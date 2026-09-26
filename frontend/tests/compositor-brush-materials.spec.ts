@@ -98,3 +98,45 @@ test('a material layer differs from colour; Moving off holds still and reloads i
   await page.waitForTimeout(1000)
   expect(await canvasData(page)).not.toBe(m1)
 })
+
+/** Share of the stage canvas that is not background — the same measure the Part 1 size check uses. */
+async function paintedShare(page: Page): Promise<number> {
+  await stackPixels(page)
+  return page.evaluate(() => {
+    const cv = document.querySelector('[data-testid="compositor-stack-canvas"]') as HTMLCanvasElement
+    const { width: w, height: h } = cv
+    const d = cv.getContext('2d')!.getImageData(0, 0, w, h).data
+    const bg = [d[0]!, d[1]!, d[2]!]
+    let n = 0
+    for (let i = 0; i < d.length; i += 4) if (Math.abs(d[i]! - bg[0]!) + Math.abs(d[i + 1]! - bg[1]!) + Math.abs(d[i + 2]! - bg[2]!) > 60) n++
+    return n / (w * h)
+  })
+}
+
+test('materials look the same at two render sizes (round, spray, neon glow)', async ({ page }) => {
+  test.setTimeout(150_000)
+  await page.setViewportSize({ width: 1024, height: 860 })
+  await openCompositor(page)
+  await page.keyboard.press('b')
+  await page.getByTestId('brush-tip-round').click()
+  await page.getByTestId('brush-material-chrome').click()
+  await paint(page, line(0.15, 0.3, 0.85, 0.33))
+  await page.getByTestId('brush-material-neon').click()
+  await paint(page, line(0.15, 0.55, 0.85, 0.58))
+  await page.getByTestId('brush-tip-spray').click()
+  await page.getByTestId('brush-material-lava').click()
+  await paint(page, line(0.15, 0.8, 0.85, 0.8), 30)
+  await expect.poll(async () => (await brushLayers(page)).length, { timeout: 6000 }).toBe(3)
+  // Hold every material still so the two sizes compare the same moment.
+  const still = (await page.evaluate(() => (window as any).__compositorLayers())).map((l: any) =>
+    l.kind === 'brush' && l.material ? { ...l, material: { ...l.material, moving: false } } : l)
+  await page.evaluate((ls) => (window as any).__compositorSetLayers(ls), still)
+  await page.keyboard.press('b') // brush off: no cursor ring in the pixels
+  const small = await paintedShare(page)
+  await page.setViewportSize({ width: 1900, height: 1300 })
+  await page.waitForTimeout(800)
+  const big = await paintedShare(page)
+  expect(small).toBeGreaterThan(0.02)
+  expect(Math.abs(big - small) / small).toBeLessThan(0.12)
+  console.log('material coverage', JSON.stringify({ small, big }))
+})
