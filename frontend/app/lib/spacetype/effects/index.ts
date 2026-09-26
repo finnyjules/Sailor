@@ -68,6 +68,8 @@ import { showTurnstileEffect } from './showTurnstile'
 import { showDoorsEffect } from './showDoors'
 import { showDominoEffect } from './showDomino'
 import { showAssembleEffect } from './showAssemble'
+import { showPagestackEffect } from './showPagestack'
+import { showCoverstackEffect } from './showCoverstack'
 import { withSeparatorControls } from '../separator'
 import { showcaseEffectId } from '../layouts/index'
 
@@ -145,12 +147,14 @@ export const SPACE_TYPE_EFFECTS: SpaceTypeEffect[] = /* @__PURE__ */ [
   showStackEffect,
   showTunnelEffect,
   showDeckEffect,
+  showCoverstackEffect,
   showSlideEffect,
   showFanEffect,
   showStageEffect,
   showFocusshiftEffect,
   showDoorsEffect,
   showDominoEffect,
+  showPagestackEffect,
   showTrailEffect,
   showBurstEffect,
   showTossEffect,

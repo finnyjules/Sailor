@@ -118,6 +118,8 @@ function showcaseControls(layout: ShowcaseLayout): ControlSpec[] {
   // A soft shadow behind every card (words have no panel to cast one). It falls on whatever
   // is behind the card — other cards in a stack, fan or cascade — so it reads as depth.
   { key: 'shadow', label: 'Shadow', kind: 'slider', min: 0, max: 1, step: 0.01, default: 0.45, group: 'Look' },
+  // A mirror image of the cards on a glossy floor just under the lowest point they reach.
+  { key: 'reflection', label: 'Reflection', kind: 'slider', min: 0, max: 1, step: 0.01, default: 0, group: 'Look' },
   { key: 'backFade', label: 'Back fade', kind: 'slider', min: 0, max: 1, step: 0.01, default: 0, group: 'Look' },
   { key: 'perspective', label: 'Perspective', kind: 'slider', min: 0, max: 1, step: 0.01, default: 0.4, group: 'Look' },
 
@@ -229,7 +231,88 @@ function makeShadow(three: typeof THREE, aspect: number): THREE.Mesh {
   return mesh
 }
 
-interface RingState { quads: THREE.Mesh[]; aspects: number[]; fades: number[] }
+interface RingState {
+  quads: THREE.Mesh[]; aspects: number[]; fades: number[]
+  /** The three.js namespace the scene was built with — `update` has none of its own, and the
+   *  reflections are made lazily, the first time Reflection goes above 0. */
+  three: typeof THREE
+  reflections?: THREE.Mesh[]
+  floor?: { key: string; y: number }
+}
+
+// ── Reflection ───────────────────────────────────────────────────────────────────────────
+// Each card gets a mirror twin: same geometry (so it bends with the card), a clone of its
+// material (same picture, corners and fill), placed by reflecting the card's world matrix in
+// a level floor. The floor sits just under the lowest point the cards reach over the whole
+// loop — measured once per arrangement, so it never bobs as the cards move. A layout whose
+// cards leave through the bottom of the frame puts its floor out of sight, and so shows none.
+const REFLECT_GAP = 0.12     // floor below the lowest card edge, world units
+const REFLECT_FADE = 3.2     // depth under the floor over which the mirror image fades out
+const REFLECT_MAX = 0.55     // mirror strength at Reflection 1 — a gloss, never a second set of cards
+const FLOOR_SAMPLES = 24
+
+function makeReflection(three: typeof THREE, card: THREE.Mesh): THREE.Mesh {
+  const src = card.material as THREE.MeshBasicMaterial
+  const mat = src.clone()
+  mat.depthWrite = false
+  const uniforms = { uReflect: { value: 0 }, uFloorY: { value: 0 }, uFadeLen: { value: REFLECT_FADE } }
+  const cardCompile = src.onBeforeCompile
+  mat.onBeforeCompile = (shader, renderer) => {
+    cardCompile.call(src, shader, renderer)                     // the card's own corner mask / crop
+    Object.assign(shader.uniforms, uniforms)
+    shader.vertexShader = 'varying float vReflY;\n' + shader.vertexShader.replace(
+      '#include <project_vertex>',
+      '#include <project_vertex>\n\tvReflY = (modelMatrix * vec4(transformed, 1.0)).y;',
+    )
+    shader.fragmentShader = 'varying float vReflY;\nuniform float uReflect;\nuniform float uFloorY;\nuniform float uFadeLen;\n' + shader.fragmentShader.replace(
+      '#include <dithering_fragment>',
+      '#include <dithering_fragment>\n\tgl_FragColor.a *= uReflect * (1.0 - smoothstep(0.0, uFadeLen, uFloorY - vReflY));',
+    )
+  }
+  mat.customProgramCacheKey = () => `${src.customProgramCacheKey()}|reflect`
+  const mesh = new three.Mesh(card.geometry, mat)
+  // Placed by hand each frame (the mirror of the card's world matrix), so the scene graph
+  // must not recompute it from position/rotation.
+  mesh.matrixAutoUpdate = false
+  mesh.matrixWorldAutoUpdate = false
+  mesh.frustumCulled = false
+  mesh.renderOrder = -1
+  mesh.visible = false
+  mesh.userData.reflectUniforms = uniforms
+  return mesh
+}
+
+/** The floor's height in world space: just under the lowest corner any card shows at over
+ *  the loop (cards fading out, or near it, don't count). Pure placement maths, run through
+ *  scratch objects so it matches what `update` draws. */
+function measureFloor(
+  three: typeof THREE, layout: ShowcaseLayout, lp: Params, count: number,
+  aspects: readonly number[], pushZ: number,
+): number {
+  const group = new three.Object3D(), card = new three.Object3D(), v = new three.Vector3()
+  card.rotation.order = 'YXZ'
+  group.add(card)
+  group.position.z = pushZ
+  let lo = Infinity
+  for (let s = 0; s < FLOOR_SAMPLES; s++) {
+    const t = s / FLOOR_SAMPLES
+    const pose = layout.pose?.(lp, t)
+    group.rotation.set(pose?.rotX ?? 0, pose?.rotY ?? 0, pose?.rotZ ?? 0)
+    for (let i = 0; i < count; i++) {
+      const tf = layout.place(i, count, lp, t, aspects)
+      if ((tf.opacity ?? 1) < 0.5) continue
+      card.position.set(tf.x, tf.y, tf.z)
+      card.rotation.set(tf.rotX ?? 0, tf.rotY, tf.rotZ ?? 0)
+      card.scale.set((aspects[i] ?? 1) * tf.scale, tf.scale, 1)
+      group.updateMatrixWorld(true)
+      for (const [cx, cy] of [[-0.5, -0.5], [0.5, -0.5], [-0.5, 0.5], [0.5, 0.5]] as const) {
+        lo = Math.min(lo, v.set(cx, cy, 0).applyMatrix4(card.matrixWorld).y)
+      }
+    }
+  }
+  return Number.isFinite(lo) ? lo - REFLECT_GAP : 0
+}
+const _mirror = /* @__PURE__ */ new THREE.Matrix4()
 
 // Resolve the ONE global word fill for this build (see the `wordFill` control's doc
 // above). `wordFill` stores a single Fill as a bare JSON object — NOT the fillList's
@@ -308,7 +391,7 @@ export function makeShowcaseEffect(spec: ShowcaseEffectSpec): SpaceTypeEffect {
   // The layout's own keys are LIVE: they're read in update() via place(), never at build, so
   // dragging them re-places rather than rebuilds.
   // (`bend` only where this layout declares it — a liveKey must be a real control.)
-  liveKeys: ['cardSize', 'perspective', 'speed', 'direction', 'motion', 'easing', 'hold', 'pulse', 'shadow', 'padding', 'backFade', 'bend', 'cornerRadius', ...spec.layout.controls.map(c => c.key)]
+  liveKeys: ['cardSize', 'perspective', 'speed', 'direction', 'motion', 'easing', 'hold', 'pulse', 'shadow', 'reflection', 'padding', 'backFade', 'bend', 'cornerRadius', ...spec.layout.controls.map(c => c.key)]
     .filter(k => controls.some(c => c.key === k)),
   loopRates(params) {
     const { layout, lp } = resolve(params)
@@ -619,7 +702,7 @@ export function makeShowcaseEffect(spec: ShowcaseEffectSpec): SpaceTypeEffect {
       quads.push(mesh)
     }
 
-    root.userData.ringState = { quads, aspects: new Array(quads.length).fill(1), fades: new Array(quads.length).fill(1) } as RingState
+    root.userData.ringState = { quads, aspects: new Array(quads.length).fill(1), fades: new Array(quads.length).fill(1), three } as RingState
     // The group's resting pose belongs to the layout (the ring's opening/tilt, a tabletop
     // for Iso, head-on for a grid…). Kept in sync with `update`'s identical call below.
     const built = resolve(params)
@@ -716,6 +799,38 @@ export function makeShowcaseEffect(spec: ShowcaseEffectSpec): SpaceTypeEffect {
         u.uStrength!.value = shadow * opacity
         u.uCorner!.value = n(params, 'cornerRadius')
         shadowMesh.visible = shadow * opacity > 0.001
+      }
+    }
+
+    // Reflection: made the first time it is asked for, then hidden (not torn down) at 0.
+    const reflect = n(params, 'reflection')
+    if (reflect > 0 && !st.reflections) {
+      st.reflections = st.quads.map(q => makeReflection(st.three, q))
+      for (const r of st.reflections) root.add(r)
+    }
+    if (st.reflections) {
+      let floorY = 0
+      if (reflect > 0) {
+        // Re-measured only when something that moves the cards changes, never per frame.
+        const key = [count, root.position.z, ...Object.keys(lp).filter(k => k !== 'content').map(k => String(lp[k])), ...st.aspects].join('|')
+        if (st.floor?.key !== key) st.floor = { key, y: measureFloor(st.three, layout, lp, count, st.aspects, root.position.z) }
+        floorY = st.floor.y
+        // Mirror in the plane y = floorY: y → 2·floorY − y.
+        _mirror.set(1, 0, 0, 0, 0, -1, 0, 2 * floorY, 0, 0, 1, 0, 0, 0, 0, 1)
+      }
+      for (let i = 0; i < count; i++) {
+        const quad = st.quads[i]!, refl = st.reflections[i]!
+        const material = quad.material as THREE.MeshBasicMaterial
+        const on = reflect > 0 && material.opacity > 0.001
+        refl.visible = on
+        if (!on) continue
+        refl.matrixWorld.multiplyMatrices(_mirror, quad.matrixWorld)
+        const rm = refl.material as THREE.MeshBasicMaterial
+        rm.opacity = material.opacity
+        rm.alphaTest = material.alphaTest
+        const u = refl.userData.reflectUniforms as { uReflect: { value: number }; uFloorY: { value: number } }
+        u.uReflect.value = reflect * REFLECT_MAX
+        u.uFloorY.value = floorY
       }
     }
   },

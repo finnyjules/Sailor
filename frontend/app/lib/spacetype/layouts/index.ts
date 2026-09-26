@@ -41,6 +41,8 @@ import { turnstileLayout } from './turnstile'
 import { doorsLayout } from './doors'
 import { dominoLayout } from './domino'
 import { assembleLayout } from './assemble'
+import { pagestackLayout } from './pagestack'
+import { coverstackLayout } from './coverstack'
 
 export type LayoutFamily = typeof LAYOUT_FAMILIES[number]
 /** Picker headings, in display order. */
@@ -81,7 +83,7 @@ export const SHOWCASE_LAYOUTS: ShowcaseLayout[] = [
   coverflowLayout, focusLayout, filmstripLayout, totemLayout, feedLayout, cascadeLayout, conveyorLayout,
   gridLayout, marqueeLayout, isoLayout, turntableLayout, parallaxLayout,
   orbitLayout, haloLayout, wheelLayout, vortexLayout, turnstileLayout,
-  stackLayout, tunnelLayout, deckLayout, slideLayout, fanLayout, stageLayout, focusshiftLayout, doorsLayout, dominoLayout,
+  stackLayout, tunnelLayout, deckLayout, coverstackLayout, slideLayout, fanLayout, stageLayout, focusshiftLayout, doorsLayout, dominoLayout, pagestackLayout,
   trailLayout, burstLayout, tossLayout, danceLayout, assembleLayout,
   medleyLayout,
 ]

@@ -486,7 +486,7 @@ describe('showcase host', () => {
     const inGroup = (g: string) => ringEffect.controls.filter(c => c.group === g).map(c => c.key)
     expect(inGroup('Content')).toEqual(['content', 'repeat'])
     expect(inGroup('Cards')).toEqual(['cardSize', 'cardRatio', 'cornerRadius', 'padding', 'bend'])
-    expect(inGroup('Look')).toEqual(['shadow', 'backFade', 'perspective'])
+    expect(inGroup('Look')).toEqual(['shadow', 'reflection', 'backFade', 'perspective'])
     expect(inGroup('Type')).toEqual(['font', 'typeWeight', 'typeYScale', 'tracking', 'wordFill'])
   })
 
