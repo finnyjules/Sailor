@@ -4,12 +4,12 @@ import type { TipStroke } from '~/lib/brushTips/record'
 
 // renderTipCoverage's compositing, with the GPU raster stubbed: each group raster is a token
 // canvas, and every canvas records the drawImage calls made on it (source + composite op).
-const engine = vi.hoisted(() => ({ path: 'gpu' as 'gpu' | '2d', calls: [] as { strokes: unknown[]; live: unknown }[] }))
+const engine = vi.hoisted(() => ({ path: 'gpu' as 'gpu' | '2d', calls: [] as { strokes: unknown[]; live: unknown; paint?: unknown }[] }))
 vi.mock('~/lib/brushTips/engine', () => ({
   capView: (v: unknown) => v,
   tipRenderPath: () => engine.path,
-  rasterGroup: (g: { strokes: unknown[] }, _v: unknown, live: unknown) => {
-    engine.calls.push({ strokes: g.strokes, live })
+  rasterGroup: (g: { strokes: unknown[] }, _v: unknown, live: unknown, _tail: unknown, paint?: unknown) => {
+    engine.calls.push({ strokes: g.strokes, live, paint })
     return { coverage: { tag: `raster${engine.calls.length}` }, shade: null, gpu: engine.path === 'gpu' }
   },
 }))
@@ -64,5 +64,25 @@ describe('renderTipCoverage', () => {
     const b = renderTipCoverage('k3', strokes, view)
     expect(b).not.toBe(a)
     expect(renderTipCoverage('k3', strokes, view)).toBe(b)
+  })
+})
+describe('renderTipCoverage with a material', () => {
+  it('a material layer with legacy strokes is never served from the cache (its base carries the fill)', () => {
+    const strokes = [legacy, tip('round')]
+    const paint = { material: 'lava' as const, t: 0 }
+    renderTipCoverage('m1', strokes, view, null, 0, { tag: 'base' } as unknown as CanvasImageSource, paint)
+    renderTipCoverage('m1', strokes, view, null, 0, { tag: 'base2' } as unknown as CanvasImageSource, paint)
+    expect(engine.calls.length).toBe(2)
+    // control: the same layer without legacy strokes IS cached
+    const tipsOnly = [tip('round')]
+    renderTipCoverage('m2', tipsOnly, view, null, 0, null, paint)
+    renderTipCoverage('m2', tipsOnly, view, null, 0, null, paint)
+    expect(engine.calls.length).toBe(3)
+  })
+  it('a live render renders at the 1/30 s bucket; an exact (export) one at its exact time', () => {
+    renderTipCoverage('m3', [tip('round')], view, null, 0, null, { material: 'foil', t: 1.01 })
+    expect((engine.calls.at(-1)!.paint as { t: number }).t).toBeCloseTo(1, 9)
+    renderTipCoverage('m4', [tip('round')], view, null, 0, null, { material: 'foil', t: 1.01, exact: true })
+    expect((engine.calls.at(-1)!.paint as { t: number }).t).toBe(1.01)
   })
 })

@@ -18,10 +18,12 @@ import { rasterGroup, capView, tipRenderPath, type TipGroup, type CoverageView, 
 export type { TipGroup, CoverageView, GroupPaint } from './engine'
 
 /** The material part of the cache signature: '' without paint, `${id}@0` when still, else the
- *  time bucketed to 1/30 s — so a moving material re-renders once per bucket, a still one never. */
+ *  time bucketed to 1/30 s — so a moving material re-renders once per bucket, a still one never.
+ *  An `exact` paint (an export / bake) keys on its exact time: it is rendered unbucketed. */
 export function paintKey(paint: GroupPaint | undefined): string {
   if (!paint) return ''
   if (paint.t === 0) return `${paint.material}@0`
+  if (paint.exact) return `${paint.material}@x${paint.t}`
   return `${paint.material}@t${(Math.round(paint.t * 30) / 30).toFixed(3)}`
 }
 
@@ -108,10 +110,20 @@ export function renderTipCoverage(
   const groups = groupTipStrokes(all)
   if (!groups.length) return null
   const path = tipRenderPath()
-  // Render at the BUCKETED time, so a cached image is a pure function of its key.
-  if (paint && paint.t !== 0) paint = { material: paint.material, t: Math.round(paint.t * 30) / 30 }
+  // Render at the BUCKETED time, so a cached image is a pure function of its key. An export /
+  // bake (`exact`) renders at its exact time instead — it must match the frame it lands on.
+  if (paint && paint.t !== 0 && !paint.exact) paint = { material: paint.material, t: Math.round(paint.t * 30) / 30 }
   const sig = `${view.originX.toFixed(3)}|${view.originY.toFixed(3)}|${view.unitPx.toFixed(5)}|${view.w}x${view.h}|${base ? 'base' : ''}|${paintKey(paint)}`
   const v = capView(view)
+
+  // A material layer with legacy strokes: `base` already holds those stamps FILLED with the
+  // layer's fill, which may change, animate or follow the frame without the stroke identity
+  // changing — so nothing here can key it. Render uncached (such layers are rare: only a layer
+  // painted before tips existed and then given a material).
+  if (base && paint) {
+    prefixes.delete(key)
+    return finish(compose(v, groups, null, base, live ?? null, liveTailMs, paint))
+  }
 
   if (!live) {
     prefixes.delete(key)

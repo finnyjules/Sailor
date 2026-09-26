@@ -21,11 +21,12 @@ import type { TipStroke } from './record'
 import type { TipId } from './tips'
 import { replayStroke } from './replay'
 import { RIBBON_STRIDE } from './bristle'
-import { MATERIALS, MATERIAL_GLSL, type MaterialId } from './materials'
+import { MATERIALS, MATERIAL_GLSL, isMaterialId, type MaterialId } from './materials'
 
 export interface TipGroup { tip: TipId; erase: boolean; strokes: TipStroke[] }
-/** A paint material for one group. t = Frame clock seconds, exactly 0 when the material is still. */
-export interface GroupPaint { material: MaterialId; t: number }
+/** A paint material for one group. t = Frame clock seconds, exactly 0 when the material is still.
+ *  `exact` (set for exports / bakes): render at exactly `t` instead of the cache's 1/30 s bucket. */
+export interface GroupPaint { material: MaterialId; t: number; exact?: boolean }
 /** Frame units the neon glow reaches past the paint (the halo's tap radius). Callers pad the
  *  view by this so the halo is not clipped. */
 export const NEON_HALO_UNITS = 16
@@ -174,7 +175,7 @@ void main(){
 // Compiled lazily on the first group painted with a material, so a material shader that fails
 // to build never takes the plain paint path down with it (the group is then tinted flat).
 
-// Param (prototype paramProg): stroke coordinates into an RGBA16F target, one quad per round
+// Param (prototype paramProg): stroke coordinates into an RGBA32F target, one quad per round
 // dab, blending OFF so the newest dab wins. Positions map exactly like DAB_VS.
 const PARAM_VS = `#version 300 es
 in vec3 aDab;   // x, y, r (Frame units)
@@ -276,7 +277,7 @@ interface Gpu {
   densTex: WebGLTexture; densFb: WebGLFramebuffer
   densW: number; densH: number
   maxSide: number
-  /** EXT_color_buffer_float was granted: the RGBA16F stroke-coordinate target is renderable.
+  /** EXT_color_buffer_float was granted: the RGBA32F stroke-coordinate target is renderable.
    *  Without it every material group uses surface coordinates. */
   floatOk: boolean
   /** Material programs, built on first use; null until then (or for good after `matFailed`). */
@@ -410,7 +411,9 @@ function initMat(g: Gpu): MatGpu | null {
 }
 
 /** Bind the stroke-coordinate target at w×h (allocating or resizing it), cleared to 0. Returns
- *  false — and turns float targets off for this context — if the driver can't render RGBA16F. */
+ *  false — and turns float targets off for this context — if the driver can't render RGBA32F.
+ *  32-bit, not 16: half floats step 2 units past ~2k and 4 past ~4k along a long stroke, which
+ *  shows as banding in the flow. Sampled NEAREST with blending off, so no float-linear is needed. */
 function bindParam(g: Gpu, m: MatGpu, w: number, h: number): boolean {
   const { gl } = g
   if (!m.paramTex) {
@@ -423,7 +426,7 @@ function bindParam(g: Gpu, m: MatGpu, w: number, h: number): boolean {
   }
   if (m.paramW !== w || m.paramH !== h) {
     gl.bindTexture(gl.TEXTURE_2D, m.paramTex)
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA16F, w, h, 0, gl.RGBA, gl.HALF_FLOAT, null)
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, w, h, 0, gl.RGBA, gl.FLOAT, null)
     gl.bindFramebuffer(gl.FRAMEBUFFER, m.paramFb)
     gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, m.paramTex, 0)
     if (gl.checkFramebufferStatus(gl.FRAMEBUFFER) !== gl.FRAMEBUFFER_COMPLETE) {
@@ -727,7 +730,9 @@ export function tipRenderPath(): 'gpu' | '2d' { return initGpu() ? 'gpu' : '2d' 
  *  tip without them, use surface coordinates. The 2D fallback — and a GPU whose material
  *  shaders failed to build — fills the coverage with the material's flat swatch colour. */
 export function rasterGroup(group: TipGroup, view: CoverageView, live: TipStroke | null, liveTailMs: number, paint?: GroupPaint): GroupRaster {
-  if (group.erase) paint = undefined
+  // An unknown material id (saved data from a newer build, or corrupted) paints like no material
+  // at all — never throws out of the Frame paint.
+  if (group.erase || (paint && !isMaterialId(paint.material))) paint = undefined
   const g = initGpu()
   if (g) {
     try {
