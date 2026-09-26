@@ -60,16 +60,26 @@ function arcCentres(doc: SketchDoc): Set<EntityId> {
   return out
 }
 
-// Counts rules removed as a side effect of an edit. Arc invariants, and rules an
-// edit removes knowingly because they became redundant (excuse), are not counted.
+// the point a pin rule holds onto a curve, if the rule is a pin
+function pinnedPoint(c: SketchConstraint): EntityId | null {
+  if (c.kind === 'pointOnLine' || c.kind === 'pointOnCircle') return c.refs[0] ?? null
+  if (c.kind === 'collinear') return c.refs[2] ?? null
+  if (c.kind === 'equalDist' && c.refs[0] === c.refs[2]) return c.refs[1] ?? null
+  return null
+}
+
+// Counts rules removed as a side effect of an edit. Not counted: arc invariants,
+// rules an edit removes knowingly because they became redundant (excuse), and pins
+// whose own point was deleted with the removed piece (they went with it).
 interface Tracker { count(): number; excuse(id: EntityId): void }
 function ruleTracker(doc: SketchDoc): Tracker {
-  const before = doc.constraints.map(c => c.id)
+  const before = doc.constraints.map(c => ({ id: c.id, pinned: pinnedPoint(c) }))
   const skip = arcInvariantIds(doc)
   return {
     count: () => {
       const now = new Set(doc.constraints.map(c => c.id))
-      return before.filter(id => !now.has(id) && !skip.has(id)).length
+      return before.filter(({ id, pinned }) =>
+        !now.has(id) && !skip.has(id) && !(pinned && !getPoint(doc, pinned))).length
     },
     excuse: id => { skip.add(id) },
   }
@@ -113,6 +123,7 @@ type PairEvent =
   | { kind: 'moved'; from: EntityId; to: EntityId }      // one end moved along the same curve
   | { kind: 'split'; x0: EntityId; x1: EntityId }        // (a,b) → (a,x0) + (x1,b)
   | { kind: 'grow'; from: EntityId; to: EntityId }       // dissolve: (a,q) → (a,b)
+  | { kind: 'cut'; x: EntityId }                          // (a,b) → (a,x) + (x,b), nothing moves
 
 type PairCat = 'dir' | 'len' | 'pin'
 
@@ -138,8 +149,10 @@ function pairSlots(doc: SketchDoc, c: SketchConstraint, centres: Set<EntityId>):
   }
 }
 
-function followPair(doc: SketchDoc, a: EntityId, b: EntityId, ev: PairEvent): void {
-  if (a === b) return
+// returns the ids of rules it rewrote or created
+function followPair(doc: SketchDoc, a: EntityId, b: EntityId, ev: PairEvent): Set<EntityId> {
+  const touched = new Set<EntityId>()
+  if (a === b) return touched
   const centres = arcCentres(doc)
   const remove = new Set<EntityId>()
   const copies: SketchConstraint[] = []
@@ -154,20 +167,30 @@ function followPair(doc: SketchDoc, a: EntityId, b: EntityId, ev: PairEvent): vo
       return refs
     }
     if (ev.kind === 'removed') {
-      if (info.cat !== 'pin') remove.add(c.id)        // a pin still holds on the line through a, b
+      remove.add(c.id)
     } else if (ev.kind === 'moved' || ev.kind === 'grow') {
       if (info.cat === 'len') remove.add(c.id)        // the length changed
-      else c.refs = rewrite(ev.from, ev.to)
+      else { c.refs = rewrite(ev.from, ev.to); touched.add(c.id) }
+    } else if (ev.kind === 'cut') {
+      // nothing moves: lengths and pins still hold on a and b; directions go to both halves
+      if (info.cat !== 'dir') continue
+      const first = rewrite(b, ev.x)
+      const second = rewrite(a, ev.x)
+      c.refs = first
+      touched.add(c.id)
+      copies.push({ ...c, refs: second })
     } else {
       if (info.cat === 'len') { remove.add(c.id); continue }
       const first = rewrite(b, ev.x0)
       const second = rewrite(a, ev.x1)
       c.refs = first
+      touched.add(c.id)
       if (info.cat === 'dir') copies.push({ ...c, refs: second })
     }
   }
   removeRules(doc, remove)
-  for (const k of copies) addConstraint(doc, k.kind, k.refs, k.value)
+  for (const k of copies) touched.add(addConstraint(doc, k.kind, k.refs, k.value))
+  return touched
 }
 
 // arc radius pins [C,p,C,q]: when anchor `from` of an arc on centre C is gone, re-aim them at `to`
@@ -502,7 +525,7 @@ export function cutAt(doc: SketchDoc, ref: CurveRef, t: number): EntityId | null
     const cons = !!line.construction
     const x = addPoint(doc, at.x, at.y, cons ? { construction: true } : {})
     const { p1, p2 } = line
-    followPair(doc, p1, p2, { kind: 'split', x0: x, x1: x })
+    followPair(doc, p1, p2, { kind: 'cut', x })
     line.p2 = x
     const L2 = addLine(doc, x, p2, cons ? { construction: true } : {})
     copyLineDirection(doc, line.id, L2)
@@ -512,7 +535,7 @@ export function cutAt(doc: SketchDoc, ref: CurveRef, t: number): EntityId | null
   if (!path || path.kind !== 'path') return null
   const [a, b] = segEnds(path, ref.segIndex)
   const x = addPoint(doc, at.x, at.y, path.construction ? { construction: true } : {})
-  followPair(doc, a, b, { kind: 'split', x0: x, x1: x })
+  followPair(doc, a, b, { kind: 'cut', x })
   splitSegment(doc, path, ref.segIndex, x)
   return x
 }
@@ -578,36 +601,51 @@ export function dissolveAt(doc: SketchDoc, pathId: EntityId, anchorIndex: number
   const b = path.anchors[(anchorIndex + 1) % n]!
   const sIn = path.segments[inSeg]!, sOut = path.segments[outSeg]!
   const loose: EntityId[] = [q]
-  const before = new Set(doc.constraints.map(c => c.id))
-  followPair(doc, a, q, { kind: 'grow', from: q, to: b })
-  followPair(doc, q, b, { kind: 'grow', from: q, to: a })
+  const touched = new Set<EntityId>([
+    ...followPair(doc, a, q, { kind: 'grow', from: q, to: b }),
+    ...followPair(doc, q, b, { kind: 'grow', from: q, to: a }),
+  ])
+  let C2: EntityId | null = null
+  let C: EntityId | null = null
   if (sIn.kind === 'arc' && sOut.kind === 'arc') {
-    const C = sIn.center, C2 = sOut.center
+    C = sIn.center; C2 = sOut.center
     removeArcInvariant(doc, C, a, q)
     removeArcInvariant(doc, C2, q, b)
-    // radius pins on either arc → the kept centre and a surviving anchor
-    for (const c of doc.constraints) {
-      if (c.kind !== 'equalDist' || c.refs[0] !== c.refs[2] || (c.refs[0] !== C && c.refs[0] !== C2)) continue
-      c.refs = [C, c.refs[1] === q ? a : c.refs[1]!, C, c.refs[3] === q ? a : c.refs[3]!]
-    }
-    addConstraint(doc, 'equalDist', [C, a, C, b])
-    if (C2 !== C) loose.push(C2)
   }
   // pair k = (anchor k, segment k); dropping pair `anchorIndex` makes pair inSeg run a→b
   path.anchors.splice(anchorIndex, 1)
   path.segments.splice(outSeg, 1)
-  // rewritten rules that became redundant (a pin onto its own end, a repeat) go uncounted
-  const seen = new Set<string>()
-  const redundant = new Set<EntityId>()
-  for (const c of doc.constraints) {
-    const key = sameKey(c)
-    const trivial = (c.kind === 'collinear' || c.kind === 'equalDist') && isTrivial(doc, c)
-    if (seen.has(key) || trivial) { redundant.add(c.id); if (before.has(c.id)) tr.excuse(c.id) }
-    seen.add(key)
+  if (C && C2) {
+    touched.add(addConstraint(doc, 'equalDist', [C, a, C, b]))
+    // radius pins re-aim only at points that are about to go: q → a, and C2 → C.
+    // Arc invariants (of any arc still drawn) are never touched.
+    const invariants = arcInvariantIds(doc)
+    const qGoes = !isPointReferenced(doc, q) && !getPoint(doc, q)?.fixed
+    const c2Goes = C2 !== C && !isPointReferenced(doc, C2) && !getPoint(doc, C2)?.fixed
+    for (const c of doc.constraints) {
+      if (invariants.has(c.id) || c.kind !== 'equalDist' || c.refs[0] !== c.refs[2]) continue
+      const centre = c.refs[0]
+      if (centre !== C && centre !== C2) continue
+      const refs = [...c.refs]
+      if (qGoes) { if (refs[1] === q) refs[1] = a; if (refs[3] === q) refs[3] = a }
+      if (c2Goes && centre === C2) { refs[0] = C; refs[2] = C }
+      if (refs.some((r, i) => r !== c.refs[i])) { c.refs = refs; touched.add(c.id) }
+    }
+    if (C2 !== C) loose.push(C2)
   }
-  removeRules(doc, redundant)
-  // any other rule the rewrite made meaningless is a real drop
-  removeRules(doc, new Set(doc.constraints.filter(c => isTrivial(doc, c)).map(c => c.id)))
+  // among the rules this dissolve rewrote: redundant ones (a pin onto its own end, a
+  // repeat of another rule) go uncounted; any other rule made meaningless is a real drop
+  const others = new Set(doc.constraints.filter(c => !touched.has(c.id)).map(sameKey))
+  const remove = new Set<EntityId>()
+  for (const c of doc.constraints) {
+    if (!touched.has(c.id)) continue
+    const key = sameKey(c)
+    const redundant = others.has(key) || ((c.kind === 'collinear' || c.kind === 'equalDist') && isTrivial(doc, c))
+    if (redundant) { remove.add(c.id); tr.excuse(c.id); continue }
+    if (isTrivial(doc, c)) { remove.add(c.id); continue }
+    others.add(key)
+  }
+  removeRules(doc, remove)
   cleanOrphans(doc, loose)
   return { ok: true, droppedRules: tr.count() }
 }

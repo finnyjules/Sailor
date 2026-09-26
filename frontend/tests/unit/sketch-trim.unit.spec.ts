@@ -859,3 +859,71 @@ describe('more trim cases', () => {
     expectSolveKeepsGeometry(d)
   })
 })
+
+// ── review round 2 ───────────────────────────────────────────────────────────
+
+describe('round 2', () => {
+  it('N1 dissolve leaves other arcs’ invariants on either centre alone', () => {
+    const d = emptyDoc()
+    const A = addPoint(d, 10, 0), M = addPoint(d, 0, 10), B = addPoint(d, -10, 0)
+    const C = addPoint(d, 0, 0), C2 = addPoint(d, 0, 0)
+    const P = addPath(d, [A, M, B], [{ kind: 'arc', center: C, sweep: 1 }, { kind: 'arc', center: C2, sweep: 1 }])
+    // another arc on C2 (keeps C2 alive) and a third arc on C that starts at M (keeps M alive)
+    const D = addPoint(d, 0, -10), E = addPoint(d, 10 * Math.SQRT1_2, -10 * Math.SQRT1_2)
+    addPath(d, [D, E], [{ kind: 'arc', center: C2, sweep: 1 }])
+    const F = addPoint(d, -10 * Math.SQRT1_2, -10 * Math.SQRT1_2)
+    addPath(d, [M, F], [{ kind: 'arc', center: C, sweep: 1 }])
+    const p = addPoint(d, -10 * Math.SQRT1_2, 10 * Math.SQRT1_2)
+    addConstraint(d, 'equalDist', [C2, p, C2, M])
+    expect(dissolveAt(d, P, 1, 0.5, 0.5)).toEqual({ ok: true, droppedRules: 0 })
+    expect(hasRule(d, 'equalDist', [C2, D, C2, E])).toBe(true)
+    expect(hasRule(d, 'equalDist', [C, M, C, F])).toBe(true)
+    expect(hasRule(d, 'equalDist', [C2, p, C2, M])).toBe(true)   // C2 and M both survive: pin still valid
+    expect(hasRule(d, 'equalDist', [C, A, C, B])).toBe(true)
+    expectSolveKeepsGeometry(d)
+  })
+
+  it('N2 a cut keeps length rules', () => {
+    const d = emptyDoc()
+    const A = addPoint(d, 0, 0), B = addPoint(d, 10, 0), E = addPoint(d, 0, 5), F = addPoint(d, 10, 5)
+    const P = addPath(d, [A, B], [{ kind: 'line' }])
+    addConstraint(d, 'distance', [A, B], 10)
+    addConstraint(d, 'equalDist', [A, B, E, F])
+    cutAt(d, { kind: 'seg', pathId: P, segIndex: 0 }, 0.5)
+    expect(hasRule(d, 'distance', [A, B])).toBe(true)
+    expect(hasRule(d, 'equalDist', [A, B, E, F])).toBe(true)
+    expectSolveKeepsGeometry(d)
+  })
+
+  it('removing a whole segment drops and counts collinear pins onto it', () => {
+    const d = emptyDoc()
+    const a0 = addPoint(d, 0, 0), a1 = addPoint(d, 10, 0), a2 = addPoint(d, 10, 10), a3 = addPoint(d, 0, 10)
+    const P = addPath(d, [a0, a1, a2, a3], [{ kind: 'line' }, { kind: 'line' }, { kind: 'line' }, { kind: 'line' }], true)
+    const q = addPoint(d, 5, 0)
+    addConstraint(d, 'collinear', [a0, a1, q])
+    expect(removeSegment(d, P, 0)).toEqual({ ok: true, droppedRules: 1 })
+    expect(ruleCount(d, 'collinear')).toBe(0)
+  })
+
+  it('removing the rest of a trimmed line does not count Trim’s own pin on the cut end', () => {
+    const d = emptyDoc()
+    const L = addLine(d, addPoint(d, 0, 0), addPoint(d, 10, 0))
+    vCutter(d, 4)
+    removeSpan(d, spanAt(d, { kind: 'line', id: L }, 0.2)!)
+    expect(removeSpan(d, spanAt(d, { kind: 'line', id: L }, 0.5)!)).toEqual({ ok: true, droppedRules: 0 })
+    expect(ruleCount(d, 'pointOnLine')).toBe(0)
+  })
+
+  it('dissolve’s clean-up only looks at rules it rewrote', () => {
+    const d = emptyDoc()
+    const a0 = addPoint(d, 0, 0), a1 = addPoint(d, 10, 0), a2 = addPoint(d, 20, 0)
+    const P = addPath(d, [a0, a1, a2], [{ kind: 'line' }, { kind: 'line' }])
+    const z = addPoint(d, 50, 50), w = addPoint(d, 60, 50)
+    addConstraint(d, 'distance', [z, w], 10)
+    addConstraint(d, 'distance', [z, w], 10)
+    addConstraint(d, 'coincident', [z, z])
+    dissolveAt(d, P, 1, 0.5, 0.5)
+    expect(ruleCount(d, 'distance')).toBe(2)
+    expect(ruleCount(d, 'coincident')).toBe(1)
+  })
+})
