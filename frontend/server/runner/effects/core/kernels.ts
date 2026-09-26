@@ -60,7 +60,28 @@ export function kernelsCore(k: TensorCore, px: PixelsCore) {
     poolPad: 'This window is padded by more than half its size',
     blurSize: 'A blur needs an odd width of at least 1 and a spread above 0',
     blurTooWide: 'This blur is wider than the runner can match (at most 181 pixels across)',
+    convKernel: 'This filter’s weights are outside what the runner can match',
   } as const
+
+  /**
+   * The convolution kernels the R2 effects pass (R2.2 fix round 2), each
+   * with its ε (255-scale): a real bound, at least twice the worst |Δ|
+   * against torch measured over 20 fresh seeds per class on 400 × 400 × 3
+   * pictures with values in [0, 1] and [−0.1, 1.1] (fixture `conv_sweep`):
+   *   integer3   — 3 × 3, integer weights |w| ≤ 4: Sobel (FindEdges,
+   *                HeightmapRelief, Outline), the laplacian (ReactionDiffusion),
+   *                Emboss at depth 1. Worst 2.4 × 10⁻⁴; ε 2⁻¹⁰.
+   *   scaled3    — 3 × 3, |w| ≤ 8: Emboss's kernel × depth (0…4). Worst
+   *                9.7 × 10⁻⁴ (1.1 × 10⁻³ on a second 20-seed draw); ε 2⁻⁸.
+   *   normalised — non-negative weights summing to 1 (within 10⁻⁴), odd sides
+   *                up to 21: Blur's motion line (≤ 15) and Bokeh's disk (≤ 21).
+   *                Worst 2.0 × 10⁻⁴ (2.1 × 10⁻⁴ on a second draw); ε 2⁻¹⁰.
+   * Anything else (wide unnormalised kernels drift to 10⁻² against torch's
+   * float sums; Sparkle's star is stamped by its family, not convolved here)
+   * is refused with KERNEL_MESSAGES.convKernel. The bound holds for values of
+   * picture size: the error scales with the values' magnitude.
+   */
+  const CONV_CLASS_EPS = { integer3: 2 ** -10, scaled3: 2 ** -8, normalised: 2 ** -10 } as const
 
   // ── Float32 helpers ─────────────────────────────────────────────────────
 
@@ -652,13 +673,28 @@ export function kernelsCore(k: TensorCore, px: PixelsCore) {
 
   // ── Convolution ─────────────────────────────────────────────────────────
 
+  /** Which supported class (CONV_CLASS_EPS) a kh × kw kernel is in, or null. */
+  function convKernelClass(kernel: ArrayLike<number>, kh: number, kw: number): keyof typeof CONV_CLASS_EPS | null {
+    if (kernel.length !== kh * kw || kh < 1 || kw < 1) return null
+    const w = Array.from(kernel, v => f(v))
+    if (w.some(v => !Number.isFinite(v))) return null
+    const sum = w.reduce((a, b) => a + b, 0)
+    if (kh % 2 === 1 && kw % 2 === 1 && kh <= 21 && kw <= 21 && w.every(v => v >= 0) && Math.abs(sum - 1) <= 1e-4) return 'normalised'
+    if (kh !== 3 || kw !== 3) return null
+    if (w.every(v => Number.isInteger(v) && Math.abs(v) <= 4)) return 'integer3'
+    if (w.every(v => Math.abs(v) <= 8)) return 'scaled3'
+    return null
+  }
+
   /**
    * A valid cross-correlation of each channel with one kh × kw kernel
    * (row-major), zero outside the picture when `pad` > 0; sums in double,
-   * rounded once. LIBRARY (torch: im2col and a BLAS product).
+   * rounded once. LIBRARY (torch: im2col and a BLAS product), within its
+   * class's ε; a kernel outside the supported classes is refused.
    */
   function correlate(t: Tensor, kernel: ArrayLike<number>, kh: number, kw: number, pad: number, stop?: () => boolean): Tensor {
     if (kernel.length !== kh * kw) throw new Error('The kernel is the wrong size')
+    if (!convKernelClass(kernel, kh, kw)) throw new Error(KERNEL_MESSAGES.convKernel)
     const oh = t.h + 2 * pad - kh + 1
     const ow = t.w + 2 * pad - kw + 1
     if (oh < 1 || ow < 1) throw new Error(ERR.tooSmall)
@@ -899,10 +935,13 @@ export function kernelsCore(k: TensorCore, px: PixelsCore) {
   /**
    * torch.topk(values, k, largest): the indices of the k largest (smallest),
    * in order of value; NaN ranks above every number, as in torch (first when
-   * largest, last when smallest); among equal values the lower index first.
-   * A k-heap over typed arrays (O(n log k)), with a Stop check every 65,536
-   * values. EXACT where the values differ; which of several values tied at
-   * the cut torch keeps is its own (the band case).
+   * largest, last when smallest). A k-heap over typed arrays (O(n log k)),
+   * with a Stop check every 65,536 values. What matches torch: the values in
+   * order, bit for bit, and the set of indices whose value is past the cut.
+   * What doesn't: the order of indices among equal values (torch's order is
+   * its own, not lower index first, even away from the cut; this heap puts
+   * the lower index first), and which of several values tied AT the cut are
+   * kept (the band case).
    */
   function topk(values: ArrayLike<number>, kk: number, largest = true, stop?: () => boolean): Int32Array {
     const n = values.length
@@ -949,7 +988,7 @@ export function kernelsCore(k: TensorCore, px: PixelsCore) {
   }
 
   return {
-    TORCH_VEC, GRAIN, TORCH_THREADS, GAUSSIAN_MAX_KSIZE, KERNEL_MESSAGES, fmaf, clamp01, inScalarTail,
+    TORCH_VEC, GRAIN, TORCH_THREADS, GAUSSIAN_MAX_KSIZE, KERNEL_MESSAGES, CONV_CLASS_EPS, convKernelClass, fmaf, clamp01, inScalarTail,
     sumContiguous, sumStrided, sumAll, meanAll,
     linspace, arange, remainder, powScalar, unary,
     areaOutSize, resizeArea, resizeNearest, resizeBilinear, resizeBicubic,

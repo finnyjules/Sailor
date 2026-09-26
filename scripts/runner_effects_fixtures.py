@@ -645,23 +645,89 @@ def kernels() -> dict:
                   lambda t, l=l, r=r, top=top, bottom=bottom: F.pad(t, [l, r, top, bottom], mode="reflect")[0])
 
     # ── conv2d ──
-    sobel = [[-1.0, 0.0, 1.0], [-2.0, 0.0, 2.0], [-1.0, 0.0, 1.0]]
+    # Fix round 2: the runner convolves only the kernel classes the R2 effects pass (kernels.ts
+    # CONV_CLASS_EPS): integer3 (Sobel, laplacian), scaled3 (Emboss × depth) and normalised (Blur's
+    # motion line, Bokeh's disk); anything else is refused. `conv_class` names the class a case's
+    # kernel is in (None: the runner refuses it; Python's output is still recorded).
+    from comfy_extras.nodes_blur import _motion_kernel
+    sobel_x = [[-1.0, 0.0, 1.0], [-2.0, 0.0, 2.0], [-1.0, 0.0, 1.0]]
+    sobel_y = [[-1.0, -2.0, -1.0], [0.0, 0.0, 0.0], [1.0, 2.0, 1.0]]
+    laplacian = [[0.0, 1.0, 0.0], [1.0, -4.0, 1.0], [0.0, 1.0, 0.0]]
     emboss = [[-2.0, -1.0, 0.0], [-1.0, 1.0, 1.0], [0.0, 1.0, 2.0]]
-    motion = [[(1.0 / 17 if y == 8 or (y == x) else 0.0) for x in range(17)] for y in range(17)]
-    disk = [[1.0 if (x - 10) ** 2 + (y - 10) ** 2 <= 100 else 0.0 for x in range(21)] for y in range(21)]
-    ndisk = sum(map(sum, disk))
-    disk = [[v / ndisk for v in row] for row in disk]
-    for name, kern in (("sobel", sobel), ("emboss", emboss), ("motion 17", motion), ("disk 21", disk)):
+
+    def bokeh_disk(r: float) -> torch.Tensor:
+        """nodes_glsl_lens.py Bokeh's disk kernel, as it builds it."""
+        k = int(2 * math.ceil(r) + 1)
+        yy, xx = torch.meshgrid(torch.arange(k, dtype=torch.float32) - k // 2, torch.arange(k, dtype=torch.float32) - k // 2, indexing="ij")
+        d = (torch.sqrt(xx * xx + yy * yy) <= r).to(torch.float32)
+        return d / d.sum()
+
+    def conv_kernel(cls: str, rng) -> torch.Tensor:
+        """One kernel of a class, drawn as the effects draw their settings."""
+        if cls == "integer3":
+            return torch.tensor((sobel_x, sobel_y, laplacian, emboss)[int(rng.integers(4))], dtype=torch.float32)
+        if cls == "scaled3":
+            step = int(rng.integers(1, 80))
+            # Whole depths below 4 make an integer kernel (class integer3): step past them.
+            depth = 4.0 if rng.random() < 0.5 else float(np.float32((step + (step % 20 == 0)) * 0.05))
+            return torch.tensor(emboss, dtype=torch.float32) * depth
+        if rng.random() < 0.5:
+            return _motion_kernel(int(rng.integers(2, 16)), float(rng.integers(0, 361)))[0, 0].to(torch.float32)
+        return bokeh_disk(9.5 if rng.random() < 0.5 else float(rng.integers(1, 20) * 0.5))
+
+    # The sweep: 20 fresh seeds per class, 400 × 400 × 3, values in [0, 1] and [−0.1, 1.1], reflect
+    # padded then depthwise (and Sobel's zero-padded one-channel form): torch's float32 against its
+    # own float64, the largest |Δ| (255-scale). The runner's double sums sit on the float64 side.
+    conv_sweep = {}
+    for cls in ("integer3", "scaled3", "normalised"):
+        worst = 0.0
+        for seed in range(20):
+            rng = np.random.default_rng(20260926 + seed)
+            kt = conv_kernel(cls, rng)
+            kh, kw = kt.shape
+            for lo, hi in ((0.0, 1.0), (-0.1, 1.1)):
+                x = torch.from_numpy(rng.uniform(lo, hi, (1, 3, 400, 400)).astype(np.float32))
+                xp = F.pad(x, [kw // 2, kw // 2, kh // 2, kh // 2], mode="reflect")
+                a32 = F.conv2d(xp, kt.expand(3, 1, kh, kw).contiguous(), groups=3)
+                a64 = F.conv2d(xp.double(), kt.double().expand(3, 1, kh, kw).contiguous(), groups=3).float()
+                worst = max(worst, float((a32 - a64).abs().max()) * 255)
+                if cls == "integer3":
+                    b32 = F.conv2d(x[:, :1], kt[None, None], padding=1)
+                    b_64 = F.conv2d(x[:, :1].double(), kt.double()[None, None], padding=1).float()
+                    worst = max(worst, float((b32 - b_64).abs().max()) * 255)
+        conv_sweep[cls] = {"worst": worst, "seeds": 20, "picture": [3, 400, 400], "ranges": [[0.0, 1.0], [-0.1, 1.1]]}
+
+    # Per class, 10 seeds as fixture cases (40 × 32 × 3, reflect padded as the effects pad).
+    for cls in ("integer3", "scaled3", "normalised"):
+        for seed in range(10):
+            rng = np.random.default_rng(7000 + seed + 100 * len(cls))
+            kt = conv_kernel(cls, rng)
+            kh, kw = kt.shape
+            flat = [float(v) for v in kt.reshape(-1)]
+            lo, hi = ((0.0, 1.0), (-0.1, 1.1))[seed % 2]
+            g.add(f"conv2d {cls} seed {seed}, {kh}×{kw}, 40×32 3 ch reflect padded", "conv2dDepthwise", "library", [g.inp(3, 32, 40, lo, hi)],
+                  {"kernel": flat, "kh": kh, "kw": kw, "reflect": [kh // 2, kw // 2], "conv_class": cls},
+                  lambda t, kt=kt, kh=kh, kw=kw: F.conv2d(F.pad(t, [kw // 2, kw // 2, kh // 2, kh // 2], mode="reflect"), kt.expand(3, 1, kh, kw).contiguous(), groups=3)[0])
+    for name, kern in (("sobel x", sobel_x), ("sobel y", sobel_y)):
         kt = torch.tensor(kern, dtype=torch.float32)
+        g.add(f"conv2d same {name}, 64×48 (Outline)", "conv2dSame", "library", [g.inp(1, 48, 64)],
+              {"kernel": [float(v) for v in kt.reshape(-1)], "kh": 3, "kw": 3, "pad": 1, "conv_class": "integer3"},
+              lambda t, kt=kt: F.conv2d(t, kt[None, None], padding=1)[0])
+
+    # The brief's named kernels: Sobel, emboss, a 17 × 17 motion line (_motion_kernel(17, 33°)), a 21 × 21 disk.
+    motion17 = _motion_kernel(17, 33.0)[0, 0].to(torch.float32)
+    for name, kt, cls in (("sobel", torch.tensor(sobel_x), "integer3"), ("emboss", torch.tensor(emboss), "integer3"),
+                          ("motion 17", motion17, "normalised"), ("disk 21", bokeh_disk(10.0), "normalised")):
         kh, kw = kt.shape
-        flat = kt.reshape(-1).tolist()
+        flat = [float(v) for v in kt.reshape(-1)]
         for c, (w, h) in ((3, (37, 23)), (4, (64, 48))):
-            g.add(f"conv2d depthwise {name}, {w}×{h} {c} ch", "conv2dDepthwise", "library", [g.inp(c, h, w)], {"kernel": flat, "kh": kh, "kw": kw},
+            g.add(f"conv2d depthwise {name}, {w}×{h} {c} ch", "conv2dDepthwise", "library", [g.inp(c, h, w)], {"kernel": flat, "kh": kh, "kw": kw, "conv_class": cls},
                   lambda t, kt=kt, c=c: F.conv2d(t, kt.expand(c, 1, *kt.shape), groups=c)[0])
-        g.add(f"conv2d same {name}, 64×48", "conv2dSame", "library", [g.inp(1, 48, 64)], {"kernel": flat, "kh": kh, "kw": kw, "pad": kh // 2},
+        g.add(f"conv2d same {name}, 64×48", "conv2dSame", "library", [g.inp(1, 48, 64)], {"kernel": flat, "kh": kh, "kw": kw, "pad": kh // 2, "conv_class": cls},
               lambda t, kt=kt: F.conv2d(t, kt[None, None], padding=kt.shape[0] // 2)[0])
 
-    # Random kernels (fix round 1): normalised (positive, summing to 1) and not (−2…2).
+    # Random kernels (fix round 1): normalised ones are in the class; unnormalised (−2…2) are
+    # refused (they drift to 10⁻² against torch's float sums: R2.2 re-review).
     for size in (5, 11, 21):
         for label, lo, hi in (("normalised", 0.0, 1.0), ("unnormalised", -2.0, 2.0)):
             g.seed += 1
@@ -670,10 +736,12 @@ def kernels() -> dict:
                 kv = (kv / kv.sum(dtype=np.float32)).astype(np.float32)
             kt = torch.from_numpy(kv.reshape(size, size).copy())
             flat = [float(x) for x in kv]
+            cls = "normalised" if label == "normalised" else None
             g.add(f"conv2d depthwise random {label} {size}×{size}, 64×48 3 ch", "conv2dDepthwise", "library", [g.inp(3, 48, 64)],
-                  {"kernel": flat, "kh": size, "kw": size}, lambda t, kt=kt: F.conv2d(t, kt.expand(3, 1, *kt.shape), groups=3)[0])
+                  {"kernel": flat, "kh": size, "kw": size, "conv_class": cls}, lambda t, kt=kt: F.conv2d(t, kt.expand(3, 1, *kt.shape), groups=3)[0])
             g.add(f"conv2d same random {label} {size}×{size}, 64×48", "conv2dSame", "library", [g.inp(1, 48, 64)],
-                  {"kernel": flat, "kh": size, "kw": size, "pad": size // 2}, lambda t, kt=kt: F.conv2d(t, kt[None, None], padding=kt.shape[0] // 2)[0])
+                  {"kernel": flat, "kh": size, "kw": size, "pad": size // 2, "conv_class": cls},
+                  lambda t, kt=kt: F.conv2d(t, kt[None, None], padding=kt.shape[0] // 2)[0])
 
     # ── gaussian ──
     # The blur's proven range is ksize ≤ 181 (σ ≤ 30, every Python caller): (301, 50) measured
@@ -751,7 +819,7 @@ def kernels() -> dict:
         topk.append({"name": f"topk {n} values ({levels or 'no'} levels{', NaN' if nan else ''}), k {k}, largest {largest}", "input": spec, "k": k, "largest": largest,
                      "values": b64(vals.numpy().astype("<f4").tobytes()), "indices": [int(i) for i in idx], "cut": float(vals[-1])})
 
-    return {"cases": g.cases, "topk": topk, "eps_candidates": KERNEL_EPS, "store_max": KERNEL_STORE_MAX}
+    return {"cases": g.cases, "topk": topk, "conv_sweep": conv_sweep, "eps_candidates": KERNEL_EPS, "store_max": KERNEL_STORE_MAX}
 
 
 # ── rng: torch's CPU generator (R2.3) ────────────────────────────────────────

@@ -46,7 +46,8 @@ interface KCase {
   error?: { type: string; message: string }
 }
 interface TopkCase { name: string; input: InputSpec; k: number; largest: boolean; values: string; indices: number[]; cut: number }
-interface KFile extends FxFile { cases: any[]; topk: TopkCase[]; eps_candidates: Record<string, number> }
+interface ConvSweep { worst: number; seeds: number; picture: number[]; ranges: number[][] }
+interface KFile extends FxFile { cases: any[]; topk: TopkCase[]; eps_candidates: Record<string, number>; conv_sweep: Record<string, ConvSweep> }
 
 const FX = loadFixtures<KFile>('kernels')
 const CASES = FX.cases as KCase[]
@@ -119,7 +120,7 @@ function run(c: KCase): Float32Array[] {
     case 'avgPool2dStrided': return d(kn.avgPool2dStrided(t, a.k))
     case 'maxPool2d': return d(kn.maxPool2d(t, a.k, a.pad))
     case 'padReflect': return d(kn.padReflect(t, a.l, a.r, a.top, a.bottom))
-    case 'conv2dDepthwise': return d(kn.conv2dDepthwise(t, a.kernel, a.kh, a.kw))
+    case 'conv2dDepthwise': return d(kn.conv2dDepthwise(a.reflect ? kn.padReflect(t, a.reflect[1], a.reflect[1], a.reflect[0], a.reflect[0]) : t, a.kernel, a.kh, a.kw))
     case 'conv2dSame': return d(kn.conv2dSame(t, a.kernel, a.kh, a.kw, a.pad))
     case 'gaussianKernel1d': return [kn.gaussianKernel1d(a.ksize, a.sigma)]
     case 'gaussianBlur': return d(kn.gaussianBlur(t, a.ksize, a.sigma))
@@ -193,16 +194,14 @@ function ulps(a: number, b: number): number {
  * candidate is under the measured difference. gaussianBlur's error is mostly
  * torch's own float sums over k² taps (181: 1.4 × 10⁻³); its proven range is
  * ksize ≤ 181, wider is refused ((301, 50) measured 5.8 × 10⁻³ in review, so
- * it is not an acceptance case). conv2d's covers random normalised and
- * unnormalised kernels (−2…2) up to 21 × 21. Transcendental and
+ * it is not an acceptance case). conv2d's ε is per kernel class instead
+ * (CONV_EPS below, from kernels.ts CONV_CLASS_EPS). Transcendental and
  * kernel-weight results also carry their largest difference in float32 ulps.
  */
 const EPS = {
   powScalar: 2 ** -12,
   unary: 2 ** -12,
   affineGrid: 2 ** -12,
-  conv2dDepthwise: 2 ** -8,
-  conv2dSame: 2 ** -8,
   gaussianKernel1d: 2 ** -12,
   gaussianBlur: 2 ** -8,
 } as const
@@ -212,6 +211,26 @@ const MAX_ULPS: Partial<Record<keyof typeof EPS, number>> = {
   gaussianKernel1d: 2,
 }
 const CANDIDATES = [2 ** -12, 2 ** -10, 2 ** -8]
+
+/**
+ * conv2d's ε per kernel class (fix round 2): a real bound, at least twice the
+ * worst |Δ| (255-scale, unclamped) the fixture's sweep measured against torch
+ * over 20 fresh seeds per class on 400 × 400 × 3 pictures (FX.conv_sweep).
+ * Kernels outside these classes are refused.
+ */
+const CONV_EPS = { integer3: 2 ** -10, scaled3: 2 ** -8, normalised: 2 ** -10 } as const
+const isConv = (c: KCase) => c.fn === 'conv2dDepthwise' || c.fn === 'conv2dSame'
+
+/** The largest |ts − py|·255 over every value, unclamped (a bound for any use of a convolution's output). */
+function rawDiff255(ts: Float32Array, py: Float32Array): number {
+  let m = 0
+  for (let i = 0; i < py.length; i++) m = Math.max(m, Math.abs(ts[i]! - py[i]!) * 255)
+  return m
+}
+
+/** A convolution result within its class: every value within ε, and the 8-bit bands in both modes. */
+const convWithin = (ts: Float32Array, py: Float32Array, eps: number) =>
+  rawDiff255(ts, py) < eps && firstOutsideBand(ts, py, eps, 'trunc') < 0 && firstOutsideBand(ts, py, eps, 'round') < 0
 
 const measured: Record<string, { dmax: number; ulpMax: number }> = {}
 afterAll(() => {
@@ -235,7 +254,7 @@ describe('the kernels fixture', () => {
       'gaussianKernel1d', 'gaussianBlur', 'rgbToGrayscale', 'blend', 'adjustBrightness', 'adjustSaturation', 'adjustContrast', 'adjustHue', 'meanAll']) {
       expect(fns.has(fn), fn).toBe(true)
     }
-    expect(CASES.length).toBe(548)
+    expect(CASES.length).toBe(580)
     expect(FX.topk.length).toBe(8)
   })
 })
@@ -268,7 +287,7 @@ describe('exact kernels: torch’s float32, bit for bit', () => {
 })
 
 describe('library kernels: 8-bit equal but within ε of a boundary', () => {
-  for (const c of CASES.filter(x => x.class === 'library')) {
+  for (const c of CASES.filter(x => x.class === 'library' && !isConv(x))) {
     const eps = EPS[c.fn as keyof typeof EPS]
     it(`${c.fn} (ε ${eps}): ${c.name}`, () => {
       expect(eps, 'a pinned ε').toBeDefined()
@@ -314,6 +333,18 @@ describe('library kernels: 8-bit equal but within ε of a boundary', () => {
     })
   }
 
+  it('conv2d’s classes: ε pinned, a real bound over the 20-seed sweep, at most 2⁻⁸', () => {
+    expect(kn.CONV_CLASS_EPS).toEqual(CONV_EPS)
+    expect(Object.keys(FX.conv_sweep).sort()).toEqual(Object.keys(CONV_EPS).sort())
+    for (const [cls, eps] of Object.entries(CONV_EPS)) {
+      const sweep = FX.conv_sweep[cls]!
+      expect(sweep.seeds, cls).toBeGreaterThanOrEqual(20)
+      expect(2 * sweep.worst, `${cls}: twice the sweep's worst`).toBeLessThanOrEqual(eps)
+      expect(eps).toBeLessThanOrEqual(2 ** -8)
+      expect(CASES.filter(c => isConv(c) && c.args.conv_class === cls).length, `${cls} fixture cases`).toBeGreaterThanOrEqual(10)
+    }
+  })
+
   it('each ε is the smallest candidate at or above the kernel’s largest difference', () => {
     for (const fn of Object.keys(EPS) as (keyof typeof EPS)[]) {
       const cases = CASES.filter(c => c.fn === fn && c.class === 'library' && !c.error)
@@ -325,6 +356,73 @@ describe('library kernels: 8-bit equal but within ε of a boundary', () => {
       expect(EPS[fn]).toBeLessThanOrEqual(2 ** -8)
     }
   }, 120_000)
+})
+
+describe('conv2d, per kernel class', () => {
+  for (const c of CASES.filter(isConv)) {
+    const cls = c.args.conv_class as keyof typeof CONV_EPS | null
+    it(`${c.fn} (${cls ?? 'refused'}): ${c.name}`, () => {
+      expect(kn.convKernelClass(c.args.kernel, c.args.kh, c.args.kw)).toBe(cls)
+      if (!cls) {
+        // Outside the supported classes: refused with plain words (Python's output is not matched).
+        expect(() => run(c)).toThrow(kn.KERNEL_MESSAGES.convKernel)
+        return
+      }
+      const eps = CONV_EPS[cls]
+      const got = run(c)
+      c.outputs!.forEach((o, n) => {
+        const py = pyFloats(o)!
+        const ts = got[n]!
+        const d = rawDiff255(ts, py)
+        const m = (measured[`conv2d ${cls}`] ??= { dmax: 0, ulpMax: 0 })
+        m.dmax = Math.max(m.dmax, d)
+        expect(d, 'largest difference (255-scale, unclamped)').toBeLessThan(eps)
+        for (const mode of ['trunc', 'round'] as const) {
+          const bad = firstOutsideBand(ts, py, eps, mode)
+          expect(bad, `${mode}: value ${bad} (got ${ts[bad]}, want ${py[bad]})`).toBe(-1)
+        }
+      })
+    })
+  }
+
+  it('the classes: which kernels are in, which are refused', () => {
+    const emboss = [-2, -1, 0, -1, 1, 1, 0, 1, 2]
+    expect(kn.convKernelClass([-1, 0, 1, -2, 0, 2, -1, 0, 1], 3, 3)).toBe('integer3')
+    expect(kn.convKernelClass([0, 1, 0, 1, -4, 1, 0, 1, 0], 3, 3)).toBe('integer3')
+    expect(kn.convKernelClass(emboss.map(v => Math.fround(v * 3.35)), 3, 3)).toBe('scaled3')
+    expect(kn.convKernelClass(emboss.map(v => v * 4), 3, 3)).toBe('scaled3')
+    expect(kn.convKernelClass(emboss.map(v => v * 4.5), 3, 3)).toBeNull()
+    expect(kn.convKernelClass(new Array(441).fill(1 / 441), 21, 21)).toBe('normalised')
+    expect(kn.convKernelClass(new Array(529).fill(1 / 529), 23, 23)).toBeNull()
+    expect(kn.convKernelClass(new Array(25).fill(1 / 20), 5, 5)).toBeNull()
+    expect(kn.convKernelClass([0.5, -0.1, 0.6], 1, 3)).toBeNull()
+    const t = tensorOf({ shape: [1, 30, 30], seed: 3, lo: 0, hi: 1, memory: 'contiguous' })
+    expect(() => kn.conv2dDepthwise(t, new Array(25).fill(0.1), 5, 5)).toThrow(kn.KERNEL_MESSAGES.convKernel)
+    expect(() => kn.conv2dSame(t, new Array(25).fill(0.1), 5, 5, 2)).toThrow(kn.KERNEL_MESSAGES.convKernel)
+  })
+
+  it('a deliberate break is caught: the check is not vacuous', () => {
+    for (const cls of Object.keys(CONV_EPS) as (keyof typeof CONV_EPS)[]) {
+      const c = CASES.find(x => isConv(x) && x.args.conv_class === cls)!
+      const py = pyFloats(c.outputs![0]!)!
+      const ts = run(c)[0]!
+      expect(convWithin(ts, py, CONV_EPS[cls]), `${cls}: the real result passes`).toBe(true)
+      // A shift of 1.5 ε (255-scale) on every value fails.
+      const shifted = ts.map(v => Math.fround(v + (1.5 * CONV_EPS[cls]) / 255))
+      expect(convWithin(shifted, py, CONV_EPS[cls]), `${cls}: shifted by 1.5 ε`).toBe(false)
+      // One weight nudged by 1 % fails too (a normalised kernel's mass moved to its largest weight, so it stays in its class).
+      const kernel: number[] = [...c.args.kernel]
+      const j = kernel.findIndex(v => v !== 0)
+      const delta = kernel[j]! * 0.01
+      kernel[j] = kernel[j]! + delta
+      if (cls === 'normalised') {
+        const big = kernel.reduce((best, v, i) => (i !== j && v > kernel[best]! ? i : best), j === 0 ? 1 : 0)
+        kernel[big] = kernel[big]! - delta
+      }
+      const nudged = run({ ...c, args: { ...c.args, kernel, conv_class: cls } })[0]!
+      expect(convWithin(nudged, py, CONV_EPS[cls]), `${cls}: a weight nudged 1 %`).toBe(false)
+    }
+  })
 })
 
 describe('topk', () => {
