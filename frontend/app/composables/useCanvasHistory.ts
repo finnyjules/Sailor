@@ -71,3 +71,35 @@ export function useCanvasHistory() {
 
   return { snapshot, undo, redo, canUndo, canRedo, reset, stack, cursor }
 }
+
+/**
+ * The canvas records an edit on a short debounce (typing in a widget is one step, not one per
+ * key). An undo or redo that lands while that debounce is still waiting must first record the
+ * edit it is waiting on — flush() — or ⌘Z steps back from the entry BEFORE it: one step too far
+ * (a kept effect take on a shader node, then ⌘Z inside 350 ms, went back past the take). A
+ * paused recorder (the canvas's takes strip is open: previews are not edits) drops the wait.
+ */
+export function createSnapshotDebounce(record: () => void, opts: { delay?: number; paused?: () => boolean } = {}) {
+  const delay = opts.delay ?? 350
+  const paused = opts.paused ?? (() => false)
+  let timer: ReturnType<typeof setTimeout> | null = null
+  function cancel() {
+    if (timer) { clearTimeout(timer); timer = null }
+  }
+  function schedule() {
+    cancel()
+    timer = setTimeout(() => {
+      timer = null
+      if (!paused()) record()
+    }, delay)
+  }
+  /** Record now what the debounce is waiting on, if anything. True when it recorded. */
+  function flush(): boolean {
+    if (!timer) return false
+    cancel()
+    if (paused()) return false
+    record()
+    return true
+  }
+  return { schedule, flush, cancel, pending: () => timer !== null }
+}

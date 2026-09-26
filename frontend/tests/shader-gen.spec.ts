@@ -501,6 +501,41 @@ test.describe('shader generation (stage 5)', () => {
     await expect(page.getByTestId('prompt-takes-target')).toHaveText(effectName)
   })
 
+  test('canvas: ⌘Z straight after keeping an effect take on a shader node is exactly one step back', async ({ page }) => {
+    await mockShaderGen(page, [100, 200, 300]); await mockMyEffects(page); await mockRouter(page)
+    await openBlankWorkflow(page); await waitForBackend(page)
+    await dropNode(page, 'ShaderEffect')
+    const node = page.locator('.vue-flow__node').last()
+    await node.waitFor({ state: 'attached', timeout: 15_000 })
+    await page.waitForTimeout(800) // the drop is a step of its own
+    // The step before the keep: Water ripple picked on the node (setup, clicked by event as above).
+    const picked = node.getByTestId('shader-effect-picker')
+    await picked.dispatchEvent('click')
+    const gallery = page.getByTestId('effect-gallery')
+    await gallery.locator('[data-effect-id="water_ripple"]').click()
+    await gallery.getByRole('button', { name: 'Use effect' }).click()
+    const water = /Water ripple/i
+    await expect(picked).toContainText(water)
+    await page.waitForTimeout(800) // the pick is recorded (the canvas records on a 350 ms debounce)
+    await node.click()
+    await page.getByRole('toolbar', { name: 'Node actions' }).getByRole('button', { name: /Develop/ }).click()
+    await page.getByRole('menu', { name: 'Develop' }).getByRole('menuitem', { name: /Remix…/ }).click()
+    const box = page.getByRole('textbox', { name: 'Ask Sailor' })
+    await box.fill('rain on a window'); await box.press('Enter')
+    const strip = page.getByTestId('prompt-takes')
+    await expect(strip).toBeVisible({ timeout: 20_000 })
+    await expect(tileIn(page, 'pending')).toHaveCount(0, { timeout: 60_000 })
+    await tileIn(page, 'ready').first().getByRole('button', { name: /^Take \d$/ }).click() // keeps it
+    // The moment the kept effect is on the node, ⌘Z — well inside the 350 ms debounce.
+    await expect(picked).not.toContainText(water, { timeout: 10_000 })
+    await page.keyboard.press('ControlOrMeta+z')
+    await expect(picked).toContainText(water) // exactly the pre-keep state…
+    await page.waitForTimeout(600)
+    await expect(picked).toContainText(water) // …and it stays (no late snapshot moves it)
+    await page.keyboard.press('ControlOrMeta+z')
+    await expect(picked).toContainText('Pick an effect') // the step before that: the pick
+  })
+
   test('a routed new effect with no chip shows the price in the working label', async ({ page }) => {
     await mockShaderGen(page, [3000, 3000, 3000]); await mockMyEffects(page); const routed = await mockRouter(page, 'new-effect')
     await openShaderStudio(page)

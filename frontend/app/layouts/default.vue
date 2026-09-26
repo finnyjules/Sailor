@@ -9,6 +9,7 @@ import {
   Sparkle, ImagePlus, Brush, Music, Mic, ChevronDown, Palette, Images,
 } from 'lucide-vue-next'
 import { toast } from 'vue-sonner'
+import { isStudioOrModalOpen as isStudioOrModalOpenGuard } from '~/lib/canvas/historyKeys'
 import { useDeliverables } from '~/composables/useDeliverables'
 import { peekPendingPromote } from '~/lib/draft/runMeta'
 import { tweenValue, shouldAnimateWalletChange } from '~/lib/countTween'
@@ -3144,8 +3145,7 @@ function handleGlobalKeydown(e: KeyboardEvent) {
 // role, the prompt bar answers isFocusable(): its field exists, is enabled, and
 // nothing covers it. Anything else → blocked, so the key falls through untouched.
 function isStudioOrModalOpen(): boolean {
-  if (settingsOpen.value || creditsModalOpen.value) return true
-  if (document.querySelector('[role="dialog"], [aria-modal="true"]')) return true
+  if (isStudioOrModalOpenGuard({ flags: [settingsOpen.value, creditsModalOpen.value] })) return true
   return !canvasPromptRef.value?.isFocusable?.()
 }
 

@@ -29,7 +29,8 @@ import { useAgentActivity } from '~/composables/useAgentActivity'
 import { useNextStepsStrip } from '~/composables/useNextStepsStrip'
 import { registerWireDrag } from '~/composables/useWireDrag'
 import AgentSweep from '~/components/agent/AgentSweep.vue'
-import { useCanvasHistory } from '~/composables/useCanvasHistory'
+import { createSnapshotDebounce, useCanvasHistory } from '~/composables/useCanvasHistory'
+import { canvasHistoryAction, isStudioOrModalOpen } from '~/lib/canvas/historyKeys'
 import { useCanvasGroups, GROUP_COLORS, type CanvasGroup } from '~/composables/useCanvasGroups'
 import { useCanvasAnnotations, STICKY_COLORS, type Annotation, type ArrowEndpoint } from '~/composables/useCanvasAnnotations'
 import { applyArtifactLocks, applyVariantFanOut, backfillStandaloneArtifactImages, buildFilteredWorkflow, collectKeepSet, realignWidgetValues, setNamedWidget } from '~/composables/useFilteredPrompt'
@@ -1449,25 +1450,21 @@ const nodeClipboard = useNodeClipboard()
 // guard prevents the watcher from snapshotting our own programmatic restore.
 const history = useCanvasHistory()
 let isRestoringHistory = false
-let snapshotTimer: ReturnType<typeof setTimeout> | null = null
 
 // While a takes strip is open, the node it previews on changes with every hover and every take
 // that lands: none of that is an edit, so history waits. The strip's end records the step (a
 // keep records its "before" and the kept take itself — agentTakesEnd).
 const takesOpen = () => takesSnapshots.size > 0
+const recordSnapshot = () => history.snapshot({ nodes: nodes.value as any[], edges: edges.value as any[] })
+const pendingSnapshot = createSnapshotDebounce(recordSnapshot, { delay: 350, paused: takesOpen })
 function scheduleSnapshot() {
   if (isRestoringHistory || takesOpen()) return
-  if (snapshotTimer) clearTimeout(snapshotTimer)
-  snapshotTimer = setTimeout(() => {
-    snapshotTimer = null
-    if (takesOpen()) return
-    history.snapshot({ nodes: nodes.value as any[], edges: edges.value as any[] })
-  }, 350)
+  pendingSnapshot.schedule()
 }
 /** Record the canvas as it is now (a pending debounced snapshot is folded into it). */
 function snapshotNow() {
-  if (snapshotTimer) { clearTimeout(snapshotTimer); snapshotTimer = null }
-  history.snapshot({ nodes: nodes.value as any[], edges: edges.value as any[] })
+  pendingSnapshot.cancel()
+  recordSnapshot()
 }
 
 // Deep, because a widget edit mutates a node's `data` in place: only a deep
@@ -1902,28 +1899,33 @@ onBeforeUnmount(() => {
 async function applyHistoryState(state: { nodes: any[], edges: any[] } | null) {
   if (!state) return
   isRestoringHistory = true
-  // Splice in place so Vue Flow's reactivity picks up the change cleanly.
-  nodes.value.splice(0, nodes.value.length, ...state.nodes)
-  edges.value.splice(0, edges.value.length, ...state.edges)
+  // A NEW array, not a splice in place: Vue Flow watches the model array's identity and
+  // length only, so a same-length splice (a widget edit undone) never reached its nodes and
+  // the node kept showing the undone value. And copies, not the history entries themselves:
+  // Vue Flow assigns each restored node's `data` onto its own node, and a later in-place
+  // widget edit would otherwise rewrite the entry that ⌘Z / redo come back to.
+  const restored = JSON.parse(JSON.stringify({ nodes: state.nodes, edges: state.edges }))
+  nodes.value = restored.nodes
+  edges.value = restored.edges
   await nextTick()
   // Give the debounced snapshot a beat to skip, then release the guard.
   setTimeout(() => { isRestoringHistory = false }, 50)
 }
 
-function handleHistoryKey(e: KeyboardEvent) {
-  const isUndo = (e.metaKey || e.ctrlKey) && (e.key === 'z' || e.key === 'Z') && !e.shiftKey
-  const isRedo = (e.metaKey || e.ctrlKey) && ((e.key === 'Z' && e.shiftKey) || e.key === 'y')
-  if (!isUndo && !isRedo) return
+// A studio, Frame, template editor, gallery or other modal is open over the canvas: the undo
+// keys are its (see ~/lib/canvas/historyKeys). The flags cover the surfaces with no dialog role.
+const canvasOverlayOpen = () => isStudioOrModalOpen({
+  flags: [anyEditorModalOpen.value, anyCanvasOccludingModalOpen.value, spaceTypeClipEditId.value],
+})
 
-  // Don't hijack undo inside text inputs — native input-undo is more useful there.
-  const ae = document.activeElement
-  if (ae instanceof Element
-    && (ae.matches('input, textarea, select, [contenteditable=""], [contenteditable="true"]')
-      || ae.closest('input, textarea, select, [contenteditable=""], [contenteditable="true"]'))) {
-    return
-  }
+function handleHistoryKey(e: KeyboardEvent) {
+  // Not a history key, a text field's own undo, or a studio / modal owns the keys: leave it.
+  const action = canvasHistoryAction(e, { overlayOpen: canvasOverlayOpen() })
+  if (!action) return
   e.preventDefault()
-  applyHistoryState(isUndo ? history.undo() : history.redo())
+  // An edit still on its debounce is a step of its own: record it before stepping back.
+  pendingSnapshot.flush()
+  applyHistoryState(action === 'undo' ? history.undo() : history.redo())
 }
 
 // Tool mode: select vs hand

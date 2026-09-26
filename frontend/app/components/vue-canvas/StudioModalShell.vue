@@ -130,7 +130,9 @@ function onKeydown(e: KeyboardEvent) {
 }
 /** ⌘Z right after a take was kept (a click on its tile) puts back what it replaced, as one step.
  *  These studios keep no undo history of their own, so this is the only ⌘Z they answer; it runs
- *  in the capture phase so the canvas behind never also undoes. Anything else passes through. */
+ *  in the capture phase so the canvas behind never also undoes. Anything else passes through, and
+ *  the canvas ignores undo keys while a studio is open (~/lib/canvas/historyKeys), so a studio
+ *  with nothing to undo swallows them. */
 function onUndoKey(e: KeyboardEvent) {
   if (e.defaultPrevented || !(e.metaKey || e.ctrlKey) || e.shiftKey || e.altKey || e.key.toLowerCase() !== 'z') return
   const el = e.target as Element | null
