@@ -52,8 +52,6 @@ function done() { emit('done') }
           :aria-pressed="brush.mode.value === 'mask'" title="Mask"
           @click="setMode('mask')"
         >Mask</button>
-        <span class="sep" />
-        <button class="tbtn primary" data-testid="brush-done" @click="done()">Done</button>
       </div>
 
       <div class="row">
@@ -85,6 +83,8 @@ function done() { emit('done') }
           :aria-pressed="brush.eraser.value" title="Eraser"
           @click="toggleEraser()"
         >Eraser</button>
+        <span class="sep" />
+        <button class="tbtn primary" data-testid="brush-done" @click="done()">Done</button>
       </div>
     </div>
 
