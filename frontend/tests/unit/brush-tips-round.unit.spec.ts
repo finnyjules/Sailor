@@ -8,14 +8,14 @@ const stroke = (): TipStroke => ({ tip: 'round', v: 1, size: 36 / REF_W, setting
 
 describe('RoundSim', () => {
   it('replays identically and matches live feeding', () => {
-    const a = Array.from(simulateRound(stroke()).view())
+    const a = Array.from(simulateRound(stroke()).dabs.view())
     const sim = new RoundSim({ size: 36, settings: defaultSettings('round'), seed: 99 })
     for (const s of samples()) sim.addSample(s)
     expect(Array.from(sim.dabs.view())).toEqual(a)
     expect(a.length / 5).toBeGreaterThan(50)
   })
   it('main dabs are evenly spaced at 8% of the size', () => {
-    const d = simulateRound(stroke()).view(), mains: number[][] = []
+    const d = simulateRound(stroke()).dabs.view(), mains: number[][] = []
     for (let i = 0; i < d.length; i += 5) if (d[i + 2] === 18) mains.push([d[i]!, d[i + 1]!])
     for (let i = 2; i < mains.length; i++) {
       const gap = Math.hypot(mains[i]![0]! - mains[i - 1]![0]!, mains[i]![1]! - mains[i - 1]![1]!)
@@ -23,7 +23,7 @@ describe('RoundSim', () => {
     }
   })
   it('stays inside the padded bounds', () => {
-    const st = stroke(), pad = tipStrokePad(st), d = simulateRound(st).view()
+    const st = stroke(), pad = tipStrokePad(st), d = simulateRound(st).dabs.view()
     const xs = samples().map(p => p.x), ys = samples().map(p => p.y)
     for (let i = 0; i < d.length; i += 5) {
       expect(d[i]! + d[i + 2]!).toBeLessThanOrEqual((Math.max(...xs) + pad.side) * REF_W)

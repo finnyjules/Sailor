@@ -5,7 +5,7 @@ import { simulateSpray, LiveSpray } from './spray'
 import { simulateRound } from './round'
 import { bristleRibbon } from './bristle'
 
-export type Replayed = ({ kind: 'dabs'; dabs: Float32Array } | { kind: 'ribbon'; data: Float32Array | null }) & { settled: boolean }
+export type Replayed = ({ kind: 'dabs'; dabs: Float32Array; coords: Float32Array | null } | { kind: 'ribbon'; data: Float32Array | null }) & { settled: boolean }
 const memo = new WeakMap<TipStroke, Replayed>()
 
 // The live spray stroke's single incremental simulation (keyed by the stroke object). Every
@@ -24,12 +24,14 @@ export function replayStroke(s: TipStroke, done = true, tailMs = 0): Replayed {
   }
   let out: Replayed
   if (s.tip === 'bristle') out = { kind: 'ribbon', data: bristleRibbon(s, done), settled: true }
-  else if (s.tip === 'round') out = { kind: 'dabs', dabs: simulateRound(s).view().slice(), settled: true }
-  else if (!done) {
+  else if (s.tip === 'round') {
+    const r = simulateRound(s)
+    out = { kind: 'dabs', dabs: r.dabs.view().slice(), coords: r.coords.view().slice(), settled: true }
+  } else if (!done) {
     if (liveSpray?.stroke !== s) liveSpray = new LiveSpray(s)
     liveSpray.sync(tailMs)
-    out = { kind: 'dabs', dabs: liveSpray.sim.dabs.view(), settled: liveSpray.sim.settled }
-  } else { const r = simulateSpray(s); out = { kind: 'dabs', dabs: r.dabs.view().slice(), settled: r.settled } }
+    out = { kind: 'dabs', dabs: liveSpray.sim.dabs.view(), coords: null, settled: liveSpray.sim.settled }
+  } else { const r = simulateSpray(s); out = { kind: 'dabs', dabs: r.dabs.view().slice(), coords: null, settled: r.settled } }
   if (done) memo.set(s, out)
   return out
 }
