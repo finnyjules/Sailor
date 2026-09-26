@@ -262,6 +262,8 @@ export const RUNNER_NODE_RULES: Readonly<Record<string, RunnerNodeRule>> = {
     },
     mustLink: ['input_image'],
     mustNotLink: ['prompt'],
+    // R1.2: the prompt takes a text wire (a card's value arrives as if typed).
+    valueInputs: { prompt: ['text'] },
   },
   DevelopImageNode: { family: 'fal-edit', mustLink: ['input_image'] },
   // With no `image` Python makes a blank no-op; the runner leaves that to Python.
@@ -334,22 +336,26 @@ export const RUNNER_NODE_RULES: Readonly<Record<string, RunnerNodeRule>> = {
     mustNotLink: ['scene_prompt', 'aspect'],
   },
   // ── restyle (Task B8): Nano Banana 2 / Pro on fal, Nano Banana on
-  // Replicate. The taste wire (style_in) comes from a Moodboard node, which
-  // the runner does not run, so a wired one goes to Python. Settings the
-  // runner reads must not be wired. "Style Transfer · IP-Adapter" is retired
-  // (model line-up H2): fofr/style-transfer has only an estimated price, so
-  // the runner no longer takes it; saved nodes run on ComfyUI as before.
+  // Replicate. The prompt and the taste wire (style_in, a Moodboard card's
+  // style block) take a text wire (R1.2): the card's value arrives as if
+  // typed. Every other setting the runner reads must not be wired. "Style
+  // Transfer · IP-Adapter" is retired (model line-up H2): fofr/style-transfer
+  // has only an estimated price, so the runner no longer takes it; saved
+  // nodes run on ComfyUI as before.
   RestyleFromImageNode: {
     models: {
       'Nano Banana 2': 'restyle', 'Nano Banana Pro': 'restyle', 'Nano Banana': 'restyle',
     },
     mustLink: ['content_image'],
     mustNotLink: ['style_in', 'prompt', 'style_refs', 'structure_strength', 'resolution', 'output_format'],
+    valueInputs: { prompt: ['text'], style_in: ['text'] },
   },
   // ── replicate-image (Task B4): the Replicate-primary image models ──
-  // Only ADDS these models; the fal ones stay as they are. The Idea socket
-  // (prompt_in) and the taste wire (style_in) come from nodes the runner does
-  // not run, so a wired one goes to Python.
+  // Only ADDS these models; the fal ones stay as they are. The prompt, the
+  // Idea socket (prompt_in), the style block and the taste wire (style_in)
+  // take a text wire (R0.4, R1.2). model_options and style_refs stay unwired:
+  // they decide how many pictures are made and which files are read before
+  // the hold.
   // ── gpt-image-2.5 (model line-up F2): GPT Image 2.5 on fal, runner-only ──
   // ── qwen-image-3 (model line-up F6): Qwen Image 3 on Replicate, runner-only ──
   // ── grok-imagine-2 (model line-up F7): Grok Imagine 2 on Replicate, runner-only ──
@@ -375,8 +381,8 @@ export const RUNNER_NODE_RULES: Readonly<Record<string, RunnerNodeRule>> = {
       'krea-2-medium': 'krea-2',
     },
     mustNotLink: ['prompt', 'model_options', 'style_block', 'style_refs', 'prompt_in', 'style_in'],
-    // R0.4: the idea socket takes a text wire (a card's value arrives as if typed).
-    valueInputs: { prompt_in: ['text'] },
+    // R0.4, R1.2: the words take a text wire (a card's value arrives as if typed).
+    valueInputs: { prompt: ['text'], prompt_in: ['text'], style_block: ['text'], style_in: ['text'] },
   },
   // ── replicate-video (Task B6): the Replicate-provider video models ──
   // Only ADDS these models; the fal ones stay as they are. A legacy label is
@@ -415,6 +421,8 @@ export const RUNNER_NODE_RULES: Readonly<Record<string, RunnerNodeRule>> = {
       'luma-ray-3.2': 'luma-ray-3.2',
     },
     mustNotLink: ['prompt', 'model_options'],
+    // R1.2: the prompt takes a text wire; model_options stays unwired (R11).
+    valueInputs: { prompt: ['text'] },
   },
   // ── frame: the Frame render, computed by the runner (server/runner/compositor/) ──
   // The static composite, and its protect_mask when Blend scene's

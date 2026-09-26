@@ -112,9 +112,11 @@ export function unpricedProviderNode(
 export const RUNNER_EXTRA_TEXT_INPUTS: readonly string[] = ['target', 'find', 'replace', 'color', 'instructions', 'scene_prompt']
 
 /**
- * A typed-in taste (a literal style_in, never a wire the runner takes) goes
- * into the provider prompt of these classes, so it is moderated too. Every
- * other class's moderation is unchanged.
+ * A typed-in taste (a literal style_in) goes into the provider prompt of
+ * these classes, so it is moderated too. A wired one (R1.2) is moderated as
+ * every wired text is: at the start when a card's settings decide it
+ * (staticWiredTexts), else at the node's turn. Every other class's
+ * moderation is unchanged.
  */
 export const TASTE_TEXT_CLASSES: ReadonlySet<string> = new Set(['RestyleFromImageNode', 'GenerateImageNode'])
 export const TASTE_TEXT_INPUTS: readonly string[] = ['style_in']

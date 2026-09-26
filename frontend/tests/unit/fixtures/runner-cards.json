@@ -140,5 +140,979 @@
       "source": null,
       "value": ""
     }
+  ],
+  "wired_text": [
+    {
+      "name": "flux-schnell, prompt '': all blank",
+      "class_type": "GenerateImageNode",
+      "inputs": {
+        "model": "flux-schnell",
+        "prompt": "",
+        "aspect_ratio": "1:1",
+        "seed": 7,
+        "model_options": "{}",
+        "prompt_in": "  ",
+        "style_block": "  ",
+        "style_in": "  "
+      },
+      "links": [],
+      "provider": "fal",
+      "endpoint": "fal-ai/flux/schnell",
+      "payload": {
+        "prompt": "",
+        "image_size": "square_hd",
+        "num_inference_steps": 4,
+        "num_images": 1,
+        "output_format": "png",
+        "seed": 7
+      }
+    },
+    {
+      "name": "flux-schnell, prompt '': prompt_in",
+      "class_type": "GenerateImageNode",
+      "inputs": {
+        "model": "flux-schnell",
+        "prompt": "",
+        "aspect_ratio": "1:1",
+        "seed": 7,
+        "model_options": "{}",
+        "prompt_in": "a lighthouse at dusk",
+        "style_block": "  ",
+        "style_in": "  "
+      },
+      "links": [],
+      "provider": "fal",
+      "endpoint": "fal-ai/flux/schnell",
+      "payload": {
+        "prompt": "a lighthouse at dusk",
+        "image_size": "square_hd",
+        "num_inference_steps": 4,
+        "num_images": 1,
+        "output_format": "png",
+        "seed": 7
+      }
+    },
+    {
+      "name": "flux-schnell, prompt '': style_block",
+      "class_type": "GenerateImageNode",
+      "inputs": {
+        "model": "flux-schnell",
+        "prompt": "",
+        "aspect_ratio": "1:1",
+        "seed": 7,
+        "model_options": "{}",
+        "prompt_in": "  ",
+        "style_block": "Muted riso print.",
+        "style_in": "  "
+      },
+      "links": [],
+      "provider": "fal",
+      "endpoint": "fal-ai/flux/schnell",
+      "payload": {
+        "prompt": "Muted riso print. ",
+        "image_size": "square_hd",
+        "num_inference_steps": 4,
+        "num_images": 1,
+        "output_format": "png",
+        "seed": 7
+      }
+    },
+    {
+      "name": "flux-schnell, prompt '': prompt_in, style_block",
+      "class_type": "GenerateImageNode",
+      "inputs": {
+        "model": "flux-schnell",
+        "prompt": "",
+        "aspect_ratio": "1:1",
+        "seed": 7,
+        "model_options": "{}",
+        "prompt_in": "a lighthouse at dusk",
+        "style_block": "Muted riso print.",
+        "style_in": "  "
+      },
+      "links": [],
+      "provider": "fal",
+      "endpoint": "fal-ai/flux/schnell",
+      "payload": {
+        "prompt": "Muted riso print. a lighthouse at dusk",
+        "image_size": "square_hd",
+        "num_inference_steps": 4,
+        "num_images": 1,
+        "output_format": "png",
+        "seed": 7
+      }
+    },
+    {
+      "name": "flux-schnell, prompt '': style_in",
+      "class_type": "GenerateImageNode",
+      "inputs": {
+        "model": "flux-schnell",
+        "prompt": "",
+        "aspect_ratio": "1:1",
+        "seed": 7,
+        "model_options": "{}",
+        "prompt_in": "  ",
+        "style_block": "  ",
+        "style_in": "In the style of: soft grain."
+      },
+      "links": [],
+      "provider": "fal",
+      "endpoint": "fal-ai/flux/schnell",
+      "payload": {
+        "prompt": "In the style of: soft grain.",
+        "image_size": "square_hd",
+        "num_inference_steps": 4,
+        "num_images": 1,
+        "output_format": "png",
+        "seed": 7
+      }
+    },
+    {
+      "name": "flux-schnell, prompt '': prompt_in, style_in",
+      "class_type": "GenerateImageNode",
+      "inputs": {
+        "model": "flux-schnell",
+        "prompt": "",
+        "aspect_ratio": "1:1",
+        "seed": 7,
+        "model_options": "{}",
+        "prompt_in": "a lighthouse at dusk",
+        "style_block": "  ",
+        "style_in": "In the style of: soft grain."
+      },
+      "links": [],
+      "provider": "fal",
+      "endpoint": "fal-ai/flux/schnell",
+      "payload": {
+        "prompt": "In the style of: soft grain. a lighthouse at dusk",
+        "image_size": "square_hd",
+        "num_inference_steps": 4,
+        "num_images": 1,
+        "output_format": "png",
+        "seed": 7
+      }
+    },
+    {
+      "name": "flux-schnell, prompt '': style_block, style_in",
+      "class_type": "GenerateImageNode",
+      "inputs": {
+        "model": "flux-schnell",
+        "prompt": "",
+        "aspect_ratio": "1:1",
+        "seed": 7,
+        "model_options": "{}",
+        "prompt_in": "  ",
+        "style_block": "Muted riso print.",
+        "style_in": "In the style of: soft grain."
+      },
+      "links": [],
+      "provider": "fal",
+      "endpoint": "fal-ai/flux/schnell",
+      "payload": {
+        "prompt": "In the style of: soft grain. Muted riso print.",
+        "image_size": "square_hd",
+        "num_inference_steps": 4,
+        "num_images": 1,
+        "output_format": "png",
+        "seed": 7
+      }
+    },
+    {
+      "name": "flux-schnell, prompt '': prompt_in, style_block, style_in",
+      "class_type": "GenerateImageNode",
+      "inputs": {
+        "model": "flux-schnell",
+        "prompt": "",
+        "aspect_ratio": "1:1",
+        "seed": 7,
+        "model_options": "{}",
+        "prompt_in": "a lighthouse at dusk",
+        "style_block": "Muted riso print.",
+        "style_in": "In the style of: soft grain."
+      },
+      "links": [],
+      "provider": "fal",
+      "endpoint": "fal-ai/flux/schnell",
+      "payload": {
+        "prompt": "In the style of: soft grain. Muted riso print. a lighthouse at dusk",
+        "image_size": "square_hd",
+        "num_inference_steps": 4,
+        "num_images": 1,
+        "output_format": "png",
+        "seed": 7
+      }
+    },
+    {
+      "name": "flux-schnell, prompt 'a red fox': all blank",
+      "class_type": "GenerateImageNode",
+      "inputs": {
+        "model": "flux-schnell",
+        "prompt": "a red fox",
+        "aspect_ratio": "1:1",
+        "seed": 7,
+        "model_options": "{}",
+        "prompt_in": "  ",
+        "style_block": "  ",
+        "style_in": "  "
+      },
+      "links": [],
+      "provider": "fal",
+      "endpoint": "fal-ai/flux/schnell",
+      "payload": {
+        "prompt": "a red fox",
+        "image_size": "square_hd",
+        "num_inference_steps": 4,
+        "num_images": 1,
+        "output_format": "png",
+        "seed": 7
+      }
+    },
+    {
+      "name": "flux-schnell, prompt 'a red fox': prompt_in",
+      "class_type": "GenerateImageNode",
+      "inputs": {
+        "model": "flux-schnell",
+        "prompt": "a red fox",
+        "aspect_ratio": "1:1",
+        "seed": 7,
+        "model_options": "{}",
+        "prompt_in": "a lighthouse at dusk",
+        "style_block": "  ",
+        "style_in": "  "
+      },
+      "links": [],
+      "provider": "fal",
+      "endpoint": "fal-ai/flux/schnell",
+      "payload": {
+        "prompt": "a lighthouse at dusk a red fox",
+        "image_size": "square_hd",
+        "num_inference_steps": 4,
+        "num_images": 1,
+        "output_format": "png",
+        "seed": 7
+      }
+    },
+    {
+      "name": "flux-schnell, prompt 'a red fox': style_block",
+      "class_type": "GenerateImageNode",
+      "inputs": {
+        "model": "flux-schnell",
+        "prompt": "a red fox",
+        "aspect_ratio": "1:1",
+        "seed": 7,
+        "model_options": "{}",
+        "prompt_in": "  ",
+        "style_block": "Muted riso print.",
+        "style_in": "  "
+      },
+      "links": [],
+      "provider": "fal",
+      "endpoint": "fal-ai/flux/schnell",
+      "payload": {
+        "prompt": "Muted riso print. a red fox",
+        "image_size": "square_hd",
+        "num_inference_steps": 4,
+        "num_images": 1,
+        "output_format": "png",
+        "seed": 7
+      }
+    },
+    {
+      "name": "flux-schnell, prompt 'a red fox': prompt_in, style_block",
+      "class_type": "GenerateImageNode",
+      "inputs": {
+        "model": "flux-schnell",
+        "prompt": "a red fox",
+        "aspect_ratio": "1:1",
+        "seed": 7,
+        "model_options": "{}",
+        "prompt_in": "a lighthouse at dusk",
+        "style_block": "Muted riso print.",
+        "style_in": "  "
+      },
+      "links": [],
+      "provider": "fal",
+      "endpoint": "fal-ai/flux/schnell",
+      "payload": {
+        "prompt": "Muted riso print. a lighthouse at dusk a red fox",
+        "image_size": "square_hd",
+        "num_inference_steps": 4,
+        "num_images": 1,
+        "output_format": "png",
+        "seed": 7
+      }
+    },
+    {
+      "name": "flux-schnell, prompt 'a red fox': style_in",
+      "class_type": "GenerateImageNode",
+      "inputs": {
+        "model": "flux-schnell",
+        "prompt": "a red fox",
+        "aspect_ratio": "1:1",
+        "seed": 7,
+        "model_options": "{}",
+        "prompt_in": "  ",
+        "style_block": "  ",
+        "style_in": "In the style of: soft grain."
+      },
+      "links": [],
+      "provider": "fal",
+      "endpoint": "fal-ai/flux/schnell",
+      "payload": {
+        "prompt": "In the style of: soft grain. a red fox",
+        "image_size": "square_hd",
+        "num_inference_steps": 4,
+        "num_images": 1,
+        "output_format": "png",
+        "seed": 7
+      }
+    },
+    {
+      "name": "flux-schnell, prompt 'a red fox': prompt_in, style_in",
+      "class_type": "GenerateImageNode",
+      "inputs": {
+        "model": "flux-schnell",
+        "prompt": "a red fox",
+        "aspect_ratio": "1:1",
+        "seed": 7,
+        "model_options": "{}",
+        "prompt_in": "a lighthouse at dusk",
+        "style_block": "  ",
+        "style_in": "In the style of: soft grain."
+      },
+      "links": [],
+      "provider": "fal",
+      "endpoint": "fal-ai/flux/schnell",
+      "payload": {
+        "prompt": "In the style of: soft grain. a lighthouse at dusk a red fox",
+        "image_size": "square_hd",
+        "num_inference_steps": 4,
+        "num_images": 1,
+        "output_format": "png",
+        "seed": 7
+      }
+    },
+    {
+      "name": "flux-schnell, prompt 'a red fox': style_block, style_in",
+      "class_type": "GenerateImageNode",
+      "inputs": {
+        "model": "flux-schnell",
+        "prompt": "a red fox",
+        "aspect_ratio": "1:1",
+        "seed": 7,
+        "model_options": "{}",
+        "prompt_in": "  ",
+        "style_block": "Muted riso print.",
+        "style_in": "In the style of: soft grain."
+      },
+      "links": [],
+      "provider": "fal",
+      "endpoint": "fal-ai/flux/schnell",
+      "payload": {
+        "prompt": "In the style of: soft grain. Muted riso print. a red fox",
+        "image_size": "square_hd",
+        "num_inference_steps": 4,
+        "num_images": 1,
+        "output_format": "png",
+        "seed": 7
+      }
+    },
+    {
+      "name": "flux-schnell, prompt 'a red fox': prompt_in, style_block, style_in",
+      "class_type": "GenerateImageNode",
+      "inputs": {
+        "model": "flux-schnell",
+        "prompt": "a red fox",
+        "aspect_ratio": "1:1",
+        "seed": 7,
+        "model_options": "{}",
+        "prompt_in": "a lighthouse at dusk",
+        "style_block": "Muted riso print.",
+        "style_in": "In the style of: soft grain."
+      },
+      "links": [],
+      "provider": "fal",
+      "endpoint": "fal-ai/flux/schnell",
+      "payload": {
+        "prompt": "In the style of: soft grain. Muted riso print. a lighthouse at dusk a red fox",
+        "image_size": "square_hd",
+        "num_inference_steps": 4,
+        "num_images": 1,
+        "output_format": "png",
+        "seed": 7
+      }
+    },
+    {
+      "name": "flux-dev, prompt '': all blank",
+      "class_type": "GenerateImageNode",
+      "inputs": {
+        "model": "flux-dev",
+        "prompt": "",
+        "aspect_ratio": "1:1",
+        "seed": 7,
+        "model_options": "{}",
+        "prompt_in": "  ",
+        "style_block": "  ",
+        "style_in": "  "
+      },
+      "links": [],
+      "provider": "replicate",
+      "endpoint": "black-forest-labs/flux-dev",
+      "payload": {
+        "prompt": "",
+        "aspect_ratio": "1:1",
+        "num_inference_steps": 28,
+        "guidance": 3.5,
+        "megapixels": "1",
+        "go_fast": true,
+        "num_outputs": 1,
+        "output_format": "png",
+        "output_quality": 95,
+        "seed": 7
+      }
+    },
+    {
+      "name": "flux-dev, prompt '': prompt_in",
+      "class_type": "GenerateImageNode",
+      "inputs": {
+        "model": "flux-dev",
+        "prompt": "",
+        "aspect_ratio": "1:1",
+        "seed": 7,
+        "model_options": "{}",
+        "prompt_in": "a lighthouse at dusk",
+        "style_block": "  ",
+        "style_in": "  "
+      },
+      "links": [],
+      "provider": "replicate",
+      "endpoint": "black-forest-labs/flux-dev",
+      "payload": {
+        "prompt": "a lighthouse at dusk",
+        "aspect_ratio": "1:1",
+        "num_inference_steps": 28,
+        "guidance": 3.5,
+        "megapixels": "1",
+        "go_fast": true,
+        "num_outputs": 1,
+        "output_format": "png",
+        "output_quality": 95,
+        "seed": 7
+      }
+    },
+    {
+      "name": "flux-dev, prompt '': style_block",
+      "class_type": "GenerateImageNode",
+      "inputs": {
+        "model": "flux-dev",
+        "prompt": "",
+        "aspect_ratio": "1:1",
+        "seed": 7,
+        "model_options": "{}",
+        "prompt_in": "  ",
+        "style_block": "Muted riso print.",
+        "style_in": "  "
+      },
+      "links": [],
+      "provider": "replicate",
+      "endpoint": "black-forest-labs/flux-dev",
+      "payload": {
+        "prompt": "Muted riso print. ",
+        "aspect_ratio": "1:1",
+        "num_inference_steps": 28,
+        "guidance": 3.5,
+        "megapixels": "1",
+        "go_fast": true,
+        "num_outputs": 1,
+        "output_format": "png",
+        "output_quality": 95,
+        "seed": 7
+      }
+    },
+    {
+      "name": "flux-dev, prompt '': prompt_in, style_block",
+      "class_type": "GenerateImageNode",
+      "inputs": {
+        "model": "flux-dev",
+        "prompt": "",
+        "aspect_ratio": "1:1",
+        "seed": 7,
+        "model_options": "{}",
+        "prompt_in": "a lighthouse at dusk",
+        "style_block": "Muted riso print.",
+        "style_in": "  "
+      },
+      "links": [],
+      "provider": "replicate",
+      "endpoint": "black-forest-labs/flux-dev",
+      "payload": {
+        "prompt": "Muted riso print. a lighthouse at dusk",
+        "aspect_ratio": "1:1",
+        "num_inference_steps": 28,
+        "guidance": 3.5,
+        "megapixels": "1",
+        "go_fast": true,
+        "num_outputs": 1,
+        "output_format": "png",
+        "output_quality": 95,
+        "seed": 7
+      }
+    },
+    {
+      "name": "flux-dev, prompt '': style_in",
+      "class_type": "GenerateImageNode",
+      "inputs": {
+        "model": "flux-dev",
+        "prompt": "",
+        "aspect_ratio": "1:1",
+        "seed": 7,
+        "model_options": "{}",
+        "prompt_in": "  ",
+        "style_block": "  ",
+        "style_in": "In the style of: soft grain."
+      },
+      "links": [],
+      "provider": "replicate",
+      "endpoint": "black-forest-labs/flux-dev",
+      "payload": {
+        "prompt": "In the style of: soft grain.",
+        "aspect_ratio": "1:1",
+        "num_inference_steps": 28,
+        "guidance": 3.5,
+        "megapixels": "1",
+        "go_fast": true,
+        "num_outputs": 1,
+        "output_format": "png",
+        "output_quality": 95,
+        "seed": 7
+      }
+    },
+    {
+      "name": "flux-dev, prompt '': prompt_in, style_in",
+      "class_type": "GenerateImageNode",
+      "inputs": {
+        "model": "flux-dev",
+        "prompt": "",
+        "aspect_ratio": "1:1",
+        "seed": 7,
+        "model_options": "{}",
+        "prompt_in": "a lighthouse at dusk",
+        "style_block": "  ",
+        "style_in": "In the style of: soft grain."
+      },
+      "links": [],
+      "provider": "replicate",
+      "endpoint": "black-forest-labs/flux-dev",
+      "payload": {
+        "prompt": "In the style of: soft grain. a lighthouse at dusk",
+        "aspect_ratio": "1:1",
+        "num_inference_steps": 28,
+        "guidance": 3.5,
+        "megapixels": "1",
+        "go_fast": true,
+        "num_outputs": 1,
+        "output_format": "png",
+        "output_quality": 95,
+        "seed": 7
+      }
+    },
+    {
+      "name": "flux-dev, prompt '': style_block, style_in",
+      "class_type": "GenerateImageNode",
+      "inputs": {
+        "model": "flux-dev",
+        "prompt": "",
+        "aspect_ratio": "1:1",
+        "seed": 7,
+        "model_options": "{}",
+        "prompt_in": "  ",
+        "style_block": "Muted riso print.",
+        "style_in": "In the style of: soft grain."
+      },
+      "links": [],
+      "provider": "replicate",
+      "endpoint": "black-forest-labs/flux-dev",
+      "payload": {
+        "prompt": "In the style of: soft grain. Muted riso print.",
+        "aspect_ratio": "1:1",
+        "num_inference_steps": 28,
+        "guidance": 3.5,
+        "megapixels": "1",
+        "go_fast": true,
+        "num_outputs": 1,
+        "output_format": "png",
+        "output_quality": 95,
+        "seed": 7
+      }
+    },
+    {
+      "name": "flux-dev, prompt '': prompt_in, style_block, style_in",
+      "class_type": "GenerateImageNode",
+      "inputs": {
+        "model": "flux-dev",
+        "prompt": "",
+        "aspect_ratio": "1:1",
+        "seed": 7,
+        "model_options": "{}",
+        "prompt_in": "a lighthouse at dusk",
+        "style_block": "Muted riso print.",
+        "style_in": "In the style of: soft grain."
+      },
+      "links": [],
+      "provider": "replicate",
+      "endpoint": "black-forest-labs/flux-dev",
+      "payload": {
+        "prompt": "In the style of: soft grain. Muted riso print. a lighthouse at dusk",
+        "aspect_ratio": "1:1",
+        "num_inference_steps": 28,
+        "guidance": 3.5,
+        "megapixels": "1",
+        "go_fast": true,
+        "num_outputs": 1,
+        "output_format": "png",
+        "output_quality": 95,
+        "seed": 7
+      }
+    },
+    {
+      "name": "flux-dev, prompt 'a red fox': all blank",
+      "class_type": "GenerateImageNode",
+      "inputs": {
+        "model": "flux-dev",
+        "prompt": "a red fox",
+        "aspect_ratio": "1:1",
+        "seed": 7,
+        "model_options": "{}",
+        "prompt_in": "  ",
+        "style_block": "  ",
+        "style_in": "  "
+      },
+      "links": [],
+      "provider": "replicate",
+      "endpoint": "black-forest-labs/flux-dev",
+      "payload": {
+        "prompt": "a red fox",
+        "aspect_ratio": "1:1",
+        "num_inference_steps": 28,
+        "guidance": 3.5,
+        "megapixels": "1",
+        "go_fast": true,
+        "num_outputs": 1,
+        "output_format": "png",
+        "output_quality": 95,
+        "seed": 7
+      }
+    },
+    {
+      "name": "flux-dev, prompt 'a red fox': prompt_in",
+      "class_type": "GenerateImageNode",
+      "inputs": {
+        "model": "flux-dev",
+        "prompt": "a red fox",
+        "aspect_ratio": "1:1",
+        "seed": 7,
+        "model_options": "{}",
+        "prompt_in": "a lighthouse at dusk",
+        "style_block": "  ",
+        "style_in": "  "
+      },
+      "links": [],
+      "provider": "replicate",
+      "endpoint": "black-forest-labs/flux-dev",
+      "payload": {
+        "prompt": "a lighthouse at dusk a red fox",
+        "aspect_ratio": "1:1",
+        "num_inference_steps": 28,
+        "guidance": 3.5,
+        "megapixels": "1",
+        "go_fast": true,
+        "num_outputs": 1,
+        "output_format": "png",
+        "output_quality": 95,
+        "seed": 7
+      }
+    },
+    {
+      "name": "flux-dev, prompt 'a red fox': style_block",
+      "class_type": "GenerateImageNode",
+      "inputs": {
+        "model": "flux-dev",
+        "prompt": "a red fox",
+        "aspect_ratio": "1:1",
+        "seed": 7,
+        "model_options": "{}",
+        "prompt_in": "  ",
+        "style_block": "Muted riso print.",
+        "style_in": "  "
+      },
+      "links": [],
+      "provider": "replicate",
+      "endpoint": "black-forest-labs/flux-dev",
+      "payload": {
+        "prompt": "Muted riso print. a red fox",
+        "aspect_ratio": "1:1",
+        "num_inference_steps": 28,
+        "guidance": 3.5,
+        "megapixels": "1",
+        "go_fast": true,
+        "num_outputs": 1,
+        "output_format": "png",
+        "output_quality": 95,
+        "seed": 7
+      }
+    },
+    {
+      "name": "flux-dev, prompt 'a red fox': prompt_in, style_block",
+      "class_type": "GenerateImageNode",
+      "inputs": {
+        "model": "flux-dev",
+        "prompt": "a red fox",
+        "aspect_ratio": "1:1",
+        "seed": 7,
+        "model_options": "{}",
+        "prompt_in": "a lighthouse at dusk",
+        "style_block": "Muted riso print.",
+        "style_in": "  "
+      },
+      "links": [],
+      "provider": "replicate",
+      "endpoint": "black-forest-labs/flux-dev",
+      "payload": {
+        "prompt": "Muted riso print. a lighthouse at dusk a red fox",
+        "aspect_ratio": "1:1",
+        "num_inference_steps": 28,
+        "guidance": 3.5,
+        "megapixels": "1",
+        "go_fast": true,
+        "num_outputs": 1,
+        "output_format": "png",
+        "output_quality": 95,
+        "seed": 7
+      }
+    },
+    {
+      "name": "flux-dev, prompt 'a red fox': style_in",
+      "class_type": "GenerateImageNode",
+      "inputs": {
+        "model": "flux-dev",
+        "prompt": "a red fox",
+        "aspect_ratio": "1:1",
+        "seed": 7,
+        "model_options": "{}",
+        "prompt_in": "  ",
+        "style_block": "  ",
+        "style_in": "In the style of: soft grain."
+      },
+      "links": [],
+      "provider": "replicate",
+      "endpoint": "black-forest-labs/flux-dev",
+      "payload": {
+        "prompt": "In the style of: soft grain. a red fox",
+        "aspect_ratio": "1:1",
+        "num_inference_steps": 28,
+        "guidance": 3.5,
+        "megapixels": "1",
+        "go_fast": true,
+        "num_outputs": 1,
+        "output_format": "png",
+        "output_quality": 95,
+        "seed": 7
+      }
+    },
+    {
+      "name": "flux-dev, prompt 'a red fox': prompt_in, style_in",
+      "class_type": "GenerateImageNode",
+      "inputs": {
+        "model": "flux-dev",
+        "prompt": "a red fox",
+        "aspect_ratio": "1:1",
+        "seed": 7,
+        "model_options": "{}",
+        "prompt_in": "a lighthouse at dusk",
+        "style_block": "  ",
+        "style_in": "In the style of: soft grain."
+      },
+      "links": [],
+      "provider": "replicate",
+      "endpoint": "black-forest-labs/flux-dev",
+      "payload": {
+        "prompt": "In the style of: soft grain. a lighthouse at dusk a red fox",
+        "aspect_ratio": "1:1",
+        "num_inference_steps": 28,
+        "guidance": 3.5,
+        "megapixels": "1",
+        "go_fast": true,
+        "num_outputs": 1,
+        "output_format": "png",
+        "output_quality": 95,
+        "seed": 7
+      }
+    },
+    {
+      "name": "flux-dev, prompt 'a red fox': style_block, style_in",
+      "class_type": "GenerateImageNode",
+      "inputs": {
+        "model": "flux-dev",
+        "prompt": "a red fox",
+        "aspect_ratio": "1:1",
+        "seed": 7,
+        "model_options": "{}",
+        "prompt_in": "  ",
+        "style_block": "Muted riso print.",
+        "style_in": "In the style of: soft grain."
+      },
+      "links": [],
+      "provider": "replicate",
+      "endpoint": "black-forest-labs/flux-dev",
+      "payload": {
+        "prompt": "In the style of: soft grain. Muted riso print. a red fox",
+        "aspect_ratio": "1:1",
+        "num_inference_steps": 28,
+        "guidance": 3.5,
+        "megapixels": "1",
+        "go_fast": true,
+        "num_outputs": 1,
+        "output_format": "png",
+        "output_quality": 95,
+        "seed": 7
+      }
+    },
+    {
+      "name": "flux-dev, prompt 'a red fox': prompt_in, style_block, style_in",
+      "class_type": "GenerateImageNode",
+      "inputs": {
+        "model": "flux-dev",
+        "prompt": "a red fox",
+        "aspect_ratio": "1:1",
+        "seed": 7,
+        "model_options": "{}",
+        "prompt_in": "a lighthouse at dusk",
+        "style_block": "Muted riso print.",
+        "style_in": "In the style of: soft grain."
+      },
+      "links": [],
+      "provider": "replicate",
+      "endpoint": "black-forest-labs/flux-dev",
+      "payload": {
+        "prompt": "In the style of: soft grain. Muted riso print. a lighthouse at dusk a red fox",
+        "aspect_ratio": "1:1",
+        "num_inference_steps": 28,
+        "guidance": 3.5,
+        "megapixels": "1",
+        "go_fast": true,
+        "num_outputs": 1,
+        "output_format": "png",
+        "output_quality": 95,
+        "seed": 7
+      }
+    },
+    {
+      "name": "Nano Banana 2 restyle, prompt '', taste from a Moodboard",
+      "class_type": "RestyleFromImageNode",
+      "inputs": {
+        "model": "Nano Banana 2",
+        "prompt": "",
+        "structure_strength": 0.65,
+        "resolution": "1K",
+        "seed": 0,
+        "output_format": "png",
+        "style_in": "In the style of: Soft film grain. Palette: Blush #F6C1CB. Avoid: gloss."
+      },
+      "links": [
+        "content_image"
+      ],
+      "reading_json": "{\"summary\":\"Soft film grain.\",\"palette\":[{\"name\":\"Blush\",\"hex\":\"#F6C1CB\"}],\"avoids\":[\"gloss\"]}",
+      "provider": "fal",
+      "endpoint": "fal-ai/nano-banana-2/edit",
+      "payload": {
+        "prompt": "Redraw the first image in the visual art style of the second image. Preserve the first image's composition, subject, pose and layout — change only the rendering style, colors, texture, lighting and finish. The second image is ONLY a style reference: apply its art style — its colors, texture, brushwork, lighting and finish — to the first image strongly and unmistakably, so the restyling is clearly visible. Take none of the second image's subject or content. Do not return the first image unchanged or only lightly altered. Additional style direction: In the style of: Soft film grain. Palette: Blush #F6C1CB. Avoid: gloss..",
+        "image_urls": [
+          "IMG:content_image"
+        ],
+        "output_format": "png",
+        "resolution": "1K",
+        "num_images": 1
+      }
+    },
+    {
+      "name": "Nano Banana 2 restyle, prompt 'watercolor', taste from a Moodboard",
+      "class_type": "RestyleFromImageNode",
+      "inputs": {
+        "model": "Nano Banana 2",
+        "prompt": "watercolor",
+        "structure_strength": 0.65,
+        "resolution": "1K",
+        "seed": 0,
+        "output_format": "png",
+        "style_in": "In the style of: Soft film grain. Palette: Blush #F6C1CB. Avoid: gloss."
+      },
+      "links": [
+        "content_image"
+      ],
+      "reading_json": "{\"summary\":\"Soft film grain.\",\"palette\":[{\"name\":\"Blush\",\"hex\":\"#F6C1CB\"}],\"avoids\":[\"gloss\"]}",
+      "provider": "fal",
+      "endpoint": "fal-ai/nano-banana-2/edit",
+      "payload": {
+        "prompt": "Redraw the first image in the visual art style of the second image. Preserve the first image's composition, subject, pose and layout — change only the rendering style, colors, texture, lighting and finish. The second image is ONLY a style reference: apply its art style — its colors, texture, brushwork, lighting and finish — to the first image strongly and unmistakably, so the restyling is clearly visible. Take none of the second image's subject or content. Do not return the first image unchanged or only lightly altered. Additional style direction: watercolor In the style of: Soft film grain. Palette: Blush #F6C1CB. Avoid: gloss..",
+        "image_urls": [
+          "IMG:content_image"
+        ],
+        "output_format": "png",
+        "resolution": "1K",
+        "num_images": 1
+      }
+    },
+    {
+      "name": "veo-3.1, a prompt",
+      "class_type": "GenerateVideoNode",
+      "inputs": {
+        "model": "veo-3.1",
+        "prompt": "a fox runs through snow",
+        "aspect_ratio": "16:9",
+        "duration": "8",
+        "seed": 7,
+        "model_options": "{}"
+      },
+      "links": [],
+      "provider": "fal",
+      "endpoint": "fal-ai/veo3.1",
+      "payload": {
+        "prompt": "a fox runs through snow",
+        "duration": "8s",
+        "resolution": "720p",
+        "generate_audio": true,
+        "auto_fix": true,
+        "aspect_ratio": "16:9",
+        "seed": 7
+      }
+    },
+    {
+      "name": "Nano Banana 2 edit, a prompt",
+      "class_type": "EditImageNode",
+      "inputs": {
+        "model": "Nano Banana 2",
+        "prompt": "make her hair blue",
+        "aspect_ratio": "match_input_image",
+        "resolution": "1K",
+        "seed": 0,
+        "safety_tolerance": 2,
+        "prompt_upsampling": false,
+        "output_format": "png"
+      },
+      "links": [
+        "input_image"
+      ],
+      "provider": "fal",
+      "endpoint": "fal-ai/nano-banana-2/edit",
+      "payload": {
+        "prompt": "make her hair blue",
+        "image_urls": [
+          "IMG:input_image"
+        ],
+        "output_format": "png",
+        "resolution": "1K",
+        "num_images": 1
+      }
+    }
   ]
 }

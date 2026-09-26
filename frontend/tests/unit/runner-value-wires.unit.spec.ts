@@ -49,9 +49,10 @@ describe('valueWiresAllowed', () => {
     expect(valueWiresAllowed(p, 'g', KINDS)).toBe(true)
   })
   it('refuses a value wired into an input that takes none', () => {
+    // (R1.2 lets the video's prompt take text; its options still take none.)
     const p: ApiPrompt = {
       t: { class_type: 'FakeText', inputs: {} },
-      v: { class_type: 'GenerateVideoNode', inputs: { model: 'veo-3.1', prompt: ['t', 0] } },
+      v: { class_type: 'GenerateVideoNode', inputs: { model: 'veo-3.1', prompt: 'a fox', model_options: ['t', 0] } },
     }
     expect(valueWiresAllowed(p, 'v', KINDS)).toBe(false)
   })

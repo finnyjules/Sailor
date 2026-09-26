@@ -8,6 +8,12 @@ adds its key and regenerates the file (the other keys must come out unchanged).
               and the edge cases; `plain: false` marks a reading the moodboard
               window never writes (the runner leaves those to the engine)
   text      — (R1.1) TextNode.execute(text, source)'s value
+  wired_text — (R1.2) the first provider call the REAL GenerateImageNode
+              (flux-schnell on fal, flux-dev on Replicate), RestyleFromImageNode
+              (Nano Banana 2, its taste a Moodboard's style block),
+              GenerateVideoNode (veo-3.1) and EditImageNode (Nano Banana 2)
+              make for the words a card would wire in, captured with
+              runner_builder_fixtures.capture_first_call
 
     cd /Users/julien/Documents/GitHub/Sailor && .venv/bin/python scripts/runner_cards_fixtures.py
 
@@ -46,6 +52,9 @@ import utils.install_util  # noqa: E402,F401
 
 from comfy_extras.nodes_moodboard import MoodboardNode  # noqa: E402
 from comfy_extras.nodes_text import TextNode  # noqa: E402
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import runner_builder_fixtures  # noqa: E402
 
 
 def _dumps(reading) -> str:
@@ -113,6 +122,61 @@ def text_cases() -> list[dict]:
     return out
 
 
+# ── wired_text (R1.2) ────────────────────────────────────────────────────────
+
+# A Moodboard reading as the moodboard window writes it; its style block is the taste wired into Restyle.
+WIRED_READING = _dumps({"summary": "Soft film grain.", "palette": [{"name": "Blush", "hex": "#F6C1CB"}],
+                        "avoids": ["gloss"]})
+
+
+def wired_text_cases() -> list[dict]:
+    import comfy_api_nodes.nodes_replicate as nr
+    capture = runner_builder_fixtures.capture_first_call
+    out = []
+
+    def case(name: str, node_cls, class_type: str, inputs: dict, links: tuple = (), **extra):
+        kwargs = dict(inputs)
+        for link in links:  # a picture arrives as its input name (IMG:<name>)
+            kwargs[link] = link
+        call = capture(node_cls, **kwargs)
+        assert not call.get("passthrough"), name
+        out.append({"name": name, "class_type": class_type, "inputs": inputs, "links": list(links), **extra,
+                    "provider": call["provider"], "endpoint": call["endpoint"], "payload": call["payload"]})
+
+    # Generate an image: prompt_in, style_block and style_in, each blank or not, under a blank and a typed prompt.
+    words = {"prompt_in": "a lighthouse at dusk", "style_block": "Muted riso print.", "style_in": "In the style of: soft grain."}
+    for model in ("flux-schnell", "flux-dev"):
+        for prompt in ("", "a red fox"):
+            for mask in range(8):
+                inputs = {"model": model, "prompt": prompt, "aspect_ratio": "1:1", "seed": 7, "model_options": "{}"}
+                for i, key in enumerate(("prompt_in", "style_block", "style_in")):
+                    inputs[key] = words[key] if mask & (1 << i) else "  "
+                label = ", ".join(k for i, k in enumerate(words) if mask & (1 << i)) or "all blank"
+                case(f"{model}, prompt {prompt!r}: {label}", nr.GenerateImageNode, "GenerateImageNode", inputs)
+
+    # Restyle from image: the taste is a Moodboard's style block.
+    style = MoodboardNode.execute(WIRED_READING).args[0]
+    assert style, style
+    for prompt in ("", "watercolor"):
+        case(f"Nano Banana 2 restyle, prompt {prompt!r}, taste from a Moodboard", nr.RestyleFromImageNode,
+             "RestyleFromImageNode",
+             {"model": "Nano Banana 2", "prompt": prompt, "structure_strength": 0.65, "resolution": "1K",
+              "seed": 0, "output_format": "png", "style_in": style},
+             links=("content_image",), reading_json=WIRED_READING)
+
+    # Generate a video: the prompt.
+    case("veo-3.1, a prompt", nr.GenerateVideoNode, "GenerateVideoNode",
+         {"model": "veo-3.1", "prompt": "a fox runs through snow", "aspect_ratio": "16:9", "duration": "8",
+          "seed": 7, "model_options": "{}"})
+
+    # Edit an image: the prompt.
+    case("Nano Banana 2 edit, a prompt", nr.EditImageNode, "EditImageNode",
+         {"model": "Nano Banana 2", "prompt": "make her hair blue", "aspect_ratio": "match_input_image",
+          "resolution": "1K", "seed": 0, "safety_tolerance": 2, "prompt_upsampling": False, "output_format": "png"},
+         links=("input_image",))
+    return out
+
+
 def main() -> None:
     data: dict = {}
     if os.path.exists(OUT):
@@ -120,6 +184,7 @@ def main() -> None:
             data = json.load(f)
     data["moodboard"] = moodboard_cases()
     data["text"] = text_cases()
+    data["wired_text"] = wired_text_cases()
     with open(OUT, "w", encoding="utf-8") as f:
         json.dump(dict(sorted(data.items())), f, indent=2, ensure_ascii=False)
         f.write("\n")
