@@ -363,6 +363,8 @@ export const RUNNER_NODE_RULES: Readonly<Record<string, RunnerNodeRule>> = {
       'krea-2-medium': 'krea-2',
     },
     mustNotLink: ['prompt', 'model_options', 'style_block', 'style_refs', 'prompt_in', 'style_in'],
+    // R0.4: the idea socket takes a text wire (a card's value arrives as if typed).
+    valueInputs: { prompt_in: ['text'] },
   },
   // ── replicate-video (Task B6): the Replicate-provider video models ──
   // Only ADDS these models; the fal ones stay as they are. A legacy label is
@@ -494,7 +496,20 @@ export const RUNNER_NODE_RULES: Readonly<Record<string, RunnerNodeRule>> = {
       fps: { type: 'COMBO', required: true, options: TOPAZ_VIDEO_FPS },
     },
   },
+  // ── cards (step 3, R0.4): the Primitive cards (comfy_extras/nodes_primitive.py) ──
+  // Each hands on its `value`, converted as ComfyUI's validate_inputs converts
+  // a widget (int(), float(), str(), bool()). A value ComfyUI would refuse
+  // (out of range, unconvertible, wired) leaves the node to the engine.
+  PrimitiveString: { family: 'cards', local: 'source', widgets: { value: { type: 'STRING', required: true } } },
+  PrimitiveStringMultiline: { family: 'cards', local: 'source', widgets: { value: { type: 'STRING', required: true } } },
+  // -sys.maxsize..sys.maxsize, narrowed to what a JS number holds exactly.
+  PrimitiveInt: { family: 'cards', local: 'source', widgets: { value: { type: 'INT', required: true, min: -Number.MAX_SAFE_INTEGER, max: Number.MAX_SAFE_INTEGER } } },
+  PrimitiveFloat: { family: 'cards', local: 'source', widgets: { value: { type: 'FLOAT', required: true, min: -Number.MAX_SAFE_INTEGER, max: Number.MAX_SAFE_INTEGER } } },
+  PrimitiveBoolean: { family: 'cards', local: 'source', widgets: { value: { type: 'BOOLEAN', required: true } } },
 }
+
+/** The Primitive cards (comfy_extras/nodes_primitive.py): each hands on its value (family `cards`). */
+export const PRIMITIVE_CLASSES = ['PrimitiveString', 'PrimitiveStringMultiline', 'PrimitiveInt', 'PrimitiveFloat', 'PrimitiveBoolean'] as const
 
 /**
  * Classes that exist in RUNNER_NODE_RULES for one family only: with it off,
@@ -505,6 +520,7 @@ export const SWITCHED_CLASSES: Readonly<Record<string, RunnerFamily>> = {
   LipSyncNode: 'sync-3',
   Audio: 'sync-3',
   EnhanceVideoNode: 'topaz-video',
+  ...Object.fromEntries(PRIMITIVE_CLASSES.map(c => [c, 'cards' as const])),
 }
 
 /**

@@ -12,7 +12,13 @@ export type ValueKind = 'files' | 'mask' | 'text' | 'number' | 'boolean' | 'json
 export const VALUE_KINDS_ALL: readonly ValueKind[] = ['mask', 'text', 'number', 'boolean', 'json', 'glb']
 
 /** Output slots that carry something other than files, by class. Rows are added by the cards (R0.4, R1). */
-export const OUTPUT_KINDS: Readonly<Record<string, Readonly<Record<number, ValueKind>>>> = {}
+export const OUTPUT_KINDS: Readonly<Record<string, Readonly<Record<number, ValueKind>>>> = {
+  PrimitiveString: { 0: 'text' },
+  PrimitiveStringMultiline: { 0: 'text' },
+  PrimitiveInt: { 0: 'number' },
+  PrimitiveFloat: { 0: 'number' },
+  PrimitiveBoolean: { 0: 'boolean' },
+}
 
 /** What a wire carries: the source's declared kind for that slot (through Gates), files by default. */
 export function outputKind(

@@ -12,6 +12,7 @@
  * unknown (undefined).
  */
 import { isLink, type ApiLink, type ApiPrompt } from './graph'
+import { pyFloatOf, pyIntOf, pyTruthy } from './pyText'
 
 export type StaticValue =
   | { kind: 'text'; text: string }
@@ -24,8 +25,20 @@ export type StaticEvaluator = (
   slot: number,
 ) => StaticValue | undefined
 
+/** validate_inputs' str(v): the canvas always sends a string for a STRING widget. */
+const strOf = (v: unknown): string => typeof v === 'string' ? v : v == null ? '' : String(v)
+/** validate_inputs' int(v) for a value eligibility has already accepted. */
+const intOf = (v: unknown): number => typeof v === 'number' ? Math.trunc(v) : typeof v === 'boolean' ? Number(v) : (pyIntOf(String(v)) ?? 0)
+const floatOf = (v: unknown): number => typeof v === 'number' ? v : typeof v === 'boolean' ? Number(v) : (pyFloatOf(String(v)) ?? 0)
+
 /** One evaluator per card class. Rows are added by the cards (R0.4, R1.1). */
-export const STATIC_VALUES: Record<string, StaticEvaluator> = {}
+export const STATIC_VALUES: Record<string, StaticEvaluator> = {
+  PrimitiveString: inputs => ({ kind: 'text', text: strOf(inputs.value) }),
+  PrimitiveStringMultiline: inputs => ({ kind: 'text', text: strOf(inputs.value) }),
+  PrimitiveInt: inputs => ({ kind: 'number', value: intOf(inputs.value), int: true }),
+  PrimitiveFloat: inputs => ({ kind: 'number', value: floatOf(inputs.value), int: false }),
+  PrimitiveBoolean: inputs => ({ kind: 'boolean', value: pyTruthy(inputs.value) }),
+}
 
 export function staticValueOf(
   prompt: ApiPrompt, link: ApiLink,

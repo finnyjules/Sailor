@@ -45,7 +45,7 @@ import {
   type LegAction, type LegRecord, type NodeRecord, type OutputFile, type PendingRequest, type RunRecord, type RunStatus,
   type RunnerProvider, type RunnerValue, type StageCharge, type TakeRecord, type MeasuredMedia, type UnconfirmedCancel,
 } from './types'
-import { filesOf, slotValue } from './values'
+import { checkValue, filesOf, filesOfValues, slotValue, withWiredValues } from './values'
 
 export class RunStopped extends Error {
   constructor() { super('Stopped'); this.name = 'RunStopped' }
@@ -911,10 +911,16 @@ export function createEngine(deps: EngineDeps) {
       const planMeasured = inputSeconds
         ?? (resuming && take.measured && Object.prototype.hasOwnProperty.call(take.measured, id) ? take.measured[id]!.seconds : undefined)
 
+      // The node's inputs as its builder reads them (R0): every wire that
+      // carries a value replaced by that value. The take keeps the workflow
+      // as sent: price, hold and charge read the wires (a wired input is
+      // priced at its most expensive, as the badge shows it).
+      const wired = withWiredValues(take.prompt, id, valueAt(take))
       const planWith = (toUrl: (f: OutputFile) => Promise<string>) => planNode({
-        prompt: take.prompt,
+        prompt: wired.prompt,
         nodeId: id,
         filesFrom: filesAt(take),
+        valueFrom: valueAt(take),
         toUrl,
         gateOpen: take.openGates.includes(id),
         readFile: readOnce,
@@ -950,6 +956,32 @@ export function createEngine(deps: EngineDeps) {
       }
       // The files' bytes are not kept for the provider wait (up to 30 minutes).
       reads.clear()
+      // Computed here from the node's inputs (the cards, R0/R1): no provider, no charge.
+      if (plan.kind === 'derive') {
+        const made = await plan.derive({
+          read: readOnce,
+          keep: (bytes, ext) => kept.put(run.id, bytes, ext),
+          saveAsset: async (bytes, o) => {
+            const f = await deps.results.save(bytes, { userId: run.userId, prefix: o.prefix, ext: o.ext })
+            await deps.metering.addOutput(run.userId, stageKey, f)
+            return f
+          },
+          savePreview: (bytes, o) => deps.results.saveLivePreview(bytes, { nodeId: o.nodeId ?? id, userId: run.userId }),
+          hosted: deps.hosted(),
+          signal,
+          nodeId: id,
+          runWorkflow: run.workflow,
+        })
+        if (signal.aborted) throw new RunStopped()
+        for (const v of Object.values(made.values)) checkValue(v)
+        rec.values = made.values
+        rec.outputs = filesOfValues(made.values)
+        rec.status = 'done'
+        rec.endedAt = deps.now()
+        await persist(run)
+        if (made.ui) publish(run, ev.executed(stageKey, id, made.ui))
+        return
+      }
       // Rendered here (the Frame): no provider, no charge, not an asset.
       if (plan.kind === 'local') {
         const made = await plan.render(signal)

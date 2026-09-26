@@ -4,6 +4,7 @@
  *   pass     — hand files on (result cards, an open Gate)
  *   pause    — a closed Gate: stop this branch and show what reached it
  *   local    — compute the picture here (the Frame render): no provider, no charge
+ *   derive   — compute values here from the node's inputs (the cards): no provider, no charge
  * Mirrors the Python nodes (GenerateImageNode and GenerateVideoNode on fal or Replicate, Gate,
  * Image, Video, the fal-edit family: EditImageNode, DevelopImageNode,
  * RelightNode, BlendSceneNode, and the nano-actions family on Replicate:
@@ -97,7 +98,11 @@ import { TOPAZ_VIDEO_UNMEASURED, topazVideoPlan } from '#shared/runner/topazVide
 import type { InputSeconds } from '#shared/pricing/clipSettings'
 import { isSync3LipSync, lipSyncSyncMode } from '#shared/runner/lipSync'
 import { backupInputProblem, checkRequest, seedanceReferenceProblem } from './requestRules'
-import type { OutputFile, RunnerProvider } from './types'
+import type { OutputFile, RunnerProvider, RunnerValue } from './types'
+import type { KeptExt } from './keptBytes'
+import { filesOf } from './values'
+import { OUTPUT_KINDS } from '#shared/runner/values'
+import { STATIC_VALUES, staticValueOf } from '#shared/runner/staticValues'
 
 /**
  * The same job on the other service, with its own request built to that
@@ -109,6 +114,25 @@ export interface ProviderBackup { provider: RunnerProvider; endpoint: string; pa
 
 /** A local render's files: the picture, and the Frame's protect_mask when a node reads it (a 16-bit greyscale PNG). */
 export interface LocalRender { image: Uint8Array; protectMask?: Uint8Array }
+
+/** What a derive plan may do: read files, keep bytes for the run, save an asset or a live preview. */
+export interface DeriveIO {
+  read(file: OutputFile): Promise<Uint8Array>
+  /** Keeps bytes for the run by their sha256 (./keptBytes.ts): not an asset. */
+  keep(bytes: Uint8Array, ext: KeptExt): Promise<OutputFile>
+  /** Saves a result into the output folder as an asset of this run (counted as the run's output). */
+  saveAsset(bytes: Uint8Array, o: { prefix: string; ext: string }): Promise<OutputFile>
+  /** Saves a live preview into temp (as Python's save_live_preview(unique=True)). */
+  savePreview(bytes: Uint8Array, o: { nodeId?: string }): Promise<OutputFile>
+  hosted: boolean
+  signal: AbortSignal
+  nodeId: string
+  /** The canvas workflow as sent (Save image embeds it), or null. */
+  runWorkflow: unknown
+}
+
+/** What a derive plan made: each output slot's value, and what the node shows. */
+export interface Derived { values: Record<number, RunnerValue>; ui: Record<string, unknown> | null }
 
 export type NodePlan =
   | {
@@ -126,12 +150,16 @@ export type NodePlan =
   | { kind: 'pause'; files: OutputFile[] }
   /** Computed on this server: `render` makes the PNG, saved as a temp live preview (as Python's save_live_preview). */
   | { kind: 'local'; render(signal?: AbortSignal): Promise<LocalRender>; uiFor(files: OutputFile[]): Record<string, unknown> | null }
+  /** Computed on this server from the node's inputs (the cards, R0/R1): no provider, no charge. */
+  | { kind: 'derive'; derive(io: DeriveIO): Promise<Derived> }
 
 export interface PlanContext {
   prompt: ApiPrompt
   nodeId: string
   /** Files produced by the node a link points at. */
   filesFrom(link: [string, number]): OutputFile[]
+  /** What a link reads (R0): the source's value on that slot. Absent: only files (older callers). */
+  valueFrom?(link: [string, number]): RunnerValue | undefined
   /**
    * Our saved file → a link the provider can fetch: a fal storage link,
    * which Replicate fetches too (so one hand-off serves both providers).
@@ -189,6 +217,24 @@ export async function planNode(ctx: PlanContext): Promise<NodePlan> {
     if (plan.backup && backupInputProblem(plan.backup, ctx.inputBytes)) delete plan.backup
   }
   return plan
+}
+
+/**
+ * A card whose every output slot is its static evaluator
+ * (#shared/runner/staticValues.ts) over its inputs as planned (a wired
+ * source already substituted by the engine): one implementation for the
+ * start-of-run moderation and for the run itself.
+ */
+export function staticDerive(ctx: PlanContext, ui?: (values: Record<number, RunnerValue>) => Record<string, unknown> | null): NodePlan {
+  const node = ctx.prompt[ctx.nodeId]!
+  const slots = Object.keys(OUTPUT_KINDS[node.class_type] ?? { 0: 'text' }).map(Number)
+  const values: Record<number, RunnerValue> = {}
+  for (const slot of slots) {
+    const v = staticValueOf(ctx.prompt, [ctx.nodeId, slot], STATIC_VALUES)
+    if (!v) throw new Error(`The runner cannot work out this ${node.class_type} card`)
+    values[slot] = v
+  }
+  return { kind: 'derive', derive: async () => ({ values, ui: ui ? ui(values) : null }) }
 }
 
 async function planNodeRequest(ctx: PlanContext): Promise<NodePlan> {
@@ -801,9 +847,24 @@ async function planNodeRequest(ctx: PlanContext): Promise<NodePlan> {
       return { kind: 'pass', files: [f], ui: null }
     }
 
+    // ── cards (step 3, R0.4): the Primitive cards hand on their value ──
+    case 'PrimitiveString':
+    case 'PrimitiveStringMultiline':
+    case 'PrimitiveInt':
+    case 'PrimitiveFloat':
+    case 'PrimitiveBoolean':
+      return staticDerive(ctx)
+
     case GATE_CLASS: {
-      const files = linked('data_in')
-      if (inputs.bypass === true || ctx.gateOpen) return { kind: 'pass', files, ui: null }
+      // A value (not files) reaching a Gate is handed on when it is open or
+      // on pass-through (spec ruling 2); a closed Gate on a value pauses with
+      // no pictures to pick from.
+      const link = inputs.data_in
+      const v = isLink(link) ? ctx.valueFrom?.(link) : undefined
+      const files = v ? filesOf(v) : linked('data_in')
+      const open = inputs.bypass === true || ctx.gateOpen
+      if (open && v && v.kind !== 'files') return { kind: 'derive', derive: async () => ({ values: { 0: v }, ui: null }) }
+      if (open) return { kind: 'pass', files, ui: null }
       return { kind: 'pause', files }
     }
 
