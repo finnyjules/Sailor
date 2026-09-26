@@ -1926,14 +1926,16 @@ export function localLayerBox(
     // strokes' NATURAL width, and the height rides that same scale — so handles +
     // hit-testing match the scaled render. At paint-commit `w == naturalW`, so
     // scale === 1 and this box is byte-identical to the un-resized bounds.
+    // NOT padded for a material's halo (e.g. neon's glow): `w` is the resize handles'
+    // scale driver against the strokes' UNPADDED natural width (`nw` below) — padding
+    // this box would grow `nw`, which shrinks that scale on every read (`layer.w` is
+    // unpadded), compounding smaller on every resize grab. The halo instead simply
+    // extends past this box in the render branch's offscreen (see brushMaterialPad's
+    // other call site), which is drawn centred, so the box stays exactly the painted
+    // bounds — as before this task.
     const b = strokeBounds((layer as BrushLayer).strokes)
-    const nw0 = b.maxX - b.minX, nh0 = b.maxY - b.minY
-    const scale = nw0 > 1e-6 ? (layer as BrushLayer).w / nw0 : 1
-    // Material halo room (e.g. neon): grows the box by the pad on every side, in the
-    // SAME scale as the strokes, so selection/handles hug the glow. Zero for a layer
-    // with no material or a non-neon one — byte-identical to before in that case.
-    const pad = brushMaterialPad(layer as BrushLayer) * 2
-    const nw = nw0 + pad, nh = nh0 + pad
+    const nw = b.maxX - b.minX, nh = b.maxY - b.minY
+    const scale = nw > 1e-6 ? (layer as BrushLayer).w / nw : 1
     return { w: Math.max(4, nw * scale * W), h: Math.max(4, nh * scale * W) }
   }
   if (layer.kind === 'wired') {
@@ -2921,6 +2923,7 @@ function paintLayer(
     && !layerHasFoil(layer)                                         // foil is lit by the Frame's light over the frame — never bake it
     && !isClipLayer                                                 // a living image changes every frame — never bake it
     && !(layer.kind === 'brush' && _liveTip.has(layer.id))          // a live tip stroke isn't in the key: never bake a half-painted raster
+    && !(layer.kind === 'brush' && (layer as BrushLayer).material?.moving) // a moving material animates every frame — the cache key has no clock
     && silhouetteContentReady(layer, W)
   // Memoized like `dofContent` below: identical for every clone of the SAME tint.
   //
