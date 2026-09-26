@@ -32,13 +32,45 @@ const strOf = (v: unknown): string => typeof v === 'string' ? v : v == null ? ''
 const intOf = (v: unknown): number => typeof v === 'number' ? Math.trunc(v) : typeof v === 'boolean' ? Number(v) : (pyIntOf(String(v)) ?? 0)
 const floatOf = (v: unknown): number => typeof v === 'number' ? v : typeof v === 'boolean' ? Number(v) : (pyFloatOf(String(v)) ?? 0)
 
+/**
+ * A Primitive's own `value` input is usually a literal, but it can itself be
+ * wired (another card feeding this one's widget). Follow that wire through
+ * `at`; a link must never be stringified as if it were the literal (it once
+ * produced "p,0" — the link's own [id, slot] tuple joined — R0.5 follow-up).
+ * A wire whose value isn't known, or isn't the expected kind, is unknown.
+ */
+function resolvedValue(inputs: Record<string, unknown>, at: (link: ApiLink) => StaticValue | undefined): StaticValue | undefined {
+  const v = inputs.value
+  return isLink(v) ? at(v as ApiLink) : undefined
+}
+
 /** One evaluator per card class. Rows are added by the cards (R0.4, R1.1). */
 export const STATIC_VALUES: Record<string, StaticEvaluator> = {
-  PrimitiveString: inputs => ({ kind: 'text', text: strOf(inputs.value) }),
-  PrimitiveStringMultiline: inputs => ({ kind: 'text', text: strOf(inputs.value) }),
-  PrimitiveInt: inputs => ({ kind: 'number', value: intOf(inputs.value), int: true }),
-  PrimitiveFloat: inputs => ({ kind: 'number', value: floatOf(inputs.value), int: false }),
-  PrimitiveBoolean: inputs => ({ kind: 'boolean', value: pyTruthy(inputs.value) }),
+  PrimitiveString: (inputs, at) => {
+    const wired = resolvedValue(inputs, at)
+    if (isLink(inputs.value)) return wired?.kind === 'text' ? wired : undefined
+    return { kind: 'text', text: strOf(inputs.value) }
+  },
+  PrimitiveStringMultiline: (inputs, at) => {
+    const wired = resolvedValue(inputs, at)
+    if (isLink(inputs.value)) return wired?.kind === 'text' ? wired : undefined
+    return { kind: 'text', text: strOf(inputs.value) }
+  },
+  PrimitiveInt: (inputs, at) => {
+    const wired = resolvedValue(inputs, at)
+    if (isLink(inputs.value)) return wired?.kind === 'number' ? { kind: 'number', value: Math.trunc(wired.value), int: true } : undefined
+    return { kind: 'number', value: intOf(inputs.value), int: true }
+  },
+  PrimitiveFloat: (inputs, at) => {
+    const wired = resolvedValue(inputs, at)
+    if (isLink(inputs.value)) return wired?.kind === 'number' ? { kind: 'number', value: wired.value, int: false } : undefined
+    return { kind: 'number', value: floatOf(inputs.value), int: false }
+  },
+  PrimitiveBoolean: (inputs, at) => {
+    const wired = resolvedValue(inputs, at)
+    if (isLink(inputs.value)) return wired?.kind === 'boolean' ? wired : undefined
+    return { kind: 'boolean', value: pyTruthy(inputs.value) }
+  },
 }
 
 export function staticValueOf(

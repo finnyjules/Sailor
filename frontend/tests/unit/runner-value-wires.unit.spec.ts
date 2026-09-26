@@ -6,7 +6,7 @@
 import { describe, expect, it } from 'vitest'
 import { outputKind, type ValueKind } from '#shared/runner/values'
 import { valueWiresAllowed, runnerTakesNode, isRunnerEligible } from '#shared/runner/eligibility'
-import { staticValueOf, staticWiredTexts, type StaticEvaluator } from '#shared/runner/staticValues'
+import { staticValueOf, staticWiredTexts, STATIC_VALUES, type StaticEvaluator } from '#shared/runner/staticValues'
 import { RUNNER_FAMILIES, parseFamilies } from '#shared/runner/families'
 import type { ApiPrompt } from '#shared/runner/graph'
 
@@ -96,6 +96,36 @@ describe('staticValueOf', () => {
       h: { class_type: 'GenerateImageNode', inputs: { prompt_in: ['a', 0] } },
     }
     expect(staticWiredTexts(q, table)).toEqual(['a fox'])
+  })
+})
+
+// R0.5 follow-up: a Primitive's own `value` input can itself be wired (a
+// card feeding another card's widget). The evaluator must follow that wire
+// through `at`, never stringify the link tuple as if it were the literal
+// (it once produced "p,0" — [id, slot].toString() — a wrong "static" value
+// that fed both moderation and withStaticWiredValues).
+describe('a Primitive whose own value is wired', () => {
+  it('follows the wire to the source card\'s own value', () => {
+    const p: ApiPrompt = {
+      src: { class_type: 'PrimitiveString', inputs: { value: 'from another card' } },
+      p: { class_type: 'PrimitiveString', inputs: { value: ['src', 0] } },
+    }
+    expect(staticValueOf(p, ['p', 0], STATIC_VALUES)).toEqual({ kind: 'text', text: 'from another card' })
+  })
+  it('is unknown, never the link stringified, when the source isn\'t a known static value', () => {
+    const p: ApiPrompt = {
+      x: { class_type: 'GenerateImageNode', inputs: {} },
+      p: { class_type: 'PrimitiveString', inputs: { value: ['x', 0] } },
+    }
+    const v = staticValueOf(p, ['p', 0], STATIC_VALUES)
+    expect(v).toBeUndefined()
+  })
+  it('the same rule applies to PrimitiveInt (a number wired, not stringified)', () => {
+    const p: ApiPrompt = {
+      src: { class_type: 'PrimitiveInt', inputs: { value: 7 } },
+      p: { class_type: 'PrimitiveInt', inputs: { value: ['src', 0] } },
+    }
+    expect(staticValueOf(p, ['p', 0], STATIC_VALUES)).toEqual({ kind: 'number', value: 7, int: true })
   })
 })
 

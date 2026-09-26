@@ -207,10 +207,14 @@ export function createMetering(d: {
     },
     async moderate(prompts, extra = []) {
       if (!d.hosted()) return
-      const text = [...new Set([...prompts.flatMap(p => [extractGraphPromptText(p), extraPromptText(p)]), ...extra].filter(Boolean))].join(' ')
-      if (!text) return
-      const mod = await d.moderate(text)
-      if (!mod.ok) throw new MeterRefusalError('This prompt was blocked by content moderation', 400, { categories: mod.categories })
+      // Each text is its own moderation call (never joined into one string),
+      // so a short harmful phrase inside long harmless text is judged on its
+      // own (R0.5 follow-up).
+      const texts = [...new Set([...prompts.flatMap(p => [extractGraphPromptText(p), extraPromptText(p)]), ...extra].filter(Boolean))]
+      for (const text of texts) {
+        const mod = await d.moderate(text)
+        if (!mod.ok) throw new MeterRefusalError('This prompt was blocked by content moderation', 400, { categories: mod.categories })
+      }
     },
     async moderateText(text) {
       if (!d.hosted() || !text.trim()) return

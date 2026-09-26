@@ -32,6 +32,7 @@ import { canonicalUploadKey, uploadOwner } from './inputUploads'
 import { GRAPH_FILE_READERS, GRAPH_FOLDER_READERS, GRAPH_OUTPUT_WRITERS, extractFileRefs, graphFolderOwnedBy, type FileRefSemantics } from './engineFileSurface'
 import { extractGraphPromptText } from './graphPromptText'
 import { staticWiredTexts } from '#shared/runner/staticValues'
+import { extraPromptText } from '../runner/metering'
 import type { ApiPrompt } from '#shared/runner/graph'
 import { moderatePrompt } from './moderation'
 import { assertSpendAllowed } from './systemControls'
@@ -471,14 +472,29 @@ async function submitMetered(userId: string | null, body: any, deps: GraphRunDep
   // the engine is never touched. moderatePrompt fails OPEN, so an OpenAI outage
   // can never take generation down. A card's text wired into a node (a
   // Primitive's value, through Gates too) is part of what runs, so it is read
-  // with the typed prompts (R0.5); with nothing wired the text is unchanged.
-  // Malformed nodes are left to ComfyUI's own validation.
+  // with the typed prompts (R0.5), and the typed extras the runner also checks
+  // (style_in, instructions, target, find, replace, scene_prompt — R0.5
+  // follow-up) are read too; with nothing extra typed or wired the moderated
+  // text is unchanged. Malformed nodes are left to ComfyUI's own validation.
+  // Each text is moderated on its own call (never joined into one string), so
+  // a short harmful phrase inside long harmless text is judged on its own.
   const wellFormed = Object.fromEntries(Object.entries(body.prompt).filter(([, n]: [string, any]) =>
     n && typeof n === 'object' && !Array.isArray(n) && typeof n.class_type === 'string'
     && (n.inputs === undefined || (n.inputs && typeof n.inputs === 'object' && !Array.isArray(n.inputs)))))
-  const mod = await deps.moderatePrompt([...new Set([extractGraphPromptText(body.prompt), ...staticWiredTexts(wellFormed as ApiPrompt)].filter(Boolean))].join(' '))
-  if (!mod.ok) {
-    throw new MeterRefusalError('This prompt was blocked by content moderation', 400, { categories: mod.categories })
+  const moderationTexts = [...new Set([
+    extractGraphPromptText(body.prompt),
+    extraPromptText(wellFormed as ApiPrompt),
+    ...staticWiredTexts(wellFormed as ApiPrompt),
+  ].filter(Boolean))]
+  // A graph with nothing to check still calls moderation once, with '' (as
+  // before this split): moderatePrompt itself no-ops on blank text, and this
+  // keeps moderation an unconditional step of the chokepoint (order-of-calls
+  // callers rely on that).
+  for (const text of moderationTexts.length ? moderationTexts : ['']) {
+    const mod = await deps.moderatePrompt(text)
+    if (!mod.ok) {
+      throw new MeterRefusalError('This prompt was blocked by content moderation', 400, { categories: mod.categories })
+    }
   }
 
   // A discontinued or runner-only model can't run on ComfyUI: refused in

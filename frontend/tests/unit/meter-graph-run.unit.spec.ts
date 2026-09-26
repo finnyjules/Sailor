@@ -1,7 +1,14 @@
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
+import { gunzipSync } from 'node:zlib'
 import { describe, it, expect, vi } from 'vitest'
 import { meterGraphSubmit, isPromptPath, holdWithRefusal, validateGraphFileRefs } from '../../server/utils/meterGraphRun'
 import { MeterRefusalError } from '../../server/utils/requestMeter'
 import { UnpricedGraphError } from '../../server/utils/priceBook'
+import { normalizeHostedPrompt } from '../../server/utils/hostedPrompt'
+
+/** The committed node catalog (what the hosted gate falls back to), for the real normalisation. */
+const CATALOG = JSON.parse(gunzipSync(readFileSync(join(process.cwd(), 'server/native/objectInfo.baseline.json.gz'))).toString('utf8')) as Record<string, any>
 
 function deps(overrides: Partial<any> = {}) {
   return {
@@ -123,17 +130,21 @@ describe('meterGraphSubmit', () => {
   // R0.5 (engine-free step 3): a card's text wired into a node is part of
   // what ComfyUI runs, so it is moderated with the typed prompts — read from
   // the prompt as forwarded (after normalisation), through a Gate too.
-  it('moderates text a Primitive sends by wire, as forwarded, and refuses it before any hold', async () => {
+  it('moderates text a Primitive sends by wire, as forwarded (real normalisation), and refuses it before any hold', async () => {
     const wired = { prompt: {
       p: { class_type: 'PrimitiveString', inputs: { value: { __value__: 'wired words' } } },
       g: { class_type: 'ComfyGateNode', inputs: { data_in: ['p', 0], bypass: false } },
       '1': { class_type: 'GenerateImageNode', inputs: { model: 'flux-schnell', prompt: 'a fox', prompt_in: ['g', 0] } },
     } }
     const moderatePrompt = vi.fn(async (t: string) => t.includes('wired words') ? { ok: false as const, categories: ['test'] } : { ok: true as const })
-    const unwrap = (prompt: any) => ({ prompt: { ...prompt, p: { ...prompt.p, inputs: { value: prompt.p.inputs.value.__value__ } } } })
-    const d = deps({ moderatePrompt, normalizePrompt: unwrap })
+    // The real hosted normalisation (not a stub): __value__ unwrapped per the
+    // node's own catalog entry, through the Gate, exactly as ComfyUI would see it.
+    const d = deps({ moderatePrompt, normalizePrompt: p => normalizeHostedPrompt(p, CATALOG) })
     await expect(meterGraphSubmit('u1', wired, d)).rejects.toMatchObject({ statusCode: 400 })
-    expect(moderatePrompt).toHaveBeenCalledWith('a fox wired words')
+    // Each source text is its own moderation call now (never joined): the
+    // typed prompt is judged on its own, and so is the wired text.
+    expect(moderatePrompt).toHaveBeenCalledWith('a fox')
+    expect(moderatePrompt).toHaveBeenCalledWith('wired words')
     expect(d.hold).not.toHaveBeenCalled()
     expect(d.forward).not.toHaveBeenCalled()
   })
@@ -148,6 +159,45 @@ describe('meterGraphSubmit', () => {
     const d = deps()
     await meterGraphSubmit('u1', { prompt: { x: null, y: { class_type: 'Z', inputs: 'no' }, p: { class_type: 'PrimitiveString', inputs: { value: 'soft' } }, '1': { class_type: 'GenerateImageNode', inputs: { prompt_in: ['p', 0] } } } }, d)
     expect(d.moderatePrompt).toHaveBeenCalledWith('soft')
+  })
+
+  // R0.5 follow-up: the typed extras the runner also checks (style_in,
+  // instructions, target, find, replace, scene_prompt) were read on the
+  // runner path but not on this hosted ComfyUI path. Now they are.
+  it('moderates a typed extra (style_in) on a class that carries taste, with nothing else typed or wired unchanged', async () => {
+    const d = deps()
+    await meterGraphSubmit('u1', { prompt: { '1': { class_type: 'GenerateImageNode', inputs: { prompt: 'a fox', style_in: 'noir photography' } } } }, d)
+    expect(d.moderatePrompt).toHaveBeenCalledWith('a fox')
+    expect(d.moderatePrompt).toHaveBeenCalledWith('noir photography')
+  })
+
+  it('a typed extra (instructions) on an edit node is moderated and can refuse before any hold', async () => {
+    const moderatePrompt = vi.fn(async (t: string) => t.includes('forbidden') ? { ok: false as const, categories: ['test'] } : { ok: true as const })
+    const d = deps({ moderatePrompt })
+    await expect(meterGraphSubmit('u1', { prompt: { '1': { class_type: 'RemoveObjectNode', inputs: { instructions: 'forbidden thing' } } } }, d))
+      .rejects.toMatchObject({ statusCode: 400 })
+    expect(moderatePrompt).toHaveBeenCalledWith('forbidden thing')
+    expect(d.hold).not.toHaveBeenCalled()
+  })
+
+  it('with nothing extra typed or wired, the moderated text is unchanged', async () => {
+    const d = deps()
+    await meterGraphSubmit('u1', { prompt: { '1': { class_type: 'GenerateImageNode', inputs: { prompt: 'a fox' } } } }, d)
+    expect(d.moderatePrompt).toHaveBeenCalledTimes(1)
+    expect(d.moderatePrompt).toHaveBeenCalledWith('a fox')
+  })
+
+  // A short harmful phrase must not be diluted inside long harmless text: each
+  // source is judged on its own moderation call, never joined into one string.
+  it('a short harmful phrase is judged on its own, not diluted inside long harmless text', async () => {
+    const longHarmless = 'a calm still life of fruit on a wooden table in soft morning light'.repeat(3)
+    const moderatePrompt = vi.fn(async (t: string) => t === 'forbidden' ? { ok: false as const, categories: ['test'] } : { ok: true as const })
+    const d = deps({ moderatePrompt })
+    await expect(meterGraphSubmit('u1', { prompt: {
+      '1': { class_type: 'GenerateImageNode', inputs: { prompt: longHarmless, instructions: 'forbidden' } },
+    } }, d)).rejects.toMatchObject({ statusCode: 400 })
+    expect(moderatePrompt).toHaveBeenCalledWith(longHarmless)
+    expect(moderatePrompt).toHaveBeenCalledWith('forbidden')
   })
 
   it('moderates AFTER file-ref validation and BEFORE pricing/hold (order matters)', async () => {
