@@ -12,9 +12,9 @@
 import type { ApiNode, ApiPrompt } from '#shared/runner/graph'
 import { LOCAL_RENDER_TYPES, PROVIDER_TYPES } from '#shared/runner/eligibility'
 import { BASE_RENDER_CREDITS, OUTPUT_CLASS_TYPES, priceGraph } from '../utils/priceBook'
-import { extractGraphPromptText } from '../utils/graphPromptText'
+import { extractGraphPromptTexts } from '../utils/graphPromptText'
 import { MeterRefusalError } from '../utils/requestMeter'
-import { moderationRefusal, type ModerationResult } from '../utils/moderation'
+import { moderateTexts, moderationRefusal, type ModerationResult } from '../utils/moderation'
 import { outputKey } from '../utils/graphRuns'
 import { actionPassThrough } from './generators/actions'
 import type { OutputFile, StageCharge } from './types'
@@ -119,8 +119,8 @@ export const RUNNER_EXTRA_TEXT_INPUTS: readonly string[] = ['target', 'find', 'r
 export const TASTE_TEXT_CLASSES: ReadonlySet<string> = new Set(['RestyleFromImageNode', 'GenerateImageNode'])
 export const TASTE_TEXT_INPUTS: readonly string[] = ['style_in']
 
-/** The non-blank values of RUNNER_EXTRA_TEXT_INPUTS (and a typed-in taste) across the prompt, joined. */
-export function extraPromptText(prompt: ApiPrompt): string {
+/** The non-blank values of RUNNER_EXTRA_TEXT_INPUTS (and a typed-in taste) across the prompt, each on its own. */
+export function extraPromptTexts(prompt: ApiPrompt): string[] {
   const parts: string[] = []
   for (const node of Object.values(prompt ?? {})) {
     const inputs = node?.inputs
@@ -131,7 +131,12 @@ export function extraPromptText(prompt: ApiPrompt): string {
       if (typeof v === 'string' && v.trim()) parts.push(v)
     }
   }
-  return parts.join(' ')
+  return parts
+}
+
+/** The same texts joined with spaces (what a generation record shows). */
+export function extraPromptText(prompt: ApiPrompt): string {
+  return extraPromptTexts(prompt).join(' ')
 }
 
 export function hasOutputNode(prompt: ApiPrompt): boolean {
@@ -209,14 +214,14 @@ export function createMetering(d: {
     },
     async moderate(prompts, extra = []) {
       if (!d.hosted()) return
-      // Each text is its own moderation call (never joined into one string),
-      // so a short harmful phrase inside long harmless text is judged on its
-      // own (R0.5 follow-up).
-      const texts = [...new Set([...prompts.flatMap(p => [extractGraphPromptText(p), extraPromptText(p)]), ...extra].filter(Boolean))]
-      for (const text of texts) {
-        const mod = await d.moderate(text)
-        if (!mod.ok) throw moderationRefusal(mod)
-      }
+      // Each text is its own moderation call — every node's prompt and every
+      // extra, never joined across nodes or extras — so a short harmful phrase
+      // beside long harmless text is judged on its own, and the size limit is
+      // per text (G3 follow-up). Identical texts are checked once; all checks
+      // run at once, refusing on the first not-ok result.
+      const texts = [...prompts.flatMap(p => [...extractGraphPromptTexts(p), ...extraPromptTexts(p)]), ...extra]
+      const mod = await moderateTexts(texts, d.moderate)
+      if (!mod.ok) throw moderationRefusal(mod)
     },
     async moderateText(text) {
       if (!d.hosted() || !text.trim()) return

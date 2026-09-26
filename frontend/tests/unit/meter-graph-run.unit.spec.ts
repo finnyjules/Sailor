@@ -155,7 +155,48 @@ describe('meterGraphSubmit', () => {
   it('moderates exactly the typed prompt text when nothing is wired', async () => {
     const d = deps()
     await meterGraphSubmit('u1', { prompt: { '1': { class_type: 'GenerateImageNode', inputs: { prompt: 'a fox', negative: 'blur' } } } }, d)
-    expect(d.moderatePrompt).toHaveBeenCalledWith('a fox blur')
+    // Each typed text is its own check (G3 follow-up): never joined.
+    expect(d.moderatePrompt.mock.calls.map((c: any[]) => c[0]).sort()).toEqual(['a fox', 'blur'])
+  })
+
+  // G3 follow-up (review finding 2): every node's prompt and every extra is its
+  // own check — no joining across nodes or across extras.
+  it('a short harmful phrase in one node is judged on its own, apart from long harmless text in another node', async () => {
+    const longHarmless = 'a calm still life of fruit on a wooden table in soft morning light '.repeat(20)
+    const moderatePrompt = vi.fn(async (t: string) => t === 'forbidden' ? { ok: false as const, categories: ['test'] } : { ok: true as const })
+    const d = deps({ moderatePrompt })
+    await expect(meterGraphSubmit('u1', { prompt: {
+      '1': { class_type: 'GenerateImageNode', inputs: { prompt: longHarmless } },
+      '2': { class_type: 'GenerateImageNode', inputs: { prompt: 'forbidden' } },
+    } }, d)).rejects.toMatchObject({ statusCode: 400 })
+    expect(moderatePrompt).toHaveBeenCalledWith('forbidden')
+    expect(moderatePrompt.mock.calls.some(c => c[0].includes('forbidden') && c[0].includes('fruit'))).toBe(false)
+    expect(d.hold).not.toHaveBeenCalled()
+  })
+
+  it('each extra is its own check, and identical texts are checked once', async () => {
+    const d = deps()
+    await meterGraphSubmit('u1', { prompt: {
+      '1': { class_type: 'RemoveObjectNode', inputs: { target: 'the red cup', instructions: 'keep the table' } },
+      '2': { class_type: 'TextEditNode', inputs: { find: 'SALE', replace: 'OPEN' } },
+      '3': { class_type: 'GenerateImageNode', inputs: { prompt: 'a fox' } },
+      '4': { class_type: 'GenerateImageNode', inputs: { prompt: 'a fox' } },
+    } }, d)
+    expect(d.moderatePrompt.mock.calls.map((c: any[]) => c[0]).sort()).toEqual(['OPEN', 'SALE', 'a fox', 'keep the table', 'the red cup'])
+  })
+
+  it('the checks run at once: the total is about one check', async () => {
+    const moderatePrompt = vi.fn(async () => { await new Promise(r => setTimeout(r, 100)); return { ok: true as const } })
+    const d = deps({ moderatePrompt })
+    const t0 = Date.now()
+    await meterGraphSubmit('u1', { prompt: {
+      '1': { class_type: 'GenerateImageNode', inputs: { prompt: 'a' } },
+      '2': { class_type: 'GenerateImageNode', inputs: { prompt: 'b' } },
+      '3': { class_type: 'GenerateImageNode', inputs: { prompt: 'c' } },
+      '4': { class_type: 'GenerateImageNode', inputs: { prompt: 'd' } },
+    } }, d)
+    expect(moderatePrompt).toHaveBeenCalledTimes(4)
+    expect(Date.now() - t0).toBeLessThan(350)
   })
 
   it('a malformed node beside a wired card is left to ComfyUI, not a crash', async () => {
@@ -419,6 +460,18 @@ describe('meterGraphSubmit — moderation fails closed (hosted)', () => {
     await expect(meterGraphSubmit('u1', padded, d)).rejects.toMatchObject({ statusCode: 400, message: MODERATION_TOO_LONG_MESSAGE })
     expect(f).not.toHaveBeenCalled()
     expectNothingHeld(d)
+  })
+
+  it('the size limit is per text: two nodes each under it pass, though together they are over it', async () => {
+    const f = vi.fn().mockResolvedValue(clean()); __setModerationFetchForTests(f as any)
+    const d = realModeration()
+    const big = { prompt: {
+      '1': { class_type: 'GenerateImageNode', inputs: { prompt: 'a fox '.repeat(3000) } },
+      '2': { class_type: 'GenerateImageNode', inputs: { prompt: 'a cat '.repeat(3000) } },
+    } }
+    const res = await meterGraphSubmit('u1', big, d)
+    expect(res.status).toBe(200)
+    expect(f).toHaveBeenCalledTimes(2)
   })
 
   it('a graph with no text makes no moderation call and is never refused for it', async () => {

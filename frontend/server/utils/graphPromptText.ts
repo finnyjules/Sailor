@@ -4,7 +4,11 @@
  * (arrays) and non-strings skipped.
  */
 const PROMPT_INPUT_NAMES = new Set(['prompt', 'text', 'positive', 'negative'])
-export function extractGraphPromptText(prompt: Record<string, { class_type: string; inputs?: any }>): string {
+/**
+ * Each typed prompt text on its own, in graph order (one per node input, never
+ * joined), for moderation: each text is judged by itself (G3 follow-up).
+ */
+export function extractGraphPromptTexts(prompt: Record<string, { class_type: string; inputs?: any }>): string[] {
   const parts: string[] = []
   for (const node of Object.values(prompt ?? {})) {
     const inputs = node?.inputs
@@ -13,7 +17,11 @@ export function extractGraphPromptText(prompt: Record<string, { class_type: stri
       if (PROMPT_INPUT_NAMES.has(name) && typeof value === 'string' && value.trim()) parts.push(value)
     }
   }
-  return parts.join(' ')
+  return parts
+}
+/** The same texts joined with spaces (what a generation record shows). */
+export function extractGraphPromptText(prompt: Record<string, { class_type: string; inputs?: any }>): string {
+  return extractGraphPromptTexts(prompt).join(' ')
 }
 
 /**

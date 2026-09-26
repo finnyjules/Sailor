@@ -172,7 +172,12 @@ describe('runner moderation fails closed (hosted)', () => {
     __setModerationFetchForTests(f as any)
     const k = makeKit({ hosted: true, moderate: hostedModeration, deps: { families: () => CARDS } })
     await expect(k.engine.startRun({ userId: k.userId, takes: [flow('soft light')], ...START })).rejects.toThrow(new RegExp(escape(MODERATION_UNAVAILABLE_MESSAGE)))
-    expect(f).toHaveBeenCalledTimes(2)
+    // The texts are checked at once (G3 follow-up), so each is tried exactly
+    // twice — one retry per text, never more.
+    const tries = new Map<string, number>()
+    for (const c of f.mock.calls) tries.set(inputOf(c[1]), (tries.get(inputOf(c[1])) ?? 0) + 1)
+    expect(tries.get('soft light')).toBe(2)
+    expect([...tries.values()].every(n => n === 2)).toBe(true)
     expect(k.ledger.hold).not.toHaveBeenCalled()
   })
 

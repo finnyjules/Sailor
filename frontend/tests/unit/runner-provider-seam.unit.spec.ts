@@ -104,11 +104,9 @@ describe('moderation of the edit nodes’ own text', () => {
     }])
     // Each text is its own call (fbe7b4ede): the typed prompt is judged on its
     // own, never joined with the edit node's text, and every word is still seen.
+    // G3 follow-up: each extra is its own call too (never joined).
     const texts = (moderate.mock.calls as unknown as [string][]).map(c => c[0])
-    expect(texts).toHaveLength(2)
-    expect(texts).toContain('a fox')
-    for (const w of ['a fox', 'the red cup', 'keep the table']) expect(texts.some(t => t.includes(w)), w).toBe(true)
-    expect(texts.some(t => t.includes('a fox') && t.includes('the red cup'))).toBe(false)
+    expect(texts.sort()).toEqual(['a fox', 'keep the table', 'the red cup'])
   })
 
   it('sees find, replace, color and scene_prompt; skips links and blanks', async () => {
@@ -118,9 +116,29 @@ describe('moderation of the edit nodes’ own text', () => {
       '2': { class_type: 'RecolorObjectNode', inputs: { target: ['9', 0], color: 'teal' } },
       '3': { class_type: 'SwapBackgroundNode', inputs: { scene_prompt: 'a beach at dusk' } },
     }])
-    const text = (moderate.mock.calls[0] as unknown as [string])[0]
-    for (const w of ['SALE', 'OPEN', 'teal', 'a beach at dusk']) expect(text).toContain(w)
-    expect(text).not.toContain('9')
+    const texts = (moderate.mock.calls as unknown as [string][]).map(c => c[0])
+    expect(texts.sort()).toEqual(['OPEN', 'SALE', 'a beach at dusk', 'teal'])
+  })
+
+  it('a short harmful phrase in one node is judged apart from long harmless text in another', async () => {
+    const longHarmless = 'a calm still life of fruit on a wooden table '.repeat(20)
+    const moderate = vi.fn(async (t: string) => (t === 'forbidden' ? { ok: false as const, categories: ['x'] } : { ok: true as const }))
+    await expect(metering(moderate).moderate([{
+      '1': { class_type: 'GenerateImageNode', inputs: { prompt: longHarmless } },
+      '2': { class_type: 'GenerateImageNode', inputs: { prompt: 'forbidden' } },
+    }])).rejects.toMatchObject({ statusCode: 400 })
+    expect(moderate).toHaveBeenCalledWith('forbidden')
+  })
+
+  it('checks every text at once: the total is about one check', async () => {
+    const moderate = vi.fn(async () => { await new Promise(r => setTimeout(r, 100)); return { ok: true as const } })
+    const t0 = Date.now()
+    await metering(moderate).moderate([{
+      '1': { class_type: 'GenerateImageNode', inputs: { prompt: 'a' } },
+      '2': { class_type: 'RemoveObjectNode', inputs: { target: 'b', instructions: 'c' } },
+    }], ['d'])
+    expect(moderate).toHaveBeenCalledTimes(4)
+    expect(Date.now() - t0).toBeLessThan(350)
   })
 
   it('a blocked edit instruction refuses the run', async () => {

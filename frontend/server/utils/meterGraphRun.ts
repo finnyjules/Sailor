@@ -30,11 +30,11 @@ import { captureError } from './observe'
 import { annotatedFilepath, collectUploadFlaggedInputs } from './engineGate'
 import { canonicalUploadKey, uploadOwner } from './inputUploads'
 import { GRAPH_FILE_READERS, GRAPH_FOLDER_READERS, GRAPH_OUTPUT_WRITERS, extractFileRefs, graphFolderOwnedBy, type FileRefSemantics } from './engineFileSurface'
-import { extractGraphPromptText } from './graphPromptText'
+import { extractGraphPromptTexts } from './graphPromptText'
 import { staticWiredTexts } from '#shared/runner/staticValues'
-import { extraPromptText } from '../runner/metering'
+import { extraPromptTexts } from '../runner/metering'
 import type { ApiPrompt } from '#shared/runner/graph'
-import { moderatePrompt, moderationRefusal, type ModerationResult } from './moderation'
+import { moderatePrompt, moderateTexts, moderationRefusal, type ModerationResult } from './moderation'
 import { assertSpendAllowed } from './systemControls'
 import { blockedPromptRefusal, nodeProblemsBody, retiredEngineRefusal } from './blockedModels'
 import { measuredInputProblems } from '../runner/requestRules'
@@ -477,24 +477,24 @@ async function submitMetered(userId: string | null, body: any, deps: GraphRunDep
   // (style_in, instructions, target, find, replace, scene_prompt — R0.5
   // follow-up) are read too; with nothing extra typed or wired the moderated
   // text is unchanged. Malformed nodes are left to ComfyUI's own validation.
-  // Each text is moderated on its own call (never joined into one string), so
-  // a short harmful phrase inside long harmless text is judged on its own.
+  // Each text is moderated on its own call — every node's prompt and every
+  // extra, never joined across nodes or extras (G3 follow-up) — so a short
+  // harmful phrase beside long harmless text is judged on its own and the size
+  // limit is per text. Identical texts are checked once; all checks run at once.
   const wellFormed = Object.fromEntries(Object.entries(body.prompt).filter(([, n]: [string, any]) =>
     n && typeof n === 'object' && !Array.isArray(n) && typeof n.class_type === 'string'
     && (n.inputs === undefined || (n.inputs && typeof n.inputs === 'object' && !Array.isArray(n.inputs)))))
-  const moderationTexts = [...new Set([
-    extractGraphPromptText(body.prompt),
-    extraPromptText(wellFormed as ApiPrompt),
+  const moderationTexts = [
+    ...extractGraphPromptTexts(body.prompt),
+    ...extraPromptTexts(wellFormed as ApiPrompt),
     ...staticWiredTexts(wellFormed as ApiPrompt),
-  ].filter(Boolean))]
+  ]
   // A graph with no text makes no moderation call at all: moderation fails
   // CLOSED in hosted (G3), so a call with nothing to check must never be able
   // to refuse a run. An unavailable service or an over-long text refuses here,
   // before pricing and any hold, with its own plain message.
-  for (const text of moderationTexts) {
-    const mod = await deps.moderatePrompt(text)
-    if (!mod.ok) throw moderationRefusal(mod)
-  }
+  const mod = await moderateTexts(moderationTexts, t => deps.moderatePrompt(t))
+  if (!mod.ok) throw moderationRefusal(mod)
 
   // A discontinued or runner-only model can't run on ComfyUI: refused in
   // ComfyUI's own 400 shape before pricing and any hold (blockedModels.ts).

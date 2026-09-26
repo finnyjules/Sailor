@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import {
-  moderatePrompt, moderationRefusal, __setModerationFetchForTests, __setModerationTimingForTests,
+  moderatePrompt, moderateTexts, moderationRefusal, __setModerationFetchForTests, __setModerationTimingForTests,
   MODERATION_MAX_INPUT_BYTES, MODERATION_UNAVAILABLE_MESSAGE, MODERATION_TOO_LONG_MESSAGE, MODERATION_BLOCKED_MESSAGE,
 } from '../../server/utils/moderation'
 
@@ -147,5 +147,135 @@ describe('moderationRefusal', () => {
   it('the messages are exactly the agreed wording', () => {
     expect(MODERATION_UNAVAILABLE_MESSAGE).toBe('Sailor couldn\'t check this prompt just now. Try again in a moment.')
     expect(MODERATION_TOO_LONG_MESSAGE).toBe('This prompt is too long to check. Shorten it and try again.')
+  })
+})
+
+// G3 follow-up (review findings 1, 3, 4, 5).
+describe('moderatePrompt — G3 follow-up', () => {
+  beforeEach(() => { process.env.NUXT_CLERK_SECRET_KEY = 'sk_test_clerk'; process.env.OPENAI_API_KEY = 'sk-x' })
+  const flagged = () => ({ ok: true, status: 200, json: async () => ({ results: [{ flagged: true, categories: { hate: true } }] }) })
+
+  it('headers arrive but the body stalls → refused as unavailable within the time limit', async () => {
+    const f = vi.fn().mockResolvedValue({ ok: true, status: 200, json: () => new Promise(() => {}) })
+    __setModerationFetchForTests(f)
+    const t0 = Date.now()
+    expect(await moderatePrompt('x', { hosted: true })).toEqual({ ok: false, categories: [], reason: 'unavailable' })
+    expect(Date.now() - t0).toBeLessThan(1000)
+    expect(f).toHaveBeenCalledTimes(2)
+  })
+  it('a 400 body that stalls is bounded by the time limit too', async () => {
+    const f = vi.fn().mockResolvedValue({ ok: false, status: 400, json: () => new Promise(() => {}) })
+    __setModerationFetchForTests(f)
+    const t0 = Date.now()
+    expect(await moderatePrompt('x', { hosted: true })).toEqual({ ok: false, categories: [], reason: 'unavailable' })
+    expect(Date.now() - t0).toBeLessThan(1000)
+  })
+  it('a 429 with Retry-After waits that long for the one retry, then passes', async () => {
+    const times: number[] = []
+    const f = vi.fn(async () => {
+      times.push(Date.now())
+      return times.length === 1 ? { ok: false, status: 429, headers: new Headers({ 'retry-after': '0.15' }), json: async () => ({}) } : clean()
+    })
+    __setModerationFetchForTests(f as any)
+    expect(await moderatePrompt('x', { hosted: true })).toEqual({ ok: true })
+    expect(f).toHaveBeenCalledTimes(2)
+    expect(times[1]! - times[0]!).toBeGreaterThanOrEqual(140)
+  })
+  it('a 429 Retry-After is capped', async () => {
+    __setModerationTimingForTests({ retryAfterCapMs: 50 })
+    const f = vi.fn().mockResolvedValueOnce({ ok: false, status: 429, headers: new Headers({ 'retry-after': '120' }), json: async () => ({}) }).mockResolvedValueOnce(clean())
+    __setModerationFetchForTests(f)
+    const t0 = Date.now()
+    expect(await moderatePrompt('x', { hosted: true })).toEqual({ ok: true })
+    expect(Date.now() - t0).toBeLessThan(1000)
+  })
+  it('a 429 twice → unavailable (never a pass)', async () => {
+    const f = vi.fn().mockResolvedValue({ ok: false, status: 429, headers: new Headers({ 'retry-after': '0' }), json: async () => ({}) })
+    __setModerationFetchForTests(f)
+    expect(await moderatePrompt('x', { hosted: true })).toEqual({ ok: false, categories: [], reason: 'unavailable' })
+    expect(f).toHaveBeenCalledTimes(2)
+  })
+  it('an unrelated 400 that mentions max_tokens → couldn\'t check, not too long', async () => {
+    const f = vi.fn().mockResolvedValue({ ok: false, status: 400, json: async () => ({ error: { message: 'max_tokens is too large: 5000. This model supports at most 4096 completion tokens.', code: 'invalid_value' } }) })
+    __setModerationFetchForTests(f)
+    expect(await moderatePrompt('x', { hosted: true })).toEqual({ ok: false, categories: [], reason: 'unavailable' })
+    expect(f).toHaveBeenCalledTimes(2)
+  })
+  it('a 400 with the service\'s too-long code → too_long', async () => {
+    const f = vi.fn().mockResolvedValue({ ok: false, status: 400, json: async () => ({ error: { message: 'Invalid input', code: 'context_length_exceeded' } }) })
+    __setModerationFetchForTests(f)
+    expect(await moderatePrompt('x', { hosted: true })).toEqual({ ok: false, categories: [], reason: 'too_long' })
+  })
+  it('a text that recently passed is not sent again', async () => {
+    const f = vi.fn().mockResolvedValue(clean()); __setModerationFetchForTests(f)
+    expect(await moderatePrompt('a red fox', { hosted: true })).toEqual({ ok: true })
+    expect(await moderatePrompt('a red fox', { hosted: true })).toEqual({ ok: true })
+    expect(f).toHaveBeenCalledTimes(1)
+  })
+  it('identical checks at the same moment make one call', async () => {
+    const f = vi.fn(async () => { await new Promise(r => setTimeout(r, 10)); return clean() }); __setModerationFetchForTests(f as any)
+    const all = await Promise.all([1, 2, 3, 4].map(() => moderatePrompt('a red fox', { hosted: true })))
+    expect(all).toEqual([{ ok: true }, { ok: true }, { ok: true }, { ok: true }])
+    expect(f).toHaveBeenCalledTimes(1)
+  })
+  it('a flagged text is never cached as a pass', async () => {
+    const f = vi.fn().mockResolvedValueOnce(flagged()).mockResolvedValueOnce(clean()); __setModerationFetchForTests(f)
+    expect(await moderatePrompt('bad', { hosted: true })).toEqual({ ok: false, categories: ['hate'] })
+    expect(await moderatePrompt('bad', { hosted: true })).toEqual({ ok: true })
+    expect(f).toHaveBeenCalledTimes(2)
+  })
+  it('a failure is never cached as a pass', async () => {
+    const f = vi.fn().mockResolvedValue(fail500()); __setModerationFetchForTests(f)
+    expect(await moderatePrompt('x', { hosted: true })).toMatchObject({ ok: false, reason: 'unavailable' })
+    expect(await moderatePrompt('x', { hosted: true })).toMatchObject({ ok: false, reason: 'unavailable' })
+    expect(f).toHaveBeenCalledTimes(4)
+  })
+  it('a local fail-open is never cached as a pass for hosted', async () => {
+    const f = vi.fn().mockResolvedValue(fail500()); __setModerationFetchForTests(f)
+    expect(await moderatePrompt('x', { hosted: false })).toEqual({ ok: true })
+    expect(await moderatePrompt('x', { hosted: true })).toMatchObject({ ok: false, reason: 'unavailable' })
+  })
+  it('a missing key still refuses at once, even for a text that passed', async () => {
+    const f = vi.fn().mockResolvedValue(clean()); __setModerationFetchForTests(f)
+    expect(await moderatePrompt('a red fox', { hosted: true })).toEqual({ ok: true })
+    delete process.env.OPENAI_API_KEY
+    expect(await moderatePrompt('a red fox', { hosted: true })).toMatchObject({ ok: false, reason: 'unavailable' })
+  })
+})
+
+describe('moderateTexts', () => {
+  const sleep = (ms: number) => new Promise(r => setTimeout(r, ms))
+  it('checks every distinct non-blank text at once: the total is about one check', async () => {
+    const check = vi.fn(async (_t: string) => { await sleep(100); return { ok: true as const } })
+    const t0 = Date.now()
+    expect(await moderateTexts(['a', 'b', 'c', 'd', 'e', 'a', '  ', ''], check)).toEqual({ ok: true })
+    expect(Date.now() - t0).toBeLessThan(300)
+    expect(check.mock.calls.map(c => c[0]).sort()).toEqual(['a', 'b', 'c', 'd', 'e'])
+  })
+  it('refuses on the first not-ok result without waiting for the rest', async () => {
+    const check = vi.fn(async (t: string) => {
+      if (t === 'bad') return { ok: false as const, categories: ['hate'] }
+      await sleep(500); return { ok: true as const }
+    })
+    const t0 = Date.now()
+    expect(await moderateTexts(['fine', 'bad'], check)).toEqual({ ok: false, categories: ['hate'] })
+    expect(Date.now() - t0).toBeLessThan(300)
+  })
+  it('no text → ok with no check', async () => {
+    const check = vi.fn()
+    expect(await moderateTexts([' ', ''], check as any)).toEqual({ ok: true })
+    expect(check).not.toHaveBeenCalled()
+  })
+  it('a thrown check rejects', async () => {
+    await expect(moderateTexts(['x'], async () => { throw new Error('boom') })).rejects.toThrow('boom')
+  })
+  it('hosted, real service: every text is checked in parallel within one timeout+retry cycle', async () => {
+    process.env.NUXT_CLERK_SECRET_KEY = 'sk_test_clerk'; process.env.OPENAI_API_KEY = 'sk-x'
+    __setModerationTimingForTests({ timeoutMs: 1000 })
+    const f = vi.fn(async () => { await sleep(100); return clean() }); __setModerationFetchForTests(f as any)
+    const t0 = Date.now()
+    expect(await moderateTexts(['a', 'b', 'c', 'd'], t => moderatePrompt(t, { hosted: true }))).toEqual({ ok: true })
+    expect(Date.now() - t0).toBeLessThan(300)
+    expect(f).toHaveBeenCalledTimes(4)
   })
 })
