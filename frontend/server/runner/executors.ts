@@ -99,6 +99,7 @@ import type { InputSeconds } from '#shared/pricing/clipSettings'
 import { isSync3LipSync, lipSyncSyncMode } from '#shared/runner/lipSync'
 import { backupInputProblem, checkRequest, seedanceReferenceProblem } from './requestRules'
 import type { OutputFile, RunnerProvider, RunnerValue } from './types'
+import { textCardUi } from './cards/text'
 import type { KeptExt } from './keptBytes'
 import { filesOf } from './values'
 import { OUTPUT_KINDS } from '#shared/runner/values'
@@ -859,6 +860,11 @@ async function planNodeRequest(ctx: PlanContext): Promise<NodePlan> {
     case 'PrimitiveFloat':
     case 'PrimitiveBoolean':
       return staticDerive(ctx)
+
+    // ── cards (step 3, R1.1): Text, Moodboard, 3D model ──
+    case 'Text': return staticDerive(ctx, textCardUi)
+    case 'Moodboard': return staticDerive(ctx)
+    case 'Model3D': return staticDerive(ctx, textCardUi)
 
     case GATE_CLASS: {
       // A value (not files) reaching a Gate is handed on when it is open or

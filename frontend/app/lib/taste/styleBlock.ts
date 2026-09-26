@@ -33,16 +33,8 @@ export function tastedPrompt(subject: string, parts: TasteStyleParts): string {
 }
 
 /**
- * Moodboard reading → the spec style block (moodboard spec 2026-08-06):
- * `In the style of: <summary>. Palette: <Name #HEX, …>. Avoid: <a, b>.`
- * Named palette (curated {name, hex}) rather than the wall's bare hexes.
- * Empty parts are omitted entirely — no dangling `Palette:`/`Avoid:` labels.
+ * Moodboard reading → the spec style block (moodboard spec 2026-08-06). It
+ * lives in shared/taste/moodboardStyle.ts so the runner's Moodboard card
+ * (step 3, R1.1) composes the same string.
  */
-export function moodboardStyleBlock(reading: { summary: string; palette: { name: string; hex: string }[]; avoids: string[] }): string {
-  const parts: string[] = []
-  const summary = reading.summary.trim().replace(/\.?$/, '.')
-  if (reading.summary.trim()) parts.push(`In the style of: ${summary}`)
-  if (reading.palette.length) parts.push(`Palette: ${reading.palette.map(p => `${p.name} ${p.hex}`).join(', ')}.`)
-  if (reading.avoids.length) parts.push(`Avoid: ${reading.avoids.join(', ')}.`)
-  return parts.join(' ')
-}
+export { moodboardStyleBlock } from '../../../shared/taste/moodboardStyle'

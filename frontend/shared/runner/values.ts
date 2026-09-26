@@ -18,6 +18,9 @@ export const OUTPUT_KINDS: Readonly<Record<string, Readonly<Record<number, Value
   PrimitiveInt: { 0: 'number' },
   PrimitiveFloat: { 0: 'number' },
   PrimitiveBoolean: { 0: 'boolean' },
+  Text: { 0: 'text' },
+  Moodboard: { 0: 'text' },
+  Model3D: { 0: 'text' },
 }
 
 /** What a wire carries: the source's declared kind for that slot (through Gates), files by default. */

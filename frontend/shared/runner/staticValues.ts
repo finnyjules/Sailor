@@ -13,7 +13,8 @@
  */
 import { GATE_CLASS, isLink, type ApiLink, type ApiPrompt } from './graph'
 import { outputKind } from './values'
-import { pyFloatOf, pyIntOf, pyTruthy } from './pyText'
+import { pyFloatOf, pyIntOf, pyStrip, pyTruthy } from './pyText'
+import { moodboardStyleFromJson } from '../taste/moodboardStyle'
 
 export type StaticValue =
   | { kind: 'text'; text: string }
@@ -70,6 +71,28 @@ export const STATIC_VALUES: Record<string, StaticEvaluator> = {
     const wired = resolvedValue(inputs, at)
     if (isLink(inputs.value)) return wired?.kind === 'boolean' ? wired : undefined
     return { kind: 'boolean', value: pyTruthy(inputs.value) }
+  },
+  // comfy_extras/nodes_text.py TextNode: typed text wins; blank typed text hands on `source`.
+  Text: (inputs, at) => {
+    const typed = typeof inputs.text === 'string' ? inputs.text : ''
+    if (typed && pyStrip(typed)) return { kind: 'text', text: typed }
+    const src = inputs.source
+    if (isLink(src)) {
+      const v = at(src)
+      return v?.kind === 'text' ? v : undefined
+    }
+    return { kind: 'text', text: typeof src === 'string' ? src : '' }
+  },
+  // comfy_extras/nodes_moodboard.py MoodboardNode: the reading's style block.
+  Moodboard: inputs => ({ kind: 'text', text: moodboardStyleFromJson(typeof inputs.reading_json === 'string' ? inputs.reading_json : '') }),
+  // comfy_extras/nodes_model3d.py Model3DNode: the address wired in, or ''.
+  Model3D: (inputs, at) => {
+    const src = inputs.glb_url
+    if (isLink(src)) {
+      const v = at(src)
+      return v?.kind === 'text' ? v : undefined
+    }
+    return { kind: 'text', text: typeof src === 'string' ? src : '' }
   },
 }
 

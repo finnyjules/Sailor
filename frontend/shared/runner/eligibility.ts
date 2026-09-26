@@ -8,6 +8,7 @@ import { pyFloatOf, pyIntOf, pyTruthy } from './pyText'
 import { SYNC_3_ENGINE, isSync3LipSync, lipSyncEngine } from './lipSync'
 import { TOPAZ_VIDEO_FPS, TOPAZ_VIDEO_TARGETS } from './topazVideo'
 import { outputKind, BASE_VALUE_INPUTS, OUTPUT_KINDS, type ValueKind } from './values'
+import { moodboardReadingIsPlain } from '../taste/moodboardStyle'
 
 export const RUNNER_NODE_TYPES: ReadonlySet<string> = new Set([
   'GenerateImageNode', 'GenerateVideoNode', 'ComfyGateNode', 'Image', 'Video',
@@ -103,7 +104,18 @@ export interface RunnerNodeRule {
    * by the render itself, once the picture's size is known.)
    */
   frameLimits?: FrameLimits
+  /** A check of the node's own inputs the runner needs to pass before it takes the node (INPUT_CHECKS). */
+  inputCheck?: keyof typeof INPUT_CHECKS
 }
+
+/**
+ * Checks of a node's own inputs, named by RunnerNodeRule.inputCheck. A node
+ * that fails one is left to the engine.
+ */
+export const INPUT_CHECKS = {
+  // The Moodboard's reading is the plain text the moodboard window writes (spec ruling 3).
+  'moodboard-reading': (inputs: Record<string, unknown>): boolean => moodboardReadingIsPlain(inputs.reading_json),
+} as const
 
 /** A node class's newer model and the family that switches it on (RunnerNodeRule.upgrade). */
 export interface ClassUpgrade {
@@ -506,6 +518,18 @@ export const RUNNER_NODE_RULES: Readonly<Record<string, RunnerNodeRule>> = {
   PrimitiveInt: { family: 'cards', local: 'source', widgets: { value: { type: 'INT', required: true, min: -Number.MAX_SAFE_INTEGER, max: Number.MAX_SAFE_INTEGER } } },
   PrimitiveFloat: { family: 'cards', local: 'source', widgets: { value: { type: 'FLOAT', required: true, min: -Number.MAX_SAFE_INTEGER, max: Number.MAX_SAFE_INTEGER } } },
   PrimitiveBoolean: { family: 'cards', local: 'source', widgets: { value: { type: 'BOOLEAN', required: true } } },
+  // ── cards (step 3, R1.1): Text, Moodboard, 3D model ──
+  // Text: typed text wins; blank typed text hands on what `source` brings.
+  Text: { family: 'cards', local: 'source', valueInputs: { source: ['text', 'json', 'glb'] }, widgets: { text: { type: 'STRING', required: true } } },
+  // Moodboard: the reading's style block. Taken only when the reading is the
+  // plain text the moodboard window writes (spec ruling 3).
+  Moodboard: {
+    family: 'cards', local: 'source',
+    widgets: { reading_json: { type: 'STRING', required: true }, moodboard_id: { type: 'STRING' } },
+    inputCheck: 'moodboard-reading',
+  },
+  // 3D model: hands on the address wired in (Sailor's own copy, spec ruling 1).
+  Model3D: { family: 'cards', local: 'source', valueInputs: { glb_url: ['glb', 'text'] } },
 }
 
 /** The Primitive cards (comfy_extras/nodes_primitive.py): each hands on its value (family `cards`). */
@@ -521,6 +545,9 @@ export const SWITCHED_CLASSES: Readonly<Record<string, RunnerFamily>> = {
   Audio: 'sync-3',
   EnhanceVideoNode: 'topaz-video',
   ...Object.fromEntries(PRIMITIVE_CLASSES.map(c => [c, 'cards' as const])),
+  Text: 'cards',
+  Moodboard: 'cards',
+  Model3D: 'cards',
 }
 
 /**
@@ -659,6 +686,7 @@ export function nodeRuleAllows(
   for (const [name, spec] of Object.entries(rule.widgets ?? {})) {
     if (!widgetValid(inputs, name, spec)) return false
   }
+  if (rule.inputCheck && !INPUT_CHECKS[rule.inputCheck](inputs)) return false
   for (const [name, key] of Object.entries(rule.noJsonList ?? {})) {
     if (hasJsonList(inputs[name], key)) return false
   }

@@ -1,0 +1,144 @@
+{
+  "moodboard": [
+    {
+      "name": "shared: moodboard_style_block_full.json",
+      "reading_json": "{\"summary\":\"Sun-bleached pastel world\",\"palette\":[{\"name\":\"Blush\",\"hex\":\"#F6C1CB\"},{\"name\":\"Turquoise\",\"hex\":\"#67C4C9\"}],\"avoids\":[\"darkness\",\"neon\"]}",
+      "style": "In the style of: Sun-bleached pastel world. Palette: Blush #F6C1CB, Turquoise #67C4C9. Avoid: darkness, neon."
+    },
+    {
+      "name": "shared: moodboard_style_block_no_avoids.json",
+      "reading_json": "{\"summary\":\"Quiet dawn light over brutalist concrete.\",\"palette\":[{\"name\":\"Fog\",\"hex\":\"#C9CDD1\"},{\"name\":\"Concrete\",\"hex\":\"#8D8A85\"},{\"name\":\"Ember\",\"hex\":\"#D96C32\"}],\"avoids\":[]}",
+      "style": "In the style of: Quiet dawn light over brutalist concrete. Palette: Fog #C9CDD1, Concrete #8D8A85, Ember #D96C32."
+    },
+    {
+      "name": "shared: moodboard_style_block_summary_avoids.json",
+      "reading_json": "{\"summary\":\"  Hand-inked riso texture  \",\"palette\":[],\"avoids\":[\"gradients\",\"gloss\",\"3D render look\"]}",
+      "style": "In the style of: Hand-inked riso texture. Avoid: gradients, gloss, 3D render look."
+    },
+    {
+      "name": "blank",
+      "reading_json": "",
+      "style": ""
+    },
+    {
+      "name": "whitespace only (U+001C, U+00A0)",
+      "reading_json": " \n\t\u001c  ",
+      "style": ""
+    },
+    {
+      "name": "a summary ending in a period",
+      "reading_json": "{\"summary\":\"Soft film grain.\",\"palette\":[{\"name\":\"Blush\",\"hex\":\"#F6C1CB\"},{\"name\":\"Turquoise\",\"hex\":\"#67C4C9\"}],\"avoids\":[\"gloss\"]}",
+      "style": "In the style of: Soft film grain. Palette: Blush #F6C1CB, Turquoise #67C4C9. Avoid: gloss."
+    },
+    {
+      "name": "a summary of only spaces",
+      "reading_json": "{\"summary\":\"    \",\"palette\":[{\"name\":\"Blush\",\"hex\":\"#F6C1CB\"},{\"name\":\"Turquoise\",\"hex\":\"#67C4C9\"}],\"avoids\":[\"gloss\"]}",
+      "style": "Palette: Blush #F6C1CB, Turquoise #67C4C9. Avoid: gloss."
+    },
+    {
+      "name": "a summary ending in U+001C (Python strips it, JS trim does not)",
+      "reading_json": "{\"summary\":\"Grain\\u001c\",\"palette\":[],\"avoids\":[]}",
+      "style": "In the style of: Grain."
+    },
+    {
+      "name": "an empty palette",
+      "reading_json": "{\"summary\":\"Riso\",\"palette\":[],\"avoids\":[\"gloss\",\"neon\"]}",
+      "style": "In the style of: Riso. Avoid: gloss, neon."
+    },
+    {
+      "name": "palette items with a missing name or hex",
+      "reading_json": "{\"summary\":\"Riso\",\"palette\":[{\"hex\":\"#FFFFFF\"},{\"name\":\"Rose\"}],\"avoids\":[]}",
+      "style": "In the style of: Riso. Palette:  #FFFFFF, Rose ."
+    },
+    {
+      "name": "null parts",
+      "reading_json": "{\"summary\":null,\"palette\":null,\"avoids\":null}",
+      "style": ""
+    },
+    {
+      "name": "an empty object",
+      "reading_json": "{}",
+      "style": ""
+    },
+    {
+      "name": "bad JSON",
+      "reading_json": "{\"summary\": \"Riso\",",
+      "style": "",
+      "plain": false
+    },
+    {
+      "name": "a JSON list",
+      "reading_json": "[{\"summary\":\"Riso\"}]",
+      "style": "",
+      "plain": false
+    },
+    {
+      "name": "a numeric avoid",
+      "reading_json": "{\"summary\":\"Riso\",\"palette\":[],\"avoids\":[\"gloss\",3]}",
+      "style": "In the style of: Riso. Avoid: gloss, 3.",
+      "plain": false
+    },
+    {
+      "name": "a palette item that is a string",
+      "reading_json": "{\"summary\":\"Riso\",\"palette\":[\"#FFFFFF\"],\"avoids\":[]}",
+      "style": "In the style of: Riso. Palette: .",
+      "plain": false
+    },
+    {
+      "name": "NaN, which json.loads takes and JSON.parse does not",
+      "reading_json": "{\"summary\": \"Riso\", \"weight\": NaN}",
+      "style": "In the style of: Riso.",
+      "plain": false
+    }
+  ],
+  "text": [
+    {
+      "name": "typed text wins over the source",
+      "text": "a red fox",
+      "source": "from the source",
+      "value": "a red fox"
+    },
+    {
+      "name": "typed text, no source",
+      "text": "a red fox",
+      "source": null,
+      "value": "a red fox"
+    },
+    {
+      "name": "blank typed text hands on the source",
+      "text": "",
+      "source": "from the source",
+      "value": "from the source"
+    },
+    {
+      "name": "whitespace-only typed text (U+2003) hands on the source",
+      "text": " ",
+      "source": "from the source",
+      "value": "from the source"
+    },
+    {
+      "name": "U+001C typed text hands on the source",
+      "text": "\u001c",
+      "source": "from the source",
+      "value": "from the source"
+    },
+    {
+      "name": "typed text keeps its own spaces",
+      "text": "  padded  ",
+      "source": "from the source",
+      "value": "  padded  "
+    },
+    {
+      "name": "blank typed text, no source",
+      "text": "",
+      "source": null,
+      "value": ""
+    },
+    {
+      "name": "whitespace typed text, no source",
+      "text": "   ",
+      "source": null,
+      "value": ""
+    }
+  ]
+}

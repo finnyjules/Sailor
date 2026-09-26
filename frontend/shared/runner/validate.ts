@@ -35,10 +35,11 @@ import { linksOf, type ApiPrompt } from './graph'
  * classes not listed are not output nodes: GenerateImageNode,
  * GenerateVideoNode, ComfyGateNode, EditImageNode, DevelopImageNode,
  * GenerateFromReferencesNode, LoadImage, LipSyncNode. The Audio card
- * (nodes_audio.py `Audio`, is_output_node=True) joined with sync-3 (F22).
+ * (nodes_audio.py `Audio`, is_output_node=True) joined with sync-3 (F22);
+ * the Text and 3D model cards with `cards` (R1.1; the Moodboard is not one).
  */
 export const RUNNER_OUTPUT_CLASSES: ReadonlySet<string> = new Set([
-  'Image', 'Video', 'Compositor', 'Audio',
+  'Image', 'Video', 'Compositor', 'Audio', 'Text', 'Model3D',
   'RelightNode', 'BlendSceneNode', 'RemoveObjectNode', 'TextEditNode', 'RecolorObjectNode',
   'SwapBackgroundNode', 'SwapProductNode', 'PersonSwap', 'RotateCameraNode', 'ProductShotNode', 'RestyleFromImageNode',
 ])
