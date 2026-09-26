@@ -450,9 +450,14 @@ def hashed_values(n: int, seed: int, lo: float = 0.0, hi: float = 1.0, levels: i
 
 
 def kernel_input(spec: dict) -> torch.Tensor:
-    """A (1, C, H, W) tensor from its spec: planar values, then the memory format."""
+    """A (1, C, H, W) tensor from its spec: planar values (every `neg_zero_every`-th set to
+    −0, every `nan_every`-th to NaN), then the memory format."""
     c, h, w = spec["shape"]
     v = hashed_values(c * h * w, spec["seed"], spec.get("lo", 0.0), spec.get("hi", 1.0), spec.get("levels", 0))
+    if spec.get("neg_zero_every"):
+        v[:: spec["neg_zero_every"]] = -0.0
+    if spec.get("nan_every"):
+        v[:: spec["nan_every"]] = np.nan
     t = torch.from_numpy(v.reshape(1, c, h, w).copy())
     if spec.get("memory") == "channels-last":
         t = t.contiguous(memory_format=torch.channels_last)
@@ -487,11 +492,16 @@ class KernelCases:
         self.cases: list[dict] = []
         self.seed = 0
 
-    def inp(self, c: int, h: int, w: int, lo: float = 0.0, hi: float = 1.0, memory: str = "contiguous", levels: int = 0) -> dict:
+    def inp(self, c: int, h: int, w: int, lo: float = 0.0, hi: float = 1.0, memory: str = "contiguous", levels: int = 0,
+            neg_zero_every: int = 0, nan_every: int = 0) -> dict:
         self.seed += 1
         spec = {"shape": [c, h, w], "seed": self.seed, "lo": lo, "hi": hi, "memory": memory}
         if levels:
             spec["levels"] = levels
+        if neg_zero_every:
+            spec["neg_zero_every"] = neg_zero_every
+        if nan_every:
+            spec["nan_every"] = nan_every
         return spec
 
     def add(self, name: str, fn: str, cls: str, inputs: list, args: dict, run) -> None:
@@ -607,6 +617,12 @@ def kernels() -> dict:
                       lambda t, k=k, pad=pad: F.avg_pool2d(t, k, stride=1, padding=pad, count_include_pad=True, ceil_mode=False)[0])
                 g.add(f"max_pool2d k {k} pad {pad}, {w}×{h} {c} ch {memory}", "maxPool2d", "exact", [g.inp(c, h, w, memory=memory)], {"k": k, "pad": pad},
                       lambda t, k=k, pad=pad: F.max_pool2d(t, k, stride=1, padding=pad)[0])
+    # torch refuses a pad of more than half the window.
+    for k, pad in ((3, 2), (2, 2), (1, 1)):
+        g.add(f"avg_pool2d k {k} pad {pad} (over half)", "avgPool2d", "exact", [g.inp(3, 23, 37)], {"k": k, "pad": pad},
+              lambda t, k=k, pad=pad: F.avg_pool2d(t, k, stride=1, padding=pad)[0])
+        g.add(f"max_pool2d k {k} pad {pad} (over half)", "maxPool2d", "exact", [g.inp(3, 23, 37)], {"k": k, "pad": pad},
+              lambda t, k=k, pad=pad: F.max_pool2d(t, k, stride=1, padding=pad)[0])
     for k in (1, 2, 3, 8, 13):
         for (w, h), c, memory in (((37, 23), 3, "contiguous"), ((37, 23), 4, "channels-last"), ((320, 200), 3, "channels-last")):
             g.add(f"avg_pool2d stride k {k}, {w}×{h} {c} ch {memory}", "avgPool2dStrided", "exact", [g.inp(c, h, w, memory=memory)], {"k": k},
@@ -634,14 +650,31 @@ def kernels() -> dict:
         g.add(f"conv2d same {name}, 64×48", "conv2dSame", "library", [g.inp(1, 48, 64)], {"kernel": flat, "kh": kh, "kw": kw, "pad": kh // 2},
               lambda t, kt=kt: F.conv2d(t, kt[None, None], padding=kt.shape[0] // 2)[0])
 
+    # Random kernels (fix round 1): normalised (positive, summing to 1) and not (−2…2).
+    for size in (5, 11, 21):
+        for label, lo, hi in (("normalised", 0.0, 1.0), ("unnormalised", -2.0, 2.0)):
+            g.seed += 1
+            kv = hashed_values(size * size, g.seed, lo, hi)
+            if label == "normalised":
+                kv = (kv / kv.sum(dtype=np.float32)).astype(np.float32)
+            kt = torch.from_numpy(kv.reshape(size, size).copy())
+            flat = [float(x) for x in kv]
+            g.add(f"conv2d depthwise random {label} {size}×{size}, 64×48 3 ch", "conv2dDepthwise", "library", [g.inp(3, 48, 64)],
+                  {"kernel": flat, "kh": size, "kw": size}, lambda t, kt=kt: F.conv2d(t, kt.expand(3, 1, *kt.shape), groups=3)[0])
+            g.add(f"conv2d same random {label} {size}×{size}, 64×48", "conv2dSame", "library", [g.inp(1, 48, 64)],
+                  {"kernel": flat, "kh": size, "kw": size, "pad": size // 2}, lambda t, kt=kt: F.conv2d(t, kt[None, None], padding=kt.shape[0] // 2)[0])
+
     # ── gaussian ──
+    # The blur's proven range is ksize ≤ 181 (σ ≤ 30, every Python caller): (301, 50) measured
+    # outside ε = 2⁻⁸ (review of R2.2), so the runner refuses it and only its 1-D kernel is here.
     for ksize, sigma in ((3, 0.3), (7, 1.0), (31, 5.0), (61, 10.0), (181, 30.0), (301, 50.0)):
         g.add(f"gaussian kernel ({ksize}, {sigma})", "gaussianKernel1d", "library", [], {"ksize": ksize, "sigma": sigma},
               lambda ksize=ksize, sigma=sigma: TF._get_gaussian_kernel1d(ksize, sigma, torch.float32, torch.device("cpu")).view(1, 1, ksize))
+        if ksize > 181:
+            continue
         g.add(f"gaussian_blur ({ksize}, {sigma}), 64×48 4 ch", "gaussianBlur", "library", [g.inp(4, 48, 64)], {"ksize": ksize, "sigma": sigma},
               lambda t, ksize=ksize, sigma=sigma: TF.gaussian_blur(t, [ksize, ksize], [sigma, sigma])[0])
-    # ksize 181 raises on 64×48: the blur itself on a picture it fits (301 needs > 150 a side: its
-    # im2col would be 8 GB, so it is covered by its kernel and the failure only).
+    # ksize 181 raises on 64×48: the blur itself on a picture it fits.
     g.add("gaussian_blur (181, 30.0), 100×96 4 ch", "gaussianBlur", "library", [g.inp(4, 96, 100)], {"ksize": 181, "sigma": 30.0},
           lambda t: TF.gaussian_blur(t, [181, 181], [30.0, 30.0])[0])
     g.add("gaussian_blur (7, 1.0), 37×23 3 ch channels-last", "gaussianBlur", "library", [g.inp(3, 23, 37, memory="channels-last")], {"ksize": 7, "sigma": 1.0},
@@ -671,13 +704,40 @@ def kernels() -> dict:
     for n in (1024 * 1024,):
         g.add(f"mean of {n}, 0…1/255 steps", "meanAll", "exact", [g.inp(1, 1, n, levels=256)], {}, lambda t: torch.mean(t[0, 0], dim=(-1,)).view(1, 1, 1))
 
+    # −0 (fix round 1): torch's clamp gives +0 in its vector loop and keeps −0 in each chunk's
+    # scalar tail (the last n mod 8 values of a chunk of the tensor's memory).
+    for (w, h), memory in (((7, 3), "contiguous"), ((7, 3), "channels-last"), ((117, 200), "contiguous"), ((117, 200), "channels-last")):
+        spec = lambda: g.inp(3, h, w, memory=memory, neg_zero_every=5)  # noqa: E731
+        g.add(f"blend 0.3 with −0, {w}×{h} {memory}", "blend", "exact", [spec(), spec()], {"ratio": 0.3}, lambda a, b: TF._blend(a, b, 0.3)[0])
+        for fn, op, fac in (("adjustBrightness", TF.adjust_brightness, 1.5), ("adjustSaturation", TF.adjust_saturation, 1.3),
+                            ("adjustContrast", TF.adjust_contrast, 1.2)):
+            g.add(f"{fn} {fac} with −0, {w}×{h} 3 ch {memory}", fn, "exact", [spec()], {"f": fac}, lambda t, op=op, fac=fac: op(t, fac)[0])
+
+    # Batches (fix round 1): with two or more pictures torch splits a long sum over the batch,
+    # each picture's sum on one thread. Each output is one picture's.
+    for n in (64000, 70001, 1_000_003):
+        g.add(f"mean of {n}, batch of 2", "meanAll", "exact", [g.inp(1, 1, n), g.inp(1, 1, n)], {"batch": 2},
+              lambda a, b: tuple(torch.mean(torch.cat([a, b]), dim=(-3, -2, -1)).view(2, 1, 1, 1)))
+    for memory in ("contiguous", "channels-last"):
+        spec = lambda: g.inp(3, 200, 320, memory=memory, levels=64)  # noqa: E731
+        g.add(f"adjustContrast 1.8, batch of 2, 320×200 3 ch {memory}", "adjustContrast", "exact", [spec(), spec()], {"f": 1.8, "batch": 2},
+              lambda a, b: tuple(TF.adjust_contrast(torch.cat([a, b]), 1.8)))
+        g.add(f"adjustBrightness 1.5 with −0, batch of 2, 117×200 3 ch {memory}", "adjustBrightness", "exact",
+              [g.inp(3, 200, 117, memory=memory, neg_zero_every=5), g.inp(3, 200, 117, memory=memory, neg_zero_every=7)], {"f": 1.5, "batch": 2},
+              lambda a, b: tuple(TF.adjust_brightness(torch.cat([a, b]), 1.5)))
+    for c, memory in ((1, "contiguous"), (3, "contiguous"), (3, "channels-last")):
+        g.add(f"area 320×200 → 1×1, batch of 2, {c} ch {memory}", "resizeArea", "exact", [g.inp(c, 200, 320, memory=memory), g.inp(c, 200, 320, memory=memory)],
+              {"oh": 1, "ow": 1, "batch": 2}, lambda a, b: tuple(F.interpolate(torch.cat([a, b]), size=(1, 1), mode="area")))
+
     # ── topk ──
     topk = []
-    for n, levels, k, largest in ((50, 6, 1, True), (50, 6, 5, True), (50, 6, 17, False), (50, 6, 50, True), (200, 0, 13, True), (64, 3, 20, False)):
-        spec = g.inp(1, 1, n, levels=levels)
+    for n, levels, k, largest, nan in ((50, 6, 1, True, 0), (50, 6, 5, True, 0), (50, 6, 17, False, 0), (50, 6, 50, True, 0), (200, 0, 13, True, 0),
+                                       (64, 3, 20, False, 0), (64, 3, 12, True, 9), (64, 3, 30, False, 9)):
+        spec = g.inp(1, 1, n, levels=levels, nan_every=nan)
         v = kernel_input(spec)[0, 0, 0]
         vals, idx = torch.topk(v, k, largest=largest)
-        topk.append({"name": f"topk {n} values ({levels or 'no'} levels), k {k}, largest {largest}", "input": spec, "k": k, "largest": largest,
+        assert not torch.isnan(vals[-1]), "the cut must be a number (JSON)"
+        topk.append({"name": f"topk {n} values ({levels or 'no'} levels{', NaN' if nan else ''}), k {k}, largest {largest}", "input": spec, "k": k, "largest": largest,
                      "values": b64(vals.numpy().astype("<f4").tobytes()), "indices": [int(i) for i in idx], "cut": float(vals[-1])})
 
     return {"cases": g.cases, "topk": topk, "eps_candidates": KERNEL_EPS, "store_max": KERNEL_STORE_MAX}

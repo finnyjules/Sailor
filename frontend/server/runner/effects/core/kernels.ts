@@ -19,12 +19,28 @@
  * Torch's own structure is ported where it decides the float result: the
  * cascade sum of SumKernel.cpp (vectors of TORCH_VEC floats, four
  * accumulators, four levels) and how a long sum is split between threads
- * (OpenMP: min(threads, ⌈n / 32768⌉) chunks of equal size). Tensors are planar C × H × W; a
- * `cl` flag says the torch tensor was channels-last in memory (a ComfyUI
- * picture movedim'd), which changes a few sums.
+ * (OpenMP: min(threads, ⌈n / 32768⌉) chunks of equal size). Tensors are
+ * planar C × H × W, one picture at a time. Where torch's float result depends
+ * on how the picture sat in its tensor, the caller says so with a
+ * TorchLayout: channels-last memory (a ComfyUI picture movedim'd) changes a
+ * few sums and divisions; the batch changes long sums (one picture: split
+ * between threads; two or more: each picture summed on one thread) and where
+ * torch's element loops fall into their scalar tails (clamp's −0).
  */
 import type { PixelsCore } from '../../pixels/core'
 import type { Tensor, TensorCore } from './tensor'
+
+/** How the picture sat in the torch tensor Python worked on (defaults: contiguous, a batch of one, this Mac's threads). */
+export interface TorchLayout {
+  /** Channels-last memory (a ComfyUI picture movedim'd to B × C × H × W without a copy). */
+  cl?: boolean
+  /** Pictures in the batch torch worked on at once. */
+  batch?: number
+  /** This picture's place in that batch. */
+  index?: number
+  /** torch.get_num_threads() of the Python being matched. */
+  threads?: number
+}
 
 export function kernelsCore(k: TensorCore, px: PixelsCore) {
   const f = Math.fround
@@ -36,6 +52,15 @@ export function kernelsCore(k: TensorCore, px: PixelsCore) {
   const GRAIN = 32768
   /** The development Mac's torch thread count (the fixtures'); a machine with another count splits sums over 64k values differently. */
   const TORCH_THREADS = 6
+  /** The widest blur proven within ε = 2⁻⁸ (every Python caller: σ ≤ 30, so ksize ≤ 181); (301, 50) measured outside it. */
+  const GAUSSIAN_MAX_KSIZE = 181
+
+  /** Plain words for settings torch refuses that no current caller makes (a guard, not a node message). */
+  const KERNEL_MESSAGES = {
+    poolPad: 'This window is padded by more than half its size',
+    blurSize: 'A blur needs an odd width of at least 1 and a spread above 0',
+    blurTooWide: 'This blur is wider than the runner can match (at most 181 pixels across)',
+  } as const
 
   // ── Float32 helpers ─────────────────────────────────────────────────────
 
@@ -67,8 +92,35 @@ export function kernelsCore(k: TensorCore, px: PixelsCore) {
     return (err > 0) === (other > r) ? other : r
   }
 
-  /** torch's clamp(x, 0, 1). */
-  const clamp01 = (x: number) => (x < 0 ? 0 : x > 1 ? 1 : x)
+  /** torch's vectorised clamp(x, 0, 1) (NEON max/min): −0 comes out +0, NaN stays NaN. */
+  const clamp01 = (x: number) => (x > 0 ? (x > 1 ? 1 : x) : x === x ? 0 : x)
+
+  /**
+   * Whether element `m` of a contiguous `total`-element tensor falls in the
+   * scalar tail of torch's element loop: the loop runs on OpenMP chunks
+   * (above 32,768 values) and each chunk in pairs of vectors (2·TORCH_VEC),
+   * its last len mod 8 values one by one. There std::max(−0, 0) keeps −0.
+   */
+  function inScalarTail(m: number, total: number, threads: number): boolean {
+    let start = 0
+    let len = total
+    if (total > GRAIN && threads > 1) {
+      const tasks = Math.min(threads, Math.ceil(total / GRAIN))
+      const chunk = Math.ceil(total / tasks)
+      start = Math.floor(m / chunk) * chunk
+      len = Math.min(total, start + chunk) - start
+    }
+    return m - start >= len - (len % (2 * TORCH_VEC))
+  }
+
+  /** A picture's value (channel ch, pixel i) as its index in torch's memory for this layout. */
+  function memoryIndex(t: { c: number; h: number; w: number }, ch: number, i: number, layout: TorchLayout): number {
+    const per = t.c * t.h * t.w
+    return (layout.index ?? 0) * per + (layout.cl ? i * t.c + ch : ch * t.h * t.w + i)
+  }
+
+  /** The threads a long sum over one picture is split between: its batch's pictures are each summed on one thread. */
+  const sumThreads = (layout: TorchLayout) => ((layout.batch ?? 1) >= 2 ? 1 : layout.threads ?? TORCH_THREADS)
 
   function stopCheck(stop: (() => boolean) | undefined, y: number): void {
     if (stop && (y & 63) === 0 && stop()) throw new Error('Stopped')
@@ -154,9 +206,14 @@ export function kernelsCore(k: TensorCore, px: PixelsCore) {
     return sumContiguous(buffer, 0, threads)
   }
 
-  /** torch.mean of one plane (sum, then ÷ n in float32). EXACT at the matched thread count. */
-  function meanAll(plane: Float32Array, threads: number = TORCH_THREADS): number {
-    return f(sumAll(plane, threads) / plane.length)
+  /**
+   * torch.mean of one picture's plane (sum, then ÷ n in float32). A batch of
+   * one splits a long sum between threads; in a batch of two or more each
+   * picture is summed on one thread (torch splits over the batch instead).
+   * EXACT at the matched thread count.
+   */
+  function meanAll(plane: Float32Array, layout: TorchLayout = {}): number {
+    return f(sumAll(plane, sumThreads(layout)) / plane.length)
   }
 
   // ── Ranges and element-wise ─────────────────────────────────────────────
@@ -248,9 +305,10 @@ export function kernelsCore(k: TensorCore, px: PixelsCore) {
 
   /**
    * The mean over H × W of each channel (adaptive_avg_pool2d to 1 × 1 is
-   * input.mean((-1, -2))): one channel is one whole reduction (split between
-   * threads above 32,768 values); several contiguous channels are summed
-   * each as a row; channels-last ones each as a strided row.
+   * input.mean((-1, -2))): one channel of a batch of one is one whole
+   * reduction (split between threads above 32,768 values); otherwise each
+   * channel is summed on one thread, as a row (contiguous) or a strided row
+   * (channels-last).
    */
   function meanHW(t: Tensor, cl: boolean, threads: number): Tensor {
     const n = t.h * t.w
@@ -270,10 +328,14 @@ export function kernelsCore(k: TensorCore, px: PixelsCore) {
    * F.interpolate(mode='area') = adaptive_avg_pool2d: window
    * [⌊i·in/out⌋, ⌈(i+1)·in/out⌉), a float sum row by row, then ÷ kh ÷ kw
    * (channels-last, a full vector of channels: ÷ (kh·kw)). To 1 × 1 it is
-   * torch.mean. EXACT.
+   * torch.mean (see meanHW and the layout's batch). An output of 0 rows or
+   * columns is an empty tensor, as torch returns one (it does not raise: an
+   * effect that can't use an empty picture refuses it itself). EXACT.
    */
-  function resizeArea(t: Tensor, oh: number, ow: number, cl = false, threads: number = TORCH_THREADS, stop?: () => boolean): Tensor {
-    if (oh === 1 && ow === 1) return meanHW(t, cl, threads)
+  function resizeArea(t: Tensor, oh: number, ow: number, layout: TorchLayout & { stop?: () => boolean } = {}): Tensor {
+    const cl = !!layout.cl
+    const stop = layout.stop
+    if (oh === 1 && ow === 1) return meanHW(t, cl, sumThreads(layout))
     const out = k.tensor(t.c, oh, ow)
     const inN = t.h * t.w
     const outN = oh * ow
@@ -492,6 +554,8 @@ export function kernelsCore(k: TensorCore, px: PixelsCore) {
   // ── Pools and padding ───────────────────────────────────────────────────
 
   function poolSize(t: Tensor, kk: number, pad: number, stride: number): { oh: number; ow: number } {
+    // torch: "pad should be at most half of effective kernel size".
+    if (pad > Math.floor(kk / 2)) throw new Error(KERNEL_MESSAGES.poolPad)
     const oh = Math.floor((t.h + 2 * pad - kk) / stride) + 1
     const ow = Math.floor((t.w + 2 * pad - kk) / stride) + 1
     if (oh < 1 || ow < 1) throw new Error(ERR.tooSmall)
@@ -659,8 +723,14 @@ export function kernelsCore(k: TensorCore, px: PixelsCore) {
    * refuses it), then the kernel k_y·k_xᵀ over each channel. Computed
    * separably with double sums, rounded to float32 once per output: the same
    * kernel mathematically, 2k taps instead of k². LIBRARY.
+   * PROVEN RANGE: ksize ≤ 181 (ε = 2⁻⁸; every Python caller has σ ≤ 30).
+   * Wider is refused: at (301, 50) torch's own float sums over 90,601 taps
+   * drift to 5.8 × 10⁻³ (255-scale), outside the band (R2.2 review). An even
+   * or non-positive ksize, or σ ≤ 0, is refused as torchvision refuses it.
    */
   function gaussianBlur(t: Tensor, ksize: number, sigma: number, stop?: () => boolean): Tensor {
+    if (!Number.isInteger(ksize) || ksize < 1 || ksize % 2 === 0 || !(sigma > 0)) throw new Error(KERNEL_MESSAGES.blurSize)
+    if (ksize > GAUSSIAN_MAX_KSIZE) throw new Error(KERNEL_MESSAGES.blurTooWide)
     const pad = Math.floor(ksize / 2)
     if (pad >= t.w || pad >= t.h) throw new Error(ERR.tooSmall)
     const kern = Float64Array.from(gaussianKernel1d(ksize, sigma))
@@ -721,40 +791,50 @@ export function kernelsCore(k: TensorCore, px: PixelsCore) {
 
   /**
    * _blend: (ratio·a + (1 − ratio)·b).clamp(0, 1). `b` is a tensor of a's
-   * channels, one channel (broadcast) or a float32 scalar (a mean). EXACT.
+   * channels, one channel (broadcast) or a float32 scalar (a mean). The
+   * clamp is torch's: −0 becomes +0, except in its element loop's scalar
+   * tails (inScalarTail, over the whole batch tensor in `layout`'s memory
+   * order), where −0 stays. EXACT.
    */
-  function blend(a: Tensor, b: Tensor | number, ratio: number): Tensor {
+  function blend(a: Tensor, b: Tensor | number, ratio: number, layout: TorchLayout = {}): Tensor {
     const r = f(ratio)
     const q = f(1 - ratio)
     const out = k.tensor(a.c, a.h, a.w)
     const n = a.w * a.h
+    const total = (layout.batch ?? 1) * a.c * n
+    const threads = layout.threads ?? TORCH_THREADS
     for (let c = 0; c < a.c; c++) {
       for (let i = 0; i < n; i++) {
         const bv = typeof b === 'number' ? b : b.c === 1 ? b.data[i]! : b.data[c * n + i]!
-        out.data[c * n + i] = clamp01(f(f(r * a.data[c * n + i]!) + f(q * bv)))
+        const v = f(f(r * a.data[c * n + i]!) + f(q * bv))
+        out.data[c * n + i] = Object.is(v, -0) && inScalarTail(memoryIndex(a, c, i, layout), total, threads) ? -0 : clamp01(v)
       }
     }
     return out
   }
 
   /** adjust_brightness: _blend with zeros. EXACT. */
-  function adjustBrightness(t: Tensor, factor: number): Tensor {
+  function adjustBrightness(t: Tensor, factor: number, layout: TorchLayout = {}): Tensor {
     needRgbOrGrey(t)
-    return blend(t, 0, factor)
+    return blend(t, 0, factor, layout)
   }
 
   /** adjust_saturation: _blend with the greyscale (one channel: unchanged). EXACT. */
-  function adjustSaturation(t: Tensor, factor: number): Tensor {
+  function adjustSaturation(t: Tensor, factor: number, layout: TorchLayout = {}): Tensor {
     needRgbOrGrey(t)
     if (t.c === 1) return copy(t)
-    return blend(t, rgbToGrayscale(t), factor)
+    return blend(t, rgbToGrayscale(t), factor, layout)
   }
 
-  /** adjust_contrast: _blend with the mean of the greyscale over the whole picture (torch.mean). EXACT at the matched thread count. */
-  function adjustContrast(t: Tensor, factor: number, threads: number = TORCH_THREADS): Tensor {
+  /**
+   * adjust_contrast: _blend with the mean of the greyscale over the whole
+   * picture (torch.mean; its batch decides how the sum is split, meanAll).
+   * EXACT at the matched thread count.
+   */
+  function adjustContrast(t: Tensor, factor: number, layout: TorchLayout = {}): Tensor {
     needRgbOrGrey(t)
     const grey = t.c === 3 ? rgbToGrayscale(t) : t
-    return blend(t, meanAll(grey.data, threads), factor)
+    return blend(t, meanAll(grey.data, layout), factor, layout)
   }
 
   /** adjust_hue: _rgb2hsv, (h + factor) % 1, _hsv2rgb, op by op (one channel: unchanged). EXACT. */
@@ -818,23 +898,58 @@ export function kernelsCore(k: TensorCore, px: PixelsCore) {
 
   /**
    * torch.topk(values, k, largest): the indices of the k largest (smallest),
-   * in order of value; among equal values the lower index first. EXACT where
-   * the values differ; which of several values tied at the cut torch keeps
-   * is its own (the band case).
+   * in order of value; NaN ranks above every number, as in torch (first when
+   * largest, last when smallest); among equal values the lower index first.
+   * A k-heap over typed arrays (O(n log k)), with a Stop check every 65,536
+   * values. EXACT where the values differ; which of several values tied at
+   * the cut torch keeps is its own (the band case).
    */
-  function topk(values: ArrayLike<number>, kk: number, largest = true): Int32Array {
-    const idx = Array.from({ length: values.length }, (_, i) => i)
-    idx.sort((a, b) => {
+  function topk(values: ArrayLike<number>, kk: number, largest = true, stop?: () => boolean): Int32Array {
+    const n = values.length
+    const size = Math.max(0, Math.min(kk, n))
+    /** Whether index a ranks before index b. */
+    const before = (a: number, b: number): boolean => {
       const va = values[a]!
       const vb = values[b]!
-      if (va !== vb) return largest ? vb - va : va - vb
-      return a - b
-    })
-    return Int32Array.from(idx.slice(0, kk))
+      const na = va !== va
+      const nb = vb !== vb
+      if (na || nb) return na && nb ? a < b : largest ? na : nb
+      if (va !== vb) return largest ? va > vb : va < vb
+      return a < b
+    }
+    // A heap whose root is the kept index ranking last.
+    const heap = new Int32Array(size)
+    let used = 0
+    const down = (at: number) => {
+      for (;;) {
+        const l = 2 * at + 1
+        if (l >= used) return
+        const r = l + 1
+        const worst = r < used && before(heap[l]!, heap[r]!) ? r : l
+        if (!before(heap[at]!, heap[worst]!)) return
+        const tmp = heap[at]!; heap[at] = heap[worst]!; heap[worst] = tmp
+        at = worst
+      }
+    }
+    for (let i = 0; i < n && size > 0; i++) {
+      if (stop && (i & 65535) === 0 && stop()) throw new Error('Stopped')
+      if (used < size) {
+        let at = used++
+        heap[at] = i
+        while (at > 0) {
+          const up = (at - 1) >> 1
+          if (!before(heap[up]!, heap[at]!)) break
+          const tmp = heap[at]!; heap[at] = heap[up]!; heap[up] = tmp
+          at = up
+        }
+      }
+      else if (before(i, heap[0]!)) { heap[0] = i; down(0) }
+    }
+    return heap.sort((a, b) => (before(a, b) ? -1 : 1))
   }
 
   return {
-    TORCH_VEC, GRAIN, TORCH_THREADS, fmaf,
+    TORCH_VEC, GRAIN, TORCH_THREADS, GAUSSIAN_MAX_KSIZE, KERNEL_MESSAGES, fmaf, clamp01, inScalarTail,
     sumContiguous, sumStrided, sumAll, meanAll,
     linspace, arange, remainder, powScalar, unary,
     areaOutSize, resizeArea, resizeNearest, resizeBilinear, resizeBicubic,

@@ -33,7 +33,7 @@ const tk = effectCores.tk
 
 // ── The fixture ──────────────────────────────────────────────────────────────
 
-interface InputSpec { shape: [number, number, number]; seed: number; lo: number; hi: number; memory: 'contiguous' | 'channels-last'; levels?: number }
+interface InputSpec { shape: [number, number, number]; seed: number; lo: number; hi: number; memory: 'contiguous' | 'channels-last'; levels?: number; neg_zero_every?: number; nan_every?: number }
 type Band = Record<'trunc' | 'round', { count: number; in: string; py8: string }>
 interface KOut { shape: number[]; f32_sha256: string; f32?: string; f32z?: string; bands?: Record<string, Band> }
 interface KCase {
@@ -63,7 +63,13 @@ function hashedValues(n: number, seed: number, lo = 0, hi = 1, levels = 0): Floa
   return out
 }
 
-const tensorOf = (s: InputSpec): Tensor => ({ c: s.shape[0], h: s.shape[1], w: s.shape[2], data: hashedValues(s.shape[0] * s.shape[1] * s.shape[2], s.seed, s.lo, s.hi, s.levels ?? 0) })
+/** A case's input tensor (planar); every `neg_zero_every`-th value −0 and every `nan_every`-th NaN, as the fixture sets them. */
+function tensorOf(s: InputSpec): Tensor {
+  const data = hashedValues(s.shape[0] * s.shape[1] * s.shape[2], s.seed, s.lo, s.hi, s.levels ?? 0)
+  if (s.neg_zero_every) for (let i = 0; i < data.length; i += s.neg_zero_every) data[i] = -0
+  if (s.nan_every) for (let i = 0; i < data.length; i += s.nan_every) data[i] = Number.NaN
+  return { c: s.shape[0], h: s.shape[1], w: s.shape[2], data }
+}
 
 /** The fixture's grid edits: every 7th value on an edge (±1 alternately), every 11th from the 4th at 0. */
 function gridPlane(s: InputSpec): Float32Array {
@@ -73,9 +79,22 @@ function gridPlane(s: InputSpec): Float32Array {
   return v
 }
 
-/** What a case's kernel makes, as planar float32 planes (one per output). */
+/** What a case's kernel makes, as planar float32 planes (one per output; a batch case: one per picture). */
 function run(c: KCase): Float32Array[] {
   const a = c.args
+  if (a.batch) {
+    return c.inputs.map((spec, index) => {
+      const t = tensorOf(spec)
+      const layout = { cl: spec.memory === 'channels-last', batch: a.batch as number, index }
+      switch (c.fn) {
+        case 'meanAll': return Float32Array.of(kn.meanAll(t.data, layout))
+        case 'adjustContrast': return kn.adjustContrast(t, a.f, layout).data
+        case 'adjustBrightness': return kn.adjustBrightness(t, a.f, layout).data
+        case 'resizeArea': return kn.resizeArea(t, a.oh, a.ow, layout).data
+        default: throw new Error(`no batch kernel ${c.fn}`)
+      }
+    })
+  }
   const ins = c.inputs.map(tensorOf)
   const cl = c.inputs[0]?.memory === 'channels-last'
   const t = ins[0]!
@@ -87,7 +106,7 @@ function run(c: KCase): Float32Array[] {
     case 'powScalar': return d(kn.powScalar(t, a.e))
     case 'unary': return d(kn.unary(t, a.op, ins[1]))
     case 'areaOutSize': return [Float32Array.of(kn.areaOutSize(a.in, a.scale))]
-    case 'resizeArea': return d(kn.resizeArea(t, a.oh, a.ow, cl))
+    case 'resizeArea': return d(kn.resizeArea(t, a.oh, a.ow, { cl }))
     case 'resizeNearest': return d(kn.resizeNearest(t, a.oh, a.ow))
     case 'resizeBilinear': return d(kn.resizeBilinear(t, a.oh, a.ow, cl))
     case 'resizeBicubic': return d(kn.resizeBicubic(t, a.oh, a.ow))
@@ -105,10 +124,10 @@ function run(c: KCase): Float32Array[] {
     case 'gaussianKernel1d': return [kn.gaussianKernel1d(a.ksize, a.sigma)]
     case 'gaussianBlur': return d(kn.gaussianBlur(t, a.ksize, a.sigma))
     case 'rgbToGrayscale': return d(kn.rgbToGrayscale(t))
-    case 'blend': return d(kn.blend(t, ins[1]!, a.ratio))
-    case 'adjustBrightness': return d(kn.adjustBrightness(t, a.f))
-    case 'adjustSaturation': return d(kn.adjustSaturation(t, a.f))
-    case 'adjustContrast': return d(kn.adjustContrast(t, a.f))
+    case 'blend': return d(kn.blend(t, ins[1]!, a.ratio, { cl }))
+    case 'adjustBrightness': return d(kn.adjustBrightness(t, a.f, { cl }))
+    case 'adjustSaturation': return d(kn.adjustSaturation(t, a.f, { cl }))
+    case 'adjustContrast': return d(kn.adjustContrast(t, a.f, { cl }))
     case 'adjustHue': return d(kn.adjustHue(t, a.f))
     case 'meanAll': return [Float32Array.of(kn.meanAll(t.data))]
     default: throw new Error(`no kernel ${c.fn}`)
@@ -125,6 +144,7 @@ const pyFloats = (o: KOut): Float32Array | null => {
 function errorKey(e: { type: string; message: string }): string {
   if (/permitted channel values/.test(e.message)) return 'EFFECT_NEEDS_RGB'
   if (/Padding size should be less|Output size is too small/.test(e.message)) return 'EFFECT_PICTURE_TOO_SMALL'
+  if (/pad should be at most half/.test(e.message)) return kn.KERNEL_MESSAGES.poolPad
   throw new Error(`unmapped Python error: ${e.message}`)
 }
 
@@ -166,18 +186,23 @@ function ulps(a: number, b: number): number {
 /**
  * Each library kernel's ε (255-scale): the smallest fixture candidate at or
  * above its largest measured difference from torch over the values 8-bit
- * output can tell apart (both clamped to [−0.01, 1.01]), so the band holds
- * for any value, not only the fixture's. The test shows the next smaller
- * candidate is under that difference. gaussianBlur's error is mostly
- * torch's own float sums over k² taps (181: 1.4 × 10⁻³). Transcendental and
+ * output can tell apart (both clamped to [−0.01, 1.01]). That is proven for
+ * the fixture's cases only: the kernels, sizes and ranges below. A family
+ * with other weights or wider blurs must measure again (these tests fail
+ * loudly if a new fixture case exceeds ε). The test shows the next smaller
+ * candidate is under the measured difference. gaussianBlur's error is mostly
+ * torch's own float sums over k² taps (181: 1.4 × 10⁻³); its proven range is
+ * ksize ≤ 181, wider is refused ((301, 50) measured 5.8 × 10⁻³ in review, so
+ * it is not an acceptance case). conv2d's covers random normalised and
+ * unnormalised kernels (−2…2) up to 21 × 21. Transcendental and
  * kernel-weight results also carry their largest difference in float32 ulps.
  */
 const EPS = {
   powScalar: 2 ** -12,
   unary: 2 ** -12,
   affineGrid: 2 ** -12,
-  conv2dDepthwise: 2 ** -12,
-  conv2dSame: 2 ** -12,
+  conv2dDepthwise: 2 ** -8,
+  conv2dSame: 2 ** -8,
   gaussianKernel1d: 2 ** -12,
   gaussianBlur: 2 ** -8,
 } as const
@@ -210,8 +235,8 @@ describe('the kernels fixture', () => {
       'gaussianKernel1d', 'gaussianBlur', 'rgbToGrayscale', 'blend', 'adjustBrightness', 'adjustSaturation', 'adjustContrast', 'adjustHue', 'meanAll']) {
       expect(fns.has(fn), fn).toBe(true)
     }
-    expect(CASES.length).toBe(505)
-    expect(FX.topk.length).toBe(6)
+    expect(CASES.length).toBe(548)
+    expect(FX.topk.length).toBe(8)
   })
 })
 
@@ -221,7 +246,7 @@ describe('exact kernels: torch’s float32, bit for bit', () => {
       if (c.error) {
         const key = errorKey(c.error)
         expect(() => run(c)).toThrow(key)
-        expect(EFFECT_ERROR_MESSAGES[key]).toBeTruthy()
+        expect(EFFECT_ERROR_MESSAGES[key] ?? Object.values(kn.KERNEL_MESSAGES).find(m => m === key)).toBeTruthy()
         return
       }
       const got = run(c)
@@ -312,7 +337,7 @@ describe('topk', () => {
       // The values in order, bit for bit.
       expect([...got].map(i => values[i]!)).toEqual([...want])
       // Every index torch keeps above the cut is kept; at the cut any of the tied ones will do.
-      const above = (i: number) => (c.largest ? values[i]! > c.cut : values[i]! < c.cut)
+      const above = (i: number) => (c.largest ? Number.isNaN(values[i]!) || values[i]! > c.cut : values[i]! < c.cut)
       expect(new Set([...got].filter(above))).toEqual(new Set(c.indices.filter(above)))
       for (const i of got) if (!above(i)) expect(values[i]).toBe(Math.fround(c.cut))
       expect(new Set(got).size).toBe(c.k)
@@ -333,6 +358,42 @@ describe('the kernels’ own rules', () => {
     expect(() => kn.padReflect(t, 7, 0, 0, 0)).toThrow('EFFECT_PICTURE_TOO_SMALL')
     expect(() => kn.gaussianBlur(t, 11, 2)).toThrow('EFFECT_PICTURE_TOO_SMALL')
     expect(kn.padReflect(t, 6, 6, 4, 4).w).toBe(19)
+  })
+
+  it('refuses what torch refuses: a pool padded over half its window, an even or empty blur, a blur wider than its proven range', () => {
+    const t = tensorOf({ shape: [1, 400, 400], seed: 1, lo: 0, hi: 1, memory: 'contiguous' })
+    expect(() => kn.avgPool2d(t, 3, 2)).toThrow(kn.KERNEL_MESSAGES.poolPad)
+    expect(() => kn.maxPool2d(t, 2, 2)).toThrow(kn.KERNEL_MESSAGES.poolPad)
+    expect(kn.maxPool2d(t, 2, 1).w).toBe(401)
+    expect(() => kn.gaussianBlur(t, 4, 1)).toThrow(kn.KERNEL_MESSAGES.blurSize)
+    expect(() => kn.gaussianBlur(t, 0, 1)).toThrow(kn.KERNEL_MESSAGES.blurSize)
+    expect(() => kn.gaussianBlur(t, 5, 0)).toThrow(kn.KERNEL_MESSAGES.blurSize)
+    expect(kn.GAUSSIAN_MAX_KSIZE).toBe(181)
+    expect(() => kn.gaussianBlur(t, 183, 30)).toThrow(kn.KERNEL_MESSAGES.blurTooWide)
+    expect(() => kn.gaussianBlur(t, 301, 50)).toThrow(kn.KERNEL_MESSAGES.blurTooWide)
+  })
+
+  it('an area resize to 0 rows is an empty picture, as torch returns', () => {
+    const t = tensorOf({ shape: [3, 5, 7], seed: 1, lo: 0, hi: 1, memory: 'contiguous' })
+    expect(kn.resizeArea(t, 0, 3).data.length).toBe(0)
+  })
+
+  it('clamp: −0 comes out +0 (torch’s vector loop), NaN stays NaN', () => {
+    expect(Object.is(kn.clamp01(-0), 0)).toBe(true)
+    expect(kn.clamp01(Number.NaN)).toBeNaN()
+    expect(kn.clamp01(-3)).toBe(0)
+    expect(kn.clamp01(3)).toBe(1)
+    // A 63-value tensor runs 56 values in pairs of vectors, the last 7 one by one.
+    expect(kn.inScalarTail(55, 63, 6)).toBe(false)
+    expect(kn.inScalarTail(56, 63, 6)).toBe(true)
+    // 70,000 values: 3 OpenMP chunks of 23,334 (tails of 6) and a last of 23,332 (tail of 4).
+    expect([23327, 23328, 23333, 23334, 69995, 69996].map(m => kn.inScalarTail(m, 70000, 6))).toEqual([false, true, true, false, false, true])
+  })
+
+  it('a batch of two or more sums each picture on one thread (torch splits over the batch)', () => {
+    const v = hashedValues(1_000_003, 9)
+    expect(kn.meanAll(v, { batch: 2 })).toBe(kn.meanAll(v, { threads: 1 }))
+    expect(kn.meanAll(v, { batch: 2 })).not.toBe(kn.meanAll(v))
   })
 
   it('a long sum is split between threads as torch splits it (the chunks change the float)', () => {
@@ -356,6 +417,34 @@ describe('speed', () => {
     // EFFECT_MAX_WORK is sized so its heaviest case takes under 60 s.
     expect(s).toBeLessThan(60)
   }, 120_000)
+})
+
+// ── topk at 8192² ────────────────────────────────────────────────────────────
+
+describe('topk at 8192²', () => {
+  const n = 8192 * 8192
+  const values = hashedValues(n, 11)
+
+  it('selects the 100 largest of 67 million values in seconds, not a full sort', () => {
+    const t0 = performance.now()
+    const got = kn.topk(values, 100, true)
+    const s = (performance.now() - t0) / 1000
+    measured['speed: topk k 100 of 8192² (dmax = seconds)'] = { dmax: s, ulpMax: 0 }
+    expect(got.length).toBe(100)
+    // Every kept value is at least the 100th, and they come in order.
+    const cut = values[got[99]!]!
+    let above = 0
+    for (let i = 0; i < n; i++) if (values[i]! > cut) above++
+    expect(above).toBeLessThan(100)
+    for (let j = 1; j < 100; j++) expect(values[got[j - 1]!]! >= values[got[j]!]!).toBe(true)
+    expect(s).toBeLessThan(20)
+  }, 120_000)
+
+  it('stops when asked', () => {
+    let calls = 0
+    expect(() => kn.topk(values, 100, true, () => ++calls > 3)).toThrow('Stopped')
+    expect(calls).toBe(4)
+  })
 })
 
 // ── The esbuild guard: the kernels built as Nitro builds server code ─────────
