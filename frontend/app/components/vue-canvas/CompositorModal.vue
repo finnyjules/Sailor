@@ -2098,7 +2098,7 @@ async function deleteNodeAnchor() {
 const brush = useBrushPaint()
 // The in-progress Paint-mode tip stroke (see onTipPointerDown). Declared here, before
 // renderStack, so a render during setup never reads it in its temporal dead zone.
-let tipLive: { layerId: string; pending: BrushLayer | null; s: TipStroke; down: boolean; raf: number } | null = null
+let tipLive: { layerId: string; pending: BrushLayer | null; s: TipStroke; down: boolean; raf: number; lastMoveT: number } | null = null
 
 function clientToNorm(e: PointerEvent | MouseEvent) {
   const r = canvasRect(); if (!r) return null
@@ -2514,7 +2514,7 @@ function onKeydown(e: KeyboardEvent) {
   const meta = e.metaKey || e.ctrlKey
   if (meta && (e.key === 'z' || e.key === 'Z') && !editingId.value) {
     e.preventDefault(); e.stopPropagation()
-    if (e.shiftKey) redo(); else undo()
+    if (e.shiftKey) redoFrame(); else undoFrame()
   } else if (meta && (e.key === 'g' || e.key === 'G') && !editingId.value) {
     e.preventDefault(); e.stopPropagation()
     if (e.shiftKey) ungroupSelected(); else groupSelected()
@@ -6958,16 +6958,22 @@ function activeBrushLayer(): BrushLayer | null {
 // commit); `layerId` is its id or the existing target's. After release a spray stroke stays
 // there while its drips run (`raf` = the hold / tail loop).
 const DRIP_TAIL_CAP_MS = 2000
+// Hold samples only once the pointer has stopped: while it moves, the move samples carry the
+// timing, and interleaved zero-motion samples would halve bristle's speed estimate and skew
+// spray pooling. Held still, the loop still records dwell (spray pools, then drips).
+const TIP_HOLD_AFTER_MS = 20
 function tipHoldLoop() {
   const L = tipLive; if (!L || !L.down) return
-  brush.holdTipStroke(performance.now()) // performance.now() and e.timeStamp share one timebase
-  renderStack()
+  const now = performance.now() // performance.now() and e.timeStamp share one timebase
+  if (now - L.lastMoveT > TIP_HOLD_AFTER_MS) { brush.holdTipStroke(now); renderStack() }
   L.raf = requestAnimationFrame(tipHoldLoop)
 }
 function onTipPointerDown(e: PointerEvent, p: { nx: number; ny: number }) {
   // A spray stroke still dripping from the last release: commit it first, so this stroke
   // targets the same layer (it becomes brushLayerId) and history keeps one step per stroke.
-  if (tipLive) { if (tipLive.down) return; commitTipStroke() }
+  // A stroke still `down` here means its up/cancel never arrived: end and commit it too, so
+  // its hold loop can't run forever.
+  if (tipLive) commitTipStroke()
   const existing = activeBrushLayer()
   // An eraser stroke with no brush layer to carve does nothing (no empty layer is created).
   if (!existing && brush.eraser.value) return
@@ -6976,7 +6982,7 @@ function onTipPointerDown(e: PointerEvent, p: { nx: number; ny: number }) {
   const s = brush.liveTipStroke(); if (!s) return
   const pending = existing ? null : createBrushLayer({ fill: brush.color.value })
   const layerId = existing ? existing.id : pending!.id
-  tipLive = { layerId, pending, s, down: true, raf: 0 }
+  tipLive = { layerId, pending, s, down: true, raf: 0, lastMoveT: e.timeStamp }
   setLiveTipStroke(layerId, s)
   tipLive.raf = requestAnimationFrame(tipHoldLoop)
 }
@@ -6987,6 +6993,7 @@ function onTipPointerMove(e: PointerEvent) {
     const q = clientToNorm(ev); if (!q) continue
     const wn = toWidthNorm(q.nx, q.ny, canvasDisplay.w, canvasDisplay.h)
     brush.extendTipStroke(wn.x, wn.y, ev.timeStamp)
+    L.lastMoveT = ev.timeStamp
   }
   renderStack()
 }
@@ -7039,6 +7046,11 @@ function commitTipStroke() {
   }
   renderStack()
 }
+// Undo / redo (⌘Z, ⇧⌘Z and the buttons) while a tip stroke is in flight: during the spray
+// drip tail, commit it first so undo takes back THIS stroke (not the step before it, with the
+// tail then landing on top); while the pointer is still down, do nothing.
+function undoFrame() { if (tipLive) { if (tipLive.down) return; commitTipStroke() } undo() }
+function redoFrame() { if (tipLive) { if (tipLive.down) return; commitTipStroke() } redo() }
 // The tool closing (B, Done, Escape, another tool) or flipping to Mask mid-stroke or
 // mid-drip commits what is there immediately.
 watch([brush.active, brush.mode], ([on, m]) => { if (!on || m !== 'paint') commitTipStroke() })
@@ -9546,11 +9558,11 @@ onUnmounted(() => {
         <!-- Undo / redo — kept in inpaint mode too (take back a brush stroke). -->
         <div class="w-px h-5 bg-white/10 mx-0.5" />
         <button class="flex items-center justify-center size-8 rounded cursor-pointer disabled:opacity-30 hover:bg-white/10 text-white/80"
-          title="Undo (⌘Z)" :disabled="!canUndo" @click="undo">
+          title="Undo (⌘Z)" :disabled="!canUndo" @click="undoFrame">
           <Undo2 class="size-4" />
         </button>
         <button class="flex items-center justify-center size-8 rounded cursor-pointer disabled:opacity-30 hover:bg-white/10 text-white/80"
-          title="Redo (⌘⇧Z)" :disabled="!canRedo" @click="redo">
+          title="Redo (⌘⇧Z)" :disabled="!canRedo" @click="redoFrame">
           <Redo2 class="size-4" />
         </button>
         <!-- Canvas tools — collapse out as the inpaint controls expand in. Both run
@@ -10140,7 +10152,8 @@ onUnmounted(() => {
       <template v-else-if="brush.active.value">
         <div class="px-4 py-3 border-b border-white/10 flex items-center gap-2">
           <Brush class="size-3.5 text-white/70" />
-          <span class="text-sm font-medium">Brush</span>
+          <!-- Paint mode's title is BrushTipSettings' own "Brush · <tip>" header below. -->
+          <span v-if="brush.mode.value !== 'paint'" class="text-sm font-medium">Brush</span>
           <button class="ml-auto text-white/40 hover:text-white/80 p-1" title="Done (B)" @click="toggleBrush"><X class="size-3.5" /></button>
         </div>
         <!-- Paint mode: the current tip's settings (tip, size, colour and eraser are in the
