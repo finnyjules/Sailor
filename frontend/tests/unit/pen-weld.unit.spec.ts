@@ -543,3 +543,44 @@ describe('final review — welding rejoins trimmed pieces', () => {
     expect(paths(doc.value)[0].closed).toBe(true)
   })
 })
+
+describe('final review — a join keeps the selected segment pointing at the same piece', () => {
+  function build() {
+    let a = '', b = '', c = '', e = '', p1 = ''
+    const { doc, pen } = mk(d => {
+      a = addPoint(d, 0, 0); b = addPoint(d, 6, 0); c = addPoint(d, 6, 6)
+      p1 = addPath(d, [a, b, c], [{ kind: 'line' }, { kind: 'line' }])
+      e = addPoint(d, -1, -5)
+      addPath(d, [addPoint(d, -6, -5), e], [{ kind: 'line' }])
+    })
+    return { doc, pen, a, b, c, e, p1 }
+  }
+  const selectedPair = (pen: ReturnType<typeof usePen>, d: SketchDoc) => {
+    const s = pen.selectedSegments.value[0]!
+    const p = P(d, s.pathId)
+    return [p.anchors[s.segIndex], p.anchors[(s.segIndex + 1) % p.anchors.length]].sort()
+  }
+
+  it('dragging another path’s end onto the selected path’s start (which reverses it) keeps b→c selected', () => {
+    const { doc, pen, a, b, c, e, p1 } = build()
+    pen.pickSegment(p1, 1)
+    dragTo(pen, doc.value, e, 0.1, 0.1)
+    pen.dropPoint(e)
+    expect(paths(doc.value)).toHaveLength(1)
+    expect(pen.selectedSegments.value).toHaveLength(1)
+    expect(selectedPair(pen, doc.value)).toEqual([b, c].sort())
+    pen.del()
+    const left = paths(doc.value)
+    expect(left.some(p => p.anchors.includes(a) && p.anchors.includes(b))).toBe(true)   // b→a survives
+    expect(P(doc.value, c)).toBeUndefined()
+  })
+
+  it('a segment dragged onto nothing new keeps its own index (plain drag, no join)', () => {
+    const { doc, pen, b, c, e, p1 } = build()
+    pen.pickSegment(p1, 1)
+    dragTo(pen, doc.value, e, -3, -8)
+    pen.dropPoint(e)
+    expect(pen.selectedSegments.value).toEqual([{ pathId: p1, segIndex: 1 }])
+    expect(selectedPair(pen, doc.value)).toEqual([b, c].sort())
+  })
+})

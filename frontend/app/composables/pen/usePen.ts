@@ -456,8 +456,10 @@ export function usePen(opts: {
       const refusal = joinRefusal(gone, keep)
       if (refusal) { status.value = refusal; return }
       clearSel()
+      const pairs = segmentPairs()
       if (!mergePoints(doc.value, gone, keep)) { status.value = BOTH_FIXED; return }
       pruneSelections()
+      segmentsAfterMerge(pairs, gone, keep)
       runSolve()
       const k = doc.value.entities.find(e => e.id === keep)
       if (k?.kind === 'point') sparkle(k.x, k.y)
@@ -1348,6 +1350,34 @@ export function usePen(opts: {
   }
   // drop selection entries a merge left pointing at nothing (a path that
   // became a circle, a segment index past a shortened path's end)
+  // Selected segments by their two anchors, captured before a merge. A merge
+  // can join two paths (mergePoints → joinOpenEnds), which may reverse the
+  // path that keeps its id, so a {pathId, segIndex} no longer names the same
+  // piece; segmentsAfterMerge finds each piece again by its anchors (`from`
+  // now reads as `into`), either way round, dropping any that are gone.
+  function segmentPairs(): [EntityId, EntityId][] {
+    const ents = new Map(doc.value.entities.map(e => [e.id, e]))
+    const out: [EntityId, EntityId][] = []
+    for (const sg of selectedSegments.value) {
+      const p = ents.get(sg.pathId)
+      if (!p || p.kind !== 'path') continue
+      const n = p.anchors.length
+      if (sg.segIndex >= (p.closed ? n : n - 1)) continue
+      out.push([p.anchors[sg.segIndex]!, p.anchors[(sg.segIndex + 1) % n]!])
+    }
+    return out
+  }
+  function segmentsAfterMerge(pairs: [EntityId, EntityId][], from: EntityId, into: EntityId): void {
+    const sw = (id: EntityId) => (id === from ? into : id)
+    const out: { pathId: EntityId; segIndex: number }[] = []
+    for (const [a0, b0] of pairs) {
+      const a = sw(a0), b = sw(b0)
+      if (a === b) continue
+      const hit = findSegment(a, b) ?? findSegment(b, a)
+      if (hit && !out.some(o => o.pathId === hit.pathId && o.segIndex === hit.segIndex)) out.push(hit)
+    }
+    selectedSegments.value = out
+  }
   function pruneSelections(): void {
     const ents = new Map(doc.value.entities.map(e => [e.id, e]))
     selection.value = selection.value.filter(id => ents.has(id))
@@ -1374,9 +1404,11 @@ export function usePen(opts: {
     dragPointer = null
     let joined = false
     if (snap?.kind === 'coincident') {
+      const pairs = segmentPairs()
       if (mergePoints(doc.value, id, snap.targetId)) {
         joined = true
         pruneSelections()
+        segmentsAfterMerge(pairs, id, snap.targetId)
         runSolve()
         const t = doc.value.entities.find(e => e.id === snap.targetId)
         if (t?.kind === 'point') sparkle(t.x, t.y)

@@ -852,6 +852,7 @@ function joinOpenEnds(doc: SketchDoc, x: EntityId, keepIds: Set<EntityId>): Enti
   if (q.anchors[0] !== x) reversePath(q)                        // q starts at x
   p.anchors = [...p.anchors, ...q.anchors.slice(1)]
   p.segments = [...p.segments, ...q.segments]
+  // rules naming q's own id go with it (dropPathEntity); the pen makes none today
   dropPathEntity(doc, q)
   return p.id
 }
