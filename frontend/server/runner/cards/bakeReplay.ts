@@ -76,9 +76,9 @@ export function bakeRefusalWords(classType: string, why: string): string {
  * Frame reads its file as before), and the Image card file behind a picture
  * utility's picture wire (R1.4). A card whose settings name no file names none.
  */
-export function cardPictureFiles(prompt: ApiPrompt, families: ReadonlySet<RunnerFamily>): { nodeId: string; classType: string; file: OutputFile }[] {
+export function cardPictureFiles(prompt: ApiPrompt, families: ReadonlySet<RunnerFamily>): CardPictureFile[] {
   if (!families.has('cards')) return []
-  const out: { nodeId: string; classType: string; file: OutputFile }[] = []
+  const out: CardPictureFile[] = []
   for (const [nodeId, n] of Object.entries(prompt)) {
     const inputs = n.inputs ?? {}
     const add = (raw: unknown) => {
@@ -96,9 +96,19 @@ export function cardPictureFiles(prompt: ApiPrompt, families: ReadonlySet<Runner
       const behind = cardFileBehind(prompt, read)
       if (behind) out.push({ ...behind, classType: 'Image' })
     }
+    // Save image and Preview image (R1.5) save every frame of the batch a
+    // loader makes of an animation; the runner hands on its first frame, so
+    // the loader's file must be one frame.
+    if ((n.class_type === 'SaveImage' || n.class_type === 'PreviewImage') && isLink(inputs.images)) {
+      const behind = loaderFileBehind(prompt, inputs.images)
+      if (behind) out.push({ ...behind, oneFrame: true })
+    }
   }
   return out
 }
+
+/** A file cardPictureFiles names; `oneFrame`: one with several frames is refused too (PICTURE_ANIMATED). */
+export interface CardPictureFile { nodeId: string; classType: string; file: OutputFile; oneFrame?: true }
 
 /** The picture input of each picture utility (R1.4). */
 const PICTURE_READS: Readonly<Record<string, string>> = { GetImageSize: 'image', ImageToMask: 'image', TextMask: 'source' }
@@ -126,6 +136,35 @@ function cardFileBehind(prompt: ApiPrompt, link: ApiLink, depth = 0): { nodeId: 
     next = pass ? inputs[pass] : undefined
   }
   return isLink(next) ? cardFileBehind(prompt, next, depth + 1) : null
+}
+
+/**
+ * The loader whose own file a picture wire brings, a LoadImage's or an Image
+ * card's (Python loads every frame of either as a batch), followed back as
+ * cardFileBehind follows it; null when the picture is made in the run.
+ */
+export function loaderFileBehind(prompt: ApiPrompt, link: ApiLink, depth = 0): { nodeId: string; classType: string; file: OutputFile } | null {
+  const node = prompt[link[0]]
+  if (!node || depth > 64) return null
+  const inputs = node.inputs ?? {}
+  let next: unknown
+  if (node.class_type === 'LoadImage') {
+    const file = link[1] === 0 ? parseInputFileRef(inputs.image) : null
+    return file ? { nodeId: link[0], classType: 'LoadImage', file } : null
+  }
+  if (node.class_type === 'Image') {
+    if (!isLink(inputs.images)) {
+      const file = parseInputFileRef(inputs.image)
+      return file ? { nodeId: link[0], classType: 'Image', file } : null
+    }
+    next = inputs.images
+  }
+  else if (node.class_type === GATE_CLASS) next = inputs.data_in
+  else {
+    const pass = PROVIDER_TYPES.has(node.class_type) ? actionPassThrough(node.class_type, inputs) : null
+    next = pass ? inputs[pass] : undefined
+  }
+  return isLink(next) ? loaderFileBehind(prompt, next, depth + 1) : null
 }
 
 /** What the start of a run says of a card's file that would be refused (`why`: one of the PICTURE_* words). */

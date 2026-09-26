@@ -33,7 +33,7 @@ import { linkedFileCheck, measuredInputProblem, requestProblems, unreadableInput
 import { isReusable, requestFingerprint } from './fingerprint'
 import { assertFilesOwned, collectInputFiles, parseInputFileRef, type OwnershipCheck } from './inputs'
 import { cardPictureFiles, cardPictureRefusal } from './cards/bakeReplay'
-import { pictureRefusal } from './pictures/pythonView'
+import { PICTURE_ANIMATED, pictureHasFrames, pictureMeta, pictureRefusal } from './pictures/pythonView'
 import { extraPromptText, hasOutputNode, measuredInput, nodeCredits, stageEstimate, unpricedProviderNode, type Metering } from './metering'
 import { ev, type RunEvents, type SwitchReason } from './events'
 import { mediaNodeKind, nodeMediaChangedWords, nodeMediaCheck, nodeMediaFiles } from './nodeMedia'
@@ -808,7 +808,9 @@ export function createEngine(deps: EngineDeps) {
     for (const id of legIds) {
       const rec = take.nodes[id]!
       // A node that handed its picture on (no call, so no endpoint) made nothing new.
-      if (rec.status === 'done' && !rec.reused && rec.endpoint !== null && PROVIDER_TYPES.has(rec.classType)) {
+      // A local render made its own files; those in the output folder are Save image's assets (R1.5).
+      const made = (rec.endpoint !== null && PROVIDER_TYPES.has(rec.classType)) || LOCAL_RENDER_TYPES.has(rec.classType)
+      if (rec.status === 'done' && !rec.reused && made) {
         outputs.push(...rec.outputs.filter(f => f.type === 'output'))
         if (rec.servedBy) servedBy[id] = rec.servedBy
       }
@@ -977,24 +979,37 @@ export function createEngine(deps: EngineDeps) {
       reads.clear()
       // Computed here from the node's inputs (the cards, R0/R1): no provider, no charge.
       if (plan.kind === 'derive') {
+        // Files saved into the output folder (Save image, R1.5): the run's
+        // assets, owned by the user and listed in the take's record.
+        const assets: OutputFile[] = []
         const made = await plan.derive({
           read: readOnce,
           keep: (bytes, ext) => kept.put(run.id, bytes, ext),
           saveAsset: async (bytes, o) => {
-            const f = await deps.results.save(bytes, { userId: run.userId, prefix: o.prefix, ext: o.ext })
-            await deps.metering.addOutput(run.userId, stageKey, f)
+            const folder = o.folder ?? 'output'
+            const f = await deps.results.save(bytes, {
+              userId: run.userId, prefix: o.prefix, ext: o.ext, folder,
+              ...(o.subfolder !== undefined ? { subfolder: o.subfolder } : {}),
+              ...(o.counter ? { counter: o.counter } : {}),
+            })
+            if (folder === 'output') {
+              await deps.metering.addOutput(run.userId, stageKey, f)
+              assets.push(f)
+            }
             return f
           },
           savePreview: (bytes, o) => deps.results.saveLivePreview(bytes, { nodeId: o.nodeId ?? id, userId: run.userId }),
+          savePreviewAs: (bytes, o) => deps.results.savePreviewAs(bytes, { filename: o.filename, userId: run.userId }),
           hosted: deps.hosted(),
           signal,
           nodeId: id,
           runWorkflow: run.workflow,
+          runPrompt: take.prompt,
         })
         if (signal.aborted) throw new RunStopped()
         for (const v of Object.values(made.values)) checkValue(v)
         rec.values = made.values
-        rec.outputs = filesOfValues(made.values)
+        rec.outputs = [...filesOfValues(made.values), ...assets]
         rec.status = 'done'
         rec.endedAt = deps.now()
         await persist(run)
@@ -1537,6 +1552,10 @@ export function createEngine(deps: EngineDeps) {
         catch { continue }
         const why = await pictureRefusal(bytes)
         if (why) throw refuse(cardPictureRefusal(c.classType, why), 400, { nodeId: c.nodeId, classType: c.classType, file: c.file.filename })
+        // Save image / Preview image behind a loader (R1.5): Python saves every frame of an animation.
+        if (c.oneFrame && pictureHasFrames(await pictureMeta(bytes), bytes)) {
+          throw refuse(PICTURE_ANIMATED, 400, { nodeId: c.nodeId, classType: c.classType, file: c.file.filename })
+        }
       }
     }
     await deps.metering.moderate(prompts, prompts.flatMap(p => staticWiredTexts(p)))

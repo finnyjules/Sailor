@@ -22,7 +22,7 @@ import { graphInputSeconds, mediaSeconds, seedanceReferenceSeconds, type MediaFi
 import { MeterRefusalError } from './requestMeter'
 import { createGraphRun, resolveGraphRun, outputKey, ownedOutputKeys } from './graphRuns'
 import { partialCharge, settleOnCompletion, type HistoryEntry, type RunChargePlan } from './settleWatcher'
-import { LOCAL_RENDER_TYPES } from '#shared/runner/eligibility'
+import { FRAME_RENDER_TYPES } from '#shared/runner/eligibility'
 import { stripForeignComfyOrgCreds } from './spikeAuth'
 import { resolveWorkerTarget } from './workerRoute'
 import { getLiveLedger } from './ledgerLive'
@@ -733,7 +733,7 @@ export async function handleMeteredPrompt(event: H3Event): Promise<any> {
  * local renders (the Frame), which earn the render credit when they finish.
  */
 export function chargePlanOf(prompt: Record<string, any>, nodes: Record<string, number>, base: number): RunChargePlan {
-  const renderNodes = Object.keys(prompt).filter(id => LOCAL_RENDER_TYPES.has(prompt[id]?.class_type)).sort()
+  const renderNodes = Object.keys(prompt).filter(id => FRAME_RENDER_TYPES.has(prompt[id]?.class_type)).sort()
   return { nodes: { ...nodes }, base, renderNodes }
 }
 

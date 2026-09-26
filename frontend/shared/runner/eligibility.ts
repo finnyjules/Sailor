@@ -628,6 +628,25 @@ export const RUNNER_NODE_RULES: Readonly<Record<string, RunnerNodeRule>> = {
     family: 'cards', local: 'source', mustLink: ['image'], imageInputs: ['image'],
     widgets: { channel: { type: 'COMBO', required: true, options: ['red', 'green', 'blue', 'alpha'] } },
   },
+  // ── cards (step 3, R1.5): Save image and Preview image (server/runner/cards/saveImage.ts) ──
+  // They write files, so they count as work (spec ruling 5): a workflow of
+  // only cards and a Save image runs in the runner. The widgets as nodes.py
+  // SaveImage declares them; Preview image has none but its pictures, and
+  // nothing may read the pictures it hands on.
+  SaveImage: {
+    family: 'cards', local: 'render', mustLink: ['images'], required: ['images'], imageInputs: ['images'],
+    widgets: {
+      filename_prefix: { type: 'STRING', required: true },
+      format: { type: 'COMBO', required: true, options: ['png', 'webp', 'jpeg'] },
+      quality: { type: 'INT', required: true, min: 1, max: 100 },
+      lossless_webp: { type: 'BOOLEAN', required: true },
+      png_compression: { type: 'INT', required: true, min: 0, max: 9 },
+      scale: { type: 'FLOAT', required: true, min: 0.1, max: 4.0 },
+      max_dimension: { type: 'INT', required: true, min: 0, max: 16384 },
+      embed_metadata: { type: 'BOOLEAN', required: true },
+    },
+  },
+  PreviewImage: { family: 'cards', local: 'render', mustLink: ['images'], required: ['images'], imageInputs: ['images'], outputsNotLinked: [0] },
 }
 
 /** The Primitive cards (comfy_extras/nodes_primitive.py): each hands on its value (family `cards`). */
@@ -652,6 +671,8 @@ export const SWITCHED_CLASSES: Readonly<Record<string, RunnerFamily>> = {
   EmptyImage: 'cards',
   GetImageSize: 'cards',
   ImageToMask: 'cards',
+  SaveImage: 'cards',
+  PreviewImage: 'cards',
 }
 
 /**
@@ -665,9 +686,22 @@ export const PROVIDER_TYPES: ReadonlySet<string> = new Set([
   ...Object.entries(RUNNER_NODE_RULES).filter(([, r]) => !r.local).map(([k]) => k),
 ])
 
-/** Classes the runner renders itself (free, no provider): the Frame. They count as work. */
+/**
+ * Classes the runner renders itself (free, no provider): the Frame, and with
+ * `cards` Save image and Preview image (R1.5). They count as work, and a
+ * finished one earns its stage the render credit, as on the Python path.
+ */
 export const LOCAL_RENDER_TYPES: ReadonlySet<string> = new Set(
   Object.entries(RUNNER_NODE_RULES).filter(([, r]) => r.local === 'render').map(([k]) => k),
+)
+
+/**
+ * The local renders the ComfyUI path's partial charge counts (server/utils
+ * meterGraphRun.ts chargePlanOf): the Frame, as before R1.5. The cards'
+ * renders are the runner's; a failed ComfyUI run is charged as it was.
+ */
+export const FRAME_RENDER_TYPES: ReadonlySet<string> = new Set(
+  [...LOCAL_RENDER_TYPES].filter(c => !Object.prototype.hasOwnProperty.call(SWITCHED_CLASSES, c)),
 )
 
 /**

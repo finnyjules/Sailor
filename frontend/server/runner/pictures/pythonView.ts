@@ -17,6 +17,15 @@ export const PICTURE_CMYK = 'This picture is CMYK. Save it as RGB and load it ag
 export const PICTURE_GIF_SEE_THROUGH = 'This GIF has see-through parts. Save it as a PNG and load it again.'
 export const PICTURE_32_BIT = 'This picture is 32-bit. Save it as an 8-bit picture and load it again.'
 export const PICTURE_UNREADABLE = 'This kind of picture file can’t be read here. Save it as a PNG or JPEG and load it again.'
+export const PICTURE_ANIMATED = 'This picture is animated, and saving here takes single pictures only. Save it as a PNG and load it again.'
+
+/**
+ * Whether Python's loaders would make a batch of several frames of this file
+ * (GIF, animated WebP, multi-page TIFF, APNG): Save image saves each (R1.5).
+ */
+export function pictureHasFrames(meta: Metadata, bytes: Uint8Array): boolean {
+  return (meta.pages ?? 1) > 1 || !!pngChunksBeforePixels(bytes)?.includes('acTL')
+}
 
 /** sharp's metadata, with a file it cannot read (BMP, ICO, TGA, PSD…) refused in plain words. */
 export async function pictureMeta(bytes: Uint8Array): Promise<Metadata> {

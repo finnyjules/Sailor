@@ -40,6 +40,18 @@ adds its key and regenerates the file (the other keys must come out unchanged).
               two-picture batch and a blank render; each image frame as the 8-bit
               RGB or RGBA a provider is sent, the mask 16-bit; and (fix round 1)
               a 300×90 render on a 1080×1920 source, its outputs as sha256
+  save_image — (R1.5) the real SaveImage().save_images (a fresh temp output
+              folder per case, metadata on) over LoadImage RGB, provider RGBA,
+              Image-card RGBA and batch tensors: png at compression 1 and 9,
+              jpeg at 60, webp lossy and lossless, scale, max_dimension, a
+              prefix with a subfolder and %width%x%height%, the counter after
+              files already there, %batch_num%, metadata off, a two-frame GIF;
+              each saved file's name, decoded pixels (sha256 when lossless and
+              unresized) and PNG text. PreviewImage (random.choice patched to
+              the first letter). PIL's LANCZOS resize alone on seeded random
+              RGB and RGBA pictures (`lanczos`). get_save_image_path over
+              prefixes with `..`,
+              absolute parts and the date variables (time.localtime patched)
 
     cd /Users/julien/Documents/GitHub/Sailor && .venv/bin/python scripts/runner_cards_fixtures.py
 
@@ -538,6 +550,164 @@ def base64_bytes(s: str) -> bytes:
     return base64.b64decode(s)
 
 
+# ── Save image and Preview image (R1.5) ──────────────────────────────────────
+
+# What the run sends as the hidden PROMPT and EXTRA_PNGINFO: integer-like keys
+# (JS orders those first) and text beyond ASCII (json.dumps escapes it).
+SAVE_PROMPT = {
+    "10": {"class_type": "SaveImage", "inputs": {"images": ["3", 0], "filename_prefix": "ComfyUI"}},
+    "3": {"class_type": "Text", "inputs": {"text": "café ☕ \"quoted\" 🦊\nline two", "scale": 1.5, "on": True, "none": None}},
+}
+SAVE_WORKFLOW = {"nodes": [{"id": 3, "type": "Text", "widgets_values": ["café ☕"]}], "links": [], "extra": {"ds": {"scale": 0.75}}, "version": 0.4}
+# The fixed moment `%year%` … `%second%` read (time.localtime patched to it).
+SAVE_MOMENT = (2026, 1, 2, 3, 4, 5)
+
+
+def _saved_file(folder: str, entry: dict, exact: bool) -> dict:
+    """One saved file: its name as ui lists it, its decoded pixels (sha256 when exact, else the bytes) and its PNG text."""
+    import hashlib
+    import numpy as np
+    from PIL import Image as PILImage
+    rv = _rv()
+    path = os.path.join(folder, entry["subfolder"], entry["filename"])
+    with PILImage.open(path) as im:
+        im.load()
+        px = np.array(im).tobytes()
+        row = {**entry, "format": im.format, "mode": im.mode, "w": im.size[0], "h": im.size[1],
+               "text": dict(getattr(im, "text", {}) or {})}
+    if exact:
+        row["px_sha256"] = hashlib.sha256(px).hexdigest()
+    else:
+        row["px"] = rv.b64(px)
+    return row
+
+
+def save_image_cases() -> dict:
+    import shutil
+    import tempfile
+    import time
+    import torch
+    from unittest import mock
+    import nodes
+    import folder_paths
+    from comfy.cli_args import args
+    assert not args.disable_metadata
+    rv = _rv()
+    sources = {
+        "rgb": ([("si_rgb.png", _rgb(28, 40, 61))], "load"),
+        "rgba": ([("si_rgba.png", _rgba(28, 40, 62))], "provider"),
+        "card": ([("si_card.png", _rgba(28, 40, 63))], "card"),
+        "batch": ([("si_batch_a.png", _rgba(28, 40, 64)), ("si_batch_b.png", _rgba(28, 40, 65))], "provider"),
+        "gif": ([("si_two_frames.gif", rv._two_frame_gif())], "load"),
+    }
+    defaults = {"filename_prefix": "ComfyUI", "format": "png", "quality": 90, "lossless_webp": False,
+                "png_compression": 4, "scale": 1.0, "max_dimension": 0, "embed_metadata": True}
+    cases = [
+        ("png, compression 1, RGB", "rgb", {"png_compression": 1}, []),
+        ("png, compression 9, RGB", "rgb", {"png_compression": 9}, []),
+        ("png, RGBA (a provider picture)", "rgba", {}, []),
+        ("png, an Image card with alpha (its alpha goes through 1 − mask)", "card", {}, []),
+        ("jpeg at 60, RGBA (flattened onto white)", "rgba", {"format": "jpeg", "quality": 60}, []),
+        ("jpeg at 60, RGB", "rgb", {"format": "jpeg", "quality": 60}, []),
+        ("webp lossy 80, RGB", "rgb", {"format": "webp", "quality": 80}, []),
+        ("webp lossy 80, RGBA", "rgba", {"format": "webp", "quality": 80}, []),
+        ("webp lossless, RGB", "rgb", {"format": "webp", "lossless_webp": True}, []),
+        ("webp lossless, RGBA", "rgba", {"format": "webp", "lossless_webp": True}, []),
+        ("scale 0.5, RGB", "rgb", {"scale": 0.5}, []),
+        ("scale 0.5, RGBA", "rgba", {"scale": 0.5}, []),
+        ("scale 1.5, RGB", "rgb", {"scale": 1.5}, []),
+        ("max_dimension 30, RGB", "rgb", {"max_dimension": 30}, []),
+        ("max_dimension 50 (larger than the picture: unchanged), RGB", "rgb", {"max_dimension": 50}, []),
+        ("scale 0.7 then max_dimension 21, RGBA", "rgba", {"scale": 0.7, "max_dimension": 21}, []),
+        ("prefix a/b/%width%x%height%, scale 0.5", "rgb", {"filename_prefix": "a/b/%width%x%height%", "scale": 0.5}, []),
+        ("two images in one batch, after files already there (the counter)", "batch", {"filename_prefix": "batch"},
+         ["batch_00007_.png", "batch_x.png", "batch_00003_.jpg", "batchy_00050_.png", "other_00099_.png", "batch_ 12_.png"]),
+        ("%batch_num% in the prefix, two images", "batch", {"filename_prefix": "frame%batch_num%"}, []),
+        ("embed_metadata false", "rgb", {"embed_metadata": False}, []),
+        ("a LoadImage of a two-frame GIF (a batch of two)", "gif", {}, []),
+    ]
+    out: dict = {"prompt": SAVE_PROMPT, "workflow": SAVE_WORKFLOW, "moment": list(SAVE_MOMENT), "save": [], "preview": [], "paths": []}
+    tensors = {k: torch.cat([_loaded(n, d, via) for n, d in files], dim=0) for k, (files, via) in sources.items()}
+    for name, src, over, existing in cases:
+        files, via = sources[src]
+        settings = {**defaults, **over}
+        folder = tempfile.mkdtemp(prefix="runner-save-image-")
+        try:
+            for e in existing:
+                open(os.path.join(folder, e), "wb").close()
+            node = nodes.SaveImage()
+            node.output_dir = folder
+            ui = node.save_images(tensors[src], prompt=SAVE_PROMPT, extra_pnginfo={"workflow": SAVE_WORKFLOW}, **settings)["ui"]
+            exact = settings["format"] == "png" and settings["scale"] == 1.0 and not settings["max_dimension"]
+            out["save"].append({
+                "name": name, "via": via, "files": {n: rv.b64(d) for n, d in files}, "names": [n for n, _ in files],
+                "settings": settings, "existing": existing, "shape": list(tensors[src].shape),
+                "saved": [_saved_file(folder, e, exact) for e in ui["images"]],
+            })
+        finally:
+            shutil.rmtree(folder)
+    # PreviewImage: its five random letters fixed at 'a' (random.choice patched to the first letter).
+    for name, src in [("Preview image, RGB", "rgb"), ("Preview image, an Image card with alpha", "card")]:
+        files, via = sources[src]
+        folder = tempfile.mkdtemp(prefix="runner-preview-image-")
+        try:
+            with mock.patch("random.choice", lambda seq: seq[0]):
+                node = nodes.PreviewImage()
+            node.output_dir = folder
+            res = node.save_images(tensors[src], prompt=SAVE_PROMPT, extra_pnginfo={"workflow": SAVE_WORKFLOW})
+            assert res["result"][0] is tensors[src]
+            out["preview"].append({
+                "name": name, "via": via, "files": {n: rv.b64(d) for n, d in files}, "names": [n for n, _ in files],
+                "compress_level": node.compress_level, "prefix_append": node.prefix_append,
+                "saved": [_saved_file(folder, e, True) for e in res["ui"]["images"]],
+            })
+        finally:
+            shutil.rmtree(folder)
+    # PIL's Image.resize(LANCZOS) on its own (save_images resizes the 8-bit
+    # picture with it): seeded random pictures up and down, RGB and RGBA.
+    import hashlib
+    import numpy as np
+    from PIL import Image as PILImage
+    rng = np.random.default_rng(1505)
+    out["lanczos"] = []
+    for mode, (w, h), (ow, oh) in [
+        ("RGB", (7, 5), (3, 2)), ("RGB", (5, 3), (17, 11)), ("RGB", (40, 28), (60, 42)), ("RGB", (97, 61), (13, 9)),
+        ("RGB", (1, 1), (4, 3)), ("RGB", (33, 1), (5, 1)), ("RGB", (20, 20), (20, 7)), ("RGB", (120, 80), (207, 133)),
+        ("RGBA", (7, 5), (3, 2)), ("RGBA", (5, 3), (17, 11)), ("RGBA", (40, 28), (20, 14)), ("RGBA", (97, 61), (13, 9)),
+        ("RGBA", (64, 48), (65, 47)), ("RGBA", (160, 120), (53, 39)),
+    ]:
+        a = rng.integers(0, 256, (h, w, len(mode)), dtype=np.uint8)
+        if mode == "RGBA":
+            a[..., 3] = rng.choice(np.array([0, 1, 7, 128, 200, 254, 255], dtype=np.uint8), (h, w))
+        res = np.array(PILImage.fromarray(a, mode).resize((ow, oh), PILImage.Resampling.LANCZOS))
+        big = w * h > 9000
+        out["lanczos"].append({
+            "mode": mode, "w": w, "h": h, "ow": ow, "oh": oh, "px": rv.b64(a.tobytes()),
+            **({"out_sha256": hashlib.sha256(res.tobytes()).hexdigest()} if big else {"out": rv.b64(res.tobytes())}),
+        })
+    # folder_paths.get_save_image_path over prefixes, the clock fixed.
+    moment = time.struct_time((*SAVE_MOMENT, 4, 2, -1))
+    prefixes = [
+        "ComfyUI", "a/b/c", "a//b/./c/", "a/../b", "a/b/..", "../x", "a/../../x", "/abs/x", "//abs/x", "..", ".", "",
+        "x/../..", "%width%x%height%/img", "%year%-%month%-%day%/%hour%%minute%%second%_x", "no%percent%here",
+        "%batch_num%/y", "café/ünï", "a b/c d",
+    ]
+    folder = tempfile.mkdtemp(prefix="runner-save-paths-")
+    try:
+        with mock.patch("time.localtime", lambda *a: moment):
+            for prefix in prefixes:
+                row: dict = {"prefix": prefix, "width": 640, "height": 480}
+                try:
+                    _full, filename, counter, subfolder, _p = folder_paths.get_save_image_path(prefix, folder, 640, 480)
+                    row.update({"subfolder": subfolder, "filename": filename, "counter": counter})
+                except Exception:
+                    row["error"] = True
+                out["paths"].append(row)
+    finally:
+        shutil.rmtree(folder)
+    return out
+
+
 def main() -> None:
     data: dict = {}
     if os.path.exists(OUT):
@@ -555,6 +725,7 @@ def main() -> None:
     data["get_image_size"] = get_image_size_cases()
     data["image_to_mask"] = image_to_mask_cases()
     data["text_mask_source"] = text_mask_source_cases()
+    data["save_image"] = save_image_cases()
     with open(OUT, "w", encoding="utf-8") as f:
         json.dump(dict(sorted(data.items())), f, indent=2, ensure_ascii=False)
         f.write("\n")

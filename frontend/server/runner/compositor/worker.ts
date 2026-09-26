@@ -87,6 +87,11 @@ parentPort.on('message', (m) => {
       value = px.clip(m.picture, clipAlpha)
       transfer = [value.px.buffer]
     }
+    else if (m.op === 'px.save') {
+      stopped()
+      value = px.savePixels(m.picture, m.w, m.h, m.flatten, () => Atomics.load(stop, 0) === 1)
+      transfer = [value.px.buffer]
+    }
     else if (m.op === 'drop') { cv = null; clipAlpha = null }
     parentPort.postMessage({ id: m.id, value }, transfer)
   }
@@ -284,6 +289,8 @@ export interface PixelsWorker {
   clipBegin(l: Uint8Array, mw: number, mh: number, w: number, h: number): Promise<Uint8Array>
   /** Text mask with a source: one source picture × (1 − mask). */
   clip(picture: RawPicture): Promise<HandOff8>
+  /** Save image (R1.5): the pixels save_images encodes, w × h (Lanczos when that differs), flattened onto white for JPEG. */
+  savePixels(picture: RawPicture, w: number, h: number, flatten: boolean): Promise<HandOff8>
 }
 
 /**
@@ -305,6 +312,10 @@ export function pixelsInWorker<T>(signal: AbortSignal | undefined, job: (w: Pixe
       async clip(picture) {
         const p = handOver(picture)
         return await call(t, { op: 'px.clip', picture: p.picture }, p.buffers) as HandOff8
+      },
+      async savePixels(picture, width, height, flatten) {
+        const p = handOver(picture)
+        return await call(t, { op: 'px.save', picture: p.picture, w: width, h: height, flatten }, p.buffers) as HandOff8
       },
     }
     try { return await job(w) }

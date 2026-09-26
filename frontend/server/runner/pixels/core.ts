@@ -212,7 +212,182 @@ export function pixelsCore() {
     return { w: p.w, h: p.h, channels: c, px }
   }
 
-  return { roundHalfEven, bilinearKind, bilinear, tensorChannels, channelTable, mask16Of, channelMask16, clipBegin, clip }
+  /**
+   * Save image's pixels (nodes.py SaveImage.save_images, R1.5): each tensor
+   * value v as np.clip(255.·v, 0, 255).astype(uint8), trunc(f32(255·v)),
+   * interleaved RGB or RGBA as the tensor. The identity on b / 255, but not
+   * on an Image card's alpha, whose 1 − mask round trip loses a level on 95
+   * of the 256 values (as Python does). Python's 1×1 blank is black RGB.
+   */
+  function saveBytes(p: PixelsPicture): { w: number; h: number; channels: 3 | 4; px: Uint8Array } {
+    const c = tensorChannels(p)
+    const n = p.w * p.h
+    const px = new Uint8Array(n * c)
+    const d = p.data
+    if (!d) return { w: p.w, h: p.h, channels: c, px }
+    const lut = new Uint8Array(256)
+    for (let k = 0; k < c; k++) {
+      const table = channelTable(p.source, k)
+      for (let b = 0; b < 256; b++) {
+        const v = f(255 * table[b]!)
+        lut[b] = v < 0 ? 0 : v > 255 ? 255 : Math.trunc(v)
+      }
+      for (let i = 0; i < n; i++) px[i * c + k] = lut[d[i * 4 + k]!]!
+    }
+    return { w: p.w, h: p.h, channels: c, px }
+  }
+
+  // ── Pillow's Image.resize(size, LANCZOS) on 8-bit pictures (Resample.c) ──
+  // Coefficients in double, fixed point with 22 fraction bits, rounded sums
+  // shifted and clamped; horizontal pass, then vertical. RGBA is resized
+  // premultiplied (RGBa, MULDIV255) and divided back (255·c / a, truncated;
+  // alpha 0 and 255 kept as they are). Measured equal to Pillow 12 on random
+  // pictures (scripts/runner_cards_fixtures.py `save_image.lanczos`).
+  const PRECISION_BITS = 22
+
+  function lanczos(x: number): number {
+    const sinc = (v: number) => {
+      if (v === 0) return 1
+      const t = v * Math.PI
+      return Math.sin(t) / t
+    }
+    return x >= -3 && x < 3 ? sinc(x) * sinc(x / 3) : 0
+  }
+
+  function pilCoeffs(inSize: number, outSize: number): { ksize: number; bounds: Int32Array; kk: Int32Array } {
+    const scale = inSize / outSize
+    const filterscale = scale < 1 ? 1 : scale
+    const support = 3 * filterscale
+    const ksize = Math.ceil(support) * 2 + 1
+    const bounds = new Int32Array(outSize * 2)
+    const kk = new Int32Array(outSize * ksize)
+    const k = new Float64Array(ksize)
+    const ss = 1 / filterscale
+    for (let xx = 0; xx < outSize; xx++) {
+      const center = (xx + 0.5) * scale
+      let xmin = Math.trunc(center - support + 0.5)
+      if (xmin < 0) xmin = 0
+      let xmax = Math.trunc(center + support + 0.5)
+      if (xmax > inSize) xmax = inSize
+      xmax -= xmin
+      let ww = 0
+      for (let x = 0; x < xmax; x++) {
+        const w = lanczos((x + xmin - center + 0.5) * ss)
+        k[x] = w
+        ww += w
+      }
+      for (let x = 0; x < xmax; x++) {
+        const w = ww !== 0 ? k[x]! / ww : k[x]!
+        kk[xx * ksize + x] = w < 0 ? Math.trunc(-0.5 + w * (1 << PRECISION_BITS)) : Math.trunc(0.5 + w * (1 << PRECISION_BITS))
+      }
+      bounds[xx * 2] = xmin
+      bounds[xx * 2 + 1] = xmax
+    }
+    return { ksize, bounds, kk }
+  }
+
+  const clip8 = (ss: number) => {
+    const v = ss >> PRECISION_BITS
+    return v < 0 ? 0 : v > 255 ? 255 : v
+  }
+
+  /** Pillow's LANCZOS resize of interleaved 8-bit pixels (c bands, each on its own). */
+  function pilResize(px: Uint8Array, w: number, h: number, c: number, ow: number, oh: number, stop?: () => boolean): Uint8Array {
+    let src = px
+    let sw = w
+    if (ow !== w) {
+      const { ksize, bounds, kk } = pilCoeffs(w, ow)
+      const out = new Uint8Array(ow * h * c)
+      for (let y = 0; y < h; y++) {
+        if (stop && (y & 63) === 0 && stop()) throw new Error('Stopped')
+        const row = y * w
+        for (let xx = 0; xx < ow; xx++) {
+          const xmin = bounds[xx * 2]!
+          const xmax = bounds[xx * 2 + 1]!
+          const kb = xx * ksize
+          for (let b = 0; b < c; b++) {
+            let ss = 1 << (PRECISION_BITS - 1)
+            for (let x = 0; x < xmax; x++) ss += src[(row + x + xmin) * c + b]! * kk[kb + x]!
+            out[(y * ow + xx) * c + b] = clip8(ss)
+          }
+        }
+      }
+      src = out
+      sw = ow
+    }
+    if (oh !== h) {
+      const { ksize, bounds, kk } = pilCoeffs(h, oh)
+      const out = new Uint8Array(sw * oh * c)
+      for (let yy = 0; yy < oh; yy++) {
+        if (stop && (yy & 63) === 0 && stop()) throw new Error('Stopped')
+        const ymin = bounds[yy * 2]!
+        const ymax = bounds[yy * 2 + 1]!
+        const kb = yy * ksize
+        for (let xx = 0; xx < sw; xx++) {
+          for (let b = 0; b < c; b++) {
+            let ss = 1 << (PRECISION_BITS - 1)
+            for (let y = 0; y < ymax; y++) ss += src[((y + ymin) * sw + xx) * c + b]! * kk[kb + y]!
+            out[(yy * sw + xx) * c + b] = clip8(ss)
+          }
+        }
+      }
+      src = out
+    }
+    return src
+  }
+
+  /** PIL's MULDIV255(a, b): round(a·b / 255) in integers. */
+  const mulDiv255 = (a: number, b: number) => {
+    const t = a * b + 128
+    return ((t >> 8) + t) >> 8
+  }
+
+  /**
+   * Everything save_images does to a picture before encoding it: the tensor's
+   * bytes (saveBytes); Image.resize(LANCZOS) to ow × oh when that differs;
+   * for JPEG (`flatten`), an RGBA picture pasted onto white with its alpha as
+   * the mask (Paste.c BLEND: DIV255(255·(255 − a) + c·a)), leaving RGB.
+   */
+  function savePixels(p: PixelsPicture, ow: number, oh: number, flatten: boolean, stop?: () => boolean): { w: number; h: number; channels: 3 | 4; px: Uint8Array } {
+    const t = saveBytes(p)
+    let px = t.px
+    const c = t.channels
+    if (ow !== t.w || oh !== t.h) {
+      if (c === 4) {
+        const pre = new Uint8Array(px.length)
+        for (let i = 0; i < px.length; i += 4) {
+          const a = px[i + 3]!
+          pre[i] = mulDiv255(px[i]!, a)
+          pre[i + 1] = mulDiv255(px[i + 1]!, a)
+          pre[i + 2] = mulDiv255(px[i + 2]!, a)
+          pre[i + 3] = a
+        }
+        px = pilResize(pre, t.w, t.h, 4, ow, oh, stop)
+        for (let i = 0; i < px.length; i += 4) {
+          const a = px[i + 3]!
+          if (a === 0 || a === 255) continue
+          for (let b = 0; b < 3; b++) {
+            const v = Math.trunc((255 * px[i + b]!) / a)
+            px[i + b] = v > 255 ? 255 : v
+          }
+        }
+      }
+      else px = pilResize(px, t.w, t.h, 3, ow, oh, stop)
+    }
+    if (!flatten || c === 3) return { w: ow, h: oh, channels: c, px }
+    const n = ow * oh
+    const rgb = new Uint8Array(n * 3)
+    for (let i = 0; i < n; i++) {
+      const a = px[i * 4 + 3]!
+      for (let b = 0; b < 3; b++) {
+        const x = 255 * (255 - a) + px[i * 4 + b]! * a + 128
+        rgb[i * 3 + b] = ((x >> 8) + x) >> 8
+      }
+    }
+    return { w: ow, h: oh, channels: 3, px: rgb }
+  }
+
+  return { roundHalfEven, bilinearKind, bilinear, tensorChannels, channelTable, mask16Of, channelMask16, clipBegin, clip, saveBytes, pilResize, savePixels }
 }
 
 export type PixelsCore = ReturnType<typeof pixelsCore>

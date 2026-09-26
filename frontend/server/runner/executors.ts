@@ -103,6 +103,7 @@ import { textCardUi } from './cards/text'
 import { planScene3D, planTextMask, planTextOnPath } from './cards/bakeReplay'
 import { planLoadImageCard } from './cards/loadImage'
 import { planEmptyImage, planGetImageSize, planImageToMask, planTextMaskWithSource } from './cards/utilities'
+import { imageCardShowingKept, planPreviewImage, planSaveImage } from './cards/saveImage'
 import type { KeptExt } from './keptBytes'
 import { filesOf } from './values'
 import { OUTPUT_KINDS } from '#shared/runner/values'
@@ -124,15 +125,23 @@ export interface DeriveIO {
   read(file: OutputFile): Promise<Uint8Array>
   /** Keeps bytes for the run by their sha256 (./keptBytes.ts): not an asset. */
   keep(bytes: Uint8Array, ext: KeptExt): Promise<OutputFile>
-  /** Saves a result into the output folder as an asset of this run (counted as the run's output). */
-  saveAsset(bytes: Uint8Array, o: { prefix: string; ext: string }): Promise<OutputFile>
+  /**
+   * Saves a result into the output folder as an asset of this run (counted as
+   * the run's output), under `subfolder` when given; with `folder: 'temp'`
+   * (Preview image) into temp instead, not an asset. `counter`: ResultStore.save's.
+   */
+  saveAsset(bytes: Uint8Array, o: { prefix: string; ext: string; subfolder?: string; folder?: 'output' | 'temp'; counter?: { prefix: string; offset: number } }): Promise<OutputFile>
   /** Saves a live preview into temp (as Python's save_live_preview(unique=True)). */
   savePreview(bytes: Uint8Array, o: { nodeId?: string }): Promise<OutputFile>
+  /** Saves a picture to show in temp under its own name, overwriting (ResultStore.savePreviewAs). */
+  savePreviewAs(bytes: Uint8Array, o: { filename: string }): Promise<OutputFile>
   hosted: boolean
   signal: AbortSignal
   nodeId: string
   /** The canvas workflow as sent (Save image embeds it), or null. */
   runWorkflow: unknown
+  /** This take's workflow as sent (the hidden PROMPT Save image embeds): wires, not the values they carry. */
+  runPrompt: ApiPrompt
 }
 
 /** What a derive plan made: each output slot's value, and what the node shows. */
@@ -903,8 +912,15 @@ async function planNodeRequest(ctx: PlanContext): Promise<NodePlan> {
         const f = parseInputFileRef(inputs.image)
         files = f ? [f] : []
       }
+      // A picture the runner made (kept bytes) is never served by /view: the
+      // card hands the kept file on and shows a copy in temp (R1.5).
+      if (files.some(f => f.type === 'kept')) return imageCardShowingKept(files)
       return { kind: 'pass', files, ui: { images: files } }
     }
+
+    // ── cards (step 3, R1.5): Save image and Preview image ──
+    case 'SaveImage': return planSaveImage(ctx)
+    case 'PreviewImage': return planPreviewImage(ctx)
 
     case 'Video': {
       let files: OutputFile[]

@@ -68,7 +68,7 @@ function intWidget(v: unknown): number {
 const keyOf = (f: OutputFile) => `${f.type}:${f.subfolder}:${f.filename}`
 
 /** What a picture wire brings: its source kind, and its files (none for Python's 1×1 blank). */
-interface Wired { source: PictureSource; files: OutputFile[] }
+export interface Wired { source: PictureSource; files: OutputFile[] }
 
 function wired(ctx: PlanContext, name: string): Wired {
   const v = ctx.prompt[ctx.nodeId]!.inputs?.[name]
@@ -89,7 +89,7 @@ const stopped = (io: DeriveIO) => { if (io.signal.aborted) throw new Error('Stop
  * exactly is refused in the words the start of a run uses; with `cap`, more
  * than CARD_MAX_PIXELS in all is refused before any pixel is decoded.
  */
-async function sizes(io: DeriveIO, w: Wired, cap: boolean): Promise<Map<string, { w: number; h: number }>> {
+export async function sizes(io: DeriveIO, w: Wired, cap: boolean): Promise<Map<string, { w: number; h: number }>> {
   const out = new Map<string, { w: number; h: number }>()
   let total = 0
   for (const file of w.files) {
@@ -111,7 +111,7 @@ async function sizes(io: DeriveIO, w: Wired, cap: boolean): Promise<Map<string, 
 }
 
 /** One file as sharp decodes it for its source (RGBA8), or Python's blank. */
-async function decoded(io: DeriveIO, source: PictureSource, file: OutputFile | null): Promise<RawPicture> {
+export async function decoded(io: DeriveIO, source: PictureSource, file: OutputFile | null): Promise<RawPicture> {
   if (!file) return decodeRaw(null, 'blank')
   try { return await decodeRaw(await io.read(file), source) }
   catch (e) {

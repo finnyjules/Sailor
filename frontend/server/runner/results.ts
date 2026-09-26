@@ -5,13 +5,45 @@
  * later means a second implementation of ResultStore plus a /view change —
  * nothing else in the runner reads or writes files directly.
  */
-import { mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises'
+import { mkdir, readdir, readFile, rename, stat, writeFile } from 'node:fs/promises'
 import { join, resolve, sep } from 'node:path'
+import { pyIntOf } from '#shared/runner/pyText'
 import { shortUserHash } from '../utils/meterGraphRun'
 import type { OutputFile } from './types'
 
+/** What `save` is asked to write. */
+export interface SaveOptions {
+  userId: string | null
+  /** The file name before `_<counter>_.<ext>`; no `/`. */
+  prefix: string
+  ext: string
+  /**
+   * A folder under the user's own (hosted) or the folder's root (local), as
+   * Save image's prefix names it (`a/b`); `..` and absolute parts are refused.
+   */
+  subfolder?: string
+  /** 'output' (an asset; the default) or 'temp' (Preview image). */
+  folder?: 'output' | 'temp'
+  /**
+   * The counter is read over files named `prefix` (not the file's own
+   * prefix) and moved on by `offset`: Save image's `%batch_num%`, whose
+   * counter Python reads once over the prefix as typed.
+   */
+  counter?: { prefix: string; offset: number }
+}
+
+export const SAVE_OUTSIDE = 'This file name would save outside the output folder'
+/** A preview's own name (savePreviewAs): a plain file name. */
+export const PREVIEW_NAME_RE = /^[A-Za-z0-9_.-]{1,200}$/
+
 export interface ResultStore {
-  save(bytes: Uint8Array, o: { userId: string | null; prefix: string; ext: string }): Promise<OutputFile>
+  save(bytes: Uint8Array, o: SaveOptions): Promise<OutputFile>
+  /**
+   * A picture shown in a node under a name of the caller's choosing, in temp
+   * (the runner's own subfolder locally, the user's hosted), overwritten when
+   * it is there: the same name is the same picture (R1.5/R1.6).
+   */
+  savePreviewAs(bytes: Uint8Array, o: { filename: string; userId: string | null }): Promise<OutputFile>
   /**
    * A result shown in a node but not an asset: save_live_preview(unique=True)'s
    * `live_preview_<node>_<nnnnn>.png` in the temp folder (the Frame render);
@@ -41,15 +73,32 @@ export const LOCAL_LIVE_PREVIEW_SUBFOLDER = 'sailor_runner'
 
 const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 
-/** folder_paths.get_save_image_path's counter: highest `<prefix>_<digits>_` + 1. */
+/**
+ * folder_paths.get_save_image_path's counter: over the names that are
+ * `<prefix>_…`, the highest int() of what comes before the next `_` (0 when
+ * int() can't read it), + 1; 1 when none is.
+ */
 export function nextCounter(names: string[], prefix: string): number {
-  const re = new RegExp(`^${escapeRe(prefix)}_(\\d+)_`)
-  let max = 0
+  let max: number | null = null
   for (const n of names) {
-    const m = re.exec(n)
-    if (m) max = Math.max(max, Number(m[1]))
+    if (!n.startsWith(`${prefix}_`)) continue
+    const digits = pyIntOf(n.slice(prefix.length + 1).split('_')[0]!) ?? 0
+    max = max === null ? digits : Math.max(max, digits)
   }
-  return max + 1
+  return max === null ? 1 : max + 1
+}
+
+/** Python's f"{counter:05}". */
+export function counter05(n: number): string {
+  return n < 0 ? `-${String(-n).padStart(4, '0')}` : String(n).padStart(5, '0')
+}
+
+/** A subfolder a save may write to: relative, no `..`, no NUL; '' for none. */
+function safeSubfolder(sub: string | undefined): string {
+  if (!sub) return ''
+  const parts = sub.split('/')
+  if (sub.startsWith('/') || sub.includes('\0') || parts.some(p => p === '..')) throw new Error(SAVE_OUTSIDE)
+  return parts.filter(p => p && p !== '.').join('/')
 }
 
 /** The next `<prefix>_<nnnnn>.png` number: one past the highest there. */
@@ -89,18 +138,22 @@ export function createEngineResultStore(o: { dirForType(type: string): string | 
     return p
   }
   return {
-    async save(bytes, { userId, prefix, ext }) {
-      const base = o.dirForType('output')
+    async save(bytes, { userId, prefix, ext, subfolder: sub, folder = 'output', counter: counting }) {
+      const base = o.dirForType(folder)
       if (!base) throw new Error('The file store is not available')
-      const subfolder = userSubfolder(userId, o.hosted())
-      const dir = join(base, subfolder)
+      if (!prefix || /[/\0]/.test(prefix) || /[/\0]/.test(ext)) throw new Error(SAVE_OUTSIDE)
+      const subfolder = [userSubfolder(userId, o.hosted()), safeSubfolder(sub)].filter(Boolean).join('/')
+      const root = resolve(base)
+      const dir = resolve(root, subfolder)
+      if (dir !== root && !dir.startsWith(root + sep)) throw new Error(SAVE_OUTSIDE)
       await mkdir(dir, { recursive: true })
-      let counter = nextCounter(await readdir(dir).catch(() => []), prefix)
+      const names = await readdir(dir).catch(() => [])
+      let counter = counting ? nextCounter(names, counting.prefix) + counting.offset : nextCounter(names, prefix)
       for (let tries = 0; tries < 1000; tries++, counter++) {
-        const filename = `${prefix}_${String(counter).padStart(5, '0')}_.${ext}`
+        const filename = `${prefix}_${counter05(counter)}_.${ext}`
         try {
           await writeFile(join(dir, filename), bytes, { flag: 'wx' })
-          return { filename, subfolder, type: 'output' }
+          return { filename, subfolder, type: folder }
         }
         catch (e: any) {
           if (e?.code !== 'EEXIST') throw e
@@ -128,6 +181,19 @@ export function createEngineResultStore(o: { dirForType(type: string): string | 
         }
       }
       throw new Error('Could not find a free file name')
+    },
+    async savePreviewAs(bytes, { filename, userId }) {
+      if (!PREVIEW_NAME_RE.test(filename) || filename === '.' || filename === '..') throw new Error('This preview’s file name is not a plain name')
+      const root = o.dirForType('temp')
+      if (!root) throw new Error('The file store is not available')
+      const subfolder = o.hosted() ? userSubfolder(userId, true) : LOCAL_LIVE_PREVIEW_SUBFOLDER
+      const dir = join(root, subfolder)
+      await mkdir(dir, { recursive: true })
+      // Written whole, then moved into place: a reader never sees half a file.
+      const tmp = join(dir, `.${filename}.${process.pid}.${Date.now()}.tmp`)
+      await writeFile(tmp, bytes)
+      await rename(tmp, join(dir, filename))
+      return { filename, subfolder, type: 'temp' }
     },
     async read(file) {
       return new Uint8Array(await readFile(pathOf(file)))
