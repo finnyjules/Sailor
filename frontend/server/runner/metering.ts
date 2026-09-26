@@ -45,28 +45,44 @@ export function nodeCredits(node: ApiNode, inputPixels?: number, families: Reado
 /**
  * The size of the picture a size-priced node is about to be sent: the first
  * file on its linked output slot (the one every builder sends, as Python
- * sends only the first frame of a batch), measured from its header.
- * Undefined when the node isn't size-priced or the file can't be read (it is
- * then priced at the cap). The runner measures before it submits, so the
+ * sends only the first frame of a batch), measured from its header
+ * (picturePixels, the gate's own reader: PNG, JPEG, WebP, GIF, TIFF, BMP,
+ * AVIF and HEIC). `pixels` is undefined when the node isn't size-priced, has
+ * no file, or the file can't be read or sized (it is then priced at the
+ * cap); `unreadable` is true only for a file that was read but whose size
+ * couldn't be (Task G1: hosted refuses that node, requestRules.ts
+ * unreadableInputWords). The runner measures before it submits, so the
  * charge reads the real size, and a picture above the cap is refused
  * (requestRules.ts measuredInputProblem) whatever the batch's length.
  */
+export async function measuredInput(
+  node: ApiNode,
+  filesFrom: (link: [string, number]) => OutputFile[],
+  read: (f: OutputFile) => Promise<Uint8Array>,
+  families: ReadonlySet<RunnerFamily> = NO_FAMILIES,
+): Promise<{ pixels?: number, unreadable: boolean }> {
+  const inputs = node.inputs ?? {}
+  const name = sizePricedInput(node.class_type, inputs, families)
+  const link = name ? inputs[name] : undefined
+  if (!isLink(link)) return { unreadable: false }
+  const sent = filesFrom(link as [string, number])[0]
+  if (!sent) return { unreadable: false }
+  let bytes: Uint8Array
+  // A file that can't be read is left to the hand-off, which reads it too (and fails).
+  try { bytes = await read(sent) }
+  catch { return { unreadable: false } }
+  const px = await picturePixels(bytes)
+  return px != null && px > 0 ? { pixels: px, unreadable: false } : { unreadable: true }
+}
+
+/** measuredInput's size alone: undefined when it couldn't be measured (priced at the cap). */
 export async function measuredInputPixels(
   node: ApiNode,
   filesFrom: (link: [string, number]) => OutputFile[],
   read: (f: OutputFile) => Promise<Uint8Array>,
   families: ReadonlySet<RunnerFamily> = NO_FAMILIES,
 ): Promise<number | undefined> {
-  const inputs = node.inputs ?? {}
-  const name = sizePricedInput(node.class_type, inputs, families)
-  const link = name ? inputs[name] : undefined
-  if (!isLink(link)) return undefined
-  const sent = filesFrom(link as [string, number])[0]
-  if (!sent) return undefined
-  let px: number | null = null
-  try { px = await picturePixels(await read(sent)) }
-  catch { px = null }
-  return px ?? undefined
+  return (await measuredInput(node, filesFrom, read, families)).pixels
 }
 
 /**

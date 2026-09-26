@@ -307,12 +307,29 @@ function topazFactor(v: unknown): number {
   return typeof v === 'string' && hasOwn(TOPAZ_FACTORS, v) ? TOPAZ_FACTORS[v]! : 6
 }
 
+/**
+ * How many times Upscale enlarges each side of its picture, per engine, as
+ * nodes_replicate.py UpscaleImageNode sends it: Topaz by its own factor
+ * (topaz_upscale_factor: None 1, 2x, 4x, 6x); Clarity, Crystal and
+ * Real-ESRGAN by scale_factor (Real-ESRGAN's `scale`). A linked or unreadable
+ * setting is its largest (6 for Topaz, MAX_SCALE_FACTOR otherwise), so the
+ * size is never below the picture made. Null for Recraft Crisp, whose output
+ * size neither Recraft's API reference nor Replicate's page states (read
+ * 2026-09-25: recraft.ai/docs/api-reference/endpoints gives input limits
+ * only), and for an engine the node doesn't offer (Task G1).
+ */
+export function upscaleSideFactor(engine: string, inputs: NodeInputs): number | null {
+  if (engine === 'Topaz') return topazFactor(inputs.topaz_upscale_factor)
+  if (engine === 'Clarity' || engine === 'Crystal' || engine === 'Real-ESRGAN') return scaleFactor(inputs.scale_factor)
+  return null
+}
+
 function upscaleCall(engine: string, inputs: NodeInputs, px: number): EditCall | null {
   const slug = hasOwn(UPSCALE_ENGINE_SLUGS, engine) ? UPSCALE_ENGINE_SLUGS[engine]! : null
   if (!slug) return null
   // Clarity and Crystal enlarge by scale_factor; Topaz by its own factor;
   // Real-ESRGAN and Recraft Crisp cost the same at any size.
-  const factor = engine === 'Topaz' ? topazFactor(inputs.topaz_upscale_factor) : scaleFactor(inputs.scale_factor)
+  const factor = upscaleSideFactor(engine, inputs) ?? scaleFactor(inputs.scale_factor)
   // The input enlarged `factor` times on each side.
   return call(slug, null, { output: px * factor * factor })
 }
@@ -442,6 +459,79 @@ export function sourceOutputPixels(classType: string, inputs: NodeInputs): numbe
   if (s.megapixels != null) return s.megapixels * 1_000_000
   if (s.tier != null) return nanoBananaPixels(s.tier, ratio)
   return null
+}
+
+/**
+ * Task G1: the largest picture a picture-making node can hand on, in pixels,
+ * read from its settings, for the hosted gate to size a size-priced node
+ * downstream of it (server/utils/graphInputPixels.ts). Null when this can't
+ * say: the gate then refuses a size-priced node that picture would reach,
+ * rather than price it at a cap the picture might be larger than.
+ *
+ * Only the classes that make a NEW picture of a size their own settings fix
+ * are here. Nodes whose picture follows their input (Upscale, Enhance
+ * detail, the Frame, an action handing its picture on, a Blend that keeps
+ * the protected layers) are sized by the gate from that input instead.
+ *  - Generate an image: sourceOutputPixels; otherwise the input cap, which is
+ *    by definition the largest picture Sailor generates (LARGEST_INPUT_PIXELS);
+ *  - Nano Banana at a tier (Edit an image, Develop, Restyle, Generate from
+ *    references on Nano Banana 2, and the 1K calls: Relight, Reframe, the
+ *    actions): the tier's largest size across ratios (nanoBananaPixels);
+ *  - FLUX.2 edit: its 2048² output cap;
+ *  - Flux Kontext Pro, Seedream (5 Pro / 5 Lite, Generate from references
+ *    and Edit an image), GPT Image 2.5 edit: the input cap. None of them
+ *    makes a picture above 4K (4096², under the cap); the ComfyUI path also
+ *    refuses the runner-only ones (GPT Image 2.5, Seedream 5 Pro on Edit);
+ *  - a linked or missing model: the largest of the node's models, or null
+ *    when any of them can't be sized.
+ * Restyle's "Style Transfer · IP-Adapter" follows its structure picture's
+ * size (fofr/style-transfer's schema: width and height are "ignored if
+ * structure image given"), so it is null; so is any class not named here.
+ */
+export function madePictureBound(classType: string, inputs: NodeInputs): number | null {
+  const nb = (tier: string | null) => nanoBananaPixels(tier ?? '4K', undefined)
+  const byModel = (models: Record<string, () => number | null>): number | null => {
+    const m = inputs.model
+    if (m === undefined || isLinked(m)) {
+      const all = Object.values(models).map(f => f())
+      return all.some(v => v == null) ? null : Math.max(...(all as number[]))
+    }
+    return typeof m === 'string' && hasOwn(models, m) ? models[m]!() : null
+  }
+  switch (classType) {
+    case 'GenerateImageNode': return sourceOutputPixels(classType, inputs) ?? LARGEST_INPUT_PIXELS
+    case 'EditImageNode': return byModel({
+      'Nano Banana 2': () => nb(nb2Tier(inputs)),
+      'Flux Kontext Pro': () => LARGEST_INPUT_PIXELS,
+      'Flux 2 Pro': () => FLUX_2_MAX_OUTPUT_PIXELS,
+      'GPT Image 2.5': () => LARGEST_INPUT_PIXELS,
+      [SEEDREAM_5_PRO_EDIT_OPTION]: () => LARGEST_INPUT_PIXELS,
+    })
+    case 'DevelopImageNode': return nb(nb2Tier(inputs))
+    case 'BlendSceneNode': return byModel({
+      'Flux 2 Pro': () => FLUX_2_MAX_OUTPUT_PIXELS,
+      'Flux Kontext Pro': () => LARGEST_INPUT_PIXELS,
+      'Nano Banana': () => nb('1K'),
+      'Nano Banana 2': () => nb('1K'),
+    })
+    case 'GenerateFromReferencesNode': return byModel({
+      'seedream-5-pro': () => LARGEST_INPUT_PIXELS,
+      'seedream-5-lite': () => LARGEST_INPUT_PIXELS,
+      'nano-banana-2': () => nb(refSize(inputs, ['1K', '2K', '4K'])),
+    })
+    case 'RestyleFromImageNode': return byModel({
+      'Nano Banana 2': () => nb(restyleTier(inputs)),
+      'Nano Banana Pro': () => nb(restyleTier(inputs)),
+      'Nano Banana': () => nb('1K'),
+      'Style Transfer · IP-Adapter': () => null,
+    })
+    case 'RestyleWithLoRANode': return nb(isLinked(inputs.resolution) ? null : textOr(inputs.resolution, '1K'))
+    case 'RelightNode': case 'LensReframe':
+    case 'RemoveObjectNode': case 'TextEditNode': case 'RecolorObjectNode':
+    case 'SwapBackgroundNode': case 'SwapProductNode': case 'PersonSwap':
+      return nb('1K')
+    default: return null
+  }
 }
 
 // ── Restyle with a style LoRA (ComfyUI path, nodes_replicate.py) ──────────

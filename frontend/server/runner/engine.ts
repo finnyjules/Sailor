@@ -26,10 +26,10 @@ import { planNode, type ProviderBackup } from './executors'
 import type { KeepStep } from './compositor/keep'
 import { createMemoryHeldBytes, type HeldBytes } from './heldBytes'
 import type { BackupSettings } from './config'
-import { linkedFileCheck, measuredInputProblem, requestProblems } from './requestRules'
+import { linkedFileCheck, measuredInputProblem, requestProblems, unreadableInputWords } from './requestRules'
 import { isReusable, requestFingerprint } from './fingerprint'
 import { assertFilesOwned, collectInputFiles, parseInputFileRef, type OwnershipCheck } from './inputs'
-import { extraPromptText, hasOutputNode, measuredInputPixels, nodeCredits, stageEstimate, unpricedProviderNode, type Metering } from './metering'
+import { extraPromptText, hasOutputNode, measuredInput, nodeCredits, stageEstimate, unpricedProviderNode, type Metering } from './metering'
 import { ev, type RunEvents, type SwitchReason } from './events'
 import { mediaNodeKind, nodeMediaChangedWords, nodeMediaCheck, nodeMediaFiles } from './nodeMedia'
 import { switchedSinceHold } from './switches'
@@ -864,8 +864,12 @@ export function createEngine(deps: EngineDeps) {
       // size-priced node: FLUX.2 edit, Rotate camera on 2511;
       // requestRules.ts) fails the node here, before the hand-off or the
       // call; its hold is released.
-      const inputPixels = resuming ? undefined : await measuredInputPixels(take.prompt[id]!, filesAt(take), readOnce, families)
+      // Hosted, a picture whose size can't be read is refused too (Task G1):
+      // it could be larger than the cap its price stops at.
+      const measured = resuming ? { unreadable: false } as Awaited<ReturnType<typeof measuredInput>> : await measuredInput(take.prompt[id]!, filesAt(take), readOnce, families)
+      const inputPixels = measured.pixels
       const tooLarge = measuredInputProblem(take.prompt[id]!.class_type, inputPixels, families, take.prompt[id]!.inputs ?? {})
+        ?? (deps.hosted() && measured.unreadable ? unreadableInputWords(take.prompt[id]!.class_type) : null)
       if (tooLarge) throw new Error(tooLarge)
       // A file its model refuses (Product shot on Bria: over 12 MB, or not
       // JPEG, PNG or WebP; HappyHorse 1.1: over 20 MB; requestRules.ts),

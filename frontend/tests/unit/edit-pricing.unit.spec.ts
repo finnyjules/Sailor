@@ -14,7 +14,10 @@ import { join } from 'node:path'
 import sharp from 'sharp'
 import { planNode } from '~~/server/runner/executors'
 import { measuredInputPixels, nodeCredits, stageEstimate } from '~~/server/runner/metering'
-import { MAX_MEASURED_FILES, graphInputPixels, isMeasurableRaster, picturePixels } from '~~/server/utils/graphInputPixels'
+import { ENHANCE_DETAIL_TOO_LARGE, FLUX_2_EDIT_TOO_LARGE, measuredInputProblems } from '~~/server/runner/requestRules'
+import {
+  MAX_MEASURED_FILES, bmpPixels, graphInputPixels, graphInputSizes, isMeasurableRaster, isobmffIspePixels, picturePixels, sniffPictureFormat,
+} from '~~/server/utils/graphInputPixels'
 import { meterGraphSubmit } from '~~/server/utils/meterGraphRun'
 import { RESTYLE_MODELS } from '~~/server/runner/generators/restyle'
 import { REFERENCE_MODEL_IDS } from '~~/server/runner/generators/refEdits'
@@ -613,6 +616,63 @@ describe('priced on the size of the picture sent in', () => {
     expect(priced.breakdown.find(b => b.action === 'EditImageNode:Flux 2 Pro')?.credits).toBe(9)
   })
 
+  // Task G1 (final re-review finding 1): a size-priced node fed by an Upscale
+  // or Enhance detail — not just a loaded file or a generator — is measured
+  // by following the chain and applying the engine's factor, so it is
+  // refused above the cap like any other measured picture instead of
+  // silently priced at it.
+  it('follows Upscale and Enhance detail upstream, applying their factor, any number of hops', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'p4-chain-'))
+    writeFileSync(join(dir, 'photo.jpg'), await sharp({ create: { width: 4000, height: 4000, channels: 3, background: '#888' } }).jpeg().toBuffer())
+    const readFile = async (v: string) => picturePixels(join(dir, v))
+    // The probe from final-rereview.md finding 1: 16 MP → Topaz 2× (64 MP out) → Edit on Flux 2 Pro.
+    const probe = {
+      1: { class_type: 'LoadImage', inputs: { image: 'photo.jpg' } },
+      2: { class_type: 'UpscaleImageNode', inputs: { model: 'Topaz', topaz_upscale_factor: '2x', image: ['1', 0] } },
+      3: { class_type: 'EditImageNode', inputs: { model: 'Flux 2 Pro', input_image: ['2', 0] } },
+    }
+    const px = await graphInputPixels(probe, readFile)
+    expect(px).toEqual({ 2: 16_000_000, 3: 64_000_000 })
+    // Refused above the cap, not capped at it — the exact bug the probe found.
+    expect(measuredInputProblems(probe as unknown as ApiPrompt, px)).toEqual([
+      { nodeId: '3', classType: 'EditImageNode', input: 'input_image', message: FLUX_2_EDIT_TOO_LARGE },
+    ])
+
+    // The second probe: Topaz 2× → Enhance detail (in place, so still 64 MP, still refused).
+    const probe2 = {
+      1: { class_type: 'LoadImage', inputs: { image: 'photo.jpg' } },
+      2: { class_type: 'UpscaleImageNode', inputs: { model: 'Topaz', topaz_upscale_factor: '2x', image: ['1', 0] } },
+      3: { class_type: 'EnhanceDetailNode', inputs: { model: 'Faithful', image: ['2', 0] } },
+    }
+    const px2 = await graphInputPixels(probe2, readFile)
+    expect(px2).toEqual({ 2: 16_000_000, 3: 64_000_000 })
+    expect(measuredInputProblems(probe2 as unknown as ApiPrompt, px2)).toEqual([
+      { nodeId: '3', classType: 'EnhanceDetailNode', input: 'image', message: ENHANCE_DETAIL_TOO_LARGE },
+    ])
+
+    // Two Upscales in a row: 16 MP → Real-ESRGAN 2× (64 MP out) → Crystal at 1× (unchanged): node 3's
+    // OWN measured input is node 2's computed OUTPUT, not node 1's picture — two hops, still exact.
+    const chained = {
+      1: { class_type: 'LoadImage', inputs: { image: 'photo.jpg' } },
+      2: { class_type: 'UpscaleImageNode', inputs: { model: 'Real-ESRGAN', scale_factor: 2, image: ['1', 0] } },
+      3: { class_type: 'UpscaleImageNode', inputs: { model: 'Crystal', scale_factor: 1, image: ['2', 0] } },
+    }
+    const px3 = await graphInputPixels(chained, readFile)
+    expect(px3).toEqual({ 2: 16_000_000, 3: 64_000_000 })
+
+    // An Upscale whose OWN input can't be sized (the file can't be read):
+    // nothing downstream is priced on a guess, and both size-priced nodes are
+    // refused in plain words (gate-chained-pictures.unit.spec.ts has the rest).
+    const unresolvable = {
+      1: { class_type: 'LoadImage', inputs: { image: 'missing.jpg' } },
+      2: { class_type: 'UpscaleImageNode', inputs: { model: 'Topaz', image: ['1', 0] } },
+      3: { class_type: 'EditImageNode', inputs: { model: 'Flux 2 Pro', input_image: ['2', 0] } },
+    }
+    const sized = await graphInputSizes(unresolvable, readFile)
+    expect(sized.pixels).toEqual({})
+    expect(sized.problems.map(p => p.nodeId)).toEqual(['2', '3'])
+  })
+
   it('meterGraphSubmit prices and holds on the measured size', async () => {
     const prompt = { 1: { class_type: 'LoadImage', inputs: { image: 'a.png' } }, 2: { class_type: 'UpscaleImageNode', inputs: { model: 'Crystal', image: ['1', 0] } }, 3: SINK }
     const held: number[] = []
@@ -734,26 +794,62 @@ describe('an upstream Nano Banana picture is sized by its real ratio', () => {
 })
 
 describe('the gate reads files sparingly', () => {
-  it('sniffs PNG, JPEG and WebP; anything else prices at the cap', async () => {
+  it('sniffs PNG, JPEG, WebP, GIF and TIFF (Task G1 widens past PNG/JPEG/WebP); anything else prices at the cap', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'p4-sniff-'))
     const make = (fmt: 'png' | 'jpeg' | 'webp' | 'gif' | 'tiff') =>
       sharp({ create: { width: 40, height: 30, channels: 3, background: '#888' } }).toFormat(fmt).toBuffer()
-    for (const fmt of ['png', 'jpeg', 'webp'] as const) {
+    for (const fmt of ['png', 'jpeg', 'webp', 'gif', 'tiff'] as const) {
       const bytes = await make(fmt)
       expect(isMeasurableRaster(bytes), fmt).toBe(true)
-      writeFileSync(join(dir, `a.${fmt}`), bytes)
-      expect(await picturePixels(join(dir, `a.${fmt}`)), fmt).toBe(1200)
+      // A PNG name on a GIF/TIFF file: the bytes decide.
+      writeFileSync(join(dir, `a.${fmt}.png`), bytes)
+      expect(await picturePixels(join(dir, `a.${fmt}.png`)), fmt).toBe(1200)
       expect(await picturePixels(new Uint8Array(bytes)), fmt).toBe(1200)
-    }
-    for (const fmt of ['gif', 'tiff'] as const) {
-      const bytes = await make(fmt)
-      expect(isMeasurableRaster(bytes), fmt).toBe(false)
-      // A PNG name on a TIFF file: the bytes decide.
-      writeFileSync(join(dir, `lying.${fmt}.png`), bytes)
-      expect(await picturePixels(join(dir, `lying.${fmt}.png`)), fmt).toBeNull()
     }
     writeFileSync(join(dir, 'x.svg'), '<svg xmlns="http://www.w3.org/2000/svg" width="9000" height="9000"/>')
     expect(await picturePixels(join(dir, 'x.svg'))).toBeNull()
+  })
+
+  it('reads a BMP from its own header, and AVIF/HEIC by walking their ispe box — no decode (Task G1)', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'p4-sniff2-'))
+    const avif = await sharp({ create: { width: 50, height: 20, channels: 3, background: '#888' } }).avif().toBuffer()
+    expect(sniffPictureFormat(avif)).toBe('avif')
+    writeFileSync(join(dir, 'a.avif'), avif)
+    expect(await picturePixels(join(dir, 'a.avif'))).toBe(50 * 20)
+    expect(await picturePixels(new Uint8Array(avif))).toBe(50 * 20)
+    expect(isobmffIspePixels(avif)).toBe(50 * 20)
+
+    // A real HEIC needs an HEVC encoder this build lacks; a synthetic ftyp
+    // 'heic' brand over the same ISOBMFF (meta/iprp/ipco/ispe) boxes proves
+    // the box walk itself, which reads either container the same way.
+    const heic = Buffer.from(avif)
+    heic.write('heic', 8, 'ascii') // ftyp brand: avif → heic; the box structure underneath is unchanged
+    expect(sniffPictureFormat(heic)).toBe('heic')
+    expect(await picturePixels(new Uint8Array(heic))).toBe(50 * 20)
+
+    // BITMAPINFOHEADER BMP (the common case): 3×2 px, no pixel data needed.
+    const bmp = new Uint8Array(26)
+    bmp.set([0x42, 0x4D], 0) // "BM"
+    new DataView(bmp.buffer).setUint32(14, 40, true) // DIB header size: BITMAPINFOHEADER
+    new DataView(bmp.buffer).setInt32(18, 3, true) // width
+    new DataView(bmp.buffer).setInt32(22, -2, true) // height, top-down (negative)
+    expect(sniffPictureFormat(bmp)).toBe('bmp')
+    expect(bmpPixels(bmp)).toBe(6)
+    expect(await picturePixels(bmp)).toBe(6)
+
+    // An old-style BITMAPCOREHEADER BMP (12-byte DIB, u16 width/height).
+    const bmpCore = new Uint8Array(22)
+    bmpCore.set([0x42, 0x4D], 0)
+    new DataView(bmpCore.buffer).setUint32(14, 12, true)
+    new DataView(bmpCore.buffer).setUint16(18, 4, true)
+    new DataView(bmpCore.buffer).setUint16(20, 5, true)
+    expect(bmpPixels(bmpCore)).toBe(20)
+
+    // A picture format this still can't read (no BMP codec, no HEVC decoder
+    // for a real HEIC): a header short of what bmpPixels/isobmffIspePixels
+    // need prices at the cap, exactly as an unrecognised format does.
+    expect(bmpPixels(new Uint8Array([0x42, 0x4D]))).toBeNull()
+    expect(isobmffIspePixels(new Uint8Array([0, 0, 0, 12, ...Buffer.from('ftyp'), ...Buffer.from('heic')]))).toBeNull()
   })
 
   it('reads each file value once, and at most MAX_MEASURED_FILES per prompt', async () => {

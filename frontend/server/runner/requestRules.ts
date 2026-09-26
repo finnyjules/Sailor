@@ -378,6 +378,36 @@ export const FLUX_2_EDIT_TOO_LARGE = 'Flux 2 Pro takes pictures up to about 19 m
 export const UPSCALE_TOO_LARGE = 'Upscale an image takes pictures up to about 19 megapixels. Make this one smaller first.'
 export const ENHANCE_DETAIL_TOO_LARGE = 'Enhance detail takes pictures up to about 19 megapixels. Make this one smaller first.'
 
+/** A size-priced node by the name the user sees it by (its own, or its model's). */
+function sizePricedName(classType: string): string {
+  switch (classType) {
+    case 'RotateCameraNode': return 'Rotate camera'
+    case 'UpscaleImageNode': return 'Upscale an image'
+    case 'EnhanceDetailNode': return 'Enhance detail'
+    // Edit an image and Blend scene: only FLUX.2 edit is priced by the picture's size.
+    default: return 'Flux 2 Pro'
+  }
+}
+
+/**
+ * Task G1: the hosted refusal for a size-priced node whose picture's size
+ * can't be known before the run (it comes from a step whose output size
+ * can't be told in advance, or could be larger than about 19 megapixels).
+ */
+export function unsizedInputWords(classType: string): string {
+  const name = sizePricedName(classType)
+  return `Sailor can't tell how big the picture going into ${name} will be, and ${name} is charged by its size. Run the steps before it first, then use a picture of up to about 19 megapixels.`
+}
+
+/**
+ * Task G1: the hosted refusal for a size-priced node sent a loaded picture
+ * whose size can't be read (a format with no size reader, or a broken file).
+ */
+export function unreadableInputWords(classType: string): string {
+  const name = sizePricedName(classType)
+  return `Sailor can't read the size of this picture, and ${name} is charged by its size. Save it as a PNG, JPEG or WebP and try again.`
+}
+
 /** The refusal for a size-priced node's picture above the input cap, in the node's (or its model's) own words. */
 function inputTooLargeWords(classType: string): string {
   switch (classType) {

@@ -12,7 +12,7 @@ import { createHash, randomUUID } from 'node:crypto'
 import type { H3Event } from 'h3'
 import { readBody, setResponseStatus } from 'h3'
 import { priceGraph, UnpricedGraphError } from './priceBook'
-import { createGateReads, graphInputPixels } from './graphInputPixels'
+import { createGateReads, graphInputPixelProblems, graphInputPixels } from './graphInputPixels'
 import { graphInputSeconds, seedanceReferenceSeconds } from './graphInputSeconds'
 import { MeterRefusalError } from './requestMeter'
 import { createGraphRun, resolveGraphRun, outputKey, ownedOutputKeys } from './graphRuns'
@@ -323,6 +323,14 @@ export interface GraphRunDeps {
    */
   measureInputPixels?(prompt: any): Promise<Record<string, number>>
   /**
+   * Task G1: the size-priced nodes refused because the gate can't size their
+   * picture before the run (it comes from a step whose output size can't be
+   * told, or could be over the input cap), or can't read a loaded file's
+   * size — graphInputPixelProblems. Refused before the price and any hold.
+   * Absent (the unit tests), none.
+   */
+  inputPixelProblems?(prompt: any): Promise<import('../runner/requestRules').RequestProblem[]>
+  /**
    * Node id → the measured length of each lip-sync node's sound clip (and
    * Kling lip-sync's source video) — graphInputSeconds. Runs after the
    * file-ownership check. Absent, every lip-sync is priced at the 60 s cap.
@@ -414,7 +422,10 @@ export async function meterGraphSubmit(userId: string | null, body: any, deps: G
   // A measured picture above the input cap is refused before the hold: each
   // size-priced model bills the picture's real size and the price stops at the
   // cap (requestRules.ts measuredInputProblems; final review finding 1).
-  const tooLarge = inputPixels ? nodeProblemsBody(measuredInputProblems(body.prompt, inputPixels)) : null
+  // A picture the gate can't size before the run, or a loaded file whose size
+  // it can't read, is refused too (Task G1): it could be larger than the cap.
+  const unsized = deps.inputPixelProblems ? await deps.inputPixelProblems(body.prompt) : []
+  const tooLarge = nodeProblemsBody([...(inputPixels ? measuredInputProblems(body.prompt, inputPixels) : []), ...unsized])
   if (tooLarge) return { status: 400, body: tooLarge }
   // The length of each lip-sync node's sound (and Kling's source video), where
   // it can read it; the rest price at the 60 s cap.
@@ -499,6 +510,8 @@ export async function handleMeteredPrompt(event: H3Event): Promise<any> {
   const result = await meterGraphSubmit(userId, body, {
     priceGraph,
     measureInputPixels: prompt => graphInputPixels(prompt, undefined, reads),
+    // The same walk over the same memoised reads: no file is read twice.
+    inputPixelProblems: prompt => graphInputPixelProblems(prompt, undefined, reads),
     measureInputSeconds: prompt => graphInputSeconds(prompt, undefined, reads),
     // Hosted: a Seedance reference whose length can't be read is refused, not counted as 0 (S1b fix round 2).
     referenceSecondsProblems: prompt => seedanceReferenceSeconds(prompt, undefined, { strict: true }),

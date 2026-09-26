@@ -96,6 +96,11 @@ interface FamilyFlow {
   alsoOff?: RunnerFamily[]
   /** Its cards must start as real PNGs: the runner reads the file's format before sending (Product shot on Bria, F12 fix round 1). */
   png?: true
+  /**
+   * Its cards must be pictures whose size can be read: the node is priced by
+   * the picture's size, and hosted refuses one it can't size (Task G1).
+   */
+  measured?: true
 }
 
 /**
@@ -311,6 +316,7 @@ const FLOWS: FamilyFlow[] = [
       2: outImage('1'),
     },
     files: ['image.png'],
+    measured: true,
     provider: 'fal',
     endpoint: 'fal-ai/qwen-image-edit-2511-multiple-angles',
     // With only this one off, ref-edits takes the node on its 2509 call.
@@ -557,8 +563,15 @@ function kit(o: Parameters<typeof makeKit>[0] = {}) {
   return k
 }
 const PNG_SIGNATURE = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]
-function writeCards(k: ReturnType<typeof makeKit>, files: string[], png = false) {
-  files.forEach((f, i) => writeFileSync(join(k.root, 'input', f), new Uint8Array([...(png ? PNG_SIGNATURE : []), i + 1, 7, 7])))
+/** A whole 1 × 1 grey PNG, whose header gives its size (bytes after IEND are ignored by readers). */
+const PNG_1X1 = [
+  ...PNG_SIGNATURE, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44, 0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x00, 0x00, 0x00,
+  0x00, 0x3A, 0x7E, 0x9B, 0x55, 0x00, 0x00, 0x00, 0x0A, 0x49, 0x44, 0x41, 0x54, 0x78, 0x9C, 0x63, 0x60, 0x00, 0x00, 0x00, 0x02, 0x00, 0x01,
+  0x48, 0xAF, 0xA4, 0x71, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4E, 0x44, 0xAE, 0x42, 0x60, 0x82,
+]
+function writeCards(k: ReturnType<typeof makeKit>, files: string[], png = false, measured = false) {
+  const head = measured ? PNG_1X1 : png ? PNG_SIGNATURE : []
+  files.forEach((f, i) => writeFileSync(join(k.root, 'input', f), new Uint8Array([...head, i + 1, 7, 7])))
 }
 const holds = (ledger: ReturnType<typeof createFakeLedger>) => [...ledger.holds.values()].map(h => [h.state, h.actual])
 
@@ -597,7 +610,7 @@ describe('B10 · one workflow per family, POST /api/runs to the last event', () 
 
   it.each(FLOWS.map(f => [`${f.family}: ${f.label} → ${f.endpoint}`, f] as const))('%s', async (_l, f) => {
     const k = kit()
-    writeCards(k, f.files, f.png)
+    writeCards(k, f.files, f.png, f.measured)
     const events = await openEvents()
     try {
       const { runId, promptIds } = await started([f.prompt])
@@ -615,8 +628,10 @@ describe('B10 · one workflow per family, POST /api/runs to the last event', () 
 
       // The charge is priceGraph for the nodes that ran (all of them), held and settled once,
       // with the server's switches (Rotate camera prices its 2511 call while that one is on).
-      const price = priceGraph(f.prompt, { families: runnerFamilies() }).credits
-      expect(price).toBe(nodeCredits(f.prompt['1']!, undefined, runnerFamilies()) + BASE_RENDER_CREDITS)
+      // A card whose size is read (`measured`: a 1 × 1 picture) is charged on that size.
+      const px = f.measured ? 1 : undefined
+      const price = priceGraph(f.prompt, { families: runnerFamilies(), ...(px ? { inputPixels: { 1: px } } : {}) }).credits
+      expect(price).toBe(nodeCredits(f.prompt['1']!, px, runnerFamilies()) + BASE_RENDER_CREDITS)
       expect(k.ledger.hold).toHaveBeenCalledTimes(1)
       expect(k.ledger.settle).toHaveBeenCalledTimes(1)
       expect(holds(k.ledger)).toEqual([['settled', price]])
@@ -862,7 +877,7 @@ describe('B10 · money', () => {
     expect(priceGraph(f.prompt).breakdown).toEqual([{ action: 'base_render', credits: BASE_RENDER_CREDITS }, { action: 'PersonSwap', credits: 14 }])
     const price = 14 + BASE_RENDER_CREDITS
     const k = kit()
-    writeCards(k, f.files, f.png)
+    writeCards(k, f.files, f.png, f.measured)
     const events = await openEvents()
     try {
       const { runId, promptIds } = await started([f.prompt])
@@ -915,7 +930,7 @@ describe('B10 · each family switched off in turn', () => {
     expect(runnerFamilies().has(family)).toBe(false)
     expect(runnerFamilies().size).toBe(RUNNER_FAMILIES.length - off.length)
     const k = kit()
-    writeCards(k, f.files, f.png)
+    writeCards(k, f.files, f.png, f.measured)
 
     const res = await startRun([f.prompt])
     expect(res.status).toBe(400)
