@@ -12,7 +12,9 @@ import { createHash, randomUUID } from 'node:crypto'
 import type { H3Event } from 'h3'
 import { readBody, setResponseStatus } from 'h3'
 import { priceGraph, UnpricedGraphError } from './priceBook'
-import { createGateReads, graphInputPixelProblems, graphInputPixels } from './graphInputPixels'
+import { createGateReads, graphInputSizes } from './graphInputPixels'
+import { normalizeHostedPrompt } from './hostedPrompt'
+import { storedNodeCatalog } from '../native/objectInfo'
 import { graphInputSeconds, seedanceReferenceSeconds } from './graphInputSeconds'
 import { MeterRefusalError } from './requestMeter'
 import { createGraphRun, resolveGraphRun, outputKey, ownedOutputKeys } from './graphRuns'
@@ -323,13 +325,21 @@ export interface GraphRunDeps {
    */
   measureInputPixels?(prompt: any): Promise<Record<string, number>>
   /**
-   * Task G1: the size-priced nodes refused because the gate can't size their
-   * picture before the run (it comes from a step whose output size can't be
-   * told, or could be over the input cap), or can't read a loaded file's
-   * size — graphInputPixelProblems. Refused before the price and any hold.
-   * Absent (the unit tests), none.
+   * Task G1 (one walk, fix round 1 R7): graphInputSizes — the sizes the price
+   * reads (`pixels`) AND the size-priced nodes refused because the gate can't
+   * size their picture before the run, can't read a loaded file's size, or
+   * left it unread (`problems`). Refused before the price and any hold. When
+   * present it replaces measureInputPixels. A throw fails the request (no hold).
    */
-  inputPixelProblems?(prompt: any): Promise<import('../runner/requestRules').RequestProblem[]>
+  measureInputSizes?(prompt: any): Promise<import('./graphInputPixels').GraphInputSizes>
+  /**
+   * G1 fix round 1 (R2/R4): the prompt as ComfyUI's validation leaves it
+   * (hostedPrompt.ts normalizeHostedPrompt) — unwrapped and coerced — or the
+   * problems that stop it being matched exactly (refused, 400). Runs before
+   * the file check, the sizing and the price; the NORMALISED prompt is the
+   * one forwarded. Absent (the unit tests), the prompt is used as sent.
+   */
+  normalizePrompt?(prompt: any): { prompt: any } | { problems: import('../runner/requestRules').RequestProblem[] }
   /**
    * Node id → the measured length of each lip-sync node's sound clip (and
    * Kling lip-sync's source video) — graphInputSeconds. Runs after the
@@ -391,6 +401,18 @@ export async function meterGraphSubmit(userId: string | null, body: any, deps: G
   // through preflightForUser). Fails CLOSED.
   await deps.spendGuard(userId)
 
+  // G1 fix round 1 (R2/R4): the prompt ComfyUI will run — `__value__`
+  // unwrapped, numbers coerced by each input's declared type — before
+  // anything reads it for money; it is also the prompt forwarded.
+  if (deps.normalizePrompt) {
+    const n = deps.normalizePrompt(body.prompt)
+    if ('problems' in n) {
+      const refusal = nodeProblemsBody(n.problems)
+      if (refusal) return { status: 400, body: refusal }
+    }
+    else body = { ...body, prompt: n.prompt }
+  }
+
   // Ownership of every file the graph references is checked BEFORE pricing or
   // any hold — a graph that reaches for another tenant's input/output is
   // refused (403) at zero cost, and the engine is never touched.
@@ -418,14 +440,17 @@ export async function meterGraphSubmit(userId: string | null, body: any, deps: G
 
   // The size of the pictures a size-priced node is sent, where the gate can
   // read it; the rest price at the input cap (never below what runs).
-  const inputPixels = deps.measureInputPixels ? await deps.measureInputPixels(body.prompt).catch(() => ({})) : undefined
+  // One walk gives both (G1 fix round 1, R7).
+  const sizes = deps.measureInputSizes
+    ? await deps.measureInputSizes(body.prompt)
+    : deps.measureInputPixels ? { pixels: await deps.measureInputPixels(body.prompt).catch(() => ({})), problems: [] } : undefined
+  const inputPixels = sizes?.pixels
   // A measured picture above the input cap is refused before the hold: each
   // size-priced model bills the picture's real size and the price stops at the
   // cap (requestRules.ts measuredInputProblems; final review finding 1).
   // A picture the gate can't size before the run, or a loaded file whose size
-  // it can't read, is refused too (Task G1): it could be larger than the cap.
-  const unsized = deps.inputPixelProblems ? await deps.inputPixelProblems(body.prompt) : []
-  const tooLarge = nodeProblemsBody([...(inputPixels ? measuredInputProblems(body.prompt, inputPixels) : []), ...unsized])
+  // it can't read or didn't read, is refused too (Task G1): it could be larger than the cap.
+  const tooLarge = nodeProblemsBody([...(inputPixels ? measuredInputProblems(body.prompt, inputPixels) : []), ...(sizes?.problems ?? [])])
   if (tooLarge) return { status: 400, body: tooLarge }
   // The length of each lip-sync node's sound (and Kling's source video), where
   // it can read it; the rest price at the 60 s cap.
@@ -509,9 +534,10 @@ export async function handleMeteredPrompt(event: H3Event): Promise<any> {
   const reads = createGateReads()
   const result = await meterGraphSubmit(userId, body, {
     priceGraph,
-    measureInputPixels: prompt => graphInputPixels(prompt, undefined, reads),
-    // The same walk over the same memoised reads: no file is read twice.
-    inputPixelProblems: prompt => graphInputPixelProblems(prompt, undefined, reads),
+    // Hosted: the prompt ComfyUI will run, from the stored node catalog (G1 fix round 1).
+    normalizePrompt: prompt => normalizeHostedPrompt(prompt, storedNodeCatalog()),
+    // One walk: the sizes the price reads and the refusals (G1 fix round 1, R7).
+    measureInputSizes: prompt => graphInputSizes(prompt, undefined, reads),
     measureInputSeconds: prompt => graphInputSeconds(prompt, undefined, reads),
     // Hosted: a Seedance reference whose length can't be read is refused, not counted as 0 (S1b fix round 2).
     referenceSecondsProblems: prompt => seedanceReferenceSeconds(prompt, undefined, { strict: true }),

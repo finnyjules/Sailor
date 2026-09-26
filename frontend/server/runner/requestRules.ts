@@ -408,6 +408,16 @@ export function unreadableInputWords(classType: string): string {
   return `Sailor can't read the size of this picture, and ${name} is charged by its size. Save it as a PNG, JPEG or WebP and try again.`
 }
 
+/**
+ * G1 fix round 1 (R6): the hosted refusal for a size-priced node sent a
+ * loaded picture the gate didn't read because the run already had as many
+ * pictures as it checks at once (MAX_MEASURED_FILES).
+ */
+export function tooManyPicturesWords(classType: string): string {
+  const name = sizePricedName(classType)
+  return `This run has more pictures than Sailor can check at once, and ${name} is charged by its picture's size. Run fewer pictures at a time.`
+}
+
 /** The refusal for a size-priced node's picture above the input cap, in the node's (or its model's) own words. */
 function inputTooLargeWords(classType: string): string {
   switch (classType) {

@@ -40,7 +40,7 @@ import {
   ENHANCE_ENGINE_SLUGS, LARGEST_INPUT_PIXELS, madePictureBound, sizePricedInput, upscaleSideFactor, type NodeInputs,
 } from '../../shared/pricing/editSettings'
 import { actionPassThrough } from '../runner/generators/actions'
-import { unreadableInputWords, unsizedInputWords, type RequestProblem } from '../runner/requestRules'
+import { tooManyPicturesWords, unreadableInputWords, unsizedInputWords, type RequestProblem } from '../runner/requestRules'
 import { LIPSYNC_MEDIA_READS } from '../../shared/pricing/clipSettings'
 
 const hasOwn = (o: object, k: string) => Object.prototype.hasOwnProperty.call(o, k)
@@ -48,11 +48,11 @@ const hasOwn = (o: object, k: string) => Object.prototype.hasOwnProperty.call(o,
 type Prompt = Record<string, { class_type?: unknown; inputs?: unknown } | undefined>
 
 /**
- * At most this many picture files are read per /prompt; any further
- * size-priced picture is priced at the cap. Each file value is read once
- * (memoised). Lip-sync media have their own reserved slots
+ * At most this many picture files are read per /prompt; a size-priced node
+ * fed by any further file is refused (G1 fix round 1, R6). Each file value
+ * is read once (memoised). Lip-sync media have their own reserved slots
  * (LIPSYNC_MEDIA_READS, graphInputSeconds.ts), so a graph full of pictures
- * can't use them up — and pictures already fail safe to the cap.
+ * can't use them up.
  */
 export const MAX_MEASURED_FILES = 8
 
@@ -62,20 +62,20 @@ export type GatePool = 'pictures' | 'media'
 /**
  * One /prompt's file reads: memoised by what is read (`key`, e.g. the kind and
  * the file value), and at most `max[pool]` distinct reads in each pool. A
- * read past its pool's budget, or one that throws, is null (priced at the cap).
+ * read past its pool's budget, or one that throws, is null.
  */
 export interface GateReads {
-  measure(key: string, read: () => Promise<number | null>, pool?: GatePool): Promise<number | null>
+  measure<T = number>(key: string, read: () => Promise<T | null>, pool?: GatePool): Promise<T | null>
 }
 
 export function createGateReads(max: Partial<Record<GatePool, number>> = {}): GateReads {
   const limit: Record<GatePool, number> = { pictures: MAX_MEASURED_FILES, media: LIPSYNC_MEDIA_READS, ...max }
-  const seen = new Map<string, Promise<number | null>>()
+  const seen = new Map<string, Promise<unknown>>()
   const used: Record<GatePool, number> = { pictures: 0, media: 0 }
   return {
-    measure(key, read, pool = 'pictures') {
+    measure<T>(key: string, read: () => Promise<T | null>, pool: GatePool = 'pictures'): Promise<T | null> {
       const hit = seen.get(`${pool}|${key}`)
-      if (hit) return hit
+      if (hit) return hit as Promise<T | null>
       if (used[pool] >= limit[pool]) return Promise.resolve(null)
       used[pool]++
       const p = read().catch(() => null)
@@ -133,6 +133,12 @@ const readU32BE = (b: Uint8Array, i: number) => ((b[i]! << 24) | (b[i + 1]! << 1
  * header is short or the size reads zero.
  */
 export function bmpPixels(head: Uint8Array): number | null {
+  const d = bmpDims(head)
+  return d ? d.width * d.height : null
+}
+
+/** bmpPixels' width and height. */
+export function bmpDims(head: Uint8Array): { width: number, height: number } | null {
   if (head.length < 18 || head[0] !== 0x42 || head[1] !== 0x4D) return null
   const dibSize = readU32LE(head, 14)
   let w: number, h: number
@@ -146,11 +152,15 @@ export function bmpPixels(head: Uint8Array): number | null {
     w = readI32LE(head, 18)
     h = Math.abs(readI32LE(head, 22))
   }
-  return w > 0 && h > 0 ? w * h : null
+  return w > 0 && h > 0 ? { width: w, height: h } : null
 }
 
-/** One ISOBMFF box's type and its payload bounds within `bytes`. */
-interface IsoBox { type: string, start: number, end: number }
+/**
+ * One ISOBMFF box's type, its payload bounds within `bytes`, and whether its
+ * declared size runs past what was read (`truncated`; a size-0 box, "to the
+ * end of the file", counts as truncated too, since a header read can't tell).
+ */
+interface IsoBox { type: string, start: number, end: number, truncated: boolean }
 
 /** Walks the sibling boxes between `from` and `to`; bounded, never throws on a malformed size. */
 function* isoBoxes(bytes: Uint8Array, from: number, to: number): Generator<IsoBox> {
@@ -160,59 +170,124 @@ function* isoBoxes(bytes: Uint8Array, from: number, to: number): Generator<IsoBo
     const type = String.fromCharCode(bytes[off + 4]!, bytes[off + 5]!, bytes[off + 6]!, bytes[off + 7]!)
     let headerLen = 8
     let size = size32
+    let truncated = false
     if (size32 === 1) {
-      // A 64-bit "largesize" follows the type; a header region is never that
-      // large, so its low 32 bits are read and the high word is assumed 0.
-      if (off + 16 > to) return
+      // A 64-bit "largesize" follows the type; the high word must be 0 for a
+      // box a picture header could hold, else it is taken as running past.
+      if (off + 16 > to) { yield { type, start: off + 8, end: to, truncated: true }; return }
+      if (readU32BE(bytes, off + 8) !== 0) truncated = true
       size = readU32BE(bytes, off + 12)
       headerLen = 16
     }
-    else if (size32 === 0) size = to - off // extends to the end of the parent
+    else if (size32 === 0) { size = to - off; truncated = true }
     if (size < headerLen) return // malformed — stop rather than loop or misread
-    const end = Math.min(off + size, to)
-    yield { type, start: off + headerLen, end }
+    if (off + size > to) truncated = true
+    yield { type, start: off + headerLen, end: Math.min(off + size, to), truncated }
+    if (truncated) return
     off += size
   }
 }
 
+/** The first `type` box among the siblings, or null; one that runs past the bytes read is returned (marked). */
 function findIsoBox(bytes: Uint8Array, from: number, to: number, type: string): IsoBox | null {
-  for (const b of isoBoxes(bytes, from, to)) if (b.type === type) return b
+  for (const b of isoBoxes(bytes, from, to)) {
+    if (b.type === type) return b
+    if (b.truncated) return null
+  }
   return null
 }
 
+/** Width and height of a picture. */
+export interface PictureDims { width: number, height: number }
+
 /**
- * Pixels of an AVIF or HEIC picture from its `ispe` (ImageSpatialExtents)
- * property box, walked ISOBMFF-fashion — no decode, so this reads a HEIC
- * whether or not any installed codec could ever open it: `ftyp` → `meta`
- * (a FullBox: 4 bytes of version/flags, then children) → `iprp` → `ipco` →
- * the largest `ispe` (also a FullBox; its payload is two big-endian u32s,
- * width then height). `bytes` need only be a header-sized read (the boxes
- * this walks sit before the picture's own encoded data); null when any box
- * is missing, truncated, or outside the bytes read.
+ * The size of an AVIF or HEIC picture from its box structure, no decode (so
+ * a HEIC reads whether or not any installed codec could open it). Round 1 of
+ * the G1 review (R1): the PRIMARY item's size, as the decoder shows it, not
+ * any `ispe` found:
+ *  - `meta` (a FullBox) → `pitm`: the primary item's id (u16, or u32 in
+ *    version 1);
+ *  - `meta` → `iprp` → `ipma` (FullBox; version 0 ids u16, else u32; flags
+ *    bit 0: property indices u16 with the top bit "essential", else u8 with
+ *    the top bit essential): the 1-based `ipco` property indices associated
+ *    with that item;
+ *  - `iprp` → `ipco`: the associated `ispe` (FullBox, then width and height
+ *    as big-endian u32).
+ * Null (can't be sized, so refused on a size-priced node in hosted mode)
+ * when `meta`, `pitm`, `iprp`, `ipco` or `ipma` is missing or runs past the
+ * bytes read, or the primary item has no `ispe`. A picture turned a quarter
+ * (`irot` 1 or 3) keeps its pixel count; its sides are reported as stored,
+ * with `rotated` set, since the decoder may or may not turn it.
  */
-export function isobmffIspePixels(bytes: Uint8Array): number | null {
+export function isobmffPrimarySize(bytes: Uint8Array): (PictureDims & { rotated: boolean }) | null {
   try {
     const meta = findIsoBox(bytes, 0, bytes.length, 'meta')
-    if (!meta) return null
-    const iprp = findIsoBox(bytes, meta.start + 4, meta.end, 'iprp')
-    if (!iprp) return null
+    if (!meta || meta.truncated) return null
+    const kids = { from: meta.start + 4, to: meta.end }
+    const pitm = findIsoBox(bytes, kids.from, kids.to, 'pitm')
+    if (!pitm || pitm.truncated) return null
+    const pitmVersion = bytes[pitm.start]!
+    if (pitm.start + 4 + (pitmVersion === 0 ? 2 : 4) > pitm.end) return null
+    const primary = pitmVersion === 0 ? (bytes[pitm.start + 4]! << 8 | bytes[pitm.start + 5]!) : readU32BE(bytes, pitm.start + 4)
+    const iprp = findIsoBox(bytes, kids.from, kids.to, 'iprp')
+    if (!iprp || iprp.truncated) return null
     const ipco = findIsoBox(bytes, iprp.start, iprp.end, 'ipco')
-    if (!ipco) return null
-    // Every `ispe` in the property container, the largest taken: a tiled
-    // (grid) picture — every iPhone HEIC — lists its tiles' size as well as
-    // the whole picture's, and a thumbnail's, so the first can be a 512 × 512
-    // tile. The largest is never below the picture itself.
-    let largest = 0
-    for (const box of isoBoxes(bytes, ipco.start, ipco.end)) {
-      if (box.type !== 'ispe') continue
-      const p = box.start + 4
-      if (p + 8 > bytes.length || p + 8 > box.end) continue
-      const px = readU32BE(bytes, p) * readU32BE(bytes, p + 4)
-      if (px > largest) largest = px
+    if (!ipco || ipco.truncated) return null
+    const properties: IsoBox[] = []
+    for (const b of isoBoxes(bytes, ipco.start, ipco.end)) {
+      if (b.truncated) return null
+      properties.push(b)
     }
-    return largest > 0 ? largest : null
+    // Every ipma (there may be more than one) — the primary item's indices.
+    const indices: number[] = []
+    let sawIpma = false
+    for (const b of isoBoxes(bytes, iprp.start, iprp.end)) {
+      if (b.truncated) return null
+      if (b.type !== 'ipma') continue
+      sawIpma = true
+      const version = bytes[b.start]!
+      const wide = (bytes[b.start + 3]! & 1) === 1
+      let q = b.start + 4
+      if (q + 4 > b.end) return null
+      const count = readU32BE(bytes, q)
+      q += 4
+      for (let e = 0; e < count; e++) {
+        const idLen = version < 1 ? 2 : 4
+        if (q + idLen + 1 > b.end) return null
+        const item = idLen === 2 ? (bytes[q]! << 8 | bytes[q + 1]!) : readU32BE(bytes, q)
+        q += idLen
+        const n = bytes[q]!
+        q += 1
+        for (let a = 0; a < n; a++) {
+          if (q + (wide ? 2 : 1) > b.end) return null
+          const index = wide ? ((bytes[q]! << 8 | bytes[q + 1]!) & 0x7FFF) : (bytes[q]! & 0x7F)
+          q += wide ? 2 : 1
+          if (item === primary) indices.push(index)
+        }
+      }
+    }
+    if (!sawIpma) return null
+    let dims: PictureDims | null = null
+    let rotated = false
+    for (const index of indices) {
+      const prop = index > 0 ? properties[index - 1] : undefined
+      if (!prop) continue
+      if (prop.type === 'ispe' && !dims) {
+        const q = prop.start + 4
+        if (q + 8 > prop.end) return null
+        dims = { width: readU32BE(bytes, q), height: readU32BE(bytes, q + 4) }
+      }
+      if (prop.type === 'irot' && prop.start < prop.end) rotated = (bytes[prop.start]! & 3) % 2 === 1
+    }
+    return dims && dims.width > 0 && dims.height > 0 ? { ...dims, rotated } : null
   }
   catch { return null }
+}
+
+/** Pixels of an AVIF or HEIC picture's primary item (isobmffPrimarySize), or null. */
+export function isobmffIspePixels(bytes: Uint8Array): number | null {
+  const d = isobmffPrimarySize(bytes)
+  return d ? d.width * d.height : null
 }
 
 /** A header-sized read of `file`'s first `n` bytes, from disk or from an in-memory buffer. */
@@ -228,38 +303,65 @@ async function headBytes(file: string | Uint8Array, n: number): Promise<Uint8Arr
 }
 
 /**
- * Header-sized reads only, never the whole file: the small one covers every
- * signature and BMP's own header; the ISOBMFF box walk (AVIF/HEIC) reads
- * further because `meta`/`iprp`/`ipco`/`ispe` can sit a little into the file
- * (still nowhere near the encoded picture data itself).
+ * Header-sized reads of a file on disk, never the whole file: the small one
+ * covers every signature and BMP's own header; the ISOBMFF box walk
+ * (AVIF/HEIC) reads up to ISOBMFF_HEAD_BYTES, and a `meta` that runs past it
+ * can't be sized (refused). Bytes already in memory (the runner's) are
+ * walked whole.
  */
 const SMALL_HEAD_BYTES = 64
-const ISOBMFF_HEAD_BYTES = 65536
+export const ISOBMFF_HEAD_BYTES = 256 * 1024
 
-/** Pixels of a picture (its header only), across every format this reads, or null when it can't. */
-export async function picturePixels(file: string | Uint8Array): Promise<number | null> {
+/**
+ * A picture's size as the engine loads it, from its header only, or null
+ * when it can't be read. `width`/`height` are after the EXIF turn the engine
+ * applies (ImageOps.exif_transpose in LoadImage and the Image card): sharp's
+ * orientation 5–8 swaps them. An AVIF/HEIC whose primary item is turned a
+ * quarter has only its pixel count (`width`/`height` absent), since whether
+ * the decoder turns it is not known here.
+ */
+export async function pictureSize(file: string | Uint8Array): Promise<{ pixels: number, width?: number, height?: number } | null> {
   try {
     const head = await headBytes(file, SMALL_HEAD_BYTES)
     const fmt = sniffPictureFormat(head)
-    if (fmt === 'bmp') return bmpPixels(head)
-    if (fmt === 'avif' || fmt === 'heic') return isobmffIspePixels(await headBytes(file, ISOBMFF_HEAD_BYTES))
+    if (fmt === 'bmp') {
+      const d = bmpDims(head)
+      return d ? { pixels: d.width * d.height, ...d } : null
+    }
+    if (fmt === 'avif' || fmt === 'heic') {
+      const d = isobmffPrimarySize(typeof file === 'string' ? await headBytes(file, ISOBMFF_HEAD_BYTES) : file)
+      if (!d) return null
+      return d.rotated ? { pixels: d.width * d.height } : { pixels: d.width * d.height, width: d.width, height: d.height }
+    }
     if (!fmt) return null
     const m = await sharp(file, { pages: 1 }).metadata()
-    return m.width && m.height ? m.width * m.height : null
+    if (!m.width || !m.height) return null
+    const turned = typeof m.orientation === 'number' && m.orientation >= 5
+    return { pixels: m.width * m.height, width: turned ? m.height : m.width, height: turned ? m.width : m.height }
   }
   catch { return null }
 }
 
+/** Pixels of a picture (its header only), across every format this reads, or null when it can't. */
+export async function picturePixels(file: string | Uint8Array): Promise<number | null> {
+  return (await pictureSize(file))?.pixels ?? null
+}
+
 /**
- * Pixels of an engine file named the way LoadImage names it (an optional
+ * The size of an engine file named the way LoadImage names it (an optional
  * ` [input]` / ` [output]` / ` [temp]` annotation; input by default), or null.
  */
-export async function engineFilePixels(value: string): Promise<number | null> {
+export async function engineFileSize(value: string): Promise<{ pixels: number, width?: number, height?: number } | null> {
   const { name, type } = annotatedFilepath(value)
   const folder = engineFolder(type ?? 'input')
   if (!folder || !name) return null
   const path = resolveInside(folder, name)
-  return path ? picturePixels(path) : null
+  return path ? pictureSize(path) : null
+}
+
+/** engineFileSize's pixel count alone. */
+export async function engineFilePixels(value: string): Promise<number | null> {
+  return (await engineFileSize(value))?.pixels ?? null
 }
 
 const inputsOf = (n: { inputs?: unknown } | undefined): NodeInputs =>
@@ -282,25 +384,43 @@ const inputsOf = (n: { inputs?: unknown } | undefined): NodeInputs =>
  *    which makes it 'unsized'.
  */
 export type PictureSize =
-  | { px: number, exact: boolean }
+  | { px: number, exact: boolean, width?: number, height?: number }
   | { unknown: 'unsized' | 'unreadable' | 'unread' }
 
 /** How far back a picture is followed; a longer chain (or a loop) is 'unsized'. */
 export const MAX_HOPS = 64
 
 /** Where a node's picture comes from, read from its class and settings. */
-type PictureRule =
+export type PictureRule =
   | { file: string }
   | { same: unknown } // the size of the picture on this link
-  | { scaled: unknown, side: number } // that picture, `side` times larger on each side
+  | { scaled: unknown, side: number, round: 'python' | 'up' } // that picture, `side` times each side
+  | { resize: unknown, width: number, height: number } // nodes.py ImageScale
+  | { crop: unknown, width: number, height: number, x: unknown, y: unknown } // nodes_images.py ImageCrop
+  | { atLeast: unknown, bound: number } // the larger of that picture and `bound`
   | { atMost: number } // no larger than this, whatever comes in
-  | { exact: number }
+  | { exact: number, width?: number, height?: number }
   | { unsized: true }
 
 const UNSIZED = { unsized: true } as const
 
 /** A whole number above 0 set on the node itself (not linked), else null. */
 const literalSize = (v: unknown): number | null => (typeof v === 'number' && Number.isInteger(v) && v > 0 ? v : null)
+/** A whole number of 0 or more set on the node itself, else null. */
+const literalCount = (v: unknown): number | null => (typeof v === 'number' && Number.isInteger(v) && v >= 0 ? v : null)
+
+/**
+ * Python's round() of a float to an int: halves go to the even neighbour
+ * (round(2.5) is 2, round(3.5) is 4). `x` is the same IEEE double Python
+ * computes, so the half test is exact.
+ */
+export function pyRound(x: number): number {
+  const f = Math.floor(x)
+  const d = x - f
+  if (d > 0.5) return f + 1
+  if (d < 0.5) return f
+  return f % 2 === 0 ? f : f + 1
+}
 
 /**
  * The first connected Frame layer, in slot order: nodes_compositor.py (and
@@ -310,8 +430,30 @@ const literalSize = (v: unknown): number | null => (typeof v === 'number' && Num
 const FRAME_LAYERS = 16
 
 /**
+ * The Nano Banana actions whose call-or-hand-on choice rests on text the
+ * gate can't read before the run (R3): a deciding text input that is linked.
+ * Python then decides at run time, after the link resolves, so the picture
+ * is either handed on unchanged or made at 1K: the larger of the two. The
+ * input named is the picture handed on. (A blank or missing text is
+ * actionPassThrough's certain hand-on; a wrapped value was unwrapped by the
+ * hosted normalisation before this is read.)
+ */
+function actionMaybePassThrough(classType: string, inputs: NodeInputs): string | null {
+  switch (classType) {
+    case 'RemoveObjectNode': return isLinkValue(inputs.target) ? 'image' : null
+    case 'TextEditNode': return isLinkValue(inputs.find) || isLinkValue(inputs.replace) ? 'image' : null
+    case 'RecolorObjectNode': return isLinkValue(inputs.target) || isLinkValue(inputs.color) ? 'image' : null
+    // `not has_reference and not scene_prompt.strip()`: with no reference wired, a linked scene prompt decides.
+    case 'SwapBackgroundNode': return !isLinkValue(inputs.background_reference) && isLinkValue(inputs.scene_prompt) ? 'product' : null
+    default: return null
+  }
+}
+
+/**
  * How a node's output picture is sized (Task G1). Each rule is read from the
- * node's own Python (named per case); anything not here is 'unsized'.
+ * node's own Python (named per case); anything not here is 'unsized'. The
+ * inputs are the hosted normalisation's (hostedPrompt.ts): unwrapped and
+ * coerced as ComfyUI's validation does, so a number here is the number that runs.
  */
 export function pictureRule(classType: string, inputs: NodeInputs): PictureRule {
   switch (classType) {
@@ -324,10 +466,12 @@ export function pictureRule(classType: string, inputs: NodeInputs): PictureRule 
     case 'Image':
       if (inputs.images !== undefined) return Array.isArray(inputs.images) ? { same: inputs.images } : UNSIZED
       return typeof inputs.image === 'string' && inputs.image ? { file: inputs.image } : UNSIZED
-    // nodes_replicate.py UpscaleImageNode: the input enlarged per side by its engine's factor.
+    // nodes_replicate.py UpscaleImageNode: the input enlarged per side by its
+    // engine's factor. A whole factor is exact; a fractional one is rounded
+    // up per side (the service's own rounding isn't stated), so never below.
     case 'UpscaleImageNode': {
       const side = typeof inputs.model === 'string' ? upscaleSideFactor(inputs.model, inputs) : null
-      return side == null ? UNSIZED : { scaled: inputs.image, side }
+      return side == null ? UNSIZED : { scaled: inputs.image, side, round: 'up' }
     }
     // build_enhance_input: every engine runs in place.
     case 'EnhanceDetailNode':
@@ -341,30 +485,31 @@ export function pictureRule(classType: string, inputs: NodeInputs): PictureRule 
       if (isLinkValue(inputs.width) || isLinkValue(inputs.height)) return UNSIZED
       const w = literalSize(inputs.width) ?? 0
       const h = literalSize(inputs.height) ?? 0
-      if (w > 0 && h > 0) return { exact: w * h }
+      if (w > 0 && h > 0) return { exact: w * h, width: w, height: h }
       for (let i = 1; i <= FRAME_LAYERS; i++) {
         const layer = inputs[`layer${i}`]
         if (layer !== undefined && layer !== null) return { same: layer }
       }
-      return { exact: 16 * 16 }
+      return { exact: 16 * 16, width: 16, height: 16 }
     }
-    // nodes.py ImageScale: width × height when both are set (0 keeps the
-    // input's aspect, which the gate can't see from a pixel count).
+    // nodes.py ImageScale: width × height; one side 0 keeps the input's
+    // aspect (round(), at least 1); both 0 hands the picture on.
     case 'ImageScale': {
-      const w = literalSize(inputs.width)
-      const h = literalSize(inputs.height)
-      return w && h ? { exact: w * h } : UNSIZED
+      const w = literalCount(inputs.width)
+      const h = literalCount(inputs.height)
+      return w == null || h == null ? UNSIZED : { resize: inputs.image, width: w, height: h }
     }
-    // nodes.py ImageScaleBy: `scale_by` per side (0.01–8; linked: 8).
+    // nodes.py ImageScaleBy: round(side × scale_by) each side (0.01–8; linked: 8, rounded up).
     case 'ImageScaleBy': {
-      const s = typeof inputs.scale_by === 'number' && inputs.scale_by > 0 ? inputs.scale_by : isLinkValue(inputs.scale_by) ? 8 : null
-      return s == null ? UNSIZED : { scaled: inputs.image, side: s }
+      if (isLinkValue(inputs.scale_by)) return { scaled: inputs.image, side: 8, round: 'up' }
+      const s = typeof inputs.scale_by === 'number' && inputs.scale_by > 0 ? inputs.scale_by : null
+      return s == null ? UNSIZED : { scaled: inputs.image, side: s, round: 'python' }
     }
-    // nodes_images.py ImageCrop: never larger than width × height.
+    // nodes_images.py ImageCrop: the slice from (min(x, W−1), min(y, H−1)), width × height at most.
     case 'ImageCrop': {
       const w = literalSize(inputs.width)
       const h = literalSize(inputs.height)
-      return w && h ? { atMost: w * h } : UNSIZED
+      return w && h ? { crop: inputs.image, width: w, height: h, x: inputs.x, y: inputs.y } : UNSIZED
     }
     // nodes_replicate.py RemoveBackgroundNode: a cut-out of the same picture.
     case 'RemoveBackgroundNode':
@@ -377,10 +522,13 @@ export function pictureRule(classType: string, inputs: NodeInputs): PictureRule 
   }
   // The Nano Banana actions (nodes_edit_actions.py and friends) hand their
   // picture on unchanged when there is nothing to change: the rule the
-  // runner plans by (actionPassThrough).
+  // runner plans by (actionPassThrough). With the deciding text linked, the
+  // larger of that and the 1K picture (R3).
   const through = actionPassThrough(classType, inputs)
   if (through) return { same: inputs[through] }
   const bound = madePictureBound(classType, inputs)
+  const maybe = actionMaybePassThrough(classType, inputs)
+  if (maybe) return bound == null ? UNSIZED : { atLeast: inputs[maybe], bound }
   return bound == null ? UNSIZED : { atMost: bound }
 }
 
@@ -399,12 +547,22 @@ function bakedForMotion(v: unknown): boolean {
   catch { return v.includes('rendered') }
 }
 
+/** What a gate file read gives: its size, 'unread' (the read budget ran out), or 'unreadable'. */
+export type FileRead = { pixels: number, width?: number, height?: number } | 'unread' | 'unreadable'
+
+/**
+ * `side` × a picture whose sides aren't known, only its pixel count `px`:
+ * the largest any shape of that many pixels could come to, each side rounded
+ * up — (w·s + 1)(h·s + 1) with w·h = px is largest for a one-pixel-high strip:
+ * px·s² + s·(px + 1) + 1.
+ */
+const scaledBound = (px: number, s: number) => Math.ceil(px * s * s + s * (px + 1) + 1)
+
 /**
  * Sizes the pictures of one prompt, memoised per node. `measure` reads a
- * loaded file's size: null when it wasn't read (the budget), -1 when it
- * was read and couldn't be sized.
+ * loaded file.
  */
-function pictureSizer(prompt: Prompt, measure: (value: string) => Promise<number | null>) {
+function pictureSizer(prompt: Prompt, measure: (value: string) => Promise<FileRead>) {
   const memo = new Map<string, Promise<PictureSize>>()
   const onLink = (link: unknown, path: ReadonlySet<string>): Promise<PictureSize> => {
     if (!Array.isArray(link) || link.length < 1) return Promise.resolve({ unknown: 'unsized' })
@@ -420,28 +578,60 @@ function pictureSizer(prompt: Prompt, measure: (value: string) => Promise<number
     memo.set(id, p)
     return p
   }
+  const sized = (width: number, height: number, exact: boolean): PictureSize => ({ px: width * height, exact, width, height })
   const size = async (id: string, path: ReadonlySet<string>): Promise<PictureSize> => {
     const node = prompt[id]
     const ct = node?.class_type
     if (typeof ct !== 'string') return { unknown: 'unsized' }
     const rule = pictureRule(ct, inputsOf(node))
     if ('file' in rule) {
-      const px = await measure(rule.file)
-      if (px == null) return { unknown: 'unread' }
-      return px > 0 ? { px, exact: true } : { unknown: 'unreadable' }
+      const r = await measure(rule.file)
+      if (r === 'unread' || r === 'unreadable') return { unknown: r }
+      return { px: r.pixels, exact: true, ...(r.width && r.height ? { width: r.width, height: r.height } : {}) }
     }
     if ('same' in rule) return onLink(rule.same, path)
-    if ('scaled' in rule) {
-      const input = await onLink(rule.scaled, path)
-      if ('unknown' in input) return rule.side <= 1 ? input : { unknown: input.unknown === 'unreadable' ? 'unreadable' : 'unsized' }
-      return { px: Math.ceil(input.px * rule.side * rule.side), exact: input.exact }
-    }
+    if ('exact' in rule) return { px: rule.exact, exact: true, ...(rule.width && rule.height ? { width: rule.width, height: rule.height } : {}) }
     if ('atMost' in rule) return { px: rule.atMost, exact: false }
-    if ('exact' in rule) return { px: rule.exact, exact: true }
-    return { unknown: 'unsized' }
+    if ('unsized' in rule) return { unknown: 'unsized' }
+    const input = await onLink('scaled' in rule ? rule.scaled : 'resize' in rule ? rule.resize : 'crop' in rule ? rule.crop : rule.atLeast, path)
+    if ('unknown' in input) return input
+    if ('atLeast' in rule) return { px: Math.max(input.px, rule.bound), exact: false }
+    const { width: w, height: h } = input
+    if ('scaled' in rule) {
+      const s = rule.side
+      if (w && h) {
+        if (rule.round === 'python') return sized(pyRound(w * s), pyRound(h * s), input.exact)
+        return sized(Math.ceil(w * s), Math.ceil(h * s), input.exact && Number.isInteger(s))
+      }
+      if (Number.isInteger(s)) return { px: input.px * s * s, exact: input.exact }
+      return { px: scaledBound(input.px, s), exact: false }
+    }
+    if ('resize' in rule) {
+      if (rule.width === 0 && rule.height === 0) return input
+      if (rule.width > 0 && rule.height > 0) return sized(rule.width, rule.height, true)
+      if (!w || !h) return { unknown: 'unsized' }
+      return rule.width === 0
+        ? sized(Math.max(1, pyRound(w * rule.height / h)), rule.height, input.exact)
+        : sized(rule.width, Math.max(1, pyRound(h * rule.width / w)), input.exact)
+    }
+    // Crop: with the input's sides and set offsets, the slice exactly; else at most width × height.
+    const x = literalCount(rule.x) ?? (rule.x === undefined ? 0 : null)
+    const y = literalCount(rule.y) ?? (rule.y === undefined ? 0 : null)
+    if (w && h && x != null && y != null) {
+      const cw = Math.max(0, Math.min(rule.width, w - Math.min(x, w - 1)))
+      const ch = Math.max(0, Math.min(rule.height, h - Math.min(y, h - 1)))
+      return sized(cw, ch, input.exact)
+    }
+    return { px: Math.min(rule.width * rule.height, input.px), exact: false }
   }
   return { ofLink: (link: unknown) => onLink(link, new Set()) }
 }
+
+/** A gate file reader: the picture's size (a pixel count, or with its sides), or null when it can't be sized. */
+export type GateFileReader = (value: string) => Promise<number | { pixels: number, width?: number, height?: number } | null>
+
+/** What the gate knows of the pictures a prompt's size-priced nodes are sent (graphInputSizes). */
+export interface GraphInputSizes { pixels: Record<string, number>, problems: RequestProblem[] }
 
 /**
  * What the gate knows of the picture each size-priced node is sent:
@@ -452,24 +642,39 @@ function pictureSizer(prompt: Prompt, measure: (value: string) => Promise<number
  * refused by measuredInputProblems in its own words, as before:
  *  - it can't be sized before the run, or only to a largest above the cap
  *    (unsizedInputWords);
- *  - it is a loaded file whose size can't be read (unreadableInputWords).
+ *  - it is a loaded file whose size can't be read, or whose read failed
+ *    (unreadableInputWords);
+ *  - it is a loaded file left unread because the prompt's read budget
+ *    (MAX_MEASURED_FILES) ran out (tooManyPicturesWords; G1 fix round 1, R6:
+ *    no longer priced at the cap).
  * A node whose picture isn't wired (a literal or missing input) is neither
  * priced on a size nor refused here: the engine refuses it itself.
+ * One walk serves both the price and the refusals (R7).
  * The ComfyUI path runs no runner family, so Rotate camera is never size-priced here.
  */
 export async function graphInputSizes(
   prompt: Prompt,
-  readFile: (value: string) => Promise<number | null> = engineFilePixels,
+  readFile: GateFileReader = engineFileSize,
   reads: GateReads = createGateReads(),
-): Promise<{ pixels: Record<string, number>, problems: RequestProblem[] }> {
+): Promise<GraphInputSizes> {
   const pixels: Record<string, number> = {}
   const problems: RequestProblem[] = []
   if (!prompt || typeof prompt !== 'object') return { pixels, problems }
   // One read per file value, and at most MAX_MEASURED_FILES picture reads per
   // prompt (lip-sync media read from their own pool of the same `reads`).
-  // A file read but not sized is -1, so the budget's null stays apart.
-  const measure = (value: string): Promise<number | null> =>
-    reads.measure(`pixels:${value}`, async () => (await readFile(value)) ?? -1, 'pictures')
+  // A read that throws, or a file that can't be sized, is 'unreadable'; the
+  // budget's null is 'unread'.
+  const measure = async (value: string): Promise<FileRead> => {
+    const r = await reads.measure<FileRead>(`pixels:${value}`, async () => {
+      try {
+        const got = await readFile(value)
+        if (typeof got === 'number') return got > 0 ? { pixels: got } : 'unreadable'
+        return got && got.pixels > 0 ? got : 'unreadable'
+      }
+      catch { return 'unreadable' }
+    }, 'pictures')
+    return r ?? 'unread'
+  }
   const sizer = pictureSizer(prompt, measure)
   for (const [id, node] of Object.entries(prompt)) {
     const ct = node?.class_type
@@ -478,14 +683,16 @@ export async function graphInputSizes(
     const name = sizePricedInput(ct, inputs)
     if (!name || !Array.isArray(inputs[name])) continue
     const s = await sizer.ofLink(inputs[name])
+    const refuse = (message: string) => problems.push({ nodeId: id, classType: ct, input: name, message })
     if ('px' in s) {
       // Exact (above the cap too: measuredInputProblems refuses it in its own
       // words), or a largest at or under the cap: priced on it.
       if (s.exact || s.px <= LARGEST_INPUT_PIXELS) pixels[id] = s.px
-      else problems.push({ nodeId: id, classType: ct, input: name, message: unsizedInputWords(ct) })
+      else refuse(unsizedInputWords(ct))
     }
-    else if (s.unknown === 'unsized') problems.push({ nodeId: id, classType: ct, input: name, message: unsizedInputWords(ct) })
-    else if (s.unknown === 'unreadable') problems.push({ nodeId: id, classType: ct, input: name, message: unreadableInputWords(ct) })
+    else if (s.unknown === 'unsized') refuse(unsizedInputWords(ct))
+    else if (s.unknown === 'unreadable') refuse(unreadableInputWords(ct))
+    else refuse(tooManyPicturesWords(ct))
   }
   return { pixels, problems }
 }
@@ -493,17 +700,8 @@ export async function graphInputSizes(
 /** Node id → the size of the picture each size-priced node is sent, where the gate knows it (graphInputSizes). */
 export async function graphInputPixels(
   prompt: Prompt,
-  readFile: (value: string) => Promise<number | null> = engineFilePixels,
+  readFile: GateFileReader = engineFileSize,
   reads: GateReads = createGateReads(),
 ): Promise<Record<string, number>> {
   return (await graphInputSizes(prompt, readFile, reads)).pixels
-}
-
-/** The size-priced nodes the gate refuses on their picture's size (graphInputSizes). */
-export async function graphInputPixelProblems(
-  prompt: Prompt,
-  readFile: (value: string) => Promise<number | null> = engineFilePixels,
-  reads: GateReads = createGateReads(),
-): Promise<RequestProblem[]> {
-  return (await graphInputSizes(prompt, readFile, reads)).problems
 }

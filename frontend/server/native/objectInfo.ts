@@ -850,6 +850,16 @@ export function storedObjectInfoBody(node: string | null): ObjectInfoBody | null
 }
 
 /**
+ * The stored node catalog as saved (the engine's last full catalog, else the
+ * committed baseline), file lists not refreshed; null when there is none.
+ * Read-only: the hosted /prompt gate reads each input's type from it
+ * (hostedPrompt.ts, Task G1 fix round 1). Memoised by readSaved / readBaseline.
+ */
+export function storedNodeCatalog(): Readonly<Catalog> | null {
+  return readSaved() ?? readBaseline()
+}
+
+/**
  * The body for `canonicalPath` (`/object_info` or `/object_info/{node}`):
  * the engine's own while it answers, else the stored catalog refreshed from
  * disk. Null only when there is no engine and no stored catalog at all.

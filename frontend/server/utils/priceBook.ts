@@ -141,7 +141,14 @@ export { VIDEO_RATES, MODEL_PRICED_NODE_CLASSES, SETTING_PRICED_NODE_CLASSES, RE
 // 25 fps (2 s bills 2.28 s: 12 → 14 credits at 720p; 6 s at 1080p 54 → 56) —
 // and Topaz video banded by the output's longer side only (a 360 × 640 →
 // 720p portrait, 2 s: 24 → 4 credits, as fal billed it). No other price moves.
-export const PRICE_BOOK_VERSION = 'lineup-taskc'
+// lineup-g1 (Task G1 and its fix round 1): the hosted /prompt gate prices a
+// size-priced node (Upscale, Enhance detail, FLUX.2 edit) on the picture it
+// is really sent when that picture comes out of another node (Upscale's
+// factor, Enhance in place, the Frame's size, Resize / Scale by / Crop, a
+// generator's stated largest), on the prompt as ComfyUI will run it
+// (`__value__` unwrapped, numbers coerced), and refuses one it can't size.
+// No rate moves.
+export const PRICE_BOOK_VERSION = 'lineup-g1'
 
 export const BASE_RENDER_CREDITS = 1
 

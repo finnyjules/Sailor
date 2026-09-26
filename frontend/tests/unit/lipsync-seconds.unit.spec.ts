@@ -274,7 +274,8 @@ describe('the /prompt gate measures lip-sync media', () => {
     expect(held).toEqual([180 + 1, 1350 + 1, 1350 + 1])
     // The live wiring shares one read budget between pictures and lengths.
     const src = readFileSync(`${REPO}frontend/server/utils/meterGraphRun.ts`, 'utf8')
-    expect(src).toContain('measureInputPixels: prompt => graphInputPixels(prompt, undefined, reads)')
+    // (G1 fix round 1: one walk gives the picture sizes and their refusals.)
+    expect(src).toContain('measureInputSizes: prompt => graphInputSizes(prompt, undefined, reads)')
     expect(src).toContain('measureInputSeconds: prompt => graphInputSeconds(prompt, undefined, reads)')
   })
 
@@ -468,7 +469,7 @@ describe('review I2, M2, M3', () => {
   })
   it('M3: RESTYLE_LORA_CREDITS is gone', () => {
     expect('RESTYLE_LORA_CREDITS' in PriceBook).toBe(false)
-    expect(PriceBook.PRICE_BOOK_VERSION).toBe('lineup-taskc')
+    expect(PriceBook.PRICE_BOOK_VERSION).toBe('lineup-g1')
   })
 })
 

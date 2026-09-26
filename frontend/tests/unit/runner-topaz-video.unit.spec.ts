@@ -383,14 +383,14 @@ describe('the price', () => {
   const at = (inputs: Record<string, unknown>, m: Record<string, number | null> = {}, families: ReadonlySet<RunnerFamily> = ON) =>
     priceNode('EnhanceVideoNode', inputs, { inputSeconds: m, families })
 
-  it('the card: per second by band and frame rate, from fal\'s page, verified, non-zero; the book carries it (lineup-f23, now lineup-taskc)', () => {
+  it('the card: per second by band and frame rate, from fal\'s page, verified, non-zero; the book carries it (lineup-f23, now lineup-g1)', () => {
     const rate = clipRate(TOPAZ_VIDEO_ENDPOINT)!
     expect(rate).toEqual({
       unit: 'per_second', service: 'fal', source: 'https://fal.ai/models/fal-ai/topaz/upscale/video/llms.txt', read: '2026-09-25', confidence: 'verified',
       byResolution: { '720p': 0.01, '1080p': 0.02, '4k': 0.08, '720p/60fps': 0.02, '1080p/60fps': 0.04, '4k/60fps': 0.16 },
     })
     expect(CLIP_RATES[TOPAZ_VIDEO_ENDPOINT]).toBe(rate)
-    expect(PRICE_BOOK_VERSION).toBe('lineup-taskc')
+    expect(PRICE_BOOK_VERSION).toBe('lineup-g1')
     expect(FAMILY_PRICED_CLASSES).toEqual({ EnhanceVideoNode: 'topaz-video' })
   })
 

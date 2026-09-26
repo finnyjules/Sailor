@@ -360,11 +360,11 @@ describe('Reve Create is untouched', () => {
 describe('the price', () => {
   const charge = (inputs: Record<string, unknown>) => priceGraph({ 1: { class_type: 'GenerateImageNode', inputs }, 2: SINK }).credits
 
-  it('the card: fal\'s flat $0.25 an image, verified, non-zero; no backup card; the book carries it (lineup-f15, now lineup-taskc)', () => {
+  it('the card: fal\'s flat $0.25 an image, verified, non-zero; no backup card; the book carries it (lineup-f15, now lineup-g1)', () => {
     expect(IMAGE_RATES[ID]).toEqual({
       unit: 'per_image', usd: PRICE, service: 'fal', source: 'https://fal.ai/models/reve/2.1/text-to-image/llms.txt', read: '2026-09-24', confidence: 'verified',
     })
-    expect(PRICE_BOOK_VERSION).toBe('lineup-taskc')
+    expect(PRICE_BOOK_VERSION).toBe('lineup-g1')
   })
 
   const examples: { name: string, inputs: Record<string, unknown> }[] = [
