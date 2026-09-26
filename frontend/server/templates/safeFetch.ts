@@ -14,8 +14,16 @@
  *   - redirects are followed by hand (at most 3), each one checked again;
  *   - 20 seconds in all, and at most 30 MB.
  * Locally (not hosted) one exception keeps the canvas working: a loopback
- * `/view` URL (ComfyUI's, or the app's own, which the editor and Python send
- * for a wired picture). Hosted, loopback is refused like the rest.
+ * `/view` URL on ComfyUI's configured port (SAILOR_COMFY_ORIGIN, as Python
+ * reads it; 8188 by default), which Python sends for a wired picture, or on
+ * the port the caller names (the route: the port its own request came in
+ * on, which the editor's absolute /view URLs use). Hosted, loopback is
+ * refused like the rest.
+ *
+ * Fix round 2: no connection is ever reused (`agent: false`), so every
+ * request resolves and checks its address, and the connected socket's
+ * address is checked once more; the IPv6 forms that carry an IPv4 address
+ * (::/96, ::ffff:0:0:0/96, 6to4, Teredo, NAT64) and site-local are refused.
  */
 import { BlockList, isIP } from 'node:net'
 import { lookup as dnsLookup } from 'node:dns'
@@ -41,8 +49,12 @@ for (const [net, bits] of [
   ['198.51.100.0', 24], ['203.0.113.0', 24], ['224.0.0.0', 4], ['240.0.0.0', 4],
 ] as const) BLOCKED.addSubnet(net, bits, 'ipv4')
 for (const [net, bits] of [
-  ['::', 128], ['::1', 128], ['fc00::', 7], ['fe80::', 10], ['ff00::', 8], ['64:ff9b::', 96], ['100::', 64], ['2001:db8::', 32],
+  ['::', 96], ['::ffff:0:0:0', 96], ['fc00::', 7], ['fe80::', 10], ['fec0::', 10], ['ff00::', 8],
+  ['64:ff9b::', 96], ['64:ff9b:1::', 48], ['100::', 64], ['2001::', 32], ['2001:db8::', 32], ['2002::', 16],
 ] as const) BLOCKED.addSubnet(net, bits, 'ipv6')
+// IPv4-mapped addresses (::ffff:a.b.c.d) are matched by the IPv4 rules above
+// (BlockList checks a mapped address against them); a ::ffff:0:0/96 rule
+// would match every IPv4 address.
 const LOOPBACK = new BlockList()
 LOOPBACK.addSubnet('127.0.0.0', 8, 'ipv4')
 LOOPBACK.addAddress('::1', 'ipv6')
@@ -61,9 +73,20 @@ export function addressAllowed(address: string, loopbackOk = false): boolean {
   return !BLOCKED.check(a.address, a.family)
 }
 
+/** ComfyUI's port, as Python's _COMFY_VIEW_ORIGIN reads it. */
+export function comfyViewPort(): number {
+  try {
+    const u = new URL(process.env.SAILOR_COMFY_ORIGIN || 'http://127.0.0.1:8188')
+    return Number(u.port || (u.protocol === 'https:' ? 443 : 80))
+  }
+  catch { return 8188 }
+}
+
 export interface SafeFetchOptions {
   /** Hosted (a shared server): no loopback exception. */
   hosted: boolean
+  /** Locally, loopback ports whose `/view` may be fetched besides ComfyUI's (the route's own). */
+  viewPorts?: readonly number[]
   timeoutMs?: number
   maxBytes?: number
 }
@@ -86,7 +109,8 @@ function requestOnce(u: URL, loopbackOk: boolean, o: { signal: AbortSignal; maxB
   }
   const lib = u.protocol === 'https:' ? https : http
   return new Promise((resolve, reject) => {
-    const req = lib.request(u, { method: 'GET', lookup: checkedLookup, signal: o.signal, headers: { 'User-Agent': 'Sailor/1.0', Accept: 'image/*' } }, (res) => {
+    // agent: false — a pooled keep-alive socket would skip the lookup, and so the check.
+    const req = lib.request(u, { method: 'GET', agent: false, lookup: checkedLookup, signal: o.signal, headers: { 'User-Agent': 'Sailor/1.0', Accept: 'image/*' } }, (res) => {
       const status = res.statusCode ?? 0
       if (status >= 300 && status < 400) {
         res.resume()
@@ -120,6 +144,13 @@ function requestOnce(u: URL, loopbackOk: boolean, o: { signal: AbortSignal; maxB
       })
       res.on('error', reject)
     })
+    // The connected socket's own address, checked once more.
+    req.on('socket', (sock) => {
+      sock.once('connect', () => {
+        const at = sock.remoteAddress
+        if (at && !addressAllowed(at, loopbackOk)) req.destroy(new FetchRefused(FETCH_REFUSED))
+      })
+    })
     req.on('error', (e) => {
       if (o.signal.aborted) reject(new FetchRefused(FETCH_TIMEOUT))
       else reject(e instanceof FetchRefused ? e : (e as Error & { cause?: unknown }).cause instanceof FetchRefused ? (e as Error & { cause: FetchRefused }).cause : e)
@@ -139,7 +170,8 @@ export function safeImageFetcher(opts: SafeFetchOptions): ImageFetcher {
     catch { throw new Error(`image fetch failed (bad address): ${url.slice(0, 100)}`) }
     for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
       if (u.protocol !== 'http:' && u.protocol !== 'https:') throw new FetchRefused(FETCH_REFUSED)
-      const loopbackOk = !opts.hosted && u.pathname === '/view'
+      const port = Number(u.port || (u.protocol === 'https:' ? 443 : 80))
+      const loopbackOk = !opts.hosted && u.pathname === '/view' && (port === comfyViewPort() || !!opts.viewPorts?.includes(port))
       const r = await requestOnce(u, loopbackOk, { signal, maxBytes }).catch((e: unknown) => {
         if (signal.aborted && !(e instanceof FetchRefused)) throw new FetchRefused(FETCH_TIMEOUT)
         throw e

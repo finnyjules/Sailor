@@ -21,13 +21,15 @@
  * `live_preview_<node>_<safe label>.png`, overwritten each run (the
  * runner's own temp subfolder locally, the user's hosted).
  *
- * Before any picture is read (fix round 1): each output at least 1 × 1 and
- * at most 8192² pixels, all within CARD_MAX_PIXELS, at most 256 elements,
- * and every preview name one the store takes. The image layers' pixel work
+ * Before any picture is read (fix rounds 1 and 2): each output at least
+ * 1 × 1, each side at most 16384 and at most 8192² pixels, all within
+ * CARD_MAX_PIXELS, at most 256 elements, the layout's text within the
+ * renderer's limits (template-grid/limits.ts), and every preview name one
+ * the store takes. The image layers' pixel work
  * runs on the Frame's worker (queue, watchdog, Stop), one layer at a time,
  * after every layer's header is read and the total checked; satori and resvg
- * run on the render worker (templates/renderWorker.ts), one output at a
- * time, terminated when the job's turn ends. Nothing is kept or written once
+ * run in the render process (templates/renderProcess.ts), one output at a
+ * time, killed when the job's turn ends. Nothing is kept or written once
  * the turn is over (the worker job's `live` signal).
  */
 import sharp from 'sharp'
@@ -42,12 +44,13 @@ import { PREVIEW_NAME_RE } from '../results'
 import { isLink, type ApiLink } from '#shared/runner/graph'
 import { CARD_MAX_PIXELS } from '#shared/runner/eligibility'
 import {
-  IMAGE_LAYERS, SMART_LAYOUT_MAX_ELEMENTS, SMART_LAYOUT_MAX_OUTPUT_PIXELS, TEXT_LAYERS,
+  IMAGE_LAYERS, SMART_LAYOUT_MAX_ELEMENTS, TEXT_LAYERS,
   autopopulateForTemplate, brandOf, formatSize, layoutElementCount, livePreviewName,
   outputLabels, parseLayout, parseTextLayers, pySplitlines, resolveOutputs,
   type SmartLayoutOutput,
 } from '#shared/runner/smartLayout'
 import { pyStrip } from '#shared/runner/pyText'
+import { LAYOUT_TOO_BIG, layoutTextProblem } from '#shared/template-grid/limits'
 import type { PictureSource } from '../compositor/decode'
 import { pictureSourceOf } from '../compositor/plan'
 import { pixelsInWorker } from '../compositor/worker'
@@ -62,7 +65,7 @@ export {
 export const LAYOUT_TOO_LARGE = `This layout’s outputs are too large to render here (more than ${Math.floor(CARD_MAX_PIXELS / 1_000_000)} million pixels in all). Render fewer or smaller formats.`
 export const LAYERS_TOO_LARGE = `This layout’s pictures are too large to work on together (more than ${Math.floor(CARD_MAX_PIXELS / 1_000_000)} million pixels). Use fewer or smaller pictures.`
 export const LAYOUT_IMAGE_FAILED = 'A picture in this layout could not be loaded'
-export const OUTPUT_TOO_LARGE = `An output of this layout is too large to render here (more than ${Math.floor(SMART_LAYOUT_MAX_OUTPUT_PIXELS / 1_000_000)} million pixels). Use a smaller format.`
+export const OUTPUT_TOO_LARGE = LAYOUT_TOO_BIG
 export const TOO_MANY_ELEMENTS = `This layout has too many elements to render here (more than ${SMART_LAYOUT_MAX_ELEMENTS}).`
 export const FORMAT_ODD = 'A format of this layout has a size that isn’t a number of pixels'
 export const PREVIEW_NAME_BAD = 'An output’s label is too long to name its preview file. Use a shorter label.'
@@ -165,9 +168,16 @@ function checkJob(job: Job, nodeId: string): void {
     const s = formatSize(r.template as unknown as Record<string, unknown>, r.aspect)
     if (s === 'odd') throw new Error(FORMAT_ODD)
     if (s === 'tiny') throw new Error(TEMPLATE_SIZE_WORDS)
+    if (s === 'huge') throw new Error(OUTPUT_TOO_LARGE)
     if (!s) continue
-    if (s.w * s.h > SMART_LAYOUT_MAX_OUTPUT_PIXELS) throw new Error(OUTPUT_TOO_LARGE)
     total += s.w * s.h
+  }
+  // The text the layout shows, its wired text filled in (round 2): the translation's limits.
+  const first = job.requests[0]
+  if (first) {
+    const brand = { ...((first.template as { brand?: Record<string, unknown> }).brand ?? {}), ...(first.brand as Record<string, unknown>) }
+    const why = layoutTextProblem(first.template, first.props as Record<string, unknown>, brand)
+    if (why) throw new Error(why)
   }
   if (total > CARD_MAX_PIXELS) throw new Error(LAYOUT_TOO_LARGE)
   job.labels.forEach((label, i) => {

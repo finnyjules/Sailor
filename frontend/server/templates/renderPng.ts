@@ -16,7 +16,7 @@ import { readManifest, USER_FONTS_DIR } from './fonts-store'
 import { inlineTreeImages, type ImageFetcher } from './inlineImages'
 import { templateToSatori } from './translate'
 import { safeImageFetcher } from './safeFetch'
-import { svgToPngInWorker } from './renderWorker'
+import { svgToPngInProcess } from './renderProcess'
 import { isHosted } from '../utils/deployMode'
 import { TEMPLATE_FONTS } from '../../shared/template-fonts'
 import { resolveTokens } from '../../shared/template-grid/tokens'
@@ -181,13 +181,13 @@ export class TemplateImageError extends Error {}
 export interface RenderOptions {
   /** How http(s) images are fetched: the safe fetcher (./safeFetch.ts) by default. */
   fetcher?: ImageFetcher
-  /** Stops the render (its worker is terminated). */
+  /** Stops the render (its process is killed). */
   signal?: AbortSignal
 }
 
 /**
  * The PNG for one render request: the route's body before R1.6, with the
- * satori and resvg steps on the render worker (./renderWorker.ts) and images
+ * satori and resvg steps in the render process (./renderProcess.ts) and images
  * fetched under the safe policy (fix round 1). Same code, same fonts, same bytes.
  */
 export async function renderTemplatePng(body: RenderRequest, opts: RenderOptions = {}): Promise<Uint8Array> {
@@ -212,8 +212,8 @@ export async function renderTemplatePng(body: RenderRequest, opts: RenderOptions
   }
 
   // satori → SVG, resvg → PNG (fitTo: original honours the size satori sized
-  // to), on the worker: the tree is plain objects, the fonts their bytes.
-  return svgToPngInWorker({
+  // to), in the render process: the tree is plain objects, the fonts their bytes.
+  return svgToPngInProcess({
     tree, width, height,
     fonts: fonts.map((f) => ({ name: f.name, data: f.data, weight: f.weight, style: f.style })),
   }, opts.signal)

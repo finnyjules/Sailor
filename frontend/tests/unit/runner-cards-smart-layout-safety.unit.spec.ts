@@ -32,7 +32,9 @@ import { PREVIEW_NAME_BAD, layerText, pyFloatStr, smartLayoutRenderer, smartLayo
 import { TemplateImageError, renderTemplatePng } from '~~/server/templates/renderPng'
 import { TEMPLATE_SIZE_REFUSED, TemplateSizeError, templateToSatori } from '~~/server/templates/translate'
 import { FETCH_REFUSED, FETCH_TIMEOUT, FETCH_TOO_LARGE, addressAllowed, safeImageFetcher } from '~~/server/templates/safeFetch'
-import { RENDER_TIMEOUT, __setSvgTimeoutForTests, svgToPngInWorker } from '~~/server/templates/renderWorker'
+import { RENDER_TIMEOUT, __renderChildPidForTests, __renderJobsForTests, __setRenderTimeoutForTests, svgToPngInProcess } from '~~/server/templates/renderProcess'
+import { inlineTreeImages } from '~~/server/templates/inlineImages'
+import { LAYOUT_MAX_TEXT, LAYOUT_TOO_BIG, LAYOUT_TOO_MANY_READERS, LAYOUT_TOO_MUCH_TEXT, layoutTextProblem } from '#shared/template-grid/limits'
 import type { RenderRequest } from '~~/server/templates/schema'
 import type { OutputFile } from '~~/server/runner/types'
 
@@ -118,7 +120,8 @@ afterEach(() => {
   hits = []
   vi.restoreAllMocks()
   __setFrameTimeoutForTests(null)
-  __setSvgTimeoutForTests(null)
+  __setRenderTimeoutForTests(null)
+  vi.unstubAllEnvs()
 })
 
 // ── 1. treatments ────────────────────────────────────────────────────────────
@@ -214,19 +217,40 @@ describe('the image fetcher (route and runner)', () => {
     expect(hits).toEqual([])
   })
 
-  it('locally, a loopback /view (ComfyUI’s or the app’s) is fetched; hosted, it is refused too', async () => {
+  it('locally, a loopback /view on ComfyUI’s configured port (or the route’s own) is fetched; any other port, or hosted, is refused', async () => {
+    await expect(safeImageFetcher({ hosted: false })(`${base}/view?filename=a.png&type=temp`)).rejects.toThrow(FETCH_REFUSED)
+    const port = Number(new URL(base).port)
+    expect((await safeImageFetcher({ hosted: false, viewPorts: [port] })(`${base}/view?filename=own.png`)).contentType).toBe('image/png')
+    vi.stubEnv('SAILOR_COMFY_ORIGIN', base)
     const got = await safeImageFetcher({ hosted: false })(`${base}/view?filename=a.png&type=temp`)
     expect(got.contentType).toBe('image/png')
     await expect(safeImageFetcher({ hosted: true })(`${base}/view?filename=a.png`)).rejects.toThrow(FETCH_REFUSED)
-    expect(hits).toEqual(['/view?filename=a.png&type=temp'])
+    expect(hits).toEqual(['/view?filename=own.png', '/view?filename=a.png&type=temp'])
+  })
+
+  it('no connection is reused: an allowed /view, then another path on the same host, is refused', async () => {
+    vi.stubEnv('SAILOR_COMFY_ORIGIN', base)
+    const f = safeImageFetcher({ hosted: false })
+    for (const host of [base, base.replace('127.0.0.1', 'localhost')]) {
+      await f(`${host}/view?filename=a.png`)
+      await expect(f(`${host}/admin?secret=1`)).rejects.toThrow(FETCH_REFUSED)
+      await expect(f(`${host}/view/`)).rejects.toThrow(FETCH_REFUSED)
+    }
+    expect(hits).toEqual(['/view?filename=a.png', '/view?filename=a.png'])
+  })
+
+  it('refuses the IPv6 forms that carry an IPv4 address, and site-local', () => {
+    for (const a of ['::7f00:1', '::127.0.0.1', '::ffff:0:7f00:1', '::ffff:7f00:1', '2002:7f00:1::1', '2001::1', 'fec0::1', '64:ff9b::7f00:1']) expect(addressAllowed(a), a).toBe(false)
   })
 
   it('checks every redirect again', async () => {
+    vi.stubEnv('SAILOR_COMFY_ORIGIN', base)
     await expect(safeImageFetcher({ hosted: false })(`${base}/view?redirect=1`)).rejects.toThrow(FETCH_REFUSED)
     expect(hits).toEqual(['/view?redirect=1'])
   })
 
   it('stops at its byte cap and its timeout', async () => {
+    vi.stubEnv('SAILOR_COMFY_ORIGIN', base)
     await expect(safeImageFetcher({ hosted: false, maxBytes: 1000 })(`${base}/view?big=1`)).rejects.toThrow(FETCH_TOO_LARGE)
     await expect(safeImageFetcher({ hosted: false, timeoutMs: 200 })(`${base}/view?slow=1`)).rejects.toThrow(FETCH_TIMEOUT)
   })
@@ -249,7 +273,7 @@ describe('the image fetcher (route and runner)', () => {
 
 // ── 4 and 5. the watchdog, the worker ────────────────────────────────────────
 
-describe('the render worker and the job’s turn', () => {
+describe('the render process and the job’s turn', () => {
   it('a render past the Frame queue’s watchdog writes nothing after it', async () => {
     __setFrameTimeoutForTests(100)
     let finish!: () => void
@@ -264,7 +288,7 @@ describe('the render worker and the job’s turn', () => {
     expect(writes).toEqual([])
   })
 
-  it('the render worker gives the route snapshot’s bytes, and the server keeps answering while it renders', async () => {
+  it('the render process gives the route snapshot’s bytes, and the server keeps answering while it renders', async () => {
     let ticks = 0
     const timer = setInterval(() => { ticks++ }, 5)
     const png = await renderTemplatePng({ ...SNAP.request, template: { ...(SNAP.request.template as object), formats: { ...((SNAP.request.template as { formats: object }).formats), big: { w: 2048, h: 2048 } } } as never, aspect: 'big', outputId: 'big' })
@@ -275,20 +299,149 @@ describe('the render worker and the job’s turn', () => {
     expect(Buffer.from(await crypto.subtle.digest('SHA-256', again)).toString('hex')).toBe(SNAP.png_sha256)
   }, 60_000)
 
-  it('a render past its limit is stopped (the worker terminated), and the next render works', async () => {
-    __setSvgTimeoutForTests(1)
-    const req = { ...SNAP.request, template: { ...(SNAP.request.template as object), formats: { ...((SNAP.request.template as { formats: object }).formats), big: { w: 4096, h: 4096 } } } as never, aspect: 'big', outputId: 'big' }
-    await expect(renderTemplatePng(req)).rejects.toThrow(RENDER_TIMEOUT)
-    __setSvgTimeoutForTests(null)
+  const heavy = () => {
+    const t = SNAP.request.template as { formats: object }
+    return { ...SNAP.request, template: { ...t, formats: { ...t.formats, big: { w: 8192, h: 8192 } } } as never, aspect: 'big', outputId: 'big' }
+  }
+  const gone = async (pid: number, ms: number) => {
+    const until = Date.now() + ms
+    while (Date.now() < until) {
+      try { process.kill(pid, 0) }
+      catch { return true }
+      await new Promise(r => setTimeout(r, 20))
+    }
+    return false
+  }
+
+  it('a render past its limit is stopped: its process is killed and gone within a second; the next render works', async () => {
+    await renderTemplatePng(SNAP.request)
+    const pid = __renderChildPidForTests()!
+    __setRenderTimeoutForTests(300)
+    await expect(renderTemplatePng(heavy())).rejects.toThrow(RENDER_TIMEOUT)
+    const stoppedAt = Date.now()
+    expect(await gone(pid, 1000)).toBe(true)
+    expect(Date.now() - stoppedAt).toBeLessThan(1000)
+    __setRenderTimeoutForTests(null)
+    const again = await renderTemplatePng(SNAP.request)
+    expect(Buffer.from(await crypto.subtle.digest('SHA-256', again)).toString('hex')).toBe(SNAP.png_sha256)
+    expect(__renderChildPidForTests()).not.toBe(pid)
+  }, 60_000)
+
+  it('an abort (Stop) kills the render’s process within a second', async () => {
+    await renderTemplatePng(SNAP.request)
+    const pid = __renderChildPidForTests()!
+    const ctl = new AbortController()
+    const p = renderTemplatePng(heavy(), { signal: ctl.signal })
+    setTimeout(() => ctl.abort(), 300)
+    await expect(p).rejects.toThrow('Stopped')
+    expect(await gone(pid, 1000)).toBe(true)
+  }, 60_000)
+
+  it('width 1e9: refused plainly before any render; forced into the renderer, only its process dies', async () => {
+    await expect(renderTemplatePng({ ...SNAP.request, width: 1e9, height: 1 })).rejects.toThrow(LAYOUT_TOO_BIG)
+    const out = await svgToPngInProcess({ tree: { type: 'div', props: { style: { width: 1e9, height: 1, display: 'flex' } } }, width: 1e9, height: 1, fonts: [] }).catch((e: Error) => e)
+    expect(out).toBeInstanceOf(Error)
+    // The server (this process) is alive and the next render is exact.
     const again = await renderTemplatePng(SNAP.request)
     expect(Buffer.from(await crypto.subtle.digest('SHA-256', again)).toString('hex')).toBe(SNAP.png_sha256)
   }, 60_000)
 
-  it('an abort stops the render', async () => {
+  it('the route stops its render when the client goes away', async () => {
+    const { EventEmitter } = await import('node:events')
+    const res = Object.assign(new EventEmitter(), { writableEnded: false })
+    const t = SNAP.request.template as { formats: object }
+    vi.stubGlobal('defineEventHandler', (h: unknown) => h)
+    vi.stubGlobal('readBody', async () => ({ ...SNAP.request, template: { ...t, formats: { ...t.formats, big: { w: 8192, h: 8192 } } }, aspect: 'big', outputId: 'big' }))
+    vi.stubGlobal('setHeader', () => {})
+    vi.stubGlobal('createError', (e: { statusCode: number; statusMessage: string }) => Object.assign(new Error(e.statusMessage), e))
+    try {
+      await renderTemplatePng(SNAP.request)
+      const pid = __renderChildPidForTests()!
+      const route = (await import('~~/server/api/render-template.post')).default as unknown as (e: unknown) => Promise<Uint8Array>
+      const p = route({ node: { req: { socket: { localPort: 3999 } }, res } })
+      setTimeout(() => res.emit('close'), 300)
+      await expect(p).rejects.toMatchObject({ statusCode: 499 })
+      expect(await gone(pid, 1000)).toBe(true)
+    }
+    finally { vi.unstubAllGlobals() }
+  }, 60_000)
+
+  it('an abort before its turn stops the render', async () => {
     const ctl = new AbortController()
-    const p = svgToPngInWorker({ tree: { type: 'div', props: { style: { width: 10, height: 10 } } }, width: 10, height: 10, fonts: [] }, ctl.signal)
     ctl.abort()
-    await expect(p).rejects.toThrow('Stopped')
+    await expect(svgToPngInProcess({ tree: { type: 'div', props: { style: { width: 10, height: 10 } } }, width: 10, height: 10, fonts: [] }, ctl.signal)).rejects.toThrow('Stopped')
+  })
+})
+
+// ── Round 2: sizes, text, the grain bake ─────────────────────────────────────
+
+describe('round 2: the renderer’s limits (route and runner)', () => {
+  const plan = (layout: string, extra: Record<string, unknown> = {}) => planNode({
+    prompt: { l: { class_type: 'SmartLayout', inputs: { layout, aspects: '', brand_kit: '', ...extra } } },
+    nodeId: 'l', families: CARDS, gateOpen: false, filesFrom: () => [], toUrl: async () => '',
+  })
+  const sized = (w: number, h: number) => JSON.stringify({ version: 2, id: 'z', master: 'z', formats: { z: { w, h } }, ...GRID, elements: [] })
+
+  it('each side at most 16384 and at most 8192² pixels: the translation, the route (400) and the runner refuse plainly', async () => {
+    for (const [w, h] of [[16385, 10], [10, 16385], [8193, 8192], [1e9, 1]] as const) {
+      const req = smartLayoutRequests({ layout: sized(w, h), aspects: '' }, {})[0]!
+      expect(() => templateToSatori(req.template, req.aspect, req.props, req.brand, undefined, req.outputId), `${w}×${h}`).toThrow(LAYOUT_TOO_BIG)
+      await expect(plan(sized(w, h)), `${w}×${h}`).rejects.toThrow(LAYOUT_TOO_BIG)
+    }
+    const req = smartLayoutRequests({ layout: sized(16384, 4096), aspects: '' }, {})[0]!
+    expect(() => templateToSatori(req.template, req.aspect, req.props, req.brand, undefined, req.outputId)).not.toThrow()
+    vi.stubGlobal('defineEventHandler', (h: unknown) => h)
+    vi.stubGlobal('readBody', async () => ({ ...SNAP.request, width: 20000, height: 10 }))
+    vi.stubGlobal('setHeader', () => {})
+    vi.stubGlobal('createError', (e: { statusCode: number; statusMessage: string }) => Object.assign(new Error(e.statusMessage), e))
+    try {
+      const route = (await import('~~/server/api/render-template.post')).default as unknown as (e: unknown) => Promise<Uint8Array>
+      await expect(route({})).rejects.toMatchObject({ statusCode: 400, statusMessage: LAYOUT_TOO_BIG })
+    }
+    finally { vi.unstubAllGlobals() }
+  })
+
+  it('at most 20,000 characters of text in all, and 8 elements per wired text: refused plainly', async () => {
+    const reading = (n: number) => JSON.stringify({ version: 2, id: 'r', master: 'a', formats: { a: { w: 200, h: 200 } }, ...GRID, elements: Array.from({ length: n }, (_, i) => ({ id: `e${i}`, type: 'text', content: '{{ props.text_layer_1 }}' })) })
+    expect(layoutTextProblem(JSON.parse(reading(8)), { text_layer_1: 'x' })).toBeNull()
+    expect(layoutTextProblem(JSON.parse(reading(9)), { text_layer_1: 'x' })).toBe(LAYOUT_TOO_MANY_READERS)
+    expect(layoutTextProblem(JSON.parse(reading(2)), { text_layer_1: 'x'.repeat(LAYOUT_MAX_TEXT / 2) })).toBeNull()
+    expect(layoutTextProblem(JSON.parse(reading(2)), { text_layer_1: 'x'.repeat(LAYOUT_MAX_TEXT / 2 + 1) })).toBe(LAYOUT_TOO_MUCH_TEXT)
+    expect(layoutTextProblem({ elements: [{ content: 'y'.repeat(LAYOUT_MAX_TEXT + 1) }] })).toBe(LAYOUT_TOO_MUCH_TEXT)
+    const render = vi.spyOn(smartLayoutRenderer, 'render')
+    await expect(plan('', { aspects: '1x1', text_layer_1: 'x'.repeat(LAYOUT_MAX_TEXT + 1) })).rejects.toThrow(LAYOUT_TOO_MUCH_TEXT)
+    await expect(plan(reading(9), { text_layer_1: 'x' })).rejects.toThrow(LAYOUT_TOO_MANY_READERS)
+    expect(render).not.toHaveBeenCalled()
+    const req = smartLayoutRequests({ layout: reading(9), aspects: '', text_layer_1: 'x' }, {})[0]!
+    expect(() => templateToSatori(req.template, req.aspect, req.props, req.brand, undefined, req.outputId)).toThrow(LAYOUT_TOO_MANY_READERS)
+  })
+
+  it('translation within the limits stays well under 200 ms on the main thread (worst cases measured: ~21 ms)', () => {
+    const grid = { grid: { gutter: 4, margin: 8, baseline: 4, columns: 12, rows: 400 }, typeScale: { base: 28, ratio: 3 } }
+    const el = (i: number, content: string) => ({ id: `t${i}`, type: 'text', priority: 1, level: 'display', region: { col: 1, colSpan: 1, row: 1, rowSpan: 1 }, overflow: 'shrink', content })
+    for (const t of [
+      { version: 2, id: 'm', master: 'a', formats: { a: { w: 1080, h: 1080 } }, ...grid, elements: [el(0, 'w '.repeat(9999))] },
+      { version: 2, id: 'm', master: 'a', formats: { a: { w: 1080, h: 1080 } }, ...grid, elements: Array.from({ length: 256 }, (_, i) => el(i, 'ab '.repeat(26))) },
+    ]) {
+      const t0 = performance.now()
+      templateToSatori(t as never, 'a', {}, {}, undefined, undefined)
+      expect(performance.now() - t0).toBeLessThan(200)
+    }
+  })
+
+  it('a treated picture is baked once per (picture, treatment), not per element', async () => {
+    const png = await sharp({ create: { width: 16, height: 16, channels: 3, background: '#808080' } }).png().toBuffer()
+    const img = (treatment: unknown) => ({ type: 'img', props: { src: 'http://pic.test/a.png', __treatment: treatment } })
+    const duo = { kind: 'duotone', intensity: 1, ink: '#112233' }
+    const grain = { kind: 'grain', intensity: 0.5, ink: '#112233' }
+    const tree = { type: 'div', props: { children: [img(duo), img(duo), img(duo), img(grain), img(grain), img(null)] } }
+    let fetches = 0
+    const before = __renderJobsForTests()
+    await inlineTreeImages(tree, async () => { fetches++; return { data: png.buffer.slice(png.byteOffset, png.byteOffset + png.byteLength) as ArrayBuffer, contentType: 'image/png' } })
+    expect(fetches).toBe(1)
+    expect(__renderJobsForTests() - before).toBe(2)
+    const srcs = (tree.props.children as { props: { src: string } }[]).map(c => c.props.src)
+    expect(new Set(srcs).size).toBe(3)
   })
 })
 

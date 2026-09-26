@@ -15,6 +15,7 @@
  * only where Python's are its own internals).
  */
 import { pyIntOf, pyStrip, pyTruthy } from './pyText'
+import { LAYOUT_MAX_AREA, LAYOUT_MAX_SIDE } from '../template-grid/limits'
 
 type Dict = Record<string, unknown>
 
@@ -474,8 +475,8 @@ export function livePreviewName(nodeId: string, label: string, index: number): s
   return `live_preview_${nodeId}_${safe}.png`
 }
 
-/** The largest one Smart Layout output the runner renders (R1.6 fix round 1). */
-export const SMART_LAYOUT_MAX_OUTPUT_PIXELS = 8192 * 8192
+/** The largest one Smart Layout output (fix round 1): the renderer's own limit since round 2 (template-grid/limits.ts). */
+export const SMART_LAYOUT_MAX_OUTPUT_PIXELS = LAYOUT_MAX_AREA
 /** The most elements (top-level and section children) a layout the runner renders may have. */
 export const SMART_LAYOUT_MAX_ELEMENTS = 256
 
@@ -484,9 +485,11 @@ export const SMART_LAYOUT_MAX_ELEMENTS = 256
  * (server/templates/translate.ts: v2/v3 `formats[key]`, else `aspects[key]`):
  * null when the template has no such format (the render fails), 'odd' when
  * its size is not a plain number of pixels, 'tiny' when it is under one
- * pixel either way (the renderer refuses it: its text fit would never end).
+ * pixel either way (the renderer refuses it: its text fit would never end),
+ * 'huge' when a side is over 16384 or it is over 8192² pixels (the renderer
+ * refuses it too, round 2: resvg would panic or run out of memory).
  */
-export function formatSize(template: Record<string, unknown>, format: unknown): { w: number; h: number } | null | 'odd' | 'tiny' {
+export function formatSize(template: Record<string, unknown>, format: unknown): { w: number; h: number } | null | 'odd' | 'tiny' | 'huge' {
   const v = template.version
   const table = v === 2 || v === 3 ? template.formats : template.aspects
   if (!isDict(table) || (typeof format !== 'string' && typeof format !== 'number')) return null
@@ -494,7 +497,9 @@ export function formatSize(template: Record<string, unknown>, format: unknown): 
   if (!isDict(f)) return null
   const ok = (n: unknown): n is number => typeof n === 'number' && Number.isFinite(n) && n >= 0
   if (!ok(f.w) || !ok(f.h)) return 'odd'
-  return f.w < 1 || f.h < 1 ? 'tiny' : { w: Math.ceil(f.w), h: Math.ceil(f.h) }
+  if (f.w < 1 || f.h < 1) return 'tiny'
+  if (f.w > LAYOUT_MAX_SIDE || f.h > LAYOUT_MAX_SIDE || Math.ceil(f.w) * Math.ceil(f.h) > LAYOUT_MAX_AREA) return 'huge'
+  return { w: Math.ceil(f.w), h: Math.ceil(f.h) }
 }
 
 /** How many elements a layout has, top-level and in sections (0 when Python would fail on its shape). */
@@ -507,10 +512,10 @@ export function layoutElementCount(template: Record<string, unknown>): number {
  * What a Smart Layout's settings would render, before anything runs: the
  * pixels in all and the largest one output, or null when the runner leaves
  * it to the engine: a layout JSON.parse can't read as json.loads does, a
- * first format hidden by key order, a size that isn't a number, an output
- * over SMART_LAYOUT_MAX_OUTPUT_PIXELS or more than SMART_LAYOUT_MAX_ELEMENTS
- * elements. A layout Python refuses, or a format under one pixel (which the
- * renderer refuses too), counts 0: the node fails plainly wherever it runs.
+ * first format hidden by key order, a size that isn't a number, or more than
+ * SMART_LAYOUT_MAX_ELEMENTS elements. A layout Python refuses, or a format
+ * under one pixel or over the renderer's size limits (which the route
+ * refuses too), counts 0: the node fails plainly wherever it runs.
  */
 export function smartLayoutPixels(inputs: Record<string, unknown>): number | null {
   let template: Dict
@@ -524,11 +529,9 @@ export function smartLayoutPixels(inputs: Record<string, unknown>): number | nul
   for (const o of outputs) {
     const s = formatSize(template, o.format)
     if (s === 'odd') return null
-    if (s === 'tiny') return 0
-    if (s) {
-      if (s.w * s.h > SMART_LAYOUT_MAX_OUTPUT_PIXELS) return null
-      total += s.w * s.h
-    }
+    // The renderer refuses these wherever the node runs: the runner refuses plainly.
+    if (s === 'tiny' || s === 'huge') return 0
+    if (s) total += s.w * s.h
   }
   return total
 }

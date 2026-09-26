@@ -12,6 +12,7 @@ import { resolveFormat } from '../../shared/template-grid/resolve'
 import type { ResolvedElement } from '../../shared/template-grid/resolve'
 import { gridExpressiveLayout, expressiveVOffset } from '../../shared/template-grid/expressive'
 import { resolveTokens } from '../../shared/template-grid/tokens'
+import { LAYOUT_TOO_SMALL, layoutTextProblem, renderSizeProblem } from '../../shared/template-grid/limits'
 import { needsServerBake, treatmentCssFilter, treatmentIntensity } from '../../shared/template-grid/treatment'
 import type {
   AnyGridTemplate, ImageElementV2, ShapeElementV2, TemplateV2, TextElementV2,
@@ -264,6 +265,8 @@ export function templateToSatori(
   explicitSize?: { width: number; height: number },
   outputId?: string,
 ): TranslatedLayout {
+  const tooMuch = layoutTextProblem(template, props as Record<string, unknown>, { ...((template as { brand?: Record<string, unknown> }).brand ?? {}), ...(brand as Record<string, unknown>) })
+  if (tooMuch) throw new TemplateSizeError(tooMuch)
   // v2 and v3 share the grid path: the resolver flattens sections into
   // positioned elements, so this only turns resolved rects into satori nodes.
   const version = (template as AnyGridTemplate).version
@@ -273,13 +276,19 @@ export function templateToSatori(
   return templateV1ToSatori(template as Template, aspectKey, props, brand, explicitSize)
 }
 
-/** A render size under one pixel (or not a number) sends the text fit into endless work: refused. */
-export const TEMPLATE_SIZE_REFUSED = 'A format of this layout is smaller than 1 × 1 pixel, so it can’t be rendered'
+/**
+ * A render size outside 1 … 16384 per side or over 8192² pixels, or a layout
+ * with too much text, is refused before any work (R1.6 fix rounds 1 and 2):
+ * under a pixel the text fit never ends; past the size limits resvg panics
+ * or runs out of memory; long text makes the main-thread fit slow
+ * (shared/template-grid/limits.ts).
+ */
+export const TEMPLATE_SIZE_REFUSED = LAYOUT_TOO_SMALL
 export class TemplateSizeError extends Error {}
 
 function checkRenderSize(w: unknown, h: unknown): void {
-  const ok = (n: unknown) => Number(n) >= 1
-  if (!ok(w) || !ok(h)) throw new TemplateSizeError(TEMPLATE_SIZE_REFUSED)
+  const why = renderSizeProblem(w, h)
+  if (why) throw new TemplateSizeError(why)
 }
 
 function templateV1ToSatori(

@@ -365,10 +365,11 @@ describe('eligibility', () => {
 
   it('a layout only Python reads (NaN), or outputs past the pixel cap, are left to the engine', () => {
     expect(isRunnerEligible({ l: smartLayout({ layout: '{"formats": {"a": {"w": NaN, "h": 1}}}', aspects: 'a' }) }, CARDS)).toBe(false)
-    // One output over 8192² (fix round 1), and outputs within it that are over CARD_MAX_PIXELS together.
+    // One output over 8192²: the renderer refuses it wherever it runs (round 2), so the runner keeps it and refuses plainly.
     const huge = JSON.stringify({ version: 2, formats: { big: { w: 8193, h: 8192 } }, elements: [] })
-    expect(smartLayoutPixels({ layout: huge, aspects: 'big' })).toBeNull()
-    expect(isRunnerEligible({ l: smartLayout({ layout: huge, aspects: 'big' }) }, CARDS)).toBe(false)
+    expect(smartLayoutPixels({ layout: huge, aspects: 'big' })).toBe(0)
+    expect(isRunnerEligible({ l: smartLayout({ layout: huge, aspects: 'big' }) }, CARDS)).toBe(true)
+    // Outputs within it that are over CARD_MAX_PIXELS together are left to the engine.
     const many = JSON.stringify({ version: 2, formats: { big: { w: 8192, h: 8192 } }, elements: [] })
     expect(smartLayoutPixels({ layout: many, aspects: 'big,big,big,big' })).toBe(CARD_MAX_PIXELS)
     expect(isRunnerEligible({ l: smartLayout({ layout: many, aspects: 'big,big,big,big' }) }, CARDS)).toBe(true)

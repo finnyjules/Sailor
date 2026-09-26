@@ -15,7 +15,7 @@
  * strips the tag so satori never sees a prop it doesn't understand.
  */
 
-import sharp from 'sharp'
+import { bakeInProcess } from './renderProcess'
 
 import type { TreatmentBakeTag } from '../../shared/template-grid/treatment'
 
@@ -42,34 +42,40 @@ export async function defaultImageFetcher(url: string): Promise<{ data: ArrayBuf
   return { data: await res.arrayBuffer(), contentType: res.headers.get('content-type') || 'image/png' }
 }
 
-function hexToRgb(hex: string): { r: number; g: number; b: number } {
-  const clean = hex.replace('#', '').trim()
-  const full = clean.length === 3 ? clean.split('').map(c => c + c).join('') : clean
-  const n = Number.parseInt(full, 16) || 0
-  return { r: (n >> 16) & 255, g: (n >> 8) & 255, b: n & 255 }
-}
-
-/** Deterministic per-pixel noise (dims-seeded, not Math.random) — a re-render
- *  of the SAME source image is stable rather than shimmering between runs. */
-function makeNoiseTile(w: number, h: number, alpha: number): Buffer {
-  const out = Buffer.alloc(w * h * 4)
-  let seed = (w * 374761393 + h * 668265263) >>> 0
-  const next = () => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296 }
-  const a = Math.round(255 * alpha)
-  for (let i = 0; i < w * h; i++) {
-    const v = Math.floor(next() * 255)
-    out[i * 4] = v; out[i * 4 + 1] = v; out[i * 4 + 2] = v; out[i * 4 + 3] = a
+/**
+ * The photo-treatment bake, self-contained: it takes sharp as an argument and
+ * refers to nothing outside itself, because its source text is what the
+ * render process runs (./renderProcess.ts, R1.6 fix round 2), keeping the
+ * per-pixel noise loop and the big buffers off the server's main thread and
+ * out of its memory. Same code, same bytes.
+ *
+ * Bakes a treatment satori/resvg can't express as a CSS filter into the
+ * actual image bytes. 'grayscale' never reaches here — it's a plain CSS
+ * `filter` set directly in translate.ts (confirmed by the render-path GATE
+ * probe). Always returns PNG bytes regardless of the source format.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export async function bakeTreatmentCore(sharp: any, data: ArrayBuffer, treatment: TreatmentBakeTag): Promise<ArrayBuffer> {
+  const hexToRgb = (hex: string): { r: number; g: number; b: number } => {
+    const clean = hex.replace('#', '').trim()
+    const full = clean.length === 3 ? clean.split('').map(c => c + c).join('') : clean
+    const n = Number.parseInt(full, 16) || 0
+    return { r: (n >> 16) & 255, g: (n >> 8) & 255, b: n & 255 }
   }
-  return out
-}
+  // Deterministic per-pixel noise (dims-seeded, not Math.random) — a re-render
+  // of the SAME source image is stable rather than shimmering between runs.
+  const makeNoiseTile = (w: number, h: number, alpha: number): Buffer => {
+    const out = Buffer.alloc(w * h * 4)
+    let seed = (w * 374761393 + h * 668265263) >>> 0
+    const next = () => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296 }
+    const a = Math.round(255 * alpha)
+    for (let i = 0; i < w * h; i++) {
+      const v = Math.floor(next() * 255)
+      out[i * 4] = v; out[i * 4 + 1] = v; out[i * 4 + 2] = v; out[i * 4 + 3] = a
+    }
+    return out
+  }
 
-/** Bake a treatment satori/resvg can't express as a CSS filter into the
- *  actual image bytes. 'grayscale' never reaches here — it's a plain CSS
- *  `filter` set directly in translate.ts (confirmed by the render-path GATE
- *  probe). Always returns PNG bytes regardless of the source format. */
-export async function bakeTreatment(
-  data: ArrayBuffer, treatment: TreatmentBakeTag,
-): Promise<ArrayBuffer> {
   const intensity = Math.max(0, Math.min(1, treatment.intensity))
   const input = Buffer.from(data)
   let out: Buffer
@@ -102,35 +108,49 @@ export async function bakeTreatment(
   return out.buffer.slice(out.byteOffset, out.byteOffset + out.byteLength) as ArrayBuffer
 }
 
+/** The bake, run in the render process (./renderProcess.ts). */
+export async function bakeTreatment(data: ArrayBuffer, treatment: TreatmentBakeTag): Promise<ArrayBuffer> {
+  return bakeInProcess(data, treatment)
+}
+
 /** Mutates the tree in place: every http(s) img src becomes a data URI, with
  *  any tagged photo treatment ('duotone'/'grain') baked into the bytes first.
- *  Duplicate URLs are fetched once (the raw bytes are cached and re-baked per
- *  node — cheap relative to the network fetch, and correct when the same
- *  source is reused with different treatments). Throws on the first failed
- *  fetch (a dead URL should fail the render loudly). Treatment is cosmetic
- *  and opt-in, so a bake failure (corrupt/unsupported source image, e.g. a
- *  CMYK JPEG sharp can't decode) does NOT fail the render — it falls back to
- *  the untreated fetched image and logs a warning instead. `__treatment` is
- *  always stripped, whether or not it was applied. */
+ *  Duplicate URLs are fetched once, and each distinct (URL, treatment) is
+ *  baked once and inlined as one shared string (R1.6 fix round 2: a layout
+ *  repeating a treated picture no longer bakes it per element). Throws on the
+ *  first failed fetch (a dead URL should fail the render loudly). Treatment
+ *  is cosmetic and opt-in, so a bake failure (corrupt/unsupported source
+ *  image, e.g. a CMYK JPEG sharp can't decode) does NOT fail the render — it
+ *  falls back to the untreated fetched image and logs a warning instead.
+ *  `__treatment` is always stripped, whether or not it was applied. */
 export async function inlineTreeImages(tree: unknown, fetcher: ImageFetcher = defaultImageFetcher): Promise<void> {
   const imgs = collectImgNodes(tree)
-  const cache = new Map<string, Promise<{ data: ArrayBuffer; contentType: string }>>()
+  const fetched = new Map<string, Promise<{ data: ArrayBuffer; contentType: string }>>()
+  const inlined = new Map<string, Promise<string>>()
   await Promise.all(imgs.map(async (n) => {
     const treatment = n.props?.__treatment
     if (n.props && '__treatment' in n.props) delete n.props.__treatment
     const src = n.props!.src!
     if (!/^https?:\/\//.test(src)) return
-    let pending = cache.get(src)
-    if (!pending) { pending = fetcher(src); cache.set(src, pending) }
-    let { data, contentType } = await pending
-    if (treatment) {
-      try {
-        data = await bakeTreatment(data, treatment)
-        contentType = 'image/png'
-      } catch (err) {
-        console.warn(`[inlineImages] treatment bake failed (kind=${treatment.kind}, src=${src}) — falling back to untreated image`, err)
-      }
+    const key = `${src}\u0000${treatment ? JSON.stringify(treatment) : ''}`
+    let uri = inlined.get(key)
+    if (!uri) {
+      uri = (async () => {
+        let pending = fetched.get(src)
+        if (!pending) { pending = fetcher(src); fetched.set(src, pending) }
+        let { data, contentType } = await pending
+        if (treatment) {
+          try {
+            data = await bakeTreatment(data, treatment)
+            contentType = 'image/png'
+          } catch (err) {
+            console.warn(`[inlineImages] treatment bake failed (kind=${treatment.kind}, src=${src.slice(0, 200)}) — falling back to untreated image`, err)
+          }
+        }
+        return `data:${contentType};base64,${Buffer.from(data).toString('base64')}`
+      })()
+      inlined.set(key, uri)
     }
-    n.props!.src = `data:${contentType};base64,${Buffer.from(data).toString('base64')}`
+    n.props!.src = await uri
   }))
 }
