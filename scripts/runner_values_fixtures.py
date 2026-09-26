@@ -17,6 +17,10 @@ TypeScript helpers (frontend/server/runner/pictures/) to be measured against
                 integer and float TIFFs (LoadImage divides those by 255), with
                 what PIL's .convert("RGB") gives (for the report; the runner
                 refuses them all)
+  bilinear    — (R1.4) torch.nn.functional.interpolate(t, size=(dh, dw),
+                mode='bilinear', align_corners=False) on seeded random float32
+                (1, C, H, W) tensors, 1 and 4 channels; input and output stored
+                as float32 little-endian, channels last (H, W, C)
 
     cd /Users/julien/Documents/GitHub/Sailor && .venv/bin/python scripts/runner_values_fixtures.py
 
@@ -288,8 +292,24 @@ def refused_cases() -> list[dict]:
     return out
 
 
+def bilinear_cases() -> list[dict]:
+    """(sw, sh) → (dw, dh), each with 1 and 4 channels, from a fixed seed."""
+    sizes = [((1, 1), (5, 3)), ((7, 5), (3, 2)), ((16, 16), (37, 23)), ((100, 1), (3, 40))]
+    gen = torch.Generator().manual_seed(20260926)
+    out = []
+    for (sw, sh), (dw, dh) in sizes:
+        for c in (1, 4):
+            t = torch.rand((1, c, sh, sw), generator=gen, dtype=torch.float32)
+            r = torch.nn.functional.interpolate(t, size=(dh, dw), mode="bilinear", align_corners=False)
+            hwc = lambda x: b64(x[0].permute(1, 2, 0).contiguous().numpy().astype("<f4").tobytes())  # noqa: E731
+            out.append({"name": f"{sw}x{sh} to {dw}x{dh}, {c} channel{'s' if c > 1 else ''}",
+                        "sw": sw, "sh": sh, "dw": dw, "dh": dh, "channels": c, "src": hwc(t), "out": hwc(r)})
+    return out
+
+
 def main() -> None:
     doc = {
+        "bilinear": bilinear_cases(),
         "load_mask": load_mask_cases(),
         "rgb_turned": rgb_turned_cases(),
         "refused": refused_cases(),
@@ -298,7 +318,7 @@ def main() -> None:
     with open(OUT, "w") as f:
         json.dump(doc, f, indent=1, sort_keys=True)
         f.write("\n")
-    print(f"wrote {OUT}: {len(doc['load_mask'])} load_mask, {len(doc['rgb_turned'])} rgb_turned, {len(doc['refused'])} refused")
+    print(f"wrote {OUT}: {len(doc['bilinear'])} bilinear, {len(doc['load_mask'])} load_mask, {len(doc['rgb_turned'])} rgb_turned, {len(doc['refused'])} refused")
 
 
 if __name__ == "__main__":

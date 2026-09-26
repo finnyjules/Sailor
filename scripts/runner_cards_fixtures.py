@@ -26,6 +26,19 @@ adds its key and regenerates the file (the other keys must come out unchanged).
   load_image — (R1.3) nodes.LoadImage().load_image over the R0.7 files
               (runner_values_fixtures.py): image 8-bit, mask 16-bit
   pil_luma  — (R1.3) PIL's convert("L") of 256 seeded random RGB triples
+  empty_image — (R1.4) nodes.EmptyImage().generate over sizes, batches and
+              colours (0 and 0xFFFFFF included): the tensor's shape and its
+              first frame as a provider is sent it (every frame is checked equal)
+  get_image_size — (R1.4) GetImageSize.execute on the tensor each loader
+              makes (a provider download, an EXIF-turned Image card, LoadImage,
+              a two-file batch), with the size text Python sends the node
+  image_to_mask — (R1.4) ImageToMask.execute, every channel, on RGB and RGBA
+              tensors (LoadImage, a provider download, an Image card, a batch);
+              `error` for alpha on a picture with none
+  text_mask_source — (R1.4) TextMaskNode.execute(params, source): a 40×20
+              render on 64×48 RGB and RGBA sources, a same-size render, a
+              two-picture batch and a blank render; each image frame as the 8-bit
+              RGB or RGBA a provider is sent, the mask 16-bit
 
     cd /Users/julien/Documents/GitHub/Sailor && .venv/bin/python scripts/runner_cards_fixtures.py
 
@@ -343,6 +356,159 @@ def pil_luma_cases() -> list[list[int]]:
     return [[int(r), int(g), int(b), int(v)] for (r, g, b), v in zip(rgb, luma)]
 
 
+# ── picture utilities (R1.4) ────────────────────────────────────────────────
+
+def _loaded(name: str, data: bytes, via: str):
+    """The IMAGE tensor a source of kind `via` hands on for this file (as scripts/compositor_fixtures.py)."""
+    import io
+    import nodes
+    from comfy_api_nodes.util.conversions import bytesio_to_image_tensor
+    from comfy_extras.nodes_image import Image as ImageCard
+    _put(name, data)
+    if via == "provider":
+        return bytesio_to_image_tensor(io.BytesIO(data))
+    if via == "card":
+        return ImageCard().process(
+            image=name, export=False, filename_prefix="fixture", format="png", quality=90,
+            lossless_webp=False, png_compression=4, scale=1.0, max_dimension=0, embed_metadata=False,
+            batch_index=-1, images=None, prompt=None, extra_pnginfo=None, unique_id="fixture",
+        )["result"][0]
+    if via == "load":
+        return nodes.LoadImage().load_image(name)[0]
+    raise ValueError(via)
+
+
+def _frames8(t) -> list[dict]:
+    """Every frame of an IMAGE as the PNG _image_tensor_to_data_url sends: 8-bit RGB or RGBA."""
+    import base64
+    import io
+    import numpy as np
+    from PIL import Image as PILImage
+    from comfy_api_nodes.nodes_replicate import _image_tensor_to_data_url
+    rv = _rv()
+    out = []
+    for i in range(t.shape[0]):
+        url = _image_tensor_to_data_url(t[i:i + 1])
+        im = PILImage.open(io.BytesIO(base64.b64decode(url.split(",", 1)[1])))
+        assert im.mode in ("RGB", "RGBA"), im.mode
+        out.append({"w": im.size[0], "h": im.size[1], "channels": len(im.mode), "px8": rv.b64(np.array(im).tobytes())})
+    return out
+
+
+def _rgba(h: int, w: int, seed: int) -> bytes:
+    import numpy as np
+    from PIL import Image as PILImage
+    rv = _rv()
+    return rv._save(PILImage.fromarray(np.dstack([rv._pattern(h, w, seed), rv._gradient_alpha(h, w)]), "RGBA"), "PNG")
+
+
+def _rgb(h: int, w: int, seed: int) -> bytes:
+    from PIL import Image as PILImage
+    rv = _rv()
+    return rv._save(PILImage.fromarray(rv._pattern(h, w, seed), "RGB"), "PNG")
+
+
+def _grey(h: int, w: int, seed: int) -> bytes:
+    from PIL import Image as PILImage
+    rv = _rv()
+    return rv._save(PILImage.fromarray(rv._pattern(h, w, seed)[..., 1], "L"), "PNG")
+
+
+def empty_image_cases() -> list[dict]:
+    import nodes
+    out = []
+    for w, h, batch, color in [(1, 1, 1, 0), (3, 2, 1, 0xFFFFFF), (5, 4, 2, 0x123456), (7, 3, 1, 0xFF8001), (64, 80, 3, 0x7F7F80), (2, 2, 1, 0x010203)]:
+        t = nodes.EmptyImage().generate(w, h, batch, color)[0]
+        assert all(bool((t[i] == t[0]).all()) for i in range(t.shape[0]))
+        out.append({"name": f"{w}x{h}, batch {batch}, colour {color:06X}", "width": w, "height": h, "batch_size": batch, "color": color,
+                    "shape": list(t.shape), "image": _image8(t)})
+    return out
+
+
+def get_image_size_cases() -> list[dict]:
+    import torch
+    from types import SimpleNamespace
+    from unittest import mock
+    from comfy_api.latest._io import HiddenHolder
+    import comfy_extras.nodes_images as ni
+    rv = _rv()
+    cases = [
+        ("a provider download (RGBA)", [("gis_provider.png", _rgba(20, 30, 31))], "provider"),
+        ("an Image card with an EXIF-turned JPEG", [("gis_card.jpg", rv._jpeg(6))], "card"),
+        ("a LoadImage with an EXIF-turned JPEG", [("gis_load.jpg", rv._jpeg(6))], "load"),
+        ("a two-file batch", [("gis_batch_a.png", _rgba(20, 30, 32)), ("gis_batch_b.png", _rgba(20, 30, 33))], "provider"),
+    ]
+    out = []
+    for name, files, via in cases:
+        t = torch.cat([_loaded(n, d, via) for n, d in files], dim=0)
+        sent: list[str] = []
+        server = SimpleNamespace(instance=SimpleNamespace(send_progress_text=lambda text, _uid: sent.append(text)))
+        with mock.patch.object(ni.GetImageSize, "hidden", HiddenHolder.from_dict({"UNIQUE_ID": "fixture"})), mock.patch.object(ni, "PromptServer", server):
+            res = ni.GetImageSize.execute(t)
+        assert res.ui is None, res.ui
+        out.append({"name": name, "via": via, "files": {n: rv.b64(d) for n, d in files}, "names": [n for n, _ in files],
+                    "values": [int(v) for v in res.args], "progress_text": sent})
+    return out
+
+
+def image_to_mask_cases() -> list[dict]:
+    import torch
+    from comfy_extras.nodes_mask import ImageToMask
+    rv = _rv()
+    sources = [
+        ("LoadImage, RGB", [("itm_load.png", _rgb(18, 26, 41))], "load"),
+        ("a provider download, RGBA", [("itm_provider.png", _rgba(18, 26, 42))], "provider"),
+        ("an Image card with alpha, RGBA", [("itm_card.png", _rgba(18, 26, 43))], "card"),
+        ("a two-file batch, RGBA", [("itm_batch_a.png", _rgba(12, 16, 44)), ("itm_batch_b.png", _rgba(12, 16, 45))], "provider"),
+    ]
+    out = []
+    for name, files, via in sources:
+        t = torch.cat([_loaded(n, d, via) for n, d in files], dim=0)
+        for channel in ("red", "green", "blue", "alpha"):
+            row: dict = {"name": f"{name}: {channel}", "via": via, "channel": channel, "channels": int(t.shape[-1]),
+                         "files": {n: rv.b64(d) for n, d in files}, "names": [n for n, _ in files]}
+            try:
+                mask = ImageToMask.execute(t, channel).args[0]
+            except IndexError:
+                row["error"] = True  # alpha on a 3-channel tensor
+                out.append(row)
+                continue
+            row["masks"] = [_mask16(mask[i:i + 1]) for i in range(mask.shape[0])]
+            out.append(row)
+    return out
+
+
+def text_mask_source_cases() -> list[dict]:
+    import torch
+    from comfy_extras.nodes_text_mask import TextMaskNode
+    rv = _rv()
+    small = _put("tms_small.png", _grey(20, 40, 51))
+    full = _put("tms_full.png", _grey(48, 64, 52))
+    p = lambda rendered: json.dumps({"text": "MASK", "rendered": rendered})  # noqa: E731
+    cases = [
+        ("a 40×20 render on a 64×48 RGB source (LoadImage)", small, [("tms_rgb.png", _rgb(48, 64, 53))], "load"),
+        ("a 40×20 render on a 64×48 RGBA source (a provider download)", small, [("tms_rgba.png", _rgba(48, 64, 54))], "provider"),
+        ("a 40×20 render on a 64×48 Image card with alpha", small, [("tms_card.png", _rgba(48, 64, 55))], "card"),
+        ("a same-size render on a 64×48 RGB source", full, [("tms_rgb.png", _rgb(48, 64, 53))], "load"),
+        ("a 40×20 render on a two-picture batch", small, [("tms_batch_a.png", _rgba(48, 64, 56)), ("tms_batch_b.png", _rgba(48, 64, 57))], "provider"),
+        ("a 64×48 render on a 40×20 RGB source (made smaller)", full, [("tms_small_rgb.png", _rgb(20, 40, 58))], "load"),
+        ("a blank render ignores the source", "", [("tms_rgb.png", _rgb(48, 64, 53))], "load"),
+    ]
+    out = []
+    for name, rendered, files, via in cases:
+        t = torch.cat([_loaded(n, d, via) for n, d in files], dim=0)
+        res = TextMaskNode.execute(p(rendered), t)
+        image, mask = res.args
+        row = {"name": name, "params": p(rendered), "via": via, "files": {n: rv.b64(d) for n, d in files}, "names": [n for n, _ in files]}
+        if rendered:
+            with open(os.path.join(rv.WORK, "input", rendered), "rb") as f:
+                row["render"] = rv.b64(f.read())
+        row["images"] = _frames8(image)
+        row["mask"] = _mask16(mask)
+        out.append(row)
+    return out
+
+
 def main() -> None:
     data: dict = {}
     if os.path.exists(OUT):
@@ -356,6 +522,10 @@ def main() -> None:
     data["text_mask"] = text_mask_cases()
     data["load_image"] = load_image_cases()
     data["pil_luma"] = pil_luma_cases()
+    data["empty_image"] = empty_image_cases()
+    data["get_image_size"] = get_image_size_cases()
+    data["image_to_mask"] = image_to_mask_cases()
+    data["text_mask_source"] = text_mask_source_cases()
     with open(OUT, "w", encoding="utf-8") as f:
         json.dump(dict(sorted(data.items())), f, indent=2, ensure_ascii=False)
         f.write("\n")

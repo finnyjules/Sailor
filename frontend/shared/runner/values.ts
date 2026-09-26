@@ -27,6 +27,9 @@ export const OUTPUT_KINDS: Readonly<Record<string, Readonly<Record<number, Value
   TextOnPath: { 1: 'mask' },
   TextMask: { 1: 'mask' },
   LoadImage: { 1: 'mask' },
+  // R1.4: the picture utilities' values.
+  GetImageSize: { 0: 'number', 1: 'number', 2: 'number' },
+  ImageToMask: { 0: 'mask' },
 }
 
 /** What a wire carries: the source's declared kind for that slot (through Gates), files by default. */

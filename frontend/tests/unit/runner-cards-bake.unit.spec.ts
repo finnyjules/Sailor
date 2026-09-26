@@ -273,9 +273,10 @@ describe('eligibility', () => {
     }
   })
 
-  it('a Text mask with a source wired is left to the engine (R1.4)', () => {
+  it('a Text mask with a picture wired as its source is taken (R1.4); a mask as its source is not', () => {
     const p: ApiPrompt = { 0: card('a.png'), c: { class_type: 'TextMask', inputs: { params: '{}', source: ['0', 0] } }, 2: edit(['c', 0]) }
-    expect(runnerTakesNode(p, 'c', EDIT_CARDS)).toBe(false)
+    expect(runnerTakesNode(p, 'c', EDIT_CARDS)).toBe(true)
+    expect(runnerTakesNode({ ...p, t: { class_type: 'TextOnPath', inputs: { params: '{}' } }, c: { class_type: 'TextMask', inputs: { params: '{}', source: ['t', 1] } } }, 'c', EDIT_CARDS)).toBe(false)
   })
 
   it('params Python reads but JSON.parse does not (NaN) are left to the engine', () => {

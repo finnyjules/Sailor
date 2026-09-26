@@ -13,7 +13,8 @@
 import { GATE_CLASS, isLink, linksOf, type ApiLink, type ApiPrompt } from '#shared/runner/graph'
 import { HOSTED_MAX_FRAME_ARTBOARD_PIXELS, PROVIDER_TYPES } from '#shared/runner/eligibility'
 import { actionPassThrough } from '../generators/actions'
-import { parseInputFileRef } from '../inputs'
+import { bakeParams, parseInputFileRef } from '../inputs'
+import { pyTruthy } from '#shared/runner/pyText'
 import type { NodePlan, PlanContext } from '../executors'
 import type { OutputFile } from '../types'
 import { decodeRaw, decodeRawMask, pngFromPreview8, type PictureSource } from './decode'
@@ -54,8 +55,14 @@ export function pictureSourceOf(prompt: ApiPrompt, link: ApiLink, depth = 0): Pi
     case 'TextOnPath':
       if (slot === 0) return 'load'
       break
-    // Text mask's image is a tensor Python builds (1 − mask, grey RGB), no EXIF turn.
+    // Text mask's image is a tensor Python builds (1 − mask, grey RGB), no EXIF
+    // turn. With a source and a render (R1.4) it is the source × (1 − mask):
+    // the source's channels, which its kept PNG keeps (RGB or RGBA).
     case 'TextMask':
+      if (slot !== 0) break
+      return isLink(inputs.source) && pyTruthy(bakeParams(inputs.params).rendered) ? pictureSourceOf(prompt, inputs.source, depth + 1) : 'rgb'
+    // Empty image (R1.4): a flat tensor Python builds, RGB.
+    case 'EmptyImage':
       if (slot === 0) return 'rgb'
       break
     default:

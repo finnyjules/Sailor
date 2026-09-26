@@ -125,7 +125,19 @@ export const INPUT_CHECKS = {
   // A bake card's `params` (Text on path, Text mask) reads the same in JSON.parse
   // as in Python's json.loads: text only Python reads (NaN, Infinity) is left to the engine.
   'bake-params': (inputs: Record<string, unknown>): boolean => bakeParamsReadable(inputs.params),
+  // Empty image within the runner's caps (R1.4): 8192 × 8192 and a batch of 64.
+  // Checked after the widgets, so each value already converts as int() does.
+  'empty-image-caps': (inputs: Record<string, unknown>): boolean =>
+    (pyIntValue(inputs.width) ?? Infinity) <= EMPTY_IMAGE_MAX_SIDE
+    && (pyIntValue(inputs.height) ?? Infinity) <= EMPTY_IMAGE_MAX_SIDE
+    && (pyIntValue(inputs.batch_size) ?? Infinity) <= EMPTY_IMAGE_MAX_BATCH,
 } as const
+
+/** nodes.py MAX_RESOLUTION: the most ComfyUI allows for a width or height widget. */
+export const COMFY_MAX_RESOLUTION = 16384
+/** The largest Empty image side and batch the runner makes (R1.4); more goes to the engine. */
+export const EMPTY_IMAGE_MAX_SIDE = 8192
+export const EMPTY_IMAGE_MAX_BATCH = 64
 
 /** Whether JSON.parse reads `params` as json.loads does (both read it, or both fail on it). */
 function bakeParamsReadable(v: unknown): boolean {
@@ -253,13 +265,15 @@ export const IMAGE_OUTPUT_CLASSES: ReadonlySet<string> = new Set([
 /**
  * Classes whose picture outputs are other slots than output 0 alone, or that
  * are pictures only on some slots (R1.3): 3D Studio's three passes, the Text
- * cards' image (their slot 1 is a mask). A class listed here is read from this
- * table; any other from IMAGE_OUTPUT_CLASSES (slot 0).
+ * cards' image (their slot 1 is a mask); and the pictures only `cards` makes
+ * (Empty image, R1.4). A class listed here is read from this table (and only
+ * with `cards` on); any other from IMAGE_OUTPUT_CLASSES (slot 0).
  */
 export const PICTURE_OUTPUTS: Readonly<Record<string, readonly number[]>> = {
   Scene3DStudio: [0, 1, 2],
   TextOnPath: [0],
   TextMask: [0],
+  EmptyImage: [0],
 }
 
 /** The most Frame copies (every layer's cloner, summed) the runner renders; more goes to ComfyUI. */
@@ -584,8 +598,26 @@ export const RUNNER_NODE_RULES: Readonly<Record<string, RunnerNodeRule>> = {
     widgets: { scene_state: { type: 'STRING' }, beauty_image: { type: 'STRING' }, depth_image: { type: 'STRING' }, normal_image: { type: 'STRING' } },
   },
   TextOnPath: { family: 'cards', local: 'source', widgets: { params: { type: 'STRING', required: true } }, inputCheck: 'bake-params' },
-  // With a source wired: R1.4.
-  TextMask: { family: 'cards', local: 'source', mustNotLink: ['source'], widgets: { params: { type: 'STRING', required: true } }, inputCheck: 'bake-params' },
+  // With a source wired (R1.4): the source clipped by the mask.
+  TextMask: { family: 'cards', local: 'source', imageInputs: ['source'], widgets: { params: { type: 'STRING', required: true } }, inputCheck: 'bake-params' },
+  // ── cards (step 3, R1.4): the picture utilities (server/runner/cards/utilities.ts) ──
+  // Empty image: the widgets as ComfyUI validates them (nodes.py EmptyImage);
+  // sizes over the runner's caps (ComfyUI allows them) leave it to the engine.
+  EmptyImage: {
+    family: 'cards', local: 'source',
+    widgets: {
+      width: { type: 'INT', required: true, min: 1, max: COMFY_MAX_RESOLUTION },
+      height: { type: 'INT', required: true, min: 1, max: COMFY_MAX_RESOLUTION },
+      batch_size: { type: 'INT', required: true, min: 1, max: 4096 },
+      color: { type: 'INT', required: true, min: 0, max: 0xFFFFFF },
+    },
+    inputCheck: 'empty-image-caps',
+  },
+  GetImageSize: { family: 'cards', local: 'source', mustLink: ['image'], imageInputs: ['image'] },
+  ImageToMask: {
+    family: 'cards', local: 'source', mustLink: ['image'], imageInputs: ['image'],
+    widgets: { channel: { type: 'COMBO', required: true, options: ['red', 'green', 'blue', 'alpha'] } },
+  },
 }
 
 /** The Primitive cards (comfy_extras/nodes_primitive.py): each hands on its value (family `cards`). */
@@ -607,6 +639,9 @@ export const SWITCHED_CLASSES: Readonly<Record<string, RunnerFamily>> = {
   Scene3DStudio: 'cards',
   TextOnPath: 'cards',
   TextMask: 'cards',
+  EmptyImage: 'cards',
+  GetImageSize: 'cards',
+  ImageToMask: 'cards',
 }
 
 /**
@@ -942,10 +977,10 @@ function graphRuleAllows(prompt: ApiPrompt, id: string, rule: RunnerNodeRule, fa
 
 /**
  * The OUTPUT_KINDS rows only `cards` declares (R1.3): the bake cards' masks
- * and LoadImage's MASK. With `cards` off those slots carry files, as before
+ * and LoadImage's MASK; Get image size's numbers and Image to mask's mask (R1.4). With `cards` off those slots carry files, as before
  * R1.3, so what the runner takes (and the needs-the-engine list) is unchanged.
  */
-const CARDS_OUTPUT_KIND_CLASSES: readonly string[] = ['TextOnPath', 'TextMask', 'LoadImage']
+const CARDS_OUTPUT_KIND_CLASSES: readonly string[] = ['TextOnPath', 'TextMask', 'LoadImage', 'GetImageSize', 'ImageToMask']
 const OUTPUT_KINDS_CARDS_OFF: Readonly<Record<string, Readonly<Record<number, ValueKind>>>> = Object.fromEntries(
   Object.entries(OUTPUT_KINDS).filter(([cls]) => !CARDS_OUTPUT_KIND_CLASSES.includes(cls)),
 )

@@ -10,10 +10,10 @@
  *   TextOnPath    — comfy_extras/nodes_text_on_path.py: the render EXIF
  *                   turned, RGB, and 1 − its alpha band as the mask (zeros
  *                   without one); no render: a 16×16 black image, a mask of ones
- *   TextMask      — comfy_extras/nodes_text_mask.py, no source wired (R1.4
- *                   takes a source): the render's convert("L"), not turned;
- *                   mask 1 − L/255, image 1 − mask as grey RGB; no render as
- *                   Text on path
+ *   TextMask      — comfy_extras/nodes_text_mask.py, no source wired (with
+ *                   one: ./utilities.ts, R1.4): the render's convert("L"), not
+ *                   turned; mask 1 − L/255, image 1 − mask as grey RGB; no
+ *                   render as Text on path
  *
  * Pictures go on as the 8-bit PNG a Python loader's tensor would hand a
  * provider (../pictures/pythonView.ts), or the file itself when it already
@@ -27,7 +27,9 @@ import {
   PICTURE_16_BIT, PICTURE_32_BIT, PICTURE_CMYK, PICTURE_GIF_SEE_THROUGH, PICTURE_UNREADABLE,
   pictureMeta, pictureRefusalOf, pngColourType, rgbTurnedPng,
 } from '../pictures/pythonView'
-import { linksOf, type ApiPrompt } from '#shared/runner/graph'
+import { GATE_CLASS, isLink, type ApiLink, type ApiPrompt } from '#shared/runner/graph'
+import { PROVIDER_TYPES } from '#shared/runner/eligibility'
+import { actionPassThrough } from '../generators/actions'
 import type { RunnerFamily } from '#shared/runner/families'
 import { encodeMask, loadImageMask, type Mask } from '../pictures/mask'
 import { MAX_INPUT_PIXELS } from '../compositor/decode'
@@ -70,8 +72,9 @@ export function bakeRefusalWords(classType: string, why: string): string {
  * The files the taken picture cards of a prompt will load, for the check at
  * the start of a run (engine.ts: a file one would refuse is refused before
  * anything is held): 3D Studio's bakes, Text on path's and Text mask's
- * render, and a LoadImage that runs as a card (with `cards` on; off, the
- * Frame reads its file as before). A card whose settings name no file names none.
+ * render, a LoadImage that runs as a card (with `cards` on; off, the
+ * Frame reads its file as before), and the Image card file behind a picture
+ * utility's picture wire (R1.4). A card whose settings name no file names none.
  */
 export function cardPictureFiles(prompt: ApiPrompt, families: ReadonlySet<RunnerFamily>): { nodeId: string; classType: string; file: OutputFile }[] {
   if (!families.has('cards')) return []
@@ -83,10 +86,46 @@ export function cardPictureFiles(prompt: ApiPrompt, families: ReadonlySet<Runner
       if (file) out.push({ nodeId, classType: n.class_type, file })
     }
     if (n.class_type === 'Scene3DStudio') for (const name of SCENE3D_BAKES) add(inputs[name])
-    else if (n.class_type === 'TextOnPath' || (n.class_type === 'TextMask' && !linksOf(n).some(l => l.input === 'source'))) add(bakeParams(inputs.params).rendered)
+    else if (n.class_type === 'TextOnPath' || n.class_type === 'TextMask') add(bakeParams(inputs.params).rendered)
     else if (n.class_type === 'LoadImage') add(inputs.image)
+    // The picture utilities (R1.4) decode what reaches them as Python's tensor:
+    // an Image card's own file behind the wire is checked here too. (Text mask
+    // reads its source only when it has a render, as Python.)
+    const read = Object.prototype.hasOwnProperty.call(PICTURE_READS, n.class_type) ? inputs[PICTURE_READS[n.class_type]!] : undefined
+    if (isLink(read) && (n.class_type !== 'TextMask' || pyTruthy(bakeParams(inputs.params).rendered))) {
+      const behind = cardFileBehind(prompt, read)
+      if (behind) out.push({ ...behind, classType: 'Image' })
+    }
   }
   return out
+}
+
+/** The picture input of each picture utility (R1.4). */
+const PICTURE_READS: Readonly<Record<string, string>> = { GetImageSize: 'image', ImageToMask: 'image', TextMask: 'source' }
+
+/**
+ * The Image card whose own file a picture wire brings, followed back through
+ * what hands a picture on unchanged (an Image card fed by a wire, a Gate, an
+ * action with nothing to do), as compositor/plan.ts pictureSourceOf follows it.
+ */
+function cardFileBehind(prompt: ApiPrompt, link: ApiLink, depth = 0): { nodeId: string; file: OutputFile } | null {
+  const node = prompt[link[0]]
+  if (!node || depth > 64) return null
+  const inputs = node.inputs ?? {}
+  let next: unknown
+  if (node.class_type === 'Image') {
+    if (!isLink(inputs.images)) {
+      const file = parseInputFileRef(inputs.image)
+      return file ? { nodeId: link[0], file } : null
+    }
+    next = inputs.images
+  }
+  else if (node.class_type === GATE_CLASS) next = inputs.data_in
+  else {
+    const pass = PROVIDER_TYPES.has(node.class_type) ? actionPassThrough(node.class_type, inputs) : null
+    next = pass ? inputs[pass] : undefined
+  }
+  return isLink(next) ? cardFileBehind(prompt, next, depth + 1) : null
 }
 
 /** What the start of a run says of a card's file that would be refused (`why`: one of the PICTURE_* words). */
@@ -118,8 +157,8 @@ function flatPng(w: number, h: number, rgb: readonly [number, number, number]): 
 const filesValue = (f: OutputFile): RunnerValue => ({ kind: 'files', files: [f] })
 const maskValue = async (io: DeriveIO, m: Mask): Promise<RunnerValue> => ({ kind: 'mask', files: [await io.keep(await encodeMask(m), 'png')] })
 
-/** `_blank()` of the type nodes: a 16×16 black image and a 16×16 mask of ones. */
-async function blankBake(io: DeriveIO): Promise<Record<number, RunnerValue>> {
+/** `_blank()` of the type nodes: a 16×16 black image and a 16×16 mask of ones (Text mask gives it with a source too). */
+export async function blankBake(io: DeriveIO): Promise<Record<number, RunnerValue>> {
   return {
     0: filesValue(await io.keep(await flatPng(16, 16, [0, 0, 0]), 'png')),
     1: await maskValue(io, { w: 16, h: 16, data: new Float32Array(256).fill(1) }),
@@ -238,36 +277,51 @@ async function pilL(bytes: Uint8Array): Promise<{ w: number; h: number; l: Uint8
   return { w: info.width, h: info.height, l }
 }
 
+/**
+ * Text mask's render (`params.rendered`), or null for none (Python's blank);
+ * throws for a name no file can have. With or without a source (R1.4).
+ */
+export function textMaskRender(params: unknown): OutputFile | null {
+  return renderedFile(params, TEXT_MASK_UNLOADABLE)
+}
+
+/** `_load_mask`: the render's convert("L") as the mask 1 − L/255 (float32, as torch). */
+export async function loadTextMask(io: DeriveIO, file: OutputFile): Promise<Mask> {
+  const bytes = await readRendered(io, file, TEXT_MASK_UNLOADABLE)
+  let grey: Awaited<ReturnType<typeof pilL>>
+  try { grey = await pilL(bytes) }
+  catch (e) {
+    if (isRefusal(e)) throw new Error(bakeRefusalWords('TextMask', e.message))
+    throw new Error(TEXT_MASK_UNLOADABLE)
+  }
+  const { w, h, l } = grey
+  const f = Math.fround
+  const data = new Float32Array(w * h)
+  for (let i = 0; i < data.length; i++) data[i] = f(1 - f(l[i]! / 255))
+  return { w, h, data }
+}
+
 /** Text mask with no source: the mask, and the mask as a grey picture. */
 export function planTextMask(ctx: PlanContext): NodePlan {
   const inputs = ctx.prompt[ctx.nodeId]!.inputs ?? {}
-  const file = renderedFile(inputs.params, TEXT_MASK_UNLOADABLE)
+  const file = textMaskRender(inputs.params)
   return {
     kind: 'derive',
     async derive(io) {
       if (!file) return { values: await blankBake(io), ui: null }
-      const bytes = await readRendered(io, file, TEXT_MASK_UNLOADABLE)
-      let grey: Awaited<ReturnType<typeof pilL>>
-      try { grey = await pilL(bytes) }
-      catch (e) {
-        if (isRefusal(e)) throw new Error(bakeRefusalWords('TextMask', e.message))
-        throw new Error(TEXT_MASK_UNLOADABLE)
-      }
-      const { w, h, l } = grey
+      const mask = await loadTextMask(io, file)
+      const { w, h } = mask
       const f = Math.fround
-      const mask = new Float32Array(w * h)
       const rgb = new Uint8Array(w * h * 3)
-      for (let i = 0; i < mask.length; i++) {
-        // float32 throughout, as torch: mask = 1 − L/255; image = 1 − mask; sent as round(255·x).
-        const m = f(1 - f(l[i]! / 255))
-        mask[i] = m
-        const v = Math.round(f(Math.min(1, Math.max(0, f(1 - m))) * 255))
+      for (let i = 0; i < mask.data.length; i++) {
+        // float32 throughout, as torch: image = 1 − mask; sent as round(255·x).
+        const v = Math.round(f(Math.min(1, Math.max(0, f(1 - mask.data[i]!))) * 255))
         rgb[i * 3] = v
         rgb[i * 3 + 1] = v
         rgb[i * 3 + 2] = v
       }
       const png = await sharp(rgb, { raw: { width: w, height: h, channels: 3 } }).png({ compressionLevel: 6 }).toBuffer()
-      return { values: { 0: filesValue(await io.keep(new Uint8Array(png), 'png')), 1: await maskValue(io, { w, h, data: mask }) }, ui: null }
+      return { values: { 0: filesValue(await io.keep(new Uint8Array(png), 'png')), 1: await maskValue(io, mask) }, ui: null }
     },
   }
 }

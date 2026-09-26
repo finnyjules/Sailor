@@ -102,6 +102,7 @@ import type { OutputFile, RunnerProvider, RunnerValue } from './types'
 import { textCardUi } from './cards/text'
 import { planScene3D, planTextMask, planTextOnPath } from './cards/bakeReplay'
 import { planLoadImageCard } from './cards/loadImage'
+import { planEmptyImage, planGetImageSize, planImageToMask, planTextMaskWithSource } from './cards/utilities'
 import type { KeptExt } from './keptBytes'
 import { filesOf } from './values'
 import { OUTPUT_KINDS } from '#shared/runner/values'
@@ -870,7 +871,13 @@ async function planNodeRequest(ctx: PlanContext): Promise<NodePlan> {
     // ── cards (step 3, R1.3): the bake-replay cards hand on their studio's bake ──
     case 'Scene3DStudio': return planScene3D(ctx)
     case 'TextOnPath': return planTextOnPath(ctx)
-    case 'TextMask': return planTextMask(ctx)
+    // With a source wired (R1.4): the source clipped by the mask.
+    case 'TextMask': return isLink(inputs.source) ? planTextMaskWithSource(ctx) : planTextMask(ctx)
+
+    // ── cards (step 3, R1.4): the picture utilities ──
+    case 'EmptyImage': return planEmptyImage(ctx)
+    case 'GetImageSize': return planGetImageSize(ctx)
+    case 'ImageToMask': return planImageToMask(ctx)
 
     case GATE_CLASS: {
       // A value (not files) reaching a Gate is handed on when it is open or

@@ -311,8 +311,8 @@ describe('the refusals that stay', () => {
         checked++
       }
     }
-    // Text mask (R1.3) needs its params to be taken at all; runner-cards-bake takes it with `source` unwired.
-    expect(untaken).toEqual([...MEDIA, 'TextMask'])
+    // Text mask keeps nothing unwired since R1.4 (its source is a picture input).
+    expect(untaken).toEqual(MEDIA)
     expect(checked).toBeGreaterThan(30)
   })
 
