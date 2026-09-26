@@ -17,7 +17,8 @@ import { runnerTakesWorkflow } from '#shared/runner/validate'
 import { planNode, type DeriveIO, type Derived, type NodePlan } from '~~/server/runner/executors'
 import { pilLuma } from '~~/server/runner/cards/bakeReplay'
 import { decodeMask } from '~~/server/runner/pictures/mask'
-import { PICTURE_16_BIT } from '~~/server/runner/pictures/pythonView'
+import { PICTURE_32_BIT } from '~~/server/runner/pictures/pythonView'
+import { nodesNeedingEngine } from '#shared/runner/needsEngine'
 import { collectInputFiles } from '~~/server/runner/inputs'
 import { pictureSourceOf } from '~~/server/runner/compositor/plan'
 import type { OutputFile, RunnerValue } from '~~/server/runner/types'
@@ -40,6 +41,9 @@ const EDIT_CARDS: ReadonlySet<RunnerFamily> = new Set(['fal-edit', 'cards'])
 const START = { workflow: null, canvasId: null, projectUuid: null, projectName: null }
 
 const b64 = (s: string) => new Uint8Array(Buffer.from(s, 'base64'))
+const VALUES = JSON.parse(readFileSync(resolve(__dirname, 'fixtures/runner-values.json'), 'utf8')) as { refused: { name: string; file: string }[] }
+/** One of R0.7's refused files (16-bit, CMYK, see-through GIF, BMP, 32-bit TIFFs). */
+const refusedFile = (name: string) => b64(VALUES.refused.find(c => c.name === name)!.file)
 const u16 = (s: string) => { const b = Buffer.from(s, 'base64'); return [...new Uint16Array(b.buffer, b.byteOffset, b.byteLength / 2)] }
 const keyOf = (f: OutputFile) => `${f.type}:${f.subfolder ? `${f.subfolder}/` : ''}${f.filename}`
 
@@ -125,14 +129,16 @@ describe('3D Studio (comfy_extras/nodes_scene3d.py)', () => {
     expect(made.values[2]).toEqual({ kind: 'files', files: [{ filename: c.normal_image, subfolder: '', type: 'input' }] })
   })
 
-  it('refuses a bake Python reads its own way (16-bit) rather than hand on the placeholder', async () => {
-    const values = JSON.parse(readFileSync(resolve(__dirname, 'fixtures/runner-values.json'), 'utf8')) as { refused: { name: string; file: string }[] }
-    const sixteen = values.refused.find(c => c.name === 'a 16-bit greyscale PNG')!
+  it('refuses a bake there that can\'t be read here (16-bit, not a picture) rather than hand on the placeholder; a missing one is the placeholder', async () => {
     const prompt: ApiPrompt = { s: { class_type: 'Scene3DStudio', inputs: { beauty_image: 'b.png', depth_image: '', normal_image: '' } } }
-    await expect(derived(prompt, 's', { 'b.png': b64(sixteen.file) })).rejects.toThrow(PICTURE_16_BIT)
-    // Not a picture at all: Python's placeholder.
-    const { made, bytesOf } = await derived(prompt, 's', { 'b.png': new TextEncoder().encode('not a picture') })
-    await expectImage(bytesOf(made.values[0]), { w: 1024, h: 1024, fill: [128, 128, 128] }, 'unreadable')
+    await expect(derived(prompt, 's', { 'b.png': refusedFile('a 16-bit greyscale PNG') }))
+      .rejects.toThrow('3D Studio’s saved picture is 16-bit, which Sailor can’t read. Open 3D Studio and bake it again.')
+    await expect(derived(prompt, 's', { 'b.png': new TextEncoder().encode('not a picture') }))
+      .rejects.toThrow('3D Studio’s saved picture is a kind of file Sailor can’t read. Open 3D Studio and bake it again.')
+    await expect(derived(prompt, 's', { 'b.png': refusedFile('a BMP') })).rejects.toThrow('is a kind of file Sailor can’t read')
+    // Not there at all: Python's placeholder.
+    const { made, bytesOf } = await derived(prompt, 's', {})
+    await expectImage(bytesOf(made.values[0]), { w: 1024, h: 1024, fill: [128, 128, 128] }, 'missing')
   })
 })
 
@@ -399,5 +405,82 @@ describe('the engine (cards on)', () => {
     const asCard = await render(new Set<RunnerFamily>(['frame', 'cards', 'fal-edit']), withEdit)
     expect(asCard.load.values![1]!.kind).toBe('mask')
     expect(asCard.px.equals(old.px)).toBe(true)
+  })
+})
+
+// ── R1.3 follow-up ───────────────────────────────────────────────────────────
+
+describe('the start of a run refuses a card\'s picture it can\'t read, before any hold', () => {
+  const cases: { label: string; node: ApiPrompt[string]; file: string; bytes: () => Uint8Array; words: string }[] = [
+    {
+      label: '3D Studio, a 16-bit bake', node: scene3d({ beauty_image: '', normal_image: 'bad.png' }), file: 'bad.png',
+      bytes: () => refusedFile('a 16-bit greyscale PNG'), words: '3D Studio’s saved picture is 16-bit, which Sailor can’t read. Open 3D Studio and bake it again.',
+    },
+    {
+      label: '3D Studio, a BMP (sharp can’t read it)', node: scene3d({ beauty_image: 'bad.png' }), file: 'bad.png',
+      bytes: () => refusedFile('a BMP'), words: '3D Studio’s saved picture is a kind of file Sailor can’t read. Open 3D Studio and bake it again.',
+    },
+    {
+      label: 'Text on path, a CMYK render', node: { class_type: 'TextOnPath', inputs: { params: JSON.stringify({ rendered: 'bad.jpg' }) } }, file: 'bad.jpg',
+      bytes: () => refusedFile('a CMYK JPEG'), words: 'Text on path’s saved picture is CMYK, which Sailor can’t read. Change a setting to bake it again.',
+    },
+    {
+      label: 'Text mask, a see-through GIF', node: { class_type: 'TextMask', inputs: { params: JSON.stringify({ rendered: 'bad.gif' }) } }, file: 'bad.gif',
+      bytes: () => refusedFile('a GIF with a transparent colour'), words: 'Text mask’s saved picture is a GIF with see-through parts, which Sailor can’t read. Change a setting to bake it again.',
+    },
+    {
+      label: 'LoadImage, a 32-bit TIFF', node: loadImage('bad.tif'), file: 'bad.tif',
+      bytes: () => refusedFile('a 32-bit float TIFF'), words: PICTURE_32_BIT,
+    },
+  ]
+  for (const c of cases) {
+    it(c.label, async () => {
+      const k = makeKit({ hosted: true, deps: { families: () => EDIT_CARDS } })
+      put(k.root, c.file, c.bytes())
+      const p: ApiPrompt = { c: c.node, 2: edit(['c', 0]), 3: outCard('2') }
+      await expect(k.engine.startRun({ userId: k.userId, takes: [p], ...START })).rejects.toMatchObject({ statusCode: 400, message: c.words })
+      expect(k.ledger.hold).not.toHaveBeenCalled()
+      expect(k.fal.client.submit).not.toHaveBeenCalled()
+    })
+  }
+
+  it('a 3D Studio bake that isn\'t there is not refused: the card hands on its placeholder', async () => {
+    const k = makeKit({ hosted: false, deps: { families: () => EDIT_CARDS } })
+    const p: ApiPrompt = { c: scene3d({ beauty_image: 'gone.png' }), 2: edit(['c', 0]), 3: outCard('2') }
+    const { runId } = await k.engine.startRun({ userId: null, takes: [p], ...START })
+    await k.engine.settled(runId)
+    expect((await k.store.get(runId))!.status).toBe('done')
+  })
+
+  it('a missing LoadImage file is refused in words that fit any reader', async () => {
+    const k = makeKit({ hosted: false, deps: { families: () => EDIT_CARDS } })
+    const p: ApiPrompt = { 1: loadImage('gone.png'), 2: edit(['1', 0]), 3: outCard('2') }
+    await expect(k.engine.startRun({ userId: null, takes: [p], ...START }))
+      .rejects.toMatchObject({ statusCode: 400, message: 'A picture this workflow needs is missing. Run it again.' })
+  })
+})
+
+describe('with cards off, the needs-the-engine list is exactly as before R1.3', () => {
+  // Each list was checked against the pre-R1.3 eligibility (8ea718fd7~1).
+  const e = (from: [string, number]) => ({ class_type: 'EditImageNode', inputs: { model: 'Nano Banana 2', input_image: from, prompt: 'x' } })
+  const cases: [string, ApiPrompt, string[]][] = [
+    ['3D Studio → Edit image', { c: scene3d(), e: e(['c', 0]) }, ['c']],
+    ['3D Studio depth → Frame', { c: scene3d(), f: { class_type: 'Compositor', inputs: frameWidgets({ layer1: ['c', 1] }) } }, ['c', 'f']],
+    ['Text on path mask → Edit image', { c: { class_type: 'TextOnPath', inputs: { params: '{}' } }, e: e(['c', 1]) }, ['c']],
+    ['Text mask → Edit image', { c: { class_type: 'TextMask', inputs: { params: '{}' } }, e: e(['c', 0]) }, ['c']],
+    ['LoadImage mask → Edit image', { l: loadImage('a.png'), e: e(['l', 1]) }, ['l']],
+    ['LoadImage → Edit image', { l: loadImage('a.png'), e: e(['l', 0]) }, ['l']],
+    ['Text on path mask → a Frame mask', {
+      c: { class_type: 'TextOnPath', inputs: { params: '{}' } }, i: card('x.png'),
+      f: { class_type: 'Compositor', inputs: frameWidgets({ layer1: ['i', 0], layer1_mask: ['c', 1] }) },
+    }, ['c', 'f']],
+  ]
+  for (const [label, p, want] of cases) {
+    it(label, () => {
+      expect(nodesNeedingEngine(p, { runnerOn: true, families: new Set<RunnerFamily>(['fal-edit', 'frame']), titleOf: id => id })).toEqual(want)
+    })
+  }
+  it('with cards on, the cards are taken', () => {
+    expect(nodesNeedingEngine({ c: scene3d(), e: e(['c', 0]) }, { runnerOn: true, families: EDIT_CARDS, titleOf: id => id })).toEqual([])
   })
 })

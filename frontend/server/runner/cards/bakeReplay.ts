@@ -4,8 +4,9 @@
  * loads it. No render, no provider, no charge.
  *
  *   Scene3DStudio — comfy_extras/nodes_scene3d.py: beauty, depth and normal,
- *                   each EXIF turned, RGB; a blank name or any failure to
- *                   load is a 1024×1024 flat placeholder
+ *                   each EXIF turned, RGB; a blank name or a missing file
+ *                   is a 1024×1024 flat placeholder (Python's for any
+ *                   failure); a file there but unreadable here is refused
  *   TextOnPath    — comfy_extras/nodes_text_on_path.py: the render EXIF
  *                   turned, RGB, and 1 − its alpha band as the mask (zeros
  *                   without one); no render: a 16×16 black image, a mask of ones
@@ -24,8 +25,10 @@ import type { OutputFile, RunnerValue } from '../types'
 import { SCENE3D_BAKES, bakeParams, parseInputFileRef } from '../inputs'
 import {
   PICTURE_16_BIT, PICTURE_32_BIT, PICTURE_CMYK, PICTURE_GIF_SEE_THROUGH, PICTURE_UNREADABLE,
-  gifFirstFrameSeeThrough, pictureMeta, pngColourType, rgbTurnedPng,
+  pictureMeta, pictureRefusalOf, pngColourType, rgbTurnedPng,
 } from '../pictures/pythonView'
+import { linksOf, type ApiPrompt } from '#shared/runner/graph'
+import type { RunnerFamily } from '#shared/runner/families'
 import { encodeMask, loadImageMask, type Mask } from '../pictures/mask'
 import { MAX_INPUT_PIXELS } from '../compositor/decode'
 import { pyTruthy } from '#shared/runner/pyText'
@@ -35,11 +38,61 @@ export const TEXT_MASK_UNLOADABLE = 'Text mask couldn’t load its picture. Chan
 
 /**
  * The refusals of a picture Python reads its own way (16-bit, 32-bit, CMYK,
- * a see-through GIF): the node fails in these words rather than hand on
+ * a see-through GIF): the node fails in plain words rather than hand on
  * something else. Every other failure to load is Python's own failure.
  */
 const PICTURE_REFUSALS: ReadonlySet<string> = new Set([PICTURE_16_BIT, PICTURE_32_BIT, PICTURE_CMYK, PICTURE_GIF_SEE_THROUGH])
 const isRefusal = (e: unknown): e is Error => e instanceof Error && PICTURE_REFUSALS.has(e.message)
+
+/** Each bake card's name on the canvas and how its bake is made again. */
+const BAKE_CARDS: Readonly<Record<string, { label: string; again: string }>> = {
+  Scene3DStudio: { label: '3D Studio', again: 'Open 3D Studio and bake it again.' },
+  TextOnPath: { label: 'Text on path', again: 'Change a setting to bake it again.' },
+  TextMask: { label: 'Text mask', again: 'Change a setting to bake it again.' },
+}
+
+const WHY_BAKE: Readonly<Record<string, string>> = {
+  [PICTURE_16_BIT]: 'is 16-bit, which Sailor can’t read',
+  [PICTURE_32_BIT]: 'is 32-bit, which Sailor can’t read',
+  [PICTURE_CMYK]: 'is CMYK, which Sailor can’t read',
+  [PICTURE_GIF_SEE_THROUGH]: 'is a GIF with see-through parts, which Sailor can’t read',
+  [PICTURE_UNREADABLE]: 'is a kind of file Sailor can’t read',
+}
+
+/** A bake card's refusal of its saved picture, in plain words (`why`: one of the PICTURE_* words). */
+export function bakeRefusalWords(classType: string, why: string): string {
+  const card = BAKE_CARDS[classType]
+  if (!card) return why
+  return `${card.label}’s saved picture ${WHY_BAKE[why] ?? WHY_BAKE[PICTURE_UNREADABLE]}. ${card.again}`
+}
+
+/**
+ * The files the taken picture cards of a prompt will load, for the check at
+ * the start of a run (engine.ts: a file one would refuse is refused before
+ * anything is held): 3D Studio's bakes, Text on path's and Text mask's
+ * render, and a LoadImage that runs as a card (with `cards` on; off, the
+ * Frame reads its file as before). A card whose settings name no file names none.
+ */
+export function cardPictureFiles(prompt: ApiPrompt, families: ReadonlySet<RunnerFamily>): { nodeId: string; classType: string; file: OutputFile }[] {
+  if (!families.has('cards')) return []
+  const out: { nodeId: string; classType: string; file: OutputFile }[] = []
+  for (const [nodeId, n] of Object.entries(prompt)) {
+    const inputs = n.inputs ?? {}
+    const add = (raw: unknown) => {
+      const file = parseInputFileRef(raw)
+      if (file) out.push({ nodeId, classType: n.class_type, file })
+    }
+    if (n.class_type === 'Scene3DStudio') for (const name of SCENE3D_BAKES) add(inputs[name])
+    else if (n.class_type === 'TextOnPath' || (n.class_type === 'TextMask' && !linksOf(n).some(l => l.input === 'source'))) add(bakeParams(inputs.params).rendered)
+    else if (n.class_type === 'LoadImage') add(inputs.image)
+  }
+  return out
+}
+
+/** What the start of a run says of a card's file that would be refused (`why`: one of the PICTURE_* words). */
+export function cardPictureRefusal(classType: string, why: string): string {
+  return BAKE_CARDS[classType] ? bakeRefusalWords(classType, why) : why
+}
 
 /** PIL's convert("L") of one RGB pixel: ITU-R 601-2 luma in 16-bit fixed point (L24). */
 export function pilLuma(r: number, g: number, b: number): number {
@@ -95,13 +148,20 @@ export function planScene3D(ctx: PlanContext): NodePlan {
     async derive(io) {
       const values: Record<number, RunnerValue> = {}
       for (const [slot, name] of SCENE3D_BAKES.entries()) {
-        // `_load_input_image`: a blank name, or any failure to load, gives None → the placeholder.
+        // `_load_input_image`: a blank name, or a file that isn't there, gives None → the placeholder.
+        // A file there is but can't be read is refused, never the grey placeholder
+        // (the start of the run already refused it; this is the backstop).
         const file = parseInputFileRef(inputs[name])
         let made: OutputFile | null = null
+        let bytes: Uint8Array | null = null
         if (file) {
-          try { made = (await pythonPicture(io, file, await io.read(file))).file }
+          try { bytes = await io.read(file) }
+          catch { bytes = null }
+        }
+        if (file && bytes) {
+          try { made = (await pythonPicture(io, file, bytes)).file }
           catch (e) {
-            if (isRefusal(e)) throw e
+            throw new Error(bakeRefusalWords('Scene3DStudio', isRefusal(e) ? e.message : PICTURE_UNREADABLE))
           }
         }
         values[slot] = filesValue(made ?? await io.keep(await flatPng(1024, 1024, SCENE3D_PLACEHOLDERS[slot]!), 'png'))
@@ -156,7 +216,7 @@ export function planTextOnPath(ctx: PlanContext): NodePlan {
           : { w: picture.w, h: picture.h, data: new Float32Array(picture.w * picture.h) }
       }
       catch (e) {
-        if (isRefusal(e)) throw e
+        if (isRefusal(e)) throw new Error(bakeRefusalWords('TextOnPath', e.message))
         throw new Error(TEXT_ON_PATH_UNLOADABLE)
       }
       return { values: { 0: filesValue(picture.file), 1: await maskValue(io, mask) }, ui: null }
@@ -167,10 +227,8 @@ export function planTextOnPath(ctx: PlanContext): NodePlan {
 /** PIL's `Image.open(path).convert("L")` (first frame, not EXIF turned), 8-bit. Refuses as rgbTurnedPng does. */
 async function pilL(bytes: Uint8Array): Promise<{ w: number; h: number; l: Uint8Array }> {
   const meta = await pictureMeta(bytes)
-  if (meta.depth === 'ushort' || meta.depth === 'short') throw new Error(PICTURE_16_BIT)
-  if (meta.depth && meta.depth !== 'uchar') throw new Error(meta.depth === 'char' ? PICTURE_UNREADABLE : PICTURE_32_BIT)
-  if (meta.space === 'cmyk') throw new Error(PICTURE_CMYK)
-  if (meta.format === 'gif' && gifFirstFrameSeeThrough(bytes)) throw new Error(PICTURE_GIF_SEE_THROUGH)
+  const refused = pictureRefusalOf(meta, bytes)
+  if (refused) throw new Error(refused)
   const { data, info } = await sharp(bytes, { pages: 1, page: 0, ignoreIcc: true, limitInputPixels: MAX_INPUT_PIXELS })
     .toColourspace('srgb').removeAlpha().raw({ depth: 'uchar' }).toBuffer({ resolveWithObject: true })
   if (info.channels !== 3) throw new Error(PICTURE_UNREADABLE)
@@ -192,7 +250,7 @@ export function planTextMask(ctx: PlanContext): NodePlan {
       let grey: Awaited<ReturnType<typeof pilL>>
       try { grey = await pilL(bytes) }
       catch (e) {
-        if (isRefusal(e)) throw e
+        if (isRefusal(e)) throw new Error(bakeRefusalWords('TextMask', e.message))
         throw new Error(TEXT_MASK_UNLOADABLE)
       }
       const { w, h, l } = grey

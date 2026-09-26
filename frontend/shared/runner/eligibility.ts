@@ -481,10 +481,11 @@ export const RUNNER_NODE_RULES: Readonly<Record<string, RunnerNodeRule>> = {
       ...Array.from({ length: COMPOSITOR_MAX_LAYERS }, (_, i) => [`layer${i + 1}_mask`, LOAD_IMAGE_MASK] as const),
       ['overlay_mask', LOAD_IMAGE_MASK] as const,
     ]),
-    // LoadImage's MASK is declared a mask (R1.3): the mask inputs take it (linkSources still insist on a LoadImage).
+    // LoadImage's MASK is a mask with `cards` on (R1.3), its file with `cards`
+    // off (outputKindsFor): the mask inputs take either (linkSources still insist on a LoadImage).
     valueInputs: Object.fromEntries([
-      ...Array.from({ length: COMPOSITOR_MAX_LAYERS }, (_, i) => [`layer${i + 1}_mask`, ['mask'] as const] as const),
-      ['overlay_mask', ['mask'] as const] as const,
+      ...Array.from({ length: COMPOSITOR_MAX_LAYERS }, (_, i) => [`layer${i + 1}_mask`, ['files', 'mask'] as const] as const),
+      ['overlay_mask', ['files', 'mask'] as const] as const,
     ]),
     noJsonList: { motion_params: 'rendered' },
     imageInputs: [...Array.from({ length: COMPOSITOR_MAX_LAYERS }, (_, i) => `layer${i + 1}`), 'overlay'],
@@ -802,15 +803,21 @@ function withinFrameLimits(inputs: Record<string, unknown>, lim: FrameLimits, ho
   return true
 }
 
-/** Whether a wire carries a picture: a picture slot (PICTURE_OUTPUTS, else output 0 of an image class), followed back through Gates. */
-function carriesImage(prompt: ApiPrompt, link: [string, number], depth = 0): boolean {
+/**
+ * Whether a wire carries a picture: a picture slot (PICTURE_OUTPUTS, whose
+ * classes exist for the runner only with `cards` on; else output 0 of an
+ * image class), followed back through Gates.
+ */
+function carriesImage(prompt: ApiPrompt, link: [string, number], families: ReadonlySet<RunnerFamily>, depth = 0): boolean {
   const from = prompt[link[0]]
   if (!from || depth > 64) return false
   if (from.class_type === 'ComfyGateNode') {
     const d = from.inputs?.data_in
-    return link[1] === 0 && isLink(d) && carriesImage(prompt, d, depth + 1)
+    return link[1] === 0 && isLink(d) && carriesImage(prompt, d, families, depth + 1)
   }
-  if (Object.prototype.hasOwnProperty.call(PICTURE_OUTPUTS, from.class_type)) return PICTURE_OUTPUTS[from.class_type]!.includes(link[1])
+  if (Object.prototype.hasOwnProperty.call(PICTURE_OUTPUTS, from.class_type)) {
+    return families.has('cards') && PICTURE_OUTPUTS[from.class_type]!.includes(link[1])
+  }
   return link[1] === 0 && IMAGE_OUTPUT_CLASSES.has(from.class_type)
 }
 
@@ -922,7 +929,7 @@ function graphRuleAllows(prompt: ApiPrompt, id: string, rule: RunnerNodeRule, fa
   const inputs = prompt[id]?.inputs ?? {}
   for (const name of rule.imageInputs ?? []) {
     const v = inputs[name]
-    if (isLink(v) && !carriesImage(prompt, v)) return false
+    if (isLink(v) && !carriesImage(prompt, v, families)) return false
   }
   for (const [name, sources] of Object.entries(rule.linkSources ?? {})) {
     const v = inputs[name]
@@ -931,6 +938,21 @@ function graphRuleAllows(prompt: ApiPrompt, id: string, rule: RunnerNodeRule, fa
     if (!from || !sources.some(([cls, slot]) => cls === from.class_type && slot === v[1])) return false
   }
   return true
+}
+
+/**
+ * The OUTPUT_KINDS rows only `cards` declares (R1.3): the bake cards' masks
+ * and LoadImage's MASK. With `cards` off those slots carry files, as before
+ * R1.3, so what the runner takes (and the needs-the-engine list) is unchanged.
+ */
+const CARDS_OUTPUT_KIND_CLASSES: readonly string[] = ['TextOnPath', 'TextMask', 'LoadImage']
+const OUTPUT_KINDS_CARDS_OFF: Readonly<Record<string, Readonly<Record<number, ValueKind>>>> = Object.fromEntries(
+  Object.entries(OUTPUT_KINDS).filter(([cls]) => !CARDS_OUTPUT_KIND_CLASSES.includes(cls)),
+)
+
+/** What each class's output slots carry with these families on. */
+export function outputKindsFor(families: ReadonlySet<RunnerFamily>): Readonly<Record<string, Readonly<Record<number, ValueKind>>>> {
+  return families.has('cards') ? OUTPUT_KINDS : OUTPUT_KINDS_CARDS_OFF
 }
 
 /** The inputs of a class that take a value wire: its rule row's, else the base table's (the Gate). */
@@ -993,7 +1015,7 @@ export function runnerTakesNode(prompt: ApiPrompt, id: string, families: Readonl
   for (const v of Object.values(inputs)) {
     if (isLink(v) && !(v[0] in prompt)) return false
   }
-  if (!valueWiresAllowed(prompt, id)) return false
+  if (!valueWiresAllowed(prompt, id, outputKindsFor(families))) return false
   return true
 }
 

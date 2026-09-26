@@ -307,7 +307,7 @@ describe('the engine renders a Frame (hosted, frame on)', () => {
       4: outCard('3'),
     }
     await expect(k.engine.startRun({ userId: k.userId, takes: [prompt], ...START }))
-      .rejects.toMatchObject({ statusCode: 400, message: 'A picture this Frame needs is missing. Run it again.' })
+      .rejects.toMatchObject({ statusCode: 400, message: 'A picture this workflow needs is missing. Run it again.' })
     expect(k.fal.client.submit).not.toHaveBeenCalled()
     expect(k.ledger.hold).not.toHaveBeenCalled()
   })

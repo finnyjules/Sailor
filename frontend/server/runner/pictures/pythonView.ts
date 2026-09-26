@@ -73,13 +73,30 @@ export function gifFirstFrameSeeThrough(b: Uint8Array): boolean {
   return true
 }
 
+/**
+ * Why a picture is refused (one of the PICTURE_* words), from its header, or
+ * null: the one rule for rgbTurnedPng, the Text mask's convert("L") and the
+ * check at the start of a run (R1.3 follow-up).
+ */
+export function pictureRefusalOf(meta: Metadata, bytes: Uint8Array): string | null {
+  if (meta.depth === 'ushort' || meta.depth === 'short') return PICTURE_16_BIT
+  // LoadImage divides 32-bit integer pictures by 255 before converting (nodes.py); not ported.
+  if (meta.depth && meta.depth !== 'uchar') return meta.depth === 'char' ? PICTURE_UNREADABLE : PICTURE_32_BIT
+  if (meta.space === 'cmyk') return PICTURE_CMYK
+  if (meta.format === 'gif' && gifFirstFrameSeeThrough(bytes)) return PICTURE_GIF_SEE_THROUGH
+  return null
+}
+
+/** pictureRefusalOf for a file's bytes; a file sharp cannot read is PICTURE_UNREADABLE. */
+export async function pictureRefusal(bytes: Uint8Array): Promise<string | null> {
+  try { return pictureRefusalOf(await pictureMeta(bytes), bytes) }
+  catch (e) { return e instanceof Error ? e.message : PICTURE_UNREADABLE }
+}
+
 export async function rgbTurnedPng(bytes: Uint8Array): Promise<{ png: Uint8Array | null; w: number; h: number }> {
   const meta = await pictureMeta(bytes)
-  if (meta.depth === 'ushort' || meta.depth === 'short') throw new Error(PICTURE_16_BIT)
-  // LoadImage divides 32-bit integer pictures by 255 before converting (nodes.py); not ported.
-  if (meta.depth && meta.depth !== 'uchar') throw new Error(meta.depth === 'char' ? PICTURE_UNREADABLE : PICTURE_32_BIT)
-  if (meta.space === 'cmyk') throw new Error(PICTURE_CMYK)
-  if (meta.format === 'gif' && gifFirstFrameSeeThrough(bytes)) throw new Error(PICTURE_GIF_SEE_THROUGH)
+  const refused = pictureRefusalOf(meta, bytes)
+  if (refused) throw new Error(refused)
   const turned = (meta.orientation ?? 1) >= 5
   const w = turned ? meta.height! : meta.width!
   const h = turned ? meta.width! : meta.height!

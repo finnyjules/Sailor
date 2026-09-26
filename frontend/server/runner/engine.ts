@@ -32,6 +32,8 @@ import type { BackupSettings } from './config'
 import { linkedFileCheck, measuredInputProblem, requestProblems, unreadableInputWords } from './requestRules'
 import { isReusable, requestFingerprint } from './fingerprint'
 import { assertFilesOwned, collectInputFiles, parseInputFileRef, type OwnershipCheck } from './inputs'
+import { cardPictureFiles, cardPictureRefusal } from './cards/bakeReplay'
+import { pictureRefusal } from './pictures/pythonView'
 import { extraPromptText, hasOutputNode, measuredInput, nodeCredits, stageEstimate, unpricedProviderNode, type Metering } from './metering'
 import { ev, type RunEvents, type SwitchReason } from './events'
 import { mediaNodeKind, nodeMediaChangedWords, nodeMediaCheck, nodeMediaFiles } from './nodeMedia'
@@ -100,6 +102,9 @@ function loadImageFiles(prompts: ApiPrompt[]): OutputFile[] {
   }
   return [...out.values()]
 }
+
+/** A loaded picture (a LoadImage's file, uploaded just before the run) that is gone. */
+export const LOADED_PICTURE_MISSING = 'A picture this workflow needs is missing. Run it again.'
 
 const FINISHED_BADLY = new Set(['error', 'skipped', 'stopped', 'dropped'])
 
@@ -1514,10 +1519,25 @@ export function createEngine(deps: EngineDeps) {
         measured[index]![nodeId] = media.measured
       }
     }
-    // A Frame's baked layers and masks are files the browser uploaded just
-    // before: one that is gone fails now, before anything runs or is charged.
+    // A LoadImage's file (a Frame's baked layer or mask, or with cards on a
+    // picture fed to anything) is uploaded just before: one that is gone fails
+    // now, before anything runs or is charged.
     for (const f of loadImageFiles(prompts)) {
-      if (!(await files.exists(f))) throw refuse('A picture this Frame needs is missing. Run it again.', 400, { file: f.filename })
+      if (!(await files.exists(f))) throw refuse(LOADED_PICTURE_MISSING, 400, { file: f.filename })
+    }
+    // The picture cards' files (R1.3 follow-up): one a card would refuse at its
+    // turn (16-bit, 32-bit, CMYK, a see-through GIF, a kind sharp can't read)
+    // is refused now, from its header, before anything is held. A file that
+    // isn't there is left to the card (3D Studio's placeholder, the Text
+    // cards' own failure). The card's own refusal stays as the backstop.
+    for (const p of prompts) {
+      for (const c of cardPictureFiles(p, families)) {
+        let bytes: Uint8Array
+        try { bytes = await files.read(c.file) }
+        catch { continue }
+        const why = await pictureRefusal(bytes)
+        if (why) throw refuse(cardPictureRefusal(c.classType, why), 400, { nodeId: c.nodeId, classType: c.classType, file: c.file.filename })
+      }
     }
     await deps.metering.moderate(prompts, prompts.flatMap(p => staticWiredTexts(p)))
 
