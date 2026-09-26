@@ -31,6 +31,16 @@ Legend: **bake** = render/export path · **motion** = animatable · **inspector*
 | Inpaint / Region | ✅ backend | — | toolbar | ✅ ops | — |
 | Collection (sweeps) | — | — | ✅ | ✅ | backbone |
 
+### Frame brush materials — paint with foil, chrome, lava, ink, neon, oil — LANDED 2026-09-26 (Part 2 of "painting with shaders"; spec `docs/superpowers/specs/2026-09-26-frame-brush-materials-design.md`, plan `docs/superpowers/plans/2026-09-26-frame-brush-materials.md`; `65eff8928`..`cfd7cc130`, non-contiguous — 7 tasks, subagent-driven, a review per task, a whole-feature review, its fix wave and a re-review)
+
+The brush toolbar gains a **Paint** row: Colour (as before) or six live materials — Holographic foil, Liquid chrome, Lava, Marbled ink, Neon, Oil slick. **Round and Bristle strokes carry the material along the line** (each stroke is its own object — chrome's highlight runs down the stroke); **the spray can's material sits on the surface**. A brush layer stores `material {id, moving}` (not a fill type — other surfaces never see it); a new layer starts when the toolbar paint differs from the selected layer; the layer panel has Material and a **Moving** switch (off = still and free: no clock, cached). The GPU engine writes stroke coordinates per group (RGBA32F) and shades the material there; output is valid premultiplied colour; neon glows 16 Frame units past the paint (render-only pad, also in corner pin / silhouette / DOF). Unknown material ids render as Colour. Colour-only and legacy brush layers render byte-identically.
+
+**Verified:** unit suites; headless GPU compile + render of every material × tip; real-mouse E2E on the running app (`tests/compositor-brush-materials.spec.ts`: a layer per material, Moving off identical after 1 s, reload identical, Moving on changes, the same coverage at two render sizes — 8.41% vs 8.26%).
+
+**Known limits.** Neon's glow changes hue just past the paint edge; neon's core reads white-hot; a neon brush with depth of field has a slightly stretched depth map; the stroke-coordinate texture can reach 1 GiB at the largest export size (an out-of-memory drops to surface coordinates for the session). Not yet tried by Julien with a trackpad.
+
+**Next.** Part 3: "More shaders" from the full library and painted effects.
+
 ### The pen — trim, tooltip cards, coincident (stages 1–3) — LANDED 2026-09-26
 
 **Why.** The owner compared the pen with Zoah (formerly Opacity); we studied every Zoah video frame by frame, help.zoah.com and the CAD sketchers. This is stages 1–3 of an 8-stage programme (4 tangency, 5 clean up, 6 right-click menu / wheel / properties panel, 7 fills, 8 round corners / offset / repeat modes).
