@@ -996,7 +996,8 @@ TONE_CLASSES = [
 ]
 
 # The library classes' ε (255-scale; R2 rule 10: at most 2⁻⁸), each at least twice the worst
-# |Δ| measured against the TypeScript port over this group (R2.4 report). A hashed case's band
+# |Δ| measured against the TypeScript port over this group (R2.4 report). The worst depends on
+# the inputs (Hologram: 3.04e-5 here, 4.56e-5 on the R2.4 reviewer's fresh inputs). A hashed case's band
 # is recorded at its class's ε; tests/unit/runner-effects-tone.unit.spec.ts holds the same table.
 TONE_LIBRARY_EPS = {
     "AdjustBrightnessContrast": 2.0 ** -12, "AdjustCurves": 2.0 ** -12, "AdjustLevels": 2.0 ** -12,
@@ -1189,12 +1190,26 @@ def tone() -> dict:
         a = gm.hex_to_rgb(h, None)
         b = _hex_to_rgb(h, None)
         hexes.append({"text": h, "gradient_map": list(a) if a is not None else None, "unicorn": list(b) if b is not None else None})
+    # Nesting (fix round 1): json.loads raises RecursionError past Python's recursion limit
+    # (parse_stops / parse_duotone don't catch it); the runner reads at most 1,000 levels.
+    nesting = []
+    for depth in (1000, 1001, 9997, 9998):
+        for kind, text in (("stops", "[" * depth + "]" * depth), ("duotone", '{"a":' * depth + "1" + "}" * depth)):
+            row: dict = {"kind": kind, "depth": depth}
+            try:
+                if kind == "stops":
+                    row["parsed"] = [[p, list(c)] for p, c in gm.parse_stops(text)]
+                else:
+                    row["pair"] = list(gm.parse_duotone(text))
+            except RecursionError:
+                row["raises"] = "RecursionError"
+            nesting.append(row)
     # An exact effect on a see-through picture into a Frame (it reads the effect's float).
     balance = {"shadows_cr": 0.26, "shadows_mg": -0.4, "shadows_yb": 0.1, "midtones_cr": 0.0, "midtones_mg": 0.3,
                "midtones_yb": -0.2, "highlights_cr": -0.5, "highlights_mg": 0.0, "highlights_yb": 0.7}
     frame = tone_frame_chain(g, classes["AdjustColorBalance"], "AdjustColorBalance", balance, g.picture(23, 19, 4, 3))
     return {"cases": g.cases, "assets": {k: b64(v) for k, v in sorted(g.assets.items())},
-            "library_eps": TONE_LIBRARY_EPS, "stops": stops, "duotone": duo, "hex": hexes, "frame": frame}
+            "library_eps": TONE_LIBRARY_EPS, "stops": stops, "duotone": duo, "hex": hexes, "nesting": nesting, "frame": frame}
 
 
 GROUPS = {"machinery": machinery, "kernels": kernels, "rng": rng, "tone": tone}

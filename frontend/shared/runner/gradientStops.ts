@@ -126,12 +126,41 @@ export function hexTextIsPortable(v: unknown): boolean {
 }
 
 /**
+ * The deepest `[` / `{` nesting the runner reads (R2.4 fix round 1).
+ * json.loads raises RecursionError past Python's recursion limit, which
+ * `_coerce` doesn't catch, so the node fails where JSON.parse succeeds.
+ * Measured in .venv (Python's default limit, 1,000): depth 9,997 parses,
+ * 9,998 raises; inside ComfyUI the stack already in use lowers that, so the
+ * runner stops far below it. No colour editor writes more than 2.
+ */
+export const JSON_MAX_DEPTH = 1000
+
+/** The deepest nesting of arrays and objects in JSON text (brackets inside strings not counted). */
+function jsonDepth(text: string): number {
+  let depth = 0
+  let most = 0
+  let inString = false
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i]
+    if (inString) {
+      if (ch === '\\') i++
+      else if (ch === '"') inString = false
+    }
+    else if (ch === '"') inString = true
+    else if (ch === '[' || ch === '{') { depth++; if (depth > most) most = depth }
+    else if (ch === ']' || ch === '}') depth--
+  }
+  return most
+}
+
+/**
  * JSON text JSON.parse reads as json.loads does, or both refuse: not a
- * refusal that mentions NaN / Infinity (json.loads reads those), and no
- * run of 300 digits (an integer float() overflows on, or json.loads refuses).
+ * refusal that mentions NaN / Infinity (json.loads reads those), no run of
+ * 300 digits (an integer float() overflows on, or json.loads refuses), and
+ * nesting no deeper than JSON_MAX_DEPTH (json.loads's RecursionError).
  */
 function jsonReadsAlike(text: string): { ok: boolean; value: unknown } {
-  if (/\d{300}/.test(text)) return { ok: false, value: null }
+  if (/\d{300}/.test(text) || jsonDepth(text) > JSON_MAX_DEPTH) return { ok: false, value: null }
   try { return { ok: true, value: JSON.parse(text) } }
   catch { return { ok: !/NaN|Infinity/.test(text), value: null } }
 }

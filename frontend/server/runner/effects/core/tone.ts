@@ -463,9 +463,9 @@ export function toneCore(k: TensorCore, kn?: KernelsCore) {
    */
   function AdjustGradientMap(inp: Inputs, p: Params, stop?: Stop, _s?: unknown, index = 0, count = 1): EffectResult {
     const x = inp.image!
+    needRgb(x)
     const lut = gradientLut(p.stops as [number, number[]][])
     const l = clampedLuma(x, stop)
-    needRgb(x)
     const mix = p.mix as number
     const keep = k.s32(1 - mix)
     const m = k.s32(mix)
@@ -621,11 +621,11 @@ export function toneCore(k: TensorCore, kn?: KernelsCore) {
    */
   function SplitToning(inp: Inputs, p: Params, stop?: Stop, _s?: unknown, index = 0, count = 1): EffectResult {
     const x = inp.image!
+    needRgb(x)
     const l = clampedLuma(x, stop)
     const balance = p.balance as number
     const e = balance >= 0 ? pyMax(0.1, 1 - balance * 0.8) : pyMax(0.1, 1 + balance * 0.8)
     const m = kern().powScalar(one(x.h, x.w, l), e).data
-    needRgb(x)
     const sh = [p.shadow_r, p.shadow_g, p.shadow_b].map(v => k.s32(v as number))
     const hi = [p.highlight_r, p.highlight_g, p.highlight_b].map(v => k.s32(v as number))
     const intensity = p.intensity as number
@@ -660,8 +660,8 @@ export function toneCore(k: TensorCore, kn?: KernelsCore) {
     const x = inp.image!
     const dark = (p.dark as number[]).map(f)
     const light = (p.light as number[]).map(f)
-    const l = k.luma709(x, stop)
     needRgb(x)
+    const l = k.luma709(x, stop)
     const mid = k.s32(p.midpoint as number)
     const con = k.s32(p.contrast as number)
     const mix = p.mix as number
@@ -730,6 +730,7 @@ export function toneCore(k: TensorCore, kn?: KernelsCore) {
    */
   function Hologram(inp: Inputs, p: Params, stop?: Stop, _s?: unknown, index = 0, count = 1): EffectResult {
     const x = inp.image!
+    needRgb(x)
     const { ys, xs } = grid(x.h, x.w, -1, 1)
     const a = k.s32((p.angle as number) * Math.PI / 180)
     const ca = f(Math.cos(a))
@@ -757,7 +758,6 @@ export function toneCore(k: TensorCore, kn?: KernelsCore) {
       const rb = [r, g, b]
       for (let c = 0; c < 3; c++) rainbow[c]![i] = f(f(f(gray + f(f(rb[c]! - gray) * sat)) * l[i]!) * bright)
     })
-    needRgb(x)
     const out = k.tensor(3, x.h, x.w)
     for (let c = 0; c < 3; c++) {
       const s = plane(x, c)
@@ -779,6 +779,7 @@ export function toneCore(k: TensorCore, kn?: KernelsCore) {
   function TwoDLight(inp: Inputs, p: Params, stop?: Stop, _s?: unknown, index = 0, count = 1): EffectResult {
     const K = kern()
     const x = inp.image!
+    needRgb(x)
     const { h, w } = x
     const hs = Math.max(1, h - 1)
     const wsp = Math.max(1, w - 1)
@@ -800,7 +801,6 @@ export function toneCore(k: TensorCore, kn?: KernelsCore) {
       const v = f(fm[i]! * intensity)
       fm[i] = v < 0 ? 0 : v > 4 ? 4 : v
     }
-    needRgb(x)
     const colour = (p.colour as number[]).map(v => k.s32(v))
     const blend = p.blend as string
     const out = k.tensor(3, h, w)
@@ -828,7 +828,8 @@ export function toneCore(k: TensorCore, kn?: KernelsCore) {
   /**
    * The screen blend of a light over the picture: 1 − (1 − x)·(1 − light),
    * light a float32 (1, H, W, 3) tensor (a 4-channel picture raises: it
-   * doesn't broadcast); clamp.
+   * doesn't broadcast; its callers check first, before their heavy work,
+   * R2.4 fix round 1); clamp.
    */
   function screen(x: Tensor, light: (c: number, i: number) => number, stop: Stop, index: number, count: number): EffectResult {
     needRgb(x)
@@ -880,6 +881,7 @@ export function toneCore(k: TensorCore, kn?: KernelsCore) {
     const x = inp.image!
     const intensity = p.intensity as number
     if (intensity <= 0) return { outputs: [finish(copy(x), stop, index, count)], preview: null }
+    needRgb(x)
     const K = kern()
     const { h, w } = x
     const { ys, xs } = grid(h, w, 0, 1)
@@ -935,6 +937,7 @@ export function toneCore(k: TensorCore, kn?: KernelsCore) {
   function Caustics(inp: Inputs, p: Params, stop?: Stop, _s?: unknown, index = 0, count = 1): EffectResult {
     const K = kern()
     const x = inp.image!
+    needRgb(x)
     const { ys, xs } = grid(x.h, x.w, 0, 1)
     const scale = p.scale as number
     const phi = ((p.seed as number) % 1000) * 0.073

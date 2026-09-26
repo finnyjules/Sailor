@@ -28,7 +28,7 @@ import { nodesNeedingEngine } from '#shared/runner/needsEngine'
 import { EFFECT_CLASSES_PORTED, EFFECT_ERROR_MESSAGES, EFFECT_FAMILIES, EFFECT_FAMILY_OF, EFFECT_TEXT_WIDGETS, effectTextIsPortable } from '#shared/runner/effects'
 import { EFFECT_SCHEMAS } from '#shared/runner/effectSchemas.generated'
 import {
-  DEFAULT_DUOTONE, duotoneTextIsPortable, hexTextIsPortable, hexToRgb, parseDuotone, parseStops, stopsTextIsPortable,
+  DEFAULT_DUOTONE, JSON_MAX_DEPTH, duotoneTextIsPortable, hexTextIsPortable, hexToRgb, parseDuotone, parseStops, stopsTextIsPortable,
 } from '#shared/runner/gradientStops'
 import { EFFECTS } from '~~/server/runner/effects/table'
 import { effectCores } from '~~/server/runner/effects/cores'
@@ -49,6 +49,7 @@ interface ToneFx extends Omit<FxFile, 'cases'> {
   stops: { raw: string; parsed: [number, number[]][] }[]
   duotone: { raw: string; pair: [string, string]; rgb: [number[], number[]] }[]
   hex: { text: string; gradient_map: number[] | null; unicorn: number[] | null }[]
+  nesting: { kind: 'stops' | 'duotone'; depth: number; parsed?: [number, number[]][]; pair?: [string, string]; raises?: string }[]
   frame: { name: string; inputs: FxCase['inputs']; effect: { class_type: string; node_id: string; widgets: Record<string, unknown> }; frame: { widgets: Record<string, unknown>; w: number; h: number; image8: string } }
 }
 const FX = withAssets(loadFixtures<ToneFx & FxFile>('tone') as unknown as FxFile) as unknown as ToneFx
@@ -74,7 +75,9 @@ const LIBRARY_EPS: Readonly<Record<string, number>> = {
   AdjustLevels: 2 ** -12, // pow
   SplitToning: 2 ** -12, // pow
   Posterize: 2 ** -12, // pow
-  Hologram: 2 ** -12, // cos, sin
+  // cos, sin. The worst Δ depends on the inputs: 3.04e-5 over this fixture's cases, 4.56e-5 on the
+  // R2.4 reviewer's fresh ones (frequency 11.9, angle 179.9, a batch of 2). A measurement, not a bound.
+  Hologram: 2 ** -12,
   TwoDLight: 2 ** -12, // pow
   LightLeak: 2 ** -12, // exp
   LensFlare: 2 ** -12, // exp
@@ -369,6 +372,26 @@ describe('colour text read as Python reads it', () => {
       close(hexToRgb(h.text, null), h.gradient_map)
       close(hexToRgb(h.text, null), h.unicorn)
     }
+  })
+
+  it('JSON nested deeper than JSON_MAX_DEPTH is left to the engine; at the limit it reads as Python reads it (fix round 1)', () => {
+    const text = (kind: string, depth: number) => kind === 'stops' ? '['.repeat(depth) + ']'.repeat(depth) : '{"a":'.repeat(depth) + '1' + '}'.repeat(depth)
+    const portable = (kind: string, t: string) => kind === 'stops' ? stopsTextIsPortable(t) : duotoneTextIsPortable(t)
+    expect(JSON_MAX_DEPTH).toBe(1000)
+    // Python's own limit here: 9,997 levels read, 9,998 raise RecursionError (the node fails).
+    expect(FX.nesting.filter(n => n.raises).map(n => [n.kind, n.depth])).toEqual([['stops', 9998], ['duotone', 9998]])
+    for (const n of FX.nesting) {
+      const t = text(n.kind, n.depth)
+      expect(portable(n.kind, t), `${n.kind} ${n.depth}`).toBe(n.depth <= JSON_MAX_DEPTH)
+      if (n.depth > JSON_MAX_DEPTH) continue
+      if (n.kind === 'stops') expect(parseStops(t).map(([p, c]) => [p, [...c]])).toEqual(n.parsed)
+      else expect(parseDuotone(t)).toEqual(n.pair)
+    }
+    // Brackets inside strings are not nesting; through eligibility, the node goes to the engine past the limit.
+    expect(stopsTextIsPortable(`[{"pos":0,"color":"${'['.repeat(2000)}"}]`)).toBe(true)
+    const take = (stops: string) => runnerTakesNode({ 0: card('a.png'), fx: { class_type: 'AdjustGradientMap', inputs: { image: ['0', 0], ...defaultsOf('AdjustGradientMap'), stops } } }, 'fx', TONE)
+    expect(take(text('stops', 1000))).toBe(true)
+    expect(take(text('stops', 1001))).toBe(false)
   })
 
   it('text the runner can\'t read as Python does leaves the node to the engine', () => {

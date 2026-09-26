@@ -73666,6 +73666,108 @@
   "SplitToning": 0.000244140625,
   "TwoDLight": 0.000244140625
  },
+ "nesting": [
+  {
+   "depth": 1000,
+   "kind": "stops",
+   "parsed": [
+    [
+     0.0,
+     [
+      0.05,
+      0.05,
+      0.2
+     ]
+    ],
+    [
+     1.0,
+     [
+      1.0,
+      0.9,
+      0.5
+     ]
+    ]
+   ]
+  },
+  {
+   "depth": 1000,
+   "kind": "duotone",
+   "pair": [
+    "#1a1a2e",
+    "#f5f5f5"
+   ]
+  },
+  {
+   "depth": 1001,
+   "kind": "stops",
+   "parsed": [
+    [
+     0.0,
+     [
+      0.05,
+      0.05,
+      0.2
+     ]
+    ],
+    [
+     1.0,
+     [
+      1.0,
+      0.9,
+      0.5
+     ]
+    ]
+   ]
+  },
+  {
+   "depth": 1001,
+   "kind": "duotone",
+   "pair": [
+    "#1a1a2e",
+    "#f5f5f5"
+   ]
+  },
+  {
+   "depth": 9997,
+   "kind": "stops",
+   "parsed": [
+    [
+     0.0,
+     [
+      0.05,
+      0.05,
+      0.2
+     ]
+    ],
+    [
+     1.0,
+     [
+      1.0,
+      0.9,
+      0.5
+     ]
+    ]
+   ]
+  },
+  {
+   "depth": 9997,
+   "kind": "duotone",
+   "pair": [
+    "#1a1a2e",
+    "#f5f5f5"
+   ]
+  },
+  {
+   "depth": 9998,
+   "kind": "stops",
+   "raises": "RecursionError"
+  },
+  {
+   "depth": 9998,
+   "kind": "duotone",
+   "raises": "RecursionError"
+  }
+ ],
  "note": "Written by scripts/runner_effects_fixtures.py --group tone from the real nodes. Do not edit.",
  "platform": "Darwin arm64",
  "stops": [
