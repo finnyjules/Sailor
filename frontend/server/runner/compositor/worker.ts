@@ -26,7 +26,8 @@
 import { Worker } from 'node:worker_threads'
 import { compositorCore, type Picture, type RawPicture } from './plane'
 import { composeFrame, type FrameBackend, type FrameLoaders } from './render'
-import { pixelsCore } from '../pixels/core'
+import { pixelsCore, type PixelsPicture } from '../pixels/core'
+import { EFFECT_CORES, type EffectCoreEntry } from '../effects/cores'
 
 /**
  * The worker's script around a core function's source text. `__name` is
@@ -35,16 +36,34 @@ import { pixelsCore } from '../pixels/core'
  * (target es2019); the esbuild guard in the engine spec checks both minified
  * and not.
  */
-export function workerScript(coreFn: () => unknown = compositorCore, pixelsFn: () => unknown = pixelsCore): string {
+export function workerScript(
+  coreFn: () => unknown = compositorCore,
+  pixelsFn: () => unknown = pixelsCore,
+  effectCores: readonly EffectCoreEntry[] = EFFECT_CORES,
+): string {
+  // The effect cores (R2), each from its source text, in dependency order.
+  const built = effectCores.map(c => `built[${JSON.stringify(c.name)}] = (${c.fn.toString()})(${c.args.map(a => `built[${JSON.stringify(a)}]`).join(', ')})`).join('\n')
   return `
 const { parentPort, workerData } = require('node:worker_threads')
 const __name = (f) => f
 const core = (${coreFn.toString()})()
 const px = (${pixelsFn.toString()})()
+const built = { px }
+${built}
 const stop = new Int32Array(workerData.stop)
 const stopped = () => { if (Atomics.load(stop, 0) === 1) throw new Error('Stopped') }
+const isStopped = () => Atomics.load(stop, 0) === 1
 let cv = null
 let clipAlpha = null
+// The effect under way (fx.begin … fx.end): its op, settings and any state it carries across the batch.
+let fx = null
+const effectOp = (name) => {
+  const dot = name.indexOf('.')
+  const c = dot > 0 ? built[name.slice(0, dot)] : null
+  const fn = c ? c[name.slice(dot + 1)] : null
+  if (typeof fn !== 'function') throw new Error('This effect is not in the runner')
+  return fn
+}
 parentPort.on('message', (m) => {
   try {
     let value = null
@@ -92,13 +111,51 @@ parentPort.on('message', (m) => {
       value = px.savePixels(m.picture, m.w, m.h, m.flatten, () => Atomics.load(stop, 0) === 1)
       transfer = [value.px.buffer]
     }
-    else if (m.op === 'drop') { cv = null; clipAlpha = null }
+    // The effects (R2.1, ../effects/): one picture (or batch index) per fx.run.
+    else if (m.op === 'fx.begin') {
+      fx = { cls: m.cls, op: effectOp(m.fn), params: m.params, count: m.count, state: {} }
+    }
+    else if (m.op === 'fx.run') {
+      stopped()
+      if (!fx) throw new Error('The effect was not begun')
+      const tk = built.tk
+      const inputs = {}
+      for (const name of Object.keys(m.inputs)) {
+        const v = m.inputs[name]
+        inputs[name] = v && v.mask16 ? tk.fromMask16(v.mask16, v.w, v.h) : tk.fromPicture(v)
+      }
+      const r = fx.op(inputs, fx.params, isStopped, fx.state, m.index)
+      stopped()
+      const outputs = []
+      r.outputs.forEach((t, i) => {
+        if (m.masks[i]) {
+          const mask16 = tk.mask16(t)
+          outputs.push({ w: t.w, h: t.h, mask16 })
+          transfer.push(mask16.buffer)
+          return
+        }
+        const o = { w: t.w, h: t.h, channels: t.c }
+        if (m.want.round[i]) { o.round8 = tk.quantize(t, 'round'); transfer.push(o.round8.buffer) }
+        if (m.want.trunc[i]) { o.trunc8 = tk.quantize(t, 'trunc'); transfer.push(o.trunc8.buffer) }
+        outputs.push(o)
+      })
+      value = { outputs }
+      if (m.first) {
+        const pt = r.preview || r.outputs[0]
+        const p8 = tk.quantize(pt, 'trunc')
+        value.preview = { w: pt.w, h: pt.h, channels: pt.c, px: p8 }
+        transfer.push(p8.buffer)
+      }
+    }
+    else if (m.op === 'fx.end') fx = null
+    else if (m.op === 'drop') { cv = null; clipAlpha = null; fx = null }
     parentPort.postMessage({ id: m.id, value }, transfer)
   }
   catch (e) {
-    // A failed or stopped composite lets its canvas (and a clip its mask) go at once.
+    // A failed or stopped composite lets its canvas (and a clip its mask, an effect its state) go at once.
     cv = null
     clipAlpha = null
+    fx = null
     parentPort.postMessage({ id: m.id, error: String((e && e.message) || e) })
   }
 })
@@ -278,6 +335,8 @@ export function keepSubjectInWorker(job: KeepJob, opts: { signal?: AbortSignal }
 
 /** The longest one picture utility may take on the worker (the Frame's limit). */
 export const PIXELS_TIMEOUT_MESSAGE = 'This card took longer than 2 minutes to work on its pictures, so it was stopped'
+/** The same limit for an effect (R2.1). */
+export const EFFECT_TIMEOUT_MESSAGE = 'This effect took longer than 2 minutes to work on its pictures, so it was stopped'
 
 /** 16-bit mask scanlines (keep.ts maskPngFromScanlines encodes them), w × h. */
 export interface MaskScanlines { w: number; h: number; scanlines: Uint8Array }
@@ -297,8 +356,38 @@ export interface PixelsWorker {
   clip(picture: RawPicture, trunc?: boolean): Promise<HandOff8>
   /** Save image (R1.5): the pixels save_images encodes, w × h (Lanczos when that differs), flattened onto white for JPEG. */
   savePixels(picture: RawPicture, w: number, h: number, flatten: boolean): Promise<HandOff8>
+  /** An effect (R2.1) starts its batch: `fn` its op ('<core>.<fn>'), `params` its widgets, `count` the batch's length. */
+  effectBegin(job: { cls: string; fn: string; params: Record<string, unknown>; count: number }): Promise<void>
+  /**
+   * One picture (or batch index) of the effect: its inputs by name (pictures
+   * as decoded, masks as a kept mask's scanlines), handed over. `masks`: which
+   * outputs are masks; `want`: which 8-bit forms of each picture output.
+   * `first`: also the live preview's pixels.
+   */
+  effectRun(job: EffectRunJob): Promise<EffectRunResult>
+  effectEnd(): Promise<void>
   /** Aborted once this job's turn is over (Stop, the watchdog, or done): check before writing anything (R1.6 fix round 1). */
   live: AbortSignal
+}
+
+/** A mask handed to an effect: a kept 16-bit mask's inflated scanlines. */
+export interface EffectMaskIn { mask16: Uint8Array; w: number; h: number }
+
+export interface EffectRunJob {
+  index: number
+  inputs: Record<string, PixelsPicture | EffectMaskIn>
+  first: boolean
+  masks: boolean[]
+  want: { round: boolean[]; trunc: boolean[] }
+}
+
+/** One output of an effect's run: a picture's 8-bit bytes (interleaved, its own channels) or a mask's scanlines. */
+export type EffectOut = { w: number; h: number; channels: number; round8?: Uint8Array; trunc8?: Uint8Array } | { w: number; h: number; mask16: Uint8Array }
+
+export interface EffectRunResult {
+  outputs: EffectOut[]
+  /** save_live_preview's pixels: trunc(f32(255·x)), interleaved, the preview tensor's own channels. */
+  preview?: { w: number; h: number; channels: number; px: Uint8Array }
 }
 
 /**
@@ -306,8 +395,8 @@ export interface PixelsWorker {
  * under the same watchdog and Stop: `job` decodes and encodes on this thread
  * and hands each picture's pixels to the worker, one at a time.
  */
-export function pixelsInWorker<T>(signal: AbortSignal | undefined, job: (w: PixelsWorker) => Promise<T>): Promise<T> {
-  return onWorker(signal, PIXELS_TIMEOUT_MESSAGE, async (t, live) => {
+export function pixelsInWorker<T>(signal: AbortSignal | undefined, job: (w: PixelsWorker) => Promise<T>, timeout: string = PIXELS_TIMEOUT_MESSAGE): Promise<T> {
+  return onWorker(signal, timeout, async (t, live) => {
     const w: PixelsWorker = {
       live,
       async channelMask(picture, index) {
@@ -325,6 +414,29 @@ export function pixelsInWorker<T>(signal: AbortSignal | undefined, job: (w: Pixe
       async savePixels(picture, width, height, flatten) {
         const p = handOver(picture)
         return await call(t, { op: 'px.save', picture: p.picture, w: width, h: height, flatten }, p.buffers) as HandOff8
+      },
+      async effectBegin(job) {
+        await call(t, { op: 'fx.begin', cls: job.cls, fn: job.fn, params: job.params, count: job.count }, [])
+      },
+      async effectRun(job) {
+        const inputs: Record<string, unknown> = {}
+        const buffers: ArrayBuffer[] = []
+        for (const [name, v] of Object.entries(job.inputs)) {
+          if ('mask16' in v) {
+            const own = v.mask16.byteOffset === 0 && v.mask16.byteLength === v.mask16.buffer.byteLength ? v.mask16 : v.mask16.slice()
+            inputs[name] = { mask16: own, w: v.w, h: v.h }
+            buffers.push(own.buffer as ArrayBuffer)
+          }
+          else {
+            const p = handOver(v as Picture)
+            inputs[name] = p.picture
+            buffers.push(...p.buffers)
+          }
+        }
+        return await call(t, { op: 'fx.run', index: job.index, inputs, first: job.first, masks: job.masks, want: job.want }, buffers) as EffectRunResult
+      },
+      async effectEnd() {
+        await call(t, { op: 'fx.end' }, [])
       },
     }
     try { return await job(w) }

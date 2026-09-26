@@ -3,13 +3,17 @@
  * whole — a workflow is never split between the two.
  */
 import { isLink, linksOf, type ApiPrompt } from './graph'
-import { NO_FAMILIES, type RunnerFamily } from './families'
+import { NO_FAMILIES, familyOn, type RunnerFamily } from './families'
 import { pyFloatOf, pyIntOf, pyTruthy } from './pyText'
 import { SYNC_3_ENGINE, isSync3LipSync, lipSyncEngine } from './lipSync'
 import { TOPAZ_VIDEO_FPS, TOPAZ_VIDEO_TARGETS } from './topazVideo'
 import { outputKind, BASE_VALUE_INPUTS, OUTPUT_KINDS, type ValueKind } from './values'
 import { moodboardReadingIsPlain } from '../taste/moodboardStyle'
 import { IMAGE_LAYERS, TEXT_LAYERS, smartLayoutPixels } from './smartLayout'
+import {
+  EFFECT_FAMILY_OF, EFFECT_OUTPUT_KINDS, EFFECT_PICTURE_OUTPUTS,
+  effectFamilyOn, effectOutputSizeFits, effectPreviewName, effectRows, effectSwitchedClasses,
+} from './effects'
 
 export const RUNNER_NODE_TYPES: ReadonlySet<string> = new Set([
   'GenerateImageNode', 'GenerateVideoNode', 'ComfyGateNode', 'Image', 'Video',
@@ -112,8 +116,8 @@ export interface RunnerNodeRule {
    * by the render itself, once the picture's size is known.)
    */
   frameLimits?: FrameLimits
-  /** A check of the node's own inputs the runner needs to pass before it takes the node (INPUT_CHECKS). */
-  inputCheck?: keyof typeof INPUT_CHECKS
+  /** Checks of the node's own inputs the runner needs to pass before it takes the node (INPUT_CHECKS). */
+  inputCheck?: InputCheckName | readonly InputCheckName[]
   /**
    * A second family that also switches the class on, lifting some of the
    * row's limits while it is on (R1.3: with `cards` on, LoadImage may feed
@@ -122,11 +126,14 @@ export interface RunnerNodeRule {
   open?: { family: RunnerFamily; lifts: readonly ('feedsOnly')[] }
 }
 
+/** What an input check may read beside the node's inputs: its class, its id in the prompt, the host. */
+export interface InputCheckContext { classType: string; nodeId?: string; hosted?: boolean }
+
 /**
  * Checks of a node's own inputs, named by RunnerNodeRule.inputCheck. A node
  * that fails one is left to the engine.
  */
-export const INPUT_CHECKS = {
+export const INPUT_CHECKS: Readonly<Record<string, (inputs: Record<string, unknown>, ctx: InputCheckContext) => boolean>> = {
   // The Moodboard's reading is the plain text the moodboard window writes (spec ruling 3).
   'moodboard-reading': (inputs: Record<string, unknown>): boolean => moodboardReadingIsPlain(inputs.reading_json),
   // A bake card's `params` (Text on path, Text mask) reads the same in JSON.parse
@@ -148,7 +155,17 @@ export const INPUT_CHECKS = {
     const px = smartLayoutPixels(inputs)
     return px !== null && px <= CARD_MAX_PIXELS
   },
-} as const
+  // An effect (R2 rule 4): its live preview is written as save_live_preview
+  // names it, `live_preview_<node id>.png`; a node id the runner can't write
+  // under that name leaves the node to the engine. Without an id (a caller
+  // checking the row alone), nothing to check.
+  'effect-preview-name': (_inputs, ctx) => ctx.nodeId === undefined || effectPreviewName(ctx.nodeId) !== null,
+  // An effect's output size known from its widgets alone within the caps (R2 rule 7).
+  'effect-output-size': (inputs, ctx) => effectOutputSizeFits(ctx.classType, inputs, !!ctx.hosted),
+}
+
+/** The name of an input check (INPUT_CHECKS). */
+export type InputCheckName = 'moodboard-reading' | 'bake-params' | 'empty-image-caps' | 'smart-layout' | 'effect-preview-name' | 'effect-output-size'
 
 /** nodes.py MAX_RESOLUTION: the most ComfyUI allows for a width or height widget. */
 export const COMFY_MAX_RESOLUTION = 16384
@@ -289,8 +306,10 @@ export const IMAGE_OUTPUT_CLASSES: ReadonlySet<string> = new Set([
  * Classes whose picture outputs are other slots than output 0 alone, or that
  * are pictures only on some slots (R1.3): 3D Studio's three passes, the Text
  * cards' image (their slot 1 is a mask); and the pictures only `cards` makes
- * (Empty image, R1.4; Smart Layout's renders, R1.6). A class listed here is
- * read from this table (and only with `cards` on); any other from IMAGE_OUTPUT_CLASSES (slot 0).
+ * (Empty image, R1.4; Smart Layout's renders, R1.6); and each ported
+ * effect's picture slots (R2, EFFECT_PICTURE_OUTPUTS, only while its family
+ * and `cards` are on). A class listed here is read from this table (and only
+ * with `cards` on); any other from IMAGE_OUTPUT_CLASSES (slot 0).
  */
 export const PICTURE_OUTPUTS: Readonly<Record<string, readonly number[]>> = {
   Scene3DStudio: [0, 1, 2],
@@ -298,6 +317,7 @@ export const PICTURE_OUTPUTS: Readonly<Record<string, readonly number[]>> = {
   TextMask: [0],
   EmptyImage: [0],
   SmartLayout: [0],
+  ...EFFECT_PICTURE_OUTPUTS,
 }
 
 /** The most Frame copies (every layer's cloner, summed) the runner renders; more goes to ComfyUI. */
@@ -673,6 +693,10 @@ export const RUNNER_NODE_RULES: Readonly<Record<string, RunnerNodeRule>> = {
     listReaders: ['SaveImage', 'PreviewImage'],
     inputCheck: 'smart-layout',
   },
+  // ── effects-* (step 3, R2): the still-picture effects (./effects.ts, server/runner/effects/) ──
+  // Rows built from the real node schemas (./effectSchemas.generated.ts), one
+  // per ported class; each needs its family and `cards`.
+  ...effectRows(),
 }
 
 /** The Primitive cards (comfy_extras/nodes_primitive.py): each hands on its value (family `cards`). */
@@ -700,6 +724,8 @@ export const SWITCHED_CLASSES: Readonly<Record<string, RunnerFamily>> = {
   SaveImage: 'cards',
   PreviewImage: 'cards',
   SmartLayout: 'cards',
+  // R2: each ported effect, by its family.
+  ...effectSwitchedClasses(),
 }
 
 /**
@@ -830,6 +856,7 @@ export function nodeRuleAllows(
   inputs: Record<string, unknown>,
   families: ReadonlySet<RunnerFamily>,
   opts: RunnerEligibilityOptions = {},
+  nodeId?: string,
 ): boolean {
   const need: string[] = [...(rule.mustLink ?? [])]
   let family: RunnerFamily | undefined = rule.family
@@ -845,14 +872,18 @@ export function nodeRuleAllows(
   }
   const upgraded = !!rule.upgrade && families.has(rule.upgrade.family)
   const opened = !!rule.open && families.has(rule.open.family)
-  if (!upgraded && !opened && (!family || !families.has(family))) return false
+  if (!upgraded && !opened && (!family || !familyOn(family, families))) return false
   if (need.some(name => !isLink(inputs[name]))) return false
   if ((rule.mustNotLink ?? []).some(name => isLink(inputs[name]) && !rule.valueInputs?.[name])) return false
   if ((rule.offWidgets ?? []).some(name => isLink(inputs[name]) || pyTruthy(inputs[name]))) return false
   for (const [name, spec] of Object.entries(rule.widgets ?? {})) {
     if (!widgetValid(inputs, name, spec)) return false
   }
-  if (rule.inputCheck && !INPUT_CHECKS[rule.inputCheck](inputs)) return false
+  if (rule.inputCheck) {
+    const ctx: InputCheckContext = { classType, nodeId, hosted: !!opts.hosted }
+    const names: readonly InputCheckName[] = typeof rule.inputCheck === 'string' ? [rule.inputCheck] : rule.inputCheck
+    if (names.some(name => !INPUT_CHECKS[name]!(inputs, ctx))) return false
+  }
   for (const [name, key] of Object.entries(rule.noJsonList ?? {})) {
     if (hasJsonList(inputs[name], key)) return false
   }
@@ -922,6 +953,7 @@ function carriesImage(prompt: ApiPrompt, link: [string, number], families: Reado
     return link[1] === 0 && isLink(d) && carriesImage(prompt, d, families, depth + 1)
   }
   if (Object.prototype.hasOwnProperty.call(PICTURE_OUTPUTS, from.class_type)) {
+    if (Object.prototype.hasOwnProperty.call(EFFECT_FAMILY_OF, from.class_type) && !effectFamilyOn(from.class_type, families)) return false
     return families.has('cards') && PICTURE_OUTPUTS[from.class_type]!.includes(link[1])
   }
   return link[1] === 0 && IMAGE_OUTPUT_CLASSES.has(from.class_type)
@@ -1058,9 +1090,26 @@ const OUTPUT_KINDS_CARDS_OFF: Readonly<Record<string, Readonly<Record<number, Va
   Object.entries(OUTPUT_KINDS).filter(([cls]) => !CARDS_OUTPUT_KIND_CLASSES.includes(cls)),
 )
 
-/** What each class's output slots carry with these families on. */
-export function outputKindsFor(families: ReadonlySet<RunnerFamily>): Readonly<Record<string, Readonly<Record<number, ValueKind>>>> {
-  return families.has('cards') ? OUTPUT_KINDS : OUTPUT_KINDS_CARDS_OFF
+type OutputKinds = Readonly<Record<string, Readonly<Record<number, ValueKind>>>>
+const effectKindsCache = new Map<string, OutputKinds>()
+
+/**
+ * What each class's output slots carry with these families on: each class's
+ * declared kinds apply only while the family that declares them is on (the
+ * cards' rows with `cards`; an effect's mask outputs with its own family and
+ * `cards`, R2). With none of them on, exactly the table before R1.3.
+ */
+export function outputKindsFor(families: ReadonlySet<RunnerFamily>): OutputKinds {
+  const base = families.has('cards') ? OUTPUT_KINDS : OUTPUT_KINDS_CARDS_OFF
+  const on = Object.keys(EFFECT_OUTPUT_KINDS).filter(cls => effectFamilyOn(cls, families))
+  if (!on.length) return base
+  const key = on.join(',')
+  let kinds = effectKindsCache.get(key)
+  if (!kinds) {
+    kinds = { ...base, ...Object.fromEntries(on.map(cls => [cls, EFFECT_OUTPUT_KINDS[cls]!])) }
+    effectKindsCache.set(key, kinds)
+  }
+  return kinds
 }
 
 /** The inputs of a class that take a value wire: its rule row's, else the base table's (the Gate). */
@@ -1110,7 +1159,7 @@ export function runnerTakesNode(prompt: ApiPrompt, id: string, families: Readonl
   if (!n) return false
   const inputs = n.inputs ?? {}
   const rule = families.size ? RUNNER_NODE_RULES[n.class_type] : undefined
-  const byRule = !!rule && nodeRuleAllows(n.class_type, rule, inputs, families, opts) && graphRuleAllows(prompt, id, rule, families)
+  const byRule = !!rule && nodeRuleAllows(n.class_type, rule, inputs, families, opts, id) && graphRuleAllows(prompt, id, rule, families)
   if (!RUNNER_NODE_TYPES.has(n.class_type) && !byRule) return false
   if (n.class_type === 'GenerateImageNode') {
     if (!IMAGE_IDS.has(String(inputs.model)) && !byRule) return false

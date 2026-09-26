@@ -34,23 +34,18 @@
 import sharp from 'sharp'
 import type { DeriveIO, NodePlan, PlanContext } from '../executors'
 import type { OutputFile, RunnerValue } from '../types'
-import { GATE_CLASS, isLink, linksOf, type ApiLink, type ApiPrompt } from '#shared/runner/graph'
+import { GATE_CLASS, linksOf, type ApiPrompt } from '#shared/runner/graph'
 import { pyIntOf } from '#shared/runner/pyText'
-import { CARD_MAX_PIXELS } from '#shared/runner/eligibility'
-import { pictureSourceOf } from '../compositor/plan'
-import { decodeRaw, type PictureSource } from '../compositor/decode'
 import type { RawPicture } from '../compositor/plane'
 import { maskPngFromScanlines } from '../compositor/keep'
 import { pixelsInWorker, type HandOff8 } from '../compositor/worker'
-import { pictureMeta, pictureRefusalOf } from '../pictures/pythonView'
 import { pixels } from '../pixels/core'
+import { decoded, keyOf, sizes, wired, type Wired } from '../effects/io'
 import { blankBake, loadTextMaskLuma, textMaskRender } from './bakeReplay'
 
 export const IMAGE_NO_ALPHA = 'This picture has no alpha channel to make a mask from'
-export const PICTURE_NOT_MADE = 'The picture this card reads was not made'
-export const PICTURE_UNREAD = 'The picture this card reads could not be read'
 export const BATCH_SIZES_DIFFER = 'The pictures this card reads are of different sizes'
-export const PICTURES_TOO_LARGE = 'The pictures this card reads are too large to work on together (more than 268 million pixels). Use fewer or smaller pictures.'
+export { PICTURE_NOT_MADE, PICTURE_UNREAD, PICTURES_TOO_LARGE, decoded, sizes, wired, type Wired } from '../effects/io'
 
 /** How many channels Python's tensor has for a picture of this source (compositor/plane.ts toTensor). */
 export function tensorChannels(raw: RawPicture): 3 | 4 {
@@ -66,60 +61,7 @@ function intWidget(v: unknown): number {
   return n
 }
 
-const keyOf = (f: OutputFile) => `${f.type}:${f.subfolder}:${f.filename}`
-
-/** What a picture wire brings: its source kind, and its files (none for Python's 1×1 blank). */
-export interface Wired { source: PictureSource; files: OutputFile[] }
-
-function wired(ctx: PlanContext, name: string): Wired {
-  const v = ctx.prompt[ctx.nodeId]!.inputs?.[name]
-  if (!isLink(v)) throw new Error('There is no picture wired in')
-  const link: ApiLink = v
-  const source = pictureSourceOf(ctx.prompt, link)
-  if (source === 'blank') return { source, files: [] }
-  const files = ctx.filesFrom(link)
-  if (!files.length) throw new Error(PICTURE_NOT_MADE)
-  return { source, files }
-}
-
 const stopped = (io: DeriveIO) => { if (io.signal.aborted) throw new Error('Stopped') }
-
-/**
- * Each distinct file's size as the tensor holds it (EXIF turned for an Image
- * card and LoadImage), from its header only. A file the runner can't read
- * exactly is refused in the words the start of a run uses; with `cap`, more
- * than CARD_MAX_PIXELS in all is refused before any pixel is decoded.
- */
-export async function sizes(io: DeriveIO, w: Wired, cap: boolean): Promise<Map<string, { w: number; h: number }>> {
-  const out = new Map<string, { w: number; h: number }>()
-  let total = 0
-  for (const file of w.files) {
-    const key = keyOf(file)
-    if (out.has(key)) continue
-    stopped(io)
-    const bytes = await io.read(file)
-    const meta = await pictureMeta(bytes)
-    const why = pictureRefusalOf(meta, bytes)
-    if (why) throw new Error(why)
-    if (!meta.width || !meta.height) throw new Error(PICTURE_UNREAD)
-    const turned = (w.source === 'card' || w.source === 'load') && (meta.orientation ?? 1) >= 5
-    const size = turned ? { w: meta.height, h: meta.width } : { w: meta.width, h: meta.height }
-    total += size.w * size.h
-    if (cap && total > CARD_MAX_PIXELS) throw new Error(PICTURES_TOO_LARGE)
-    out.set(key, size)
-  }
-  return out
-}
-
-/** One file as sharp decodes it for its source (RGBA8), or Python's blank. */
-export async function decoded(io: DeriveIO, source: PictureSource, file: OutputFile | null): Promise<RawPicture> {
-  if (!file) return decodeRaw(null, 'blank')
-  try { return await decodeRaw(await io.read(file), source) }
-  catch (e) {
-    if (e instanceof Error && /larger than 8192/.test(e.message)) throw new Error('This picture is larger than 8192 × 8192, too large to read here')
-    throw new Error(PICTURE_UNREAD)
-  }
-}
 
 /** The 8-bit pixels a hand-off sends, as a PNG. */
 async function handOffPng(p: HandOff8): Promise<Uint8Array> {

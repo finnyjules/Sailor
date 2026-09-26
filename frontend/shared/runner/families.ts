@@ -92,19 +92,58 @@ export type RunnerFamily =
    * it took before step 3.
    */
   | 'cards'
+  /**
+   * The still-picture effects (step 3, R2), one family per kind of machinery
+   * (shared/runner/effects.ts). Each needs `cards` (FAMILY_REQUIRES): the
+   * effects read Image cards and LoadImage and pass masks, all cards
+   * machinery. Computed by the runner itself; they count as work.
+   */
+  | 'effects-tone'
+  | 'effects-blur'
+  | 'effects-cells'
+  | 'effects-warp'
+  | 'effects-mask'
+  | 'effects-noise'
+  /** The Shader effect, replayed from the browser's bake (R2.10). Needs `cards`. */
+  | 'shader-bake'
+  /** The effects' live previews through the runner (R2.11). Needs `cards`. */
+  | 'live-previews'
 
 export const RUNNER_FAMILIES: readonly RunnerFamily[] = [
   'fal-edit', 'replicate-image', 'replicate-video', 'nano-actions', 'ref-edits', 'restyle', 'frame', 'wan-3', 'gpt-image-2.5', 'h3-max-turbo', 'gemini-omni-flash', 'veo-3.1-lite', 'qwen-image-3', 'grok-imagine-2', 'ideogram-4', 'seedream-5-pro-edit', 'qwen-2511-angles', 'nano-banana-2-blend', 'bria-product-shot', 'muse-image', 'nano-banana-2-lite', 'reve-2.1', 'recraft-v4.1', 'krea-2', 'happyhorse-1.1', 'grok-imagine-video-1.5', 'ltx-2.5-fast', 'luma-ray-3.2', 'sync-3', 'topaz-video', 'cards',
+  'effects-tone', 'effects-blur', 'effects-cells', 'effects-warp', 'effects-mask', 'effects-noise', 'shader-bake', 'live-previews',
 ]
+
+/**
+ * A family that works only while another is on too (R2): with its
+ * requirement off, parseFamilies drops it.
+ */
+export const FAMILY_REQUIRES: Partial<Record<RunnerFamily, RunnerFamily>> = {
+  'effects-tone': 'cards',
+  'effects-blur': 'cards',
+  'effects-cells': 'cards',
+  'effects-warp': 'cards',
+  'effects-mask': 'cards',
+  'effects-noise': 'cards',
+  'shader-bake': 'cards',
+  'live-previews': 'cards',
+}
 
 const KNOWN: ReadonlySet<string> = new Set(RUNNER_FAMILIES)
 
 /** No family switched on. */
 export const NO_FAMILIES: ReadonlySet<RunnerFamily> = new Set()
 
+/** Whether a family is on: switched on, and its requirement (FAMILY_REQUIRES) with it. */
+export function familyOn(family: RunnerFamily, families: ReadonlySet<RunnerFamily>): boolean {
+  const need = FAMILY_REQUIRES[family]
+  return families.has(family) && (!need || families.has(need))
+}
+
 /**
  * A comma list of family names → the set. Unknown names are dropped; anything
- * unreadable (not a string or a list of strings) is no families at all.
+ * unreadable (not a string or a list of strings) is no families at all. A
+ * family whose requirement (FAMILY_REQUIRES) is off is dropped too.
  */
 export function parseFamilies(raw: unknown): ReadonlySet<RunnerFamily> {
   let parts: unknown[]
@@ -116,6 +155,10 @@ export function parseFamilies(raw: unknown): ReadonlySet<RunnerFamily> {
     if (typeof p !== 'string') continue
     const name = p.trim().toLowerCase()
     if (KNOWN.has(name)) out.add(name as RunnerFamily)
+  }
+  for (const f of [...out]) {
+    const need = FAMILY_REQUIRES[f]
+    if (need && !out.has(need)) out.delete(f)
   }
   return out
 }

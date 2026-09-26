@@ -11,7 +11,11 @@
  *   load     — LoadImage (the Frame editor's baked layers): EXIF turned, RGB;
  *   rgb      — another Compositor's result: RGB (the runner saved it as an
  *              8-bit PNG, where Python passes the float on: up to 1/255 apart);
- *   blank    — an Image card with nothing loaded: Python's 1×1 black placeholder.
+ *   blank    — an Image card with nothing loaded: Python's 1×1 black placeholder;
+ *   tensor   — a picture an effect made (R2.1): the runner kept the tensor as
+ *              an 8-bit PNG with its own channels, so it reads back as
+ *              'provider' (4 channels, alpha as it is) when the PNG has alpha,
+ *              else as 'rgb'; no EXIF turn.
  * And a mask input from LoadImage's MASK output (`loadMask`): 1 − alpha, or
  * a 64×64 zero mask when the file has no alpha.
  *
@@ -21,6 +25,7 @@
  */
 import sharp from 'sharp'
 import { core, type Plane, type RawPicture } from './plane'
+import { pngColourType } from '../pictures/pythonView'
 
 /** The largest picture read: 8192 × 8192 pixels, the Frame's own size limit. */
 export const MAX_INPUT_PIXELS = 8192 * 8192
@@ -32,7 +37,7 @@ function tooLarge(e: unknown): never {
 }
 
 /** 'made' (R1.5 follow-up, Save image only): a kept picture made from a card's tensor, read as 'card' is but with its alpha as it is. */
-export type PictureSource = 'provider' | 'card' | 'load' | 'rgb' | 'blank' | 'made'
+export type PictureSource = 'provider' | 'card' | 'load' | 'rgb' | 'blank' | 'made' | 'tensor'
 
 interface Rgba8 { w: number; h: number; data: Uint8Array }
 
@@ -57,6 +62,10 @@ export async function decodeRaw(bytes: Uint8Array | null, source: PictureSource)
   if (source === 'blank') return { raw: true, source, w: 1, h: 1, data: null }
   if (!bytes) throw new Error('A picture for the Frame is missing')
   const p = await rgba8(bytes, source === 'card' || source === 'load')
+  if (source === 'tensor') {
+    const type = pngColourType(bytes)
+    return { raw: true, source: type === 4 || type === 6 ? 'provider' : 'rgb', w: p.w, h: p.h, data: p.data }
+  }
   return { raw: true, source, w: p.w, h: p.h, data: p.data }
 }
 

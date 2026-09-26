@@ -105,6 +105,8 @@ import { planLoadImageCard } from './cards/loadImage'
 import { planEmptyImage, planGetImageSize, planImageToMask, planTextMaskWithSource } from './cards/utilities'
 import { imageCardShowingKept, planPreviewImage, planSaveImage } from './cards/saveImage'
 import { planSmartLayout } from './cards/smartLayout'
+import { effectSpec } from './effects/table'
+import { planEffect } from './effects/plan'
 import type { KeptExt } from './keptBytes'
 import { filesOf } from './values'
 import { OUTPUT_KINDS } from '#shared/runner/values'
@@ -936,7 +938,11 @@ async function planNodeRequest(ctx: PlanContext): Promise<NodePlan> {
       return { kind: 'pass', files, ui: files.length ? { images: files, animated: [true] } : { images: [] } }
     }
 
-    default:
+    default: {
+      // ── effects-* (step 3, R2): the still-picture effects, computed here ──
+      const fx = effectSpec(node.class_type)
+      if (fx) return planEffect(ctx)
       throw new Error(`The runner cannot run a ${node.class_type} node`)
+    }
   }
 }

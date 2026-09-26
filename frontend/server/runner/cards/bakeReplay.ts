@@ -35,6 +35,7 @@ import { encodeMask, loadImageMask, type Mask } from '../pictures/mask'
 import { MAX_INPUT_PIXELS } from '../compositor/decode'
 import { pyTruthy } from '#shared/runner/pyText'
 import { IMAGE_LAYERS } from '#shared/runner/smartLayout'
+import { effectFamilyOn, effectSchemaOf } from '#shared/runner/effects'
 
 export const TEXT_ON_PATH_UNLOADABLE = 'Text on path couldn’t load its picture. Change a setting to bake it again.'
 export const TEXT_MASK_UNLOADABLE = 'Text mask couldn’t load its picture. Change a setting to bake it again.'
@@ -96,6 +97,14 @@ export function cardPictureFiles(prompt: ApiPrompt, families: ReadonlySet<Runner
     const read = Object.prototype.hasOwnProperty.call(PICTURE_READS, n.class_type) ? inputs[PICTURE_READS[n.class_type]!] : undefined
     if (isLink(read) && (n.class_type !== 'TextMask' || pyTruthy(bakeParams(inputs.params).rendered))) {
       const behind = cardFileBehind(prompt, read)
+      if (behind) out.push({ ...behind, classType: 'Image' })
+    }
+    // An effect (R2 rule 9) decodes each picture wired in as Python's tensor:
+    // an Image card's own file behind the wire is checked here too.
+    const fx = effectFamilyOn(n.class_type, families) ? effectSchemaOf(n.class_type) : undefined
+    for (const input of fx?.images ?? []) {
+      const v = inputs[input.name]
+      const behind = isLink(v) ? cardFileBehind(prompt, v) : null
       if (behind) out.push({ ...behind, classType: 'Image' })
     }
     // Smart Layout (R1.6) decodes each image layer's first frame as Python's tensor.

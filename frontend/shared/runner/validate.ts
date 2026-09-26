@@ -26,7 +26,8 @@ import {
   RUNNER_NODE_RULES, RUNNER_NODE_TYPES, SWITCHED_CLASSES, isRunnerEligible, nodeValidationErrors,
   type ComfyValidationError, type RunnerEligibilityOptions,
 } from './eligibility'
-import { NO_FAMILIES, type RunnerFamily } from './families'
+import { NO_FAMILIES, familyOn, type RunnerFamily } from './families'
+import { EFFECT_OUTPUT_NODES } from './effects'
 import { linksOf, type ApiPrompt } from './graph'
 
 /**
@@ -38,12 +39,14 @@ import { linksOf, type ApiPrompt } from './graph'
  * (nodes_audio.py `Audio`, is_output_node=True) joined with sync-3 (F22);
  * the Text and 3D model cards with `cards` (R1.1; the Moodboard is not one);
  * Save image and Preview image with `cards` (R1.5); Smart Layout with
- * `cards` (R1.6).
+ * `cards` (R1.6); every ported effect that is one (R2: all but Painter, as
+ * define_schema's is_output_node says, ./effects.ts EFFECT_OUTPUT_NODES).
  */
 export const RUNNER_OUTPUT_CLASSES: ReadonlySet<string> = new Set([
   'Image', 'Video', 'Compositor', 'Audio', 'Text', 'Model3D', 'SaveImage', 'PreviewImage', 'SmartLayout',
   'RelightNode', 'BlendSceneNode', 'RemoveObjectNode', 'TextEditNode', 'RecolorObjectNode',
   'SwapBackgroundNode', 'SwapProductNode', 'PersonSwap', 'RotateCameraNode', 'ProductShotNode', 'RestyleFromImageNode',
+  ...EFFECT_OUTPUT_NODES,
 ])
 
 /** ComfyUI's node_errors entry for a node that failed validation. */
@@ -74,7 +77,7 @@ const knows = (classType: string, families: ReadonlySet<RunnerFamily>) => {
   if (RUNNER_NODE_TYPES.has(classType)) return true
   if (!Object.prototype.hasOwnProperty.call(RUNNER_NODE_RULES, classType)) return false
   const only = Object.prototype.hasOwnProperty.call(SWITCHED_CLASSES, classType) ? SWITCHED_CLASSES[classType] : undefined
-  return !only || families.has(only)
+  return !only || familyOn(only, families)
 }
 
 /** The prompt as ComfyUI's validate_prompt leaves it to run. `families`: the runner families on. */

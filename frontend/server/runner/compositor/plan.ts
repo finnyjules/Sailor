@@ -12,6 +12,7 @@
  */
 import { GATE_CLASS, isLink, linksOf, type ApiLink, type ApiPrompt } from '#shared/runner/graph'
 import { HOSTED_MAX_FRAME_ARTBOARD_PIXELS, PROVIDER_TYPES } from '#shared/runner/eligibility'
+import { EFFECT_PICTURE_OUTPUTS } from '#shared/runner/effects'
 import { actionPassThrough } from '../generators/actions'
 import { bakeParams, parseInputFileRef } from '../inputs'
 import { pyTruthy } from '#shared/runner/pyText'
@@ -70,6 +71,11 @@ export function pictureSourceOf(prompt: ApiPrompt, link: ApiLink, depth = 0): Pi
       if (slot === 0) return 'rgb'
       break
     default:
+      // An effect's picture (R2.1): the tensor it made, kept with its own channels.
+      if (Object.prototype.hasOwnProperty.call(EFFECT_PICTURE_OUTPUTS, node.class_type)) {
+        if (EFFECT_PICTURE_OUTPUTS[node.class_type]!.includes(slot)) return 'tensor'
+        break
+      }
       if (PROVIDER_TYPES.has(node.class_type)) {
         const pass = actionPassThrough(node.class_type, inputs)
         const v = pass ? inputs[pass] : undefined

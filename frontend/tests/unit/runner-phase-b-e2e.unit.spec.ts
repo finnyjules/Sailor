@@ -606,7 +606,9 @@ describe('B10 · one workflow per family, POST /api/runs to the last event', () 
     // unmeasured price this loop checks): its end-to-end is runner-sync-3.unit.spec.ts. `topaz-video` the same
     // (Task F23): a real video, measured before the hold: runner-topaz-video.unit.spec.ts. `cards` (step 3, R0.3)
     // makes no provider call either (the runner computes the cards): runner-value-wires.unit.spec.ts and the R1 card specs.
-    expect(FLOWS.map(f => f.family).sort()).toEqual(RUNNER_FAMILIES.filter(f => f !== 'frame' && f !== 'sync-3' && f !== 'topaz-video' && f !== 'cards').sort())
+    // Nor do the picture effects, the Shader effect's bake and the live previews (step 3, R2): runner-effects-*.unit.spec.ts.
+    const local: readonly string[] = ['frame', 'sync-3', 'topaz-video', 'cards', 'effects-tone', 'effects-blur', 'effects-cells', 'effects-warp', 'effects-mask', 'effects-noise', 'shader-bake', 'live-previews']
+    expect(FLOWS.map(f => f.family).sort()).toEqual(RUNNER_FAMILIES.filter(f => !local.includes(f)).sort())
   })
 
   it.each(FLOWS.map(f => [`${f.family}: ${f.label} → ${f.endpoint}`, f] as const))('%s', async (_l, f) => {
