@@ -25,6 +25,7 @@ import {
   ISOBMFF_HEAD_BYTES, MAX_HOPS, MAX_MEASURED_FILES, createGateReads, graphInputPixels, graphInputSizes, isobmffIspePixels, picturePixels, pictureRule, pyRound,
 } from '~~/server/utils/graphInputPixels'
 import { meterGraphSubmit } from '~~/server/utils/meterGraphRun'
+import { GRAPH_FILE_READERS, extractFileRefs } from '~~/server/utils/engineFileSurface'
 import { SETTING_UNREADABLE, STEPS_UNAVAILABLE, STEP_UNKNOWN, normalizeHostedPrompt } from '~~/server/utils/hostedPrompt'
 import { priceGraph } from '~~/server/utils/priceBook'
 import type { OutputFile } from '~~/server/runner/types'
@@ -458,7 +459,8 @@ describe('the hosted normalisation: what is priced is what ComfyUI runs (R2, R4)
   const frame = (inputs: Record<string, unknown>): P => ({ 1: { class_type: 'Compositor', inputs }, 2: flux2Edit('1'), 3: SINK })
 
   it('the review\'s Frame widths — text, a decimal, wrapped — are read as ComfyUI\'s int() reads them', async () => {
-    for (const width of ['4096', 4096.5, { __value__: 4096 }, { __value__: '4096' }, ' 4096 ']) {
+    // '4_096': Python's int() reads underscores (shared/runner/pyText.ts, fix round 2).
+    for (const width of ['4096', 4096.5, { __value__: 4096 }, { __value__: '4096' }, ' 4096 ', '4_096']) {
       const p = normalised(frame({ width, height: 4096 }))
       expect(p[1]!.inputs.width, JSON.stringify(width)).toBe(4096)
       const s = await graphInputSizes(p, files({}))
@@ -471,7 +473,7 @@ describe('the hosted normalisation: what is priced is what ComfyUI runs (R2, R4)
   })
 
   it('a value int() or float() reads in a way this can\'t match exactly: refused, in plain words', () => {
-    for (const width of ['4_096', 'inf', '4096.5', null, [1], { a: 1 }, '٤٠٩٦']) {
+    for (const width of ['4__096', 'inf', '4096.5', null, [1], { a: 1 }, '٤٠٩٦']) {
       if (Array.isArray(width)) continue // a list is a link: left to ComfyUI
       const n = normalizeHostedPrompt(frame({ width, height: 4096 }), CATALOG)
       expect('problems' in n && n.problems.map(x => [x.nodeId, x.input, x.message]), JSON.stringify(width)).toEqual([['1', 'width', SETTING_UNREADABLE]])
@@ -548,7 +550,7 @@ describe('the hosted normalisation: what is priced is what ComfyUI runs (R2, R4)
 
   it('a refused normalisation: 400 in ComfyUI\'s shape, nothing held or sent', async () => {
     const forwarded: unknown[] = []
-    const res = await meterGraphSubmit('u', { prompt: frame({ width: '4_096', height: 4096 }) }, {
+    const res = await meterGraphSubmit('u', { prompt: frame({ width: '4096.5', height: 4096 }) }, {
       priceGraph,
       normalizePrompt: p => normalizeHostedPrompt(p, CATALOG),
       spendGuard: async () => {}, validateFileRefs: async () => { throw new Error('not reached') }, moderatePrompt: async () => ({ ok: true as const }),
@@ -596,3 +598,156 @@ describe('a Nano Banana action whose deciding text is linked (R3)', () => {
     expect(s.pixels[3]).toBe(nanoBananaPixels('1K', undefined))
   })
 })
+
+// ── G1 fix round 2 ────────────────────────────────────────────────────────
+
+describe('a wrapper inside a wrapper: refused, never unwrapped twice (fix round 2, 1)', () => {
+  it('the re-review\'s wrapped link and wrapped resolution', () => {
+    for (const p of [
+      { 1: load('p.jpg'), 2: { class_type: 'EditImageNode', inputs: { model: 'Flux 2 Pro', input_image: { __value__: { __value__: ['1', 0] } } } } },
+      { 1: load('p.jpg'), 2: { class_type: 'EditImageNode', inputs: { model: 'Nano Banana 2', input_image: ['1', 0], resolution: { __value__: { __value__: '4K' } } } } },
+      // Deeper, and inside a list, and on an input the class doesn't declare.
+      { 2: { class_type: 'EditImageNode', inputs: { model: { __value__: { a: [{ __value__: 'Flux 2 Pro' }] } } } } },
+      { 2: { class_type: 'EditImageNode', inputs: { input_image: ['1', { __value__: 0 }] } } },
+      { 2: { class_type: 'EditImageNode', inputs: { extra: { deep: { __value__: 1 } } } } },
+    ] as P[]) {
+      const n = normalizeHostedPrompt(p, CATALOG)
+      expect('problems' in n && n.problems.map(x => [x.nodeId, x.message]), JSON.stringify(p)).toEqual([['2', SETTING_UNREADABLE]])
+    }
+  })
+
+  it('Load3D: a picture dict wrapped once is unwrapped (the file check then sees it); wrapped twice, refused', () => {
+    const once = normalised({ 1: { class_type: 'Load3D', inputs: { model_file: 'a.glb', image: { __value__: { image: 'someone-else.png' } }, width: 1024, height: 1024 } } })
+    expect(once[1]!.inputs.image).toEqual({ image: 'someone-else.png' })
+    // The file check's own reader names the file on the normalised value (it named none on the wrapper).
+    const spec = GRAPH_FILE_READERS.Load3D!.find(x => x.input === 'image')!
+    expect(extractFileRefs(spec, once[1]!.inputs.image)).toEqual(['someone-else.png'])
+    expect(extractFileRefs(spec, { __value__: { __value__: { image: 'someone-else.png' } } })).toEqual([])
+    const twice = normalizeHostedPrompt({ 1: { class_type: 'Load3D', inputs: { model_file: 'a.glb', image: { __value__: { __value__: { image: 'someone-else.png' } } }, width: 1024, height: 1024 } } }, CATALOG)
+    expect('problems' in twice && twice.problems.map(x => [x.input, x.message])).toEqual([['image', SETTING_UNREADABLE]])
+  })
+
+  it('every hosted check reads the normalised prompt: the file check, the sizing, the price, and what is sent', async () => {
+    const seen: Record<string, any> = {}
+    const read = files({ 'p.jpg': MP })
+    const prompt: P = { 1: load('p.jpg'), 2: { class_type: 'Load3D', inputs: { model_file: 'a.glb', image: { __value__: { image: 'x.png' } }, width: 1024, height: 1024 } }, 3: flux2Edit('1'), 4: SINK }
+    const res = await meterGraphSubmit('u', { prompt }, {
+      priceGraph: (p, o) => { seen.price = p; return priceGraph(p, o) },
+      normalizePrompt: p => normalizeHostedPrompt(p, CATALOG),
+      measureInputSizes: p => { seen.sizes = p; return graphInputSizes(p, read) },
+      spendGuard: async () => {}, validateFileRefs: async (p) => { seen.files = p }, moderatePrompt: async () => ({ ok: true as const }),
+      hold: async () => ({ ok: true as const, holdId: 1 }),
+      getAvailable: async () => 0,
+      forward: async (b: any) => { seen.sent = b.prompt; return { status: 200, body: { prompt_id: 'p' } } },
+      registerRun: async () => {}, startSettle: () => {}, releaseHold: async () => {},
+    })
+    expect(res.status).toBe(200)
+    for (const k of ['files', 'sizes', 'price', 'sent']) expect(seen[k]![2].inputs.image, k).toEqual({ image: 'x.png' })
+    // One object throughout: what is checked is what is sent.
+    expect(seen.files).toBe(seen.sent)
+    expect(prompt[2]!.inputs.image).toEqual({ __value__: { image: 'x.png' } })
+  })
+})
+
+describe('AVIF / HEIF sequences: refused, since the engine decodes the track (fix round 2, 2)', () => {
+  const box = (type: string, payload: Uint8Array | number[], full = false) => {
+    const body = Buffer.from(full ? [0, 0, 0, 0, ...payload] : [...payload])
+    const out = Buffer.alloc(8 + body.length)
+    out.writeUInt32BE(out.length, 0)
+    out.write(type, 4, 'ascii')
+    body.copy(out, 8)
+    return out
+  }
+  const u32 = (n: number) => [n >>> 24 & 255, n >>> 16 & 255, n >>> 8 & 255, n & 255]
+  const ispe = (w: number, h: number) => box('ispe', [...u32(w), ...u32(h)], true)
+  /**
+   * The re-review's case, made without Pillow: a still item whose ispe says
+   * 10 × 10, plus (optionally) a `moov` track of 3000 × 2000 (tkhd's width and
+   * height, 16.16 fixed point) — the frames the engine's libavif decodes.
+   */
+  const avif = (brand: string, withTrack: boolean) => Buffer.concat([
+    box('ftyp', [...Buffer.from(brand), 0, 0, 0, 0, ...Buffer.from('avifmif1msf1')]),
+    box('meta', Buffer.concat([box('pitm', [0, 1], true), box('iprp', Buffer.concat([box('ipco', ispe(10, 10)), box('ipma', [...u32(1), 0, 1, 1, 1], true)]))]), true),
+    ...(withTrack ? [box('moov', box('trak', box('tkhd', [...new Array(72).fill(0), ...u32(3000 << 16), ...u32(2000 << 16)], true)))] : []),
+    box('mdat', new Array(64).fill(7)),
+  ])
+
+  it('the 2-frame sequence (brand avis, a track) and the same with mif1 or msf1: can\'t be sized, from disk or bytes', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'g1-avis-'))
+    for (const brand of ['avis', 'mif1', 'msf1', 'avif']) {
+      const bytes = avif(brand, true)
+      writeFileSync(join(dir, `${brand}.avif`), bytes)
+      expect(await picturePixels(join(dir, `${brand}.avif`)), brand).toBeNull()
+      expect(await picturePixels(new Uint8Array(bytes)), brand).toBeNull()
+    }
+  })
+
+  it('a sequence brand with no track is refused too; a still brand with no track is sized', async () => {
+    for (const brand of ['avis', 'msf1', 'hevc', 'heim']) expect(await picturePixels(new Uint8Array(avif(brand, false))), brand).toBeNull()
+    for (const brand of ['avif', 'mif1', 'heic']) expect(await picturePixels(new Uint8Array(avif(brand, false))), brand).toBe(100)
+  })
+
+  it('the gate refuses the sequence before a size-priced node; the runner refuses it in hosted', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'g1-avis2-'))
+    writeFileSync(join(dir, 'seq.avif'), avif('avis', true))
+    const s = await graphInputSizes({ 1: load('seq.avif'), 2: upscale('1', { model: 'Topaz', topaz_upscale_factor: '6x' }) }, v => picturePixels(join(dir, v)))
+    expect(s.pixels).toEqual({})
+    expect(s.problems.map(x => x.message)).toEqual([unreadableInputWords('UpscaleImageNode')])
+    const f: OutputFile = { filename: 'seq.avif', subfolder: '', type: 'output' }
+    const node = { class_type: 'EditImageNode', inputs: { model: 'Flux 2 Pro', input_image: ['1', 0] } }
+    expect(await measuredInput(node, () => [f], async () => new Uint8Array(avif('avis', true)), FAL_EDIT)).toEqual({ unreadable: true })
+  })
+
+  it('a top-level box running past the end of the file: can\'t be walked, refused', async () => {
+    const bytes = avif('avif', false)
+    expect(await picturePixels(new Uint8Array(bytes.subarray(0, bytes.length - 10)))).toBeNull()
+  })
+})
+
+describe('side order: a loaded file\'s width may be its height to the engine (fix round 2, 3)', () => {
+  /** A PNG with a `Raw profile type exif` text chunk — Pillow reads its orientation, sharp doesn't. */
+  const withRawExif = async (w: number, h: number) => {
+    const png = await sharp({ create: { width: w, height: h, channels: 3, background: '#888' } }).png().toBuffer()
+    const crcTable = Array.from({ length: 256 }, (_, n) => { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1; return c >>> 0 })
+    const crc = (b: Buffer) => { let c = 0xFFFFFFFF; for (const x of b) c = crcTable[(c ^ x) & 255]! ^ (c >>> 8); return (c ^ 0xFFFFFFFF) >>> 0 }
+    // "Exif\0\0" + a little-endian TIFF with one IFD entry: Orientation (0x0112) = 6.
+    const exif = Buffer.from('457869660000' + '49492a0008000000' + '0100' + '120103000100000006000000' + '00000000', 'hex')
+    const text = Buffer.concat([Buffer.from('Raw profile type exif\0'), Buffer.from(`\nexif\n${String(exif.length).padStart(8)}\n${exif.toString('hex')}\n`)])
+    const body = Buffer.concat([Buffer.from('tEXt'), text])
+    const chunk = Buffer.concat([Buffer.alloc(4), body, Buffer.alloc(4)])
+    chunk.writeUInt32BE(text.length, 0)
+    chunk.writeUInt32BE(crc(body), chunk.length - 4)
+    return Buffer.concat([png.subarray(0, 33), chunk, png.subarray(33)])
+  }
+
+  it('the re-review\'s 100 × 3000 PNG → Resize to height 1000 → Flux 2 Pro: sized for either order, so refused (was 33,000 px)', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'g1-orient-'))
+    writeFileSync(join(dir, 'rawexif.png'), await withRawExif(100, 3000))
+    // sharp reads it upright: 100 × 3000 (the engine turns it to 3000 × 100).
+    const meta = await sharp(join(dir, 'rawexif.png')).metadata()
+    expect([meta.width, meta.height, meta.orientation]).toEqual([100, 3000, undefined])
+    const read = (v: string) => engineFileSizeAt(join(dir, v))
+    const p: P = { 1: load('rawexif.png'), 2: { class_type: 'ImageScale', inputs: { image: ['1', 0], width: 0, height: 1000 } }, 3: flux2Edit('2'), 4: upscale('2', { model: 'Topaz' }) }
+    const s = await graphInputSizes(p, read)
+    // round(3000 × 1000 / 100) = 30000 × 1000: 30 MP, above the cap, so both size-priced nodes are refused.
+    expect(s.pixels).toEqual({})
+    expect(s.problems.map(x => x.nodeId).sort()).toEqual(['3', '4'])
+  })
+
+  it('Crop: the larger of both orders, side by side', async () => {
+    const read = async () => ({ pixels: 100 * 3000, width: 100, height: 3000 })
+    const s = await graphInputSizes({ 1: load('a.png'), 2: { class_type: 'ImageCrop', inputs: { image: ['1', 0], width: 2000, height: 2000, x: 0, y: 0 } }, 3: flux2Edit('2') }, read)
+    // Upright: 100 × 2000; turned: 2000 × 100 — the bound is 2000 × 2000.
+    expect(s.pixels[3]).toBe(2000 * 2000)
+  })
+
+  it('an order-certain picture (a Frame\'s own size) is still exact', async () => {
+    const s = await graphInputSizes({ 1: { class_type: 'Compositor', inputs: { width: 100, height: 3000 } }, 2: { class_type: 'ImageScale', inputs: { image: ['1', 0], width: 0, height: 1000 } }, 3: flux2Edit('2') }, files({}))
+    expect(s.pixels[3]).toBe(33 * 1000)
+  })
+})
+
+async function engineFileSizeAt(path: string) {
+  const { pictureSize } = await import('~~/server/utils/graphInputPixels')
+  return pictureSize(path)
+}

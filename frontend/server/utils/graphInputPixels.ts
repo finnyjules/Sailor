@@ -290,6 +290,78 @@ export function isobmffIspePixels(bytes: Uint8Array): number | null {
   return d ? d.width * d.height : null
 }
 
+/**
+ * The ISOBMFF major brands read as one still picture (G1 fix round 2). The
+ * engine's Pillow 12.1.1 AvifImagePlugin opens major brands avif, avis,
+ * mif1 and msf1, and its libavif 1.3.0 (decoder source AUTO) decodes the
+ * `moov` track instead of the primary item for `avis`, and for any other
+ * brand but `avif` when the file has a track. So:
+ *  - `avif` and `mif1` (and HEIC's `heic` / `heix`, which the engine can't
+ *    decode at all) are stills: sized from the primary item;
+ *  - `avis`, `msf1` and every other brand (the HEVC sequence brands `hevc`,
+ *    `hevx`, `hevm`, `hevs`, and the multi-layer `heim`, `heis`) are refused;
+ *  - any file with a top-level `moov` box (a track) is refused whatever its
+ *    brand, so no decoder can choose the track over the item sized here.
+ */
+const STILL_BRANDS: ReadonlySet<string> = new Set(['avif', 'mif1', 'heic', 'heix'])
+/** At most this many top-level boxes are walked; a file with more is refused. */
+const MAX_TOP_LEVEL_BOXES = 256
+
+/** The top-level box types of `file` (headers only, seeking from box to box), or null when they can't all be walked. */
+async function topLevelBoxTypes(file: string | Uint8Array): Promise<string[] | null> {
+  let total: number
+  let read: (off: number, n: number) => Promise<Uint8Array>
+  let close = async () => {}
+  if (typeof file === 'string') {
+    const fh = await open(file, 'r')
+    total = (await fh.stat()).size
+    read = async (off, n) => {
+      const buf = new Uint8Array(n)
+      const { bytesRead } = await fh.read(buf, 0, n, off)
+      return buf.subarray(0, bytesRead)
+    }
+    close = () => fh.close()
+  }
+  else {
+    total = file.byteLength
+    read = async (off, n) => file.subarray(off, off + n)
+  }
+  try {
+    const types: string[] = []
+    let off = 0
+    while (off < total) {
+      if (types.length >= MAX_TOP_LEVEL_BOXES) return null
+      const h = await read(off, 16)
+      if (h.length < 8) return null
+      const size32 = readU32BE(h, 0)
+      const type = String.fromCharCode(h[4]!, h[5]!, h[6]!, h[7]!)
+      let size: number
+      let header = 8
+      if (size32 === 1) {
+        if (h.length < 16) return null
+        size = readU32BE(h, 8) * 2 ** 32 + readU32BE(h, 12)
+        header = 16
+      }
+      else if (size32 === 0) size = total - off // the last box, to the end of the file
+      else size = size32
+      if (size < header || off + size > total) return null
+      types.push(type)
+      off += size
+    }
+    return types
+  }
+  finally { await close() }
+}
+
+/** Whether an AVIF/HEIC file is read as one still picture: a still major brand and no top-level `moov`. */
+export async function isobmffStill(file: string | Uint8Array, head: Uint8Array): Promise<boolean> {
+  if (head.length < 12) return false
+  const brand = String.fromCharCode(...head.subarray(8, 12))
+  if (!STILL_BRANDS.has(brand)) return false
+  const types = await topLevelBoxTypes(file)
+  return types != null && !types.includes('moov')
+}
+
 /** A header-sized read of `file`'s first `n` bytes, from disk or from an in-memory buffer. */
 async function headBytes(file: string | Uint8Array, n: number): Promise<Uint8Array> {
   if (typeof file !== 'string') return file.subarray(0, n)
@@ -329,6 +401,8 @@ export async function pictureSize(file: string | Uint8Array): Promise<{ pixels: 
       return d ? { pixels: d.width * d.height, ...d } : null
     }
     if (fmt === 'avif' || fmt === 'heic') {
+      // A sequence is decoded from its track, not the still item sized below (G1 fix round 2).
+      if (!(await isobmffStill(file, head))) return null
       const d = isobmffPrimarySize(typeof file === 'string' ? await headBytes(file, ISOBMFF_HEAD_BYTES) : file)
       if (!d) return null
       return d.rotated ? { pixels: d.width * d.height } : { pixels: d.width * d.height, width: d.width, height: d.height }
@@ -384,7 +458,8 @@ const inputsOf = (n: { inputs?: unknown } | undefined): NodeInputs =>
  *    which makes it 'unsized'.
  */
 export type PictureSize =
-  | { px: number, exact: boolean, width?: number, height?: number }
+  // `swappable`: the sides are known but not which is the width (a loaded file).
+  | { px: number, exact: boolean, width?: number, height?: number, swappable?: boolean }
   | { unknown: 'unsized' | 'unreadable' | 'unread' }
 
 /** How far back a picture is followed; a longer chain (or a loop) is 'unsized'. */
@@ -578,7 +653,20 @@ function pictureSizer(prompt: Prompt, measure: (value: string) => Promise<FileRe
     memo.set(id, p)
     return p
   }
-  const sized = (width: number, height: number, exact: boolean): PictureSize => ({ px: width * height, exact, width, height })
+  const sized = (width: number, height: number, exact: boolean, swappable = false): PictureSize =>
+    ({ px: width * height, exact, width, height, ...(swappable ? { swappable: true } : {}) })
+  /**
+   * A result that depends on which side is which, for an input whose side
+   * order isn't certain (`swappable`): worked out for both orders, and the
+   * side-by-side largest taken (never below either); exact only when both
+   * orders agree (G1 fix round 2).
+   */
+  const eitherOrder = (w: number, h: number, input: { exact: boolean, swappable?: boolean }, f: (w: number, h: number) => [number, number]): PictureSize => {
+    const [a, b] = f(w, h)
+    if (!input.swappable) return sized(a, b, input.exact)
+    const [c, d] = f(h, w)
+    return sized(Math.max(a, c), Math.max(b, d), input.exact && a === c && b === d)
+  }
   const size = async (id: string, path: ReadonlySet<string>): Promise<PictureSize> => {
     const node = prompt[id]
     const ct = node?.class_type
@@ -587,7 +675,9 @@ function pictureSizer(prompt: Prompt, measure: (value: string) => Promise<FileRe
     if ('file' in rule) {
       const r = await measure(rule.file)
       if (r === 'unread' || r === 'unreadable') return { unknown: r }
-      return { px: r.pixels, exact: true, ...(r.width && r.height ? { width: r.width, height: r.height } : {}) }
+      // A file's side ORDER is never certain: the engine's exif_transpose also
+      // reads orientation from PNG text chunks and XMP, which sharp doesn't.
+      return { px: r.pixels, exact: true, ...(r.width && r.height ? { width: r.width, height: r.height, swappable: true } : {}) }
     }
     if ('same' in rule) return onLink(rule.same, path)
     if ('exact' in rule) return { px: rule.exact, exact: true, ...(rule.width && rule.height ? { width: rule.width, height: rule.height } : {}) }
@@ -600,8 +690,9 @@ function pictureSizer(prompt: Prompt, measure: (value: string) => Promise<FileRe
     if ('scaled' in rule) {
       const s = rule.side
       if (w && h) {
-        if (rule.round === 'python') return sized(pyRound(w * s), pyRound(h * s), input.exact)
-        return sized(Math.ceil(w * s), Math.ceil(h * s), input.exact && Number.isInteger(s))
+        // The same whichever side is which: the order stays as uncertain as it was.
+        if (rule.round === 'python') return sized(pyRound(w * s), pyRound(h * s), input.exact, input.swappable)
+        return sized(Math.ceil(w * s), Math.ceil(h * s), input.exact && Number.isInteger(s), input.swappable)
       }
       if (Number.isInteger(s)) return { px: input.px * s * s, exact: input.exact }
       return { px: scaledBound(input.px, s), exact: false }
@@ -610,17 +701,18 @@ function pictureSizer(prompt: Prompt, measure: (value: string) => Promise<FileRe
       if (rule.width === 0 && rule.height === 0) return input
       if (rule.width > 0 && rule.height > 0) return sized(rule.width, rule.height, true)
       if (!w || !h) return { unknown: 'unsized' }
-      return rule.width === 0
-        ? sized(Math.max(1, pyRound(w * rule.height / h)), rule.height, input.exact)
-        : sized(rule.width, Math.max(1, pyRound(h * rule.width / w)), input.exact)
+      return eitherOrder(w, h, input, (W, H) => rule.width === 0
+        ? [Math.max(1, pyRound(W * rule.height / H)), rule.height]
+        : [rule.width, Math.max(1, pyRound(H * rule.width / W))])
     }
     // Crop: with the input's sides and set offsets, the slice exactly; else at most width × height.
     const x = literalCount(rule.x) ?? (rule.x === undefined ? 0 : null)
     const y = literalCount(rule.y) ?? (rule.y === undefined ? 0 : null)
     if (w && h && x != null && y != null) {
-      const cw = Math.max(0, Math.min(rule.width, w - Math.min(x, w - 1)))
-      const ch = Math.max(0, Math.min(rule.height, h - Math.min(y, h - 1)))
-      return sized(cw, ch, input.exact)
+      return eitherOrder(w, h, input, (W, H) => [
+        Math.max(0, Math.min(rule.width, W - Math.min(x, W - 1))),
+        Math.max(0, Math.min(rule.height, H - Math.min(y, H - 1))),
+      ])
     }
     return { px: Math.min(rule.width * rule.height, input.px), exact: false }
   }

@@ -4,8 +4,12 @@
  * (execution.py validate_inputs, the non-link branch) BEFORE anything reads
  * it for money: the file-ownership check, the sizing, the price. The
  * NORMALISED prompt is the one forwarded to ComfyUI, so what is priced is
- * what runs. ComfyUI's validation of it again changes nothing (each step is
- * idempotent).
+ * what runs. ComfyUI unwraps `__value__` once per validation, so a wrapper
+ * inside a wrapper would be unwrapped again there and run as a value this
+ * never saw: after the one unwrap, any value still holding a `__value__` key
+ * anywhere (at any depth, in any input, declared or not) is refused (G1 fix
+ * round 2). With none left, ComfyUI's own validation of the forwarded
+ * prompt changes nothing: the coercions below give values it leaves as they are.
  *
  * For each input the node's class declares (its /object_info entry, read from
  * the stored catalog):
@@ -25,12 +29,14 @@
  *    JSON number arrives here as 4096, so the two can't be told apart);
  *  - bool() of a list or a dict;
  *  - a `__value__` wrapper on an input the class doesn't declare (ComfyUI
- *    would not unwrap it, but a dynamic input might);
+ *    would not unwrap it, but a dynamic input might), or one left inside a
+ *    value after the unwrap;
  *  - a class the catalog doesn't know (ComfyUI refuses the whole prompt then too).
  * Inputs a class doesn't declare are otherwise left alone: ComfyUI passes
  * only their links on.
  */
 import type { RequestProblem } from '../runner/requestRules'
+import { pyFloatOf, pyIntOf } from '../../shared/runner/pyText'
 
 export const SETTING_UNREADABLE = 'One of this step\'s settings has a value Sailor can\'t read. Set it again, then run once more.'
 export const STEP_UNKNOWN = 'This step isn\'t one Sailor knows, so it can\'t be priced. Remove it, then run once more.'
@@ -39,11 +45,6 @@ export const STEPS_UNAVAILABLE = 'Sailor can\'t check this workflow\'s steps rig
 type Catalog = Readonly<Record<string, any>>
 type Prompt = Record<string, any>
 
-/** Python's str.strip() whitespace for the ASCII range (the only range read here). */
-const WS = '[ \\t\\n\\r\\f\\v]*'
-const PY_INT_TEXT = new RegExp(`^${WS}[+-]?[0-9]+${WS}$`)
-const PY_FLOAT_TEXT = new RegExp(`^${WS}[+-]?([0-9]+(\\.[0-9]*)?|\\.[0-9]+)([eE][+-]?[0-9]+)?${WS}$`)
-
 const CANT = Symbol('cant')
 
 /** Python's int(v) for a JSON value, or CANT when it would fail or can't be matched exactly. */
@@ -51,7 +52,12 @@ export function pyIntCoerce(v: unknown): number | typeof CANT {
   let n: number
   if (typeof v === 'boolean') n = v ? 1 : 0
   else if (typeof v === 'number') n = Math.trunc(v)
-  else if (typeof v === 'string' && PY_INT_TEXT.test(v)) n = Number(v.trim())
+  else if (typeof v === 'string') {
+    // shared/runner/pyText.ts: Python's int(str) grammar (the runner reads widgets with it too).
+    const parsed = pyIntOf(v)
+    if (parsed == null) return CANT
+    n = parsed
+  }
   else return CANT
   return Number.isSafeInteger(n) ? n : CANT
 }
@@ -61,8 +67,13 @@ export function pyFloatCoerce(v: unknown): number | typeof CANT {
   let n: number
   if (typeof v === 'boolean') n = v ? 1 : 0
   else if (typeof v === 'number') n = v
-  else if (typeof v === 'string' && PY_FLOAT_TEXT.test(v)) n = Number(v.trim())
+  else if (typeof v === 'string') {
+    const parsed = pyFloatOf(v)
+    if (parsed == null) return CANT
+    n = parsed
+  }
   else return CANT
+  // inf and nan can't be sent back as JSON: refused.
   return Number.isFinite(n) ? n : CANT
 }
 
@@ -88,6 +99,17 @@ function declared(entry: any, input: string): unknown[] | undefined {
   return undefined
 }
 
+/** Whether `v` holds a `__value__` key anywhere, at any depth (bounded). */
+export function holdsWrapper(v: unknown, depth = 0): boolean {
+  if (depth > 64) return true
+  if (Array.isArray(v)) return v.some(x => holdsWrapper(x, depth + 1))
+  if (v && typeof v === 'object') {
+    if (Object.prototype.hasOwnProperty.call(v, '__value__')) return true
+    return Object.values(v as Record<string, unknown>).some(x => holdsWrapper(x, depth + 1))
+  }
+  return false
+}
+
 const isDict = (v: unknown): v is Record<string, unknown> => Boolean(v) && typeof v === 'object' && !Array.isArray(v)
 const PRIMITIVE_TYPES = new Set(['INT', 'FLOAT', 'STRING', 'BOOLEAN'])
 
@@ -109,18 +131,27 @@ export function normalizeHostedPrompt(prompt: unknown, catalog: Catalog | null):
     const inputs = node.inputs
     if (!isDict(inputs)) continue
     for (const [name, raw] of Object.entries(inputs)) {
-      if (Array.isArray(raw)) continue // a link
+      // A wrapper inside a list: ComfyUI would take the list as a link and never unwrap it, but refuse anyway.
+      if (Array.isArray(raw)) {
+        if (holdsWrapper(raw)) problems.push({ nodeId, classType: ct, input: name, message: SETTING_UNREADABLE })
+        continue // a link
+      }
       const spec = declared(entry, name)
       const wrapped = isDict(raw) && Object.prototype.hasOwnProperty.call(raw, '__value__')
       if (!spec) {
-        if (wrapped) problems.push({ nodeId, classType: ct, input: name, message: SETTING_UNREADABLE })
+        if (holdsWrapper(raw)) problems.push({ nodeId, classType: ct, input: name, message: SETTING_UNREADABLE })
         continue
       }
       const v = wrapped ? (raw as Record<string, unknown>).__value__ : raw
       const type = spec[0]
       if (typeof type !== 'string' || !PRIMITIVE_TYPES.has(type)) {
-        // A combo or a link type: unwrapped, not coerced (an unwrapped list becomes a link).
-        if (wrapped) inputs[name] = v
+        // A combo or a link type: unwrapped once, not coerced (an unwrapped list becomes a link).
+        if (holdsWrapper(v)) problems.push({ nodeId, classType: ct, input: name, message: SETTING_UNREADABLE })
+        else if (wrapped) inputs[name] = v
+        continue
+      }
+      if (holdsWrapper(v)) {
+        problems.push({ nodeId, classType: ct, input: name, message: SETTING_UNREADABLE })
         continue
       }
       let coerced: unknown = CANT
