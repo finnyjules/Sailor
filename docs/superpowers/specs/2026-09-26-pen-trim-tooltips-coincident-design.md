@@ -1,6 +1,6 @@
 # The pen, stages 1–3 — trim, tooltip cards, coincident
 
-Status: designed 2026-09-26 on the owner's "run with it". Stages 1–3 of the pen programme below.
+Status: designed 2026-09-26; stages 1–3 built the same day (browser pass owed — see docs/STATE.md)
 
 ## Why
 
@@ -57,7 +57,7 @@ Line entities, circle entities, and the line and arc segments of paths. **Bézie
 - **Surviving geometry keeps its ids** where it survives, so rules on it stay attached. Rules whose references disappear are dropped (existing `deleteEntity` behaviour) and counted.
 
 ### Cut (key **C**) and Dissolve (key **D**)
-- **Cut:** click on a line segment or arc segment of a path to add an anchor there; the curve does not move (line → two lines; arc → two arcs with the shared centre and their invariants). On a line entity it splits into two line entities sharing the new point. Not on circles or Bézier segments in v1 (the hint says "Cut works on a path's lines and arcs").
+- **Cut:** click on a line segment or arc segment of a path to add an anchor there; the curve does not move (line → two lines; arc → two arcs with the shared centre and their invariants). On a line entity it splits into two line entities sharing the new point. Not on circles or Bézier segments in v1 (the hint says "Cut works on lines and arcs").
 - **Dissolve:** click an interior anchor of a path where the two segments meeting there are both lines lying on one line (within 0.5° and 1 screen px), or both arcs with the same centre point (or centres within 1 screen px and equal radii within 1 px) → they merge into one segment and the anchor is removed if nothing else references it. Otherwise the hint says "These two sides don't line up, so they can't merge".
 
 ### Deleting selected segments
