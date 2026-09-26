@@ -15,7 +15,21 @@
  * in shared/pricing/markup.ts, re-exported so existing imports keep working.
  */
 import { creditsForUsd } from '#shared/pricing/markup'
+import { ASSIST_CALL_CREDITS, ASSIST_CALL_USD } from '#shared/pricing/anthropicTokens'
 export { creditsForUsd }
+
+/**
+ * The price of a run of short "assist" calls (/api/vibe and its siblings, metered flat per
+ * call — server/utils/anthropicMeter.ts). A studio's "Try other settings" is one takes call,
+ * plus a recipe-and-pick pass or a see-first review when the studio has one: 1 to 3 calls.
+ * "~$0.01–0.03" locally (the operator's own spend), "~2–6 cr" hosted.
+ */
+export function assistEstimateText(hosted: boolean, calls: readonly [number, number] = [1, 3]): string {
+  const [lo, hi] = calls
+  if (hosted) return lo === hi ? `~${lo * ASSIST_CALL_CREDITS} cr` : `~${lo * ASSIST_CALL_CREDITS}–${hi * ASSIST_CALL_CREDITS} cr`
+  const usd = (n: number) => (n * ASSIST_CALL_USD).toFixed(2)
+  return lo === hi ? `~$${usd(lo)}` : `~$${usd(lo)}–${usd(hi)}`
+}
 
 /** Short badge text: "~$0.08" local, "~16 cr" hosted (hosted is always ~). */
 export function formatCostBadge(usd: number, approximate: boolean, hosted: boolean): string {

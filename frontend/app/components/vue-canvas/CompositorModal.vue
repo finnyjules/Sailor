@@ -1920,7 +1920,7 @@ function emit(e: 'close') {
 }
 // Inspector actions, under the thing itself: the layer, or the Frame when nothing is selected.
 const frameActions = computed(() => studioActions({ place: 'frame', canTakes: false, backgroundIsShader: backgroundIsShader.value, local: [
-  { id: 'layouts', label: 'Try layouts', group: 'develop', ai: false, lands: null, run: { call: () => { inspectorTab.value = 'layout' } } },
+  { id: 'layouts', label: 'Try layouts', description: 'Other arrangements of this frame, no AI', ai: false, lands: null, run: { call: () => { inspectorTab.value = 'layout' } } },
 ] }))
 
 const selectedCount = computed(() => selectedLayers.value.length)

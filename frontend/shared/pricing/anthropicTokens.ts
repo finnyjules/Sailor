@@ -21,6 +21,13 @@ export const ANTHROPIC_USD_PER_MTOK: Record<string, AnthropicTokenPrice> = {
 
 export const ASSIST_MARKUP = 2
 
+/** The flat charge for one short "assist" call (/api/vibe and its siblings) in hosted mode:
+ *  server/utils/anthropicMeter.ts debits exactly this. Shared so the client can quote it. */
+export const ASSIST_CALL_CREDITS = 2
+/** What one assist call costs the operator locally: a Haiku call of at most 2048 tokens out,
+ *  about a cent. An estimate for the badge, never a charge. */
+export const ASSIST_CALL_USD = 0.01
+
 /** One call's USD cost → integer credits at the markup. Never zero for a real
  *  call; the epsilon keeps an exact number of cents from rounding up on float noise. */
 export function anthropicCallCredits(usd: number): number {

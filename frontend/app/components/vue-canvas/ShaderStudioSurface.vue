@@ -1,13 +1,14 @@
 <!-- frontend/app/components/vue-canvas/ShaderStudioSurface.vue -->
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, toRaw, watch } from 'vue'
-import { Plus, Trash2 } from 'lucide-vue-next'
+import { Dice5, Plus, Trash2 } from 'lucide-vue-next'
 import ShaderEffectGallery from '~/components/vue-canvas/ShaderEffectGallery.vue'
 import StudioModalShell from '~/components/vue-canvas/StudioModalShell.vue'
 import StudioSection from '~/components/vue-canvas/StudioSection.vue'
 import StudioLayerStack from '~/components/vue-canvas/StudioLayerStack.vue'
 import StudioActionsFooter from '~/components/vue-canvas/studio/StudioActionsFooter.vue'
 import StudioActionRows from '~/components/vue-canvas/studio/StudioActionRows.vue'
+import StudioActionRow from '~/components/vue-canvas/studio/StudioActionRow.vue'
 import StudioInspectorHead from '~/components/vue-canvas/studio/StudioInspectorHead.vue'
 import MyEffectRecipe from '~/components/vue-canvas/MyEffectRecipe.vue'
 import StudioSwitch from '~/components/vue-canvas/studio/StudioSwitch.vue'
@@ -42,7 +43,7 @@ import { ensureSpaceTypeBake } from '~/lib/spacetype/bake'
 import { encodeFrames } from '~/lib/engine/encodeVideo'
 import { useStudioAgent } from '~/composables/useStudioAgent'
 import { settleTakesOnRender } from '~/lib/prompt/studioTakes'
-import { LAYERS_FULL, REMIX_ACTION, studioActions } from '~/lib/studio/studioActions'
+import { LAYERS_FULL, layerAddActions, studioActions } from '~/lib/studio/studioActions'
 import { useStudioVarBindings } from '~/composables/useStudioVarBindings'
 import { useStudioVarMenu } from '~/composables/useStudioVarMenu'
 import { makeConfigParams } from '~/lib/agent/configParams'
@@ -165,10 +166,10 @@ const shaderAgent = useStudioAgent({
 // The prompt's chip and the inspector head both name the active effect.
 const promptLabel = computed(() => effectDef.value?.name ?? 'Shader')
 const effectCategory = computed(() => SHADER_SECTIONS.find(s => s.id === effectDef.value?.category)?.label ?? null)
-const inspectorActions = computed(() => studioActions({
-  place: 'shader', canTakes: true, layersFull: config.value.effects.length >= LAYER_MAX,
-  local: [{ id: 'new-variation', label: 'New variation', group: 'develop', ai: false, lands: null, run: { call: rerollSeed } }],
-}))
+// Two rows: Try other settings (new dial values) and Rewrite the effect (new code).
+// "New variation" is the dice on the Variation dial; "Describe a new layer" is in the
+// Layers + menu (redesign 2026-09-25).
+const inspectorActions = computed(() => studioActions({ place: 'shader', canTakes: true }))
 
 // Collections variable binding (Slice 2a, Task 7a) — same recipe as Gradient Studio
 // (Task 6): `studioControls` mirrors what the agent tuner offers (via
@@ -962,6 +963,25 @@ function onTuneKept(request: string) {
 }
 
 // ── effect stack (aside StudioLayerStack) ───────────────────────────────────
+// The Layers "+" is a choice: an empty layer, or one described in words (the prompt's
+// New effect chip, landing on a new layer). Rendered by this surface, as Vector Type's
+// three-kind menu is — the shared stack's `add` carries no choice.
+const addMenuOpen = ref(false)
+const addLayerActions = computed(() => layerAddActions({ addEmpty: addEffect, layersFull: layersFull.value }))
+function openAddMenu() { addMenuOpen.value = !stackLocked.value && !layersFull.value }
+// Closed by the next pointer down anywhere else (the menu stops its own), or Escape.
+let offAddMenu: (() => void) | null = null
+watch(addMenuOpen, (open) => {
+  offAddMenu?.()
+  offAddMenu = null
+  if (!open) return
+  const close = () => { addMenuOpen.value = false }
+  const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') close() }
+  window.addEventListener('pointerdown', close)
+  window.addEventListener('keydown', onKey)
+  offAddMenu = () => { window.removeEventListener('pointerdown', close); window.removeEventListener('keydown', onKey) }
+})
+onBeforeUnmount(() => { offAddMenu?.(); offAddMenu = null })
 function addEffect() {
   if (stackLocked.value || config.value.effects.length >= LAYER_MAX) return
   config.value.effects.push({ layerId: newLayerId(), id: '', params: {}, enabled: true, blend: 'normal', opacity: 1 })
@@ -1020,12 +1040,22 @@ function remapEffectTracks(kind: 'move' | 'insert' | 'remove', a: number, b?: nu
     @close="closeEditor"
   >
     <template #aside>
-      <StudioLayerStack
-        :layers="config.effects.map((e, i) => ({ label: effectLabel(e), enabled: e.enabled }))"
-        :active-index="activeEffect" :max="LAYER_MAX"
-        @select="activeEffect = $event"
-        @add="addEffect" @remove="removeEffect" @duplicate="duplicateEffect"
-        @reorder="reorderEffect" @toggle="toggleEffect" />
+      <div class="relative flex h-full w-full min-h-0 flex-col">
+        <StudioLayerStack
+          :layers="config.effects.map((e, i) => ({ label: effectLabel(e), enabled: e.enabled }))"
+          :active-index="activeEffect" :max="LAYER_MAX"
+          @select="activeEffect = $event"
+          @add="openAddMenu" @remove="removeEffect" @duplicate="duplicateEffect"
+          @reorder="reorderEffect" @toggle="toggleEffect" />
+        <!-- The + menu. The root is pointer-events-none; only the menu takes pointer events. -->
+        <div v-if="addMenuOpen" class="pointer-events-none absolute inset-0 z-30">
+          <div role="menu" aria-label="Add a layer" data-testid="shader-add-layer-menu"
+               class="pointer-events-auto absolute right-2 top-9 w-60 rounded-lg border border-white/15 bg-neutral-900/95 p-1 shadow-xl backdrop-blur"
+               @pointerdown.stop>
+            <StudioActionRow v-for="a in addLayerActions" :key="a.id" :action="a" :prompt="shellRef?.prompt" role="menuitem" @ran="addMenuOpen = false" />
+          </div>
+        </div>
+      </div>
     </template>
 
     <template #preview>
@@ -1085,8 +1115,9 @@ function remapEffectTracks(kind: 'move' | 'insert' | 'remove', a: number, b?: nu
 
     <template #controls>
       <StudioInspectorHead :title="promptLabel" :subtitle="effectCategory">
-        <StudioButton :disabled="layerReadOnly" @click="openPicker">Change effect</StudioButton>
-        <StudioActionRows bare :actions="[REMIX_ACTION]" />
+        <template #aside>
+          <StudioButton :disabled="layerReadOnly" @click="openPicker" variant="outline" size="sm">Change effect</StudioButton>
+        </template>
       </StudioInspectorHead>
       <MyEffectRecipe
         :effect-id="activeEffectCfg.id" :values="activeEffectCfg.params" :disabled="layerReadOnly"
@@ -1100,7 +1131,15 @@ function remapEffectTracks(kind: 'move' | 'insert' | 'remove', a: number, b?: nu
           Upload image<input type="file" accept="image/*" class="hidden" @change="onUpload" />
         </label>
         <div class="mt-2">
-          <StudioSlider v-model="config.seed" label="Variation" :min="1" :max="9999" :step="1" :default="42" :bindable="false" />
+          <div class="flex items-center gap-1.5">
+            <StudioSlider v-model="config.seed" class="min-w-0 flex-1" label="Variation" :min="1" :max="9999" :step="1" :default="42" :bindable="false" />
+            <!-- New variation: a fresh seed, one click (was an inspector row). -->
+            <button type="button" aria-label="New variation" title="New variation" data-testid="shader-new-variation"
+                    class="flex size-7 shrink-0 items-center justify-center rounded-[6px] bg-white/[0.05] text-white/60 outline-none transition-colors hover:bg-white/[0.08] hover:text-white/90 focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-white/40"
+                    @click="rerollSeed">
+              <Dice5 class="size-3.5" />
+            </button>
+          </div>
         </div>
       </StudioSection>
 

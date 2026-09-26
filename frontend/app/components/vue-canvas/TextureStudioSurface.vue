@@ -336,7 +336,7 @@ const promptLabel = computed(() => {
 })
 const inspectorActions = computed(() => studioActions({
   place: 'texture', canTakes: false,
-  local: [{ id: 'roll', label: 'Roll', group: 'develop', ai: false, lands: null, run: { call: roll } }],
+  local: [{ id: 'roll', label: 'New variation', description: 'Same pattern, a new random seed', ai: false, lands: null, run: { call: roll } }],
 }))
 function onParam() {
   if (String(params.mode) === 'raster' && params.rasterSrc && !getRaster(String(params.rasterSrc))) {

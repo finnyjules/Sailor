@@ -89,7 +89,7 @@ const layerNames = computed(() => layerLabels(config.value))
 const promptLabel = computed(() => layerNames.value[activeLayer.value] ?? 'Gradient')
 const inspectorActions = computed(() => studioActions({
   place: 'gradient', canTakes: true,
-  local: [{ id: 'randomize', label: 'Randomize', group: 'develop', ai: false, lands: null, run: { call: () => randomize('all') } }],
+  local: [{ id: 'randomize', label: 'Randomize', description: 'A random new gradient, no AI', ai: false, lands: null, run: { call: () => randomize('all') } }],
 }))
 
 // Inspector tabs — Design (everything that shapes the still frame) vs Motion (tracks

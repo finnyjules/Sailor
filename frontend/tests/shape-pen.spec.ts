@@ -103,10 +103,10 @@ test('a Drawn shape is drawn with the shared pen, arranged by the studio, and th
     .toBeGreaterThanOrEqual(10)
   const before = JSON.stringify((await markOf(page)).sketch)
   const actionRows = page.locator('[data-testid="studio-action-row"]')
-  expect(await actionRows.count()).toBeGreaterThan(0)   // Tune…, Vary, Re-roll when the pen is closed
+  expect(await actionRows.count()).toBeGreaterThan(0)   // Try other settings, Randomize when the pen is closed
 
   // Edit it again. Nothing else edits the layer while the pen is open: no action rows
-  // (Tune…, Vary, Re-roll), the rail shut to pointer AND keyboard, the Shape rows locked.
+  // (Try other settings, Randomize), the rail shut to pointer AND keyboard, the Shape rows locked.
   await page.getByTestId('shape-draw').click()
   await expect(page.locator('[data-tool="path"]')).toBeVisible()
   await expect(page.getByTestId('shape-rail-lock')).toBeVisible()

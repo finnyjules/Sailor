@@ -235,13 +235,13 @@ function layerLabel(i: number): string {
 }
 const railLayers = computed(() => doc.value.layers.map((l, i) => ({ label: layerLabel(i), enabled: l.enabled })))
 // The prompt's chip and the inspector head both name the selected layer, as the
-// rail labels it. Re-roll re-seeds that layer's mark, so it needs a selection.
+// rail labels it. Randomize re-seeds that layer's mark, so it needs a selection.
 const promptLabel = computed(() => (isSelected.value ? layerLabel(activeLayer.value) : 'Shape'))
-// Nothing else edits the layer while the pen is open: no Tune, Vary (a paid agent call
-// whose takes would patch the mark mid-session) or Re-roll.
+// Nothing else edits the layer while the pen is open: no Try other settings (a paid agent
+// call whose takes would patch the mark mid-session) or Randomize.
 const inspectorActions = computed(() => (penSession.value ? [] : studioActions({
   place: 'shape', canTakes: true,
-  local: isSelected.value ? [{ id: 'reroll', label: 'Re-roll', group: 'develop', ai: false, lands: null, run: { call: rerollConfig } }] : [],
+  local: isSelected.value ? [{ id: 'reroll', label: 'Randomize', description: 'Random new settings, locked sections stay', ai: false, lands: null, run: { call: rerollConfig } }] : [],
 })))
 
 // Click a row to select it; click the ALREADY-active row again to deselect → the
@@ -700,10 +700,10 @@ async function exportSvg() {
     </template>
     <template #controls>
       <StudioInspectorHead :title="promptLabel" />
-      <StudioActionRows :actions="inspectorActions" />
+      <StudioActionRows v-if="!penSession" :actions="inspectorActions" />
       <!-- ══ A LAYER IS SELECTED → edit that layer's mark ══ -->
       <template v-if="isSelected">
-        <!-- Seed of the selected layer's mark (Re-roll is an action row above). -->
+        <!-- Seed of the selected layer's mark (Randomize is an action row above). -->
         <div class="flex items-center justify-between rounded-lg border border-white/[0.07] bg-white/[0.03] px-3 py-2.5">
           <div class="flex flex-col">
             <span class="text-[10px] uppercase tracking-wide text-white/30">Seed · {{ layerLabel(activeLayer) }}</span>

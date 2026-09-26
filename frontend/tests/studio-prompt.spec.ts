@@ -135,7 +135,7 @@ test.describe('the one prompt in studios', () => {
     await expect(page.getByTestId('prompt-takes')).toHaveCount(0)
   })
 
-  test('Shader: Remix… sets a priced mode chip, and sending writes three effect takes above the prompt, with no router call', async ({ page }) => {
+  test('Shader: Rewrite the effect sets a priced mode chip, and sending writes three effect takes above the prompt, with no router call', async ({ page }) => {
     const routed = await mockRouter(page, 'tweak')
     const vibe = await mockVibe(page)
     // /api/shader-gen answers each take with the spike's hand-written rain take (no model is reached).
@@ -152,8 +152,9 @@ test.describe('the one prompt in studios', () => {
       await r.fulfill({ json: { effects: [] } })
     })
     await openStudio(page, 'ShaderStudio', 'sailor:openShaderStudio')
-    const remix = page.getByTestId('studio-inspector-head').locator('[data-testid="studio-action-row"][data-action-id="remix"]')
-    await expect(remix).toContainText('3 takes · ~$0.24–0.42')
+    const remix = page.getByTestId('studio-actions').locator('[data-testid="studio-action-row"][data-action-id="remix"]')
+    await expect(remix).toContainText('Rewrite the effect')
+    await expect(remix.getByTestId('studio-action-price')).toHaveText('~$0.24–0.42')
     await remix.click()
     await expect(page.getByTestId('prompt-mode-chip')).toContainText('Remix')
     // The chip carries the price before anything runs.
@@ -185,6 +186,7 @@ test.describe('the one prompt in studios', () => {
     const layerRows = () => page.getByRole('button', { name: 'Toggle layer' }).count()
     const before = await layerRows()
     await page.getByRole('button', { name: 'Add layer' }).click()
+    await expect(page.getByTestId('shader-add-layer-menu')).toHaveCount(0) // the + menu stays shut while a set is open
     expect(await layerRows()).toBe(before)
     // × puts the effect back, saves nothing, and hands the controls back.
     await strip.getByRole('button', { name: 'Close takes' }).click()
@@ -194,15 +196,81 @@ test.describe('the one prompt in studios', () => {
     await expect(changeEffect).toBeEnabled()
   })
 
-  test('Shader: inspector reads the thing, then Edit and Develop rows', async ({ page }) => {
+  test('Shader: the head names the effect; two AI rows with a description and a price; the hint; the dice; the Layers + menu', async ({ page }) => {
     await openStudio(page, 'ShaderStudio', 'sailor:openShaderStudio')
-    // The head's bare Remix row is also a `studio-actions` list; pick the one with headings.
-    const actions = page.getByTestId('studio-actions').filter({ has: page.getByRole('heading', { name: 'Edit' }) })
-    await expect(actions.getByRole('heading', { name: 'Edit' })).toBeVisible()
-    await expect(actions.getByRole('heading', { name: 'Develop' })).toBeVisible()
-    await expect(actions.getByTestId('studio-action-row').filter({ hasText: 'Vary' })).toContainText('3 takes')
-    // The head (the thing itself) comes before the action rows.
-    await expectAbove(page.getByTestId('studio-inspector-head').getByRole('button', { name: 'Change effect' }), actions)
+    const head = page.getByTestId('studio-inspector-head')
+    const changeEffect = head.getByRole('button', { name: 'Change effect' })
+    await expect(changeEffect).toBeEnabled()
+    // Pick an effect from the gallery: the head then names it.
+    await changeEffect.click()
+    const gallery = page.getByTestId('effect-gallery')
+    const card = gallery.locator('[data-effect-id="water_ripple"]')
+    const picked = (await card.locator('.truncate').first().innerText()).trim()
+    await card.click()
+    await gallery.getByRole('button', { name: 'Use effect' }).click()
+    await expect(page.getByTestId('effect-gallery')).toHaveCount(0)
+    await expect(head.getByTestId('studio-inspector-title')).toHaveText(picked)
+    // Change effect sits on the title's own row.
+    const t = (await head.getByTestId('studio-inspector-title').boundingBox())!
+    const c = (await changeEffect.boundingBox())!
+    expect(Math.abs((t.y + t.height / 2) - (c.y + c.height / 2))).toBeLessThan(12)
+    const actions = page.getByTestId('studio-actions')
+    await expect(actions.getByRole('heading')).toHaveCount(0)
+    const rows = actions.getByTestId('studio-action-row')
+    await expect(rows).toHaveCount(2)
+    await expect(rows.nth(0).getByTestId('studio-action-name')).toHaveText('Try other settings')
+    await expect(rows.nth(0).getByTestId('studio-action-description')).toHaveText('Same effect, 3 new sets of dial values')
+    await expect(rows.nth(0).getByTestId('studio-action-price')).toHaveText('~$0.01–0.03')
+    await expect(rows.nth(1).getByTestId('studio-action-name')).toHaveText('Rewrite the effect')
+    await expect(rows.nth(1).getByTestId('studio-action-description')).toHaveText('3 new versions of the code itself')
+    await expect(rows.nth(1).getByTestId('studio-action-price')).toHaveText('~$0.24–0.42')
+    // Names fit: never cut.
+    for (const i of [0, 1]) {
+      const fits = await rows.nth(i).getByTestId('studio-action-name').evaluate(el => el.scrollWidth <= el.clientWidth + 1)
+      expect(fits).toBe(true)
+    }
+    await expect(actions.getByTestId('studio-actions-hint')).toHaveText('Or type what you want in the prompt below')
+    await expect(actions).not.toContainText('Tune')
+    await expect(actions).not.toContainText('New variation')
+    await expect(actions).not.toContainText('New layer')
+    await expectAbove(changeEffect, actions)
+
+    // The screenshot for Julien: the inspector's top, head to the Source card.
+    const shot = process.env.SAILOR_INSPECTOR_SHOT
+    if (shot) {
+      const top = (await head.boundingBox())!
+      const source = (await page.locator('summary').filter({ hasText: 'Source' }).first().boundingBox())!
+      const col = (await actions.boundingBox())!
+      await page.screenshot({ path: shot, clip: { x: col.x - 16, y: top.y - 16, width: col.width + 32, height: source.y + source.height + 110 - (top.y - 16) } })
+    }
+
+    // New variation is the dice on the Variation dial: a fresh seed.
+    const seed = page.getByRole('slider', { name: 'Variation' })
+    const before = await seed.getAttribute('aria-valuenow')
+    let changed = false
+    for (let i = 0; i < 3 && !changed; i++) {
+      await page.getByRole('button', { name: 'New variation' }).click()
+      changed = (await seed.getAttribute('aria-valuenow')) !== before
+    }
+    expect(changed).toBe(true)
+
+    // Describe a new layer lives in the Layers + menu, starred and priced; it sets the New effect chip.
+    await page.getByRole('button', { name: 'Add layer' }).click()
+    const menu = page.getByTestId('shader-add-layer-menu')
+    await expect(menu).toBeVisible()
+    const describe = menu.locator('[data-action-id="new-layer"]')
+    await expect(describe.getByTestId('studio-action-name')).toHaveText('Describe a new layer')
+    await expect(describe.getByTestId('studio-action-price')).toHaveText('~$0.24–0.42')
+    await describe.click()
+    await expect(menu).toHaveCount(0)
+    await expect(page.getByTestId('prompt-mode-chip')).toContainText('New effect')
+    await expect(prompt(page)).toBeFocused()
+    // The other item adds an empty layer, as + used to.
+    const layerRows = () => page.getByRole('button', { name: 'Toggle layer' }).count()
+    const n = await layerRows()
+    await page.getByRole('button', { name: 'Add layer' }).click()
+    await menu.locator('[data-action-id="empty-layer"]').click()
+    await expect.poll(layerRows).toBe(n + 1)
   })
 
   test('Space type: the transport is in the tool bar and a request comes back as a proposed change', async ({ page }) => {

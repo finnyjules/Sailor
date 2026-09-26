@@ -23,7 +23,7 @@ describe('studio effect targets', () => {
     // dials (the whole layer section), the centre handle and the effect picker
     expect(s).toMatch(/data-testid="shader-studio-layer-controls"[\s\S]{0,200}:inert="layerReadOnly/)
     expect(s).toMatch(/v-if="showMaskHandles && !layerReadOnly"/)
-    expect(s).toMatch(/<StudioButton :disabled="layerReadOnly" @click="openPicker">/)
+    expect(s).toMatch(/<StudioButton :disabled="layerReadOnly" @click="openPicker"[^>]*>/)
     for (const fn of ['setParam', 'setMask', 'openPicker', 'pickEffect', 'pickEffectLook', 'onMaskDown'])
       expect(s).toMatch(new RegExp(`function ${fn}[^{]*\\{[\\s\\S]{0,80}if \\(layerReadOnly\\.value\\) return`))
     // Fix round 1, #1 (task-11-review): the Recipe's version chips/rename/remove are a

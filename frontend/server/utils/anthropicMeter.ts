@@ -20,9 +20,11 @@ import { currentMeterContext, getLedger, holdOrRefuse, MeterRefusalError } from 
 import { assertSpendAllowed } from './systemControls'
 import { captureError } from './observe'
 import { creditsForUsd, usdForUsage, type AnthropicUsage } from './anthropicPrices'
+import { ASSIST_CALL_CREDITS } from '../../shared/pricing/anthropicTokens'
 
-// Flat rate — covers ~$0.01 median at 2x markup; per-token metering is noise at this price
-export const ANTHROPIC_ASSIST_CREDITS = 2
+// Flat rate — covers ~$0.01 median at 2x markup; per-token metering is noise at this price.
+// The number lives in shared/pricing/anthropicTokens.ts so the client quotes the same one.
+export const ANTHROPIC_ASSIST_CREDITS = ASSIST_CALL_CREDITS
 
 /**
  * Call after a route's auth/rate-limit section, before its Anthropic fetch.

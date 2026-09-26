@@ -188,7 +188,7 @@ test.describe('shader generation (stage 5)', () => {
   test('Shader studio: Remix shows its price, effects land one by one, hover previews, Keep saves to My effects', async ({ page }) => {
     const gen = await mockShaderGen(page); const store = await mockMyEffects(page); const routed = await mockRouter(page)
     await openShaderStudio(page)
-    await page.getByTestId('studio-inspector-head').locator('[data-testid="studio-action-row"][data-action-id="remix"]').click()
+    await page.getByTestId('studio-actions').locator('[data-testid="studio-action-row"][data-action-id="remix"]').click()
     await expect(page.getByTestId('prompt-mode-chip')).toContainText('Remix')
     await expect(page.getByTestId('studio-prompt').getByTestId('prompt-note')).toHaveText(PRICE)
     await prompt(page).fill('rain on a window'); await prompt(page).press('Enter')
@@ -239,7 +239,8 @@ test.describe('shader generation (stage 5)', () => {
   test('no source picture: the request asks for a standalone effect, and a kept take that reads its input still shows, over the sample picture', async ({ page }) => {
     const gen = await mockShaderGen(page, [100, 200, 300], READS_INPUT_TAKES); const store = await mockMyEffects(page); await mockRouter(page)
     await openShaderStudio(page)
-    await page.getByTestId('studio-actions').getByTestId('studio-action-row').filter({ hasText: 'New layer from a description' }).click()
+    await page.getByRole('button', { name: 'Add layer' }).click()
+    await page.getByTestId('shader-add-layer-menu').locator('[data-action-id="new-layer"]').click()
     await expect(page.getByTestId('prompt-mode-chip')).toContainText('New effect')
     await prompt(page).fill('prism light'); await prompt(page).press('Enter')
     const strip = page.getByTestId('prompt-takes')
@@ -276,7 +277,8 @@ test.describe('shader generation (stage 5)', () => {
     const gen = await mockShaderGen(page, [100, 200, 300], [[raw[0]!, S.lava![0]!], [raw[1]!, S.lava![1]!], [raw[2]!, S.lava![2]!]])
     await mockMyEffects(page); await mockRouter(page)
     await openShaderStudio(page)
-    await page.getByTestId('studio-actions').getByTestId('studio-action-row').filter({ hasText: 'New layer from a description' }).click()
+    await page.getByRole('button', { name: 'Add layer' }).click()
+    await page.getByTestId('shader-add-layer-menu').locator('[data-action-id="new-layer"]').click()
     await prompt(page).fill('molten wax'); await prompt(page).press('Enter')
     await expect(page.getByTestId('prompt-takes')).toBeVisible({ timeout: 20_000 })
     await expect(tileIn(page, 'pending')).toHaveCount(0, { timeout: 60_000 })
@@ -309,7 +311,8 @@ test.describe('shader generation (stage 5)', () => {
     const warnings: string[] = []
     page.on('console', (m) => { if (m.type() === 'warning' && m.text().includes('[shader-gen]')) warnings.push(m.text()) })
     await openShaderStudio(page)
-    await page.getByTestId('studio-actions').getByTestId('studio-action-row').filter({ hasText: 'New layer from a description' }).click()
+    await page.getByRole('button', { name: 'Add layer' }).click()
+    await page.getByTestId('shader-add-layer-menu').locator('[data-action-id="new-layer"]').click()
     await prompt(page).fill('make it loop'); await prompt(page).press('Enter')
     await expect(page.getByTestId('prompt-takes')).toBeVisible({ timeout: 20_000 })
     await expect(tileIn(page, 'pending')).toHaveCount(0, { timeout: 60_000 })
@@ -391,7 +394,8 @@ test.describe('shader generation (stage 5)', () => {
     await openShaderStudio(page)
     const layerRows = () => page.getByRole('button', { name: 'Toggle layer' }).count()
     const before = await layerRows()
-    await page.getByTestId('studio-actions').getByTestId('studio-action-row').filter({ hasText: 'New layer from a description' }).click()
+    await page.getByRole('button', { name: 'Add layer' }).click()
+    await page.getByTestId('shader-add-layer-menu').locator('[data-action-id="new-layer"]').click()
     await expect(page.getByTestId('prompt-mode-chip')).toContainText('New effect')
     await prompt(page).fill('ink on paper'); await prompt(page).press('Enter')
     // Partial: the fast slot has settled (landed, or given up after its second try), the rest are working.
