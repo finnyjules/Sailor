@@ -33,6 +33,88 @@ export interface EffectSpec {
 
 const tone = (name: string, prepare?: EffectSpec['prepare']): EffectSpec => ({ family: 'effects-tone', op: `tone.${name}`, batch: 'pure', ...(prepare ? { prepare } : {}) })
 
+// ── effects-blur (R2.5): the work each asks for (rule 7) ──
+//
+// work = pixels × channels × taps, at the size where the taps are worked
+// (a blur past its downsampling threshold works on the smaller copy), in
+// the units of EFFECT_MAX_WORK (0.37 × 10⁹ a second). The header can't
+// tell 3 channels from 4, so every picture counts 4. Taps: a gaussian
+// 2·ksize (separable), a motion line or Bokeh's disk its kernel's area, a
+// Sobel 9 per kernel, a bilinear resize back up 4, a zoom 12 samples of 6.
+// Outline works on the luma alone: two Sobels, its max-pool window and its
+// per-pixel steps. Sparkle: its 9 × 9 peak pool over the luma, and max_n ·
+// ks² for the star stamped at every kept peak (the number of kept peaks,
+// not a per-pixel count).
+//
+// Measured on the development Mac (R2.5 report, 1024² × 4 in this thread):
+// the separable gaussian runs at 0.8 × 10⁹ taps a second, well inside the
+// unit; a direct convolution (kernels.ts correlate: a bounds check each
+// tap) at 0.30–0.35 × 10⁹, so its taps count CONV_TAP = 1.5; a zoom sample
+// (affine_grid + grid_sample) costs about 5 units a value, counted 6; the
+// small Sobel and relief kernels carry a per-value overhead (the map passes
+// around them) on top.
+
+/** Channels counted per picture: the most a picture holds. */
+const WORK_CHANNELS = 4
+/** A direct convolution's tap, in gaussian-pass taps (measured, above). */
+const CONV_TAP = 1.5
+type Size = { w: number; h: number } | null
+const px = (s: Size) => (s ? s.w * s.h : 0)
+/** The nodes' gaussian width, 2·ceil(3σ) + 1. */
+const ksizeOf = (sigma: number) => 2 * Math.ceil(3 * sigma) + 1
+/** Pixels after an area resize by 1 / scale. */
+const smallPx = (s: Size, scale: number) => (s ? Math.floor(s.h * (1 / scale)) * Math.floor(s.w * (1 / scale)) : 0)
+/** A gaussian blur at `sigma` on `pixels` pixels. */
+const gaussWork = (pixels: number, sigma: number) => pixels * WORK_CHANNELS * 2 * ksizeOf(sigma)
+/** A blur past its threshold (Blur's gaussian, TiltShift): downsampled by max(1, int(r / 4)), then back up. */
+function scaledGaussWork(s: Size, radius: number, always = false): number {
+  const scale = Math.max(1, Math.trunc(radius / 4))
+  const up = scale > 1 || always ? px(s) * WORK_CHANNELS * 4 : 0
+  return gaussWork(scale > 1 || always ? smallPx(s, scale) : px(s), radius / scale) + up
+}
+const num = (w: Record<string, unknown>, k: string) => (typeof w[k] === 'number' ? w[k] as number : 0)
+/** Python's round() of a float (half to even). */
+const pyRound = (x: number) => { const r = Math.round(x); return r - x === 0.5 && r % 2 !== 0 ? r - 1 : r }
+
+const blur = (name: string, work: NonNullable<EffectSpec['work']>, prepare?: EffectSpec['prepare']): EffectSpec =>
+  ({ family: 'effects-blur', op: `blur.${name}`, batch: 'pure', work, ...(prepare ? { prepare } : {}) })
+
+/** Blur's work by its type. */
+function blurWork(w: Record<string, unknown>, s: Size): number {
+  if (w.type === 'gaussian' && num(w, 'radius') > 0) return scaledGaussWork(s, num(w, 'radius'))
+  if (w.type === 'motion' && num(w, 'length') > 0) {
+    const length = pyRound(num(w, 'length'))
+    const scale = Math.max(1, Math.trunc(length / 8))
+    const line = scale > 1 ? Math.max(2, pyRound(length / scale)) : length
+    const side = line <= 1 ? 1 : line % 2 === 1 ? line : line + 1
+    return (scale > 1 ? smallPx(s, scale) : px(s)) * WORK_CHANNELS * side * side * CONV_TAP + (scale > 1 ? px(s) * WORK_CHANNELS * 4 : 0)
+  }
+  if (w.type === 'zoom' && num(w, 'strength') > 0) return px(s) * WORK_CHANNELS * 12 * 6
+  return 0
+}
+
+/** Bokeh's work: its disk over the (downsampled) picture, and the resize back. */
+function bokehWork(w: Record<string, unknown>, s: Size): number {
+  const radius = num(w, 'radius')
+  if (radius <= 0) return 0
+  const scale = Math.max(1, Math.trunc(radius / 5))
+  const side = 2 * Math.ceil(radius / scale) + 1
+  return (scale > 1 ? smallPx(s, scale) : px(s)) * WORK_CHANNELS * side * side * CONV_TAP + (scale > 1 ? px(s) * WORK_CHANNELS * 4 : 0)
+}
+
+/** Sparkle's work: the peak pool, and the star stamped at up to max_n peaks. */
+function sparkleWork(w: Record<string, unknown>, s: Size): number {
+  const maxN = Math.max(1, Math.trunc(num(w, 'max_density') * (s?.h ?? 0) * (s?.w ?? 0)))
+  const ks = Math.trunc(num(w, 'size')) * 2 + 1
+  return px(s) * 81 + Math.min(maxN, px(s)) * ks * ks
+}
+
+/** Outline's work: two Sobels and its max-pool window, on the luma. */
+function outlineWork(w: Record<string, unknown>, s: Size): number {
+  const k = Math.max(1, pyRound(num(w, 'thickness')))
+  return px(s) * (2 * 9 * CONV_TAP + (k > 1 ? (2 * k + 1) ** 2 : 0) + 10)
+}
+
 export const EFFECTS: Readonly<Record<string, EffectSpec>> = {
   // ── effects-tone (R2.1 pilots): per pixel, exact ──
   AdjustExposure: { family: 'effects-tone', op: 'tone.AdjustExposure', batch: 'pure' },
@@ -68,6 +150,20 @@ export const EFFECTS: Readonly<Record<string, EffectSpec>> = {
   Blinds: tone('Blinds'),
   CrossHatch: tone('CrossHatch'),
   Dither: tone('Dither'),
+  // ── effects-blur (R2.5): convolution, library ──
+  Sharpen: blur('Sharpen', (w, s) => (num(w, 'amount') === 0 ? 0 : gaussWork(px(s), num(w, 'radius')))),
+  Denoise: blur('Denoise', (w, s) => (num(w, 'strength') <= 0 ? 0 : gaussWork(px(s), num(w, 'strength')))),
+  AdjustGlow: blur('AdjustGlow', (w, s) => (num(w, 'intensity') <= 0 || num(w, 'radius') <= 0 ? 0 : scaledGaussWork(s, num(w, 'radius'), true))),
+  HighPass: blur('HighPass', (w, s) => gaussWork(px(s), num(w, 'radius'))),
+  Emboss: blur('Emboss', (_w, s) => px(s) * WORK_CHANNELS * (9 * CONV_TAP + 4)),
+  FindEdges: blur('FindEdges', (_w, s) => px(s) * WORK_CHANNELS * (2 * 9 * CONV_TAP + 4)),
+  Blur: blur('Blur', blurWork),
+  Bokeh: blur('Bokeh', bokehWork),
+  TiltShift: blur('TiltShift', (w, s) => scaledGaussWork(s, num(w, 'blur'))),
+  FrequencySeparation: blur('FrequencySeparation', (w, s) => gaussWork(px(s), num(w, 'radius'))),
+  HeightmapRelief: blur('HeightmapRelief', (_w, s) => px(s) * (2 * 9 * CONV_TAP + 20)),
+  Outline: blur('Outline', outlineWork, w => ({ ...w, line: hexToRgb(String(w.line_color), [0, 0, 0]), fill: hexToRgb(String(w.fill_color), [1, 1, 1]) })),
+  Sparkle: blur('Sparkle', sparkleWork),
 }
 
 /** The runner's spec for an effect class, or undefined when the class is not an effect it ports. */

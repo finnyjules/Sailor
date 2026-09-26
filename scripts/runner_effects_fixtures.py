@@ -39,6 +39,19 @@ Groups:
               exact effect into a Frame. An exact class's outputs are
               sha256s; a library class (TONE_LIBRARY_EPS) also keeps its
               small floats (zlib) and its hashed bands at its own ε.
+  blur      — (R2.5) the 13 blur and convolution effects over the standard
+              case set, plus: radii at the downsampling thresholds; the
+              largest radii on pictures too small for their padding (and an
+              area resize down to nothing); Blur's motion at four angles and
+              five lengths, and its zoom; FrequencySeparation's three
+              previews; Sparkle with more peaks than it keeps, tied lumas
+              included; `_motion_kernel` on its own; one effect into a Frame.
+              Every class is library (BLUR_LIBRARY_EPS): each output keeps
+              its sha256s, a small one its float32 (zlib), a hashed one its
+              band at the class's ε; the preview tensor is kept the same way
+              when it isn't the first output. Where Sparkle's topk had values
+              tied at its cut, the case also records what the node makes with
+              the lower index kept first among them (the runner's topk).
 
 Every picture reaches a node as it does in a real run, through the real
 Python loader of its source (as scripts/compositor_fixtures.py):
@@ -1212,7 +1225,260 @@ def tone() -> dict:
             "library_eps": TONE_LIBRARY_EPS, "stops": stops, "duotone": duo, "hex": hexes, "nesting": nesting, "frame": frame}
 
 
-GROUPS = {"machinery": machinery, "kernels": kernels, "rng": rng, "tone": tone}
+# ── Group `blur` (R2.5): the blur and convolution effects ─────────────────
+
+# (module, node_id) of the 13 classes R2.5 ports.
+BLUR_CLASSES = [
+    ("nodes_sharpen_noise", "Sharpen"), ("nodes_sharpen_noise", "Denoise"), ("nodes_tone_extras", "AdjustGlow"),
+    ("nodes_stylize", "HighPass"), ("nodes_stylize", "Emboss"), ("nodes_stylize", "FindEdges"), ("nodes_blur", "Blur"),
+    ("nodes_glsl_lens", "Bokeh"), ("nodes_glsl_lab", "TiltShift"), ("nodes_glsl_lab", "FrequencySeparation"),
+    ("nodes_glsl_lab", "HeightmapRelief"), ("nodes_glsl_unicorn", "Outline"), ("nodes_glsl_unicorn", "Sparkle"),
+]
+
+# Every class is library (conv2d or a transcendental function). Each ε (255-scale; R2 rule 10: at
+# most 2⁻⁸) is at least twice the worst |Δ| measured against the TypeScript port over this group
+# (R2.5 report); tests/unit/runner-effects-blur.unit.spec.ts holds the same table. A hashed case's
+# band (and a kept preview's) is recorded at its class's ε.
+BLUR_LIBRARY_EPS = {
+    "Sharpen": 2.0 ** -8, "Denoise": 2.0 ** -8, "AdjustGlow": 2.0 ** -8, "HighPass": 2.0 ** -8, "Emboss": 2.0 ** -8,
+    "FindEdges": 2.0 ** -8, "Blur": 2.0 ** -8, "Bokeh": 2.0 ** -8, "TiltShift": 2.0 ** -8, "FrequencySeparation": 2.0 ** -8,
+    "HeightmapRelief": 2.0 ** -8, "Outline": 2.0 ** -8, "Sparkle": 2.0 ** -8,
+}
+
+
+def record_blur_preview(t: torch.Tensor, hashed: bool, eps: float) -> dict:
+    """The tensor a node handed save_live_preview, when it isn't its first output's first picture
+    (FrequencySeparation's high or side-by-side preview): as record_tone_output keeps a library item."""
+    return record_tone_output(t[:1] if t.dim() == 4 else t[None], hashed, eps)["items"][0]
+
+
+class BlurGroup(Group):
+    """The blur group's cases: outputs as record_tone_output keeps a library class's, the preview
+    file as a sha256 and, when it isn't output 0's first picture, its tensor too. Sparkle's topk is
+    watched: where values tied at its cut, the case also records what the node makes with the lower
+    index first among them (`stable`), and both kept sets."""
+
+    def case(self, name: str, cls, class_type: str, widgets: dict, inputs: dict, hashed: bool = False) -> None:
+        import sys
+        from unittest import mock
+        self.seq += 1
+        node_id = f"fx{self.seq}"
+        tensors = {}
+        for key, (source, files) in inputs.items():
+            tensors[key] = load("blank", None, None) if source == "blank" else torch.cat([load(source, f, self.assets[f]) for f in files], dim=0)
+        row: dict = {"name": name, "class_type": class_type, "node_id": node_id, "widgets": widgets,
+                     "inputs": {k: {"source": s, "files": list(f)} for k, (s, f) in inputs.items()}}
+        if hashed:
+            row["hashed"] = True
+        eps = BLUR_LIBRARY_EPS[class_type]
+        mod = sys.modules[cls.__module__]
+        real_preview = mod.save_live_preview
+        shown: list = []
+        chosen: list = []
+        real_topk = torch.topk
+
+        def preview(t, *a, **k):
+            shown.append(t)
+            return real_preview(t, *a, **k)
+
+        def topk(x, k, dim=-1, *a, **kw):
+            r = real_topk(x, k, dim, *a, **kw)
+            chosen.append((x.clone(), k, r.values.clone(), r.indices.clone()))
+            return r
+        try:
+            with mock.patch.object(mod, "save_live_preview", preview), mock.patch.object(torch, "topk", topk):
+                outs, ui = run_node(cls, node_id, **tensors, **widgets)
+        except Exception as e:  # Python raises: the runner's plain message is checked against it
+            row["error"] = {"type": type(e).__name__, "message": str(e)}
+            self.cases.append(row)
+            return
+        row["outputs"] = [record_tone_output(t, hashed, eps) for t in outs]
+        row["ui"] = {"images": ui["images"], "animated": list(ui["animated"])}
+        row["preview"] = read_preview(ui, True)
+        if not torch.equal(shown[0][0], outs[0][0]):
+            row["preview"]["tensor"] = record_blur_preview(shown[0], hashed, eps)
+        if chosen:
+            row["peaks"] = self.sparkle_peaks(cls, node_id, tensors, widgets, chosen[0], hashed, eps, row)
+        self.cases.append(row)
+
+    def sparkle_peaks(self, cls, node_id, tensors, widgets, chosen, hashed, eps, row) -> list:
+        """Sparkle's kept peaks per picture: torch's, and the lower-index-first choice (the
+        runner's) among values tied at the cut; where they differ, the node's outputs with that
+        choice (`stable_outputs`)."""
+        from unittest import mock
+        flat, k, values, indices = chosen
+        thr = torch.tensor(widgets["threshold"], dtype=flat.dtype)
+        out = []
+        differs = False
+        for b in range(flat.shape[0]):
+            got = sorted(int(i) for i, v in zip(indices[b].tolist(), values[b]) if v > thr)
+            order = torch.sort(flat[b], descending=True, stable=True).indices[:k]
+            stable = sorted(int(i) for i in order.tolist() if flat[b, i] > thr)
+            cut = float(values[b, -1]) if k > 0 else None
+            tied = int((flat[b] == values[b, -1]).sum()) if k > 0 else 0
+            out.append({"torch": got, "stable": stable, "cut": cut, "tied_at_cut": tied})
+            differs = differs or got != stable
+        if differs:
+            real_topk = torch.topk
+
+            def stable_topk(x, k, dim=-1, *a, **kw):
+                s = torch.sort(x, dim=dim, descending=True, stable=True)
+                return torch.return_types.topk((s.values.narrow(dim, 0, k), s.indices.narrow(dim, 0, k)))
+            with mock.patch.object(torch, "topk", stable_topk):
+                outs, _ui = run_node(cls, node_id + "s", **tensors, **widgets)
+            assert real_topk is torch.topk
+            row["stable_outputs"] = [record_tone_output(t, hashed, eps) for t in outs]
+        return out
+
+    def dots(self, name: str, w: int, h: int, spots: list) -> str:
+        """A dark RGB picture with bright one-pixel spots [(x, y, (r, g, b)), …] (an asset of its own name)."""
+        px = np.full((h, w, 3), 12, dtype=np.uint8)
+        for x, y, rgb in spots:
+            px[y, x] = rgb
+        buf = io.BytesIO()
+        PILImage.fromarray(px, "RGB").save(buf, format="PNG")
+        self.assets.setdefault(name, buf.getvalue())
+        return name
+
+
+# Blur's motion angles and lengths (R2.5 brief), and `_motion_kernel` on its own over every
+# length a case reaches (a length past 8 works on a copy at 1 / int(length / 8)).
+BLUR_MOTION_ANGLES = [0.0, 33.0, 90.0, 271.0]
+BLUR_MOTION_LENGTHS = [1.0, 2.0, 15.0, 16.0, 80.0]
+BLUR_KERNEL_ANGLES = [0.0, 33.0, 45.0, 90.0, 133.2, 180.0, 271.0, 360.0]
+
+
+def blur_frame_chain(g: Group, cls, class_type: str, widgets: dict, file: str) -> dict:
+    """A blur effect on a see-through card picture (4 channels) into a Frame's layer 1, as
+    tone_frame_chain; the Frame's float32 is kept too (zlib), so the spec can put a band on the
+    8-bit result (the effect is library)."""
+    from unittest import mock
+    from comfy_api.latest._io import HiddenHolder
+    import comfy_extras.nodes_compositor as nc
+    x = load("card", file, g.assets[file])
+    g.seq += 1
+    node_id = f"fx{g.seq}"
+    outs, _ui = run_node(cls, node_id, image=x, **widgets)
+    frame = {"layer1_x": 0.0, "layer1_y": 0.0, "layer1_rotation": 10.0, "layer1_scale": 0.8, "layer1_opacity": 1.0,
+             "layer1_blend": "normal", "layer1_z": 1.0, "layer1_protect": False, "layer1_cloner": "",
+             "width": 0, "height": 0, "motion_params": ""}
+    previews = []
+    with mock.patch.object(nc.CompositorNode, "hidden", HiddenHolder.from_dict({"UNIQUE_ID": "frame"})), \
+            mock.patch.object(nc, "save_live_preview", lambda t, *_a, **_k: previews.append(t) or {}):
+        res = nc.CompositorNode.execute(layer1=outs[0], **frame)
+    image = res.result[0]
+    assert previews and previews[0] is image
+    f32 = image[0].contiguous().cpu().numpy().astype("<f4").tobytes()
+    return {"name": f"{class_type} → Frame, card", "inputs": {"image": {"source": "card", "files": [file]}},
+            "effect": {"class_type": class_type, "node_id": node_id, "widgets": widgets},
+            "frame": {"widgets": frame, "w": int(image.shape[2]), "h": int(image.shape[1]), "c": int(image.shape[3]),
+                      "image8": b64(trunc8(image[0]).tobytes()), "f32z": b64(zlib.compress(f32, 9))}}
+
+
+def blur() -> dict:
+    import comfy_extras.nodes_blur as nb
+    g = BlurGroup()
+    classes = {node_id: node_class(module, node_id) for module, node_id in BLUR_CLASSES}
+    for node_id, cls in classes.items():
+        standard_cases(g, cls, node_id)
+    rgb, card4, card3, prov = g.picture(37, 23, 3, 1), g.picture(23, 19, 4, 3), g.picture(23, 19, 3, 4), g.picture(29, 31, 4, 2)
+    mid = g.picture(80, 60, 3, 11)
+    tiny = g.picture(5, 4, 4, 8)
+    four = (("rgb 37×23", "rgb", rgb), ("provider 29×31", "provider", prov), ("card 23×19 see-through", "card", card4), ("card 23×19 opaque", "card", card3))
+    defaults = {node_id: widget_settings(cls)[0] for node_id, cls in classes.items()}
+
+    def run(cls_name: str, label: str, over: dict, pics, hashed: bool = False) -> None:
+        for pname, source, file in pics:
+            g.case(f"{cls_name}: {label}, {pname}", classes[cls_name], cls_name, {**defaults[cls_name], **over}, {"image": (source, [file])}, hashed=hashed)
+
+    # Every numeric widget "between" at once (the standard set moves one at a time).
+    for node_id, cls in classes.items():
+        _d, settings = widget_settings(cls)
+        mixed = dict(defaults[node_id])
+        for label, over in settings:
+            if " between (" in label:
+                mixed.update(over)
+        run(node_id, "every setting between", {k: v for k, v in mixed.items() if k not in defaults[node_id] or v != defaults[node_id][k]},
+            (("rgb 37×23", "rgb", rgb), ("card 23×19 see-through", "card", card4)))
+    # Radii at the downsampling thresholds, on a picture large enough for the small copy's blur.
+    at80 = (("rgb 80×60", "rgb", mid), ("rgb 37×23", "rgb", rgb))
+    for r in (3.5, 4.0, 7.9, 8.0):
+        run("AdjustGlow", f"radius {r}", {"radius": r}, at80)
+        run("Blur", f"gaussian radius {r}", {"type": "gaussian", "radius": r}, at80)
+        run("TiltShift", f"blur {r}", {"blur": r}, at80)
+    for r in (4.9, 5.0, 10.0):
+        run("Bokeh", f"radius {r}", {"radius": r}, at80)
+    # Blur by each type on the standard pictures (its defaults blur nothing).
+    for over in ({"type": "gaussian", "radius": 2.5}, {"type": "gaussian", "radius": 12.0}, {"type": "motion", "length": 9.0, "angle": 33.0},
+                 {"type": "motion", "length": 2.5, "angle": 120.0}, {"type": "motion", "length": 0.5, "angle": 10.0},
+                 {"type": "zoom", "strength": 0.01}, {"type": "zoom", "strength": 0.37}, {"type": "zoom", "strength": 1.0}):
+        run("Blur", ", ".join(f"{k} {v}" for k, v in over.items()), over, four)
+    # Motion at four angles and five lengths.
+    for a in BLUR_MOTION_ANGLES:
+        for length in BLUR_MOTION_LENGTHS:
+            run("Blur", f"motion angle {a} length {length}", {"type": "motion", "angle": a, "length": length}, (("rgb 80×60", "rgb", mid),))
+    # The largest radii on pictures too small for their padding, and an area resize down to nothing.
+    run("HighPass", "radius 30 (too wide)", {"radius": 30.0}, (("rgb 37×23", "rgb", rgb),))
+    run("FrequencySeparation", "radius 30 (too wide)", {"radius": 30.0}, (("rgb 37×23", "rgb", rgb),))
+    for pics in ((("provider 5×4", "provider", tiny),), (("rgb 37×23", "rgb", rgb),)):
+        run("AdjustGlow", "radius 50", {"radius": 50.0}, pics)
+        run("Blur", "gaussian radius 50", {"type": "gaussian", "radius": 50.0}, pics)
+        run("Blur", "motion length 80", {"type": "motion", "length": 80.0, "angle": 45.0}, pics)
+        run("Bokeh", "radius 30", {"radius": 30.0}, pics)
+        run("TiltShift", "blur 40", {"blur": 40.0}, pics)
+    # Outline at each rounding of its thickness.
+    for t in (1.5, 2.5, 3.5):
+        run("Outline", f"thickness {t}", {"thickness": t}, (("rgb 37×23", "rgb", rgb),))
+    for mode in ("solid", "source", "transparent_black"):
+        run("Outline", f"fill {mode}, colours", {"fill_mode": mode, "line_color": "#3a7", "fill_color": " #102030 ", "mix": 0.63}, (("rgb 37×23", "rgb", rgb),))
+    # Sparkle: more peaks than it keeps; tied lumas at the cut; distinct ones.
+    spots = [(3 + 10 * (i % 6), 3 + 10 * (i // 6), (255, 255, 255)) for i in range(18)]
+    tied = g.dots("dots_tied_64x48.png", 64, 48, spots)
+    graded = g.dots("dots_graded_64x48.png", 64, 48, [(x, y, (250 - 5 * i, 250 - 5 * i, 250 - 5 * i)) for i, (x, y, _c) in enumerate(spots)])
+    mixed_spots = [(x, y, (255, 255, 255) if i % 3 else (240, 240, 240)) for i, (x, y, _c) in enumerate(spots)]
+    mixed = g.dots("dots_mixed_64x48.png", 64, 48, mixed_spots)
+    for density in (0.0001, 0.0017, 0.004, 0.05):
+        for pname, file in (("tied dots 64×48", tied), ("graded dots 64×48", graded), ("mixed dots 64×48", mixed)):
+            g.case(f"Sparkle: max_density {density}, {pname}", classes["Sparkle"], "Sparkle",
+                   {**defaults["Sparkle"], "max_density": density, "threshold": 0.5, "size": 6.0}, {"image": ("rgb", [file])})
+    # Below torch's large-input path, its topk keeps its own choice among tied values.
+    small_tied = g.dots("dots_tied_40x30.png", 40, 30, [(3 + 10 * (i % 4), 3 + 10 * (i // 4), (255, 255, 255)) for i in range(12)])
+    block = g.dots("block_40x30.png", 40, 30, [(x, y, (255, 255, 255)) for y in range(5, 15) for x in range(5, 15)])
+    # Outline's dilation on sparse edges (the synthetic texture has edges everywhere, which the
+    # max-pool saturates): each rounding of the thickness, on the block and the dots.
+    for t in (1.5, 2.5, 3.5, 4.0):
+        for pname, file in (("a white block 40×30", block), ("graded dots 64×48", graded)):
+            g.case(f"Outline: thickness {t}, {pname}", classes["Outline"], "Outline", {**defaults["Outline"], "thickness": t}, {"image": ("rgb", [file])})
+    for density in (0.003, 0.03, 0.05):
+        g.case(f"Sparkle: max_density {density}, a white block 40×30 (100 tied peaks)", classes["Sparkle"], "Sparkle",
+               {**defaults["Sparkle"], "max_density": density, "threshold": 0.5, "size": 6.0}, {"image": ("rgb", [block])})
+    for density in (0.0017, 0.004, 0.006):
+        g.case(f"Sparkle: max_density {density}, tied dots 40×30", classes["Sparkle"], "Sparkle",
+               {**defaults["Sparkle"], "max_density": density, "threshold": 0.5, "size": 6.0}, {"image": ("rgb", [small_tied])})
+    g.case("Sparkle: max_density 0.0017, a batch of tied and graded dots", classes["Sparkle"], "Sparkle",
+           {**defaults["Sparkle"], "max_density": 0.0017, "threshold": 0.5, "size": 6.0}, {"image": ("rgb", [tied, graded, tied])})
+    run("Sparkle", "threshold 0.3, max_density 0.0001", {"threshold": 0.3, "max_density": 0.0001}, four)
+    # The large cases (hashed): each class's defaults are the standard set's; here the blurs that
+    # otherwise stay small.
+    big = (("rgb 320×200", "rgb", g.picture(320, 200, 3, 6)),)
+    run("Blur", "gaussian radius 10", {"type": "gaussian", "radius": 10.0}, big, hashed=True)
+    run("Blur", "motion length 16, angle 33", {"type": "motion", "length": 16.0, "angle": 33.0}, big, hashed=True)
+    run("Blur", "zoom 0.5", {"type": "zoom", "strength": 0.5}, big, hashed=True)
+    run("HighPass", "radius 30", {"radius": 30.0}, big, hashed=True)
+    run("Sparkle", "threshold 0.5, size 80", {"threshold": 0.5, "size": 80.0}, big, hashed=True)
+    run("FrequencySeparation", "show high", {"show": "high"}, big, hashed=True)
+    # `_motion_kernel` on its own.
+    kernels = []
+    for length in range(0, 21):
+        for a in BLUR_KERNEL_ANGLES:
+            kk = nb._motion_kernel(length, a).reshape(-1).contiguous()
+            kernels.append({"length": length, "angle": a, "side": int(round(kk.numel() ** 0.5)), "f32": b64(kk.numpy().astype("<f4").tobytes())})
+    frame = blur_frame_chain(g, classes["Sharpen"], "Sharpen", {"amount": 1.3, "radius": 1.5}, card4)
+    return {"cases": g.cases, "assets": {k: b64(v) for k, v in sorted(g.assets.items())},
+            "library_eps": BLUR_LIBRARY_EPS, "motion_kernels": kernels, "frame": frame}
+
+
+GROUPS = {"machinery": machinery, "kernels": kernels, "rng": rng, "tone": tone, "blur": blur}
 
 
 def main() -> None:

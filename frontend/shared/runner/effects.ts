@@ -24,13 +24,14 @@ export type EffectFamily = EffectSchemaFamily
 /** Every effect family. */
 export const EFFECT_FAMILIES: readonly EffectFamily[] = ['effects-tone', 'effects-blur', 'effects-cells', 'effects-warp', 'effects-mask', 'effects-noise']
 
-/** The effects ported so far (R2.1: the three pilots; R2.4: the rest of effects-tone). Each task adds its classes. */
+/** The effects ported so far (R2.1: the three pilots; R2.4: the rest of effects-tone; R2.5: effects-blur). Each task adds its classes. */
 export const EFFECT_CLASSES_PORTED: readonly string[] = [
   'AdjustExposure', 'AdjustInvert', 'AdjustThreshold',
   'AdjustBrightnessContrast', 'AdjustColor', 'AdjustCurves', 'AdjustLevels',
   'AdjustTemperature', 'AdjustVibrance', 'AdjustColorBalance', 'AdjustBlackWhite', 'AdjustPhotoFilter', 'AdjustGradientMap', 'AdjustChannelMixer', 'AdjustPosterize',
   'AdjustVignette', 'AdjustShadowsHighlights', 'Duotone', 'SplitToning',
   'GradientMap', 'Posterize', 'Hologram', 'TwoDLight', 'LightLeak', 'LensFlare', 'Caustics', 'Blinds', 'CrossHatch', 'Dither',
+  'Sharpen', 'Denoise', 'AdjustGlow', 'HighPass', 'Emboss', 'FindEdges', 'Blur', 'Bokeh', 'TiltShift', 'FrequencySeparation', 'HeightmapRelief', 'Outline', 'Sparkle',
 ]
 
 /** Each effect class's family (every generated class, ported or not). */
@@ -119,6 +120,7 @@ export const EFFECT_TEXT_WIDGETS: Readonly<Record<string, Readonly<Record<string
   Duotone: { duotone: 'duotone' },
   GradientMap: { dark_color: 'hex', light_color: 'hex' },
   TwoDLight: { color: 'hex' },
+  Outline: { line_color: 'hex', fill_color: 'hex' },
 }
 
 /** Whether the runner reads an effect's colour text as Python does (nothing to read: yes). */

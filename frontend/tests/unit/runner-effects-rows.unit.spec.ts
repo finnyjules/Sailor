@@ -17,14 +17,17 @@ import { FAMILY_REQUIRES, RUNNER_FAMILIES, type RunnerFamily } from '#shared/run
 import { EFFECTS } from '~~/server/runner/effects/table'
 import { effectCores } from '~~/server/runner/effects/cores'
 
-/** The classes ported so far: the pilots (R2.1) and the rest of effects-tone (R2.4). */
+/** The classes ported so far: the pilots (R2.1), the rest of effects-tone (R2.4) and effects-blur (R2.5). */
 const PORTED = [
   'AdjustExposure', 'AdjustInvert', 'AdjustThreshold',
   'AdjustBrightnessContrast', 'AdjustColor', 'AdjustCurves', 'AdjustLevels',
   'AdjustTemperature', 'AdjustVibrance', 'AdjustColorBalance', 'AdjustBlackWhite', 'AdjustPhotoFilter', 'AdjustGradientMap', 'AdjustChannelMixer', 'AdjustPosterize',
   'AdjustVignette', 'AdjustShadowsHighlights', 'Duotone', 'SplitToning',
   'GradientMap', 'Posterize', 'Hologram', 'TwoDLight', 'LightLeak', 'LensFlare', 'Caustics', 'Blinds', 'CrossHatch', 'Dither',
+  'Sharpen', 'Denoise', 'AdjustGlow', 'HighPass', 'Emboss', 'FindEdges', 'Blur', 'Bokeh', 'TiltShift', 'FrequencySeparation', 'HeightmapRelief', 'Outline', 'Sparkle',
 ]
+/** Picture outputs: one, except FrequencySeparation's two (low, high). */
+const pictureSlots = (cls: string) => (cls === 'FrequencySeparation' ? [0, 1] : [0])
 
 /** The inventory's 78 still-picture effects (plan R2.4–R2.9 and the pilots), and Painter. */
 const INVENTORY: Record<string, string[]> = {
@@ -116,11 +119,11 @@ describe('the rows', () => {
       expect(PROVIDER_TYPES.has(cls)).toBe(false)
       expect(FRAME_RENDER_TYPES.has(cls)).toBe(false)
       expect(RUNNER_OUTPUT_CLASSES.has(cls)).toBe(true)
-      expect(PICTURE_OUTPUTS[cls]).toEqual([0])
+      expect(PICTURE_OUTPUTS[cls]).toEqual(pictureSlots(cls))
     }
     expect([...FRAME_RENDER_TYPES]).toEqual(['Compositor'])
     expect(EFFECT_OUTPUT_NODES).toEqual(EFFECT_CLASSES_PORTED)
-    expect(EFFECT_PICTURE_OUTPUTS).toEqual(Object.fromEntries(PORTED.map(cls => [cls, [0]])))
+    expect(EFFECT_PICTURE_OUTPUTS).toEqual(Object.fromEntries(PORTED.map(cls => [cls, pictureSlots(cls)])))
     // None of the ported classes makes a mask: the output kinds are the cards' whatever the families.
     expect(EFFECT_OUTPUT_KINDS).toEqual({})
     const all = new Set<RunnerFamily>(RUNNER_FAMILIES)

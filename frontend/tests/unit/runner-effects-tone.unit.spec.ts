@@ -397,7 +397,8 @@ describe('colour text read as Python reads it', () => {
   it('text the runner can\'t read as Python does leaves the node to the engine', () => {
     const take = (cls: string, over: Record<string, unknown>) => runnerTakesNode({ 0: card('a.png'), fx: { class_type: cls, inputs: { image: ['0', 0], ...defaultsOf(cls), ...over } } }, 'fx', TONE)
     // Taken: the defaults and plain text.
-    for (const cls of Object.keys(EFFECT_TEXT_WIDGETS)) expect(take(cls, {}), cls).toBe(true)
+    // (the tone classes: R2.5's Outline has its own check in the blur spec)
+    for (const cls of Object.keys(EFFECT_TEXT_WIDGETS).filter(c => TONE_CLASSES.includes(c))) expect(take(cls, {}), cls).toBe(true)
     expect(take('AdjustGradientMap', { stops: 'not json' })).toBe(true)
     expect(take('TwoDLight', { color: ' #abc ' })).toBe(true)
     // json.loads reads NaN and Infinity, JSON.parse doesn't.

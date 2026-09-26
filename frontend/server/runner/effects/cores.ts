@@ -13,6 +13,7 @@
 import { pixels } from '../pixels/core'
 import { tensorCore } from './core/tensor'
 import { toneCore } from './core/tone'
+import { blurCore } from './core/blur'
 import { kernelsCore } from './core/kernels'
 import { rngCore } from './core/rng'
 
@@ -30,14 +31,16 @@ export const EFFECT_CORES: readonly EffectCoreEntry[] = [
   // R2.4: the tone effects use the kernels (torchvision's colour ops, linspace, pow, clamp).
   { name: 'tone', fn: toneCore as EffectCoreEntry['fn'], args: ['tk', 'kn'] },
   { name: 'rng', fn: rngCore as EffectCoreEntry['fn'], args: [] },
+  // R2.5: the blur and convolution effects (gaussian blur, depthwise conv, resizes, pools, topk).
+  { name: 'blur', fn: blurCore as EffectCoreEntry['fn'], args: ['tk', 'kn'] },
 ]
 
 /** The cores whose functions are effect ops (not helpers). */
-export const EFFECT_OP_CORES: readonly string[] = ['tone']
+export const EFFECT_OP_CORES: readonly string[] = ['tone', 'blur']
 
 /** The cores in this thread (tests), built as the worker builds them. */
 export const effectCores = (() => {
   const tk = tensorCore(pixels)
   const kn = kernelsCore(tk, pixels)
-  return { px: pixels, tk, kn, tone: toneCore(tk, kn), rng: rngCore() }
+  return { px: pixels, tk, kn, tone: toneCore(tk, kn), rng: rngCore(), blur: blurCore(tk, kn) }
 })()
