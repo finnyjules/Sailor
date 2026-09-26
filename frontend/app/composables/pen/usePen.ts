@@ -1271,8 +1271,9 @@ export function usePen(opts: {
   let dragPointer: Vec2 | null = null   // the raw pointer, while dropSnap pulls the point off it
   // points `id` can't be joined with without collapsing a piece: the other end
   // of a line or path segment it is on, an arc's centre and its ends. One
-  // exception: the two ends of an open path of ONE arc may meet — the arc
-  // closes into a circle (mergePoints). In a text guide (openOnly) the other
+  // exception: the two ends of an open path of ONE near-full arc (sweep over
+  // 180°) may meet — the arc closes into a circle (mergePoints). A smaller
+  // arc's ends would collapse it like any piece. In a text guide (openOnly) the other
   // end of its own open path is off too: a guide never closes.
   function collapseNeighbours(id: EntityId): Set<EntityId> {
     const out = new Set<EntityId>()
@@ -1283,6 +1284,7 @@ export function usePen(opts: {
       } else if (e.kind === 'path') {
         const n = e.anchors.length
         const oneArc = !e.closed && n === 2 && e.segments.length === 1 && e.segments[0]!.kind === 'arc'
+          && Math.abs(curveGeom(doc.value, { kind: 'seg', pathId: e.id, segIndex: 0 })?.sweepAngle ?? 0) > Math.PI
         e.segments.forEach((seg, i) => {
           const a = e.anchors[i], b = e.anchors[(i + 1) % n]
           if (!a || !b) return

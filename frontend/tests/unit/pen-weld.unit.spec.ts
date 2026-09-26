@@ -336,8 +336,11 @@ describe('fix round 1', () => {
     expect(pen.status.value).toBe('A text guide stays open')
   })
 
-  function oneArc(d: SketchDoc) {
-    const A = addPoint(d, 0, 0); const B = addPoint(d, 1, -0.5); const C = addPoint(d, 0.5, 3)
+  // an open path of one arc, centre (0,3) radius 3, from A = (0,0) the
+  // anticlockwise way round through `deg` degrees (300° by default: near-full)
+  function oneArc(d: SketchDoc, deg = 300) {
+    const t = (-90 + deg) * Math.PI / 180
+    const A = addPoint(d, 0, 0); const B = addPoint(d, 3 * Math.cos(t), 3 + 3 * Math.sin(t)); const C = addPoint(d, 0, 3)
     const path = addPath(d, [A, B], [{ kind: 'arc', center: C, sweep: 1 }])
     return { A, B, C, path }
   }
@@ -365,7 +368,7 @@ describe('fix round 1', () => {
     let ids = { A: '', B: '', C: '', path: '' }
     const { doc, pen } = mk(d => { ids = oneArc(d) })
     pen.pickSegment(ids.path, 0)
-    dragTo(pen, doc.value, ids.B, 0.1, 0.05)
+    dragTo(pen, doc.value, ids.B, -0.1, 0.05)
     expect(pen.hoverSnap.value?.kind).toBe('point')
     pen.dropPoint(ids.B)
     expectCircle(doc.value, ids, ids.A)
@@ -386,10 +389,31 @@ describe('fix round 1', () => {
   it('a one-arc text guide never closes into a circle', () => {
     let ids = { A: '', B: '', C: '', path: '' }
     const { doc, pen } = mk(d => { ids = oneArc(d) }, true)
-    dragTo(pen, doc.value, ids.B, 0.1, 0.05)
+    dragTo(pen, doc.value, ids.B, -0.1, 0.05)
     expect(pen.hoverSnap.value).toBeNull()
     pen.dropPoint(ids.B)
     expect(paths(doc.value)).toHaveLength(1)
+  })
+
+  it('a small (~2°) one-arc path’s end dragged to its start finds no target', () => {
+    let ids = { A: '', B: '', C: '', path: '' }
+    const { doc, pen } = mk(d => { ids = oneArc(d, 2) })
+    expect(Math.abs(curveGeom(doc.value, { kind: 'seg', pathId: ids.path, segIndex: 0 })!.sweepAngle!)).toBeLessThan(0.1)
+    dragTo(pen, doc.value, ids.B, 0.02, 0.01)
+    expect(pen.hoverSnap.value).toBeNull()
+    pen.dropPoint(ids.B)
+    expect(paths(doc.value)).toHaveLength(1)
+    expect(doc.value.entities.some(e => e.kind === 'circle')).toBe(false)
+  })
+
+  it('Coincident on a small one-arc path’s two ends refuses: it would collapse the piece', () => {
+    let ids = { A: '', B: '', C: '', path: '' }
+    const { doc, pen } = mk(d => { ids = oneArc(d, 2) })
+    pen.pick(ids.A); pen.pick(ids.B, true)
+    pen.apply('coincident')
+    expect(pen.status.value).toBe('That would collapse the piece')
+    expect(paths(doc.value)).toHaveLength(1)
+    expect(pen.canUndo()).toBe(false)
   })
 
   it('a one-arc path’s end still never joins its own centre', () => {
