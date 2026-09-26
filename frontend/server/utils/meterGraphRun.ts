@@ -12,10 +12,11 @@ import { createHash, randomUUID } from 'node:crypto'
 import type { H3Event } from 'h3'
 import { readBody, setResponseStatus } from 'h3'
 import { priceGraph, UnpricedGraphError } from './priceBook'
-import { createGateReads, graphInputSizes } from './graphInputPixels'
+import { createGateReads, graphInputSizes, pictureSize } from './graphInputPixels'
+import { createGateSnapshots, rewriteMeasuredInputs } from './gateSnapshots'
 import { normalizeHostedPrompt } from './hostedPrompt'
 import { storedNodeCatalog } from '../native/objectInfo'
-import { graphInputSeconds, seedanceReferenceSeconds } from './graphInputSeconds'
+import { graphInputSeconds, mediaSeconds, seedanceReferenceSeconds, type MediaFile, type MediaKind } from './graphInputSeconds'
 import { MeterRefusalError } from './requestMeter'
 import { createGraphRun, resolveGraphRun, outputKey, ownedOutputKeys } from './graphRuns'
 import { settleOnCompletion } from './settleWatcher'
@@ -341,6 +342,18 @@ export interface GraphRunDeps {
    */
   normalizePrompt?(prompt: any): { prompt: any } | { problems: import('../runner/requestRules').RequestProblem[] }
   /**
+   * G1 fix round 3: the prompt with every measured file named by the run's
+   * own copy (gateSnapshots.ts rewriteMeasuredInputs), or problems (refused).
+   * Runs after all measuring, before the price; its prompt is forwarded.
+   */
+  finalizePrompt?(prompt: any): { prompt: any } | { problems: import('../runner/requestRules').RequestProblem[] }
+  /**
+   * G1 fix round 3: remove the run's copies. Called by meterGraphSubmit on
+   * every way out but a queued run; for a queued run, startSettle's caller
+   * calls it when the settle watcher ends.
+   */
+  releaseInputs?(): Promise<void>
+  /**
    * Node id → the measured length of each lip-sync node's sound clip (and
    * Kling lip-sync's source video) — graphInputSeconds. Runs after the
    * file-ownership check. Absent, every lip-sync is priced at the 60 s cap.
@@ -388,6 +401,21 @@ export interface GraphRunDeps {
 }
 
 export async function meterGraphSubmit(userId: string | null, body: any, deps: GraphRunDeps): Promise<{ status: number; body: any }> {
+  // G1 fix round 3: the run's copies of its measured inputs live until its
+  // settle watcher ends (startSettle's caller releases them then); on every
+  // other way out — a refusal, a throw, the engine not queuing it — now.
+  const run = { handedOff: false }
+  try {
+    return await submitMetered(userId, body, deps, run)
+  }
+  finally {
+    if (!run.handedOff && deps.releaseInputs) {
+      await deps.releaseInputs().catch(e => console.error('[graphMeter] releasing measured copies failed', { error: e }))
+    }
+  }
+}
+
+async function submitMetered(userId: string | null, body: any, deps: GraphRunDeps, run: { handedOff: boolean }): Promise<{ status: number; body: any }> {
   if (!userId) throw new MeterRefusalError('Sign in to run graphs', 401)
   if (!body || typeof body.prompt !== 'object' || body.prompt === null) {
     throw new MeterRefusalError('Missing prompt graph', 400)
@@ -456,6 +484,18 @@ export async function meterGraphSubmit(userId: string | null, body: any, deps: G
   // it can read it; the rest price at the 60 s cap.
   const inputSeconds = deps.measureInputSeconds ? await deps.measureInputSeconds(body.prompt).catch(() => ({})) : undefined
 
+  // G1 fix round 3 (R3 + R4): every file measured above was measured from the
+  // run's own copy; the prompt priced and forwarded names those copies, so
+  // ComfyUI reads the bytes that were priced, however long it queues.
+  if (deps.finalizePrompt) {
+    const f = deps.finalizePrompt(body.prompt)
+    if ('problems' in f) {
+      const refusal = nodeProblemsBody(f.problems)
+      if (refusal) return { status: 400, body: refusal }
+    }
+    else body = { ...body, prompt: f.prompt }
+  }
+
   let price
   try {
     price = deps.priceGraph(body.prompt, inputPixels || inputSeconds ? { inputPixels, inputSeconds } : undefined)
@@ -509,6 +549,7 @@ export async function meterGraphSubmit(userId: string | null, body: any, deps: G
   } catch (e) {
     console.error('[graphMeter] registerRun failed — run will settle but ownership row is missing', { promptId, userId, holdId, error: e })
   }
+  run.handedOff = true
   deps.startSettle({ promptId, holdId, credits: price.credits })
   return fwd
 }
@@ -532,15 +573,27 @@ export async function handleMeteredPrompt(event: H3Event): Promise<any> {
 
   // One read budget for the prompt: pictures and media lengths share it.
   const reads = createGateReads()
+  // G1 fix round 3: every file measured is measured from this run's own copy.
+  const snaps = createGateSnapshots()
+  const pictureOfCopy = async (value: string) => {
+    const copy = await snaps.take({ value, literalInput: false })
+    return copy ? pictureSize(copy.path) : null
+  }
+  const mediaOfCopy = async (file: MediaFile, kind: MediaKind) => {
+    const copy = await snaps.take(file)
+    return copy ? mediaSeconds(copy.path, kind) : null
+  }
   const result = await meterGraphSubmit(userId, body, {
     priceGraph,
     // Hosted: the prompt ComfyUI will run, from the stored node catalog (G1 fix round 1).
     normalizePrompt: prompt => normalizeHostedPrompt(prompt, storedNodeCatalog()),
     // One walk: the sizes the price reads and the refusals (G1 fix round 1, R7).
-    measureInputSizes: prompt => graphInputSizes(prompt, undefined, reads),
-    measureInputSeconds: prompt => graphInputSeconds(prompt, undefined, reads),
+    measureInputSizes: prompt => graphInputSizes(prompt, pictureOfCopy, reads),
+    measureInputSeconds: prompt => graphInputSeconds(prompt, mediaOfCopy, reads),
     // Hosted: a Seedance reference whose length can't be read is refused, not counted as 0 (S1b fix round 2).
-    referenceSecondsProblems: prompt => seedanceReferenceSeconds(prompt, undefined, { strict: true }),
+    referenceSecondsProblems: prompt => seedanceReferenceSeconds(prompt, mediaOfCopy, { strict: true }),
+    finalizePrompt: prompt => rewriteMeasuredInputs(prompt, snaps),
+    releaseInputs: () => snaps.release(),
     // Stage 7 final review C1: the operator kill-switch + daily ceiling. Wired
     // the SAME way moderatePrompt (Task 3) is — the real implementation passed
     // in here, stubbed in the unit tests. Local mode is a no-op inside
@@ -581,6 +634,7 @@ export async function handleMeteredPrompt(event: H3Event): Promise<any> {
     // worker (?comfyWorker=N) could never be settled from the harvest path.
     registerRun: r => createGraphRun({ ...r, target }),
     startSettle: ({ promptId, holdId, credits }) => {
+      // The run's copies go when its watcher ends (success, error or timeout).
       void settleOnCompletion({
         promptId,
         intervalMs: SETTLE_INTERVAL_MS,
@@ -598,7 +652,7 @@ export async function handleMeteredPrompt(event: H3Event): Promise<any> {
             await resolveGraphRun(id, 'voided').catch(() => {})
           })()
         },
-      })
+      }).catch(() => {}).finally(() => { void snaps.release() })
     },
     releaseHold: id => ledger.release(id),
   })

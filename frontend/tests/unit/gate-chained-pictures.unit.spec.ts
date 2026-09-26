@@ -7,7 +7,8 @@
  * loaded picture whose size can't be read is refused on a size-priced node
  * in hosted mode (gate and runner). Local mode is unchanged.
  */
-import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { createHash } from 'node:crypto'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { gunzipSync } from 'node:zlib'
 import { join } from 'node:path'
@@ -22,10 +23,11 @@ import {
   ENHANCE_DETAIL_TOO_LARGE, FLUX_2_EDIT_TOO_LARGE, UPSCALE_TOO_LARGE, measuredInputProblems, tooManyPicturesWords, unreadableInputWords, unsizedInputWords,
 } from '~~/server/runner/requestRules'
 import {
-  ISOBMFF_HEAD_BYTES, MAX_HOPS, MAX_MEASURED_FILES, createGateReads, graphInputPixels, graphInputSizes, isobmffIspePixels, picturePixels, pictureRule, pyRound,
+  ISOBMFF_HEAD_BYTES, MAX_HOPS, MAX_MEASURED_FILES, createGateReads, graphInputPixels, graphInputSizes, isobmffIspePixels, picturePixels, pictureRule, pictureSize, pyRound, tiffFirstIfdUnique,
 } from '~~/server/utils/graphInputPixels'
 import { meterGraphSubmit } from '~~/server/utils/meterGraphRun'
 import { GRAPH_FILE_READERS, extractFileRefs } from '~~/server/utils/engineFileSurface'
+import { MEASURED_REF_UNRENAMABLE, createGateSnapshots, rewriteMeasuredInputs, sourcePath } from '~~/server/utils/gateSnapshots'
 import { SETTING_UNREADABLE, STEPS_UNAVAILABLE, STEP_UNKNOWN, normalizeHostedPrompt } from '~~/server/utils/hostedPrompt'
 import { priceGraph } from '~~/server/utils/priceBook'
 import type { OutputFile } from '~~/server/runner/types'
@@ -90,7 +92,7 @@ describe('the probe (final re-review finding 1)', () => {
     expect(res.body.error.message).toBe(unsizedInputWords('EditImageNode'))
     expect(held).toEqual([])
     const src = readFileSync(join(process.cwd(), 'server/utils/meterGraphRun.ts'), 'utf8')
-    expect(src).toContain('measureInputSizes: prompt => graphInputSizes(prompt, undefined, reads)')
+    expect(src).toContain('measureInputSizes: prompt => graphInputSizes(prompt, pictureOfCopy, reads)')
     expect(src).toContain('normalizePrompt: prompt => normalizeHostedPrompt(prompt, storedNodeCatalog())')
     expect(src).not.toContain('measureInputPixels: prompt')
   })
@@ -734,11 +736,11 @@ describe('side order: a loaded file\'s width may be its height to the engine (fi
     expect(s.problems.map(x => x.nodeId).sort()).toEqual(['3', '4'])
   })
 
-  it('Crop: the larger of both orders, side by side', async () => {
+  it('Crop: each order cropped on its own; the larger count taken (fix round 3)', async () => {
     const read = async () => ({ pixels: 100 * 3000, width: 100, height: 3000 })
     const s = await graphInputSizes({ 1: load('a.png'), 2: { class_type: 'ImageCrop', inputs: { image: ['1', 0], width: 2000, height: 2000, x: 0, y: 0 } }, 3: flux2Edit('2') }, read)
-    // Upright: 100 × 2000; turned: 2000 × 100 — the bound is 2000 × 2000.
-    expect(s.pixels[3]).toBe(2000 * 2000)
+    // Upright: 100 × 2000; turned: 2000 × 100 — 200,000 either way (not a merged 2000 × 2000).
+    expect(s.pixels[3]).toBe(100 * 2000)
   })
 
   it('an order-certain picture (a Frame\'s own size) is still exact', async () => {
@@ -751,3 +753,246 @@ async function engineFileSizeAt(path: string) {
   const { pictureSize } = await import('~~/server/utils/graphInputPixels')
   return pictureSize(path)
 }
+
+// ── G1 fix round 3 ────────────────────────────────────────────────────────
+
+describe('every shape a picture may have is carried through the chain (fix round 3, R1)', () => {
+  const plain = async () => ({ pixels: 100 * 3000, width: 100, height: 3000 })
+
+  it('the re-review\'s plain 100 × 3000 → Resize h1000 → Resize w1000 → Flux 2 Pro and Topaz: 30.3 MP possible, both refused', async () => {
+    const p: P = {
+      1: load('tall.png'),
+      2: { class_type: 'ImageScale', inputs: { image: ['1', 0], width: 0, height: 1000 } },
+      3: { class_type: 'ImageScale', inputs: { image: ['2', 0], width: 1000, height: 0 } },
+      4: flux2Edit('3'),
+      5: upscale('3', { model: 'Topaz' }),
+    }
+    const s = await graphInputSizes(p, plain)
+    // Upright: 100 × 3000 → 33 × 1000 → 1000 × 30303. Turned: 3000 × 100 → 30000 × 1000 → 1000 × 33.
+    expect(s.pixels).toEqual({})
+    expect(s.problems.map(x => [x.nodeId, x.message])).toEqual([['4', unsizedInputWords('EditImageNode')], ['5', unsizedInputWords('UpscaleImageNode')]])
+  })
+
+  it('the re-review\'s Crop 3000 × 3000 → Resize h1000: 30 MP possible, refused', async () => {
+    const p: P = {
+      1: load('tall.png'),
+      2: { class_type: 'ImageCrop', inputs: { image: ['1', 0], width: 3000, height: 3000, x: 0, y: 0 } },
+      3: { class_type: 'ImageScale', inputs: { image: ['2', 0], width: 0, height: 1000 } },
+      4: flux2Edit('3'),
+    }
+    const s = await graphInputSizes(p, plain)
+    expect(s.pixels).toEqual({})
+    expect(s.problems.map(x => x.nodeId)).toEqual(['4'])
+  })
+
+  it('a square picture has one shape, and stays exact through the chain', async () => {
+    const s = await graphInputSizes({ 1: load('sq.png'), 2: { class_type: 'ImageScale', inputs: { image: ['1', 0], width: 0, height: 1000 } }, 3: { class_type: 'ImageScale', inputs: { image: ['2', 0], width: 500, height: 0 } }, 4: flux2Edit('3') },
+      async () => ({ pixels: 2000 * 2000, width: 2000, height: 2000 }))
+    expect(s.pixels[4]).toBe(500 * 500)
+  })
+
+  it('both orders small: priced on the larger count, never refused', async () => {
+    const s = await graphInputSizes({ 1: load('a.png'), 2: { class_type: 'ImageScale', inputs: { image: ['1', 0], width: 0, height: 1000 } }, 3: flux2Edit('2') },
+      async () => ({ pixels: 3000 * 2000, width: 3000, height: 2000 }))
+    // 1500 × 1000 or 667 × 1000.
+    expect(s.pixels[3]).toBe(1500 * 1000)
+    expect(s.problems).toEqual([])
+  })
+})
+
+describe('a TIFF repeating a tag in its first directory: refused (fix round 3, R2)', () => {
+  /** A classic little-endian uncompressed RGB TIFF with the given IFD0 entries (tag, type, value), then its strip. */
+  const tiff = (entries: [number, number, number][], strip: number) => {
+    const n = entries.length
+    const ifd = 8
+    const dataAt = ifd + 2 + n * 12 + 4
+    const buf = Buffer.alloc(dataAt + strip)
+    buf.write('II', 0, 'ascii')
+    buf.writeUInt16LE(42, 2)
+    buf.writeUInt32LE(ifd, 4)
+    buf.writeUInt16LE(n, ifd)
+    entries.forEach(([tag, type, value], i) => {
+      const at = ifd + 2 + i * 12
+      buf.writeUInt16LE(tag, at)
+      buf.writeUInt16LE(type, at + 2)
+      buf.writeUInt32LE(1, at + 4)
+      if (type === 3) buf.writeUInt16LE(value === -1 ? dataAt : value, at + 8)
+      else buf.writeUInt32LE(value === -1 ? dataAt : value, at + 8)
+    })
+    return buf
+  }
+  const tags = (w: number[], h: number[]): [number, number, number][] => [
+    ...w.map(v => [256, 4, v] as [number, number, number]),
+    ...h.map(v => [257, 4, v] as [number, number, number]),
+    [258, 3, 8], [259, 3, 1], [262, 3, 2], [273, 4, -1], [277, 3, 3], [278, 4, 10], [279, 4, 300],
+  ]
+
+  it('the re-review\'s file (256 = 10, 256 = 3000, 257 = 10, 257 = 2000): not sized, from disk or bytes', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'g1-tiff-'))
+    const bad = tiff(tags([10, 3000], [10, 2000]), 300)
+    writeFileSync(join(dir, 'twice.tif'), bad)
+    expect(await tiffFirstIfdUnique(new Uint8Array(bad))).toBe(false)
+    expect(await picturePixels(join(dir, 'twice.tif'))).toBeNull()
+    expect(await picturePixels(new Uint8Array(bad))).toBeNull()
+    // The gate refuses it before a size-priced node; the runner's measuring does too.
+    const s = await graphInputSizes({ 1: load('twice.tif'), 2: upscale('1', { model: 'Topaz', topaz_upscale_factor: '6x' }) }, v => picturePixels(join(dir, v)))
+    expect(s.problems.map(x => x.message)).toEqual([unreadableInputWords('UpscaleImageNode')])
+    const f: OutputFile = { filename: 'twice.tif', subfolder: '', type: 'output' }
+    expect(await measuredInput({ class_type: 'EditImageNode', inputs: { model: 'Flux 2 Pro', input_image: ['1', 0] } }, () => [f], async () => new Uint8Array(bad), FAL_EDIT)).toEqual({ unreadable: true })
+  })
+
+  it('a TIFF naming each tag once is sized (sharp\'s own, and a hand-made one)', async () => {
+    expect(await tiffFirstIfdUnique(new Uint8Array(tiff(tags([10], [10]), 300)))).toBe(true)
+    expect(await picturePixels(new Uint8Array(tiff(tags([10], [10]), 300)))).toBe(100)
+    const real = await sharp({ create: { width: 60, height: 40, channels: 3, background: '#888' } }).tiff().toBuffer()
+    expect(await tiffFirstIfdUnique(new Uint8Array(real))).toBe(true)
+    expect(await picturePixels(new Uint8Array(real))).toBe(2400)
+  })
+
+  it('a first directory past the end of the file: refused', async () => {
+    const t = tiff(tags([10], [10]), 0)
+    t.writeUInt32LE(99999, 4)
+    expect(await tiffFirstIfdUnique(new Uint8Array(t))).toBe(false)
+  })
+})
+
+describe('the run reads exactly the bytes it was priced on (fix round 3, R3 + R4)', () => {
+  const setup = () => {
+    const root = mkdtempSync(join(tmpdir(), 'g1-snap-'))
+    for (const d of ['input', 'output', 'temp']) mkdirSync(join(root, d))
+    const folder = (name: 'input' | 'output' | 'temp') => join(root, name)
+    return { root, folder, snaps: createGateSnapshots({ folder, token: 'run1' }) }
+  }
+  const png = (w: number, h: number) => sharp({ create: { width: w, height: h, channels: 3, background: '#888' } }).png().toBuffer()
+
+  it('a measured picture is copied under its sha-256, measured from the copy; overwriting the original after submit changes nothing', async () => {
+    const { root, folder, snaps } = setup()
+    const small = await png(100, 100)
+    writeFileSync(join(root, 'input', 'mine.png'), small)
+    const copy = (await snaps.take({ value: 'mine.png', literalInput: false }))!
+    const sha = createHash('sha256').update(small).digest('hex')
+    expect(copy.name).toBe(`g1-run1-${sha}.png`)
+    expect(copy.path).toBe(join(root, 'input', copy.name))
+    // The owner overwrites their file with a 48 MP picture once the prompt is queued.
+    writeFileSync(join(root, 'input', 'mine.png'), await png(8000, 6000))
+    expect(readFileSync(copy.path).equals(small)).toBe(true)
+    expect(await picturePixels(copy.path)).toBe(100 * 100)
+    // ComfyUI resolves the unannotated copy name in the input folder (LoadImage, the Image card, the /view refs).
+    expect(sourcePath({ value: copy.name, literalInput: false }, folder)).toBe(copy.path)
+    expect(sourcePath({ value: copy.name, literalInput: true }, folder)).toBe(copy.path)
+    await snaps.release()
+    expect(existsSync(copy.path)).toBe(false)
+  })
+
+  it('an output file and an annotated value are copied into the input folder; the same file once', async () => {
+    const { root, snaps } = setup()
+    writeFileSync(join(root, 'output', 'made.png'), await png(10, 10))
+    const a = (await snaps.take({ value: 'made.png [output]', literalInput: false }))!
+    expect(a.path.startsWith(join(root, 'input'))).toBe(true)
+    writeFileSync(join(root, 'input', 'x.png'), await png(12, 12))
+    const b1 = (await snaps.take({ value: 'x.png', literalInput: false }))!
+    const b2 = (await snaps.take({ value: 'x.png [input]', literalInput: false }))!
+    expect(b2).toEqual(b1)
+    expect(readdirSync(join(root, 'input')).filter(n => n.startsWith('g1-')).length).toBe(2)
+    await snaps.release()
+    expect(readdirSync(join(root, 'input')).filter(n => n.startsWith('g1-'))).toEqual([])
+  })
+
+  it('the forwarded prompt names the copies: file inputs, and /view references in the options, nothing else changed', () => {
+    const names = new Map([['engine:a.png', 'g1-r-aaa.png'], ['engine:s.wav', 'g1-r-bbb.wav'], ['view:v.mp4', 'g1-r-ccc.mp4'], ['view:ref.mp4', 'g1-r-ddd.mp4']])
+    const snaps = { nameFor: (s: { value: string, literalInput: boolean }) => names.get(`${s.literalInput ? 'view' : 'engine'}:${s.value}`) ?? null }
+    const options = '{"engine": "sync", "face_video": "/view?filename=v.mp4&type=input", "note": 1.0}'
+    const seedance = '{"video_urls": ["/view?filename=ref.mp4&type=input", "https://x/y.mp4"], "image_urls": ["/view?filename=other.png&type=input"]}'
+    const prompt: P = {
+      1: load('a.png'),
+      2: { class_type: 'Image', inputs: { image: 'unmeasured.png' } },
+      3: { class_type: 'LoadAudio', inputs: { audio: 's.wav' } },
+      4: { class_type: 'LipSyncNode', inputs: { audio: ['3', 0], model_options: options, prompt: 'a.png' } },
+      5: { class_type: 'GenerateVideoNode', inputs: { model: 'seedance-2.0', model_options: seedance } },
+    }
+    const r = rewriteMeasuredInputs(prompt, snaps)
+    if (!('prompt' in r)) throw new Error('refused')
+    expect(r.prompt[1]!.inputs.image).toBe('g1-r-aaa.png')
+    expect(r.prompt[2]!.inputs.image).toBe('unmeasured.png')
+    expect(r.prompt[3]!.inputs.audio).toBe('g1-r-bbb.wav')
+    // Only the reference's own string changes: the rest of the text (1.0 included) is byte for byte the same.
+    expect(r.prompt[4]!.inputs.model_options).toBe('{"engine": "sync", "face_video": "/view?filename=g1-r-ccc.mp4&type=input", "note": 1.0}')
+    expect(r.prompt[4]!.inputs.prompt).toBe('a.png')
+    expect(JSON.parse(r.prompt[5]!.inputs.model_options)).toEqual({ video_urls: ['/view?filename=g1-r-ddd.mp4&type=input', 'https://x/y.mp4'], image_urls: ['/view?filename=other.png&type=input'] })
+    // The caller's prompt is untouched.
+    expect(prompt[1]!.inputs.image).toBe('a.png')
+  })
+
+  it('a measured reference written in a form that can\'t be swapped exactly: refused', () => {
+    const snaps = { nameFor: (s: { value: string, literalInput: boolean }) => (s.literalInput && s.value === 'v.mp4' ? 'g1-r-ccc.mp4' : null) }
+    // "\/" escapes: the same string to JSON, but not the same text.
+    const r = rewriteMeasuredInputs({ 4: { class_type: 'LipSyncNode', inputs: { model_options: '{"face_video": "\\/view?filename=v.mp4&type=input"}' } } }, snaps)
+    expect('problems' in r && r.problems.map(x => x.message)).toEqual([MEASURED_REF_UNRENAMABLE])
+  })
+
+  it('the gate forwards the copies, prices them, and releases them only when the run ends', async () => {
+    const { root, folder } = setup()
+    writeFileSync(join(root, 'input', 'mine.png'), await png(1000, 1000))
+    const snaps = createGateSnapshots({ folder, token: 'run2' })
+    const released: string[] = []
+    const forwarded: any[] = []
+    let settle: (() => void) | undefined
+    const deps = {
+      priceGraph,
+      normalizePrompt: (p: unknown) => normalizeHostedPrompt(p, CATALOG),
+      measureInputSizes: (p: any) => graphInputSizes(p, async v => { const c = await snaps.take({ value: v, literalInput: false }); return c ? pictureSize(c.path) : null }),
+      finalizePrompt: (p: any) => rewriteMeasuredInputs(p, snaps),
+      releaseInputs: async () => { released.push('now'); await snaps.release() },
+      spendGuard: async () => {}, validateFileRefs: async () => {}, moderatePrompt: async () => ({ ok: true as const }),
+      hold: async () => ({ ok: true as const, holdId: 1 }),
+      getAvailable: async () => 0,
+      forward: async (b: any) => { forwarded.push(b); return { status: 200, body: { prompt_id: 'p' } } },
+      registerRun: async () => {},
+      startSettle: () => { settle = () => { void snaps.release() } },
+      releaseHold: async () => {},
+    }
+    const prompt: P = { 1: { ...load('mine.png'), is_changed: 'pinned' } as any, 2: flux2Edit('1'), 3: SINK }
+    const res = await meterGraphSubmit('u', { prompt }, deps)
+    expect(res.status).toBe(200)
+    const sent = forwarded[0].prompt
+    expect(sent[1].inputs.image).toMatch(/^g1-run2-[0-9a-f]{64}\.png$/)
+    // is_changed never reaches the engine.
+    expect(Object.keys(sent[1]).sort()).toEqual(['class_type', 'inputs'])
+    // The copy is still there for the queued run; released when its watcher ends.
+    expect(released).toEqual([])
+    expect(existsSync(join(root, 'input', sent[1].inputs.image))).toBe(true)
+    settle!()
+    await new Promise(r => setTimeout(r, 20))
+    expect(existsSync(join(root, 'input', sent[1].inputs.image))).toBe(false)
+  })
+
+  it('a refused or unqueued run releases its copies at once', async () => {
+    for (const forward of [
+      async () => ({ status: 400, body: { error: 'x' } }),
+      async () => { throw new Error('engine down') },
+    ]) {
+      const released: string[] = []
+      await meterGraphSubmit('u', { prompt: { 1: load('a.png'), 2: SINK } }, {
+        priceGraph, releaseInputs: async () => { released.push('now') },
+        spendGuard: async () => {}, validateFileRefs: async () => {}, moderatePrompt: async () => ({ ok: true as const }),
+        hold: async () => ({ ok: true as const, holdId: 1 }), getAvailable: async () => 0,
+        forward, registerRun: async () => {}, startSettle: () => { throw new Error('not reached') }, releaseHold: async () => {},
+      }).catch(() => null)
+      expect(released).toEqual(['now'])
+    }
+  })
+
+  it('is_changed and any other node-level key are dropped by the normalisation; _meta is kept', () => {
+    const n = normalised({ 1: { class_type: 'LoadImage', inputs: { image: 'a.png' }, is_changed: 'pinned', _meta: { title: 'Photo' }, extra: 1 } as any })
+    expect(n[1]).toEqual({ class_type: 'LoadImage', inputs: { image: 'a.png' }, _meta: { title: 'Photo' } })
+  })
+
+  it('the live handler measures from the copies and forwards them', () => {
+    const src = readFileSync(join(process.cwd(), 'server/utils/meterGraphRun.ts'), 'utf8')
+    expect(src).toContain('const snaps = createGateSnapshots()')
+    expect(src).toContain('referenceSecondsProblems: prompt => seedanceReferenceSeconds(prompt, mediaOfCopy, { strict: true })')
+    expect(src).toContain('finalizePrompt: prompt => rewriteMeasuredInputs(prompt, snaps)')
+    expect(src).toContain('releaseInputs: () => snaps.release()')
+    expect(src).toContain('.finally(() => { void snaps.release() })')
+  })
+})

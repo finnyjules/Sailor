@@ -362,6 +362,58 @@ export async function isobmffStill(file: string | Uint8Array, head: Uint8Array):
   return types != null && !types.includes('moov')
 }
 
+/** `n` bytes of `file` from `offset` (fewer at its end), from disk or from an in-memory buffer. */
+async function bytesAt(file: string | Uint8Array, offset: number, n: number): Promise<Uint8Array> {
+  if (typeof file !== 'string') return file.subarray(offset, offset + n)
+  const fh = await open(file, 'r')
+  try {
+    const buf = new Uint8Array(n)
+    const { bytesRead } = await fh.read(buf, 0, n, offset)
+    return buf.subarray(0, bytesRead)
+  }
+  finally { await fh.close() }
+}
+
+/** At most this many entries in a TIFF's first directory; more is refused. */
+const MAX_TIFF_IFD_ENTRIES = 4096
+
+/**
+ * Whether a classic TIFF's first image directory (IFD0) names each tag once.
+ * libtiff (sharp) keeps the first of a repeated tag and Pillow's
+ * ImageFileDirectory_v2 the last, so a file repeating ImageWidth (256) or
+ * ImageLength (257) is sized small by sharp and decoded large by the engine
+ * (task-G1-rereview2 finding 2). Any repeated tag is refused, as is a
+ * directory that can't be read whole: the header (byte order, 42, the IFD0
+ * offset), the entry count (u16), then count × 12-byte entries whose first
+ * u16 is the tag.
+ */
+export async function tiffFirstIfdUnique(file: string | Uint8Array): Promise<boolean> {
+  try {
+    const head = await bytesAt(file, 0, 8)
+    if (head.length < 8) return false
+    const le = head[0] === 0x49 && head[1] === 0x49
+    if (!le && !(head[0] === 0x4D && head[1] === 0x4D)) return false
+    const u16 = (b: Uint8Array, i: number) => (le ? b[i]! | b[i + 1]! << 8 : b[i]! << 8 | b[i + 1]!)
+    const u32 = (b: Uint8Array, i: number) => (le ? readU32LE(b, i) : readU32BE(b, i))
+    if (u16(head, 2) !== 42) return false
+    const ifd = u32(head, 4)
+    const countBytes = await bytesAt(file, ifd, 2)
+    if (countBytes.length < 2) return false
+    const count = u16(countBytes, 0)
+    if (count < 1 || count > MAX_TIFF_IFD_ENTRIES) return false
+    const entries = await bytesAt(file, ifd + 2, count * 12)
+    if (entries.length < count * 12) return false
+    const seen = new Set<number>()
+    for (let e = 0; e < count; e++) {
+      const tag = u16(entries, e * 12)
+      if (seen.has(tag)) return false
+      seen.add(tag)
+    }
+    return true
+  }
+  catch { return false }
+}
+
 /** A header-sized read of `file`'s first `n` bytes, from disk or from an in-memory buffer. */
 async function headBytes(file: string | Uint8Array, n: number): Promise<Uint8Array> {
   if (typeof file !== 'string') return file.subarray(0, n)
@@ -405,9 +457,13 @@ export async function pictureSize(file: string | Uint8Array): Promise<{ pixels: 
       if (!(await isobmffStill(file, head))) return null
       const d = isobmffPrimarySize(typeof file === 'string' ? await headBytes(file, ISOBMFF_HEAD_BYTES) : file)
       if (!d) return null
-      return d.rotated ? { pixels: d.width * d.height } : { pixels: d.width * d.height, width: d.width, height: d.height }
+      // A quarter turn (irot) keeps the sides; the gate tries both orders of a file's sides anyway.
+      return { pixels: d.width * d.height, width: d.width, height: d.height }
     }
     if (!fmt) return null
+    // A TIFF that repeats a tag in its first directory is sized by sharp from
+    // the first copy and decoded by the engine's Pillow from the last (G1 fix round 3).
+    if (fmt === 'tiff' && !(await tiffFirstIfdUnique(file))) return null
     const m = await sharp(file, { pages: 1 }).metadata()
     if (!m.width || !m.height) return null
     const turned = typeof m.orientation === 'number' && m.orientation >= 5
@@ -457,9 +513,14 @@ const inputsOf = (n: { inputs?: unknown } | undefined): NodeInputs =>
  *    its own size up to the cap) — unless something enlarges it on the way,
  *    which makes it 'unsized'.
  */
+/** One possible width × height of a picture. */
+export type Shape = readonly [number, number]
+
 export type PictureSize =
-  // `swappable`: the sides are known but not which is the width (a loaded file).
-  | { px: number, exact: boolean, width?: number, height?: number, swappable?: boolean }
+  // `shapes`: every width × height the picture may have when it runs (G1 fix
+  // round 3): a loaded file's sides in both orders, since which one the engine
+  // takes as the width is not certain. `px` is the largest of them.
+  | { px: number, exact: boolean, shapes?: readonly Shape[] }
   | { unknown: 'unsized' | 'unreadable' | 'unread' }
 
 /** How far back a picture is followed; a longer chain (or a loop) is 'unsized'. */
@@ -653,19 +714,19 @@ function pictureSizer(prompt: Prompt, measure: (value: string) => Promise<FileRe
     memo.set(id, p)
     return p
   }
-  const sized = (width: number, height: number, exact: boolean, swappable = false): PictureSize =>
-    ({ px: width * height, exact, width, height, ...(swappable ? { swappable: true } : {}) })
   /**
-   * A result that depends on which side is which, for an input whose side
-   * order isn't certain (`swappable`): worked out for both orders, and the
-   * side-by-side largest taken (never below either); exact only when both
-   * orders agree (G1 fix round 2).
+   * A picture from its possible shapes (G1 fix round 3, R1): duplicates
+   * dropped; `px` is the largest pixel count among them, and it is exact only
+   * when every shape has that count and the step (`exact`) is exact. The set
+   * is kept whole through every later step, never merged into one shape: a
+   * side-by-side largest is not an upper bound for a step that keeps the
+   * aspect (a taller picture resized to a width comes out SHORTER).
    */
-  const eitherOrder = (w: number, h: number, input: { exact: boolean, swappable?: boolean }, f: (w: number, h: number) => [number, number]): PictureSize => {
-    const [a, b] = f(w, h)
-    if (!input.swappable) return sized(a, b, input.exact)
-    const [c, d] = f(h, w)
-    return sized(Math.max(a, c), Math.max(b, d), input.exact && a === c && b === d)
+  const fromShapes = (shapes: readonly Shape[], exact: boolean): PictureSize => {
+    const unique = shapes.filter((a, i) => shapes.findIndex(b => b[0] === a[0] && b[1] === a[1]) === i)
+    const counts = unique.map(([w, h]) => w * h)
+    const px = Math.max(...counts)
+    return { px, exact: exact && counts.every(c => c === px), shapes: unique }
   }
   const size = async (id: string, path: ReadonlySet<string>): Promise<PictureSize> => {
     const node = prompt[id]
@@ -677,42 +738,43 @@ function pictureSizer(prompt: Prompt, measure: (value: string) => Promise<FileRe
       if (r === 'unread' || r === 'unreadable') return { unknown: r }
       // A file's side ORDER is never certain: the engine's exif_transpose also
       // reads orientation from PNG text chunks and XMP, which sharp doesn't.
-      return { px: r.pixels, exact: true, ...(r.width && r.height ? { width: r.width, height: r.height, swappable: true } : {}) }
+      // Both orders are carried on.
+      if (r.width && r.height) return fromShapes([[r.width, r.height], [r.height, r.width]], true)
+      return { px: r.pixels, exact: true }
     }
     if ('same' in rule) return onLink(rule.same, path)
-    if ('exact' in rule) return { px: rule.exact, exact: true, ...(rule.width && rule.height ? { width: rule.width, height: rule.height } : {}) }
+    if ('exact' in rule) return rule.width && rule.height ? fromShapes([[rule.width, rule.height]], true) : { px: rule.exact, exact: true }
     if ('atMost' in rule) return { px: rule.atMost, exact: false }
     if ('unsized' in rule) return { unknown: 'unsized' }
     const input = await onLink('scaled' in rule ? rule.scaled : 'resize' in rule ? rule.resize : 'crop' in rule ? rule.crop : rule.atLeast, path)
     if ('unknown' in input) return input
     if ('atLeast' in rule) return { px: Math.max(input.px, rule.bound), exact: false }
-    const { width: w, height: h } = input
+    const shapes = input.shapes
     if ('scaled' in rule) {
       const s = rule.side
-      if (w && h) {
-        // The same whichever side is which: the order stays as uncertain as it was.
-        if (rule.round === 'python') return sized(pyRound(w * s), pyRound(h * s), input.exact, input.swappable)
-        return sized(Math.ceil(w * s), Math.ceil(h * s), input.exact && Number.isInteger(s), input.swappable)
+      if (shapes) {
+        if (rule.round === 'python') return fromShapes(shapes.map(([w, h]) => [pyRound(w * s), pyRound(h * s)] as const), input.exact)
+        return fromShapes(shapes.map(([w, h]) => [Math.ceil(w * s), Math.ceil(h * s)] as const), input.exact && Number.isInteger(s))
       }
       if (Number.isInteger(s)) return { px: input.px * s * s, exact: input.exact }
       return { px: scaledBound(input.px, s), exact: false }
     }
     if ('resize' in rule) {
       if (rule.width === 0 && rule.height === 0) return input
-      if (rule.width > 0 && rule.height > 0) return sized(rule.width, rule.height, true)
-      if (!w || !h) return { unknown: 'unsized' }
-      return eitherOrder(w, h, input, (W, H) => rule.width === 0
+      if (rule.width > 0 && rule.height > 0) return fromShapes([[rule.width, rule.height]], true)
+      if (!shapes) return { unknown: 'unsized' }
+      return fromShapes(shapes.map(([W, H]): Shape => (rule.width === 0
         ? [Math.max(1, pyRound(W * rule.height / H)), rule.height]
-        : [rule.width, Math.max(1, pyRound(H * rule.width / W))])
+        : [rule.width, Math.max(1, pyRound(H * rule.width / W))])), input.exact)
     }
-    // Crop: with the input's sides and set offsets, the slice exactly; else at most width × height.
+    // Crop: with the input's shapes and set offsets, each slice exactly; else at most width × height.
     const x = literalCount(rule.x) ?? (rule.x === undefined ? 0 : null)
     const y = literalCount(rule.y) ?? (rule.y === undefined ? 0 : null)
-    if (w && h && x != null && y != null) {
-      return eitherOrder(w, h, input, (W, H) => [
+    if (shapes && x != null && y != null) {
+      return fromShapes(shapes.map(([W, H]) => [
         Math.max(0, Math.min(rule.width, W - Math.min(x, W - 1))),
         Math.max(0, Math.min(rule.height, H - Math.min(y, H - 1))),
-      ])
+      ] as const), input.exact)
     }
     return { px: Math.min(rule.width * rule.height, input.px), exact: false }
   }

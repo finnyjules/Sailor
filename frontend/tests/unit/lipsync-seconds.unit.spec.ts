@@ -275,8 +275,8 @@ describe('the /prompt gate measures lip-sync media', () => {
     // The live wiring shares one read budget between pictures and lengths.
     const src = readFileSync(`${REPO}frontend/server/utils/meterGraphRun.ts`, 'utf8')
     // (G1 fix round 1: one walk gives the picture sizes and their refusals.)
-    expect(src).toContain('measureInputSizes: prompt => graphInputSizes(prompt, undefined, reads)')
-    expect(src).toContain('measureInputSeconds: prompt => graphInputSeconds(prompt, undefined, reads)')
+    expect(src).toContain('measureInputSizes: prompt => graphInputSizes(prompt, pictureOfCopy, reads)')
+    expect(src).toContain('measureInputSeconds: prompt => graphInputSeconds(prompt, mediaOfCopy, reads)')
   })
 
   it('the Studio’s /view links are ownership-checked before anything is read or priced', async () => {

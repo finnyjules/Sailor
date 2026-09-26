@@ -33,7 +33,8 @@
  *    value after the unwrap;
  *  - a class the catalog doesn't know (ComfyUI refuses the whole prompt then too).
  * Inputs a class doesn't declare are otherwise left alone: ComfyUI passes
- * only their links on.
+ * only their links on. Each node keeps only `class_type`, `inputs` and
+ * `_meta`; any other key (`is_changed` above all) is dropped.
  */
 import type { RequestProblem } from '../runner/requestRules'
 import { pyFloatOf, pyIntOf } from '../../shared/runner/pyText'
@@ -122,9 +123,17 @@ export function normalizeHostedPrompt(prompt: unknown, catalog: Catalog | null):
   if (!prompt || typeof prompt !== 'object' || Array.isArray(prompt)) return { prompt: prompt as Prompt }
   const out = structuredClone(prompt) as Prompt
   const problems: RequestProblem[] = []
-  for (const [nodeId, node] of Object.entries(out)) {
-    if (!isDict(node) || typeof node.class_type !== 'string') continue
-    const ct = node.class_type
+  for (const [nodeId, raw] of Object.entries(out)) {
+    if (!isDict(raw) || typeof raw.class_type !== 'string') continue
+    // Only what a node is, what it is given and its title go on (G1 fix
+    // round 3): ComfyUI reads a node-level `is_changed` as the node's cache
+    // signature (execution.py IsChangedCache), which would let a pinned key
+    // serve an old result for a file measured afresh.
+    const node: Record<string, unknown> = { class_type: raw.class_type, inputs: raw.inputs }
+    if (Object.prototype.hasOwnProperty.call(raw, '_meta')) node._meta = raw._meta
+    if (!Object.prototype.hasOwnProperty.call(raw, 'inputs')) delete node.inputs
+    out[nodeId] = node
+    const ct = raw.class_type
     if (!catalog) { problems.push({ nodeId, classType: ct, input: '', message: STEPS_UNAVAILABLE }); continue }
     const entry = Object.prototype.hasOwnProperty.call(catalog, ct) ? catalog[ct] : undefined
     if (!entry) { problems.push({ nodeId, classType: ct, input: '', message: STEP_UNKNOWN }); continue }
