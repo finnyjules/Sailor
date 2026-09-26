@@ -7,6 +7,7 @@ import { realReplicateClient } from './replicateQueue'
 import { createEngineResultStore } from './results'
 import { createHandoff } from './handoff'
 import { createFileHeldBytes } from './heldBytes'
+import { createFileKeptBytes } from './keptBytes'
 import { createMetering } from './metering'
 import { createRunEvents } from './events'
 import { createGenerationRecords } from './records'
@@ -97,6 +98,8 @@ export function getEngine(): Engine {
     },
     // Beside the run store (.data locally, the volume hosted): never ComfyUI's temp folder.
     held: createFileHeldBytes(join(storeDir('data'), 'runner-held')),
+    // Bytes the runner makes itself (keptBytes.ts), beside the run store.
+    kept: createFileKeptBytes(join(storeDir('data'), 'runner-kept')),
   })
   g.__sailorRunnerEngine = engine
   return engine

@@ -25,6 +25,8 @@ import { cancelAndConfirm, type CancelCheck } from './cancelCheck'
 import { planNode, type ProviderBackup } from './executors'
 import type { KeepStep } from './compositor/keep'
 import { createMemoryHeldBytes, type HeldBytes } from './heldBytes'
+import { createMemoryKeptBytes, type KeptBytes } from './keptBytes'
+import { createFileAccess } from './fileAccess'
 import type { BackupSettings } from './config'
 import { linkedFileCheck, measuredInputProblem, requestProblems, unreadableInputWords } from './requestRules'
 import { isReusable, requestFingerprint } from './fingerprint'
@@ -160,6 +162,8 @@ export interface EngineDeps {
    * kept in memory (tests).
    */
   held?: HeldBytes
+  /** Bytes the runner makes itself (./keptBytes.ts). Absent: kept in memory (tests). */
+  kept?: KeptBytes
 }
 
 export interface StartRunInput {
@@ -404,6 +408,8 @@ export function applyGateAction(
 
 export function createEngine(deps: EngineDeps) {
   const held = deps.held ?? createMemoryHeldBytes()
+  const kept = deps.kept ?? createMemoryKeptBytes()
+  const files = createFileAccess(deps.results, kept)
   const live = new Map<string, LiveRun>()
   const locks = new Map<string, Promise<unknown>>()
   const wakers = new Map<string, () => void>()
@@ -853,7 +859,7 @@ export function createEngine(deps: EngineDeps) {
       const readOnce = (f: OutputFile): Promise<Uint8Array> => {
         const key = `${f.type}:${f.subfolder}:${f.filename}`
         let p = reads.get(key)
-        if (!p) { p = deps.results.read(f); reads.set(key, p) }
+        if (!p) { p = files.read(f); reads.set(key, p) }
         return p
       }
       // Resuming a request already sent before a restart (F22 fix round 2):
@@ -877,7 +883,7 @@ export function createEngine(deps: EngineDeps) {
       // before the hand-off; one too large by its size on disk is refused
       // before it is read. Reads nothing for any other node. The size read
       // goes to planNode, which drops a backup that can't take it.
-      const fileCheck = resuming ? { problem: null } as Awaited<ReturnType<typeof linkedFileCheck>> : await linkedFileCheck(take.prompt[id]!, filesAt(take), readOnce, families, f => deps.results.size?.(f) ?? Promise.resolve(null))
+      const fileCheck = resuming ? { problem: null } as Awaited<ReturnType<typeof linkedFileCheck>> : await linkedFileCheck(take.prompt[id]!, filesAt(take), readOnce, families, f => files.size(f))
       if (fileCheck.problem) throw new Error(fileCheck.problem)
       // A media node (./nodeMedia.ts: sync-3 lip-sync, F22; Topaz video
       // upscale, F23): its files read and measured again now, before the
@@ -885,7 +891,7 @@ export function createEngine(deps: EngineDeps) {
       // released); what is measured is what it is planned and charged on.
       let inputSeconds: InputSeconds | undefined
       const media = resuming ? null : await nodeMediaCheck(take.prompt, id, {
-        read: readOnce, size: f => deps.results.size?.(f) ?? Promise.resolve(null), strict: deps.hosted(), filesFrom: filesAt(take),
+        read: readOnce, size: f => files.size(f), strict: deps.hosted(), filesFrom: filesAt(take),
       })
       if (media) {
         if (media.problem !== null) throw new Error(media.problem)
@@ -1001,7 +1007,7 @@ export function createEngine(deps: EngineDeps) {
 
       if (fp && !rec.request) {
         const prior = await deps.store.getResult(userKey, fp)
-        if (prior?.length && (await Promise.all(prior.map(f => deps.results.exists(f)))).every(Boolean)) {
+        if (prior?.length && (await Promise.all(prior.map(f => files.exists(f)))).every(Boolean)) {
           for (const f of prior) await deps.metering.addOutput(run.userId, stageKey, f)
           rec.outputs = prior
           rec.reused = true
@@ -1048,7 +1054,7 @@ export function createEngine(deps: EngineDeps) {
 
       const urls = clientFor(providerOf(rec.request!)).outputUrls(result, plan.media)
       if (!urls.length) throw new Error(plan.media === 'image' ? 'The provider returned no image' : 'The provider returned no video')
-      const files: OutputFile[] = []
+      const saved: OutputFile[] = []
       if (plan.keep) {
         // Blend scene's kept subject (Task F11b): Python reads the first
         // answer only, lays it under the kept region, and saves that as a PNG.
@@ -1057,7 +1063,7 @@ export function createEngine(deps: EngineDeps) {
         if (signal.aborted) throw new RunStopped()
         const file = await deps.results.save(png, { userId: run.userId, prefix: plan.prefix, ext: 'png' })
         await deps.metering.addOutput(run.userId, stageKey, file)
-        files.push(file)
+        saved.push(file)
       }
       else {
         for (const url of urls) {
@@ -1066,23 +1072,23 @@ export function createEngine(deps: EngineDeps) {
             userId: run.userId, prefix: plan.prefix, ext: extFor(contentType, url, plan.media === 'image' ? 'png' : 'mp4'),
           })
           await deps.metering.addOutput(run.userId, stageKey, file)
-          files.push(file)
+          saved.push(file)
         }
       }
-      rec.outputs = files
+      rec.outputs = saved
       rec.status = 'done'
       rec.servedBy = providerOf(rec.request!)
       rec.endedAt = deps.now()
-      if (fp) await deps.store.putResult(userKey, fp, files).catch(e => deps.reportError(e, { site: 'runner.putResult' }))
+      if (fp) await deps.store.putResult(userKey, fp, saved).catch(e => deps.reportError(e, { site: 'runner.putResult' }))
       // Made on the backup: also filed under the backup's own request, so the same settings reuse it either way.
       if (rec.switchedFrom && rec.payload && isReusable(rec.payload)) {
         const backupFp = requestFingerprint(fingerprintEndpoint(rec.servedBy, rec.endpoint!), withKeep(rec.payload, plan.keep), u => deps.handoff.hashOf(u))
-        if (backupFp !== fp) await deps.store.putResult(userKey, backupFp, files).catch(e => deps.reportError(e, { site: 'runner.putResult' }))
+        if (backupFp !== fp) await deps.store.putResult(userKey, backupFp, saved).catch(e => deps.reportError(e, { site: 'runner.putResult' }))
       }
       // The result is made, kept and billed: a failed save here must not turn
       // the node into an error. The stage's closing save writes it down again.
       await persist(run).catch(e => deps.reportError(e, { site: 'runner.node.save', stageKey, node: id }))
-      const ui = plan.uiFor(files)
+      const ui = plan.uiFor(saved)
       if (ui) publish(run, ev.executed(stageKey, id, ui))
     }
     catch (e) {
@@ -1405,15 +1411,15 @@ export function createEngine(deps: EngineDeps) {
     const wanted = prompts.reduce((n, p) => n + [...legNodes(p, noGates)].filter(id => isQueuedWork(p[id]!.class_type)).length, 0)
     if (queuedCalls(i.userId) + wanted > MAX_QUEUED_CALLS) throw refuse('You have too many runs waiting. Try again when one finishes.', 429)
     await deps.metering.spendGuard(i.userId)
-    const files = new Map<string, OutputFile>()
-    for (const p of prompts) for (const f of collectInputFiles(p)) files.set(`${f.type}:${f.subfolder}:${f.filename}`, f)
-    await assertFilesOwned([...files.values()], i.userId, deps.hosted(), deps.ownership)
+    const inputFiles = new Map<string, OutputFile>()
+    for (const p of prompts) for (const f of collectInputFiles(p)) inputFiles.set(`${f.type}:${f.subfolder}:${f.filename}`, f)
+    await assertFilesOwned([...inputFiles.values()], i.userId, deps.hosted(), deps.ownership)
     // Seedance 2.0 references: at most 15 s of video and 15 s of sound in all,
     // measured from their input files; hosted refuses one it can't measure
     // (S1b fix round 2). Loaded here so this change stays in one place.
     const { runnerReferenceProblems } = await import('../utils/graphInputSeconds')
     const tooLong = await runnerReferenceProblems(prompts, {
-      readFile: f => deps.results.read(f), strict: deps.hosted(),
+      readFile: f => files.read(f), strict: deps.hosted(),
       assertOwned: fs => assertFilesOwned(fs, i.userId, deps.hosted(), deps.ownership),
     })
     if (tooLong) throw refuse(tooLong.message, 400, { nodeId: tooLong.nodeId, classType: tooLong.classType })
@@ -1428,7 +1434,7 @@ export function createEngine(deps: EngineDeps) {
         if (!mediaNodeKind(n)) continue
         await assertFilesOwned(nodeMediaFiles(p, nodeId), i.userId, deps.hosted(), deps.ownership)
         const media = await nodeMediaCheck(p, nodeId, {
-          read: f => deps.results.read(f), size: f => deps.results.size?.(f) ?? Promise.resolve(null), strict: deps.hosted(),
+          read: f => files.read(f), size: f => files.size(f), strict: deps.hosted(),
         })
         if (!media) continue
         if (media.problem !== null) throw refuse(media.problem, 400, { nodeId, classType: n.class_type })
@@ -1438,7 +1444,7 @@ export function createEngine(deps: EngineDeps) {
     // A Frame's baked layers and masks are files the browser uploaded just
     // before: one that is gone fails now, before anything runs or is charged.
     for (const f of loadImageFiles(prompts)) {
-      if (!(await deps.results.exists(f))) throw refuse('A picture this Frame needs is missing. Run it again.', 400, { file: f.filename })
+      if (!(await files.exists(f))) throw refuse('A picture this Frame needs is missing. Run it again.', 400, { file: f.filename })
     }
     await deps.metering.moderate(prompts)
 
@@ -1550,6 +1556,7 @@ export function createEngine(deps: EngineDeps) {
     const active = await deps.store.listActive()
     // Held bytes of runs no longer in progress are let go (heldBytes.ts).
     await held.keepOnly(new Set(active.map(r => r.id))).catch(e => deps.reportError(e, { site: 'runner.held.sweep' }))
+    await kept.keepOnly(new Set(active.map(r => r.id))).catch(e => deps.reportError(e, { site: 'runner.kept.sweep' }))
     for (const run of active) {
       if (live.has(run.id)) continue
       const leg = run.legs.find(l => l.status === 'running')
