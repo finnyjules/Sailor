@@ -2900,6 +2900,7 @@ function paintLayer(
     && !layerPaints(layer).some(p => isFill(p) && fillIsShader(p))  // shader fills are live / frame-anchored
     && !layerHasFoil(layer)                                         // foil is lit by the Frame's light over the frame — never bake it
     && !isClipLayer                                                 // a living image changes every frame — never bake it
+    && !(layer.kind === 'brush' && _liveTip.has(layer.id))          // a live tip stroke isn't in the key: never bake a half-painted raster
     && silhouetteContentReady(layer, W)
   // Memoized like `dofContent` below: identical for every clone of the SAME tint.
   //
@@ -4850,22 +4851,23 @@ function drawLayerContentBody(ctx: CanvasRenderingContext2D, layer: LocalLayer, 
     const octx = off.getContext('2d'); if (!octx) return
     octx.save()
     octx.translate(-b.minX * W * dpr * scale, -b.minY * W * dpr * scale) // bounds' top-left → offscreen origin
-    // Legacy stamps draw first, then tip coverage on top — on a layer that mixes both stroke
-    // kinds this does NOT preserve paint order between them, and an eraser only cuts its own
-    // engine's paint (a legacy erase stroke never touches tip coverage and vice versa). Known
-    // Part 1 limitation.
+    // Legacy stamps draw first, then the tip groups composite over them in order. Paint mode
+    // only makes tip strokes, so on a layer that has both, every legacy stroke predates every
+    // tip stroke and this IS paint order: a tip eraser cuts legacy paint too (the stamps are
+    // handed to renderTipCoverage as its base). A legacy erase stroke only cuts legacy paint.
     const legacy = layer.strokes.filter(s => !isTipStroke(s)) as PaintStroke[]
     if (legacy.length) stampStrokes(octx, legacy, W * dpr * scale)   // base = artboard-width scale × keep-proportions scale
     octx.restore()
     // Tip strokes (spray/round/bristle) render through the shared coverage engine —
     // a cached white-alpha canvas (+ optional shade), already in offscreen DEVICE
     // space (origin = bounds' top-left, unitPx = W*dpr*scale per Frame unit, matching
-    // the legacy translate above). A brush with only legacy strokes never reaches this:
-    // `renderTipCoverage` returns null with no side effects, so that layer takes exactly
-    // the old code path (byte-identical output).
+    // the legacy translate above). With legacy stamps it is the WHOLE layer (stamps + tip
+    // groups), so it replaces the offscreen. A brush with only legacy strokes never reaches
+    // this: `renderTipCoverage` returns null with no side effects, so that layer takes
+    // exactly the old code path (byte-identical output).
     const unitPx = (W * dpr * scale) / REF_W
-    const cov = renderTipCoverage(layer.id, layer.strokes, { originX: b.minX * REF_W, originY: b.minY * REF_W, unitPx, w: dw, h: dh }, live, liveE?.tailMs ?? 0)
-    if (cov) octx.drawImage(cov.coverage, 0, 0, dw, dh)
+    const cov = renderTipCoverage(layer.id, layer.strokes, { originX: b.minX * REF_W, originY: b.minY * REF_W, unitPx, w: dw, h: dh }, live, liveE?.tailMs ?? 0, legacy.length ? off : null)
+    if (cov) { if (legacy.length) octx.clearRect(0, 0, dw, dh); octx.drawImage(cov.coverage, 0, 0, dw, dh) }
     if (hasPaint(layer.fill)) {
       octx.save()
       octx.translate(dw / 2, dh / 2)             // center so resolvePaint's gradient/pattern lines up
