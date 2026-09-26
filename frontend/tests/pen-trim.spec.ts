@@ -63,10 +63,11 @@ test('trim by click and sweep, one undo for the sweep, then cut and dissolve', a
   expect(xs[0]![1]).toBeCloseTo(16, 5)
   await expect(page.locator('[data-trim-ghost]')).toHaveCount(1)
 
-  // sweep across 4–8 and 8–10 in one press
+  // sweep across 4–8 and 8–10 in one press — as ONE pointer move, the way a
+  // fast sweep arrives once the browser coalesces moves
   await moveTo(page, 6, 6, 3)
   await page.mouse.down()
-  await moveTo(page, 9.2, 6, 12)
+  await moveTo(page, 9.2, 6, 1)
   await page.mouse.up()
   xs = await lineXs(page)
   expect(xs.length).toBe(1)

@@ -126,6 +126,94 @@ describe('pen trim tool', () => {
   })
 })
 
+describe('pen trim — review fixes', () => {
+  it('one big jump across a middle piece still removes it', () => {
+    const { doc, pen } = mk()
+    line(pen, 0, 0, 10, 0)
+    line(pen, 3, -4, 3, 4)
+    line(pen, 7, -4, 7, 4)
+    const h = lines(doc.value)[0]
+    pen.selectTool('trim')
+    pen.trimDown(1.5, 0)             // removes [0, 3]
+    pen.trimMove(9, 0)               // one coalesced move across [3, 7] (and onto [7, 10])
+    pen.trimUp(9, 0)
+    expect(lines(doc.value).some(l => l.id === h.id)).toBe(false)
+    expect(pen.trimGhosts.value.length).toBe(3)
+    expect(lines(doc.value).length).toBe(2)   // the two cutters untouched
+  })
+
+  it('an empty press records nothing and keeps the status line', () => {
+    const { doc, pen } = mk()
+    line(pen, 0, 0, 10, 0)
+    line(pen, 5, -5, 5, 5)
+    const [h] = lines(doc.value)
+    pen.pick(h.id); pen.apply('horizontal')
+    pen.selectTool('trim')
+    pen.trimDown(2, 0); pen.trimUp(2, 0)
+    pen.trimDown(7, 0); pen.trimUp(7, 0)
+    expect(pen.status.value).toBe('Removed 1 rule with that piece')
+    const snap = JSON.stringify(doc.value)
+    pen.trimDown(20, 20); pen.trimMove(21, 20); pen.trimUp(21, 20)   // nothing under the press
+    expect(pen.status.value).toBe('Removed 1 rule with that piece')
+    expect(JSON.stringify(doc.value)).toBe(snap)
+    pen.undo()
+    expect(lines(doc.value).some(l => l.id === h.id)).toBe(true)   // the undo step is the real trim
+  })
+
+  it('a text guide split by Trim says which piece the text follows', () => {
+    const doc = ref<SketchDoc>({ entities: [], constraints: [] })
+    const pen = usePen({ doc, view: ref(DEV), options: { openOnly: true, tools: ['select', 'path', 'curve', 'trim', 'cut', 'dissolve'] } })
+    path(pen, [[0, 0], [10, 0]])
+    path(pen, [[3, -4], [3, 4]])
+    path(pen, [[7, -4], [7, 4]])
+    pen.selectTool('trim')
+    pen.trimDown(5, 0); pen.trimUp(5, 0)
+    expect(pen.status.value).toBe('The text follows the longer piece')
+  })
+
+  it('a text guide split by a segment Delete says which piece the text follows', () => {
+    const doc = ref<SketchDoc>({ entities: [], constraints: [] })
+    const pen = usePen({ doc, view: ref(DEV), options: { openOnly: true, tools: ['select', 'path', 'curve'] } })
+    path(pen, [[0, 0], [5, 0], [5, 5], [0, 5]])
+    const p = paths(doc.value)[0]
+    pen.selectTool('select')
+    pen.pickSegment(p.id, 1)
+    pen.del()
+    expect(paths(doc.value).length).toBe(2)
+    expect(pen.status.value).toBe('The text follows the longer piece')
+  })
+
+  it('switching tools finishes a pending path instead of throwing it away', () => {
+    const { doc, pen } = mk()
+    pen.selectTool('path')
+    for (const [x, y] of [[0, 0], [4, 0], [4, 4]] as const) { pen.pathDown(x, y); pen.pathUp(x, y) }
+    expect(pen.onKeydown(key('t'))).toBe(true)
+    expect(pen.tool.value).toBe('trim')
+    const ps = paths(doc.value)
+    expect(ps.length).toBe(1)
+    expect(ps[0].anchors.length).toBe(3)
+    expect(ps[0].closed).toBe(false)
+  })
+
+  it('switching tools still drops a lone first anchor', () => {
+    const { doc, pen } = mk()
+    pen.selectTool('path')
+    pen.pathDown(1, 1); pen.pathUp(1, 1)
+    pen.selectTool('select')
+    expect(doc.value.entities.length).toBe(0)
+  })
+
+  it('a circle crossed once shows one ring, not two on one spot', () => {
+    const { pen } = mk()
+    pen.selectTool('circle'); pen.place(0, 0); pen.place(3, 0)
+    line(pen, -5, 0, -1, 0.5)   // ends inside: crosses the circle once, at the left
+    pen.selectTool('trim')
+    pen.trimMove(0, -3)
+    expect(pen.trimHover.value!.ref.kind).toBe('circle')
+    expect(pen.trimHoverEnds.value.length).toBe(1)
+  })
+})
+
 describe('pen cut and dissolve tools', () => {
   it('cut then dissolve round-trips a path line segment', () => {
     const { doc, pen } = mk()

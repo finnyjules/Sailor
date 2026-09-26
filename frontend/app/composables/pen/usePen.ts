@@ -454,6 +454,7 @@ export function usePen(opts: {
       return { pathId: s.pathId, segIndex: s.segIndex, from: p.anchors[s.segIndex] as EntityId, to: p.anchors[(s.segIndex + 1) % p.anchors.length] as EntityId }
     }).filter((s): s is NonNullable<typeof s> => !!s)
       .sort((a, b) => a.pathId === b.pathId ? b.segIndex - a.segIndex : a.pathId < b.pathId ? -1 : 1)
+    const pathsBefore = doc.value.entities.filter(e => e.kind === 'path').length
     for (const s of segs) {
       const at = findSegment(s.from, s.to)
       if (at) removeSegment(doc.value, at.pathId, at.segIndex)
@@ -462,6 +463,9 @@ export function usePen(opts: {
     for (const id of [...selection.value]) deleteEntity(doc.value, id)
     clearSel()
     runSolve()
+    // a text guide split in two: say which piece the text follows
+    const pathsAfter = doc.value.entities.filter(e => e.kind === 'path').length
+    if (openOnly && segs.length && pathsAfter > Math.max(1, pathsBefore)) status.value = 'The text follows the longer piece'
     commitHistory()
   }
   function findSegment(from: EntityId, to: EntityId): { pathId: EntityId; segIndex: number } | null {
@@ -1217,11 +1221,29 @@ export function usePen(opts: {
   const cutHover = ref<{ x: number; y: number } | null>(null)
   // the path point a Dissolve click would remove; ok = the two pieces line up
   const dissolveHover = ref<{ pathId: EntityId; anchorIndex: number; x: number; y: number; ok: boolean } | null>(null)
-  // a live Trim press: plain state (only the pen reads it). `dropped` counts
-  // the rules removed with the pieces so far, for the status line on release;
-  // `ends` are the ends of the pieces removed so far and `carrier` the curve
-  // the last one lay on (see trimMove).
-  let trimPress: { dropped: number; ends: Vec2[]; carrier: CurveGeom | null } | null = null
+  // a live Trim press: plain state (only the pen reads it). `removed` and
+  // `dropped` count the pieces and the rules removed so far (an empty press
+  // settles nothing, and the status line reports the rules); `ends` are the
+  // ends of the pieces removed so far and `carrier` the curve the last one lay
+  // on (see sweepSkips); `last` is the last pointer position the press saw
+  // (see trimMove); `paths` the path count when the press began (a text guide
+  // split in two says which piece the text follows).
+  let trimPress: { removed: number; dropped: number; ends: Vec2[]; carrier: CurveGeom | null; last: Vec2; paths: number } | null = null
+  const pathCount = () => doc.value.entities.filter(e => e.kind === 'path').length
+  const GUIDE_SPLIT_STATUS = 'The text follows the longer piece'
+
+  // the distinct points where a crossing cuts the hovered piece — one ring
+  // each (a circle crossed once starts and ends at the same crossing)
+  const trimHoverEnds = computed<Vec2[]>(() => {
+    const s = tool.value === 'trim' ? trimHover.value : null
+    if (!s) return []
+    const out: Vec2[] = []
+    for (const e of [s.start, s.end]) {
+      if (!e.cutter) continue
+      if (!out.some(q => Math.hypot(q.x - e.point.x, q.y - e.point.y) < 1e-9)) out.push(e.point)
+    }
+    return out
+  })
 
   const snapTol = () => pxToUnits(SNAP_PX, opts.view.value)
 
@@ -1237,6 +1259,7 @@ export function usePen(opts: {
     if (!res.ok) return false
     if (d) trimGhosts.value = [...trimGhosts.value, d]
     if (trimPress) {
+      trimPress.removed++
       trimPress.dropped += res.droppedRules
       trimPress.ends.push(span.start.point, span.end.point)
       trimPress.carrier = carrier
@@ -1246,7 +1269,7 @@ export function usePen(opts: {
   }
   function trimDown(x: number, y: number) {
     if (tool.value !== 'trim') return
-    trimPress = { dropped: 0, ends: [], carrier: null }
+    trimPress = { removed: 0, dropped: 0, ends: [], carrier: null, last: { x, y }, paths: pathCount() }
     const span = trimSpanAt(x, y)
     if (span) trimRemove(span)
     trimHover.value = trimSpanAt(x, y)
@@ -1264,11 +1287,23 @@ export function usePen(opts: {
     const g = curveGeom(doc.value, span.ref)
     return !g || !sameCarrier(press.carrier, g, pxToUnits(0.5, opts.view.value))
   }
+  // The browser coalesces pointer moves (about one per frame), so a fast sweep
+  // arrives as big jumps. While pressed, walk from the last position the press
+  // saw to this one in steps of half the snap reach, taking the piece under
+  // each step, so no piece the pointer passed over is skipped.
   function trimMove(x: number, y: number) {
     if (tool.value !== 'trim') return
-    if (trimPress) {
-      const span = trimSpanAt(x, y)
-      if (span && !sweepSkips(span, x, y)) trimRemove(span)
+    const press = trimPress
+    if (press) {
+      const from = press.last
+      const len = Math.hypot(x - from.x, y - from.y)
+      const n = Math.max(1, Math.ceil(len / (snapTol() / 2)))
+      for (let i = 1; i <= n; i++) {
+        const px = from.x + (x - from.x) * (i / n), py = from.y + (y - from.y) * (i / n)
+        const span = trimSpanAt(px, py)
+        if (span && !sweepSkips(span, px, py)) trimRemove(span)
+      }
+      press.last = { x, y }
     }
     trimHover.value = trimSpanAt(x, y)
   }
@@ -1276,9 +1311,14 @@ export function usePen(opts: {
     const press = trimPress
     if (!press) return
     trimPress = null
-    runSolve()
-    if (press.dropped > 0) status.value = `Removed ${press.dropped} ${press.dropped === 1 ? 'rule' : 'rules'} with that piece`
-    commitHistory()   // one entry for the whole press→release
+    if (press.removed > 0) {
+      runSolve()
+      const notes: string[] = []
+      if (press.dropped > 0) notes.push(`Removed ${press.dropped} ${press.dropped === 1 ? 'rule' : 'rules'} with that piece`)
+      if (openOnly && pathCount() > Math.max(1, press.paths)) notes.push(GUIDE_SPLIT_STATUS)
+      if (notes.length) status.value = notes.join(' · ')
+      commitHistory()   // one entry for the whole press→release
+    }
     trimHover.value = x != null && y != null && tool.value === 'trim' ? trimSpanAt(x, y) : null
   }
 
@@ -1587,6 +1627,10 @@ export function usePen(opts: {
       dimBuffer.value = ''
       return
     }
+    // Switching away mid-path keeps the work: a pending path with two or more
+    // points is finished as an open path (as finishSession does; finishPath
+    // commits it). A lone first point is still dropped just below.
+    if (pendingPath.value && pendingPath.value.anchors.length >= 2) finishPath(false)
     // Fix (c): switching tools mid Line/Circle must delete its owned start
     // point too (deletePendingOwnPoint, above). Folded into ONE before/after
     // check + commit with the pending PATH cleanup right below, so a switch
@@ -1736,7 +1780,7 @@ export function usePen(opts: {
     place, pathDown, pathMove, pathUp, finishPath, cancelPath, removeLastAnchor, getPathDrag, jointInfoForSegment,
     curveDown, curveMove, curveUp, getCurveDrag, getHeldHandles, handleIds, endGesture,
     // trim / cut / dissolve
-    trimHover, trimGhosts, cutHover, dissolveHover,
+    trimHover, trimHoverEnds, trimGhosts, cutHover, dissolveHover,
     trimDown, trimMove, trimUp, cutMove, cutClick, dissolveMove, dissolveClick, clearToolHover, clearTrimGhosts,
     // verbs
     runSolve, apply, applyWithValue, availableConstraints, orderRefs, del, nudge, fixSelected, makeConstruction, flip,

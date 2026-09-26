@@ -88,7 +88,7 @@ const {
   curveDown, curveMove, curveUp, getCurveDrag, getHeldHandles, handleIds,
   runSolve, applyRepeat, applyMirror, cancelPendingOp,
   onArcDimClick, onConstraintMarkClick, commitHistory, finishSession, endGesture,
-  trimHover, trimGhosts, cutHover, dissolveHover,
+  trimHover, trimHoverEnds, trimGhosts, cutHover, dissolveHover,
   trimDown, trimMove, trimUp, cutMove, cutClick, dissolveMove, dissolveClick, clearToolHover,
 } = props.pen
 
@@ -429,11 +429,7 @@ const cursorGlow = computed(() => {
 // where a crossing cuts it. Cut: the point a click would add. Dissolve: the
 // point a click would remove (green when its two pieces line up).
 const trimHoverD = computed(() => (tool.value === 'trim' && trimHover.value ? spanPathD(doc.value, trimHover.value) : ''))
-const trimHoverRings = computed(() => {
-  const s = tool.value === 'trim' ? trimHover.value : null
-  if (!s) return []
-  return [s.start, s.end].filter(e => e.cutter).map(e => toScreen(e.point))
-})
+const trimHoverRings = computed(() => trimHoverEnds.value.map(p => toScreen(p)))
 const cutHoverScreen = computed(() => (tool.value === 'cut' && cutHover.value ? toScreen(cutHover.value) : null))
 const dissolveHoverScreen = computed(() => {
   const h = tool.value === 'dissolve' ? dissolveHover.value : null
