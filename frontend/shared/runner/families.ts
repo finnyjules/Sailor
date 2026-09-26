@@ -84,9 +84,17 @@ export type RunnerFamily =
    * ComfyUI (Replicate's Topaz) at its flat price, as before.
    */
   | 'topaz-video'
+  /**
+   * The text and data cards (step 3, R0/R1): Primitive, Text, Moodboard,
+   * Model3D, the bake-replay cards, LoadImage outside the Frame, Empty image,
+   * Get image size, Image to mask, Save image, Preview image, Smart Layout.
+   * Computed by the runner itself, free. Off: the runner takes exactly what
+   * it took before step 3.
+   */
+  | 'cards'
 
 export const RUNNER_FAMILIES: readonly RunnerFamily[] = [
-  'fal-edit', 'replicate-image', 'replicate-video', 'nano-actions', 'ref-edits', 'restyle', 'frame', 'wan-3', 'gpt-image-2.5', 'h3-max-turbo', 'gemini-omni-flash', 'veo-3.1-lite', 'qwen-image-3', 'grok-imagine-2', 'ideogram-4', 'seedream-5-pro-edit', 'qwen-2511-angles', 'nano-banana-2-blend', 'bria-product-shot', 'muse-image', 'nano-banana-2-lite', 'reve-2.1', 'recraft-v4.1', 'krea-2', 'happyhorse-1.1', 'grok-imagine-video-1.5', 'ltx-2.5-fast', 'luma-ray-3.2', 'sync-3', 'topaz-video',
+  'fal-edit', 'replicate-image', 'replicate-video', 'nano-actions', 'ref-edits', 'restyle', 'frame', 'wan-3', 'gpt-image-2.5', 'h3-max-turbo', 'gemini-omni-flash', 'veo-3.1-lite', 'qwen-image-3', 'grok-imagine-2', 'ideogram-4', 'seedream-5-pro-edit', 'qwen-2511-angles', 'nano-banana-2-blend', 'bria-product-shot', 'muse-image', 'nano-banana-2-lite', 'reve-2.1', 'recraft-v4.1', 'krea-2', 'happyhorse-1.1', 'grok-imagine-video-1.5', 'ltx-2.5-fast', 'luma-ray-3.2', 'sync-3', 'topaz-video', 'cards',
 ]
 
 const KNOWN: ReadonlySet<string> = new Set(RUNNER_FAMILIES)

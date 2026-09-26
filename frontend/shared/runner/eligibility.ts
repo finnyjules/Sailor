@@ -7,6 +7,7 @@ import { NO_FAMILIES, type RunnerFamily } from './families'
 import { pyFloatOf, pyIntOf, pyTruthy } from './pyText'
 import { SYNC_3_ENGINE, isSync3LipSync, lipSyncEngine } from './lipSync'
 import { TOPAZ_VIDEO_FPS, TOPAZ_VIDEO_TARGETS } from './topazVideo'
+import { outputKind, BASE_VALUE_INPUTS, OUTPUT_KINDS, type ValueKind } from './values'
 
 export const RUNNER_NODE_TYPES: ReadonlySet<string> = new Set([
   'GenerateImageNode', 'GenerateVideoNode', 'ComfyGateNode', 'Image', 'Video',
@@ -29,6 +30,13 @@ export interface RunnerNodeRule {
   models?: Readonly<Record<string, RunnerFamily | RunnerModelRule>>
   mustLink?: readonly string[]
   mustNotLink?: readonly string[]
+  /**
+   * Inputs that take a value wire (R0), and of which kinds. Such an input is
+   * exempt from `mustNotLink` when the wire carries one of these kinds: the
+   * engine hands the node the value as if it were typed. A wire of any other
+   * kind into it (files, or an unknown source) is refused.
+   */
+  valueInputs?: Readonly<Record<string, readonly ValueKind[]>>
   /**
    * A class the runner computes itself, with no provider and no charge:
    * 'render' makes a picture (it counts as work, like a provider node);
@@ -630,7 +638,7 @@ export function nodeRuleAllows(
   const upgraded = !!rule.upgrade && families.has(rule.upgrade.family)
   if (!upgraded && (!family || !families.has(family))) return false
   if (need.some(name => !isLink(inputs[name]))) return false
-  if ((rule.mustNotLink ?? []).some(name => isLink(inputs[name]))) return false
+  if ((rule.mustNotLink ?? []).some(name => isLink(inputs[name]) && !rule.valueInputs?.[name])) return false
   if ((rule.offWidgets ?? []).some(name => isLink(inputs[name]) || pyTruthy(inputs[name]))) return false
   for (const [name, spec] of Object.entries(rule.widgets ?? {})) {
     if (!widgetValid(inputs, name, spec)) return false
@@ -819,6 +827,37 @@ function graphRuleAllows(prompt: ApiPrompt, id: string, rule: RunnerNodeRule): b
   return true
 }
 
+/** The inputs of a class that take a value wire: its rule row's, else the base table's (the Gate). */
+export function valueInputsOf(classType: string): Readonly<Record<string, readonly ValueKind[]>> {
+  const rule = Object.prototype.hasOwnProperty.call(RUNNER_NODE_RULES, classType) ? RUNNER_NODE_RULES[classType] : undefined
+  return rule?.valueInputs ?? (Object.prototype.hasOwnProperty.call(BASE_VALUE_INPUTS, classType) ? BASE_VALUE_INPUTS[classType]! : {})
+}
+
+/**
+ * Whether every wire into this node carries what the input takes: a value
+ * only into an input listed for that kind; into a listed value input,
+ * nothing but a kind it lists (the Gate's lists files too). File wires into
+ * unlisted inputs are unchanged.
+ */
+export function valueWiresAllowed(
+  prompt: ApiPrompt, id: string,
+  kinds: Readonly<Record<string, Readonly<Record<number, ValueKind>>>> = OUTPUT_KINDS,
+): boolean {
+  const node = prompt[id]
+  if (!node) return false
+  const takes = valueInputsOf(node.class_type)
+  for (const l of linksOf(node)) {
+    const kind = outputKind(prompt, [l.from, l.slot], kinds)
+    const allowed = Object.prototype.hasOwnProperty.call(takes, l.input) ? takes[l.input] : undefined
+    if (kind === 'files') {
+      if (allowed && !allowed.includes('files')) return false
+      continue
+    }
+    if (!allowed?.includes(kind)) return false
+  }
+  return true
+}
+
 /**
  * Whether the runner can take this one node of the prompt: a runner node type,
  * on a runner model, asking for one picture, with no sound wired into a
@@ -848,6 +887,7 @@ export function runnerTakesNode(prompt: ApiPrompt, id: string, families: Readonl
   for (const v of Object.values(inputs)) {
     if (isLink(v) && !(v[0] in prompt)) return false
   }
+  if (!valueWiresAllowed(prompt, id)) return false
   return true
 }
 
