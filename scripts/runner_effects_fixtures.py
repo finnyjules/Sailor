@@ -11,6 +11,15 @@ Groups:
               (AdjustExposure, AdjustInvert, AdjustThreshold) over the
               standard case set; save_live_preview of a 4-channel tensor
               (the preview keeps RGBA).
+  kernels   — (R2.2) the kernels the effects share, each on its own against
+              torch / torchvision: linspace, arange, remainder, pow, the
+              transcendental functions, the area / nearest / bilinear /
+              bicubic resizes, grid_sample, affine_grid, the pools, reflect
+              padding, conv2d, the gaussian kernel and blur, torchvision's
+              colour operations, torch.mean and topk. Inputs are rebuilt from
+              `hashed_values` (no stored floats); an exact kernel's output is
+              stored as float32 (or its sha256 when large), a library one's
+              always (zlib), with its band list at each ε candidate.
 
 Every picture reaches a node as it does in a real run, through the real
 Python loader of its source (as scripts/compositor_fixtures.py):
@@ -419,7 +428,262 @@ def machinery() -> dict:
     return {"synth": synths, "cases": g.cases, "chains": chains, "assets": {k: b64(v) for k, v in sorted(g.assets.items())}, "rgba_preview": rgba}
 
 
-GROUPS = {"machinery": machinery}
+# ── Group `kernels` (R2.2): the sampling, pooling and convolution kernels ────
+
+# ε candidates for the library kernels' bands (255-scale; R2 rule 10: at most 2⁻⁸).
+KERNEL_EPS = {"2^-12": 2.0 ** -12, "2^-10": 2.0 ** -10, "2^-8": 2.0 ** -8}
+# Outputs of at most this many values are stored as float32; larger exact ones as a sha256.
+KERNEL_STORE_MAX = 4096
+
+
+def hashed_values(n: int, seed: int, lo: float = 0.0, hi: float = 1.0, levels: int = 0) -> np.ndarray:
+    """n float32 values from a multiplicative hash of the index (as runner_values_fixtures.py
+    `hashed_src`): u = k / 2²⁴, then lo + (hi − lo)·u in double, rounded to float32 once; with
+    `levels`, u is first quantised to floor(u·levels) / (levels − 1) (ties for max/min and hue).
+    tests/unit/runner-effects-kernels.unit.spec.ts rebuilds the same."""
+    i = np.arange(n, dtype=np.uint64)
+    k = ((i * np.uint64(2654435761) + np.uint64(seed * 40503)) & np.uint64(0xFFFFFFFF)) >> np.uint64(8)
+    u = k.astype(np.float64) / 16777216.0
+    if levels:
+        u = np.floor(u * levels) / (levels - 1)
+    return (lo + (hi - lo) * u).astype(np.float32)
+
+
+def kernel_input(spec: dict) -> torch.Tensor:
+    """A (1, C, H, W) tensor from its spec: planar values, then the memory format."""
+    c, h, w = spec["shape"]
+    v = hashed_values(c * h * w, spec["seed"], spec.get("lo", 0.0), spec.get("hi", 1.0), spec.get("levels", 0))
+    t = torch.from_numpy(v.reshape(1, c, h, w).copy())
+    if spec.get("memory") == "channels-last":
+        t = t.contiguous(memory_format=torch.channels_last)
+    return t
+
+
+def planar_bytes(t: torch.Tensor) -> bytes:
+    return t.detach().contiguous().cpu().numpy().astype("<f4").tobytes()
+
+
+def kernel_bands(t: torch.Tensor) -> dict:
+    """band_list at each ε candidate (a library kernel's float against the 8-bit boundaries)."""
+    flat = t.detach().reshape(-1)
+    return {name: band_list(flat, eps) for name, eps in KERNEL_EPS.items()}
+
+
+def kernel_out(t: torch.Tensor, library: bool) -> dict:
+    """A kernel's output, planar (C, H, W) float32 bytes: stored (library: always, zlib'd) or
+    hashed (a large exact one)."""
+    raw = planar_bytes(t)
+    row: dict = {"shape": list(t.shape), "f32_sha256": sha(raw)}
+    if library:
+        row["f32z"] = b64(zlib.compress(raw, 9))
+        row["bands"] = kernel_bands(t)
+    elif t.numel() <= KERNEL_STORE_MAX:
+        row["f32"] = b64(raw)
+    return row
+
+
+class KernelCases:
+    def __init__(self) -> None:
+        self.cases: list[dict] = []
+        self.seed = 0
+
+    def inp(self, c: int, h: int, w: int, lo: float = 0.0, hi: float = 1.0, memory: str = "contiguous", levels: int = 0) -> dict:
+        self.seed += 1
+        spec = {"shape": [c, h, w], "seed": self.seed, "lo": lo, "hi": hi, "memory": memory}
+        if levels:
+            spec["levels"] = levels
+        return spec
+
+    def add(self, name: str, fn: str, cls: str, inputs: list, args: dict, run) -> None:
+        row = {"name": name, "fn": fn, "class": cls, "inputs": inputs, "args": args}
+        try:
+            outs = run(*[kernel_input(s) for s in inputs])
+        except Exception as e:  # torch raises: the runner's plain message is checked against it
+            row["error"] = {"type": type(e).__name__, "message": str(e)}
+            self.cases.append(row)
+            return
+        if not isinstance(outs, (list, tuple)):
+            outs = [outs]
+        row["outputs"] = [kernel_out(o, cls == "library") for o in outs]
+        self.cases.append(row)
+
+
+def kernels() -> dict:
+    import torch.nn.functional as F
+    from torchvision.transforms import _functional_tensor as TF
+    g = KernelCases()
+
+    # ── linspace, arange, remainder ──
+    for a, b, n in ((0.0, 1.0, 1), (0.0, 1.0, 2), (-1.0, 1.0, 5), (-1.0, 1.0, 37), (-1.0, 1.0, 320), (-2.5, 7.3, 23),
+                    (-15.0, 15.0, 31), (-90.0, 90.0, 181), (-150.0, 150.0, 301), (0.0, 1.0, 1000), (0.1, 0.7, 64000), (3.0, -1.7, 77)):
+        g.add(f"linspace({a}, {b}, {n})", "linspace", "exact", [], {"a": a, "b": b, "n": n},
+              lambda a=a, b=b, n=n: torch.linspace(a, b, n, dtype=torch.float32).view(1, 1, n))
+    for n in (1, 7, 320, 70000):
+        g.add(f"arange({n})", "arange", "exact", [], {"n": n}, lambda n=n: torch.arange(n, dtype=torch.float32).view(1, 1, n))
+    for d in (1.0, 0.37, -0.5, 6.0):
+        g.add(f"remainder(t, {d})", "remainder", "exact", [g.inp(1, 23, 37, -3.0, 3.0)], {"b": d}, lambda t, d=d: t[0] % d)
+    g.add("remainder(t, t2)", "remainder", "exact", [g.inp(1, 23, 37, -3.0, 3.0), g.inp(1, 23, 37, -2.0, 2.0)], {},
+          lambda t, u: torch.remainder(t[0], u[0]))
+
+    # ── pow and the transcendental functions ──
+    for e in (2.0, 3.0, 0.5, -0.5, -1.0, -2.0, 0.0, 1.0, 2.2, 1 / 2.2, 1.7, -1.3):
+        special = e in (2.0, 3.0, 0.5, -0.5, -1.0, -2.0, 0.0, 1.0)
+        g.add(f"pow(t, {e})", "powScalar", "exact" if special else "library", [g.inp(1, 23, 37, 0.0, 2.0)], {"e": e},
+              lambda t, e=e: t[0].pow(e))
+    g.add("pow(t, 2) over −2…2", "powScalar", "exact", [g.inp(3, 23, 37, -2.0, 2.0)], {"e": 2.0}, lambda t: t[0].pow(2.0))
+    g.add("pow(t, -1) at 0", "powScalar", "exact", [g.inp(1, 1, 3, 0.0, 0.0)], {"e": -1.0}, lambda t: t[0].pow(-1.0))
+    for op, lo, hi in (("exp", -10.0, 10.0), ("sin", -7.0, 7.0), ("cos", -7.0, 7.0), ("tan", -1.5, 1.5), ("log", 0.001, 4.0)):
+        g.add(f"{op}(t)", "unary", "library", [g.inp(1, 23, 37, lo, hi)], {"op": op}, lambda t, op=op: getattr(torch, op)(t[0]))
+    g.add("atan2(t, t2)", "unary", "library", [g.inp(1, 23, 37, -1.0, 1.0), g.inp(1, 23, 37, -1.0, 1.0)], {"op": "atan2"},
+          lambda t, u: torch.atan2(t[0], u[0]))
+
+    # ── resizes ──
+    for size, scale in ((320, 0.666), (200, 0.25), (37, 1.5), (23, 0.1), (7, 3.3), (1, 0.5), (213, 1 / 3), (100, 0.29)):
+        g.add(f"area size {size} × {scale}", "areaOutSize", "exact", [g.inp(1, 1, size)], {"in": size, "scale": scale},
+              lambda t, scale=scale: torch.tensor([[[float(F.interpolate(t, scale_factor=(1.0, scale), mode="area").shape[-1])]]]))
+    area = [((320, 200), (213, 133)), ((320, 200), (80, 50)), ((320, 200), (1, 1)), ((37, 23), (17, 9)),
+            ((37, 23), (37, 23)), ((7, 5), (14, 10)), ((2, 3), (5, 7)), ((1, 1), (3, 2)), ((37, 23), (1, 1))]
+    for (sw, sh), (dw, dh) in area:
+        for c, memory in ((1, "contiguous"), (3, "contiguous"), (4, "contiguous"), (3, "channels-last"), (4, "channels-last")):
+            g.add(f"area {sw}×{sh} → {dw}×{dh}, {c} ch {memory}", "resizeArea", "exact", [g.inp(c, sh, sw, memory=memory)],
+                  {"oh": dh, "ow": dw}, lambda t, dh=dh, dw=dw: F.interpolate(t, size=(dh, dw), mode="area")[0])
+    nearest = [((37, 23), (74, 46)), ((7, 5), (21, 15)), ((320, 200), (213, 133)), ((37, 23), (37, 23)), ((37, 23), (50, 31)),
+               ((2, 3), (5, 7)), ((1, 1), (3, 2)), ((320, 200), (640, 400))]
+    for (sw, sh), (dw, dh) in nearest:
+        for c, memory in ((1, "contiguous"), (3, "channels-last"), (4, "channels-last")):
+            g.add(f"nearest {sw}×{sh} → {dw}×{dh}, {c} ch {memory}", "resizeNearest", "exact", [g.inp(c, sh, sw, memory=memory)],
+                  {"oh": dh, "ow": dw}, lambda t, dh=dh, dw=dw: F.interpolate(t, size=(dh, dw), mode="nearest")[0])
+    for (sw, sh), (dw, dh) in (((37, 23), (64, 48)), ((320, 200), (213, 133)), ((7, 5), (3, 2))):
+        for c, memory in ((1, "contiguous"), (3, "channels-last"), (4, "channels-last"), (4, "contiguous")):
+            g.add(f"bilinear {sw}×{sh} → {dw}×{dh}, {c} ch {memory}", "resizeBilinear", "exact", [g.inp(c, sh, sw, memory=memory)],
+                  {"oh": dh, "ow": dw}, lambda t, dh=dh, dw=dw: F.interpolate(t, size=(dh, dw), mode="bilinear", align_corners=False)[0])
+    bicubic = [((17, 13), (64, 48)), ((37, 23), (17, 9)), ((320, 200), (213, 133)), ((7, 5), (7, 5)), ((1, 1), (3, 2)),
+               ((2, 3), (5, 7)), ((37, 23), (74, 46))]
+    for (sw, sh), (dw, dh) in bicubic:
+        for c, memory in ((1, "contiguous"), (3, "contiguous"), (4, "contiguous"), (3, "channels-last"), (4, "channels-last")):
+            g.add(f"bicubic {sw}×{sh} → {dw}×{dh}, {c} ch {memory}", "resizeBicubic", "exact", [g.inp(c, sh, sw, memory=memory)],
+                  {"oh": dh, "ow": dw}, lambda t, dh=dh, dw=dw: F.interpolate(t, size=(dh, dw), mode="bicubic", align_corners=False)[0])
+
+    # ── grid_sample, affine_grid ──
+    def grid_of(gx: torch.Tensor, gy: torch.Tensor) -> torch.Tensor:
+        # Every 7th value exactly on an edge (±1) and every 11th at 0, so "on" the border is covered.
+        gx, gy = gx[0, 0].clone(), gy[0, 0].clone()
+        for t in (gx, gy):
+            flat = t.view(-1)
+            flat[::7] = torch.where(torch.arange(flat[::7].numel()) % 2 == 0, 1.0, -1.0)
+            flat[3::11] = 0.0
+        return torch.stack((gx, gy), dim=-1)[None]
+
+    for c in (1, 3, 4):
+        for lo, hi in ((-0.9, 0.9), (-1.6, 1.6), (-4.3, 4.3)):
+            for padding in ("zeros", "border", "reflection"):
+                for ac in (False, True):
+                    src, gxs, gys = g.inp(c, 23, 37), g.inp(1, 17, 29, lo, hi), g.inp(1, 17, 29, lo, hi)
+                    g.add(f"grid_sample {c} ch, grid {lo}…{hi}, {padding}, align_corners {ac}", "gridSample", "exact", [src, gxs, gys],
+                          {"padding": padding, "alignCorners": ac, "edges": True},
+                          lambda t, gx, gy, padding=padding, ac=ac: F.grid_sample(t, grid_of(gx, gy), mode="bilinear", padding_mode=padding, align_corners=ac)[0])
+    for w, h in ((1, 1), (2, 3), (7, 5)):
+        for padding in ("zeros", "border", "reflection"):
+            for ac in (False, True):
+                src, gxs, gys = g.inp(3, h, w), g.inp(1, 5, 6, -1.6, 1.6), g.inp(1, 5, 6, -1.6, 1.6)
+                g.add(f"grid_sample {w}×{h} 3 ch, {padding}, align_corners {ac}", "gridSample", "exact", [src, gxs, gys],
+                      {"padding": padding, "alignCorners": ac, "edges": True},
+                      lambda t, gx, gy, padding=padding, ac=ac: F.grid_sample(t, grid_of(gx, gy), mode="bilinear", padding_mode=padding, align_corners=ac)[0])
+    src, gxs, gys = g.inp(4, 200, 320), g.inp(1, 200, 320, -1.2, 1.2), g.inp(1, 200, 320, -1.2, 1.2)
+    g.add("grid_sample 4 ch 320×200, reflection", "gridSample", "exact", [src, gxs, gys], {"padding": "reflection", "alignCorners": False, "edges": True},
+          lambda t, gx, gy: F.grid_sample(t, grid_of(gx, gy), mode="bilinear", padding_mode="reflection", align_corners=False)[0])
+    for theta in ([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]], [[0.7071, -0.7071, 0.1], [0.7071, 0.7071, -0.25]],
+                  [[1.2, 0.3, -0.4], [-0.1, 0.8, 0.33]]):
+        for w, h in ((37, 23), (1, 1), (2, 3), (320, 200)):
+            g.add(f"affine_grid {theta} {w}×{h}", "affineGrid", "library", [], {"theta": theta, "h": h, "w": w},
+                  lambda theta=theta, h=h, w=w: tuple(F.affine_grid(torch.tensor([theta], dtype=torch.float32), [1, 1, h, w], align_corners=False)[0].permute(2, 0, 1)[None, i] for i in (0, 1)))
+
+    # ── pools, reflect padding ──
+    for k in (1, 2, 3, 13):
+        for pad in sorted({0, k // 2}):
+            for (w, h), c, memory in (((37, 23), 3, "contiguous"), ((37, 23), 4, "channels-last"), ((7, 5), 1, "contiguous"), ((320, 200), 3, "channels-last"),
+                                      ((1, 1), 3, "contiguous"), ((2, 3), 4, "channels-last")):
+                g.add(f"avg_pool2d k {k} pad {pad}, {w}×{h} {c} ch {memory}", "avgPool2d", "exact", [g.inp(c, h, w, memory=memory)], {"k": k, "pad": pad},
+                      lambda t, k=k, pad=pad: F.avg_pool2d(t, k, stride=1, padding=pad, count_include_pad=True, ceil_mode=False)[0])
+                g.add(f"max_pool2d k {k} pad {pad}, {w}×{h} {c} ch {memory}", "maxPool2d", "exact", [g.inp(c, h, w, memory=memory)], {"k": k, "pad": pad},
+                      lambda t, k=k, pad=pad: F.max_pool2d(t, k, stride=1, padding=pad)[0])
+    for k in (1, 2, 3, 8, 13):
+        for (w, h), c, memory in (((37, 23), 3, "contiguous"), ((37, 23), 4, "channels-last"), ((320, 200), 3, "channels-last")):
+            g.add(f"avg_pool2d stride k {k}, {w}×{h} {c} ch {memory}", "avgPool2dStrided", "exact", [g.inp(c, h, w, memory=memory)], {"k": k},
+                  lambda t, k=k: F.avg_pool2d(t, kernel_size=k)[0])
+    for (w, h), pads in (((7, 5), [(6, 6, 4, 4), (1, 2, 3, 0), (0, 0, 0, 0), (7, 0, 0, 0), (0, 0, 0, 5), (0, 6, 0, 4)]),
+                         ((2, 3), [(1, 1, 2, 2), (2, 0, 0, 0)]), ((1, 1), [(1, 0, 0, 0), (0, 0, 0, 0)]), ((37, 23), [(36, 36, 22, 22)])):
+        for l, r, top, bottom in pads:
+            g.add(f"pad reflect {w}×{h} ({l}, {r}, {top}, {bottom})", "padReflect", "exact", [g.inp(3, h, w)], {"l": l, "r": r, "top": top, "bottom": bottom},
+                  lambda t, l=l, r=r, top=top, bottom=bottom: F.pad(t, [l, r, top, bottom], mode="reflect")[0])
+
+    # ── conv2d ──
+    sobel = [[-1.0, 0.0, 1.0], [-2.0, 0.0, 2.0], [-1.0, 0.0, 1.0]]
+    emboss = [[-2.0, -1.0, 0.0], [-1.0, 1.0, 1.0], [0.0, 1.0, 2.0]]
+    motion = [[(1.0 / 17 if y == 8 or (y == x) else 0.0) for x in range(17)] for y in range(17)]
+    disk = [[1.0 if (x - 10) ** 2 + (y - 10) ** 2 <= 100 else 0.0 for x in range(21)] for y in range(21)]
+    ndisk = sum(map(sum, disk))
+    disk = [[v / ndisk for v in row] for row in disk]
+    for name, kern in (("sobel", sobel), ("emboss", emboss), ("motion 17", motion), ("disk 21", disk)):
+        kt = torch.tensor(kern, dtype=torch.float32)
+        kh, kw = kt.shape
+        flat = kt.reshape(-1).tolist()
+        for c, (w, h) in ((3, (37, 23)), (4, (64, 48))):
+            g.add(f"conv2d depthwise {name}, {w}×{h} {c} ch", "conv2dDepthwise", "library", [g.inp(c, h, w)], {"kernel": flat, "kh": kh, "kw": kw},
+                  lambda t, kt=kt, c=c: F.conv2d(t, kt.expand(c, 1, *kt.shape), groups=c)[0])
+        g.add(f"conv2d same {name}, 64×48", "conv2dSame", "library", [g.inp(1, 48, 64)], {"kernel": flat, "kh": kh, "kw": kw, "pad": kh // 2},
+              lambda t, kt=kt: F.conv2d(t, kt[None, None], padding=kt.shape[0] // 2)[0])
+
+    # ── gaussian ──
+    for ksize, sigma in ((3, 0.3), (7, 1.0), (31, 5.0), (61, 10.0), (181, 30.0), (301, 50.0)):
+        g.add(f"gaussian kernel ({ksize}, {sigma})", "gaussianKernel1d", "library", [], {"ksize": ksize, "sigma": sigma},
+              lambda ksize=ksize, sigma=sigma: TF._get_gaussian_kernel1d(ksize, sigma, torch.float32, torch.device("cpu")).view(1, 1, ksize))
+        g.add(f"gaussian_blur ({ksize}, {sigma}), 64×48 4 ch", "gaussianBlur", "library", [g.inp(4, 48, 64)], {"ksize": ksize, "sigma": sigma},
+              lambda t, ksize=ksize, sigma=sigma: TF.gaussian_blur(t, [ksize, ksize], [sigma, sigma])[0])
+    # ksize 181 raises on 64×48: the blur itself on a picture it fits (301 needs > 150 a side: its
+    # im2col would be 8 GB, so it is covered by its kernel and the failure only).
+    g.add("gaussian_blur (181, 30.0), 100×96 4 ch", "gaussianBlur", "library", [g.inp(4, 96, 100)], {"ksize": 181, "sigma": 30.0},
+          lambda t: TF.gaussian_blur(t, [181, 181], [30.0, 30.0])[0])
+    g.add("gaussian_blur (7, 1.0), 37×23 3 ch channels-last", "gaussianBlur", "library", [g.inp(3, 23, 37, memory="channels-last")], {"ksize": 7, "sigma": 1.0},
+          lambda t: TF.gaussian_blur(t, [7, 7], [1.0, 1.0])[0])
+
+    # ── torchvision's colour operations ──
+    for c, memory in ((3, "contiguous"), (3, "channels-last"), (1, "contiguous"), (4, "contiguous")):
+        g.add(f"rgb_to_grayscale {c} ch {memory}", "rgbToGrayscale", "exact", [g.inp(c, 23, 37, memory=memory)], {},
+              lambda t: TF.rgb_to_grayscale(t)[0])
+    for r in (0.0, 0.3, 1.0, 1.5):
+        g.add(f"blend {r}", "blend", "exact", [g.inp(3, 23, 37), g.inp(3, 23, 37)], {"ratio": r}, lambda a, b, r=r: TF._blend(a, b, r)[0])
+    adjust = (("adjustBrightness", TF.adjust_brightness, (0.0, 0.5, 1.0, 1.7, 3.0), "exact"),
+              ("adjustSaturation", TF.adjust_saturation, (0.0, 0.3, 1.0, 2.5), "exact"),
+              ("adjustContrast", TF.adjust_contrast, (0.0, 0.5, 1.0, 1.8), "exact"),
+              ("adjustHue", TF.adjust_hue, (-0.5, -0.25, 0.0, 0.13, 0.5), "exact"))
+    for fn, op, factors, cls in adjust:
+        for fac in factors:
+            for (w, h), c, memory, levels in (((37, 23), 3, "contiguous", 0), ((37, 23), 3, "channels-last", 8), ((37, 23), 1, "contiguous", 0),
+                                              ((1, 1), 3, "contiguous", 0), ((2, 3), 3, "channels-last", 4)):
+                g.add(f"{fn} {fac}, {w}×{h} {c} ch {memory}{' levels' if levels else ''}", fn, cls, [g.inp(c, h, w, memory=memory, levels=levels)], {"f": fac},
+                      lambda t, op=op, fac=fac: op(t, fac)[0])
+        g.add(f"{fn} {factors[1]}, 4 ch", fn, cls, [g.inp(4, 23, 37)], {"f": factors[1]}, lambda t, op=op, fac=factors[1]: op(t, fac)[0])
+        g.add(f"{fn} {factors[-1]}, 320×200 3 ch channels-last", fn, cls, [g.inp(3, 200, 320, memory="channels-last", levels=64)], {"f": factors[-1]},
+              lambda t, op=op, fac=factors[-1]: op(t, fac)[0])
+    for n in (1, 15, 16, 17, 31, 64, 65, 4096, 4099, 64000, 70001, 1_000_003):
+        g.add(f"mean of {n}", "meanAll", "exact", [g.inp(1, 1, n)], {}, lambda t: torch.mean(t[0, 0], dim=(-1,)).view(1, 1, 1))
+    for n in (1024 * 1024,):
+        g.add(f"mean of {n}, 0…1/255 steps", "meanAll", "exact", [g.inp(1, 1, n, levels=256)], {}, lambda t: torch.mean(t[0, 0], dim=(-1,)).view(1, 1, 1))
+
+    # ── topk ──
+    topk = []
+    for n, levels, k, largest in ((50, 6, 1, True), (50, 6, 5, True), (50, 6, 17, False), (50, 6, 50, True), (200, 0, 13, True), (64, 3, 20, False)):
+        spec = g.inp(1, 1, n, levels=levels)
+        v = kernel_input(spec)[0, 0, 0]
+        vals, idx = torch.topk(v, k, largest=largest)
+        topk.append({"name": f"topk {n} values ({levels or 'no'} levels), k {k}, largest {largest}", "input": spec, "k": k, "largest": largest,
+                     "values": b64(vals.numpy().astype("<f4").tobytes()), "indices": [int(i) for i in idx], "cut": float(vals[-1])})
+
+    return {"cases": g.cases, "topk": topk, "eps_candidates": KERNEL_EPS, "store_max": KERNEL_STORE_MAX}
+
+
+GROUPS = {"machinery": machinery, "kernels": kernels}
 
 
 def main() -> None:

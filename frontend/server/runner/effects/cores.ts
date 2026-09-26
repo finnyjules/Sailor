@@ -7,11 +7,13 @@
  * `args`, already built (`px` is ../pixels/core.ts pixelsCore). An effect's
  * worker op is '<name>.<fn>' (effects/table.ts EffectSpec.op). R2.2's
  * kernels and R2.3's random numbers join this list before the families
- * that consume them.
+ * that consume them. `kn` (R2.2, ./core/kernels.ts) is the kernels: helpers,
+ * not ops.
  */
 import { pixels } from '../pixels/core'
 import { tensorCore } from './core/tensor'
 import { toneCore } from './core/tone'
+import { kernelsCore } from './core/kernels'
 
 export interface EffectCoreEntry {
   /** The name the worker (and an op) knows the built core by. */
@@ -24,6 +26,7 @@ export interface EffectCoreEntry {
 export const EFFECT_CORES: readonly EffectCoreEntry[] = [
   { name: 'tk', fn: tensorCore as EffectCoreEntry['fn'], args: ['px'] },
   { name: 'tone', fn: toneCore as EffectCoreEntry['fn'], args: ['tk'] },
+  { name: 'kn', fn: kernelsCore as EffectCoreEntry['fn'], args: ['tk', 'px'] },
 ]
 
 /** The cores whose functions are effect ops (not helpers). */
@@ -32,5 +35,5 @@ export const EFFECT_OP_CORES: readonly string[] = ['tone']
 /** The cores in this thread (tests), built as the worker builds them. */
 export const effectCores = (() => {
   const tk = tensorCore(pixels)
-  return { px: pixels, tk, tone: toneCore(tk) }
+  return { px: pixels, tk, tone: toneCore(tk), kn: kernelsCore(tk, pixels) }
 })()
