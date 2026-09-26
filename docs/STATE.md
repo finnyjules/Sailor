@@ -31,6 +31,18 @@ Legend: **bake** = render/export path · **motion** = animatable · **inspector*
 | Inpaint / Region | ✅ backend | — | toolbar | ✅ ops | — |
 | Collection (sweeps) | — | — | ✅ | ✅ | backbone |
 
+### Frame brush tips — spray can, round, bristle — LANDED 2026-09-26 (Part 1 of "painting with shaders"; spec `docs/superpowers/specs/2026-09-26-frame-brush-tips-design.md`, plan `docs/superpowers/plans/2026-09-26-frame-brush-tips.md`, prototype `docs/superpowers/specs/assets/2026-09-26-shader-brush-prototype.html`; `a9777f232`..`dfaca8fe1`, non-contiguous — 10 tasks, subagent-driven, a review per task, a whole-feature review, its fix wave and a re-review)
+
+The Frame brush's Paint mode now has three tips instead of round dabs: **Spray can** (fine speckle over a soft mist; holding still pools the paint, then it drips), **Round** (clean even stroke, a little overspray and grain at the edge), **Bristle** (thins a little when fast, tapers, dry-brush breakup). Quick controls sit in a bottom brush toolbar (tip, size, colour, eraser, Paint/Mask, Done); each tip's full settings are in the right panel with Julien's hand-tuned defaults and Reset, remembered per tip. Mask mode is unchanged.
+
+A stroke saves its **movement** (pointer path + timing + tip settings + seed), not pixels — `TipStroke` in `lib/brushTips/record.ts`. Pure simulators (`spray.ts`, `round.ts`, `bristle.ts`) replay it deterministically in fixed Frame units (1080 per artboard width), so a stroke looks the same in the editor, node card, exports and embeds at any size. A small WebGL2 engine (`engine.ts`, Canvas2D fallback) turns that into a coverage shape; the brush layer's existing fill is poured in unchanged, so every fill (including shader fills) works — the base for Part 2 (materials) and Part 3 (the shader library, painted effects). Legacy brush strokes render byte-identically.
+
+**Verified:** unit suites (determinism, live equals replay at any frame rate, bounds); real-mouse E2E on the running app (`tests/compositor-brush-tips.spec.ts`: one stroke = one undo step, drips then commit, reload redraws identical pixels, eraser rules, legacy draws; `tests/compositor-brush-tips-size.spec.ts`: same paint coverage at two render sizes).
+
+**Known limits.** Undo while drips are still running first commits the dripping stroke. On a layer mixing old and new strokes, old ones always draw underneath. Spray and round strokes painted before the final fix re-grain once. Not yet tried with a real trackpad by Julien.
+
+**Next.** Part 2: the seven curated materials (Round and Bristle strokes follow the line, the spray can stays fixed to the surface). Part 3: "More shaders" from the full library and painting effects onto the picture.
+
 ### Stroke fill follows the line — BUILT 2026-09-25 (spec `docs/superpowers/specs/2026-09-25-stroke-fill-follows-line.md`)
 
 A Compositor stroke's patterned or gradient fill can now bend along the outline it paints instead of sitting still across it. Three new `StrokeInstance` fields carry it: `follow` (bool, on/off), `fade` ("across" | "along", an ombre paint's fade direction while following), and `fadeRepeats` (1..50, out-and-back fade cycles round the line when `fade` is "along"). Wired through the painter, the stroke inspector row, and the agent's `setStrokeProps`/`addStroke` patch (`STROKE_PROPS`, validated the same way as every other stroke key).
