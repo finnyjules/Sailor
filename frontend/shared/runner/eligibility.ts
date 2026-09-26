@@ -9,6 +9,7 @@ import { SYNC_3_ENGINE, isSync3LipSync, lipSyncEngine } from './lipSync'
 import { TOPAZ_VIDEO_FPS, TOPAZ_VIDEO_TARGETS } from './topazVideo'
 import { outputKind, BASE_VALUE_INPUTS, OUTPUT_KINDS, type ValueKind } from './values'
 import { moodboardReadingIsPlain } from '../taste/moodboardStyle'
+import { IMAGE_LAYERS, TEXT_LAYERS, smartLayoutPixels } from './smartLayout'
 
 export const RUNNER_NODE_TYPES: ReadonlySet<string> = new Set([
   'GenerateImageNode', 'GenerateVideoNode', 'ComfyGateNode', 'Image', 'Video',
@@ -75,6 +76,12 @@ export interface RunnerNodeRule {
   outputReaders?: Readonly<Record<number, readonly (readonly [string, string])[]>>
   /** Every node reading this one must be one of these classes. */
   feedsOnly?: readonly string[]
+  /**
+   * The class hands on a list (ComfyUI's is_output_list: the next node runs
+   * once per item): only these classes may read it. Anything else is left to
+   * the engine (R1.6: ComfyUI would run a paid node once per item).
+   */
+  listReaders?: readonly string[]
   /** At least one node of the prompt must read this one (a source with no reader is left to ComfyUI). */
   needsReader?: true
   /**
@@ -134,6 +141,12 @@ export const INPUT_CHECKS = {
     const h = pyIntValue(inputs.height) ?? Infinity
     const batch = pyIntValue(inputs.batch_size) ?? Infinity
     return w <= EMPTY_IMAGE_MAX_SIDE && h <= EMPTY_IMAGE_MAX_SIDE && batch <= EMPTY_IMAGE_MAX_BATCH && w * h * batch <= CARD_MAX_PIXELS
+  },
+  // Smart Layout (R1.6): its outputs' pixels within CARD_MAX_PIXELS, and a
+  // layout the runner reads as Python does (./smartLayout.ts smartLayoutPixels).
+  'smart-layout': (inputs: Record<string, unknown>): boolean => {
+    const px = smartLayoutPixels(inputs)
+    return px !== null && px <= CARD_MAX_PIXELS
   },
 } as const
 
@@ -276,14 +289,15 @@ export const IMAGE_OUTPUT_CLASSES: ReadonlySet<string> = new Set([
  * Classes whose picture outputs are other slots than output 0 alone, or that
  * are pictures only on some slots (R1.3): 3D Studio's three passes, the Text
  * cards' image (their slot 1 is a mask); and the pictures only `cards` makes
- * (Empty image, R1.4). A class listed here is read from this table (and only
- * with `cards` on); any other from IMAGE_OUTPUT_CLASSES (slot 0).
+ * (Empty image, R1.4; Smart Layout's renders, R1.6). A class listed here is
+ * read from this table (and only with `cards` on); any other from IMAGE_OUTPUT_CLASSES (slot 0).
  */
 export const PICTURE_OUTPUTS: Readonly<Record<string, readonly number[]>> = {
   Scene3DStudio: [0, 1, 2],
   TextOnPath: [0],
   TextMask: [0],
   EmptyImage: [0],
+  SmartLayout: [0],
 }
 
 /** The most Frame copies (every layer's cloner, summed) the runner renders; more goes to ComfyUI. */
@@ -647,6 +661,18 @@ export const RUNNER_NODE_RULES: Readonly<Record<string, RunnerNodeRule>> = {
     },
   },
   PreviewImage: { family: 'cards', local: 'render', mustLink: ['images'], required: ['images'], imageInputs: ['images'], outputsNotLinked: [0] },
+  // ── cards (step 3, R1.6): Smart Layout (server/runner/cards/smartLayout.ts) ──
+  // It renders, so it counts as work. Its pictures are a list (one per
+  // output), which only Save image and Preview image may read; its layout
+  // must be one the runner reads as Python does, within the pixel cap.
+  SmartLayout: {
+    family: 'cards', local: 'render',
+    valueInputs: { brand: ['text'], ...Object.fromEntries(TEXT_LAYERS.map(k => [k, ['text'] as const])) },
+    imageInputs: IMAGE_LAYERS,
+    widgets: { layout: { type: 'STRING', required: true }, aspects: { type: 'STRING', required: true }, brand_kit: { type: 'STRING' } },
+    listReaders: ['SaveImage', 'PreviewImage'],
+    inputCheck: 'smart-layout',
+  },
 }
 
 /** The Primitive cards (comfy_extras/nodes_primitive.py): each hands on its value (family `cards`). */
@@ -673,6 +699,7 @@ export const SWITCHED_CLASSES: Readonly<Record<string, RunnerFamily>> = {
   ImageToMask: 'cards',
   SaveImage: 'cards',
   PreviewImage: 'cards',
+  SmartLayout: 'cards',
 }
 
 /**
@@ -991,7 +1018,8 @@ function graphRuleAllows(prompt: ApiPrompt, id: string, rule: RunnerNodeRule, fa
   const slotReaders = rule.outputReaders
   const opened = !!rule.open && families.has(rule.open.family)
   const feedsOnly = opened && rule.open!.lifts.includes('feedsOnly') ? undefined : rule.feedsOnly
-  if (notLinked.length || slotReaders || feedsOnly || rule.needsReader) {
+  const listReaders = rule.listReaders
+  if (notLinked.length || slotReaders || feedsOnly || listReaders || rule.needsReader) {
     let readers = 0
     for (const node of Object.values(prompt)) {
       for (const l of linksOf(node)) {
@@ -1001,6 +1029,7 @@ function graphRuleAllows(prompt: ApiPrompt, id: string, rule: RunnerNodeRule, fa
         const only = slotReaders && Object.prototype.hasOwnProperty.call(slotReaders, l.slot) ? slotReaders[l.slot] : undefined
         if (only && !only.some(([cls, input]) => cls === node.class_type && input === l.input)) return false
         if (feedsOnly && !feedsOnly.includes(node.class_type)) return false
+        if (listReaders && !listReaders.includes(node.class_type)) return false
       }
     }
     if (rule.needsReader && !readers) return false

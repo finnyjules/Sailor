@@ -34,6 +34,7 @@ import type { RunnerFamily } from '#shared/runner/families'
 import { encodeMask, loadImageMask, type Mask } from '../pictures/mask'
 import { MAX_INPUT_PIXELS } from '../compositor/decode'
 import { pyTruthy } from '#shared/runner/pyText'
+import { IMAGE_LAYERS } from '#shared/runner/smartLayout'
 
 export const TEXT_ON_PATH_UNLOADABLE = 'Text on path couldn’t load its picture. Change a setting to bake it again.'
 export const TEXT_MASK_UNLOADABLE = 'Text mask couldn’t load its picture. Change a setting to bake it again.'
@@ -74,7 +75,8 @@ export function bakeRefusalWords(classType: string, why: string): string {
  * anything is held): 3D Studio's bakes, Text on path's and Text mask's
  * render, a LoadImage that runs as a card (with `cards` on; off, the
  * Frame reads its file as before), and the Image card file behind a picture
- * utility's picture wire (R1.4). A card whose settings name no file names none.
+ * utility's picture wire (R1.4) or behind a Smart Layout's image layer (R1.6).
+ * A card whose settings name no file names none.
  */
 export function cardPictureFiles(prompt: ApiPrompt, families: ReadonlySet<RunnerFamily>): CardPictureFile[] {
   if (!families.has('cards')) return []
@@ -95,6 +97,14 @@ export function cardPictureFiles(prompt: ApiPrompt, families: ReadonlySet<Runner
     if (isLink(read) && (n.class_type !== 'TextMask' || pyTruthy(bakeParams(inputs.params).rendered))) {
       const behind = cardFileBehind(prompt, read)
       if (behind) out.push({ ...behind, classType: 'Image' })
+    }
+    // Smart Layout (R1.6) decodes each image layer's first frame as Python's tensor.
+    if (n.class_type === 'SmartLayout') {
+      for (const key of IMAGE_LAYERS) {
+        const v = inputs[key]
+        const behind = isLink(v) ? cardFileBehind(prompt, v) : null
+        if (behind) out.push({ ...behind, classType: 'Image' })
+      }
     }
     // Save image and Preview image (R1.5) save every frame of the batch a
     // loader makes of an animation; the runner hands on its first frame, so

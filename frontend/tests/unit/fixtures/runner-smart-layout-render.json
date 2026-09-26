@@ -1,0 +1,88 @@
+{
+  "note": "render-template.post.ts's output for this request, taken before the render moved into server/templates/renderPng.ts (R1.6)",
+  "request": {
+    "template": {
+      "version": 2,
+      "id": "starter",
+      "name": "New Layout",
+      "master": "1x1",
+      "formats": {
+        "1x1": {
+          "w": 1080,
+          "h": 1080,
+          "label": "Square"
+        },
+        "300x250": {
+          "w": 300,
+          "h": 250,
+          "label": "MPU"
+        }
+      },
+      "grid": {
+        "gutter": 24,
+        "margin": 72,
+        "baseline": 12
+      },
+      "typeScale": {
+        "base": 28,
+        "ratio": 1.414
+      },
+      "background": {
+        "fill": "#0a0a0a"
+      },
+      "elements": [
+        {
+          "id": "image_layer_1",
+          "type": "image",
+          "role": "IMAGE_LAYER_1",
+          "priority": 4,
+          "region": {
+            "col": 1,
+            "colSpan": 9999,
+            "row": 1,
+            "rowSpan": 9999
+          },
+          "bleed": true,
+          "focal": {
+            "x": 0.5,
+            "y": 0.5
+          },
+          "style": {
+            "fit": "cover"
+          },
+          "content": "{{ props.image_layer_1 }}"
+        },
+        {
+          "id": "text_layer_1",
+          "type": "text",
+          "role": "TEXT_LAYER_1",
+          "priority": 1,
+          "level": "display",
+          "region": {
+            "col": 1,
+            "colSpan": 6,
+            "row": 4,
+            "rowSpan": 2
+          },
+          "overflow": "shrink-then-truncate",
+          "style": {
+            "fontWeight": 700,
+            "color": "#ffffff"
+          },
+          "content": "{{ props.text_layer_1 }}"
+        }
+      ]
+    },
+    "aspect": "300x250",
+    "outputId": "300x250",
+    "props": {
+      "text_layer_1": "Spring drop",
+      "image_layer_1": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAYAAAAECAIAAAAiZtkUAAAACXBIWXMAAAPoAAAD6AG1e1JrAAAAWUlEQVQIHQKMgdsgtGr+kZd8xhG1i46/ETSLbmBYeuq9iGVc84qzn8RtEttWX/gqxWCf0rnu8g9Zp/Sejdd+K7hm9W9huPlP2SN30vY7jGreBVN33WfR9AMAPmkjhYRb6eQAAAAASUVORK5CYII="
+    },
+    "brand": {
+      "primary": "#ff3300"
+    }
+  },
+  "png_sha256": "914c6a65eaf90c1ec604925e674eb0f005d382c33d119256402bbe4b09bf3c56",
+  "png_bytes": 66144
+}

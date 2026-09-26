@@ -33,8 +33,12 @@ export interface SaveOptions {
 }
 
 export const SAVE_OUTSIDE = 'This file name would save outside the output folder'
-/** A preview's own name (savePreviewAs): a plain file name. */
-export const PREVIEW_NAME_RE = /^[A-Za-z0-9_.-]{1,200}$/
+/**
+ * A preview's own name (savePreviewAs): a plain file name. Letters and
+ * numbers of any script (R1.6: Smart Layout's previews are named by their
+ * labels, as str.isalnum() keeps them), `_`, `-` and `.`.
+ */
+export const PREVIEW_NAME_RE = /^[\p{L}\p{N}_.-]{1,200}$/u
 
 export interface ResultStore {
   save(bytes: Uint8Array, o: SaveOptions): Promise<OutputFile>

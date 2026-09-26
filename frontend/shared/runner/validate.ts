@@ -37,10 +37,11 @@ import { linksOf, type ApiPrompt } from './graph'
  * GenerateFromReferencesNode, LoadImage, LipSyncNode. The Audio card
  * (nodes_audio.py `Audio`, is_output_node=True) joined with sync-3 (F22);
  * the Text and 3D model cards with `cards` (R1.1; the Moodboard is not one);
- * Save image and Preview image with `cards` (R1.5).
+ * Save image and Preview image with `cards` (R1.5); Smart Layout with
+ * `cards` (R1.6).
  */
 export const RUNNER_OUTPUT_CLASSES: ReadonlySet<string> = new Set([
-  'Image', 'Video', 'Compositor', 'Audio', 'Text', 'Model3D', 'SaveImage', 'PreviewImage',
+  'Image', 'Video', 'Compositor', 'Audio', 'Text', 'Model3D', 'SaveImage', 'PreviewImage', 'SmartLayout',
   'RelightNode', 'BlendSceneNode', 'RemoveObjectNode', 'TextEditNode', 'RecolorObjectNode',
   'SwapBackgroundNode', 'SwapProductNode', 'PersonSwap', 'RotateCameraNode', 'ProductShotNode', 'RestyleFromImageNode',
 ])

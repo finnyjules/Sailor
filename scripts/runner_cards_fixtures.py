@@ -53,6 +53,15 @@ adds its key and regenerates the file (the other keys must come out unchanged).
               seeded random RGB and RGBA pictures (`lanczos`).
               get_save_image_path over prefixes with `..`, absolute parts and
               the date variables (time.localtime patched)
+  smart_layout — (R1.6) nodes_smart_layout's pure functions (_parse_layout,
+              _parse_text_layers, _autopopulate_for_template, _resolve_outputs,
+              _output_labels) over the starter, v1, v2 (outputs, variations,
+              float and bool grid columns), v3 and broken layouts, aspects
+              blank, unknown and repeated; and SmartLayoutNode.execute with
+              urllib.request.urlopen patched to capture each POST body and
+              answer a 2×2 RGBA PNG: the bodies (each image layer's /view URL
+              replaced by the saved frame's 8-bit pixels), the outputs' RGB
+              pixels, and the live previews' names and pixels
 
     cd /Users/julien/Documents/GitHub/Sailor && .venv/bin/python scripts/runner_cards_fixtures.py
 
@@ -740,6 +749,220 @@ def save_image_cases() -> dict:
     return out
 
 
+# ── Smart Layout (R1.6) ──────────────────────────────────────────────────────
+
+def _sl_layouts() -> dict:
+    """The layouts the Smart Layout cases run over, as the node's widget holds them (text)."""
+    with open(os.path.join(ROOT, "frontend", "server", "templates", "layouts", "social-post.json"), encoding="utf-8") as f:
+        v1 = f.read()
+    v2 = json.dumps({
+        "version": 2, "id": "v2", "name": "Variations", "master": "1x1",
+        "formats": {"1x1": {"w": 1080, "h": 1080, "label": "Square"}, "9x16": {"w": 1080, "h": 1920, "label": "Story"},
+                    "300x250": {"w": 300, "h": 250, "label": "Écran à 2"}, "320x50": {"w": 320, "h": 50}},
+        "grid": {"columns": 12, "rows": 8, "gutter": 24, "margin": 72},
+        "order": ["text_layer_1", "logo"],
+        "outputs": [
+            {"id": "sq", "format": "1x1"}, {"id": "sq-b", "format": "1x1", "label": "Square"},
+            {"id": "st", "format": "9x16", "label": "Story / tall"}, {"format": ""}, "junk", {"id": "no-format"},
+            {"id": "mpu", "format": "300x250"}, {"id": "banner", "format": "320x50"},
+        ],
+        "background": {"fill": "{{ brand.primary }}"},
+        "elements": [
+            {"id": "logo", "type": "text", "region": {"col": 1, "colSpan": 2, "row": 1, "rowSpan": 1}, "content": "{{ brand.name }}"},
+            {"id": "cta", "type": "text", "region": {"col": 1, "colSpan": 3, "row": 7, "rowSpan": 1}, "content": "Buy {{ props.text_layer_2 }} now"},
+        ],
+    })
+    return {
+        "starter (empty)": "",
+        "starter (blank)": "  \n\t ",
+        "v1 (social post)": v1,
+        "v2 with outputs and variations": v2,
+        "v2, no outputs, grid columns as a float": json.dumps({
+            "version": 2, "id": "g", "formats": {"1x1": {"w": 1080, "h": 1080, "label": "Square"}, "16x9": {"w": 1920, "h": 1080}},
+            "grid": {"columns": 12.0, "rows": 0}, "elements": [],
+        }),
+        "v2, grid columns true, content not text": json.dumps({
+            "version": 2, "id": "b", "defaultAspect": "16x9", "formats": {"1x1": {"w": 64, "h": 64}, "16x9": {"w": 1920, "h": 1080}},
+            "grid": {"columns": True, "rows": 3}, "outputs": [],
+            "elements": [{"id": "pic", "type": "image", "content": {"src": "{{ props.image_layer_1 }}"}}],
+        }),
+        "v3 with sections": json.dumps({
+            "version": 3, "id": "s", "formats": {"4x5": {"w": 1080, "h": 1350, "label": "Feed portrait"}},
+            "sections": [{"id": "top", "children": [{"id": "t", "type": "text", "content": "{{ props.text_layer_1 }}"}]}, {"id": "empty"}],
+            "elements": [],
+        }),
+        "v1, no formats (aspects only), no default": json.dumps({"id": "a", "aspects": {"b": {"w": 10, "h": 10}, "a": {"w": 20, "h": 20}}, "elements": []}),
+        "no formats at all": json.dumps({"version": 2, "formats": {}, "elements": []}),
+        "elements null": json.dumps({"version": 2, "formats": {"1x1": {"w": 8, "h": 8}}, "elements": None}),
+        "bad JSON": "{\"version\": 2,",
+        "a list": "[1, 2]",
+        "no aspects or formats": "{\"name\": \"x\"}",
+    }
+
+
+def _sl_png(px: list[tuple[int, int, int, int]], w: int, h: int) -> bytes:
+    import io
+    from PIL import Image as PILImage
+    im = PILImage.new("RGBA", (w, h))
+    im.putdata(px)
+    b = io.BytesIO()
+    im.save(b, "PNG")
+    return b.getvalue()
+
+
+# What the fake renderer answers every POST with: 2×2 RGBA, one pixel half
+# see-through and one fully (convert("RGB") drops the alpha as it is).
+SL_RENDER = [(255, 0, 0, 255), (0, 255, 0, 128), (0, 0, 255, 0), (10, 20, 30, 255)]
+
+
+def smart_layout_cases() -> dict:
+    import base64
+    import io
+    import shutil
+    import tempfile
+    from unittest import mock
+    from urllib.parse import parse_qs, urlparse
+    import numpy as np
+    from PIL import Image as PILImage
+    import torch
+    import folder_paths
+    import comfy_extras.nodes_smart_layout as sl
+    from comfy_api.latest._io import HiddenHolder
+    rv = _rv()
+    layouts = _sl_layouts()
+    out: dict = {"layouts": layouts, "parse_layout": [], "parse_text_layers": [], "autopopulate": [], "resolve_outputs": [], "execute": []}
+
+    for name, raw in layouts.items():
+        try:
+            out["parse_layout"].append({"layout": name, "out": sl._parse_layout(raw)})
+        except Exception as e:
+            out["parse_layout"].append({"layout": name, "error": str(e)})
+
+    for text, role in [
+        ("", "headline"), ("   \n ", "headline"), ("Spring drop", "headline"), ("  Spring drop  \n", "tagline"),
+        ("headline=Spring\n sub = Big sale \n# c=1\nno equals here\n=v\nk=\n\n", "headline"),
+        ("a=b=c", "headline"), ("x=1\r\ny=2\rz=3 w=4\x1cv=5\x85u=6", "headline"),
+        ("\x1c=\x1d\x1e", "headline"), ("# only=comment", "headline"), ("café=ünï ☕", "headline"),
+    ]:
+        out["parse_text_layers"].append({"text": text, "default_role": role, "out": sl._parse_text_layers(text, default_role=role)})
+
+    prop_sets = [
+        {},
+        {"text_layer_1": "Spring drop", "text_layer_2": "Big sale"},
+        {"image_layer_1": "/view?a", "image_layer_2": "/view?b", "image_layer_3": "/view?c", "text_layer_1": "Hi"},
+        {"text_layer_8": "eight", "image_layer_2": "/view?b", "text_layer_2": "two", "text_layer_3": "three"},
+        {"image_layer_1": "/view?a", "text_layer_2": "two"},
+    ]
+    for name, raw in layouts.items():
+        for props in prop_sets:
+            row: dict = {"layout": name, "props": props}
+            try:
+                t = sl._parse_layout(raw)
+                sl._autopopulate_for_template(t, dict(props))
+                row["out"] = t
+            except Exception as e:
+                row["error"] = str(e)
+            out["autopopulate"].append(row)
+
+    for name, raw in layouts.items():
+        for aspects in ["1x1,9x16,16x9", "", " , ", "1x1, 1x1", "nope", "1x1,nope,zz", "16x9", "b"]:
+            row = {"layout": name, "aspects": aspects}
+            try:
+                t = sl._parse_layout(raw)
+                outs = sl._resolve_outputs(t, aspects)
+                row["out"] = outs
+                row["labels"] = sl._output_labels(outs, t)
+            except Exception as e:
+                row["error"] = str(e)
+            out["resolve_outputs"].append(row)
+
+    # execute, the renderer faked: each POST body captured, answered with SL_RENDER.
+    render_png = _sl_png(SL_RENDER, 2, 2)
+    out["render"] = rv.b64(render_png)
+    sources = {
+        "load_rgb": ("sl_rgb.png", _rgb(28, 40, 81), "load"),
+        "provider_rgba": ("sl_rgba.png", _rgba(24, 36, 82), "provider"),
+        "card_rgba": ("sl_card.png", _rgba(20, 30, 83), "card"),
+        "batch": ("sl_batch.png", _rgb(16, 16, 84), "load"),
+    }
+    tensors = {k: _loaded(n, d, via) for k, (n, d, via) in sources.items()}
+    tensors["batch"] = torch.cat([tensors["batch"], tensors["load_rgb"][:, :16, :16, :]], dim=0)
+    cases = [
+        ("the starter, two aspects, a text and an image", {"layout": "", "aspects": "1x1,9x16", "text_layer_1": "Spring drop", "image_layer_1": "load_rgb"}),
+        ("v2 outputs and variations, brand over the kit", {
+            "layout": layouts["v2 with outputs and variations"], "aspects": "1x1",
+            "text_layer_1": "Spring drop", "text_layer_2": "Big sale", "image_layer_1": "provider_rgba", "image_layer_2": "card_rgba",
+            "brand": "primary=#ff0000\nfont = Inter\n# note", "brand_kit": "primary=#00ff00\naccent=#0000ff\n# c=1\nempty=\n=novalue\nname = Acme ",
+        }),
+        ("v1, a blank text layer skipped, a friendly brand", {
+            "layout": layouts["v1 (social post)"], "aspects": "16x9",
+            "text_layer_1": "   ", "text_layer_3": "Hello", "brand": "Just a word", "brand_kit": "primary = #111 \nforeground=#fff",
+        }),
+        ("aspects blank: the master format", {"layout": layouts["v2, no outputs, grid columns as a float"], "aspects": "", "image_layer_4": "batch"}),
+        ("aspects repeated", {"layout": "", "aspects": "300x250, 300x250", "text_layer_2": "two"}),
+        ("an unknown aspect", {"layout": "", "aspects": "1x1,nope", "text_layer_1": "x"}),
+        ("bad JSON", {"layout": "{", "aspects": "1x1"}),
+        ("no brand, no layers", {"layout": "", "aspects": "728x90", "brand": "", "brand_kit": ""}),
+    ]
+    temp = tempfile.mkdtemp(prefix="runner-smart-layout-")
+    old_temp = folder_paths.get_temp_directory()
+    folder_paths.set_temp_directory(temp)
+    try:
+        for name, inputs in cases:
+            bodies: list = []
+
+            class _Answer:
+                def __enter__(self):
+                    return self
+
+                def __exit__(self, *a):
+                    return False
+
+                def read(self):
+                    return render_png
+
+            def fake_urlopen(req, timeout=None):
+                bodies.append(json.loads(req.data.decode("utf-8")))
+                return _Answer()
+
+            kwargs = {k: (tensors[v] if k.startswith("image_layer_") else v) for k, v in inputs.items()}
+            row: dict = {"name": name, "inputs": inputs, "node_id": "17"}
+            try:
+                with mock.patch("urllib.request.urlopen", fake_urlopen), \
+                        mock.patch.object(sl.SmartLayoutNode, "hidden", HiddenHolder.from_dict({"UNIQUE_ID": "17"})):
+                    res = sl.SmartLayoutNode.execute(**kwargs)
+                row["outputs"] = [{"shape": list(t.shape), "rgb8": rv.b64(np.clip(255.0 * t[0].numpy(), 0, 255).astype(np.uint8).tobytes())} for t in res.args[0]]
+                ui = res.ui
+                row["ui"] = {"images": ui["images"], "animated": list(ui["animated"])}
+                row["previews"] = []
+                for im in ui["images"]:
+                    with PILImage.open(os.path.join(temp, im["filename"])) as p:
+                        row["previews"].append({"filename": im["filename"], "mode": p.mode, "px": rv.b64(np.array(p).tobytes())})
+            except Exception as e:
+                row["error"] = str(e)
+            # Each image layer's /view URL → the saved frame's pixels.
+            images: dict = {}
+            for body in bodies:
+                for k, v in list(body["props"].items()):
+                    if not k.startswith("image_layer_"):
+                        continue
+                    q = parse_qs(urlparse(v).query)
+                    assert q["type"] == ["temp"], v
+                    with PILImage.open(os.path.join(temp, q["filename"][0])) as p:
+                        images[k] = {"w": p.size[0], "h": p.size[1], "mode": p.mode, "px": rv.b64(np.array(p).tobytes())}
+                    body["props"][k] = {"frame": k}
+            row["bodies"] = bodies
+            row["frames"] = images
+            row["files"] = {sources[v][0]: rv.b64(sources[v][1]) for k, v in inputs.items() if k.startswith("image_layer_")}
+            row["via"] = {k: sources[v][2] for k, v in inputs.items() if k.startswith("image_layer_")}
+            row["names"] = {k: sources[v][0] for k, v in inputs.items() if k.startswith("image_layer_")}
+            out["execute"].append(row)
+    finally:
+        folder_paths.set_temp_directory(old_temp)
+        shutil.rmtree(temp)
+    return out
+
+
 def main() -> None:
     data: dict = {}
     if os.path.exists(OUT):
@@ -758,6 +981,7 @@ def main() -> None:
     data["image_to_mask"] = image_to_mask_cases()
     data["text_mask_source"] = text_mask_source_cases()
     data["save_image"] = save_image_cases()
+    data["smart_layout"] = smart_layout_cases()
     with open(OUT, "w", encoding="utf-8") as f:
         json.dump(dict(sorted(data.items())), f, indent=2, ensure_ascii=False)
         f.write("\n")

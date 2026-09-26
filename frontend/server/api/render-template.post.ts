@@ -4,177 +4,12 @@
  * POST body: RenderRequest (see ../templates/schema.ts).
  * Returns: image/png bytes.
  *
- * Architecture: layout JSON → satori (SVG) → resvg (PNG). Both libraries are
- * pure JS, no native browser needed. Fonts are loaded once at startup and
- * reused across renders.
+ * The render itself (satori → resvg) is ../templates/renderPng.ts, shared
+ * with the runner's Smart Layout card.
  */
 
-import { readFile } from 'node:fs/promises'
-import { join } from 'node:path'
-
-import { Resvg } from '@resvg/resvg-js'
-import satori from 'satori'
-
 import type { RenderRequest } from '~~/server/templates/schema'
-import { readManifest, USER_FONTS_DIR } from '~~/server/templates/fonts-store'
-import { inlineTreeImages } from '~~/server/templates/inlineImages'
-import { templateToSatori } from '~~/server/templates/translate'
-import { TEMPLATE_FONTS } from '~~/shared/template-fonts'
-import { resolveTokens } from '~~/shared/template-grid/tokens'
-import { resolveLibraryFaceByFamily } from '~~/server/utils/libraryFontManifest'
-
-interface LoadedFont {
-  name: string
-  data: ArrayBuffer
-  weight: 400 | 700
-  style: 'normal'
-}
-
-function toArrayBuffer(buf: Buffer): ArrayBuffer {
-  return buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength) as ArrayBuffer
-}
-
-// Curated families (shared/template-fonts.ts) — read once from node_modules.
-let curatedCache: LoadedFont[] | null = null
-
-async function loadCuratedFonts(): Promise<LoadedFont[]> {
-  if (curatedCache) return curatedCache
-  const out: LoadedFont[] = []
-  for (const fam of TEMPLATE_FONTS) {
-    for (const w of fam.weights) {
-      try {
-        const buf = await readFile(join(process.cwd(), 'node_modules', w.modulePath))
-        out.push({ name: fam.name, data: toArrayBuffer(buf), weight: w.weight, style: 'normal' })
-      } catch {
-        // Missing fontsource file — skip; Inter (also curated) still covers.
-      }
-    }
-  }
-  curatedCache = out
-  return out
-}
-
-// Uploaded ("Brand fonts") families — read from the gitignored user dir each
-// render (few, small files; avoids cross-render staleness on re-upload). The
-// single-covers-both manifest mirror means a one-file family registers 400+700.
-async function loadUploadedFonts(): Promise<LoadedFont[]> {
-  const manifest = await readManifest()
-  const out: LoadedFont[] = []
-  const bytesByFile = new Map<string, ArrayBuffer>()  // mirror reads once per render
-  for (const fam of manifest) {
-    for (const weight of ['400', '700'] as const) {
-      const file = fam.weights[weight]
-      if (!file) continue
-      let data = bytesByFile.get(file)
-      if (!data) {
-        try {
-          data = toArrayBuffer(await readFile(join(USER_FONTS_DIR, file)))
-        } catch {
-          continue // file removed out from under the manifest — skip
-        }
-        bytesByFile.set(file, data)
-      }
-      out.push({ name: fam.family, data, weight: Number(weight) as 400 | 700, style: 'normal' })
-    }
-  }
-  return out
-}
-
-// Pangram/Off-Type library families: resolve straight from the committed
-// manifest to an on-disk OTF (no network). Checked before Google so a
-// library family is never also attempted as a Google family (which would
-// 404 — the manifest's family names aren't Google families).
-async function loadLibraryFonts(families: string[]): Promise<LoadedFont[]> {
-  const out: LoadedFont[] = []
-  for (const family of families) {
-    for (const weight of [400, 700] as const) {
-      const face = resolveLibraryFaceByFamily(family, weight, false)
-      if (!face) continue
-      try {
-        const buf = await readFile(face.path)
-        out.push({ name: family, data: toArrayBuffer(buf), weight, style: 'normal' })
-      } catch {
-        // File missing on disk despite manifest entry — skip this weight.
-      }
-    }
-  }
-  return out
-}
-
-// Non-curated families picked in the editor's font picker: fetch TTFs from
-// Google Fonts on first use and cache for the process lifetime. A non-browser
-// User-Agent makes Google return TTF sources — satori can't parse woff2.
-const googleCache = new Map<string, LoadedFont[]>()
-const googleFailed = new Set<string>()
-
-async function loadGoogleFamily(family: string): Promise<LoadedFont[]> {
-  const cached = googleCache.get(family)
-  if (cached) return cached
-  if (googleFailed.has(family)) return []
-  try {
-    const f = encodeURIComponent(family).replace(/%20/g, '+')
-    const cssRes = await fetch(
-      `https://fonts.googleapis.com/css2?family=${f}:wght@400;700&display=swap`,
-      { headers: { 'User-Agent': 'curl/8' } },
-    )
-    if (!cssRes.ok) throw new Error(`css ${cssRes.status}`)
-    const css = await cssRes.text()
-    const fonts: LoadedFont[] = []
-    for (const block of css.split('@font-face').slice(1)) {
-      const weight = /font-weight:\s*(\d+)/.exec(block)?.[1]
-      const url = /src:\s*url\(([^)]+\.ttf)\)/.exec(block)?.[1]
-      if (!url || (weight !== '400' && weight !== '700')) continue
-      const ttf = await fetch(url)
-      if (!ttf.ok) continue
-      fonts.push({ name: family, data: await ttf.arrayBuffer(), weight: Number(weight) as 400 | 700, style: 'normal' })
-    }
-    if (!fonts.length) throw new Error('no ttf faces')
-    googleCache.set(family, fonts)
-    return fonts
-  } catch {
-    googleFailed.add(family)  // don't re-fetch a broken family every render
-    return []
-  }
-}
-
-/** Every fontFamily referenced by the template (v1 incl. per-aspect
- * overrides, v2 element styles). `{{ brand.* }}` tokens resolve against the
- * merged brand so brand-bound fonts are fetched too. */
-function collectFamilies(template: unknown, brand: Record<string, unknown>): string[] {
-  const fams = new Set<string>()
-  const resolve = (f: unknown) => {
-    if (typeof f !== 'string' || !f.trim()) return
-    const r = String(resolveTokens(f.trim(), {}, brand)).trim()
-    if (r) fams.add(r)
-  }
-  const t = template as { elements?: unknown[]; sections?: { children?: unknown[] }[] }
-  const elements = [
-    ...(t?.elements ?? []),
-    ...(t?.sections ?? []).flatMap(s => s?.children ?? []),   // v3 section children
-  ]
-  for (const el of elements as any[]) {
-    resolve(el?.style?.fontFamily)
-    for (const ov of Object.values(el?.overrides ?? {})) resolve((ov as any)?.style?.fontFamily)
-  }
-  return [...fams]
-}
-
-async function loadFonts(template: unknown, brand: Record<string, unknown>): Promise<LoadedFont[]> {
-  const merged = { ...((template as any)?.brand ?? {}), ...brand }
-  // Tiers: curated → uploaded → library → Google. Google fills only families
-  // in none of the local sets, so a library (or uploaded) family wins a name
-  // collision with a Google one, and is never ALSO attempted as Google.
-  const curated = await loadCuratedFonts()
-  const uploaded = await loadUploadedFonts()
-  const referenced = collectFamilies(template, merged)
-  const library = await loadLibraryFonts(referenced.filter(n =>
-    !curated.some(f => f.name === n) && !uploaded.some(f => f.name === n)))
-  const localNames = new Set([...curated, ...uploaded, ...library].map(f => f.name))
-  const extra = (await Promise.all(
-    referenced.filter(n => !localNames.has(n)).map(loadGoogleFamily),
-  )).flat()
-  return [...curated, ...uploaded, ...library, ...extra]
-}
+import { TemplateImageError, renderTemplatePng } from '~~/server/templates/renderPng'
 
 export default defineEventHandler(async (event) => {
   const body = await readBody<RenderRequest>(event)
@@ -182,37 +17,13 @@ export default defineEventHandler(async (event) => {
     throw createError({ statusCode: 400, statusMessage: 'Missing `template` in request body.' })
   }
 
-  const fonts = await loadFonts(body.template, (body.brand ?? {}) as Record<string, unknown>)
-
-  const { tree, width, height } = templateToSatori(
-    body.template,
-    body.aspect,
-    body.props ?? {},
-    body.brand ?? {},
-    body.width && body.height ? { width: body.width, height: body.height } : undefined,
-    body.outputId,
-  )
-
-  // Inline every remote image as a data URI BEFORE satori: its own remote
-  // loading fails silently (a 404 just skips the image → plausible-but-wrong
-  // output). A dead URL now rejects the render with a clear 502 instead.
+  let png: Uint8Array
   try {
-    await inlineTreeImages(tree)
+    png = await renderTemplatePng(body)
   } catch (e) {
-    throw createError({ statusCode: 502, statusMessage: String((e as Error).message ?? e).slice(0, 200) })
+    if (e instanceof TemplateImageError) throw createError({ statusCode: 502, statusMessage: e.message })
+    throw e
   }
-
-  // Satori's first arg is "any" because it accepts ReactNode-shaped objects.
-  // Our `tree` matches that shape (type/props/children) without pulling React.
-  const svg = await satori(tree as any, {
-    width,
-    height,
-    fonts: fonts.map((f) => ({ name: f.name, data: f.data, weight: f.weight, style: f.style })),
-  })
-
-  // SVG → PNG via resvg. fitTo:original honours the size satori already sized to.
-  const resvg = new Resvg(svg, { fitTo: { mode: 'original' } })
-  const png = resvg.render().asPng()
 
   setHeader(event, 'Content-Type', 'image/png')
   setHeader(event, 'Cache-Control', 'no-store')

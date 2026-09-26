@@ -204,8 +204,12 @@ export function planImageToMask(ctx: PlanContext): NodePlan {
 
 // ── Text mask with a source ──────────────────────────────────────────────────
 
-/** The classes that write a picture as save_images does: trunc(f32(255·x)), not a hand-off's round (R1.5 follow-up). */
-const TRUNC_READERS: ReadonlySet<string> = new Set(['SaveImage', 'PreviewImage'])
+/**
+ * The classes that write a picture as save_images does: trunc(f32(255·x)),
+ * not a hand-off's round (R1.5 follow-up). Smart Layout saves each image
+ * layer's frame the same way before its render reads it (R1.6).
+ */
+const TRUNC_READERS: ReadonlySet<string> = new Set(['SaveImage', 'PreviewImage', 'SmartLayout'])
 
 /**
  * Whether everything that reads this output reads it the way save_images

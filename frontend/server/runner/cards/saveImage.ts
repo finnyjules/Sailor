@@ -237,7 +237,7 @@ const keyOf = (f: OutputFile) => `${f.type}:${f.subfolder}:${f.filename}`
  * tensor's alpha: read with an Image card source, the card's 1 − mask round
  * trip would be applied a second time.
  */
-function fromTextMask(prompt: ApiPrompt, link: ApiLink, depth = 0): boolean {
+export function fromTextMask(prompt: ApiPrompt, link: ApiLink, depth = 0): boolean {
   const node = prompt[link[0]]
   if (!node || depth > 64) return false
   const inputs = node.inputs ?? {}

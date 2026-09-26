@@ -65,6 +65,10 @@ export function pictureSourceOf(prompt: ApiPrompt, link: ApiLink, depth = 0): Pi
     case 'EmptyImage':
       if (slot === 0) return 'rgb'
       break
+    // Smart Layout (R1.6): each render as an RGB tensor, exactly its 8-bit PNG (v / 255 round-trips).
+    case 'SmartLayout':
+      if (slot === 0) return 'rgb'
+      break
     default:
       if (PROVIDER_TYPES.has(node.class_type)) {
         const pass = actionPassThrough(node.class_type, inputs)

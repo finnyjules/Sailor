@@ -104,6 +104,7 @@ import { planScene3D, planTextMask, planTextOnPath } from './cards/bakeReplay'
 import { planLoadImageCard } from './cards/loadImage'
 import { planEmptyImage, planGetImageSize, planImageToMask, planTextMaskWithSource } from './cards/utilities'
 import { imageCardShowingKept, planPreviewImage, planSaveImage } from './cards/saveImage'
+import { planSmartLayout } from './cards/smartLayout'
 import type { KeptExt } from './keptBytes'
 import { filesOf } from './values'
 import { OUTPUT_KINDS } from '#shared/runner/values'
@@ -921,6 +922,9 @@ async function planNodeRequest(ctx: PlanContext): Promise<NodePlan> {
     // ── cards (step 3, R1.5): Save image and Preview image ──
     case 'SaveImage': return planSaveImage(ctx)
     case 'PreviewImage': return planPreviewImage(ctx)
+
+    // ── cards (step 3, R1.6): Smart Layout renders its layout here ──
+    case 'SmartLayout': return planSmartLayout(ctx)
 
     case 'Video': {
       let files: OutputFile[]
