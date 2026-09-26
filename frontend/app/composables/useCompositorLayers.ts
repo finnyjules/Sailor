@@ -88,7 +88,10 @@ import { resolveGroupCascade, type LayerGroup } from '~/lib/compositor/layerGrou
 // on purpose (see its header), so the painter can import it at runtime with no cycle.
 import { layoutScaleOf } from '~/lib/frame/responsive/layoutScale'
 import { layoutExpressive, isAccentGlyph, type ExpressiveParams, type AccentRule } from '~~/shared/text-layout/expressive'
-import { type PaintStroke, stampStrokes, strokeBounds } from '~/lib/compositor/brushStamp'
+import { type PaintStroke, type BrushStroke, stampStrokes, strokeBounds } from '~/lib/compositor/brushStamp'
+import { isTipStroke, type TipStroke } from '~/lib/brushTips/record'
+import { renderTipCoverage } from '~/lib/brushTips/coverage'
+import { REF_W } from '~/lib/brushTips/tips'
 import {
   applyBlurPass, applyPasses, applyStackPost, chainActive,
   strokeAlphaAlignOf, strokeAlphaBand,
@@ -736,7 +739,7 @@ export interface StarLayer extends LayerCommon, StrokeStyleFields {
 
 export interface BrushLayer extends LayerCommon {
   kind: 'brush'
-  strokes: PaintStroke[]
+  strokes: BrushStroke[]
   fill: Paint            // region fill — full FillControl set; '' / 'none' = no fill
   stroke?: Paint         // optional outline of the painted silhouette
   strokeWidth?: number   // normalized to width
@@ -1477,6 +1480,11 @@ export async function ensureLayerImages(layers: LocalLayer[], opts?: { keep?: bo
 // capture points are here (before every `applyXform`, and before the background's own
 // center translate).
 let _fieldCtx: ShaderFieldFrameCtx = { frameW: 1, frameH: 1, t: 0, fps: 30, base: null, bake: false, token: 0 }
+
+const _liveTip = new Map<string, { s: TipStroke; tailMs: number }>()
+/** The Frame editor's in-progress tip stroke for a brush layer, folded into its render (live preview).
+ *  `tailMs` = drip time since release (0 while the pointer is down). */
+export function setLiveTipStroke(layerId: string, s: TipStroke | null, tailMs = 0) { if (s) _liveTip.set(layerId, { s, tailMs }); else _liveTip.delete(layerId) }
 
 // The paint's own clock (`t`, on the Frame's loop) for what must stay in step with the loop — a
 // living image's frame. `_fieldCtx.t` is the SHADER clock: the same `t`, unless a live host has
@@ -4806,13 +4814,17 @@ function drawLayerContentBody(ctx: CanvasRenderingContext2D, layer: LocalLayer, 
       ctx.drawImage(live.src, r.sx, r.sy, r.sw, r.sh, -box.w / 2, -box.h / 2, box.w, box.h)
     } else ctx.drawImage(live.src, -box.w / 2, -box.h / 2, box.w, box.h)
   } else if (layer.kind === 'brush') {
-    if (!layer.strokes.length) return
+    // The Frame editor's in-progress tip stroke (live preview), folded into the
+    // bounds and the coverage render below; not part of `layer.strokes` until commit.
+    const liveE = _liveTip.get(layer.id) ?? null
+    const live = liveE?.s ?? null
+    if (!layer.strokes.length && !live) return
     // Size the offscreen to the painted BOUNDS (a tight box), not the whole artboard,
     // so the layer's box/selection hug the marks. Strokes are width-normalized; shift
     // the offscreen so the bounds' top-left maps to (0,0). Rasterize at DEVICE
     // resolution (dpr) so the committed layer stays crisp on retina — `ctx` is
     // DPR-scaled, so the final drawImage at LOGICAL size renders the hi-res offscreen 1:1.
-    const b = strokeBounds(layer.strokes)
+    const b = strokeBounds(live ? [...layer.strokes, live] : layer.strokes)
     // Uniform "keep proportions" scale: `w` drives a scale of the strokes' natural
     // width, and multiplying every artboard-width factor (W) by it below scales the
     // whole shape AND the stroke thickness together, staying centred. At paint-commit
@@ -4831,8 +4843,18 @@ function drawLayerContentBody(ctx: CanvasRenderingContext2D, layer: LocalLayer, 
     const octx = off.getContext('2d'); if (!octx) return
     octx.save()
     octx.translate(-b.minX * W * dpr * scale, -b.minY * W * dpr * scale) // bounds' top-left → offscreen origin
-    stampStrokes(octx, layer.strokes, W * dpr * scale)   // base = artboard-width scale × keep-proportions scale
+    const legacy = layer.strokes.filter(s => !isTipStroke(s)) as PaintStroke[]
+    if (legacy.length) stampStrokes(octx, legacy, W * dpr * scale)   // base = artboard-width scale × keep-proportions scale
     octx.restore()
+    // Tip strokes (spray/round/bristle) render through the shared coverage engine —
+    // a cached white-alpha canvas (+ optional shade), already in offscreen DEVICE
+    // space (origin = bounds' top-left, unitPx = W*dpr*scale per Frame unit, matching
+    // the legacy translate above). A brush with only legacy strokes never reaches this:
+    // `renderTipCoverage` returns null with no side effects, so that layer takes exactly
+    // the old code path (byte-identical output).
+    const unitPx = (W * dpr * scale) / REF_W
+    const cov = renderTipCoverage(layer.id, layer.strokes, { originX: b.minX * REF_W, originY: b.minY * REF_W, unitPx, w: dw, h: dh }, live, liveE?.tailMs ?? 0)
+    if (cov) octx.drawImage(cov.coverage, 0, 0, dw, dh)
     if (hasPaint(layer.fill)) {
       octx.save()
       octx.translate(dw / 2, dh / 2)             // center so resolvePaint's gradient/pattern lines up
@@ -4856,6 +4878,7 @@ function drawLayerContentBody(ctx: CanvasRenderingContext2D, layer: LocalLayer, 
       octx.fillRect(-dw / 2, -dh / 2, dw, dh)
       octx.restore()
     }
+    if (cov?.shade) { octx.save(); octx.globalCompositeOperation = 'soft-light'; octx.drawImage(cov.shade, 0, 0, dw, dh); octx.restore() }
     // Centered at the layer origin, which the caller placed at the bounds' centre.
     ctx.drawImage(off, -w / 2, -h / 2, w, h)
   } else if (layer.kind === 'deal') {

@@ -3,6 +3,8 @@
 // target canvas (its width when a stroke spans the full artboard). The renderer
 // then source-in-fills this alpha with any Paint. See the paintbrush design spec.
 
+import { type TipStroke, isTipStroke, tipStrokePad, decodePts } from '~/lib/brushTips/record'
+
 export interface PaintStroke {
   points: { x: number; y: number }[] // width-normalized (both axes ÷ artboard width)
   radius: number                     // width-normalized brush radius
@@ -82,11 +84,24 @@ export function strokeRadiusPx(stroke: PaintStroke, base: number): number {
   return Math.max(0.5, stroke.radius * base)
 }
 
+/** A brush layer stroke: either a legacy freehand `PaintStroke` or a tip-authored `TipStroke`. */
+export type BrushStroke = PaintStroke | TipStroke
+
 /** Tight bounds of all strokes in WIDTH-normalized artboard coords, expanded by each
  *  stroke's radius so the painted marks sit fully inside. Empty → a zero box at origin. */
-export function strokeBounds(strokes: PaintStroke[]): { minX: number; minY: number; maxX: number; maxY: number } {
+export function strokeBounds(strokes: BrushStroke[]): { minX: number; minY: number; maxX: number; maxY: number } {
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
   for (const s of strokes) {
+    if (isTipStroke(s)) {
+      const pad = tipStrokePad(s)
+      for (const p of decodePts(s.pts)) {
+        if (p.x - pad.side < minX) minX = p.x - pad.side
+        if (p.y - pad.up < minY) minY = p.y - pad.up
+        if (p.x + pad.side > maxX) maxX = p.x + pad.side
+        if (p.y + pad.down > maxY) maxY = p.y + pad.down
+      }
+      continue
+    }
     const r = Math.max(0, s.radius)
     for (const p of s.points) {
       if (p.x - r < minX) minX = p.x - r
@@ -103,7 +118,7 @@ export function strokeBounds(strokes: PaintStroke[]): { minX: number; minY: numb
  *  (like every shape layer); `x` is a fraction of WIDTH and `y` a fraction of HEIGHT
  *  (the layer-position convention — `applyXform` translates to `x*W, y*H`). Strokes are
  *  width-normalized on both axes, so `y` is converted by the aspect (H/W). */
-export function brushBoxFromStrokes(strokes: PaintStroke[], aspect: number): { x: number; y: number; w: number; h: number } {
+export function brushBoxFromStrokes(strokes: BrushStroke[], aspect: number): { x: number; y: number; w: number; h: number } {
   const b = strokeBounds(strokes)
   const w = Math.max(1e-4, b.maxX - b.minX)
   const h = Math.max(1e-4, b.maxY - b.minY)

@@ -39,7 +39,8 @@ export function tipStrokePad(s: TipStroke): { side: number; up: number; down: nu
     const D = st.drips ?? 0
     down = side + size * 0.2 + (25 + size * 1.5) * D + size * 0.1 // drip start + longest run + end blob
   } else if (s.tip === 'round') {
-    side = size / 2 * (1 + 0.3 * Math.max(0.3, st.overspray ?? 0) * 3) + 1
+    const r = size / 2
+    side = r * (0.85 + 0.3 * Math.max(0.3, st.overspray ?? 0) * 4) + 1
     down = side
   } else {
     side = size * 1.25 / 2 + 2  // widest bristle width (1.2× size) plus ragged edge
