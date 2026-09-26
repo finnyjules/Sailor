@@ -56,8 +56,15 @@ type Prompt = Record<string, { class_type?: unknown; inputs?: unknown } | undefi
  */
 export const MAX_MEASURED_FILES = 8
 
-/** The two read pools of a /prompt: pictures, and lip-sync sound / video. */
-export type GatePool = 'pictures' | 'media'
+/**
+ * At most this many Seedance references are read per /prompt (G1 follow-up);
+ * a reference past it is refused. A Seedance node sends at most 3 reference
+ * videos and 3 reference sounds, so this covers two such nodes in full.
+ */
+export const SEEDANCE_REFERENCE_READS = 12
+
+/** The read pools of a /prompt: pictures, lip-sync sound / video, and Seedance references. */
+export type GatePool = 'pictures' | 'media' | 'references'
 
 /**
  * One /prompt's file reads: memoised by what is read (`key`, e.g. the kind and
@@ -69,9 +76,9 @@ export interface GateReads {
 }
 
 export function createGateReads(max: Partial<Record<GatePool, number>> = {}): GateReads {
-  const limit: Record<GatePool, number> = { pictures: MAX_MEASURED_FILES, media: LIPSYNC_MEDIA_READS, ...max }
+  const limit: Record<GatePool, number> = { pictures: MAX_MEASURED_FILES, media: LIPSYNC_MEDIA_READS, references: SEEDANCE_REFERENCE_READS, ...max }
   const seen = new Map<string, Promise<unknown>>()
-  const used: Record<GatePool, number> = { pictures: 0, media: 0 }
+  const used: Record<GatePool, number> = { pictures: 0, media: 0, references: 0 }
   return {
     measure<T>(key: string, read: () => Promise<T | null>, pool: GatePool = 'pictures'): Promise<T | null> {
       const hit = seen.get(`${pool}|${key}`)

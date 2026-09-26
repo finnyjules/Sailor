@@ -45,6 +45,20 @@ import { readViewRef, type MediaFileRef } from '../../shared/pricing/clipSetting
 
 /** Copies larger than this are not made (the input is then left unmeasured, as a larger read is). */
 export const MAX_SNAPSHOT_BYTES = 512 * 1024 * 1024
+/**
+ * At most this many bytes are copied for one request (G1 follow-up). The
+ * copies are made (and hashed) before the credit hold, so without a bound one
+ * request could copy the same uploads many times over. 1 GiB is ten
+ * full-size uploads (the upload limit is 100 MB): far more than a real run
+ * measures (a few pictures and a clip or two), small enough that a request
+ * can't tie up the disk. A file that would take the request past it is not
+ * copied, and the request is refused (INPUTS_TOO_LARGE).
+ */
+export const MAX_SNAPSHOT_BYTES_PER_RUN = 1024 * 1024 * 1024
+/** The refusal when a request's measured files come to more than MAX_SNAPSHOT_BYTES_PER_RUN. */
+export const INPUTS_TOO_LARGE = 'This run uses more file data than Sailor can check at once. Run fewer or smaller files at a time.'
+/** A copy's name, exactly: `g1-<24 hex token>-<64 hex sha256><.ext>`, or its temporary `g1-<token>-<16 hex>.tmp`. */
+export const SNAPSHOT_NAME = /^g1-[0-9a-f]{24}-(?:[0-9a-f]{64}(?:\.[a-z0-9]{1,10})?|[0-9a-f]{16}\.tmp)$/
 /** A copy older than this, found on a sweep, belongs to no live run (the settle watcher gives up after 30 minutes). */
 export const STALE_SNAPSHOT_MS = 3 * 60 * 60 * 1000
 const PREFIX = 'g1-'
@@ -59,6 +73,8 @@ export interface GateSnapshots {
   nameFor(source: SnapshotSource): string | null
   /** Remove every copy (idempotent). */
   release(): Promise<void>
+  /** Whether a file was left uncopied because the request's copies would pass MAX_SNAPSHOT_BYTES_PER_RUN. */
+  overBudget(): boolean
 }
 
 /** Where `source` lives on disk, as the engine resolves it, or null. */
@@ -80,7 +96,8 @@ async function sweepStale(inputDir: string, now: number): Promise<void> {
   let names: string[]
   try { names = await readdir(inputDir) }
   catch { return }
-  await Promise.all(names.filter(n => n.startsWith(PREFIX)).map(async (n) => {
+  // Only names of the copies' exact form: a user's own upload that merely starts with `g1-` is never touched.
+  await Promise.all(names.filter(n => SNAPSHOT_NAME.test(n)).map(async (n) => {
     const p = path.join(inputDir, n)
     try {
       const st = await stat(p)
@@ -106,7 +123,11 @@ export function createGateSnapshots(opts: {
   folder?: (name: 'input' | 'output' | 'temp') => string | null
   token?: string
   now?: () => number
+  maxBytes?: number
 } = {}): GateSnapshots {
+  const maxBytes = opts.maxBytes ?? MAX_SNAPSHOT_BYTES_PER_RUN
+  let reserved = 0
+  let over = false
   const folder = opts.folder ?? engineFolder
   const token = opts.token ?? randomBytes(12).toString('hex')
   const now = opts.now ?? Date.now
@@ -123,6 +144,9 @@ export function createGateSnapshots(opts: {
     try {
       const st = await stat(src)
       if (!st.isFile() || st.size > MAX_SNAPSHOT_BYTES) return null
+      // The request's byte budget, reserved before the copy (takes run in parallel).
+      if (reserved + st.size > maxBytes) { over = true; return null }
+      reserved += st.size
     }
     catch { return null }
     const tmp = path.join(inputDir, `${PREFIX}${token}-${randomBytes(8).toString('hex')}.tmp`)
@@ -155,6 +179,9 @@ export function createGateSnapshots(opts: {
         if (r) byKey.set(keyOf(source), r.name)
         return r
       })
+    },
+    overBudget() {
+      return over
     },
     nameFor(source) {
       return byKey.get(keyOf(source)) ?? null

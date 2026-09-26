@@ -13,7 +13,7 @@ import type { H3Event } from 'h3'
 import { readBody, setResponseStatus } from 'h3'
 import { priceGraph, UnpricedGraphError } from './priceBook'
 import { createGateReads, graphInputSizes, pictureSize } from './graphInputPixels'
-import { createGateSnapshots, rewriteMeasuredInputs } from './gateSnapshots'
+import { INPUTS_TOO_LARGE, createGateSnapshots, rewriteMeasuredInputs } from './gateSnapshots'
 import { normalizeHostedPrompt } from './hostedPrompt'
 import { storedNodeCatalog } from '../native/objectInfo'
 import { graphInputSeconds, mediaSeconds, seedanceReferenceSeconds, type MediaFile, type MediaKind } from './graphInputSeconds'
@@ -354,6 +354,20 @@ export interface GraphRunDeps {
    */
   releaseInputs?(): Promise<void>
   /**
+   * G1 follow-up: a plain refusal when the request's measured files came to
+   * more than the gate copies for one request (gateSnapshots.ts
+   * MAX_SNAPSHOT_BYTES_PER_RUN), else null. Asked after each measuring step,
+   * before that step's own refusals.
+   */
+  inputsRefusal?(): string | null
+  /**
+   * G1 follow-up: the caller's available credits, asked before anything is
+   * copied or measured. A prompt that costs anything, from a caller with no
+   * credit at all, is refused (402) before the gate copies a byte. Absent
+   * (the unit tests), not asked; the hold decides as before.
+   */
+  availableBeforeMeasuring?(userId: string): Promise<number>
+  /**
    * Node id → the measured length of each lip-sync node's sound clip (and
    * Kling lip-sync's source video) — graphInputSeconds. Runs after the
    * file-ownership check. Absent, every lip-sync is priced at the 60 s cap.
@@ -462,8 +476,30 @@ async function submitMetered(userId: string | null, body: any, deps: GraphRunDep
   // Hosted, until F12: the two estimate-priced edit engines are refused too.
   const retired = retiredEngineRefusal(body.prompt)
   if (retired) return { status: 400, body: retired }
+  // G1 follow-up: measuring copies files (below), before the hold. A caller
+  // with no credit at all can't pay for a prompt that costs anything, so it
+  // is refused before a byte is copied. The price here is the unmeasured one
+  // (every size at its cap); only "costs anything" is read from it.
+  if (deps.availableBeforeMeasuring) {
+    let unmeasured: { credits: number } | null = null
+    try { unmeasured = deps.priceGraph(body.prompt) }
+    catch { unmeasured = null } // refused with its own words below
+    if (unmeasured && unmeasured.credits > 0) {
+      const available = await deps.availableBeforeMeasuring(userId)
+      if (!(available >= 1)) throw new MeterRefusalError('Not enough credits', 402, { required: 1, available: Math.max(0, available || 0) })
+    }
+  }
+  // Too much file data to copy for one request: refused plainly (G1 follow-up).
+  const overBudget = () => {
+    const message = deps.inputsRefusal?.() ?? null
+    return message ? { status: 400, body: { error: { type: 'value_not_valid', message, details: '', extra_info: {} }, node_errors: {} } } : null
+  }
+
   // Seedance references longer than the model takes, refused in plain words (S1b fix round 1).
-  const tooLong = deps.referenceSecondsProblems ? nodeProblemsBody(await deps.referenceSecondsProblems(body.prompt)) : null
+  const referenceProblems = deps.referenceSecondsProblems ? await deps.referenceSecondsProblems(body.prompt) : []
+  const refsOver = overBudget()
+  if (refsOver) return refsOver
+  const tooLong = nodeProblemsBody(referenceProblems)
   if (tooLong) return { status: 400, body: tooLong }
 
   // The size of the pictures a size-priced node is sent, where the gate can
@@ -473,6 +509,8 @@ async function submitMetered(userId: string | null, body: any, deps: GraphRunDep
     ? await deps.measureInputSizes(body.prompt)
     : deps.measureInputPixels ? { pixels: await deps.measureInputPixels(body.prompt).catch(() => ({})), problems: [] } : undefined
   const inputPixels = sizes?.pixels
+  const picturesOver = overBudget()
+  if (picturesOver) return picturesOver
   // A measured picture above the input cap is refused before the hold: each
   // size-priced model bills the picture's real size and the price stops at the
   // cap (requestRules.ts measuredInputProblems; final review finding 1).
@@ -483,6 +521,8 @@ async function submitMetered(userId: string | null, body: any, deps: GraphRunDep
   // The length of each lip-sync node's sound (and Kling's source video), where
   // it can read it; the rest price at the 60 s cap.
   const inputSeconds = deps.measureInputSeconds ? await deps.measureInputSeconds(body.prompt).catch(() => ({})) : undefined
+  const mediaOver = overBudget()
+  if (mediaOver) return mediaOver
 
   // G1 fix round 3 (R3 + R4): every file measured above was measured from the
   // run's own copy; the prompt priced and forwarded names those copies, so
@@ -591,9 +631,11 @@ export async function handleMeteredPrompt(event: H3Event): Promise<any> {
     measureInputSizes: prompt => graphInputSizes(prompt, pictureOfCopy, reads),
     measureInputSeconds: prompt => graphInputSeconds(prompt, mediaOfCopy, reads),
     // Hosted: a Seedance reference whose length can't be read is refused, not counted as 0 (S1b fix round 2).
-    referenceSecondsProblems: prompt => seedanceReferenceSeconds(prompt, mediaOfCopy, { strict: true }),
+    referenceSecondsProblems: prompt => seedanceReferenceSeconds(prompt, mediaOfCopy, { strict: true, reads }),
     finalizePrompt: prompt => rewriteMeasuredInputs(prompt, snaps),
     releaseInputs: () => snaps.release(),
+    inputsRefusal: () => (snaps.overBudget() ? INPUTS_TOO_LARGE : null),
+    availableBeforeMeasuring: u => ledger.getAvailable(u),
     // Stage 7 final review C1: the operator kill-switch + daily ceiling. Wired
     // the SAME way moderatePrompt (Task 3) is — the real implementation passed
     // in here, stubbed in the unit tests. Local mode is a no-op inside

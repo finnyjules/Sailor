@@ -300,6 +300,8 @@ export const SEEDANCE_REFERENCE_MAX_SECONDS = 15
 export const SEEDANCE_TOO_MUCH_VIDEO = 'Seedance 2.0 takes at most 15 s of reference video in all.'
 export const SEEDANCE_TOO_MUCH_SOUND = 'Seedance 2.0 takes at most 15 s of reference sound in all.'
 /** Hosted: a reference whose length can't be read (an external link, say) can't be checked, so it isn't sent. */
+/** G1 follow-up: a Seedance reference past the hosted gate's per-run read limit (SEEDANCE_REFERENCE_READS). */
+export const SEEDANCE_TOO_MANY_REFERENCES = 'This run has more Seedance 2.0 reference videos and sounds than Sailor can check at once. Run fewer at a time.'
 export const SEEDANCE_UNMEASURED_REFERENCE = 'Seedance 2.0 can’t check how long a reference video or sound is. Use one uploaded to Sailor.'
 
 /**

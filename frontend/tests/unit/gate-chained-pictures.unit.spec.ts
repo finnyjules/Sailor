@@ -8,7 +8,7 @@
  * in hosted mode (gate and runner). Local mode is unchanged.
  */
 import { createHash } from 'node:crypto'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, utimesSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { gunzipSync } from 'node:zlib'
 import { join } from 'node:path'
@@ -20,14 +20,15 @@ import { LARGEST_INPUT_PIXELS, madePictureBound, nanoBananaPixels, upscaleSideFa
 import { editUsd } from '#shared/pricing/editRates'
 import { measuredInput } from '~~/server/runner/metering'
 import {
-  ENHANCE_DETAIL_TOO_LARGE, FLUX_2_EDIT_TOO_LARGE, UPSCALE_TOO_LARGE, measuredInputProblems, tooManyPicturesWords, unreadableInputWords, unsizedInputWords,
+  ENHANCE_DETAIL_TOO_LARGE, FLUX_2_EDIT_TOO_LARGE, SEEDANCE_TOO_MANY_REFERENCES, UPSCALE_TOO_LARGE, measuredInputProblems, tooManyPicturesWords, unreadableInputWords, unsizedInputWords,
 } from '~~/server/runner/requestRules'
 import {
-  ISOBMFF_HEAD_BYTES, MAX_HOPS, MAX_MEASURED_FILES, createGateReads, graphInputPixels, graphInputSizes, isobmffIspePixels, picturePixels, pictureRule, pictureSize, pyRound, tiffFirstIfdUnique,
+  ISOBMFF_HEAD_BYTES, MAX_HOPS, MAX_MEASURED_FILES, SEEDANCE_REFERENCE_READS, createGateReads, graphInputPixels, graphInputSizes, isobmffIspePixels, picturePixels, pictureRule, pictureSize, pyRound, tiffFirstIfdUnique,
 } from '~~/server/utils/graphInputPixels'
 import { meterGraphSubmit } from '~~/server/utils/meterGraphRun'
 import { GRAPH_FILE_READERS, extractFileRefs } from '~~/server/utils/engineFileSurface'
-import { MEASURED_REF_UNRENAMABLE, createGateSnapshots, rewriteMeasuredInputs, sourcePath } from '~~/server/utils/gateSnapshots'
+import { INPUTS_TOO_LARGE, MEASURED_REF_UNRENAMABLE, SNAPSHOT_NAME, __resetSnapshotSweepForTests, createGateSnapshots, rewriteMeasuredInputs, sourcePath } from '~~/server/utils/gateSnapshots'
+import { seedanceReferenceSeconds } from '~~/server/utils/graphInputSeconds'
 import { SETTING_UNREADABLE, STEPS_UNAVAILABLE, STEP_UNKNOWN, normalizeHostedPrompt } from '~~/server/utils/hostedPrompt'
 import { priceGraph } from '~~/server/utils/priceBook'
 import type { OutputFile } from '~~/server/runner/types'
@@ -990,9 +991,129 @@ describe('the run reads exactly the bytes it was priced on (fix round 3, R3 + R4
   it('the live handler measures from the copies and forwards them', () => {
     const src = readFileSync(join(process.cwd(), 'server/utils/meterGraphRun.ts'), 'utf8')
     expect(src).toContain('const snaps = createGateSnapshots()')
-    expect(src).toContain('referenceSecondsProblems: prompt => seedanceReferenceSeconds(prompt, mediaOfCopy, { strict: true })')
+    expect(src).toContain('referenceSecondsProblems: prompt => seedanceReferenceSeconds(prompt, mediaOfCopy, { strict: true, reads })')
+    expect(src).toContain('inputsRefusal: () => (snaps.overBudget() ? INPUTS_TOO_LARGE : null)')
+    expect(src).toContain('availableBeforeMeasuring: u => ledger.getAvailable(u)')
     expect(src).toContain('finalizePrompt: prompt => rewriteMeasuredInputs(prompt, snaps)')
     expect(src).toContain('releaseInputs: () => snaps.release()')
     expect(src).toContain('.finally(() => { void snaps.release() })')
+  })
+})
+
+// ── G1 follow-up (re-review 3) ────────────────────────────────────────────
+
+describe('what one request may copy (follow-up 1)', () => {
+  const seedanceNode = (names: string[]) => ({
+    class_type: 'GenerateVideoNode',
+    inputs: { model: 'seedance-2.0', model_options: JSON.stringify({ audio_urls: names.map(n => `/view?filename=${n}&type=input`) }) },
+  })
+
+  it('Seedance references share one read limit per prompt; past it, refused in plain words (the re-review\'s 20 nodes × 3 sounds)', async () => {
+    const p: P = {}
+    for (let i = 0; i < 20; i++) p[`s${i}`] = seedanceNode([`a${i}.wav`, `b${i}.wav`, `c${i}.wav`])
+    const read: string[] = []
+    const problems = await seedanceReferenceSeconds(p, async (f) => { read.push(f.value); return 1 }, { strict: true, reads: createGateReads() })
+    expect(read).toHaveLength(SEEDANCE_REFERENCE_READS)
+    expect(SEEDANCE_REFERENCE_READS).toBe(12)
+    // The first four nodes (12 references) are read; the other 16 are refused.
+    expect(problems).toHaveLength(16)
+    expect(new Set(problems.map(x => x.message))).toEqual(new Set([SEEDANCE_TOO_MANY_REFERENCES]))
+    expect(SEEDANCE_TOO_MANY_REFERENCES).toBe('This run has more Seedance 2.0 reference videos and sounds than Sailor can check at once. Run fewer at a time.')
+  })
+
+  it('the same reference in many nodes is read once and counts once', async () => {
+    const p: P = {}
+    for (let i = 0; i < 20; i++) p[`s${i}`] = seedanceNode(['same.wav'])
+    const read: string[] = []
+    expect(await seedanceReferenceSeconds(p, async (f) => { read.push(f.value); return 1 }, { strict: true, reads: createGateReads() })).toEqual([])
+    expect(read).toEqual(['same.wav'])
+  })
+
+  it('a request\'s copies stop at the byte limit: nothing past it is copied, and the request is refused plainly', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'g1-budget-'))
+    for (const d of ['input', 'output', 'temp']) mkdirSync(join(root, d))
+    const folder = (name: 'input' | 'output' | 'temp') => join(root, name)
+    for (const n of ['a', 'b', 'c']) writeFileSync(join(root, 'input', `${n}.wav`), Buffer.alloc(400, n))
+    const snaps = createGateSnapshots({ folder, token: 'b'.repeat(24), maxBytes: 1000 })
+    expect(await snaps.take({ value: 'a.wav', literalInput: false })).not.toBeNull()
+    expect(await snaps.take({ value: 'b.wav', literalInput: false })).not.toBeNull()
+    expect(snaps.overBudget()).toBe(false)
+    expect(await snaps.take({ value: 'c.wav', literalInput: false })).toBeNull()
+    expect(snaps.overBudget()).toBe(true)
+    // Only two copies were made.
+    expect(readdirSync(join(root, 'input')).filter(n => n.startsWith('g1-'))).toHaveLength(2)
+    await snaps.release()
+    expect(INPUTS_TOO_LARGE).toBe('This run uses more file data than Sailor can check at once. Run fewer or smaller files at a time.')
+  })
+
+  it('the gate refuses an over-limit request with that message, before the hold, and releases the copies', async () => {
+    let held = false
+    let released = false
+    // The limit is passed while the pictures are measured (the copy of the next one isn't made).
+    let over = false
+    const res = await meterGraphSubmit('u', { prompt: { 1: load('a.png'), 2: flux2Edit('1'), 3: SINK } }, {
+      priceGraph,
+      measureInputSizes: async () => { over = true; return { pixels: {}, problems: [{ nodeId: '2', classType: 'EditImageNode', input: 'input_image', message: unreadableInputWords('EditImageNode') }] } },
+      inputsRefusal: () => (over ? INPUTS_TOO_LARGE : null),
+      releaseInputs: async () => { released = true },
+      spendGuard: async () => {}, validateFileRefs: async () => {}, moderatePrompt: async () => ({ ok: true as const }),
+      hold: async () => { held = true; return { ok: true as const, holdId: 1 } }, getAvailable: async () => 0,
+      forward: async () => ({ status: 200, body: { prompt_id: 'p' } }), registerRun: async () => {}, startSettle: () => {}, releaseHold: async () => {},
+    }) as { status: number, body: any }
+    expect(res.status).toBe(400)
+    // The byte limit's own words, not the "can't read the size" the uncopied file would otherwise give.
+    expect(res.body.error.message).toBe(INPUTS_TOO_LARGE)
+    expect(held).toBe(false)
+    expect(released).toBe(true)
+  })
+
+  it('a caller with no credit is refused before anything is copied or measured; a free prompt isn\'t asked', async () => {
+    let measured = false
+    const deps = {
+      priceGraph,
+      availableBeforeMeasuring: async () => 0,
+      measureInputSizes: async () => { measured = true; return { pixels: {}, problems: [] } },
+      referenceSecondsProblems: async () => { measured = true; return [] },
+      spendGuard: async () => {}, validateFileRefs: async () => {}, moderatePrompt: async () => ({ ok: true as const }),
+      hold: async () => ({ ok: true as const, holdId: 1 }), getAvailable: async () => 0,
+      forward: async () => ({ status: 200, body: { prompt_id: 'p' } }), registerRun: async () => {}, startSettle: () => {}, releaseHold: async () => {},
+    }
+    const err = await meterGraphSubmit('u', { prompt: { 1: load('a.png'), 2: flux2Edit('1'), 3: SINK } }, deps).then(() => null, e => e)
+    expect(err?.statusCode).toBe(402)
+    expect(measured).toBe(false)
+    // Nothing that costs anything (no output, no paid node): not asked, runs on.
+    let asked = false
+    const res = await meterGraphSubmit('u', { prompt: { 1: load('a.png') } }, { ...deps, availableBeforeMeasuring: async () => { asked = true; return 0 } })
+    expect(asked).toBe(false)
+    expect(res.status).toBe(200)
+    // A caller with credit goes on to measuring as before.
+    measured = false
+    await meterGraphSubmit('u', { prompt: { 1: load('a.png'), 2: flux2Edit('1'), 3: SINK } }, { ...deps, availableBeforeMeasuring: async () => 500 })
+    expect(measured).toBe(true)
+  })
+})
+
+describe('the leftover sweep deletes only the copies\' own names (follow-up 2)', () => {
+  it('an old upload that merely starts with g1- is kept; an old copy (and its temporary) is removed; a fresh copy is kept', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'g1-sweep-'))
+    for (const d of ['input', 'output', 'temp']) mkdirSync(join(root, d))
+    const input = join(root, 'input')
+    const token = 'a'.repeat(24)
+    const oldCopy = `g1-${token}-${'c'.repeat(64)}.png`
+    const oldTmp = `g1-${token}-${'d'.repeat(16)}.tmp`
+    const freshCopy = `g1-${'e'.repeat(24)}-${'f'.repeat(64)}.wav`
+    const uploads = ['g1-holiday.png', `g1-${token}.png`, `g1-${token}-${'c'.repeat(63)}.png`, `g1-${'g'.repeat(24)}-${'c'.repeat(64)}.png`, `g1-${token}-${'c'.repeat(64)}.png.bak`]
+    for (const n of [oldCopy, oldTmp, freshCopy, ...uploads]) writeFileSync(join(input, n), 'x')
+    const old = (Date.now() - 5 * 60 * 60 * 1000) / 1000
+    for (const n of [oldCopy, oldTmp, ...uploads]) utimesSync(join(input, n), old, old)
+    expect(uploads.some(n => SNAPSHOT_NAME.test(n))).toBe(false)
+    expect([oldCopy, oldTmp, freshCopy].every(n => SNAPSHOT_NAME.test(n))).toBe(true)
+    writeFileSync(join(input, 'src.png'), 'y')
+    __resetSnapshotSweepForTests()
+    await createGateSnapshots({ folder: n => join(root, n), token: 'b'.repeat(24) }).take({ value: 'src.png', literalInput: false })
+    const left = readdirSync(input)
+    expect(left).not.toContain(oldCopy)
+    expect(left).not.toContain(oldTmp)
+    for (const n of [freshCopy, ...uploads]) expect(left, n).toContain(n)
   })
 })

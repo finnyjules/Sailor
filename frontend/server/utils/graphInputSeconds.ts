@@ -37,7 +37,7 @@ import { createGateReads, type GateReads } from './graphInputPixels'
 import { readModelOptions } from '../../shared/pricing/videoSettings'
 import { readViewRef } from '../../shared/pricing/clipSettings'
 import { resolveVideoModelId } from '../../shared/runner/eligibility'
-import { SEEDANCE_REFERENCE_MAX_SECONDS, SEEDANCE_TOO_MUCH_SOUND, SEEDANCE_TOO_MUCH_VIDEO, SEEDANCE_UNMEASURED_REFERENCE, type RequestProblem } from '../runner/requestRules'
+import { SEEDANCE_REFERENCE_MAX_SECONDS, SEEDANCE_TOO_MANY_REFERENCES, SEEDANCE_TOO_MUCH_SOUND, SEEDANCE_TOO_MUCH_VIDEO, SEEDANCE_UNMEASURED_REFERENCE, type RequestProblem } from '../runner/requestRules'
 
 type Prompt = Record<string, { class_type?: unknown; inputs?: unknown } | undefined>
 export type MediaKind = 'audio' | 'video'
@@ -247,15 +247,28 @@ export async function graphInputSeconds(
 export async function seedanceReferenceSeconds(
   prompt: Prompt,
   read: (file: MediaFile, kind: MediaKind) => Promise<number | null> = engineMediaSeconds,
-  opts: { strict?: boolean } = {},
+  opts: { strict?: boolean, reads?: GateReads } = {},
 ): Promise<RequestProblem[]> {
   const out: RequestProblem[] = []
+  // With `reads` (the hosted gate, G1 follow-up): each distinct reference is
+  // read once, and at most SEEDANCE_REFERENCE_READS per prompt, from their own
+  // pool; one past the budget is left unread and refused (it can't be checked).
+  const OVER = Symbol('over')
+  const readOne = (name: string, kind: MediaKind): Promise<number | null | typeof OVER> => {
+    const file = { value: name, literalInput: true }
+    if (!opts.reads) return read(file, kind).catch(() => null)
+    let ran = false
+    return opts.reads.measure<number | typeof OVER>(mediaFileKey(kind, file), async () => {
+      ran = true
+      return (await read(file, kind).catch(() => null)) ?? -1
+    }, 'references').then(v => (v == null ? (ran ? null : OVER) : v === -1 ? null : v))
+  }
   for (const list of seedanceReferenceLists(prompt)) {
-    const lengths = await Promise.all(list.names.map(name =>
-      name ? read({ value: name, literalInput: true }, list.kind).catch(() => null) : Promise.resolve(null)))
+    const lengths = await Promise.all(list.names.map(name => (name ? readOne(name, list.kind) : Promise.resolve(null))))
     const problem = (message: string): RequestProblem => ({ nodeId: list.nodeId, classType: 'GenerateVideoNode', input: 'model_options', message })
+    if (lengths.some(s => s === OVER)) { out.push(problem(SEEDANCE_TOO_MANY_REFERENCES)); continue }
     if (opts.strict && lengths.some(s => s == null)) { out.push(problem(SEEDANCE_UNMEASURED_REFERENCE)); continue }
-    const total = lengths.reduce<number>((n, s) => n + (s ?? 0), 0)
+    const total = (lengths as (number | null)[]).reduce<number>((n, s) => n + (s ?? 0), 0)
     if (total > SEEDANCE_REFERENCE_MAX_SECONDS) out.push(problem(list.tooMuch))
   }
   return out
