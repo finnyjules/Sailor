@@ -93,7 +93,7 @@ import { isTipStroke, type TipStroke } from '~/lib/brushTips/record'
 import { renderTipCoverage } from '~/lib/brushTips/coverage'
 import { REF_W } from '~/lib/brushTips/tips'
 import { NEON_HALO_UNITS } from '~/lib/brushTips/engine'
-import type { MaterialId } from '~/lib/brushTips/materials'
+import { isMaterialId, type MaterialId } from '~/lib/brushTips/materials'
 import {
   applyBlurPass, applyPasses, applyStackPost, chainActive,
   strokeAlphaAlignOf, strokeAlphaBand,
@@ -759,7 +759,31 @@ export interface BrushLayer extends LayerCommon {
  *  clamps there, so an unpadded box smears the glow at the boundary. Every other
  *  material is flat coverage and needs no extra room. */
 export function brushMaterialPad(layer: BrushLayer): number {
-  return layer.material?.id === 'neon' ? NEON_HALO_UNITS / REF_W : 0
+  return brushMaterialOf(layer)?.id === 'neon' ? NEON_HALO_UNITS / REF_W : 0
+}
+
+/** A brush layer's material when it is one this build knows, else undefined. Saved data can
+ *  carry an id this build has never heard of (a newer build, or a hand-edited file); such a
+ *  layer renders, pads and ticks exactly like a Colour layer instead of throwing out of the
+ *  whole Frame paint. Every reader of `material` goes through this. */
+export function brushMaterialOf(layer: BrushLayer): { id: MaterialId; moving: boolean } | undefined {
+  const m = layer.material
+  return m && isMaterialId(m.id) ? m : undefined
+}
+
+/** `brushMaterialPad` in logical px for the layer as rendered: the Frame-unit pad × W × the
+ *  keep-proportions scale the render branch applies (stored `w` over the strokes' natural
+ *  width, 1 at paint-commit). Box-sized offscreens (corner pin, raster warp, DOF, the
+ *  silhouette raster) add it so neon's halo is not cropped to a hard rectangle. 0 for every
+ *  non-brush layer and every brush layer without a (valid) neon material — byte-identical. */
+export function brushMaterialPadPx(layer: LocalLayer, W: number): number {
+  if (layer.kind !== 'brush') return 0
+  const pad = brushMaterialPad(layer as BrushLayer)
+  if (!pad) return 0
+  const b = strokeBounds((layer as BrushLayer).strokes)
+  const nw = b.maxX - b.minX
+  const scale = nw > 1e-6 ? (layer as BrushLayer).w / nw : 1
+  return pad * W * scale
 }
 
 /**
@@ -2048,7 +2072,8 @@ export function strokeReachPx(layer: LocalLayer, W: number): number {
  * branch is a full em plus the outline's reach.
  */
 export function cornerPinPadPx(layer: LocalLayer, W: number): number {
-  return strokeStackReachPx(layer, W, false) + geometryOutwardPx(layer, W)
+  // + a neon brush material's halo (0 for everything else — byte-identical pad and quad).
+  return strokeStackReachPx(layer, W, false) + geometryOutwardPx(layer, W) + brushMaterialPadPx(layer, W)
 }
 
 /**
@@ -2828,6 +2853,8 @@ export function silhouettePadPx(layer: LocalLayer, W: number, s: number, box: { 
     maxLineWPx,
     boxWidthPx: box.w,
   }, s) + outerGlowOutwardPx(layer, W) + strokeAlphaOutwardPx(layer, W) + motionBlurOutwardPx(layer, W, box) + edgeDistortOutwardPx(layer, W)
+    // A neon brush material's halo reaches past the painted bounds (0 otherwise), like geoPx.
+    + brushMaterialPadPx(layer, W)
 }
 
 // Raster mesh-warp (F3 4b) constants. `RASTER_WARP_EPS` matches `geometryEffects.WARP_EPS`:
@@ -2923,7 +2950,7 @@ function paintLayer(
     && !layerHasFoil(layer)                                         // foil is lit by the Frame's light over the frame — never bake it
     && !isClipLayer                                                 // a living image changes every frame — never bake it
     && !(layer.kind === 'brush' && _liveTip.has(layer.id))          // a live tip stroke isn't in the key: never bake a half-painted raster
-    && !(layer.kind === 'brush' && (layer as BrushLayer).material?.moving) // a moving material animates every frame — the cache key has no clock
+    && !(layer.kind === 'brush' && brushMaterialOf(layer as BrushLayer)?.moving) // a moving material animates every frame — the cache key has no clock
     && silhouetteContentReady(layer, W)
   // Memoized like `dofContent` below: identical for every clone of the SAME tint.
   //
@@ -3062,7 +3089,10 @@ function paintLayer(
     if (!dofShouldRun(dof, true)) return dofMemo
 
     const box = localLayerBox(measureCtx(), layer, W, H, wiredLive)
-    const bw = Math.max(1, Math.round(box.w)), bh = Math.max(1, Math.round(box.h))
+    // A neon brush material's halo reaches past the box on every side (0 for everything else,
+    // so this source is byte-identical); drawn centred, so the pad simply grows the canvas.
+    const matPad = brushMaterialPadPx(layer, W)
+    const bw = Math.max(1, Math.round(box.w + matPad * 2)), bh = Math.max(1, Math.round(box.h + matPad * 2))
     const src = document.createElement('canvas'); src.width = bw; src.height = bh
     const sctx = src.getContext('2d')
     if (!sctx) return dofMemo
@@ -4918,7 +4948,9 @@ function drawLayerContentBody(ctx: CanvasRenderingContext2D, layer: LocalLayer, 
       octx.fillRect(-dw / 2, -dh / 2, dw, dh)
       octx.restore()
     }
-    if (layer.material && legacy.length) applyFill() // legacy fill, before the tip coverage below replaces `off`
+    // Only a material this build knows counts — an unknown id renders exactly like Colour.
+    const mat = brushMaterialOf(layer)
+    if (mat && legacy.length) applyFill() // legacy fill, before the tip coverage below replaces `off`
     // Tip strokes (spray/round/bristle) render through the shared coverage engine —
     // a cached white-alpha canvas (+ optional shade), already in offscreen DEVICE
     // space (origin = bounds' top-left, unitPx = W*dpr*scale per Frame unit, matching
@@ -4928,12 +4960,13 @@ function drawLayerContentBody(ctx: CanvasRenderingContext2D, layer: LocalLayer, 
     // exactly the old code path (byte-identical output). With a material, the returned
     // coverage is already the COLOURED premultiplied composite (base + tinted tip groups).
     const unitPx = (W * dpr * scale) / REF_W
-    const paint = layer.material ? { material: layer.material.id, t: layer.material.moving ? _fieldCtx.t : 0 } : undefined
+    // A bake (export) renders at the exact clock time, not the live cache's 1/30 s bucket.
+    const paint = mat ? { material: mat.id, t: mat.moving ? _fieldCtx.t : 0, exact: _fieldCtx.bake } : undefined
     const cov = renderTipCoverage(layer.id, layer.strokes, { originX: b.minX * REF_W, originY: b.minY * REF_W, unitPx, w: dw, h: dh }, live, liveE?.tailMs ?? 0, legacy.length ? off : null, paint)
     // Canvases may come back smaller than the view (the 8192 render cap) — the explicit
     // (dw, dh) below always stretches back to the real offscreen size.
     if (cov) { octx.clearRect(0, 0, dw, dh); octx.drawImage(cov.coverage, 0, 0, dw, dh) }
-    if (!layer.material) applyFill() // today's single fill pass, over the strokes + tip coverage together
+    if (!mat) applyFill() // today's single fill pass, over the strokes + tip coverage together
     if (cov?.shade) { octx.save(); octx.globalCompositeOperation = 'soft-light'; octx.drawImage(cov.shade, 0, 0, dw, dh); octx.restore() }
     // Centered at the layer origin, which the caller placed at the bounds' centre.
     ctx.drawImage(off, -w / 2, -h / 2, w, h)
@@ -6498,11 +6531,17 @@ export function hasAnimatedShaderFill(items: StackItem[], background?: Paint): b
     e.type === 'backdrop_shader' && e.visible && getEffectSync(e.effectId)?.animated === true && e.speed !== 0
   for (const it of items) {
     if (it.type !== 'local') continue
-    if (layerPaints(it.layer).some(isLiveShader)) return true
+    // A brush layer with a (known) material paints its tip strokes in the material, so its
+    // `fill` is hidden unless legacy strokes still wear it — a hidden moving fill must not keep
+    // the clock running under a still material.
+    const brushMat = it.layer.kind === 'brush' ? brushMaterialOf(it.layer as BrushLayer) : undefined
+    const hiddenFill = !!brushMat && (it.layer as BrushLayer).strokes.every(isTipStroke)
+    const paints = hiddenFill ? layerPaints(it.layer).filter(p => p !== (it.layer as BrushLayer).fill) : layerPaints(it.layer)
+    if (paints.some(isLiveShader)) return true
     if (effectStackOf(it.layer as unknown as Parameters<typeof effectStackOf>[0]).some(e => isLiveShaderEffect(e) || isLiveBackdropShaderEffect(e))) return true
     // A brush layer's material is its own live shader look, driven by the same
     // Frame clock — `moving: true` needs the clock exactly like a live shader fill.
-    if (it.layer.kind === 'brush' && (it.layer as BrushLayer).material?.moving === true) return true
+    if (brushMat?.moving === true) return true
   }
   return false
 }
