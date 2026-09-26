@@ -6,6 +6,7 @@
 import { computed } from 'vue'
 import type { useBrushPaint } from '~/composables/useBrushPaint'
 import { TIPS, TIP_IDS, SIZE_MIN, SIZE_MAX, MASK_HINT } from '~/lib/brushTips/tips'
+import { MATERIAL_IDS, MATERIALS } from '~/lib/brushTips/materials'
 import StudioColor from '~/components/vue-canvas/studio/StudioColor.vue'
 
 const props = defineProps<{ brush: ReturnType<typeof useBrushPaint> }>()
@@ -23,7 +24,9 @@ const currentTipSize = computed(() => props.brush.tipSize[props.brush.tip.value]
 function selectTip(id: (typeof TIP_IDS)[number]) { props.brush.tip.value = id }
 function setTipSize(v: number) { props.brush.tipSize[props.brush.tip.value] = v }
 function setSizePx(v: number) { props.brush.sizePx.value = v }
-function setColor(v: string) { props.brush.color.value = v }
+function setColor(v: string) { props.brush.color.value = v; props.brush.material.value = null }
+function selectColour() { props.brush.material.value = null }
+function selectMaterial(id: (typeof MATERIAL_IDS)[number]) { props.brush.material.value = id }
 function toggleEraser() { props.brush.eraser.value = !props.brush.eraser.value }
 function setMode(m: 'paint' | 'mask') { props.brush.mode.value = m }
 function done() { emit('done') }
@@ -85,6 +88,24 @@ function done() { emit('done') }
         >Eraser</button>
         <span class="sep" />
         <button class="tbtn primary" data-testid="brush-done" @click="done()">Done</button>
+      </div>
+
+      <div v-if="!isMask" class="row">
+        <span class="lbl">Paint</span>
+        <button
+          class="swatch colour" data-testid="brush-material-colour"
+          :aria-pressed="brush.material.value === null" aria-label="Colour" title="Colour"
+          :style="{ background: brush.color.value }"
+          @click="selectColour()"
+        />
+        <button
+          v-for="id in MATERIAL_IDS" :key="id"
+          class="swatch" :data-testid="`brush-material-${id}`"
+          :aria-pressed="brush.material.value === id"
+          :aria-label="MATERIALS[id].label" :title="MATERIALS[id].label"
+          :style="{ background: MATERIALS[id].swatch }"
+          @click="selectMaterial(id)"
+        />
       </div>
     </div>
 
@@ -172,6 +193,18 @@ input[type='range'] {
 .tbtn[aria-pressed='true'] { background: #fff; color: #111; }
 .tbtn.primary { background: #2f6bff; color: #fff; }
 .tbtn.primary:hover { background: #3f78ff; }
+.swatch {
+  flex: none;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  cursor: pointer;
+  padding: 0;
+}
+.swatch.colour { background: #3b82f6; }
+.swatch[aria-pressed='true'] { box-shadow: 0 0 0 2px #fff; }
+.swatch:hover { border-color: rgba(255, 255, 255, 0.5); }
 .hint-wrap { display: flex; max-width: 100%; }
 .hint {
   font-size: 11px;

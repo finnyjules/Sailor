@@ -2,6 +2,7 @@ import { ref, reactive, watch } from 'vue'
 import type { PaintStroke } from '~/lib/compositor/brushStamp'
 import { TIPS, TIP_IDS, defaultSettings, REF_W, SIZE_MIN, SIZE_MAX, type TipId } from '~/lib/brushTips/tips'
 import { encodePts, type Sample, type TipStroke } from '~/lib/brushTips/record'
+import { isMaterialId, type MaterialId } from '~/lib/brushTips/materials'
 
 export type BrushMode = 'paint' | 'mask'
 
@@ -10,17 +11,26 @@ function loadTips() {
   const settings = Object.fromEntries(TIP_IDS.map(t => [t, defaultSettings(t)])) as Record<TipId, Record<string, number>>
   const size = Object.fromEntries(TIP_IDS.map(t => [t, TIPS[t].defaultSize])) as Record<TipId, number>
   let tip: TipId = 'spray'
+  let material: MaterialId | null = null
   try {
     const raw = JSON.parse(localStorage.getItem(STORE_KEY) || 'null')
     if (raw && typeof raw === 'object') {
       if (TIP_IDS.includes(raw.tip)) tip = raw.tip
+      if (isMaterialId(raw.material)) material = raw.material
       for (const t of TIP_IDS) {
         for (const k of Object.keys(settings[t])) { const v = raw.settings?.[t]?.[k]; if (typeof v === 'number' && Number.isFinite(v)) settings[t][k] = v }
         const sz = raw.size?.[t]; if (typeof sz === 'number' && Number.isFinite(sz)) size[t] = Math.min(SIZE_MAX, Math.max(SIZE_MIN, sz))
       }
     }
   } catch { /* bad or blocked storage: defaults */ }
-  return { tip, settings, size }
+  return { tip, settings, size, material }
+}
+
+/** True when a brush layer's material and the toolbar's paint choice would draw the same look:
+ * both Colour (no material), or the same material id. */
+export function paintMatchesLayer(layerMaterial: { id: MaterialId } | undefined, toolbar: MaterialId | null): boolean {
+  const layerId = layerMaterial?.id ?? null
+  return layerId === toolbar
 }
 
 export function useBrushPaint() {
@@ -64,10 +74,11 @@ export function useBrushPaint() {
   const tip = ref<TipId>(saved.tip)
   const tipSettings = reactive(saved.settings)
   const tipSize = reactive(saved.size)
+  const material = ref<MaterialId | null>(saved.material)
   let saveTimer: ReturnType<typeof setTimeout> | null = null
-  watch([tip, tipSettings, tipSize], () => {
+  watch([tip, tipSettings, tipSize, material], () => {
     if (saveTimer) clearTimeout(saveTimer)
-    saveTimer = setTimeout(() => { try { localStorage.setItem(STORE_KEY, JSON.stringify({ tip: tip.value, settings: tipSettings, size: tipSize })) } catch { /* ignore */ } }, 150)
+    saveTimer = setTimeout(() => { try { localStorage.setItem(STORE_KEY, JSON.stringify({ tip: tip.value, settings: tipSettings, size: tipSize, material: material.value })) } catch { /* ignore */ } }, 150)
   }, { deep: true })
   function resetTipSettings(t: TipId) { Object.assign(tipSettings[t], defaultSettings(t)) }
 
@@ -99,7 +110,7 @@ export function useBrushPaint() {
   return {
     active, mode, sizePx, color, opacity, hardness, smoothing, eraser, cursor, hasLiveStroke,
     setActive, radiusNorm, beginStroke, extendStroke, endStroke, liveStroke,
-    tip, tipSettings, tipSize, resetTipSettings,
+    tip, tipSettings, tipSize, material, resetTipSettings,
     beginTipStroke, extendTipStroke, holdTipStroke, liveTipStroke, endTipStroke,
   }
 }
