@@ -8,6 +8,7 @@ import sharp from 'sharp'
 import { maskPngFromScanlines, readMaskPng } from '../compositor/keep'
 import { core } from '../compositor/plane'
 import { MAX_INPUT_PIXELS } from '../compositor/decode'
+import { pictureMeta, pngChunksBeforePixels, pngColourType } from './pythonView'
 
 export interface Mask { w: number; h: number; data: Float32Array }
 
@@ -28,10 +29,23 @@ export async function decodeMask(bytes: Uint8Array): Promise<Mask> {
   return { w, h, data: p.data }
 }
 
+/**
+ * Whether LoadImage takes a mask from the file: an alpha band, or a palette
+ * with transparency. A PNG's tRNS colour key on RGB or grey leaves PIL's mode
+ * RGB / L (no mask), though sharp turns it into alpha; so a PNG is judged by
+ * its IHDR colour type. Other formats: sharp's alpha agrees with PIL's.
+ */
+function hasAlphaAsPil(bytes: Uint8Array, sharpAlpha: boolean | undefined): boolean {
+  const type = pngColourType(bytes)
+  if (type === null) return !!sharpAlpha
+  if (type === 4 || type === 6) return true
+  return type === 3 && !!pngChunksBeforePixels(bytes)?.includes('tRNS')
+}
+
 export async function loadImageMask(bytes: Uint8Array): Promise<Mask> {
+  const meta = await pictureMeta(bytes)
+  if (!hasAlphaAsPil(bytes, meta.hasAlpha)) return { w: 64, h: 64, data: new Float32Array(64 * 64) }
   const s = sharp(bytes, { pages: 1, page: 0, autoOrient: true, ignoreIcc: true, limitInputPixels: MAX_INPUT_PIXELS })
-  const meta = await s.metadata()
-  if (!meta.hasAlpha) return { w: 64, h: 64, data: new Float32Array(64 * 64) }
   const { data, info } = await s.extractChannel('alpha').raw().toBuffer({ resolveWithObject: true })
   const out = new Float32Array(info.width * info.height)
   // As Python: float32(a / 255), then 1 − that in float32.

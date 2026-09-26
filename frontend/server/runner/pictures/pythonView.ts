@@ -4,17 +4,47 @@
  * LoadImage's IMAGE, 3D Studio's bakes and Text on path. Returned as the PNG
  * `_image_tensor_to_data_url` would send (8-bit RGB), or `png: null` when the
  * file already is exactly that picture (then it is handed on untouched).
- * PIL ignores embedded ICC profiles; so does this. 16-bit and CMYK files are
- * refused: PIL's conversion of those is its own, and not ported. So is a GIF
+ * PIL ignores embedded ICC profiles; so does this. 16-bit, 32-bit and CMYK
+ * files are refused, and so are files sharp cannot read (BMP, ICO, TGA, PSD…): PIL's conversion of those is its own, and not ported. So is a GIF
  * whose first frame has a see-through colour or does not fill the picture:
  * PIL fills those pixels with a palette colour, sharp with transparent black.
  */
-import sharp from 'sharp'
+import sharp, { type Metadata } from 'sharp'
 import { MAX_INPUT_PIXELS } from '../compositor/decode'
 
 export const PICTURE_16_BIT = 'This picture is 16-bit. Save it as an 8-bit picture and load it again.'
 export const PICTURE_CMYK = 'This picture is CMYK. Save it as RGB and load it again.'
 export const PICTURE_GIF_SEE_THROUGH = 'This GIF has see-through parts. Save it as a PNG and load it again.'
+export const PICTURE_32_BIT = 'This picture is 32-bit. Save it as an 8-bit picture and load it again.'
+export const PICTURE_UNREADABLE = 'This kind of picture file can’t be read here. Save it as a PNG or JPEG and load it again.'
+
+/** sharp's metadata, with a file it cannot read (BMP, ICO, TGA, PSD…) refused in plain words. */
+export async function pictureMeta(bytes: Uint8Array): Promise<Metadata> {
+  try { return await sharp(bytes, { limitInputPixels: MAX_INPUT_PIXELS }).metadata() }
+  catch { throw new Error(PICTURE_UNREADABLE) }
+}
+
+const PNG_SIGNATURE = [137, 80, 78, 71, 13, 10, 26, 10]
+
+/** A PNG's chunk types before its pixels (IHDR … up to IDAT), or null when the bytes are not a PNG. */
+export function pngChunksBeforePixels(b: Uint8Array): string[] | null {
+  if (b.length < 8 || PNG_SIGNATURE.some((v, i) => b[i] !== v)) return null
+  const view = new DataView(b.buffer, b.byteOffset, b.byteLength)
+  const types: string[] = []
+  for (let o = 8; o + 8 <= b.length;) {
+    const type = String.fromCharCode(b[o + 4]!, b[o + 5]!, b[o + 6]!, b[o + 7]!)
+    if (type === 'IDAT' || type === 'IEND') break
+    types.push(type)
+    o += 12 + view.getUint32(o)
+  }
+  return types
+}
+
+/** A PNG's IHDR colour type (0 grey, 2 RGB, 3 palette, 4 grey+alpha, 6 RGBA), or null when the bytes are not a PNG. */
+export function pngColourType(b: Uint8Array): number | null {
+  const chunks = pngChunksBeforePixels(b)
+  return chunks?.[0] === 'IHDR' && b.length > 25 ? b[25]! : null
+}
 
 /**
  * Whether a GIF's first frame has a transparent colour (its Graphic Control
@@ -44,15 +74,19 @@ export function gifFirstFrameSeeThrough(b: Uint8Array): boolean {
 }
 
 export async function rgbTurnedPng(bytes: Uint8Array): Promise<{ png: Uint8Array | null; w: number; h: number }> {
-  const meta = await sharp(bytes, { limitInputPixels: MAX_INPUT_PIXELS }).metadata()
-  if (meta.depth === 'ushort') throw new Error(PICTURE_16_BIT)
+  const meta = await pictureMeta(bytes)
+  if (meta.depth === 'ushort' || meta.depth === 'short') throw new Error(PICTURE_16_BIT)
+  // LoadImage divides 32-bit integer pictures by 255 before converting (nodes.py); not ported.
+  if (meta.depth && meta.depth !== 'uchar') throw new Error(meta.depth === 'char' ? PICTURE_UNREADABLE : PICTURE_32_BIT)
   if (meta.space === 'cmyk') throw new Error(PICTURE_CMYK)
   if (meta.format === 'gif' && gifFirstFrameSeeThrough(bytes)) throw new Error(PICTURE_GIF_SEE_THROUGH)
   const turned = (meta.orientation ?? 1) >= 5
   const w = turned ? meta.height! : meta.width!
   const h = turned ? meta.width! : meta.height!
+  // Exactly Python's picture: 8-bit RGB, one frame (no APNG acTL), not turned, no ICC profile (the data URL carries none).
   const already = meta.format === 'png' && meta.channels === 3 && !meta.hasAlpha
     && (meta.orientation ?? 1) === 1 && (meta.pages ?? 1) === 1 && meta.space === 'srgb'
+    && !meta.hasProfile && !pngChunksBeforePixels(bytes)?.includes('acTL')
   if (already) return { png: null, w, h }
   const png = await sharp(bytes, { pages: 1, page: 0, autoOrient: true, ignoreIcc: true, limitInputPixels: MAX_INPUT_PIXELS })
     .toColourspace('srgb').removeAlpha().png({ compressionLevel: 6 }).toBuffer()

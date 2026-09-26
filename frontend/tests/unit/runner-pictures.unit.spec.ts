@@ -7,7 +7,7 @@ import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import sharp from 'sharp'
 import { decodeMask, encodeMask, loadImageMask, type Mask } from '~~/server/runner/pictures/mask'
-import { PICTURE_16_BIT, PICTURE_CMYK, PICTURE_GIF_SEE_THROUGH, rgbTurnedPng } from '~~/server/runner/pictures/pythonView'
+import { PICTURE_16_BIT, PICTURE_32_BIT, PICTURE_CMYK, PICTURE_GIF_SEE_THROUGH, PICTURE_UNREADABLE, rgbTurnedPng } from '~~/server/runner/pictures/pythonView'
 
 const FIX = JSON.parse(readFileSync(join(__dirname, 'fixtures', 'runner-values.json'), 'utf8'))
 const b64 = (s: string) => new Uint8Array(Buffer.from(s, 'base64'))
@@ -54,5 +54,12 @@ describe('rgbTurnedPng', () => {
   it('refuses a GIF with a see-through colour (PIL fills it with a palette colour, sharp with transparent black)', async () => {
     const gif = (FIX.refused as { name: string; file: string }[]).find(c => c.name === 'a GIF with a transparent colour')
     await expect(rgbTurnedPng(b64(gif!.file))).rejects.toThrow(PICTURE_GIF_SEE_THROUGH)
+  })
+  it('refuses a file sharp cannot read, and 32-bit integer and float pictures, in plain words', async () => {
+    const byName = (n: string) => b64((FIX.refused as { name: string; file: string }[]).find(c => c.name === n)!.file)
+    await expect(rgbTurnedPng(byName('a BMP'))).rejects.toThrow(PICTURE_UNREADABLE)
+    await expect(loadImageMask(byName('a BMP'))).rejects.toThrow(PICTURE_UNREADABLE)
+    await expect(rgbTurnedPng(byName('a 32-bit integer TIFF'))).rejects.toThrow(PICTURE_32_BIT)
+    await expect(rgbTurnedPng(byName('a 32-bit float TIFF'))).rejects.toThrow(PICTURE_32_BIT)
   })
 })

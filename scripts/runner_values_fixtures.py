@@ -10,10 +10,13 @@ TypeScript helpers (frontend/server/runner/pictures/) to be measured against
                 the real _image_tensor_to_data_url (nodes_replicate.py) and
                 stored as its 8-bit RGB pixels; and whether the file already
                 was that picture (an RGB 8-bit single-frame PNG with no EXIF
-                orientation), so the runner may hand it on untouched
-  refused     — a 16-bit greyscale PNG, a CMYK JPEG and a GIF with a
-                transparent colour, with what PIL's .convert("RGB") gives (for
-                the report; the runner refuses all three)
+                orientation, ICC profile or colour key), so the runner may
+                hand it on untouched
+  refused     — a 16-bit greyscale PNG, a CMYK JPEG, a GIF with a
+                transparent colour, a BMP (sharp can't read it) and 32-bit
+                integer and float TIFFs (LoadImage divides those by 255), with
+                what PIL's .convert("RGB") gives (for the report; the runner
+                refuses them all)
 
     cd /Users/julien/Documents/GitHub/Sailor && .venv/bin/python scripts/runner_values_fixtures.py
 
@@ -139,6 +142,52 @@ def _transparent_gif() -> bytes:
     return _save(a, "GIF", transparency=3)
 
 
+def _rgb_trns_png() -> bytes:
+    """An RGB PNG with a tRNS colour key: PIL keeps it mode RGB (no alpha band)."""
+    arr = _pattern(24, 36, 17)
+    arr[:4, :6] = [10, 20, 30]
+    return _save(PILImage.fromarray(arr, "RGB"), "PNG", transparency=(10, 20, 30))
+
+
+def _grey_trns_png() -> bytes:
+    """A greyscale PNG with a tRNS colour key: PIL keeps it mode L."""
+    arr = _pattern(18, 22, 18)[..., 0].copy()
+    arr[:3, :5] = 7
+    return _save(PILImage.fromarray(arr, "L"), "PNG", transparency=7)
+
+
+def _icc_png() -> bytes:
+    """An RGB PNG carrying an ICC profile (Python's data URL carries none)."""
+    from PIL import ImageCms
+    icc = bytearray(ImageCms.ImageCmsProfile(ImageCms.createProfile("sRGB")).tobytes())
+    icc[24:36] = bytes([0x07, 0xEA, 0, 1, 0, 1, 0, 0, 0, 0, 0, 0])  # a fixed creation date (2026-01-01), so the fixture is stable
+    icc = bytes(icc)
+    return _save(PILImage.fromarray(_pattern(20, 28, 19), "RGB"), "PNG", icc_profile=icc)
+
+
+def _apng() -> bytes:
+    """A two-frame animated PNG (acTL): Python sends only its first frame."""
+    a = PILImage.fromarray(_pattern(16, 24, 20), "RGB")
+    b = PILImage.fromarray(_pattern(16, 24, 21), "RGB")
+    return _save(a, "PNG", save_all=True, append_images=[b], duration=100, loop=0)
+
+
+def _bmp() -> bytes:
+    return _save(PILImage.fromarray(_pattern(10, 14, 22), "RGB"), "BMP")
+
+
+def _tiff_i() -> bytes:
+    """A 32-bit integer TIFF (PIL mode I): LoadImage divides it by 255 first."""
+    y, x = np.mgrid[0:10, 0:14]
+    return _save(PILImage.fromarray((x * 3000 + y * 40).astype(np.int32)), "TIFF")
+
+
+def _tiff_f() -> bytes:
+    """A 32-bit float TIFF (PIL mode F)."""
+    y, x = np.mgrid[0:10, 0:14].astype(np.float32)
+    return _save(PILImage.fromarray(x * 17.5 + y * 0.25), "TIFF")
+
+
 def _cmyk_jpeg() -> bytes:
     rgb = _pattern(12, 16, 5).astype(np.float64) / 255
     k = 1 - rgb.max(axis=-1)
@@ -183,7 +232,8 @@ def already_that_picture(data: bytes) -> bool:
     im = PILImage.open(io.BytesIO(data))
     frames = getattr(im, "n_frames", 1)
     orientation = im.getexif().get(0x0112, 1)
-    return im.format == "PNG" and im.mode == "RGB" and frames == 1 and orientation == 1
+    return im.format == "PNG" and im.mode == "RGB" and frames == 1 and orientation == 1 \
+        and "icc_profile" not in im.info and "transparency" not in im.info
 
 
 # ── Cases ────────────────────────────────────────────────────────────────────
@@ -194,6 +244,8 @@ def load_mask_cases() -> list[dict]:
         "an RGB PNG (no alpha)": ("rgb.png", _rgb_png()),
         "an LA PNG": ("la.png", _la_png()),
         "a palette PNG with a transparent index": ("pal.png", _palette_png()),
+        "an RGB PNG with a tRNS colour key": ("rgb_trns.png", _rgb_trns_png()),
+        "a greyscale PNG with a tRNS colour key": ("l_trns.png", _grey_trns_png()),
     }
     out = []
     for label, (name, data) in files.items():
@@ -214,6 +266,9 @@ def rgb_turned_cases() -> list[dict]:
         "a greyscale PNG": _grey_png(),
         "a palette PNG": _palette_png(),
         "a two-frame GIF": _two_frame_gif(),
+        "an RGB PNG with an ICC profile": _icc_png(),
+        "a two-frame animated PNG": _apng(),
+        "an RGB PNG with a tRNS colour key": _rgb_trns_png(),
     }
     out = []
     for label, data in files.items():
@@ -224,7 +279,8 @@ def rgb_turned_cases() -> list[dict]:
 
 def refused_cases() -> list[dict]:
     out = []
-    for label, data in {"a 16-bit greyscale PNG": _grey16_png(), "a CMYK JPEG": _cmyk_jpeg(), "a GIF with a transparent colour": _transparent_gif()}.items():
+    for label, data in {"a 16-bit greyscale PNG": _grey16_png(), "a CMYK JPEG": _cmyk_jpeg(), "a GIF with a transparent colour": _transparent_gif(),
+                        "a BMP": _bmp(), "a 32-bit integer TIFF": _tiff_i(), "a 32-bit float TIFF": _tiff_f()}.items():
         im = PILImage.open(io.BytesIO(data))
         mode = im.mode
         rgb = im.convert("RGB")
