@@ -90,7 +90,8 @@ import { cloneDoc } from '~/lib/sketch/clone'
 import { isTypingInField } from '~/composables/pen/usePen'
 import PenOverlay from '~/components/pen/PenOverlay.vue'
 import PenToolbar from '~/components/pen/PenToolbar.vue'
-import { useBrushPaint } from '~/composables/useBrushPaint'
+import { useBrushPaint, paintMatchesLayer } from '~/composables/useBrushPaint'
+import { MATERIAL_IDS, MATERIALS, type MaterialId } from '~/lib/brushTips/materials'
 import { toWidthNorm, brushBoxFromStrokes, strokeRadiusPx, maskStrokeToLocal, type PaintStroke } from '~/lib/compositor/brushStamp'
 import BrushToolbar from '~/components/vue-canvas/compositor/BrushToolbar.vue'
 import BrushTipSettings from '~/components/vue-canvas/compositor/BrushTipSettings.vue'
@@ -6946,6 +6947,15 @@ function stampWidthNormStrokeToMask(mctx: CanvasRenderingContext2D, s: PaintStro
 // ── Brush painting: freehand strokes commit to a BrushLayer via the editor ────
 // The brush layer strokes land on. Reuse the selected brush layer, else create one.
 let brushLayerId: string | null = null
+// Brush layer panel: "None (use fill)" plus the six materials. A change is one setLocal
+// (one history step); picking a material on a layer starts it Moving.
+const BRUSH_MATERIAL_OPTIONS = ['none', ...MATERIAL_IDS]
+const BRUSH_MATERIAL_LABELS = ['None (use fill)', ...MATERIAL_IDS.map(id => MATERIALS[id].label)]
+function setBrushLayerMaterial(layer: BrushLayer, v: string) {
+  const id = v === 'none' ? null : v as MaterialId
+  if ((layer.material?.id ?? null) === id) return
+  setLocal(layer.id, { material: id ? { id, moving: layer.material?.moving ?? true } : undefined })
+}
 function activeBrushLayer(): BrushLayer | null {
   const sel = selectedLocal.value
   if (sel && sel.kind === 'brush') return sel as BrushLayer
@@ -6974,13 +6984,20 @@ function onTipPointerDown(e: PointerEvent, p: { nx: number; ny: number }) {
   // A stroke still `down` here means its up/cancel never arrived: end and commit it too, so
   // its hold loop can't run forever.
   if (tipLive) commitTipStroke()
-  const existing = activeBrushLayer()
+  const selected = activeBrushLayer()
   // An eraser stroke with no brush layer to carve does nothing (no empty layer is created).
-  if (!existing && brush.eraser.value) return
+  if (!selected && brush.eraser.value) return
+  // Target rule: paint only lands in a layer painted with the same thing (Colour, or the
+  // same material). Otherwise the stroke starts a new layer, exactly like no selection.
+  // The eraser carves the selected layer whatever its material.
+  const existing = selected && (brush.eraser.value || paintMatchesLayer(selected.material, brush.material.value)) ? selected : null
   const wn = toWidthNorm(p.nx, p.ny, canvasDisplay.w, canvasDisplay.h)
   brush.beginTipStroke(wn.x, wn.y, e.timeStamp)
   const s = brush.liveTipStroke(); if (!s) return
-  const pending = existing ? null : createBrushLayer({ fill: brush.color.value })
+  // A new layer keeps the toolbar colour as its fill, so switching the material off later
+  // shows a sensible colour.
+  const mat = brush.material.value
+  const pending = existing ? null : createBrushLayer({ fill: brush.color.value, ...(mat ? { material: { id: mat, moving: true } } : {}) })
   const layerId = existing ? existing.id : pending!.id
   tipLive = { layerId, pending, s, down: true, raf: 0, lastMoveT: e.timeStamp }
   setLiveTipStroke(layerId, s)
@@ -11872,6 +11889,18 @@ onUnmounted(() => {
           <template v-if="selectedLocal.kind === 'brush'">
             <StudioSection title="Fill and outline">
               <div>
+                <div class="panel-label mb-1.5">Material</div>
+                <StudioSelect data-testid="brush-layer-material" :options="BRUSH_MATERIAL_OPTIONS" :option-labels="BRUSH_MATERIAL_LABELS"
+                  :model-value="(selectedLocal as BrushLayer).material?.id ?? 'none'"
+                  @update:model-value="(v: string) => setBrushLayerMaterial(selectedLocal as BrushLayer, v)" />
+                <template v-if="(selectedLocal as BrushLayer).material">
+                  <StudioSwitch class="mt-2" data-testid="brush-layer-moving" label="Moving"
+                    :model-value="(selectedLocal as BrushLayer).material!.moving"
+                    @update:model-value="(v: boolean) => setLocal(selectedLocal!.id, { material: { ...(selectedLocal as BrushLayer).material!, moving: v } })" />
+                  <p class="mt-1.5 text-[11px] text-white/50">The material replaces the fill for brush strokes.</p>
+                </template>
+              </div>
+              <div v-if="!(selectedLocal as BrushLayer).material">
                 <div class="panel-label mb-1.5">Fill</div>
                 <FillControl allow-image :model-value="(selectedLocal as any).fill" allow-reads-backdrop :other-layers="glassCandidates"
                   @update:model-value="(v: any) => setLocal(selectedLocal!.id, { fill: v })" />
