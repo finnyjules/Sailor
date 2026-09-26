@@ -15,6 +15,8 @@
  * strips the tag so satori never sees a prop it doesn't understand.
  */
 
+import { createHash, randomUUID } from 'node:crypto'
+
 import sharp from 'sharp'
 
 import { bakeInProcess } from './renderProcess'
@@ -128,26 +130,83 @@ export async function bakeTreatment(data: ArrayBuffer, treatment: TreatmentBakeT
 export interface InlineOptions {
   /** Stops the fetches and the bakes (the render's Stop, disconnect or deadline). */
   signal?: AbortSignal
-  /** The most bytes fetched in all (LAYOUT_MAX_IMAGE_BYTES). */
+  /** The most picture bytes per render (LAYOUT_MAX_IMAGE_BYTES): fetched, and shown (bytes × uses). */
   maxBytes?: number
 }
 
+/**
+ * Each distinct picture of a render, once (fix round 4), keyed by the
+ * placeholder its img nodes carry (`sailor-image:<render nonce>:<sha-256>`):
+ * fetched (or baked) bytes, or a `data:` URI the layout already held. The
+ * render process builds each data URI once and puts it in the nodes
+ * (substituteImagesCore), so the tree sent to it never holds a picture more
+ * than once, however many elements show it.
+ */
+export type ImageTable = Record<string, { contentType: string; data: Uint8Array } | { uri: string }>
+
+/**
+ * Puts each picture of `images` into the img nodes whose src is its key, as
+ * a data URI built once per picture. Self-contained (it refers to nothing
+ * outside itself) because its source text runs in the render process too.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function substituteImagesCore(tree: any, images: any): void {
+  const uris = new Map<string, string>()
+  const uriOf = (key: string): string | undefined => {
+    let u = uris.get(key)
+    if (u !== undefined) return u
+    const e = images[key]
+    if (!e) return undefined
+    const made: string = typeof e.uri === 'string' ? e.uri : `data:${e.contentType};base64,${Buffer.from(e.data.buffer, e.data.byteOffset, e.data.byteLength).toString('base64')}`
+    uris.set(key, made)
+    return made
+  }
+  const stack = [tree]
+  while (stack.length) {
+    const n = stack.pop()
+    if (!n || typeof n !== 'object') continue
+    const p = n.props
+    if (!p || typeof p !== 'object') continue
+    if (n.type === 'img' && typeof p.src === 'string' && Object.prototype.hasOwnProperty.call(images, p.src)) {
+      const u = uriOf(p.src)
+      if (u !== undefined) p.src = u
+    }
+    const kids = p.children
+    if (Array.isArray(kids)) for (const k of kids) stack.push(k)
+    else if (kids && typeof kids === 'object') stack.push(kids)
+  }
+}
+
 /** Mutates the tree in place: every http(s) img src becomes a data URI, with
- *  any tagged photo treatment ('duotone'/'grain') baked into the bytes first.
- *  Duplicate URLs are fetched once, and each distinct (URL, treatment) is
- *  baked once and inlined as one shared string. Throws on the first failed
- *  fetch (a dead URL should fail the render loudly). `__treatment` is always
- *  stripped, whether or not it was applied.
+ *  any tagged photo treatment baked in first (see tableTreeImages). Kept for
+ *  callers that render in this process; the route and runner send the table
+ *  to the render process instead. */
+export async function inlineTreeImages(tree: unknown, fetcher: ImageFetcher = defaultImageFetcher, opts: InlineOptions = {}): Promise<void> {
+  const images = await tableTreeImages(tree, fetcher, opts)
+  substituteImagesCore(tree, images)
+}
+
+/** Every http(s) or data: picture of the tree into a table, each img node's
+ *  src swapped for its picture's key; any tagged photo treatment
+ *  ('duotone'/'grain') baked into the bytes first. Duplicate URLs are
+ *  fetched once, each distinct (URL, treatment) is baked once, and equal
+ *  bytes share one entry. Throws on the first failed fetch (a dead URL
+ *  should fail the render loudly), leaving every src as it was.
+ *  `__treatment` is always stripped, whether or not it was applied.
  *
  *  Fix round 3: at most LAYOUT_MAX_TREATED distinct treated pictures, each
  *  at most LAYOUT_MAX_TREATED_AREA pixels (read from its header here, before
  *  the bake is queued), and at most `maxBytes` fetched in all; each refused
  *  plainly (ImageLimitError). A bake that fails fails the render: the
  *  picture is never shown untreated in its place. The signal stops fetches
- *  and bakes. */
-export async function inlineTreeImages(tree: unknown, fetcher: ImageFetcher = defaultImageFetcher, opts: InlineOptions = {}): Promise<void> {
+ *  and bakes.
+ *  Fix round 4: the pictures as shown count too — each distinct picture's
+ *  final bytes (baked ones included) times the elements showing it, at most
+ *  `maxBytes` in all. */
+export async function tableTreeImages(tree: unknown, fetcher: ImageFetcher = defaultImageFetcher, opts: InlineOptions = {}): Promise<ImageTable> {
   const imgs = collectImgNodes(tree)
   const maxBytes = opts.maxBytes ?? LAYOUT_MAX_IMAGE_BYTES
+  const nonce = randomUUID()
   const keyOf = (src: string, t: TreatmentBakeTag | undefined) => `${src}\u0000${t ? JSON.stringify(t) : ''}`
   const treated = new Set(imgs.filter(n => n.props?.__treatment && /^https?:\/\//.test(n.props.src!)).map(n => keyOf(n.props!.src!, n.props!.__treatment)))
   if (treated.size > LAYOUT_MAX_TREATED) {
@@ -157,7 +216,6 @@ export async function inlineTreeImages(tree: unknown, fetcher: ImageFetcher = de
   const budget: ByteBudget = { left: maxBytes }
   let fetchedBytes = 0
   const fetched = new Map<string, Promise<{ data: ArrayBuffer; contentType: string }>>()
-  const inlined = new Map<string, Promise<string>>()
   const fetchOnce = (src: string) => {
     let pending = fetched.get(src)
     if (!pending) {
@@ -173,39 +231,61 @@ export async function inlineTreeImages(tree: unknown, fetcher: ImageFetcher = de
     }
     return pending
   }
-  await Promise.all(imgs.map(async (n) => {
+  interface Entry { key: string; size: number; value: ImageTable[string] }
+  const entries = new Map<string, Promise<Entry>>()
+  const entryFor = (src: string, treatment: TreatmentBakeTag | undefined): Promise<Entry> => {
+    const k = keyOf(src, treatment)
+    let e = entries.get(k)
+    if (e) return e
+    e = (async (): Promise<Entry> => {
+      if (/^data:/i.test(src)) {
+        // A picture the layout carries itself: one copy, its decoded size counted.
+        return { key: `sailor-image:${nonce}:${createHash('sha256').update(src).digest('hex')}`, size: Math.floor(src.length * 3 / 4), value: { uri: src } }
+      }
+      let { data, contentType } = await fetchOnce(src)
+      if (treatment) {
+        let area = 0
+        try {
+          const meta = await sharp(Buffer.from(data), { limitInputPixels: false }).metadata()
+          area = (meta.width ?? 0) * (meta.height ?? 0)
+        }
+        catch { throw new Error(LAYOUT_TREATMENT_FAILED) }
+        if (!area) throw new Error(LAYOUT_TREATMENT_FAILED)
+        if (area > LAYOUT_MAX_TREATED_AREA) throw new ImageLimitError(LAYOUT_TREATED_TOO_LARGE)
+        try {
+          data = await bakeTreatment(data, treatment, opts.signal)
+        }
+        catch (err) {
+          if (opts.signal?.aborted) throw err
+          console.warn(`[inlineImages] treatment bake failed (kind=${treatment.kind}, src=${src.slice(0, 200)})`, err)
+          throw new Error(LAYOUT_TREATMENT_FAILED)
+        }
+        contentType = 'image/png'
+      }
+      const bytes = new Uint8Array(data)
+      const hash = createHash('sha256').update(contentType).update('\u0000').update(bytes).digest('hex')
+      return { key: `sailor-image:${nonce}:${hash}`, size: bytes.byteLength, value: { contentType, data: bytes } }
+    })()
+    entries.set(k, e)
+    return e
+  }
+  const shown: { n: TreeNode; entry: Promise<Entry> }[] = []
+  for (const n of imgs) {
     const treatment = n.props?.__treatment
     if (n.props && '__treatment' in n.props) delete n.props.__treatment
     const src = n.props!.src!
-    if (!/^https?:\/\//.test(src)) return
-    const key = keyOf(src, treatment)
-    let uri = inlined.get(key)
-    if (!uri) {
-      uri = (async () => {
-        let { data, contentType } = await fetchOnce(src)
-        if (treatment) {
-          let area = 0
-          try {
-            const meta = await sharp(Buffer.from(data), { limitInputPixels: false }).metadata()
-            area = (meta.width ?? 0) * (meta.height ?? 0)
-          }
-          catch { throw new Error(LAYOUT_TREATMENT_FAILED) }
-          if (!area) throw new Error(LAYOUT_TREATMENT_FAILED)
-          if (area > LAYOUT_MAX_TREATED_AREA) throw new ImageLimitError(LAYOUT_TREATED_TOO_LARGE)
-          try {
-            data = await bakeTreatment(data, treatment, opts.signal)
-          }
-          catch (err) {
-            if (opts.signal?.aborted) throw err
-            console.warn(`[inlineImages] treatment bake failed (kind=${treatment.kind}, src=${src.slice(0, 200)})`, err)
-            throw new Error(LAYOUT_TREATMENT_FAILED)
-          }
-          contentType = 'image/png'
-        }
-        return `data:${contentType};base64,${Buffer.from(data).toString('base64')}`
-      })()
-      inlined.set(key, uri)
-    }
-    n.props!.src = await uri
-  }))
+    if (!/^https?:\/\//.test(src) && !/^data:/i.test(src)) continue
+    shown.push({ n, entry: entryFor(src, treatment) })
+  }
+  const got = await Promise.all(shown.map(s => s.entry))
+  // What the render holds: each picture's bytes once per element showing it.
+  let total = 0
+  for (const e of got) total += e.size
+  if (total > maxBytes) throw new ImageLimitError(LAYOUT_IMAGES_TOO_LARGE)
+  const table: ImageTable = {}
+  got.forEach((e, i) => {
+    table[e.key] = e.value
+    shown[i]!.n.props!.src = e.key
+  })
+  return table
 }

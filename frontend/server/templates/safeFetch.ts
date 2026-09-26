@@ -16,9 +16,9 @@
  * Locally (not hosted) one exception keeps the canvas working: a loopback
  * `/view` URL on ComfyUI's configured port (SAILOR_COMFY_ORIGIN, as Python
  * reads it; 8188 by default), which Python sends for a wired picture, or on
- * the port the caller names (the route: the port its own request came in
- * on, which the editor's absolute /view URLs use). Hosted, loopback is
- * refused like the rest.
+ * the ports the caller names (the route: the port its own request came in
+ * on and the app's configured port, which the editor's absolute /view URLs
+ * use; never the Host header's). Hosted, loopback is refused like the rest.
  *
  * Fix round 2: no connection is ever reused (`agent: false`), so every
  * request resolves and checks its address, and the connected socket's
@@ -27,6 +27,7 @@
  * Round 3: also 2001:20::/28 (ORCHIDv2), 3fff::/20 and 5f00::/16 (reserved);
  * the caller's signal ends a fetch, and a render's byte budget is taken from
  * as bytes arrive.
+ * Round 4: `localhost` connects over IPv4 first (its addresses still all checked).
  */
 import { BlockList, isIP } from 'node:net'
 import { lookup as dnsLookup } from 'node:dns'
@@ -87,17 +88,15 @@ export function comfyViewPort(): number {
   catch { return 8188 }
 }
 
-const LOOPBACK_HOST = /^(?:localhost|127(?:\.\d{1,3}){3}|\[::1\]|::1)$/i
-
 /**
  * The loopback ports whose `/view` the route may fetch locally, besides
- * ComfyUI's (fix round 3): the port its request came in on (none over the
- * Unix socket `nuxi dev` listens on), the app's configured port (NUXT_PORT,
- * NITRO_PORT, PORT), and the Host header's port when that host is loopback
- * (what the browser typed: the editor's absolute /view URLs). Only local mode
- * reads them (safeImageFetcher ignores them hosted).
+ * ComfyUI's configured one (fix rounds 3 and 4): the port its request really
+ * came in on (the socket's; none over the Unix socket `nuxi dev` listens on)
+ * and the app's configured port (NUXT_PORT, NITRO_PORT, PORT). Round 4: the
+ * Host header is no longer read — a caller could name any loopback port in it.
+ * Only local mode reads these (safeImageFetcher ignores them hosted).
  */
-export function localViewPorts(o: { localPort?: unknown; host?: unknown; env?: NodeJS.ProcessEnv } = {}): number[] {
+export function localViewPorts(o: { localPort?: unknown; env?: NodeJS.ProcessEnv } = {}): number[] {
   const env = o.env ?? process.env
   const out = new Set<number>()
   const add = (v: unknown) => {
@@ -106,10 +105,6 @@ export function localViewPorts(o: { localPort?: unknown; host?: unknown; env?: N
   }
   if (typeof o.localPort === 'number') add(o.localPort)
   for (const k of ['NUXT_PORT', 'NITRO_PORT', 'PORT']) if (env[k]) add(env[k])
-  if (typeof o.host === 'string') {
-    const m = /^(\[[^\]]+\]|[^:]+)(?::(\d+))?$/.exec(o.host.trim())
-    if (m && LOOPBACK_HOST.test(m[1]!)) add(m[2] ?? 80)
-  }
   return [...out]
 }
 
@@ -134,6 +129,9 @@ function requestOnce(u: URL, loopbackOk: boolean, o: { signal: AbortSignal; maxB
       if (err) return (cb as (e: Error) => void)(err)
       const list = addresses as unknown as { address: string; family: number }[]
       if (!list.length || list.some(a => !addressAllowed(a.address, loopbackOk))) return (cb as (e: Error) => void)(new FetchRefused(FETCH_REFUSED))
+      // `localhost` over IPv4 first (fix round 4): on this kind of machine
+      // [::1] can be another listener on the same port (a 426 answer).
+      if (/^localhost\.?$/i.test(hostname)) list.sort((a, b) => (a.family === 4 ? 0 : 1) - (b.family === 4 ? 0 : 1))
       if ((options as { all?: boolean }).all) return (cb as unknown as (e: null, a: typeof list) => void)(null, list)
       return (cb as (e: null, a: string, f: number) => void)(null, list[0]!.address, list[0]!.family)
     })

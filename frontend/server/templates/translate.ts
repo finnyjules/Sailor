@@ -12,7 +12,7 @@ import { resolveFormat } from '../../shared/template-grid/resolve'
 import type { ResolvedElement } from '../../shared/template-grid/resolve'
 import { gridExpressiveLayout, expressiveVOffset } from '../../shared/template-grid/expressive'
 import { resolveTokens } from '../../shared/template-grid/tokens'
-import { LAYOUT_TOO_SMALL, layoutElementsProblem, layoutTextProblem, renderSizeProblem } from '../../shared/template-grid/limits'
+import { LAYOUT_TOO_SMALL, layoutElementsProblem, layoutShapeProblem, layoutTextProblem, renderSizeProblem } from '../../shared/template-grid/limits'
 import { needsServerBake, treatmentCssFilter, treatmentIntensity } from '../../shared/template-grid/treatment'
 import type {
   AnyGridTemplate, ImageElementV2, ShapeElementV2, TemplateV2, TextElementV2,
@@ -265,6 +265,9 @@ export function templateToSatori(
   explicitSize?: { width: number; height: number },
   outputId?: string,
 ): TranslatedLayout {
+  // A layout not in the shape the translation reads is refused plainly (fix round 4).
+  const misshapen = layoutShapeProblem(template)
+  if (misshapen) throw new TemplateSizeError(misshapen)
   const crowded = layoutElementsProblem(template)
   if (crowded) throw new TemplateSizeError(crowded)
   const tooMuch = layoutTextProblem(template, props as Record<string, unknown>, { ...((template as { brand?: Record<string, unknown> }).brand ?? {}), ...(brand as Record<string, unknown>) })
@@ -286,6 +289,7 @@ export function templateToSatori(
  * (shared/template-grid/limits.ts).
  */
 export const TEMPLATE_SIZE_REFUSED = LAYOUT_TOO_SMALL
+/** A layout refused plainly (the route answers 400): its size, limits or shape (round 4: also an unknown aspect or format). */
 export class TemplateSizeError extends Error {}
 
 function checkRenderSize(w: unknown, h: unknown): void {
@@ -301,7 +305,7 @@ function templateV1ToSatori(
   const key = aspectKey ?? template.defaultAspect ?? Object.keys(template.aspects)[0]
   const aspect = template.aspects[key]
   if (!aspect && !explicitSize) {
-    throw new Error(`Unknown aspect '${key}' on template '${template.id}'.`)
+    throw new TemplateSizeError(`This layout has no aspect named “${String(key).slice(0, 80)}”.`)
   }
   const effectiveAspect: AspectSpec = explicitSize
     ? { w: explicitSize.width, h: explicitSize.height, label: 'custom' }
@@ -509,7 +513,7 @@ function templateV2ToSatori(
     }
     key = '__explicit__'
   } else if (!template.formats[key]) {
-    throw new Error(`Unknown format '${key}' on template '${template.id}'.`)
+    throw new TemplateSizeError(`This layout has no format named “${String(key).slice(0, 80)}”.`)
   }
   checkRenderSize(tpl.formats[key]!.w, tpl.formats[key]!.h)
 

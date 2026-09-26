@@ -53,8 +53,9 @@ export default defineEventHandler(async (event) => {
   // The response's close (not the request's, which closes once its body is read).
   res?.once?.('close', onClose)
   // Locally, the editor's absolute /view URLs point at this server's own port
-  // (under nuxi dev a Unix socket: the configured port and the Host header's).
-  const viewPorts = localViewPorts({ localPort: req?.socket?.localPort, host: headers.host })
+  // (under nuxi dev a Unix socket: the configured port). Never the Host
+  // header's port, which the caller chooses (fix round 4).
+  const viewPorts = localViewPorts({ localPort: req?.socket?.localPort })
   let png: Uint8Array
   try {
     png = await renderTemplatePng(body, {

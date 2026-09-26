@@ -14,6 +14,10 @@
  *   7. A float literal read as Python's str().
  */
 import { createServer, type Server } from 'node:http'
+import { spawn as realSpawn } from 'node:child_process'
+import { serialize } from 'node:v8'
+import { randomBytes } from 'node:crypto'
+import { readdirSync, writeFileSync } from 'node:fs'
 import { createServer as createNetServer, connect } from 'node:net'
 import { EventEmitter } from 'node:events'
 import { Readable } from 'node:stream'
@@ -32,11 +36,12 @@ import { planNode, type DeriveIO, type Derived, type NodePlan } from '~~/server/
 import { createEngineResultStore } from '~~/server/runner/results'
 import { __setFrameTimeoutForTests } from '~~/server/runner/compositor/worker'
 import { PREVIEW_NAME_BAD, layerText, pyFloatStr, smartLayoutRenderer, smartLayoutRequests } from '~~/server/runner/cards/smartLayout'
-import { TemplateImageError, __setRenderDeadlineForTests, renderTemplatePng } from '~~/server/templates/renderPng'
+import { GOOGLE_CACHE_MAX_BYTES, GOOGLE_CACHE_MAX_FAMILIES, GOOGLE_FAILED_MAX, TemplateImageError, __setGoogleFontsForTests, __setRenderDeadlineForTests, loadGoogleFamily, renderTemplatePng } from '~~/server/templates/renderPng'
 import { TEMPLATE_SIZE_REFUSED, TemplateSizeError, templateToSatori } from '~~/server/templates/translate'
 import { FETCH_REFUSED, FETCH_TIMEOUT, FETCH_TOO_LARGE, addressAllowed, localViewPorts, safeImageFetcher } from '~~/server/templates/safeFetch'
 import { CHILD_EXIT_WAIT_MS, RENDER_CRASHED, RENDER_TIMEOUT, __renderChildPidForTests, __renderJobsForTests, __setRenderSpawnForTests, __setRenderTimeoutForTests, childEnv, svgToPngInProcess } from '~~/server/templates/renderProcess'
-import { inlineTreeImages } from '~~/server/templates/inlineImages'
+import { inlineTreeImages, tableTreeImages } from '~~/server/templates/inlineImages'
+import { LAYOUT_BAD_SHAPE, LAYOUT_MAX_REMOTE_FONTS, LAYOUT_TOO_MANY_FONTS, layoutShapeProblem } from '#shared/template-grid/limits'
 import { LAYOUT_IMAGES_TOO_LARGE, LAYOUT_MAX_TEXT, LAYOUT_TOO_BIG, LAYOUT_TOO_MANY_ELEMENTS, LAYOUT_TOO_MANY_READERS, LAYOUT_TOO_MANY_TREATED, LAYOUT_TOO_MUCH_TEXT, LAYOUT_TREATED_TOO_LARGE, LAYOUT_TREATMENT_FAILED, layoutTextProblem } from '#shared/template-grid/limits'
 import type { RenderRequest } from '~~/server/templates/schema'
 import type { OutputFile } from '~~/server/runner/types'
@@ -503,11 +508,10 @@ describe('round 3', () => {
     client.destroy()
     unix.close()
     const port = Number(new URL(base).port)
-    expect(localViewPorts({ localPort: undefined, host: `127.0.0.1:${port}`, env: {} })).toEqual([port])
-    expect(localViewPorts({ host: `localhost:${port}`, env: {} })).toEqual([port])
-    expect(localViewPorts({ host: `[::1]:${port}`, env: {} })).toEqual([port])
-    expect(localViewPorts({ host: `evil.test:${port}`, env: {} })).toEqual([])
+    expect(localViewPorts({ localPort: undefined, env: { NUXT_PORT: String(port) } })).toEqual([port])
     expect(localViewPorts({ env: { NUXT_PORT: '3002' } })).toEqual([3002])
+    // The app's configured port (round 4: never the Host header's).
+    vi.stubEnv('NUXT_PORT', String(port))
     // Through the route: a wired picture at the app's own address.
     const layout = JSON.stringify({ version: 2, id: 's', master: 'a', formats: { a: { w: 120, h: 120 } }, ...GRID, grid: { columns: 6, rows: 6, gutter: 4, margin: 8, baseline: 4 }, elements: [{ id: 'i', type: 'image', priority: 4, region: { col: 1, colSpan: 6, row: 1, rowSpan: 6 }, bleed: true, style: { fit: 'cover' }, content: `${base}/view?filename=wired.png` }] })
     vi.stubGlobal('defineEventHandler', (h: unknown) => h)
@@ -520,7 +524,11 @@ describe('round 3', () => {
       expect(png.length).toBeGreaterThan(0)
       expect(hits).toEqual(['/view?filename=wired.png'])
       hits = []
-      await expect(route({ node: { req: { socket: {}, headers: { host: `evil.test:${port}` } }, res: new EventEmitter() } })).rejects.toMatchObject({ statusCode: 502, statusMessage: FETCH_REFUSED })
+      // Round 4: a Host header naming the port no longer opens it.
+      vi.stubEnv('NUXT_PORT', '1')
+      for (const host of [`localhost:${port}`, `127.0.0.1:${port}`, `[::1]:${port}`, `evil.test:${port}`]) {
+        await expect(route({ node: { req: { socket: {}, headers: { host } }, res: new EventEmitter() } })).rejects.toMatchObject({ statusCode: 502, statusMessage: FETCH_REFUSED })
+      }
       expect(hits).toEqual([])
     }
     finally { vi.unstubAllGlobals() }
@@ -615,6 +623,288 @@ describe('round 3', () => {
 })
 
 // ── 6 and 7 ──────────────────────────────────────────────────────────────────
+
+// ── Round 4 ──────────────────────────────────────────────────────────────────
+
+describe('round 4', () => {
+  const FRONTEND = resolve(__dirname, '../..')
+  const buf4 = (b: Buffer) => b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength) as ArrayBuffer
+  /** A v2 layout of `n` full-bleed image elements all showing `src`. */
+  const repeated = (src: string, n: number, extra: Record<string, unknown> = {}) => ({
+    version: 2, id: 'r', master: 'a', formats: { a: { w: 64, h: 64 } }, ...GRID, grid: { columns: 6, rows: 6, gutter: 4, margin: 8, baseline: 4 },
+    elements: Array.from({ length: n }, (_, i) => ({ id: `i${i}`, type: 'image', priority: 4, region: { col: 1, colSpan: 6, row: 1, rowSpan: 6 }, bleed: true, style: { fit: 'cover', ...extra }, content: src })),
+  })
+  const routeWith = async (body: unknown) => {
+    vi.stubGlobal('defineEventHandler', (h: unknown) => h)
+    vi.stubGlobal('setHeader', () => {})
+    vi.stubGlobal('createError', (e: { statusCode: number; statusMessage: string }) => Object.assign(new Error(e.statusMessage), e))
+    vi.stubGlobal('readBody', async () => body)
+    try {
+      const route = (await import('~~/server/api/render-template.post')).default as unknown as (e: unknown) => Promise<Uint8Array>
+      return await route({ node: { req: { socket: {}, headers: {} }, res: new EventEmitter() } })
+    }
+    finally { vi.unstubAllGlobals() }
+  }
+
+  it('a real EMFILE spawn never signals the process group: a sentinel in the same group survives and later renders work', async () => {
+    // Run in its own session and process group (detached → setsid), with a
+    // hard fd limit and a sentinel `sleep` in that group. Nothing outside it
+    // is ever signalled: the sentinel is ended by its own pid afterwards.
+    const dir = mkdtempSync(join(tmpdir(), 'r16-emfile-'))
+    const script = join(dir, 'child.mjs')
+    writeFileSync(script, `
+import { spawn } from 'node:child_process'
+import { closeSync, openSync } from 'node:fs'
+const [jitiPath, modPath] = process.argv.slice(2)
+const { createJiti } = await import(jitiPath)
+const rp = await createJiti(import.meta.url).import(modPath)
+const job = { tree: { type: 'div', props: { style: { width: 10, height: 10, display: 'flex', background: '#f00' } } }, width: 10, height: 10, fonts: [] }
+const out = {}
+out.warm = (await rp.svgToPngInProcess(job)).length
+const pid = rp.__renderChildPidForTests()
+if (typeof pid === 'number' && pid > 0) process.kill(pid, 'SIGKILL')
+await new Promise(r => setTimeout(r, 300))
+const seen = []
+rp.__setRenderSpawnForTests((...a) => { const p = spawn(...a); seen.push(p.pid ?? null); return p })
+const fds = []
+try { for (;;) fds.push(openSync('/dev/null', 'r')) } catch (e) { out.code = e.code }
+out.failed = await rp.svgToPngInProcess(job).then(() => 'rendered', e => e.message)
+for (const fd of fds) closeSync(fd)
+out.spawnPid = seen[0] ?? null
+await new Promise(r => setTimeout(r, 100))
+out.after = []
+for (let i = 0; i < 2; i++) out.after.push(await rp.svgToPngInProcess(job).then(b => b.length, e => e.message))
+rp.__setRenderSpawnForTests(null)
+process.stdout.write(JSON.stringify(out) + '\\n')
+process.exit(0)
+`)
+    const pnpm = join(FRONTEND, 'node_modules/.pnpm')
+    const jitiDir = readdirSync(pnpm).filter(d => /^jiti@2\./.test(d)).sort().pop()!
+    const jiti = join(pnpm, jitiDir, 'node_modules/jiti/lib/jiti.mjs')
+    const sh = realSpawn('/bin/sh', ['-c', 'ulimit -n 512; sleep 30 & echo "SENTINEL $!"; exec "$0" "$@"', process.execPath, script, jiti, join(FRONTEND, 'server/templates/renderProcess.ts')], {
+      detached: true, stdio: ['ignore', 'pipe', 'pipe'], env: { PATH: process.env.PATH, HOME: process.env.HOME, TMPDIR: process.env.TMPDIR },
+    })
+    let out = ''
+    sh.stdout!.on('data', (d: Buffer) => { out += d })
+    sh.stderr!.resume()
+    const [code, sig] = await new Promise<[number | null, string | null]>(r => sh.once('exit', (c, sg) => r([c, sg])))
+    const sentinel = Number(/SENTINEL (\d+)/.exec(out)?.[1])
+    expect(sentinel).toBeGreaterThan(0)
+    let alive = false
+    try { process.kill(sentinel, 0); alive = true }
+    catch { /* gone */ }
+    if (alive) process.kill(sentinel, 'SIGTERM')
+    expect({ code, sig }).toEqual({ code: 0, sig: null })
+    expect(alive).toBe(true)
+    const r = JSON.parse(out.split('\n').find(l => l.startsWith('{'))!)
+    expect(r.code).toBe('EMFILE')
+    expect(r.spawnPid).toBeNull()  // the spawn really failed: a handle with no pid
+    expect(r.failed).toBe(RENDER_CRASHED)
+    expect(r.after).toEqual([r.warm, r.warm])
+  }, 60_000)
+
+  it('each distinct picture is sent to the render process once, however many elements show it', async () => {
+    // A picture that doesn't compress: its bytes dominate the difference.
+    const pic = await sharp(randomBytes(256 * 256 * 3), { raw: { width: 256, height: 256, channels: 3 } }).png().toBuffer()
+    const sent: number[] = []
+    const pid = __renderChildPidForTests()
+    if (pid) process.kill(pid, 'SIGKILL')
+    await new Promise(r => setTimeout(r, 200))
+    __setRenderSpawnForTests(((...a: Parameters<typeof realSpawn>) => {
+      const p = realSpawn(...a)
+      const send = p.send.bind(p)
+      p.send = ((m: unknown, ...rest: unknown[]) => { sent.push(serialize(m).length); return (send as (...x: unknown[]) => boolean)(m, ...rest) }) as typeof p.send
+      return p
+    }) as never)
+    try {
+      for (const n of [1, 16]) {
+        const png = await renderTemplatePng({ template: repeated('http://pic.test/a.png', n) as never, aspect: 'a' }, { fetcher: async () => ({ data: buf4(pic), contentType: 'image/png' }) })
+        expect(png.length).toBeGreaterThan(0)
+      }
+    }
+    finally { __setRenderSpawnForTests(null) }
+    expect(sent.length).toBe(2)
+    // One job holds the picture; sixteen elements showing it add only their nodes.
+    expect(sent[0]!).toBeGreaterThan(pic.length)
+    expect(sent[1]! - sent[0]!).toBeLessThan(pic.length / 4)
+    // The same picture as a data: URI in the tree: once too.
+    const tree = { type: 'div', props: { children: Array.from({ length: 8 }, () => ({ type: 'img', props: { src: `data:image/png;base64,${pic.toString('base64')}` } })) } }
+    const table = await tableTreeImages(tree, async () => { throw new Error('no fetch') })
+    expect(Object.keys(table).length).toBe(1)
+    expect(new Set(tree.props.children.map(c => c.props.src)).size).toBe(1)
+    expect(serialize({ tree, table }).length).toBeLessThan(pic.length * 2)
+  }, 60_000)
+
+  it('the pictures as shown count against the 100 MB budget: bytes × uses, and baked bytes', async () => {
+    const one = new ArrayBuffer(10 * 1024 * 1024)
+    const tree = (n: number) => ({ type: 'div', props: { children: Array.from({ length: n }, () => ({ type: 'img', props: { src: 'http://pic.test/big.png' } })) } })
+    await expect(tableTreeImages(tree(9), async () => ({ data: one, contentType: 'image/png' }))).resolves.toBeTruthy()
+    let fetches = 0
+    await expect(tableTreeImages(tree(11), async () => { fetches++; return { data: one, contentType: 'image/png' } })).rejects.toThrow(LAYOUT_IMAGES_TOO_LARGE)
+    expect(fetches).toBe(1)
+    // A data: URI in the layout, repeated: counted the same way.
+    const uri = `data:image/png;base64,${Buffer.alloc(3 * 1024 * 1024).toString('base64')}`
+    const t2 = { type: 'div', props: { children: Array.from({ length: 40 }, () => ({ type: 'img', props: { src: uri } })) } }
+    await expect(tableTreeImages(t2)).rejects.toThrow(LAYOUT_IMAGES_TOO_LARGE)
+    // Baked bytes: a flat picture fetched small, grain makes it big.
+    const flat = await sharp({ create: { width: 512, height: 512, channels: 3, background: '#808080' } }).png().toBuffer()
+    const grain = { kind: 'grain', intensity: 0.5, ink: '#000' }
+    const t3 = { type: 'div', props: { children: [1, 2, 3].map(() => ({ type: 'img', props: { src: 'http://pic.test/flat.png', __treatment: grain } })) } }
+    const table = await tableTreeImages(structuredClone(t3), async () => ({ data: buf4(flat), contentType: 'image/png' }))
+    const baked = (Object.values(table)[0] as { data: Uint8Array }).data.byteLength
+    expect(baked).toBeGreaterThan(flat.length * 10)
+    // Under a budget the fetched bytes fit and the baked ones × 3 don't: refused.
+    const maxBytes = baked * 2
+    expect(flat.length * 3).toBeLessThan(maxBytes)
+    await expect(tableTreeImages(structuredClone(t3), async () => ({ data: buf4(flat), contentType: 'image/png' }), { maxBytes })).rejects.toThrow(LAYOUT_IMAGES_TOO_LARGE)
+    // And for a render: refused plainly (the route answers 400), with nothing sent to the render process.
+    const jobs = __renderJobsForTests()
+    const e = await renderTemplatePng({ template: repeated('http://pic.test/big.png', 11) as never, aspect: 'a' }, { fetcher: async () => ({ data: one, contentType: 'image/png' }) }).catch((x: unknown) => x)
+    expect(e).toBeInstanceOf(TemplateSizeError)
+    expect((e as Error).message).toBe(LAYOUT_IMAGES_TOO_LARGE)
+    expect(__renderJobsForTests()).toBe(jobs)
+  }, 60_000)
+
+  it('a malformed layout answers 400 in plain words, never a server error', async () => {
+    const v2 = (o: Record<string, unknown>) => ({ version: 2, id: 'm', master: 'a', formats: { a: { w: 64, h: 64 } }, ...GRID, elements: [], ...o })
+    const cases: [string, unknown, string?][] = [
+      ['empty', {}],
+      ['v1, elements only', { elements: [] }],
+      ['v1, aspects only', { aspects: { a: { w: 10, h: 10 } } }],
+      ['v2, no formats', { version: 2, id: 'm', master: 'a', elements: [] }],
+      ['v2, elements a number', v2({ elements: 5 })],
+      ['a string', 'x'],
+      ['a list', [1]],
+      ['v2, a null element', v2({ elements: [null] })],
+      ['v3, sections not a list', { ...v2({}), version: 3, sections: 3 }],
+      ['v3, section children missing', { ...v2({}), version: 3, sections: [{ id: 's', region: { col: 1, colSpan: 1, row: 1, rowSpan: 1 } }] }],
+      ['v2, a format that is a number', v2({ formats: { a: 5 } })],
+      ['v2, an element style that is a string', v2({ elements: [{ id: 'e', type: 'shape', region: { col: 1, colSpan: 1, row: 1, rowSpan: 1 }, style: 'red' }] })],
+    ]
+    for (const [name, template] of cases) {
+      const why = layoutShapeProblem(template)
+      expect(why, name).toMatch(new RegExp(`^${LAYOUT_BAD_SHAPE}`))
+      expect(() => templateToSatori(template as never, 'a', {}, {}, undefined, undefined), name).toThrow(TemplateSizeError)
+      await expect(routeWith({ template, aspect: 'a' }), name).rejects.toMatchObject({ statusCode: 400, statusMessage: why })
+    }
+    // What the shape check lets through but the translation can't read: the backstop.
+    const noRegion = { ...v2({}), version: 3, sections: [{ id: 's', children: [] }] }
+    expect(layoutShapeProblem(noRegion)).toBeNull()
+    await expect(routeWith({ template: noRegion, aspect: 'a' })).rejects.toMatchObject({ statusCode: 400, statusMessage: LAYOUT_BAD_SHAPE })
+    // An unknown aspect or format.
+    await expect(routeWith({ template: v2({}), aspect: 'nope' })).rejects.toMatchObject({ statusCode: 400, statusMessage: 'This layout has no format named “nope”.' })
+    await expect(routeWith({ template: { aspects: { a: { w: 10, h: 10 } }, elements: [] }, aspect: 'nope' })).rejects.toMatchObject({ statusCode: 400, statusMessage: 'This layout has no aspect named “nope”.' })
+    // A well-formed layout still renders, and the snapshot holds.
+    const png = await renderTemplatePng(SNAP.request)
+    expect(Buffer.from(await crypto.subtle.digest('SHA-256', png)).toString('hex')).toBe(SNAP.png_sha256)
+  }, 60_000)
+
+  describe('Google fonts', () => {
+    const calls: string[] = []
+    const REAL_FONT = readFileSync(join(FRONTEND, 'node_modules/@fontsource/inter/files/inter-latin-400-normal.woff'))
+    /** Google's CSS for any family, and a TTF of `ttfBytes`; `hang` never answers (until its signal ends it). */
+    const google = (o: { ttfBytes?: number; hang?: boolean; ttfUrl?: string } = {}) => (async (url: string | URL | Request, init?: RequestInit) => {
+      calls.push(String(url))
+      if (o.hang) {
+        return new Promise<Response>((_, rej) => init?.signal?.addEventListener('abort', () => rej(init.signal!.reason), { once: true }))
+      }
+      if (String(url).startsWith('https://fonts.googleapis.com/')) {
+        return new Response(`@font-face { font-weight: 400; src: url(${o.ttfUrl ?? 'https://fonts.gstatic.com/s/x.ttf'}) format('truetype'); }`)
+      }
+      return new Response(o.ttfBytes ? new Uint8Array(o.ttfBytes) : new Uint8Array(REAL_FONT))
+    }) as typeof fetch
+    /** A v1 layout (its per-aspect overrides do change the font): one text element per family. */
+    const withFonts = (families: string[], overrides: Record<string, unknown> = {}) => ({
+      id: 'f', aspects: { a: { w: 400, h: 400, label: 'A' }, b: { w: 400, h: 400, label: 'B' } },
+      elements: families.map((f, i) => ({
+        id: `t${i}`, type: 'text', anchor: 'top-left', offset: { x: 0, y: i * 10 }, size: { w: 200, h: 20 }, content: 'Hi', style: { fontFamily: f }, overrides,
+      })),
+    })
+    afterEach(() => { calls.length = 0; __setGoogleFontsForTests({ fetch: null, timeoutMs: null, clear: true }) })
+
+    it('families only from the rendered format; at most 16 to download, refused plainly past it', async () => {
+      __setGoogleFontsForTests({ fetch: google(), clear: true })
+      // 2,000 families named in other aspects' overrides: none fetched for aspect a.
+      const overrides = Object.fromEntries(Array.from({ length: 2000 }, (_, i) => [`o${i}`, { style: { fontFamily: `Nofont ${i}` } }]))
+      const t = withFonts(['Inter'], { ...overrides, b: { style: { fontFamily: 'Remote B' } } })
+      await renderTemplatePng({ template: t as never, aspect: 'a' })
+      expect(calls).toEqual([])
+      // Aspect b's own override is fetched, and only it.
+      await renderTemplatePng({ template: t as never, aspect: 'b' })
+      expect(calls).toEqual(['https://fonts.googleapis.com/css2?family=Remote+B:wght@400;700&display=swap', 'https://fonts.gstatic.com/s/x.ttf'])
+      calls.length = 0
+      // 17 remote families on the rendered format: refused before any fetch.
+      const seventeen = Array.from({ length: LAYOUT_MAX_REMOTE_FONTS + 1 }, (_, i) => `Remote ${i}`)
+      const e = await renderTemplatePng({ template: withFonts(seventeen) as never, aspect: 'a' }).catch((x: unknown) => x)
+      expect(e).toBeInstanceOf(TemplateSizeError)
+      expect((e as Error).message).toBe(LAYOUT_TOO_MANY_FONTS)
+      expect(calls).toEqual([])
+      await expect(routeWith({ template: withFonts(seventeen), aspect: 'a' })).rejects.toMatchObject({ statusCode: 400, statusMessage: LAYOUT_TOO_MANY_FONTS })
+      // 16 are fine.
+      await renderTemplatePng({ template: withFonts(seventeen.slice(0, 16)) as never, aspect: 'a' })
+      expect(calls.filter(c => c.startsWith('https://fonts.googleapis.com/')).length).toBe(16)
+    }, 60_000)
+
+    it('a hung font fetch ends with Stop, and on its own time limit', async () => {
+      __setGoogleFontsForTests({ fetch: google({ hang: true }), clear: true })
+      const ctl = new AbortController()
+      setTimeout(() => ctl.abort(), 300)
+      const t0 = Date.now()
+      await expect(renderTemplatePng({ template: withFonts(['Hung Family']) as never, aspect: 'a' }, { signal: ctl.signal })).rejects.toThrow('Stopped')
+      expect(Date.now() - t0).toBeLessThan(2000)
+      // The render's deadline too.
+      __setRenderDeadlineForTests(300)
+      try {
+        await expect(renderTemplatePng({ template: withFonts(['Hung Family']) as never, aspect: 'a' })).rejects.toThrow(RENDER_TIMEOUT)
+      }
+      finally { __setRenderDeadlineForTests(null) }
+      // Each fetch's own limit: the render carries on without the font.
+      __setGoogleFontsForTests({ timeoutMs: 200 })
+      const t1 = Date.now()
+      const png = await renderTemplatePng({ template: withFonts(['Hung Family']) as never, aspect: 'a' })
+      expect(png.length).toBeGreaterThan(0)
+      expect(Date.now() - t1).toBeLessThan(5000)
+    }, 60_000)
+
+    it('both caches are bounded; a font file past 10 MB, or not from Google’s font host, is not used', async () => {
+      __setGoogleFontsForTests({ fetch: (async () => new Response('nope', { status: 400 })) as typeof fetch, clear: true })
+      for (let i = 0; i < GOOGLE_FAILED_MAX + 50; i++) await loadGoogleFamily(`Missing ${i}`)
+      expect(__setGoogleFontsForTests({}).failed).toBe(GOOGLE_FAILED_MAX)
+      __setGoogleFontsForTests({ fetch: google({ ttfBytes: 2 * 1024 * 1024 }) })
+      for (let i = 0; i < GOOGLE_CACHE_MAX_FAMILIES + 20; i++) expect((await loadGoogleFamily(`Real ${i}`)).length).toBe(1)
+      const sizes = __setGoogleFontsForTests({})
+      expect(sizes.cachedBytes).toBeLessThanOrEqual(GOOGLE_CACHE_MAX_BYTES)
+      expect(sizes.cached).toBeLessThanOrEqual(GOOGLE_CACHE_MAX_FAMILIES)
+      expect(sizes.cached).toBeGreaterThan(0)
+      __setGoogleFontsForTests({ fetch: google({ ttfBytes: 11 * 1024 * 1024 }), clear: true })
+      expect(await loadGoogleFamily('Huge')).toEqual([])
+      __setGoogleFontsForTests({ fetch: google({ ttfUrl: 'http://127.0.0.1:1/x.ttf' }), clear: true })
+      expect(await loadGoogleFamily('Elsewhere')).toEqual([])
+      expect(calls.some(c => c.startsWith('http://127.0.0.1'))).toBe(false)
+    }, 60_000)
+  })
+
+  it('localhost connects over IPv4 first: a [::1] listener on the same port is not reached', async () => {
+    const png = await sharp({ create: { width: 2, height: 2, channels: 3, background: '#00ff00' } }).png().toBuffer()
+    const v4 = createServer((_q, res) => { res.writeHead(200, { 'content-type': 'image/png' }); res.end(png) })
+    await new Promise<void>(r => v4.listen(0, '127.0.0.1', r))
+    const port = (v4.address() as AddressInfo).port
+    const v6 = createServer((_q, res) => { res.writeHead(426); res.end() })
+    await new Promise<void>((r, j) => { v6.once('error', j); v6.listen(port, '::1', r) })
+    try {
+      for (let i = 0; i < 3; i++) {
+        const got = await safeImageFetcher({ hosted: false, viewPorts: [port] })(`http://localhost:${port}/view?filename=a.png`)
+        expect(Buffer.from(got.data).equals(png)).toBe(true)
+      }
+      // Its addresses are still all checked: another path is refused.
+      await expect(safeImageFetcher({ hosted: false, viewPorts: [port] })(`http://localhost:${port}/admin`)).rejects.toThrow(FETCH_REFUSED)
+    }
+    finally {
+      v4.closeAllConnections(); v4.close()
+      v6.closeAllConnections(); v6.close()
+    }
+  })
+})
 
 describe('preview names and literals', () => {
   it('a label too long for its preview’s file name fails the node before any render', async () => {

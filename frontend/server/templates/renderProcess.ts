@@ -19,7 +19,7 @@
 import { spawn, type ChildProcess } from 'node:child_process'
 import { createRequire } from 'node:module'
 import { pathToFileURL } from 'node:url'
-import { bakeTreatmentCore } from './inlineImages'
+import { bakeTreatmentCore, substituteImagesCore, type ImageTable } from './inlineImages'
 import type { TreatmentBakeTag } from '../../shared/template-grid/treatment'
 
 export const RENDER_TIMEOUT_MS = 60_000
@@ -27,12 +27,14 @@ export const RENDER_TIMEOUT = 'The layout took longer than a minute to render, s
 export const RENDER_CRASHED = 'The layout renderer stopped while rendering this layout'
 
 export interface RenderFont { name: string; data: ArrayBuffer; weight: 400 | 700; style: 'normal' }
-export interface SvgJob { tree: unknown; width: number; height: number; fonts: RenderFont[] }
+/** `images`: each distinct picture once, keyed by the placeholder its img nodes carry (fix round 4). */
+export interface SvgJob { tree: unknown; width: number; height: number; fonts: RenderFont[]; images?: ImageTable }
 
 function script(): string {
   return `
 const __name = (f) => f
 const bake = (${bakeTreatmentCore.toString()})
+const substitute = (${substituteImagesCore.toString()})
 const urls = JSON.parse(process.argv[1])
 let mods = null
 const load = async () => {
@@ -53,6 +55,7 @@ process.on('message', async (m) => {
     const { satori, Resvg, sharp } = await load()
     let out
     if (m.op === 'render') {
+      if (m.images) substitute(m.tree, m.images)
       const svg = await satori(m.tree, { width: m.width, height: m.height, fonts: m.fonts })
       out = new Uint8Array(new Resvg(svg, { fitTo: { mode: 'original' } }).render().asPng())
     }
@@ -144,6 +147,24 @@ function busy(c: Child): void {
   ;(c.proc.channel as unknown as { ref?(): void } | undefined)?.ref?.()
 }
 
+/**
+ * Whether a child really started (fix round 4). A spawn that fails with
+ * EMFILE/ENFILE leaves a handle but no pid; signalling it then sends
+ * kill(0, …), which kills this server's whole process group (Nitro, nuxi and
+ * whatever was started alongside). Only a pid > 0 is ever signalled.
+ */
+function started(c: Child): boolean {
+  const pid = c.proc.pid
+  return typeof pid === 'number' && Number.isInteger(pid) && pid > 0
+}
+
+/** The one place a child is signalled: never one without a real pid. */
+function killChild(c: Child): void {
+  if (!started(c)) return
+  try { c.proc.kill('SIGKILL') }
+  catch { /* already gone */ }
+}
+
 /** One job on the child, waiting its turn; killed (SIGKILL) past the limit or on abort. */
 function onChild(msg: Record<string, unknown>, signal?: AbortSignal): Promise<Uint8Array> {
   const run = async (): Promise<Uint8Array> => {
@@ -165,8 +186,7 @@ function onChild(msg: Record<string, unknown>, signal?: AbortSignal): Promise<Ui
       let timer: ReturnType<typeof setTimeout> | undefined
       const kill = (why: string) => {
         c.dead = why
-        try { c.proc.kill('SIGKILL') }
-        catch { /* already gone */ }
+        killChild(c)
       }
       const onAbort = () => kill(stopWords(signal!))
       const done = () => {
@@ -179,7 +199,8 @@ function onChild(msg: Record<string, unknown>, signal?: AbortSignal): Promise<Ui
       signal?.addEventListener('abort', onAbort, { once: true })
       try {
         if (c.dead) throw new Error(c.dead)
-        if (typeof c.proc.send !== 'function') throw new Error(RENDER_CRASHED)
+        // A failed spawn (no pid, or no IPC channel) is never sent to or signalled.
+        if (!started(c) || typeof c.proc.send !== 'function') throw new Error(RENDER_CRASHED)
         busy(c)
         c.proc.send({ ...msg, id })
       }
@@ -216,7 +237,7 @@ function whileWaiting<T>(job: Promise<T>, signal?: AbortSignal): Promise<T> {
 
 /** satori then resvg for one translated layout, in the render process. */
 export function svgToPngInProcess(job: SvgJob, signal?: AbortSignal): Promise<Uint8Array> {
-  return onChild({ op: 'render', tree: job.tree, width: job.width, height: job.height, fonts: job.fonts }, signal)
+  return onChild({ op: 'render', tree: job.tree, width: job.width, height: job.height, fonts: job.fonts, images: job.images }, signal)
 }
 
 /** inlineImages' photo-treatment bake, in the render process. */
@@ -243,5 +264,5 @@ export function __renderJobsForTests(): number {
 /** Tests only: the render process's pid, if one is running. */
 export function __renderChildPidForTests(): number | null {
   const c = g.__sailorRenderChild
-  return c && !c.dead ? c.proc.pid ?? null : null
+  return c && !c.dead && started(c) ? c.proc.pid! : null
 }
