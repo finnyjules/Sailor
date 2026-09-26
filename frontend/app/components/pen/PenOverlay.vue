@@ -49,6 +49,8 @@ import { sketchPathData, entityPath } from '~/lib/sketch/sketchPath'
 import { constraintMarks, arcDimensionMarks } from '~/lib/sketch/annotate'
 import { applyView, invertView, viewToSvg, type ViewMatrix } from '~/lib/sketch/view'
 import { bowArc, spanPathD, SPARKLE_LIFETIME_MS, isTypingInField, type Pen } from '~/composables/pen/usePen'
+import { pointRolesForDoc, type PointRole } from '~/lib/sketch/pointRoles'
+import { clampChipOrigin } from '~/lib/sketch/chipClamp'
 
 const props = withDefaults(defineProps<{
   pen: Pen
@@ -167,7 +169,7 @@ const visibleHandleIds = computed(() => {
 const allHandleIds = computed(() => handleIds())
 const pts = computed(() => (doc.value.entities.filter(e =>
   e.kind === 'point' && (!allHandleIds.value.has(e.id) || visibleHandleIds.value.has(e.id))) as any[])
-  .map(p => ({ p, s: toScreen(p), handle: allHandleIds.value.has(p.id) })))
+  .map(p => ({ p, s: toScreen(p), handle: allHandleIds.value.has(p.id), role: pointRoleOf(p) })))
 
 // screen-space arms (point → handle) for the handles on show
 const handleArms = computed(() => {
@@ -216,12 +218,29 @@ function hiddenHandleRule(m: { id: EntityId; kind: ConstraintKind }): boolean {
   const handles = allHandleIds.value, visible = visibleHandleIds.value
   return c.refs.some(r => handles.has(r) && !visible.has(r))
 }
+// badges and chips are clamped to stay fully inside the overlay — a chip
+// near an edge (the "R" at the right edge that motivated this) must never be
+// cut off. Clamping only moves the rect/text origin; the click target (`m`)
+// is unchanged, so click-to-edit still works wherever the chip actually sits.
+function chipOrigin(s: { x: number; y: number }, chipWidth: number) {
+  return clampChipOrigin(s.x + 6, s.y - 16, chipWidth, props.width, props.height)
+}
 const visibleMarks = computed(() => marks.value
   .filter(m => !STRUCTURAL_MARK_KINDS.includes(m.kind) && !hiddenHandleRule(m))
-  .map(m => ({ m, s: toScreen(m) })))
+  .map(m => {
+    const s = toScreen(m)
+    const w = m.text ? 30 : 16
+    const o = chipOrigin(s, w)
+    return { m, s, w, x: o.x, y: o.y }
+  }))
 // persistent "R n.n" radius chips on every finished arc segment — pure read
 // of the doc, never solves; distinct from pathBowChip's live during-drag chip
-const arcDims = computed(() => arcDimensionMarks(doc.value).map(m => ({ m, s: toScreen(m) })))
+const arcDims = computed(() => arcDimensionMarks(doc.value).map(m => {
+  const s = toScreen(m)
+  const w = 34
+  const o = chipOrigin(s, w)
+  return { m, s, w, x: o.x, y: o.y }
+}))
 
 // point-handle rendering: selection (orange, filled, r6) always wins; a
 // construction point renders as a small grey hollow dot, distinct from both
@@ -241,6 +260,24 @@ function pointStroke(p: { id: EntityId; construction?: boolean }, handle = false
   if (selection.value.includes(p.id)) return 'none'
   if (handle) return HANDLE_COLOR
   return p.construction ? '#9ca3af' : 'none'
+}
+
+// How points look (spec "Stage 3 — How points look"): a point shared by two
+// or more pieces, or pinned onto a curve as a T-junction, reads as a small
+// solid JOINT dot; a loose line/path END is a hollow square; an arc/circle
+// CENTRE is a hollow circle; everything else is FREE (today's plain dot).
+// Selection and construction both override this (checked first) and a
+// Bézier handle keeps its own separate look entirely — none of them get the
+// distinct glyph below. The hit circle underneath stays at today's radius
+// either way, so `[data-point]` keeps receiving pointer events at the same
+// size regardless of the visual role on top of it.
+const pointRoles = computed(() => pointRolesForDoc(doc.value))
+function pointRoleOf(p: { id: EntityId }): PointRole { return pointRoles.value.get(p.id) ?? 'free' }
+function hasDistinctRoleGlyph(p: { id: EntityId; construction?: boolean }, role: PointRole, handle: boolean): boolean {
+  return !handle && !p.construction && !selection.value.includes(p.id) && (role === 'joint' || role === 'end' || role === 'centre')
+}
+function roleGlyphColor(p: { fixed?: boolean }): string {
+  return p.fixed ? '#9ca3af' : '#2563eb'
 }
 
 function worldPt(id: EntityId): { x: number; y: number } | null {
@@ -885,29 +922,46 @@ defineExpose({
       <circle :cx="previewDragHandles.ptr.x" :cy="previewDragHandles.ptr.y" r="3" :fill="HANDLE_COLOR" />
       <circle :cx="previewDragHandles.mirror.x" :cy="previewDragHandles.mirror.y" r="3" :fill="HANDLE_COLOR" />
     </g>
-    <circle v-for="{ p, s, handle } in pts" :key="p.id" :cx="s.x" :cy="s.y" :r="pointRadius(p)"
-            :fill="pointFill(p)" :stroke="pointStroke(p, handle)" stroke-width="1.5"
-            :style="{ cursor: tool === 'select' ? 'grab' : 'crosshair' }"
-            @pointerdown="(ev) => onPointerDownPoint(p.id, ev)" @pointerup="(ev) => onPointerUpPoint(p.id, ev)"
-            :pointer-events="active ? (handle ? 'all' : undefined) : 'none'"
-            :data-point="p.id" :data-construction="p.construction ? '' : null" :data-handle="handle ? '' : null" />
+    <template v-for="{ p, s, handle, role } in pts" :key="p.id">
+      <!-- the hit target: same size and pointer behaviour as before a role
+           had a distinct look — [data-point] click/drag specs rely on this.
+           When a distinct glyph is drawn on top (below), this stays invisible
+           and only the glyph carries the visible look. -->
+      <circle :cx="s.x" :cy="s.y" :r="pointRadius(p)"
+              :fill="hasDistinctRoleGlyph(p, role, handle) ? 'transparent' : pointFill(p)"
+              :stroke="hasDistinctRoleGlyph(p, role, handle) ? 'transparent' : pointStroke(p, handle)" stroke-width="1.5"
+              :style="{ cursor: tool === 'select' ? 'grab' : 'crosshair' }"
+              @pointerdown="(ev) => onPointerDownPoint(p.id, ev)" @pointerup="(ev) => onPointerUpPoint(p.id, ev)"
+              :pointer-events="active ? (handle ? 'all' : undefined) : 'none'"
+              :data-point="p.id" :data-construction="p.construction ? '' : null" :data-handle="handle ? '' : null"
+              :data-point-role="handle ? null : role" />
+      <!-- JOINT: small solid dot -->
+      <circle v-if="hasDistinctRoleGlyph(p, role, handle) && role === 'joint'" :cx="s.x" :cy="s.y" r="3"
+              :fill="roleGlyphColor(p)" pointer-events="none" />
+      <!-- END: hollow square -->
+      <rect v-if="hasDistinctRoleGlyph(p, role, handle) && role === 'end'" :x="s.x - 3.5" :y="s.y - 3.5" width="7" height="7"
+            fill="none" :stroke="roleGlyphColor(p)" stroke-width="1.5" pointer-events="none" />
+      <!-- CENTRE: hollow circle -->
+      <circle v-if="hasDistinctRoleGlyph(p, role, handle) && role === 'centre'" :cx="s.x" :cy="s.y" r="5"
+              fill="none" :stroke="roleGlyphColor(p)" stroke-width="1.5" pointer-events="none" />
+    </template>
     <circle v-if="cutHoverScreen" :cx="cutHoverScreen.x" :cy="cutHoverScreen.y" r="5" fill="#fff" stroke="#ef4444"
             stroke-width="1.5" pointer-events="none" data-cut-hover />
     <circle v-if="dissolveHoverScreen" :cx="dissolveHoverScreen.x" :cy="dissolveHoverScreen.y" r="9" fill="none"
             :stroke="dissolveHoverScreen.ok ? '#16a34a' : '#9ca3af'" stroke-width="2" pointer-events="none"
             :data-dissolve-hover="dissolveHoverScreen.ok ? 'ok' : 'no'" />
     <template v-if="showLabels">
-      <g v-for="{ m, s } in visibleMarks" :key="m.id" class="constraint-badge" :pointer-events="active ? 'auto' : 'none'" style="cursor: pointer"
+      <g v-for="{ m, w, x, y } in visibleMarks" :key="m.id" class="constraint-badge" :pointer-events="active ? 'auto' : 'none'" style="cursor: pointer"
          :data-constraint="m.id" :data-constraint-kind="m.kind"
          @pointerdown.stop @click.stop="onMarkClick(m, $event)">
         <title>{{ m.text != null ? 'click to edit · shift+click to remove' : 'click to remove' }}</title>
-        <rect :x="s.x + 6" :y="s.y - 16" :width="m.text ? 30 : 16" height="14" rx="3" fill="#111827" opacity="0.85" />
-        <text :x="s.x + 9" :y="s.y - 5" fill="#e5e7eb" font-size="10" font-family="ui-monospace, monospace">{{ m.glyph }}{{ m.text ? ' ' + m.text : '' }}</text>
+        <rect :x="x" :y="y" :width="w" height="14" rx="3" fill="#111827" opacity="0.85" />
+        <text :x="x + 3" :y="y + 11" fill="#e5e7eb" font-size="10" font-family="ui-monospace, monospace">{{ m.glyph }}{{ m.text ? ' ' + m.text : '' }}</text>
       </g>
-      <g v-for="{ m, s } in arcDims" :key="m.id" :pointer-events="active ? 'auto' : 'none'" style="cursor: pointer"
+      <g v-for="{ m, w, x, y } in arcDims" :key="m.id" :pointer-events="active ? 'auto' : 'none'" style="cursor: pointer"
          @pointerdown.stop @click.stop="onDimClick(m)">
-        <rect :x="s.x + 6" :y="s.y - 16" width="34" height="14" rx="3" fill="#111827" opacity="0.85" />
-        <text :x="s.x + 9" :y="s.y - 5" fill="#e5e7eb" font-size="10" font-family="ui-monospace, monospace">{{ m.text }}</text>
+        <rect :x="x" :y="y" :width="w" height="14" rx="3" fill="#111827" opacity="0.85" />
+        <text :x="x + 3" :y="y + 11" fill="#e5e7eb" font-size="10" font-family="ui-monospace, monospace">{{ m.text }}</text>
       </g>
     </template>
     <g v-if="pathBowChip" pointer-events="none" data-bow-chip>
