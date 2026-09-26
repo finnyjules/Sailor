@@ -92,6 +92,8 @@ import { type PaintStroke, type BrushStroke, stampStrokes, strokeBounds } from '
 import { isTipStroke, type TipStroke } from '~/lib/brushTips/record'
 import { renderTipCoverage } from '~/lib/brushTips/coverage'
 import { REF_W } from '~/lib/brushTips/tips'
+import { NEON_HALO_UNITS } from '~/lib/brushTips/engine'
+import type { MaterialId } from '~/lib/brushTips/materials'
 import {
   applyBlurPass, applyPasses, applyStackPost, chainActive,
   strokeAlphaAlignOf, strokeAlphaBand,
@@ -745,6 +747,19 @@ export interface BrushLayer extends LayerCommon {
   strokeWidth?: number   // normalized to width
   w: number              // full-artboard bounds; 1 = artboard width
   h: number              // aspect (artboardH / artboardW)
+  /** A material replaces the tip strokes' fill with a live shaded look (see
+   *  lib/brushTips/materials.ts). Absent means today's plain-fill behaviour,
+   *  byte-identical. `moving` selects the Frame clock (`_fieldCtx.t`) vs a frozen 0. */
+  material?: { id: MaterialId; moving: boolean }
+}
+
+/** How far (Frame-unit width fraction) a brush layer's tip bounds must grow on every
+ *  side to hold its material's glow. Only `neon` needs room — its halo pass samples
+ *  up to `NEON_HALO_UNITS` past the coverage edge, and the engine's density texture
+ *  clamps there, so an unpadded box smears the glow at the boundary. Every other
+ *  material is flat coverage and needs no extra room. */
+export function brushMaterialPad(layer: BrushLayer): number {
+  return layer.material?.id === 'neon' ? NEON_HALO_UNITS / REF_W : 0
 }
 
 /**
@@ -1912,8 +1927,13 @@ export function localLayerBox(
     // hit-testing match the scaled render. At paint-commit `w == naturalW`, so
     // scale === 1 and this box is byte-identical to the un-resized bounds.
     const b = strokeBounds((layer as BrushLayer).strokes)
-    const nw = b.maxX - b.minX, nh = b.maxY - b.minY
-    const scale = nw > 1e-6 ? (layer as BrushLayer).w / nw : 1
+    const nw0 = b.maxX - b.minX, nh0 = b.maxY - b.minY
+    const scale = nw0 > 1e-6 ? (layer as BrushLayer).w / nw0 : 1
+    // Material halo room (e.g. neon): grows the box by the pad on every side, in the
+    // SAME scale as the strokes, so selection/handles hug the glow. Zero for a layer
+    // with no material or a non-neon one — byte-identical to before in that case.
+    const pad = brushMaterialPad(layer as BrushLayer) * 2
+    const nw = nw0 + pad, nh = nh0 + pad
     return { w: Math.max(4, nw * scale * W), h: Math.max(4, nh * scale * W) }
   }
   if (layer.kind === 'wired') {
@@ -4832,16 +4852,23 @@ function drawLayerContentBody(ctx: CanvasRenderingContext2D, layer: LocalLayer, 
     // the offscreen so the bounds' top-left maps to (0,0). Rasterize at DEVICE
     // resolution (dpr) so the committed layer stays crisp on retina — `ctx` is
     // DPR-scaled, so the final drawImage at LOGICAL size renders the hi-res offscreen 1:1.
-    const b = strokeBounds(live ? [...layer.strokes, live] : layer.strokes)
+    const b0 = strokeBounds(live ? [...layer.strokes, live] : layer.strokes)
     // Uniform "keep proportions" scale: `w` drives a scale of the strokes' natural
     // width, and multiplying every artboard-width factor (W) by it below scales the
     // whole shape AND the stroke thickness together, staying centred. At paint-commit
     // `w == naturalW` so scale === 1 → every `* scale` is a no-op and this renders
-    // byte-identical to the un-resized brush.
+    // byte-identical to the un-resized brush. Computed from the UNPADDED bounds, so a
+    // material's halo pad (below) never perturbs it.
     // NOTE: painting MORE strokes onto a resized brush re-fits `w` to the new natural
     // bounds (brushBoxFromStrokes), resetting the scale — acceptable, out of scope.
-    const nw = b.maxX - b.minX
-    const scale = nw > 1e-6 ? layer.w / nw : 1
+    const nw0 = b0.maxX - b0.minX
+    const scale = nw0 > 1e-6 ? layer.w / nw0 : 1
+    // Material halo room (neon only — see brushMaterialPad): grows the bounds on every
+    // side so the engine's density texture has room for the glow past the coverage edge
+    // (unpadded, it clamps there and the halo smears). Zero for no material / non-neon,
+    // so `b` === `b0` and every `* scale` below stays byte-identical to before.
+    const pad = brushMaterialPad(layer)
+    const b = { minX: b0.minX - pad, maxX: b0.maxX + pad, minY: b0.minY - pad, maxY: b0.maxY + pad }
     const w = Math.max(1, Math.round((b.maxX - b.minX) * W * scale))
     const h = Math.max(1, Math.round((b.maxY - b.minY) * W * scale))
     const dpr = (typeof window !== 'undefined' && window.devicePixelRatio) || 1
@@ -4858,17 +4885,14 @@ function drawLayerContentBody(ctx: CanvasRenderingContext2D, layer: LocalLayer, 
     const legacy = layer.strokes.filter(s => !isTipStroke(s)) as PaintStroke[]
     if (legacy.length) stampStrokes(octx, legacy, W * dpr * scale)   // base = artboard-width scale × keep-proportions scale
     octx.restore()
-    // Tip strokes (spray/round/bristle) render through the shared coverage engine —
-    // a cached white-alpha canvas (+ optional shade), already in offscreen DEVICE
-    // space (origin = bounds' top-left, unitPx = W*dpr*scale per Frame unit, matching
-    // the legacy translate above). With legacy stamps it is the WHOLE layer (stamps + tip
-    // groups), so it replaces the offscreen. A brush with only legacy strokes never reaches
-    // this: `renderTipCoverage` returns null with no side effects, so that layer takes
-    // exactly the old code path (byte-identical output).
-    const unitPx = (W * dpr * scale) / REF_W
-    const cov = renderTipCoverage(layer.id, layer.strokes, { originX: b.minX * REF_W, originY: b.minY * REF_W, unitPx, w: dw, h: dh }, live, liveE?.tailMs ?? 0, legacy.length ? off : null)
-    if (cov) { if (legacy.length) octx.clearRect(0, 0, dw, dh); octx.drawImage(cov.coverage, 0, 0, dw, dh) }
-    if (hasPaint(layer.fill)) {
+    // The layer's plain fill, source-in against whatever is currently in `off` — shared by
+    // both paths below. Without a material this runs ONCE, after the tip coverage replaces
+    // `off` (today's order: fill covers strokes + tip coverage together). With a material,
+    // it instead runs HERE, right after the legacy stamp, so the fill lands on the legacy
+    // paint only — the tip strokes get the material's own colour instead (see below), and
+    // legacy paint keeps the layer's fill and draws underneath it (global rule).
+    const applyFill = () => {
+      if (!hasPaint(layer.fill)) return
       octx.save()
       octx.translate(dw / 2, dh / 2)             // center so resolvePaint's gradient/pattern lines up
       octx.globalCompositeOperation = 'source-in' // keep fill only where strokes painted
@@ -4891,6 +4915,22 @@ function drawLayerContentBody(ctx: CanvasRenderingContext2D, layer: LocalLayer, 
       octx.fillRect(-dw / 2, -dh / 2, dw, dh)
       octx.restore()
     }
+    if (layer.material && legacy.length) applyFill() // legacy fill, before the tip coverage below replaces `off`
+    // Tip strokes (spray/round/bristle) render through the shared coverage engine —
+    // a cached white-alpha canvas (+ optional shade), already in offscreen DEVICE
+    // space (origin = bounds' top-left, unitPx = W*dpr*scale per Frame unit, matching
+    // the legacy translate above). With legacy stamps it is the WHOLE layer (stamps + tip
+    // groups), so it replaces the offscreen. A brush with only legacy strokes never reaches
+    // this: `renderTipCoverage` returns null with no side effects, so that layer takes
+    // exactly the old code path (byte-identical output). With a material, the returned
+    // coverage is already the COLOURED premultiplied composite (base + tinted tip groups).
+    const unitPx = (W * dpr * scale) / REF_W
+    const paint = layer.material ? { material: layer.material.id, t: layer.material.moving ? _fieldCtx.t : 0 } : undefined
+    const cov = renderTipCoverage(layer.id, layer.strokes, { originX: b.minX * REF_W, originY: b.minY * REF_W, unitPx, w: dw, h: dh }, live, liveE?.tailMs ?? 0, legacy.length ? off : null, paint)
+    // Canvases may come back smaller than the view (the 8192 render cap) — the explicit
+    // (dw, dh) below always stretches back to the real offscreen size.
+    if (cov) { octx.clearRect(0, 0, dw, dh); octx.drawImage(cov.coverage, 0, 0, dw, dh) }
+    if (!layer.material) applyFill() // today's single fill pass, over the strokes + tip coverage together
     if (cov?.shade) { octx.save(); octx.globalCompositeOperation = 'soft-light'; octx.drawImage(cov.shade, 0, 0, dw, dh); octx.restore() }
     // Centered at the layer origin, which the caller placed at the bounds' centre.
     ctx.drawImage(off, -w / 2, -h / 2, w, h)
@@ -6457,6 +6497,9 @@ export function hasAnimatedShaderFill(items: StackItem[], background?: Paint): b
     if (it.type !== 'local') continue
     if (layerPaints(it.layer).some(isLiveShader)) return true
     if (effectStackOf(it.layer as unknown as Parameters<typeof effectStackOf>[0]).some(e => isLiveShaderEffect(e) || isLiveBackdropShaderEffect(e))) return true
+    // A brush layer's material is its own live shader look, driven by the same
+    // Frame clock — `moving: true` needs the clock exactly like a live shader fill.
+    if (it.layer.kind === 'brush' && (it.layer as BrushLayer).material?.moving === true) return true
   }
   return false
 }
