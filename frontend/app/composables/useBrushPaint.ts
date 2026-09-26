@@ -3,8 +3,14 @@ import type { PaintStroke } from '~/lib/compositor/brushStamp'
 import { TIPS, TIP_IDS, defaultSettings, REF_W, SIZE_MIN, SIZE_MAX, type TipId } from '~/lib/brushTips/tips'
 import { encodePts, type Sample, type TipStroke } from '~/lib/brushTips/record'
 import { isMaterialId, type MaterialId } from '~/lib/brushTips/materials'
+import { DEFAULT_BRUSH_EFFECT } from '~/lib/brushTips/effects'
+import { effectStackOf, type StackHost } from '~/lib/compositor/effectStack'
+import { isFill, type Paint } from '~/lib/compositor/paint'
+import { fillIsShader } from '~/lib/spacetype/fillTile'
 
-export type BrushMode = 'paint' | 'mask'
+export type BrushMode = 'paint' | 'effect' | 'mask'
+const BRUSH_MODES: readonly BrushMode[] = ['paint', 'effect', 'mask']
+function isBrushMode(v: unknown): v is BrushMode { return typeof v === 'string' && (BRUSH_MODES as readonly string[]).includes(v) }
 
 const STORE_KEY = 'sailor.brushTips.v1'
 function loadTips() {
@@ -12,18 +18,24 @@ function loadTips() {
   const size = Object.fromEntries(TIP_IDS.map(t => [t, TIPS[t].defaultSize])) as Record<TipId, number>
   let tip: TipId = 'spray'
   let material: MaterialId | null = null
+  let mode: BrushMode = 'paint'
+  let effect: string = DEFAULT_BRUSH_EFFECT
+  let shaderPaint: string | null = null
   try {
     const raw = JSON.parse(localStorage.getItem(STORE_KEY) || 'null')
     if (raw && typeof raw === 'object') {
       if (TIP_IDS.includes(raw.tip)) tip = raw.tip
       if (isMaterialId(raw.material)) material = raw.material
+      if (isBrushMode(raw.mode)) mode = raw.mode
+      if (typeof raw.effect === 'string' && raw.effect.length > 0) effect = raw.effect
+      if (typeof raw.shaderPaint === 'string' && raw.shaderPaint.length > 0) shaderPaint = raw.shaderPaint
       for (const t of TIP_IDS) {
         for (const k of Object.keys(settings[t])) { const v = raw.settings?.[t]?.[k]; if (typeof v === 'number' && Number.isFinite(v)) settings[t][k] = v }
         const sz = raw.size?.[t]; if (typeof sz === 'number' && Number.isFinite(sz)) size[t] = Math.min(SIZE_MAX, Math.max(SIZE_MIN, sz))
       }
     }
   } catch { /* bad or blocked storage: defaults */ }
-  return { tip, settings, size, material }
+  return { tip, settings, size, material, mode, effect, shaderPaint }
 }
 
 /** True when a brush layer's material and the toolbar's paint choice would draw the same look:
@@ -33,9 +45,35 @@ export function paintMatchesLayer(layerMaterial: { id: MaterialId } | undefined,
   return layerId === toolbar
 }
 
+/** True when `layer` is a painted-effect layer (paint hidden) whose visible backdrop_shader
+ *  targets `effectId`. */
+export function effectLayerMatches(layer: (StackHost & { showPaint?: boolean }) | undefined, effectId: string): boolean {
+  if (!layer || layer.showPaint !== false) return false
+  return effectStackOf(layer).some(e => e.type === 'backdrop_shader' && e.visible !== false && (e as { effectId?: string }).effectId === effectId)
+}
+
+/** True when `fill` is a shader fill whose effect matches `shaderId` (never for `shaderId: null`). */
+export function shaderPaintMatches(fill: unknown, shaderId: string | null): boolean {
+  if (shaderId === null) return false
+  const f = fill as Paint | undefined
+  return isFill(f) && fillIsShader(f) && f.shader.effectId === shaderId
+}
+
+/** The Frame target rule for Paint mode: an effect layer never matches; a shaderPaint choice
+ *  requires no material and a matching shader fill; otherwise fall back to `paintMatchesLayer`. */
+export function paintTargetMatches(
+  layer: { material?: { id: MaterialId }; fill?: unknown; showPaint?: boolean } | undefined,
+  toolbar: { material: MaterialId | null; shaderPaint: string | null },
+): boolean {
+  if (layer?.showPaint === false) return false
+  if (toolbar.shaderPaint !== null) return !layer?.material && shaderPaintMatches(layer?.fill, toolbar.shaderPaint)
+  return paintMatchesLayer(layer?.material, toolbar.material)
+}
+
 export function useBrushPaint() {
+  const saved = loadTips()
   const active = ref(false)
-  const mode = ref<BrushMode>('paint')
+  const mode = ref<BrushMode>(saved.mode)
   const sizePx = ref(40)          // brush DIAMETER, display px
   const color = ref('#3b82f6')
   const opacity = ref(1)          // 0..1
@@ -70,15 +108,21 @@ export function useBrushPaint() {
   }
   const liveStroke = () => live
 
-  const saved = loadTips()
   const tip = ref<TipId>(saved.tip)
   const tipSettings = reactive(saved.settings)
   const tipSize = reactive(saved.size)
   const material = ref<MaterialId | null>(saved.material)
+  const effect = ref<string>(saved.effect)
+  const shaderPaint = ref<string | null>(saved.shaderPaint)
+  function chooseMaterial(id: MaterialId | null) { material.value = id; shaderPaint.value = null }
+  function chooseShaderPaint(id: string | null) { shaderPaint.value = id; if (id !== null) material.value = null }
   let saveTimer: ReturnType<typeof setTimeout> | null = null
-  watch([tip, tipSettings, tipSize, material], () => {
+  watch([tip, tipSettings, tipSize, material, mode, effect, shaderPaint], () => {
     if (saveTimer) clearTimeout(saveTimer)
-    saveTimer = setTimeout(() => { try { localStorage.setItem(STORE_KEY, JSON.stringify({ tip: tip.value, settings: tipSettings, size: tipSize, material: material.value })) } catch { /* ignore */ } }, 150)
+    saveTimer = setTimeout(() => { try { localStorage.setItem(STORE_KEY, JSON.stringify({
+      tip: tip.value, settings: tipSettings, size: tipSize, material: material.value,
+      mode: mode.value, effect: effect.value, shaderPaint: shaderPaint.value,
+    })) } catch { /* ignore */ } }, 150)
   }, { deep: true })
   function resetTipSettings(t: TipId) { Object.assign(tipSettings[t], defaultSettings(t)) }
 
@@ -110,7 +154,7 @@ export function useBrushPaint() {
   return {
     active, mode, sizePx, color, opacity, hardness, smoothing, eraser, cursor, hasLiveStroke,
     setActive, radiusNorm, beginStroke, extendStroke, endStroke, liveStroke,
-    tip, tipSettings, tipSize, material, resetTipSettings,
+    tip, tipSettings, tipSize, material, effect, shaderPaint, chooseMaterial, chooseShaderPaint, resetTipSettings,
     beginTipStroke, extendTipStroke, holdTipStroke, liveTipStroke, endTipStroke,
   }
 }

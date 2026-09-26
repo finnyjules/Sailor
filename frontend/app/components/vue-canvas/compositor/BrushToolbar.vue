@@ -24,9 +24,9 @@ const currentTipSize = computed(() => props.brush.tipSize[props.brush.tip.value]
 function selectTip(id: (typeof TIP_IDS)[number]) { props.brush.tip.value = id }
 function setTipSize(v: number) { props.brush.tipSize[props.brush.tip.value] = v }
 function setSizePx(v: number) { props.brush.sizePx.value = v }
-function setColor(v: string) { props.brush.color.value = v; props.brush.material.value = null }
-function selectColour() { props.brush.material.value = null }
-function selectMaterial(id: (typeof MATERIAL_IDS)[number]) { props.brush.material.value = id }
+function setColor(v: string) { props.brush.color.value = v; props.brush.chooseMaterial(null) }
+function selectColour() { props.brush.chooseMaterial(null) }
+function selectMaterial(id: (typeof MATERIAL_IDS)[number]) { props.brush.chooseMaterial(id) }
 function toggleEraser() { props.brush.eraser.value = !props.brush.eraser.value }
 function setMode(m: 'paint' | 'mask') { props.brush.mode.value = m }
 function done() { emit('done') }
