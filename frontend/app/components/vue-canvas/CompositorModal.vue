@@ -95,7 +95,7 @@ import { toWidthNorm, brushBoxFromStrokes, strokeRadiusPx, maskStrokeToLocal, ty
 import BrushToolbar from '~/components/vue-canvas/compositor/BrushToolbar.vue'
 import BrushTipSettings from '~/components/vue-canvas/compositor/BrushTipSettings.vue'
 import { setLiveTipStroke } from '~/composables/useCompositorLayers'
-import { simulateSpray } from '~/lib/brushTips/spray'
+import { replayStroke } from '~/lib/brushTips/replay'
 import { REF_W as BRUSH_REF_W } from '~/lib/brushTips/tips'
 import type { TipStroke } from '~/lib/brushTips/record'
 import StudioColor from '~/components/vue-canvas/studio/StudioColor.vue'
@@ -7007,12 +7007,13 @@ function onTipPointerUp() {
   setLiveTipStroke(L.layerId, s)
   if (s.tip !== 'spray') { commitTipStroke(); return }
   // Spray: let the drips run before committing. The committed stroke replays with the drips
-  // fully settled, identical to the last live frame.
+  // fully settled, identical to the last live frame. `settled` comes from the live stroke's one
+  // incremental simulation (replay.ts) — the same sim the render below reads, advanced once.
   const releaseT = performance.now()
   const tail = () => {
     if (tipLive !== L) return
     const tailMs = Math.min(DRIP_TAIL_CAP_MS, performance.now() - releaseT)
-    if (tailMs >= DRIP_TAIL_CAP_MS || simulateSpray(s, tailMs).settled) { commitTipStroke(); return }
+    if (tailMs >= DRIP_TAIL_CAP_MS || replayStroke(s, false, tailMs).settled) { commitTipStroke(); return }
     setLiveTipStroke(L.layerId, s, tailMs)
     renderStack()
     L.raf = requestAnimationFrame(tail)
