@@ -553,10 +553,12 @@ describe('a typed-in taste (literal style_in) is moderated', () => {
     ;(flow[2]!.inputs as Record<string, unknown>).style_in = 'grainy film'
     const { runId } = await k.engine.startRun({ userId: k.userId, takes: [flow], ...START })
     await k.engine.settled(runId)
-    expect(moderate).toHaveBeenCalledTimes(1)
-    const text = moderate.mock.calls[0]![0]
-    expect(text).toContain('watercolor')
-    expect(text).toContain('grainy film')
+    // Each text is its own call (fbe7b4ede): the prompt and the typed-in taste
+    // are both checked, and neither is joined into the other.
+    const texts = moderate.mock.calls.map(c => c[0])
+    expect(texts).toHaveLength(2)
+    expect(texts).toContain('watercolor')
+    expect(texts).toContain('grainy film')
     expect(String(k.replicate.submitted()[0]!.payload.prompt)).toContain('Additional style direction: watercolor grainy film.')
   })
 
@@ -569,7 +571,9 @@ describe('a typed-in taste (literal style_in) is moderated', () => {
     }
     await expect(k.engine.startRun({ userId: k.userId, takes: [flow], ...START }))
       .rejects.toMatchObject({ statusCode: 400, message: 'This prompt was blocked by content moderation' })
-    expect(moderate.mock.calls[0]![0]).toContain('forbidden taste')
+    // The taste is judged on its own call (fbe7b4ede), not inside the prompt.
+    expect(moderate.mock.calls.map(c => c[0])).toContain('forbidden taste')
+    expect(moderate.mock.calls.some(c => c[0].includes('forbidden taste') && c[0].includes('a red fox'))).toBe(false)
     expect(k.fal.client.submit).not.toHaveBeenCalled()
   })
 

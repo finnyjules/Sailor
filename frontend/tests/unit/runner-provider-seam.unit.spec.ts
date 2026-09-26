@@ -102,11 +102,13 @@ describe('moderation of the edit nodes’ own text', () => {
       '2': { class_type: 'RemoveObjectNode', inputs: { image: ['1', 0], target: 'the red cup', instructions: 'keep the table' } },
       '3': { class_type: 'GenerateImageNode', inputs: { prompt: 'a fox', model: 'flux-schnell' } },
     }])
-    expect(moderate).toHaveBeenCalledTimes(1)
-    const text = (moderate.mock.calls[0] as unknown as [string])[0]
-    expect(text).toContain('a fox')
-    expect(text).toContain('the red cup')
-    expect(text).toContain('keep the table')
+    // Each text is its own call (fbe7b4ede): the typed prompt is judged on its
+    // own, never joined with the edit node's text, and every word is still seen.
+    const texts = (moderate.mock.calls as unknown as [string][]).map(c => c[0])
+    expect(texts).toHaveLength(2)
+    expect(texts).toContain('a fox')
+    for (const w of ['a fox', 'the red cup', 'keep the table']) expect(texts.some(t => t.includes(w)), w).toBe(true)
+    expect(texts.some(t => t.includes('a fox') && t.includes('the red cup'))).toBe(false)
   })
 
   it('sees find, replace, color and scene_prompt; skips links and blanks', async () => {
