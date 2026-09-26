@@ -18,6 +18,8 @@ import type { NodePlan, PlanContext } from '../executors'
 import type { OutputFile } from '../types'
 import { decodeRaw, decodeRawMask, pngFromPreview8, type PictureSource } from './decode'
 import { maskPngFromScanlines } from './keep'
+import { decodeMask, type Mask } from '../pictures/mask'
+import type { Picture } from './plane'
 import { MAX_LAYERS, type Loader } from './render'
 import { renderFrameInWorker } from './worker'
 
@@ -46,6 +48,16 @@ export function pictureSourceOf(prompt: ApiPrompt, link: ApiLink, depth = 0): Pi
     case 'Compositor':
       if (slot === 0) return 'rgb'
       break
+    // The bake-replay cards (R1.3): each hands on its bake as the PNG Python's loader holds.
+    case 'Scene3DStudio':
+      return 'load'
+    case 'TextOnPath':
+      if (slot === 0) return 'load'
+      break
+    // Text mask's image is a tensor Python builds (1 − mask, grey RGB), no EXIF turn.
+    case 'TextMask':
+      if (slot === 0) return 'rgb'
+      break
     default:
       if (PROVIDER_TYPES.has(node.class_type)) {
         const pass = actionPassThrough(node.class_type, inputs)
@@ -56,7 +68,8 @@ export function pictureSourceOf(prompt: ApiPrompt, link: ApiLink, depth = 0): Pi
   throw new Error(`The runner cannot read a Frame picture from a ${node.class_type} node`)
 }
 
-interface Wired { source: PictureSource | 'mask'; file: OutputFile | null }
+/** 'mask': a LoadImage's file, whose alpha the Frame reads; 'kept-mask': a mask value the runner kept (R1.3: a LoadImage run as a card). */
+interface Wired { source: PictureSource | 'mask' | 'kept-mask'; file: OutputFile | null }
 
 export function planCompositor(ctx: PlanContext): NodePlan {
   const inputs = ctx.prompt[ctx.nodeId]!.inputs ?? {}
@@ -74,7 +87,7 @@ export function planCompositor(ctx: PlanContext): NodePlan {
     if (ctx.prompt[v[0]]?.class_type !== 'LoadImage' || v[1] !== 1) throw new Error('The runner can only read a Frame mask from a loaded picture')
     const file = ctx.filesFrom(v)[0] ?? null
     if (!file) throw new Error('A mask for the Frame is missing')
-    return { source: 'mask', file }
+    return { source: ctx.valueFrom?.(v)?.kind === 'mask' ? 'kept-mask' : 'mask', file }
   }
   const layers = Array.from({ length: MAX_LAYERS }, (_, i) => picture(`layer${i + 1}`))
   const masks = Array.from({ length: MAX_LAYERS }, (_, i) => mask(`layer${i + 1}_mask`))
@@ -94,6 +107,7 @@ export function planCompositor(ctx: PlanContext): NodePlan {
           try {
             // Raw RGBA8 only: the worker builds the tensor.
             if (w.source === 'mask') return await decodeRawMask(await read(w.file!))
+            if (w.source === 'kept-mask') return loadImageMaskPicture(await decodeMask(await read(w.file!)))
             return await decodeRaw(w.file ? await read(w.file) : null, w.source)
           }
           catch (e) {
@@ -117,6 +131,24 @@ export function planCompositor(ctx: PlanContext): NodePlan {
     // save_live_preview's ui.
     uiFor: files => ({ images: files, animated: [false] }),
   }
+}
+
+/**
+ * A LoadImage's MASK kept by the runner (R1.3), as the raw picture its file
+ * gives the Frame: every value LoadImage makes is 1 − a/255, kept exactly as
+ * (255 − a)·257, so the alpha comes back and the worker builds the very
+ * tensor it builds from the file. A value off that grid (not LoadImage's)
+ * goes in as the kept float.
+ */
+function loadImageMaskPicture(m: Mask): Picture {
+  const n = m.w * m.h
+  const rgba = new Uint8Array(n * 4)
+  for (let i = 0; i < n; i++) {
+    const u = Math.round(m.data[i]! * 65535)
+    if (u % 257 !== 0) return { c: 1, h: m.h, w: m.w, data: m.data }
+    rgba[i * 4 + 3] = 255 - u / 257
+  }
+  return { raw: true, source: 'mask', w: m.w, h: m.h, data: rgba }
 }
 
 /** Whether any node of the prompt reads this Frame's protect_mask (output 1). */

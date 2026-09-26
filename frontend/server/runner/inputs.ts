@@ -1,7 +1,9 @@
 /**
  * Files a workflow reads before it makes anything: moodboard reference
  * pictures (GenerateImageNode.style_refs, RestyleFromImageNode.style_refs), pictures/clips/sounds loaded into an
- * unwired Image, Video or Audio card, and a LoadImage's picture (the Frame's baked layers). In hosted, every one must be the user's own.
+ * unwired Image, Video or Audio card, a LoadImage's picture, and the files the
+ * bake-replay cards hand on (3D Studio's passes, Text on path's and Text
+ * mask's render). In hosted, every one must be the user's own.
  */
 import { isLink, type ApiPrompt } from '#shared/runner/graph'
 import { MeterRefusalError } from '../utils/requestMeter'
@@ -49,10 +51,40 @@ export function parseInputFileRef(raw: unknown): OutputFile | null {
   return { filename, subfolder: parts.join('/'), type }
 }
 
+/**
+ * A bake card's `params` (Text on path, Text mask) as its Python node reads
+ * it: `json.loads(params or "{}")`, and anything but an object is `{}`.
+ * (Text Python reads and JSON.parse does not, NaN or Infinity, is left to the
+ * engine by eligibility's `bake-params` check.)
+ */
+export function bakeParams(raw: unknown): Record<string, unknown> {
+  const text = typeof raw === 'string' ? raw : raw === null || raw === undefined ? '' : String(raw)
+  if (!text) return {}
+  try {
+    const v: unknown = JSON.parse(text)
+    return v && typeof v === 'object' && !Array.isArray(v) ? v as Record<string, unknown> : {}
+  }
+  catch { return {} }
+}
+
+/** 3D Studio's baked passes (comfy_extras/nodes_scene3d.py), in output order. */
+export const SCENE3D_BAKES = ['beauty_image', 'depth_image', 'normal_image'] as const
+
 export function collectInputFiles(prompt: ApiPrompt): OutputFile[] {
   const out: OutputFile[] = []
   for (const node of Object.values(prompt)) {
     const inputs = node.inputs ?? {}
+    // The bake-replay cards (R1.3): the files their studio baked.
+    if (node.class_type === 'Scene3DStudio') {
+      for (const name of SCENE3D_BAKES) {
+        const f = isLink(inputs[name]) ? null : parseInputFileRef(inputs[name])
+        if (f) out.push(f)
+      }
+    }
+    if (node.class_type === 'TextOnPath' || node.class_type === 'TextMask') {
+      const f = parseInputFileRef(bakeParams(inputs.params).rendered)
+      if (f) out.push(f)
+    }
     if (node.class_type === 'GenerateImageNode' || node.class_type === 'RestyleFromImageNode') out.push(...moodboardFiles(inputs.style_refs))
     if (node.class_type === 'Image' && !isLink(inputs.images)) {
       const f = parseInputFileRef(inputs.image)

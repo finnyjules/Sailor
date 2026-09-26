@@ -21,6 +21,12 @@ export const OUTPUT_KINDS: Readonly<Record<string, Readonly<Record<number, Value
   Text: { 0: 'text' },
   Moodboard: { 0: 'text' },
   Model3D: { 0: 'text' },
+  // R1.3: the bake-replay cards' masks, and LoadImage's MASK (a value only
+  // when the LoadImage runs as a card; fed to a Frame the old way it is still
+  // the file, which the Frame reads as before).
+  TextOnPath: { 1: 'mask' },
+  TextMask: { 1: 'mask' },
+  LoadImage: { 1: 'mask' },
 }
 
 /** What a wire carries: the source's declared kind for that slot (through Gates), files by default. */

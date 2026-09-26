@@ -14,6 +14,18 @@ adds its key and regenerates the file (the other keys must come out unchanged).
               GenerateVideoNode (veo-3.1) and EditImageNode (Nano Banana 2)
               make for the words a card would wire in, captured with
               runner_builder_fixtures.capture_first_call
+  scene3d   — (R1.3) Scene3DStudioNode.execute over good bakes (an RGBA PNG,
+              an EXIF-turned JPEG, an RGB PNG), a missing file and blank
+              names: each output as the 8-bit RGB a provider is sent
+              (_image_tensor_to_data_url, round(255·x)); a flat placeholder
+              is stored as its one colour and size
+  text_on_path — (R1.3) TextOnPathNode.execute(params): image as 8-bit RGB,
+              mask as round(m·65535) little-endian uint16; `error` when the
+              node raises
+  text_mask — (R1.3) TextMaskNode.execute(params) with no source, as text_on_path
+  load_image — (R1.3) nodes.LoadImage().load_image over the R0.7 files
+              (runner_values_fixtures.py): image 8-bit, mask 16-bit
+  pil_luma  — (R1.3) PIL's convert("L") of 256 seeded random RGB triples
 
     cd /Users/julien/Documents/GitHub/Sailor && .venv/bin/python scripts/runner_cards_fixtures.py
 
@@ -177,6 +189,160 @@ def wired_text_cases() -> list[dict]:
     return out
 
 
+# ── bake replays and LoadImage (R1.3) ────────────────────────────────────────
+
+def _rv():
+    """runner_values_fixtures (R0.7): its synthetic files, encoders and input folder."""
+    import runner_values_fixtures as rv
+    return rv
+
+
+def _put(name: str, data: bytes) -> str:
+    rv = _rv()
+    path = os.path.join(rv.WORK, "input", name)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "wb") as f:
+        f.write(data)
+    return name
+
+
+def _image8(t) -> dict:
+    """An IMAGE as a provider is sent it; a flat picture (a placeholder) as its one colour."""
+    import numpy as np
+    rv = _rv()
+    w, h, rgb8 = rv.data_url_rgb8(t)
+    px = np.frombuffer(rgb8, dtype=np.uint8).reshape(h, w, 3)
+    first = px[0, 0]
+    if w * h > 4096 and (px == first).all():
+        return {"w": w, "h": h, "fill": [int(v) for v in first]}
+    return {"w": w, "h": h, "rgb8": rv.b64(rgb8)}
+
+
+def _mask16(m) -> dict:
+    rv = _rv()
+    return {"w": int(m.shape[-1]), "h": int(m.shape[-2]), "mask16": rv.mask16(m)}
+
+
+def scene3d_cases() -> list[dict]:
+    from comfy_extras.nodes_scene3d import Scene3DStudioNode
+    rv = _rv()
+    rgba = _put("s3d_beauty.png", rv._rgba_png())
+    jpeg = _put("s3d_depth.jpg", rv._jpeg(6))
+    rgb = _put("s3d_normal.png", rv._rgb_png())
+    _put("s3d/sub_rgb.png", rv._rgb_png())
+    files = {rgba: rv._rgba_png(), jpeg: rv._jpeg(6), rgb: rv._rgb_png(), "s3d/sub_rgb.png": rv._rgb_png()}
+    cases = [
+        ("three good bakes: an RGBA PNG, an EXIF-turned JPEG, an RGB PNG", rgba, jpeg, rgb),
+        ("a missing file becomes its placeholder", "missing_beauty.png", jpeg, "missing_normal.png"),
+        ("blank names are the placeholders", "", "", ""),
+        ("a name in a subfolder, annotated [input]", "s3d/sub_rgb.png [input]", "", rgb),
+    ]
+    out = []
+    for name, beauty, depth, normal in cases:
+        res = Scene3DStudioNode.execute(scene_state="{}", beauty_image=beauty, depth_image=depth, normal_image=normal)
+        assert res.ui is None, res.ui
+        out.append({
+            "name": name, "beauty_image": beauty, "depth_image": depth, "normal_image": normal,
+            "files": {k: rv.b64(v) for k, v in files.items() if k in (beauty, depth, normal) or f"{k} [input]" in (beauty, depth, normal)},
+            "outputs": [_image8(t) for t in res.args],
+        })
+    return out
+
+
+def _bake_cases(node_cls, renders: list[tuple[str, str, bytes | None]]) -> list[dict]:
+    """Each case: its params text; any render file it names; the node's two outputs, or that it raised."""
+    rv = _rv()
+    out = []
+    for name, params, data in renders:
+        row: dict = {"name": name, "params": params}
+        if data is not None:
+            rendered = json.loads(params)["rendered"]
+            _put(rendered, data)
+            row["file"] = rv.b64(data)
+        try:
+            res = node_cls.execute(params)
+        except RuntimeError:
+            row["error"] = True  # the node raises (its words carry a temp path, so only the fact is kept)
+            out.append(row)
+            continue
+        image, mask = res.args
+        row["image"] = _image8(image)
+        row["mask"] = _mask16(mask)
+        out.append(row)
+    return out
+
+
+def text_on_path_cases() -> list[dict]:
+    from comfy_extras.nodes_text_on_path import TextOnPathNode
+    rv = _rv()
+    p = lambda rendered: json.dumps({"text": "HELLO", "path": "arc", "rendered": rendered})  # noqa: E731
+    return _bake_cases(TextOnPathNode, [
+        ("an RGBA render", p("top_rgba.png"), rv._rgba_png()),
+        ("an RGB render (no alpha: a zero mask)", p("top_rgb.png"), rv._rgb_png()),
+        ("an LA render", p("top_la.png"), rv._la_png()),
+        ("a palette render with a transparent index (no A band: a zero mask)", p("top_pal.png"), rv._palette_png()),
+        ("an EXIF-turned JPEG render", p("top_turned.jpg"), rv._jpeg(6)),
+        ("blank rendered", p(""), None),
+        ("no rendered key", json.dumps({"text": "HELLO"}), None),
+        ("params not a dict", json.dumps(["top_rgba.png"]), None),
+        ("bad JSON", '{"rendered": "top_rgba.png"', None),
+        ("blank params", "", None),
+        ("a missing render fails the node", p("top_missing.png"), None),
+    ])
+
+
+def text_mask_cases() -> list[dict]:
+    from comfy_extras.nodes_text_mask import TextMaskNode
+    rv = _rv()
+    p = lambda rendered: json.dumps({"text": "MASK", "rendered": rendered})  # noqa: E731
+    return _bake_cases(TextMaskNode, [
+        ("an RGBA render with colour", p("tm_rgba.png"), rv._rgba_png()),
+        ("a greyscale render", p("tm_grey.png"), rv._grey_png()),
+        ("an RGB render", p("tm_rgb.png"), rv._rgb_png()),
+        ("an LA render", p("tm_la.png"), rv._la_png()),
+        ("a palette render with a transparent index", p("tm_pal.png"), rv._palette_png()),
+        ("an EXIF-turned JPEG (not turned: convert(\"L\") only)", p("tm_turned.jpg"), rv._jpeg(6)),
+        ("blank rendered", p(""), None),
+        ("params not a dict", "7", None),
+        ("bad JSON", "{", None),
+        ("a missing render fails the node", p("tm_missing.png"), None),
+    ])
+
+
+def load_image_cases() -> list[dict]:
+    import nodes
+    rv = _rv()
+    files = {
+        "an RGBA PNG with a gradient alpha": rv._rgba_png(),
+        "an RGB PNG (no alpha)": rv._rgb_png(),
+        "an LA PNG": rv._la_png(),
+        "a palette PNG with a transparent index": rv._palette_png(),
+        "an RGB PNG with a tRNS colour key": rv._rgb_trns_png(),
+        "a greyscale PNG with a tRNS colour key": rv._grey_trns_png(),
+        "a JPEG with EXIF orientation 6": rv._jpeg(6),
+        "a JPEG with EXIF orientation 1": rv._jpeg(1),
+        "a greyscale PNG": rv._grey_png(),
+        "a two-frame GIF": rv._two_frame_gif(),
+        "an RGB PNG with an ICC profile": rv._icc_png(),
+        "a two-frame animated PNG": rv._apng(),
+    }
+    out = []
+    for i, (label, data) in enumerate(files.items()):
+        name = _put(f"li_{i}.{'gif' if 'GIF' in label else 'jpg' if 'JPEG' in label else 'png'}", data)
+        image, mask = nodes.LoadImage().load_image(name)
+        out.append({"name": label, "image_name": name, "file": rv.b64(data), "image": _image8(image), "mask": _mask16(mask)})
+    return out
+
+
+def pil_luma_cases() -> list[list[int]]:
+    import numpy as np
+    from PIL import Image as PILImage
+    rgb = np.random.default_rng(20260926).integers(0, 256, size=(256, 3), dtype=np.uint8)
+    rgb[:4] = [[0, 0, 0], [255, 255, 255], [255, 0, 0], [1, 2, 3]]
+    luma = np.array(PILImage.fromarray(rgb.reshape(1, 256, 3), "RGB").convert("L")).reshape(256)
+    return [[int(r), int(g), int(b), int(v)] for (r, g, b), v in zip(rgb, luma)]
+
+
 def main() -> None:
     data: dict = {}
     if os.path.exists(OUT):
@@ -185,6 +351,11 @@ def main() -> None:
     data["moodboard"] = moodboard_cases()
     data["text"] = text_cases()
     data["wired_text"] = wired_text_cases()
+    data["scene3d"] = scene3d_cases()
+    data["text_on_path"] = text_on_path_cases()
+    data["text_mask"] = text_mask_cases()
+    data["load_image"] = load_image_cases()
+    data["pil_luma"] = pil_luma_cases()
     with open(OUT, "w", encoding="utf-8") as f:
         json.dump(dict(sorted(data.items())), f, indent=2, ensure_ascii=False)
         f.write("\n")

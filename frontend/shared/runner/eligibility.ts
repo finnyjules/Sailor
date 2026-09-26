@@ -92,8 +92,9 @@ export interface RunnerNodeRule {
    */
   noJsonList?: Readonly<Record<string, string>>
   /**
-   * Inputs that, when wired, must carry a picture: output 0 of a class in
-   * IMAGE_OUTPUT_CLASSES, followed back through Gates. A video (a Video card,
+   * Inputs that, when wired, must carry a picture: a picture slot of a class
+   * in PICTURE_OUTPUTS, or output 0 of one in IMAGE_OUTPUT_CLASSES, followed
+   * back through Gates. A video (a Video card,
    * a video generator) wired in is left to ComfyUI.
    */
   imageInputs?: readonly string[]
@@ -106,6 +107,12 @@ export interface RunnerNodeRule {
   frameLimits?: FrameLimits
   /** A check of the node's own inputs the runner needs to pass before it takes the node (INPUT_CHECKS). */
   inputCheck?: keyof typeof INPUT_CHECKS
+  /**
+   * A second family that also switches the class on, lifting some of the
+   * row's limits while it is on (R1.3: with `cards` on, LoadImage may feed
+   * anything, not only Frames). With it off, the row is exactly as before.
+   */
+  open?: { family: RunnerFamily; lifts: readonly ('feedsOnly')[] }
 }
 
 /**
@@ -115,7 +122,18 @@ export interface RunnerNodeRule {
 export const INPUT_CHECKS = {
   // The Moodboard's reading is the plain text the moodboard window writes (spec ruling 3).
   'moodboard-reading': (inputs: Record<string, unknown>): boolean => moodboardReadingIsPlain(inputs.reading_json),
+  // A bake card's `params` (Text on path, Text mask) reads the same in JSON.parse
+  // as in Python's json.loads: text only Python reads (NaN, Infinity) is left to the engine.
+  'bake-params': (inputs: Record<string, unknown>): boolean => bakeParamsReadable(inputs.params),
 } as const
+
+/** Whether JSON.parse reads `params` as json.loads does (both read it, or both fail on it). */
+function bakeParamsReadable(v: unknown): boolean {
+  if (typeof v !== 'string' || !v) return true
+  try { JSON.parse(v) }
+  catch { return !/NaN|Infinity/.test(v) }
+  return true
+}
 
 /** A node class's newer model and the family that switches it on (RunnerNodeRule.upgrade). */
 export interface ClassUpgrade {
@@ -231,6 +249,18 @@ export const IMAGE_OUTPUT_CLASSES: ReadonlySet<string> = new Set([
   'RemoveObjectNode', 'TextEditNode', 'RecolorObjectNode', 'SwapBackgroundNode', 'SwapProductNode', 'PersonSwap',
   'GenerateFromReferencesNode', 'RotateCameraNode', 'ProductShotNode', 'RestyleFromImageNode',
 ])
+
+/**
+ * Classes whose picture outputs are other slots than output 0 alone, or that
+ * are pictures only on some slots (R1.3): 3D Studio's three passes, the Text
+ * cards' image (their slot 1 is a mask). A class listed here is read from this
+ * table; any other from IMAGE_OUTPUT_CLASSES (slot 0).
+ */
+export const PICTURE_OUTPUTS: Readonly<Record<string, readonly number[]>> = {
+  Scene3DStudio: [0, 1, 2],
+  TextOnPath: [0],
+  TextMask: [0],
+}
 
 /** The most Frame copies (every layer's cloner, summed) the runner renders; more goes to ComfyUI. */
 export const MAX_FRAME_COPIES = 256
@@ -451,6 +481,11 @@ export const RUNNER_NODE_RULES: Readonly<Record<string, RunnerNodeRule>> = {
       ...Array.from({ length: COMPOSITOR_MAX_LAYERS }, (_, i) => [`layer${i + 1}_mask`, LOAD_IMAGE_MASK] as const),
       ['overlay_mask', LOAD_IMAGE_MASK] as const,
     ]),
+    // LoadImage's MASK is declared a mask (R1.3): the mask inputs take it (linkSources still insist on a LoadImage).
+    valueInputs: Object.fromEntries([
+      ...Array.from({ length: COMPOSITOR_MAX_LAYERS }, (_, i) => [`layer${i + 1}_mask`, ['mask'] as const] as const),
+      ['overlay_mask', ['mask'] as const] as const,
+    ]),
     noJsonList: { motion_params: 'rendered' },
     imageInputs: [...Array.from({ length: COMPOSITOR_MAX_LAYERS }, (_, i) => `layer${i + 1}`), 'overlay'],
     frameLimits: {
@@ -461,11 +496,13 @@ export const RUNNER_NODE_RULES: Readonly<Record<string, RunnerNodeRule>> = {
     },
   },
   // The LoadImage the Frame editor injects at submit for baked text/shape
-  // layers and masks (VueNodeCanvas injectCompositorOverlays). Taken only
-  // when it feeds Frames: anywhere else its RGB-only picture would differ
-  // from the file the runner hands a provider.
+  // layers and masks (VueNodeCanvas injectCompositorOverlays). With `frame`
+  // alone, taken only when it feeds Frames. With `cards` on (R1.3) it may feed
+  // anything: it runs as a card whose picture is Python's RGB picture, not
+  // the file (server/runner/cards/loadImage.ts).
   LoadImage: {
     family: 'frame',
+    open: { family: 'cards', lifts: ['feedsOnly'] },
     local: 'source',
     mustNotLink: ['image', 'upload'],
     feedsOnly: ['Compositor'],
@@ -538,6 +575,16 @@ export const RUNNER_NODE_RULES: Readonly<Record<string, RunnerNodeRule>> = {
   },
   // 3D model: hands on the address wired in (Sailor's own copy, spec ruling 1).
   Model3D: { family: 'cards', local: 'source', valueInputs: { glb_url: ['glb', 'text'] } },
+  // ── cards (step 3, R1.3): the bake-replay cards (server/runner/cards/bakeReplay.ts) ──
+  // Each hands on the file its studio baked into the node's settings.
+  Scene3DStudio: {
+    family: 'cards', local: 'source',
+    valueInputs: { glb_url: ['text', 'glb'] },
+    widgets: { scene_state: { type: 'STRING' }, beauty_image: { type: 'STRING' }, depth_image: { type: 'STRING' }, normal_image: { type: 'STRING' } },
+  },
+  TextOnPath: { family: 'cards', local: 'source', widgets: { params: { type: 'STRING', required: true } }, inputCheck: 'bake-params' },
+  // With a source wired: R1.4.
+  TextMask: { family: 'cards', local: 'source', mustNotLink: ['source'], widgets: { params: { type: 'STRING', required: true } }, inputCheck: 'bake-params' },
 }
 
 /** The Primitive cards (comfy_extras/nodes_primitive.py): each hands on its value (family `cards`). */
@@ -556,6 +603,9 @@ export const SWITCHED_CLASSES: Readonly<Record<string, RunnerFamily>> = {
   Text: 'cards',
   Moodboard: 'cards',
   Model3D: 'cards',
+  Scene3DStudio: 'cards',
+  TextOnPath: 'cards',
+  TextMask: 'cards',
 }
 
 /**
@@ -687,7 +737,8 @@ export function nodeRuleAllows(
     }
   }
   const upgraded = !!rule.upgrade && families.has(rule.upgrade.family)
-  if (!upgraded && (!family || !families.has(family))) return false
+  const opened = !!rule.open && families.has(rule.open.family)
+  if (!upgraded && !opened && (!family || !families.has(family))) return false
   if (need.some(name => !isLink(inputs[name]))) return false
   if ((rule.mustNotLink ?? []).some(name => isLink(inputs[name]) && !rule.valueInputs?.[name])) return false
   if ((rule.offWidgets ?? []).some(name => isLink(inputs[name]) || pyTruthy(inputs[name]))) return false
@@ -751,15 +802,16 @@ function withinFrameLimits(inputs: Record<string, unknown>, lim: FrameLimits, ho
   return true
 }
 
-/** Whether a wire carries a picture: output 0 of an image class, followed back through Gates. */
+/** Whether a wire carries a picture: a picture slot (PICTURE_OUTPUTS, else output 0 of an image class), followed back through Gates. */
 function carriesImage(prompt: ApiPrompt, link: [string, number], depth = 0): boolean {
   const from = prompt[link[0]]
-  if (!from || link[1] !== 0 || depth > 64) return false
+  if (!from || depth > 64) return false
   if (from.class_type === 'ComfyGateNode') {
     const d = from.inputs?.data_in
-    return isLink(d) && carriesImage(prompt, d, depth + 1)
+    return link[1] === 0 && isLink(d) && carriesImage(prompt, d, depth + 1)
   }
-  return IMAGE_OUTPUT_CLASSES.has(from.class_type)
+  if (Object.prototype.hasOwnProperty.call(PICTURE_OUTPUTS, from.class_type)) return PICTURE_OUTPUTS[from.class_type]!.includes(link[1])
+  return link[1] === 0 && IMAGE_OUTPUT_CLASSES.has(from.class_type)
 }
 
 /** One of ComfyUI's validation errors (execution.py validate_inputs), in its own shape. */
@@ -848,10 +900,12 @@ function hasJsonList(v: unknown, key: string): boolean {
 }
 
 /** The checks a rule makes across the prompt: who reads this node, and where its wires come from. */
-function graphRuleAllows(prompt: ApiPrompt, id: string, rule: RunnerNodeRule): boolean {
+function graphRuleAllows(prompt: ApiPrompt, id: string, rule: RunnerNodeRule, families: ReadonlySet<RunnerFamily>): boolean {
   const notLinked = rule.outputsNotLinked ?? []
   const slotReaders = rule.outputReaders
-  if (notLinked.length || slotReaders || rule.feedsOnly || rule.needsReader) {
+  const opened = !!rule.open && families.has(rule.open.family)
+  const feedsOnly = opened && rule.open!.lifts.includes('feedsOnly') ? undefined : rule.feedsOnly
+  if (notLinked.length || slotReaders || feedsOnly || rule.needsReader) {
     let readers = 0
     for (const node of Object.values(prompt)) {
       for (const l of linksOf(node)) {
@@ -860,7 +914,7 @@ function graphRuleAllows(prompt: ApiPrompt, id: string, rule: RunnerNodeRule): b
         if (notLinked.includes(l.slot)) return false
         const only = slotReaders && Object.prototype.hasOwnProperty.call(slotReaders, l.slot) ? slotReaders[l.slot] : undefined
         if (only && !only.some(([cls, input]) => cls === node.class_type && input === l.input)) return false
-        if (rule.feedsOnly && !rule.feedsOnly.includes(node.class_type)) return false
+        if (feedsOnly && !feedsOnly.includes(node.class_type)) return false
       }
     }
     if (rule.needsReader && !readers) return false
@@ -926,7 +980,7 @@ export function runnerTakesNode(prompt: ApiPrompt, id: string, families: Readonl
   if (!n) return false
   const inputs = n.inputs ?? {}
   const rule = families.size ? RUNNER_NODE_RULES[n.class_type] : undefined
-  const byRule = !!rule && nodeRuleAllows(n.class_type, rule, inputs, families, opts) && graphRuleAllows(prompt, id, rule)
+  const byRule = !!rule && nodeRuleAllows(n.class_type, rule, inputs, families, opts) && graphRuleAllows(prompt, id, rule, families)
   if (!RUNNER_NODE_TYPES.has(n.class_type) && !byRule) return false
   if (n.class_type === 'GenerateImageNode') {
     if (!IMAGE_IDS.has(String(inputs.model)) && !byRule) return false

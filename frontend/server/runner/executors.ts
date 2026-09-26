@@ -100,6 +100,8 @@ import { isSync3LipSync, lipSyncSyncMode } from '#shared/runner/lipSync'
 import { backupInputProblem, checkRequest, seedanceReferenceProblem } from './requestRules'
 import type { OutputFile, RunnerProvider, RunnerValue } from './types'
 import { textCardUi } from './cards/text'
+import { planScene3D, planTextMask, planTextOnPath } from './cards/bakeReplay'
+import { planLoadImageCard } from './cards/loadImage'
 import type { KeptExt } from './keptBytes'
 import { filesOf } from './values'
 import { OUTPUT_KINDS } from '#shared/runner/values'
@@ -845,13 +847,12 @@ async function planNodeRequest(ctx: PlanContext): Promise<NodePlan> {
     case 'Compositor':
       return planCompositor(ctx)
 
-    // The Frame editor's injected LoadImage: its file, handed to the Frame
-    // (which reads the picture, or its alpha as the mask, by the wire's slot).
-    case 'LoadImage': {
-      const f = parseInputFileRef(inputs.image)
-      if (!f) throw new Error('There is no picture to load')
-      return { kind: 'pass', files: [f], ui: null }
-    }
+    // LoadImage: feeding only Frames with cards off, the Frame editor's
+    // injected file handed on as before (the Frame reads the picture, or its
+    // alpha as the mask, by the wire's slot); otherwise a card (R1.3) whose
+    // picture and mask are Python's.
+    case 'LoadImage':
+      return planLoadImageCard(ctx)
 
     // ── cards (step 3, R0.4): the Primitive cards hand on their value ──
     case 'PrimitiveString':
@@ -865,6 +866,11 @@ async function planNodeRequest(ctx: PlanContext): Promise<NodePlan> {
     case 'Text': return staticDerive(ctx, textCardUi)
     case 'Moodboard': return staticDerive(ctx)
     case 'Model3D': return staticDerive(ctx, textCardUi)
+
+    // ── cards (step 3, R1.3): the bake-replay cards hand on their studio's bake ──
+    case 'Scene3DStudio': return planScene3D(ctx)
+    case 'TextOnPath': return planTextOnPath(ctx)
+    case 'TextMask': return planTextMask(ctx)
 
     case GATE_CLASS: {
       // A value (not files) reaching a Gate is handed on when it is open or

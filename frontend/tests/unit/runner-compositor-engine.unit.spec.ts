@@ -104,11 +104,18 @@ describe('eligibility: family frame', () => {
     ['a missing required widget', (() => { const p = frameFlow(); delete p['3']!.inputs.layer9_rotation; return p })(), '3'],
     ['a wired widget', { ...frameFlow({ layer1_x: ['1', 0] }) }, '3'],
     ['a mask from an Image card', { ...frameFlow({ layer2_mask: ['1', 1] }) }, '3'],
-    ['a LoadImage feeding something else', { ...frameFlow(), 5: { class_type: 'DevelopImageNode', inputs: { input_image: ['2', 0] } } }, '2'],
   ]
   it.each(refused)('%s → ComfyUI', (_l, p, badId) => {
     expect(isRunnerEligible(p, ALL)).toBe(false)
     expect(runnerTakesNode(p, badId, ALL)).toBe(false)
+  })
+
+  it('a LoadImage feeding something else → ComfyUI, unless cards is on (R1.3: then it runs as a card)', () => {
+    const p = { ...frameFlow(), 5: { class_type: 'DevelopImageNode', inputs: { input_image: ['2', 0] } } }
+    const noCards = new Set(RUNNER_FAMILIES.filter(f => f !== 'cards'))
+    expect(isRunnerEligible(p, noCards)).toBe(false)
+    expect(runnerTakesNode(p, '2', noCards)).toBe(false)
+    expect(runnerTakesNode(p, '2', ALL)).toBe(true)
   })
 
   it('refuses a workflow reading the video output, or the protect_mask anywhere but Blend scene’s keep_subject', () => {
