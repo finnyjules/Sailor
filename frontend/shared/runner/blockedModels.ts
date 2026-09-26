@@ -153,7 +153,8 @@ export function blockedModelRefusal(
   }
   const switchedOn = !!entry?.family && families.has(entry.family) && runnerTakesClass(use.classType)
   // Switched on, with no other node to blame: the node itself is set up in a
-  // way the runner doesn't take (a Blend scene's keep_subject wired, Task F11).
+  // way the runner doesn't take (a Blend scene's keep_subject wired from
+  // anything but a Frame's protect_mask, Tasks F11 and F11b).
   return {
     title: `“${opts.title}” uses ${label}, which only runs in Sailor`,
     description: switchedOn ? opts.engineReason ?? NOT_TAKEN_AS_SET_UP_REASON : SWITCH_OFF_REASON,

@@ -2,16 +2,22 @@
  * The Compositor node as a runner plan: find each wired picture's file and
  * how Python would have decoded it (by the node it came from), then render
  * locally. Eligibility (shared/runner/eligibility.ts, family `frame`) has
- * already refused everything this does not do: baked motion, a read
- * protect_mask or video output, a mask not from a LoadImage, invalid widgets.
+ * already refused everything this does not do: baked motion, the video
+ * output read, the protect_mask read by anything but Blend scene's
+ * keep_subject, a mask not from a LoadImage, invalid widgets.
+ *
+ * When a node reads the protect_mask (Task F11b), the render makes it too,
+ * as a 16-bit greyscale PNG (keep.ts); the engine saves it beside the
+ * composite as the node's second output.
  */
-import { GATE_CLASS, isLink, type ApiLink, type ApiPrompt } from '#shared/runner/graph'
+import { GATE_CLASS, isLink, linksOf, type ApiLink, type ApiPrompt } from '#shared/runner/graph'
 import { HOSTED_MAX_FRAME_ARTBOARD_PIXELS, PROVIDER_TYPES } from '#shared/runner/eligibility'
 import { actionPassThrough } from '../generators/actions'
 import { parseInputFileRef } from '../inputs'
 import type { NodePlan, PlanContext } from '../executors'
 import type { OutputFile } from '../types'
 import { decodeRaw, decodeRawMask, pngFromPreview8, type PictureSource } from './decode'
+import { maskPngFromScanlines } from './keep'
 import { MAX_LAYERS, type Loader } from './render'
 import { renderFrameInWorker } from './worker'
 
@@ -74,6 +80,7 @@ export function planCompositor(ctx: PlanContext): NodePlan {
   const masks = Array.from({ length: MAX_LAYERS }, (_, i) => mask(`layer${i + 1}_mask`))
   const overlay = picture('overlay')
   const overlayMask = mask('overlay_mask')
+  const protect = protectMaskRead(ctx.prompt, ctx.nodeId)
 
   return {
     kind: 'local',
@@ -100,11 +107,19 @@ export function planCompositor(ctx: PlanContext): NodePlan {
         masks: masks.map(loader),
         overlay: loader(overlay),
         overlayMask: loader(overlayMask),
-      }, { signal, maxCanvasPixels: ctx.hosted ? HOSTED_MAX_FRAME_ARTBOARD_PIXELS : undefined })
-      // Only the PNG encode (sharp) runs on this thread.
-      return pngFromPreview8(out.px, out.w, out.h)
+      }, { signal, maxCanvasPixels: ctx.hosted ? HOSTED_MAX_FRAME_ARTBOARD_PIXELS : undefined, protect })
+      // Only the PNG encodes (sharp, zlib) run on this thread.
+      const image = await pngFromPreview8(out.px, out.w, out.h)
+      if (!protect) return { image }
+      if (!out.mask) throw new Error('The Frame’s kept region was not made')
+      return { image, protectMask: await maskPngFromScanlines(out.mask, out.w, out.h) }
     },
     // save_live_preview's ui.
     uiFor: files => ({ images: files, animated: [false] }),
   }
+}
+
+/** Whether any node of the prompt reads this Frame's protect_mask (output 1). */
+export function protectMaskRead(prompt: ApiPrompt, nodeId: string): boolean {
+  return Object.values(prompt).some(n => linksOf(n).some(l => l.from === nodeId && l.slot === 1))
 }

@@ -216,7 +216,9 @@ describe('eligibility follows the family switch', () => {
     expect(RUNNER_NODE_RULES.BlendSceneNode!.models).toEqual({
       'Flux Kontext Pro': 'fal-edit', 'Flux 2 Pro': 'fal-edit', 'Nano Banana': 'nano-actions', 'Nano Banana 2': FAMILY,
     })
-    expect(RUNNER_NODE_RULES.BlendSceneNode!.mustNotLink).toEqual(['keep_subject', 'prompt'])
+    // keep_subject is taken from a Frame's protect_mask only (Task F11b, runner-blend-keep.unit.spec.ts).
+    expect(RUNNER_NODE_RULES.BlendSceneNode!.mustNotLink).toEqual(['prompt', 'keep_feather'])
+    expect(RUNNER_NODE_RULES.BlendSceneNode!.linkSources).toEqual({ keep_subject: [['Compositor', 1]] })
   })
 
   it('off (no families, or every other family): not taken', () => {
@@ -225,7 +227,7 @@ describe('eligibility follows the family switch', () => {
     expect(isRunnerEligible(take, ALL_BUT)).toBe(false)
   })
 
-  it('on: taken; only with its picture linked; never with keep_subject or the prompt wired', () => {
+  it('on: taken; only with its picture linked; never with the prompt wired, or keep_subject from anything but a Frame', () => {
     expect(isRunnerEligible(take, ON)).toBe(true)
     expect(isRunnerEligible(take, ALL)).toBe(true)
     const noPicture = blend()

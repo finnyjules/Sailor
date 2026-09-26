@@ -1,7 +1,9 @@
 /**
  * The Frame's pixel work, off the server's main thread: one worker thread per
  * process, one composite at a time (a queue), created on first use and
- * unref'd so it never keeps the process alive.
+ * unref'd so it never keeps the process alive. Blend scene's kept subject
+ * (Task F11b, keep.ts) runs on the same worker, in the same queue, under the
+ * same watchdog.
  *
  * The main thread only decodes (sharp, on libvips' own threads) and encodes
  * the PNG. Everything that touches pixels one by one runs in the worker:
@@ -22,7 +24,7 @@
  * and fails plainly; the next render starts a fresh one.
  */
 import { Worker } from 'node:worker_threads'
-import { compositorCore, type Picture } from './plane'
+import { compositorCore, type Picture, type RawPicture } from './plane'
 import { composeFrame, type FrameBackend, type FrameLoaders } from './render'
 
 /**
@@ -47,11 +49,20 @@ parentPort.on('message', (m) => {
     else if (m.op === 'paint') core.paint(cv, m.image, m.mask, m.blend, m.copies, m.protect, () => Atomics.load(stop, 0) === 1)
     else if (m.op === 'overlay') core.overlay(cv, m.image, m.mask)
     else if (m.op === 'finish') {
-      const r = core.finish(cv, false)
+      const r = core.finish(cv, !!m.protect)
       cv = null
       const px = core.toPreview8(r.image)
       value = { w: r.image.w, h: r.image.h, px }
       transfer = [px.buffer]
+      if (r.protect) {
+        value.mask = core.mask16Scanlines(r.protect)
+        transfer.push(value.mask.buffer)
+      }
+    }
+    else if (m.op === 'keep') {
+      const mask = core.maskFromScanlines(m.mask, m.mw, m.mh)
+      value = core.keepSubject(m.base, m.edited, mask, m.feather, () => Atomics.load(stop, 0) === 1)
+      transfer = [value.px.buffer]
     }
     else if (m.op === 'drop') cv = null
     parentPort.postMessage({ id: m.id, value }, transfer)
@@ -68,9 +79,14 @@ parentPort.on('message', (m) => {
 /** The longest one Frame may render before its worker is stopped. */
 export const FRAME_RENDER_TIMEOUT_MS = 120_000
 export const FRAME_TIMEOUT_MESSAGE = 'The Frame took longer than 2 minutes to render, so it was stopped'
+/** The same limit for Blend scene's kept subject (the same worker and queue). */
+export const KEEP_TIMEOUT_MESSAGE = 'Keeping the subject exact took longer than 2 minutes, so it was stopped'
 
-/** What the worker hands back: save_live_preview's 8-bit RGB pixels. */
-export interface Preview8 { w: number; h: number; px: Uint8Array }
+/**
+ * What the worker hands back: save_live_preview's 8-bit RGB pixels, and when
+ * asked, the protect_mask as a 16-bit PNG's scanlines (plane.ts mask16Scanlines).
+ */
+export interface Preview8 { w: number; h: number; px: Uint8Array; mask?: Uint8Array }
 
 interface Pending { resolve(v: unknown): void; reject(e: Error): void }
 interface Thread { worker: Worker; stop: Int32Array; pending: Map<number, Pending>; seq: number; dead: string | null }
@@ -122,36 +138,29 @@ function call(t: Thread, msg: Record<string, unknown>, buffers: ArrayBuffer[]): 
   })
 }
 
-function workerBackend(t: Thread): FrameBackend<Preview8> {
+function workerBackend(t: Thread, protect: boolean): FrameBackend<Preview8> {
   return {
     async begin(ch, cw) { await call(t, { op: 'begin', ch, cw }, []) },
-    async paint(image, mask, blend, copies, protect) {
+    async paint(image, mask, blend, copies, protectLayer) {
       const img = handOver(image)
       const m = handOver(mask)
-      await call(t, { op: 'paint', image: img.picture, mask: m.picture, blend, copies, protect }, [...img.buffers, ...m.buffers])
+      await call(t, { op: 'paint', image: img.picture, mask: m.picture, blend, copies, protect: protectLayer }, [...img.buffers, ...m.buffers])
     },
     async overlay(image, mask) {
       const img = handOver(image)
       const m = handOver(mask)
       await call(t, { op: 'overlay', image: img.picture, mask: m.picture }, [...img.buffers, ...m.buffers])
     },
-    async finish() { return await call(t, { op: 'finish' }, []) as Preview8 },
+    async finish() { return await call(t, { op: 'finish', protect }, []) as Preview8 },
   }
 }
 
-export interface WorkerRenderOptions {
-  signal?: AbortSignal
-  /** The largest canvas (hosted: 4096²). */
-  maxCanvasPixels?: number
-}
-
 /**
- * `composeFrame` with the pixel work on the worker thread, waiting its turn
- * behind any other Frame. No protect_mask (the runner never reads it).
+ * One job on the worker, waiting its turn behind any other (one at a time),
+ * with Stop (the shared flag) and the watchdog, whose message is `timeout`.
  */
-export function renderFrameInWorker(inputs: Record<string, unknown>, loaders: FrameLoaders, opts: WorkerRenderOptions = {}): Promise<Preview8> {
-  const { signal } = opts
-  const run = async (): Promise<Preview8> => {
+function onWorker<T>(signal: AbortSignal | undefined, timeout: string, job: (t: Thread) => Promise<T>): Promise<T> {
+  const run = async (): Promise<T> => {
     if (signal?.aborted) throw new Error('Stopped')
     const t = thread()
     Atomics.store(t.stop, 0, 0)
@@ -160,12 +169,12 @@ export function renderFrameInWorker(inputs: Record<string, unknown>, loaders: Fr
     let timer: ReturnType<typeof setTimeout> | undefined
     const watchdog = new Promise<never>((_, reject) => {
       timer = setTimeout(() => {
-        t.dead = FRAME_TIMEOUT_MESSAGE
+        t.dead = timeout
         void t.worker.terminate()
-        reject(new Error(FRAME_TIMEOUT_MESSAGE))
+        reject(new Error(timeout))
       }, g.__sailorFrameTimeoutMs ?? FRAME_RENDER_TIMEOUT_MS)
     })
-    const work = composeFrame(inputs, loaders, workerBackend(t), { protect: false, signal, maxCanvasPixels: opts.maxCanvasPixels })
+    const work = job(t)
     work.catch(() => {})
     try {
       return await Promise.race([work, watchdog])
@@ -184,6 +193,52 @@ export function renderFrameInWorker(inputs: Record<string, unknown>, loaders: Fr
   const next = prev.catch(() => {}).then(run)
   g.__sailorFrameQueue = next.catch(() => {})
   return next
+}
+
+export interface WorkerRenderOptions {
+  signal?: AbortSignal
+  /** The largest canvas (hosted: 4096²). */
+  maxCanvasPixels?: number
+  /**
+   * Also make the protect_mask (a node reads the Frame's second output: Blend
+   * scene's keep_subject, Task F11b). Off, the worker never builds it.
+   */
+  protect?: boolean
+}
+
+/**
+ * `composeFrame` with the pixel work on the worker thread, waiting its turn
+ * behind any other Frame. The protect_mask only when asked.
+ */
+export function renderFrameInWorker(inputs: Record<string, unknown>, loaders: FrameLoaders, opts: WorkerRenderOptions = {}): Promise<Preview8> {
+  const protect = !!opts.protect
+  return onWorker(opts.signal, FRAME_TIMEOUT_MESSAGE, t =>
+    composeFrame(inputs, loaders, workerBackend(t, protect), { protect, signal: opts.signal, maxCanvasPixels: opts.maxCanvasPixels }))
+}
+
+/** Blend scene's kept subject: what the worker's `keep` takes (plane.ts keepSubject). */
+export interface KeepJob {
+  /** The picture Blend was given, as its source decodes it. */
+  base: RawPicture
+  /** The provider's answer, as the download decodes it (source provider). */
+  edited: RawPicture
+  /** The kept region: a 16-bit greyscale PNG's inflated scanlines, mw × mh. */
+  mask: Uint8Array
+  mw: number
+  mh: number
+  feather: number
+}
+
+/** `keepSubject` on the worker, in the Frame's queue: the 8-bit RGB result. */
+export function keepSubjectInWorker(job: KeepJob, opts: { signal?: AbortSignal } = {}): Promise<Preview8> {
+  return onWorker(opts.signal, KEEP_TIMEOUT_MESSAGE, async (t) => {
+    const base = handOver(job.base)
+    const edited = handOver(job.edited)
+    const mask = job.mask.byteOffset === 0 && job.mask.byteLength === job.mask.buffer.byteLength ? job.mask : job.mask.slice()
+    return await call(t, {
+      op: 'keep', base: base.picture, edited: edited.picture, mask, mw: job.mw, mh: job.mh, feather: job.feather,
+    }, [...base.buffers, ...edited.buffers, mask.buffer as ArrayBuffer]) as Preview8
+  })
 }
 
 /** Tests only: the worker thread, if one is running. */

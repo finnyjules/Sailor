@@ -557,9 +557,171 @@ export function compositorCore() {
     return px
   }
 
+  // ── Blend scene's keep_subject (BlendSceneNode.execute, comfy_api_nodes/nodes_replicate.py) ──
+
+  /** Python's round() on a double: halves go to the even neighbour. */
+  function pyRound(x: number): number {
+    const r = Math.round(x)
+    return Math.abs(x % 1) === 0.5 && r % 2 !== 0 ? r - 1 : r
+  }
+
+  /** `2 * int(round(3.0 * keep_feather)) + 1`, or 0 when keep_feather > 0 is false (no blur). */
+  function keepKernelSize(feather: number): number {
+    return feather > 0 ? 2 * pyRound(3 * feather) + 1 : 0
+  }
+
+  /**
+   * torchvision's `_get_gaussian_kernel1d` in float32: x = linspace(−h, h, k)
+   * (whole numbers here), pdf = exp(−0.5·(x/σ)²), divided by its sum.
+   */
+  function gaussianKernel(k: number, sigma: number): Float32Array {
+    const half = (k - 1) / 2
+    const s = f(sigma)
+    const pdf = new Float32Array(k)
+    let sum = 0
+    for (let i = 0; i < k; i++) {
+      const q = f((i - half) / s)
+      pdf[i] = f(Math.exp(f(-0.5 * f(q * q))))
+      sum = f(sum + pdf[i]!)
+    }
+    for (let i = 0; i < k; i++) pdf[i] = f(pdf[i]! / sum)
+    return pdf
+  }
+
+  /**
+   * `gaussian_blur(m, kernel_size=k, sigma=σ)` on one channel: reflect padding
+   * of k // 2 on every side (torch refuses a padding not smaller than the side),
+   * then the k × k kernel (the outer product of the 1-D one). Summed in double
+   * as two passes and rounded once: within float32 rounding of torch's conv2d,
+   * whose summation order is its own.
+   */
+  function blurReflect(m: Plane, k: number, sigma: number, stopped?: () => boolean): Plane {
+    const { h, w } = m
+    const pad = k >> 1
+    if (pad >= h || pad >= w) throw new Error('KEEP_PAD')
+    const kern = gaussianKernel(k, sigma)
+    const reflect = (i: number, n: number) => (i < 0 ? -i : i >= n ? 2 * (n - 1) - i : i)
+    const src = m.data
+    const rows = new Float64Array(h * w)
+    for (let y = 0; y < h; y++) {
+      if (stopped && stopped()) throw new Error('Stopped')
+      const r = y * w
+      for (let x = 0; x < w; x++) {
+        let acc = 0
+        for (let t = 0; t < k; t++) acc += kern[t]! * src[r + reflect(x + t - pad, w)]!
+        rows[r + x] = acc
+      }
+    }
+    const out = plane(1, h, w)
+    for (let y = 0; y < h; y++) {
+      if (stopped && stopped()) throw new Error('Stopped')
+      for (let x = 0; x < w; x++) {
+        let acc = 0
+        for (let t = 0; t < k; t++) acc += kern[t]! * rows[reflect(y + t - pad, h) * w + x]!
+        out.data[y * w + x] = f(acc)
+      }
+    }
+    return out
+  }
+
+  /**
+   * Blend scene's keep_subject, after the provider call: the answer (`edited`,
+   * as the download decodes it: RGBA) and the mask brought to the picture's
+   * size (bilinear, align_corners=False), the mask softened by `feather`
+   * (torchvision's gaussian_blur), clamped, then
+   * `base[..., :3] · m + edited[..., :3] · (1 − m)`, clamped, as the 8-bit
+   * RGB save_generation_output writes. `KEEP_PAD` when the blur's edge padding
+   * is not smaller than the picture (torch refuses it).
+   */
+  function keepSubject(basePicture: Plane | RawPicture, editedPicture: Plane | RawPicture, mask: Plane, feather: number, stopped?: () => boolean): { w: number; h: number; px: Uint8Array } {
+    const base = toTensor(basePicture)
+    const H = base.h
+    const W = base.w
+    let ed = toTensor(editedPicture)
+    if (ed.h !== H || ed.w !== W) ed = resizeBilinear(ed, H, W)
+    let m = mask.h === H && mask.w === W ? mask : resizeBilinear(mask, H, W)
+    const k = keepKernelSize(feather)
+    if (k > 0) m = blurReflect(m, k, feather, stopped)
+    const n = H * W
+    const out = plane(3, H, W)
+    const md = m.data
+    for (let c = 0; c < 3; c++) {
+      if (stopped && stopped()) throw new Error('Stopped')
+      const b = channel(base, c)
+      const e = channel(ed, c)
+      const o = channel(out, c)
+      for (let i = 0; i < n; i++) {
+        const mv = md[i]! < 0 ? 0 : md[i]! > 1 ? 1 : md[i]!
+        const v = f(f(b[i]! * mv) + f(e[i]! * f(1 - mv)))
+        o[i] = v < 0 ? 0 : v > 1 ? 1 : v
+      }
+    }
+    return { w: W, h: H, px: toPreview8(out) }
+  }
+
+  /**
+   * A one-channel [0, 1] plane as a 16-bit greyscale PNG's scanlines: each row
+   * a filter byte (0, none) and big-endian round(x·65535). The PNG around them
+   * (zlib, chunks) is made off the pixel loop (keep.ts).
+   */
+  function mask16Scanlines(p: Plane): Uint8Array {
+    const { h, w } = p
+    const stride = 1 + 2 * w
+    const out = new Uint8Array(stride * h)
+    for (let y = 0; y < h; y++) {
+      const row = y * stride
+      for (let x = 0; x < w; x++) {
+        const v = p.data[y * w + x]!
+        const u = Math.floor((v < 0 ? 0 : v > 1 ? 1 : v) * 65535 + 0.5)
+        out[row + 1 + 2 * x] = u >> 8
+        out[row + 2 + 2 * x] = u & 255
+      }
+    }
+    return out
+  }
+
+  /** A 16-bit greyscale PNG's inflated scanlines (any of PNG's five filters) → the plane, x = u / 65535 in float32. */
+  function maskFromScanlines(bytes: Uint8Array, w: number, h: number): Plane {
+    const bpp = 2
+    const len = 2 * w
+    const stride = 1 + len
+    if (bytes.length < stride * h) throw new Error('The kept region could not be read')
+    const prev = new Uint8Array(len)
+    const cur = new Uint8Array(len)
+    const out = plane(1, h, w)
+    for (let y = 0; y < h; y++) {
+      const row = y * stride
+      const ft = bytes[row]!
+      for (let i = 0; i < len; i++) {
+        const x = bytes[row + 1 + i]!
+        const a = i >= bpp ? cur[i - bpp]! : 0
+        const b = prev[i]!
+        const c = i >= bpp ? prev[i - bpp]! : 0
+        let v: number
+        if (ft === 0) v = x
+        else if (ft === 1) v = x + a
+        else if (ft === 2) v = x + b
+        else if (ft === 3) v = x + ((a + b) >> 1)
+        else if (ft === 4) {
+          const p = a + b - c
+          const pa = Math.abs(p - a)
+          const pb = Math.abs(p - b)
+          const pc = Math.abs(p - c)
+          v = x + (pa <= pb && pa <= pc ? a : pb <= pc ? b : c)
+        }
+        else throw new Error('The kept region could not be read')
+        cur[i] = v & 255
+      }
+      for (let x = 0; x < w; x++) out.data[y * w + x] = f(((cur[2 * x]! << 8) | cur[2 * x + 1]!) / 65535)
+      prev.set(cur)
+    }
+    return out
+  }
+
   return {
     plane, channel, channels, repeat3, concat, resizeBilinear, resizeTo, fitToCanvas, transform, blendValue,
     drawable, prepLayer, createCanvas, paint, overlay, finish, toTensor, toPreview8,
+    pyRound, keepKernelSize, gaussianKernel, blurReflect, keepSubject, mask16Scanlines, maskFromScanlines,
   }
 }
 

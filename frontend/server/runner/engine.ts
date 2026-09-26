@@ -23,6 +23,7 @@ import { FalError, isProviderNetworkError, percentFromLogs, type FalStatus, type
 import { ReplicateError } from './replicateQueue'
 import { cancelAndConfirm, type CancelCheck } from './cancelCheck'
 import { planNode, type ProviderBackup } from './executors'
+import type { KeepStep } from './compositor/keep'
 import type { BackupSettings } from './config'
 import { linkedFileCheck, measuredInputProblem, requestProblems } from './requestRules'
 import { isReusable, requestFingerprint } from './fingerprint'
@@ -263,6 +264,26 @@ function storableWorkflow(workflow: unknown): unknown {
   try { text = JSON.stringify(workflow) }
   catch { return null }
   return text != null && text.length <= MAX_STORED_WORKFLOW_CHARS ? workflow : null
+}
+
+/**
+ * The files a link reads: the node's outputs, or for a later output slot of a
+ * node that keeps one (the Frame's protect_mask, `slotOutputs`) that slot's
+ * files. A node with no per-slot files hands every slot its outputs (a
+ * LoadImage's MASK is read from its one file).
+ */
+function filesAt(take: TakeRecord): (link: [string, number]) => OutputFile[] {
+  return ([from, slot]) => {
+    const n = take.nodes[from]
+    if (!n) return []
+    if (slot > 0 && n.slotOutputs) return n.slotOutputs[slot] ?? []
+    return n.outputs
+  }
+}
+
+/** A request's fingerprint body: with a kept subject, its mask and edge too (the saved result depends on them). */
+function withKeep(payload: Record<string, unknown>, keep: KeepStep | undefined): Record<string, unknown> {
+  return keep ? { ...payload, sailor_keep_subject: keep.fingerprint } : payload
 }
 
 function plainError(e: unknown): string {
@@ -828,7 +849,7 @@ export function createEngine(deps: EngineDeps) {
       // size-priced node: FLUX.2 edit, Rotate camera on 2511;
       // requestRules.ts) fails the node here, before the hand-off or the
       // call; its hold is released.
-      const inputPixels = resuming ? undefined : await measuredInputPixels(take.prompt[id]!, ([from]) => take.nodes[from]?.outputs ?? [], readOnce, families)
+      const inputPixels = resuming ? undefined : await measuredInputPixels(take.prompt[id]!, filesAt(take), readOnce, families)
       const tooLarge = measuredInputProblem(take.prompt[id]!.class_type, inputPixels, families, take.prompt[id]!.inputs ?? {})
       if (tooLarge) throw new Error(tooLarge)
       // A file its model refuses (Product shot on Bria: over 12 MB, or not
@@ -836,7 +857,7 @@ export function createEngine(deps: EngineDeps) {
       // before the hand-off; one too large by its size on disk is refused
       // before it is read. Reads nothing for any other node. The size read
       // goes to planNode, which drops a backup that can't take it.
-      const fileCheck = resuming ? { problem: null } as Awaited<ReturnType<typeof linkedFileCheck>> : await linkedFileCheck(take.prompt[id]!, ([from]) => take.nodes[from]?.outputs ?? [], readOnce, families, f => deps.results.size?.(f) ?? Promise.resolve(null))
+      const fileCheck = resuming ? { problem: null } as Awaited<ReturnType<typeof linkedFileCheck>> : await linkedFileCheck(take.prompt[id]!, filesAt(take), readOnce, families, f => deps.results.size?.(f) ?? Promise.resolve(null))
       if (fileCheck.problem) throw new Error(fileCheck.problem)
       // A media node (./nodeMedia.ts: sync-3 lip-sync, F22; Topaz video
       // upscale, F23): its files read and measured again now, before the
@@ -844,7 +865,7 @@ export function createEngine(deps: EngineDeps) {
       // released); what is measured is what it is planned and charged on.
       let inputSeconds: InputSeconds | undefined
       const media = resuming ? null : await nodeMediaCheck(take.prompt, id, {
-        read: readOnce, size: f => deps.results.size?.(f) ?? Promise.resolve(null), strict: deps.hosted(), filesFrom: ([from]) => take.nodes[from]?.outputs ?? [],
+        read: readOnce, size: f => deps.results.size?.(f) ?? Promise.resolve(null), strict: deps.hosted(), filesFrom: filesAt(take),
       })
       if (media) {
         if (media.problem !== null) throw new Error(media.problem)
@@ -867,7 +888,7 @@ export function createEngine(deps: EngineDeps) {
       const planWith = (toUrl: (f: OutputFile) => Promise<string>) => planNode({
         prompt: take.prompt,
         nodeId: id,
-        filesFrom: ([from]) => take.nodes[from]?.outputs ?? [],
+        filesFrom: filesAt(take),
         toUrl,
         gateOpen: take.openGates.includes(id),
         readFile: readOnce,
@@ -903,10 +924,15 @@ export function createEngine(deps: EngineDeps) {
       reads.clear()
       // Rendered here (the Frame): no provider, no charge, not an asset.
       if (plan.kind === 'local') {
-        const bytes = await plan.render(signal)
+        const made = await plan.render(signal)
         if (signal.aborted) throw new RunStopped()
-        const file = await deps.results.saveLivePreview(bytes, { nodeId: id, userId: run.userId })
+        const file = await deps.results.saveLivePreview(made.image, { nodeId: id, userId: run.userId })
         rec.outputs = [file]
+        // The Frame's protect_mask, when a node reads it (Blend scene's
+        // keep_subject, Task F11b): its second output, saved beside it.
+        rec.slotOutputs = made.protectMask
+          ? { 1: [await deps.results.saveLivePreview(made.protectMask, { nodeId: `${id}_protect_mask`, userId: run.userId })] }
+          : {}
         rec.status = 'done'
         rec.endedAt = deps.now()
         await persist(run)
@@ -946,7 +972,7 @@ export function createEngine(deps: EngineDeps) {
       const fp = resuming
         ? rec.fingerprint
         : isReusable(plan.payload)
-          ? requestFingerprint(fingerprintEndpoint(plan.provider, plan.endpoint), plan.payload, u => deps.handoff.hashOf(u))
+          ? requestFingerprint(fingerprintEndpoint(plan.provider, plan.endpoint), withKeep(plan.payload, plan.keep), u => deps.handoff.hashOf(u))
           : null
       rec.fingerprint = fp
 
@@ -1000,13 +1026,25 @@ export function createEngine(deps: EngineDeps) {
       const urls = clientFor(providerOf(rec.request!)).outputUrls(result, plan.media)
       if (!urls.length) throw new Error(plan.media === 'image' ? 'The provider returned no image' : 'The provider returned no video')
       const files: OutputFile[] = []
-      for (const url of urls) {
-        const { bytes, contentType } = await deps.download(url)
-        const file = await deps.results.save(bytes, {
-          userId: run.userId, prefix: plan.prefix, ext: extFor(contentType, url, plan.media === 'image' ? 'png' : 'mp4'),
-        })
+      if (plan.keep) {
+        // Blend scene's kept subject (Task F11b): Python reads the first
+        // answer only, lays it under the kept region, and saves that as a PNG.
+        const { bytes } = await deps.download(urls[0]!)
+        const png = await plan.keep.apply(bytes, signal)
+        if (signal.aborted) throw new RunStopped()
+        const file = await deps.results.save(png, { userId: run.userId, prefix: plan.prefix, ext: 'png' })
         await deps.metering.addOutput(run.userId, stageKey, file)
         files.push(file)
+      }
+      else {
+        for (const url of urls) {
+          const { bytes, contentType } = await deps.download(url)
+          const file = await deps.results.save(bytes, {
+            userId: run.userId, prefix: plan.prefix, ext: extFor(contentType, url, plan.media === 'image' ? 'png' : 'mp4'),
+          })
+          await deps.metering.addOutput(run.userId, stageKey, file)
+          files.push(file)
+        }
       }
       rec.outputs = files
       rec.status = 'done'
@@ -1015,7 +1053,7 @@ export function createEngine(deps: EngineDeps) {
       if (fp) await deps.store.putResult(userKey, fp, files).catch(e => deps.reportError(e, { site: 'runner.putResult' }))
       // Made on the backup: also filed under the backup's own request, so the same settings reuse it either way.
       if (rec.switchedFrom && rec.payload && isReusable(rec.payload)) {
-        const backupFp = requestFingerprint(fingerprintEndpoint(rec.servedBy, rec.endpoint!), rec.payload, u => deps.handoff.hashOf(u))
+        const backupFp = requestFingerprint(fingerprintEndpoint(rec.servedBy, rec.endpoint!), withKeep(rec.payload, plan.keep), u => deps.handoff.hashOf(u))
         if (backupFp !== fp) await deps.store.putResult(userKey, backupFp, files).catch(e => deps.reportError(e, { site: 'runner.putResult' }))
       }
       // The result is made, kept and billed: a failed save here must not turn

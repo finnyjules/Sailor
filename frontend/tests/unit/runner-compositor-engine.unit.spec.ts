@@ -111,13 +111,17 @@ describe('eligibility: family frame', () => {
     expect(runnerTakesNode(p, badId, ALL)).toBe(false)
   })
 
-  it('refuses a workflow reading the protect_mask or the video output', () => {
-    const mask = { ...frameFlow(), 5: { class_type: 'BlendSceneNode', inputs: { model: 'Flux 2 Pro', image: ['3', 0], keep_subject: ['3', 1] } } }
+  it('refuses a workflow reading the video output, or the protect_mask anywhere but Blend scene’s keep_subject', () => {
     const video = { ...frameFlow(), 5: { class_type: 'Video', inputs: { file: '', export: false, filename_prefix: 'v', source: ['3', 2] } } }
-    for (const p of [mask, video]) {
+    const gate = { ...frameFlow(), 5: { class_type: 'ComfyGateNode', inputs: { data_in: ['3', 1], bypass: false } } }
+    for (const p of [video, gate]) {
       expect(runnerTakesNode(p, '3', ALL)).toBe(false)
       expect(isRunnerEligible(p, ALL)).toBe(false)
     }
+    // Task F11b: Blend scene's keep_subject reads it (runner-blend-keep.unit.spec.ts).
+    const keep = { ...frameFlow(), 5: { class_type: 'BlendSceneNode', inputs: { model: 'Flux 2 Pro', image: ['3', 0], keep_subject: ['3', 1] } } }
+    expect(runnerTakesNode(keep, '3', ALL)).toBe(true)
+    expect(isRunnerEligible(keep, ALL)).toBe(true)
   })
 
   it('takes a Frame on a generated picture, and one read by a provider', () => {

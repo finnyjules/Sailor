@@ -78,6 +78,12 @@ export interface NodeRecord {
   fingerprint: string | null
   request: PendingRequest | null
   outputs: OutputFile[]
+  /**
+   * The files of an output after the first, by output slot, for a node that
+   * makes more than one (the Frame's protect_mask, slot 1, Task F11b). Absent:
+   * every slot reads `outputs`.
+   */
+  slotOutputs?: Record<number, OutputFile[]>
   /** True when an earlier identical result was handed back (charged nothing). */
   reused: boolean
   /** This node's price in credits (0 for result cards and Gates). */

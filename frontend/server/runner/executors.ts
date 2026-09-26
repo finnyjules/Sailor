@@ -65,7 +65,8 @@ import {
   checkStyleSource, isNanoBananaRestyle, isRestyleModel, isUnreadableFile, restyleCall, structureStrengthOf,
 } from './generators/restyle'
 import { moodboardFiles, parseInputFileRef } from './inputs'
-import { planCompositor } from './compositor/plan'
+import { pictureSourceOf, planCompositor } from './compositor/plan'
+import { planKeepSubject, type KeepStep } from './compositor/keep'
 import {
   FAL_FIRST_VIDEO, IMAGE_BACKUPS, NANO_BANANA_2_REPLICATE, VIDEO_BACKUPS,
   flux2ProEditOnReplicate, nanoBananaOnFal, nanoBananaOnReplicate, type ServiceCall,
@@ -106,12 +107,25 @@ import type { OutputFile, RunnerProvider } from './types'
  */
 export interface ProviderBackup { provider: RunnerProvider; endpoint: string; payload: Record<string, unknown> }
 
+/** A local render's files: the picture, and the Frame's protect_mask when a node reads it (a 16-bit greyscale PNG). */
+export interface LocalRender { image: Uint8Array; protectMask?: Uint8Array }
+
 export type NodePlan =
-  | { kind: 'provider'; provider: RunnerProvider; endpoint: string; payload: Record<string, unknown>; media: 'image' | 'video'; prefix: string; uiFor(files: OutputFile[]): Record<string, unknown> | null; backup?: ProviderBackup }
+  | {
+    kind: 'provider'; provider: RunnerProvider; endpoint: string; payload: Record<string, unknown>; media: 'image' | 'video'; prefix: string
+    uiFor(files: OutputFile[]): Record<string, unknown> | null
+    backup?: ProviderBackup
+    /**
+     * Blend scene with keep_subject wired (Task F11b): the answer is laid
+     * under the kept region here, after the call, and that PNG is what the
+     * node saves. The request (and its price) is the same as without it.
+     */
+    keep?: KeepStep
+  }
   | { kind: 'pass'; files: OutputFile[]; ui: Record<string, unknown> | null }
   | { kind: 'pause'; files: OutputFile[] }
   /** Computed on this server: `render` makes the PNG, saved as a temp live preview (as Python's save_live_preview). */
-  | { kind: 'local'; render(signal?: AbortSignal): Promise<Uint8Array>; uiFor(files: OutputFile[]): Record<string, unknown> | null }
+  | { kind: 'local'; render(signal?: AbortSignal): Promise<LocalRender>; uiFor(files: OutputFile[]): Record<string, unknown> | null }
 
 export interface PlanContext {
   prompt: ApiPrompt
@@ -215,6 +229,37 @@ async function planNodeRequest(ctx: PlanContext): Promise<NodePlan> {
     const f = linkedFirstFile(passName)
     if (!f) throw new Error('There is no picture to pass on')
     return { kind: 'pass', files: [f], ui: { images: [f] } }
+  }
+
+  // Blend scene's request (its case below adds the keep_subject step).
+  const planBlendScene = async (): Promise<NodePlan> => {
+    const image = await pictureUrl('image', 'There is no picture to blend')
+    const model = String(inputs.model)
+    const prompt = pyStrip(asText(inputs.prompt)) || blendInstruction({
+      unifyLighting: flag('unify_lighting', true),
+      contactShadows: flag('contact_shadows', true),
+      matchCameraLook: flag('match_camera_look', true),
+      preserveIdentity: flag('preserve_identity', true),
+    })
+    const outputFormat = asText(inputs.output_format) || 'png'
+    const seed = asInt(inputs.seed, 0)
+    if (model === 'Flux 2 Pro') {
+      return flux2Edit(falFlux2Edit({ imageUrls: [image], prompt, outputFormat, seed }), 'blend_scene')
+    }
+    if (model === 'Flux Kontext Pro') {
+      // Kontext here gets only output_format and seed: no aspect, safety or upsampling.
+      return still(FLUX_KONTEXT_APP, falKontext({ imageUrl: image, prompt, outputFormat, seed }), 'blend_scene')
+    }
+    if (model === 'Nano Banana') {
+      // Replicate google/nano-banana with only {prompt, image_input} (nano-actions).
+      return still(NANO_BANANA_SLUG, { prompt, image_input: [image] }, 'blend_scene', 'replicate')
+    }
+    if (model === 'Nano Banana 2') {
+      // The nano actions' call (family nano-banana-2-blend): Replicate at 1K, fal the backup.
+      // Replicate's Nano Banana 2 takes no seed; the format is png or jpg, as the node's widget.
+      return nanoAction(prompt, [image], 'blend_scene', outputFormat === 'jpg' || outputFormat === 'jpeg' ? 'jpg' : 'png')
+    }
+    throw new Error(`The runner cannot blend with ${model}`)
   }
 
   switch (node.class_type) {
@@ -528,34 +573,23 @@ async function planNodeRequest(ctx: PlanContext): Promise<NodePlan> {
 
     // BlendSceneNode (:2940), the two Flux modes, the first Nano Banana, and
     // Nano Banana 2 (runner-only, F11). A custom prompt wins over the toggles.
+    // keep_subject wired (a Frame's protect_mask, Task F11b): every model's
+    // answer goes under the kept region after the call (compositor/keep.ts).
+    // Its checks come first, so a kept subject the runner can't finish is
+    // refused before the picture is handed off or anything is sent.
     case 'BlendSceneNode': {
-      const image = await pictureUrl('image', 'There is no picture to blend')
-      const model = String(inputs.model)
-      const prompt = pyStrip(asText(inputs.prompt)) || blendInstruction({
-        unifyLighting: flag('unify_lighting', true),
-        contactShadows: flag('contact_shadows', true),
-        matchCameraLook: flag('match_camera_look', true),
-        preserveIdentity: flag('preserve_identity', true),
-      })
-      const outputFormat = asText(inputs.output_format) || 'png'
-      const seed = asInt(inputs.seed, 0)
-      if (model === 'Flux 2 Pro') {
-        return flux2Edit(falFlux2Edit({ imageUrls: [image], prompt, outputFormat, seed }), 'blend_scene')
+      let keep: KeepStep | undefined
+      if (isLink(inputs.keep_subject)) {
+        const link = inputs.image
+        if (!isLink(link)) throw new Error('There is no picture to blend')
+        let source
+        try { source = pictureSourceOf(ctx.prompt, link) }
+        catch { throw new Error('The runner cannot keep the subject of this picture') }
+        keep = await planKeepSubject(ctx, inputs, { link, source })
       }
-      if (model === 'Flux Kontext Pro') {
-        // Kontext here gets only output_format and seed: no aspect, safety or upsampling.
-        return still(FLUX_KONTEXT_APP, falKontext({ imageUrl: image, prompt, outputFormat, seed }), 'blend_scene')
-      }
-      if (model === 'Nano Banana') {
-        // Replicate google/nano-banana with only {prompt, image_input} (nano-actions).
-        return still(NANO_BANANA_SLUG, { prompt, image_input: [image] }, 'blend_scene', 'replicate')
-      }
-      if (model === 'Nano Banana 2') {
-        // The nano actions' call (family nano-banana-2-blend): Replicate at 1K, fal the backup.
-        // Replicate's Nano Banana 2 takes no seed; the format is png or jpg, as the node's widget.
-        return nanoAction(prompt, [image], 'blend_scene', outputFormat === 'jpg' || outputFormat === 'jpeg' ? 'jpg' : 'png')
-      }
-      throw new Error(`The runner cannot blend with ${model}`)
+      const plan = await planBlendScene()
+      if (keep && plan.kind === 'provider') plan.keep = keep
+      return plan
     }
 
     // ── nano-actions family (comfy_extras/nodes_edit_actions.py, nodes_swap_*.py, nodes_person_swap.py) ──

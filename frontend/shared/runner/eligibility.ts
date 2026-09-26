@@ -22,8 +22,7 @@ export interface RunnerModelRule {
  * How a family switches a node class on. Pure data. A row gives either the
  * family for the whole class, or (for a class with a `model` widget) the
  * family per model; a model not listed is not taken. `mustLink` inputs must
- * be wired; `mustNotLink` inputs must not be (e.g. BlendScene `keep_subject`,
- * Restyle `style_in`).
+ * be wired; `mustNotLink` inputs must not be (e.g. Restyle `style_in`).
  */
 export interface RunnerNodeRule {
   family?: RunnerFamily
@@ -58,8 +57,13 @@ export interface RunnerNodeRule {
    * for that refusal. Off, the class is exactly as `family` makes it.
    */
   upgrade?: ClassUpgrade
-  /** Output slots no node in the prompt may read (e.g. the Compositor's protect_mask and video). */
+  /** Output slots no node in the prompt may read (e.g. the Compositor's video). */
   outputsNotLinked?: readonly number[]
+  /**
+   * Output slots only these (class, input) pairs may read (the Compositor's
+   * protect_mask: Blend scene's keep_subject, Task F11b).
+   */
+  outputReaders?: Readonly<Record<number, readonly (readonly [string, string])[]>>
   /** Every node reading this one must be one of these classes. */
   feedsOnly?: readonly string[]
   /** At least one node of the prompt must read this one (a source with no reader is left to ComfyUI). */
@@ -244,12 +248,17 @@ export const RUNNER_NODE_RULES: Readonly<Record<string, RunnerNodeRule>> = {
   RelightNode: { family: 'fal-edit', mustLink: ['image'], mustNotLink: ['light', 'instructions'] },
   // The Nano Banana mode is Replicate (nano-actions, Task B5). Nano Banana 2
   // (model line-up F11) is runner-only, its own family: the nano actions'
-  // call. A linked keep_subject needs a local mask composite after the call,
-  // which the runner does not do.
+  // call. A linked keep_subject (Task F11b) is taken for every model when it
+  // is a Frame's protect_mask: the runner makes that mask and lays the answer
+  // under it after the call (server/runner/compositor/keep.ts). Any other
+  // mask source stays with ComfyUI. keep_feather is read then, so it must
+  // not be wired, and must pass ComfyUI's own validation.
   BlendSceneNode: {
     models: { 'Flux Kontext Pro': 'fal-edit', 'Flux 2 Pro': 'fal-edit', 'Nano Banana': 'nano-actions', 'Nano Banana 2': 'nano-banana-2-blend' },
     mustLink: ['image'],
-    mustNotLink: ['keep_subject', 'prompt'],
+    mustNotLink: ['prompt', 'keep_feather'],
+    linkSources: { keep_subject: [['Compositor', 1]] },
+    widgets: { keep_feather: { type: 'FLOAT', min: 0, max: 30 } },
   },
   // ── nano-actions (Task B5): google/nano-banana-2 on Replicate ──
   // The main picture must be linked: without it Python makes a blank, which
@@ -381,8 +390,10 @@ export const RUNNER_NODE_RULES: Readonly<Record<string, RunnerNodeRule>> = {
     mustNotLink: ['prompt', 'model_options'],
   },
   // ── frame: the Frame render, computed by the runner (server/runner/compositor/) ──
-  // The static composite only. Left to ComfyUI: baked motion (a frame batch
-  // and a real video), anything reading the protect_mask or video outputs,
+  // The static composite, and its protect_mask when Blend scene's
+  // keep_subject reads it (Task F11b). Left to ComfyUI: baked motion (a frame
+  // batch and a real video), anything else reading the protect_mask, anything
+  // reading the video output,
   // a mask from anything but a LoadImage, and layer 1 unwired. layer1 is a
   // REQUIRED input (`_layer_inputs(1, optional=False)`), and ComfyUI's
   // validate_inputs reports any missing required input, wire or widget, as
@@ -399,7 +410,8 @@ export const RUNNER_NODE_RULES: Readonly<Record<string, RunnerNodeRule>> = {
     mustLink: ['layer1'],
     required: ['layer1'],
     widgets: compositorWidgets(),
-    outputsNotLinked: [1, 2],
+    outputsNotLinked: [2],
+    outputReaders: { 1: [['BlendSceneNode', 'keep_subject']] },
     linkSources: Object.fromEntries([
       ...Array.from({ length: COMPOSITOR_MAX_LAYERS }, (_, i) => [`layer${i + 1}_mask`, LOAD_IMAGE_MASK] as const),
       ['overlay_mask', LOAD_IMAGE_MASK] as const,
@@ -773,13 +785,16 @@ function hasJsonList(v: unknown, key: string): boolean {
 /** The checks a rule makes across the prompt: who reads this node, and where its wires come from. */
 function graphRuleAllows(prompt: ApiPrompt, id: string, rule: RunnerNodeRule): boolean {
   const notLinked = rule.outputsNotLinked ?? []
-  if (notLinked.length || rule.feedsOnly || rule.needsReader) {
+  const slotReaders = rule.outputReaders
+  if (notLinked.length || slotReaders || rule.feedsOnly || rule.needsReader) {
     let readers = 0
     for (const node of Object.values(prompt)) {
       for (const l of linksOf(node)) {
         if (l.from !== id) continue
         readers++
         if (notLinked.includes(l.slot)) return false
+        const only = slotReaders && Object.prototype.hasOwnProperty.call(slotReaders, l.slot) ? slotReaders[l.slot] : undefined
+        if (only && !only.some(([cls, input]) => cls === node.class_type && input === l.input)) return false
         if (rule.feedsOnly && !rule.feedsOnly.includes(node.class_type)) return false
       }
     }
