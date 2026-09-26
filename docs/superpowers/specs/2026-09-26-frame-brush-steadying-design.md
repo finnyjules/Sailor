@@ -3,14 +3,14 @@
 Date: 2026-09-26 · Status: prototype approved by Julien ("that's great, just have these controls in the inspector when i'm in brush mode")
 Builds on: `2026-09-26-frame-brush-tips-design.md` (Part 1: tips, saved movement) and Parts 2–3
 Prototype: `docs/superpowers/specs/assets/2026-09-26-brush-steady-prototype.html` (https://claude.ai/artifact/DDtooPF759h2x2cy1S55Jp)
-Idea source: Procreate's StreamLine, Stabilisation, Motion filtering and QuickShape.
+Idea source: Procreate's Streamline, Stabilisation, Motion filtering and QuickShape.
 
 ## In plain words
 
 Two additions to the Frame brush, for a trackpad hand.
 
 1. **Steadying.** The brush is steadied before it paints. This applies to every tip (spray can, round, bristle), in Paint and Effect mode, including the eraser.
-   - **StreamLine:** the brush trails your finger a little and catches up, so curves come out smooth. When you lift, it quickly finishes the line to where you stopped.
+   - **Streamline:** the brush trails your finger a little and catches up, so curves come out smooth. When you lift, it quickly finishes the line to where you stopped.
    - **Stabilisation:** averages the path, so slow, careful strokes lose their wobble.
    - **Motion filtering:** removes small jitter without adding lag to fast strokes.
 2. **Hold to snap** (Round and Bristle only). Stop at the end of a stroke and keep holding.
@@ -28,13 +28,13 @@ The controls sit in the right-panel inspector in brush mode, under the tip's set
    - The saved record is unchanged (`TipStroke`, v 1). Replay stays deterministic, and live equals replay by construction.
    - Changing the steadying settings affects the next stroke only, like the tip settings.
 2. **Where it runs.** Steadying works on screen pixels, since it's about your hand, before conversion to Frame units. Snapping fits shapes in screen pixels too, then converts the shape's points. Both live in pure modules: `lib/brushTips/steady.ts` and `lib/brushTips/quickShape.ts`, ported from the prototype.
-   - The Frame's existing hold loop drives StreamLine's catch-up and the hold timer.
+   - The Frame's existing hold loop drives Streamline's catch-up and the hold timer.
    - On release, the catch-up runs for at most 350 ms, then the stroke commits. A spray stroke's drips then run as today.
 3. **One set of settings for all tips**, persisted in `sailor.brushTips.v1` under `steady`. Defaults are the prototype's:
 
    | Setting | Default |
    |---|---|
-   | StreamLine | 30% |
+   | Streamline | 30% |
    | Stabilisation | 15% |
    | Motion filtering | 40% |
    | Hold to snap | on |
@@ -42,7 +42,7 @@ The controls sit in the right-panel inspector in brush mode, under the tip's set
 
    Reset restores them.
 4. **Inspector.** A **Steadying** section in the brush inspector with:
-   - StreamLine, Stabilisation and Motion filtering (0–100%);
+   - Streamline, Stabilisation and Motion filtering (0–100%);
    - a Hold to snap switch;
    - Hold time (0.25–1.00 s, shown in seconds; hidden when Hold to snap is off);
    - Reset.
@@ -50,7 +50,7 @@ The controls sit in the right-panel inspector in brush mode, under the tip's set
    Explanations are tooltips, per the rule that panels show labels and values only. The prototype's "Steadying On/Off" and "Show my hand" were for comparing, and are not carried over.
 5. **Snapping replaces the live stroke's samples.**
    - `useBrushPaint` gains `replaceTipSamples(samples)`.
-   - The live-prefix cache in `coverage.ts` must not reuse a prefix built from the samples that were replaced. Its `usable()` check must see the change.
+   - No cache work is needed: the live prefix in `coverage.ts` excludes the live stroke, and live round/bristle strokes re-simulate from their samples every frame.
 6. **On-canvas feedback:**
    - the hold ring, shown after 150 ms still and filling up to the hold time;
    - the shape tag near the cursor ("Line", "Arc", "Ellipse", "Circle", "Shape"), shown while the snap is held and hidden on release.
@@ -72,7 +72,7 @@ The controls sit in the right-panel inspector in brush mode, under the tip's set
   - `replaceTipSamples`, and the live-prefix cache invalidating on replacement.
   - Persistence and reset.
 - **Browser (real mouse, running app):**
-  - a wobbly round stroke with StreamLine on is smoother than with it off;
+  - a wobbly round stroke with Streamline on is smoother than with it off;
   - a held line snaps and saves as a straight stroke;
   - a held loop becomes an ellipse; Shift gives a circle;
   - dragging while held resizes it;
