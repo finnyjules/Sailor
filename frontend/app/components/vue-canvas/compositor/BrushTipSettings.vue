@@ -31,10 +31,11 @@ function reset() {
   <div class="brush-tip-settings" data-testid="brush-tip-settings">
     <div class="header">Brush · {{ tipDef.label }}</div>
     <div v-for="st in tipDef.settings" :key="st.key" class="row">
-      <span class="lbl">{{ st.label }}</span>
+      <span class="lbl" :title="st.label">{{ st.label }}</span>
       <input
         type="range" min="0" :max="st.max * 100" step="5"
         :value="pct(st.key)"
+        :aria-label="st.label"
         @input="setPct(st.key, Number(($event.target as HTMLInputElement).value))"
       />
       <span class="val tabular-nums">{{ pct(st.key) }}%</span>
@@ -49,6 +50,8 @@ function reset() {
   display: flex;
   flex-direction: column;
   gap: 8px;
+  min-width: 0;
+  max-width: 100%;
 }
 .header {
   font-size: 11px;
@@ -59,20 +62,26 @@ function reset() {
   display: flex;
   align-items: center;
   gap: 8px;
+  min-width: 0;
+  max-width: 100%;
 }
 .lbl {
   width: 96px;
   flex: none;
   font-size: 10px;
   color: rgba(255, 255, 255, 0.4);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .row input[type='range'] {
   flex: 1;
+  min-width: 0;
   accent-color: #fff;
   cursor: pointer;
 }
 .val {
-  width: 36px;
+  width: 40px;
   flex: none;
   text-align: right;
   font-size: 10px;

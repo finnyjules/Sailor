@@ -32,55 +32,60 @@ function done() { emit('done') }
 <template>
   <div class="brush-toolbar" data-testid="brush-toolbar">
     <div class="tb" role="toolbar" aria-label="Brush">
-      <template v-if="!isMask">
+      <div class="row">
+        <template v-if="!isMask">
+          <button
+            v-for="id in TIP_IDS" :key="id"
+            class="tbtn" :data-testid="`brush-tip-${id}`"
+            :aria-pressed="brush.tip.value === id" :title="TIPS[id].label"
+            @click="selectTip(id)"
+          >{{ TIPS[id].label }}</button>
+          <span class="sep" />
+        </template>
         <button
-          v-for="id in TIP_IDS" :key="id"
-          class="tbtn" :data-testid="`brush-tip-${id}`"
-          :aria-pressed="brush.tip.value === id" :title="TIPS[id].label"
-          @click="selectTip(id)"
-        >{{ TIPS[id].label }}</button>
+          class="tbtn" data-testid="brush-mode-paint"
+          :aria-pressed="brush.mode.value === 'paint'" title="Paint"
+          @click="setMode('paint')"
+        >Paint</button>
+        <button
+          class="tbtn" data-testid="brush-mode-mask"
+          :aria-pressed="brush.mode.value === 'mask'" title="Mask"
+          @click="setMode('mask')"
+        >Mask</button>
         <span class="sep" />
-        <span class="lbl">Size</span>
-        <input
-          type="range" data-testid="brush-size"
-          :min="SIZE_MIN" :max="SIZE_MAX" step="1"
-          :value="currentTipSize"
-          @input="setTipSize(Number(($event.target as HTMLInputElement).value))"
-        />
-        <span class="val tabular-nums">{{ currentTipSize }}</span>
-        <span class="sep" />
-        <StudioColor :model-value="brush.color.value" @update:model-value="setColor" />
-      </template>
-      <template v-else>
-        <span class="lbl">Size</span>
-        <input
-          type="range" data-testid="brush-size"
-          min="2" max="240" step="1"
-          :value="brush.sizePx.value"
-          @input="setSizePx(Number(($event.target as HTMLInputElement).value))"
-        />
-        <span class="val tabular-nums">{{ brush.sizePx.value }}</span>
-      </template>
+        <button class="tbtn primary" data-testid="brush-done" @click="done()">Done</button>
+      </div>
 
-      <span class="sep" />
-      <button
-        class="tbtn" data-testid="brush-eraser"
-        :aria-pressed="brush.eraser.value" title="Eraser"
-        @click="toggleEraser()"
-      >Eraser</button>
-      <span class="sep" />
-      <button
-        class="tbtn" data-testid="brush-mode-paint"
-        :aria-pressed="brush.mode.value === 'paint'" title="Paint"
-        @click="setMode('paint')"
-      >Paint</button>
-      <button
-        class="tbtn" data-testid="brush-mode-mask"
-        :aria-pressed="brush.mode.value === 'mask'" title="Mask"
-        @click="setMode('mask')"
-      >Mask</button>
-      <span class="sep" />
-      <button class="tbtn primary" data-testid="brush-done" @click="done()">Done</button>
+      <div class="row">
+        <template v-if="!isMask">
+          <span class="lbl">Size</span>
+          <input
+            type="range" data-testid="brush-size"
+            :min="SIZE_MIN" :max="SIZE_MAX" step="1"
+            :value="currentTipSize"
+            @input="setTipSize(Number(($event.target as HTMLInputElement).value))"
+          />
+          <span class="val tabular-nums">{{ currentTipSize }}</span>
+          <span class="sep" />
+          <StudioColor :model-value="brush.color.value" @update:model-value="setColor" />
+        </template>
+        <template v-else>
+          <span class="lbl">Size</span>
+          <input
+            type="range" data-testid="brush-size"
+            min="2" max="240" step="1"
+            :value="brush.sizePx.value"
+            @input="setSizePx(Number(($event.target as HTMLInputElement).value))"
+          />
+          <span class="val tabular-nums">{{ brush.sizePx.value }}</span>
+        </template>
+        <span class="sep" />
+        <button
+          class="tbtn" data-testid="brush-eraser"
+          :aria-pressed="brush.eraser.value" title="Eraser"
+          @click="toggleEraser()"
+        >Eraser</button>
+      </div>
     </div>
 
     <div class="hint-wrap">
@@ -102,17 +107,25 @@ function done() { emit('done') }
 }
 .tb {
   display: flex;
-  flex-wrap: wrap;
+  flex-direction: column;
   min-width: 0;
-  align-items: center;
-  justify-content: center;
+  align-items: stretch;
   gap: 4px;
   padding: 6px;
   background: color-mix(in srgb, #1a1a1a 95%, transparent);
   border: 1px solid #2a2a2a;
   border-radius: 12px;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
-  max-width: 100%;
+  max-width: 380px;
+  width: max-content;
+}
+.tb .row {
+  display: flex;
+  flex-wrap: wrap;
+  min-width: 0;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
 }
 .tb .sep {
   width: 1px;
