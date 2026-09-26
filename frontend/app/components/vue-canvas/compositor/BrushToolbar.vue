@@ -202,7 +202,6 @@ input[type='range'] {
   cursor: pointer;
   padding: 0;
 }
-.swatch.colour { background: #3b82f6; }
 .swatch[aria-pressed='true'] { box-shadow: 0 0 0 2px #fff; }
 .swatch:hover { border-color: rgba(255, 255, 255, 0.5); }
 .hint-wrap { display: flex; max-width: 100%; }

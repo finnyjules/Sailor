@@ -250,7 +250,7 @@ export function planFrameExport(input: FrameExportInput): FramePlan {
 
   const still = !input.hasMotion && !input.animatedFill && clips.length === 0 && wiredClips.length === 0
   if (input.ownMotion ?? input.hasMotion) notices.push({ group: 'live', text: 'Everything you animated in the Motion tab' })
-  if (input.animatedFill) notices.push({ group: 'live', text: 'Moving shader fills' })
+  if (input.animatedFill) notices.push({ group: 'live', text: 'Moving shader fills and paint' })
   const duration = still ? 1 : loopSeconds(v, clips, wiredClips)
   // A clip whose played length does not divide the Frame's loop jumps at the wrap. Said in the
   // sheet (spec, "Time"), not hidden behind an elapsed-time counter that would break scrubbing.
