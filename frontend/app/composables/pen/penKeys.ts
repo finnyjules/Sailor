@@ -58,8 +58,12 @@ export interface PenKeyContext {
 }
 
 // single-letter tool keys — only with no modifier, and only for a tool the
-// host offers (a key for a tool it doesn't offer is left untouched)
-const TOOL_KEYS: Record<string, PenTool> = { t: 'trim', c: 'cut', d: 'dissolve' }
+// host offers (a key for a tool it doesn't offer is left untouched). The
+// toolbar's tooltip cards show the same letters (penTips.ts PEN_TIPS[tool].key).
+export const TOOL_KEYS: Record<string, PenTool> = {
+  v: 'select', p: 'path', b: 'curve', l: 'line', o: 'circle', n: 'point',
+  t: 'trim', c: 'cut', d: 'dissolve',
+}
 
 // Returns true when the key did something. usePen.ts's onKeydown reads that
 // for Escape / Enter: with nothing to cancel or finish, the key belongs to

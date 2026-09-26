@@ -305,7 +305,7 @@ test('curve: the toolbar offers Curve after Pen, with its own hint', async ({ pa
   const order = await page.locator('[data-tool]').evaluateAll(els => els.map(e => e.getAttribute('data-tool')))
   expect(order.slice(0, 3)).toEqual(['select', 'path', 'curve'])
   const btn = page.locator('[data-tool="curve"]')
-  await expect(btn).toHaveAttribute('title', 'Bézier curve — drag to pull out handles')
+  await expect(btn).toHaveAttribute('aria-label', 'Bézier curve')
   await btn.click()
   await expect(btn).toHaveAttribute('aria-pressed', 'true')
   expect(await page.evaluate(() => (window as any).__sketchDraw.tool)).toBe('curve')

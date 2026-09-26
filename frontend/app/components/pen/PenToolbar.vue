@@ -13,6 +13,9 @@ import { computed, type Component } from 'vue'
 import type { Pen, PenTool } from '~/composables/pen/usePen'
 import StudioButton from '~/components/vue-canvas/studio/StudioButton.vue'
 import PenValueRow from '~/components/pen/PenValueRow.vue'
+import PenTipCard from '~/components/pen/PenTipCard.vue'
+import { TooltipProvider } from '~/components/ui/tooltip'
+import { PEN_TIPS } from '~/composables/pen/penTips'
 import {
   MousePointer2, Spline, PenTool as PenNib, Minus, Circle, Dot,
   CircleDashed, Tag, Undo2, Redo2, Scissors, Slice, Bandage,
@@ -41,19 +44,21 @@ function done() {
 }
 
 // Tool row: Select, Pen (arcs), Curve (Bézier), Line, Circle, Point, then the
-// editing tools Trim, Cut and Dissolve. Pen and Curve add to the same path. Order and tooltip copy match the spec's
-// approved layout (sentence case, "Name — what it does").
-const ALL_TOOLS: { id: PenTool; icon: Component; label: string }[] = [
-  { id: 'select', icon: MousePointer2, label: 'Select — click a shape to select it, drag a point to move it' },
-  { id: 'path', icon: Spline, label: 'Pen — click to add a point, drag to bend it into an arc' },
-  { id: 'curve', icon: PenNib, label: 'Bézier curve — drag to pull out handles' },
-  { id: 'line', icon: Minus, label: 'Line — click two points to draw a line' },
-  { id: 'circle', icon: Circle, label: 'Circle — click the centre, then click again to set the size' },
-  { id: 'point', icon: Dot, label: 'Point — click to place a point' },
-  { id: 'trim', icon: Scissors, label: 'Trim — remove a piece between crossings' },
-  { id: 'cut', icon: Slice, label: 'Cut — add a point on a line or arc' },
-  { id: 'dissolve', icon: Bandage, label: 'Dissolve — merge two pieces that line up' },
+// editing tools Trim, Cut and Dissolve. Pen and Curve add to the same path.
+// Every button's name, key and caption live in penTips.ts (PEN_TIPS) and show
+// on its hover card (PenTipCard) — no native `title` tooltips here.
+const ALL_TOOLS: { id: PenTool; icon: Component }[] = [
+  { id: 'select', icon: MousePointer2 },
+  { id: 'path', icon: Spline },
+  { id: 'curve', icon: PenNib },
+  { id: 'line', icon: Minus },
+  { id: 'circle', icon: Circle },
+  { id: 'point', icon: Dot },
+  { id: 'trim', icon: Scissors },
+  { id: 'cut', icon: Slice },
+  { id: 'dissolve', icon: Bandage },
 ]
+const tipName = (id: string) => PEN_TIPS[id]?.name ?? id
 // only the tools this host offers (PenOptions.tools, resolved by usePen —
 // always includes Select, and openOnly already drops Circle there)
 const TOOLS = computed(() => ALL_TOOLS.filter(t => options.tools.includes(t.id)))
@@ -80,61 +85,84 @@ const isSelectIdle = computed(() => tool.value === 'select' && !hasAnySelection.
 </script>
 
 <template>
+  <!-- one provider for the whole toolbar: the first card after 350 ms of hover,
+       the next one at once while moving along the buttons (600 ms warm-up).
+       The cards are look-only (pointer-events: none), so no hoverable-content
+       grace area — it would hold the old card open and block the next one. -->
+  <TooltipProvider :delay-duration="350" :skip-delay-duration="600" disable-hoverable-content>
   <div class="pen-toolbar">
     <PenValueRow :pen="pen" />
     <div v-if="hasAnySelection" class="tb" role="toolbar" aria-label="Rules">
       <span class="count">{{ selectedCount }} selected</span>
-      <button v-for="v in rules" :key="v.kind" class="tbtn" :data-verb="v.kind" @click="applyWithValue(v)">{{ v.label }}</button>
+      <PenTipCard v-for="v in rules" :id="v.kind" :key="v.kind" :name="v.label">
+        <button class="tbtn" :data-verb="v.kind" :aria-label="v.label" @click="applyWithValue(v)">{{ v.label }}</button>
+      </PenTipCard>
       <span v-if="rules.length && hasEntitySelection" class="sep" />
       <template v-if="hasEntitySelection">
-        <button class="tbtn" data-verb="fix" @click="fixSelected()">Fix</button>
-        <button class="tbtn" data-verb="repeat" @click="repeatPrompt()">Repeat…</button>
-        <button class="tbtn" data-verb="mirror" @click="doMirror()">Mirror</button>
-        <button class="tbtn" data-verb="flip-h" @click="flip('h')">Flip horizontal</button>
-        <button class="tbtn" data-verb="flip-v" @click="flip('v')">Flip vertical</button>
-        <button class="tbtn" data-verb="construction" @click="makeConstruction()">Make guide</button>
+        <PenTipCard id="fix"><button class="tbtn" data-verb="fix" aria-label="Fix" @click="fixSelected()">Fix</button></PenTipCard>
+        <PenTipCard id="repeat"><button class="tbtn" data-verb="repeat" aria-label="Repeat…" @click="repeatPrompt()">Repeat…</button></PenTipCard>
+        <PenTipCard id="mirror"><button class="tbtn" data-verb="mirror" aria-label="Mirror" @click="doMirror()">Mirror</button></PenTipCard>
+        <PenTipCard id="flip-h"><button class="tbtn" data-verb="flip-h" aria-label="Flip horizontal" @click="flip('h')">Flip horizontal</button></PenTipCard>
+        <PenTipCard id="flip-v"><button class="tbtn" data-verb="flip-v" aria-label="Flip vertical" @click="flip('v')">Flip vertical</button></PenTipCard>
+        <PenTipCard id="construction"><button class="tbtn" data-verb="construction" aria-label="Make guide" @click="makeConstruction()">Make guide</button></PenTipCard>
         <span class="sep" />
-        <button class="tbtn danger" data-act="delete" @click="del()">Delete</button>
+        <PenTipCard id="delete"><button class="tbtn danger" data-act="delete" aria-label="Delete" @click="del()">Delete</button></PenTipCard>
       </template>
       <template v-else>
         <!-- segments only (Option-click): they can be deleted too -->
         <span v-if="rules.length" class="sep" />
-        <button class="tbtn danger" data-act="delete" @click="del()">Delete</button>
+        <PenTipCard id="delete"><button class="tbtn danger" data-act="delete" aria-label="Delete" @click="del()">Delete</button></PenTipCard>
       </template>
     </div>
 
     <div class="tb" role="toolbar" aria-label="Pen tools">
-      <button v-for="t in TOOLS" :key="t.id" class="tbtn icon" :data-tool="t.id"
-              :aria-pressed="tool === t.id" :title="t.label" :aria-label="t.label"
-              @click="selectTool(t.id)">
-        <component :is="t.icon" :size="16" />
-      </button>
+      <PenTipCard v-for="t in TOOLS" :id="t.id" :key="t.id">
+        <button class="tbtn icon" :data-tool="t.id"
+                :aria-pressed="tool === t.id" :aria-label="tipName(t.id)"
+                @click="selectTool(t.id)">
+          <component :is="t.icon" :size="16" />
+        </button>
+      </PenTipCard>
       <span class="sep" />
-      <button class="tbtn icon toggle" data-act="guide" :aria-pressed="guideMode"
-              title="Guide — new shapes shape the drawing but aren't drawn" aria-label="Guide"
-              @click="toggleGuideMode()">
-        <CircleDashed :size="16" />
-      </button>
-      <button class="tbtn icon toggle" data-act="labels" :aria-pressed="showLabels"
-              title="Labels — show rules and sizes on the drawing" aria-label="Labels"
-              @click="toggleShowLabels()">
-        <Tag :size="16" />
-      </button>
+      <PenTipCard id="guide">
+        <button class="tbtn icon toggle" data-act="guide" :aria-pressed="guideMode" aria-label="Guide"
+                @click="toggleGuideMode()">
+          <CircleDashed :size="16" />
+        </button>
+      </PenTipCard>
+      <PenTipCard id="labels">
+        <button class="tbtn icon toggle" data-act="labels" :aria-pressed="showLabels" aria-label="Labels"
+                @click="toggleShowLabels()">
+          <Tag :size="16" />
+        </button>
+      </PenTipCard>
       <span class="sep" />
-      <button class="tbtn icon" data-act="undo" :disabled="!canUndo()" title="Undo" aria-label="Undo" @click="undo()">
-        <Undo2 :size="16" />
-      </button>
-      <button class="tbtn icon" data-act="redo" :disabled="!canRedo()" title="Redo" aria-label="Redo" @click="redo()">
-        <Redo2 :size="16" />
-      </button>
+      <PenTipCard id="undo">
+        <button class="tbtn icon" data-act="undo" :disabled="!canUndo()" aria-label="Undo" @click="undo()">
+          <Undo2 :size="16" />
+        </button>
+      </PenTipCard>
+      <PenTipCard id="redo">
+        <button class="tbtn icon" data-act="redo" :disabled="!canRedo()" aria-label="Redo" @click="redo()">
+          <Redo2 :size="16" />
+        </button>
+      </PenTipCard>
       <template v-if="tool === 'path' || tool === 'curve'">
         <span class="sep" />
-        <button v-if="!options.openOnly" class="tbtn" data-act="close" title="Close the path back to its first point" @click="finishPath(true)">Close</button>
-        <button class="tbtn" data-act="finish" title="Finish the path as an open line" @click="finishPath(false)">Finish</button>
+        <PenTipCard v-if="!options.openOnly" id="close">
+          <button class="tbtn" data-act="close" aria-label="Close" @click="finishPath(true)">Close</button>
+        </PenTipCard>
+        <PenTipCard id="finish">
+          <button class="tbtn" data-act="finish" aria-label="Finish" @click="finishPath(false)">Finish</button>
+        </PenTipCard>
       </template>
       <span class="sep" />
-      <StudioButton variant="secondary" data-act="cancel" @click="emit('cancel')">Cancel</StudioButton>
-      <StudioButton variant="primary" data-act="done" @click="done()">Done</StudioButton>
+      <PenTipCard id="cancel">
+        <StudioButton variant="secondary" data-act="cancel" aria-label="Cancel" @click="emit('cancel')">Cancel</StudioButton>
+      </PenTipCard>
+      <PenTipCard id="done">
+        <StudioButton variant="primary" data-act="done" aria-label="Done" @click="done()">Done</StudioButton>
+      </PenTipCard>
     </div>
 
     <div class="hint-wrap">
@@ -146,6 +174,7 @@ const isSelectIdle = computed(() => tool.value === 'select' && !hasAnySelection.
       <div v-else class="hint">{{ TOOL_HINTS[tool] }}</div>
     </div>
   </div>
+  </TooltipProvider>
 </template>
 
 <style scoped>
