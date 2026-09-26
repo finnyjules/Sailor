@@ -21,8 +21,9 @@
  * channels and whether it is EXIF turned. A batch (several files) gives one
  * result per file, in order; a file listed more than once (Empty image's
  * batch) is worked on once. Pictures made here in float are kept as the 8-bit
- * PNG a hand-off sends (round(255·x), RGB or RGBA as the tensor); masks as the
- * runner keeps them (16-bit, ../pictures/mask.ts).
+ * PNG a hand-off sends (round(255·x), RGB or RGBA as the tensor), or, when
+ * only Save image / Preview image read it, as they write it (trunc(255·x),
+ * onlySavesRead); masks as the runner keeps them (16-bit, ../pictures/mask.ts).
  *
  * Fix round 1: the pixel work runs on the Frame's worker (../pixels/core.ts
  * through compositor/worker.ts pixelsInWorker: its queue, 2-minute watchdog
@@ -33,7 +34,7 @@
 import sharp from 'sharp'
 import type { DeriveIO, NodePlan, PlanContext } from '../executors'
 import type { OutputFile, RunnerValue } from '../types'
-import { isLink, type ApiLink } from '#shared/runner/graph'
+import { GATE_CLASS, isLink, linksOf, type ApiLink, type ApiPrompt } from '#shared/runner/graph'
 import { pyIntOf } from '#shared/runner/pyText'
 import { CARD_MAX_PIXELS } from '#shared/runner/eligibility'
 import { pictureSourceOf } from '../compositor/plan'
@@ -203,10 +204,37 @@ export function planImageToMask(ctx: PlanContext): NodePlan {
 
 // ── Text mask with a source ──────────────────────────────────────────────────
 
+/** The classes that write a picture as save_images does: trunc(f32(255·x)), not a hand-off's round (R1.5 follow-up). */
+const TRUNC_READERS: ReadonlySet<string> = new Set(['SaveImage', 'PreviewImage'])
+
+/**
+ * Whether everything that reads this output reads it the way save_images
+ * does: Save image and Preview image, followed on through what hands a
+ * picture on unchanged (an Image card fed by a wire, a Gate). A provider, a
+ * Frame or a utility among the readers (or no reader at all) keeps the
+ * hand-off's rounding.
+ */
+export function onlySavesRead(prompt: ApiPrompt, id: string, slot: number, depth = 0): boolean {
+  if (depth > 64) return false
+  let readers = 0
+  for (const [rid, node] of Object.entries(prompt)) {
+    for (const l of linksOf(node)) {
+      if (l.from !== id || l.slot !== slot) continue
+      readers++
+      if (TRUNC_READERS.has(node.class_type)) continue
+      const passes = (node.class_type === 'Image' && l.input === 'images') || (node.class_type === GATE_CLASS && l.input === 'data_in')
+      if (!passes || !onlySavesRead(prompt, rid, 0, depth + 1)) return false
+    }
+  }
+  return readers > 0
+}
+
 export function planTextMaskWithSource(ctx: PlanContext): NodePlan {
   const inputs = ctx.prompt[ctx.nodeId]!.inputs ?? {}
   const render = textMaskRender(inputs.params)
   const w = wired(ctx, 'source')
+  // Kept as the pixels its readers write: Python's Save image truncates the float (R1.5 follow-up).
+  const trunc = onlySavesRead(ctx.prompt, ctx.nodeId, 0)
   return {
     kind: 'derive',
     async derive(io) {
@@ -220,7 +248,7 @@ export function planTextMaskWithSource(ctx: PlanContext): NodePlan {
         const scanlines = await worker.clipBegin(luma.l, luma.w, luma.h, size.w, size.h)
         const mask = await io.keep(await maskPngFromScanlines(scanlines, size.w, size.h), 'png')
         const images = await perFile(io, w, async (file) => {
-          const out = await worker.clip(await decoded(io, w.source, file))
+          const out = await worker.clip(await decoded(io, w.source, file), trunc)
           return io.keep(await handOffPng(out), 'png')
         })
         return { values: { 0: { kind: 'files', files: images }, 1: { kind: 'mask', files: [mask] } }, ui: null }

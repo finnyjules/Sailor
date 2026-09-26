@@ -84,7 +84,7 @@ parentPort.on('message', (m) => {
     else if (m.op === 'px.clip') {
       stopped()
       if (!clipAlpha) throw new Error('The mask to clip with was not made')
-      value = px.clip(m.picture, clipAlpha)
+      value = px.clip(m.picture, clipAlpha, !!m.trunc)
       transfer = [value.px.buffer]
     }
     else if (m.op === 'px.save') {
@@ -287,8 +287,8 @@ export interface PixelsWorker {
   channelMask(picture: RawPicture, index: number): Promise<MaskScanlines>
   /** Text mask with a source: the render's luma as the mask, resized to w × h; kept on the worker for `clip`. */
   clipBegin(l: Uint8Array, mw: number, mh: number, w: number, h: number): Promise<Uint8Array>
-  /** Text mask with a source: one source picture × (1 − mask). */
-  clip(picture: RawPicture): Promise<HandOff8>
+  /** Text mask with a source: one source picture × (1 − mask); `trunc`: quantised as save_images does (core.ts clip). */
+  clip(picture: RawPicture, trunc?: boolean): Promise<HandOff8>
   /** Save image (R1.5): the pixels save_images encodes, w × h (Lanczos when that differs), flattened onto white for JPEG. */
   savePixels(picture: RawPicture, w: number, h: number, flatten: boolean): Promise<HandOff8>
 }
@@ -309,9 +309,9 @@ export function pixelsInWorker<T>(signal: AbortSignal | undefined, job: (w: Pixe
         const own = l.byteOffset === 0 && l.byteLength === l.buffer.byteLength ? l : l.slice()
         return (await call(t, { op: 'px.clipBegin', l: own, mw, mh, w: width, h: height }, [own.buffer as ArrayBuffer]) as { scanlines: Uint8Array }).scanlines
       },
-      async clip(picture) {
+      async clip(picture, trunc = false) {
         const p = handOver(picture)
-        return await call(t, { op: 'px.clip', picture: p.picture }, p.buffers) as HandOff8
+        return await call(t, { op: 'px.clip', picture: p.picture, trunc }, p.buffers) as HandOff8
       },
       async savePixels(picture, width, height, flatten) {
         const p = handOver(picture)

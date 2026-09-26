@@ -6,7 +6,7 @@
  * failed or paused at a Gate. Money is held per take before a leg starts and
  * charged exactly when it ends. See docs/superpowers/specs/2026-09-22-sailor-runner-and-gate-design.md.
  */
-import { LOCAL_RENDER_TYPES, PROVIDER_TYPES, isRunnerEligible } from '#shared/runner/eligibility'
+import { FRAME_RENDER_TYPES, LOCAL_RENDER_TYPES, PROVIDER_TYPES, isRunnerEligible } from '#shared/runner/eligibility'
 import { NO_FAMILIES, type RunnerFamily } from '#shared/runner/families'
 import { staticWiredTexts } from '#shared/runner/staticValues'
 import { NO_VALID_OUTPUTS_MESSAGE, pruneInvalidOutputs, type ComfyNodeError } from '#shared/runner/validate'
@@ -785,7 +785,13 @@ export function createEngine(deps: EngineDeps) {
     let actual = legIds
       .filter(id => take.nodes[id]!.status === 'done' && !take.nodes[id]!.reused)
       .reduce((s, id) => s + take.nodes[id]!.credits, 0)
-    const rendered = legIds.some(id => take.nodes[id]!.status === 'done' && LOCAL_RENDER_TYPES.has(take.nodes[id]!.classType))
+    // A take that failed or was stopped counts only a finished Frame as a
+    // render, as the ComfyUI path's partial charge does (meterGraphRun.ts
+    // chargePlanOf): a Save image or Preview image earns the render credit
+    // only when the take finishes, as on the ComfyUI path's successful settle.
+    const ended = takeOutcome(take, leg.index)
+    const renders = ended === 'error' || ended === 'stopped' ? FRAME_RENDER_TYPES : LOCAL_RENDER_TYPES
+    const rendered = legIds.some(id => take.nodes[id]!.status === 'done' && renders.has(take.nodes[id]!.classType))
     if (charge.includesBase && (actual > 0 || rendered) && !run.baseCharged) {
       actual += BASE_RENDER_CREDITS
       run.baseCharged = true

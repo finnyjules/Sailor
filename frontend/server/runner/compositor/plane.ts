@@ -55,7 +55,8 @@ export interface CopyPose {
  */
 export interface RawPicture {
   raw: true
-  source: 'provider' | 'card' | 'load' | 'rgb' | 'blank' | 'mask' | 'nomask'
+  /** 'made': Save image only (../pixels/core.ts); the Frame never reads one. */
+  source: 'provider' | 'card' | 'load' | 'rgb' | 'blank' | 'mask' | 'nomask' | 'made'
   w: number
   h: number
   data: Uint8Array | null

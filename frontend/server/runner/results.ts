@@ -138,6 +138,15 @@ export function createEngineResultStore(o: { dirForType(type: string): string | 
     return p
   }
   return {
+    // Where the runner's file names part from Python's: Python never checks
+    // that a name is free and overwrites; the runner writes with 'wx' and, on
+    // a clash, moves on to the next counter, so it never overwrites. The
+    // names differ exactly where Python would overwrite: a `%batch_num%` run
+    // again (its counter reads the prefix as typed, so it starts at 1 each
+    // time); a prefix ending in `/` or `/..` (get_save_image_path measures the
+    // un-normalised basename, finds no match and always writes _00001_); two
+    // saves racing for one name; a name differing only in case on a
+    // case-insensitive disk. The counter itself (nextCounter) is Python's.
     async save(bytes, { userId, prefix, ext, subfolder: sub, folder = 'output', counter: counting }) {
       const base = o.dirForType(folder)
       if (!base) throw new Error('The file store is not available')

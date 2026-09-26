@@ -31,7 +31,8 @@ function tooLarge(e: unknown): never {
   throw e
 }
 
-export type PictureSource = 'provider' | 'card' | 'load' | 'rgb' | 'blank'
+/** 'made' (R1.5 follow-up, Save image only): a kept picture made from a card's tensor, read as 'card' is but with its alpha as it is. */
+export type PictureSource = 'provider' | 'card' | 'load' | 'rgb' | 'blank' | 'made'
 
 interface Rgba8 { w: number; h: number; data: Uint8Array }
 

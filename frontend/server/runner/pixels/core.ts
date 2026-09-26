@@ -131,7 +131,10 @@ export function pixelsCore() {
   /** Python's tensor channels for a picture of this source (compositor/plane.ts toTensor). */
   function tensorChannels(p: PixelsPicture): 3 | 4 {
     if (p.source === 'provider') return 4
-    if (p.source === 'card' && p.data) {
+    // 'made' (R1.5 follow-up): a picture the runner kept from a card's tensor
+    // (Text mask clipping an Image card): the card's channel count, its alpha
+    // already the tensor's, so read as it is.
+    if ((p.source === 'card' || p.source === 'made') && p.data) {
       for (let i = 3; i < p.data.length; i += 4) if (p.data[i]! < 255) return 4
     }
     return 3
@@ -193,9 +196,11 @@ export function pixelsCore() {
   /**
    * Text mask's clip, per picture: source × alpha on every tensor channel, as
    * the 8-bit pixels `_image_tensor_to_data_url` sends (round(255·clamp(x))),
-   * interleaved RGB or RGBA as the tensor.
+   * interleaved RGB or RGBA as the tensor. With `trunc` (R1.5 follow-up: only
+   * Save image / Preview image read it), as save_images writes them instead:
+   * np.clip(255.·x, 0, 255).astype(uint8), trunc(f32(255·x)).
    */
-  function clip(p: PixelsPicture, alpha: Float32Array): { w: number; h: number; channels: 3 | 4; px: Uint8Array } {
+  function clip(p: PixelsPicture, alpha: Float32Array, trunc = false): { w: number; h: number; channels: 3 | 4; px: Uint8Array } {
     const c = tensorChannels(p)
     const n = p.w * p.h
     if (alpha.length !== n) throw new Error('The pictures this card reads are of different sizes')
@@ -206,7 +211,11 @@ export function pixelsCore() {
       const table = channelTable(p.source, k)
       for (let i = 0; i < n; i++) {
         const v = f(table[d[i * 4 + k]!]! * alpha[i]!)
-        px[i * c + k] = roundHalfEven(f((v < 0 ? 0 : v > 1 ? 1 : v) * 255))
+        if (trunc) {
+          const t = f(255 * v)
+          px[i * c + k] = t < 0 ? 0 : t > 255 ? 255 : Math.trunc(t)
+        }
+        else px[i * c + k] = roundHalfEven(f((v < 0 ? 0 : v > 1 ? 1 : v) * 255))
       }
     }
     return { w: p.w, h: p.h, channels: c, px }

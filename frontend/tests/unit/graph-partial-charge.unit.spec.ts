@@ -11,7 +11,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { meterGraphSubmit, watchGraphRun, chargePlanOf, type WatchGraphRunIO } from '../../server/utils/meterGraphRun'
 import { partialCharge, type HistoryEntry, type RunChargePlan } from '../../server/utils/settleWatcher'
 import { priceGraph, BASE_RENDER_CREDITS, LORA_RENDER_CREDITS } from '../../server/utils/priceBook'
-import { LOCAL_RENDER_TYPES } from '#shared/runner/eligibility'
+import { FRAME_RENDER_TYPES } from '#shared/runner/eligibility'
 
 const PAID = 'FluxLoRARemoteNode' // a flat-priced paid class: LORA_RENDER_CREDITS a call
 
@@ -225,7 +225,8 @@ describe('partialCharge', () => {
   })
 
   it('the render credit rides on a finished Frame render with no paid node, as in the runner', () => {
-    const frame = [...LOCAL_RENDER_TYPES][0]!
+    const frame = 'Compositor'
+    expect(FRAME_RENDER_TYPES.has(frame)).toBe(true)
     const g = { '5': { class_type: frame, inputs: {} }, '6': { class_type: 'SaveImage', inputs: {} }, '10': { class_type: PAID, inputs: {} } }
     const p = chargePlanOf(g, { '10': LORA_RENDER_CREDITS }, BASE_RENDER_CREDITS)
     expect(p.renderNodes).toEqual(['5'])

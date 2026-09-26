@@ -23,9 +23,13 @@
  * writes it into EXIF UserComment when its PIL build can; the runner never
  * does). The encoders are sharp's (libvips), so JPEG and WebP bytes differ;
  * decoded, they are within the lossy tolerance (spec Open question 3). A
- * picture made here in float (the Frame, Text mask with a source) reaches
- * this card as the 8-bit PNG it was kept as (round(255·x)), where Python
- * truncates the float: one level apart on some pixels.
+ * picture made here in float reaches this card as the 8-bit PNG it was kept
+ * as: the Frame hands on trunc(f32(255·x)) (plane.ts toPreview8), which is
+ * exactly what save_images writes, and Text mask with a source keeps that
+ * too when only Save image / Preview image read it (utilities.ts
+ * onlySavesRead); read by a provider as well, it keeps the hand-off's round,
+ * one level apart from Python's save on some edge pixels. Of Python's
+ * extra_pnginfo only `workflow` is embedded: it is all the app sends.
  *
  * A list value (R1.6) is saved item by item, as ComfyUI runs the node once
  * per item. A loader's animation (Python's batch of frames) is refused at the
@@ -35,7 +39,8 @@ import { crc32 } from 'node:zlib'
 import sharp from 'sharp'
 import type { DeriveIO, Derived, NodePlan, PlanContext } from '../executors'
 import type { OutputFile } from '../types'
-import { isLink, type ApiLink, type ApiPrompt } from '#shared/runner/graph'
+import { GATE_CLASS, isLink, type ApiLink, type ApiPrompt } from '#shared/runner/graph'
+import type { PictureSource } from '../compositor/decode'
 import { pyFloatOf, pyIntOf, pyTruthy } from '#shared/runner/pyText'
 import { CARD_MAX_PIXELS } from '#shared/runner/eligibility'
 import { pictureSourceOf } from '../compositor/plan'
@@ -49,7 +54,7 @@ import { PICTURE_NOT_MADE, decoded, sizes, type Wired } from './utilities'
 
 export { SAVE_OUTSIDE }
 export const SAVE_FAILED = 'The picture couldn’t be saved under this file name. Try a shorter, plainer name.'
-export const SAVE_TOO_LARGE = 'The pictures to save are too large (more than 268 million pixels). Use a smaller scale.'
+export const SAVE_TOO_LARGE = `The pictures to save are too large (more than ${Math.floor(CARD_MAX_PIXELS / 1_000_000)} million pixels). Use a smaller scale.`
 
 // ── folder_paths.get_save_image_path ─────────────────────────────────────────
 
@@ -226,12 +231,29 @@ export function saveSize(w: number, h: number, scale: number, maxDimension: numb
 
 const keyOf = (f: OutputFile) => `${f.type}:${f.subfolder}:${f.filename}`
 
+/**
+ * Whether a picture wire brings a Text mask's clipped picture (followed back
+ * through what hands a picture on unchanged). Its kept PNG already holds the
+ * tensor's alpha: read with an Image card source, the card's 1 − mask round
+ * trip would be applied a second time.
+ */
+function fromTextMask(prompt: ApiPrompt, link: ApiLink, depth = 0): boolean {
+  const node = prompt[link[0]]
+  if (!node || depth > 64) return false
+  const inputs = node.inputs ?? {}
+  if (node.class_type === 'TextMask') return link[1] === 0 && isLink(inputs.source)
+  if (node.class_type === 'Image' && isLink(inputs.images)) return fromTextMask(prompt, inputs.images, depth + 1)
+  if (node.class_type === GATE_CLASS && isLink(inputs.data_in)) return fromTextMask(prompt, inputs.data_in, depth + 1)
+  return false
+}
+
 /** Each run of the node: the batch it saves (a list value: one run per item). */
 function batchesOf(ctx: PlanContext): Wired[] {
   const v = ctx.prompt[ctx.nodeId]!.inputs?.images
   if (!isLink(v)) throw new Error('There is no picture wired in')
   const link: ApiLink = v
-  const source = pictureSourceOf(ctx.prompt, link)
+  const found = pictureSourceOf(ctx.prompt, link)
+  const source: PictureSource = found === 'card' && fromTextMask(ctx.prompt, link) ? 'made' : found
   if (source === 'blank') return [{ source, files: [] }]
   const value = ctx.valueFrom?.(link)
   const files = value ? filesOf(value) : ctx.filesFrom(link)

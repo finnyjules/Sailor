@@ -24,6 +24,14 @@ import { createEngineResultStore, nextCounter, counter05 } from '~~/server/runne
 import { SAVE_FAILED, SAVE_OUTSIDE, asciiJson, insertPngText, pyNormpath, saveImagePrefix, saveSize } from '~~/server/runner/cards/saveImage'
 import { PICTURE_ANIMATED } from '~~/server/runner/pictures/pythonView'
 import { pixels } from '~~/server/runner/pixels/core'
+import { inflateSync } from 'node:zlib'
+import { renderFrameInWorker } from '~~/server/runner/compositor/worker'
+import { decodeRaw, decodeRawMask, pngFromPreview8, type PictureSource } from '~~/server/runner/compositor/decode'
+import { onlySavesRead } from '~~/server/runner/cards/utilities'
+import { chargePlanOf } from '~~/server/utils/meterGraphRun'
+import { partialCharge } from '~~/server/utils/settleWatcher'
+import { SAVE_TOO_LARGE } from '~~/server/runner/cards/saveImage'
+import { CARD_MAX_PIXELS } from '#shared/runner/eligibility'
 import { shortUserHash } from '~~/server/utils/meterGraphRun'
 import { BASE_RENDER_CREDITS } from '~~/server/utils/priceBook'
 import type { OutputFile, RunnerValue } from '~~/server/runner/types'
@@ -41,10 +49,11 @@ interface SaveCase {
   settings: Record<string, unknown>; existing: string[]; shape: number[]; saved: Saved[]
 }
 interface PreviewCase { name: string; via: Via; files: Record<string, string>; names: string[]; compress_level: number; prefix_append: string; saved: Saved[] }
+interface TextMaskCase { name: string; via: Via; params: string; render: string; files: Record<string, string>; names: string[]; saved: Saved[] }
 interface LanczosCase { mode: 'RGB' | 'RGBA'; w: number; h: number; ow: number; oh: number; px: string; out?: string; out_sha256?: string }
 interface PathCase { prefix: string; width: number; height: number; subfolder?: string; filename?: string; counter?: number; error?: true }
 const FX = (JSON.parse(readFileSync(resolve(__dirname, 'fixtures/runner-cards.json'), 'utf8')) as {
-  save_image: { prompt: ApiPrompt; workflow: unknown; moment: number[]; save: SaveCase[]; preview: PreviewCase[]; paths: PathCase[]; lanczos: LanczosCase[] }
+  save_image: { prompt: ApiPrompt; workflow: unknown; moment: number[]; save: SaveCase[]; preview: PreviewCase[]; paths: PathCase[]; lanczos: LanczosCase[]; text_mask: TextMaskCase[] }
 }).save_image
 
 const NO: ReadonlySet<RunnerFamily> = new Set()
@@ -221,6 +230,68 @@ describe('Save image (nodes.py SaveImage.save_images)', () => {
     expect(assets.map(a => a.filename)).toEqual(['20_00001_.png', '5_00001_.png'])
     expect((made.ui as { images: unknown[] }).images).toHaveLength(2)
     expect((await decode(await read(assets[1]!))).w).toBe(5)
+  })
+})
+
+describe('follow-up: pictures made in float, saved', () => {
+  interface FrameCase { name: string; links: Record<string, [string, string]>; inputs: Record<string, unknown>; width: number; height: number; image8: string }
+  const COMP = JSON.parse(readFileSync(resolve(__dirname, 'fixtures/runner-compositor.json'), 'utf8')) as { assets: Record<string, string>; cases: FrameCase[] }
+  const asset = (name: string) => new Uint8Array(Buffer.from(COMP.assets[name]!, 'base64'))
+
+  // The Frame hands on trunc(f32(255·x)) (its image8, which the Frame's own spec
+  // proves); save_images writes the same float the same way: Frame → Save is exact.
+  for (const c of COMP.cases.slice(0, 6)) {
+    it(`Frame → Save image is Python's image8 exactly: ${c.name}`, async () => {
+      const raw = (name: string, via: string) => via === 'load_mask' ? decodeRawMask(asset(name)) : decodeRaw(asset(name), via as PictureSource)
+      const lazy = (link: [string, string] | undefined) => (link ? () => raw(link[0], link[1]) : null)
+      const r = await renderFrameInWorker(c.inputs, {
+        layers: Array.from({ length: 16 }, (_, i) => lazy(c.links[`layer${i + 1}`])),
+        masks: Array.from({ length: 16 }, (_, i) => lazy(c.links[`layer${i + 1}_mask`])),
+        overlay: lazy(c.links.overlay),
+        overlayMask: lazy(c.links.overlay_mask),
+      })
+      const frame = await pngFromPreview8(r.px, r.w, r.h)
+      const prompt: ApiPrompt = { src: { class_type: 'Compositor', inputs: {} }, s: saveImage(['src', 0]) }
+      const { assets, read } = await derived(prompt, 's', { 'frame.png': new Uint8Array(frame) }, ['frame.png'])
+      const got = await decode(await read(assets[0]!))
+      expect([got.w, got.h, got.channels]).toEqual([c.width, c.height, 3])
+      expect(Buffer.compare(Buffer.from(got.px), inflateSync(Buffer.from(c.image8, 'base64')))).toBe(0)
+    })
+  }
+
+  for (const c of FX.text_mask) {
+    it(`Text mask with a source → Save image matches Python exactly: ${c.name}`, async () => {
+      const k = makeKit({ hosted: false, deps: { families: () => CARDS } })
+      for (const [n, d] of Object.entries(c.files)) put(k.root, n, b64(d))
+      put(k.root, (JSON.parse(c.params) as { rendered: string }).rendered, b64(c.render))
+      const p: ApiPrompt = {
+        0: c.via === 'card' ? card(c.names[0]!) : loadImage(c.names[0]!),
+        t: { class_type: 'TextMask', inputs: { params: c.params, source: ['0', 0] } },
+        s: saveImage(['t', 0]),
+      }
+      const { runId } = await k.engine.startRun({ userId: null, takes: [p], ...START })
+      await k.engine.settled(runId)
+      expect((await k.store.get(runId))!.status).toBe('done')
+      const got = await decode(new Uint8Array(readFileSync(join(k.root, 'output', c.saved[0]!.filename))))
+      expect([got.w, got.h, got.channels]).toEqual([c.saved[0]!.w, c.saved[0]!.h, c.saved[0]!.mode.length])
+      expect(sha256(got.px)).toBe(c.saved[0]!.px_sha256)
+    })
+  }
+
+  it('Text mask keeps the truncated picture only when Save image / Preview image alone read it', () => {
+    const t = { class_type: 'TextMask', inputs: { params: '{}', source: ['0', 0] } }
+    expect(onlySavesRead({ t, s: saveImage(['t', 0]) }, 't', 0)).toBe(true)
+    expect(onlySavesRead({ t, s: saveImage(['t', 0]), p: previewImage(['t', 0]) }, 't', 0)).toBe(true)
+    expect(onlySavesRead({ t, c: outCard('t'), g: { class_type: 'ComfyGateNode', inputs: { data_in: ['c', 0] } }, s: saveImage(['g', 0]) }, 't', 0)).toBe(true)
+    expect(onlySavesRead({ t, s: saveImage(['t', 0]), e: edit(['t', 0]) }, 't', 0)).toBe(false)
+    expect(onlySavesRead({ t, c: outCard('t'), s: saveImage(['c', 0]), e: edit(['c', 0]) }, 't', 0)).toBe(false)
+    expect(onlySavesRead({ t, m: { class_type: 'ImageToMask', inputs: { image: ['t', 0], channel: 'red' } } }, 't', 0)).toBe(false)
+    expect(onlySavesRead({ t }, 't', 0)).toBe(false)
+    expect(onlySavesRead({ t, s: saveImage(['t', 1]) }, 't', 0)).toBe(false)
+  })
+
+  it('the too-large message states the cap it enforces', () => {
+    expect(SAVE_TOO_LARGE).toContain(`${Math.floor(CARD_MAX_PIXELS / 1_000_000)} million pixels`)
   })
 })
 
@@ -434,6 +505,33 @@ describe('the engine (cards on)', () => {
     const { runId } = await k.engine.startRun({ userId: null, takes: [p], ...START })
     await k.engine.settled(runId)
     expect((await k.store.get(runId))!.takes[0]!.nodes.s!.error).toBe(SAVE_FAILED)
+  })
+
+  it('a failed take where only a Save image finished charges no render credit, as the ComfyUI path', async () => {
+    const k = makeKit({ hosted: true, deps: { families: () => CARDS } })
+    const p: ApiPrompt = { e: emptyImage(), s: saveImage(['e', 0]), bad: saveImage(['e', 0], { filename_prefix: '../x' }) }
+    const { runId } = await k.engine.startRun({ userId: k.userId, takes: [p], ...START })
+    await k.engine.settled(runId)
+    const run = (await k.store.get(runId))!
+    expect(run.takes[0]!.nodes.bad!.status).toBe('error')
+    expect(run.takes[0]!.nodes.s!.status).toBe('done')
+    // The runner: the hold of one render credit is let go, nothing charged.
+    expect(k.ledger.hold).toHaveBeenCalledTimes(1)
+    expect(k.ledger.settle.mock.calls.filter(([, actual]) => actual > 0)).toEqual([])
+    // The ComfyUI path, the same graph failing the same way: no render credit either.
+    const plan = chargePlanOf(p, {}, BASE_RENDER_CREDITS)
+    const failed = { status: { messages: [
+      ['execution_start', {}], ['execution_cached', { nodes: [] }],
+      ['execution_error', { executed: ['e', 's'], node_id: 'bad' }],
+    ] } }
+    expect(partialCharge(failed as never, plan, BASE_RENDER_CREDITS)).toMatchObject({ credits: 0 })
+  })
+
+  it('a failed take where a Frame finished still charges the render credit, on both paths', () => {
+    const p = { f: { class_type: 'Compositor', inputs: {} }, s: saveImage(['f', 0]) }
+    const plan = chargePlanOf(p, {}, BASE_RENDER_CREDITS)
+    const failed = { status: { messages: [['execution_error', { executed: ['f'], node_id: 's' }]] } }
+    expect(partialCharge(failed as never, plan, BASE_RENDER_CREDITS)).toMatchObject({ credits: BASE_RENDER_CREDITS })
   })
 
   it('Preview image writes to temp and is not an output', async () => {

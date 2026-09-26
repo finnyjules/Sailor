@@ -43,15 +43,16 @@ adds its key and regenerates the file (the other keys must come out unchanged).
   save_image — (R1.5) the real SaveImage().save_images (a fresh temp output
               folder per case, metadata on) over LoadImage RGB, provider RGBA,
               Image-card RGBA and batch tensors: png at compression 1 and 9,
-              jpeg at 60, webp lossy and lossless, scale, max_dimension, a
-              prefix with a subfolder and %width%x%height%, the counter after
-              files already there, %batch_num%, metadata off, a two-frame GIF;
-              each saved file's name, decoded pixels (sha256 when lossless and
-              unresized) and PNG text. PreviewImage (random.choice patched to
-              the first letter). PIL's LANCZOS resize alone on seeded random
-              RGB and RGBA pictures (`lanczos`). get_save_image_path over
-              prefixes with `..`,
-              absolute parts and the date variables (time.localtime patched)
+              jpeg at 60 and 90, webp lossy 80 and 90 and lossless, scale,
+              max_dimension, a prefix with a subfolder and %width%x%height%,
+              the counter after files already there, %batch_num%, metadata
+              off, a two-frame GIF; each saved file's name, decoded pixels
+              (sha256 when lossless and unresized) and PNG text. PreviewImage
+              (random.choice patched to the first letter). Text mask with a
+              source → Save image (`text_mask`). PIL's LANCZOS resize alone on
+              seeded random RGB and RGBA pictures (`lanczos`).
+              get_save_image_path over prefixes with `..`, absolute parts and
+              the date variables (time.localtime patched)
 
     cd /Users/julien/Documents/GitHub/Sailor && .venv/bin/python scripts/runner_cards_fixtures.py
 
@@ -609,6 +610,10 @@ def save_image_cases() -> dict:
         ("png, an Image card with alpha (its alpha goes through 1 − mask)", "card", {}, []),
         ("jpeg at 60, RGBA (flattened onto white)", "rgba", {"format": "jpeg", "quality": 60}, []),
         ("jpeg at 60, RGB", "rgb", {"format": "jpeg", "quality": 60}, []),
+        ("jpeg at 90 (the default quality), RGB", "rgb", {"format": "jpeg"}, []),
+        ("jpeg at 90 (the default quality), RGBA", "rgba", {"format": "jpeg"}, []),
+        ("webp lossy 90 (the default quality), RGB", "rgb", {"format": "webp"}, []),
+        ("webp lossy 90 (the default quality), RGBA", "rgba", {"format": "webp"}, []),
         ("webp lossy 80, RGB", "rgb", {"format": "webp", "quality": 80}, []),
         ("webp lossy 80, RGBA", "rgba", {"format": "webp", "quality": 80}, []),
         ("webp lossless, RGB", "rgb", {"format": "webp", "lossless_webp": True}, []),
@@ -660,6 +665,33 @@ def save_image_cases() -> dict:
                 "name": name, "via": via, "files": {n: rv.b64(d) for n, d in files}, "names": [n for n, _ in files],
                 "compress_level": node.compress_level, "prefix_append": node.prefix_append,
                 "saved": [_saved_file(folder, e, True) for e in res["ui"]["images"]],
+            })
+        finally:
+            shutil.rmtree(folder)
+    # (follow-up) Text mask with a source → Save image: the float picture
+    # save_images truncates. A 40×20 render on 64×48 sources (LoadImage RGB,
+    # an Image card with alpha); the saved PNG's pixels by sha256.
+    from comfy_extras.nodes_text_mask import TextMaskNode
+    render = _put("si_tms_render.png", _grey(20, 40, 71))
+    params = json.dumps({"text": "MASK", "rendered": render})
+    with open(os.path.join(rv.WORK, "input", render), "rb") as f:
+        render_b64 = rv.b64(f.read())
+    out["text_mask"] = []
+    for name, files, via in [
+        ("Text mask on a LoadImage RGB source → Save image", [("si_tms_rgb.png", _rgb(48, 64, 72))], "load"),
+        ("Text mask on an Image card with alpha → Save image", [("si_tms_card.png", _rgba(48, 64, 73))], "card"),
+    ]:
+        t = torch.cat([_loaded(n, d, via) for n, d in files], dim=0)
+        image = TextMaskNode.execute(params, t).args[0]
+        folder = tempfile.mkdtemp(prefix="runner-save-text-mask-")
+        try:
+            node = nodes.SaveImage()
+            node.output_dir = folder
+            ui = node.save_images(image, prompt=SAVE_PROMPT, extra_pnginfo={"workflow": SAVE_WORKFLOW}, **defaults)["ui"]
+            out["text_mask"].append({
+                "name": name, "via": via, "params": params, "render": render_b64,
+                "files": {n: rv.b64(d) for n, d in files}, "names": [n for n, _ in files],
+                "saved": [_saved_file(folder, e, True) for e in ui["images"]],
             })
         finally:
             shutil.rmtree(folder)
