@@ -2,6 +2,7 @@ import { faceOf } from './types'
 import type { BandEl, ButtonEl, Colour, Content, LineEl, LogoEl, Measure, MissingEl, OwnTextEl, PhotoEl, RectEl, RoleKey, RuleEl, StarsEl, Style, TextEl, TextKey } from './types'
 import { STYLES } from './styles'
 import type { StyleId } from './styles'
+import type { FrameFormat } from '~/lib/frame/formats'
 
 // ═══════════════════════ the kit ═══════════════════════
 // Ported from the prototype (docs/superpowers/specs/assets/2026-09-23-frame-layout-system/
@@ -138,6 +139,14 @@ export function kitBasics(frameW: number, frameH: number, format?: SheetOpts['fo
   const infoFloor = format?.view ? 900 / format.view : 0
   const infoSize = Math.max(1.95 * B, infoFloor)
   return { B, margin, nc, infoSize, infoLh: STYLES[style].info.lh }
+}
+
+/** The sheet options a format sets (Stage 2): its minimum text size, column count and side
+ *  margins. Undefined without a format, so the sheet is exactly Stage 1's. */
+export function formatSheetOpts(fmt: FrameFormat | null): SheetOpts['format'] {
+  if (!fmt) return undefined
+  const keepSide = fmt.keep ? Math.max(fmt.keep.left, fmt.keep.right) : undefined
+  return { view: fmt.view, nc: fmt.nc, ...(keepSide != null ? { keepSide } : {}) }
 }
 
 export function makeSheet(o: SheetOpts): Sheet {

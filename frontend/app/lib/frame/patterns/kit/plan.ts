@@ -16,7 +16,7 @@ import { clearGroupPinsOfMoved, clearPinsOfMoved } from '../pins'
 import { layoutEntry } from '../layouts/catalog'
 import { formatFor } from '~/lib/frame/formats'
 import type { FrameFormat, KeepClear } from '~/lib/frame/formats'
-import { makeSheet, splitDateRange } from './sheet'
+import { formatSheetOpts, makeSheet, splitDateRange } from './sheet'
 import type { Sheet, SheetOpts } from './sheet'
 import { makeCanvasMeasure } from './measure'
 import type { MeasurePool } from './measure'
@@ -468,14 +468,6 @@ function hasContent(p: Prepared, k: NonNullable<LayoutDef['needsContent']>[numbe
 
 /** The seed of a choice's random stream (the prototype's). */
 const seedFor = (index: number, choice: Choice) => 7000 + index * 97 + 13 + choice.arr * 7919
-
-/** The sheet options a format sets (Stage 2): its minimum text size, column count and side
- *  margins. Undefined without a format, so the sheet is exactly Stage 1's. */
-export function formatSheetOpts(fmt: FrameFormat | null): SheetOpts['format'] {
-  if (!fmt) return undefined
-  const keepSide = fmt.keep ? Math.max(fmt.keep.left, fmt.keep.right) : undefined
-  return { view: fmt.view, nc: fmt.nc, ...(keepSide != null ? { keepSide } : {}) }
-}
 
 /** Run the layout for one choice — the ONE pipeline shared by plan and candidates. Wide frames
  *  with an image get the prototype's side image (`runCandidate`): the layout composes on the
