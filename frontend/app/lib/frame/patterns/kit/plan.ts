@@ -471,7 +471,7 @@ const seedFor = (index: number, choice: Choice) => 7000 + index * 97 + 13 + choi
 
 /** The sheet options a format sets (Stage 2): its minimum text size, column count and side
  *  margins. Undefined without a format, so the sheet is exactly Stage 1's. */
-function formatSheetOpts(fmt: FrameFormat | null): SheetOpts['format'] {
+export function formatSheetOpts(fmt: FrameFormat | null): SheetOpts['format'] {
   if (!fmt) return undefined
   const keepSide = fmt.keep ? Math.max(fmt.keep.left, fmt.keep.right) : undefined
   return { view: fmt.view, nc: fmt.nc, ...(keepSide != null ? { keepSide } : {}) }

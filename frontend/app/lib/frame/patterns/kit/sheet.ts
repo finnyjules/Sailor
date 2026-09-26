@@ -125,6 +125,21 @@ export function splitDateRange(token: string): [string, string] | null {
   return null
 }
 
+/** The kit's own sizes for a Frame shape, in kit units (percent of width), with the Frame grid OFF:
+ *  the size unit B, the margin, the real column count, and the info (body) type size and leading.
+ *  The Frame's suggested layout grid is built from these (lib/frame/layoutGrid.ts). */
+export function kitBasics(frameW: number, frameH: number, format?: SheetOpts['format'], style: StyleId = 'swiss') {
+  const W = 100
+  const H_full = 100 * frameH / frameW
+  const B = Math.sqrt(W * H_full) / Math.sqrt(100 * 100 * 1280 / 895)
+  let margin = Math.min(4, H_full * 0.06)
+  if (format?.keepSide != null) margin = Math.max(margin, format.keepSide * 100)
+  const nc = format?.nc ?? (H_full / W >= 0.7 ? 12 : W / H_full >= 2.5 ? 20 : 16)
+  const infoFloor = format?.view ? 900 / format.view : 0
+  const infoSize = Math.max(1.95 * B, infoFloor)
+  return { B, margin, nc, infoSize, infoLh: STYLES[style].info.lh }
+}
+
 export function makeSheet(o: SheetOpts): Sheet {
   const { measure } = o
   const SCALE = o.scale ?? 1
@@ -135,7 +150,8 @@ export function makeSheet(o: SheetOpts): Sheet {
   const W = 100
   const H_full = 100 * o.frameH / o.frameW
   const H = o.composeH ?? H_full
-  const B = Math.sqrt(W * H_full) / Math.sqrt(100 * 100 * 1280 / 895)   // size unit: 1 on the portrait poster — from the FULL height
+  const kb = kitBasics(o.frameW, o.frameH, o.format, o.style ?? 'swiss')
+  const B = kb.B   // size unit: 1 on the portrait poster — from the FULL height
   const kitM = Math.min(4, H * 0.06)
   let M = gridOn ? grid!.margin * 100 : kitM
   if (o.format?.keepSide != null) M = Math.max(M, o.format.keepSide * 100)
@@ -157,8 +173,7 @@ export function makeSheet(o: SheetOpts): Sheet {
   const L = (r: number) => M + r * RH                                 // line under design row r; L(0) = top margin
 
   // Swiss styles — minimum text size from the format's viewing width (Stage 2), Stage 1 sizes when absent.
-  const infoFloor = o.format?.view ? 900 / o.format.view : 0
-  const infoSize = Math.max(1.95 * B, infoFloor)
+  const infoSize = kb.infoSize
   const secondSize = o.format?.view ? Math.max(4.4 * B, 1.6 * infoSize) : 4.4 * B
   // The style's display and information type; `upper` only when the style sets capitals, so the
   // Swiss styles are exactly the Stage 1 objects.
