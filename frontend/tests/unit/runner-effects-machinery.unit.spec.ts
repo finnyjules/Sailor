@@ -7,7 +7,7 @@
  */
 import { createRequire } from 'node:module'
 import { Worker } from 'node:worker_threads'
-import { mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -19,17 +19,18 @@ import {
   paramsOf, pictureOf, pngPixels, runEffectCase, sha256, synth, tensorsOf, withAssets, bandOf, type FxCase, type FxFile,
 } from './__runner__/effectsParity'
 import type { ApiPrompt } from '#shared/runner/graph'
-import { parseFamilies, type RunnerFamily } from '#shared/runner/families'
-import { CARD_MAX_PIXELS, isRunnerEligible, runnerTakesNode } from '#shared/runner/eligibility'
+import { RUNNER_FAMILIES, parseFamilies, type RunnerFamily } from '#shared/runner/families'
+import { CARD_MAX_PIXELS, IMAGE_OUTPUT_CLASSES, PICTURE_OUTPUTS, isRunnerEligible, runnerTakesNode } from '#shared/runner/eligibility'
 import { runnerTakesWorkflow } from '#shared/runner/validate'
 import { nodesNeedingEngine } from '#shared/runner/needsEngine'
 import {
   EFFECT_ERROR_MESSAGES, EFFECT_PICTURES_TOO_LARGE, EFFECT_PICTURE_TOO_LARGE, EFFECT_PICTURE_TOO_LARGE_HOSTED,
-  EFFECT_FAMILY_OF, EFFECT_MAX_WORK, EFFECT_PREVIEW_NAME_RE, EFFECT_TOO_MUCH_WORK, effectPreviewName,
+  EFFECT_FAMILIES, EFFECT_FAMILY_OF, EFFECT_MAX_WORK, EFFECT_PICTURE_ANIMATED, EFFECT_PREVIEW_NAME_RE, EFFECT_TOO_MUCH_WORK, effectPreviewName,
 } from '#shared/runner/effects'
 import { PREVIEW_NAME_RE } from '~~/server/runner/results'
 import { planNode, type NodePlan } from '~~/server/runner/executors'
 import { EFFECTS, type EffectSpec } from '~~/server/runner/effects/table'
+import { EFFECT_IO_WORK_PER_VALUE } from '~~/server/runner/effects/plan'
 import { effectCores } from '~~/server/runner/effects/cores'
 import { tensorCore } from '~~/server/runner/effects/core/tensor'
 import { toneCore } from '~~/server/runner/effects/core/tone'
@@ -49,9 +50,12 @@ vi.mock('~~/server/runner/compositor/decode', async (importOriginal) => {
   return { ...m, decodeRaw: (...a: Parameters<typeof m.decodeRaw>) => { decodes.n++; return m.decodeRaw(...a) } }
 })
 
+interface ChainStep { class_type: string; node_id: string; widgets: Record<string, unknown>; outputs: NonNullable<FxCase['outputs']>; ui: FxCase['ui']; preview: NonNullable<FxCase['preview']> }
+interface Chain { name: string; inputs: FxCase['inputs']; steps?: ChainStep[]; effect?: { class_type: string; node_id: string; widgets: Record<string, unknown> }; frame?: { widgets: Record<string, unknown>; w: number; h: number; image8: string } }
 interface MachineryFx extends FxFile {
   synth: { w: number; h: number; channels: number; seed: number; sha256: string }[]
   rgba_preview: { mode: string; w: number; h: number; px: string }
+  chains: Chain[]
 }
 const FX = withAssets(loadFixtures<MachineryFx>('machinery'))
 
@@ -162,23 +166,107 @@ describe('the pilots against Python (exact)', () => {
     })
   }
 
-  it('the band helper: a hashed case\'s band holds Python\'s bytes, and a result off by one inside it passes', () => {
+  it('the band helper: each mode has its own band; a result off by one passes only inside its own mode\'s band', () => {
     const c = FX.cases.find(x => x.hashed && x.class_type === 'AdjustInvert')!
-    const band = bandOf(c.outputs![0]!.items[0]!.band!)
-    expect(band.length).toBe(c.outputs![0]!.items[0]!.band!.count)
-    const py = new Uint8Array(320 * 200 * 3)
-    for (const [i, t] of band) py[i] = t
-    const ts = py.slice()
-    ts[band[0]![0]] = ts[band[0]![0]]! === 255 ? 254 : ts[band[0]![0]]! + 1
-    expectBand(ts, py, null, band, FX.band_eps, 'trunc')
-    // Two levels off is never allowed.
+    const item = c.outputs![0]!.items[0]!
+    const trunc = bandOf(item.band!, 'trunc')
+    const round = bandOf(item.band!, 'round')
+    expect([trunc.length, round.length]).toEqual([item.band!.trunc.count, item.band!.round.count])
+    // Invert of b / 255 lands on the trunc grid everywhere and on no half: Python's bytes there are its trunc8.
+    expect(trunc.length).toBe(320 * 200 * 3)
+    expect(round).toHaveLength(0)
+    const py = new Uint8Array(trunc.map(([, v]) => v))
+    expect(sha256(py)).toBe(item.trunc8_sha256)
+    const bump = (a: Uint8Array) => { const t = a.slice(); t[0] = t[0] === 255 ? 254 : t[0]! + 1; return t }
+    expectBand(bump(py), py, null, trunc, FX.band_eps, 'trunc')
     const far = py.slice()
-    far[band[0]![0]] = (far[band[0]![0]]! + 2) & 255
-    expect(() => expectBand(far, py, null, band, FX.band_eps, 'trunc')).toThrow()
+    far[0] = (far[0]! + 2) & 255
+    expect(() => expectBand(far, py, null, trunc, FX.band_eps, 'trunc')).toThrow()
+    // The same one-level slip in round mode, where no value is near a half: refused.
+    expect(() => expectBand(bump(py), py, null, round, FX.band_eps, 'round')).toThrow()
+    // And from a small case's floats: b / 255 values are near trunc's edges, not round's.
+    const small = find('AdjustExposure: defaults, rgb 37×23').outputs![0]!.items[0]!
+    const f32 = new Float32Array(Uint8Array.from(b64(small.f32!)).buffer)
+    const r8 = b64(small.round8!)
+    const t8 = b64(small.trunc8!)
+    expectBand(bump(t8), t8, f32, null, FX.band_eps, 'trunc')
+    expect(() => expectBand(bump(r8), r8, f32, null, FX.band_eps, 'round')).toThrow()
   })
 })
 
 // ── The machinery ────────────────────────────────────────────────────────────
+
+describe('chains: an effect hands the next effect its float tensor, as Python does (fix round 1)', () => {
+  for (const ch of FX.chains.filter(x => x.steps)) {
+    it(ch.name, async () => {
+      const [a, b] = ch.steps!
+      const file = ch.inputs.image!.files[0]!
+      const source = ch.inputs.image!.source
+      const files: Record<string, Uint8Array> = { [file]: b64(FX.assets[file]!) }
+      const prompt: ApiPrompt = {
+        src: sourceNodeOf(source, file),
+        [a!.node_id]: effect(a!.class_type, ['src', 0], a!.widgets),
+        [b!.node_id]: effect(b!.class_type, [a!.node_id, 0], b!.widgets),
+      }
+      const mem = memoryIO(files, a!.node_id)
+      const values: Record<string, Record<number, RunnerValue>> = {}
+      const ctx = (nodeId: string) => ({
+        prompt, nodeId, families: TONE, gateOpen: false, toUrl: async () => '',
+        filesFrom: (l: [string, number]): OutputFile[] => l[0] === 'src' ? [{ filename: file, subfolder: '', type: 'input' }] : filesOfValue(values[l[0]]![l[1]]),
+        valueFrom: (l: [string, number]) => values[l[0]]?.[l[1]],
+      })
+      const first = await planNode(ctx(a!.node_id)) as Extract<NodePlan, { kind: 'derive' }>
+      values[a!.node_id] = (await first.derive(mem.io)).values
+      // Read by an effect: the float tensor is kept beside the PNG.
+      const va = values[a!.node_id]![0] as Extract<RunnerValue, { kind: 'files' }>
+      expect(va.tensors).toHaveLength(1)
+      expect(va.tensors![0]!.filename).toMatch(/\.bin$/)
+      // As a restarted server reads it back: the record's values as JSON.
+      values[a!.node_id] = JSON.parse(JSON.stringify(values[a!.node_id]))
+      const second = await planNode({ ...ctx(b!.node_id) }) as Extract<NodePlan, { kind: 'derive' }>
+      const made = await second.derive({ ...mem.io, nodeId: b!.node_id })
+      const out = await pngPixels(mem.bytes(filesOfValue(made.values[0])[0]!))
+      const item = b!.outputs[0]!.items[0]!
+      expect([out.w, out.h, out.channels]).toEqual([item.w, item.h, item.c])
+      if (item.round8) expect(Buffer.compare(out.px, b64(item.round8))).toBe(0)
+      else expect(sha256(out.px)).toBe(item.round8_sha256)
+      // Its own reader is nothing: no tensor kept for the last step.
+      expect((made.values[0] as Extract<RunnerValue, { kind: 'files' }>).tensors).toBeUndefined()
+      const pv = await pngPixels(mem.previews.at(-1)!.bytes)
+      if (b!.preview.px) expect(Buffer.compare(pv.px, b64(b!.preview.px))).toBe(0)
+      else expect(sha256(pv.px)).toBe(b!.preview.px_sha256)
+    })
+  }
+
+  it('without the tensor (the 8-bit PNG alone), the chains would not match Python: the float is what makes them exact', async () => {
+    const ch = FX.chains.find(x => x.name === 'Exposure 0.3 → Threshold 0.5, rgb')!
+    const [a, b] = ch.steps!
+    const file = ch.inputs.image!.files[0]!
+    const raw = await decodeRaw(b64(FX.assets[file]!), 'rgb')
+    const x = effectCores.tk.fromPicture(raw)
+    const mid = effectCores.tone.AdjustExposure({ image: x }, a!.widgets).outputs[0]!
+    // Through 8 bits, as a provider would get it.
+    const via8 = effectCores.tk.fromPicture({ source: 'rgb', w: mid.w, h: mid.h, data: rgbaOf(effectCores.tk.quantize(mid, 'round'), 3) })
+    const lossy = effectCores.tone.AdjustThreshold({ image: via8 }, b!.widgets).outputs[0]!
+    const exact = effectCores.tone.AdjustThreshold({ image: mid }, b!.widgets).outputs[0]!
+    const item = b!.outputs[0]!.items[0]!
+    expectExactHash(interleaved(exact), item.f32_sha256!)
+    expect(sha256(new Uint8Array(interleaved(lossy).buffer))).not.toBe(item.f32_sha256)
+  })
+})
+
+/** Interleaved c-channel bytes as RGBA8 (alpha 255). */
+function rgbaOf(px: Uint8Array, c: number): Uint8Array {
+  const n = px.length / c
+  const out = new Uint8Array(n * 4)
+  for (let i = 0; i < n; i++) {
+    for (let k = 0; k < c; k++) out[i * 4 + k] = px[i * c + k]!
+    if (c === 3) out[i * 4 + 3] = 255
+  }
+  return out
+}
+
+const sourceNodeOf = (source: string, file: string): ApiPrompt[string] => source === 'rgb' ? { class_type: 'Compositor', inputs: {} } : card(file)
 
 describe('channels and the tensor wire source', () => {
   it('a provider picture through Adjust threshold keeps 4 channels: the kept PNG is RGBA and so is the preview, as Python writes it', async () => {
@@ -265,6 +353,20 @@ describe('batches', () => {
   })
 })
 
+describe('each file is read once (fix round 1)', () => {
+  it('a batch of two files and a repeat reads each file once: its header for the caps, its bytes for the decode', async () => {
+    const c = find('AdjustExposure: a batch of two files and a repeat')
+    const p = pictureOf(c)
+    const mem = memoryIO(p.files, c.node_id)
+    const reads = new Map<string, number>()
+    const read = mem.io.read
+    mem.io.read = async (f) => { reads.set(f.filename, (reads.get(f.filename) ?? 0) + 1); return read(f) }
+    const plan = await planNode({ prompt: p.prompt, nodeId: c.node_id, families: TONE, gateOpen: false, filesFrom: p.filesOf, toUrl: async () => '' }) as Extract<NodePlan, { kind: 'derive' }>
+    await plan.derive(mem.io)
+    expect(Object.fromEntries(reads)).toEqual(Object.fromEntries([...new Set(c.inputs.image!.files)].map(f => [f, 1])))
+  })
+})
+
 describe('caps, from the headers, before any picture is decoded (rule 7)', () => {
   const blankPng = async (w: number, h: number) => new Uint8Array(await sharp({ create: { width: w, height: h, channels: 3, background: '#000' } }).png().toBuffer())
   const caseWith = (file: string, count = 1): FxCase => ({
@@ -297,8 +399,11 @@ describe('caps, from the headers, before any picture is decoded (rule 7)', () =>
       await expect(runEffectCase(c, { families: TONE })).rejects.toThrow(EFFECT_TOO_MUCH_WORK)
       expect(seen).toEqual([[{ amount: 0.37 }, { w: 29, h: 31 }]])
       expect(posted.mock.calls.map(([m]) => (m as { op?: string }).op).filter(o => o === 'fx.run')).toHaveLength(0)
-      table.AdjustInvert = { ...spec, work: () => EFFECT_MAX_WORK }
+      // Reading and writing the picture counts too (fix round 1): 29 × 31 pixels in and out, 4 values each.
+      table.AdjustInvert = { ...spec, work: () => EFFECT_MAX_WORK - EFFECT_IO_WORK_PER_VALUE * 4 * 2 * 29 * 31 }
       await expect(runEffectCase(c, { families: TONE })).resolves.toBeTruthy()
+      table.AdjustInvert = { ...spec, work: () => EFFECT_MAX_WORK - EFFECT_IO_WORK_PER_VALUE * 4 * 2 * 29 * 31 + 1 }
+      await expect(runEffectCase(c, { families: TONE })).rejects.toThrow(EFFECT_TOO_MUCH_WORK)
     }
     finally {
       table.AdjustInvert = spec
@@ -326,6 +431,21 @@ describe('Stop', () => {
     expect(() => effectCores.tone.AdjustInvert({ image: x }, { amount: 1 }, stop)).toThrow('Stopped')
     // Checked at row 0 (go on) and row 64 (stop): the first block of 64 rows was the only work done.
     expect(calls).toBe(2)
+  })
+
+  it('reading a picture into a tensor, quantising it and its luma stop within one 64-row block too', () => {
+    const tk = effectCores.tk
+    const picture = { source: 'provider', w: 4, h: 256, data: new Uint8Array(4 * 256 * 4) }
+    const x = tk.tensor(3, 256, 4)
+    for (const [label, run] of [
+      ['fromPicture', (stop: () => boolean) => tk.fromPicture(picture, stop)],
+      ['quantize', (stop: () => boolean) => tk.quantize(x, 'round', stop)],
+      ['luma709', (stop: () => boolean) => tk.luma709(x, stop)],
+    ] as const) {
+      let calls = 0
+      expect(() => run(() => ++calls >= 2), label).toThrow('Stopped')
+      expect(calls, label).toBe(2)
+    }
   })
 
   it('stopped mid-batch: nothing is written after Stop', async () => {
@@ -397,6 +517,22 @@ describe('families', () => {
     expect(EFFECT_PREVIEW_NAME_RE.flags).toBe(PREVIEW_NAME_RE.flags)
   })
 
+  it('node by node: each pilot, its source card and its reader, with cards on and off', () => {
+    for (const cls of Object.keys(EFFECTS)) {
+      const w = cls === 'AdjustExposure' ? { exposure: 1 } : cls === 'AdjustInvert' ? { amount: 1 } : { threshold: 0.5 }
+      const q: ApiPrompt = { 0: card('a.png'), fx: effect(cls, ['0', 0], w), e: editNode(['fx', 0]), o: outCard('e') }
+      const take = (fam: RunnerFamily[]) => Object.fromEntries(Object.keys(q).map(id => [id, runnerTakesNode(q, id, new Set(fam))]))
+      // Cards and the family on: every node.
+      expect(take(['cards', 'effects-tone', 'fal-edit']), cls).toEqual({ 0: true, fx: true, e: true, o: true })
+      // Cards off, or the family off: only the effect is refused (the edit's own row checks no
+      // picture source), and so the workflow goes to the engine whole.
+      for (const fam of [['effects-tone', 'fal-edit'], ['cards', 'fal-edit'], ['cards', 'effects-blur', 'fal-edit']] as RunnerFamily[][]) {
+        expect(take(fam), `${cls} ${fam}`).toEqual({ 0: true, fx: false, e: true, o: true })
+        expect(isRunnerEligible(q, new Set(fam)), `${cls} ${fam}`).toBe(false)
+      }
+    }
+  })
+
   it('a mask or a video is not a picture for an effect', () => {
     const take = (from: ApiPrompt[string]) => runnerTakesNode({ s: from, fx: effect('AdjustInvert', ['s', 0], { amount: 1 }) }, 'fx', TONE)
     expect(take({ class_type: 'Video', inputs: { file: 'a.mp4' } })).toBe(false)
@@ -406,6 +542,31 @@ describe('families', () => {
 })
 
 // ── With every effects family off, nothing changes (rule 12) ─────────────────
+
+/**
+ * The graph with an effect of class `cls` spliced in after every picture
+ * output (slot 0 of an image class, or a PICTURE_OUTPUTS slot): its readers
+ * read the effect instead.
+ */
+function spliceAfterPictures(p: ApiPrompt, cls: string): { prompt: ApiPrompt; count: number } {
+  const out: ApiPrompt = JSON.parse(JSON.stringify(p))
+  const w = cls === 'AdjustExposure' ? { exposure: 1 } : cls === 'AdjustInvert' ? { amount: 1 } : { threshold: 0.5 }
+  let count = 0
+  for (const [id, n] of Object.entries(p)) {
+    const slots = Object.prototype.hasOwnProperty.call(PICTURE_OUTPUTS, n.class_type) ? PICTURE_OUTPUTS[n.class_type]! : IMAGE_OUTPUT_CLASSES.has(n.class_type) ? [0] : []
+    for (const slot of slots) {
+      const fx = `fx_${id}_${slot}`
+      for (const r of Object.values(out)) {
+        for (const [name, v] of Object.entries(r.inputs ?? {})) {
+          if (Array.isArray(v) && v.length === 2 && v[0] === id && v[1] === slot) r.inputs[name] = [fx, 0]
+        }
+      }
+      out[fx] = effect(cls, [id, slot], w)
+      count++
+    }
+  }
+  return { prompt: out, count }
+}
 
 /**
  * The prompt as the runner read it before R2.1: no effect class had a row, so
@@ -419,7 +580,7 @@ const OFF_SETS: [string, RunnerFamily[]][] = [
   ['none', []],
   ['cards', ['cards']],
   ['cards, frame, fal-edit', ['cards', 'frame', 'fal-edit']],
-  ['every family but the effects', ['fal-edit', 'replicate-image', 'replicate-video', 'nano-actions', 'ref-edits', 'restyle', 'frame', 'cards', 'sync-3', 'topaz-video']],
+  ['every family but the effects', RUNNER_FAMILIES.filter(f => !(EFFECT_FAMILIES as readonly string[]).includes(f))],
   ['every family but cards', ['fal-edit', 'frame', 'effects-tone', 'effects-blur']],
 ]
 
@@ -448,18 +609,22 @@ describe('with every effects family off, the needs-the-engine lists are as befor
     }
   })
 
-  it('over every saved project graph (user/sailor/projects)', async () => {
-    const root = resolve(__dirname, '../../../user/sailor/projects')
-    let dirs: string[] = []
-    try { dirs = readdirSync(root) }
-    catch { return }
+  // The saved projects are this machine's own data (no other checkout has them): with the
+  // folder missing the check is skipped, visibly, and the synthetic graphs above stay the guard.
+  const PROJECTS = resolve(__dirname, '../../../user/sailor/projects')
+  const projectsIt = existsSync(PROJECTS) ? it : it.skip
+
+  projectsIt('over every saved project graph (user/sailor/projects), and each with every pilot spliced in after every picture', async () => {
     const { gunzipSync } = await import('node:zlib')
     const { graphToPrompt } = await import('~/lib/graph/graphToPrompt')
     const catalog = JSON.parse(gunzipSync(readFileSync(resolve(__dirname, '../../server/native/objectInfo.baseline.json.gz'))).toString('utf8'))
     let graphs = 0
-    for (const uuid of dirs.sort()) {
+    let spliced = 0
+    let pictures = 0
+    let changedWhenOn = 0
+    for (const uuid of readdirSync(PROJECTS).sort()) {
       let wf: { canvases?: { workflow: unknown }[] } | undefined
-      try { wf = JSON.parse(readFileSync(join(root, uuid, 'versions', 'current.json'), 'utf8')).workflow }
+      try { wf = JSON.parse(readFileSync(join(PROJECTS, uuid, 'versions', 'current.json'), 'utf8')).workflow }
       catch { continue }
       for (const c of wf?.canvases ?? []) {
         let p: ApiPrompt
@@ -467,10 +632,26 @@ describe('with every effects family off, the needs-the-engine lists are as befor
         catch { continue }
         sameAsBefore(p, uuid)
         graphs++
+        for (const cls of Object.keys(EFFECTS)) {
+          const s = spliceAfterPictures(p, cls)
+          if (!s.count) continue
+          sameAsBefore(s.prompt, `${uuid} with ${cls}`)
+          // With the effects on, the pilots are taken: the same graphs read differently (the guard has teeth).
+          const on = new Set<RunnerFamily>(RUNNER_FAMILIES)
+          if (JSON.stringify(nodesNeedingEngine(s.prompt, { runnerOn: true, families: on, titleOf: id => id })) !== JSON.stringify(nodesNeedingEngine(withoutEffects(s.prompt), { runnerOn: true, families: on, titleOf: id => id }))) changedWhenOn++
+          spliced++
+          pictures += s.count
+        }
       }
     }
-    expect(graphs).toBeGreaterThan(0)
-  }, 120_000)
+    // Lower bounds, not exact counts: the folder is live data (every save changes it).
+    // On 2026-09-26: 866 graphs, 1,827 graphs with a pilot spliced in, 3,849 pilots.
+    expect(graphs).toBeGreaterThanOrEqual(800)
+    expect(spliced).toBeGreaterThanOrEqual(1500)
+    expect(pictures).toBeGreaterThanOrEqual(3000)
+    expect(changedWhenOn).toBeGreaterThan(0)
+    console.info(`families-off invariant: ${graphs} saved graphs, ${spliced} with a pilot spliced in, ${pictures} pilots, ${changedWhenOn} read differently with the effects on`)
+  }, 300_000)
 })
 
 // ── The engine ───────────────────────────────────────────────────────────────
@@ -490,6 +671,31 @@ describe('the engine (cards and effects-tone on)', () => {
     await expect(k.engine.startRun({ userId: k.userId, takes: [p], ...START }))
       .rejects.toMatchObject({ statusCode: 400, message: 'This picture is 16-bit. Save it as an 8-bit picture and load it again.' })
     expect(k.ledger.hold).not.toHaveBeenCalled()
+  })
+
+  it('a loader\'s animation behind an effect (Python makes a batch of its frames) is refused at the start, before the hold', async () => {
+    const VALUES = JSON.parse(readFileSync(resolve(__dirname, 'fixtures/runner-values.json'), 'utf8')) as { rgb_turned: { name: string; file: string }[] }
+    const loadImage = (n: string) => ({ class_type: 'LoadImage', inputs: { image: n, upload: 'image' } })
+    for (const name of ['a two-frame GIF', 'a two-frame animated PNG']) {
+      for (const make of [loadImage, card]) {
+        const k = makeKit({ hosted: true, deps: { families: () => TONE } })
+        put(k.root, 'anim.bin', b64(VALUES.rgb_turned.find(x => x.name === name)!.file))
+        // Straight in, and through an Image card fed by the loader.
+        for (const p of [
+          { 0: make('anim.bin'), fx: effect('AdjustInvert', ['0', 0], { amount: 1 }) },
+          { 0: make('anim.bin'), 1: outCard('0'), fx: effect('AdjustInvert', ['1', 0], { amount: 1 }) },
+        ] as ApiPrompt[]) {
+          expect(isRunnerEligible(p, TONE)).toBe(true)
+          await expect(k.engine.startRun({ userId: k.userId, takes: [p], ...START }), `${name} ${make('x').class_type}`)
+            .rejects.toMatchObject({ statusCode: 400, message: EFFECT_PICTURE_ANIMATED })
+        }
+        expect(k.ledger.hold).not.toHaveBeenCalled()
+      }
+    }
+    // The node's own check is the backstop (a picture that arrives some other way).
+    const c: FxCase = { name: 'anim', class_type: 'AdjustInvert', node_id: 'fx', widgets: { amount: 1 }, inputs: { image: { source: 'card', files: ['anim.bin'] } } }
+    await expect(runEffectCase(c, { families: TONE, files: { 'anim.bin': b64(VALUES.rgb_turned.find(x => x.name === 'a two-frame GIF')!.file) } }))
+      .rejects.toThrow(EFFECT_PICTURE_ANIMATED)
   })
 
   it('an effect feeding Edit an image hands off its kept round-8 PNG', async () => {
@@ -529,28 +735,25 @@ describe('the engine (cards and effects-tone on)', () => {
     expect(Buffer.compare(saved.px, b64(item.trunc8!))).toBe(0)
   })
 
-  it('an effect → Frame renders as if the Frame read the kept PNG', async () => {
+  it('an effect → Frame: the Frame gets the effect\'s float tensor, and renders Python\'s picture exactly', async () => {
+    const ch = FX.chains.find(x => x.frame)!
+    const file = ch.inputs.image!.files[0]!
     const kept = createMemoryKeptBytes()
     const k = makeKit({ hosted: false, deps: { families: () => TONE_FRAME, kept } })
-    put(k.root, fileName, fileBytes)
-    const p: ApiPrompt = { 0: card(fileName), [c.node_id]: effect('AdjustInvert', ['0', 0], c.widgets), f: { class_type: 'Compositor', inputs: frameWidgets({ layer1: [c.node_id, 0], layer1_scale: 0.8, layer1_rotation: 10 }) } }
+    put(k.root, file, b64(FX.assets[file]!))
+    const fx = ch.effect!
+    const p: ApiPrompt = { 0: card(file), [fx.node_id]: effect(fx.class_type, ['0', 0], fx.widgets), f: { class_type: 'Compositor', inputs: frameWidgets({ ...ch.frame!.widgets, layer1: [fx.node_id, 0] }) } }
     expect(isRunnerEligible(p, TONE_FRAME)).toBe(true)
     const { runId } = await k.engine.startRun({ userId: k.userId, takes: [p], ...START })
     await k.engine.settled(runId)
     const run = (await k.store.get(runId))!
     expect(run.status).toBe('done')
-    const keptFile = (run.takes[0]!.nodes[c.node_id]!.values![0] as Extract<RunnerValue, { kind: 'files' }>).files[0]!
+    const v = run.takes[0]!.nodes[fx.node_id]!.values![0] as Extract<RunnerValue, { kind: 'files' }>
+    expect(v.tensors).toHaveLength(1)
     const frameFile = run.takes[0]!.nodes.f!.outputs[0]!
     const frame = await pngPixels(new Uint8Array(readFileSync(join(k.root, frameFile.type, frameFile.subfolder, frameFile.filename))))
-    // The same PNG handed to a Frame by a provider (it has alpha: read as RGBA, as a download is).
-    const bytes = await kept.read(keptFile)
-    expect((await pngPixels(bytes)).channels).toBe(4)
-    const q: ApiPrompt = { g: { class_type: 'GenerateImageNode', inputs: {} }, f: { ...p.f!, inputs: { ...p.f!.inputs, layer1: ['g', 0] } } }
-    const probe: OutputFile = { filename: 'probe.png', subfolder: '', type: 'input' }
-    const plan = await planNode({ prompt: q, nodeId: 'f', families: TONE_FRAME, gateOpen: false, filesFrom: () => [probe], toUrl: async () => '', readFile: async () => bytes }) as Extract<NodePlan, { kind: 'local' }>
-    const direct = await pngPixels((await plan.render()).image)
-    expect([direct.w, direct.h, direct.channels]).toEqual([frame.w, frame.h, frame.channels])
-    expect(Buffer.compare(direct.px, frame.px)).toBe(0)
+    expect([frame.w, frame.h, frame.channels]).toEqual([ch.frame!.w, ch.frame!.h, 3])
+    expect(Buffer.compare(frame.px, b64(ch.frame!.image8))).toBe(0)
   })
 })
 

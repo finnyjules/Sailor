@@ -46,17 +46,55 @@ export function tensorCore(px: PixelsCore) {
    * float (b / 255; an Image card's alpha through its 1 − mask round trip).
    * Python's 1×1 blank (no data) is 1 × 1 black RGB.
    */
-  function fromPicture(p: PixelsPicture): Tensor {
+  function fromPicture(p: PixelsPicture, stop?: () => boolean): Tensor {
     const c = px.tensorChannels(p)
     const t = tensor(c, p.h, p.w)
     const d = p.data
     if (!d) return t
     const n = p.w * p.h
-    for (let k = 0; k < c; k++) {
-      const table = px.channelTable(p.source, k)
-      const out = t.data.subarray(k * n, (k + 1) * n)
-      for (let i = 0; i < n; i++) out[i] = table[d[i * 4 + k]!]!
-    }
+    const tables = Array.from({ length: c }, (_, k) => px.channelTable(p.source, k))
+    rows(p.h, stop, (y) => {
+      for (let k = 0; k < c; k++) {
+        const table = tables[k]!
+        const out = t.data.subarray(k * n, (k + 1) * n)
+        for (let i = y * p.w, end = i + p.w; i < end; i++) out[i] = table[d[i * 4 + k]!]!
+      }
+    })
+    return t
+  }
+
+  /**
+   * The float32 tensor an effect hands on to the effects and Frames reading it
+   * (fix round 1: Python passes the float itself): a kept file of a 16-byte
+   * header ('SFT1', then c, h, w as little-endian uint32) and the planar
+   * float32 data, little-endian.
+   */
+  function tensorFileOf(t: Tensor): Uint8Array {
+    const out = new Uint8Array(16 + t.data.length * 4)
+    const v = new DataView(out.buffer)
+    v.setUint32(0, 0x31544653, true)
+    v.setUint32(4, t.c, true)
+    v.setUint32(8, t.h, true)
+    v.setUint32(12, t.w, true)
+    const body = new Float32Array(out.buffer, 16, t.data.length)
+    body.set(t.data)
+    // The data is written in this machine's order: refuse a big-endian one rather than write a wrong file.
+    if (new Uint8Array(new Uint32Array([1]).buffer)[0] !== 1) throw new Error('This machine stores numbers big-endian')
+    return out
+  }
+
+  /** A kept tensor file back as its tensor (a copy, so the bytes' buffer may be anything). */
+  function fromTensorFile(bytes: Uint8Array): Tensor {
+    const bad = () => new Error('A picture this effect reads could not be read')
+    if (bytes.length < 16) throw bad()
+    const v = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
+    if (v.getUint32(0, true) !== 0x31544653) throw bad()
+    const c = v.getUint32(4, true)
+    const h = v.getUint32(8, true)
+    const w = v.getUint32(12, true)
+    if (c < 1 || c > 4 || bytes.length !== 16 + c * h * w * 4) throw bad()
+    const t = tensor(c, h, w)
+    new Uint8Array(t.data.buffer).set(bytes.subarray(16))
     return t
   }
 
@@ -105,25 +143,26 @@ export function tensorCore(px: PixelsCore) {
    *   'round' — the hand-off's round(255·clamp(x, 0, 1)), halves to even
    *             (_image_tensor_to_data_url; R1.4 clip).
    */
-  function quantize(t: Tensor, mode: 'trunc' | 'round'): Uint8Array {
+  function quantize(t: Tensor, mode: 'trunc' | 'round', stop?: () => boolean): Uint8Array {
     const n = t.w * t.h
     const c = t.c
     const out = new Uint8Array(n * c)
-    for (let k = 0; k < c; k++) {
-      const d = t.data.subarray(k * n, (k + 1) * n)
-      if (mode === 'trunc') {
-        for (let i = 0; i < n; i++) {
-          const v = f(255 * d[i]!)
-          out[i * c + k] = v > 0 ? (v > 255 ? 255 : Math.trunc(v)) : 0
+    const data = t.data
+    rows(t.h, stop, (y) => {
+      for (let k = 0; k < c; k++) {
+        const base = k * n
+        for (let i = y * t.w, end = i + t.w; i < end; i++) {
+          if (mode === 'trunc') {
+            const v = f(255 * data[base + i]!)
+            out[i * c + k] = v > 0 ? (v > 255 ? 255 : Math.trunc(v)) : 0
+          }
+          else {
+            const x = data[base + i]!
+            out[i * c + k] = px.roundHalfEven(f((x > 0 ? (x > 1 ? 1 : x) : 0) * 255))
+          }
         }
       }
-      else {
-        for (let i = 0; i < n; i++) {
-          const x = d[i]!
-          out[i * c + k] = px.roundHalfEven(f((x > 0 ? (x > 1 ? 1 : x) : 0) * 255))
-        }
-      }
-    }
+    })
     return out
   }
 
@@ -138,7 +177,7 @@ export function tensorCore(px: PixelsCore) {
    * `_luma` (nodes_color_filters.py:12-13) of channels 0–2: each product with
    * the float32 weight rounded, then (p0 + p1) + p2.
    */
-  function luma709(t: Tensor): Float32Array {
+  function luma709(t: Tensor, stop?: () => boolean): Float32Array {
     if (t.c < 3) throw new Error(EFFECT_ERRORS.needsRgb)
     const n = t.w * t.h
     const r = t.data.subarray(0, n)
@@ -148,7 +187,9 @@ export function tensorCore(px: PixelsCore) {
     const wg = f(0.7152)
     const wb = f(0.0722)
     const out = new Float32Array(n)
-    for (let i = 0; i < n; i++) out[i] = f(f(f(wr * r[i]!) + f(wg * g[i]!)) + f(wb * b[i]!))
+    rows(t.h, stop, (y) => {
+      for (let i = y * t.w, end = i + t.w; i < end; i++) out[i] = f(f(f(wr * r[i]!) + f(wg * g[i]!)) + f(wb * b[i]!))
+    })
     return out
   }
 
@@ -163,7 +204,7 @@ export function tensorCore(px: PixelsCore) {
     }
   }
 
-  return { EFFECT_ERRORS, s32, tensor, fromPicture, fromMask16, quantize, mask16, luma709, clamp01, rows }
+  return { EFFECT_ERRORS, s32, tensor, fromPicture, tensorFileOf, fromTensorFile, fromMask16, quantize, mask16, luma709, clamp01, rows }
 }
 
 export type TensorCore = ReturnType<typeof tensorCore>

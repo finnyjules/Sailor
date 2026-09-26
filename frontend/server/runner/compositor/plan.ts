@@ -24,6 +24,8 @@ import { decodeMask, type Mask } from '../pictures/mask'
 import type { Picture } from './plane'
 import { MAX_LAYERS, type Loader } from './render'
 import { renderFrameInWorker } from './worker'
+import { keptTensorsBehind } from '../effects/tensorFiles'
+import { effectCores } from '../effects/cores'
 
 /**
  * How the node at the end of this wire hands its picture to Python, which
@@ -85,8 +87,13 @@ export function pictureSourceOf(prompt: ApiPrompt, link: ApiLink, depth = 0): Pi
   throw new Error(`The runner cannot read a Frame picture from a ${node.class_type} node`)
 }
 
-/** 'mask': a LoadImage's file, whose alpha the Frame reads; 'kept-mask': a mask value the runner kept (R1.3: a LoadImage run as a card). */
-interface Wired { source: PictureSource | 'mask' | 'kept-mask'; file: OutputFile | null }
+/**
+ * 'mask': a LoadImage's file, whose alpha the Frame reads; 'kept-mask': a mask
+ * value the runner kept (R1.3: a LoadImage run as a card). `tensor`: the
+ * float32 tensor an effect kept for this picture (R2.1 fix round 1), read
+ * instead of its PNG, as Python hands the Frame the float itself.
+ */
+interface Wired { source: PictureSource | 'mask' | 'kept-mask'; file: OutputFile | null; tensor?: OutputFile }
 
 export function planCompositor(ctx: PlanContext): NodePlan {
   const inputs = ctx.prompt[ctx.nodeId]!.inputs ?? {}
@@ -96,7 +103,8 @@ export function planCompositor(ctx: PlanContext): NodePlan {
     const source = pictureSourceOf(ctx.prompt, v)
     const file = ctx.filesFrom(v)[0] ?? null
     if (!file && source !== 'blank') throw new Error('A picture for the Frame is missing')
-    return { source, file }
+    const tensor = source === 'tensor' && file ? keptTensorsBehind(ctx, v)?.get(`${file.type}:${file.subfolder}:${file.filename}`) : undefined
+    return tensor ? { source, file, tensor } : { source, file }
   }
   const mask = (name: string): Wired | null => {
     const v = inputs[name]
@@ -125,6 +133,7 @@ export function planCompositor(ctx: PlanContext): NodePlan {
             // Raw RGBA8 only: the worker builds the tensor.
             if (w.source === 'mask') return await decodeRawMask(await read(w.file!))
             if (w.source === 'kept-mask') return loadImageMaskPicture(await decodeMask(await read(w.file!)))
+            if (w.tensor) return effectCores.tk.fromTensorFile(await read(w.tensor))
             return await decodeRaw(w.file ? await read(w.file) : null, w.source)
           }
           catch (e) {

@@ -35,7 +35,7 @@ import { encodeMask, loadImageMask, type Mask } from '../pictures/mask'
 import { MAX_INPUT_PIXELS } from '../compositor/decode'
 import { pyTruthy } from '#shared/runner/pyText'
 import { IMAGE_LAYERS } from '#shared/runner/smartLayout'
-import { effectFamilyOn, effectSchemaOf } from '#shared/runner/effects'
+import { EFFECT_PICTURE_ANIMATED, effectFamilyOn, effectSchemaOf } from '#shared/runner/effects'
 
 export const TEXT_ON_PATH_UNLOADABLE = 'Text on path couldn’t load its picture. Change a setting to bake it again.'
 export const TEXT_MASK_UNLOADABLE = 'Text mask couldn’t load its picture. Change a setting to bake it again.'
@@ -100,12 +100,17 @@ export function cardPictureFiles(prompt: ApiPrompt, families: ReadonlySet<Runner
       if (behind) out.push({ ...behind, classType: 'Image' })
     }
     // An effect (R2 rule 9) decodes each picture wired in as Python's tensor:
-    // an Image card's own file behind the wire is checked here too.
+    // an Image card's own file behind the wire is checked here too; and, as
+    // for Save image, a loader's animation is refused (Python's loaders make a
+    // batch of every frame, and the effect a result for each; R2.1 fix round 1).
     const fx = effectFamilyOn(n.class_type, families) ? effectSchemaOf(n.class_type) : undefined
     for (const input of fx?.images ?? []) {
       const v = inputs[input.name]
-      const behind = isLink(v) ? cardFileBehind(prompt, v) : null
+      if (!isLink(v)) continue
+      const behind = cardFileBehind(prompt, v)
       if (behind) out.push({ ...behind, classType: 'Image' })
+      const loader = loaderFileBehind(prompt, v)
+      if (loader) out.push({ ...loader, oneFrame: true, animated: EFFECT_PICTURE_ANIMATED })
     }
     // Smart Layout (R1.6) decodes each image layer's first frame as Python's tensor.
     if (n.class_type === 'SmartLayout') {
@@ -126,8 +131,11 @@ export function cardPictureFiles(prompt: ApiPrompt, families: ReadonlySet<Runner
   return out
 }
 
-/** A file cardPictureFiles names; `oneFrame`: one with several frames is refused too (PICTURE_ANIMATED). */
-export interface CardPictureFile { nodeId: string; classType: string; file: OutputFile; oneFrame?: true }
+/**
+ * A file cardPictureFiles names; `oneFrame`: one with several frames is
+ * refused too, in `animated`'s words (PICTURE_ANIMATED when absent).
+ */
+export interface CardPictureFile { nodeId: string; classType: string; file: OutputFile; oneFrame?: true; animated?: string }
 
 /** The picture input of each picture utility (R1.4). */
 const PICTURE_READS: Readonly<Record<string, string>> = { GetImageSize: 'image', ImageToMask: 'image', TextMask: 'source' }

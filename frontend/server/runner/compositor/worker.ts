@@ -122,7 +122,9 @@ parentPort.on('message', (m) => {
       const inputs = {}
       for (const name of Object.keys(m.inputs)) {
         const v = m.inputs[name]
-        inputs[name] = v && v.mask16 ? tk.fromMask16(v.mask16, v.w, v.h) : tk.fromPicture(v)
+        inputs[name] = v && v.mask16 ? tk.fromMask16(v.mask16, v.w, v.h)
+          : v && v.tensorFile ? tk.fromTensorFile(v.tensorFile)
+            : tk.fromPicture(v, isStopped)
       }
       const r = fx.op(inputs, fx.params, isStopped, fx.state, m.index)
       stopped()
@@ -135,14 +137,15 @@ parentPort.on('message', (m) => {
           return
         }
         const o = { w: t.w, h: t.h, channels: t.c }
-        if (m.want.round[i]) { o.round8 = tk.quantize(t, 'round'); transfer.push(o.round8.buffer) }
-        if (m.want.trunc[i]) { o.trunc8 = tk.quantize(t, 'trunc'); transfer.push(o.trunc8.buffer) }
+        if (m.want.round[i]) { o.round8 = tk.quantize(t, 'round', isStopped); transfer.push(o.round8.buffer) }
+        if (m.want.trunc[i]) { o.trunc8 = tk.quantize(t, 'trunc', isStopped); transfer.push(o.trunc8.buffer) }
+        if (m.want.f32 && m.want.f32[i]) { o.tensorFile = tk.tensorFileOf(t); transfer.push(o.tensorFile.buffer) }
         outputs.push(o)
       })
       value = { outputs }
       if (m.first) {
         const pt = r.preview || r.outputs[0]
-        const p8 = tk.quantize(pt, 'trunc')
+        const p8 = tk.quantize(pt, 'trunc', isStopped)
         value.preview = { w: pt.w, h: pt.h, channels: pt.c, px: p8 }
         transfer.push(p8.buffer)
       }
@@ -372,17 +375,20 @@ export interface PixelsWorker {
 
 /** A mask handed to an effect: a kept 16-bit mask's inflated scanlines. */
 export interface EffectMaskIn { mask16: Uint8Array; w: number; h: number }
+/** A picture another effect made, as the float32 tensor it kept (effects/core/tensor.ts tensorFileOf). */
+export interface EffectTensorIn { tensorFile: Uint8Array }
 
 export interface EffectRunJob {
   index: number
-  inputs: Record<string, PixelsPicture | EffectMaskIn>
+  inputs: Record<string, PixelsPicture | EffectMaskIn | EffectTensorIn>
   first: boolean
   masks: boolean[]
-  want: { round: boolean[]; trunc: boolean[] }
+  /** Which forms of each picture output: 8-bit round, 8-bit trunc, and the float32 tensor file (read by effects or Frames). */
+  want: { round: boolean[]; trunc: boolean[]; f32: boolean[] }
 }
 
 /** One output of an effect's run: a picture's 8-bit bytes (interleaved, its own channels) or a mask's scanlines. */
-export type EffectOut = { w: number; h: number; channels: number; round8?: Uint8Array; trunc8?: Uint8Array } | { w: number; h: number; mask16: Uint8Array }
+export type EffectOut = { w: number; h: number; channels: number; round8?: Uint8Array; trunc8?: Uint8Array; tensorFile?: Uint8Array } | { w: number; h: number; mask16: Uint8Array }
 
 export interface EffectRunResult {
   outputs: EffectOut[]
@@ -425,6 +431,12 @@ export function pixelsInWorker<T>(signal: AbortSignal | undefined, job: (w: Pixe
           if ('mask16' in v) {
             const own = v.mask16.byteOffset === 0 && v.mask16.byteLength === v.mask16.buffer.byteLength ? v.mask16 : v.mask16.slice()
             inputs[name] = { mask16: own, w: v.w, h: v.h }
+            buffers.push(own.buffer as ArrayBuffer)
+          }
+          else if ('tensorFile' in v) {
+            const b = v.tensorFile
+            const own = b.byteOffset === 0 && b.byteLength === b.buffer.byteLength && !(b.buffer instanceof SharedArrayBuffer) ? b : b.slice()
+            inputs[name] = { tensorFile: own }
             buffers.push(own.buffer as ArrayBuffer)
           }
           else {

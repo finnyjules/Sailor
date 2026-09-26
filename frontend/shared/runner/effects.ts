@@ -62,6 +62,7 @@ export const EFFECT_MAX_WORK = 16 * 1024 * 1024 * 1024
 export const EFFECT_PICTURE_TOO_LARGE = 'This picture is too large for this effect (more than 8192 × 8192 pixels). Use a smaller picture.'
 export const EFFECT_PICTURE_TOO_LARGE_HOSTED = 'This picture is too large for this effect (more than 4096 × 4096 pixels). Use a smaller picture.'
 export const EFFECT_PICTURES_TOO_LARGE = 'The pictures this effect reads are too large to work on together (more than 268 million pixels). Use fewer or smaller pictures.'
+export const EFFECT_PICTURE_ANIMATED = 'This picture is animated, and effects here take single pictures only. Save it as a PNG and load it again.'
 export const EFFECT_TOO_MUCH_WORK = 'This effect would take too long on a picture this size. Use a smaller picture or a lighter setting.'
 
 /** Where Python raises, the runner fails the node with these words (rule 6), keyed as the cores throw them. */

@@ -70,7 +70,7 @@ export function toneCore(k: TensorCore) {
   function AdjustThreshold(inp: Record<string, Tensor>, p: Record<string, unknown>, stop?: () => boolean): EffectResult {
     const x = inp.image!
     const t = k.s32(p.threshold as number)
-    const luma = k.luma709(x)
+    const luma = k.luma709(x, stop)
     const out = k.tensor(x.c, x.h, x.w)
     const n = x.w * x.h
     k.rows(x.h, stop, (y) => {

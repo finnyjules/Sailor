@@ -26,7 +26,8 @@ export interface FxItem {
   w: number; h: number; c: number
   f32?: string; round8?: string; trunc8?: string
   f32_sha256?: string; round8_sha256?: string; trunc8_sha256?: string
-  band?: { count: number; in: string; trunc8: string; round8: string }
+  /** Per mode, the values near that mode's boundary and Python's bytes there (fixture packing). */
+  band?: Record<'trunc' | 'round', { count: number; in: string; py8: string }>
 }
 export interface FxCase {
   name: string
@@ -180,25 +181,28 @@ export function expectExactHash(ts: Float32Array, pySha: string, label = ''): vo
   expect(sha256(new Uint8Array(ts.buffer, ts.byteOffset, ts.byteLength)), label).toBe(pySha)
 }
 
-/** A hashed case's band (the fixture's packing): the in-band values' positions and Python's bytes there. */
-export function bandOf(band: NonNullable<FxItem['band']>): [number, number, number][] {
-  const inside = inflateSync(b64(band.in))
-  const tr = inflateSync(b64(band.trunc8))
-  const ro = inflateSync(b64(band.round8))
-  const out: [number, number, number][] = []
+/**
+ * A hashed case's band for one mode (the fixture's packing): the values whose
+ * float lies within ε of that mode's boundary, [[index, py8], …].
+ */
+export function bandOf(band: NonNullable<FxItem['band']>, mode: 'trunc' | 'round'): [number, number][] {
+  const inside = inflateSync(b64(band[mode].in))
+  const py = inflateSync(b64(band[mode].py8))
+  const out: [number, number][] = []
   let j = 0
-  for (let i = 0; i < inside.length; i++) if (inside[i]) { out.push([i, tr[j]!, ro[j]!]); j++ }
+  for (let i = 0; i < inside.length; i++) if (inside[i]) { out.push([i, py[j]!]); j++ }
   return out
 }
 
 /**
- * A library result's 8-bit bytes: equal to Python's, except at pixels where
- * Python's float lies within eps of a quantisation boundary, where they may
- * differ by exactly one level. The band is Python's float (small cases:
- * `pyF32`) or the fixture's band list (hashed cases).
+ * A library result's 8-bit bytes: equal to Python's, except at values where
+ * Python's float lies within eps of THIS mode's quantisation boundary (an
+ * integer for trunc, a half for round), where they may differ by exactly one
+ * level. The band is Python's float (small cases: `pyF32`) or the fixture's
+ * band for the mode (hashed cases: bandOf(band, mode)).
  */
 export function expectBand(
-  ts8: Uint8Array, py8: Uint8Array, pyF32: Float32Array | null, band: [number, number, number][] | null,
+  ts8: Uint8Array, py8: Uint8Array, pyF32: Float32Array | null, band: [number, number][] | null,
   eps: number, mode: 'trunc' | 'round', label = '',
 ): void {
   expect(ts8.length, label).toBe(py8.length)

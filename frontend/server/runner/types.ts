@@ -35,7 +35,12 @@ export interface OutputFile {
  *   glb      a 3D model address, and Sailor's saved copy when there is one
  */
 export type RunnerValue =
-  | { kind: 'files'; files: OutputFile[]; list?: true }
+  /**
+   * `tensors` (R2.1 fix round 1): an effect's pictures also as the float32
+   * tensors it made, one kept file per picture beside `files`, which the next
+   * effect or Frame reads instead of the 8-bit PNG (as Python hands the float on).
+   */
+  | { kind: 'files'; files: OutputFile[]; list?: true; tensors?: OutputFile[] }
   | { kind: 'mask'; files: OutputFile[] }
   | { kind: 'text'; text: string }
   | { kind: 'number'; value: number; int: boolean }

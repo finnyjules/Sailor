@@ -34,9 +34,11 @@ file it writes into temp is read back. Small outputs are recorded as float32
 (little-endian, H × W × C, base64) with Python's own 8-bit forms: `round8`,
 the hand-off's (tensor.clamp(0, 1) · 255).round() (_image_tensor_to_data_url),
 and `trunc8`, np.clip(255·x, 0, 255).astype(uint8) (save_live_preview and
-save_images). A hashed case records the sha256 of each, and its band: the
-pixels whose float lies within ε = 2⁻⁸ (in 255-scale) of a quantisation
-boundary, [[index, trunc8, round8], …].
+save_images). A hashed case records the sha256 of each, and its band per mode:
+the values whose float lies within ε = 2⁻⁸ (in 255-scale) of that mode's
+quantisation boundary (an integer for trunc, a half for round), with Python's
+bytes there. `chains` (fix round 1): effects in a row, and an effect into a
+Frame, each fed the float tensor the one before made, as ComfyUI runs them.
 
 Torch runs at its default thread count, as ComfyUI does (the script refuses
 one thread, as compositor_fixtures.py does), and the file records the torch
@@ -204,19 +206,18 @@ def trunc8(t: torch.Tensor) -> np.ndarray:
 
 
 def band_list(t: torch.Tensor, eps: float = BAND_EPS) -> dict:
-    """Pixels whose float lies within eps (255-scale) of a trunc or round boundary, with
-    Python's bytes there ([[index, trunc8, round8], …]), packed: `in` one byte per value of
-    the interleaved H × W × C bytes (1 in the band), `trunc8` and `round8` Python's bytes
-    at the band's values in order; each zlib-compressed (level 9), base64."""
+    """Per mode, the values whose float lies within eps (255-scale) of that mode's
+    quantisation boundary, with Python's bytes there ([[index, py8], …]): `trunc` —
+    an integer (trunc(f32(255·x))); `round` — a half (round(255·x)). Packed per mode:
+    `in` one byte per value of the interleaved H × W × C bytes (1 in the band) and `py8`
+    Python's bytes at the band's values in order, each zlib-compressed (level 9), base64."""
     v = (t.cpu().numpy().astype(np.float64) * 255.0).reshape(-1)
-    near_int = np.abs(v - np.round(v)) < eps
-    near_half = np.abs(v - (np.floor(v) + 0.5)) < eps
-    inside = near_int | near_half
-    tr = trunc8(t).reshape(-1)
-    ro = round8(t).reshape(-1)
     z = lambda b: b64(zlib.compress(b, 9))  # noqa: E731
-    return {"count": int(inside.sum()), "in": z(inside.astype(np.uint8).tobytes()),
-            "trunc8": z(tr[inside].tobytes()), "round8": z(ro[inside].tobytes())}
+    out = {}
+    for mode, edge, py in (("trunc", np.round(v), trunc8(t).reshape(-1)), ("round", np.floor(v) + 0.5, round8(t).reshape(-1))):
+        inside = np.abs(v - edge) < eps
+        out[mode] = {"count": int(inside.sum()), "in": z(inside.astype(np.uint8).tobytes()), "py8": z(py[inside].tobytes())}
+    return out
 
 
 def record_output(t: torch.Tensor, hashed: bool) -> dict:
@@ -340,6 +341,48 @@ def standard_cases(g: Group, cls, class_type: str) -> None:
 
 # ── Groups ───────────────────────────────────────────────────────────────────
 
+def chain_case(g: Group, name: str, steps: list, source: str, file: str, hashed: bool) -> dict:
+    """Effects in a row, each fed the float tensor the one before made (as ComfyUI runs
+    them): every step's outputs and preview are recorded."""
+    x = load(source, file, g.assets[file])
+    row: dict = {"name": name, "inputs": {"image": {"source": source, "files": [file]}}, "steps": []}
+    for cls, class_type, widgets in steps:
+        g.seq += 1
+        node_id = f"fx{g.seq}"
+        outs, ui = run_node(cls, node_id, image=x, **widgets)
+        row["steps"].append({"class_type": class_type, "node_id": node_id, "widgets": widgets,
+                             "outputs": [record_output(t, hashed) for t in outs],
+                             "ui": {"images": ui["images"], "animated": list(ui["animated"])},
+                             "preview": read_preview(ui, hashed)})
+        x = outs[0]
+    return row
+
+
+def frame_chain(g: Group, file: str) -> dict:
+    """An effect (Invert 0.37 on a see-through card picture: 4 channels) into a Frame's
+    layer 1: the Frame gets the float tensor; its 8-bit result as save_live_preview writes it."""
+    from unittest import mock
+    from comfy_api.latest._io import HiddenHolder
+    import comfy_extras.nodes_compositor as nc
+    from comfy_extras.nodes_color_filters import InvertNode
+    x = load("card", file, g.assets[file])
+    g.seq += 1
+    node_id = f"fx{g.seq}"
+    outs, _ui = run_node(InvertNode, node_id, image=x, amount=0.37)
+    widgets = {"layer1_x": 0.0, "layer1_y": 0.0, "layer1_rotation": 10.0, "layer1_scale": 0.8, "layer1_opacity": 1.0,
+               "layer1_blend": "normal", "layer1_z": 1.0, "layer1_protect": False, "layer1_cloner": "",
+               "width": 0, "height": 0, "motion_params": ""}
+    previews = []
+    with mock.patch.object(nc.CompositorNode, "hidden", HiddenHolder.from_dict({"UNIQUE_ID": "frame"})), \
+            mock.patch.object(nc, "save_live_preview", lambda t, *_a, **_k: previews.append(t) or {}):
+        res = nc.CompositorNode.execute(layer1=outs[0], **widgets)
+    image = res.result[0]
+    assert previews and previews[0] is image
+    return {"name": "Invert 0.37 → Frame, card", "inputs": {"image": {"source": "card", "files": [file]}},
+            "effect": {"class_type": "AdjustInvert", "node_id": node_id, "widgets": {"amount": 0.37}},
+            "frame": {"widgets": widgets, "w": int(image.shape[2]), "h": int(image.shape[1]), "image8": b64(trunc8(image[0]).tobytes())}}
+
+
 def machinery() -> dict:
     from comfy_extras.nodes_adjust_exposure import AdjustExposureNode
     from comfy_extras.nodes_color_filters import InvertNode, ThresholdNode
@@ -358,11 +401,22 @@ def machinery() -> dict:
     t = float(at) - float(np.spacing(at)) / 4
     assert np.float32(t) == at and t < float(at)
     g.case("AdjustThreshold: a threshold just under a luma the picture holds", ThresholdNode, "AdjustThreshold", {"threshold": t}, {"image": ("rgb", [rgb])})
+    # Chains (fix round 1 ruling): Python hands the float32 tensor straight to the next node.
+    chains = []
+    big, small = g.picture(320, 200, 3, 6), g.picture(23, 19, 4, 3)
+    for label, steps in (
+        ("Exposure 0.3 → Invert 0.37", [(AdjustExposureNode, "AdjustExposure", {"exposure": 0.3}), (InvertNode, "AdjustInvert", {"amount": 0.37})]),
+        ("Invert 0.37 → Exposure −0.7", [(InvertNode, "AdjustInvert", {"amount": 0.37}), (AdjustExposureNode, "AdjustExposure", {"exposure": -0.7})]),
+        ("Exposure 0.3 → Threshold 0.5", [(AdjustExposureNode, "AdjustExposure", {"exposure": 0.3}), (ThresholdNode, "AdjustThreshold", {"threshold": 0.5})]),
+    ):
+        for source, file, hashed in (("rgb", big, True), ("card", small, False)):
+            chains.append(chain_case(g, f"{label}, {source}", steps, source, file, hashed))
+    chains.append(frame_chain(g, small))
     # save_live_preview keeps a 4-channel tensor's alpha: the preview is RGBA.
     t4 = torch.from_numpy(np.frombuffer(synth(5, 4, 4, 8), dtype=np.uint8).reshape(1, 4, 5, 4).astype(np.float32) / 255.0)
     ui = save_live_preview(t4, "rgba_probe")
     rgba = read_preview({"images": ui["images"]}, False)
-    return {"synth": synths, "cases": g.cases, "assets": {k: b64(v) for k, v in sorted(g.assets.items())}, "rgba_preview": rgba}
+    return {"synth": synths, "cases": g.cases, "chains": chains, "assets": {k: b64(v) for k, v in sorted(g.assets.items())}, "rgba_preview": rgba}
 
 
 GROUPS = {"machinery": machinery}

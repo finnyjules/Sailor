@@ -1560,7 +1560,7 @@ export function createEngine(deps: EngineDeps) {
         if (why) throw refuse(cardPictureRefusal(c.classType, why), 400, { nodeId: c.nodeId, classType: c.classType, file: c.file.filename })
         // Save image / Preview image behind a loader (R1.5): Python saves every frame of an animation.
         if (c.oneFrame && pictureHasFrames(await pictureMeta(bytes), bytes)) {
-          throw refuse(PICTURE_ANIMATED, 400, { nodeId: c.nodeId, classType: c.classType, file: c.file.filename })
+          throw refuse(c.animated ?? PICTURE_ANIMATED, 400, { nodeId: c.nodeId, classType: c.classType, file: c.file.filename })
         }
       }
     }
