@@ -4,6 +4,7 @@ import { mount } from '@vue/test-utils'
 import BrushToolbar from '~/components/vue-canvas/compositor/BrushToolbar.vue'
 import BrushTipSettings from '~/components/vue-canvas/compositor/BrushTipSettings.vue'
 import { useBrushPaint } from '~/composables/useBrushPaint'
+import { brushEffectLabel } from '~/lib/brushTips/effects'
 
 beforeEach(() => localStorage.clear())
 
@@ -46,6 +47,16 @@ describe('BrushToolbar', () => {
     await w.get('[data-testid="brush-effect-pixelate"]').trigger('click')
     expect(brush.effect.value).toBe('pixelate')
     expect(w.get('[data-testid="brush-effect-pixelate"]').attributes('aria-pressed')).toBe('true')
+  })
+  it('shows the shader-paint swatch only once a library shader is chosen', async () => {
+    const brush = useBrushPaint()
+    const w = mount(BrushToolbar, { props: { brush }, global: { stubs } })
+    expect(w.find('[data-testid="brush-shader-paint"]').exists()).toBe(false)
+    brush.chooseShaderPaint('water_ripple')
+    await w.vm.$nextTick()
+    const swatch = w.get('[data-testid="brush-shader-paint"]')
+    expect(swatch.attributes('aria-pressed')).toBe('true')
+    expect(swatch.attributes('title')).toBe(brushEffectLabel('water_ripple'))
   })
   it('emits more-paint and more-effect from the More… buttons', async () => {
     const brush = useBrushPaint()

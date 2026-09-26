@@ -133,10 +133,11 @@ function moreEffect() { emit('more-effect') }
           @click="selectMaterial(id)"
         />
         <button
+          v-if="brush.shaderPaint.value !== null"
           class="swatch" data-testid="brush-shader-paint"
-          :aria-pressed="brush.shaderPaint.value !== null"
-          :aria-label="brush.shaderPaint.value ? brushEffectLabel(brush.shaderPaint.value) : 'Shader'"
-          :title="brush.shaderPaint.value ? brushEffectLabel(brush.shaderPaint.value) : 'Shader'"
+          aria-pressed="true"
+          :aria-label="brushEffectLabel(brush.shaderPaint.value)"
+          :title="brushEffectLabel(brush.shaderPaint.value)"
           :style="{ background: SHADER_PAINT_SWATCH }"
           @click="morePaint()"
         />
@@ -157,7 +158,7 @@ function moreEffect() { emit('more-effect') }
         <button
           v-if="extraEffect"
           class="swatch" :data-testid="`brush-effect-${extraEffect}`"
-          aria-pressed="true"
+          :aria-pressed="true"
           :aria-label="brushEffectLabel(extraEffect)" :title="brushEffectLabel(extraEffect)"
           @click="selectEffect(extraEffect)"
         />
