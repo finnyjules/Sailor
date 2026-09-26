@@ -18,8 +18,12 @@
  *     fused chain y0x1, y0x0, y1x0, y1x1;
  *   - otherwise (width + height ≥ 129): separable, x first,
  *     t0 = fma(A, lx0, B·lx1), t1 = fma(C, lx0, D·lx1), out = fma(t0, ly0, t1·ly1).
- *   The Frame's own resize (compositorCore.resizeBilinear) is not this code
- *   and is left as it is (its larger-size gap is a separate follow-up).
+ *   That is torch on two or more threads, as ComfyUI runs it (torch's default
+ *   count; measured the same on 2–8). On ONE thread, 1–3 channels in
+ *   channels-last memory keep the ≤ 128 fused chain at every size.
+ *   The Frame's resize (compositor/plane.ts compositorCore.resizeBilinear)
+ *   carries the same arithmetic in its own self-contained core; the parity
+ *   spec (runner-bilinear) holds the two to the same torch fixtures.
  */
 
 /** A picture as sharp decodes it (compositor/plane.ts RawPicture): RGBA8, `data` null for Python's 1×1 blank. */

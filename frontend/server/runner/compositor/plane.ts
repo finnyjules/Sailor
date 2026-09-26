@@ -15,9 +15,14 @@
  *   - grid_sample (bilinear, zeros): (g + 1)·(size/2) − 0.5, then four
  *     corner products summed left to right, every step rounded;
  *   - interpolate (bilinear, align_corners=False): source index
- *     fma(scale, d + 0.5, −0.5); the four corner weights a·b rounded; then
- *     for ≤ 3 channels a fused chain (y0x1, y0x0, y1x0, y1x1), and for 4+
- *     channels (torch's channels-last kernel) unfused adds (y1x1, y1x0, y0x1, y0x0).
+ *     fma(scale, d + 0.5, −0.5), then one of torch's three sums, chosen as
+ *     torch chooses its kernel (the same arithmetic as ../pixels/core.ts
+ *     `bilinear`, proven there against torch): 4 channels in channels-last
+ *     memory (a movedim'd ComfyUI picture) at any size, or 4 channels at
+ *     output w + h ≤ 128, sum the rounded corner weights a·b unfused
+ *     (y1x1, y1x0, y0x1, y0x0); 1–3 channels at w + h ≤ 128 a fused chain
+ *     (y0x1, y0x0, y1x0, y1x1); otherwise (w + h ≥ 129) separable, x first.
+ *     Each call passes the memory format the Python Frame's tensor has there.
  * Bit-for-bit agreement is what makes the 8-bit PNG match: most composite
  * values sit exactly on a level (k/255), where one float32 ulp decides
  * which side truncation lands.
@@ -133,14 +138,23 @@ export function compositorCore() {
     return { i0, i1, l0, l1 }
   }
 
-  /** `F.interpolate(t, size=(h, w), mode='bilinear', align_corners=False)` (no antialias). */
-  function resizeBilinear(p: Plane, h: number, w: number): Plane {
+  /**
+   * `F.interpolate(t, size=(h, w), mode='bilinear', align_corners=False)` (no
+   * antialias). `memory` is the torch tensor's memory format at that call:
+   * 'channels-last' for a ComfyUI picture permuted to (B, C, H, W) without a
+   * copy, 'contiguous' for a mask's unsqueeze or a repeat/cat result. It
+   * changes torch's sum for 4 channels only.
+   */
+  function resizeBilinear(p: Plane, h: number, w: number, memory: 'contiguous' | 'channels-last' = 'contiguous'): Plane {
     const out = plane(p.c, h, w)
     const ty = linearTaps(p.h, h)
     const tx = linearTaps(p.w, w)
     const inN = p.h * p.w
     const outN = h * w
-    const channelsLast = p.c > 3
+    // Which sum torch takes (../pixels/core.ts bilinearKind).
+    const small = w + h <= 128
+    const channelsLast = p.c === 4 && (memory === 'channels-last' || small)
+    const separable = !channelsLast && !small
     for (let c = 0; c < p.c; c++) {
       const src = p.data.subarray(c * inN, (c + 1) * inN)
       const dst = out.data.subarray(c * outN, (c + 1) * outN)
@@ -155,6 +169,13 @@ export function compositorCore() {
           const c1 = tx.i1[x]!
           const b0 = tx.l0[x]!
           const b1 = tx.l1[x]!
+          if (separable) {
+            // x first: t0 = fma(A, lx0, B·lx1), t1 = fma(C, lx0, D·lx1), then fma(t0, ly0, t1·ly1).
+            const t0 = fma(src[r0 + c0]!, b0, f(src[r0 + c1]! * b1))
+            const t1 = fma(src[r1 + c0]!, b0, f(src[r1 + c1]! * b1))
+            dst[row + x] = fma(t0, a0, f(t1 * a1))
+            continue
+          }
           const w00 = f(a0 * b0)
           const w01 = f(a0 * b1)
           const w10 = f(a1 * b0)
@@ -180,12 +201,12 @@ export function compositorCore() {
   }
 
   /** `_resize_to`: stretch to exactly (h, w); unchanged when already that size. */
-  function resizeTo(p: Plane, h: number, w: number): Plane {
-    return p.h === h && p.w === w ? p : resizeBilinear(p, h, w)
+  function resizeTo(p: Plane, h: number, w: number, memory: 'contiguous' | 'channels-last' = 'contiguous'): Plane {
+    return p.h === h && p.w === w ? p : resizeBilinear(p, h, w, memory)
   }
 
   /** `_fit_to_canvas`: aspect-fit, centred, zero padding (every channel, alpha included). */
-  function fitToCanvas(p: Plane, ch: number, cw: number): Plane {
+  function fitToCanvas(p: Plane, ch: number, cw: number, memory: 'contiguous' | 'channels-last' = 'contiguous'): Plane {
     if (p.h === ch && p.w === cw) return p
     const canvasAspect = cw / ch
     const layerAspect = p.w / p.h
@@ -198,7 +219,7 @@ export function compositorCore() {
       nh = ch
       nw = Math.max(1, Math.trunc(ch * layerAspect))
     }
-    const resized = resizeBilinear(p, nh, nw)
+    const resized = resizeBilinear(p, nh, nw, memory)
     const top = Math.floor((ch - nh) / 2)
     const left = Math.floor((cw - nw) / 2)
     const out = plane(p.c, ch, cw)
@@ -344,9 +365,11 @@ export function compositorCore() {
    */
   function prepLayer(image: Plane, mask: Float32Array | null, copy: CopyPose, ch: number, cw: number): { rgb: Plane; a: Float32Array } {
     let t = image
+    // `layer["image"].permute(0, 3, 1, 2)` is channels-last memory; repeat and cat make a contiguous tensor.
+    const memory = t.c === 1 || t.c === 2 ? 'contiguous' : 'channels-last'
     if (t.c === 1) t = repeat3(t)
     else if (t.c === 2) t = concat(repeat3(channels(t, 0, 1)), channels(t, 1, 2))
-    t = fitToCanvas(t, ch, cw)
+    t = fitToCanvas(t, ch, cw, memory)
     const tr = transform(t, copy.x, copy.y, copy.rot, copy.scl)
     const out = tr.out
     const n = ch * cw
@@ -448,7 +471,8 @@ export function compositorCore() {
     const { ch, cw } = cv
     const n = ch * cw
     if (!cv.result) cv.result = plane(3, ch, cw)
-    let o = resizeTo(src, ch, cw)
+    // `overlay.permute(0, 3, 1, 2)`: channels-last memory. Masks (unsqueeze) are contiguous.
+    let o = resizeTo(src, ch, cw, 'channels-last')
     let embedded: Float32Array | null = null
     if (o.c === 1) o = repeat3(o)
     else if (o.c >= 4) {
@@ -638,7 +662,8 @@ export function compositorCore() {
     const H = base.h
     const W = base.w
     let ed = toTensor(editedPicture)
-    if (ed.h !== H || ed.w !== W) ed = resizeBilinear(ed, H, W)
+    // `ed.permute(0, 3, 1, 2)`: channels-last memory; the mask's unsqueeze(1) is contiguous.
+    if (ed.h !== H || ed.w !== W) ed = resizeBilinear(ed, H, W, 'channels-last')
     let m = mask.h === H && mask.w === W ? mask : resizeBilinear(mask, H, W)
     const k = keepKernelSize(feather)
     if (k > 0) m = blurReflect(m, k, feather, stopped)

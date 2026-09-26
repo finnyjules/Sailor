@@ -14,7 +14,10 @@
  * operation torch rounds after, in torch's own order (see plane.ts), so it is
  * bit-for-bit on these fixtures (torch 2.10, arm64):
  *   decode: exact (checked to the fixtures' 16-bit storage, 1/65535);
- *   composite and protect_mask, float: max |Δ| ≤ 1e-5 (the 16-bit storage);
+ *   composite and protect_mask, float: max |Δ| ≤ 1e-5 (the 16-bit storage),
+ *     and every float32 bit (the fixtures' sha256 of each, every case, the
+ *     real-size ones included: output width + height above 128, where torch's
+ *     bilinear resize changes kernel);
  *   the 8-bit PNG: identical, every value.
  * These fixtures were written on arm64 (Apple silicon). On x86, torch's own
  * kernels may fuse or order float32 operations differently, so the Python
@@ -24,6 +27,7 @@
  * The end-to-end test runs through the runner's own path: pictures decoded
  * one at a time as their turn comes, the pixel work on the worker thread.
  */
+import { createHash } from 'node:crypto'
 import { inflateSync } from 'node:zlib'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
@@ -45,6 +49,9 @@ interface FixtureCase {
   image?: string
   image8: string
   protect: string
+  /** sha256 of the float32 composite (HWC) and protect_mask, little-endian: every bit. */
+  image_f32_sha256: string
+  protect_f32_sha256: string
 }
 const FIX = JSON.parse(readFileSync(fileURLToPath(new URL('./fixtures/runner-compositor.json', import.meta.url)), 'utf8')) as {
   assets: Record<string, string>
@@ -76,6 +83,11 @@ function planeToHwc(p: Plane): Float64Array {
   const out = new Float64Array(n * p.c)
   for (let i = 0; i < n; i++) for (let k = 0; k < p.c; k++) out[i * p.c + k] = p.data[k * n + i]!
   return out
+}
+/** sha256 of values as float32, little-endian (the fixtures' f32_sha256). */
+function f32Sha256(values: ArrayLike<number>): string {
+  const a = Float32Array.from(values)
+  return createHash('sha256').update(Buffer.from(a.buffer, a.byteOffset, a.byteLength)).digest('hex')
 }
 function maxAbs(a: ArrayLike<number>, b: ArrayLike<number>): number {
   expect(a.length).toBe(b.length)
@@ -143,6 +155,12 @@ describe('composite parity: renderFrame vs CompositorNode.execute', () => {
     for (const word of ['turned', 'z ', 'mask', 'explicit artboard', 'overlay', 'protect', 'cloner linear', 'cloner grid', 'cloner radial', 'vary', '16×16']) {
       expect(names).toContain(word)
     }
+    // Real sizes: torch's separable resize (output width + height ≥ 129) with layers up and down, masks, the overlay, clones.
+    const real = FIX.cases.filter(c => c.name.startsWith('real size') && c.width + c.height > 128)
+    expect(real.length).toBeGreaterThanOrEqual(8)
+    for (const word of ['scaled up', 'scaled down', 'masks', 'overlay', 'clones', 'w + h = 128', 'w + h = 129']) {
+      expect(FIX.cases.some(c => c.name.startsWith('real size') && c.name.includes(word)), word).toBe(true)
+    }
   })
 
   it.each(FIX.cases.map(c => [c.name, c] as const))('%s — the port, on the Python tensors', async (_n, c) => {
@@ -153,6 +171,14 @@ describe('composite parity: renderFrame vs CompositorNode.execute', () => {
     report.push(`composite ${c.name}: image ${c.image ? (e1 * 255).toFixed(4) : '(8-bit only)'}/255, protect ${(e2 * 255).toFixed(4)}/255`)
     expect(e1).toBeLessThanOrEqual(TOL_FLOAT)
     expect(e2).toBeLessThanOrEqual(TOL_FLOAT)
+  })
+
+  // The stored Python tensors are 16-bit, so a mask's 1 − a/255 comes back a bit off; our own
+  // decode builds each tensor as the Python loader does, in float32, so from it every bit can be compared.
+  it.each(FIX.cases.map(c => [c.name, c] as const))('%s — every float32 bit, from our decode', async (_n, c) => {
+    const r = await renderFrame(c.inputs, await sourcesOf(c, ourDecode))
+    expect(f32Sha256(planeToHwc(r.image)), 'the float32 composite').toBe(c.image_f32_sha256)
+    expect(f32Sha256(r.protect!.data), 'the float32 protect_mask').toBe(c.protect_f32_sha256)
   })
 
   it.each(FIX.cases.map(c => [c.name, c] as const))('%s — end to end on the worker, the 8-bit PNG', async (_n, c) => {

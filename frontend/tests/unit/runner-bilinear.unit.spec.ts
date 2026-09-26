@@ -5,6 +5,7 @@
  * small cases with their floats stored, and (fix round 1) cases either side of
  * torch's kernel switch at output w + h = 129 and large ones, contiguous and
  * channels-last, whose input is rebuilt from a hash and whose output is a sha256.
+ * The Frame's own resize (compositor/plane.ts, FR1) is held to the same cases.
  */
 import { createHash } from 'node:crypto'
 import { mkdtempSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
@@ -63,12 +64,25 @@ describe('bilinearResize (torch F.interpolate, bilinear, align_corners=False)', 
     })
   }
 
-  it('above w + h = 128 torch is separable (the Frame\'s kernel, left as it is, is not)', () => {
-    const c = FX.bilinear.find(x => x.dw + x.dh === 129 && x.channels === 1)!
-    const src = hashedSrc(c.sw * c.sh, c.seed!)
-    const frame = core.resizeBilinear({ c: 1, h: c.sh, w: c.sw, data: src }, c.dh, c.dw).data
-    expect(createHash('sha256').update(bytes(frame)).digest('hex')).not.toBe(c.out_sha256)
-    expect(pixels.bilinearKind(1, c.dw, c.dh, false)).toBe('separable')
+  // FR1: the Frame's own resize (compositorCore, shipped to its worker as source text) carries
+  // the same arithmetic, given the memory format of the Python Frame's tensor at each call.
+  for (const c of FX.bilinear) {
+    it(`the Frame's resize equals torch bit for bit too: ${c.name}`, () => {
+      const hwc = c.src ? f32(c.src) : hashedSrc(c.sw * c.sh * c.channels, c.seed!)
+      const n = c.sw * c.sh
+      const chw = new Float32Array(hwc.length)
+      for (let i = 0; i < n; i++) for (let k = 0; k < c.channels; k++) chw[k * n + i] = hwc[i * c.channels + k]!
+      const got = core.resizeBilinear({ c: c.channels, h: c.sh, w: c.sw, data: chw }, c.dh, c.dw, c.memory ?? 'contiguous').data
+      const m = c.dw * c.dh
+      const out = new Float32Array(got.length)
+      for (let i = 0; i < m; i++) for (let k = 0; k < c.channels; k++) out[i * c.channels + k] = got[k * m + i]!
+      if (c.out) expect(bytes(out).equals(bytes(f32(c.out)))).toBe(true)
+      else expect(createHash('sha256').update(bytes(out)).digest('hex')).toBe(c.out_sha256)
+    })
+  }
+
+  it('above w + h = 128 torch is separable, except 4 channels in channels-last memory', () => {
+    expect(pixels.bilinearKind(1, 61, 68, false)).toBe('separable')
     expect(pixels.bilinearKind(1, 60, 68, false)).toBe('weights')
     expect(pixels.bilinearKind(4, 517, 333, true)).toBe('weights-cl')
     expect(pixels.bilinearKind(4, 517, 333, false)).toBe('separable')

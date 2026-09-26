@@ -25,6 +25,7 @@ node module is imported. Nothing here needs the network.
 """
 import asyncio
 import base64
+import hashlib
 import io
 import json
 import math
@@ -162,6 +163,8 @@ def _assets() -> dict[str, bytes]:
     huge[:, :, 2] = np.where((x.astype(int) // 3) % 2 == 0, huge[:, :, 2], 1 - huge[:, :, 2])
     oval = np.clip(1.5 - np.sqrt(((x - 800) / 700) ** 2 + ((y - 450) / 380) ** 2) * 1.5, 0, 1)
     a["huge.png"] = _png(np.dstack([np.floor(huge * 255 + 0.5).astype(np.uint8), np.floor(oval * 255 + 0.5).astype(np.uint8)]), "RGBA")
+    # A large opaque photo-like picture (RGB through every loader), to be scaled down at real sizes.
+    a["photo_big.png"] = _png(_pattern(800, 1200, 14), "RGB")
     return a
 
 
@@ -205,6 +208,11 @@ def u8_truncated(t: torch.Tensor) -> str:
     """Exactly what save_live_preview writes: clip(255·x).astype(uint8)."""
     a = t.detach().float().cpu().numpy()
     return _pack(np.clip(255.0 * a, 0, 255).astype(np.uint8), np.uint8)
+
+
+def f32_sha256(t: torch.Tensor) -> str:
+    """sha256 of the tensor's float32 values, C order, little-endian: equal only when every bit is."""
+    return hashlib.sha256(np.ascontiguousarray(t.detach().cpu().numpy().astype("<f4")).tobytes()).hexdigest()
 
 
 # ── Cases ────────────────────────────────────────────────────────────────────
@@ -359,6 +367,38 @@ CASES += [
     case("640×360: a 1600×900 RGBA picture downscaled 2.5×, turned, over a card",
          {"layer1": ["wide.png", "card"], "layer2": ["huge.png", "provider"], "layer3": ["huge.png", "card"]},
          width=640, height=360, **layer(2, rot=7.0, scale=0.9, blend="screen"), **layer(3, scale=0.3, x=0.3, y=-0.2, op=0.8)),
+    # Real sizes (output width + height well above 128, where torch's bilinear resize is separable, x first;
+    # a 4-channel picture movedim'd from ComfyUI's (B, H, W, C) keeps its channels-last sum at every size).
+    # The mask and the RGB overlay are stretched to exactly the artboard: 80 + 48 = 128, 81 + 48 = 129.
+    *[case(f"real size: either side of torch's kernel switch, {w}×48 (w + h = {w + 48})",
+           {"layer1": ["land.png", "card"], "layer2": ["disc.png", "provider"], "layer2_mask": ["mask_small.png", "load_mask"],
+            "overlay": ["wide.png", "load"], "overlay_mask": ["overlay.png", "load_mask"]},
+           width=w, height=48, **layer(2, scale=0.8)) for w in (80, 81)],
+    case("real size: small RGB and RGBA layers scaled up onto 640×360",
+         {"layer1": ["wide.png", "card"], "layer2": ["land.png", "provider"], "layer3": ["port.png", "card"], "layer4": ["disc.png", "card"]},
+         width=640, height=360, **layer(2, x=-0.2, scale=0.6, rot=8.0), **layer(3, x=0.25, scale=0.7, blend="multiply"),
+         **layer(4, y=0.1, scale=0.5, blend="overlay")),
+    case("real size: large RGB and RGBA layers scaled down onto 320×180",
+         {"layer1": ["photo_big.png", "load"], "layer2": ["huge.png", "card"], "layer3": ["photo_big.png", "provider"], "layer4": ["photo_big.png", "card"]},
+         width=320, height=180, **layer(2, scale=0.8, rot=-6.0), **layer(3, scale=0.4, x=0.3, y=0.2, blend="screen"),
+         **layer(4, scale=0.3, x=-0.3, y=-0.25, op=0.7)),
+    case("real size: large layers scaled down, the canvas from layer 1 (1200×800 → 1600×900 fit)",
+         {"layer1": ["photo_big.png", "card"], "layer2": ["huge.png", "provider"]}, **layer(2, scale=0.5, x=0.1, blend="soft_light")),
+    case("real size: masks stretched onto 512×384",
+         {"layer1": ["photo_big.png", "load"], "layer1_mask": ["mask_rect.png", "load_mask"],
+          "layer2": ["land.png", "provider"], "layer2_mask": ["mask_small.png", "load_mask"],
+          "layer3": ["wide.png", "card"], "layer3_mask": ["land.png", "load_mask"]},
+         width=512, height=384, **layer(1, op=0.9), **layer(2, rot=15.0, scale=0.9, protect=True), **layer(3, scale=0.5, x=0.2)),
+    case("real size: an RGB overlay stretched onto 640×360", {"layer1": ["photo_big.png", "card"], "overlay": ["wide.png", "load"],
+                                                             "overlay_mask": ["overlay.png", "load_mask"]}, width=640, height=360),
+    case("real size: an RGBA overlay stretched onto 640×360, with a mask", {"layer1": ["photo_big.png", "provider"], "overlay": ["disc.png", "provider"],
+                                                                           "overlay_mask": ["mask_small.png", "load_mask"]}, width=640, height=360),
+    case("real size: clones on 640×360", {"layer1": ["photo_big.png", "card"], "layer2": ["disc.png", "card"], "layer3": ["port.png", "card"]},
+         width=640, height=360,
+         **layer(2, scale=0.25, x=-0.35, protect=True, cloner=cl(mode="linear", countX=4, countY=2, spacingX=0.2, spacingY=0.35,
+                                                                  stepScale=0.9, stepRotation=10, varyColor=True,
+                                                                  varyPalette=["#ff0044", "#22cc88"], varyColorStrength=0.4)),
+         **layer(3, scale=0.3, x=0.25, cloner=cl(mode="radial", count=5, radius=0.2, faceCenter=True, stepOpacity=0.85))),
     case("an all-opaque RGBA card loads as RGB", {"layer1": ["wide.png", "card"], "layer2": ["opaque_rgba.png", "card"]}, **layer(2, rot=30.0)),
     case("one pixel at 254 makes the card RGBA", {"layer1": ["wide.png", "card"], "layer2": ["almost.png", "card"]}, **layer(2, rot=30.0)),
 ]
@@ -386,6 +426,9 @@ def run_case(c: dict) -> dict:
         "height": int(h),
         "image8": u8_truncated(image[0]),
         "protect": u16(protect[0]),
+        # The float32 composite and protect_mask, bit for bit (HWC, little-endian), for every case.
+        "image_f32_sha256": f32_sha256(image[0]),
+        "protect_f32_sha256": f32_sha256(protect[0]),
     }
     # The float composite of a large case is left out to keep the file small:
     # its 8-bit PNG pixels (the deliverable) are still compared exactly.
@@ -473,7 +516,12 @@ def run_validate_cases() -> list:
 
 
 def main() -> None:
-    torch.set_num_threads(1)
+    # torch's own thread count, as ComfyUI runs the node (it never sets one). Not 1: on one
+    # thread, torch's bilinear resize of a 3-channel picture in channels-last memory (every
+    # RGB layer, `image.permute(0, 3, 1, 2)`) keeps its small-size sum at every size, where
+    # on two or more threads (any thread count, measured 2–8) it is separable above output
+    # width + height 128, as the runner's port is.
+    assert torch.get_num_threads() > 1, "Run on a machine with more than one CPU thread: ComfyUI's Frame does"
     decoded = {}
     for c in CASES:
         for asset, via in c["links"].values():
