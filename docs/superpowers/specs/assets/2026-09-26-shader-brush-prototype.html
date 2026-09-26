@@ -1,0 +1,1171 @@
+<title>Shader Brush</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,800&family=Hanken+Grotesk:wght@400;500;600&display=swap">
+<style>
+  :root {
+    color-scheme: dark;
+    --bg: #121117;
+    --panel: #1c1a22;
+    --line: #2d2a35;
+    --ink: #efeaf4;
+    --muted: #9a93a6;
+    --accent: #d8c7ff;
+    --accent-ink: #1a1424;
+  }
+  [hidden] { display: none !important; }
+  html, body { height: 100%; }
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font: 14px/1.4 "Hanken Grotesk", ui-sans-serif, system-ui, sans-serif;
+  }
+  .app {
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding-inline: 16px;
+    padding-block: 14px;
+    box-sizing: border-box;
+  }
+  .bar { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 20px; }
+  .brand { display: flex; align-items: baseline; gap: 10px; margin-right: auto; }
+  .name { font: 800 22px/1 "Bricolage Grotesque", ui-sans-serif, sans-serif; letter-spacing: -0.01em; }
+  .tag { color: var(--muted); font-size: 13px; }
+  .seg { display: inline-flex; background: var(--panel); border: 1px solid var(--line); border-radius: 999px; padding: 3px; }
+  .seg button {
+    appearance: none; border: 0; background: transparent; color: var(--muted);
+    font: 600 13px/1 "Hanken Grotesk", sans-serif; padding: 8px 14px; border-radius: 999px; cursor: pointer;
+  }
+  .seg button[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); }
+  .tools { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+  .tools label { display: inline-flex; align-items: center; gap: 8px; color: var(--muted); font-weight: 500; }
+  .tools input[type="range"] { width: 120px; accent-color: var(--accent); }
+  .btn {
+    appearance: none; border: 1px solid var(--line); background: var(--panel); color: var(--ink);
+    font: 600 13px/1 "Hanken Grotesk", sans-serif; padding: 9px 14px; border-radius: 999px; cursor: pointer;
+  }
+  .btn:hover, .chip:hover { border-color: #4a4555; }
+  button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-height: 40px; }
+  .chip {
+    appearance: none; display: inline-flex; align-items: center; gap: 8px;
+    border: 1px solid var(--line); background: var(--panel); color: var(--ink);
+    font: 500 13px/1 "Hanken Grotesk", sans-serif; padding: 5px 12px 5px 5px; border-radius: 999px; cursor: pointer;
+  }
+  .chip[aria-pressed="true"] { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; }
+  .sw { width: 26px; height: 26px; border-radius: 50%; flex: none; }
+  .divider { width: 1px; height: 24px; background: var(--line); margin-inline: 4px; }
+  .dot {
+    appearance: none; width: 24px; height: 24px; border-radius: 50%; border: 2px solid transparent; cursor: pointer; padding: 0;
+  }
+  .dot[aria-pressed="true"] { border-color: var(--ink); }
+  .tune { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 8px 18px; align-items: center;
+    background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding-block: 10px; padding-inline: 14px; }
+  .tune label { display: grid; grid-template-columns: 1fr auto; gap: 2px 8px; font-size: 12px; color: var(--muted); }
+  .tune label b { color: var(--ink); font-weight: 600; }
+  .tune output { font-variant-numeric: tabular-nums; color: var(--ink); }
+  .tune input { grid-column: 1 / -1; width: 100%; accent-color: var(--accent); margin: 0; }
+  .tune .actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; grid-column: span 2; }
+  .tune .note { font-size: 12px; color: var(--muted); }
+  .stage {
+    position: relative; flex: 1; min-height: 280px; border-radius: 14px; overflow: hidden;
+    border: 1px solid var(--line); background: #000;
+  }
+  .stage canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; cursor: none; }
+  .ring {
+    position: absolute; left: 0; top: 0; pointer-events: none; border-radius: 50%;
+    border: 1.5px solid rgba(255,255,255,0.9); box-shadow: 0 0 0 1px rgba(0,0,0,0.45);
+    transform: translate(-50%, -50%); opacity: 0; transition: opacity .15s;
+  }
+  .stage:hover .ring { opacity: 1; }
+  .hint { color: var(--muted); font-size: 13px; display: flex; flex-wrap: wrap; gap: 6px 18px; }
+  .hint b { color: var(--ink); font-weight: 600; }
+  .nogl { position: absolute; inset: 0; display: grid; place-items: center; color: var(--muted); padding: 24px; text-align: center; }
+</style>
+
+<div class="app">
+  <header class="bar">
+    <div class="brand"><span class="name">Shader brush</span><span class="tag">Frame paint prototype</span></div>
+    <div class="seg" role="group" aria-label="What the brush paints">
+      <button id="mode-material" aria-pressed="true">Paint with a material</button>
+      <button id="mode-effect" aria-pressed="false">Paint an effect</button>
+    </div>
+    <div class="tools">
+      <div class="seg" role="group" aria-label="Tip">
+        <button id="tip-spray" aria-pressed="true">Spray can</button>
+        <button id="tip-round" aria-pressed="false">Round</button>
+        <button id="tip-brush" aria-pressed="false">Bristle</button>
+      </div>
+      <label for="size">Size <input id="size" type="range" min="6" max="120" value="44"></label>
+      <div class="seg" role="group" aria-label="Surface">
+        <button id="bg-photo" aria-pressed="true">Photo</button>
+        <button id="bg-paper" aria-pressed="false">Paper</button>
+      </div>
+      <button class="btn" id="undo">Undo</button>
+      <button class="btn" id="clear">Clear</button>
+    </div>
+  </header>
+  <div class="row" id="chips-material"></div>
+  <div class="row" id="chips-effect" hidden></div>
+  <div class="tune" id="tune-phys"></div>
+  <div class="tune" id="tune" hidden></div>
+  <main class="stage" id="stage">
+    <canvas id="c"></canvas>
+    <div class="ring" id="ring"></div>
+  </main>
+  <footer class="hint" id="hint"></footer>
+</div>
+
+<script>
+(() => {
+  // ---------- catalogue ----------
+  const MATERIALS = [
+    { id: 0, name: 'Paint', sw: '', load: 1.0, geo: 1 },
+    { id: 1, name: 'Holographic foil', sw: 'conic-gradient(from 30deg, #ffd1f0, #c9d8ff, #bff5e6, #fff3b8, #ffc9d9, #ffd1f0)', load: 0.6, geo: 1 },
+    { id: 2, name: 'Liquid chrome', sw: 'linear-gradient(160deg, #f6f8ff 0 35%, #545a66 48%, #d9dde6 60%, #1b1d22 100%)', load: 0.5, geo: 1 },
+    { id: 3, name: 'Lava', sw: 'radial-gradient(circle at 40% 40%, #ffe07a, #ff5a12 45%, #2a0f0a 80%)', load: 0.4, geo: 1 },
+    { id: 4, name: 'Marbled ink', sw: 'linear-gradient(135deg, #0e1440, #1d6d7a 55%, #efe3cf 62%, #122050)', load: 0.8, geo: 1 },
+    { id: 5, name: 'Neon', sw: 'radial-gradient(circle, #fff 0 18%, #ff4fd8 35%, rgba(255,79,216,0.15) 70%), #1a0f22', load: 0, geo: 2.4 },
+    { id: 6, name: 'Oil slick', sw: 'linear-gradient(120deg, #050507 20%, #6b2cff 40%, #16c7a8 55%, #ffb000 68%, #050507 85%)', load: 0.6, geo: 1 },
+  ];
+  const COLORS = ['#e4572e', '#f3b61f', '#2e6fdb', '#1b998b', '#f1ece2', '#1d1a23'];
+  const EFFECTS = [
+    { ch: 0, name: 'Ripple', sw: 'repeating-radial-gradient(circle at 50% 50%, #7fb8ff 0 3px, #22406e 3px 6px)' },
+    { ch: 1, name: 'Reeded glass', sw: 'repeating-linear-gradient(90deg, #cfe6ff 0 3px, #5d7ea8 3px 5px, #eaf4ff 5px 6px)' },
+    { ch: 2, name: 'Glow', sw: 'radial-gradient(circle, #fff6d6 0 20%, #ffb35c 45%, #3a1d10 80%)' },
+    { ch: 3, name: 'Dither', sw: 'repeating-conic-gradient(#f5ead4 0 25%, #1c1a3a 0 50%) 0 0 / 6px 6px' },
+    { ch: 4, name: 'Colour split', sw: 'linear-gradient(90deg, #ff3b5c 0 33%, #3bff9d 33% 66%, #3b6bff 66%)' },
+    { ch: 5, name: 'Pixels', sw: 'conic-gradient(#b94a7c 0 25%, #f5a35a 0 50%, #5b2d63 0 75%, #ffd08a 0) 0 0 / 13px 13px' },
+    { ch: 6, name: 'Frost', sw: 'radial-gradient(circle at 35% 35%, #ffffff, #cfd9e6 55%, #8d9bb0)' },
+  ];
+
+  // Defaults tuned by hand on 2026-09-26
+  const PHYS_DEFAULTS = {
+    spray: { speckle: 0.25, overspray: 0.2, drips: 1.75, build: 2, relief: 0 },
+    round: { softness: 2, overspray: 2, grain: 2, smoothing: 2, relief: 0.05 },
+    brush: { thin: 0.15, taper: 0.2, dry: 0.65, load: 0, bristle: 0.5, relief: 0.35, smoothing: 0.6 },
+  };
+  const state = {
+    mode: 'material', mat: 1, color: COLORS[0], effect: 1, surface: 'photo',
+    tune: [1, 1, 1, 1, 1, 1, 1], buildUp: 1,
+    phys: JSON.parse(JSON.stringify(PHYS_DEFAULTS)),
+    tip: 'spray', size: { spray: 110, round: 36, 'brush-material': 44, 'brush-effect': 130 },
+  };
+
+  const sizeKey = () => state.tip === 'brush' ? 'brush-' + state.mode : state.tip;
+  // ---------- UI ----------
+  const $ = (id) => document.getElementById(id);
+  const chipsM = $('chips-material'), chipsE = $('chips-effect');
+  function chip(label, bg, onClick) {
+    const b = document.createElement('button');
+    b.className = 'chip';
+    b.innerHTML = `<span class="sw"></span><span></span>`;
+    b.firstChild.style.background = bg;
+    b.lastChild.textContent = label;
+    b.addEventListener('click', onClick);
+    return b;
+  }
+  const matChips = MATERIALS.map((m) => {
+    const c = chip(m.name, m.sw || state.color, () => { state.mat = m.id; syncUI(); });
+    chipsM.appendChild(c); return c;
+  });
+  const divider = document.createElement('span'); divider.className = 'divider'; chipsM.appendChild(divider);
+  const dots = COLORS.map((col) => {
+    const d = document.createElement('button');
+    d.className = 'dot'; d.style.background = col; d.setAttribute('aria-label', 'Paint colour ' + col);
+    d.addEventListener('click', () => { state.color = col; syncUI(); });
+    chipsM.appendChild(d); return d;
+  });
+  const fxChips = EFFECTS.map((f) => {
+    const c = chip(f.name, f.sw, () => { state.effect = f.ch; syncUI(); });
+    chipsE.appendChild(c); return c;
+  });
+  const tuneEl = $('tune');
+  try { const saved = JSON.parse(localStorage.getItem('shader-brush-tune') || 'null'); if (saved && saved.tune && saved.tune.length === 7) { state.tune = saved.tune; state.buildUp = saved.buildUp || 1; } } catch (e) {}
+  const saveTune = () => { try { localStorage.setItem('shader-brush-tune', JSON.stringify({ tune: state.tune, buildUp: state.buildUp })); } catch (e) {} };
+  function slider(id, label, value, max, onInput) {
+    const l = document.createElement('label');
+    l.htmlFor = id;
+    l.innerHTML = `<b></b><output></output><input id="${id}" type="range" min="0" max="${max}" step="5">`;
+    l.querySelector('b').textContent = label;
+    const inp = l.querySelector('input'), out = l.querySelector('output');
+    const show = () => { out.textContent = inp.value + '%'; };
+    inp.value = Math.round(value * 100); show();
+    inp.addEventListener('input', () => { show(); onInput(+inp.value / 100); saveTune(); });
+    tuneEl.appendChild(l);
+    return inp;
+  }
+  const tuneInputs = EFFECTS.map((f) => slider('tune-' + f.ch, f.name, state.tune[f.ch], 400, (v) => { state.tune[f.ch] = v; }));
+  const buildInput = slider('tune-build', 'Build-up speed', state.buildUp, 300, (v) => { state.buildUp = v; });
+  const actions = document.createElement('div'); actions.className = 'actions';
+  actions.innerHTML = '<button class="btn" id="tune-copy">Copy values</button><button class="btn" id="tune-reset">Reset</button><span class="note" id="tune-note"></span>';
+  tuneEl.appendChild(actions);
+  $('tune-copy').onclick = () => {
+    const txt = 'Effect strengths: ' + EFFECTS.map((f) => `${f.name} ${Math.round(state.tune[f.ch] * 100)}%`).join(', ') + `. Build-up speed ${Math.round(state.buildUp * 100)}%.`;
+    const done = () => { $('tune-note').textContent = 'Copied. Paste it to Claude.'; };
+    try { navigator.clipboard.writeText(txt).then(done, () => { $('tune-note').textContent = txt; }); } catch (e) { $('tune-note').textContent = txt; }
+  };
+  $('tune-reset').onclick = () => {
+    state.tune = [1, 1, 1, 1, 1, 1, 1]; state.buildUp = 1;
+    tuneInputs.forEach((i) => { i.value = 100; i.dispatchEvent(new Event('input')); });
+    buildInput.value = 100; buildInput.dispatchEvent(new Event('input'));
+    $('tune-note').textContent = '';
+  };
+  // Physics tuning for the two tips
+  const PHYS = {
+    spray: [['speckle', 'Speckle'], ['overspray', 'Overspray'], ['drips', 'Drips'], ['build', 'Build-up'], ['relief', 'Relief']],
+    round: [['softness', 'Softness'], ['overspray', 'Overspray'], ['grain', 'Grain'], ['smoothing', 'Smoothing'], ['relief', 'Relief']],
+    brush: [['thin', 'Speed thinning'], ['taper', 'Taper'], ['dry', 'Dry brush'], ['load', 'Runs out of paint'], ['bristle', 'Bristle texture'], ['relief', 'Paint thickness'], ['smoothing', 'Smoothing']],
+  };
+  try { const sp = JSON.parse(localStorage.getItem('shader-brush-phys-v2') || 'null'); if (sp && sp.spray && sp.brush) { Object.assign(state.phys.spray, sp.spray); Object.assign(state.phys.brush, sp.brush); if (sp.round) Object.assign(state.phys.round, sp.round); } } catch (e) {}
+  const physEl = $('tune-phys');
+  const physInputs = [];
+  function buildPhys() {
+    physEl.innerHTML = '';
+    physInputs.length = 0;
+    const tip = state.tip, P = state.phys[tip];
+    for (const [key, label] of PHYS[tip]) {
+      const l = document.createElement('label');
+      l.htmlFor = 'phys-' + key;
+      l.innerHTML = `<b></b><output></output><input id="phys-${key}" type="range" min="0" max="${tip === 'round' ? 400 : 200}" step="5">`;
+      l.querySelector('b').textContent = label;
+      const inp = l.querySelector('input'), out = l.querySelector('output');
+      inp.value = Math.round(P[key] * 100); out.textContent = inp.value + '%';
+      inp.addEventListener('input', () => {
+        out.textContent = inp.value + '%'; P[key] = +inp.value / 100;
+        try { localStorage.setItem('shader-brush-phys-v2', JSON.stringify(state.phys)); } catch (e) {}
+        if (tip === 'brush') rebuildRibbons();
+      });
+      physEl.appendChild(l); physInputs.push(inp);
+    }
+    const act = document.createElement('div'); act.className = 'actions';
+    act.innerHTML = `<button class="btn" id="phys-copy">Copy values</button><button class="btn" id="phys-reset">Reset</button><span class="note" id="phys-note">${({ brush: 'Changes strokes already painted.', spray: 'Relief changes paint already down. The rest applies to your next spray.', round: 'Grain and relief change strokes already painted. The rest applies to your next stroke.' })[tip]}</span>`;
+    physEl.appendChild(act);
+    $('phys-copy').onclick = () => {
+      const txt = ({ brush: 'Bristle: ', spray: 'Spray can: ', round: 'Round: ' })[tip] + PHYS[tip].map(([k, lab]) => `${lab} ${Math.round(P[k] * 100)}%`).join(', ') + '.';
+      const note = $('phys-note');
+      try { navigator.clipboard.writeText(txt).then(() => { note.textContent = 'Copied. Paste it to Claude.'; }, () => { note.textContent = txt; }); } catch (e) { note.textContent = txt; }
+    };
+    $('phys-reset').onclick = () => { PHYS[tip].forEach(([k], j) => { physInputs[j].value = Math.round(PHYS_DEFAULTS[tip][k] * 100); physInputs[j].dispatchEvent(new Event('input')); }); };
+  }
+  let rebuildRibbons = () => {};
+  const sizeEl = $('size');
+  function syncUI() {
+    const m = state.mode;
+    $('mode-material').setAttribute('aria-pressed', m === 'material');
+    $('mode-effect').setAttribute('aria-pressed', m === 'effect');
+    chipsM.hidden = m !== 'material';
+    chipsE.hidden = m !== 'effect';
+    tuneEl.hidden = m !== 'effect';
+    if (physEl.dataset.tip !== state.tip) { physEl.dataset.tip = state.tip; buildPhys(); }
+    matChips.forEach((c, i) => c.setAttribute('aria-pressed', state.mat === i));
+    matChips[0].firstChild.style.background = state.color;
+    const showDots = state.mat === 0;
+    divider.hidden = !showDots; dots.forEach((d) => { d.hidden = !showDots; d.setAttribute('aria-pressed', d.style.background && COLORS[dots.indexOf(d)] === state.color); });
+    fxChips.forEach((c, i) => c.setAttribute('aria-pressed', state.effect === i));
+    $('bg-photo').setAttribute('aria-pressed', state.surface === 'photo');
+    $('bg-paper').setAttribute('aria-pressed', state.surface === 'paper');
+    const k = sizeKey(), R = { spray: [30, 280], round: [4, 160], 'brush-material': [6, 120], 'brush-effect': [30, 320] }[k];
+    sizeEl.min = R[0]; sizeEl.max = R[1]; sizeEl.value = state.size[k];
+    $('tip-spray').setAttribute('aria-pressed', state.tip === 'spray');
+    $('tip-brush').setAttribute('aria-pressed', state.tip === 'brush');
+    $('tip-round').setAttribute('aria-pressed', state.tip === 'round');
+    const HINTS = {
+      'spray-material': '<span><b>Hold still</b> and the paint pools, then drips.</span><span><b>Move fast</b> for a light dusting.</span><span>Size sets how wide the can sprays.</span>',
+      'spray-effect': '<span>The effect goes on in speckles. <b>Hold still</b> to fill it in, and it drips.</span><span>Every effect keeps its own sprayed area, so they stack.</span>',
+      'round-material': '<span>A clean round brush with a little overspray and grain at the edges.</span><span><b>Go over it again</b> to fill the grain in.</span>',
+      'round-effect': '<span>Paints the effect with a clean round edge and a little grain.</span><span><b>Go over it again</b> to make it stronger.</span>',
+      'brush-material': '<span><b>Slow down</b> for a fat, loaded stroke.</span><span><b>Flick fast</b> for a thin, dry, broken one.</span><span>Long strokes run out of paint. Each new stroke reloads the brush.</span>',
+      'brush-effect': '<span><b>Hold still</b> to build the effect up, like an airbrush.</span><span><b>Go over it again</b> to make it stronger.</span><span>Every effect keeps its own painted area, so they stack.</span>',
+    };
+    $('hint').innerHTML = HINTS[state.tip + '-' + m];
+    sizeRing();
+  }
+  $('mode-material').onclick = () => { state.mode = 'material'; syncUI(); };
+  $('mode-effect').onclick = () => { state.mode = 'effect'; syncUI(); };
+  $('tip-spray').onclick = () => { state.tip = 'spray'; syncUI(); };
+  $('tip-round').onclick = () => { state.tip = 'round'; syncUI(); };
+  $('tip-brush').onclick = () => { state.tip = 'brush'; syncUI(); };
+  $('bg-photo').onclick = () => { state.surface = 'photo'; syncUI(); drawBackground(); };
+  $('bg-paper').onclick = () => { state.surface = 'paper'; syncUI(); drawBackground(); };
+  sizeEl.addEventListener('input', () => { state.size[sizeKey()] = +sizeEl.value; sizeRing(); });
+  const ring = $('ring');
+  function sizeRing() {
+    const d = state.size[sizeKey()];
+    ring.style.width = ring.style.height = d + 'px';
+  }
+
+  // ---------- GL ----------
+  const stage = $('stage'), cvs = $('c');
+  const gl = cvs.getContext('webgl2', { antialias: true, alpha: false, premultipliedAlpha: true });
+  if (!gl) {
+    stage.insertAdjacentHTML('beforeend', '<div class="nogl">This prototype needs WebGL 2. Open it in a current Chrome, Safari or Firefox.</div>');
+    syncUI(); return;
+  }
+
+  const NOISE = `
+    float hash(vec2 p){ p = fract(p*vec2(123.34,456.21)); p += dot(p, p+45.32); return fract(p.x*p.y); }
+    float noise(vec2 p){ vec2 i=floor(p), f=fract(p); vec2 u=f*f*(3.-2.*f);
+      return mix(mix(hash(i),hash(i+vec2(1,0)),u.x), mix(hash(i+vec2(0,1)),hash(i+vec2(1,1)),u.x), u.y); }
+    float fbm(vec2 p){ float a=.5, s=0.; for(int i=0;i<5;i++){ s+=a*noise(p); p=p*2.03+vec2(1.7,9.2); a*=.5; } return s; }
+    vec3 hsv(float h,float s,float v){ vec3 k=clamp(abs(mod(h*6.+vec3(0,4,2),6.)-3.)-1.,0.,1.); return v*mix(vec3(1),k,s); }
+  `;
+
+  function program(vs, fs) {
+    const mk = (type, src) => {
+      const s = gl.createShader(type); gl.shaderSource(s, src); gl.compileShader(s);
+      if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s));
+      return s;
+    };
+    const p = gl.createProgram();
+    gl.attachShader(p, mk(gl.VERTEX_SHADER, vs)); gl.attachShader(p, mk(gl.FRAGMENT_SHADER, fs));
+    gl.linkProgram(p);
+    if (!gl.getProgramParameter(p, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(p));
+    const u = {}; const n = gl.getProgramParameter(p, gl.ACTIVE_UNIFORMS);
+    for (let i = 0; i < n; i++) { const info = gl.getActiveUniform(p, i); u[info.name] = gl.getUniformLocation(p, info.name); }
+    return { p, u };
+  }
+
+  // Composite: background + painted effects
+  const compProg = program(`#version 300 es
+    void main(){ vec2 p = vec2((gl_VertexID<<1)&2, gl_VertexID&2); gl_Position = vec4(p*2.-1., 0, 1); }`,
+  `#version 300 es
+    precision highp float;
+    uniform sampler2D uBg, uMA, uMB;
+    uniform vec2 uDev, uCss;
+    uniform float uTime;
+    uniform float uAmt[7];
+    out vec4 o;
+    ${NOISE}
+    const float bayer[16] = float[16](0.,8.,2.,10.,12.,4.,14.,6.,3.,11.,1.,9.,15.,7.,13.,5.);
+    vec3 blur(vec2 uv, float radPx){
+      vec3 acc = vec3(0); float j = hash(gl_FragCoord.xy)*6.2831;
+      for(int i=0;i<14;i++){ float fi=float(i); float r = sqrt((fi+.5)/14.)*radPx; float a = fi*2.39996+j;
+        acc += texture(uBg, uv + vec2(cos(a),sin(a))*r/uCss).rgb; }
+      return acc/14.;
+    }
+    void main(){
+      vec2 uv = gl_FragCoord.xy / uDev;
+      vec4 ma = texture(uMA, uv), mb = texture(uMB, uv);
+      vec2 suv = uv;
+      vec2 px = uv*uCss;
+      // ripple: liquid warp that keeps moving
+      if(ma.r > .002){
+        vec2 p = px/70.;
+        float n = fbm(p*.8 + uTime*.25);
+        vec2 d = vec2(fbm(p + vec2(n*3., uTime*.35)), fbm(p + vec2(uTime*.3, n*3.))) - .5;
+        suv += d * .07 * uAmt[0] * smoothstep(0., .9, ma.r) * vec2(1., uCss.x/uCss.y);
+      }
+      // reeded glass: vertical flutes that refract sideways
+      float flute = fract(px.x/16.) - .5;
+      if(ma.g > .002){ suv.x += flute * 30./uCss.x * smoothstep(0., .8, ma.g) * 1.6 * uAmt[1]; }
+      // pixels
+      if(mb.g > .002){
+        float cell = mix(1., 1. + 25.*uAmt[5], smoothstep(0., .9, mb.g));
+        if(cell > 1.5) suv = (floor(suv*uCss/cell)+.5)*cell/uCss;
+      }
+      vec3 col = texture(uBg, suv).rgb;
+      if(mb.r > .002){
+        float k = smoothstep(0., .9, mb.r);
+        vec2 d = vec2(14. + 4.*sin(uTime*2.), 3.*cos(uTime*1.3))/uCss * k * uAmt[4];
+        col.r = texture(uBg, suv + d).r; col.b = texture(uBg, suv - d).b;
+      }
+      if(ma.g > .002){
+        float k = smoothstep(0., .8, ma.g);
+        col *= 1. - min(1., k*.18*uAmt[1])*smoothstep(.2,.5,abs(flute));
+        col += k*.12*uAmt[1]*pow(1.-abs(flute*2.-.3),6.);
+      }
+      if(mb.b > .002){
+        float k = smoothstep(0., .9, mb.b);
+        vec3 b = blur(suv, 22.*k*uAmt[6]);
+        col = mix(col, b, min(1., k*uAmt[6]));
+        col = mix(col, vec3(.92,.95,.99), min(1., .2*k*uAmt[6])) + (hash(px+uTime)-.5)*.04*k*uAmt[6];
+      }
+      if(ma.b > .002){
+        float k = smoothstep(0., .9, ma.b);
+        vec3 b = blur(suv, 38.);
+        vec3 bright = max(b - .45, 0.)*2.2;
+        col += (bright*(1.3 + .25*sin(uTime*1.7 + px.x*.01)) + col*.15)*k*uAmt[2];
+      }
+      if(ma.a > .002){
+        float k = min(1., smoothstep(0., .6, ma.a)*uAmt[3]);
+        float l = dot(col, vec3(.299,.587,.114));
+        ivec2 c = ivec2(mod(floor(gl_FragCoord.xy/2.), 4.));
+        float th = (bayer[c.y*4+c.x]+.5)/16.;
+        vec3 d = l > th ? vec3(.97,.92,.83) : vec3(.11,.1,.23);
+        col = mix(col, d, k);
+      }
+      o = vec4(col, 1.);
+    }`);
+
+  // Ribbon: a stroke with a live material flowing along it
+  const ribProg = program(`#version 300 es
+    in vec2 aPos; in float aU; in float aV; in float aW; in float aT; in float aSp;
+    uniform vec2 uCss;
+    out float vU, vV, vW, vT, vSp;
+    void main(){ vU=aU; vV=aV; vW=aW; vT=aT; vSp=aSp;
+      gl_Position = vec4(aPos.x/uCss.x*2.-1., 1.-aPos.y/uCss.y*2., 0, 1); }`,
+  `#version 300 es
+    precision highp float;
+    in float vU, vV, vW, vT, vSp;
+    uniform float uTime, uSeed, uLoad, uDry, uBristle, uRelief;
+    uniform int uMat;
+    uniform vec3 uColor;
+    out vec4 o;
+    ${NOISE}
+    void main(){
+      float v = vV, av = abs(v);
+      float flowU = vU - uTime*55.;
+      if(uMat == 5){ // neon: light, not pigment
+        float core = exp(-av*av*38.);
+        float glow = exp(-av*av*5.)*(1.-smoothstep(.8,1.,av));
+        vec3 c = hsv(fract(vU*.0012 - uTime*.12 + uSeed), .75, 1.);
+        float pulse = pow(.5+.5*sin(vU*.035 - uTime*7.), 14.);
+        vec3 lc = c*glow*1.1 + vec3(1)*core*(.75+pulse) + c*pulse*glow*.7;
+        o = vec4(lc, clamp(glow*.5 + core, 0., 1.));
+        return;
+      }
+      float bw = max(vW, 2.);
+      float n1 = noise(vec2(vU/70. + uSeed, v*bw*.16 + uSeed*31.));
+      float n2 = noise(vec2(vU/9., v*bw*.65 + uSeed*7.));
+      float bristle = mix(.5, .55*n1 + .45*n2, min(1., uBristle));
+      float dry = min(1., max(smoothstep(.7, 2.8, vSp)*.5*uDry, smoothstep(.55, 1.3, vT)*uLoad*.62));
+      float thr = .1 + .52*dry;
+      float aB = mix(1., smoothstep(thr, thr+.1, bristle), min(1., max(uBristle, dry*2.)));
+      float e = av + (n2-.5)*.24*uBristle;
+      float aE = 1. - smoothstep(.76, .98, e);
+      float a = aE*aB;
+      float h = sqrt(max(0., 1.-av*av))*.7 + (bristle-.5)*.55*uBristle;
+      vec3 N = normalize(vec3(-dFdx(h)*3.5*uRelief, -dFdy(h)*3.5*uRelief, 1.));
+      vec3 L = normalize(vec3(-.45, .55, .7)), H = normalize(L + vec3(0,0,1));
+      float diff = clamp(dot(N,L), 0., 1.)*.55 + .6;
+      float spec = pow(clamp(dot(N,H), 0., 1.), 36.);
+      vec3 col; float sp = .3, emit = 0.;
+      if(uMat == 0){
+        col = uColor*(.9 + .25*(bristle-.5)*uBristle); sp = .32*min(1., uRelief);
+      } else if(uMat == 1){ // holographic foil
+        float t = flowU*.0028 + v*.55 + bristle*.12 + fbm(vec2(flowU*.006, v*1.2+uSeed))*.8;
+        col = hsv(fract(t), .42, 1.)*.88 + .1;
+        col += step(.994, hash(floor(gl_FragCoord.xy/1.5) + floor(uTime*10.)))*.9;
+        sp = 1.; emit = .35;
+      } else if(uMat == 2){ // liquid chrome
+        float y = -v*1.3 + bristle*.1 + (fbm(vec2(flowU*.004, v*.8+uSeed))-.5)*1.4;
+        vec3 sky = mix(vec3(.93,.95,1.), vec3(.3,.34,.42), smoothstep(0., 1.1, y));
+        vec3 gnd = mix(vec3(.03,.03,.05), vec3(.6,.55,.5), smoothstep(-1.3, 0., y));
+        col = y > 0. ? sky : gnd;
+        col += smoothstep(.07, 0., abs(y))*.5;
+        sp = 1.2; emit = .85;
+      } else if(uMat == 3){ // lava
+        vec2 q = vec2(flowU*.008, v*1.3 + uSeed);
+        float f = fbm(q + vec2(fbm(q*1.7 + uTime*.2), 0.)*1.5);
+        float crust = smoothstep(.47, .6, f);
+        vec3 hot = mix(vec3(1.,.25,.02), vec3(1.,.86,.4), pow(1.-av, 2.)*(1.-crust));
+        col = mix(hot*1.45, vec3(.09,.05,.05), crust);
+        emit = 1. - crust; sp = .45*crust;
+      } else if(uMat == 4){ // marbled ink
+        vec2 q = vec2(flowU*.005, v*1.1 + uSeed*3.);
+        vec2 w = vec2(fbm(q + uTime*.05), fbm(q + 5.2));
+        float m = fbm(q + w*2.2);
+        col = mix(vec3(.05,.07,.22), vec3(.1,.45,.55), smoothstep(.3, .7, m));
+        col = mix(col, vec3(.95,.9,.8), smoothstep(.64, .7, m)*.9);
+        sp = .7;
+      } else { // oil slick
+        float th = fbm(vec2(flowU*.006, v*1.4 + uSeed))*2. + v*.6;
+        vec3 film = .5 + .5*cos(6.2831*(th + vec3(0., .33, .67)));
+        col = mix(vec3(.02,.02,.03), film, .8*smoothstep(.25, .85, fbm(vec2(flowU*.012, v*2.5 + uSeed))));
+        sp = .9;
+      }
+      vec3 lit = col*mix(diff, 1., emit) + spec*sp;
+      o = vec4(lit*a, a);
+    }`);
+
+  // Dab: soft round stamp into an effect's painted area
+  const dabProg = program(`#version 300 es
+    in vec2 aPos; in vec2 aLoc; in float aStr; in float aHard;
+    uniform vec2 uCss;
+    out vec2 vL; out float vS; out float vH;
+    void main(){ vL = aLoc; vS = aStr; vH = aHard; gl_Position = vec4(aPos.x/uCss.x*2.-1., 1.-aPos.y/uCss.y*2., 0, 1); }`,
+  `#version 300 es
+    precision highp float;
+    in vec2 vL; in float vS; in float vH;
+    out vec4 o;
+    void main(){ float l = length(vL);
+      float a = mix(pow(clamp(1. - l, 0., 1.), 1.6), 1. - smoothstep(.55, 1., l), vH)*vS; o = vec4(a); }`);
+
+  // Stroke coordinates: where along your movement (u) and how far off-centre (v) each bit of paint landed
+  const paramProg = program(`#version 300 es
+    in vec2 aPos; in vec2 aLoc; in float aHard; in float aR; in vec2 aUV; in vec2 aT; in float aRn;
+    uniform vec2 uCss;
+    out vec2 vL; out float vH; out float vR; out vec2 vUV; out vec2 vT; out float vRn;
+    void main(){ vL = aLoc; vH = aHard; vR = aR; vUV = aUV; vT = aT; vRn = aRn;
+      gl_Position = vec4(aPos.x/uCss.x*2.-1., 1.-aPos.y/uCss.y*2., 0, 1); }`,
+  `#version 300 es
+    precision highp float;
+    in vec2 vL; in float vH; in float vR; in vec2 vUV; in vec2 vT; in float vRn;
+    uniform float uSeed;
+    out vec4 o;
+    void main(){
+      float l = length(vL);
+      float cov = mix(pow(clamp(1. - l, 0., 1.), 1.6), 1. - smoothstep(.55, 1., l), vH);
+      if(cov < .04) discard;
+      vec2 off = vL*vR, n = vec2(-vT.y, vT.x);
+      o = vec4(vUV.x + dot(off, vT), clamp(vUV.y + dot(off, n)/vRn, -1., 1.), uSeed, 1.);
+    }`);
+
+  // Spray layer: a live material wherever paint has landed
+  const layProg = program(`#version 300 es
+    void main(){ vec2 p = vec2((gl_VertexID<<1)&2, gl_VertexID&2); gl_Position = vec4(p*2.-1., 0, 1); }`,
+  `#version 300 es
+    precision highp float;
+    uniform sampler2D uD, uP;
+    uniform int uFollow;
+    uniform vec2 uDev, uCss;
+    uniform float uTime, uSeed, uGrain, uTooth, uRelief;
+    uniform int uMat;
+    uniform vec3 uColor;
+    out vec4 o;
+    ${NOISE}
+    float D(vec2 uv){ return texture(uD, uv).r; }
+    void main(){
+      vec2 uv = gl_FragCoord.xy/uDev;
+      vec2 px = vec2(uv.x, 1.-uv.y)*uCss;
+      float d = D(uv);
+      // Stroke coordinates: u = distance along your movement, v = across it (-1..1)
+      vec4 P = texture(uP, uv);
+      bool has = uFollow == 1 && P.a > .02;
+      float sU = has ? P.r/P.a : px.x, sV = has ? P.g/P.a : 0., sSeed = has ? P.b/P.a : uSeed;
+      float flowU = sU - uTime*55.;
+      if(uMat == 5){ // neon: sprayed light
+        float g = 0.; float j = hash(gl_FragCoord.xy)*6.2831;
+        for(int i=0;i<12;i++){ float fi = float(i); float r = sqrt((fi+.5)/12.)*16.; float an = fi*2.39996 + j;
+          g += D(uv + vec2(cos(an), sin(an))*r/uCss); }
+        g /= 12.;
+        if(g < .004 && d < .004) discard;
+        vec3 c = has ? hsv(fract(sU*.0012 - uTime*.12 + sSeed), .75, 1.) : hsv(fract(px.x*.0009 + px.y*.0006 - uTime*.08 + uSeed), .75, 1.);
+        float pulse = pow(.5 + .5*sin(sU*.035 - uTime*7.), 14.)*(has ? 1. : 0.);
+        float gn = mix(hash(floor(gl_FragCoord.xy)), noise(gl_FragCoord.xy*.5 + uSeed*50.), .35);
+        float core = smoothstep(gn - .06, gn + .06, d*1.05)*smoothstep(.1, .5, d);
+        o = vec4(c*g*2.8*(1. + pulse) + mix(c, vec3(1), .6)*core, clamp(g*.8 + core*.8, 0., 1.));
+        return;
+      }
+      if(d < .004) discard;
+      vec2 e = 1.5/uCss;
+      float gx = D(uv + vec2(e.x, 0.)) - D(uv - vec2(e.x, 0.));
+      float gy = D(uv + vec2(0., e.y)) - D(uv - vec2(0., e.y));
+      vec3 N = normalize(vec3(-gx*.35*uRelief, -gy*.35*uRelief, 1.));
+      vec3 L = normalize(vec3(-.45, .55, .7)), H = normalize(L + vec3(0,0,1));
+      float diff = mix(1., clamp(dot(N,L), 0., 1.)*.35 + .78, min(1., uRelief));
+      float spec = pow(clamp(dot(N,H), 0., 1.), 30.)*min(1., uRelief);
+      float wet = smoothstep(.8, 1., d);
+      // fine grain: thin paint shows as pinpoints, thick paint fills in solid
+      float gn = mix(hash(floor(gl_FragCoord.xy)), noise(gl_FragCoord.xy*.5 + uSeed*50.), .35);
+      float a = mix(smoothstep(0., .45, d), smoothstep(gn - .06, gn + .06, d*1.15), uGrain);
+      a *= 1. - uTooth*.16*smoothstep(.55, .85, noise(gl_FragCoord.xy*.4 + uSeed*9.));
+      vec3 col; float sp = .15, emit = 0.;
+      if(uMat == 0){
+        col = uColor; sp = .25*wet;
+      } else if(uMat == 1){ // holographic foil
+        float t = has ? flowU*.0028 + sV*.55 + fbm(vec2(flowU*.006, sV*1.2 + sSeed))*.8 + N.x*.25
+                      : px.x*.0016 + px.y*.0011 + fbm(px/220. + uTime*.06 + uSeed)*.9 + N.x*.25 - uTime*.05;
+        col = hsv(fract(t), .42, 1.)*.88 + .1;
+        col += step(.994, hash(floor(px/1.5) + floor(uTime*10.)))*.9*a;
+        sp = .8; emit = .35;
+      } else if(uMat == 2){ // liquid chrome
+        float y = has ? -sV*1.3 + N.y*.8 + (fbm(vec2(flowU*.004, sV*.8 + sSeed)) - .5)*1.4
+                      : (.5 - px.y/uCss.y)*3. + N.y*.8 + (fbm(px/260. + vec2(uTime*.08, 0.) + uSeed) - .5)*1.6;
+        vec3 sky = mix(vec3(.93,.95,1.), vec3(.3,.34,.42), smoothstep(0., 1.1, y));
+        vec3 gnd = mix(vec3(.03,.03,.05), vec3(.6,.55,.5), smoothstep(-1.3, 0., y));
+        col = y > 0. ? sky : gnd;
+        col += smoothstep(.07, 0., abs(y))*.5;
+        sp = 1.; emit = .85;
+      } else if(uMat == 3){ // lava
+        vec2 q = has ? vec2(flowU*.008, sV*1.3 + sSeed) : px/110. + uSeed;
+        float f = has ? fbm(q + vec2(fbm(q*1.7 + uTime*.2), 0.)*1.5) : fbm(q + vec2(fbm(q*1.7 + uTime*.25), uTime*.12)*1.6);
+        float crust = smoothstep(.47, .6, f);
+        vec3 hot = mix(vec3(1.,.25,.02), vec3(1.,.86,.4), smoothstep(.5, 1., d)*(1.-crust));
+        col = mix(hot*1.45, vec3(.09,.05,.05), crust);
+        emit = 1. - crust; sp = .4*crust;
+      } else if(uMat == 4){ // marbled ink
+        vec2 q = has ? vec2(flowU*.005, sV*1.1 + sSeed*3.) : px/170. + uSeed*3.;
+        vec2 w = vec2(fbm(q + uTime*.05), fbm(q + 5.2));
+        float m = fbm(q + w*2.2);
+        col = mix(vec3(.05,.07,.22), vec3(.1,.45,.55), smoothstep(.3, .7, m));
+        col = mix(col, vec3(.95,.9,.8), smoothstep(.64, .7, m)*.9);
+        sp = .5;
+      } else { // oil slick
+        float th = has ? fbm(vec2(flowU*.006, sV*1.4 + sSeed))*2. + sV*.6 + N.x*.4 : fbm(px/200. + uSeed + uTime*.03)*2. + N.x*.4;
+        vec3 film = .5 + .5*cos(6.2831*(th + vec3(0., .33, .67)));
+        col = mix(vec3(.02,.02,.03), film, .8*smoothstep(.25, .85, has ? fbm(vec2(flowU*.012, sV*2.5 + sSeed)) : fbm(px/90. + uSeed)));
+        sp = .7;
+      }
+      vec3 lit = col*mix(diff, 1., emit) + spec*(sp + wet*.12);
+      o = vec4(lit*a, a);
+    }`);
+
+  const emptyVao = gl.createVertexArray();
+
+  function attribs(prog, layout) {
+    const stride = layout.reduce((s, [, n]) => s + n, 0) * 4;
+    let off = 0;
+    for (const [name, n] of layout) {
+      const loc = gl.getAttribLocation(prog.p, name);
+      if (loc >= 0) { gl.enableVertexAttribArray(loc); gl.vertexAttribPointer(loc, n, gl.FLOAT, false, stride, off); }
+      off += n * 4;
+    }
+  }
+  const RIB_LAYOUT = [['aPos', 2], ['aU', 1], ['aV', 1], ['aW', 1], ['aT', 1], ['aSp', 1]];
+  const DAB_LAYOUT = [['aPos', 2], ['aLoc', 2], ['aStr', 1], ['aHard', 1], ['aR', 1], ['aUV', 2], ['aT', 2], ['aRn', 1]];
+  const DS = 10; // floats per stored dab
+
+  function makeMesh(prog, layout) {
+    const vao = gl.createVertexArray(), buf = gl.createBuffer();
+    gl.bindVertexArray(vao); gl.bindBuffer(gl.ARRAY_BUFFER, buf); attribs(prog, layout); gl.bindVertexArray(null);
+    return { vao, buf, count: 0 };
+  }
+  const dabMesh = makeMesh(dabProg, DAB_LAYOUT);
+  const paramVao = gl.createVertexArray();
+  gl.bindVertexArray(paramVao); gl.bindBuffer(gl.ARRAY_BUFFER, dabMesh.buf); attribs(paramProg, DAB_LAYOUT); gl.bindVertexArray(null);
+  const followOK = !!gl.getExtension('EXT_color_buffer_float');
+  const liveMesh = makeMesh(ribProg, RIB_LAYOUT);
+
+  // ---------- sizing, textures ----------
+  let W = 0, H = 0, dpr = 1, DW = 1, DH = 1;
+  let bgTex = gl.createTexture();
+  const masks = [0, 1].map(() => ({ tex: gl.createTexture(), fb: gl.createFramebuffer() }));
+  function setupTex(tex) {
+    gl.bindTexture(gl.TEXTURE_2D, tex);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  }
+  function resizeMasks() {
+    for (const m of masks) {
+      setupTex(m.tex);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, W, H, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, m.fb);
+      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, m.tex, 0);
+    }
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    rasterMasks();
+  }
+
+  function rng(seed) { return () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+
+  function drawPhoto(x, w, h) {
+    const r = rng(7), m = Math.min(w, h), hz = h * 0.6;
+    const sky = x.createLinearGradient(0, 0, 0, hz);
+    sky.addColorStop(0, '#1f1640'); sky.addColorStop(0.55, '#b8487a'); sky.addColorStop(1, '#ffb36b');
+    x.fillStyle = sky; x.fillRect(0, 0, w, hz);
+    const sx = w * 0.66, sy = hz - m * 0.03, sr = m * 0.2;
+    const sg = x.createLinearGradient(0, sy - sr, 0, sy + sr);
+    sg.addColorStop(0, '#fff0b8'); sg.addColorStop(1, '#ff6b4a');
+    x.fillStyle = sg; x.beginPath(); x.arc(sx, sy, sr, 0, Math.PI * 2); x.fill();
+    x.fillStyle = sky;
+    for (let i = 0; i < 6; i++) x.fillRect(sx - sr - 2, sy - sr * 0.1 + i * sr * 0.17, sr * 2 + 4, sr * 0.02 * (i + 1));
+    const ridge = (base, amp, col, s) => {
+      x.fillStyle = col; x.beginPath(); x.moveTo(0, hz);
+      for (let i = 0; i <= 60; i++) {
+        const t = i / 60, xx = t * w;
+        const yy = hz - base - amp * (0.5 * Math.sin(t * 7 + s) + 0.3 * Math.sin(t * 17 + s * 2) + 0.2 * Math.sin(t * 41 + s * 3));
+        x.lineTo(xx, Math.min(hz, yy));
+      }
+      x.lineTo(w, hz); x.closePath(); x.fill();
+    };
+    ridge(h * 0.07, h * 0.07, '#6a3070', 1.3);
+    ridge(h * 0.02, h * 0.05, '#2e1a45', 4.1);
+    const sea = x.createLinearGradient(0, hz, 0, h);
+    sea.addColorStop(0, '#553874'); sea.addColorStop(1, '#0e0a1f');
+    x.fillStyle = sea; x.fillRect(0, hz, w, h - hz);
+    for (let i = 0; i < 170; i++) {
+      const t = r(), yy = hz + (h - hz) * Math.pow(t, 1.3);
+      const spread = sr * (0.5 + t * 1.2), cx = sx + (r() - 0.5) * spread * 1.6;
+      const len = sr * (0.08 + r() * 0.5) * (1 - t * 0.4);
+      x.globalAlpha = 0.75 * (1 - t);
+      x.fillStyle = t < 0.35 ? '#ffe2a0' : '#ff8a6a';
+      x.fillRect(cx - len / 2, yy, len, Math.max(1, m * 0.005 * (1 - t) + 1));
+    }
+    x.globalAlpha = 1;
+    x.fillStyle = '#fff1dc'; x.textBaseline = 'top';
+    x.font = `800 ${Math.round(m * 0.17)}px "Bricolage Grotesque", ui-sans-serif, sans-serif`;
+    x.fillText('Low tide', w * 0.06, h * 0.07);
+    x.globalAlpha = 0.85;
+    x.font = `500 ${Math.round(m * 0.034)}px "Hanken Grotesk", ui-sans-serif, sans-serif`;
+    x.fillText('Late swim, 7:42 pm', w * 0.066, h * 0.07 + m * 0.2);
+    x.globalAlpha = 1;
+  }
+  function drawPaper(x, w, h) {
+    x.fillStyle = '#ece6da'; x.fillRect(0, 0, w, h);
+    const img = x.getImageData(0, 0, w, h), d = img.data, r = rng(3);
+    for (let i = 0; i < d.length; i += 4) { const n = (r() - 0.5) * 14; d[i] += n; d[i + 1] += n; d[i + 2] += n; }
+    x.putImageData(img, 0, 0);
+  }
+  function drawBackground() {
+    const w = Math.round(W * dpr), h = Math.round(H * dpr);
+    const c = document.createElement('canvas'); c.width = w; c.height = h;
+    const x = c.getContext('2d');
+    (state.surface === 'photo' ? drawPhoto : drawPaper)(x, w, h);
+    setupTex(bgTex);
+    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, c);
+    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
+  }
+
+  // ---------- strokes ----------
+  const items = [];     // brush ribbons and spray layers, in paint order
+  const maskStrokes = []; // finished effect strokes
+  const history = [];
+  let cur = null;
+
+  const smooth = (a, b, x) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
+  const widthFor = (size, speed) => size * (1 + (0.2 - 0.87 * smooth(0.15, 2.2, speed)) * state.phys.brush.thin);
+
+  function resample(P) { // Catmull-Rom, max 4 px between points
+    if (P.length < 3) return P;
+    const out = [];
+    for (let i = 0; i < P.length - 1; i++) {
+      const p0 = P[Math.max(0, i - 1)], p1 = P[i], p2 = P[i + 1], p3 = P[Math.min(P.length - 1, i + 2)];
+      const n = Math.max(1, Math.ceil(Math.hypot(p2.x - p1.x, p2.y - p1.y) / 4));
+      for (let k = 0; k < n; k++) {
+        const t = k / n, t2 = t * t, t3 = t2 * t;
+        const cr = (a, b, c, d) => 0.5 * ((2 * b) + (-a + c) * t + (2 * a - 5 * b + 4 * c - d) * t2 + (-a + 3 * b - 3 * c + d) * t3);
+        out.push({ x: cr(p0.x, p1.x, p2.x, p3.x), y: cr(p0.y, p1.y, p2.y, p3.y), w: p1.w + (p2.w - p1.w) * t, sp: p1.sp + (p2.sp - p1.sp) * t });
+      }
+    }
+    out.push(P[P.length - 1]);
+    return out;
+  }
+
+  // Even spacing along the path, so smoothing windows mean the same distance everywhere
+  function evenSpacing(P, step) {
+    if (P.length < 2) return P;
+    const out = [P[0]];
+    let carry = 0;
+    for (let i = 1; i < P.length; i++) {
+      const a = P[i - 1], b = P[i], L = Math.hypot(b.x - a.x, b.y - a.y);
+      let d = step - carry;
+      while (d <= L) {
+        const t = d / L;
+        out.push({ x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t, w: a.w + (b.w - a.w) * t, sp: a.sp + (b.sp - a.sp) * t });
+        d += step;
+      }
+      carry = L - (d - step);
+    }
+    const last = P[P.length - 1];
+    if (Math.hypot(last.x - out[out.length - 1].x, last.y - out[out.length - 1].y) > 0.5) out.push(last);
+    return out;
+  }
+  // A wide brush can't turn on a point: round corners over a window tied to its width.
+  // Window shrinks near the ends so the stroke still starts and stops where you did.
+  function roundCorners(P, k) {
+    const n = P.length;
+    if (k < 1 || n < 3) return P;
+    let cur = P;
+    for (let pass = 0; pass < 2; pass++) {
+      const next = new Array(n);
+      for (let i = 0; i < n; i++) {
+        const r = Math.min(k, i, n - 1 - i);
+        let sx = 0, sy = 0;
+        for (let j = i - r; j <= i + r; j++) { sx += cur[j].x; sy += cur[j].y; }
+        const c = 2 * r + 1;
+        next[i] = { ...cur[i], x: sx / c, y: sy / c };
+      }
+      cur = next;
+    }
+    return cur;
+  }
+
+  function buildRibbon(st) {
+    let wv = widthFor(st.size, 0);
+    for (const q of st.pts) { wv += (widthFor(st.size, q.sp) - wv) * 0.14; q.w = wv; }
+    const STEP = 2, sm = state.phys.brush.smoothing;
+    const P = roundCorners(evenSpacing(resample(st.pts), STEP), Math.round(Math.min(25, st.size * 0.2 * sm) / STEP)), n = P.length;
+    const tw = Math.max(1, Math.round(Math.max(2, st.size * 0.18 * sm) / STEP));
+    if (n < 2) return null;
+    const s = new Float32Array(n);
+    for (let i = 1; i < n; i++) s[i] = s[i - 1] + Math.hypot(P[i].x - P[i - 1].x, P[i].y - P[i - 1].y);
+    const total = s[n - 1];
+    const ws = P.map((p) => p.w);
+    for (let pass = 0; pass < 3; pass++) for (let i = 1; i < n - 1; i++) ws[i] = (ws[i - 1] + ws[i] * 2 + ws[i + 1]) / 4;
+    const TP = Math.max(0.001, state.phys.brush.taper);
+    const tIn = Math.min(st.size * 1.6 * TP, total * 0.35 * Math.min(1, TP));
+    const tOut = (st.done ? Math.min(st.size * 3 * TP, total * 0.45 * Math.min(1, TP)) : Math.min(st.size * 0.5 * TP, total * 0.15)) || 0.001;
+    const geo = MATERIALS[st.mat].geo;
+    const data = new Float32Array(n * 2 * 7);
+    let o = 0;
+    for (let i = 0; i < n; i++) {
+      const a = P[Math.max(0, i - tw)], b = P[Math.min(n - 1, i + tw)];
+      let tx = b.x - a.x, ty = b.y - a.y; const l = Math.hypot(tx, ty) || 1; tx /= l; ty /= l;
+      const ti = smooth(0, tIn, s[i]), to = smooth(0, tOut, total - s[i]);
+      const half = ws[i] * (0.05 + 0.95 * Math.min(ti, to)) * geo / 2;
+      const loadT = s[i] / (st.size * 26);
+      for (const side of [-1, 1]) {
+        data[o++] = P[i].x - ty * half * side; data[o++] = P[i].y + tx * half * side;
+        data[o++] = s[i]; data[o++] = side; data[o++] = ws[i] * geo; data[o++] = loadT; data[o++] = P[i].sp;
+      }
+    }
+    return data;
+  }
+  function uploadRibbon(st, mesh) {
+    const data = buildRibbon(st);
+    mesh.count = data ? data.length / 7 : 0;
+    if (data) { gl.bindBuffer(gl.ARRAY_BUFFER, mesh.buf); gl.bufferData(gl.ARRAY_BUFFER, data, gl.DYNAMIC_DRAW); }
+  }
+  rebuildRibbons = () => { for (const it of items) if (it.kind === 'ribbon') uploadRibbon(it, it.mesh); };
+  function finishRibbon(st) {
+    st.done = true;
+    st.mesh = makeMesh(ribProg, RIB_LAYOUT);
+    uploadRibbon(st, st.mesh);
+    items.push(st); history.push(st);
+  }
+
+  // Dabs are flat: x, y, radius, strength, hardness
+  function maskTarget(ch) { const m = masks[ch < 4 ? 0 : 1], c = ch % 4; return { fb: m.fb, cm: [c === 0, c === 1, c === 2, c === 3] }; }
+  const layerTarget = (L, st) => ({ fb: L.fb, pfb: L.pfb, seed: st ? st.seed : 0, cm: [true, true, true, true], w: DW, h: DH });
+  const strokeTarget = (st) => st.layer ? layerTarget(st.layer, st) : maskTarget(st.ch);
+  const CORNERS = [[-1, -1], [1, -1], [1, 1], [-1, -1], [1, 1], [-1, 1]];
+  function drawDabs(flat, from, target) {
+    const n = (flat.length - from) / DS;
+    if (n <= 0) return;
+    gl.bindFramebuffer(gl.FRAMEBUFFER, target.fb);
+    gl.viewport(0, 0, target.w || W, target.h || H);
+    gl.colorMask(...target.cm);
+    gl.enable(gl.BLEND); gl.blendFunc(gl.ONE, gl.ONE);
+    const data = new Float32Array(n * 6 * 12); let o = 0;
+    for (let i = from; i < flat.length; i += DS) {
+      const x = flat[i], y = flat[i + 1], r = flat[i + 2], st = flat[i + 3], h = flat[i + 4];
+      for (const [cx, cy] of CORNERS) {
+        data[o++] = x + cx * r; data[o++] = y + cy * r; data[o++] = cx; data[o++] = cy; data[o++] = st; data[o++] = h; data[o++] = r;
+        data[o++] = flat[i + 5]; data[o++] = flat[i + 6]; data[o++] = flat[i + 7]; data[o++] = flat[i + 8]; data[o++] = flat[i + 9];
+      }
+    }
+    gl.useProgram(dabProg.p);
+    gl.uniform2f(dabProg.u.uCss, W, H);
+    gl.bindVertexArray(dabMesh.vao);
+    gl.bindBuffer(gl.ARRAY_BUFFER, dabMesh.buf); gl.bufferData(gl.ARRAY_BUFFER, data, gl.DYNAMIC_DRAW);
+    gl.drawArrays(gl.TRIANGLES, 0, n * 6);
+    gl.colorMask(true, true, true, true);
+    if (target.pfb) { // newest paint decides which way the material runs
+      gl.bindFramebuffer(gl.FRAMEBUFFER, target.pfb);
+      gl.viewport(0, 0, W, H);
+      gl.disable(gl.BLEND);
+      gl.useProgram(paramProg.p);
+      gl.uniform2f(paramProg.u.uCss, W, H);
+      gl.uniform1f(paramProg.u.uSeed, target.seed || 0);
+      gl.bindVertexArray(paramVao);
+      gl.drawArrays(gl.TRIANGLES, 0, n * 6);
+    }
+    gl.bindVertexArray(null);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  }
+  function rasterMasks() {
+    for (const m of masks) { gl.bindFramebuffer(gl.FRAMEBUFFER, m.fb); gl.clearColor(0, 0, 0, 0); gl.clear(gl.COLOR_BUFFER_BIT); }
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    for (const st of maskStrokes) { drawDabs(st.dabs, 0, maskTarget(st.ch)); st.drawn = st.dabs.length; }
+    if (cur && cur.kind === 'mask') drawDabs(cur.dabs, 0, maskTarget(cur.ch));
+  }
+
+  // Spray layers: consecutive spray strokes of one material share a layer
+  function allocLayer(L) {
+    setupTex(L.tex);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.R8, DW, DH, 0, gl.RED, gl.UNSIGNED_BYTE, null);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, L.fb);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, L.tex, 0);
+    gl.clearColor(0, 0, 0, 0); gl.clear(gl.COLOR_BUFFER_BIT);
+    if (followOK && L.tip !== 'spray') {
+      if (!L.ptex) { L.ptex = gl.createTexture(); L.pfb = gl.createFramebuffer(); }
+      setupTex(L.ptex);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA16F, W, H, 0, gl.RGBA, gl.HALF_FLOAT, null);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, L.pfb);
+      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, L.ptex, 0);
+      gl.clear(gl.COLOR_BUFFER_BIT);
+    }
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  }
+  function rasterLayer(L) {
+    gl.clearColor(0, 0, 0, 0);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, L.fb); gl.clear(gl.COLOR_BUFFER_BIT);
+    if (L.pfb) { gl.bindFramebuffer(gl.FRAMEBUFFER, L.pfb); gl.clear(gl.COLOR_BUFFER_BIT); }
+    for (const st of L.strokes) { drawDabs(st.dabs, 0, layerTarget(L, st)); st.drawn = st.dabs.length; }
+  }
+  function makeLayer(mat, hex, tip = 'spray') {
+    const L = { kind: 'layer', tip, mat, hex, color: hexRgb(hex), seed: Math.random() * 10, tex: gl.createTexture(), fb: gl.createFramebuffer(), strokes: [] };
+    allocLayer(L); items.push(L); return L;
+  }
+  function layerFor(mat, hex, tip) {
+    const last = items[items.length - 1];
+    if (last && last.kind === 'layer' && last.tip === tip && last.mat === mat && (mat !== 0 || last.hex === hex)) return last;
+    return makeLayer(mat, hex, tip);
+  }
+  const newSpray = (layer, ch, size) => ({ kind: 'spray', layer, ch, size, dabs: [], drawn: 0, wet: 0, dripT: 0, carry: 0, arc: 0, tx: 1, ty: 0, seed: Math.random() * 10 });
+  function steer(st, dx, dy, k) { const L = Math.hypot(dx, dy); if (L < 0.5) return; let tx = st.tx + (dx / L - st.tx) * k, ty = st.ty + (dy / L - st.ty) * k; const m = Math.hypot(tx, ty) || 1; st.tx = tx / m; st.ty = ty / m; }
+
+  function gauss() { let u = 0; while (!u) u = Math.random(); const r = Math.sqrt(-2 * Math.log(u)), a = 2 * Math.PI * Math.random(); return [r * Math.cos(a), r * Math.sin(a)]; }
+  // One frame of spraying: paint lands over time, spread across the path the nozzle moved
+  function sprayTick(st, a, b, dt) {
+    const SP = state.phys.spray, size = st.size, sig = size * 0.26, k = (st.layer ? 1 : 0.6 * state.buildUp) * SP.build, rs = Math.max(1, size / 140);
+    const moved = Math.hypot(b.x - a.x, b.y - a.y);
+    steer(st, b.x - a.x, b.y - a.y, 0.3);
+    const tx = st.tx, ty = st.ty, across = sig * 2.2;
+    // soft mist underneath, so the cloud fades out smoothly
+    const steps = Math.max(1, Math.ceil(moved / (sig * 0.5)));
+    for (let i = 1; i <= steps; i++) st.dabs.push(a.x + (b.x - a.x) * i / steps, a.y + (b.y - a.y) * i / steps, sig * 1.9, 2.1 * dt / steps * k, 0, st.arc + moved * i / steps, 0, tx, ty, across);
+    // fine specks on top: the grain of a real can
+    const want = dt * 5000 * SP.speckle * (size / 100) ** 2 + st.carry;
+    let n = Math.floor(want); st.carry = want - n; n = Math.min(n, 2500);
+    for (let i = 0; i < n; i++) {
+      const t = Math.random(), cx = a.x + (b.x - a.x) * t, cy = a.y + (b.y - a.y) * t;
+      const over = Math.random() < Math.min(0.6, 0.22 * SP.overspray), g = gauss(), sg = over ? sig * (1 + 1.1 * SP.overspray) : sig;
+      const r = (over ? 0.22 + Math.random() * 0.2 : 0.28 + Math.random() * Math.random() * 0.55) * rs;
+      const ox = g[0] * sg, oy = g[1] * sg;
+      st.dabs.push(cx + ox, cy + oy, r, (over ? 0.35 : 0.5 + Math.random() * 0.4) * k, 1, st.arc + moved * t + ox * tx + oy * ty, (-ox * ty + oy * tx) / across, tx, ty, across);
+    }
+    st.arc += moved;
+    // Held still, the paint pools; pooled paint runs
+    st.wet = moved < dt * 25 ? st.wet + dt : Math.max(0, st.wet - dt * 2);
+    if (SP.drips > 0.01 && st.wet > 0.6 / SP.drips) { st.dripT -= dt; if (st.dripT <= 0) { st.dripT = (0.25 + Math.random() * 0.4) / SP.drips; spawnDrip(st, b); } }
+  }
+  const drips = [];
+  function spawnDrip(st, at) {
+    const g = gauss();
+    drips.push({ st, x: at.x + g[0] * st.size * 0.14, y: at.y + st.size * 0.12 + Math.random() * st.size * 0.08,
+      vy: (45 + Math.random() * 60) * (0.6 + 0.4 * Math.min(2, state.phys.spray.drips)), u: st.arc, r: Math.max(1.3, st.size * 0.02) * (0.8 + Math.random() * 0.5), left: (25 + Math.random() * st.size * 1.5) * state.phys.spray.drips, acc: 0 });
+  }
+  function updateDrips(dt) {
+    for (let i = drips.length - 1; i >= 0; i--) {
+      const d = drips[i], k = d.st.layer ? 1 : 0.6 * state.buildUp;
+      d.acc += d.vy * dt; d.vy *= Math.exp(-0.9 * dt);
+      while (d.acc >= 1) { d.acc -= 1; d.y += 1; d.left -= 1; d.r *= 0.997; d.u += 1; d.st.dabs.push(d.x + (Math.random() - 0.5) * 0.3, d.y, d.r, 0.85 * k, 1, d.u, 0, 0, 1, d.r * 2); }
+      if (d.left <= 0 || d.vy < 7) { d.st.dabs.push(d.x, d.y + d.r * 0.6, d.r * 1.55, k, 1, d.u, 0, 0, 1, d.r * 2); drips.splice(i, 1); }
+    }
+  }
+  function flush(st) { drawDabs(st.dabs, st.drawn, strokeTarget(st)); st.drawn = st.dabs.length; }
+
+  // Round tip: clean dab, a little overspray just outside the edge
+  function stampRound(x, y) {
+    const P = state.phys.round, r = cur.size / 2, k = cur.layer ? 1 : 0.3 * state.buildUp;
+    const tx = cur.tx, ty = cur.ty;
+    cur.dabs.push(x, y, r, 0.35 * k, Math.max(0, Math.min(1, 1 - 0.3 * P.softness)), cur.arc, 0, tx, ty, r);
+    const e = 0.5 * P.overspray * Math.max(1, cur.size / 30);
+    const n = Math.floor(e) + (Math.random() < e % 1 ? 1 : 0);
+    for (let i = 0; i < n; i++) {
+      const a = Math.random() * Math.PI * 2, rr = r * (0.85 + Math.abs(gauss()[0]) * 0.3 * Math.max(0.3, P.overspray));
+      const ox = Math.cos(a) * rr, oy = Math.sin(a) * rr;
+      cur.dabs.push(x + ox, y + oy, 0.3 + Math.random() * 0.45, 0.5 * k, 1, cur.arc + ox * tx + oy * ty, (-ox * ty + oy * tx) / r, tx, ty, r);
+    }
+    flush(cur);
+  }
+  function stamp(x, y, k) {
+    cur.dabs.push(x, y, cur.size / 2, 0.075 * k * state.buildUp, 0, 0, 0, 1, 0, 1);
+    drawDabs(cur.dabs, cur.dabs.length - DS, maskTarget(cur.ch));
+  }
+
+  // ---------- input ----------
+  let nozzle = null, prevNozzle = null;
+  let down = false, lazy = null, lastRaw = null, speed = 0, wCur = 0, lastDab = null, lastMoveT = 0;
+  const loc = (e) => { const r = cvs.getBoundingClientRect(); return { x: e.clientX - r.left, y: e.clientY - r.top }; };
+
+  cvs.addEventListener('pointerdown', (e) => {
+    if (e.button !== 0) return;
+    cvs.setPointerCapture(e.pointerId);
+    down = true;
+    const p = loc(e);
+    lazy = { ...p }; lastRaw = { ...p, t: e.timeStamp }; speed = 0; lastMoveT = performance.now();
+    if (state.tip === 'round') {
+      const layer = state.mode === 'material' ? layerFor(state.mat, state.color, 'round') : null;
+      cur = { kind: 'round', layer, ch: state.effect, size: state.size.round, dabs: [], drawn: 0, arc: 0, tx: 1, ty: 0, seed: Math.random() * 10 };
+      if (layer) layer.strokes.push(cur); else maskStrokes.push(cur);
+      lastDab = { ...p }; stampRound(p.x, p.y);
+    } else if (state.tip === 'spray') {
+      const layer = state.mode === 'material' ? layerFor(state.mat, state.color, 'spray') : null;
+      cur = newSpray(layer, state.effect, state.size.spray);
+      if (layer) layer.strokes.push(cur); else maskStrokes.push(cur);
+      nozzle = { ...p }; prevNozzle = { ...p };
+    } else if (state.mode === 'material') {
+      wCur = widthFor(state.size['brush-material'], 0);
+      cur = { kind: 'ribbon', mat: state.mat, color: hexRgb(state.color), seed: Math.random() * 10, size: state.size['brush-material'], pts: [{ x: p.x, y: p.y, w: wCur, sp: 0 }], done: false };
+    } else {
+      cur = { kind: 'mask', ch: state.effect, size: state.size['brush-effect'], dabs: [] };
+      lastDab = { ...p }; stamp(p.x, p.y, 1);
+    }
+  });
+  function onRaw(p, t) {
+    const dt = Math.max(1, t - lastRaw.t);
+    speed += (Math.hypot(p.x - lastRaw.x, p.y - lastRaw.y) / dt - speed) * 0.25;
+    lastRaw = { ...p, t };
+    const dx = p.x - lazy.x, dy = p.y - lazy.y, L = Math.hypot(dx, dy), R = cur.kind === 'ribbon' ? 3 * state.phys.brush.smoothing : cur.kind === 'round' ? 3 * state.phys.round.smoothing : 3;
+    if (L <= R) return;
+    lazy.x += dx * (L - R) / L; lazy.y += dy * (L - R) / L;
+    lastMoveT = performance.now();
+    if (cur.kind === 'ribbon') {
+      wCur += (widthFor(cur.size, speed) - wCur) * 0.14;
+      const last = cur.pts[cur.pts.length - 1];
+      if (Math.hypot(lazy.x - last.x, lazy.y - last.y) >= 1.5) cur.pts.push({ x: lazy.x, y: lazy.y, w: wCur, sp: speed });
+    } else if (cur.kind === 'round') {
+      const step = Math.max(1, cur.size * 0.08);
+      let d = Math.hypot(lazy.x - lastDab.x, lazy.y - lastDab.y);
+      while (d >= step) {
+        steer(cur, lazy.x - lastDab.x, lazy.y - lastDab.y, 0.25);
+        lastDab = { x: lastDab.x + (lazy.x - lastDab.x) * step / d, y: lastDab.y + (lazy.y - lastDab.y) * step / d };
+        cur.arc += step;
+        stampRound(lastDab.x, lastDab.y);
+        d -= step;
+      }
+    } else {
+      const step = Math.max(2, cur.size * 0.1);
+      let d = Math.hypot(lazy.x - lastDab.x, lazy.y - lastDab.y);
+      while (d >= step) {
+        lastDab = { x: lastDab.x + (lazy.x - lastDab.x) * step / d, y: lastDab.y + (lazy.y - lastDab.y) * step / d };
+        stamp(lastDab.x, lastDab.y, 1);
+        d -= step;
+      }
+    }
+  }
+  cvs.addEventListener('pointermove', (e) => {
+    const p = loc(e);
+    ring.style.left = p.x + 'px'; ring.style.top = p.y + 'px';
+    if (!down) return;
+    if (cur.kind === 'spray') { nozzle = p; return; }
+    const evs = e.getCoalescedEvents ? e.getCoalescedEvents() : [e];
+    for (const ev of (evs.length ? evs : [e])) onRaw(loc(ev), ev.timeStamp);
+    if (cur.kind === 'ribbon') uploadRibbon(cur, liveMesh);
+  });
+  function end() {
+    if (!down) return;
+    down = false;
+    if (cur.kind === 'spray' || cur.kind === 'round') history.push(cur);
+    else if (cur.kind === 'ribbon') { if (cur.pts.length > 1) finishRibbon(cur); liveMesh.count = 0; }
+    else { maskStrokes.push(cur); history.push(cur); }
+    cur = null;
+  }
+  cvs.addEventListener('pointerup', end);
+  cvs.addEventListener('pointercancel', end);
+
+  function undo() {
+    const st = history.pop(); if (!st) return;
+    for (let i = drips.length - 1; i >= 0; i--) if (drips[i].st === st) drips.splice(i, 1);
+    if (st.kind === 'ribbon') { items.splice(items.indexOf(st), 1); gl.deleteBuffer(st.mesh.buf); gl.deleteVertexArray(st.mesh.vao); }
+    else if ((st.kind === 'spray' || st.kind === 'round') && st.layer) {
+      const L = st.layer; L.strokes.splice(L.strokes.indexOf(st), 1);
+      if (!L.strokes.length) { items.splice(items.indexOf(L), 1); gl.deleteTexture(L.tex); gl.deleteFramebuffer(L.fb); if (L.ptex) { gl.deleteTexture(L.ptex); gl.deleteFramebuffer(L.pfb); } } else rasterLayer(L);
+    } else { maskStrokes.splice(maskStrokes.indexOf(st), 1); rasterMasks(); }
+  }
+  $('undo').onclick = undo;
+  $('clear').onclick = () => { if (down) return; while (history.length) undo(); };
+  window.addEventListener('keydown', (e) => { if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'z') { e.preventDefault(); undo(); } });
+
+  function hexRgb(h) { const n = parseInt(h.slice(1), 16); return [(n >> 16 & 255) / 255, (n >> 8 & 255) / 255, (n & 255) / 255]; }
+
+  // ---------- opening state: a few strokes already on the photo ----------
+  function seed() {
+    const m = Math.min(W, H), sx = W * 0.66, sy = H * 0.6 - m * 0.03, sr = m * 0.2;
+    const fx = (ch, size, path) => { cur = { kind: 'mask', ch, size, dabs: [] }; for (const [x, y, k] of path) stamp(x, y, k); maskStrokes.push(cur); history.push(cur); cur = null; };
+    const glass = [];
+    for (let c = 0; c < 6; c++) { const x = sx - sr * 1.05 + c * sr * 0.42; for (let y = sy - sr * 1.15; y < sy + sr * 0.35; y += 8) glass.push([x, y, 1.6]); }
+    fx(1, 90, glass);
+    const rip = [];
+    for (const yy of [0.74, 0.86]) for (let x = W * 0.3; x < W * 0.98; x += 10) rip.push([x, H * yy + Math.sin(x * 0.02) * 6, 1.4]);
+    fx(0, 110, rip);
+    const spray = (mat, hex, size, f, secs, dwell) => {
+      const layer = makeLayer(mat, hex), st = newSpray(layer, 0, size);
+      layer.strokes.push(st);
+      let prev = f(0);
+      const N = Math.round(secs * 60);
+      for (let i = 1; i <= N; i++) { const q = f(i / N); sprayTick(st, { x: prev[0], y: prev[1] }, { x: q[0], y: q[1] }, 1 / 60); prev = q; }
+      for (let i = 0; i < dwell * 60; i++) sprayTick(st, { x: prev[0], y: prev[1] }, { x: prev[0], y: prev[1] }, 1 / 60);
+      flush(st); history.push(st);
+    };
+    spray(1, COLORS[0], Math.max(60, m * 0.16), (t) => [W * (0.07 + 0.45 * t), H * (0.8 + 0.06 * Math.sin(t * 10))], 2.6, 1.1);
+    spray(5, COLORS[0], Math.max(30, m * 0.07), (t) => [sx + Math.cos(Math.PI * (0.95 + 1.7 * t)) * sr * 1.4, sy + Math.sin(Math.PI * (0.95 + 1.7 * t)) * sr * 1.4], 1.8, 0);
+    spray(2, COLORS[0], Math.max(40, m * 0.09), (t) => [W * (0.07 + 0.36 * t), H * 0.42 + Math.sin(t * 3) * m * 0.02], 1.3, 0.9);
+  }
+
+  // ---------- loop ----------
+  let lastNow = performance.now();
+  const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  function frame(now) {
+    const t = now / 1000 * (reduce ? 0.15 : 1);
+    const dt = Math.min(0.05, Math.max(0, (now - lastNow) / 1000)); lastNow = now;
+    const active = new Set(drips.map((d) => d.st));
+    if (down && cur && cur.kind === 'spray') { active.add(cur); sprayTick(cur, prevNozzle, nozzle, dt); prevNozzle = { ...nozzle }; }
+    updateDrips(dt);
+    for (const st of active) flush(st);
+    if (down && cur && cur.kind === 'mask' && performance.now() - lastMoveT > 40) stamp(lazy.x, lazy.y, 0.35);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.viewport(0, 0, cvs.width, cvs.height);
+    gl.disable(gl.BLEND);
+    gl.useProgram(compProg.p);
+    gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, bgTex);
+    gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, masks[0].tex);
+    gl.activeTexture(gl.TEXTURE2); gl.bindTexture(gl.TEXTURE_2D, masks[1].tex);
+    gl.uniform1i(compProg.u.uBg, 0); gl.uniform1i(compProg.u.uMA, 1); gl.uniform1i(compProg.u.uMB, 2);
+    gl.uniform2f(compProg.u.uDev, cvs.width, cvs.height);
+    gl.uniform2f(compProg.u.uCss, W, H);
+    gl.uniform1f(compProg.u.uTime, t);
+    gl.uniform1fv(compProg.u['uAmt[0]'], state.tune);
+    gl.bindVertexArray(emptyVao);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+
+    gl.enable(gl.BLEND); gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+    const drawRib = (st, mesh) => {
+      if (!mesh.count) return;
+      gl.useProgram(ribProg.p);
+      gl.uniform2f(ribProg.u.uCss, W, H);
+      gl.uniform1f(ribProg.u.uTime, t);
+      gl.uniform1i(ribProg.u.uMat, st.mat);
+      gl.uniform1f(ribProg.u.uSeed, st.seed);
+      gl.uniform1f(ribProg.u.uLoad, MATERIALS[st.mat].load * state.phys.brush.load);
+      gl.uniform1f(ribProg.u.uDry, state.phys.brush.dry);
+      gl.uniform1f(ribProg.u.uBristle, state.phys.brush.bristle);
+      gl.uniform1f(ribProg.u.uRelief, state.phys.brush.relief);
+      gl.uniform3fv(ribProg.u.uColor, st.color);
+      gl.bindVertexArray(mesh.vao);
+      gl.drawArrays(gl.TRIANGLE_STRIP, 0, mesh.count);
+    };
+    const drawLayer = (L) => {
+      gl.useProgram(layProg.p);
+      gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, L.tex);
+      gl.uniform1i(layProg.u.uD, 0);
+      gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, L.ptex || null);
+      gl.uniform1i(layProg.u.uP, 1);
+      gl.uniform1i(layProg.u.uFollow, L.ptex ? 1 : 0);
+      gl.activeTexture(gl.TEXTURE0);
+      gl.uniform2f(layProg.u.uDev, cvs.width, cvs.height);
+      gl.uniform2f(layProg.u.uCss, W, H);
+      gl.uniform1f(layProg.u.uTime, t);
+      gl.uniform1f(layProg.u.uSeed, L.seed);
+      gl.uniform1i(layProg.u.uMat, L.mat);
+      const G = L.tip === 'round' ? state.phys.round.grain : 1;
+      gl.uniform1f(layProg.u.uGrain, Math.min(1, G));
+      gl.uniform1f(layProg.u.uTooth, L.tip === 'round' ? G : 0);
+      gl.uniform1f(layProg.u.uRelief, (state.phys[L.tip] || state.phys.spray).relief);
+      gl.uniform3fv(layProg.u.uColor, L.color);
+      gl.bindVertexArray(emptyVao);
+      gl.drawArrays(gl.TRIANGLES, 0, 3);
+    };
+    for (const it of items) it.kind === 'ribbon' ? drawRib(it, it.mesh) : drawLayer(it);
+    if (cur && cur.kind === 'ribbon') drawRib(cur, liveMesh);
+    gl.bindVertexArray(null);
+    requestAnimationFrame(frame);
+  }
+
+  let seeded = false;
+  function resize() {
+    const r = stage.getBoundingClientRect();
+    W = Math.max(1, Math.round(r.width)); H = Math.max(1, Math.round(r.height));
+    dpr = Math.min(2, window.devicePixelRatio || 1);
+    cvs.width = DW = Math.round(W * dpr); cvs.height = DH = Math.round(H * dpr);
+    drawBackground();
+    resizeMasks();
+    for (const it of items) if (it.kind === 'layer') { allocLayer(it); rasterLayer(it); }
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    if (!seeded) { seeded = true; seed(); }
+  }
+  new ResizeObserver(resize).observe(stage);
+  syncUI();
+  resize();
+  if (document.fonts) document.fonts.ready.then(drawBackground);
+  requestAnimationFrame(frame);
+})();
+</script>
