@@ -37,7 +37,7 @@ function fakeEffects() {
   return {
     session, target: shallowRef(null), request: ref(''), reference: ref<string | null>(null), working: computed(() => running.value), running, error: ref(''), notice: ref(''), saving: ref(false),
     start: vi.fn(async (_r: string, t: any) => { session.value = { nodeId: t.key, nodeLabel: t.label, request: _r, tiles: [], known: [], hovered: null, chosen: null, currentThumb: null } }),
-    preview: vi.fn(), choose: vi.fn(), keep: vi.fn(async () => true), close: vi.fn(() => { session.value = null }), more: vi.fn(), stop: vi.fn(), clearMessages: vi.fn(),
+    preview: vi.fn(), keep: vi.fn(async () => true), close: vi.fn(() => { session.value = null }), more: vi.fn(), stop: vi.fn(), clearMessages: vi.fn(),
   }
 }
 function fakeCanvas() {
@@ -79,7 +79,7 @@ describe('useCanvasPrompt: new effects on a shader node', () => {
   it('a Remix chip runs the effect session against the node, without the router', async () => {
     const { api, effects, route, replies } = setup()
     setMode({ label: 'Remix', kind: 'new-effect', nodeId: 's1' })
-    expect(api.modeNote.value).toBe('~$0.24–0.42')
+    expect(api.modeNote.value).toBe('48–88 credits')
     await api.submit('rain on a window')
     expect(route).not.toHaveBeenCalled() // the chip decides the kind (spec §4)
     expect(effects.start).toHaveBeenCalledWith('rain on a window', expect.objectContaining({ key: 's1', label: 'Water ripple' }))
@@ -95,7 +95,6 @@ describe('useCanvasPrompt: new effects on a shader node', () => {
     expect(api.card.value).toBe('takes')
     expect(api.takes.value!.nodeId).toBe('s1')
     api.previewTake('draft_1_0'); expect(effects.preview).toHaveBeenCalledWith('draft_1_0')
-    api.chooseTake('draft_1_0'); expect(effects.choose).toHaveBeenCalledWith('draft_1_0')
     await api.keepTake('draft_1_0'); expect(effects.keep).toHaveBeenCalledWith('draft_1_0')
     expect(api.takesSaving.value).toBe(false)
     effects.saving.value = true
@@ -122,7 +121,7 @@ describe('useCanvasPrompt: new effects on a shader node', () => {
   it('a New effect chip starts from nothing', async () => {
     const { api, effects } = setup()
     setMode({ label: 'New effect', kind: 'new-effect', nodeId: 's1' })
-    expect(api.modeNote.value).toBe('~$0.24–0.42')
+    expect(api.modeNote.value).toBe('48–88 credits')
     await api.submit('rain on a window')
     expect(effects.start.mock.calls[0]![1].base).toBeNull()
     expect(effects.start.mock.calls[0]![1].remix).toBe(false)
@@ -152,7 +151,7 @@ describe('useCanvasPrompt: new effects on a shader node', () => {
     effects.request.value = 'rain on a window'
     effects.running.value = true
     expect(api.working.value).toBe(true)
-    expect(api.workingLabel.value).toBe('Working on “rain on a window” · ~$0.24–0.42')
+    expect(api.workingLabel.value).toBe('Working on “rain on a window” · 48–88 credits')
     await api.submit('something else')
     expect(route).not.toHaveBeenCalled()
     api.stop()
@@ -240,7 +239,7 @@ describe('useCanvasPrompt: new effects on a shader node', () => {
     expect(api.takesMoreNote.value).toBeNull()
     setMode({ label: 'Remix', kind: 'new-effect', nodeId: 's1' })
     await api.submit('rain')
-    expect(api.takesMoreNote.value).toBe('~$0.24–0.42')
+    expect(api.takesMoreNote.value).toBe('48–88 credits')
   })
 
   it('Make one / Remix mid-job says why nothing happens (the studios’ busy toast)', async () => {
@@ -260,7 +259,7 @@ describe('useCanvasPrompt: new effects on a shader node', () => {
       expect(api.acceptsReference.value).toBe(true)
       api.attachReference(REF)
       expect(api.mode.value).toMatchObject({ label: 'New effect', kind: 'new-effect', nodeId: 's1' })
-      expect(api.modeNote.value).toBe('~$0.24–0.43')
+      expect(api.modeNote.value).toBe('51–88 credits')
       await api.submit('')
       expect(route).not.toHaveBeenCalled()
       expect(effects.start).toHaveBeenCalledWith(REFERENCE_ONLY_REQUEST, expect.objectContaining({ key: 's1', base: null }), { reference: REF })

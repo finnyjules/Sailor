@@ -79,9 +79,9 @@ void main(){
 })
 const TELEPORT_BEAMS = beamsTake('0.04 * loopPhase()')
 const LOOPING_BEAMS = beamsTake('loopCircle(0.02).x')
-const PRICE = '~$0.24–0.42'
+const PRICE = '48–88 credits'
 /** One more picture on every call (a reference, ≤ 512 px: 350 input tokens). */
-const PRICE_WITH_REFERENCE = '~$0.24–0.43'
+const PRICE_WITH_REFERENCE = '51–88 credits'
 
 /** Non-GET calls to a route that spends model money, queues an engine run, or writes My effects. */
 const GUARDED = /^\/(prompt|api\/(prompt-route|vibe|vibe-review|vibe-recipes|vibe-pick|agent-plan|agent-review|shader-gen|my-effects|pipeline-suggest|font-suggest|copy-assist|image-search|style-profile|frame\/animate|scene3d\/(gen-[a-z0-9-]+|restyle)|inpaint|krea|vector|depth|lipsync|cloud-train|voice-clone|runs)(\/.*)?)$/
@@ -185,9 +185,12 @@ test.describe('shader generation (stage 5)', () => {
     expect(leaked, 'a model or My effects route was called without a mock').toEqual([])
   })
 
-  test('Shader studio: Remix shows its price, effects land one by one, hover previews, Keep saves to My effects', async ({ page }) => {
+  test('Shader studio: Remix shows its price, effects land one by one, hover previews, a click keeps and saves to My effects, ⌘Z puts the layer back', async ({ page }) => {
     const gen = await mockShaderGen(page); const store = await mockMyEffects(page); const routed = await mockRouter(page)
     await openShaderStudio(page)
+    const head = page.getByTestId('studio-inspector-head')
+    const effectBefore = (await page.getByTestId('studio-prompt').getByTestId('prompt-selection-chip').innerText()).trim()
+    expect(effectBefore).not.toBe('')
     await page.getByTestId('studio-actions').locator('[data-testid="studio-action-row"][data-action-id="remix"]').click()
     await expect(page.getByTestId('prompt-mode-chip')).toContainText('Remix')
     await expect(page.getByTestId('studio-prompt').getByTestId('prompt-note')).toHaveText(PRICE)
@@ -222,10 +225,10 @@ test.describe('shader generation (stage 5)', () => {
     const states = await tiles.evaluateAll(els => els.map(e => e.getAttribute('data-state')))
     const slot = states.indexOf('ready')
     const first = tiles.nth(slot)
-    await first.getByRole('button', { name: /Preview take/ }).hover()
+    await first.getByRole('button', { name: /^Take \d$/ }).hover()
     const names = TAKES[slot]!.map(t => t.name)
-    await expect(page.getByTestId('studio-inspector-head')).toContainText(new RegExp(names.join('|')))
-    await first.getByRole('button', { name: 'Keep', exact: true }).click()
+    await expect(head).toContainText(new RegExp(names.join('|')))
+    await first.getByRole('button', { name: /^Take \d$/ }).click() // the click keeps it
     await expect(page.getByTestId('prompt-answer')).toContainText('Saved to My effects as')
     await expect(strip).toHaveCount(0)
     expect(store.size).toBe(1)
@@ -234,6 +237,13 @@ test.describe('shader generation (stage 5)', () => {
     expect(saved.versions).toHaveLength(1)
     await expect(page.getByTestId('my-effect-recipe')).toBeVisible()
     await expect(page.getByTestId('my-effect-version')).toHaveText(['v1'])
+    // ⌘Z: one step puts the layer back to the effect it had; the My effect stays saved.
+    await expect(head).toContainText(saved.name)
+    await page.keyboard.press('ControlOrMeta+z')
+    await expect(head).not.toContainText(saved.name)
+    await expect(page.getByTestId('studio-prompt').getByTestId('prompt-selection-chip')).toHaveText(effectBefore)
+    expect(store.size).toBe(1)
+    await expect(page.getByTestId('studio-shell-dock')).toBeVisible() // the studio is still open
   })
 
   test('no source picture: the request asks for a standalone effect, and a kept take that reads its input still shows, over the sample picture', async ({ page }) => {
@@ -252,9 +262,9 @@ test.describe('shader generation (stage 5)', () => {
     expect(gen.every(b => String(b.prompt).includes('There is no picture for the effect to run over'))).toBe(true)
     const ready = tileIn(page, 'ready').first()
     // Hover-preview already draws it over the sample picture (before the fix: "Add a source image to begin").
-    await ready.getByRole('button', { name: /Preview take/ }).hover()
+    await ready.getByRole('button', { name: /^Take \d$/ }).hover()
     await expect(page.getByTestId('shader-studio-sample-hint')).toBeVisible()
-    await ready.getByRole('button', { name: 'Keep', exact: true }).click()
+    await ready.getByRole('button', { name: /^Take \d$/ }).click() // the click keeps it
     await expect(page.getByTestId('prompt-answer')).toContainText('Saved to My effects as')
     expect([...store.values()][0]?.generative).toBe(false) // the case Julien hit: the kept take reads its input
     // The preview is not empty: it draws the effect over the sample picture, and says so quietly.
@@ -405,7 +415,7 @@ test.describe('shader generation (stage 5)', () => {
     // Previewing the landed take puts it on a new layer at the end of the stack… (the fast
     // slot can give up on a loaded machine — see the header — and then there is nothing to preview).
     if (await tiles.nth(0).getAttribute('data-state') === 'ready') {
-      await tiles.nth(0).getByRole('button', { name: /Preview take/ }).click()
+      await tiles.nth(0).getByRole('button', { name: /^Take \d$/ }).hover() // a click would keep it
       await expect.poll(layerRows).toBe(before + 1)
     } else {
       test.info().annotations.push({ type: 'note', description: 'the fast slot gave up; Stop checked without a preview' })

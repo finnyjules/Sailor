@@ -36,7 +36,7 @@ describe('takes session', () => {
     s = ingestTakes(s, [take('t0'), take('t1'), take('t2'), take('t3')])
     expect(readyCount(s)).toBe(3)
     expect(isTakesWorking(s)).toBe(false)
-    expect(takesStatus(s)).toBe('Three takes · hover to preview, Keep one')
+    expect(takesStatus(s)).toBe('Three takes')
   })
 
   it('a take from a run that is not this set\'s never becomes a tile (an earlier set\'s late arrival, a plain Run)', () => {
@@ -71,7 +71,7 @@ describe('takes session', () => {
     s = settleUnqueued(s)
     expect(s.tiles.map(t => t.state)).toEqual(['ready', 'failed', 'failed'])
     expect(isTakesWorking(s)).toBe(false)
-    expect(takesStatus(s)).toBe('One of three came back · hover to preview, Keep one')
+    expect(takesStatus(s)).toBe('One of three came back')
     expect(takesStatus(failPending(open()))).toBe('No takes came back')
   })
 

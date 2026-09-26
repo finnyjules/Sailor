@@ -40,7 +40,7 @@ function fakeEffects() {
   return {
     session, target: shallowRef<any>(null), request, reference, working: computed(() => running.value), running, error: ref(''), notice: ref(''), saving: ref(false),
     start: vi.fn(async (r: string, t: any, o?: { reference?: string | null }) => { request.value = r; reference.value = o?.reference ?? null; session.value = { nodeId: t.key, nodeLabel: t.label, request: r, tiles: [], known: [], hovered: null, chosen: null, currentThumb: null } }),
-    preview: vi.fn(), choose: vi.fn(), keep: vi.fn(async () => true), close: vi.fn(() => { session.value = null; running.value = false }),
+    preview: vi.fn(), keep: vi.fn(async () => true), close: vi.fn(() => { session.value = null; running.value = false }),
     more: vi.fn(), stop: vi.fn(() => { session.value = null; running.value = false }), clearMessages: vi.fn(),
   }
 }
@@ -135,7 +135,6 @@ describe('useStudioPrompt', () => {
     worker!.takes!.value = t
     api.previewTake('take-1'); expect(worker!.previewTake).toHaveBeenLastCalledWith(t[1])
     api.previewTake(null); expect(worker!.previewTake).toHaveBeenLastCalledWith(null)
-    api.chooseTake('take-0'); expect(worker!.selectTake).toHaveBeenLastCalledWith(t[0])
     api.keepTake('take-1'); expect(worker!.selectTake).toHaveBeenLastCalledWith(t[1]); expect(worker!.keepTake).toHaveBeenCalled()
     api.closeTakes(); expect(worker!.dismissTakes).toHaveBeenCalled()
     api.moreTakes(); expect(worker!.moreDirections).toHaveBeenCalled()
@@ -377,7 +376,7 @@ describe('useStudioPrompt', () => {
     const targetFn = vi.fn(() => ({ key: 'shader-studio', label: 'Water ripple', base: null, image: () => null, preview: vi.fn(), apply: vi.fn() }))
     const { api, route } = setup({ effectTarget: targetFn, effects })
     api.setMode('Remix')
-    expect(api.modeNote.value).toBe('~$0.24–0.42')
+    expect(api.modeNote.value).toBe('48–88 credits')
     await api.submit('rain on a window')
     expect(route).not.toHaveBeenCalled()
     expect(targetFn).toHaveBeenCalledWith({ effectId: null, add: false, fresh: false, remix: true })
@@ -413,6 +412,23 @@ describe('useStudioPrompt', () => {
     expect(effects.start).not.toHaveBeenCalled()
     expect(api.answerCard.value).toMatchObject({ kind: 'notice', text: STUDIO_MESSAGES.newEffect })
   })
+  it('⌘Z after a kept worker take goes to the worker’s undo; after an effect keep, to the effect set’s', async () => {
+    const { api, worker } = setup()
+    ;(worker as any).undoKeep = vi.fn(() => true)
+    expect(api.undoKeep()).toBe(false) // nothing kept yet
+    ;(worker!.takes as any).value = [{ label: 'a' }]
+    api.keepTake('take-0')
+    expect(api.undoKeep()).toBe(true)
+    expect((worker as any).undoKeep).toHaveBeenCalledTimes(1)
+    expect(api.undoKeep()).toBe(false) // one step
+    const effects = { ...fakeEffects(), undoKeep: vi.fn(() => true) }
+    const fx = setup({ effectTarget: vi.fn(shaderTarget), effects })
+    fx.api.setMode('Remix')
+    await fx.api.submit('rain')
+    await fx.api.keepTake('draft_1_0')
+    expect(fx.api.undoKeep()).toBe(true)
+    expect(effects.undoKeep).toHaveBeenCalledTimes(1)
+  })
   it('keeping a worker take calls afterKeep with the request', async () => {
     const afterKeep = vi.fn()
     const { api, worker } = setup({ afterKeep })
@@ -429,7 +445,7 @@ describe('useStudioPrompt', () => {
     effects.running.value = true
     expect(api.working.value).toBe(true)
     expect(api.workingLabel.value).toContain('“rain”')
-    expect(api.workingLabel.value).toContain('~$0.24–0.42')
+    expect(api.workingLabel.value).toContain('48–88 credits')
     // one job at a time: a new request waits
     await api.submit('warmer')
     expect(worker!.ask).not.toHaveBeenCalled()
@@ -443,7 +459,6 @@ describe('useStudioPrompt', () => {
     api.setMode('Remix')
     await api.submit('rain')
     api.previewTake('draft_1_0'); expect(effects.preview).toHaveBeenCalledWith('draft_1_0')
-    api.chooseTake('draft_1_0'); expect(effects.choose).toHaveBeenCalledWith('draft_1_0')
     api.moreTakes(); expect(effects.more).toHaveBeenCalled()
     await api.keepTake('draft_1_0'); expect(effects.keep).toHaveBeenCalledWith('draft_1_0')
     api.closeTakes(); expect(effects.close).toHaveBeenCalled()
@@ -577,7 +592,7 @@ describe('useStudioPrompt', () => {
       api.attachReference(REF)
       expect(api.reference.value).toBe(REF)
       expect(api.mode.value).toMatchObject({ label: 'New effect', kind: 'new-effect' })
-      expect(api.modeNote.value).toBe('~$0.24–0.43')
+      expect(api.modeNote.value).toBe('51–88 credits')
     })
     it('Remix already set stays Remix', () => {
       const { api } = setup({ effectTarget: vi.fn(shaderTarget2) })
@@ -609,9 +624,9 @@ describe('useStudioPrompt', () => {
       expect(effects.start).toHaveBeenCalledWith(REFERENCE_ONLY_REQUEST, expect.objectContaining({ key: 'shader-studio' }), { reference: REF })
       // The set owns it now: the working label and Three more carry the higher price.
       effects.running.value = true
-      expect(api.workingLabel.value).toContain('~$0.24–0.43')
+      expect(api.workingLabel.value).toContain('51–88 credits')
       effects.running.value = false
-      expect(api.takesMoreNote.value).toBe('~$0.24–0.43')
+      expect(api.takesMoreNote.value).toBe('51–88 credits')
       expect(api.reference.value).toBe(REF) // still in the prompt while the set is open
     })
     it('× on the set clears it from the prompt; so does a Keep', async () => {

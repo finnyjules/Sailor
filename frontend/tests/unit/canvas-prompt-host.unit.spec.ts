@@ -22,7 +22,7 @@ const { api, stop } = vi.hoisted(() => {
     selection: ref([]), chipLabel: ref(null), suggestions: ref([]), mode: ref(null), modeNote: ref(null), focusTick: ref(0),
     working: ref(false), workingLabel: ref('Looking at the result…'), lastSubmitted: ref(''), card: ref(null), answerCard: ref(null), takes: ref(null), takesSaving: ref(false), takesError: ref(null),
     showSketchInstead: ref(false), searchOpen: ref(false), searchQuery: ref(''), onSearchDone: vi.fn(),
-    submit: vi.fn(), stop, clearMode: vi.fn(), clearSelection: vi.fn(), onPromptFocus: vi.fn(), previewTake: vi.fn(), chooseTake: vi.fn(),
+    submit: vi.fn(), stop, clearMode: vi.fn(), clearSelection: vi.fn(), onPromptFocus: vi.fn(), previewTake: vi.fn(),
     keepTake: vi.fn(), closeTakes: vi.fn(), moreTakes: vi.fn(), dismissAnswer: vi.fn(), runFollowUp: vi.fn(), sketchInstead: vi.fn(),
   }
   return { api, stop }

@@ -116,9 +116,27 @@ export function makeLayerTarget(o: {
     },
     apply: (id, values) => {
       set(id, { ...values })
+      const keptAt = o.add ? tempIndex : index
       if (o.add && tempIndex != null) o.setActive(tempIndex)
       tempIndex = null
       o.previewing(false) // the kept effect is an edit: the host's next save keeps it
+      // ⌘Z: the layer goes back as it was before the keep (a new layer goes away), in one step —
+      // only while the kept layer is still exactly as kept (a later edit is not undone with it).
+      const kept = keptAt == null ? undefined : o.effects()[keptAt]
+      if (!kept) return
+      const keptLayerId = kept.layerId
+      const keptJson = JSON.stringify(kept)
+      return () => {
+        const fx = o.effects()
+        const at = fx.findIndex(e => e.layerId === keptLayerId)
+        if (at < 0 || JSON.stringify(fx[at]) !== keptJson) return false
+        if (o.add) {
+          fx.splice(at, 1)
+          o.setActive(Math.max(0, Math.min(index, fx.length - 1)))
+        } else fx[at] = { ...original }
+        o.redraw()
+        return true
+      }
     },
   }
 }

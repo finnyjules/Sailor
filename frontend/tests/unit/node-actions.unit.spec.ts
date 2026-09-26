@@ -106,15 +106,17 @@ describe('price in the grey hint', () => {
   const img = ctx('artifact-image', { hasImages: true })
   const hint = (c: NodeActionCtx, label: string, hosted = false) => { const a = find(c, label); return actionHint(a, actionPrice(a, info, hosted)) }
 
-  it('image actions carry the fixed estimate the old menu showed', () => {
-    expect(hint(img, 'Upscale')).toBe('adds a step · ~$0.14') // the fixed estimate wins over the badge
-    expect(hint(img, 'Edit with Nano Banana')).toBe('adds a step · ~$0.12')
-    expect(hint(img, 'Animate')).toBe('adds a step · from $1.60')
+  it('image actions carry the fixed estimate the old menu showed, in credits', () => {
+    expect(hint(img, 'Upscale')).toBe('adds a step · about 21 credits') // the fixed estimate wins over the badge
+    expect(hint(img, 'Edit with Nano Banana')).toBe('adds a step · about 18 credits')
+    expect(hint(img, 'Enhance detail')).toBe('adds a step · 21–42 credits')
+    expect(hint(img, 'Animate')).toBe('adds a step · from 240 credits')
   })
-  it('video and audio actions are priced from their node’s price_badge', () => {
-    expect(hint(ctx('artifact-video'), 'Enhance')).toBe('adds a step · $0.25')
-    expect(hint(ctx('artifact-audio'), 'Transcribe')).toBe('adds a step · ~$0.02')
-    expect(hint(ctx('artifact-audio'), 'Transcribe', true)).toMatch(/^adds a step · ~\d+ cr$/)
+  it('video and audio actions are priced from their node’s price_badge, in credits locally and hosted', () => {
+    expect(hint(ctx('artifact-video'), 'Enhance')).toBe('adds a step · about 38 credits')
+    expect(hint(ctx('artifact-audio'), 'Transcribe')).toBe('adds a step · about 4 credits')
+    expect(hint(ctx('artifact-audio'), 'Transcribe', true)).toBe('adds a step · about 4 credits')
+    for (const label of ['Enhance', 'Sync lips']) expect(hint(ctx('artifact-video'), label) ?? '').not.toMatch(/\$|~/)
   })
   it('free actions, and paid ones with no known price, show just the landing hint', () => {
     expect(hint(img, 'Remove background')).toBe('adds a step')

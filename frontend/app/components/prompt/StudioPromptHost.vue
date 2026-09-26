@@ -70,7 +70,7 @@ async function onAttachImage(file: File) {
         <PromptTakes
           v-if="p.card.value === 'takes' && p.takes.value"
           :session="p.takes.value" :saving="p.takesSaving.value" :error="p.takesError.value" :more-note="p.takesMoreNote?.value ?? null"
-          @hover="p.previewTake" @choose="p.chooseTake" @keep="p.keepTake" @more="p.moreTakes" @close="p.closeTakes"
+          @hover="p.previewTake" @keep="p.keepTake" @more="p.moreTakes" @close="p.closeTakes"
         />
         <PromptChangesCard
           v-else-if="p.card.value === 'changes' && p.worker()"

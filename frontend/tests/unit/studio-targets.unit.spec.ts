@@ -122,6 +122,29 @@ describe('Shader studio layer target', () => {
     expect(effects[2]).toMatchObject({ id: 'mine_abcdefabcdef', params: { u_density: 3 } })
     expect(getActive()).toBe(2)
   })
+  it('⌘Z after Keep puts the layer back as it was, once; not after a later edit', () => {
+    const { t, effects } = setup()
+    const before = JSON.parse(JSON.stringify(effects))
+    t.preview('draft_1_0')
+    const undo = t.apply('mine_abcdefabcdef', { u_density: 3 }) as () => boolean
+    expect(typeof undo).toBe('function')
+    expect(undo()).toBe(true)
+    expect(JSON.parse(JSON.stringify(effects))).toEqual(before)
+    const again = t.apply('mine_abcdefabcdef', { u_density: 3 }) as () => boolean
+    effects[1] = { ...effects[1]!, opacity: 0.2 } // an edit since the keep
+    expect(again()).toBe(false)
+    expect(effects[1]).toMatchObject({ id: 'mine_abcdefabcdef', opacity: 0.2 })
+  })
+  it('New layer: ⌘Z after Keep removes the kept layer and goes back to the layer that was active', () => {
+    const { t, effects, getActive } = setup({ add: true, active: 0 })
+    t.preview('draft_1_0')
+    const undo = t.apply('mine_abcdefabcdef', {}) as () => boolean
+    expect(effects).toHaveLength(3)
+    expect(getActive()).toBe(2)
+    expect(undo()).toBe(true)
+    expect(effects.map(e => e.layerId)).toEqual(['L0', 'L1'])
+    expect(getActive()).toBe(0)
+  })
   it('New layer: × after selecting the temporary layer goes back to the layer that was active', () => {
     const { t, effects, getActive, setActive } = setup({ add: true, active: 0 })
     t.preview('draft_1_0')

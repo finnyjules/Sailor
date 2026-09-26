@@ -24,7 +24,7 @@
  * A studio that passes no `opts.takes` never sends `variants` at all, and its
  * request stays byte-identical to what it sends today.
  */
-import { computed, ref, shallowRef } from 'vue'
+import { computed, nextTick, ref, shallowRef } from 'vue'
 import { $fetch } from 'ofetch'
 import type { ControlSpec, Params, ParamValue } from '~/lib/spacetype/effect'
 import type { ProposedChange, VisualReview } from '~/composables/useLayoutAgent'
@@ -1210,6 +1210,11 @@ export function useStudioAgent(opts: { controls: () => ControlSpec[]; params: Pa
     if (!t) return
     restoreTakeOriginal()
     clearOriginal()
+    // What ⌘Z puts back: the studio as it was before this keep (the original is on screen now).
+    const src = opts.takes
+    const beforeConfig = src ? cloneConfig(src.config()) : null
+    const beforeView = src?.captureView?.() ?? null
+    const prior: Record<string, ParamValue> = {}
     const macro = opts.takes?.macro
     // A COMPOSED take is nothing but its config: there are no leaf changes to
     // route through `recompute`, so installing it IS the commit. Without this,
@@ -1229,13 +1234,47 @@ export function useStudioAgent(opts: { controls: () => ControlSpec[]; params: Pa
       if (macro && ch.key === macro.key) continue
       if (ch.value === opts.params[ch.key]) continue // skip no-ops, same as ask()
       original[ch.key] = opts.params[ch.key] as ParamValue
+      prior[ch.key] = opts.params[ch.key] as ParamValue
       built.push(changeFor(ch.key, ch.value, t.rationale))
     }
+    // A composed or macro take replaced the whole config, so the whole config is what comes back.
+    const wholeConfig = !!src?.setConfig && (!!t.config || !!(macro && t.changes.some(c => c.key === macro.key)))
     changes.value = built
     recompute()
     logTake('keep', t)
     resetTakes()
     keep()
+    const rec: KeptTake = { wholeConfig, beforeConfig, beforeView, prior, after: configJson() }
+    keptTake = rec
+    // The studio's own watchers may settle the config a tick later (clamps, derived fields).
+    void nextTick(() => { if (keptTake === rec) rec.after = configJson() })
+  }
+
+  // ── ⌘Z after a keep ────────────────────────────────────────────────────────
+  // A studio has no undo history of its own, so the last kept take carries its own one step:
+  // what was there before it. Offered only while the studio is exactly as the keep left it, so
+  // an edit made since is never thrown away with it.
+  interface KeptTake { wholeConfig: boolean; beforeConfig: unknown; beforeView: unknown; prior: Record<string, ParamValue>; after: string | null }
+  let keptTake: KeptTake | null = null
+  function configJson(): string | null {
+    const src = opts.takes
+    if (!src) return null
+    try { return JSON.stringify(src.config()) } catch { return null }
+  }
+  /** Put back what the last kept take replaced. False (nothing changes): no keep to undo, or the
+   *  studio has changed since. */
+  function undoKeep(): boolean {
+    const rec = keptTake
+    keptTake = null
+    const src = opts.takes
+    if (!rec || !src || rec.after == null || configJson() !== rec.after) return false
+    if (rec.wholeConfig && src.setConfig && rec.beforeConfig != null) {
+      src.setConfig(cloneConfig(rec.beforeConfig))
+      if (src.restoreView) src.restoreView(rec.beforeView)
+    } else {
+      for (const [k, v] of Object.entries(rec.prior)) opts.params[k] = v
+    }
+    return true
   }
 
   function dismissTakes() {
@@ -1436,6 +1475,6 @@ export function useStudioAgent(opts: { controls: () => ControlSpec[]; params: Pa
     // Four Takes
     takes, takeThumbs, takeCurrentThumb, takeDropped, takePromiseResults, takeVerdicts, reviewingTakes,
     selectedTake, hasTakes,
-    previewTake, selectTake, keepTake, dismissTakes, abandonTakes, moreDirections,
+    previewTake, selectTake, keepTake, undoKeep, dismissTakes, abandonTakes, moreDirections,
   }
 }

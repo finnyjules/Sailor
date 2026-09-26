@@ -11,8 +11,8 @@ describe('shader effect node actions (spec §7.3)', () => {
     expect(edit).toEqual([])
     expect(develop.map(a => a.label)).toEqual(['Remix…', 'New effect…'])
     expect(develop.map(a => a.id)).toEqual(['remix-effect', 'new-effect'])
-    expect(SHADER_GEN_ACTION_HINT).toBe('~$0.24–0.42')
-    for (const a of develop) expect(actionHint(a, actionPrice(a, null, false))).toBe('3 takes · ~$0.24–0.42')
+    expect(SHADER_GEN_ACTION_HINT).toBe('48–88 credits')
+    for (const a of develop) expect(actionHint(a, actionPrice(a, null, false))).toBe('3 takes · 48–88 credits')
   })
   it('a node with no effect picked offers New effect… only (Remix… needs an effect to start from)', () => {
     expect(actionsFor({ ...ctx, hasEffect: false }).develop.map(a => a.label)).toEqual(['New effect…'])
@@ -20,7 +20,7 @@ describe('shader effect node actions (spec §7.3)', () => {
   })
   it('hosted, the menu shows the same credits text as the prompt note', () => {
     for (const a of actionsFor(ctx).develop) expect(actionPrice(a, null, true)).toBe(shaderGenEstimateText(true))
-    expect(shaderGenEstimateText(true)).toMatch(/^~\d+–\d+ cr$/)
+    expect(shaderGenEstimateText(true)).toMatch(/^\d+–\d+ credits$/)
   })
   it('each sets a mode chip on the node, with no request sent', () => {
     const seen: any[] = []

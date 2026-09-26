@@ -21,7 +21,7 @@ import { REFERENCE_ONLY_REQUEST } from '~/lib/prompt/referencePicture'
 import { routeRequest } from '~/lib/prompt/routeRequest'
 import { BUSY_NOTICE } from '~/lib/prompt/notices'
 import {
-  assignRun, chooseTile, failRun, hoverTile, ingestTakes, isTakesWorking, openTakes, pendingRunIds, readyCount,
+  assignRun, failRun, hoverTile, ingestTakes, isTakesWorking, openTakes, pendingRunIds, readyCount,
   setRunIds, settleUnqueued, shownTakeId, TAKES_PER_SET, wantedActiveTakeId, type TakesSession,
 } from '~/lib/prompt/takesSession'
 import { useEffectTakes, type EffectTarget } from '~/composables/useEffectTakes'
@@ -389,10 +389,6 @@ export function useCanvasPrompt(canvas: () => any, deps: { route?: typeof routeR
     if (fx.session.value) return fx.preview(id)
     const s = takes.value; if (!s) return; takes.value = hoverTile(s, id); show(takes.value)
   }
-  function chooseTake(id: string) {
-    if (fx.session.value) return fx.choose(id)
-    const s = takes.value; if (!s) return; takes.value = chooseTile(s, id); show(takes.value)
-  }
   async function keepTake(id: string) {
     if (fx.session.value) { if (await fx.keep(id)) reference.value = null; return }
     endTakes(id)
@@ -430,7 +426,8 @@ export function useCanvasPrompt(canvas: () => any, deps: { route?: typeof routeR
       image: () => i.image,
       current: () => i.current ?? null,
       preview: effectId => fire('sailor:shaderEffectPreview', { effectId }),
-      apply: (effectId, values) => fire('sailor:shaderEffectApply', { effectId, values }),
+      // No undo of its own: the node's widgets change, and the canvas history records that as one step.
+      apply: (effectId, values) => { fire('sailor:shaderEffectApply', { effectId, values }) },
     }
   }
 
@@ -710,7 +707,7 @@ export function useCanvasPrompt(canvas: () => any, deps: { route?: typeof routeR
   return {
     agent, selection, chipLabel, suggestions, mode, focusTick, reference, acceptsReference, attachReference, clearReference, working, workingLabel, lastSubmitted,
     card, answerCard, takes: shownTakes, takesSaving, takesError, takesMoreNote, modeNote, showSketchInstead, searchOpen, searchQuery, onSearchDone,
-    submit, stop, clearMode, clearSelection, onPromptFocus, previewTake, chooseTake, keepTake, closeTakes,
+    submit, stop, clearMode, clearSelection, onPromptFocus, previewTake, keepTake, closeTakes,
     moreTakes, dismissAnswer, runFollowUp, sketchInstead,
   }
 }

@@ -42,7 +42,7 @@ const routeTo = (kind: string, followUps: string[] = []) => vi.fn(async () => ({
 function idleEffects(): any {
   return {
     session: ref(null), target: ref(null), request: ref(''), working: ref(false), error: ref(''), notice: ref(''), saving: ref(false),
-    start: vi.fn(), preview: vi.fn(), choose: vi.fn(), keep: vi.fn(), close: vi.fn(), more: vi.fn(), stop: vi.fn(), clearMessages: vi.fn(),
+    start: vi.fn(), preview: vi.fn(), keep: vi.fn(), undoKeep: vi.fn(() => false), close: vi.fn(), more: vi.fn(), stop: vi.fn(), clearMessages: vi.fn(),
   }
 }
 function setup(route = routeTo('plan')) {

@@ -47,12 +47,25 @@ describe('estimateShaderGen with a reference picture', () => {
 })
 
 describe('shaderGenEstimateText', () => {
-  it('dollars locally, credits hosted', () => {
-    expect(shaderGenEstimateText(false)).toBe('~$0.24–0.42')
-    expect(shaderGenEstimateText(true)).toBe('~48–88 cr')
+  it('credits locally and hosted alike', () => {
+    expect(shaderGenEstimateText(false)).toBe('48–88 credits')
+    expect(shaderGenEstimateText(true)).toBe('48–88 credits')
   })
   it('higher with a reference picture', () => {
-    expect(shaderGenEstimateText(false, estimateShaderGen(SHADER_GEN_TAKES, { reference: true }))).toBe('~$0.24–0.43')
-    expect(shaderGenEstimateText(true, estimateShaderGen(SHADER_GEN_TAKES, { reference: true }))).toBe('~51–88 cr')
+    expect(shaderGenEstimateText(false, estimateShaderGen(SHADER_GEN_TAKES, { reference: true }))).toBe('51–88 credits')
+    expect(shaderGenEstimateText(true, estimateShaderGen(SHADER_GEN_TAKES, { reference: true }))).toBe('51–88 credits')
+  })
+})
+
+describe('creditsText', () => {
+  it('says credits in words: singular, plural, a range, about, from — never a "~" or a "$"', async () => {
+    const { creditsText, usdAsCreditsText } = await import('~/lib/pricing')
+    expect(creditsText(1)).toBe('1 credit')
+    expect(creditsText(2)).toBe('2 credits')
+    expect(creditsText([48, 88])).toBe('48–88 credits')
+    expect(creditsText([6, 6])).toBe('6 credits')
+    expect(creditsText(24, { approximate: true })).toBe('about 24 credits')
+    expect(creditsText(240, { from: true })).toBe('from 240 credits')
+    expect(usdAsCreditsText(0.12, { approximate: true })).toBe('about 18 credits') // the server's markup (1.5× above $0.10)
   })
 })

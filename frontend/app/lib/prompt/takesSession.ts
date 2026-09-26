@@ -8,7 +8,7 @@
 import { projectTake, type Take } from '~/composables/useTakes'
 
 export const TAKES_PER_SET = 3
-/** The "current version" tile's id in hover/choose. */
+/** The "current version" tile's id in hover and keep (keeping it keeps what was there). */
 export const CURRENT = '__current__'
 
 export type TileState = 'pending' | 'ready' | 'failed'
@@ -140,9 +140,10 @@ export const readyCount = (s: TakesSession): number => s.tiles.filter(t => t.sta
 export function takesStatus(s: TakesSession): string {
   const ready = readyCount(s)
   if (isTakesWorking(s)) return ready ? `${ready} of ${TAKES_PER_SET} ready` : 'Working…'
-  if (ready === TAKES_PER_SET) return 'Three takes · hover to preview, Keep one'
+  // How to use them is the strip's own hint ("Hover to preview, click to keep"), not this line.
+  if (ready === TAKES_PER_SET) return 'Three takes'
   if (!ready) return 'No takes came back'
-  return `${WORDS[ready]} of three came back · hover to preview, Keep one`
+  return `${WORDS[ready]} of three came back`
 }
 
 export const hoverTile = (s: TakesSession, id: string | null): TakesSession => ({ ...s, hovered: id })

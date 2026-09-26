@@ -21,31 +21,79 @@ describe('PromptTakes', () => {
     expect(tiles[1]!.find('.animate-pulse').exists()).toBe(true)
     expect(w.text()).toContain('1 of 3 ready')
   })
-  it('hover and focus preview; leaving the strip goes back; click chooses; Keep keeps', async () => {
+  it('hover and focus preview; leaving the strip goes back; there is no separate Keep button', async () => {
     const w = mount(PromptTakes, { props: { session: session(3) } })
     const first = w.findAll('[data-testid="prompt-take-tile"]')[0]!
-    await first.get('button[aria-label="Preview take 1"]').trigger('mouseenter')
-    await first.get('button[aria-label="Preview take 1"]').trigger('focus')
+    await first.get('button').trigger('mouseenter')
+    await first.get('button').trigger('focus')
     await w.get('[data-testid="prompt-take-current"]').trigger('mouseenter')
     await w.get('[data-testid="prompt-takes"]').trigger('mouseleave')
-    await first.get('button[aria-label="Preview take 1"]').trigger('click')
-    await first.findAll('button').find(b => b.text() === 'Keep')!.trigger('click')
     expect(w.emitted('hover')).toEqual([['1'], ['1'], [CURRENT], [null]])
-    expect(w.emitted('choose')).toEqual([['1']])
-    expect(w.emitted('keep')).toEqual([['1']])
+    expect(first.findAll('button')).toHaveLength(1)
+    expect(w.findAll('button').some(b => b.text() === 'Keep')).toBe(false)
+    expect(first.get('button').text()).toBe('Take 1')
   })
-  it('a failed Keep shows its sentence on the strip, which stays open', () => {
+  it('a click on a tile keeps it; a click on Current keeps what was there (the strip closes)', async () => {
+    const w = mount(PromptTakes, { props: { session: session(3) } })
+    await w.findAll('[data-testid="prompt-take-tile"]')[1]!.get('button').trigger('click', { detail: 1 })
+    expect(w.emitted('keep')).toEqual([['2']])
+    await w.get('[data-testid="prompt-take-current"]').trigger('click', { detail: 1 })
+    expect(w.emitted('close')).toHaveLength(1)
+    expect(w.emitted('keep')).toHaveLength(1)
+  })
+  it('Enter or Space on a focused tile keeps it (a keyboard click); focus alone only previews', async () => {
+    const w = mount(PromptTakes, { props: { session: session(3) } })
+    const b = w.findAll('[data-testid="prompt-take-tile"]')[2]!.get('button')
+    await b.trigger('focus')
+    expect(w.emitted('keep')).toBeUndefined()
+    await b.trigger('click', { detail: 0 }) // what the browser fires for Enter / Space on a button
+    expect(w.emitted('hover')).toEqual([['3']])
+    expect(w.emitted('keep')).toEqual([['3']])
+  })
+  it('the header says how: hover to preview, click to keep (once a take is in)', () => {
+    expect(mount(PromptTakes, { props: { session: session(1) } }).get('[data-testid="prompt-takes-hint"]').text()).toBe('Hover to preview, click to keep')
+    expect(mount(PromptTakes, { props: { session: opened() } }).find('[data-testid="prompt-takes-hint"]').exists()).toBe(false)
+  })
+  it('touch: the first tap previews a tile, a second tap on the same tile keeps it', async () => {
+    const w = mount(PromptTakes, { props: { session: session(3) } })
+    const tap = async (el: ReturnType<typeof w.get>) => { await el.trigger('pointerdown', { pointerType: 'touch' }); await el.trigger('click', { detail: 1 }) }
+    const [one, two] = w.findAll('[data-testid="prompt-take-tile"]').map(x => x.get('button'))
+    await tap(one!)
+    expect(w.emitted('keep')).toBeUndefined()
+    expect(w.emitted('hover')).toEqual([['1']])
+    expect(w.get('[data-testid="prompt-takes-hint"]').text()).toBe('Tap to preview, tap again to keep')
+    await tap(two!) // another tile: previews that one instead
+    expect(w.emitted('keep')).toBeUndefined()
+    expect(w.emitted('hover')!.at(-1)).toEqual(['2'])
+    await tap(two!)
+    expect(w.emitted('keep')).toEqual([['2']])
+    // Current the same way: a first tap previews it, a second keeps what was there.
+    await tap(w.get('[data-testid="prompt-take-current"]'))
+    expect(w.emitted('close')).toBeUndefined()
+    await tap(w.get('[data-testid="prompt-take-current"]'))
+    expect(w.emitted('close')).toHaveLength(1)
+  })
+  it('a device without hover says "tap" from the start', async () => {
+    const mm = window.matchMedia
+    window.matchMedia = ((q: string) => ({ matches: q === '(hover: none)', media: q, addEventListener() {}, removeEventListener() {} })) as any
+    try {
+      const w = mount(PromptTakes, { props: { session: session(3) } })
+      await w.vm.$nextTick()
+      expect(w.get('[data-testid="prompt-takes-hint"]').text()).toBe('Tap to preview, tap again to keep')
+    } finally { window.matchMedia = mm }
+  })
+  it('a failed keep shows its sentence on the strip, which stays open', () => {
     const w = mount(PromptTakes, { props: { session: session(3), error: 'Couldn’t save to My effects. Try again in a moment.' } })
     expect(w.find('[data-testid="prompt-takes-error"]').text()).toBe('Couldn’t save to My effects. Try again in a moment.')
     expect(w.find('[data-testid="prompt-takes-error"]').attributes('role')).toBe('alert')
     expect(mount(PromptTakes, { props: { session: session(3) } }).find('[data-testid="prompt-takes-error"]').exists()).toBe(false)
   })
-  it('while a Keep is saving, every Keep is off', async () => {
+  it('while a keep is saving, a click on another tile keeps nothing', async () => {
     const w = mount(PromptTakes, { props: { session: session(3), saving: true } })
-    const keeps = w.findAll('button').filter(b => b.text() === 'Keep')
-    expect(keeps).toHaveLength(3)
-    for (const k of keeps) expect(k.attributes('disabled')).toBeDefined()
-    await keeps[0]!.trigger('click')
+    const tiles = w.findAll('[data-testid="prompt-take-tile"] button')
+    expect(tiles).toHaveLength(3)
+    for (const k of tiles) expect(k.attributes('aria-disabled')).toBe('true')
+    await tiles[0]!.trigger('click', { detail: 1 })
     expect(w.emitted('keep')).toBeUndefined()
   })
   it('"Three more" waits until the takes are in; × closes', async () => {
@@ -56,13 +104,13 @@ describe('PromptTakes', () => {
     await done.get('button[aria-label="Close takes"]').trigger('click')
     expect(done.emitted('more')).toHaveLength(1)
     expect(done.emitted('close')).toHaveLength(1)
-    expect(done.text()).toContain('Three takes · hover to preview, Keep one')
+    expect(done.text()).toContain('Three takes · Hover to preview, click to keep')
   })
   it('an effect set\'s "Three more" shows its price before the click; a Variations set shows none', () => {
-    const paid = mount(PromptTakes, { props: { session: session(3), moreNote: '~$0.24–0.42' } })
+    const paid = mount(PromptTakes, { props: { session: session(3), moreNote: '48–88 credits' } })
     const more = paid.findAll('button').find(b => b.text().startsWith('Three more'))!
-    expect(more.text()).toBe('Three more · ~$0.24–0.42')
-    expect(more.get('[data-testid="prompt-takes-more-note"]').text()).toBe('~$0.24–0.42')
+    expect(more.text()).toBe('Three more · 48–88 credits')
+    expect(more.get('[data-testid="prompt-takes-more-note"]').text()).toBe('48–88 credits')
     const free = mount(PromptTakes, { props: { session: session(3) } })
     expect(free.find('[data-testid="prompt-takes-more-note"]').exists()).toBe(false)
   })

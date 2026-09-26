@@ -1113,16 +1113,33 @@ function agentShowTake(id: string, takeId: string | null) {
   n.data = showOnData({ ...n.data }, takeId, snap)
 }
 function agentTakesEnd(id: string, keepTakeId: string | null, holdPromptIds: string[] = []) {
-  agentShowTake(id, keepTakeId)
-  takesSnapshots.delete(id)
   const n = nodeById(id)
+  const snap = takesSnapshots.get(id)
+  if (n && snap && keepTakeId) {
+    // Keeping a take is ONE undo step back to what the node showed before (previews recorded
+    // nothing: history is paused while a strip is open, see scheduleSnapshot). Record that
+    // "before" — the takes that landed stay in the node's history, the display is the one at
+    // open, no ring — then the kept take, both at once so ⌘Z straight away still has both.
+    n.data = showOnData({ ...n.data }, null, snap)
+    n.class = unringed(n.class)
+    takesSnapshots.delete(id)
+    snapshotNow()
+    n.data = showOnData({ ...n.data }, keepTakeId, snap)
+    snapshotNow()
+  } else {
+    agentShowTake(id, keepTakeId)
+    takesSnapshots.delete(id)
+  }
   if (!n) return
   if (holdPromptIds.length) {
     const prev = takesHolds.get(id)?.promptIds ?? []
     takesHolds.set(id, { snap: displaySnapshot(n.data ?? {}), promptIds: [...new Set([...prev, ...holdPromptIds])] })
   }
-  const rest = String(n.class ?? '').split(' ').filter(c => c && c !== 'agent-takes-target')
-  n.class = rest.length ? rest.join(' ') : undefined
+  n.class = unringed(n.class)
+}
+function unringed(cls: unknown): string | undefined {
+  const rest = String(cls ?? '').split(' ').filter(c => c && c !== 'agent-takes-target')
+  return rest.length ? rest.join(' ') : undefined
 }
 // Unmounting mid-preview must not leave a previewed take as the node's display.
 onBeforeUnmount(() => { for (const id of [...takesSnapshots.keys()]) agentTakesEnd(id, null) })
@@ -1434,12 +1451,23 @@ const history = useCanvasHistory()
 let isRestoringHistory = false
 let snapshotTimer: ReturnType<typeof setTimeout> | null = null
 
+// While a takes strip is open, the node it previews on changes with every hover and every take
+// that lands: none of that is an edit, so history waits. The strip's end records the step (a
+// keep records its "before" and the kept take itself — agentTakesEnd).
+const takesOpen = () => takesSnapshots.size > 0
 function scheduleSnapshot() {
-  if (isRestoringHistory) return
+  if (isRestoringHistory || takesOpen()) return
   if (snapshotTimer) clearTimeout(snapshotTimer)
   snapshotTimer = setTimeout(() => {
+    snapshotTimer = null
+    if (takesOpen()) return
     history.snapshot({ nodes: nodes.value as any[], edges: edges.value as any[] })
   }, 350)
+}
+/** Record the canvas as it is now (a pending debounced snapshot is folded into it). */
+function snapshotNow() {
+  if (snapshotTimer) { clearTimeout(snapshotTimer); snapshotTimer = null }
+  history.snapshot({ nodes: nodes.value as any[], edges: edges.value as any[] })
 }
 
 // Deep, because a widget edit mutates a node's `data` in place: only a deep

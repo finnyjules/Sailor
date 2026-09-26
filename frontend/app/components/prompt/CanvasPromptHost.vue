@@ -20,7 +20,7 @@ const {
   agent, chipLabel, suggestions, mode, modeNote, focusTick, working, workingLabel, card, answerCard, takes, takesSaving, takesError, takesMoreNote, showSketchInstead,
   searchOpen, searchQuery, onSearchDone, submit, stop, clearMode, clearSelection, onPromptFocus,
   reference, acceptsReference, attachReference, clearReference,
-  previewTake, chooseTake, keepTake, closeTakes, moreTakes, dismissAnswer, runFollowUp, sketchInstead,
+  previewTake, keepTake, closeTakes, moreTakes, dismissAnswer, runFollowUp, sketchInstead,
 } = useCanvasPrompt(() => props.vueCanvas ?? null)
 const { changes, issues, review, reviewing, busy: agentBusy, hovered, acceptChange, rejectChange, reroll, keep, keepAndRun, dismiss } = agent
 
@@ -77,7 +77,7 @@ async function onAttachImage(file: File) {
       <template v-if="card" #above>
         <PromptTakes
           v-if="card === 'takes' && takes" :session="takes" :saving="takesSaving" :error="takesError" :more-note="takesMoreNote"
-          @hover="previewTake" @choose="chooseTake" @keep="keepTake" @more="moreTakes" @close="closeTakes"
+          @hover="previewTake" @keep="keepTake" @more="moreTakes" @close="closeTakes"
         />
         <PromptChangesCard
           v-else-if="card === 'changes'"

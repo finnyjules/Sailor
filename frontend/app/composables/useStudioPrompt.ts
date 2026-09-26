@@ -49,6 +49,8 @@ export interface StudioPromptWorker {
   hasTakes?: Ref<boolean> | ComputedRef<boolean>
   takes?: Ref<any[]>; takeThumbs?: Ref<Map<any, any>>; takeCurrentThumb?: Ref<any>; selectedTake?: Ref<any>
   previewTake?: (t: any | null) => void; selectTake?: (t: any | null) => void; keepTake?: () => void
+  /** ⌘Z after keepTake: put back what it replaced; false when there is nothing (left) to undo. */
+  undoKeep?: () => boolean
   dismissTakes?: () => void; abandonTakes?: () => void; moreDirections?: () => unknown
 }
 /** `effectId`: the effect a gallery Remix starts from; `add`: the takes land on a new layer. */
@@ -331,19 +333,28 @@ export function useStudioPrompt(
     if (fx.session.value) { fx.preview(id); return }
     worker()?.previewTake?.(id === CURRENT ? null : takeAt(id))
   }
-  function chooseTake(id: string) {
-    if (fx.session.value) { fx.choose(id); return }
-    worker()?.selectTake?.(takeAt(id))
-  }
+  // A click on a tile keeps it (the strip closes); ⌘Z then puts back what it replaced, as one
+  // step (undoKeep). An effect take's My effect stays saved — only the target's change is undone.
+  let keptUndo: (() => boolean) | null = null
   function keepTake(id: string) {
-    if (fx.session.value) { return fx.keep(id).then((kept) => { if (kept) reference.value = null }) }
+    if (fx.session.value) {
+      return fx.keep(id).then((kept) => { if (kept) { reference.value = null; keptUndo = () => fx.undoKeep() } })
+    }
     const w = worker()
     const t = takeAt(id)
     if (!w || !t) return
     dropLateReply()
     w.selectTake?.(t)
     w.keepTake?.()
+    keptUndo = w.undoKeep ? () => w.undoKeep!() : null
     if (request.value.trim()) o.afterKeep?.(request.value)
+  }
+  /** Undo the last kept take (the owner's ⌘Z). False: nothing to undo, so ⌘Z goes on to whatever
+   *  else handles it. */
+  function undoKeep(): boolean {
+    const u = keptUndo
+    keptUndo = null
+    return u ? u() : false
   }
   // The strip's own "more" button: the worker restarts the set, so only a run
   // in flight (not thumbnails still drawing) blocks it.
@@ -394,7 +405,7 @@ export function useStudioPrompt(
     card, takes, takesSaving, takesError, takesMoreNote, effectsOpen, answerCard, worker, notify,
     reference, acceptsReference, attachReference, clearReference,
     submit, runKind, setMode, clearMode, stop, requestFocus,
-    previewTake, chooseTake, keepTake, moreTakes, closeTakes, endEffects,
+    previewTake, keepTake, undoKeep, moreTakes, closeTakes, endEffects,
     approve, rejectAll, dismissAnswer, runFollowUp,
   }
 }

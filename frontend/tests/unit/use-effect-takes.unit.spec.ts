@@ -77,14 +77,13 @@ describe('useEffectTakes', () => {
     expect(api.working.value).toBe(false)
   })
 
-  it('hover previews on the target; leaving goes back; choose sticks', async () => {
+  it('hover previews on the target; leaving goes back', async () => {
     const { api, release } = setup()
     const tg = target()
     const run = api.start('rain', tg); release(0); release(1); release(2); await run
     const id = api.session.value!.tiles[1]!.takeId!
     api.preview(id); expect(tg.preview).toHaveBeenLastCalledWith(id)
     api.preview(null); expect(tg.preview).toHaveBeenLastCalledWith(null)
-    api.choose(id); api.preview(null); expect(tg.preview).toHaveBeenLastCalledWith(id)
     api.preview(CURRENT); expect(tg.preview).toHaveBeenLastCalledWith(null)
   })
 
@@ -99,6 +98,20 @@ describe('useEffectTakes', () => {
     expect(unregister).toHaveBeenCalledWith(expect.arrayContaining([id]))
     expect(api.session.value).toBeNull()
     expect(api.notice.value).toBe(EFFECT_MESSAGES.savedNew(SPIKE_TAKES.rain![0]!.name))
+  })
+
+  it('⌘Z after Keep runs the target’s own undo once (the My effect stays saved)', async () => {
+    const { api, release, library } = setup()
+    const undo = vi.fn(() => true)
+    const tg = target()
+    tg.apply.mockImplementation(() => undo)
+    const run = api.start('rain', tg); release(0); release(1); release(2); await run
+    expect(api.undoKeep()).toBe(false) // nothing kept yet
+    expect(await api.keep(api.session.value!.tiles[0]!.takeId!)).toBe(true)
+    expect(api.undoKeep()).toBe(true)
+    expect(undo).toHaveBeenCalledTimes(1)
+    expect(api.undoKeep()).toBe(false)
+    expect(library.saveTake).toHaveBeenCalledTimes(1)
   })
 
   it('Keep on a Remix of a My effect adds a version to it (an old-version def resolves to its effect)', async () => {
@@ -274,7 +287,7 @@ describe('useEffectTakes', () => {
     const tg = target()
     const run = api.start('rain', tg); release(0); release(1); release(2); await run
     const id = api.session.value!.tiles[2]!.takeId!
-    api.choose(id)
+    api.preview(id)
     lose()
     expect(api.session.value!.tiles[2]!.state).toBe('failed')
     expect(tg.preview).toHaveBeenLastCalledWith(null)

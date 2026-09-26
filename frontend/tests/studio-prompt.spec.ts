@@ -84,6 +84,27 @@ async function savedCanvas(page: Page): Promise<string> {
   })
 }
 
+/** Effect takes the render checks pass: each loops over LOOP() through the preamble's
+ *  loopPhase() / loopCircle() (a raw u_time body now fails the seamless-loop check), and each
+ *  visibly changes the picture under it, even a flat one (a hue sweep across it), so none is
+ *  thrown away as "changed nothing". */
+const loopedTake = (name: string, hueScale: number) => ({
+  name, animated: true, generative: false,
+  params: [
+    { uniform: 'u_amount', label: 'Amount', type: 'float', min: 0, max: 1, step: 0.01, default: 0.7 },
+    { uniform: 'u_sat', label: 'Colour', type: 'float', min: 0, max: 1, step: 0.01, default: 0.75 },
+    { uniform: 'u_drift', label: 'Drift', type: 'float', min: 0, max: 0.05, step: 0.001, default: 0.01 },
+  ],
+  body: `uniform float u_amount; uniform float u_sat; uniform float u_drift;
+void main(){
+  vec3 c = tex(v_texCoord + loopCircle(u_drift));
+  vec3 tint = hsv2rgb(vec3(fract(v_texCoord.x * ${hueScale.toFixed(1)} + loopPhase()), u_sat, 0.9));
+  float s = 0.5 + 0.5 * sin(6.28318530718 * loopPhase());
+  fragColor0 = vec4(mix(c, tint, u_amount * (0.6 + 0.2 * s)), 1.0);
+}`,
+})
+const LOOPED_TAKES = [loopedTake('Hue sweep', 1), loopedTake('Double sweep', 2), loopedTake('Triple sweep', 3)]
+
 /** `upper` sits wholly above `lower` on screen. */
 async function expectAbove(upper: Locator, lower: Locator) {
   const a = (await upper.boundingBox())!
@@ -131,7 +152,8 @@ test.describe('the one prompt in studios', () => {
     const first = tiles.first()
     await expect(first).toHaveAttribute('data-state', 'ready', { timeout: 20_000 })
     await first.hover()
-    await first.getByRole('button', { name: 'Keep', exact: true }).click()
+    await expect(first.getByRole('button', { name: 'Keep', exact: true })).toHaveCount(0) // no separate Keep
+    await first.getByRole('button', { name: 'Take 1' }).click() // the click keeps it
     await expect(page.getByTestId('prompt-takes')).toHaveCount(0)
   })
 
@@ -154,11 +176,11 @@ test.describe('the one prompt in studios', () => {
     await openStudio(page, 'ShaderStudio', 'sailor:openShaderStudio')
     const remix = page.getByTestId('studio-actions').locator('[data-testid="studio-action-row"][data-action-id="remix"]')
     await expect(remix).toContainText('Rewrite the effect')
-    await expect(remix.getByTestId('studio-action-price')).toHaveText('~$0.24–0.42')
+    await expect(remix.getByTestId('studio-action-price')).toHaveText('48–88 credits')
     await remix.click()
     await expect(page.getByTestId('prompt-mode-chip')).toContainText('Remix')
     // The chip carries the price before anything runs.
-    await expect(page.getByTestId('studio-prompt').getByTestId('prompt-note')).toHaveText('~$0.24–0.42')
+    await expect(page.getByTestId('studio-prompt').getByTestId('prompt-note')).toHaveText('48–88 credits')
     await expect(prompt(page)).toBeFocused()
     await prompt(page).fill('ink on paper')
     await prompt(page).press('Enter')
@@ -220,10 +242,10 @@ test.describe('the one prompt in studios', () => {
     await expect(rows).toHaveCount(2)
     await expect(rows.nth(0).getByTestId('studio-action-name')).toHaveText('Try other settings')
     await expect(rows.nth(0).getByTestId('studio-action-description')).toHaveText('Same effect, 3 new sets of dial values')
-    await expect(rows.nth(0).getByTestId('studio-action-price')).toHaveText('~$0.01–0.03')
+    await expect(rows.nth(0).getByTestId('studio-action-price')).toHaveText('2–6 credits')
     await expect(rows.nth(1).getByTestId('studio-action-name')).toHaveText('Rewrite the effect')
     await expect(rows.nth(1).getByTestId('studio-action-description')).toHaveText('3 new versions of the code itself')
-    await expect(rows.nth(1).getByTestId('studio-action-price')).toHaveText('~$0.24–0.42')
+    await expect(rows.nth(1).getByTestId('studio-action-price')).toHaveText('48–88 credits')
     // Names fit: never cut.
     for (const i of [0, 1]) {
       const fits = await rows.nth(i).getByTestId('studio-action-name').evaluate(el => el.scrollWidth <= el.clientWidth + 1)
@@ -260,7 +282,7 @@ test.describe('the one prompt in studios', () => {
     await expect(menu).toBeVisible()
     const describe = menu.locator('[data-action-id="new-layer"]')
     await expect(describe.getByTestId('studio-action-name')).toHaveText('Describe a new layer')
-    await expect(describe.getByTestId('studio-action-price')).toHaveText('~$0.24–0.42')
+    await expect(describe.getByTestId('studio-action-price')).toHaveText('48–88 credits')
     await describe.click()
     await expect(menu).toHaveCount(0)
     await expect(page.getByTestId('prompt-mode-chip')).toContainText('New effect')
@@ -317,7 +339,7 @@ test.describe('the one prompt in studios', () => {
       const body = r.request().postDataJSON()
       written.push(String(body.prompt ?? ''))
       const slot = Number(/Take (\d):/.exec(String(body.prompt ?? ''))?.[1] ?? 1) - 1
-      await r.fulfill({ json: { text: JSON.stringify(SPIKE_TAKES.rain![slot % SPIKE_TAKES.rain!.length]), usage: null, stop_reason: 'end_turn' } })
+      await r.fulfill({ json: { text: JSON.stringify(LOOPED_TAKES[slot % LOOPED_TAKES.length]), usage: null, stop_reason: 'end_turn' } })
     })
     await page.route('**/api/my-effects**', r => r.fulfill({ json: { effects: [] } }))
     await openCompositor(page)
@@ -337,9 +359,8 @@ test.describe('the one prompt in studios', () => {
     // (so no canvas undo step or autosave can hold one), and × leaves the node as it was.
     const savedBefore = await savedCanvas(page)
     const ready = dock.locator('[data-testid="prompt-take-tile"][data-state="ready"]')
-    expect(await ready.count()).toBeGreaterThan(0)
-    await ready.first().getByRole('button', { name: /Preview take/ }).hover()
-    await ready.first().getByRole('button', { name: /Preview take/ }).click() // chosen: stays on screen
+    await expect(ready).toHaveCount(3) // every take passes the checks: none "didn't loop" or "changed nothing"
+    await ready.first().getByRole('button', { name: /^Take \d$/ }).hover() // previewed (a click would keep it)
     await page.waitForTimeout(600)
     const during = await savedCanvas(page)
     expect(during).not.toContain('draft_')

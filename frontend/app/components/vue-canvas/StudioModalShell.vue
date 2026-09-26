@@ -128,14 +128,29 @@ function onKeydown(e: KeyboardEvent) {
   // prompt without closing the studio — the early return above.
   if (e.key === 'Escape') { e.stopPropagation(); requestClose() }
 }
+/** ⌘Z right after a take was kept (a click on its tile) puts back what it replaced, as one step.
+ *  These studios keep no undo history of their own, so this is the only ⌘Z they answer; it runs
+ *  in the capture phase so the canvas behind never also undoes. Anything else passes through. */
+function onUndoKey(e: KeyboardEvent) {
+  if (e.defaultPrevented || !(e.metaKey || e.ctrlKey) || e.shiftKey || e.altKey || e.key.toLowerCase() !== 'z') return
+  const el = e.target as Element | null
+  if (el?.closest?.('input, textarea, select, [contenteditable=""], [contenteditable="true"]')) return
+  if (!prompt.undoKeep()) return
+  e.preventDefault()
+  e.stopImmediatePropagation()
+}
 onMounted(() => {
   if (props.fullBleed) {
     try { panelsVisible.value = sessionStorage.getItem(PANELS_KEY) !== '0' } catch { /* private mode */ }
   }
   window.addEventListener('keydown', onKeydown)
+  window.addEventListener('keydown', onUndoKey, true)
   rootEl.value?.focus()
 })
-onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
+onBeforeUnmount(() => {
+  window.removeEventListener('keydown', onKeydown)
+  window.removeEventListener('keydown', onUndoKey, true)
+})
 </script>
 
 <template>

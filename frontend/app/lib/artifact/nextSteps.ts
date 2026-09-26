@@ -4,6 +4,8 @@
 // docs/superpowers/specs/2026-07-01-costs-and-pricing-model.md (1cr = $0.01);
 // the billing spec's price_book replaces them when metering lands.
 
+import { usdAsCreditsText } from '~/lib/pricing'
+
 export const ARTIFACT_ACTION_IDS = [
   'remove-bg', 'inpaint', 'nano-banana', 'fix',
   'enhance', 'upscale', 'relight', 'lens',
@@ -11,19 +13,19 @@ export const ARTIFACT_ACTION_IDS = [
 ] as const
 export type ArtifactActionId = typeof ARTIFACT_ACTION_IDS[number]
 
-// Dollar amounts until the credits system ships (billing spec's price_book
-// will replace these constants; credits = $ × 100 when that lands).
+// Prices are credits, locally and hosted alike: the provider estimates below (dollars) at the
+// markup the server charges (creditsForUsd) — "about 18 credits", never "~$0.12".
 export const ACTION_HINTS: Record<ArtifactActionId, string | null> = {
   'remove-bg': null,
   'inpaint': null,
-  'nano-banana': '~$0.12',
+  'nano-banana': usdAsCreditsText(0.12, { approximate: true }),
   'fix': null,
-  'enhance': '$0.14–0.28',
-  'upscale': '~$0.14',
-  'relight': '~$0.12',
-  'lens': '~$0.12',
+  'enhance': usdAsCreditsText([0.14, 0.28]),
+  'upscale': usdAsCreditsText(0.14, { approximate: true }),
+  'relight': usdAsCreditsText(0.12, { approximate: true }),
+  'lens': usdAsCreditsText(0.12, { approximate: true }),
   'variations': '3 runs',
-  'animate': 'from $1.60',
+  'animate': usdAsCreditsText(1.6, { from: true }),
 }
 
 interface MinimalNode { id: string; data?: { nodeType?: string; images?: unknown[]; audios?: unknown[] } }

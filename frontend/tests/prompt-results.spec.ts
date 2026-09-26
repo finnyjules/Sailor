@@ -239,7 +239,7 @@ test.describe('Results on the work', () => {
     await expect(prompt(page)).not.toBeFocused()
   })
 
-  test('Variations: three takes above the prompt; the node glows and previews each; Keep applies; nothing moves', async ({ page }) => {
+  test('Variations: three takes above the prompt; the node glows and previews each; a click keeps; ⌘Z puts it back; nothing moves', async ({ page }) => {
     const T0 = { id: 't0', createdAt: 1, promptId: 'p0', images: [svg('#777')] }
     await page.evaluate(d => window.dispatchEvent(new CustomEvent('sailor:addNode', { detail: d })),
       { nodeType: 'Image', dataOverrides: { images: T0.images, takes: [T0], activeTakeId: 't0' } })
@@ -282,26 +282,101 @@ test.describe('Results on the work', () => {
       // The node stays on its version while takes land (its active take, not just a thumbnail).
       await expect(node.locator('.ring-action img').first()).toHaveAttribute('src', /%23777/)
     }
-    await expect(strip).toContainText('Three takes · hover to preview, Keep one')
+    await expect(strip).toContainText('Three takes · Hover to preview, click to keep')
     // The node sits clear of the whole prompt stack, strip included.
     await expect.poll(() => clearOfPrompt(page, node)).toBe(true)
     await shot(page, 'takes')
     await expect(prompt(page)).toBeVisible() // no longer working
 
     const tiles = strip.getByTestId('prompt-take-tile')
-    await tiles.nth(1).getByRole('button', { name: 'Preview take 2' }).hover()
+    await tiles.nth(1).getByRole('button', { name: 'Take 2' }).hover()
     await expect(node.locator(`img[src*="${encodeURIComponent('#1a1')}"]`).first()).toBeVisible()
     await page.mouse.move(5, 5) // leave the strip
     await expect(node.locator(`img[src*="${encodeURIComponent('#777')}"]`).first()).toBeVisible()
 
-    await tiles.nth(2).getByRole('button', { name: 'Preview take 3' }).hover()
-    await tiles.nth(2).getByRole('button', { name: 'Keep' }).click()
+    await expect(tiles.getByRole('button', { name: 'Keep' })).toHaveCount(0) // no separate Keep
+    await tiles.nth(2).getByRole('button', { name: 'Take 3' }).hover()
+    await tiles.nth(2).getByRole('button', { name: 'Take 3' }).click() // the click keeps it
     await expect(strip).toHaveCount(0)
     await page.mouse.move(5, 5)
     await expect(node.locator(`img[src*="${encodeURIComponent('#11a')}"]`).first()).toBeVisible()
     await expect(node).not.toHaveClass(/agent-takes-target/)
     expect(before).toMatch(/translate/)
     expect(await flowPos()).toBe(before)
+
+    // ⌘Z: one step back to the version the node had before the keep (hovers recorded nothing).
+    await page.keyboard.press('ControlOrMeta+z')
+    await expect(node.locator(`img[src*="${encodeURIComponent('#777')}"]`).first()).toBeVisible()
+    await expect(node).not.toHaveClass(/agent-takes-target/)
+    // The takes that came back are still the node's (they were paid for): redo brings the kept one.
+    await page.keyboard.press('ControlOrMeta+Shift+z')
+    await expect(node.locator(`img[src*="${encodeURIComponent('#11a')}"]`).first()).toBeVisible()
+  })
+
+  /** A node with three takes landed in an open strip (the Variations flow above, in brief). */
+  async function landedTakes(page: Page) {
+    const T0 = { id: 't0', createdAt: 1, promptId: 'p0', images: [svg('#777')] }
+    await page.evaluate(d => window.dispatchEvent(new CustomEvent('sailor:addNode', { detail: d })),
+      { nodeType: 'Image', dataOverrides: { images: T0.images, takes: [T0], activeTakeId: 't0' } })
+    const node = page.locator('.vue-flow__node-artifact-image')
+    await expect(node).toBeVisible()
+    // Let the added node be recorded as a step of its own before the strip opens.
+    await page.waitForTimeout(600)
+    const nodeId = await node.getAttribute('data-id')
+    await page.evaluate(id => window.dispatchEvent(new CustomEvent('sailor:promptKind', { detail: { kind: 'tweak', nodeId: id, fromMenu: true } })), nodeId)
+    await page.mouse.move(5, 5)
+    await queued(page, nodeId, ['p1', 'p2', 'p3'])
+    await loopDone(page, nodeId, ['p1', 'p2', 'p3'])
+    const takes = [T0]
+    for (const [i, fill] of ['#a11', '#1a1', '#11a'].entries()) {
+      const t = { id: `t${i + 1}`, createdAt: 2 + i, promptId: `p${i + 1}`, images: [svg(fill)] }
+      takes.push(t)
+      await page.evaluate(({ takes, t }) => window.dispatchEvent(new CustomEvent('sailor:test:setNodeData', {
+        detail: { match: 'Image', patch: { takes, activeTakeId: t.id, images: t.images } },
+      })), { takes: [...takes], t })
+    }
+    const strip = page.getByTestId('prompt-takes')
+    await expect(strip.locator('[data-testid="prompt-take-tile"][data-state="ready"]')).toHaveCount(3)
+    return { node, strip, tiles: strip.getByTestId('prompt-take-tile') }
+  }
+  const shows = (node: Locator, fill: string) => node.locator(`img[src*="${encodeURIComponent(fill)}"]`).first()
+
+  test('Enter on a focused take keeps it; ⌘Z is one step back, however many takes were previewed', async ({ page }) => {
+    const { node, strip, tiles } = await landedTakes(page)
+    await tiles.nth(1).getByRole('button', { name: 'Take 2' }).hover()
+    await tiles.nth(2).getByRole('button', { name: 'Take 3' }).hover()
+    await page.mouse.move(5, 5)
+    await tiles.nth(0).getByRole('button', { name: 'Take 1' }).focus() // focus previews
+    await expect(shows(node, '#a11')).toBeVisible()
+    await expect(strip).toBeVisible()
+    await page.keyboard.press('Enter')
+    await expect(strip).toHaveCount(0)
+    await expect(shows(node, '#a11')).toBeVisible()
+    await page.keyboard.press('ControlOrMeta+z')
+    await expect(shows(node, '#777')).toBeVisible()
+  })
+
+  test('Current keeps what was there: a click on it closes the strip with the node as it was', async ({ page }) => {
+    const { node, strip, tiles } = await landedTakes(page)
+    await tiles.nth(1).getByRole('button', { name: 'Take 2' }).hover()
+    await expect(shows(node, '#1a1')).toBeVisible()
+    await strip.getByTestId('prompt-take-current').click()
+    await expect(strip).toHaveCount(0)
+    await expect(shows(node, '#777')).toBeVisible()
+  })
+
+  test.describe('on a touch screen', () => {
+    test.use({ hasTouch: true })
+    test('the first tap previews a take, a second tap on it keeps it', async ({ page }) => {
+      const { node, strip, tiles } = await landedTakes(page)
+      await tiles.nth(1).getByRole('button', { name: 'Take 2' }).tap()
+      await expect(strip).toBeVisible()
+      await expect(shows(node, '#1a1')).toBeVisible()
+      await expect(strip.getByTestId('prompt-takes-hint')).toHaveText('Tap to preview, tap again to keep')
+      await tiles.nth(1).getByRole('button', { name: 'Take 2' }).tap()
+      await expect(strip).toHaveCount(0)
+      await expect(shows(node, '#1a1')).toBeVisible()
+    })
   })
 
   test('Stop after the loop reported done interrupts the set’s runs still rendering; a late take never becomes active', async ({ page }) => {

@@ -22,15 +22,22 @@ export function useCanvasHistory() {
   const stack = ref<CanvasSnapshot[]>([])
   const cursor = ref(-1)
 
+  // The entry at the cursor, serialized, so a snapshot identical to it is not a second step
+  // (a caller that records at once and then again on its debounce must not need two ⌘Z).
+  // null: not known (after undo/redo), worked out when next needed.
+  let headJson: string | null = null
+  const serialize = (st: CanvasSnapshot) => JSON.stringify({ nodes: st.nodes ?? [], edges: st.edges ?? [] })
+
   function snapshot(state: CanvasSnapshot) {
+    const json = serialize(state)
+    const head = stack.value[cursor.value]
+    if (head && json === (headJson ??= serialize(head))) return
     // Drop anything after the cursor — we're branching off this point.
     if (cursor.value < stack.value.length - 1) {
       stack.value = stack.value.slice(0, cursor.value + 1)
     }
-    const cloned: CanvasSnapshot = {
-      nodes: JSON.parse(JSON.stringify(state.nodes ?? [])),
-      edges: JSON.parse(JSON.stringify(state.edges ?? [])),
-    }
+    const cloned = JSON.parse(json) as CanvasSnapshot
+    headJson = json
     stack.value.push(cloned)
     // Cap memory — drop the oldest entry, keep cursor pointing at the head.
     if (stack.value.length > MAX_ENTRIES) {
@@ -45,18 +52,21 @@ export function useCanvasHistory() {
   function undo(): CanvasSnapshot | null {
     if (!canUndo.value) return null
     cursor.value -= 1
+    headJson = null
     return stack.value[cursor.value] ?? null
   }
 
   function redo(): CanvasSnapshot | null {
     if (!canRedo.value) return null
     cursor.value += 1
+    headJson = null
     return stack.value[cursor.value] ?? null
   }
 
   function reset() {
     stack.value = []
     cursor.value = -1
+    headJson = null
   }
 
   return { snapshot, undo, redo, canUndo, canRedo, reset, stack, cursor }

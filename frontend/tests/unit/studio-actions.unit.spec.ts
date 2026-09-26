@@ -70,10 +70,10 @@ describe('studioActions: each studio’s rows', () => {
 })
 
 describe('prices', () => {
-  it('Try other settings costs a run of assist calls: dollars locally, credits hosted', () => {
+  it('Try other settings costs a run of assist calls, in credits locally and hosted', () => {
     const vary = studioActions({ place: 'shader', canTakes: true })[0]!
-    expect(vary.priceFor!(false)).toBe('~$0.01–0.03')
-    expect(vary.priceFor!(true)).toBe('~2–6 cr')
+    expect(vary.priceFor!(false)).toBe('2–6 credits')
+    expect(vary.priceFor!(true)).toBe('2–6 credits')
     expect(vary.priceFor!(true)).toBe(assistEstimateText(true))
   })
   it('the effect rows carry the shader-generation estimate', () => {
@@ -81,8 +81,8 @@ describe('prices', () => {
     for (const id of ['new-background', 'remix-background', 'new-layer', 'remix']) {
       const a = rows.find(r => r.id === id)!
       expect(a.lands).toBe('takes')
-      expect(a.priceFor!(false)).toBe('~$0.24–0.42')
-      expect(a.priceFor!(true)).toMatch(/^~\d+–\d+ cr$/)
+      expect(a.priceFor!(false)).toBe('48–88 credits')
+      expect(a.priceFor!(true)).toMatch(/^\d+–\d+ credits$/)
     }
   })
   it('a row that spends nothing has no price', () => {
@@ -113,7 +113,7 @@ describe('Layers + menu (Shader)', () => {
     expect(labels(acts)).toEqual(['Empty layer', 'Describe a new layer'])
     const w = mount(StudioActionRow, { props: { action: acts[1]!, prompt: prompt() } })
     expect(w.findComponent({ name: 'AiMark' }).exists()).toBe(true)
-    expect(w.find('[data-testid="studio-action-price"]').text()).toBe('~$0.24–0.42')
+    expect(w.find('[data-testid="studio-action-price"]').text()).toBe('48–88 credits')
     const e = mount(StudioActionRow, { props: { action: acts[0]!, prompt: prompt() } })
     expect(e.findComponent({ name: 'AiMark' }).exists()).toBe(false)
     expect(e.find('[data-testid="studio-action-price"]').exists()).toBe(false)
@@ -168,8 +168,8 @@ describe('StudioActionRows', () => {
     expect(rows.map(r => r.attributes('data-action-id'))).toEqual(['vary', 'remix'])
     expect(rows[0]!.find('[data-testid="studio-action-name"]').text()).toBe('Try other settings')
     expect(rows[0]!.find('[data-testid="studio-action-description"]').text()).toBe('Same effect, 3 new sets of dial values')
-    expect(rows[0]!.find('[data-testid="studio-action-price"]').text()).toBe('~$0.01–0.03')
-    expect(rows[1]!.find('[data-testid="studio-action-price"]').text()).toBe('~$0.24–0.42')
+    expect(rows[0]!.find('[data-testid="studio-action-price"]').text()).toBe('2–6 credits')
+    expect(rows[1]!.find('[data-testid="studio-action-price"]').text()).toBe('48–88 credits')
     for (const r of rows) expect(r.findComponent({ name: 'AiMark' }).exists()).toBe(true)
     expect(w.find('[data-testid="studio-actions-hint"]').text()).toBe(PROMPT_HINT)
     expect(PROMPT_HINT).toBe('Or type what you want in the prompt below')

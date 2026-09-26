@@ -19,7 +19,7 @@ import { shaderFx } from '~/lib/shaderfx/renderer'
 import { useMyEffects } from '~/composables/useMyEffects'
 import { MY_EFFECTS_ERRORS } from '~/lib/myEffects/client'
 import { REFERENCE_ONLY_REQUEST } from '~/lib/prompt/referencePicture'
-import { chooseTile, CURRENT, failPending, hoverTile, markCreditRefusals, openTakes, shownTakeId, type TakesSession } from '~/lib/prompt/takesSession'
+import { CURRENT, failPending, hoverTile, markCreditRefusals, openTakes, shownTakeId, type TakesSession } from '~/lib/prompt/takesSession'
 import { takeFailureReason } from '~/lib/shadergen/failureReason'
 import type { EffectDef, ParamValue } from '~/lib/shaderfx/types'
 
@@ -42,8 +42,10 @@ export interface EffectTarget {
   current?: () => CanvasImageSource | null
   /** Show a take (a registered draft id) on the target; null restores what was there. */
   preview: (effectId: string | null) => void
-  /** Keep: point the target at a saved effect with these dial values. */
-  apply: (effectId: string, values: Record<string, ParamValue>) => void
+  /** Keep: point the target at a saved effect with these dial values. May return an undo: it puts
+   *  back what the target had before the keep and says true, or says false (and changes nothing)
+   *  when the target has changed since, so ⌘Z after a keep is one step (the My effect stays saved). */
+  apply: (effectId: string, values: Record<string, ParamValue>) => void | (() => boolean)
 }
 
 const PLAIN_SAVE_ERRORS = new Set<string>(Object.values(MY_EFFECTS_ERRORS))
@@ -102,8 +104,9 @@ export interface EffectTakes {
   reference: Readonly<Ref<string | null>>
   start(request: string, target: EffectTarget, o?: EffectStartOptions): Promise<void>
   preview(id: string | null): void
-  choose(id: string): void
   keep(id: string): Promise<boolean>
+  /** Undo the last kept take on its target (the My effect stays saved). False: nothing to undo. */
+  undoKeep(): boolean
   close(): void
   more(): Promise<void>
   stop(): void
@@ -176,8 +179,12 @@ export function useEffectTakes(deps: EffectTakesDeps = {}): EffectTakes {
   function dropDrafts() { if (taken.size) unregister([...taken.keys()]); taken.clear() }
   function end() { target.value?.preview(null); dropDrafts(); session.value = null; running.value = false; reference.value = null }
   const clearMessages = () => { error.value = ''; notice.value = '' }
+  // ⌘Z after a keep: the target's own undo of it (EffectTarget.apply), until the next set starts.
+  let keptUndo: (() => boolean) | null = null
+  function undoKeep(): boolean { const u = keptUndo; keptUndo = null; return u ? u() : false }
 
   async function start(text: string, t: EffectTarget, o: EffectStartOptions = {}) {
+    keptUndo = null
     ctrl?.abort()
     releaseRenderer()
     if (session.value) end()
@@ -254,7 +261,6 @@ export function useEffectTakes(deps: EffectTakesDeps = {}): EffectTakes {
   }
 
   function preview(id: string | null) { const s = session.value; if (!s) return; session.value = hoverTile(s, id); show() }
-  function choose(id: string) { const s = session.value; if (!s) return; session.value = chooseTile(s, id); show() }
 
   async function keep(id: string): Promise<boolean> {
     const s = session.value, t = target.value, et = taken.get(id)
@@ -293,7 +299,8 @@ export function useEffectTakes(deps: EffectTakesDeps = {}): EffectTakes {
         session.value = null
         running.value = false
         reference.value = null
-        t.apply(effectIdForVersion(rec, last), valuesForVersion(rec, last))
+        const undo = t.apply(effectIdForVersion(rec, last), valuesForVersion(rec, last))
+        keptUndo = typeof undo === 'function' ? undo : null
       }
       notice.value = mineId ? EFFECT_MESSAGES.savedVersion(rec.versions[last]!.label, rec.name) : EFFECT_MESSAGES.savedNew(rec.name)
       return true
@@ -333,5 +340,5 @@ export function useEffectTakes(deps: EffectTakesDeps = {}): EffectTakes {
   // Released with the owning scope: a component's unmount, or an effectScope/store being stopped.
   if (getCurrentScope()) onScopeDispose(() => { offCtx(); if (session.value || running.value) close() })
 
-  return { session, target, request, working, error, notice, saving: readonly(saving), reference: readonly(reference), start, preview, choose, keep, close, more, stop, clearMessages }
+  return { session, target, request, working, error, notice, saving: readonly(saving), reference: readonly(reference), start, preview, keep, undoKeep, close, more, stop, clearMessages }
 }

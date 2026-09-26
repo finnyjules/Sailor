@@ -242,6 +242,32 @@ describe('useStudioAgent — hover preview is non-destructive', () => {
 })
 
 describe('useStudioAgent — keep commits through the existing path', () => {
+  it('⌘Z after a keep puts back what it replaced, in one step, and only once', async () => {
+    fetchMock.mockResolvedValue({ takes: TAKES })
+    const { agent, config } = makeAgent()
+    await agent.ask('dreamier')
+    const before = JSON.stringify(config)
+    agent.previewTake(agent.takes.value[1]) // a hover never becomes the "before"
+    agent.selectTake(agent.takes.value[0])
+    agent.keepTake()
+    expect(config.hue).toBe(40)
+    expect(agent.undoKeep()).toBe(true)
+    expect(JSON.stringify(config)).toBe(before)
+    expect(agent.undoKeep()).toBe(false) // nothing more to undo
+  })
+
+  it('an edit made after the keep is never thrown away by ⌘Z', async () => {
+    fetchMock.mockResolvedValue({ takes: TAKES })
+    const { agent, config } = makeAgent()
+    await agent.ask('dreamier')
+    agent.selectTake(agent.takes.value[0])
+    agent.keepTake()
+    config.softness = 0.9
+    expect(agent.undoKeep()).toBe(false)
+    expect(config.hue).toBe(40)
+    expect(config.softness).toBe(0.9)
+  })
+
   it('writes the take through the same writer accept used, then commits', async () => {
     fetchMock.mockResolvedValue({ takes: TAKES })
     const { agent, config } = makeAgent()
@@ -541,6 +567,21 @@ describe('useStudioAgent — a take may swap the whole base look', () => {
 
     agent.selectTake(agent.takes.value[0])
     agent.dismissTakes()
+    expect(JSON.stringify(state.config)).toBe(before)
+  })
+
+  it('⌘Z after a macro keep puts the WHOLE base config back', async () => {
+    fetchMock.mockResolvedValue({ takes: [
+      { label: 'sunset', changes: [{ key: 'preset', value: 'sunset' }, { key: 'blur', value: 40 }], rationale: '' },
+      { label: 'duo', changes: [{ key: 'blur', value: 10 }], rationale: '' },
+    ] })
+    const { agent, state } = makeMacroAgent()
+    await agent.ask('a dreamy sunset')
+    const before = JSON.stringify(state.config)
+    agent.selectTake(agent.takes.value[0])
+    agent.keepTake()
+    expect(state.config.base).toBe('sunset')
+    expect(agent.undoKeep()).toBe(true)
     expect(JSON.stringify(state.config)).toBe(before)
   })
 

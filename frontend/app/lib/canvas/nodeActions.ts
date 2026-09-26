@@ -5,12 +5,12 @@
 // so their results land above it (spec §3.1, §1.2). `lands` is the grey hint:
 // '3 takes' on this node, or 'adds a step' (a new node after it); null for
 // actions that open an editor.
-// Actions that spend money add their price to that hint ("adds a step · ~$0.14"):
+// Actions that spend money add their price to that hint ("adds a step · about 21 credits"):
 // `priceHint` is the fixed estimate the old image menu showed (ACTION_HINTS);
 // otherwise `priceNodeType`'s own price_badge, the figure the node itself shows.
 import { ACTION_HINTS } from '~/lib/artifact/nextSteps'
 import { parseBadgeUsd } from '~/lib/costEstimate'
-import { formatCostBadge } from '~/lib/pricing'
+import { usdAsCreditsText } from '~/lib/pricing'
 import { shaderGenEstimateText } from '~/lib/shadergen/estimate'
 
 export type ActionGroup = 'edit' | 'develop'
@@ -21,7 +21,7 @@ export interface NodeAction {
   id: string; label: string; group: ActionGroup; ai: boolean; lands: ActionLands
   /** Fixed price estimate for a paid action (wins over the badge). */
   priceHint?: string | null
-  /** A price that follows the hosted switch (dollars locally, credits hosted); wins over both. */
+  /** The action's price text (credits, local and hosted alike); wins over both. */
   priceFor?: (hosted: boolean) => string
   /** The paid node this action adds — its price_badge prices the action. */
   priceNodeType?: string
@@ -33,13 +33,14 @@ export function landsHint(l: ActionLands): string | null {
 }
 
 /** An action's price, or null when it doesn't spend money (or has no known price).
- *  `objectInfo` is /object_info; `hosted` shows credits instead of dollars. */
+ *  `objectInfo` is /object_info; prices are credits in both modes (`hosted` is passed on to `priceFor`). */
 export function actionPrice(a: NodeAction, objectInfo: Record<string, any> | null | undefined, hosted: boolean): string | null {
+  // Prices are credits, locally too (the badge's figure at the server's markup): "about 38 credits".
   if (a.priceFor) return a.priceFor(hosted)
   if (a.priceHint) return a.priceHint
   if (!a.priceNodeType) return null
   const cost = parseBadgeUsd(objectInfo?.[a.priceNodeType]?.price_badge?.expr)
-  return cost ? formatCostBadge(cost.usd, cost.approximate, hosted) : null
+  return cost ? usdAsCreditsText(cost.usd, { approximate: true }) : null
 }
 
 /** The grey hint on a menu row: where it lands, plus the price when it spends money. */
@@ -91,8 +92,8 @@ const TUNE: NodeAction = {
   run: c => fire('sailor:promptMode', { label: 'Tune', kind: 'tweak', nodeId: c.nodeId }),
 }
 
-/** Remix / New effect cost (spec §7.2 estimate) in dollars. The menu shows
- *  `shaderGenEstimateText(hosted)` — the same text as the prompt's note and working row. */
+/** Remix / New effect cost (spec §7.2 estimate) in credits — the same text as the prompt's note
+ *  and working row. */
 export const SHADER_GEN_ACTION_HINT = shaderGenEstimateText(false)
 // Both need words: each puts a chip in the prompt (the chip decides the kind, so
 // no router call) and the three effect takes land above it (spec §7.3).
