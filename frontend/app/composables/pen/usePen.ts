@@ -57,6 +57,8 @@ import {
 import { createPenHistory } from './penHistory'
 import { handlePenKey, type PenKeyContext, NUDGE_PX, NUDGE_PX_SHIFT, screenDeltaToDrawing } from './penKeys'
 import { createPenCopies, type PendingOp } from './penCopies'
+import { nearestCurve, spanAt, curveGeom, type Span, type CurveGeom } from '~/lib/sketch/crossings'
+import { removeSpan, removeSegment, cutAt, canDissolve, dissolveAt } from '~/lib/sketch/trim'
 
 // NUDGE_PX / NUDGE_PX_SHIFT / screenDeltaToDrawing now live in penKeys.ts
 // (they exist only for the arrow-key nudge in the key handler); re-exported
@@ -64,8 +66,10 @@ import { createPenCopies, type PendingOp } from './penCopies'
 export { NUDGE_PX, NUDGE_PX_SHIFT, screenDeltaToDrawing }
 
 // 'path' is the arc Pen; 'curve' is the Bézier Curve tool. Both add to the
-// same pending path (see selectTool / curveDown).
-export type PenTool = 'select' | 'point' | 'line' | 'circle' | 'path' | 'curve'
+// same pending path (see selectTool / curveDown). 'trim' removes the piece of
+// a curve between crossings, 'cut' adds a point on a line or arc, 'dissolve'
+// merges the two pieces at a point back into one (see the Trim section).
+export type PenTool = 'select' | 'point' | 'line' | 'circle' | 'path' | 'curve' | 'trim' | 'cut' | 'dissolve'
 export interface PenOptions { openOnly?: boolean; tools?: PenTool[] }
 
 export const SPARKLE_LIFETIME_MS = 380
@@ -158,6 +162,47 @@ export type PathDrag = { anchor: EntityId; prevAnchor: EntityId; startX: number;
 export type CurveDrag = { anchor: EntityId; startX: number; startY: number; smooth: boolean } | null
 const isDrawTool = (t: PenTool) => t === 'path' || t === 'curve'
 
+// Dissolve: how close two pieces must line up to merge (spec: 1 screen px, 0.5°)
+export const DISSOLVE_PX = 1
+export const DISSOLVE_DEG = 0.5
+
+/** True when two curves lie on the same line, or on the same circle. */
+export function sameCarrier(g1: CurveGeom, g2: CurveGeom, eps: number): boolean {
+  if (g1.kind === 'line' || g2.kind === 'line') {
+    if (g1.kind !== 'line' || g2.kind !== 'line') return false
+    const a = g1.a!, b = g1.b!
+    const len = Math.hypot(b.x - a.x, b.y - a.y)
+    if (len < 1e-12) return false
+    const off = (p: Vec2) => Math.abs((b.x - a.x) * (p.y - a.y) - (b.y - a.y) * (p.x - a.x)) / len
+    return off(g2.a!) <= eps && off(g2.b!) <= eps
+  }
+  return dist(g1.c!, g2.c!) <= eps && Math.abs(g1.r! - g2.r!) <= eps
+}
+
+/** Drawing-space SVG path data for one piece of a curve (a Span from
+ *  crossings.ts): what the Trim tool tints on hover and leaves as a ghost.
+ *  Arcs follow sketchPath's convention (sweep flag 1 = angle increasing).
+ *  A circle piece with fewer than two crossings is the whole circle. */
+export function spanPathD(doc: SketchDoc, span: Span): string {
+  const g = curveGeom(doc, span.ref)
+  if (!g) return ''
+  const a = span.start.point, b = span.end.point
+  if (g.kind === 'line') return `M ${a.x} ${a.y} L ${b.x} ${b.y}`
+  const r = g.r!
+  if (g.kind === 'circle') {
+    const whole = !span.start.cutter || !span.end.cutter || span.end.t - span.start.t >= Math.PI * 2 - 1e-9
+    if (whole) {
+      const c = g.c!
+      return `M ${c.x + r} ${c.y} A ${r} ${r} 0 1 1 ${c.x - r} ${c.y} A ${r} ${r} 0 1 1 ${c.x + r} ${c.y}`
+    }
+    const large = span.end.t - span.start.t > Math.PI ? 1 : 0
+    return `M ${a.x} ${a.y} A ${r} ${r} 0 ${large} 1 ${b.x} ${b.y}`
+  }
+  const sweepAngle = g.sweepAngle! * (span.end.t - span.start.t)
+  const large = Math.abs(sweepAngle) > Math.PI ? 1 : 0
+  return `M ${a.x} ${a.y} A ${r} ${r} 0 ${large} ${sweepAngle >= 0 ? 1 : 0} ${b.x} ${b.y}`
+}
+
 export function usePen(opts: {
   doc: Ref<SketchDoc>          // a CLONE of the host's drawing (see HOST CONTRACT); the pen mutates doc.value in place and replaces it on undo/redo/reset/revert
   view: Ref<ViewMatrix>        // drawing → screen: screen-pixel tolerances, arrow-nudge steps and the screen marquee
@@ -180,7 +225,7 @@ export function usePen(opts: {
   // to it); openOnly drops Circle even if the host listed it — an open-path
   // guide has no use for a closed shape. See PenToolbar for how `tools` gates
   // the toolbar's own buttons.
-  const ALL_PEN_TOOLS: PenTool[] = ['select', 'point', 'line', 'circle', 'path', 'curve']
+  const ALL_PEN_TOOLS: PenTool[] = ['select', 'point', 'line', 'circle', 'path', 'curve', 'trim', 'cut', 'dissolve']
   const openOnly = !!opts.options?.openOnly
   const resolvedTools: PenTool[] = (() => {
     let list = opts.options?.tools ? opts.options.tools.filter(t => ALL_PEN_TOOLS.includes(t)) : [...ALL_PEN_TOOLS]
@@ -310,6 +355,7 @@ export function usePen(opts: {
   const penHistory = createPenHistory({ doc, onChange: opts.onChange, onLiveChange: opts.onLiveChange })
   const { commitHistory, initHistory, canUndo, canRedo } = penHistory
   function undo() {
+    if (trimPress) trimUp()   // a live Trim press settles before stepping back over it
     if (!penHistory.undo()) return
     clearSel()
     clearSegSel()
@@ -319,10 +365,12 @@ export function usePen(opts: {
     resetCurveState()
     cursor.value = null
     dimBuffer.value = ''
+    resetEditTools()
     status.value = 'undo'
     opts.onChange?.()
   }
   function redo() {
+    if (trimPress) trimUp()
     if (!penHistory.redo()) return
     clearSel()
     clearSegSel()
@@ -332,6 +380,7 @@ export function usePen(opts: {
     resetCurveState()
     cursor.value = null
     dimBuffer.value = ''
+    resetEditTools()
     status.value = 'redo'
     opts.onChange?.()
   }
@@ -351,9 +400,10 @@ export function usePen(opts: {
   // alive that could drift from the pen's own.
   function onKeydown(ev: KeyboardEvent, local?: { cancelGesture?: () => boolean }): boolean {
     const ctx: PenKeyContext = {
-      tool, pendingPath, dimBuffer, pendingOp, status, selection, view: opts.view,
+      tool, pendingPath, dimBuffer, pendingOp, status, selection, selectedSegments, view: opts.view,
       cancelGesture: opts.cancelGesture,
       cancelPendingOp, undo, redo, cancelPath, commitDimension, finishPath, removeLastAnchor, del, nudge,
+      selectTool, isToolAllowed, clearTrimGhosts,
     }
     const handled = handlePenKey(ev, ctx, local)
     if (handled) { ev.preventDefault(); ev.stopPropagation() }
@@ -391,11 +441,39 @@ export function usePen(opts: {
     apply(v.kind, n)
   }
 
+  // Deletes the selected entities, and any Option-selected segments through
+  // Trim's "remove a whole segment" (removeSegment). A segment is found again
+  // by its two anchors (in order) before each removal: removing one re-numbers
+  // the rest (an open path splits, a closed one opens and re-starts), so the
+  // stored indexes go stale — highest index first per path keeps an open
+  // path's earlier indexes valid, the anchor lookup covers the rest.
   function del() {
+    const segs = selectedSegments.value.map(s => {
+      const p = doc.value.entities.find(e => e.id === s.pathId) as any
+      if (!p || p.kind !== 'path') return null
+      return { pathId: s.pathId, segIndex: s.segIndex, from: p.anchors[s.segIndex] as EntityId, to: p.anchors[(s.segIndex + 1) % p.anchors.length] as EntityId }
+    }).filter((s): s is NonNullable<typeof s> => !!s)
+      .sort((a, b) => a.pathId === b.pathId ? b.segIndex - a.segIndex : a.pathId < b.pathId ? -1 : 1)
+    for (const s of segs) {
+      const at = findSegment(s.from, s.to)
+      if (at) removeSegment(doc.value, at.pathId, at.segIndex)
+    }
+    clearSegSel()
     for (const id of [...selection.value]) deleteEntity(doc.value, id)
     clearSel()
     runSolve()
     commitHistory()
+  }
+  function findSegment(from: EntityId, to: EntityId): { pathId: EntityId; segIndex: number } | null {
+    for (const e of doc.value.entities) {
+      if (e.kind !== 'path') continue
+      const n = e.anchors.length
+      const count = e.closed ? n : n - 1
+      for (let i = 0; i < count; i++) {
+        if (e.anchors[i] === from && e.anchors[(i + 1) % n] === to) return { pathId: e.id, segIndex: i }
+      }
+    }
+    return null
   }
 
   // --- editable dimension chips: arc radius chips (arcDims, over every arc
@@ -1124,6 +1202,179 @@ export function usePen(opts: {
     return snapped.snap ? { x: snapped.x, y: snapped.y } : null
   })
 
+  // --- Trim / Cut / Dissolve (lib/sketch/crossings.ts + trim.ts) ---
+  // Trim: hovering tints the piece of a curve between crossings under the
+  // pointer (trimHover); a press removes it, and while the button is held
+  // every move removes the piece under the pointer too. The whole
+  // press→release settles as ONE history entry (commit on release). Removed
+  // pieces stay drawn as faint ghosts (trimGhosts, drawing-space path data —
+  // overlay only, never stored) until the tool changes, Escape, or the
+  // session ends. Cut and Dissolve are click tools; their hover refs only
+  // show the target. All of these are refs, so the overlay's computeds follow.
+  const trimHover = ref<Span | null>(null)
+  const trimGhosts = ref<string[]>([])
+  // the point on a line or arc where a Cut click would add a point
+  const cutHover = ref<{ x: number; y: number } | null>(null)
+  // the path point a Dissolve click would remove; ok = the two pieces line up
+  const dissolveHover = ref<{ pathId: EntityId; anchorIndex: number; x: number; y: number; ok: boolean } | null>(null)
+  // a live Trim press: plain state (only the pen reads it). `dropped` counts
+  // the rules removed with the pieces so far, for the status line on release;
+  // `ends` are the ends of the pieces removed so far and `carrier` the curve
+  // the last one lay on (see trimMove).
+  let trimPress: { dropped: number; ends: Vec2[]; carrier: CurveGeom | null } | null = null
+
+  const snapTol = () => pxToUnits(SNAP_PX, opts.view.value)
+
+  function trimSpanAt(x: number, y: number): Span | null {
+    const hit = nearestCurve(doc.value, { x, y }, snapTol())
+    return hit ? spanAt(doc.value, hit.ref, hit.t) : null
+  }
+  // remove one piece, leaving its ghost; false when trim refused it
+  function trimRemove(span: Span): boolean {
+    const d = spanPathD(doc.value, span)
+    const carrier = curveGeom(doc.value, span.ref)
+    const res = removeSpan(doc.value, span)
+    if (!res.ok) return false
+    if (d) trimGhosts.value = [...trimGhosts.value, d]
+    if (trimPress) {
+      trimPress.dropped += res.droppedRules
+      trimPress.ends.push(span.start.point, span.end.point)
+      trimPress.carrier = carrier
+    }
+    opts.onLiveChange?.()
+    return true
+  }
+  function trimDown(x: number, y: number) {
+    if (tool.value !== 'trim') return
+    trimPress = { dropped: 0, ends: [], carrier: null }
+    const span = trimSpanAt(x, y)
+    if (span) trimRemove(span)
+    trimHover.value = trimSpanAt(x, y)
+  }
+  // Sweeping along a curve passes right over the crossings it was cut at, and
+  // there the cutting curve is just as close to the pointer. So while the
+  // pointer is still within reach of the end of a piece this press removed,
+  // only a piece on the same curve as the last one removed is taken; any other
+  // curve's piece waits until the pointer has moved clear of that crossing.
+  function sweepSkips(span: Span, x: number, y: number): boolean {
+    const press = trimPress
+    if (!press || !press.carrier) return false
+    const tol = snapTol()
+    if (!press.ends.some(e => Math.hypot(e.x - x, e.y - y) <= tol)) return false
+    const g = curveGeom(doc.value, span.ref)
+    return !g || !sameCarrier(press.carrier, g, pxToUnits(0.5, opts.view.value))
+  }
+  function trimMove(x: number, y: number) {
+    if (tool.value !== 'trim') return
+    if (trimPress) {
+      const span = trimSpanAt(x, y)
+      if (span && !sweepSkips(span, x, y)) trimRemove(span)
+    }
+    trimHover.value = trimSpanAt(x, y)
+  }
+  function trimUp(x?: number, y?: number) {
+    const press = trimPress
+    if (!press) return
+    trimPress = null
+    runSolve()
+    if (press.dropped > 0) status.value = `Removed ${press.dropped} ${press.dropped === 1 ? 'rule' : 'rules'} with that piece`
+    commitHistory()   // one entry for the whole press→release
+    trimHover.value = x != null && y != null && tool.value === 'trim' ? trimSpanAt(x, y) : null
+  }
+
+  function cutTarget(x: number, y: number) {
+    const hit = nearestCurve(doc.value, { x, y }, snapTol())
+    if (!hit || hit.ref.kind === 'circle' || !(hit.t > 1e-9 && hit.t < 1 - 1e-9)) return { hit, ok: false }
+    return { hit, ok: true }
+  }
+  function cutMove(x: number, y: number) {
+    if (tool.value !== 'cut') return
+    const { hit, ok } = cutTarget(x, y)
+    const g = ok && hit ? curveGeom(doc.value, hit.ref) : null
+    if (!g || !hit) { cutHover.value = null; return }
+    const a = g.a!, b = g.b!
+    if (g.kind === 'line') cutHover.value = { x: a.x + (b.x - a.x) * hit.t, y: a.y + (b.y - a.y) * hit.t }
+    else {
+      const ang = g.a0! + g.sweepAngle! * hit.t
+      cutHover.value = { x: g.c!.x + g.r! * Math.cos(ang), y: g.c!.y + g.r! * Math.sin(ang) }
+    }
+  }
+  function cutClick(x: number, y: number) {
+    if (tool.value !== 'cut') return
+    const { hit, ok } = cutTarget(x, y)
+    if (!hit || !ok) {
+      // a circle, or no line or arc in reach (Bézier curves aren't cut in v1)
+      if (!hit || hit.ref.kind === 'circle') status.value = "Cut works on a path's lines and arcs"
+      return
+    }
+    const id = cutAt(doc.value, hit.ref, hit.t)
+    if (!id) return
+    runSolve()
+    commitHistory()
+    const p = doc.value.entities.find(e => e.id === id) as any
+    if (p && p.kind === 'point') sparkle(p.x, p.y)
+    cutMove(x, y)
+  }
+
+  // the nearest interior path point within snap reach (an open path's two
+  // ends have only one piece each, so there is nothing to merge there)
+  function dissolveTarget(x: number, y: number) {
+    const tol = snapTol()
+    let best: { pathId: EntityId; anchorIndex: number; x: number; y: number; d: number } | null = null
+    for (const e of doc.value.entities) {
+      if (e.kind !== 'path') continue
+      const n = e.anchors.length
+      for (let k = 0; k < n; k++) {
+        if (!e.closed && (k === 0 || k === n - 1)) continue
+        if (e.closed && n < 3) continue
+        const p = doc.value.entities.find(q => q.id === e.anchors[k]) as any
+        if (!p || p.kind !== 'point') continue
+        const d = Math.hypot(p.x - x, p.y - y)
+        if (d <= tol && (!best || d < best.d)) best = { pathId: e.id, anchorIndex: k, x: p.x, y: p.y, d }
+      }
+    }
+    if (!best) return null
+    const ok = canDissolve(doc.value, best.pathId, best.anchorIndex, pxToUnits(DISSOLVE_PX, opts.view.value), DISSOLVE_DEG)
+    return { pathId: best.pathId, anchorIndex: best.anchorIndex, x: best.x, y: best.y, ok }
+  }
+  function dissolveMove(x: number, y: number) {
+    if (tool.value !== 'dissolve') return
+    dissolveHover.value = dissolveTarget(x, y)
+  }
+  function dissolveClick(x: number, y: number) {
+    if (tool.value !== 'dissolve') return
+    const t = dissolveTarget(x, y)
+    if (!t) return
+    if (!t.ok) { status.value = "These two sides don't line up, so they can't merge"; return }
+    const res = dissolveAt(doc.value, t.pathId, t.anchorIndex, pxToUnits(DISSOLVE_PX, opts.view.value), DISSOLVE_DEG)
+    if (!res.ok) { status.value = "These two sides don't line up, so they can't merge"; return }
+    runSolve()
+    commitHistory()
+    sparkle(t.x, t.y)
+    dissolveMove(x, y)
+  }
+
+  // the pointer left the drawing: nothing is under it any more
+  function clearToolHover() {
+    trimHover.value = null
+    cutHover.value = null
+    dissolveHover.value = null
+  }
+  // Escape in Trim: true when there were ghosts to clear
+  function clearTrimGhosts(): boolean {
+    if (!trimGhosts.value.length) return false
+    trimGhosts.value = []
+    return true
+  }
+  // every Trim/Cut/Dissolve transient back to rest (tool change, undo/redo,
+  // reset, session end). A live Trim press is settled first so its removals
+  // land as their own history step.
+  function resetEditTools() {
+    if (trimPress) trimUp()
+    clearToolHover()
+    trimGhosts.value = []
+  }
+
   // --- Repeat / Mirror / Flip: see penCopies.ts. doRepeat and repeatPrompt
   // (the inline-value-request entry points — requestValue, above) stay here
   // and call into it.
@@ -1347,6 +1598,7 @@ export function usePen(opts: {
     if (doc.value.entities.length !== before) commitHistory()
     cancelPendingOp()   // a half-armed Repeat/Mirror never survives a tool switch
     cancelValue()       // a pending value request (Distance/Radius/Copies) never survives a tool switch
+    resetEditTools()    // Trim's ghosts and every hover target go with the tool
     // switching to a draw tool must not carry a stale entity/segment
     // selection along with it — the verb bar, arrow-nudge, and Backspace-
     // delete all act on `selection`/`selectedSegments`, and a leftover pick
@@ -1367,6 +1619,7 @@ export function usePen(opts: {
   }
 
   function reset() {
+    resetEditTools()
     cleanupPendingPath()
     doc.value = { entities: [], constraints: [] }
     cancelValue()   // a pending value request never survives a reset
@@ -1386,6 +1639,7 @@ export function usePen(opts: {
   // every transient (non-doc) draw/selection state back to rest — shared by
   // finishSession and revert
   function clearTransient() {
+    resetEditTools()
     clearSel()
     clearSegSel()
     pending.value = null
@@ -1427,6 +1681,7 @@ export function usePen(opts: {
   // called by the overlay or toolbar — a host calls it on `cancel` if its
   // cancel means "discard".
   function revert(): void {
+    trimPress = null   // discarded with everything else — never settled onto the reverted drawing
     penHistory.revert()   // doc.value = cloneDoc(opening); initHistory()
     clearTransient()
     status.value = 'ready'
@@ -1451,6 +1706,8 @@ export function usePen(opts: {
   function endGesture(): void {
     setPathDrag(null)
     curveDrag.value = null
+    if (trimPress) trimUp()   // the pieces already removed settle as their step
+    clearToolHover()
   }
 
   // stop the sparkle loop — the host calls this when it unmounts
@@ -1478,6 +1735,9 @@ export function usePen(opts: {
     // drawing
     place, pathDown, pathMove, pathUp, finishPath, cancelPath, removeLastAnchor, getPathDrag, jointInfoForSegment,
     curveDown, curveMove, curveUp, getCurveDrag, getHeldHandles, handleIds, endGesture,
+    // trim / cut / dissolve
+    trimHover, trimGhosts, cutHover, dissolveHover,
+    trimDown, trimMove, trimUp, cutMove, cutClick, dissolveMove, dissolveClick, clearToolHover, clearTrimGhosts,
     // verbs
     runSolve, apply, applyWithValue, availableConstraints, orderRefs, del, nudge, fixSelected, makeConstruction, flip,
     repeatPrompt, armRepeat, doRepeat, applyRepeat, doMirror, applyMirror, cancelPendingOp,

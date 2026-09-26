@@ -36,6 +36,7 @@ export interface PenKeyContext {
   pendingOp: Ref<PendingOp>
   status: Ref<string>
   selection: Ref<EntityId[]>
+  selectedSegments: Ref<{ pathId: EntityId; segIndex: number }[]>
   view: Ref<ViewMatrix>
   // the host's own live pointer gesture (the dev page's pan) — Escape offers
   // it the chance to abort first (see the module-level comment on usePen's
@@ -50,7 +51,15 @@ export interface PenKeyContext {
   removeLastAnchor: () => void
   del: () => void
   nudge: (dx: number, dy: number) => void
+  selectTool: (t: PenTool) => void
+  isToolAllowed: (t: PenTool) => boolean
+  // Escape in Trim: clears the removed pieces' ghosts; true if there were any
+  clearTrimGhosts: () => boolean
 }
+
+// single-letter tool keys — only with no modifier, and only for a tool the
+// host offers (a key for a tool it doesn't offer is left untouched)
+const TOOL_KEYS: Record<string, PenTool> = { t: 'trim', c: 'cut', d: 'dissolve' }
 
 // Returns true when the key did something. usePen.ts's onKeydown reads that
 // for Escape / Enter: with nothing to cancel or finish, the key belongs to
@@ -83,12 +92,19 @@ export function handlePenKey(ev: KeyboardEvent, ctx: PenKeyContext, local?: { ca
   if (gestureActive && /^[0-9]$/.test(ev.key)) { ctx.dimBuffer.value += ev.key; return true }
   if (gestureActive && ev.key === '.' && !ctx.dimBuffer.value.includes('.')) { ctx.dimBuffer.value += '.'; return true }
 
+  if (!ev.shiftKey && !ev.altKey && ev.key.length === 1) {
+    const t = TOOL_KEYS[ev.key.toLowerCase()]
+    if (t && ctx.isToolAllowed(t)) { ctx.selectTool(t); return true }
+  }
+
   if (ev.key === 'Escape') {
     if (ctx.pendingOp.value) { ctx.cancelPendingOp(); ctx.status.value = 'cancelled'; return true }
     // clearing a live dimension buffer takes priority over everything else —
     // a first Escape just clears the typed value, a second (now-empty-buffer)
     // Escape falls through to the normal marquee/pan/path-cancel handling.
     if (ctx.dimBuffer.value) { ctx.dimBuffer.value = ''; return true }
+    // Trim: a first Escape clears the removed pieces' ghosts
+    if (ctx.tool.value === 'trim' && ctx.clearTrimGhosts()) return true
     // a live marquee drag or pan takes priority over path-cancel — abort
     // just that gesture (clear its state, no selection change, no doc
     // mutation) rather than falling through to cancelPath's path cleanup.
@@ -111,7 +127,7 @@ export function handlePenKey(ev: KeyboardEvent, ctx: PenKeyContext, local?: { ca
     // preventDefault only when the key acts (onKeydown does it): with
     // nothing to delete, Delete/Backspace belong to the host
     if (ctx.pendingPath.value) { ctx.removeLastAnchor(); return true }
-    if (ctx.selection.value.length) { ctx.del(); return true }
+    if (ctx.selection.value.length || ctx.selectedSegments.value.length) { ctx.del(); return true }
     return false
   }
   if (ev.key === 'ArrowLeft' || ev.key === 'ArrowRight' || ev.key === 'ArrowUp' || ev.key === 'ArrowDown') {

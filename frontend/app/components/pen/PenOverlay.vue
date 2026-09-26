@@ -48,7 +48,7 @@ import { addPoint } from '~/lib/sketch/edit'
 import { sketchPathData, entityPath } from '~/lib/sketch/sketchPath'
 import { constraintMarks, arcDimensionMarks } from '~/lib/sketch/annotate'
 import { applyView, invertView, viewToSvg, type ViewMatrix } from '~/lib/sketch/view'
-import { bowArc, SPARKLE_LIFETIME_MS, isTypingInField, type Pen } from '~/composables/pen/usePen'
+import { bowArc, spanPathD, SPARKLE_LIFETIME_MS, isTypingInField, type Pen } from '~/composables/pen/usePen'
 
 const props = withDefaults(defineProps<{
   pen: Pen
@@ -88,6 +88,8 @@ const {
   curveDown, curveMove, curveUp, getCurveDrag, getHeldHandles, handleIds,
   runSolve, applyRepeat, applyMirror, cancelPendingOp,
   onArcDimClick, onConstraintMarkClick, commitHistory, finishSession, endGesture,
+  trimHover, trimGhosts, cutHover, dissolveHover,
+  trimDown, trimMove, trimUp, cutMove, cutClick, dissolveMove, dissolveClick, clearToolHover,
 } = props.pen
 
 const svgEl = ref<SVGSVGElement | null>(null)
@@ -422,6 +424,22 @@ const cursorGlow = computed(() => {
   return hoverSnap.value ? toScreen(hoverSnap.value) : null
 })
 
+// Trim: the piece under the pointer, in drawing space (drawn thick and tinted
+// — the "will be removed" look), plus a small screen-space ring at each end
+// where a crossing cuts it. Cut: the point a click would add. Dissolve: the
+// point a click would remove (green when its two pieces line up).
+const trimHoverD = computed(() => (tool.value === 'trim' && trimHover.value ? spanPathD(doc.value, trimHover.value) : ''))
+const trimHoverRings = computed(() => {
+  const s = tool.value === 'trim' ? trimHover.value : null
+  if (!s) return []
+  return [s.start, s.end].filter(e => e.cutter).map(e => toScreen(e.point))
+})
+const cutHoverScreen = computed(() => (tool.value === 'cut' && cutHover.value ? toScreen(cutHover.value) : null))
+const dissolveHoverScreen = computed(() => {
+  const h = tool.value === 'dissolve' ? dissolveHover.value : null
+  return h ? { ...toScreen(h), ok: h.ok } : null
+})
+
 // screen-space sparkles: a small burst of short rays radiating from the
 // point, ease-out pop + linear fade to 0 by SPARKLE_LIFETIME_MS.
 const SPARKLE_RAYS = 6
@@ -579,6 +597,9 @@ function onPointerDownSvg(ev: PointerEvent) {
   }
   const w = drawingXY(ev)
   if (!w) return
+  if (tool.value === 'trim') { trimDown(w.x, w.y); return }
+  if (tool.value === 'cut') { cutClick(w.x, w.y); return }
+  if (tool.value === 'dissolve') { dissolveClick(w.x, w.y); return }
   if (tool.value === 'path') { pathDown(w.x, w.y, ev.shiftKey); return }
   if (tool.value === 'curve') { curveDown(w.x, w.y); return }
   const { x, y } = w
@@ -608,6 +629,14 @@ function onPointerMove(ev: PointerEvent) {
     if (w) curveMove(w.x, w.y)
     return
   }
+  if (tool.value === 'trim' || tool.value === 'cut' || tool.value === 'dissolve') {
+    const w = drawingXY(ev)
+    if (!w) { clearToolHover(); return }
+    if (tool.value === 'trim') trimMove(w.x, w.y)
+    else if (tool.value === 'cut') cutMove(w.x, w.y)
+    else dissolveMove(w.x, w.y)
+    return
+  }
   if (tool.value === 'point' || tool.value === 'line' || tool.value === 'circle') {
     // hover only — feeds the pen's hoverSnap (the cursor glow)
     const w = drawingXY(ev)
@@ -631,6 +660,12 @@ function onPointerMove(ev: PointerEvent) {
 }
 function onPointerUp(ev: PointerEvent) {
   if (!props.active) return
+  if (tool.value === 'trim') {
+    const w = drawingXY(ev)
+    if (w) trimUp(w.x, w.y)
+    else trimUp()
+    return
+  }
   if (tool.value === 'path' && getPathDrag()) {
     const w = drawingXY(ev)
     if (w) pathUp(w.x, w.y)
@@ -665,6 +700,7 @@ function onPointerLeave(ev: PointerEvent) {
   if (!props.active) return
   onPointerUp(ev)
   penCursor.value = null
+  clearToolHover()
 }
 
 // badge / chip clicks, gated like every other input
@@ -800,6 +836,18 @@ defineExpose({
       <path :d="previewD" fill="none" stroke="#6366f1" stroke-width="1.5" stroke-dasharray="5 3"
             vector-effect="non-scaling-stroke" data-path-preview />
     </g>
+    <!-- Trim: removed pieces as faint dotted ghosts, and the piece under the
+         pointer drawn thick and tinted — drawing space, like the outline -->
+    <g v-if="trimGhosts.length && tool === 'trim'" :transform="svgTransform" pointer-events="none">
+      <path v-for="(d, i) in trimGhosts" :key="'ghost-' + i" :d="d" fill="none" stroke="#3730a3" stroke-width="1"
+            stroke-dasharray="1 3" opacity="0.35" vector-effect="non-scaling-stroke" data-trim-ghost />
+    </g>
+    <g v-if="trimHoverD" :transform="svgTransform" pointer-events="none" data-trim-hover>
+      <path :d="trimHoverD" fill="none" stroke="#ef4444" stroke-opacity="0.55" stroke-width="4" stroke-linecap="round"
+            vector-effect="non-scaling-stroke" />
+    </g>
+    <circle v-for="(r, i) in trimHoverRings" :key="'trimring-' + i" :cx="r.x" :cy="r.y" r="4" fill="none"
+            stroke="#ef4444" stroke-width="1.5" pointer-events="none" data-trim-ring />
     <!-- bowing: the arc's full circle, faint, in drawing space -->
     <g v-if="pathBowChip" :transform="svgTransform" pointer-events="none" data-bow-ghost>
       <circle :cx="pathBowChip.center.x" :cy="pathBowChip.center.y" :r="pathBowChip.r" fill="none"
@@ -827,6 +875,11 @@ defineExpose({
             @pointerdown="(ev) => onPointerDownPoint(p.id, ev)" @pointerup="(ev) => onPointerUpPoint(p.id, ev)"
             :pointer-events="active ? (handle ? 'all' : undefined) : 'none'"
             :data-point="p.id" :data-construction="p.construction ? '' : null" :data-handle="handle ? '' : null" />
+    <circle v-if="cutHoverScreen" :cx="cutHoverScreen.x" :cy="cutHoverScreen.y" r="5" fill="#fff" stroke="#ef4444"
+            stroke-width="1.5" pointer-events="none" data-cut-hover />
+    <circle v-if="dissolveHoverScreen" :cx="dissolveHoverScreen.x" :cy="dissolveHoverScreen.y" r="9" fill="none"
+            :stroke="dissolveHoverScreen.ok ? '#16a34a' : '#9ca3af'" stroke-width="2" pointer-events="none"
+            :data-dissolve-hover="dissolveHoverScreen.ok ? 'ok' : 'no'" />
     <template v-if="showLabels">
       <g v-for="{ m, s } in visibleMarks" :key="m.id" class="constraint-badge" :pointer-events="active ? 'auto' : 'none'" style="cursor: pointer"
          :data-constraint="m.id" :data-constraint-kind="m.kind"

@@ -15,7 +15,7 @@ import StudioButton from '~/components/vue-canvas/studio/StudioButton.vue'
 import PenValueRow from '~/components/pen/PenValueRow.vue'
 import {
   MousePointer2, Spline, PenTool as PenNib, Minus, Circle, Dot,
-  CircleDashed, Tag, Undo2, Redo2,
+  CircleDashed, Tag, Undo2, Redo2, Scissors, Slice, Bandage,
 } from 'lucide-vue-next'
 
 const props = defineProps<{ pen: Pen }>()
@@ -40,8 +40,8 @@ function done() {
   emit('commit')
 }
 
-// Tool row: Select, Pen (arcs), Curve (Bézier), Line, Circle, Point. Pen and
-// Curve add to the same path. Order and tooltip copy match the spec's
+// Tool row: Select, Pen (arcs), Curve (Bézier), Line, Circle, Point, then the
+// editing tools Trim, Cut and Dissolve. Pen and Curve add to the same path. Order and tooltip copy match the spec's
 // approved layout (sentence case, "Name — what it does").
 const ALL_TOOLS: { id: PenTool; icon: Component; label: string }[] = [
   { id: 'select', icon: MousePointer2, label: 'Select — click a shape to select it, drag a point to move it' },
@@ -50,6 +50,9 @@ const ALL_TOOLS: { id: PenTool; icon: Component; label: string }[] = [
   { id: 'line', icon: Minus, label: 'Line — click two points to draw a line' },
   { id: 'circle', icon: Circle, label: 'Circle — click the centre, then click again to set the size' },
   { id: 'point', icon: Dot, label: 'Point — click to place a point' },
+  { id: 'trim', icon: Scissors, label: 'Trim — remove a piece between crossings' },
+  { id: 'cut', icon: Slice, label: 'Cut — add a point on a line or arc' },
+  { id: 'dissolve', icon: Bandage, label: 'Dissolve — merge two pieces that line up' },
 ]
 // only the tools this host offers (PenOptions.tools, resolved by usePen —
 // always includes Select, and openOnly already drops Circle there)
@@ -64,6 +67,9 @@ const TOOL_HINTS: Record<PenTool, string> = {
   line: 'Click two points to draw a line',
   circle: 'Click the centre, then click again to set the size',
   point: 'Click to place a point',
+  trim: 'Click a piece between crossings to remove it, or sweep across several',
+  cut: 'Click a line or arc to add a point there',
+  dissolve: 'Click a point between two pieces that line up to merge them',
 }
 
 const hasEntitySelection = computed(() => selection.value.length > 0)
@@ -88,6 +94,11 @@ const isSelectIdle = computed(() => tool.value === 'select' && !hasAnySelection.
         <button class="tbtn" data-verb="flip-v" @click="flip('v')">Flip vertical</button>
         <button class="tbtn" data-verb="construction" @click="makeConstruction()">Make guide</button>
         <span class="sep" />
+        <button class="tbtn danger" data-act="delete" @click="del()">Delete</button>
+      </template>
+      <template v-else>
+        <!-- segments only (Option-click): they can be deleted too -->
+        <span v-if="rules.length" class="sep" />
         <button class="tbtn danger" data-act="delete" @click="del()">Delete</button>
       </template>
     </div>

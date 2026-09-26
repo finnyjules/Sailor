@@ -66,7 +66,7 @@ export function resizedFrame(frame: PreviewFrame, cssW: number, cssH: number): P
 }
 
 /** The tools a Drawn shape offers (Select is always added by the pen). */
-export const SHAPE_PEN_TOOLS: PenTool[] = ['select', 'path', 'curve', 'line', 'circle', 'point']
+export const SHAPE_PEN_TOOLS: PenTool[] = ['select', 'path', 'curve', 'line', 'circle', 'point', 'trim', 'cut', 'dissolve']
 
 /** True when the drawing's visible outline has a closed path or a circle. */
 export function hasClosedOutline(doc: SketchDoc): boolean {
