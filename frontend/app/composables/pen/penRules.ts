@@ -53,6 +53,9 @@ export function availableConstraints(doc: SketchDoc, selection: EntityId[], segm
     const s = segments[0]!
     const path = doc.entities.find(e => e.id === s.pathId) as any
     const seg = path?.kind === 'path' ? path.segments[s.segIndex] : null
+    // the point is one of this piece's own ends or its centre: pinning it
+    // onto (or to the middle of) itself would collapse the piece
+    if (ownsSegment(doc, ids[0]!, s)) return out
     if (seg?.kind === 'line') out.push({ kind: 'collinear', label: 'On curve', tip: 'onCurve' }, { kind: 'midpoint', label: 'Midpoint' })
     else if (seg?.kind === 'arc') out.push({ kind: 'equalDist', label: 'On curve', tip: 'onCurve' })
     return out
@@ -166,6 +169,7 @@ export function segmentConstraintRefs(doc: SketchDoc, kind: ConstraintKind, segs
 // (centre C, start A); Midpoint is midpoint [p, A, B] on a line segment.
 // null for any other kind/segment pairing, or a segment that no longer resolves.
 export function pointSegmentRefs(doc: SketchDoc, kind: ConstraintKind, p: EntityId, seg: SegRef): EntityId[] | null {
+  if (ownsSegment(doc, p, seg)) return null
   const path = doc.entities.find(e => e.id === seg.pathId) as any
   const s = path?.kind === 'path' ? path.segments[seg.segIndex] : null
   const ends = segmentAnchorPair(doc, seg.pathId, seg.segIndex)
@@ -175,6 +179,15 @@ export function pointSegmentRefs(doc: SketchDoc, kind: ConstraintKind, p: Entity
   if (s.kind === 'line' && kind === 'midpoint') return [p, a, b]
   if (s.kind === 'arc' && kind === 'equalDist') return [s.center, p, s.center, a]
   return null
+}
+
+// `p` is one of the segment's two anchors, or its arc centre
+function ownsSegment(doc: SketchDoc, p: EntityId, seg: SegRef): boolean {
+  const ends = segmentAnchorPair(doc, seg.pathId, seg.segIndex)
+  if (ends && ends.includes(p)) return true
+  const path = doc.entities.find(e => e.id === seg.pathId) as any
+  const s = path?.kind === 'path' ? path.segments[seg.segIndex] : null
+  return s?.kind === 'arc' && s.center === p
 }
 
 // refs order per kind (matches residuals.ts contract)

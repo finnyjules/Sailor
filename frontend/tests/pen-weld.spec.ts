@@ -107,9 +107,14 @@ for (const key of ['Meta', 'Control'] as const) {
     const to = await screenOf(page, 2.15, 2.1)
     await page.mouse.move(from.x, from.y)
     await page.mouse.down()
-    await page.keyboard.down(key)
+    // the same drag, first without the key: the start offers the join
     await page.mouse.move(to.x, to.y, { steps: 12 })
-    await expect(page.locator('[data-snap-preview]')).toHaveCount(0)
+    const chip = page.locator('[data-snap-preview]')
+    await expect(chip).toHaveAttribute('data-snap-kind', 'point')
+    // with the key held the next move shows no join, and release makes none
+    await page.keyboard.down(key)
+    await page.mouse.move(to.x + 1, to.y, { steps: 2 })
+    await expect(chip).toHaveCount(0)
     await page.mouse.up()
     await page.keyboard.up(key)
 
@@ -121,7 +126,7 @@ for (const key of ['Meta', 'Control'] as const) {
       const p = (window as any).__sketchDraw.doc.entities.find((e: any) => e.id === id)
       return { x: p.x, y: p.y }
     }, built.anchors[3]!)
-    expect(end.x).toBeCloseTo(2.15, 1)
+    expect(end.x).toBeCloseTo(2.15 + 1 / 34, 1)
     expect(end.y).toBeCloseTo(2.1, 1)
   })
 }
@@ -165,4 +170,42 @@ test('a point and an Option-clicked arc piece offer On curve, which pins the poi
     return d.constraints.find((c: any) => c.kind === 'equalDist' && c.refs[1] === ids.p)?.refs ?? null
   }, ids)
   expect(refs).toEqual([ids.centre, ids.p, ids.centre, ids.start])
+})
+
+test('dropping the end of a near-full arc onto its start closes it into a circle', async ({ page }) => {
+  await open(page)
+  const ids = await page.evaluate(() => {
+    const D = (window as any).__sketchDraw
+    D.reset()
+    D.setTool('path'); D.setNextSegment('line')
+    D.place(4, 6)
+    // press at (6,6) and drag up through (5,9): the piece bows into the long
+    // way round, a near-full arc
+    D.pathDown(6, 6); D.pathMove(5.6, 8); D.pathMove(5, 9); D.pathUp(5, 9)
+    D.finishPath(false)
+    D.setTool('select')
+    const path = D.doc.entities.find((e: any) => e.kind === 'path')
+    return { kinds: path.segments.map((s: any) => s.kind), start: path.anchors[0], end: path.anchors[1], centre: path.segments[0].center }
+  })
+  expect(ids.kinds).toEqual(['arc'])
+  const from = await screenOf(page, 6, 6)
+  const to = await screenOf(page, 4.1, 6.05)
+  await page.mouse.move(from.x, from.y)
+  await page.mouse.down()
+  await page.mouse.move(to.x, to.y, { steps: 12 })
+  await expect(page.locator('[data-snap-preview]')).toHaveAttribute('data-snap-kind', 'point')
+  await page.mouse.up()
+  const res = await page.evaluate((ids) => {
+    const d = (window as any).__sketchDraw.doc
+    const circle = d.entities.find((e: any) => e.kind === 'circle')
+    return {
+      paths: d.entities.filter((e: any) => e.kind === 'path').length,
+      centre: circle?.center ?? null,
+      pin: d.constraints.find((c: any) => c.kind === 'pointOnCircle')?.refs ?? null,
+      circleId: circle?.id ?? null,
+    }
+  }, ids)
+  expect(res.paths).toBe(0)
+  expect(res.centre).toBe(ids.centre)
+  expect(res.pin).toEqual([ids.start, res.circleId])
 })

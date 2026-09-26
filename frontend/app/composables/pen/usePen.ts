@@ -59,7 +59,7 @@ import { createPenHistory } from './penHistory'
 import { handlePenKey, type PenKeyContext, NUDGE_PX, NUDGE_PX_SHIFT, screenDeltaToDrawing } from './penKeys'
 import { createPenCopies, type PendingOp } from './penCopies'
 import { nearestCurve, spanAt, curveGeom, type Span, type CurveGeom } from '~/lib/sketch/crossings'
-import { removeSpan, removeSegment, cutAt, canDissolve, dissolveAt, mergePoints } from '~/lib/sketch/trim'
+import { removeSpan, removeSegment, cutAt, canDissolve, dissolveAt, mergePoints, sameKey } from '~/lib/sketch/trim'
 
 // NUDGE_PX / NUDGE_PX_SHIFT / screenDeltaToDrawing now live in penKeys.ts
 // (they exist only for the arrow-key nudge in the key handler); re-exported
@@ -276,15 +276,15 @@ export function usePen(opts: {
   // same as the old always-toggle behavior. Entity selection and segment
   // selection (below) are mutually exclusive, with ONE exception: one point
   // plus one Option-clicked segment stay selected together (the "On curve" /
-  // "Midpoint" pairing, penRules availableConstraints). Any other mix clears
+  // "Midpoint" pairing, penRules availableConstraints) when the second pick
+  // is a Shift- or Option-click (additive here; pickSegment is always an
+  // Option-click). A plain click replaces everything; any other mix clears
   // the segment selection.
   function pick(id: EntityId, additive = false) {
-    if (!additive) selection.value = [id]
-    else {
-      const i = selection.value.indexOf(id)
-      if (i >= 0) selection.value.splice(i, 1)
-      else selection.value.push(id)
-    }
+    if (!additive) { clearSegSel(); selection.value = [id]; return }
+    const i = selection.value.indexOf(id)
+    if (i >= 0) selection.value.splice(i, 1)
+    else selection.value.push(id)
     const sel = selection.value
     const pairs = selectedSegments.value.length === 1 && (sel.length === 0 || (sel.length === 1 && isPointId(sel[0]!)))
     if (!pairs) clearSegSel()
@@ -450,8 +450,11 @@ export function usePen(opts: {
     // ever read back from older drawings)
     if (kind === 'coincident' && selection.value.length === 2 && selection.value.every(isPointId)) {
       const [keep, gone] = selection.value as [EntityId, EntityId]
+      const refusal = joinRefusal(gone, keep)
+      if (refusal) { status.value = refusal; return }
       clearSel()
       if (!mergePoints(doc.value, gone, keep)) { status.value = BOTH_FIXED; return }
+      pruneSelections()
       runSolve()
       const k = doc.value.entities.find(e => e.id === keep)
       if (k?.kind === 'point') sparkle(k.x, k.y)
@@ -1261,59 +1264,110 @@ export function usePen(opts: {
   // point sits on the snapped spot while it is in reach. dropPoint settles
   // the whole drag — the join included — as ONE history entry. `noJoin`
   // (⌘ / Ctrl held) moves without snapping or joining.
-  // Never a target: the dragged point, any Bézier handle, the other end of a
-  // piece it belongs to (joining those would collapse that piece), and the
-  // pieces built on it (skipCurvesUsing).
+  // Never a target: the dragged point, any Bézier handle (and a handle is
+  // never dragged onto anything), a point it can't join without collapsing a
+  // piece (collapseNeighbours), and the pieces built on it (skipCurvesUsing).
   const dropSnap = shallowRef<PointSnap | null>(null)
-  function weldExclusions(id: EntityId): EntityId[] {
-    const out = new Set<EntityId>([id, ...handleIds()])
+  let dragPointer: Vec2 | null = null   // the raw pointer, while dropSnap pulls the point off it
+  // points `id` can't be joined with without collapsing a piece: the other end
+  // of a line or path segment it is on, an arc's centre and its ends. One
+  // exception: the two ends of an open path of ONE arc may meet — the arc
+  // closes into a circle (mergePoints). In a text guide (openOnly) the other
+  // end of its own open path is off too: a guide never closes.
+  function collapseNeighbours(id: EntityId): Set<EntityId> {
+    const out = new Set<EntityId>()
     for (const e of doc.value.entities) {
       if (e.kind === 'line') {
         if (e.p1 === id) out.add(e.p2)
         if (e.p2 === id) out.add(e.p1)
       } else if (e.kind === 'path') {
         const n = e.anchors.length
+        const oneArc = !e.closed && n === 2 && e.segments.length === 1 && e.segments[0]!.kind === 'arc'
         e.segments.forEach((seg, i) => {
-          if (seg.kind === 'cubic') { if (seg.h1) out.add(seg.h1); if (seg.h2) out.add(seg.h2) }
           const a = e.anchors[i], b = e.anchors[(i + 1) % n]
           if (!a || !b) return
-          if (a === id) out.add(b)
-          if (b === id) out.add(a)
+          if (!oneArc || openOnly) {
+            if (a === id) out.add(b)
+            if (b === id) out.add(a)
+          }
           if (seg.kind === 'arc') {
             if (a === id || b === id) out.add(seg.center)
             if (seg.center === id) { out.add(a); out.add(b) }
           }
         })
+        if (openOnly && !e.closed && n >= 2) {
+          const first = e.anchors[0]!, last = e.anchors[n - 1]!
+          if (first === id) out.add(last)
+          if (last === id) out.add(first)
+        }
       }
     }
-    return [...out]
+    return out
+  }
+  // why `gone` can't be merged into `keep` (null when it can) — shared by the
+  // drag's targets and the Coincident verb
+  function joinRefusal(gone: EntityId, keep: EntityId): string | null {
+    const handles = handleIds()
+    if (handles.has(gone) || handles.has(keep)) return 'A curve handle can’t be joined to a point'
+    if (openOnly && collapseNeighbours(gone).has(keep) && isGuideEnds(gone, keep)) return 'A text guide stays open'
+    if (collapseNeighbours(gone).has(keep)) return 'That would collapse the piece'
+    return null
+  }
+  function isGuideEnds(a: EntityId, b: EntityId): boolean {
+    return doc.value.entities.some(e => e.kind === 'path' && !e.closed && e.anchors.length >= 2
+      && ((e.anchors[0] === a && e.anchors[e.anchors.length - 1] === b) || (e.anchors[0] === b && e.anchors[e.anchors.length - 1] === a)))
+  }
+  // drop selection entries a merge left pointing at nothing (a path that
+  // became a circle, a segment index past a shortened path's end)
+  function pruneSelections(): void {
+    const ents = new Map(doc.value.entities.map(e => [e.id, e]))
+    selection.value = selection.value.filter(id => ents.has(id))
+    selectedSegments.value = selectedSegments.value.filter(sg => {
+      const p = ents.get(sg.pathId)
+      if (!p || p.kind !== 'path') return false
+      return sg.segIndex < (p.closed ? p.anchors.length : p.anchors.length - 1)
+    })
   }
   function dragPoint(id: EntityId, x: number, y: number, noJoin = false): void {
-    const snap = noJoin ? null : snapPoint(doc.value, x, y, {
-      exclude: weldExclusions(id), skipCurvesUsing: [id], tol: pxToUnits(SNAP_PX, opts.view.value),
+    dragPointer = { x, y }
+    const handles = handleIds()
+    const snap = noJoin || handles.has(id) ? null : snapPoint(doc.value, x, y, {
+      exclude: [id, ...handles, ...collapseNeighbours(id)], skipCurvesUsing: [id], tol: pxToUnits(SNAP_PX, opts.view.value),
     }).snap
     dropSnap.value = snap
     runSolve({ point: id, x: snap ? snap.x : x, y: snap ? snap.y : y })
   }
   function dropPoint(id: EntityId, noJoin = false): void {
-    const snap = noJoin ? null : dropSnap.value
+    const pulled = dropSnap.value
+    const snap = noJoin ? null : pulled
+    const pointer = dragPointer
     dropSnap.value = null
+    dragPointer = null
+    let joined = false
     if (snap?.kind === 'coincident') {
       if (mergePoints(doc.value, id, snap.targetId)) {
+        joined = true
+        pruneSelections()
         runSolve()
         const t = doc.value.entities.find(e => e.id === snap.targetId)
         if (t?.kind === 'point') sparkle(t.x, t.y)
-      } else status.value = BOTH_FIXED
+      }
     } else if (snap) {
       const p = doc.value.entities.find(e => e.id === id)
       const rule = snapRule(snap, id)
       if (p?.kind === 'point' && rule) {
+        joined = true
         p.x = snap.x; p.y = snap.y
-        addConstraint(doc.value, rule.kind, rule.refs)
+        // already pinned there by the very same rule: don't add a second copy
+        const key = sameKey({ id: '', kind: rule.kind, refs: rule.refs })
+        if (!doc.value.constraints.some(c => sameKey(c) === key)) addConstraint(doc.value, rule.kind, rule.refs)
         runSolve()
         sparkle(p.x, p.y)
       }
     }
+    // no join: the point goes back under the pointer, off the snapped spot
+    if (!joined && pulled && pointer && doc.value.entities.some(e => e.id === id)) runSolve({ point: id, x: pointer.x, y: pointer.y })
+    if (!joined && snap?.kind === 'coincident') status.value = BOTH_FIXED
     commitHistory()
   }
   function cancelPointDrop(): void { dropSnap.value = null }

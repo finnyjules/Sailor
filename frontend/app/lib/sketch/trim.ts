@@ -6,7 +6,7 @@ import type { Vec2 } from './geom'
 import { dist, sub, cross, dot, distPointToLine } from './geom'
 import type { CurveRef, Span, SpanEnd } from './crossings'
 import { curveGeom, pointAt } from './crossings'
-import { addPoint, addLine, addConstraint, deleteEntity, isPointReferenced } from './edit'
+import { addPoint, addLine, addCircle, addConstraint, deleteEntity, isPointReferenced } from './edit'
 import { freshId } from './ids'
 
 const TAU = Math.PI * 2
@@ -120,7 +120,8 @@ function drawingTol(doc: SketchDoc): number {
   return 1e-6 * Math.max(size, 1)
 }
 
-const sameKey = (c: SketchConstraint) => `${c.kind}|${c.refs.join(',')}|${c.value ?? ''}`
+/** Two rules with the same key are the same rule (kind, refs in order, value). */
+export const sameKey = (c: SketchConstraint) => `${c.kind}|${c.refs.join(',')}|${c.value ?? ''}`
 
 // ── point-pair rules ─────────────────────────────────────────────────────────
 // The pen stores segment rules as point pairs: horizontal/vertical [a,b],
@@ -764,6 +765,22 @@ export function mergePoints(doc: SketchDoc, from: EntityId, into: EntityId): boo
 
 // drop segments whose two anchors are now the same point; an open path whose ends met closes
 function collapsePath(doc: SketchDoc, path: PathEntity, loose: EntityId[]): void {
+  // an open path of ONE arc whose two ends became one point X: the arc has
+  // closed on itself — it becomes a circle on the same centre, with X kept on
+  // it (the arc's own equalDist invariant went trivial and is dropped)
+  const only = path.segments[0]
+  if (!path.closed && path.anchors.length === 2 && path.anchors[0] === path.anchors[1]
+      && path.segments.length === 1 && only?.kind === 'arc') {
+    const x = path.anchors[0]!
+    const px = getPoint(doc, x), pc = getPoint(doc, only.center)
+    if (px && pc) {
+      removeArcInvariant(doc, only.center, x, x)
+      const circle = addCircle(doc, only.center, dist(px, pc), path.construction ? { construction: true } : {})
+      addConstraint(doc, 'pointOnCircle', [x, circle])
+      dropPathEntity(doc, path)
+      return
+    }
+  }
   if (!path.closed && path.anchors.length > 2 && path.anchors[0] === path.anchors[path.anchors.length - 1]) {
     path.anchors.pop()
     path.closed = true

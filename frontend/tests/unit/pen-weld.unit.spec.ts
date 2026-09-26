@@ -10,12 +10,13 @@ import type { SketchDoc, EntityId } from '~/lib/sketch/model'
 import { addPoint, addLine, addPath } from '~/lib/sketch/edit'
 import { curveGeom, pointAt } from '~/lib/sketch/crossings'
 import { usePen } from '~/composables/pen/usePen'
+import { mergePoints } from '~/lib/sketch/trim'
 
 const DEV = { a: 34, b: 0, c: 0, d: -34, e: 40, f: 400 }   // snap radius 0.6 units
-function mk(build: (d: SketchDoc) => void) {
+function mk(build: (d: SketchDoc) => void, openOnly = false) {
   const doc = ref<SketchDoc>({ entities: [], constraints: [] })
   build(doc.value)
-  const pen = usePen({ doc, view: ref(DEV) })
+  const pen = usePen({ doc, view: ref(DEV), options: openOnly ? { openOnly } : undefined })
   return { doc, pen }
 }
 const P = (d: SketchDoc, id: EntityId) => d.entities.find(e => e.id === id) as any
@@ -237,7 +238,7 @@ describe('rules row: Coincident merges, point + segment rules', () => {
       p = addPoint(d, 3, 4)
     })
     pen.pickSegment(path, 0)
-    pen.pick(p)
+    pen.pick(p, true)   // a Shift-click keeps the segment
     expect(pen.selectedSegments.value).toHaveLength(1)
     const opts = pen.availableConstraints()
     expect(opts.map(r => r.label)).toEqual(['On curve', 'Midpoint'])
@@ -279,5 +280,192 @@ describe('rules row: Coincident merges, point + segment rules', () => {
     pen.pick(b, true)                 // point + segment, then a second point: segment goes
     expect(pen.selectedSegments.value).toEqual([])
     expect(pen.selection.value).toEqual([a, b])
+  })
+})
+
+describe('fix round 1', () => {
+  it('a Bézier handle dragged onto its anchor never joins it', () => {
+    let a = '', h1 = ''
+    const { doc, pen } = mk(d => {
+      a = addPoint(d, 0, 0); const b = addPoint(d, 10, 0)
+      h1 = addPoint(d, 3, 3, { construction: true }); const h2 = addPoint(d, 7, 3, { construction: true })
+      addPath(d, [a, b], [{ kind: 'cubic', h1, h2 }])
+    })
+    dragTo(pen, doc.value, h1, 0.1, 0.1)
+    expect(pen.hoverSnap.value).toBeNull()
+    pen.dropPoint(h1)
+    expect(P(doc.value, h1)).toBeTruthy()
+    expect((paths(doc.value)[0].segments[0] as any).h1).toBe(h1)
+  })
+
+  it('Coincident refuses to merge a handle', () => {
+    let a = '', h1 = ''
+    const { doc, pen } = mk(d => {
+      a = addPoint(d, 0, 0); const b = addPoint(d, 10, 0)
+      h1 = addPoint(d, 3, 3, { construction: true }); const h2 = addPoint(d, 7, 3, { construction: true })
+      addPath(d, [a, b], [{ kind: 'cubic', h1, h2 }])
+    })
+    pen.pick(a); pen.pick(h1, true)
+    pen.apply('coincident')
+    expect(P(doc.value, h1)).toBeTruthy()
+    expect(pen.canUndo()).toBe(false)
+  })
+
+  it('a text guide (openOnly) end dropped onto its start does not close it', () => {
+    let e = ''
+    const { doc, pen } = mk(d => {
+      const a = addPoint(d, 0, 0); const b = addPoint(d, 6, 0); const c = addPoint(d, 6, 6); e = addPoint(d, 1, 5)
+      addPath(d, [a, b, c, e], [{ kind: 'line' }, { kind: 'line' }, { kind: 'line' }])
+    }, true)
+    dragTo(pen, doc.value, e, 0.1, 0.1)
+    expect(pen.hoverSnap.value?.kind).not.toBe('point')   // its first piece may still take it, never its start
+    pen.dropPoint(e)
+    expect(paths(doc.value)[0].closed).toBe(false)
+    expect(P(doc.value, e)).toBeTruthy()
+  })
+
+  it('Coincident on a text guide’s two ends refuses and says why', () => {
+    let a = '', e = ''
+    const { doc, pen } = mk(d => {
+      a = addPoint(d, 0, 0); const b = addPoint(d, 6, 0); const c = addPoint(d, 6, 6); e = addPoint(d, 1, 5)
+      addPath(d, [a, b, c, e], [{ kind: 'line' }, { kind: 'line' }, { kind: 'line' }])
+    }, true)
+    pen.pick(a); pen.pick(e, true)
+    pen.apply('coincident')
+    expect(paths(doc.value)[0].closed).toBe(false)
+    expect(pen.status.value).toBe('A text guide stays open')
+  })
+
+  function oneArc(d: SketchDoc) {
+    const A = addPoint(d, 0, 0); const B = addPoint(d, 1, -0.5); const C = addPoint(d, 0.5, 3)
+    const path = addPath(d, [A, B], [{ kind: 'arc', center: C, sweep: 1 }])
+    return { A, B, C, path }
+  }
+  function expectCircle(d: SketchDoc, ids: { A: string; B: string; C: string }, keep: string) {
+    expect(paths(d)).toHaveLength(0)
+    const circles = d.entities.filter(e => e.kind === 'circle') as any[]
+    expect(circles).toHaveLength(1)
+    expect(circles[0].center).toBe(ids.C)
+    expect(P(d, ids.C)).toBeTruthy()
+    expect(P(d, keep)).toBeTruthy()
+    const pin = d.constraints.find(c => c.kind === 'pointOnCircle')
+    expect(pin?.refs).toEqual([keep, circles[0].id])
+    expect(d.constraints.some(c => c.kind === 'equalDist')).toBe(false)
+    expect(circles[0].r).toBeCloseTo(distPts(P(d, keep), P(d, ids.C)), 4)
+  }
+
+  it('mergePoints turns a one-arc open path whose ends meet into a circle', () => {
+    const d: SketchDoc = { entities: [], constraints: [] }
+    const ids = oneArc(d)
+    expect(mergePoints(d, ids.B, ids.A)).toBe(true)
+    expectCircle(d, ids, ids.A)
+  })
+
+  it('dropping a one-arc path’s end on its start makes a circle; one undo restores the path', () => {
+    let ids = { A: '', B: '', C: '', path: '' }
+    const { doc, pen } = mk(d => { ids = oneArc(d) })
+    pen.pickSegment(ids.path, 0)
+    dragTo(pen, doc.value, ids.B, 0.1, 0.05)
+    expect(pen.hoverSnap.value?.kind).toBe('point')
+    pen.dropPoint(ids.B)
+    expectCircle(doc.value, ids, ids.A)
+    expect(pen.selectedSegments.value).toEqual([])
+    pen.undo()
+    expect(paths(doc.value)).toHaveLength(1)
+    expect(doc.value.entities.some(e => e.kind === 'circle')).toBe(false)
+  })
+
+  it('Coincident on a one-arc path’s two ends makes a circle', () => {
+    let ids = { A: '', B: '', C: '', path: '' }
+    const { doc, pen } = mk(d => { ids = oneArc(d) })
+    pen.pick(ids.A); pen.pick(ids.B, true)
+    pen.apply('coincident')
+    expectCircle(doc.value, ids, ids.A)
+  })
+
+  it('a one-arc text guide never closes into a circle', () => {
+    let ids = { A: '', B: '', C: '', path: '' }
+    const { doc, pen } = mk(d => { ids = oneArc(d) }, true)
+    dragTo(pen, doc.value, ids.B, 0.1, 0.05)
+    expect(pen.hoverSnap.value).toBeNull()
+    pen.dropPoint(ids.B)
+    expect(paths(doc.value)).toHaveLength(1)
+  })
+
+  it('a one-arc path’s end still never joins its own centre', () => {
+    let ids = { A: '', B: '', C: '', path: '' }
+    const { doc, pen } = mk(d => { ids = oneArc(d) })
+    const c = P(doc.value, ids.C)
+    dragTo(pen, doc.value, ids.B, c.x + 0.1, c.y)
+    expect(pen.hoverSnap.value).toBeNull()
+  })
+
+  it('a point with its own segment is offered neither On curve nor Midpoint', () => {
+    let A = '', path = '', C = '', arc = ''
+    const { pen } = mk(d => {
+      A = addPoint(d, 0, 0); const B = addPoint(d, 10, 0); path = addPath(d, [A, B], [{ kind: 'line' }])
+      const E = addPoint(d, 0, 5), F = addPoint(d, 10, 5); C = addPoint(d, 5, 5)
+      arc = addPath(d, [E, F], [{ kind: 'arc', center: C, sweep: 1 }])
+    })
+    pen.pick(A); pen.pickSegment(path, 0)
+    expect(pen.availableConstraints()).toEqual([])
+    pen.pick(C); pen.pickSegment(arc, 0)
+    expect(pen.availableConstraints()).toEqual([])
+  })
+
+  it('a curve drop adds no second copy of a rule the point already has', () => {
+    let A = '', B = '', q = ''
+    const { doc, pen } = mk(d => {
+      A = addPoint(d, 0, 0); B = addPoint(d, 10, 0); addPath(d, [A, B], [{ kind: 'line' }])
+      q = addPoint(d, 3, 0.1)
+      d.constraints.push({ id: 'k1', kind: 'collinear', refs: [A, B, q] } as any)
+    })
+    dragTo(pen, doc.value, q, 6, 0.2)
+    pen.dropPoint(q)
+    expect(doc.value.constraints.filter(c => c.kind === 'collinear')).toHaveLength(1)
+  })
+
+  it('a plain click on a point replaces a segment selection', () => {
+    let p = '', path = ''
+    const { pen } = mk(d => {
+      const A = addPoint(d, 0, 0), B = addPoint(d, 10, 0); path = addPath(d, [A, B], [{ kind: 'line' }])
+      p = addPoint(d, 3, 4)
+    })
+    pen.pickSegment(path, 0)
+    pen.pick(p)
+    expect(pen.selectedSegments.value).toEqual([])
+    expect(pen.selection.value).toEqual([p])
+  })
+
+  it('Coincident refuses joins that would collapse a piece', () => {
+    let a = '', b = '', A = '', C = ''
+    const { doc, pen } = mk(d => {
+      a = addPoint(d, 0, 0); b = addPoint(d, 5, 0); addLine(d, a, b)
+      A = addPoint(d, 0, 5); const B = addPoint(d, 10, 5); C = addPoint(d, 5, 5)
+      const D = addPoint(d, 10, 9)
+      addPath(d, [A, B, D], [{ kind: 'arc', center: C, sweep: 1 }, { kind: 'line' }])
+    })
+    pen.pick(a); pen.pick(b, true)
+    pen.apply('coincident')
+    expect(pen.status.value).toBe('That would collapse the piece')
+    expect(doc.value.entities.some(e => e.kind === 'line')).toBe(true)
+    pen.pick(A); pen.pick(C, true)
+    pen.apply('coincident')
+    expect(pen.status.value).toBe('That would collapse the piece')
+    expect(P(doc.value, C)).toBeTruthy()
+    expect(pen.canUndo()).toBe(false)
+  })
+
+  it('a drop that does not join leaves the point at the pointer, not the snapped spot', () => {
+    let e = ''
+    const { doc, pen } = mk(d => {
+      const a = addPoint(d, 0, 0); const b = addPoint(d, 6, 0); const c = addPoint(d, 6, 6); e = addPoint(d, 1, 5)
+      addPath(d, [a, b, c, e], [{ kind: 'line' }, { kind: 'line' }, { kind: 'line' }])
+    })
+    dragTo(pen, doc.value, e, 0.3, 0.2)
+    expect(P(doc.value, e).x).toBeCloseTo(0, 3)   // sitting on the snapped spot
+    pen.dropPoint(e, true)
+    expect(P(doc.value, e).x).toBeCloseTo(0.3, 3)
+    expect(P(doc.value, e).y).toBeCloseTo(0.2, 3)
   })
 })

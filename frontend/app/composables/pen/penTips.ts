@@ -58,7 +58,7 @@ export const PEN_TIPS: Record<string, PenTip> = {
   // ── rules (keyed by the rule kind availableConstraints offers, or its
   //    `tip` where the kind alone would name another card) ──
   coincident: { name: 'Coincident',
-    caption: 'Joins two points into one. The first one you picked stays where it is.' },
+    caption: 'Joins two points into one. The first one you picked stays put, unless only the other one is fixed.' },
   onCurve: { name: 'On curve',
     caption: 'Keeps a point on the chosen line or arc piece; it can still slide along it.' },
   distance: { name: 'Distance',

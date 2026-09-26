@@ -764,14 +764,18 @@ describe('#5–#8 mergePoints', () => {
     expect(JSON.stringify(d)).toBe(snap)
   })
 
-  it('merging the ends of a one-arc path never deletes `into`', () => {
+  it('merging the ends of a one-arc path never deletes `into`; the arc closes into a circle', () => {
     const d = emptyDoc()
     const A = addPoint(d, 10, 0), B = addPoint(d, 0, 10), C = addPoint(d, 0, 0)
     const P = addPath(d, [A, B], [{ kind: 'arc', center: C, sweep: 1 }])
     expect(mergePoints(d, B, A)).toBe(true)
     expect(getEntity(d, P)).toBeUndefined()
     expect(getPoint(d, A)).toBeDefined()
-    expect(getPoint(d, C)).toBeUndefined()
+    // the centre stays: it is the new circle's centre, with A pinned on it
+    expect(getPoint(d, C)).toBeDefined()
+    const circle = d.entities.find(e => e.kind === 'circle') as any
+    expect(circle).toMatchObject({ center: C, r: 10 })
+    expect(d.constraints.find(c => c.kind === 'pointOnCircle')?.refs).toEqual([A, circle.id])
     expect(ruleCount(d, 'equalDist')).toBe(0)
   })
 

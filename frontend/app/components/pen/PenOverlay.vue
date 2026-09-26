@@ -565,7 +565,8 @@ function onPointerUpPoint(id: EntityId, ev: PointerEvent) {
   if (!props.active) return
   // a click without a drag replaces the selection (or shift-toggles this
   // point); the selection only changes here, once we know it was a click.
-  if (tool.value === 'select' && dragId === id && !moved) { pick(id, ev.shiftKey); ev.stopPropagation() }
+  // (Shift or Option adds: a point + an Option-clicked segment stay paired)
+  if (tool.value === 'select' && dragId === id && !moved) { pick(id, ev.shiftKey || ev.altKey); ev.stopPropagation() }
   // a real drag bubbles on to onPointerUp, which settles it (and the join)
   if (!moved) { dragId = null; dragHandleIds = []; dragLast = null }
 }
