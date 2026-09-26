@@ -12,7 +12,7 @@ import { resolveFormat } from '../../shared/template-grid/resolve'
 import type { ResolvedElement } from '../../shared/template-grid/resolve'
 import { gridExpressiveLayout, expressiveVOffset } from '../../shared/template-grid/expressive'
 import { resolveTokens } from '../../shared/template-grid/tokens'
-import { LAYOUT_TOO_SMALL, layoutTextProblem, renderSizeProblem } from '../../shared/template-grid/limits'
+import { LAYOUT_TOO_SMALL, layoutElementsProblem, layoutTextProblem, renderSizeProblem } from '../../shared/template-grid/limits'
 import { needsServerBake, treatmentCssFilter, treatmentIntensity } from '../../shared/template-grid/treatment'
 import type {
   AnyGridTemplate, ImageElementV2, ShapeElementV2, TemplateV2, TextElementV2,
@@ -265,6 +265,8 @@ export function templateToSatori(
   explicitSize?: { width: number; height: number },
   outputId?: string,
 ): TranslatedLayout {
+  const crowded = layoutElementsProblem(template)
+  if (crowded) throw new TemplateSizeError(crowded)
   const tooMuch = layoutTextProblem(template, props as Record<string, unknown>, { ...((template as { brand?: Record<string, unknown> }).brand ?? {}), ...(brand as Record<string, unknown>) })
   if (tooMuch) throw new TemplateSizeError(tooMuch)
   // v2 and v3 share the grid path: the resolver flattens sections into

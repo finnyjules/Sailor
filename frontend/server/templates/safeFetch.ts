@@ -24,13 +24,17 @@
  * request resolves and checks its address, and the connected socket's
  * address is checked once more; the IPv6 forms that carry an IPv4 address
  * (::/96, ::ffff:0:0:0/96, 6to4, Teredo, NAT64) and site-local are refused.
+ * Round 3: also 2001:20::/28 (ORCHIDv2), 3fff::/20 and 5f00::/16 (reserved);
+ * the caller's signal ends a fetch, and a render's byte budget is taken from
+ * as bytes arrive.
  */
 import { BlockList, isIP } from 'node:net'
 import { lookup as dnsLookup } from 'node:dns'
 import http from 'node:http'
 import https from 'node:https'
 import type { LookupFunction } from 'node:net'
-import type { ImageFetcher } from './inlineImages'
+import type { ByteBudget, ImageFetcher } from './inlineImages'
+import { LAYOUT_IMAGES_TOO_LARGE } from '../../shared/template-grid/limits'
 
 export const FETCH_REFUSED = 'An image in this layout points at a private network address, which is not allowed'
 export const FETCH_TOO_LARGE = 'An image in this layout is larger than 30 MB'
@@ -51,6 +55,7 @@ for (const [net, bits] of [
 for (const [net, bits] of [
   ['::', 96], ['::ffff:0:0:0', 96], ['fc00::', 7], ['fe80::', 10], ['fec0::', 10], ['ff00::', 8],
   ['64:ff9b::', 96], ['64:ff9b:1::', 48], ['100::', 64], ['2001::', 32], ['2001:db8::', 32], ['2002::', 16],
+  ['2001:20::', 28], ['3fff::', 20], ['5f00::', 16],
 ] as const) BLOCKED.addSubnet(net, bits, 'ipv6')
 // IPv4-mapped addresses (::ffff:a.b.c.d) are matched by the IPv4 rules above
 // (BlockList checks a mapped address against them); a ::ffff:0:0/96 rule
@@ -82,6 +87,32 @@ export function comfyViewPort(): number {
   catch { return 8188 }
 }
 
+const LOOPBACK_HOST = /^(?:localhost|127(?:\.\d{1,3}){3}|\[::1\]|::1)$/i
+
+/**
+ * The loopback ports whose `/view` the route may fetch locally, besides
+ * ComfyUI's (fix round 3): the port its request came in on (none over the
+ * Unix socket `nuxi dev` listens on), the app's configured port (NUXT_PORT,
+ * NITRO_PORT, PORT), and the Host header's port when that host is loopback
+ * (what the browser typed: the editor's absolute /view URLs). Only local mode
+ * reads them (safeImageFetcher ignores them hosted).
+ */
+export function localViewPorts(o: { localPort?: unknown; host?: unknown; env?: NodeJS.ProcessEnv } = {}): number[] {
+  const env = o.env ?? process.env
+  const out = new Set<number>()
+  const add = (v: unknown) => {
+    const n = Number(v)
+    if (Number.isInteger(n) && n > 0 && n < 65536) out.add(n)
+  }
+  if (typeof o.localPort === 'number') add(o.localPort)
+  for (const k of ['NUXT_PORT', 'NITRO_PORT', 'PORT']) if (env[k]) add(env[k])
+  if (typeof o.host === 'string') {
+    const m = /^(\[[^\]]+\]|[^:]+)(?::(\d+))?$/.exec(o.host.trim())
+    if (m && LOOPBACK_HOST.test(m[1]!)) add(m[2] ?? 80)
+  }
+  return [...out]
+}
+
 export interface SafeFetchOptions {
   /** Hosted (a shared server): no loopback exception. */
   hosted: boolean
@@ -95,7 +126,7 @@ export interface SafeFetchOptions {
 const hostOf = (u: URL) => u.hostname.replace(/^\[|\]$/g, '')
 
 /** One request, its answer's status, headers and body (at most `maxBytes`). */
-function requestOnce(u: URL, loopbackOk: boolean, o: { signal: AbortSignal; maxBytes: number }): Promise<{ status: number; location?: string; contentType: string; data: ArrayBuffer }> {
+function requestOnce(u: URL, loopbackOk: boolean, o: { signal: AbortSignal; maxBytes: number; budget?: ByteBudget; stopped: () => boolean }): Promise<{ status: number; location?: string; contentType: string; data: ArrayBuffer }> {
   const host = hostOf(u)
   if (isIP(host) && !addressAllowed(host, loopbackOk)) return Promise.reject(new FetchRefused(FETCH_REFUSED))
   const checkedLookup: LookupFunction = (hostname, options, cb) => {
@@ -123,6 +154,11 @@ function requestOnce(u: URL, loopbackOk: boolean, o: { signal: AbortSignal; maxB
         reject(new FetchRefused(FETCH_TOO_LARGE))
         return
       }
+      if (o.budget && Number.isFinite(declared) && declared > o.budget.left) {
+        res.destroy()
+        reject(new FetchRefused(LAYOUT_IMAGES_TOO_LARGE))
+        return
+      }
       const chunks: Buffer[] = []
       let size = 0
       res.on('data', (c: Buffer) => {
@@ -131,6 +167,15 @@ function requestOnce(u: URL, loopbackOk: boolean, o: { signal: AbortSignal; maxB
           res.destroy()
           reject(new FetchRefused(FETCH_TOO_LARGE))
           return
+        }
+        // The render's total, shared by its fetches (fix round 3).
+        if (o.budget) {
+          o.budget.left -= c.length
+          if (o.budget.left < 0) {
+            res.destroy()
+            reject(new FetchRefused(LAYOUT_IMAGES_TOO_LARGE))
+            return
+          }
         }
         chunks.push(c)
       })
@@ -152,7 +197,8 @@ function requestOnce(u: URL, loopbackOk: boolean, o: { signal: AbortSignal; maxB
       })
     })
     req.on('error', (e) => {
-      if (o.signal.aborted) reject(new FetchRefused(FETCH_TIMEOUT))
+      if (o.stopped()) reject(new Error('Stopped'))
+      else if (o.signal.aborted) reject(new FetchRefused(FETCH_TIMEOUT))
       else reject(e instanceof FetchRefused ? e : (e as Error & { cause?: unknown }).cause instanceof FetchRefused ? (e as Error & { cause: FetchRefused }).cause : e)
     })
     req.end()
@@ -163,8 +209,12 @@ function requestOnce(u: URL, loopbackOk: boolean, o: { signal: AbortSignal; maxB
 export function safeImageFetcher(opts: SafeFetchOptions): ImageFetcher {
   const timeoutMs = opts.timeoutMs ?? FETCH_TIMEOUT_MS
   const maxBytes = opts.maxBytes ?? FETCH_MAX_BYTES
-  return async (url) => {
-    const signal = AbortSignal.timeout(timeoutMs)
+  return async (url, o = {}) => {
+    const timeout = AbortSignal.timeout(timeoutMs)
+    // The caller's signal (the render's Stop, disconnect or deadline) ends the fetch too.
+    const signal = o.signal ? AbortSignal.any([timeout, o.signal]) : timeout
+    const stopped = () => !!o.signal?.aborted && !timeout.aborted
+    if (stopped()) throw new Error('Stopped')
     let u: URL
     try { u = new URL(url) }
     catch { throw new Error(`image fetch failed (bad address): ${url.slice(0, 100)}`) }
@@ -172,7 +222,8 @@ export function safeImageFetcher(opts: SafeFetchOptions): ImageFetcher {
       if (u.protocol !== 'http:' && u.protocol !== 'https:') throw new FetchRefused(FETCH_REFUSED)
       const port = Number(u.port || (u.protocol === 'https:' ? 443 : 80))
       const loopbackOk = !opts.hosted && u.pathname === '/view' && (port === comfyViewPort() || !!opts.viewPorts?.includes(port))
-      const r = await requestOnce(u, loopbackOk, { signal, maxBytes }).catch((e: unknown) => {
+      const r = await requestOnce(u, loopbackOk, { signal, maxBytes, budget: o.budget, stopped }).catch((e: unknown) => {
+        if (stopped()) throw new Error('Stopped')
         if (signal.aborted && !(e instanceof FetchRefused)) throw new FetchRefused(FETCH_TIMEOUT)
         throw e
       })

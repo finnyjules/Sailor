@@ -15,7 +15,7 @@
  * only where Python's are its own internals).
  */
 import { pyIntOf, pyStrip, pyTruthy } from './pyText'
-import { LAYOUT_MAX_AREA, LAYOUT_MAX_SIDE } from '../template-grid/limits'
+import { LAYOUT_MAX_AREA, LAYOUT_MAX_ELEMENTS, LAYOUT_MAX_SIDE } from '../template-grid/limits'
 
 type Dict = Record<string, unknown>
 
@@ -478,7 +478,7 @@ export function livePreviewName(nodeId: string, label: string, index: number): s
 /** The largest one Smart Layout output (fix round 1): the renderer's own limit since round 2 (template-grid/limits.ts). */
 export const SMART_LAYOUT_MAX_OUTPUT_PIXELS = LAYOUT_MAX_AREA
 /** The most elements (top-level and section children) a layout the runner renders may have. */
-export const SMART_LAYOUT_MAX_ELEMENTS = 256
+export const SMART_LAYOUT_MAX_ELEMENTS = LAYOUT_MAX_ELEMENTS
 
 /**
  * The render size of an output's format as the renderer reads it

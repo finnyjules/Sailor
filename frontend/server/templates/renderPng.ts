@@ -13,10 +13,10 @@ import { join } from 'node:path'
 
 import type { RenderRequest } from './schema'
 import { readManifest, USER_FONTS_DIR } from './fonts-store'
-import { inlineTreeImages, type ImageFetcher } from './inlineImages'
-import { templateToSatori } from './translate'
+import { ImageLimitError, inlineTreeImages, type ImageFetcher } from './inlineImages'
+import { TemplateSizeError, templateToSatori } from './translate'
 import { safeImageFetcher } from './safeFetch'
-import { svgToPngInProcess } from './renderProcess'
+import { RENDER_TIMEOUT, svgToPngInProcess } from './renderProcess'
 import { isHosted } from '../utils/deployMode'
 import { TEMPLATE_FONTS } from '../../shared/template-fonts'
 import { resolveTokens } from '../../shared/template-grid/tokens'
@@ -185,14 +185,21 @@ export interface RenderOptions {
   signal?: AbortSignal
 }
 
+/** One render's whole deadline (fix round 3): fetches, bakes and the render together, queue waits included. */
+export const RENDER_DEADLINE_MS = 60_000
+
 /**
  * The PNG for one render request: the route's body before R1.6, with the
  * satori and resvg steps in the render process (./renderProcess.ts) and images
  * fetched under the safe policy (fix round 1). Same code, same fonts, same bytes.
+ * Round 3: one deadline for the whole render, and Stop (or the client going
+ * away) ends its fetches and bakes too; the pictures' limits refused plainly.
  */
 export async function renderTemplatePng(body: RenderRequest, opts: RenderOptions = {}): Promise<Uint8Array> {
-  const fonts = await loadFonts(body.template, (body.brand ?? {}) as Record<string, unknown>)
+  const deadline = AbortSignal.timeout(g.__sailorRenderDeadlineMs ?? RENDER_DEADLINE_MS)
+  const signal = opts.signal ? AbortSignal.any([opts.signal, deadline]) : deadline
 
+  // The layout's own limits first (size, elements, text): nothing is loaded for one refused.
   const { tree, width, height } = templateToSatori(
     body.template,
     body.aspect,
@@ -202,12 +209,16 @@ export async function renderTemplatePng(body: RenderRequest, opts: RenderOptions
     body.outputId,
   )
 
+  const fonts = await loadFonts(body.template, (body.brand ?? {}) as Record<string, unknown>)
+
   // Inline every remote image as a data URI BEFORE satori: its own remote
   // loading fails silently (a 404 just skips the image → plausible-but-wrong
   // output). A dead URL now rejects the render with a clear error instead.
   try {
-    await inlineTreeImages(tree, opts.fetcher ?? safeImageFetcher({ hosted: isHosted() }))
+    await inlineTreeImages(tree, opts.fetcher ?? safeImageFetcher({ hosted: isHosted() }), { signal })
   } catch (e) {
+    if (signal.aborted) throw new Error(deadline.aborted && !opts.signal?.aborted ? RENDER_TIMEOUT : 'Stopped')
+    if (e instanceof ImageLimitError) throw new TemplateSizeError(e.message)
     throw new TemplateImageError(String((e as Error).message ?? e).slice(0, 200))
   }
 
@@ -216,5 +227,12 @@ export async function renderTemplatePng(body: RenderRequest, opts: RenderOptions
   return svgToPngInProcess({
     tree, width, height,
     fonts: fonts.map((f) => ({ name: f.name, data: f.data, weight: f.weight, style: f.style })),
-  }, opts.signal)
+  }, signal)
+}
+
+const g = globalThis as unknown as { __sailorRenderDeadlineMs?: number }
+
+/** Tests only: the render's whole deadline (null restores a minute). */
+export function __setRenderDeadlineForTests(ms: number | null): void {
+  g.__sailorRenderDeadlineMs = ms ?? undefined
 }

@@ -78,16 +78,41 @@ function moduleUrl(name: string): string {
 }
 
 interface Child { proc: ChildProcess; exited: Promise<void>; pending: Map<number, { resolve(v: Uint8Array): void; reject(e: Error): void }>; seq: number; dead: string | null }
-const g = globalThis as unknown as { __sailorRenderChild?: Child | null; __sailorRenderQueue?: Promise<unknown>; __sailorRenderTimeoutMs?: number; __sailorRenderLastExit?: Promise<void>; __sailorRenderJobs?: number }
+type Spawn = typeof spawn
+const g = globalThis as unknown as {
+  __sailorRenderChild?: Child | null; __sailorRenderQueue?: Promise<unknown>; __sailorRenderTimeoutMs?: number
+  __sailorRenderLastExit?: Promise<void>; __sailorRenderJobs?: number; __sailorRenderSpawn?: Spawn | null
+}
+
+/** The longest a new child waits for a killed one to be gone before it starts anyway. */
+export const CHILD_EXIT_WAIT_MS = 5_000
+
+/**
+ * The child's environment (fix round 3): only what node needs to run and
+ * find its temp folder. No API keys or secrets: the child parses untrusted
+ * fonts, pictures and SVG with native code.
+ */
+export function childEnv(env: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  const out: NodeJS.ProcessEnv = {}
+  for (const k of ['PATH', 'HOME', 'TMPDIR', 'TMP', 'TEMP', 'LANG', 'SystemRoot', 'windir']) {
+    if (env[k] !== undefined) out[k] = env[k]
+  }
+  return out
+}
 
 function child(): Child {
   const live = g.__sailorRenderChild
   if (live && !live.dead) return live
   const urls = { satori: moduleUrl('satori'), resvg: moduleUrl('@resvg/resvg-js'), sharp: moduleUrl('sharp') }
-  const proc = spawn(process.execPath, ['-e', script(), JSON.stringify(urls)], {
-    stdio: ['ignore', 'inherit', 'inherit', 'ipc'], serialization: 'advanced', env: { ...process.env, NODE_OPTIONS: '' },
+  const proc = (g.__sailorRenderSpawn ?? spawn)(process.execPath, ['-e', script(), JSON.stringify(urls)], {
+    stdio: ['ignore', 'inherit', 'inherit', 'ipc'], serialization: 'advanced', env: childEnv(),
   })
-  const c: Child = { proc, exited: new Promise(r => proc.once('exit', () => r())), pending: new Map(), seq: 0, dead: null }
+  // A spawn that fails (EMFILE, EAGAIN) gives 'error' and never 'exit': either ends it.
+  const exited = new Promise<void>((r) => {
+    proc.once('exit', () => r())
+    proc.once('error', () => r())
+  })
+  const c: Child = { proc, exited, pending: new Map(), seq: 0, dead: null }
   proc.on('message', (m: { id: number; out?: Uint8Array; error?: string }) => {
     const p = c.pending.get(m.id)
     if (!p) return
@@ -111,45 +136,82 @@ function child(): Child {
 
 /** An idle child doesn't keep the server (or a test run) alive; a busy one does. */
 function idle(c: Child): void {
-  c.proc.unref()
+  c.proc.unref?.()
   ;(c.proc.channel as unknown as { unref?(): void } | undefined)?.unref?.()
 }
 function busy(c: Child): void {
-  c.proc.ref()
+  c.proc.ref?.()
   ;(c.proc.channel as unknown as { ref?(): void } | undefined)?.ref?.()
 }
 
 /** One job on the child, waiting its turn; killed (SIGKILL) past the limit or on abort. */
 function onChild(msg: Record<string, unknown>, signal?: AbortSignal): Promise<Uint8Array> {
   const run = async (): Promise<Uint8Array> => {
-    if (signal?.aborted) throw new Error('Stopped')
-    // Never two children: a killed one is gone before the next starts.
-    if (!g.__sailorRenderChild) await g.__sailorRenderLastExit
-    const c = child()
+    if (signal?.aborted) throw new Error(stopWords(signal))
+    // Never two children: a killed one is gone before the next starts — but
+    // never waiting on it for ever (a child that never exits must not wedge the queue).
+    if (!g.__sailorRenderChild && g.__sailorRenderLastExit) {
+      let t: ReturnType<typeof setTimeout> | undefined
+      await Promise.race([g.__sailorRenderLastExit, new Promise<void>((r) => { t = setTimeout(r, CHILD_EXIT_WAIT_MS) })])
+      clearTimeout(t)
+    }
+    if (signal?.aborted) throw new Error(stopWords(signal))
+    let c: Child
+    try { c = child() }
+    catch { throw new Error(RENDER_CRASHED) }
     const id = ++c.seq
     g.__sailorRenderJobs = (g.__sailorRenderJobs ?? 0) + 1
-    busy(c)
     return new Promise<Uint8Array>((resolve, reject) => {
+      let timer: ReturnType<typeof setTimeout> | undefined
       const kill = (why: string) => {
         c.dead = why
-        c.proc.kill('SIGKILL')
+        try { c.proc.kill('SIGKILL') }
+        catch { /* already gone */ }
       }
-      const timer = setTimeout(() => kill(RENDER_TIMEOUT), g.__sailorRenderTimeoutMs ?? RENDER_TIMEOUT_MS)
-      const onAbort = () => kill('Stopped')
-      signal?.addEventListener('abort', onAbort, { once: true })
+      const onAbort = () => kill(stopWords(signal!))
       const done = () => {
         clearTimeout(timer)
         signal?.removeEventListener('abort', onAbort)
         if (!c.dead) idle(c)
       }
       c.pending.set(id, { resolve: (v) => { done(); resolve(v) }, reject: (e) => { done(); reject(e) } })
-      c.proc.send({ ...msg, id })
+      timer = setTimeout(() => kill(RENDER_TIMEOUT), g.__sailorRenderTimeoutMs ?? RENDER_TIMEOUT_MS)
+      signal?.addEventListener('abort', onAbort, { once: true })
+      try {
+        if (c.dead) throw new Error(c.dead)
+        if (typeof c.proc.send !== 'function') throw new Error(RENDER_CRASHED)
+        busy(c)
+        c.proc.send({ ...msg, id })
+      }
+      catch {
+        c.pending.delete(id)
+        kill(RENDER_CRASHED)
+        done()
+        reject(new Error(RENDER_CRASHED))
+      }
     })
   }
   const prev = g.__sailorRenderQueue ?? Promise.resolve()
   const next = prev.catch(() => {}).then(run)
   g.__sailorRenderQueue = next.catch(() => {})
-  return next
+  return whileWaiting(next, signal)
+}
+
+/** The words for an abort: the render's own deadline, or Stop. */
+function stopWords(signal: AbortSignal): string {
+  const r = signal.reason as { name?: string } | undefined
+  return r?.name === 'TimeoutError' ? RENDER_TIMEOUT : 'Stopped'
+}
+
+/** A job still waiting its turn rejects as soon as its signal aborts (its turn then does nothing). */
+function whileWaiting<T>(job: Promise<T>, signal?: AbortSignal): Promise<T> {
+  if (!signal) return job
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = () => reject(new Error(stopWords(signal)))
+    if (signal.aborted) onAbort()
+    signal.addEventListener('abort', onAbort, { once: true })
+    job.then(resolve, reject).finally(() => signal.removeEventListener('abort', onAbort))
+  })
 }
 
 /** satori then resvg for one translated layout, in the render process. */
@@ -158,14 +220,19 @@ export function svgToPngInProcess(job: SvgJob, signal?: AbortSignal): Promise<Ui
 }
 
 /** inlineImages' photo-treatment bake, in the render process. */
-export async function bakeInProcess(data: ArrayBuffer, treatment: TreatmentBakeTag): Promise<ArrayBuffer> {
-  const out = await onChild({ op: 'bake', data, treatment })
+export async function bakeInProcess(data: ArrayBuffer, treatment: TreatmentBakeTag, signal?: AbortSignal): Promise<ArrayBuffer> {
+  const out = await onChild({ op: 'bake', data, treatment }, signal)
   return out.buffer.slice(out.byteOffset, out.byteOffset + out.byteLength) as ArrayBuffer
 }
 
 /** Tests only: the render limit (null restores a minute). */
 export function __setRenderTimeoutForTests(ms: number | null): void {
   g.__sailorRenderTimeoutMs = ms ?? undefined
+}
+
+/** Tests only: the spawn the render process is started with (null restores node's). */
+export function __setRenderSpawnForTests(fn: Spawn | null): void {
+  g.__sailorRenderSpawn = fn
 }
 
 /** Tests only: how many jobs the render process has been given. */

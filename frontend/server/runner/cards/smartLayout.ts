@@ -228,7 +228,7 @@ async function renderOne(req: RenderRequest, opts: RenderOptions): Promise<Uint8
   try { return await smartLayoutRenderer.render(req, opts) }
   catch (e) {
     if (opts.signal?.aborted) throw new Error('Stopped')
-    if (e instanceof TemplateImageError) throw new Error(/private network|larger than 30 MB|longer than 20 seconds/.test(e.message) ? e.message : LAYOUT_IMAGE_FAILED)
+    if (e instanceof TemplateImageError) throw new Error(/private network|larger than 30 MB|longer than 20 seconds|photo treatment/.test(e.message) ? e.message : LAYOUT_IMAGE_FAILED)
     if (e instanceof TemplateSizeError) throw new Error(e.message)
     throw new Error(`The layout could not be rendered (${String((e as Error)?.message ?? e).slice(0, 200)})`)
   }
@@ -237,13 +237,13 @@ async function renderOne(req: RenderRequest, opts: RenderOptions): Promise<Uint8
 /** The card's fetcher: its own layers from memory, anything else the layout names under the safe policy. */
 function layerFetcher(layers: ReadonlyMap<string, Uint8Array>, hosted: boolean): ImageFetcher {
   const safe = safeImageFetcher({ hosted })
-  return async (url) => {
+  return async (url, o) => {
     if (url.startsWith(LAYER_ORIGIN)) {
       const bytes = layers.get(url.slice(LAYER_ORIGIN.length))
       if (!bytes) throw new Error('A picture in this layout was not made')
       return { data: bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer, contentType: 'image/png' }
     }
-    return safe(url)
+    return safe(url, o)
   }
 }
 

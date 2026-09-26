@@ -6,7 +6,12 @@
  *     panics or runs out of memory past that, taking the process with it);
  *   - at most 20,000 characters of text across the layout's elements, their
  *     tokens filled in (the text fit's work grows with it, on the main thread);
- *   - at most 8 elements reading any one `{{ props.x }}` (each reads it whole).
+ *   - at most 8 elements reading any one `{{ props.x }}` (each reads it whole);
+ *   - (round 3) at most 256 elements (top-level and section children): the
+ *     translation's cost grows faster than the count, on the main thread;
+ *   - (round 3) pictures: at most 100 MB fetched in all per render, at most
+ *     4 different pictures with a photo treatment (duotone, grain), each at
+ *     most 4096 × 4096 pixels (the bake's time and memory grow with it).
  */
 import { resolveTokens, type TokenScope } from './tokens'
 
@@ -14,11 +19,20 @@ export const LAYOUT_MAX_SIDE = 16384
 export const LAYOUT_MAX_AREA = 8192 * 8192
 export const LAYOUT_MAX_TEXT = 20_000
 export const LAYOUT_MAX_READERS = 8
+export const LAYOUT_MAX_ELEMENTS = 256
+export const LAYOUT_MAX_IMAGE_BYTES = 100 * 1024 * 1024
+export const LAYOUT_MAX_TREATED = 4
+export const LAYOUT_MAX_TREATED_AREA = 4096 * 4096
 
 export const LAYOUT_TOO_SMALL = 'A format of this layout is smaller than 1 × 1 pixel, so it can’t be rendered'
 export const LAYOUT_TOO_BIG = `A format of this layout is too large to render (each side at most ${LAYOUT_MAX_SIDE} pixels, and at most ${Math.floor(LAYOUT_MAX_AREA / 1_000_000)} million pixels in all)`
 export const LAYOUT_TOO_MUCH_TEXT = `This layout has too much text to render (more than ${LAYOUT_MAX_TEXT.toLocaleString('en-US')} characters in all). Use shorter text.`
 export const LAYOUT_TOO_MANY_READERS = `Too many elements of this layout show the same wired text (more than ${LAYOUT_MAX_READERS}).`
+export const LAYOUT_TOO_MANY_ELEMENTS = `This layout has too many elements to render (more than ${LAYOUT_MAX_ELEMENTS}).`
+export const LAYOUT_IMAGES_TOO_LARGE = `The pictures in this layout are too large to render together (more than ${LAYOUT_MAX_IMAGE_BYTES / (1024 * 1024)} MB in all). Use fewer or smaller pictures.`
+export const LAYOUT_TOO_MANY_TREATED = `This layout has more than ${LAYOUT_MAX_TREATED} different pictures with a photo treatment (duotone or grain).`
+export const LAYOUT_TREATED_TOO_LARGE = 'A picture with a photo treatment (duotone or grain) is too large: at most 4096 × 4096 pixels. Use a smaller picture or no treatment.'
+export const LAYOUT_TREATMENT_FAILED = 'A photo treatment (duotone or grain) could not be applied to a picture in this layout'
 
 /** The refusal for a render size, or null when it is fine. */
 export function renderSizeProblem(w: unknown, h: unknown): string | null {
@@ -56,6 +70,16 @@ function contentsOf(e: Record<string, unknown>): string[] {
     }
   }
   return out
+}
+
+/** How many elements a layout has, top-level and in sections. */
+export function layoutElementCount(template: unknown): number {
+  return elementsOf(template).length
+}
+
+/** The refusal for a layout's element count, or null. */
+export function layoutElementsProblem(template: unknown): string | null {
+  return layoutElementCount(template) > LAYOUT_MAX_ELEMENTS ? LAYOUT_TOO_MANY_ELEMENTS : null
 }
 
 /** The refusal for a layout's text (too much in all, or one wired text read too often), or null. */

@@ -14,6 +14,9 @@
  *   7. A float literal read as Python's str().
  */
 import { createServer, type Server } from 'node:http'
+import { createServer as createNetServer, connect } from 'node:net'
+import { EventEmitter } from 'node:events'
+import { Readable } from 'node:stream'
 import { mkdirSync, mkdtempSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
@@ -29,12 +32,12 @@ import { planNode, type DeriveIO, type Derived, type NodePlan } from '~~/server/
 import { createEngineResultStore } from '~~/server/runner/results'
 import { __setFrameTimeoutForTests } from '~~/server/runner/compositor/worker'
 import { PREVIEW_NAME_BAD, layerText, pyFloatStr, smartLayoutRenderer, smartLayoutRequests } from '~~/server/runner/cards/smartLayout'
-import { TemplateImageError, renderTemplatePng } from '~~/server/templates/renderPng'
+import { TemplateImageError, __setRenderDeadlineForTests, renderTemplatePng } from '~~/server/templates/renderPng'
 import { TEMPLATE_SIZE_REFUSED, TemplateSizeError, templateToSatori } from '~~/server/templates/translate'
-import { FETCH_REFUSED, FETCH_TIMEOUT, FETCH_TOO_LARGE, addressAllowed, safeImageFetcher } from '~~/server/templates/safeFetch'
-import { RENDER_TIMEOUT, __renderChildPidForTests, __renderJobsForTests, __setRenderTimeoutForTests, svgToPngInProcess } from '~~/server/templates/renderProcess'
+import { FETCH_REFUSED, FETCH_TIMEOUT, FETCH_TOO_LARGE, addressAllowed, localViewPorts, safeImageFetcher } from '~~/server/templates/safeFetch'
+import { CHILD_EXIT_WAIT_MS, RENDER_CRASHED, RENDER_TIMEOUT, __renderChildPidForTests, __renderJobsForTests, __setRenderSpawnForTests, __setRenderTimeoutForTests, childEnv, svgToPngInProcess } from '~~/server/templates/renderProcess'
 import { inlineTreeImages } from '~~/server/templates/inlineImages'
-import { LAYOUT_MAX_TEXT, LAYOUT_TOO_BIG, LAYOUT_TOO_MANY_READERS, LAYOUT_TOO_MUCH_TEXT, layoutTextProblem } from '#shared/template-grid/limits'
+import { LAYOUT_IMAGES_TOO_LARGE, LAYOUT_MAX_TEXT, LAYOUT_TOO_BIG, LAYOUT_TOO_MANY_ELEMENTS, LAYOUT_TOO_MANY_READERS, LAYOUT_TOO_MANY_TREATED, LAYOUT_TOO_MUCH_TEXT, LAYOUT_TREATED_TOO_LARGE, LAYOUT_TREATMENT_FAILED, layoutTextProblem } from '#shared/template-grid/limits'
 import type { RenderRequest } from '~~/server/templates/schema'
 import type { OutputFile } from '~~/server/runner/types'
 
@@ -123,6 +126,17 @@ afterEach(() => {
   __setRenderTimeoutForTests(null)
   vi.unstubAllEnvs()
 })
+
+/** Whether a process is gone within `ms`. */
+const gone = async (pid: number, ms: number) => {
+  const until = Date.now() + ms
+  while (Date.now() < until) {
+    try { process.kill(pid, 0) }
+    catch { return true }
+    await new Promise(r => setTimeout(r, 20))
+  }
+  return false
+}
 
 // ── 1. treatments ────────────────────────────────────────────────────────────
 
@@ -303,15 +317,6 @@ describe('the render process and the job’s turn', () => {
     const t = SNAP.request.template as { formats: object }
     return { ...SNAP.request, template: { ...t, formats: { ...t.formats, big: { w: 8192, h: 8192 } } } as never, aspect: 'big', outputId: 'big' }
   }
-  const gone = async (pid: number, ms: number) => {
-    const until = Date.now() + ms
-    while (Date.now() < until) {
-      try { process.kill(pid, 0) }
-      catch { return true }
-      await new Promise(r => setTimeout(r, 20))
-    }
-    return false
-  }
 
   it('a render past its limit is stopped: its process is killed and gone within a second; the next render works', async () => {
     await renderTemplatePng(SNAP.request)
@@ -442,6 +447,170 @@ describe('round 2: the renderer’s limits (route and runner)', () => {
     expect(__renderJobsForTests() - before).toBe(2)
     const srcs = (tree.props.children as { props: { src: string } }[]).map(c => c.props.src)
     expect(new Set(srcs).size).toBe(3)
+  })
+})
+
+// ── Round 3 ──────────────────────────────────────────────────────────────────
+
+describe('round 3', () => {
+  /** A spawn that fails as EMFILE does: no send, an 'error', never an 'exit'. */
+  const failingSpawn = (seen: { env?: NodeJS.ProcessEnv }[]) => ((_cmd: string, _args: string[], o: { env?: NodeJS.ProcessEnv }) => {
+    seen.push(o)
+    const p = Object.assign(new EventEmitter(), { pid: undefined, channel: undefined })
+    setImmediate(() => p.emit('error', Object.assign(new Error('spawn EMFILE'), { code: 'EMFILE' })))
+    return p
+  }) as never
+
+  it('a spawn that fails (EMFILE) fails its render plainly and never wedges the next ones', async () => {
+    await renderTemplatePng(SNAP.request)
+    // The live child is let go, so the next job must spawn.
+    const pid = __renderChildPidForTests()
+    if (pid) process.kill(pid, 'SIGKILL')
+    await new Promise(r => setTimeout(r, 200))
+    const seen: { env?: NodeJS.ProcessEnv }[] = []
+    __setRenderSpawnForTests(failingSpawn(seen))
+    await expect(svgToPngInProcess({ tree: { type: 'div', props: { style: { width: 10, height: 10 } } }, width: 10, height: 10, fonts: [] })).rejects.toThrow(RENDER_CRASHED)
+    expect(seen.length).toBe(1)
+    __setRenderSpawnForTests(null)
+    const t0 = Date.now()
+    const again = await renderTemplatePng(SNAP.request)
+    expect(Date.now() - t0).toBeLessThan(CHILD_EXIT_WAIT_MS)
+    expect(Buffer.from(await crypto.subtle.digest('SHA-256', again)).toString('hex')).toBe(SNAP.png_sha256)
+  }, 60_000)
+
+  it('the child is spawned with a minimal environment: no API keys or secrets', async () => {
+    expect(childEnv({ PATH: '/bin', HOME: '/h', TMPDIR: '/t', FAL_KEY: 'k', NUXT_CLERK_SECRET_KEY: 's', OPENAI_API_KEY: 'o', NODE_OPTIONS: '--x' })).toEqual({ PATH: '/bin', HOME: '/h', TMPDIR: '/t' })
+    vi.stubEnv('FAL_KEY', 'secret-test-value')
+    const pid = __renderChildPidForTests()
+    if (pid) process.kill(pid, 'SIGKILL')
+    await new Promise(r => setTimeout(r, 200))
+    const seen: { env?: NodeJS.ProcessEnv }[] = []
+    __setRenderSpawnForTests(failingSpawn(seen))
+    await svgToPngInProcess({ tree: { type: 'div', props: {} }, width: 10, height: 10, fonts: [] }).catch(() => {})
+    __setRenderSpawnForTests(null)
+    expect(Object.keys(seen[0]!.env!).every(k => ['PATH', 'HOME', 'TMPDIR', 'TMP', 'TEMP', 'LANG', 'SystemRoot', 'windir'].includes(k))).toBe(true)
+    expect(JSON.stringify(seen[0]!.env)).not.toContain('secret-test-value')
+  })
+
+  it('under nuxi dev (a Unix socket, no local port) the editor’s loopback /view on the app’s port is fetched', async () => {
+    // A socket over a Unix path has no localPort, as nuxi dev's worker.
+    const sockPath = join(mkdtempSync(join(tmpdir(), 'r16-sock-')), 's.sock')
+    const unix = createNetServer(s => s.end())
+    await new Promise<void>(r => unix.listen(sockPath, r))
+    const client = connect(sockPath)
+    await new Promise<void>(r => client.once('connect', () => r()))
+    expect(client.localPort).toBeUndefined()
+    client.destroy()
+    unix.close()
+    const port = Number(new URL(base).port)
+    expect(localViewPorts({ localPort: undefined, host: `127.0.0.1:${port}`, env: {} })).toEqual([port])
+    expect(localViewPorts({ host: `localhost:${port}`, env: {} })).toEqual([port])
+    expect(localViewPorts({ host: `[::1]:${port}`, env: {} })).toEqual([port])
+    expect(localViewPorts({ host: `evil.test:${port}`, env: {} })).toEqual([])
+    expect(localViewPorts({ env: { NUXT_PORT: '3002' } })).toEqual([3002])
+    // Through the route: a wired picture at the app's own address.
+    const layout = JSON.stringify({ version: 2, id: 's', master: 'a', formats: { a: { w: 120, h: 120 } }, ...GRID, grid: { columns: 6, rows: 6, gutter: 4, margin: 8, baseline: 4 }, elements: [{ id: 'i', type: 'image', priority: 4, region: { col: 1, colSpan: 6, row: 1, rowSpan: 6 }, bleed: true, style: { fit: 'cover' }, content: `${base}/view?filename=wired.png` }] })
+    vi.stubGlobal('defineEventHandler', (h: unknown) => h)
+    vi.stubGlobal('readBody', async () => smartLayoutRequests({ layout, aspects: '' }, {})[0])
+    vi.stubGlobal('setHeader', () => {})
+    vi.stubGlobal('createError', (e: { statusCode: number; statusMessage: string }) => Object.assign(new Error(e.statusMessage), e))
+    try {
+      const route = (await import('~~/server/api/render-template.post')).default as unknown as (e: unknown) => Promise<Uint8Array>
+      const png = await route({ node: { req: { socket: {}, headers: { host: `127.0.0.1:${port}` } }, res: new EventEmitter() } })
+      expect(png.length).toBeGreaterThan(0)
+      expect(hits).toEqual(['/view?filename=wired.png'])
+      hits = []
+      await expect(route({ node: { req: { socket: {}, headers: { host: `evil.test:${port}` } }, res: new EventEmitter() } })).rejects.toMatchObject({ statusCode: 502, statusMessage: FETCH_REFUSED })
+      expect(hits).toEqual([])
+    }
+    finally { vi.unstubAllGlobals() }
+  }, 60_000)
+
+  const buf = (b: Buffer) => b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength) as ArrayBuffer
+  const treatedTree = (srcs: string[], kind = 'grain') => ({ type: 'div', props: { children: srcs.map(src => ({ type: 'img', props: { src, __treatment: { kind, intensity: 0.5, ink: '#123456' } } })) } })
+
+  it('at most 4 different treated pictures: refused before any fetch', async () => {
+    let fetches = 0
+    const tree = treatedTree(['a', 'b', 'c', 'd', 'e'].map(x => `http://pic.test/${x}.png`))
+    await expect(inlineTreeImages(tree, async () => { fetches++; throw new Error('no') })).rejects.toThrow(LAYOUT_TOO_MANY_TREATED)
+    expect(fetches).toBe(0)
+  })
+
+  it('a treated picture over 4096 × 4096 is refused from its header, before its bake is queued; no untreated fall-back', async () => {
+    const big = await sharp({ create: { width: 4097, height: 4096, channels: 3, background: '#808080' } }).png().toBuffer()
+    const before = __renderJobsForTests()
+    await expect(inlineTreeImages(treatedTree(['http://pic.test/big.png']), async () => ({ data: buf(big), contentType: 'image/png' }))).rejects.toThrow(LAYOUT_TREATED_TOO_LARGE)
+    expect(__renderJobsForTests()).toBe(before)
+    // A picture the bake can't read fails the render, not shown untreated.
+    await expect(inlineTreeImages(treatedTree(['http://pic.test/bad.png']), async () => ({ data: buf(Buffer.from('not a picture')), contentType: 'image/png' }))).rejects.toThrow(LAYOUT_TREATMENT_FAILED)
+    // One whose header reads but whose pixels don't (cut short): its bake fails, and so does the render.
+    const whole = await sharp({ create: { width: 64, height: 64, channels: 3, background: '#808080' } }).png().toBuffer()
+    const cut = whole.subarray(0, whole.length - 20)
+    expect((await sharp(cut).metadata()).width).toBe(64)
+    await expect(inlineTreeImages(treatedTree(['http://pic.test/cut.png']), async () => ({ data: buf(Buffer.from(cut)), contentType: 'image/png' }))).rejects.toThrow(LAYOUT_TREATMENT_FAILED)
+    // The route answers 400 for the limits.
+    const layout = JSON.stringify({ version: 2, id: 's', master: 'a', formats: { a: { w: 120, h: 120 } }, ...GRID, grid: { columns: 6, rows: 6, gutter: 4, margin: 8, baseline: 4 }, elements: [{ id: 'i', type: 'image', priority: 4, region: { col: 1, colSpan: 6, row: 1, rowSpan: 6 }, bleed: true, style: { fit: 'cover', treatment: { kind: 'grain' } }, content: 'http://pic.test/big.png' }] })
+    const e = await renderTemplatePng(smartLayoutRequests({ layout, aspects: '' }, {})[0]!, { fetcher: async () => ({ data: buf(big), contentType: 'image/png' }) }).catch((x: unknown) => x)
+    expect(e).toBeInstanceOf(TemplateSizeError)
+    expect((e as Error).message).toBe(LAYOUT_TREATED_TOO_LARGE)
+  }, 60_000)
+
+  it('Stop ends a bake: its process is killed within a second', async () => {
+    const pic = await sharp({ create: { width: 4096, height: 4096, channels: 3, background: '#808080' } }).png().toBuffer()
+    await renderTemplatePng(SNAP.request)
+    const pid = __renderChildPidForTests()!
+    const ctl = new AbortController()
+    const p = inlineTreeImages(treatedTree(['http://pic.test/a.png', 'http://pic.test/b.png']), async () => ({ data: buf(pic), contentType: 'image/png' }), { signal: ctl.signal })
+    setTimeout(() => ctl.abort(), 400)
+    const t0 = Date.now()
+    await expect(p).rejects.toThrow('Stopped')
+    expect(Date.now() - t0).toBeLessThan(2000)
+    expect(await gone(pid, 1000)).toBe(true)
+  }, 60_000)
+
+  it('one deadline for the whole render, fetches included', async () => {
+    vi.stubEnv('SAILOR_COMFY_ORIGIN', base)
+    __setRenderDeadlineForTests(300)
+    try {
+      const layout = JSON.stringify({ version: 2, id: 's', master: 'a', formats: { a: { w: 120, h: 120 } }, ...GRID, grid: { columns: 6, rows: 6, gutter: 4, margin: 8, baseline: 4 }, elements: [{ id: 'i', type: 'image', priority: 4, region: { col: 1, colSpan: 6, row: 1, rowSpan: 6 }, bleed: true, style: { fit: 'cover' }, content: `${base}/view?slow=1` }] })
+      const t0 = Date.now()
+      await expect(renderTemplatePng(smartLayoutRequests({ layout, aspects: '' }, {})[0]!)).rejects.toThrow(RENDER_TIMEOUT)
+      expect(Date.now() - t0).toBeLessThan(2000)
+    }
+    finally { __setRenderDeadlineForTests(null) }
+  })
+
+  it('at most 100 MB of pictures per render, counted as they arrive', async () => {
+    const big = new ArrayBuffer(60 * 1024 * 1024)
+    const tree = { type: 'div', props: { children: ['a', 'b'].map(x => ({ type: 'img', props: { src: `http://pic.test/${x}.png` } })) } }
+    await expect(inlineTreeImages(tree, async () => ({ data: big, contentType: 'image/png' }))).rejects.toThrow(LAYOUT_IMAGES_TOO_LARGE)
+    vi.stubEnv('SAILOR_COMFY_ORIGIN', base)
+    await expect(safeImageFetcher({ hosted: false })(`${base}/view?big=1`, { budget: { left: 1000 } })).rejects.toThrow(LAYOUT_IMAGES_TOO_LARGE)
+  })
+
+  it('at most 256 elements, for the route too; the route’s body is limited', async () => {
+    const crowded = { version: 2, id: 'c', master: 'a', formats: { a: { w: 64, h: 64 } }, ...GRID, elements: Array.from({ length: 257 }, (_, i) => ({ id: `e${i}`, type: 'shape', region: { col: 1, colSpan: 1, row: 1, rowSpan: 1 } })) }
+    expect(() => templateToSatori(crowded as never, 'a', {}, {}, undefined, undefined)).toThrow(LAYOUT_TOO_MANY_ELEMENTS)
+    vi.stubGlobal('defineEventHandler', (h: unknown) => h)
+    vi.stubGlobal('setHeader', () => {})
+    vi.stubGlobal('createError', (e: { statusCode: number; statusMessage: string }) => Object.assign(new Error(e.statusMessage), e))
+    try {
+      vi.stubGlobal('readBody', async () => ({ template: crowded, aspect: 'a' }))
+      const route = (await import('~~/server/api/render-template.post')).default as unknown as (e: unknown) => Promise<Uint8Array>
+      await expect(route({ node: { req: { socket: {}, headers: {} }, res: new EventEmitter() } })).rejects.toMatchObject({ statusCode: 400, statusMessage: LAYOUT_TOO_MANY_ELEMENTS })
+      const readBody = vi.fn()
+      vi.stubGlobal('readBody', readBody)
+      await expect(route({ node: { req: { socket: {}, headers: { 'content-length': String(9 * 1024 * 1024) } }, res: new EventEmitter() } })).rejects.toMatchObject({ statusCode: 413 })
+      const chunked = Object.assign(Readable.from([Buffer.alloc(5 * 1024 * 1024), Buffer.alloc(5 * 1024 * 1024)]), { headers: { 'transfer-encoding': 'chunked' }, socket: {} })
+      await expect(route({ node: { req: chunked, res: new EventEmitter() } })).rejects.toMatchObject({ statusCode: 413 })
+      expect(readBody).not.toHaveBeenCalled()
+    }
+    finally { vi.unstubAllGlobals() }
+  })
+
+  it('refuses 2001:20::/28, 3fff::/20 and 5f00::/16', () => {
+    for (const a of ['2001:20::1', '2001:2f::1', '3fff::1', '3fff:fff::1', '5f00::1', '5f00:ffff::1']) expect(addressAllowed(a), a).toBe(false)
+    expect(addressAllowed('2001:4860:4860::8888')).toBe(true)
   })
 })
 

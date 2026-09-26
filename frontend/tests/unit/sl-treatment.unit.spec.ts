@@ -1,4 +1,5 @@
 import sharp from 'sharp'
+import { LAYOUT_TREATMENT_FAILED } from '#shared/template-grid/limits'
 import { describe, expect, it } from 'vitest'
 import {
   editorImgFilter, hasTreatment, needsServerBake, treatmentCssFilter,
@@ -286,17 +287,16 @@ describe('treatment: fallback branch — sharp bake (duotone/grain)', () => {
     expect(data[idx + 1]).toBeGreaterThan(data[idx])   // green-tinted
   })
 
-  it('a bake failure (corrupt/unsupported image) falls back to the untreated fetched image instead of failing the whole render', async () => {
+  it('a bake failure (corrupt/unsupported image) fails the render plainly: never the untreated picture in its place (R1.6 fix round 3)', async () => {
     const garbage = new TextEncoder().encode('not-a-real-image-these-are-garbage-bytes').buffer as ArrayBuffer
     const node: any = {
       type: 'img',
       props: { src: 'http://x/corrupt.jpg', __treatment: { kind: 'duotone', intensity: 1, ink: '#00ff00' } },
     }
     await expect(inlineTreeImages({ type: 'div', props: { children: node } },
-      async () => ({ data: garbage, contentType: 'image/jpeg' }))).resolves.toBeUndefined()
-
+      async () => ({ data: garbage, contentType: 'image/jpeg' }))).rejects.toThrow(LAYOUT_TREATMENT_FAILED)
     expect(node.props.__treatment).toBeUndefined()
-    // Falls back to the ORIGINAL fetched (untreated) bytes — not baked, not thrown.
-    expect(node.props.src).toBe(`data:image/jpeg;base64,${Buffer.from(garbage).toString('base64')}`)
+    // Not inlined untreated.
+    expect(node.props.src).toBe('http://x/corrupt.jpg')
   })
 })

@@ -15,9 +15,15 @@
  * strips the tag so satori never sees a prop it doesn't understand.
  */
 
+import sharp from 'sharp'
+
 import { bakeInProcess } from './renderProcess'
 
 import type { TreatmentBakeTag } from '../../shared/template-grid/treatment'
+import {
+  LAYOUT_IMAGES_TOO_LARGE, LAYOUT_MAX_IMAGE_BYTES, LAYOUT_MAX_TREATED, LAYOUT_MAX_TREATED_AREA,
+  LAYOUT_TOO_MANY_TREATED, LAYOUT_TREATED_TOO_LARGE, LAYOUT_TREATMENT_FAILED,
+} from '../../shared/template-grid/limits'
 
 interface TreeNode {
   type?: string
@@ -34,7 +40,13 @@ function collectImgNodes(node: unknown, out: TreeNode[] = []): TreeNode[] {
   return out
 }
 
-export type ImageFetcher = (url: string) => Promise<{ data: ArrayBuffer; contentType: string }>
+/** The bytes the render may still fetch (fix round 3): a fetcher that streams takes from it as bytes arrive. */
+export interface ByteBudget { left: number }
+
+export type ImageFetcher = (url: string, o?: { signal?: AbortSignal; budget?: ByteBudget }) => Promise<{ data: ArrayBuffer; contentType: string }>
+
+/** A limit on the layout's pictures (their total size, how many are treated and how big): the route answers 400. */
+export class ImageLimitError extends Error {}
 
 export async function defaultImageFetcher(url: string): Promise<{ data: ArrayBuffer; contentType: string }> {
   const res = await fetch(url)
@@ -109,43 +121,86 @@ export async function bakeTreatmentCore(sharp: any, data: ArrayBuffer, treatment
 }
 
 /** The bake, run in the render process (./renderProcess.ts). */
-export async function bakeTreatment(data: ArrayBuffer, treatment: TreatmentBakeTag): Promise<ArrayBuffer> {
-  return bakeInProcess(data, treatment)
+export async function bakeTreatment(data: ArrayBuffer, treatment: TreatmentBakeTag, signal?: AbortSignal): Promise<ArrayBuffer> {
+  return bakeInProcess(data, treatment, signal)
+}
+
+export interface InlineOptions {
+  /** Stops the fetches and the bakes (the render's Stop, disconnect or deadline). */
+  signal?: AbortSignal
+  /** The most bytes fetched in all (LAYOUT_MAX_IMAGE_BYTES). */
+  maxBytes?: number
 }
 
 /** Mutates the tree in place: every http(s) img src becomes a data URI, with
  *  any tagged photo treatment ('duotone'/'grain') baked into the bytes first.
  *  Duplicate URLs are fetched once, and each distinct (URL, treatment) is
- *  baked once and inlined as one shared string (R1.6 fix round 2: a layout
- *  repeating a treated picture no longer bakes it per element). Throws on the
- *  first failed fetch (a dead URL should fail the render loudly). Treatment
- *  is cosmetic and opt-in, so a bake failure (corrupt/unsupported source
- *  image, e.g. a CMYK JPEG sharp can't decode) does NOT fail the render — it
- *  falls back to the untreated fetched image and logs a warning instead.
- *  `__treatment` is always stripped, whether or not it was applied. */
-export async function inlineTreeImages(tree: unknown, fetcher: ImageFetcher = defaultImageFetcher): Promise<void> {
+ *  baked once and inlined as one shared string. Throws on the first failed
+ *  fetch (a dead URL should fail the render loudly). `__treatment` is always
+ *  stripped, whether or not it was applied.
+ *
+ *  Fix round 3: at most LAYOUT_MAX_TREATED distinct treated pictures, each
+ *  at most LAYOUT_MAX_TREATED_AREA pixels (read from its header here, before
+ *  the bake is queued), and at most `maxBytes` fetched in all; each refused
+ *  plainly (ImageLimitError). A bake that fails fails the render: the
+ *  picture is never shown untreated in its place. The signal stops fetches
+ *  and bakes. */
+export async function inlineTreeImages(tree: unknown, fetcher: ImageFetcher = defaultImageFetcher, opts: InlineOptions = {}): Promise<void> {
   const imgs = collectImgNodes(tree)
+  const maxBytes = opts.maxBytes ?? LAYOUT_MAX_IMAGE_BYTES
+  const keyOf = (src: string, t: TreatmentBakeTag | undefined) => `${src}\u0000${t ? JSON.stringify(t) : ''}`
+  const treated = new Set(imgs.filter(n => n.props?.__treatment && /^https?:\/\//.test(n.props.src!)).map(n => keyOf(n.props!.src!, n.props!.__treatment)))
+  if (treated.size > LAYOUT_MAX_TREATED) {
+    for (const n of imgs) if (n.props && '__treatment' in n.props) delete n.props.__treatment
+    throw new ImageLimitError(LAYOUT_TOO_MANY_TREATED)
+  }
+  const budget: ByteBudget = { left: maxBytes }
+  let fetchedBytes = 0
   const fetched = new Map<string, Promise<{ data: ArrayBuffer; contentType: string }>>()
   const inlined = new Map<string, Promise<string>>()
+  const fetchOnce = (src: string) => {
+    let pending = fetched.get(src)
+    if (!pending) {
+      pending = fetcher(src, { signal: opts.signal, budget }).then((got) => {
+        fetchedBytes += got.data.byteLength
+        if (fetchedBytes > maxBytes) throw new ImageLimitError(LAYOUT_IMAGES_TOO_LARGE)
+        return got
+      }, (e: unknown) => {
+        if ((e as Error)?.message === LAYOUT_IMAGES_TOO_LARGE) throw new ImageLimitError(LAYOUT_IMAGES_TOO_LARGE)
+        throw e
+      })
+      fetched.set(src, pending)
+    }
+    return pending
+  }
   await Promise.all(imgs.map(async (n) => {
     const treatment = n.props?.__treatment
     if (n.props && '__treatment' in n.props) delete n.props.__treatment
     const src = n.props!.src!
     if (!/^https?:\/\//.test(src)) return
-    const key = `${src}\u0000${treatment ? JSON.stringify(treatment) : ''}`
+    const key = keyOf(src, treatment)
     let uri = inlined.get(key)
     if (!uri) {
       uri = (async () => {
-        let pending = fetched.get(src)
-        if (!pending) { pending = fetcher(src); fetched.set(src, pending) }
-        let { data, contentType } = await pending
+        let { data, contentType } = await fetchOnce(src)
         if (treatment) {
+          let area = 0
           try {
-            data = await bakeTreatment(data, treatment)
-            contentType = 'image/png'
-          } catch (err) {
-            console.warn(`[inlineImages] treatment bake failed (kind=${treatment.kind}, src=${src.slice(0, 200)}) — falling back to untreated image`, err)
+            const meta = await sharp(Buffer.from(data), { limitInputPixels: false }).metadata()
+            area = (meta.width ?? 0) * (meta.height ?? 0)
           }
+          catch { throw new Error(LAYOUT_TREATMENT_FAILED) }
+          if (!area) throw new Error(LAYOUT_TREATMENT_FAILED)
+          if (area > LAYOUT_MAX_TREATED_AREA) throw new ImageLimitError(LAYOUT_TREATED_TOO_LARGE)
+          try {
+            data = await bakeTreatment(data, treatment, opts.signal)
+          }
+          catch (err) {
+            if (opts.signal?.aborted) throw err
+            console.warn(`[inlineImages] treatment bake failed (kind=${treatment.kind}, src=${src.slice(0, 200)})`, err)
+            throw new Error(LAYOUT_TREATMENT_FAILED)
+          }
+          contentType = 'image/png'
         }
         return `data:${contentType};base64,${Buffer.from(data).toString('base64')}`
       })()
