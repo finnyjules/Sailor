@@ -1,7 +1,27 @@
-import { ref } from 'vue'
+import { ref, reactive, watch } from 'vue'
 import type { PaintStroke } from '~/lib/compositor/brushStamp'
+import { TIPS, TIP_IDS, defaultSettings, REF_W, type TipId } from '~/lib/brushTips/tips'
+import { encodePts, type Sample, type TipStroke } from '~/lib/brushTips/record'
 
 export type BrushMode = 'paint' | 'mask'
+
+const STORE_KEY = 'sailor.brushTips.v1'
+function loadTips() {
+  const settings = Object.fromEntries(TIP_IDS.map(t => [t, defaultSettings(t)])) as Record<TipId, Record<string, number>>
+  const size = Object.fromEntries(TIP_IDS.map(t => [t, TIPS[t].defaultSize])) as Record<TipId, number>
+  let tip: TipId = 'spray'
+  try {
+    const raw = JSON.parse(localStorage.getItem(STORE_KEY) || 'null')
+    if (raw && typeof raw === 'object') {
+      if (TIP_IDS.includes(raw.tip)) tip = raw.tip
+      for (const t of TIP_IDS) {
+        for (const k of Object.keys(settings[t])) { const v = raw.settings?.[t]?.[k]; if (typeof v === 'number' && Number.isFinite(v)) settings[t][k] = v }
+        const sz = raw.size?.[t]; if (typeof sz === 'number' && Number.isFinite(sz)) size[t] = sz
+      }
+    }
+  } catch { /* bad or blocked storage: defaults */ }
+  return { tip, settings, size }
+}
 
 export function useBrushPaint() {
   const active = ref(false)
@@ -40,8 +60,44 @@ export function useBrushPaint() {
   }
   const liveStroke = () => live
 
+  const saved = loadTips()
+  const tip = ref<TipId>(saved.tip)
+  const tipSettings = reactive(saved.settings)
+  const tipSize = reactive(saved.size)
+  let saveTimer: ReturnType<typeof setTimeout> | null = null
+  watch([tip, tipSettings, tipSize], () => {
+    if (saveTimer) clearTimeout(saveTimer)
+    saveTimer = setTimeout(() => { try { localStorage.setItem(STORE_KEY, JSON.stringify({ tip: tip.value, settings: tipSettings, size: tipSize })) } catch { /* ignore */ } }, 150)
+  }, { deep: true })
+  function resetTipSettings(t: TipId) { Object.assign(tipSettings[t], defaultSettings(t)) }
+
+  let liveTip: TipStroke | null = null
+  let tipSamples: Sample[] = []
+  let t0 = 0
+  function beginTipStroke(x: number, y: number, tMs: number) {
+    t0 = tMs
+    tipSamples = [{ x, y, t: 0 }]
+    const rec: TipStroke = { tip: tip.value, v: 1, size: tipSize[tip.value] / REF_W, settings: { ...tipSettings[tip.value] }, seed: (Math.random() * 0xffffffff) >>> 0, pts: encodePts(tipSamples) }
+    if (eraser.value) rec.erase = true
+    liveTip = rec
+  }
+  function pushTipSample(x: number, y: number, tMs: number) {
+    if (!liveTip) return
+    const t = Math.max(tipSamples[tipSamples.length - 1]!.t, tMs - t0)
+    const last = tipSamples[tipSamples.length - 1]!
+    if (last.x === x && last.y === y && last.t === t) return
+    tipSamples.push({ x, y, t })
+    liveTip.pts = encodePts(tipSamples)
+  }
+  const extendTipStroke = (x: number, y: number, tMs: number) => pushTipSample(x, y, tMs)
+  function holdTipStroke(tMs: number) { const l = tipSamples[tipSamples.length - 1]; if (l) pushTipSample(l.x, l.y, tMs) }
+  const liveTipStroke = () => liveTip
+  function endTipStroke(): TipStroke | null { const s = liveTip; liveTip = null; tipSamples = []; if (s) s.pts = s.pts.slice(); return s }
+
   return {
     active, mode, sizePx, color, opacity, hardness, smoothing, eraser, cursor, hasLiveStroke,
     setActive, radiusNorm, beginStroke, extendStroke, endStroke, liveStroke,
+    tip, tipSettings, tipSize, resetTipSettings,
+    beginTipStroke, extendTipStroke, holdTipStroke, liveTipStroke, endTipStroke,
   }
 }
