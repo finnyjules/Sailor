@@ -210,9 +210,11 @@ function moreEffect() { emit('more-effect') }
 }
 /* Row 1 (tips + modes): the two segments never wrap internally, and the row
    itself never wraps either — the bar widens (up to max-width) to fit them
-   on one line instead. */
+   on one line instead. Its inline padding keeps the last mode button (Mask) off
+   the bar's edge, inset like the wrapping rows below. */
 .row-nowrap {
   flex-wrap: nowrap;
+  padding-inline: 4px;
 }
 .seg {
   display: flex;

@@ -91,7 +91,8 @@ import { isTypingInField } from '~/composables/pen/usePen'
 import PenOverlay from '~/components/pen/PenOverlay.vue'
 import PenToolbar from '~/components/pen/PenToolbar.vue'
 import { useBrushPaint, paintTargetMatches, effectLayerMatches } from '~/composables/useBrushPaint'
-import { paintGalleryInclude, effectGalleryInclude, brushEffectLabel } from '~/lib/brushTips/effects'
+import { paintGalleryInclude, effectGalleryInclude, brushEffectLabel, DEFAULT_BRUSH_EFFECT, EFFECT_LAYER_FILL, withPaintedEffect, brushIdIsStale } from '~/lib/brushTips/effects'
+import { myEffectsLoaded } from '~/lib/myEffects/library'
 import { MATERIAL_IDS, MATERIALS, type MaterialId } from '~/lib/brushTips/materials'
 import { toWidthNorm, brushBoxFromStrokes, strokeRadiusPx, maskStrokeToLocal, type PaintStroke } from '~/lib/compositor/brushStamp'
 import BrushToolbar from '~/components/vue-canvas/compositor/BrushToolbar.vue'
@@ -2627,7 +2628,7 @@ onBeforeUnmount(() => {
 // Any selection change invalidates the live brush-mask canvas — it's seeded
 // per-slot from that slot's maskUrl and must not be reused stale.
 watch(selectedLocalId, () => { wiredBrushMask = null })
-// Leaving Brush entirely, or flipping to Paint mode, also drops the live mask
+// Leaving Brush entirely, or leaving Mask mode, also drops the live mask
 // canvas so re-entering Mask mode re-seeds it from the persisted maskUrl.
 watch(brush.active, (on) => { if (!on) wiredBrushMask = null })
 watch(brush.mode, (m) => { if (m !== 'mask') wiredBrushMask = null })
@@ -2882,11 +2883,28 @@ function pickShaderFxEffect(id: string) {
 // ── Brush galleries: the toolbar's More… (paint with a library shader / paint an effect) and
 // a painted-effect layer's Change effect…. One gallery, three purposes.
 type BrushGalleryPurpose = 'paint' | 'effect' | 'change'
-const brushGallery = ref<BrushGalleryPurpose | null>(null)
+// `brushGalleryOpen` drives the gallery; `brushGallery` (the purpose) is NOT cleared on close,
+// so the closing gallery keeps its title and filter through its leave animation.
+const brushGalleryOpen = ref(false)
+const brushGallery = ref<BrushGalleryPurpose>('paint')
+const BRUSH_GALLERY_COPY: Record<BrushGalleryPurpose, { title: string; confirm: string }> = {
+  paint: { title: 'Paint with a shader', confirm: 'Paint with it' },
+  effect: { title: 'Paint an effect', confirm: 'Use effect' },
+  change: { title: 'Change effect', confirm: 'Use effect' },
+}
 function openBrushGallery(purpose: BrushGalleryPurpose) {
   loadShaderFxCatalog() // the catalogue fills in as it lands, like the effect picker above
   brushGallery.value = purpose
+  brushGalleryOpen.value = true
 }
+// Remembered toolbar ids (localStorage) can outlive their effect: a removed My effect, a
+// renamed built-in. Once the catalogue is in, fall back rather than paint with nothing.
+watch([shaderFxCatalog, myEffectsLoaded], ([cat, mineLoaded]) => {
+  if (!cat) return
+  if (brushIdIsStale(brush.effect.value, cat.effects, mineLoaded)) brush.effect.value = DEFAULT_BRUSH_EFFECT
+  const sp = brush.shaderPaint.value
+  if (sp && brushIdIsStale(sp, cat.effects, mineLoaded)) brush.chooseShaderPaint(null)
+}, { immediate: true })
 /** The one backdrop_shader a painted-effect layer carries. */
 function paintedEffectOf(layer: LocalLayer | null | undefined): (EffectInstance & { effectId?: string }) | undefined {
   return layer ? effectStackOf(layer).find(e => e.type === 'backdrop_shader') as (EffectInstance & { effectId?: string }) | undefined : undefined
@@ -2901,21 +2919,25 @@ const brushGallerySelectedId = computed<string | null>(() => {
   const p = brushGallery.value
   if (p === 'paint') return brush.shaderPaint.value
   if (p === 'effect') return brush.effect.value
-  if (p === 'change') { const id = paintedEffectOf(selectedLocal.value)?.effectId; return id ? resolveEffectId(id) : null }
-  return null
+  const id = paintedEffectOf(selectedLocal.value)?.effectId
+  return id ? resolveEffectId(id) : null
 })
 function confirmBrushGallery(id: string) {
   const p = brushGallery.value
-  brushGallery.value = null
+  brushGalleryOpen.value = false
   if (p === 'paint') brush.chooseShaderPaint(id)
   else if (p === 'effect') brush.effect.value = id
   else if (p === 'change') {
     const l = selectedLocal.value
+    if (!l) return
     const fx = paintedEffectOf(l)
-    if (!l || !fx || fx.effectId === id) return
+    if (fx && fx.visible !== false && resolveEffectId(fx.effectId ?? '') === id) { brush.effect.value = id; return }
     if (tipLive && !tipLive.down) commitTipStroke() // a dripping stroke is its own step first
-    // One history step (setLocal). Params are per-effect, so they reset, as pickShaderFxEffect does.
-    setLayerStack(l.id, layerStack(l).map(e => (e.id === fx.id ? { ...e, effectId: id, params: {} } as EffectInstance : e)))
+    // One history step (setLocal): switch the effect (params reset, as pickShaderFxEffect does)
+    // and show it again if hidden; a layer that lost its backdrop_shader gets a fresh one, built
+    // as a new painted-effect layer's is.
+    setLayerStack(l.id, withPaintedEffect(layerStack(l), id))
+    brush.effect.value = id // the next stroke continues in this layer
   }
   retryFieldCatalog()
 }
@@ -5877,7 +5899,7 @@ function renderStack(wallT?: number, live = false) {
       items.push({ type: 'local', key: `l:${tmp.id}`, layer: tmp })
     }
   }
-  // Live TIP stroke (Paint mode: spray / round / bristle). The stroke itself is folded in by
+  // Live TIP stroke (Paint and Effect mode: spray / round / bristle). The stroke itself is folded in by
   // the renderer (setLiveTipStroke, keyed by layer id); here we only keep the target layer's
   // BOX fitted to [...strokes, live] on every live frame — pointer move, hold tick and each
   // drip-tail frame — because the renderer's keep-proportions scale reads the box (see the
@@ -7036,7 +7058,7 @@ function activeBrushLayer(): BrushLayer | null {
   if (brushLayerId) { const l = localLayers.value.find(x => x.id === brushLayerId); if (l && l.kind === 'brush') return l as BrushLayer }
   return null
 }
-// ── Tip strokes (Paint mode: spray can / round / bristle) ─────────────────────
+// ── Tip strokes (Paint and Effect mode: spray can / round / bristle) ─────────────────────
 // `tipLive` (declared next to `brush`) is the in-progress tip stroke and where it lands.
 // `pending` is a brand-new brush layer that is NOT in the document yet (no history until
 // commit); `layerId` is its id or the existing target's. After release a spray stroke stays
@@ -7055,13 +7077,13 @@ function tipHoldLoop() {
 /** The layer a tip stroke starts when nothing selected matches (appended on top on commit,
  *  via addLocal, like every new brush layer). Paint mode: the toolbar colour, plus the material
  *  or, instead, a library shader fill. Effect mode: the paint is hidden and drives one
- *  backdrop_shader running the chosen effect (still at speed 0); the fill is the toolbar colour,
- *  never drawn but valid. */
+ *  backdrop_shader running the chosen effect (still at speed 0); the fill is opaque white, never
+ *  drawn, because its alpha scales the effect's coverage (destination-in) and a toolbar colour
+ *  with alpha would weaken the effect for good. */
 function newTipLayer(effectMode: boolean): BrushLayer {
   if (effectMode) {
-    const stack = addEffect([], 'backdrop_shader')
-      .map(fx => (fx.type === 'backdrop_shader' ? { ...fx, effectId: brush.effect.value, speed: 0 } : fx)) as EffectInstance[]
-    return createBrushLayer({ fill: brush.color.value, showPaint: false, ...writeStackToLayer(stack) } as Partial<BrushLayer>)
+    const stack = withPaintedEffect([], brush.effect.value)
+    return createBrushLayer({ fill: EFFECT_LAYER_FILL, showPaint: false, ...writeStackToLayer(stack) } as Partial<BrushLayer>)
   }
   const sp = brush.shaderPaint.value
   if (sp) {
@@ -9591,13 +9613,15 @@ onUnmounted(() => {
       <!-- The brush galleries (teleported): More… in Paint / Effect mode and a painted-effect
            layer's Change effect…. -->
       <ShaderEffectGallery
-        :open="brushGallery !== null"
+        :open="brushGalleryOpen"
         :effects="shaderFxCatalog?.effects ?? []"
         :include="brushGallery === 'paint' ? paintGalleryInclude : effectGalleryInclude"
-        :title="brushGallery === 'paint' ? 'Paint with a shader' : 'Paint an effect'"
+        :title="BRUSH_GALLERY_COPY[brushGallery].title"
+        :confirm-label="BRUSH_GALLERY_COPY[brushGallery].confirm"
+        subtitle=""
         :selected-id="brushGallerySelectedId"
         :thumbs="{}"
-        @close="brushGallery = null"
+        @close="brushGalleryOpen = false"
         @confirm="confirmBrushGallery"
       />
       <!-- Toolbar -->

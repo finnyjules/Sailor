@@ -1,4 +1,6 @@
-import { effectReadsInput, getEffectSync } from '~/lib/shaderfx/catalogStore'
+import { effectReadsInput, getEffectSync, resolveEffectId } from '~/lib/shaderfx/catalogStore'
+import { addEffect, type EffectInstance } from '~/lib/compositor/effectStack'
+import { myEffectIdOf } from '~/lib/myEffects/defs'
 
 export interface BrushEffect {
   id: string
@@ -35,4 +37,30 @@ export function brushEffectLabel(id: string): string {
   const curated = BRUSH_EFFECTS.find(e => e.id === id)
   if (curated) return curated.label
   return getEffectSync(id)?.name ?? 'Effect'
+}
+
+/** A painted-effect layer's fill. Never drawn (showPaint: false), but its alpha scales the
+ *  coverage that drives the effect through destination-in, so it is always opaque white:
+ *  a toolbar colour carrying alpha would weaken the effect for good. */
+export const EFFECT_LAYER_FILL = '#ffffff'
+
+/** `stack` with its one backdrop_shader running `effectId`: an existing one switches effect
+ *  (params reset, since they are per-effect) and is shown again if hidden; with none, one is
+ *  added exactly as a new painted-effect layer gets it (addEffect's defaults, speed 0). */
+export function withPaintedEffect(stack: EffectInstance[], effectId: string): EffectInstance[] {
+  if (stack.some(e => e.type === 'backdrop_shader')) {
+    return stack.map(e => (e.type === 'backdrop_shader' ? { ...e, effectId, params: {}, visible: true } : e))
+  }
+  return addEffect(stack, 'backdrop_shader')
+    .map(e => (e.type === 'backdrop_shader' ? { ...e, effectId, speed: 0 } : e))
+}
+
+/** True when a remembered brush id (the toolbar's effect or shader paint) no longer names an
+ *  effect in `effects`. Resolves legacy aliases; pinned My effect ids (`mine_x~vN`) are in the
+ *  catalogue as their own defs. A My effect id is never judged stale before the My effects
+ *  library has loaded, since the catalogue publishes the built-ins first. */
+export function brushIdIsStale(id: string, effects: readonly { id: string }[], myEffectsLoaded: boolean): boolean {
+  const want = resolveEffectId(id)
+  if (effects.some(e => e.id === want)) return false
+  return !myEffectIdOf(id) || myEffectsLoaded
 }
