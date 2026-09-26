@@ -233,6 +233,8 @@ function makeShadow(three: typeof THREE, aspect: number): THREE.Mesh {
 
 interface RingState {
   quads: THREE.Mesh[]; aspects: number[]; fades: number[]
+  /** Cards the layout is holding inside a window this frame (their shadows are off). */
+  clipped: boolean[]
   /** The three.js namespace the scene was built with — `update` has none of its own, and the
    *  reflections are made lazily, the first time Reflection goes above 0. */
   three: typeof THREE
@@ -471,7 +473,7 @@ export function makeShowcaseEffect(spec: ShowcaseEffectSpec): SpaceTypeEffect {
       // Set for every card tile (image or fill) that got a rounded-rect corner mask attached
       // below — stashed onto mesh.userData.matUniforms so `update` can drive `uCorner` live
       // from the slider.
-      let cornerUniforms: { uCorner: { value: number }; uAspect: { value: number } } | undefined
+      let cornerUniforms: { uCorner: { value: number }; uAspect: { value: number }; uClip: { value: THREE.Vector4 } } | undefined
       // Set for every card tile: the soft shadow quad that rides behind it (see makeShadow).
       let cardShadow: THREE.Mesh | undefined
 
@@ -548,16 +550,18 @@ export function makeShowcaseEffect(spec: ShowcaseEffectSpec): SpaceTypeEffect {
           uCorner: { value: n(params, 'cornerRadius') },
           uAspect: { value: aspect },
           uUvScale: { value: new three.Vector2(uvScale[0], uvScale[1]) },
+          uClip: { value: new three.Vector4(0, 0, 1, 1) },
         }
         material.onBeforeCompile = (shader) => {
           shader.uniforms.uCorner = uniforms.uCorner
           shader.uniforms.uAspect = uniforms.uAspect
           shader.uniforms.uUvScale = uniforms.uUvScale
+          shader.uniforms.uClip = uniforms.uClip
           shader.vertexShader = 'varying vec2 vCardUv;\n' + shader.vertexShader.replace(
             '#include <uv_vertex>',
             '#include <uv_vertex>\n\tvCardUv = uv;',
           )
-          let frag = 'varying vec2 vCardUv;\nuniform float uCorner;\nuniform float uAspect;\nuniform vec2 uUvScale;\n' + shader.fragmentShader
+          let frag = 'varying vec2 vCardUv;\nuniform float uCorner;\nuniform float uAspect;\nuniform vec2 uUvScale;\nuniform vec4 uClip;\n' + shader.fragmentShader
           if (tile.fillKind === 'image' && tex) {
             // UV varying: three@0.171.0's meshbasic fragment shader declares `vMapUv` (not
             // `vUv`) for USE_MAP — see uv_pars_fragment.glsl.js: `varying vec2 vMapUv;`
@@ -600,6 +604,8 @@ export function makeShowcaseEffect(spec: ShowcaseEffectSpec): SpaceTypeEffect {
                  vec2 q = abs(p) - (hs - vec2(r));
                  float d = length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - r;
                  if (d > 0.0) discard;                               // outside the rounded rect
+                 // The layout's window (TileTransform.clip), in the same card space.
+                 if (vCardUv.x < uClip.x || vCardUv.y < uClip.y || vCardUv.x > uClip.z || vCardUv.y > uClip.w) discard;
                }`,
           )
         }
@@ -702,7 +708,7 @@ export function makeShowcaseEffect(spec: ShowcaseEffectSpec): SpaceTypeEffect {
       quads.push(mesh)
     }
 
-    root.userData.ringState = { quads, aspects: new Array(quads.length).fill(1), fades: new Array(quads.length).fill(1), three } as RingState
+    root.userData.ringState = { quads, aspects: new Array(quads.length).fill(1), fades: new Array(quads.length).fill(1), clipped: new Array(quads.length).fill(false), three } as RingState
     // The group's resting pose belongs to the layout (the ring's opening/tilt, a tabletop
     // for Iso, head-on for a grid…). Kept in sync with `update`'s identical call below.
     const built = resolve(params)
@@ -750,8 +756,14 @@ export function makeShowcaseEffect(spec: ShowcaseEffectSpec): SpaceTypeEffect {
       // Live corner-radius drive — every card quad (image or fill) carries `matUniforms`
       // (see buildScene); glyph/letter/word quads have no mask attached and are silently
       // skipped here.
-      const matUniforms = quad.userData.matUniforms as { uCorner: { value: number } } | undefined
-      if (matUniforms) matUniforms.uCorner.value = n(params, 'cornerRadius')
+      const matUniforms = quad.userData.matUniforms as { uCorner: { value: number }; uClip: { value: THREE.Vector4 } } | undefined
+      if (matUniforms) {
+        matUniforms.uCorner.value = n(params, 'cornerRadius')
+        const c = tf.clip
+        matUniforms.uClip.value.set(c?.[0] ?? 0, c?.[1] ?? 0, c?.[2] ?? 1, c?.[3] ?? 1)
+      }
+      // A windowed card's shadow would spill past the window, so it has none.
+      st.clipped[i] = !!tf.clip
     }
 
     const pose = layout.pose?.(lp, t01)
@@ -798,7 +810,7 @@ export function makeShowcaseEffect(spec: ShowcaseEffectSpec): SpaceTypeEffect {
         const u = (shadowMesh.material as THREE.ShaderMaterial).uniforms
         u.uStrength!.value = shadow * opacity
         u.uCorner!.value = n(params, 'cornerRadius')
-        shadowMesh.visible = shadow * opacity > 0.001
+        shadowMesh.visible = shadow * opacity > 0.001 && !st.clipped[i]
       }
     }
 

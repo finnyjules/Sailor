@@ -43,6 +43,10 @@ import { dominoLayout } from './domino'
 import { assembleLayout } from './assemble'
 import { pagestackLayout } from './pagestack'
 import { coverstackLayout } from './coverstack'
+import { panelpushLayout } from './panelpush'
+import { wipeLayout } from './wipe'
+import { splitcolumnsLayout } from './splitcolumns'
+import { peelLayout } from './peel'
 
 export type LayoutFamily = typeof LAYOUT_FAMILIES[number]
 /** Picker headings, in display order. */
@@ -81,9 +85,9 @@ export interface ShowcaseLayout {
 export const SHOWCASE_LAYOUTS: ShowcaseLayout[] = [
   ringLayout, coverringLayout, sphereLayout, globeLayout, cloudLayout, domeLayout, spiralLayout, bloomLayout, cubeLayout,
   coverflowLayout, focusLayout, filmstripLayout, totemLayout, feedLayout, cascadeLayout, conveyorLayout,
-  gridLayout, marqueeLayout, isoLayout, turntableLayout, parallaxLayout,
+  gridLayout, marqueeLayout, isoLayout, turntableLayout, parallaxLayout, splitcolumnsLayout,
   orbitLayout, haloLayout, wheelLayout, vortexLayout, turnstileLayout,
-  stackLayout, tunnelLayout, deckLayout, coverstackLayout, slideLayout, fanLayout, stageLayout, focusshiftLayout, doorsLayout, dominoLayout, pagestackLayout,
+  stackLayout, tunnelLayout, deckLayout, coverstackLayout, slideLayout, fanLayout, stageLayout, focusshiftLayout, doorsLayout, dominoLayout, pagestackLayout, peelLayout, panelpushLayout, wipeLayout,
   trailLayout, burstLayout, tossLayout, danceLayout, assembleLayout,
   medleyLayout,
 ]

@@ -50,7 +50,7 @@ export interface ProjectedCard {
 
 /** One card → its four projected corners. `null` when any corner is at or behind the camera. */
 export function projectCard(
-  tf: { x: number; y: number; z: number; rotY: number; rotX?: number; rotZ?: number; scale: number; opacity?: number },
+  tf: { x: number; y: number; z: number; rotY: number; rotX?: number; rotZ?: number; scale: number; opacity?: number; clip?: readonly [number, number, number, number] },
   pose: ShowcasePose, index: number, aspect = 1,
 ): ProjectedCard | null {
   const hw = (aspect * tf.scale) / 2, hh = tf.scale / 2
@@ -63,7 +63,11 @@ export function projectCard(
     return [v[0], v[1], v[2] + ROOT_PUSH]
   }
   const corners: [number, number][] = []
-  for (const [cx, cy] of [[-hw, hh], [hw, hh], [hw, -hh], [-hw, -hh]] as const) {
+  // A windowed card draws only its clipped part (TileTransform.clip, card 0…1 space, v up).
+  const [u0, v0, u1, v1] = tf.clip ?? [0, 0, 1, 1]
+  const x0 = (u0 - 0.5) * 2 * hw, x1 = (u1 - 0.5) * 2 * hw, y0 = (v0 - 0.5) * 2 * hh, y1 = (v1 - 0.5) * 2 * hh
+  if (x1 <= x0 || y1 <= y0) return null
+  for (const [cx, cy] of [[x0, y1], [x1, y1], [x1, y0], [x0, y0]] as const) {
     const v = toView([cx, cy, 0])
     const dist = CAMERA_Z - v[2]
     if (dist <= 0.2) return null

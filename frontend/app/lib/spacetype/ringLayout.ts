@@ -26,6 +26,10 @@ export interface TileTransform {
   rotX?: number
   rotZ?: number
   opacity?: number
+  /** The part of the card to draw, as [u0, v0, u1, v1] in the card's own 0…1 space (v up).
+   *  Absent → all of it. Lets a layout hold its cards inside a fixed window: a card sliding
+   *  in is cut at the window's edge rather than crossing the background. Card tiles only. */
+  clip?: readonly [number, number, number, number]
 }
 
 export function ringTransform(i: number, n: number, p: RingParams, t01: number): TileTransform {

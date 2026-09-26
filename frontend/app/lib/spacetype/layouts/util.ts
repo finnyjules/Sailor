@@ -146,3 +146,32 @@ export function rowPlace(
   const x = pmod(centre + travel * length + length / 2, length) - length / 2
   return { x, length, fade: smoothstep(0, cardSize, length / 2 - Math.abs(x)) }
 }
+
+/** A window in layout space: left, bottom, right, top. */
+export type Rect = readonly [number, number, number, number]
+
+/** The part of a flat, upright card (centre cx, cy; w × h) that falls inside `win`, as the
+ *  card-space clip `TileTransform.clip` takes (0…1, v up). `null` when none of it does. */
+export function windowClip(cx: number, cy: number, w: number, h: number, win: Rect): [number, number, number, number] | null {
+  const u0 = (win[0] - (cx - w / 2)) / w, u1 = (win[2] - (cx - w / 2)) / w
+  const v0 = (win[1] - (cy - h / 2)) / h, v1 = (win[3] - (cy - h / 2)) / h
+  const c: [number, number, number, number] = [Math.max(0, u0), Math.max(0, v0), Math.min(1, u1), Math.min(1, v1)]
+  return c[2] - c[0] > 1e-4 && c[3] - c[1] > 1e-4 ? c : null
+}
+
+/** Height to draw a card of this aspect so it covers a w × h slot (the slot's window crops
+ *  the overflow) — how a framed layout fills its panels whatever shape the photos are. */
+export const coverScale = (aspect: number, w: number, h: number) => Math.max(h, w / Math.max(0.05, aspect))
+
+/** Window sizes for the framed layouts' Frame choice, width ÷ height. */
+export const FRAME_SHAPES: Record<string, number> = { portrait: 4 / 5, square: 1, wide: 16 / 9 }
+export const FRAME_SHAPE_IDS = ['portrait', 'square', 'wide']
+export const FRAME_SHAPE_LABELS = ['Portrait', 'Square', 'Wide']
+
+/** A framed window's width and height for a shape, sized from Card size and kept inside the
+ *  frame the camera sees (about 17 × 12.6 world units at the cards' depth, landscape). */
+export function frameSize(shape: string, cardSize: number): { W: number; H: number } {
+  const a = FRAME_SHAPES[shape] ?? 1
+  const H = Math.min(cardSize * 2.8, 10.5, 15 / a)
+  return { W: H * a, H }
+}

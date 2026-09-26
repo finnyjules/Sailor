@@ -70,6 +70,10 @@ import { showDominoEffect } from './showDomino'
 import { showAssembleEffect } from './showAssemble'
 import { showPagestackEffect } from './showPagestack'
 import { showCoverstackEffect } from './showCoverstack'
+import { showPanelpushEffect } from './showPanelpush'
+import { showWipeEffect } from './showWipe'
+import { showSplitcolumnsEffect } from './showSplitcolumns'
+import { showPeelEffect } from './showPeel'
 import { withSeparatorControls } from '../separator'
 import { showcaseEffectId } from '../layouts/index'
 
@@ -139,6 +143,7 @@ export const SPACE_TYPE_EFFECTS: SpaceTypeEffect[] = /* @__PURE__ */ [
   showIsoEffect,
   showTurntableEffect,
   showParallaxEffect,
+  showSplitcolumnsEffect,
   showOrbitEffect,
   showHaloEffect,
   showWheelEffect,
@@ -155,6 +160,9 @@ export const SPACE_TYPE_EFFECTS: SpaceTypeEffect[] = /* @__PURE__ */ [
   showDoorsEffect,
   showDominoEffect,
   showPagestackEffect,
+  showPeelEffect,
+  showPanelpushEffect,
+  showWipeEffect,
   showTrailEffect,
   showBurstEffect,
   showTossEffect,

@@ -25,7 +25,7 @@ const SHOWCASE = [
   'showstack', 'showtunnel', 'showdeck', 'showslide', 'showfan', 'showstage', 'showfocusshift',
   'showtrail', 'showburst', 'showtoss', 'showdance', 'showmedley',
   'showcube', 'showconveyor', 'showturnstile', 'showdoors', 'showdomino', 'showassemble',
-  'showpagestack', 'showcoverstack',
+  'showpagestack', 'showcoverstack', 'showpanelpush', 'showwipe', 'showsplitcolumns', 'showpeel',
 ]
 const INELIGIBLE = ['coil', 'elastic', 'echo', 'blend', 'cascade', 'onionburst', 'ring', 'slot', 'pile', ...SHOWCASE]
 
