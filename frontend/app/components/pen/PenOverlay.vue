@@ -51,7 +51,7 @@ import { applyView, invertView, viewToSvg, type ViewMatrix } from '~/lib/sketch/
 import { spanPathD, SPARKLE_LIFETIME_MS, isTypingInField, type Pen } from '~/composables/pen/usePen'
 import { pointRolesForDoc, type PointRole } from '~/lib/sketch/pointRoles'
 import { clampChipOrigin } from '~/lib/sketch/chipClamp'
-import { TOOL_KEYS, isCleanupKey, isActionKey } from '~/composables/pen/penKeys'
+import { TOOL_KEYS, isCleanupKey, isActionKey, isApplePlatform } from '~/composables/pen/penKeys'
 import { cleanupBadges, BADGE_H, type CleanupBadge } from '~/lib/sketch/cleanup'
 import { WHEEL_OPEN_PX, ACTIONS } from '~/composables/pen/penActions'
 import { pieceKey } from '~/lib/sketch/pieces'
@@ -86,7 +86,7 @@ const emit = defineEmits<{
 // real primary click. It is a right press (pen stage 6: the pen's own menu or
 // wheel), never a place / pick / drag.
 const isMacPlatform = typeof navigator !== 'undefined'
-  && (/Mac|iPhone|iPad|iPod/.test((navigator as any).userAgentData?.platform || navigator.platform || ''))
+  && isApplePlatform((navigator as any).userAgentData?.platform || navigator.platform)
 function isCtrlContextClick(ev: PointerEvent) { return ev.ctrlKey && isMacPlatform }
 
 // the pen is read ONCE — fixed for the overlay's lifetime (re-key the overlay

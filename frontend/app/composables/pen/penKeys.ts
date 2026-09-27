@@ -182,3 +182,10 @@ export function handlePenKey(ev: KeyboardEvent, ctx: PenKeyContext, local?: { ca
   }
   return false
 }
+
+/** An Apple platform (a Mac ctrl-click is a right press there). Case-blind:
+ *  Chrome's `navigator.userAgentData.platform` reads "macOS", while the older
+ *  `navigator.platform` reads "MacIntel". */
+export function isApplePlatform(platform: string | undefined | null): boolean {
+  return /mac|iphone|ipad|ipod/i.test(platform || '')
+}
