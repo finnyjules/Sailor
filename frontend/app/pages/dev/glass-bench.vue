@@ -19,7 +19,7 @@
  * to Vue Flow's own hooks) and exposes them as beginMove()/endMove(), which
  * the bench calls itself right before and after each run.
  */
-import { onMounted, ref, computed, h, defineComponent, markRaw } from 'vue'
+import { onMounted, ref, computed, nextTick, h, defineComponent, markRaw } from 'vue'
 import { VueFlow, useVueFlow, Position } from '@vue-flow/core'
 import '@vue-flow/core/dist/style.css'
 import '@vue-flow/core/dist/theme-default.css'
@@ -27,7 +27,7 @@ import NodeShell from '~/components/vue-canvas/surfaces/NodeShell.vue'
 import NodeWell from '~/components/vue-canvas/surfaces/NodeWell.vue'
 import NodePort from '~/components/vue-canvas/NodePort.vue'
 import { createCanvasGlass, provideCanvasGlass } from '~/composables/useCanvasGlass'
-import type { GlassMode } from '~/lib/canvas/glassPolicy'
+import { countVisible, type GlassMode } from '~/lib/canvas/glassPolicy'
 
 definePageMeta({ layout: false })
 
@@ -132,6 +132,16 @@ const flowEdges = edgeDefs.map(e => ({
 const mode = ref<GlassMode>('smart')
 const canvasRootRef = ref<HTMLElement | null>(null)
 
+// Fix round 1, finding 1(c): blurAllowed's smart rule turns blur off once
+// more than GLASS_LIMITS.maxVisibleNodes (24) nodes are visible, and the
+// default (0,0,zoom 1) viewport put ~25 nodes on screen at the 1600×1000 dev
+// viewport (all 20 paired nodes plus the standalone grid's first row) — so
+// Smart silently measured the same as Never. This rest viewport frames just
+// the 10 overlapping pairs (20 nodes, comfortably under 24) and is where the
+// figure-eight pan/pinch-zoom below is centred, so the animated run still
+// crosses back and forth over the pairs the blur test cares about.
+const REST_VIEWPORT = { x: 0, y: 340, zoom: 1 }
+
 const {
   onMoveStart, onMoveEnd, getNodes, getEdges, viewport: vfViewport, setViewport,
 } = useVueFlow()
@@ -140,30 +150,58 @@ const {
 let moveStartCb: (() => void) | null = null
 let moveEndCb: (() => void) | null = null
 
+const getBoxes = () => getNodes.value
+  .filter(n => n.dimensions.width > 0)
+  .map(n => ({ id: n.id, x: n.computedPosition.x, y: n.computedPosition.y, w: n.dimensions.width, h: n.dimensions.height }))
+const getWires = () => getEdges.value
+  .filter(e => e.sourceX != null && e.targetX != null)
+  .map(e => ({ source: e.source, target: e.target, sx: e.sourceX, sy: e.sourceY, tx: e.targetX, ty: e.targetY }))
+const getSize = () => ({ width: canvasRootRef.value?.clientWidth ?? 0, height: canvasRootRef.value?.clientHeight ?? 0 })
+
 const canvasGlass = createCanvasGlass({
   onMoveStart: (cb) => { moveStartCb = cb; onMoveStart(cb) },
   onMoveEnd: (cb) => { moveEndCb = cb; onMoveEnd(cb) },
   viewport: vfViewport,
-  boxes: () => getNodes.value
-    .filter(n => n.dimensions.width > 0)
-    .map(n => ({ id: n.id, x: n.computedPosition.x, y: n.computedPosition.y, w: n.dimensions.width, h: n.dimensions.height })),
-  wires: () => getEdges.value
-    .filter(e => e.sourceX != null && e.targetX != null)
-    .map(e => ({ source: e.source, target: e.target, sx: e.sourceX, sy: e.sourceY, tx: e.targetX, ty: e.targetY })),
-  size: () => ({ width: canvasRootRef.value?.clientWidth ?? 0, height: canvasRootRef.value?.clientHeight ?? 0 }),
+  boxes: getBoxes,
+  wires: getWires,
+  size: getSize,
 }, { mode })
 
 // In Always mode the policy allows blur everywhere, but only nodes actually
 // listed in blurIds get `data-glass-blur` on their shell (see NodeShell.vue /
 // useNodeGlass) — so for Always to mean every shell blurs, every node id
 // must be in blurIds, overriding whatever nodesWithSomethingBehind computed.
-const effectiveBlurIds = computed(() => (mode.value === 'always' ? new Set(allNodeIds) : canvasGlass.blurIds.value))
+// In Never mode blur is never allowed at the root either way, but the set
+// should still be empty (fix round 1, finding 2) so no shell is left
+// carrying a stale `data-glass-blur` attribute from a previous Smart run.
+const effectiveBlurIds = computed(() => {
+  if (mode.value === 'always') return new Set(allNodeIds)
+  if (mode.value === 'never') return new Set<string>()
+  return canvasGlass.blurIds.value
+})
 provideCanvasGlass({ blurIds: effectiveBlurIds as any })
 
 function beginMove() { if (mode.value === 'smart') moveStartCb?.() }
 function endMove() { if (mode.value === 'smart') moveEndCb?.() }
 
-onMounted(() => canvasGlass.recompute())
+// True blur only happens where BOTH hold: the root allows it (canvas-glass--blur)
+// and the shell is in the blur set. Used by the readout and by the
+// blurredAtRest/blurredDuringPan measurements below.
+function sampleBlurredShellCount(): number {
+  return canvasGlass.rootClass.value.includes('canvas-glass--blur') ? effectiveBlurIds.value.size : 0
+}
+
+// ---------- always-visible readout (fix round 1, finding 1a) ----------
+const rootHasBlur = computed(() => canvasGlass.rootClass.value.includes('canvas-glass--blur'))
+const blurredShellCount = computed(() => effectiveBlurIds.value.size)
+const visibleNodeCount = computed(() => countVisible(getBoxes(), { ...vfViewport.value, ...getSize() }))
+
+// Vue Flow measures each node's dimensions asynchronously (ResizeObserver),
+// so a recompute() called synchronously in onMounted sees every box at
+// height 0 — which silently zeroes out every overlapping pair's overlap
+// test and left blurIds permanently empty (found while verifying fix round
+// 1's readout). A couple of animation frames is enough for real layout.
+onMounted(() => requestAnimationFrame(() => requestAnimationFrame(() => canvasGlass.recompute())))
 
 function setMode(next: GlassMode) {
   mode.value = next
@@ -171,24 +209,41 @@ function setMode(next: GlassMode) {
 }
 
 // ---------- the benchmark run ----------
-interface BenchResult { label: string; median: number; p95: number; dropped: number; frames: number }
+interface BenchResult {
+  label: string
+  median: number
+  p95: number
+  dropped: number
+  frames: number
+  // Fix round 1, finding 1(b): so a Smart run that never actually blurred
+  // (e.g. because too many nodes were visible) can be told apart from one
+  // that did, instead of just trusting the frame times.
+  blurredAtRest: number
+  blurredDuringPan: number
+}
 const results = ref<BenchResult[]>([])
 const running = ref(false)
 
 // Measurement code as specified in the task 9 brief: rAF deltas over a
-// 6-second figure-eight pan followed by a 6-second pinch zoom (1 → 0.6 → 1).
-async function runBench(label: string) {
+// 6-second figure-eight pan followed by a 6-second pinch zoom (1 → 0.6 → 1),
+// both centred on REST_VIEWPORT rather than (0,0,1) so the pan stays over
+// the overlapping-pairs section the rest viewport frames.
+async function runBench(label: string, blurredAtRest: number) {
   const deltas: number[] = []
   let last = performance.now(), live = true
   const tick = (t: number) => { deltas.push(t - last); last = t; if (live) requestAnimationFrame(tick) }
   requestAnimationFrame(tick)
+  let blurredDuringPan = blurredAtRest
+  let sampledMidPan = false
   const start = performance.now()
   await new Promise<void>((resolve) => {
     const step = () => {
       const t = (performance.now() - start) / 1000
       if (t > 12) { resolve(); return }
-      if (t <= 6) setViewport({ x: Math.sin(t * 2) * 400, y: Math.sin(t * 4) * 150, zoom: 1 })
-      else setViewport({ x: 0, y: 0, zoom: 1 - 0.4 * Math.sin(((t - 6) / 6) * Math.PI) })
+      if (t <= 6) setViewport({ x: REST_VIEWPORT.x + Math.sin(t * 2) * 400, y: REST_VIEWPORT.y + Math.sin(t * 4) * 150, zoom: REST_VIEWPORT.zoom })
+      else setViewport({ x: REST_VIEWPORT.x, y: REST_VIEWPORT.y, zoom: REST_VIEWPORT.zoom - 0.4 * Math.sin(((t - 6) / 6) * Math.PI) })
+      // Sampled once, at t≈3s (mid pan, per fix round 1 finding 1b).
+      if (!sampledMidPan && t >= 3) { sampledMidPan = true; blurredDuringPan = sampleBlurredShellCount() }
       requestAnimationFrame(step)
     }
     requestAnimationFrame(step)
@@ -201,6 +256,8 @@ async function runBench(label: string) {
     p95: s[Math.floor(s.length * 0.95)] ?? 0,
     dropped: s.filter(d => d > 20).length,
     frames: s.length,
+    blurredAtRest,
+    blurredDuringPan,
   }
   ;(window as any).__glassBench = [...((window as any).__glassBench ?? []), result]
   console.table([result])
@@ -212,9 +269,16 @@ async function runPan() {
   if (running.value) return
   running.value = true
   try {
+    // Force a Smart-mode recompute at the rest viewport, and let it settle,
+    // BEFORE sampling blurredAtRest and BEFORE beginMove() turns blur off for
+    // the move — otherwise this would sample the already-moving state, not
+    // the rest one the finding asks for.
+    if (mode.value === 'smart') canvasGlass.recompute()
+    await nextTick()
+    const blurredAtRest = sampleBlurredShellCount()
     beginMove()
     const label = mode.value === 'always' ? 'Always' : mode.value === 'never' ? 'Never' : 'Smart'
-    await runBench(label)
+    await runBench(label, blurredAtRest)
   } finally {
     endMove()
     running.value = false
@@ -231,6 +295,7 @@ function fmt(n: number) { return Number.isFinite(n) ? n.toFixed(1) : '—' }
       :nodes="flowNodes"
       :edges="flowEdges"
       :node-types="nodeTypes"
+      :default-viewport="REST_VIEWPORT"
       :min-zoom="0.2"
       :max-zoom="2"
       :nodes-draggable="false"
@@ -251,6 +316,17 @@ function fmt(n: number) { return Number.isFinite(n) ? n.toFixed(1) : '—' }
         <button type="button" class="node-btn" :disabled="running" @click="runPan">Pan</button>
       </div>
 
+      <!-- Always-visible readout (fix round 1, finding 1a) — makes it obvious
+           on screen, without waiting for a run, when Smart's 24-visible-node
+           limit has silently turned blur off. -->
+      <div data-testid="glass-readout" class="text-[12px] text-white/60">
+        <span data-testid="glass-readout-root">root blur: {{ rootHasBlur ? 'on' : 'off' }}</span>
+        ·
+        <span data-testid="glass-readout-shells">shells blurring: {{ blurredShellCount }}</span>
+        ·
+        <span data-testid="glass-readout-visible">visible: {{ visibleNodeCount }}</span>
+      </div>
+
       <table v-if="results.length" class="text-left text-[12px] text-white/70">
         <thead>
           <tr class="text-white/40">
@@ -258,7 +334,9 @@ function fmt(n: number) { return Number.isFinite(n) ? n.toFixed(1) : '—' }
             <th class="pr-4 font-medium">Median</th>
             <th class="pr-4 font-medium">p95</th>
             <th class="pr-4 font-medium">Dropped</th>
-            <th class="font-medium">Frames</th>
+            <th class="pr-4 font-medium">Frames</th>
+            <th class="pr-4 font-medium">Blur (rest)</th>
+            <th class="font-medium">Blur (pan)</th>
           </tr>
         </thead>
         <tbody>
@@ -267,7 +345,9 @@ function fmt(n: number) { return Number.isFinite(n) ? n.toFixed(1) : '—' }
             <td class="pr-4">{{ fmt(r.median) }} ms</td>
             <td class="pr-4">{{ fmt(r.p95) }} ms</td>
             <td class="pr-4">{{ r.dropped }}</td>
-            <td>{{ r.frames }}</td>
+            <td class="pr-4">{{ r.frames }}</td>
+            <td class="pr-4">{{ r.blurredAtRest }}</td>
+            <td>{{ r.blurredDuringPan }}</td>
           </tr>
         </tbody>
       </table>
