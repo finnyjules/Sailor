@@ -4426,7 +4426,7 @@ class FixFacesNode(IO.ComfyNode):
         return IO.Schema(
             node_id="FixFacesNode",
             display_name="Fix faces in a photo",
-            category="api node/image/Replicate",
+            category="api node/image/fal",
             description="Sharpens and rebuilds faces while upscaling, with Topaz. From about $0.08 a picture, by output size.",
             inputs=[
                 IO.Image.Input("image"),

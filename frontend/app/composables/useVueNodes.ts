@@ -5,6 +5,7 @@ import { ensureVarsInput } from '~/lib/collection/varsInput'
 import { stashTakesIntoProperties, restoreTakesFromProperties } from '~/lib/canvas/persistTakes'
 import { stashCapsuleIntoProperties, restoreCapsuleFromProperties } from '~/lib/canvas/persistCapsule'
 import { migrateKineticWorkflow } from '~/lib/vectortype/migrateKinetic'
+import { migrateFaceNodesWorkflow } from '~/lib/graph/migrateFaceNodes'
 
 // LiteGraph workflow format
 export interface LiteGraphNode {
@@ -363,6 +364,11 @@ export function useVueNodes(opts: { groupsBridge?: GroupsBridge; annotationsBrid
     const migratedKinetic = migrateKineticWorkflow(workflow as any)
     if (migratedKinetic) {
       console.info(`[Sailor] migrated ${migratedKinetic} KineticType node(s) to Vector Type`)
+    }
+    // Old CodeFormer Fix faces / InsightFace Face swap values onto the new inputs.
+    const migratedFaces = migrateFaceNodesWorkflow(workflow as any, definitions)
+    if (migratedFaces) {
+      console.info(`[Sailor] reset ${migratedFaces} old Fix faces / Face swap node(s) to the new settings`)
     }
     lastWorkflow = workflow
     opts.groupsBridge?.load(workflow.groups)

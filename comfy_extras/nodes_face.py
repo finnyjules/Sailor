@@ -20,7 +20,7 @@ class FaceSwapNode(IO.ComfyNode):
             display_name="Face swap",
             description="Put the face from one photo into another picture, with Easel. About $0.05 a picture. "
                         "Please don't use on real people without their consent, or on minors.",
-            category="image",
+            category="api node/image/fal",
             inputs=[
                 IO.Image.Input("source_face", tooltip="A photo of the face to use. A clear, well-lit face works best."),
                 IO.Image.Input("target_frames", tooltip="The picture to put the face in."),
@@ -51,7 +51,7 @@ class PersonSwapVideoNode(IO.ComfyNode):
             description="Replace the person in a video with the person in a photo, with Pixverse. "
                         "Swaps the whole person, not only the face. $0.15–0.20 up to 5 s, doubled up to 10 s. "
                         "Please don't use on real people without their consent, or on minors.",
-            category="video",
+            category="api node/video/fal",
             inputs=[
                 IO.String.Input("video_url", default="", tooltip="A video uploaded to Sailor, up to 10 seconds."),
                 IO.Image.Input("image", tooltip="A photo of the person to put in the video."),

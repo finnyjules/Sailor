@@ -47,8 +47,8 @@ COPY requirements.txt ./
 RUN pip install --index-url https://download.pytorch.org/whl/cpu torch torchvision torchaudio \
  && pip install -r requirements.txt
 
-# opencv (cv2) is imported by several comfy_extras nodes (face_restore,
-# subject_track, lip_sync) but isn't declared in requirements.txt. The headless
+# opencv (cv2) is imported by comfy_extras nodes (subject_track, frame_interp, …) but isn't
+# declared in requirements.txt. The headless
 # build avoids GUI deps. Separate layer so the heavy torch layer stays cached.
 RUN pip install opencv-python-headless
 

@@ -40,6 +40,8 @@ defineEmits<{ close: [] }>()
 // "legacy" — hidden behind the toggle so users see the modern set first.
 const MODERN_PROVIDERS = new Set<string>([
   'Replicate',
+  // Sailor's runner calls fal directly (Fix faces, Face swap, Person swap (video)).
+  'fal',
 ])
 function isLegacyProvider(provider: string): boolean {
   return !MODERN_PROVIDERS.has(provider)

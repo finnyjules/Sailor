@@ -56,6 +56,10 @@ export const NODE_KEYWORDS: Record<string, string[]> = {
   FaceSwap: [
     'face swap', 'swap face', 'replace face', 'change face', 'put face',
   ],
+  PersonSwapVideo: [
+    'person swap', 'swap person', 'replace person', 'swap person in video',
+    'replace someone in a video', 'face swap video', 'video face swap', 'swap face in video',
+  ],
   ConsistentFaceNode: [
     'consistent face', 'same face', 'same character', 'keep face', 'character consistency',
   ],

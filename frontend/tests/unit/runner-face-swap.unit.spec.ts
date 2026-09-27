@@ -18,10 +18,11 @@ import { RUNNER_NODE_RULES, classUpgradeOn, runnerTakesNode } from '#shared/runn
 import { EDIT_RATES, editMaxUsd } from '#shared/pricing/editRates'
 import { editCalls } from '#shared/pricing/editSettings'
 import {
-  FACE_SWAP_NEEDS_GENDER, faceSwapGender, faceSwapWorkflow, EASEL_FACE_SWAP_APP,
+  FACE_SWAP_NEEDS_GENDER, FACE_SWAP_ONE_PICTURE, faceSwapGender, faceSwapWorkflow, EASEL_FACE_SWAP_APP,
   FACE_SWAP_GENDER_OPTIONS, FACE_SWAP_GENDER_DEFAULT, FACE_SWAP_HAIR_OPTIONS, FACE_SWAP_HAIR_DEFAULT,
 } from '#shared/runner/faceSwap'
 import { easelFaceSwap } from '~~/server/runner/generators/easelFaceSwap'
+import { planNode } from '~~/server/runner/executors'
 import { RUNNER_ROUTES } from '~~/server/runner/generators/twins'
 import { requestProblems } from '~~/server/runner/requestRules'
 import { checkPayload, loadProviderSchema } from './helpers/providerSchema'
@@ -111,6 +112,33 @@ describe('Face swap on Easel (face-swap)', () => {
       3: { class_type: 'FaceSwap', inputs: { source_face: ['1', 0], target_frames: ['2', 0], gender: ['1', 0], keep_hair_from: 'The picture' } },
     }
     expect(requestProblems(linked, { runner: true })).toEqual([])
+  })
+})
+
+describe('one picture only', () => {
+  const prompt: ApiPrompt = {
+    11: { class_type: 'Image', inputs: { image: 'face.png' } },
+    12: { class_type: 'Image', inputs: { image: 'target.png' } },
+    1: { class_type: 'FaceSwap', inputs: { source_face: ['11', 0], target_frames: ['12', 0], gender: 'Female', keep_hair_from: 'The picture' } },
+  }
+  const file = (filename: string): OutputFile => ({ filename, subfolder: '', type: 'output' })
+  const planWith = (targets: OutputFile[], handed: OutputFile[]) => planNode({
+    prompt, nodeId: '1', gateOpen: false, families: ON,
+    filesFrom: link => link[0] === '12' ? targets : [file('face.png')],
+    toUrl: async f => { handed.push(f); return `https://fal.storage/${f.filename}` },
+  })
+
+  it('a batch of several pictures (video frames) is refused before anything is handed off', async () => {
+    const handed: OutputFile[] = []
+    await expect(planWith([file('f1.png'), file('f2.png')], handed)).rejects.toThrow(FACE_SWAP_ONE_PICTURE)
+    expect(handed).toEqual([])
+  })
+
+  it('a single picture is planned as before', async () => {
+    const handed: OutputFile[] = []
+    const p = await planWith([file('target.png')], handed)
+    expect(p.kind).toBe('provider')
+    expect(handed.map(f => f.filename)).toEqual(['face.png', 'target.png'])
   })
 })
 

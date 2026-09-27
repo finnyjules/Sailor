@@ -121,6 +121,7 @@ import type { KeptExt } from './keptBytes'
 import { filesOf } from './values'
 import { OUTPUT_KINDS } from '#shared/runner/values'
 import { STATIC_VALUES, staticValueOf } from '#shared/runner/staticValues'
+import { FACE_SWAP_ONE_PICTURE } from '#shared/runner/faceSwap'
 
 /**
  * The same job on the other service, with its own request built to that
@@ -785,9 +786,11 @@ async function planNodeRequest(ctx: PlanContext): Promise<NodePlan> {
       return stillCall(topazFixFaces({ image, inputs }), 'fix_faces')
     }
 
-    // ── face-swap: Face swap on Easel, no backup (easelFaceSwap.ts). Python sends
-    // only an IMAGE batch's first frame; so does the runner (linkedFirstFile). ──
+    // ── face-swap: Face swap on Easel, no backup (easelFaceSwap.ts). Easel takes
+    // one picture: a batch of several (video frames) is refused before anything
+    // is handed off (the hold is released), pointing at Person swap (video). ──
     case 'FaceSwap': {
+      if (linked('target_frames').length > 1) throw new Error(FACE_SWAP_ONE_PICTURE)
       const face = await pictureUrl('source_face', 'There is no face picture')
       const target = await pictureUrl('target_frames', 'There is no picture to put the face in')
       return stillCall(easelFaceSwap({ face, target, inputs }), 'face_swap')
@@ -885,8 +888,10 @@ async function planNodeRequest(ctx: PlanContext): Promise<NodePlan> {
       return {
         kind: 'provider', provider: call.provider, endpoint: call.endpoint, payload: call.payload, media: 'video', prefix: 'person_swap_video',
         // PersonSwapVideo is its own output node (is_output_node=True, no
-        // downstream Video card required): show the swapped video directly.
-        uiFor: files => ({ video: files }),
+        // downstream Video card required): it shows the swapped video in the
+        // Video card's shape, so a lone node's take (useTakes buildTake, which
+        // reads images/audio/text) keeps it.
+        uiFor: files => ({ images: files, animated: [true] }),
       }
     }
 

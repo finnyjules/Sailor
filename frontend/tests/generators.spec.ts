@@ -255,9 +255,9 @@ test.describe('Generators panel + use-case nodes', () => {
       expectSuccess(entry, 'ExtractText')
     })
 
-    // Replicate FaceSwap test removed — node was retired in favor of the
-    // local FaceSwap node (InsightFace + inswapper_128, faster, free,
-    // supports video). The local node has its own test surface elsewhere.
+    // Replicate FaceSwap test removed. Face swap now runs on Sailor's runner
+    // (family face-swap, fal Easel); its tests are
+    // tests/unit/runner-face-swap.unit.spec.ts.
 
     test('FindObjects executes without error', async ({ page, request }) => {
       const img = await findInputImage(request)

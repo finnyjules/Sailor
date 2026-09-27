@@ -438,6 +438,7 @@ export const RUNNER_NODE_RULES: Readonly<Record<string, RunnerNodeRule>> = {
     mustNotLink: ['strength', 'creativity', 'upscale'],
   },
   // ── face-swap: Face swap on Easel (replaces InsightFace inswapper) ──
+  // The Face Swap mini app needs both `cards` and `face-swap` on (its pictures come in through LoadImage nodes, taken only with `cards`).
   FaceSwap: {
     upgrade: { family: 'face-swap', label: 'Face swap' },
     mustLink: ['source_face', 'target_frames'],
@@ -743,6 +744,10 @@ export const SWITCHED_CLASSES: Readonly<Record<string, RunnerFamily>> = {
   LipSyncNode: 'sync-3',
   Audio: 'sync-3',
   EnhanceVideoNode: 'topaz-video',
+  // Moved whole onto one family each, like EnhanceVideoNode (no other model runs them).
+  FixFacesNode: 'fix-faces',
+  FaceSwap: 'face-swap',
+  PersonSwapVideo: 'person-swap-video',
   ...Object.fromEntries(PRIMITIVE_CLASSES.map(c => [c, 'cards' as const])),
   Text: 'cards',
   Moodboard: 'cards',

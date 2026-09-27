@@ -1,6 +1,6 @@
 """Shared model-bundle registry + SSE download endpoint used by the toolbox.
 
-Each ML node file (`nodes_face.py`, `nodes_bg_remove.py`, …) registers one
+Each ML node file (`nodes_bg_remove.py`, `nodes_upscale.py`, …) registers one
 bundle at import time, declaring which files it needs on disk and where to
 fetch them. The toolbox calls a single set of endpoints regardless of which
 bundle is involved.

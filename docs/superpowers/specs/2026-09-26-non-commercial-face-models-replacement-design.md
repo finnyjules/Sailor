@@ -172,6 +172,8 @@ Nothing is switched on by this work. Afterwards, one live call per family, about
 
 Only then are the families added to the local `.env` family lists.
 
+The Face Swap mini app needs both `cards` and `face-swap` on: its two pictures come in through LoadImage nodes, which the runner takes only with `cards`.
+
 ## Out of scope
 
 - The edit-model A/B for face swap (GPT Image 2.5 / Nano Banana Pro).

@@ -128,13 +128,15 @@ export function linkedInputNames(
   return names
 }
 
-/** A node bills the user in USD (Replicate BYOK) rather than Comfy credits.
- *  Most are class-named `*RemoteNode` (comfy_api_nodes/nodes_replicate.py), but
- *  the Sailor wrappers that call Replicate from comfy_extras (Person Swap,
- *  Pose Mannequin) aren't — they're caught by their `…/Replicate` category.
+/** A node bills the user in USD (Replicate BYOK, or fal through Sailor's
+ *  runner) rather than Comfy credits. Most are class-named `*RemoteNode`
+ *  (comfy_api_nodes/nodes_replicate.py), but the Sailor wrappers that call
+ *  Replicate from comfy_extras (Person Swap, Pose Mannequin) aren't — they're
+ *  caught by their `…/Replicate` category; the fal runner nodes (Fix faces,
+ *  Face swap, Person swap (video)) by `…/fal`.
  *  Stock Comfy API nodes (OpenAI, Kling, …) are credit-billed and excluded. */
 export function isReplicateBilled(n: EstimateInputNode): boolean {
-  return !!n.type?.endsWith('RemoteNode') || /\/Replicate$/.test(n.category || '')
+  return !!n.type?.endsWith('RemoteNode') || /\/(Replicate|fal)$/.test(n.category || '')
 }
 
 /** Stock Comfy API nodes (Kling, OpenAI, …) bill in Comfy credits. Their

@@ -52,7 +52,7 @@ import {
   TOPAZ_VIDEO_ENDPOINT, TOPAZ_VIDEO_MAX_SECONDS, TOPAZ_VIDEO_UNKNOWN_SETTING, topazVideoPlan, topazVideoRateKey, topazVideoTarget, topazVideoTargetFps,
 } from '../runner/topazVideo'
 import {
-  PERSON_SWAP_MAX_SECONDS, PERSON_SWAP_TOO_LONG, PERSON_SWAP_UNKNOWN_SETTING, PIXVERSE_SWAP_ENDPOINT, personSwapRateKey, personSwapResolution,
+  PERSON_SWAP_MAX_SECONDS, PERSON_SWAP_TOO_LONG, PERSON_SWAP_UNKNOWN_SETTING, PIXVERSE_SWAP_ENDPOINT, personSwapRateKey, personSwapResolution, personSwapSeconds,
 } from '../runner/personSwapVideo'
 
 export interface ClipCall {
@@ -590,7 +590,7 @@ export function personSwapVideoCalls(inputs: Inputs, measured: InputSeconds = {}
   const resolution = personSwapResolution(inputs)
   if (!resolution) return { refused: PERSON_SWAP_UNKNOWN_SETTING }
   const seconds = typeof measured.video === 'number' && measured.video > 0 ? measured.video : PERSON_SWAP_MAX_SECONDS
-  if (seconds > PERSON_SWAP_MAX_SECONDS + 1e-6) return { refused: PERSON_SWAP_TOO_LONG }
+  if (personSwapSeconds(seconds) > PERSON_SWAP_MAX_SECONDS) return { refused: PERSON_SWAP_TOO_LONG }
   return [{ endpoint: PIXVERSE_SWAP_ENDPOINT, seconds: 1, resolution: personSwapRateKey(resolution, seconds), audio: false }]
 }
 

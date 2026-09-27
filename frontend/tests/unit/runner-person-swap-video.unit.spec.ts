@@ -41,6 +41,7 @@ import { createEngineResultStore } from '~~/server/runner/results'
 import { checkPayload, loadProviderSchema } from './helpers/providerSchema'
 import { makeKit, ofType, until } from './__runner__/kit'
 import type { OutputFile } from '~~/server/runner/types'
+import { buildTake, takeHasContent } from '~/composables/useTakes'
 
 const FAMILY: RunnerFamily = 'person-swap-video'
 const ON: ReadonlySet<RunnerFamily> = new Set([FAMILY])
@@ -103,6 +104,19 @@ describe('the saved schema and the route', () => {
     expect(RUNNER_ROUTES['PersonSwapVideo+person-swap-video']!.first).toBe('fal')
     expect(RUNNER_ROUTES['PersonSwapVideo+person-swap-video']!.backup).toBeNull()
     expect(RUNNER_ROUTES['PersonSwapVideo+person-swap-video']!.why).toContain('Pixverse Swap')
+  })
+})
+
+describe('the result on its own node', () => {
+  it('a lone Person swap node shows the swapped video as a take (the Video card\'s shape)', async () => {
+    const p = await plan()
+    const clip: OutputFile = { filename: 'person_swap_video_00001_.mp4', subfolder: '', type: 'output' }
+    const ui = p.uiFor([clip])
+    expect(ui).toEqual({ images: [clip], animated: [true] })
+    const take = buildTake('prompt-1', ui, f => `/view?filename=${f.filename}`)
+    expect(takeHasContent(take)).toBe(true)
+    expect(take.images).toEqual(['/view?filename=person_swap_video_00001_.mp4'])
+    expect(take.animated).toBe(true)
   })
 })
 
@@ -182,6 +196,13 @@ describe('the price', () => {
     expect(usd('540p', 5)).toBeCloseTo(0.15)
     expect(usd('720p', 5)).toBeCloseTo(0.20)
     expect(usd('720p', 6)).toBeCloseTo(0.40)
+  })
+
+  it('a measured 5.0000001 s is 5 s (the base price), as a 10.0000001 s is 10 s (allowed)', () => {
+    expect(personSwapRateKey('720p', 5.0000001)).toBe('720p')
+    expect(usd('720p', 5.0000001)).toBe(usd('720p', 5))
+    expect(usd('720p', 5.0000001)).toBeCloseTo(0.20)
+    expect(usd('720p', 10.0000001)).toBeCloseTo(0.40)
   })
 
   it('an unknown resolution is refused', () => {
