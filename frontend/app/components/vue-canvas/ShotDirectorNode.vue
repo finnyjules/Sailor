@@ -103,7 +103,7 @@ function generate() {
       <!-- Model chip -->
       <div class="flex items-center gap-1.5">
         <span class="rounded border border-white/10 bg-white/5 px-1.5 py-0.5 text-[10px] text-white/50 tracking-tight">
-          Seedance 2.0
+          {{ profile.label }}
         </span>
       </div>
 
@@ -142,7 +142,7 @@ function generate() {
       </button>
       <button
         class="rounded bg-action/15 px-2 py-1 text-[11px] font-medium text-action hover:bg-action/25"
-        title="Compile the shot and run Seedance"
+        :title="`Compile the shot and run ${profile.label}`"
         @click.stop="generate"
       >
         Generate

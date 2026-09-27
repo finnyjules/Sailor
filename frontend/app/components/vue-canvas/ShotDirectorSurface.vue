@@ -494,7 +494,15 @@ function patchDialogue(i: number, patch: { speaker?: string; line?: string }) {
       <!-- Header -->
       <div class="flex shrink-0 items-center gap-2 border-b border-white/[0.06] px-4 pt-3 pb-2.5">
         <span class="text-[13px] font-medium tracking-[-0.01em] text-white/90">Shot Director</span>
-        <span class="ml-1 rounded border border-white/10 bg-white/[0.04] px-1.5 py-0.5 text-[10px] text-white/40">Seedance 2.0</span>
+        <select
+          :value="profile.id"
+          :title="MODEL_TIPS[profile.id]"
+          aria-label="Model"
+          class="ml-1 cursor-pointer rounded border border-white/15 bg-white/[0.06] px-1.5 py-0.5 text-[11px] text-white/80 outline-none hover:border-white/25 focus:border-white/30"
+          @change="setModel(($event.target as HTMLSelectElement).value)"
+        >
+          <option v-for="m in SHOT_MODEL_CHOICES" :key="m.id" :value="m.id" class="bg-neutral-900">{{ m.label }}</option>
+        </select>
         <span class="flex-1" />
         <span class="rounded border border-white/10 px-1.5 py-0.5 text-[11px] text-white/30">esc</span>
         <button type="button" aria-label="Close" class="ml-1 text-white/40 transition hover:text-white/80" @click="emit('close')">
@@ -974,17 +982,6 @@ function patchDialogue(i: number, patch: { speaker?: string; line?: string }) {
 
           <!-- ═══ FORMAT BAR ══════════════════════════════════════════════════ -->
           <StudioSection title="Format">
-            <!-- Model -->
-            <div>
-              <label class="mb-1 block text-[11px] text-white/45" :title="MODEL_TIPS[profile.id]">Model</label>
-              <select
-                :value="profile.id"
-                class="w-full rounded border border-white/10 bg-[#0e0e10] px-2 py-1.5 text-[11px] text-white/80 outline-none focus:border-white/25"
-                @change="setModel(($event.target as HTMLSelectElement).value)"
-              >
-                <option v-for="m in SHOT_MODEL_CHOICES" :key="m.id" :value="m.id" class="bg-neutral-900">{{ m.label }}</option>
-              </select>
-            </div>
             <div class="grid grid-cols-2 gap-x-3 gap-y-2.5">
               <!-- Aspect ratio -->
               <div v-if="sheet.mode === 'reference'">
