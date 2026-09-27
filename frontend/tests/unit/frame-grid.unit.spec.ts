@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { defaultGrid, resolveGrid, type FrameGrid } from '~/lib/frame/grid'
+import { defaultGrid, resolveGrid, type FrameGrid } from '~/lib/compositor/mosaicGrid'
 
 describe('resolveGrid explicit', () => {
   it('off mode yields no lines or regions', () => {

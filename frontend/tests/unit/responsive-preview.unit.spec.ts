@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { createRectLayer, createTextLayer } from '~/composables/useCompositorLayers'
-import { defaultGrid } from '~/lib/frame/grid'
+import { defaultGrid } from '~/lib/compositor/mosaicGrid'
 import { effectivePins, guideLinesFor } from '~/lib/frame/responsive/preview'
 import { axisMap } from '~/lib/frame/responsive/axis'
 import type { FrameDoc } from '~/lib/frame/responsive/types'

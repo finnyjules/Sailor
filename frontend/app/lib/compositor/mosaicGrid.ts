@@ -1,7 +1,7 @@
-// frontend/app/lib/frame/grid.ts
+// frontend/app/lib/compositor/mosaicGrid.ts — Mosaic's seeded grid (moved from lib/frame/grid.ts; the Frame uses lib/frame/layoutGrid.ts)
 export interface Rect { x: number; y: number; w: number; h: number }
 
-export interface FrameGrid {
+export interface MosaicGrid {
   mode: 'off' | 'explicit' | 'generated'
   baseModule: number    // normalized to frame width; alignment unit
   gutter: number        // normalized to frame width
@@ -240,3 +240,6 @@ export function resolveGrid(grid: FrameGrid, w: number, h: number, unitW: number
   const gutterPx = grid.gutter * unitW
   return { xs, ys, regions: applyGutter(regions, gutterPx) }
 }
+
+/** @deprecated The old Frame grid shape. Read only by gridConfig.ts, responsive/* and kit/plan.ts until stages 3–4 of the layout-grid plan; new code uses LayoutGrid. */
+export type FrameGrid = MosaicGrid

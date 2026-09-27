@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { readGrid, gridProperty } from '~/lib/frame/gridConfig'
-import { defaultGrid } from '~/lib/frame/grid'
+import { defaultGrid } from '~/lib/compositor/mosaicGrid'
 
 describe('readGrid', () => {
   it('absent → default (off)', () => {

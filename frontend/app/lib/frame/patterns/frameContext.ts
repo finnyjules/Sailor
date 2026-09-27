@@ -1,7 +1,7 @@
 import type { PatternContext, PosterLayerView, Measure, FrameElements } from './types'
 import { inferElements } from './hierarchy'
 import { readGrid } from '~/lib/frame/gridConfig'
-import { resolveGrid } from '~/lib/frame/grid'
+import { resolveGrid } from '~/lib/compositor/mosaicGrid'
 import type { LocalLayer } from '~/composables/useCompositorLayers'
 import { isImageKind } from './userImages'
 

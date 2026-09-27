@@ -5,7 +5,7 @@ import {
   parcelPresetPatch, parcelPresetOf, paintParcel,
   type ParcelParams, type ParcelCtx, type ParcelCluster, type ParcelRun,
 } from '~/lib/compositor/parcel'
-import { defaultGrid } from '~/lib/frame/grid'
+import { defaultGrid } from '~/lib/compositor/mosaicGrid'
 import { applyCompositorCommand, type CompositorState } from '~/lib/agent/surfaces/compositor'
 
 // Every rule below is the playgrnd Parcel generator's rule, restated as a test.

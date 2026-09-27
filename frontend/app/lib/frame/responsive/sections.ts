@@ -1,4 +1,4 @@
-import { resolveGrid, type FrameGrid, type Rect } from '~/lib/frame/grid'
+import { resolveGrid, type FrameGrid, type Rect } from '~/lib/compositor/mosaicGrid'
 
 export interface Box { x: number; y: number; w: number; h: number }
 

@@ -119,7 +119,7 @@ import { displayRun, guideFromSpec, measureRunPx, placeGlyphs, placedGlyphsToCom
 // Runtime import is safe: wiredLayer.ts only imports the WiredLayer TYPE back from
 // this file, and type imports are erased — so this is not a module cycle.
 import { wiredLayerHeight } from '~/lib/compositor/wiredLayer'
-import { resolveGrid, defaultGrid, type FrameGrid } from '~/lib/frame/grid'
+import { resolveGrid, defaultGrid, type MosaicGrid } from '~/lib/compositor/mosaicGrid'
 import { pickDealPaint, keptCell, forceKeptCell, type DealVocab } from '~/lib/compositor/dealVocab'
 import { paneRegions, paneCellGradient, panePalette, defaultPane, type PaneParams } from '~/lib/compositor/pane'
 import { paintModular, modularPalette, defaultModular, type ModularParams } from '~/lib/compositor/modular'
@@ -817,7 +817,7 @@ export function brushMaterialPadPx(layer: LocalLayer, W: number): number {
 export interface DealLayer extends LayerCommon {
   kind: 'deal'
   w: number; h: number        // box size, BOTH normalized to canvas width (like RectLayer)
-  grid: FrameGrid             // the cell layout for THIS layer
+  grid: MosaicGrid             // the cell layout for THIS layer
   vocab: DealVocab            // named weighted fill vocabulary
   density: number             // 0..1 fraction of cells that get filled (rest transparent)
   cellInset: number           // 0..0.4 normalized inset per cell (gutter look on top of the grid's own)

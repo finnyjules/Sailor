@@ -6,7 +6,7 @@ import {
   type ModularParams, type ModularCtx, type ModularType,
 } from '~/lib/compositor/modular'
 import { DEAL_VOCABS } from '~/lib/compositor/dealVocab'
-import { defaultGrid } from '~/lib/frame/grid'
+import { defaultGrid } from '~/lib/compositor/mosaicGrid'
 import { applyCompositorCommand, type CompositorState } from '~/lib/agent/surfaces/compositor'
 
 // Every rule below is the playgrnd Modular generator's rule, restated as a test.

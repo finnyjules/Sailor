@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { readGrid } from '~/lib/frame/gridConfig'
-import { resolveGrid } from '~/lib/frame/grid'
+import { resolveGrid } from '~/lib/compositor/mosaicGrid'
 
 // A frame saved before the grid feature has no `sailor_localGrid` property.
 // It must load with the grid OFF and contribute nothing to layout or snapping,

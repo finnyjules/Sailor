@@ -1,4 +1,4 @@
-import type { Rect } from '~/lib/frame/grid'
+import type { Rect } from '~/lib/compositor/mosaicGrid'
 import type { ExpressiveParams } from '~~/shared/text-layout/expressive'
 
 /** What the user brought, inferred from the title's word count. */

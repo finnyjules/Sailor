@@ -3,7 +3,7 @@ import {
   pickDealIndex, pickDealPaint, keptCell, dealVocabItems, dealVocabSize,
   normalizeVocab, DEAL_VOCABS, type DealVocab,
 } from '~/lib/compositor/dealVocab'
-import { resolveGrid, defaultGrid, type FrameGrid } from '~/lib/frame/grid'
+import { resolveGrid, defaultGrid, type MosaicGrid } from '~/lib/compositor/mosaicGrid'
 import { isFill, isGradient, type Paint } from '~/lib/compositor/paint'
 import { applyCompositorCommand, type CompositorState } from '~/lib/agent/surfaces/compositor'
 
@@ -94,7 +94,7 @@ describe('dealVocab: keptCell density', () => {
 
 // ── resolveGrid integration: the deal's cell layout ──────────────────────────
 describe('deal + resolveGrid', () => {
-  const explicitGrid = (cols: number, rows: number): FrameGrid => ({
+  const explicitGrid = (cols: number, rows: number): MosaicGrid => ({
     ...defaultGrid(), mode: 'explicit', columns: cols, rows, margin: 0, gutter: 0,
   })
 
@@ -309,7 +309,7 @@ describe('deal layer render (headless)', () => {
   it('two different seeds produce different dealt sequences (pixel-signature proxy)', () => {
     // The picked-paint sequence is the pixel signature: if two seeds dealt the same
     // fills to the same cells, the render would be identical. They must differ.
-    const grid: FrameGrid = { ...defaultGrid(), mode: 'explicit', columns: 5, rows: 4 }
+    const grid: MosaicGrid = { ...defaultGrid(), mode: 'explicit', columns: 5, rows: 4 }
     const seqFor = (seed: number) => {
       const { regions } = resolveGrid(grid, 400, 320)
       return regions.map((_r, i) => JSON.stringify(pickDealPaint('cool', seed, i))).join('|')

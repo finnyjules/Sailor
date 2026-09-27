@@ -32,7 +32,7 @@ import { deriveMasterClock, slotPhase01, masterFrameIndex } from '~/lib/composit
 import { portOffset } from '~/lib/canvas/portLayout'
 import { onFieldCatalogReady } from '~/lib/shaderfill/field'
 import { readGrid } from '~/lib/frame/gridConfig'
-import { resolveGrid } from '~/lib/frame/grid'
+import { resolveGrid } from '~/lib/compositor/mosaicGrid'
 import { FRAME_SIZE_PRESET_GROUPS, FRAME_SIZE_PRESETS, applyFramePreset, framePresetId, setFrameDim, setFrameResponsive } from '~/lib/frame/frameSize'
 import { isResponsiveFrame } from '~/lib/frame/responsive/fromNode'
 import { toast } from 'vue-sonner'

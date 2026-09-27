@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { defaultGrid, resolveGrid } from '~/lib/frame/grid'
+import { defaultGrid, resolveGrid } from '~/lib/compositor/mosaicGrid'
 import { sectionOf, sectionsAt } from '~/lib/frame/responsive/sections'
 
 describe('resolveGrid unitW', () => {

@@ -32,7 +32,7 @@ import {
 } from '~/lib/compositor/strokeStack'
 import type { LayerGroup } from '~/lib/compositor/layerGroups'
 import { readGrid } from '~/lib/frame/gridConfig'
-import type { FrameGrid } from '~/lib/frame/grid'
+import type { FrameGrid } from '~/lib/compositor/mosaicGrid'
 import { normalizeVocab } from '~/lib/compositor/dealVocab'
 import {
   mosaicStyleFromArgs, cellFillOfStyle, mosaicStyleOf, DEFAULT_MOSAIC_STYLE, isMosaicCellFill, isMosaicShaderFill,

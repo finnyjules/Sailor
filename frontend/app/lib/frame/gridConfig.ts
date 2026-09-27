@@ -1,8 +1,8 @@
 // frontend/app/lib/frame/gridConfig.ts
 // Read and write helpers for the sailor_localGrid frame property
 
-import type { FrameGrid } from '~/lib/frame/grid'
-import { defaultGrid } from '~/lib/frame/grid'
+import type { FrameGrid } from '~/lib/compositor/mosaicGrid'
+import { defaultGrid } from '~/lib/compositor/mosaicGrid'
 
 /**
  * Recursively fill any keys missing from a (possibly partial) saved grid config.

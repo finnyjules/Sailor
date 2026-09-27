@@ -6,7 +6,7 @@ import {
   moshChevronSpec, moshChevronShift, moshChevronRects, moshRects, paintMosh,
   type MoshParams, type MoshCtx, type MoshRect,
 } from '~/lib/compositor/mosh'
-import { defaultGrid } from '~/lib/frame/grid'
+import { defaultGrid } from '~/lib/compositor/mosaicGrid'
 import { applyCompositorCommand, type CompositorState } from '~/lib/agent/surfaces/compositor'
 
 // Every rule below is the playgrnd Mosh generator's rule, restated as a test.

@@ -1,6 +1,6 @@
 import type { LocalLayer } from '~/composables/useCompositorLayers'
 import type { LayerGroup } from '~/lib/compositor/layerGroups'
-import type { FrameGrid } from '~/lib/frame/grid'
+import type { FrameGrid } from '~/lib/compositor/mosaicGrid'
 import type { FrameMotion } from '~/lib/motion/types'
 
 /**

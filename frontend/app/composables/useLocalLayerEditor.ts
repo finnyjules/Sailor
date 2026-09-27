@@ -32,7 +32,7 @@ import { syncAllWiredWidgets, wiredLayerHeight, type ContentDims } from '~/lib/c
 import { inject, type Ref } from 'vue'
 import type { BrandKit } from '~~/shared/brand/types'
 import { readGrid, gridProperty } from '~/lib/frame/gridConfig'
-import { resolveGrid, type FrameGrid, type Rect } from '~/lib/frame/grid'
+import { resolveGrid, type FrameGrid, type Rect } from '~/lib/compositor/mosaicGrid'
 import { readFrameSizeState, writeFrameSizeState, type FrameSizeState } from '~/lib/frame/frameSize'
 import { readFrameLight, sanitizeLight, type FrameLight } from '~/lib/compositor/frameLight'
 

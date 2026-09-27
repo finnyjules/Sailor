@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { createRectLayer, createTextLayer, paintLayerStack, type LocalLayer } from '~/composables/useCompositorLayers'
 import { DEFAULT_CLONER } from '~/composables/useCloner'
-import { defaultGrid } from '~/lib/frame/grid'
+import { defaultGrid } from '~/lib/compositor/mosaicGrid'
 import { resolveLayout, layoutScaleOf } from '~/lib/frame/responsive'
 import type { FrameDoc } from '~/lib/frame/responsive/types'
 

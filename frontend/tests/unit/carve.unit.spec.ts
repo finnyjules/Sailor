@@ -11,7 +11,7 @@ import {
   type CarveParams, type CarveCtx,
 } from '~/lib/compositor/carve'
 import { LruCache } from '~/lib/compositor/silhouetteCache'
-import { defaultGrid } from '~/lib/frame/grid'
+import { defaultGrid } from '~/lib/compositor/mosaicGrid'
 import { dealVocabDrivesLook } from '~/lib/compositor/dealVocab'
 import { applyCompositorCommand, describeCompositor, impliedDealFill, type CompositorState } from '~/lib/agent/surfaces/compositor'
 

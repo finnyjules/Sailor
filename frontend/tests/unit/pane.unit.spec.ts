@@ -5,7 +5,7 @@ import {
   panePresetPatch, panePresetOf, paneInkPatch, hexToHsl, hslToHex, type PaneParams,
 } from '~/lib/compositor/pane'
 import { DEAL_VOCABS } from '~/lib/compositor/dealVocab'
-import { defaultGrid } from '~/lib/frame/grid'
+import { defaultGrid } from '~/lib/compositor/mosaicGrid'
 import { applyCompositorCommand, type CompositorState } from '~/lib/agent/surfaces/compositor'
 
 // Every rule below is the playgrnd Pane generator's rule, restated as a test.

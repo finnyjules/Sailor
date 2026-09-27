@@ -10,7 +10,7 @@ import {
   totemMirror, totemCore, paintTotem,
   type TotemParams, type TotemCtx,
 } from '~/lib/compositor/totem'
-import { defaultGrid } from '~/lib/frame/grid'
+import { defaultGrid } from '~/lib/compositor/mosaicGrid'
 import { dealVocabDrivesLook } from '~/lib/compositor/dealVocab'
 import { applyCompositorCommand, describeCompositor, impliedDealFill, type CompositorState } from '~/lib/agent/surfaces/compositor'
 
