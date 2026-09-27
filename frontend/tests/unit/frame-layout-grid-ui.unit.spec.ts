@@ -11,9 +11,12 @@ import { suggestedLayoutGrid, resolveLayoutGrid, patchLayoutGrid, type LayoutGri
 const grid = suggestedLayoutGrid(1080, 1350, null)
 const resolved = resolveLayoutGrid(grid, 1080, 1350)
 
-function overlay(p: Partial<{ show: boolean; moving: boolean; covered: any; textMarks: any }> = {}) {
+function overlay(p: Partial<{ show: boolean; moving: boolean; covered: any; textMarks: any; w: number; h: number }> = {}) {
   return mount(LayoutGridOverlay, { props: { grid: resolved, show: true, moving: false, covered: null, w: 540, h: 675, ...p } })
 }
+/** How many closed rectangles (Z) or move-tos (M) a path draws. */
+const count = (d: string | undefined, ch: 'M' | 'Z') => (d ?? '').split(ch).length - 1
+const dOf = (w: ReturnType<typeof overlay>, id: string) => w.find(`[data-testid="${id}"]`).attributes('d')
 
 describe('LayoutGridOverlay', () => {
   it('draws nothing when the grid is hidden', () => {
@@ -21,28 +24,53 @@ describe('LayoutGridOverlay', () => {
   })
   it('shows faint column edges; modules stay mounted but faded until a layer moves', () => {
     const w = overlay()
-    expect(w.findAll('svg').at(0)!.findAll('line').length).toBe(grid.cols.count * 2)
+    expect(count(dOf(w, 'compositor-grid-columns'), 'M')).toBe(grid.cols.count * 2)
     const mods = w.get('[data-testid="compositor-grid-modules"]')
     expect(mods.classes()).not.toContain('on')
-    expect(mods.findAll('rect').length).toBe(resolved.cols.length * resolved.rows.length)
+    expect(count(mods.find('path').attributes('d'), 'Z')).toBe(resolved.cols.length * resolved.rows.length)
     expect(overlay({ moving: true }).get('[data-testid="compositor-grid-modules"]').classes()).toContain('on')
   })
   it('fills the cells the moving layer covers, only while it moves', () => {
     const c0 = resolved.cols[0]!, c1 = resolved.cols[1]!, r0 = resolved.rows[0]!
     const covered = { x: c0.a, y: r0.a, w: c1.a + c1.w - c0.a, h: r0.w }
-    const marks = (w: ReturnType<typeof overlay>) => w.findAll('svg').at(2)!.findAll('rect').length
-    expect(marks(overlay({ moving: true, covered }))).toBe(2)
-    expect(marks(overlay({ moving: false, covered }))).toBe(0)
+    expect(count(dOf(overlay({ moving: true, covered }), 'compositor-grid-covered'), 'Z')).toBe(2)
+    expect(overlay({ moving: false, covered }).find('[data-testid="compositor-grid-covered"]').exists()).toBe(false)
   })
   it('keeps hairlines one CSS px at any display size and zoom (non-scaling strokes)', () => {
     // The modal zooms with a CSS transform, so a stroke width computed from the display size is
-    // only 1 px at zoom 1 — every stroked line/rect must be a non-scaling 1 px stroke instead.
-    const stroked = overlay({ moving: true }).findAll('line, rect').filter(el => el.attributes('stroke'))
+    // only 1 px at zoom 1 — every stroked path/line must be a non-scaling 1 px stroke instead.
+    const stroked = overlay({ moving: true }).findAll('path, line, rect').filter(el => el.attributes('stroke'))
     expect(stroked.length).toBeGreaterThan(0)
     for (const el of stroked) {
       expect(el.attributes('stroke-width')).toBe('1')
       expect(el.attributes('vector-effect')).toBe('non-scaling-stroke')
     }
+  })
+  it('draws a fixed handful of shapes, however fine the grid (not one element per line or module)', () => {
+    const fine = resolveLayoutGrid(patchLayoutGrid(grid, { columns: 24, rows: 'count', rowCount: 24 }), 1080, 1350)
+    const c0 = fine.cols[0]!, r0 = fine.rows[0]!
+    const w = mount(LayoutGridOverlay, { props: { grid: fine, show: true, moving: true, covered: { x: c0.a, y: r0.a, w: c0.w * 6, h: r0.w * 6 }, w: 540, h: 675 } })
+    expect(w.findAll('path, line, rect').length).toBeLessThanOrEqual(4)
+  })
+  it('leaves out baselines too dense to read on screen', () => {
+    // unit ≈ 20 grid px on a 1080-wide grid: 540 CSS px wide → ~10 px apart (drawn); 100 → ~1.9 px (not).
+    expect(overlay({ moving: true }).find('[data-testid="compositor-grid-baselines"]').exists()).toBe(true)
+    expect(overlay({ moving: true, w: 100, h: 125 } as any).find('[data-testid="compositor-grid-baselines"]').exists()).toBe(false)
+  })
+  it('skips module outlines past 2000 modules; the columns still show', () => {
+    const tracks = (n: number, size: number) => Array.from({ length: n }, (_, i) => ({ a: i * size, w: size - 1 }))
+    const huge = { W: 1000, H: 1000, unit: 5, cols: tracks(24, 1000 / 24), rows: tracks(100, 10), margin: 0, top: 0, bottom: 1000, xs: [], ys: [] }
+    const w = mount(LayoutGridOverlay, { props: { grid: huge, show: true, moving: true, covered: null, w: 540, h: 540 } })
+    expect(w.get('[data-testid="compositor-grid-modules"]').find('path:not([data-testid])').exists()).toBe(false)
+    expect(count(w.get('[data-testid="compositor-grid-columns"]').attributes('d'), 'M')).toBe(48)
+  })
+  it('a moving cover changes only the covered path; the neutral paths keep their exact strings', async () => {
+    const w = overlay({ moving: true })
+    const before = [dOf(w, 'compositor-grid-columns'), w.get('[data-testid="compositor-grid-modules"] path').attributes('d')]
+    const c0 = resolved.cols[0]!, r0 = resolved.rows[0]!
+    await w.setProps({ covered: { x: c0.a, y: r0.a, w: c0.w, h: r0.w } })
+    expect([dOf(w, 'compositor-grid-columns'), w.get('[data-testid="compositor-grid-modules"] path').attributes('d')]).toEqual(before)
+    expect(count(dOf(w, 'compositor-grid-covered'), 'Z')).toBe(1)
   })
   it('marks the selected text: a dashed accent line at its capitals, a solid one at each baseline', () => {
     const marks = { capTop: 300, baselines: [330, 380], x: 100, w: 400 }
@@ -71,13 +99,13 @@ describe('LayoutGridOverlay', () => {
     const off = resolveLayoutGrid(patchLayoutGrid(grid, { rows: 'off' }), 1080, 1350)
     const w = mount(LayoutGridOverlay, { props: { grid: off, show: true, moving: true, covered: two, w: 540, h: 675 } })
     expect(w.get('[data-testid="compositor-grid-badge"]').text()).toBe('2 columns')
-    expect(w.findAll('svg').at(2)!.findAll('rect').length).toBe(2)
+    expect(count(w.find('[data-testid="compositor-grid-covered"]').attributes('d'), 'Z')).toBe(2)
   })
   it('a one-line text inside a row still covers that row (spans, not half-cell overlap)', () => {
     const c0 = resolved.cols[0]!, r1 = resolved.rows[1]!
     const capsToBaseline = { x: c0.a, y: r1.a, w: c0.w, h: 10 }       // far less than half the row
     const w = overlay({ moving: true, covered: capsToBaseline })
-    expect(w.findAll('svg').at(2)!.findAll('rect').length).toBe(1)
+    expect(count(w.find('[data-testid="compositor-grid-covered"]').attributes('d'), 'Z')).toBe(1)
     expect(w.get('[data-testid="compositor-grid-badge"]').text()).toBe('1 × 1 module')
   })
 })

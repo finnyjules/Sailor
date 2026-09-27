@@ -27,7 +27,7 @@ test.describe('Frame layout grid', () => {
     expect(html).not.toMatch(/255,\s*72,\s*96|#ff3ea5|#22d3ee/i)
     // …and the quiet neutral column lines are what IS drawn.
     expect(html).toMatch(/rgba\(\s*255,\s*255,\s*255,\s*0?\.09\s*\)/)
-    expect(await overlay.locator('line').count()).toBeGreaterThan(0)
+    expect(await overlay.locator('[data-testid="compositor-grid-columns"]').getAttribute('d')).toMatch(/^M/)
   })
 
   test('clicking a layer selects it without showing modules or recording a step', async ({ page }) => {
