@@ -82,6 +82,21 @@ The brush toolbar gains a **Paint** row: Colour (as before) or six live material
 
 **Next.** Part 3: "More shaders" from the full library and painted effects.
 
+### The pen — round corners, chamfer, offset, repeat modes (stage 8) — LANDED 2026-09-27
+
+Spec `docs/superpowers/specs/2026-09-26-pen-stages-4-8-design.md` (Stage 8), plan `docs/superpowers/plans/2026-09-27-pen-stage-8-corners-offset-repeat.md`; commits 9a63522eb … 08dfd2c98, final fixes aeb334470 + f2e98eaa6 + f84af46f6. On the pen page, in the Frame and in Shape Studio:
+
+- **Round corner (F) and Chamfer (H):** press a corner and drag to size it, or click it and type a size + Enter; several corners share one size (tied Equal); too big previews red and can't be applied. The old corner stays as a grey guide dot tied to both sides, so rules on it still hold; side rules move to the side you see.
+- **Offset (E):** drag from a path (or click and type; − flips the side) for a live parallel copy: lines to parallel lines, arcs on the same centre, sharp corners; smooth joins held on the arc's radial line; an offset that turns back or crosses itself previews red. New rules `offsetLine`, `offsetRadius`.
+- **Repeat… panel** (in the side panel, replacing Properties while open): Radial (centre, copies, sweep — live), Linear (angle, Step or Span — live through `translatedFrom` to a dashed guide whose far end you can drag), Along a path (placed once). Preview only until Apply (one undo step); Esc/Cancel leaves the drawing as it was. Menu entries Offset…, Round corner…, Chamfer… after Repeat…; text-guide pens get corners, not Offset.
+- Every new rule is followed by trim, Cut, Dissolve, merge, delete, Mirror, copy/paste, Clean up and fills.
+
+**Proof.** ~1,455 unit tests across sketch/pen/cleanup/frame-pen/shape-pen; real-mouse `tests/pen-corners-offset-repeat.spec.ts` plus the other pen specs, 142/142, three hosts at 1280 and 1024. Previews ≤ 16 ms on a 150-piece connected drawing.
+
+**Rulings beyond the plan.** A refused corner leaves the drawing byte-identical; smooth-join offset points use `collinear` (the plan's rule pair was singular); self-crossing offsets refused; repeat centre from the drawn geometry; a trimmed offset end re-aims only when the new end lies on the offset line; Repeat panel fields keep what you type when you leave them; Clean up refuses a solve that doesn't settle.
+
+**Known limits.** Offsetting separate lines gives copies that don't join; paste and Along a path drop a corner's guide dot (a chamfer's two setbacks stop being tied); linear Apply takes 0.1–0.3 s at ~600 pieces; a rounded corner's radius chip covers its guide dot.
+
 ### The pen — fills (stage 7) — LANDED 2026-09-27
 
 Spec `docs/superpowers/specs/2026-09-26-pen-stages-4-8-design.md` (Stage 7), plan `docs/superpowers/plans/2026-09-27-pen-stage-7-fills.md`; commits 0081a6279 … 38b4a0672, final fixes 65ade1e7f + 7c9b7e418. On the pen page, in the Frame and in Shape Studio:
