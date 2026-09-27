@@ -14,14 +14,19 @@ import { GUARD } from './types'
 
 /** Solves `doc` in place with `held` points and circle radii kept where they
  *  are (the solver's own `fixed`, and a radius rule, on a private copy). False
- *  — and `doc` untouched — when it does not converge. */
+ *  — and `doc` untouched — when it does not converge, or when it settles with
+ *  a rule still not holding (a least-squares standstill between rules that
+ *  can't all be met with what is held — final review I1: accepting it left
+ *  rules unmet below the 1e-3 "conflict" refusal, re-solved invisibly by the
+ *  next drag). */
 export function solveHeld(doc: SketchDoc, held: ReadonlySet<EntityId>): boolean {
   const plain = cloneDoc(doc)
   for (const e of plain.entities) {
     if (e.kind === 'point' && held.has(e.id)) e.fixed = true
     else if (e.kind === 'circle' && held.has(e.id)) plain.constraints.push({ id: `__held_${e.id}`, kind: 'radius', refs: [e.id], value: e.r })
   }
-  if (!solve(plain, { maxIter: 120 }).converged) return false
+  const res = solve(plain, { maxIter: 120 })
+  if (!res.converged || res.residualNorm > HOLDS) return false
   const solved = new Map(plain.entities.map(e => [e.id, e]))
   for (const e of doc.entities) {
     const s = solved.get(e.id)
@@ -30,6 +35,10 @@ export function solveHeld(doc: SketchDoc, held: ReadonlySet<EntityId>): boolean 
   }
   return true
 }
+
+// every rule holds: ten times the solver's own target (1e-6), which a solve
+// that meets its rules reaches; its "converged" (< 1e-3) also passes a standstill
+const HOLDS = 1e-5
 
 // the points an id stands for: a point itself, a line's ends, a circle's centre
 // and its radius (the circle id), every point a path is built on

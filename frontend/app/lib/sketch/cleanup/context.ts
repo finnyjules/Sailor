@@ -21,7 +21,7 @@ export interface Piece {
   lineId: EntityId | null      // line entity id
   points: EntityId[]           // a, b, c where present
   inScope: boolean             // something about it may move
-  copy: boolean                // every point is a Repeat / Mirror copy
+  copy: boolean                // every point is a Repeat / Mirror / offset copy (an arc: both ends)
   len: number                  // line length, arc length, circle circumference
   size: number                 // for the movement cap: length (line, arc), radius (circle)
   geom: CurveGeom
@@ -80,17 +80,44 @@ function isGuide(doc: SketchDoc, ref: CurveRef): boolean {
  *  sources only and never ties a copy to its source (pen stage 8). */
 export function copyPoints(doc: SketchDoc): Set<EntityId> {
   const out = new Set<EntityId>()
+  const offset = new Set<EntityId>()
   for (const c of doc.constraints) {
     if (c.kind === 'rotatedFrom' || c.kind === 'mirroredFrom' || c.kind === 'translatedFrom') out.add(c.refs[0]!)
-    else if (c.kind === 'offsetLine') out.add(c.refs[2]!)
-    else if (c.kind === 'offsetRadius' && c.refs.length === 4) out.add(c.refs[3]!)
+    else if (c.kind === 'offsetLine') offset.add(c.refs[2]!)
+    else if (c.kind === 'offsetRadius' && c.refs.length === 4) offset.add(c.refs[3]!)
   }
+  // An offset copy's point at a smooth join with an arc side (or an open
+  // copy's end on an arc) is held by `collinear [C, X, X′]` instead — C the
+  // source arc's centre, X that arc's end, X′ an anchor of a path that holds
+  // other offset points (final review I1). It is as much a copy as the rest.
+  const collinears = doc.constraints.filter(c => c.kind === 'collinear' && c.refs.length === 3)
+  if (offset.size && collinears.length) {
+    const arcEnds = new Set<string>()                 // `${centre}|${end}` of every arc piece
+    const pathOf = new Map<EntityId, EntityId[]>()    // anchor → the anchors of its path(s)
+    for (const e of doc.entities) {
+      if (e.kind !== 'path') continue
+      const n = e.anchors.length
+      e.segments.forEach((sg, i) => {
+        if (sg.kind !== 'arc') return
+        arcEnds.add(`${sg.center}|${e.anchors[i]}`)
+        arcEnds.add(`${sg.center}|${e.anchors[(i + 1) % n]}`)
+      })
+      for (const a of e.anchors) pathOf.set(a, [...(pathOf.get(a) ?? []), ...e.anchors])
+    }
+    for (const c of collinears) {
+      const [C, X, Xp] = c.refs as [EntityId, EntityId, EntityId]
+      if (offset.has(Xp) || !arcEnds.has(`${C}|${X}`)) continue
+      if ((pathOf.get(Xp) ?? []).some(a => a !== Xp && offset.has(a))) out.add(Xp)
+    }
+  }
+  for (const id of offset) out.add(id)
   return out
 }
 
 /** What must not move for a scope: with a selection of pieces, every point of
  *  an unselected piece (shared ones included), every point no selected piece
- *  uses, and every unselected circle's radius. No usable selection: nothing. */
+ *  uses (but a guide point tied only to selected pieces' points), and every
+ *  unselected circle's radius. No usable selection: nothing. */
 export function heldForScope(doc: SketchDoc, scope: CleanupScope | null | undefined): Set<EntityId> {
   const held = new Set<EntityId>()
   if (!scope) return held
@@ -113,7 +140,28 @@ export function heldForScope(doc: SketchDoc, scope: CleanupScope | null | undefi
     for (const id of curvePoints(doc, r)) (mine ? free : pinned).add(id)
     if (r.kind === 'circle' && !mine) held.add(r.id)
   }
-  for (const e of doc.entities) if (e.kind === 'point' && (!free.has(e.id) || pinned.has(e.id))) held.add(e.id)
+  // A guide point no piece uses — the virtual sharp a round or chamfer leaves
+  // — goes with the selection when every rule on it ties it only to points of
+  // selected pieces (or to other such guides: neighbouring corners' sharps
+  // name each other): holding it would pin both sides through their collinear
+  // ties and switch Clean up off on a rounded shape (final review I2).
+  const byPoint = new Map<EntityId, typeof doc.constraints>()
+  for (const c of doc.constraints) for (const r of c.refs) byPoint.set(r, [...(byPoint.get(r) ?? []), c])
+  const guideFree = new Set<EntityId>()
+  for (const e of doc.entities) {
+    if (e.kind === 'point' && e.construction && !e.fixed && !free.has(e.id) && !pinned.has(e.id) && byPoint.has(e.id)) guideFree.add(e.id)
+  }
+  const loose = (id: EntityId) => (free.has(id) && !pinned.has(id)) || guideFree.has(id)
+  for (let changed = true; changed;) {
+    changed = false
+    for (const id of guideFree) {
+      if (byPoint.get(id)!.every(c => c.refs.every(loose))) continue
+      guideFree.delete(id); changed = true
+    }
+  }
+  for (const e of doc.entities) {
+    if (e.kind === 'point' && !guideFree.has(e.id) && (!free.has(e.id) || pinned.has(e.id))) held.add(e.id)
+  }
   return held
 }
 
@@ -145,7 +193,9 @@ export function buildContext(doc: SketchDoc, env: ContextEnv): CleanupContext {
     const inScope = ref.kind === 'circle' ? !env.held.has(circle!) || !env.held.has(c!) : points.some(id => !env.held.has(id))
     pieces.push({
       key: curveKey(ref), ref, kind: geom.kind, a, b, c, circle, lineId, points, inScope,
-      copy: points.length > 0 && points.every(id => env.copies.has(id)),
+      // an offset arc shares its source's centre: its two ends make it a copy
+      copy: geom.kind === 'arc' ? !!a && !!b && env.copies.has(a) && env.copies.has(b)
+        : points.length > 0 && points.every(id => env.copies.has(id)),
       len, size: geom.kind === 'circle' ? geom.r! : len, geom,
     })
   }

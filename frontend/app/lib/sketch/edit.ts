@@ -92,12 +92,66 @@ function spansLine(doc: SketchDoc, a: EntityId, b: EntityId): boolean {
   return false
 }
 
+const REPEAT_KINDS = new Set<ConstraintKind>(['rotatedFrom', 'mirroredFrom', 'translatedFrom'])
+
+// Guide points tied by rules to `seeds` (and through them to further guide
+// points): the virtual sharps a round or chamfer leaves. A point a Repeat
+// rule names (a radial centre, a linear guide end) is never one.
+function tiedGuides(doc: SketchDoc, seeds: readonly EntityId[]): Set<EntityId> {
+  const repeat = new Set<EntityId>()
+  for (const c of doc.constraints) if (REPEAT_KINDS.has(c.kind)) for (const r of c.refs) repeat.add(r)
+  const out = new Set<EntityId>()
+  const reach = new Set(seeds)
+  for (let grew = true; grew;) {
+    grew = false
+    for (const c of doc.constraints) {
+      if (!c.refs.some(r => reach.has(r))) continue
+      for (const r of c.refs) {
+        if (reach.has(r) || repeat.has(r)) continue
+        const p = getPoint(doc, r)
+        if (!p?.construction || p.fixed) continue
+        out.add(r); reach.add(r); grew = true
+      }
+    }
+  }
+  return out
+}
+
+// After a delete (final review I4): the guide points `cands` that no piece
+// uses and no rule ties to anything but each other go, with those ties.
+function dropLooseGuides(doc: SketchDoc, cands: ReadonlySet<EntityId>): void {
+  const loose = new Set([...cands].filter(id => !!getPoint(doc, id) && !isPointReferenced(doc, id)))
+  for (let shrank = true; shrank;) {
+    shrank = false
+    for (const id of loose) {
+      if (doc.constraints.every(c => !c.refs.includes(id) || c.refs.every(r => loose.has(r)))) continue
+      loose.delete(id); shrank = true
+    }
+  }
+  if (!loose.size) return
+  doc.constraints = doc.constraints.filter(c => !c.refs.some(r => loose.has(r)))
+  doc.entities = doc.entities.filter(e => !loose.has(e.id))
+}
+
+// the linear guide lines (construction lines between a translatedFrom rule's
+// `from` and `to`) no translatedFrom names any more go, with their free ends —
+// deleting every linear copy (or their source) takes the dashed guide too
+function dropUnusedLinearGuides(doc: SketchDoc, pairs: ReadonlyArray<readonly [EntityId, EntityId]>): void {
+  for (const [f, t] of pairs) {
+    if (doc.constraints.some(c => c.kind === 'translatedFrom' && c.refs[2] === f && c.refs[3] === t)) continue
+    const g = doc.entities.find(e => e.kind === 'line' && e.construction && ((e.p1 === f && e.p2 === t) || (e.p1 === t && e.p2 === f)))
+    if (g) deleteEntity(doc, g.id)
+  }
+}
+
 // Delete an entity and everything that structurally depends on it.
 /** `keepGuideEnds`: a guide line's ends stay even when nothing else uses them
  *  (mergePoints dropping a line squeezed to one point must not take the point). */
 export function deleteEntity(doc: SketchDoc, id: EntityId, opts: { keepGuideEnds?: boolean } = {}): void {
   const e = getEntity(doc, id)
   if (!e) return
+  const linearPairs = [...new Map(doc.constraints.filter(c => c.kind === 'translatedFrom' && c.refs.length === 4)
+    .map(c => [`${c.refs[2]}|${c.refs[3]}`, [c.refs[2]!, c.refs[3]!] as const])).values()]
   // entities that reference this one and must go too (only points have dependents)
   const dependents: EntityId[] = []
   if (e.kind === 'point') {
@@ -123,8 +177,10 @@ export function deleteEntity(doc: SketchDoc, id: EntityId, opts: { keepGuideEnds
   // capture path-specific info before the entity is removed
   let arcEqualDistRefs: EntityId[][] = []
   let memberPoints: EntityId[] = []
+  let guides = new Set<EntityId>()
   if (e.kind === 'path') {
     memberPoints = pathMemberPoints(e)
+    guides = tiedGuides(doc, memberPoints)
     e.segments.forEach((s, i) => {
       if (s.kind === 'arc') {
         const a = e.anchors[i]!
@@ -173,9 +229,11 @@ export function deleteEntity(doc: SketchDoc, id: EntityId, opts: { keepGuideEnds
       if (!p || p.fixed) continue
       if (!isPointReferenced(doc, pid)) deleteEntity(doc, pid)
     }
+    dropLooseGuides(doc, guides)
   }
   // recurse into dependents
   for (const depId of dependents) deleteEntity(doc, depId)
+  if (linearPairs.length) dropUnusedLinearGuides(doc, linearPairs)
 }
 
 export function addPath(doc: SketchDoc, anchors: EntityId[], segments: SegmentSpec[], closed = false, opts: { construction?: boolean } = {}): EntityId {

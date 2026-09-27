@@ -367,10 +367,21 @@ describe('speed (one connected drawing, a symmetric grid)', () => {
     expect((performance.now() - t) / 10).toBeLessThan(16)
   })
   it('all 150 gear corners at once: a rare, one-off frame', () => {
+    // measured on every run, asserted load-tolerantly (final fix wave): the
+    // FASTEST of five previews ≤ 32 ms (two frames). One run alone flaked
+    // above 64 ms, and even the median of five reached ~52 ms, while the whole
+    // suite shared a loaded machine; the fastest run is what the code costs
+    // when it gets the processor (typical alone: ~15 ms), so a real slow-down
+    // still fails
     const { doc: g, anchors } = gear(150)
-    const t = performance.now()
-    const every = cornerPreview(g, anchors, 'round', 0.05)
-    expect(performance.now() - t).toBeLessThan(16 * 4)
+    const times: number[] = []
+    let every = cornerPreview(g, anchors, 'round', 0.05)
+    for (let i = 0; i < 5; i++) {
+      const t = performance.now()
+      every = cornerPreview(g, anchors, 'round', 0.05)
+      times.push(performance.now() - t)
+    }
+    expect(Math.min(...times)).toBeLessThanOrEqual(32)
     expect(every.fits).toBe(true)
   })
   it('the corner list is one quick pass', () => {

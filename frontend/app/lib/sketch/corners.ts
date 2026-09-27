@@ -350,6 +350,42 @@ function reaimArcRule(doc: SketchDoc, s: CornerSide, x: EntityId, t: EntityId): 
   return addConstraint(doc, 'equalDist', [C, s.far, C, t])
 }
 
+// the pairs of a rule that name a straight line by two of its points — the
+// line-pair rules trim and delete follow by the piece's own ends (trim.ts
+// pairSlots' 'dir', 'tan', 'off' and 'pin' kinds). A length ('distance', a
+// segment equalDist) is not one: its value is the length between those two
+// points, so it stays on the corner.
+function linePairs(doc: SketchDoc, c: SketchDoc['constraints'][number]): [number, number][] {
+  const r = c.refs
+  switch (c.kind) {
+    case 'horizontal':
+    case 'vertical': return r.length === 2 && getPoint(doc, r[0]!) ? [[0, 1]] : []
+    case 'parallel':
+    case 'perpendicular': return r.length === 4 ? [[0, 1], [2, 3]] : []
+    case 'tangentLineArc': return r.length >= 3 ? [[0, 1]] : []
+    case 'offsetLine': return r.length === 3 ? [[0, 1]] : []
+    // a virtual sharp's own tie [far, T, X] keeps naming its guide (Ruling 4)
+    case 'collinear': return r.length === 3 && !getPoint(doc, r[2]!)?.construction ? [[0, 1]] : []
+    default: return []
+  }
+}
+
+// Ruling 4, amended (final review I3): a rule that named a straight side by
+// its corner, (far, X), now names the drawn side (far, T) — the same line, so
+// it still holds as placed, and trim / Cut / delete of the drawn side follow
+// it. The virtual sharp keeps its own ties.
+function reaimSideRules(doc: SketchDoc, s: CornerSide, x: EntityId, t: EntityId): void {
+  if (s.kind !== 'line') return
+  for (const c of doc.constraints) {
+    if (!c.refs.includes(x) || !c.refs.includes(s.far)) continue
+    for (const [i, j] of linePairs(doc, c)) {
+      const a = c.refs[i], b = c.refs[j]
+      const at = a === s.far && b === x ? j : a === x && b === s.far ? i : -1
+      if (at >= 0) c.refs = c.refs.map((r, k) => (k === at ? t : r))
+    }
+  }
+}
+
 interface Built { x: EntityId; t1: EntityId; t2: EntityId; c: EntityId | null; touched: EntityId[]; rules: EntityId[]; created: EntityId[] }
 
 function buildCorner(doc: SketchDoc, corner: Corner, g: CornerGeom, kind: CornerKind): Built {
@@ -367,6 +403,7 @@ function buildCorner(doc: SketchDoc, corner: Corner, g: CornerGeom, kind: Corner
   for (const [side, t] of [[corner.a, t1], [corner.b, t2]] as const) {
     const k = reaimArcRule(doc, side, X, t)
     if (k) rules.push(k)
+    reaimSideRules(doc, side, X, t)
   }
   if (corner.spliced) {
     const p = getEntity(doc, corner.a.id) as PathEntity
