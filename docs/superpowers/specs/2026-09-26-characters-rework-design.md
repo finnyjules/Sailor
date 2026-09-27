@@ -24,7 +24,7 @@
 - **You can't invent a character.** Creating one needs a photo.
 - **The readiness process goes unused.** None of the five characters has ever reached "Ready".
 - **The sheet is sent to video in a form that works against us.** It goes as one combined grid image. Seedance's own guide warns that a picture showing several views of a person gets read as several people.
-- **Veo never receives the reference images at all.**
+- **Veo can't take reference images** in Sailor: a Veo request with them is refused.
 
 **What changes**
 - **A character is a face, not a pile of photos.**
@@ -94,6 +94,8 @@ CharacterRecord {
   voice: VoiceRef | null          // NEW: a trained voice, a picked stock voice, or none
   origin: 'described' | 'photos' | 'canvas'
   likenessConfirmed: boolean      // required for 'photos' / 'canvas' origins
+  style: 'photo' | 'anime'        // set at creation, never changes; more styles later
+  linkedFrom: string | null       // slug of the character this one was made from ("Make an anime version")
   loraName, trigger               // kept: an optional upgrade
   looks: Look[]                   // was `states`
 }
@@ -129,6 +131,17 @@ Check { verdict: 'match' | 'unsure' | 'different' | 'no-face', score?, lookFit?:
 
 ---
 
+## Style: Photo and Anime (added 2026-09-26)
+
+A character has **one style, chosen at creation**: **Photo** (the default) or **Anime**. More styles (3D animated, Illustrated, Comic) come later, once these two work well.
+
+- **Style belongs to the character, not to a look.** An anime character's design *is* her identity; looks still change hair and clothes, not the rendering.
+- **The same person in two styles is two characters.** "Make an anime version" on a Photo character creates a new Anime character linked to it (`linkedFrom`), built from her face. It never adds a second style to one character.
+- **Creation:** Describe → a style choice (Photo · Anime) before "Show faces", and the casting call draws in that style. Start from photos → Photo, or turn her into an anime character (the likeness checkbox still applies).
+- **Checking:** face matching only works on real faces, so Anime characters are checked by a vision model instead (see Checks).
+- **The sheet:** Anime characters get an animation-style turnaround. The head stays on every body panel, and the side profile is standard, not optional (see Sheet panels).
+- **Video:** the start-frame route (stage 3) matters most here, because video models drift towards realism and a drawn first frame holds the style.
+
 ## Making pictures of her
 
 ### Sheet panels
@@ -147,7 +160,9 @@ Check { verdict: 'match' | 'unsure' | 'different' | 'no-face', score?, lookFit?:
 - Body presets become explicit visual wording, for example Muscular: *"broad strong shoulders, defined arms, visible abdominal muscles and powerful thighs"*.
 - `bodyPhrase.ts` bands get rewritten in that style. Today's strongest muscle phrase, *"a strongly muscular physique"*, is too weak.
 
-**Side profile:** an optional sixth panel. It is only built and only sent for models that ask for it (Kling, Vidu). For Seedance and Gemini it adds risk.
+**Side profile:** an optional sixth panel for Photo characters. It is only built and only sent for models that ask for it (Kling, Vidu). For Seedance and Gemini it adds risk.
+
+**Anime sheet:** full-body front, three-quarter, side profile and back, **all with the head** (the headless panels were a workaround for photoreal video models), plus a face row: neutral and smiling. The wording is written and tested in stage 4, on GPT Image 2.5 and Nano Banana Pro. For heavy use of one anime character, a trained LoRA is the community standard, and Sailor already has the trainer.
 
 ### Casting-call faces
 - **GPT Image 2.5 Flare**, text-to-image, medium quality: six faces for about $0.09.
@@ -197,7 +212,11 @@ Conditions attached:
   - Someone else: left out, with "Use anyway".
   - If several flagged photos are the same other person: "Make a new character from these".
 - **Face detection:** pad each image about 40% before detecting. The detector misses faces that fill the frame, as in the close-up panels.
-- **Stylised characters** (illustration, 3D): face scores don't work on them, so checks are off, and the page shows no scores rather than wrong ones.
+- **Anime characters are checked by a vision model**, not AWS. Face matching is trained on real faces and gives no score, or a meaningless one, on drawn characters. So Claude compares the picture with her approved face against a checklist: face shape, eye style and colour, hair style and colour, distinctive marks, body proportions. Pose, expression, angle, lighting and clothing are ignored.
+  - It answers with a verdict and a short note, such as "hair is shorter", and no score.
+  - It costs about $0.01 a comparison and goes through the same assist metering as other Claude calls.
+  - The usage limits that rule vision models out for real people (identifying people, biometrics) don't apply to fictional drawn characters.
+  - To you, the flags and Redo look the same for both styles.
 
 ---
 
@@ -255,16 +274,19 @@ These follow the prototype.
 
 Each stage ships on its own and is checked in the real app before the next one starts.
 
-0. **Quick fixes, now and separate from this spec:**
-   - Seedance cast sends portrait + body front, not the grid (`lib/shotdirector/cast.ts`, `identityRefs`).
-   - Veo routes references to `reference-to-video` (`comfy_api_nodes/video_models.py` `_veo31_fal_input`).
+0. **Quick fix:** Seedance cast sends portrait + body front, never the grid (`lib/shotdirector/cast.ts`, a new `videoIdentityRefs`).
 1. **Model and reading old records:** looks with clothes, character-level photos and face, the `madeFrom` stamps. Unit tests for converting all three past record formats.
 2. **The face checker as a service:** AWS Compare faces behind one server route, with the training opt-out set, the consent step for real-photo characters, thresholds re-measured on Jene (must flag) and Reva (must pass), and checks run on read.
-3. **The sheet pipeline:** GPT Sunburst with automatic fallback to Nano Banana Pro, the tested wording, clothes stated, staleness, and redo with the other model. One live run per character route, about $0.50.
-4. **The character page and panel:** the new UI from the prototype, with body presets and the voice row stored but not yet sent.
-5. **Creation:** describe (casting call), photos (checks, "which one?", likeness), from the canvas.
-6. **Canvas and images:** the character node as the only route in; any image generator accepts a character; "Appears in" and the star.
-7. **Video, per model:** what-to-send profiles as in the table, start frame first, then Kling through fal elements.
+3. **Video, per model** (moved up from 7 on 2026-09-26, so better video lands before the character screens):
+   - Shot Director profiles beyond Seedance, sending what the table in "What gets sent" says.
+   - **Kling 3 through fal**, as an element plus a start frame (moves Kling off Replicate).
+   - **Veo 3.1 references** through `veo3.1/reference-to-video`. Today the runner refuses a Veo request with reference pictures in plain words (`VEO_31_ONE_PICTURE`), and the Shot Director can only target Seedance, so this is new capability, not a silent bug. It needs a saved fal schema fixture first.
+   - **The start-frame route:** make the shot's first frame as an image from the character, then animate it.
+   - The face checker scores a few frames of every take, so models can be compared on real results.
+4. **The sheet pipeline:** GPT Sunburst with automatic fallback to Nano Banana Pro, the tested wording, clothes stated, staleness, and redo with the other model. One live run per character route, about $0.50.
+5. **The character page and panel:** the new UI from the prototype, with body presets and the voice row stored but not yet sent.
+6. **Creation:** describe (casting call), photos (checks, "which one?", likeness), from the canvas.
+7. **Canvas and images:** the character node as the only route in; any image generator accepts a character; "Appears in" and the star.
 8. **Voice to models,** then consider Vidu Q3.
 
 Tests at every stage:
