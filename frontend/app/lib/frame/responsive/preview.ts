@@ -32,9 +32,11 @@ export function effectivePins(frame: FrameDoc, layerId: string, ctx: CanvasRende
   const gridAvailable = auto.onGrid.h || auto.onGrid.v
   const holdStored = stored.holdTo === 'frame'
   const hold = holdStored ? holdOf(unit, lone, pair, W0, H0, W0, H0, ctx) : auto
-  // Inferred against the same rectangle the resolver uses, so the card says what really happens.
-  const infH = inferAxisPin(unit.box.x, unit.box.w, hold.h.dStart, hold.h.dExtent, unit.canStretch)
-  const infV = V_NAME[inferAxisPin(hold.vBox.y, hold.vBox.h, hold.v.dStart, hold.v.dExtent, unit.canStretch && hold.vCanStretch)]
+  // Inferred against the same rectangle, and with the same stretch rule, the resolver uses (a unit
+  // that keeps its size is placed, never stretched), so the card says what really happens.
+  const cs = unit.canStretch && !stored.keepSize
+  const infH = inferAxisPin(unit.box.x, unit.box.w, hold.h.dStart, hold.h.dExtent, cs)
+  const infV = V_NAME[inferAxisPin(hold.vBox.y, hold.vBox.h, hold.v.dStart, hold.v.dExtent, cs && hold.vCanStretch)]
   const holdTo: 'frame' | 'grid' = holdStored ? 'frame' : (gridAvailable ? 'grid' : 'frame')
 
   return {

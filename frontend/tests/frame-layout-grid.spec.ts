@@ -289,6 +289,23 @@ test.describe('Frame layout grid — a responsive Frame at a viewing size', () =
     await expect.poll(() => viewBox(page)).toBe(`0 0 ${before.design.W} ${before.design.H}`)
   })
 
+  test('typing a layer Grid field at a viewing size returns to the design size first, then places it', async ({ page }) => {
+    await page.evaluate(() => (window as any).__frameLab.editor.selectLocal('strokecenter'))
+    const before = await grids(page)
+    const h = page.locator('[data-testid="frame-view-h"]')
+    await h.fill(String(before.design.W)); await h.press('Tab')
+    await expect.poll(async () => (await grids(page)).overlay.H).not.toBe(before.design.H)
+    await expect(page.getByText('Back to design size')).toBeVisible()
+    const field = page.locator('[data-testid="layer-grid-col"]')
+    const want = Number(await field.inputValue()) === 3 ? 5 : 3
+    await field.fill(String(want)); await field.press('Enter'); await field.blur()
+    // Back at the design size (the overlay is the design grid again), and placed on the DESIGN grid.
+    await expect.poll(() => viewBox(page)).toBe(`0 0 ${before.design.W} ${before.design.H}`)
+    await expect(page.getByText('Back to design size')).toHaveCount(0)
+    const l = await page.evaluate(() => (window as any).__frameLab.node.data.properties.sailor_localLayers.find((x: any) => x.id === 'strokecenter'))
+    expect(Math.abs((l.x - l.w / 2) * before.design.W - before.design.cols[want - 1].a)).toBeLessThan(0.5)
+  })
+
   test('text marks are a design-size tool: hidden at a viewing size', async ({ page }) => {
     const id = await page.evaluate(() => (window as any).__frameLab.node.data.properties.sailor_localLayers
       .find((x: any) => x.kind === 'text' && !x.rotation && !x.path && !(x.runs?.length))?.id)

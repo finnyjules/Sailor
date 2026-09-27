@@ -72,7 +72,8 @@ export function textRowBox(layer: LocalLayer | undefined, W0: number, H0: number
 /**
  * The rectangle a unit holds to, per axis. An axis holds to the unit's span on the grid when the
  * unit lies on that span (within `max(1 % of the design width, one grid unit)`); otherwise, or with
- * no grid, or with `holdTo: 'frame'`, it holds to the frame — exactly the rectangle resolve used before.
+ * no grid, or with `holdTo: 'frame'`, or where the box reaches or passes a frame edge on that axis, it
+ * holds to the frame — exactly the rectangle resolve used before.
  * `lone` is the unit's single layer when the unit is one layer (text reads its rows by what is drawn).
  */
 export function holdOf(unit: Unit, lone: LocalLayer | undefined, pair: GridPair | null, W0: number, H0: number, W: number, H: number, ctx: CanvasRenderingContext2D | null): Hold {
@@ -91,14 +92,20 @@ export function holdOf(unit: Unit, lone: LocalLayer | undefined, pair: GridPair 
   const vb = text ?? { y: box.y, h: box.h }
   const span = spanOf({ x: box.x, w: box.w, y: vb.y, h: vb.h }, d)
   const dp = placeOnSpan(span, d)
+  // A box that reaches or passes a frame edge (a full-bleed background, a band to the edge) holds
+  // to the FRAME on that axis, so it keeps meeting the edge at every size — even where the grid's
+  // margin is within the tolerance and the box would otherwise read as on the outer columns/rows.
+  const EDGE = 1e-3
+  const hitsFrameH = box.x <= EDGE || box.x + box.w >= W0 - EDGE
+  const hitsFrameV = box.y <= EDGE || box.y + box.h >= H0 - EDGE
   // Columns: the count is stored, so the same indices exist at every size.
-  if (box.x >= dp.x - tol && box.x + box.w <= dp.x + dp.w + tol) {
+  if (!hitsFrameH && box.x >= dp.x - tol && box.x + box.w <= dp.x + dp.w + tol) {
     const vp = placeOnSpan({ ...span, row: null, rows: null }, v)
     out.h = { dStart: dp.x, dExtent: dp.w, bStart: vp.x, bExtent: vp.w }
     out.onGrid.h = true
   }
   // Rows: Square rows change count with the shape, so the span keeps its rows by holdRows.
-  if (span.row != null && span.rows != null && dp.y != null && dp.h != null
+  if (!hitsFrameV && span.row != null && span.rows != null && dp.y != null && dp.h != null
     && vb.y >= dp.y - tol && vb.y + vb.h <= dp.y + dp.h + tol) {
     const held = holdRows(span.row - 1, span.row + span.rows - 2, d.rows.length, v.rows.length)
     if (held) {
@@ -107,6 +114,45 @@ export function holdOf(unit: Unit, lone: LocalLayer | undefined, pair: GridPair 
       out.onGrid.v = true
       out.vBox = vb
       out.vCanStretch = !text
+    }
+  }
+  return out
+}
+
+/**
+ * Every grid span a unit drawn over [a, b] (view px) on one axis could hold to at the viewing size —
+ * those whose view extent holds [a, b] within the tolerance (scaled to the view) — each with the
+ * design span that holds to it: the same columns, or every design row span `holdRows` keeps on
+ * those view rows. Empty without a grid (or rows, down). An edit at a viewing size maps a drop back
+ * through each, so the unit can re-hold where it lands.
+ */
+export function spansAtView(pair: GridPair | null, axis: 'h' | 'v', a: number, b: number, W0: number): AxisRef[] {
+  if (!pair) return []
+  const { design: d, view: v, s } = pair
+  const tol = Math.max(0.01 * W0, d.unit) * s + 1e-6
+  const out: AxisRef[] = []
+  const holds = (lo: number, hi: number) => lo <= a + tol && hi >= b - tol
+  if (axis === 'h') {
+    const n = Math.min(v.cols.length, d.cols.length)
+    for (let c0 = 0; c0 < n; c0++) {
+      for (let c1 = c0; c1 < n; c1++) {
+        const lo = v.cols[c0]!.a, hi = v.cols[c1]!.a + v.cols[c1]!.w
+        if (lo > a + tol) break
+        if (!holds(lo, hi)) continue
+        out.push({ dStart: d.cols[c0]!.a, dExtent: d.cols[c1]!.a + d.cols[c1]!.w - d.cols[c0]!.a, bStart: lo, bExtent: hi - lo })
+      }
+    }
+    return out
+  }
+  const n = d.rows.length, m = v.rows.length
+  if (!n || !m) return out
+  for (let r0 = 0; r0 < n; r0++) {
+    for (let r1 = r0; r1 < n; r1++) {
+      const held = holdRows(r0, r1, n, m)
+      if (!held) continue
+      const lo = v.rows[held[0]]!.a, hi = v.rows[held[1]]!.a + v.rows[held[1]]!.w
+      if (!holds(lo, hi)) continue
+      out.push({ dStart: d.rows[r0]!.a, dExtent: d.rows[r1]!.a + d.rows[r1]!.w - d.rows[r0]!.a, bStart: lo, bExtent: hi - lo })
     }
   }
   return out

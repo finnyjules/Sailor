@@ -78,7 +78,7 @@ describe('holdOf', () => {
   })
   it('within one unit of its columns it still holds; further out it holds to the frame', () => {
     const p = gridsAt(own(), null, W0, H0, 3000, 1000)!
-    const near = createRectLayer({ id: 'n', x: 0.255, y: 0.5, w: 0.51, h: 0.1 })  // 0..510: 10 px past column 1
+    const near = createRectLayer({ id: 'n', x: 0.26, y: 0.5, w: 0.51, h: 0.1 })   // 5..515: 15 px past column 1
     expect(holdOf(unitOf(near), near, p, W0, H0, 3000, 1000, null).onGrid.h).toBe(true)
     const far = createRectLayer({ id: 'f', x: 0.48, y: 0.5, w: 0.16, h: 0.1 })    // 400..560: 60 px past column 1
     const h = holdOf(unitOf(far), far, p, W0, H0, 3000, 1000, null)
