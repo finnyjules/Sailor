@@ -186,3 +186,42 @@ describe('Minor 5: deleting every linear copy removes the dashed guide line', ()
     expect(getEntity(d, g)).toBeTruthy()
   })
 })
+
+describe('re-review Minor 1: a length rule on a rounded side goes when that side does', () => {
+  function roundedSquare(kind: 'round' | 'chamfer') {
+    const d = doc()
+    const { path, pts } = squarePath(d, 0, 0, 10)
+    const L = addConstraint(d, 'distance', [pts[0]!, pts[1]!], 10)
+    const E = addConstraint(d, 'equalDist', [pts[0]!, pts[1]!, pts[2]!, pts[3]!])
+    expect(roundCorners(d, [pts[1]!], kind, 2).ok).toBe(true)
+    return { d, path, pts, L, E }
+  }
+  it('trim the side A → T1: the distance and the segment Equal naming A and the hidden corner go, counted', () => {
+    for (const kind of ['round', 'chamfer'] as const) {
+      const { d, path, pts, L, E } = roundedSquare(kind)
+      const p = getEntity(d, path) as PathEntity
+      const n0 = d.constraints.length
+      const r = removeSpan(d, spanAt(d, { kind: 'seg', pathId: path, segIndex: p.anchors.indexOf(pts[0]!) }, 0.5)!)
+      expect(r.ok).toBe(true)
+      expect(d.constraints.some(c => c.id === L || c.id === E)).toBe(false)
+      expect(r.droppedRules).toBe(n0 - d.constraints.length)
+      expect(r.droppedRules).toBeGreaterThanOrEqual(2)
+    }
+  })
+  it('trimming the other side leaves the length on A → B alone', () => {
+    const { d, path, pts, L } = roundedSquare('round')
+    const p = getEntity(d, path) as PathEntity
+    const r = removeSpan(d, spanAt(d, { kind: 'seg', pathId: path, segIndex: p.anchors.indexOf(pts[2]!) }, 0.5)!)
+    expect(r.ok).toBe(true)
+    expect(d.constraints.some(c => c.id === L)).toBe(true)
+  })
+  it('deleting a separate line side takes its length on the hidden corner too', () => {
+    const d = doc()
+    const a = addPoint(d, 0, 0), x = addPoint(d, 10, 0), b = addPoint(d, 10, 10)
+    const side = addLine(d, a, x); addLine(d, x, b)
+    const L = addConstraint(d, 'distance', [a, x], 10)
+    expect(roundCorners(d, [x], 'round', 2).ok).toBe(true)
+    deleteEntity(d, side)
+    expect(d.constraints.some(c => c.id === L)).toBe(false)
+  })
+})

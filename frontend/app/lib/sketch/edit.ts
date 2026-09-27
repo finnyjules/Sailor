@@ -92,6 +92,32 @@ function spansLine(doc: SketchDoc, a: EntityId, b: EntityId): boolean {
   return false
 }
 
+/** The length rules that belong to a rounded or chamfered corner's side
+ *  (a, b) = (far, T): every `distance` or segment `equalDist` naming the far
+ *  end and the corner's virtual sharp X, found through the sharp's own tie
+ *  `collinear [far, T, X]`. When the side goes (trim, delete) they go too —
+ *  left behind they would tie `far` to a hidden guide dot (re-review Minor 1). */
+export function sharpSideLengthRules(doc: SketchDoc, a: EntityId, b: EntityId): Set<EntityId> {
+  const out = new Set<EntityId>()
+  const sharps: [EntityId, EntityId][] = []   // [far, X]
+  for (const c of doc.constraints) {
+    if (c.kind !== 'collinear' || c.refs.length !== 3) continue
+    const [f, t, x] = c.refs as [EntityId, EntityId, EntityId]
+    if (!((f === a && t === b) || (f === b && t === a))) continue
+    if (getPoint(doc, x)?.construction) sharps.push([f, x])
+  }
+  if (!sharps.length) return out
+  const is = (p: EntityId | undefined, q: EntityId | undefined) => sharps.some(([f, x]) => (p === f && q === x) || (p === x && q === f))
+  const centres = new Set<EntityId>()
+  for (const e of doc.entities) if (e.kind === 'path') for (const sg of e.segments) if (sg.kind === 'arc') centres.add(sg.center)
+  for (const c of doc.constraints) {
+    const r = c.refs
+    if (c.kind === 'distance' && r.length === 2 && is(r[0], r[1])) out.add(c.id)
+    else if (c.kind === 'equalDist' && r.length === 4 && !(r[0] === r[2] && centres.has(r[0]!)) && (is(r[0], r[1]) || is(r[2], r[3]))) out.add(c.id)
+  }
+  return out
+}
+
 const REPEAT_KINDS = new Set<ConstraintKind>(['rotatedFrom', 'mirroredFrom', 'translatedFrom'])
 
 // Guide points tied by rules to `seeds` (and through them to further guide
@@ -189,10 +215,19 @@ export function deleteEntity(doc: SketchDoc, id: EntityId, opts: { keepGuideEnds
       }
     })
   }
+  // a straight side of a rounded / chamfered corner: its lengths on the sharp
+  // go with the last piece between its ends (checked once it is gone)
+  const sides: [EntityId, EntityId][] = []
+  if (e.kind === 'line') sides.push([e.p1, e.p2])
+  else if (e.kind === 'path') e.segments.forEach((s, i) => { if (s.kind === 'line') sides.push([e.anchors[i]!, e.anchors[(i + 1) % e.anchors.length]!]) })
+  const sideLengths = sides.map(([a, b]) => ({ a, b, ids: sharpSideLengthRules(doc, a, b) })).filter(x => x.ids.size)
   // remove this entity
   doc.entities = doc.entities.filter(x => x.id !== id)
   // drop constraints that reference the removed entity
   doc.constraints = doc.constraints.filter(c => !c.refs.includes(id))
+  for (const { a, b, ids } of sideLengths) {
+    if (!spansLine(doc, a, b)) doc.constraints = doc.constraints.filter(c => !ids.has(c.id))
+  }
   if (e.kind === 'line' && !spansLine(doc, e.p1, e.p2)) {
     // a tangent or offset line names its ends, not its id: it goes with the last piece between them
     doc.constraints = doc.constraints.filter(c => !((c.kind === 'tangentLineArc' || c.kind === 'offsetLine') &&

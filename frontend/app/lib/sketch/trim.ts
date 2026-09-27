@@ -6,7 +6,7 @@ import type { Vec2 } from './geom'
 import { dist, sub, cross, dot, distPointToLine } from './geom'
 import type { CurveRef, Span, SpanEnd } from './crossings'
 import { curveGeom, pointAt } from './crossings'
-import { addPoint, addLine, addCircle, addConstraint, deleteEntity, isPointReferenced } from './edit'
+import { addPoint, addLine, addCircle, addConstraint, deleteEntity, isPointReferenced, sharpSideLengthRules } from './edit'
 import { freshId } from './ids'
 import { tangentTouchPoint } from './tangency'
 import { splitSeeds, joinSeeds, renameSeedPoints } from './fills'
@@ -242,7 +242,9 @@ function followPair(doc: SketchDoc, a: EntityId, b: EntityId, ev: PairEvent): Se
   const touched = new Set<EntityId>()
   if (a === b) return touched
   const centres = arcCentres(doc)
-  const remove = new Set<EntityId>()
+  // a rounded / chamfered corner's side removed: its lengths on the hidden
+  // corner go too (re-review Minor 1)
+  const remove = ev.kind === 'removed' ? sharpSideLengthRules(doc, a, b) : new Set<EntityId>()
   const copies: SketchConstraint[] = []
   for (const c of doc.constraints) {
     const info = pairSlots(doc, c, centres)
