@@ -19,7 +19,7 @@ import { PEN_TIPS } from '~/composables/pen/penTips'
 import { STRENGTHS, type CleanupStrength } from '~/lib/sketch/cleanup'
 import {
   MousePointer2, Spline, PenTool as PenNib, Minus, Circle, Dot,
-  CircleDashed, Tag, Undo2, Redo2, Scissors, Slice, Bandage, WandSparkles,
+  CircleDashed, Tag, Undo2, Redo2, Scissors, Slice, Bandage, WandSparkles, PaintBucket,
 } from 'lucide-vue-next'
 
 // The root is the renderless TooltipProvider, so the host's class (the Frame
@@ -62,6 +62,7 @@ const ALL_TOOLS: { id: PenTool; icon: Component }[] = [
   { id: 'trim', icon: Scissors },
   { id: 'cut', icon: Slice },
   { id: 'dissolve', icon: Bandage },
+  { id: 'fill', icon: PaintBucket },
 ]
 const tipName = (id: string) => PEN_TIPS[id]?.name ?? id
 // only the tools this host offers (PenOptions.tools, resolved by usePen —

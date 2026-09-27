@@ -5,7 +5,14 @@
 // drawn across fills both halves), G picks the tool and a text-guide pen has
 // none, Flip keeps a filled shape filled, the hover and the settle stay cheap
 // on one connected drawing, and a drawing with no fills does no face work.
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
+// every face lookup goes through facesFor: count its calls (the real one runs)
+vi.mock('~/lib/sketch/faces', async (orig) => {
+  const m = await orig<typeof import('~/lib/sketch/faces')>()
+  return { ...m, facesFor: vi.fn(m.facesFor) }
+})
+import { facesFor } from '~/lib/sketch/faces'
+import { fillTarget } from '~/lib/sketch/fills'
 import { ref } from 'vue'
 import type { SketchDoc } from '~/lib/sketch/model'
 import { addPoint, addPath, addLine, addCircle } from '~/lib/sketch/edit'
@@ -90,6 +97,10 @@ describe('the pen’s Fill tool', () => {
     pen.place(3, 0); pen.place(3, 6)
     expect(pen.fillView().filled).toBe(2)
     expect(doc.value.fills!.length).toBe(2)
+    // both halves are filled, and nothing outside the square is
+    expect(fillTarget(doc.value, { x: 2, y: 3 }, 0)?.filled).toBe(true)
+    expect(fillTarget(doc.value, { x: 4, y: 3 }, 0)?.filled).toBe(true)
+    expect(fillTarget(doc.value, { x: 8, y: 3 }, 0)).toBeNull()
     pen.undo()
     expect(pen.fillView().filled).toBe(1)
   })
@@ -165,8 +176,14 @@ describe('the pen’s Fill tool', () => {
   })
   it('a drawing with no fills does no face work at commit', () => {
     const { doc, pen } = penWithSquare()
+    const calls = vi.mocked(facesFor).mock.calls.length
     pen.selectTool('line'); pen.place(7, 0); pen.place(7, 6)
+    pen.selectTool('select'); pen.undo(); pen.redo()
+    expect(vi.mocked(facesFor).mock.calls.length).toBe(calls)
     expect(doc.value.fills).toBeUndefined()
+    // (the count is live: the Fill tool's own hover does look faces up)
+    pen.selectTool('fill'); pen.fillMove(2, 2)
+    expect(vi.mocked(facesFor).mock.calls.length).toBeGreaterThan(calls)
     expect(pen.fillView()).toEqual({ d: '', gaps: [], filled: 0, asleep: 0 })
   })
   it('a text-guide pen pastes a copy without its fills', () => {

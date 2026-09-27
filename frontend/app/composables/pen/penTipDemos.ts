@@ -11,6 +11,7 @@
 // SVG viewBox of that size — no view matrix).
 import type { SketchDoc, EntityId, SegmentSpec } from '~/lib/sketch/model'
 import type { Vec2 } from '~/lib/sketch/geom'
+import { toggleFillAt } from '~/lib/sketch/fills'
 
 export const DEMO_W = 160
 export const DEMO_H = 96
@@ -31,6 +32,8 @@ export interface PenTipFrame {
   dots?: Vec2[]
   /** dots drawn highlighted (hovered / grabbed) */
   hot?: Vec2[]
+  /** the Fill tool's hover: the area under this point is shown hatched */
+  hatchAt?: Vec2
 }
 
 // ── tiny drawing builder ─────────────────────────────────────────────────────
@@ -292,6 +295,23 @@ function dissolve(t: number): PenTipFrame {
   }
 }
 
+// Fill: two crossing circles; point into the lens (it shows hatched), click,
+// it fills; then point at the left crescent, which shows hatched in turn.
+// The doc carries a real fill, so the card draws it the way the pen does.
+function fill(t: number): PenTipFrame {
+  const CA = v(62, 48), CB = v(98, 48), r = 26
+  const lens = v(80, 48), crescent = v(47, 48)
+  const cursor = track(t, [[0.04, v(140, 88)], [0.32, v(lens.x + 1, lens.y + 3)], [0.64, v(lens.x + 1, lens.y + 3)], [0.84, v(crescent.x + 1, crescent.y + 3)]])
+  const filled = t >= 0.53
+  const s = sk().circle(CA, r).circle(CB, r)
+  if (filled) toggleFillAt(s.doc, lens, 0)
+  return {
+    doc: s.doc, cursor, pressed: within(t, 0.5, 0.56),
+    hatchAt: t >= 0.3 && t < 0.5 ? lens : t >= 0.82 ? crescent : undefined,
+    ...sparkleAt(t, 0.53, lens),
+  }
+}
+
 // Clean up: a shape whose top doesn't quite close and whose base sits a
 // little off level; press, and it tidies — the ends join, the base levels,
 // the old drawing stays as a faint ghost.
@@ -317,6 +337,6 @@ function cleanup(t: number): PenTipFrame {
 }
 
 export const PEN_TIP_DEMOS: Record<string, (t: number) => PenTipFrame> = {
-  select, path, curve, line, circle, point, trim, cut, dissolve, cleanup,
+  select, path, curve, line, circle, point, trim, cut, dissolve, fill, cleanup,
 }
 export const PEN_DEMO_TOOLS = Object.keys(PEN_TIP_DEMOS)

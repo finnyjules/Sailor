@@ -42,7 +42,7 @@
 //   / `onHostBlur()`. `onHostKeydown` runs the same typing guard and
 //   focused-control rule before touching the pen, and returns whether it
 //   consumed the key.
-import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted, useId } from 'vue'
 import type { SketchDoc, EntityId, ConstraintKind, SegmentSpec } from '~/lib/sketch/model'
 import { addPoint } from '~/lib/sketch/edit'
 import { sketchPathData, entityPath } from '~/lib/sketch/sketchPath'
@@ -104,6 +104,7 @@ const {
   arcDragStart, arcDragMove, arcDragEnd, arcDragTransient,
   cleanup: cleanupSession, toggleCleanupFix, toggleCleanupKind,
   highlight, menu, wheel, openMenu, closeMenus, openWheel, wheelPointer, releaseWheel, closeWheel, setViewSize,
+  fillHover, fillMove, fillClick, fillView, docRevision,
 } = props.pen
 
 const svgEl = ref<SVGSVGElement | null>(null)
@@ -509,6 +510,22 @@ const dissolveHoverScreen = computed(() => {
   return h ? { ...toScreen(h), ok: h.ok } : null
 })
 
+// ---------- Fill (pen stage 7) ----------
+// The filled areas, a soft tint in drawing space under the outline, in every
+// tool; the rings at the open ends of a sleeping fill's drawing (screen
+// space); and in the Fill tool the area under the pointer, hatched in screen
+// space (so the hatch keeps its spacing under any zoom or rotation) through a
+// clip of that area's outline drawn in drawing space. Read on the drawing as
+// it settles (docRevision) and as it moves (pathDrawing), so it follows drags
+// and does no work while nothing moves.
+const fillShown = computed(() => { void docRevision.value; void pathDrawing.value; return fillView() })
+const fillGapScreens = computed(() => fillShown.value.gaps.map(p => toScreen(p)))
+const fillHoverShown = computed(() => (tool.value === 'fill' && !cleanupSession.value ? fillHover.value : null))
+// ids unique to this overlay (a page may show two pens)
+const fillUid = useId().replace(/[^a-zA-Z0-9_-]/g, '')
+const hatchId = `pen-fill-hatch-${fillUid}`
+const hatchClipId = `pen-fill-clip-${fillUid}`
+
 // screen-space sparkles: a small burst of short rays radiating from the
 // point, ease-out pop + linear fade to 0 by SPARKLE_LIFETIME_MS.
 const SPARKLE_RAYS = 6
@@ -885,6 +902,7 @@ function onPointerDownSvg(ev: PointerEvent) {
   if (tool.value === 'trim') { trimDown(w.x, w.y); return }
   if (tool.value === 'cut') { cutClick(w.x, w.y); return }
   if (tool.value === 'dissolve') { dissolveClick(w.x, w.y); return }
+  if (tool.value === 'fill') { fillClick(w.x, w.y); return }
   if (tool.value === 'path') { pathDown(w.x, w.y, ev.shiftKey); return }
   if (tool.value === 'curve') { curveDown(w.x, w.y); return }
   const { x, y } = w
@@ -916,11 +934,12 @@ function onPointerMove(ev: PointerEvent) {
     if (w) curveMove(w.x, w.y)
     return
   }
-  if (tool.value === 'trim' || tool.value === 'cut' || tool.value === 'dissolve') {
+  if (tool.value === 'trim' || tool.value === 'cut' || tool.value === 'dissolve' || tool.value === 'fill') {
     const w = drawingXY(ev)
     if (!w) { clearToolHover(); return }
     if (tool.value === 'trim') trimMove(w.x, w.y)
     else if (tool.value === 'cut') cutMove(w.x, w.y)
+    else if (tool.value === 'fill') fillMove(w.x, w.y)
     else dissolveMove(w.x, w.y)
     return
   }
@@ -1196,6 +1215,8 @@ defineExpose({
     <!-- drawing space: the view matrix does scale, rotation and mirroring -->
     <g :transform="svgTransform">
       <template v-if="!cleanupSession">
+      <!-- filled areas (pen stage 7): a soft tint under the outline -->
+      <path v-if="fillShown.d" :d="fillShown.d" fill="#6366f1" fill-opacity="0.16" stroke="none" pointer-events="none" data-fill-area />
       <path :d="pathDrawing" fill="none" stroke="#3730a3" stroke-width="1.5" vector-effect="non-scaling-stroke" />
       <path :d="constructionDrawing" fill="none" stroke="#9ca3af" stroke-width="1.5" stroke-dasharray="4 3" vector-effect="non-scaling-stroke" />
       <template v-for="e in doc.entities" :key="'hit-' + e.id">
@@ -1248,6 +1269,20 @@ defineExpose({
       <path v-for="(d, i) in trimGhosts" :key="'ghost-' + i" :d="d" fill="none" stroke="#3730a3" stroke-width="1"
             stroke-dasharray="1 3" opacity="0.35" vector-effect="non-scaling-stroke" data-trim-ghost />
     </g>
+    <!-- Fill: the area under the pointer, hatched (indigo: a click fills it;
+         red: it is filled and a click empties it) -->
+    <template v-if="fillHoverShown">
+      <defs>
+        <pattern :id="hatchId" patternUnits="userSpaceOnUse" width="6" height="6" patternTransform="rotate(45)">
+          <line x1="0" y1="0" x2="0" y2="6" :stroke="fillHoverShown.filled ? '#ef4444' : '#4f46e5'" stroke-width="1.5" />
+        </pattern>
+        <clipPath :id="hatchClipId">
+          <path :d="fillHoverShown.d" :transform="svgTransform" />
+        </clipPath>
+      </defs>
+      <rect x="0" y="0" :width="width" :height="height" :fill="`url(#${hatchId})`" :clip-path="`url(#${hatchClipId})`"
+            opacity="0.7" pointer-events="none" data-fill-hover :data-filled="fillHoverShown.filled ? 'yes' : 'no'" />
+    </template>
     <g v-if="trimHoverD" :transform="svgTransform" pointer-events="none" data-trim-hover>
       <path :d="trimHoverD" fill="none" stroke="#ef4444" stroke-opacity="0.55" stroke-width="4" stroke-linecap="round"
             vector-effect="non-scaling-stroke" />
@@ -1300,6 +1335,11 @@ defineExpose({
     </template>
     <circle v-if="cutHoverScreen" :cx="cutHoverScreen.x" :cy="cutHoverScreen.y" r="5" fill="#fff" stroke="#ef4444"
             stroke-width="1.5" pointer-events="none" data-cut-hover />
+    <!-- a sleeping fill: rings at the open ends that keep its area from closing -->
+    <template v-if="!cleanupSession">
+      <circle v-for="(g, i) in fillGapScreens" :key="'fillgap-' + i" :cx="g.x" :cy="g.y" r="6" fill="none"
+              stroke="#f59e0b" stroke-width="1.5" stroke-dasharray="3 2.5" pointer-events="none" data-fill-gap />
+    </template>
     <circle v-if="dissolveHoverScreen" :cx="dissolveHoverScreen.x" :cy="dissolveHoverScreen.y" r="9" fill="none"
             :stroke="dissolveHoverScreen.ok ? '#16a34a' : '#9ca3af'" stroke-width="2" pointer-events="none"
             :data-dissolve-hover="dissolveHoverScreen.ok ? 'ok' : 'no'" />
