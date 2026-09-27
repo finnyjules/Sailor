@@ -3,6 +3,7 @@ import type { BandEl, ButtonEl, Colour, Content, LineEl, LogoEl, Measure, Missin
 import { STYLES } from './styles'
 import type { StyleId } from './styles'
 import type { FrameFormat } from '~/lib/frame/formats'
+import type { ResolvedLayoutGrid } from '~/lib/frame/layoutGrid'
 
 // ═══════════════════════ the kit ═══════════════════════
 // Ported from the prototype (docs/superpowers/specs/assets/2026-09-23-frame-layout-system/
@@ -14,6 +15,13 @@ import type { FrameFormat } from '~/lib/frame/formats'
 export interface SheetOpts {
   frameW: number; frameH: number
   grid?: { mode: 'off' | 'explicit' | 'generated'; margin: number; gutter: number; columns: number } | null
+  /** Stage 3: the Frame's layout grid, resolved at frameW × frameH (px). Given, the sheet's columns,
+   *  band, rows and type come from it; `grid`, `composeH` and the format's `nc` / `keepSide` are then
+   *  not read. Absent: the kit's own sheet, exactly as before. */
+  layout?: ResolvedLayoutGrid
+  /** With `layout`: the sheet covers the whole Frame (Y0 0, the full height) instead of the grid's
+   *  band — the sheet the checker, the settle and the ops use. */
+  whole?: boolean
   measure: Measure
   /** Multiplies every fitted size (a variation's scale). Default 1. */
   scale?: number
@@ -44,6 +52,10 @@ export interface Sheet {
   /** The margin is the kit's own (`min(4, 6% of H)`) — not the Frame's grid margin, and not widened
    *  to a platform's side keep-clear (a story). Optical nudges past the margin apply only then. */
   defaultMargin: boolean
+  /** Stage 3: the baseline grid's step, kit units (0: the kit's own sheet, no grid). */
+  U: number
+  /** Stage 3: where this sheet's y = 0 sits on the Frame, kit units (0 unless composing on a band). */
+  Y0: number
   DISPLAY: Style; SECOND: Style & { size: number }; INFO: Style & { size: number }
   X(c: number): number; XR(c: number): number; SPAN(a: number, b: number): number; L(r: number): number; Xr(c: number): number
   /** The line a bottom or a baseline on design row `r` sits on (stage 3). The kit's own sheet: `L`. */
@@ -151,37 +163,66 @@ export function formatSheetOpts(fmt: FrameFormat | null): SheetOpts['format'] {
   return { view: fmt.view, nc: fmt.nc, ...(keepSide != null ? { keepSide } : {}) }
 }
 
+/** The band a sheet on the layout grid composes on (kit units, percent of frame width). Layouts are
+ *  written "margin to margin", so the band is chosen to make their margin `m` (the grid's own left
+ *  margin) land on the grid's `top` and `bottom`, which already stop at a format's covered areas:
+ *  the band starts `m` above the grid's top (`y0`, on the Frame) and is `h` tall. */
+export function gridBand(r: ResolvedLayoutGrid, frameW: number): { y0: number; h: number; m: number; top: number; bottom: number } {
+  const k = 100 / frameW
+  const m = r.margin * k, top = r.top * k, bottom = r.bottom * k
+  return { y0: top - m, h: bottom - top + 2 * m, m, top, bottom }
+}
+
 export function makeSheet(o: SheetOpts): Sheet {
   const { measure } = o
   const SCALE = o.scale ?? 1
   const FLIP = !!o.flip
-  const grid = o.grid ?? null
+  const grid = o.layout ? null : (o.grid ?? null)
   const gridOn = !!grid && grid.mode !== 'off'
+  const lay = o.layout ?? null
+  const k = 100 / o.frameW                                            // px → kit units
+  const gb = lay ? gridBand(lay, o.frameW) : null
 
   const W = 100
   const H_full = 100 * o.frameH / o.frameW
-  const H = o.composeH ?? H_full
+  const H = gb ? (o.whole ? H_full : gb.h) : (o.composeH ?? H_full)
+  /** Where y = 0 of this sheet sits on the Frame. */
+  const Y0 = gb && !o.whole ? gb.y0 : 0
   const kb = kitBasics(o.frameW, o.frameH, o.format, o.style ?? 'swiss')
   const B = kb.B   // size unit: 1 on the portrait poster — from the FULL height
   const kitM = Math.min(4, H * 0.06)
-  let M = gridOn ? grid!.margin * 100 : kitM
-  if (o.format?.keepSide != null) M = Math.max(M, o.format.keepSide * 100)
-  const defaultMargin = !gridOn && M === kitM
-  const NC = grid?.mode === 'explicit' ? grid.columns : (o.format?.nc ?? (H_full / W >= 0.7 ? 12 : W / H_full >= 2.5 ? 20 : 16))
-  const G = gridOn ? grid!.gutter * 100 : 1.6 * B
-  const CW = (W - 2 * M - (NC - 1) * G) / NC
-  const RH = (H - 2 * M) / NR
+  /** Stage 3: the baseline grid's step (kit units); 0 on the kit's own sheet. */
+  const U = lay ? lay.unit * k : 0
+  let M: number, NC: number, G: number
+  if (lay) {
+    NC = lay.cols.length
+    M = lay.cols[0]!.a * k
+    G = NC > 1 ? (lay.cols[1]!.a - lay.cols[0]!.a - lay.cols[0]!.w) * k : 0
+  } else {
+    M = gridOn ? grid!.margin * 100 : kitM
+    if (o.format?.keepSide != null) M = Math.max(M, o.format.keepSide * 100)
+    NC = grid?.mode === 'explicit' ? grid.columns : (o.format?.nc ?? (H_full / W >= 0.7 ? 12 : W / H_full >= 2.5 ? 20 : 16))
+    G = gridOn ? grid!.gutter * 100 : 1.6 * B
+  }
+  // On the grid the margin is the kit's own when it is the kit's margin on the unit and no side is kept
+  // clear (the suggested grid); optical nudges past the margin apply only then.
+  const kitOnUnit = U ? Math.max(U, Math.round(Math.min(4, H_full * 0.06) / U) * U) : kitM
+  const defaultMargin = lay ? o.format?.keepSide == null && Math.abs(M - kitOnUnit) < 1e-6 : !gridOn && M === kitM
+  const CW = lay ? lay.cols[0]!.w * k : (W - 2 * M - (NC - 1) * G) / NC
+  /** The grid band's top on this sheet (the kit's own sheet: its margin). */
+  const T0 = gb ? gb.top - Y0 : M
+  const RH = gb ? (gb.bottom - gb.top) / NR : (H - 2 * M) / NR
   const GAP = RH * 0.5
   const CAP = measure.capAbove('title') + measure.baseBelow('title')
 
   const [colA, colB] = o.colRange ?? [1, NC]                          // the real columns the design grid spans
-  const Xr = (c: number) => M + (c - 1) * (CW + G)
+  const Xr = (c: number) => M + (c - 1) * (CW + G)                    // real column c's left edge (the grid's own)
   const cs = (c: number) => colA + Math.round((c - 1) * (colB - colA + 1) / 12)   // design column → real start column
   const ce = (c: number) => colA - 1 + Math.round(c * (colB - colA + 1) / 12)     // design column → real end column
   const X = (c: number) => Xr(cs(c))                                  // left edge of design column c
   const XR = (c: number) => Xr(ce(c)) + CW                            // right edge of design column c
   const SPAN = (a: number, b: number) => XR(b) - X(a)
-  const L = (r: number) => M + r * RH                                 // line under design row r; L(0) = top margin
+  const L = (r: number) => T0 + r * RH                                // line under design row r; L(0) = the top margin
   const LB = L                                                        // stage 3: a bottom on row r (Task 5 gives it rows)
 
   // Swiss styles — minimum text size from the format's viewing width (Stage 2), Stage 1 sizes when absent.
@@ -406,7 +447,7 @@ export function makeSheet(o: SheetOpts): Sheet {
 
   return {
     measure,
-    W, H, M, G, NC, CW, RH, GAP, CAP, B, defaultMargin,
+    W, H, M, G, NC, CW, RH, GAP, CAP, B, defaultMargin, U, Y0,
     DISPLAY, SECOND, INFO,
     X, XR, SPAN, L, LB, Xr,
     w100, fitSize, sizeFor, blockH, countLines, dateLines, breakLines, balance,
