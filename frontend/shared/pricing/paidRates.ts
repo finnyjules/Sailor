@@ -161,6 +161,20 @@ export const PAID_RATES: Record<string, PaidRate> = {
     unit: 'per_call', usd: 0.04,
     service: 'replicate', source: 'https://replicate.com/bria/expand-image', read: '2026-09-27', confidence: 'verified',
   },
+  // R3.7, Separate background and foreground (read 2026-09-27, plain GETs of the public pages).
+  // Its cut-out is Remove background's call (851-labs/background-remover, above). The fills:
+  // LaMa, billed by GPU time (Nvidia T4, $0.000225/s, no billing table): the page says "approximately
+  // $0.00068 to run" (its p50 price), written here rounded up to the next hundredth of a cent. An
+  // estimate until the live check measures it (a larger picture runs longer).
+  'zylim0702/remove-object': {
+    unit: 'gpu_ceiling', usd: 0.0007, note: 'T4 at $0.000225/s; page: approximately $0.00068 to run (read 2026-09-27), rounded up to the next $0.0001',
+    service: 'replicate', source: 'https://replicate.com/zylim0702/remove-object', read: '2026-09-27', confidence: 'estimate',
+  },
+  // Bria Eraser: the page's billing table, "$0.04 per output image" (`image_output_count`; "or 25 images for $1").
+  'bria/eraser': {
+    unit: 'per_call', usd: 0.04,
+    service: 'replicate', source: 'https://replicate.com/bria/eraser', read: '2026-09-27', confidence: 'verified',
+  },
 }
 
 const own = <T>(o: Record<string, T>, k: string): T | undefined =>

@@ -345,6 +345,8 @@ export const RUNNER_ROUTES: Readonly<Record<string, Route>> = {
   'SeedreamLayerizeNode': r('fal', null, 'no same-model twin on Replicate is carded'),
   'OutpaintImageNode:Flux Fill': r('replicate', null, 'no same-model twin on fal with the same settings is carded'),
   'OutpaintImageNode:Bria Expand': r('replicate', null, 'no same-model twin on fal with the same settings is carded'),
+  // R3.7, Separate background and foreground: its cut-out and fill on Replicate, as Python.
+  'SplitPhotoLayersNode': r('replicate', null, 'no same-model twin on fal with the same settings is carded'),
 }
 
 // ── Generate video: the two models moved to fal first ──────────────────────

@@ -125,6 +125,12 @@ parentPort.on('message', (m) => {
       value = px.clip(m.picture, clipAlpha, !!m.trunc)
       transfer = [value.px.buffer]
     }
+    // PIL's MaxFilter on an 8-bit greyscale mask (R3.7, ../pixels/maxFilter.ts).
+    else if (m.op === 'px.maxFilter') {
+      stopped()
+      value = built.maxf.maxFilterL(m.l, m.w, m.h, m.size, isStopped)
+      transfer = [value.buffer]
+    }
     else if (m.op === 'px.save') {
       stopped()
       value = px.savePixels(m.picture, m.w, m.h, m.flatten, () => Atomics.load(stop, 0) === 1)
@@ -399,6 +405,8 @@ export interface PixelsWorker {
   clipTensor(tensorFile: Uint8Array, trunc?: boolean): Promise<HandOff8>
   /** Text mask with a source: one source picture × (1 − mask); `trunc`: quantised as save_images does (core.ts clip). */
   clip(picture: RawPicture, trunc?: boolean): Promise<HandOff8>
+  /** PIL's MaxFilter(size) of an 8-bit greyscale mask, w × h, one byte a pixel (R3.7, ../pixels/maxFilter.ts). */
+  maxFilter(l: Uint8Array, w: number, h: number, size: number): Promise<Uint8Array>
   /** Save image (R1.5): the pixels save_images encodes, w × h (Lanczos when that differs), flattened onto white for JPEG. */
   savePixels(picture: RawPicture, w: number, h: number, flatten: boolean): Promise<HandOff8>
   /** An effect (R2.1) starts its batch: `fn` its op ('<core>.<fn>'), `params` its widgets, `count` the batch's length. */
@@ -472,6 +480,10 @@ export function pixelsInWorker<T>(signal: AbortSignal | undefined, job: (w: Pixe
       async clip(picture, trunc = false) {
         const p = handOver(picture)
         return await call(t, { op: 'px.clip', picture: p.picture, trunc }, p.buffers) as HandOff8
+      },
+      async maxFilter(l, width, height, size) {
+        const own = l.byteOffset === 0 && l.byteLength === l.buffer.byteLength && !(l.buffer instanceof SharedArrayBuffer) ? l : l.slice()
+        return await call(t, { op: 'px.maxFilter', l: own, w: width, h: height, size }, [own.buffer as ArrayBuffer]) as Uint8Array
       },
       async savePixels(picture, width, height, flatten) {
         const p = handOver(picture)

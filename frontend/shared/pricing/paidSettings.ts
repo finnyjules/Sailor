@@ -41,7 +41,8 @@ import {
 } from '../runner/describe'
 import { REPAIR_PER_CALL_CLASSES, REPAIR_PER_CALL_ENDPOINTS, type RepairPerCallClass } from '../runner/repair'
 import {
-  LAYERIZE_SLUG, OUTPAINT_SLUGS, SEEDREAM_1K_AREA, SEEDREAM_LAYERIZE_APP, SEEDREAM_MAX_IMAGES, type OutpaintModel,
+  LAYERIZE_SLUG, OUTPAINT_SLUGS, PHOTO_FILL_SLUGS, SEEDREAM_1K_AREA, SEEDREAM_LAYERIZE_APP, SEEDREAM_MAX_IMAGES, SPLIT_CLASS, SPLIT_CUTOUT_SLUG,
+  type OutpaintModel, type PhotoFill,
 } from '../runner/layers'
 
 /**
@@ -276,6 +277,28 @@ const LAYERS_PLANNERS: Readonly<Record<string, PaidPlanner>> = {
   },
 }
 
+// ── R3.7: Separate background and foreground (#shared/runner/layers) ──
+
+/** The fill engine as set, or, wired or not one it offers (or missing), each (the dearest is priced). */
+function splitFillEndpoints(fill: unknown): string[] {
+  const own = typeof fill === 'string' && Object.prototype.hasOwnProperty.call(PHOTO_FILL_SLUGS, fill)
+  return own ? [PHOTO_FILL_SLUGS[fill as PhotoFill]] : Object.values(PHOTO_FILL_SLUGS)
+}
+
+/**
+ * Separate background and foreground: the cut-out (Remove background's card)
+ * and the fill on its engine's card, once each: every call it makes. Python's
+ * third call, the remover's matte for a cut-out without alpha, can't happen
+ * (a downloaded picture is always read as RGBA: the cut-out always has an
+ * alpha; the R3.7 fixture proves it), so it is never held. The runner charges
+ * the calls that finished (ruling (f)).
+ */
+function splitPlanner(inputs: NodeInputs): PaidCalls {
+  const usd = (e: string) => paidCallUsd({ endpoint: e }) ?? Number.POSITIVE_INFINITY
+  const fill = splitFillEndpoints(inputs.background_fill).reduce((a, b) => (usd(b) > usd(a) ? b : a))
+  return { steps: [{ call: { endpoint: SPLIT_CUTOUT_SLUG }, times: 1 }, { call: { endpoint: fill }, times: 1 }] }
+}
+
 /** Python returns "" before calling anyone when the text is blank (typed; a wired one is priced as a call). */
 function llmNoCall(classType: LlmTextClass): ((inputs: NodeInputs) => boolean) | null {
   const name = LLM_NO_CALL_INPUT[classType]
@@ -290,6 +313,7 @@ const PAID_PLANNERS: Readonly<Record<string, PaidPlanner>> = {
   ...Object.fromEntries(DESCRIBE_CLASSES.map(c => [c, describePlanner(c)])),
   ...Object.fromEntries(REPAIR_PER_CALL_CLASSES.map(c => [c, repairPlanner(c)])),
   ...LAYERS_PLANNERS,
+  [SPLIT_CLASS]: splitPlanner,
 }
 
 /** Each paid class's no-call rule (rule 8), where Python has one. Filled by each R3 task. */

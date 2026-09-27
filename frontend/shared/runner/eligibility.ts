@@ -22,6 +22,7 @@ import {
 } from './repair'
 import {
   LAYERIZE_MODELS, LAYERS_CLASSES, LAYERS_JSON_CLASSES, OUTPAINT_ASPECT_RATIOS, OUTPAINT_DIRECTIONS, OUTPAINT_MODELS, SEEDREAM_IMAGE_SIZES,
+  PHOTO_FILLS, SPLIT_CLASS, SPLIT_MASK_GROW,
 } from './layers'
 import {
   BRAINSTORM_ANGLES, CHAT_LLM_MODELS, IMPROVE_PROMPT_MODELS, IMPROVE_PROMPT_TARGETS, REASON_MODELS, REWRITE_MODELS, REWRITE_TONES,
@@ -338,6 +339,19 @@ export const PAID_PICTURE_FAMILY: Readonly<Record<string, RunnerFamily>> = {
   ...Object.fromEntries(REPAIR_CLASSES.map(c => [c, 'image-repair' as const])),
   // R3.6: the layerizers' picture (slot 0; slot 1 is their JSON) and the outpainted picture.
   ...Object.fromEntries(LAYERS_CLASSES.map(c => [c, 'layers' as const])),
+  // R3.7: Separate background and foreground's subject and background (slots 0 and 1, PAID_PICTURE_SLOTS).
+  [SPLIT_CLASS]: 'layers',
+}
+
+/**
+ * A paid family's picture class whose pictures are other slots than output 0
+ * alone (R3.7: Separate background and foreground, subject and background),
+ * pictures only while its family is on (PAID_PICTURE_FAMILY). Kept apart
+ * from PICTURE_OUTPUTS, which answers with `cards` alone (rule 15: with the
+ * family off, nothing changes).
+ */
+export const PAID_PICTURE_SLOTS: Readonly<Record<string, readonly number[]>> = {
+  [SPLIT_CLASS]: [0, 1],
 }
 
 /**
@@ -1004,6 +1018,17 @@ export const RUNNER_NODE_RULES: Readonly<Record<string, RunnerNodeRule>> = {
       seed: { type: 'INT', required: true, min: 0, max: 0xFFFFFFFF },
     },
   },
+  // R3.7: Separate background and foreground, two Replicate calls (the cut-out, the fill). Its
+  // picture is a linked picture; its engine and mask growth are widgets as ComfyUI validates them.
+  [SPLIT_CLASS]: {
+    family: 'layers',
+    mustLink: ['image'],
+    imageInputs: ['image'],
+    widgets: {
+      background_fill: { type: 'COMBO', required: true, options: PHOTO_FILLS },
+      mask_grow: { type: 'INT', required: true, min: SPLIT_MASK_GROW.min, max: SPLIT_MASK_GROW.max },
+    },
+  },
   // ── effects-* (step 3, R2): the still-picture effects (./effects.ts, server/runner/effects/) ──
   // Rows built from the real node schemas (./effectSchemas.generated.ts), one
   // per ported class; each needs its family and `cards`.
@@ -1060,6 +1085,8 @@ export const SWITCHED_CLASSES: Readonly<Record<string, RunnerFamily>> = {
   ...Object.fromEntries(REPAIR_CLASSES.map(c => [c, 'image-repair' as const])),
   // R3.6: layers from one call, and outpaint.
   ...Object.fromEntries(LAYERS_CLASSES.map(c => [c, 'layers' as const])),
+  // R3.7: Separate background and foreground.
+  [SPLIT_CLASS]: 'layers',
 }
 
 /**
@@ -1296,7 +1323,8 @@ function carriesImage(prompt: ApiPrompt, link: [string, number], families: Reado
   // A paid family's picture (R3.5's image-repair), only while that family is on
   // (read before IMAGE_OUTPUT_CLASSES, which doesn't list them).
   if (Object.prototype.hasOwnProperty.call(PAID_PICTURE_FAMILY, from.class_type)) {
-    return link[1] === 0 && familyOn(PAID_PICTURE_FAMILY[from.class_type]!, families)
+    const slots = Object.prototype.hasOwnProperty.call(PAID_PICTURE_SLOTS, from.class_type) ? PAID_PICTURE_SLOTS[from.class_type]! : [0]
+    return slots.includes(link[1]) && familyOn(PAID_PICTURE_FAMILY[from.class_type]!, families)
   }
   return link[1] === 0 && IMAGE_OUTPUT_CLASSES.has(from.class_type)
 }

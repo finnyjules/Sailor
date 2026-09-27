@@ -60,6 +60,8 @@ export const RUNNER_OUTPUT_CLASSES: ReadonlySet<string> = new Set([
   'RemoveBackgroundNode', 'RestorePhotoNode',
   // R3.6: the two layerizers are output nodes (Expand / outpaint is not).
   'LayerizeGraphicNode', 'SeedreamLayerizeNode',
+  // R3.7: Separate background and foreground is one too (is_output_node=True).
+  'SplitPhotoLayersNode',
 ])
 
 /** ComfyUI's node_errors entry for a node that failed validation. */

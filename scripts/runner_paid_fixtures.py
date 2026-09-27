@@ -39,6 +39,15 @@ Groups:
              (Seedream) and Expand / outpaint (Flux Fill, Bria Expand), for
              frontend/server/runner/generators/layers.ts
              (tests/unit/runner-paid-layers.unit.spec.ts)
+  split      (R3.7) Separate background and foreground: both fill engines,
+             mask_grow 0, 1, 12 and 50, RGB and RGBA inputs, cut-outs PIL
+             reads its own way (grey + alpha, palette, CMYK, 16-bit grey) and
+             one with no alpha (Python still makes two calls: a downloaded
+             picture is always read as RGBA), for
+             frontend/server/runner/generators/splitLayers.ts; and PIL's
+             MaxFilter alone on masks touching every edge and corner, for
+             frontend/server/runner/pixels/maxFilter.ts
+             (tests/unit/runner-paid-split.unit.spec.ts)
 
 The network is blocked (as in compositor_fixtures.py): every outbound connect
 and DNS lookup raises and the provider keys are removed before any node module
@@ -148,13 +157,14 @@ def _unb64(text: str) -> bytes:
     return base64.b64decode(text)
 
 
-def _picture_tensor(data: bytes):
-    """A picture input as LoadImage hands it on: RGB, float32 /255, [1, H, W, 3]."""
+def _picture_tensor(data: bytes, mode: str = "RGB"):
+    """A picture input as LoadImage hands it on: RGB, float32 /255, [1, H, W, 3];
+    `mode` "RGBA" as a node that keeps alpha hands it on (R3.7: [1, H, W, 4])."""
     import io
     import numpy as np
     import torch
     from PIL import Image
-    img = Image.open(io.BytesIO(data)).convert("RGB")
+    img = Image.open(io.BytesIO(data)).convert(mode)
     return torch.from_numpy(np.array(img).astype(np.float32) / 255.0).unsqueeze(0)
 
 
@@ -235,7 +245,8 @@ def _fake_session(get):
 
 
 def capture_calls(node_cls, answers: list, links: dict | None = None, files: dict | None = None,
-                  pictures: dict | None = None, sounds: dict | None = None, **kwargs) -> dict:
+                  pictures: dict | None = None, sounds: dict | None = None, picture_modes: dict | None = None,
+                  made_pixels: bool = False, **kwargs) -> dict:
     """Run `node_cls.execute(**kwargs)` with every provider call, upload,
     download, save and web fetch patched out, and record what it does.
 
@@ -250,6 +261,11 @@ def capture_calls(node_cls, answers: list, links: dict | None = None, files: dic
       sent as `IMG:<name>` / `WAV:<name>`. A picture the node made itself (an
       alpha-dropped copy, a crop) is sent as `PNG:<sha256>` of the PNG Python
       encodes; a sound as `WAV:<sha256>`. Uploads become `UPLOAD:<file name>`.
+      `picture_modes` (input name → PIL mode, R3.7): a picture handed on in
+      that mode ("RGBA": a node upstream kept its alpha). `made_pixels`
+      (R3.7): each `PNG:<sha256>` is also described in `made` by its decoded
+      pixels (`{shape, sha256}` of the 8-bit array), since the TypeScript
+      side's PNG encoder writes other bytes for the same pixels.
     - Every GET (aiohttp, and the download helpers) is recorded in `gets` as
       `{url, status}` and served from `links` (text, or `{status, text}` — a
       404 is served as asked; `{raise: message}` fails the fetch outright
@@ -280,6 +296,7 @@ def capture_calls(node_cls, answers: list, links: dict | None = None, files: dic
     queue = list(answers)
     counters: dict = {}
     saved_inputs: list = []
+    made: dict = {}
     served = _served(links or {}, files or {})
     named: dict = {}  # id(object) → (kind, label); objects kept alive in `keep`
     keep: list = []
@@ -332,7 +349,13 @@ def capture_calls(node_cls, answers: list, links: dict | None = None, files: dic
         if label and label[0] == "input":
             return f"IMG:{label[1]}"
         png = _unb64(real_image_url(t).split(",", 1)[1])
-        return f"PNG:{hashlib.sha256(png).hexdigest()}"
+        key = f"PNG:{hashlib.sha256(png).hexdigest()}"
+        if made_pixels:
+            import io as _io
+            from PIL import Image as _Image
+            arr = np.array(_Image.open(_io.BytesIO(png)))
+            made[key] = {"shape": list(arr.shape), "sha256": hashlib.sha256(arr.tobytes()).hexdigest()}
+        return key
 
     def wav_url(a, max_seconds=None):
         label = named.get(id(a))
@@ -405,7 +428,7 @@ def capture_calls(node_cls, answers: list, links: dict | None = None, files: dic
         return file
 
     for pname, data in (pictures or {}).items():
-        kwargs[pname] = name(_picture_tensor(data), "input", pname)
+        kwargs[pname] = name(_picture_tensor(data, (picture_modes or {}).get(pname, "RGB")), "input", pname)
     for sname, data in (sounds or {}).items():
         kwargs[sname] = name(_sound_dict(data), "input", sname)
 
@@ -454,11 +477,14 @@ def capture_calls(node_cls, answers: list, links: dict | None = None, files: dic
     result["ui"] = jsonable(getattr(out, "ui", None))
     if saved_inputs:
         result["saved_inputs"] = saved_inputs
+    if made_pixels:
+        result["made"] = made
     return result
 
 
 def paid_case(name: str, node_cls, widgets: dict, answers: list, pictures=(), sounds=(),
-              links: dict | None = None, files: dict | None = None) -> dict:
+              links: dict | None = None, files: dict | None = None, picture_modes: dict | None = None,
+              made_pixels: bool = False) -> dict:
     """One fixture case (tests/unit/__runner__/paidParity.ts PaidCase): the
     node's widgets, its picture and sound inputs, the answers and served
     files, and what capture_calls saw. `pictures` / `sounds`: input names
@@ -471,7 +497,8 @@ def paid_case(name: str, node_cls, widgets: dict, answers: list, pictures=(), so
         return {n: make(n, i) for i, n in enumerate(given)}
     pics = files_of(pictures, lambda n, i: png_bytes(8, 6, 1000 + i))
     snds = files_of(sounds, lambda n, i: wav_bytes(0.25, 8000, 2000 + i))
-    got = capture_calls(node_cls, answers, links=links, files=files, pictures=pics, sounds=snds, **widgets)
+    got = capture_calls(node_cls, answers, links=links, files=files, pictures=pics, sounds=snds,
+                        picture_modes=picture_modes, made_pixels=made_pixels, **widgets)
     case = {"name": name, "class_type": node_cls.define_schema().node_id, "widgets": widgets,
             "pictures": list(pics), "sounds": list(snds),
             "picture_files": {n: _b64(b) for n, b in pics.items()},
@@ -486,6 +513,10 @@ def paid_case(name: str, node_cls, widgets: dict, answers: list, pictures=(), so
         case["error"] = got["error"]
     if "saved_inputs" in got:
         case["saved_inputs"] = got["saved_inputs"]
+    if picture_modes:
+        case["picture_modes"] = picture_modes
+    if "made" in got:
+        case["made"] = got["made"]
     return case
 
 
@@ -1042,12 +1073,147 @@ def layers_group() -> dict:
     return {"cases": cases}
 
 
+# ── split (R3.7): Separate background and foreground ────────────────────────
+
+SPLIT_CUTOUT = "https://r.test/split/cutout.png"
+SPLIT_BACKGROUND = "https://r.test/split/background.png"
+SPLIT_FILLS = {"LaMa (fast)": "LaMa", "Bria Eraser (quality)": "Bria"}
+
+
+def split_mask(w: int, h: int, seed: int) -> bytes:
+    """A deterministic 8-bit mask (w × h, raw L bytes) that touches every edge
+    and corner: distinct corner values, about a third of the border set, a
+    few interior points and a solid block (a subject), so a max filter's edge
+    rule shows wherever it differs."""
+    rng = random.Random(seed)
+    px = bytearray(w * h)
+    for x in range(w):
+        for y in (0, h - 1):
+            if rng.random() < 0.35:
+                px[y * w + x] = rng.randrange(1, 256)
+    for y in range(h):
+        for x in (0, w - 1):
+            if rng.random() < 0.35:
+                px[y * w + x] = rng.randrange(1, 256)
+    for i in range(w * h):
+        if rng.random() < 0.03:
+            px[i] = rng.randrange(1, 256)
+    bw, bh = max(1, w // 4), max(1, h // 4)
+    bx, by = rng.randrange(0, max(1, w - bw)), rng.randrange(0, max(1, h - bh))
+    for y in range(by, by + bh):
+        for x in range(bx, bx + bw):
+            px[y * w + x] = 255
+    # Distinct corners (a 1-pixel side shares them: the last write wins).
+    px[0] = 201
+    px[w - 1] = 157
+    px[(h - 1) * w] = 113
+    px[(h - 1) * w + w - 1] = 67
+    return bytes(px)
+
+
+def _split_cutout(w: int, h: int, seed: int, kind: str = "RGBA") -> bytes:
+    """The remover's cut-out, alpha from split_mask, in the file kind asked:
+    RGBA, LA (grey + alpha), P (palette, alpha by tRNS), RGB (no alpha),
+    CMYK (a JPEG) or I;16 (16-bit grey)."""
+    import io
+    from PIL import Image
+    rng = random.Random(seed + 7)
+    alpha = split_mask(w, h, seed)
+    if kind == "CMYK":
+        return cmyk_jpeg_bytes(w, h, seed)
+    if kind == "I;16":
+        return grey16_png_bytes(w, h, seed)
+    buf = io.BytesIO()
+    if kind == "P":
+        img = Image.frombytes("P", (w, h), alpha)
+        img.putpalette(bytes(rng.randrange(256) for _ in range(768)))
+        img.save(buf, format="PNG", transparency=bytes(range(256)))
+        return buf.getvalue()
+    # The colours don't reach the mask: a smooth gradient keeps the fixture small.
+    base = rng.randrange(256)
+    grey = bytes((base + x + 3 * y) % 256 for y in range(h) for x in range(w))
+    rgb = Image.merge("RGB", (Image.frombytes("L", (w, h), grey), Image.frombytes("L", (w, h), grey[::-1]),
+                              Image.frombytes("L", (w, h), bytes((v + 85) % 256 for v in grey))))
+    if kind == "LA":
+        img = Image.merge("LA", (Image.frombytes("L", (w, h), grey), Image.frombytes("L", (w, h), alpha)))
+    elif kind == "RGB":
+        img = rgb
+    else:
+        img = rgb.convert("RGBA")
+        img.putalpha(Image.frombytes("L", (w, h), alpha))
+    img.save(buf, format="PNG")
+    return buf.getvalue()
+
+
+def split_group() -> dict:
+    """R3.7: Separate background and foreground (SplitPhotoLayersNode). The
+    remover's cut-out (alpha → the mask, grown by PIL's MaxFilter), then the
+    fill engine on the picture without its alpha and the mask. Every case
+    records the mask Python sends (its PNG in the payload: the TypeScript side
+    compares its pixels) and each alpha-dropped picture's pixels (`made`).
+    `maxfilter`: MaxFilter alone, the edge rule, on masks touching every edge
+    and corner."""
+    import hashlib
+    from PIL import Image, ImageFilter
+    import runner_builder_fixtures as rbf
+    nr, _fal, _extras = rbf._node_modules()
+    cases: list = []
+    W, H = 48, 36
+
+    def split(name, fill="LaMa (fast)", grow=12, mode="RGB", size=(W, H), cutout=None, background=None,
+              answers=None, seed=300):
+        w, h = size
+        pic = png_bytes(w, h, seed, mode)
+        files = {SPLIT_CUTOUT: _b64(cutout if cutout is not None else _split_cutout(w, h, seed + 1)),
+                 SPLIT_BACKGROUND: _b64(background if background is not None else png_bytes(w, h, seed + 2, "RGBA"))}
+        cases.append(paid_case(f"split · {name}", nr.SplitPhotoLayersNode, {"background_fill": fill, "mask_grow": grow},
+                               answers or [{"output": SPLIT_CUTOUT}, {"output": [SPLIT_BACKGROUND]}],
+                               pictures={"image": pic}, files=files,
+                               picture_modes={"image": "RGBA"} if mode == "RGBA" else None, made_pixels=True))
+
+    for fill, short in SPLIT_FILLS.items():
+        for grow in (0, 1, 12, 50):
+            for mode in ("RGB", "RGBA"):
+                split(f"{short} · mask_grow {grow} · {mode} input", fill, grow, mode, seed=300 + grow * 3 + (mode == "RGBA"))
+    split("a picture 50 px wide, mask_grow 50", grow=50, size=(50, 20), seed=400)
+    split("a picture 50 px wide, mask_grow 50, Bria", fill="Bria Eraser (quality)", grow=50, size=(50, 20), mode="RGBA", seed=401)
+    # A downloaded picture is always read as RGBA (bytesio_to_image_tensor): with no alpha the mask is all 255
+    # and the remover's matte ('map') is never asked for. Two calls, as every other case.
+    split("a cut-out with no alpha (no matte call)", cutout=_split_cutout(W, H, 411, "RGB"), seed=410)
+    for kind, label in (("LA", "grey and alpha"), ("P", "palette with transparency"), ("CMYK", "CMYK JPEG"), ("I;16", "16-bit grey")):
+        split(f"a cut-out in {label}", cutout=_split_cutout(W, H, 421, kind), seed=420)
+    split("a cut-out larger than the picture", cutout=_split_cutout(60, 45, 431), seed=430)
+    split("a cut-out 1 px tall, mask_grow 1", size=(W, 1), grow=1, cutout=_split_cutout(W, 1, 436), seed=435)
+    for kind, label, data in (("RGB", "RGB", png_bytes(W, H, 441, "RGB")), ("CMYK", "CMYK JPEG", cmyk_jpeg_bytes(W, H, 442)),
+                              ("I;16", "16-bit grey", grey16_png_bytes(W, H, 443))):
+        split(f"a background in {label}", background=data, seed=440)
+    split("answers the other way round (a list, then a string)", answers=[{"output": [SPLIT_CUTOUT]}, {"output": SPLIT_BACKGROUND}], seed=455)
+    split("a cut-out answer with no output", answers=[{"output": None}], seed=460)
+    split("a background answer with no output", answers=[{"output": SPLIT_CUTOUT}, {"output": []}], seed=470)
+
+    # MaxFilter alone: PIL expands the image by size // 2 before its rank filter; the fixture says how it fills.
+    # Each mask is written once (`masks`, raw L bytes by "<w>x<h>"), then filtered at each size.
+    masks: dict = {}
+    maxfilter = []
+    for (w, h) in ((37, 23), (320, 200), (1, 7), (9, 1), (1, 1)):
+        raw = split_mask(w, h, 500 + w * 7 + h)
+        masks[f"{w}x{h}"] = _b64(raw)
+        for size in (3, 25, 101):
+            out = Image.frombytes("L", (w, h), raw).filter(ImageFilter.MaxFilter(size)).tobytes()
+            row = {"w": w, "h": h, "size": size, "sha256": hashlib.sha256(out).hexdigest()}
+            if w * h <= 37 * 23:
+                row["out"] = _b64(out)
+            maxfilter.append(row)
+    return {"cases": cases, "maxfilter": maxfilter, "masks": masks}
+
+
 GROUPS = {
     "machinery": machinery_group,
     "llm": llm_group,
     "describe": describe_group,
     "repair": repair_group,
     "layers": layers_group,
+    "split": split_group,
 }
 
 

@@ -13,9 +13,11 @@
  *  - OutpaintImageNode ("Expand / outpaint an image", :4731): Replicate Flux
  *    Fill Pro or Bria Expand by its engine, one call.
  *
- * Separate background and foreground (R3.7) is in the same family but not
- * here. Pure; relative imports only.
+ * Separate background and foreground (R3.7, SPLIT_CLASS below) is in the
+ * same family: a pipeline of its own (server/runner/generators/splitLayers.ts).
+ * Pure; relative imports only.
  */
+import { BACKGROUND_REMOVER_SLUG } from './repair'
 
 export const LAYERIZE_SLUG = 'ideogram-ai/layerize'
 export const SEEDREAM_LAYERIZE_APP = 'bytedance/seedream/v5/pro/layerize'
@@ -62,3 +64,26 @@ export const SEEDREAM_SMALL_AREA = 1536 * 1536
  * size (`auto` follows the input) is held at the dearer rate.
  */
 export const SEEDREAM_1K_AREA = 1024 * 1024
+
+// ── R3.7: Separate background and foreground (SplitPhotoLayersNode, nodes_replicate.py:4556-4653) ──
+
+/**
+ * The class: the remover's cut-out (Replicate 851-labs/background-remover,
+ * R3.5's card), then a fill engine erasing the subject from the picture.
+ * Python's third call (the remover's matte, when the cut-out has no alpha)
+ * never happens: a downloaded picture is always read as RGBA
+ * (bytesio_to_image_tensor), so every cut-out has an alpha. The fixture
+ * proves it (`split · a cut-out with no alpha`); it is neither made nor held.
+ */
+export const SPLIT_CLASS = 'SplitPhotoLayersNode'
+
+/** The cut-out's service (the same card as Remove background). */
+export const SPLIT_CUTOUT_SLUG = BACKGROUND_REMOVER_SLUG
+
+/** `_PHOTO_FILL_SLUGS` (:4550-4553): the `background_fill` options and the slug each calls, in the node's order. */
+export const PHOTO_FILL_SLUGS = { 'LaMa (fast)': 'zylim0702/remove-object', 'Bria Eraser (quality)': 'bria/eraser' } as const
+export type PhotoFill = keyof typeof PHOTO_FILL_SLUGS
+export const PHOTO_FILLS = Object.keys(PHOTO_FILL_SLUGS) as PhotoFill[]
+
+/** `mask_grow`'s bounds and default (define_schema: min 0, max 50, default 12). */
+export const SPLIT_MASK_GROW = { min: 0, max: 50, default: 12 } as const

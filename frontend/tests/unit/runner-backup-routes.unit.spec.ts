@@ -12,6 +12,7 @@
  *     no backup (Flux 2 Pro and Max: none for a webp picture; S3b).
  */
 import { describe, expect, it } from 'vitest'
+import sharp from 'sharp'
 import { planNode, type NodePlan, type PipelineCall, type PipelineIO } from '~~/server/runner/executors'
 import { RUNNER_IMAGE_MODELS, RUNNER_REPLICATE_IMAGE_MODELS } from '~~/server/runner/generators/image'
 import { RUNNER_REPLICATE_VIDEO_MODELS, RUNNER_VIDEO_MODELS } from '~~/server/runner/generators/video'
@@ -86,6 +87,8 @@ const EDIT_BASE: Record<string, Record<string, unknown>> = {
   LayerizeGraphicNode: { image: LINK, prompt: '', seed: 0 },
   SeedreamLayerizeNode: { image: LINK, prompt: '', image_size: 'auto' },
   OutpaintImageNode: { image: LINK, prompt: '', direction: 'Zoom out 1.5x', aspect_ratio: '16:9', seed: 0 },
+  // Separate background and foreground (R3.7): its first call is the cut-out.
+  SplitPhotoLayersNode: { image: LINK, background_fill: 'LaMa (fast)', mask_grow: 12 },
   // sync-3 lip-sync (Task F22): the studio's face video and sound.
   LipSyncNode: {
     engine: 'sync-3',
@@ -129,7 +132,12 @@ async function firstCall(classType: string, inputs: Record<string, unknown>, fam
   if (p.kind !== 'pipeline') throw new Error(`${classType} made no call`)
   let first: PipelineCall | null = null
   const sent = new Error('first call sent')
-  await p.run({ signal: new AbortController().signal, call: async (c: PipelineCall) => { first = c; throw sent } } as unknown as PipelineIO).catch((e) => { if (e !== sent) throw e })
+  // (R3.7: Separate background and foreground reads its picture before its first call: a plain RGB PNG here.)
+  const picture = new Uint8Array(await sharp({ create: { width: 2, height: 2, channels: 3, background: { r: 1, g: 2, b: 3 } } }).png().toBuffer())
+  await p.run({
+    signal: new AbortController().signal, call: async (c: PipelineCall) => { first = c; throw sent },
+    read: async () => picture, handOff: async (_b: Uint8Array, name: string) => `https://pics.test/${name}`,
+  } as unknown as PipelineIO).catch((e) => { if (e !== sent) throw e })
   if (!first) throw new Error(`${classType} made no call`)
   const c = first as PipelineCall
   return { provider: c.provider, endpoint: c.endpoint, payload: c.payload, ...(c.backup ? { backup: c.backup } : {}) }

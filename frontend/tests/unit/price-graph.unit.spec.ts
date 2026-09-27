@@ -665,3 +665,20 @@ describe('layers from one call, and outpaint, on the ComfyUI path (R3.6)', () =>
     expect(at('SeedreamLayerizeNode', { image: ['2', 0], prompt: '' })).toBe(173)
   })
 })
+
+// ───────────────────────────────────────────────────────────────────────────
+// R3.7 (ruling (a)): Separate background and foreground leaves its flat row
+// (2) for its two calls (Replicate's pages): the cut-out at Remove
+// background's card ($0.0004, 1) and the fill, LaMa ($0.0007, an estimate,
+// 1: 2 in all, as before) or Bria Eraser ($0.04, 8: 2 → 9). A wired or
+// missing engine is held at the dearer. The ComfyUI path is charged both calls.
+// ───────────────────────────────────────────────────────────────────────────
+describe('Separate background and foreground on the ComfyUI path (R3.7)', () => {
+  const at = (inputs: Record<string, unknown>) => priceGraph({ 1: { class_type: 'SplitPhotoLayersNode', inputs } }).nodes!['1']
+  it('by its fill engine', () => {
+    expect(at({ background_fill: 'LaMa (fast)', image: ['2', 0], mask_grow: 12 })).toBe(2)
+    expect(at({ background_fill: 'Bria Eraser (quality)', image: ['2', 0], mask_grow: 0 })).toBe(9)
+    expect(at({ background_fill: ['9', 0], image: ['2', 0], mask_grow: 12 })).toBe(9)
+    expect(at({ image: ['2', 0] })).toBe(9)
+  })
+})

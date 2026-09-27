@@ -102,6 +102,17 @@ export async function pictureRefusal(bytes: Uint8Array): Promise<string | null> 
   catch (e) { return e instanceof Error ? e.message : PICTURE_UNREADABLE }
 }
 
+/**
+ * Exactly the picture `_image_tensor_to_data_url` sends for an RGB tensor:
+ * an 8-bit RGB PNG, one frame (no APNG acTL), not turned, no ICC profile (the
+ * data URL carries none).
+ */
+export function isPlainRgbPng(meta: Metadata, bytes: Uint8Array): boolean {
+  return meta.format === 'png' && meta.channels === 3 && !meta.hasAlpha && (meta.depth ?? 'uchar') === 'uchar'
+    && (meta.orientation ?? 1) === 1 && (meta.pages ?? 1) === 1 && meta.space === 'srgb'
+    && !meta.hasProfile && !pngChunksBeforePixels(bytes)?.includes('acTL')
+}
+
 export async function rgbTurnedPng(bytes: Uint8Array): Promise<{ png: Uint8Array | null; w: number; h: number }> {
   const meta = await pictureMeta(bytes)
   const refused = pictureRefusalOf(meta, bytes)
@@ -109,11 +120,7 @@ export async function rgbTurnedPng(bytes: Uint8Array): Promise<{ png: Uint8Array
   const turned = (meta.orientation ?? 1) >= 5
   const w = turned ? meta.height! : meta.width!
   const h = turned ? meta.width! : meta.height!
-  // Exactly Python's picture: 8-bit RGB, one frame (no APNG acTL), not turned, no ICC profile (the data URL carries none).
-  const already = meta.format === 'png' && meta.channels === 3 && !meta.hasAlpha
-    && (meta.orientation ?? 1) === 1 && (meta.pages ?? 1) === 1 && meta.space === 'srgb'
-    && !meta.hasProfile && !pngChunksBeforePixels(bytes)?.includes('acTL')
-  if (already) return { png: null, w, h }
+  if (isPlainRgbPng(meta, bytes)) return { png: null, w, h }
   const png = await sharp(bytes, { pages: 1, page: 0, autoOrient: true, ignoreIcc: true, limitInputPixels: MAX_INPUT_PIXELS })
     .toColourspace('srgb').removeAlpha().png({ compressionLevel: 6 }).toBuffer()
   return { png: new Uint8Array(png), w, h }
@@ -204,5 +211,28 @@ export async function answerRgbaPng(bytes: Uint8Array): Promise<Uint8Array> {
     rgba[i] = Math.min(255, Math.max(0, Math.trunc(Math.fround(255 * x))))
   }
   const png = await sharp(rgba, { raw: { width: info.width, height: info.height, channels: 4 } }).png({ compressionLevel: 6 }).toBuffer()
+  return new Uint8Array(png)
+}
+
+/**
+ * A picture as a Python node sends it once it has dropped its alpha
+ * (`image[..., :3]`, then `_image_tensor_to_data_url`; R3.7, Separate
+ * background and foreground's fill step): the RGB of PIL's
+ * `.convert("RGBA")` (pilRgba; no EXIF turn, no ICC conversion), whose
+ * `round(clamp(v/255)·255)` gives each 8-bit value back, as an RGB PNG. Null
+ * when the file already is exactly that picture (isPlainRgbPng): then it is
+ * sent as it is.
+ */
+export async function pilRgbPng(bytes: Uint8Array): Promise<Uint8Array | null> {
+  if (isPlainRgbPng(await pictureMeta(bytes), bytes)) return null
+  const { data, info } = await pilRgba(bytes)
+  const n = info.width * info.height
+  const rgb = new Uint8Array(n * 3)
+  for (let i = 0; i < n; i++) {
+    rgb[i * 3] = data[i * 4]!
+    rgb[i * 3 + 1] = data[i * 4 + 1]!
+    rgb[i * 3 + 2] = data[i * 4 + 2]!
+  }
+  const png = await sharp(rgb, { raw: { width: info.width, height: info.height, channels: 3 } }).png({ compressionLevel: 6 }).toBuffer()
   return new Uint8Array(png)
 }

@@ -364,7 +364,7 @@ describe('the price', () => {
     expect(IMAGE_RATES[ID]).toEqual({
       unit: 'per_image', usd: PRICE, service: 'fal', source: 'https://fal.ai/models/reve/2.1/text-to-image/llms.txt', read: '2026-09-24', confidence: 'verified',
     })
-    expect(PRICE_BOOK_VERSION).toBe('r3-layers')
+    expect(PRICE_BOOK_VERSION).toBe('r3-split')
   })
 
   const examples: { name: string, inputs: Record<string, unknown> }[] = [

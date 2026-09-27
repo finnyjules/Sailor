@@ -382,7 +382,7 @@ describe('prices (ruling (a))', () => {
       expect(PAID_NODE_CLASSES).toContain(c)
       expect(Object.prototype.hasOwnProperty.call(GRAPH_NODE_CREDITS, c), c).toBe(false)
     }
-    expect(PRICE_BOOK_VERSION).toBe('r3-layers')
+    expect(PRICE_BOOK_VERSION).toBe('r3-split')
   })
 
   it('credits on both paths: Layerize 18, Outpaint 10 or 8 by engine (a wired one at the dearest), Seedream 87 at auto_1K and 173 otherwise', () => {

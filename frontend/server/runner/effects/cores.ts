@@ -20,6 +20,7 @@ import { maskCore } from './core/mask'
 import { noiseCore } from './core/noise'
 import { kernelsCore } from './core/kernels'
 import { rngCore } from './core/rng'
+import { maxFilterCore } from '../pixels/maxFilter'
 
 export interface EffectCoreEntry {
   /** The name the worker (and an op) knows the built core by. */
@@ -45,6 +46,9 @@ export const EFFECT_CORES: readonly EffectCoreEntry[] = [
   { name: 'mask', fn: maskCore as EffectCoreEntry['fn'], args: ['tk', 'kn', 'px'] },
   // R2.9: generators, seeded looks and Add noise (torch's generator; resizes, grid_sample, topk, pools, the Winograd laplacian).
   { name: 'noise', fn: noiseCore as EffectCoreEntry['fn'], args: ['tk', 'kn', 'rng'] },
+  // R3.7: PIL's MaxFilter (Separate background and foreground grows its mask): a helper the
+  // worker's `px.maxFilter` op calls, not an effect op.
+  { name: 'maxf', fn: maxFilterCore as EffectCoreEntry['fn'], args: [] },
 ]
 
 /** The cores whose functions are effect ops (not helpers). */

@@ -125,6 +125,7 @@ import { planLlm } from './generators/llm'
 import { planDescribe } from './generators/describe'
 import { planRepair } from './generators/repair'
 import { planLayers } from './generators/layers'
+import { planSplitLayers } from './generators/splitLayers'
 import type { KeptExt } from './keptBytes'
 import type { AnswerKind } from './answerDownload'
 import { filesOf } from './values'
@@ -1085,6 +1086,9 @@ async function planNodeRequest(ctx: PlanContext): Promise<NodePlan> {
     case 'SeedreamLayerizeNode':
     case 'OutpaintImageNode':
       return planLayers(ctx)
+    // ── layers (step 3, R3.7): Separate background and foreground, a pipeline of two Replicate calls ──
+    case 'SplitPhotoLayersNode':
+      return planSplitLayers(ctx)
     case 'Text': return staticDerive(ctx, textCardUi)
     case 'Moodboard': return staticDerive(ctx)
     case 'Model3D': return staticDerive(ctx, textCardUi)

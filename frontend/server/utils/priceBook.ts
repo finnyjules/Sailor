@@ -177,7 +177,16 @@ export { VIDEO_RATES, MODEL_PRICED_NODE_CLASSES, SETTING_PRICED_NODE_CLASSES, RE
 // picture under 1536² and $0.0675 over, held (and on the ComfyUI path
 // charged) at its 17 pictures: `auto_1K` 87 credits, every other size 173
 // (was a flat 51). The runner charges the pictures that came back.
-export const PRICE_BOOK_VERSION = 'r3-layers'
+// r3-split (step 3, R3.7, ruling (a)): Separate background and foreground
+// leaves its flat row (2 credits, badge $0.01) for its two calls, read from
+// Replicate's pages: the cut-out at Remove background's GPU-time card
+// ($0.0004, 1 credit) plus the fill, LaMa at its GPU-time page ($0.0007, an
+// estimate: 1 credit; 2 in all, unchanged) or Bria Eraser at $0.04 an output
+// picture (8 credits; 2 → 9 in all). A wired or missing engine is held at
+// the dearer. The remover's matte call Python keeps for a cut-out without
+// alpha never runs (a downloaded picture is always read as RGBA) and is not
+// held. The runner charges the calls that finished.
+export const PRICE_BOOK_VERSION = 'r3-split'
 
 export const BASE_RENDER_CREDITS = 1
 
@@ -316,9 +325,9 @@ export const GRAPH_NODE_CREDITS: Record<string, number> = {
   TextEffectNode: 8,               // badge $0.04
   SketchToImageNode: 8,            // badge $0.04
   ConsistentFaceNode: 16,          // badge $0.08
-  SplitPhotoLayersNode: 2,         // badge $0.01
   // (Separate text from image, Layerize an image and Expand / outpaint are
-  // priced by their calls since R3.6: shared/pricing/paidSettings.ts, on both paths.)
+  // priced by their calls since R3.6, and Separate background and foreground
+  // since R3.7: shared/pricing/paidSettings.ts, on both paths.)
   // (Restore an old photo and Remove background, and their hidden twins, are
   // priced by their calls since R3.5: shared/pricing/paidSettings.ts, on both paths.)
   // Clarity is RANGE-priced (own description: ~$0.05–0.20/image by
