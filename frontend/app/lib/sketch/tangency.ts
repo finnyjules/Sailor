@@ -145,7 +145,12 @@ export function tangentRuleFor(doc: SketchDoc, p: TangentPiece, q: TangentPiece)
     const other = p.a === shared ? p.b : p.a
     return { kind: 'perpendicular', refs: [other, shared, shared, q.c] }
   }
-  if (shared && p.kind === 'arc' && q.kind === 'arc') return { kind: 'collinear', refs: [p.c, shared, q.c] }
+  if (shared && p.kind === 'arc' && q.kind === 'arc') {
+    // one centre: they already flow into each other — there is nothing to make tangent
+    const c1 = getPoint(doc, p.c), c2 = getPoint(doc, q.c)
+    if (p.c === q.c || (c1 && c2 && dist(c1, c2) < 1e-9)) return null
+    return { kind: 'collinear', refs: [p.c, shared, q.c] }
+  }
   if (p.kind === 'line') {
     const round = q as Exclude<TangentPiece, { kind: 'line' }>
     if (round.kind === 'circle' && p.lineId) return { kind: 'tangentLineCircle', refs: [p.lineId, round.id] }
@@ -157,6 +162,34 @@ export function tangentRuleFor(doc: SketchDoc, p: TangentPiece, q: TangentPiece)
   if (d < 1e-9) return null
   const side = Math.abs(d - (g1.r + g2.r)) <= Math.abs(d - Math.abs(g1.r - g2.r)) ? 1 : -1
   return { kind: 'tangentArcs', refs: [...operandRefs(p), ...operandRefs(q as Exclude<TangentPiece, { kind: 'line' }>)], value: side }
+}
+
+/** A key under which two rules that say the same thing agree, whatever order
+ *  their refs were written in: perpendicular/parallel read each pair either
+ *  way round and the pairs in either order; collinear any order; a tangent
+ *  line's ends either way round; tangentArcs' two operands either order. */
+export function equivalentRuleKey(doc: SketchDoc, r: { kind: ConstraintKind; refs: EntityId[]; value?: number }): string {
+  const x = r.refs
+  const pair = (a: EntityId, b: EntityId) => (a < b ? `${a},${b}` : `${b},${a}`)
+  let refs: string
+  if ((r.kind === 'perpendicular' || r.kind === 'parallel') && x.length === 4) {
+    refs = [pair(x[0]!, x[1]!), pair(x[2]!, x[3]!)].sort().join(';')
+  } else if (r.kind === 'collinear') {
+    refs = [...x].sort().join(',')
+  } else if (r.kind === 'tangentLineArc' && x.length >= 3) {
+    refs = `${pair(x[0]!, x[1]!)};${x.slice(2).join(',')}`
+  } else if (r.kind === 'tangentArcs') {
+    // operands: a circle id alone, or a pair [C, S]
+    const ops: string[] = []
+    for (let i = 0; i < x.length;) {
+      if (getEntity(doc, x[i]!)?.kind === 'circle') { ops.push(x[i]!); i += 1 }
+      else { ops.push(`${x[i]},${x[i + 1] ?? ''}`); i += 2 }
+    }
+    refs = ops.sort().join(';')
+  } else {
+    refs = x.join(',')
+  }
+  return `${r.kind}|${refs}|${r.value ?? ''}`
 }
 
 // ── the Pen's bow snap ──────────────────────────────────────────────────────

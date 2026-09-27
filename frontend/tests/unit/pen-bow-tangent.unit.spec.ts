@@ -187,3 +187,27 @@ describe('no tangent promise without the rule', () => {
     expect((e.x - c.x) * (n.x - e.x) + (e.y - c.y) * (n.y - e.y)).toBeCloseTo(0, 6)
   })
 })
+
+// final review fixes: a typed radius gates the release and the sparkle too;
+// the snap scan runs once per drag tick and cursor
+describe('a radius being typed skips the snap everywhere', () => {
+  it('releasing writes no tangent rule, and moving near the line sparkles nothing', () => {
+    const { doc, pen } = mk(d => { addLine(d, addPoint(d, 2, 2), addPoint(d, 16, 2)) })
+    pen.pathDown(6, 5); pen.pathUp(6, 5)
+    pen.pathDown(12, 5)
+    pen.dimBuffer.value = '4'
+    pen.pathMove(10.5, 3.55); pen.pathMove(9, 2.1)
+    expect(pen.sparkleCount()).toBe(0)
+    pen.pathUp(9, 2.1); pen.finishPath(false)
+    expect(doc.value.constraints.some(c => c.kind === 'tangentLineArc')).toBe(false)
+    expect(lastPath(doc.value).segments[0].kind).toBe('arc')
+  })
+  it('the snap for one cursor is worked out once per drag tick', () => {
+    const { pen } = mk(d => { addLine(d, addPoint(d, 2, 2), addPoint(d, 16, 2)) })
+    bowFrom6to12(pen, { x: 9, y: 2.1 }, false)
+    const a = pen.bowPreview({ x: 9, y: 2.1 })!.touch
+    expect(a).not.toBeNull()
+    expect(pen.bowPreview({ x: 9, y: 2.1 })!.touch).toBe(a)
+    expect(pen.bowPreview({ x: 9, y: 2.2 })!.touch).not.toBe(a)
+  })
+})

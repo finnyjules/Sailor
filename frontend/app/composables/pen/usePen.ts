@@ -44,7 +44,7 @@ import type { SketchDoc, SketchConstraint, EntityId, ConstraintKind, SegmentSpec
 import { addPoint, addLine, addCircle, addConstraint, removeConstraint, deleteEntity, addPath, pointClosure, isPointReferenced, addSmoothHandles } from '~/lib/sketch/edit'
 import { snapPoint, snapRule, snapPreviewKind, inferCircleTangents, tangentJointArc, sweepFor, circumcenter, type SnapPreviewKind, type PointSnap } from '~/lib/sketch/infer'
 import { solve, type DragTarget } from '~/lib/sketch/solve'
-import { bowTangentSnap, pieceOf, tangentRuleFor, curveKey, type BowTangentSnap } from '~/lib/sketch/tangency'
+import { bowTangentSnap, pieceOf, tangentRuleFor, curveKey, equivalentRuleKey, type BowTangentSnap } from '~/lib/sketch/tangency'
 import { dist, type Vec2 } from '~/lib/sketch/geom'
 import { constraintMarks, type ConstraintMark, type ArcDimensionMark } from '~/lib/sketch/annotate'
 import { applyView, type ViewMatrix } from '~/lib/sketch/view'
@@ -524,14 +524,15 @@ export function usePen(opts: {
 
   // Tangent (penRules tangentRuleForSelection): the rule for the two selected
   // pieces — the joint form where they meet, tangentLineArc / tangentArcs
-  // where they don't. An identical rule already there is not added twice.
+  // where they don't. A rule already there that says the same (whatever order
+  // its refs were written in — equivalentRuleKey) is not added twice.
   function applyTangent() {
     const rule = tangentRuleForSelection(doc.value, selection.value, selectedSegments.value)
     clearSel()
     clearSegSel()
     if (!rule) return
-    const key = sameKey({ id: '', kind: rule.kind, refs: rule.refs, value: rule.value })
-    if (doc.value.constraints.some(c => sameKey(c) === key)) return   // already there — no step
+    const key = equivalentRuleKey(doc.value, rule)
+    if (doc.value.constraints.some(c => equivalentRuleKey(doc.value, c) === key)) return   // already there — no step
     const id = addConstraint(doc.value, rule.kind, rule.refs, rule.value)
     runSolve()
     sparkleAtConstraint(id)
@@ -1055,6 +1056,18 @@ export function usePen(opts: {
   // joint's own tangency), then — unless that snapped, or `snap: false` (a
   // typed radius) — the tangent snap onto nearby committed geometry
   // (bowTangentSnap). Reads pathDragTick so overlay computeds follow the drag.
+  // bowTangentSnap scans every curve; pathMove and the overlay's two readers
+  // ask for the same cursor each move, so one result is kept per drag tick and
+  // inputs (the drawing does not change while a segment bows)
+  let bowSnapMemo: { key: string; doc: SketchDoc; val: BowTangentSnap | null } | null = null
+  function bowSnapOnce(J: Vec2, E: Vec2, free: Vec2, tol: number, skip: EntityId[]): BowTangentSnap | null {
+    const d = doc.value
+    const key = `${pathDragTick.value}|${d.entities.length}|${d.constraints.length}|${J.x},${J.y}|${E.x},${E.y}|${free.x},${free.y}|${tol}|${skip.join(',')}`
+    if (bowSnapMemo && bowSnapMemo.key === key && bowSnapMemo.doc === d) return bowSnapMemo.val
+    const val = bowTangentSnap(d, J, E, free, tol, skip)
+    bowSnapMemo = { key, doc: d, val }
+    return val
+  }
   function bowPreview(pointer: Vec2 | null, o: { snap?: boolean } = {}): BowPreview | null {
     void pathDragTick.value
     if (!pointer || !pathDrag || !pathDrag.bowed) return null
@@ -1068,7 +1081,7 @@ export function usePen(opts: {
     const arc = bowArc(J, E, pointer, joint?.tangentDir ?? null)
     if (!arc) return null
     if (arc.snappedTangent || o.snap === false) return { ...arc, touch: null }
-    const touch = bowTangentSnap(doc.value, J, E, arc.center, pxToUnits(SNAP_PX, opts.view.value), [pathDrag.prevAnchor, pathDrag.anchor])
+    const touch = bowSnapOnce(J, E, arc.center, pxToUnits(SNAP_PX, opts.view.value), [pathDrag.prevAnchor, pathDrag.anchor])
     if (!touch) return { ...arc, touch: null }
     return { ...arcShape(J, E, pointer, touch.center), snappedTangent: false, touch }
   }
@@ -1109,7 +1122,7 @@ export function usePen(opts: {
     if (!pathDrag) return
     if (dist({ x, y }, { x: pathDrag.startX, y: pathDrag.startY }) > pxToUnits(BOW_PX, opts.view.value) && !pathDrag.bowed) { pathDrag.bowed = true; pathDragTick.value++ }
     if (pathDrag.bowed) {
-      const pv = bowPreview({ x, y })
+      const pv = bowPreview({ x, y }, { snap: !dimBuffer.value })   // a typed radius wins over the snap (and its sparkle)
       const key = pv?.touch ? curveKey(pv.touch.target) : null
       if (key && key !== bowTouchKey) sparkle(pv!.touch!.touch.x, pv!.touch!.touch.y)
       bowTouchKey = key
@@ -1157,7 +1170,7 @@ export function usePen(opts: {
 
   function pathUp(x: number, y: number) {
     if (!pathDrag) return
-    commitBowedSegment({ x, y })
+    commitBowedSegment({ x, y }, !dimBuffer.value)   // a radius being typed: no unannounced tangent rule
     setPathDrag(null)
     // the pointer is here now: re-seat the cursor so anything reading the
     // (non-reactive) drag state — the overlay's cursor glow — settles too
@@ -1580,6 +1593,13 @@ export function usePen(opts: {
   let arcDrag: ArcDrag = null
   function setArcDrag(v: ArcDrag) { arcDrag = v; pathDragTick.value++ }
   function arcDragTransient(): EntityId | null { void pathDragTick.value; return arcDrag?.transient ?? null }
+  /** The drawing as a host should show it mid-gesture: without an arc drag's
+   *  transient guide point and its pin (they exist only while the bow is held). */
+  function liveDoc(): SketchDoc {
+    const t = arcDrag?.transient
+    if (!t) return doc.value
+    return { ...doc.value, entities: doc.value.entities.filter(e => e.id !== t), constraints: doc.value.constraints.filter(c => !c.refs.includes(t)) }
+  }
 
   function arcDragStart(pathId: EntityId, segIndex: number, x: number, y: number, centre = false): boolean {
     if (arcDrag) arcDragEnd()
@@ -2231,7 +2251,7 @@ export function usePen(opts: {
     // selection
     pick, clearSel, pickSegment, clearSegSel, marqueeSelect, marqueeSelectScreen, isPointId,
     // select-tool point drag, joining onto what it is dropped on
-    dragPoint, dropPoint, cancelPointDrop, arcDragStart, arcDragMove, arcDragEnd, arcDragTransient,
+    dragPoint, dropPoint, cancelPointDrop, arcDragStart, arcDragMove, arcDragEnd, arcDragTransient, liveDoc,
     // drawing
     place, pathDown, pathMove, pathUp, finishPath, cancelPath, removeLastAnchor, getPathDrag, jointInfoForSegment, bowPreview,
     curveDown, curveMove, curveUp, getCurveDrag, getHeldHandles, handleIds, endGesture,

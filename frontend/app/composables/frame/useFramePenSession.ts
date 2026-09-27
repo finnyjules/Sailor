@@ -240,11 +240,12 @@ export function useFramePenSession(host: FramePenHost) {
       return layerView(layerPlacementForView(live), W, H)
     })
     const preview = () => {
-      const json = JSON.stringify(doc.value)
+      const shown = pen.liveDoc()   // never an arc drag's transient guide point
+      const json = JSON.stringify(shown)
       if (json === written) return   // nothing changed (a click, a selection)
       written = json
       ensureRecorded()
-      const sk = cloneDoc(doc.value)
+      const sk = cloneDoc(shown)
       writeLayer(id, l => ({ ...l, d: sketchToLocalD(sk), sketch: sk }))
     }
     const pen = usePen({ doc, view, options: { tools: FRAME_PEN_TOOLS }, onChange: preview, onLiveChange: preview })
@@ -283,7 +284,7 @@ export function useFramePenSession(host: FramePenHost) {
     const view = computed(() => fixed!)   // FIXED for the session: the guide re-centres itself, the drawing must not jump
     const preview = () => {
       // the path still being drawn counts too, so the type follows it as you draw
-      const shown = withPendingPath(doc.value, pen.pendingPath.value)
+      const shown = withPendingPath(pen.liveDoc(), pen.pendingPath.value)
       const json = JSON.stringify(shown)
       if (json === written) return
       const { W, H } = host.size()

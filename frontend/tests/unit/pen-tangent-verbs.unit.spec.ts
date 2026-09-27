@@ -150,3 +150,40 @@ describe('Tangent with a whole line or circle', () => {
     expect(pen.availableConstraints().map(o => o.tip ?? o.kind)).toEqual(['onCurve'])
   })
 })
+
+// final review fixes: an equivalent rule already there is not written twice;
+// two arcs joined on one centre get no Tangent
+describe('Tangent never duplicates an equivalent rule', () => {
+  it('an arc then a line whose joint rule the Pen captured as [C, J, J, N] → no second rule', () => {
+    let path = '', C = '', J = '', N = ''
+    const { doc, pen } = mk(d => {
+      const S = addPoint(d, 4, 6); J = addPoint(d, 10, 6); C = addPoint(d, 7, 9); N = addPoint(d, 13, 3)
+      path = addPath(d, [S, J, N], [{ kind: 'arc', center: C, sweep: 1 }, { kind: 'line' }])
+      d.constraints.push({ id: 'cap', kind: 'perpendicular', refs: [C, J, J, N] })
+    })
+    pen.pickSegment(path, 1); pen.pickSegment(path, 0, true)
+    pen.applyWithValue(tangentOf(pen)!)
+    expect(doc.value.constraints.filter(c => c.kind === 'perpendicular')).toHaveLength(1)
+    expect(pen.canUndo()).toBe(false)
+  })
+  it('two joined arcs picked in either order → one collinear', () => {
+    let path = ''
+    const { doc, pen } = mk(d => {
+      const S = addPoint(d, 4, 6), J = addPoint(d, 10, 6), E = addPoint(d, 16, 6)
+      path = addPath(d, [S, J, E], [{ kind: 'arc', center: addPoint(d, 7, 9), sweep: 1 }, { kind: 'arc', center: addPoint(d, 13, 3), sweep: 0 }])
+    })
+    pen.pickSegment(path, 0); pen.pickSegment(path, 1, true); pen.applyWithValue(tangentOf(pen)!)
+    pen.pickSegment(path, 1); pen.pickSegment(path, 0, true); pen.applyWithValue(tangentOf(pen)!)
+    expect(doc.value.constraints.filter(c => c.kind === 'collinear')).toHaveLength(1)
+  })
+  it('two arcs joined on the same centre → no Tangent offered', () => {
+    let path = ''
+    const { doc, pen } = mk(d => {
+      const C = addPoint(d, 0, 0)
+      path = addPath(d, [addPoint(d, 5, 0), addPoint(d, 0, 5), addPoint(d, -5, 0)], [{ kind: 'arc', center: C, sweep: 1 }, { kind: 'arc', center: C, sweep: 1 }])
+    })
+    pen.pickSegment(path, 0); pen.pickSegment(path, 1, true)
+    expect(tangentOf(pen)).toBeUndefined()
+    expect(doc.value.constraints.some(c => c.kind === 'collinear')).toBe(false)
+  })
+})

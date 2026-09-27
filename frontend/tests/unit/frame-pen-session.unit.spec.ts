@@ -613,3 +613,38 @@ describe('useFramePenSession — a text layer\'s drawn guide', () => {
     expect(h2.get('t').path).toBe(text.path)
   })
 })
+
+// pen stage 4 final fix: mid-drag previews never show the arc drag's
+// transient guide point (or its pin)
+describe('useFramePenSession — dragging an arc’s bow', () => {
+  it('the live preview leaves out the transient guide point and its rule', async () => {
+    const { curveGeom, pointAt } = await import('~/lib/sketch/crossings')
+    const { host, added } = makeHost()
+    const s0 = useFramePenSession(host)
+    s0.open({ kind: 'new' })
+    const d0 = s0.session.value!.doc.value
+    addPath(d0, [addPoint(d0, 4, 6), addPoint(d0, 10, 6)], [{ kind: 'arc', center: addPoint(d0, 7, 9), sweep: 1 }])
+    s0.commitSession()
+    let list = [added[0]]
+    const h = { ...makeHost().host, layers: () => list, commit: vi.fn((next: any[]) => { list = next }) }
+    const s = useFramePenSession(h)
+    s.open({ kind: 'layer', id: added[0].id })
+    const sess = s.session.value!
+    const doc = sess.doc.value
+    const path = doc.entities.find(e => e.kind === 'path')!
+    const pts = doc.entities.filter(e => e.kind === 'point').length
+    const cons = doc.constraints.length
+    const g = curveGeom(doc, { kind: 'seg', pathId: path.id, segIndex: 0 })!
+    const on = pointAt(g, 0.5)
+    const out = { x: on.x + (on.x - g.c!.x) * 0.3, y: on.y + (on.y - g.c!.y) * 0.3 }
+    expect(sess.pen.arcDragStart(path.id, 0, on.x, on.y)).toBe(true)
+    sess.pen.arcDragMove((on.x + out.x) / 2, (on.y + out.y) / 2)
+    sess.pen.arcDragMove(out.x, out.y)
+    expect(h.commit).toHaveBeenCalled()
+    const sk = list[0].sketch
+    expect(sk.entities.filter((e: any) => e.kind === 'point')).toHaveLength(pts)
+    expect(sk.constraints).toHaveLength(cons)
+    expect(sk.entities.some((e: any) => e.construction)).toBe(false)
+    sess.pen.arcDragEnd()
+  })
+})
