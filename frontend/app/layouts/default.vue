@@ -68,7 +68,8 @@ import { withKeyedLock } from '~/lib/graph/keyedLock'
 import { shouldUseRunner, startRunnerRun, runnerGateAction, stopRunnerRuns, fetchRunnerRecord, runIdOfPrompt, isRunnerDeclined, type LegStarted } from '~/lib/runner/client'
 import { useRunnerEvents, ensureRunnerEvents } from '~/composables/useRunnerEvents'
 import { createRunnerEventBuffer, ownerTabForCanvas, runnerRunIdsForTab } from '~/lib/runner/routing'
-import { nodesNeedingEngine, workflowNodeTitles, needsEngineDescription, blockedRunRefusal } from '~/lib/runner/needsEngine'
+import { nodesNeedingEngine, workflowNodeTitles, needsEngineDescription, needsEngineReasons, blockedRunRefusal } from '~/lib/runner/needsEngine'
+import { bakeShaderEffectsForRun } from '~/lib/runner/shaderBake'
 import { RUNNER_WORKER, isRunnerPromptId } from '#shared/runner/messages'
 import { NO_FAMILIES, parseFamilies } from '#shared/runner/families'
 import { RUNNER_STAGE_STALL_MS } from '#shared/runner/timeouts'
@@ -834,6 +835,12 @@ async function runVueWorkflow(
         return 'abort'
       }
     }
+    // Shader effects (step 3, R2.10): while `shader-bake` is on, the browser bakes each
+    // one the runner can replay into the prompt; one it couldn't is left to the engine.
+    if (directPrompt && runnerEnabled && runnerFamilies.has('shader-bake')) {
+      const bake = await bakeShaderEffectsForRun(directPrompt)
+      if (bake.failed.length) toast.error('A shader effect couldn’t be prepared for the run')
+    }
     return { plainWorkflow, directPrompt }
   }
 
@@ -888,6 +895,7 @@ async function runVueWorkflow(
     // refusal must name nodes across all of them too, or a take-2+-only
     // engine-bound node would dispatch to a /prompt that can only fail.
     const needsSet = new Set<string>()
+    const reasonSet = new Set<string>()
     for (const tk of [firstTake, ...extraTakes]) {
       if (!tk.directPrompt) continue
       for (const name of nodesNeedingEngine(tk.directPrompt, {
@@ -895,10 +903,11 @@ async function runVueWorkflow(
         families: runnerFamilies,
         titleOf: workflowNodeTitles(tk.plainWorkflow, objectInfo.value),
       })) needsSet.add(name)
+      for (const why of needsEngineReasons(tk.directPrompt, { runnerOn: runnerEnabled, families: runnerFamilies })) reasonSet.add(why)
     }
     const needs = [...needsSet]
     if (needs.length) {
-      toast.error('This workflow needs the local engine', { description: needsEngineDescription(needs) })
+      toast.error('This workflow needs the local engine', { description: needsEngineDescription(needs, [...reasonSet]) })
       if (activeTab.value?.type === 'project') updateTabStatus(activeTab.value.id, 'idle')
       currentRunSilent.value = false
       return false
