@@ -51,7 +51,8 @@ import { applyView, invertView, viewToSvg, type ViewMatrix } from '~/lib/sketch/
 import { spanPathD, SPARKLE_LIFETIME_MS, isTypingInField, type Pen } from '~/composables/pen/usePen'
 import { pointRolesForDoc, type PointRole } from '~/lib/sketch/pointRoles'
 import { clampChipOrigin } from '~/lib/sketch/chipClamp'
-import { TOOL_KEYS } from '~/composables/pen/penKeys'
+import { TOOL_KEYS, isCleanupKey } from '~/composables/pen/penKeys'
+import { cleanupBadges, BADGE_H, type CleanupBadge } from '~/lib/sketch/cleanup'
 
 const props = withDefaults(defineProps<{
   pen: Pen
@@ -94,6 +95,7 @@ const {
   trimHover, trimHoverEnds, trimGhosts, cutHover, dissolveHover,
   trimDown, trimMove, trimUp, cutMove, cutClick, dissolveMove, dissolveClick, clearToolHover,
   arcDragStart, arcDragMove, arcDragEnd, arcDragTransient,
+  cleanup: cleanupSession, toggleCleanupFix, toggleCleanupKind,
 } = props.pen
 
 const svgEl = ref<SVGSVGElement | null>(null)
@@ -169,12 +171,13 @@ const visibleHandleIds = computed(() => {
   return out
 })
 const allHandleIds = computed(() => handleIds())
-const pts = computed(() => (doc.value.entities.filter(e =>
+const pts = computed(() => (cleanupSession.value ? [] : doc.value.entities.filter(e =>
   e.kind === 'point' && e.id !== arcDragTransient() && (!allHandleIds.value.has(e.id) || visibleHandleIds.value.has(e.id))) as any[])
   .map(p => ({ p, s: toScreen(p), handle: allHandleIds.value.has(p.id), role: pointRoleOf(p) })))
 
 // screen-space arms (point → handle) for the handles on show
 const handleArms = computed(() => {
+  if (cleanupSession.value) return [] as { x1: number; y1: number; x2: number; y2: number }[]
   const d = doc.value
   const visible = visibleHandleIds.value
   const out: { x1: number; y1: number; x2: number; y2: number }[] = []
@@ -227,7 +230,7 @@ function hiddenHandleRule(m: { id: EntityId; kind: ConstraintKind }): boolean {
 function chipOrigin(s: { x: number; y: number }, chipWidth: number) {
   return clampChipOrigin(s.x + 6, s.y - 16, chipWidth, props.width, props.height, 14)
 }
-const visibleMarks = computed(() => marks.value
+const visibleMarks = computed(() => (cleanupSession.value ? [] : marks.value)
   .filter(m => !STRUCTURAL_MARK_KINDS.includes(m.kind) && !hiddenHandleRule(m))
   .map(m => {
     const s = toScreen(m)
@@ -237,7 +240,7 @@ const visibleMarks = computed(() => marks.value
   }))
 // persistent "R n.n" radius chips on every finished arc segment — pure read
 // of the doc, never solves; distinct from pathBowChip's live during-drag chip
-const arcDims = computed(() => arcDimensionMarks(doc.value).map(m => {
+const arcDims = computed(() => (cleanupSession.value ? [] : arcDimensionMarks(doc.value)).map(m => {
   const s = toScreen(m)
   const w = 34
   const o = chipOrigin(s, w)
@@ -512,6 +515,39 @@ const sparkleRender = computed(() => sparkles.value.map(s => {
   return { id: s.id, opacity, rays }
 }))
 
+// ---------- Clean up preview (pen stage 5) ----------
+// the cleaned drawing, solid, over a faint ghost of the drawing as it is, with
+// its guides dashed; one badge per fix (lib/sketch/cleanup/badges.ts) — a
+// click switches that fix (or, collapsed, that kind) off and on
+const cleanupD = computed(() => (cleanupSession.value ? sketchPathData(cleanupSession.value.result.doc) : ''))
+const cleanupGuidesD = computed(() => {
+  const s = cleanupSession.value
+  if (!s) return ''
+  const d = s.result.doc
+  return d.entities.filter(e => e.kind !== 'point' && e.construction).map(e => entityPath(d, e.id)).filter(Boolean).join(' ')
+})
+// the layout shown last, handed back so a badge still there keeps its place
+// across a switch (the clicked one stays under the pointer) — only while the
+// view and the overlay size are unchanged; a plain variable, not state: it
+// only feeds the next layout, never triggers one
+let lastBadges: { view: ViewMatrix; width: number; height: number; list: CleanupBadge[] } | null = null
+const cleanupBadgeList = computed<CleanupBadge[]>(() => {
+  const s = cleanupSession.value
+  if (!s) { lastBadges = null; return [] }
+  const { view, width, height } = props
+  const l = lastBadges
+  const sameView = !!l && (['a', 'b', 'c', 'd', 'e', 'f'] as const).every(k => l.view[k] === view[k])
+  const prev = l && sameView && l.width === width && l.height === height ? l.list : undefined
+  const list = cleanupBadges(s.result.fixes, toScreen, width, height, prev)
+  lastBadges = { view: { ...view }, width, height, list }
+  return list
+})
+function onCleanupBadgeClick(b: CleanupBadge) {
+  if (!props.active) return
+  if (b.collapsed) toggleCleanupKind(b.kind)
+  else toggleCleanupFix(b.key)
+}
+
 // ---------- pointer input ----------
 
 let dragId: EntityId | null = null
@@ -605,6 +641,7 @@ function drawingXY(ev: PointerEvent) {
 
 function onEntityPointerDown(id: EntityId, ev: PointerEvent) {
   if (!props.active || ev.button !== 0 || isCtrlContextClick(ev)) return
+  if (cleanupSession.value) return   // a Clean up preview: only its badges take clicks
   // guided Mirror: a line click supplies the axis
   if (tool.value === 'select' && pendingOp.value?.kind === 'mirror' && (doc.value.entities.find(e => e.id === id) as any)?.kind === 'line') {
     applyMirror(pendingOp.value.units, id)
@@ -617,6 +654,7 @@ function onEntityPointerDown(id: EntityId, ev: PointerEvent) {
 function onPointerDownPoint(id: EntityId, ev: PointerEvent) {
   settleArcPress()
   if (!props.active || ev.button !== 0 || isCtrlContextClick(ev) || tool.value !== 'select') return
+  if (cleanupSession.value) return
   // guided Repeat: this point is the ring center
   if (pendingOp.value?.kind === 'repeat') {
     applyRepeat(pendingOp.value.units, id, pendingOp.value.count)
@@ -640,6 +678,7 @@ function onPointerUpPoint(id: EntityId, ev: PointerEvent) {
 function onSegmentPointerDown(pathId: EntityId, segIndex: number, ev: PointerEvent) {
   settleArcPress()
   if (!props.active || ev.button !== 0 || isCtrlContextClick(ev) || tool.value !== 'select') return
+  if (cleanupSession.value) return
   // guided ops treat a path-body click as picking the whole path (the unit)
   if (pendingOp.value) { pick(pathId, ev.shiftKey); ev.stopPropagation(); return }
   // a plain click selects the WHOLE path; Alt/Option-click drills in to the
@@ -658,6 +697,7 @@ function onSegmentPointerDown(pathId: EntityId, segIndex: number, ev: PointerEve
 function onPointerDownSvg(ev: PointerEvent) {
   settleArcPress()
   if (!props.active || ev.button !== 0 || isCtrlContextClick(ev)) return
+  if (cleanupSession.value) return
   if (tool.value === 'select') {
     // guided Repeat with an empty-canvas click: drop a fresh FIXED center
     // where they clicked and repeat around it. Mirror needs a real line, so
@@ -690,6 +730,7 @@ function onPointerDownSvg(ev: PointerEvent) {
 }
 function onPointerMove(ev: PointerEvent) {
   if (!props.active) return
+  if (cleanupSession.value) return
   if (marqueeStart) {
     if (ev.buttons === 0) return   // button released off-canvas — pointerup/leave settles it
     const { x, y } = localXY(ev)
@@ -875,6 +916,14 @@ function focusedControl(ev: KeyboardEvent): boolean {
 // commit/cancel) — a key ignored because the user is typing returns false.
 function handleKeydownEvent(ev: KeyboardEvent): boolean {
   if (!props.active || isTypingInField()) return false
+  // a Clean up preview owns the keys (usePen's cleanupKey) ahead of the
+  // focused-control rule: Enter applies even while a toolbar button (the
+  // Clean up button just clicked) has focus
+  if (cleanupSession.value) return props.pen.onKeydown(ev)
+  // ⌥⇧C: the overlay's own live gesture (a marquee, a point drag, an arc
+  // press) settles first, so no mid-drag point reaches history or the
+  // drawing the preview starts from
+  if (isCleanupKey(ev)) settleOverlayGesture()
   const onControl = (ev.key === 'Enter' || ev.key === 'Escape') && focusedControl(ev)
   if (onControl && ev.key === 'Enter') return false
   // switching tools mid marquee or mid point drag: settle it first, or the
@@ -935,6 +984,7 @@ defineExpose({
        @contextmenu.prevent>
     <!-- drawing space: the view matrix does scale, rotation and mirroring -->
     <g :transform="svgTransform">
+      <template v-if="!cleanupSession">
       <path :d="pathDrawing" fill="none" stroke="#3730a3" stroke-width="1.5" vector-effect="non-scaling-stroke" />
       <path :d="constructionDrawing" fill="none" stroke="#9ca3af" stroke-width="1.5" stroke-dasharray="4 3" vector-effect="non-scaling-stroke" />
       <template v-for="e in doc.entities" :key="'hit-' + e.id">
@@ -957,6 +1007,17 @@ defineExpose({
       <template v-for="s in selectedSegments" :key="'segsel-' + s.pathId + '-' + s.segIndex">
         <path :d="segmentPathDrawing(s.pathId, s.segIndex)" fill="none" stroke="#f59e0b" stroke-width="2.5"
               vector-effect="non-scaling-stroke" pointer-events="none" data-seg-selected />
+      </template>
+      </template>
+      <!-- Clean up preview: the drawing as it is, a faint dotted ghost; the
+           cleaned drawing's guides dashed and the cleaned drawing on top -->
+      <template v-else>
+        <path :d="pathDrawing" fill="none" stroke="#3730a3" stroke-width="1.5" stroke-dasharray="2 3" opacity="0.28"
+              vector-effect="non-scaling-stroke" pointer-events="none" data-cleanup-ghost />
+        <path :d="cleanupGuidesD" fill="none" stroke="#9ca3af" stroke-width="1" stroke-dasharray="4 3"
+              vector-effect="non-scaling-stroke" pointer-events="none" data-cleanup-guides />
+        <path :d="cleanupD" fill="none" stroke="#3730a3" stroke-width="1.75"
+              vector-effect="non-scaling-stroke" pointer-events="none" data-cleanup-preview />
       </template>
     </g>
     <!-- screen space -->
@@ -1084,6 +1145,16 @@ defineExpose({
       <rect :x="lineDim.x - lineDim.w / 2" :y="lineDim.y - 7" :width="lineDim.w" height="14" rx="3" fill="#111827" opacity="0.85" />
       <text :x="lineDim.x" :y="lineDim.y + 4" text-anchor="middle" fill="#e5e7eb" font-size="10" font-family="ui-monospace, monospace">{{ lineDim.text }}</text>
     </g>
+    <!-- Clean up: one badge per fix, with a dot where it acts -->
+    <g v-for="b in cleanupBadgeList" :key="b.key" class="cleanup-badge" :pointer-events="active ? 'auto' : 'none'" style="cursor: pointer"
+       :data-cleanup-fix="b.collapsed ? null : b.key" :data-cleanup-kind="b.collapsed ? b.kind : null"
+       :data-fix-kind="b.kind" :data-on="b.on ? '' : null" :data-off="b.on ? null : ''"
+       @pointerdown.stop @click.stop="onCleanupBadgeClick(b)">
+      <circle :cx="b.ax" :cy="b.ay" r="2.5" :fill="b.on ? '#16a34a' : '#9ca3af'" pointer-events="none" />
+      <rect :x="b.x" :y="b.y" :width="b.w" :height="BADGE_H" rx="4" :fill="b.on ? '#15803d' : '#111827'" :opacity="b.on ? 0.95 : 0.7" />
+      <text :x="b.x + 6" :y="b.y + 11.5" :fill="b.on ? '#fff' : '#9ca3af'" font-size="10.5" font-family="ui-sans-serif, system-ui, sans-serif"
+            :text-decoration="b.on ? undefined : 'line-through'">{{ b.label }}</text>
+    </g>
     <rect v-if="marqueeRect" :x="marqueeRect.x" :y="marqueeRect.y" :width="marqueeRect.w" :height="marqueeRect.h"
           fill="rgba(37,99,235,0.08)" stroke="#2563eb" stroke-width="1" stroke-dasharray="4 3" pointer-events="none" data-marquee />
     <g v-for="p in sparkleRender" :key="'sparkle-' + p.id" pointer-events="none" data-sparkle :style="{ opacity: p.opacity }">
@@ -1099,4 +1170,6 @@ defineExpose({
 .constraint-badge rect { transition: opacity 120ms ease; }
 .constraint-badge:hover rect { opacity: 1; }
 .constraint-badge:hover text { fill: #fff; }
+.cleanup-badge rect { transition: opacity 120ms ease; }
+.cleanup-badge:hover rect { opacity: 1; }
 </style>
