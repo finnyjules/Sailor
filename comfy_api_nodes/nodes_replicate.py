@@ -4438,6 +4438,8 @@ class FixFacesNode(IO.ComfyNode):
                              tooltip="How many times larger the picture comes back."),
             ],
             outputs=[IO.Image.Output()],
+            hidden=[IO.Hidden.unique_id],
+            is_output_node=True,
             price_badge=IO.PriceBadge(expr='{"type":"usd","usd":0.08,"format":{"approximate":true}}'),
         )
 
