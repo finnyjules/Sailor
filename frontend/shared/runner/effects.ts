@@ -20,13 +20,14 @@ import type { RunnerFamily } from './families'
 import type { InputCheckName, RunnerNodeRule, RunnerWidgetSpec } from './eligibility'
 import type { ValueKind } from './values'
 import { isLink } from './graph'
+import { pyFloatOf, pyIntOf } from './pyText'
 
 export type EffectFamily = EffectSchemaFamily
 
 /** Every effect family. */
 export const EFFECT_FAMILIES: readonly EffectFamily[] = ['effects-tone', 'effects-blur', 'effects-cells', 'effects-warp', 'effects-mask', 'effects-noise']
 
-/** The effects ported so far (R2.1: the three pilots; R2.4: the rest of effects-tone; R2.5: effects-blur; R2.6: effects-cells; R2.7: effects-warp; R2.8: effects-mask). Each task adds its classes. */
+/** The effects ported so far (R2.1: the three pilots; R2.4: the rest of effects-tone; R2.5: effects-blur; R2.6: effects-cells; R2.7: effects-warp; R2.8: effects-mask; R2.9: effects-noise). Each task adds its classes. */
 export const EFFECT_CLASSES_PORTED: readonly string[] = [
   'AdjustExposure', 'AdjustInvert', 'AdjustThreshold',
   'AdjustBrightnessContrast', 'AdjustColor', 'AdjustCurves', 'AdjustLevels',
@@ -37,6 +38,7 @@ export const EFFECT_CLASSES_PORTED: readonly string[] = [
   'Pixelate', 'Halftone', 'Kuwahara', 'Ascii',
   'CropImage', 'ResizeImage', 'RotateImage', 'FlipImage', 'Pinch', 'Twirl', 'Wave', 'LensCorrection', 'Kaleidoscope', 'PolarCoords', 'Fisheye', 'ChromaticAberration', 'CRT', 'Mirror', 'GodRays',
   'Blend', 'ApplyMask', 'ThresholdMask', 'ColorRangeMask', 'MatteGrowShrink', 'MergeAlpha', 'Painter',
+  'FilmGrain', 'Glitch', 'PerlinNoise', 'Voronoi', 'GradientGenerator', 'PaletteQuantize', 'ReactionDiffusion', 'Fractal', 'Stipple', 'FlowField', 'AddNoise',
 ]
 
 /** Each effect class's family (every generated class, ported or not). */
@@ -103,6 +105,8 @@ export const EFFECT_ERROR_MESSAGES: Readonly<Record<string, string>> = {
   EFFECT_NEEDS_RGB: 'This effect can’t work on a picture with see-through parts',
   EFFECT_PICTURE_TOO_SMALL: 'This picture is too small for this setting. Lower the setting or use a larger picture.',
   EFFECT_BATCHES_DIFFER: 'The pictures this effect combines come in different numbers',
+  // R2.9: Film grain below size 1 makes a noise field larger than the picture, which Python can't add to it.
+  EFFECT_GRAIN_TOO_FINE: 'This grain size is too fine for this picture. Use a grain size of 1 or more.',
 }
 
 // ── The live preview's name (rule 4) ─────────────────────────────────────────
@@ -116,19 +120,100 @@ export function effectPreviewName(nodeId: string): string | null {
   return EFFECT_PREVIEW_NAME_RE.test(name) ? name : null
 }
 
-// ── Output sizes known from the widgets (rule 7) ─────────────────────────────
+// ── Output sizes and work known from the widgets (rule 7) ────────────────────
+
+/** The generators (R2.9): no picture in; their size and their work are known from their widgets. */
+export const EFFECT_GENERATOR_CLASSES: readonly string[] = ['PerlinNoise', 'Voronoi', 'GradientGenerator', 'ReactionDiffusion', 'Fractal']
 
 /**
- * The output size an effect's widgets decide on their own (generators), or
- * null when it depends on the picture. None of the R2.1 pilots has one.
+ * A number widget as ComfyUI's validation converts it (int() truncates a
+ * float; text as Python reads it), or null when it isn't known here (a
+ * link, text Python refuses).
  */
-export const EFFECT_WIDGET_SIZES: Readonly<Record<string, (inputs: Record<string, unknown>) => { w: number; h: number } | null>> = {}
+function widgetNumber(v: unknown, int: boolean): number | null {
+  let n: number | null = null
+  if (typeof v === 'number') n = v
+  else if (typeof v === 'boolean') n = Number(v)
+  else if (typeof v === 'string') n = int ? pyIntOf(v) : pyFloatOf(v)
+  if (n === null || !Number.isFinite(n)) return null
+  return int ? Math.trunc(n) : n
+}
 
-/** Whether an output size known from the widgets fits the caps (unknown: checked at the node's turn). */
+/** A generator's width × height from its widgets, or null. */
+function generatorSize(inputs: Record<string, unknown>): { w: number; h: number } | null {
+  const w = widgetNumber(inputs.width, true)
+  const h = widgetNumber(inputs.height, true)
+  return w !== null && h !== null && w > 0 && h > 0 ? { w, h } : null
+}
+
+/** The output size an effect's widgets decide on their own (the generators, R2.9), or null when it depends on the picture. */
+export const EFFECT_WIDGET_SIZES: Readonly<Record<string, (inputs: Record<string, unknown>) => { w: number; h: number } | null>> =
+  Object.fromEntries(EFFECT_GENERATOR_CLASSES.map(cls => [cls, generatorSize]))
+
+/**
+ * The work of reading, quantising and encoding a value (server/runner/effects/
+ * plan.ts, measured in the R2.1 fix round): 6 units a value, 4 values a pixel,
+ * in and out.
+ */
+export const EFFECT_IO_WORK_PER_VALUE = 6
+
+/**
+ * Each generator's own work from its widgets, in EffectSpec.work's units
+ * (0.37 × 10⁹ a second), measured on the development Mac (R2.9 report: each
+ * at a heavy setting in this thread, the constant set so its time at the
+ * unit's rate is at or above the measured time): Perlin noise per octave a
+ * bicubic value a pixel (PERLIN_PIXEL) and its random grid (RAND_VALUE a
+ * value: below scale 1 the grid outgrows the picture); Voronoi a site's
+ * distance and its topk step a pixel (VORONOI_SITE); Gradient its one pass
+ * (GRADIENT_PIXEL); Reaction-diffusion an iteration's two Winograd laplacians
+ * and its update a pixel (REACTION_STEP); Fractal an iteration of a pixel
+ * still escaping (FRACTAL_STEP: every pixel counted at every iteration, the
+ * most it can take).
+ */
+export const EFFECT_GENERATOR_UNITS = { PERLIN_PIXEL: 40, RAND_VALUE: 6, VORONOI_SITE: 4, GRADIENT_PIXEL: 6, REACTION_STEP: 24, FRACTAL_STEP: 5 } as const
+
+/** A generator's own work from its widgets (null: not a generator, or a widget not known here). */
+export function generatorWork(classType: string, inputs: Record<string, unknown>): number | null {
+  if (!EFFECT_GENERATOR_CLASSES.includes(classType)) return null
+  const size = generatorSize(inputs)
+  if (!size) return null
+  const px = size.w * size.h
+  const U = EFFECT_GENERATOR_UNITS
+  const int = (k: string) => widgetNumber(inputs[k], true)
+  switch (classType) {
+    case 'PerlinNoise': {
+      const o = int('octaves')
+      let sc = widgetNumber(inputs.scale, false)
+      if (o === null || sc === null || !(sc > 0)) return null
+      // Each octave's random grid (max(2, int(side / sc) + 1) a side; sc halves every octave) and its bicubic.
+      let work = 0
+      for (let i = 0; i < o; i++) {
+        const grid = Math.max(2, Math.trunc(size.w / sc) + 1) * Math.max(2, Math.trunc(size.h / sc) + 1)
+        work += px * U.PERLIN_PIXEL + grid * U.RAND_VALUE
+        sc /= 2
+      }
+      return work
+    }
+    case 'Voronoi': { const n = int('points'); return n === null ? null : px * Math.max(0, n) * U.VORONOI_SITE }
+    case 'GradientGenerator': return px * U.GRADIENT_PIXEL
+    case 'ReactionDiffusion': { const it = int('iterations'); return it === null ? null : px * Math.max(0, it) * U.REACTION_STEP }
+    default: { const it = int('max_iter'); return it === null ? null : px * Math.max(0, it) * U.FRACTAL_STEP }
+  }
+}
+
+/**
+ * Whether what an effect's widgets decide on their own fits: its output size
+ * within the caps, and a generator's work (its own and its output's I/O, as
+ * planEffect counts it) within EFFECT_MAX_WORK. Anything not known from the
+ * widgets is checked at the node's turn. Over it, the node is left to the
+ * engine (R2.9: Reaction-diffusion at 1024² × 3000, say).
+ */
 export function effectOutputSizeFits(classType: string, inputs: Record<string, unknown>, hosted: boolean): boolean {
   const size = Object.prototype.hasOwnProperty.call(EFFECT_WIDGET_SIZES, classType) ? EFFECT_WIDGET_SIZES[classType]!(inputs) : null
   if (!size) return true
-  return size.w * size.h <= (hosted ? EFFECT_HOSTED_MAX_PICTURE_PIXELS : EFFECT_MAX_PICTURE_PIXELS)
+  if (size.w * size.h > (hosted ? EFFECT_HOSTED_MAX_PICTURE_PIXELS : EFFECT_MAX_PICTURE_PIXELS)) return false
+  const work = generatorWork(classType, inputs)
+  return work === null || work + EFFECT_IO_WORK_PER_VALUE * 4 * size.w * size.h <= EFFECT_MAX_WORK
 }
 
 /**
@@ -177,6 +262,7 @@ export const EFFECT_TEXT_WIDGETS: Readonly<Record<string, Readonly<Record<string
   GradientMap: { dark_color: 'hex', light_color: 'hex' },
   TwoDLight: { color: 'hex' },
   Outline: { line_color: 'hex', fill_color: 'hex' },
+  Stipple: { dot_color: 'hex', bg_color: 'hex' },
 }
 
 /** Whether the runner reads an effect's colour text as Python does (nothing to read: yes). */

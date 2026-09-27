@@ -17,6 +17,7 @@ import { blurCore } from './core/blur'
 import { cellsCore } from './core/cells'
 import { warpCore } from './core/warp'
 import { maskCore } from './core/mask'
+import { noiseCore } from './core/noise'
 import { kernelsCore } from './core/kernels'
 import { rngCore } from './core/rng'
 
@@ -42,14 +43,17 @@ export const EFFECT_CORES: readonly EffectCoreEntry[] = [
   { name: 'warp', fn: warpCore as EffectCoreEntry['fn'], args: ['tk', 'kn'] },
   // R2.8: masks, blends and Painter (the resizes, gaussian blur; Pillow's Lanczos from the pixels core).
   { name: 'mask', fn: maskCore as EffectCoreEntry['fn'], args: ['tk', 'kn', 'px'] },
+  // R2.9: generators, seeded looks and Add noise (torch's generator; resizes, grid_sample, topk, pools, the Winograd laplacian).
+  { name: 'noise', fn: noiseCore as EffectCoreEntry['fn'], args: ['tk', 'kn', 'rng'] },
 ]
 
 /** The cores whose functions are effect ops (not helpers). */
-export const EFFECT_OP_CORES: readonly string[] = ['tone', 'blur', 'cells', 'warp', 'mask']
+export const EFFECT_OP_CORES: readonly string[] = ['tone', 'blur', 'cells', 'warp', 'mask', 'noise']
 
 /** The cores in this thread (tests), built as the worker builds them. */
 export const effectCores = (() => {
   const tk = tensorCore(pixels)
   const kn = kernelsCore(tk, pixels)
-  return { px: pixels, tk, kn, tone: toneCore(tk, kn), rng: rngCore(), blur: blurCore(tk, kn), cells: cellsCore(tk, kn), warp: warpCore(tk, kn), mask: maskCore(tk, kn, pixels) }
+  const rng = rngCore()
+  return { px: pixels, tk, kn, tone: toneCore(tk, kn), rng, blur: blurCore(tk, kn), cells: cellsCore(tk, kn), warp: warpCore(tk, kn), mask: maskCore(tk, kn, pixels), noise: noiseCore(tk, kn, rng) }
 })()

@@ -12,13 +12,14 @@
  * widgets, the wires and the preview's name. Effects count as work (render
  * credit on a full run); nothing here is charged on its own.
  */
+import { createHash } from 'node:crypto'
 import sharp from 'sharp'
 import type { DeriveIO, NodePlan, PlanContext } from '../executors'
 import type { OutputFile, RunnerValue } from '../types'
 import { isLink } from '#shared/runner/graph'
 import { CARD_MAX_PIXELS } from '#shared/runner/eligibility'
 import {
-  EFFECT_ERROR_MESSAGES, EFFECT_MAX_WORK, EFFECT_PICTURES_TOO_LARGE, EFFECT_PICTURE_ANIMATED, EFFECT_TOO_MUCH_WORK,
+  EFFECT_ERROR_MESSAGES, EFFECT_IO_WORK_PER_VALUE, EFFECT_MAX_WORK, EFFECT_PICTURES_TOO_LARGE, EFFECT_PICTURE_ANIMATED, EFFECT_TOO_MUCH_WORK,
   EFFECT_PICTURE_TOO_LARGE_FOR_CLASS, EFFECT_START_SIZED_CLASSES, effectOutSize, effectPictureCap, effectPreviewName, effectSchemaOf,
 } from '#shared/runner/effects'
 import type { EffectSchema } from '#shared/runner/effectSchemas.generated'
@@ -152,6 +153,8 @@ export function planEffect(ctx: PlanContext): NodePlan {
     kind: 'derive',
     async derive(io) {
       const jobs = await planJobs(io, cls, spec, ins, params, schema.outputs.length)
+      // Add noise (R2.9, ruling (e)): its own seed from its settings and its files, so the noise holds still until one changes.
+      const opParams = spec.seeded ? { ...params, seed: addNoiseSeed(schema, params, jobs.hashes) } : params
       const want = {
         round: trunc.map((t, i) => !masks[i] && !t),
         trunc: trunc.map((t, i) => !masks[i] && t),
@@ -165,7 +168,18 @@ export function planEffect(ctx: PlanContext): NodePlan {
         const tensors: OutputFile[][] = schema.outputs.map(() => [])
         let preview: OutputFile | null = null
         try {
-          await worker.effectBegin({ cls, fn: spec.op, params: spec.prepare ? spec.prepare(params) : params, count: jobs.order.length })
+          await worker.effectBegin({ cls, fn: spec.op, params: spec.prepare ? spec.prepare(opParams) : opParams, count: jobs.order.length })
+          // A two-pass effect (R2.9: Palette quantize) first hands the worker every picture of the batch
+          // to sample, in order; nothing comes back from that pass.
+          if (spec.gather) {
+            for (let index = 0; index < jobs.order.length; index++) {
+              stopped()
+              const job = jobs.byKey.get(jobs.order[index]!)!
+              const handed: Record<string, PixelsPicture | EffectMaskIn | EffectTensorIn> = {}
+              for (const [name, x] of Object.entries(job.inputs)) handed[name] = await jobs.input(x)
+              await worker.effectRun({ index, inputs: handed, first: false, masks, want: { round: masks.map(() => false), trunc: masks.map(() => false), f32: masks.map(() => false) } })
+            }
+          }
           const done = new Map<string, { files: OutputFile[]; tensors: (OutputFile | null)[] }>()
           for (let index = 0; index < jobs.order.length; index++) {
             const key = jobs.order[index]!
@@ -243,9 +257,10 @@ interface Job { inputs: Record<string, JobInput> }
  * second). Measured (fix round 1 report): a 4096² × 4 picture decoded, made a
  * tensor, quantised, PNG-encoded and kept as a tensor file took 557 ms, about
  * 3 taps a value in and out together; 6 a value on each side leaves room for
- * pictures that compress slower than the synthetic one.
+ * pictures that compress slower than the synthetic one. Kept in
+ * shared/runner/effects.ts since R2.9 (the generators' widget check counts it too).
  */
-export const EFFECT_IO_WORK_PER_VALUE = 6
+export { EFFECT_IO_WORK_PER_VALUE }
 
 /**
  * The batch (rule 5), after the caps (rule 7). Inputs batched together must
@@ -261,6 +276,8 @@ async function planJobs(io: DeriveIO, cls: string, spec: EffectSpec, ins: In[], 
   const { max: maxOne, message: tooLarge } = effectPictureCap(cls, io.hosted)
   const size = new Map<string, { w: number; h: number; c: number }>()
   const bytes = new Map<string, Uint8Array>()
+  // Each file's sha256, for a seeded effect (Add noise): the bytes the node reads.
+  const fileHash = new Map<string, string>()
   let total = 0
   const count = (key: string, s: { w: number; h: number; c: number }) => {
     if (s.w * s.h > maxOne) throw new Error(tooLarge)
@@ -279,6 +296,7 @@ async function planJobs(io: DeriveIO, cls: string, spec: EffectSpec, ins: In[], 
         const b = await io.read(f)
         const s = await pictureHeader(b, i.wire.source, maxOne, tooLarge)
         count(key, s)
+        if (spec.seeded) fileHash.set(key, createHash('sha256').update(i.tensors?.get(key) ? await io.read(i.tensors.get(key)!) : b).digest('hex'))
         // A picture an effect made is decoded from its tensor: its PNG is needed no more.
         if (!i.tensors?.has(key)) bytes.set(key, b)
       }
@@ -339,7 +357,8 @@ async function planJobs(io: DeriveIO, cls: string, spec: EffectSpec, ins: In[], 
     order.push(key)
     if (byKey.has(key)) continue
     byKey.set(key, job)
-    for (const p of parts) uses.set(p, (uses.get(p) ?? 0) + 1)
+    // A two-pass effect reads each file twice.
+    for (const p of parts) uses.set(p, (uses.get(p) ?? 0) + (spec.gather ? 2 : 1))
     // Reading, decoding, quantising and encoding (every input and the output, at 4 values a pixel), and the effect's own.
     const pixelsIn = parts.reduce((sum, p) => sum + ((size.get(p)?.w ?? 0) * (size.get(p)?.h ?? 0)), 0)
     const outPixels = out ? out.w * out.h : 0
@@ -349,6 +368,11 @@ async function planJobs(io: DeriveIO, cls: string, spec: EffectSpec, ins: In[], 
       work += spec.work(params, s0 ? { w: s0.w, h: s0.h } : first)
     }
   }
+  // A two-pass effect reads and decodes every input twice.
+  if (spec.gather) work += EFFECT_IO_WORK_PER_VALUE * 4 * [...byKey.values()].reduce((sum, j) => sum + Object.values(j.inputs).reduce((a, x) => {
+    const s = size.get(x.file ? keyOf(x.file) : 'blank')
+    return a + (s ? s.w * s.h : 0)
+  }, 0), 0)
   // A preview of its own is quantised and encoded once, from the first picture.
   if (preview) work += EFFECT_IO_WORK_PER_VALUE * 4 * preview.w * preview.h
   if (work > EFFECT_MAX_WORK) throw new Error(EFFECT_TOO_MUCH_WORK)
@@ -373,7 +397,24 @@ async function planJobs(io: DeriveIO, cls: string, spec: EffectSpec, ins: In[], 
       throw new Error(PICTURE_UNREAD)
     }
   }
-  return { order, byKey, input }
+  // The input files' sha256s in batch order (a blank: none), for addNoiseSeed.
+  const hashes = spec.seeded ? lists.flatMap(l => l.flatMap(f => (f ? [fileHash.get(keyOf(f)) ?? ''] : []))) : []
+  return { order, byKey, input, hashes }
+}
+
+/**
+ * Add noise's seed (R2.9, controller ruling (e)): Python draws from the
+ * process's generator, so no two runs match; the runner seeds its own from
+ * the first 8 bytes of the sha256 of the node's widget values (as execute()
+ * receives them, in the schema's order) and its input files' sha256s, in
+ * batch order: the noise holds still while nothing changes, as ComfyUI's
+ * cache keeps it, and changes with the picture or a setting. An unsigned
+ * 64-bit seed, handed over exactly as a bigint.
+ */
+export function addNoiseSeed(schema: EffectSchema, params: Record<string, unknown>, fileHashes: readonly string[]): bigint {
+  const widgets = Object.keys(schema.widgets).map(name => [name, params[name] ?? null])
+  const digest = createHash('sha256').update(JSON.stringify({ widgets, files: fileHashes })).digest()
+  return digest.readBigUInt64BE(0)
 }
 
 /**

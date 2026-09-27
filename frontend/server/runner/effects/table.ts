@@ -5,7 +5,7 @@
  * (rule 7). Its classes are exactly shared/runner/effects.ts
  * EFFECT_CLASSES_PORTED (a test holds them equal).
  */
-import { effectOutSize, type EffectFamily } from '#shared/runner/effects'
+import { EFFECT_WIDGET_SIZES, effectOutSize, generatorWork, type EffectFamily } from '#shared/runner/effects'
 import { hexToRgb, parseDuotone, parseStops } from '#shared/runner/gradientStops'
 import { asciiPrepare } from './asciiGlyphs'
 
@@ -41,6 +41,14 @@ export interface EffectSpec {
    * broadcast a batch of one against more); otherwise rule 5's equal-or-one.
    */
   equalBatches?: true
+  /**
+   * Two passes over the batch (R2.9: Palette quantize samples every picture,
+   * then snaps each): the plan hands the worker every picture once with
+   * nothing wanted back, then again for the outputs.
+   */
+  gather?: true
+  /** The op draws from a seed the plan derives from the node's settings and files (R2.9: Add noise, ruling (e)); handed in as `seed`. */
+  seeded?: true
 }
 
 const tone = (name: string, prepare?: EffectSpec['prepare']): EffectSpec => ({ family: 'effects-tone', op: `tone.${name}`, batch: 'pure', ...(prepare ? { prepare } : {}) })
@@ -226,6 +234,48 @@ function matteWork(w: Record<string, unknown>, s: Size): number {
 /** The output size of a class that changes it (effectOutSize), else the input's. */
 const sizedBy = (cls: string): EffectSpec['outSize'] => (w, s) => (s ? effectOutSize(cls, w, s) ?? s : { w: 0, h: 0 })
 
+// ── effects-noise (R2.9): the work each asks for (rule 7) ──
+//
+// In the same units (0.37 × 10⁹ a second), every picture counted at 4
+// channels. Measured on the development Mac (R2.9 report: each op at 1024²
+// (a generator at its largest) in this thread, the constants set so every
+// op's time at the unit's rate is at or above its measured time). The
+// generators' own work comes from their widgets alone
+// (shared/runner/effects.ts generatorWork, the same numbers the eligibility
+// check reads). Film grain: its noise drawn and resized, and its per-pixel
+// grain (GRAIN_PIXEL); Glitch: its rolls (COPY_VALUE a value, three
+// passes); Palette quantize: a distance per sample and centre per iteration
+// and per pixel and centre (PALETTE_DISTANCE), and its area sample; Stipple:
+// its luma, pow, pool and stamp (STIPPLE_PIXEL); Flow field: its two value
+// noises and its grid (FLOW_PIXEL) and the grid_sample of every channel
+// (GRID_VALUE); Add noise: a draw and an add a value (NOISE_VALUE).
+
+const GRAIN_PIXEL = 40
+const PALETTE_DISTANCE = 8
+const STIPPLE_PIXEL = 40
+const FLOW_PIXEL = 60
+const NOISE_VALUE = 24
+
+const noise = (name: string, batch: EffectSpec['batch'], work: NonNullable<EffectSpec['work']>, extra: Partial<EffectSpec> = {}): EffectSpec =>
+  ({ family: 'effects-noise', op: `noise.${name}`, batch, work, ...extra })
+
+/** A generator: its size and work from its widgets alone. */
+const generator = (name: string): EffectSpec => noise(name, 'generator', w => generatorWork(name, w) ?? 0, {
+  outSize: w => EFFECT_WIDGET_SIZES[name]!(w) ?? { w: 0, h: 0 },
+})
+
+/**
+ * Film grain's output size: the picture's, except below size 1, where a side
+ * of 1 grows to the noise field's (max(2, int(1 / size)), torch's broadcast).
+ */
+function filmGrainSize(w: Record<string, unknown>, s: Size): { w: number; h: number } {
+  if (!s) return { w: 0, h: 0 }
+  const size = num(w, 'size')
+  if (num(w, 'amount') <= 0 || size > 1) return s
+  const grow = (side: number) => (side === 1 ? Math.max(2, Math.trunc(1 / size)) : side)
+  return { w: grow(s.w), h: grow(s.h) }
+}
+
 export const EFFECTS: Readonly<Record<string, EffectSpec>> = {
   // ── effects-tone (R2.1 pilots): per pixel, exact ──
   AdjustExposure: { family: 'effects-tone', op: 'tone.AdjustExposure', batch: 'pure' },
@@ -315,6 +365,30 @@ export const EFFECTS: Readonly<Record<string, EffectSpec>> = {
   MergeAlpha: mask('MergeAlpha', (_w, s) => px(s) * (WORK_CHANNELS * 2 * MASK_VALUE + RESIZE_VALUE.bilinear!), { equalBatches: true }),
   // Painter has a plan of its own (effects/painter.ts): the base's first picture and a painter file.
   Painter: mask('Painter', (w, s) => painterWork(w, s, null), { batch: 'coupled' }),
+  // ── effects-noise (R2.9) ──
+  // One noise field for the whole batch (coupled, as the brief has it: nothing deduplicated).
+  FilmGrain: noise('FilmGrain', 'coupled', (w, s) => (num(w, 'amount') <= 0 ? copyWork(s) : px(filmGrainSize(w, s)) * GRAIN_PIXEL), { outSize: filmGrainSize }),
+  // The same shifts for every picture of the batch (one draw per slice, per execute).
+  Glitch: noise('Glitch', 'coupled', (_w, s) => 3 * copyWork(s)),
+  PerlinNoise: generator('PerlinNoise'),
+  Voronoi: generator('Voronoi'),
+  GradientGenerator: generator('GradientGenerator'),
+  // One k-means over every picture's sample: two passes (gather).
+  PaletteQuantize: noise('PaletteQuantize', 'coupled', (w, s) => {
+    const kk = Math.max(2, Math.trunc(num(w, 'colors')))
+    const side = s ? Math.min(96, s.w, s.h) : 0
+    return (side * side * kk * Math.max(1, Math.trunc(num(w, 'iterations'))) + px(s) * kk) * PALETTE_DISTANCE + copyWork(s)
+  }, { gather: true }),
+  ReactionDiffusion: generator('ReactionDiffusion'),
+  Fractal: generator('Fractal'),
+  // rand over (b, sh, sw), b-major: one stream across the batch.
+  Stipple: noise('Stipple', 'coupled', (_w, s) => px(s) * STIPPLE_PIXEL, {
+    prepare: w => ({ ...w, dot: hexToRgb(String(w.dot_color), [0, 0, 0]), bg: hexToRgb(String(w.bg_color), [1, 1, 1]) }),
+  }),
+  // The same field for every picture.
+  FlowField: noise('FlowField', 'pure', (_w, s) => px(s) * (WORK_CHANNELS * GRID_VALUE + FLOW_PIXEL)),
+  // One draw over the whole batch, from the node's own seed.
+  AddNoise: noise('AddNoise', 'coupled', (_w, s) => px(s) * WORK_CHANNELS * NOISE_VALUE, { seeded: true }),
 }
 
 /**

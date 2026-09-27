@@ -88,6 +88,23 @@ Groups:
               "warp" parity class (WARP_BAND_CLASSES) a small output's float
               and a hashed one's 8-bit bytes and float windows. `--sweep` runs
               the broad sweep, small pictures and up to 8192² (writes nothing).
+  noise     — (R2.9) the generators (Perlin noise, Voronoi, Gradient,
+              Reaction-diffusion, Fractal: every widget at its min, max and a
+              value between on 64², the defaults at 64², at their own size and
+              at their largest (hashed), seeds 0, 1 and 2³¹ − 1) and the seeded
+              looks and Add noise over the standard case set, plus: Glitch's
+              slices past the picture's height; PaletteQuantize batches, colours
+              2 / 32, iterations 1 / 20; Stipple batches, invert and its colour
+              text; Reaction-diffusion 64² at 50 and 600 iterations; Fractal in
+              both types at zoom 1 / 10 000 and max_iter 16 / 512; Add noise under
+              torch.manual_seed(7) and (8) (`global_seed`) and its statistics on
+              a fixed mid-grey ramp; FilmGrain around size 1; one effect into a
+              Frame. `winograd`: F.conv2d's depthwise 3 × 3 on its own (torch's
+              Winograd3x3Depthwise path on this Mac), which Reaction-diffusion's
+              laplacian takes. Exact classes keep their sha256s; the library
+              classes (NOISE_LIBRARY_EPS) a small float or a hashed band;
+              FlowField (the "warp" class) as the warp group keeps it. `--sweep`
+              measures the library ε and FlowField up to 8192² (writes nothing).
 
 Every picture reaches a node as it does in a real run, through the real
 Python loader of its source (as scripts/compositor_fixtures.py):
@@ -3110,7 +3127,338 @@ def mask_sweep_run() -> int:
     return r.returncode
 
 
-GROUPS = {"machinery": machinery, "kernels": kernels, "rng": rng, "tone": tone, "blur": blur, "cells": cells, "warp": warp, "mask": mask}
+# ── Group `noise` (R2.9): generators, seeded looks and Add noise ─────────────
+
+NOISE_CLASSES = [
+    ("nodes_glsl_atmosphere", "FilmGrain"), ("nodes_glsl_distortion", "Glitch"),
+    ("nodes_glsl_generative", "PerlinNoise"), ("nodes_glsl_generative", "Voronoi"), ("nodes_glsl_generative", "GradientGenerator"),
+    ("nodes_glsl_lab", "PaletteQuantize"), ("nodes_glsl_fractal", "ReactionDiffusion"), ("nodes_glsl_fractal", "Fractal"),
+    ("nodes_glsl_unicorn", "Stipple"), ("nodes_glsl_unicorn", "FlowField"), ("nodes_sharpen_noise", "AddNoise"),
+]
+NOISE_GENERATORS = ("PerlinNoise", "Voronoi", "GradientGenerator", "ReactionDiffusion", "Fractal")
+# The library classes: their ε (255-scale), measured (fixture and `--sweep`), at most 2⁻⁸. A small output keeps its
+# float (`f32s`, byte-shuffled, zlib), a hashed one its band at the class's ε. tests/unit/runner-effects-noise
+# .unit.spec.ts holds the same table.
+# Measured worst |Δ|·255 (R2.9 report, fixture and --sweep): FilmGrain 3.0e-5, AddNoise 1.5e-5, Fractal 1.5e-5, PaletteQuantize 0
+# (bit-exact on every case measured; kept library for its means).
+NOISE_LIBRARY_EPS = {"FilmGrain": 2.0 ** -13, "Fractal": 2.0 ** -13, "PaletteQuantize": 2.0 ** -13, "AddNoise": 2.0 ** -13}
+# The "warp" parity class (R2.7 amendment): FlowField's flow is torch's float cos / sin (SLEEF u10) into grid_sample.
+NOISE_WARP_CLASSES = ("FlowField",)
+# Add noise draws from torch's global generator: each fixture case seeds it just before execute.
+NOISE_GLOBAL_SEED = 7
+# The fixed picture Add noise's statistics are measured on: 256 × 256 RGB, a smooth mid-grey ramp
+# 96 + floor(64·(x + y) / 510) on every channel (the spec rebuilds it).
+NOISE_STATS_SIDE = 256
+NOISE_STATS_SEED = 11
+# Store every small float (not only the library classes'): for debugging a port, never committed.
+NOISE_DEBUG_FLOATS = bool(os.environ.get("NOISE_DEBUG_FLOATS"))
+
+
+def noise_output(t: torch.Tensor, hashed: bool, class_type: str) -> dict:
+    """One output, frame by frame: its sha256s (float32, round8, trunc8); a library class's small float (`f32s`) or
+    hashed band at its ε; the warp class as warp_output keeps it (small: `f32s`; hashed: round8z, trunc8_off, windows)."""
+    eps = NOISE_LIBRARY_EPS.get(class_type)
+    warp = class_type in NOISE_WARP_CLASSES
+    items = []
+    for i in range(t.shape[0]):
+        x = t[i].contiguous()
+        f32 = x.cpu().numpy().astype("<f4").tobytes()
+        item = {"w": int(x.shape[1]), "h": int(x.shape[0]), "c": int(x.shape[2]), "f32_sha256": sha(f32),
+                "round8_sha256": sha(round8(x).tobytes()), "trunc8_sha256": sha(trunc8(x).tobytes())}
+        if warp and hashed:
+            r8, t8 = round8(x), trunc8(x)
+            off = (r8.astype(np.int16) - t8.astype(np.int16)).reshape(-1)
+            assert off.min() >= 0 and off.max() <= 1
+            item["round8z"] = b64(zlib.compress(r8.tobytes(), 9))
+            item["trunc8_off"] = b64(zlib.compress(np.packbits(off.astype(np.uint8)).tobytes(), 9))
+            item["windows"] = warp_windows(x)
+        elif eps is not None and hashed:
+            item["band"] = band_list(x, eps)
+        elif warp or eps is not None or (NOISE_DEBUG_FLOATS and not hashed):
+            item["f32s"] = shuffled_f32(x)
+        items.append(item)
+    return {"kind": "image", "items": items}
+
+
+class NoiseGroup(Group):
+    """The noise group's cases (noise_output). A generator case has no inputs. Add noise's cases name the global
+    seed torch was given just before execute (`global_seed`)."""
+
+    def case(self, name: str, cls, class_type: str, widgets: dict, inputs: dict, hashed: bool = False, global_seed: int | None = None) -> None:
+        self.seq += 1
+        node_id = f"fx{self.seq}"
+        tensors = {}
+        for key, (source, files) in inputs.items():
+            tensors[key] = load("blank", None, None) if source == "blank" else torch.cat([load(source, f, self.assets[f]) for f in files], dim=0)
+        row: dict = {"name": name, "class_type": class_type, "node_id": node_id, "widgets": widgets,
+                     "inputs": {k: {"source": s, "files": list(f)} for k, (s, f) in inputs.items()}}
+        if hashed:
+            row["hashed"] = True
+        if class_type == "AddNoise":
+            global_seed = NOISE_GLOBAL_SEED if global_seed is None else global_seed
+            row["global_seed"] = global_seed
+            torch.manual_seed(global_seed)
+        try:
+            outs, ui = run_node(cls, node_id, **tensors, **widgets)
+        except Exception as e:  # Python raises: the runner's plain message is checked against it
+            row["error"] = {"type": type(e).__name__, "message": str(e)}
+            self.cases.append(row)
+            return
+        row["outputs"] = [noise_output(t, hashed, class_type) for t in outs]
+        row["ui"] = {"images": ui["images"], "animated": list(ui["animated"])}
+        row["preview"] = read_preview(ui, True)
+        self.cases.append(row)
+
+
+def generator_cases(g: NoiseGroup, cls, class_type: str) -> None:
+    """Every widget at its min, its max and one value between (the others at their defaults, on a 64² picture); the
+    defaults at 64², at the node's own size and at the largest (hashed); seeds 0, 1 and 2³¹ − 1."""
+    defaults, settings = widget_settings(cls)
+    small = {"width": 64, "height": 64}
+    top = cls.INPUT_TYPES()["required"]["width"][1]["max"]
+    for label, over in settings:
+        if label == "defaults":
+            continue
+        sized = {**defaults, **small, **over}
+        g.case(f"{class_type}: {label}, 64²", cls, class_type, sized, {})
+    g.case(f"{class_type}: defaults, 64²", cls, class_type, {**defaults, **small}, {})
+    g.case(f"{class_type}: defaults, {defaults['width']}×{defaults['height']}", cls, class_type, dict(defaults), {})
+    g.case(f"{class_type}: defaults, {top}²", cls, class_type, {**defaults, "width": top, "height": top}, {}, hashed=True)
+    g.case(f"{class_type}: 64 × {top}", cls, class_type, {**defaults, "width": 64, "height": top}, {})
+    if "seed" in defaults:
+        for s in (0, 1, 2 ** 31 - 1):
+            g.case(f"{class_type}: seed {s}, 64²", cls, class_type, {**defaults, **small, "seed": s}, {})
+
+
+def noise_frame_chain(g: NoiseGroup, cls, class_type: str, widgets: dict, file: str) -> dict:
+    """An effect on a see-through card picture into a Frame's layer 1 (tone_frame_chain)."""
+    return tone_frame_chain(g, cls, class_type, widgets, file)
+
+
+def noise_stats(cls) -> list:
+    """Add noise on the fixed mid-grey ramp, each type, mono and colour, under NOISE_STATS_SEED: per-channel means of
+    the output and the standard deviation of (output − input), in double."""
+    s = NOISE_STATS_SIDE
+    y, x = np.meshgrid(np.arange(s), np.arange(s), indexing="ij")
+    v = (96 + (64 * (x + y)) // 510).astype(np.uint8)
+    img = torch.from_numpy(np.repeat(v[:, :, None], 3, axis=2).astype(np.float32) / np.float32(255.0))[None]
+    rows = []
+    for type_ in ("gaussian", "uniform"):
+        for mono in (False, True):
+            torch.manual_seed(NOISE_STATS_SEED)
+            (out,), _ui = run_node(cls, "stats", image=img, amount=0.1, type=type_, monochromatic=mono)
+            o = out[0].double().numpy()
+            d = (out[0] - img[0]).double().numpy()
+            rows.append({"type": type_, "monochromatic": mono, "amount": 0.1, "global_seed": NOISE_STATS_SEED,
+                         "means": [float(o[..., k].mean()) for k in range(3)], "std": float(d.std())})
+    return rows
+
+
+def winograd_cases() -> list:
+    """F.conv2d of a depthwise 3 × 3 kernel on its own (torch's Winograd3x3Depthwise path on this Mac): the laplacian
+    and random kernels, odd sizes, padding 0 and 1, three channels grouped, a batch of two. Inputs (B, C, H, W) from
+    `hashed_values`, kernels as listed; outputs planar float32 (stored when small, else a sha256)."""
+    import torch.nn.functional as F
+    lap = [0.0, 1.0, 0.0, 1.0, -4.0, 1.0, 0.0, 1.0, 0.0]
+    out = []
+    specs = [
+        ((1, 1, 3, 3), 0), ((1, 1, 4, 4), 1), ((1, 1, 5, 7), 0), ((1, 1, 5, 7), 1), ((1, 1, 21, 18), 0), ((1, 1, 21, 18), 1),
+        ((1, 1, 66, 66), 1), ((1, 3, 19, 23), 1), ((1, 3, 19, 23), 0), ((2, 3, 13, 17), 1), ((2, 1, 64, 80), 1), ((1, 1, 130, 257), 1),
+    ]
+    n = 0
+    for shape, pad in specs:
+        for kname in ("laplacian", "random"):
+            for lo, hi in ((0.0, 1.0), (-2.0, 3.0)):
+                n += 1
+                b, c, h, w = shape
+                v = hashed_values(b * c * h * w, 100 + n, lo, hi)
+                # Signed zeros (the bias add of +0 turns a −0 product into +0) and a flat run of zeros.
+                if lo < 0:
+                    v[:: 5] = -0.0
+                    v[: min(len(v), 2 * w)] = 0.0
+                x = torch.from_numpy(v.reshape(b, c, h, w).copy())
+                kern = [lap] * c if kname == "laplacian" else [[float(v) for v in hashed_values(9, 900 + n * 7 + j, -3.0, 3.0)] for j in range(c)]
+                wt = torch.tensor(kern, dtype=torch.float32).view(c, 1, 3, 3)
+                backend = torch._C._select_conv_backend(x, wt, None, [1, 1], [pad, pad], [1, 1], False, [0, 0], c, None)
+                assert "Winograd3x3Depthwise" in str(backend), backend
+                y = F.conv2d(x, wt, padding=pad, groups=c)
+                raw = planar_bytes(y)
+                row = {"name": f"{kname} {b}×{c}×{h}×{w} pad {pad} [{lo}, {hi}]", "shape": list(shape), "seed": 100 + n, "lo": lo, "hi": hi, "zeros": lo < 0,
+                       "pad": pad, "kernels": kern, "out_shape": list(y.shape), "f32_sha256": sha(raw)}
+                if y.numel() <= KERNEL_STORE_MAX:
+                    row["f32"] = b64(raw)
+                out.append(row)
+    return out
+
+
+def noise_classes() -> dict:
+    return {node_id: node_class(module, node_id) for module, node_id in NOISE_CLASSES}
+
+
+def noise() -> dict:
+    g = NoiseGroup()
+    classes = noise_classes()
+    for node_id, cls in classes.items():
+        if node_id in NOISE_GENERATORS:
+            generator_cases(g, cls, node_id)
+        else:
+            standard_cases(g, cls, node_id)
+    pics = {"rgb": g.picture(37, 23, 3, 1), "rgb_b": g.picture(37, 23, 3, 5), "prov": g.picture(29, 31, 4, 2),
+            "card4": g.picture(23, 19, 4, 3), "big": g.picture(320, 200, 3, 6)}
+    # Glitch: slices past the picture's height (slice_h = 1).
+    short = g.picture(40, 9, 3, 21)
+    for s in (2, 60):
+        g.case(f"Glitch: slices {s} on 40×9", classes["Glitch"], "Glitch", {"intensity": 0.8, "slices": s, "seed": 3}, {"image": ("rgb", [short])})
+    g.case("Glitch: a batch of two (the same shifts)", classes["Glitch"], "Glitch", {"intensity": 0.6, "slices": 7, "seed": 9}, {"image": ("rgb", [pics["rgb"], pics["rgb_b"]])})
+    # PaletteQuantize: a batch of two (one k-means over both pictures' samples), colours 2 and 32, iterations 1 and 20.
+    mid_a, mid_b = g.picture(120, 100, 3, 31), g.picture(120, 100, 3, 32)
+    for colors in (2, 32):
+        for its in (1, 20):
+            w = {"colors": colors, "iterations": its, "seed": 5}
+            g.case(f"PaletteQuantize: batch of two 37×23, colours {colors}, iterations {its}", classes["PaletteQuantize"], "PaletteQuantize", w, {"image": ("rgb", [pics["rgb"], pics["rgb_b"]])})
+            g.case(f"PaletteQuantize: 37×23, colours {colors}, iterations {its}", classes["PaletteQuantize"], "PaletteQuantize", w, {"image": ("rgb", [pics["rgb"]])})
+            g.case(f"PaletteQuantize: 37×23 (b), colours {colors}, iterations {its}", classes["PaletteQuantize"], "PaletteQuantize", w, {"image": ("rgb", [pics["rgb_b"]])})
+    g.case("PaletteQuantize: batch of two 120×100", classes["PaletteQuantize"], "PaletteQuantize", {"colors": 12, "iterations": 8, "seed": 2}, {"image": ("rgb", [mid_a, mid_b])})
+    g.case("PaletteQuantize: see-through card, colours 32", classes["PaletteQuantize"], "PaletteQuantize", {"colors": 32, "iterations": 6, "seed": 1}, {"image": ("card", [pics["card4"]])})
+    # Stipple: a batch of two (rand over (b, sh, sw)), invert off and on; its colour text.
+    for inv in (False, True):
+        g.case(f"Stipple: batch of two, invert {inv}", classes["Stipple"], "Stipple",
+               {"density": 9, "dot_size": 1.4, "gamma": 1.0, "dot_color": "#000000", "bg_color": "#ffffff", "seed": 4, "invert": inv},
+               {"image": ("rgb", [pics["rgb"], pics["rgb_b"]])})
+    for dc, bc in (("#f00", "zz"), (" #102030 ", "#abcdef"), ("", "#0000ff"), ("12345", "#ffe8c4")):
+        g.case(f"Stipple: colours {dc!r} on {bc!r}", classes["Stipple"], "Stipple",
+               {"density": 12, "dot_size": 2.0, "gamma": 0.6, "dot_color": dc, "bg_color": bc, "seed": 8, "invert": False}, {"image": ("rgb", [pics["rgb"]])})
+    g.case("Stipple: 320×200, density 80, gamma 2.2", classes["Stipple"], "Stipple",
+           {"density": 80, "dot_size": 3.0, "gamma": 2.2, "dot_color": "#224466", "bg_color": "#fafafa", "seed": 77, "invert": True}, {"image": ("rgb", [pics["big"]])}, hashed=True)
+    # ReactionDiffusion 64² at 50 and 600 iterations, other feeds.
+    rd = classes["ReactionDiffusion"]
+    for its in (50, 600):
+        for feed, kill in ((0.04, 0.06), (0.035, 0.065), (0.022, 0.051)):
+            g.case(f"ReactionDiffusion: 64², {its} iterations, feed {feed}, kill {kill}", rd, "ReactionDiffusion",
+                   {"width": 64, "height": 64, "feed": feed, "kill": kill, "iterations": its, "seed": 1}, {})
+    g.case("ReactionDiffusion: 72 × 136, 3000 iterations", rd, "ReactionDiffusion", {"width": 72, "height": 136, "feed": 0.03, "kill": 0.062, "iterations": 3000, "seed": 9}, {})
+    # Fractal in both types, zoom 1 and 10 000, max_iter 16 and 512.
+    fr = classes["Fractal"]
+    fd = widget_settings(fr)[0]
+    for type_ in ("mandelbrot", "julia"):
+        for zoom in (1.0, 10000.0):
+            for mi in (16, 512):
+                g.case(f"Fractal: {type_}, zoom {zoom}, max_iter {mi}, 64²", fr, "Fractal", {**fd, "width": 64, "height": 64, "type": type_, "zoom": zoom, "max_iter": mi}, {})
+    g.case("Fractal: julia, 200 × 120, zoom 3", fr, "Fractal", {**fd, "type": "julia", "width": 200, "height": 120, "zoom": 3.0, "center_x": 0.1}, {})
+    # Add noise under manual_seed(7) and (8), each type, mono and colour.
+    an = classes["AddNoise"]
+    for s in (7, 8):
+        for type_ in ("gaussian", "uniform"):
+            for mono in (False, True):
+                for pname, src, f in (("rgb 37×23", "rgb", pics["rgb"]), ("provider 29×31", "provider", pics["prov"])):
+                    g.case(f"AddNoise: seed {s}, {type_}, mono {mono}, {pname}", an, "AddNoise", {"amount": 0.3, "type": type_, "monochromatic": mono},
+                           {"image": (src, [f])}, global_seed=s)
+            g.case(f"AddNoise: seed {s}, {type_}, a batch of two and a repeat", an, "AddNoise", {"amount": 0.2, "type": type_, "monochromatic": False},
+                   {"image": ("rgb", [pics["rgb"], pics["rgb_b"], pics["rgb"]])}, global_seed=s)
+    # FilmGrain: sizes around 1, and a batch.
+    fg = classes["FilmGrain"]
+    for size in (0.99, 1.0, 1.01, 2.5):
+        for pname, src, f in (("rgb 37×23", "rgb", pics["rgb"]), ("the 1×1 blank", "blank", None)):
+            g.case(f"FilmGrain: size {size}, {pname}", fg, "FilmGrain", {"amount": 0.5, "size": size, "seed": 3}, {"image": (src, [f] if f else [])})
+    g.case("FilmGrain: size 0.97 on 23×19", fg, "FilmGrain", {"amount": 0.5, "size": 0.97, "seed": 3}, {"image": ("card", [pics["card4"]])})
+    # FlowField: a batch (the same field for each picture).
+    g.case("FlowField: a batch of two", classes["FlowField"], "FlowField", {"strength": 0.3, "scale": 9.0, "rotation": 45.0, "seed": 6}, {"image": ("rgb", [pics["rgb"], pics["rgb_b"]])})
+    frame = noise_frame_chain(g, classes["Glitch"], "Glitch", {"intensity": 0.7, "slices": 5, "seed": 2}, pics["card4"])
+    return {"cases": g.cases, "library_eps": NOISE_LIBRARY_EPS, "warp_classes": list(NOISE_WARP_CLASSES), "winograd": winograd_cases(),
+            "stats": noise_stats(an), "frame": frame, "assets": {k: b64(v) for k, v in sorted(g.assets.items())}}
+
+
+# `--group noise --sweep`: the library classes' ε and FlowField's warp bounds over fresh pictures and settings,
+# then FlowField up to 8192², measured by the spec against the TypeScript port. Writes nothing into the repo.
+NOISE_SWEEP_SEEDS = 40
+NOISE_SWEEP_SIZES = [(41, 29), (37, 31), (29, 37), (64, 48), (97, 61), (160, 100), (320, 200), (511, 257)]
+NOISE_SWEEP_LARGE = [(2048, 3), (4096, 2), (8192, 1)]
+
+
+def noise_spec_run(env_key: str, path: str, title: str) -> tuple[int, list]:
+    import subprocess
+    env = {k: v for k, v in os.environ.items() if k not in PROVIDER_KEYS}
+    env[env_key] = path
+    r = subprocess.run(["npx", "vitest", "run", "tests/unit/runner-effects-noise.unit.spec.ts", "-t", title, "--testTimeout=1800000", "--reporter=verbose"],
+                       cwd=os.path.join(ROOT, "frontend"), env=env, capture_output=True, text=True)
+    lines = [ln for ln in (r.stdout + r.stderr).splitlines() if "noise ε" in ln or "noise large" in ln or "Tests " in ln or "FAIL" in ln or "Error" in ln]
+    return r.returncode, lines
+
+
+def noise_sweep_run() -> int:
+    classes = noise_classes()
+    rs = np.random.default_rng(2909)
+    cases = []
+    for node_id in ("FilmGrain", "PaletteQuantize", "AddNoise", "FlowField", "Fractal"):
+        cls = classes[node_id]
+        types = cls.INPUT_TYPES()["required"]
+        for i in range(NOISE_SWEEP_SEEDS):
+            w, h = NOISE_SWEEP_SIZES[int(rs.integers(0, len(NOISE_SWEEP_SIZES)))]
+            c = 3 if rs.integers(0, 3) else 4
+            seed = int(rs.integers(1, 2 ** 31))
+            widgets = sweep_widgets(rs, {k: v for k, v in types.items() if v[0] != "IMAGE"})
+            for k, v in types.items():
+                if v[0] == "BOOLEAN":
+                    widgets[k] = bool(rs.integers(0, 2))
+                elif v[0] == "STRING":
+                    widgets[k] = v[1].get("default", "")
+            if "seed" in widgets:
+                widgets["seed"] = int(rs.integers(0, 2 ** 31))
+            row = {"class_type": node_id, "widgets": widgets, "w": w, "h": h, "c": c, "seed": seed}
+            inputs = {}
+            if node_id == "Fractal":
+                widgets.update({"width": w, "height": h})
+                row["c"] = 3
+            else:
+                px = np.frombuffer(synth(w, h, c, seed), dtype=np.uint8).reshape(1, h, w, c)
+                inputs["image"] = torch.from_numpy(px.astype(np.float32) / 255.0)
+            if node_id == "FilmGrain":
+                widgets["size"] = max(1.0, widgets["size"])
+            if node_id == "AddNoise":
+                row["global_seed"] = int(rs.integers(0, 2 ** 31))
+                torch.manual_seed(row["global_seed"])
+            try:
+                outs, _ui = run_node(cls, f"sw{len(cases)}", **inputs, **widgets)
+                t = outs[0][0]
+                row.update({"ow": int(t.shape[1]), "oh": int(t.shape[0]), "oc": int(t.shape[2]), "f32s": shuffled_f32(t)})
+            except Exception as e:  # noqa: BLE001
+                row["error"] = str(e)
+            cases.append(row)
+    path = os.path.join(WORK, "noise-sweep.json")
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump({"cases": cases}, f)
+    print(f"noise ε sweep, small: {len(cases)} cases, {sum(1 for c in cases if 'error' in c)} Python raises")
+    code, lines = noise_spec_run("NOISE_SWEEP_FILE", path, "the noise ε sweep")
+    print("\n".join(lines))
+    # Large: FlowField up to 8192² (the largest picture an effect takes), one file at a time.
+    rs = np.random.default_rng(2910)
+    cls = classes["FlowField"]
+    types = {k: v for k, v in cls.INPUT_TYPES()["required"].items() if v[0] != "IMAGE"}
+    rows, files = [], []
+    for side, seeds in NOISE_SWEEP_LARGE:
+        for j in range(seeds):
+            seed = int(rs.integers(1, 2 ** 31))
+            widgets = sweep_widgets(rs, types, at_max=(j == 0))
+            widgets["seed"] = int(rs.integers(0, 2 ** 31))
+            x = torch.from_numpy(big_pixels(side, side, 3, seed).astype(np.float32)[None] / np.float32(255.0))
+            outs, _ui = run_node(cls, f"big{len(files)}", image=x, **widgets)
+            t = outs[0][0].contiguous()
+            fpath = os.path.join(WORK, f"noise-large-{len(files)}.f32")
+            t.cpu().numpy().astype("<f4").tofile(fpath)
+            files.append(fpath)
+            rows.append({"class_type": "FlowField", "widgets": widgets, "w": side, "h": side, "c": 3, "seed": seed, "file": fpath})
+            del outs, t, x
+    lpath = os.path.join(WORK, "noise-large.json")
+    with open(lpath, "w", encoding="utf-8") as f:
+        json.dump({"cases": rows}, f)
+    c2, lines = noise_spec_run("NOISE_SWEEP_LARGE_FILE", lpath, "the noise large sweep")
+    print("\n".join(lines))
+    for fp in files:
+        os.remove(fp)
+    return code or c2
+
+
+GROUPS = {"machinery": machinery, "kernels": kernels, "rng": rng, "tone": tone, "blur": blur, "cells": cells, "warp": warp, "mask": mask, "noise": noise}
 
 
 def blur_sweep_run() -> int:
@@ -3139,13 +3487,14 @@ def blur_sweep_run() -> int:
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--group", required=True, choices=sorted(GROUPS))
-    ap.add_argument("--sweep", action="store_true", help="blur, warp and mask only: run the whole ε sweep, print each class's worst |Δ|; writes nothing")
+    ap.add_argument("--sweep", action="store_true", help="blur, warp, mask and noise only: run the whole ε sweep, print each class's worst |Δ|; writes nothing")
     args = ap.parse_args()
     check_threads()
     if args.sweep:
-        if args.group not in ("blur", "warp", "mask"):
-            ap.error("--sweep is the blur, warp and mask groups'")
-        sys.exit(blur_sweep_run() if args.group == "blur" else warp_sweep_run() if args.group == "warp" else mask_sweep_run())
+        if args.group not in ("blur", "warp", "mask", "noise"):
+            ap.error("--sweep is the blur, warp, mask and noise groups'")
+        runs = {"blur": blur_sweep_run, "warp": warp_sweep_run, "mask": mask_sweep_run, "noise": noise_sweep_run}
+        sys.exit(runs[args.group]())
     body = GROUPS[args.group]()
     doc = {
         "note": f"Written by scripts/runner_effects_fixtures.py --group {args.group} from the real nodes. Do not edit.",

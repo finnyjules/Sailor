@@ -28,6 +28,7 @@ const PORTED = [
   'Pixelate', 'Halftone', 'Kuwahara', 'Ascii',
   'CropImage', 'ResizeImage', 'RotateImage', 'FlipImage', 'Pinch', 'Twirl', 'Wave', 'LensCorrection', 'Kaleidoscope', 'PolarCoords', 'Fisheye', 'ChromaticAberration', 'CRT', 'Mirror', 'GodRays',
   'Blend', 'ApplyMask', 'ThresholdMask', 'ColorRangeMask', 'MatteGrowShrink', 'MergeAlpha', 'Painter',
+  'FilmGrain', 'Glitch', 'PerlinNoise', 'Voronoi', 'GradientGenerator', 'PaletteQuantize', 'ReactionDiffusion', 'Fractal', 'Stipple', 'FlowField', 'AddNoise',
 ]
 /** Picture outputs: one, except FrequencySeparation's two (low, high), and none for the classes that make only a mask (R2.8). */
 const MASK_ONLY = ['ThresholdMask', 'ColorRangeMask', 'MatteGrowShrink']

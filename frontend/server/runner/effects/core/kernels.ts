@@ -746,6 +746,108 @@ export function kernelsCore(k: TensorCore, px: PixelsCore) {
   /** F.conv2d(t, kernel expanded to every channel, groups=c) on an already padded tensor (a valid correlation). LIBRARY. */
   const conv2dDepthwise = (t: Tensor, kernel: ArrayLike<number>, kh: number, kw: number, stop?: () => boolean) => correlate(t, kernel, kh, kw, 0, stop)
 
+  /**
+   * F.conv2d(t, weight (C, 1, 3, 3), padding=pad, groups=C) as torch computes
+   * it ON THIS MAC: a depthwise 3 × 3, stride 1, float32, contiguous conv
+   * takes torch's Winograd3x3Depthwise backend (ATen native/cpu/
+   * DepthwiseConvKernel.cpp, its ARM NEON Winograd F(2 × 2, 3 × 3) path).
+   * `kernels`: the C kernels, 9 values each (row-major), one after another.
+   * EXACT (float32 bit for bit against torch 2.10 on arm64: noise fixtures
+   * `winograd`). Step 3 R2.9: Reaction-diffusion's laplacian only, where a
+   * one-ulp difference grows over its iterations; the R2.5 Sobel / Emboss
+   * users keep conv2dDepthwise, within their ε.
+   *
+   * x86 torch (a hosted Python, say) has no such path and takes another
+   * conv (a GEMM), whose sums round differently: Reaction-diffusion, which
+   * amplifies tiny differences, comes out differently there. The reference
+   * is this Mac's torch, which is what the user's local ComfyUI runs.
+   *
+   * Per channel: the kernel tile G·g·Gᵀ (each pass g0, ½(g0 + g2) + ½g1,
+   * ½(g0 + g2) − ½g1, g2; over the kernel's rows, then its columns); per
+   * 2 × 2 output tile, the 4 × 4 input tile at (2·oth − pad, 2·otw − pad),
+   * outside the picture 0: Bᵀ·d·B (each pass d0 − d2, d1 + d2, −d1 + d2,
+   * d1 − d3; rows, then columns), × the kernel tile, + 0 (the bias) on its
+   * second row, then Aᵀ·m·A (each pass (m0 + m1) + m2, (m1 − m2) − m3;
+   * over the column index, then the row index), each value rounded to
+   * float32 as NEON rounds it.
+   */
+  function conv2dWinograd3x3(t: Tensor, kernels: ArrayLike<number>, pad: number, stop?: () => boolean): Tensor {
+    if (kernels.length !== 9 * t.c) throw new Error('The kernels are the wrong size')
+    if (!Number.isInteger(pad) || pad < 0) throw new Error('The padding must be a whole number of at least 0')
+    const H = t.h
+    const W = t.w
+    const oh = H + 2 * pad - 2
+    const ow = W + 2 * pad - 2
+    if (oh < 1 || ow < 1) throw new Error(ERR.tooSmall)
+    const out = k.tensor(t.c, oh, ow)
+    const inN = H * W
+    const outN = oh * ow
+    // One pass of the kernel transform over three values.
+    const kt = (x0: number, x1: number, x2: number, a: number) => {
+      if (a === 0) return x0
+      if (a === 3) return x2
+      const h = f(0.5 * f(x0 + x2))
+      const g = f(x1 * 0.5)
+      return a === 1 ? f(h + g) : f(h - g)
+    }
+    const K = new Float32Array(16)
+    const A = new Float32Array(12)
+    const blk = new Float32Array(16)
+    const D = new Float32Array(16)
+    const Y = new Float32Array(16)
+    const Z = new Float32Array(8)
+    for (let c = 0; c < t.c; c++) {
+      const g = Array.from({ length: 9 }, (_, i) => f(kernels[c * 9 + i]!))
+      // Over the kernel's rows (per column j), then its columns: K[a·4 + r].
+      for (let r = 0; r < 4; r++) for (let j = 0; j < 3; j++) A[r * 3 + j] = kt(g[j]!, g[3 + j]!, g[6 + j]!, r)
+      for (let a = 0; a < 4; a++) for (let r = 0; r < 4; r++) K[a * 4 + r] = kt(A[r * 3]!, A[r * 3 + 1]!, A[r * 3 + 2]!, a)
+      const s = t.data.subarray(c * inN, (c + 1) * inN)
+      const o = out.data.subarray(c * outN, (c + 1) * outN)
+      for (let oth = 0; oth < (oh + 1) >> 1; oth++) {
+        stopCheck(stop, oth)
+        const ih = 2 * oth - pad
+        for (let otw = 0; otw < (ow + 1) >> 1; otw++) {
+          const iw = 2 * otw - pad
+          for (let r = 0; r < 4; r++) {
+            const y = ih + r
+            for (let q = 0; q < 4; q++) {
+              const x = iw + q
+              blk[r * 4 + q] = y >= 0 && y < H && x >= 0 && x < W ? s[y * W + x]! : 0
+            }
+          }
+          // Bᵀ·d over the rows (per column q): D[r·4 + q].
+          for (let q = 0; q < 4; q++) {
+            const d0 = blk[q]!, d1 = blk[4 + q]!, d2 = blk[8 + q]!, d3 = blk[12 + q]!
+            D[q] = f(d0 - d2); D[4 + q] = f(d1 + d2); D[8 + q] = f(-d1 + d2); D[12 + q] = f(d1 - d3)
+          }
+          // …then over the columns (per transformed row r), × the kernel tile: Y[a·4 + r].
+          for (let r = 0; r < 4; r++) {
+            const e0 = D[r * 4]!, e1 = D[r * 4 + 1]!, e2 = D[r * 4 + 2]!, e3 = D[r * 4 + 3]!
+            Y[r] = f(f(e0 - e2) * K[r]!)
+            Y[4 + r] = f(f(f(e1 + e2) * K[4 + r]!) + 0)
+            Y[8 + r] = f(f(-e1 + e2) * K[8 + r]!)
+            Y[12 + r] = f(f(e1 - e3) * K[12 + r]!)
+          }
+          // Aᵀ·m over the column index (per r): Z[x·4 + r]; then over r: the 2 × 2 result.
+          for (let r = 0; r < 4; r++) {
+            const m0 = Y[r]!, m1 = Y[4 + r]!, m2 = Y[8 + r]!, m3 = Y[12 + r]!
+            Z[r] = f(f(m0 + m1) + m2)
+            Z[4 + r] = f(f(m1 - m2) - m3)
+          }
+          for (let x = 0; x < 2; x++) {
+            const ox = 2 * otw + x
+            if (ox >= ow) continue
+            const q0 = Z[x * 4]!, q1 = Z[x * 4 + 1]!, q2 = Z[x * 4 + 2]!, q3 = Z[x * 4 + 3]!
+            const oy = 2 * oth
+            o[oy * ow + ox] = f(f(q0 + q1) + q2)
+            if (oy + 1 < oh) o[(oy + 1) * ow + ox] = f(f(q1 - q2) - q3)
+          }
+        }
+      }
+    }
+    return out
+  }
+
   /** F.conv2d(t, kernel, padding=pad) on one channel, zero padding (Outline, relief). LIBRARY. */
   function conv2dSame(t: Tensor, kernel: ArrayLike<number>, kh: number, kw: number, pad: number, stop?: () => boolean): Tensor {
     if (t.c !== 1) throw new Error('conv2dSame takes one channel')
@@ -1013,7 +1115,7 @@ export function kernelsCore(k: TensorCore, px: PixelsCore) {
     areaOutSize, resizeArea, resizeNearest, resizeBilinear, resizeBicubic,
     gridSample, affineGrid,
     avgPool2d, avgPool2dStrided, maxPool2d, padReflect,
-    conv2dDepthwise, conv2dSame, gaussianKernel1d, gaussianBlur,
+    conv2dDepthwise, conv2dWinograd3x3, conv2dSame, gaussianKernel1d, gaussianBlur,
     rgbToGrayscale, blend, adjustBrightness, adjustSaturation, adjustContrast, adjustHue,
     topk,
   }
