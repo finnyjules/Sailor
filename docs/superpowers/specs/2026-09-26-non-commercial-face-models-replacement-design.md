@@ -69,7 +69,7 @@ Never sent: the second face, and `detailer`.
 - `mode: "person"`;
 - `original_sound_switch: true`.
 
-**Price.** The video is measured first. The rate is $0.15 at 360p or 540p and $0.20 at 720p, and **doubled if the video is longer than 5 s** (fal's rule).
+**Price.** The video is measured first. The rate is $0.15 at 360p or 540p and $0.20 at 720p, and **doubled if the video is longer than 5 s** (fal's rule). fal states no maximum, so Sailor takes videos up to 10 s, which keeps the price at most doubled. Videos are MP4, MOV or WebM, up to 100 MB.
 
 ### Fix faces: family `fix-faces`
 
@@ -93,7 +93,7 @@ Never sent: the second face, and `detailer`.
 | up to 96 MP | $0.32 |
 | up to 512 MP | $1.36 |
 
-Anything bigger is refused.
+The input is capped at Sailor's shared ~19 MP limit (`LARGEST_INPUT_PIXELS`), so the output never passes 512 MP. A larger input is refused; an input that can't be measured is priced at the cap.
 
 ### Removed outright
 
