@@ -31,8 +31,8 @@ import {
   type StrokeInstance, type StrokeAlign,
 } from '~/lib/compositor/strokeStack'
 import type { LayerGroup } from '~/lib/compositor/layerGroups'
-import { readGrid } from '~/lib/frame/gridConfig'
-import type { FrameGrid } from '~/lib/compositor/mosaicGrid'
+import { patchLayoutGrid, describeLayoutGrid, type LayoutGrid } from '~/lib/frame/layoutGrid'
+import { defaultGrid, type MosaicGrid } from '~/lib/compositor/mosaicGrid'
 import { normalizeVocab } from '~/lib/compositor/dealVocab'
 import {
   mosaicStyleFromArgs, cellFillOfStyle, mosaicStyleOf, DEFAULT_MOSAIC_STYLE, isMosaicCellFill, isMosaicShaderFill,
@@ -73,10 +73,8 @@ export interface CompositorState {
    *  round-trips through here). The agent addresses a copy by `instanceId` —
    *  it never edits a template's placed layers directly. */
   templates?: TemplateInstance[]
-  /** Doc-level layout grid (guide + snap source) — `sailor_localGrid` round-trips
-   *  through here like background/postEffects. Absent = mode 'off' (readGrid's
-   *  default), same as an old frame with no grid config saved yet. */
-  grid?: FrameGrid
+  /** The Frame's layout grid (`sailor_layoutGrid`, read through readLayoutGrid by the host). */
+  grid?: LayoutGrid
   /** The frame's aspect as H/W (16:9 landscape = 0.5625, portrait > 1). Layer
    *  boxes are width-normalized, so a layer that fills the frame is `w: 1,
    *  h: aspect` — the mosaic op's create reads it. Absent = square (1). */
@@ -865,7 +863,7 @@ const COMPOSITOR_COMMANDS: CommandSpec[] = [
   { op: 'removeLayer', hint: 'Delete a layer by id. target = layer id.' },
   { op: 'setLayerDepth', hint: 'Change a layer\'s stacking depth (z-order). target = layer id; args: { to: "back" | "front" }. "back" puts it BEHIND every other layer including the connected/wired image — use this for "put the headline BEHIND the image". "front" brings it to the top.' },
   { op: 'setBackground', hint: 'Set the FRAME background that sits behind every layer. args: { paint } — a "#RRGGBB" colour, a gradient object, or "none". Use for "make the background blue / a sunset gradient".' },
-  { op: 'setGrid', hint: 'Set the layout grid on a Frame — a Swiss-style guide layers can snap to (editor-only, never baked/exported). args: { patch: {...}, generate? }. patch keys: mode ("off" | "explicit" | "generated"), baseModule (0..1 of canvas width, the alignment unit), gutter (0..1), margin (0..1), columns/rows (explicit mode counts), gen: { colRange/rowRange ([min,max] column/row counts, generated mode), regularity (0..1: 0 = loose/free spacing, 1 = strict/equal), merge (bool, merge adjacent cells into larger regions), mergeMaxSpan (max cells a merged region spans), symmetry ("none" | "mirror"), seed (integer) }, overlay (bool, show the guide lines). Omitted keys keep their current value. generate:true (or reroll:true) re-rolls a fresh random seed for a new generated-grid variation; switching mode to "generated" without giving gen.seed also rolls a fresh seed. This is what "add a layout grid", "give it a 6-column grid", "generate a new grid variation", "re-roll the grid" mean.' },
+  { op: 'setGrid', hint: 'Set the Frame\'s layout grid — a standard guide layers snap to (editor-only, never exported). args (all optional): columns (1..24), gutter and margin (px at the design size), fit ("stretch" | "center" | "left"), width (px per column when fit is center/left), rows ("off" | "square" | "count"), rowCount (1..24, with rows "count"), line (the body text line spacing in px; the baseline grid is half of it), show (bool), suggested (true = back to the grid suggested for the format). This is what "a 12-column grid", "square modules", "a baseline grid", "show the grid" and "hide the grid" mean. For a generated grid PATTERN use mosaic.' },
   { op: 'mosaic', hint: `Add a MOSAIC — a generative composition element (a whole dense pattern as ONE self-painting layer that BAKES into the render) — or restyle one. For "make a colourful mosaic", "add a modular grid", "a glitchy texture", "deal a warm grid", "re-roll the pattern", "sparser tiles". To CREATE, omit target (it fills the whole frame; default style modular); to restyle one, target = its id (box unchanged). style: "tiles" (seeded grid, each kept cell one flat fill; vocab, density, cellInset apply only here) | "pane" (rows of panes, each a two-colour corner or edge ramp) | "modular" (flush grid of modules, some merged; each empty, solid, blocks, dots, lines or a ramp; faint hairlines) | "parcel" (coarse two-tone block field with floating hairline survey grids) | "mosh" (datamosh / glitch: horizontal bands of confetti, blocks with dark diagonal tears, smears, scan rows, herringbone, in colour-cube inks) | "carve" (panel collage / report cover: one rectangle split into panels, each flat, striped, chevrons, a grainy ramp or a hairline grid) | "totem" (screenprinted emblem poster: speckled mat, dark plate, left half of patterned rectangles mirrored right, ringed centre emblem) | "blueprint" (drafting grid: square lattice plus a polar overlay from a corner origin — dashed spokes, ticked arcs, angle labels) | "oddgrid" (a SHADER: uneven patchwork of coloured cells on paper, optional marks) | "static" (a SHADER: one-ink riso static in bands with glitch tears). cellFill is accepted as an alias of style. A style's tunables object implies that style, and colours inside it override the preset. An explicit style wins; else the first tunables object in the order pane → modular → parcel → mosh → carve → totem → blueprint; else a palettePreset name; else modular. palettePreset must be in the FINAL style's list (another style's name is an error); tiles has none (it uses vocab). Shader styles take a look (or palettePreset): oddgrid "Patchwork" | "Bloom" | "Quilt" | "Scatter" | "Drift"; static "Wine on Periwinkle" | "Pink on Straw" | "Maroon on Orange" | "Blue on Cream" | "Green on Yellow" | "Blue on Pink" | "Black on Lime" | "Purple on Gold"; fine-tune with shader: { params: { … } } — oddgrid: cols 8..96, scale 2..30, density/block/grain/variety/motifAmt 0..1, bsize 2..12, speck 0..0.5, balance -1.5..1.5, motif 0 none|1 dot|2 ring|3 square|4 wedge|5 mixed, bg hex, ramp [{pos,color}] ≤8; static: ink/bg hex, res 24..160, regions 1..6, glitch/mix 0..1. args: { style, vocab "brand"|"mono"|"warm"|"cool" (tiles palette; pane/modular fall back to it), density 0..1 (share of tiles filled), cellInset 0..0.4, pane { rows 1..8, cells 1..12, vary/diag/soft/spread 0..1, inks (ordered hex — the order is the look) } presets "Hot pink" | "Electric" | "Deep" | "Sorbet" | "Candy"; modular { gcols 2..12, unit 2..8, merge 0..1, w { empty, solid, blocks, dots, lines, grad } weights 0..50, blockFill/dot/rules 0..1, ruleW 1..3, bg/rule hex, inks } presets "Digital" | "Riso" | "Bloom" | "Heat" | "Mono"; parcel { cells 8..40, cover 0..1, chunk 0.5..3, grids 0..8, blend "multiply"|"normal", ground/ink/hairline hex } presets "Lime on grey" | "Blue on cream" | "Acid on black" | "Orange on cream" | "Cyan on stone" | "Blue on olive"; mosh { bands 1..8, cols 24..300, mix/tears/runs/bright 0..1, inks (8 hex; inks[1] the bright one) } presets "Pure cube" | "Soft cube" | "Print cube" | "Warm cube" | "Cool cube"; carve { cuts 1..16, uneven/gap/mix/stripePitch/grain/gridDetail 0..1, inks (two neutrals, inks[0] the ground, then four loud) } presets "Report" | "Signal" | "Playbill" | "Almanac" | "Broadsheet"; totem { border 0..0.4, mat 0..0.7, matGrain 1..6, keyline 0..10, regions 1..30, grain 16..220 (higher = finer), mirror 0..1 (1 = true mirror), variety 0..1, core 0..0.6 (0 = no emblem), coreRings 0..8, inks (5 hex: darkest = plate, first other = mat, second from end = speckle) } presets "Arcade" | "Lagoon" | "Carnival" | "Kiosk" | "Neon" | "Harbour"; blueprint { cells 6..64, major 2..12, minorAlpha/labels 0..1, majorWidth 1..3, corner "auto"|"bl"|"br"|"tr"|"tl", originX/originY -0.5..0.5, angleStart 0..90, angleStep 5..45, angleSpread 15..360, arcs 0..10, arcGap 0.05..0.6, tickStep 1..30, paper/ink/inkDim hex } presets "Blueprint" | "Cyan on navy" | "Black on cream" | "Amber on charcoal" | "White on slate"; grid { colRange [min,max], rowRange [min,max], regularity 0..1, merge bool, symmetry "none"|"mirror" } (tiles layout), seed (integer variation), generate (bool: re-roll the seed, keeping style, box and dials), id? }.` },
   { op: 'scatter', hint: SCATTER_HINT },
   { op: 'generateImage', hint: 'Generate a PHOTOGRAPHIC/illustrative AI image and add it as a layer — "generate a picture of a dog", "add a city photo". Not for gradients/colours (use setBackground/setFill). args: { prompt (vivid), aspectRatio? }.' },
@@ -960,11 +958,7 @@ export function describeCompositor(state: CompositorState): SurfaceSnapshot {
     current: {
       background: paintLabel(state.background),
       postEffects: state.postEffects?.filter(e => e.visible).map(e => e.type).join(', ') || 'none',
-      grid: state.grid && state.grid.mode !== 'off'
-        ? (state.grid.mode === 'explicit'
-          ? `explicit ${state.grid.columns}×${state.grid.rows}`
-          : `generated cols ${state.grid.gen.colRange.join('-')} rows ${state.grid.gen.rowRange.join('-')} regularity ${state.grid.gen.regularity} seed ${state.grid.gen.seed}`)
-        : 'off',
+      grid: state.grid ? describeLayoutGrid(state.grid) : 'none',
       // The frame is a unit square in normalized coords: x/y/sizes are 0..1.
       coordinateSpace: 'normalized 0..1 (0,0 = top-left, 0.5,0.5 = centre)',
       // Every id addShape accepts. ~1.5 KB (measured 1,530 chars serialised); listed so the model never guesses a name.
@@ -1008,7 +1002,7 @@ export function applyCompositorCommand(input: CompositorState, cmd: Command): Co
 
 function applyCommand(input: CompositorState, cmd: Command): CommandResult<CompositorState> {
   const state = clone(input)
-  const snapshot = (): Command => ({ op: 'restore', args: { layers: clone(input.layers), background: clone(input.background), postEffects: clone(input.postEffects), groups: clone(input.groups), templates: clone(input.templates), motion: clone(input.motion) } })
+  const snapshot = (): Command => ({ op: 'restore', args: { layers: clone(input.layers), background: clone(input.background), postEffects: clone(input.postEffects), groups: clone(input.groups), templates: clone(input.templates), motion: clone(input.motion), grid: clone(input.grid) } })
 
   switch (cmd.op) {
     case 'setLayerProps': {
@@ -1208,13 +1202,21 @@ function applyCommand(input: CompositorState, cmd: Command): CommandResult<Compo
       return { ok: true, template: { ...state, background: bg }, inverse: snapshot() }
     }
     case 'setGrid': {
-      const patch = (cmd.args?.patch ?? {}) as Partial<FrameGrid>
-      const g = readGrid(state.grid ? { sailor_localGrid: state.grid } : undefined)
-      const merged: FrameGrid = { ...g, ...patch, gen: { ...g.gen, ...(patch.gen ?? {}) } }
-      const reroll = cmd.args?.generate === true || cmd.args?.reroll === true
-      const enteringGeneratedNoSeed = patch.mode === 'generated' && patch.gen?.seed == null
-      if (reroll || enteringGeneratedNoSeed) merged.gen = { ...merged.gen, seed: Math.floor(Math.random() * 9999) + 1 }
-      return { ok: true, template: { ...state, grid: merged }, inverse: snapshot() }
+      const a = (cmd.args ?? {}) as Record<string, any>
+      if (a.generate === true || a.reroll === true || a.patch?.mode === 'generated')
+        return { ok: false, reason: 'invalid', detail: "The Frame's grid is a layout guide; for a generated grid pattern use mosaic." }
+      const cur = state.grid
+      if (!cur) return { ok: false, reason: 'invalid', detail: 'this frame has no grid yet' }
+      if (a.suggested === true) return { ok: true, template: { ...state, grid: { ...cur, auto: true } }, inverse: snapshot() }
+      const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : undefined)
+      const next = patchLayoutGrid(cur, {
+        columns: num(a.columns), gutter: num(a.gutter), margin: num(a.margin), width: num(a.width),
+        fit: ['stretch', 'center', 'left'].includes(a.fit) ? a.fit : undefined,
+        rows: ['off', 'square', 'count'].includes(a.rows) ? a.rows : undefined,
+        rowCount: num(a.rowCount), line: num(a.line),
+        show: typeof a.show === 'boolean' ? a.show : undefined,
+      })
+      return { ok: true, template: { ...state, grid: next }, inverse: snapshot() }
     }
     // `dealGrid` is the op's old name — kept as a silent alias so a model (or a
     // saved plan) that learned it still lands on the same handler. Not listed in
@@ -1222,7 +1224,7 @@ function applyCommand(input: CompositorState, cmd: Command): CommandResult<Compo
     case 'mosaic':
     case 'dealGrid': {
       const a = (cmd.args ?? {}) as Record<string, unknown>
-      const gridPatch = (a.grid ?? {}) as Partial<FrameGrid['gen']> & Partial<FrameGrid>
+      const gridPatch = (a.grid ?? {}) as Partial<MosaicGrid['gen']> & Partial<MosaicGrid>
       const reroll = a.generate === true || a.reroll === true
       const target = cmd.target ? findLayer(state, cmd.target) : undefined
       if (cmd.target && (!target || target.kind !== 'deal')) return { ok: false, reason: 'invalid', detail: `no mosaic layer '${String(cmd.target)}'` }
@@ -1250,9 +1252,9 @@ function applyCommand(input: CompositorState, cmd: Command): CommandResult<Compo
         if (patches.carve) d.carve = normalizeCarve(patches.carve, (d.carve as CarveParams | undefined) ?? defaultCarve())
         if (patches.totem) d.totem = normalizeTotem(patches.totem, (d.totem as TotemParams | undefined) ?? defaultTotem())
         if (patches.blueprint) d.blueprint = normalizeBlueprint(patches.blueprint, (d.blueprint as BlueprintParams | undefined) ?? defaultBlueprint())
-        const g = clone((target as { grid: FrameGrid }).grid)
+        const g = clone((target as { grid: MosaicGrid }).grid)
         // gen-level grid keys the model may send (colRange/rowRange/regularity/merge/symmetry).
-        g.gen = { ...g.gen, ...(gridPatch as Partial<FrameGrid['gen']>) }
+        g.gen = { ...g.gen, ...(gridPatch as Partial<MosaicGrid['gen']>) }
         if (typeof a.seed === 'number') g.gen.seed = Math.round(a.seed)
         if (reroll) g.gen.seed = Math.floor(Math.random() * 9999) + 1
         d.grid = g
@@ -1263,17 +1265,15 @@ function applyCommand(input: CompositorState, cmd: Command): CommandResult<Compo
         return { ok: true, template: state, inverse: snapshot() }
       }
 
-      // Create a new mosaic filling the frame, seeded from the frame's current grid.
+      // Create a new mosaic filling the frame, with its OWN generated grid (never the Frame's layout grid).
       // Default style: modular — the same default the toolbar stamp uses.
       const id = typeof a.id === 'string' && a.id ? a.id : `l_${state.layers.length + 1}_mosaic`
       if (state.layers.some(l => l.id === id)) return { ok: false, reason: 'invalid', detail: `layer id '${id}' already exists` }
       const resolved = resolveDealFill(a, cellFillOfStyle(DEFAULT_MOSAIC_STYLE))
       if (!resolved.ok) return { ok: false, reason: 'invalid', detail: resolved.detail }
       const patches = dealLookPatches(a, resolved.fill, resolved.preset)
-      const base = readGrid(state.grid ? { sailor_localGrid: state.grid } : undefined)
-      const grid: FrameGrid = clone(base)
-      if (grid.mode === 'off') grid.mode = 'generated'
-      grid.gen = { ...grid.gen, ...(gridPatch as Partial<FrameGrid['gen']>) }
+      const grid: MosaicGrid = { ...defaultGrid(), mode: 'generated' }
+      grid.gen = { ...grid.gen, ...(gridPatch as Partial<MosaicGrid['gen']>) }
       if (typeof a.seed === 'number') grid.gen.seed = Math.round(a.seed)
       if (reroll) grid.gen.seed = Math.floor(Math.random() * 9999) + 1
       // Boxes are width-normalized, so filling the frame is h = aspect (H/W) —
@@ -1495,6 +1495,7 @@ function applyCommand(input: CompositorState, cmd: Command): CommandResult<Compo
       if ('groups' in (cmd.args ?? {})) next.groups = clone(cmd.args!.groups as LayerGroup[] | undefined)
       if ('templates' in (cmd.args ?? {})) next.templates = clone(cmd.args!.templates as TemplateInstance[] | undefined)
       if ('motion' in (cmd.args ?? {})) next.motion = clone(cmd.args!.motion as FrameMotion | undefined)
+      if ((cmd.args as any)?.grid) next.grid = clone(cmd.args!.grid as LayoutGrid)
       return { ok: true, template: next, inverse: snapshot() }
     }
     case 'placeTemplate': {

@@ -778,11 +778,12 @@ export function useLayoutVary(src: LayoutVarySource): {
   let disposed = false
   if (getCurrentScope()) onScopeDispose(() => { disposed = true })
   /** What "the Frame has not changed" compares: the editor's history revision (any step, even one
-   *  that changed nothing) and the identity of everything an edit writes — layers, order, groups,
-   *  background, the layout record. Every write makes a new array or object; nothing is deep-read. */
+   *  that changed nothing — a drag records once it moves; a plain click records nothing) and the
+   *  identity of everything an edit writes — layers, order, groups, background, the layout record,
+   *  the layout grid. Every write makes a new array or object; nothing is deep-read. */
   function frameMark(): unknown[] {
     const p = toRaw(src.props())
-    return [src.editor().historyRev?.(), ...['sailor_localLayers', 'sailor_stackOrder', 'sailor_localGroups', 'sailor_localBg', 'sailor_posterState', 'sailor_localGrid'].map(k => toRaw(p?.[k]))]
+    return [src.editor().historyRev?.(), ...['sailor_localLayers', 'sailor_stackOrder', 'sailor_localGroups', 'sailor_localBg', 'sailor_posterState', 'sailor_layoutGrid'].map(k => toRaw(p?.[k]))]
   }
   const sameMark = (a: unknown[], b: unknown[]) => a.length === b.length && a.every((v, i) => v === b[i])
   /** The editor, with `recordHistory` a no-op: an apply through it joins the step already recorded

@@ -31,8 +31,8 @@ import { imageUrlToFile } from '~/lib/canvas/imageUrlToFile'
 import { syncAllWiredWidgets, wiredLayerHeight, type ContentDims } from '~/lib/compositor/wiredLayer'
 import { inject, type Ref } from 'vue'
 import type { BrandKit } from '~~/shared/brand/types'
-import { readGrid, gridProperty } from '~/lib/frame/gridConfig'
-import { resolveGrid, type FrameGrid, type Rect } from '~/lib/compositor/mosaicGrid'
+import { readLayoutGrid, resolveLayoutGrid, layoutGridProperty, type LayoutGrid, type ResolvedLayoutGrid } from '~/lib/frame/layoutGrid'
+import { formatFor } from '~/lib/frame/formats'
 import { readFrameSizeState, writeFrameSizeState, type FrameSizeState } from '~/lib/frame/frameSize'
 import { readFrameLight, sanitizeLight, type FrameLight } from '~/lib/compositor/frameLight'
 
@@ -40,6 +40,12 @@ interface EditorOpts {
   node: () => any                       // the compositor node (reactive)
   dims: () => { w: number; h: number }  // logical artboard size
   getRect: () => DOMRect | null         // canvas element's on-screen rect
+  /**
+   * The Frame's DESIGN size, when `dims` is a display size (the modal's artboard). The layout
+   * grid's px values and its format are at the design size, so the grid resolves there and is
+   * normalised to [0,1] from it. Absent → `dims`.
+   */
+  designDims?: () => { w: number; h: number }
   /**
    * Content pixel dimensions of a wired slot's upstream image / studio frame,
    * for the `layer{N}_*` write-through's contain-fit. HOST-OWNED: only the host
@@ -250,16 +256,24 @@ export function useLocalLayerEditor(opts: EditorOpts) {
   /** `record: false` while a drag is under way — the caller records once at pointer-down. */
   function setFrameLight(l: FrameLight, record = true) { if (record) recordHistory(); writeLight(l) }
 
-  // Doc-level grid config (layout guide + snap source). Persisted like background/
-  // postEffects: on node properties, absent-key defaulted via readGrid so old
-  // frames (no sailor_localGrid at all) resolve to mode:'off'. Not part of the
-  // undo Snapshot below — a layout-guide tweak isn't a content edit, and folding
-  // it into history would push no-op restore entries (Snapshot has no grid field).
-  const grid = computed<FrameGrid>(() => readGrid(node()?.data?.properties as any))
-  function setGrid(g: FrameGrid) {
+  // The Frame's layout grid (spec 2026-09-26-frame-layout-grid-design): stored on
+  // `sailor_layoutGrid`, read through readLayoutGrid (auto grids follow the format;
+  // old Frames migrate). Part of the undo Snapshot — a grid change is a real edit.
+  const gridDims = () => opts.designDims?.() ?? dims()
+  const frameFormat = computed(() => { const { w, h } = gridDims(); return formatFor(node()?.data?.properties as any, w, h) })
+  const layoutGrid = computed<LayoutGrid>(() => { const { w, h } = gridDims(); return readLayoutGrid(node()?.data?.properties as any, w, h, frameFormat.value) })
+  const layoutGridResolved = computed<ResolvedLayoutGrid>(() => { const { w, h } = gridDims(); return resolveLayoutGrid(layoutGrid.value, w, h, frameFormat.value) })
+  function writeLayoutGrid(g: LayoutGrid) {
     const n = node(); if (!n) return
     if (!n.data.properties) n.data.properties = {}
-    Object.assign(n.data.properties, gridProperty(g))
+    Object.assign(n.data.properties, layoutGridProperty(JSON.parse(JSON.stringify(g))))
+  }
+  function setLayoutGrid(g: LayoutGrid, record = true) { if (record) recordHistory(); writeLayoutGrid(g) }
+  /** Fix the grid on first open: an old Frame (layers, no grid) keeps it hidden forever after,
+   *  a new one keeps it shown — without this, a new Frame would read as "old" once it had layers. */
+  function ensureLayoutGrid() {
+    const p = node()?.data?.properties as any
+    if (!p?.sailor_layoutGrid) writeLayoutGrid(layoutGrid.value)
   }
 
   // ── Undo / redo (snapshot history over local layers + z-order) ──────────────
@@ -327,11 +341,11 @@ export function useLocalLayerEditor(opts: EditorOpts) {
     if (!n.data.properties) n.data.properties = {}
     ;(n.data.properties as any).sailor_posterState = next
   }
-  type Snapshot = { layers: LocalLayer[]; order: string[]; bg: Paint | undefined; fx: PostEffect[]; groups: LayerGroup[]; frameTemplates: unknown[]; motion?: MotionSnap; frameSize?: FrameSizeState; layout?: LayoutSnap; light?: FrameLight }
+  type Snapshot = { layers: LocalLayer[]; order: string[]; bg: Paint | undefined; fx: PostEffect[]; groups: LayerGroup[]; frameTemplates: unknown[]; motion?: MotionSnap; frameSize?: FrameSizeState; layout?: LayoutSnap; light?: FrameLight; grid?: LayoutGrid }
   const HISTORY_CAP = 120
   const _past = ref<Snapshot[]>([])
   const _future = ref<Snapshot[]>([])
-  function snapshot(): Snapshot { return { layers: JSON.parse(JSON.stringify(localLayers.value)), order: [...readOrder()], bg: background.value, fx: JSON.parse(JSON.stringify(postEffects.value)), groups: JSON.parse(JSON.stringify(localGroups.value)), frameTemplates: JSON.parse(JSON.stringify((node()?.data?.properties as any)?.sailor_frametemplates ?? [])), motion: readMotionSnap(), frameSize: frameSizeSnap(), layout: readLayoutSnap(), light: (node()?.data?.properties as any)?.sailor_localLight } }
+  function snapshot(): Snapshot { return { layers: JSON.parse(JSON.stringify(localLayers.value)), order: [...readOrder()], bg: background.value, fx: JSON.parse(JSON.stringify(postEffects.value)), groups: JSON.parse(JSON.stringify(localGroups.value)), frameTemplates: JSON.parse(JSON.stringify((node()?.data?.properties as any)?.sailor_frametemplates ?? [])), motion: readMotionSnap(), frameSize: frameSizeSnap(), layout: readLayoutSnap(), light: (node()?.data?.properties as any)?.sailor_localLight, grid: (node()?.data?.properties as any)?.sailor_layoutGrid ? JSON.parse(JSON.stringify((node()!.data.properties as any).sailor_layoutGrid)) : undefined } }
   function restore(s: Snapshot) {
     commit(s.layers); writeOrder([...s.order]); writeBg(s.bg); writeFx(s.fx?.length ? s.fx : undefined); writeGroups([...s.groups])
     const n = node()
@@ -344,11 +358,12 @@ export function useLocalLayerEditor(opts: EditorOpts) {
     const nd = node()?.data
     if (s.frameSize && nd) writeFrameSizeState(nd, s.frameSize)
     writeLight(s.light)
+    if (s.grid) writeLayoutGrid(s.grid)
   }
   function frameSizeSnap(): FrameSizeState | undefined { const nd = node()?.data; return nd ? readFrameSizeState(nd) : undefined }
   /** Bumped by every history change (record, undo, redo): a caller holding a value from before an
    *  async wait can tell whether any step happened meanwhile — even one that changed nothing (a
-   *  click records at pointer-down). `useLayoutVary` folds a late re-apply into the step before
+   *  drag records once it moves past the slop; a plain click records nothing). `useLayoutVary` folds a late re-apply into the step before
    *  only while this is unchanged (the top snapshot is then still that step's "before"). */
   let _historyRev = 0
   const historyRev = () => _historyRev
@@ -801,7 +816,7 @@ export function useLocalLayerEditor(opts: EditorOpts) {
 
   // ── Pointer interaction (zoom-agnostic via screen rect) ─────────────────────
   type Drag =
-    | { type: 'move'; id: string; sx: number; sy: number; origins: { id: string; ox: number; oy: number }[] }
+    | { type: 'move'; id: string; sx: number; sy: number; origins: { id: string; ox: number; oy: number }[]; moved?: boolean }
     | { type: 'scale'; id: string; cx: number; cy: number; startDist: number; start: Record<string, number> }
     | { type: 'rotate'; id: string; cx: number; cy: number; startAngle: number; startRot: number }
     | { type: 'resize'; id: string; handle: Handle; rot: number; start: Box; p0: { x: number; y: number } }
@@ -811,18 +826,16 @@ export function useLocalLayerEditor(opts: EditorOpts) {
   // Active snap guide lines (normalized positions) shown while moving.
   const snapGuides = ref<{ vx: number | null; hy: number | null }>({ vx: null, hy: null })
   const SNAP_PX = 6 // snap distance threshold in screen pixels
+  const MOVE_SLOP_PX = 4 // a press is a click until it travels this far (screen px)
+  /** A move drag that has passed the slop — the overlay fades its modules in only then. */
+  const dragMoving = computed(() => drag.value?.type === 'move' && !!(drag.value as any).moved)
 
-  // Grid line positions, normalized to [0,1], for drag snapping (Task 6). A Vue
-  // `computed` — recomputed only when `grid` (itself computed off the node's
-  // properties) or the canvas dims change, NOT on every pointermove; `resolveGrid`
-  // reseeds a PRNG and walks the axis-edge algorithm, so re-running it per pointer
-  // event would be real, avoidable work on every dragged pixel.
+  // Grid snap lines, normalized to [0,1]. Only while the grid is shown — a hidden guide never
+  // pulls a layer. Recomputed when the grid or the canvas dims change, not per pointer event.
   const gridSnapLines = computed(() => {
-    const g = grid.value
-    if (g.mode === 'off') return { xs: [] as number[], ys: [] as number[] }
-    const { w: W, h: H } = dims()
-    const { xs, ys } = resolveGrid(g, W, H)
-    return { xs: xs.map(x => x / W), ys: ys.map(y => y / H) }
+    if (!layoutGrid.value.show) return { xs: [] as number[], ys: [] as number[] }
+    const r = layoutGridResolved.value // resolved at the design size; fractions are size-free
+    return { xs: r.xs.map(x => x / r.W), ys: r.ys.map(y => y / r.H) }
   })
 
   // screen px → normalized [0,1] within the artboard
@@ -856,13 +869,13 @@ export function useLocalLayerEditor(opts: EditorOpts) {
 
   function startMove(id: string, e: PointerEvent) {
     const l = localLayers.value.find(x => x.id === id); if (!l) return
-    recordHistory() // coalesce the whole drag into one undo step
+    // No history yet: a press that never travels MOVE_SLOP_PX is a click (see onMove).
     // Move the whole selection (group) together when dragging within it.
     const moveIds = selectedIds.value.has(id) ? [...selectedIds.value] : [id]
     const origins = moveIds
       .map(mid => { const m = localLayers.value.find(x => x.id === mid); return m ? { id: mid, ox: m.x, oy: m.y } : null })
       .filter(Boolean) as { id: string; ox: number; oy: number }[]
-    drag.value = { type: 'move', id, sx: e.clientX, sy: e.clientY, origins }
+    drag.value = { type: 'move', id, sx: e.clientX, sy: e.clientY, origins, moved: false }
     attach()
   }
 
@@ -965,6 +978,12 @@ export function useLocalLayerEditor(opts: EditorOpts) {
     const d = drag.value; if (!d) return
     const r = getRect(); if (!r) return
     if (d.type === 'move') {
+      if (!d.moved) {
+        // A press is a click until it travels 4 screen px: selecting changes nothing, records nothing.
+        if (Math.hypot(e.clientX - d.sx, e.clientY - d.sy) < MOVE_SLOP_PX) return
+        d.moved = true
+        recordHistory() // coalesce the whole drag into one undo step
+      }
       const prim = d.origins.find(o => o.id === d.id) ?? d.origins[0]
       let dx = (e.clientX - d.sx) / r.width, dy = (e.clientY - d.sy) / r.height
       if (!e.altKey && prim) ({ dx, dy } = applySnap(prim.id, prim.ox, prim.oy, dx, dy)) // Alt disables snap
@@ -994,7 +1013,18 @@ export function useLocalLayerEditor(opts: EditorOpts) {
       // BOTH axes, exactly like a rect's.
       const cur = localLayers.value.find(l => l.id === d.id)
       const locked = aspectLockedResizeKind(cur?.kind ?? '')
-      const box = resizeBox(d.start, d.rot, d.handle, d.p0, { x: nx * W, y: ny * H }, { aspect: e.shiftKey || locked, fromCenter: e.altKey })
+      // Snap the dragged corner/edge to the layout grid (unrotated layers; ⌥ turns it off).
+      let px = nx * W, py = ny * H
+      if (!e.altKey && !d.rot) {
+        const gl = gridSnapLines.value, th = SNAP_PX * W / r.width   // screen px → design px
+        let gx: number | null = null, gy: number | null = null
+        for (const x of gl.xs) { const v = x * W; if (Math.abs(v - px) < th && (gx == null || Math.abs(v - px) < Math.abs(gx - px))) gx = v }
+        for (const y of gl.ys) { const v = y * H; if (Math.abs(v - py) < th && (gy == null || Math.abs(v - py) < Math.abs(gy - py))) gy = v }
+        if (gx != null) px = gx
+        if (gy != null) py = gy
+        snapGuides.value = { vx: gx != null ? gx / W : null, hy: gy != null ? gy / H : null }
+      } else snapGuides.value = { vx: null, hy: null }
+      const box = resizeBox(d.start, d.rot, d.handle, d.p0, { x: px, y: py }, { aspect: e.shiftKey || locked, fromCenter: e.altKey })
       // px → normalized (w,h fractions of WIDTH; x of width, y of height). A text
       // box writes its boxW/boxH — the same normalized-to-width fields — instead of
       // a rect's w/h, so the handles resize the box rather than nothing.
@@ -1041,33 +1071,9 @@ export function useLocalLayerEditor(opts: EditorOpts) {
     window.addEventListener('pointerup', onUp, { once: true })
   }
 
-  // ── Grid-driven section ops (Task 7) ────────────────────────────────────────
-  // "Fill grid with sections", "Draw section" and "Re-snap to grid" all key off
-  // the same `gridSnapLines` (Task 6) the drag-snap already uses, so a section's
+  // ── Re-snap to the layout grid ──────────────────────────────────────────────
+  // Keys off the same `gridSnapLines` the drag-snap uses, so a re-snapped layer's
   // edges always land exactly on the lines the overlay draws.
-
-  /** Create one empty (unfilled) `rect` layer per grid region — `regions` are the
-   *  PIXEL boxes `resolveGrid` returns, same basis as `dims()`. Grouped (when >1)
-   *  and selected together, in one history step. The caller enforces the
-   *  region-count cap (dense fills are a later feature) before calling this —
-   *  this function just lays the rects down. */
-  function fillGridWithSections(regions: Rect[]) {
-    if (!regions.length) return
-    const W = dims().w, H = dims().h
-    recordHistory()
-    const gid = regions.length > 1 ? `g-${Date.now().toString(36)}-${++_groupSeq}` : undefined
-    const layers = regions.map(r => createRectLayer({
-      x: (r.x + r.w / 2) / W, y: (r.y + r.h / 2) / H,
-      // RectLayer w/h are both normalized to canvas WIDTH (see localLayerBox).
-      w: r.w / W, h: r.h / W,
-      fill: 'none', stroke: '', strokeWidth: 0,
-      ...(gid ? { groupId: gid } : {}),
-    }))
-    commit([...localLayers.value, ...layers])
-    if (gid) writeGroups([...localGroups.value, { id: gid }])
-    selectedIds.value = new Set(layers.map(l => l.id))
-    selectedId.value = layers[layers.length - 1]?.id ?? null
-  }
 
   /** Snap each currently-selected layer's box edges to the nearest grid line,
    *  independently per layer, in one history step. A large threshold (0.5) means
@@ -1090,49 +1096,6 @@ export function useLocalLayerEditor(opts: EditorOpts) {
     if (!patches.size) return
     recordHistory()
     commit(localLayers.value.map(l => (patches.has(l.id) ? stripOwner({ ...l, ...patches.get(l.id)! } as LocalLayer) : l)))
-  }
-
-  /** "Draw section" mode: while on, a marquee drag on the artboard creates a
-   *  snapped rect instead of selecting (see `finishDrawSection`). A separate flag
-   *  from every other tool mode — the host gates its own pointer handlers on it,
-   *  same pattern as brush/pen/node-edit — so normal marquee selection is
-   *  byte-identical when the mode is off. */
-  const drawSectionActive = ref(false)
-  function setDrawSectionActive(v: boolean) { drawSectionActive.value = v }
-
-  function nearestGridLine(v: number, lines: number[]): number {
-    if (!lines.length) return v
-    let best = lines[0]!, bd = Math.abs(v - lines[0]!)
-    for (const ln of lines) { const d = Math.abs(v - ln); if (d < bd) { bd = d; best = ln } }
-    return best
-  }
-
-  /** End a "Draw section" drag: reuses the same `marquee` rect `startMarquee`/
-   *  `moveMarquee` build, but on up snaps BOTH corners to the nearest grid line
-   *  (falling back to the canvas edges [0,1] with no grid) and creates a rect
-   *  instead of running the selection hit-test. Too-small drags (a click) are a
-   *  no-op, same threshold as `endMarquee`. */
-  function finishDrawSection() {
-    const m = marquee.value; marquee.value = null
-    if (!m) return
-    const W = dims().w, H = dims().h
-    const gl = gridSnapLines.value
-    const xs = gl.xs.length ? gl.xs : [0, 1]
-    const ys = gl.ys.length ? gl.ys : [0, 1]
-    const x0 = nearestGridLine(Math.min(m.x0, m.x1), xs)
-    const x1 = nearestGridLine(Math.max(m.x0, m.x1), xs)
-    const y0 = nearestGridLine(Math.min(m.y0, m.y1), ys)
-    const y1 = nearestGridLine(Math.max(m.y0, m.y1), ys)
-    const wN = x1 - x0            // fraction of W, same convention as x0/x1
-    const hN = ((y1 - y0) * H) / W // fraction of H → px → fraction of W (RectLayer.h convention)
-    if (wN < 0.005 || hN < 0.002) return // a click, not a drag
-    recordHistory()
-    const layer = createRectLayer({
-      x: x0 + wN / 2, y: y0 + (y1 - y0) / 2, w: wN, h: hN,
-      fill: 'none', stroke: '', strokeWidth: 0,
-    })
-    commit([...localLayers.value, layer])
-    selectLocal(layer.id)
   }
 
   // Consumer binds these to the artboard element (capture phase recommended so
@@ -1269,7 +1232,7 @@ export function useLocalLayerEditor(opts: EditorOpts) {
     writeBackground: writeBg, // non-recording: for callers that batch a layers write + background write under ONE recordHistory()
     postEffects, setPostEffects,
     frameLight, setFrameLight,
-    grid, setGrid,
+    layoutGrid, layoutGridResolved, setLayoutGrid, ensureLayoutGrid, dragMoving, gridSnapLines,
     undo, redo, canUndo, canRedo, historyRev,
     selectedIds, selectedLayers, toggleSelect, applyBoolean, alignSelected, alignToFrame, nudgeSelection, duplicateSelection, handleEditorKey,
     copySelection, pasteClipboard,
@@ -1278,7 +1241,6 @@ export function useLocalLayerEditor(opts: EditorOpts) {
     editingLayerNameId, layerNameDraft, startLayerRename, commitLayerRename, setLayerName,
     localGroups, commitBoth, writeGroups, setLayerGroup, setGroupParent, selectGroupById,
     snapGuides, marquee, startMarquee, moveMarquee, endMarquee,
-    fillGridWithSections, resnapSelected,
-    drawSectionActive, setDrawSectionActive, finishDrawSection,
+    resnapSelected,
   }
 }
