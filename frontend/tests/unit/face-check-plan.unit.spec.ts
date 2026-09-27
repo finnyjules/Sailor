@@ -80,4 +80,11 @@ describe('applyChecks', () => {
     const out = applyChecks(r, [{ target: plan[0]!, score: null, verdict: 'unsure', note: 'hair is shorter' }], 'now')
     expect(out.photos.find(p => p.filename === 'blonde.png')!.check).toEqual({ verdict: 'unsure', against: 'face.png', at: 'now', note: 'hair is shorter' })
   })
+  it('does not apply a panel result when the slot now holds a different picture', () => {
+    const r = rec()
+    const plan = planChecks(r)
+    const rerolled = { ...r, states: r.states.map(s => s.id !== 'default' ? s : { ...s, panels: s.panels.map(p => p.slot === 'portrait' ? { ...p, filename: 'portrait-v2.png' } : p) }) }
+    const out = applyChecks(rerolled, [{ target: plan[1]!, score: 97 }], 'now')
+    expect(out.states.find(s => s.id === 'default')!.panels.find(p => p.slot === 'portrait')!.check).toBeFalsy()
+  })
 })

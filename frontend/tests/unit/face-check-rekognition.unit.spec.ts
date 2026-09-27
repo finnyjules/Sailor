@@ -1,6 +1,7 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
+import { DetectFacesCommand } from '@aws-sdk/client-rekognition'
 import sharp from 'sharp'
-import { compareFaces, FaceCheckError, prepareForCompare, type CompareClient } from '~~/server/utils/faceCheck/rekognition'
+import { compareFaces, FaceCheckError, hasFace, prepareForCompare, type CompareClient } from '~~/server/utils/faceCheck/rekognition'
 
 async function png(w: number, h: number) {
   return sharp({ create: { width: w, height: h, channels: 3, background: { r: 200, g: 10, b: 10 } } }).png().toBuffer()
@@ -17,6 +18,12 @@ describe('prepareForCompare', () => {
   it('shrinks large images to fit 1600 before padding', async () => {
     const meta = await sharp(await prepareForCompare(await png(4000, 2000))).metadata()
     expect(meta.width).toBe(1600 + 2 * 640)
+  })
+  it('with pad: false only resizes and encodes JPEG', async () => {
+    const meta = await sharp(await prepareForCompare(await png(4000, 2000), { pad: false })).metadata()
+    expect(meta.format).toBe('jpeg')
+    expect(meta.width).toBe(1600)
+    expect(meta.height).toBe(800)
   })
 })
 
@@ -36,11 +43,24 @@ describe('compareFaces', () => {
   it('returns null when the target has no face', async () => {
     expect(await compareFaces(fakeClient({ FaceMatches: [], UnmatchedFaces: [] }), b, b)).toBeNull()
   })
-  it('turns AWS "no face in source" into a FaceCheckError', async () => {
+  it('turns AWS InvalidParameterException (no face in source OR target) into no-face-either', async () => {
     const e = Object.assign(new Error('Request has invalid parameters'), { name: 'InvalidParameterException' })
-    await expect(compareFaces(fakeClient(e), b, b)).rejects.toMatchObject({ code: 'no-source-face' })
+    await expect(compareFaces(fakeClient(e), b, b)).rejects.toMatchObject({ code: 'no-face-either' })
   })
   it('wraps other AWS failures', async () => {
     await expect(compareFaces(fakeClient(new Error('boom')), b, b)).rejects.toBeInstanceOf(FaceCheckError)
+  })
+})
+
+describe('hasFace', () => {
+  const b = Buffer.from('x')
+  it('is true when DetectFaces finds a face', async () => {
+    const send = vi.fn(async (cmd: any) => { expect(cmd).toBeInstanceOf(DetectFacesCommand); expect(cmd.input.Image.Bytes).toBe(b); return { FaceDetails: [{}] } })
+    expect(await hasFace({ send } as unknown as CompareClient, b)).toBe(true)
+    expect(send).toHaveBeenCalledTimes(1)
+  })
+  it('is false when DetectFaces finds none', async () => {
+    expect(await hasFace(fakeClient({ FaceDetails: [] }), b)).toBe(false)
+    expect(await hasFace(fakeClient({}), b)).toBe(false)
   })
 })

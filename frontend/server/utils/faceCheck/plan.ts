@@ -50,7 +50,7 @@ export function verdictFor(score: number | null, t = FACE_THRESHOLDS): CheckVerd
 export interface CheckResult { target: CheckTarget; score: number | null; verdict?: CheckVerdict; note?: string }
 
 export function applyChecks(record: CharacterRecord, results: CheckResult[], now: string): CharacterRecord {
-  type R = { score: number | null; against: string; verdict?: CheckVerdict; note?: string }
+  type R = { score: number | null; against: string; verdict?: CheckVerdict; note?: string; filename?: string }
   const mk = (r: R) => {
     const out: Check = { verdict: r.verdict ?? verdictFor(r.score), against: r.against, at: now }
     if (r.score !== null) out.score = r.score
@@ -60,7 +60,7 @@ export function applyChecks(record: CharacterRecord, results: CheckResult[], now
   const photoRes = new Map<string, R>()
   const panelRes = new Map<string, R>()
   for (const { target, score, verdict, note } of results) {
-    const r: R = { score, against: target.against, verdict, note }
+    const r: R = { score, against: target.against, verdict, note, filename: target.filename }
     if (target.kind === 'photo') photoRes.set(target.filename, r)
     else panelRes.set(`${target.stateId}\u0000${target.slot}`, r)
   }
@@ -76,8 +76,9 @@ export function applyChecks(record: CharacterRecord, results: CheckResult[], now
       ...s,
       panels: s.panels.map((p) => {
         if (face && p.filename === face) return { ...p, check: mk({ score: 100, against: face }) }
+        // Ruling L: a panel re-rolled since the check ran holds a new picture — the result isn't about it.
         const r = panelRes.get(`${s.id}\u0000${p.slot}`)
-        return r ? { ...p, check: mk(r) } : p
+        return r && r.filename === p.filename ? { ...p, check: mk(r) } : p
       }),
     }
   })

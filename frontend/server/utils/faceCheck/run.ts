@@ -8,6 +8,8 @@ export const MAX_COMPARES_PER_CALL = 40
 export interface RunDeps {
   readImage(filename: string): Promise<Buffer | null>
   compare(source: Buffer, target: Buffer): Promise<number | null | { verdict: CheckVerdict; note?: string }>
+  /** Asked once per face per pass when compare throws 'no-face-either' (Ruling K). */
+  sourceHasFace(face: Buffer): Promise<boolean>
   now(): string
 }
 
@@ -34,7 +36,8 @@ export function applyOutcome(record: CharacterRecord, outcome: CheckOutcome): Ch
       photos: next.photos.map(p => (photoSet.has(p.filename) ? { ...p, check: note(photoSet.get(p.filename)!) } : p)),
       states: next.states.map(s => ({
         ...s,
-        panels: s.panels.map((p) => { const t = panelSet.get(`${s.id}\u0000${p.slot}`); return t ? { ...p, check: note(t) } : p }),
+        // Ruling L: skip a panel re-rolled since the check ran.
+        panels: s.panels.map((p) => { const t = panelSet.get(`${s.id}\u0000${p.slot}`); return t && t.filename === p.filename ? { ...p, check: note(t) } : p }),
       })),
     }
   }
@@ -46,6 +49,8 @@ export async function runChecks(record: CharacterRecord, deps: RunDeps) {
   const batch = plan.slice(0, MAX_COMPARES_PER_CALL)
   const skipped = plan.length - batch.length
   const faces = new Map<string, Buffer | null | 'no-face'>()
+  // Ruling K: DetectFaces answer for each face buffer, asked at most once per pass.
+  const sourceChecked = new Map<string, boolean>()
   const results: CheckResult[] = []
   const noSource: CheckTarget[] = []
   let compared = 0
@@ -63,7 +68,20 @@ export async function runChecks(record: CharacterRecord, deps: RunDeps) {
       results.push(typeof r === 'object' && r !== null ? { target, score: null, verdict: r.verdict, note: r.note } : { target, score: r })
       compared++
     } catch (e) {
-      if (e instanceof FaceCheckError && e.code === 'no-source-face') {
+      // H3 errors (metering 402/503, missing key 503) are the caller's answer, not a stalled pass (Ruling N).
+      if (typeof (e as { statusCode?: unknown })?.statusCode === 'number') throw e
+      if (e instanceof FaceCheckError && (e.code === 'no-face-either' || e.code === 'no-source-face')) {
+        let sourceOk = false
+        if (e.code === 'no-face-either') {
+          if (!sourceChecked.has(target.against)) sourceChecked.set(target.against, await deps.sourceHasFace(face))
+          sourceOk = sourceChecked.get(target.against)!
+        }
+        if (sourceOk) {
+          // The picture itself has no face.
+          results.push({ target, score: null })
+          compared++
+          continue
+        }
         faces.set(target.against, 'no-face')
         noSource.push(target)
         continue

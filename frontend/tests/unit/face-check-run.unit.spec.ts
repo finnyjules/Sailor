@@ -72,4 +72,55 @@ describe('runChecks', () => {
     expect(out.record.photos.find(p => p.filename === 'c.png')!.check).toBeNull()
     warn.mockRestore()
   })
+
+  it('a faceless target (source has a face) scores only that picture no-face and carries on', async () => {
+    const compare = vi.fn(async (_s: Buffer, t: Buffer) => {
+      if (t.toString() === 'b.png') throw new FaceCheckError('no-face-either', 'x')
+      return 95
+    })
+    const sourceHasFace = vi.fn(async () => true)
+    const out = await runChecks(rec(['a.png', 'b.png', 'c.png']), { readImage: async f => Buffer.from(f), compare, sourceHasFace, now: () => 'n' })
+    expect(out.failed).toBeUndefined()
+    expect(compare).toHaveBeenCalledTimes(3)
+    expect(out.compared).toBe(3)
+    const check = (f: string) => out.record.photos.find(p => p.filename === f)!.check
+    expect(check('a.png')?.verdict).toBe('match')
+    expect(check('c.png')?.verdict).toBe('match')
+    expect(check('b.png')).toEqual({ verdict: 'no-face', against: 'face.png', at: 'n' })
+  })
+  it('a faceless source (DetectFaces says no) marks this and every later target with the source note, asking once', async () => {
+    const compare = vi.fn(async (_s: Buffer, t: Buffer) => {
+      if (t.toString() !== 'a.png') throw new FaceCheckError('no-face-either', 'x')
+      return 95
+    })
+    const sourceHasFace = vi.fn(async () => false)
+    const out = await runChecks(rec(['a.png', 'b.png', 'c.png']), { readImage: async f => Buffer.from(f), compare, sourceHasFace, now: () => 'n' })
+    expect(sourceHasFace).toHaveBeenCalledTimes(1)
+    expect(compare).toHaveBeenCalledTimes(2)
+    const check = (f: string) => out.record.photos.find(p => p.filename === f)!.check
+    expect(check('a.png')?.verdict).toBe('match')
+    for (const f of ['b.png', 'c.png']) expect(check(f)).toEqual({ verdict: 'no-face', against: 'face.png', at: 'n', note: 'No face found in the approved face picture' })
+  })
+  it('re-throws errors that carry a statusCode (metering / missing key) instead of stopping early', async () => {
+    const compare = async () => { throw Object.assign(new Error('x'), { statusCode: 402 }) }
+    await expect(runChecks(rec(['a.png']), { readImage: async f => Buffer.from(f), compare, sourceHasFace: async () => true, now: () => 'n' }))
+      .rejects.toMatchObject({ statusCode: 402 })
+  })
+  it('applyOutcome skips a panel whose slot now holds a new picture (re-rolled mid-pass)', async () => {
+    const withPanels = (portrait: string, smile: string) => parseCharacterRecord(JSON.stringify({
+      name: 'R', face: { filename: 'face.png', approvedAt: 't' }, photos: [],
+      states: [{ id: 'default', label: 'D', refImages: [], panels: [{ slot: 'portrait', filename: portrait }, { slot: 'face-smile', filename: smile }] }],
+    }), 'r')!
+    const compare = vi.fn(async (_s: Buffer, t: Buffer) => {
+      if (t.toString() === 'smile.png') throw new FaceCheckError('no-face-either', 'x')
+      return 95
+    })
+    const { outcome } = await runChecks(withPanels('portrait.png', 'smile.png'), { readImage: async f => Buffer.from(f), compare, sourceHasFace: async () => false, now: () => 'n' })
+    expect(outcome.results).toHaveLength(1)
+    expect(outcome.noSource).toHaveLength(1)
+    const applied = applyOutcome(withPanels('portrait-v2.png', 'smile-v2.png'), outcome)
+    for (const p of applied.states[0]!.panels) expect(p.check).toBeFalsy()
+    const same = applyOutcome(withPanels('portrait.png', 'smile.png'), outcome)
+    expect(same.states[0]!.panels.map(p => p.check?.verdict)).toEqual(['match', 'no-face'])
+  })
 })
