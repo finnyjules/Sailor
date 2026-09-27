@@ -40,6 +40,8 @@ describe('parseFamilies', () => {
       'effects-tone', 'effects-blur', 'effects-cells', 'effects-warp', 'effects-mask', 'effects-noise', 'shader-bake', 'live-previews',
       // Step 3, R3.3: the LLM text nodes (needs `cards`).
       'llm-text',
+      // Step 3, R3.4: describe, read and find (needs `cards`).
+      'describe',
     ].sort())
   })
 })

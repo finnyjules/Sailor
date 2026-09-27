@@ -329,6 +329,10 @@ export const RUNNER_ROUTES: Readonly<Record<string, Route>> = {
   ...Object.fromEntries([
     'ChatLLMNode', 'ImprovePromptNode', 'SummarizeTextNode', 'TranslateTextNode', 'RewriteToneNode', 'BrainstormIdeasNode', 'ReasonStepByStepNode',
   ].map(ct => [ct, r('replicate', null, 'no fal twin of these models has a saved schema or a rate card')])),
+  // R3.4, describe, read and find (family describe): Replicate, as Python.
+  ...Object.fromEntries([
+    'DescribeImageNode', 'DescribeImageRemoteNode', 'DescribeVideoNode', 'ExtractTextNode', 'FindObjectsNode',
+  ].map(ct => [ct, r('replicate', null, 'no same-model twin on fal is carded')])),
 }
 
 // ── Generate video: the two models moved to fal first ──────────────────────

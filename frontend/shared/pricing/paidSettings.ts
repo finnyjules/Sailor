@@ -35,6 +35,10 @@ import {
   reasonSystem, rewriteSystem, summarizeSystem, translateSystem, type LlmTextClass,
 } from '../runner/llm'
 import { pyStrip, pyTruthy } from '../runner/pyText'
+import {
+  DESCRIBE_CLASSES, DESCRIBE_ENDPOINTS, DESCRIBE_VIDEO_MAX_ANSWER_TOKENS, DESCRIBE_VIDEO_MAX_SECONDS, DESCRIBE_VIDEO_TOKENS_PER_SECOND,
+  type DescribeClass,
+} from '../runner/describe'
 
 /**
  * The most bytes of one moderated text in hosted (server/utils/moderation.ts
@@ -186,6 +190,37 @@ function llmPlanner(classType: LlmTextClass): PaidPlanner {
   }
 }
 
+// ── R3.4: describe, read and find (#shared/runner/describe) ──
+
+/**
+ * Seconds of video Describe a video is priced on: as measured (the runner
+ * reads an uploaded file before the hold, ruling (s)), else the longest
+ * video Gemini takes (an address typed in, or the ComfyUI path).
+ */
+function describeVideoSeconds(opts: PriceOptions): number {
+  const s = opts.inputSeconds?.video
+  return typeof s === 'number' && Number.isFinite(s) && s > 0 ? s : DESCRIBE_VIDEO_MAX_SECONDS
+}
+
+/**
+ * A describe node's one call. Describe a video by the token (ruling (c)):
+ * the prompt as tokenCeiling counts it plus the video's tokens (its length ×
+ * DESCRIBE_VIDEO_TOKENS_PER_SECOND, rounded up), and Gemini's longest answer;
+ * with `answerUsage`, what the prediction reported. The others per call.
+ */
+function describePlanner(classType: DescribeClass): PaidPlanner {
+  const endpoint = DESCRIBE_ENDPOINTS[classType]
+  if (classType !== 'DescribeVideoNode') return () => ({ steps: [{ call: { endpoint }, times: 1 }] })
+  return (inputs, opts) => {
+    const { answerUsage, ...rest } = opts
+    if (answerUsage) return { steps: [{ call: { endpoint, inputTokens: answerUsage.inputTokens, outputTokens: answerUsage.outputTokens }, times: 1 }] }
+    const linked = isLink(inputs.prompt)
+    const t = tokenCeiling({ texts: linked ? [] : [text(inputs.prompt)], linkedTexts: linked ? 1 : 0, maxAnswerTokens: DESCRIBE_VIDEO_MAX_ANSWER_TOKENS }, rest)
+    const video = Math.ceil(describeVideoSeconds(rest) * DESCRIBE_VIDEO_TOKENS_PER_SECOND)
+    return { steps: [{ call: { endpoint, inputTokens: t.inputTokens + video, outputTokens: t.outputTokens }, times: 1 }] }
+  }
+}
+
 /** Python returns "" before calling anyone when the text is blank (typed; a wired one is priced as a call). */
 function llmNoCall(classType: LlmTextClass): ((inputs: NodeInputs) => boolean) | null {
   const name = LLM_NO_CALL_INPUT[classType]
@@ -197,6 +232,7 @@ const LLM_CLASSES = Object.keys(LLM_CALL_SHAPES) as LlmTextClass[]
 /** Each paid class's planner. Filled by each R3 task. */
 const PAID_PLANNERS: Readonly<Record<string, PaidPlanner>> = {
   ...Object.fromEntries(LLM_CLASSES.map(c => [c, llmPlanner(c)])),
+  ...Object.fromEntries(DESCRIBE_CLASSES.map(c => [c, describePlanner(c)])),
 }
 
 /** Each paid class's no-call rule (rule 8), where Python has one. Filled by each R3 task. */

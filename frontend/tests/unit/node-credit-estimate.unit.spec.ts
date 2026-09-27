@@ -10,6 +10,7 @@ import { LEGACY_VIDEO_MODEL_IDS } from '~/data/video-prices'
 import { VIDEO_RATES, videoUsd } from '#shared/pricing/videoRates'
 import { effectiveVideoSettings } from '#shared/pricing/videoSettings'
 import { ENHANCE_ENGINE_SLUGS, UPSCALE_ENGINE_SLUGS } from '#shared/pricing/editSettings'
+import { PAID_NODE_CLASSES } from '#shared/pricing/paidSettings'
 import { MODEL_PRICED_NODE_CLASSES, REMOTE_VIDEO_NODE_CLASSES, SETTING_PRICED_NODE_CLASSES, UnpricedGraphError, priceGraph } from '../../server/utils/priceBook'
 
 // The hosted node badge must price a model-picker node from the model the user
@@ -35,7 +36,8 @@ describe('MODEL_PRICED_BADGE_CLASSES', () => {
   })
 
   it('is the same set the server price book prices from widgets: by model, (Task P4) the edit tools by their settings, (Task P5) the older video and lip-sync nodes per second, and (Task F23) Enhance a video while its switch moves it to fal', () => {
-    expect([...MODEL_PRICED_BADGE_CLASSES].sort()).toEqual([...MODEL_PRICED_NODE_CLASSES, ...SETTING_PRICED_NODE_CLASSES, ...REMOTE_VIDEO_NODE_CLASSES, 'EnhanceVideoNode', 'PersonSwapVideo'].sort())
+    // + step 3, R3: the paid classes priced by their calls (R3.3 the LLM text nodes, R3.4 describe, read and find).
+    expect([...MODEL_PRICED_BADGE_CLASSES].sort()).toEqual([...MODEL_PRICED_NODE_CLASSES, ...SETTING_PRICED_NODE_CLASSES, ...REMOTE_VIDEO_NODE_CLASSES, 'EnhanceVideoNode', 'PersonSwapVideo', ...PAID_NODE_CLASSES].sort())
   })
 })
 

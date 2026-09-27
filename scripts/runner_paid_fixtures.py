@@ -668,9 +668,106 @@ def llm_group() -> dict:
     return {"cases": cases, "isdigit_ranges": ranges}
 
 
+# ── describe (R3.4): Describe an image (+ twin), Describe a video, Extract text, Find objects ──
+
+DESCRIBE_PROMPTS = {
+    "default": "Describe this image in detail.",
+    "empty": "",
+    "non-ASCII": "Qu'y a-t-il sur l'étiquette ? 日本語 \U0001f98a",
+}
+
+VIDEO_URL = "https://example.test/clip.mp4"
+
+
+def _body(raw_output: str) -> dict:
+    """A Replicate prediction body as text, its `output` written as given (numbers keep their form)."""
+    return {"__body__": '{"id": "p1", "status": "succeeded", "output": ' + raw_output + ', "metrics": {"predict_time": 0.4}}'}
+
+
+TEXT_ANSWERS = {
+    "token list": _body('["A ", "red", " fox", ".", "  "]'),
+    "string with spaces": _body('"  \\n A tidy caption.\\u3000 \\n"'),
+    "null": _body("null"),
+    "mixed list": _body("[1, 2.0, true, null, \"x\"]"),
+    "empty list": _body("[]"),
+    "number": _body("42"),
+    "float": _body("1e5"),
+    "false": _body("false"),
+    "non-ASCII string": _body('"Caf\\u00e9 — \U0001f98a"'),
+}
+
+EXTRACT_ANSWERS = {
+    "pages list": _body('["# Page 1\\n", "Page 2 \\u2603", 3, 2.0, null, true]'),
+    "empty list": _body("[]"),
+    "dict text": _body('{"text": "  Hello text  ", "markdown": "ignored"}'),
+    "dict markdown": _body('{"markdown": "# Title\\n\\nBody", "transcription": "ignored"}'),
+    "dict transcription": _body('{"transcription": "spoken words"}'),
+    "dict falsy text": _body('{"text": "", "markdown": 0, "transcription": "third"}'),
+    "dict number": _body('{"markdown": 12.0}'),
+    "dict none": _body('{"pages": 2, "blocks": []}'),
+    "empty dict": _body("{}"),
+    "string": _body('"  plain markdown\\n"'),
+    "null": _body("null"),
+    "number": _body("7"),
+    "true": _body("true"),
+}
+
+FIND_ANSWERS = {
+    "string": _body('"{\\"objects\\": [1.0, 2]}  "'),
+    "dict with floats": _body('{"detections": [{"label": "caf\\u00e9", "confidence": 0.9, "x": 12.0, "y": 1e-3, "width": 1E2, '
+                              '"height": 5, "big": 123456789012345678901}], "count": 1, "ok": true, "none": null}'),
+    "list": _body('[{"label": "person", "box": [0.0, 10.5, -0.0, 2.5e+16]}, "\\u65e5\\u672c", []]'),
+    "null": _body("null"),
+    "number": _body("3.0"),
+    "empty dict": _body("{}"),
+    # (No NaN or Infinity: Replicate answers in strict JSON, and the runner's clients read it with JSON.parse.)
+    "nested": _body('{"a": {"b": {"c": [[], {}, [1.0, -0.0, 1e300, 1.5e-7]]}}}'),
+}
+
+
+def describe_group() -> dict:
+    import runner_builder_fixtures as rbf
+    nr, _fal, _extras = rbf._node_modules()
+    cases: list = []
+
+    def add(name, cls, widgets, answers, pictures=("image",)):
+        cases.append(paid_case(name, cls, widgets, answers, pictures=list(pictures)))
+
+    caption = [TEXT_ANSWERS["token list"]]
+    # Describe an image, its hidden twin and Describe a video: every prompt, then every answer shape.
+    for pname, prompt in DESCRIBE_PROMPTS.items():
+        add(f"describe · {pname}", nr.DescribeImageNode, {"model": "Moondream 2", "prompt": prompt}, caption)
+        add(f"describe twin · {pname}", nr.DescribeImageRemoteNode, {"prompt": prompt}, caption)
+        add(f"video · {pname}", nr.DescribeVideoNode, {"model": "Gemini 2.5 Flash", "video_url": VIDEO_URL, "prompt": prompt}, caption, pictures=())
+    for aname, ans in TEXT_ANSWERS.items():
+        add(f"answer · describe · {aname}", nr.DescribeImageNode, {"model": "Moondream 2", "prompt": "What is it?"}, [ans])
+        add(f"answer · describe twin · {aname}", nr.DescribeImageRemoteNode, {"prompt": "What is it?"}, [ans])
+        add(f"answer · video · {aname}", nr.DescribeVideoNode,
+            {"model": "Gemini 2.5 Flash", "video_url": VIDEO_URL, "prompt": "Summarize."}, [ans], pictures=())
+    # Describe a video with no address: Python raises before any call.
+    add("video · blank address", nr.DescribeVideoNode, {"model": "Gemini 2.5 Flash", "video_url": "", "prompt": "Describe."}, [], pictures=())
+    # An address of spaces is sent as it is (Python's `if not video_url`).
+    add("video · spaces address", nr.DescribeVideoNode, {"model": "Gemini 2.5 Flash", "video_url": "   ", "prompt": "Describe."}, caption, pictures=())
+
+    # Extract text: every answer shape.
+    for aname, ans in EXTRACT_ANSWERS.items():
+        add(f"extract · {aname}", nr.ExtractTextNode, {"model": "ByteDance Dolphin"}, [ans])
+
+    # Find objects: confidence 0, 0.25 and 1; the default query, an empty one, one with spaces and commas, non-ASCII.
+    found = [FIND_ANSWERS["dict with floats"]]
+    for conf in (0.0, 0.25, 1.0):
+        add(f"find · confidence {conf}", nr.FindObjectsNode, {"model": "YOLO-World", "query": "person, car, dog", "confidence": conf}, found)
+    for qname, query in {"empty": "", "spaces and commas": "  red car ,, person ,  traffic light,", "non-ASCII": "café, 猫"}.items():
+        add(f"find · query {qname}", nr.FindObjectsNode, {"model": "YOLO-World", "query": query, "confidence": 0.25}, found)
+    for aname, ans in FIND_ANSWERS.items():
+        add(f"answer · find · {aname}", nr.FindObjectsNode, {"model": "YOLO-World", "query": "person", "confidence": 0.25}, [ans])
+    return {"cases": cases}
+
+
 GROUPS = {
     "machinery": machinery_group,
     "llm": llm_group,
+    "describe": describe_group,
 }
 
 

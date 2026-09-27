@@ -139,6 +139,11 @@ export const PAID_TEXT_INPUTS: Readonly<Record<string, readonly string[]>> = {
   RewriteToneNode: ['text'],
   BrainstormIdeasNode: ['topic'],
   ReasonStepByStepNode: ['question'],
+  // R3.4, describe, read and find (Extract text sends no text).
+  DescribeImageNode: ['prompt'],
+  DescribeImageRemoteNode: ['prompt'],
+  DescribeVideoNode: ['prompt'],
+  FindObjectsNode: ['query'],
 }
 
 /** The non-blank values of RUNNER_EXTRA_TEXT_INPUTS (a typed-in taste, a paid class's PAID_TEXT_INPUTS) across the prompt, each on its own. */

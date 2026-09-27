@@ -96,6 +96,24 @@ export const PAID_RATES: Record<string, PaidRate> = {
   'anthropic/claude-4.5-haiku': REPLICATE_TOKEN_CARD('anthropic/claude-4.5-haiku', 1, 5),
   'google/gemini-3-flash': REPLICATE_TOKEN_CARD('google/gemini-3-flash', 0.5, 3),
   'deepseek-ai/deepseek-r1': REPLICATE_TOKEN_CARD('deepseek-ai/deepseek-r1', 3.75, 10), // output "$0.01 per thousand"
+  // R3.4, describe, read and find. Describe a video on Gemini 2.5 Flash: the
+  // page's billing table ("$0.30 per million input tokens", "$2.50 per
+  // million output tokens"; `token_input_count` / `token_output_count`).
+  'google/gemini-2.5-flash': REPLICATE_TOKEN_CARD('google/gemini-2.5-flash', 0.3, 2.5),
+  // Extract text on Dolphin, billed by GPU time (Nvidia T4, $0.000225/s): the
+  // page says "approximately $0.0052 to run", written here rounded up to the
+  // next tenth of a cent. An estimate until the live check measures it.
+  'bytedance/dolphin': {
+    unit: 'gpu_ceiling', usd: 0.006, note: 'T4 at $0.000225/s; page: approximately $0.0052 to run (read 2026-09-27), rounded up to the next $0.001',
+    service: 'replicate', source: 'https://replicate.com/bytedance/dolphin', read: '2026-09-27', confidence: 'estimate',
+  },
+  // Find objects on YOLO-World, billed by GPU time (Nvidia L40S,
+  // $0.000975/s): "approximately $0.00098 to run", rounded up the same way.
+  'zsxkib/yolo-world': {
+    unit: 'gpu_ceiling', usd: 0.001, note: 'L40S at $0.000975/s; page: approximately $0.00098 to run (read 2026-09-27), rounded up to the next $0.001',
+    service: 'replicate', source: 'https://replicate.com/zsxkib/yolo-world', read: '2026-09-27', confidence: 'estimate',
+  },
+  // (Describe an image's moondream2 is priced by its edit card, editRates.ts: $0.002, an estimate.)
 }
 
 const own = <T>(o: Record<string, T>, k: string): T | undefined =>

@@ -122,6 +122,7 @@ import { effectSpec } from './effects/table'
 import { planEffect } from './effects/plan'
 import { planPainter } from './effects/painter'
 import { planLlm } from './generators/llm'
+import { planDescribe } from './generators/describe'
 import type { KeptExt } from './keptBytes'
 import type { AnswerKind } from './answerDownload'
 import { filesOf } from './values'
@@ -1044,6 +1045,13 @@ async function planNodeRequest(ctx: PlanContext): Promise<NodePlan> {
     case 'BrainstormIdeasNode':
     case 'ReasonStepByStepNode':
       return planLlm(ctx)
+    // ── describe (R3.4): Describe an image (+ twin), Describe a video, Extract text, Find objects (generators/describe.ts) ──
+    case 'DescribeImageNode':
+    case 'DescribeImageRemoteNode':
+    case 'DescribeVideoNode':
+    case 'ExtractTextNode':
+    case 'FindObjectsNode':
+      return planDescribe(ctx)
     case 'Text': return staticDerive(ctx, textCardUi)
     case 'Moodboard': return staticDerive(ctx)
     case 'Model3D': return staticDerive(ctx, textCardUi)

@@ -328,8 +328,8 @@ export function llmText(out: PyJson): string {
   return pyStrip(text)
 }
 
-/** Python's `not x` for a JSON value. */
-function pyFalsy(v: PyJson): boolean {
+/** Python's `not x` for a JSON value (also Extract text's `or` chain, R3.4). */
+export function pyFalsy(v: PyJson): boolean {
   if (v === null || v === false) return true
   if (v === true) return false
   if (typeof v === 'string') return v.length === 0

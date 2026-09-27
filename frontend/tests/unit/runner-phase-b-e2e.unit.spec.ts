@@ -720,6 +720,8 @@ describe('B10 · one workflow per family, POST /api/runs to the last event', () 
       'effects-tone', 'effects-blur', 'effects-cells', 'effects-warp', 'effects-mask', 'effects-noise', 'shader-bake', 'live-previews',
       // The LLM text nodes (R3.3) hand on text, not files: their end-to-end is runner-paid-llm.unit.spec.ts.
       'llm-text',
+      // Describe, read and find (R3.4) hand on text and JSON: runner-paid-describe.unit.spec.ts.
+      'describe',
     ]
     expect(FLOWS.map(f => f.family).sort()).toEqual(RUNNER_FAMILIES.filter(f => !local.includes(f)).sort())
   })

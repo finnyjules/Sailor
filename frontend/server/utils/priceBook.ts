@@ -155,7 +155,15 @@ export { VIDEO_RATES, MODEL_PRICED_NODE_CLASSES, SETTING_PRICED_NODE_CLASSES, RE
 // request can cost (the text sent, one token per byte, plus the answer limit
 // sent), the charge what the prediction reports it used. On the ComfyUI path
 // (which can't read the usage) the charge is that ceiling. No other price moves.
-export const PRICE_BOOK_VERSION = 'r3-llm-text'
+// r3-describe (step 3, R3.4, ruling (a)): Describe an image (+ twin), Describe
+// a video, Extract text and Find objects leave their flat rows for their
+// calls: moondream2 at its edit card ($0.002, 1 credit, unchanged), Dolphin
+// and YOLO-World at their GPU-time pages (estimates: 2 and 1 credits), and
+// Describe a video by the token on Replicate's Gemini 2.5 Flash card, its
+// video counted by its length (300 tokens a second; unmeasured, 45 minutes).
+// The ComfyUI path (which can't read the usage or see a video's length) is
+// charged the ceiling.
+export const PRICE_BOOK_VERSION = 'r3-describe'
 
 export const BASE_RENDER_CREDITS = 1
 
@@ -340,11 +348,8 @@ export const GRAPH_NODE_CREDITS: Record<string, number> = {
   Generate3DNode: 45,              // badge $0.30
 
   // — vision / text utility —
-  DescribeImageRemoteNode: 1,      // badge $0.001
-  DescribeImageNode: 1,            // badge $0.001
-  DescribeVideoNode: 2,            // badge $0.01
-  ExtractTextNode: 1,              // badge $0.005
-  FindObjectsNode: 1,              // badge $0.005
+  // Describe an image (+ its twin), Describe a video, Extract text and Find
+  // objects are priced by their calls since R3.4 (shared/pricing/paidSettings.ts), on both paths.
   // The seven LLM text nodes (Chat, Improve a prompt, Summarize, Translate,
   // Rewrite, Brainstorm, Think step by step) are priced by their tokens
   // since R3.3 (shared/pricing/paidSettings.ts), on both paths.

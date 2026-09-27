@@ -53,6 +53,8 @@ export const RUNNER_OUTPUT_CLASSES: ReadonlySet<string> = new Set([
   // R3.3: the LLM text nodes are ComfyUI output nodes (is_output_node=True).
   'ChatLLMNode', 'ImprovePromptNode', 'SummarizeTextNode', 'TranslateTextNode',
   'RewriteToneNode', 'BrainstormIdeasNode', 'ReasonStepByStepNode',
+  // R3.4: describe, read and find are output nodes too (the twin as well).
+  'DescribeImageNode', 'DescribeImageRemoteNode', 'DescribeVideoNode', 'ExtractTextNode', 'FindObjectsNode',
 ])
 
 /** ComfyUI's node_errors entry for a node that failed validation. */

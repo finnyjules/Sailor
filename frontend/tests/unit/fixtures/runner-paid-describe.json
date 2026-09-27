@@ -1,0 +1,2345 @@
+{
+ "cases": [
+  {
+   "answers": [
+    {
+     "__body__": "{\"id\": \"p1\", \"status\": \"succeeded\", \"output\": [\"A \", \"red\", \" fox\", \".\", \"  \"], \"metrics\": {\"predict_time\": 0.4}}"
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "lucataco/moondream2",
+     "payload": {
+      "image": "IMG:image",
+      "prompt": "Describe this image in detail."
+     },
+     "payload_json": "{\"image\": \"IMG:image\", \"prompt\": \"Describe this image in detail.\"}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "DescribeImageNode",
+   "gets": [],
+   "name": "describe \u00b7 default",
+   "output": [
+    "A red fox."
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "model": "Moondream 2",
+    "prompt": "Describe this image in detail."
+   }
+  },
+  {
+   "answers": [
+    {
+     "__body__": "{\"id\": \"p1\", \"status\": \"succeeded\", \"output\": [\"A \", \"red\", \" fox\", \".\", \"  \"], \"metrics\": {\"predict_time\": 0.4}}"
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "lucataco/moondream2",
+     "payload": {
+      "image": "IMG:image",
+      "prompt": "Describe this image in detail."
+     },
+     "payload_json": "{\"image\": \"IMG:image\", \"prompt\": \"Describe this image in detail.\"}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "DescribeImageRemoteNode",
+   "gets": [],
+   "name": "describe twin \u00b7 default",
+   "output": [
+    "A red fox."
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "prompt": "Describe this image in detail."
+   }
+  },
+  {
+   "answers": [
+    {
+     "__body__": "{\"id\": \"p1\", \"status\": \"succeeded\", \"output\": [\"A \", \"red\", \" fox\", \".\", \"  \"], \"metrics\": {\"predict_time\": 0.4}}"
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "google/gemini-2.5-flash",
+     "payload": {
+      "prompt": "Describe this image in detail.",
+      "videos": [
+       "https://example.test/clip.mp4"
+      ]
+     },
+     "payload_json": "{\"prompt\": \"Describe this image in detail.\", \"videos\": [\"https://example.test/clip.mp4\"]}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "DescribeVideoNode",
+   "gets": [],
+   "name": "video \u00b7 default",
+   "output": [
+    "A red fox."
+   ],
+   "picture_files": {},
+   "pictures": [],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "model": "Gemini 2.5 Flash",
+    "prompt": "Describe this image in detail.",
+    "video_url": "https://example.test/clip.mp4"
+   }
+  },
+  {
+   "answers": [
+    {
+     "__body__": "{\"id\": \"p1\", \"status\": \"succeeded\", \"output\": [\"A \", \"red\", \" fox\", \".\", \"  \"], \"metrics\": {\"predict_time\": 0.4}}"
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "lucataco/moondream2",
+     "payload": {
+      "image": "IMG:image",
+      "prompt": ""
+     },
+     "payload_json": "{\"image\": \"IMG:image\", \"prompt\": \"\"}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "DescribeImageNode",
+   "gets": [],
+   "name": "describe \u00b7 empty",
+   "output": [
+    "A red fox."
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "model": "Moondream 2",
+    "prompt": ""
+   }
+  },
+  {
+   "answers": [
+    {
+     "__body__": "{\"id\": \"p1\", \"status\": \"succeeded\", \"output\": [\"A \", \"red\", \" fox\", \".\", \"  \"], \"metrics\": {\"predict_time\": 0.4}}"
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "lucataco/moondream2",
+     "payload": {
+      "image": "IMG:image",
+      "prompt": ""
+     },
+     "payload_json": "{\"image\": \"IMG:image\", \"prompt\": \"\"}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "DescribeImageRemoteNode",
+   "gets": [],
+   "name": "describe twin \u00b7 empty",
+   "output": [
+    "A red fox."
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "prompt": ""
+   }
+  },
+  {
+   "answers": [
+    {
+     "__body__": "{\"id\": \"p1\", \"status\": \"succeeded\", \"output\": [\"A \", \"red\", \" fox\", \".\", \"  \"], \"metrics\": {\"predict_time\": 0.4}}"
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "google/gemini-2.5-flash",
+     "payload": {
+      "prompt": "",
+      "videos": [
+       "https://example.test/clip.mp4"
+      ]
+     },
+     "payload_json": "{\"prompt\": \"\", \"videos\": [\"https://example.test/clip.mp4\"]}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "DescribeVideoNode",
+   "gets": [],
+   "name": "video \u00b7 empty",
+   "output": [
+    "A red fox."
+   ],
+   "picture_files": {},
+   "pictures": [],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "model": "Gemini 2.5 Flash",
+    "prompt": "",
+    "video_url": "https://example.test/clip.mp4"
+   }
+  },
+  {
+   "answers": [
+    {
+     "__body__": "{\"id\": \"p1\", \"status\": \"succeeded\", \"output\": [\"A \", \"red\", \" fox\", \".\", \"  \"], \"metrics\": {\"predict_time\": 0.4}}"
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "lucataco/moondream2",
+     "payload": {
+      "image": "IMG:image",
+      "prompt": "Qu'y a-t-il sur l'\u00e9tiquette ? \u65e5\u672c\u8a9e \ud83e\udd8a"
+     },
+     "payload_json": "{\"image\": \"IMG:image\", \"prompt\": \"Qu'y a-t-il sur l'\\u00e9tiquette ? \\u65e5\\u672c\\u8a9e \\ud83e\\udd8a\"}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "DescribeImageNode",
+   "gets": [],
+   "name": "describe \u00b7 non-ASCII",
+   "output": [
+    "A red fox."
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "model": "Moondream 2",
+    "prompt": "Qu'y a-t-il sur l'\u00e9tiquette ? \u65e5\u672c\u8a9e \ud83e\udd8a"
+   }
+  },
+  {
+   "answers": [
+    {
+     "__body__": "{\"id\": \"p1\", \"status\": \"succeeded\", \"output\": [\"A \", \"red\", \" fox\", \".\", \"  \"], \"metrics\": {\"predict_time\": 0.4}}"
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "lucataco/moondream2",
+     "payload": {
+      "image": "IMG:image",
+      "prompt": "Qu'y a-t-il sur l'\u00e9tiquette ? \u65e5\u672c\u8a9e \ud83e\udd8a"
+     },
+     "payload_json": "{\"image\": \"IMG:image\", \"prompt\": \"Qu'y a-t-il sur l'\\u00e9tiquette ? \\u65e5\\u672c\\u8a9e \\ud83e\\udd8a\"}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "DescribeImageRemoteNode",
+   "gets": [],
+   "name": "describe twin \u00b7 non-ASCII",
+   "output": [
+    "A red fox."
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "prompt": "Qu'y a-t-il sur l'\u00e9tiquette ? \u65e5\u672c\u8a9e \ud83e\udd8a"
+   }
+  },
+  {
+   "answers": [
+    {
+     "__body__": "{\"id\": \"p1\", \"status\": \"succeeded\", \"output\": [\"A \", \"red\", \" fox\", \".\", \"  \"], \"metrics\": {\"predict_time\": 0.4}}"
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "google/gemini-2.5-flash",
+     "payload": {
+      "prompt": "Qu'y a-t-il sur l'\u00e9tiquette ? \u65e5\u672c\u8a9e \ud83e\udd8a",
+      "videos": [
+       "https://example.test/clip.mp4"
+      ]
+     },
+     "payload_json": "{\"prompt\": \"Qu'y a-t-il sur l'\\u00e9tiquette ? \\u65e5\\u672c\\u8a9e \\ud83e\\udd8a\", \"videos\": [\"https://example.test/clip.mp4\"]}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "DescribeVideoNode",
+   "gets": [],
+   "name": "video \u00b7 non-ASCII",
+   "output": [
+    "A red fox."
+   ],
+   "picture_files": {},
+   "pictures": [],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "model": "Gemini 2.5 Flash",
+    "prompt": "Qu'y a-t-il sur l'\u00e9tiquette ? \u65e5\u672c\u8a9e \ud83e\udd8a",
+    "video_url": "https://example.test/clip.mp4"
+   }
+  },
+  {
+   "answers": [
+    {
+     "__body__": "{\"id\": \"p1\", \"status\": \"succeeded\", \"output\": [\"A \", \"red\", \" fox\", \".\", \"  \"], \"metrics\": {\"predict_time\": 0.4}}"
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "lucataco/moondream2",
+     "payload": {
+      "image": "IMG:image",
+      "prompt": "What is it?"
+     },
+     "payload_json": "{\"image\": \"IMG:image\", \"prompt\": \"What is it?\"}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "DescribeImageNode",
+   "gets": [],
+   "name": "answer \u00b7 describe \u00b7 token list",
+   "output": [
+    "A red fox."
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "model": "Moondream 2",
+    "prompt": "What is it?"
+   }
+  },
+  {
+   "answers": [
+    {
+     "__body__": "{\"id\": \"p1\", \"status\": \"succeeded\", \"output\": [\"A \", \"red\", \" fox\", \".\", \"  \"], \"metrics\": {\"predict_time\": 0.4}}"
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "lucataco/moondream2",
+     "payload": {
+      "image": "IMG:image",
+      "prompt": "What is it?"
+     },
+     "payload_json": "{\"image\": \"IMG:image\", \"prompt\": \"What is it?\"}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "DescribeImageRemoteNode",
+   "gets": [],
+   "name": "answer \u00b7 describe twin \u00b7 token list",
+   "output": [
+    "A red fox."
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "prompt": "What is it?"
+   }
+  },
+  {
+   "answers": [
+    {
+     "__body__": "{\"id\": \"p1\", \"status\": \"succeeded\", \"output\": [\"A \", \"red\", \" fox\", \".\", \"  \"], \"metrics\": {\"predict_time\": 0.4}}"
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "google/gemini-2.5-flash",
+     "payload": {
+      "prompt": "Summarize.",
+      "videos": [
+       "https://example.test/clip.mp4"
+      ]
+     },
+     "payload_json": "{\"prompt\": \"Summarize.\", \"videos\": [\"https://example.test/clip.mp4\"]}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "DescribeVideoNode",
+   "gets": [],
+   "name": "answer \u00b7 video \u00b7 token list",
+   "output": [
+    "A red fox."
+   ],
+   "picture_files": {},
+   "pictures": [],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "model": "Gemini 2.5 Flash",
+    "prompt": "Summarize.",
+    "video_url": "https://example.test/clip.mp4"
+   }
+  },
+  {
+   "answers": [
+    {
+     "__body__": "{\"id\": \"p1\", \"status\": \"succeeded\", \"output\": \"  \\n A tidy caption.\\u3000 \\n\", \"metrics\": {\"predict_time\": 0.4}}"
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "lucataco/moondream2",
+     "payload": {
+      "image": "IMG:image",
+      "prompt": "What is it?"
+     },
+     "payload_json": "{\"image\": \"IMG:image\", \"prompt\": \"What is it?\"}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "DescribeImageNode",
+   "gets": [],
+   "name": "answer \u00b7 describe \u00b7 string with spaces",
+   "output": [
+    "A tidy caption."
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "model": "Moondream 2",
+    "prompt": "What is it?"
+   }
+  },
+  {
+   "answers": [
+    {
+     "__body__": "{\"id\": \"p1\", \"status\": \"succeeded\", \"output\": \"  \\n A tidy caption.\\u3000 \\n\", \"metrics\": {\"predict_time\": 0.4}}"
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "lucataco/moondream2",
+     "payload": {
+      "image": "IMG:image",
+      "prompt": "What is it?"
+     },
+     "payload_json": "{\"image\": \"IMG:image\", \"prompt\": \"What is it?\"}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "DescribeImageRemoteNode",
+   "gets": [],
+   "name": "answer \u00b7 describe twin \u00b7 string with spaces",
+   "output": [
+    "A tidy caption."
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "prompt": "What is it?"
+   }
+  },
+  {
+   "answers": [
+    {
+     "__body__": "{\"id\": \"p1\", \"status\": \"succeeded\", \"output\": \"  \\n A tidy caption.\\u3000 \\n\", \"metrics\": {\"predict_time\": 0.4}}"
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "google/gemini-2.5-flash",
+     "payload": {
+      "prompt": "Summarize.",
+      "videos": [
+       "https://example.test/clip.mp4"
+      ]
+     },
+     "payload_json": "{\"prompt\": \"Summarize.\", \"videos\": [\"https://example.test/clip.mp4\"]}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "DescribeVideoNode",
+   "gets": [],
+   "name": "answer \u00b7 video \u00b7 string with spaces",
+   "output": [
+    "A tidy caption."
+   ],
+   "picture_files": {},
+   "pictures": [],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "model": "Gemini 2.5 Flash",
+    "prompt": "Summarize.",
+    "video_url": "https://example.test/clip.mp4"
+   }
+  },
+  {
+   "answers": [
+    {
+     "__body__": "{\"id\": \"p1\", \"status\": \"succeeded\", \"output\": null, \"metrics\": {\"predict_time\": 0.4}}"
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "lucataco/moondream2",
+     "payload": {
+      "image": "IMG:image",
+      "prompt": "What is it?"
+     },
+     "payload_json": "{\"image\": \"IMG:image\", \"prompt\": \"What is it?\"}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "DescribeImageNode",
+   "gets": [],
+   "name": "answer \u00b7 describe \u00b7 null",
+   "output": [
+    ""
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "model": "Moondream 2",
+    "prompt": "What is it?"
+   }
+  },
+  {
+   "answers": [
+    {
+     "__body__": "{\"id\": \"p1\", \"status\": \"succeeded\", \"output\": null, \"metrics\": {\"predict_time\": 0.4}}"
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "lucataco/moondream2",
+     "payload": {
+      "image": "IMG:image",
+      "prompt": "What is it?"
+     },
+     "payload_json": "{\"image\": \"IMG:image\", \"prompt\": \"What is it?\"}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "DescribeImageRemoteNode",
+   "gets": [],
+   "name": "answer \u00b7 describe twin \u00b7 null",
+   "output": [
+    ""
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "prompt": "What is it?"
+   }
+  },
+  {
+   "answers": [
+    {
+     "__body__": "{\"id\": \"p1\", \"status\": \"succeeded\", \"output\": null, \"metrics\": {\"predict_time\": 0.4}}"
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "google/gemini-2.5-flash",
+     "payload": {
+      "prompt": "Summarize.",
+      "videos": [
+       "https://example.test/clip.mp4"
+      ]
+     },
+     "payload_json": "{\"prompt\": \"Summarize.\", \"videos\": [\"https://example.test/clip.mp4\"]}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "DescribeVideoNode",
+   "gets": [],
+   "name": "answer \u00b7 video \u00b7 null",
+   "output": [
+    ""
+   ],
+   "picture_files": {},
+   "pictures": [],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "model": "Gemini 2.5 Flash",
+    "prompt": "Summarize.",
+    "video_url": "https://example.test/clip.mp4"
+   }
+  },
+  {
+   "answers": [
+    {
+     "__body__": "{\"id\": \"p1\", \"status\": \"succeeded\", \"output\": [1, 2.0, true, null, \"x\"], \"metrics\": {\"predict_time\": 0.4}}"
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "lucataco/moondream2",
+     "payload": {
+      "image": "IMG:image",
+      "prompt": "What is it?"
+     },
+     "payload_json": "{\"image\": \"IMG:image\", \"prompt\": \"What is it?\"}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "DescribeImageNode",
+   "gets": [],
+   "name": "answer \u00b7 describe \u00b7 mixed list",
+   "output": [
+    "12.0TrueNonex"
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "model": "Moondream 2",
+    "prompt": "What is it?"
+   }
+  },
+  {
+   "answers": [
+    {
+     "__body__": "{\"id\": \"p1\", \"status\": \"succeeded\", \"output\": [1, 2.0, true, null, \"x\"], \"metrics\": {\"predict_time\": 0.4}}"
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "lucataco/moondream2",
+     "payload": {
+      "image": "IMG:image",
+      "prompt": "What is it?"
+     },
+     "payload_json": "{\"image\": \"IMG:image\", \"prompt\": \"What is it?\"}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "DescribeImageRemoteNode",
+   "gets": [],
+   "name": "answer \u00b7 describe twin \u00b7 mixed list",
+   "output": [
+    "12.0TrueNonex"
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "prompt": "What is it?"
+   }
+  },
+  {
+   "answers": [
+    {
+     "__body__": "{\"id\": \"p1\", \"status\": \"succeeded\", \"output\": [1, 2.0, true, null, \"x\"], \"metrics\": {\"predict_time\": 0.4}}"
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "google/gemini-2.5-flash",
+     "payload": {
+      "prompt": "Summarize.",
+      "videos": [
+       "https://example.test/clip.mp4"
+      ]
+     },
+     "payload_json": "{\"prompt\": \"Summarize.\", \"videos\": [\"https://example.test/clip.mp4\"]}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "DescribeVideoNode",
+   "gets": [],
+   "name": "answer \u00b7 video \u00b7 mixed list",
+   "output": [
+    "12.0TrueNonex"
+   ],
+   "picture_files": {},
+   "pictures": [],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "model": "Gemini 2.5 Flash",
+    "prompt": "Summarize.",
+    "video_url": "https://example.test/clip.mp4"
+   }
+  },
+  {
+   "answers": [
+    {
+     "__body__": "{\"id\": \"p1\", \"status\": \"succeeded\", \"output\": [], \"metrics\": {\"predict_time\": 0.4}}"
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "lucataco/moondream2",
+     "payload": {
+      "image": "IMG:image",
+      "prompt": "What is it?"
+     },
+     "payload_json": "{\"image\": \"IMG:image\", \"prompt\": \"What is it?\"}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "DescribeImageNode",
+   "gets": [],
+   "name": "answer \u00b7 describe \u00b7 empty list",
+   "output": [
+    ""
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "model": "Moondream 2",
+    "prompt": "What is it?"
+   }
+  },
+  {
+   "answers": [
+    {
+     "__body__": "{\"id\": \"p1\", \"status\": \"succeeded\", \"output\": [], \"metrics\": {\"predict_time\": 0.4}}"
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "lucataco/moondream2",
+     "payload": {
+      "image": "IMG:image",
+      "prompt": "What is it?"
+     },
+     "payload_json": "{\"image\": \"IMG:image\", \"prompt\": \"What is it?\"}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "DescribeImageRemoteNode",
+   "gets": [],
+   "name": "answer \u00b7 describe twin \u00b7 empty list",
+   "output": [
+    ""
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "prompt": "What is it?"
+   }
+  },
+  {
+   "answers": [
+    {
+     "__body__": "{\"id\": \"p1\", \"status\": \"succeeded\", \"output\": [], \"metrics\": {\"predict_time\": 0.4}}"
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "google/gemini-2.5-flash",
+     "payload": {
+      "prompt": "Summarize.",
+      "videos": [
+       "https://example.test/clip.mp4"
+      ]
+     },
+     "payload_json": "{\"prompt\": \"Summarize.\", \"videos\": [\"https://example.test/clip.mp4\"]}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "DescribeVideoNode",
+   "gets": [],
+   "name": "answer \u00b7 video \u00b7 empty list",
+   "output": [
+    ""
+   ],
+   "picture_files": {},
+   "pictures": [],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "model": "Gemini 2.5 Flash",
+    "prompt": "Summarize.",
+    "video_url": "https://example.test/clip.mp4"
+   }
+  },
+  {
+   "answers": [
+    {
+     "__body__": "{\"id\": \"p1\", \"status\": \"succeeded\", \"output\": 42, \"metrics\": {\"predict_time\": 0.4}}"
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "lucataco/moondream2",
+     "payload": {
+      "image": "IMG:image",
+      "prompt": "What is it?"
+     },
+     "payload_json": "{\"image\": \"IMG:image\", \"prompt\": \"What is it?\"}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "DescribeImageNode",
+   "gets": [],
+   "name": "answer \u00b7 describe \u00b7 number",
+   "output": [
+    "42"
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "model": "Moondream 2",
+    "prompt": "What is it?"
+   }
+  },
+  {
+   "answers": [
+    {
+     "__body__": "{\"id\": \"p1\", \"status\": \"succeeded\", \"output\": 42, \"metrics\": {\"predict_time\": 0.4}}"
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "lucataco/moondream2",
+     "payload": {
+      "image": "IMG:image",
+      "prompt": "What is it?"
+     },
+     "payload_json": "{\"image\": \"IMG:image\", \"prompt\": \"What is it?\"}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "DescribeImageRemoteNode",
+   "gets": [],
+   "name": "answer \u00b7 describe twin \u00b7 number",
+   "output": [
+    "42"
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "prompt": "What is it?"
+   }
+  },
+  {
+   "answers": [
+    {
+     "__body__": "{\"id\": \"p1\", \"status\": \"succeeded\", \"output\": 42, \"metrics\": {\"predict_time\": 0.4}}"
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "google/gemini-2.5-flash",
+     "payload": {
+      "prompt": "Summarize.",
+      "videos": [
+       "https://example.test/clip.mp4"
+      ]
+     },
+     "payload_json": "{\"prompt\": \"Summarize.\", \"videos\": [\"https://example.test/clip.mp4\"]}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "DescribeVideoNode",
+   "gets": [],
+   "name": "answer \u00b7 video \u00b7 number",
+   "output": [
+    "42"
+   ],
+   "picture_files": {},
+   "pictures": [],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "model": "Gemini 2.5 Flash",
+    "prompt": "Summarize.",
+    "video_url": "https://example.test/clip.mp4"
+   }
+  },
+  {
+   "answers": [
+    {
+     "__body__": "{\"id\": \"p1\", \"status\": \"succeeded\", \"output\": 1e5, \"metrics\": {\"predict_time\": 0.4}}"
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "lucataco/moondream2",
+     "payload": {
+      "image": "IMG:image",
+      "prompt": "What is it?"
+     },
+     "payload_json": "{\"image\": \"IMG:image\", \"prompt\": \"What is it?\"}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "DescribeImageNode",
+   "gets": [],
+   "name": "answer \u00b7 describe \u00b7 float",
+   "output": [
+    "100000.0"
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "model": "Moondream 2",
+    "prompt": "What is it?"
+   }
+  },
+  {
+   "answers": [
+    {
+     "__body__": "{\"id\": \"p1\", \"status\": \"succeeded\", \"output\": 1e5, \"metrics\": {\"predict_time\": 0.4}}"
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "lucataco/moondream2",
+     "payload": {
+      "image": "IMG:image",
+      "prompt": "What is it?"
+     },
+     "payload_json": "{\"image\": \"IMG:image\", \"prompt\": \"What is it?\"}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "DescribeImageRemoteNode",
+   "gets": [],
+   "name": "answer \u00b7 describe twin \u00b7 float",
+   "output": [
+    "100000.0"
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "prompt": "What is it?"
+   }
+  },
+  {
+   "answers": [
+    {
+     "__body__": "{\"id\": \"p1\", \"status\": \"succeeded\", \"output\": 1e5, \"metrics\": {\"predict_time\": 0.4}}"
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "google/gemini-2.5-flash",
+     "payload": {
+      "prompt": "Summarize.",
+      "videos": [
+       "https://example.test/clip.mp4"
+      ]
+     },
+     "payload_json": "{\"prompt\": \"Summarize.\", \"videos\": [\"https://example.test/clip.mp4\"]}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "DescribeVideoNode",
+   "gets": [],
+   "name": "answer \u00b7 video \u00b7 float",
+   "output": [
+    "100000.0"
+   ],
+   "picture_files": {},
+   "pictures": [],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "model": "Gemini 2.5 Flash",
+    "prompt": "Summarize.",
+    "video_url": "https://example.test/clip.mp4"
+   }
+  },
+  {
+   "answers": [
+    {
+     "__body__": "{\"id\": \"p1\", \"status\": \"succeeded\", \"output\": false, \"metrics\": {\"predict_time\": 0.4}}"
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "lucataco/moondream2",
+     "payload": {
+      "image": "IMG:image",
+      "prompt": "What is it?"
+     },
+     "payload_json": "{\"image\": \"IMG:image\", \"prompt\": \"What is it?\"}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "DescribeImageNode",
+   "gets": [],
+   "name": "answer \u00b7 describe \u00b7 false",
+   "output": [
+    ""
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "model": "Moondream 2",
+    "prompt": "What is it?"
+   }
+  },
+  {
+   "answers": [
+    {
+     "__body__": "{\"id\": \"p1\", \"status\": \"succeeded\", \"output\": false, \"metrics\": {\"predict_time\": 0.4}}"
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "lucataco/moondream2",
+     "payload": {
+      "image": "IMG:image",
+      "prompt": "What is it?"
+     },
+     "payload_json": "{\"image\": \"IMG:image\", \"prompt\": \"What is it?\"}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "DescribeImageRemoteNode",
+   "gets": [],
+   "name": "answer \u00b7 describe twin \u00b7 false",
+   "output": [
+    ""
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "prompt": "What is it?"
+   }
+  },
+  {
+   "answers": [
+    {
+     "__body__": "{\"id\": \"p1\", \"status\": \"succeeded\", \"output\": false, \"metrics\": {\"predict_time\": 0.4}}"
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "google/gemini-2.5-flash",
+     "payload": {
+      "prompt": "Summarize.",
+      "videos": [
+       "https://example.test/clip.mp4"
+      ]
+     },
+     "payload_json": "{\"prompt\": \"Summarize.\", \"videos\": [\"https://example.test/clip.mp4\"]}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "DescribeVideoNode",
+   "gets": [],
+   "name": "answer \u00b7 video \u00b7 false",
+   "output": [
+    ""
+   ],
+   "picture_files": {},
+   "pictures": [],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "model": "Gemini 2.5 Flash",
+    "prompt": "Summarize.",
+    "video_url": "https://example.test/clip.mp4"
+   }
+  },
+  {
+   "answers": [
+    {
+     "__body__": "{\"id\": \"p1\", \"status\": \"succeeded\", \"output\": \"Caf\\u00e9 \u2014 \ud83e\udd8a\", \"metrics\": {\"predict_time\": 0.4}}"
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "lucataco/moondream2",
+     "payload": {
+      "image": "IMG:image",
+      "prompt": "What is it?"
+     },
+     "payload_json": "{\"image\": \"IMG:image\", \"prompt\": \"What is it?\"}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "DescribeImageNode",
+   "gets": [],
+   "name": "answer \u00b7 describe \u00b7 non-ASCII string",
+   "output": [
+    "Caf\u00e9 \u2014 \ud83e\udd8a"
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "model": "Moondream 2",
+    "prompt": "What is it?"
+   }
+  },
+  {
+   "answers": [
+    {
+     "__body__": "{\"id\": \"p1\", \"status\": \"succeeded\", \"output\": \"Caf\\u00e9 \u2014 \ud83e\udd8a\", \"metrics\": {\"predict_time\": 0.4}}"
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "lucataco/moondream2",
+     "payload": {
+      "image": "IMG:image",
+      "prompt": "What is it?"
+     },
+     "payload_json": "{\"image\": \"IMG:image\", \"prompt\": \"What is it?\"}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "DescribeImageRemoteNode",
+   "gets": [],
+   "name": "answer \u00b7 describe twin \u00b7 non-ASCII string",
+   "output": [
+    "Caf\u00e9 \u2014 \ud83e\udd8a"
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "prompt": "What is it?"
+   }
+  },
+  {
+   "answers": [
+    {
+     "__body__": "{\"id\": \"p1\", \"status\": \"succeeded\", \"output\": \"Caf\\u00e9 \u2014 \ud83e\udd8a\", \"metrics\": {\"predict_time\": 0.4}}"
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "google/gemini-2.5-flash",
+     "payload": {
+      "prompt": "Summarize.",
+      "videos": [
+       "https://example.test/clip.mp4"
+      ]
+     },
+     "payload_json": "{\"prompt\": \"Summarize.\", \"videos\": [\"https://example.test/clip.mp4\"]}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "DescribeVideoNode",
+   "gets": [],
+   "name": "answer \u00b7 video \u00b7 non-ASCII string",
+   "output": [
+    "Caf\u00e9 \u2014 \ud83e\udd8a"
+   ],
+   "picture_files": {},
+   "pictures": [],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "model": "Gemini 2.5 Flash",
+    "prompt": "Summarize.",
+    "video_url": "https://example.test/clip.mp4"
+   }
+  },
+  {
+   "answers": [],
+   "calls": [],
+   "class_type": "DescribeVideoNode",
+   "error": {
+    "message": "video_url is required.",
+    "type": "RuntimeError"
+   },
+   "gets": [],
+   "name": "video \u00b7 blank address",
+   "output": null,
+   "picture_files": {},
+   "pictures": [],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "model": "Gemini 2.5 Flash",
+    "prompt": "Describe.",
+    "video_url": ""
+   }
+  },
+  {
+   "answers": [
+    {
+     "__body__": "{\"id\": \"p1\", \"status\": \"succeeded\", \"output\": [\"A \", \"red\", \" fox\", \".\", \"  \"], \"metrics\": {\"predict_time\": 0.4}}"
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "google/gemini-2.5-flash",
+     "payload": {
+      "prompt": "Describe.",
+      "videos": [
+       "   "
+      ]
+     },
+     "payload_json": "{\"prompt\": \"Describe.\", \"videos\": [\"   \"]}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "DescribeVideoNode",
+   "gets": [],
+   "name": "video \u00b7 spaces address",
+   "output": [
+    "A red fox."
+   ],
+   "picture_files": {},
+   "pictures": [],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "model": "Gemini 2.5 Flash",
+    "prompt": "Describe.",
+    "video_url": "   "
+   }
+  },
+  {
+   "answers": [
+    {
+     "__body__": "{\"id\": \"p1\", \"status\": \"succeeded\", \"output\": [\"# Page 1\\n\", \"Page 2 \\u2603\", 3, 2.0, null, true], \"metrics\": {\"predict_time\": 0.4}}"
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "bytedance/dolphin",
+     "payload": {
+      "file": "IMG:image",
+      "output_format": "markdown_content"
+     },
+     "payload_json": "{\"file\": \"IMG:image\", \"output_format\": \"markdown_content\"}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "ExtractTextNode",
+   "gets": [],
+   "name": "extract \u00b7 pages list",
+   "output": [
+    "# Page 1\n\nPage 2 \u2603\n3\n2.0\nNone\nTrue"
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "model": "ByteDance Dolphin"
+   }
+  },
+  {
+   "answers": [
+    {
+     "__body__": "{\"id\": \"p1\", \"status\": \"succeeded\", \"output\": [], \"metrics\": {\"predict_time\": 0.4}}"
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "bytedance/dolphin",
+     "payload": {
+      "file": "IMG:image",
+      "output_format": "markdown_content"
+     },
+     "payload_json": "{\"file\": \"IMG:image\", \"output_format\": \"markdown_content\"}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "ExtractTextNode",
+   "gets": [],
+   "name": "extract \u00b7 empty list",
+   "output": [
+    ""
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "model": "ByteDance Dolphin"
+   }
+  },
+  {
+   "answers": [
+    {
+     "__body__": "{\"id\": \"p1\", \"status\": \"succeeded\", \"output\": {\"text\": \"  Hello text  \", \"markdown\": \"ignored\"}, \"metrics\": {\"predict_time\": 0.4}}"
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "bytedance/dolphin",
+     "payload": {
+      "file": "IMG:image",
+      "output_format": "markdown_content"
+     },
+     "payload_json": "{\"file\": \"IMG:image\", \"output_format\": \"markdown_content\"}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "ExtractTextNode",
+   "gets": [],
+   "name": "extract \u00b7 dict text",
+   "output": [
+    "Hello text"
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "model": "ByteDance Dolphin"
+   }
+  },
+  {
+   "answers": [
+    {
+     "__body__": "{\"id\": \"p1\", \"status\": \"succeeded\", \"output\": {\"markdown\": \"# Title\\n\\nBody\", \"transcription\": \"ignored\"}, \"metrics\": {\"predict_time\": 0.4}}"
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "bytedance/dolphin",
+     "payload": {
+      "file": "IMG:image",
+      "output_format": "markdown_content"
+     },
+     "payload_json": "{\"file\": \"IMG:image\", \"output_format\": \"markdown_content\"}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "ExtractTextNode",
+   "gets": [],
+   "name": "extract \u00b7 dict markdown",
+   "output": [
+    "# Title\n\nBody"
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "model": "ByteDance Dolphin"
+   }
+  },
+  {
+   "answers": [
+    {
+     "__body__": "{\"id\": \"p1\", \"status\": \"succeeded\", \"output\": {\"transcription\": \"spoken words\"}, \"metrics\": {\"predict_time\": 0.4}}"
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "bytedance/dolphin",
+     "payload": {
+      "file": "IMG:image",
+      "output_format": "markdown_content"
+     },
+     "payload_json": "{\"file\": \"IMG:image\", \"output_format\": \"markdown_content\"}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "ExtractTextNode",
+   "gets": [],
+   "name": "extract \u00b7 dict transcription",
+   "output": [
+    "spoken words"
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "model": "ByteDance Dolphin"
+   }
+  },
+  {
+   "answers": [
+    {
+     "__body__": "{\"id\": \"p1\", \"status\": \"succeeded\", \"output\": {\"text\": \"\", \"markdown\": 0, \"transcription\": \"third\"}, \"metrics\": {\"predict_time\": 0.4}}"
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "bytedance/dolphin",
+     "payload": {
+      "file": "IMG:image",
+      "output_format": "markdown_content"
+     },
+     "payload_json": "{\"file\": \"IMG:image\", \"output_format\": \"markdown_content\"}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "ExtractTextNode",
+   "gets": [],
+   "name": "extract \u00b7 dict falsy text",
+   "output": [
+    "third"
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "model": "ByteDance Dolphin"
+   }
+  },
+  {
+   "answers": [
+    {
+     "__body__": "{\"id\": \"p1\", \"status\": \"succeeded\", \"output\": {\"markdown\": 12.0}, \"metrics\": {\"predict_time\": 0.4}}"
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "bytedance/dolphin",
+     "payload": {
+      "file": "IMG:image",
+      "output_format": "markdown_content"
+     },
+     "payload_json": "{\"file\": \"IMG:image\", \"output_format\": \"markdown_content\"}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "ExtractTextNode",
+   "gets": [],
+   "name": "extract \u00b7 dict number",
+   "output": [
+    "12.0"
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "model": "ByteDance Dolphin"
+   }
+  },
+  {
+   "answers": [
+    {
+     "__body__": "{\"id\": \"p1\", \"status\": \"succeeded\", \"output\": {\"pages\": 2, \"blocks\": []}, \"metrics\": {\"predict_time\": 0.4}}"
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "bytedance/dolphin",
+     "payload": {
+      "file": "IMG:image",
+      "output_format": "markdown_content"
+     },
+     "payload_json": "{\"file\": \"IMG:image\", \"output_format\": \"markdown_content\"}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "ExtractTextNode",
+   "gets": [],
+   "name": "extract \u00b7 dict none",
+   "output": [
+    ""
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "model": "ByteDance Dolphin"
+   }
+  },
+  {
+   "answers": [
+    {
+     "__body__": "{\"id\": \"p1\", \"status\": \"succeeded\", \"output\": {}, \"metrics\": {\"predict_time\": 0.4}}"
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "bytedance/dolphin",
+     "payload": {
+      "file": "IMG:image",
+      "output_format": "markdown_content"
+     },
+     "payload_json": "{\"file\": \"IMG:image\", \"output_format\": \"markdown_content\"}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "ExtractTextNode",
+   "gets": [],
+   "name": "extract \u00b7 empty dict",
+   "output": [
+    ""
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "model": "ByteDance Dolphin"
+   }
+  },
+  {
+   "answers": [
+    {
+     "__body__": "{\"id\": \"p1\", \"status\": \"succeeded\", \"output\": \"  plain markdown\\n\", \"metrics\": {\"predict_time\": 0.4}}"
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "bytedance/dolphin",
+     "payload": {
+      "file": "IMG:image",
+      "output_format": "markdown_content"
+     },
+     "payload_json": "{\"file\": \"IMG:image\", \"output_format\": \"markdown_content\"}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "ExtractTextNode",
+   "gets": [],
+   "name": "extract \u00b7 string",
+   "output": [
+    "plain markdown"
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "model": "ByteDance Dolphin"
+   }
+  },
+  {
+   "answers": [
+    {
+     "__body__": "{\"id\": \"p1\", \"status\": \"succeeded\", \"output\": null, \"metrics\": {\"predict_time\": 0.4}}"
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "bytedance/dolphin",
+     "payload": {
+      "file": "IMG:image",
+      "output_format": "markdown_content"
+     },
+     "payload_json": "{\"file\": \"IMG:image\", \"output_format\": \"markdown_content\"}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "ExtractTextNode",
+   "gets": [],
+   "name": "extract \u00b7 null",
+   "output": [
+    ""
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "model": "ByteDance Dolphin"
+   }
+  },
+  {
+   "answers": [
+    {
+     "__body__": "{\"id\": \"p1\", \"status\": \"succeeded\", \"output\": 7, \"metrics\": {\"predict_time\": 0.4}}"
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "bytedance/dolphin",
+     "payload": {
+      "file": "IMG:image",
+      "output_format": "markdown_content"
+     },
+     "payload_json": "{\"file\": \"IMG:image\", \"output_format\": \"markdown_content\"}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "ExtractTextNode",
+   "gets": [],
+   "name": "extract \u00b7 number",
+   "output": [
+    ""
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "model": "ByteDance Dolphin"
+   }
+  },
+  {
+   "answers": [
+    {
+     "__body__": "{\"id\": \"p1\", \"status\": \"succeeded\", \"output\": true, \"metrics\": {\"predict_time\": 0.4}}"
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "bytedance/dolphin",
+     "payload": {
+      "file": "IMG:image",
+      "output_format": "markdown_content"
+     },
+     "payload_json": "{\"file\": \"IMG:image\", \"output_format\": \"markdown_content\"}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "ExtractTextNode",
+   "gets": [],
+   "name": "extract \u00b7 true",
+   "output": [
+    ""
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "model": "ByteDance Dolphin"
+   }
+  },
+  {
+   "answers": [
+    {
+     "__body__": "{\"id\": \"p1\", \"status\": \"succeeded\", \"output\": {\"detections\": [{\"label\": \"caf\\u00e9\", \"confidence\": 0.9, \"x\": 12.0, \"y\": 1e-3, \"width\": 1E2, \"height\": 5, \"big\": 123456789012345678901}], \"count\": 1, \"ok\": true, \"none\": null}, \"metrics\": {\"predict_time\": 0.4}}"
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "zsxkib/yolo-world",
+     "payload": {
+      "class_names": "person, car, dog",
+      "input_media": "IMG:image",
+      "score_thr": 0.0
+     },
+     "payload_json": "{\"class_names\": \"person, car, dog\", \"input_media\": \"IMG:image\", \"score_thr\": 0.0}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "FindObjectsNode",
+   "gets": [],
+   "name": "find \u00b7 confidence 0.0",
+   "output": [
+    "{\"detections\": [{\"label\": \"caf\\u00e9\", \"confidence\": 0.9, \"x\": 12.0, \"y\": 0.001, \"width\": 100.0, \"height\": 5, \"big\": 123456789012345678901}], \"count\": 1, \"ok\": true, \"none\": null}"
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "confidence": 0.0,
+    "model": "YOLO-World",
+    "query": "person, car, dog"
+   }
+  },
+  {
+   "answers": [
+    {
+     "__body__": "{\"id\": \"p1\", \"status\": \"succeeded\", \"output\": {\"detections\": [{\"label\": \"caf\\u00e9\", \"confidence\": 0.9, \"x\": 12.0, \"y\": 1e-3, \"width\": 1E2, \"height\": 5, \"big\": 123456789012345678901}], \"count\": 1, \"ok\": true, \"none\": null}, \"metrics\": {\"predict_time\": 0.4}}"
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "zsxkib/yolo-world",
+     "payload": {
+      "class_names": "person, car, dog",
+      "input_media": "IMG:image",
+      "score_thr": 0.25
+     },
+     "payload_json": "{\"class_names\": \"person, car, dog\", \"input_media\": \"IMG:image\", \"score_thr\": 0.25}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "FindObjectsNode",
+   "gets": [],
+   "name": "find \u00b7 confidence 0.25",
+   "output": [
+    "{\"detections\": [{\"label\": \"caf\\u00e9\", \"confidence\": 0.9, \"x\": 12.0, \"y\": 0.001, \"width\": 100.0, \"height\": 5, \"big\": 123456789012345678901}], \"count\": 1, \"ok\": true, \"none\": null}"
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "confidence": 0.25,
+    "model": "YOLO-World",
+    "query": "person, car, dog"
+   }
+  },
+  {
+   "answers": [
+    {
+     "__body__": "{\"id\": \"p1\", \"status\": \"succeeded\", \"output\": {\"detections\": [{\"label\": \"caf\\u00e9\", \"confidence\": 0.9, \"x\": 12.0, \"y\": 1e-3, \"width\": 1E2, \"height\": 5, \"big\": 123456789012345678901}], \"count\": 1, \"ok\": true, \"none\": null}, \"metrics\": {\"predict_time\": 0.4}}"
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "zsxkib/yolo-world",
+     "payload": {
+      "class_names": "person, car, dog",
+      "input_media": "IMG:image",
+      "score_thr": 1.0
+     },
+     "payload_json": "{\"class_names\": \"person, car, dog\", \"input_media\": \"IMG:image\", \"score_thr\": 1.0}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "FindObjectsNode",
+   "gets": [],
+   "name": "find \u00b7 confidence 1.0",
+   "output": [
+    "{\"detections\": [{\"label\": \"caf\\u00e9\", \"confidence\": 0.9, \"x\": 12.0, \"y\": 0.001, \"width\": 100.0, \"height\": 5, \"big\": 123456789012345678901}], \"count\": 1, \"ok\": true, \"none\": null}"
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "confidence": 1.0,
+    "model": "YOLO-World",
+    "query": "person, car, dog"
+   }
+  },
+  {
+   "answers": [
+    {
+     "__body__": "{\"id\": \"p1\", \"status\": \"succeeded\", \"output\": {\"detections\": [{\"label\": \"caf\\u00e9\", \"confidence\": 0.9, \"x\": 12.0, \"y\": 1e-3, \"width\": 1E2, \"height\": 5, \"big\": 123456789012345678901}], \"count\": 1, \"ok\": true, \"none\": null}, \"metrics\": {\"predict_time\": 0.4}}"
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "zsxkib/yolo-world",
+     "payload": {
+      "class_names": "",
+      "input_media": "IMG:image",
+      "score_thr": 0.25
+     },
+     "payload_json": "{\"class_names\": \"\", \"input_media\": \"IMG:image\", \"score_thr\": 0.25}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "FindObjectsNode",
+   "gets": [],
+   "name": "find \u00b7 query empty",
+   "output": [
+    "{\"detections\": [{\"label\": \"caf\\u00e9\", \"confidence\": 0.9, \"x\": 12.0, \"y\": 0.001, \"width\": 100.0, \"height\": 5, \"big\": 123456789012345678901}], \"count\": 1, \"ok\": true, \"none\": null}"
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "confidence": 0.25,
+    "model": "YOLO-World",
+    "query": ""
+   }
+  },
+  {
+   "answers": [
+    {
+     "__body__": "{\"id\": \"p1\", \"status\": \"succeeded\", \"output\": {\"detections\": [{\"label\": \"caf\\u00e9\", \"confidence\": 0.9, \"x\": 12.0, \"y\": 1e-3, \"width\": 1E2, \"height\": 5, \"big\": 123456789012345678901}], \"count\": 1, \"ok\": true, \"none\": null}, \"metrics\": {\"predict_time\": 0.4}}"
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "zsxkib/yolo-world",
+     "payload": {
+      "class_names": "  red car ,, person ,  traffic light,",
+      "input_media": "IMG:image",
+      "score_thr": 0.25
+     },
+     "payload_json": "{\"class_names\": \"  red car ,, person ,  traffic light,\", \"input_media\": \"IMG:image\", \"score_thr\": 0.25}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "FindObjectsNode",
+   "gets": [],
+   "name": "find \u00b7 query spaces and commas",
+   "output": [
+    "{\"detections\": [{\"label\": \"caf\\u00e9\", \"confidence\": 0.9, \"x\": 12.0, \"y\": 0.001, \"width\": 100.0, \"height\": 5, \"big\": 123456789012345678901}], \"count\": 1, \"ok\": true, \"none\": null}"
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "confidence": 0.25,
+    "model": "YOLO-World",
+    "query": "  red car ,, person ,  traffic light,"
+   }
+  },
+  {
+   "answers": [
+    {
+     "__body__": "{\"id\": \"p1\", \"status\": \"succeeded\", \"output\": {\"detections\": [{\"label\": \"caf\\u00e9\", \"confidence\": 0.9, \"x\": 12.0, \"y\": 1e-3, \"width\": 1E2, \"height\": 5, \"big\": 123456789012345678901}], \"count\": 1, \"ok\": true, \"none\": null}, \"metrics\": {\"predict_time\": 0.4}}"
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "zsxkib/yolo-world",
+     "payload": {
+      "class_names": "caf\u00e9, \u732b",
+      "input_media": "IMG:image",
+      "score_thr": 0.25
+     },
+     "payload_json": "{\"class_names\": \"caf\\u00e9, \\u732b\", \"input_media\": \"IMG:image\", \"score_thr\": 0.25}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "FindObjectsNode",
+   "gets": [],
+   "name": "find \u00b7 query non-ASCII",
+   "output": [
+    "{\"detections\": [{\"label\": \"caf\\u00e9\", \"confidence\": 0.9, \"x\": 12.0, \"y\": 0.001, \"width\": 100.0, \"height\": 5, \"big\": 123456789012345678901}], \"count\": 1, \"ok\": true, \"none\": null}"
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "confidence": 0.25,
+    "model": "YOLO-World",
+    "query": "caf\u00e9, \u732b"
+   }
+  },
+  {
+   "answers": [
+    {
+     "__body__": "{\"id\": \"p1\", \"status\": \"succeeded\", \"output\": \"{\\\"objects\\\": [1.0, 2]}  \", \"metrics\": {\"predict_time\": 0.4}}"
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "zsxkib/yolo-world",
+     "payload": {
+      "class_names": "person",
+      "input_media": "IMG:image",
+      "score_thr": 0.25
+     },
+     "payload_json": "{\"class_names\": \"person\", \"input_media\": \"IMG:image\", \"score_thr\": 0.25}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "FindObjectsNode",
+   "gets": [],
+   "name": "answer \u00b7 find \u00b7 string",
+   "output": [
+    "{\"objects\": [1.0, 2]}  "
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "confidence": 0.25,
+    "model": "YOLO-World",
+    "query": "person"
+   }
+  },
+  {
+   "answers": [
+    {
+     "__body__": "{\"id\": \"p1\", \"status\": \"succeeded\", \"output\": {\"detections\": [{\"label\": \"caf\\u00e9\", \"confidence\": 0.9, \"x\": 12.0, \"y\": 1e-3, \"width\": 1E2, \"height\": 5, \"big\": 123456789012345678901}], \"count\": 1, \"ok\": true, \"none\": null}, \"metrics\": {\"predict_time\": 0.4}}"
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "zsxkib/yolo-world",
+     "payload": {
+      "class_names": "person",
+      "input_media": "IMG:image",
+      "score_thr": 0.25
+     },
+     "payload_json": "{\"class_names\": \"person\", \"input_media\": \"IMG:image\", \"score_thr\": 0.25}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "FindObjectsNode",
+   "gets": [],
+   "name": "answer \u00b7 find \u00b7 dict with floats",
+   "output": [
+    "{\"detections\": [{\"label\": \"caf\\u00e9\", \"confidence\": 0.9, \"x\": 12.0, \"y\": 0.001, \"width\": 100.0, \"height\": 5, \"big\": 123456789012345678901}], \"count\": 1, \"ok\": true, \"none\": null}"
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "confidence": 0.25,
+    "model": "YOLO-World",
+    "query": "person"
+   }
+  },
+  {
+   "answers": [
+    {
+     "__body__": "{\"id\": \"p1\", \"status\": \"succeeded\", \"output\": [{\"label\": \"person\", \"box\": [0.0, 10.5, -0.0, 2.5e+16]}, \"\\u65e5\\u672c\", []], \"metrics\": {\"predict_time\": 0.4}}"
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "zsxkib/yolo-world",
+     "payload": {
+      "class_names": "person",
+      "input_media": "IMG:image",
+      "score_thr": 0.25
+     },
+     "payload_json": "{\"class_names\": \"person\", \"input_media\": \"IMG:image\", \"score_thr\": 0.25}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "FindObjectsNode",
+   "gets": [],
+   "name": "answer \u00b7 find \u00b7 list",
+   "output": [
+    "[{\"label\": \"person\", \"box\": [0.0, 10.5, -0.0, 2.5e+16]}, \"\\u65e5\\u672c\", []]"
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "confidence": 0.25,
+    "model": "YOLO-World",
+    "query": "person"
+   }
+  },
+  {
+   "answers": [
+    {
+     "__body__": "{\"id\": \"p1\", \"status\": \"succeeded\", \"output\": null, \"metrics\": {\"predict_time\": 0.4}}"
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "zsxkib/yolo-world",
+     "payload": {
+      "class_names": "person",
+      "input_media": "IMG:image",
+      "score_thr": 0.25
+     },
+     "payload_json": "{\"class_names\": \"person\", \"input_media\": \"IMG:image\", \"score_thr\": 0.25}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "FindObjectsNode",
+   "gets": [],
+   "name": "answer \u00b7 find \u00b7 null",
+   "output": [
+    "null"
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "confidence": 0.25,
+    "model": "YOLO-World",
+    "query": "person"
+   }
+  },
+  {
+   "answers": [
+    {
+     "__body__": "{\"id\": \"p1\", \"status\": \"succeeded\", \"output\": 3.0, \"metrics\": {\"predict_time\": 0.4}}"
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "zsxkib/yolo-world",
+     "payload": {
+      "class_names": "person",
+      "input_media": "IMG:image",
+      "score_thr": 0.25
+     },
+     "payload_json": "{\"class_names\": \"person\", \"input_media\": \"IMG:image\", \"score_thr\": 0.25}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "FindObjectsNode",
+   "gets": [],
+   "name": "answer \u00b7 find \u00b7 number",
+   "output": [
+    "3.0"
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "confidence": 0.25,
+    "model": "YOLO-World",
+    "query": "person"
+   }
+  },
+  {
+   "answers": [
+    {
+     "__body__": "{\"id\": \"p1\", \"status\": \"succeeded\", \"output\": {}, \"metrics\": {\"predict_time\": 0.4}}"
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "zsxkib/yolo-world",
+     "payload": {
+      "class_names": "person",
+      "input_media": "IMG:image",
+      "score_thr": 0.25
+     },
+     "payload_json": "{\"class_names\": \"person\", \"input_media\": \"IMG:image\", \"score_thr\": 0.25}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "FindObjectsNode",
+   "gets": [],
+   "name": "answer \u00b7 find \u00b7 empty dict",
+   "output": [
+    "{}"
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "confidence": 0.25,
+    "model": "YOLO-World",
+    "query": "person"
+   }
+  },
+  {
+   "answers": [
+    {
+     "__body__": "{\"id\": \"p1\", \"status\": \"succeeded\", \"output\": {\"a\": {\"b\": {\"c\": [[], {}, [1.0, -0.0, 1e300, 1.5e-7]]}}}, \"metrics\": {\"predict_time\": 0.4}}"
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "zsxkib/yolo-world",
+     "payload": {
+      "class_names": "person",
+      "input_media": "IMG:image",
+      "score_thr": 0.25
+     },
+     "payload_json": "{\"class_names\": \"person\", \"input_media\": \"IMG:image\", \"score_thr\": 0.25}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "FindObjectsNode",
+   "gets": [],
+   "name": "answer \u00b7 find \u00b7 nested",
+   "output": [
+    "{\"a\": {\"b\": {\"c\": [[], {}, [1.0, -0.0, 1e+300, 1.5e-07]]}}}"
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "confidence": 0.25,
+    "model": "YOLO-World",
+    "query": "person"
+   }
+  }
+ ]
+}

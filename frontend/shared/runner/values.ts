@@ -39,6 +39,13 @@ export const OUTPUT_KINDS: Readonly<Record<string, Readonly<Record<number, Value
   RewriteToneNode: { 0: 'text' },
   BrainstormIdeasNode: { 0: 'text' },
   ReasonStepByStepNode: { 0: 'text' },
+  // R3.4: describe, read and find (a value only while `describe` is on);
+  // Find objects hands on Python's JSON text.
+  DescribeImageNode: { 0: 'text' },
+  DescribeImageRemoteNode: { 0: 'text' },
+  DescribeVideoNode: { 0: 'text' },
+  ExtractTextNode: { 0: 'text' },
+  FindObjectsNode: { 0: 'json' },
 }
 
 /** What a wire carries: the source's declared kind for that slot (through Gates), files by default. */

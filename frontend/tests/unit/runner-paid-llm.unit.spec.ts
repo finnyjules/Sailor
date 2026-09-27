@@ -336,7 +336,7 @@ describe('prices: Replicate\'s per-token cards, the hold and the charge (rulings
       expect(PAID_NODE_CLASSES).toContain(c)
       expect(Object.prototype.hasOwnProperty.call(GRAPH_NODE_CREDITS, c), c).toBe(false)
     }
-    expect(PRICE_BOOK_VERSION).toBe('r3-llm-text')
+    expect(PRICE_BOOK_VERSION).toBe('r3-describe')
   })
 
   it('the hold for Chat on GPT-5 at 8192 max tokens is the card\'s ceiling', () => {
@@ -469,7 +469,7 @@ describe('settings known only at run time are priced at their dearest (fix round
 
 describe('moderation and hosted start checks', () => {
   it('lists the user\'s texts for moderation, not Sailor\'s system prompts', () => {
-    expect(PAID_TEXT_INPUTS).toEqual({
+    expect(Object.fromEntries(LLM_TEXT_CLASSES.map(c => [c, PAID_TEXT_INPUTS[c]]))).toEqual({
       ChatLLMNode: ['prompt', 'system_prompt'], ImprovePromptNode: ['idea'], SummarizeTextNode: ['text'],
       TranslateTextNode: ['text', 'custom_language'], RewriteToneNode: ['text'], BrainstormIdeasNode: ['topic'], ReasonStepByStepNode: ['question'],
     })

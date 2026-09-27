@@ -458,7 +458,9 @@ describe('server health: caps, sources, Stop', () => {
     // Person swap (video) on Pixverse Swap (non-commercial face models replacement) make a video.
     const videos = new Set(['GenerateVideoNode', 'LipSyncNode', 'EnhanceVideoNode', 'FilmShotNode', 'PersonSwapVideo'])
     // The LLM text nodes (R3.3) hand on text.
-    const texts = new Set(['ChatLLMNode', 'ImprovePromptNode', 'SummarizeTextNode', 'TranslateTextNode', 'RewriteToneNode', 'BrainstormIdeasNode', 'ReasonStepByStepNode'])
+    const texts = new Set(['ChatLLMNode', 'ImprovePromptNode', 'SummarizeTextNode', 'TranslateTextNode', 'RewriteToneNode', 'BrainstormIdeasNode', 'ReasonStepByStepNode',
+      // Describe, read and find (R3.4) hand on text and JSON.
+      'DescribeImageNode', 'DescribeImageRemoteNode', 'DescribeVideoNode', 'ExtractTextNode', 'FindObjectsNode'])
     for (const c of PROVIDER_TYPES) expect(IMAGE_OUTPUT_CLASSES.has(c), c).toBe(!videos.has(c) && !texts.has(c))
     expect(IMAGE_OUTPUT_CLASSES.has('Video')).toBe(false)
   })

@@ -532,6 +532,52 @@ export const RUNNER_NODE_RULES: Readonly<Record<string, RunnerNodeRule>> = {
       model: { type: 'COMBO', required: true, options: REASON_MODELS },
     },
   },
+  // ── describe (step 3, R3.4): Describe an image (+ its hidden twin), Describe
+  // a video, Extract text, Find objects, on Replicate. The picture is a linked
+  // picture (the handed-off file); the prompt and the query take a text wire
+  // (R0: the value arrives as typed); every other setting is a widget as
+  // ComfyUI validates it. A wired widget leaves the node to the engine.
+  DescribeImageNode: {
+    family: 'describe',
+    mustLink: ['image'],
+    imageInputs: ['image'],
+    valueInputs: { prompt: ['text'] },
+    required: ['prompt'],
+    widgets: { model: { type: 'COMBO', required: true, options: ['Moondream 2'] } },
+  },
+  DescribeImageRemoteNode: {
+    family: 'describe',
+    mustLink: ['image'],
+    imageInputs: ['image'],
+    valueInputs: { prompt: ['text'] },
+    required: ['prompt'],
+  },
+  DescribeVideoNode: {
+    family: 'describe',
+    valueInputs: { prompt: ['text'] },
+    required: ['prompt'],
+    widgets: {
+      model: { type: 'COMBO', required: true, options: ['Gemini 2.5 Flash'] },
+      video_url: { type: 'STRING', required: true },
+    },
+  },
+  ExtractTextNode: {
+    family: 'describe',
+    mustLink: ['image'],
+    imageInputs: ['image'],
+    widgets: { model: { type: 'COMBO', required: true, options: ['ByteDance Dolphin'] } },
+  },
+  FindObjectsNode: {
+    family: 'describe',
+    mustLink: ['image'],
+    imageInputs: ['image'],
+    valueInputs: { query: ['text'] },
+    required: ['query'],
+    widgets: {
+      model: { type: 'COMBO', required: true, options: ['YOLO-World'] },
+      confidence: { type: 'FLOAT', required: true, min: 0, max: 1 },
+    },
+  },
   // ── restyle (Task B8): Nano Banana 2 / Pro on fal, Nano Banana on
   // Replicate. The prompt and the taste wire (style_in, a Moodboard card's
   // style block) take a text wire (R1.2): the card's value arrives as if
@@ -866,6 +912,12 @@ export const SWITCHED_CLASSES: Readonly<Record<string, RunnerFamily>> = {
   RewriteToneNode: 'llm-text',
   BrainstormIdeasNode: 'llm-text',
   ReasonStepByStepNode: 'llm-text',
+  // R3.4: describe, read and find.
+  DescribeImageNode: 'describe',
+  DescribeImageRemoteNode: 'describe',
+  DescribeVideoNode: 'describe',
+  ExtractTextNode: 'describe',
+  FindObjectsNode: 'describe',
 }
 
 /**
@@ -1248,6 +1300,11 @@ const PAID_OUTPUT_KIND_FAMILY: Readonly<Record<string, RunnerFamily>> = {
   RewriteToneNode: 'llm-text',
   BrainstormIdeasNode: 'llm-text',
   ReasonStepByStepNode: 'llm-text',
+  DescribeImageNode: 'describe',
+  DescribeImageRemoteNode: 'describe',
+  DescribeVideoNode: 'describe',
+  ExtractTextNode: 'describe',
+  FindObjectsNode: 'describe',
 }
 const withoutPaidRows = (kinds: OutputKinds): OutputKinds =>
   Object.fromEntries(Object.entries(kinds).filter(([cls]) => !Object.prototype.hasOwnProperty.call(PAID_OUTPUT_KIND_FAMILY, cls)))

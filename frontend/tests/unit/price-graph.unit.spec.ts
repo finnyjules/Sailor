@@ -575,3 +575,23 @@ describe('the LLM text nodes on the ComfyUI path (R3.3)', () => {
     expect(() => at('ChatLLMNode', { model: 'GPT-9', prompt: 'x', system_prompt: '', temperature: 1, max_tokens: 64 })).toThrow(UnpricedGraphError)
   })
 })
+
+// ───────────────────────────────────────────────────────────────────────────
+// Step 3, R3.4 (ruling (a), user-approved): Describe an image (+ its twin),
+// Describe a video, Extract text and Find objects leave their flat rows for
+// their calls. moondream2 keeps its edit card ($0.002: 1 credit, as before);
+// Dolphin and YOLO-World are priced from their GPU-time pages (estimates:
+// 2 credits, was 1; 1 credit); Describe a video by the token on Gemini 2.5
+// Flash, which on the ComfyUI path (no usage, no video length) is its
+// ceiling: a 45-minute video and the longest answer, 62 credits (was 2).
+// ───────────────────────────────────────────────────────────────────────────
+describe('describe, read and find on the ComfyUI path (R3.4)', () => {
+  const at = (ct: string, inputs: Record<string, unknown>) => priceGraph({ 1: { class_type: ct, inputs } }).nodes!['1']
+  it('each class, default settings', () => {
+    expect(at('DescribeImageNode', { model: 'Moondream 2', image: ['2', 0], prompt: 'Describe this image in detail.' })).toBe(1)
+    expect(at('DescribeImageRemoteNode', { image: ['2', 0], prompt: 'Describe this image in detail.' })).toBe(1)
+    expect(at('ExtractTextNode', { model: 'ByteDance Dolphin', image: ['2', 0] })).toBe(2)
+    expect(at('FindObjectsNode', { model: 'YOLO-World', image: ['2', 0], query: 'person, car, dog', confidence: 0.25 })).toBe(1)
+    expect(at('DescribeVideoNode', { model: 'Gemini 2.5 Flash', video_url: 'https://example.test/a.mp4', prompt: 'Describe this video in detail.' })).toBe(62)
+  })
+})

@@ -69,6 +69,12 @@ const EDIT_BASE: Record<string, Record<string, unknown>> = {
   RewriteToneNode: { text: 'we sell shoes', tone: 'Punchy', model: 'Claude 4.5 Haiku' },
   BrainstormIdeasNode: { topic: 'coffee', count: 3, angle: 'Variations' },
   ReasonStepByStepNode: { question: '17 * 23?', include_reasoning: false, model: 'DeepSeek R1' },
+  // Describe, read and find (R3.4): their widgets as the canvas writes them.
+  DescribeImageNode: { model: 'Moondream 2', image: LINK, prompt: 'Describe this image in detail.' },
+  DescribeImageRemoteNode: { image: LINK, prompt: 'Describe this image in detail.' },
+  DescribeVideoNode: { model: 'Gemini 2.5 Flash', video_url: 'https://example.test/clip.mp4', prompt: 'Describe this video in detail.' },
+  ExtractTextNode: { model: 'ByteDance Dolphin', image: LINK },
+  FindObjectsNode: { model: 'YOLO-World', image: LINK, query: 'person, car, dog', confidence: 0.25 },
   // sync-3 lip-sync (Task F22): the studio's face video and sound.
   LipSyncNode: {
     engine: 'sync-3',
