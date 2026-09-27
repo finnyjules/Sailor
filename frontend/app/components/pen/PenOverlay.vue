@@ -101,6 +101,10 @@ const {
 const svgEl = ref<SVGSVGElement | null>(null)
 const toScreen = (p: { x: number; y: number }) => applyView(props.view, p)
 const svgTransform = computed(() => viewToSvg(props.view))
+// Clean up preview (Task 8 controller ruling): the drawing ignores clicks
+// while previewing, so the host's own tool cursor (a drawing tool's
+// crosshair) would be misleading — force the plain arrow instead.
+const svgCursor = computed(() => (cleanupSession.value ? 'default' : props.cursor))
 
 function clamp(v: number, lo: number, hi: number) { return Math.min(hi, Math.max(lo, v)) }
 
@@ -979,7 +983,7 @@ defineExpose({
 
 <template>
   <svg ref="svgEl" :width="width" :height="height"
-       :style="{ position: 'absolute', left: 0, top: 0, display: 'block', touchAction: 'none', cursor, pointerEvents: active ? undefined : 'none' }"
+       :style="{ position: 'absolute', left: 0, top: 0, display: 'block', touchAction: 'none', cursor: svgCursor, pointerEvents: active ? undefined : 'none' }"
        @pointerdown="onPointerDownSvg" @pointermove="onPointerMove" @pointerup="onPointerUp" @pointerleave="onPointerLeave" @pointercancel="onPointerLeave"
        @contextmenu.prevent>
     <!-- drawing space: the view matrix does scale, rotation and mirroring -->

@@ -2034,18 +2034,28 @@ export function usePen(opts: {
     if (!t || typeof (t as Element).closest !== 'function') return false
     return !!t.closest('button, input, select, textarea, [role="button"], [role="radio"], [role="slider"], [role="tab"], [contenteditable="true"]')
   }
-  // keys while a preview is open: Enter applies, Escape / ⌥⇧C cancel, ⌘Z / ⌘Y
-  // only close it; every other plain key is swallowed so nothing edits the
-  // drawing under the preview — except Tab / ⇧Tab, and Space on a focused
-  // control, left to the browser so the keyboard reaches strength / Apply /
-  // Cancel; other ⌘ combos and bare modifiers are not the pen's
+  // the toolbar's own Cancel control (PenToolbar's data-act="cleanup-cancel")
+  // has focus — native button behaviour says Enter there presses IT, not
+  // Apply (the target, else the document's active element, same fallback as
+  // isControlFocused)
+  function isCancelFocused(ev: KeyboardEvent): boolean {
+    const t = (ev.target ?? (typeof document !== 'undefined' ? document.activeElement : null)) as Element | null
+    return !!(t && typeof t.closest === 'function' && t.closest('[data-act="cleanup-cancel"]'))
+  }
+  // keys while a preview is open: Enter applies — except on a focused Cancel
+  // button, where it cancels, matching what a native button does with Enter —
+  // Escape / ⌥⇧C always cancel, ⌘Z / ⌘Y only close it; every other plain key
+  // is swallowed so nothing edits the drawing under the preview — except
+  // Tab / ⇧Tab, and Space on a focused control, left to the browser so the
+  // keyboard reaches strength / Apply / Cancel; other ⌘ combos and bare
+  // modifiers are not the pen's
   function cleanupKey(ev: KeyboardEvent): boolean {
     if (ev.metaKey || ev.ctrlKey) {
       const k = ev.key.toLowerCase()
       if (k === 'z' || k === 'y') { cancelCleanup(); return true }
       return false
     }
-    if (ev.key === 'Enter') { applyCleanup(); return true }
+    if (ev.key === 'Enter') { if (isCancelFocused(ev)) cancelCleanup(); else applyCleanup(); return true }
     if (ev.key === 'Escape' || isCleanupKey(ev)) { cancelCleanup(); return true }
     // keyboard access to the strength / Apply / Cancel row: Tab / ⇧Tab move
     // focus, and Space presses a focused button or control

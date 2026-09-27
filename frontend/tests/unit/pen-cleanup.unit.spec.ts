@@ -192,6 +192,21 @@ describe('Clean up in the pen', () => {
     expect(pen.onKeydown(key('Enter', { target: button }))).toBe(true)   // Enter still applies
     expect(pen.cleanup.value).toBeNull()
   })
+  it('Enter on a focused Cancel button cancels; Enter on any other focused toolbar button applies', () => {
+    const { doc, pen } = mk(flower)
+    const before = JSON.stringify(doc.value)
+    const cancelBtn = { closest: (sel: string) => (sel === '[data-act="cleanup-cancel"]' ? cancelBtn : null) }
+    const applyBtn = { closest: (sel: string) => (sel.includes('button') ? applyBtn : null) }
+    pen.startCleanup()
+    expect(pen.onKeydown(key('Enter', { target: cancelBtn }))).toBe(true)
+    expect(pen.cleanup.value).toBeNull()
+    expect(pen.status.value).toBe('Clean up cancelled')
+    expect(JSON.stringify(doc.value)).toBe(before)
+    pen.startCleanup()
+    expect(pen.onKeydown(key('Enter', { target: applyBtn }))).toBe(true)   // a different toolbar button: still applies
+    expect(pen.cleanup.value).toBeNull()
+    expect(paths(doc.value)).toHaveLength(1)
+  })
   it.each(['redo', 'reset', 'revert', 'endGesture', 'dispose'] as const)('%s drops the preview', (end) => {
     const { pen } = mk(flower)
     pen.startCleanup()

@@ -16,9 +16,10 @@ import PenValueRow from '~/components/pen/PenValueRow.vue'
 import PenTipCard from '~/components/pen/PenTipCard.vue'
 import { TooltipProvider } from '~/components/ui/tooltip'
 import { PEN_TIPS } from '~/composables/pen/penTips'
+import { STRENGTHS, type CleanupStrength } from '~/lib/sketch/cleanup'
 import {
   MousePointer2, Spline, PenTool as PenNib, Minus, Circle, Dot,
-  CircleDashed, Tag, Undo2, Redo2, Scissors, Slice, Bandage,
+  CircleDashed, Tag, Undo2, Redo2, Scissors, Slice, Bandage, WandSparkles,
 } from 'lucide-vue-next'
 
 // The root is the renderless TooltipProvider, so the host's class (the Frame
@@ -39,6 +40,7 @@ const {
   availableConstraints, applyWithValue, fixSelected, repeatPrompt, doMirror,
   flip, makeConstruction, del, finishPath, cancelPendingOp,
   undo, redo, canUndo, canRedo, finishSession,
+  cleanup, toggleCleanup, applyCleanup, cancelCleanup, setCleanupStrength,
 } = props.pen
 
 function done() {
@@ -85,6 +87,20 @@ const hasAnySelection = computed(() => selection.value.length > 0 || selectedSeg
 const rules = computed(() => availableConstraints())
 const selectedCount = computed(() => selection.value.length + selectedSegments.value.length)
 const isSelectIdle = computed(() => tool.value === 'select' && !hasAnySelection.value)
+
+// Clean up (pen stage 5): while its preview is open the rules row hides, the
+// tool row is disabled except Clean up itself, and the hint row becomes the
+// strength / Cancel / Apply bar
+const previewing = computed(() => !!cleanup.value)
+const STRENGTH_LABEL: Record<CleanupStrength, string> = { gentle: 'Gentle', normal: 'Normal', strong: 'Strong' }
+const cleanupHasOn = computed(() => !!cleanup.value?.result.fixes.some(f => f.on))
+const cleanupNote = computed(() => {
+  const s = cleanup.value
+  if (!s) return ''
+  if (s.result.refused === 'tooBig') return 'Too much to clean up at once — select a part'
+  if (s.result.refused === 'conflict') return 'Some rules don’t hold, so nothing is safe to change'
+  return s.result.fixes.length ? '' : 'Nothing to change'
+})
 </script>
 
 <template>
@@ -95,7 +111,7 @@ const isSelectIdle = computed(() => tool.value === 'select' && !hasAnySelection.
   <TooltipProvider :delay-duration="350" :skip-delay-duration="600" disable-hoverable-content>
   <div class="pen-toolbar" v-bind="$attrs">
     <PenValueRow :pen="pen" />
-    <div v-if="hasAnySelection" class="tb" role="toolbar" aria-label="Rules">
+    <div v-if="hasAnySelection && !previewing" class="tb" role="toolbar" aria-label="Rules">
       <span class="count">{{ selectedCount }} selected</span>
       <PenTipCard v-for="v in rules" :id="v.tip ?? v.kind" :key="v.tip ?? v.kind" :name="v.label">
         <button class="tbtn" :data-verb="v.tip ?? v.kind" :aria-label="v.label" @click="applyWithValue(v)">{{ v.label }}</button>
@@ -120,21 +136,27 @@ const isSelectIdle = computed(() => tool.value === 'select' && !hasAnySelection.
 
     <div class="tb" role="toolbar" aria-label="Pen tools">
       <PenTipCard v-for="t in TOOLS" :id="t.id" :key="t.id">
-        <button class="tbtn icon" :data-tool="t.id"
+        <button class="tbtn icon" :data-tool="t.id" :disabled="previewing"
                 :aria-pressed="tool === t.id" :aria-label="tipName(t.id)"
                 @click="selectTool(t.id)">
           <component :is="t.icon" :size="16" />
         </button>
       </PenTipCard>
+      <PenTipCard v-if="options.cleanup" id="cleanup">
+        <button class="tbtn icon toggle" data-act="cleanup" :aria-pressed="previewing" aria-label="Clean up"
+                @click="toggleCleanup()">
+          <WandSparkles :size="16" />
+        </button>
+      </PenTipCard>
       <span class="sep" />
       <PenTipCard id="guide">
-        <button class="tbtn icon toggle" data-act="guide" :aria-pressed="guideMode" aria-label="Guide"
+        <button class="tbtn icon toggle" data-act="guide" :disabled="previewing" :aria-pressed="guideMode" aria-label="Guide"
                 @click="toggleGuideMode()">
           <CircleDashed :size="16" />
         </button>
       </PenTipCard>
       <PenTipCard id="labels">
-        <button class="tbtn icon toggle" data-act="labels" :aria-pressed="showLabels" aria-label="Labels"
+        <button class="tbtn icon toggle" data-act="labels" :disabled="previewing" :aria-pressed="showLabels" aria-label="Labels"
                 @click="toggleShowLabels()">
           <Tag :size="16" />
         </button>
@@ -142,14 +164,14 @@ const isSelectIdle = computed(() => tool.value === 'select' && !hasAnySelection.
       <span class="sep" />
       <PenTipCard id="undo">
         <span class="tip-wrap" data-tip-wrap="undo">
-          <button class="tbtn icon" data-act="undo" :disabled="!canUndo()" aria-label="Undo" @click="undo()">
+          <button class="tbtn icon" data-act="undo" :disabled="!canUndo() || previewing" aria-label="Undo" @click="undo()">
             <Undo2 :size="16" />
           </button>
         </span>
       </PenTipCard>
       <PenTipCard id="redo">
         <span class="tip-wrap" data-tip-wrap="redo">
-          <button class="tbtn icon" data-act="redo" :disabled="!canRedo()" aria-label="Redo" @click="redo()">
+          <button class="tbtn icon" data-act="redo" :disabled="!canRedo() || previewing" aria-label="Redo" @click="redo()">
             <Redo2 :size="16" />
           </button>
         </span>
@@ -157,23 +179,38 @@ const isSelectIdle = computed(() => tool.value === 'select' && !hasAnySelection.
       <template v-if="tool === 'path' || tool === 'curve'">
         <span class="sep" />
         <PenTipCard v-if="!options.openOnly" id="close">
-          <button class="tbtn" data-act="close" aria-label="Close" @click="finishPath(true)">Close</button>
+          <button class="tbtn" data-act="close" :disabled="previewing" aria-label="Close" @click="finishPath(true)">Close</button>
         </PenTipCard>
         <PenTipCard id="finish">
-          <button class="tbtn" data-act="finish" aria-label="Finish" @click="finishPath(false)">Finish</button>
+          <button class="tbtn" data-act="finish" :disabled="previewing" aria-label="Finish" @click="finishPath(false)">Finish</button>
         </PenTipCard>
       </template>
       <span class="sep" />
       <PenTipCard id="cancel">
-        <StudioButton variant="secondary" data-act="cancel" aria-label="Cancel" @click="emit('cancel')">Cancel</StudioButton>
+        <StudioButton variant="secondary" data-act="cancel" :disabled="previewing" aria-label="Cancel" @click="emit('cancel')">Cancel</StudioButton>
       </PenTipCard>
       <PenTipCard id="done">
-        <StudioButton variant="primary" data-act="done" aria-label="Done" @click="done()">Done</StudioButton>
+        <StudioButton variant="primary" data-act="done" :disabled="previewing" aria-label="Done" @click="done()">Done</StudioButton>
       </PenTipCard>
     </div>
 
     <div class="hint-wrap">
-      <div v-if="opHint" data-op-hint class="hint">
+      <div v-if="cleanup" data-cleanup-bar class="hint cleanup-bar">
+        <PenTipCard id="cleanup-strength">
+          <div class="seg" role="radiogroup" aria-label="Strength">
+            <button v-for="s in STRENGTHS" :key="s" class="seg-btn" role="radio" :data-strength="s"
+                    :aria-checked="cleanup.strength === s" @click="setCleanupStrength(s)">{{ STRENGTH_LABEL[s] }}</button>
+          </div>
+        </PenTipCard>
+        <span v-if="cleanupNote" data-cleanup-note>{{ cleanupNote }}</span>
+        <PenTipCard id="cleanup-cancel">
+          <button class="hint-btn" data-act="cleanup-cancel" aria-label="Cancel" @click="cancelCleanup()">Cancel</button>
+        </PenTipCard>
+        <PenTipCard id="cleanup-apply">
+          <button class="hint-btn primary" data-act="cleanup-apply" aria-label="Apply" :disabled="!cleanupHasOn" @click="applyCleanup()">Apply</button>
+        </PenTipCard>
+      </div>
+      <div v-else-if="opHint" data-op-hint class="hint">
         <span>{{ opHint }}</span>
         <button class="hint-cancel" data-act="op-cancel" @click="cancelPendingOp()">Cancel (Esc)</button>
       </div>
@@ -282,4 +319,18 @@ const isSelectIdle = computed(() => tool.value === 'select' && !hasAnySelection.
   cursor: pointer;
   font-size: 11px;
 }
+.cleanup-bar { gap: 8px; padding: 4px 6px; flex-wrap: wrap; justify-content: center; }
+.seg { display: inline-flex; padding: 2px; gap: 2px; border-radius: 6px; background: rgba(255, 255, 255, 0.06); }
+.seg-btn {
+  height: 24px; padding: 0 10px; border: 0; border-radius: 4px; background: transparent;
+  color: rgba(255, 255, 255, 0.7); font: 500 11.5px/1 ui-sans-serif, system-ui, sans-serif; cursor: pointer;
+}
+.seg-btn[aria-checked='true'] { background: #fff; color: #111; }
+.seg-btn:hover:not([aria-checked='true']) { background: rgba(255, 255, 255, 0.08); }
+.hint-btn {
+  height: 24px; padding: 0 10px; border-radius: 6px; border: 1px solid rgba(255, 255, 255, 0.2);
+  background: transparent; color: rgba(255, 255, 255, 0.85); font: 500 11.5px/1 ui-sans-serif, system-ui, sans-serif; cursor: pointer;
+}
+.hint-btn.primary { background: #2f6bff; border-color: #2f6bff; color: #fff; }
+.hint-btn:disabled { opacity: 0.4; cursor: default; }
 </style>

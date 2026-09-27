@@ -22,12 +22,13 @@ function flower(d: SketchDoc): void {
     addPath(d, [s, e], [{ kind: 'arc', center: c, sweep: 1 }])
   }
 }
-function mountFlower(keyboard?: 'window' | 'host') {
+function mountFlower(keyboard?: 'window' | 'host', cursor?: string) {
   const doc = ref<SketchDoc>({ entities: [], constraints: [] })
   flower(doc.value)
   const pen = usePen({ doc: doc as any, view: ref(view) })
   const props: Record<string, unknown> = { pen, view, width: 680, height: 460 }
   if (keyboard) props.keyboard = keyboard
+  if (cursor) props.cursor = cursor
   const wrapper = mount(PenOverlay, { props, attachTo: document.body })
   return { wrapper, doc, pen }
 }
@@ -55,6 +56,14 @@ describe('PenOverlay — Clean up preview', () => {
     pen.cancelCleanup(); await nextTick()
     expect(wrapper.find('[data-cleanup-preview]').exists()).toBe(false)
     expect(wrapper.findAll('circle[data-point]').length).toBeGreaterThan(0)
+  })
+  it('the canvas cursor is plain while previewing, and the host\'s own cursor again once it closes', async () => {
+    const { wrapper, pen } = mountFlower('window', 'crosshair'); mounted = wrapper
+    expect(wrapper.find('svg').attributes('style')).toContain('cursor: crosshair')
+    pen.startCleanup(); await nextTick()
+    expect(wrapper.find('svg').attributes('style')).toContain('cursor: default')
+    pen.cancelCleanup(); await nextTick()
+    expect(wrapper.find('svg').attributes('style')).toContain('cursor: crosshair')
   })
   it('the cleaned drawing is the preview doc, the ghost the drawing as it is', async () => {
     const { wrapper, pen } = mountFlower(); mounted = wrapper

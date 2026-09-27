@@ -3,7 +3,7 @@
 // badge when there is a shortcut, and a one-line caption — keyed by button id
 // (tool ids, the fixed toolbar buttons, every rule kind availableConstraints
 // can offer, and the rules row's own verbs). The nine drawing and editing
-// tools also name a scripted demo in penTipDemos.ts.
+// tools, and Clean up, also name a scripted demo in penTipDemos.ts.
 //
 // Copy rules: sentence case, no identifiers, say exactly what the button does
 // in this pen (read the tool before changing a caption). Tool keys must match
@@ -38,6 +38,8 @@ export const PEN_TIPS: Record<string, PenTip> = {
     caption: 'A new point on a line or arc, splitting it in two. Click where the cut goes.' },
   dissolve: { name: 'Dissolve', key: 'D', demo: 'dissolve',
     caption: 'Cut’s inverse: a point healed back into one piece, where the two sides line up. Click the point.' },
+  cleanup: { name: 'Clean up', key: '⌥⇧C', demo: 'cleanup',
+    caption: 'Joins ends that nearly meet, squares what is nearly square and evens what is nearly even. Shows every change first; click one to leave it out.' },
 
   // ── toggles, history, path and session buttons ──
   guide: { name: 'Guide',
@@ -54,6 +56,12 @@ export const PEN_TIPS: Record<string, PenTip> = {
     caption: 'Keeps the drawing and puts the pen away.' },
   cancel: { name: 'Cancel', key: 'Esc',
     caption: 'Puts the pen away without keeping this session’s changes.' },
+  'cleanup-apply': { name: 'Apply', key: '↵',
+    caption: 'Keeps the changes that are switched on, as one step.' },
+  'cleanup-cancel': { name: 'Cancel', key: 'Esc',
+    caption: 'Closes Clean up and leaves the drawing as it was.' },
+  'cleanup-strength': { name: 'Strength',
+    caption: 'How far Clean up reaches: Gentle fixes only what is very close, Strong reaches further.' },
 
   // ── rules (keyed by the rule kind availableConstraints offers, or its
   //    `tip` where the kind alone would name another card) ──
@@ -112,11 +120,12 @@ export const PEN_TIPS: Record<string, PenTip> = {
 }
 
 /** A tip's key badge text: Mac glyphs as-is on a Mac, spelled out elsewhere
- *  (⌘Z → Ctrl+Z, ⇧⌘Z → Ctrl+Shift+Z). */
+ *  (⌘Z → Ctrl+Z, ⇧⌘Z → Ctrl+Shift+Z, ⌥⇧C → Alt+Shift+C). */
 export function tipKeyLabel(key: string, isMac: boolean): string {
-  if (isMac || !/[⌘⇧]/.test(key)) return key
+  if (isMac || !/[⌘⇧⌥]/.test(key)) return key
   const mods: string[] = []
   if (key.includes('⌘')) mods.push('Ctrl')
+  if (key.includes('⌥')) mods.push('Alt')
   if (key.includes('⇧')) mods.push('Shift')
-  return [...mods, key.replace(/[⌘⇧]/g, '')].join('+')
+  return [...mods, key.replace(/[⌘⇧⌥]/g, '')].join('+')
 }
