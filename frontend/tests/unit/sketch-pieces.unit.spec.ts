@@ -4,7 +4,7 @@
 // what it is called, the rules that belong to a selection, and the heading.
 import { describe, it, expect } from 'vitest'
 import type { SketchDoc } from '~/lib/sketch/model'
-import { addPoint, addLine, addCircle, addPath, addConstraint } from '~/lib/sketch/edit'
+import { addPoint, addLine, addCircle, addPath, addConstraint, setAnchorSmooth } from '~/lib/sketch/edit'
 import {
   pieceNames, pieceKey, rulePieces, ruleName, ruleLabel, isArcInvariant,
   rulesForSelection, selectionLabel, topLevelIds,
@@ -95,6 +95,26 @@ describe('the rules of a selection', () => {
     const s = scene()
     const k = addConstraint(s.d, 'horizontal', [s.p5, s.lone])
     expect(rulesForSelection(s.d, [s.arc], []).map(c => c.id).sort()).toEqual([s.tan, k].sort())
+  })
+  it('hides Repeat / Mirror copy rules, like the badges (C2)', () => {
+    const s = scene()
+    const q = addPoint(s.d, 3, 5)
+    addConstraint(s.d, 'rotatedFrom', [q, s.p1, s.c], 90)
+    addConstraint(s.d, 'mirroredFrom', [q, s.p1, s.line])
+    expect(rulesForSelection(s.d, [s.p1], [])).toEqual([])
+    expect(rulesForSelection(s.d, [s.line], []).map(c => c.id)).toEqual([s.tan])
+  })
+  it('Bézier handles are not pieces of their own: unnumbered, and read as their curve (C2)', () => {
+    const d: SketchDoc = { entities: [], constraints: [] }
+    const a = addPoint(d, 0, 0), b = addPoint(d, 4, 0), c = addPoint(d, 8, 0)
+    const path = addPath(d, [a, b, c], [{ kind: 'line' }, { kind: 'line' }])
+    expect(setAnchorSmooth(d, path, 1)).toBe(true)
+    const lone = addPoint(d, 9, 9)
+    const n = pieceNames(d)
+    expect(n.get(`point:${lone}`)).toBe('Point 4')      // a, b, c, lone — the handles are skipped
+    const smooth = d.constraints.find(k => k.kind === 'collinear')!
+    expect(ruleLabel(d, smooth, n)).toBe('Smooth — Curve 1 · Point 2 · Curve 2')
+    expect(rulesForSelection(d, [], [{ pathId: path, segIndex: 0 }]).map(k => k.id)).toEqual([smooth.id])
   })
   it('a piece with no rules lists none', () => {
     const s = scene()

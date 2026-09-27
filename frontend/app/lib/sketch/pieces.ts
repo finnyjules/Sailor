@@ -23,13 +23,42 @@ export const segCount = (p: PathEntity): number => (p.closed ? p.anchors.length 
 const endsOf = (p: PathEntity, i: number): [EntityId, EntityId] => [p.anchors[i]!, p.anchors[(i + 1) % p.anchors.length]!]
 const segNoun = (s: SegmentSpec | undefined): string => (s?.kind === 'arc' ? 'arc' : s?.kind === 'cubic' ? 'curve' : 'line')
 
-/** Every piece's name, keyed by pieceKey (Ruling 10). */
+/** Every cubic handle point's id, keyed to the curve piece it shapes. */
+export function handleCurves(doc: SketchDoc): Map<EntityId, PieceRef> {
+  const out = new Map<EntityId, PieceRef>()
+  for (const e of doc.entities) {
+    if (e.kind !== 'path') continue
+    for (let i = 0; i < e.segments.length; i++) {
+      const s = e.segments[i]
+      if (s?.kind !== 'cubic') continue
+      if (s.h1) out.set(s.h1, { kind: 'seg', pathId: e.id, segIndex: i })
+      if (s.h2) out.set(s.h2, { kind: 'seg', pathId: e.id, segIndex: i })
+    }
+  }
+  return out
+}
+// the curve a handle point shapes, or null (controller ruling C2: a Bézier
+// handle is not a piece of its own — a rule on it reads as its curve)
+function handleCurve(doc: SketchDoc, id: EntityId): PieceRef | null {
+  for (const e of doc.entities) {
+    if (e.kind !== 'path') continue
+    for (let i = 0; i < e.segments.length; i++) {
+      const s = e.segments[i]
+      if (s?.kind === 'cubic' && (s.h1 === id || s.h2 === id)) return { kind: 'seg', pathId: e.id, segIndex: i }
+    }
+  }
+  return null
+}
+
+/** Every piece's name, keyed by pieceKey (Ruling 10). Bézier handle points
+ *  get no name and no number (C2): they read as their curve. */
 export function pieceNames(doc: SketchDoc): Map<string, string> {
   const out = new Map<string, string>()
   const n = { point: 0, line: 0, arc: 0, circle: 0, curve: 0 }
   const NAME: Record<string, string> = { line: 'Line', arc: 'Arc', curve: 'Curve' }
+  const handles = handleCurves(doc)
   for (const e of doc.entities) {
-    if (e.kind === 'point') out.set(`point:${e.id}`, `Point ${++n.point}`)
+    if (e.kind === 'point') { if (!handles.has(e.id)) out.set(`point:${e.id}`, `Point ${++n.point}`) }
     else if (e.kind === 'line') out.set(`line:${e.id}`, `Line ${++n.line}`)
     else if (e.kind === 'circle') out.set(`circle:${e.id}`, `Circle ${++n.circle}`)
     else {
@@ -73,6 +102,7 @@ export function arcAt(doc: SketchDoc, c: EntityId, s: EntityId): PieceRef | null
 function entityPiece(doc: SketchDoc, id: EntityId): PieceRef | null {
   const e = getEntity(doc, id)
   if (!e || e.kind === 'path') return null
+  if (e.kind === 'point') { const h = handleCurve(doc, id); if (h) return h }
   return { kind: e.kind, id }
 }
 // a pair of point refs: the line between them, else the arc they are the
@@ -210,11 +240,20 @@ export function selectionKeys(doc: SketchDoc, sel: readonly EntityId[], segs: re
   return out
 }
 
-/** Every rule that ties a selected piece, except each arc's own equal-ends rule (Ruling 11). */
+/** A Repeat / Mirror copy's own bookkeeping rule — hidden from the rules
+ *  list like the canvas badges hide it (controller ruling C2: a ring of
+ *  copies would flood the list). */
+export const isCopyRule = (c: SketchConstraint): boolean => c.kind === 'rotatedFrom' || c.kind === 'mirroredFrom'
+
+/** Every rule that ties a selected piece, except each arc's own equal-ends
+ *  rule (Ruling 11) and the copy rules (C2). A selected handle point counts
+ *  as its curve. */
 export function rulesForSelection(doc: SketchDoc, sel: readonly EntityId[], segs: readonly SegPick[]): SketchConstraint[] {
   const keys = selectionKeys(doc, sel, segs)
   if (!keys.size) return []
-  return doc.constraints.filter(c => !isArcInvariant(doc, c) && rulePieces(doc, c).some(p => keys.has(pieceKey(p))))
+  const handles = handleCurves(doc)
+  for (const id of sel) { const h = handles.get(id); if (h) keys.add(pieceKey(h)) }
+  return doc.constraints.filter(c => !isCopyRule(c) && !isArcInvariant(doc, c) && rulePieces(doc, c).some(p => keys.has(pieceKey(p))))
 }
 
 function nounOf(doc: SketchDoc, id: EntityId): string | null {

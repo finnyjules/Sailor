@@ -70,7 +70,7 @@ import { SIZE_REFUSED, STAY_PX, drawingDirForScreenAngle, arcEndForSweep, radius
 import { penClipboard, setPenClipboard, nextPasteStep, PASTE_STEP_PX } from './penClipboard'
 import { OK, no, REASON, type ActionState } from './penReasons'
 import {
-  ACTIONS, menuFor, runItem, wheelFor, wheelDirAt, ruleState, ruleItemId, ruleItems as registryRuleItems,
+  ACTIONS, menuFor, runItem, wheelFor, wheelDirAt, ruleState, pickRuleState, ruleItemId, ruleItems as registryRuleItems,
   type PenActionHost, type PenMenuItem, type WheelSlice, type WheelDir,
 } from './penActions'
 
@@ -2340,6 +2340,17 @@ export function usePen(opts: {
     closeMenus()
     return settleAndRun(id, at).ok
   }
+  // Properties' + list, when a rule is hovered (controller ruling C1): the
+  // full check on demand — the cheap one first, then the window trial solve
+  // (penActions pickRuleState). Changes nothing and writes no step; an action
+  // id gets its own state.
+  function checkRuleItem(id: string): ActionState {
+    if (cleanup.value) return no(REASON.notHere)
+    const q = quickState(id)
+    if (!q.ok || !id.startsWith('rule:')) return q
+    const o = availableConstraints().find(x => ruleItemId(x) === id)
+    return o ? pickRuleState(actionHost, o) : no(REASON.notHere)
+  }
 
   // --- Clean up (pen stage 5, lib/sketch/cleanup) ---
   // A preview: the drawing stays exactly as it is while `cleanup` holds the
@@ -2871,7 +2882,7 @@ export function usePen(opts: {
     toggleArcRadiusLock, setCircleRadius, toggleCircleRadiusLock,
     // right-click menu and action wheel (pen stage 6)
     menu, wheel, openMenu, closeMenu, closeMenus, setMenuActive, runMenuItem,
-    openWheel, wheelPointer, releaseWheel, closeWheel, ruleItems, runAction,
+    openWheel, wheelPointer, releaseWheel, closeWheel, ruleItems, runAction, checkRuleItem,
     // Clean up (pen stage 5)
     cleanup, toggleCleanup, startCleanup, applyCleanup, cancelCleanup, toggleCleanupFix, toggleCleanupKind, setCleanupStrength,
     // history
