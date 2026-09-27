@@ -40,13 +40,36 @@ export function livePreviewRequest(
   const out: ApiPrompt = {}
   const pinned: Record<string, PreviewFile[]> = {}
   for (const id of plan.pins) {
-    const files = lastFiles(id)
+    // A loader that shows nothing (LoadImage never does; an Image card may not yet) is pinned by its own file.
+    const files = lastFiles(id) ?? ownFileOf(prompt[id]!)
     if (!files?.length || !files.every(plainFile)) return null
     out[id] = prompt[id]!
     pinned[id] = files.map(f => ({ filename: f.filename, subfolder: f.subfolder, type: f.type }))
   }
   for (const id of plan.order) out[id] = prompt[id]!
   return { nodeId, prompt: out, pinned }
+}
+
+/**
+ * A loader's own picture, as its widget names it: LoadImage's `image`, or an
+ * Image card's `image` when nothing is wired into it. The widget's text is
+ * read as the runner reads it (server/runner/inputs.ts parseInputFileRef):
+ * `a.png`, `sub/a.png`, or either with ` [input|output|temp]`; input by default.
+ * Null for any other node, an empty widget, or a name with an unsafe part.
+ */
+export function ownFileOf(node: { class_type: string; inputs?: Record<string, unknown> }): PreviewFile[] | null {
+  const inputs = node.inputs ?? {}
+  const loader = node.class_type === 'LoadImage' || (node.class_type === 'Image' && !Array.isArray(inputs.images))
+  const raw = inputs.image
+  if (!loader || typeof raw !== 'string' || !raw.trim()) return null
+  let name = raw.trim()
+  let type: PreviewFile['type'] = 'input'
+  const m = /^(.*?)\s*\[(input|output|temp)\]$/.exec(name)
+  if (m) { name = m[1]!; type = m[2] as PreviewFile['type'] }
+  const parts = name.replace(/\\/g, '/').split('/')
+  if (parts.some(p => !p || p === '.' || p === '..' || p.includes('\0'))) return null
+  const filename = parts.pop()!
+  return [{ filename, subfolder: parts.join('/'), type }]
 }
 
 /** The files a node shows (its `data.images`, `/view?…` addresses), or null when it shows none the runner can read. */

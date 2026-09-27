@@ -10,7 +10,7 @@ import { parseFamilies } from '#shared/runner/families'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { vi } from 'vitest'
-import { PREVIEW_COULD_NOT_MAKE, clearPreviewFailure, filesShownBy, livePreviewRequest, markPreviewFailed, previewEnvelope, previewPromptId, runLivePreview, sendLivePreview, type LivePreviewEnv, type PreviewFile } from '~/lib/runner/livePreview'
+import { PREVIEW_COULD_NOT_MAKE, clearPreviewFailure, ownFileOf, filesShownBy, livePreviewRequest, markPreviewFailed, previewEnvelope, previewPromptId, runLivePreview, sendLivePreview, type LivePreviewEnv, type PreviewFile } from '~/lib/runner/livePreview'
 import { isRunnerPromptId } from '#shared/runner/messages'
 
 const ON = parseFamilies('cards,effects-tone,effects-blur,live-previews')
@@ -88,6 +88,25 @@ describe('livePreviewRequest', () => {
     const prompt: ApiPrompt = { ...worked, 3: { class_type: 'ApplyMask', inputs: { image: ['9', 0], mask: ['9', 1], invert: false } } }
     delete prompt[6]
     expect(livePreviewRequest(prompt, '3', fam, () => shown[1]!)).toBeNull()
+  })
+
+  it('a LoadImage (which never shows pictures) is pinned by its own widget file; so is an Image card with a file and nothing shown', () => {
+    const load = (image: unknown) => ({ class_type: 'LoadImage', inputs: { image } })
+    const withLoad = (image: unknown): ApiPrompt => ({ 9: load(image), 3: curves(['9', 0]) })
+    expect(livePreviewRequest(withLoad('taskc_1000.png'), '3', ON, () => null)).toEqual({
+      nodeId: '3', prompt: withLoad('taskc_1000.png'), pinned: { 9: [{ filename: 'taskc_1000.png', subfolder: '', type: 'input' }] },
+    })
+    expect(livePreviewRequest(withLoad('clipspace/mask 1.png [input]'), '3', ON, () => null)?.pinned).toEqual({ 9: [{ filename: 'mask 1.png', subfolder: 'clipspace', type: 'input' }] })
+    // An empty or unreadable widget: the old path.
+    for (const bad of ['', '   ', '../etc/x.png', 'a//b.png', 42, null]) expect(livePreviewRequest(withLoad(bad), '3', ON, () => null)).toBeNull()
+    // An Image card holding a file, before it shows anything.
+    const cardPrompt: ApiPrompt = { 1: card('fox.png'), 3: curves(['1', 0]) }
+    expect(livePreviewRequest(cardPrompt, '3', ON, () => null)?.pinned).toEqual({ 1: [{ filename: 'fox.png', subfolder: '', type: 'input' }] })
+    expect(livePreviewRequest({ 1: card(''), 3: curves(['1', 0]) }, '3', ON, () => null)).toBeNull()
+    // What a node shows comes first; nodes that aren't loaders have no file of their own.
+    expect(livePreviewRequest(cardPrompt, '3', ON, () => [{ filename: 'shown.png', subfolder: 'sailor_runner', type: 'temp' }])?.pinned).toEqual({ 1: [{ filename: 'shown.png', subfolder: 'sailor_runner', type: 'temp' }] })
+    expect(ownFileOf(generate())).toBeNull()
+    expect(ownFileOf({ class_type: 'Image', inputs: { image: 'fox.png', images: ['7', 0] } })).toBeNull()
   })
 
   it('reads a node’s shown files from its /view addresses', () => {

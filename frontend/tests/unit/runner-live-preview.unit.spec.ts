@@ -111,6 +111,27 @@ describe('runPreview', () => {
     expect(Buffer.compare(fromPreview, fromRun)).toBe(0)
   })
 
+  it('LoadImage → Adjust curves, pinned by its widget file (as the browser pins it): the same pixels a full run writes', async () => {
+    const picture = await png(33, 21, 12)
+    const prompt: ApiPrompt = { 9: { class_type: 'LoadImage', inputs: { image: 'taskc_1000.png' } }, 3: curves(['9', 0]) }
+    const a = kitFor()
+    a.put('input', 'taskc_1000.png', picture)
+    const res = await runPreview({ userId: null, body: { canvasId: 'c1', nodeId: '3', prompt, pinned: { 9: [input('taskc_1000.png')] } } }, a.deps)
+    expect(res.ui).toEqual({ images: [{ filename: 'live_preview_3.png', subfolder: 'sailor_runner', type: 'temp' }], animated: [false] })
+    const b = kitFor()
+    b.put('input', 'taskc_1000.png', picture)
+    await b.kit.engine.startRun({ userId: null, takes: [prompt], workflow: null, canvasId: 'c1', projectUuid: null, projectName: null })
+    await until(() => ofType(b.kit.seen, 'execution_success').length > 0 || ofType(b.kit.seen, 'execution_error').length > 0, 60_000)
+    expect(ofType(b.kit.seen, 'execution_error')).toEqual([])
+    expect(Buffer.compare(readFileSync(join(a.kit.root, 'temp/sailor_runner/live_preview_3.png')), readFileSync(join(b.kit.root, 'temp/sailor_runner/live_preview_3.png')))).toBe(0)
+    // Hosted: that input file must be the user's own, as any pin's.
+    const h = kitFor({ hosted: true })
+    h.put('input', 'taskc_1000.png', picture)
+    await expect(runPreview({ userId: 'user_1', body: { canvasId: 'c1', nodeId: '3', prompt, pinned: { 9: [input('taskc_1000.png')] } } }, h.deps)).rejects.toMatchObject({ statusCode: 403 })
+    h.owned.add('input:taskc_1000.png')
+    expect((await runPreview({ userId: 'user_1', body: { canvasId: 'c1', nodeId: '3', prompt, pinned: { 9: [input('taskc_1000.png')] } } }, h.deps)).ui).toBeTruthy()
+  })
+
   it('Add noise draws the same noise as a full run (the seed is the node id and what it reads)', async () => {
     const fox = await png(29, 31, 3)
     const prompt: ApiPrompt = { 1: card(), 4: noise(['1', 0]) }
