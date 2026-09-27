@@ -65,7 +65,8 @@ import { cloneDoc } from '~/lib/sketch/clone'
 import { runCleanup, STRENGTHS, type CleanupResult, type CleanupScope, type CleanupStrength, type FixKind } from '~/lib/sketch/cleanup'
 import { sketchPathData } from '~/lib/sketch/sketchPath'
 import { extractPieces, insertPieces, piecesCentre, hasClosedPieces } from '~/lib/sketch/clipboard'
-import { selectionLabel, topLevelIds } from '~/lib/sketch/pieces'
+import { selectionLabel, topLevelIds, type PieceRef } from '~/lib/sketch/pieces'
+import { SIZE_REFUSED, STAY_PX, drawingDirForScreenAngle, arcEndForSweep, radiusPinOf, circleRadiusRuleOf, checkSizeEdit, stayed } from '~/lib/sketch/sizes'
 import { penClipboard, setPenClipboard, nextPasteStep, PASTE_STEP_PX } from './penClipboard'
 import { OK, no, REASON, type ActionState } from './penReasons'
 
@@ -2015,6 +2016,144 @@ export function usePen(opts: {
     return true
   }
 
+  // --- Properties: typed sizes and the hover highlight (pen stage 6) ---
+  // A typed size is checked first on a copy — only the window round it
+  // (checkSizeEdit, the stage-5 window solve; never a big drawing whole). A
+  // certain "no" refuses it and changes nothing. Else the same edit runs on
+  // the drawing through the pen's normal solve (runSolve); if that solve
+  // fails the drawing is put back and it is refused (an uncertain check is
+  // never a refusal on a guess). Any temporary rule goes again; one step.
+  // `seeds` are what the edit touches when it neither drags nor adds a rule
+  // (a rule's value changed). `stay` are the points a drag must leave where
+  // they are for the typed size to be kept (a line's other end, an arc's
+  // centre and start) — a solve that meets the rules by moving them has lost
+  // the typed size, and that is a refusal too.
+  type SizeEdit = { drag?: DragTarget; temp?: { kind: ConstraintKind; refs: EntityId[]; value: number }; seeds?: EntityId[]; stay?: EntityId[] }
+  function tryEdit(edit: (d: SketchDoc) => SizeEdit | null, own?: [EntityId, EntityId]): boolean {
+    const plan = edit(cloneDoc(doc.value))
+    if (!plan) return false
+    const seeds = plan.drag ? [plan.drag.point] : plan.temp ? plan.temp.refs : plan.seeds ?? []
+    const unitsPerPx = pxToUnits(1, opts.view.value)
+    const verdict = checkSizeEdit(doc.value, {
+      fresh: () => {
+        const t = cloneDoc(doc.value)
+        const p = edit(t)!
+        if (p.drag) { const q = ptOf(t, p.drag.point); if (q) { q.x = p.drag.x; q.y = p.drag.y } }
+        if (p.temp) t.constraints.push({ id: '__size', kind: p.temp.kind, refs: [...p.temp.refs], value: p.temp.value })
+        return t
+      },
+      seeds, held: new Set(plan.drag ? [plan.drag.point] : []), unitsPerPx, own, stay: plan.stay,
+    })
+    if (verdict === 'refuse') { status.value = SIZE_REFUSED; return false }
+    const before = cloneDoc(doc.value)
+    const real = edit(doc.value)!
+    const tempId = real.temp ? addConstraint(doc.value, real.temp.kind, real.temp.refs, real.temp.value) : null
+    const res = runSolve(real.drag)
+    if (!res.converged || !stayed(before, doc.value, real.stay ?? [], STAY_PX * unitsPerPx)) {
+      doc.value = before
+      status.value = SIZE_REFUSED
+      return false
+    }
+    if (tempId) removeConstraint(doc.value, tempId)
+    commitHistory()
+    return true
+  }
+  const ptOf = (d: SketchDoc, id: EntityId) => { const p = d.entities.find(e => e.id === id); return p?.kind === 'point' ? p : null }
+  function setPointXY(id: EntityId, x: number, y: number): boolean {
+    const p = ptOf(doc.value, id)
+    if (!p || !Number.isFinite(x) || !Number.isFinite(y)) return false
+    if (p.fixed) { status.value = 'Fixed points stay where they are'; return false }
+    return tryEdit(() => ({ drag: { point: id, x, y } }))
+  }
+  // move the free end of a–b so it runs `len` along `dir` from the other end
+  function moveLineEnd(a: EntityId, b: EntityId, dirOf: (A: Vec2, B: Vec2) => Vec2 | null, lenOf: (A: Vec2, B: Vec2) => number): boolean {
+    return tryEdit(d => {
+      const A = ptOf(d, a), B = ptOf(d, b)
+      if (!A || !B || (A.fixed && B.fixed)) return null
+      const dir = dirOf(A, B), len = lenOf(A, B)
+      if (!dir || !(len > 0)) return null
+      if (!B.fixed) return { drag: { point: b, x: A.x + dir.x * len, y: A.y + dir.y * len }, stay: [a] }
+      return { drag: { point: a, x: B.x - dir.x * len, y: B.y - dir.y * len }, stay: [b] }
+    }, [a, b])
+  }
+  const unitDir = (A: Vec2, B: Vec2): Vec2 | null => { const n = Math.hypot(B.x - A.x, B.y - A.y); return n > 1e-12 ? { x: (B.x - A.x) / n, y: (B.y - A.y) / n } : null }
+  function setLineLength(a: EntityId, b: EntityId, len: number): boolean {
+    if (!(len > 0)) return false
+    return moveLineEnd(a, b, unitDir, () => len)
+  }
+  function setLineAngle(a: EntityId, b: EntityId, deg: number): boolean {
+    if (!Number.isFinite(deg)) return false
+    return moveLineEnd(a, b, () => drawingDirForScreenAngle(opts.view.value, deg), (A, B) => Math.hypot(B.x - A.x, B.y - A.y))
+  }
+  function arcParts(d: SketchDoc, pathId: EntityId, segIndex: number) {
+    const p = d.entities.find(e => e.id === pathId)
+    if (p?.kind !== 'path') return null
+    const seg = p.segments[segIndex]
+    if (seg?.kind !== 'arc') return null
+    const s = p.anchors[segIndex], e = p.anchors[(segIndex + 1) % p.anchors.length]
+    return s && e ? { c: seg.center, s, e, sweep: seg.sweep } : null
+  }
+  function setArcRadiusValue(pathId: EntityId, segIndex: number, r: number): boolean {
+    if (!(r > 0)) return false
+    return tryEdit(d => {
+      const a = arcParts(d, pathId, segIndex)
+      if (!a) return null
+      const pin = radiusPinOf(d, a.c, a.s)
+      if (pin) { pin.value = r; return { seeds: [a.c, a.s] } }
+      return { temp: { kind: 'distance', refs: [a.c, a.s], value: r } }
+    })
+  }
+  function setArcSweep(pathId: EntityId, segIndex: number, deg: number): boolean {
+    if (!Number.isFinite(deg)) return false
+    const sweepDeg = Math.min(359.5, Math.max(0.5, deg))
+    return tryEdit(d => {
+      const a = arcParts(d, pathId, segIndex)
+      const C = a && ptOf(d, a.c), S = a && ptOf(d, a.s), E = a && ptOf(d, a.e)
+      if (!a || !C || !S || !E || E.fixed) return null
+      const to = arcEndForSweep(C, S, a.sweep === 1 ? 1 : -1, sweepDeg)
+      return { drag: { point: a.e, x: to.x, y: to.y }, stay: [a.c, a.s] }
+    })
+  }
+  function setArcLength(pathId: EntityId, segIndex: number, len: number): boolean {
+    const a = arcParts(doc.value, pathId, segIndex)
+    const C = a && ptOf(doc.value, a.c), S = a && ptOf(doc.value, a.s)
+    if (!C || !S || !(len > 0)) return false
+    const r = Math.hypot(S.x - C.x, S.y - C.y)
+    return r > 1e-12 ? setArcSweep(pathId, segIndex, (len / r) * 180 / Math.PI) : false
+  }
+  function toggleArcRadiusLock(pathId: EntityId, segIndex: number): void {
+    const a = arcParts(doc.value, pathId, segIndex)
+    const C = a && ptOf(doc.value, a.c), S = a && ptOf(doc.value, a.s)
+    if (!a || !C || !S) return
+    const pin = radiusPinOf(doc.value, a.c, a.s)
+    if (pin) removeConstraintById(pin.id)
+    else setArcRadius(pathId, segIndex, Math.hypot(S.x - C.x, S.y - C.y))
+  }
+  function setCircleRadius(id: EntityId, r: number): boolean {
+    if (!(r > 0)) return false
+    return tryEdit(d => {
+      const c = d.entities.find(e => e.id === id)
+      if (c?.kind !== 'circle') return null
+      const rule = circleRadiusRuleOf(d, id)
+      if (rule) { rule.value = r; return { seeds: [id] } }
+      c.r = r
+      return { temp: { kind: 'radius', refs: [id], value: r } }
+    })
+  }
+  function toggleCircleRadiusLock(id: EntityId): void {
+    const c = doc.value.entities.find(e => e.id === id)
+    if (c?.kind !== 'circle') return
+    const rule = circleRadiusRuleOf(doc.value, id)
+    if (rule) { removeConstraintById(rule.id); return }
+    addConstraint(doc.value, 'radius', [id], c.r)
+    runSolve()
+    commitHistory()
+  }
+  // what the Properties panel lights while a rule row is hovered — view state
+  // (no history); replaced, never mutated, so the overlay's computeds follow
+  const highlight = shallowRef<PieceRef[]>([])
+  function setHighlight(p: PieceRef[]): void { highlight.value = p }
+
   // --- Clean up (pen stage 5, lib/sketch/cleanup) ---
   // A preview: the drawing stays exactly as it is while `cleanup` holds the
   // cleaned copy, re-solved from the drawing as it was when Clean up opened
@@ -2485,6 +2624,7 @@ export function usePen(opts: {
   function dispose() {
     closeCleanup()
     cancelValue()   // a pending value request never outlives the pen
+    highlight.value = []
     if (sparkleRaf && typeof cancelAnimationFrame !== 'undefined') cancelAnimationFrame(sparkleRaf)
     sparkleRaf = 0
   }
@@ -2496,6 +2636,8 @@ export function usePen(opts: {
     doc,
     // resolved PenOptions (tools defaults to all tools; openOnly excludes circle)
     options,
+    // the host's view (Properties reads angles as on screen)
+    view: opts.view,
     // state
     tool, guideMode, showLabels, status, selection, selectedSegments, pending, pendingPath,
     pendingOp, opHint, cursor, dimBuffer, nextSegment, sparkles, sparkleClock, placementPreview, hoverSnap,
@@ -2519,6 +2661,9 @@ export function usePen(opts: {
     commitDimension,
     // copy / paste / select all / dissolve a point (pen stage 6)
     copySelection, pasteState, paste, copySvg, selectAll, dissolveState, dissolvePoint,
+    // Properties: typed sizes, the radius lock, the hover highlight (pen stage 6)
+    highlight, setHighlight, setPointXY, setLineLength, setLineAngle, setArcRadiusValue, setArcSweep, setArcLength,
+    toggleArcRadiusLock, setCircleRadius, toggleCircleRadiusLock,
     // Clean up (pen stage 5)
     cleanup, toggleCleanup, startCleanup, applyCleanup, cancelCleanup, toggleCleanupFix, toggleCleanupKind, setCleanupStrength,
     // history
