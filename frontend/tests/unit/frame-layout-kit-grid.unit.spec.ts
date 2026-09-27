@@ -190,3 +190,56 @@ describe('the sheet on the layout grid — L(0) and LB(16) are the resolved grid
     expect(r.margin).toBeGreaterThan(r.top + 1)
   })
 })
+
+describe('the sheet on the layout grid — type from the Line (stub capitals 0.7 em)', () => {
+  const S = sheetOn(own())                       // U = 2 kit units, the Line = 4
+  const onUnits = (v: number) => Math.abs(v / S.U - Math.round(v / S.U)) < 1e-9
+  it('body text: line spacing = the Line, capitals exactly one unit', () => {
+    expect(S.INFO.size * 0.7).toBeCloseTo(S.U, 9)
+    expect(S.INFO.lh * S.INFO.size).toBeCloseTo(2 * S.U, 9)
+  })
+  it('the format\'s legibility floor wins: size at the floor, line spacing whole units ≥ size × 1.3', () => {
+    const F = sheetOn(own(), 1000, 1000, { format: { view: 200 } })   // floor 900/200 = 4.5 > 2/0.7
+    expect(F.INFO.size).toBeCloseTo(4.5, 9)
+    const line = F.INFO.lh * F.INFO.size
+    expect(onUnits(line)).toBe(true)
+    expect(line).toBeGreaterThanOrEqual(4.5 * 1.3 - 1e-9)
+  })
+  it('fitSize and sizeFor: whole-unit capitals, never bigger than the fit', () => {
+    const raw = 50 * 100 / (6 * 55)             // "Echoes" in 50 units at the stub's 0.55 em per letter
+    const f = S.fitSize(['Echoes'], 50)
+    expect(f).toBeLessThanOrEqual(raw + 1e-9)
+    expect(onUnits(f * 0.7)).toBe(true)
+    const s = S.sizeFor(['Weather', 'Report'], 60, 30)
+    expect(onUnits(s * 0.7)).toBe(true)
+    expect(S.blockH(2, s, S.DISPLAY.lh)).toBeLessThanOrEqual(30 + 1e-9)
+  })
+  it('qSize up for a layout that must stay at least as big; never under INFO.size when it started above', () => {
+    expect(S.qSize(15.15, 'title', 'up') * 0.7 / S.U).toBeCloseTo(6, 9)
+    expect(S.qSize(15.15, 'title') * 0.7 / S.U).toBeCloseTo(5, 9)
+    expect(S.qSize(S.INFO.size, 'caption')).toBeCloseTo(S.INFO.size, 9)
+  })
+  it('disp / sec / own quantise size and line spacing; info keeps INFO.size; turned or inside text is left alone', () => {
+    const d = S.disp('Echoes', { size: 15.15, x: 0, top: 6 })
+    expect(onUnits(d.size * 0.7)).toBe(true)
+    expect(onUnits(d.lh * d.size)).toBe(true)
+    const i = S.info('Kunstraum Lenz', { x: 0, top: 6 })
+    expect(i.size).toBeCloseTo(S.INFO.size, 9)
+    expect(onUnits(i.lh * i.size)).toBe(true)
+    const turned = S.disp('Echoes', { size: 15.15, x: 0, top: 6, rot: -90 })
+    expect(turned.size).toBe(15.15)
+    const inside = S.text('Shop now', { size: 3.3, lh: 1, x: 0, top: 6, inside: 'btn' })
+    expect(inside.lh).toBe(1)
+  })
+  it('blockH, gapBelow and groupGap are whole units', () => {
+    const s = S.fitSize(['Echoes'], 50)
+    expect(onUnits(S.blockH(3, s, S.DISPLAY.lh) - S.CAP * s)).toBe(true)
+    expect(onUnits(S.gapBelow(s))).toBe(true)
+    expect(onUnits(S.groupGap())).toBe(true)
+  })
+  it('the kit\'s own sheet is unchanged: qSize and lhFor are the identity', () => {
+    const K = makeSheet({ frameW: 1000, frameH: 1000, measure })
+    expect(K.qSize(15.15, 'title')).toBe(15.15)
+    expect(K.lhFor(15.15, 0.9)).toBe(0.9)
+  })
+})

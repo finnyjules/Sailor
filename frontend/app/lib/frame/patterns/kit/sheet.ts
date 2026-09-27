@@ -65,6 +65,13 @@ export interface Sheet {
   /** Stage 3: the last row bottom at or before y (before the first row: its top); rows off: y down to
    *  the baseline grid. The kit's own sheet: y. */
   rowBottom(y: number): number
+  /** Stage 3: on the grid, the nearest size below (`'up'`: above) whose capitals in `role`'s face are
+   *  a whole number of units — never under INFO.size when `size` was at least that. The kit's own
+   *  sheet: `size`. */
+  qSize(size: number, role?: string, dir?: 'down' | 'up'): number
+  /** Stage 3: on the grid, the line height whose line spacing (lh × size) is the nearest whole number
+   *  of units, at least one. The kit's own sheet: `lh`. */
+  lhFor(size: number, lh: number): number
   DISPLAY: Style; SECOND: Style & { size: number }; INFO: Style & { size: number }
   X(c: number): number; XR(c: number): number; SPAN(a: number, b: number): number; L(r: number): number; Xr(c: number): number
   /** The line a bottom or a baseline on design row `r` sits on (stage 3). The kit's own sheet: `L`. */
@@ -251,23 +258,50 @@ export function makeSheet(o: SheetOpts): Sheet {
   const LB = lay ? (r: number) => rowBottom(T0 + r * RH) : L                        // a bottom or baseline on row r
 
   // Swiss styles — minimum text size from the format's viewing width (Stage 2), Stage 1 sizes when absent.
-  const infoSize = kb.infoSize
-  const secondSize = o.format?.view ? Math.max(4.4 * B, 1.6 * infoSize) : 4.4 * B
+  const sty = STYLES[o.style ?? 'swiss']
+  /** A face's capital height (em): 'H' from its top to its baseline. */
+  const capOf = (role: string | undefined) => { const f = faceOf(role); return measure.capAbove(f) + measure.baseBelow(f) }
+  const upU = (v: number) => (U ? Math.ceil(v / U - EPS) * U : v)     // a length, up to whole units
+  // Stage 3 (rulings 1, 3): on the grid, body text's capitals are one unit tall in the caption face —
+  // unless the format's legibility floor is bigger; then the floor, on whole-unit line spacing.
+  const viewFloor = o.format?.view ? 900 / o.format.view : 0
+  const oneUnit = U ? U / capOf('caption') : 0
+  const infoSize = U ? Math.max(oneUnit, viewFloor) : kb.infoSize
+  const infoLh = !U ? sty.info.lh
+    : infoSize <= oneUnit + EPS ? 2 * U / infoSize
+    : Math.max(2 * U, upU(infoSize * sty.info.lh)) / infoSize
+  const qSize = (size: number, role?: string, dir: 'down' | 'up' = 'down'): number => {
+    if (!U || !(size > 0)) return size
+    const q = U / capOf(role)
+    const n = size / q
+    const s = Math.max(1, dir === 'up' ? Math.ceil(n - EPS) : Math.floor(n + EPS)) * q
+    return s < infoSize - EPS && size >= infoSize - EPS ? size : s
+  }
+  const lhFor = (size: number, lh: number): number => (U && size > 0 ? Math.max(1, Math.round(lh * size / U)) * U / size : lh)
+  const secondRaw = o.format?.view ? Math.max(4.4 * B, 1.6 * infoSize) : 4.4 * B
+  const secondSize = qSize(secondRaw, 'details')
   // The style's display and information type; `upper` only when the style sets capitals, so the
   // Swiss styles are exactly the Stage 1 objects.
-  const sty = STYLES[o.style ?? 'swiss']
   const upperOf = (u: boolean | undefined) => (u ? { upper: true } : {})
   const DISPLAY: Style = { role: 'title', wt: sty.display.wt, ls: sty.display.ls, lh: sty.display.lh, ...upperOf(sty.display.upper) }
   const SECOND: Style & { size: number } = { role: 'details', size: secondSize, wt: 500, ls: -0.02, lh: 1.04 }
-  const INFO: Style & { size: number } = { role: 'caption', size: infoSize, wt: sty.info.wt, ls: sty.info.ls, lh: sty.info.lh, ...upperOf(sty.info.upper) }
+  const INFO: Style & { size: number } = { role: 'caption', size: infoSize, wt: sty.info.wt, ls: sty.info.ls, lh: infoLh, ...upperOf(sty.info.upper) }
 
   // measurement: width at size 100, with the letter spacing the layout will set
   const w100 = (s: string, st: Style = DISPLAY) => measure.w100(s, st.role ?? 'title', st.ls, st.upper)
-  const fitSize = (lines: string[], width: number, st: Style = DISPLAY) =>
+  const fitRaw = (lines: string[], width: number, st: Style) =>
     SCALE * Math.min(...lines.map(l => width * 100 / Math.max(1, w100(l, st))))
-  const blockH = (n: number, size: number, lh: number) => ((n - 1) * lh + CAP) * size
-  const sizeFor = (lines: string[], width: number, maxH: number, st: Style = DISPLAY) =>
-    Math.min(fitSize(lines, width, st), SCALE * maxH / ((lines.length - 1) * st.lh + CAP))
+  const fitSize = (lines: string[], width: number, st: Style = DISPLAY) => qSize(fitRaw(lines, width, st), st.role)
+  const blockH = (n: number, size: number, lh: number) => ((n - 1) * lhFor(size, lh) + CAP) * size
+  const sizeFor = (lines: string[], width: number, maxH: number, st: Style = DISPLAY) => {
+    const raw = Math.min(fitRaw(lines, width, st), SCALE * maxH / ((lines.length - 1) * st.lh + CAP))
+    if (!U) return raw
+    // Trimmed to whole-unit capitals, then down a step at a time until its whole-unit line spacing fits.
+    const q = U / capOf(st.role)
+    let s = qSize(raw, st.role)
+    while (s - q >= infoSize - EPS && ((lines.length - 1) * lhFor(s, st.lh) + CAP) * s > SCALE * maxH + EPS) s -= q
+    return s
+  }
   function breakLines(words: string[], width: number, size: number, st: Style): string[] {
     const out: string[] = []; let cur = ''
     for (const w of words) {
@@ -329,14 +363,21 @@ export function makeSheet(o: SheetOpts): Sheet {
   // A flowing date line (its own box, `w`) that has to break after its range dash becomes placed
   // lines — the mechanism a title's line breaks use (`pre`: the op carries the lines as runs, the
   // layer's text is never rewritten), so the break measured here is the break drawn.
+  /** Stage 3: on the grid, the size trimmed to whole-unit capitals in its own face (`sized`) and the
+   *  line spacing a whole number of units. Turned text and text inside a shape keep theirs. */
+  const onGridType = <T extends Partial<TextEl>>(e: T, sized: boolean): T => {
+    if (!U || e.rot || e.inside || e.size == null) return e
+    const size = sized ? qSize(e.size, e.role) : e.size
+    return { ...e, size, ...(e.lh != null ? { lh: lhFor(size, e.lh) } : {}) }
+  }
   const text = (s: string, o: Partial<TextEl>): TextEl => {
-    const e = { k: 't', s, ...o } as TextEl
+    const e = { k: 't', s, ...onGridType(o, false) } as TextEl
     if (e.pre || e.w == null || faceOf(e.role) !== 'date' || e.size == null) return e
     const dl = dateLines(s, e.w, { role: 'date', ls: e.ls ?? 0, lh: e.lh, upper: e.upper }, e.size)
     return dl ? { ...e, s: dl.join('\n'), pre: true } : e
   }
-  const disp = (s: string, o: Partial<TextEl>) => text(s, { wt: DISPLAY.wt, ls: DISPLAY.ls, lh: DISPLAY.lh, role: 'title', pre: true, ...upperOf(DISPLAY.upper), ...o })
-  const sec = (s: string, o: Partial<TextEl>) => text(s, { size: SECOND.size, wt: SECOND.wt, ls: SECOND.ls, lh: SECOND.lh, role: 'details', ...o })
+  const disp = (s: string, o: Partial<TextEl>) => text(s, onGridType({ wt: DISPLAY.wt, ls: DISPLAY.ls, lh: DISPLAY.lh, role: 'title', pre: true, ...upperOf(DISPLAY.upper), ...o }, true))
+  const sec = (s: string, o: Partial<TextEl>) => text(s, onGridType({ size: SECOND.size, wt: SECOND.wt, ls: SECOND.ls, lh: SECOND.lh, role: 'details', ...o }, true))
   const info = (s: string, o: Partial<TextEl>) => text(s, { role: 'info', size: INFO.size, wt: INFO.wt, ls: INFO.ls, lh: INFO.lh, ...upperOf(INFO.upper), ...o })
   const rule = (x: number, y: number, w: number): RuleEl => ({ k: 'l', x, y, w })
   /** INFO measured in the face of the element's own role. */
@@ -348,7 +389,7 @@ export function makeSheet(o: SheetOpts): Sheet {
     items.forEach((it, i) => {
       const n = countLines(it.s, w, infoIn(it.role), INFO.size)
       els.push(info(it.s, { x: X(c1), w, top: y, wt: it.wt || INFO.wt, role: it.role || 'info' }))
-      y += blockH(n, INFO.size, INFO.lh) + (i < items.length - 1 ? INFO.size * 1.25 : 0)
+      y += blockH(n, INFO.size, INFO.lh) + (i < items.length - 1 ? upU(INFO.size * 1.25) : 0)
     })
     return { els, bottom: y }
   }
@@ -442,8 +483,8 @@ export function makeSheet(o: SheetOpts): Sheet {
     return { k: 'logo', x: o.align === 'center' ? x - w / 2 : o.align === 'right' ? x - w : x, y: top, w, h, role: 'logo' }
   }
   // Spacing, from the type rather than per layout:
-  const gapBelow = (s: number) => Math.max(s * 0.4, INFO.size * 1.1)
-  const groupGap = () => Math.max(RH * 1.4, INFO.size * 3.4)
+  const gapBelow = (s: number) => upU(Math.max(s * 0.4, INFO.size * 1.1))
+  const groupGap = () => upU(Math.max(RH * 1.4, INFO.size * 3.4))
   const inset = () => Math.max(M, INFO.size * 2.4)
   // A rotated tag in accent (Street), the prototype's `tag()` (~1159), maths verbatim. The text is
   // the user's own line (`role`), measured in that line's face with the display style.
@@ -463,8 +504,12 @@ export function makeSheet(o: SheetOpts): Sheet {
   }
 
   // ── Stage 4 pieces: owned words, stars and leader lines ──
-  const own = (s: string, o: Partial<OwnTextEl>): OwnTextEl =>
-    ({ k: 'own', s, x: 0, size: INFO.size, wt: INFO.wt ?? 400, ls: 0, lh: 1, role: 'own', ...o } as OwnTextEl)
+  const own = (s: string, o: Partial<OwnTextEl>): OwnTextEl => {
+    const e = { k: 'own', s, x: 0, size: INFO.size, wt: INFO.wt ?? 400, ls: 0, lh: 1, role: 'own', ...o } as OwnTextEl
+    if (!U || e.rot) return e
+    const size = e.size > infoSize + EPS ? qSize(e.size, 'caption') : e.size
+    return { ...e, size, lh: lhFor(size, e.lh) }
+  }
   const stars = (value: number, x: number, y: number, size: number): StarsEl =>
     ({ k: 'stars', x, y, size, value, role: 'stars' })
   const leader = (x1: number, y1: number, x2: number, y2: number): LineEl =>
@@ -472,7 +517,7 @@ export function makeSheet(o: SheetOpts): Sheet {
 
   return {
     measure,
-    W, H, M, G, NC, CW, RH, GAP, CAP, B, defaultMargin, U, Y0, rows, rowTop, rowBottom,
+    W, H, M, G, NC, CW, RH, GAP, CAP, B, defaultMargin, U, Y0, rows, rowTop, rowBottom, qSize, lhFor,
     DISPLAY, SECOND, INFO,
     X, XR, SPAN, L, LB, Xr,
     w100, fitSize, sizeFor, blockH, countLines, dateLines, breakLines, balance,
