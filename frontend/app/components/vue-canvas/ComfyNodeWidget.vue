@@ -622,6 +622,7 @@ function formatLabel(name: string): string {
           :label="formatLabel(widgetDef.name)"
           :hint="rowHint"
           :model-value="modelValue"
+          size="comfortable"
           @update:model-value="emit('update:modelValue', $event)"
         />
         <StudioSwitch
@@ -629,6 +630,7 @@ function formatLabel(name: string): string {
           :label="formatLabel(widgetDef.name)"
           :hint="rowHint"
           :model-value="!!modelValue"
+          size="comfortable"
           @update:model-value="emit('update:modelValue', $event)"
         />
         <!-- `:bindable="false"` — StudioRow shows the variable glyph by default and
@@ -645,6 +647,7 @@ function formatLabel(name: string): string {
           :default="widgetDef.default"
           :bindable="false"
           :model-value="Number(modelValue)"
+          size="comfortable"
           @update:model-value="emit('update:modelValue', $event)"
         />
         <!-- Seed: an integer plus its lock/shuffle toggle. Not a slider — 0..2^32 fills no
@@ -656,6 +659,7 @@ function formatLabel(name: string): string {
           :spec="slotRowSpec as never"
           :model-value="modelValue"
           :bindable="false"
+          size="comfortable"
         >
           <template #label-after>
             <button
@@ -690,6 +694,7 @@ function formatLabel(name: string): string {
           :spec="slotRowSpec as never"
           :model-value="modelValue"
           :bindable="false"
+          size="comfortable"
         >
           <template #value>
             <input
@@ -711,6 +716,7 @@ function formatLabel(name: string): string {
           :spec="slotRowSpec as never"
           :model-value="modelValue ?? ''"
           :bindable="false"
+          size="comfortable"
           @update:model-value="emit('update:modelValue', $event)"
         />
       </div>

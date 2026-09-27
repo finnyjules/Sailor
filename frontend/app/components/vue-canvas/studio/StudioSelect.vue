@@ -16,7 +16,7 @@ import type { ControlSpec } from '~/lib/spacetype/effect'
 import StudioRow from './StudioRow.vue'
 
 const model = defineModel<string>({ required: true })
-const props = defineProps<{ options: string[]; optionLabels?: string[]; optionGroups?: string[]; label?: string; hint?: string }>()
+const props = defineProps<{ options: string[]; optionLabels?: string[]; optionGroups?: string[]; label?: string; hint?: string; size?: 'compact' | 'comfortable' }>()
 
 // `optionGroups` pairs with `options` by index: consecutive options sharing a heading
 // render under one <optgroup>. The plain (label-less) branch below groups directly; the
@@ -64,7 +64,7 @@ const spec = computed(() => ({
        reach StudioRow through StudioControlPanel, which does wire promotion. -->
   <StudioRow
     v-else
-    :spec="spec" :model-value="model" :bindable="false"
+    :spec="spec" :model-value="model" :bindable="false" :size="size"
     @update:model-value="(v) => (model = String(v))"
   />
 </template>

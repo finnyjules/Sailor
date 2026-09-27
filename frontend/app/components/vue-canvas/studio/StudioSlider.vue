@@ -26,6 +26,7 @@ const props = defineProps<{
   // nor passes it to `scrubValue` — and no call site set it. `scrubValue` still takes
   // one for the `v-scrub` directive, which does forward `b.scrubPx`.
   hint?: string
+  size?: 'compact' | 'comfortable'
 }>()
 const emit = defineEmits<{ (e: 'promote'): void; (e: 'menu', event: MouseEvent): void }>()
 
@@ -48,6 +49,7 @@ const spec = computed(() => ({
     :model-value="model"
     :bound="bound ?? null"
     :bindable="bindable"
+    :size="size"
     @update:model-value="(v) => (model = Number(v))"
     @promote="emit('promote')"
     @menu="(e) => emit('menu', e)"

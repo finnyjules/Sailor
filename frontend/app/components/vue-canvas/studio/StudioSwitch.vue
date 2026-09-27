@@ -17,7 +17,7 @@ const model = defineModel<boolean>({ required: true })
 // No `bound` prop. It had zero call sites, and had one appeared, StudioRow's pink
 // column button emits `goToCollection` into this component, which declares no such
 // emit — the same dead affordance `:bindable="false"` exists to prevent.
-const props = defineProps<{ label?: string; hint?: string }>()
+const props = defineProps<{ label?: string; hint?: string; size?: 'compact' | 'comfortable' }>()
 
 const spec = computed(() => ({
   key: 'inline', label: props.label ?? '', kind: 'switch', default: false, group: '',
@@ -33,7 +33,7 @@ const spec = computed(() => ({
   />
   <StudioRow
     v-else
-    :spec="spec" :model-value="model"
+    :spec="spec" :model-value="model" :size="size"
     @update:model-value="(v) => (model = Boolean(v))"
   />
 </template>
