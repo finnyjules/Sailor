@@ -162,3 +162,59 @@ export function describeLayoutGrid(g: LayoutGrid): string {
   const rows = g.rows.mode === 'off' ? 'no rows' : g.rows.mode === 'square' ? 'square rows' : `${g.rows.count} rows`
   return `${g.cols.count} columns, ${rows}, line ${g.line} px${g.show ? '' : ', hidden'}`
 }
+
+/** The columns (and rows, when there are rows) a layer covers: 1-based first, and how many. */
+export interface LayoutSpan { col: number; cols: number; row: number | null; rows: number | null }
+
+/** First and last track a [lo, hi] extent covers: the first is the track whose START is nearest lo
+ *  among those that start before hi; the last is the track whose END is nearest hi among those that
+ *  end after lo. So a small box inside one track covers just that track. 0-based. */
+function spanIdx(tracks: Track[], lo: number, hi: number): [number, number] {
+  let first = -1, last = -1, bf = Infinity, bl = Infinity
+  tracks.forEach((t, i) => {
+    if (t.a < hi) { const d = Math.abs(t.a - lo); if (d < bf) { bf = d; first = i } }
+    if (t.a + t.w > lo) { const d = Math.abs(t.a + t.w - hi); if (d < bl) { bl = d; last = i } }
+  })
+  if (first < 0) first = 0
+  if (last < 0) last = tracks.length - 1
+  if (last < first) last = first
+  return [first, last]
+}
+
+/** The span a box (grid px) covers. Text passes its capitals-to-last-baseline extent as y/h. */
+export function spanOf(box: { x: number; y: number; w: number; h: number }, r: ResolvedLayoutGrid): LayoutSpan {
+  const [c0, c1] = spanIdx(r.cols, box.x, box.x + box.w)
+  if (!r.rows.length) return { col: c0 + 1, cols: c1 - c0 + 1, row: null, rows: null }
+  const [r0, r1] = spanIdx(r.rows, box.y, box.y + box.h)
+  return { col: c0 + 1, cols: c1 - c0 + 1, row: r0 + 1, rows: r1 - r0 + 1 }
+}
+
+/** Where a span sits on the grid (px), clamped inside it. y/h are null when rows are off. */
+export function placeOnSpan(s: LayoutSpan, r: ResolvedLayoutGrid): { x: number; w: number; y: number | null; h: number | null } {
+  const nc = r.cols.length
+  const c0 = clampInt(s.col, 1, nc) - 1
+  const c1 = Math.min(nc - 1, c0 + Math.max(1, Math.round(s.cols)) - 1)
+  const x = r.cols[c0]!.a, w = r.cols[c1]!.a + r.cols[c1]!.w - x
+  if (!r.rows.length || s.row == null) return { x, w, y: null, h: null }
+  const nr = r.rows.length
+  const r0 = clampInt(s.row, 1, nr) - 1
+  const r1 = Math.min(nr - 1, r0 + Math.max(1, Math.round(s.rows ?? 1)) - 1)
+  const y = r.rows[r0]!.a
+  return { x, w, y, h: r.rows[r1]!.a + r.rows[r1]!.w - y }
+}
+
+/** One track plus one gap (the pitch), and the gap. A single track: its own size, no gap. */
+function pitchOf(tracks: Track[]): { pitch: number; gap: number } {
+  if (tracks.length > 1) { const p = tracks[1]!.a - tracks[0]!.a; return { pitch: p, gap: p - tracks[0]!.w } }
+  return { pitch: tracks[0]?.w ?? 0, gap: 0 }
+}
+/** How many tracks a length spans: n tracks are n pitches less one gap (the text box "col" unit). */
+export function tracksFromLength(tracks: Track[], px: number): number {
+  const { pitch, gap } = pitchOf(tracks)
+  return pitch > 0 ? (px + gap) / pitch : 0
+}
+/** The length of n tracks: n pitches less one gap. */
+export function lengthFromTracks(tracks: Track[], n: number): number {
+  const { pitch, gap } = pitchOf(tracks)
+  return Math.max(1, n * pitch - gap)
+}
