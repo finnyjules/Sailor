@@ -1,9 +1,11 @@
-import { computed, inject, provide, ref, toValue, type ComputedRef, type InjectionKey, type MaybeRefOrGetter, type Ref } from 'vue'
+import { computed, getCurrentScope, inject, onScopeDispose, provide, ref, toValue, watch, type ComputedRef, type InjectionKey, type MaybeRefOrGetter, type Ref } from 'vue'
 import { blurAllowed, countVisible, nodesWithSomethingBehind, type GlassMode, type NodeBox, type Wire } from '~/lib/canvas/glassPolicy'
 
 export interface GlassFlow {
-  onMoveStart(cb: () => void): void
-  onMoveEnd(cb: () => void): void
+  /** Optional. The viewport watch decides "moving"; a move start alone never turns blur off. */
+  onMoveStart?(cb: () => void): void
+  /** Optional. A move end only re-arms the settle timer. */
+  onMoveEnd?(cb: () => void): void
   viewport: Ref<{ x: number; y: number; zoom: number }>
   boxes: () => NodeBox[]
   wires: () => Wire[]
@@ -11,11 +13,18 @@ export interface GlassFlow {
 }
 
 /**
- * The canvas's glass switch. Blur is decided once per REST, never per frame: move start
- * turns it off with a single class change on the root, move end (after a short settle)
- * recomputes which nodes have something behind them and turns it back on. The zoom used
- * for the one-screen-pixel border is also published only at rest, so a pinch never
- * restyles every node on every frame.
+ * The canvas's glass switch. Blur is decided once per REST, never per frame.
+ *
+ * "Moving" is read from the viewport itself, not from gesture events (Vue Flow emits no
+ * move events for fitView, setViewport, zoom buttons or keyboard zoom). Any viewport
+ * change turns blur off with a single class change on the root and re-arms a short
+ * settle timer; when it fires, the zoom is published, the set of nodes with something
+ * behind them is recomputed and blur comes back. The per-frame cost while moving is one
+ * clearTimeout/setTimeout. The zoom used for the one-screen-pixel border is published
+ * only at rest, so a pinch never restyles every node on every frame.
+ *
+ * invalidate(): graph changed (load, add, remove, resize) — recompute once after the
+ * settle, coalescing any number of calls. pause()/resume(): a node drag.
  */
 export function createCanvasGlass(flow: GlassFlow, opts: { mode?: Ref<GlassMode>; settleMs?: number } = {}) {
   const mode = opts.mode ?? ref<GlassMode>('smart')
@@ -25,37 +34,66 @@ export function createCanvasGlass(flow: GlassFlow, opts: { mode?: Ref<GlassMode>
   const visible = ref(0)
   const blurIds = ref<Set<string>>(new Set())
   let settle: ReturnType<typeof setTimeout> | null = null
+  let paused = false
 
   function recompute() {
+    const vp = flow.viewport.value
+    zoomAtRest.value = vp.zoom
     const boxes = flow.boxes()
     const { width, height } = flow.size()
-    visible.value = countVisible(boxes, { ...flow.viewport.value, width, height })
-    blurIds.value = nodesWithSomethingBehind(boxes, flow.wires())
+    visible.value = countVisible(boxes, { ...vp, width, height })
+    const allowedNow = blurAllowed({ mode: mode.value, moving: moving.value, zoom: vp.zoom, visibleNodes: visible.value })
+    if (allowedNow) blurIds.value = nodesWithSomethingBehind(boxes, flow.wires())
+    else if (blurIds.value.size) blurIds.value = new Set()
   }
 
-  flow.onMoveStart(() => {
-    if (settle) { clearTimeout(settle); settle = null }
-    moving.value = true
-  })
-  flow.onMoveEnd(() => {
+  function settleSoon() {
+    if (paused) return
     if (settle) clearTimeout(settle)
     settle = setTimeout(() => {
       settle = null
-      zoomAtRest.value = flow.viewport.value.zoom
-      recompute()
       moving.value = false
+      recompute()
     }, settleMs)
-  })
+  }
+
+  // Only a real viewport change means "moving". Sync, so the per-frame cost is exactly
+  // one clearTimeout/setTimeout (Vue Flow writes the viewport as one object).
+  watch(
+    [() => flow.viewport.value.x, () => flow.viewport.value.y, () => flow.viewport.value.zoom],
+    () => { moving.value = true; settleSoon() },
+    { flush: 'sync' },
+  )
+  watch(mode, () => settleSoon())
+  flow.onMoveEnd?.(() => settleSoon())
+
+  function invalidate() { settleSoon() }
+  function pause() {
+    paused = true
+    if (settle) { clearTimeout(settle); settle = null }
+    moving.value = true
+  }
+  function resume() {
+    paused = false
+    settleSoon()
+  }
+
+  if (getCurrentScope()) onScopeDispose(() => { if (settle) clearTimeout(settle); settle = null })
 
   const allowed = computed(() => blurAllowed({ mode: mode.value, moving: moving.value, zoom: zoomAtRest.value, visibleNodes: visible.value }))
-  const rootClass = computed(() => (allowed.value ? 'canvas-glass canvas-glass--blur' : 'canvas-glass'))
+  const rootClass = computed(() => {
+    if (mode.value === 'never') return 'canvas-glass canvas-glass--never'
+    return allowed.value ? 'canvas-glass canvas-glass--blur' : 'canvas-glass'
+  })
   const rootStyle = computed(() => ({ '--canvas-zoom': String(zoomAtRest.value) }))
-  return { rootClass, rootStyle, blurIds, recompute, moving }
+  return { rootClass, rootStyle, blurIds, recompute, invalidate, pause, resume, moving }
 }
 
-export const CANVAS_GLASS_KEY: InjectionKey<{ blurIds: Ref<Set<string>> }> = Symbol('canvas-glass')
+export interface CanvasGlassContext { blurIds: Readonly<Ref<ReadonlySet<string>>> }
 
-export function provideCanvasGlass(g: { blurIds: Ref<Set<string>> }) {
+export const CANVAS_GLASS_KEY: InjectionKey<CanvasGlassContext> = Symbol('canvas-glass')
+
+export function provideCanvasGlass(g: CanvasGlassContext) {
   provide(CANVAS_GLASS_KEY, g)
 }
 

@@ -10,16 +10,11 @@
  * of them long enough to cross behind a node that isn't either endpoint —
  * exactly the case createCanvasGlass's `nodesWithSomethingBehind` exists for.
  *
- * IMPORTANT — setViewport does not fire Vue Flow's move events (it's a
- * programmatic viewport write, not a user pan), so createCanvasGlass never
- * sees a move start/end during the animated run and Smart mode would stay
- * frozen at whatever blur state it was last in. To exercise Smart mode
- * honestly, this page captures the exact callbacks createCanvasGlass hands
- * to `flow.onMoveStart` / `flow.onMoveEnd` (rather than only forwarding them
- * to Vue Flow's own hooks) and exposes them as beginMove()/endMove(), which
- * the bench calls itself right before and after each run.
+ * setViewport fires no Vue Flow move events, but createCanvasGlass reads
+ * "moving" from the viewport itself, so the animated run turns Smart's blur
+ * off and the settle after it turns blur back on — no hand-fired callbacks.
  */
-import { onMounted, ref, computed, nextTick, h, defineComponent, markRaw } from 'vue'
+import { ref, computed, nextTick, h, defineComponent, markRaw } from 'vue'
 import { VueFlow, useVueFlow, Position } from '@vue-flow/core'
 import '@vue-flow/core/dist/style.css'
 import '@vue-flow/core/dist/theme-default.css'
@@ -143,12 +138,8 @@ const canvasRootRef = ref<HTMLElement | null>(null)
 const REST_VIEWPORT = { x: 0, y: 340, zoom: 1 }
 
 const {
-  onMoveStart, onMoveEnd, getNodes, getEdges, viewport: vfViewport, setViewport,
+  onNodesInitialized, getNodes, getEdges, viewport: vfViewport, setViewport,
 } = useVueFlow()
-
-// Captured so the bench can trigger them itself — see the file comment above.
-let moveStartCb: (() => void) | null = null
-let moveEndCb: (() => void) | null = null
 
 const getBoxes = () => getNodes.value
   .filter(n => n.dimensions.width > 0)
@@ -159,8 +150,6 @@ const getWires = () => getEdges.value
 const getSize = () => ({ width: canvasRootRef.value?.clientWidth ?? 0, height: canvasRootRef.value?.clientHeight ?? 0 })
 
 const canvasGlass = createCanvasGlass({
-  onMoveStart: (cb) => { moveStartCb = cb; onMoveStart(cb) },
-  onMoveEnd: (cb) => { moveEndCb = cb; onMoveEnd(cb) },
   viewport: vfViewport,
   boxes: getBoxes,
   wires: getWires,
@@ -179,10 +168,7 @@ const effectiveBlurIds = computed(() => {
   if (mode.value === 'never') return new Set<string>()
   return canvasGlass.blurIds.value
 })
-provideCanvasGlass({ blurIds: effectiveBlurIds as any })
-
-function beginMove() { if (mode.value === 'smart') moveStartCb?.() }
-function endMove() { if (mode.value === 'smart') moveEndCb?.() }
+provideCanvasGlass({ blurIds: effectiveBlurIds })
 
 // True blur only happens where BOTH hold: the root allows it (canvas-glass--blur)
 // and the shell is in the blur set. Used by the readout and by the
@@ -196,12 +182,8 @@ const rootHasBlur = computed(() => canvasGlass.rootClass.value.includes('canvas-
 const blurredShellCount = computed(() => effectiveBlurIds.value.size)
 const visibleNodeCount = computed(() => countVisible(getBoxes(), { ...vfViewport.value, ...getSize() }))
 
-// Vue Flow measures each node's dimensions asynchronously (ResizeObserver),
-// so a recompute() called synchronously in onMounted sees every box at
-// height 0 — which silently zeroes out every overlapping pair's overlap
-// test and left blurIds permanently empty (found while verifying fix round
-// 1's readout). A couple of animation frames is enough for real layout.
-onMounted(() => requestAnimationFrame(() => requestAnimationFrame(() => canvasGlass.recompute())))
+// Same as the real canvas: decide blur once the nodes have real dimensions.
+onNodesInitialized(() => canvasGlass.invalidate())
 
 function setMode(next: GlassMode) {
   mode.value = next
@@ -269,18 +251,13 @@ async function runPan() {
   if (running.value) return
   running.value = true
   try {
-    // Force a Smart-mode recompute at the rest viewport, and let it settle,
-    // BEFORE sampling blurredAtRest and BEFORE beginMove() turns blur off for
-    // the move — otherwise this would sample the already-moving state, not
-    // the rest one the finding asks for.
+    // Sample the rest state BEFORE the first setViewport turns blur off.
     if (mode.value === 'smart') canvasGlass.recompute()
     await nextTick()
     const blurredAtRest = sampleBlurredShellCount()
-    beginMove()
     const label = mode.value === 'always' ? 'Always' : mode.value === 'never' ? 'Never' : 'Smart'
     await runBench(label, blurredAtRest)
   } finally {
-    endMove()
     running.value = false
   }
 }
@@ -336,7 +313,7 @@ function fmt(n: number) { return Number.isFinite(n) ? n.toFixed(1) : '—' }
             <th class="pr-4 font-medium">Dropped</th>
             <th class="pr-4 font-medium">Frames</th>
             <th class="pr-4 font-medium">Blur (rest)</th>
-            <th class="font-medium">Blur (pan)</th>
+            <th class="font-medium" title="Shells blurring mid pan. Smart should read 0 while moving">Blur (pan)</th>
           </tr>
         </thead>
         <tbody>

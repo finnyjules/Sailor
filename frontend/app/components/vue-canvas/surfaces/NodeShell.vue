@@ -1,8 +1,12 @@
 <script setup lang="ts">
 /** The instrument/studio shell. Chrome only: each node fills the slots. See node-surfaces.css. */
+import { inject } from 'vue'
+import { NodeIdInjection } from '@vue-flow/core'
 import { useNodeGlass } from '~/composables/useCanvasGlass'
 const props = defineProps<{ title: string; nodeId?: string; selected?: boolean }>()
-const glass = useNodeGlass(() => props.nodeId)
+// Inside a Vue Flow node the id is injected, so a caller that forgets nodeId still gets blur.
+const injectedNodeId = inject(NodeIdInjection, undefined)
+const glass = useNodeGlass(() => props.nodeId ?? injectedNodeId)
 </script>
 
 <template>

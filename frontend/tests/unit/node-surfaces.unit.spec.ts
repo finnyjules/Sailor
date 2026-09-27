@@ -11,6 +11,7 @@ import NodeOpenBar from '~/components/vue-canvas/surfaces/NodeOpenBar.vue'
 import ContentCard from '~/components/vue-canvas/surfaces/ContentCard.vue'
 import PrintSurface from '~/components/vue-canvas/surfaces/PrintSurface.vue'
 import { CANVAS_GLASS_KEY } from '~/composables/useCanvasGlass'
+import { NodeIdInjection } from '@vue-flow/core'
 
 let CSS = ''
 try {
@@ -65,6 +66,14 @@ describe('NodeShell', () => {
     const off = mount(NodeShell, { props: { title: 't', nodeId: 'n2' }, global: { provide: { [CANVAS_GLASS_KEY as symbol]: { blurIds } } } })
     expect(on.find('.node-shell').attributes('data-glass-blur')).toBeDefined()
     expect(off.find('.node-shell').attributes('data-glass-blur')).toBeUndefined()
+  })
+  it('falls back to the Vue Flow node id when no nodeId is passed', () => {
+    const blurIds = ref(new Set(['n1']))
+    const w = mount(NodeShell, { props: { title: 't' }, global: { provide: { [CANVAS_GLASS_KEY as symbol]: { blurIds }, [NodeIdInjection as symbol]: 'n1' } } })
+    expect(w.find('.node-shell').attributes('data-glass-blur')).toBeDefined()
+  })
+  it('keeps the Open bar up while the shell is selected', () => {
+    expect(CSS).toMatch(/\.node-shell\[data-selected\] \.node-openbar[^{]*\{[^}]*opacity: 1/)
   })
 })
 

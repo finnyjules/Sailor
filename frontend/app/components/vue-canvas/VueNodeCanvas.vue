@@ -1244,14 +1244,13 @@ const {
   onConnect, addEdges, fitView, fitBounds, zoomIn: vfZoomIn, zoomOut: vfZoomOut,
   project, removeNodes, removeEdges, viewport: vfViewport, onNodeDragStart, onNodeDragStop, onNodeDrag,
   onConnectStart, onConnectEnd, onEdgesChange, findNode, dimensions: vfDimensions, setViewport,
-  onMoveStart, onMoveEnd, getNodes, getEdges,
+  onNodesInitialized, onNodesChange, getNodes, getEdges,
 } = useVueFlow()
 
 // Glass: real blur only at rest and only on nodes with something behind them.
 // Decided once per rest, never per frame (docs/superpowers/specs/2026-09-27-node-design-design.md).
+// "Moving" is read from the viewport itself (fitView/setViewport/zoom buttons emit no move events).
 const canvasGlass = createCanvasGlass({
-  onMoveStart: (cb) => onMoveStart(cb),
-  onMoveEnd: (cb) => onMoveEnd(cb),
   viewport: vfViewport,
   boxes: () => getNodes.value
     .filter(n => n.dimensions.width > 0)
@@ -1262,8 +1261,13 @@ const canvasGlass = createCanvasGlass({
   size: () => ({ width: canvasRootRef.value?.clientWidth ?? 0, height: canvasRootRef.value?.clientHeight ?? 0 }),
 })
 provideCanvasGlass(canvasGlass)
-onNodeDragStop(() => canvasGlass.recompute())
-onMounted(() => canvasGlass.recompute())
+// Graph changes re-decide blur once, after a settle. Never on 'position' (every drag frame).
+onNodesInitialized(() => canvasGlass.invalidate())
+onNodesChange((cs) => { if (cs.some(c => c.type === 'dimensions' || c.type === 'add' || c.type === 'remove')) canvasGlass.invalidate() })
+onEdgesChange((cs) => { if (cs.some(c => c.type === 'add' || c.type === 'remove')) canvasGlass.invalidate() })
+watch(() => getNodes.value.length + ':' + getEdges.value.length, () => canvasGlass.invalidate())
+onNodeDragStart(() => canvasGlass.pause())
+onNodeDragStop(() => canvasGlass.resume())
 
 // Ports label themselves while a compatible wire is being dragged. Bound once,
 // here, because there is one canvas and every port reads the same drag.
