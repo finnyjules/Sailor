@@ -6,12 +6,23 @@
  * keyed per run, let go with the run). Its value lists them (`tensors`, one per
  * file); effects and Frames reading the picture take the tensor, while
  * providers, Save image and the rest keep reading the PNG.
+ *
+ * Masks alike (R2.8 fix round 1, controller ruling): a mask an effect or a
+ * Frame reads (floatReadBy) is kept as its float32 tensor too, beside the
+ * 16-bit PNG, by every node that makes one (LoadImage's MASK, Image to mask,
+ * Text mask, Text on path, the mask effects, Painter); readers prefer it.
  */
 import { GATE_CLASS, isLink, linksOf, type ApiLink, type ApiPrompt } from '#shared/runner/graph'
 import { EFFECT_PICTURE_OUTPUTS } from '#shared/runner/effects'
 import type { PlanContext } from '../executors'
 import type { OutputFile } from '../types'
 import { keyOf } from './io'
+import { effectCores } from './cores'
+
+/** A mask's float32 as a kept tensor file (core/tensor.ts tensorFileOf, one channel). */
+export function maskTensorBytes(m: { w: number; h: number; data: Float32Array }): Uint8Array {
+  return effectCores.tk.tensorFileOf({ c: 1, h: m.h, w: m.w, data: m.data })
+}
 
 /** The classes that read an effect's picture as a float tensor: the effects themselves and the Frame. */
 const readsFloat = (classType: string) => classType === 'Compositor' || Object.prototype.hasOwnProperty.call(EFFECT_PICTURE_OUTPUTS, classType)

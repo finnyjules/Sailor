@@ -90,8 +90,9 @@ export function pictureSourceOf(prompt: ApiPrompt, link: ApiLink, depth = 0): Pi
 /**
  * 'mask': a LoadImage's file, whose alpha the Frame reads; 'kept-mask': a mask
  * value the runner kept (R1.3: a LoadImage run as a card). `tensor`: the
- * float32 tensor an effect kept for this picture (R2.1 fix round 1), read
- * instead of its PNG, as Python hands the Frame the float itself.
+ * float32 tensor an effect kept for this picture (R2.1 fix round 1), or the
+ * LoadImage card for its mask (R2.8 fix round 1), read instead of its PNG,
+ * as Python hands the Frame the float itself.
  */
 interface Wired { source: PictureSource | 'mask' | 'kept-mask'; file: OutputFile | null; tensor?: OutputFile }
 
@@ -112,7 +113,11 @@ export function planCompositor(ctx: PlanContext): NodePlan {
     if (ctx.prompt[v[0]]?.class_type !== 'LoadImage' || v[1] !== 1) throw new Error('The runner can only read a Frame mask from a loaded picture')
     const file = ctx.filesFrom(v)[0] ?? null
     if (!file) throw new Error('A mask for the Frame is missing')
-    return { source: ctx.valueFrom?.(v)?.kind === 'mask' ? 'kept-mask' : 'mask', file }
+    const value = ctx.valueFrom?.(v)
+    if (value?.kind !== 'mask') return { source: 'mask', file }
+    // The float mask kept beside it (R2.8 fix round 1), read as Python hands the Frame the float itself.
+    const tensor = value.tensors && value.tensors.length === value.files.length ? value.tensors[value.files.indexOf(file)] : undefined
+    return tensor ? { source: 'kept-mask', file, tensor } : { source: 'kept-mask', file }
   }
   const layers = Array.from({ length: MAX_LAYERS }, (_, i) => picture(`layer${i + 1}`))
   const masks = Array.from({ length: MAX_LAYERS }, (_, i) => mask(`layer${i + 1}_mask`))
@@ -131,9 +136,9 @@ export function planCompositor(ctx: PlanContext): NodePlan {
         return async () => {
           try {
             // Raw RGBA8 only: the worker builds the tensor.
+            if (w.tensor) return effectCores.tk.fromTensorFile(await read(w.tensor))
             if (w.source === 'mask') return await decodeRawMask(await read(w.file!))
             if (w.source === 'kept-mask') return loadImageMaskPicture(await decodeMask(await read(w.file!)))
-            if (w.tensor) return effectCores.tk.fromTensorFile(await read(w.tensor))
             return await decodeRaw(w.file ? await read(w.file) : null, w.source)
           }
           catch (e) {

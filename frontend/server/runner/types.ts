@@ -41,7 +41,12 @@ export type RunnerValue =
    * effect or Frame reads instead of the 8-bit PNG (as Python hands the float on).
    */
   | { kind: 'files'; files: OutputFile[]; list?: true; tensors?: OutputFile[] }
-  | { kind: 'mask'; files: OutputFile[] }
+  /**
+   * `tensors` (R2.8 fix round 1): the masks also as the float32 tensors their
+   * node made, one kept file per mask beside `files` (the 16-bit PNGs), which
+   * an effect or a Frame reads instead, as Python hands the float mask on.
+   */
+  | { kind: 'mask'; files: OutputFile[]; tensors?: OutputFile[] }
   | { kind: 'text'; text: string }
   | { kind: 'number'; value: number; int: boolean }
   | { kind: 'boolean'; value: boolean }

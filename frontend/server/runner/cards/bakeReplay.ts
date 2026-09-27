@@ -32,6 +32,7 @@ import { PROVIDER_TYPES } from '#shared/runner/eligibility'
 import { actionPassThrough } from '../generators/actions'
 import type { RunnerFamily } from '#shared/runner/families'
 import { encodeMask, loadImageMask, type Mask } from '../pictures/mask'
+import { floatReadBy, maskTensorBytes } from '../effects/tensorFiles'
 import { MAX_INPUT_PIXELS } from '../compositor/decode'
 import { pyTruthy } from '#shared/runner/pyText'
 import { IMAGE_LAYERS } from '#shared/runner/smartLayout'
@@ -232,13 +233,18 @@ function flatPng(w: number, h: number, rgb: readonly [number, number, number]): 
 }
 
 const filesValue = (f: OutputFile): RunnerValue => ({ kind: 'files', files: [f] })
-const maskValue = async (io: DeriveIO, m: Mask): Promise<RunnerValue> => ({ kind: 'mask', files: [await io.keep(await encodeMask(m), 'png')] })
+/** A mask value: the 16-bit PNG, and with `float` (an effect or a Frame reads it) the float32 tensor too (R2.8 fix round 1). */
+const maskValue = async (io: DeriveIO, m: Mask, float = false): Promise<RunnerValue> => ({
+  kind: 'mask',
+  files: [await io.keep(await encodeMask(m), 'png')],
+  ...(float ? { tensors: [await io.keep(maskTensorBytes(m), 'bin')] } : {}),
+})
 
 /** `_blank()` of the type nodes: a 16×16 black image and a 16×16 mask of ones (Text mask gives it with a source too). */
-export async function blankBake(io: DeriveIO): Promise<Record<number, RunnerValue>> {
+export async function blankBake(io: DeriveIO, float = false): Promise<Record<number, RunnerValue>> {
   return {
     0: filesValue(await io.keep(await flatPng(16, 16, [0, 0, 0]), 'png')),
-    1: await maskValue(io, { w: 16, h: 16, data: new Float32Array(256).fill(1) }),
+    1: await maskValue(io, { w: 16, h: 16, data: new Float32Array(256).fill(1) }, float),
   }
 }
 
@@ -318,10 +324,11 @@ async function hasAlphaBand(bytes: Uint8Array): Promise<boolean> {
 export function planTextOnPath(ctx: PlanContext): NodePlan {
   const inputs = ctx.prompt[ctx.nodeId]!.inputs ?? {}
   const file = renderedFile(inputs.params, TEXT_ON_PATH_UNLOADABLE)
+  const float = floatReadBy(ctx.prompt, ctx.nodeId, 1)
   return {
     kind: 'derive',
     async derive(io) {
-      if (!file) return { values: await blankBake(io), ui: null }
+      if (!file) return { values: await blankBake(io, float), ui: null }
       const bytes = await readRendered(io, file, TEXT_ON_PATH_UNLOADABLE)
       let picture: Awaited<ReturnType<typeof pythonPicture>>
       let mask: Mask
@@ -335,7 +342,7 @@ export function planTextOnPath(ctx: PlanContext): NodePlan {
         if (isRefusal(e)) throw new Error(bakeRefusalWords('TextOnPath', e.message))
         throw new Error(TEXT_ON_PATH_UNLOADABLE)
       }
-      return { values: { 0: filesValue(picture.file), 1: await maskValue(io, mask) }, ui: null }
+      return { values: { 0: filesValue(picture.file), 1: await maskValue(io, mask, float) }, ui: null }
     },
   }
 }
@@ -385,10 +392,11 @@ export async function loadTextMask(io: DeriveIO, file: OutputFile): Promise<Mask
 export function planTextMask(ctx: PlanContext): NodePlan {
   const inputs = ctx.prompt[ctx.nodeId]!.inputs ?? {}
   const file = textMaskRender(inputs.params)
+  const float = floatReadBy(ctx.prompt, ctx.nodeId, 1)
   return {
     kind: 'derive',
     async derive(io) {
-      if (!file) return { values: await blankBake(io), ui: null }
+      if (!file) return { values: await blankBake(io, float), ui: null }
       const mask = await loadTextMask(io, file)
       const { w, h } = mask
       const f = Math.fround
@@ -401,7 +409,7 @@ export function planTextMask(ctx: PlanContext): NodePlan {
         rgb[i * 3 + 2] = v
       }
       const png = await sharp(rgb, { raw: { width: w, height: h, channels: 3 } }).png({ compressionLevel: 6 }).toBuffer()
-      return { values: { 0: filesValue(await io.keep(new Uint8Array(png), 'png')), 1: await maskValue(io, mask) }, ui: null }
+      return { values: { 0: filesValue(await io.keep(new Uint8Array(png), 'png')), 1: await maskValue(io, mask, float) }, ui: null }
     },
   }
 }

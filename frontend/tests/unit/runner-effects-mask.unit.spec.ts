@@ -7,12 +7,14 @@
  * (float32 bit for bit with Python, by its sha256) except Matte grow /
  * shrink's feather (torchvision's gaussian_blur: *library*, within MATTE_EPS).
  *
- * A mask travels between runner nodes as its kept 16-bit PNG (R0: round(v ·
- * 65535), read back as u / 65535): every producer (LoadImage's MASK, Image to
- * mask, Text mask, Threshold mask, Color range mask, Matte grow / shrink,
- * Painter) keeps it so, and every reader decodes it so. The fixtures feed
- * Python's consumers exactly that; `chains` records how far Python's own
- * float chain lands from it (`drift`).
+ * A mask travels between runner nodes as its float32 tensor (R2.8 fix round
+ * 1, controller ruling: as pictures do since R2.1), kept beside the 16-bit
+ * PNG it is saved and shown as: every producer (LoadImage's MASK, Image to
+ * mask, Text mask, Text on path, Threshold mask, Color range mask, Matte grow
+ * / shrink, Painter) keeps it when an effect or a Frame reads the mask, and
+ * readers prefer it. `chains` hold the runner to ComfyUI's own float chain,
+ * node by node; the standard cases' mask inputs are kept 16-bit masks with
+ * no tensor (a mask value that has none), read as u / 65535.
  */
 import { createRequire } from 'node:module'
 import { Worker } from 'node:worker_threads'
@@ -89,8 +91,9 @@ interface MaskCase extends Omit<FxCase, 'outputs' | 'inputs'> {
 }
 interface ChainCase extends MaskCase {
   producer: { class_type: string; file?: string; channel?: string; rendered?: string; widgets?: Record<string, unknown>; image?: { source: string; files: string[] } }
-  kept: { file: string; u16_sha256: string; w: number; h: number }
-  drift: { values: number; f32: number; round8: number; trunc8: number }
+  middle: Record<string, number> | null
+  kept: { f32_sha256: string; u16_sha256: string; w: number; h: number }
+  quantised: { values: number; f32: number; round8: number; trunc8: number }
 }
 interface NegZeroCase {
   name: string; class_type: string; widgets: Record<string, unknown>
@@ -585,50 +588,72 @@ function watchedKept(): { kept: KeptBytes; bytes: (f: OutputFile) => Uint8Array 
   }
 }
 
-/** The producer node of a chain (its picture from an Image card of the same file: a 3-channel PNG loads as 'rgb' does). */
-function producerNodes(ch: ChainCase): { nodes: ApiPrompt; slot: number } {
+/** The producer node of a chain (its picture from an Image card of the same file: a 3-channel PNG loads as 'rgb' does), and a Matte grow / shrink after it when the chain has one. */
+function producerNodes(ch: ChainCase): { nodes: ApiPrompt; from: [string, number]; slot: number } {
   const p = ch.producer
-  if (p.class_type === 'LoadImage') return { nodes: { prod: { class_type: 'LoadImage', inputs: { image: p.file!, upload: 'image' } } }, slot: 1 }
-  if (p.class_type === 'TextMask') return { nodes: { prod: { class_type: 'TextMask', inputs: { params: JSON.stringify({ rendered: p.rendered }) } } }, slot: 1 }
-  const src = { srcp: card(p.image!.files[0]!) }
-  if (p.class_type === 'ImageToMask') return { nodes: { ...src, prod: { class_type: 'ImageToMask', inputs: { image: ['srcp', 0], channel: p.channel } } }, slot: 0 }
-  return { nodes: { ...src, prod: { class_type: p.class_type, inputs: { image: ['srcp', 0], ...p.widgets } } }, slot: 0 }
+  let nodes: ApiPrompt
+  let slot = 0
+  if (p.class_type === 'LoadImage') { nodes = { prod: { class_type: 'LoadImage', inputs: { image: p.file!, upload: 'image' } } }; slot = 1 }
+  else if (p.class_type === 'TextMask') { nodes = { prod: { class_type: 'TextMask', inputs: { params: JSON.stringify({ rendered: p.rendered }) } } }; slot = 1 }
+  else if (p.class_type === 'Painter') { nodes = { prod: { class_type: 'Painter', inputs: { ...p.widgets } } }; slot = 1 }
+  else if (p.class_type === 'ImageToMask') nodes = { srcp: card(p.image!.files[0]!), prod: { class_type: 'ImageToMask', inputs: { image: ['srcp', 0], channel: p.channel } } }
+  else nodes = { srcp: card(p.image!.files[0]!), prod: { class_type: p.class_type, inputs: { image: ['srcp', 0], ...p.widgets } } }
+  if (!ch.middle) return { nodes, from: ['prod', slot], slot }
+  return { nodes: { ...nodes, mid: { class_type: 'MatteGrowShrink', inputs: { mask: ['prod', slot], ...ch.middle } } }, from: ['mid', 0], slot }
 }
 
-describe('chains: a mask from each producer, handed on as its kept 16 bits (as the fixtures feed Python)', () => {
+/** A kept tensor file's float32 body (tensor.ts tensorFileOf: a 16-byte header, then the planar floats). */
+const tensorBody = (b: Uint8Array) => new Float32Array(b.slice(16).buffer)
+
+describe('chains: a mask from each producer, handed on as its float32 tensor, as ComfyUI runs the chain node by node', () => {
   for (const ch of FX.chains) {
-    it(`${ch.name}: the producer keeps Python's mask quantised, and the consumer is Python's on that mask, through the engine`, async () => {
-      const w = watchedKept()
-      const k = makeKit({ hosted: false, deps: { families: () => MASK, kept: w.kept } })
-      for (const [name, b64s] of Object.entries(FX.assets)) put(k.root, name, b64(b64s))
-      const { nodes, slot } = producerNodes(ch)
-      const pic = ch.inputs.image!.files[0]!
-      const p: ApiPrompt = { ...nodes, img: card(pic), [ch.node_id]: { class_type: ch.class_type, inputs: { image: ['img', 0], mask: ['prod', slot], ...ch.widgets } } }
-      expect(isRunnerEligible(p, MASK)).toBe(true)
-      const { runId } = await k.engine.startRun({ userId: k.userId, takes: [p], ...START })
-      await k.engine.settled(runId)
-      const run = (await k.store.get(runId))!
-      expect(run.status, JSON.stringify(run.takes[0]!.nodes[ch.node_id])).toBe('done')
-      const mv = run.takes[0]!.nodes.prod!.values![slot] as Extract<RunnerValue, { kind: 'mask' }>
-      expect(mv.kind).toBe('mask')
-      const kept = await keptU16(w.bytes(mv.files[0]!))
-      expect([kept.w, kept.h]).toEqual([ch.kept.w, ch.kept.h])
-      expect(shaU16(kept.q), 'the producer\'s kept mask').toBe(ch.kept.u16_sha256)
-      const v = run.takes[0]!.nodes[ch.node_id]!.values![0] as Extract<RunnerValue, { kind: 'files' }>
-      const got = await pngPixels(w.bytes(v.files[0]!))
-      const item = ch.outputs![0]!.items[0]!
-      expect([got.w, got.h, got.channels]).toEqual([item.w, item.h, item.c])
-      expect(sha256(got.px), 'the consumer\'s kept picture').toBe(item.round8_sha256)
-      console.info(`mask chain ${ch.name}: Python's own float chain differs from the 16-bit hand-off in ${ch.drift.f32}/${ch.drift.values} floats, ${ch.drift.round8} round-8 and ${ch.drift.trunc8} trunc-8 values`)
-    }, 60_000)
+    it(`${ch.name}: the producer keeps Python's float mask (and its 16 bits), and the consumer is Python's own chain, through the engine`, async () => {
+      for (const save of [false, true]) {
+        const w = watchedKept()
+        const k = makeKit({ hosted: false, deps: { families: () => MASK, kept: w.kept } })
+        for (const [name, b64s] of Object.entries(FX.assets)) put(k.root, name, b64(b64s))
+        const { nodes, from, slot } = producerNodes(ch)
+        const pic = ch.inputs.image!.files[0]!
+        const p: ApiPrompt = { ...nodes, img: card(pic), [ch.node_id]: { class_type: ch.class_type, inputs: { image: ['img', 0], mask: from, ...ch.widgets } }, ...(save ? { s: saveImage([ch.node_id, 0]) } : {}) }
+        expect(isRunnerEligible(p, MASK)).toBe(true)
+        const { runId } = await k.engine.startRun({ userId: k.userId, takes: [p], ...START })
+        await k.engine.settled(runId)
+        const run = (await k.store.get(runId))!
+        expect(run.status, JSON.stringify(run.takes[0]!.nodes[ch.node_id])).toBe('done')
+        const mv = run.takes[0]!.nodes.prod!.values![slot] as Extract<RunnerValue, { kind: 'mask' }>
+        expect(mv.kind).toBe('mask')
+        // The producer's mask: saved as 16 bits, handed on as its float.
+        const kept = await keptU16(w.bytes(mv.files[0]!))
+        expect([kept.w, kept.h]).toEqual([ch.kept.w, ch.kept.h])
+        expect(shaU16(kept.q), 'the producer\'s 16-bit mask').toBe(ch.kept.u16_sha256)
+        expect(mv.tensors, 'the producer kept its float mask').toHaveLength(1)
+        expect(shaF32(tensorBody(w.bytes(mv.tensors![0]!))), 'the producer\'s float mask').toBe(ch.kept.f32_sha256)
+        const item = ch.outputs![0]!.items[0]!
+        if (save) {
+          // Save image writes Python's own chain, truncated (Text mask → Merge alpha → Save among them).
+          const saved = await pngPixels(new Uint8Array(readFileSync(join(k.root, 'output', 'ComfyUI_00001_.png'))))
+          expect([saved.w, saved.h, saved.channels]).toEqual([item.w, item.h, item.c])
+          expect(sha256(saved.px), 'saved').toBe(item.trunc8_sha256)
+        }
+        else {
+          const v = run.takes[0]!.nodes[ch.node_id]!.values![0] as Extract<RunnerValue, { kind: 'files' }>
+          const got = await pngPixels(w.bytes(v.files[0]!))
+          expect([got.w, got.h, got.channels]).toEqual([item.w, item.h, item.c])
+          expect(sha256(got.px), 'the consumer\'s kept picture').toBe(item.round8_sha256)
+        }
+      }
+      console.info(`mask chain ${ch.name}: exact; the old 16-bit hand-off would differ in ${ch.quantised.f32}/${ch.quantised.values} floats, ${ch.quantised.round8} round-8 and ${ch.quantised.trunc8} trunc-8 values`)
+    }, 120_000)
   }
 
-  it('Threshold mask → Apply mask: the brief\'s chain, soft and hard, node by node as Python on the 16-bit mask', () => {
-    const soft = FX.chains.find(c => c.name === 'Threshold mask (softness 0.2) → ApplyMask, rgb 320×200')!
-    const hard = FX.chains.find(c => c.name === 'Threshold mask (softness 0.0) → ApplyMask, rgb 320×200')!
-    // A hard threshold is 0 or 1: 16 bits hold it exactly, so Python's own chain lands on the same floats.
-    expect(hard.drift.f32).toBe(0)
-    expect(soft.drift.f32).toBeGreaterThan(0)
+  it('the chains cover every mask producer the runner has, through Matte grow / shrink too; the 16-bit hand-off they replace was off', () => {
+    const producers = new Set(FX.chains.map(c => c.producer.class_type))
+    expect([...producers].sort()).toEqual(['ColorRangeMask', 'ImageToMask', 'LoadImage', 'Painter', 'TextMask', 'ThresholdMask'])
+    expect(FX.chains.filter(c => c.middle).length).toBeGreaterThan(0)
+    const tm = FX.chains.find(c => c.name === 'Text mask → MergeAlpha, same size')!
+    expect(tm.quantised.trunc8).toBeGreaterThan(0)
+    // A hard threshold is 0 or 1: 16 bits held it exactly anyway.
+    expect(FX.chains.find(c => c.name === 'Threshold mask (softness 0.0) → ApplyMask, rgb 320×200')!.quantised.f32).toBe(0)
   })
 })
 
@@ -889,8 +914,8 @@ describe('the engine (cards and effects-mask on)', () => {
     const ch = FX.chains.find(x => x.name === 'Image to mask (alpha) → MergeAlpha, same size')!
     const k = makeKit({ hosted: false, deps: { families: () => MASK } })
     for (const [name, s] of Object.entries(FX.assets)) put(k.root, name, b64(s))
-    const { nodes, slot } = producerNodes(ch)
-    const p: ApiPrompt = { ...nodes, img: card(ch.inputs.image!.files[0]!), m: { class_type: 'MergeAlpha', inputs: { image: ['img', 0], mask: ['prod', slot], ...ch.widgets } }, s: saveImage(['m', 0]) }
+    const { nodes, from } = producerNodes(ch)
+    const p: ApiPrompt = { ...nodes, img: card(ch.inputs.image!.files[0]!), m: { class_type: 'MergeAlpha', inputs: { image: ['img', 0], mask: from, ...ch.widgets } }, s: saveImage(['m', 0]) }
     const { runId } = await k.engine.startRun({ userId: k.userId, takes: [p], ...START })
     await k.engine.settled(runId)
     expect((await k.store.get(runId))!.status).toBe('done')

@@ -57,6 +57,8 @@ export function planPainter(ctx: PlanContext): NodePlan {
   // Kept as the pixels its readers write (Save image / Preview image truncate the float, R1.5); the float tensor too when an effect or a Frame reads it.
   const trunc = onlySavesRead(ctx.prompt, ctx.nodeId, 0)
   const float = floatReadBy(ctx.prompt, ctx.nodeId, 0)
+  // The mask, as its float32 tensor too when an effect or a Frame reads it (R2.8 fix round 1).
+  const floatMask = floatReadBy(ctx.prompt, ctx.nodeId, 1)
   const letters = previewImageLetters()
   return {
     kind: 'derive',
@@ -126,7 +128,7 @@ export function planPainter(ctx: PlanContext): NodePlan {
           await worker.effectBegin({ cls: 'Painter', fn: 'mask.Painter', params: { width: canvas.w, height: canvas.h, bg }, count: 1 })
           const r = await worker.effectRun({
             index: 0, inputs: handed, first: false, masks: [false, true],
-            want: { round: [!trunc, false], trunc: [true, false], f32: [float, false] },
+            want: { round: [!trunc, false], trunc: [true, false], f32: [float, floatMask] },
           })
           await worker.effectEnd()
           const [pic, msk] = r.outputs
@@ -143,17 +145,22 @@ export function planPainter(ctx: PlanContext): NodePlan {
           const maskPng = await maskPngFromScanlines(msk.mask16, msk.w, msk.h)
           stopped()
           const mask = await io.keep(maskPng, 'png')
+          let maskTensor: OutputFile | null = null
+          if (msk.tensorFile) {
+            stopped()
+            maskTensor = await io.keep(msk.tensorFile, 'bin')
+          }
           const shown = await png8(pic.trunc8!, pic.w, pic.h, pic.channels, 1)
           const { subfolder, filename } = saveImagePrefix(`ComfyUI_temp_${letters}`, pic.w, pic.h, new Date())
           stopped()
           const preview = await io.saveAsset(shown, { prefix: filename, ext: 'png', subfolder, folder: 'temp' })
-          return { picture, tensor, mask, preview }
+          return { picture, tensor, mask, maskTensor, preview }
         }
         catch (e) { throw plain(e) }
       }, EFFECT_TIMEOUT_MESSAGE)
       const values: Record<number, RunnerValue> = {
         0: { kind: 'files', files: [made.picture], ...(made.tensor ? { tensors: [made.tensor] } : {}) },
-        1: { kind: 'mask', files: [made.mask] },
+        1: { kind: 'mask', files: [made.mask], ...(made.maskTensor ? { tensors: [made.maskTensor] } : {}) },
       }
       return { values, ui: { images: [{ filename: made.preview.filename, subfolder: made.preview.subfolder, type: made.preview.type }], animated: [false] } }
     },

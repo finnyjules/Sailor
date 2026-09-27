@@ -2882,10 +2882,12 @@ def mask_negzero(classes: dict) -> list:
 
 
 def mask_chains(g: MaskGroup, classes: dict) -> list:
-    """A mask from each producer the runner has (LoadImage's MASK, Image to mask, Threshold mask, Text
-    mask), into Apply mask and Merge alpha, at the picture's size and at another. The runner hands a mask
-    on as its kept 16 bits (u / 65535), so Python's consumer is fed exactly that (`fed`); `drift` counts
-    how far Python's own float chain (the producer's float mask fed straight in) lands from it."""
+    """A mask from each producer the runner has (LoadImage's MASK, Image to mask, Threshold mask, Color
+    range mask, Text mask, Painter), sometimes through Matte grow / shrink, into Apply mask and Merge alpha,
+    at the picture's size and at another. As ComfyUI runs them: each node fed the float mask the one before
+    made (the runner hands a mask on as its float32 tensor, R2.8 fix round 1). `kept` records the
+    producer's mask (its float32 and the 16 bits it is saved as); `quantised` counts how far the old 16-bit
+    hand-off (the mask fed as u / 65535) would land from Python's chain."""
     from nodes import LoadImage
     from comfy_extras.nodes_mask import ImageToMask
     from comfy_extras.nodes_text_mask import TextMaskNode
@@ -2900,56 +2902,61 @@ def mask_chains(g: MaskGroup, classes: dict) -> list:
     with open(os.path.join(WORK, "input", render), "wb") as f:
         f.write(g.assets[render])
     card_file = g.picture(37, 23, 4, 3)
+    painter_file = g.painter_file("painter_37x23_rgba.png", painter_image(37, 23, 31, "RGBA"))
+    card = lambda: load("card", card_file, g.assets[card_file])  # noqa: E731
     producers = [
         ("LoadImage", {"class_type": "LoadImage", "file": load_file}, lambda: LoadImage().load_image(load_file)[1]),
         ("Image to mask (alpha)", {"class_type": "ImageToMask", "channel": "alpha", "image": {"source": "card", "files": [card_file]}},
-         lambda: ImageToMask.execute(load("card", card_file, g.assets[card_file]), "alpha").args[0]),
+         lambda: ImageToMask.execute(card(), "alpha").args[0]),
         ("Image to mask (red)", {"class_type": "ImageToMask", "channel": "red", "image": {"source": "card", "files": [card_file]}},
-         lambda: ImageToMask.execute(load("card", card_file, g.assets[card_file]), "red").args[0]),
+         lambda: ImageToMask.execute(card(), "red").args[0]),
         ("Threshold mask (soft)", {"class_type": "ThresholdMask", "widgets": {"threshold": 0.45, "softness": 0.15, "invert": False}, "image": {"source": "card", "files": [card_file]}},
-         lambda: run_node(classes["ThresholdMask"], "producer", image=load("card", card_file, g.assets[card_file]), threshold=0.45, softness=0.15, invert=False)[0][0]),
+         lambda: run_node(classes["ThresholdMask"], "producer", image=card(), threshold=0.45, softness=0.15, invert=False)[0][0]),
+        ("Color range mask", {"class_type": "ColorRangeMask", "widgets": {"target_r": 0.6, "target_g": 0.3, "target_b": 0.5, "tolerance": 0.35, "invert": True},
+                              "image": {"source": "card", "files": [same]}},
+         lambda: run_node(classes["ColorRangeMask"], "producer", image=load("card", same, g.assets[same]), target_r=0.6, target_g=0.3, target_b=0.5, tolerance=0.35, invert=True)[0][0]),
         ("Text mask", {"class_type": "TextMask", "rendered": render}, lambda: TextMaskNode.execute(params=json.dumps({"rendered": render})).args[1]),
+        ("Painter", {"class_type": "Painter", "widgets": {"mask": painter_file, "width": 64, "height": 64, "bg_color": "#000000"}},
+         lambda: run_node(classes["Painter"], "producer", mask=painter_file, width=64, height=64, bg_color="#000000")[0][1]),
     ]
+    middles = {"Threshold mask (soft)": [None, {"amount": -2.0, "feather": 0.0}], "Text mask": [None, {"amount": 3.0, "feather": 0.0}], "LoadImage": [None, {"amount": 1.0, "feather": 0.0}]}
     consumers = [("ApplyMask", {"invert": False}), ("MergeAlpha", {"invert_mask": True})]
-    for label, producer, make in producers:
-        m = make()
+
+    def chain_row(name, producer, middle, m_prod, m, consumer, widgets, pic, hashed):
+        img = load("rgb", pic, g.assets[pic])
         q = quantise16(m[0])
-        name = g.mask_of(f"kept_{producer['class_type']}_{len(rows)}.png", q)
-        fed = load("mask", name, g.assets[name])
-        for consumer, widgets in consumers:
-            for size, pic in (("same size", same), ("another size", other)):
-                if consumer == "MergeAlpha" and size == "another size" and label != "Text mask":
-                    continue
-                img = load("rgb", pic, g.assets[pic])
-                g.seq += 1
-                node_id = f"fx{g.seq}"
-                outs, ui = run_node(classes[consumer], node_id, image=img, mask=fed, **widgets)
-                flt, _ = run_node(classes[consumer], f"{node_id}f", image=img, mask=m, **widgets)
-                a, b = outs[0][0], flt[0][0]
-                drift = {"values": int(a.numel()), "f32": int((a != b).sum()),
-                         "round8": int((round8(a) != round8(b)).sum()), "trunc8": int((trunc8(a) != trunc8(b)).sum())}
-                rows.append({"name": f"{label} → {consumer}, {size}", "producer": producer, "kept": {"file": name, "u16_sha256": sha(q.astype("<u2").tobytes()), "w": int(q.shape[1]), "h": int(q.shape[0])},
-                             "class_type": consumer, "node_id": node_id, "widgets": widgets, "inputs": {"image": {"source": "rgb", "files": [pic]}, "mask": {"source": "mask", "files": [name]}},
-                             "outputs": [record_tone_output(outs[0], False, None)], "ui": {"images": ui["images"], "animated": list(ui["animated"])},
-                             "preview": read_preview(ui, True), "drift": drift})
+        g.seq += 1
+        node_id = f"fx{g.seq}"
+        outs, ui = run_node(classes[consumer], node_id, image=img, mask=m, **widgets)
+        fed = torch.from_numpy(q.astype(np.float32) / np.float32(65535.0))[None]
+        old, _ = run_node(classes[consumer], f"{node_id}q", image=img, mask=fed, **widgets)
+        a, b = outs[0][0], old[0][0]
+        pq = quantise16(m_prod[0])
+        return {"name": name, "producer": producer, "middle": middle,
+                "kept": {"f32_sha256": sha(m_prod[0].contiguous().cpu().numpy().astype("<f4").tobytes()), "u16_sha256": sha(pq.astype("<u2").tobytes()),
+                         "w": int(pq.shape[1]), "h": int(pq.shape[0])},
+                "class_type": consumer, "node_id": node_id, "widgets": widgets, "inputs": {"image": {"source": "rgb", "files": [pic]}},
+                "outputs": [record_tone_output(outs[0], hashed, None)], "ui": {"images": ui["images"], "animated": list(ui["animated"])},
+                "preview": read_preview(ui, True),
+                "quantised": {"values": int(a.numel()), "f32": int((a != b).sum()), "round8": int((round8(a) != round8(b)).sum()), "trunc8": int((trunc8(a) != trunc8(b)).sum())}}
+
+    for label, producer, make in producers:
+        m_prod = make()
+        for middle in middles.get(label, [None]):
+            m = m_prod if middle is None else run_node(classes["MatteGrowShrink"], "middle", mask=m_prod, **middle)[0][0]
+            via = "" if middle is None else f" → Matte grow / shrink {middle['amount']}"
+            for consumer, widgets in consumers:
+                for size, pic in (("same size", same), ("another size", other)):
+                    if consumer == "MergeAlpha" and size == "another size" and label not in ("Text mask", "Painter"):
+                        continue
+                    rows.append(chain_row(f"{label}{via} → {consumer}, {size}", producer, middle, m_prod, m, consumer, widgets, pic, False))
     # Threshold mask → Apply mask, the brief's chain, on the 320×200 picture too (hashed).
     big = g.picture(320, 200, 3, 6)
     x = load("rgb", big, g.assets[big])
     for soft in (0.0, 0.2):
         (m,), _ = run_node(classes["ThresholdMask"], "producer", image=x, threshold=0.5, softness=soft, invert=False)
-        q = quantise16(m[0])
-        name = g.mask_of(f"kept_threshold_{soft}.png", q)
-        fed = load("mask", name, g.assets[name])
-        g.seq += 1
-        node_id = f"fx{g.seq}"
-        outs, ui = run_node(classes["ApplyMask"], node_id, image=x, mask=fed, invert=False)
-        flt, _ = run_node(classes["ApplyMask"], f"{node_id}f", image=x, mask=m, invert=False)
-        a, b = outs[0][0], flt[0][0]
-        rows.append({"name": f"Threshold mask (softness {soft}) → ApplyMask, rgb 320×200", "producer": {"class_type": "ThresholdMask", "widgets": {"threshold": 0.5, "softness": soft, "invert": False}, "image": {"source": "rgb", "files": [big]}},
-                     "kept": {"file": name, "u16_sha256": sha(q.astype("<u2").tobytes()), "w": int(q.shape[1]), "h": int(q.shape[0])},
-                     "class_type": "ApplyMask", "node_id": node_id, "widgets": {"invert": False}, "inputs": {"image": {"source": "rgb", "files": [big]}, "mask": {"source": "mask", "files": [name]}},
-                     "outputs": [record_tone_output(outs[0], True, None)], "ui": {"images": ui["images"], "animated": list(ui["animated"])}, "preview": read_preview(ui, True),
-                     "drift": {"values": int(a.numel()), "f32": int((a != b).sum()), "round8": int((round8(a) != round8(b)).sum()), "trunc8": int((trunc8(a) != trunc8(b)).sum())}})
+        producer = {"class_type": "ThresholdMask", "widgets": {"threshold": 0.5, "softness": soft, "invert": False}, "image": {"source": "card", "files": [big]}}
+        rows.append(chain_row(f"Threshold mask (softness {soft}) → ApplyMask, rgb 320×200", producer, None, m, m, "ApplyMask", {"invert": False}, big, True))
     return rows
 
 

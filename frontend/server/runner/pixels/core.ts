@@ -176,28 +176,37 @@ export function pixelsCore() {
     return out
   }
 
-  /** ImageToMask: channel `index` of the picture's tensor, as a mask's 16-bit scanlines. No float tensor is built. */
-  function channelMask16(p: PixelsPicture, index: number): { w: number; h: number; scanlines: Uint8Array } {
+  /**
+   * ImageToMask: channel `index` of the picture's tensor, as a mask's 16-bit
+   * scanlines; with `float` (R2.8 fix round 1: read by an effect), the float32
+   * mask Python holds too (`data`), which the runner hands on.
+   */
+  function channelMask16(p: PixelsPicture, index: number, float = false): { w: number; h: number; scanlines: Uint8Array; data?: Float32Array } {
     if (index >= tensorChannels(p)) throw new Error('This picture has no alpha channel to make a mask from')
     const d = p.data
-    if (!d) return { w: p.w, h: p.h, scanlines: mask16Of(p.w, p.h, () => 0) }
+    if (!d) return { w: p.w, h: p.h, scanlines: mask16Of(p.w, p.h, () => 0), ...(float ? { data: new Float32Array(p.w * p.h) } : {}) }
     const table = channelTable(p.source, index)
-    return { w: p.w, h: p.h, scanlines: mask16Of(p.w, p.h, i => table[d[i * 4 + index]!]!) }
+    const scanlines = mask16Of(p.w, p.h, i => table[d[i * 4 + index]!]!)
+    if (!float) return { w: p.w, h: p.h, scanlines }
+    const data = new Float32Array(p.w * p.h)
+    for (let i = 0; i < data.length; i++) data[i] = table[d[i * 4 + index]!]!
+    return { w: p.w, h: p.h, scanlines, data }
   }
 
   /**
    * Text mask's clip, first half: the render's luma L (mw × mh) as the mask
    * 1 − L/255, resized to the source (w × h, a contiguous (1, 1, H, W)
-   * tensor) when the sizes differ. Returns 1 − mask for `clip` and the mask's
-   * 16-bit scanlines (the node's mask output).
+   * tensor) when the sizes differ. Returns 1 − mask for `clip`, the mask's
+   * 16-bit scanlines (the node's mask output) and the float32 mask itself
+   * (`mask`: handed on to an effect, R2.8 fix round 1).
    */
-  function clipBegin(l: Uint8Array, mw: number, mh: number, w: number, h: number): { alpha: Float32Array; scanlines: Uint8Array } {
+  function clipBegin(l: Uint8Array, mw: number, mh: number, w: number, h: number): { alpha: Float32Array; scanlines: Uint8Array; mask: Float32Array } {
     let m: Float32Array = new Float32Array(mw * mh)
     for (let i = 0; i < m.length; i++) m[i] = f(1 - f(l[i]! / 255))
     if (mw !== w || mh !== h) m = bilinear(m, 1, mh, mw, h, w, false)
     const alpha = new Float32Array(w * h)
     for (let i = 0; i < alpha.length; i++) alpha[i] = f(1 - m[i]!)
-    return { alpha, scanlines: mask16Of(w, h, i => m[i]!) }
+    return { alpha, scanlines: mask16Of(w, h, i => m[i]!), mask: m }
   }
 
   /**

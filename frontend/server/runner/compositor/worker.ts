@@ -90,15 +90,16 @@ parentPort.on('message', (m) => {
     // The picture utilities (R1.4, ../pixels/core.ts).
     else if (m.op === 'px.channel') {
       stopped()
-      value = px.channelMask16(m.picture, m.index)
-      transfer = [value.scanlines.buffer]
+      value = px.channelMask16(m.picture, m.index, !!m.float)
+      transfer = value.data ? [value.scanlines.buffer, value.data.buffer] : [value.scanlines.buffer]
     }
     else if (m.op === 'px.clipBegin') {
       stopped()
       const r = px.clipBegin(m.l, m.mw, m.mh, m.w, m.h)
       clipAlpha = r.alpha
-      value = { scanlines: r.scanlines }
-      transfer = [r.scanlines.buffer]
+      // The float mask goes back only when asked for (it is handed on to an effect, R2.8 fix round 1).
+      value = m.float ? { scanlines: r.scanlines, mask: r.mask } : { scanlines: r.scanlines }
+      transfer = m.float ? [r.scanlines.buffer, r.mask.buffer] : [r.scanlines.buffer]
     }
     else if (m.op === 'px.clip') {
       stopped()
@@ -135,8 +136,11 @@ parentPort.on('message', (m) => {
       r.outputs.forEach((t, i) => {
         if (m.masks[i]) {
           const mask16 = tk.mask16(t)
-          outputs.push({ w: t.w, h: t.h, mask16 })
+          const o = { w: t.w, h: t.h, mask16 }
           transfer.push(mask16.buffer)
+          // Read by an effect or a Frame: the float mask too (R2.8 fix round 1).
+          if (m.want.f32 && m.want.f32[i]) { o.tensorFile = tk.tensorFileOf(t); transfer.push(o.tensorFile.buffer) }
+          outputs.push(o)
           return
         }
         const o = { w: t.w, h: t.h, channels: t.c }
@@ -345,7 +349,7 @@ export const PIXELS_TIMEOUT_MESSAGE = 'This card took longer than 2 minutes to w
 export const EFFECT_TIMEOUT_MESSAGE = 'This effect took longer than 2 minutes to work on its pictures, so it was stopped'
 
 /** 16-bit mask scanlines (keep.ts maskPngFromScanlines encodes them), w × h. */
-export interface MaskScanlines { w: number; h: number; scanlines: Uint8Array }
+export interface MaskScanlines { w: number; h: number; scanlines: Uint8Array; data?: Float32Array }
 /** 8-bit pixels as `_image_tensor_to_data_url` sends them, interleaved RGB or RGBA. */
 export interface HandOff8 { w: number; h: number; channels: 3 | 4; px: Uint8Array }
 
@@ -355,9 +359,9 @@ export interface HandOff8 { w: number; h: number; channels: 3 | 4; px: Uint8Arra
  */
 export interface PixelsWorker {
   /** ImageToMask: channel `index` of the picture's tensor as a mask. */
-  channelMask(picture: RawPicture, index: number): Promise<MaskScanlines>
-  /** Text mask with a source: the render's luma as the mask, resized to w × h; kept on the worker for `clip`. */
-  clipBegin(l: Uint8Array, mw: number, mh: number, w: number, h: number): Promise<Uint8Array>
+  channelMask(picture: RawPicture, index: number, float?: boolean): Promise<MaskScanlines>
+  /** Text mask with a source: the render's luma as the mask, resized to w × h; kept on the worker for `clip`. `float`: the float32 mask back too. */
+  clipBegin(l: Uint8Array, mw: number, mh: number, w: number, h: number, float?: boolean): Promise<{ scanlines: Uint8Array; mask?: Float32Array }>
   /** Text mask with a source: one source picture × (1 − mask); `trunc`: quantised as save_images does (core.ts clip). */
   clip(picture: RawPicture, trunc?: boolean): Promise<HandOff8>
   /** Save image (R1.5): the pixels save_images encodes, w × h (Lanczos when that differs), flattened onto white for JPEG. */
@@ -393,7 +397,7 @@ export interface EffectRunJob {
 }
 
 /** One output of an effect's run: a picture's 8-bit bytes (interleaved, its own channels) or a mask's scanlines. */
-export type EffectOut = { w: number; h: number; channels: number; round8?: Uint8Array; trunc8?: Uint8Array; tensorFile?: Uint8Array } | { w: number; h: number; mask16: Uint8Array }
+export type EffectOut = { w: number; h: number; channels: number; round8?: Uint8Array; trunc8?: Uint8Array; tensorFile?: Uint8Array } | { w: number; h: number; mask16: Uint8Array; tensorFile?: Uint8Array }
 
 export interface EffectRunResult {
   outputs: EffectOut[]
@@ -410,13 +414,13 @@ export function pixelsInWorker<T>(signal: AbortSignal | undefined, job: (w: Pixe
   return onWorker(signal, timeout, async (t, live) => {
     const w: PixelsWorker = {
       live,
-      async channelMask(picture, index) {
+      async channelMask(picture, index, float = false) {
         const p = handOver(picture)
-        return await call(t, { op: 'px.channel', picture: p.picture, index }, p.buffers) as MaskScanlines
+        return await call(t, { op: 'px.channel', picture: p.picture, index, float }, p.buffers) as MaskScanlines
       },
-      async clipBegin(l, mw, mh, width, height) {
+      async clipBegin(l, mw, mh, width, height, float = false) {
         const own = l.byteOffset === 0 && l.byteLength === l.buffer.byteLength ? l : l.slice()
-        return (await call(t, { op: 'px.clipBegin', l: own, mw, mh, w: width, h: height }, [own.buffer as ArrayBuffer]) as { scanlines: Uint8Array }).scanlines
+        return await call(t, { op: 'px.clipBegin', l: own, mw, mh, w: width, h: height, float }, [own.buffer as ArrayBuffer]) as { scanlines: Uint8Array; mask?: Float32Array }
       },
       async clip(picture, trunc = false) {
         const p = handOver(picture)

@@ -92,13 +92,13 @@ export function plain(e: unknown): Error {
   return e instanceof Error ? e : new Error(String(e))
 }
 
-/** A mask wire's kept files (a mask value, R1.3). */
-function wiredMask(ctx: PlanContext, name: string): OutputFile[] {
+/** A mask wire's kept files (a mask value, R1.3), and the float32 tensors kept beside them when its maker kept them (R2.8 fix round 1). */
+function wiredMask(ctx: PlanContext, name: string): { files: OutputFile[]; tensors: OutputFile[] | null } {
   const v = ctx.prompt[ctx.nodeId]!.inputs?.[name]
   if (!isLink(v)) throw new Error(EFFECT_MASK_MISSING)
   const value = ctx.valueFrom?.(v)
   if (value?.kind !== 'mask' || !value.files.length) throw new Error(EFFECT_MASK_MISSING)
-  return value.files
+  return { files: value.files, tensors: value.tensors && value.tensors.length === value.files.length ? value.tensors : null }
 }
 
 /** A kept mask's size from its PNG header. */
@@ -121,10 +121,11 @@ export async function png8(px: Uint8Array, w: number, h: number, channels: numbe
 /** One input of the node: a picture wire (its source, files, and the tensors an effect kept for them) or a mask wire. */
 type In =
   | { name: string; kind: 'image'; wire: Wired; tensors: Map<string, OutputFile> | null }
-  | { name: string; kind: 'mask'; files: OutputFile[] }
+  /** `tensors`: each mask's float32 tensor (read instead of its 16-bit PNG, which gives only the size); null: the PNGs. */
+  | { name: string; kind: 'mask'; files: OutputFile[]; tensors: OutputFile[] | null }
 
 /** Its files, one per batch index; Python's 1×1 blank as one picture with no file. */
-const batchFiles = (i: In): (OutputFile | null)[] => i.kind === 'mask' ? i.files : (i.wire.files.length ? i.wire.files : [null])
+const batchFiles = (i: In): (OutputFile | null)[] => i.kind === 'mask' ? i.tensors ?? i.files : (i.wire.files.length ? i.wire.files : [null])
 
 export function planEffect(ctx: PlanContext): NodePlan {
   const node = ctx.prompt[ctx.nodeId]!
@@ -138,15 +139,15 @@ export function planEffect(ctx: PlanContext): NodePlan {
     ...schema.images.filter(i => isLink(inputs[i.name])).map((i): In => ({
       name: i.name, kind: 'image', wire: wired(ctx, i.name), tensors: keptTensorsBehind(ctx, inputs[i.name] as [string, number]),
     })),
-    ...schema.masks.filter(m => isLink(inputs[m.name])).map((m): In => ({ name: m.name, kind: 'mask', files: wiredMask(ctx, m.name) })),
+    ...schema.masks.filter(m => isLink(inputs[m.name])).map((m): In => ({ name: m.name, kind: 'mask', ...wiredMask(ctx, m.name) })),
   ]
   const previewName = effectPreviewName(ctx.nodeId)
   if (!previewName) throw new Error('This effect’s preview can’t be named after this node')
   const masks = schema.outputs.map(o => o === 'mask')
   // Kept as the pixels its readers write: Save image / Preview image truncate the float (R1.5).
   const trunc = schema.outputs.map((o, slot) => o === 'image' && onlySavesRead(ctx.prompt, ctx.nodeId, slot))
-  // Read by an effect or a Frame: the float tensor is kept too (fix round 1).
-  const float = schema.outputs.map((o, slot) => o === 'image' && floatReadBy(ctx.prompt, ctx.nodeId, slot))
+  // Read by an effect or a Frame: the float tensor is kept too (fix round 1; a mask's too, R2.8 fix round 1).
+  const float = schema.outputs.map((_o, slot) => floatReadBy(ctx.prompt, ctx.nodeId, slot))
   return {
     kind: 'derive',
     async derive(io) {
@@ -182,7 +183,11 @@ export function planEffect(ctx: PlanContext): NodePlan {
                   const png = await maskPngFromScanlines(o.mask16, o.w, o.h)
                   stopped()
                   out.files.push(await io.keep(png, 'png'))
-                  out.tensors.push(null)
+                  if (o.tensorFile) {
+                    stopped()
+                    out.tensors.push(await io.keep(o.tensorFile, 'bin'))
+                  }
+                  else out.tensors.push(null)
                   continue
                 }
                 const png = await png8((o.trunc8 ?? o.round8)!, o.w, o.h, o.channels, 6)
@@ -214,9 +219,8 @@ export function planEffect(ctx: PlanContext): NodePlan {
       schema.outputs.forEach((o, slot) => {
         const files = made.results[slot]!
         const kept = made.tensors[slot]!
-        values[slot] = o === 'mask'
-          ? { kind: 'mask', files }
-          : { kind: 'files', files, ...(kept.length && kept.length === files.length ? { tensors: kept } : {}) }
+        const tensors = kept.length && kept.length === files.length ? { tensors: kept } : {}
+        values[slot] = o === 'mask' ? { kind: 'mask', files, ...tensors } : { kind: 'files', files, ...tensors }
       })
       const ui = made.preview
         ? { images: [{ filename: made.preview.filename, subfolder: made.preview.subfolder, type: made.preview.type }], animated: [false] }
@@ -229,7 +233,8 @@ export function planEffect(ctx: PlanContext): NodePlan {
 /** One batch index's inputs: each input's file (null: Python's blank) and how to read it. */
 type JobInput =
   | { kind: 'image'; source: Wired['source']; file: OutputFile | null; tensor: OutputFile | null }
-  | { kind: 'mask'; file: OutputFile }
+  /** `tensor`: `file` is the mask's float32 tensor file, else its 16-bit PNG. */
+  | { kind: 'mask'; file: OutputFile; tensor: boolean }
 interface Job { inputs: Record<string, JobInput> }
 
 /**
@@ -279,13 +284,15 @@ async function planJobs(io: DeriveIO, cls: string, spec: EffectSpec, ins: In[], 
       }
     }
     else {
-      for (const f of i.files) {
-        const key = keyOf(f)
+      // A mask is known by its tensor file when it has one (two masks may share their 16 bits), its size read from its PNG.
+      for (const [k, f] of i.files.entries()) {
+        const t = i.tensors?.[k]
+        const key = keyOf(t ?? f)
         if (size.has(key)) continue
         stop()
         const b = await io.read(f)
         count(key, { ...maskSize(b), c: 1 })
-        bytes.set(key, b)
+        if (!t) bytes.set(key, b)
       }
     }
   }
@@ -325,7 +332,7 @@ async function planJobs(io: DeriveIO, cls: string, spec: EffectSpec, ins: In[], 
       const file = l[l.length === 1 ? 0 : index] ?? null
       parts.push(file ? keyOf(file) : 'blank')
       job.inputs[i.name] = i.kind === 'mask'
-        ? { kind: 'mask', file: file! }
+        ? { kind: 'mask', file: file!, tensor: !!i.tensors }
         : { kind: 'image', source: i.wire.source, file, tensor: file ? i.tensors?.get(keyOf(file)) ?? null : null }
     })
     const key = spec.batch === 'pure' ? parts.join('\n') : String(index)
@@ -354,6 +361,7 @@ async function planJobs(io: DeriveIO, cls: string, spec: EffectSpec, ins: In[], 
     const b = bytes.get(key)
     if (left <= 0) bytes.delete(key)
     if (x.kind === 'mask') {
+      if (x.tensor) return { tensorFile: await io.read(x.file).catch(() => { throw new Error(EFFECT_MASK_UNREAD) }) }
       const m = await readMaskPng(b!).catch(() => { throw new Error(EFFECT_MASK_UNREAD) })
       return { mask16: m.scanlines, w: m.w, h: m.h }
     }
