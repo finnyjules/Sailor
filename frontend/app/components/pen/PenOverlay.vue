@@ -524,6 +524,8 @@ let dragLast: { x: number; y: number } | null = null
 // centre drag) once it moves past the marquee threshold; `live` once the pen
 // has started the drag
 let arcPress: { pathId: EntityId; segIndex: number; x: number; y: number; wx: number; wy: number; centre: boolean; live: boolean } | null = null
+// bare modifiers never end an arc press (usePen.onKeydown's rule too)
+const ARC_PRESS_KEEP_KEYS = new Set(['Shift', 'Meta', 'Control', 'Alt'])
 // settle a leftover press (its pointerup was lost): a live drag is its own step
 function settleArcPress(): void {
   if (!arcPress) return
@@ -879,6 +881,9 @@ function handleKeydownEvent(ev: KeyboardEvent): boolean {
   // marquee stays live (swallowing later moves) and the dragged point is left
   // mid-solve, folded into whatever step comes next
   if (isToolKey(ev)) settleOverlayGesture()
+  // any real key mid arc drag: the pen settles its side (usePen.onKeydown),
+  // so the overlay's press goes too — the rest of that press is a plain one
+  else if (!ARC_PRESS_KEEP_KEYS.has(ev.key)) settleArcPress()
   const handled = props.pen.onKeydown(ev, { cancelGesture: cancelMarquee })
   if (handled) return true
   if (onControl) return false

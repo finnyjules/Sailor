@@ -14,7 +14,7 @@ import type { SketchDoc } from '~/lib/sketch/model'
 import type { ViewMatrix } from '~/lib/sketch/view'
 import { usePen } from '~/composables/pen/usePen'
 import PenOverlay from '~/components/pen/PenOverlay.vue'
-import { addPoint, addLine } from '~/lib/sketch/edit'
+import { addPoint, addLine, addPath } from '~/lib/sketch/edit'
 import { FRAME_PEN_TOOLS } from '~/composables/frame/useFramePenSession'
 
 const view: ViewMatrix = { a: 34, b: 0, c: 0, d: -34, e: 40, f: 400 }
@@ -206,5 +206,38 @@ describe('PenOverlay keyboard="host" with the Frame\'s tools', () => {
       expect(consumed).toBe(true)
       expect(pen.tool.value).toBe(tool)
     }
+  })
+})
+
+describe('PenOverlay: a key mid arc drag', () => {
+  it('settles the drag as its own step; the rest of the press drags nothing; undo leaves no transient point', async () => {
+    const doc = ref<SketchDoc>({ entities: [], constraints: [] })
+    const A = addPoint(doc.value, 4, 6), B = addPoint(doc.value, 10, 6), C = addPoint(doc.value, 7, 9)
+    const path = addPath(doc.value, [A, B], [{ kind: 'arc', center: C, sweep: 1 }])
+    const pen = usePen({ doc: doc as any, view: ref(view) })
+    const wrapper = mount(PenOverlay, { props: { pen, view, width: 800, height: 800, keyboard: 'host' } })
+    mounted = wrapper
+    const ents = doc.value.entities.length, cons = doc.value.constraints.length
+    // drawing → screen: x' = 34x + 40, y' = -34y + 400
+    const scr = (x: number, y: number) => ({ clientX: 34 * x + 40, clientY: -34 * y + 400, button: 0, buttons: 1 })
+    const seg = wrapper.find(`[data-seg="${path}:0"]`)
+    const svg = wrapper.find('svg')
+    await seg.trigger('pointerdown', scr(7, 9 - Math.hypot(3, 3)))
+    await svg.trigger('pointermove', scr(7, 3.5))
+    expect(pen.arcDragTransient()).not.toBeNull()
+    // (the press picked the path, so the arrow nudges it)
+    ;(wrapper.vm as any).onHostKeydown(new KeyboardEvent('keydown', { key: 'ArrowUp' }))
+    expect(pen.arcDragTransient()).toBeNull()
+    const centreMid = { ...(doc.value.entities.find(e => e.id === C) as any) }
+    // the rest of the press: moves no longer drag the arc
+    await svg.trigger('pointermove', scr(7, 2))
+    const c = doc.value.entities.find(e => e.id === C) as any
+    expect(c.x).toBeCloseTo(centreMid.x, 9); expect(c.y).toBeCloseTo(centreMid.y, 9)
+    await svg.trigger('pointerup', { ...scr(7, 2), buttons: 0 })
+    for (let i = 0; i < 3; i++) pen.undo()
+    expect(doc.value.entities.filter(e => (e as any).construction)).toHaveLength(0)
+    expect(doc.value.entities.length).toBe(ents)
+    expect(doc.value.constraints.length).toBe(cons)
+    expect(doc.value.entities.find(e => e.id === C)).toMatchObject({ x: 7, y: 9 })
   })
 })
