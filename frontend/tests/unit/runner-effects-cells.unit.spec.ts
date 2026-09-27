@@ -16,7 +16,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, statSync
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
-import { inflateSync } from 'node:zlib'
+import { deflateSync, gunzipSync, gzipSync, inflateSync } from 'node:zlib'
 import { describe, expect, it, vi } from 'vitest'
 import sharp from 'sharp'
 import { makeKit } from './__runner__/kit'
@@ -37,7 +37,9 @@ import { ASCII_DEFAULT, ASCII_GLYPH_CHARACTERS, ASCII_PRESETS } from '#shared/ru
 import { EFFECTS } from '~~/server/runner/effects/table'
 import { effectCores } from '~~/server/runner/effects/cores'
 import type { Tensor } from '~~/server/runner/effects/core/tensor'
-import { ASCII_CHARACTER_UNKNOWN, asciiAtlasFor, asciiGlyphs, asciiPrepare } from '~~/server/runner/effects/asciiGlyphs'
+import {
+  ASCII_CHARACTER_UNKNOWN, ASCII_GLYPHS_MISSING, ASCII_GLYPHS_UNREADABLE, __setAsciiGlyphsFileForTests, asciiAtlasFor, asciiGlyphs, asciiPrepare,
+} from '~~/server/runner/effects/asciiGlyphs'
 import { decodeRaw } from '~~/server/runner/compositor/decode'
 import { workerScript } from '~~/server/runner/compositor/worker'
 import { compositorCore } from '~~/server/runner/compositor/plane'
@@ -217,6 +219,44 @@ describe('the Ascii glyph atlas', () => {
       expect(sha256(new Uint8Array(f.buffer)), `cell ${cell}`).toBe(f32_sha256)
     }
     expect(FX.atlas.cells.map(c => c.cell)).toEqual(Array.from({ length: 61 }, (_x, i) => i + 4))
+  })
+
+  it('a missing atlas fails the node as missing; a corrupt one (not gzip, a bad index) or one of the wrong size as unreadable, in plain words (fix round 1)', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ascii-atlas-'))
+    const good = gunzipSync(readFileSync(ATLAS_FILE))
+    const headLen = good.readUInt32LE(4)
+    const files: Record<string, Uint8Array> = {
+      'not gzip': new Uint8Array(Buffer.from('not an atlas at all')),
+      'gzip, not an atlas': gzipSync(Buffer.from('hello')),
+      'a bad index': gzipSync(Buffer.concat([good.subarray(0, 8), Buffer.from('{'.padEnd(headLen, ' ')), good.subarray(8 + headLen)])),
+      'an index longer than the file': gzipSync(Buffer.concat([Buffer.from('SAG1'), Buffer.from([0xFF, 0xFF, 0xFF, 0x7F])])),
+      'one byte short': gzipSync(good.subarray(0, good.length - 1)),
+      'one byte long': gzipSync(Buffer.concat([good, Buffer.from([0])])),
+      'deflate, not gzip': deflateSync(good),
+    }
+    const c = FX.cases.find(x => x.name === 'Ascii: defaults, rgb 37×23')!
+    try {
+      __setAsciiGlyphsFileForTests(join(dir, 'nowhere.bin'))
+      expect(() => asciiGlyphs()).toThrow(ASCII_GLYPHS_MISSING)
+      await expect(runEffectCase(c as FxCase, { families: CELLS })).rejects.toThrow(ASCII_GLYPHS_MISSING)
+      for (const [label, bytes] of Object.entries(files)) {
+        const file = join(dir, `${label}.bin`)
+        writeFileSync(file, bytes)
+        __setAsciiGlyphsFileForTests(file)
+        expect(() => asciiGlyphs(), label).toThrow(ASCII_GLYPHS_UNREADABLE)
+        await expect(runEffectCase(c as FxCase, { families: CELLS }), label).rejects.toThrow(ASCII_GLYPHS_UNREADABLE)
+      }
+      // The good file under another name reads, and the node runs.
+      const copy = join(dir, 'copy.bin')
+      writeFileSync(copy, readFileSync(ATLAS_FILE))
+      __setAsciiGlyphsFileForTests(copy)
+      expect(asciiGlyphs().chars.join('')).toBe(ASCII_GLYPH_CHARACTERS)
+      const run = await runEffectCase(c as FxCase, { families: CELLS })
+      expect(sha256((await pngPixels(run.bytes(filesOfValue(run.made.values[0])[0]!))).px)).toBe(c.outputs![0]!.items[0]!.round8_sha256)
+    }
+    finally { __setAsciiGlyphsFileForTests(null) }
+    expect(ASCII_GLYPHS_MISSING).toMatch(/^[A-Z][^A-Z]*$/)
+    expect(ASCII_GLYPHS_UNREADABLE).toMatch(/^[A-Z][^A-Z]*$/)
   })
 
   it('a node gets its cell\'s bitmaps for its ramp\'s distinct characters, in ramp order', () => {

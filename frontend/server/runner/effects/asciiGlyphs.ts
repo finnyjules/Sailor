@@ -22,6 +22,7 @@ import { asciiRampOf } from '#shared/runner/effects'
 import type { AsciiAtlas } from './core/cells'
 
 export const ASCII_GLYPHS_MISSING = 'The runner’s character pictures for this effect are missing'
+export const ASCII_GLYPHS_UNREADABLE = 'The runner’s character pictures for this effect could not be read'
 export const ASCII_CHARACTER_UNKNOWN = 'A character in this effect’s text can’t be drawn here'
 
 export interface AsciiGlyphIndex {
@@ -37,9 +38,18 @@ export interface AsciiGlyphIndex {
 interface Loaded { index: AsciiGlyphIndex; chars: string[]; data: Uint8Array; offsets: Map<number, number> }
 
 let loaded: Loaded | null = null
+/** Tests only: the atlas file to read instead of the usual places (undefined: the usual places). */
+let fileOverride: string | undefined
+
+/** Tests only: read the atlas from `file` (a missing, corrupt or wrong-sized one), or the usual places again (null); the next read starts afresh. */
+export function __setAsciiGlyphsFileForTests(file: string | null): void {
+  fileOverride = file ?? undefined
+  loaded = null
+}
 
 /** Where the atlas is: beside this module (dev, tests), or under the server's folder from the working directory. */
 function atlasFile(): string | null {
+  if (fileOverride !== undefined) return existsSync(fileOverride) ? fileOverride : null
   const candidates = [
     process.env.SAILOR_ASCII_GLYPHS || null,
     (() => { try { return fileURLToPath(new URL('./asciiGlyphs.bin', import.meta.url)) } catch { return null } })(),
@@ -54,22 +64,36 @@ export function asciiGlyphs(): Loaded {
   if (loaded) return loaded
   const file = atlasFile()
   if (!file) throw new Error(ASCII_GLYPHS_MISSING)
-  const raw = new Uint8Array(gunzipSync(readFileSync(file)))
-  const v = new DataView(raw.buffer, raw.byteOffset, raw.byteLength)
-  if (raw.length < 8 || String.fromCharCode(...raw.subarray(0, 4)) !== 'SAG1') throw new Error(ASCII_GLYPHS_MISSING)
-  const len = v.getUint32(4, true)
-  const index = JSON.parse(new TextDecoder().decode(raw.subarray(8, 8 + len))) as AsciiGlyphIndex
+  loaded = readAtlas(file)
+  return loaded
+}
+
+/** The atlas file read and checked: anything not the file the fixture script writes (not gzip, a bad index, the wrong size) is unreadable. */
+function readAtlas(file: string): Loaded {
+  const bad = () => new Error(ASCII_GLYPHS_UNREADABLE)
+  let raw: Uint8Array
+  let index: AsciiGlyphIndex
+  try {
+    raw = new Uint8Array(gunzipSync(readFileSync(file)))
+    if (raw.length < 8 || String.fromCharCode(...raw.subarray(0, 4)) !== 'SAG1') throw bad()
+    const len = new DataView(raw.buffer, raw.byteOffset, raw.byteLength).getUint32(4, true)
+    if (8 + len > raw.length) throw bad()
+    index = JSON.parse(new TextDecoder().decode(raw.subarray(8, 8 + len))) as AsciiGlyphIndex
+    if (!index || typeof index.characters !== 'string' || !Number.isInteger(index.cell_min) || !Number.isInteger(index.cell_max)
+      || index.cell_min < 1 || index.cell_max < index.cell_min || index.cell_max > 1024) throw bad()
+    raw = raw.subarray(8 + len)
+  }
+  catch { throw bad() }
   const chars = [...index.characters]
-  const data = raw.subarray(8 + len)
+  const data = raw
   const offsets = new Map<number, number>()
   let off = 0
   for (let cell = index.cell_min; cell <= index.cell_max; cell++) {
     offsets.set(cell, off)
     off += chars.length * cell * cell
   }
-  if (off !== data.length) throw new Error(ASCII_GLYPHS_MISSING)
-  loaded = { index, chars, data, offsets }
-  return loaded
+  if (off !== data.length) throw bad()
+  return { index, chars, data, offsets }
 }
 
 /** One character's cell × cell bitmap (a view into the atlas), or null when the atlas hasn't it. */
