@@ -1710,6 +1710,7 @@ watch(previewImages, (urls) => {
     :class="{
       'comfy-node--muted': isMuted,
       'comfy-node--bypassed': isBypassed,
+      'comfy-node--subgraph': data.isSubgraph,
       'ring-2 ring-red-500': data.error,
       // Dominant: full width. Recessive: narrower, so utilities stop competing
       // with the work. Width carries the whole distinction — recessive nodes used
@@ -1726,12 +1727,9 @@ watch(previewImages, (urls) => {
     :style="{
       // The shell (node-surfaces.css) draws the glass tint, border and shadow. A
       // user-set bgcolor still tints, mixed into the same glass so blur shows through.
-      // A subgraph keeps a border you can actually see — it is a signal, not chrome —
-      // set inline so it only recolours the shell's border.
       background: data.bgcolor
         ? `color-mix(in srgb, ${data.bgcolor} 28%, rgba(26,26,28,0.58))`
         : undefined,
-      borderColor: data.isSubgraph ? 'rgba(255,255,255,0.3)' : undefined,
       '--border-color-left': borderColorLeft,
       '--border-color-right': borderColorRight,
       // Short nodes with many ports must still enclose their own dots.
@@ -2440,6 +2438,13 @@ watch(previewImages, (urls) => {
   backdrop-filter: none;
 }
 .capsule-swap-enter-active { transition-duration: 0.36s; }
+/* The shell's real blur (node-surfaces.css, 0,3,0) would outrank the rule above, so
+   switch it off again while the card expands or collapses. The ancestor sits inside
+   :is() because scoped CSS drops everything after a :global() prefix. */
+.node-shell[data-glass-blur]:is(.capsule-swap-enter-active, .capsule-swap-leave-active):is(.canvas-glass--blur *) {
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
 .capsule-swap-leave-active {
   transition-duration: 0.22s;
   position: absolute;
@@ -2486,6 +2491,10 @@ watch(previewImages, (urls) => {
     45deg, transparent 0 5px, rgba(91, 123, 214, 0.55) 5px 6px);
   border: 1px dashed rgba(91, 123, 214, 0.8);
 }
+
+/* A subgraph keeps a border you can actually see — it is a signal, not chrome. Before
+   the running and bypassed rules so their borders still win. */
+.comfy-node--subgraph { border-color: rgba(255, 255, 255, 0.3); }
 
 /* Sweeping glow border when running */
 .comfy-node[data-running] {

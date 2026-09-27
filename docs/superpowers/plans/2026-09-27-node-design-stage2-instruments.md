@@ -271,6 +271,34 @@ describe.each(['ComfyGateNode.vue', 'ShaderEffectNode.vue', 'SubgraphIONode.vue'
 
 ---
 
+### Task 6: The model picker as a row, and a solid prompt well (added after the Task 3 screenshot)
+
+**Why:** on the real node the model picker was still its own box with the maker in capitals ("GOOGLE"), and the prompt well showed a rainbow wash: the pastel ring is painted as a gradient behind the box and Task 2's see-through fill (`rgba(0,0,0,.35)`) let it show through.
+
+**Files:** Modify `frontend/app/components/vue-canvas/widgets/WidgetModelPicker.vue` (template + scoped style only), `frontend/app/components/vue-canvas/widgets/WidgetText.vue` (one value); Test `frontend/tests/unit/model-picker-row.unit.spec.ts` (new)
+
+- [ ] **Step 1: Failing test** — mount `WidgetModelPicker` (read its props/setup first; stub whatever store/gallery it needs, or use `shallowMount` with the minimal props) and assert: the root has `data-studio-row`-like row classes `h-8`, `px-[11px]`, `bg-white/[0.03]`; a left label reading "Model" (kind model), "Shot" (shot preset) or "Effect" (text effect) in `text-white/55`; the value shows the model's label; **no element with `uppercase`**; the chevron is present. Also a source assertion that `WidgetText.vue`'s multiline textarea sets `--pastel-hairline-bg` to an opaque colour (no `rgba(`).
+- [ ] **Step 2:** run → FAIL.
+- [ ] **Step 3: Implement.** Picker: one 32px row, `rounded-[6px] bg-white/[0.03] hover:bg-white/[0.065] h-8 px-[11px] flex items-center justify-between gap-2`; left: the label ("Model" / "Shot" / "Effect", 11px, `text-white/55`); right: the existing brand-icon frame shrunk to 16px (`size-4`, icon `size-3`), the model label (11px, `text-white/90`, truncate), then the chevron (`size-3.5`, `text-white/30`, hover `/55`). Drop the second line (maker / "Text effect" / "Shot preset") entirely. Keep the button element, `@click="openGallery"`, `nopan nodrag`, the `:title` text and every script line. Prompt well: in `WidgetText.vue` set `--pastel-hairline-bg: #111113` (opaque: the ring is a gradient behind the fill, so the fill must not be see-through).
+- [ ] **Step 4:** run → PASS; a Playwright screenshot of a Generate an image node (expanded, not hovered) to the scratchpad path the controller gives.
+- [ ] **Step 5:** controller commits — `fix(nodes): the model picker is a row; the prompt well is solid again`.
+
+---
+
+### Task 7: The capsule matches the shell (added after the Task 3 review)
+
+**Why:** the collapsed capsule is still opaque `#1f1f1f` with a 13% border and its own shadow, while the expanded card is now glass with a 10% border — expanding changes fill and edge mid-animation, which breaks "one object opening".
+
+**Files:** Modify `frontend/app/components/vue-canvas/NodeCapsule.vue` (scoped style only), `frontend/app/components/vue-canvas/ComfyNode.vue` (the `<NodeCapsule …>` element only: add `node-shell` to its class and `:data-glass-blur="glass || undefined"`); Test: extend `frontend/tests/unit/instrument-shell.unit.spec.ts`
+
+- [ ] **Step 1: Failing guards:** `NodeCapsule.vue`'s root rule has no `#1f1f1f` background and no `rgba(255, 255, 255, 0.13)` border; its border width uses `calc(1px / var(--canvas-zoom, 1))`; its title rule has `font-weight: 600`; ComfyNode's `<NodeCapsule` element carries `node-shell` and `:data-glass-blur`.
+- [ ] **Step 2:** run → FAIL.
+- [ ] **Step 3: Implement.** In NodeCapsule's root rule replace `background: #1f1f1f` with `background: var(--node-glass-tint)`, the border with `border: calc(1px / var(--canvas-zoom, 1)) solid var(--node-edge)`, the shadow with `box-shadow: var(--node-shadow)`; keep radius 16px, padding, widths, the running/failed rules and every hover/transition rule (update any hover rule that sets `background` to a lighter opaque grey so it lightens the glass instead, e.g. `color-mix(in srgb, #ffffff 4%, var(--node-glass-tint))`). Title `font-weight: 600`. In ComfyNode add `node-shell` to the capsule's `class` and the `:data-glass-blur` binding (the `glass` ref already exists). Do not change the capsule's geometry or the unfold/fold hooks.
+- [ ] **Step 4:** unit guards; `npx playwright test tests/capsule-expand-timing.spec.ts tests/node-capsule.spec.ts`; screenshot of the capsule and of the card mid-expand if feasible.
+- [ ] **Step 5:** controller commits by hunk — `feat(nodes): the capsule wears the same glass as the card, so expanding reads as one object`.
+
+---
+
 ## After stage 2
 
 - Live look on the real canvas with Julien (the glass now blurs on real nodes: this is the first real-world check of always-on blur).
