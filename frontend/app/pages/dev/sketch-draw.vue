@@ -5,7 +5,7 @@
 // surface in PenOverlay (components/pen); this page hosts both: the viewport
 // (pan, zoom, the view matrix), the toolbars and the test API.
 definePageMeta({ layout: false })
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted, toRaw } from 'vue'
 import type { SketchDoc, EntityId, ConstraintKind } from '~/lib/sketch/model'
 import { repeatEntities, mirrorEntities } from '~/lib/sketch/edit'
 import { sketchPathData } from '~/lib/sketch/sketchPath'
@@ -16,6 +16,7 @@ import PenOverlay from '~/components/pen/PenOverlay.vue'
 import PenToolbar from '~/components/pen/PenToolbar.vue'
 import PenProperties from '~/components/pen/PenProperties.vue'
 import { pieceKey } from '~/lib/sketch/pieces'
+import { fillState } from '~/lib/sketch/fills'
 
 type Tool = PenTool
 
@@ -305,6 +306,18 @@ onMounted(() => {
     },
     wheel: () => (pen.wheel.value ? { layout: pen.wheel.value.layout, hover: pen.wheel.value.hover } : null),
     highlight: () => pen.highlight.value.map(pieceKey),
+    // pen stage 7 — read the fills (never change them): how many are stored,
+    // how many areas are filled, how many sleep, the gap rings, the filled
+    // outline and its total area
+    fills: () => {
+      const v = pen.fillView()
+      const raw = toRaw(doc.value)
+      const st = raw.fills?.length ? fillState(raw) : null
+      return {
+        count: raw.fills?.length ?? 0, filled: v.filled, asleep: v.asleep, gaps: v.gaps.length, d: v.d,
+        area: st ? st.filled.reduce((s, f) => s + st.fs.faces[f]!.area, 0) : 0,
+      }
+    },
   }
   ready.value = true
   window.addEventListener('keydown', onKeydown, { capture: true })

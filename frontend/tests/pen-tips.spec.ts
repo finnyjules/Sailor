@@ -77,10 +77,10 @@ test('hovering Pen shows its card with key, caption and a live demo; the next ca
   await expect(page.locator('[data-pen-tip]')).toHaveCount(0)
 })
 
-test('P, B, L, O, N, T, C, D and V pick their tools from the keyboard', async ({ page }) => {
+test('P, B, L, O, N, T, C, D, G and V pick their tools from the keyboard', async ({ page }) => {
   await open(page)
   const tool = () => page.evaluate(() => (window as any).__sketchDraw.tool)
-  const want: [string, string][] = [['p', 'path'], ['t', 'trim'], ['b', 'curve'], ['l', 'line'], ['o', 'circle'], ['n', 'point'], ['c', 'cut'], ['d', 'dissolve'], ['v', 'select']]
+  const want: [string, string][] = [['p', 'path'], ['t', 'trim'], ['b', 'curve'], ['l', 'line'], ['o', 'circle'], ['n', 'point'], ['c', 'cut'], ['d', 'dissolve'], ['g', 'fill'], ['v', 'select']]
   for (const [k, t] of want) {
     await page.keyboard.press(k)
     expect(await tool(), k).toBe(t)
