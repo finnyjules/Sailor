@@ -179,12 +179,19 @@ export function parseCharacterRecord(raw: string, slug: string): CharacterRecord
     states = [...states.filter(v => v.id === 'default'), ...states.filter(v => v.id !== 'default')]
   }
 
+  // Merge, not "stored else derived": the old workbench still writes
+  // per-look refImages until stage 5, so a look can grow new refs after
+  // `photos` was already stored (at creation, by the heal-write, or by a
+  // states-replace PATCH) — those new refs must still surface as photos.
   const storedPhotos = Array.isArray(r.photos)
     ? (r.photos as unknown[]).map(photoHygiene).filter((p): p is Photo => !!p)
-    : null
-  const photos: Photo[] = storedPhotos ?? (() => {
+    : []
+  const photos: Photo[] = (() => {
     const seen = new Set<string>()
     const out: Photo[] = []
+    for (const p of storedPhotos) {
+      if (!seen.has(p.filename)) { seen.add(p.filename); out.push(p) }
+    }
     for (const s of states) for (const f of s.refImages) {
       if (!seen.has(f)) { seen.add(f); out.push({ filename: f, check: null }) }
     }

@@ -306,6 +306,24 @@ describe('read-time conversion for the rework', () => {
     expect(r.face).toBeNull()
     expect(r.photos).toEqual([])
   })
+  it('merges stored photos with new refs a look picked up since, keeping the stored check', () => {
+    const r = parseCharacterRecord(JSON.stringify({
+      name: 'X',
+      photos: [{ filename: 'a.png', check: { verdict: 'match', score: 99, against: 'a.png', at: 't' } }],
+      states: [{ id: 'default', label: 'D', refImages: ['a.png', 'new.png'] }],
+    }), 'x')!
+    expect(r.photos).toEqual([
+      { filename: 'a.png', check: { verdict: 'match', score: 99, against: 'a.png', at: 't' } },
+      { filename: 'new.png', check: null },
+    ])
+  })
+  it('merges an empty stored photos array with a look\'s refs', () => {
+    const r = parseCharacterRecord(JSON.stringify({
+      name: 'X', photos: [],
+      states: [{ id: 'default', label: 'D', refImages: ['x.png'] }],
+    }), 'x')!
+    expect(r.photos).toEqual([{ filename: 'x.png', check: null }])
+  })
 })
 
 describe('healRefImages for rework fields', () => {
