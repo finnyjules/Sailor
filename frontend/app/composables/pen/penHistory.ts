@@ -22,8 +22,12 @@ export function createPenHistory(opts: { doc: Ref<SketchDoc>; onChange?: () => v
   // the drawing as the pen received it — revert()'s target. Separate from
   // `history`, which is capped at 200 entries and so can lose its first one.
   const opening = cloneDoc(doc.value)
+  // bumped whenever the drawing moves to another history entry (a commit, an
+  // undo / redo, a fresh start) — a cheap key for readers that work on the
+  // raw doc (pen stage 6: the Properties panel's rules list)
+  const rev = ref(0)
 
-  function initHistory() { history.value = [cloneDoc(doc.value)]; histPtr.value = 0 }
+  function initHistory() { history.value = [cloneDoc(doc.value)]; histPtr.value = 0; rev.value++ }
 
   function commitHistory() {
     // no-op guard: a settle that left `doc` structurally identical to the
@@ -38,6 +42,7 @@ export function createPenHistory(opts: { doc: Ref<SketchDoc>; onChange?: () => v
     history.value.push(cloneDoc(doc.value))
     histPtr.value = history.value.length - 1
     if (history.value.length > 200) { history.value.shift(); histPtr.value-- }
+    rev.value++
     opts.onChange?.()
   }
 
@@ -48,12 +53,14 @@ export function createPenHistory(opts: { doc: Ref<SketchDoc>; onChange?: () => v
     if (histPtr.value <= 0) return false
     histPtr.value--
     doc.value = cloneDoc(history.value[histPtr.value]!)
+    rev.value++
     return true
   }
   function redo(): boolean {
     if (histPtr.value >= history.value.length - 1) return false
     histPtr.value++
     doc.value = cloneDoc(history.value[histPtr.value]!)
+    rev.value++
     return true
   }
   function canUndo() { return histPtr.value > 0 }
@@ -70,5 +77,5 @@ export function createPenHistory(opts: { doc: Ref<SketchDoc>; onChange?: () => v
 
   function live(): void { opts.onLiveChange?.() }
 
-  return { initHistory, commitHistory, undo, redo, canUndo, canRedo, revert, live }
+  return { initHistory, commitHistory, undo, redo, canUndo, canRedo, revert, live, rev }
 }

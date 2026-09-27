@@ -24,6 +24,12 @@ vi.mock('~/components/ui/tooltip', async () => {
   const pass = dc({ setup: (_, { slots }) => () => slots.default?.() })
   return { TooltipProvider: pass, Tooltip: pass, TooltipTrigger: pass }
 })
+// counts the full rule check's trial solves (passes through)
+vi.mock('~/lib/sketch/ruleCheck', async (orig) => {
+  const m = await orig<typeof import('~/lib/sketch/ruleCheck')>()
+  return { ...m, checkRule: vi.fn(m.checkRule) }
+})
+const { checkRule } = await import('~/lib/sketch/ruleCheck')
 const { default: PenProperties } = await import('~/components/pen/PenProperties.vue')
 const { default: PenValueRow } = await import('~/components/pen/PenValueRow.vue')
 const { default: PenNumberInput } = await import('~/components/pen/PenNumberInput.vue')
@@ -199,12 +205,15 @@ describe('PenProperties', () => {
     const s = scene()
     const q = addPoint(s.doc.value, 3, 5)
     addConstraint(s.doc.value, 'rotatedFrom', [q, s.p1, s.c], 90)
+    addConstraint(s.doc.value, 'mirroredFrom', [q, s.p1, s.line])
+    const h = addConstraint(s.doc.value, 'horizontal', [s.p1, q])   // positive control: a normal rule on the same points
     s.pen.pick(s.p1)
     wrapper = mount(PenProperties, { props: { pen: s.pen } })
     await nextTick()
-    expect(wrapper.find('[data-props-rules]').exists()).toBe(true)
-    expect(wrapper.findAll('[data-rule-row]')).toHaveLength(0)   // the tangent ties the line, not this point
+    expect(wrapper.findAll('[data-rule-row]').map(r => r.attributes('data-rule-row'))).toEqual([h])
+    expect(wrapper.find(`[data-rule-row="${h}"]`).text()).toContain('Horizontal — Point 1 · Point 5')
     expect(wrapper.text()).not.toContain('Repeat copy')
+    expect(wrapper.text()).not.toContain('Mirror copy')
   })
 
   it('the + list offers the rules row’s rules; an exact duplicate is greyed on open; a conflicting pick adds nothing and says why', async () => {
@@ -276,6 +285,43 @@ describe('PenProperties', () => {
     expect(s.pen.canUndo()).toBe(false)
   })
 
+  it('a pick runs the trial solve once — not again inside the run (fresh verdict)', async () => {
+    const s = scene()
+    s.pen.pick(s.p1); s.pen.pick(s.p5, true)
+    wrapper = mount(PenProperties, { props: { pen: s.pen } })
+    await nextTick()
+    await wrapper.find('[data-act="rule-add"]').trigger('click')
+    await nextTick()
+    vi.mocked(checkRule).mockClear()
+    await wrapper.find('[data-rule-add="rule:vertical"]').trigger('click')
+    await nextTick()
+    expect(s.doc.value.constraints.some(k => k.kind === 'vertical')).toBe(true)
+    expect(vi.mocked(checkRule)).toHaveBeenCalledTimes(1)
+  })
+
+  it('remembered verdicts are dropped on any drawing change (a commit), not only on count changes', async () => {
+    vi.useFakeTimers()
+    const s = scene()
+    addConstraint(s.doc.value, 'horizontal', [s.line])
+    s.pen.pick(s.line)
+    const spy = vi.spyOn(s.pen, 'checkRuleItem')
+    wrapper = mount(PenProperties, { props: { pen: s.pen } })
+    await nextTick()
+    await wrapper.find('[data-act="rule-add"]').trigger('click')
+    await nextTick()
+    const vertical = () => wrapper!.find('[data-rule-add="rule:vertical"]')
+    await vertical().trigger('mouseenter'); vi.advanceTimersByTime(500); await nextTick()
+    expect(spy).toHaveBeenCalledTimes(1)
+    expect(vertical().attributes('aria-disabled')).toBe('true')
+    // move a point and commit: same counts, a new revision
+    P(s.doc.value, s.p5).x += 0.5
+    s.pen.commitHistory()
+    await nextTick()
+    expect(vertical().attributes('aria-disabled')).toBeUndefined()   // forgotten, back to the cheap check
+    await vertical().trigger('mouseleave'); await vertical().trigger('mouseenter'); vi.advanceTimersByTime(500)
+    expect(spy).toHaveBeenCalledTimes(2)
+  })
+
   it('the + list closes when the selection changes', async () => {
     const s = scene()
     s.pen.pick(s.line)
@@ -295,6 +341,39 @@ describe('PenProperties', () => {
     wrapper = mount(PenProperties, { props: { pen: s.pen } })
     await nextTick()
     expect(wrapper.find('[data-pen-properties]').attributes('inert')).toBeDefined()
+  })
+})
+
+describe('speed (a 150-piece connected drawing)', () => {
+  // a closed path of 150 pieces — every third an arc with its own centre —
+  // with a distance on every piece and a right angle at every straight joint
+  function big() {
+    const doc = ref<SketchDoc>({ entities: [], constraints: [] })
+    const d = doc.value
+    const N = 150, R = 40
+    const pts = Array.from({ length: N }, (_, i) => addPoint(d, R * Math.cos(2 * Math.PI * i / N), R * Math.sin(2 * Math.PI * i / N)))
+    const segs = pts.map((_, i) => (i % 3 === 2
+      ? { kind: 'arc' as const, center: addPoint(d, 0, 0), sweep: 1 as const }
+      : { kind: 'line' as const }))
+    const path = addPath(d, pts, segs, true)
+    for (let i = 0; i < N; i++) addConstraint(d, 'distance', [pts[i]!, pts[(i + 1) % N]!], 1.6)
+    for (let i = 0; i < N; i += 3) addConstraint(d, 'perpendicular', [pts[i]!, pts[i + 1]!, pts[i + 1]!, pts[i + 2]!])
+    return { doc, path, pts, pen: usePen({ doc, view: ref(view) }) }
+  }
+  it('selecting the whole path computes its rules and names in under 50 ms', async () => {
+    const s = big()
+    expect(s.doc.value.constraints.length).toBeGreaterThanOrEqual(250)
+    wrapper = mount(PenProperties, { props: { pen: s.pen } })
+    await nextTick()
+    const vm = wrapper.vm as unknown as { rules: unknown[]; names: Map<string, string> }
+    s.pen.pick(s.path)
+    const t0 = performance.now()
+    const n = vm.rules.length
+    const names = vm.names.size
+    const ms = performance.now() - t0
+    expect(n).toBeGreaterThan(150)
+    expect(names).toBeGreaterThan(150)
+    expect(ms).toBeLessThan(50)
   })
 })
 

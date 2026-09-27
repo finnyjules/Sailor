@@ -431,6 +431,8 @@ export function usePen(opts: {
   // firing onChange.
   const penHistory = createPenHistory({ doc, onChange: opts.onChange, onLiveChange: opts.onLiveChange })
   const { commitHistory, initHistory, canUndo, canRedo } = penHistory
+  /** bumps on every commit, undo, redo and fresh start (penHistory.ts) */
+  const docRevision = penHistory.rev
   function undo() {
     closeMenus()
     // with a Clean up preview open, undo only closes it (as ⌘Z does) — it
@@ -2257,10 +2259,12 @@ export function usePen(opts: {
     const d = ACTIONS[id]
     return d ? d.state(actionHost) : no(REASON.notHere)
   }
-  // settle, then run (a rule gets its full check here); the refusal, or OK
-  function settleAndRun(id: string, at: Vec2 | null): ActionState {
+  // settle, then run (a rule gets its full check here, unless the caller
+  // just ran it — `prechecked` — and settling changed nothing); the refusal, or OK
+  function settleAndRun(id: string, at: Vec2 | null, prechecked = false): ActionState {
+    const before = docRevision.value
     settleLive()
-    const r = runItem(actionHost, id, at)
+    const r = runItem(actionHost, id, at, prechecked && docRevision.value === before)
     if (!r.ok) status.value = r.reason
     return r
   }
@@ -2333,12 +2337,14 @@ export function usePen(opts: {
   }
   // Properties' + list and any other caller: run a registry id now. A greyed
   // one (or anything during a Clean up preview) does nothing and says why.
-  function runAction(id: string, at: Vec2 | null = null): boolean {
+  // `prechecked`: the caller has just had checkRuleItem say yes for this
+  // drawing (docRevision unchanged since), so the rule's trial solve isn't run twice.
+  function runAction(id: string, at: Vec2 | null = null, opts: { prechecked?: boolean } = {}): boolean {
     if (cleanup.value) return false
     const q = quickState(id)
     if (!q.ok) { status.value = q.reason; return false }
     closeMenus()
-    return settleAndRun(id, at).ok
+    return settleAndRun(id, at, !!opts.prechecked).ok
   }
   // Properties' + list, when a rule is hovered (controller ruling C1): the
   // full check on demand — the cheap one first, then the window trial solve
@@ -2886,7 +2892,7 @@ export function usePen(opts: {
     // Clean up (pen stage 5)
     cleanup, toggleCleanup, startCleanup, applyCleanup, cancelCleanup, toggleCleanupFix, toggleCleanupKind, setCleanupStrength,
     // history
-    undo, redo, canUndo, canRedo, reset, revert, commitHistory, initHistory,
+    undo, redo, canUndo, canRedo, reset, revert, commitHistory, initHistory, docRevision,
     // session
     finishSession,
     // keys

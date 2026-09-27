@@ -171,12 +171,13 @@ export function menuFor(h: PenActionHost): { header: string | null; groups: PenM
 }
 
 /** Run a menu item, wheel slice or key action. A rule gets the full check
- *  first; an action its own state. Returns the refusal (nothing ran) or OK. */
-export function runItem(h: PenActionHost, id: string, at: Vec2 | null): ActionState {
+ *  first (skipped when `prechecked`: the caller just ran it on this very
+ *  drawing); an action its own state. Returns the refusal (nothing ran) or OK. */
+export function runItem(h: PenActionHost, id: string, at: Vec2 | null, prechecked = false): ActionState {
   if (id.startsWith('rule:')) {
     const o = h.availableConstraints().find(x => ruleItemId(x) === id)
     if (!o) return no(REASON.notHere)
-    const s = pickRuleState(h, o)
+    const s = prechecked ? OK : pickRuleState(h, o)
     if (!s.ok) return s
     void h.applyWithValue(o)
     return OK

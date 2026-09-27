@@ -15,14 +15,14 @@
 //
 // Each host places it in its own side panel while the pen is open; it
 // assumes nothing about its position and fills the width it is given.
-import { computed, ref, watch, onBeforeUnmount } from 'vue'
+import { computed, ref, watch, onBeforeUnmount, toRaw } from 'vue'
 import type { Pen } from '~/composables/pen/usePen'
 import type { ActionState } from '~/composables/pen/penReasons'
 import type { PenMenuItem } from '~/composables/pen/penActions'
 import PenTipCard from '~/components/pen/PenTipCard.vue'
 import PenNumberInput from '~/components/pen/PenNumberInput.vue'
 import { TooltipProvider } from '~/components/ui/tooltip'
-import { pieceNames, rulesForSelection, ruleLabel, rulePieces, selectionLabel } from '~/lib/sketch/pieces'
+import { pieceIndex, pieceNames, rulesForSelection, ruleLabel, rulePieces, selectionLabel, type PieceRef } from '~/lib/sketch/pieces'
 import { sizeTargetFor, measureSizes } from '~/lib/sketch/sizes'
 import { Lock, LockOpen, Plus, X } from 'lucide-vue-next'
 
@@ -30,7 +30,7 @@ import { Lock, LockOpen, Plus, X } from 'lucide-vue-next'
 defineOptions({ inheritAttrs: false })
 const props = defineProps<{ pen: Pen }>()
 const {
-  doc, view, status, selection, selectedSegments, cleanup, availableConstraints, ruleItems, runAction, checkRuleItem,
+  doc, view, status, selection, selectedSegments, cleanup, docRevision, availableConstraints, ruleItems, runAction, checkRuleItem,
   setHighlight, removeConstraintById, setPointXY, setLineLength, setLineAngle,
   setArcRadiusValue, setArcLength, setArcSweep, toggleArcRadiusLock, setCircleRadius, toggleCircleRadiusLock,
 } = props.pen
@@ -38,18 +38,37 @@ const {
 /** How long the pointer rests on a + item before its full check runs. */
 const CHECK_REST_MS = 120
 
-const header = computed(() => selectionLabel(doc.value, selection.value, selectedSegments.value))
+// The heading, names and rules don't depend on where points sit, only on
+// the drawing's make-up — so they are read from the RAW doc (walking a big
+// drawing through Vue's reactive proxies costs ~100× more), re-read whenever
+// this revision key changes: the pen's history revision (every commit, undo,
+// redo), a new doc object, or a piece or rule added or removed outside it.
+// A live drag (positions only, no commit) doesn't re-read them.
+const revision = computed(() => {
+  const d = doc.value
+  return `${docRevision.value}:${d.entities.length}:${d.constraints.length}`
+})
+// the raw doc and one piece index for it, per revision (the object identity
+// changes with doc.value, which this computed tracks)
+const rawDoc = computed(() => { void revision.value; return { doc: toRaw(doc.value) } })
+const ix = computed(() => pieceIndex(rawDoc.value.doc))
+const selKey = computed(() => `${selection.value.join(',')}|${selectedSegments.value.map(s => `${s.pathId}:${s.segIndex}`).join(',')}`)
+const header = computed(() => { void selKey.value; return selectionLabel(rawDoc.value.doc, toRaw(selection.value), toRaw(selectedSegments.value), ix.value) })
 const picked = computed(() => selection.value.length > 0 || selectedSegments.value.length > 0)
 const target = computed(() => sizeTargetFor(doc.value, selection.value, selectedSegments.value))
 const sizes = computed(() => (target.value ? measureSizes(doc.value, target.value, view.value) : null))
-const names = computed(() => pieceNames(doc.value))
-const rules = computed(() => rulesForSelection(doc.value, selection.value, selectedSegments.value)
-  .map(c => ({ c, label: ruleLabel(doc.value, c, names.value), pieces: rulePieces(doc.value, c) })))
+const names = computed(() => pieceNames(rawDoc.value.doc, ix.value))
+const rules = computed(() => {
+  void selKey.value
+  const d = rawDoc.value.doc, x = ix.value, n = names.value
+  return rulesForSelection(d, toRaw(selection.value), toRaw(selectedSegments.value), x)
+    .map(c => ({ c, label: ruleLabel(d, c, n, x), pieces: rulePieces(d, c, x) }))
+})
 
 // ── the rules list's hover highlight: cleared on mouse-leave, and when the
 // hovered row goes away (removed, undone) without a mouse-leave ──
 const hoveredRule = ref<string | null>(null)
-function enterRule(r: { c: { id: string }; pieces: ReturnType<typeof rulePieces> }) { hoveredRule.value = r.c.id; setHighlight(r.pieces) }
+function enterRule(r: { c: { id: string }; pieces: PieceRef[] }) { hoveredRule.value = r.c.id; setHighlight(r.pieces) }
 function leaveRule() { hoveredRule.value = null; setHighlight([]) }
 watch(rules, (rs) => { if (hoveredRule.value && !rs.some(r => r.c.id === hoveredRule.value)) leaveRule() })
 function remove(id: string) { leaveRule(); removeConstraintById(id) }
@@ -59,7 +78,7 @@ const canAdd = computed(() => picked.value && availableConstraints().length > 0)
 const adding = ref(false)
 const addable = computed<PenMenuItem[]>(() => (adding.value ? ruleItems() : []))
 // full-check verdicts of this list, by item id; forgotten whenever the list,
-// the selection or the drawing's make-up changes
+// the selection or the drawing changes (the revision key, or a new doc)
 const checked = ref(new Map<string, ActionState>())
 let restTimer: ReturnType<typeof setTimeout> | null = null
 function stopRest() { if (restTimer) clearTimeout(restTimer); restTimer = null }
@@ -81,10 +100,12 @@ function add(it: PenMenuItem) {
   stopRest()
   const s = it.state.ok ? fullCheck(it.id) : it.state
   if (!s.ok) { status.value = s.reason; return }   // greyed, says why; nothing added
-  if (runAction(it.id)) adding.value = false
+  // the verdict is fresh (forgotten on any drawing change), so the pick
+  // doesn't trial-solve a second time
+  if (runAction(it.id, null, { prechecked: s.ok && checked.value.has(it.id) })) adding.value = false
 }
 watch(adding, forget)
-watch(() => [doc.value.entities.length, doc.value.constraints.length], forget)
+watch(rawDoc, forget)
 watch([selection, selectedSegments], () => { adding.value = false; forget(); leaveRule() }, { deep: true })
 onBeforeUnmount(() => { stopRest(); setHighlight([]) })
 
