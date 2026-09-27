@@ -64,6 +64,7 @@ import type { SpaceTypeState } from '~/lib/spacetype/state'
 import { useNodeSearch } from '~/composables/useNodeSearch'
 import { useNodeClipboard } from '~/composables/useNodeClipboard'
 import { buildTake, appendTake, refreshTakeDisplay, takeHasContent, tagTakeFromRunMeta } from '~/composables/useTakes'
+import { shotStudioForTake, castToScore, takeVideoUrl, scoreTakeFrames, withFaceScores } from '~/lib/shotdirector/takeScores'
 import type { Take } from '~/composables/useTakes'
 import { displaySnapshot, holdOnLanding, showOnData, type DisplaySnapshot, type TakesHold } from '~/lib/prompt/takesSession'
 import { revealDelta } from '~/lib/canvas/revealPan'
@@ -244,6 +245,7 @@ function applyPendingTakesForDisplayedCanvas() {
       const prevActive = target.data?.activeTakeId ?? null
       target.data = appendTake({ ...target.data }, tagged)
       holdClosedTakes(target, tagged, prevActive)
+      scoreShotTakeInBackground(String(target.id), tagged)
     }
   }
 }
@@ -3106,6 +3108,47 @@ function takeFromExecutedEvent(event: MessageEvent): any | null {
   return takeHasContent(take) ? take : null
 }
 
+// Shot Director: a video take on the card after a studio's film node is
+// scored against the cast's faces, in the background. Never awaited and never
+// throws into the take append; failures leave the take unscored. Keyed by
+// the output files so a same-run re-emission (appendTake replaces it in place
+// under a fresh id) is not scored twice.
+const shotTakesScored = new Set<string>()
+function scoreShotTakeInBackground(nodeId: string, take: any) {
+  try {
+    if (!take || take.faceScores) return
+    const videoUrl = takeVideoUrl(take)
+    if (!videoUrl) return
+    const studio = shotStudioForTake(nodes.value as any[], edges.value as any[], nodeId)
+    if (!studio) return
+    const cast = castToScore(studio.data)
+    if (!cast.length) return
+    const key = `${nodeId}|${take.sig || videoUrl.replace(/[?&]t=\d+/, '')}`
+    if (shotTakesScored.has(key)) return
+    shotTakesScored.add(key)
+    const takeId = String(take.id)
+    void scoreTakeFrames(videoUrl, cast, {
+      sample: async (url) => (await import('~/lib/shotdirector/takeFrames')).sampleTakeFrames(url),
+      post: async (body) => {
+        const res = await fetch('/api/characters-local/take-check', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        })
+        return { status: res.status, body: await res.json().catch(() => null) }
+      },
+    }).then((scores) => {
+      if (!scores.length) return
+      const card = (nodes.value as any[]).find((n: any) => String(n.id) === nodeId)
+      if (!card?.data) return
+      const next = withFaceScores(card.data, takeId, scores)
+      if (next !== card.data) card.data = next
+    }).catch((err) => console.warn('[shot-director] take face scores failed', err))
+  } catch (err) {
+    console.warn('[shot-director] take face scores failed', err)
+  }
+}
+
 // Listen for execution progress on the window pipe (the layout re-posts
 // direct-execution WS events here in the 'sailor-bridge' envelope).
 function handleBridgeMessage(event: MessageEvent) {
@@ -3380,6 +3423,7 @@ function handleBridgeMessage(event: MessageEvent) {
           const prevActive = target.data?.activeTakeId ?? null
           target.data = appendTake({ ...target.data }, tagged)
           holdClosedTakes(target, tagged, prevActive)
+          scoreShotTakeInBackground(String(target.id), tagged)
           // Prompt-bar sketch pad: the transient hidden pad's batch lands in the
           // ONE pile node (replacing the optimistic skeleton pile), not 4 anchor
           // cards. Routed by the pad's properties.sketchPad marker (id-agnostic —
@@ -8834,6 +8878,7 @@ defineExpose({
         v-if="shotDirectorOpenForId"
         :node-id="shotDirectorOpenForId"
         :nodes="nodes as any[]"
+        :edges="edges as any[]"
         @close="shotDirectorOpenForId = null"
       />
     </Teleport>

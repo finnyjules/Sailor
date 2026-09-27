@@ -21,8 +21,9 @@ import CharacterPickerModal from '~/components/vue-canvas/CharacterPickerModal.v
 import ShotViewfinder from '~/components/vue-canvas/ShotViewfinder.vue'
 import ShotCameraPicker from '~/components/vue-canvas/ShotCameraPicker.vue'
 import { emitCharacterEvent } from '~/lib/characters/bus'
+import { latestShotTakeScores, faceScoreChip } from '~/lib/shotdirector/takeScores'
 
-const props = defineProps<{ nodeId: string; nodes: any[] }>()
+const props = defineProps<{ nodeId: string; nodes: any[]; edges?: any[] }>()
 const emit = defineEmits<{ (e: 'close'): void }>()
 
 const node = computed(() => props.nodes.find(n => String(n.id) === String(props.nodeId)))
@@ -126,6 +127,11 @@ function onNewTake() {
   rerollSeed()
   onGenerate()
 }
+
+/** The latest take's face scores, one chip per cast member. */
+const takeScoreChips = computed(() =>
+  latestShotTakeScores(props.nodes, props.edges ?? [], props.nodeId).map(s => ({ key: s.slug, ...faceScoreChip(s) })),
+)
 
 // ── Copy actions ──────────────────────────────────────────────────────────────
 const copiedPrompt = ref(false)
@@ -1188,6 +1194,12 @@ function patchDialogue(i: number, patch: { speaker?: string; line?: string }) {
       <div class="flex shrink-0 items-center gap-2 border-t border-white/[0.06] px-4 py-2.5">
         <span class="text-[10px] text-white/25">Failed runs aren't charged.</span>
         <span class="flex-1" />
+        <span
+          v-for="c in takeScoreChips" :key="c.key"
+          class="rounded-full border px-2 py-0.5 text-[11px] tabular-nums"
+          :class="c.tone === 'amber' ? 'border-amber-400/30 bg-amber-400/10 text-amber-300/90' : 'border-white/10 bg-white/[0.05] text-white/70'"
+          :title="c.tip"
+        >{{ c.text }}</span>
         <button
           type="button"
           class="rounded bg-white/[0.06] px-2.5 py-1.5 text-[12px] text-white/70 transition hover:bg-white/10 disabled:opacity-40 disabled:cursor-not-allowed"
