@@ -18,13 +18,13 @@ import { IMAGE_OUTPUT_CLASSES, LOCAL_RENDER_TYPES, PICTURE_OUTPUTS, PROVIDER_TYP
 import { RUNNER_OUTPUT_CLASSES, runnerTakesWorkflow } from '#shared/runner/validate'
 import { needsEngineDescription, needsEngineReasons, nodesNeedingEngine } from '#shared/runner/needsEngine'
 import {
-  SHADER_ASPECTS, SHADER_CATALOG_VERSION, SHADER_EFFECT_IDS, SHADER_GENERATIVE_IDS, SHADER_LEGACY_EFFECT_IDS, SHADER_NEEDS_PICTURE_FIRST,
+  SHADER_ASPECTS, SHADER_CATALOG_VERSION, bakedFileHash, shaderSeedUniform, SHADER_EFFECT_IDS, SHADER_GENERATIVE_IDS, SHADER_LEGACY_EFFECT_IDS, SHADER_NEEDS_PICTURE_FIRST,
   aspectSize, canonicalJson, framePlan, parseShaderBaked, sha256HexSync, shaderBakeKey, shaderBakeKeySync, shaderBakeKeyText, shaderBakedText,
 } from '#shared/runner/shaderBakeKey'
 import { EFFECT_PICTURE_ANIMATED } from '#shared/runner/effects'
 import { collectInputFiles } from '~~/server/runner/inputs'
 import { pictureSourceOf } from '~~/server/runner/compositor/plan'
-import { SHADER_BAKE_UNREADABLE, SHADER_BAKE_WRONG_SIZE, bakedPngSize } from '~~/server/runner/cards/shaderEffect'
+import { SHADER_BAKE_CHANGED, SHADER_BAKE_UNREADABLE, SHADER_BAKE_WRONG_SIZE, bakedPngSize } from '~~/server/runner/cards/shaderEffect'
 import type { RunnerValue } from '~~/server/runner/types'
 
 interface ShaderFixture {
@@ -38,6 +38,7 @@ interface ShaderFixture {
   aspect_sizes: { resolution: number; aspect: string; size: [number, number] }[]
   frame_plans: { batch: number; time: number; duration: number; fps: number; frames: number; plan: [number, number][] }[]
   raises: { name: string; error: string | null }[]
+  seeds: [number, number][]
 }
 const FX = JSON.parse(readFileSync(resolve(__dirname, 'fixtures/runner-effects-shader.json'), 'utf8')) as ShaderFixture
 
@@ -68,12 +69,19 @@ const shaderInputs = (over: Record<string, unknown> = {}) => ({ effect: 'halfton
 /** A Shader effect node, baked as the browser bakes it (the key over the prompt as it will be sent). */
 function baked(prompt: ApiPrompt, id: string, files: string[], sources: string[]): ApiPrompt {
   const inputs = prompt[id]!.inputs
-  inputs.sailor_baked = shaderBakedText(files, shaderBakeKeySync(inputs, sources, SHADER_CATALOG_VERSION))
+  inputs.sailor_baked = shaderBakedText(files, shaderBakeKeySync(inputs, sources, SHADER_CATALOG_VERSION, files))
   return prompt
 }
 
 /** Image card 'src.png' → a baked Shader effect → Save image. */
-function cardShader(over: Record<string, unknown> = {}, bake = 'bake.png'): ApiPrompt {
+/** A bake's name for these bytes, as the browser names it: the first 32 hex of their sha256. */
+const bakeNameOf = (bytes: Uint8Array) => `shader_bake_${createHash('sha256').update(bytes).digest('hex').slice(0, 32)}.png`
+/** A well-formed bake name for eligibility alone (no bytes behind it). */
+const FAKE_BAKE = `shader_bake_${'0'.repeat(32)}.png`
+/** The bake the engine tests put in input (setUp sets it). */
+let BAKE = FAKE_BAKE
+
+function cardShader(over: Record<string, unknown> = {}, bake = BAKE): ApiPrompt {
   const p: ApiPrompt = { 0: card('src.png'), fx: { class_type: 'ShaderEffect', inputs: { image: ['0', 0], ...shaderInputs(over) } }, s: saveImage(['fx', 0]) }
   return baked(p, 'fx', [bake], ['src.png'])
 }
@@ -154,6 +162,11 @@ describe('the pure half agrees with Python', () => {
     }
   })
 
+  it('u_seed is Python\'s int(seed) % 10000 (whole, fractional and negative seeds)', () => {
+    expect(FX.seeds.length).toBeGreaterThanOrEqual(10)
+    for (const [seed, want] of FX.seeds) expect(shaderSeedUniform(seed), String(seed)).toBe(want)
+  })
+
   it('records the node\'s raises before any render (the runner never takes these: engine eligibility)', () => {
     const errors = Object.fromEntries(FX.raises.map(r => [r.name, r.error]))
     expect(errors['unknown effect']).toMatch(/unknown effect/)
@@ -179,18 +192,21 @@ describe('the key', () => {
 
   it('shaderBakeKey (Web Crypto, as the browser) equals the server\'s synchronous key and node crypto', async () => {
     const inputs = shaderInputs({ params: '{"u_amount":0.25}', time: 1.5, seed: 12345 })
-    const text = shaderBakeKeyText(inputs, ['a.png [input]'], 1)
-    expect(JSON.parse(text)).toEqual({ ...inputs, source: ['a.png [input]'], catalogVersion: 1 })
+    const F = [FAKE_BAKE]
+    const text = shaderBakeKeyText(inputs, ['a.png [input]'], 1, F)
+    expect(JSON.parse(text)).toEqual({ ...inputs, source: ['a.png [input]'], catalogVersion: 1, files: F })
     const node = createHash('sha256').update(text, 'utf8').digest('hex')
-    expect(await shaderBakeKey(inputs, ['a.png [input]'], 1)).toBe(node)
-    expect(shaderBakeKeySync(inputs, ['a.png [input]'], 1)).toBe(node)
+    expect(await shaderBakeKey(inputs, ['a.png [input]'], 1, F)).toBe(node)
+    expect(shaderBakeKeySync(inputs, ['a.png [input]'], 1, F)).toBe(node)
     // Key order in the inputs does not matter; every keyed setting does.
-    expect(shaderBakeKeySync(Object.fromEntries(Object.entries(inputs).reverse()), ['a.png [input]'], 1)).toBe(node)
+    expect(shaderBakeKeySync(Object.fromEntries(Object.entries(inputs).reverse()), ['a.png [input]'], 1, F)).toBe(node)
     for (const k of ['effect', 'params', 'time', 'duration', 'fps', 'seed', 'resolution', 'aspect']) {
-      expect(shaderBakeKeySync({ ...inputs, [k]: 7 }, ['a.png [input]'], 1), k).not.toBe(node)
+      expect(shaderBakeKeySync({ ...inputs, [k]: 7 }, ['a.png [input]'], 1, F), k).not.toBe(node)
     }
-    expect(shaderBakeKeySync(inputs, ['b.png [input]'], 1)).not.toBe(node)
-    expect(shaderBakeKeySync(inputs, ['a.png [input]'], 2)).not.toBe(node)
+    expect(shaderBakeKeySync(inputs, ['b.png [input]'], 1, F)).not.toBe(node)
+    expect(shaderBakeKeySync(inputs, ['a.png [input]'], 2, F)).not.toBe(node)
+    // The baked files are in the key: another bake's files under this key are not replayed.
+    expect(shaderBakeKeySync(inputs, ['a.png [input]'], 1, [`shader_bake_${'1'.repeat(32)}.png`])).not.toBe(node)
   })
 
   it('parseShaderBaked reads only { files: [text…], key: 64 hex }', () => {
@@ -213,16 +229,16 @@ describe('eligibility (shader-bake and cards on)', () => {
     expect(nodesNeedingEngine(p, { runnerOn: true, families: SHADER, titleOf: id => id })).toEqual([])
     // Through a Gate and an Image card fed by a wire; a LoadImage's picture; a legacy effect name.
     const q: ApiPrompt = { 0: card('src.png'), g: { class_type: 'ComfyGateNode', inputs: { data_in: ['0', 0], bypass: true } }, c: outCard('g'), fx: { class_type: 'ShaderEffect', inputs: { image: ['c', 0], ...shaderInputs({ effect: 'filament' }) } }, s: saveImage(['fx', 0]) }
-    expect(runnerTakesNode(baked(q, 'fx', ['b.png'], ['src.png']), 'fx', SHADER)).toBe(true)
+    expect(runnerTakesNode(baked(q, 'fx', [FAKE_BAKE], ['src.png']), 'fx', SHADER)).toBe(true)
     const l: ApiPrompt = { 0: { class_type: 'LoadImage', inputs: { image: 'sub/l.png [input]' } }, fx: { class_type: 'ShaderEffect', inputs: { image: ['0', 0], ...shaderInputs() } }, s: saveImage(['fx', 0]) }
-    expect(runnerTakesNode(baked(l, 'fx', ['b.png'], ['sub/l.png [input]']), 'fx', SHADER)).toBe(true)
+    expect(runnerTakesNode(baked(l, 'fx', [FAKE_BAKE], ['sub/l.png [input]']), 'fx', SHADER)).toBe(true)
   })
 
   it('a generative effect with no picture is taken; a still effect with no picture is left to the engine (Python raises)', () => {
     const gen: ApiPrompt = { fx: { class_type: 'ShaderEffect', inputs: shaderInputs({ effect: 'aurora' }) }, s: saveImage(['fx', 0]) }
-    expect(runnerTakesNode(baked(gen, 'fx', ['b.png'], []), 'fx', SHADER)).toBe(true)
+    expect(runnerTakesNode(baked(gen, 'fx', [FAKE_BAKE], []), 'fx', SHADER)).toBe(true)
     const still: ApiPrompt = { fx: { class_type: 'ShaderEffect', inputs: shaderInputs({ effect: 'halftone' }) }, s: saveImage(['fx', 0]) }
-    expect(runnerTakesNode(baked(still, 'fx', ['b.png'], []), 'fx', SHADER)).toBe(false)
+    expect(runnerTakesNode(baked(still, 'fx', [FAKE_BAKE], []), 'fx', SHADER)).toBe(false)
   })
 
   it('a key mismatch, or no sailor_baked, leaves the node to the engine', () => {
@@ -238,11 +254,28 @@ describe('eligibility (shader-bake and cards on)', () => {
     expect(runnerTakesNode(none, 'fx', SHADER)).toBe(false)
     expect(isRunnerEligible(none, SHADER)).toBe(false)
     const handMade = cardShader()
-    handMade.fx!.inputs.sailor_baked = shaderBakedText(['bake.png'], 'f'.repeat(64))
+    handMade.fx!.inputs.sailor_baked = shaderBakedText([FAKE_BAKE], 'f'.repeat(64))
     expect(runnerTakesNode(handMade, 'fx', SHADER)).toBe(false)
     const twoFrames = cardShader()
-    twoFrames.fx!.inputs.sailor_baked = shaderBakedText(['a.png', 'b.png'], shaderBakeKeySync(twoFrames.fx!.inputs, ['src.png'], SHADER_CATALOG_VERSION))
+    const two = [FAKE_BAKE, `shader_bake_${'1'.repeat(32)}.png`]
+    twoFrames.fx!.inputs.sailor_baked = shaderBakedText(two, shaderBakeKeySync(twoFrames.fx!.inputs, ['src.png'], SHADER_CATALOG_VERSION, two))
     expect(runnerTakesNode(twoFrames, 'fx', SHADER)).toBe(false)
+    // Another bake's files swapped in under the old key.
+    const swapped = cardShader()
+    swapped.fx!.inputs.sailor_baked = shaderBakedText([`shader_bake_${'2'.repeat(32)}.png`], parseShaderBaked(swapped.fx!.inputs.sailor_baked)!.key)
+    expect(runnerTakesNode(swapped, 'fx', SHADER)).toBe(false)
+  })
+
+  it('a baked name that isn\'t one of the bake\'s own input files is left to the engine at eligibility, key or not', () => {
+    for (const name of ['../../etc/passwd', `../shader_bake_${'0'.repeat(32)}.png`, `sub//shader_bake_${'0'.repeat(32)}.png`, `shader_bake_${'0'.repeat(32)}.png [output]`, `shader_bake_${'0'.repeat(32)}.png [temp]`, 'bake.png', `shader_bake_${'A'.repeat(32)}.png`, `shader_bake_${'0'.repeat(31)}.png`]) {
+      const p = cardShader({}, name)
+      expect(runnerTakesNode(p, 'fx', SHADER), name).toBe(false)
+      expect(nodesNeedingEngine(p, { runnerOn: true, families: SHADER, titleOf: id => id }), name).toEqual(['fx'])
+    }
+    for (const name of [`u_1/shader_bake_${'0'.repeat(32)}.png`, `shader_bake_${'0'.repeat(32)}.png [input]`]) {
+      expect(bakedFileHash(name), name).toBe('0'.repeat(32))
+      expect(runnerTakesNode(cardShader({}, name), 'fx', SHADER), name).toBe(true)
+    }
   })
 
   it('an animated still (a duration), an effect the runner doesn\'t know, or a wired setting stays on the engine', () => {
@@ -258,13 +291,14 @@ describe('eligibility (shader-bake and cards on)', () => {
       fx: { class_type: 'ShaderEffect', inputs: { image: ['g', 0], ...shaderInputs() } },
       s: saveImage(['fx', 0]),
     }
-    baked(p, 'fx', ['b.png'], [])
+    baked(p, 'fx', [FAKE_BAKE], [])
     expect(runnerTakesNode(p, 'fx', SHADER)).toBe(false)
     const titleOf = (id: string) => (id === 'fx' ? 'Shader effect' : id)
     expect(nodesNeedingEngine(p, { runnerOn: true, families: SHADER, titleOf })).toEqual(['Shader effect'])
     const reasons = needsEngineReasons(p, { runnerOn: true, families: SHADER })
     expect(reasons).toEqual([SHADER_NEEDS_PICTURE_FIRST])
-    expect(needsEngineDescription(['Shader effect'], reasons)).toBe(`Only the engine can run “Shader effect”. ${SHADER_NEEDS_PICTURE_FIRST}.`)
+    expect(SHADER_NEEDS_PICTURE_FIRST).toBe('This shader needs its picture before the run. Put the picture in an Image card first.')
+    expect(needsEngineDescription(['Shader effect'], reasons)).toBe(`Only the engine can run “Shader effect”. ${SHADER_NEEDS_PICTURE_FIRST}`)
     // With the family off, no reason: nothing of the runner's is said about it.
     expect(needsEngineReasons(p, { runnerOn: true, families: new Set(['cards']) })).toEqual([])
     expect(needsEngineReasons(p, { runnerOn: false, families: SHADER })).toEqual([])
@@ -345,7 +379,7 @@ describe('with shader-bake off, a Shader effect is exactly an unknown class (as 
             }
             out[fx] = { class_type: 'ShaderEffect', inputs: { image: [id, slot], ...shaderInputs() } }
             const src = n.class_type === 'Image' && typeof n.inputs.image === 'string' && n.inputs.image && !Array.isArray(n.inputs.images) ? [n.inputs.image] : []
-            baked(out, fx, ['b.png'], src)
+            baked(out, fx, [FAKE_BAKE], src)
             count++
           }
         }
@@ -370,7 +404,9 @@ describe('the runner replays the bake (the engine, cards and shader-bake on)', (
   async function setUp(o: { hosted?: boolean; families?: ReadonlySet<RunnerFamily>; bakeW?: number; bakeBytes?: Uint8Array } = {}) {
     const k = makeKit({ hosted: !!o.hosted, deps: { families: () => o.families ?? SHADER } })
     put(k.root, 'src.png', await png(pixels(W, H, 3, 3), W, H, 3))
-    put(k.root, 'bake.png', o.bakeBytes ?? await png(o.bakeW ? pixels(o.bakeW, H, 4, 7) : bakeRgba, o.bakeW ?? W, H, 4))
+    const bytes = o.bakeBytes ?? await png(o.bakeW ? pixels(o.bakeW, H, 4, 7) : bakeRgba, o.bakeW ?? W, H, 4)
+    BAKE = bakeNameOf(bytes)
+    put(k.root, BAKE, bytes)
     return k
   }
 
@@ -416,8 +452,9 @@ describe('the runner replays the bake (the engine, cards and shader-bake on)', (
     expect(Buffer.compare(Buffer.from(saved.px), Buffer.from(rgb))).toBe(0)
 
     const { w, h } = aspectSize(256, '16:9')
-    put(k.root, 'gen.png', await png(pixels(w, h, 4, 5), w, h, 4))
-    const gen = baked({ fx: { class_type: 'ShaderEffect', inputs: shaderInputs({ effect: 'aurora', resolution: 256, aspect: '16:9' }) }, s: saveImage(['fx', 0]) }, 'fx', ['gen.png'], [])
+    const genBytes = await png(pixels(w, h, 4, 5), w, h, 4)
+    put(k.root, bakeNameOf(genBytes), genBytes)
+    const gen = baked({ fx: { class_type: 'ShaderEffect', inputs: shaderInputs({ effect: 'aurora', resolution: 256, aspect: '16:9' }) }, s: saveImage(['fx', 0]) }, 'fx', [bakeNameOf(genBytes)], [])
     const r2 = await k.engine.startRun({ userId: k.userId, takes: [gen], ...START })
     await k.engine.settled(r2.runId)
     expect((await k.store.get(r2.runId))!.status).toBe('done')
@@ -440,10 +477,20 @@ describe('the runner replays the bake (the engine, cards and shader-bake on)', (
     expect(bakedPngSize(new Uint8Array(jpeg))).toBeNull()
     expect(bakedPngSize(new Uint8Array(deep))).toBeNull()
     expect(bakedPngSize(await png(bakeRgba, W, H, 4))).toEqual({ w: W, h: H })
-    put(k.root, 'grey.png', new Uint8Array(grey))
-    const r2 = await k.engine.startRun({ userId: k.userId, takes: [cardShader({}, 'grey.png')], ...START })
+    put(k.root, bakeNameOf(new Uint8Array(grey)), new Uint8Array(grey))
+    const r2 = await k.engine.startRun({ userId: k.userId, takes: [cardShader({}, bakeNameOf(new Uint8Array(grey)))], ...START })
     await k.engine.settled(r2.runId)
     expect((await k.store.get(r2.runId))!.takes[0]!.nodes.fx!.error).toBe(SHADER_BAKE_UNREADABLE)
+    // Bytes that aren't the ones the name hashes (overwritten after the bake) are not replayed.
+    put(k.root, BAKE, await png(pixels(W, H, 4, 99), W, H, 4))
+    const r3 = await k.engine.startRun({ userId: k.userId, takes: [cardShader()], ...START })
+    await k.engine.settled(r3.runId)
+    expect((await k.store.get(r3.runId))!.takes[0]!.nodes.fx!.error).toBe(SHADER_BAKE_CHANGED)
+    // IHDR must be the first chunk: IHDR-like bytes in another first chunk are refused from the header.
+    const good = await png(bakeRgba, W, H, 4)
+    const fake = new Uint8Array(good)
+    fake.set([0x74, 0x45, 0x58, 0x74], 12) // IHDR → tEXt
+    expect(bakedPngSize(fake)).toBeNull()
   })
 
   it('a key mismatch is refused by the server as not the runner\'s (the browser then runs it on the engine)', async () => {
@@ -457,19 +504,25 @@ describe('the runner replays the bake (the engine, cards and shader-bake on)', (
   it('a baked file owned by someone else is refused 403 before the hold (hosted)', async () => {
     const k = await setUp({ hosted: true })
     const owned: string[] = []
-    k.deps.ownership.ownsInput = async (_u, f) => { owned.push(f.filename); return f.filename !== 'bake.png' }
-    expect(collectInputFiles(cardShader()).map(f => f.filename)).toEqual(['src.png', 'bake.png'])
+    k.deps.ownership.ownsInput = async (_u, f) => { owned.push(f.filename); return f.filename !== BAKE }
+    expect(collectInputFiles(cardShader()).map(f => f.filename)).toEqual(['src.png', BAKE])
     await expect(k.engine.startRun({ userId: k.userId, takes: [cardShader()], ...START })).rejects.toMatchObject({ message: 'This workflow uses a file that isn’t one of yours', statusCode: 403 })
-    expect(owned).toContain('bake.png')
+    expect(owned).toContain(BAKE)
     expect(k.ledger.holds.size).toBe(0)
   })
 
-  it('an animated source picture is refused at the start of the take, before any hold', async () => {
+  it('an animated source is not refused at the start of the take (the browser leaves it unbaked, to the engine); a hand-made bake of one fails plainly at its turn', async () => {
     const k = await setUp()
     const gif = await sharp(pixels(W, H * 2, 3, 9), { raw: { width: W, height: H * 2, channels: 3, pageHeight: H } as never }).gif().toBuffer()
     put(k.root, 'src.png', new Uint8Array(gif))
-    await expect(k.engine.startRun({ userId: k.userId, takes: [cardShader()], ...START })).rejects.toThrow(EFFECT_PICTURE_ANIMATED)
-    expect(k.ledger.holds.size).toBe(0)
+    const { runId } = await k.engine.startRun({ userId: k.userId, takes: [cardShader()], ...START })
+    await k.engine.settled(runId)
+    expect((await k.store.get(runId))!.takes[0]!.nodes.fx!.error).toBe(EFFECT_PICTURE_ANIMATED)
+    // Unbaked (as the browser leaves it), it is simply the engine's: named, with no refusal and no reason.
+    const unbaked = cardShader()
+    delete unbaked.fx!.inputs.sailor_baked
+    expect(nodesNeedingEngine(unbaked, { runnerOn: true, families: SHADER, titleOf: id => id })).toEqual(['fx'])
+    expect(needsEngineReasons(unbaked, { runnerOn: true, families: SHADER })).toEqual([])
   })
 
   it('a Shader effect feeding Edit an image hands off its kept PNG', async () => {

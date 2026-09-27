@@ -102,7 +102,7 @@ export function needsEngineDescription(titles: string[], reasons: readonly strin
   const list = quoted.length <= 1
     ? (quoted[0] ?? 'this workflow')
     : `${quoted.slice(0, -1).join(', ')} and ${quoted[quoted.length - 1]}`
-  return [`Only the engine can run ${list}.`, ...reasons.map(r => `${r}.`)].join(' ')
+  return [`Only the engine can run ${list}.`, ...reasons.map(r => (/[.!?]$/.test(r) ? r : `${r}.`))].join(' ')
 }
 
 /**

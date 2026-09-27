@@ -18,7 +18,10 @@ import { SHADER_CATALOG_VERSION, aspectSize, parseShaderBaked, shaderBakeKeySync
 import { catalogPayload } from '~~/server/native/shaderCatalog'
 import { planNode, type DeriveIO, type NodePlan } from '~~/server/runner/executors'
 import type { OutputFile, RunnerValue } from '~~/server/runner/types'
-import { bakeShaderEffects, bakeUniforms, paramsPortable, shaderBakeKey, viewUrlOf, type ShaderBakeContext } from '~/lib/runner/shaderBake'
+import {
+  bakeShaderEffects, bakeShaderTakes, bakeUniforms, paramsPortable, pictureIsAnimated, shaderBakeKey, takeWantsShaderBake, viewUrlOf,
+  type ShaderBakeContext, type ShaderBakeRunContext,
+} from '~/lib/runner/shaderBake'
 import { parseParams, resolveUniforms } from '~/lib/shaderfx/params'
 import type { ShaderPass } from '~/lib/shaderfx/renderer'
 import type { EffectDef, ShaderFxCatalog } from '~/lib/shaderfx/types'
@@ -80,6 +83,8 @@ describe('the browser\'s uniform builder is Python\'s to_uniforms(resolve_params
     const u = bakeUniforms(ascii, '{}', { time: 1.25, seed: 123_456, hasInput: true })
     for (const [k, v] of Object.entries(ascii.textures[0]!.extraUniforms ?? {})) expect(u[k], k).toBe(v)
     expect([u.u_time, u.u_seed, u.u_hasInput]).toEqual([1.25, 3456, 1])
+    // int(seed) first, as Python: 5.5 renders as 5.
+    expect(bakeUniforms(ascii, '{}', { time: 0, seed: 5.5, hasInput: true }).u_seed).toBe(5)
     expect(bakeUniforms(defOf('aurora'), '{}', { time: 0, seed: 42, hasInput: false }).u_hasInput).toBe(0)
   })
 })
@@ -98,7 +103,7 @@ function pixels(n: number, seed: number): Uint8Array {
 }
 
 /** A fake page: the renderer records what it is asked; readPixels gives pixels made from the size (alpha not 255). */
-function fakePage(o: { failRender?: (passes: ShaderPass[]) => boolean } = {}) {
+function fakePage(o: { failRender?: (passes: ShaderPass[]) => boolean; animated?: boolean; clamp?: boolean } = {}) {
   const renders: { passes: ShaderPass[]; base: unknown; w: number; h: number }[] = []
   const uploads: { bytes: Uint8Array; name: string }[] = []
   const read: Uint8Array[] = []
@@ -113,10 +118,12 @@ function fakePage(o: { failRender?: (passes: ShaderPass[]) => boolean } = {}) {
       },
     },
     async upload(bytes, name) { uploads.push({ bytes, name }); return `u_x/${name}` },
-    async sourceFile(file) { sources.push(file); return { image: { src: file } as unknown as TexImageSource, width: 23, height: 19 } },
+    async sourceFile(file) { sources.push(file); return { image: { src: file } as unknown as TexImageSource, width: 23, height: 19, ...(o.animated ? { animated: true } : {}) } },
     async texture(_def, t) { return { texture: t.file } as unknown as TexImageSource },
     blank(w, h) { return { blank: [w, h] } as unknown as TexImageSource },
-    readPixels(_canvas, w, h) { const px = pixels(w * h * 4, w * 31 + h); read.push(px.slice()); return px },
+    readPixels(_canvas, w, h) {
+      if (o.clamp) throw new Error('The picture is too large for this browser to render the shader')
+      const px = pixels(w * h * 4, w * 31 + h); read.push(px.slice()); return px },
     async encodePng(rgba, w, h) { return new Uint8Array(await sharp(rgba, { raw: { width: w, height: h, channels: 4 } }).png().toBuffer()) },
   }
   return { ctx, renders, uploads, read, sources }
@@ -149,8 +156,8 @@ describe('bakeShaderEffects (a fake renderer and upload)', () => {
     // sailor_baked: the stored name, and the key the runner works out from the prompt as sent.
     const baked = parseShaderBaked(p.fx!.inputs.sailor_baked)!
     expect(baked.files).toEqual([`u_x/${up.name}`])
-    expect(baked.key).toBe(await shaderBakeKey(p.fx!.inputs, ['pics/src.png [input]'], CATALOG.version))
-    expect(baked.key).toBe(shaderBakeKeySync(p.fx!.inputs, ['pics/src.png [input]'], SHADER_CATALOG_VERSION))
+    expect(baked.key).toBe(await shaderBakeKey(p.fx!.inputs, ['pics/src.png [input]'], CATALOG.version, baked.files))
+    expect(baked.key).toBe(shaderBakeKeySync(p.fx!.inputs, ['pics/src.png [input]'], SHADER_CATALOG_VERSION, baked.files))
     expect(runnerTakesNode(p, 'fx', SHADER)).toBe(true)
   })
 
@@ -248,6 +255,25 @@ describe('bakeShaderEffects (a fake renderer and upload)', () => {
     expect(made.ui).toEqual({ images: [{ filename: 'live_preview_fx_00001.png', subfolder: '', type: 'temp' }], animated: [false] })
   })
 
+  it('an animated source is not baked (no render, no upload, no failure): it goes to the engine, unrefused', async () => {
+    const page = fakePage({ animated: true })
+    const p: ApiPrompt = { 0: card('anim.gif'), fx: { class_type: 'ShaderEffect', inputs: { image: ['0', 0], ...shaderInputs() } }, s: saveImage(['fx', 0]) }
+    expect(await bakeShaderEffects(p, page.ctx)).toEqual({ baked: [], failed: [] })
+    expect(page.renders).toHaveLength(0)
+    expect(page.uploads).toHaveLength(0)
+    expect(p.fx!.inputs.sailor_baked).toBeUndefined()
+    expect(runnerTakesNode(p, 'fx', SHADER)).toBe(false)
+  })
+
+  it('a drawing buffer the browser clamped is not uploaded; the node goes to the engine', async () => {
+    const page = fakePage({ clamp: true })
+    const p: ApiPrompt = { 0: card('src.png'), fx: { class_type: 'ShaderEffect', inputs: { image: ['0', 0], ...shaderInputs() } } }
+    const r = await bakeShaderEffects(p, page.ctx)
+    expect(r.failed.map(f => f.nodeId)).toEqual(['fx'])
+    expect(page.uploads).toHaveLength(0)
+    expect(p.fx!.inputs.sailor_baked).toBeUndefined()
+  })
+
   it('viewUrlOf turns a card\'s widget text into its /view link', () => {
     expect(viewUrlOf('a.png')).toBe('/view?filename=a.png&subfolder=&type=input')
     expect(viewUrlOf('u_1/sub/a b.png [output]')).toBe('/view?filename=a+b.png&subfolder=u_1%2Fsub&type=output')
@@ -257,3 +283,70 @@ describe('bakeShaderEffects (a fake renderer and upload)', () => {
 // The EffectDef type is the catalog payload's: keep the fixture's catalog honest about it.
 const _typed: EffectDef[] = CATALOG.effects
 void _typed
+
+// ── A run's takes (fix round 1) ──────────────────────────────────────────────
+
+describe('bakeShaderTakes: only takes going to the runner, one context per run, released', () => {
+  const runnerTake = (): ApiPrompt => ({ 0: card('src.png'), fx: { class_type: 'ShaderEffect', inputs: { image: ['0', 0], ...shaderInputs() } }, s: saveImage(['fx', 0]) })
+  const engineTake = (): ApiPrompt => ({ ...runnerTake(), k: { class_type: 'KSampler', inputs: { seed: 0 } } })
+
+  function runContext(o: Parameters<typeof fakePage>[0] = {}) {
+    const page = fakePage(o)
+    let made = 0
+    let released = 0
+    const make = async (): Promise<ShaderBakeRunContext> => { made++; return { ...page.ctx, release: () => { released++ } } }
+    return { page, make, counts: () => ({ made, released }) }
+  }
+
+  it('a take going to the engine is not baked: no context, no render, no upload', async () => {
+    const run = runContext()
+    const p = engineTake()
+    expect(takeWantsShaderBake(p, SHADER)).toBe(false)
+    expect(await bakeShaderTakes([p, null], SHADER, run.make)).toEqual({ baked: [], failed: [] })
+    expect(run.counts()).toEqual({ made: 0, released: 0 })
+    expect(run.page.renders).toHaveLength(0)
+    expect(run.page.uploads).toHaveLength(0)
+    expect(p.fx!.inputs.sailor_baked).toBeUndefined()
+    // With the family off, not even a runner take is baked.
+    expect(takeWantsShaderBake(runnerTake(), new Set(['cards']))).toBe(false)
+  })
+
+  it('bakes only the takes going to the runner, with one context for the run, released once', async () => {
+    const run = runContext()
+    const a = runnerTake()
+    const b = engineTake()
+    const c = runnerTake()
+    c.fx!.inputs.seed = 7
+    const r = await bakeShaderTakes([a, b, c], SHADER, run.make)
+    expect(r.baked).toEqual(['fx', 'fx'])
+    expect(run.counts()).toEqual({ made: 1, released: 1 })
+    expect(a.fx!.inputs.sailor_baked).toBeDefined()
+    expect(b.fx!.inputs.sailor_baked).toBeUndefined()
+    expect(runnerTakesNode(a, 'fx', SHADER) && runnerTakesNode(c, 'fx', SHADER)).toBe(true)
+  })
+
+  it('the context is released when a render fails, and when making it fails nothing is left behind', async () => {
+    const run = runContext({ failRender: () => true })
+    const r = await bakeShaderTakes([runnerTake()], SHADER, run.make)
+    expect(r.failed).toHaveLength(1)
+    expect(run.counts()).toEqual({ made: 1, released: 1 })
+    const broken = await bakeShaderTakes([runnerTake()], SHADER, async () => { throw new Error('WebGL2 unavailable') })
+    expect(broken).toEqual({ baked: [], failed: [{ nodeId: 'fx', error: 'WebGL2 unavailable' }] })
+  })
+})
+
+describe('pictureIsAnimated (an animated source is left to the engine)', () => {
+  it('a GIF of two frames, an APNG and an animated WebP are animated; single frames are not', async () => {
+    const two = new Uint8Array(await sharp(pixels(8 * 16 * 3, 1), { raw: { width: 8, height: 16, channels: 3, pageHeight: 8 } as never }).gif().toBuffer())
+    const one = new Uint8Array(await sharp(pixels(8 * 8 * 3, 1), { raw: { width: 8, height: 8, channels: 3 } }).gif().toBuffer())
+    const webpAnim = new Uint8Array(await sharp(pixels(8 * 16 * 3, 1), { raw: { width: 8, height: 16, channels: 3, pageHeight: 8 } as never }).webp().toBuffer())
+    const webp = new Uint8Array(await sharp(pixels(8 * 8 * 3, 1), { raw: { width: 8, height: 8, channels: 3 } }).webp().toBuffer())
+    const png = new Uint8Array(await sharp(pixels(8 * 8 * 3, 1), { raw: { width: 8, height: 8, channels: 3 } }).png().toBuffer())
+    // An APNG: an acTL chunk right after IHDR (8-byte signature + 25-byte IHDR chunk).
+    const actl = new Uint8Array([0, 0, 0, 8, 0x61, 0x63, 0x54, 0x4c, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0])
+    const apng = new Uint8Array(png.length + actl.length)
+    apng.set(png.subarray(0, 33)); apng.set(actl, 33); apng.set(png.subarray(33), 33 + actl.length)
+    expect([pictureIsAnimated(two), pictureIsAnimated(apng), pictureIsAnimated(webpAnim)]).toEqual([true, true, true])
+    expect([pictureIsAnimated(one), pictureIsAnimated(webp), pictureIsAnimated(png), pictureIsAnimated(new Uint8Array(3))]).toEqual([false, false, false, false])
+  })
+})

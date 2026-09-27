@@ -114,7 +114,8 @@ Groups:
               aspect (and an unknown one) at 256, 768, 2048 and a few odd
               sizes; frame_plan cases; and the node's own raises before any
               render (an unknown effect, a non-generative effect with no
-              picture, too many frames). No render is recorded: the browser
+              picture, too many frames); `seeds`: u_seed for whole, fractional
+              and negative seeds. No render is recorded: the browser
               and moderngl are different GL implementations, and decision 9
               makes the browser's bytes the result.
 
@@ -3596,6 +3597,8 @@ def shader() -> dict:
         "generative": sorted(e.id for e in catalog.effects.values() if e.generative),
         "legacy": LEGACY_EFFECT_IDS,
         "max_output_frames": MAX_OUTPUT_FRAMES,
+        # u_seed = float(seed % 10000) on the int the node gets: int() of the widget, then Python's floor-mod.
+        "seeds": [[s, float(int(s) % 10000)] for s in (0, 42, 5.5, 9999.9, 10000, 123456, 2 ** 31 - 1, -1, -5.5, -10000, -10001)],
         "uniforms": uniforms,
         "aspect_sizes": sizes,
         "frame_plans": plans,

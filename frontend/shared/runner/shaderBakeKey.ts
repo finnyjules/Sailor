@@ -7,9 +7,16 @@
  * doesn't declare, so the engine path is unchanged.
  *
  * `key` is the sha256 of the canonical JSON of the node's settings as sent,
- * its source picture's file and the catalog's version. The runner takes the
- * node only when the key it works out from the prompt agrees, so a stale or
- * hand-made bake is not replayed. The key is worked out synchronously here
+ * its source picture's file name, the catalog's version and the baked files'
+ * names. Each baked name is `shader_bake_<first 32 hex of the PNG's sha256>.png`,
+ * which the runner checks against the bytes it reads (cards/shaderEffect.ts).
+ * What an agreeing key proves: the bake was made for exactly these settings,
+ * this source name and this catalog, and the files replayed are the bytes
+ * named. It is not a signature: anyone can work it out, so a hand-made bake of
+ * one's own files is replayed (hosted, only one's own files: inputs.ts); and it
+ * does not cover the source's bytes, so a source overwritten under the same
+ * name after the bake is not noticed. Settings changed after the bake are. The
+ * key is worked out synchronously here
  * (eligibility is synchronous, in the browser and on the server alike); the
  * browser's `shaderBakeKey` computes the same digest over Web Crypto.
  *
@@ -60,7 +67,7 @@ export const SHADER_GENERATIVE_IDS: readonly string[] = [
 export const SHADER_ASPECTS = ['1:1', '16:9', '9:16', '4:5', '3:2'] as const
 
 /** The needs-engine reason of a Shader effect whose picture is made in the same run (ruling: refused for now). */
-export const SHADER_NEEDS_PICTURE_FIRST = 'This shader needs its picture before the run; run the picture first'
+export const SHADER_NEEDS_PICTURE_FIRST = 'This shader needs its picture before the run. Put the picture in an Image card first.'
 
 /** An effect id as the node reads it: a legacy name → its current one. */
 export function resolveShaderEffectId(id: string): string {
@@ -117,13 +124,23 @@ export function canonicalJson(v: unknown): string {
 /** The settings the key covers, as the prompt carries them. */
 const KEYED_INPUTS = ['effect', 'params', 'time', 'duration', 'fps', 'seed', 'resolution', 'aspect'] as const
 
-/** The text the key hashes: the node's settings as sent, its source files, the catalog's version. */
-export function shaderBakeKeyText(inputs: Record<string, unknown>, sources: readonly string[], catalogVersion: unknown): string {
+/** The text the key hashes: the node's settings as sent, its source files, the catalog's version, the baked files. */
+export function shaderBakeKeyText(inputs: Record<string, unknown>, sources: readonly string[], catalogVersion: unknown, files: readonly string[]): string {
   const o: Record<string, unknown> = {}
   for (const k of KEYED_INPUTS) o[k] = inputs[k]
   o.source = [...sources]
   o.catalogVersion = catalogVersion
+  o.files = [...files]
   return canonicalJson(o)
+}
+
+/**
+ * `u_seed`: Python's `seed % 10000` on `int(seed)` (the INT widget passes 5.5
+ * through as 5.5; int() truncates it), a floor-mod as Python's `%`.
+ */
+export function shaderSeedUniform(seed: number): number {
+  const n = Math.trunc(seed)
+  return ((n % 10000) + 10000) % 10000
 }
 
 const K = new Uint32Array([
@@ -169,8 +186,8 @@ export function sha256HexSync(bytes: Uint8Array): string {
 }
 
 /** The key, worked out synchronously (eligibility). */
-export function shaderBakeKeySync(inputs: Record<string, unknown>, sources: readonly string[], catalogVersion: unknown): string {
-  return sha256HexSync(new TextEncoder().encode(shaderBakeKeyText(inputs, sources, catalogVersion)))
+export function shaderBakeKeySync(inputs: Record<string, unknown>, sources: readonly string[], catalogVersion: unknown, files: readonly string[]): string {
+  return sha256HexSync(new TextEncoder().encode(shaderBakeKeyText(inputs, sources, catalogVersion, files)))
 }
 
 /** SHA-256 of bytes over Web Crypto (the browser, and node's global `crypto`), as lowercase hex. */
@@ -182,8 +199,8 @@ export async function sha256Hex(bytes: Uint8Array): Promise<string> {
 }
 
 /** The key over Web Crypto; the same digest as shaderBakeKeySync. */
-export async function shaderBakeKey(inputs: Record<string, unknown>, sources: readonly string[], catalogVersion: unknown): Promise<string> {
-  return sha256Hex(new TextEncoder().encode(shaderBakeKeyText(inputs, sources, catalogVersion)))
+export async function shaderBakeKey(inputs: Record<string, unknown>, sources: readonly string[], catalogVersion: unknown, files: readonly string[]): Promise<string> {
+  return sha256Hex(new TextEncoder().encode(shaderBakeKeyText(inputs, sources, catalogVersion, files)))
 }
 
 // ── What the prompt carries ─────────────────────────────────────────────────
@@ -201,6 +218,24 @@ export function parseShaderBaked(raw: unknown): ShaderBaked | null {
   if (typeof key !== 'string' || !/^[0-9a-f]{64}$/.test(key)) return null
   if (!Array.isArray(files) || !files.length || files.some(f => typeof f !== 'string' || !f.trim())) return null
   return { files: files as string[], key }
+}
+
+/**
+ * A baked file's name as the upload stored it: an input file ('sub/name' or
+ * 'name [input]'), no empty, '.' or '..' part (server/runner/inputs.ts
+ * parseInputFileRef's rule), named `shader_bake_<32 hex>.png`. Returns the
+ * hex (the first 32 of the PNG's sha256), or null for anything else.
+ */
+export function bakedFileHash(raw: string): string | null {
+  let name = raw.trim()
+  const m = /^(.*?)\s*\[(input|output|temp)\]$/.exec(name)
+  if (m) {
+    if (m[2] !== 'input') return null
+    name = m[1]!
+  }
+  const parts = name.replace(/\\/g, '/').split('/')
+  if (parts.some(p => !p || p === '.' || p === '..')) return null
+  return /^shader_bake_([0-9a-f]{32})\.png$/.exec(parts[parts.length - 1]!)?.[1] ?? null
 }
 
 /** `inputs.sailor_baked` for these uploaded files and this key. */
@@ -258,7 +293,10 @@ function floatOf(v: unknown): number | null {
  * 'shader-bake'): an effect of the catalog; a still (`duration` 0; an animated
  * one stays on the engine for now, ruling f); its picture unwired (a
  * generative effect) or one the browser had before the run; and a bake of one
- * frame whose key agrees with the prompt as sent.
+ * frame, named as the bake names its files, whose key agrees with the prompt
+ * as sent. (A source's frames can't be seen here: the browser doesn't bake an
+ * animated one, which goes to the engine; the batch path is deferred with
+ * ruling f.)
  */
 export function shaderBakeTaken(prompt: ApiPrompt, nodeId: string): boolean {
   const inputs = prompt[nodeId]?.inputs ?? {}
@@ -272,7 +310,9 @@ export function shaderBakeTaken(prompt: ApiPrompt, nodeId: string): boolean {
   if (!sources.length && !SHADER_GENERATIVE_IDS.includes(effect)) return false
   const baked = parseShaderBaked(inputs.sailor_baked)
   if (!baked || baked.files.length !== 1) return false
-  return baked.key === shaderBakeKeySync(inputs, sources, SHADER_CATALOG_VERSION)
+  // A name that isn't one of the bake's own input files is left to the engine now, not failed late.
+  if (baked.files.some(f => bakedFileHash(f) === null)) return false
+  return baked.key === shaderBakeKeySync(inputs, sources, SHADER_CATALOG_VERSION, baked.files)
 }
 
 /** Why the runner leaves a Shader effect to the engine, when there is a plain reason to give (else null). */

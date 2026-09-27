@@ -17,9 +17,11 @@
  * (`failed`), for a toast.
  */
 import type { ApiPrompt } from '#shared/runner/graph'
+import type { RunnerFamily } from '#shared/runner/families'
+import { runnerTakesNode } from '#shared/runner/eligibility'
 import {
   SHADER_EFFECT_IDS, SHADER_GENERATIVE_IDS, aspectSize, framePlan, resolveShaderEffectId, shaderBakeKey,
-  shaderBakedText, shaderSourcesOf, sha256Hex,
+  shaderBakedText, shaderSeedUniform, shaderSourcesOf, sha256Hex,
 } from '#shared/runner/shaderBakeKey'
 import { parseParams, resolveUniforms } from '~/lib/shaderfx/params'
 import { expandPasses, type ShaderPass } from '~/lib/shaderfx/renderer'
@@ -27,8 +29,12 @@ import type { EffectDef, EffectTextureDef, ShaderFxCatalog } from '~/lib/shaderf
 
 export { shaderBakeKey }
 
-/** A picture ready to upload as a texture, with its size. */
-export interface BakePicture { image: TexImageSource; width: number; height: number }
+/**
+ * A picture ready to upload as a texture, with its size. `animated`: the file
+ * has several frames (Python renders one per frame; the batch path is
+ * deferred with ruling f), so the node is not baked and goes to the engine.
+ */
+export interface BakePicture { image: TexImageSource; width: number; height: number; animated?: boolean }
 
 /** What a bake needs from the page (the tests give fakes). */
 export interface ShaderBakeContext {
@@ -42,11 +48,14 @@ export interface ShaderBakeContext {
   texture(def: EffectDef, t: EffectTextureDef): Promise<TexImageSource>
   /** An opaque black picture of this size: a generative effect's base (Python's zeros). */
   blank(width: number, height: number): TexImageSource
-  /** The RGBA pixels of the canvas `render` returned, top row first. */
+  /** The RGBA pixels of the canvas `render` returned, top row first; throws when the drawing buffer isn't that size (the browser clamped it). */
   readPixels(canvas: HTMLCanvasElement, width: number, height: number): Uint8Array
   /** An 8-bit PNG of these RGBA pixels (alpha 255). */
   encodePng(rgba: Uint8Array, width: number, height: number): Promise<Uint8Array>
 }
+
+/** A run's context: made once for the run, released (its WebGL context lost) when the run's bakes are done. */
+export interface ShaderBakeRunContext extends ShaderBakeContext { release(): void }
 
 export interface ShaderBakeResult {
   /** The nodes given a bake. */
@@ -94,12 +103,12 @@ export function paramsPortable(def: EffectDef, text: unknown): boolean {
 
 /**
  * The uniforms Python uploads for one frame: to_uniforms(resolve_params),
- * then the textures' extraUniforms, then u_time, u_seed and u_hasInput.
+ * then the textures' extraUniforms, then u_time, u_seed (`int(seed) % 10000`) and u_hasInput.
  */
 export function bakeUniforms(def: EffectDef, params: string, o: { time: number; seed: number; hasInput: boolean }): Record<string, number | [number, number, number]> {
   const extra: Record<string, number> = {}
   for (const t of def.textures) for (const [k, v] of Object.entries(t.extraUniforms ?? {})) extra[k] = v
-  return { ...resolveUniforms(def, parseParams(params)), ...extra, u_time: o.time, u_seed: o.seed % 10000, u_hasInput: o.hasInput ? 1 : 0 }
+  return { ...resolveUniforms(def, parseParams(params)), ...extra, u_time: o.time, u_seed: shaderSeedUniform(o.seed), u_hasInput: o.hasInput ? 1 : 0 }
 }
 
 const num = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v)
@@ -134,6 +143,8 @@ export async function bakeShaderEffects(prompt: ApiPrompt, ctx: ShaderBakeContex
     if (!paramsPortable(def, params)) continue
     try {
       const picture = sources.length ? await ctx.sourceFile(sources[0]!) : null
+      // An animated source: Python renders a frame per frame; not baked, so it goes to the engine as before.
+      if (picture?.animated) continue
       const size = picture ? { w: picture.width, h: picture.height } : aspectSize(Math.trunc(resolution), aspect)
       const textures: Record<string, TexImageSource> = {}
       for (const t of def.textures) textures[t.uniform] = await ctx.texture(def, t)
@@ -148,7 +159,7 @@ export async function bakeShaderEffects(prompt: ApiPrompt, ctx: ShaderBakeContex
         const png = await ctx.encodePng(rgba, size.w, size.h)
         files.push(await ctx.upload(png, `shader_bake_${(await sha256Hex(png)).slice(0, 32)}.png`))
       }
-      inputs.sailor_baked = shaderBakedText(files, await shaderBakeKey(inputs, sources, ctx.catalog.version))
+      inputs.sailor_baked = shaderBakedText(files, await shaderBakeKey(inputs, sources, ctx.catalog.version, files))
       result.baked.push(nodeId)
     }
     catch (e) {
@@ -157,6 +168,115 @@ export async function bakeShaderEffects(prompt: ApiPrompt, ctx: ShaderBakeContex
     }
   }
   return result
+}
+
+/**
+ * Whether a take goes to the runner once its Shader effects are baked: it has
+ * a Shader effect, and every other node passes `runnerTakesNode`. A take bound
+ * for the engine anyway is not baked (nothing rendered, nothing uploaded).
+ */
+export function takeWantsShaderBake(prompt: ApiPrompt | null | undefined, families: ReadonlySet<RunnerFamily>): prompt is ApiPrompt {
+  if (!prompt) return false
+  const ids = Object.keys(prompt)
+  if (!ids.some(id => prompt[id]!.class_type === 'ShaderEffect')) return false
+  return ids.every(id => prompt[id]!.class_type === 'ShaderEffect' || runnerTakesNode(prompt, id, families))
+}
+
+/**
+ * Bakes a run's takes: only the takes going to the runner (takeWantsShaderBake),
+ * with one context for the whole run, made only when a take needs it and
+ * released in `finally` whatever happens.
+ */
+export async function bakeShaderTakes(
+  prompts: readonly (ApiPrompt | null | undefined)[],
+  families: ReadonlySet<RunnerFamily>,
+  makeContext: () => Promise<ShaderBakeRunContext>,
+): Promise<ShaderBakeResult> {
+  const result: ShaderBakeResult = { baked: [], failed: [] }
+  const wanted = prompts.filter((p): p is ApiPrompt => takeWantsShaderBake(p, families))
+  if (!wanted.length) return result
+  let ctx: ShaderBakeRunContext
+  try { ctx = await makeContext() }
+  catch (e) {
+    for (const p of wanted) {
+      for (const [nodeId, n] of Object.entries(p)) if (n.class_type === 'ShaderEffect') result.failed.push({ nodeId, error: e instanceof Error ? e.message : String(e) })
+    }
+    return result
+  }
+  try {
+    for (const p of wanted) {
+      const r = await bakeShaderEffects(p, ctx)
+      result.baked.push(...r.baked)
+      result.failed.push(...r.failed)
+    }
+  }
+  finally {
+    ctx.release()
+  }
+  return result
+}
+
+// ── Animated sources ─────────────────────────────────────────────────────────
+
+/** A GIF's image count (image descriptors), walking its blocks; 0 when it isn't a readable GIF. */
+function gifFrames(b: Uint8Array): number {
+  if (b.length < 13 || String.fromCharCode(b[0]!, b[1]!, b[2]!) !== 'GIF') return 0
+  let i = 13
+  if (b[10]! & 0x80) i += 3 * (1 << ((b[10]! & 7) + 1))
+  const subBlocks = () => { while (i < b.length && b[i] !== 0) i += b[i]! + 1; i++ }
+  let frames = 0
+  while (i < b.length) {
+    const tag = b[i]
+    if (tag === 0x3B) break
+    if (tag === 0x21) { i += 2; subBlocks() }
+    else if (tag === 0x2C) {
+      if (i + 10 > b.length) break
+      const packed = b[i + 9]!
+      i += 10
+      if (packed & 0x80) i += 3 * (1 << ((packed & 7) + 1))
+      i++ // LZW minimum code size
+      subBlocks()
+      frames++
+      if (frames > 1) return frames
+    }
+    else break
+  }
+  return frames
+}
+
+/** An APNG: an `acTL` chunk before the first IDAT. */
+function pngAnimated(b: Uint8Array): boolean {
+  const sig = [137, 80, 78, 71, 13, 10, 26, 10]
+  if (b.length < 8 || sig.some((v, k) => b[k] !== v)) return false
+  const view = new DataView(b.buffer, b.byteOffset, b.byteLength)
+  for (let i = 8; i + 8 <= b.length;) {
+    const len = view.getUint32(i)
+    const type = String.fromCharCode(b[i + 4]!, b[i + 5]!, b[i + 6]!, b[i + 7]!)
+    if (type === 'acTL') return true
+    if (type === 'IDAT' || type === 'IEND') return false
+    i += 12 + len
+  }
+  return false
+}
+
+/** An animated WebP: a VP8X header with the animation flag, or an ANIM chunk. */
+function webpAnimated(b: Uint8Array): boolean {
+  const tag = (k: number) => String.fromCharCode(b[k]!, b[k + 1]!, b[k + 2]!, b[k + 3]!)
+  if (b.length < 16 || tag(0) !== 'RIFF' || tag(8) !== 'WEBP') return false
+  const view = new DataView(b.buffer, b.byteOffset, b.byteLength)
+  for (let i = 12; i + 8 <= b.length;) {
+    const type = tag(i)
+    const len = view.getUint32(i + 4, true)
+    if (type === 'ANIM' || type === 'ANMF') return true
+    if (type === 'VP8X' && i + 8 < b.length && (b[i + 8]! & 0x02)) return true
+    i += 8 + len + (len & 1)
+  }
+  return false
+}
+
+/** Whether a picture file has several frames (a GIF of several images, an APNG, an animated WebP). */
+export function pictureIsAnimated(bytes: Uint8Array): boolean {
+  return gifFrames(bytes) > 1 || pngAnimated(bytes) || webpAnimated(bytes)
 }
 
 // ── The page's own context ───────────────────────────────────────────────────
@@ -182,25 +302,26 @@ function loadImage(url: string): Promise<HTMLImageElement> {
 }
 
 /**
- * Bakes the prompt's Shader effects with the page's own catalog, a renderer
- * of its own (the node previews keep theirs) and the /upload/image rail.
+ * Bakes a run's takes (bakeShaderTakes) with the page's own catalog, one
+ * renderer for the run (the node previews keep theirs; its WebGL context is
+ * lost when the run's bakes are done) and the /upload/image rail.
  */
-export async function bakeShaderEffectsForRun(prompt: ApiPrompt): Promise<ShaderBakeResult> {
-  if (!Object.values(prompt).some(n => n.class_type === 'ShaderEffect')) return { baked: [], failed: [] }
-  const { fetchShaderFxCatalog, assetUrl } = await import('~/lib/shaderfx/catalog')
-  const { ShaderFxRenderer } = await import('~/lib/shaderfx/renderer')
-  let catalog: ShaderFxCatalog
-  try { catalog = await fetchShaderFxCatalog() }
-  catch (e) {
-    const ids = Object.entries(prompt).filter(([, n]) => n.class_type === 'ShaderEffect').map(([id]) => id)
-    return { baked: [], failed: ids.map(nodeId => ({ nodeId, error: e instanceof Error ? e.message : String(e) })) }
-  }
-  const renderer = new ShaderFxRenderer()
-  const textures = new Map<string, Promise<HTMLImageElement>>()
-  try {
-    return await bakeShaderEffects(prompt, {
+export async function bakeShaderEffectsForRun(prompts: readonly (ApiPrompt | null | undefined)[], families: ReadonlySet<RunnerFamily>): Promise<ShaderBakeResult> {
+  return bakeShaderTakes(prompts, families, async () => {
+    const { fetchShaderFxCatalog, assetUrl } = await import('~/lib/shaderfx/catalog')
+    const { ShaderFxRenderer } = await import('~/lib/shaderfx/renderer')
+    const catalog = await fetchShaderFxCatalog()
+    const renderer = new ShaderFxRenderer()
+    const textures = new Map<string, Promise<HTMLImageElement>>()
+    return {
       catalog,
       renderer,
+      release() {
+        // dispose() deletes every GL object and loses the context (WEBGL_lose_context), so runs don't pile up contexts.
+        const gl = renderer.outputCanvas?.getContext('webgl2') ?? null
+        renderer.dispose()
+        if (gl && !gl.isContextLost()) gl.getExtension('WEBGL_lose_context')?.loseContext()
+      },
       async upload(bytes, name) {
         const fd = new FormData()
         fd.append('image', new File([bytes as BlobPart], name, { type: 'image/png' }))
@@ -212,8 +333,17 @@ export async function bakeShaderEffectsForRun(prompt: ApiPrompt): Promise<Shader
         return data.subfolder ? `${data.subfolder}/${data.name}` : data.name
       },
       async sourceFile(file) {
-        const img = await loadImage(viewUrlOf(file))
-        return { image: img, width: img.naturalWidth, height: img.naturalHeight }
+        const res = await fetch(viewUrlOf(file))
+        if (!res.ok) throw new Error('A picture for the shader couldn’t be loaded')
+        const bytes = new Uint8Array(await res.arrayBuffer())
+        if (pictureIsAnimated(bytes)) return { image: null as unknown as TexImageSource, width: 0, height: 0, animated: true }
+        const url = URL.createObjectURL(new Blob([bytes as BlobPart]))
+        try {
+          const img = await loadImage(url)
+          await img.decode().catch(() => {})
+          return { image: img, width: img.naturalWidth, height: img.naturalHeight }
+        }
+        finally { URL.revokeObjectURL(url) }
       },
       texture(_def, t) {
         let p = textures.get(t.file)
@@ -233,6 +363,8 @@ export async function bakeShaderEffectsForRun(prompt: ApiPrompt): Promise<Shader
         // The renderer's own context (getContext hands back the one it made); GL rows run bottom up.
         const gl = canvas.getContext('webgl2')
         if (!gl) throw new Error('The shader’s picture couldn’t be read')
+        // A browser may clamp a large canvas silently: then this is not Python's size, and nothing is uploaded.
+        if (gl.drawingBufferWidth !== width || gl.drawingBufferHeight !== height) throw new Error('The picture is too large for this browser to render the shader')
         gl.bindFramebuffer(gl.FRAMEBUFFER, null)
         const up = new Uint8Array(width * height * 4)
         gl.readPixels(0, 0, width, height, gl.RGBA, gl.UNSIGNED_BYTE, up)
@@ -252,9 +384,6 @@ export async function bakeShaderEffectsForRun(prompt: ApiPrompt): Promise<Shader
         if (!blob) throw new Error('The shader’s picture couldn’t be saved')
         return new Uint8Array(await blob.arrayBuffer())
       },
-    })
-  }
-  finally {
-    renderer.dispose()
-  }
+    }
+  })
 }

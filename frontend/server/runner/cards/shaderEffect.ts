@@ -8,7 +8,8 @@
  * (#shared/runner/shaderBakeKey.ts). Here each baked file is read, refused
  * unless it is an 8-bit RGB or RGBA PNG of the size Python renders (the
  * picture's own size, EXIF turned as its loader turns it; with no picture,
- * `_aspect_size`), and kept as an 8-bit RGB PNG (Python keeps `o[..., :3]`).
+ * `_aspect_size`), whose sha256 starts with the hex its name carries (the
+ * name the key covers), and kept as an 8-bit RGB PNG (Python keeps `o[..., :3]`).
  * The first frame is the node's live preview under a new name every run
  * (`save_live_preview(unique=True)`). The picture is read downstream as the
  * tensor it is (compositor/plan.ts pictureSourceOf: 'tensor'): bytes / 255,
@@ -20,7 +21,8 @@ import type { OutputFile, RunnerValue } from '../types'
 import { parseInputFileRef } from '../inputs'
 import { isLink } from '#shared/runner/graph'
 import { pyIntOf } from '#shared/runner/pyText'
-import { aspectSize, parseShaderBaked } from '#shared/runner/shaderBakeKey'
+import { aspectSize, bakedFileHash, parseShaderBaked } from '#shared/runner/shaderBakeKey'
+import { sha256Hex } from '../handoff'
 import { EFFECT_PICTURE_ANIMATED, effectPictureCap } from '#shared/runner/effects'
 import { pictureHasFrames, pictureMeta, pictureRefusalOf, pngChunksBeforePixels } from '../pictures/pythonView'
 import { PICTURE_NOT_MADE, PICTURE_UNREAD } from '../effects/io'
@@ -28,6 +30,8 @@ import { PICTURE_NOT_MADE, PICTURE_UNREAD } from '../effects/io'
 export const SHADER_BAKE_MISSING = 'The shader’s baked picture is missing. Run it again.'
 export const SHADER_BAKE_WRONG_SIZE = 'The shader’s baked picture is the wrong size. Run it again.'
 export const SHADER_BAKE_UNREADABLE = 'The shader’s baked picture can’t be read. Run it again.'
+/** The bytes read aren't the ones the bake named (its name is their hash). */
+export const SHADER_BAKE_CHANGED = 'The shader’s baked picture has changed since it was made. Run it again.'
 /** `render_effect` refuses a side over MAX_RENDER_DIM (8192). */
 export const SHADER_PICTURE_TOO_WIDE = 'This picture is too large for a shader (more than 8192 pixels on a side). Use a smaller picture.'
 const MAX_RENDER_DIM = 8192
@@ -45,7 +49,7 @@ function intOf(v: unknown): number {
 
 /** An 8-bit RGB or RGBA PNG's size from its IHDR, or null for anything else. */
 export function bakedPngSize(b: Uint8Array): { w: number; h: number } | null {
-  if (!pngChunksBeforePixels(b) || b.length < 33) return null
+  if (pngChunksBeforePixels(b)?.[0] !== 'IHDR' || b.length < 33) return null
   const view = new DataView(b.buffer, b.byteOffset, b.byteLength)
   const w = view.getUint32(16)
   const h = view.getUint32(20)
@@ -81,8 +85,10 @@ export function planShaderEffect(ctx: PlanContext): NodePlan {
   const inputs = ctx.prompt[ctx.nodeId]!.inputs ?? {}
   // Eligibility took the node for its bake; a prompt without one never gets here.
   const baked = parseShaderBaked(inputs.sailor_baked)
-  const files = (baked?.files ?? []).map(parseInputFileRef)
-  if (!files.length || files.some(f => !f)) throw new Error(SHADER_BAKE_MISSING)
+  const names = baked?.files ?? []
+  const files = names.map(parseInputFileRef)
+  const hashes = names.map(bakedFileHash)
+  if (!files.length || files.some(f => !f) || hashes.some(h => !h)) throw new Error(SHADER_BAKE_MISSING)
   return {
     kind: 'derive',
     async derive(io) {
@@ -92,11 +98,13 @@ export function planShaderEffect(ctx: PlanContext): NodePlan {
       if (size.w * size.h > cap.max) throw new Error(cap.message)
       const kept: OutputFile[] = []
       let preview: OutputFile | null = null
-      for (const file of files as OutputFile[]) {
+      for (const [i, file] of (files as OutputFile[]).entries()) {
         stopped(io)
         let bytes: Uint8Array
         try { bytes = await io.read(file) }
         catch { throw new Error(SHADER_BAKE_MISSING) }
+        // The name the key covers is the bytes' hash: other bytes under it are not the bake.
+        if (sha256Hex(bytes).slice(0, 32) !== hashes[i]) throw new Error(SHADER_BAKE_CHANGED)
         // From the header, before any pixel is decoded.
         const got = bakedPngSize(bytes)
         if (!got) throw new Error(SHADER_BAKE_UNREADABLE)
