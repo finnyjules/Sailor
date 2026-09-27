@@ -230,3 +230,50 @@ describe('Fix round 2: an unrelated line sharing the copy’s end point must not
     noDangling(d)
   })
 })
+
+// Fix round 3 (re-review, Scenario A): round 2's same-source sibling scan can be
+// fooled — a second copy of the same source ending at Z (its own offsetLine),
+// connected to the first copy's end P by a connector M = (P, Z): the sibling
+// check saw Z's offsetLine and re-aimed [A,B,P] onto a point on M regardless of
+// whether M actually lay on the offset line. Fixed by dropping the topology
+// guess for certain geometry: re-aim only when the trimmed pair is a straight
+// piece AND both its surviving end and the new end sit at the rule's own signed
+// distance from A→B (within the drawing's tolerance) — i.e. the trimmed piece
+// truly lies on the offset line.
+describe('Fix round 3: the re-aim is geometry, not topology', () => {
+  it('Scenario A, different distance: a connector to a second copy at another offset leaves the rule alone', () => {
+    const { d, a, b, p, q } = offsetPair()
+    const z = addPoint(d, 5, 3)                       // a second copy's end, offset 3 — not on P's line
+    addConstraint(d, 'offsetLine', [a, b, z], 3)
+    const m = addLine(d, p, z)                          // a connector between the two copies' ends
+    const c1 = addPoint(d, -5, 1.5), c2 = addPoint(d, 10, 1.5)
+    addLine(d, c1, c2)                                   // crosses M at (1.25, 1.5), t≈0.25 along M
+    const span = spanAt(d, { kind: 'line', id: m }, 0.1)   // the piece nearest P
+    expect(span).not.toBeNull()
+    const r = removeSpan(d, span!)
+    expect(r.ok).toBe(true)
+    expect(rules(d, 'offsetLine').find(c => c.value === 1)!.refs).toEqual([a, b, p])   // untouched — M isn't on this line
+    expect(rules(d, 'offsetLine').find(c => c.value === 3)!.refs).toEqual([a, b, z])   // untouched too
+    noDangling(d)
+  })
+  it('Scenario A, same distance and side: a connector that itself lies on the offset line may re-aim, and the drawing solves', () => {
+    const { d, a, b, p, q } = offsetPair()
+    const z = addPoint(d, 15, 1)                        // a second copy's end, same offset (+1), same line
+    addConstraint(d, 'offsetLine', [a, b, z], 1)
+    const m = addLine(d, p, z)                            // the connector — entirely on the offset line y=1
+    const c1 = addPoint(d, 7, -5), c2 = addPoint(d, 7, 5)
+    addLine(d, c1, c2)                                     // crosses M at (7, 1)
+    const span = spanAt(d, { kind: 'line', id: m }, 0.1)     // the piece nearest P
+    expect(span).not.toBeNull()
+    const r = removeSpan(d, span!)
+    expect(r.ok).toBe(true)
+    expect(r.droppedRules).toBe(0)
+    const reaimed = rules(d, 'offsetLine').find(c => c.value === 1 && c.refs[2] !== p && c.refs[2] !== z)
+    expect(reaimed).toBeTruthy()                           // P's rule followed onto the crossing point
+    ;(d.entities.find(e => e.id === a) as { fixed?: boolean }).fixed = true
+    expect(solve(d, { drag: { point: b, x: 0, y: 4 } }).converged).toBe(true)
+    expect(constraintResiduals(d).every(v => Math.abs(v) < 1e-4)).toBe(true)
+    noDangling(d)
+    void q
+  })
+})

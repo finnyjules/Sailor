@@ -201,6 +201,42 @@ function nearerHalf(doc: SketchDoc, c: SketchConstraint, first: EntityId[], seco
   return d(second) < d(first) ? second : first
 }
 
+// is the pair (a,b) currently a straight piece — a line entity, or one of a
+// path's 'line' segments? Only such a piece can safely carry an offsetLine's
+// re-aim (an arc that merely happens to touch the offset line must not).
+function isStraightPair(doc: SketchDoc, a: EntityId, b: EntityId): boolean {
+  const pair = (x: EntityId, y: EntityId) => (x === a && y === b) || (x === b && y === a)
+  for (const e of doc.entities) {
+    if (e.kind === 'line' && pair(e.p1, e.p2)) return true
+    if (e.kind !== 'path') continue
+    const n = e.anchors.length
+    const count = e.closed ? n : n - 1
+    for (let i = 0; i < count; i++) {
+      if (e.segments[i]?.kind === 'line' && pair(e.anchors[i]!, e.anchors[(i + 1) % n]!)) return true
+    }
+  }
+  return false
+}
+
+// X's signed distance from A→B (left of A→B positive) — the same convention
+// as offsetLine's own residual (residuals.ts); null on a zero-length line
+function signedOffsetDistance(doc: SketchDoc, A: EntityId, B: EntityId, X: EntityId): number | null {
+  const a = getPoint(doc, A), b = getPoint(doc, B), x = getPoint(doc, X)
+  if (!a || !b || !x) return null
+  const dx = b.x - a.x, dy = b.y - a.y
+  const L = Math.hypot(dx, dy)
+  if (L < 1e-12) return null
+  return (dx * (x.y - a.y) - dy * (x.x - a.x)) / L
+}
+
+// does X sit on offsetLine rule c's own line, at c's own distance, within tol?
+// The only certain condition for re-aiming refs[2] onto X — geometry, not topology.
+function onOffsetLine(doc: SketchDoc, c: SketchConstraint, X: EntityId, tol: number): boolean {
+  if (c.value == null) return false
+  const d = signedOffsetDistance(doc, c.refs[0]!, c.refs[1]!, X)
+  return d != null && Math.abs(d - c.value) <= tol
+}
+
 // returns the ids of rules it rewrote or created
 function followPair(doc: SketchDoc, a: EntityId, b: EntityId, ev: PairEvent): Set<EntityId> {
   const touched = new Set<EntityId>()
@@ -249,20 +285,23 @@ function followPair(doc: SketchDoc, a: EntityId, b: EntityId, ev: PairEvent): Se
   // piece is moved or grown, not the whole line removed), the rule follows to
   // the new end — the copy is still the same offset line, just shorter/longer
   // (the arc form already re-aims the same way through followArcOperands).
-  // Only when the trimmed pair (a, b) really IS the offset copy's own line:
-  // its other end must carry the sibling offsetLine on the same source
-  // (Ruling 10 — both ends of a straight offset are pinned this way). An
-  // unrelated line that merely shares this end point (a T-junction) is left
-  // alone, or it would be silently re-pointed at whatever that line becomes.
+  // Certain geometry decides it, not topology (a same-source sibling scan can
+  // be fooled by a second copy plus a connector between the two copies' ends):
+  // re-aim only when the trimmed pair is a straight piece (a topology guess
+  // alone can't rule out an arc that merely touches the line) AND both its
+  // surviving end and the new end sit at the rule's own signed distance from
+  // A→B, within the drawing's tolerance — i.e. the trimmed piece truly lies on
+  // the offset line, so re-aiming can never move the rule's point off it.
   if (ev.kind === 'moved' || ev.kind === 'grow') {
     const other = ev.from === a ? b : a
-    for (const c of doc.constraints) {
-      if (c.kind === 'offsetLine' && c.refs.length === 3 && c.refs[2] === ev.from && !touched.has(c.id) && !remove.has(c.id)) {
-        const sibling = doc.constraints.some(k => k.kind === 'offsetLine' && k.id !== c.id &&
-          k.refs[2] === other && k.refs[0] === c.refs[0] && k.refs[1] === c.refs[1])
-        if (!sibling) continue
-        c.refs = [c.refs[0]!, c.refs[1]!, ev.to]
-        touched.add(c.id)
+    if (isStraightPair(doc, a, b)) {
+      const tol = drawingTol(doc)
+      for (const c of doc.constraints) {
+        if (c.kind === 'offsetLine' && c.refs.length === 3 && c.refs[2] === ev.from && !touched.has(c.id) && !remove.has(c.id)) {
+          if (!onOffsetLine(doc, c, other, tol) || !onOffsetLine(doc, c, ev.to, tol)) continue
+          c.refs = [c.refs[0]!, c.refs[1]!, ev.to]
+          touched.add(c.id)
+        }
       }
     }
   }
