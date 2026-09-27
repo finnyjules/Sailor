@@ -1,16 +1,21 @@
 // app/lib/sketch/ruleCheck.ts
 // Pen stage 6: can this rule be added? Four verdicts:
 //   "ok"       — it can be added.
-//   "already"  — Already true: an equivalent rule is there, or the rule holds
-//                now AND the others provably imply it (its Jacobian rows lie
-//                in the span of rules that sit wholly inside the window round
-//                it — so the dependency holds in the whole drawing, not just
-//                with the window's edge held). Callers grey it out.
+//   "already"  — Already true: an equivalent rule is there, or (full check
+//                only) the rule holds now AND the others imply it — its
+//                Jacobian rows lie in the span of rules wholly inside the
+//                window round it, and that is still so at a second, nudged
+//                and re-settled configuration (a first-order test alone
+//                greys out a rule that locks a point sliding past a tangent).
+//                Callers grey it out.
 //   "conflict" — Conflicts with another rule, and only when that is certain:
 //                a merge of two fixed points apart; a trial solve that fails
 //                on a region holding the rule's whole connected part (nothing
-//                outside it could have helped); or a trial solve that settled
-//                but collapsed a line, arc or circle. Callers grey it out.
+//                outside it could have helped); or a trial solve over such a
+//                region that settled but collapsed a line, arc or circle.
+//                A whole-part solve that fails to converge within the
+//                solver's iteration cap is treated as a conflict — a strong
+//                sign, not a proof. Callers grey it out.
 //   "unsure"   — no window small enough to solve quickly could settle it, and
 //                its part is too big to solve whole (the solver is dense: a
 //                150-piece part takes seconds). Never refuse on a guess
@@ -21,8 +26,8 @@
 //
 // Two checks (controller ruling C1 — the menus must open fast):
 //   quickRuleCheck — for the menu, the wheel and Properties' + list: no solve.
-//     "already" as above; "conflict" only for a merge of two fixed points
-//     apart; everything else "ok".
+//     "already" only for an exact equivalent rule; "conflict" only for a
+//     merge of two fixed points apart; everything else "ok".
 //   checkRule — on demand (a rule picked or hovered): the same, plus a trial
 //     solve of the stage-5 window round the rule (cleanup/guards windowOf /
 //     solveWindow, everything outside held), widening once — to the rule's
@@ -56,7 +61,8 @@ function pointMap(doc: SketchDoc): Map<EntityId, Pt> {
   return pt
 }
 
-// every line, straight piece, arc radius and circle radius, by a stable key,
+// every line, straight piece, arc radius and circle radius, by a stable key
+// (entities by id, path pieces by their points),
 // with its two ends (a piece whose ends became one point — a merge — is left
 // out: it went, it didn't collapse)
 interface Size { a: EntityId; b: EntityId; len: number; straight: boolean }
@@ -74,8 +80,11 @@ function sizes(doc: SketchDoc): Map<string, Size> {
         const s = e.segments[i]
         const a = e.anchors[i]!, b = e.anchors[(i + 1) % n]!
         if (a === b) continue
-        if (s?.kind === 'line') out.set(`${e.id}:${i}`, { a, b, len: d(a, b), straight: true })
-        else if (s?.kind === 'arc') out.set(`${e.id}:${i}`, { a: s.center, b: a, len: d(s.center, a), straight: false })
+        // keyed by the piece's own points, not its index (a merge or a
+        // removal renumbers a path's pieces)
+        const ends = a < b ? `${a},${b}` : `${b},${a}`
+        if (s?.kind === 'line') out.set(`line:${ends}`, { a, b, len: d(a, b), straight: true })
+        else if (s?.kind === 'arc') out.set(`arc:${s.center}:${ends}`, { a: s.center, b: a, len: d(s.center, a), straight: false })
       }
     }
   }
@@ -159,20 +168,46 @@ function fixedApart(doc: SketchDoc, a: EntityId, b: EntityId): boolean {
   return !!pa.fixed && !!pb.fixed && Math.hypot(pa.x - pb.x, pa.y - pb.y) > 1e-9 * Math.max(1, span(doc))
 }
 
-/** The menus' check (C1): no solve. "already" when an equivalent rule is
- *  there, or it holds now and adds no rank round it; "conflict" only for a
- *  merge of two fixed points apart; otherwise "ok" (checkRule, on demand,
- *  tells a conflict). */
+/** The menus' check (C1): no solve. "already" only for an exact equivalent
+ *  rule; "conflict" only for a merge of two fixed points apart; otherwise
+ *  "ok" (checkRule, on demand, tells an implied rule or a conflict). */
 export function quickRuleCheck(doc: SketchDoc, spec: RuleSpec | MergeSpec): RuleCheck {
   if ('merge' in spec) {
     const [keep, gone] = spec.merge
     if (keep === gone) return 'already'
     return fixedApart(doc, keep, gone) ? 'conflict' : 'ok'
   }
-  if (isThere(doc, spec)) return 'already'
-  const rule = asRule(spec)
-  if (holdsNow(doc, rule) && !addsRank(doc, rule, windowOf(doc, spec.refs, RANK_HOPS))) return 'already'
-  return 'ok'
+  return isThere(doc, spec) ? 'already' : 'ok'
+}
+
+/** How far the second configuration nudges each free scalar of the window,
+ *  as a share of the window's size. */
+const NUDGE_FRAC = 0.03
+
+// a deterministic stream in [-1, 1) (a fixed-seed LCG — the same drawing
+// always gets the same nudge)
+function seeded(seed = 0x2f6b1d): () => number {
+  let x = seed >>> 0
+  return () => { x = (Math.imul(x, 1664525) + 1013904223) >>> 0; return x / 2 ** 31 - 1 }
+}
+
+// the rule, holding now and adding no rank at this configuration, is implied:
+// confirm it at a second one — nudge the window's free points and radii by a
+// small seeded step, re-settle with the existing rules only (a window solve
+// on a copy), and require the rule still holds and still adds no rank there
+function impliedAtSecondConfig(doc: SketchDoc, rule: SketchConstraint, win: ReadonlySet<EntityId>): boolean {
+  const trial = cloneDoc(doc)
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity
+  for (const e of trial.entities) if (e.kind === 'point' && win.has(e.id)) { x0 = Math.min(x0, e.x); y0 = Math.min(y0, e.y); x1 = Math.max(x1, e.x); y1 = Math.max(y1, e.y) }
+  const size = Number.isFinite(x0) ? Math.max(Math.hypot(x1 - x0, y1 - y0), 1e-6) : 1
+  const step = NUDGE_FRAC * size, rnd = seeded()
+  for (const e of trial.entities) {
+    if (!win.has(e.id)) continue
+    if (e.kind === 'point' && !e.fixed) { e.x += step * rnd(); e.y += step * rnd() }
+    else if (e.kind === 'circle') e.r = Math.max(e.r * (1 + NUDGE_FRAC * rnd()), 1e-9)
+  }
+  if (!solveWindow(trial, win, new Set())) return false
+  return holdsNow(trial, rule) && !addsRank(trial, rule, win)
 }
 
 /** The trial solve widens once: the stage-5 window (WINDOW_HOPS) first;
@@ -185,20 +220,21 @@ const WIDE_HOPS = 4
 const PART_SLOTS = 60
 
 // a trial solve round `seeds`; `fresh` builds a new trial copy for each step.
-// "ok" when a step settles with nothing collapsed; "conflict" when a step
-// settles but collapses a piece and no wider step settles cleanly, or a step
-// whose window holds the seeds' whole connected part fails; else "unsure".
+// "ok" when a step settles with nothing collapsed; "conflict" only when a
+// step whose window holds the seeds' whole connected part fails or settles
+// with a piece collapsed (a collapse in a partial window may be the held edge
+// forcing it); else "unsure".
 function trialSolve(fresh: () => SketchDoc, seeds: EntityId[], before: Map<string, Size>, opts: RuleCheckOptions): 'ok' | 'conflict' | 'unsure' {
-  let sawCollapse = false
+  let certain = false
   let whole = false
   const settled = (win: (t: SketchDoc) => Set<EntityId>): boolean => {
     const trial = fresh()
     const part = componentOf(trial, seeds)
     const w = win(trial)
     whole = !reachesBeyond(part, w)
-    if (!solveWindow(trial, w, new Set())) return false
-    if (collapsed(before, trial, opts)) { sawCollapse = true; return false }
-    return true
+    if (solveWindow(trial, w, new Set()) && !collapsed(before, trial, opts)) return true
+    if (whole) certain = true
+    return false
   }
   if (settled(t => windowOf(t, seeds))) return 'ok'
   if (!whole) {
@@ -208,12 +244,12 @@ function trialSolve(fresh: () => SketchDoc, seeds: EntityId[], before: Map<strin
     })
     if (ok) return 'ok'
   }
-  return whole || sawCollapse ? 'conflict' : 'unsure'
+  return certain ? 'conflict' : 'unsure'
 }
 
 /** The full check, on demand (a rule picked or hovered — C1). An equivalent
- *  rule there, or one that holds now and provably adds nothing →
- *  "already"; a merge refused (two fixed points apart) → "conflict"; else
+ *  rule there, or one that holds now and adds nothing — here and at a
+ *  nudged second configuration (impliedAtSecondConfig) → "already"; a merge refused (two fixed points apart) → "conflict"; else
  *  the trial solve's verdict (trialSolve): "ok", a certain "conflict", or
  *  "unsure" (callers allow it). A rule that settles is "ok" even when its
  *  rows add no rank — the solve found a drawing where every rule holds. */
@@ -229,6 +265,9 @@ export function checkRule(doc: SketchDoc, spec: RuleSpec | MergeSpec, opts: Rule
   }
   if (isThere(doc, spec)) return 'already'
   const rule = asRule(spec)
-  if (holdsNow(doc, rule) && !addsRank(doc, rule, windowOf(doc, spec.refs, RANK_HOPS))) return 'already'
+  if (holdsNow(doc, rule)) {
+    const win = windowOf(doc, spec.refs, RANK_HOPS)
+    if (!addsRank(doc, rule, win) && impliedAtSecondConfig(doc, rule, win)) return 'already'
+  }
   return trialSolve(() => { const t = cloneDoc(doc); t.constraints.push({ ...rule, refs: [...rule.refs] }); return t }, spec.refs, before, opts)
 }
