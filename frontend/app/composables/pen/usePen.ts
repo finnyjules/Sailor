@@ -63,6 +63,11 @@ import { nearestCurve, spanAt, curveGeom, paramOf, pointAt, type Span, type Curv
 import { removeSpan, removeSegment, cutAt, canDissolve, dissolveAt, mergePoints, sameKey } from '~/lib/sketch/trim'
 import { cloneDoc } from '~/lib/sketch/clone'
 import { runCleanup, STRENGTHS, type CleanupResult, type CleanupScope, type CleanupStrength, type FixKind } from '~/lib/sketch/cleanup'
+import { sketchPathData } from '~/lib/sketch/sketchPath'
+import { extractPieces, insertPieces, piecesCentre, hasClosedPieces } from '~/lib/sketch/clipboard'
+import { selectionLabel, topLevelIds } from '~/lib/sketch/pieces'
+import { penClipboard, setPenClipboard, nextPasteStep, PASTE_STEP_PX } from './penClipboard'
+import { OK, no, REASON, type ActionState } from './penReasons'
 
 // NUDGE_PX / NUDGE_PX_SHIFT / screenDeltaToDrawing now live in penKeys.ts
 // (they exist only for the arrow-key nudge in the key handler); re-exported
@@ -1916,6 +1921,100 @@ export function usePen(opts: {
     clearSel(); runSolve(); commitHistory()
   }
 
+  // --- Copy / Paste / Select all / Dissolve a point (pen stage 6) ---
+  // The pen's own clipboard (penClipboard.ts) holds a copy of the pieces and
+  // the rules among them, shared by every pen on the page; pasting gives the
+  // pieces fresh ids (lib/sketch/clipboard.ts). Copy as SVG writes the
+  // selection's outline — the pen page's Copy SVG format — to the system
+  // clipboard. Copy and Select all write no history; Paste and Dissolve are
+  // one step each.
+  const hasPick = () => selection.value.length > 0 || selectedSegments.value.length > 0
+  function copySelection(): boolean {
+    if (!hasPick()) return false
+    const clip = extractPieces(doc.value, selection.value, selectedSegments.value)
+    if (!clip.entities.length) return false
+    setPenClipboard(clip)
+    status.value = `Copied ${selectionLabel(doc.value, selection.value, selectedSegments.value)}`
+    return true
+  }
+  function pasteState(): ActionState {
+    const c = penClipboard.value
+    if (!c) return no(REASON.emptyClip)
+    if (openOnly && hasClosedPieces(c.doc)) return no(REASON.openOnly)
+    return OK
+  }
+  // `at` (the menu's Paste): the copy's centre lands there; else (⌘V) 16 px
+  // down-right on screen of where it was copied, 16 px more per paste
+  function paste(at?: Vec2 | null): boolean {
+    if (!pasteState().ok) return false
+    const c = penClipboard.value!
+    if (tool.value !== 'select') selectTool('select')
+    let offset: Vec2 = { x: 0, y: 0 }
+    if (at) {
+      const ctr = piecesCentre(c.doc)
+      offset = { x: at.x - ctr.x, y: at.y - ctr.y }
+    } else {
+      const step = screenDeltaToDrawing(opts.view.value, PASTE_STEP_PX, PASTE_STEP_PX)
+      const k = nextPasteStep()
+      if (step) offset = { x: step.x * k, y: step.y * k }
+    }
+    const { top } = insertPieces(doc.value, c.doc, offset)
+    clearSegSel()
+    selection.value = top
+    runSolve()
+    commitHistory()
+    status.value = `Pasted ${selectionLabel(doc.value, top, [])}`
+    return true
+  }
+  function copySvg(): string {
+    if (!hasPick()) return ''
+    const d = sketchPathData(extractPieces(doc.value, selection.value, selectedSegments.value))
+    if (!d) return ''
+    try { if (typeof navigator !== 'undefined') navigator.clipboard?.writeText(d)?.catch?.(() => {}) } catch {}
+    status.value = 'Copied as SVG'
+    return d
+  }
+  function selectAll(): boolean {
+    const ids = topLevelIds(doc.value)
+    if (!ids.length) return false
+    if (tool.value !== 'select') selectTool('select')
+    clearSegSel()
+    selection.value = ids
+    return true
+  }
+  // Dissolve on one selected point: it must sit between two pieces of a path
+  // (an open path's ends don't) — the Dissolve tool's rule
+  function dissolveSpot(id: EntityId): { pathId: EntityId; anchorIndex: number } | null {
+    for (const e of doc.value.entities) {
+      if (e.kind !== 'path') continue
+      const n = e.anchors.length
+      for (let k = 0; k < n; k++) {
+        if (e.anchors[k] !== id) continue
+        if (e.closed ? n >= 3 : k > 0 && k < n - 1) return { pathId: e.id, anchorIndex: k }
+      }
+    }
+    return null
+  }
+  function dissolveState(id: EntityId): ActionState {
+    const s = dissolveSpot(id)
+    if (!s) return no(REASON.notBetween)
+    return canDissolve(doc.value, s.pathId, s.anchorIndex, pxToUnits(DISSOLVE_PX, opts.view.value), DISSOLVE_DEG) ? OK : no(REASON.noMerge)
+  }
+  function dissolvePoint(id: EntityId): boolean {
+    const s = dissolveSpot(id)
+    const p = doc.value.entities.find(e => e.id === id)
+    if (!s || p?.kind !== 'point') return false
+    const { x, y } = p
+    const res = dissolveAt(doc.value, s.pathId, s.anchorIndex, pxToUnits(DISSOLVE_PX, opts.view.value), DISSOLVE_DEG)
+    if (!res.ok) { status.value = DISSOLVE_REFUSED; return false }
+    clearSel()
+    clearSegSel()
+    runSolve()
+    commitHistory()
+    sparkle(x, y)
+    return true
+  }
+
   // --- Clean up (pen stage 5, lib/sketch/cleanup) ---
   // A preview: the drawing stays exactly as it is while `cleanup` holds the
   // cleaned copy, re-solved from the drawing as it was when Clean up opened
@@ -2418,6 +2517,8 @@ export function usePen(opts: {
     repeatPrompt, armRepeat, doRepeat, applyRepeat, doMirror, applyMirror, cancelPendingOp,
     setArcRadius, setConstraintValue, removeConstraintById, onArcDimClick, onConstraintMarkClick,
     commitDimension,
+    // copy / paste / select all / dissolve a point (pen stage 6)
+    copySelection, pasteState, paste, copySvg, selectAll, dissolveState, dissolvePoint,
     // Clean up (pen stage 5)
     cleanup, toggleCleanup, startCleanup, applyCleanup, cancelCleanup, toggleCleanupFix, toggleCleanupKind, setCleanupStrength,
     // history
