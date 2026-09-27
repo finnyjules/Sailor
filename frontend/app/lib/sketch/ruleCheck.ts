@@ -1,35 +1,44 @@
 // app/lib/sketch/ruleCheck.ts
-// Pen stage 6: can this rule be added?
-//   "already"  — the same rule is there, or the others already imply it (its
-//                Jacobian rows add no rank round the rule, and it holds now);
-//   "conflict" — it would move what it can't, the trial solve fails, or a
-//                line, arc or circle collapses;
-//   otherwise "ok". Coincident is checked as the merge it is.
+// Pen stage 6: can this rule be added? Four verdicts:
+//   "ok"       — it can be added.
+//   "already"  — Already true: an equivalent rule is there, or the rule holds
+//                now AND the others provably imply it (its Jacobian rows lie
+//                in the span of rules that sit wholly inside the window round
+//                it — so the dependency holds in the whole drawing, not just
+//                with the window's edge held). Callers grey it out.
+//   "conflict" — Conflicts with another rule, and only when that is certain:
+//                a merge of two fixed points apart; a trial solve that fails
+//                on a region holding the rule's whole connected part (nothing
+//                outside it could have helped); or a trial solve that settled
+//                but collapsed a line, arc or circle. Callers grey it out.
+//   "unsure"   — no window small enough to solve quickly could settle it, and
+//                its part is too big to solve whole (the solver is dense: a
+//                150-piece part takes seconds). Never refuse on a guess
+//                (controller ruling): callers treat "unsure" as ALLOWED — the
+//                pick goes through the pen's normal apply, as the rules row
+//                does.
+// Coincident is checked as the merge it is.
 //
 // Two checks (controller ruling C1 — the menus must open fast):
 //   quickRuleCheck — for the menu, the wheel and Properties' + list: no solve.
-//     Already true by an equivalent rule, or by "holds now and adds no rank";
-//     a merge of two fixed points apart conflicts; everything else is "ok".
+//     "already" as above; "conflict" only for a merge of two fixed points
+//     apart; everything else "ok".
 //   checkRule — on demand (a rule picked or hovered): the same, plus a trial
 //     solve of the stage-5 window round the rule (cleanup/guards windowOf /
 //     solveWindow, everything outside held), widening once — to the rule's
 //     connected part when it is small, else a wider window — when the window
 //     can't converge or its answer collapses a piece. Never a big drawing.
-// The rank is taken over the window's free scalars (points outside held) — a
-// rule independent there is independent in the whole drawing; one dependent
-// there is, near enough, implied by what is round it.
 // Pure: the drawing is never changed (every trial runs on a copy).
-import type { SketchDoc, SketchConstraint, EntityId } from './model'
+import type { SketchDoc, SketchConstraint, SketchEntity, EntityId } from './model'
 import { cloneDoc } from './clone'
 import { constraintResiduals } from './residuals'
 import { equivalentRuleKey, type RuleSpec } from './tangency'
 import { mergePoints } from './trim'
-import { componentOf, windowOf, windowOfPart, solveWindow, lineCollapsed, type Baseline } from './cleanup/guards'
-import { GUARD } from './cleanup/types'
+import { componentOf, windowOf, windowOfPart, solveWindow, reachesBeyond, lineCollapsed, type Baseline } from './cleanup/guards'
 import { RowBasis, freeSlots, rowsFor } from './cleanup/rank'
 
 export type MergeSpec = { merge: [EntityId, EntityId] }   // [keep, gone]
-export type RuleCheck = 'ok' | 'already' | 'conflict'
+export type RuleCheck = 'ok' | 'already' | 'conflict' | 'unsure'
 export interface RuleCheckOptions {
   /** drawing units per screen px — when given, a straight piece squeezed
    *  under 2 px (Clean up's lineCollapsed guard) is a collapse too */
@@ -37,7 +46,7 @@ export interface RuleCheckOptions {
 }
 
 /** How many hops round the rule its rank is taken over (a little wider than
- *  the solve window, so what the window's edge holds weighs less). */
+ *  the solve window, so more of the rules round it sit wholly inside). */
 const RANK_HOPS = 3
 
 type Pt = { x: number; y: number }
@@ -94,17 +103,6 @@ function span(doc: SketchDoc): number {
   for (const e of doc.entities) if (e.kind === 'point') { x0 = Math.min(x0, e.x); y0 = Math.min(y0, e.y); x1 = Math.max(x1, e.x); y1 = Math.max(y1, e.y) }
   return Number.isFinite(x0) ? Math.hypot(x1 - x0, y1 - y0) : 0
 }
-function maxMove(before: SketchDoc, after: SketchDoc): number {
-  const was = pointMap(before)
-  let m = 0
-  for (const e of after.entities) {
-    if (e.kind !== 'point') continue
-    const p = was.get(e.id)
-    if (p) m = Math.max(m, Math.hypot(e.x - p.x, e.y - p.y))
-  }
-  return m
-}
-
 function asRule(spec: RuleSpec): SketchConstraint {
   return { id: '__check', kind: spec.kind, refs: [...spec.refs], ...(spec.value != null ? { value: spec.value } : {}) }
 }
@@ -112,13 +110,39 @@ function isThere(doc: SketchDoc, spec: RuleSpec): boolean {
   const key = equivalentRuleKey(doc, spec)
   return doc.constraints.some(c => equivalentRuleKey(doc, c) === key)
 }
-// the rule's rows raise the rank of the rows already there, over the free
-// scalars of the window round it (everything outside the window held)
+// the points an id stands for (as cleanup/guards reads them): a point, a
+// line's ends, a circle's centre and its radius (the circle id), a path's
+// anchors, arc centres and handles
+function pointsOf(map: ReadonlyMap<EntityId, SketchEntity>, id: EntityId): EntityId[] {
+  const e = map.get(id)
+  if (!e) return [id]
+  if (e.kind === 'point') return [e.id]
+  if (e.kind === 'line') return [e.p1, e.p2]
+  if (e.kind === 'circle') return [e.center, e.id]
+  const out = [...e.anchors]
+  for (const s of e.segments) {
+    if (s.kind === 'arc') out.push(s.center)
+    else if (s.kind === 'cubic') { if (s.h1) out.push(s.h1); if (s.h2) out.push(s.h2) }
+  }
+  return out
+}
+// the rule's rows raise the rank of the rules that sit wholly inside the
+// window `win` (every scalar they read is a window scalar or a fixed point).
+// Those rows are zero outside the window, so a rule they span is spanned in
+// the whole drawing — "adds nothing" is certain. A rule reaching past the
+// window's edge is left out: counting it with its far end held could hide
+// freedom the rule would still take (then this says "adds", i.e. "ok").
 function addsRank(doc: SketchDoc, rule: SketchConstraint, win: ReadonlySet<EntityId>): boolean {
   const slots = freeSlots({ entities: doc.entities.filter(e => win.has(e.id)), constraints: [] }, new Set())
   if (!slots.length) return false
+  const map = new Map(doc.entities.map(e => [e.id, e]))
+  const inside = (c: SketchConstraint) => c.refs.every(r => pointsOf(map, r).every(p => {
+    if (win.has(p)) return true
+    const q = map.get(p)
+    return q?.kind === 'point' && !!q.fixed
+  }))
   const basis = new RowBasis(slots.length)
-  for (const row of rowsFor(doc, slots, doc.constraints)) basis.add(row)
+  for (const row of rowsFor(doc, slots, doc.constraints.filter(inside))) basis.add(row)
   let adds = false
   for (const row of rowsFor(doc, slots, [rule])) if (basis.add(row)) adds = true
   return adds
@@ -156,31 +180,43 @@ export function quickRuleCheck(doc: SketchDoc, spec: RuleSpec | MergeSpec): Rule
  *  most PART_SLOTS free scalars, else a wider window of WIDE_HOPS hops. The
  *  solver is dense and a failing solve runs all its iterations — a 150-piece
  *  part (~300 scalars) takes seconds, far too slow for a hover (C1) — so a
- *  big part that neither window can settle is called a conflict. */
+ *  big part that neither window can settle is "unsure", not a conflict. */
 const WIDE_HOPS = 4
 const PART_SLOTS = 60
 
-// a trial solve round `seeds`, widening as above when the window can't
-// converge or collapses a piece; `fresh` builds a new trial copy for each
-// step. The solved copy, or null.
-function trialSolve(fresh: () => SketchDoc, seeds: EntityId[], before: Map<string, Size>, opts: RuleCheckOptions): SketchDoc | null {
-  const settled = (win: (t: SketchDoc) => Set<EntityId>): SketchDoc | null => {
+// a trial solve round `seeds`; `fresh` builds a new trial copy for each step.
+// "ok" when a step settles with nothing collapsed; "conflict" when a step
+// settles but collapses a piece and no wider step settles cleanly, or a step
+// whose window holds the seeds' whole connected part fails; else "unsure".
+function trialSolve(fresh: () => SketchDoc, seeds: EntityId[], before: Map<string, Size>, opts: RuleCheckOptions): 'ok' | 'conflict' | 'unsure' {
+  let sawCollapse = false
+  let whole = false
+  const settled = (win: (t: SketchDoc) => Set<EntityId>): boolean => {
     const trial = fresh()
-    return solveWindow(trial, win(trial), new Set()) && !collapsed(before, trial, opts) ? trial : null
+    const part = componentOf(trial, seeds)
+    const w = win(trial)
+    whole = !reachesBeyond(part, w)
+    if (!solveWindow(trial, w, new Set())) return false
+    if (collapsed(before, trial, opts)) { sawCollapse = true; return false }
+    return true
   }
-  return settled(t => windowOf(t, seeds))
-    ?? settled(t => {
+  if (settled(t => windowOf(t, seeds))) return 'ok'
+  if (!whole) {
+    const ok = settled(t => {
       const part = componentOf(t, seeds)
       return freeSlots(part, new Set()).length <= PART_SLOTS ? windowOfPart(part) : windowOf(t, seeds, WIDE_HOPS)
     })
+    if (ok) return 'ok'
+  }
+  return whole || sawCollapse ? 'conflict' : 'unsure'
 }
 
-/** The full check, on demand (a rule picked or hovered — C1): an equivalent
- *  rule there → "already"; a merge refused (two fixed points apart) →
- *  "conflict"; else a trial solve round the rule (the window, then a small
- *  connected part or a wider window) that fails or collapses a piece →
- *  "conflict"; a rule that adds rank → "ok"; one that doesn't → "already" when the trial moved
- *  nothing (over 1e-5 of the drawing's size), else "conflict". */
+/** The full check, on demand (a rule picked or hovered — C1). An equivalent
+ *  rule there, or one that holds now and provably adds nothing →
+ *  "already"; a merge refused (two fixed points apart) → "conflict"; else
+ *  the trial solve's verdict (trialSolve): "ok", a certain "conflict", or
+ *  "unsure" (callers allow it). A rule that settles is "ok" even when its
+ *  rows add no rank — the solve found a drawing where every rule holds. */
 export function checkRule(doc: SketchDoc, spec: RuleSpec | MergeSpec, opts: RuleCheckOptions = {}): RuleCheck {
   const before = sizes(doc)
   if ('merge' in spec) {
@@ -189,12 +225,10 @@ export function checkRule(doc: SketchDoc, spec: RuleSpec | MergeSpec, opts: Rule
     if (fixedApart(doc, keep, gone)) return 'conflict'
     const merged = cloneDoc(doc)
     if (!mergePoints(merged, gone, keep)) return 'conflict'
-    return trialSolve(() => cloneDoc(merged), [keep], before, opts) ? 'ok' : 'conflict'
+    return trialSolve(() => cloneDoc(merged), [keep], before, opts)
   }
   if (isThere(doc, spec)) return 'already'
   const rule = asRule(spec)
-  const solved = trialSolve(() => { const t = cloneDoc(doc); t.constraints.push({ ...rule, refs: [...rule.refs] }); return t }, spec.refs, before, opts)
-  if (!solved) return 'conflict'
-  if (addsRank(doc, rule, windowOf(doc, spec.refs, RANK_HOPS))) return 'ok'
-  return maxMove(doc, solved) <= 1e-5 * Math.max(1, span(doc)) ? 'already' : 'conflict'
+  if (holdsNow(doc, rule) && !addsRank(doc, rule, windowOf(doc, spec.refs, RANK_HOPS))) return 'already'
+  return trialSolve(() => { const t = cloneDoc(doc); t.constraints.push({ ...rule, refs: [...rule.refs] }); return t }, spec.refs, before, opts)
 }

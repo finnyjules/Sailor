@@ -193,13 +193,52 @@ describe('speed on a 150-piece connected drawing (C1)', () => {
     const par = ruleSpecFor(d, [], [{ pathId: P, segIndex: 40 }, { pathId: P, segIndex: 90 }], { kind: 'parallel', label: '' })!
     const hor = ruleSpecFor(d, [pts[20]!, pts[120]!], [], { kind: 'horizontal', label: '' })!
     // two pieces of pinned, different lengths made equal: every window fails
-    // and the part is too big to solve — the slowest path, still a conflict
+    // and the part is too big to solve — the slowest path; not certain, so
+    // "unsure" (allowed), never a guessed conflict
     const eq = ruleSpecFor(d, [], [{ pathId: P, segIndex: 40 }, { pathId: P, segIndex: 90 }], { kind: 'equalDist', label: '' })!
-    for (const [s, want] of [[par, 'ok'], [hor, 'ok'], [eq, 'conflict']] as const) {
+    for (const [s, want] of [[par, 'ok'], [hor, 'ok'], [eq, 'unsure']] as const) {
       let r = ''
       const ms = best(3, () => { r = checkRule(d, s) })
       expect(r).toBe(want)
       expect(ms).toBeLessThan(100)
     }
+  })
+})
+
+// a rigid strip of 150 triangles (every piece's length and every second
+// point's distance pinned), free to turn and slide as a whole
+function rigidStrip(): { d: SketchDoc; pts: EntityId[] } {
+  const d = empty()
+  const pts: EntityId[] = []
+  for (let i = 0; i <= 150; i++) pts.push(addPoint(d, i * 2, (i % 2) * 1.5))
+  addPath(d, pts, pts.slice(1).map(() => ({ kind: 'line' as const })))
+  const at = (id: EntityId) => d.entities.find(e => e.id === id) as any
+  const len = (a: EntityId, b: EntityId) => Math.hypot(at(a).x - at(b).x, at(a).y - at(b).y)
+  for (let i = 0; i < 150; i++) addConstraint(d, 'distance', [pts[i]!, pts[i + 1]!], len(pts[i]!, pts[i + 1]!))
+  for (let i = 0; i < 149; i++) addConstraint(d, 'distance', [pts[i]!, pts[i + 2]!], len(pts[i]!, pts[i + 2]!))
+  return { d, pts }
+}
+
+describe('never refuse on a guess (controller ruling)', () => {
+  it('a rule only the whole big drawing can settle is unsure, not a conflict', () => {
+    const { d, pts } = rigidStrip()
+    // turning the whole strip levels its two far ends — no window can
+    const spec = { kind: 'horizontal' as const, refs: [pts[0]!, pts[149]!] }
+    expect(checkRule(d, spec)).toBe('unsure')
+    expect(quickRuleCheck(d, spec)).toBe('ok')
+  })
+  it('a rule true now that the window’s edge would seem to imply, but that still locks the turn, is fine', () => {
+    const { d, pts } = rigidStrip()
+    const spec = { kind: 'horizontal' as const, refs: [pts[0]!, pts[2]!] }   // level now
+    expect(quickRuleCheck(d, spec)).toBe('ok')
+    expect(checkRule(d, spec)).toBe('ok')
+  })
+  it('a pinned length truly implied inside the strip is already true', () => {
+    const { d, pts } = rigidStrip()
+    const at = (id: EntityId) => d.entities.find(e => e.id === id) as any
+    const v = Math.hypot(at(pts[10]!).x - at(pts[13]!).x, at(pts[10]!).y - at(pts[13]!).y)
+    const spec = { kind: 'distance' as const, refs: [pts[10]!, pts[13]!], value: v }
+    expect(quickRuleCheck(d, spec)).toBe('already')
+    expect(checkRule(d, spec)).toBe('already')
   })
 })
