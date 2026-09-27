@@ -34,10 +34,15 @@
  *  - Gemini Omni Flash with a last frame, or reference pictures, videos or
  *    sounds, in its options: its endpoints take one first frame at most, so
  *    the node is refused (geminiOmniFlash.ts GEMINI_OMNI_FLASH_ONE_PICTURE);
- *  - Veo 3.1, Veo 3.1 Fast and Veo 3.1 Lite with a last frame, or reference
- *    pictures, videos or sounds, in their options (F6 follow-up): their shared
- *    builder takes one first frame at most, so the node is refused on
- *    Generate a video and on Film a shot (video.ts VEO_31_ONE_PICTURE);
+ *  - Veo 3.1 Lite with a last frame, or reference pictures, videos or sounds,
+ *    in its options (F6 follow-up): its builder takes one first frame at
+ *    most, so the node is refused on Generate a video and on Film a shot
+ *    (video.ts VEO_31_ONE_PICTURE). Veo 3.1 and Veo 3.1 Fast, headed for the
+ *    runner (RUNNER_VIDEO_MODEL_IDS — they are always taken by the runner
+ *    when it is on), take up to 3 reference pictures instead (Task 2,
+ *    veo31RefsProblem); on the ComfyUI /prompt gate (opts.runner unset —
+ *    Python never sends references) they keep the same full refusal as
+ *    Lite. Film a shot stays ComfyUI-only for all three (Task 4);
  *  - HappyHorse 1.1 (F18) with a last frame, or reference pictures, videos or
  *    sounds, in its options: its endpoints take one first frame at most and no
  *    sound (happyHorse11.ts HAPPYHORSE_11_ONE_PICTURE); and its text-to-video
@@ -116,11 +121,11 @@
  */
 import { isLink, type ApiNode, type ApiPrompt } from '#shared/runner/graph'
 import { withStaticWiredValues } from '#shared/runner/staticValues'
-import { classUpgradeOn, resolveVideoModelId } from '#shared/runner/eligibility'
+import { RUNNER_VIDEO_MODEL_IDS, classUpgradeOn, resolveVideoModelId } from '#shared/runner/eligibility'
 import { NO_FAMILIES, type RunnerFamily } from '#shared/runner/families'
 import { LARGEST_INPUT_PIXELS, sizePricedInput } from '#shared/pricing/editSettings'
 import { nodeImagePrompt } from './generators/image'
-import { RUNNER_VIDEO_MODELS, VEO_31_ONE_PICTURE, veo31HasExtras } from './generators/video'
+import { RUNNER_VIDEO_MODELS, VEO_31_ONE_PICTURE, veo31HasExtras, veo31RefsProblem } from './generators/video'
 import { H3_MAX_TURBO_APP, H3_MAX_TURBO_ENDPOINTS, H3_MAX_TURBO_ID, H3_MAX_TURBO_NEEDS_PROMPT } from './generators/h3MaxTurbo'
 import {
   GEMINI_OMNI_FLASH_ID, GEMINI_OMNI_FLASH_ONE_PICTURE, GEMINI_OMNI_FLASH_TEXT_TO_VIDEO,
@@ -700,9 +705,20 @@ export function requestProblems(prompt: ApiPrompt, opts: { runner?: boolean } = 
         const p = wan3RequestProblem(id, inputs)
         if (p) out.push({ nodeId, classType: ct, input: p.input, message: p.message })
       }
-      // Veo 3.1 (all three): one first frame at most (their builder refuses the same at planning).
-      if (VEO_31_MODEL_IDS.includes(id) && !isLink(inputs.model_options) && veo31HasExtras(parseJsonObject(inputs.model_options))) {
-        out.push({ nodeId, classType: ct, input: 'model_options', message: VEO_31_ONE_PICTURE })
+      // Veo 3.1 and Veo 3.1 Fast, headed for the runner (always taken by it when the runner is
+      // on: RUNNER_VIDEO_MODEL_IDS), take up to 3 reference pictures (Task 2, their builder refuses
+      // the same at planning); Veo 3.1 Lite, and the ComfyUI /prompt gate for all three (opts.runner
+      // unset — Python never sends references), keep the old one-first-frame-at-most rule.
+      if (VEO_31_MODEL_IDS.includes(id) && !isLink(inputs.model_options)) {
+        const adv = parseJsonObject(inputs.model_options)
+        if (opts.runner && (RUNNER_VIDEO_MODEL_IDS as readonly string[]).includes(id)) {
+          const hasFirst = isLink(inputs.image) || !!firstFrame(null, adv)
+          const p = veo31RefsProblem(adv, hasFirst)
+          if (p) out.push({ nodeId, classType: ct, input: 'model_options', message: p })
+        }
+        else if (veo31HasExtras(adv)) {
+          out.push({ nodeId, classType: ct, input: 'model_options', message: VEO_31_ONE_PICTURE })
+        }
       }
       // Gemini Omni Flash: one first frame at most (its builder refuses the same at planning).
       if (id === GEMINI_OMNI_FLASH_ID && !isLink(inputs.model_options) && hasMediaExtras(parseJsonObject(inputs.model_options), { lastFrame: true })) {

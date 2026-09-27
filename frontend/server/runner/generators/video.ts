@@ -39,22 +39,55 @@ const H3_PEM_BASE = new Set(['disabled', 'fast', 'balanced', 'quality'])
 const H3_PEM_MAX = new Set(['disabled', 'balanced', 'quality'])
 
 /**
- * Veo 3.1, Veo 3.1 Fast and Veo 3.1 Lite (veo31Lite.ts) take one picture at
- * most, the first frame: their builder sends no last frame and no references.
- * So a last frame (`end_image_url`) or reference pictures, videos or sounds
- * left in the node's options are refused in plain words, never dropped
- * (requestRules.ts judges the same before the hold, on both paths).
+ * Veo 3.1 Lite (veo31Lite.ts) takes one picture at most, the first frame: its
+ * builder sends no last frame and no references. So a last frame
+ * (`end_image_url`) or reference pictures, videos or sounds left in the
+ * node's options are refused in plain words, never dropped (requestRules.ts
+ * judges the same before the hold, on both paths). Veo 3.1 and Veo 3.1 Fast
+ * (this file's `veo31`) took the same rule until Task 2 (characters stage 3):
+ * on the runner, they now take up to 3 reference pictures instead
+ * (`veo31RefsProblem`, `fal-ai/veo3.1/reference-to-video`); the ComfyUI path
+ * (Python, which never sends references) still refuses with this message.
  */
 export const VEO_31_ONE_PICTURE
   = 'Veo 3.1 starts from one picture at most. Remove the last frame and any reference pictures, videos or sounds, or pick another model.'
 
-/** True when the options carry what Veo 3.1's builder can't send: a last frame, or reference pictures, videos or sounds. */
+/** True when the options carry what Veo 3.1 Lite's builder can't send: a last frame, or reference pictures, videos or sounds. */
 export function veo31HasExtras(adv: Record<string, unknown>): boolean {
   return hasMediaExtras(adv, { lastFrame: true })
 }
 
+/**
+ * Veo 3.1 and Veo 3.1 Fast's own rule (Task 2): up to 3 reference pictures
+ * (`image_urls`), OR one first frame, not both; no last frame, and no
+ * reference videos or sounds (fal's reference-to-video takes pictures only).
+ */
+export const VEO_31_REFS_WORDS
+  = 'Veo 3.1 takes up to 3 reference pictures, or one first frame — not both, and no last frame, clips or sounds. Remove the extras or pick another model.'
+
+/** null when the options fit Veo 3.1's own rule; else VEO_31_REFS_WORDS. */
+export function veo31RefsProblem(adv: Record<string, unknown>, hasFirstFrame: boolean): string | null {
+  const pics = Array.isArray(adv.image_urls) ? adv.image_urls.length : 0
+  const clips = ['video_urls', 'audio_urls'].some(k => Array.isArray(adv[k]) && (adv[k] as unknown[]).length > 0)
+  if (adv.end_image_url || clips || pics > 3 || (pics > 0 && hasFirstFrame)) return VEO_31_REFS_WORDS
+  return null
+}
+
 function veo31({ prompt, aspectRatio, duration, seed, image, adv }: VideoBuildArgs) {
-  if (veo31HasExtras(adv)) throw new Error(VEO_31_ONE_PICTURE)
+  const p = veo31RefsProblem(adv, !!(image || adv.image_url))
+  if (p) throw new Error(p)
+  const pics = Array.isArray(adv.image_urls) ? adv.image_urls as unknown[] : []
+  if (pics.length) {
+    return {
+      prompt,
+      image_urls: pics,
+      aspect_ratio: arOr(VEO_AR, aspectRatio, '16:9'),
+      duration: '8s',
+      resolution: lowerEnum(adv, 'resolution', VEO_RESOLUTIONS, '720p'),
+      generate_audio: optBool(adv, 'generate_audio', true),
+      auto_fix: optBool(adv, 'enhance_prompt', true),
+    }
+  }
   const inp: Record<string, unknown> = {
     prompt,
     duration: `${durOr([4, 6, 8], duration, 8)}s`,
@@ -131,8 +164,8 @@ function hailuoH3Core(a: VideoBuildArgs, pemAllowed: ReadonlySet<string>, resolu
 }
 
 export const RUNNER_VIDEO_MODELS: Record<string, VideoModelDesc> = {
-  'veo-3.1': { id: 'veo-3.1', label: 'Veo 3.1', app: 'fal-ai/veo3.1', defaultDuration: 8, fnByMode: { t2v: '', firstLast: 'image-to-video', reference: 'image-to-video' }, build: veo31 },
-  'veo-3.1-fast': { id: 'veo-3.1-fast', label: 'Veo 3.1 Fast', app: 'fal-ai/veo3.1/fast', defaultDuration: 8, fnByMode: { t2v: '', firstLast: 'image-to-video', reference: 'image-to-video' }, build: veo31 },
+  'veo-3.1': { id: 'veo-3.1', label: 'Veo 3.1', app: 'fal-ai/veo3.1', defaultDuration: 8, fnByMode: { t2v: '', firstLast: 'image-to-video', reference: 'reference-to-video' }, build: veo31 },
+  'veo-3.1-fast': { id: 'veo-3.1-fast', label: 'Veo 3.1 Fast', app: 'fal-ai/veo3.1/fast', defaultDuration: 8, fnByMode: { t2v: '', firstLast: 'image-to-video', reference: 'reference-to-video' }, build: veo31 },
   'flux-3': { id: 'flux-3', label: 'FLUX 3', app: 'blackforestlabs/flux-3', defaultDuration: 10, fnByMode: { t2v: 'text-to-video', firstLast: 'image-to-video', reference: 'image-to-video' }, build: flux3 },
   'seedance-2.0': { id: 'seedance-2.0', label: 'Seedance 2.0', app: 'bytedance/seedance-2.0', defaultDuration: 5, fnByMode: { t2v: 'text-to-video', firstLast: 'image-to-video', reference: 'reference-to-video' }, build: seedance20 },
   'hailuo-h3': { id: 'hailuo-h3', label: 'Hailuo H3', app: 'minimax/h3', defaultDuration: 5, fnByMode: { t2v: 'text-to-video', firstLast: 'image-to-video', reference: 'reference-to-video' }, build: a => hailuoH3Core(a, H3_PEM_BASE, H3_RES) },

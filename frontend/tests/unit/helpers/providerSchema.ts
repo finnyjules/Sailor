@@ -39,7 +39,7 @@ const ANNOTATIONS = new Set([
 ])
 /** Keywords this checker applies. */
 const VALIDATORS = new Set([
-  '$ref', 'type', 'enum', 'minimum', 'maximum', 'exclusiveMinimum', 'exclusiveMaximum',
+  '$ref', 'type', 'enum', 'const', 'minimum', 'maximum', 'exclusiveMinimum', 'exclusiveMaximum',
   'minLength', 'maxLength', 'pattern', 'required', 'properties', 'additionalProperties',
   'items', 'minItems', 'maxItems', 'anyOf', 'allOf',
 ])
@@ -116,6 +116,11 @@ function check(fixture: ProviderSchemaFixture, schema: Schema, v: unknown, path:
     if (!options.some(o => show(o) === show(v)) && !(v === null && schema.nullable === true)) {
       errs.push(`${at(path)}: ${show(v)} is not one of ${options.map(show).join(', ')}`)
     }
+  }
+
+  // `const` (fal-ai/veo3.1/reference-to-video's fixed 8 s duration): the sent value must equal it exactly.
+  if (has(schema, 'const') && show(v) !== show(schema.const)) {
+    errs.push(`${at(path)}: ${show(v)} is not ${show(schema.const)}`)
   }
 
   if (typeof v === 'number') {
