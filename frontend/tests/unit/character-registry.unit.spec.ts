@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
-  healRefImages, parseCharacterRecord, sanitizeBodyShape, slugifyCharacterName, validRefFilename,
+  checkHygiene, faceRefHygiene, garmentHygiene, healRefImages, parseCharacterRecord, photoHygiene,
+  sanitizeBodyShape, slugifyCharacterName, stateHygiene, validRefFilename, voiceHygiene,
   type CharacterRecord,
   type CharacterState,
 } from '~~/server/utils/characterRegistry'
@@ -8,14 +9,16 @@ import {
 function V(over: Partial<CharacterState> = {}): CharacterState {
   return {
     id: 'default', label: 'Default', descriptor: '', refImages: ['a.png'], coverIndex: 0,
-    panels: [], sheetImage: null, status: 'draft', stressResult: null, updatedAt: '', ...over,
+    panels: [], sheetImage: null, clothes: [], face: null, status: 'draft', stressResult: null, updatedAt: '', ...over,
   }
 }
 
 function rec(over: Partial<CharacterRecord> = {}): CharacterRecord {
   return {
     name: 'Reva', slug: 'reva', states: [V()],
-    loraName: null, trigger: null, bodyShape: null, notes: '', createdAt: 't', updatedAt: 't', ...over,
+    loraName: null, trigger: null, bodyShape: null, notes: '', createdAt: 't', updatedAt: 't',
+    face: null, photos: [], voice: null, origin: 'photos', likenessConfirmed: false, style: 'photo', linkedFrom: null,
+    ...over,
   }
 }
 
@@ -197,5 +200,53 @@ describe('three-era migration', () => {
     expect(s.panels).toEqual([{ slot: 'portrait', filename: 'p.png' }])
     expect(s.sheetImage).toBe(null)
     expect(s.status).toBe('draft')   // locked promise broken — back to draft
+  })
+})
+
+describe('rework field hygiene', () => {
+  it('checkHygiene keeps a well-formed check and drops junk', () => {
+    expect(checkHygiene({ verdict: 'match', score: 97.2, against: 'f.png', at: 't' }))
+      .toEqual({ verdict: 'match', score: 97.2, against: 'f.png', at: 't' })
+    expect(checkHygiene({ verdict: 'nope', against: 'f.png', at: 't' })).toBeNull()
+    expect(checkHygiene({ verdict: 'match', against: '../x', at: 't' })).toBeNull()
+    expect(checkHygiene({ verdict: 'unsure', score: 250, against: 'f.png', at: 't' })!.score).toBe(100)
+    expect(checkHygiene(null)).toBeNull()
+  })
+  it('faceRefHygiene needs a safe filename', () => {
+    expect(faceRefHygiene({ filename: 'f.png', approvedAt: 't' })).toEqual({ filename: 'f.png', approvedAt: 't' })
+    expect(faceRefHygiene({ filename: 'a/b.png' })).toBeNull()
+  })
+  it('photoHygiene keeps check and a clamped crop', () => {
+    expect(photoHygiene({ filename: 'p.png', check: null, crop: { x: -1, y: 0.2, w: 0.5, h: 2 } }))
+      .toEqual({ filename: 'p.png', check: null, crop: { x: 0, y: 0.2, w: 0.5, h: 1 } })
+    expect(photoHygiene({ filename: '' })).toBeNull()
+  })
+  it('garmentHygiene needs id, filename and a name', () => {
+    expect(garmentHygiene({ id: 'g1', filename: 'coat.png', name: 'Green waxed raincoat' }))
+      .toEqual({ id: 'g1', filename: 'coat.png', name: 'Green waxed raincoat' })
+    expect(garmentHygiene({ id: 'g1', filename: 'coat.png', name: '  ' })).toBeNull()
+  })
+  it('voiceHygiene accepts stock and trained voices only', () => {
+    expect(voiceHygiene({ kind: 'stock', id: 'warm', label: 'Warm, low' })).toEqual({ kind: 'stock', id: 'warm', label: 'Warm, low' })
+    expect(voiceHygiene({ kind: 'cloned', id: 'x', label: 'x' })).toBeNull()
+  })
+  it('stateHygiene carries clothes, look face and panel checks', () => {
+    const s = stateHygiene({
+      id: 'default', label: 'Everyday',
+      clothes: [{ id: 'g1', filename: 'coat.png', name: 'Raincoat' }, { id: 'bad' }],
+      face: { filename: 'heavier.png', approvedAt: 't' },
+      panels: [{ slot: 'portrait', filename: 'p.png', check: { verdict: 'match', score: 99, against: 'f.png', at: 't' },
+        madeFrom: { face: 'f.png', clothesKey: 'g1', bodyKey: '', model: 'gpt-image-2.5-sunburst' } }],
+    })!
+    expect(s.clothes).toEqual([{ id: 'g1', filename: 'coat.png', name: 'Raincoat' }])
+    expect(s.face).toEqual({ filename: 'heavier.png', approvedAt: 't' })
+    expect(s.panels[0]!.check!.verdict).toBe('match')
+    expect(s.panels[0]!.madeFrom!.model).toBe('gpt-image-2.5-sunburst')
+  })
+  it('stateHygiene gives an old look empty clothes and no face', () => {
+    const s = stateHygiene({ id: 'default', label: 'Default', panels: [{ slot: 'portrait', filename: 'p.png' }] })!
+    expect(s.clothes).toEqual([])
+    expect(s.face).toBeNull()
+    expect(s.panels[0]!.check ?? null).toBeNull()
   })
 })

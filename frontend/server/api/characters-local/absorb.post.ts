@@ -70,6 +70,7 @@ export default defineEventHandler(async (event) => {
     const record: CharacterRecord = {
       name: c.name,
       slug: bySlug,
+      face: null, photos: [], voice: null, origin: 'photos', likenessConfirmed: false, style: 'photo', linkedFrom: null,
       loraName: c.weightsFilename,
       trigger: c.trigger,
       bodyShape: null,

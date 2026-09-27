@@ -146,6 +146,7 @@ export async function linkTrainedCharacter(opts: { displayName: string, weightsF
     const record: CharacterRecord = {
       name: displayName,
       slug: newSlug,
+      face: null, photos: [], voice: null, origin: 'photos', likenessConfirmed: false, style: 'photo', linkedFrom: null,
       states: [emptyState('default', 'Default')],
       loraName: weightsFilename,
       trigger,
@@ -163,6 +164,7 @@ export async function linkTrainedCharacter(opts: { displayName: string, weightsF
   const record: CharacterRecord = {
     name: displayName,
     slug,
+    face: null, photos: [], voice: null, origin: 'photos', likenessConfirmed: false, style: 'photo', linkedFrom: null,
     states: [emptyState('default', 'Default')],
     loraName: weightsFilename,
     trigger,

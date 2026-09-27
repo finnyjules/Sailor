@@ -19,6 +19,7 @@ export default defineEventHandler(async (event) => {
   const now = new Date().toISOString()
   const record: CharacterRecord = {
     name, slug,
+    face: null, photos: [], voice: null, origin: 'photos', likenessConfirmed: false, style: 'photo', linkedFrom: null,
     states: [emptyState('default', 'Default')],
     loraName: null, trigger: null, bodyShape: null, notes: '', createdAt: now, updatedAt: now,
   }
