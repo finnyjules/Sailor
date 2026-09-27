@@ -2,7 +2,7 @@
 // frontend/tests/unit/frame-layout-grid-editor.unit.spec.ts
 import { describe, it, expect } from 'vitest'
 import { reactive } from 'vue'
-import { useLocalLayerEditor } from '~/composables/useLocalLayerEditor'
+import { useLocalLayerEditor, canSpanColumns, canSpanRows } from '~/composables/useLocalLayerEditor'
 import { createRectLayer, createTextLayer, textVAlignCenterOffset } from '~/composables/useCompositorLayers'
 import { patchLayoutGrid } from '~/lib/frame/layoutGrid'
 import { textMetrics } from '~/lib/frame/textMetrics'
@@ -320,5 +320,91 @@ describe('a box with nothing in reach rounds its top to the baseline grid', () =
     drag(b, b.localLayers.value[0]!.id, 7)
     const lb = b.localLayers.value[0] as any
     expect(lb.y * HD - (lb.h * WD) / 2).toBeCloseTo(378 + o + 14, 6)
+  })
+})
+
+describe('spans in the editor', () => {
+  it('layerGridBox is the box in design px; for text it runs from the capitals to the last baseline', () => {
+    const rect = createRectLayer({ x: 0.5, y: 0.5, w: 0.2, h: 0.1 })
+    const text = createTextLayer({ text: 'One\nTwo', fontSize: 0.04, boxW: 0.4, valign: 'top', x: 0.5, y: 0.3 } as any)
+    const { ed } = rowsEditor({ sailor_localLayers: [rect, text] })
+    const b = ed.layerGridBox(rect)
+    expect(b.x).toBeCloseTo(0.5 * WD - 0.1 * WD, 6)
+    expect(b.w).toBeCloseTo(0.2 * WD, 6)
+    expect(b.y).toBeCloseTo(0.5 * HD - 0.05 * WD, 6)
+    expect(b.h).toBeCloseTo(0.1 * WD, 6)
+    const m = marksAt(text, 0.3)
+    const t = ed.layerGridBox(text)
+    expect(t.y).toBeCloseTo(m.capTop, 6)
+    expect(t.h).toBeCloseTo(m.baselines[1]! - m.capTop, 6)
+  })
+  it('typing a column moves the left edge onto it, in one undo step', () => {
+    const rect = createRectLayer({ x: 0.5, y: 0.5, w: 0.2, h: 0.1 })
+    const { ed } = rowsEditor({ sailor_localLayers: [rect] })
+    const g = ed.layoutGridResolved.value
+    const rev = ed.historyRev()
+    ed.setLayerSpan(rect.id, { col: 3 })
+    const l = ed.localLayers.value[0] as any
+    expect((l.x - l.w / 2) * WD).toBeCloseTo(g.cols[2]!.a, 6)
+    expect(l.w).toBeCloseTo(0.2, 9)
+    expect(ed.historyRev()).toBe(rev + 1)
+    ed.undo()
+    expect((ed.localLayers.value[0] as any).x).toBeCloseTo(0.5, 9)
+  })
+  it('typing a span resizes a box to those columns and rows', () => {
+    const rect = createRectLayer({ x: 0.5, y: 0.5, w: 0.2, h: 0.1 })
+    const { ed } = rowsEditor({ sailor_localLayers: [rect] })
+    const g = ed.layoutGridResolved.value
+    ed.setLayerSpan(rect.id, { col: 2, cols: 4 })
+    ed.setLayerSpan(rect.id, { cols: 4 })
+    ed.setLayerSpan(rect.id, { row: 2 })
+    ed.setLayerSpan(rect.id, { rows: 3 })
+    const l = ed.localLayers.value[0] as any
+    expect((l.x - l.w / 2) * WD).toBeCloseTo(g.cols[1]!.a, 6)
+    expect(l.w * WD).toBeCloseTo(g.cols[4]!.a + g.cols[4]!.w - g.cols[1]!.a, 6)
+    expect(l.y * HD - (l.h * WD) / 2).toBeCloseTo(g.rows[1]!.a, 6)
+    expect(l.h * WD).toBeCloseTo(g.rows[3]!.a + g.rows[3]!.w - g.rows[1]!.a, 6)
+    expect(ed.layerSpan(l)).toEqual({ col: 2, cols: 4, row: 2, rows: 3 })
+  })
+  it('text: a row puts its capitals on the row top; a column span gives it a box; a row span changes nothing', () => {
+    const text = createTextLayer({ text: 'Grid', fontSize: 0.04, x: 0.5, y: 0.4 } as any)   // boxless, centred
+    const { ed } = rowsEditor({ sailor_localLayers: [text] })
+    const g = ed.layoutGridResolved.value
+    ed.setLayerSpan(text.id, { row: 4 })
+    let l = ed.localLayers.value[0] as any
+    expect(marksAt(l, l.y).capTop).toBeCloseTo(g.rows[3]!.a, 6)
+    ed.setLayerSpan(text.id, { col: 1, cols: 3 })
+    ed.setLayerSpan(text.id, { cols: 3 })
+    l = ed.localLayers.value[0] as any
+    expect(l.boxW * WD).toBeCloseTo(g.cols[2]!.a + g.cols[2]!.w - g.cols[0]!.a, 6)
+    const rev = ed.historyRev()
+    ed.setLayerSpan(text.id, { rows: 3 })
+    expect(ed.historyRev()).toBe(rev)
+  })
+  it('who can span what', () => {
+    expect(canSpanColumns(createRectLayer({}))).toBe(true)
+    expect(canSpanRows(createRectLayer({}))).toBe(true)
+    expect(canSpanColumns(createTextLayer({}))).toBe(true)
+    expect(canSpanRows(createTextLayer({}))).toBe(false)
+    expect(canSpanColumns(createTextLayer({ runs: [{ text: 'a', x: 0, y: 0 }] } as any))).toBe(false)
+    expect(canSpanColumns({ kind: 'wired', w: 0.3 } as any)).toBe(true)
+    expect(canSpanRows({ kind: 'wired', w: 0.3 } as any)).toBe(false)
+    expect(canSpanColumns({ kind: 'line', w: 0.3 } as any)).toBe(false)
+  })
+  it('selectedTextMarks: the selected text\'s capitals and baselines while the grid is shown', () => {
+    const rect = createRectLayer({ x: 0.5, y: 0.7, w: 0.2, h: 0.1 })
+    const text = createTextLayer({ text: 'One\nTwo', fontSize: 0.04, boxW: 0.4, valign: 'top', x: 0.5, y: 0.3 } as any)
+    const { ed } = rowsEditor({ sailor_localLayers: [rect, text] })
+    ed.selectLocal(rect.id)
+    expect(ed.selectedTextMarks.value).toBeNull()
+    ed.selectLocal(text.id)
+    const m = marksAt(text, 0.3)
+    const s = ed.selectedTextMarks.value!
+    expect(s.capTop).toBeCloseTo(m.capTop, 6)
+    expect(s.baselines).toHaveLength(2)
+    expect(s.x).toBeCloseTo(0.5 * WD - 0.2 * WD, 6)
+    expect(s.w).toBeCloseTo(0.4 * WD, 6)
+    ed.setLayoutGrid({ ...ed.layoutGrid.value, show: false }, false)
+    expect(ed.selectedTextMarks.value).toBeNull()
   })
 })

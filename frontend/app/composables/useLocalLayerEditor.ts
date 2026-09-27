@@ -31,7 +31,7 @@ import { imageUrlToFile } from '~/lib/canvas/imageUrlToFile'
 import { syncAllWiredWidgets, wiredLayerHeight, type ContentDims } from '~/lib/compositor/wiredLayer'
 import { inject, type Ref } from 'vue'
 import type { BrandKit } from '~~/shared/brand/types'
-import { readLayoutGrid, resolveLayoutGrid, layoutGridProperty, type LayoutGrid, type ResolvedLayoutGrid } from '~/lib/frame/layoutGrid'
+import { readLayoutGrid, resolveLayoutGrid, layoutGridProperty, spanOf, placeOnSpan, type LayoutGrid, type LayoutSpan, type ResolvedLayoutGrid } from '~/lib/frame/layoutGrid'
 import { textMetrics } from '~/lib/frame/textMetrics'
 import { textSnapY, baselineRoundDy, resnapReach, type TextMarks } from '~/lib/frame/gridSnap'
 import { formatFor } from '~/lib/frame/formats'
@@ -140,6 +140,16 @@ export function cornerResizableKind(kind: string): boolean {
 export function textBoxResizable(l: { kind: string; boxW?: number; boxH?: number; runs?: unknown[] } | null | undefined): boolean {
   if (!l || l.kind !== 'text' || l.runs?.length) return false
   return ((l.boxW ?? 0) > 0) || ((l.boxH ?? 0) > 0)
+}
+/** A layer whose WIDTH can be set to a span of columns (the Layer section's column Span): boxes,
+ *  wired layers (the height follows) and flowing text (it gets a text box of that width). */
+export function canSpanColumns(l: { kind: string; runs?: unknown[]; path?: unknown }): boolean {
+  if (l.kind === 'text') return !l.runs?.length && !l.path
+  return resizableKind(l.kind) || l.kind === 'wired'
+}
+/** A layer whose HEIGHT can be set to a span of rows: boxes only (text and wired follow their content). */
+export function canSpanRows(l: { kind: string }): boolean {
+  return resizableKind(l.kind)
 }
 
 /** Compute handle positions (corners, edges, rotation, center) from box geometry
@@ -1158,6 +1168,62 @@ export function useLocalLayerEditor(opts: EditorOpts) {
     commit(localLayers.value.map(l => (patches.has(l.id) ? stripOwner({ ...l, ...patches.get(l.id)! } as LocalLayer) : l)))
   }
 
+  // ── Where a layer sits on the grid (the Layer section's Column / Span, Row / Span) ─────────
+  /** The layer's box in grid (design) px. Text runs from its capitals to its last baseline, so its
+   *  rows are counted from the capitals (spec "The editor"). */
+  function layerGridBox(l: LocalLayer): { x: number; y: number; w: number; h: number } {
+    const W = dims().w, H = dims().h
+    const { w: Wd, h: Hd } = gridDims()
+    const b = boxPx(l)
+    const kx = Wd / W, ky = Hd / H
+    const w = b.w * kx, h = b.h * ky
+    const x = l.x * Wd - w / 2
+    const marks = gridTextMarks(l, l.y)
+    if (marks) return { x, y: marks.capTop, w, h: Math.max(1, marks.baselines[marks.baselines.length - 1]! - marks.capTop) }
+    const cy = (l.y * H + textVAlignCenterOffset(l, b.h)) * ky
+    return { x, y: cy - h / 2, w, h }
+  }
+  function layerSpan(l: LocalLayer): LayoutSpan {
+    return spanOf(layerGridBox(l), layoutGridResolved.value)
+  }
+  /** Move (Column, Row) or resize (Span) a layer onto the grid, in one undo step. A span the layer
+   *  can't take (text rows, a line's columns) changes nothing and records nothing. */
+  function setLayerSpan(id: string, p: Partial<LayoutSpan>) {
+    const l = localLayers.value.find(x => x.id === id); if (!l) return
+    const g = layoutGridResolved.value
+    const { w: Wd, h: Hd } = gridDims()
+    const box = layerGridBox(l)
+    const place = placeOnSpan({ ...spanOf(box, g), ...p }, g)
+    const patch: Record<string, number> = {}
+    if (p.col != null || (p.cols != null && canSpanColumns(l))) {
+      const spanCols = p.cols != null && canSpanColumns(l)
+      const w = spanCols ? place.w : box.w
+      patch.x = (place.x + w / 2) / Wd                    // every kind's x is its box centre
+      if (spanCols) patch[l.kind === 'text' ? 'boxW' : 'w'] = w / Wd
+    }
+    if (place.y != null && (p.row != null || (p.rows != null && canSpanRows(l)))) {
+      if (l.kind === 'text') patch.y = l.y + (place.y - box.y) / Hd   // the capitals to the row top
+      else {
+        const spanRows = p.rows != null && canSpanRows(l)
+        const h = spanRows ? place.h! : box.h
+        patch.y = (place.y + h / 2) / Hd                  // boxes: no valign offset
+        if (spanRows) patch.h = h / Wd                    // h is normalised to width
+      }
+    }
+    if (!Object.keys(patch).length) return
+    recordHistory()
+    commit(localLayers.value.map(x => (x.id === id ? stripOwner({ ...x, ...patch } as LocalLayer) : x)))
+  }
+  /** The single selected text's capitals and baselines (grid px) with its box's x and width — the
+   *  overlay's accent marks. Null unless the grid is shown and exactly one flowing text is selected. */
+  const selectedTextMarks = computed(() => {
+    if (!layoutGrid.value.show || selectedIds.value.size > 1) return null
+    const l = selected.value; if (!l) return null
+    const m = gridTextMarks(l, l.y); if (!m) return null
+    const b = layerGridBox(l)
+    return { capTop: m.capTop, baselines: m.baselines, x: b.x, w: b.w }
+  })
+
   // Consumer binds these to the artboard element (capture phase recommended so
   // it wins over node-drag). Returns true if it handled (hit a layer).
   // `forcedId` lets the caller supply the hit layer from a more accurate (e.g.
@@ -1302,5 +1368,6 @@ export function useLocalLayerEditor(opts: EditorOpts) {
     localGroups, commitBoth, writeGroups, setLayerGroup, setGroupParent, selectGroupById,
     snapGuides, marquee, startMarquee, moveMarquee, endMarquee,
     resnapSelected,
+    layerGridBox, layerSpan, setLayerSpan, selectedTextMarks,
   }
 }
