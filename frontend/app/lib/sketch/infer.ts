@@ -172,7 +172,7 @@ export function arcThroughTangent(J: Vec2, end: Vec2, tangentDir: Vec2): { cente
 }
 
 // circumcircle center of three points (null if collinear)
-function circumcenter(a: Vec2, b: Vec2, c: Vec2): Vec2 | null {
+export function circumcenter(a: Vec2, b: Vec2, c: Vec2): Vec2 | null {
   const dcp = (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x)
   if (Math.abs(dcp) < 1e-9) return null
   const a2 = a.x * a.x + a.y * a.y, b2 = b.x * b.x + b.y * b.y, c2 = c.x * c.x + c.y * c.y

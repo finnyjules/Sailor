@@ -42,7 +42,7 @@
 import { ref, shallowRef, computed, toRaw, type Ref } from 'vue'
 import type { SketchDoc, SketchConstraint, EntityId, ConstraintKind, SegmentSpec, PathEntity } from '~/lib/sketch/model'
 import { addPoint, addLine, addCircle, addConstraint, removeConstraint, deleteEntity, addPath, pointClosure, isPointReferenced, addSmoothHandles } from '~/lib/sketch/edit'
-import { snapPoint, snapRule, snapPreviewKind, inferCircleTangents, tangentJointArc, sweepFor, type SnapPreviewKind, type PointSnap } from '~/lib/sketch/infer'
+import { snapPoint, snapRule, snapPreviewKind, inferCircleTangents, tangentJointArc, sweepFor, circumcenter, type SnapPreviewKind, type PointSnap } from '~/lib/sketch/infer'
 import { solve, type DragTarget } from '~/lib/sketch/solve'
 import { bowTangentSnap, pieceOf, tangentRuleFor, curveKey, type BowTangentSnap } from '~/lib/sketch/tangency'
 import { dist, type Vec2 } from '~/lib/sketch/geom'
@@ -60,7 +60,7 @@ import {
 import { createPenHistory } from './penHistory'
 import { handlePenKey, type PenKeyContext, NUDGE_PX, NUDGE_PX_SHIFT, screenDeltaToDrawing } from './penKeys'
 import { createPenCopies, type PendingOp } from './penCopies'
-import { nearestCurve, spanAt, curveGeom, type Span, type CurveGeom } from '~/lib/sketch/crossings'
+import { nearestCurve, spanAt, curveGeom, paramOf, pointAt, type Span, type CurveGeom } from '~/lib/sketch/crossings'
 import { removeSpan, removeSegment, cutAt, canDissolve, dissolveAt, mergePoints, sameKey } from '~/lib/sketch/trim'
 
 // NUDGE_PX / NUDGE_PX_SHIFT / screenDeltaToDrawing now live in penKeys.ts
@@ -409,6 +409,7 @@ export function usePen(opts: {
   const { commitHistory, initHistory, canUndo, canRedo } = penHistory
   function undo() {
     if (trimPress) trimUp()   // a live Trim press settles before stepping back over it
+    if (arcDrag) arcDragEnd()   // so does a live arc drag
     if (!penHistory.undo()) return
     clearSel()
     clearSegSel()
@@ -424,6 +425,7 @@ export function usePen(opts: {
   }
   function redo() {
     if (trimPress) trimUp()
+    if (arcDrag) arcDragEnd()
     if (!penHistory.redo()) return
     clearSel()
     clearSegSel()
@@ -707,10 +709,14 @@ export function usePen(opts: {
   // proxy reference can end up embedded), so build the plain snapshot explicitly
   // instead. Only positions/radii are copied back afterward — solve never changes
   // entity/constraint structure.
-  function runSolve(drag?: DragTarget) {
+  // `hold`: points treated as fixed for this solve only (the snapshot's copy
+  // is marked; `fixed` is never copied back to the drawing).
+  function runSolve(drag?: DragTarget, hold?: EntityId[]) {
+    const held = hold && hold.length ? new Set(hold) : null
     const plain: SketchDoc = {
       entities: doc.value.entities.map(e => ({
         ...toRaw(e),
+        ...(held && e.kind === 'point' && held.has(e.id) ? { fixed: true } : {}),
         ...(e.kind === 'path' ? { anchors: [...e.anchors], segments: e.segments.map(s => ({ ...toRaw(s) })) } : {}),
       })),
       constraints: doc.value.constraints.map(c => ({ ...toRaw(c), refs: [...c.refs] })),
@@ -1553,6 +1559,91 @@ export function usePen(opts: {
   }
   function cancelPointDrop(): void { dropSnap.value = null }
 
+  // --- Select: drag an arc's bow (or, with ⌘, its centre) ---
+  // A press on an arc segment that moves (PenOverlay) starts arcDragStart. Bow
+  // mode adds a transient guide point on the arc at the grab spot, pinned on
+  // it (equalDist [C, T, C, S]); each move solves with that point held at the
+  // pointer and the arc's ends held too — or, if that can't converge (a rule
+  // needs an end to move), with the ends free. Centre mode (⌘) moves the
+  // centre point by the pointer's movement. arcDragEnd removes the transient
+  // point and settles ONE history step (none when nothing moved). Plain
+  // state, like pathDrag: every write goes through setArcDrag or bumps
+  // pathDragTick, so arcDragTransient() stays reactive for the overlay.
+  type ArcDrag = {
+    pathId: EntityId; segIndex: number; centre: EntityId; ends: [EntityId, EntityId]
+    transient: EntityId | null; from: Vec2; centreFrom: Vec2; moved: boolean
+  } | null
+  let arcDrag: ArcDrag = null
+  function setArcDrag(v: ArcDrag) { arcDrag = v; pathDragTick.value++ }
+  function arcDragTransient(): EntityId | null { void pathDragTick.value; return arcDrag?.transient ?? null }
+
+  function arcDragStart(pathId: EntityId, segIndex: number, x: number, y: number, centre = false): boolean {
+    if (arcDrag) arcDragEnd()
+    const path = doc.value.entities.find(e => e.id === pathId)
+    if (!path || path.kind !== 'path') return false
+    const seg = path.segments[segIndex]
+    if (!seg || seg.kind !== 'arc') return false
+    const g = curveGeom(doc.value, { kind: 'seg', pathId, segIndex })
+    const c = doc.value.entities.find(e => e.id === seg.center)
+    if (!g || g.kind !== 'arc' || !c || c.kind !== 'point') return false
+    const a = path.anchors[segIndex]!, b = path.anchors[(segIndex + 1) % path.anchors.length]!
+    let transient: EntityId | null = null
+    if (!centre) {
+      const on = pointAt(g, paramOf(g, { x, y }))
+      transient = addPoint(doc.value, on.x, on.y, { construction: true })
+      addConstraint(doc.value, 'equalDist', [seg.center, transient, seg.center, a])
+    }
+    setArcDrag({ pathId, segIndex, centre: seg.center, ends: [a, b], transient, from: { x, y }, centreFrom: { x: c.x, y: c.y }, moved: false })
+    return true
+  }
+
+  // the transient point left the drawn arc (the pointer crossed the chord):
+  // flip the segment so the drawn arc runs under it again
+  function keepTransientOnArc(d: NonNullable<ArcDrag>) {
+    const t = doc.value.entities.find(e => e.id === d.transient)
+    const g = curveGeom(doc.value, { kind: 'seg', pathId: d.pathId, segIndex: d.segIndex })
+    if (!t || t.kind !== 'point' || !g || g.kind !== 'arc') return
+    const on = pointAt(g, paramOf(g, t))
+    if (dist(on, t) <= 1e-6 * Math.max(1, g.r!)) return
+    const path = doc.value.entities.find(e => e.id === d.pathId) as PathEntity
+    const seg = path.segments[d.segIndex]!
+    if (seg.kind === 'arc') path.segments[d.segIndex] = { ...seg, sweep: seg.sweep === 1 ? 0 : 1 }
+  }
+
+  function arcDragMove(x: number, y: number): void {
+    const d = arcDrag
+    if (!d) return
+    if (!d.transient) {
+      d.moved = true
+      runSolve({ point: d.centre, x: d.centreFrom.x + (x - d.from.x), y: d.centreFrom.y + (y - d.from.y) })
+    } else {
+      // warm start: the centre of the circle through both ends and the
+      // pointer — exactly the answer when nothing else ties the arc, and the
+      // only way across the chord (Gauss-Newton can't walk through the
+      // infinite radius in between)
+      const pa = doc.value.entities.find(e => e.id === d.ends[0])
+      const pb = doc.value.entities.find(e => e.id === d.ends[1])
+      const pc = doc.value.entities.find(e => e.id === d.centre)
+      if (!pa || pa.kind !== 'point' || !pb || pb.kind !== 'point' || !pc || pc.kind !== 'point') return
+      const cc = circumcenter({ x: pa.x, y: pa.y }, { x: pb.x, y: pb.y }, { x, y })
+      if (!cc || Math.hypot(cc.x - pa.x, cc.y - pa.y) > 1e4) return   // pointer on the chord line: no circle through it yet
+      d.moved = true
+      pc.x = cc.x; pc.y = cc.y
+      const res = runSolve({ point: d.transient, x, y }, d.ends)
+      if (!res.converged) runSolve({ point: d.transient, x, y })
+      keepTransientOnArc(d)
+    }
+    pathDragTick.value++
+  }
+
+  function arcDragEnd(): void {
+    const d = arcDrag
+    if (!d) return
+    setArcDrag(null)
+    if (d.transient && doc.value.entities.some(e => e.id === d.transient)) deleteEntity(doc.value, d.transient)
+    if (d.moved) { runSolve(); commitHistory() }
+  }
+
   // --- Trim / Cut / Dissolve (lib/sketch/crossings.ts + trim.ts) ---
   // Trim: hovering tints the piece of a curve between crossings under the
   // pointer (trimHover); a press removes it, and while the button is held
@@ -1965,6 +2056,7 @@ export function usePen(opts: {
 
   function selectTool(t: Tool) {
     if (!isToolAllowed(t)) return   // PenOptions.tools / openOnly: not a tool this host offers — no-op
+    if (arcDrag) arcDragEnd()   // a live arc drag settles as its own step
     // Pen ↔ Curve mid-path keeps drawing the same path: the next segment's kind
     // follows whichever of the two is active when its end point is placed
     if (pendingPath.value && isDrawTool(tool.value) && isDrawTool(t)) {
@@ -2010,6 +2102,7 @@ export function usePen(opts: {
   }
 
   function reset() {
+    setArcDrag(null)   // dropped, never settled — the drawing is thrown away
     resetEditTools()
     cleanupPendingPath()
     doc.value = { entities: [], constraints: [] }
@@ -2051,6 +2144,7 @@ export function usePen(opts: {
   // A half-armed Repeat/Mirror is dropped. Commits one history step iff the
   // doc changed.
   function finishSession(): void {
+    if (arcDrag) arcDragEnd()   // a live arc drag settles as its own step
     pendingOp.value = null
     if (pendingPath.value && pendingPath.value.anchors.length >= 2) {
       finishPath(false)
@@ -2073,6 +2167,7 @@ export function usePen(opts: {
   // cancel means "discard".
   function revert(): void {
     trimPress = null   // discarded with everything else — never settled onto the reverted drawing
+    setArcDrag(null)   // likewise a live arc drag
     penHistory.revert()   // doc.value = cloneDoc(opening); initHistory()
     clearTransient()
     status.value = 'ready'
@@ -2099,6 +2194,7 @@ export function usePen(opts: {
     setPathDrag(null)
     curveDrag.value = null
     if (trimPress) trimUp()   // the pieces already removed settle as their step
+    if (arcDrag) arcDragEnd()   // so does a live arc drag
     clearToolHover()
   }
 
@@ -2125,7 +2221,7 @@ export function usePen(opts: {
     // selection
     pick, clearSel, pickSegment, clearSegSel, marqueeSelect, marqueeSelectScreen, isPointId,
     // select-tool point drag, joining onto what it is dropped on
-    dragPoint, dropPoint, cancelPointDrop,
+    dragPoint, dropPoint, cancelPointDrop, arcDragStart, arcDragMove, arcDragEnd, arcDragTransient,
     // drawing
     place, pathDown, pathMove, pathUp, finishPath, cancelPath, removeLastAnchor, getPathDrag, jointInfoForSegment, bowPreview,
     curveDown, curveMove, curveUp, getCurveDrag, getHeldHandles, handleIds, endGesture,

@@ -93,6 +93,7 @@ const {
   onArcDimClick, onConstraintMarkClick, commitHistory, finishSession, endGesture,
   trimHover, trimHoverEnds, trimGhosts, cutHover, dissolveHover,
   trimDown, trimMove, trimUp, cutMove, cutClick, dissolveMove, dissolveClick, clearToolHover,
+  arcDragStart, arcDragMove, arcDragEnd, arcDragTransient,
 } = props.pen
 
 const svgEl = ref<SVGSVGElement | null>(null)
@@ -169,7 +170,7 @@ const visibleHandleIds = computed(() => {
 })
 const allHandleIds = computed(() => handleIds())
 const pts = computed(() => (doc.value.entities.filter(e =>
-  e.kind === 'point' && (!allHandleIds.value.has(e.id) || visibleHandleIds.value.has(e.id))) as any[])
+  e.kind === 'point' && e.id !== arcDragTransient() && (!allHandleIds.value.has(e.id) || visibleHandleIds.value.has(e.id))) as any[])
   .map(p => ({ p, s: toScreen(p), handle: allHandleIds.value.has(p.id), role: pointRoleOf(p) })))
 
 // screen-space arms (point → handle) for the handles on show
@@ -519,6 +520,14 @@ let moved = false
 // the anchor each move, so their arms keep shape
 let dragHandleIds: EntityId[] = []
 let dragLast: { x: number; y: number } | null = null
+// Select: a press on an arc segment, which becomes a bow drag (⌘ / Ctrl: a
+// centre drag) once it moves past the marquee threshold; `live` once the pen
+// has started the drag
+let arcPress: { pathId: EntityId; segIndex: number; x: number; y: number; wx: number; wy: number; centre: boolean; live: boolean } | null = null
+function isArcSegment(pathId: EntityId, segIndex: number): boolean {
+  const p = doc.value.entities.find(e => e.id === pathId) as any
+  return p?.kind === 'path' && p.segments[segIndex]?.kind === 'arc'
+}
 
 // select-tool marquee + click-empty-deselect. A pointerdown on EMPTY canvas
 // (entity/point pointerdowns stopPropagation first) starts a marquee
@@ -625,7 +634,14 @@ function onSegmentPointerDown(pathId: EntityId, segIndex: number, ev: PointerEve
   // a plain click selects the WHOLE path; Alt/Option-click drills in to the
   // single segment under the cursor for the per-segment verbs
   if (ev.altKey) pickSegment(pathId, segIndex, ev.shiftKey)
-  else pick(pathId, ev.shiftKey)
+  else {
+    pick(pathId, ev.shiftKey)
+    // a plain (or ⌘) press on an arc may become a bow (or centre) drag
+    if (!ev.shiftKey && isArcSegment(pathId, segIndex)) {
+      const w = drawingXY(ev), l = localXY(ev)
+      if (w) arcPress = { pathId, segIndex, x: l.x, y: l.y, wx: w.x, wy: w.y, centre: noJoinKey(ev), live: false }
+    }
+  }
   ev.stopPropagation()
 }
 function onPointerDownSvg(ev: PointerEvent) {
@@ -698,6 +714,18 @@ function onPointerMove(ev: PointerEvent) {
     penCursor.value = w ? { x: w.x, y: w.y, shift: ev.shiftKey } : null
     return
   }
+  if (arcPress && tool.value === 'select') {
+    if (ev.buttons === 0) return
+    const l = localXY(ev), w = drawingXY(ev)
+    if (!w) return
+    if (!arcPress.live) {
+      if (Math.hypot(l.x - arcPress.x, l.y - arcPress.y) <= MARQUEE_THRESHOLD_PX) return
+      arcPress.live = arcDragStart(arcPress.pathId, arcPress.segIndex, arcPress.wx, arcPress.wy, arcPress.centre)
+      if (!arcPress.live) { arcPress = null; return }
+    }
+    arcDragMove(w.x, w.y)
+    return
+  }
   if (!dragId || ev.buttons === 0) return
   const w = drawingXY(ev)
   if (!w) return
@@ -722,6 +750,15 @@ function onPointerMove(ev: PointerEvent) {
 function noJoinKey(ev: PointerEvent) { return ev.metaKey || ev.ctrlKey }
 function onPointerUp(ev: PointerEvent) {
   if (!props.active) return
+  // settle an arc press first (whatever the tool is by now — a tool key mid
+  // press already settled the pen's side): a live bow/centre drag is one
+  // step; a still press was only the path pick
+  if (arcPress) {
+    const live = arcPress.live
+    arcPress = null
+    if (live) arcDragEnd()
+    if (tool.value === 'select') return
+  }
   if (tool.value === 'trim') {
     const w = drawingXY(ev)
     if (w) trimUp(w.x, w.y)
@@ -787,6 +824,7 @@ watch(() => props.active, (on) => {
 // the overlay's own live gesture, settled: a marquee is dropped (no selection
 // change); a moved point drag commits as its own step with no join
 function settleOverlayGesture(): void {
+  if (arcPress) { if (arcPress.live) arcDragEnd(); arcPress = null }
   cancelMarquee()
   if (moved && tool.value === 'select') { if (dragId) dropPoint(dragId, true); else commitHistory() }
   dragId = null; dragHandleIds = []; dragLast = null; moved = false
