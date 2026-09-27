@@ -115,6 +115,41 @@ describe('seeds and sleeping fills', () => {
   })
 })
 
+describe('an opened area inside a closed shape', () => {
+  it('sleeps with two gap markers instead of handing its fill to the shape around it', () => {
+    const d = doc(); addCircle(d, addPoint(d, 2, 2), 10); const s = square(d, 0, 0, 4)
+    expect(toggleFillAt(d, { x: 1, y: 1 }, 0)).toBe(true)
+    let st = fillState(d)
+    expect(st.filled).toHaveLength(1)
+    expect(st.fs.faces[st.filled[0]!]!.area).toBeCloseTo(16, 6)
+    const path = d.entities.find(e => e.id === s.id) as { closed: boolean; segments: unknown[] }
+    path.closed = false; path.segments.pop()
+    st = fillState(d)
+    expect(st.filled).toHaveLength(0)
+    expect(st.asleep).toHaveLength(1)
+    expect(fillPathData(d)).toBe('')
+    expect(gapMarkers(d)).toHaveLength(2)
+  })
+})
+
+describe('the fill gap', () => {
+  it('a drawing with fills but no stored gap uses no gap, for hover too, and never pins one later', () => {
+    const d = doc(); square(d, 0, 0, 4)
+    // a C bent open by 0.1: closes at a gap of 0.2, not at 0
+    const ids = [[10, 0], [14, 0], [14, 4], [10, 4], [10, 0.1]].map(([x, y]) => addPoint(d, x!, y!))
+    addPath(d, ids, ids.slice(1).map(() => ({ kind: 'line' as const })))
+    expect(toggleFillAt(d, { x: 1, y: 1 }, 0)).toBe(true)
+    expect(d.fillGap).toBeUndefined()
+    expect(fillTarget(d, { x: 12, y: 2 }, 0.2)).toBeNull()
+    expect(toggleFillAt(d, { x: 12, y: 2 }, 0.2)).toBe(false)
+    expect(d.fillGap).toBeUndefined()
+    expect(d.fills).toHaveLength(1)
+    // before any fill, the hover's gap applies
+    const e = doc(); e.entities = d.entities; e.constraints = d.constraints
+    expect(fillTarget(e, { x: 12, y: 2 }, 0.2)).toMatchObject({ filled: false })
+  })
+})
+
 describe('storage', () => {
   it('a clone and a save / load keep fills; a drawing from before fills loads unchanged; broken seeds are dropped', () => {
     const d = doc(); square(d, 0, 0, 4); addCircle(d, addPoint(d, 10, 2), 1)
@@ -127,9 +162,15 @@ describe('storage', () => {
     const old = mergeSketchDoc(JSON.parse(JSON.stringify({ entities: d.entities, constraints: d.constraints })))
     expect('fills' in old).toBe(false); expect('fillGap' in old).toBe(false)
     expect(JSON.stringify(cloneDoc(old))).toBe(JSON.stringify(old))
-    const broken = JSON.parse(JSON.stringify(d)); broken.fills[0].seed.a = 'nope'; broken.fills[1].seed.side = 0
+    const broken = JSON.parse(JSON.stringify(d)); broken.fills[0].seed.a = 'nope'
     const b = mergeSketchDoc(broken)
-    expect(b.fills).toBeUndefined(); expect(b.fillGap).toBeUndefined()
+    expect(b.fills).toEqual([d.fills![1]]); expect(b.fillGap).toBe(0.2)
+    // (a load lists paths after the other entities, as it always has)
+    const byId = (a: { id: string }, z: { id: string }) => a.id.localeCompare(z.id)
+    expect([...b.entities].sort(byId)).toEqual([...d.entities].sort(byId)); expect(b.constraints).toEqual(d.constraints)
+    const allBroken = JSON.parse(JSON.stringify(d)); allBroken.fills[0].seed.a = 'nope'; allBroken.fills[1].seed.side = 0
+    const nb = mergeSketchDoc(allBroken)
+    expect(nb.fills).toBeUndefined(); expect(nb.fillGap).toBeUndefined()
   })
   it('withoutFills drops both fields and leaves the rest', () => {
     const d = doc(); square(d, 0, 0, 4); toggleFillAt(d, { x: 1, y: 1 }, 0.2)

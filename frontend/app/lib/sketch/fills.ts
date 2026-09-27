@@ -14,9 +14,16 @@ import { facesFor, faceAt, facesD, faceOfHalfEdge, facePieceKey, type FaceSet, t
  *  gap may be and still fill — Clean up's join distance. */
 export const FILL_GAP_PX = 6
 
+/** The gap a drawing's faces use: its stored gap; none when it has fills
+ *  but no stored gap (its first fill was made without one — a gap must never
+ *  appear later, at another zoom); `gapIfNone` only before its first fill. */
+function gapOf(doc: SketchDoc, gapIfNone: number): number {
+  return doc.fillGap ?? (doc.fills?.length ? 0 : gapIfNone)
+}
+
 /** The faces this drawing's fills live on (its stored gap). */
 export function fillFaces(doc: SketchDoc, gapIfNone = 0): FaceSet {
-  return facesFor(doc, doc.fillGap ?? gapIfNone)
+  return facesFor(doc, gapOf(doc, gapIfNone))
 }
 
 // ── seeds ↔ half-edges ─────────────────────────────────────────────────────
@@ -51,10 +58,15 @@ export function halfEdgeOfSeed(fs: FaceSet, s: FillSeed): number | null {
   return locateSeed(fs, s)?.h ?? null
 }
 
-/** The face a fill sits on now, or null (asleep). */
+/** The face a fill sits on now, or null (asleep). A seed counts only on a
+ *  face's OUTER cycle: one on a hole's outline (an area inside that opened)
+ *  sleeps rather than hand its fill to the area around it. seedForFace only
+ *  ever seeds an outer cycle. */
 export function resolveFill(fs: FaceSet, f: SketchFill): number | null {
   const h = halfEdgeOfSeed(fs, f.seed)
-  return h == null ? null : faceOfHalfEdge(fs, h)
+  if (h == null) return null
+  const face = faceOfHalfEdge(fs, h)
+  return face != null && fs.faces[face]!.outer === fs.cycleOf[h] ? face : null
 }
 
 /** A seed in the middle of half-edge h, on its left (its face's side). */
@@ -161,7 +173,7 @@ export function fillTarget(doc: SketchDoc, p: Vec2, gapIfNone: number): { face: 
 /** Click: fill the face under p, or empty it if it is filled. The first
  *  fill fixes the drawing's gap; the last one clears it. True if it changed. */
 export function toggleFillAt(doc: SketchDoc, p: Vec2, gapIfNone: number): boolean {
-  const gap = doc.fillGap ?? gapIfNone
+  const gap = gapOf(doc, gapIfNone)
   const fs = facesFor(doc, gap)
   const f = faceAt(fs, p)
   if (f == null) return false
