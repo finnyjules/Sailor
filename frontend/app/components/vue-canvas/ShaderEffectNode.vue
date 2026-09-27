@@ -3,6 +3,7 @@ import { ChevronRight, Pause, Play, Sparkles } from 'lucide-vue-next'
 import { computed, inject, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import ShaderEffectGallery from '~/components/vue-canvas/ShaderEffectGallery.vue'
 import { getTypeColor } from '~/composables/useVueNodes'
+import { useNodeGlass } from '~/composables/useCanvasGlass'
 import { assetUrl, fetchShaderFxCatalog, resolveEffectId, useShaderCatalog } from '~/lib/shaderfx/catalog'
 import { effectKindLabel } from '~/lib/shaderfx/gallery'
 import { walkShaderChain } from '~/lib/shaderfx/chain'
@@ -35,6 +36,9 @@ const props = defineProps<{
 const isMuted = computed(() => props.data.mode === 2)
 const isBypassed = computed(() => props.data.mode === 4)
 const imageColor = computed(() => getTypeColor('IMAGE'))
+
+// Real blur behind the glass shell when the canvas asks for it (data-glass-blur).
+const glass = useNodeGlass(() => props.id)
 
 function inputIdx(name: string): number { const i = props.data.inputs?.findIndex(inp => inp.name === name) ?? -1; return i >= 0 ? i : 0 }
 function outputIdx(name: string): number { const i = props.data.outputs?.findIndex(o => o.name === name) ?? -1; return i >= 0 ? i : 0 }
@@ -387,23 +391,21 @@ onBeforeUnmount(() => {
     <VueCanvasNodePort :id="`output-${imageOutIdx}`" type="source" side="right" :index="0" :data-type="'IMAGE'" label="image" />
 
   <div
-    class="shader-effect-node relative z-10 rounded-xl border w-[288px] select-none backdrop-blur-sm"
+    class="shader-effect-node node-shell relative z-10 w-[288px] select-none"
     :class="[
-      data.error ? 'border-red-500 ring-2 ring-red-500' : 'border-white/10',
+      data.error ? 'ring-2 ring-red-500' : '',
       { 'opacity-45 grayscale': isMuted, 'opacity-85': isBypassed },
     ]"
-    :style="{ background: 'linear-gradient(180deg, #252525 0%, #1e1e1e 100%)', '--port-color': imageColor } as any"
+    :style="{ '--port-color': imageColor } as any"
     :data-running="data.running || undefined"
+    :data-glass-blur="glass || undefined"
     @mouseenter="hovered = true"
     @mouseleave="hovered = false"
   >
     <!-- Header -->
-    <div
-      class="flex items-center gap-2 px-3 py-2 border-b border-white/5 rounded-t-xl"
-      :style="{ background: `linear-gradient(135deg, ${imageColor}15 0%, transparent 60%)` }"
-    >
+    <div class="flex items-center gap-2 px-3 py-2 border-b border-white/5">
       <Sparkles class="size-4 shrink-0 text-white/70" :stroke-width="1.75" />
-      <span class="text-xs font-semibold text-white/90 truncate flex-1">{{ effectDef?.name || 'Shader effect' }}</span>
+      <span class="text-[13px] font-semibold text-white/90 truncate flex-1">{{ effectDef?.name || 'Shader effect' }}</span>
       <button
         class="nopan nodrag shrink-0 size-5 rounded flex items-center justify-center text-white/55 hover:text-white/85 hover:bg-white/[0.08] transition-colors cursor-pointer"
         :title="playing ? 'Pause preview' : 'Play preview'" @click.stop="playing = !playing"
@@ -500,6 +502,7 @@ onBeforeUnmount(() => {
               :max="p.max"
               :step="p.step"
               :bindable="false"
+              size="comfortable"
             />
           </div>
         </template>
@@ -524,7 +527,6 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
-.shader-effect-node { box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4), 0 1px 4px rgba(0, 0, 0, 0.2); }
 .shader-effect-node[data-running] { box-shadow: 0 0 0 2px var(--port-color, #fff), 0 4px 16px rgba(0, 0, 0, 0.4); }
 .bg-checker {
   background-color: #141414;

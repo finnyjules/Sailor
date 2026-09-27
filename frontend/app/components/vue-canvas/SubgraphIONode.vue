@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { getTypeColor } from '~/composables/useVueNodes'
 import { minHeightForPorts } from '~/lib/canvas/portLayout'
+import { useNodeGlass } from '~/composables/useCanvasGlass'
 
 const props = defineProps<{
   id: string
@@ -17,6 +18,9 @@ const props = defineProps<{
 const portsMinHeight = computed(() =>
   minHeightForPorts(props.data.isInput ? props.data.outputs.length : props.data.inputs.length),
 )
+
+// Real blur behind the glass shell when the canvas asks for it (data-glass-blur).
+const glass = useNodeGlass(() => props.id)
 </script>
 
 <template>
@@ -36,13 +40,14 @@ const portsMinHeight = computed(() =>
     />
 
   <div
-    class="subgraph-io relative z-10 rounded-xl border border-white/30 select-none backdrop-blur-sm min-w-[180px]"
+    class="subgraph-io node-shell relative z-10 select-none min-w-[180px]"
+    :data-glass-blur="glass || undefined"
     :style="{
       // Absolutely positioned ports can't hold the node open themselves.
       minHeight: `${portsMinHeight}px`,
-      background: data.isInput
-        ? 'linear-gradient(180deg, rgba(255,255,255,0.06) 0%, rgba(30,30,30,0.95) 100%)'
-        : 'linear-gradient(180deg, rgba(255,255,255,0.06) 0%, rgba(30,30,30,0.95) 100%)',
+      // A visible border is a signal here (subgraph boundary), so it stays inline
+      // rather than folding into the shell's own even edge.
+      borderColor: 'rgba(255,255,255,0.3)',
     }"
   >
     <!-- Title bar -->
@@ -54,7 +59,7 @@ const portsMinHeight = computed(() =>
       <svg v-else class="size-3.5 text-white/70 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
         <polyline points="15 18 9 12 15 6" />
       </svg>
-      <span class="text-xs font-semibold truncate" :class="data.isInput ? 'text-white/70' : 'text-white/70'">
+      <span class="text-[13px] font-semibold truncate" :class="data.isInput ? 'text-white/70' : 'text-white/70'">
         {{ data.title }}
       </span>
     </div>
@@ -65,8 +70,3 @@ const portsMinHeight = computed(() =>
   </div>
 </template>
 
-<style scoped>
-.subgraph-io {
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4), 0 0 20px rgba(99, 102, 241, 0.08);
-}
-</style>

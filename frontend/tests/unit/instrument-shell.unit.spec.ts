@@ -29,3 +29,14 @@ describe('ComfyNode wears the instrument shell', () => {
     expect(t).toMatch(/flex flex-col gap-\[5px\]/)
   })
 })
+
+describe.each(['ComfyGateNode.vue', 'ShaderEffectNode.vue', 'SubgraphIONode.vue'])('%s wears the shell', (f) => {
+  const s = src(f), t = tpl(s)
+  it('root carries node-shell and asks for glass', () => {
+    expect(t).toMatch(/class="[^"]*\bnode-shell\b/)
+    expect(s).toMatch(/useNodeGlass\(/)
+  })
+  it('no rounded-xl border card of its own', () => {
+    expect(t).not.toMatch(/rounded-xl border/)
+  })
+})

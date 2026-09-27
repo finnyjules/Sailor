@@ -3,6 +3,7 @@ import { SkipBack, RotateCcw, Play, Pause } from 'lucide-vue-next'
 import { getTypeColor } from '~/composables/useVueNodes'
 import { initialTicks, continueLabel, viewUrl, isVideoFile } from '~/lib/runner/gateChoices'
 import { isRunnerPromptId } from '#shared/runner/messages'
+import { useNodeGlass } from '~/composables/useCanvasGlass'
 
 const props = defineProps<{
   id: string
@@ -49,6 +50,9 @@ function toggleBypass() {
   const vals = props.data.widgetsValues
   if (vals) vals[0] = !vals[0]
 }
+
+// Real blur behind the glass shell when the canvas asks for it (data-glass-blur).
+const glass = useNodeGlass(() => props.id)
 
 const isRunner = computed(() => isRunnerPromptId(props.data.promptId))
 const choices = computed(() => props.data.choices ?? [])
@@ -133,24 +137,22 @@ async function resumeGate(action: 'continue' | 'redo' | 'restart') {
     />
 
   <div
-    class="gate-node relative z-10 rounded-xl border border-white/10 w-[260px] select-none backdrop-blur-sm"
+    class="gate-node node-shell relative z-10 w-[260px] select-none"
     :class="{
       'ring-2 ring-red-500': data.error,
       'opacity-60': isBypassed,
     }"
     :data-running="data.running || data.paused || undefined"
+    :data-glass-blur="glass || undefined"
     :style="{
       '--border-color-left': borderColorLeft,
       '--border-color-right': borderColorRight,
     } as any"
   >
     <!-- Title bar (matches ComfyNode) -->
-    <div
-      class="flex items-center gap-2 px-3 py-2 border-b border-white/5"
-      :style="{ background: `linear-gradient(135deg, ${accentColor}15 0%, transparent 60%)` }"
-    >
+    <div class="flex items-center gap-2 px-3 py-2 border-b border-white/5">
       <div class="size-2 rounded-full shrink-0" :style="{ backgroundColor: accentColor }" />
-      <span class="text-xs font-semibold text-white/90 truncate flex-1">{{ data.title || 'Gate' }}</span>
+      <span class="text-[13px] font-semibold text-white/90 truncate flex-1">{{ data.title || 'Gate' }}</span>
     </div>
 
 
@@ -215,7 +217,7 @@ async function resumeGate(action: 'continue' | 'redo' | 'restart') {
       <!-- Action buttons (while paused; runner Gates also after the run, to continue again) -->
       <div v-if="showActions" class="flex items-center gap-1.5 nopan nodrag">
         <button
-          class="gate-btn flex items-center justify-center gap-1.5 flex-1 h-9 rounded bg-zinc-800 text-white/80 shadow-sm cursor-pointer hover:bg-zinc-700 transition-colors text-[11px] font-medium"
+          class="gate-btn node-btn flex-1 justify-center"
           data-tooltip="Re-run from the start"
           @click="resumeGate('restart')"
         >
@@ -224,7 +226,7 @@ async function resumeGate(action: 'continue' | 'redo' | 'restart') {
         </button>
         <button
           v-if="data.paused"
-          class="gate-btn flex items-center justify-center gap-1.5 flex-1 h-9 rounded bg-zinc-800 text-white/80 shadow-sm cursor-pointer hover:bg-zinc-700 transition-colors text-[11px] font-medium"
+          class="gate-btn node-btn flex-1 justify-center"
           data-tooltip="Redo last step"
           @click="resumeGate('redo')"
         >
@@ -232,7 +234,7 @@ async function resumeGate(action: 'continue' | 'redo' | 'restart') {
           <span>Redo</span>
         </button>
         <button
-          class="gate-btn flex items-center justify-center gap-1.5 flex-1 h-9 rounded bg-action text-white shadow-sm cursor-pointer hover:bg-action/85 transition-colors text-[11px] font-semibold disabled:opacity-40 disabled:cursor-not-allowed"
+          class="gate-btn node-btn node-btn--primary flex-1 justify-center disabled:opacity-40 disabled:cursor-not-allowed"
           :data-tooltip="data.paused ? 'Continue downstream' : 'Run the steps after this Gate again'"
           :disabled="!canContinue"
           @click="resumeGate('continue')"
@@ -247,11 +249,6 @@ async function resumeGate(action: 'continue' | 'redo' | 'restart') {
 </template>
 
 <style scoped>
-.gate-node {
-  background: linear-gradient(180deg, #252525 0%, #1e1e1e 100%);
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4), 0 1px 4px rgba(0, 0, 0, 0.2);
-}
-
 /* Sweeping glow border when running/paused */
 .gate-node[data-running] {
   --border-left: var(--border-color-left, #fff);
