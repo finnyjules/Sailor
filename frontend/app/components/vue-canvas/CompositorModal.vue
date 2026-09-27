@@ -7296,6 +7296,8 @@ function finishTipRelease(L: TipLive) {
  *  the box and record ONE history step. Also the path for the tool closing mid-stroke or
  *  mid-drip (B, Done, Escape, switching to Mask). */
 function commitTipStroke() {
+  // A snap edit still waiting for the next frame lands before the stroke ends.
+  if (tipLive?.down && tipLive.snapDirty) applySnap(tipLive)
   hideSnapUi()
   const L = tipLive; if (!L) return
   tipLive = null
