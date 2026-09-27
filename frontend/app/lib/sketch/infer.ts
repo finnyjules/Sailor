@@ -181,7 +181,7 @@ function circumcenter(a: Vec2, b: Vec2, c: Vec2): Vec2 | null {
   return { x: ux, y: uy }
 }
 
-function sweepFor(J: Vec2, end: Vec2, pointer: Vec2, C: Vec2): 0 | 1 {
+export function sweepFor(J: Vec2, end: Vec2, pointer: Vec2, C: Vec2): 0 | 1 {
   const TAU = Math.PI * 2
   const a0 = Math.atan2(J.y - C.y, J.x - C.x)
   const a1 = Math.atan2(end.y - C.y, end.x - C.x)

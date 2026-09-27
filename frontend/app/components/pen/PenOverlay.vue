@@ -48,7 +48,7 @@ import { addPoint } from '~/lib/sketch/edit'
 import { sketchPathData, entityPath } from '~/lib/sketch/sketchPath'
 import { constraintMarks, arcDimensionMarks } from '~/lib/sketch/annotate'
 import { applyView, invertView, viewToSvg, type ViewMatrix } from '~/lib/sketch/view'
-import { bowArc, spanPathD, SPARKLE_LIFETIME_MS, isTypingInField, type Pen } from '~/composables/pen/usePen'
+import { spanPathD, SPARKLE_LIFETIME_MS, isTypingInField, type Pen } from '~/composables/pen/usePen'
 import { pointRolesForDoc, type PointRole } from '~/lib/sketch/pointRoles'
 import { clampChipOrigin } from '~/lib/sketch/chipClamp'
 import { TOOL_KEYS } from '~/composables/pen/penKeys'
@@ -87,7 +87,7 @@ const {
   doc, tool, showLabels, status, selection, selectedSegments, pendingPath, pendingOp,
   cursor: penCursor, dimBuffer, sparkles, sparkleClock, placementPreview, hoverSnap,
   pick, clearSel, pickSegment, clearSegSel, marqueeSelectScreen, dragPoint, dropPoint,
-  place, pathDown, pathMove, pathUp, getPathDrag, jointInfoForSegment,
+  place, pathDown, pathMove, pathUp, getPathDrag, bowPreview,
   curveDown, curveMove, curveUp, getCurveDrag, getHeldHandles, handleIds,
   applyRepeat, applyMirror, cancelPendingOp,
   onArcDimClick, onConstraintMarkClick, commitHistory, finishSession, endGesture,
@@ -319,9 +319,9 @@ const previewD = computed(() => {
     if (!to) break
     if (bowing && i === segCount - 1) {
       // just-placed segment bowing live under the pointer
-      const p0 = worldPt(fromId)
-      const joint = jointInfoForSegment(pp, i)
-      const arc = (p0 && penCursor.value) ? bowArc(p0, to, penCursor.value, joint?.tangentDir ?? null) : null
+      // (bowPreview: the same arc the ghost circle shows and the release commits,
+      // tangent snap included)
+      const arc = bowPreview(penCursor.value)
       if (arc) d += ` A ${arc.r} ${arc.r} 0 ${arc.large} ${arc.sweep} ${to.x} ${to.y}`
       else d += ` L ${to.x} ${to.y}`
     } else if (seg.kind === 'arc') {
@@ -387,26 +387,26 @@ const previewDragHandles = computed(() => {
 // the dashed radius leader from the arc's centre to its bow midpoint. It also
 // carries the ghost circle (the arc's full circle, drawing space) and the
 // leader's ends (screen space). When the bow is joint-tangent-locked to the
-// previous segment (snappedTangent), it carries J's screen position for a "T" chip.
+// previous segment (snappedTangent), it carries J's screen position for a "T"
+// chip; when it snapped tangent onto nearby geometry, `touch` is where it touches.
 const pathBowChip = computed(() => {
   const pathDrag = getPathDrag()
   if (tool.value !== 'path' || !pathDrag || !pathDrag.bowed || !penCursor.value) return null
-  const pp = pendingPath.value
   const p0 = worldPt(pathDrag.prevAnchor)
-  const p1 = worldPt(pathDrag.anchor)
-  if (!p0 || !p1 || !pp) return null
-  const joint = jointInfoForSegment(pp, pp.segments.length - 1)
-  const arc = bowArc(p0, p1, penCursor.value, joint?.tangentDir ?? null)
-  if (!arc) return null
-  const mid = toScreen(arc.mid)
-  const c = toScreen(arc.center)
+  if (!p0) return null
+  const pv = bowPreview(penCursor.value)
+  if (!pv) return null
+  const mid = toScreen(pv.mid)
+  const c = toScreen(pv.center)
   const j = toScreen(p0)
   return {
     x: (c.x + mid.x) / 2, y: (c.y + mid.y) / 2,
-    center: arc.center, r: arc.r, cx: c.x, cy: c.y, midX: mid.x, midY: mid.y,
+    center: pv.center, r: pv.r, cx: c.x, cy: c.y, midX: mid.x, midY: mid.y,
     // type-a-dimension: a typed value (with a caret) replaces the measured radius
-    text: dimBuffer.value ? dimBuffer.value + '|' : `R ${arc.r.toFixed(1)}`,
-    snappedTangent: arc.snappedTangent, jointX: j.x, jointY: j.y,
+    text: dimBuffer.value ? dimBuffer.value + '|' : `R ${pv.r.toFixed(1)}`,
+    snappedTangent: pv.snappedTangent, jointX: j.x, jointY: j.y,
+    // snapped tangent onto nearby geometry: where it touches (screen)
+    touch: pv.touch ? toScreen(pv.touch.touch) : null,
   }
 })
 
@@ -447,6 +447,14 @@ const lineDim = computed(() => {
 // last line segment (usePen's right-angle snap)
 const rightAngleChip = computed(() => {
   if (tool.value !== 'path' || getPathDrag() || !placementPreview.value?.perpendicular) return null
+  const pp = pendingPath.value
+  return pp ? screenPt(pp.anchors[pp.anchors.length - 1]!) : null
+})
+
+// "T" chip at the joint while the next anchor is snapping onto the tangent of
+// the arc it leaves (usePen's snapArcTangent)
+const tangentChip = computed(() => {
+  if (tool.value !== 'path' || getPathDrag() || !placementPreview.value?.tangent) return null
   const pp = pendingPath.value
   return pp ? screenPt(pp.anchors[pp.anchors.length - 1]!) : null
 })
@@ -919,9 +927,9 @@ defineExpose({
     <circle v-for="(r, i) in trimHoverRings" :key="'trimring-' + i" :cx="r.x" :cy="r.y" r="4" fill="none"
             stroke="#ef4444" stroke-width="1.5" pointer-events="none" data-trim-ring />
     <!-- bowing: the arc's full circle, faint, in drawing space -->
-    <g v-if="pathBowChip" :transform="svgTransform" pointer-events="none" data-bow-ghost>
+    <g v-if="pathBowChip" :transform="svgTransform" pointer-events="none" data-bow-ghost :data-tangent="pathBowChip.touch ? '' : null">
       <circle :cx="pathBowChip.center.x" :cy="pathBowChip.center.y" :r="pathBowChip.r" fill="none"
-              stroke="#6366f1" stroke-width="1" stroke-dasharray="3 4" opacity="0.35" vector-effect="non-scaling-stroke" />
+              :stroke="pathBowChip.touch ? '#16a34a' : '#6366f1'" stroke-width="1" stroke-dasharray="3 4" :opacity="pathBowChip.touch ? 0.7 : 0.35" vector-effect="non-scaling-stroke" />
     </g>
     <g v-if="pathBowChip" pointer-events="none" data-bow-leader>
       <line :x1="pathBowChip.cx" :y1="pathBowChip.cy" :x2="pathBowChip.midX" :y2="pathBowChip.midY"
@@ -989,6 +997,11 @@ defineExpose({
       <rect :x="pathBowChip.jointX + 6" :y="pathBowChip.jointY - 16" width="16" height="14" rx="3" fill="#111827" opacity="0.85" />
       <text :x="pathBowChip.jointX + 9" :y="pathBowChip.jointY - 5" fill="#e5e7eb" font-size="10" font-family="ui-monospace, monospace">T</text>
     </g>
+    <g v-if="pathBowChip && pathBowChip.touch" pointer-events="none" data-bow-tangent>
+      <circle :cx="pathBowChip.touch.x" :cy="pathBowChip.touch.y" r="3" fill="none" stroke="#16a34a" stroke-width="1.5" />
+      <rect :x="pathBowChip.touch.x + 6" :y="pathBowChip.touch.y - 16" width="16" height="14" rx="3" fill="#111827" opacity="0.85" />
+      <text :x="pathBowChip.touch.x + 9" :y="pathBowChip.touch.y - 5" fill="#e5e7eb" font-size="10" font-family="ui-monospace, monospace">T</text>
+    </g>
     <g v-if="snapPreview" pointer-events="none" data-snap-preview :data-snap-kind="snapPreview.kind">
       <circle :cx="snapPreview.x" :cy="snapPreview.y" r="3" fill="none" stroke="#6366f1" stroke-width="1.5" />
       <rect :x="snapPreview.x - 22" :y="snapPreview.y - 16" width="16" height="14" rx="3" fill="#111827" opacity="0.85" />
@@ -1006,6 +1019,10 @@ defineExpose({
     <g v-if="rightAngleChip" pointer-events="none" data-right-angle>
       <rect :x="rightAngleChip.x + 6" :y="rightAngleChip.y - 16" width="16" height="14" rx="3" fill="#111827" opacity="0.85" />
       <text :x="rightAngleChip.x + 9" :y="rightAngleChip.y - 5" fill="#e5e7eb" font-size="10" font-family="ui-monospace, monospace">⊥</text>
+    </g>
+    <g v-if="tangentChip" pointer-events="none" data-tangent-chip>
+      <rect :x="tangentChip.x + 6" :y="tangentChip.y - 16" width="16" height="14" rx="3" fill="#111827" opacity="0.85" />
+      <text :x="tangentChip.x + 9" :y="tangentChip.y - 5" fill="#e5e7eb" font-size="10" font-family="ui-monospace, monospace">T</text>
     </g>
     <g v-if="lineDim" pointer-events="none" data-line-dim>
       <line :x1="lineDim.x1" :y1="lineDim.y1" :x2="lineDim.x2" :y2="lineDim.y2" stroke="#6366f1" stroke-width="1" opacity="0.7" />

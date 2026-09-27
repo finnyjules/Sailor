@@ -42,8 +42,9 @@
 import { ref, shallowRef, computed, toRaw, type Ref } from 'vue'
 import type { SketchDoc, SketchConstraint, EntityId, ConstraintKind, SegmentSpec, PathEntity } from '~/lib/sketch/model'
 import { addPoint, addLine, addCircle, addConstraint, removeConstraint, deleteEntity, addPath, pointClosure, isPointReferenced, addSmoothHandles } from '~/lib/sketch/edit'
-import { snapPoint, snapRule, snapPreviewKind, inferCircleTangents, tangentJointArc, type SnapPreviewKind, type PointSnap } from '~/lib/sketch/infer'
+import { snapPoint, snapRule, snapPreviewKind, inferCircleTangents, tangentJointArc, sweepFor, type SnapPreviewKind, type PointSnap } from '~/lib/sketch/infer'
 import { solve, type DragTarget } from '~/lib/sketch/solve'
+import { bowTangentSnap, pieceOf, tangentRuleFor, curveKey, type BowTangentSnap } from '~/lib/sketch/tangency'
 import { dist, type Vec2 } from '~/lib/sketch/geom'
 import { constraintMarks, type ConstraintMark, type ArcDimensionMark } from '~/lib/sketch/annotate'
 import { applyView, type ViewMatrix } from '~/lib/sketch/view'
@@ -125,18 +126,47 @@ export function snapPerpendicular(prevPrev: Vec2, prev: Vec2, pt: Vec2, tolRad: 
 // tangent-locked arc instead (see tangentJointArc / snappedTangent). Returns
 // null when no arc fits (near-collinear, or the circle would be enormous) —
 // callers fall back to a straight line in that case.
+// the SVG arc through J → end with this centre, on the pointer's side:
+// radius, sweep (1 = ccw in drawing coords, matching pathD), large-arc flag,
+// and the drawn arc's middle
+export function arcShape(J: Vec2, end: Vec2, pointer: Vec2, center: Vec2): { center: Vec2; r: number; sweep: 0 | 1; large: 0 | 1; mid: Vec2 } {
+  const TAU = Math.PI * 2
+  const r = Math.hypot(J.x - center.x, J.y - center.y)
+  const sweep = sweepFor(J, end, pointer, center)
+  const a0 = Math.atan2(J.y - center.y, J.x - center.x)
+  const a1 = Math.atan2(end.y - center.y, end.x - center.x)
+  const ccw = ((a1 - a0) % TAU + TAU) % TAU
+  const span = sweep === 1 ? ccw : TAU - ccw
+  const large: 0 | 1 = span > Math.PI ? 1 : 0
+  const am = sweep === 1 ? a0 + span / 2 : a0 - span / 2
+  return { center, r, sweep, large, mid: { x: center.x + r * Math.cos(am), y: center.y + r * Math.sin(am) } }
+}
+
 export function bowArc(J: Vec2, end: Vec2, pointer: Vec2, tangentDir: Vec2 | null): { center: Vec2; r: number; sweep: 0 | 1; large: 0 | 1; mid: Vec2; snappedTangent: boolean } | null {
   const arc = tangentJointArc(J, end, pointer, tangentDir)
   if (!arc || arc.radius > 1e4) return null
-  const TAU = Math.PI * 2
-  const a0 = Math.atan2(J.y - arc.center.y, J.x - arc.center.x)
-  const a1 = Math.atan2(end.y - arc.center.y, end.x - arc.center.x)
-  const ccw = ((a1 - a0) % TAU + TAU) % TAU
-  const span = arc.sweep === 1 ? ccw : TAU - ccw
-  const large: 0 | 1 = span > Math.PI ? 1 : 0
-  const am = arc.sweep === 1 ? a0 + span / 2 : a0 - span / 2
-  const mid = { x: arc.center.x + arc.radius * Math.cos(am), y: arc.center.y + arc.radius * Math.sin(am) }
-  return { center: arc.center, r: arc.radius, sweep: arc.sweep, large, mid, snappedTangent: arc.snappedTangent }
+  return { ...arcShape(J, end, pointer, arc.center), snappedTangent: arc.snappedTangent }
+}
+
+// what the Pen shows and commits while bowing: bowArc, then (unless the
+// joint's own tangency snapped) the tangent snap onto nearby geometry
+export interface BowPreview { center: Vec2; r: number; sweep: 0 | 1; large: 0 | 1; mid: Vec2; snappedTangent: boolean; touch: BowTangentSnap | null }
+
+// A line leaving an arc's end E (centre C, `sweep` as stored): when the
+// rubber band E→pt points forward within `tolRad` of the arc's direction of
+// travel at E, `pt` is projected onto that tangent line. Pure.
+export function snapArcTangent(C: Vec2, E: Vec2, sweep: 0 | 1, pt: Vec2, tolRad: number): { pt: Vec2; snapped: boolean } {
+  const rx = E.x - C.x, ry = E.y - C.y
+  const rl = Math.hypot(rx, ry)
+  const vx = pt.x - E.x, vy = pt.y - E.y
+  const vl = Math.hypot(vx, vy)
+  if (rl < 1e-9 || vl < 1e-9) return { pt, snapped: false }
+  const s = sweep === 1 ? 1 : -1
+  const tx = (-ry / rl) * s, ty = (rx / rl) * s   // travel direction at E
+  const along = vx * tx + vy * ty
+  if (along <= 0) return { pt, snapped: false }
+  if (Math.abs(vx * ty - vy * tx) / vl > Math.sin(tolRad)) return { pt, snapped: false }
+  return { pt: { x: E.x + tx * along, y: E.y + ty * along }, snapped: true }
 }
 
 // Tangent info at the shared anchor J = pp.anchors[segIndex], derived from
@@ -860,18 +890,25 @@ export function usePen(opts: {
   // PERP_SNAP_RAD of square to it, the placement lands exactly perpendicular.
   // `perpendicular` reports that it fired, so pathDown/pathClick can capture
   // the rule (capturePerpendicular) and the overlay can show its ⊥ chip.
-  function pathPlacement(x: number, y: number, shift: boolean): { x: number; y: number; perpendicular: boolean } {
+  function pathPlacement(x: number, y: number, shift: boolean): { x: number; y: number; perpendicular: boolean; tangent: boolean } {
     const pp = pendingPath.value
-    if (!pp || pp.anchors.length === 0) return { x, y, perpendicular: false }
+    if (!pp || pp.anchors.length === 0) return { x, y, perpendicular: false, tangent: false }
     const prev = doc.value.entities.find(e => e.id === pp.anchors[pp.anchors.length - 1]) as any
-    if (!prev || prev.kind !== 'point') return { x, y, perpendicular: false }
-    if (shift) return { ...snapAngle({ x: prev.x, y: prev.y }, { x, y }), perpendicular: false }
+    if (!prev || prev.kind !== 'point') return { x, y, perpendicular: false, tangent: false }
+    if (shift) return { ...snapAngle({ x: prev.x, y: prev.y }, { x, y }), perpendicular: false, tangent: false }
     const lastSeg = pp.segments[pp.segments.length - 1]
-    if (pp.anchors.length < 2 || !lastSeg || lastSeg.kind !== 'line') return { x, y, perpendicular: false }
+    // leaving an arc's end: snap onto its tangent (snapArcTangent)
+    if (lastSeg && lastSeg.kind === 'arc') {
+      const C = doc.value.entities.find(e => e.id === lastSeg.center) as any
+      if (!C || C.kind !== 'point') return { x, y, perpendicular: false, tangent: false }
+      const r = snapArcTangent({ x: C.x, y: C.y }, { x: prev.x, y: prev.y }, lastSeg.sweep, { x, y }, PERP_SNAP_RAD)
+      return { x: r.pt.x, y: r.pt.y, perpendicular: false, tangent: r.snapped }
+    }
+    if (pp.anchors.length < 2 || !lastSeg || lastSeg.kind !== 'line') return { x, y, perpendicular: false, tangent: false }
     const pprev = doc.value.entities.find(e => e.id === pp.anchors[pp.anchors.length - 2]) as any
-    if (!pprev || pprev.kind !== 'point') return { x, y, perpendicular: false }
+    if (!pprev || pprev.kind !== 'point') return { x, y, perpendicular: false, tangent: false }
     const r = snapPerpendicular({ x: pprev.x, y: pprev.y }, { x: prev.x, y: prev.y }, { x, y }, PERP_SNAP_RAD)
-    return { x: r.pt.x, y: r.pt.y, perpendicular: r.snapped }
+    return { x: r.pt.x, y: r.pt.y, perpendicular: r.snapped, tangent: false }
   }
   function pathPlacementXY(x: number, y: number, shift: boolean): Vec2 {
     const p = pathPlacement(x, y, shift)
@@ -913,6 +950,28 @@ export function usePen(opts: {
     return cid
   }
 
+  // The arc counterpart of capturePerpendicular: the new anchor landed exactly
+  // on the previous arc's tangent (placement `tangent`) — capture the joint
+  // rule perpendicular [C, E, E, new] (radius ⊥ the new line).
+  function captureArcTangent(p: { x: number; y: number; tangent: boolean }, id: EntityId, own: boolean): EntityId | null {
+    const pp = pendingPath.value
+    if (!p.tangent || !own || !pp || pp.anchors.length < 3) return null
+    const n = pp.anchors.length
+    if (pp.anchors[n - 1] !== id) return null
+    const arc = pp.segments[n - 3]
+    if (!arc || arc.kind !== 'arc') return null
+    const joint = pp.anchors[n - 2]!
+    const placed = doc.value.entities.find(e => e.id === id) as any
+    const corner = doc.value.entities.find(e => e.id === joint) as any
+    if (!placed || placed.kind !== 'point' || !corner || corner.kind !== 'point') return null
+    if (Math.abs(placed.x - p.x) > 1e-9 || Math.abs(placed.y - p.y) > 1e-9) return null
+    const refs = [arc.center, joint, joint, id]
+    if (doc.value.constraints.some(c => c.kind === 'perpendicular' && c.refs.join() === refs.join())) return null
+    const cid = addConstraint(doc.value, 'perpendicular', refs)
+    sparkle(corner.x, corner.y)
+    return cid
+  }
+
   function pathClick(x: number, y: number, shift = false) {
     const p = pathPlacement(x, y, shift)
     const { id, own } = placePointOwn(p.x, p.y, [], guideMode.value)
@@ -937,7 +996,7 @@ export function usePen(opts: {
     }
     pp.anchors.push(id)
     pp.ownAnchors.push(own)
-    if (nextSegment.value === 'line') capturePerpendicular(p, id, own)
+    if (nextSegment.value === 'line' && !capturePerpendicular(p, id, own)) captureArcTangent(p, id, own)
     commitHistory()
   }
 
@@ -979,7 +1038,32 @@ export function usePen(opts: {
   // write goes through setPathDrag (or bumps pathDragTick) and getPathDrag
   // reads the tick, making the drag state reactive to its readers.
   const pathDragTick = ref(0)
-  function setPathDrag(v: PathDrag) { pathDrag = v; pathDragTick.value++ }
+  // the curve the bow is snapped tangent to (curveKey), so the sparkle fires
+  // once when the snap engages, not on every move
+  let bowTouchKey: string | null = null
+  function setPathDrag(v: PathDrag) { pathDrag = v; bowTouchKey = null; pathDragTick.value++ }
+
+  // The arc the bowing segment would become under `pointer`: bowArc (with the
+  // joint's own tangency), then — unless that snapped, or `snap: false` (a
+  // typed radius) — the tangent snap onto nearby committed geometry
+  // (bowTangentSnap). Reads pathDragTick so overlay computeds follow the drag.
+  function bowPreview(pointer: Vec2 | null, o: { snap?: boolean } = {}): BowPreview | null {
+    void pathDragTick.value
+    if (!pointer || !pathDrag || !pathDrag.bowed) return null
+    const pp = pendingPath.value
+    if (!pp) return null
+    const p0 = doc.value.entities.find(e => e.id === pathDrag!.prevAnchor) as any
+    const p1 = doc.value.entities.find(e => e.id === pathDrag!.anchor) as any
+    if (!p0 || p0.kind !== 'point' || !p1 || p1.kind !== 'point') return null
+    const J = { x: p0.x, y: p0.y }, E = { x: p1.x, y: p1.y }
+    const joint = jointInfoForSegment(pp, pp.segments.length - 1)
+    const arc = bowArc(J, E, pointer, joint?.tangentDir ?? null)
+    if (!arc) return null
+    if (arc.snappedTangent || o.snap === false) return { ...arc, touch: null }
+    const touch = bowTangentSnap(doc.value, J, E, arc.center, pxToUnits(SNAP_PX, opts.view.value), [pathDrag.prevAnchor, pathDrag.anchor])
+    if (!touch) return { ...arc, touch: null }
+    return { ...arcShape(J, E, pointer, touch.center), snappedTangent: false, touch }
+  }
 
   function pathDown(x: number, y: number, shift = false) {
     const p = pathPlacement(x, y, shift)
@@ -1002,7 +1086,7 @@ export function usePen(opts: {
     pp.anchors.push(id)
     pp.ownAnchors.push(own)
     if (shift) captureAxisConstraint(prevAnchor, id)
-    const perp = capturePerpendicular(p, id, own)
+    const perp = capturePerpendicular(p, id, own) ?? captureArcTangent(p, id, own)
     // don't commit here — this anchor+segment (and any shift-captured axis or
     // right-angle constraint) settle as ONE history entry together with
     // whatever pathUp does next (a plain click, or bowing the segment into an arc)
@@ -1016,6 +1100,12 @@ export function usePen(opts: {
     cursor.value = { x, y, shift }
     if (!pathDrag) return
     if (dist({ x, y }, { x: pathDrag.startX, y: pathDrag.startY }) > pxToUnits(BOW_PX, opts.view.value) && !pathDrag.bowed) { pathDrag.bowed = true; pathDragTick.value++ }
+    if (pathDrag.bowed) {
+      const pv = bowPreview({ x, y })
+      const key = pv?.touch ? curveKey(pv.touch.target) : null
+      if (key && key !== bowTouchKey) sparkle(pv!.touch!.touch.x, pv!.touch!.touch.y)
+      bowTouchKey = key
+    }
   }
 
   // Commits the currently-bowing segment (pathDrag.bowed) into an arc through
@@ -1024,7 +1114,7 @@ export function usePen(opts: {
   // can't drift apart. Returns the new center point id, or null if bowArc
   // couldn't fit (near-collinear / enormous radius) or nothing is bowing —
   // callers treat null as "segment stayed a plain line, nothing to pin".
-  function commitBowedSegment(pointer: Vec2): EntityId | null {
+  function commitBowedSegment(pointer: Vec2, snap = true): EntityId | null {
     if (!pathDrag || !pathDrag.bowed) return null
     const { anchor, prevAnchor } = pathDrag
     const pp = pendingPath.value
@@ -1035,19 +1125,24 @@ export function usePen(opts: {
     const p1 = doc.value.entities.find(e => e.id === anchor) as any
     if (!seg || seg.kind !== 'line' || !p0 || !p1) return null
     const joint = jointInfoForSegment(pp, segIndex)
-    const arc = bowArc({ x: p0.x, y: p0.y }, { x: p1.x, y: p1.y }, pointer, joint?.tangentDir ?? null)
-    if (!arc) return null
-    const c = addPoint(doc.value, arc.center.x, arc.center.y)
-    pp.segments[segIndex] = { kind: 'arc', center: c, sweep: arc.sweep }
-    // the right-angle rule this press captured was for a straight segment — an
-    // arc's chord has no business staying square to the previous line
+    const pv = bowPreview(pointer, { snap })
+    if (!pv) return null
+    const c = addPoint(doc.value, pv.center.x, pv.center.y)
+    pp.segments[segIndex] = { kind: 'arc', center: c, sweep: pv.sweep }
+    // the right-angle (or arc-tangent) rule this press captured was for a
+    // straight segment — gone now it is an arc
     if (pathDrag.perp) removeConstraint(doc.value, pathDrag.perp)
     // tangent-continuous with the previous segment: wire the joint constraint
     // so the solver keeps the flow smooth after later drags (see brief §joint)
-    if (arc.snappedTangent && joint) {
+    if (pv.snappedTangent && joint) {
       if (joint.prevKind === 'arc') addConstraint(doc.value, 'collinear', [joint.Cprev, prevAnchor, c])
       else addConstraint(doc.value, 'perpendicular', [joint.La, joint.Lb, prevAnchor, c])
       sparkle(p0.x, p0.y)   // joint anchor J
+    } else if (pv.touch) {
+      // snapped tangent onto nearby geometry: the rule that keeps it touching
+      const target = pieceOf(doc.value, pv.touch.target)
+      const rule = target ? tangentRuleFor(doc.value, { kind: 'arc', c, s: prevAnchor, e: anchor }, target) : null
+      if (rule) { addConstraint(doc.value, rule.kind, rule.refs, rule.value); sparkle(pv.touch.touch.x, pv.touch.touch.y) }
     }
     return c
   }
@@ -1076,7 +1171,7 @@ export function usePen(opts: {
   function applyArcDimension(value: number): void {
     if (!pathDrag || !pathDrag.bowed || !cursor.value) return
     const prevAnchor = pathDrag.prevAnchor
-    const c = commitBowedSegment(cursor.value)
+    const c = commitBowedSegment(cursor.value, false)   // a typed radius wins over the tangent snap
     setPathDrag(null)
     if (!c) return   // bowArc couldn't fit — segment stayed a line, nothing to pin
     const existing = findRadiusPin(c, prevAnchor)
@@ -2029,7 +2124,7 @@ export function usePen(opts: {
     // select-tool point drag, joining onto what it is dropped on
     dragPoint, dropPoint, cancelPointDrop,
     // drawing
-    place, pathDown, pathMove, pathUp, finishPath, cancelPath, removeLastAnchor, getPathDrag, jointInfoForSegment,
+    place, pathDown, pathMove, pathUp, finishPath, cancelPath, removeLastAnchor, getPathDrag, jointInfoForSegment, bowPreview,
     curveDown, curveMove, curveUp, getCurveDrag, getHeldHandles, handleIds, endGesture,
     // trim / cut / dissolve
     trimHover, trimHoverEnds, trimGhosts, cutHover, dissolveHover,
