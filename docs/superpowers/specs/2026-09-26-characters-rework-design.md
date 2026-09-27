@@ -320,6 +320,8 @@ Tests at every stage:
 
 Checking the face checker's licence showed that three features Sailor already ships use models licensed for non-commercial use only. All three run on the local ComfyUI engine, which is being retired anyway. This is **not part of the character rework**. It must be settled before hosted launch.
 
+**Done 2026-09-27** (spec `2026-09-26-non-commercial-face-models-replacement-design.md`): Face Swap moved to Easel (family `face-swap`) plus a new canvas node, Person swap (video), on Pixverse Swap (`person-swap-video`). Fix faces moved to Topaz with face enhancement (`fix-faces`). The local Face restore and Lip-sync nodes were removed, along with every InsightFace, CodeFormer and Wav2Lip download. All three families are off until one live call each. The "Not yet checked" items: fal badges all three models "Commercial use"; LatentSync was not added; the edit-model A/B is still open.
+
 | Feature (file) | Restricted model(s) | Replacement |
 |---|---|---|
 | Face Swap node and app (`comfy_extras/nodes_face.py`) | InsightFace buffalo_l + inswapper_128 ([licence](https://github.com/deepinsight/insightface)) | fal `easel-ai/advanced-face-swap` for images (~$0.05) and Pixverse Swap for video (~$0.15–0.40 per 5 s). A/B against GPT Image 2.5 / Nano Banana Pro "put this face here". |

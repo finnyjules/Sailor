@@ -1,6 +1,6 @@
 # Replacing the non-commercial face models — design
 
-Date: 2026-09-26. Status: approved in chat, spec awaiting review.
+Date: 2026-09-26. Status: built 2026-09-27 (plan `docs/superpowers/plans/2026-09-27-non-commercial-face-models-replacement.md`); families off pending one live call each.
 
 ## Why
 
