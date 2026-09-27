@@ -1,0 +1,354 @@
+{
+  "endpoint": "fal-ai/topaz/upscale/image",
+  "fetchedAt": "2026-09-27",
+  "sources": {
+    "schema": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=fal-ai/topaz/upscale/image",
+    "pricing": "https://fal.ai/models/fal-ai/topaz/upscale/image/llms.txt"
+  },
+  "input": {
+    "$ref": "#/components/schemas/TopazUpscaleImageInput"
+  },
+  "output": {
+    "$ref": "#/components/schemas/TopazUpscaleImageOutput"
+  },
+  "components": {
+    "schemas": {
+      "TopazUpscaleImageInput": {
+        "type": "object",
+        "required": [
+          "image_url"
+        ],
+        "title": "ImageUpscaleRequest",
+        "properties": {
+          "model": {
+            "title": "Model",
+            "description": "Model to use for image enhancement, grouped by family. Precision — Standard V2 fits most photos, High Fidelity V2 preserves detail in professional shots, Low Resolution V2 recovers compressed sources, CGI targets art and rendered graphics, Text Refine keeps text and shapes crisp. Generative — Wonder 3 is Topaz's most advanced generative model, Redefine adds prompt-guided creative detail, Standard MAX maximizes quality, Recovery/Recovery V2 rebuild extreme low-resolution images.",
+            "type": "string",
+            "enum": [
+              "Standard V2",
+              "High Fidelity V2",
+              "Low Resolution V2",
+              "CGI",
+              "Text Refine",
+              "Wonder 3",
+              "Wonder",
+              "Standard MAX",
+              "Redefine",
+              "Recovery V2",
+              "Recovery"
+            ],
+            "default": "Standard V2"
+          },
+          "autoprompt": {
+            "description": "Enable automatic prompt generation for generative upscaling. Applies to Redefine model only.",
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Autoprompt"
+          },
+          "strength": {
+            "description": "Enhancement strength (0.01-1.0). Applies to Text Refine model only.",
+            "anyOf": [
+              {
+                "minimum": 0.01,
+                "type": "number",
+                "maximum": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Strength"
+          },
+          "texture": {
+            "description": "Texture detail level for generative upscaling (1-5). Applies to Redefine model only.",
+            "anyOf": [
+              {
+                "minimum": 1,
+                "type": "integer",
+                "maximum": 5
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Texture"
+          },
+          "image_url": {
+            "examples": [
+              "https://storage.googleapis.com/falserverless/model_tests/codeformer/codeformer_poor_1.jpeg"
+            ],
+            "type": "string",
+            "description": "Url of the image to be upscaled",
+            "minLength": 1,
+            "title": "Image Url"
+          },
+          "enhancement_strength": {
+            "description": "Enhancement strength for generative upscaling. Applies to Wonder 3 model only. When omitted, Topaz auto-configures it.",
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "low",
+                  "medium",
+                  "high"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Enhancement Strength"
+          },
+          "upscale_factor": {
+            "minimum": 1,
+            "description": "Factor to upscale the image by (e.g. 2.0 doubles width and height)",
+            "maximum": 4,
+            "type": "number",
+            "title": "Upscale Factor",
+            "default": 2
+          },
+          "fix_compression": {
+            "description": "Compression artifact removal level (0.0-1.0). Applies to Standard V2, Low Resolution V2, High Fidelity V2, and Text Refine models.",
+            "anyOf": [
+              {
+                "minimum": 0,
+                "type": "number",
+                "maximum": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fix Compression"
+          },
+          "crop_to_fill": {
+            "type": "boolean",
+            "title": "Crop To Fill",
+            "default": false
+          },
+          "output_format": {
+            "description": "Output format of the upscaled image.",
+            "type": "string",
+            "enum": [
+              "jpeg",
+              "png"
+            ],
+            "title": "Output Format",
+            "default": "jpeg"
+          },
+          "subject_detection": {
+            "description": "Subject detection mode for the image enhancement. Applies to standard enhance and Recovery V2 models.",
+            "type": "string",
+            "enum": [
+              "All",
+              "Foreground",
+              "Background"
+            ],
+            "title": "Subject Detection",
+            "default": "All"
+          },
+          "face_enhancement_creativity": {
+            "minimum": 0,
+            "description": "Creativity level for face enhancement. 0.0 means no creativity, 1.0 means maximum creativity. Ignored if face enhancement is disabled.",
+            "maximum": 1,
+            "type": "number",
+            "title": "Face Enhancement Creativity",
+            "default": 0
+          },
+          "sharpen": {
+            "description": "Sharpening level (0.0-1.0). Applies to Standard V2, Low Resolution V2, CGI, High Fidelity V2, Text Refine, and Redefine models.",
+            "anyOf": [
+              {
+                "minimum": 0,
+                "type": "number",
+                "maximum": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sharpen"
+          },
+          "creativity": {
+            "description": "Creativity level for generative upscaling (1-6). Higher values produce more creative/hallucinated details. Applies to Redefine model only.",
+            "anyOf": [
+              {
+                "minimum": 1,
+                "type": "integer",
+                "maximum": 6
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Creativity"
+          },
+          "detail": {
+            "description": "Detail recovery level (0.0-1.0). Applies to Recovery V2 model only.",
+            "anyOf": [
+              {
+                "minimum": 0,
+                "type": "number",
+                "maximum": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Detail"
+          },
+          "denoise": {
+            "description": "Denoising level (0.0-1.0). Applies to Standard V2, Low Resolution V2, CGI, High Fidelity V2, Text Refine, and Redefine models.",
+            "anyOf": [
+              {
+                "minimum": 0,
+                "type": "number",
+                "maximum": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Denoise"
+          },
+          "face_enhancement_strength": {
+            "minimum": 0,
+            "description": "Strength of the face enhancement. 0.0 means no enhancement, 1.0 means maximum enhancement. Ignored if face enhancement is disabled.",
+            "maximum": 1,
+            "type": "number",
+            "title": "Face Enhancement Strength",
+            "default": 0.8
+          },
+          "prompt": {
+            "description": "Text prompt to guide generative upscaling (max 1024 chars). Applies to Redefine model only.",
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 1024
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prompt"
+          },
+          "face_enhancement": {
+            "description": "Whether to apply face enhancement to the image. Applies to standard enhance and Recovery V2 models.",
+            "type": "boolean",
+            "title": "Face Enhancement",
+            "default": true
+          }
+        },
+        "x-fal-order-properties": [
+          "image_url",
+          "model",
+          "upscale_factor",
+          "crop_to_fill",
+          "output_format",
+          "subject_detection",
+          "face_enhancement",
+          "face_enhancement_creativity",
+          "face_enhancement_strength",
+          "sharpen",
+          "denoise",
+          "fix_compression",
+          "strength",
+          "creativity",
+          "texture",
+          "prompt",
+          "autoprompt",
+          "detail",
+          "enhancement_strength"
+        ]
+      },
+      "TopazUpscaleImageOutput": {
+        "type": "object",
+        "required": [
+          "image"
+        ],
+        "title": "ImageUpscaleOutput",
+        "properties": {
+          "image": {
+            "description": "The upscaled image.",
+            "$ref": "#/components/schemas/File"
+          }
+        },
+        "x-fal-order-properties": [
+          "image"
+        ]
+      },
+      "File": {
+        "type": "object",
+        "required": [
+          "url"
+        ],
+        "title": "File",
+        "properties": {
+          "content_type": {
+            "examples": [
+              "image/png"
+            ],
+            "description": "The mime type of the file.",
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Content Type"
+          },
+          "file_size": {
+            "examples": [
+              4404019
+            ],
+            "description": "The size of the file in bytes.",
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "File Size"
+          },
+          "url": {
+            "type": "string",
+            "description": "The URL where the file can be downloaded from.",
+            "title": "Url"
+          },
+          "file_name": {
+            "examples": [
+              "z9RV14K95DvU.png"
+            ],
+            "description": "The name of the file. It will be auto-generated if not provided.",
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "File Name"
+          }
+        },
+        "x-fal-order-properties": [
+          "url",
+          "content_type",
+          "file_name",
+          "file_size"
+        ]
+      }
+    }
+  },
+  "pricingText": "For a single image, your request will cost **$0.08** for up to **24MP**, **$0.16** for up to **48MP**, **$0.32** for up to **96MP**, and up to **$1.36** for **512MP** output resolution.\n\nFor more details, see [fal.ai pricing](https://fal.ai/pricing)."
+}

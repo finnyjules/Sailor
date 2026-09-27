@@ -1,0 +1,214 @@
+{
+  "endpoint": "easel-ai/advanced-face-swap",
+  "fetchedAt": "2026-09-27",
+  "sources": {
+    "schema": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=easel-ai/advanced-face-swap",
+    "pricing": "https://fal.ai/models/easel-ai/advanced-face-swap/llms.txt"
+  },
+  "input": {
+    "$ref": "#/components/schemas/AdvancedFaceSwapInput"
+  },
+  "output": {
+    "$ref": "#/components/schemas/AdvancedFaceSwapOutput"
+  },
+  "components": {
+    "schemas": {
+      "AdvancedFaceSwapInput": {
+        "title": "MirrorInput",
+        "type": "object",
+        "properties": {
+          "detailer": {
+            "title": "Detailer",
+            "type": "boolean",
+            "description": "(Beta) Apply detailer to the image. Detailer will improve certain image details, but slightly increase generation time.",
+            "default": false
+          },
+          "face_image_1": {
+            "examples": [
+              "https://images.easelai.com/mirror_fal/faces/female.png",
+              "https://images.easelai.com/mirror_fal/faces/male.png"
+            ],
+            "title": "Second user's face image (optional)",
+            "description": "(Optional) The Second face image to face swap FROM",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Image"
+              }
+            ]
+          },
+          "target_image": {
+            "examples": [
+              "https://images.easelai.com/mirror_fal/men_single_player/rip.jpg",
+              "https://images.easelai.com/mirror_fal/men_single_player/saturday.png",
+              "https://images.easelai.com/mirror_fal/multiplayer/bf.jpg",
+              "https://images.easelai.com/mirror_fal/multiplayer/couple.png",
+              "https://images.easelai.com/mirror_fal/multiplayer/forever.png"
+            ],
+            "title": "Target image to face swap on",
+            "description": "The target image to face swap TO",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Image"
+              }
+            ]
+          },
+          "workflow_type": {
+            "enum": [
+              "user_hair",
+              "target_hair"
+            ],
+            "title": "Workflow Type",
+            "type": "string",
+            "description": "The type of face swap workflow. target_hair = preserve target's hair. user_hair = preserve user's hair."
+          },
+          "face_image_0": {
+            "examples": [
+              "https://images.easelai.com/mirror_fal/faces/male.png",
+              "https://images.easelai.com/mirror_fal/faces/female.png"
+            ],
+            "title": "User's face image",
+            "description": "User's face image to face swap FROM",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Image"
+              }
+            ]
+          },
+          "upscale": {
+            "title": "Upscale",
+            "type": "boolean",
+            "description": "Apply 2x upscale and boost quality. Upscaling will refine the image and make the subjects brighter.",
+            "default": true
+          },
+          "gender_1": {
+            "enum": [
+              "male",
+              "female",
+              "non-binary"
+            ],
+            "title": "Second User Gender",
+            "type": "string",
+            "description": "The gender of the person in the second face image."
+          },
+          "gender_0": {
+            "enum": [
+              "male",
+              "female",
+              "non-binary"
+            ],
+            "title": "(Optional) User Gender",
+            "type": "string",
+            "description": "The gender of the person in the face image."
+          }
+        },
+        "x-fal-order-properties": [
+          "face_image_0",
+          "gender_0",
+          "face_image_1",
+          "gender_1",
+          "target_image",
+          "workflow_type",
+          "upscale",
+          "detailer"
+        ],
+        "required": [
+          "face_image_0",
+          "gender_0",
+          "workflow_type"
+        ]
+      },
+      "Image": {
+        "description": "Represents an image file.",
+        "type": "object",
+        "x-fal-order-properties": [
+          "url",
+          "content_type",
+          "file_name",
+          "file_size",
+          "file_data",
+          "width",
+          "height"
+        ],
+        "title": "Image",
+        "properties": {
+          "file_size": {
+            "examples": [
+              4404019
+            ],
+            "title": "File Size",
+            "type": "integer",
+            "description": "The size of the file in bytes."
+          },
+          "height": {
+            "examples": [
+              1024
+            ],
+            "title": "Height",
+            "type": "integer",
+            "description": "The height of the image in pixels."
+          },
+          "url": {
+            "title": "Url",
+            "type": "string",
+            "description": "The URL where the file can be downloaded from."
+          },
+          "width": {
+            "examples": [
+              1024
+            ],
+            "title": "Width",
+            "type": "integer",
+            "description": "The width of the image in pixels."
+          },
+          "file_name": {
+            "examples": [
+              "z9RV14K95DvU.png"
+            ],
+            "title": "File Name",
+            "type": "string",
+            "description": "The name of the file. It will be auto-generated if not provided."
+          },
+          "content_type": {
+            "examples": [
+              "image/png"
+            ],
+            "title": "Content Type",
+            "type": "string",
+            "description": "The mime type of the file."
+          },
+          "file_data": {
+            "format": "binary",
+            "title": "File Data",
+            "type": "string",
+            "description": "File data"
+          }
+        },
+        "required": [
+          "url"
+        ]
+      },
+      "AdvancedFaceSwapOutput": {
+        "title": "MirrorOutput",
+        "type": "object",
+        "properties": {
+          "image": {
+            "title": "Image",
+            "description": "The mirrored image.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Image"
+              }
+            ]
+          }
+        },
+        "x-fal-order-properties": [
+          "image"
+        ],
+        "required": [
+          "image"
+        ]
+      }
+    }
+  },
+  "pricingText": "- **Price**: $0.05 per generations\n\nFor more details, see [fal.ai pricing](https://fal.ai/pricing)."
+}
