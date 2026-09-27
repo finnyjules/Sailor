@@ -19,11 +19,12 @@ import { RUNNER_OUTPUT_CLASSES } from '#shared/runner/validate'
 import { pyIsDigit, pySplitlines } from '#shared/runner/pyText'
 import { parsePyJson } from '#shared/runner/pyJson'
 import {
-  CHAT_CLAUDE_MAX_TOKENS_TOO_LOW, CHAT_NEEDS_QUESTION, IMPROVE_NEEDS_IDEA, LLM_BUILDERS, LLM_ENDPOINTS, LLM_TEXT_CLASSES,
-  SUMMARIZE_CLAUDE_TOO_SHORT, brainstormCount, brainstormLines, llmRequestProblem, llmText, type LlmTextClass,
+  CHAT_LLM_MODELS, REASON_MODELS, REWRITE_MODELS, SUMMARIZE_MODELS, rewriteSystem,
+  CHAT_NEEDS_QUESTION, IMPROVE_NEEDS_IDEA, LLM_BUILDERS, LLM_ENDPOINTS, LLM_TEXT_CLASSES,
+  REWRITE_TONES, TONE_GUIDANCE, brainstormCount, brainstormLines, llmRequestProblem, llmText, type LlmTextClass,
 } from '#shared/runner/llm'
 import { PAID_RATES, otherCardFor, paidCallUsd } from '#shared/pricing/paidRates'
-import { PAID_NODE_CLASSES, TOKEN_TEXT_CAP_BYTES, paidCalls, paidNoCall, utf8Bytes } from '#shared/pricing/paidSettings'
+import { LLM_MODEL_UNPRICED, PAID_NODE_CLASSES, TOKEN_TEXT_CAP_BYTES, paidCalls, paidNoCall, utf8Bytes } from '#shared/pricing/paidSettings'
 import { priceNode } from '#shared/pricing/nodePrice'
 import { creditsForUsd } from '#shared/pricing/markup'
 import { GRAPH_NODE_CREDITS, PRICE_BOOK_VERSION, priceGraph } from '~~/server/utils/priceBook'
@@ -60,14 +61,16 @@ function pythonWire(payloadJson: string, sent: Record<string, unknown>): string 
   return payloadJson
 }
 
-/** The refusals the runner makes where Python sends and pays (the brief's deviations and rule 9). */
+/**
+ * The refusals the runner makes where Python sends and pays (the brief's
+ * deviations: a blank question or idea). A Claude answer limit under
+ * Replicate's published 1024 is sent as Python sends it (ruling 3).
+ */
 function expectedRefusal(c: PaidCase): string | null {
   const w = c.widgets
   const blank = (v: unknown) => typeof v === 'string' && !v.replace(/[\s　]/g, '')
-  if (c.class_type === 'ChatLLMNode' && w.model === 'Claude 4.5 Sonnet' && (w.max_tokens as number) < 1024) return CHAT_CLAUDE_MAX_TOKENS_TOO_LOW
   if (c.class_type === 'ChatLLMNode' && blank(w.prompt)) return CHAT_NEEDS_QUESTION
   if (c.class_type === 'ImprovePromptNode' && blank(w.idea)) return IMPROVE_NEEDS_IDEA
-  if (c.class_type === 'SummarizeTextNode' && w.model === 'Claude 4.5 Haiku' && !blank(w.text)) return SUMMARIZE_CLAUDE_TOO_SHORT
   return null
 }
 
@@ -167,10 +170,9 @@ describe('every fixture case: what Python sends and returns', () => {
     expect(plan.uiFor([], values)).toEqual(c.ui)
   })
 
-  it('the deviations are exactly the brief\'s and the schema\'s (blank Chat and Improve, Claude under 1024)', () => {
-    // Chat blank and spaces on 3 models (6), Improve blank and spaces (2), Summarize on Claude 4.5 Haiku
-    // with text (4), Chat on Claude 4.5 Sonnet at max tokens 1 (system on and off × 3 temperatures: 6).
-    expect(refused.length).toBe(18)
+  it('the deviations are exactly the brief\'s (blank Chat and Improve)', () => {
+    // Chat blank and spaces on 3 models (6), Improve blank and spaces (2).
+    expect(refused.length).toBe(8)
   })
 
   it('whole temperatures are the only wire difference, and only Chat sends one', () => {
@@ -210,7 +212,7 @@ describe('every fixture case through the engine (cards and llm-text on)', () => 
 
   it('the refused cases are refused before anything is held or sent (hosted)', async () => {
     const refusedCases = CASES.filter(expectedRefusal)
-    expect(refusedCases.length).toBeGreaterThan(10)
+    expect(refusedCases.length).toBe(8)
     for (const c of refusedCases) {
       const k = makeKit({ hosted: true, deps: { families: () => ON } })
       const p: ApiPrompt = { n: { class_type: c.class_type, inputs: { ...c.widgets } } }
@@ -270,19 +272,33 @@ const UNDECLARED: Record<string, string[]> = {
 }
 
 describe('the requests against Replicate\'s published inputs', () => {
-  it('every sent payload keeps within them, but for the undeclared keys pinned here', () => {
+  it('every sent payload keeps within them, but for the undeclared keys and the Claude limits pinned here', () => {
     const seen: Record<string, Set<string>> = {}
+    const underMin: string[] = []
     for (const c of CASES) {
       if (expectedRefusal(c) || !c.calls.length) continue
       const b = LLM_BUILDERS[cls(c)](c.widgets) as { slug: string; input: Record<string, unknown> }
       const pub = PUBLISHED[b.slug]!
       for (const [k, v] of Object.entries(b.input)) {
         if (!pub.keys.includes(k)) (seen[b.slug] ??= new Set()).add(k)
-        if (pub.min?.[k] !== undefined) expect(v as number, `${c.name} ${k}`).toBeGreaterThanOrEqual(pub.min[k]!)
+        // Ruling 3: a Claude limit under the published 1024 is sent as Python sends it; the live check decides.
+        if (pub.min?.[k] !== undefined && (v as number) < pub.min[k]!) underMin.push(`${b.slug} ${k}=${v as number}`)
         if (pub.max?.[k] !== undefined) expect(v as number, `${c.name} ${k}`).toBeLessThanOrEqual(pub.max[k]!)
       }
     }
     for (const slug of LLM_ENDPOINTS) expect([...(seen[slug] ?? [])].sort(), slug).toEqual([...UNDECLARED[slug]!].sort())
+    // Only Claude's max_tokens: Summarize's 400 on Haiku, and Chat's small limits on Sonnet.
+    expect([...new Set(underMin)].sort()).toEqual(['anthropic/claude-4.5-haiku max_tokens=400', 'anthropic/claude-4.5-sonnet max_tokens=1'])
+  })
+
+  it('Summarize on Claude 4.5 Haiku and Chat on Claude under 1024 are sent as Python sends them (ruling 3)', async () => {
+    const haiku = CASES.find(c => c.name === 'summarize · Claude 4.5 Haiku · one line')!
+    expect(llmRequestProblem(haiku.class_type, haiku.widgets)).toBeNull()
+    const plan = await planOf(haiku.class_type, haiku.widgets) as Extract<NodePlan, { kind: 'provider' }>
+    expect(plan.payload.max_tokens).toBe(400)
+    expect(plan.payload).toEqual(haiku.calls[0]!.payload)
+    const sonnet = CASES.find(c => c.name.startsWith('chat · Claude 4.5 Sonnet · system off · t1.0 · max 1'))!
+    expect(requestProblems({ n: { class_type: sonnet.class_type, inputs: sonnet.widgets } }, { runner: true })).toEqual([])
   })
 
   it('the saved schemas, where snapshotted, agree with the published inputs above', () => {
@@ -383,6 +399,71 @@ describe('prices: Replicate\'s per-token cards, the hold and the charge (rulings
     expect(stageEstimate(typed, ['n', 't'], false, ON)).toBe(0)
     const wired: ApiPrompt = { ...typed, n: { class_type: 'SummarizeTextNode', inputs: { text: ['t', 0], length: 'Short', model: 'Gemini 3 Flash' } } }
     expect(stageEstimate(wired, ['n', 't'], false, ON)).toBe(priceNode('SummarizeTextNode', wired.n!.inputs).credits)
+  })
+})
+
+describe('settings known only at run time are priced at their dearest (fix round 1)', () => {
+  const LINK = ['w', 0]
+  const credits = (ct: string, inputs: Record<string, unknown>) => {
+    const p = priceNode(ct, inputs)
+    if ('refused' in p) throw new Error(p.refused)
+    return p.credits
+  }
+  const BASE: [LlmTextClass, Record<string, unknown>, readonly string[]][] = [
+    ['ChatLLMNode', { prompt: 'Hello there', system_prompt: '', temperature: 1, max_tokens: 1024 }, CHAT_LLM_MODELS],
+    ['SummarizeTextNode', { text: 'Some text', length: 'Short' }, SUMMARIZE_MODELS],
+    ['RewriteToneNode', { text: 'We sell shoes', tone: 'Punchy' }, REWRITE_MODELS],
+    ['ReasonStepByStepNode', { question: '17 * 23?', include_reasoning: false }, REASON_MODELS],
+  ]
+
+  it('a wired model: the dearest model the node offers, on both paths, never refused', () => {
+    for (const [ct, inputs, models] of BASE) {
+      const each = models.map(model => priceNode(ct, { ...inputs, model }) as { usd: number; credits: number })
+      const dearest = each.reduce((a, b) => (b.usd > a.usd ? b : a))
+      expect(priceNode(ct, { ...inputs, model: LINK }), ct).toEqual(dearest)
+      expect(priceGraph({ 1: { class_type: ct, inputs: { ...inputs, model: LINK } } }).nodes!['1'], ct).toBe(dearest.credits)
+    }
+    // Chat at 1024 max tokens: Claude 4.5 Sonnet ($15/M out) is the dearest.
+    expect(priceNode('ChatLLMNode', { ...BASE[0]![1], model: LINK })).toEqual(priceNode('ChatLLMNode', { ...BASE[0]![1], model: 'Claude 4.5 Sonnet' }))
+  })
+
+  it('a model Sailor doesn\'t know is refused in plain words, with no class name', () => {
+    const p = priceNode('ChatLLMNode', { ...BASE[0]![1], model: 'GPT-9' })
+    expect(p).toEqual({ refused: LLM_MODEL_UNPRICED })
+    expect(LLM_MODEL_UNPRICED).not.toMatch(/Node|[A-Z][a-z]+[A-Z]/)
+  })
+
+  it('a wired tone: the longest guidance, in bytes', () => {
+    const longest = REWRITE_TONES.map(t => rewriteSystem(t)).reduce((a, b) => (utf8Bytes(b) > utf8Bytes(a) ? b : a))
+    expect(longest).toContain(TONE_GUIDANCE.Casual)
+    const wired = paidCalls('RewriteToneNode', { text: 'abc', tone: LINK, model: 'Claude 4.5 Haiku' }, {})
+    if ('refused' in wired) throw new Error(wired.refused)
+    expect(wired.steps[0]!.call.inputTokens).toBe(3 + utf8Bytes(longest))
+    for (const tone of REWRITE_TONES) {
+      expect(credits('RewriteToneNode', { text: 'abc', tone: LINK, model: 'Claude 4.5 Haiku' })).toBeGreaterThanOrEqual(credits('RewriteToneNode', { text: 'abc', tone, model: 'Claude 4.5 Haiku' }))
+    }
+  })
+
+  it('a wired count and angle on Brainstorm: 12 ideas and the longest angle', () => {
+    const wired = paidCalls('BrainstormIdeasNode', { topic: 'x', count: LINK, angle: LINK }, {}) as { steps: { call: { inputTokens: number } }[] }
+    const typed = paidCalls('BrainstormIdeasNode', { topic: 'x', count: 12, angle: 'Styles' }, {}) as { steps: { call: { inputTokens: number } }[] }
+    expect(wired.steps[0]!.call.inputTokens).toBe(typed.steps[0]!.call.inputTokens)
+  })
+
+  it('the charge\'s cap comes from the inputs the hold was priced from, never from a wire\'s value', async () => {
+    const sent = { text: LINK, length: 'Short', model: 'Gemini 3 Flash' }
+    const planned = { ...sent, text: 'short' }
+    const plan = await planNode({
+      prompt: { n: { class_type: 'SummarizeTextNode', inputs: planned } }, nodeId: 'n', filesFrom: () => [], gateOpen: false,
+      toUrl: async () => { throw new Error('no files') }, priceInputs: sent,
+    }) as Extract<NodePlan, { kind: 'provider' }>
+    const usage = { inputTokens: 30_000, outputTokens: 400 }
+    const result = { metrics: { input_token_count: usage.inputTokens, output_token_count: usage.outputTokens } }
+    const fromSent = (priceNode('SummarizeTextNode', sent, { answerUsage: usage }) as { credits: number }).credits
+    const fromWireValue = (priceNode('SummarizeTextNode', planned, { answerUsage: usage }) as { credits: number }).credits
+    expect(fromSent).toBeGreaterThan(fromWireValue)
+    expect(plan.chargeOf!(result)).toBe(fromSent)
+    expect(fromSent).toBeLessThanOrEqual(credits('SummarizeTextNode', sent))
   })
 })
 

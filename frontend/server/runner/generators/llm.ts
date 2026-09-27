@@ -10,13 +10,16 @@
  *  - A blank text Python never sends (Summarize, Translate, Rewrite,
  *    Brainstorm, Think step by step) makes no call: the node hands on "" and
  *    shows it, free (rule 8).
- *  - A blank question (Chat) or idea (Improve a prompt), or a Claude answer
- *    limit under Replicate's 1024, is refused in plain words: before the
- *    hold when typed (requestRules.ts), here when a wire brought it.
+ *  - A blank question (Chat) or idea (Improve a prompt) is refused in plain
+ *    words: before the hold when typed (requestRules.ts), here when a wire
+ *    brought it. A Claude answer limit under Replicate's published 1024 is
+ *    sent as Python sends it (ruling 3: the live check decides).
  *  - The charge is the token counts the prediction reports
  *    (`metrics.input_token_count` / `output_token_count`, as Replicate bills
- *    them) through the endpoint's card, never above the hold; no counts, the
- *    hold (ruling (c)).
+ *    them) through the endpoint's card, capped by the ceiling of the inputs
+ *    the hold was priced from (`ctx.priceInputs`: wires left as wires, never
+ *    the value a wire brought) and never above the hold; no counts, the hold
+ *    (ruling (c)).
  *  - A request byte-identical to one this user already made gives back that
  *    answer, free (ruling (d)): the plan is reusable by its request alone.
  */
@@ -109,7 +112,8 @@ export function planLlm(ctx: PlanContext): NodePlan {
     chargeOf: (result) => {
       const used = answerUsage(result)
       if (!used) return null
-      const p = priceNode(classType, inputs, { answerUsage: used, hosted: ctx.hosted })
+      // Priced as the hold was (metering.ts nodeCredits: the node as sent, no host cap).
+      const p = priceNode(classType, ctx.priceInputs ?? inputs, { answerUsage: used })
       return 'refused' in p ? null : p.credits
     },
   }

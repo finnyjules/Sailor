@@ -27,7 +27,9 @@
 import type { NodeInputs, PriceOptions } from './nodePrice'
 import type { PaidCall } from './paidRates'
 import { isLink } from '../runner/graph'
+import { paidCallUsd } from './paidRates'
 import {
+  BRAINSTORM_ANGLES, CHAT_LLM_MODELS, IMPROVE_PROMPT_TARGETS, REASON_MODELS, REWRITE_MODELS, REWRITE_TONES, SUMMARIZE_MODELS, TRANSLATE_LANGUAGES,
   BRAINSTORM_MAX_TOKENS, LLM_MODEL_SLUGS, LLM_NO_CALL_INPUT, LLM_TEXT_INPUTS, REASON_MAX_TOKENS, REWRITE_MAX_TOKENS,
   SUMMARIZE_LENGTHS, SUMMARIZE_MAX_TOKENS, TRANSLATE_MAX_TOKENS, brainstormCount, brainstormSystem, improvePromptSystem, isBlank,
   reasonSystem, rewriteSystem, summarizeSystem, translateSystem, type LlmTextClass,
@@ -89,7 +91,7 @@ type PaidPlanner = (inputs: NodeInputs, opts: PriceOptions) => PaidCalls
 // ── R3.3: the LLM text nodes (#shared/runner/llm) ──
 
 /** What one LLM text node's call is priced from: its endpoint, Sailor's own text, its longest answer. */
-interface LlmCallShape { endpoint: string; fixed: string[]; maxAnswerTokens: number }
+interface LlmCallShape { endpoints: string[]; fixed: string[]; maxAnswerTokens: number }
 
 const text = (v: unknown): string => (typeof v === 'string' ? v : '')
 const intIn = (v: unknown, def: number, lo: number, hi: number): number => {
@@ -100,70 +102,87 @@ const slugOf = (model: unknown): string | null => {
   const row = typeof model === 'string' && Object.prototype.hasOwnProperty.call(LLM_MODEL_SLUGS, model) ? LLM_MODEL_SLUGS[model] : undefined
   return row ? row[0] : null
 }
-/** A combo value the node knows, else the dearest of its options (a price never guesses low). */
-const optionOr = (v: unknown, options: Readonly<Record<string, string>>, dearest: string): string =>
-  (typeof v === 'string' && Object.prototype.hasOwnProperty.call(options, v) ? v : dearest)
+/**
+ * The endpoints a `model` setting can mean: the one it names, or, wired (known
+ * only at run time) or missing, every model the node offers (the planner
+ * prices the dearest). Empty for a model Sailor doesn't know.
+ */
+const endpointsOf = (model: unknown, offered: readonly string[]): string[] => {
+  if (isLink(model) || model === undefined) return offered.map(m => slugOf(m)!)
+  const one = slugOf(model)
+  return one ? [one] : []
+}
+/**
+ * Sailor's system text for a combo setting: as picked, or, wired or not one
+ * of the node's options, the longest the options make, in UTF-8 bytes (a
+ * price never guesses low).
+ */
+const systemFor = (v: unknown, options: readonly string[], make: (option: string) => string): string => {
+  if (typeof v === 'string' && options.includes(v)) return make(v)
+  return options.map(make).reduce((a, b) => (utf8Bytes(b) > utf8Bytes(a) ? b : a))
+}
 
 /**
  * Each class's call as its settings make it (the same request the runner
- * builds, #shared/runner/llm): the endpoint by `model`, Sailor's system text
- * (counted whole), the answer limit sent. An unknown model can't be priced.
+ * builds, #shared/runner/llm): the endpoints `model` can mean, Sailor's
+ * system text (counted whole), the answer limit sent. A setting known only at
+ * run time (wired) is priced at its dearest.
  */
-const LLM_CALL_SHAPES: Readonly<Record<LlmTextClass, (i: NodeInputs) => LlmCallShape | null>> = {
-  ChatLLMNode: (i) => {
-    const endpoint = slugOf(i.model)
-    // Chat's system prompt is the user's text (LLM_TEXT_INPUTS), not Sailor's.
-    return endpoint ? { endpoint, fixed: [], maxAnswerTokens: intIn(i.max_tokens, 8192, 1, 8192) } : null
-  },
-  ImprovePromptNode: (i) => ({ endpoint: 'openai/gpt-5-nano', fixed: [improvePromptSystem(text(i.target) === 'video' ? 'video' : 'image')], maxAnswerTokens: 200 }),
-  SummarizeTextNode: (i) => {
-    const endpoint = slugOf(i.model)
-    const length = optionOr(i.length, SUMMARIZE_LENGTHS, 'Bullets')
-    return endpoint ? { endpoint, fixed: [summarizeSystem(length)], maxAnswerTokens: SUMMARIZE_MAX_TOKENS } : null
-  },
+const LLM_CALL_SHAPES: Readonly<Record<LlmTextClass, (i: NodeInputs) => LlmCallShape>> = {
+  // Chat's system prompt is the user's text (LLM_TEXT_INPUTS), not Sailor's.
+  ChatLLMNode: i => ({ endpoints: endpointsOf(i.model, CHAT_LLM_MODELS), fixed: [], maxAnswerTokens: isLink(i.max_tokens) ? 8192 : intIn(i.max_tokens, 8192, 1, 8192) }),
+  ImprovePromptNode: i => ({ endpoints: ['openai/gpt-5-nano'], fixed: [systemFor(i.target, IMPROVE_PROMPT_TARGETS, improvePromptSystem)], maxAnswerTokens: 200 }),
+  SummarizeTextNode: i => ({
+    endpoints: endpointsOf(i.model, SUMMARIZE_MODELS), fixed: [systemFor(i.length, Object.keys(SUMMARIZE_LENGTHS), summarizeSystem)], maxAnswerTokens: SUMMARIZE_MAX_TOKENS,
+  }),
   // The target language: a typed custom one is the user's text (counted there); else the picked one.
   TranslateTextNode: (i) => {
     const custom = isLink(i.custom_language) ? '' : pyStrip(text(i.custom_language))
-    return { endpoint: 'google/gemini-3-flash', fixed: [translateSystem(custom ? '' : text(i.target_language) || 'Chinese (Traditional)')], maxAnswerTokens: TRANSLATE_MAX_TOKENS }
+    const fixed = custom ? translateSystem('') : systemFor(i.target_language, TRANSLATE_LANGUAGES, translateSystem)
+    return { endpoints: ['google/gemini-3-flash'], fixed: [fixed], maxAnswerTokens: TRANSLATE_MAX_TOKENS }
   },
-  RewriteToneNode: (i) => {
-    const endpoint = slugOf(i.model)
-    return endpoint ? { endpoint, fixed: [rewriteSystem(text(i.tone) || 'Professional')], maxAnswerTokens: REWRITE_MAX_TOKENS } : null
-  },
-  BrainstormIdeasNode: (i) => ({
-    endpoint: 'openai/gpt-5-mini',
-    fixed: [brainstormSystem(intIn(brainstormCount(i), 12, 2, 12), text(i.angle) || 'Styles')],
-    maxAnswerTokens: BRAINSTORM_MAX_TOKENS,
+  RewriteToneNode: i => ({
+    endpoints: endpointsOf(i.model, REWRITE_MODELS),
+    // A tone typed outside the list is sent as Python words it (rewriteSystem's fallback).
+    fixed: [typeof i.tone === 'string' && i.tone ? rewriteSystem(i.tone) : systemFor(i.tone, REWRITE_TONES, rewriteSystem)],
+    maxAnswerTokens: REWRITE_MAX_TOKENS,
   }),
+  BrainstormIdeasNode: (i) => {
+    const count = isLink(i.count) ? 12 : intIn(brainstormCount(i), 12, 2, 12)
+    return { endpoints: ['openai/gpt-5-mini'], fixed: [systemFor(i.angle, Object.keys(BRAINSTORM_ANGLES), a => brainstormSystem(count, a))], maxAnswerTokens: BRAINSTORM_MAX_TOKENS }
+  },
   ReasonStepByStepNode: (i) => {
-    const endpoint = slugOf(i.model)
-    // A wired switch (the ComfyUI path only): the longer of the two system texts.
     const fixed = isLink(i.include_reasoning)
-      ? [reasonSystem(true), reasonSystem(false)].sort((a, b) => b.length - a.length)[0]!
+      ? systemFor(undefined, ['shown', 'hidden'], o => reasonSystem(o === 'shown'))
       : reasonSystem(pyTruthy(i.include_reasoning))
-    return endpoint ? { endpoint, fixed: [fixed], maxAnswerTokens: REASON_MAX_TOKENS } : null
+    return { endpoints: endpointsOf(i.model, REASON_MODELS), fixed: [fixed], maxAnswerTokens: REASON_MAX_TOKENS }
   },
 }
+
+/** What a node whose model Sailor doesn't know is refused with (plain words, shown on the node). */
+export const LLM_MODEL_UNPRICED = 'This model has no price yet. Pick another model.'
 
 /**
  * An LLM text node's one call: its ceiling (ruling (c), tokenCeiling: the
  * user's texts as typed, a wired one at the cap, Sailor's system text whole,
- * the answer limit sent), or, with `answerUsage`, the tokens the answer
- * reported, on the same endpoint's card.
+ * the answer limit sent) on the dearest endpoint its `model` can mean, or,
+ * with `answerUsage`, the tokens the answer reported on that same endpoint's
+ * card (the charge; priceNode caps it at the ceiling).
  */
 function llmPlanner(classType: LlmTextClass): PaidPlanner {
   return (inputs, opts) => {
     const shape = LLM_CALL_SHAPES[classType](inputs)
-    if (!shape) return { refused: `${classType} has no known model` }
-    if (opts.answerUsage) {
-      const { inputTokens, outputTokens } = opts.answerUsage
-      return { steps: [{ call: { endpoint: shape.endpoint, inputTokens, outputTokens }, times: 1 }] }
-    }
+    if (!shape.endpoints.length) return { refused: LLM_MODEL_UNPRICED }
     const names = LLM_TEXT_INPUTS[classType]
     const linkedTexts = names.filter(n => isLink(inputs[n])).length
     const texts = names.filter(n => !isLink(inputs[n])).map(n => text(inputs[n]))
-    const t = tokenCeiling({ texts, linkedTexts, fixed: shape.fixed, maxAnswerTokens: shape.maxAnswerTokens }, opts)
-    return { steps: [{ call: { endpoint: shape.endpoint, ...t }, times: 1 }] }
+    const { answerUsage, ...rest } = opts
+    const t = tokenCeiling({ texts, linkedTexts, fixed: shape.fixed, maxAnswerTokens: shape.maxAnswerTokens }, rest)
+    // The dearest endpoint at this ceiling (one, unless `model` is wired). An unpriced one prices at null: refused later.
+    const usd = (endpoint: string) => paidCallUsd({ endpoint, ...t }) ?? Number.POSITIVE_INFINITY
+    const endpoint = shape.endpoints.reduce((a, b) => (usd(b) > usd(a) ? b : a))
+    if (answerUsage) return { steps: [{ call: { endpoint, inputTokens: answerUsage.inputTokens, outputTokens: answerUsage.outputTokens }, times: 1 }] }
+    return { steps: [{ call: { endpoint, ...t }, times: 1 }] }
   }
 }
 

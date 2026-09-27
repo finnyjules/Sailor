@@ -99,14 +99,6 @@ export const IMPROVE_PROMPT_SYSTEM_BASE
 // ── Refusals before the hold (rule 9; the brief's deviations) ──
 export const CHAT_NEEDS_QUESTION = 'Chat with an LLM needs a question.'
 export const IMPROVE_NEEDS_IDEA = 'Improve a prompt needs an idea to work on.'
-/**
- * Replicate's Claude 4.5 schemas take `max_tokens` from 1024 up: a shorter
- * limit is refused by Replicate (Python sends it and fails). Refused here
- * before anything is held.
- */
-export const CLAUDE_MIN_MAX_TOKENS = 1024
-export const CHAT_CLAUDE_MAX_TOKENS_TOO_LOW = 'Claude 4.5 Sonnet needs max tokens of at least 1024. Raise it, or pick another model.'
-export const SUMMARIZE_CLAUDE_TOO_SHORT = 'Claude 4.5 Haiku can’t write answers as short as a summary asks for. Pick another model.'
 export const LLM_UNKNOWN_MODEL = 'This model isn’t one Sailor knows. Pick another model.'
 
 /** One call: the Replicate slug and the input Python sends it. */
@@ -303,22 +295,20 @@ export const LLM_NO_CALL_INPUT: Readonly<Partial<Record<LlmTextClass, string>>> 
 /**
  * The refusal a request earns before anything is sent or held, from its
  * settings as sent, or null: a blank question or idea (Python sends it and
- * pays for an empty answer: the line-up's empty-prompt precedent), a Claude
- * answer limit under the schema's minimum, a model Sailor doesn't know. A
- * wired text isn't judged here (its value is judged at the node's turn); a
- * wired Summarize text is taken to make its call.
+ * pays for an empty answer: the line-up's empty-prompt precedent), a model
+ * Sailor doesn't know. A wired text isn't judged here (its value is judged
+ * at the node's turn). A Claude answer limit under Replicate's published
+ * minimum (1024) is sent as Python sends it (R3.3 ruling 3: the live check
+ * decides), so Summarize on Claude 4.5 Haiku sends its 400.
  */
 export function llmRequestProblem(classType: string, inputs: Record<string, unknown>): { input: string; message: string } | null {
   const blankTyped = (v: unknown) => !isLink(v) && isBlank(v)
   if (classType === 'ChatLLMNode') {
     const model = typeof inputs.model === 'string' ? inputs.model : ''
     if (!own(CHAT_LLM_MODELS_SET, model)) return { input: 'model', message: LLM_UNKNOWN_MODEL }
-    if (model === 'Claude 4.5 Sonnet' && intOf(inputs.max_tokens, 1024) < CLAUDE_MIN_MAX_TOKENS) return { input: 'max_tokens', message: CHAT_CLAUDE_MAX_TOKENS_TOO_LOW }
     if (blankTyped(inputs.prompt)) return { input: 'prompt', message: CHAT_NEEDS_QUESTION }
   }
   if (classType === 'ImprovePromptNode' && blankTyped(inputs.idea)) return { input: 'idea', message: IMPROVE_NEEDS_IDEA }
-  // Summarize sends 400: under Claude's 1024. Only when a call is made (a blank text makes none).
-  if (classType === 'SummarizeTextNode' && inputs.model === 'Claude 4.5 Haiku' && !blankTyped(inputs.text)) return { input: 'model', message: SUMMARIZE_CLAUDE_TOO_SHORT }
   return null
 }
 

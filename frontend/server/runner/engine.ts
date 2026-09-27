@@ -1129,6 +1129,7 @@ export function createEngine(deps: EngineDeps) {
         ...(planMeasured ? { measured: planMeasured } : {}),
         hold,
         ...(resuming && rec.keepHeld ? { keepHeld: rec.keepHeld } : {}),
+        priceInputs: take.prompt[id]!.inputs,
       })
       const handOff = async (f: OutputFile) => deps.handoff.toUrlBytes(f, await readOnce(f))
       // Resuming: the request written down is kept (and its price); the plan is

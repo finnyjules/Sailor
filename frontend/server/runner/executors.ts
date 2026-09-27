@@ -305,6 +305,12 @@ export interface PlanContext {
   hold?: KeepHold
   /** A resumed Blend scene: the kept bytes recorded at its send (NodeRecord.keepHeld). */
   keepHeld?: KeepHeld
+  /**
+   * The node's inputs as sent (wires left as wires), which its hold was
+   * priced from: a token node's charge is capped from these, never from the
+   * value a wire brought (prices never read a wired value). Absent: `prompt`'s.
+   */
+  priceInputs?: Record<string, unknown>
 }
 
 /**

@@ -915,9 +915,8 @@ export function requestProblems(prompt: ApiPrompt, opts: { runner?: boolean } = 
       }
     }
     // The LLM text nodes (R3.3), on a runner run only: a blank question or
-    // idea, a Claude answer limit under Replicate's 1024, a model Sailor
-    // doesn't know (#shared/runner/llm llmRequestProblem; planLlm refuses the
-    // same for a wired text at the node's turn).
+    // idea, a model Sailor doesn't know (#shared/runner/llm llmRequestProblem;
+    // planLlm refuses the same for a wired text at the node's turn).
     if (opts.runner && isLlmTextClass(ct)) {
       const p = llmRequestProblem(ct, inputs)
       if (p) out.push({ nodeId, classType: ct, input: p.input, message: p.message })
