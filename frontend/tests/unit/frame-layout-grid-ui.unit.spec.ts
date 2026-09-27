@@ -5,6 +5,7 @@ import { describe, it, expect } from 'vitest'
 import { mount } from '@vue/test-utils'
 import LayoutGridOverlay from '~/components/vue-canvas/LayoutGridOverlay.vue'
 import LayoutGridSection from '~/components/vue-canvas/LayoutGridSection.vue'
+import LayerGridFields from '~/components/vue-canvas/LayerGridFields.vue'
 import { suggestedLayoutGrid, resolveLayoutGrid, patchLayoutGrid, type LayoutGrid } from '~/lib/frame/layoutGrid'
 
 const grid = suggestedLayoutGrid(1080, 1350, null)
@@ -127,5 +128,44 @@ describe('LayoutGridSection', () => {
     const w = section()
     await w.get('[data-testid="grid-show"] button').trigger('click')
     expect((w.emitted('update')![0]![0] as LayoutGrid).show).toBe(false)
+  })
+})
+
+describe('LayerGridFields', () => {
+  const base = { span: { col: 2, cols: 3, row: 1, rows: 2 }, colCount: 12, rowCount: 6, canSpanCols: true, canSpanRows: true }
+  const fields = (p: Record<string, any> = {}) => mount(LayerGridFields, { props: { ...base, ...p } })
+  const commit = async (w: ReturnType<typeof fields>, id: string, v: string) => {
+    const input = w.get(`[data-testid="${id}"]`)
+    ;(input.element as HTMLInputElement).value = v
+    await input.trigger('change')
+    return input
+  }
+  it('labels only: Column, Span, Row, Span', () => {
+    const text = fields().get('[data-testid="layer-grid-fields"]').text()
+    expect(text).toContain('Column'); expect(text).toContain('Row')
+    expect(text.match(/Span/g)).toHaveLength(2)
+  })
+  it('a committed column emits one patch; values clamp inside the grid', async () => {
+    const w = fields()
+    await commit(w, 'layer-grid-col', '5')
+    await commit(w, 'layer-grid-cols', '40')
+    expect(w.emitted('update')).toEqual([[{ col: 5 }], [{ cols: 11 }]])   // 12 − 2 + 1
+  })
+  it('an unchanged, cleared or junk value records nothing and shows the value again', async () => {
+    const w = fields()
+    const a = await commit(w, 'layer-grid-col', '2')
+    const b = await commit(w, 'layer-grid-row', '')
+    expect(w.emitted('update')).toBeUndefined()
+    expect((a.element as HTMLInputElement).value).toBe('2')
+    expect((b.element as HTMLInputElement).value).toBe('1')
+  })
+  it('rows only with rows; spans only where the layer can take them; everything off when disabled', () => {
+    expect(fields({ span: { col: 1, cols: 1, row: null, rows: null } }).find('[data-testid="layer-grid-row"]').exists()).toBe(false)
+    const t = fields({ canSpanRows: false })
+    expect(t.get('[data-testid="layer-grid-rows"]').attributes('disabled')).toBeDefined()
+    expect(t.get('[data-testid="layer-grid-row"]').attributes('disabled')).toBeUndefined()
+    const d = fields({ disabled: true })
+    for (const id of ['layer-grid-col', 'layer-grid-cols', 'layer-grid-row', 'layer-grid-rows'])
+      expect(d.get(`[data-testid="${id}"]`).attributes('disabled')).toBeDefined()
   })
 })
