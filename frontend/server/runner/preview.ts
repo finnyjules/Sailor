@@ -18,10 +18,10 @@ import { isLink, type ApiPrompt } from '#shared/runner/graph'
 import { familyOn, type RunnerFamily } from '#shared/runner/families'
 import {
   EFFECT_PICTURES_TOO_LARGE, EFFECT_PICTURE_TOO_LARGE, EFFECT_PICTURE_TOO_LARGE_FOR_CLASS, EFFECT_PICTURE_TOO_LARGE_HOSTED,
-  EFFECT_TOO_MUCH_MEMORY, EFFECT_TOO_MUCH_WORK,
+  EFFECT_MAX_WORK, EFFECT_TOO_MUCH_MEMORY, EFFECT_TOO_MUCH_WORK,
 } from '#shared/runner/effects'
 import {
-  PREVIEW_MAX_PINNED_FILES, PREVIEW_NEEDS_FULL_RUN, PREVIEW_SUPERSEDED, PREVIEW_SUPERSEDED_REASON, previewPlan,
+  PREVIEW_MAX_PINNED_FILES, PREVIEW_NEEDS_FULL_RUN, PREVIEW_NEEDS_FULL_RUN_REASON, PREVIEW_SUPERSEDED, PREVIEW_SUPERSEDED_REASON, previewPlan,
   type PreviewFile,
 } from '#shared/runner/livePreview'
 import { MeterRefusalError } from '../utils/requestMeter'
@@ -51,6 +51,10 @@ export const PREVIEW_NOT_YOURS = 'This workflow uses a file that isn’t one of 
 
 /** A preview's refusal, as the route answers it (h3 reads statusCode, message and data). */
 const refuse = (message: string, status: number, data?: unknown) => new MeterRefusalError(message, status, data)
+/** The 409 the browser reads as "run it as before" (a full run), with the node it is about. */
+const needsFullRun = (nodeId?: string) => refuse(PREVIEW_NEEDS_FULL_RUN, 409, { reason: PREVIEW_NEEDS_FULL_RUN_REASON, ...(nodeId ? { nodeId } : {}) })
+/** Thrown when a preview's chain would do more work than one effect may on a full run. */
+class PreviewOverBudget extends Error {}
 
 /** Refusals about size: the route answers them 413, as a too-large request. */
 const SIZE_REFUSALS: ReadonlySet<string> = new Set([
@@ -65,6 +69,8 @@ export interface PreviewDeps {
   /** The canvas's files (input, output, temp) and the target's preview. */
   results: Pick<ResultStore, 'read' | 'exists' | 'savePreviewAs'>
   ownership: OwnershipCheck
+  /** The work one preview's whole chain may do (absent: EFFECT_MAX_WORK, one effect's full-run budget). Tests lower it. */
+  workBudget?: number
 }
 
 export interface PreviewInput {
@@ -73,12 +79,22 @@ export interface PreviewInput {
   body: unknown
   /** Aborted when the browser goes away. */
   signal?: AbortSignal
+  /**
+   * When the request arrived (previewArrival, taken by the route before it
+   * reads the body): a later arrival replaces an earlier one for the same
+   * node, never the reverse. Absent: taken when runPreview is called.
+   */
+  arrival?: number
 }
 
 // ── What is in flight ────────────────────────────────────────────────────────
 
-interface Flight { ctrl: AbortController; superseded: boolean }
+interface Flight { ctrl: AbortController; superseded: boolean; arrival: number }
 const flights = new Map<string, Map<string, Flight>>()
+let arrivals = 0
+
+/** The next arrival number: the route takes one the moment a request comes in. */
+export function previewArrival(): number { return ++arrivals }
 /** Bytes this module holds right now across requests (made by the nodes, let go when each answers). */
 let heldBytes = 0
 
@@ -89,17 +105,25 @@ export function previewsInFlight(): { requests: number; bytes: number } {
   return { requests, bytes: heldBytes }
 }
 
-function enter(user: string, node: string): Flight {
+const superseded = () => refuse(PREVIEW_SUPERSEDED, 409, { reason: PREVIEW_SUPERSEDED_REASON })
+
+/**
+ * Takes the (user, node) slot, synchronously (no await between the request's
+ * arrival and this): a request that arrived after the one holding the slot
+ * replaces it; one that arrived before it is refused as replaced.
+ */
+function enter(user: string, node: string, arrival: number): Flight {
   let mine = flights.get(user)
   if (!mine) { mine = new Map(); flights.set(user, mine) }
-  const older = mine.get(node)
-  if (older) {
-    older.superseded = true
-    older.ctrl.abort()
+  const held = mine.get(node)
+  if (held) {
+    if (held.arrival > arrival) throw superseded()
+    held.superseded = true
+    held.ctrl.abort()
     mine.delete(node)
   }
   if (mine.size >= PREVIEW_MAX_PER_USER) throw refuse(PREVIEW_TOO_MANY, 429)
-  const f: Flight = { ctrl: new AbortController(), superseded: false }
+  const f: Flight = { ctrl: new AbortController(), superseded: false, arrival }
   mine.set(node, f)
   return f
 }
@@ -175,48 +199,20 @@ function plainMessage(e: unknown): string {
 // ── The preview ──────────────────────────────────────────────────────────────
 
 export async function runPreview(req: PreviewInput, deps: PreviewDeps): Promise<{ ui: Record<string, unknown> }> {
+  const arrival = req.arrival ?? previewArrival()
   if (!deps.runnerOn()) throw refuse('Not found', 404)
   const families = deps.families()
   const hosted = deps.hosted()
-  if (!familyOn('live-previews', families)) throw refuse(PREVIEW_NEEDS_FULL_RUN, 409)
+  if (!familyOn('live-previews', families)) throw needsFullRun()
   const r = readRequest(req.body)
-
-  // The pinned cards read their pinned file, as their widget would name it.
-  const prompt: ApiPrompt = { ...r.prompt }
-  for (const [id, files] of Object.entries(r.pinned)) {
-    const n = prompt[id]!
-    const cls = n.class_type
-    if ((cls === 'Image' && !isLink(n.inputs.images)) || (cls === 'LoadImage' && !isLink(n.inputs.image))) {
-      prompt[id] = { ...n, inputs: { ...n.inputs, image: refOf(files[0]!) } }
-    }
-  }
-  // Only what the runner itself works out: a provider (or anything else) not pinned needs a full run.
-  const plan = previewPlan(prompt, r.nodeId, families, { hosted })
-  if (!plan) throw refuse(PREVIEW_NEEDS_FULL_RUN, 409, { nodeId: r.nodeId })
-  // A node the preview would have to run (a provider, say) that isn't pinned needs a full run.
-  const missing = plan.pins.find(id => !Object.prototype.hasOwnProperty.call(r.pinned, id))
-  if (missing) throw refuse(PREVIEW_NEEDS_FULL_RUN, 409, { nodeId: missing })
-  const pins = new Set(plan.pins)
-  if (Object.keys(r.pinned).some(id => !pins.has(id))) throw refuse(PREVIEW_UNREADABLE, 400)
-  // What a pin brings is read as its real class hands it on (an action with nothing to do hands on what it reads: not here).
-  for (const id of plan.pins) {
-    try { pictureSourceOf(prompt, [id, 0]) }
-    catch { throw refuse(PREVIEW_NEEDS_FULL_RUN, 409, { nodeId: id }) }
-  }
-  const sub: ApiPrompt = Object.fromEntries([...plan.pins, ...plan.order].map(id => [id, prompt[id]!]))
-
-  // Hosted: the pinned files and the local nodes' own files (Painter's) must be the user's.
-  const pinnedFiles = plan.pins.flatMap(id => r.pinned[id]!)
-  const ownFiles = collectInputFiles(Object.fromEntries(plan.order.map(id => [id, sub[id]!])))
-  await assertOwned([...pinnedFiles, ...ownFiles], req.userId, hosted, deps.ownership)
-
+  // A browser that has gone already gets nothing; otherwise the slot is taken now, before any await.
+  if (req.signal?.aborted) throw refuse(PREVIEW_STOPPED, 409, { reason: 'stopped' })
   const user = req.userId ?? 'local'
   const nodeKey = `${r.canvasId ?? ''}\n${r.nodeId}`
-  const flight = enter(user, nodeKey)
+  const flight = enter(user, nodeKey, arrival)
   const signal = flight.ctrl.signal
   const onAbort = () => flight.ctrl.abort()
   req.signal?.addEventListener('abort', onAbort, { once: true })
-  if (req.signal?.aborted) flight.ctrl.abort()
   // What the nodes made (their kept bytes), and each one's size (a buffer handed to the worker is emptied).
   const mem = new Map<string, Uint8Array>()
   const sizes = new Map<string, number>()
@@ -228,7 +224,40 @@ export async function runPreview(req: PreviewInput, deps: PreviewDeps): Promise<
     heldBytes += b.byteLength
   }
   let current: string | null = null
+  let sub: ApiPrompt = {}
   try {
+    // The pinned cards read their pinned file, as their widget would name it.
+    const prompt: ApiPrompt = { ...r.prompt }
+    for (const [id, files] of Object.entries(r.pinned)) {
+      const n = prompt[id]!
+      const cls = n.class_type
+      if ((cls === 'Image' && !isLink(n.inputs.images)) || (cls === 'LoadImage' && !isLink(n.inputs.image))) {
+        prompt[id] = { ...n, inputs: { ...n.inputs, image: refOf(files[0]!) } }
+      }
+    }
+    // Only what the runner itself works out: a provider (or anything else) not pinned needs a full run.
+    const plan = previewPlan(prompt, r.nodeId, families, { hosted })
+    if (!plan) throw needsFullRun(r.nodeId)
+    // A node the preview would have to run (a provider, say) that isn't pinned needs a full run.
+    const missing = plan.pins.find(id => !Object.prototype.hasOwnProperty.call(r.pinned, id))
+    if (missing) throw needsFullRun(missing)
+    const pins = new Set(plan.pins)
+    if (Object.keys(r.pinned).some(id => !pins.has(id))) throw refuse(PREVIEW_UNREADABLE, 400)
+    // Nothing else: a node in the request that the preview neither works out nor pins (a provider off to the side) needs a full run.
+    const stray = Object.keys(prompt).find(id => !pins.has(id) && !plan.order.includes(id))
+    if (stray) throw needsFullRun(stray)
+    // What a pin brings is read as its real class hands it on (an action with nothing to do hands on what it reads: not here).
+    for (const id of plan.pins) {
+      try { pictureSourceOf(prompt, [id, 0]) }
+      catch { throw needsFullRun(id) }
+    }
+    sub = Object.fromEntries([...plan.pins, ...plan.order].map(id => [id, prompt[id]!]))
+
+    // Hosted: the pinned files and the local nodes' own files (Painter's) must be the user's.
+    const pinnedFiles = plan.pins.flatMap(id => r.pinned[id]!)
+    const ownFiles = collectInputFiles(Object.fromEntries(plan.order.map(id => [id, sub[id]!])))
+    await assertOwned([...pinnedFiles, ...ownFiles], req.userId, hosted, deps.ownership)
+
     const stopped = () => {
       if (signal.aborted) {
         throw refuse(flight.superseded ? PREVIEW_SUPERSEDED : PREVIEW_STOPPED, 409, { reason: flight.superseded ? PREVIEW_SUPERSEDED_REASON : 'stopped' })
@@ -273,6 +302,12 @@ export async function runPreview(req: PreviewInput, deps: PreviewDeps): Promise<
       catch { throw new Error(PREVIEW_PICTURE_UNREAD) }
     }
     const shown = (filename: string): OutputFile => ({ filename, subfolder: '', type: 'temp' })
+    // The whole chain's work within one effect's full-run budget (plan.ts's EFFECT_MAX_WORK): past it, a full run.
+    let spent = 0
+    const spendWork = (work: number) => {
+      spent += work
+      if (spent > (deps.workBudget ?? EFFECT_MAX_WORK)) throw new PreviewOverBudget()
+    }
     let made: Derived | null = null
     for (const id of plan.order) {
       stopped()
@@ -301,7 +336,7 @@ export async function runPreview(req: PreviewInput, deps: PreviewDeps): Promise<
         recs[id] = rec
         continue
       }
-      if (node.kind !== 'derive') throw refuse(PREVIEW_NEEDS_FULL_RUN, 409, { nodeId: id })
+      if (node.kind !== 'derive') throw needsFullRun(id)
       const io: DeriveIO = {
         read: readOnce,
         keep: async (bytes: Uint8Array, ext: KeptExt) => {
@@ -325,6 +360,7 @@ export async function runPreview(req: PreviewInput, deps: PreviewDeps): Promise<
         },
         hosted,
         signal,
+        spendWork,
         nodeId: id,
         runWorkflow: null,
         runPrompt: sub,
@@ -344,6 +380,7 @@ export async function runPreview(req: PreviewInput, deps: PreviewDeps): Promise<
       throw refuse(flight.superseded ? PREVIEW_SUPERSEDED : PREVIEW_STOPPED, 409, { reason: flight.superseded ? PREVIEW_SUPERSEDED_REASON : 'stopped' })
     }
     if (e instanceof MeterRefusalError) throw e
+    if (e instanceof PreviewOverBudget) throw needsFullRun(current ?? r.nodeId)
     const message = plainMessage(e)
     const classType = current ? sub[current]?.class_type ?? null : null
     throw refuse(message, SIZE_REFUSALS.has(message) ? 413 : 400, { nodeId: current ?? r.nodeId, classType })

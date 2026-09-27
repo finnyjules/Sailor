@@ -29,6 +29,8 @@ export interface PreviewRequest {
 }
 
 export const PREVIEW_NEEDS_FULL_RUN = 'This preview needs a full run'
+/** `data.reason` of the 409 that tells the browser to run the node as before (the only 409 it falls back on). */
+export const PREVIEW_NEEDS_FULL_RUN_REASON = 'needs-full-run'
 export const PREVIEW_SUPERSEDED = 'A newer preview of this step took its place'
 /** `data.reason` of the 409 an older preview gets when a newer one for the same node replaces it. */
 export const PREVIEW_SUPERSEDED_REASON = 'superseded'

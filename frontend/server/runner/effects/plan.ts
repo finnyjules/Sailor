@@ -379,6 +379,7 @@ async function planJobs(io: DeriveIO, cls: string, spec: EffectSpec, ins: In[], 
   // A preview of its own is quantised and encoded once, from the first picture.
   if (preview) work += EFFECT_IO_WORK_PER_VALUE * 4 * preview.w * preview.h
   if (work > EFFECT_MAX_WORK) throw new Error(EFFECT_TOO_MUCH_WORK)
+  io.spendWork?.(work)
 
   /** One input of a job, as the worker takes it; each file's bytes let go after its last use. */
   const input = async (x: JobInput): Promise<PixelsPicture | EffectMaskIn | EffectTensorIn> => {

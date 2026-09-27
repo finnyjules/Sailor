@@ -10,7 +10,7 @@
  */
 import type { ApiPrompt } from '#shared/runner/graph'
 import { familyOn, type RunnerFamily } from '#shared/runner/families'
-import { PREVIEW_SUPERSEDED_REASON, previewPlan, type PreviewFile, type PreviewRequest } from '#shared/runner/livePreview'
+import { PREVIEW_NEEDS_FULL_RUN_REASON, PREVIEW_SUPERSEDED_REASON, previewPlan, type PreviewFile, type PreviewRequest } from '#shared/runner/livePreview'
 import { runnerMessageToPipe } from '~/composables/useRunnerEvents'
 
 export type { PreviewFile, PreviewRequest }
@@ -73,8 +73,11 @@ export type LivePreviewOutcome =
   | { kind: 'failed'; nodeId: string; classType: string | null; message: string }
   /** A newer preview of the node took its place, or it was cancelled: nothing to show. */
   | { kind: 'dropped' }
-  /** The route doesn't take it (off, or it needs a full run): run it as before. */
+  /** The route doesn't take it (the runner off: 404; or its 409 "needs a full run"): run it as before. */
   | { kind: 'fallback' }
+
+/** Words for a preview the server couldn't make (a 5xx, the network): never a reason to start a take. */
+export const PREVIEW_COULD_NOT_MAKE = 'This preview couldn’t be made. Try again in a moment.'
 
 /** The node's own in-flight preview, by canvas and node: a newer one cancels it. */
 const inFlight = new Map<string, AbortController>()
@@ -98,19 +101,19 @@ export async function sendLivePreview(body: PreviewRequest & { canvasId: string 
     const x = e as { statusCode?: number; status?: number; data?: { message?: unknown; data?: { reason?: unknown; nodeId?: unknown; classType?: unknown } } } | null
     const status = x?.statusCode ?? x?.status
     const data = x?.data?.data
-    if (status === 409 && data?.reason === PREVIEW_SUPERSEDED_REASON) return { kind: 'dropped' }
-    // Too many previews at once: the next slider change asks again.
-    if (status === 429) return { kind: 'dropped' }
-    if (status === 400 || status === 403 || status === 413) {
-      const message = typeof x?.data?.message === 'string' && x.data.message ? x.data.message : 'This preview couldn’t be made'
-      return {
-        kind: 'failed',
-        nodeId: typeof data?.nodeId === 'string' ? data.nodeId : body.nodeId,
-        classType: typeof data?.classType === 'string' ? data.classType : null,
-        message,
-      }
+    // Only the route saying it doesn't take this preview runs it as before (a full take may follow).
+    if (status === 404 || (status === 409 && data?.reason === PREVIEW_NEEDS_FULL_RUN_REASON)) return { kind: 'fallback' }
+    // Replaced by a newer one, stopped, or too many at once: the next slider change asks again.
+    if (status === 409 || status === 429) return { kind: 'dropped' }
+    const said = status === 400 || status === 403 || status === 413
+    const message = said && typeof x?.data?.message === 'string' && x.data.message ? x.data.message : PREVIEW_COULD_NOT_MAKE
+    // Anything else (a 5xx, a network error): a failed preview, never a take.
+    return {
+      kind: 'failed',
+      nodeId: said && typeof data?.nodeId === 'string' ? data.nodeId : body.nodeId,
+      classType: said && typeof data?.classType === 'string' ? data.classType : null,
+      message,
     }
-    return { kind: 'fallback' }
   }
   finally {
     if (inFlight.get(key) === ctrl) inFlight.delete(key)
@@ -122,18 +125,74 @@ export function previewPromptId(): string {
   return `run_preview_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`
 }
 
-/** The answer as the runner's own event, in the in-page pipe's envelope (useRunnerEvents.ts). */
-export function previewEnvelope(promptId: string, canvasId: string | null, outcome: Extract<LivePreviewOutcome, { kind: 'shown' | 'failed' }>, nodeId: string): Record<string, unknown> | null {
-  const message = outcome.kind === 'shown'
-    ? { type: 'executed', data: { prompt_id: promptId, node: nodeId, display_node: nodeId, output: outcome.ui, canvas_id: canvasId } }
-    : {
-        type: 'execution_error',
-        data: {
-          prompt_id: promptId, node_id: outcome.nodeId, node_type: outcome.classType, exception_message: outcome.message,
-          exception_type: 'RunnerError', traceback: [], canvas_id: canvasId,
-        },
-      }
-  return runnerMessageToPipe(JSON.stringify(message))
+/** A shown preview as the runner's own `executed` event, in the in-page pipe's envelope (useRunnerEvents.ts). */
+export function previewEnvelope(promptId: string, canvasId: string | null, ui: Record<string, unknown>, nodeId: string): Record<string, unknown> | null {
+  return runnerMessageToPipe(JSON.stringify({ type: 'executed', data: { prompt_id: promptId, node: nodeId, display_node: nodeId, output: ui, canvas_id: canvasId } }))
+}
+
+/**
+ * A failed preview's own small path: the node shows it failed, as a failed
+ * run marks it (red ring and message), and nothing goes on the run pipe, so no
+ * run's handlers (wallet, status bar, run visuals, a wait for completion) see it.
+ */
+export function markPreviewFailed(nodes: any[], nodeId: string, message: string): void {
+  const n = nodes.find(x => String(x?.id) === nodeId)
+  if (n) n.data = { ...n.data, running: false, error: true, errorMessage: message, previewError: true }
+}
+
+/** A shown preview clears the failure a preview marked (never a run's). */
+export function clearPreviewFailure(nodes: any[], nodeId: string): void {
+  const n = nodes.find(x => String(x?.id) === nodeId)
+  if (n?.data?.previewError) n.data = { ...n.data, error: false, errorMessage: null, previewError: false }
+}
+
+/** Whether a node's live preview goes to the runner's route: the runner, direct execution and `live-previews` on. */
+export function livePreviewsOn(runnerOn: boolean, directOn: boolean, families: ReadonlySet<RunnerFamily>): boolean {
+  return runnerOn && directOn && familyOn('live-previews', families)
+}
+
+/** What the layout lends a preview. */
+export interface LivePreviewEnv {
+  runnerOn: boolean
+  directOn: boolean
+  families: ReadonlySet<RunnerFamily>
+  /** The canvas asked from (null: not a project canvas, run as before). */
+  canvasId: string | null
+  /** The prompt as a live run builds it, or null. */
+  buildPrompt(nodeId: string): ApiPrompt | null
+  /** The canvas's nodes (data.images), or null once that canvas isn't on screen. */
+  nodes(): any[] | null
+  /** The old path (a scoped live run). */
+  runAsBefore(nodeId: string): void
+  /** Lands a shown preview on the node: the runner's `executed` envelope for a silent stage. */
+  show(promptId: string, env: Record<string, unknown>): void
+  post?: Post
+}
+
+/**
+ * One live preview: through the route when it takes it, else as before.
+ * Only the route's own "not here" (404, or its 409 needs-a-full-run) runs the
+ * old path; a failure shows on the node and a replaced preview shows nothing.
+ */
+export async function runLivePreview(nodeId: string, env: LivePreviewEnv): Promise<void> {
+  if (!livePreviewsOn(env.runnerOn, env.directOn, env.families) || !env.canvasId) return env.runAsBefore(nodeId)
+  const prompt = env.buildPrompt(nodeId)
+  const nodes = prompt ? env.nodes() : null
+  const req = prompt && nodes ? livePreviewRequest(prompt, nodeId, env.families, id => filesShownBy(nodes.find(n => String(n?.id) === id)?.data?.images)) : null
+  if (!req) return env.runAsBefore(nodeId)
+  const out = await sendLivePreview({ ...req, canvasId: env.canvasId }, env.post)
+  if (out.kind === 'fallback') return env.runAsBefore(nodeId)
+  if (out.kind === 'dropped') return
+  const now = env.nodes()
+  if (out.kind === 'failed') {
+    if (now) markPreviewFailed(now, out.nodeId, out.message)
+    return
+  }
+  const promptId = previewPromptId()
+  const envelope = previewEnvelope(promptId, env.canvasId, out.ui, nodeId)
+  if (!envelope) return
+  if (now) clearPreviewFailure(now, nodeId)
+  env.show(promptId, envelope)
 }
 
 /**

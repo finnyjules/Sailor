@@ -143,6 +143,12 @@ export interface DeriveIO {
   savePreviewAs(bytes: Uint8Array, o: { filename: string }): Promise<OutputFile>
   hosted: boolean
   signal: AbortSignal
+  /**
+   * Told each effect's work (pixel·steps, the units of EFFECT_MAX_WORK) before
+   * any pixel is decoded; throws to refuse it. A live preview (R2.11 fix round 1)
+   * holds its whole chain to one effect's budget. Absent on a run.
+   */
+  spendWork?(work: number): void
   nodeId: string
   /** The canvas workflow as sent (Save image embeds it), or null. */
   runWorkflow: unknown

@@ -10,11 +10,15 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs'
 import { join, relative } from 'node:path'
 import sharp from 'sharp'
-import { createApp, eventHandler, toWebHandler } from 'h3'
+import { createServer, request } from 'node:http'
+import type { AddressInfo } from 'node:net'
+import { createApp, eventHandler, toNodeListener, toWebHandler } from 'h3'
 import type { ApiPrompt } from '#shared/runner/graph'
 import { parseFamilies, type RunnerFamily } from '#shared/runner/families'
-import { EFFECT_PICTURE_TOO_LARGE_HOSTED } from '#shared/runner/effects'
-import { PREVIEW_NEEDS_FULL_RUN, PREVIEW_SUPERSEDED } from '#shared/runner/livePreview'
+import { EFFECT_IO_WORK_PER_VALUE, EFFECT_MAX_WORK, EFFECT_PICTURE_TOO_LARGE_HOSTED, effectSchemaOf } from '#shared/runner/effects'
+import { effectSpec } from '~~/server/runner/effects/table'
+import { effectParams } from '~~/server/runner/effects/plan'
+import { PREVIEW_NEEDS_FULL_RUN, PREVIEW_NEEDS_FULL_RUN_REASON, PREVIEW_SUPERSEDED } from '#shared/runner/livePreview'
 import { __setPreviewDepsForTests, PREVIEW_NOT_YOURS, PREVIEW_PICTURE_GONE, PREVIEW_TOO_MANY, previewsInFlight, runPreview, type PreviewDeps } from '~~/server/runner/preview'
 import { userSubfolder } from '~~/server/runner/results'
 import route from '~~/server/api/runs/preview.post'
@@ -133,7 +137,10 @@ describe('runPreview', () => {
     const { deps, put } = kitFor()
     put('input', 'fox.png', await png(8, 8, 1))
     await expect(runPreview({ userId: null, body: { nodeId: '2', prompt: { 7: generate(), 2: blur(['7', 0]) }, pinned: {} } }, deps))
-      .rejects.toMatchObject({ statusCode: 409, message: PREVIEW_NEEDS_FULL_RUN })
+      .rejects.toMatchObject({ statusCode: 409, message: PREVIEW_NEEDS_FULL_RUN, data: { reason: PREVIEW_NEEDS_FULL_RUN_REASON, nodeId: '7' } })
+    // A provider in the request that nothing reads is refused too, not dropped.
+    await expect(runPreview({ userId: null, body: { nodeId: '3', prompt: { ...chain(), 7: generate() }, pinned: { 1: [input('fox.png')] } } }, deps))
+      .rejects.toMatchObject({ statusCode: 409, data: { reason: PREVIEW_NEEDS_FULL_RUN_REASON, nodeId: '7' } })
     const shaderFam = parseFamilies('cards,effects-blur,shader-bake,live-previews')
     const shader = kitFor({ families: shaderFam })
     await expect(runPreview({ userId: null, body: { nodeId: '2', prompt: { 1: card(), 5: { class_type: 'ShaderEffect', inputs: { image: ['1', 0] } }, 2: blur(['5', 0]) }, pinned: { 1: [input('fox.png')] } } }, shader.deps))
@@ -211,6 +218,107 @@ describe('runPreview', () => {
     await expect(a).rejects.toMatchObject({ statusCode: 409, data: { reason: 'stopped' } })
     expect((await b).ui).toBeTruthy()
     expect(previewsInFlight()).toEqual({ requests: 0, bytes: 0 })
+  })
+})
+
+describe('runPreview, fix round 1', () => {
+  it('the (user, node) slot is taken on arrival: an older request whose ownership check is slower never replaces the newer', async () => {
+    const { kit, deps, put, owned } = kitFor({ hosted: true })
+    put('input', 'mine.png', await png(120, 80, 11))
+    owned.add('input:mine.png')
+    let calls = 0
+    const slowFirst: PreviewDeps = {
+      ...deps,
+      ownership: {
+        ownsInput: async (u, f) => {
+          if (++calls === 1) await new Promise(r => setTimeout(r, 60))
+          return deps.ownership.ownsInput(u, f)
+        },
+        ownsOutput: deps.ownership.ownsOutput,
+      },
+    }
+    const body = (midtones: number) => ({ canvasId: 'c1', nodeId: '3', prompt: { ...chain(), 1: card('mine.png'), 3: curves(['2', 0], midtones) }, pinned: { 1: [input('mine.png')] } })
+    const older = runPreview({ userId: 'user_1', body: body(1.1) }, slowFirst)
+    const newer = runPreview({ userId: 'user_1', body: body(1.7) }, slowFirst)
+    await expect(older).rejects.toMatchObject({ statusCode: 409, data: { reason: 'superseded' } })
+    expect((await newer).ui).toBeTruthy()
+    // What is on disk is the newer one's picture.
+    const check = kitFor({ hosted: true })
+    check.put('input', 'mine.png', readFileSync(join(kit.root, 'input/mine.png')))
+    check.owned.add('input:mine.png')
+    const own = userSubfolder('user_1', true)
+    await runPreview({ userId: 'user_1', body: body(1.7) }, check.deps)
+    expect(Buffer.compare(readFileSync(join(kit.root, 'temp', own, 'live_preview_3.png')), readFileSync(join(check.kit.root, 'temp', own, 'live_preview_3.png')))).toBe(0)
+    expect(previewsInFlight()).toEqual({ requests: 0, bytes: 0 })
+  })
+
+  it('a request that arrived earlier than the one holding the slot is refused as replaced, however late it reaches runPreview', async () => {
+    const { deps, put } = kitFor()
+    put('input', 'fox.png', await png(64, 48, 2))
+    const body = { canvasId: 'c1', nodeId: '3', prompt: chain(), pinned: { 1: [input('fox.png')] } }
+    const newer = runPreview({ userId: null, body, arrival: 1_000_000_002 }, deps)
+    await expect(runPreview({ userId: null, body, arrival: 1_000_000_001 }, deps)).rejects.toMatchObject({ statusCode: 409, data: { reason: 'superseded' } })
+    expect((await newer).ui).toBeTruthy()
+  })
+
+  it('a request whose browser has already gone is refused and takes no slot', async () => {
+    const { deps, put } = kitFor()
+    put('input', 'fox.png', await png(16, 16, 2))
+    const gone = new AbortController()
+    gone.abort()
+    const running = runPreview({ userId: null, body: { canvasId: 'c1', nodeId: '3', prompt: chain(), pinned: { 1: [input('fox.png')] } } }, deps)
+    await expect(runPreview({ userId: null, body: { canvasId: 'c1', nodeId: '3', prompt: chain(), pinned: { 1: [input('fox.png')] } }, signal: gone.signal }, deps))
+      .rejects.toMatchObject({ statusCode: 409, data: { reason: 'stopped' } })
+    // The gone request replaced nothing.
+    expect((await running).ui).toBeTruthy()
+  })
+
+  it('the whole chain’s work is held to one effect’s full-run budget: past it, 409 needs a full run, before the next node decodes anything', async () => {
+    const { kit, put, deps } = kitFor()
+    put('input', 'fox.png', await png(40, 30, 3))
+    expect(deps.workBudget).toBeUndefined()
+    // One Blur's work on this picture, as plan.ts counts it: its reading, decoding and encoding, and its own.
+    const params = effectParams(effectSchemaOf('Blur')!, blur(['1', 0]).inputs)
+    const one = EFFECT_IO_WORK_PER_VALUE * 4 * (40 * 30 * 2) + effectSpec('Blur')!.work!(params, { w: 40, h: 30 })
+    expect(one).toBeLessThan(EFFECT_MAX_WORK)
+    const budget = { ...deps, workBudget: Math.floor(one * 1.5) }
+    const twoBlurs: ApiPrompt = { 1: card(), 2: blur(['1', 0]), 3: blur(['2', 0]) }
+    expect((await runPreview({ userId: null, body: { canvasId: 'c1', nodeId: '2', prompt: { 1: card(), 2: blur(['1', 0]) }, pinned: { 1: [input('fox.png')] } } }, budget)).ui).toBeTruthy()
+    await expect(runPreview({ userId: null, body: { canvasId: 'c1', nodeId: '3', prompt: twoBlurs, pinned: { 1: [input('fox.png')] } } }, budget))
+      .rejects.toMatchObject({ statusCode: 409, message: PREVIEW_NEEDS_FULL_RUN, data: { reason: PREVIEW_NEEDS_FULL_RUN_REASON, nodeId: '3' } })
+    expect(filesUnder(join(kit.root, 'temp'))).toEqual(['sailor_runner/live_preview_2.png'])
+    expect(previewsInFlight()).toEqual({ requests: 0, bytes: 0 })
+  })
+})
+
+describe('POST /api/runs/preview over a real socket', () => {
+  it('the browser closing its connection stops the preview: nothing is written and nothing is held', async () => {
+    process.env.NUXT_RUNNER_ENABLED = 'true'
+    const { kit, deps, put } = kitFor()
+    put('input', 'fox.png', await png(32, 24, 8))
+    let seen = 0
+    // The picture check waits, so the connection goes while the preview is under way.
+    __setPreviewDepsForTests({ ...deps, results: { ...deps.results, exists: async (f) => { seen++; await new Promise(r => setTimeout(r, 150)); return deps.results.exists(f) } } })
+    const app = createApp()
+    app.use(route)
+    const server = createServer(toNodeListener(app))
+    await new Promise<void>(r => server.listen(0, '127.0.0.1', r))
+    try {
+      const { port } = server.address() as AddressInfo
+      const payload = JSON.stringify({ canvasId: 'c1', nodeId: '3', prompt: chain(), pinned: { 1: [input('fox.png')] } })
+      const req = request({ host: '127.0.0.1', port, path: '/', method: 'POST', headers: { 'content-type': 'application/json', 'content-length': Buffer.byteLength(payload) } })
+      req.on('error', () => {})
+      req.end(payload)
+      await until(() => seen > 0, 5000)
+      req.destroy()
+      await until(() => previewsInFlight().requests === 0, 5000)
+      await new Promise(r => setTimeout(r, 300))
+      expect(filesUnder(join(kit.root, 'temp'))).toEqual([])
+      expect(previewsInFlight()).toEqual({ requests: 0, bytes: 0 })
+    }
+    finally {
+      await new Promise(r => server.close(r))
+    }
   })
 })
 

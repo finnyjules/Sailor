@@ -10,7 +10,7 @@
 import { createError, defineEventHandler, getRequestHeader, readRawBody } from 'h3'
 import { runnerEnabled, runnerFamilies } from '../../runner/config'
 import { assertRateLimit } from '../../lib/rateLimit'
-import { previewDepsOverride, runPreview, type PreviewDeps } from '../../runner/preview'
+import { previewArrival, previewDepsOverride, runPreview, type PreviewDeps } from '../../runner/preview'
 import { createEngineResultStore } from '../../runner/results'
 import { canonicalUploadKey, engineDirForType, uploadOwner } from '../../utils/inputUploads'
 import { ownedOutputKeys, outputKey } from '../../utils/graphRuns'
@@ -56,18 +56,27 @@ export default defineEventHandler(async (event) => {
   if (!runnerEnabled()) throw createError({ statusCode: 404, message: 'Not found' })
   // A slider drag asks often; the browser keeps one request per node in flight.
   assertRateLimit(event, 'runs-preview', 600)
-  const length = getRequestHeader(event, 'content-length')
-  if (Number(length ?? 0) > PREVIEW_MAX_BODY_BYTES) throw createError({ statusCode: 413, message: TOO_LARGE })
-  const raw = length === undefined && getRequestHeader(event, 'transfer-encoding')
-    ? await readLimited(event.node!.req as unknown as AsyncIterable<unknown>)
-    : await readRawBody(event, 'utf8')
-  if (raw && Buffer.byteLength(raw) > PREVIEW_MAX_BODY_BYTES) throw createError({ statusCode: 413, message: TOO_LARGE })
-  let body: unknown
-  try { body = raw ? JSON.parse(raw) : null }
-  catch { throw createError({ statusCode: 400, message: UNREADABLE }) }
-  // The browser going away stops the preview: the response's close (the request's closes once its body is read).
+  // The moment it arrived: a later request for the same node replaces this one, never the reverse.
+  const arrival = previewArrival()
+  // The browser going away stops the preview, from before the body is read: the response's close
+  // (the request's closes once its body is read). Let go when the request answers.
   const gone = new AbortController()
   const res = event.node?.res
-  res?.once?.('close', () => { if (!res.writableEnded) gone.abort() })
-  return await runPreview({ userId: event.context.userId ?? null, body, signal: gone.signal }, deps())
+  const onClose = () => { if (!res?.writableEnded) gone.abort() }
+  res?.once?.('close', onClose)
+  try {
+    const length = getRequestHeader(event, 'content-length')
+    if (Number(length ?? 0) > PREVIEW_MAX_BODY_BYTES) throw createError({ statusCode: 413, message: TOO_LARGE })
+    const raw = length === undefined && getRequestHeader(event, 'transfer-encoding')
+      ? await readLimited(event.node!.req as unknown as AsyncIterable<unknown>)
+      : await readRawBody(event, 'utf8')
+    if (raw && Buffer.byteLength(raw) > PREVIEW_MAX_BODY_BYTES) throw createError({ statusCode: 413, message: TOO_LARGE })
+    let body: unknown
+    try { body = raw ? JSON.parse(raw) : null }
+    catch { throw createError({ statusCode: 400, message: UNREADABLE }) }
+    return await runPreview({ userId: event.context.userId ?? null, body, signal: gone.signal, arrival }, deps())
+  }
+  finally {
+    res?.off?.('close', onClose)
+  }
 })
