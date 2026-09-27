@@ -600,15 +600,18 @@ async function planNodeRequest(ctx: PlanContext): Promise<NodePlan> {
     // (shotRefs.ts), `image_url` is the first frame unless a picture is
     // linked, and the rest is planned exactly as Generate a video. Its
     // prompt is Shot Director's own, sent as typed (Python's shot_directed
-    // path adds no preset phrase). It shows its video on itself, as on ComfyUI.
+    // path adds no preset phrase).
     case 'FilmShotNode': {
-      const resolved = await resolveShotRefs(parseJsonObject(inputs.model_options), ctx.toUrl)
+      // A linked picture that brought no file fails the node, as pictureUrl does; never a silent fallback.
       const f = linkedFirstFile('image')
+      if (isLink(inputs.image) && !f) throw new Error('There is no picture for the first frame')
+      const resolved = await resolveShotRefs(parseJsonObject(inputs.model_options), ctx.toUrl)
       const firstFrame = resolved.firstFrame
       const first = f ? () => ctx.toUrl(f) : firstFrame ? async () => firstFrame : null
       const plan = await planVideoGeneration({ ...inputs, model_options: JSON.stringify(resolved.adv) }, first)
       if (plan.kind !== 'provider') return plan
-      return { ...plan, prefix: 'film_shot', uiFor: files => ({ images: files, animated: [true] }) }
+      // Python's FilmShotNode is not an output node: the take lands on the Video card after it (Ruling C).
+      return { ...plan, prefix: 'film_shot', uiFor: () => null }
     }
 
     // ── fal-edit family (nodes_replicate.py EditImageNode :2725) ──

@@ -319,7 +319,10 @@ export const SEEDANCE_UNMEASURED_REFERENCE = 'Seedance 2.0 can’t check how lon
  * ComfyUI path (the Kling switch off) a node that carries them is refused,
  * never run with the character silently dropped (Ruling B, Task 4).
  */
-export const KLING_ELEMENTS_COMFY_WORDS = 'Kling 3 films characters only through Sailor\'s runner, which is off for Kling here. Pick Seedance or Veo, or switch Kling on.'
+export const KLING_ELEMENTS_COMFY_WORDS = 'Kling 3 films characters only through Sailor\'s runner, and this shot can\'t go there. Pick Seedance or Veo, or switch Kling on.'
+
+/** Runner: elements on a model other than Kling 3, which would drop them (Task 4 fix, minor a). */
+export const ELEMENTS_ONLY_KLING_WORDS = 'Only Kling 3 takes characters as elements. Pick Kling 3, or send pictures instead.'
 
 /** Whether these options carry any Kling element. */
 function hasKlingElements(adv: Record<string, unknown>): boolean {
@@ -721,6 +724,10 @@ export function requestProblems(prompt: ApiPrompt, opts: { runner?: boolean } = 
       if (!opts.runner && !isLink(inputs.model_options) && hasKlingElements(parseJsonObject(inputs.model_options))) {
         out.push({ nodeId, classType: ct, input: 'model_options', message: KLING_ELEMENTS_COMFY_WORDS })
       }
+      // The runner: only Kling 3's builder sends elements; any other model would drop them.
+      if (opts.runner && id !== 'kling-v3' && !isLink(inputs.model_options) && hasKlingElements(parseJsonObject(inputs.model_options))) {
+        out.push({ nodeId, classType: ct, input: 'model_options', message: ELEMENTS_ONLY_KLING_WORDS })
+      }
       if (isWan3Model(id)) {
         const p = wan3RequestProblem(id, inputs)
         if (p) out.push({ nodeId, classType: ct, input: p.input, message: p.message })
@@ -831,6 +838,8 @@ export function requestProblems(prompt: ApiPrompt, opts: { runner?: boolean } = 
       // A reference link the runner can't resolve (shotRefs.ts) is refused before the hold.
       const bad = shotRefProblem(adv)
       if (bad) out.push({ nodeId, classType: ct, input: 'model_options', message: bad })
+      // Only Kling 3's builder sends elements; any other model would drop them.
+      if (id !== 'kling-v3' && hasKlingElements(adv)) out.push({ nodeId, classType: ct, input: 'model_options', message: ELEMENTS_ONLY_KLING_WORDS })
       if (id === 'seedance-2.0') {
         const p = seedanceReferenceProblem(adv, isLink(inputs.image))
         if (p) out.push({ nodeId, classType: ct, input: 'model_options', message: p.message })

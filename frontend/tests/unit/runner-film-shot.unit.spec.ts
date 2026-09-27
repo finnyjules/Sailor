@@ -12,7 +12,8 @@ import { VIEW_REF_REFUSED } from '#shared/pricing/clipSettings'
 import { PROVIDER_TYPES, isRunnerEligible, isShotDirected, runnerTakesNode } from '#shared/runner/eligibility'
 import { planNode } from '~~/server/runner/executors'
 import { resolveShotRefs, shotRefFilenames, shotRefProblem } from '~~/server/runner/shotRefs'
-import { KLING_ELEMENTS_COMFY_WORDS, requestProblems } from '~~/server/runner/requestRules'
+import { ELEMENTS_ONLY_KLING_WORDS, KLING_ELEMENTS_COMFY_WORDS, SEEDANCE_TOO_MUCH_VIDEO, SEEDANCE_UNMEASURED_REFERENCE, requestProblems } from '~~/server/runner/requestRules'
+import { runnerReferenceProblems, seedanceReferenceSeconds } from '~~/server/utils/graphInputSeconds'
 import { VEO_31_ONE_PICTURE, VEO_31_REFS_WORDS } from '~~/server/runner/generators/video'
 import { KLING_ELEMENTS_NEED_FRAME } from '~~/server/runner/generators/twins'
 import { nodeCredits } from '~~/server/runner/metering'
@@ -169,11 +170,19 @@ describe('planning a shot-directed Film a shot', () => {
     expect(JSON.stringify(p.payload)).toContain('https://fal/start.png')
     expect(p.backup).toBeUndefined()
   })
-  it('shows its video on itself', async () => {
+  it('shows nothing on itself, as Generate a video', async () => {
     const p = await plan(shot('veo-3.1'))
     if (p.kind !== 'provider') throw new Error('not a provider plan')
     const f: OutputFile = { filename: 'film_shot_00001_.mp4', subfolder: '', type: 'output' }
-    expect(p.uiFor([f])).toEqual({ images: [f], animated: [true] })
+    // Python's FilmShotNode is not an output node: the take lands on the Video card after it (Ruling C).
+    expect(p.uiFor([f])).toBeNull()
+  })
+  it('a linked picture that brought no file fails the node, never falls back to image_url', async () => {
+    const node = shot('seedance-2.0', { image_url: view('other.png') }, { image: true })
+    await expect(planNode({
+      prompt: { 9: { class_type: 'Image', inputs: { image: 'f.png' } }, n: node },
+      nodeId: 'n', filesFrom: () => [], toUrl, gateOpen: false,
+    })).rejects.toThrow('There is no picture for the first frame')
   })
   it('a refused link fails the node before anything is sent', async () => {
     await expect(plan(shot('veo-3.1', { image_urls: ['/view?filename=a.png&filename=b.png&type=input'] }))).rejects.toThrow(VIEW_REF_REFUSED)
@@ -190,7 +199,7 @@ describe('requestProblems for Film a shot', () => {
       { nodeId: 'n', classType: 'GenerateVideoNode', input: 'model_options', message: KLING_ELEMENTS_COMFY_WORDS },
     ])
     expect(requestProblems({ n: shot('kling-v3', { elements: [] }) })).toEqual([])
-    expect(KLING_ELEMENTS_COMFY_WORDS).toBe('Kling 3 films characters only through Sailor\'s runner, which is off for Kling here. Pick Seedance or Veo, or switch Kling on.')
+    expect(KLING_ELEMENTS_COMFY_WORDS).toBe('Kling 3 films characters only through Sailor\'s runner, and this shot can\'t go there. Pick Seedance or Veo, or switch Kling on.')
   })
   it('the runner gate takes a shot-directed Veo with up to 3 pictures, and refuses what Generate a video refuses', () => {
     expect(requestProblems({ n: shot('veo-3.1', { image_urls: [view('a.png'), view('b.png')] }) }, { runner: true })).toEqual([])
@@ -233,5 +242,44 @@ describe('a bad reference link is refused before the hold', () => {
     ])
     expect(shotRefProblem({ image_urls: ['/view?filename=../x&type=input'] })).toBe('A reference picture could not be read.')
     expect(shotRefProblem({ image_urls: [view('a.png'), 'https://x/y.png'], elements: [{ frontal_image_url: view('f.png') }] })).toBeNull()
+  })
+})
+
+describe('fix round: elements only on Kling 3 (runner)', () => {
+  const el = { frontal_image_url: view('face.png'), reference_image_urls: [] }
+  it('the runner gate refuses elements on any other model, Film a shot or Generate a video', () => {
+    expect(requestProblems({ n: shot('seedance-2.0', { elements: [el] }) }, { runner: true })).toEqual([
+      { nodeId: 'n', classType: 'FilmShotNode', input: 'model_options', message: ELEMENTS_ONLY_KLING_WORDS },
+    ])
+    expect(requestProblems({ n: video('veo-3.1', { elements: [el] }) }, { runner: true })).toEqual([
+      { nodeId: 'n', classType: 'GenerateVideoNode', input: 'model_options', message: ELEMENTS_ONLY_KLING_WORDS },
+    ])
+    expect(ELEMENTS_ONLY_KLING_WORDS).toBe('Only Kling 3 takes characters as elements. Pick Kling 3, or send pictures instead.')
+  })
+})
+
+describe('fix round (Ruling D): Seedance reference lengths on a shot-directed Film a shot', () => {
+  const lengths: Record<string, number> = { 'a.mp4': 8, 'b.mp4': 8 }
+  const read = async (f: { value: string }) => lengths[f.value] ?? null
+  const overlong = () => ({ n: shot('seedance-2.0', { video_urls: [view('a.mp4'), view('b.mp4')] }) })
+
+  it('the runner\'s check refuses 16 s of reference video', async () => {
+    expect(await seedanceReferenceSeconds(overlong(), read, { filmShots: true })).toEqual([
+      { nodeId: 'n', classType: 'FilmShotNode', input: 'model_options', message: SEEDANCE_TOO_MUCH_VIDEO },
+    ])
+  })
+  it('the runner\'s own call refuses an unmeasurable reference (hosted) and checks its files are owned', async () => {
+    const owned: string[] = []
+    const p = await runnerReferenceProblems([{ n: shot('seedance-2.0', { video_urls: [view('a.mp4'), 'https://x/y.mp4'] }) }], {
+      readFile: async () => { throw new Error('gone') },
+      strict: true,
+      assertOwned: async fs => { owned.push(...fs.map(f => f.filename)) },
+    })
+    expect(p).toEqual({ nodeId: 'n', classType: 'FilmShotNode', input: 'model_options', message: SEEDANCE_UNMEASURED_REFERENCE })
+    expect(owned).toEqual(['a.mp4'])
+  })
+  it('the ComfyUI gate is unchanged: it does not read a Film a shot', async () => {
+    expect(await seedanceReferenceSeconds(overlong(), read)).toEqual([])
+    expect(await seedanceReferenceSeconds(overlong(), read, { strict: true })).toEqual([])
   })
 })
