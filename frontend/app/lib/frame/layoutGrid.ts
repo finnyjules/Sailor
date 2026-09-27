@@ -168,8 +168,20 @@ export interface LayoutSpan { col: number; cols: number; row: number | null; row
 
 /** First and last track a [lo, hi] extent covers: the first is the track whose START is nearest lo
  *  among those that start before hi; the last is the track whose END is nearest hi among those that
- *  end after lo. So a small box inside one track covers just that track. 0-based. */
+ *  end after lo. So a small box inside one track covers just that track. 0-based.
+ *  A box that overlaps NO track's interior (it sits wholly inside a gutter) covers only the single
+ *  nearest track, by distance from the box's centre to the track's centre — ties go to the lower index. */
 function spanIdx(tracks: Track[], lo: number, hi: number): [number, number] {
+  const overlapsAny = tracks.some(t => t.a < hi && t.a + t.w > lo)
+  if (!overlapsAny) {
+    const c = (lo + hi) / 2
+    let best = 0, bd = Infinity
+    tracks.forEach((t, i) => {
+      const d = Math.abs((t.a + t.w / 2) - c)
+      if (d < bd) { bd = d; best = i }
+    })
+    return [best, best]
+  }
   let first = -1, last = -1, bf = Infinity, bl = Infinity
   tracks.forEach((t, i) => {
     if (t.a < hi) { const d = Math.abs(t.a - lo); if (d < bf) { bf = d; first = i } }

@@ -50,6 +50,16 @@ describe('spanOf / placeOnSpan', () => {
   it('rows off → no row', () => {
     expect(spanOf({ x: 100, y: 100, w: 400, h: 190 }, R0)).toEqual({ col: 1, cols: 2, row: null, rows: null })
   })
+  it('a box wholly inside a gutter covers the single nearest track (tie → lower index)', () => {
+    // Tracks 0 (100-290) and 1 (310-500), gutter 290-310. Box [295, 305] is equidistant
+    // from both track centres (195 and 405): the tie goes to the lower index.
+    expect(spanOf({ x: 295, y: 400, w: 10, h: 10 }, R)).toEqual({ col: 1, cols: 1, row: 2, rows: 1 })
+  })
+  it('a box straddling a gutter into both tracks still covers two', () => {
+    // [150, 450] reaches well past the gutter into the interior of both track 0 (100-290)
+    // and track 1 (310-500) — not the gutter-only case above.
+    expect(spanOf({ x: 150, y: 100, w: 300, h: 190 }, R)).toEqual({ col: 1, cols: 2, row: 1, rows: 1 })
+  })
   it('places a span on the grid and clamps it inside', () => {
     expect(placeOnSpan({ col: 2, cols: 2, row: 3, rows: 2 }, R)).toEqual({ x: 310, w: 400, y: 520, h: 400 })
     expect(placeOnSpan({ col: 9, cols: 5, row: null, rows: null }, R)).toEqual({ x: 730, w: 190, y: null, h: null })
