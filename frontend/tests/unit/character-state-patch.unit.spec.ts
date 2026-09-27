@@ -109,3 +109,18 @@ it('a bare re-lock after a testing-state content edit 400s — the stale stressR
   const relock = applyStatePatch((afterEdit as { ok: true, record: typeof testing }).record, { stateId: 'default', patch: { status: 'locked' } }, 'T3')
   expect(relock).toMatchObject({ ok: false, code: 400 })
 })
+
+describe('rework fields in a look patch', () => {
+  it('accepts clothes and a look face, cleaned', () => {
+    const r = rec()
+    const res = applyStatePatch(r, {
+      stateId: 'default',
+      patch: { clothes: [{ id: 'g1', filename: 'coat.png', name: 'Raincoat' }, { id: 'x' } as any], face: { filename: 'heavier.png', approvedAt: 't' } },
+    }, 'now')
+    expect(res.ok).toBe(true)
+    if (!res.ok) return
+    const s = res.record.states.find(s => s.id === 'default')!
+    expect(s.clothes).toEqual([{ id: 'g1', filename: 'coat.png', name: 'Raincoat' }])
+    expect(s.face).toEqual({ filename: 'heavier.png', approvedAt: 't' })
+  })
+})

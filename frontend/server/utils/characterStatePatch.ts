@@ -4,24 +4,24 @@
  * IO-only (read record, call this, write record). Kept fs-free so it
  * unit-tests without Nitro, same as characterRegistry.ts.
  */
-import type { CharacterRecord, CharacterState } from '#shared/characters/types'
-import { stateHygiene } from './characterRegistry'
+import type { CharacterRecord, CharacterState, Garment } from '#shared/characters/types'
+import { faceRefHygiene, garmentHygiene, stateHygiene } from './characterRegistry'
 
 export interface StatePatchBody {
   stateId: string
   expectedUpdatedAt?: string
-  patch: Partial<Pick<CharacterState, 'label' | 'descriptor' | 'refImages' | 'coverIndex' | 'panels' | 'sheetImage' | 'status' | 'stressResult'>>
+  patch: Partial<Pick<CharacterState, 'label' | 'descriptor' | 'refImages' | 'coverIndex' | 'panels' | 'sheetImage' | 'status' | 'stressResult' | 'clothes' | 'face'>>
 }
 
 export type StatePatchResult =
   | { ok: true, record: CharacterRecord }
   | { ok: false, code: 400 | 404 | 409, message: string }
 
-const ALLOWED = new Set(['label', 'descriptor', 'refImages', 'coverIndex', 'panels', 'sheetImage', 'status', 'stressResult'])
+const ALLOWED = new Set(['label', 'descriptor', 'refImages', 'coverIndex', 'panels', 'sheetImage', 'status', 'stressResult', 'clothes', 'face'])
 
 // Patch keys that carry the state's identity/content — editing any of these
 // on a locked state breaks its "this sheet passed stress" promise.
-const CONTENT_KEYS = new Set(['descriptor', 'refImages', 'coverIndex', 'panels', 'sheetImage'])
+const CONTENT_KEYS = new Set(['descriptor', 'refImages', 'coverIndex', 'panels', 'sheetImage', 'clothes', 'face'])
 
 const STATUSES = new Set(['draft', 'testing', 'locked'])
 
@@ -43,6 +43,8 @@ export function applyStatePatch(record: CharacterRecord, body: StatePatchBody, n
   }
 
   let next: CharacterState = { ...state, ...patch }
+  if (patch.clothes !== undefined) next = { ...next, clothes: (Array.isArray(patch.clothes) ? patch.clothes : []).map(garmentHygiene).filter((g): g is Garment => !!g) }
+  if (patch.face !== undefined) next = { ...next, face: faceRefHygiene(patch.face) }
 
   // Content-edit rule: a non-draft state (locked OR testing) whose content
   // the patch touches demotes to draft (stressResult cleared) unless the
