@@ -8,10 +8,14 @@
  *
  * A planner gives the calls at their most expensive where an input is linked
  * (known only at run time), the most a text model can be sent and can answer
- * (ruling (c): one token per byte of text sent, at most the moderation limit,
- * plus the node's longest answer), and every call a pipeline may make. Given
+ * (ruling (c), `tokenCeiling`: one token per UTF-8 byte of text sent, each
+ * moderated text at most the moderation limit in hosted, plus Sailor's own
+ * fixed prompt text, plus the node's longest answer), and every call a pipeline may make. Given
  * `opts.answerUsage` (what the answer reported) it gives the calls as used,
  * for the charge; priceNode never lets that exceed the hold.
+ *
+ * Rule (c) is implemented once, in `tokenCeiling`: every text model's
+ * planner builds its ceiling from it.
  *
  * `paidNoCall` says, from the inputs as sent, when Python returns before
  * calling anyone (rule 8): the stage hold skips such a node
@@ -22,6 +26,53 @@
  */
 import type { NodeInputs, PriceOptions } from './nodePrice'
 import type { PaidCall } from './paidRates'
+
+/**
+ * The most bytes of one moderated text in hosted (server/utils/moderation.ts
+ * MODERATION_MAX_INPUT_BYTES: a longer text is refused before the hold). A
+ * test keeps the two equal; shared code can't import the server's.
+ */
+export const TOKEN_TEXT_CAP_BYTES = 32_768
+
+const UTF8 = new TextEncoder()
+
+/** A text's size in UTF-8 bytes (what the moderation limit and a token ceiling count). */
+export function utf8Bytes(text: string): number {
+  return UTF8.encode(text).length
+}
+
+/** What a text node sends, for its token ceiling. */
+export interface TokenTexts {
+  /** The user's texts as typed, each moderated on its own. */
+  texts: readonly string[]
+  /** How many of the user's texts are linked (known only at run time): each counted at the cap. */
+  linkedTexts?: number
+  /** Sailor's own fixed text sent with them (system prompts, templates): counted whole, never capped. */
+  fixed?: readonly string[]
+  /** The node's longest answer, in tokens (its max-tokens setting). */
+  maxAnswerTokens: number
+}
+
+/**
+ * Ruling (c)'s ceiling for a text model's call, in tokens, counted
+ * generously as one token per UTF-8 byte:
+ *  - input: the user's texts (hosted: each at most TOKEN_TEXT_CAP_BYTES, as
+ *    moderation refuses a longer one; local: whole), a linked text at the cap
+ *    (local runs are free, so this bound only shows on the badge), or the
+ *    caller's measured `opts.inputBytes` in their place (hosted: at most the
+ *    cap per text); plus Sailor's fixed text, never capped;
+ *  - output: the node's longest answer.
+ */
+export function tokenCeiling(t: TokenTexts, opts: Pick<PriceOptions, 'inputBytes' | 'hosted'> = {}): { inputTokens: number, outputTokens: number } {
+  const linked = Math.max(0, t.linkedTexts ?? 0)
+  const cap = (bytes: number) => (opts.hosted ? Math.min(bytes, TOKEN_TEXT_CAP_BYTES) : bytes)
+  const measured = opts.inputBytes
+  const user = typeof measured === 'number' && Number.isFinite(measured) && measured >= 0
+    ? (opts.hosted ? Math.min(measured, TOKEN_TEXT_CAP_BYTES * Math.max(1, t.texts.length + linked)) : measured)
+    : t.texts.reduce((sum, text) => sum + cap(utf8Bytes(text)), 0) + linked * TOKEN_TEXT_CAP_BYTES
+  const fixed = (t.fixed ?? []).reduce((sum, text) => sum + utf8Bytes(text), 0)
+  return { inputTokens: user + fixed, outputTokens: t.maxAnswerTokens }
+}
 
 /** The calls a node makes: each call `times` times in one run, or the reason it can't be priced. */
 export type PaidCalls = { steps: { call: PaidCall, times: number }[] } | { refused: string }

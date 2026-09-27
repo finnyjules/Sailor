@@ -10,6 +10,7 @@
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import sharp from 'sharp'
 import type { ApiPrompt } from '#shared/runner/graph'
 import type { RunnerFamily } from '#shared/runner/families'
 import type { NodeInputs, PriceOptions } from '#shared/pricing/nodePrice'
@@ -18,15 +19,16 @@ import type { PaidCalls } from '#shared/pricing/paidSettings'
 import { SHARED_PRICED_CLASS_SET, priceNode } from '#shared/pricing/nodePrice'
 import { creditsForUsd, usdChargedAtCost } from '#shared/pricing/markup'
 import { callCredits, callsCredits } from '#shared/pricing/pipelinePrice'
-import { PAID_RATES, paidCallUsd } from '#shared/pricing/paidRates'
-import { PAID_NODE_CLASSES, paidCalls, paidNoCall } from '#shared/pricing/paidSettings'
+import { PAID_RATES, otherCardFor, paidCallUsd } from '#shared/pricing/paidRates'
+import { PAID_NODE_CLASSES, TOKEN_TEXT_CAP_BYTES, paidCalls, paidNoCall, tokenCeiling, utf8Bytes } from '#shared/pricing/paidSettings'
+import { MODERATION_MAX_INPUT_BYTES } from '~~/server/utils/moderation'
 import { editUsd } from '#shared/pricing/editRates'
 import { clipUsd } from '#shared/pricing/clipRates'
 import { videoPriceUsd } from '#shared/pricing/videoRates'
 import { GRAPH_NODE_CREDITS, priceGraph } from '~~/server/utils/priceBook'
 import { PAID_TEXT_INPUTS, createMetering, extraPromptTexts, nodeCredits, stageEstimate } from '~~/server/runner/metering'
 import { makeKit } from './__runner__/kit'
-import { expectCalls, normalizeSent, runPaidCase, type PaidCase } from './__runner__/paidParity'
+import { expectCalls, normalizeSent, runPaidCase, wireText, type PaidCase } from './__runner__/paidParity'
 
 // ── Stand-ins ────────────────────────────────────────────────────────────────
 
@@ -40,14 +42,10 @@ const RATES = vi.hoisted((): Record<string, unknown> => ({
 
 /** The token stand-in's ceiling: one token per byte of text sent (at most 32,768), plus its longest answer. */
 const MAX_ANSWER_TOKENS = 8192
+/** The token stand-in's own fixed prompt, in bytes. */
+const SYSTEM = 'You are a summarizer.'.length
 const STAND_IN = vi.hoisted(() => ({
-  TestTokenNode: (inputs: Record<string, unknown>, opts: { inputChars?: number; answerUsage?: { inputTokens: number; outputTokens: number } }) => {
-    const sent = Math.min(32768, opts.inputChars ?? new TextEncoder().encode(String(inputs.text ?? '')).length)
-    const call = opts.answerUsage
-      ? { endpoint: 'test/llm', inputTokens: opts.answerUsage.inputTokens, outputTokens: opts.answerUsage.outputTokens }
-      : { endpoint: 'test/llm', inputTokens: sent, outputTokens: 8192 }
-    return { steps: [{ call, times: 1 }] }
-  },
+  TestTokenNode: null as unknown as (inputs: Record<string, unknown>, opts: Record<string, unknown>) => unknown,
   TestPipelineNode: () => ({
     steps: [
       { call: { endpoint: 'test/a' }, times: 2 },
@@ -56,6 +54,7 @@ const STAND_IN = vi.hoisted(() => ({
   }),
   TestUnpricedNode: () => ({ steps: [{ call: { endpoint: 'test/no-card' }, times: 1 }] }),
   TestRefusedNode: () => ({ refused: 'Pick a model first.' }),
+  TestBadTimesNode: (inputs: Record<string, unknown>) => ({ steps: [{ call: { endpoint: 'test/a' }, times: inputs.times as number }] }),
 }))
 
 vi.mock('#shared/pricing/paidRates', async (importOriginal) => {
@@ -66,6 +65,15 @@ vi.mock('#shared/pricing/paidRates', async (importOriginal) => {
 
 vi.mock('#shared/pricing/paidSettings', async (importOriginal) => {
   const real = await importOriginal<typeof import('#shared/pricing/paidSettings')>()
+  // The token stand-in builds its ceiling from the one shared rule (c).
+  STAND_IN.TestTokenNode = (inputs: NodeInputs, opts: PriceOptions) => ({
+    steps: [{
+      call: opts.answerUsage
+        ? { endpoint: 'test/llm', inputTokens: opts.answerUsage.inputTokens, outputTokens: opts.answerUsage.outputTokens }
+        : { endpoint: 'test/llm', ...real.tokenCeiling({ texts: typeof inputs.text === 'string' ? [inputs.text] : [], linkedTexts: Array.isArray(inputs.text) ? 1 : 0, fixed: ['You are a summarizer.'], maxAnswerTokens: 8192 }, opts) },
+      times: 1,
+    }],
+  }) as never
   const planned = STAND_IN as unknown as Record<string, (i: NodeInputs, o: PriceOptions) => PaidCalls>
   return {
     ...real,
@@ -132,6 +140,50 @@ describe('paidCallUsd', () => {
   it('the real table adds no price: empty until a task fills it', () => {
     expect(Object.keys(PAID_RATES)).toEqual([])
   })
+  it('no paid card duplicates an edit, clip or video card (each rate lives in one place)', () => {
+    for (const endpoint of Object.keys(PAID_RATES)) expect(otherCardFor(endpoint), endpoint).toBeNull()
+    // The guard sees each kind of existing card.
+    expect(otherCardFor('fal-ai/nano-banana-2/edit')).toBe('edit')
+    expect(otherCardFor('minimax/h3/image-to-video')).toBe('clip')
+    expect(otherCardFor('hailuo-h3')).toBe('video')
+    expect(otherCardFor('test/llm')).toBeNull()
+    expect(otherCardFor('constructor')).toBeNull()
+  })
+})
+
+// ── Rule (c): the token ceiling ──────────────────────────────────────────────
+
+describe('tokenCeiling', () => {
+  const CJK = '日本語のテキスト' // 8 characters, 24 bytes
+  const EMOJI = '😀🎉' // 4 UTF-16 units, 8 bytes
+  it('counts UTF-8 bytes, not characters or UTF-16 units', () => {
+    expect([CJK.length, utf8Bytes(CJK)]).toEqual([8, 24])
+    expect([EMOJI.length, utf8Bytes(EMOJI)]).toEqual([4, 8])
+    expect(tokenCeiling({ texts: [CJK, EMOJI, 'ab'], maxAnswerTokens: 400 })).toEqual({ inputTokens: 24 + 8 + 2, outputTokens: 400 })
+  })
+  it('hosted: each text at most the moderation limit; local: whole', () => {
+    expect(TOKEN_TEXT_CAP_BYTES).toBe(MODERATION_MAX_INPUT_BYTES)
+    const long = '語'.repeat(20_000) // 60,000 bytes
+    const short = '😀'.repeat(10) // 40 bytes
+    expect(tokenCeiling({ texts: [long, short], maxAnswerTokens: 1 }, { hosted: true }).inputTokens).toBe(32_768 + 40)
+    expect(tokenCeiling({ texts: [long, short], maxAnswerTokens: 1 }, { hosted: false }).inputTokens).toBe(60_000 + 40)
+    expect(tokenCeiling({ texts: [long, short], maxAnswerTokens: 1 }).inputTokens).toBe(60_000 + 40)
+  })
+  it('Sailor’s own fixed prompt is added whole, never capped', () => {
+    const system = '指示'.repeat(20_000) // 120,000 bytes
+    expect(tokenCeiling({ texts: ['hi'], fixed: [system, 'Output only the text.'], maxAnswerTokens: 8 }, { hosted: true }))
+      .toEqual({ inputTokens: 2 + 120_000 + 21, outputTokens: 8 })
+  })
+  it('a linked text counts at the cap; a measured size replaces the texts (hosted: capped per text)', () => {
+    expect(tokenCeiling({ texts: [CJK], linkedTexts: 2, maxAnswerTokens: 0 }).inputTokens).toBe(24 + 2 * 32_768)
+    expect(tokenCeiling({ texts: [CJK], linkedTexts: 1, fixed: ['sys'], maxAnswerTokens: 0 }, { inputBytes: 90_000 }).inputTokens).toBe(90_000 + 3)
+    expect(tokenCeiling({ texts: [CJK], linkedTexts: 1, fixed: ['sys'], maxAnswerTokens: 0 }, { inputBytes: 90_000, hosted: true }).inputTokens).toBe(2 * 32_768 + 3)
+    expect(tokenCeiling({ texts: [CJK], maxAnswerTokens: 0 }, { inputBytes: Number.NaN }).inputTokens).toBe(24)
+  })
+  it('a stand-in text node with CJK and emoji text is priced on its bytes', () => {
+    const text = CJK + EMOJI
+    expect(priceNode('TestTokenNode', { text })).toEqual({ usd: tokenUsd(32 + SYSTEM, 8192), credits: creditsForUsd(tokenUsd(32 + SYSTEM, 8192)) })
+  })
 })
 
 // ── priceNode ────────────────────────────────────────────────────────────────
@@ -142,12 +194,13 @@ describe('priceNode for a paid class', () => {
     expect(PAID_NODE_CLASSES).toEqual(Object.keys(STAND_IN))
   })
 
-  it('a token node: the hold is creditsForUsd of the ceiling', () => {
+  it('a token node: the hold is creditsForUsd of the ceiling (rule (c), tokenCeiling)', () => {
     const inputs = { text: 'x'.repeat(1000) }
     const hold = priceNode('TestTokenNode', inputs)
-    expect(hold).toEqual({ usd: tokenUsd(1000, MAX_ANSWER_TOKENS), credits: creditsForUsd(tokenUsd(1000, MAX_ANSWER_TOKENS)) })
-    // The measured text sent, counted generously, when the caller gives it.
-    expect(priceNode('TestTokenNode', inputs, { inputChars: 32768 })).toEqual({ usd: tokenUsd(32768, 8192), credits: creditsForUsd(tokenUsd(32768, 8192)) })
+    expect(hold).toEqual({ usd: tokenUsd(1000 + SYSTEM, MAX_ANSWER_TOKENS), credits: creditsForUsd(tokenUsd(1000 + SYSTEM, MAX_ANSWER_TOKENS)) })
+    // The caller's measured bytes, when given; capped per text in hosted only.
+    expect(priceNode('TestTokenNode', inputs, { inputBytes: 50_000 })).toEqual({ usd: tokenUsd(50_000 + SYSTEM, 8192), credits: creditsForUsd(tokenUsd(50_000 + SYSTEM, 8192)) })
+    expect(priceNode('TestTokenNode', inputs, { inputBytes: 50_000, hosted: true })).toEqual({ usd: tokenUsd(32_768 + SYSTEM, 8192), credits: creditsForUsd(tokenUsd(32_768 + SYSTEM, 8192)) })
     // Through the graph pricer (the ComfyUI path and the runner's charge) too.
     expect(priceGraph({ n: { class_type: 'TestTokenNode', inputs } }).nodes!.n).toBe((hold as { credits: number }).credits)
   })
@@ -181,6 +234,14 @@ describe('priceNode for a paid class', () => {
     expect(priceNode('TestUnpricedNode', {})).toEqual({ refused: 'test/no-card has no listed price' })
     expect(priceNode('TestRefusedNode', {})).toEqual({ refused: 'Pick a model first.' })
     expect(() => priceGraph({ n: { class_type: 'TestUnpricedNode', inputs: {} } })).toThrow(/no listed price/)
+  })
+
+  it('refuses a step planned to run other than a whole number of times, at least once', () => {
+    for (const times of [0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY]) {
+      const p = priceNode('TestBadTimesNode', { times })
+      expect(p, String(times)).toEqual({ refused: `test/a is planned to run ${times} times; a call runs a whole number of times, at least once` })
+    }
+    expect(priceNode('TestBadTimesNode', { times: 3 })).toEqual({ usd: 0.15, credits: 30 })
   })
 
   it('the real paidCalls refuses a class no task has planned, and paidNoCall is false for it', () => {
@@ -273,6 +334,21 @@ describe('paidParity', () => {
     expect(normalizeSent(sent, ['input_image'], ['voice'])).toEqual([{ provider: 'fal', endpoint: 'e', payload: { image_urls: ['IMG:input_image'], audio: 'WAV:voice', n: 1 } }])
   })
 
+  it('compares payloads on the wire too: Python’s 1.0 is not a sent 1', () => {
+    const sent = [{ provider: 'fal' as const, endpoint: 'e', payload: { b: 1, a: 'é', c: [0.5, 2] } }]
+    expect(wireText(sent[0]!.payload)).toBe('{"a": "\\u00e9", "b": 1, "c": [0.5, 2]}')
+    expectCalls(sent, [{ ...sent[0]!, payload_json: '{"a": "\\u00e9", "b": 1, "c": [0.5, 2]}' }])
+    expect(() => expectCalls(sent, [{ ...sent[0]!, payload_json: '{"a": "\\u00e9", "b": 1.0, "c": [0.5, 2]}' }])).toThrow()
+    expect(() => expectCalls(sent, [{ ...sent[0]!, payload_json: '{"a": "\\u00e9", "b": 1, "c": [0.5, 2.0]}' }])).toThrow()
+  })
+
+  it('a GET the case doesn’t serve fails the node, not a quiet default', async () => {
+    const fam = JSON.parse(readFileSync(resolve(__dirname, 'fixtures/runner-families.json'), 'utf8')) as { falEdit: { class_type: string; widgets: Record<string, unknown>; links: string[]; call: PaidCase['calls'][number] }[] }
+    const one = fam.falEdit[0]!
+    const r = await runPaidCase({ name: 'unserved', class_type: one.class_type, widgets: one.widgets, pictures: one.links, answers: [{ images: [{ url: 'https://fal.media/missing.png' }] }], calls: [one.call], output: null, ui: null, files: {} }, { families: new Set(['fal-edit', 'cards']) })
+    expect(r.status).toBe('error')
+  })
+
   it('runs a Python-captured case through planNode and the kit: the calls match Python’s, call by call', async () => {
     // The first fal-edit case Python captured (runner-families.json), as a paid case.
     const fam = JSON.parse(readFileSync(resolve(__dirname, 'fixtures/runner-families.json'), 'utf8')) as { falEdit: { class_type: string; widgets: Record<string, unknown>; links: string[]; call: { provider: 'fal' | 'replicate'; endpoint: string; payload: Record<string, unknown> } }[] }
@@ -280,6 +356,7 @@ describe('paidParity', () => {
     const c: PaidCase = {
       name: 'fal edit, first case', class_type: one.class_type, widgets: one.widgets, pictures: one.links,
       answers: [{ images: [{ url: 'https://fal.media/out.png' }] }], calls: [one.call], output: null, ui: null,
+      files: { 'https://fal.media/out.png': (await sharp(Buffer.from([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]), { raw: { width: 2, height: 2, channels: 3 } }).png().toBuffer()).toString('base64') },
     }
     const families: ReadonlySet<RunnerFamily> = new Set(['fal-edit', 'cards'])
     const r = await runPaidCase(c, { families, hosted: true })

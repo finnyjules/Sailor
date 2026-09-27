@@ -212,11 +212,17 @@ export interface PriceOptions {
    */
   families?: ReadonlySet<RunnerFamily>
   /**
-   * Characters of the text a paid text node sends, where the caller measured
-   * them (paidSettings.ts: its hold counts them generously); unmeasured, the
-   * node's own ceiling.
+   * UTF-8 bytes of the user's text a paid text node sends, where the caller
+   * measured them (a wired text at the node's turn): tokenCeiling
+   * (paidSettings.ts) counts them in place of the texts it can read.
    */
-  inputChars?: number
+  inputBytes?: number
+  /**
+   * Whether the price is for hosted Sailor, where each moderated text is at
+   * most MODERATION_MAX_INPUT_BYTES (tokenCeiling caps it there); locally a
+   * text is counted whole.
+   */
+  hosted?: boolean
   /**
    * The tokens a paid text node's answer reported, for the charge
    * (ruling (c)); priceNode never prices it above the node's hold.
@@ -229,12 +235,14 @@ export interface PriceOptions {
  * (paidRates.ts paidCallUsd, fallbacks at cost) turned into credits on its
  * own and summed, `times` over (pipelinePrice.ts callCredits, the R3.1
  * ruling), never the markup of the summed dollars. `usd` is the summed basis.
+ * `times` must be a whole number ≥ 1 (a planner bug is refused, never priced).
  */
 export function paidStepsPrice(p: PaidCalls): NodePrice {
   if ('refused' in p) return p
   let usd = 0
   let credits = 0
   for (const { call, times } of p.steps) {
+    if (!Number.isInteger(times) || times < 1) return { refused: `${call.endpoint} is planned to run ${times} times; a call runs a whole number of times, at least once` }
     const basis = paidCallUsd(call)
     if (basis == null) return { refused: `${call.endpoint} has no listed price` }
     usd += basis * times
