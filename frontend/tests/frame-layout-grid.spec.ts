@@ -170,6 +170,72 @@ test.describe('Frame layout grid', () => {
     await page.mouse.up()
     expect((await frameLab(page)).layoutGrid.show).toBe(true)
   })
+
+  test('dragging text lands its capitals on a row top, with a badge on the way', async ({ page }) => {
+    const id = await page.evaluate(() => (window as any).__frameLab.node.data.properties.sailor_localLayers
+      .find((l: any) => l.kind === 'text' && l.text === 'Plain text').id as string)
+    await page.evaluate((i) => (window as any).__frameLab.editor.selectLocal(i), id)
+    const marks = () => page.evaluate(() => (window as any).__frameLab.editor.selectedTextMarks.value as { capTop: number; baselines: number[] } | null)
+    const m0 = (await marks())!
+    expect(m0).not.toBeNull()
+    await expect(page.locator('[data-testid="compositor-grid-text-marks"] line')).toHaveCount(m0.baselines.length + 1)
+    const grid = (await frameLab(page)).layoutGridResolved as { W: number; H: number; rows: { a: number; w: number }[]; bottom: number }
+    expect(grid.rows.length).toBeGreaterThan(2)
+    const cvBox = (await page.locator('[data-testid="compositor-stack-canvas"]').boundingBox())!
+    const k = cvBox.height / grid.H                                    // screen px per design px
+    const span = m0.baselines[m0.baselines.length - 1]! - m0.capTop
+    const bottoms = [...grid.rows.map(r => r.a + r.w), grid.bottom]
+    // A row top ≥ 30 screen px below the capitals where the last baseline can't compete.
+    const target = grid.rows.map(r => r.a).find(t => (t - m0.capTop) * k >= 30 && bottoms.every(b => Math.abs(t + span - b) * k > 8))
+    expect(target).toBeDefined()
+    // The canvas hit test is pixel-accurate: press on an inked pixel of the (white) text, inside
+    // its own measured ink band (capitals → baseline, its own width) — the fixture's arched
+    // "BADGE OF HONOUR" sits on top and reaches up next to it, so a wider scan can press that.
+    const press = await page.evaluate(({ m, GW, GH }) => {
+      const cv = document.querySelector('[data-testid="compositor-stack-canvas"]') as HTMLCanvasElement
+      const r = cv.getBoundingClientRect(), sx = cv.width / r.width, sy = cv.height / r.height
+      const ctx = cv.getContext('2d')!
+      const y0 = (m.capTop / GH) * r.height, y1 = (m.baselines[0]! / GH) * r.height
+      const xa = (m.x / GW) * r.width, xb = ((m.x + m.w) / GW) * r.width
+      const cx = (xa + xb) / 2
+      for (let dx = 0; dx < (xb - xa) / 2; dx += 1) for (const x of [cx + dx, cx - dx]) for (let y = y0 + 2; y < y1 - 2; y += 1) {
+        const px = ctx.getImageData(Math.round(x * sx), Math.round(y * sy), 1, 1).data
+        if (px[0]! > 200 && px[1]! > 200 && px[2]! > 200) return { x: r.left + x, y: r.top + y }
+      }
+      return null
+    }, { m: m0 as any, GW: grid.W, GH: grid.H })
+    expect(press).not.toBeNull()
+    const dyScreen = (target! - m0.capTop) * k - 2                     // capitals 2 screen px short of the row top
+    await page.mouse.move(press!.x, press!.y)
+    await page.mouse.down()
+    expect(await page.evaluate(() => [...(window as any).__frameLab.editor.selectedIds.value])).toEqual([id])
+    await page.mouse.move(press!.x, press!.y + 8, { steps: 2 })        // past the 4 px slop
+    await page.mouse.move(press!.x, press!.y + dyScreen, { steps: 10 })
+    await expect(page.locator('[data-testid="compositor-grid-badge"]')).toHaveText(/^\d+ × \d+ modules?$/)
+    await page.mouse.up()
+    const m1 = (await marks())!
+    expect(Math.abs(m1.capTop - target!)).toBeLessThan(0.5)
+  })
+
+  test('typing a column moves the layer onto it in one undo step', async ({ page }) => {
+    await page.evaluate(() => (window as any).__frameLab.editor.selectLocal('strokecenter'))
+    const layer = () => page.evaluate(() => {
+      const l = (window as any).__frameLab.node.data.properties.sailor_localLayers.find((x: any) => x.id === 'strokecenter')
+      return { x: l.x as number, w: l.w as number }
+    })
+    const grid = (await frameLab(page)).layoutGridResolved as { W: number; cols: { a: number; w: number }[] }
+    const before = await layer()
+    const rev0 = (await frameLab(page)).historyRev as number
+    const field = page.locator('[data-testid="layer-grid-col"]')
+    const want = Number(await field.inputValue()) === 3 ? 5 : 3
+    await field.fill(String(want)); await field.press('Enter'); await field.blur()
+    const after = await layer()
+    expect(Math.abs((after.x - after.w / 2) * grid.W - grid.cols[want - 1]!.a)).toBeLessThan(0.5)
+    expect(after.w).toBe(before.w)
+    expect((await frameLab(page)).historyRev).toBe(rev0 + 1)
+    await page.keyboard.press('Meta+z')
+    expect((await layer()).x).toBeCloseTo(before.x, 9)
+  })
 })
 
 test.describe('Frame layout grid — old Frames', () => {
