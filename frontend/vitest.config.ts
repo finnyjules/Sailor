@@ -22,6 +22,9 @@ export default defineConfig({
       'h3': h3Path,
       '~~': fileURLToPath(new URL('.', import.meta.url)),
       '~': fileURLToPath(new URL('./app', import.meta.url)),
+      // shadcn-vue's ui/ components import `@/lib/utils` (Nuxt's `@` = app/);
+      // PenOverlay now pulls PenContextMenu → ui/tooltip into every spec that mounts it
+      '@': fileURLToPath(new URL('./app', import.meta.url)),
       '#shared': fileURLToPath(new URL('./shared', import.meta.url)),
     },
   },
