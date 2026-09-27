@@ -692,6 +692,28 @@ export function renameSeedPoints(doc: SketchDoc, from: EntityId, into: EntityId)
   }
 }
 
+/** Round corner / Chamfer (pen stage 8): corner `x`, whose sides were split
+ *  (splitSeeds) at t1 (the side running into the corner) and t2 (the side
+ *  running out), is cut off by a new piece t1 → t2 — an arc about `c` turning
+ *  counter-clockwise when `ccw`, or a straight cut. Seeds on the cut-off
+ *  stretches t1–x and x–t2 move onto the new piece halfway along, on the same
+ *  side (the way of travel runs on through the corner). */
+export function cornerSeeds(doc: SketchDoc, x: EntityId, t1: EntityId, t2: EntityId, cut: { c?: EntityId; ccw?: boolean } = {}): void {
+  for (const f of doc.fills ?? []) {
+    const s = f.seed
+    if (s.kind === 'circle') continue
+    const first = (s.a === t1 && s.b === x) || (s.a === x && s.b === t1)
+    const second = (s.a === x && s.b === t2) || (s.a === t2 && s.b === x)
+    if (!first && !second) continue
+    // towards the corner on the first stretch, or away from it on the second, is the new piece's own way
+    const along = first ? s.a === t1 : s.a === x
+    const a = along ? t1 : t2, b = along ? t2 : t1
+    f.seed = cut.c
+      ? { kind: 'arc', a, b, c: cut.c, ccw: along ? !!cut.ccw : !cut.ccw, t: 0.5, side: s.side }
+      : { kind: 'line', a, b, t: 0.5, side: s.side }
+  }
+}
+
 /** A seed carried onto a copy: points renamed by `map`; `mirror` (the axis
  *  angle, radians) reflects it, `turn` (radians) turns it about a centre. */
 export function mapSeed(s: FillSeed, map: (id: EntityId) => EntityId, how: { mirror?: number; turn?: number } = {}): FillSeed {
