@@ -5,7 +5,7 @@
 // setbacks; the corner point stays as a guide — the "virtual sharp" — tied to
 // both sides, so every rule that named it still holds (Ruling 4). Everything
 // is made of ordinary points, pieces and rules. Pure.
-import type { SketchDoc, EntityId, PathEntity, SegmentSpec } from './model'
+import type { SketchDoc, EntityId, PathEntity, SegmentSpec, SketchEntity } from './model'
 import { getEntity, getPoint } from './model'
 import type { Vec2 } from './geom'
 import { addPoint, addConstraint, addPath } from './edit'
@@ -226,6 +226,13 @@ function touch(g: SideGeom, C: Vec2, r: number): Vec2 {
 
 const crossZ = (a: Vec2, b: Vec2) => a.x * b.y - a.y * b.x
 
+// a side's direction at point T of it, pointing away from the corner
+function leavingAt(g: SideGeom, T: Vec2): Vec2 {
+  if (g.kind === 'line') return g.u
+  const dx = T.x - g.c.x, dy = T.y - g.c.y, l = Math.hypot(dx, dy) || 1
+  return { x: (-g.dir * dy) / l, y: (g.dir * dx) / l }
+}
+
 function roundGeom(ga: SideGeom, gb: SideGeom, X: Vec2, r: number): CornerGeom | null {
   if (!(r > EPS)) return null
   const sg = Math.sign(crossZ(ga.u, gb.u))
@@ -241,8 +248,16 @@ function roundGeom(ga: SideGeom, gb: SideGeom, X: Vec2, r: number): CornerGeom |
         if (!(fa > EPS) || !(fb > EPS)) continue
         const dd = Math.hypot(t1.x - X.x, t1.y - X.y) + Math.hypot(t2.x - X.x, t2.y - X.y)
         if (dd >= bestD) continue
+        // the fillet runs on smoothly from side a (travelling into the corner)
+        // and into side b (travelling out of it); a cusp is no candidate
+        const r1 = { x: t1.x - C.x, y: t1.y - C.y }, r2 = { x: t2.x - C.x, y: t2.y - C.y }
+        const ua = leavingAt(ga, t1)
+        const sweep: 0 | 1 = crossZ(r1, { x: -ua.x, y: -ua.y }) > 0 ? 1 : 0
+        const k = sweep ? 1 : -1
+        const out = { x: (-k * r2.y) / r, y: (k * r2.x) / r }
+        const ub = leavingAt(gb, t2)
+        if (out.x * ub.x + out.y * ub.y < 0.5) continue
         bestD = dd
-        const sweep: 0 | 1 = crossZ({ x: t1.x - C.x, y: t1.y - C.y }, { x: t2.x - C.x, y: t2.y - C.y }) > 0 ? 1 : 0
         best = { t1, t2, c: C, r, sweep, fa, fb, fits: fa < 1 - EPS && fb < 1 - EPS }
       }
     }
@@ -280,7 +295,10 @@ export function cornerGeom(doc: SketchDoc, corner: Corner, kind: CornerKind, siz
 }
 
 /** The size that puts the arc's (or the cut's) middle at the pointer's
- *  projection on the corner's bisector (Ruling 8); 0 behind the corner. */
+ *  projection on the corner's bisector (Ruling 8); 0 behind the corner.
+ *  Measured with the sides' directions at the corner, so on an arc side the
+ *  middle follows the pointer only roughly — close enough for a drag, and
+ *  the typed digits are exact. */
 export function sizeFromPointer(doc: SketchDoc, corner: Corner, kind: CornerKind, p: Vec2): number {
   const X = getPoint(doc, corner.x)
   if (!X) return 0
@@ -313,14 +331,15 @@ function moveEnd(doc: SketchDoc, s: CornerSide, x: EntityId, t: EntityId): void 
   else if (e.anchors[last] === x) e.anchors[last] = t
 }
 
-// an arc side's own rule equalDist [C, far, C, x] now names its new end
-function reaimArcRule(doc: SketchDoc, s: CornerSide, x: EntityId, t: EntityId): void {
-  if (s.kind !== 'arc') return
+// an arc side's own rule equalDist [C, far, C, x] now names its new end;
+// returns the rule's id when it had none and one was added
+function reaimArcRule(doc: SketchDoc, s: CornerSide, x: EntityId, t: EntityId): EntityId | null {
+  if (s.kind !== 'arc') return null
   const C = s.center!
   const k = doc.constraints.find(c => c.kind === 'equalDist' && c.refs[0] === C && c.refs[2] === C &&
     ((c.refs[1] === s.far && c.refs[3] === x) || (c.refs[1] === x && c.refs[3] === s.far)))
-  if (k) k.refs = k.refs.map(r => (r === x ? t : r))
-  else addConstraint(doc, 'equalDist', [C, s.far, C, t])
+  if (k) { k.refs = k.refs.map(r => (r === x ? t : r)); return null }
+  return addConstraint(doc, 'equalDist', [C, s.far, C, t])
 }
 
 interface Built { x: EntityId; t1: EntityId; t2: EntityId; c: EntityId | null; touched: EntityId[]; rules: EntityId[]; created: EntityId[] }
@@ -337,8 +356,10 @@ function buildCorner(doc: SketchDoc, corner: Corner, g: CornerGeom, kind: Corner
   const rules: EntityId[] = []
   const touched = [corner.a.id, corner.b.id]
   const created = [t1, t2, ...(c ? [c] : [])]
-  reaimArcRule(doc, corner.a, X, t1)
-  reaimArcRule(doc, corner.b, X, t2)
+  for (const [side, t] of [[corner.a, t1], [corner.b, t2]] as const) {
+    const k = reaimArcRule(doc, side, X, t)
+    if (k) rules.push(k)
+  }
   if (corner.spliced) {
     const p = getEntity(doc, corner.a.id) as PathEntity
     const last = p.anchors.length - 1
@@ -377,11 +398,25 @@ function buildCorner(doc: SketchDoc, corner: Corner, g: CornerGeom, kind: Corner
   return { x: X, t1, t2, c, touched, rules, created }
 }
 
-/** Rounds (or chamfers) the corners `xs` with one size, in order, on `doc`
- *  itself — callers hand in a clone and keep it only when `ok`. Several
+/** Rounds (or chamfers) the corners `xs` with one size, in order. Several
  *  corners are tied Equal to the first (Ruling 7). Not ok (and `bad` names
- *  them) when any corner isn't one or its size doesn't fit (Ruling 6). */
+ *  them) when any corner isn't one or its size doesn't fit (Ruling 6) — then
+ *  `doc` is left exactly as it was: the corners are built on a clone (each
+ *  measured on the drawing as the earlier ones left it) and copied back into
+ *  `doc` only when every one of them was made. */
 export function roundCorners(doc: SketchDoc, xs: readonly EntityId[], kind: CornerKind, size: number): CornerBuild {
+  const work = cloneDoc(doc)
+  const out = buildAll(work, xs, kind, size)
+  if (out.ok) {
+    doc.entities.splice(0, doc.entities.length, ...work.entities)
+    doc.constraints.splice(0, doc.constraints.length, ...work.constraints)
+    if (work.fills) doc.fills = work.fills
+  }
+  return out
+}
+
+// roundCorners' work, on `doc` itself (half built when it refuses)
+function buildAll(doc: SketchDoc, xs: readonly EntityId[], kind: CornerKind, size: number): CornerBuild {
   const built: Built[] = []
   const bad: EntityId[] = []
   for (const x of [...new Set(xs)]) {
@@ -405,7 +440,10 @@ export function roundCorners(doc: SketchDoc, xs: readonly EntityId[], kind: Corn
 
 function rawCornerD(g: CornerGeom): string {
   const f = (v: number) => Number(v.toFixed(6))
-  if (g.c) return `M ${f(g.t1.x)} ${f(g.t1.y)} A ${f(g.r!)} ${f(g.r!)} 0 0 ${g.sweep} ${f(g.t2.x)} ${f(g.t2.y)}`
+  if (g.c) {
+    const turn = norm((g.sweep ? 1 : -1) * (Math.atan2(g.t2.y - g.c.y, g.t2.x - g.c.x) - Math.atan2(g.t1.y - g.c.y, g.t1.x - g.c.x)))
+    return `M ${f(g.t1.x)} ${f(g.t1.y)} A ${f(g.r!)} ${f(g.r!)} 0 ${turn > Math.PI ? 1 : 0} ${g.sweep} ${f(g.t2.x)} ${f(g.t2.y)}`
+  }
   return `M ${f(g.t1.x)} ${f(g.t1.y)} L ${f(g.t2.x)} ${f(g.t2.y)}`
 }
 
@@ -416,6 +454,7 @@ function rawCornerD(g: CornerGeom): string {
 export function cornerPreview(doc: SketchDoc, xs: readonly EntityId[], kind: CornerKind, size: number): CornerPreview {
   const work = cloneDoc({ entities: doc.entities, constraints: doc.constraints })
   const touched = new Set<EntityId>()
+  const ends = new Set<EntityId>()
   const bad: { at: Vec2; d: string }[] = []
   for (const x of [...new Set(xs)]) {
     const X = getPoint(work, x)
@@ -425,10 +464,36 @@ export function cornerPreview(doc: SketchDoc, xs: readonly EntityId[], kind: Cor
       if (X) bad.push({ at: { x: X.x, y: X.y }, d: g ? rawCornerD(g) : '' })
       continue
     }
-    for (const id of buildCorner(work, chk.corner, g, kind).touched) touched.add(id)
+    const b = buildCorner(work, chk.corner, g, kind)
+    for (const id of b.touched) touched.add(id)
+    ends.add(b.t1); ends.add(b.t2)
   }
-  const d = [...touched].map(id => entityPath(work, id)).filter(Boolean).join(' ')
+  // lines whole; of a path only the pieces ending at a touch point (the new
+  // corner pieces and the shortened sides), never the whole path
+  const parts: string[] = []
+  for (const id of touched) {
+    const e = getEntity(work, id)
+    if (!e) continue
+    if (e.kind !== 'path') { const s = entityPath(work, id); if (s) parts.push(s); continue }
+    const n = e.anchors.length, count = e.closed ? n : n - 1
+    for (let i = 0; i < count; i++) {
+      if (!ends.has(e.anchors[i]!) && !ends.has(e.anchors[(i + 1) % n]!)) continue
+      const s = segmentD(work, e, i)
+      if (s) parts.push(s)
+    }
+  }
+  const d = parts.join(' ')
   return { d, fits: bad.length === 0 && touched.size > 0, bad }
+}
+
+// one piece of a path, drawn on its own
+function segmentD(doc: SketchDoc, p: PathEntity, i: number): string {
+  const a = p.anchors[i]!, b = p.anchors[(i + 1) % p.anchors.length]!, seg = p.segments[i]!
+  const ids = [a, b, ...(seg.kind === 'arc' ? [seg.center] : seg.kind === 'cubic' ? [seg.h1, seg.h2] : [])]
+  const pts: SketchEntity[] = []
+  for (const id of ids) { const q = id ? getPoint(doc, id) : undefined; if (q) pts.push(q) }
+  const one: PathEntity = { id: '~piece', kind: 'path', anchors: [a, b], segments: [seg], closed: false }
+  return entityPath({ entities: [...pts, one], constraints: [] }, one.id)
 }
 
 /** `want`, halved (up to 8 times) until every corner takes it (Ruling 8). */
@@ -436,7 +501,7 @@ export function fittingSize(doc: SketchDoc, xs: readonly EntityId[], kind: Corne
   let s = want
   for (let i = 0; i < 8; i++) {
     const work = cloneDoc({ entities: doc.entities, constraints: doc.constraints })
-    if (roundCorners(work, xs, kind, s).ok) return s
+    if (buildAll(work, xs, kind, s).ok) return s
     s /= 2
   }
   return want

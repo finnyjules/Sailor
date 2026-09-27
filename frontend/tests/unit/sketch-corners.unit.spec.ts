@@ -251,6 +251,98 @@ describe('construction — more shapes (added by the implementer)', () => {
   })
 })
 
+describe('fix round 1 (review)', () => {
+  // the fillet's direction of travel at a touch point, and the side's there
+  const arcDir = (C: { x: number; y: number }, T: { x: number; y: number }, ccw: boolean) => {
+    const r = Math.hypot(T.x - C.x, T.y - C.y), k = ccw ? 1 : -1
+    return { x: (-k * (T.y - C.y)) / r, y: (k * (T.x - C.x)) / r }
+  }
+  const dot = (a: { x: number; y: number }, b: { x: number; y: number }) => a.x * b.x + a.y * b.y
+
+  it('a refused set leaves the drawing byte-identical', () => {
+    const d = doc(); const { pts } = squarePath(d, 0, 0, 4)
+    toggleFillAt(d, { x: 2, y: 2 }, 0)
+    const before = JSON.stringify(d)
+    const r = roundCorners(d, [pts[0]!, pts[1]!], 'round', 2.5)
+    expect(r.ok).toBe(false)
+    expect(r.bad).toEqual([pts[1]])
+    expect(JSON.stringify(d)).toBe(before)
+  })
+
+  it('a fillet always runs on smoothly into both sides — an arc that crosses back over the line gives no cusp', () => {
+    let refused = 0, built = 0
+    for (let deg = 95; deg <= 175; deg += 5) {
+      for (const sweep of [0, 1] as const) {
+        const d = doc()
+        const a = addPoint(d, -4, 0), x = addPoint(d, 0, 0)
+        const th = (deg * Math.PI) / 180, R = 3
+        const C = { x: R * Math.cos(th), y: R * Math.sin(th) }
+        // the arc's far end, a quarter turn round C from x in the arc's own way
+        const phi = Math.atan2(-C.y, -C.x) + (sweep ? 1 : -1) * Math.PI / 2
+        const e = addPoint(d, C.x + R * Math.cos(phi), C.y + R * Math.sin(phi)), ca = addPoint(d, C.x, C.y)
+        addPath(d, [a, x, e], [{ kind: 'line' }, { kind: 'arc', center: ca, sweep }])
+        const chk = cornerCheck(d, x); if (!chk.ok) continue
+        for (const r of [0.2, 0.5, 1]) {
+          const g = cornerGeom(d, chk.corner, 'round', r)
+          if (!g || !g.fits) { refused++; continue }
+          built++
+          const ccw = g.sweep === 1
+          // side a runs (−4,0) → x: +x; the fillet must leave t1 that way
+          expect(dot(arcDir(g.c!, g.t1, ccw), { x: 1, y: 0 })).toBeGreaterThan(0.999)
+          // and arrive at t2 running the arc's own way
+          expect(dot(arcDir(g.c!, g.t2, ccw), arcDir(C, g.t2, sweep === 1))).toBeGreaterThan(0.999)
+          const work = cloneDoc(d)
+          expect(roundCorners(work, [x], 'round', r).ok).toBe(true)
+          expect(allHold(work)).toBe(true)
+        }
+      }
+    }
+    expect(built).toBeGreaterThan(0)
+    expect(refused).toBeGreaterThan(0)
+  })
+
+  it('an arc into a line (the other way round) and a reflex corner are smooth too', () => {
+    const d = doc()
+    const e = addPoint(d, 3, 3), x = addPoint(d, 0, 0), a = addPoint(d, -4, 0), ca = addPoint(d, 3, 0)
+    addPath(d, [e, x, a], [{ kind: 'arc', center: ca, sweep: 1 }, { kind: 'line' }])
+    const chk = cornerCheck(d, x); if (!chk.ok) throw new Error(JSON.stringify(chk))
+    const g = cornerGeom(d, chk.corner, 'round', 0.5)!
+    expect(g.fits).toBe(true)
+    expect(dot(arcDir(g.c!, g.t2, g.sweep === 1), { x: -1, y: 0 })).toBeGreaterThan(0.999)
+    expect(dot(arcDir(g.c!, g.t1, g.sweep === 1), arcDir({ x: 3, y: 0 }, g.t1, true))).toBeGreaterThan(0.999)
+    // the L's inner (reflex) corner: centre outside the L
+    const l = doc()
+    const q = [[0, 0], [4, 0], [4, 2], [2, 2], [2, 4], [0, 4]].map(([px, py]) => addPoint(l, px!, py!))
+    addPath(l, q, q.map(() => ({ kind: 'line' as const })), true)
+    const c = cornerCheck(l, q[3]!); if (!c.ok) throw new Error()
+    const gl = cornerGeom(l, c.corner, 'round', 0.5)!
+    expect(gl.c!.x).toBeCloseTo(2.5, 9); expect(gl.c!.y).toBeCloseTo(2.5, 9)
+    expect(roundCorners(l, [q[3]!], 'round', 0.5).ok).toBe(true)
+    expect(allHold(l)).toBe(true)
+  })
+
+  it('every rule the build adds is reported, the arc side’s own rule included', () => {
+    const d = doc()
+    const a = addPoint(d, -4, 0), x = addPoint(d, 0, 0), e = addPoint(d, 3, 3), ca = addPoint(d, 3, 0)
+    addPath(d, [a, x, e], [{ kind: 'line' }, { kind: 'arc', center: ca, sweep: 0 }])
+    d.constraints = []   // an arc with no rule of its own
+    const before = new Set(d.constraints.map(k => k.id))
+    const r = roundCorners(d, [x], 'round', 0.5)
+    expect(r.ok).toBe(true)
+    const added = d.constraints.filter(k => !before.has(k.id)).map(k => k.id).sort()
+    expect([...r.rules].sort()).toEqual(added)
+  })
+
+  it('the preview draws only the new and shortened pieces of a spliced corner', () => {
+    const { doc: g, anchors } = gear(150)
+    const pv = cornerPreview(g, [anchors[0]!], 'round', 0.1)
+    expect(pv.fits).toBe(true)
+    expect((pv.d.match(/M /g) ?? []).length).toBe(3)
+    const r = Number(/ A (\S+) /.exec(pv.d)![1])
+    expect(r).toBeCloseTo(0.1, 9)
+  })
+})
+
 describe('preview', () => {
   it('draws the new pieces, changes nothing, and goes red with the too-big corners', () => {
     const d = doc(); const { pts } = squarePath(d, 0, 0, 4)
@@ -267,26 +359,32 @@ describe('preview', () => {
 })
 
 describe('speed (one connected drawing, a symmetric grid)', () => {
-  it('a preview frame stays well inside 16 ms', () => {
+  it('one gear corner: a preview frame stays well inside 16 ms', () => {
     const { doc: g, anchors } = gear(150)
-    const map = cornersOf(g)
-    expect(map.size).toBe(150)
     cornerPreview(g, [anchors[0]!], 'round', 0.1)   // warm up
-    let t = performance.now()
-    for (let i = 0; i < 10; i++) cornerPreview(g, [anchors[0]!], 'round', 0.1 + i * 0.01)
+    const t = performance.now()
+    for (let i = 0; i < 10; i++) expect(cornerPreview(g, [anchors[0]!], 'round', 0.1 + i * 0.01).fits).toBe(true)
     expect((performance.now() - t) / 10).toBeLessThan(16)
-    t = performance.now()
+  })
+  it('all 150 gear corners at once: a rare, one-off frame', () => {
+    const { doc: g, anchors } = gear(150)
+    const t = performance.now()
     const every = cornerPreview(g, anchors, 'round', 0.05)
-    expect(performance.now() - t).toBeLessThan(16 * 4)          // all 150 corners at once: a rare, one-off frame
+    expect(performance.now() - t).toBeLessThan(16 * 4)
     expect(every.fits).toBe(true)
-    t = performance.now(); for (let i = 0; i < 20; i++) cornersOf(g); expect((performance.now() - t) / 20).toBeLessThan(4)
-
+  })
+  it('the corner list is one quick pass', () => {
+    const { doc: g } = gear(150)
+    expect(cornersOf(g).size).toBe(150)
+    const t = performance.now(); for (let i = 0; i < 20; i++) cornersOf(g); expect((performance.now() - t) / 20).toBeLessThan(4)
+  })
+  it('the grid: a preview frame of a quarter of its corners stays inside 16 ms', () => {
     const { doc: grid } = rectGrid(37)
     const gm = cornersOf(grid)
     expect(gm.size).toBe(148)
     const some = [...gm.keys()].filter((_, i) => i % 4 === 0)
-    t = performance.now()
-    for (let i = 0; i < 10; i++) cornerPreview(grid, some, 'chamfer', 0.1)
+    const t = performance.now()
+    for (let i = 0; i < 10; i++) expect(cornerPreview(grid, some, 'chamfer', 0.1).fits).toBe(true)
     expect((performance.now() - t) / 10).toBeLessThan(16)
   })
 })
