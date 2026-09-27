@@ -8,6 +8,7 @@ import { promptFirst } from '~/lib/canvas/widgetOrder'
 import { nodeTier } from '~/lib/canvas/nodeTier'
 import { minHeightForPorts } from '~/lib/canvas/portLayout'
 import { useNodePortSync } from '~/composables/useNodePortSync'
+import { useNodeGlass } from '~/composables/useCanvasGlass'
 import NodeCapsule from '~/components/vue-canvas/NodeCapsule.vue'
 import NodeRunRow from '~/components/vue-canvas/NodeRunRow.vue'
 import NodeFixesBadge from '~/components/vue-canvas/NodeFixesBadge.vue'
@@ -237,13 +238,15 @@ function dispatchRun(detail: Record<string, any>) {
 function playThisNode() { dispatchRun({ rerollScope: 'self' }) }
 // The Run row's status line (runRowStatus): running / failed / live / rendered
 // N min ago / not run yet · cost. One shared 30 s clock keeps "N min ago" fresh.
+// Real blur behind the glass shell when the canvas asks for it (data-glass-blur).
+const glass = useNodeGlass(() => props.id)
 const runRowNow = useRunRowClock()
 const runStatus = computed(() => runRowStatus({
   running: !!props.data.running,
   error: !!props.data.error,
   live: LIVE_PREVIEW_NODES.has(props.data.nodeType),
   hasRun: hasRun.value,
-  costLabel: priceLabel.value,
+  costLabel: null,
   lastRunAt: props.data.lastRunAt ?? null,
   // Only the run the note came from: a later run starts after it (runningSince).
   note: (props.data.runNoteAt ?? 0) >= (props.data.runningSince ?? Number.POSITIVE_INFINITY) ? props.data.runNote ?? null : null,
@@ -1703,17 +1706,11 @@ watch(previewImages, (urls) => {
   <div
     v-else
     key="card"
-    class="comfy-node relative z-10 border select-none transition-opacity duration-150"
+    class="comfy-node node-shell relative z-10 select-none transition-opacity duration-150"
     :class="{
       'comfy-node--muted': isMuted,
       'comfy-node--bypassed': isBypassed,
       'ring-2 ring-red-500': data.error,
-      // A subgraph keeps a border you can actually see — it is a signal, not chrome.
-      // An ordinary node's is barely there: the card already separates itself from the
-      // canvas by fill and shadow, so the outline only needs to catch the edge, not draw
-      // it. 10% -> 4% -> 6% on 2026-08-06; 4% read as nothing at all.
-      'border-white/30': data.isSubgraph,
-      'border-white/[0.06]': !data.isSubgraph,
       // Dominant: full width. Recessive: narrower, so utilities stop competing
       // with the work. Width carries the whole distinction — recessive nodes used
       // to also sit at `opacity-70 hover:opacity-100`, dropped 2026-08-05 because
@@ -1725,15 +1722,16 @@ watch(previewImages, (urls) => {
     }"
     :data-running="data.running || undefined"
     :data-mode="data.mode || 0"
+    :data-glass-blur="glass || undefined"
     :style="{
-      // Flat, not the 180deg #252525 -> #1e1e1e gradient this used to be. A gradient on a
-      // 260px card reads as a sheen the controls have to compete with, and every surface
-      // inside it (rows, prompt, launcher) is a flat percentage of white — so the one
-      // gradient was the odd surface. #1a1a1c is also a touch darker, which gives the
-      // white-ish controls more room. A user-set bgcolor still tints, now as a flat mix.
+      // The shell (node-surfaces.css) draws the glass tint, border and shadow. A
+      // user-set bgcolor still tints, mixed into the same glass so blur shows through.
+      // A subgraph keeps a border you can actually see — it is a signal, not chrome —
+      // set inline so it only recolours the shell's border.
       background: data.bgcolor
-        ? `color-mix(in srgb, ${data.bgcolor} 28%, #1a1a1c)`
-        : '#1a1a1c',
+        ? `color-mix(in srgb, ${data.bgcolor} 28%, rgba(26,26,28,0.58))`
+        : undefined,
+      borderColor: data.isSubgraph ? 'rgba(255,255,255,0.3)' : undefined,
       '--border-color-left': borderColorLeft,
       '--border-color-right': borderColorRight,
       // Short nodes with many ports must still enclose their own dots.
@@ -1762,7 +1760,6 @@ watch(previewImages, (urls) => {
     <div
       class="node-head flex items-center border-b border-white/5"
       @mouseenter="measureTitle"
-      :style="{ background: `linear-gradient(135deg, ${accentColor}15 0%, transparent 60%)` }"
     >
       <!-- Subgraph icon → partner icon → toolbox icon. No fallback dot:
            if nothing resolves, the title fills the space instead. -->
@@ -1780,30 +1777,40 @@ watch(previewImages, (urls) => {
       <span ref="titleClipEl" class="node-head__title text-xs font-semibold text-white/90">
         <span>{{ data.subgraphName || displayTitle }}</span>
       </span>
-      <!-- Seed lock: fix the seed so every run keeps the same options. Shares
-           state with the inspector's seed widget. -->
+      <!-- Hover-only actions: node settings (opens the right-hand inspector for this
+           node's mechanical params — seed / aspect / advanced — only when it has some),
+           then the seed lock while it is unlocked. -->
+      <div
+        v-if="hasInspectorSettings || (hasSeed && !seedLocked)"
+        class="node-shell__actions shrink-0 items-center"
+      >
+        <button
+          v-if="hasInspectorSettings"
+          class="nopan nodrag shrink-0 size-5 rounded-[6px] flex items-center justify-center text-white/40 hover:text-white/80 hover:bg-white/[0.08] transition-colors cursor-pointer"
+          title="Node settings"
+          @click.stop="openInspector"
+        >
+          <SlidersHorizontal class="size-3.5" />
+        </button>
+        <button
+          v-if="hasSeed && !seedLocked"
+          class="nopan nodrag shrink-0 size-5 rounded-[6px] flex items-center justify-center transition-colors cursor-pointer text-white/40 hover:text-white/80 hover:bg-white/[0.08]"
+          title="Lock the seed so every run keeps the same options."
+          @click.stop="toggleSeedLock"
+        >
+          <LockOpen class="size-3.5" />
+        </button>
+      </div>
+      <!-- Seed lock: fix the seed so every run keeps the same options. Shares state
+           with the inspector's seed widget. Locked is a state, so it stays visible, in
+           the same place the unlocked lock sits while hovered. -->
       <button
-        v-if="hasSeed"
-        class="nopan nodrag shrink-0 size-5 rounded-[6px] flex items-center justify-center transition-colors cursor-pointer"
-        :class="seedLocked
-          ? 'text-amber-300 bg-amber-400/15'
-          : 'text-white/40 hover:text-white/80 hover:bg-white/[0.08]'"
-        :title="seedLocked
-          ? 'Seed locked — same options every run. Click to unlock.'
-          : 'Lock the seed so every run keeps the same options.'"
+        v-if="hasSeed && seedLocked"
+        class="nopan nodrag shrink-0 size-5 rounded-[6px] flex items-center justify-center transition-colors cursor-pointer text-amber-300 bg-amber-400/15"
+        title="Seed locked — same options every run. Click to unlock."
         @click.stop="toggleSeedLock"
       >
-        <component :is="seedLocked ? Lock : LockOpen" class="size-3.5" />
-      </button>
-      <!-- Node settings: opens the right-hand inspector for this node's
-           mechanical params (seed / aspect / advanced). Only when it has some. -->
-      <button
-        v-if="hasInspectorSettings"
-        class="nopan nodrag shrink-0 size-5 rounded-[6px] flex items-center justify-center text-white/40 hover:text-white/80 hover:bg-white/[0.08] transition-colors cursor-pointer"
-        title="Node settings"
-        @click.stop="openInspector"
-      >
-        <SlidersHorizontal class="size-3.5" />
+        <Lock class="size-3.5" />
       </button>
       <!-- "N fixes" — the reviewer's fixes for this node; opens Edit ▾. -->
       <NodeFixesBadge :node-id="id" />
@@ -1812,10 +1819,6 @@ watch(previewImages, (urls) => {
         v-if="data.isSubgraph && data.innerNodeCount"
         class="shrink-0 text-[8px] font-medium px-1.5 py-0.5 rounded-full bg-white/20 text-white/70 border border-white/20"
       >{{ data.innerNodeCount }} nodes</span>
-      <span
-        v-else-if="priceLabel"
-        class="shrink-0 text-[8px] font-medium px-1.5 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/20 tabular-nums"
-      >{{ priceLabel }}</span>
     </div>
 
     <!-- Inline error banner — persists until the next successful run on
@@ -1874,7 +1877,7 @@ watch(previewImages, (urls) => {
     <!-- Widgets (Compositor / SmartLayout edit via their dedicated modal/body, so we hide the inline controls) -->
     <!-- No horizontal padding on this block: every ComfyNodeWidget insets ITSELF by 10px,
          so padding here doubles it — measured as a 21px field inset before this. -->
-    <div v-if="data.widgetDefs?.some(w => !w.hidden) && data.nodeType !== 'Compositor' && data.nodeType !== 'Timeline' && data.nodeType !== 'SmartLayout'" class="py-4 flex flex-col gap-2">
+    <div v-if="data.widgetDefs?.some(w => !w.hidden) && data.nodeType !== 'Compositor' && data.nodeType !== 'Timeline' && data.nodeType !== 'SmartLayout'" class="py-3 flex flex-col gap-[5px]">
       <!-- Ungrouped widgets render first. Seed widgets carry a lock state
            that controls whether the pre-Run randomizer touches them. For
            Comfy-standard seeds it lives at widgets_values[i+1] (the
@@ -2294,6 +2297,9 @@ watch(previewImages, (urls) => {
          for its status only — they auto-run, so there is nothing to press. -->
     <NodeRunRow
       v-if="showRunButton || LIVE_PREVIEW_NODES.has(data.nodeType)"
+      variant="instrument"
+      :price="priceLabel"
+      :button-text="hasRun ? 'Run again' : 'Run'"
       :status="runStatus"
       :can-run="showRunButton && !isMuted && !isBypassed"
       :running="!!data.running"
@@ -2355,9 +2361,8 @@ watch(previewImages, (urls) => {
 
 <style scoped>
 .comfy-node {
-  /* `backdrop-blur-sm` removed: the card's background is set inline and has always been
-     opaque, so there was never anything to see through it — the filter ran every frame
-     and changed nothing.
+  /* The instrument shell (.node-shell, node-surfaces.css) draws the glass fill, the one
+     even border and the shadow; real blur comes from the canvas via data-glass-blur.
 
      16px. It matches the capsule, so the corner does not change shape halfway through
      the expand, and 16 - 10 inset = 6 is the radius every input and button uses — so the
@@ -2367,7 +2372,6 @@ watch(previewImages, (urls) => {
      now 16/10/6 — the inset went to 10 for the roomier spacing, so the shell followed.)
      See NodeCapsule.vue, which must stay equal. */
   border-radius: 16px;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4), 0 1px 4px rgba(0, 0, 0, 0.2);
 }
 .node-head {
   border-top-left-radius: 16px;
@@ -2405,6 +2409,7 @@ watch(previewImages, (urls) => {
 .node-head__title > span {
   display: inline-block;
   white-space: nowrap;
+  font-weight: 600;
 }
 .comfy-node:hover .node-head__title > span {
   animation: node-title-ticker var(--tick-dur, 0s) ease-in-out infinite alternate;
