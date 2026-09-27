@@ -51,6 +51,20 @@ The brush toolbar gains a **Paint** row: Colour (as before) or six live material
 
 **Next.** Part 3: "More shaders" from the full library and painted effects.
 
+### The pen — tangency done right (stage 4) — LANDED 2026-09-26
+
+Spec `docs/superpowers/specs/2026-09-26-pen-stages-4-8-design.md`, plan `docs/superpowers/plans/2026-09-26-pen-stage-4-tangency.md`; commits 0ea65d6ed … 775281ade, final fixes cb3a5579d + 0883742ce. On the pen page, in the Frame and in Shape Studio:
+
+- **Tangent on any two pieces, joined or not.** Select two segments (or a line or circle plus a segment) → Tangent. Joined pieces get the joint form; pieces apart get two new rules, `tangentLineArc` and `tangentArcs` (outside or inside, whichever is nearer when made). Two arcs also get **Equal** (same radius).
+- **The bowing arc snaps tangent** to any nearby line, arc or circle, even one it isn't joined to: the ghost circle turns green, a T chip sits where it touches, a sparkle marks it, and letting go writes the rule. A line leaving an arc's end snaps onto its tangent and keeps the joint smooth.
+- **Drag an arc's bow** in Select to resize it with its ends and rules holding; **⌘-drag** moves its centre. One undo step each.
+
+**Proof.** Unit suites (pen-* and sketch-*, 694 tests) incl. Jacobian-vs-numeric checks for the new rules and 15 trim/cut/dissolve/merge cases with them; real-mouse `tests/pen-tangent.spec.ts` (5) plus sketch-draw, frame-pen, shape-pen, pen-trim, pen-tips, pen-snap, pen-weld — 75/75.
+
+**Rulings.** `tangentLineArc` also takes a circle id; the joint's own tangency beats the bow snap; a typed radius skips it; a bow drag holds the ends first and frees them only if it must; the centre is warm-started at the circle through the ends and the pointer so a bow can cross its chord (the sweep flips); circles are not bow-dragged; arc Equal has no badge, like line Equal.
+
+**Known limits.** Earlier segments of the path being drawn are not bow-snap targets; the Line tool starting at an arc's end doesn't snap tangent; trimming a circle into an arc drops its tangent rules (counted); joint tangency forms are not re-aimed when the arc is trimmed away from the joint (from stage 3); drop-to-join drops degenerate tangent rules without counting them.
+
 ### The pen — trim, tooltip cards, coincident (stages 1–3) — LANDED 2026-09-26
 
 **Why.** The owner compared the pen with Zoah (formerly Opacity); we studied every Zoah video frame by frame, help.zoah.com and the CAD sketchers. This is stages 1–3 of an 8-stage programme (4 tangency, 5 clean up, 6 right-click menu / wheel / properties panel, 7 fills, 8 round corners / offset / repeat modes).
