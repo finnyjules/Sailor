@@ -24233,6 +24233,265 @@
    }
   }
  ],
+ "effect_chains": [
+  {
+   "blend": {
+    "base": "synth_37x23x3_1.png",
+    "top": "synth_37x23x3_5.png",
+    "widgets": {
+     "mode": "multiply",
+     "opacity": 0.7
+    }
+   },
+   "consumer": {
+    "class_type": "MergeAlpha",
+    "image": "synth_37x23x3_1.png",
+    "node_id": "fx467",
+    "widgets": {
+     "invert_mask": false
+    }
+   },
+   "name": "Blend multiply 0.7 → Image to mask (red) → MergeAlpha",
+   "outputs": [
+    {
+     "items": [
+      {
+       "c": 4,
+       "f32_sha256": "9ba9b9e39f7788532a87a36ff483bc014b693b8ffdb5503270c7e812f68859ac",
+       "h": 23,
+       "round8_sha256": "619dc596f928d84a22f6e5a61dbcedf7f96c53f86eea3e685c9aae0bb99382ed",
+       "trunc8_sha256": "9bcaf946fe6f0ae7203b37b2c89fb0e3c6c152d31d376ab22cabc1f711ccfc81",
+       "w": 37
+      }
+     ],
+     "kind": "image"
+    }
+   ],
+   "preview": {
+    "filename": "live_preview_fx467.png",
+    "h": 23,
+    "mode": "RGB",
+    "px_sha256": "cf6765d7358fb56716f8f079b6695b5546eea8443a851b27bc7203d5b3506bd5",
+    "w": 37
+   },
+   "reader": {
+    "channel": "red",
+    "class_type": "ImageToMask"
+   },
+   "ui": {
+    "animated": [
+     false
+    ],
+    "images": [
+     {
+      "filename": "live_preview_fx467.png",
+      "subfolder": "",
+      "type": "temp"
+     }
+    ]
+   }
+  },
+  {
+   "blend": {
+    "base": "synth_37x23x3_1.png",
+    "top": "synth_29x17x3_15.png",
+    "widgets": {
+     "mode": "soft_light",
+     "opacity": 0.45
+    }
+   },
+   "consumer": {
+    "class_type": "ApplyMask",
+    "image": "synth_29x17x3_15.png",
+    "node_id": "fx468",
+    "widgets": {
+     "invert": true
+    }
+   },
+   "name": "Blend soft_light 0.45 → Image to mask (green) → ApplyMask",
+   "outputs": [
+    {
+     "items": [
+      {
+       "c": 3,
+       "f32_sha256": "c6cdddf8dbf2103883c98fc6238436e7bc23fae9b0b61f799203474f6208eabb",
+       "h": 17,
+       "round8_sha256": "e5b4548feeb27d20d433b6820570f189dedf39d50f16d8909a4017645dc47f9a",
+       "trunc8_sha256": "577f76884ab5e96b18734f7f647d521d183cd2658acb9f98e6a141e8a2f53550",
+       "w": 29
+      }
+     ],
+     "kind": "image"
+    }
+   ],
+   "preview": {
+    "filename": "live_preview_fx468.png",
+    "h": 17,
+    "mode": "RGB",
+    "px_sha256": "577f76884ab5e96b18734f7f647d521d183cd2658acb9f98e6a141e8a2f53550",
+    "w": 29
+   },
+   "reader": {
+    "channel": "green",
+    "class_type": "ImageToMask"
+   },
+   "ui": {
+    "animated": [
+     false
+    ],
+    "images": [
+     {
+      "filename": "live_preview_fx468.png",
+      "subfolder": "",
+      "type": "temp"
+     }
+    ]
+   }
+  },
+  {
+   "blend": {
+    "base": "synth_23x19x4_3.png",
+    "top": "synth_23x19x4_13.png",
+    "widgets": {
+     "mode": "screen",
+     "opacity": 0.6
+    }
+   },
+   "consumer": {
+    "class_type": "ApplyMask",
+    "image": "synth_37x23x3_1.png",
+    "node_id": "fx469",
+    "widgets": {
+     "invert": false
+    }
+   },
+   "name": "Blend screen 0.6 → Image to mask (alpha) → ApplyMask",
+   "outputs": [
+    {
+     "items": [
+      {
+       "c": 3,
+       "f32_sha256": "4d4b26c69ef020a8c6cc99c6ca325913980ce0ac1d59b3dfb5cef09a839cffe3",
+       "h": 23,
+       "round8_sha256": "14b17ef3ef5f3b420957129f225b50c2de15098689c9107f0555c20552ba832e",
+       "trunc8_sha256": "9980ad329fa7c47f406ca216c5f9e883d9f4ce3a8d43df70e57b2c773b388c34",
+       "w": 37
+      }
+     ],
+     "kind": "image"
+    }
+   ],
+   "preview": {
+    "filename": "live_preview_fx469.png",
+    "h": 23,
+    "mode": "RGB",
+    "px_sha256": "9980ad329fa7c47f406ca216c5f9e883d9f4ce3a8d43df70e57b2c773b388c34",
+    "w": 37
+   },
+   "reader": {
+    "channel": "alpha",
+    "class_type": "ImageToMask"
+   },
+   "ui": {
+    "animated": [
+     false
+    ],
+    "images": [
+     {
+      "filename": "live_preview_fx469.png",
+      "subfolder": "",
+      "type": "temp"
+     }
+    ]
+   }
+  },
+  {
+   "blend": {
+    "base": "synth_37x23x3_1.png",
+    "top": "synth_37x23x3_5.png",
+    "widgets": {
+     "mode": "overlay",
+     "opacity": 0.8
+    }
+   },
+   "consumer": null,
+   "name": "Blend overlay 0.8 → Text mask's source",
+   "outputs": [
+    {
+     "items": [
+      {
+       "c": 3,
+       "f32_sha256": "01eefa0eebb529b74c527b2bab61356086d35bf9e2bf3d2998d72bb0225b69fe",
+       "h": 23,
+       "round8_sha256": "30eb15166efbb2163129e1e6dbccf070fdd9e76cb7aed67995bf0c965b8cbcf2",
+       "trunc8_sha256": "e3bd1dfb306e2898043e55ddf5cbbc7762c58e0a4015aee3baac81f9c07f8355",
+       "w": 37
+      }
+     ],
+     "kind": "image"
+    },
+    {
+     "items": [
+      {
+       "c": 1,
+       "f32_sha256": "45b36cfb33e683b8118a3e896a4adbc7f734b184d97ae0121ae1424d77235187",
+       "h": 23,
+       "u16_sha256": "ee19b9d49b27bcc31cb336c2dfc14d4a6c63d992a73de5cb026d189f17d68fb9",
+       "w": 37
+      }
+     ],
+     "kind": "mask"
+    }
+   ],
+   "reader": {
+    "class_type": "TextMask",
+    "rendered": "synth_37x23x3_22.png"
+   }
+  },
+  {
+   "blend": {
+    "base": "synth_23x19x4_3.png",
+    "top": "synth_23x19x4_13.png",
+    "widgets": {
+     "mode": "difference",
+     "opacity": 0.5
+    }
+   },
+   "consumer": null,
+   "name": "Blend difference 0.5 → Text mask's source",
+   "outputs": [
+    {
+     "items": [
+      {
+       "c": 4,
+       "f32_sha256": "b12741df5066c71e2146a021917884596addf0e9dc9a26c556fcd1c4729687c1",
+       "h": 19,
+       "round8_sha256": "b58bb4cd47c0b7ca65b590e8259f56d6e0f236010dbfa861800f89064b5dd743",
+       "trunc8_sha256": "3212ad2bdba3b7b810d5ff2a0d2b05dca1ad0428917c97403c89062ffdbf7017",
+       "w": 23
+      }
+     ],
+     "kind": "image"
+    },
+    {
+     "items": [
+      {
+       "c": 1,
+       "f32_sha256": "63a4f539d7e4160846602a66f54685f4b01552cefb3edc9b92b452f17feb0aaa",
+       "h": 19,
+       "u16_sha256": "085b6222733b8d1f8868217a191aadc84527dc74c5e0a05697098898a1277343",
+       "w": 23
+      }
+     ],
+     "kind": "mask"
+    }
+   ],
+   "reader": {
+    "class_type": "TextMask",
+    "rendered": "synth_37x23x3_22.png"
+   }
+  }
+ ],
  "frame": {
   "effect": {
    "class_type": "Blend",
@@ -24309,7 +24568,7 @@
      "w": 37
     }
    ],
-   "name": "Blend {'mode': 'multiply', 'opacity': 0.37}, 1×23×37×3",
+   "name": "Blend {'mode': 'multiply', 'opacity': 0.37} {}, 1×23×37×3",
    "widgets": {
     "mode": "multiply",
     "opacity": 0.37
@@ -24353,7 +24612,7 @@
      "w": 37
     }
    ],
-   "name": "Blend {'mode': 'multiply', 'opacity': 0.37}, 2×23×37×3",
+   "name": "Blend {'mode': 'multiply', 'opacity': 0.37} {}, 2×23×37×3",
    "widgets": {
     "mode": "multiply",
     "opacity": 0.37
@@ -24390,7 +24649,7 @@
      "w": 110
     }
    ],
-   "name": "Blend {'mode': 'multiply', 'opacity': 0.37}, 1×120×110×3",
+   "name": "Blend {'mode': 'multiply', 'opacity': 0.37} {}, 1×120×110×3",
    "widgets": {
     "mode": "multiply",
     "opacity": 0.37
@@ -24434,7 +24693,7 @@
      "w": 90
     }
    ],
-   "name": "Blend {'mode': 'multiply', 'opacity': 0.37}, 2×61×90×4",
+   "name": "Blend {'mode': 'multiply', 'opacity': 0.37} {}, 2×61×90×4",
    "widgets": {
     "mode": "multiply",
     "opacity": 0.37
@@ -24471,7 +24730,7 @@
      "w": 90
     }
    ],
-   "name": "Blend {'mode': 'multiply', 'opacity': 0.37}, 1×61×90×4",
+   "name": "Blend {'mode': 'multiply', 'opacity': 0.37} {}, 1×61×90×4",
    "widgets": {
     "mode": "multiply",
     "opacity": 0.37
@@ -24508,7 +24767,7 @@
      "w": 37
     }
    ],
-   "name": "Blend {'mode': 'normal', 'opacity': 1.0}, 1×23×37×3",
+   "name": "Blend {'mode': 'normal', 'opacity': 1.0} {}, 1×23×37×3",
    "widgets": {
     "mode": "normal",
     "opacity": 1.0
@@ -24552,7 +24811,7 @@
      "w": 37
     }
    ],
-   "name": "Blend {'mode': 'normal', 'opacity': 1.0}, 2×23×37×3",
+   "name": "Blend {'mode': 'normal', 'opacity': 1.0} {}, 2×23×37×3",
    "widgets": {
     "mode": "normal",
     "opacity": 1.0
@@ -24589,7 +24848,7 @@
      "w": 110
     }
    ],
-   "name": "Blend {'mode': 'normal', 'opacity': 1.0}, 1×120×110×3",
+   "name": "Blend {'mode': 'normal', 'opacity': 1.0} {}, 1×120×110×3",
    "widgets": {
     "mode": "normal",
     "opacity": 1.0
@@ -24633,7 +24892,7 @@
      "w": 90
     }
    ],
-   "name": "Blend {'mode': 'normal', 'opacity': 1.0}, 2×61×90×4",
+   "name": "Blend {'mode': 'normal', 'opacity': 1.0} {}, 2×61×90×4",
    "widgets": {
     "mode": "normal",
     "opacity": 1.0
@@ -24670,7 +24929,7 @@
      "w": 90
     }
    ],
-   "name": "Blend {'mode': 'normal', 'opacity': 1.0}, 1×61×90×4",
+   "name": "Blend {'mode': 'normal', 'opacity': 1.0} {}, 1×61×90×4",
    "widgets": {
     "mode": "normal",
     "opacity": 1.0
@@ -24707,7 +24966,7 @@
      "w": 37
     }
    ],
-   "name": "Blend {'mode': 'subtract', 'opacity': 0.5}, 1×23×37×3",
+   "name": "Blend {'mode': 'subtract', 'opacity': 0.5} {}, 1×23×37×3",
    "widgets": {
     "mode": "subtract",
     "opacity": 0.5
@@ -24751,7 +25010,7 @@
      "w": 37
     }
    ],
-   "name": "Blend {'mode': 'subtract', 'opacity': 0.5}, 2×23×37×3",
+   "name": "Blend {'mode': 'subtract', 'opacity': 0.5} {}, 2×23×37×3",
    "widgets": {
     "mode": "subtract",
     "opacity": 0.5
@@ -24788,7 +25047,7 @@
      "w": 110
     }
    ],
-   "name": "Blend {'mode': 'subtract', 'opacity': 0.5}, 1×120×110×3",
+   "name": "Blend {'mode': 'subtract', 'opacity': 0.5} {}, 1×120×110×3",
    "widgets": {
     "mode": "subtract",
     "opacity": 0.5
@@ -24832,7 +25091,7 @@
      "w": 90
     }
    ],
-   "name": "Blend {'mode': 'subtract', 'opacity': 0.5}, 2×61×90×4",
+   "name": "Blend {'mode': 'subtract', 'opacity': 0.5} {}, 2×61×90×4",
    "widgets": {
     "mode": "subtract",
     "opacity": 0.5
@@ -24869,7 +25128,7 @@
      "w": 90
     }
    ],
-   "name": "Blend {'mode': 'subtract', 'opacity': 0.5}, 1×61×90×4",
+   "name": "Blend {'mode': 'subtract', 'opacity': 0.5} {}, 1×61×90×4",
    "widgets": {
     "mode": "subtract",
     "opacity": 0.5
@@ -24897,7 +25156,7 @@
      "w": 37
     }
    ],
-   "name": "ApplyMask {'invert': False}, 1×23×37×3",
+   "name": "ApplyMask {'invert': False} {}, 1×23×37×3",
    "widgets": {
     "invert": false
    }
@@ -24931,7 +25190,7 @@
      "w": 37
     }
    ],
-   "name": "ApplyMask {'invert': False}, 2×23×37×3",
+   "name": "ApplyMask {'invert': False} {}, 2×23×37×3",
    "widgets": {
     "invert": false
    }
@@ -24958,7 +25217,7 @@
      "w": 110
     }
    ],
-   "name": "ApplyMask {'invert': False}, 1×120×110×3",
+   "name": "ApplyMask {'invert': False} {}, 1×120×110×3",
    "widgets": {
     "invert": false
    }
@@ -24992,7 +25251,7 @@
      "w": 90
     }
    ],
-   "name": "ApplyMask {'invert': False}, 2×61×90×4",
+   "name": "ApplyMask {'invert': False} {}, 2×61×90×4",
    "widgets": {
     "invert": false
    }
@@ -25019,7 +25278,7 @@
      "w": 90
     }
    ],
-   "name": "ApplyMask {'invert': False}, 1×61×90×4",
+   "name": "ApplyMask {'invert': False} {}, 1×61×90×4",
    "widgets": {
     "invert": false
    }
@@ -25046,7 +25305,7 @@
      "w": 37
     }
    ],
-   "name": "ApplyMask {'invert': True}, 1×23×37×3",
+   "name": "ApplyMask {'invert': True} {}, 1×23×37×3",
    "widgets": {
     "invert": true
    }
@@ -25080,7 +25339,7 @@
      "w": 37
     }
    ],
-   "name": "ApplyMask {'invert': True}, 2×23×37×3",
+   "name": "ApplyMask {'invert': True} {}, 2×23×37×3",
    "widgets": {
     "invert": true
    }
@@ -25107,7 +25366,7 @@
      "w": 110
     }
    ],
-   "name": "ApplyMask {'invert': True}, 1×120×110×3",
+   "name": "ApplyMask {'invert': True} {}, 1×120×110×3",
    "widgets": {
     "invert": true
    }
@@ -25141,7 +25400,7 @@
      "w": 90
     }
    ],
-   "name": "ApplyMask {'invert': True}, 2×61×90×4",
+   "name": "ApplyMask {'invert': True} {}, 2×61×90×4",
    "widgets": {
     "invert": true
    }
@@ -25168,7 +25427,7 @@
      "w": 90
     }
    ],
-   "name": "ApplyMask {'invert': True}, 1×61×90×4",
+   "name": "ApplyMask {'invert': True} {}, 1×61×90×4",
    "widgets": {
     "invert": true
    }
@@ -25195,7 +25454,7 @@
      "w": 37
     }
    ],
-   "name": "MergeAlpha {'invert_mask': False}, 1×23×37×3",
+   "name": "MergeAlpha {'invert_mask': False} {}, 1×23×37×3",
    "widgets": {
     "invert_mask": false
    }
@@ -25229,7 +25488,7 @@
      "w": 37
     }
    ],
-   "name": "MergeAlpha {'invert_mask': False}, 2×23×37×3",
+   "name": "MergeAlpha {'invert_mask': False} {}, 2×23×37×3",
    "widgets": {
     "invert_mask": false
    }
@@ -25256,7 +25515,7 @@
      "w": 110
     }
    ],
-   "name": "MergeAlpha {'invert_mask': False}, 1×120×110×3",
+   "name": "MergeAlpha {'invert_mask': False} {}, 1×120×110×3",
    "widgets": {
     "invert_mask": false
    }
@@ -25290,7 +25549,7 @@
      "w": 90
     }
    ],
-   "name": "MergeAlpha {'invert_mask': False}, 2×61×90×4",
+   "name": "MergeAlpha {'invert_mask': False} {}, 2×61×90×4",
    "widgets": {
     "invert_mask": false
    }
@@ -25317,9 +25576,695 @@
      "w": 90
     }
    ],
-   "name": "MergeAlpha {'invert_mask': False}, 1×61×90×4",
+   "name": "MergeAlpha {'invert_mask': False} {}, 1×61×90×4",
    "widgets": {
     "invert_mask": false
+   }
+  },
+  {
+   "class_type": "MergeAlpha",
+   "input": {
+    "mask_neg_zero_every": 3,
+    "mask_seed": 15031,
+    "neg_zero_every": 3,
+    "seed": 8031,
+    "shape": [
+     1,
+     23,
+     37,
+     3
+    ]
+   },
+   "items": [
+    {
+     "c": 4,
+     "f32_sha256": "489a21cfb239310ab930d5c558bd24de33ff5371403ca60c8a3905818b277ee4",
+     "h": 23,
+     "neg_zeros": 1,
+     "w": 37
+    }
+   ],
+   "name": "MergeAlpha {'invert_mask': False} {'mask_neg_zero_every': 3}, 1×23×37×3",
+   "widgets": {
+    "invert_mask": false
+   }
+  },
+  {
+   "class_type": "MergeAlpha",
+   "input": {
+    "mask_neg_zero_every": 3,
+    "mask_seed": 15032,
+    "neg_zero_every": 3,
+    "seed": 8032,
+    "shape": [
+     2,
+     23,
+     37,
+     3
+    ]
+   },
+   "items": [
+    {
+     "c": 4,
+     "f32_sha256": "6dbbce2fc74628e97e86020588f0ce360d169c0f12cd2e2766e3fea6a6fad940",
+     "h": 23,
+     "neg_zeros": 0,
+     "w": 37
+    },
+    {
+     "c": 4,
+     "f32_sha256": "0f8c0933a3488dec4217ccb5073fe688ec37a9ac35c4bd8fd32f78b7847703e2",
+     "h": 23,
+     "neg_zeros": 0,
+     "w": 37
+    }
+   ],
+   "name": "MergeAlpha {'invert_mask': False} {'mask_neg_zero_every': 3}, 2×23×37×3",
+   "widgets": {
+    "invert_mask": false
+   }
+  },
+  {
+   "class_type": "MergeAlpha",
+   "input": {
+    "mask_neg_zero_every": 3,
+    "mask_seed": 15033,
+    "neg_zero_every": 3,
+    "seed": 8033,
+    "shape": [
+     1,
+     120,
+     110,
+     3
+    ]
+   },
+   "items": [
+    {
+     "c": 4,
+     "f32_sha256": "ca2cb33e9936e8431032282df40925d73e0adbda579768c95265a52a1ea56ca4",
+     "h": 120,
+     "neg_zeros": 0,
+     "w": 110
+    }
+   ],
+   "name": "MergeAlpha {'invert_mask': False} {'mask_neg_zero_every': 3}, 1×120×110×3",
+   "widgets": {
+    "invert_mask": false
+   }
+  },
+  {
+   "class_type": "MergeAlpha",
+   "input": {
+    "mask_neg_zero_every": 3,
+    "mask_seed": 15034,
+    "neg_zero_every": 3,
+    "seed": 8034,
+    "shape": [
+     2,
+     61,
+     90,
+     4
+    ]
+   },
+   "items": [
+    {
+     "c": 4,
+     "f32_sha256": "58b37ea3d098a71bd69727dddcce4caa9606a3e92d1d4aeb69ae8f1cdd997f6f",
+     "h": 61,
+     "neg_zeros": 0,
+     "w": 90
+    },
+    {
+     "c": 4,
+     "f32_sha256": "457382682f4f364aa55790bc26a72c39e62c77cd74439a7df3f38f7067a01c02",
+     "h": 61,
+     "neg_zeros": 0,
+     "w": 90
+    }
+   ],
+   "name": "MergeAlpha {'invert_mask': False} {'mask_neg_zero_every': 3}, 2×61×90×4",
+   "widgets": {
+    "invert_mask": false
+   }
+  },
+  {
+   "class_type": "MergeAlpha",
+   "input": {
+    "mask_neg_zero_every": 3,
+    "mask_seed": 15035,
+    "neg_zero_every": 3,
+    "seed": 8035,
+    "shape": [
+     1,
+     61,
+     90,
+     4
+    ]
+   },
+   "items": [
+    {
+     "c": 4,
+     "f32_sha256": "5be2c7576ef7ec054cc9619c895efbf5d9625d0feea94e59298f8eb2e0b84bfa",
+     "h": 61,
+     "neg_zeros": 0,
+     "w": 90
+    }
+   ],
+   "name": "MergeAlpha {'invert_mask': False} {'mask_neg_zero_every': 3}, 1×61×90×4",
+   "widgets": {
+    "invert_mask": false
+   }
+  },
+  {
+   "class_type": "ThresholdMask",
+   "input": {
+    "neg_zero_every": 1,
+    "seed": 8036,
+    "shape": [
+     1,
+     23,
+     37,
+     3
+    ]
+   },
+   "items": [
+    {
+     "c": 1,
+     "f32_sha256": "17e0aa07345096da0c4c19d65a11c859f83d1b932df852294f3ea8cadc5a1777",
+     "h": 23,
+     "neg_zeros": 3,
+     "w": 37
+    }
+   ],
+   "name": "ThresholdMask {'threshold': 0.2, 'softness': 0.2, 'invert': False} {'neg_zero_every': 1}, 1×23×37×3",
+   "widgets": {
+    "invert": false,
+    "softness": 0.2,
+    "threshold": 0.2
+   }
+  },
+  {
+   "class_type": "ThresholdMask",
+   "input": {
+    "neg_zero_every": 1,
+    "seed": 8037,
+    "shape": [
+     2,
+     23,
+     37,
+     3
+    ]
+   },
+   "items": [
+    {
+     "c": 1,
+     "f32_sha256": "c1a644a68322e92348cf9c4f2964d2fa439b303d94cd135068c2c26b69e4a899",
+     "h": 23,
+     "neg_zeros": 0,
+     "w": 37
+    },
+    {
+     "c": 1,
+     "f32_sha256": "547d5dc23747e2e6add945790e5ee2960d8a4791be0a2422276dec5ba80abbe5",
+     "h": 23,
+     "neg_zeros": 6,
+     "w": 37
+    }
+   ],
+   "name": "ThresholdMask {'threshold': 0.2, 'softness': 0.2, 'invert': False} {'neg_zero_every': 1}, 2×23×37×3",
+   "widgets": {
+    "invert": false,
+    "softness": 0.2,
+    "threshold": 0.2
+   }
+  },
+  {
+   "class_type": "ThresholdMask",
+   "input": {
+    "neg_zero_every": 1,
+    "seed": 8038,
+    "shape": [
+     1,
+     120,
+     110,
+     3
+    ]
+   },
+   "items": [
+    {
+     "c": 1,
+     "f32_sha256": "b4b1a4eb0baf0ec35ab5a28cc700344b2fe7f02b9dfa7df4b10247b2eed177f5",
+     "h": 120,
+     "neg_zeros": 0,
+     "w": 110
+    }
+   ],
+   "name": "ThresholdMask {'threshold': 0.2, 'softness': 0.2, 'invert': False} {'neg_zero_every': 1}, 1×120×110×3",
+   "widgets": {
+    "invert": false,
+    "softness": 0.2,
+    "threshold": 0.2
+   }
+  },
+  {
+   "class_type": "ThresholdMask",
+   "input": {
+    "neg_zero_every": 1,
+    "seed": 8039,
+    "shape": [
+     2,
+     61,
+     90,
+     4
+    ]
+   },
+   "items": [
+    {
+     "c": 1,
+     "f32_sha256": "4bf7f921931f7f0b9a0d1c9835493724e6e3254338ca8f4ddb64c8e286dd6fb7",
+     "h": 61,
+     "neg_zeros": 0,
+     "w": 90
+    },
+    {
+     "c": 1,
+     "f32_sha256": "0777bd160ba74a2a44ea29e0b97df5b29a89a06cd4f05fe4457abc8a27c83896",
+     "h": 61,
+     "neg_zeros": 4,
+     "w": 90
+    }
+   ],
+   "name": "ThresholdMask {'threshold': 0.2, 'softness': 0.2, 'invert': False} {'neg_zero_every': 1}, 2×61×90×4",
+   "widgets": {
+    "invert": false,
+    "softness": 0.2,
+    "threshold": 0.2
+   }
+  },
+  {
+   "class_type": "ThresholdMask",
+   "input": {
+    "neg_zero_every": 1,
+    "seed": 8040,
+    "shape": [
+     1,
+     61,
+     90,
+     4
+    ]
+   },
+   "items": [
+    {
+     "c": 1,
+     "f32_sha256": "79a1883c7487dbc4d579a26c27c220eeb2e24957f8f08ba2086244c9513e90de",
+     "h": 61,
+     "neg_zeros": 2,
+     "w": 90
+    }
+   ],
+   "name": "ThresholdMask {'threshold': 0.2, 'softness': 0.2, 'invert': False} {'neg_zero_every': 1}, 1×61×90×4",
+   "widgets": {
+    "invert": false,
+    "softness": 0.2,
+    "threshold": 0.2
+   }
+  },
+  {
+   "class_type": "MatteGrowShrink",
+   "input": {
+    "mask_only": true,
+    "neg_zero_every": 3,
+    "seed": 8041,
+    "shape": [
+     1,
+     23,
+     37,
+     1
+    ]
+   },
+   "items": [
+    {
+     "c": 1,
+     "f32_sha256": "ac92d3643710faf810ba29c40ce4b13c1b71f84dedc17a26511483c751befe98",
+     "h": 23,
+     "neg_zeros": 1,
+     "w": 37
+    }
+   ],
+   "name": "MatteGrowShrink {'amount': 0.0, 'feather': 0.0} {'mask_only': True}, 1×23×37×1",
+   "widgets": {
+    "amount": 0.0,
+    "feather": 0.0
+   }
+  },
+  {
+   "class_type": "MatteGrowShrink",
+   "input": {
+    "mask_only": true,
+    "neg_zero_every": 3,
+    "seed": 8042,
+    "shape": [
+     2,
+     23,
+     37,
+     1
+    ]
+   },
+   "items": [
+    {
+     "c": 1,
+     "f32_sha256": "82cc130449ef111f944fb50342dae14f97592f911e0e01c05aca90a4cb31c720",
+     "h": 23,
+     "neg_zeros": 0,
+     "w": 37
+    },
+    {
+     "c": 1,
+     "f32_sha256": "afd0d45bfbee19d3e7f53c67fd37975ca1bc5febadbe032fe1b334be1b1fc723",
+     "h": 23,
+     "neg_zeros": 2,
+     "w": 37
+    }
+   ],
+   "name": "MatteGrowShrink {'amount': 0.0, 'feather': 0.0} {'mask_only': True}, 2×23×37×1",
+   "widgets": {
+    "amount": 0.0,
+    "feather": 0.0
+   }
+  },
+  {
+   "class_type": "MatteGrowShrink",
+   "input": {
+    "mask_only": true,
+    "neg_zero_every": 3,
+    "seed": 8043,
+    "shape": [
+     1,
+     200,
+     190,
+     1
+    ]
+   },
+   "items": [
+    {
+     "c": 1,
+     "f32_sha256": "14df9ba85e38f34f804b436b0fe1e81a5a08bd969ee39c885d091fbc45a93206",
+     "h": 200,
+     "neg_zeros": 0,
+     "w": 190
+    }
+   ],
+   "name": "MatteGrowShrink {'amount': 0.0, 'feather': 0.0} {'mask_only': True}, 1×200×190×1",
+   "widgets": {
+    "amount": 0.0,
+    "feather": 0.0
+   }
+  },
+  {
+   "class_type": "MatteGrowShrink",
+   "input": {
+    "mask_only": true,
+    "neg_zero_every": 3,
+    "seed": 8044,
+    "shape": [
+     2,
+     120,
+     160,
+     1
+    ]
+   },
+   "items": [
+    {
+     "c": 1,
+     "f32_sha256": "7b58dba400884716e3dfd835bb14d4fc0b0465065aec0c5c6dd1b136f5a954ba",
+     "h": 120,
+     "neg_zeros": 0,
+     "w": 160
+    },
+    {
+     "c": 1,
+     "f32_sha256": "b29c09447a336bb6dd01d8556094bcf30dba8a17f77ad6b300957c75ba282172",
+     "h": 120,
+     "neg_zeros": 0,
+     "w": 160
+    }
+   ],
+   "name": "MatteGrowShrink {'amount': 0.0, 'feather': 0.0} {'mask_only': True}, 2×120×160×1",
+   "widgets": {
+    "amount": 0.0,
+    "feather": 0.0
+   }
+  },
+  {
+   "class_type": "MatteGrowShrink",
+   "input": {
+    "mask_only": true,
+    "neg_zero_every": 3,
+    "seed": 8045,
+    "shape": [
+     1,
+     23,
+     37,
+     1
+    ]
+   },
+   "items": [
+    {
+     "c": 1,
+     "f32_sha256": "c1a644a68322e92348cf9c4f2964d2fa439b303d94cd135068c2c26b69e4a899",
+     "h": 23,
+     "neg_zeros": 0,
+     "w": 37
+    }
+   ],
+   "name": "MatteGrowShrink {'amount': -1.0, 'feather': 0.0} {'mask_only': True}, 1×23×37×1",
+   "widgets": {
+    "amount": -1.0,
+    "feather": 0.0
+   }
+  },
+  {
+   "class_type": "MatteGrowShrink",
+   "input": {
+    "mask_only": true,
+    "neg_zero_every": 3,
+    "seed": 8046,
+    "shape": [
+     2,
+     23,
+     37,
+     1
+    ]
+   },
+   "items": [
+    {
+     "c": 1,
+     "f32_sha256": "c1a644a68322e92348cf9c4f2964d2fa439b303d94cd135068c2c26b69e4a899",
+     "h": 23,
+     "neg_zeros": 0,
+     "w": 37
+    },
+    {
+     "c": 1,
+     "f32_sha256": "4d83f8df044492b218512e0fdabea2d5602cea23f087f39556fb1b6708184a6a",
+     "h": 23,
+     "neg_zeros": 1,
+     "w": 37
+    }
+   ],
+   "name": "MatteGrowShrink {'amount': -1.0, 'feather': 0.0} {'mask_only': True}, 2×23×37×1",
+   "widgets": {
+    "amount": -1.0,
+    "feather": 0.0
+   }
+  },
+  {
+   "class_type": "MatteGrowShrink",
+   "input": {
+    "mask_only": true,
+    "neg_zero_every": 3,
+    "seed": 8047,
+    "shape": [
+     1,
+     200,
+     190,
+     1
+    ]
+   },
+   "items": [
+    {
+     "c": 1,
+     "f32_sha256": "28682dcbfb8a9964fd970c80e8d3f5e33dc9f302b8ca91424737a69a6078fa64",
+     "h": 200,
+     "neg_zeros": 0,
+     "w": 190
+    }
+   ],
+   "name": "MatteGrowShrink {'amount': -1.0, 'feather': 0.0} {'mask_only': True}, 1×200×190×1",
+   "widgets": {
+    "amount": -1.0,
+    "feather": 0.0
+   }
+  },
+  {
+   "class_type": "MatteGrowShrink",
+   "input": {
+    "mask_only": true,
+    "neg_zero_every": 3,
+    "seed": 8048,
+    "shape": [
+     2,
+     120,
+     160,
+     1
+    ]
+   },
+   "items": [
+    {
+     "c": 1,
+     "f32_sha256": "e2cc2a1fa6131cf4d86faa3baf78851f35a36853e2467c257b3df9d89e85cce5",
+     "h": 120,
+     "neg_zeros": 0,
+     "w": 160
+    },
+    {
+     "c": 1,
+     "f32_sha256": "e2cc2a1fa6131cf4d86faa3baf78851f35a36853e2467c257b3df9d89e85cce5",
+     "h": 120,
+     "neg_zeros": 0,
+     "w": 160
+    }
+   ],
+   "name": "MatteGrowShrink {'amount': -1.0, 'feather': 0.0} {'mask_only': True}, 2×120×160×1",
+   "widgets": {
+    "amount": -1.0,
+    "feather": 0.0
+   }
+  },
+  {
+   "class_type": "MatteGrowShrink",
+   "input": {
+    "mask_only": true,
+    "neg_zero_every": 3,
+    "seed": 8049,
+    "shape": [
+     1,
+     23,
+     37,
+     1
+    ]
+   },
+   "items": [
+    {
+     "c": 1,
+     "f32_sha256": "e6f63f1b99ebfb2e4bffd8143bd511dbba859c1f4e4fe5ce154b2864cfc6ff5b",
+     "h": 23,
+     "neg_zeros": 0,
+     "w": 37
+    }
+   ],
+   "name": "MatteGrowShrink {'amount': 2.0, 'feather': 0.0} {'mask_only': True}, 1×23×37×1",
+   "widgets": {
+    "amount": 2.0,
+    "feather": 0.0
+   }
+  },
+  {
+   "class_type": "MatteGrowShrink",
+   "input": {
+    "mask_only": true,
+    "neg_zero_every": 3,
+    "seed": 8050,
+    "shape": [
+     2,
+     23,
+     37,
+     1
+    ]
+   },
+   "items": [
+    {
+     "c": 1,
+     "f32_sha256": "5c674b26e430e21ad28c7a31f2e55f16c7da7933773962f178efba3b2e8c8025",
+     "h": 23,
+     "neg_zeros": 0,
+     "w": 37
+    },
+    {
+     "c": 1,
+     "f32_sha256": "557c7e98106eb75f7112dc3398e22ad22df128ca7c3df362251dd41c2b02df09",
+     "h": 23,
+     "neg_zeros": 0,
+     "w": 37
+    }
+   ],
+   "name": "MatteGrowShrink {'amount': 2.0, 'feather': 0.0} {'mask_only': True}, 2×23×37×1",
+   "widgets": {
+    "amount": 2.0,
+    "feather": 0.0
+   }
+  },
+  {
+   "class_type": "MatteGrowShrink",
+   "input": {
+    "mask_only": true,
+    "neg_zero_every": 3,
+    "seed": 8051,
+    "shape": [
+     1,
+     200,
+     190,
+     1
+    ]
+   },
+   "items": [
+    {
+     "c": 1,
+     "f32_sha256": "cbc66bf49fdfe1cb78b5c5da5a7644c125cdcb4d94def3dde5d75fd05ccc5972",
+     "h": 200,
+     "neg_zeros": 0,
+     "w": 190
+    }
+   ],
+   "name": "MatteGrowShrink {'amount': 2.0, 'feather': 0.0} {'mask_only': True}, 1×200×190×1",
+   "widgets": {
+    "amount": 2.0,
+    "feather": 0.0
+   }
+  },
+  {
+   "class_type": "MatteGrowShrink",
+   "input": {
+    "mask_only": true,
+    "neg_zero_every": 3,
+    "seed": 8052,
+    "shape": [
+     2,
+     120,
+     160,
+     1
+    ]
+   },
+   "items": [
+    {
+     "c": 1,
+     "f32_sha256": "c1991d56e5715cf31507e1fe952ec2ed07b3a8df5a3c9e6888b8a60122826cae",
+     "h": 120,
+     "neg_zeros": 0,
+     "w": 160
+    },
+    {
+     "c": 1,
+     "f32_sha256": "32d3c995ca7d5516c2cd24f5e44bcb0de0deab8f11e5eb28c7c87eefbe33deeb",
+     "h": 120,
+     "neg_zeros": 0,
+     "w": 160
+    }
+   ],
+   "name": "MatteGrowShrink {'amount': 2.0, 'feather': 0.0} {'mask_only': True}, 2×120×160×1",
+   "widgets": {
+    "amount": 2.0,
+    "feather": 0.0
    }
   }
  ],

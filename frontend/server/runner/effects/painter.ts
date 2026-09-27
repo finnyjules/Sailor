@@ -56,9 +56,9 @@ export function planPainter(ctx: PlanContext): NodePlan {
   if (!bg) throw new Error(PAINTER_COLOUR_UNREAD)
   // Kept as the pixels its readers write (Save image / Preview image truncate the float, R1.5); the float tensor too when an effect or a Frame reads it.
   const trunc = onlySavesRead(ctx.prompt, ctx.nodeId, 0)
-  const float = floatReadBy(ctx.prompt, ctx.nodeId, 0)
+  const float = floatReadBy(ctx.prompt, ctx.nodeId, 0, ctx.families)
   // The mask, as its float32 tensor too when an effect or a Frame reads it (R2.8 fix round 1).
-  const floatMask = floatReadBy(ctx.prompt, ctx.nodeId, 1)
+  const floatMask = floatReadBy(ctx.prompt, ctx.nodeId, 1, ctx.families, 'mask')
   const letters = previewImageLetters()
   return {
     kind: 'derive',

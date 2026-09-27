@@ -238,6 +238,28 @@ export function pixelsCore() {
   }
 
   /**
+   * Text mask's clip of a picture an effect made (R2.8 fix round 2): its kept
+   * float32 tensor (planar, `c` channels) × alpha, quantised as `clip` does.
+   */
+  function clipPlanar(c: number, w: number, h: number, data: Float32Array, alpha: Float32Array, trunc = false): { w: number; h: number; channels: 3 | 4; px: Uint8Array } {
+    const n = w * h
+    if (alpha.length !== n) throw new Error('The pictures this card reads are of different sizes')
+    if (c !== 3 && c !== 4) throw new Error('A picture this card reads could not be read')
+    const px = new Uint8Array(n * c)
+    for (let k = 0; k < c; k++) {
+      for (let i = 0; i < n; i++) {
+        const v = f(data[k * n + i]! * alpha[i]!)
+        if (trunc) {
+          const t = f(255 * v)
+          px[i * c + k] = t > 0 ? (t > 255 ? 255 : Math.trunc(t)) : 0
+        }
+        else px[i * c + k] = roundHalfEven(f((v > 0 ? (v > 1 ? 1 : v) : 0) * 255))
+      }
+    }
+    return { w, h, channels: c, px }
+  }
+
+  /**
    * Save image's pixels (nodes.py SaveImage.save_images, R1.5): each tensor
    * value v as np.clip(255.·v, 0, 255).astype(uint8), trunc(f32(255·v)),
    * interleaved RGB or RGBA as the tensor. The identity on b / 255, but not
@@ -418,7 +440,7 @@ export function pixelsCore() {
     return { w: ow, h: oh, channels: 3, px: rgb }
   }
 
-  return { roundHalfEven, bilinearKind, bilinear, tensorChannels, channelTable, mask16Of, channelMask16, clipBegin, clip, saveBytes, pilResize, pilResizeRgba, savePixels }
+  return { roundHalfEven, bilinearKind, bilinear, tensorChannels, channelTable, mask16Of, channelMask16, clipBegin, clip, clipPlanar, saveBytes, pilResize, pilResizeRgba, savePixels }
 }
 
 export type PixelsCore = ReturnType<typeof pixelsCore>

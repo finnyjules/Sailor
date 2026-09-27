@@ -53,6 +53,7 @@ import { collectInputFiles } from '~~/server/runner/inputs'
 import { planNode, type NodePlan } from '~~/server/runner/executors'
 import type { OutputFile, RunnerValue } from '~~/server/runner/types'
 import { createMemoryKeptBytes, type KeptBytes } from '~~/server/runner/keptBytes'
+import { floatReadBy } from '~~/server/runner/effects/tensorFiles'
 import { PICTURE_16_BIT } from '~~/server/runner/pictures/pythonView'
 import { effectSchemaOf } from '#shared/runner/effects'
 
@@ -97,7 +98,7 @@ interface ChainCase extends MaskCase {
 }
 interface NegZeroCase {
   name: string; class_type: string; widgets: Record<string, unknown>
-  input: { shape: [number, number, number, number]; seed: number; neg_zero_every: number; top?: { seed: number; neg_zero_every: number }; mask_seed?: number }
+  input: { shape: [number, number, number, number]; seed: number; neg_zero_every: number; top?: { seed: number; neg_zero_every: number }; mask_seed?: number; mask_neg_zero_every?: number; mask_only?: true }
   items: { w: number; h: number; c: number; f32_sha256: string; neg_zeros: number }[]
 }
 interface MaskFx extends Omit<FxFile, 'cases'> {
@@ -524,20 +525,20 @@ describe('what the cases pin', () => {
     expect(find('MatteGrowShrink: amount 50.0, feather 30.0, mask 200×190 hard').library).toBe(true)
   })
 
-  it('the separable max pool equals kernels.ts maxPool2d (grow and shrink, windows 3–41, masks with ties and edges)', () => {
+  it('Matte grow / shrink\'s max pool, taken one side at a time, equals kernels.ts maxPool2d (grow and shrink, windows 3–41, masks with ties and edges); the helper is no op', () => {
+    const matte = (m: Tensor, amount: number) => effectCores.mask.MatteGrowShrink({ mask: m }, { amount, feather: 0 }).outputs[0]!
     for (const [w, h, seed] of [[37, 23, 1], [8, 50, 2], [64, 3, 3], [1, 1, 4]] as const) {
       const m = tk.tensor(1, h, w)
       for (let i = 0; i < m.data.length; i++) m.data[i] = ((Math.imul(i + seed, 2654435761) >>> 24) % 5) / 4
       for (const kk of [3, 5, 9, 21, 41]) {
-        const grow = effectCores.mask.maxPoolSeparable(m, kk, false, undefined)
-        expect(shaF32(grow.data), `grow ${w}×${h} k ${kk}`).toBe(shaF32(kn.maxPool2d(m, kk, kk >> 1).data))
+        expect(shaF32(matte(m, (kk - 1) / 2).data), `grow ${w}×${h} k ${kk}`).toBe(shaF32(kn.maxPool2d(m, kk, kk >> 1).data))
         const neg = tk.tensor(1, h, w)
         for (let i = 0; i < m.data.length; i++) neg.data[i] = -m.data[i]!
         const direct = kn.maxPool2d(neg, kk, kk >> 1).data.map(v => -v)
-        const shrink = effectCores.mask.maxPoolSeparable(m, kk, true, undefined)
-        expect([...shrink.data], `shrink ${w}×${h} k ${kk}`).toEqual([...direct])
+        expect(shaF32(matte(m, -(kk - 1) / 2).data), `shrink ${w}×${h} k ${kk}`).toBe(shaF32(direct))
       }
     }
+    expect(Object.keys(effectCores.mask).sort()).toEqual([...MASK_CLASSES].sort())
   })
 
   it('Painter: the canvas colour as its own hex_to_rgb reads it; the file isn\'t turned by its EXIF; a 4-channel base under a file raises; no file hands the picture on with a zero mask', () => {
@@ -646,6 +647,12 @@ describe('chains: a mask from each producer, handed on as its float32 tensor, as
     }, 120_000)
   }
 
+  it('the −0 probes reach the masks\' clamps: Matte grow / shrink and Threshold mask keep some −0 (torch\'s scalar tails)', () => {
+    const negs = (cls: string) => FX.negzero.filter(x => x.class_type === cls).flatMap(x => x.items.map(i => i.neg_zeros))
+    expect(negs('MatteGrowShrink').some(n => n > 0)).toBe(true)
+    expect(negs('ThresholdMask').some(n => n > 0)).toBe(true)
+  })
+
   it('the chains cover every mask producer the runner has, through Matte grow / shrink too; the 16-bit hand-off they replace was off', () => {
     const producers = new Set(FX.chains.map(c => c.producer.class_type))
     expect([...producers].sort()).toEqual(['ColorRangeMask', 'ImageToMask', 'LoadImage', 'Painter', 'TextMask', 'ThresholdMask'])
@@ -657,6 +664,101 @@ describe('chains: a mask from each producer, handed on as its float32 tensor, as
   })
 })
 
+// ── An effect's picture read by the picture utilities that work on its float (fix round 2) ──
+
+interface EffectChain {
+  name: string
+  blend: { base: string; top: string; widgets: Record<string, unknown> }
+  reader: { class_type: 'ImageToMask' | 'TextMask'; channel?: string; rendered?: string }
+  consumer: { class_type: string; node_id: string; widgets: Record<string, unknown>; image: string } | null
+  outputs: { kind: 'image' | 'mask'; items: MaskItem[] }[]
+}
+const EFFECT_CHAINS = (FX as unknown as { effect_chains: EffectChain[] }).effect_chains
+
+describe('an effect\'s picture into Image to mask and Text mask\'s source: read as its float tensor, as ComfyUI\'s chain', () => {
+  for (const ch of EFFECT_CHAINS) {
+    it(`${ch.name}: exact, kept and saved`, async () => {
+      for (const save of [false, true]) {
+        const w = watchedKept()
+        const k = makeKit({ hosted: false, deps: { families: () => MASK, kept: w.kept } })
+        for (const [name, b64s] of Object.entries(FX.assets)) put(k.root, name, b64(b64s))
+        const p: ApiPrompt = {
+          b: card(ch.blend.base), t: card(ch.blend.top),
+          bl: { class_type: 'Blend', inputs: { base: ['b', 0], top: ['t', 0], ...ch.blend.widgets } },
+        }
+        let last: string
+        if (ch.reader.class_type === 'ImageToMask') {
+          p.itm = { class_type: 'ImageToMask', inputs: { image: ['bl', 0], channel: ch.reader.channel } }
+          p.img = card(ch.consumer!.image)
+          p.c = { class_type: ch.consumer!.class_type, inputs: { image: ['img', 0], mask: ['itm', 0], ...ch.consumer!.widgets } }
+          last = 'c'
+        }
+        else {
+          p.tm = { class_type: 'TextMask', inputs: { params: JSON.stringify({ rendered: ch.reader.rendered }), source: ['bl', 0] } }
+          last = 'tm'
+        }
+        if (save) p.s = saveImage([last, 0])
+        expect(isRunnerEligible(p, MASK)).toBe(true)
+        const { runId } = await k.engine.startRun({ userId: k.userId, takes: [p], ...START })
+        await k.engine.settled(runId)
+        const run = (await k.store.get(runId))!
+        expect(run.status, JSON.stringify(run.takes[0]!.nodes[last])).toBe('done')
+        // Blend kept its float for the utility that reads it.
+        expect((run.takes[0]!.nodes.bl!.values![0] as Extract<RunnerValue, { kind: 'files' }>).tensors).toHaveLength(1)
+        const item = ch.outputs[0]!.items[0]!
+        if (save) {
+          const saved = await pngPixels(new Uint8Array(readFileSync(join(k.root, 'output', 'ComfyUI_00001_.png'))))
+          expect([saved.w, saved.h, saved.channels]).toEqual([item.w, item.h, item.c])
+          expect(sha256(saved.px), 'saved').toBe(item.trunc8_sha256)
+        }
+        else {
+          const v = run.takes[0]!.nodes[last]!.values![0] as Extract<RunnerValue, { kind: 'files' }>
+          expect(sha256((await pngPixels(w.bytes(v.files[0]!))).px), 'kept').toBe(item.round8_sha256)
+          if (ch.reader.class_type === 'TextMask') {
+            const mv = run.takes[0]!.nodes.tm!.values![1] as Extract<RunnerValue, { kind: 'mask' }>
+            expect(shaU16((await keptU16(w.bytes(mv.files[0]!))).q)).toBe(ch.outputs[1]!.items[0]!.u16_sha256)
+          }
+        }
+      }
+    }, 120_000)
+  }
+})
+
+describe('a float tensor is kept only for a reader whose family is on (fix round 2)', () => {
+  const on = (fam: RunnerFamily[]) => new Set<RunnerFamily>(fam)
+  it('floatReadBy: effects by their family, the Frame for pictures only, Image to mask and Text mask\'s source with cards', () => {
+    const p: ApiPrompt = withSources({ a: { class_type: 'ApplyMask', inputs: { image: ['0', 0], mask: ['l', 1], invert: false } } })
+    expect(floatReadBy(p, 'l', 1, on(['cards']), 'mask')).toBe(false)
+    expect(floatReadBy(p, 'l', 1, on(['cards', 'effects-tone']), 'mask')).toBe(false)
+    expect(floatReadBy(p, 'l', 1, MASK, 'mask')).toBe(true)
+    expect(floatReadBy(p, 'l', 1, undefined, 'mask')).toBe(false)
+    const f: ApiPrompt = withSources({ f: { class_type: 'Compositor', inputs: frameWidgets({ layer1: ['0', 0], layer1_mask: ['l', 1] }) } })
+    expect(floatReadBy(f, 'l', 1, on([...RUNNER_FAMILIES]), 'mask')).toBe(false)
+    const e: ApiPrompt = { 0: card('a.png'), bl: nodeOf('Blend', ['0', 0]), i: { class_type: 'ImageToMask', inputs: { image: ['bl', 0], channel: 'red' } } }
+    expect(floatReadBy(e, 'bl', 0, MASK)).toBe(true)
+    expect(floatReadBy(e, 'bl', 0, on(['effects-mask']))).toBe(false)
+  })
+
+  it('with every effects family off, LoadImage → Frame keeps no tensor and the Frame reads the PNG, as before this task', async () => {
+    const w = watchedKept()
+    const families = on(['cards', 'frame'])
+    const k = makeKit({ hosted: false, deps: { families: () => families, kept: w.kept } })
+    const file = 'synth_37x23x4_21.png'
+    put(k.root, file, assetOf(file))
+    const p: ApiPrompt = { l: loadImage(file), f: { class_type: 'Compositor', inputs: frameWidgets({ layer1: ['l', 0], layer1_mask: ['l', 1] }) } }
+    expect(isRunnerEligible(p, families)).toBe(true)
+    const put0 = w.kept.put
+    const exts: string[] = []
+    w.kept.put = async (r, b, ext) => { exts.push(ext); return put0(r, b, ext) }
+    const { runId } = await k.engine.startRun({ userId: k.userId, takes: [p], ...START })
+    await k.engine.settled(runId)
+    const run = (await k.store.get(runId))!
+    expect(run.status).toBe('done')
+    expect((run.takes[0]!.nodes.l!.values![1] as Extract<RunnerValue, { kind: 'mask' }>).tensors).toBeUndefined()
+    expect(exts).not.toContain('bin')
+  })
+})
+
 // ── −0 through the last clamp ────────────────────────────────────────────────
 
 function hashedValues(n: number, seed: number): Float32Array {
@@ -665,7 +767,7 @@ function hashedValues(n: number, seed: number): Float32Array {
   return out
 }
 
-describe('−0 through each node\'s last clamp (as a Dither upstream leaves it): kept only where torch\'s loop keeps it', () => {
+describe('−0 through each node\'s clamps (as a Dither upstream leaves it), pictures and masks: kept only where torch\'s loop keeps it', () => {
   const planar = (v: Float32Array, b: number, H: number, W: number, C: number) => {
     const t = tk.tensor(C, H, W)
     const n = H * W
@@ -683,12 +785,15 @@ describe('−0 through each node\'s last clamp (as a Dither upstream leaves it):
       const x = withNeg(nz.input.seed)
       const top = nz.input.top ? withNeg(nz.input.top.seed) : null
       const m = nz.input.mask_seed !== undefined ? hashedValues(B * H * W, nz.input.mask_seed) : null
+      if (m && nz.input.mask_neg_zero_every) for (let i = 0; i < m.length; i += nz.input.mask_neg_zero_every) m[i] = -0
       const op = coreOp(EFFECTS[nz.class_type]!.op) as unknown as Op
       const p = paramsOf({ class_type: nz.class_type, widgets: nz.widgets } as unknown as FxCase)
       for (let b = 0; b < B; b++) {
         const inp: Record<string, Tensor> = top
           ? { base: planar(x, b, H, W, C), top: planar(top, b, H, W, C) }
-          : { image: planar(x, b, H, W, C), mask: { c: 1, h: H, w: W, data: m!.slice(b * H * W, (b + 1) * H * W) } }
+          : nz.input.mask_only ? { mask: planar(x, b, H, W, 1) }
+            : m ? { image: planar(x, b, H, W, C), mask: { c: 1, h: H, w: W, data: m.slice(b * H * W, (b + 1) * H * W) } }
+              : { image: planar(x, b, H, W, C) }
         const got = interleaved(op(inp, p, undefined, {}, b, B).outputs[0]!)
         let negs = 0
         for (const v of got) if (Object.is(v, -0)) negs++

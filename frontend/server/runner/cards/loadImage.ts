@@ -22,7 +22,7 @@ export function planLoadImageCard(ctx: PlanContext): NodePlan {
   const onlyFrames = Object.values(ctx.prompt).every(n => n.class_type === 'Compositor' || !linksOf(n).some(l => l.from === ctx.nodeId))
   if (onlyFrames && !ctx.families?.has('cards')) return { kind: 'pass', files: [file], ui: null }
   // Read by an effect or a Frame: the float mask is kept too, and handed on (R2.8 fix round 1).
-  const float = floatReadBy(ctx.prompt, ctx.nodeId, 1)
+  const float = floatReadBy(ctx.prompt, ctx.nodeId, 1, ctx.families, 'mask')
   return {
     kind: 'derive',
     async derive(io) {

@@ -324,7 +324,7 @@ async function hasAlphaBand(bytes: Uint8Array): Promise<boolean> {
 export function planTextOnPath(ctx: PlanContext): NodePlan {
   const inputs = ctx.prompt[ctx.nodeId]!.inputs ?? {}
   const file = renderedFile(inputs.params, TEXT_ON_PATH_UNLOADABLE)
-  const float = floatReadBy(ctx.prompt, ctx.nodeId, 1)
+  const float = floatReadBy(ctx.prompt, ctx.nodeId, 1, ctx.families, 'mask')
   return {
     kind: 'derive',
     async derive(io) {
@@ -392,7 +392,7 @@ export async function loadTextMask(io: DeriveIO, file: OutputFile): Promise<Mask
 export function planTextMask(ctx: PlanContext): NodePlan {
   const inputs = ctx.prompt[ctx.nodeId]!.inputs ?? {}
   const file = textMaskRender(inputs.params)
-  const float = floatReadBy(ctx.prompt, ctx.nodeId, 1)
+  const float = floatReadBy(ctx.prompt, ctx.nodeId, 1, ctx.families, 'mask')
   return {
     kind: 'derive',
     async derive(io) {

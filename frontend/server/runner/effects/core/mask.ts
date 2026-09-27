@@ -62,9 +62,12 @@ export function maskCore(k: TensorCore, kn: KernelsCore, px: PixelsCore) {
   const pyMax = (a: number, b: number) => (b > a ? b : a)
 
   /**
-   * The node's last `.clamp(0, 1)` over its contiguous (B, H, W, C) result, in
-   * place: −0 kept only in the scalar tails of torch's loop (kernels.ts
-   * inScalarTail, over the whole batch in memory order); NaN stays NaN.
+   * A `.clamp(0, 1)` over a contiguous (B, H, W, C) tensor, a picture or a
+   * (B, H, W) mask (C = 1), in place: −0 kept only in the scalar tails of
+   * torch's loop (kernels.ts inScalarTail, over the whole batch in memory
+   * order), as torch's clamp keeps it; NaN stays NaN. Every clamp whose result
+   * is handed on (a picture, and a mask, since masks hand on their float:
+   * R2.8 fix rounds 1 and 2) goes through here.
    */
   function finish(t: Tensor, stop: Stop, index: number, count: number): Tensor {
     const n = t.w * t.h
@@ -83,8 +86,12 @@ export function maskCore(k: TensorCore, kn: KernelsCore, px: PixelsCore) {
     return t
   }
 
-  /** clamp(0, 1) of an intermediate or a mask (its zeros' sign never reaches an output). */
-  function clamped(t: Tensor, stop: Stop): Tensor {
+  /** `finish` on a copy (the input is left as it is). */
+  const clampedCopy = (t: Tensor, stop: Stop, index: number, count: number) =>
+    finish({ c: t.c, h: t.h, w: t.w, data: new Float32Array(t.data) }, stop, index, count)
+
+  /** clamp(0, 1) of a live preview only: quantised to 8 bits, where a zero's sign doesn't reach. */
+  function previewClamp(t: Tensor, stop: Stop): Tensor {
     const out = k.tensor(t.c, t.h, t.w)
     const d = t.data
     k.rows(t.h, stop, (y) => {
@@ -206,7 +213,7 @@ export function maskCore(k: TensorCore, kn: KernelsCore, px: PixelsCore) {
    * high in double; 1 − mask with `invert`. A MASK out; the preview is
    * (image · mask).clamp(0, 1). Exact.
    */
-  function ThresholdMask(inp: Inputs, p: Params, stop?: Stop): EffectResult {
+  function ThresholdMask(inp: Inputs, p: Params, stop?: Stop, _s?: unknown, index = 0, count = 1): EffectResult {
     const x = inp.image!
     const t = p.threshold as number
     const soft = p.softness as number
@@ -222,11 +229,12 @@ export function maskCore(k: TensorCore, kn: KernelsCore, px: PixelsCore) {
       const lo = k.s32(low)
       const den = k.s32(pyMax(1e-6, high - low))
       k.rows(x.h, stop, (y) => {
-        for (let i = y * x.w, end = i + x.w; i < end; i++) m.data[i] = kn.clamp01(f(f(luma[i]! - lo) / den))
+        for (let i = y * x.w, end = i + x.w; i < end; i++) m.data[i] = f(f(luma[i]! - lo) / den)
       })
+      finish(m, stop, index, count)
     }
     const mask = p.invert ? oneMinus(m, stop) : m
-    return { outputs: [mask], preview: clamped(times(x, mask, x.c, stop), stop) }
+    return { outputs: [mask], preview: previewClamp(times(x, mask, x.c, stop), stop) }
   }
 
   /**
@@ -255,7 +263,7 @@ export function maskCore(k: TensorCore, kn: KernelsCore, px: PixelsCore) {
       }
     })
     const mask = p.invert ? oneMinus(m, stop) : m
-    return { outputs: [mask], preview: clamped(times(x, mask, x.c, stop), stop) }
+    return { outputs: [mask], preview: previewClamp(times(x, mask, x.c, stop), stop) }
   }
 
   // ── nodes_matte.py ──────────────────────────────────────────────────────
@@ -309,10 +317,10 @@ export function maskCore(k: TensorCore, kn: KernelsCore, px: PixelsCore) {
    * a mask that small raises in Python); clamped again. The preview is the
    * mask as grey RGB. Exact, but LIBRARY when feathered.
    */
-  function MatteGrowShrink(inp: Inputs, p: Params, stop?: Stop): EffectResult {
+  function MatteGrowShrink(inp: Inputs, p: Params, stop?: Stop, _s?: unknown, index = 0, count = 1): EffectResult {
     const amount = p.amount as number
     const feather = p.feather as number
-    let m = clamped(inp.mask!, stop)
+    let m = clampedCopy(inp.mask!, stop, index, count)
     if (amount !== 0) {
       const kk = Math.abs(Math.trunc(pyRound(amount))) * 2 + 1
       if (kk > 1) m = maxPoolSeparable(m, kk, amount < 0, stop)
@@ -322,7 +330,7 @@ export function maskCore(k: TensorCore, kn: KernelsCore, px: PixelsCore) {
       stopNow(stop)
       m = kn.gaussianBlur(m, ksize, feather, stop)
     }
-    m = clamped(m, stop)
+    m = clampedCopy(m, stop, index, count)
     const preview = k.tensor(3, m.h, m.w)
     for (let c = 0; c < 3; c++) preview.data.set(m.data, c * m.w * m.h)
     return { outputs: [m], preview }
@@ -338,13 +346,13 @@ export function maskCore(k: TensorCore, kn: KernelsCore, px: PixelsCore) {
    */
   function MergeAlpha(inp: Inputs, p: Params, stop?: Stop, _s?: unknown, index = 0, count = 1): EffectResult {
     const x = inp.image!
-    let m = clamped(maskTo(inp.mask!, x.h, x.w, stop), stop)
+    let m = clampedCopy(maskTo(inp.mask!, x.h, x.w, stop), stop, index, count)
     if (p.invert_mask) m = oneMinus(m, stop)
     const n = x.w * x.h
     const rgba = k.tensor(4, x.h, x.w)
     rgba.data.set(x.data.subarray(0, 3 * n))
     rgba.data.set(m.data, 3 * n)
-    return { outputs: [finish(rgba, stop, index, count)], preview: clamped(times(x, m, 3, stop), stop) }
+    return { outputs: [finish(rgba, stop, index, count)], preview: previewClamp(times(x, m, 3, stop), stop) }
   }
 
   // ── nodes_painter.py ────────────────────────────────────────────────────
@@ -398,7 +406,8 @@ export function maskCore(k: TensorCore, kn: KernelsCore, px: PixelsCore) {
     return { outputs: [out, mask], preview: null }
   }
 
-  return { Blend, ApplyMask, ThresholdMask, ColorRangeMask, MatteGrowShrink, MergeAlpha, Painter, maxPoolSeparable }
+  // The ops: every function returned is addressable as 'mask.<name>' (effects/table.ts), so helpers stay out.
+  return { Blend, ApplyMask, ThresholdMask, ColorRangeMask, MatteGrowShrink, MergeAlpha, Painter }
 }
 
 export type MaskCore = ReturnType<typeof maskCore>

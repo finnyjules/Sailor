@@ -147,7 +147,7 @@ export function planEffect(ctx: PlanContext): NodePlan {
   // Kept as the pixels its readers write: Save image / Preview image truncate the float (R1.5).
   const trunc = schema.outputs.map((o, slot) => o === 'image' && onlySavesRead(ctx.prompt, ctx.nodeId, slot))
   // Read by an effect or a Frame: the float tensor is kept too (fix round 1; a mask's too, R2.8 fix round 1).
-  const float = schema.outputs.map((_o, slot) => floatReadBy(ctx.prompt, ctx.nodeId, slot))
+  const float = schema.outputs.map((o, slot) => floatReadBy(ctx.prompt, ctx.nodeId, slot, ctx.families, o === 'mask' ? 'mask' : 'picture'))
   return {
     kind: 'derive',
     async derive(io) {

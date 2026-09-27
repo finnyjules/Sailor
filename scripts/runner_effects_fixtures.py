@@ -2850,34 +2850,97 @@ def painter_cases(g: MaskGroup, painter) -> None:
 
 
 def mask_negzero(classes: dict) -> list:
-    """−0 through each node's last clamp (as a Dither upstream leaves it), for the classes whose picture is
-    handed on as a float: every third input value −0, the mask from hashed_values."""
+    """−0 through each node's clamps (as a Dither upstream leaves it), for the classes whose picture or mask is
+    handed on as a float: every third input value −0 (every value for Threshold's soft branch, whose luma is −0
+    only where all three channels are), the mask from hashed_values (with −0s of its own for Matte grow / shrink
+    and one Merge alpha probe: R2.8 fix round 2)."""
     rows = []
     seed = 8000
-    probes = [("Blend", {"mode": "multiply", "opacity": 0.37}), ("Blend", {"mode": "normal", "opacity": 1.0}), ("Blend", {"mode": "subtract", "opacity": 0.5}),
-              ("ApplyMask", {"invert": False}), ("ApplyMask", {"invert": True}), ("MergeAlpha", {"invert_mask": False})]
-    for class_type, widgets in probes:
-        for shape in ((1, 23, 37, 3), (2, 23, 37, 3), (1, 120, 110, 3), (2, 61, 90, 4), (1, 61, 90, 4)):
+    probes = [("Blend", {"mode": "multiply", "opacity": 0.37}, {}), ("Blend", {"mode": "normal", "opacity": 1.0}, {}), ("Blend", {"mode": "subtract", "opacity": 0.5}, {}),
+              ("ApplyMask", {"invert": False}, {}), ("ApplyMask", {"invert": True}, {}), ("MergeAlpha", {"invert_mask": False}, {}),
+              ("MergeAlpha", {"invert_mask": False}, {"mask_neg_zero_every": 3}),
+              ("ThresholdMask", {"threshold": 0.2, "softness": 0.2, "invert": False}, {"neg_zero_every": 1}),
+              ("MatteGrowShrink", {"amount": 0.0, "feather": 0.0}, {"mask_only": True}), ("MatteGrowShrink", {"amount": -1.0, "feather": 0.0}, {"mask_only": True}),
+              ("MatteGrowShrink", {"amount": 2.0, "feather": 0.0}, {"mask_only": True})]
+    for class_type, widgets, extra in probes:
+        shapes = ((1, 23, 37, 3), (2, 23, 37, 3), (1, 120, 110, 3), (2, 61, 90, 4), (1, 61, 90, 4))
+        if extra.get("mask_only"):
+            shapes = ((1, 23, 37, 1), (2, 23, 37, 1), (1, 200, 190, 1), (2, 120, 160, 1))
+        for shape in shapes:
             seed += 1
-            spec = {"shape": list(shape), "seed": seed, "neg_zero_every": 3}
-            x = warp_negzero_input(spec)
+            spec = {"shape": list(shape), "seed": seed, "neg_zero_every": extra.get("neg_zero_every", 3)}
             b, h, w, _c = shape
-            if class_type == "Blend":
-                other = {"shape": list(shape), "seed": seed + 5000, "neg_zero_every": 3}
-                inputs = {"base": x, "top": warp_negzero_input(other)}
-                spec["top"] = other
+            if extra.get("mask_only"):
+                spec["mask_only"] = True
+                v = hashed_values(b * h * w, seed)
+                v[::spec["neg_zero_every"]] = -0.0
+                inputs = {"mask": torch.from_numpy(v.reshape(b, h, w).copy())}
             else:
-                m = torch.from_numpy(hashed_values(b * h * w, seed + 7000).reshape(b, h, w).copy())
-                inputs = {"image": x, "mask": m}
-                spec["mask_seed"] = seed + 7000
+                x = warp_negzero_input(spec)
+                if class_type == "Blend":
+                    other = {"shape": list(shape), "seed": seed + 5000, "neg_zero_every": 3}
+                    inputs = {"base": x, "top": warp_negzero_input(other)}
+                    spec["top"] = other
+                elif class_type == "ThresholdMask":
+                    inputs = {"image": x}
+                else:
+                    mv = hashed_values(b * h * w, seed + 7000)
+                    if extra.get("mask_neg_zero_every"):
+                        mv[:: extra["mask_neg_zero_every"]] = -0.0
+                        spec["mask_neg_zero_every"] = extra["mask_neg_zero_every"]
+                    inputs = {"image": x, "mask": torch.from_numpy(mv.reshape(b, h, w).copy())}
+                    spec["mask_seed"] = seed + 7000
             outs, _ui = run_node(classes[class_type], f"nz{seed}", **inputs, **widgets)
             t = outs[0]
             items = []
             for i in range(t.shape[0]):
                 y = t[i].contiguous()
-                items.append({"w": int(y.shape[1]), "h": int(y.shape[0]), "c": int(y.shape[2]), "f32_sha256": sha(y.cpu().numpy().astype("<f4").tobytes()),
+                c = 1 if y.dim() == 2 else int(y.shape[2])
+                items.append({"w": int(y.shape[1]), "h": int(y.shape[0]), "c": c, "f32_sha256": sha(y.cpu().numpy().astype("<f4").tobytes()),
                               "neg_zeros": int((torch.signbit(y) & (y == 0)).sum())})
-            rows.append({"name": f"{class_type} {widgets}, {'×'.join(map(str, shape))}", "class_type": class_type, "widgets": widgets, "input": spec, "items": items})
+            rows.append({"name": f"{class_type} {widgets} {extra}, {'×'.join(map(str, shape))}", "class_type": class_type, "widgets": widgets, "input": spec, "items": items})
+    return rows
+
+
+def mask_effect_chains(g: MaskGroup, classes: dict) -> list:
+    """An effect's picture read by the picture utilities that work on its float (R2.8 fix round 2): Blend →
+    Image to mask → Merge alpha (or Apply mask), and Blend → Text mask's source, as ComfyUI runs them (each
+    node fed the float the one before made). Each records the last node's outputs."""
+    from comfy_extras.nodes_mask import ImageToMask
+    from comfy_extras.nodes_text_mask import TextMaskNode
+    rows = []
+    rgb, rgb_b, other = g.picture(37, 23, 3, 1), g.picture(37, 23, 3, 5), g.picture(29, 17, 3, 15)
+    card4, card4b = g.picture(23, 19, 4, 3), g.picture(23, 19, 4, 13)
+    render = g.picture(37, 23, 3, 22)
+    with open(os.path.join(WORK, "input", render), "wb") as f:
+        f.write(g.assets[render])
+
+    def blend(base, top, widgets):
+        (x,), _ = run_node(classes["Blend"], "blend", base=load("card", base, g.assets[base]), top=load("card", top, g.assets[top]), **widgets)
+        return x
+
+    def row(name, blend_spec, reader, consumer, outs, ui):
+        return {"name": name, "blend": blend_spec, "reader": reader, "consumer": consumer,
+                "outputs": [record_mask_output(t, False, False) if t.dim() == 3 else record_tone_output(t, False, None) for t in outs],
+                **({"ui": {"images": ui["images"], "animated": list(ui["animated"])}, "preview": read_preview(ui, True)} if ui else {})}
+
+    for bw, base, top, channel, consumer, cw, pic in (
+        ({"mode": "multiply", "opacity": 0.7}, rgb, rgb_b, "red", "MergeAlpha", {"invert_mask": False}, rgb),
+        ({"mode": "soft_light", "opacity": 0.45}, rgb, other, "green", "ApplyMask", {"invert": True}, other),
+        ({"mode": "screen", "opacity": 0.6}, card4, card4b, "alpha", "ApplyMask", {"invert": False}, rgb),
+    ):
+        x = blend(base, top, bw)
+        m = ImageToMask.execute(x, channel).args[0]
+        g.seq += 1
+        node_id = f"fx{g.seq}"
+        outs, ui = run_node(classes[consumer], node_id, image=load("rgb", pic, g.assets[pic]), mask=m, **cw)
+        rows.append(row(f"Blend {bw['mode']} {bw['opacity']} → Image to mask ({channel}) → {consumer}", {"base": base, "top": top, "widgets": bw},
+                        {"class_type": "ImageToMask", "channel": channel}, {"class_type": consumer, "node_id": node_id, "widgets": cw, "image": pic}, outs, ui))
+    for bw, base, top in (({"mode": "overlay", "opacity": 0.8}, rgb, rgb_b), ({"mode": "difference", "opacity": 0.5}, card4, card4b)):
+        x = blend(base, top, bw)
+        res = TextMaskNode.execute(params=json.dumps({"rendered": render}), source=x)
+        rows.append(row(f"Blend {bw['mode']} {bw['opacity']} → Text mask's source", {"base": base, "top": top, "widgets": bw},
+                        {"class_type": "TextMask", "rendered": render}, None, list(res.args), None))
     return rows
 
 
@@ -2971,7 +3034,8 @@ def mask() -> dict:
     chains = mask_chains(g, classes)
     # An effect into a Frame: Blend's float tensor on the Frame's layer 1.
     frame = mask_frame_chain(g, classes["Blend"])
-    return {"cases": g.cases, "chains": chains, "negzero": mask_negzero(classes), "frame": frame,
+    effect_chains = mask_effect_chains(g, classes)
+    return {"cases": g.cases, "chains": chains, "effect_chains": effect_chains, "negzero": mask_negzero(classes), "frame": frame,
             "assets": {k: b64(v) for k, v in sorted(g.assets.items())}}
 
 

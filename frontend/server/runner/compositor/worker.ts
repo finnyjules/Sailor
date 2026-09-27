@@ -93,6 +93,24 @@ parentPort.on('message', (m) => {
       value = px.channelMask16(m.picture, m.index, !!m.float)
       transfer = value.data ? [value.scanlines.buffer, value.data.buffer] : [value.scanlines.buffer]
     }
+    // A picture an effect made, as its kept float32 tensor (R2.8 fix round 2): Image to mask's channel, Text mask's clip.
+    else if (m.op === 'px.channelTensor') {
+      stopped()
+      const t = built.tk.fromTensorFile(m.tensorFile)
+      if (m.index >= t.c) throw new Error('This picture has no alpha channel to make a mask from')
+      const n = t.w * t.h
+      const data = t.data.slice(m.index * n, (m.index + 1) * n)
+      value = { w: t.w, h: t.h, scanlines: px.mask16Of(t.w, t.h, i => data[i]) }
+      transfer = [value.scanlines.buffer]
+      if (m.float) { value.data = data; transfer.push(data.buffer) }
+    }
+    else if (m.op === 'px.clipTensor') {
+      stopped()
+      if (!clipAlpha) throw new Error('The mask to clip with was not made')
+      const t = built.tk.fromTensorFile(m.tensorFile)
+      value = px.clipPlanar(t.c, t.w, t.h, t.data, clipAlpha, !!m.trunc)
+      transfer = [value.px.buffer]
+    }
     else if (m.op === 'px.clipBegin') {
       stopped()
       const r = px.clipBegin(m.l, m.mw, m.mh, m.w, m.h)
@@ -362,6 +380,10 @@ export interface PixelsWorker {
   channelMask(picture: RawPicture, index: number, float?: boolean): Promise<MaskScanlines>
   /** Text mask with a source: the render's luma as the mask, resized to w × h; kept on the worker for `clip`. `float`: the float32 mask back too. */
   clipBegin(l: Uint8Array, mw: number, mh: number, w: number, h: number, float?: boolean): Promise<{ scanlines: Uint8Array; mask?: Float32Array }>
+  /** Image to mask of a picture an effect made: channel `index` of its kept float32 tensor (R2.8 fix round 2). */
+  channelMaskTensor(tensorFile: Uint8Array, index: number, float?: boolean): Promise<MaskScanlines>
+  /** Text mask with a source an effect made: its kept float32 tensor × (1 − mask) (R2.8 fix round 2). */
+  clipTensor(tensorFile: Uint8Array, trunc?: boolean): Promise<HandOff8>
   /** Text mask with a source: one source picture × (1 − mask); `trunc`: quantised as save_images does (core.ts clip). */
   clip(picture: RawPicture, trunc?: boolean): Promise<HandOff8>
   /** Save image (R1.5): the pixels save_images encodes, w × h (Lanczos when that differs), flattened onto white for JPEG. */
@@ -421,6 +443,14 @@ export function pixelsInWorker<T>(signal: AbortSignal | undefined, job: (w: Pixe
       async clipBegin(l, mw, mh, width, height, float = false) {
         const own = l.byteOffset === 0 && l.byteLength === l.buffer.byteLength ? l : l.slice()
         return await call(t, { op: 'px.clipBegin', l: own, mw, mh, w: width, h: height, float }, [own.buffer as ArrayBuffer]) as { scanlines: Uint8Array; mask?: Float32Array }
+      },
+      async channelMaskTensor(tensorFile, index, float = false) {
+        const own = tensorFile.byteOffset === 0 && tensorFile.byteLength === tensorFile.buffer.byteLength && !(tensorFile.buffer instanceof SharedArrayBuffer) ? tensorFile : tensorFile.slice()
+        return await call(t, { op: 'px.channelTensor', tensorFile: own, index, float }, [own.buffer as ArrayBuffer]) as MaskScanlines
+      },
+      async clipTensor(tensorFile, trunc = false) {
+        const own = tensorFile.byteOffset === 0 && tensorFile.byteLength === tensorFile.buffer.byteLength && !(tensorFile.buffer instanceof SharedArrayBuffer) ? tensorFile : tensorFile.slice()
+        return await call(t, { op: 'px.clipTensor', tensorFile: own, trunc }, [own.buffer as ArrayBuffer]) as HandOff8
       },
       async clip(picture, trunc = false) {
         const p = handOver(picture)
