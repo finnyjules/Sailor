@@ -9,7 +9,7 @@
 // ANALYTIC (closed-form): coincident, concentric, pointOnLine, pointOnCircle,
 //   tangentLineCircle, tangentCircleCircle, horizontal, vertical, distance,
 //   radius, equalDist, rotatedFrom, collinear, perpendicular, parallel,
-//   midpoint, equalRadius.
+//   midpoint, equalRadius, tangentLineArc, tangentArcs.
 // NUMERIC FALLBACK (local central-difference over ≤6 coords — orig.x/y and
 //   the axis line's two endpoints; the `copy` point's own partials are the
 //   trivial identity and ARE analytic): mirroredFrom.
@@ -22,6 +22,7 @@
 import type { SketchDoc, SketchConstraint, SketchEntity, PointEntity, LineEntity, CircleEntity, EntityId } from './model'
 import type { DerivedRule } from './substitute'
 import { derivedGradients } from './substitute'
+import { readCircleOperands, operandRadius, type CircleOperand } from './tangency'
 
 type EntityMap = Map<EntityId, SketchEntity>
 
@@ -94,6 +95,17 @@ function reflectAcrossLine(ogx: number, ogy: number, ax: number, ay: number, bx:
   const nx = -diry / L, ny = dirx / L
   const s = (ogx - ax) * nx + (ogy - ay) * ny
   return { rx: ogx - 2 * s * nx, ry: ogy - 2 * s * ny }
+}
+
+// ∂(k·radius)/∂params for a circle operand: a circle's r directly, or |C S|
+// through its two points
+function radiusEntries(o: CircleOperand, k: number): JacEntry[] {
+  if (o.kind === 'circle') return [pr(o.circle.id, k)]
+  const dx = o.s.x - o.c.x, dy = o.s.y - o.c.y
+  const d = Math.hypot(dx, dy)
+  if (d < 1e-9) return []
+  const ux = dx / d, uy = dy / d
+  return [px(o.s.id, k * ux), py(o.s.id, k * uy), px(o.c.id, -k * ux), py(o.c.id, -k * uy)]
 }
 
 function rowsFor(map: EntityMap, c: SketchConstraint): JacEntry[][] | null {
@@ -308,6 +320,43 @@ function rowsFor(map: EntityMap, c: SketchConstraint): JacEntry[][] | null {
       const a = circleOf(map, c.refs[0]!); const b = circleOf(map, c.refs[1]!)
       if (!a || !b) return null
       return [[pr(a.id, 1), pr(b.id, -1)]]
+    }
+    case 'tangentLineArc': {
+      const a = pointOf(map, c.refs[0]!); const b = pointOf(map, c.refs[1]!)
+      const ops = readCircleOperands(map, c.refs, 2)
+      if (!a || !b || !ops || ops.length !== 1) return null
+      const o = ops[0]!
+      const row: JacEntry[] = []
+      const sd = signedDistPartials(o.c.x, o.c.y, a.x, a.y, b.x, b.y)
+      if (sd) {
+        const sign = sd.s >= 0 ? 1 : -1
+        row.push(
+          px(o.c.id, sign * sd.dPx), py(o.c.id, sign * sd.dPy),
+          px(a.id, sign * sd.dAx), py(a.id, sign * sd.dAy),
+          px(b.id, sign * sd.dBx), py(b.id, sign * sd.dBy),
+        )
+      }
+      row.push(...radiusEntries(o, -1))
+      return [row]
+    }
+    case 'tangentArcs': {
+      const ops = readCircleOperands(map, c.refs, 0)
+      if (!ops || ops.length !== 2 || (c.value !== 1 && c.value !== -1)) return null
+      const [o1, o2] = ops as [CircleOperand, CircleOperand]
+      const row: JacEntry[] = []
+      const dx = o1.c.x - o2.c.x, dy = o1.c.y - o2.c.y
+      const d = Math.hypot(dx, dy)
+      if (d >= 1e-9) {
+        const ux = dx / d, uy = dy / d
+        row.push(px(o1.c.id, ux), py(o1.c.id, uy), px(o2.c.id, -ux), py(o2.c.id, -uy))
+      }
+      if (c.value === 1) {
+        row.push(...radiusEntries(o1, -1), ...radiusEntries(o2, -1))
+      } else {
+        const sg = operandRadius(o1) - operandRadius(o2) >= 0 ? 1 : -1
+        row.push(...radiusEntries(o1, -sg), ...radiusEntries(o2, sg))
+      }
+      return [row]
     }
     default:
       return null

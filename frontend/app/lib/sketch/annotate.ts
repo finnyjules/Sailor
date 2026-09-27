@@ -2,6 +2,7 @@ import type { SketchDoc, SketchConstraint, EntityId, ConstraintKind } from './mo
 import { getEntity, getPoint, lineEndpoints, circleCenter } from './model'
 import type { Vec2 } from './geom'
 import { dist } from './geom'
+import { tangentTouchPoint } from './tangency'
 
 export interface ConstraintMark { id: EntityId; kind: ConstraintKind; glyph: string; x: number; y: number; text?: string }
 
@@ -10,10 +11,15 @@ const GLYPH: Record<ConstraintKind, string> = {
   horizontal: 'H', vertical: 'V', pointOnLine: '—', pointOnCircle: 'o', distance: '↔', radius: 'R',
   equalDist: 'E', rotatedFrom: '↻', mirroredFrom: '⇄', collinear: 'S',
   perpendicular: '⊥', parallel: '∥', midpoint: 'M', equalRadius: 'E',
+  tangentLineArc: 'T', tangentArcs: 'T',
 }
 
 // a representative world point to anchor the badge near, for the first resolvable ref
 function anchor(doc: SketchDoc, c: SketchConstraint): Vec2 | null {
+  if (c.kind === 'tangentLineArc' || c.kind === 'tangentArcs') {
+    const t = tangentTouchPoint(doc, c)
+    if (t) return t
+  }
   for (const ref of c.refs) {
     const e = getEntity(doc, ref)
     if (!e) continue
@@ -76,7 +82,7 @@ export function constraintMarks(doc: SketchDoc): ConstraintMark[] {
     if (!c.refs.every(r => getEntity(doc, r))) continue
     const at = anchor(doc, c)
     if (!at) continue
-    out.push({ id: c.id, kind: c.kind, glyph: GLYPH[c.kind], x: at.x, y: at.y, ...(c.value != null ? { text: String(Math.round(c.value * 100) / 100) } : {}) })
+    out.push({ id: c.id, kind: c.kind, glyph: GLYPH[c.kind], x: at.x, y: at.y, ...(c.value != null && c.kind !== 'tangentArcs' ? { text: String(Math.round(c.value * 100) / 100) } : {}) })
   }
   return out
 }

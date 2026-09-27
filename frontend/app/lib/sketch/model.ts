@@ -28,6 +28,9 @@ export type ConstraintKind =
   | 'horizontal' | 'vertical' | 'distance' | 'radius'
   | 'equalDist' | 'rotatedFrom' | 'mirroredFrom' | 'collinear'
   | 'perpendicular' | 'parallel' | 'midpoint' | 'equalRadius'
+  // pen stage 4 (tangency.ts): [A, B, C, S] or [A, B, circleId]; and
+  // [C1, S1, C2, S2] (either pair may be a circle id) with value +1 outside / −1 inside
+  | 'tangentLineArc' | 'tangentArcs'
 
 export interface SketchConstraint {
   id: EntityId

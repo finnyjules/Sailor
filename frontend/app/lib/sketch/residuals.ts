@@ -1,5 +1,6 @@
 import type { SketchDoc, SketchConstraint, SketchEntity, PointEntity, LineEntity, CircleEntity, EntityId } from './model'
 import { dist, distPointToLine } from './geom'
+import { readCircleOperands, operandRadius } from './tangency'
 
 type EntityMap = Map<EntityId, SketchEntity>
 
@@ -158,6 +159,23 @@ function residualsFor(map: EntityMap, c: SketchConstraint): number[] | null {
       const a = circleOf(map, c.refs[0]!); const b = circleOf(map, c.refs[1]!)
       if (!a || !b) return null
       return [a.r - b.r]
+    }
+    case 'tangentLineArc': {
+      // refs=[A, B, C, S] or [A, B, circleId] — |distance from the centre to line AB| = radius
+      const a = pointOf(map, c.refs[0]!); const b = pointOf(map, c.refs[1]!)
+      const ops = readCircleOperands(map, c.refs, 2)
+      if (!a || !b || !ops || ops.length !== 1) return null
+      const o = ops[0]!
+      return [Math.abs(distPointToLine({ x: o.c.x, y: o.c.y }, a, b)) - operandRadius(o)]
+    }
+    case 'tangentArcs': {
+      // two circle operands; value +1 outside each other, −1 one inside the other
+      const ops = readCircleOperands(map, c.refs, 0)
+      if (!ops || ops.length !== 2 || (c.value !== 1 && c.value !== -1)) return null
+      const [o1, o2] = ops as [typeof ops[0], typeof ops[0]]
+      const d = dist({ x: o1.c.x, y: o1.c.y }, { x: o2.c.x, y: o2.c.y })
+      const r1 = operandRadius(o1), r2 = operandRadius(o2)
+      return [c.value === 1 ? d - (r1 + r2) : d - Math.abs(r1 - r2)]
     }
     default:
       return null
