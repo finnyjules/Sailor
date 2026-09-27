@@ -91,7 +91,9 @@ function spansLine(doc: SketchDoc, a: EntityId, b: EntityId): boolean {
 }
 
 // Delete an entity and everything that structurally depends on it.
-export function deleteEntity(doc: SketchDoc, id: EntityId): void {
+/** `keepGuideEnds`: a guide line's ends stay even when nothing else uses them
+ *  (mergePoints dropping a line squeezed to one point must not take the point). */
+export function deleteEntity(doc: SketchDoc, id: EntityId, opts: { keepGuideEnds?: boolean } = {}): void {
   const e = getEntity(doc, id)
   if (!e) return
   // entities that reference this one and must go too (only points have dependents)
@@ -138,7 +140,7 @@ export function deleteEntity(doc: SketchDoc, id: EntityId): void {
     doc.constraints = doc.constraints.filter(c => !(c.kind === 'tangentLineArc' &&
       ((c.refs[0] === e.p1 && c.refs[1] === e.p2) || (c.refs[0] === e.p2 && c.refs[1] === e.p1))))
   }
-  if (e.kind === 'line' && e.construction) {
+  if (e.kind === 'line' && e.construction && !opts.keepGuideEnds) {
     // a guide line's own guide ends go with it when nothing else uses them — a
     // rule tying only its two ends (a Clean up axis's Vertical / Horizontal)
     // goes too; an end another piece or rule still uses stays

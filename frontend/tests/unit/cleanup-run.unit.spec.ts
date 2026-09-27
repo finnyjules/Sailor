@@ -108,7 +108,7 @@ describe('solveHeld and componentOf', () => {
 })
 
 describe('windowOf', () => {
-  it('reaches two hops along pieces and rules, and frees the radius of a circle centred in it', () => {
+  it('reaches two hops along pieces and positional rules (not size rules), and frees the radius of a circle centred in it', () => {
     const d = blank()
     const p = addPoint(d, 0, 0), q = addPoint(d, 1, 0), c = addPoint(d, 2, 0), far = addPoint(d, 9, 9)
     addLine(d, p, q); addLine(d, q, c)
@@ -119,6 +119,9 @@ describe('windowOf', () => {
     const w = windowOf(d, [p])
     for (const id of [p, q, c, circ, far]) expect(w.has(id)).toBe(true)
     for (const id of [x, y, z]) expect(w.has(id)).toBe(false)
+    // a size rule to another shape is not a hop (the window solve holds what it reaches)
+    addConstraint(d, 'equalDist', [p, q, x, y])
+    for (const id of [x, y, z]) expect(windowOf(d, [p]).has(id)).toBe(false)
   })
 })
 
@@ -358,9 +361,9 @@ describe('runCleanup', () => {
   it('a mirror pair the rules can’t allow leaves no guide behind', () => {
     const make = (fixed: boolean) => {
       const d = blank()
-      const a = addCircle(d, addPoint(d, 0, 0, { fixed }), 1)
-      const b = addCircle(d, addPoint(d, 10, 0.1, { fixed }), 1)
-      addConstraint(d, 'equalRadius', [a, b])   // one shape: a rule ties them
+      const ca = addPoint(d, 0, 0, { fixed }), cb = addPoint(d, 10, 0.1, { fixed })
+      addCircle(d, ca, 1); addCircle(d, cb, 1)
+      addLine(d, ca, cb)   // one shape: a line joins the centres
       return d
     }
     // control: free centres are mirrored about a new upright guide
@@ -373,7 +376,7 @@ describe('runCleanup', () => {
     expect(r.fixes.some(f => f.kind === 'mirror')).toBe(false)
     expect(r.doc.entities).toHaveLength(d.entities.length)
     expect(r.doc.entities.some(e => e.kind !== 'circle' && e.construction)).toBe(false)
-    expect(r.doc.constraints.map(c => c.kind)).toEqual(['equalRadius'])
+    expect(r.doc.constraints.map(c => c.kind)).toEqual(r.fixes.some(f => f.kind === 'equalRadius' && f.on) ? ['equalRadius'] : [])
   })
   it('a rounded size leaves no rule behind', () => {
     const d = blank()
@@ -423,11 +426,68 @@ describe('runCleanup', () => {
     expect(none.fixes).toEqual([])
     expect(JSON.stringify(none.doc)).toBe(JSON.stringify(d))
   })
+  it('a budget stop still lists the fixes switched off in the passes it didn’t reach', () => {
+    const d = blank(); flower(d)
+    const lvl = lineAt(d, 0, 20, 2, 6)                     // 2° off level: Horizontal, a later pass
+    const all = runCleanup(d, opts())
+    const h = all.fixes.find(f => f.kind === 'horizontal' && f.id.includes(lvl.a))!
+    expect(h).toBeDefined()
+    let t = 0
+    const r = runCleanup(d, opts({ budgetMs: 25, now: () => (t += 10), off: new Set([h.id]) }))
+    expect(r.stopped).toBe(true)
+    expect(r.fixes.some(f => f.kind === 'join' && f.on)).toBe(true)
+    expect(r.fixes.find(f => f.id === h.id)).toMatchObject({ on: false, label: 'Horizontal' })
+    expect(r.fixes.filter(f => f.kind !== 'join').map(f => f.id)).toEqual([h.id])   // nothing else from the later passes
+  })
+  it('Clean up again on its own result: fast, no Mirror pair across shapes (its Same length rules don’t weld shapes together)', () => {
+    const d = blank()
+    rectGrid(d, 37)
+    const r1 = runCleanup(d, opts())
+    // two near-mirrored rectangles, whose first run ties them by Same length / Evenly spaced
+    const e = blank()
+    const A = [[0, 0], [4, 0.05], [4.02, 3], [0.03, 3.04]].map(([x, y]) => addPoint(e, x!, y!))
+    const B = [[8.1, 0.02], [12.05, 0], [12.1, 3.03], [8.12, 3]].map(([x, y]) => addPoint(e, x!, y!))
+    for (const p of [A, B]) addPath(e, p, [{ kind: 'line' }, { kind: 'line' }, { kind: 'line' }, { kind: 'line' }], true)
+    // (Evenly spaced is switched off: its guide point sits between the shapes, which is a real tie)
+    const spacing = new Set(runCleanup(e, opts()).fixes.filter(f => f.kind === 'evenSpacing').map(f => f.id))
+    const e1 = runCleanup(e, opts({ off: spacing }))
+    const tiesAB = (c: { kind: string; refs: string[] }) => c.kind === 'equalDist' && c.refs.some(id => A.includes(id)) && c.refs.some(id => B.includes(id))
+    expect(e1.doc.constraints.some(tiesAB)).toBe(true)   // Same length ties the two rectangles
+    for (const strength of ['normal', 'strong'] as const) {
+      for (const [first, pieces] of [[r1, 148], [e1, 8]] as const) {
+        const doc = first.doc
+        const t0 = performance.now()
+        const r2 = runCleanup(doc, opts({ strength }))
+        expect(performance.now() - t0).toBeLessThan(2000)
+        expect(r2.refused).toBeUndefined()
+        mirrorStaysInOneShape(r2.doc)
+        expect(maxRes(r2.doc)).toBeLessThan(1e-3)
+        // a size the first run made whole is not offered again
+        const rounded = first.fixes.filter(f => f.kind === 'round' && f.on).length
+        expect(r2.fixes.filter(f => f.kind === 'round').length).toBeLessThanOrEqual(pieces - rounded)
+      }
+    }
+    expect(partHas(e1.doc, A[0]!, B[0]!)).toBe(false)   // Same length doesn't make them one shape
+  }, 30000)
+  it('with a selection, only the rules of the part it touches must hold', () => {
+    const d = blank()
+    const a = addPoint(d, 0, 10), b = addPoint(d, 5, 11.5)
+    addLine(d, a, b)
+    addConstraint(d, 'horizontal', [a, b])   // broken, but far from the selection
+    const l = lineAt(d, 0, 0, 2, 6)
+    const r = runCleanup(d, opts({ scope: { entities: [l.id], segments: [] } }))
+    expect(r.refused).toBeUndefined()
+    expect(r.fixes.find(f => f.kind === 'horizontal')?.on).toBe(true)
+    expect(runCleanup(d, opts()).refused).toBe('conflict')
+    // a broken rule in the selected part still refuses
+    expect(runCleanup(d, opts({ scope: { entities: [l.id, d.entities.find(e => e.kind === 'line' && (e as any).p1 === a)!.id], segments: [] } })).refused).toBe('conflict')
+  })
   it('37 slightly crooked rectangles: opens in well under 2 s at the default budget', () => {
     const d = blank(); rectGrid(d, 37)
     const t0 = performance.now()
     const r = runCleanup(d, { unitsPerPx: U, strength: 'normal' })
     expect(performance.now() - t0).toBeLessThan(2000)
+    expect(r.stopped).toBeFalsy()                     // the whole run fits in the default budget
     expect(r.fixes.some(f => f.on)).toBe(true)
     expect(maxRes(r.doc)).toBeLessThan(1e-3)
     mirrorStaysInOneShape(r.doc)

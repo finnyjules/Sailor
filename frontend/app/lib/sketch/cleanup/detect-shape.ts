@@ -365,7 +365,8 @@ export function detectRound(ctx: CleanupContext): Candidate[] {
     const size = p.kind === 'line' ? p.len : radiusOf(p)
     const target = Math.round(size)
     const off = Math.abs(size - target)
-    if (target < 1 || off < 1e-9 || off > frac * size) continue
+    // already whole, to the solver's precision (a second Clean up must not offer it again)
+    if (target < 1 || off <= 1e-5 * Math.max(1, size) || off > frac * size) continue
     const nudge: Candidate['nudge'] = p.kind === 'line' ? { refs: [p.a!, p.b!], value: target }
       : p.kind === 'arc' ? { refs: [p.c!, p.a!], value: target }
       : { circle: p.circle!, value: target }

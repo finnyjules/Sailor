@@ -7,13 +7,12 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import type { SketchDoc, EntityId } from '~/lib/sketch/model'
 import { addPoint, addPath } from '~/lib/sketch/edit'
 
-const spy = vi.hoisted(() => ({ windowOk: true, wholePart: 0 }))
+const spy = vi.hoisted(() => ({ windowOk: true, solves: 0 }))
 vi.mock('~/lib/sketch/cleanup/guards', async (importOriginal) => {
   const real = await importOriginal<typeof import('~/lib/sketch/cleanup/guards')>()
   return {
     ...real,
-    solveWindow: (...a: Parameters<typeof real.solveWindow>) => (spy.windowOk ? real.solveWindow(...a) : false),
-    solveHeld: (...a: Parameters<typeof real.solveHeld>) => { spy.wholePart++; return real.solveHeld(...a) },
+    solveWindow: (...a: Parameters<typeof real.solveWindow>) => { spy.solves++; return spy.windowOk ? real.solveWindow(...a) : false },
   }
 })
 const { runCleanup } = await import('~/lib/sketch/cleanup/run')
@@ -36,7 +35,7 @@ function crooked(): SketchDoc {
 const opts = { unitsPerPx: 1 / 34, strength: 'normal' as const, budgetMs: Infinity }
 
 describe('a nudge never falls back to the whole part', () => {
-  beforeEach(() => { spy.windowOk = true; spy.wholePart = 0 })
+  beforeEach(() => { spy.windowOk = true; spy.solves = 0 })
   it('control: the window takes it', () => {
     const r = runCleanup(crooked(), opts)
     expect(r.fixes.map(f => f.label)).toEqual(['Rounded to 5'])
@@ -46,6 +45,6 @@ describe('a nudge never falls back to the whole part', () => {
     spy.windowOk = false
     const r = runCleanup(crooked(), opts)
     expect(r.fixes).toEqual([])
-    expect(spy.wholePart).toBe(0)
+    expect(spy.solves).toBe(1)   // the window only — no second, whole-part solve
   })
 })

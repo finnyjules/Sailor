@@ -5,7 +5,7 @@
 // and keeps a candidate only when the held solve converges, it adds
 // something, and the guards pass. Always from the drawing it is given, so
 // the same switches give the same answer — unless the time budget runs out
-// (`budgetMs`, 400 ms by default): the run then stops, keeps what it
+// (`budgetMs`, 800 ms by default): the run then stops, keeps what it
 // accepted and says `stopped`, and where it stopped depends on the machine's
 // speed. The pen memoises each answer per strength + switches for the
 // session, so one session still shows one answer per setting.
@@ -20,7 +20,7 @@ import { equivalentRuleKey, type RuleSpec } from '../tangency'
 import { meanPoint } from './cluster'
 import { buildContext, heldForScope, copyPoints, type CleanupContext, type ContextEnv } from './context'
 import { RowBasis, freeSlots, rowsFor } from './rank'
-import { solveHeld, solveWindow, windowOf, reachesBeyond, componentOf, baselineOf, movedTooFar, arcBroken, lineCollapsed, type Baseline } from './guards'
+import { solveWindow, windowOf, windowOfPart, reachesBeyond, componentOf, baselineOf, movedTooFar, arcBroken, lineCollapsed, type Baseline } from './guards'
 import { detectJoins, detectOnCurve, detectTangents } from './detect-topology'
 import { detectHV, detectParallelPerp } from './detect-directions'
 import { detectConcentric, detectMirrorPairs, detectEqualLengths, detectEqualRadii, detectEvenSpacing, detectRound } from './detect-shape'
@@ -44,6 +44,13 @@ function resolveIn(alias: ReadonlyMap<EntityId, EntityId>, id: EntityId): Entity
   let x = id
   for (let k = 0; alias.has(x) && k < 10000; k++) x = alias.get(x)!
   return x
+}
+// the drawing with only the rules of the parts a scope touches (all of it with no scope)
+function scopeRules(doc: SketchDoc, scope: CleanupOptions['scope']): SketchDoc {
+  if (!scope) return doc
+  const seeds = [...scope.entities, ...scope.segments.map(x => x.pathId)]
+  if (!seeds.some(id => doc.entities.some(e => e.id === id))) return doc
+  return { entities: doc.entities, constraints: componentOf(doc, seeds).constraints }
 }
 const residualNorm = (doc: SketchDoc) => Math.sqrt(constraintResiduals(doc).reduce((s, r) => s + r * r, 0))
 
@@ -125,7 +132,8 @@ function tryApply(work: SketchDoc, cand: Candidate, env: Env): boolean {
     const part = componentOf(work, seeds)
     if (reachesBeyond(part, win)) {        // else the window was the whole part: same answer
       restoreShape(work, was)
-      ok = solveHeld(part, env.held) && guarded()
+      // the whole part moves; anything a size rule reaches in another part is held
+      ok = solveWindow(work, windowOfPart(part), env.held) && guarded()
     }
   }
   if (temp) removeConstraint(work, temp)
@@ -158,7 +166,8 @@ export function runCleanup(input: SketchDoc, o: CleanupOptions): CleanupResult {
   const base = baselineOf(work, o.unitsPerPx)
   // Ruling 19: rules that don't hold before Clean up starts → nothing is safe
   // to change (re-solving them here would fold that movement into Apply)
-  if (residualNorm(work) >= 1e-3) return { doc: cloneDoc(input), fixes: [], refused: 'conflict' }
+  // — the rules of the part the scope touches (the whole drawing with no scope)
+  if (residualNorm(scopeRules(work, o.scope)) >= 1e-3) return { doc: cloneDoc(input), fixes: [], refused: 'conflict' }
   const now = o.now ?? (() => performance.now())
   const budget = o.budgetMs ?? GUARD.BUDGET_MS
   const t0 = now()
@@ -172,7 +181,9 @@ export function runCleanup(input: SketchDoc, o: CleanupOptions): CleanupResult {
     return at.length ? meanPoint(at) : null
   }
   for (const pass of PASSES) {
-    if (stopped) break
+    // after a budget stop the later passes are still looked at, but only to
+    // list the fixes switched off in them — so their badges don't vanish
+    if (stopped && !off.size) break
     const ctx = buildContext(work, env0)
     const cands = pass.flatMap(detect => detect(ctx)).sort((a, b) => b.score - a.score || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
     const seen = new Set<string>()
@@ -181,7 +192,7 @@ export function runCleanup(input: SketchDoc, o: CleanupOptions): CleanupResult {
       seen.add(cand.id)
       const spot = spotIn(work, cand)
       if (off.has(cand.id)) { tried.push({ cand, on: false, spot }); continue }
-      if (now() - t0 > budget) { stopped = true; break }
+      if (stopped || now() - t0 > budget) { stopped = true; continue }
       const snap = cloneDoc(work), snapAlias = new Map(alias), snapGuides = new Map(guides)
       if (tryApply(work, cand, { held, base, alias, guides, openOnly: !!o.openOnly })) { tried.push({ cand, on: true, spot }); continue }
       work = snap

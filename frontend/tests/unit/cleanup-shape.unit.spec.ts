@@ -107,7 +107,7 @@ describe('detectMirrorPairs', () => {
     const d = blank()
     const L = { a: addPoint(d, 1, 1), b: addPoint(d, 3, 4) }; addLine(d, L.a, L.b)
     const R = { a: addPoint(d, 9.1, 1), b: addPoint(d, 7, 4) }; addLine(d, R.a, R.b)
-    addConstraint(d, 'equalDist', [L.a, L.b, R.a, R.b])   // one shape: a rule ties the two lines
+    addLine(d, L.b, R.b)   // one shape: a line joins the two
     const c = detectMirrorPairs(buildContext(d, env()))
     expect(c).toHaveLength(1)
     expect(c[0]).toMatchObject({ kind: 'mirror', label: 'Mirror pair' })

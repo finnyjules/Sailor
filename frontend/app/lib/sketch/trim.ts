@@ -904,7 +904,7 @@ export function mergePoints(doc: SketchDoc, from: EntityId, into: EntityId): boo
   const loose: EntityId[] = []
   for (const e of [...doc.entities]) {
     if (!touched.has(e.id)) continue
-    if (e.kind === 'line' && e.p1 === e.p2) deleteEntity(doc, e.id)
+    if (e.kind === 'line' && e.p1 === e.p2) deleteEntity(doc, e.id, { keepGuideEnds: true })
     else if (e.kind === 'path') collapsePath(doc, e, loose)
   }
   cleanOrphans(doc, loose, into)

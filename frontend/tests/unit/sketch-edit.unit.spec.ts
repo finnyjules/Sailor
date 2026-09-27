@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest'
 import type { SketchDoc } from '~/lib/sketch/model'
 import { freshId } from '~/lib/sketch/ids'
 import { addPoint, addLine, addCircle, addConstraint, removeConstraint, deleteEntity } from '~/lib/sketch/edit'
+import { mergePoints } from '~/lib/sketch/trim'
 
 const emptyDoc = (): SketchDoc => ({ entities: [], constraints: [] })
 
@@ -76,6 +77,13 @@ describe('deleting a guide line', () => {
     deleteEntity(d, axis)
     expect(d.entities.map(e => e.id).sort()).toEqual([a, b].sort())
     expect(d.constraints).toEqual([])
+  })
+  it('merging a guide line’s two ends into one keeps the point (the squeezed line goes, not its end)', () => {
+    const d = emptyDoc()
+    const p = addPoint(d, 0, 0, { construction: true }), q = addPoint(d, 0.01, 0, { construction: true })
+    addLine(d, p, q, { construction: true })
+    expect(mergePoints(d, q, p)).toBe(true)
+    expect(d.entities.map(e => e.id)).toEqual([p])
   })
   it('keeps an end another piece or rule still uses, and every end of a plain line', () => {
     const d = emptyDoc()

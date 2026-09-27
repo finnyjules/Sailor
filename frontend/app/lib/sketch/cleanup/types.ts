@@ -38,7 +38,7 @@ export const GUARD = {
   ARC_MIN_PX: 2,         // no arc ends shorter than this (length or radius); no line under it is looked at
   MAX_PIECES: 150,       // above this Clean up refuses (select a part)
   ROUND_MIN_UNIT_PX: 4,  // round sizes only when one drawing unit is at least this big on screen
-  BUDGET_MS: 400,        // one run stops trying fixes after this long (keeps what it accepted)
+  BUDGET_MS: 800,        // one run stops trying fixes after this long (keeps what it accepted)
 } as const
 
 export type FixKind =
