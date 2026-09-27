@@ -28,6 +28,7 @@ import { pyFloatOf, pyIntOf, pyTruthy } from '#shared/runner/pyText'
 import { ENHANCE_ENGINE_SLUGS, UPSCALE_ENGINE_SLUGS } from '#shared/pricing/editSettings'
 import { BACKGROUND_REMOVER_SLUG, RESTORE_IMAGE_SLUG, restoreTwinSafety, type RepairClass } from '#shared/runner/repair'
 import type { NodePlan, PlanContext } from '../executors'
+import { imageUrlOf } from '../imageUrl'
 
 // ── A widget as ComfyUI hands it to execute (missing: the node's default) ──
 
@@ -256,7 +257,7 @@ export async function planRepair(ctx: PlanContext): Promise<NodePlan> {
   const link = inputs.image
   const file = isLink(link) ? ctx.filesFrom(link)[0] : undefined
   if (!file) throw new Error('There is no picture to work on')
-  const image = await ctx.toUrl(file)
+  const image = await imageUrlOf(ctx, file, link)
   let call: RepairCall
   switch (classType) {
     case 'UpscaleImageNode': call = upscaleInput(inputs, image); break

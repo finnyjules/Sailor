@@ -41,7 +41,7 @@ import type { ApiPrompt } from '#shared/runner/graph'
 import type { RunnerMessage } from '#shared/runner/messages'
 import { nodesNeedingEngine } from '~~/app/lib/runner/needsEngine'
 import { isRunnerDeclined } from '~~/app/lib/runner/client'
-import { createFakeFal, createFakeLedger, createFakeReplicate, makeKit, until } from './__runner__/kit'
+import { createFakeFal, createFakeLedger, createFakeReplicate, makeKit, rgbPng1x1, until } from './__runner__/kit'
 import { withoutUnknownFields } from './helpers/pythonParity'
 
 // ── Fixtures ─────────────────────────────────────────────────────────────
@@ -707,6 +707,12 @@ const PNG_1X1 = [
   0x48, 0xAF, 0xA4, 0x71, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4E, 0x44, 0xAE, 0x42, 0x60, 0x82,
 ]
 function writeCards(k: ReturnType<typeof makeKit>, files: string[], png = false, measured = false) {
+  // R3.H: with `cards` on, an Image card's file is decoded before it is handed off (as
+  // Python's loader decodes it): each card is a real 1 × 1 picture of its own colour.
+  if (runnerFamilies().has('cards')) {
+    files.forEach((f, i) => writeFileSync(join(k.root, 'input', f), rgbPng1x1(i + 1, 7, 7)))
+    return
+  }
   const head = measured ? PNG_1X1 : png ? PNG_SIGNATURE : []
   files.forEach((f, i) => writeFileSync(join(k.root, 'input', f), new Uint8Array([...head, i + 1, 7, 7])))
 }

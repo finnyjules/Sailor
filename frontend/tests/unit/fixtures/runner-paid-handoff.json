@@ -1,0 +1,3687 @@
+{
+ "cases": [
+  {
+   "answers": [
+    {
+     "images": [
+      {
+       "url": "https://f.test/handoff/edited.png"
+      }
+     ]
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "fal-ai/flux-2-pro/edit",
+     "payload": {
+      "image_urls": [
+       "PNG:654759df3d627ef9b5917c287e4e936a1a29196ef81bcb245dbabbd8de21bc20"
+      ],
+      "output_format": "png",
+      "prompt": "make it dusk",
+      "seed": 7
+     },
+     "payload_json": "{\"image_urls\": [\"PNG:654759df3d627ef9b5917c287e4e936a1a29196ef81bcb245dbabbd8de21bc20\"], \"output_format\": \"png\", \"prompt\": \"make it dusk\", \"seed\": 7}",
+     "provider": "fal"
+    }
+   ],
+   "class_type": "EditImageNode",
+   "file": "a plain RGB JPEG",
+   "filename": "handoff.jpg",
+   "input": "input_image",
+   "loader": "LoadImage",
+   "made": {
+    "PNG:654759df3d627ef9b5917c287e4e936a1a29196ef81bcb245dbabbd8de21bc20": {
+     "sha256": "a52acad8c3f1cfe01ba9f11cb4c38de64133a5398b28e965cf097861f0b78eda",
+     "shape": [
+      15,
+      23,
+      3
+     ]
+    }
+   },
+   "name": "handoff \u00b7 a plain RGB JPEG \u00b7 LoadImage \u2192 EditImageNode",
+   "tensor_shape": [
+    1,
+    15,
+    23,
+    3
+   ],
+   "widgets": {
+    "aspect_ratio": "match_input_image",
+    "model": "Flux 2 Pro",
+    "output_format": "png",
+    "prompt": "make it dusk",
+    "prompt_upsampling": false,
+    "resolution": "1K",
+    "safety_tolerance": 2,
+    "seed": 7
+   }
+  },
+  {
+   "answers": [
+    {
+     "images": [
+      {
+       "url": "https://f.test/handoff/edited.png"
+      }
+     ]
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "fal-ai/flux-2-pro/edit",
+     "payload": {
+      "image_urls": [
+       "PNG:654759df3d627ef9b5917c287e4e936a1a29196ef81bcb245dbabbd8de21bc20"
+      ],
+      "output_format": "png",
+      "prompt": "make it dusk",
+      "seed": 7
+     },
+     "payload_json": "{\"image_urls\": [\"PNG:654759df3d627ef9b5917c287e4e936a1a29196ef81bcb245dbabbd8de21bc20\"], \"output_format\": \"png\", \"prompt\": \"make it dusk\", \"seed\": 7}",
+     "provider": "fal"
+    }
+   ],
+   "class_type": "EditImageNode",
+   "file": "a plain RGB JPEG",
+   "filename": "handoff.jpg",
+   "input": "input_image",
+   "loader": "Image",
+   "made": {
+    "PNG:654759df3d627ef9b5917c287e4e936a1a29196ef81bcb245dbabbd8de21bc20": {
+     "sha256": "a52acad8c3f1cfe01ba9f11cb4c38de64133a5398b28e965cf097861f0b78eda",
+     "shape": [
+      15,
+      23,
+      3
+     ]
+    }
+   },
+   "name": "handoff \u00b7 a plain RGB JPEG \u00b7 Image \u2192 EditImageNode",
+   "tensor_shape": [
+    1,
+    15,
+    23,
+    3
+   ],
+   "widgets": {
+    "aspect_ratio": "match_input_image",
+    "model": "Flux 2 Pro",
+    "output_format": "png",
+    "prompt": "make it dusk",
+    "prompt_upsampling": false,
+    "resolution": "1K",
+    "safety_tolerance": 2,
+    "seed": 7
+   }
+  },
+  {
+   "answers": [
+    {
+     "images": [
+      {
+       "url": "https://f.test/handoff/edited.png"
+      }
+     ]
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "fal-ai/flux-2-pro/edit",
+     "payload": {
+      "image_urls": [
+       "PNG:af90199f89526bd580c5ba2315657d1c19369029115ab7998aec45f69b89ee16"
+      ],
+      "output_format": "png",
+      "prompt": "make it dusk",
+      "seed": 7
+     },
+     "payload_json": "{\"image_urls\": [\"PNG:af90199f89526bd580c5ba2315657d1c19369029115ab7998aec45f69b89ee16\"], \"output_format\": \"png\", \"prompt\": \"make it dusk\", \"seed\": 7}",
+     "provider": "fal"
+    }
+   ],
+   "class_type": "EditImageNode",
+   "file": "a plain RGB PNG",
+   "filename": "handoff.png",
+   "input": "input_image",
+   "loader": "LoadImage",
+   "made": {
+    "PNG:af90199f89526bd580c5ba2315657d1c19369029115ab7998aec45f69b89ee16": {
+     "sha256": "77628f1e68fc2869c6acd6e3a6dcec2e4812baa2e5a11167dd0884c3d90d4f9d",
+     "shape": [
+      15,
+      23,
+      3
+     ]
+    }
+   },
+   "name": "handoff \u00b7 a plain RGB PNG \u00b7 LoadImage \u2192 EditImageNode",
+   "tensor_shape": [
+    1,
+    15,
+    23,
+    3
+   ],
+   "widgets": {
+    "aspect_ratio": "match_input_image",
+    "model": "Flux 2 Pro",
+    "output_format": "png",
+    "prompt": "make it dusk",
+    "prompt_upsampling": false,
+    "resolution": "1K",
+    "safety_tolerance": 2,
+    "seed": 7
+   }
+  },
+  {
+   "answers": [
+    {
+     "images": [
+      {
+       "url": "https://f.test/handoff/edited.png"
+      }
+     ]
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "fal-ai/flux-2-pro/edit",
+     "payload": {
+      "image_urls": [
+       "PNG:af90199f89526bd580c5ba2315657d1c19369029115ab7998aec45f69b89ee16"
+      ],
+      "output_format": "png",
+      "prompt": "make it dusk",
+      "seed": 7
+     },
+     "payload_json": "{\"image_urls\": [\"PNG:af90199f89526bd580c5ba2315657d1c19369029115ab7998aec45f69b89ee16\"], \"output_format\": \"png\", \"prompt\": \"make it dusk\", \"seed\": 7}",
+     "provider": "fal"
+    }
+   ],
+   "class_type": "EditImageNode",
+   "file": "a plain RGB PNG",
+   "filename": "handoff.png",
+   "input": "input_image",
+   "loader": "Image",
+   "made": {
+    "PNG:af90199f89526bd580c5ba2315657d1c19369029115ab7998aec45f69b89ee16": {
+     "sha256": "77628f1e68fc2869c6acd6e3a6dcec2e4812baa2e5a11167dd0884c3d90d4f9d",
+     "shape": [
+      15,
+      23,
+      3
+     ]
+    }
+   },
+   "name": "handoff \u00b7 a plain RGB PNG \u00b7 Image \u2192 EditImageNode",
+   "tensor_shape": [
+    1,
+    15,
+    23,
+    3
+   ],
+   "widgets": {
+    "aspect_ratio": "match_input_image",
+    "model": "Flux 2 Pro",
+    "output_format": "png",
+    "prompt": "make it dusk",
+    "prompt_upsampling": false,
+    "resolution": "1K",
+    "safety_tolerance": 2,
+    "seed": 7
+   }
+  },
+  {
+   "answers": [
+    {
+     "images": [
+      {
+       "url": "https://f.test/handoff/edited.png"
+      }
+     ]
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "fal-ai/flux-2-pro/edit",
+     "payload": {
+      "image_urls": [
+       "PNG:af90199f89526bd580c5ba2315657d1c19369029115ab7998aec45f69b89ee16"
+      ],
+      "output_format": "png",
+      "prompt": "make it dusk",
+      "seed": 7
+     },
+     "payload_json": "{\"image_urls\": [\"PNG:af90199f89526bd580c5ba2315657d1c19369029115ab7998aec45f69b89ee16\"], \"output_format\": \"png\", \"prompt\": \"make it dusk\", \"seed\": 7}",
+     "provider": "fal"
+    }
+   ],
+   "class_type": "EditImageNode",
+   "file": "an RGB PNG with a text chunk",
+   "filename": "handoff.png",
+   "input": "input_image",
+   "loader": "LoadImage",
+   "made": {
+    "PNG:af90199f89526bd580c5ba2315657d1c19369029115ab7998aec45f69b89ee16": {
+     "sha256": "77628f1e68fc2869c6acd6e3a6dcec2e4812baa2e5a11167dd0884c3d90d4f9d",
+     "shape": [
+      15,
+      23,
+      3
+     ]
+    }
+   },
+   "name": "handoff \u00b7 an RGB PNG with a text chunk \u00b7 LoadImage \u2192 EditImageNode",
+   "tensor_shape": [
+    1,
+    15,
+    23,
+    3
+   ],
+   "widgets": {
+    "aspect_ratio": "match_input_image",
+    "model": "Flux 2 Pro",
+    "output_format": "png",
+    "prompt": "make it dusk",
+    "prompt_upsampling": false,
+    "resolution": "1K",
+    "safety_tolerance": 2,
+    "seed": 7
+   }
+  },
+  {
+   "answers": [
+    {
+     "images": [
+      {
+       "url": "https://f.test/handoff/edited.png"
+      }
+     ]
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "fal-ai/flux-2-pro/edit",
+     "payload": {
+      "image_urls": [
+       "PNG:af90199f89526bd580c5ba2315657d1c19369029115ab7998aec45f69b89ee16"
+      ],
+      "output_format": "png",
+      "prompt": "make it dusk",
+      "seed": 7
+     },
+     "payload_json": "{\"image_urls\": [\"PNG:af90199f89526bd580c5ba2315657d1c19369029115ab7998aec45f69b89ee16\"], \"output_format\": \"png\", \"prompt\": \"make it dusk\", \"seed\": 7}",
+     "provider": "fal"
+    }
+   ],
+   "class_type": "EditImageNode",
+   "file": "an RGB PNG with a text chunk",
+   "filename": "handoff.png",
+   "input": "input_image",
+   "loader": "Image",
+   "made": {
+    "PNG:af90199f89526bd580c5ba2315657d1c19369029115ab7998aec45f69b89ee16": {
+     "sha256": "77628f1e68fc2869c6acd6e3a6dcec2e4812baa2e5a11167dd0884c3d90d4f9d",
+     "shape": [
+      15,
+      23,
+      3
+     ]
+    }
+   },
+   "name": "handoff \u00b7 an RGB PNG with a text chunk \u00b7 Image \u2192 EditImageNode",
+   "tensor_shape": [
+    1,
+    15,
+    23,
+    3
+   ],
+   "widgets": {
+    "aspect_ratio": "match_input_image",
+    "model": "Flux 2 Pro",
+    "output_format": "png",
+    "prompt": "make it dusk",
+    "prompt_upsampling": false,
+    "resolution": "1K",
+    "safety_tolerance": 2,
+    "seed": 7
+   }
+  },
+  {
+   "answers": [
+    {
+     "images": [
+      {
+       "url": "https://f.test/handoff/edited.png"
+      }
+     ]
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "fal-ai/flux-2-pro/edit",
+     "payload": {
+      "image_urls": [
+       "PNG:49c507cbd461ef13d85ac3c221340f00447b93dc0965e0c671f8a77ec5636b49"
+      ],
+      "output_format": "png",
+      "prompt": "make it dusk",
+      "seed": 7
+     },
+     "payload_json": "{\"image_urls\": [\"PNG:49c507cbd461ef13d85ac3c221340f00447b93dc0965e0c671f8a77ec5636b49\"], \"output_format\": \"png\", \"prompt\": \"make it dusk\", \"seed\": 7}",
+     "provider": "fal"
+    }
+   ],
+   "class_type": "EditImageNode",
+   "file": "a grey PNG",
+   "filename": "handoff.png",
+   "input": "input_image",
+   "loader": "LoadImage",
+   "made": {
+    "PNG:49c507cbd461ef13d85ac3c221340f00447b93dc0965e0c671f8a77ec5636b49": {
+     "sha256": "be7e6aea9afea9e9a19dfb5c66c1ec764e2c1046b6315c22abd5f02f17e81617",
+     "shape": [
+      15,
+      23,
+      3
+     ]
+    }
+   },
+   "name": "handoff \u00b7 a grey PNG \u00b7 LoadImage \u2192 EditImageNode",
+   "tensor_shape": [
+    1,
+    15,
+    23,
+    3
+   ],
+   "widgets": {
+    "aspect_ratio": "match_input_image",
+    "model": "Flux 2 Pro",
+    "output_format": "png",
+    "prompt": "make it dusk",
+    "prompt_upsampling": false,
+    "resolution": "1K",
+    "safety_tolerance": 2,
+    "seed": 7
+   }
+  },
+  {
+   "answers": [
+    {
+     "images": [
+      {
+       "url": "https://f.test/handoff/edited.png"
+      }
+     ]
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "fal-ai/flux-2-pro/edit",
+     "payload": {
+      "image_urls": [
+       "PNG:49c507cbd461ef13d85ac3c221340f00447b93dc0965e0c671f8a77ec5636b49"
+      ],
+      "output_format": "png",
+      "prompt": "make it dusk",
+      "seed": 7
+     },
+     "payload_json": "{\"image_urls\": [\"PNG:49c507cbd461ef13d85ac3c221340f00447b93dc0965e0c671f8a77ec5636b49\"], \"output_format\": \"png\", \"prompt\": \"make it dusk\", \"seed\": 7}",
+     "provider": "fal"
+    }
+   ],
+   "class_type": "EditImageNode",
+   "file": "a grey PNG",
+   "filename": "handoff.png",
+   "input": "input_image",
+   "loader": "Image",
+   "made": {
+    "PNG:49c507cbd461ef13d85ac3c221340f00447b93dc0965e0c671f8a77ec5636b49": {
+     "sha256": "be7e6aea9afea9e9a19dfb5c66c1ec764e2c1046b6315c22abd5f02f17e81617",
+     "shape": [
+      15,
+      23,
+      3
+     ]
+    }
+   },
+   "name": "handoff \u00b7 a grey PNG \u00b7 Image \u2192 EditImageNode",
+   "tensor_shape": [
+    1,
+    15,
+    23,
+    3
+   ],
+   "widgets": {
+    "aspect_ratio": "match_input_image",
+    "model": "Flux 2 Pro",
+    "output_format": "png",
+    "prompt": "make it dusk",
+    "prompt_upsampling": false,
+    "resolution": "1K",
+    "safety_tolerance": 2,
+    "seed": 7
+   }
+  },
+  {
+   "answers": [
+    {
+     "images": [
+      {
+       "url": "https://f.test/handoff/edited.png"
+      }
+     ]
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "fal-ai/flux-2-pro/edit",
+     "payload": {
+      "image_urls": [
+       "PNG:af90199f89526bd580c5ba2315657d1c19369029115ab7998aec45f69b89ee16"
+      ],
+      "output_format": "png",
+      "prompt": "make it dusk",
+      "seed": 7
+     },
+     "payload_json": "{\"image_urls\": [\"PNG:af90199f89526bd580c5ba2315657d1c19369029115ab7998aec45f69b89ee16\"], \"output_format\": \"png\", \"prompt\": \"make it dusk\", \"seed\": 7}",
+     "provider": "fal"
+    }
+   ],
+   "class_type": "EditImageNode",
+   "file": "an RGBA PNG, partly see-through",
+   "filename": "handoff.png",
+   "input": "input_image",
+   "loader": "LoadImage",
+   "made": {
+    "PNG:af90199f89526bd580c5ba2315657d1c19369029115ab7998aec45f69b89ee16": {
+     "sha256": "77628f1e68fc2869c6acd6e3a6dcec2e4812baa2e5a11167dd0884c3d90d4f9d",
+     "shape": [
+      15,
+      23,
+      3
+     ]
+    }
+   },
+   "name": "handoff \u00b7 an RGBA PNG, partly see-through \u00b7 LoadImage \u2192 EditImageNode",
+   "tensor_shape": [
+    1,
+    15,
+    23,
+    3
+   ],
+   "widgets": {
+    "aspect_ratio": "match_input_image",
+    "model": "Flux 2 Pro",
+    "output_format": "png",
+    "prompt": "make it dusk",
+    "prompt_upsampling": false,
+    "resolution": "1K",
+    "safety_tolerance": 2,
+    "seed": 7
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": "https://f.test/handoff/edited.png"
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "google/nano-banana-2",
+     "payload": {
+      "image_input": [
+       "PNG:af90199f89526bd580c5ba2315657d1c19369029115ab7998aec45f69b89ee16"
+      ],
+      "output_format": "png",
+      "prompt": "Remove the lamp from the image completely. Fill the area it occupied by seamlessly continuing the surrounding background \u2014 match the scene's textures, perspective, lighting and grain so no trace, outline or shadow of the removed object remains. Keep EVERYTHING ELSE in the image exactly as it is: composition, framing, colours, other subjects and overall lighting. Output only the edited image.",
+      "resolution": "1K"
+     },
+     "payload_json": "{\"image_input\": [\"PNG:af90199f89526bd580c5ba2315657d1c19369029115ab7998aec45f69b89ee16\"], \"output_format\": \"png\", \"prompt\": \"Remove the lamp from the image completely. Fill the area it occupied by seamlessly continuing the surrounding background \\u2014 match the scene's textures, perspective, lighting and grain so no trace, outline or shadow of the removed object remains. Keep EVERYTHING ELSE in the image exactly as it is: composition, framing, colours, other subjects and overall lighting. Output only the edited image.\", \"resolution\": \"1K\"}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "RemoveObjectNode",
+   "file": "an RGBA PNG, partly see-through",
+   "filename": "handoff.png",
+   "input": "image",
+   "loader": "LoadImage",
+   "made": {
+    "PNG:af90199f89526bd580c5ba2315657d1c19369029115ab7998aec45f69b89ee16": {
+     "sha256": "77628f1e68fc2869c6acd6e3a6dcec2e4812baa2e5a11167dd0884c3d90d4f9d",
+     "shape": [
+      15,
+      23,
+      3
+     ]
+    }
+   },
+   "name": "handoff \u00b7 an RGBA PNG, partly see-through \u00b7 LoadImage \u2192 RemoveObjectNode",
+   "tensor_shape": [
+    1,
+    15,
+    23,
+    3
+   ],
+   "widgets": {
+    "instructions": "",
+    "target": "the lamp"
+   }
+  },
+  {
+   "answers": [
+    {
+     "images": [
+      {
+       "url": "https://f.test/handoff/edited.png"
+      }
+     ]
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "fal-ai/flux-2-pro/edit",
+     "payload": {
+      "image_urls": [
+       "PNG:f4227e167edaab5b9770de73efd63adcdc2e8aa1676ec9bcbaa047a3812c28a9"
+      ],
+      "output_format": "png",
+      "prompt": "make it dusk",
+      "seed": 7
+     },
+     "payload_json": "{\"image_urls\": [\"PNG:f4227e167edaab5b9770de73efd63adcdc2e8aa1676ec9bcbaa047a3812c28a9\"], \"output_format\": \"png\", \"prompt\": \"make it dusk\", \"seed\": 7}",
+     "provider": "fal"
+    }
+   ],
+   "class_type": "EditImageNode",
+   "file": "an RGBA PNG, partly see-through",
+   "filename": "handoff.png",
+   "input": "input_image",
+   "loader": "Image",
+   "made": {
+    "PNG:f4227e167edaab5b9770de73efd63adcdc2e8aa1676ec9bcbaa047a3812c28a9": {
+     "sha256": "5f6436e3e403683fa9b9f7239789ecbc164bd7fac35efb4a91389b078d4ae2e3",
+     "shape": [
+      15,
+      23,
+      4
+     ]
+    }
+   },
+   "name": "handoff \u00b7 an RGBA PNG, partly see-through \u00b7 Image \u2192 EditImageNode",
+   "tensor_shape": [
+    1,
+    15,
+    23,
+    4
+   ],
+   "widgets": {
+    "aspect_ratio": "match_input_image",
+    "model": "Flux 2 Pro",
+    "output_format": "png",
+    "prompt": "make it dusk",
+    "prompt_upsampling": false,
+    "resolution": "1K",
+    "safety_tolerance": 2,
+    "seed": 7
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": "https://f.test/handoff/edited.png"
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "google/nano-banana-2",
+     "payload": {
+      "image_input": [
+       "PNG:f4227e167edaab5b9770de73efd63adcdc2e8aa1676ec9bcbaa047a3812c28a9"
+      ],
+      "output_format": "png",
+      "prompt": "Remove the lamp from the image completely. Fill the area it occupied by seamlessly continuing the surrounding background \u2014 match the scene's textures, perspective, lighting and grain so no trace, outline or shadow of the removed object remains. Keep EVERYTHING ELSE in the image exactly as it is: composition, framing, colours, other subjects and overall lighting. Output only the edited image.",
+      "resolution": "1K"
+     },
+     "payload_json": "{\"image_input\": [\"PNG:f4227e167edaab5b9770de73efd63adcdc2e8aa1676ec9bcbaa047a3812c28a9\"], \"output_format\": \"png\", \"prompt\": \"Remove the lamp from the image completely. Fill the area it occupied by seamlessly continuing the surrounding background \\u2014 match the scene's textures, perspective, lighting and grain so no trace, outline or shadow of the removed object remains. Keep EVERYTHING ELSE in the image exactly as it is: composition, framing, colours, other subjects and overall lighting. Output only the edited image.\", \"resolution\": \"1K\"}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "RemoveObjectNode",
+   "file": "an RGBA PNG, partly see-through",
+   "filename": "handoff.png",
+   "input": "image",
+   "loader": "Image",
+   "made": {
+    "PNG:f4227e167edaab5b9770de73efd63adcdc2e8aa1676ec9bcbaa047a3812c28a9": {
+     "sha256": "5f6436e3e403683fa9b9f7239789ecbc164bd7fac35efb4a91389b078d4ae2e3",
+     "shape": [
+      15,
+      23,
+      4
+     ]
+    }
+   },
+   "name": "handoff \u00b7 an RGBA PNG, partly see-through \u00b7 Image \u2192 RemoveObjectNode",
+   "tensor_shape": [
+    1,
+    15,
+    23,
+    4
+   ],
+   "widgets": {
+    "instructions": "",
+    "target": "the lamp"
+   }
+  },
+  {
+   "answers": [
+    {
+     "images": [
+      {
+       "url": "https://f.test/handoff/edited.png"
+      }
+     ]
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "fal-ai/flux-2-pro/edit",
+     "payload": {
+      "image_urls": [
+       "PNG:af90199f89526bd580c5ba2315657d1c19369029115ab7998aec45f69b89ee16"
+      ],
+      "output_format": "png",
+      "prompt": "make it dusk",
+      "seed": 7
+     },
+     "payload_json": "{\"image_urls\": [\"PNG:af90199f89526bd580c5ba2315657d1c19369029115ab7998aec45f69b89ee16\"], \"output_format\": \"png\", \"prompt\": \"make it dusk\", \"seed\": 7}",
+     "provider": "fal"
+    }
+   ],
+   "class_type": "EditImageNode",
+   "file": "an RGBA PNG, opaque everywhere",
+   "filename": "handoff.png",
+   "input": "input_image",
+   "loader": "LoadImage",
+   "made": {
+    "PNG:af90199f89526bd580c5ba2315657d1c19369029115ab7998aec45f69b89ee16": {
+     "sha256": "77628f1e68fc2869c6acd6e3a6dcec2e4812baa2e5a11167dd0884c3d90d4f9d",
+     "shape": [
+      15,
+      23,
+      3
+     ]
+    }
+   },
+   "name": "handoff \u00b7 an RGBA PNG, opaque everywhere \u00b7 LoadImage \u2192 EditImageNode",
+   "tensor_shape": [
+    1,
+    15,
+    23,
+    3
+   ],
+   "widgets": {
+    "aspect_ratio": "match_input_image",
+    "model": "Flux 2 Pro",
+    "output_format": "png",
+    "prompt": "make it dusk",
+    "prompt_upsampling": false,
+    "resolution": "1K",
+    "safety_tolerance": 2,
+    "seed": 7
+   }
+  },
+  {
+   "answers": [
+    {
+     "images": [
+      {
+       "url": "https://f.test/handoff/edited.png"
+      }
+     ]
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "fal-ai/flux-2-pro/edit",
+     "payload": {
+      "image_urls": [
+       "PNG:af90199f89526bd580c5ba2315657d1c19369029115ab7998aec45f69b89ee16"
+      ],
+      "output_format": "png",
+      "prompt": "make it dusk",
+      "seed": 7
+     },
+     "payload_json": "{\"image_urls\": [\"PNG:af90199f89526bd580c5ba2315657d1c19369029115ab7998aec45f69b89ee16\"], \"output_format\": \"png\", \"prompt\": \"make it dusk\", \"seed\": 7}",
+     "provider": "fal"
+    }
+   ],
+   "class_type": "EditImageNode",
+   "file": "an RGBA PNG, opaque everywhere",
+   "filename": "handoff.png",
+   "input": "input_image",
+   "loader": "Image",
+   "made": {
+    "PNG:af90199f89526bd580c5ba2315657d1c19369029115ab7998aec45f69b89ee16": {
+     "sha256": "77628f1e68fc2869c6acd6e3a6dcec2e4812baa2e5a11167dd0884c3d90d4f9d",
+     "shape": [
+      15,
+      23,
+      3
+     ]
+    }
+   },
+   "name": "handoff \u00b7 an RGBA PNG, opaque everywhere \u00b7 Image \u2192 EditImageNode",
+   "tensor_shape": [
+    1,
+    15,
+    23,
+    3
+   ],
+   "widgets": {
+    "aspect_ratio": "match_input_image",
+    "model": "Flux 2 Pro",
+    "output_format": "png",
+    "prompt": "make it dusk",
+    "prompt_upsampling": false,
+    "resolution": "1K",
+    "safety_tolerance": 2,
+    "seed": 7
+   }
+  },
+  {
+   "answers": [
+    {
+     "images": [
+      {
+       "url": "https://f.test/handoff/edited.png"
+      }
+     ]
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "fal-ai/flux-2-pro/edit",
+     "payload": {
+      "image_urls": [
+       "PNG:af90199f89526bd580c5ba2315657d1c19369029115ab7998aec45f69b89ee16"
+      ],
+      "output_format": "png",
+      "prompt": "make it dusk",
+      "seed": 7
+     },
+     "payload_json": "{\"image_urls\": [\"PNG:af90199f89526bd580c5ba2315657d1c19369029115ab7998aec45f69b89ee16\"], \"output_format\": \"png\", \"prompt\": \"make it dusk\", \"seed\": 7}",
+     "provider": "fal"
+    }
+   ],
+   "class_type": "EditImageNode",
+   "file": "an RGBA PNG with one pixel at 254",
+   "filename": "handoff.png",
+   "input": "input_image",
+   "loader": "LoadImage",
+   "made": {
+    "PNG:af90199f89526bd580c5ba2315657d1c19369029115ab7998aec45f69b89ee16": {
+     "sha256": "77628f1e68fc2869c6acd6e3a6dcec2e4812baa2e5a11167dd0884c3d90d4f9d",
+     "shape": [
+      15,
+      23,
+      3
+     ]
+    }
+   },
+   "name": "handoff \u00b7 an RGBA PNG with one pixel at 254 \u00b7 LoadImage \u2192 EditImageNode",
+   "tensor_shape": [
+    1,
+    15,
+    23,
+    3
+   ],
+   "widgets": {
+    "aspect_ratio": "match_input_image",
+    "model": "Flux 2 Pro",
+    "output_format": "png",
+    "prompt": "make it dusk",
+    "prompt_upsampling": false,
+    "resolution": "1K",
+    "safety_tolerance": 2,
+    "seed": 7
+   }
+  },
+  {
+   "answers": [
+    {
+     "images": [
+      {
+       "url": "https://f.test/handoff/edited.png"
+      }
+     ]
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "fal-ai/flux-2-pro/edit",
+     "payload": {
+      "image_urls": [
+       "PNG:cbe5fb6b6b69c3624d59bbdc7ffbdaf88e8085435ac1a30d94d4e73cd342b523"
+      ],
+      "output_format": "png",
+      "prompt": "make it dusk",
+      "seed": 7
+     },
+     "payload_json": "{\"image_urls\": [\"PNG:cbe5fb6b6b69c3624d59bbdc7ffbdaf88e8085435ac1a30d94d4e73cd342b523\"], \"output_format\": \"png\", \"prompt\": \"make it dusk\", \"seed\": 7}",
+     "provider": "fal"
+    }
+   ],
+   "class_type": "EditImageNode",
+   "file": "an RGBA PNG with one pixel at 254",
+   "filename": "handoff.png",
+   "input": "input_image",
+   "loader": "Image",
+   "made": {
+    "PNG:cbe5fb6b6b69c3624d59bbdc7ffbdaf88e8085435ac1a30d94d4e73cd342b523": {
+     "sha256": "6580c2cd7763c8c5f3f3fc9c0247fc6c2a0f7cd5b3a6ff52d1f4f150172c9aa8",
+     "shape": [
+      15,
+      23,
+      4
+     ]
+    }
+   },
+   "name": "handoff \u00b7 an RGBA PNG with one pixel at 254 \u00b7 Image \u2192 EditImageNode",
+   "tensor_shape": [
+    1,
+    15,
+    23,
+    4
+   ],
+   "widgets": {
+    "aspect_ratio": "match_input_image",
+    "model": "Flux 2 Pro",
+    "output_format": "png",
+    "prompt": "make it dusk",
+    "prompt_upsampling": false,
+    "resolution": "1K",
+    "safety_tolerance": 2,
+    "seed": 7
+   }
+  },
+  {
+   "answers": [
+    {
+     "images": [
+      {
+       "url": "https://f.test/handoff/edited.png"
+      }
+     ]
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "fal-ai/flux-2-pro/edit",
+     "payload": {
+      "image_urls": [
+       "PNG:6fbd54b9a1078b75641c37aca035ae1bb986957d0082b3b893064306493e10e8"
+      ],
+      "output_format": "png",
+      "prompt": "make it dusk",
+      "seed": 7
+     },
+     "payload_json": "{\"image_urls\": [\"PNG:6fbd54b9a1078b75641c37aca035ae1bb986957d0082b3b893064306493e10e8\"], \"output_format\": \"png\", \"prompt\": \"make it dusk\", \"seed\": 7}",
+     "provider": "fal"
+    }
+   ],
+   "class_type": "EditImageNode",
+   "file": "a grey + alpha PNG",
+   "filename": "handoff.png",
+   "input": "input_image",
+   "loader": "LoadImage",
+   "made": {
+    "PNG:6fbd54b9a1078b75641c37aca035ae1bb986957d0082b3b893064306493e10e8": {
+     "sha256": "b8bfbf35edbf3e4c44c912651a0fc4e4b7137c5f8640f445d86712c73c0bd60d",
+     "shape": [
+      15,
+      23,
+      3
+     ]
+    }
+   },
+   "name": "handoff \u00b7 a grey + alpha PNG \u00b7 LoadImage \u2192 EditImageNode",
+   "tensor_shape": [
+    1,
+    15,
+    23,
+    3
+   ],
+   "widgets": {
+    "aspect_ratio": "match_input_image",
+    "model": "Flux 2 Pro",
+    "output_format": "png",
+    "prompt": "make it dusk",
+    "prompt_upsampling": false,
+    "resolution": "1K",
+    "safety_tolerance": 2,
+    "seed": 7
+   }
+  },
+  {
+   "answers": [
+    {
+     "images": [
+      {
+       "url": "https://f.test/handoff/edited.png"
+      }
+     ]
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "fal-ai/flux-2-pro/edit",
+     "payload": {
+      "image_urls": [
+       "PNG:abee63c5faff6b26a52ab681bd4d6cc360a2217cc6d000d3a58b0c1662b1ea97"
+      ],
+      "output_format": "png",
+      "prompt": "make it dusk",
+      "seed": 7
+     },
+     "payload_json": "{\"image_urls\": [\"PNG:abee63c5faff6b26a52ab681bd4d6cc360a2217cc6d000d3a58b0c1662b1ea97\"], \"output_format\": \"png\", \"prompt\": \"make it dusk\", \"seed\": 7}",
+     "provider": "fal"
+    }
+   ],
+   "class_type": "EditImageNode",
+   "file": "a grey + alpha PNG",
+   "filename": "handoff.png",
+   "input": "input_image",
+   "loader": "Image",
+   "made": {
+    "PNG:abee63c5faff6b26a52ab681bd4d6cc360a2217cc6d000d3a58b0c1662b1ea97": {
+     "sha256": "1ef030fdb505323c705d1fe258c3d1ab671c3910c8941469285eb7aa50b35c71",
+     "shape": [
+      15,
+      23,
+      4
+     ]
+    }
+   },
+   "name": "handoff \u00b7 a grey + alpha PNG \u00b7 Image \u2192 EditImageNode",
+   "tensor_shape": [
+    1,
+    15,
+    23,
+    4
+   ],
+   "widgets": {
+    "aspect_ratio": "match_input_image",
+    "model": "Flux 2 Pro",
+    "output_format": "png",
+    "prompt": "make it dusk",
+    "prompt_upsampling": false,
+    "resolution": "1K",
+    "safety_tolerance": 2,
+    "seed": 7
+   }
+  },
+  {
+   "answers": [
+    {
+     "images": [
+      {
+       "url": "https://f.test/handoff/edited.png"
+      }
+     ]
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "fal-ai/flux-2-pro/edit",
+     "payload": {
+      "image_urls": [
+       "PNG:af90199f89526bd580c5ba2315657d1c19369029115ab7998aec45f69b89ee16"
+      ],
+      "output_format": "png",
+      "prompt": "make it dusk",
+      "seed": 7
+     },
+     "payload_json": "{\"image_urls\": [\"PNG:af90199f89526bd580c5ba2315657d1c19369029115ab7998aec45f69b89ee16\"], \"output_format\": \"png\", \"prompt\": \"make it dusk\", \"seed\": 7}",
+     "provider": "fal"
+    }
+   ],
+   "class_type": "EditImageNode",
+   "file": "an RGB PNG with a colour key",
+   "filename": "handoff.png",
+   "input": "input_image",
+   "loader": "LoadImage",
+   "made": {
+    "PNG:af90199f89526bd580c5ba2315657d1c19369029115ab7998aec45f69b89ee16": {
+     "sha256": "77628f1e68fc2869c6acd6e3a6dcec2e4812baa2e5a11167dd0884c3d90d4f9d",
+     "shape": [
+      15,
+      23,
+      3
+     ]
+    }
+   },
+   "name": "handoff \u00b7 an RGB PNG with a colour key \u00b7 LoadImage \u2192 EditImageNode",
+   "tensor_shape": [
+    1,
+    15,
+    23,
+    3
+   ],
+   "widgets": {
+    "aspect_ratio": "match_input_image",
+    "model": "Flux 2 Pro",
+    "output_format": "png",
+    "prompt": "make it dusk",
+    "prompt_upsampling": false,
+    "resolution": "1K",
+    "safety_tolerance": 2,
+    "seed": 7
+   }
+  },
+  {
+   "answers": [
+    {
+     "images": [
+      {
+       "url": "https://f.test/handoff/edited.png"
+      }
+     ]
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "fal-ai/flux-2-pro/edit",
+     "payload": {
+      "image_urls": [
+       "PNG:af90199f89526bd580c5ba2315657d1c19369029115ab7998aec45f69b89ee16"
+      ],
+      "output_format": "png",
+      "prompt": "make it dusk",
+      "seed": 7
+     },
+     "payload_json": "{\"image_urls\": [\"PNG:af90199f89526bd580c5ba2315657d1c19369029115ab7998aec45f69b89ee16\"], \"output_format\": \"png\", \"prompt\": \"make it dusk\", \"seed\": 7}",
+     "provider": "fal"
+    }
+   ],
+   "class_type": "EditImageNode",
+   "file": "an RGB PNG with a colour key",
+   "filename": "handoff.png",
+   "input": "input_image",
+   "loader": "Image",
+   "made": {
+    "PNG:af90199f89526bd580c5ba2315657d1c19369029115ab7998aec45f69b89ee16": {
+     "sha256": "77628f1e68fc2869c6acd6e3a6dcec2e4812baa2e5a11167dd0884c3d90d4f9d",
+     "shape": [
+      15,
+      23,
+      3
+     ]
+    }
+   },
+   "name": "handoff \u00b7 an RGB PNG with a colour key \u00b7 Image \u2192 EditImageNode",
+   "tensor_shape": [
+    1,
+    15,
+    23,
+    3
+   ],
+   "widgets": {
+    "aspect_ratio": "match_input_image",
+    "model": "Flux 2 Pro",
+    "output_format": "png",
+    "prompt": "make it dusk",
+    "prompt_upsampling": false,
+    "resolution": "1K",
+    "safety_tolerance": 2,
+    "seed": 7
+   }
+  },
+  {
+   "answers": [
+    {
+     "images": [
+      {
+       "url": "https://f.test/handoff/edited.png"
+      }
+     ]
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "fal-ai/flux-2-pro/edit",
+     "payload": {
+      "image_urls": [
+       "PNG:e64c98efc4b7517fcddcc04ac09516ffeda44eed9cddedd9088662e90b38dbdb"
+      ],
+      "output_format": "png",
+      "prompt": "make it dusk",
+      "seed": 7
+     },
+     "payload_json": "{\"image_urls\": [\"PNG:e64c98efc4b7517fcddcc04ac09516ffeda44eed9cddedd9088662e90b38dbdb\"], \"output_format\": \"png\", \"prompt\": \"make it dusk\", \"seed\": 7}",
+     "provider": "fal"
+    }
+   ],
+   "class_type": "EditImageNode",
+   "file": "a palette PNG with transparency",
+   "filename": "handoff.png",
+   "input": "input_image",
+   "loader": "LoadImage",
+   "made": {
+    "PNG:e64c98efc4b7517fcddcc04ac09516ffeda44eed9cddedd9088662e90b38dbdb": {
+     "sha256": "b2e7294a275bac5d7f31293291297b1fc5cf861ff0fe142258d74faec968a336",
+     "shape": [
+      15,
+      23,
+      3
+     ]
+    }
+   },
+   "name": "handoff \u00b7 a palette PNG with transparency \u00b7 LoadImage \u2192 EditImageNode",
+   "tensor_shape": [
+    1,
+    15,
+    23,
+    3
+   ],
+   "widgets": {
+    "aspect_ratio": "match_input_image",
+    "model": "Flux 2 Pro",
+    "output_format": "png",
+    "prompt": "make it dusk",
+    "prompt_upsampling": false,
+    "resolution": "1K",
+    "safety_tolerance": 2,
+    "seed": 7
+   }
+  },
+  {
+   "answers": [
+    {
+     "images": [
+      {
+       "url": "https://f.test/handoff/edited.png"
+      }
+     ]
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "fal-ai/flux-2-pro/edit",
+     "payload": {
+      "image_urls": [
+       "PNG:9d0faf7dbcba57644ddda62a937de78e1bcee7333c93f06ce880b139913dba9c"
+      ],
+      "output_format": "png",
+      "prompt": "make it dusk",
+      "seed": 7
+     },
+     "payload_json": "{\"image_urls\": [\"PNG:9d0faf7dbcba57644ddda62a937de78e1bcee7333c93f06ce880b139913dba9c\"], \"output_format\": \"png\", \"prompt\": \"make it dusk\", \"seed\": 7}",
+     "provider": "fal"
+    }
+   ],
+   "class_type": "EditImageNode",
+   "file": "a palette PNG with transparency",
+   "filename": "handoff.png",
+   "input": "input_image",
+   "loader": "Image",
+   "made": {
+    "PNG:9d0faf7dbcba57644ddda62a937de78e1bcee7333c93f06ce880b139913dba9c": {
+     "sha256": "9a514ef356e1b2e75b8365558893c6ed426d4c19257df99fcc8146481c072bc1",
+     "shape": [
+      15,
+      23,
+      4
+     ]
+    }
+   },
+   "name": "handoff \u00b7 a palette PNG with transparency \u00b7 Image \u2192 EditImageNode",
+   "tensor_shape": [
+    1,
+    15,
+    23,
+    4
+   ],
+   "widgets": {
+    "aspect_ratio": "match_input_image",
+    "model": "Flux 2 Pro",
+    "output_format": "png",
+    "prompt": "make it dusk",
+    "prompt_upsampling": false,
+    "resolution": "1K",
+    "safety_tolerance": 2,
+    "seed": 7
+   }
+  },
+  {
+   "answers": [
+    {
+     "images": [
+      {
+       "url": "https://f.test/handoff/edited.png"
+      }
+     ]
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "fal-ai/flux-2-pro/edit",
+     "payload": {
+      "image_urls": [
+       "PNG:e64c98efc4b7517fcddcc04ac09516ffeda44eed9cddedd9088662e90b38dbdb"
+      ],
+      "output_format": "png",
+      "prompt": "make it dusk",
+      "seed": 7
+     },
+     "payload_json": "{\"image_urls\": [\"PNG:e64c98efc4b7517fcddcc04ac09516ffeda44eed9cddedd9088662e90b38dbdb\"], \"output_format\": \"png\", \"prompt\": \"make it dusk\", \"seed\": 7}",
+     "provider": "fal"
+    }
+   ],
+   "class_type": "EditImageNode",
+   "file": "a palette PNG, no transparency",
+   "filename": "handoff.png",
+   "input": "input_image",
+   "loader": "LoadImage",
+   "made": {
+    "PNG:e64c98efc4b7517fcddcc04ac09516ffeda44eed9cddedd9088662e90b38dbdb": {
+     "sha256": "b2e7294a275bac5d7f31293291297b1fc5cf861ff0fe142258d74faec968a336",
+     "shape": [
+      15,
+      23,
+      3
+     ]
+    }
+   },
+   "name": "handoff \u00b7 a palette PNG, no transparency \u00b7 LoadImage \u2192 EditImageNode",
+   "tensor_shape": [
+    1,
+    15,
+    23,
+    3
+   ],
+   "widgets": {
+    "aspect_ratio": "match_input_image",
+    "model": "Flux 2 Pro",
+    "output_format": "png",
+    "prompt": "make it dusk",
+    "prompt_upsampling": false,
+    "resolution": "1K",
+    "safety_tolerance": 2,
+    "seed": 7
+   }
+  },
+  {
+   "answers": [
+    {
+     "images": [
+      {
+       "url": "https://f.test/handoff/edited.png"
+      }
+     ]
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "fal-ai/flux-2-pro/edit",
+     "payload": {
+      "image_urls": [
+       "PNG:e64c98efc4b7517fcddcc04ac09516ffeda44eed9cddedd9088662e90b38dbdb"
+      ],
+      "output_format": "png",
+      "prompt": "make it dusk",
+      "seed": 7
+     },
+     "payload_json": "{\"image_urls\": [\"PNG:e64c98efc4b7517fcddcc04ac09516ffeda44eed9cddedd9088662e90b38dbdb\"], \"output_format\": \"png\", \"prompt\": \"make it dusk\", \"seed\": 7}",
+     "provider": "fal"
+    }
+   ],
+   "class_type": "EditImageNode",
+   "file": "a palette PNG, no transparency",
+   "filename": "handoff.png",
+   "input": "input_image",
+   "loader": "Image",
+   "made": {
+    "PNG:e64c98efc4b7517fcddcc04ac09516ffeda44eed9cddedd9088662e90b38dbdb": {
+     "sha256": "b2e7294a275bac5d7f31293291297b1fc5cf861ff0fe142258d74faec968a336",
+     "shape": [
+      15,
+      23,
+      3
+     ]
+    }
+   },
+   "name": "handoff \u00b7 a palette PNG, no transparency \u00b7 Image \u2192 EditImageNode",
+   "tensor_shape": [
+    1,
+    15,
+    23,
+    3
+   ],
+   "widgets": {
+    "aspect_ratio": "match_input_image",
+    "model": "Flux 2 Pro",
+    "output_format": "png",
+    "prompt": "make it dusk",
+    "prompt_upsampling": false,
+    "resolution": "1K",
+    "safety_tolerance": 2,
+    "seed": 7
+   }
+  },
+  {
+   "answers": [
+    {
+     "images": [
+      {
+       "url": "https://f.test/handoff/edited.png"
+      }
+     ]
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "fal-ai/flux-2-pro/edit",
+     "payload": {
+      "image_urls": [
+       "PNG:6fb4fa360753818e10d1187d8e470b1e95576b645d4eeb7b43613a3d4b0dd82d"
+      ],
+      "output_format": "png",
+      "prompt": "make it dusk",
+      "seed": 7
+     },
+     "payload_json": "{\"image_urls\": [\"PNG:6fb4fa360753818e10d1187d8e470b1e95576b645d4eeb7b43613a3d4b0dd82d\"], \"output_format\": \"png\", \"prompt\": \"make it dusk\", \"seed\": 7}",
+     "provider": "fal"
+    }
+   ],
+   "class_type": "EditImageNode",
+   "file": "a CMYK JPEG",
+   "filename": "handoff.jpg",
+   "input": "input_image",
+   "loader": "LoadImage",
+   "made": {
+    "PNG:6fb4fa360753818e10d1187d8e470b1e95576b645d4eeb7b43613a3d4b0dd82d": {
+     "sha256": "523fd17bb4307f8e95a6d8ce1303c4e4148585d1b6e5e4e603265a30fbd73a31",
+     "shape": [
+      15,
+      23,
+      3
+     ]
+    }
+   },
+   "name": "handoff \u00b7 a CMYK JPEG \u00b7 LoadImage \u2192 EditImageNode",
+   "tensor_shape": [
+    1,
+    15,
+    23,
+    3
+   ],
+   "widgets": {
+    "aspect_ratio": "match_input_image",
+    "model": "Flux 2 Pro",
+    "output_format": "png",
+    "prompt": "make it dusk",
+    "prompt_upsampling": false,
+    "resolution": "1K",
+    "safety_tolerance": 2,
+    "seed": 7
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": "https://f.test/handoff/edited.png"
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "google/nano-banana-2",
+     "payload": {
+      "image_input": [
+       "PNG:6fb4fa360753818e10d1187d8e470b1e95576b645d4eeb7b43613a3d4b0dd82d"
+      ],
+      "output_format": "png",
+      "prompt": "Remove the lamp from the image completely. Fill the area it occupied by seamlessly continuing the surrounding background \u2014 match the scene's textures, perspective, lighting and grain so no trace, outline or shadow of the removed object remains. Keep EVERYTHING ELSE in the image exactly as it is: composition, framing, colours, other subjects and overall lighting. Output only the edited image.",
+      "resolution": "1K"
+     },
+     "payload_json": "{\"image_input\": [\"PNG:6fb4fa360753818e10d1187d8e470b1e95576b645d4eeb7b43613a3d4b0dd82d\"], \"output_format\": \"png\", \"prompt\": \"Remove the lamp from the image completely. Fill the area it occupied by seamlessly continuing the surrounding background \\u2014 match the scene's textures, perspective, lighting and grain so no trace, outline or shadow of the removed object remains. Keep EVERYTHING ELSE in the image exactly as it is: composition, framing, colours, other subjects and overall lighting. Output only the edited image.\", \"resolution\": \"1K\"}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "RemoveObjectNode",
+   "file": "a CMYK JPEG",
+   "filename": "handoff.jpg",
+   "input": "image",
+   "loader": "LoadImage",
+   "made": {
+    "PNG:6fb4fa360753818e10d1187d8e470b1e95576b645d4eeb7b43613a3d4b0dd82d": {
+     "sha256": "523fd17bb4307f8e95a6d8ce1303c4e4148585d1b6e5e4e603265a30fbd73a31",
+     "shape": [
+      15,
+      23,
+      3
+     ]
+    }
+   },
+   "name": "handoff \u00b7 a CMYK JPEG \u00b7 LoadImage \u2192 RemoveObjectNode",
+   "tensor_shape": [
+    1,
+    15,
+    23,
+    3
+   ],
+   "widgets": {
+    "instructions": "",
+    "target": "the lamp"
+   }
+  },
+  {
+   "answers": [
+    {
+     "images": [
+      {
+       "url": "https://f.test/handoff/edited.png"
+      }
+     ]
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "fal-ai/flux-2-pro/edit",
+     "payload": {
+      "image_urls": [
+       "PNG:6fb4fa360753818e10d1187d8e470b1e95576b645d4eeb7b43613a3d4b0dd82d"
+      ],
+      "output_format": "png",
+      "prompt": "make it dusk",
+      "seed": 7
+     },
+     "payload_json": "{\"image_urls\": [\"PNG:6fb4fa360753818e10d1187d8e470b1e95576b645d4eeb7b43613a3d4b0dd82d\"], \"output_format\": \"png\", \"prompt\": \"make it dusk\", \"seed\": 7}",
+     "provider": "fal"
+    }
+   ],
+   "class_type": "EditImageNode",
+   "file": "a CMYK JPEG",
+   "filename": "handoff.jpg",
+   "input": "input_image",
+   "loader": "Image",
+   "made": {
+    "PNG:6fb4fa360753818e10d1187d8e470b1e95576b645d4eeb7b43613a3d4b0dd82d": {
+     "sha256": "523fd17bb4307f8e95a6d8ce1303c4e4148585d1b6e5e4e603265a30fbd73a31",
+     "shape": [
+      15,
+      23,
+      3
+     ]
+    }
+   },
+   "name": "handoff \u00b7 a CMYK JPEG \u00b7 Image \u2192 EditImageNode",
+   "tensor_shape": [
+    1,
+    15,
+    23,
+    3
+   ],
+   "widgets": {
+    "aspect_ratio": "match_input_image",
+    "model": "Flux 2 Pro",
+    "output_format": "png",
+    "prompt": "make it dusk",
+    "prompt_upsampling": false,
+    "resolution": "1K",
+    "safety_tolerance": 2,
+    "seed": 7
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": "https://f.test/handoff/edited.png"
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "google/nano-banana-2",
+     "payload": {
+      "image_input": [
+       "PNG:6fb4fa360753818e10d1187d8e470b1e95576b645d4eeb7b43613a3d4b0dd82d"
+      ],
+      "output_format": "png",
+      "prompt": "Remove the lamp from the image completely. Fill the area it occupied by seamlessly continuing the surrounding background \u2014 match the scene's textures, perspective, lighting and grain so no trace, outline or shadow of the removed object remains. Keep EVERYTHING ELSE in the image exactly as it is: composition, framing, colours, other subjects and overall lighting. Output only the edited image.",
+      "resolution": "1K"
+     },
+     "payload_json": "{\"image_input\": [\"PNG:6fb4fa360753818e10d1187d8e470b1e95576b645d4eeb7b43613a3d4b0dd82d\"], \"output_format\": \"png\", \"prompt\": \"Remove the lamp from the image completely. Fill the area it occupied by seamlessly continuing the surrounding background \\u2014 match the scene's textures, perspective, lighting and grain so no trace, outline or shadow of the removed object remains. Keep EVERYTHING ELSE in the image exactly as it is: composition, framing, colours, other subjects and overall lighting. Output only the edited image.\", \"resolution\": \"1K\"}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "RemoveObjectNode",
+   "file": "a CMYK JPEG",
+   "filename": "handoff.jpg",
+   "input": "image",
+   "loader": "Image",
+   "made": {
+    "PNG:6fb4fa360753818e10d1187d8e470b1e95576b645d4eeb7b43613a3d4b0dd82d": {
+     "sha256": "523fd17bb4307f8e95a6d8ce1303c4e4148585d1b6e5e4e603265a30fbd73a31",
+     "shape": [
+      15,
+      23,
+      3
+     ]
+    }
+   },
+   "name": "handoff \u00b7 a CMYK JPEG \u00b7 Image \u2192 RemoveObjectNode",
+   "tensor_shape": [
+    1,
+    15,
+    23,
+    3
+   ],
+   "widgets": {
+    "instructions": "",
+    "target": "the lamp"
+   }
+  },
+  {
+   "answers": [
+    {
+     "images": [
+      {
+       "url": "https://f.test/handoff/edited.png"
+      }
+     ]
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "fal-ai/flux-2-pro/edit",
+     "payload": {
+      "image_urls": [
+       "PNG:a5806f8cdfbd2a9d0eabf680841a177b7d97045245962a0ac9487940d56fc0c2"
+      ],
+      "output_format": "png",
+      "prompt": "make it dusk",
+      "seed": 7
+     },
+     "payload_json": "{\"image_urls\": [\"PNG:a5806f8cdfbd2a9d0eabf680841a177b7d97045245962a0ac9487940d56fc0c2\"], \"output_format\": \"png\", \"prompt\": \"make it dusk\", \"seed\": 7}",
+     "provider": "fal"
+    }
+   ],
+   "class_type": "EditImageNode",
+   "file": "a CMYK JPEG, EXIF 6",
+   "filename": "handoff.jpg",
+   "input": "input_image",
+   "loader": "LoadImage",
+   "made": {
+    "PNG:a5806f8cdfbd2a9d0eabf680841a177b7d97045245962a0ac9487940d56fc0c2": {
+     "sha256": "d4753586c5c7c2e4ee9673dfaadbf677ba186436680c7cfe146e2d7bfae3ef1f",
+     "shape": [
+      23,
+      15,
+      3
+     ]
+    }
+   },
+   "name": "handoff \u00b7 a CMYK JPEG, EXIF 6 \u00b7 LoadImage \u2192 EditImageNode",
+   "tensor_shape": [
+    1,
+    23,
+    15,
+    3
+   ],
+   "widgets": {
+    "aspect_ratio": "match_input_image",
+    "model": "Flux 2 Pro",
+    "output_format": "png",
+    "prompt": "make it dusk",
+    "prompt_upsampling": false,
+    "resolution": "1K",
+    "safety_tolerance": 2,
+    "seed": 7
+   }
+  },
+  {
+   "answers": [
+    {
+     "images": [
+      {
+       "url": "https://f.test/handoff/edited.png"
+      }
+     ]
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "fal-ai/flux-2-pro/edit",
+     "payload": {
+      "image_urls": [
+       "PNG:a5806f8cdfbd2a9d0eabf680841a177b7d97045245962a0ac9487940d56fc0c2"
+      ],
+      "output_format": "png",
+      "prompt": "make it dusk",
+      "seed": 7
+     },
+     "payload_json": "{\"image_urls\": [\"PNG:a5806f8cdfbd2a9d0eabf680841a177b7d97045245962a0ac9487940d56fc0c2\"], \"output_format\": \"png\", \"prompt\": \"make it dusk\", \"seed\": 7}",
+     "provider": "fal"
+    }
+   ],
+   "class_type": "EditImageNode",
+   "file": "a CMYK JPEG, EXIF 6",
+   "filename": "handoff.jpg",
+   "input": "input_image",
+   "loader": "Image",
+   "made": {
+    "PNG:a5806f8cdfbd2a9d0eabf680841a177b7d97045245962a0ac9487940d56fc0c2": {
+     "sha256": "d4753586c5c7c2e4ee9673dfaadbf677ba186436680c7cfe146e2d7bfae3ef1f",
+     "shape": [
+      23,
+      15,
+      3
+     ]
+    }
+   },
+   "name": "handoff \u00b7 a CMYK JPEG, EXIF 6 \u00b7 Image \u2192 EditImageNode",
+   "tensor_shape": [
+    1,
+    23,
+    15,
+    3
+   ],
+   "widgets": {
+    "aspect_ratio": "match_input_image",
+    "model": "Flux 2 Pro",
+    "output_format": "png",
+    "prompt": "make it dusk",
+    "prompt_upsampling": false,
+    "resolution": "1K",
+    "safety_tolerance": 2,
+    "seed": 7
+   }
+  },
+  {
+   "answers": [
+    {
+     "images": [
+      {
+       "url": "https://f.test/handoff/edited.png"
+      }
+     ]
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "fal-ai/flux-2-pro/edit",
+     "payload": {
+      "image_urls": [
+       "PNG:7a8bf51b83c898f25d732ae94f6e98a6083be4631a0814f748c5f9c643b835bd"
+      ],
+      "output_format": "png",
+      "prompt": "make it dusk",
+      "seed": 7
+     },
+     "payload_json": "{\"image_urls\": [\"PNG:7a8bf51b83c898f25d732ae94f6e98a6083be4631a0814f748c5f9c643b835bd\"], \"output_format\": \"png\", \"prompt\": \"make it dusk\", \"seed\": 7}",
+     "provider": "fal"
+    }
+   ],
+   "class_type": "EditImageNode",
+   "file": "a 16-bit grey PNG",
+   "filename": "handoff.png",
+   "input": "input_image",
+   "loader": "LoadImage",
+   "made": {
+    "PNG:7a8bf51b83c898f25d732ae94f6e98a6083be4631a0814f748c5f9c643b835bd": {
+     "sha256": "e319a2858e3a8c20416de887eb73b417308d1be8abab0ab89a163b510569caa3",
+     "shape": [
+      15,
+      23,
+      3
+     ]
+    }
+   },
+   "name": "handoff \u00b7 a 16-bit grey PNG \u00b7 LoadImage \u2192 EditImageNode",
+   "tensor_shape": [
+    1,
+    15,
+    23,
+    3
+   ],
+   "widgets": {
+    "aspect_ratio": "match_input_image",
+    "model": "Flux 2 Pro",
+    "output_format": "png",
+    "prompt": "make it dusk",
+    "prompt_upsampling": false,
+    "resolution": "1K",
+    "safety_tolerance": 2,
+    "seed": 7
+   }
+  },
+  {
+   "answers": [
+    {
+     "images": [
+      {
+       "url": "https://f.test/handoff/edited.png"
+      }
+     ]
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "fal-ai/flux-2-pro/edit",
+     "payload": {
+      "image_urls": [
+       "PNG:7a8bf51b83c898f25d732ae94f6e98a6083be4631a0814f748c5f9c643b835bd"
+      ],
+      "output_format": "png",
+      "prompt": "make it dusk",
+      "seed": 7
+     },
+     "payload_json": "{\"image_urls\": [\"PNG:7a8bf51b83c898f25d732ae94f6e98a6083be4631a0814f748c5f9c643b835bd\"], \"output_format\": \"png\", \"prompt\": \"make it dusk\", \"seed\": 7}",
+     "provider": "fal"
+    }
+   ],
+   "class_type": "EditImageNode",
+   "file": "a 16-bit grey PNG",
+   "filename": "handoff.png",
+   "input": "input_image",
+   "loader": "Image",
+   "made": {
+    "PNG:7a8bf51b83c898f25d732ae94f6e98a6083be4631a0814f748c5f9c643b835bd": {
+     "sha256": "e319a2858e3a8c20416de887eb73b417308d1be8abab0ab89a163b510569caa3",
+     "shape": [
+      15,
+      23,
+      3
+     ]
+    }
+   },
+   "name": "handoff \u00b7 a 16-bit grey PNG \u00b7 Image \u2192 EditImageNode",
+   "tensor_shape": [
+    1,
+    15,
+    23,
+    3
+   ],
+   "widgets": {
+    "aspect_ratio": "match_input_image",
+    "model": "Flux 2 Pro",
+    "output_format": "png",
+    "prompt": "make it dusk",
+    "prompt_upsampling": false,
+    "resolution": "1K",
+    "safety_tolerance": 2,
+    "seed": 7
+   }
+  },
+  {
+   "answers": [
+    {
+     "images": [
+      {
+       "url": "https://f.test/handoff/edited.png"
+      }
+     ]
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "fal-ai/flux-2-pro/edit",
+     "payload": {
+      "image_urls": [
+       "PNG:fd9972dec15a27d4edb6580ad2652fa65433080958eb70496ada772db6ff508c"
+      ],
+      "output_format": "png",
+      "prompt": "make it dusk",
+      "seed": 7
+     },
+     "payload_json": "{\"image_urls\": [\"PNG:fd9972dec15a27d4edb6580ad2652fa65433080958eb70496ada772db6ff508c\"], \"output_format\": \"png\", \"prompt\": \"make it dusk\", \"seed\": 7}",
+     "provider": "fal"
+    }
+   ],
+   "class_type": "EditImageNode",
+   "file": "a 16-bit RGB PNG",
+   "filename": "handoff.png",
+   "input": "input_image",
+   "loader": "LoadImage",
+   "made": {
+    "PNG:fd9972dec15a27d4edb6580ad2652fa65433080958eb70496ada772db6ff508c": {
+     "sha256": "f1e0b5b2225d065ac98ce65b26c9168508c3d524f1c37bf35d4e3459ab6df7e1",
+     "shape": [
+      15,
+      23,
+      3
+     ]
+    }
+   },
+   "name": "handoff \u00b7 a 16-bit RGB PNG \u00b7 LoadImage \u2192 EditImageNode",
+   "tensor_shape": [
+    1,
+    15,
+    23,
+    3
+   ],
+   "widgets": {
+    "aspect_ratio": "match_input_image",
+    "model": "Flux 2 Pro",
+    "output_format": "png",
+    "prompt": "make it dusk",
+    "prompt_upsampling": false,
+    "resolution": "1K",
+    "safety_tolerance": 2,
+    "seed": 7
+   }
+  },
+  {
+   "answers": [
+    {
+     "images": [
+      {
+       "url": "https://f.test/handoff/edited.png"
+      }
+     ]
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "fal-ai/flux-2-pro/edit",
+     "payload": {
+      "image_urls": [
+       "PNG:fd9972dec15a27d4edb6580ad2652fa65433080958eb70496ada772db6ff508c"
+      ],
+      "output_format": "png",
+      "prompt": "make it dusk",
+      "seed": 7
+     },
+     "payload_json": "{\"image_urls\": [\"PNG:fd9972dec15a27d4edb6580ad2652fa65433080958eb70496ada772db6ff508c\"], \"output_format\": \"png\", \"prompt\": \"make it dusk\", \"seed\": 7}",
+     "provider": "fal"
+    }
+   ],
+   "class_type": "EditImageNode",
+   "file": "a 16-bit RGB PNG",
+   "filename": "handoff.png",
+   "input": "input_image",
+   "loader": "Image",
+   "made": {
+    "PNG:fd9972dec15a27d4edb6580ad2652fa65433080958eb70496ada772db6ff508c": {
+     "sha256": "f1e0b5b2225d065ac98ce65b26c9168508c3d524f1c37bf35d4e3459ab6df7e1",
+     "shape": [
+      15,
+      23,
+      3
+     ]
+    }
+   },
+   "name": "handoff \u00b7 a 16-bit RGB PNG \u00b7 Image \u2192 EditImageNode",
+   "tensor_shape": [
+    1,
+    15,
+    23,
+    3
+   ],
+   "widgets": {
+    "aspect_ratio": "match_input_image",
+    "model": "Flux 2 Pro",
+    "output_format": "png",
+    "prompt": "make it dusk",
+    "prompt_upsampling": false,
+    "resolution": "1K",
+    "safety_tolerance": 2,
+    "seed": 7
+   }
+  },
+  {
+   "answers": [
+    {
+     "images": [
+      {
+       "url": "https://f.test/handoff/edited.png"
+      }
+     ]
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "fal-ai/flux-2-pro/edit",
+     "payload": {
+      "image_urls": [
+       "PNG:b87b117ad6d55bfcd9f157b9bf2daebb5dce35b301f7159e8fe13240bdcaba5f"
+      ],
+      "output_format": "png",
+      "prompt": "make it dusk",
+      "seed": 7
+     },
+     "payload_json": "{\"image_urls\": [\"PNG:b87b117ad6d55bfcd9f157b9bf2daebb5dce35b301f7159e8fe13240bdcaba5f\"], \"output_format\": \"png\", \"prompt\": \"make it dusk\", \"seed\": 7}",
+     "provider": "fal"
+    }
+   ],
+   "class_type": "EditImageNode",
+   "file": "a 16-bit RGBA PNG, partly see-through",
+   "filename": "handoff.png",
+   "input": "input_image",
+   "loader": "LoadImage",
+   "made": {
+    "PNG:b87b117ad6d55bfcd9f157b9bf2daebb5dce35b301f7159e8fe13240bdcaba5f": {
+     "sha256": "b7e8f9124e750e81fd894562fbd316e8a61d63551eaf155743c643b353ed69e3",
+     "shape": [
+      15,
+      23,
+      3
+     ]
+    }
+   },
+   "name": "handoff \u00b7 a 16-bit RGBA PNG, partly see-through \u00b7 LoadImage \u2192 EditImageNode",
+   "tensor_shape": [
+    1,
+    15,
+    23,
+    3
+   ],
+   "widgets": {
+    "aspect_ratio": "match_input_image",
+    "model": "Flux 2 Pro",
+    "output_format": "png",
+    "prompt": "make it dusk",
+    "prompt_upsampling": false,
+    "resolution": "1K",
+    "safety_tolerance": 2,
+    "seed": 7
+   }
+  },
+  {
+   "answers": [
+    {
+     "images": [
+      {
+       "url": "https://f.test/handoff/edited.png"
+      }
+     ]
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "fal-ai/flux-2-pro/edit",
+     "payload": {
+      "image_urls": [
+       "PNG:42752f5a636abe934efe2e27714bf9d472cc32864fed64a1f53f2f067563331e"
+      ],
+      "output_format": "png",
+      "prompt": "make it dusk",
+      "seed": 7
+     },
+     "payload_json": "{\"image_urls\": [\"PNG:42752f5a636abe934efe2e27714bf9d472cc32864fed64a1f53f2f067563331e\"], \"output_format\": \"png\", \"prompt\": \"make it dusk\", \"seed\": 7}",
+     "provider": "fal"
+    }
+   ],
+   "class_type": "EditImageNode",
+   "file": "a 16-bit RGBA PNG, partly see-through",
+   "filename": "handoff.png",
+   "input": "input_image",
+   "loader": "Image",
+   "made": {
+    "PNG:42752f5a636abe934efe2e27714bf9d472cc32864fed64a1f53f2f067563331e": {
+     "sha256": "c7ab14ed7b22c52ee63a54a962d4c5c235cd6ef22b1b4f04217dea97c52e0933",
+     "shape": [
+      15,
+      23,
+      4
+     ]
+    }
+   },
+   "name": "handoff \u00b7 a 16-bit RGBA PNG, partly see-through \u00b7 Image \u2192 EditImageNode",
+   "tensor_shape": [
+    1,
+    15,
+    23,
+    4
+   ],
+   "widgets": {
+    "aspect_ratio": "match_input_image",
+    "model": "Flux 2 Pro",
+    "output_format": "png",
+    "prompt": "make it dusk",
+    "prompt_upsampling": false,
+    "resolution": "1K",
+    "safety_tolerance": 2,
+    "seed": 7
+   }
+  },
+  {
+   "answers": [
+    {
+     "images": [
+      {
+       "url": "https://f.test/handoff/edited.png"
+      }
+     ]
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "fal-ai/flux-2-pro/edit",
+     "payload": {
+      "image_urls": [
+       "PNG:afa785f385e3fa3d22070cf468fccddf7254b16bc2f1efa4172065855a53d6bf"
+      ],
+      "output_format": "png",
+      "prompt": "make it dusk",
+      "seed": 7
+     },
+     "payload_json": "{\"image_urls\": [\"PNG:afa785f385e3fa3d22070cf468fccddf7254b16bc2f1efa4172065855a53d6bf\"], \"output_format\": \"png\", \"prompt\": \"make it dusk\", \"seed\": 7}",
+     "provider": "fal"
+    }
+   ],
+   "class_type": "EditImageNode",
+   "file": "a lossy WebP",
+   "filename": "handoff.webp",
+   "input": "input_image",
+   "loader": "LoadImage",
+   "made": {
+    "PNG:afa785f385e3fa3d22070cf468fccddf7254b16bc2f1efa4172065855a53d6bf": {
+     "sha256": "3c46edabefb1ca5d7802231192cdbf3bcd050252e7b3f651b8ba8b2ab894bf73",
+     "shape": [
+      15,
+      23,
+      3
+     ]
+    }
+   },
+   "name": "handoff \u00b7 a lossy WebP \u00b7 LoadImage \u2192 EditImageNode",
+   "tensor_shape": [
+    1,
+    15,
+    23,
+    3
+   ],
+   "widgets": {
+    "aspect_ratio": "match_input_image",
+    "model": "Flux 2 Pro",
+    "output_format": "png",
+    "prompt": "make it dusk",
+    "prompt_upsampling": false,
+    "resolution": "1K",
+    "safety_tolerance": 2,
+    "seed": 7
+   }
+  },
+  {
+   "answers": [
+    {
+     "images": [
+      {
+       "url": "https://f.test/handoff/edited.png"
+      }
+     ]
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "fal-ai/flux-2-pro/edit",
+     "payload": {
+      "image_urls": [
+       "PNG:afa785f385e3fa3d22070cf468fccddf7254b16bc2f1efa4172065855a53d6bf"
+      ],
+      "output_format": "png",
+      "prompt": "make it dusk",
+      "seed": 7
+     },
+     "payload_json": "{\"image_urls\": [\"PNG:afa785f385e3fa3d22070cf468fccddf7254b16bc2f1efa4172065855a53d6bf\"], \"output_format\": \"png\", \"prompt\": \"make it dusk\", \"seed\": 7}",
+     "provider": "fal"
+    }
+   ],
+   "class_type": "EditImageNode",
+   "file": "a lossy WebP",
+   "filename": "handoff.webp",
+   "input": "input_image",
+   "loader": "Image",
+   "made": {
+    "PNG:afa785f385e3fa3d22070cf468fccddf7254b16bc2f1efa4172065855a53d6bf": {
+     "sha256": "3c46edabefb1ca5d7802231192cdbf3bcd050252e7b3f651b8ba8b2ab894bf73",
+     "shape": [
+      15,
+      23,
+      3
+     ]
+    }
+   },
+   "name": "handoff \u00b7 a lossy WebP \u00b7 Image \u2192 EditImageNode",
+   "tensor_shape": [
+    1,
+    15,
+    23,
+    3
+   ],
+   "widgets": {
+    "aspect_ratio": "match_input_image",
+    "model": "Flux 2 Pro",
+    "output_format": "png",
+    "prompt": "make it dusk",
+    "prompt_upsampling": false,
+    "resolution": "1K",
+    "safety_tolerance": 2,
+    "seed": 7
+   }
+  },
+  {
+   "answers": [
+    {
+     "images": [
+      {
+       "url": "https://f.test/handoff/edited.png"
+      }
+     ]
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "fal-ai/flux-2-pro/edit",
+     "payload": {
+      "image_urls": [
+       "PNG:c7959ecdc5f5f7cecd7ea4ca1bb2fb46bd0c907700409b22d32f3780083516f9"
+      ],
+      "output_format": "png",
+      "prompt": "make it dusk",
+      "seed": 7
+     },
+     "payload_json": "{\"image_urls\": [\"PNG:c7959ecdc5f5f7cecd7ea4ca1bb2fb46bd0c907700409b22d32f3780083516f9\"], \"output_format\": \"png\", \"prompt\": \"make it dusk\", \"seed\": 7}",
+     "provider": "fal"
+    }
+   ],
+   "class_type": "EditImageNode",
+   "file": "a lossless WebP with alpha",
+   "filename": "handoff.webp",
+   "input": "input_image",
+   "loader": "LoadImage",
+   "made": {
+    "PNG:c7959ecdc5f5f7cecd7ea4ca1bb2fb46bd0c907700409b22d32f3780083516f9": {
+     "sha256": "854e1c976318073f3713bc496cd5bdf43883bc7e7d0f9357461a1e990efd4ffb",
+     "shape": [
+      15,
+      23,
+      3
+     ]
+    }
+   },
+   "name": "handoff \u00b7 a lossless WebP with alpha \u00b7 LoadImage \u2192 EditImageNode",
+   "tensor_shape": [
+    1,
+    15,
+    23,
+    3
+   ],
+   "widgets": {
+    "aspect_ratio": "match_input_image",
+    "model": "Flux 2 Pro",
+    "output_format": "png",
+    "prompt": "make it dusk",
+    "prompt_upsampling": false,
+    "resolution": "1K",
+    "safety_tolerance": 2,
+    "seed": 7
+   }
+  },
+  {
+   "answers": [
+    {
+     "images": [
+      {
+       "url": "https://f.test/handoff/edited.png"
+      }
+     ]
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "fal-ai/flux-2-pro/edit",
+     "payload": {
+      "image_urls": [
+       "PNG:14c854344db4e0f61a0217bf47691f3756df323635bc36a95efcde8677480f59"
+      ],
+      "output_format": "png",
+      "prompt": "make it dusk",
+      "seed": 7
+     },
+     "payload_json": "{\"image_urls\": [\"PNG:14c854344db4e0f61a0217bf47691f3756df323635bc36a95efcde8677480f59\"], \"output_format\": \"png\", \"prompt\": \"make it dusk\", \"seed\": 7}",
+     "provider": "fal"
+    }
+   ],
+   "class_type": "EditImageNode",
+   "file": "a lossless WebP with alpha",
+   "filename": "handoff.webp",
+   "input": "input_image",
+   "loader": "Image",
+   "made": {
+    "PNG:14c854344db4e0f61a0217bf47691f3756df323635bc36a95efcde8677480f59": {
+     "sha256": "3c28322f387aec08167f46f749c8734a99d48ecca7abdabaaf24bedbf65077b5",
+     "shape": [
+      15,
+      23,
+      4
+     ]
+    }
+   },
+   "name": "handoff \u00b7 a lossless WebP with alpha \u00b7 Image \u2192 EditImageNode",
+   "tensor_shape": [
+    1,
+    15,
+    23,
+    4
+   ],
+   "widgets": {
+    "aspect_ratio": "match_input_image",
+    "model": "Flux 2 Pro",
+    "output_format": "png",
+    "prompt": "make it dusk",
+    "prompt_upsampling": false,
+    "resolution": "1K",
+    "safety_tolerance": 2,
+    "seed": 7
+   }
+  },
+  {
+   "answers": [
+    {
+     "images": [
+      {
+       "url": "https://f.test/handoff/edited.png"
+      }
+     ]
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "fal-ai/flux-2-pro/edit",
+     "payload": {
+      "image_urls": [
+       "PNG:9b901e773ec2232c2e389d089369e27e503079e205a24c85c848ec79d956e013"
+      ],
+      "output_format": "png",
+      "prompt": "make it dusk",
+      "seed": 7
+     },
+     "payload_json": "{\"image_urls\": [\"PNG:9b901e773ec2232c2e389d089369e27e503079e205a24c85c848ec79d956e013\"], \"output_format\": \"png\", \"prompt\": \"make it dusk\", \"seed\": 7}",
+     "provider": "fal"
+    }
+   ],
+   "class_type": "EditImageNode",
+   "file": "a WebP, EXIF 6",
+   "filename": "handoff.webp",
+   "input": "input_image",
+   "loader": "LoadImage",
+   "made": {
+    "PNG:9b901e773ec2232c2e389d089369e27e503079e205a24c85c848ec79d956e013": {
+     "sha256": "6a8febb31a3f442eb9df2b75e2343718b35e6340f006b0ccdb45e7af606457c0",
+     "shape": [
+      23,
+      15,
+      3
+     ]
+    }
+   },
+   "name": "handoff \u00b7 a WebP, EXIF 6 \u00b7 LoadImage \u2192 EditImageNode",
+   "tensor_shape": [
+    1,
+    23,
+    15,
+    3
+   ],
+   "widgets": {
+    "aspect_ratio": "match_input_image",
+    "model": "Flux 2 Pro",
+    "output_format": "png",
+    "prompt": "make it dusk",
+    "prompt_upsampling": false,
+    "resolution": "1K",
+    "safety_tolerance": 2,
+    "seed": 7
+   }
+  },
+  {
+   "answers": [
+    {
+     "images": [
+      {
+       "url": "https://f.test/handoff/edited.png"
+      }
+     ]
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "fal-ai/flux-2-pro/edit",
+     "payload": {
+      "image_urls": [
+       "PNG:9b901e773ec2232c2e389d089369e27e503079e205a24c85c848ec79d956e013"
+      ],
+      "output_format": "png",
+      "prompt": "make it dusk",
+      "seed": 7
+     },
+     "payload_json": "{\"image_urls\": [\"PNG:9b901e773ec2232c2e389d089369e27e503079e205a24c85c848ec79d956e013\"], \"output_format\": \"png\", \"prompt\": \"make it dusk\", \"seed\": 7}",
+     "provider": "fal"
+    }
+   ],
+   "class_type": "EditImageNode",
+   "file": "a WebP, EXIF 6",
+   "filename": "handoff.webp",
+   "input": "input_image",
+   "loader": "Image",
+   "made": {
+    "PNG:9b901e773ec2232c2e389d089369e27e503079e205a24c85c848ec79d956e013": {
+     "sha256": "6a8febb31a3f442eb9df2b75e2343718b35e6340f006b0ccdb45e7af606457c0",
+     "shape": [
+      23,
+      15,
+      3
+     ]
+    }
+   },
+   "name": "handoff \u00b7 a WebP, EXIF 6 \u00b7 Image \u2192 EditImageNode",
+   "tensor_shape": [
+    1,
+    23,
+    15,
+    3
+   ],
+   "widgets": {
+    "aspect_ratio": "match_input_image",
+    "model": "Flux 2 Pro",
+    "output_format": "png",
+    "prompt": "make it dusk",
+    "prompt_upsampling": false,
+    "resolution": "1K",
+    "safety_tolerance": 2,
+    "seed": 7
+   }
+  },
+  {
+   "answers": [
+    {
+     "images": [
+      {
+       "url": "https://f.test/handoff/edited.png"
+      }
+     ]
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "fal-ai/flux-2-pro/edit",
+     "payload": {
+      "image_urls": [
+       "PNG:b241ba9ccde1fc29f6b67b7dbe6f26afe32a4c5d49088742e07a35a68a46f071"
+      ],
+      "output_format": "png",
+      "prompt": "make it dusk",
+      "seed": 7
+     },
+     "payload_json": "{\"image_urls\": [\"PNG:b241ba9ccde1fc29f6b67b7dbe6f26afe32a4c5d49088742e07a35a68a46f071\"], \"output_format\": \"png\", \"prompt\": \"make it dusk\", \"seed\": 7}",
+     "provider": "fal"
+    }
+   ],
+   "class_type": "EditImageNode",
+   "file": "a PNG with EXIF 6 (eXIf)",
+   "filename": "handoff.png",
+   "input": "input_image",
+   "loader": "LoadImage",
+   "made": {
+    "PNG:b241ba9ccde1fc29f6b67b7dbe6f26afe32a4c5d49088742e07a35a68a46f071": {
+     "sha256": "6414120456c89be6006341e22eaf3a3cba57bf4973480b5361a4971a6521b58b",
+     "shape": [
+      23,
+      15,
+      3
+     ]
+    }
+   },
+   "name": "handoff \u00b7 a PNG with EXIF 6 (eXIf) \u00b7 LoadImage \u2192 EditImageNode",
+   "tensor_shape": [
+    1,
+    23,
+    15,
+    3
+   ],
+   "widgets": {
+    "aspect_ratio": "match_input_image",
+    "model": "Flux 2 Pro",
+    "output_format": "png",
+    "prompt": "make it dusk",
+    "prompt_upsampling": false,
+    "resolution": "1K",
+    "safety_tolerance": 2,
+    "seed": 7
+   }
+  },
+  {
+   "answers": [
+    {
+     "images": [
+      {
+       "url": "https://f.test/handoff/edited.png"
+      }
+     ]
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "fal-ai/flux-2-pro/edit",
+     "payload": {
+      "image_urls": [
+       "PNG:b241ba9ccde1fc29f6b67b7dbe6f26afe32a4c5d49088742e07a35a68a46f071"
+      ],
+      "output_format": "png",
+      "prompt": "make it dusk",
+      "seed": 7
+     },
+     "payload_json": "{\"image_urls\": [\"PNG:b241ba9ccde1fc29f6b67b7dbe6f26afe32a4c5d49088742e07a35a68a46f071\"], \"output_format\": \"png\", \"prompt\": \"make it dusk\", \"seed\": 7}",
+     "provider": "fal"
+    }
+   ],
+   "class_type": "EditImageNode",
+   "file": "a PNG with EXIF 6 (eXIf)",
+   "filename": "handoff.png",
+   "input": "input_image",
+   "loader": "Image",
+   "made": {
+    "PNG:b241ba9ccde1fc29f6b67b7dbe6f26afe32a4c5d49088742e07a35a68a46f071": {
+     "sha256": "6414120456c89be6006341e22eaf3a3cba57bf4973480b5361a4971a6521b58b",
+     "shape": [
+      23,
+      15,
+      3
+     ]
+    }
+   },
+   "name": "handoff \u00b7 a PNG with EXIF 6 (eXIf) \u00b7 Image \u2192 EditImageNode",
+   "tensor_shape": [
+    1,
+    23,
+    15,
+    3
+   ],
+   "widgets": {
+    "aspect_ratio": "match_input_image",
+    "model": "Flux 2 Pro",
+    "output_format": "png",
+    "prompt": "make it dusk",
+    "prompt_upsampling": false,
+    "resolution": "1K",
+    "safety_tolerance": 2,
+    "seed": 7
+   }
+  },
+  {
+   "answers": [
+    {
+     "images": [
+      {
+       "url": "https://f.test/handoff/edited.png"
+      }
+     ]
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "fal-ai/flux-2-pro/edit",
+     "payload": {
+      "image_urls": [
+       "PNG:4d35d52dee3b054d7c802cac0c8789359f757de120b10591cf6f2be776c17384"
+      ],
+      "output_format": "png",
+      "prompt": "make it dusk",
+      "seed": 7
+     },
+     "payload_json": "{\"image_urls\": [\"PNG:4d35d52dee3b054d7c802cac0c8789359f757de120b10591cf6f2be776c17384\"], \"output_format\": \"png\", \"prompt\": \"make it dusk\", \"seed\": 7}",
+     "provider": "fal"
+    }
+   ],
+   "class_type": "EditImageNode",
+   "file": "an RGBA PNG, EXIF 8, partly see-through",
+   "filename": "handoff.png",
+   "input": "input_image",
+   "loader": "LoadImage",
+   "made": {
+    "PNG:4d35d52dee3b054d7c802cac0c8789359f757de120b10591cf6f2be776c17384": {
+     "sha256": "17f73e54d6f1daaa2d1be15e28a2dfb39d913955cb62169aabef091f27eca97d",
+     "shape": [
+      23,
+      15,
+      3
+     ]
+    }
+   },
+   "name": "handoff \u00b7 an RGBA PNG, EXIF 8, partly see-through \u00b7 LoadImage \u2192 EditImageNode",
+   "tensor_shape": [
+    1,
+    23,
+    15,
+    3
+   ],
+   "widgets": {
+    "aspect_ratio": "match_input_image",
+    "model": "Flux 2 Pro",
+    "output_format": "png",
+    "prompt": "make it dusk",
+    "prompt_upsampling": false,
+    "resolution": "1K",
+    "safety_tolerance": 2,
+    "seed": 7
+   }
+  },
+  {
+   "answers": [
+    {
+     "images": [
+      {
+       "url": "https://f.test/handoff/edited.png"
+      }
+     ]
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "fal-ai/flux-2-pro/edit",
+     "payload": {
+      "image_urls": [
+       "PNG:5c736f3848149a196f2897fd30a42f33fdc1af8c894e08bcf539f413d7ed4998"
+      ],
+      "output_format": "png",
+      "prompt": "make it dusk",
+      "seed": 7
+     },
+     "payload_json": "{\"image_urls\": [\"PNG:5c736f3848149a196f2897fd30a42f33fdc1af8c894e08bcf539f413d7ed4998\"], \"output_format\": \"png\", \"prompt\": \"make it dusk\", \"seed\": 7}",
+     "provider": "fal"
+    }
+   ],
+   "class_type": "EditImageNode",
+   "file": "an RGBA PNG, EXIF 8, partly see-through",
+   "filename": "handoff.png",
+   "input": "input_image",
+   "loader": "Image",
+   "made": {
+    "PNG:5c736f3848149a196f2897fd30a42f33fdc1af8c894e08bcf539f413d7ed4998": {
+     "sha256": "1e0c84dabc2c3c027e27f570d2fb319e30fb7a49e02bba9cb939e3ffa362cb2e",
+     "shape": [
+      23,
+      15,
+      4
+     ]
+    }
+   },
+   "name": "handoff \u00b7 an RGBA PNG, EXIF 8, partly see-through \u00b7 Image \u2192 EditImageNode",
+   "tensor_shape": [
+    1,
+    23,
+    15,
+    4
+   ],
+   "widgets": {
+    "aspect_ratio": "match_input_image",
+    "model": "Flux 2 Pro",
+    "output_format": "png",
+    "prompt": "make it dusk",
+    "prompt_upsampling": false,
+    "resolution": "1K",
+    "safety_tolerance": 2,
+    "seed": 7
+   }
+  },
+  {
+   "answers": [
+    {
+     "images": [
+      {
+       "url": "https://f.test/handoff/edited.png"
+      }
+     ]
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "fal-ai/flux-2-pro/edit",
+     "payload": {
+      "image_urls": [
+       "PNG:f39855c01cd810ec255935e69007bc2213b91f4c102b8f4b4d6dc2bce1e153b7"
+      ],
+      "output_format": "png",
+      "prompt": "make it dusk",
+      "seed": 7
+     },
+     "payload_json": "{\"image_urls\": [\"PNG:f39855c01cd810ec255935e69007bc2213b91f4c102b8f4b4d6dc2bce1e153b7\"], \"output_format\": \"png\", \"prompt\": \"make it dusk\", \"seed\": 7}",
+     "provider": "fal"
+    }
+   ],
+   "class_type": "EditImageNode",
+   "file": "a GIF, no transparency",
+   "filename": "handoff.gif",
+   "input": "input_image",
+   "loader": "LoadImage",
+   "made": {
+    "PNG:f39855c01cd810ec255935e69007bc2213b91f4c102b8f4b4d6dc2bce1e153b7": {
+     "sha256": "f07fcd43d83d080d8b08c0084dcea024f3d1e31d0a95003193d6c6e54493f9da",
+     "shape": [
+      15,
+      23,
+      3
+     ]
+    }
+   },
+   "name": "handoff \u00b7 a GIF, no transparency \u00b7 LoadImage \u2192 EditImageNode",
+   "tensor_shape": [
+    1,
+    15,
+    23,
+    3
+   ],
+   "widgets": {
+    "aspect_ratio": "match_input_image",
+    "model": "Flux 2 Pro",
+    "output_format": "png",
+    "prompt": "make it dusk",
+    "prompt_upsampling": false,
+    "resolution": "1K",
+    "safety_tolerance": 2,
+    "seed": 7
+   }
+  },
+  {
+   "answers": [
+    {
+     "images": [
+      {
+       "url": "https://f.test/handoff/edited.png"
+      }
+     ]
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "fal-ai/flux-2-pro/edit",
+     "payload": {
+      "image_urls": [
+       "PNG:f39855c01cd810ec255935e69007bc2213b91f4c102b8f4b4d6dc2bce1e153b7"
+      ],
+      "output_format": "png",
+      "prompt": "make it dusk",
+      "seed": 7
+     },
+     "payload_json": "{\"image_urls\": [\"PNG:f39855c01cd810ec255935e69007bc2213b91f4c102b8f4b4d6dc2bce1e153b7\"], \"output_format\": \"png\", \"prompt\": \"make it dusk\", \"seed\": 7}",
+     "provider": "fal"
+    }
+   ],
+   "class_type": "EditImageNode",
+   "file": "a GIF, no transparency",
+   "filename": "handoff.gif",
+   "input": "input_image",
+   "loader": "Image",
+   "made": {
+    "PNG:f39855c01cd810ec255935e69007bc2213b91f4c102b8f4b4d6dc2bce1e153b7": {
+     "sha256": "f07fcd43d83d080d8b08c0084dcea024f3d1e31d0a95003193d6c6e54493f9da",
+     "shape": [
+      15,
+      23,
+      3
+     ]
+    }
+   },
+   "name": "handoff \u00b7 a GIF, no transparency \u00b7 Image \u2192 EditImageNode",
+   "tensor_shape": [
+    1,
+    15,
+    23,
+    3
+   ],
+   "widgets": {
+    "aspect_ratio": "match_input_image",
+    "model": "Flux 2 Pro",
+    "output_format": "png",
+    "prompt": "make it dusk",
+    "prompt_upsampling": false,
+    "resolution": "1K",
+    "safety_tolerance": 2,
+    "seed": 7
+   }
+  },
+  {
+   "answers": [
+    {
+     "images": [
+      {
+       "url": "https://f.test/handoff/edited.png"
+      }
+     ]
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "fal-ai/flux-2-pro/edit",
+     "payload": {
+      "image_urls": [
+       "PNG:d64d61674a64c384d446821d63316e871b3a77cd1bafa6f327f2bc0aa275a4dd"
+      ],
+      "output_format": "png",
+      "prompt": "make it dusk",
+      "seed": 7
+     },
+     "payload_json": "{\"image_urls\": [\"PNG:d64d61674a64c384d446821d63316e871b3a77cd1bafa6f327f2bc0aa275a4dd\"], \"output_format\": \"png\", \"prompt\": \"make it dusk\", \"seed\": 7}",
+     "provider": "fal"
+    }
+   ],
+   "class_type": "EditImageNode",
+   "file": "a JPEG, EXIF 2",
+   "filename": "handoff.jpg",
+   "input": "input_image",
+   "loader": "LoadImage",
+   "made": {
+    "PNG:d64d61674a64c384d446821d63316e871b3a77cd1bafa6f327f2bc0aa275a4dd": {
+     "sha256": "896db8db62f080c884ebbdd0c36dae5a634fe12d131f07884665754b302f5874",
+     "shape": [
+      15,
+      23,
+      3
+     ]
+    }
+   },
+   "name": "handoff \u00b7 a JPEG, EXIF 2 \u00b7 LoadImage \u2192 EditImageNode",
+   "tensor_shape": [
+    1,
+    15,
+    23,
+    3
+   ],
+   "widgets": {
+    "aspect_ratio": "match_input_image",
+    "model": "Flux 2 Pro",
+    "output_format": "png",
+    "prompt": "make it dusk",
+    "prompt_upsampling": false,
+    "resolution": "1K",
+    "safety_tolerance": 2,
+    "seed": 7
+   }
+  },
+  {
+   "answers": [
+    {
+     "images": [
+      {
+       "url": "https://f.test/handoff/edited.png"
+      }
+     ]
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "fal-ai/flux-2-pro/edit",
+     "payload": {
+      "image_urls": [
+       "PNG:d64d61674a64c384d446821d63316e871b3a77cd1bafa6f327f2bc0aa275a4dd"
+      ],
+      "output_format": "png",
+      "prompt": "make it dusk",
+      "seed": 7
+     },
+     "payload_json": "{\"image_urls\": [\"PNG:d64d61674a64c384d446821d63316e871b3a77cd1bafa6f327f2bc0aa275a4dd\"], \"output_format\": \"png\", \"prompt\": \"make it dusk\", \"seed\": 7}",
+     "provider": "fal"
+    }
+   ],
+   "class_type": "EditImageNode",
+   "file": "a JPEG, EXIF 2",
+   "filename": "handoff.jpg",
+   "input": "input_image",
+   "loader": "Image",
+   "made": {
+    "PNG:d64d61674a64c384d446821d63316e871b3a77cd1bafa6f327f2bc0aa275a4dd": {
+     "sha256": "896db8db62f080c884ebbdd0c36dae5a634fe12d131f07884665754b302f5874",
+     "shape": [
+      15,
+      23,
+      3
+     ]
+    }
+   },
+   "name": "handoff \u00b7 a JPEG, EXIF 2 \u00b7 Image \u2192 EditImageNode",
+   "tensor_shape": [
+    1,
+    15,
+    23,
+    3
+   ],
+   "widgets": {
+    "aspect_ratio": "match_input_image",
+    "model": "Flux 2 Pro",
+    "output_format": "png",
+    "prompt": "make it dusk",
+    "prompt_upsampling": false,
+    "resolution": "1K",
+    "safety_tolerance": 2,
+    "seed": 7
+   }
+  },
+  {
+   "answers": [
+    {
+     "images": [
+      {
+       "url": "https://f.test/handoff/edited.png"
+      }
+     ]
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "fal-ai/flux-2-pro/edit",
+     "payload": {
+      "image_urls": [
+       "PNG:e961aed412b38655c6bfd0f1ddbc2d434343e085565a8f37ab3e1cd5a32f7209"
+      ],
+      "output_format": "png",
+      "prompt": "make it dusk",
+      "seed": 7
+     },
+     "payload_json": "{\"image_urls\": [\"PNG:e961aed412b38655c6bfd0f1ddbc2d434343e085565a8f37ab3e1cd5a32f7209\"], \"output_format\": \"png\", \"prompt\": \"make it dusk\", \"seed\": 7}",
+     "provider": "fal"
+    }
+   ],
+   "class_type": "EditImageNode",
+   "file": "a JPEG, EXIF 3",
+   "filename": "handoff.jpg",
+   "input": "input_image",
+   "loader": "LoadImage",
+   "made": {
+    "PNG:e961aed412b38655c6bfd0f1ddbc2d434343e085565a8f37ab3e1cd5a32f7209": {
+     "sha256": "5b2739367d632026353b6186605131d63dbe961ca07f9d251ae74e5ebea236fc",
+     "shape": [
+      15,
+      23,
+      3
+     ]
+    }
+   },
+   "name": "handoff \u00b7 a JPEG, EXIF 3 \u00b7 LoadImage \u2192 EditImageNode",
+   "tensor_shape": [
+    1,
+    15,
+    23,
+    3
+   ],
+   "widgets": {
+    "aspect_ratio": "match_input_image",
+    "model": "Flux 2 Pro",
+    "output_format": "png",
+    "prompt": "make it dusk",
+    "prompt_upsampling": false,
+    "resolution": "1K",
+    "safety_tolerance": 2,
+    "seed": 7
+   }
+  },
+  {
+   "answers": [
+    {
+     "images": [
+      {
+       "url": "https://f.test/handoff/edited.png"
+      }
+     ]
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "fal-ai/flux-2-pro/edit",
+     "payload": {
+      "image_urls": [
+       "PNG:e961aed412b38655c6bfd0f1ddbc2d434343e085565a8f37ab3e1cd5a32f7209"
+      ],
+      "output_format": "png",
+      "prompt": "make it dusk",
+      "seed": 7
+     },
+     "payload_json": "{\"image_urls\": [\"PNG:e961aed412b38655c6bfd0f1ddbc2d434343e085565a8f37ab3e1cd5a32f7209\"], \"output_format\": \"png\", \"prompt\": \"make it dusk\", \"seed\": 7}",
+     "provider": "fal"
+    }
+   ],
+   "class_type": "EditImageNode",
+   "file": "a JPEG, EXIF 3",
+   "filename": "handoff.jpg",
+   "input": "input_image",
+   "loader": "Image",
+   "made": {
+    "PNG:e961aed412b38655c6bfd0f1ddbc2d434343e085565a8f37ab3e1cd5a32f7209": {
+     "sha256": "5b2739367d632026353b6186605131d63dbe961ca07f9d251ae74e5ebea236fc",
+     "shape": [
+      15,
+      23,
+      3
+     ]
+    }
+   },
+   "name": "handoff \u00b7 a JPEG, EXIF 3 \u00b7 Image \u2192 EditImageNode",
+   "tensor_shape": [
+    1,
+    15,
+    23,
+    3
+   ],
+   "widgets": {
+    "aspect_ratio": "match_input_image",
+    "model": "Flux 2 Pro",
+    "output_format": "png",
+    "prompt": "make it dusk",
+    "prompt_upsampling": false,
+    "resolution": "1K",
+    "safety_tolerance": 2,
+    "seed": 7
+   }
+  },
+  {
+   "answers": [
+    {
+     "images": [
+      {
+       "url": "https://f.test/handoff/edited.png"
+      }
+     ]
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "fal-ai/flux-2-pro/edit",
+     "payload": {
+      "image_urls": [
+       "PNG:01cf20da744ac0f175bee0ff8850f69ec5b0c0ddbd14da4b20ea7ea8a3d287dd"
+      ],
+      "output_format": "png",
+      "prompt": "make it dusk",
+      "seed": 7
+     },
+     "payload_json": "{\"image_urls\": [\"PNG:01cf20da744ac0f175bee0ff8850f69ec5b0c0ddbd14da4b20ea7ea8a3d287dd\"], \"output_format\": \"png\", \"prompt\": \"make it dusk\", \"seed\": 7}",
+     "provider": "fal"
+    }
+   ],
+   "class_type": "EditImageNode",
+   "file": "a JPEG, EXIF 4",
+   "filename": "handoff.jpg",
+   "input": "input_image",
+   "loader": "LoadImage",
+   "made": {
+    "PNG:01cf20da744ac0f175bee0ff8850f69ec5b0c0ddbd14da4b20ea7ea8a3d287dd": {
+     "sha256": "51ccf4974548e28382a5ccb4c09d86a5276613a19d9245177df9fe58d9c080d7",
+     "shape": [
+      15,
+      23,
+      3
+     ]
+    }
+   },
+   "name": "handoff \u00b7 a JPEG, EXIF 4 \u00b7 LoadImage \u2192 EditImageNode",
+   "tensor_shape": [
+    1,
+    15,
+    23,
+    3
+   ],
+   "widgets": {
+    "aspect_ratio": "match_input_image",
+    "model": "Flux 2 Pro",
+    "output_format": "png",
+    "prompt": "make it dusk",
+    "prompt_upsampling": false,
+    "resolution": "1K",
+    "safety_tolerance": 2,
+    "seed": 7
+   }
+  },
+  {
+   "answers": [
+    {
+     "images": [
+      {
+       "url": "https://f.test/handoff/edited.png"
+      }
+     ]
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "fal-ai/flux-2-pro/edit",
+     "payload": {
+      "image_urls": [
+       "PNG:01cf20da744ac0f175bee0ff8850f69ec5b0c0ddbd14da4b20ea7ea8a3d287dd"
+      ],
+      "output_format": "png",
+      "prompt": "make it dusk",
+      "seed": 7
+     },
+     "payload_json": "{\"image_urls\": [\"PNG:01cf20da744ac0f175bee0ff8850f69ec5b0c0ddbd14da4b20ea7ea8a3d287dd\"], \"output_format\": \"png\", \"prompt\": \"make it dusk\", \"seed\": 7}",
+     "provider": "fal"
+    }
+   ],
+   "class_type": "EditImageNode",
+   "file": "a JPEG, EXIF 4",
+   "filename": "handoff.jpg",
+   "input": "input_image",
+   "loader": "Image",
+   "made": {
+    "PNG:01cf20da744ac0f175bee0ff8850f69ec5b0c0ddbd14da4b20ea7ea8a3d287dd": {
+     "sha256": "51ccf4974548e28382a5ccb4c09d86a5276613a19d9245177df9fe58d9c080d7",
+     "shape": [
+      15,
+      23,
+      3
+     ]
+    }
+   },
+   "name": "handoff \u00b7 a JPEG, EXIF 4 \u00b7 Image \u2192 EditImageNode",
+   "tensor_shape": [
+    1,
+    15,
+    23,
+    3
+   ],
+   "widgets": {
+    "aspect_ratio": "match_input_image",
+    "model": "Flux 2 Pro",
+    "output_format": "png",
+    "prompt": "make it dusk",
+    "prompt_upsampling": false,
+    "resolution": "1K",
+    "safety_tolerance": 2,
+    "seed": 7
+   }
+  },
+  {
+   "answers": [
+    {
+     "images": [
+      {
+       "url": "https://f.test/handoff/edited.png"
+      }
+     ]
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "fal-ai/flux-2-pro/edit",
+     "payload": {
+      "image_urls": [
+       "PNG:9612b583295b170d75760c0de43f52d1fc2a8360758c527f5cf60d8987d8f22a"
+      ],
+      "output_format": "png",
+      "prompt": "make it dusk",
+      "seed": 7
+     },
+     "payload_json": "{\"image_urls\": [\"PNG:9612b583295b170d75760c0de43f52d1fc2a8360758c527f5cf60d8987d8f22a\"], \"output_format\": \"png\", \"prompt\": \"make it dusk\", \"seed\": 7}",
+     "provider": "fal"
+    }
+   ],
+   "class_type": "EditImageNode",
+   "file": "a JPEG, EXIF 5",
+   "filename": "handoff.jpg",
+   "input": "input_image",
+   "loader": "LoadImage",
+   "made": {
+    "PNG:9612b583295b170d75760c0de43f52d1fc2a8360758c527f5cf60d8987d8f22a": {
+     "sha256": "1728aebcb384df4c6e189b41df1fb3ddcf076024b19f25f821d8ec05ff27da82",
+     "shape": [
+      23,
+      15,
+      3
+     ]
+    }
+   },
+   "name": "handoff \u00b7 a JPEG, EXIF 5 \u00b7 LoadImage \u2192 EditImageNode",
+   "tensor_shape": [
+    1,
+    23,
+    15,
+    3
+   ],
+   "widgets": {
+    "aspect_ratio": "match_input_image",
+    "model": "Flux 2 Pro",
+    "output_format": "png",
+    "prompt": "make it dusk",
+    "prompt_upsampling": false,
+    "resolution": "1K",
+    "safety_tolerance": 2,
+    "seed": 7
+   }
+  },
+  {
+   "answers": [
+    {
+     "images": [
+      {
+       "url": "https://f.test/handoff/edited.png"
+      }
+     ]
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "fal-ai/flux-2-pro/edit",
+     "payload": {
+      "image_urls": [
+       "PNG:9612b583295b170d75760c0de43f52d1fc2a8360758c527f5cf60d8987d8f22a"
+      ],
+      "output_format": "png",
+      "prompt": "make it dusk",
+      "seed": 7
+     },
+     "payload_json": "{\"image_urls\": [\"PNG:9612b583295b170d75760c0de43f52d1fc2a8360758c527f5cf60d8987d8f22a\"], \"output_format\": \"png\", \"prompt\": \"make it dusk\", \"seed\": 7}",
+     "provider": "fal"
+    }
+   ],
+   "class_type": "EditImageNode",
+   "file": "a JPEG, EXIF 5",
+   "filename": "handoff.jpg",
+   "input": "input_image",
+   "loader": "Image",
+   "made": {
+    "PNG:9612b583295b170d75760c0de43f52d1fc2a8360758c527f5cf60d8987d8f22a": {
+     "sha256": "1728aebcb384df4c6e189b41df1fb3ddcf076024b19f25f821d8ec05ff27da82",
+     "shape": [
+      23,
+      15,
+      3
+     ]
+    }
+   },
+   "name": "handoff \u00b7 a JPEG, EXIF 5 \u00b7 Image \u2192 EditImageNode",
+   "tensor_shape": [
+    1,
+    23,
+    15,
+    3
+   ],
+   "widgets": {
+    "aspect_ratio": "match_input_image",
+    "model": "Flux 2 Pro",
+    "output_format": "png",
+    "prompt": "make it dusk",
+    "prompt_upsampling": false,
+    "resolution": "1K",
+    "safety_tolerance": 2,
+    "seed": 7
+   }
+  },
+  {
+   "answers": [
+    {
+     "images": [
+      {
+       "url": "https://f.test/handoff/edited.png"
+      }
+     ]
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "fal-ai/flux-2-pro/edit",
+     "payload": {
+      "image_urls": [
+       "PNG:61438b9c6e2852ae6494ca01c1b84dd67593a740cf8e000bce5704e0da13df3e"
+      ],
+      "output_format": "png",
+      "prompt": "make it dusk",
+      "seed": 7
+     },
+     "payload_json": "{\"image_urls\": [\"PNG:61438b9c6e2852ae6494ca01c1b84dd67593a740cf8e000bce5704e0da13df3e\"], \"output_format\": \"png\", \"prompt\": \"make it dusk\", \"seed\": 7}",
+     "provider": "fal"
+    }
+   ],
+   "class_type": "EditImageNode",
+   "file": "a JPEG, EXIF 6",
+   "filename": "handoff.jpg",
+   "input": "input_image",
+   "loader": "LoadImage",
+   "made": {
+    "PNG:61438b9c6e2852ae6494ca01c1b84dd67593a740cf8e000bce5704e0da13df3e": {
+     "sha256": "5bf04d91c74196ecdcc9a121512ba836f46d87324df1926185aa07e609d4b92b",
+     "shape": [
+      23,
+      15,
+      3
+     ]
+    }
+   },
+   "name": "handoff \u00b7 a JPEG, EXIF 6 \u00b7 LoadImage \u2192 EditImageNode",
+   "tensor_shape": [
+    1,
+    23,
+    15,
+    3
+   ],
+   "widgets": {
+    "aspect_ratio": "match_input_image",
+    "model": "Flux 2 Pro",
+    "output_format": "png",
+    "prompt": "make it dusk",
+    "prompt_upsampling": false,
+    "resolution": "1K",
+    "safety_tolerance": 2,
+    "seed": 7
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": "https://f.test/handoff/edited.png"
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "google/nano-banana-2",
+     "payload": {
+      "image_input": [
+       "PNG:61438b9c6e2852ae6494ca01c1b84dd67593a740cf8e000bce5704e0da13df3e"
+      ],
+      "output_format": "png",
+      "prompt": "Remove the lamp from the image completely. Fill the area it occupied by seamlessly continuing the surrounding background \u2014 match the scene's textures, perspective, lighting and grain so no trace, outline or shadow of the removed object remains. Keep EVERYTHING ELSE in the image exactly as it is: composition, framing, colours, other subjects and overall lighting. Output only the edited image.",
+      "resolution": "1K"
+     },
+     "payload_json": "{\"image_input\": [\"PNG:61438b9c6e2852ae6494ca01c1b84dd67593a740cf8e000bce5704e0da13df3e\"], \"output_format\": \"png\", \"prompt\": \"Remove the lamp from the image completely. Fill the area it occupied by seamlessly continuing the surrounding background \\u2014 match the scene's textures, perspective, lighting and grain so no trace, outline or shadow of the removed object remains. Keep EVERYTHING ELSE in the image exactly as it is: composition, framing, colours, other subjects and overall lighting. Output only the edited image.\", \"resolution\": \"1K\"}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "RemoveObjectNode",
+   "file": "a JPEG, EXIF 6",
+   "filename": "handoff.jpg",
+   "input": "image",
+   "loader": "LoadImage",
+   "made": {
+    "PNG:61438b9c6e2852ae6494ca01c1b84dd67593a740cf8e000bce5704e0da13df3e": {
+     "sha256": "5bf04d91c74196ecdcc9a121512ba836f46d87324df1926185aa07e609d4b92b",
+     "shape": [
+      23,
+      15,
+      3
+     ]
+    }
+   },
+   "name": "handoff \u00b7 a JPEG, EXIF 6 \u00b7 LoadImage \u2192 RemoveObjectNode",
+   "tensor_shape": [
+    1,
+    23,
+    15,
+    3
+   ],
+   "widgets": {
+    "instructions": "",
+    "target": "the lamp"
+   }
+  },
+  {
+   "answers": [
+    {
+     "images": [
+      {
+       "url": "https://f.test/handoff/edited.png"
+      }
+     ]
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "fal-ai/flux-2-pro/edit",
+     "payload": {
+      "image_urls": [
+       "PNG:61438b9c6e2852ae6494ca01c1b84dd67593a740cf8e000bce5704e0da13df3e"
+      ],
+      "output_format": "png",
+      "prompt": "make it dusk",
+      "seed": 7
+     },
+     "payload_json": "{\"image_urls\": [\"PNG:61438b9c6e2852ae6494ca01c1b84dd67593a740cf8e000bce5704e0da13df3e\"], \"output_format\": \"png\", \"prompt\": \"make it dusk\", \"seed\": 7}",
+     "provider": "fal"
+    }
+   ],
+   "class_type": "EditImageNode",
+   "file": "a JPEG, EXIF 6",
+   "filename": "handoff.jpg",
+   "input": "input_image",
+   "loader": "Image",
+   "made": {
+    "PNG:61438b9c6e2852ae6494ca01c1b84dd67593a740cf8e000bce5704e0da13df3e": {
+     "sha256": "5bf04d91c74196ecdcc9a121512ba836f46d87324df1926185aa07e609d4b92b",
+     "shape": [
+      23,
+      15,
+      3
+     ]
+    }
+   },
+   "name": "handoff \u00b7 a JPEG, EXIF 6 \u00b7 Image \u2192 EditImageNode",
+   "tensor_shape": [
+    1,
+    23,
+    15,
+    3
+   ],
+   "widgets": {
+    "aspect_ratio": "match_input_image",
+    "model": "Flux 2 Pro",
+    "output_format": "png",
+    "prompt": "make it dusk",
+    "prompt_upsampling": false,
+    "resolution": "1K",
+    "safety_tolerance": 2,
+    "seed": 7
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": "https://f.test/handoff/edited.png"
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "google/nano-banana-2",
+     "payload": {
+      "image_input": [
+       "PNG:61438b9c6e2852ae6494ca01c1b84dd67593a740cf8e000bce5704e0da13df3e"
+      ],
+      "output_format": "png",
+      "prompt": "Remove the lamp from the image completely. Fill the area it occupied by seamlessly continuing the surrounding background \u2014 match the scene's textures, perspective, lighting and grain so no trace, outline or shadow of the removed object remains. Keep EVERYTHING ELSE in the image exactly as it is: composition, framing, colours, other subjects and overall lighting. Output only the edited image.",
+      "resolution": "1K"
+     },
+     "payload_json": "{\"image_input\": [\"PNG:61438b9c6e2852ae6494ca01c1b84dd67593a740cf8e000bce5704e0da13df3e\"], \"output_format\": \"png\", \"prompt\": \"Remove the lamp from the image completely. Fill the area it occupied by seamlessly continuing the surrounding background \\u2014 match the scene's textures, perspective, lighting and grain so no trace, outline or shadow of the removed object remains. Keep EVERYTHING ELSE in the image exactly as it is: composition, framing, colours, other subjects and overall lighting. Output only the edited image.\", \"resolution\": \"1K\"}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "RemoveObjectNode",
+   "file": "a JPEG, EXIF 6",
+   "filename": "handoff.jpg",
+   "input": "image",
+   "loader": "Image",
+   "made": {
+    "PNG:61438b9c6e2852ae6494ca01c1b84dd67593a740cf8e000bce5704e0da13df3e": {
+     "sha256": "5bf04d91c74196ecdcc9a121512ba836f46d87324df1926185aa07e609d4b92b",
+     "shape": [
+      23,
+      15,
+      3
+     ]
+    }
+   },
+   "name": "handoff \u00b7 a JPEG, EXIF 6 \u00b7 Image \u2192 RemoveObjectNode",
+   "tensor_shape": [
+    1,
+    23,
+    15,
+    3
+   ],
+   "widgets": {
+    "instructions": "",
+    "target": "the lamp"
+   }
+  },
+  {
+   "answers": [
+    {
+     "images": [
+      {
+       "url": "https://f.test/handoff/edited.png"
+      }
+     ]
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "fal-ai/flux-2-pro/edit",
+     "payload": {
+      "image_urls": [
+       "PNG:989bdbd3d34b67e11ba5b9eb8d69c9402bfbe7bf9a27cadcfc064fcb8312f4f6"
+      ],
+      "output_format": "png",
+      "prompt": "make it dusk",
+      "seed": 7
+     },
+     "payload_json": "{\"image_urls\": [\"PNG:989bdbd3d34b67e11ba5b9eb8d69c9402bfbe7bf9a27cadcfc064fcb8312f4f6\"], \"output_format\": \"png\", \"prompt\": \"make it dusk\", \"seed\": 7}",
+     "provider": "fal"
+    }
+   ],
+   "class_type": "EditImageNode",
+   "file": "a JPEG, EXIF 7",
+   "filename": "handoff.jpg",
+   "input": "input_image",
+   "loader": "LoadImage",
+   "made": {
+    "PNG:989bdbd3d34b67e11ba5b9eb8d69c9402bfbe7bf9a27cadcfc064fcb8312f4f6": {
+     "sha256": "1481c8c377f7e1c8ab0eb1fe64011c32e6d374ed8c503af488d54c8e99497b76",
+     "shape": [
+      23,
+      15,
+      3
+     ]
+    }
+   },
+   "name": "handoff \u00b7 a JPEG, EXIF 7 \u00b7 LoadImage \u2192 EditImageNode",
+   "tensor_shape": [
+    1,
+    23,
+    15,
+    3
+   ],
+   "widgets": {
+    "aspect_ratio": "match_input_image",
+    "model": "Flux 2 Pro",
+    "output_format": "png",
+    "prompt": "make it dusk",
+    "prompt_upsampling": false,
+    "resolution": "1K",
+    "safety_tolerance": 2,
+    "seed": 7
+   }
+  },
+  {
+   "answers": [
+    {
+     "images": [
+      {
+       "url": "https://f.test/handoff/edited.png"
+      }
+     ]
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "fal-ai/flux-2-pro/edit",
+     "payload": {
+      "image_urls": [
+       "PNG:989bdbd3d34b67e11ba5b9eb8d69c9402bfbe7bf9a27cadcfc064fcb8312f4f6"
+      ],
+      "output_format": "png",
+      "prompt": "make it dusk",
+      "seed": 7
+     },
+     "payload_json": "{\"image_urls\": [\"PNG:989bdbd3d34b67e11ba5b9eb8d69c9402bfbe7bf9a27cadcfc064fcb8312f4f6\"], \"output_format\": \"png\", \"prompt\": \"make it dusk\", \"seed\": 7}",
+     "provider": "fal"
+    }
+   ],
+   "class_type": "EditImageNode",
+   "file": "a JPEG, EXIF 7",
+   "filename": "handoff.jpg",
+   "input": "input_image",
+   "loader": "Image",
+   "made": {
+    "PNG:989bdbd3d34b67e11ba5b9eb8d69c9402bfbe7bf9a27cadcfc064fcb8312f4f6": {
+     "sha256": "1481c8c377f7e1c8ab0eb1fe64011c32e6d374ed8c503af488d54c8e99497b76",
+     "shape": [
+      23,
+      15,
+      3
+     ]
+    }
+   },
+   "name": "handoff \u00b7 a JPEG, EXIF 7 \u00b7 Image \u2192 EditImageNode",
+   "tensor_shape": [
+    1,
+    23,
+    15,
+    3
+   ],
+   "widgets": {
+    "aspect_ratio": "match_input_image",
+    "model": "Flux 2 Pro",
+    "output_format": "png",
+    "prompt": "make it dusk",
+    "prompt_upsampling": false,
+    "resolution": "1K",
+    "safety_tolerance": 2,
+    "seed": 7
+   }
+  },
+  {
+   "answers": [
+    {
+     "images": [
+      {
+       "url": "https://f.test/handoff/edited.png"
+      }
+     ]
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "fal-ai/flux-2-pro/edit",
+     "payload": {
+      "image_urls": [
+       "PNG:adee4d4ca3e31aa7d8df4631f9448f0f2d5ba778e489a31c813767d1c220b7fc"
+      ],
+      "output_format": "png",
+      "prompt": "make it dusk",
+      "seed": 7
+     },
+     "payload_json": "{\"image_urls\": [\"PNG:adee4d4ca3e31aa7d8df4631f9448f0f2d5ba778e489a31c813767d1c220b7fc\"], \"output_format\": \"png\", \"prompt\": \"make it dusk\", \"seed\": 7}",
+     "provider": "fal"
+    }
+   ],
+   "class_type": "EditImageNode",
+   "file": "a JPEG, EXIF 8",
+   "filename": "handoff.jpg",
+   "input": "input_image",
+   "loader": "LoadImage",
+   "made": {
+    "PNG:adee4d4ca3e31aa7d8df4631f9448f0f2d5ba778e489a31c813767d1c220b7fc": {
+     "sha256": "7d18bb2ef78a80bf7b263e2402efda58bdfee0f21e13acf0f64e20138d4f6ceb",
+     "shape": [
+      23,
+      15,
+      3
+     ]
+    }
+   },
+   "name": "handoff \u00b7 a JPEG, EXIF 8 \u00b7 LoadImage \u2192 EditImageNode",
+   "tensor_shape": [
+    1,
+    23,
+    15,
+    3
+   ],
+   "widgets": {
+    "aspect_ratio": "match_input_image",
+    "model": "Flux 2 Pro",
+    "output_format": "png",
+    "prompt": "make it dusk",
+    "prompt_upsampling": false,
+    "resolution": "1K",
+    "safety_tolerance": 2,
+    "seed": 7
+   }
+  },
+  {
+   "answers": [
+    {
+     "images": [
+      {
+       "url": "https://f.test/handoff/edited.png"
+      }
+     ]
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "fal-ai/flux-2-pro/edit",
+     "payload": {
+      "image_urls": [
+       "PNG:adee4d4ca3e31aa7d8df4631f9448f0f2d5ba778e489a31c813767d1c220b7fc"
+      ],
+      "output_format": "png",
+      "prompt": "make it dusk",
+      "seed": 7
+     },
+     "payload_json": "{\"image_urls\": [\"PNG:adee4d4ca3e31aa7d8df4631f9448f0f2d5ba778e489a31c813767d1c220b7fc\"], \"output_format\": \"png\", \"prompt\": \"make it dusk\", \"seed\": 7}",
+     "provider": "fal"
+    }
+   ],
+   "class_type": "EditImageNode",
+   "file": "a JPEG, EXIF 8",
+   "filename": "handoff.jpg",
+   "input": "input_image",
+   "loader": "Image",
+   "made": {
+    "PNG:adee4d4ca3e31aa7d8df4631f9448f0f2d5ba778e489a31c813767d1c220b7fc": {
+     "sha256": "7d18bb2ef78a80bf7b263e2402efda58bdfee0f21e13acf0f64e20138d4f6ceb",
+     "shape": [
+      23,
+      15,
+      3
+     ]
+    }
+   },
+   "name": "handoff \u00b7 a JPEG, EXIF 8 \u00b7 Image \u2192 EditImageNode",
+   "tensor_shape": [
+    1,
+    23,
+    15,
+    3
+   ],
+   "widgets": {
+    "aspect_ratio": "match_input_image",
+    "model": "Flux 2 Pro",
+    "output_format": "png",
+    "prompt": "make it dusk",
+    "prompt_upsampling": false,
+    "resolution": "1K",
+    "safety_tolerance": 2,
+    "seed": 7
+   }
+  }
+ ],
+ "files": {
+  "a 16-bit RGB PNG": "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",
+  "a 16-bit RGBA PNG, partly see-through": "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",
+  "a 16-bit grey PNG": "iVBORw0KGgoAAAANSUhEUgAAABcAAAAPEAAAAAB6VNfJAAACj0lEQVR4nAXBC0zMAQDA4d+ljrZCpMnjstv04FiRSTiJ9LjCJEedVV5bHlPX1sM86jxqp+dkHrGRnkouIktWsyadMudaD07X/ubd0YtSjO+D056fWeETxnsyXWSGhNp2vjI18T6Vt26Ne95MY4SjezUiEzi4YYB3iCgADvdWTM05+5D2oqGDvuxDwFeSzSg69vw0TtxIvIdSZ4O6KTW1Zi75Su2QLTlI2J9rR8JwCVM4gyivQOvz7++4jE585vYZTCKSOeKs/FQV4HD7ooNJsVLoMvqVO+os5abn/qYIlRkFYmywUhY1Sgy2JM3g+IbqrDSW8CBGVRkz/wn1y71ZsD2K04Xi7NbFwV90/c0zI7AiNV5NxTy2TXzvzsSef/0XfxgpzA+jkBb73utanJBREmdeH0cAmur3BEEZO8yOaz/SnJJBvdZuV+1k23L3tfJMxfE6R0FqNKsoNXRgpR5Ghh48yTOmMx9n0vTrYt2GnWinM0NGYJOUS9xBPBDqMUpIaZD4Ck7QyBZBwA53bQRuqL4l7m4mymxtMhCu+ul3jGibD8TzmQke0gUiwlFSH7xv9ppybxQo2Ig4UeCURs7ojAyCUaqtcUVB/7e38EFI6Z5O+vYwQi25Lgu3leLUHU8yHeQ9fcY4bo+3UKXeiQX56lOik0OaAyPn7BLaY7bWvHCfraWBl4zxVSwZn/Yn22GVr3JWVXEw1udfVw7qxbBIkEZfTXOJjMAj6gRZ1JKCF42xrxhLaSGcNmozEsL8iwelm4Qe7loIZdnAG8bQdUjtYz28joxwjz5GvR6RjH/III2RgZSwkM3GVmg4Fqe/QI/wCfXvQ/FFXONycRC9KJb6JP1C3lbXM0lfRj/Oc27g+h+MQQiEtd+19gAAAABJRU5ErkJggg==",
+  "a CMYK JPEG": "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",
+  "a CMYK JPEG, EXIF 6": "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",
+  "a GIF, no transparency": "R0lGODdhFwAPAIUAAN7zpt71OaTqmaXtJ+bJntrKIZnMnqDLO1v30Fv4P1ropmPGZiHs4SHqOhLKvyTOMOSyzd+xVZytwKGzZN+K0uaIMaKIpKWJIWKownemPSarwxi3Mm6LhzWNjxSVzRuBZuBkz+NmU6xhoaljKNlGn+dPSqpBs6pKNuMi0+IiUdUHrdgEL60luKMtMZ8LoroNQl5l6VlncVVTWW03qVs8KhpiqBhrNyc+xSA+TF8doWMjO2MNqV0JUhUq1DERziYbNSwAAAAAFwAPAAAI/wA/HDCxo4CDAAxaSGDRIYcODyECYJCQ4cSACSkqIBBBQEOGCxtgfEgwogKGDD9QFChgAsSNEQFajHBBgoAJAzYaPKDRAEMHCBMUqCgxAwIGDAA8EMDBAkYOECggNMjxQIEJESxwTJBgQECBACgQzDhhgcCFCRsQBCBxI8QBCRFurLAxAUOPETkwEDjgggOFDABU9KiZ4sGEHDZE+OCxwoWJGzkkiJDgwwOKHxFUMIjQ4EWGDiN+dFjxwocLGSVAtIgggoSDGRgSULjhIYIHCSVYkGBQwwUMBj9a4KhQIQaNFglYbGAhIQUABgk+KABgA4KI4xM6AMCxgIaIHB8wqIXwsYLHhAsvYjjAUaPHhRokSrSQsQDlDQQwUHAQ0BKCDxUNDLACCgI8sEEIFCSAgAwkYFBbCzxI8AIJefkAQQIhtDDADRboIAEIQeWAAlMgDDACDT0cEMAAOuAnggw8lOAAAiCA8AEACuBQwGIDIMAADTe8AAMGP/ylAgwGGEBAAgxI0EFAADs=",
+  "a JPEG, EXIF 2": "/9j/4AAQSkZJRgABAQAAAQABAAD/4QAiRXhpZgAATU0AKgAAAAgAAQESAAMAAAABAAIAAAAAAAD/2wBDAAIBAQEBAQIBAQECAgICAgQDAgICAgUEBAMEBgUGBgYFBgYGBwkIBgcJBwYGCAsICQoKCgoKBggLDAsKDAkKCgr/2wBDAQICAgICAgUDAwUKBwYHCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgr/wAARCAAPABcDASIAAhEBAxEB/8QAHwAAAQUBAQEBAQEAAAAAAAAAAAECAwQFBgcICQoL/8QAtRAAAgEDAwIEAwUFBAQAAAF9AQIDAAQRBRIhMUEGE1FhByJxFDKBkaEII0KxwRVS0fAkM2JyggkKFhcYGRolJicoKSo0NTY3ODk6Q0RFRkdISUpTVFVWV1hZWmNkZWZnaGlqc3R1dnd4eXqDhIWGh4iJipKTlJWWl5iZmqKjpKWmp6ipqrKztLW2t7i5usLDxMXGx8jJytLT1NXW19jZ2uHi4+Tl5ufo6erx8vP09fb3+Pn6/8QAHwEAAwEBAQEBAQEBAQAAAAAAAAECAwQFBgcICQoL/8QAtREAAgECBAQDBAcFBAQAAQJ3AAECAxEEBSExBhJBUQdhcRMiMoEIFEKRobHBCSMzUvAVYnLRChYkNOEl8RcYGRomJygpKjU2Nzg5OkNERUZHSElKU1RVVldYWVpjZGVmZ2hpanN0dXZ3eHl6goOEhYaHiImKkpOUlZaXmJmaoqOkpaanqKmqsrO0tba3uLm6wsPExcbHyMnK0tPU1dbX2Nna4uPk5ebn6Onq8vP09fb3+Pn6/9oADAMBAAIRAxEAPwBNC/ak+Bmr+OdJ8Kfs8fEq70O3fTdM0S41rXNDkhhv41guYVmgNp/pzbUuI2ikuHa3Ly3bShYBaqK2vaT8KItG0vW7rSdW1zxLHOUs9LufDx3fZmthF8l3I0senJaJaJbxss14VdxZrFLcpJIyvbRHVb/x94lXTvD3gf4ea3cWXjfx01nY3M9hra/YrW7t7IQ6YJ47gJJd+Y8Vv9jnnigniFq+JIuP8PeHPBOmfD/w98J7Lwpe3fhC3t9L1nxHLDb6fYSCO5tZI7KZlWOSRd6/2jE0MUkjLPp9uyzRQtbta9X1XCVMPg54KhOqvdVuZR9pKnOShGVRUk5OPIoezjKNkoyoJSnOMfQrYXKsz5qTpXq03ThUlSq805znQftKbqU4U5xnOMoycJPmSqOnzypRlI9n8UeP/HGk/E2x0rU/CWteKIrOxm0u8t9K8S6hYCxZna6UXWoSPd392bjZ5qRmWOWNbaN5crcuHKy/i58Bvir+znout/F7wZ4h1y6ubPWpNYg1qLx7d2upzSX93cQiJDAIhcQW8bSovmy27f6XK4B5icrellOYuhCeTSp1KcruUualD95zPnukuWTuruUdJNu7lPmnJYPNeCc0hOefY+lTxEZzjyKMVyR5m4rWu29He/nvL4pf/9k=",
+  "a JPEG, EXIF 3": "/9j/4AAQSkZJRgABAQAAAQABAAD/4QAiRXhpZgAATU0AKgAAAAgAAQESAAMAAAABAAMAAAAAAAD/2wBDAAIBAQEBAQIBAQECAgICAgQDAgICAgUEBAMEBgUGBgYFBgYGBwkIBgcJBwYGCAsICQoKCgoKBggLDAsKDAkKCgr/2wBDAQICAgICAgUDAwUKBwYHCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgr/wAARCAAPABcDASIAAhEBAxEB/8QAHwAAAQUBAQEBAQEAAAAAAAAAAAECAwQFBgcICQoL/8QAtRAAAgEDAwIEAwUFBAQAAAF9AQIDAAQRBRIhMUEGE1FhByJxFDKBkaEII0KxwRVS0fAkM2JyggkKFhcYGRolJicoKSo0NTY3ODk6Q0RFRkdISUpTVFVWV1hZWmNkZWZnaGlqc3R1dnd4eXqDhIWGh4iJipKTlJWWl5iZmqKjpKWmp6ipqrKztLW2t7i5usLDxMXGx8jJytLT1NXW19jZ2uHi4+Tl5ufo6erx8vP09fb3+Pn6/8QAHwEAAwEBAQEBAQEBAQAAAAAAAAECAwQFBgcICQoL/8QAtREAAgECBAQDBAcFBAQAAQJ3AAECAxEEBSExBhJBUQdhcRMiMoEIFEKRobHBCSMzUvAVYnLRChYkNOEl8RcYGRomJygpKjU2Nzg5OkNERUZHSElKU1RVVldYWVpjZGVmZ2hpanN0dXZ3eHl6goOEhYaHiImKkpOUlZaXmJmaoqOkpaanqKmqsrO0tba3uLm6wsPExcbHyMnK0tPU1dbX2Nna4uPk5ebn6Onq8vP09fb3+Pn6/9oADAMBAAIRAxEAPwBNC/ak+Bmr+OdJ8Kfs8fEq70O3fTdM0S41rXNDkhhv41guYVmgNp/pzbUuI2ikuHa3Ly3bShYBaqK2vaT8KItG0vW7rSdW1zxLHOUs9LufDx3fZmthF8l3I0senJaJaJbxss14VdxZrFLcpJIyvbRHVb/x94lXTvD3gf4ea3cWXjfx01nY3M9hra/YrW7t7IQ6YJ47gJJd+Y8Vv9jnnigniFq+JIuP8PeHPBOmfD/w98J7Lwpe3fhC3t9L1nxHLDb6fYSCO5tZI7KZlWOSRd6/2jE0MUkjLPp9uyzRQtbta9X1XCVMPg54KhOqvdVuZR9pKnOShGVRUk5OPIoezjKNkoyoJSnOMfQrYXKsz5qTpXq03ThUlSq805znQftKbqU4U5xnOMoycJPmSqOnzypRlI9n8UeP/HGk/E2x0rU/CWteKIrOxm0u8t9K8S6hYCxZna6UXWoSPd392bjZ5qRmWOWNbaN5crcuHKy/i58Bvir+znout/F7wZ4h1y6ubPWpNYg1qLx7d2upzSX93cQiJDAIhcQW8bSovmy27f6XK4B5icrellOYuhCeTSp1KcruUualD95zPnukuWTuruUdJNu7lPmnJYPNeCc0hOefY+lTxEZzjyKMVyR5m4rWu29He/nvL4pf/9k=",
+  "a JPEG, EXIF 4": "/9j/4AAQSkZJRgABAQAAAQABAAD/4QAiRXhpZgAATU0AKgAAAAgAAQESAAMAAAABAAQAAAAAAAD/2wBDAAIBAQEBAQIBAQECAgICAgQDAgICAgUEBAMEBgUGBgYFBgYGBwkIBgcJBwYGCAsICQoKCgoKBggLDAsKDAkKCgr/2wBDAQICAgICAgUDAwUKBwYHCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgr/wAARCAAPABcDASIAAhEBAxEB/8QAHwAAAQUBAQEBAQEAAAAAAAAAAAECAwQFBgcICQoL/8QAtRAAAgEDAwIEAwUFBAQAAAF9AQIDAAQRBRIhMUEGE1FhByJxFDKBkaEII0KxwRVS0fAkM2JyggkKFhcYGRolJicoKSo0NTY3ODk6Q0RFRkdISUpTVFVWV1hZWmNkZWZnaGlqc3R1dnd4eXqDhIWGh4iJipKTlJWWl5iZmqKjpKWmp6ipqrKztLW2t7i5usLDxMXGx8jJytLT1NXW19jZ2uHi4+Tl5ufo6erx8vP09fb3+Pn6/8QAHwEAAwEBAQEBAQEBAQAAAAAAAAECAwQFBgcICQoL/8QAtREAAgECBAQDBAcFBAQAAQJ3AAECAxEEBSExBhJBUQdhcRMiMoEIFEKRobHBCSMzUvAVYnLRChYkNOEl8RcYGRomJygpKjU2Nzg5OkNERUZHSElKU1RVVldYWVpjZGVmZ2hpanN0dXZ3eHl6goOEhYaHiImKkpOUlZaXmJmaoqOkpaanqKmqsrO0tba3uLm6wsPExcbHyMnK0tPU1dbX2Nna4uPk5ebn6Onq8vP09fb3+Pn6/9oADAMBAAIRAxEAPwBNC/ak+Bmr+OdJ8Kfs8fEq70O3fTdM0S41rXNDkhhv41guYVmgNp/pzbUuI2ikuHa3Ly3bShYBaqK2vaT8KItG0vW7rSdW1zxLHOUs9LufDx3fZmthF8l3I0senJaJaJbxss14VdxZrFLcpJIyvbRHVb/x94lXTvD3gf4ea3cWXjfx01nY3M9hra/YrW7t7IQ6YJ47gJJd+Y8Vv9jnnigniFq+JIuP8PeHPBOmfD/w98J7Lwpe3fhC3t9L1nxHLDb6fYSCO5tZI7KZlWOSRd6/2jE0MUkjLPp9uyzRQtbta9X1XCVMPg54KhOqvdVuZR9pKnOShGVRUk5OPIoezjKNkoyoJSnOMfQrYXKsz5qTpXq03ThUlSq805znQftKbqU4U5xnOMoycJPmSqOnzypRlI9n8UeP/HGk/E2x0rU/CWteKIrOxm0u8t9K8S6hYCxZna6UXWoSPd392bjZ5qRmWOWNbaN5crcuHKy/i58Bvir+znout/F7wZ4h1y6ubPWpNYg1qLx7d2upzSX93cQiJDAIhcQW8bSovmy27f6XK4B5icrellOYuhCeTSp1KcruUualD95zPnukuWTuruUdJNu7lPmnJYPNeCc0hOefY+lTxEZzjyKMVyR5m4rWu29He/nvL4pf/9k=",
+  "a JPEG, EXIF 5": "/9j/4AAQSkZJRgABAQAAAQABAAD/4QAiRXhpZgAATU0AKgAAAAgAAQESAAMAAAABAAUAAAAAAAD/2wBDAAIBAQEBAQIBAQECAgICAgQDAgICAgUEBAMEBgUGBgYFBgYGBwkIBgcJBwYGCAsICQoKCgoKBggLDAsKDAkKCgr/2wBDAQICAgICAgUDAwUKBwYHCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgr/wAARCAAPABcDASIAAhEBAxEB/8QAHwAAAQUBAQEBAQEAAAAAAAAAAAECAwQFBgcICQoL/8QAtRAAAgEDAwIEAwUFBAQAAAF9AQIDAAQRBRIhMUEGE1FhByJxFDKBkaEII0KxwRVS0fAkM2JyggkKFhcYGRolJicoKSo0NTY3ODk6Q0RFRkdISUpTVFVWV1hZWmNkZWZnaGlqc3R1dnd4eXqDhIWGh4iJipKTlJWWl5iZmqKjpKWmp6ipqrKztLW2t7i5usLDxMXGx8jJytLT1NXW19jZ2uHi4+Tl5ufo6erx8vP09fb3+Pn6/8QAHwEAAwEBAQEBAQEBAQAAAAAAAAECAwQFBgcICQoL/8QAtREAAgECBAQDBAcFBAQAAQJ3AAECAxEEBSExBhJBUQdhcRMiMoEIFEKRobHBCSMzUvAVYnLRChYkNOEl8RcYGRomJygpKjU2Nzg5OkNERUZHSElKU1RVVldYWVpjZGVmZ2hpanN0dXZ3eHl6goOEhYaHiImKkpOUlZaXmJmaoqOkpaanqKmqsrO0tba3uLm6wsPExcbHyMnK0tPU1dbX2Nna4uPk5ebn6Onq8vP09fb3+Pn6/9oADAMBAAIRAxEAPwBNC/ak+Bmr+OdJ8Kfs8fEq70O3fTdM0S41rXNDkhhv41guYVmgNp/pzbUuI2ikuHa3Ly3bShYBaqK2vaT8KItG0vW7rSdW1zxLHOUs9LufDx3fZmthF8l3I0senJaJaJbxss14VdxZrFLcpJIyvbRHVb/x94lXTvD3gf4ea3cWXjfx01nY3M9hra/YrW7t7IQ6YJ47gJJd+Y8Vv9jnnigniFq+JIuP8PeHPBOmfD/w98J7Lwpe3fhC3t9L1nxHLDb6fYSCO5tZI7KZlWOSRd6/2jE0MUkjLPp9uyzRQtbta9X1XCVMPg54KhOqvdVuZR9pKnOShGVRUk5OPIoezjKNkoyoJSnOMfQrYXKsz5qTpXq03ThUlSq805znQftKbqU4U5xnOMoycJPmSqOnzypRlI9n8UeP/HGk/E2x0rU/CWteKIrOxm0u8t9K8S6hYCxZna6UXWoSPd392bjZ5qRmWOWNbaN5crcuHKy/i58Bvir+znout/F7wZ4h1y6ubPWpNYg1qLx7d2upzSX93cQiJDAIhcQW8bSovmy27f6XK4B5icrellOYuhCeTSp1KcruUualD95zPnukuWTuruUdJNu7lPmnJYPNeCc0hOefY+lTxEZzjyKMVyR5m4rWu29He/nvL4pf/9k=",
+  "a JPEG, EXIF 6": "/9j/4AAQSkZJRgABAQAAAQABAAD/4QAiRXhpZgAATU0AKgAAAAgAAQESAAMAAAABAAYAAAAAAAD/2wBDAAIBAQEBAQIBAQECAgICAgQDAgICAgUEBAMEBgUGBgYFBgYGBwkIBgcJBwYGCAsICQoKCgoKBggLDAsKDAkKCgr/2wBDAQICAgICAgUDAwUKBwYHCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgr/wAARCAAPABcDASIAAhEBAxEB/8QAHwAAAQUBAQEBAQEAAAAAAAAAAAECAwQFBgcICQoL/8QAtRAAAgEDAwIEAwUFBAQAAAF9AQIDAAQRBRIhMUEGE1FhByJxFDKBkaEII0KxwRVS0fAkM2JyggkKFhcYGRolJicoKSo0NTY3ODk6Q0RFRkdISUpTVFVWV1hZWmNkZWZnaGlqc3R1dnd4eXqDhIWGh4iJipKTlJWWl5iZmqKjpKWmp6ipqrKztLW2t7i5usLDxMXGx8jJytLT1NXW19jZ2uHi4+Tl5ufo6erx8vP09fb3+Pn6/8QAHwEAAwEBAQEBAQEBAQAAAAAAAAECAwQFBgcICQoL/8QAtREAAgECBAQDBAcFBAQAAQJ3AAECAxEEBSExBhJBUQdhcRMiMoEIFEKRobHBCSMzUvAVYnLRChYkNOEl8RcYGRomJygpKjU2Nzg5OkNERUZHSElKU1RVVldYWVpjZGVmZ2hpanN0dXZ3eHl6goOEhYaHiImKkpOUlZaXmJmaoqOkpaanqKmqsrO0tba3uLm6wsPExcbHyMnK0tPU1dbX2Nna4uPk5ebn6Onq8vP09fb3+Pn6/9oADAMBAAIRAxEAPwBNC/ak+Bmr+OdJ8Kfs8fEq70O3fTdM0S41rXNDkhhv41guYVmgNp/pzbUuI2ikuHa3Ly3bShYBaqK2vaT8KItG0vW7rSdW1zxLHOUs9LufDx3fZmthF8l3I0senJaJaJbxss14VdxZrFLcpJIyvbRHVb/x94lXTvD3gf4ea3cWXjfx01nY3M9hra/YrW7t7IQ6YJ47gJJd+Y8Vv9jnnigniFq+JIuP8PeHPBOmfD/w98J7Lwpe3fhC3t9L1nxHLDb6fYSCO5tZI7KZlWOSRd6/2jE0MUkjLPp9uyzRQtbta9X1XCVMPg54KhOqvdVuZR9pKnOShGVRUk5OPIoezjKNkoyoJSnOMfQrYXKsz5qTpXq03ThUlSq805znQftKbqU4U5xnOMoycJPmSqOnzypRlI9n8UeP/HGk/E2x0rU/CWteKIrOxm0u8t9K8S6hYCxZna6UXWoSPd392bjZ5qRmWOWNbaN5crcuHKy/i58Bvir+znout/F7wZ4h1y6ubPWpNYg1qLx7d2upzSX93cQiJDAIhcQW8bSovmy27f6XK4B5icrellOYuhCeTSp1KcruUualD95zPnukuWTuruUdJNu7lPmnJYPNeCc0hOefY+lTxEZzjyKMVyR5m4rWu29He/nvL4pf/9k=",
+  "a JPEG, EXIF 7": "/9j/4AAQSkZJRgABAQAAAQABAAD/4QAiRXhpZgAATU0AKgAAAAgAAQESAAMAAAABAAcAAAAAAAD/2wBDAAIBAQEBAQIBAQECAgICAgQDAgICAgUEBAMEBgUGBgYFBgYGBwkIBgcJBwYGCAsICQoKCgoKBggLDAsKDAkKCgr/2wBDAQICAgICAgUDAwUKBwYHCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgr/wAARCAAPABcDASIAAhEBAxEB/8QAHwAAAQUBAQEBAQEAAAAAAAAAAAECAwQFBgcICQoL/8QAtRAAAgEDAwIEAwUFBAQAAAF9AQIDAAQRBRIhMUEGE1FhByJxFDKBkaEII0KxwRVS0fAkM2JyggkKFhcYGRolJicoKSo0NTY3ODk6Q0RFRkdISUpTVFVWV1hZWmNkZWZnaGlqc3R1dnd4eXqDhIWGh4iJipKTlJWWl5iZmqKjpKWmp6ipqrKztLW2t7i5usLDxMXGx8jJytLT1NXW19jZ2uHi4+Tl5ufo6erx8vP09fb3+Pn6/8QAHwEAAwEBAQEBAQEBAQAAAAAAAAECAwQFBgcICQoL/8QAtREAAgECBAQDBAcFBAQAAQJ3AAECAxEEBSExBhJBUQdhcRMiMoEIFEKRobHBCSMzUvAVYnLRChYkNOEl8RcYGRomJygpKjU2Nzg5OkNERUZHSElKU1RVVldYWVpjZGVmZ2hpanN0dXZ3eHl6goOEhYaHiImKkpOUlZaXmJmaoqOkpaanqKmqsrO0tba3uLm6wsPExcbHyMnK0tPU1dbX2Nna4uPk5ebn6Onq8vP09fb3+Pn6/9oADAMBAAIRAxEAPwBNC/ak+Bmr+OdJ8Kfs8fEq70O3fTdM0S41rXNDkhhv41guYVmgNp/pzbUuI2ikuHa3Ly3bShYBaqK2vaT8KItG0vW7rSdW1zxLHOUs9LufDx3fZmthF8l3I0senJaJaJbxss14VdxZrFLcpJIyvbRHVb/x94lXTvD3gf4ea3cWXjfx01nY3M9hra/YrW7t7IQ6YJ47gJJd+Y8Vv9jnnigniFq+JIuP8PeHPBOmfD/w98J7Lwpe3fhC3t9L1nxHLDb6fYSCO5tZI7KZlWOSRd6/2jE0MUkjLPp9uyzRQtbta9X1XCVMPg54KhOqvdVuZR9pKnOShGVRUk5OPIoezjKNkoyoJSnOMfQrYXKsz5qTpXq03ThUlSq805znQftKbqU4U5xnOMoycJPmSqOnzypRlI9n8UeP/HGk/E2x0rU/CWteKIrOxm0u8t9K8S6hYCxZna6UXWoSPd392bjZ5qRmWOWNbaN5crcuHKy/i58Bvir+znout/F7wZ4h1y6ubPWpNYg1qLx7d2upzSX93cQiJDAIhcQW8bSovmy27f6XK4B5icrellOYuhCeTSp1KcruUualD95zPnukuWTuruUdJNu7lPmnJYPNeCc0hOefY+lTxEZzjyKMVyR5m4rWu29He/nvL4pf/9k=",
+  "a JPEG, EXIF 8": "/9j/4AAQSkZJRgABAQAAAQABAAD/4QAiRXhpZgAATU0AKgAAAAgAAQESAAMAAAABAAgAAAAAAAD/2wBDAAIBAQEBAQIBAQECAgICAgQDAgICAgUEBAMEBgUGBgYFBgYGBwkIBgcJBwYGCAsICQoKCgoKBggLDAsKDAkKCgr/2wBDAQICAgICAgUDAwUKBwYHCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgr/wAARCAAPABcDASIAAhEBAxEB/8QAHwAAAQUBAQEBAQEAAAAAAAAAAAECAwQFBgcICQoL/8QAtRAAAgEDAwIEAwUFBAQAAAF9AQIDAAQRBRIhMUEGE1FhByJxFDKBkaEII0KxwRVS0fAkM2JyggkKFhcYGRolJicoKSo0NTY3ODk6Q0RFRkdISUpTVFVWV1hZWmNkZWZnaGlqc3R1dnd4eXqDhIWGh4iJipKTlJWWl5iZmqKjpKWmp6ipqrKztLW2t7i5usLDxMXGx8jJytLT1NXW19jZ2uHi4+Tl5ufo6erx8vP09fb3+Pn6/8QAHwEAAwEBAQEBAQEBAQAAAAAAAAECAwQFBgcICQoL/8QAtREAAgECBAQDBAcFBAQAAQJ3AAECAxEEBSExBhJBUQdhcRMiMoEIFEKRobHBCSMzUvAVYnLRChYkNOEl8RcYGRomJygpKjU2Nzg5OkNERUZHSElKU1RVVldYWVpjZGVmZ2hpanN0dXZ3eHl6goOEhYaHiImKkpOUlZaXmJmaoqOkpaanqKmqsrO0tba3uLm6wsPExcbHyMnK0tPU1dbX2Nna4uPk5ebn6Onq8vP09fb3+Pn6/9oADAMBAAIRAxEAPwBNC/ak+Bmr+OdJ8Kfs8fEq70O3fTdM0S41rXNDkhhv41guYVmgNp/pzbUuI2ikuHa3Ly3bShYBaqK2vaT8KItG0vW7rSdW1zxLHOUs9LufDx3fZmthF8l3I0senJaJaJbxss14VdxZrFLcpJIyvbRHVb/x94lXTvD3gf4ea3cWXjfx01nY3M9hra/YrW7t7IQ6YJ47gJJd+Y8Vv9jnnigniFq+JIuP8PeHPBOmfD/w98J7Lwpe3fhC3t9L1nxHLDb6fYSCO5tZI7KZlWOSRd6/2jE0MUkjLPp9uyzRQtbta9X1XCVMPg54KhOqvdVuZR9pKnOShGVRUk5OPIoezjKNkoyoJSnOMfQrYXKsz5qTpXq03ThUlSq805znQftKbqU4U5xnOMoycJPmSqOnzypRlI9n8UeP/HGk/E2x0rU/CWteKIrOxm0u8t9K8S6hYCxZna6UXWoSPd392bjZ5qRmWOWNbaN5crcuHKy/i58Bvir+znout/F7wZ4h1y6ubPWpNYg1qLx7d2upzSX93cQiJDAIhcQW8bSovmy27f6XK4B5icrellOYuhCeTSp1KcruUualD95zPnukuWTuruUdJNu7lPmnJYPNeCc0hOefY+lTxEZzjyKMVyR5m4rWu29He/nvL4pf/9k=",
+  "a PNG with EXIF 6 (eXIf)": "iVBORw0KGgoAAAANSUhEUgAAABcAAAAPCAIAAACAzcMBAAAAGmVYSWZNTQAqAAAACAABARIAAwAAAAEABgAAAAAAANZnS2kAAAQlSURBVHicARoE5fsAE4BlkcEyuljBXxOl370pH92jzvRPEPvsozQ3tOjgiS/iCZGRaC94ax4cA2jlxFJr7+9cc8DbotjKhKwTqlc4nvE0kcplBMSN7B8K8W6bPE5+oeoHhgS/ArAM1ZHZR4pg9B2DFr1Ef1Zgkj/JDUsH9eFOy5XL0eMw/cEAIPaRNNwbA8jjamZvOUvp6ACucTDt8EjGJx7EbhaXCIzXcpf30o6oP8+M04kEcQkU4S4e0ApdWDIj8wJJquoqlYbj3t+qv3Bv86fiAcv5UwZmPMHsr/0AVqLjd6PN6frzB6Lqy6eULlM5lwPcOX/9XheC8XbV7h/u+7vzAN8+WBitQbsBU/ytozjHqmNvoTPrODtBq8NStOLxkderAYHneW3vlgYlEOUJynTzAyRB408VXwFLUjUiC8TSee8he1sP1HkrfVgYaglVSzr0S88Pj8dT4dX1aGsMuz6EbrrkM1NfIwIG1fBtzqIOMYm9WjQyJq/rgPQycHfmSdeUWjDJ7HIh50xuDuZMD6vwDEwp12rN7NrvWkg8gy6bM5/O8P0X7MQiXTKN6HcAPy7/RwdfvgkctBGevD7AP0G0aQWAl5PlsUl7k7LVOBfSBZfxywf2CR0ixLJl8xCcCc37wI9WOfYmqwtaYqEiFI6Nt24wARojKAdbZbCCsPAEA5AdomLomatd34zp+QcCbqnmekiHIsqMEiPyFEeYNWKL+/AwJu5rW4eEyCza2hFWHsYRTi/Yn3kI/gDlT1GeIrHSPqcPv/MIL5eXDXs5b9sV4OYWEwuJNlUwNk7yfQTfjQtKc4FEQjKoKTdu91/AMqcLvECPEs6MvLXhMWfe8M0AF/31R/ceGWx2Tv596uqCJXcZ8776pFZzYVYsjz0XqrmBT5OU3vbZDlB3ScJMeycYnFyuNxSRF2F2W6LD2gOOPAX87gwUAVICVkyw9wzO0v6aJ7xBMqVnJzN7q/UiV9zKT4JuPp20dLH2FBgIpqfQtKQ9PPB6GkPL08J5HAYwcgilAih6NWLG57NetACG/n+tTsH7cPjJuPY0CNzSIbgj0HS25CngASyxFPbD63QlxQgPqTK3dm/5ku5ezTZk9th8VFXob5Rdms0ikO/rxVuuND4C6RXd6VEOxKEw/YmfG/2pkJL2LT52Q8WsjfHjRG95yUWnfyr8+3lo2AojYJBdW9eFbWAPQk4bT3n6FI64tYD+LHX1CfKQALVn1LPfA61SJEQ/Ax0r1cDBNtPsLrDmQWwJOFTX6jg//7xipDxTUUUZRfZfSAmtpmvv++Zy8u9ruSemcc7zllL1uQJNUAQwcDlANr5IGKRLyf8QBwtp48JQUUGu4FmXBc7SqwTcZrxwgF68ZeCDVU74fHlABlVGDpDIU/k6BwAaGu5xAU1CzdnYODyd5v/A1+jwWgAAAABJRU5ErkJggg==",
+  "a WebP, EXIF 6": "UklGRmACAABXRUJQVlA4WAoAAAAIAAAAFgAADgAAVlA4ICACAAAQDwCdASoXAA8APjEUiEKiISEYBAAgAwS2AE6ZQjuTQZwI0BhgP1d/WbfK+sA/TP2AP1V9Ef9lfgN/YD9dvZluUFcb/Ucxt+RGSn0Q//Iahv+0+ff+5eRr4h/wv83+AD+I/yr/AfmN/ePkA9QHoH/qARbA3A/8297gFDcjezOOfAAA/eO9RL/yC0QlwPpqHyIQnoAzbZPf5shAthh/6lVRUERgeZmjoAN74y1+pUk7x6GayiKT3VX/NS9szuRE2mFz9RD7hThvRI3lNoDvuJHgePxDz4BiOKRVPrDkkpZkLDG6SclB6IotqhlngwVjGb7oJWgVvrPGfhYxD68Uj7iCW/ELBi1dk//RbusuRsQvgw66cez/QvUnp3pVRnovQ9ADEX3UfxHof5GfwtQSMjLcFoTdT/McEteXeKcXLlNgdTn6CTndZbLE1sPrbvllHstE+IznyAyOOTX4b6+KjenNs2bQrfv/yE9RO8Xal8zOfB5dtyXLb62Y5e79WXq2YV2N65FM4r//j3zOmZa3KaPc8vvAH3s7VwaKiqHj/ur2/mmDUBchy2aeourPW9LD1enAYfANcJ5S7UR/oqx4r5lRx3Lk3IhZxt9nHWN9r38N/vVZVVt//ahb+0tZvkQLg3n8mYtL2h4S2l9BD5pAKlf4saSnrm7fFEuJA8jxgT1S83RkZ2C+lCIh6pEW5JeTj7IubZ9b0p6+55/PYJhAAAAARVhJRhoAAABNTQAqAAAACAABARIAAwAAAAEABgAAAAAAAA==",
+  "a grey + alpha PNG": "iVBORw0KGgoAAAANSUhEUgAAABcAAAAPCAQAAAClppzdAAACfUlEQVR4nAXBfUzMcQAH4M+3X2iihl420urQksQfYidvrfUuWkxpejs2XdJqa1yLZatoqVxtRjabl1VOSbok2uK4rOxa4XJUVKarI3pZF0v5eB4EoffOmthelu714ihPQ0dbZM3H8RejMMVMfk+Kv1pQrKaJnUgGchFPN8zxg7oaS9HHMoudrzJZjXaYUV49i1uMDslADiqwhVNEMffzAadZAAccY9XzXbkntQWM4LXkreaf7qmog4H5LIR/5gATJHSwinbsQWhiKlz5KLwBwdcTGYdmTOJvmRFOXI8dUPIJD9V/BQzFVqrhhiOMgCIljw2sRT7nYZsgYOUZ2nPRhVVURishYw/wDiE8yhAeRCcdr3zEBvQjSz/KPaqH8DK2XzqPf4w83ssMblM4Q7zkDDyh0ku7jXyBFWiRuv4ZXnfItcgXadgODeWStKB0Lhm3VP62iHikYWZclyJvdPEoHerHH+jF8LLKmfv4a9J6z4puTogRvj3wTLtZcl2AAU4mP67mNmpuztRU4nNtSGA4Ix0VdASxFmkYP9PKJP701/+pJ5QI4BBLGHg42i8ZejS+eoNu/T1Pe1igoxdVy2epQBiXYhBuwNjQCXTXKOGNbJkNfOiNGJ6L1TERg4jANVTwNhzYfDZskz2n74oezgspStK24ZPKpegTA4w630nIRB3VmEC7sMU+fhO/OVzUpLLCpimxhesareXBvFoxwosrPWuCxBKhRZhwhEbouYxjQsN3cG71ENnAU+QzFu8hRwZScnb6GDnHvjwNZTRzGjGUt/ZTR+3laoZSRXSgi+7sxw0u5kaQYwPpNPMHuwYqIZkewyk7/dQXTNKAtkIF/wMSl14ys8abfQAAAABJRU5ErkJggg==",
+  "a grey PNG": "iVBORw0KGgoAAAANSUhEUgAAABcAAAAPCAAAAAAqxAuKAAABc0lEQVR4nAFoAZf+AQHHEzIuCVI3TVgsCfqomiLJHkPpVrrLALykMrrJgl0GlL4zTxrBFKbHngs36CR/ATSU37pCGRaY3I8kDDRt1AbwEpTqG4s1ALAhcYIdK25j13EY3LnJlvpnAcwz2YtmAnXg9iYz47jqJkfk2K1JCJMBBGidsE6MAcbrlUQZv+AVRbxMZvHSyzPqPrTCB0auAm7UQ23HZ7Cgx2lsZjge92kvTQ8IBgbUAfoPHSikA37FM8dAsknNHAiashssyWRSAOvNDO421KJ7Cogg9vg7i/bu7BEHW7HNASsmQxvkQ91Z7+QoZNdrjmgHCd3iDhmmAc+d4BR9ZOw5jV7wPX+mGg4Zod7MIBKaATeOKv9OaN2zCLNb2QM0AzNL1+ygsVIxAqFuxS71TMJOTzMim8drnvervUpu/QgIAWChVgLcZ+H60rUkMQcAxgR3UmlsnQFrBAsWZQTDzULsxn4P+lgDeT0pwHf5APYY+7CfwnGEnlAAAAAASUVORK5CYII=",
+  "a lossless WebP with alpha": "UklGRl4EAABXRUJQVlA4TFIEAAAvFoADEB8Hx7ZttY0sZpbDzFSmpHllalgmVVZaMzOI9cH/axqwJMk2bZ2Nw73Ote+zbU/3zYWfto1jG5IAgGWklEndqWZtW1/ZB+59r3vVzcbNVs2kgoNt27Hl+o1ck23X9GOL248tuyZummxOths7mm3vtptsBfqJ/3eyDrr0C1NWYnQlaUaTpr9Sr3EiUPqKms1FFV+AUfSf+EsdbMr3mmimfzVU0lNBePGuz7KJCZQVmmEJ88kBiwIlegWz/AzQR2di/VLaiBtigmSZU6cChwoHwIAOWthvBjmTIcEU9POTQtNFD0Lye8GHpDQTKWjuN/hu0RG9InK+lkevjIlXtvUWuSkvMOkfATYDKbMaR6jWEBlUtOXmRP0V+5pRC8MgSeeZWSQCigRMJnSbSt2fZobNZhhTYisVJ1Ov+hP2yGJcI7MxDj/RMigeEgXmzhAtUrH/o3WRwaZPE9KwYPpjPNY85AQqFj3+/iDvD4Oz2T+hnwXbiCGsddznHDwacH8QVnUVrTbbnERuDgweU84AYBGlB2A9D9OPTYTYfqWmO65vyieI4cl+EG9OsnAElnFiNCQTlXnQs2jO3XNPTV3FeKXBDguhLqrmxfp8O2F83yHpbRpBB8JKemMsA7+L/SNTGhiWtgYfSLsHmZwgAAOjBGL3NzEXnZmnK2z8FP1/YqFgzShdTyo17fa/CzwRY0GcAaAkLBOUm5DdvEDDA51+oESqrz+3thFo8YNFihzWkQDtrU6senlseAr5/SiRS8e/feFfFEkqTq+PpAdQII/Y8YsZ8vuD+4+ReDS/U4s6aHtqYg4XEC8k1UGhJXj2ybD9FsqtQW60PpzgsxpmKCo5ErCAAZ1OhYZ9M5DxNCiS2SINHirIv4I1qvnqn/iVIrB3g8XOAN2D19EkCVRr0x6kMIwCmYKNe/zFcVcfqE38e1HnVMjGjiQ3zyOCjHhX1d4H97szDfcsacR8KL3vh1FU49wN/x7ktB011y6FzDb0DBx/AmFxFdZfplbbBYY7LWvppxWo+Owxh2y3O9Mctua2itkqlUwkW8ubJeUGHPwDu+YJtuAD/Pm2vy3zjcM2SAwQgAAY27Zt27Zt27Zte7Zt27bZURH9D+z3nrp32R8P1tMVGTMJ/H/9nzvQRUUiOD+TbAaK0BYGxmtdArxWIGVPbOvbNzKvPoHNaV7U9H/OEyCBTQlmhICP7AZd2xvEDMA53CyTseIaxpNGdqUPEYTso6sUJgFzDsGIHObPY/OTLYip+YRRr7xoysWebWDQQiuSDFfw870QLms4xX24Uo0GE8P0ws8DQ8eiRnkpr9fRCXDwyUbJ399oNqkGPQdprLPgw1rVCXIAdZYhlUacGvYDOFJ3VWpnWTRt8Itbd7dCeGrWDXLkjjzw/LHgfUil4HzfN4By5vfxXmkHu7gJcOf29y/ilfo6pH1tn34UesaASwqcfc3xiKV80VmOEB/HO4ozAQ==",
+  "a lossy WebP": "UklGRiwCAABXRUJQVlA4ICACAAAQDwCdASoXAA8APjEUiEKiISEYBAAgAwS2AE6ZQjuTQZwI0BhgP1d/WbfK+sA/TP2AP1V9Ef9lfgN/YD9dvZluUFcb/Ucxt+RGSn0Q//Iahv+0+ff+5eRr4h/wv83+AD+I/yr/AfmN/ePkA9QHoH/qARbA3A/8297gFDcjezOOfAAA/eO9RL/yC0QlwPpqHyIQnoAzbZPf5shAthh/6lVRUERgeZmjoAN74y1+pUk7x6GayiKT3VX/NS9szuRE2mFz9RD7hThvRI3lNoDvuJHgePxDz4BiOKRVPrDkkpZkLDG6SclB6IotqhlngwVjGb7oJWgVvrPGfhYxD68Uj7iCW/ELBi1dk//RbusuRsQvgw66cez/QvUnp3pVRnovQ9ADEX3UfxHof5GfwtQSMjLcFoTdT/McEteXeKcXLlNgdTn6CTndZbLE1sPrbvllHstE+IznyAyOOTX4b6+KjenNs2bQrfv/yE9RO8Xal8zOfB5dtyXLb62Y5e79WXq2YV2N65FM4r//j3zOmZa3KaPc8vvAH3s7VwaKiqHj/ur2/mmDUBchy2aeourPW9LD1enAYfANcJ5S7UR/oqx4r5lRx3Lk3IhZxt9nHWN9r38N/vVZVVt//ahb+0tZvkQLg3n8mYtL2h4S2l9BD5pAKlf4saSnrm7fFEuJA8jxgT1S83RkZ2C+lCIh6pEW5JeTj7IubZ9b0p6+55/PYJhAAAAA",
+  "a palette PNG with transparency": "iVBORw0KGgoAAAANSUhEUgAAABcAAAAPCAMAAAA4caRkAAAAYFBMVEVmir4sMPV5h2tV2lIhXMjpzfP6qyYDrFDnSuv36W/+KN/9qnRawYdo+E4lsYTNisExhDiv3YWCbzABw4Hk7htU3K1AKHhoMQDsRXYttfFVlqN/JNoP0qPtBnoVpcbP17/HYe0/AAAAIHRSTlPOG5HZqqsbLlyK2D0N98sP2N+sGdI4IlfdAX7HT+WLKn8f1ZIAAAD5SURBVHicBcEJAoAQEADAza0I2Vq3//+yGWDvpUmBPCn4D2dW/TE4K5ggVpHpXGZXJEGbt1NVBWKCy9HzIrV7iC+lvVdCgplfOnayFvpkS9/Ld6IyoG+B9NZ+mmqR2xNHiO3mkEeS2WoOyHA3XZuGJbsEcXhhMduaypMAt3te05iHm3SsDVJbr9eLo46OvInQn+cOHTZUu69VWk4F1fXBMKIzbZmyHnxpgelPMiwQPh/18d6HmP0C9pl2OOMuYN3FjZaojqArpW7GjB2BODP3NI0Omld8wzQPKgnwnlDScvc341ID5vYXH9JBnkFZlY8OSMl2LBpGm+MHxaIVN0rdL2gAAAAASUVORK5CYII=",
+  "a palette PNG, no transparency": "iVBORw0KGgoAAAANSUhEUgAAABcAAAAPCAMAAAA4caRkAAAAYFBMVEVmir4sMPV5h2tV2lIhXMjpzfP6qyYDrFDnSuv36W/+KN/9qnRawYdo+E4lsYTNisExhDiv3YWCbzABw4Hk7htU3K1AKHhoMQDsRXYttfFVlqN/JNoP0qPtBnoVpcbP17/HYe0/AAAA+UlEQVR4nAXBCQKAEBAAwM2tCNlat///shlg76VJgTwp+A9nVv0xOCuYIFaR6VxmVyRBm7dTVQVigsvR8yK1e4gvpb1XQoKZXzp2shb6ZEvfy3eiMqBvgfTWfppqkdsTR4jt5pBHktlqDshwN12bhiW7BHF4YTHbmsqTALd7XtOYh5t0rA1SW6/Xi6OOjryJ0J/nDh02VLuvVVpOBdX1wTCiM22Zsh58aYHpTzIsED4f9fHeh5j9AvaZdjjjLmDdxY2WqI6gK6VuxowdgTgz9zSNDppXfMM0DyoJ8J5Q0nL3N+NSA+b2Fx/SQZ5BWZWPDkjJdiwaRpvjB8WiFTdK3S9oAAAAAElFTkSuQmCC",
+  "a plain RGB JPEG": "/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAIBAQEBAQIBAQECAgICAgQDAgICAgUEBAMEBgUGBgYFBgYGBwkIBgcJBwYGCAsICQoKCgoKBggLDAsKDAkKCgr/2wBDAQICAgICAgUDAwUKBwYHCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgr/wAARCAAPABcDASIAAhEBAxEB/8QAHwAAAQUBAQEBAQEAAAAAAAAAAAECAwQFBgcICQoL/8QAtRAAAgEDAwIEAwUFBAQAAAF9AQIDAAQRBRIhMUEGE1FhByJxFDKBkaEII0KxwRVS0fAkM2JyggkKFhcYGRolJicoKSo0NTY3ODk6Q0RFRkdISUpTVFVWV1hZWmNkZWZnaGlqc3R1dnd4eXqDhIWGh4iJipKTlJWWl5iZmqKjpKWmp6ipqrKztLW2t7i5usLDxMXGx8jJytLT1NXW19jZ2uHi4+Tl5ufo6erx8vP09fb3+Pn6/8QAHwEAAwEBAQEBAQEBAQAAAAAAAAECAwQFBgcICQoL/8QAtREAAgECBAQDBAcFBAQAAQJ3AAECAxEEBSExBhJBUQdhcRMiMoEIFEKRobHBCSMzUvAVYnLRChYkNOEl8RcYGRomJygpKjU2Nzg5OkNERUZHSElKU1RVVldYWVpjZGVmZ2hpanN0dXZ3eHl6goOEhYaHiImKkpOUlZaXmJmaoqOkpaanqKmqsrO0tba3uLm6wsPExcbHyMnK0tPU1dbX2Nna4uPk5ebn6Onq8vP09fb3+Pn6/9oADAMBAAIRAxEAPwBNC/ak+Bmr+OdJ8Kfs8fEq70O3fTdM0S41rXNDkhhv41guYVmgNp/pzbUuI2ikuHa3Ly3bShYBaqK2vaT8KItG0vW7rSdW1zxLHOUs9LufDx3fZmthF8l3I0senJaJaJbxss14VdxZrFLcpJIyvbRHVb/x94lXTvD3gf4ea3cWXjfx01nY3M9hra/YrW7t7IQ6YJ47gJJd+Y8Vv9jnnigniFq+JIuP8PeHPBOmfD/w98J7Lwpe3fhC3t9L1nxHLDb6fYSCO5tZI7KZlWOSRd6/2jE0MUkjLPp9uyzRQtbta9X1XCVMPg54KhOqvdVuZR9pKnOShGVRUk5OPIoezjKNkoyoJSnOMfQrYXKsz5qTpXq03ThUlSq805znQftKbqU4U5xnOMoycJPmSqOnzypRlI9n8UeP/HGk/E2x0rU/CWteKIrOxm0u8t9K8S6hYCxZna6UXWoSPd392bjZ5qRmWOWNbaN5crcuHKy/i58Bvir+znout/F7wZ4h1y6ubPWpNYg1qLx7d2upzSX93cQiJDAIhcQW8bSovmy27f6XK4B5icrellOYuhCeTSp1KcruUualD95zPnukuWTuruUdJNu7lPmnJYPNeCc0hOefY+lTxEZzjyKMVyR5m4rWu29He/nvL4pf/9k=",
+  "a plain RGB PNG": "iVBORw0KGgoAAAANSUhEUgAAABcAAAAPCAIAAACAzcMBAAAEJUlEQVR4nAEaBOX7ABOAZZHBMrpYwV8Tpd+9KR/do870TxD77KM0N7To4Ikv4gmRkWgveGseHANo5cRSa+/vXHPA26LYyoSsE6pXOJ7xNJHKZQTEjewfCvFumzxOfqHqB4YEvwKwDNWR2UeKYPQdgxa9RH9WYJI/yQ1LB/XhTsuVy9HjMP3BACD2kTTcGwPI42pmbzlL6egArnEw7fBIxicexG4WlwiM13KX99KOqD/PjNOJBHEJFOEuHtAKXVgyI/MCSarqKpWG497fqr9wb/On4gHL+VMGZjzB7K/9AFai43ejzen68wei6sunlC5TOZcD3Dl//V4XgvF21e4f7vu78wDfPlgYrUG7AVP8raM4x6pjb6Ez6zg7QavDUrTi8ZHXqwGB53lt75YGJRDlCcp08wMkQeNPFV8BS1I1IgvE0nnvIXtbD9R5K31YGGoJVUs69EvPD4/HU+HV9WhrDLs+hG665DNTXyMCBtXwbc6iDjGJvVo0Miav64D0MnB35knXlFowyexyIedMbg7mTA+r8AxMKddqzeza71pIPIMumzOfzvD9F+zEIl0yjeh3AD8u/0cHX74JHLQRnrw+wD9BtGkFgJeT5bFJe5Oy1TgX0gWX8csH9gkdIsSyZfMQnAnN+8CPVjn2JqsLWmKhIhSOjbduMAEaIygHW2WwgrDwBAOQHaJi6JmrXd+M6fkHAm6p5npIhyLKjBIj8hRHmDVii/vwMCbua1uHhMgs2toRVh7GEU4v2J95CP4A5U9RniKx0j6nD7/zCC+Xlw17OW/bFeDmFhMLiTZVMDZO8n0E340LSnOBREIyqCk3bvdfwDKnC7xAjxLOjLy14TFn3vDNABf99Uf3Hhlsdk7+ferqgiV3GfO++qRWc2FWLI89F6q5gU+TlN722Q5Qd0nCTHsnGJxcrjcUkRdhdluiw9oDjjwF/O4MFAFSAlZMsPcMztL+mie8QTKlZycze6v1Ilfcyk+Cbj6dtHSx9hQYCKan0LSkPTzwehpDy9PCeRwGMHIIpQIoejVixuezXrQAhv5/rU7B+3D4ybj2NAjc0iG4I9B0tuQp4AEssRT2w+t0JcUID6kyt3Zv+ZLuXs02ZPbYfFRV6G+UXZrNIpDv68VbrjQ+AukV3elRDsShMP2Jnxv9qZCS9i0+dkPFrI3x40RveclFp38q/Pt5aNgKI2CQXVvXhW1gD0JOG095+hSOuLWA/ix19QnykAC1Z9Sz3wOtUiREPwMdK9XAwTbT7C6w5kFsCThU1+o4P/+8YqQ8U1FFGUX2X0gJraZr7/vmcvLva7knpnHO85ZS9bkCTVAEMHA5QDa+SBikS8n/EAcLaePCUFFBruBZlwXO0qsE3Ga8cIBevGXgg1VO+Hx5QAZVRg6QyFP5OgcAGhrucQFNQs3Z2Dg8neb/wNfo8FoAAAAASUVORK5CYII=",
+  "an RGB PNG with a colour key": "iVBORw0KGgoAAAANSUhEUgAAABcAAAAPCAIAAACAzcMBAAAABnRSTlMAxABuABbErhrxAAAEJUlEQVR4nAEaBOX7ABOAZZHBMrpYwV8Tpd+9KR/do870TxD77KM0N7To4Ikv4gmRkWgveGseHANo5cRSa+/vXHPA26LYyoSsE6pXOJ7xNJHKZQTEjewfCvFumzxOfqHqB4YEvwKwDNWR2UeKYPQdgxa9RH9WYJI/yQ1LB/XhTsuVy9HjMP3BACD2kTTcGwPI42pmbzlL6egArnEw7fBIxicexG4WlwiM13KX99KOqD/PjNOJBHEJFOEuHtAKXVgyI/MCSarqKpWG497fqr9wb/On4gHL+VMGZjzB7K/9AFai43ejzen68wei6sunlC5TOZcD3Dl//V4XgvF21e4f7vu78wDfPlgYrUG7AVP8raM4x6pjb6Ez6zg7QavDUrTi8ZHXqwGB53lt75YGJRDlCcp08wMkQeNPFV8BS1I1IgvE0nnvIXtbD9R5K31YGGoJVUs69EvPD4/HU+HV9WhrDLs+hG665DNTXyMCBtXwbc6iDjGJvVo0Miav64D0MnB35knXlFowyexyIedMbg7mTA+r8AxMKddqzeza71pIPIMumzOfzvD9F+zEIl0yjeh3AD8u/0cHX74JHLQRnrw+wD9BtGkFgJeT5bFJe5Oy1TgX0gWX8csH9gkdIsSyZfMQnAnN+8CPVjn2JqsLWmKhIhSOjbduMAEaIygHW2WwgrDwBAOQHaJi6JmrXd+M6fkHAm6p5npIhyLKjBIj8hRHmDVii/vwMCbua1uHhMgs2toRVh7GEU4v2J95CP4A5U9RniKx0j6nD7/zCC+Xlw17OW/bFeDmFhMLiTZVMDZO8n0E340LSnOBREIyqCk3bvdfwDKnC7xAjxLOjLy14TFn3vDNABf99Uf3Hhlsdk7+ferqgiV3GfO++qRWc2FWLI89F6q5gU+TlN722Q5Qd0nCTHsnGJxcrjcUkRdhdluiw9oDjjwF/O4MFAFSAlZMsPcMztL+mie8QTKlZycze6v1Ilfcyk+Cbj6dtHSx9hQYCKan0LSkPTzwehpDy9PCeRwGMHIIpQIoejVixuezXrQAhv5/rU7B+3D4ybj2NAjc0iG4I9B0tuQp4AEssRT2w+t0JcUID6kyt3Zv+ZLuXs02ZPbYfFRV6G+UXZrNIpDv68VbrjQ+AukV3elRDsShMP2Jnxv9qZCS9i0+dkPFrI3x40RveclFp38q/Pt5aNgKI2CQXVvXhW1gD0JOG095+hSOuLWA/ix19QnykAC1Z9Sz3wOtUiREPwMdK9XAwTbT7C6w5kFsCThU1+o4P/+8YqQ8U1FFGUX2X0gJraZr7/vmcvLva7knpnHO85ZS9bkCTVAEMHA5QDa+SBikS8n/EAcLaePCUFFBruBZlwXO0qsE3Ga8cIBevGXgg1VO+Hx5QAZVRg6QyFP5OgcAGhrucQFNQs3Z2Dg8neb/wNfo8FoAAAAASUVORK5CYII=",
+  "an RGB PNG with a text chunk": "iVBORw0KGgoAAAANSUhEUgAAABcAAAAPCAIAAACAzcMBAAAAKHRFWHRwcm9tcHQAeyIxIjogeyJjbGFzc190eXBlIjogIktTYW1wbGVyIn19eG/jAAAABCVJREFUeJwBGgTl+wATgGWRwTK6WMFfE6XfvSkf3aPO9E8Q++yjNDe06OCJL+IJkZFoL3hrHhwDaOXEUmvv71xzwNui2MqErBOqVzie8TSRymUExI3sHwrxbps8Tn6h6geGBL8CsAzVkdlHimD0HYMWvUR/VmCSP8kNSwf14U7LlcvR4zD9wQAg9pE03BsDyONqZm85S+noAK5xMO3wSMYnHsRuFpcIjNdyl/fSjqg/z4zTiQRxCRThLh7QCl1YMiPzAkmq6iqVhuPe36q/cG/zp+IBy/lTBmY8weyv/QBWouN3o83p+vMHourLp5QuUzmXA9w5f/1eF4LxdtXuH+77u/MA3z5YGK1BuwFT/K2jOMeqY2+hM+s4O0Grw1K04vGR16sBged5be+WBiUQ5QnKdPMDJEHjTxVfAUtSNSILxNJ57yF7Ww/UeSt9WBhqCVVLOvRLzw+Px1Ph1fVoawy7PoRuuuQzU18jAgbV8G3Oog4xib1aNDImr+uA9DJwd+ZJ15RaMMnsciHnTG4O5kwPq/AMTCnXas3s2u9aSDyDLpszn87w/RfsxCJdMo3odwA/Lv9HB1++CRy0EZ68PsA/QbRpBYCXk+WxSXuTstU4F9IFl/HLB/YJHSLEsmXzEJwJzfvAj1Y59iarC1pioSIUjo23bjABGiMoB1tlsIKw8AQDkB2iYuiZq13fjOn5BwJuqeZ6SIciyowSI/IUR5g1Yov78DAm7mtbh4TILNraEVYexhFOL9ifeQj+AOVPUZ4isdI+pw+/8wgvl5cNezlv2xXg5hYTC4k2VTA2TvJ9BN+NC0pzgURCMqgpN273X8Aypwu8QI8Szoy8teExZ97wzQAX/fVH9x4ZbHZO/n3q6oIldxnzvvqkVnNhViyPPRequYFPk5Te9tkOUHdJwkx7JxicXK43FJEXYXZbosPaA448BfzuDBQBUgJWTLD3DM7S/ponvEEypWcnM3ur9SJX3MpPgm4+nbR0sfYUGAimp9C0pD088HoaQ8vTwnkcBjByCKUCKHo1Ysbns160AIb+f61Owftw+Mm49jQI3NIhuCPQdLbkKeABLLEU9sPrdCXFCA+pMrd2b/mS7l7NNmT22HxUVehvlF2azSKQ7+vFW640PgLpFd3pUQ7EoTD9iZ8b/amQkvYtPnZDxayN8eNEb3nJRad/Kvz7eWjYCiNgkF1b14VtYA9CThtPefoUjri1gP4sdfUJ8pAAtWfUs98DrVIkRD8DHSvVwME20+wusOZBbAk4VNfqOD//vGKkPFNRRRlF9l9ICa2ma+/75nLy72u5J6ZxzvOWUvW5Ak1QBDBwOUA2vkgYpEvJ/xAHC2njwlBRQa7gWZcFztKrBNxmvHCAXrxl4INVTvh8eUAGVUYOkMhT+ToHABoa7nEBTULN2dg4PJ3m/8DX6PBaAAAAAElFTkSuQmCC",
+  "an RGBA PNG with one pixel at 254": "iVBORw0KGgoAAAANSUhEUgAAABcAAAAPCAYAAAAPr1RWAAAFAElEQVR4nAXBCzQVBgAG4P96XTdCUaRoUUk13S6JZqS0GBGiRiibUsqrxm5qpFbHhihlq1bHoxQRpfVSUXrgUFMOSSGR1zy63JL4933QjgtiapmEtzaUMUD7HJvvmHLm6yzWDLlRa7SXWRZLWdzZwoRFbylKTWXwol8YYjiDisHtLPcIYX//Ru4qfcXMhkoevKTN3PVWPDNowdTKICqVJ/Vi5oRBhJ6ygeuvGegWHoLSPQUUqtch9eVq/L5pCAYHpuKOQyy8Nx2FXcVEOAuH0epaheNV/6JNPIYyfAV5qgWapiviSdt2bAmzhnNXJ1AQIeZ/A458ZGLI8tCpTFdNZH1kOj/WJvOC3VMmPk+gUoSIOq1mNHw2gX4bJDSWKdApt5vzjx9i25tm5t4LZ5gsh28FVRzxVOEWmzL2Xh4jvDPbGJ1Vza7PMgozu1mVk0YzT2umKzbROnaM/rrxHIyqY9/MPo7elhHNttygl0/72wJ6fslnltVj5v4YxgzzHlp9Y8+8Bx4sfjvI1Po8Cva/l3Jn/wmozNFCu6gSu2WKmG3fBrcpARA4e2CJkRrKa6XonxUDX80XkC7Yhw162yHycsayIWc81TyCx56tqBsORoj6bdgeDMWtd+bwDDCGgkrdAHbWZEJjcQLu+FhAMvcyeuKGIAmPRodTPdJ8xKjojcSs9y4I1eiAi2YeBtRdYFq/HdW9jej3cYTNATOcMj+LmoEx6PaWw8hPgqTOaMDOjFwtDOBd0QwWTzrDEttS2tkXc5tyHNOPtbPIKYbHrtTRSreWyumDrBLKKTIwYvmVIMq0TlNUPcrSI960ls9lnpoPAzOMqJOcxOuhYgr0jedR6BuEwvhCDCgpIsUgE4GdfyHPrxmJXSMQKoTiYsceOB42QmXiZBp/0BGs/nMJAv8YxYB4LvpCfHH44BMsbGzEJG9DPJrkikUNZyFVHQfa3dx5xqiItbY51Lwno+qidKZPjKF12CtOaengVG01Jlh6UWzpyg/7lNicpMbvd+2nwwoJL5guZejHAJZKcqhWspxHJtcwseQaWxdv5ZuBakJ3bJirPxpy2o4ouo7vY3d3POdET6Ps7mdme+/iZu+FPPKtLnNv7qfbsTS+kb+kxtpoOt13YYyJHk9vLOBSnVTqbo6ib+YDNiom00b5C/vUdSjwUPCmS+FHqNfUYvykCUrsJTi31QTmMXkYNlqPpko3xIfa4u/i3SiS60BP9TxynhUj+1sbDOzRx8qq57gvnQEVcSRUzylg3p4lCHz0Hlf9i4FD47HMdy3jaPgnVtyQ00K1ibWzbtD42W7+886ULYKFLNKR80HPbs55qErNixJejwrjyNE++ldb8id5A/eu82JnWBr9TlbTKKWfPQ99WWBhS4WuKa/R5a6B8gwxxhLOYvrYRaQcleNr2yisfHgJSYNtcAiTomJVDmLnf8GoNBgNE4yxKcUPvvW/YecmTaxwnQ436WfoJN/AtbhxLPx5GKIPKcC1rS94tVmR+R6z6WCnSIMFdSwts+TzXjMWdthzh8iK6+q7aWVHlgRm08bTnaumraI8wJGi/PMM6R9lR+QH9ofcpMn5CNbITtBj+CYV1qylkjjcGsst78JRLxvOFYSWUA3b2u5jrbs9Clp+QLpyDWrzlNC0pQThcf4oCWrBAS9XfNorxXIVL3ynkYInniNYJgT09fsQIViDFdUv0WBlg/8BhVG7FIvyyugAAAAASUVORK5CYII=",
+  "an RGBA PNG, EXIF 8, partly see-through": "iVBORw0KGgoAAAANSUhEUgAAABcAAAAPCAYAAAAPr1RWAAAAGmVYSWZNTQAqAAAACAABARIAAwAAAAEACAAAAAAAAIZYMDQAAAVPSURBVHicBcELPBMIHADg/2ZieSUreqAmr06jkUcnWlcXnVcIEaJc3a28j+Q6j5Kj5VFq5Ypf8xh2XtFD5JFHF+cRuZUc0pnXmseYpPnf94FafBBkNtE5z7yaPP3VCnD4uaGt9r952LXgjOtWhJBnZoHVEyOQYjz6lZyZiWeNLyBTayvInB3DFlcmzsyc8I9ofH+L87Y99cqfaljiaYk5c2aQ2R4EwFc6CpJUHTwtlkJpWA6+ainP0LlXCb8V7YAHCaa4K0t/8ghTYiQX8ctJ3zk54HpTYD6ADA6PKwqPJ1iDtbYVSrVXvhdXqED3y/XA3ssB6cn3aGffjFAWZoKfZu2wTV8LW4I3IlueBfxwNiz1pmGRbXcDqy8llhRGrqJ8oKFWz1r09aKf1BETBfYlU1o7b12Fj0PDUNIQiiFiLo4SOmDZbU3oj9ZNKCyXyoAH5yNG53Xi5BcxynGmoIOb5UdzswK2zCBaxUnt/dQTYS6q/45IW4QrtWKAYRvw0igFRi0hze1rKeRZvsSSUyHwwHQaLL9lIK/ZFatH58oy+TyAhPGYVNE/Kriwog3vSJPguCTEMMtuaHSkBTTdiUfJs2v4jEWC4tI4JNW5waXxHt9+3AtD7kmoYdeD457+WFayP/5ybhGKeKdcjIxfg0CNhFbh+kBc0z8bdb6LA8q7U/C5txnS9coJ0/ELSA+Npgns+YQsbxPCK2E4bB93aA1WFqCDCm/LrKIDGPJ/7u8UDvw+421HsL5Mi/vDNPd016y0XF3YglRf+qnrE9EAtjTEw3L+WE/eitWqOc11No1gy6jGn2TjkX1zDCvtY4k3H/aDpXpvmyx7DjvkJEjWpELLwyAQr7sH5M4VbEz3IFpJ9JCn4E0JfEAFStr1u0+CTRIJm3UMQM4nCCoSK4SzJJmADE3Ow8CJu9t4vsMjrMllkCMGQ7HgIsEumarYzlq/oDNPgcN39vADr60YzJroEURMH0y+8hfBaGAAVT20nNpUnaqM3+bKxMivSmHM+SjkUCv5vTZcVGkQo7wxG9lKsfetQt5zN4wIYKOaAi/F/BjDxNwJ5y+RVIavK+CRiAQ4eIAORYYWELzkD410bpRC3X5MX9+FrLpHez7sPvN5aLYTQV26CIeXtHDTuSh0Wr2EU1OJ7rrRm2ji+i+Q7xEBAR5Gzen71KGkJqHF+WbW9iHJO1B2iQb7Fw4Yq6+B906UKVlQMlE9IAp8OM04IJMG1rJfQaRIAYIr0WPEoWJpm2JXL3c1W/94HYMOBWf0qaaxvKFFqicOtjsTEoNt8H51pFelhFKkIV9I4PZUQ/4+a5i9uBm+6+jDFzFbCWtMwlG+gHjB4OKe6sC28TdVftX5cHU1DkudmmAl9LPjq6cSMJMfhN7tTy/o9ETC4/8McYRg1FdJkWDzdCTqtsqDSjEdn0SF4PINEfp1msNpyVv41f0YToRkgW92J1IzZpKnW32wzMwGIUTthO/t3G5sUDXANsatTGfZJAysKlvrojyFy8X9qufnVS4uXg4BlskWyJ8hwVpqNqTH38Dj1B+gJr8WX3uMYz0nFCwm0jDMIAn56z4dUN/rAk/0uhAenXkDVcMyWOq6Aw7ayoDmN/3Q2GQOfUJaTIWAsfMc2RLd+VNoaYtxdYH5aO12FA9tOoQSfzsglxYic2alVhA+jzPMGtQvDLvWJb6Nros1SHR0QRjjK4HuhiY8vysI0yU64C4dQcORzxizzwr0NbOxXvnsYEaiCM8V1KKRLhEnUkcHmUUmINpRzLcPWoXK2rTIstZk5sTfycAQ+KPtwkdIeFGXtDOJhf8DlkO7qrokypUAAAAASUVORK5CYII=",
+  "an RGBA PNG, opaque everywhere": "iVBORw0KGgoAAAANSUhEUgAAABcAAAAPCAYAAAAPr1RWAAAFAUlEQVR4nAXBCzgUBgAH8L9HzkUoih60qKSM65JoRnosRidERh7Z9FJHMnappcfqsyFXylatvqQUEaX1UlF64KOmfFSKUvKaO47rIf77/WCcHEV5uZjXg8oZbnyazTdtOPnlKdb2+9BosJunHOaxpL2FKfZvKJTLuc7+F0ZbTKLWunes8IumQrGKW8peMLuxinvOGzNvpROP9zpQXhVF7Yq0bkwe2QvpURdIfj2JTsFeaN/WRJF+PeTPluL3iH6Y7x6Hm4t3IDDiANwqR8FLMIDXkmocqv4XraIhlOMrqOUOaJqohYetG7AmxhleHe1A4WYR/1N68L61BSuk45ilm8qGuCx+qEvnWbdHTH2SQu3NQpq8tqPF45EMDRLTSqVJz7xOzjy0l62vmpl3O5Yxqly+0ajmJ38drnEpZ/eFISIwu5WJp2rY8VlFQXYnq3MzaefvzCytJjrvGGKY6S72JtSzZ3IPB2+oiGZXBpkV0P2GBv2/FPCU0wPm/RjDk3O66PSNO/Pv+rHkTS/lDfnU2Plexk2Kw9CZZoR3wirEq7Qw1b0VPmPDoeHlh7mWeqiok0ExJQkhhk8hm7UdQWYbIAzwwvx+Lzwy3I8H/q9RP7AO0fo34LpHiutv58A/3AqaOvVKbKrNhsHsFNwMdoB4+gV0JfdDHJuINs8GZAaLUNkdhynvvSE1aIO3YT6U+t6wadiAmu7nUAR7wGW3HY7OOYFa5RBMuytgGSpGWnsi4GZHLhWE85ZwEktGH2epaxnd3Eu4fkQysw6+Y7FnEg9erKeTaR1HZPWyWqCm0NySFRejqDI6RmHNIMv2B9JZPZ35esGMPGlJk/Q0XpGKqDHBagYFIVEo2lUEpbYWMsyzEdn+F/JDm5Ha8QkCTSnOtW2Fxz5LVKWOgVWfCZb+OReRfwxCKZqOnugQ7NvzELbPn2N0oAXuj5bAvvEEZLrDwDsfXx63LGaday4Nb6uoa5/FrFFJdI55wbEtbRxnrMcUxwCKHCXs267N5jQ9fr9lJxcvFPOszTxKP4SzTJxLvdIF3D+mlqmll/l69lq+UtYQpkMDXPrBguM3JlAyvJ2dnbs4LXE8Vbc+MydwC1cH2nL/t6bMu7aTPgcz+Ur9jAbLE+l5x5tJ1mY8tqqQ80zkNF2dwJDsu3yulU6XEV/Yo29CDT/NQHoXfYB+bR2Gj1ij1F2M02utMScpHwOWK9FU5YNdUlf8XRKPYrUJzHTPIPdxCXK+dYFy6wQsqn6CO7JJ0BHFQfe0JmZsnYvI++9xKawE2Du8gwWScg7GfmTlVTUddJtYN+UqrR7H85+3NmzRsGWxiZp3u+I57Z4uDc+JeSUhhp8O9DCsxpE/qRu5bUUA22MyGXqkhpYZCnbdC2Ghgys1O8a+RIevASpOijCUcgITh84h44AaX7smYNG980jrbcXiGBkql+Rix8wvGJStQ+NIK0RkhCKk4TdsijDEQslE+Mg+wyT9Ki4nD8P25wEI+zKAy2uf8lKzFgv8pnKxmxbNZ9WzrNyRT7rtWNTmzo1CJ65o6KSTG1kamUMXf18uGb+E6nAPCgvOMFoxyLa4Piqir9H6zGbWqg7Tb+AaNZctp7Yo1hkLHG/BwywHXpWEkUAP61vvYLmvOwpbfkDWiFrU5WujaU0pYpPDUBrVgt0BEnzcJsMCnQB8Z5CBh/6fMF8ATJjQg80ay7Cw5hkanVzwP80ouhQgcnQFAAAAAElFTkSuQmCC",
+  "an RGBA PNG, partly see-through": "iVBORw0KGgoAAAANSUhEUgAAABcAAAAPCAYAAAAPr1RWAAAFT0lEQVR4nAXBCzwTCBwA4P9mYnklK3qgJq9Oo5FHJ1pXF51XCBGiXN2tvI/kOo+So+VRauWKX/MYdl7RQ+SRRxfnEbmVHNKZ15rHmKT53/eBWnwQZDbROc+8mjz91Qpw+Lmhrfa/edi14IzrVoSQZ2aB1RMjkGI8+pWcmYlnjS8gU2sryJwdwxZXJs7MnPCPaHx/i/O2PfXKn2pY4mmJOXNmkNkeBMBXOgqSVB08LZZCaVgOvmopz9C5Vwm/Fe2ABwmmuCtLf/IIU2IkF/HLSd85OeB6U2A+gAwOjysKjydYg7W2FUq1V74XV6hA98v1wN7LAenJ92hn34xQFmaCn2btsE1fC1uCNyJbngX8cDYs9aZhkW13A6svJZYURq6ifKChVs9a9PWin9QREwX2JVNaO29dhY9Dw1DSEIohYi6OEjpg2W1N6I/WTSgsl8qAB+cjRud14uQXMcpxpqCDm+VHc7MCtswgWsVJ7f3UE2Euqv+OSFuEK7VigGEb8NIoBUYtIc3taynkWb7EklMh8MB0Giy/ZSCv2RWrR+fKMvk8gITxmFTRPyq4sKIN70iT4LgkxDDLbmh0pAU03YlHybNr+IxFguLSOCTVucGl8R7fftwLQ+5JqGHXg+Oe/lhWsj/+cm4RininXIyMX4NAjYRW4fpAXNM/G3W+iwPKu1PwubcZ0vXKCdPxC0gPjaYJ7PmELG8TwithOGwfd2gNVhaggwpvy6yiAxjyf+7vFA78PuNtR7C+TIv7wzT3dNestFxd2IJUX/qp6xPRALY0xMNy/lhP3orVqjnNdTaNYMuoxp9k45F9cwwr7WOJNx/2g6V6b5ssew475CRI1qRCy8MgEK+7B+TOFWxM9yBaSfSQp+BNCXxABUra9btPgk0SCZt1DEDOJwgqEiuEsySZgAxNzsPAibvbeL7DI6zJZZAjBkOx4CLBLpmq2M5av6AzT4HDd/bwA6+tGMya6BFETB9MvvIXwWhgAFU9tJzaVJ2qjN/mysTIr0phzPko5FAr+b02XFRpEKO8MRvZSrH3rULeczeMCGCjmgIvxfwYw8TcCecvkVSGryvgkYgEOHiADkWGFhC85A+NdG6UQt1+TF/fhay6R3s+7D7zeWi2E0FdugiHl7Rw07kodFq9hFNTie660Zto4vovkO8RAQEeRs3p+9ShpCahxflm1vYhyTtQdokG+xcOGKuvgfdOlClZUDJRPSAKfDjNOCCTBtayX0GkSAGCK9FjxKFiaZtiVy93NVv/eB2DDgVn9KmmsbyhRaonDrY7ExKDbfB+daRXpYRSpCFfSOD2VEP+PmuYvbgZvuvowxcxWwlrTMJRvoB4weDinurAtvE3VX7V+XB1NQ5LnZpgJfSz46unEjCTH4Te7U8v6PREwuP/DHGEYNRXSZFg83Qk6rbKg0oxHZ9EheDyDRH6dZrDaclb+NX9GE6EZIFvdidSM2aSp1t9sMzMBiFE7YTv7dxubFA1wDbGrUxn2SQMrCpb66I8hcvF/arn51UuLl4OAZbJFsifIcFaajakx9/A49QfoCa/Fl97jGM9JxQsJtIwzCAJ+es+HVDf6wJP9LoQHp15A1XDMljqugMO2sqA5jf90NhkDn1CWkyFgLHzHNkS3flTaGmLcXWB+WjtdhQPbTqEEn87IJcWInNmpVYQPo8zzBrULwy71iW+ja6LNUh0dEEY4yuB7oYmPL8rCNMlOuAuHUHDkc8Ys88K9DWzsV757GBGogjPFdSikS4RJ1JHB5lFJiDaUcy3D1qFytq0yLLWZObE38nAEPij7cJHSHhRl7QziYX/A5ZDu6q6JMqVAAAAAElFTkSuQmCC"
+ }
+}

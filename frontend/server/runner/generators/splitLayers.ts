@@ -6,8 +6,10 @@
  *
  *  0. The picture (fix round 1). Behind a loader (a LoadImage or an Image
  *     card, `loaderFileBehind`), Python's picture is the loader's tensor:
- *     `ImageOps.exif_transpose`, then RGB (pythonView.ts rgbTurnedPng, the
- *     file itself when it already is that picture). Both calls are sent that
+ *     `ImageOps.exif_transpose`, then RGB — or, R3.H, an Image card's RGBA
+ *     when its file has see-through pixels, whose RGB the fill gets
+ *     (../pictures/handoffView.ts, the file itself when it already is that
+ *     picture). Both calls are sent that
  *     picture, so the cut-out (and its mask) comes back in the same shape as
  *     the fill picture, EXIF-turned phone photos included. Any other source
  *     (a picture a paid node downloaded: Python's tensor is the file read as
@@ -54,7 +56,8 @@ import { paidCallUsd } from '#shared/pricing/paidRates'
 import sharp from 'sharp'
 import { answerExt } from '../answerDownload'
 import { pixelsInWorker } from '../compositor/worker'
-import { answerRgbPng, isPlainRgbPng, pictureMeta, pilRaw, rgbTurnedPng } from '../pictures/pythonView'
+import { answerRgbPng, isPlainRgbPng, pictureMeta, pilRaw } from '../pictures/pythonView'
+import { handoffView, plainPngChunks, type LoaderKind } from '../pictures/handoffView'
 import { loaderFileBehind } from '../cards/bakeReplay'
 import type { NodePlan, PipelineIO, PlanContext } from '../executors'
 import type { OutputFile, RunnerValue } from '../types'
@@ -123,15 +126,20 @@ export async function splitMask(cutout: Uint8Array, grow: number, signal: AbortS
 
 /**
  * The picture both calls see, and its size (step 0 above): behind a loader,
- * the loader's picture (`picture` and `fill` null: the file itself already
- * is it); otherwise the file as it is (`picture` null), its fill copy the RGB
- * PIL reads (`fill` null: the file itself, an 8-bit RGB PNG already), made on
- * the Frame's worker.
+ * the loader's picture as Python hands its tensor on (R3.H,
+ * ../pictures/handoffView.ts: EXIF turned, RGB; an Image card's RGBA when its
+ * file has see-through pixels, and then the fill gets its RGB); `picture`
+ * and `fill` null: the file itself already is it. Otherwise the file as it is
+ * (`picture` null), its fill copy the RGB PIL reads (`fill` null: the file
+ * itself, an 8-bit RGB PNG already), made on the Frame's worker.
  */
-export async function splitPictures(bytes: Uint8Array, fromLoader: boolean, signal: AbortSignal): Promise<{ picture: Uint8Array | null; fill: Uint8Array | null; w: number; h: number }> {
-  if (fromLoader) {
-    const { png, w, h } = await rgbTurnedPng(bytes)
-    return { picture: png, fill: png, w, h }
+export async function splitPictures(bytes: Uint8Array, loader: LoaderKind | null, signal: AbortSignal): Promise<{ picture: Uint8Array | null; fill: Uint8Array | null; w: number; h: number }> {
+  if (loader) {
+    const view = await handoffView(bytes, loader, raw => pixelsInWorker(signal, worker => worker.rgbOf(raw), SPLIT_MASK_TIMEOUT))
+    if (view.channels === 3) return { picture: view.png, fill: view.png, w: view.w, h: view.h }
+    // `image[..., :3]` of the card's RGBA: its RGB, as the PNG Python sends.
+    const rgb = await sharp(view.png ?? bytes).removeAlpha().png({ compressionLevel: 6 }).toBuffer()
+    return { picture: view.png, fill: plainPngChunks(new Uint8Array(rgb.buffer, rgb.byteOffset, rgb.byteLength)), w: view.w, h: view.h }
   }
   const meta = await pictureMeta(bytes)
   if (isPlainRgbPng(meta, bytes)) return { picture: null, fill: null, w: meta.width!, h: meta.height! }
@@ -166,15 +174,16 @@ export async function planSplitLayers(ctx: PlanContext): Promise<NodePlan> {
   const fillSlug = PHOTO_FILL_SLUGS[photoFillOf(inputs.background_fill)]
   const grow = intOf(inputs.mask_grow, SPLIT_MASK_GROW.default)
   const image = await ctx.toUrl(source)
-  // Behind a LoadImage or an Image card: Python's picture is the loader's (EXIF turned, RGB).
-  const fromLoader = isLink(link) && !!loaderFileBehind(ctx.prompt, link)
+  // Behind a LoadImage or an Image card: Python's picture is the loader's (EXIF turned; RGB, or an Image card's RGBA).
+  const behind = isLink(link) ? loaderFileBehind(ctx.prompt, link) : null
+  const loader: LoaderKind | null = behind ? { keepsAlpha: behind.classType === 'Image' } : null
   const cutoutUsd = callUsd(SPLIT_CUTOUT_SLUG)
   const fillUsd = callUsd(fillSlug)
   return {
     kind: 'pipeline', prefix: 'split_subject',
     run: async (io: PipelineIO) => {
       // The pictures, read before any call: a file that can't be read fails the node uncharged.
-      const pics = await splitPictures(await io.read(source), fromLoader, io.signal)
+      const pics = await splitPictures(await io.read(source), loader, io.signal)
       const picture = pics.picture ? await io.handOff(pics.picture, 'split_image.png') : image
       const fillImage = pics.fill === pics.picture ? picture : pics.fill ? await io.handOff(pics.fill, 'split_image.png') : image
       const cut = await io.call({ key: 'cutout', provider: 'replicate', endpoint: SPLIT_CUTOUT_SLUG, payload: cutoutInput(picture), media: 'image', usd: cutoutUsd })

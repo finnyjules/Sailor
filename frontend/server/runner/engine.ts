@@ -13,7 +13,7 @@ import { NO_VALID_OUTPUTS_MESSAGE, pruneInvalidOutputs, type ComfyNodeError } fr
 import { blockedModelUses, blockedModelsResponse } from '#shared/runner/blockedModels'
 import {
   GATE_CLASS, dependenciesOf, downstreamNodes, isLink, legNodes, upstreamStage,
-  type ApiPrompt, type TakeGateState,
+  type ApiLink, type ApiPrompt, type TakeGateState,
 } from '#shared/runner/graph'
 import { RUNNER_NOT_ELIGIBLE, type GateChoice, type RunnerMessage } from '#shared/runner/messages'
 import { RUNNER_TIMEOUTS, type RunnerTimeouts } from '#shared/runner/timeouts'
@@ -33,13 +33,15 @@ import { createMemoryHeldBytes, type HeldBytes } from './heldBytes'
 import { createMemoryKeptBytes, type KeptBytes, type KeptExt } from './keptBytes'
 import { createFileAccess } from './fileAccess'
 import type { BackupSettings } from './config'
-import { linkedFileCheck, measuredInputProblem, pictureChangedWords, pictureOverMarginWords, requestProblems, unreadableInputWords } from './requestRules'
+import { inputFileProblem, linkedFileCheck, measuredInputProblem, pictureChangedWords, pictureOverMarginWords, requestProblems, unreadableInputWords } from './requestRules'
 import { predictedHoldPixels, startPictureSizes } from './repairSizes'
 import { isReusable, requestFingerprint } from './fingerprint'
 import { assertFilesOwned, collectInputFiles, parseInputFileRef, type OwnershipCheck } from './inputs'
 import { shotRefFilenames } from './shotRefs'
 import { parseJsonObject } from './generators/opts'
 import { cardPictureFiles, cardPictureRefusal } from './cards/bakeReplay'
+import { handoffPngName, loaderHandoffBytes, loaderHandoffs, loaderSourceOf, type LoaderSource } from './pictureHandoff'
+import { handoffRefusal } from './pictures/handoffView'
 import { effectOutRefusal } from './effects/plan'
 import { PICTURE_ANIMATED, pictureHasFrames, pictureMeta, pictureRefusal } from './pictures/pythonView'
 import { extraPromptText, hasOutputNode, measuredInput, nodeCredits, stageEstimate, unpricedProviderNode, type Metering } from './metering'
@@ -1109,7 +1111,21 @@ export function createEngine(deps: EngineDeps) {
       // before the hand-off; one too large by its size on disk is refused
       // before it is read. Reads nothing for any other node. The size read
       // goes to planNode, which drops a backup that can't take it.
-      const fileCheck = resuming ? { problem: null } as Awaited<ReturnType<typeof linkedFileCheck>> : await linkedFileCheck(take.prompt[id]!, filesAt(take), readOnce, families, f => files.size(f))
+      // A loader's picture (R3.H, ./pictureHandoff.ts) is handed off as the PNG
+      // of the loader's tensor, made once for this turn from the loader's own
+      // file: the file cap is judged on it, and it is what is sent.
+      const views = new Map<string, Promise<{ bytes: Uint8Array; made: boolean }>>()
+      const handedOffPicture = (src: LoaderSource) => {
+        const key = `${src.file.type}:${src.file.subfolder}:${src.file.filename}:${src.kind.keepsAlpha ? 'a' : ''}`
+        let p = views.get(key)
+        if (!p) { p = readOnce(src.file).then(b => loaderHandoffBytes(b, src.kind, signal)); views.set(key, p) }
+        return p
+      }
+      const loaderAt = (link: unknown) => loaderSourceOf(take.prompt, link, families)
+      const fileCheck = resuming ? { problem: null } as Awaited<ReturnType<typeof linkedFileCheck>> : await linkedFileCheck(take.prompt[id]!, filesAt(take), readOnce, families, f => files.size(f), (link) => {
+        const src = loaderAt(link)
+        return src ? handedOffPicture(src).then(v => v.bytes) : null
+      })
       if (fileCheck.problem) throw new Error(fileCheck.problem)
       // A media node (./nodeMedia.ts: sync-3 lip-sync, F22; Topaz video
       // upscale, F23): its files read and measured again now, before the
@@ -1155,12 +1171,13 @@ export function createEngine(deps: EngineDeps) {
       // priced at its most expensive, as the badge shows it). Worked out
       // inside planWith, so a value missing while resuming takes the
       // cancel-the-sent-job-first path below.
-      const planWith = async (toUrl: (f: OutputFile) => Promise<string>) => planNode({
+      const planWith = async (toUrl: (f: OutputFile) => Promise<string>, imageToUrl?: (f: OutputFile, link: ApiLink) => Promise<string>) => planNode({
         prompt: withWiredValues(take.prompt, id, valueAt(take)).prompt,
         nodeId: id,
         filesFrom: filesAt(take),
         valueFrom: valueAt(take),
         toUrl,
+        ...(imageToUrl ? { imageToUrl } : {}),
         gateOpen: take.openGates.includes(id),
         readFile: readOnce,
         hosted: deps.hosted(),
@@ -1172,17 +1189,24 @@ export function createEngine(deps: EngineDeps) {
         priceInputs: take.prompt[id]!.inputs,
       })
       const handOff = async (f: OutputFile) => deps.handoff.toUrlBytes(f, await readOnce(f))
+      // A picture wired into an IMAGE input: from a loader, the PNG of its tensor (R3.H).
+      const imageHandOff = async (f: OutputFile, link: ApiLink) => {
+        const src = loaderAt(link)
+        if (!src) return handOff(f)
+        const sent = await handedOffPicture(src)
+        return deps.handoff.toUrlBytes(sent.made ? handoffPngName(src.file) : src.file, sent.bytes)
+      }
       // Resuming: the request written down is kept (and its price); the plan is
       // rebuilt only for its backup. If it can't be rebuilt now (a file gone),
       // the node carries on waiting for its job, with no backup.
       let resumedWithoutBackup = false
       let plan: Awaited<ReturnType<typeof planNode>>
-      if (!resuming) plan = await planWith(handOff)
+      if (!resuming) plan = await planWith(handOff, imageHandOff)
       else {
-        try { plan = await planWith(handOff) }
+        try { plan = await planWith(handOff, imageHandOff) }
         catch {
           resumedWithoutBackup = true
-          try { plan = await planWith(async () => '') }
+          try { plan = await planWith(async () => '', async () => '') }
           catch (e) {
             // The plan can't be rebuilt at all now (its rules changed since
             // the request was sent, or what it was planned from is gone): the
@@ -1196,6 +1220,7 @@ export function createEngine(deps: EngineDeps) {
       }
       // The files' bytes are not kept for the provider wait (up to 30 minutes).
       reads.clear()
+      views.clear()
       // Files saved into the output folder (Save image, R1.5; a pipeline's
       // saves, R3.1): the run's assets, owned by the user and listed in the take's record.
       const assets: OutputFile[] = []
@@ -1953,6 +1978,25 @@ export function createEngine(deps: EngineDeps) {
         if (c.resized) {
           const tooLarge = effectOutRefusal(c.resized, c.classType, await pictureMeta(bytes), deps.hosted())
           if (tooLarge) throw refuse(tooLarge, 400, { nodeId: c.resized.nodeId, classType: c.resized.classType, file: c.file.filename })
+        }
+      }
+    }
+    // A loader's picture a paid node hands off (R3.H, ./pictureHandoff.ts): one
+    // that can't be made into the loader's tensor is refused now, and a model's
+    // file cap (Product shot on Bria, HappyHorse 1.1) is judged on the PNG it
+    // will be sent, before anything is held. A file that isn't there is left
+    // to the node's turn.
+    for (const p of prompts) {
+      for (const h of loaderHandoffs(p, families)) {
+        let bytes: Uint8Array
+        try { bytes = await files.read(h.file) }
+        catch { continue }
+        const why = await handoffRefusal(bytes, h.kind)
+        if (why) throw refuse(why, 400, { nodeId: h.nodeId, classType: p[h.nodeId]?.class_type, file: h.file.filename })
+        if (h.checked) {
+          const sent = await loaderHandoffBytes(bytes, h.kind)
+          const problem = inputFileProblem(h.classType, sent.bytes, families, p[h.at]?.inputs?.model)
+          if (problem) throw refuse(problem, 400, { nodeId: h.at, classType: h.classType })
         }
       }
     }

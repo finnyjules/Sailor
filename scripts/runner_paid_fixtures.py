@@ -48,6 +48,13 @@ Groups:
              MaxFilter alone on masks touching every edge and corner, for
              frontend/server/runner/pixels/maxFilter.ts
              (tests/unit/runner-paid-split.unit.spec.ts)
+  handoff    (R3.H) the PNG `_image_tensor_to_data_url` sends for a loader's
+             tensor: every file kind (EXIF 2–8, RGBA, grey + alpha, palette and
+             colour-key transparency, CMYK, 16-bit, WebP, GIF…) through the real
+             LoadImage and the real Image card, sent by Edit an image (fal) and
+             Remove object (Replicate), for
+             frontend/server/runner/pictures/handoffView.ts
+             (tests/unit/runner-handoff-parity.unit.spec.ts)
 
 The network is blocked (as in compositor_fixtures.py): every outbound connect
 and DNS lookup raises and the provider keys are removed before any node module
@@ -249,7 +256,7 @@ def _fake_session(get):
 
 def capture_calls(node_cls, answers: list, links: dict | None = None, files: dict | None = None,
                   pictures: dict | None = None, sounds: dict | None = None, picture_modes: dict | None = None,
-                  made_pixels: bool = False, **kwargs) -> dict:
+                  made_pixels: bool = False, tensors: dict | None = None, **kwargs) -> dict:
     """Run `node_cls.execute(**kwargs)` with every provider call, upload,
     download, save and web fetch patched out, and record what it does.
 
@@ -271,6 +278,9 @@ def capture_calls(node_cls, answers: list, links: dict | None = None, files: dic
       side's PNG encoder writes other bytes for the same pixels; and each
       picture input by the pixels its tensor holds (`loaded`, R3.7 fix
       round 1: the loader's view, EXIF turned).
+    - `tensors` (input name → a tensor a real loader made, R3.H): passed in
+      as they are, not named, so `_image_tensor_to_data_url` encodes them as
+      it encodes any picture (`PNG:<sha256>`, described in `made`).
     - Every GET (aiohttp, and the download helpers) is recorded in `gets` as
       `{url, status}` and served from `links` (text, or `{status, text}` — a
       404 is served as asked; `{raise: message}` fails the fetch outright
@@ -440,6 +450,8 @@ def capture_calls(node_cls, answers: list, links: dict | None = None, files: dic
             loaded[pname] = {"shape": list(arr.shape), "sha256": hashlib.sha256(arr.tobytes()).hexdigest()}
     for sname, data in (sounds or {}).items():
         kwargs[sname] = name(_sound_dict(data), "input", sname)
+    for tname, t in (tensors or {}).items():
+        kwargs[tname] = t
 
     saves = {"save_generation_output": fake_generation, "save_live_preview": fake_live, "save_image_to_input": fake_to_input}
     patches = [
@@ -1237,7 +1249,174 @@ def split_group() -> dict:
     return {"cases": cases, "maxfilter": maxfilter, "masks": masks}
 
 
+# ── handoff (R3.H): the picture a loader's tensor is handed to a provider as ──
+
+def _raw_png(w: int, h: int, colour_type: int, depth: int, pixels: bytes) -> bytes:
+    """A PNG written by hand (PIL can't write 16-bit colour): filter 0 rows of `pixels`."""
+    import zlib
+    channels = {0: 1, 2: 3, 4: 2, 6: 4}[colour_type]
+    row = w * channels * depth // 8
+
+    def chunk(kind: bytes, data: bytes) -> bytes:
+        return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data) & 0xFFFFFFFF)
+    raw = b"".join(b"\x00" + pixels[y * row:(y + 1) * row] for y in range(h))
+    return (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", w, h, depth, colour_type, 0, 0, 0))
+            + chunk(b"IDAT", zlib.compress(raw, 6)) + chunk(b"IEND", b""))
+
+
+def handoff_files() -> dict:
+    """The loader files of the handoff group, by case name: every kind the
+    brief names (EXIF 2–8 JPEG, RGBA PNG, palette PNG with transparency, CMYK
+    JPEG, 16-bit PNG, WebP, a plain RGB JPEG) and the kinds that decide RGB
+    against RGBA on the Image card (grey + alpha, a colour-keyed RGB PNG, an
+    RGBA PNG that is opaque everywhere) or that carry chunks Python drops."""
+    import io
+    from PIL import Image
+    W, H = 23, 15
+    rng = random.Random(9100)
+
+    def noise(n: int) -> bytes:
+        return bytes(rng.randrange(256) for _ in range(n))
+
+    def save(img, fmt: str, **kw) -> bytes:
+        buf = io.BytesIO()
+        img.save(buf, format=fmt, **kw)
+        return buf.getvalue()
+
+    def exif(orientation: int):
+        e = Image.Exif()
+        e[0x0112] = orientation
+        return e
+
+    rgb = Image.frombytes("RGB", (W, H), noise(W * H * 3))
+    alpha = bytes(rng.choice((0, 255, rng.randrange(256))) for _ in range(W * H))
+    rgba = rgb.convert("RGBA")
+    rgba.putalpha(Image.frombytes("L", (W, H), alpha))
+    out = {
+        "a plain RGB JPEG": save(rgb, "JPEG", quality=95),
+        "a plain RGB PNG": save(rgb, "PNG"),
+        "an RGB PNG with a text chunk": save(rgb, "PNG", pnginfo=_png_text()),
+        "a grey PNG": save(Image.frombytes("L", (W, H), noise(W * H)), "PNG"),
+        "an RGBA PNG, partly see-through": save(rgba, "PNG"),
+        "an RGBA PNG, opaque everywhere": save(rgb.convert("RGBA"), "PNG"),
+        "an RGBA PNG with one pixel at 254": None,
+        "a grey + alpha PNG": save(Image.merge("LA", (Image.frombytes("L", (W, H), noise(W * H)), Image.frombytes("L", (W, H), alpha))), "PNG"),
+        "an RGB PNG with a colour key": None,
+        "a palette PNG with transparency": None,
+        "a palette PNG, no transparency": None,
+        "a CMYK JPEG": cmyk_jpeg_bytes(W, H, 9101),
+        "a CMYK JPEG, EXIF 6": None,
+        "a 16-bit grey PNG": grey16_png_bytes(W, H, 9102),
+        "a 16-bit RGB PNG": _raw_png(W, H, 2, 16, noise(W * H * 6)),
+        "a 16-bit RGBA PNG, partly see-through": _raw_png(W, H, 6, 16, noise(W * H * 8)),
+        "a lossy WebP": save(rgb, "WEBP", quality=90),
+        "a lossless WebP with alpha": save(rgba, "WEBP", lossless=True),
+        "a WebP, EXIF 6": save(rgb, "WEBP", quality=90, exif=exif(6)),
+        "a PNG with EXIF 6 (eXIf)": save(rgb, "PNG", exif=exif(6)),
+        "an RGBA PNG, EXIF 8, partly see-through": save(rgba, "PNG", exif=exif(8)),
+        "a GIF, no transparency": save(rgb.convert("P", palette=Image.Palette.ADAPTIVE, colors=64), "GIF"),
+    }
+    for o in range(2, 9):
+        out[f"a JPEG, EXIF {o}"] = save(rgb, "JPEG", quality=95, exif=exif(o))
+    one = bytearray(b"\xff" * (W * H))
+    one[W * H // 2] = 254
+    nearly = rgb.convert("RGBA")
+    nearly.putalpha(Image.frombytes("L", (W, H), bytes(one)))
+    out["an RGBA PNG with one pixel at 254"] = save(nearly, "PNG")
+    out["an RGB PNG with a colour key"] = save(rgb, "PNG", transparency=rgb.getpixel((3, 2)))
+    pal = Image.frombytes("P", (W, H), bytes(rng.randrange(32) for _ in range(W * H)))
+    pal.putpalette(noise(32 * 3))
+    out["a palette PNG with transparency"] = save(pal, "PNG", transparency=bytes(rng.randrange(256) for _ in range(32)))
+    out["a palette PNG, no transparency"] = save(pal, "PNG")
+    cmyk = Image.open(io.BytesIO(out["a CMYK JPEG"]))
+    out["a CMYK JPEG, EXIF 6"] = save(cmyk, "JPEG", quality=95, exif=exif(6))
+    return out
+
+
+def _png_text():
+    from PIL import PngImagePlugin
+    info = PngImagePlugin.PngInfo()
+    info.add_text("prompt", '{"1": {"class_type": "KSampler"}}')
+    return info
+
+
+def _loader_tensor(loader: str, data: bytes, filename: str):
+    """What a real loader hands on for this file: LoadImage (nodes.py) or the
+    Image card (comfy_extras/nodes_image.py, which keeps the alpha of a file
+    that has any as a 4th channel), from a temporary input folder."""
+    import tempfile
+    import folder_paths
+    import nodes
+    from comfy_extras import nodes_image
+    with tempfile.TemporaryDirectory() as tmp:
+        before = folder_paths.get_input_directory()
+        folder_paths.set_input_directory(tmp)
+        try:
+            with open(os.path.join(tmp, filename), "wb") as f:
+                f.write(data)
+            if loader == "LoadImage":
+                return nodes.LoadImage().load_image(filename)[0]
+            none = lambda *_a, **_k: {"ui": {"images": []}}  # noqa: E731 — the previews are not part of the fixture
+            with mock.patch.object(nodes_image.Image, "_preview_to_temp", none), \
+                    mock.patch.object(nodes_image, "save_live_preview", none), \
+                    mock.patch.object(folder_paths, "get_temp_directory", lambda: tmp):
+                card = nodes_image.Image()
+                got = card.process(image=filename, export=False, filename_prefix="ComfyUI", format="png", quality=90,
+                                   lossless_webp=False, png_compression=4, scale=1.0, max_dimension=0, embed_metadata=True)
+            return got["result"][0]
+        finally:
+            folder_paths.set_input_directory(before)
+
+
+HANDOFF_EDITED = "https://f.test/handoff/edited.png"
+HANDOFF_EXT = {"JPEG": "jpg", "PNG": "png", "WEBP": "webp", "GIF": "gif"}
+
+
+def handoff_group() -> dict:
+    """R3.H: the bytes Python hands a provider for a picture from a loader.
+    Every paid node the runner takes encodes its IMAGE input with
+    `_image_tensor_to_data_url` (a PNG of the first frame, 8-bit, as many
+    channels as the tensor); for each file kind and each loader (LoadImage,
+    the Image card), the real loader makes the tensor and a real node sends
+    it: Edit an image on FLUX.2 [pro] (fal), and Remove object on Nano Banana 2
+    (Replicate, comfy_extras) for a few. Each case records the calls (the
+    picture as `PNG:<sha256>` of Python's PNG) and `made`: that PNG's decoded
+    pixels (shape and sha256), which the runner's hand-off must equal."""
+    import io
+    from PIL import Image
+    import runner_builder_fixtures as rbf
+    nr, _fal, extras = rbf._node_modules()
+    edit_actions = next(m for m in extras if hasattr(m, "RemoveObjectNode"))
+    files = handoff_files()
+    edited = _b64(png_bytes(8, 6, 9200, "RGBA"))
+    cases: list = []
+    for fname, data in files.items():
+        ext = HANDOFF_EXT[Image.open(io.BytesIO(data)).format]
+        filename = f"handoff.{ext}"
+        runs = [("EditImageNode", nr.EditImageNode, "input_image",
+                 {"model": "Flux 2 Pro", "prompt": "make it dusk", "aspect_ratio": "match_input_image", "resolution": "1K",
+                  "seed": 7, "safety_tolerance": 2, "prompt_upsampling": False, "output_format": "png"},
+                 [{"images": [{"url": HANDOFF_EDITED}]}])]
+        if fname in ("a JPEG, EXIF 6", "an RGBA PNG, partly see-through", "a CMYK JPEG"):
+            runs.append(("RemoveObjectNode", edit_actions.RemoveObjectNode, "image", {"target": "the lamp", "instructions": ""},
+                         [{"output": HANDOFF_EDITED}]))
+        for loader in ("LoadImage", "Image"):
+            for cls_name, cls, input_name, widgets, answers in runs:
+                tensor = _loader_tensor(loader, data, filename)
+                got = capture_calls(cls, answers, files={HANDOFF_EDITED: edited}, made_pixels=True,
+                                    tensors={input_name: tensor}, **widgets)
+                case = {"name": f"handoff · {fname} · {loader} → {cls_name}", "file": fname, "filename": filename,
+                        "loader": loader, "class_type": cls.define_schema().node_id, "input": input_name,
+                        "widgets": widgets, "answers": answers, "calls": got["calls"], "made": got.get("made", {}),
+                        "tensor_shape": list(tensor.shape)}
+                if "error" in got:
+                    case["error"] = got["error"]
+                cases.append(case)
+    return {"cases": cases, "files": {n: _b64(b) for n, b in files.items()}}
+
+
 GROUPS = {
+    "handoff": handoff_group,
     "machinery": machinery_group,
     "llm": llm_group,
     "describe": describe_group,

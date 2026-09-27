@@ -30,6 +30,7 @@ import {
 } from '#shared/runner/describe'
 import { priceNode } from '#shared/pricing/nodePrice'
 import type { NodePlan, PlanContext } from '../executors'
+import { imageUrlOf } from '../imageUrl'
 import type { RunnerValue } from '../types'
 import { answerOutput, answerUsage } from './llm'
 
@@ -142,7 +143,7 @@ export async function planDescribe(ctx: PlanContext): Promise<NodePlan> {
     const v = inputs.image
     const f = isLink(v) ? ctx.filesFrom(v)[0] : undefined
     if (!f) throw new Error('There is no picture to look at')
-    return ctx.toUrl(f)
+    return imageUrlOf(ctx, f, v)
   }
   let payload: Record<string, unknown>
   switch (classType) {

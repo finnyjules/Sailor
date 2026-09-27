@@ -10,7 +10,7 @@
 import { readFileSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
-import { createFakeFal, createFakeReplicate, makeKit, ofType } from './__runner__/kit'
+import { createFakeFal, createFakeReplicate, makeKit, ofType, rgbPng1x1 } from './__runner__/kit'
 import { planNode } from '~~/server/runner/executors'
 import { withWiredValues } from '~~/server/runner/values'
 import { NANO_BANANA_SHORT_PROMPT } from '~~/server/runner/requestRules'
@@ -172,7 +172,8 @@ describe('Moodboard → Restyle\'s taste on the engine (hosted)', () => {
   it('one call whose prompt folds the style block as Python does; charged the Restyle\'s own price, the Moodboard nothing', async () => {
     const moderate = vi.fn(async (_t: string) => ({ ok: true as const }))
     const k = makeKit({ hosted: true, moderate, fal: createFakeFal(), replicate: createFakeReplicate(), deps: { families: () => FAMILIES } })
-    writeFileSync(join(k.root, 'input', 'content.png'), new Uint8Array([1]))
+    // A real picture (R3.H: the Image card's file is decoded before it is handed off, as Python's loader does).
+    writeFileSync(join(k.root, 'input', 'content.png'), rgbPng1x1(1, 7, 7))
     const { runId, promptIds } = await k.engine.startRun({ userId: k.userId, takes: [flow()], ...START })
     await k.engine.settled(runId)
     const run = (await k.store.get(runId))!

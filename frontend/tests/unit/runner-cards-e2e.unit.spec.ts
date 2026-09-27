@@ -43,7 +43,7 @@ import { nodesNeedingEngine } from '~~/app/lib/runner/needsEngine'
 import { isRunnerDeclined } from '~~/app/lib/runner/client'
 import type { OutputFile, RunnerValue } from '~~/server/runner/types'
 import type { RenderRequest } from '~~/server/templates/schema'
-import { createFakeFal, createFakeLedger, createFakeReplicate, makeKit, until } from './__runner__/kit'
+import { createFakeFal, createFakeLedger, createFakeReplicate, makeKit, rgbPng1x1, until } from './__runner__/kit'
 import { withoutUnknownFields } from './helpers/pythonParity'
 
 // Every R1 card's text is known at the start of a run, even through a Gate
@@ -137,7 +137,8 @@ const tasteFlow = (): CardFlow => ({
     1: { class_type: 'RestyleFromImageNode', inputs: { ...TASTE.inputs, content_image: ['11', 0], style_in: ['m', 0] } },
     2: outImage('1'),
   },
-  files: { 'content_image.png': new Uint8Array([0x89, 0x50, 0x4E, 0x47, 1, 7, 7]) },
+  // A real picture (R3.H: the Image card's file is decoded before it is handed off, as Python's loader does).
+  files: { 'content_image.png': rgbPng1x1(1, 7, 7) },
   cards: ['m'],
 })
 /** 3. Text → Smart Layout `text_layer_2` → Save image (Python's node id 17, for its preview names). */

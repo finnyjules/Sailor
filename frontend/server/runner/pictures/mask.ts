@@ -37,7 +37,7 @@ export async function decodeMask(bytes: Uint8Array): Promise<Mask> {
  * (a first frame smaller than the picture counts too: LoadImage refuses those
  * pictures anyway, rgbTurnedPng). Other formats: sharp's alpha agrees with PIL's.
  */
-function hasAlphaAsPil(bytes: Uint8Array, sharpAlpha: boolean | undefined, format: string | undefined): boolean {
+export function hasAlphaAsPil(bytes: Uint8Array, sharpAlpha: boolean | undefined, format: string | undefined): boolean {
   const type = pngColourType(bytes)
   // A GIF opens as mode P: a mask only with a transparent colour (sharp gives every GIF alpha).
   if (format === 'gif') return !!sharpAlpha && gifFirstFrameSeeThrough(bytes)

@@ -603,7 +603,8 @@ function inputFileSizeProblem(classType: string, size: number): string | null {
  * (backupInputProblem). A file over its model's limit by its size on disk
  * (`size`, when the store can tell) is refused before it is read (final fix
  * F9: stat before read, as the media checks do). A file that can't be read is
- * left to the hand-off, which reads it too.
+ * left to the hand-off, which reads it too. `handedOff` (R3.H): the bytes a
+ * loader's picture on that link is sent as, or null for any other picture.
  */
 export async function linkedFileCheck<F>(
   node: ApiNode,
@@ -611,12 +612,23 @@ export async function linkedFileCheck<F>(
   read: (f: F) => Promise<Uint8Array>,
   families: ReadonlySet<RunnerFamily>,
   size?: (f: F) => Promise<number | null>,
+  handedOff?: (link: [string, number]) => Promise<Uint8Array> | null,
 ): Promise<{ problem: string | null, bytes?: number }> {
   const name = checkedInputFile(node.class_type, families, node.inputs?.model)
   const link = name ? node.inputs?.[name] : undefined
   if (!isLink(link)) return { problem: null }
   const f = filesFrom(link as [string, number])[0]
   if (f === undefined) return { problem: null }
+  // A loader's picture (R3.H): judged on the PNG it is handed off as, never
+  // on the loader's file. One that can't be made is left to the hand-off,
+  // which fails the node in the same words.
+  const sent = handedOff?.(link as [string, number])
+  if (sent) {
+    let bytes: Uint8Array
+    try { bytes = await sent }
+    catch { return { problem: null } }
+    return { problem: inputFileProblem(node.class_type, bytes, families, node.inputs?.model), bytes: bytes.byteLength }
+  }
   let onDisk: number | null = null
   try { onDisk = size ? await size(f) : null }
   catch { onDisk = null }

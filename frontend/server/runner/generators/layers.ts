@@ -36,6 +36,7 @@ import { MAX_VALUE_TEXT_CHARS } from '../values'
 import { answerExt } from '../answerDownload'
 import { answerRgbaPng } from '../pictures/pythonView'
 import type { NodePlan, PipelineIO, PlanContext } from '../executors'
+import { imageUrlOf } from '../imageUrl'
 import type { OutputFile, RunnerValue } from '../types'
 import { firstOutputUrl } from './repair'
 
@@ -480,7 +481,7 @@ export async function planLayers(ctx: PlanContext): Promise<NodePlan> {
   const link = inputs.image
   const file = isLink(link) ? ctx.filesFrom(link)[0] : undefined
   if (!file) throw new Error('There is no picture to work on')
-  const image = await ctx.toUrl(file)
+  const image = await imageUrlOf(ctx, file, link)
   switch (classType) {
     case 'LayerizeGraphicNode': return layerizePlan(inputs, image)
     case 'SeedreamLayerizeNode': return seedreamPlan(ctx, inputs, image, file)

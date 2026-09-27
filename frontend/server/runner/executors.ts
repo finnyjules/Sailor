@@ -50,7 +50,7 @@
  * moves the whole node while it is on)
  * closely enough that the same workflow gives the same result.
  */
-import { GATE_CLASS, isLink, type ApiPrompt } from '#shared/runner/graph'
+import { GATE_CLASS, isLink, type ApiLink, type ApiPrompt } from '#shared/runner/graph'
 import { classUpgradeOn, resolveVideoModelId } from '#shared/runner/eligibility'
 import { NO_FAMILIES, type RunnerFamily } from '#shared/runner/families'
 import { RUNNER_IMAGE_MODELS, RUNNER_REPLICATE_IMAGE_MODELS, imageAppFor, nodeImagePrompt } from './generators/image'
@@ -129,6 +129,7 @@ import { planSplitLayers } from './generators/splitLayers'
 import type { KeptExt } from './keptBytes'
 import type { AnswerKind } from './answerDownload'
 import { filesOf } from './values'
+import { imageUrlOf } from './imageUrl'
 import { OUTPUT_KINDS } from '#shared/runner/values'
 import { STATIC_VALUES, staticValueOf } from '#shared/runner/staticValues'
 import { FACE_SWAP_ONE_PICTURE } from '#shared/runner/faceSwap'
@@ -295,6 +296,14 @@ export interface PlanContext {
    * which Replicate fetches too (so one hand-off serves both providers).
    */
   toUrl(file: OutputFile): Promise<string>
+  /**
+   * A picture wired into an IMAGE input Python encodes with
+   * `_image_tensor_to_data_url` → a link the provider can fetch (R3.H): from
+   * a loader (with `cards` on), the PNG of the loader's tensor
+   * (../runner/pictureHandoff.ts); any other picture as `toUrl` hands it off.
+   * Absent: `toUrl`.
+   */
+  imageToUrl?(file: OutputFile, link: ApiLink): Promise<string>
   /** For a Gate: this take was let through it. */
   gateOpen: boolean
   /** The bytes of one of our files (a local render reads its pictures). Absent: local renders fail plainly. */
@@ -512,7 +521,7 @@ async function planNodeRequest(ctx: PlanContext): Promise<NodePlan> {
   const pictureUrl = async (name: string, missing: string): Promise<string> => {
     const f = linkedFirstFile(name)
     if (!f) throw new Error(missing)
-    return ctx.toUrl(f)
+    return imageUrlOf(ctx, f, inputs[name])
   }
   // A widget toggle as Python reads it: missing is the node's default.
   const flag = (name: string, def: boolean): boolean => inputs[name] === undefined ? def : pyTruthy(inputs[name])
@@ -705,7 +714,7 @@ async function planNodeRequest(ctx: PlanContext): Promise<NodePlan> {
 
     case 'GenerateVideoNode': {
       const f = linkedFirstFile('image')
-      return planVideoGeneration(inputs, f ? () => ctx.toUrl(f) : null)
+      return planVideoGeneration(inputs, f ? () => imageUrlOf(ctx, f, inputs.image) : null)
     }
 
     // A shot-directed Film a shot (Task 4, characters stage 3; runnerTakesNode
@@ -720,7 +729,7 @@ async function planNodeRequest(ctx: PlanContext): Promise<NodePlan> {
       if (isLink(inputs.image) && !f) throw new Error('There is no picture for the first frame')
       const resolved = await resolveShotRefs(parseJsonObject(inputs.model_options), ctx.toUrl)
       const firstFrame = resolved.firstFrame
-      const first = f ? () => ctx.toUrl(f) : firstFrame ? async () => firstFrame : null
+      const first = f ? () => imageUrlOf(ctx, f, inputs.image) : firstFrame ? async () => firstFrame : null
       const plan = await planVideoGeneration({ ...inputs, model_options: JSON.stringify(resolved.adv) }, first)
       if (plan.kind !== 'provider') return plan
       // Python's FilmShotNode is not an output node: the take lands on the Video card after it (Ruling C).

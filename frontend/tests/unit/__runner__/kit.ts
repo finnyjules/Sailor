@@ -1,5 +1,6 @@
 /** Test helpers for the runner engine: a fake fal, a fake Replicate, a fake ledger, and an engine wired to real file storage in a temp folder. */
 import { mkdirSync, mkdtempSync } from 'node:fs'
+import { crc32, deflateSync } from 'node:zlib'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { vi } from 'vitest'
@@ -252,4 +253,31 @@ export async function until(check: () => boolean, ms = 3000): Promise<void> {
     if (Date.now() > end) throw new Error('timed out waiting for the engine')
     await new Promise(r => setTimeout(r, 2))
   }
+}
+
+/**
+ * A real 1 × 1 8-bit RGB PNG of one colour (R3.H: a loader's picture is
+ * decoded before it is handed off, as Python's loaders decode it, so a card's
+ * file must be a picture). Distinct colours give distinct files.
+ */
+export function rgbPng1x1(r: number, g: number, b: number): Uint8Array {
+  const chunk = (type: string, data: Uint8Array) => {
+    const body = Buffer.concat([Buffer.from(type, 'latin1'), data])
+    const out = Buffer.alloc(12 + data.length)
+    out.writeUInt32BE(data.length, 0)
+    body.copy(out, 4)
+    out.writeUInt32BE(crc32(body), 8 + data.length)
+    return out
+  }
+  const ihdr = Buffer.alloc(13)
+  ihdr.writeUInt32BE(1, 0)
+  ihdr.writeUInt32BE(1, 4)
+  ihdr[8] = 8
+  ihdr[9] = 2
+  return new Uint8Array(Buffer.concat([
+    Buffer.from([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]),
+    chunk('IHDR', ihdr),
+    chunk('IDAT', deflateSync(Buffer.from([0, r, g, b]))),
+    chunk('IEND', new Uint8Array(0)),
+  ]))
 }
