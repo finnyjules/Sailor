@@ -43,4 +43,25 @@ describe('Face Swap app on the runner', () => {
     w.post({ type: 'sailor-bridge', event: 'execution_complete', prompt_id: 'run1.0' })
     await expect(done).rejects.toThrow('The swap finished but made no picture.')
   })
+
+  it('still picks up the picture event when it arrives before the promptId is known', async () => {
+    const w = fakeWindow()
+    let resolveId!: (id: string) => void
+    const idPromise = new Promise<string>((res) => { resolveId = res })
+    const done = awaitRunnerImage(idPromise, { target: w })
+    // Posted before the id promise ever resolves — the race the fix closes:
+    // the leg's events can land on window before startRunnerRun resolves.
+    w.post({ type: 'sailor-bridge', event: 'executed', prompt_id: 'run1.0', output: { images: [{ filename: 'face_swap_1.png', subfolder: '', type: 'output' }] } })
+    resolveId('run1.0')
+    await expect(done).resolves.toEqual({ filename: 'face_swap_1.png', subfolder: '', type: 'output' })
+    expect(w.size()).toBe(0)
+  })
+
+  it('rejects with the id promise’s own error and leaves no listener when the run never started', async () => {
+    const w = fakeWindow()
+    const err = new Error('The swap didn’t start. Try again.')
+    const done = awaitRunnerImage(Promise.reject(err), { target: w })
+    await expect(done).rejects.toThrow('The swap didn’t start. Try again.')
+    expect(w.size()).toBe(0)
+  })
 })

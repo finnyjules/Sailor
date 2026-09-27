@@ -77,6 +77,7 @@ function clearSlot(role: 'source' | 'target') {
 // ----- Face's gender + hair choice ----------------------------------------
 
 const GENDER_STORAGE_KEY = 'sailor.faceSwap.gender'
+const HAIR_STORAGE_KEY = 'sailor.faceSwap.hair'
 
 function readSavedGender(): typeof FACE_SWAP_GENDER_OPTIONS[number] {
   try {
@@ -86,11 +87,23 @@ function readSavedGender(): typeof FACE_SWAP_GENDER_OPTIONS[number] {
   return FACE_SWAP_GENDER_DEFAULT
 }
 
+function readSavedHair(): typeof FACE_SWAP_HAIR_OPTIONS[number] {
+  try {
+    const saved = localStorage.getItem(HAIR_STORAGE_KEY)
+    if (saved && (FACE_SWAP_HAIR_OPTIONS as readonly string[]).includes(saved)) return saved as typeof FACE_SWAP_HAIR_OPTIONS[number]
+  } catch { /* localStorage unavailable — fall back to the default */ }
+  return FACE_SWAP_HAIR_DEFAULT
+}
+
 const gender = ref<typeof FACE_SWAP_GENDER_OPTIONS[number]>(readSavedGender())
-const keepHairFrom = ref<typeof FACE_SWAP_HAIR_OPTIONS[number]>(FACE_SWAP_HAIR_DEFAULT)
+const keepHairFrom = ref<typeof FACE_SWAP_HAIR_OPTIONS[number]>(readSavedHair())
 
 watch(gender, (v) => {
   try { localStorage.setItem(GENDER_STORAGE_KEY, v) } catch { /* best effort only */ }
+})
+
+watch(keepHairFrom, (v) => {
+  try { localStorage.setItem(HAIR_STORAGE_KEY, v) } catch { /* best effort only */ }
 })
 
 // ----- Prompt construction + submission (Sailor runner) -------------------
@@ -113,10 +126,17 @@ async function run() {
       gender: gender.value,
       keepHairFrom: keepHairFrom.value,
     })
-    const leg = await startRunnerRun({ takes: [prompt], workflow: null, canvasId: null, projectUuid: null, projectName: null })
-    const promptId = leg.promptIds[0]
-    if (!promptId) throw new Error('The swap didn’t start. Try again.')
-    const output = await awaitRunnerImage(promptId)
+    // awaitRunnerImage is called BEFORE the POST settles (not after, on its
+    // promptId) so its window listener is attached before the runner can
+    // possibly post this leg's events — server/runner/engine.ts starts the
+    // leg without awaiting the response, so those events can otherwise land
+    // before startRunnerRun resolves and be missed.
+    const idPromise = startRunnerRun({ takes: [prompt], workflow: null, canvasId: null, projectUuid: null, projectName: null })
+      .then(leg => leg.promptIds[0] ?? Promise.reject(new Error('The swap didn’t start. Try again.')))
+    const done = awaitRunnerImage(idPromise)
+    const output = await done
+    // Already settled by the time `done` resolves — just reads the id back.
+    const promptId = await idPromise
     const url = `/view?${new URLSearchParams({
       filename: output.filename,
       type: output.type,
