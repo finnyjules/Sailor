@@ -578,3 +578,94 @@ test.describe('Frame pen — a text layer\'s drawn path', () => {
     expect(back.x).toBe(t3.x); expect(back.y).toBe(t3.y)
   })
 })
+
+// ── pen stage 8: Round corner / Chamfer / Offset and the Repeat panel in the Frame ──
+test.describe('Frame pen — pen stage 8', () => {
+  test.beforeEach(async ({ page }) => {
+    await page.goto('/dev/frame-lab')
+    await page.waitForSelector('[data-ready]')
+    await expect(penButton(page)).toBeVisible()
+  })
+
+  test('a triangle corner rounded by dragging reaches the layer; Esc mid-drag leaves the layer byte-identical', async ({ page }) => {
+    const { tri, box } = await drawTriangle(page)
+    await dblclickLayer(page, tri, box)
+    await expect(penToolbar(page)).toBeVisible()
+    const l0 = JSON.parse(JSON.stringify(await layerById(page, tri.id)))
+    const cs = corners(l0)
+    const c0 = sketchToScreen(l0, cs[0]!, box)
+    const mid = sketchToScreen(l0, { x: (cs[0]!.x * 2 + cs[1]!.x + cs[2]!.x) / 4, y: (cs[0]!.y * 2 + cs[1]!.y + cs[2]!.y) / 4 }, box)
+    await page.keyboard.press('f')
+    await expect(page.locator('[data-tool="round"]')).toHaveAttribute('aria-pressed', 'true')
+    // Esc mid-drag: nothing reaches the layer
+    await page.mouse.move(c0.x, c0.y); await page.mouse.down()
+    await page.mouse.move((c0.x + mid.x) / 2, (c0.y + mid.y) / 2, { steps: 5 })
+    await expect(overlay(page).locator('[data-corner-preview]')).toHaveCount(1)
+    expect(await layerById(page, tri.id)).toEqual(l0)                  // the preview never writes the layer
+    await page.keyboard.press('Escape')
+    await page.mouse.up()
+    await expect(penToolbar(page)).toBeVisible()                        // Esc took the preview, not the pen
+    expect(await layerById(page, tri.id)).toEqual(l0)
+    // a real drag: the layer's outline takes the arc
+    await drag(page, c0, { x: (c0.x * 3 + mid.x) / 4, y: (c0.y * 3 + mid.y) / 4 })
+    await expect.poll(async () => (await layerById(page, tri.id)).d).toMatch(/A/)
+    await page.keyboard.press('Enter')
+    await expect(penToolbar(page)).toBeHidden()
+    const done = await layerById(page, tri.id)
+    expect(done.d).toMatch(/A/)
+    expect(done.sketch.entities.filter((e: any) => e.kind === 'path').flatMap((e: any) => e.segments).filter((s: any) => s.kind === 'arc')).toHaveLength(1)
+    // the corner stays in the drawing as a guide, never in the outline
+    expect(done.sketch.entities.find((e: any) => e.id === cs[0]!.id)?.construction).toBe(true)
+  })
+
+  test('the new tools and the Repeat panel (in the pen’s Properties) are on screen at 1280 and 1024', async ({ page }) => {
+    for (const width of [1280, 1024]) {
+      await page.setViewportSize({ width, height: 800 })
+      await page.goto('/dev/frame-lab'); await page.waitForSelector('[data-ready]')
+      const { tri, box } = await drawTriangle(page)
+      await dblclickLayer(page, tri, box)
+      await expect(penToolbar(page)).toBeVisible()
+      for (const t of ['round', 'chamfer', 'offset']) {
+        const b = (await page.locator(`[data-tool="${t}"]`).boundingBox())!
+        expect(b.x).toBeGreaterThanOrEqual(0)
+        expect(b.x + b.width).toBeLessThanOrEqual(width); expect(b.y + b.height).toBeLessThanOrEqual(800)
+      }
+      // a real click on the Offset button picks it
+      await page.locator('[data-tool="offset"]').click()
+      await expect(page.locator('[data-tool="offset"]')).toHaveAttribute('aria-pressed', 'true')
+      // select the drawing (a click on its first edge with Select), then right-click it
+      const cs = corners(tri)
+      const edge = sketchToScreen(tri, { x: (cs[0]!.x + cs[1]!.x) / 2, y: (cs[0]!.y + cs[1]!.y) / 2 }, box)
+      await page.keyboard.press('v')
+      await page.mouse.click(edge.x, edge.y)
+      await page.mouse.click(edge.x, edge.y, { button: 'right' })
+      await page.locator('[data-menu-item="repeat"]').click()
+      const panel = page.locator('[data-testid="frame-pen-properties"] [data-repeat-panel]')
+      await expect(panel).toBeVisible()
+      const pb = (await page.locator('[data-act="repeat-apply"]').boundingBox())!
+      expect(pb.x).toBeGreaterThanOrEqual(0)
+      expect(pb.x + pb.width).toBeLessThanOrEqual(width); expect(pb.y + pb.height).toBeLessThanOrEqual(800)
+      // the tool row is still on screen with the panel open
+      const rb = (await page.locator('[data-tool="round"]').boundingBox())!
+      expect(rb.x + rb.width).toBeLessThanOrEqual(width); expect(rb.y + rb.height).toBeLessThanOrEqual(800)
+      await page.keyboard.press('Escape')
+      await expect(panel).toHaveCount(0)
+      expect(await layerById(page, tri.id)).toEqual(tri)                 // Esc: the layer as it was
+      await page.keyboard.press('Escape')
+    }
+  })
+
+  test('a text guide’s pen offers Round corner and Chamfer, not Offset', async ({ page }) => {
+    // opened as the text-guide block above opens it: the "Plain text" layer, Follow a path → Drawn path, Draw a path
+    await page.locator('[title="Double-click to rename"]', { hasText: /Plain text/ }).first().click()
+    await page.locator('div:has(> .panel-label:text-is("Follow a path")) > select').first().selectOption('custom')
+    await page.locator('button:has-text("Draw a path"), button:has-text("Edit the path")').first().click()
+    await expect(penToolbar(page)).toBeVisible()
+    await expect(page.locator('[data-tool="round"]')).toBeVisible()
+    await expect(page.locator('[data-tool="chamfer"]')).toBeVisible()
+    await expect(page.locator('[data-tool="offset"]')).toHaveCount(0)
+    // …and its key does nothing there
+    await page.keyboard.press('e')
+    await expect(page.locator('[data-tool="path"]')).toHaveAttribute('aria-pressed', 'true')
+  })
+})

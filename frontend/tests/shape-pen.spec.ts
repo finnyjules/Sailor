@@ -175,3 +175,72 @@ test('a Drawn shape is drawn with the shared pen, arranged by the studio, and th
   await page.keyboard.press('Escape')
   await expect.poll(() => closesOf(page)).toBe(1)
 })
+
+test('pen stage 8: the Drawn shape takes an offset; the new tools and the Repeat panel fit at 1280 and 1024', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 800 })
+  await page.goto('/dev/shape-studio-lab')
+  await page.locator('[data-ready]').waitFor()
+  await page.getByLabel('Shape', { exact: true }).selectOption('drawn')
+  await expect(page.locator('[data-tool="path"]')).toBeVisible()
+  const fits = async (width: number) => {
+    for (const t of ['round', 'chamfer', 'offset']) {
+      const b = (await page.locator(`[data-tool="${t}"]`).boundingBox())!
+      expect(b.x).toBeGreaterThanOrEqual(0)
+      expect(b.x + b.width).toBeLessThanOrEqual(width); expect(b.y + b.height).toBeLessThanOrEqual(800)
+    }
+  }
+  await fits(1280)
+  await page.setViewportSize({ width: 1024, height: 800 })
+  await fits(1024)
+  const overlay = page.locator('[data-testid="shape-pen-overlay"]')
+  const box = (await overlay.boundingBox())!
+  const cx = box.x + box.width / 2, cy = box.y + box.height / 2
+  // a closed triangle with the Pen
+  await page.keyboard.press('p')
+  for (const [dx, dy] of [[-70, 40], [70, 40], [0, -60], [-70, 40]]) {
+    await page.mouse.move(cx + dx!, cy + dy!); await page.mouse.down(); await page.mouse.up()
+  }
+  // the bottom side's middle, read off its hit path each time: selecting grows
+  // the dock under the preview, which re-fits the canvas and the drawing with it
+  const bottomMid = async () => {
+    const r = await page.evaluate(() => {
+      const segs = [...document.querySelectorAll('[data-testid="shape-pen-overlay"] [data-seg]')].map(e => e.getBoundingClientRect())
+      const flat = segs.filter(b => b.width > 3 * b.height).sort((a, b) => b.y - a.y)[0]!
+      return { x: flat.x + flat.width / 2, y: flat.y + flat.height / 2 }
+    })
+    return r
+  }
+  // the Repeat panel in the pen's Properties: a right-click on the triangle selects it; Repeat…
+  await page.keyboard.press('v')
+  const e1 = await bottomMid()
+  await page.mouse.click(e1.x, e1.y, { button: 'right' })
+  await page.locator('[data-menu-item="repeat"]').click()
+  const panel = page.locator('[data-testid="shape-pen-properties"] [data-repeat-panel]')
+  await expect(panel).toBeVisible()
+  for (const width of [1024, 1280]) {
+    await page.setViewportSize({ width, height: 800 })
+    const pb = (await page.locator('[data-act="repeat-apply"]').boundingBox())!
+    expect(pb.x).toBeGreaterThanOrEqual(0)
+    expect(pb.x + pb.width).toBeLessThanOrEqual(width); expect(pb.y + pb.height).toBeLessThanOrEqual(800)
+    await fits(width)
+  }
+  await page.setViewportSize({ width: 1024, height: 800 })
+  await page.keyboard.press('Escape')
+  await expect(panel).toHaveCount(0)
+  await expect(page.locator('[data-tool="path"]')).toBeVisible()   // Esc took the panel, not the pen
+  // E, then a drag from the bottom side outward (down): the offset copy
+  await page.keyboard.press('e')
+  await expect(page.locator('[data-tool="offset"]')).toHaveAttribute('aria-pressed', 'true')
+  const e2 = await bottomMid()
+  await page.mouse.move(e2.x, e2.y); await page.mouse.down()
+  await page.mouse.move(e2.x, e2.y + 10, { steps: 3 }); await page.mouse.move(e2.x, e2.y + 20, { steps: 3 })
+  await page.mouse.up()
+  await page.keyboard.press('Enter')
+  await expect(page.locator('[data-tool="offset"]')).toHaveCount(0)
+  await expect.poll(async () => page.evaluate(() => {
+    const m = (window as any).__shapeStudioLab.props.sailor_shapeStudio?.doc?.layers?.[0]?.mark
+    return m?.sketch?.entities?.filter((e: any) => e.kind === 'path').length ?? 0
+  }), { timeout: 15_000 }).toBe(2)
+  const mark = await page.evaluate(() => (window as any).__shapeStudioLab.props.sailor_shapeStudio.doc.layers[0].mark)
+  expect(mark.sketch.constraints.some((k: any) => k.kind === 'offsetLine')).toBe(true)
+})
