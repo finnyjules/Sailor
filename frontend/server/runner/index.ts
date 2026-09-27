@@ -72,7 +72,7 @@ export function getEngine(): Engine {
       },
     }),
     // Network errors and 5xx are tried again (1s, 2s): fal has already billed the result.
-    download: url => downloadResult(url),
+    download: (url, o) => downloadResult(url, o?.maxBytes !== undefined ? { maxBytes: o.maxBytes } : {}),
     hosted: isHosted,
     families: runnerFamilies,
     backup: runnerBackup,

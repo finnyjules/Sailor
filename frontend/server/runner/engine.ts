@@ -20,13 +20,17 @@ import { RUNNER_TIMEOUTS, type RunnerTimeouts } from '#shared/runner/timeouts'
 import { MeterRefusalError } from '../utils/requestMeter'
 import { BASE_RENDER_CREDITS, UnpricedGraphError } from '../utils/priceBook'
 import { extractGraphPromptText } from '../utils/graphPromptText'
-import { FalError, isProviderNetworkError, percentFromLogs, type FalStatus, type ProviderClient } from './falQueue'
+import { FalError, isProviderNetworkError, percentFromLogs, type FalStatus, type OutputMedia, type ProviderClient } from './falQueue'
 import { ReplicateError } from './replicateQueue'
 import { cancelAndConfirm, type CancelCheck } from './cancelCheck'
-import { planNode, type ProviderBackup } from './executors'
+import { planNode, type DeriveIO, type PipelineCall, type ProviderBackup } from './executors'
+import { rawTextOf } from './rawJson'
+import { creditsForUsd } from '#shared/pricing/markup'
+import { MAX_MEDIA_BYTES } from '../utils/graphInputSeconds'
+import { answerRgbPng } from './pictures/pythonView'
 import type { KeepStep } from './compositor/keep'
 import { createMemoryHeldBytes, type HeldBytes } from './heldBytes'
-import { createMemoryKeptBytes, type KeptBytes } from './keptBytes'
+import { createMemoryKeptBytes, type KeptBytes, type KeptExt } from './keptBytes'
 import { createFileAccess } from './fileAccess'
 import type { BackupSettings } from './config'
 import { linkedFileCheck, measuredInputProblem, requestProblems, unreadableInputWords } from './requestRules'
@@ -48,7 +52,7 @@ import { extFor, type ResultStore } from './results'
 import { runIdOf, userKeyOf, type RunStore } from './store'
 import {
   emptyNodeRecord, stageKeyOf,
-  type LegAction, type LegRecord, type NodeRecord, type OutputFile, type PendingRequest, type RunRecord, type RunStatus,
+  type CallRecord, type LegAction, type LegRecord, type NodeRecord, type OutputFile, type PendingRequest, type RunRecord, type RunStatus,
   type RunnerProvider, type RunnerValue, type StageCharge, type TakeRecord, type MeasuredMedia, type UnconfirmedCancel,
 } from './types'
 import { checkValue, filesOf, filesOfValues, slotValue, withWiredValues } from './values'
@@ -143,7 +147,8 @@ export interface EngineDeps {
   events: RunEvents
   ownership: OwnershipCheck
   records: { write(s: StageRecordSummary): Promise<void> }
-  download(url: string): Promise<{ bytes: Uint8Array; contentType: string | null }>
+  /** Downloads an answer's file; over `maxBytes` it fails plainly (falQueue.ts downloadResult). */
+  download(url: string, o?: { maxBytes?: number }): Promise<{ bytes: Uint8Array; contentType: string | null }>
   hosted(): boolean
   /** The runner families switched on, server side (the authority). None when absent. */
   families?(): ReadonlySet<RunnerFamily>
@@ -245,6 +250,41 @@ export function isSubmitOutage(e: unknown): boolean {
 /** What a saved result is filed under: fal keeps its bare endpoint (results saved before 2026-09-24 still match). */
 const fingerprintEndpoint = (provider: RunnerProvider, endpoint: string): string =>
   provider === 'fal' ? endpoint : `${provider}:${endpoint}`
+
+/**
+ * What a provider job is sent with and waits on: a node's record, or one call
+ * of a pipeline (CallRecord, R3.1). Sending, the Replicate re-send and the
+ * switch to a backup write the request down on it.
+ */
+type Sendable = Pick<NodeRecord, 'request' | 'switchedFrom'> & { endpoint: string | null; payload: Record<string, unknown> | null }
+
+/** A job's result in a node's words (a time-out names it). */
+const MEDIA_NOUN: Record<OutputMedia, string> = { image: 'image', video: 'video', audio: 'sound', glb: '3D model', value: 'answer' }
+/** When the provider's answer names no file to download. */
+const NO_FILE: Record<Exclude<OutputMedia, 'value'>, string> = {
+  image: 'The provider returned no image', video: 'The provider returned no video',
+  audio: 'The provider returned no sound', glb: 'The provider returned no 3D model',
+}
+/** A resumed pipeline call that is no longer the call written down (the F12 rule). */
+export const PIPELINE_CALL_CHANGED = 'This step changed while it was running, so it was stopped. Run it again.'
+
+/** Kept bytes' extension by a hand-off's name (keptBytes.ts). */
+function keptExtOf(name: string): KeptExt {
+  const ext = name.slice(name.lastIndexOf('.') + 1).toLowerCase()
+  return ext === 'png' || ext === 'glb' || ext === 'json' ? ext : 'bin'
+}
+
+/** A saved output file's address, as the canvas reads it (a 3D file's value, R3.1). */
+function viewUrlOf(f: OutputFile): string {
+  return `/view?filename=${encodeURIComponent(f.filename)}&subfolder=${encodeURIComponent(f.subfolder)}&type=${f.type}`
+}
+
+/** The provider jobs a node may have out: its own request, and a pipeline's calls sent and not answered. */
+function sentRequests(rec: NodeRecord): PendingRequest[] {
+  const out: PendingRequest[] = rec.request ? [rec.request] : []
+  for (const c of rec.calls ?? []) if (c.status === 'sent' && c.request) out.push(c.request)
+  return out
+}
 
 /** Larger than this, the workflow is not stored (Open workflow then falls back, with its toast). */
 export const MAX_STORED_WORKFLOW_CHARS = 2_000_000
@@ -524,7 +564,12 @@ export function createEngine(deps: EngineDeps) {
           r.unconfirmedCancels = r.unconfirmedCancels!.filter(x => x.requestId !== requestId)
           if (!r.unconfirmedCancels.length) delete r.unconfirmedCancels
           // A first job left behind by a backup switch: its cancel is confirmed now.
-          for (const t of r.takes) for (const n of Object.values(t.nodes)) if (n.switchedFrom?.requestId === requestId) delete n.switchedFrom.cancelUrl
+          for (const t of r.takes) {
+            for (const n of Object.values(t.nodes)) {
+              if (n.switchedFrom?.requestId === requestId) delete n.switchedFrom.cancelUrl
+              for (const c of n.calls ?? []) if (c.switchedFrom?.requestId === requestId) delete c.switchedFrom.cancelUrl
+            }
+          }
         })
         return
       }
@@ -551,7 +596,7 @@ export function createEngine(deps: EngineDeps) {
   }
 
   /** Send the node's written-down request (rec.endpoint, rec.payload) to `provider`, and write the request down. */
-  async function submitRequest(run: RunRecord, rec: NodeRecord, provider: RunnerProvider, signal: AbortSignal): Promise<PendingRequest> {
+  async function submitRequest(run: RunRecord, rec: Sendable, provider: RunnerProvider, signal: AbortSignal): Promise<PendingRequest> {
     // A Stop can land while a switch is under way; nothing may go out after it.
     if (signal.aborted) throw new RunStopped()
     const sub = await clientFor(provider).submit(rec.endpoint!, rec.payload!, { webhookUrl: webhookFor(provider) })
@@ -574,7 +619,7 @@ export function createEngine(deps: EngineDeps) {
    * backup (sent again on restart); Sailor absorbs its cost.
    */
   async function sendToBackup(
-    run: RunRecord, rec: NodeRecord, backup: ProviderBackup, from: NonNullable<NodeRecord['switchedFrom']>,
+    run: RunRecord, rec: Sendable, backup: ProviderBackup, from: NonNullable<NodeRecord['switchedFrom']>,
     reason: SwitchReason, stageKey: string, nodeId: string, signal: AbortSignal,
   ): Promise<PendingRequest> {
     // After Stop: no switch, and no switch notice.
@@ -586,6 +631,104 @@ export function createEngine(deps: EngineDeps) {
     await persist(run)
     publish(run, ev.providerSwitch(stageKey, nodeId, from.provider, backup.provider, reason))
     return submitRequest(run, rec, backup.provider, signal)
+  }
+
+  /**
+   * One call of a pipeline (R3.1). Looked up on the node's record by its key:
+   * a finished call gives back its kept answer; one sent before a restart is
+   * waited on (sent again only if its send never got a request back, as a
+   * provider node's is); any other is written down, then sent, with its
+   * backup under the backup rules, and its answer written down. A resumed call
+   * that is no longer the call written down (its endpoint or body changed,
+   * handed-off files compared by their bytes) fails the node plainly, and the
+   * recorded request is cancelled (the F12 rule). A call that fails at the
+   * provider is marked so (never charged); Stop leaves it `sent` for the
+   * node's Stop to cancel.
+   */
+  async function pipelineCall(
+    run: RunRecord, rec: NodeRecord, c: PipelineCall,
+    o: { stageKey: string; nodeId: string; userKey: string; signal: AbortSignal; backupSettings: BackupSettings; noBackup: boolean },
+  ): Promise<NonNullable<CallRecord['answer']>> {
+    const { stageKey, nodeId, userKey, signal } = o
+    const calls = rec.calls ??= []
+    const fp = requestFingerprint(fingerprintEndpoint(c.provider, c.endpoint), c.payload, u => deps.handoff.hashOf(u))
+    let cr = calls.find(x => x.key === c.key)
+    if (cr && cr.status !== 'error') {
+      if (cr.fingerprint !== fp) {
+        if (cr.status === 'sent' && cr.request) await confirmCancel(run, cr.request)
+        throw new Error(PIPELINE_CALL_CHANGED)
+      }
+      if (cr.status === 'done' && cr.answer) return cr.answer
+    }
+    if (signal.aborted) throw new RunStopped()
+    if (!cr || cr.status === 'error' || (cr.status === 'done' && !cr.answer)) {
+      const fresh: CallRecord = { key: c.key, provider: c.provider, endpoint: c.endpoint, payload: c.payload, request: null, status: 'sent', usd: c.usd, fingerprint: fp }
+      if (cr) calls[calls.indexOf(cr)] = fresh
+      else calls.push(fresh)
+      cr = fresh
+      await persist(run)
+    }
+    const call = cr
+    const backup = o.backupSettings.enabled && c.backup && !o.noBackup ? c.backup : null
+    await limiter.acquire(userKey, signal)
+    let result: unknown
+    try {
+      if (signal.aborted) throw new RunStopped()
+      if (!call.request) {
+        if (call.switchedFrom && backup) await submitRequest(run, call, backup.provider, signal)
+        else {
+          if (call.switchedFrom) {
+            // Switched, but the backup is gone now (switched off): back to the first service.
+            delete call.switchedFrom
+            call.endpoint = c.endpoint
+            call.payload = c.payload
+          }
+          try { await submitRequest(run, call, c.provider, signal) }
+          catch (e) {
+            if (!backup || signal.aborted || !isSubmitOutage(e)) throw e
+            await sendToBackup(run, call, backup, { provider: c.provider, requestId: null }, 'send-failed', stageKey, nodeId, signal)
+          }
+        }
+      }
+      result = await waitForResult(run, call, stageKey, nodeId, c.media === 'video' ? 'video' : 'image', signal, backup, o.backupSettings.stallMs, MEDIA_NOUN[c.media])
+    }
+    catch (e) {
+      if (!(e instanceof RunStopped) && !signal.aborted) {
+        call.status = 'error'
+        await persist(run).catch(err => deps.reportError(err, { site: 'runner.call.save', stageKey, node: nodeId, call: c.key }))
+      }
+      throw e
+    }
+    finally {
+      limiter.release(userKey)
+    }
+    call.provider = providerOf(call.request!)
+    const urls = c.media === 'value' ? [] : clientFor(call.provider).outputUrls(result, c.media)
+    call.answer = { result, raw: rawTextOf(result), urls }
+    call.status = 'done'
+    await persist(run)
+    return call.answer
+  }
+
+  /**
+   * What one node is charged in its stage: a finished node's credits (a
+   * reused one: nothing); a pipeline's (R3.1, ruling (f)), whether it ended
+   * done, failed or stopped, the credits of the dollars its finished calls
+   * cost, never above its hold (reported when it would be).
+   */
+  function chargeableCredits(rec: NodeRecord, stageKey: string, nodeId: string): number {
+    if (rec.calls) {
+      const usd = rec.calls.filter(c => c.status === 'done').reduce((sum, c) => sum + c.usd, 0)
+      const credits = creditsForUsd(usd)
+      if (credits > rec.credits) {
+        deps.reportError(new Error(`A charge of ${credits} credits is above this step’s hold of ${rec.credits}; charged the hold`), {
+          site: 'runner.charge.above-hold', stageKey, node: nodeId, charge: credits, hold: rec.credits,
+        })
+        return rec.credits
+      }
+      return credits
+    }
+    return rec.status === 'done' && !rec.reused ? rec.credits : 0
   }
 
   function entryFor(run: RunRecord): LiveRun {
@@ -785,9 +928,7 @@ export function createEngine(deps: EngineDeps) {
     // Everything this take ran in this leg counts, including nodes that
     // finished before a restart (legNodes above no longer lists those).
     const legIds = stageNodeIds(take, charge, leg.index)
-    let actual = legIds
-      .filter(id => take.nodes[id]!.status === 'done' && !take.nodes[id]!.reused)
-      .reduce((s, id) => s + take.nodes[id]!.credits, 0)
+    let actual = legIds.reduce((s, id) => s + chargeableCredits(take.nodes[id]!, stageKey, id), 0)
     // A take that failed or was stopped counts only a finished Frame as a
     // render, as the ComfyUI path's partial charge does (meterGraphRun.ts
     // chargePlanOf): a Save image or Preview image earns the render credit
@@ -818,7 +959,9 @@ export function createEngine(deps: EngineDeps) {
       const rec = take.nodes[id]!
       // A node that handed its picture on (no call, so no endpoint) made nothing new.
       // A local render made its own files; those in the output folder are Save image's assets (R1.5).
+      // A pipeline (R3.1) made something when one of its calls finished.
       const made = (rec.endpoint !== null && PROVIDER_TYPES.has(rec.classType)) || LOCAL_RENDER_TYPES.has(rec.classType)
+        || !!rec.calls?.some(c => c.status === 'done')
       if (rec.status === 'done' && !rec.reused && made) {
         outputs.push(...rec.outputs.filter(f => f.type === 'output'))
         if (rec.servedBy) servedBy[id] = rec.servedBy
@@ -852,7 +995,8 @@ export function createEngine(deps: EngineDeps) {
     }
     try {
       if (signal.aborted) throw new RunStopped()
-      const resuming = rec.status === 'running' && !!rec.request
+      // A pipeline (R3.1) resumes when a call of it was written down: its calls carry the requests.
+      const resuming = rec.status === 'running' && (!!rec.request || !!rec.calls?.some(c => c.status !== 'error'))
       rec.status = 'running'
       rec.error = null
       if (!resuming) rec.startedAt = deps.now()
@@ -979,42 +1123,43 @@ export function createEngine(deps: EngineDeps) {
             // job sent before the restart is cancelled before the node fails,
             // so no provider job is left running and billing (F23 re-review
             // minor 1; final fix F12). The node's hold is released.
-            if (rec.request) await confirmCancel(run, rec.request)
+            for (const req of sentRequests(rec)) await confirmCancel(run, req)
             throw e
           }
         }
       }
       // The files' bytes are not kept for the provider wait (up to 30 minutes).
       reads.clear()
+      // Files saved into the output folder (Save image, R1.5; a pipeline's
+      // saves, R3.1): the run's assets, owned by the user and listed in the take's record.
+      const assets: OutputFile[] = []
+      const deriveIO = (): DeriveIO => ({
+        read: readOnce,
+        keep: (bytes, ext) => kept.put(run.id, bytes, ext),
+        saveAsset: async (bytes, o) => {
+          const folder = o.folder ?? 'output'
+          const f = await deps.results.save(bytes, {
+            userId: run.userId, prefix: o.prefix, ext: o.ext, folder,
+            ...(o.subfolder !== undefined ? { subfolder: o.subfolder } : {}),
+            ...(o.counter ? { counter: o.counter } : {}),
+          })
+          if (folder === 'output') {
+            await deps.metering.addOutput(run.userId, stageKey, f)
+            assets.push(f)
+          }
+          return f
+        },
+        savePreview: (bytes, o) => deps.results.saveLivePreview(bytes, { nodeId: o.nodeId ?? id, userId: run.userId }),
+        savePreviewAs: (bytes, o) => deps.results.savePreviewAs(bytes, { filename: o.filename, userId: run.userId }),
+        hosted: deps.hosted(),
+        signal,
+        nodeId: id,
+        runWorkflow: run.workflow,
+        runPrompt: take.prompt,
+      })
       // Computed here from the node's inputs (the cards, R0/R1): no provider, no charge.
       if (plan.kind === 'derive') {
-        // Files saved into the output folder (Save image, R1.5): the run's
-        // assets, owned by the user and listed in the take's record.
-        const assets: OutputFile[] = []
-        const made = await plan.derive({
-          read: readOnce,
-          keep: (bytes, ext) => kept.put(run.id, bytes, ext),
-          saveAsset: async (bytes, o) => {
-            const folder = o.folder ?? 'output'
-            const f = await deps.results.save(bytes, {
-              userId: run.userId, prefix: o.prefix, ext: o.ext, folder,
-              ...(o.subfolder !== undefined ? { subfolder: o.subfolder } : {}),
-              ...(o.counter ? { counter: o.counter } : {}),
-            })
-            if (folder === 'output') {
-              await deps.metering.addOutput(run.userId, stageKey, f)
-              assets.push(f)
-            }
-            return f
-          },
-          savePreview: (bytes, o) => deps.results.saveLivePreview(bytes, { nodeId: o.nodeId ?? id, userId: run.userId }),
-          savePreviewAs: (bytes, o) => deps.results.savePreviewAs(bytes, { filename: o.filename, userId: run.userId }),
-          hosted: deps.hosted(),
-          signal,
-          nodeId: id,
-          runWorkflow: run.workflow,
-          runPrompt: take.prompt,
-        })
+        const made = await plan.derive(deriveIO())
         if (signal.aborted) throw new RunStopped()
         for (const v of Object.values(made.values)) checkValue(v)
         rec.values = made.values
@@ -1022,6 +1167,35 @@ export function createEngine(deps: EngineDeps) {
         rec.status = 'done'
         rec.endedAt = deps.now()
         await persist(run)
+        if (made.ui) publish(run, ev.executed(stageKey, id, made.ui))
+        return
+      }
+      const backupSettings = deps.backup?.() ?? { enabled: false, stallMs: 0 }
+      // Several provider calls (R3.1): each written down before it is sent and
+      // when it has its answer (pipelineCall). Held at the node's price and
+      // charged for the calls that finished (the stage charge, chargeableCredits).
+      if (plan.kind === 'pipeline') {
+        if (!resuming) rec.credits = nodeCredits(take.prompt[id]!, inputPixels, families, inputSeconds)
+        rec.calls ??= []
+        await persist(run)
+        const made = await plan.run({
+          ...deriveIO(),
+          call: c => pipelineCall(run, rec, c, { stageKey, nodeId: id, userKey, signal, backupSettings, noBackup: resumedWithoutBackup }),
+          download: (url, o) => deps.download(url, { maxBytes: o?.maxBytes ?? MAX_MEDIA_BYTES }),
+          handOff: async (bytes, name) => {
+            const f = await kept.put(run.id, bytes, keptExtOf(name))
+            // Uploaded under the node's own name (its type goes by it); remembered by the bytes.
+            return deps.handoff.toUrlBytes({ ...f, filename: name }, bytes)
+          },
+          toUrl: handOff,
+        })
+        if (signal.aborted) throw new RunStopped()
+        for (const v of Object.values(made.values)) checkValue(v)
+        rec.values = made.values
+        rec.outputs = [...filesOfValues(made.values), ...assets]
+        rec.status = 'done'
+        rec.endedAt = deps.now()
+        await persist(run).catch(e => deps.reportError(e, { site: 'runner.node.save', stageKey, node: id }))
         if (made.ui) publish(run, ev.executed(stageKey, id, made.ui))
         return
       }
@@ -1069,7 +1243,6 @@ export function createEngine(deps: EngineDeps) {
       }
       // Written down with the request, so a resumed node composites from the same kept bytes.
       if (plan.keep && !resuming) rec.keepHeld = plan.keep.held
-      const backupSettings = deps.backup?.() ?? { enabled: false, stallMs: 0 }
       const backup = backupSettings.enabled && plan.backup && !resumedWithoutBackup ? plan.backup : null
       // Priced on the measured picture where the price depends on its size
       // (FLUX.2 edit; Rotate camera on 2511), and on the measured media where
@@ -1127,10 +1300,24 @@ export function createEngine(deps: EngineDeps) {
             }
           }
         }
-        result = await waitForResult(run, rec, stageKey, id, plan.media === 'video' ? 'video' : 'image', signal, backup, backupSettings.stallMs)
+        // A 3D file waits as a video does; a sound or a value as a picture, unless the plan says video.
+        const wait = plan.wait ?? (plan.media === 'video' || plan.media === 'glb' ? 'video' : 'image')
+        result = await waitForResult(run, rec, stageKey, id, wait, signal, backup, backupSettings.stallMs, MEDIA_NOUN[plan.media])
       }
       finally {
         limiter.release(userKey)
+      }
+      // A token-priced node is charged what its answer says it used, never above its hold.
+      if (plan.chargeOf) {
+        const used = plan.chargeOf(result)
+        if (used != null) {
+          if (used > rec.credits) {
+            deps.reportError(new Error(`A charge of ${used} credits is above this step’s hold of ${rec.credits}; charged the hold`), {
+              site: 'runner.charge.above-hold', stageKey, node: id, charge: used, hold: rec.credits,
+            })
+          }
+          rec.credits = Math.max(0, Math.min(rec.credits, used))
+        }
       }
 
       /** Files the result for reuse; made on the backup, also under the backup's own request, so the same settings reuse it either way. */
@@ -1144,7 +1331,7 @@ export function createEngine(deps: EngineDeps) {
       }
       if (plan.media === 'value') {
         if (!plan.valuesOf) throw new Error('This step has no way to read its answer')
-        const values = plan.valuesOf(result)
+        const values = plan.valuesOf(result, rawTextOf(result))
         for (const v of Object.values(values)) checkValue(v)
         rec.values = values
         rec.outputs = filesOfValues(values)
@@ -1159,13 +1346,39 @@ export function createEngine(deps: EngineDeps) {
         if (ui) publish(run, ev.executed(stageKey, id, ui))
         return
       }
-      const urls = clientFor(providerOf(rec.request!)).outputUrls(result, plan.media)
-      if (!urls.length) throw new Error(plan.media === 'image' ? 'The provider returned no image' : 'The provider returned no video')
+      let urls = plan.urlsOf ? plan.urlsOf(result) : clientFor(providerOf(rec.request!)).outputUrls(result, plan.media)
+      // Python reads `_first_output_url`: only the first is downloaded.
+      if (plan.take === 'first') urls = urls.slice(0, 1)
+      if (!urls.length) throw new Error(NO_FILE[plan.media])
+      // Every file is capped (a file over it fails the node after the call).
+      const download = (url: string) => deps.download(url, { maxBytes: MAX_MEDIA_BYTES })
       const saved: OutputFile[] = []
+      if (plan.media === 'glb') {
+        // A 3D file (spec ruling 1, R3 ruling (k)): Sailor's own copy, saved in
+        // the user's output folder as an asset, handed on as a `glb` value
+        // naming it. Python hands on the provider's link, which expires.
+        const url = urls[0]!
+        const { bytes } = await download(url)
+        if (signal.aborted) throw new RunStopped()
+        const file = await deps.results.save(bytes, { userId: run.userId, prefix: plan.prefix, ext: 'glb' })
+        await deps.metering.addOutput(run.userId, stageKey, file)
+        const values: Record<number, RunnerValue> = { 0: { kind: 'glb', url: viewUrlOf(file), file } }
+        for (const v of Object.values(values)) checkValue(v)
+        rec.values = values
+        rec.outputs = [file]
+        rec.status = 'done'
+        rec.servedBy = providerOf(rec.request!)
+        rec.endedAt = deps.now()
+        await fileResult({ files: rec.outputs, values })
+        await persist(run).catch(e => deps.reportError(e, { site: 'runner.node.save', stageKey, node: id }))
+        const ui = plan.uiFor(rec.outputs)
+        if (ui) publish(run, ev.executed(stageKey, id, ui))
+        return
+      }
       if (plan.keep) {
         // Blend scene's kept subject (Task F11b): Python reads the first
         // answer only, lays it under the kept region, and saves that as a PNG.
-        const { bytes } = await deps.download(urls[0]!)
+        const { bytes } = await download(urls[0]!)
         const png = await plan.keep.apply(bytes, signal)
         if (signal.aborted) throw new RunStopped()
         const file = await deps.results.save(png, { userId: run.userId, prefix: plan.prefix, ext: 'png' })
@@ -1174,10 +1387,13 @@ export function createEngine(deps: EngineDeps) {
       }
       else {
         for (const url of urls) {
-          const { bytes, contentType } = await deps.download(url)
-          const file = await deps.results.save(bytes, {
-            userId: run.userId, prefix: plan.prefix, ext: extFor(contentType, url, plan.media === 'image' ? 'png' : 'mp4'),
-          })
+          const { bytes, contentType } = await download(url)
+          // Python drops alpha before it saves (rule 3): the RGB PNG of the decoded pixels.
+          const file = plan.rgb
+            ? await deps.results.save(await answerRgbPng(bytes), { userId: run.userId, prefix: plan.prefix, ext: 'png' })
+            : await deps.results.save(bytes, {
+              userId: run.userId, prefix: plan.prefix, ext: extFor(contentType, url, plan.media === 'image' ? 'png' : plan.media === 'audio' ? 'wav' : 'mp4'),
+            })
           await deps.metering.addOutput(run.userId, stageKey, file)
           saved.push(file)
         }
@@ -1199,9 +1415,15 @@ export function createEngine(deps: EngineDeps) {
         rec.error = null
         // Stop may have landed while this request was being sent, before
         // Stop could see its id: cancel it here so nothing is left running.
-        if (rec.request) await confirmCancel(run, rec.request, { tries: 1 })
+        // A pipeline's call in flight too (R3.1).
+        for (const req of sentRequests(rec)) await confirmCancel(run, req, { tries: 1 })
       }
-      else { rec.status = 'error'; rec.error = plainError(e) }
+      else {
+        rec.status = 'error'
+        rec.error = plainError(e)
+        // A pipeline that failed with a call still out (calls made side by side): nothing is left running.
+        for (const c of rec.calls ?? []) if (c.status === 'sent' && c.request) await confirmCancel(run, c.request, { tries: 1 })
+      }
       rec.endedAt = deps.now()
       await persist(run).catch(() => {})
     }
@@ -1255,9 +1477,13 @@ export function createEngine(deps: EngineDeps) {
     return outcome === 'requested' ? 'unconfirmed' : 'keep'
   }
 
+  /**
+   * `media` sets the time limits (a picture's or a video's); `noun` names the
+   * result in a time-out's words (default: the media's own word).
+   */
   async function waitForResult(
-    run: RunRecord, rec: NodeRecord, stageKey: string, nodeId: string, media: 'image' | 'video', signal: AbortSignal,
-    backup: ProviderBackup | null = null, stallMs = 0,
+    run: RunRecord, rec: Sendable, stageKey: string, nodeId: string, media: 'image' | 'video', signal: AbortSignal,
+    backup: ProviderBackup | null = null, stallMs = 0, noun: string = media,
   ): Promise<unknown> {
     let req = rec.request!
     let provider = providerOf(req)
@@ -1303,8 +1529,8 @@ export function createEngine(deps: EngineDeps) {
           catch { /* not fetchable: fail as a time-out */ }
         }
         const late = stillQueued
-          ? `The service hadn’t started this ${media} after ${limitWords(queueMs)} in its queue`
-          : `The service took more than ${limitWords(limitMs)} to make this ${media}`
+          ? `The service hadn’t started this ${noun} after ${limitWords(queueMs)} in its queue`
+          : `The service took more than ${limitWords(limitMs)} to make this ${noun}`
         throw new Error(check.confirmed ? `${late}, so it was cancelled` : `${late}. ${NOT_CONFIRMED}`)
       }
       // Outer limit that applies even when the provider never gave a real
@@ -1666,10 +1892,12 @@ export function createEngine(deps: EngineDeps) {
       for (const t of e.run.takes) {
         for (const n of Object.values(t.nodes)) {
           // One try each here, so Stop is quick; one not confirmed is asked about again in the background.
-          if (n.status === 'running' && n.request) cancels.push(confirmCancel(e.run, n.request, { tries: 1 }))
-          // A first job whose cancel was never confirmed after a switch is cancelled too.
-          const first = n.status === 'running' ? n.switchedFrom : undefined
-          if (first?.cancelUrl && first.requestId) {
+          // A pipeline's call in flight too (R3.1).
+          if (n.status === 'running') for (const req of sentRequests(n)) cancels.push(confirmCancel(e.run, req, { tries: 1 }))
+          // A first job whose cancel was never confirmed after a switch is cancelled too (a pipeline call's too, R3.1).
+          const firsts = n.status === 'running' ? [n.switchedFrom, ...(n.calls ?? []).filter(c => c.status === 'sent').map(c => c.switchedFrom)] : []
+          for (const first of firsts) {
+            if (!first?.cancelUrl || !first.requestId) continue
             const id = first.requestId
             cancels.push(clientFor(first.provider).cancel(first.cancelUrl).catch(() => {}).then(() => startCancelWatch(e.run.id, id)))
           }

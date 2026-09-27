@@ -16,7 +16,8 @@
  * engine's job: it sees `retryable` on the status and sends the request again.
  */
 import { getReplicateToken } from '../utils/secrets'
-import { CANCEL_TIMEOUT_MS, type CancelOutcome, type FalStatus, type FalSubmitted, type ProviderClient } from './falQueue'
+import { CANCEL_TIMEOUT_MS, type CancelOutcome, type FalStatus, type FalSubmitted, type OutputMedia, type ProviderClient } from './falQueue'
+import { parseRemembered } from './rawJson'
 
 export const REPLICATE_API_BASE = 'https://api.replicate.com/v1'
 
@@ -64,7 +65,13 @@ export function allOutputUrls(pred: unknown): string[] {
   return []
 }
 
-export function replicateOutputUrls(result: unknown, media: 'image' | 'video'): string[] {
+/**
+ * The files a finished prediction points at: every picture; the first URL for
+ * a video, a sound or a 3D file (Python's `_first_output_url`); none for a
+ * value answer (the answer itself is the result).
+ */
+export function replicateOutputUrls(result: unknown, media: OutputMedia): string[] {
+  if (media === 'value') return []
   if (media === 'image') return allOutputUrls(result)
   const url = firstOutputUrl(result)
   return url ? [url] : []
@@ -126,7 +133,8 @@ export function createReplicateClient(opts: ReplicateClientOptions = {}): Provid
   async function postCreate(url: string, body: Record<string, unknown>, h: Record<string, string>): Promise<Record<string, unknown>> {
     for (let attempt = 0; attempt < 3; attempt++) {
       const r = await fetch(url, { method: 'POST', headers: h, body: JSON.stringify(body) })
-      if (r.status === 200 || r.status === 201) return await r.json() as Record<string, unknown>
+      // Read as text, so a value answer keeps its body (rawJson.ts).
+      if (r.status === 200 || r.status === 201) return parseRemembered<Record<string, unknown>>(await r.text())
       const text = await r.text().catch(() => '')
       if (r.status === 429 && attempt < 2) {
         await sleep(Math.max(0, (Math.min(retryAfterSeconds(text), 30) + 0.5) * 1000))
@@ -189,7 +197,8 @@ export function createReplicateClient(opts: ReplicateClientOptions = {}): Provid
       }
       return transientStatus()
     }
-    const body = await r.json() as Record<string, unknown>
+    // Read as text, so a value answer keeps its body (rawJson.ts): the engine takes this body as the result.
+    const body = parseRemembered<Record<string, unknown>>(await r.text())
     // A 200 with no usable status is treated the same as a blip: keep polling
     // rather than passing a made-up "UNKNOWN" through as if it were real.
     if (typeof body.status !== 'string' || !body.status) return transientStatus()
@@ -220,7 +229,7 @@ export function createReplicateClient(opts: ReplicateClientOptions = {}): Provid
     let text = ''
     for (let attempt = 0; attempt < 3; attempt++) {
       const r = await fetch(responseUrl, { headers: headers() })
-      if (r.status === 200) return await r.json() as T
+      if (r.status === 200) return parseRemembered<T>(await r.text())
       status = r.status
       text = await r.text().catch(() => '')
       if (status >= 500 && status < 600 && attempt < 2) { await sleep(500); continue }

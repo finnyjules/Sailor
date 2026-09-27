@@ -98,6 +98,32 @@ export interface UnconfirmedCancel {
   gaveUpAt?: number
 }
 
+/**
+ * One call of a node that makes several (a `pipeline` plan, R3.1), written
+ * down before it is sent and again when it has an answer, so a restarted
+ * server replays the calls that finished and never sends one twice. The
+ * finished calls' `usd` is what a failed or stopped node is charged for
+ * (ruling (f)).
+ */
+export interface CallRecord {
+  /** Stable within the node (e.g. 'cutout', 'fill', 'nb-1'): a resumed run matches calls by it. */
+  key: string
+  provider: RunnerProvider; endpoint: string; payload: Record<string, unknown>
+  request: PendingRequest | null
+  status: 'sent' | 'done' | 'error'
+  usd: number
+  /** The answer, kept so a resumed run replays it instead of calling again. */
+  answer?: { result: unknown; raw: string | null; urls: string[] }
+  /**
+   * The planned call's fingerprint (./fingerprint.ts: its endpoint and body,
+   * handed-off links as the sha256 of their bytes), taken when it was first
+   * written down: a resumed run's call must match it, or the node fails.
+   */
+  fingerprint?: string
+  /** Set once this call was moved to its backup service (as NodeRecord.switchedFrom). */
+  switchedFrom?: NodeRecord['switchedFrom']
+}
+
 export type NodeStatus = 'waiting' | 'running' | 'done' | 'error' | 'skipped' | 'paused' | 'dropped' | 'stopped'
 
 export interface NodeRecord {
@@ -152,6 +178,8 @@ export interface NodeRecord {
   }
   /** The service that made this node's result (absent: nothing made yet, or a reused result). */
   servedBy?: RunnerProvider
+  /** A `pipeline` node's calls, in the order they were first sent (R3.1). Absent on every other node. */
+  calls?: CallRecord[]
 }
 
 export interface TakeRecord {

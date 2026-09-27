@@ -8,6 +8,7 @@
  *   PUT  cancel_url           -> 202 requested / 400 already completed / 404 unknown
  */
 import { getFalToken } from '../utils/falStorage'
+import { parseRemembered } from './rawJson'
 
 export const FAL_QUEUE_BASE = 'https://queue.fal.run'
 
@@ -86,7 +87,7 @@ export async function falSubmit(
     const t = await r.text().catch(() => '')
     throw new FalError(`fal submit ${r.status}: ${t || r.statusText}`, r.status)
   }
-  const body = await r.json() as Record<string, unknown>
+  const body = parseRemembered<Record<string, unknown>>(await r.text())
   const requestId = String(body.request_id ?? '')
   if (!requestId) throw new FalError('fal submit returned no request id', null)
   return {
@@ -112,7 +113,7 @@ export async function falStatus(statusUrl: string, opts: { logs?: boolean } = {}
     }
     return transientStatus()
   }
-  const body = await r.json() as Record<string, unknown>
+  const body = parseRemembered<Record<string, unknown>>(await r.text())
   const logs = Array.isArray(body.logs)
     ? (body.logs as unknown[]).filter((l): l is { message: string } => !!l && typeof (l as any).message === 'string')
     : []
@@ -132,16 +133,22 @@ export async function falResult<T = unknown>(responseUrl: string): Promise<T> {
     const t = await r.text().catch(() => '')
     throw new FalError(`fal result ${r.status}: ${t}`, r.status)
   }
-  return await r.json() as T
+  // Read as text, so a value answer keeps its body (rawJson.ts).
+  return parseRemembered<T>(await r.text())
 }
+
+/** A result file over the download cap (R3 rule 3): the call was made, so the node fails after it. */
+export const RESULT_TOO_LARGE = (maxBytes: number) => `The result is too large to keep (over ${Math.floor(maxBytes / (1024 * 1024))} MB)`
 
 /**
  * Fetch a finished result file (a fal.media URL). A network error or a 5xx is
  * tried again, three tries in all, waiting 1s then 2s; a 4xx fails at once.
+ * `maxBytes`: a file larger than this (by its Content-Length, or as it
+ * arrives) fails at once, plainly (RESULT_TOO_LARGE), and is not tried again.
  */
 export async function downloadResult(
   url: string,
-  opts: { sleep?: (ms: number) => Promise<void> } = {},
+  opts: { sleep?: (ms: number) => Promise<void>; maxBytes?: number } = {},
 ): Promise<{ bytes: Uint8Array; contentType: string | null }> {
   const sleep = opts.sleep ?? (ms => new Promise<void>(r => setTimeout(r, ms)))
   const waits = [1000, 2000]
@@ -150,16 +157,56 @@ export async function downloadResult(
     let final = false
     try {
       const r = await fetch(url)
-      if (r.ok) return { bytes: new Uint8Array(await r.arrayBuffer()), contentType: r.headers.get('content-type') }
+      if (r.ok) {
+        const contentType = r.headers.get('content-type')
+        if (opts.maxBytes === undefined) return { bytes: new Uint8Array(await r.arrayBuffer()), contentType }
+        return { bytes: await cappedBody(r, opts.maxBytes), contentType }
+      }
       failure = new Error(`Could not download the result (${r.status})`)
       final = r.status < 500
     }
     catch (e) {
+      if (e instanceof ResultTooLargeError) throw e
       failure = e instanceof Error ? e : new Error(String(e)) // no answer, or the body broke off
     }
     if (final || attempt >= waits.length) throw failure
     await sleep(waits[attempt]!)
   }
+}
+
+class ResultTooLargeError extends Error {
+  constructor(maxBytes: number) { super(RESULT_TOO_LARGE(maxBytes)); this.name = 'ResultTooLargeError' }
+}
+
+/** The body, read no further than `maxBytes`. */
+async function cappedBody(r: Response, maxBytes: number): Promise<Uint8Array> {
+  const declared = Number(r.headers.get('content-length'))
+  if (Number.isFinite(declared) && declared > maxBytes) {
+    await r.body?.cancel().catch(() => {})
+    throw new ResultTooLargeError(maxBytes)
+  }
+  if (!r.body) {
+    const bytes = new Uint8Array(await r.arrayBuffer())
+    if (bytes.byteLength > maxBytes) throw new ResultTooLargeError(maxBytes)
+    return bytes
+  }
+  const reader = r.body.getReader()
+  const parts: Uint8Array[] = []
+  let total = 0
+  for (;;) {
+    const { done, value } = await reader.read()
+    if (done) break
+    total += value.byteLength
+    if (total > maxBytes) {
+      await reader.cancel().catch(() => {})
+      throw new ResultTooLargeError(maxBytes)
+    }
+    parts.push(value)
+  }
+  const out = new Uint8Array(total)
+  let at = 0
+  for (const p of parts) { out.set(p, at); at += p.byteLength }
+  return out
 }
 
 /**
@@ -209,9 +256,33 @@ export function falVideoUrl(result: unknown): string | null {
   return typeof url === 'string' && url ? url : null
 }
 
-/** The files a finished fal result points at: every image, or the one video. */
-export function falOutputUrls(result: unknown, media: 'image' | 'video'): string[] {
-  return media === 'image' ? falImageUrls(result) : [falVideoUrl(result)].filter((u): u is string => !!u)
+/** A fal sound answer's file: `audio` (the speech and music apps), else `audio_file`. */
+export function falAudioUrl(result: unknown): string | null {
+  const r = result as { audio?: { url?: unknown }; audio_file?: { url?: unknown } } | null
+  const url = r?.audio?.url ?? r?.audio_file?.url
+  return typeof url === 'string' && url ? url : null
+}
+
+/** A fal 3D answer's file: `model_glb`, else `model_mesh` (the image-to-3D apps). */
+export function falGlbUrl(result: unknown): string | null {
+  const r = result as { model_glb?: { url?: unknown }; model_mesh?: { url?: unknown } } | null
+  const url = r?.model_glb?.url ?? r?.model_mesh?.url
+  return typeof url === 'string' && url ? url : null
+}
+
+/**
+ * What a provider node's answer is (R3.1): pictures, a video, a sound, a 3D
+ * file (each downloaded and saved), or a value (the answer itself is the
+ * result: nothing is downloaded).
+ */
+export type OutputMedia = 'image' | 'video' | 'audio' | 'glb' | 'value'
+
+/** The files a finished fal result points at: every image, or the one video, sound or 3D file; none for a value. */
+export function falOutputUrls(result: unknown, media: OutputMedia): string[] {
+  if (media === 'value') return []
+  if (media === 'image') return falImageUrls(result)
+  const url = media === 'video' ? falVideoUrl(result) : media === 'audio' ? falAudioUrl(result) : falGlbUrl(result)
+  return url ? [url] : []
 }
 
 export type FalClient = {
@@ -226,7 +297,7 @@ export type FalClient = {
  * (replicateQueue.ts). The shape is fal's, plus where the result's files are.
  */
 export type ProviderClient = FalClient & {
-  outputUrls(result: unknown, media: 'image' | 'video'): string[]
+  outputUrls(result: unknown, media: OutputMedia): string[]
 }
 
 export const realFalClient: ProviderClient = {

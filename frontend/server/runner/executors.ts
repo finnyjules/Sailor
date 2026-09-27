@@ -1,6 +1,7 @@
 /**
  * What each runner node does, as a plan the engine carries out:
  *   provider — send a request to a provider (fal or Replicate), save what comes back
+ *   pipeline — several provider calls, each written down so a restart never sends one twice (R3.1)
  *   pass     — hand files on (result cards, an open Gate)
  *   pause    — a closed Gate: stop this branch and show what reached it
  *   local    — compute the picture here (the Frame render): no provider, no charge
@@ -159,14 +160,60 @@ export interface DeriveIO {
 /** What a derive plan made: each output slot's value, and what the node shows. */
 export interface Derived { values: Record<number, RunnerValue>; ui: Record<string, unknown> | null }
 
+/** One call of a pipeline (R3.1). */
+export interface PipelineCall {
+  /** Stable within the node (e.g. 'cutout', 'fill', 'nb-1'): a resumed run matches calls by it. */
+  key: string
+  provider: RunnerProvider; endpoint: string; payload: Record<string, unknown>
+  media: 'image' | 'video' | 'value'
+  backup?: ProviderBackup
+  /** This call's price basis in dollars (the price module's figure for it). */
+  usd: number
+}
+
+/** What a pipeline may do: a derive plan's reads and saves, plus calls, downloads and hand-offs. */
+export interface PipelineIO extends DeriveIO {
+  /**
+   * Sends the call (or, resumed, replays its kept answer or waits on its
+   * recorded request) and gives back the answer, its body text and its file URLs.
+   */
+  call(c: PipelineCall): Promise<{ result: unknown; raw: string | null; urls: string[] }>
+  /** Downloads an answer's file, capped at `maxBytes` (default MAX_MEDIA_BYTES, 512 MiB). */
+  download(url: string, o?: { maxBytes?: number }): Promise<{ bytes: Uint8Array; contentType: string | null }>
+  /** Hands off bytes the node made itself (a mask, an RGB copy): kept by sha256, then uploaded. */
+  handOff(bytes: Uint8Array, name: string): Promise<string>
+  toUrl(file: OutputFile): Promise<string>
+}
+
 export type NodePlan =
   | {
     kind: 'provider'; provider: RunnerProvider; endpoint: string; payload: Record<string, unknown>
-    /** 'value': the answer itself is the result (text, JSON…), read by `valuesOf`; nothing is downloaded. */
-    media: 'image' | 'video' | 'value'; prefix: string
+    /**
+     * What the answer is: pictures, a video, a sound ('audio', saved with the
+     * answer's extension, `wav` by default) or a 3D file ('glb', saved as the
+     * user's asset and handed on as a `glb` value) — each downloaded — or
+     * 'value': the answer itself is the result (text, JSON…), read by
+     * `valuesOf`; nothing is downloaded.
+     */
+    media: 'image' | 'video' | 'audio' | 'glb' | 'value'; prefix: string
     uiFor(files: OutputFile[]): Record<string, unknown> | null
-    /** For media 'value': the node's values, read out of the provider's answer. */
-    valuesOf?(result: unknown): Record<number, RunnerValue>
+    /** Python reads `_first_output_url`: only the first URL is downloaded. Default 'all' (as before R3). */
+    take?: 'first' | 'all'
+    /** The answer's file URLs where they aren't Replicate's `output` list or fal's `images`/`video` (Trellis's `model_file`, Layerize's pick by extension). */
+    urlsOf?(result: unknown): string[]
+    /** Python drops alpha before its output: the file kept is the RGB PNG of the decoded pixels (rule 3). */
+    rgb?: true
+    /** For media 'value': the node's values; `raw` is the answer's body text (rawJson.ts) or null. */
+    valuesOf?(result: unknown, raw: string | null): Record<number, RunnerValue>
+    /** Token-priced nodes: credits for what the answer reports it used, or null (charge the hold). Never above the hold. */
+    chargeOf?(result: unknown): number | null
+    /**
+     * How long the job may take: a 3D file waits as a video does (Python's
+     * `_VIDEO_POLL_DEADLINE_SEC`), everything else but a video as a picture
+     * (`_DEFAULT_POLL_DEADLINE_SEC`), unless the node's Python polls as a video
+     * (Describe a video, Sync lips to audio): then 'video'.
+     */
+    wait?: 'image' | 'video'
     backup?: ProviderBackup
     /**
      * Blend scene with keep_subject wired (Task F11b): the answer is laid
@@ -175,6 +222,12 @@ export type NodePlan =
      */
     keep?: KeepStep
   }
+  /**
+   * A node that makes several calls (R3.1): `run` makes them through `io`,
+   * which writes each one down, so a restarted server replays the finished
+   * ones; charged for the calls that finished (ruling (f)).
+   */
+  | { kind: 'pipeline'; prefix: string; run(io: PipelineIO): Promise<Derived> }
   | { kind: 'pass'; files: OutputFile[]; ui: Record<string, unknown> | null }
   /** A closed Gate: `values` is the value that reached it (R0.4), kept on its record so Continue hands it on. */
   | { kind: 'pause'; files: OutputFile[]; values?: Record<number, RunnerValue> }
