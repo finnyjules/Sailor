@@ -604,10 +604,15 @@ describe('B10 · one workflow per family, POST /api/runs to the last event', () 
     // `frame` makes no provider call (the runner renders it): its end-to-end is runner-compositor-engine.unit.spec.ts.
     // `sync-3` needs real media files, measured before the hold, and charges the clip it measures (below the
     // unmeasured price this loop checks): its end-to-end is runner-sync-3.unit.spec.ts. `topaz-video` the same
-    // (Task F23): a real video, measured before the hold: runner-topaz-video.unit.spec.ts. `cards` (step 3, R0.3)
+    // (Task F23): a real video, measured before the hold: runner-topaz-video.unit.spec.ts. `person-swap-video` the
+    // same (Task 3, non-commercial face models replacement): a real video, measured before the hold:
+    // runner-person-swap-video.unit.spec.ts. `cards` (step 3, R0.3)
     // makes no provider call either (the runner computes the cards): runner-value-wires.unit.spec.ts and the R1 card specs.
     // Nor do the picture effects, the Shader effect's bake and the live previews (step 3, R2): runner-effects-*.unit.spec.ts.
-    const local: readonly string[] = ['frame', 'sync-3', 'topaz-video', 'cards', 'effects-tone', 'effects-blur', 'effects-cells', 'effects-warp', 'effects-mask', 'effects-noise', 'shader-bake', 'live-previews']
+    const local: readonly string[] = [
+      'frame', 'sync-3', 'topaz-video', 'person-swap-video', 'cards',
+      'effects-tone', 'effects-blur', 'effects-cells', 'effects-warp', 'effects-mask', 'effects-noise', 'shader-bake', 'live-previews',
+    ]
     expect(FLOWS.map(f => f.family).sort()).toEqual(RUNNER_FAMILIES.filter(f => !local.includes(f)).sort())
   })
 

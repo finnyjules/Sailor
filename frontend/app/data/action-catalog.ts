@@ -69,6 +69,7 @@ export const ACTION_CATALOG: Record<string, ActionEntry> = {
   LipsyncNode:           { useCase: 'Sync lips to audio',             model: 'sync.so 2-pro',                            intent: 'edit', source: 'video' },
   LipSyncNode:           { useCase: 'Lip-sync a character',           model: 'VEED Fabric 1.0 / sync.so 2-pro',          intent: 'edit' },
   EnhanceVideoNode:      { useCase: 'Enhance a video',                model: 'Topaz',                                    intent: 'enhance' },
+  PersonSwapVideo:       { useCase: 'Swap a person in a video',       model: 'Pixverse',                                 intent: 'edit' },
   DescribeVideoNode:     { useCase: 'Describe a video',               model: 'Gemini 2.5 Flash',                         intent: 'analyze' },
   // -- Audio -------------------------------------------------------------------
   GenerateMusicNode:     { useCase: 'Generate music',                 model: 'MusicGen',                                 intent: 'create' },
@@ -113,7 +114,7 @@ export const DEPRECATED_NODES = new Set<string>([
 // the intent sections and excluded from them. Order here = display order.
 export const HERO_BY_DOMAIN: Record<ActionDomain, string[]> = {
   image: ['GenerateImageNode', 'FluxLoRARemoteNode', 'EditImageNode', 'UpscaleImageNode'],
-  video: ['GenerateVideoNode', 'LipsyncNode', 'EnhanceVideoNode'],
+  video: ['GenerateVideoNode', 'LipsyncNode', 'EnhanceVideoNode', 'PersonSwapVideo'],
   audio: ['GenerateSpeechNode', 'GenerateMusicNode', 'TranscribeAudioNode'],
   '3d':  ['Generate3DNode'],
   text:  ['ChatLLMNode', 'ImprovePromptNode'],

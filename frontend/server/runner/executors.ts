@@ -44,7 +44,9 @@
  * FixFacesNode on fal's Topaz image upscale with face enhancement, family
  * fix-faces, which moves the whole node while it is on;
  * FaceSwap on Easel's advanced face swap, family face-swap, which moves the
- * whole node while it is on)
+ * whole node while it is on;
+ * PersonSwapVideo on fal's Pixverse Swap, family person-swap-video, which
+ * moves the whole node while it is on)
  * closely enough that the same workflow gives the same result.
  */
 import { GATE_CLASS, isLink, type ApiPrompt } from '#shared/runner/graph'
@@ -101,6 +103,8 @@ import { easelFaceSwap } from './generators/easelFaceSwap'
 import { sync3Lipsync, sync3NodeProblem, sync3Sources } from './generators/sync3'
 import { topazVideoNodeProblem, topazVideoSource, topazVideoUpscale } from './generators/topazVideo'
 import { TOPAZ_VIDEO_UNMEASURED, topazVideoPlan } from '#shared/runner/topazVideo'
+import { pixverseSwap, pixverseSwapNodeProblem, pixverseSwapSource } from './generators/pixverseSwap'
+import { personSwapResolution } from '#shared/runner/personSwapVideo'
 import type { InputSeconds } from '#shared/pricing/clipSettings'
 import { isSync3LipSync, lipSyncSyncMode } from '#shared/runner/lipSync'
 import { backupInputProblem, checkRequest, seedanceReferenceProblem } from './requestRules'
@@ -866,6 +870,23 @@ async function planNodeRequest(ctx: PlanContext): Promise<NodePlan> {
         kind: 'provider', provider: call.provider, endpoint: call.endpoint, payload: call.payload, media: 'video', prefix: 'enhance_video',
         // EnhanceVideoNode shows nothing itself (its Python execute returns only the video); a Video card after it does.
         uiFor: () => null,
+      }
+    }
+
+    // ── person-swap-video: Pixverse Swap on fal, no backup. The engine has
+    // already read and measured the video (personSwapMedia.ts). ──
+    case 'PersonSwapVideo': {
+      const problem = pixverseSwapNodeProblem(ctx.prompt, ctx.nodeId)
+      if (problem) throw new Error(problem.message)
+      const source = pixverseSwapSource(ctx.prompt, ctx.nodeId)
+      if (!('file' in source)) throw new Error('This person swap has no video')
+      const imageUrl = await pictureUrl('image', 'There is no picture of the person')
+      const call = pixverseSwap({ videoUrl: await ctx.toUrl(source.file), imageUrl, resolution: personSwapResolution(inputs)! })
+      return {
+        kind: 'provider', provider: call.provider, endpoint: call.endpoint, payload: call.payload, media: 'video', prefix: 'person_swap_video',
+        // PersonSwapVideo is its own output node (is_output_node=True, no
+        // downstream Video card required): show the swapped video directly.
+        uiFor: files => ({ video: files }),
       }
     }
 

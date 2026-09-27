@@ -61,7 +61,7 @@ import { SETTING_PRICED_NODE_CLASSES, editCalls, editSteps } from './editSetting
 import { imagePriceMaxUsd, imagePriceUsd, imageRate } from './imageRates'
 import { LARGEST_RATIO, effectiveImageSettings } from './imageSettings'
 import { videoPriceMaxUsd, videoPriceUsd, videoRate } from './videoRates'
-import { REMOTE_VIDEO_NODE_CLASSES, remoteVideoNodeUsd, topazVideoUsd, type InputSeconds } from './clipSettings'
+import { REMOTE_VIDEO_NODE_CLASSES, personSwapVideoUsd, remoteVideoNodeUsd, topazVideoUsd, type InputSeconds } from './clipSettings'
 import { effectiveVideoSettings, maxVideoSeconds } from './videoSettings'
 import type { RunnerFamily } from '../runner/families'
 
@@ -102,9 +102,14 @@ export const SHARED_PRICED_CLASS_SET: ReadonlySet<string> = new Set([...MODEL_PR
  * the class keeps its flat price (server/utils/priceBook.ts
  * GRAPH_NODE_CREDITS) and priceNode refuses it as "not a model-priced class",
  * as before.
+ *
+ * PersonSwapVideo (family person-swap-video) has no flat price and no
+ * ComfyUI path at all (like FaceSwap and FixFacesNode): it is priced here
+ * only, and unpriced with the family off (there is nothing to run then).
  */
 export const FAMILY_PRICED_CLASSES: Readonly<Record<string, RunnerFamily>> = {
   EnhanceVideoNode: 'topaz-video',
+  PersonSwapVideo: 'person-swap-video',
 }
 
 /** Whether `classType` is priced here with these families on (FAMILY_PRICED_CLASSES). */
@@ -230,9 +235,12 @@ export function priceNode(classType: string, inputs: NodeInputs | null | undefin
     if (usd == null) return { refused: `${classType} has a call with no listed price` }
     return typeof usd === 'number' ? { usd, credits: creditsForUsd(usd) } : usd
   }
-  // Enhance a video on fal's Topaz, while topaz-video is on (F23): the measured video, else its ceiling.
+  // Enhance a video on fal's Topaz, while topaz-video is on (F23); Person swap (video) on fal's
+  // Pixverse Swap, while person-swap-video is on: the measured video, else its ceiling.
   if (familyPricedClass(classType, opts.families)) {
-    const usd = topazVideoUsd(inputs ?? {}, opts.inputSeconds ?? {})
+    const usd = classType === 'PersonSwapVideo'
+      ? personSwapVideoUsd(inputs ?? {}, opts.inputSeconds ?? {})
+      : topazVideoUsd(inputs ?? {}, opts.inputSeconds ?? {})
     return typeof usd === 'number' ? { usd, credits: creditsForUsd(usd) } : usd
   }
   if (!MODEL_PRICED_CLASS_SET.has(classType)) return { refused: 'not a model-priced class' }

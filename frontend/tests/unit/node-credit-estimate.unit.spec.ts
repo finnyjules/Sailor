@@ -35,7 +35,7 @@ describe('MODEL_PRICED_BADGE_CLASSES', () => {
   })
 
   it('is the same set the server price book prices from widgets: by model, (Task P4) the edit tools by their settings, (Task P5) the older video and lip-sync nodes per second, and (Task F23) Enhance a video while its switch moves it to fal', () => {
-    expect([...MODEL_PRICED_BADGE_CLASSES].sort()).toEqual([...MODEL_PRICED_NODE_CLASSES, ...SETTING_PRICED_NODE_CLASSES, ...REMOTE_VIDEO_NODE_CLASSES, 'EnhanceVideoNode'].sort())
+    expect([...MODEL_PRICED_BADGE_CLASSES].sort()).toEqual([...MODEL_PRICED_NODE_CLASSES, ...SETTING_PRICED_NODE_CLASSES, ...REMOTE_VIDEO_NODE_CLASSES, 'EnhanceVideoNode', 'PersonSwapVideo'].sort())
   })
 })
 

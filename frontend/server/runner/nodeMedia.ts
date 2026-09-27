@@ -4,7 +4,9 @@
  * turn (the tight hold, F22 fix round 1). One place for the engine to ask:
  *   - Lip-sync a character on sync-3 (F22): its face video and sound
  *     (./sync3Media.ts);
- *   - Enhance a video on fal's Topaz (F23): its video (./topazMedia.ts).
+ *   - Enhance a video on fal's Topaz (F23): its video (./topazMedia.ts);
+ *   - Person swap (video) on fal's Pixverse Swap (family person-swap-video):
+ *     its video (./personSwapMedia.ts).
  * Each check returns what it measured as a MeasuredMedia record: the lengths
  * (and a video's size and frame rate) the price reads, and the sha256 of the
  * bytes measured.
@@ -13,13 +15,15 @@ import type { ApiNode, ApiPrompt } from '#shared/runner/graph'
 import { isSync3LipSync } from '#shared/runner/lipSync'
 import { SYNC_3_CHANGED, measuredOf, sync3InputFiles, sync3MediaCheck, type Sync3MediaReads } from './sync3Media'
 import { TOPAZ_VIDEO_CHANGED, topazInputFiles, topazMediaCheck } from './topazMedia'
+import { PERSON_SWAP_CHANGED, personSwapInputFiles, personSwapMediaCheck } from './personSwapMedia'
 import type { MeasuredMedia, OutputFile } from './types'
 
 /** Which media check a node takes, or null for a node priced without reading its files. */
-export function mediaNodeKind(node: ApiNode | undefined): 'sync-3' | 'topaz-video' | null {
+export function mediaNodeKind(node: ApiNode | undefined): 'sync-3' | 'topaz-video' | 'person-swap-video' | null {
   if (!node) return null
   if (node.class_type === 'LipSyncNode' && isSync3LipSync(node.inputs ?? {})) return 'sync-3'
   if (node.class_type === 'EnhanceVideoNode') return 'topaz-video'
+  if (node.class_type === 'PersonSwapVideo') return 'person-swap-video'
   return null
 }
 
@@ -36,6 +40,10 @@ export async function nodeMediaCheck(prompt: ApiPrompt, nodeId: string, reads: S
       const c = await topazMediaCheck(prompt, nodeId, reads)
       return c.problem !== null ? { problem: c.problem } : { problem: null, measured: c.measured }
     }
+    case 'person-swap-video': {
+      const c = await personSwapMediaCheck(prompt, nodeId, reads)
+      return c.problem !== null ? { problem: c.problem } : { problem: null, measured: c.measured }
+    }
     default:
       return null
   }
@@ -46,11 +54,13 @@ export function nodeMediaFiles(prompt: ApiPrompt, nodeId: string): OutputFile[] 
   switch (mediaNodeKind(prompt[nodeId])) {
     case 'sync-3': return sync3InputFiles(prompt, nodeId)
     case 'topaz-video': return topazInputFiles(prompt, nodeId)
+    case 'person-swap-video': return personSwapInputFiles(prompt, nodeId)
     default: return []
   }
 }
 
 /** The refusal when a media node's files changed after Run was pressed. */
 export function nodeMediaChangedWords(node: ApiNode | undefined): string {
-  return mediaNodeKind(node) === 'topaz-video' ? TOPAZ_VIDEO_CHANGED : SYNC_3_CHANGED
+  const kind = mediaNodeKind(node)
+  return kind === 'topaz-video' ? TOPAZ_VIDEO_CHANGED : kind === 'person-swap-video' ? PERSON_SWAP_CHANGED : SYNC_3_CHANGED
 }

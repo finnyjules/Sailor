@@ -89,6 +89,7 @@ export const GENERATOR_NODE_ICONS: Record<string, Component> = {
   TurntableNode:        Rotate3d,
   FilmShotNode:         Clapperboard,
   EnhanceVideoNode:     Wand2,
+  PersonSwapVideo:      UsersRound,
   DescribeVideoNode:    MessageSquareText,
   LipsyncNode:          Mic,
   LipSyncNode:          AudioLines,
@@ -158,6 +159,7 @@ export const NODE_MODEL_BRAND: Record<string, string | null> = {
   TurntableNode:        'Luma',               // Luma Ray 2 (front-only default path)
   FilmShotNode:         null,                 // Multi: full video gallery
   EnhanceVideoNode:     'Topaz',
+  PersonSwapVideo:      'Pixverse',
   DescribeVideoNode:    'Gemini',
   LipsyncNode:          null,                 // sync.so 2-pro
 

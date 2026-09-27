@@ -294,8 +294,9 @@ describe('the refusals that stay', () => {
 
   // The media nodes need a measured file or a sound card to be taken at all;
   // their own suites wire each of these inputs into a node that is otherwise
-  // taken (runner-sync-3, runner-topaz-video). Here they are only held to refusing.
-  const MEDIA = ['LipSyncNode', 'Audio', 'EnhanceVideoNode']
+  // taken (runner-sync-3, runner-topaz-video, runner-person-swap-video). Here
+  // they are only held to refusing.
+  const MEDIA = ['PersonSwapVideo', 'LipSyncNode', 'Audio', 'EnhanceVideoNode']
 
   it('every other input a rule keeps unwired leaves the workflow to the engine', () => {
     let checked = 0

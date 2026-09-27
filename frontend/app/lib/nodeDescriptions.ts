@@ -395,6 +395,7 @@ export const NODE_DESCRIPTIONS: Record<string, string> = {
   'PerpNeg': 'Applies perpendicular negative guidance to improve image quality (deprecated).',
   'PerpNegGuider': 'Creates a guider that uses perpendicular negative guidance for better results.',
   'PerturbedAttentionGuidance': 'Improves image details by perturbing the model\'s attention during generation.',
+  'PersonSwapVideo': 'Replaces the person in a video with the person in a photo.',
   'PhotoMakerEncode': 'Encodes a face photo for use with PhotoMaker to create personalized images.',
   'PhotoMakerLoader': 'Loads a PhotoMaker model for generating personalized face images.',
   'PixverseImageToVideoNode': 'Turns an image into a video using PixVerse API.',

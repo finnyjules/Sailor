@@ -168,6 +168,7 @@ import { TOPAZ_VIDEO_APP, topazVideoNodeProblem } from './generators/topazVideo'
 import { TOPAZ_VIDEO_MAX_FACTOR, TOPAZ_VIDEO_MIN_FACTOR, TOPAZ_VIDEO_UNKNOWN_SETTING } from '#shared/runner/topazVideo'
 import { isSync3LipSync, sync3ModeRefusal } from '#shared/runner/lipSync'
 import { FACE_SWAP_NEEDS_GENDER, faceSwapGender } from '#shared/runner/faceSwap'
+import { pixverseSwapNodeProblem } from './generators/pixverseSwap'
 
 export { FIRST_FRAME_AND_REFERENCES }
 
@@ -775,6 +776,13 @@ export function requestProblems(prompt: ApiPrompt, opts: { runner?: boolean } = 
     // a file uploaded to Sailor. The video itself is read and measured next, before the hold (topazMedia.ts).
     else if (ct === 'EnhanceVideoNode' && opts.runner) {
       const p = topazVideoNodeProblem(prompt, nodeId)
+      if (p) out.push({ nodeId, classType: ct, input: p.input, message: p.message })
+    }
+    // Person swap (video) on fal's Pixverse Swap (family person-swap-video), on a runner run: a
+    // resolution it doesn't offer, no video, or one that isn't a file uploaded to Sailor. The video
+    // itself is read and measured next, before the hold (personSwapMedia.ts).
+    else if (ct === 'PersonSwapVideo' && opts.runner) {
+      const p = pixverseSwapNodeProblem(prompt, nodeId)
       if (p) out.push({ nodeId, classType: ct, input: p.input, message: p.message })
     }
     // Face swap on Easel (family face-swap), on a runner run: Easel requires a

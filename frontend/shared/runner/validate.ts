@@ -46,6 +46,7 @@ export const RUNNER_OUTPUT_CLASSES: ReadonlySet<string> = new Set([
   'Image', 'Video', 'Compositor', 'Audio', 'Text', 'Model3D', 'SaveImage', 'PreviewImage', 'SmartLayout',
   'RelightNode', 'BlendSceneNode', 'RemoveObjectNode', 'TextEditNode', 'RecolorObjectNode',
   'SwapBackgroundNode', 'SwapProductNode', 'PersonSwap', 'RotateCameraNode', 'ProductShotNode', 'RestyleFromImageNode', 'FixFacesNode', 'FaceSwap',
+  'PersonSwapVideo',
   ...EFFECT_OUTPUT_NODES,
 ])
 

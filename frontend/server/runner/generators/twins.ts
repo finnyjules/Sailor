@@ -323,6 +323,7 @@ export const RUNNER_ROUTES: Readonly<Record<string, Route>> = {
   'EnhanceVideoNode+topaz-video': r('fal', null, 'Replicate\'s Topaz video upscale bills an unspecified unit: its price can\'t be verified'),
   'FixFacesNode+fix-faces': r('fal', null, 'Replicate\'s Topaz is another app with its own settings and no face-enhancement strength'),
   'FaceSwap+face-swap': r('fal', null, 'Replicate has no Easel face swap'),
+  'PersonSwapVideo+person-swap-video': r('fal', null, 'Replicate has no Pixverse Swap'),
 }
 
 // ── Generate video: the two models moved to fal first ──────────────────────

@@ -140,6 +140,19 @@ export const CLIP_RATES: Record<string, ClipRate> = {
       '720p/60fps': 0.02, '1080p/60fps': 0.04, '4k/60fps': 0.16,
     },
   },
+
+  // ── Person swap (video) on fal's Pixverse Swap (family person-swap-video) ──
+  // Billed per clip: $0.15 at 360p/540p, $0.20 at 720p for 5 s; "if input
+  // video duration is greater than 5 s the cost will double" (llms.txt, read
+  // 2026-09-26). Written as a one-second rate (personSwapVideoCalls sends
+  // seconds: 1), so the figure is the clip's price; "/long" is the doubled one.
+  'fal-ai/pixverse/swap': {
+    unit: 'per_second', service: 'fal', source: fal('fal-ai/pixverse/swap'), read: '2026-09-26', confidence: 'verified',
+    byResolution: {
+      '360p': 0.15, '540p': 0.15, '720p': 0.20,
+      '360p/long': 0.30, '540p/long': 0.30, '720p/long': 0.40,
+    },
+  },
 }
 
 /** The card for `endpoint`, or null. Own keys only: "constructor" is not an endpoint. */

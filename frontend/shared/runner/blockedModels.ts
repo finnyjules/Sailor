@@ -175,6 +175,7 @@ const CLASS_TITLES: Readonly<Record<string, string>> = {
   ProductShotNode: 'Product shot',
   FixFacesNode: 'Fix faces',
   FaceSwap: 'Face swap',
+  PersonSwapVideo: 'Person swap (video)',
   LipSyncNode: 'Lip-sync a character',
   EnhanceVideoNode: 'Enhance a video',
 }

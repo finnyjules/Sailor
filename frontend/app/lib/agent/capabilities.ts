@@ -227,6 +227,8 @@ const GENERATORS: AgentCapability[] = [
     intents: ['lip sync this', 'sync the lips to audio', 'make the face talk', 'talking head video', 'dub this video', 'match lips to speech', 'lipsync', 'animate the mouth to audio', 'talking portrait'] },
   { nodeType: 'EnhanceVideoNode', kind: 'effect', title: 'Enhance a video', summary: 'Upscale + denoise + sharpen video (needs a video URL).', inputs: [], outputs: [{ name: 'VIDEO', type: 'VIDEO' }],
     intents: ['enhance the video', 'upscale this video', 'make the video hd', 'improve video quality', '4k the video', 'denoise the video', 'sharpen the video', 'clean up this clip', 'increase video resolution', 'restore this video'] },
+  { nodeType: 'PersonSwapVideo', kind: 'effect', title: 'Person swap (video)', summary: 'Swap the person in a video for someone in a photo (needs an uploaded video URL + a person photo).', inputs: [{ name: 'image', type: 'IMAGE' }], outputs: [{ name: 'VIDEO', type: 'VIDEO' }],
+    intents: ['swap the person in this video', 'replace the person in the video', 'put someone else in this clip', 'change who is in the video', 'person swap video', 'swap this person for another'] },
   { nodeType: 'DescribeVideoNode', kind: 'effect', title: 'Describe a video', summary: 'Video + question → text (captions, summaries). Needs a video URL.', inputs: [], outputs: [{ name: 'description', type: 'STRING' }],
     intents: ['describe this video', 'what happens in this video', 'summarize the video', 'caption the clip', 'analyze the footage', "what's going on in this video", 'explain the video', 'video summary'] },
 

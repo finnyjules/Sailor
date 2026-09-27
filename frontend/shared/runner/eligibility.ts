@@ -7,6 +7,7 @@ import { NO_FAMILIES, familyOn, type RunnerFamily } from './families'
 import { pyFloatOf, pyIntOf, pyTruthy } from './pyText'
 import { SYNC_3_ENGINE, isSync3LipSync, lipSyncEngine } from './lipSync'
 import { TOPAZ_VIDEO_FPS, TOPAZ_VIDEO_TARGETS } from './topazVideo'
+import { PERSON_SWAP_RESOLUTIONS } from './personSwapVideo'
 import { outputKind, BASE_VALUE_INPUTS, OUTPUT_KINDS, type ValueKind } from './values'
 import { moodboardReadingIsPlain } from '../taste/moodboardStyle'
 import { IMAGE_LAYERS, TEXT_LAYERS, smartLayoutPixels } from './smartLayout'
@@ -442,6 +443,17 @@ export const RUNNER_NODE_RULES: Readonly<Record<string, RunnerNodeRule>> = {
     mustLink: ['source_face', 'target_frames'],
     imageInputs: ['source_face', 'target_frames'],
     mustNotLink: ['gender', 'keep_hair_from'],
+  },
+  // ── person-swap-video: Person swap (video) on fal's Pixverse Swap (the video half of FaceSwap) ──
+  PersonSwapVideo: {
+    upgrade: { family: 'person-swap-video', label: 'Person swap (video)' },
+    mustLink: ['image'],
+    imageInputs: ['image'],
+    mustNotLink: ['video_url', 'resolution'],
+    widgets: {
+      video_url: { type: 'STRING', required: true },
+      resolution: { type: 'COMBO', required: true, options: PERSON_SWAP_RESOLUTIONS },
+    },
   },
   // ── restyle (Task B8): Nano Banana 2 / Pro on fal, Nano Banana on
   // Replicate. The prompt and the taste wire (style_in, a Moodboard card's

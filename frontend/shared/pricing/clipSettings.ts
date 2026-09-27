@@ -51,6 +51,9 @@ import { SYNC_3_ENGINE, lipSyncSyncMode, sync3ModeRefusal } from '../runner/lipS
 import {
   TOPAZ_VIDEO_ENDPOINT, TOPAZ_VIDEO_MAX_SECONDS, TOPAZ_VIDEO_UNKNOWN_SETTING, topazVideoPlan, topazVideoRateKey, topazVideoTarget, topazVideoTargetFps,
 } from '../runner/topazVideo'
+import {
+  PERSON_SWAP_MAX_SECONDS, PERSON_SWAP_TOO_LONG, PERSON_SWAP_UNKNOWN_SETTING, PIXVERSE_SWAP_ENDPOINT, personSwapRateKey, personSwapResolution,
+} from '../runner/personSwapVideo'
 
 export interface ClipCall {
   endpoint: string
@@ -567,6 +570,33 @@ export function topazVideoCalls(inputs: Inputs, measured: InputSeconds = {}): Cl
 /** Dollars for Topaz's call as configured and measured, or the refusal. */
 export function topazVideoUsd(inputs: Inputs, measured: InputSeconds = {}): number | { refused: string } {
   const calls = topazVideoCalls(inputs, measured)
+  if ('refused' in calls) return calls
+  return clipUsd(calls[0]!.endpoint, calls[0]!)!
+}
+
+// ── Person swap (video) on fal's Pixverse Swap (family person-swap-video) ─
+
+export { PIXVERSE_SWAP_ENDPOINT }
+
+/**
+ * Person swap (video)'s call as the runner sends it
+ * (server/runner/generators/pixverseSwap.ts): the measured length picks the
+ * base or doubled clip price (Pixverse bills per clip, not per second, so the
+ * call is written at `seconds: 1` with the clip's own price as the rate);
+ * unmeasured, the doubled (ceiling) price. A resolution the node doesn't
+ * offer is refused.
+ */
+export function personSwapVideoCalls(inputs: Inputs, measured: InputSeconds = {}): ClipCall[] | { refused: string } {
+  const resolution = personSwapResolution(inputs)
+  if (!resolution) return { refused: PERSON_SWAP_UNKNOWN_SETTING }
+  const seconds = typeof measured.video === 'number' && measured.video > 0 ? measured.video : PERSON_SWAP_MAX_SECONDS
+  if (seconds > PERSON_SWAP_MAX_SECONDS + 1e-6) return { refused: PERSON_SWAP_TOO_LONG }
+  return [{ endpoint: PIXVERSE_SWAP_ENDPOINT, seconds: 1, resolution: personSwapRateKey(resolution, seconds), audio: false }]
+}
+
+/** Dollars for Person swap (video)'s call as configured and measured, or the refusal. */
+export function personSwapVideoUsd(inputs: Inputs, measured: InputSeconds = {}): number | { refused: string } {
+  const calls = personSwapVideoCalls(inputs, measured)
   if ('refused' in calls) return calls
   return clipUsd(calls[0]!.endpoint, calls[0]!)!
 }

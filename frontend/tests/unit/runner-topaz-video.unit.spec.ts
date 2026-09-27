@@ -391,7 +391,8 @@ describe('the price', () => {
     })
     expect(CLIP_RATES[TOPAZ_VIDEO_ENDPOINT]).toBe(rate)
     expect(PRICE_BOOK_VERSION).toBe('lineup-g1')
-    expect(FAMILY_PRICED_CLASSES).toEqual({ EnhanceVideoNode: 'topaz-video' })
+    // + PersonSwapVideo (person-swap-video), added by Task 3 (non-commercial face models replacement).
+    expect(FAMILY_PRICED_CLASSES).toEqual({ EnhanceVideoNode: 'topaz-video', PersonSwapVideo: 'person-swap-video' })
   })
 
   it('the video measured: whole seconds rounded up × the band\'s rate, doubled at 60 frames a second', () => {

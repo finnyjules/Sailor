@@ -42,10 +42,36 @@ class FaceSwapNode(IO.ComfyNode):
         raise RuntimeError("Face swap runs on Sailor's runner. Switch on the face-swap family.")
 
 
+class PersonSwapVideoNode(IO.ComfyNode):
+    @classmethod
+    def define_schema(cls):
+        return IO.Schema(
+            node_id="PersonSwapVideo",
+            display_name="Person swap (video)",
+            description="Replace the person in a video with the person in a photo, with Pixverse. "
+                        "Swaps the whole person, not only the face. $0.15–0.20 up to 5 s, doubled up to 10 s. "
+                        "Please don't use on real people without their consent, or on minors.",
+            category="video",
+            inputs=[
+                IO.String.Input("video_url", default="", tooltip="A video uploaded to Sailor, up to 10 seconds."),
+                IO.Image.Input("image", tooltip="A photo of the person to put in the video."),
+                IO.Combo.Input("resolution", options=["360p", "540p", "720p"], default="720p"),
+            ],
+            outputs=[IO.Video.Output()],
+            hidden=[IO.Hidden.unique_id],
+            is_output_node=True,
+            price_badge=IO.PriceBadge(expr='{"type":"range_usd","min_usd":0.15,"max_usd":0.40}'),
+        )
+
+    @classmethod
+    def execute(cls, video_url, image, resolution) -> IO.NodeOutput:
+        raise RuntimeError("Person swap (video) runs on Sailor's runner. Switch on the person-swap-video family.")
+
+
 class FaceExtension(ComfyExtension):
     @override
     async def get_node_list(self) -> list[type[IO.ComfyNode]]:
-        return [FaceSwapNode]
+        return [FaceSwapNode, PersonSwapVideoNode]
 
 
 async def comfy_entrypoint() -> FaceExtension:

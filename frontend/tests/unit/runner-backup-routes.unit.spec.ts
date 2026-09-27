@@ -59,6 +59,7 @@ const EDIT_BASE: Record<string, Record<string, unknown>> = {
   ProductShotNode: { image: LINK },
   FixFacesNode: { image: LINK },
   FaceSwap: { source_face: LINK, target_frames: LINK, gender: 'Female', keep_hair_from: 'The picture' },
+  PersonSwapVideo: { image: LINK, video_url: '/view?filename=clip.mp4&type=input', resolution: '720p' },
   RestyleFromImageNode: { content_image: LINK, style_image: LINK },
   // sync-3 lip-sync (Task F22): the studio's face video and sound.
   LipSyncNode: {

@@ -99,6 +99,13 @@ export type RunnerFamily =
    */
   | 'face-swap'
   /**
+   * Person swap (video) on fal's Pixverse Swap, no backup. Moves the whole
+   * PersonSwapVideo node (Ruling 10), the video half of the retired
+   * InsightFace face swap. Off, the node goes to ComfyUI, whose
+   * definition-only Python node fails plainly: there is no ComfyUI path.
+   */
+  | 'person-swap-video'
+  /**
    * The text and data cards (step 3, R0/R1): Primitive, Text, Moodboard,
    * Model3D, the bake-replay cards, LoadImage outside the Frame, Empty image,
    * Get image size, Image to mask, Save image, Preview image, Smart Layout.
@@ -124,7 +131,7 @@ export type RunnerFamily =
   | 'live-previews'
 
 export const RUNNER_FAMILIES: readonly RunnerFamily[] = [
-  'fal-edit', 'replicate-image', 'replicate-video', 'nano-actions', 'ref-edits', 'restyle', 'frame', 'wan-3', 'gpt-image-2.5', 'h3-max-turbo', 'gemini-omni-flash', 'veo-3.1-lite', 'qwen-image-3', 'grok-imagine-2', 'ideogram-4', 'seedream-5-pro-edit', 'qwen-2511-angles', 'nano-banana-2-blend', 'bria-product-shot', 'muse-image', 'nano-banana-2-lite', 'reve-2.1', 'recraft-v4.1', 'krea-2', 'happyhorse-1.1', 'grok-imagine-video-1.5', 'ltx-2.5-fast', 'luma-ray-3.2', 'sync-3', 'topaz-video', 'fix-faces', 'face-swap', 'cards',
+  'fal-edit', 'replicate-image', 'replicate-video', 'nano-actions', 'ref-edits', 'restyle', 'frame', 'wan-3', 'gpt-image-2.5', 'h3-max-turbo', 'gemini-omni-flash', 'veo-3.1-lite', 'qwen-image-3', 'grok-imagine-2', 'ideogram-4', 'seedream-5-pro-edit', 'qwen-2511-angles', 'nano-banana-2-blend', 'bria-product-shot', 'muse-image', 'nano-banana-2-lite', 'reve-2.1', 'recraft-v4.1', 'krea-2', 'happyhorse-1.1', 'grok-imagine-video-1.5', 'ltx-2.5-fast', 'luma-ray-3.2', 'sync-3', 'topaz-video', 'fix-faces', 'face-swap', 'person-swap-video', 'cards',
   'effects-tone', 'effects-blur', 'effects-cells', 'effects-warp', 'effects-mask', 'effects-noise', 'shader-bake', 'live-previews',
 ]
 
