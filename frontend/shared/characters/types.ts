@@ -89,6 +89,22 @@ export function identityRefs(state?: CharacterState): string[] {
   return state.sheetImage ? [state.sheetImage, ...rest] : rest
 }
 
+/**
+ * What a VIDEO model gets for one character look: at most two pictures of the
+ * same person. The combined sheet grid is never sent — Seedance's own guide
+ * warns multi-view images read as several people. Portrait + full-body front
+ * come from one generation, so they are one person; without panels, only the
+ * cover (two photos could be two different people).
+ */
+export function videoIdentityRefs(state?: CharacterState): string[] {
+  if (!state) return []
+  const panels = [panelFilename(state, 'portrait'), panelFilename(state, 'body-front')]
+    .filter((f): f is string => !!f)
+  if (panels.length) return panels
+  const cover = coverFirstRefs(state)[0]
+  return cover ? [cover] : []
+}
+
 /** Visible text for a non-locked state's flag in cast/state pickers — never hidden, just badged. */
 export const DRAFT_BADGE_TEXT = 'draft — not stress-tested'
 

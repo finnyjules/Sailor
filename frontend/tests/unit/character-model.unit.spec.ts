@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   coverFirstRefs, defaultState, emptyState, identityRefs,
   normalizeStateId, panelFilename, pickState,
-  sortStatesLockedFirst, draftBadge, DRAFT_BADGE_TEXT,
+  sortStatesLockedFirst, draftBadge, DRAFT_BADGE_TEXT, videoIdentityRefs,
 } from '#shared/characters/types'
 
 const state = (over: Partial<ReturnType<typeof emptyState>> = {}) => ({ ...emptyState('default', 'Default'), ...over })
@@ -42,6 +42,32 @@ describe('identityRefs', () => {
   it('falls back to cover-first refs without a sheet', () => {
     const s = state({ refImages: ['a.png', 'b.png'], coverIndex: 1 })
     expect(identityRefs(s)).toEqual(['b.png', 'a.png'])
+  })
+})
+
+describe('videoIdentityRefs', () => {
+  it('sends the portrait and full-body front panels, never the sheet', () => {
+    const s = state({
+      sheetImage: 'sheet.png', refImages: ['a.png'], coverIndex: 0,
+      panels: [
+        { slot: 'face-smile', filename: 'smile.png' },
+        { slot: 'body-front', filename: 'front.png' },
+        { slot: 'portrait', filename: 'portrait.png' },
+      ],
+    })
+    expect(videoIdentityRefs(s)).toEqual(['portrait.png', 'front.png'])
+  })
+  it('sends whichever of the two panels exists', () => {
+    const s = state({ panels: [{ slot: 'body-front', filename: 'front.png' }], refImages: ['a.png'] })
+    expect(videoIdentityRefs(s)).toEqual(['front.png'])
+  })
+  it('falls back to the cover alone — never two photos, which may be two people', () => {
+    const s = state({ refImages: ['a.png', 'b.png', 'c.png'], coverIndex: 1 })
+    expect(videoIdentityRefs(s)).toEqual(['b.png'])
+  })
+  it('is empty for an empty look', () => {
+    expect(videoIdentityRefs(state({}))).toEqual([])
+    expect(videoIdentityRefs(undefined)).toEqual([])
   })
 })
 
