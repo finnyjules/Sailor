@@ -82,6 +82,20 @@ The brush toolbar gains a **Paint** row: Colour (as before) or six live material
 
 **Next.** Part 3: "More shaders" from the full library and painted effects.
 
+### The pen — fills (stage 7) — LANDED 2026-09-27
+
+Spec `docs/superpowers/specs/2026-09-26-pen-stages-4-8-design.md` (Stage 7), plan `docs/superpowers/plans/2026-09-27-pen-stage-7-fills.md`; commits 0081a6279 … 38b4a0672, final fixes 65ade1e7f + 7c9b7e418. On the pen page, in the Frame and in Shape Studio:
+
+- **Fill tool** (G, bucket): hover hatches the area under the pointer, click fills it, click a filled area to empty it. Areas are the faces the drawing's lines, arcs and circles make where they cross; guides don't bound them; ends that nearly meet (6 px at the first fill's zoom) are bridged, so the owner's trimmed flower fills petal by petal without joining.
+- **Fills follow edits:** a drag carries them; a line across a filled area keeps both halves filled; removing a divider keeps one fill; opening a gap puts the fill to sleep with amber rings until it closes; trimming an area away drops its fill; Cut, Dissolve, Clean up, Repeat, Mirror, Flip, copy/paste (across tools) carry them; an overlapping copy fills its whole area and nothing outside it.
+- **Output:** filled areas become one merged outline with true arcs. A Frame path layer gets `fillD` — the painter fills `fillD` and strokes `d` (editor, card, web export, bake, SVG export, mask "Use shape", long shadow, geometry effects); layers without fills paint byte-identically. A Drawn shape in Shape Studio with fills is its filled areas.
+
+**Proof.** ~1,250 unit tests across sketch/pen/cleanup/frame-pen/geoshape plus 5,297 compositor/frame tests (byte-identity snapshot unchanged); real-mouse `tests/pen-fills.spec.ts` plus the other ten pen specs, 121/121, three hosts at 1280 and 1024.
+
+**Rulings.** Holes nest (non-zero outlines); a fill is stored as a seed on an edge and settled against the last drawing inside every commit; a fill counts only on an area's outer edge; never fill or move a fill on a guess; one colour per drawing (the layer's fill, blue if it had none); Morph drops `fillD`; no Fill in text-guide pens or in the menu, wheel or Properties.
+
+**Known limits.** Two exactly overlapping pieces don't split an area; Bézier pieces bound nothing; a Morph shows the closed-up outline while it runs. **Found, not stage 7:** dragging a point on a ~160-piece connected drawing stalls up to seconds a frame in the solver.
+
 ### The pen — right-click menu, action wheel, Properties (stage 6) — LANDED 2026-09-27
 
 Spec `docs/superpowers/specs/2026-09-26-pen-stages-4-8-design.md` (Stage 6), plan `docs/superpowers/plans/2026-09-27-pen-stage-6-menus-properties.md`; commits 0e5333b79 … 42f0bfb89, final fix d47b364d2. On the pen page, in the Frame and in Shape Studio:
