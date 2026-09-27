@@ -9,8 +9,9 @@ const CONSTRAINT_KINDS: ConstraintKind[] = [
   'equalDist', 'rotatedFrom', 'mirroredFrom', 'collinear',
   'perpendicular', 'parallel', 'midpoint', 'equalRadius',
   'tangentLineArc', 'tangentArcs',
+  'offsetLine', 'offsetRadius', 'translatedFrom',
 ]
-const NEEDS_VALUE = new Set<ConstraintKind>(['distance', 'radius', 'rotatedFrom', 'tangentArcs'])
+const NEEDS_VALUE = new Set<ConstraintKind>(['distance', 'radius', 'rotatedFrom', 'tangentArcs', 'offsetLine', 'offsetRadius', 'translatedFrom'])
 
 function mergeEntity(raw: any): SketchEntity | null {
   if (!raw || !isStr(raw.id)) return null

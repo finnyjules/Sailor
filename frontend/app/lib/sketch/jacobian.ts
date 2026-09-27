@@ -9,7 +9,8 @@
 // ANALYTIC (closed-form): coincident, concentric, pointOnLine, pointOnCircle,
 //   tangentLineCircle, tangentCircleCircle, horizontal, vertical, distance,
 //   radius, equalDist, rotatedFrom, collinear, perpendicular, parallel,
-//   midpoint, equalRadius, tangentLineArc, tangentArcs.
+//   midpoint, equalRadius, tangentLineArc, tangentArcs, offsetLine,
+//   offsetRadius, translatedFrom.
 // NUMERIC FALLBACK (local central-difference over ≤6 coords — orig.x/y and
 //   the axis line's two endpoints; the `copy` point's own partials are the
 //   trivial identity and ARE analytic): mirroredFrom.
@@ -357,6 +358,35 @@ function rowsFor(map: EntityMap, c: SketchConstraint): JacEntry[][] | null {
         row.push(...radiusEntries(o1, -sg), ...radiusEntries(o2, sg))
       }
       return [row]
+    }
+    case 'offsetLine': {
+      const a = pointOf(map, c.refs[0]!); const b = pointOf(map, c.refs[1]!); const p = pointOf(map, c.refs[2]!)
+      if (!a || !b || !p || c.value == null) return null
+      // the same signed distance residualsFor scores (num / L); null for a
+      // zero-length line, which residualsFor skips too — rows stay aligned
+      const sd = signedDistPartials(p.x, p.y, a.x, a.y, b.x, b.y)
+      if (!sd) return null
+      return [[
+        px(p.id, sd.dPx), py(p.id, sd.dPy),
+        px(a.id, sd.dAx), py(a.id, sd.dAy),
+        px(b.id, sd.dBx), py(b.id, sd.dBy),
+      ]]
+    }
+    case 'offsetRadius': {
+      const ops = readCircleOperands(map, c.refs, 0)
+      if (!ops || ops.length !== 2 || c.value == null) return null
+      return [[...radiusEntries(ops[1]!, 1), ...radiusEntries(ops[0]!, -1)]]
+    }
+    case 'translatedFrom': {
+      const cp = pointOf(map, c.refs[0]!); const og = pointOf(map, c.refs[1]!)
+      const fr = pointOf(map, c.refs[2]!); const to = pointOf(map, c.refs[3]!)
+      if (!cp || !og || !fr || !to || c.value == null) return null
+      const k = c.value
+      // from = to (one id): the ±k entries land in one column and cancel
+      return [
+        [px(cp.id, 1), px(og.id, -1), px(to.id, -k), px(fr.id, k)],
+        [py(cp.id, 1), py(og.id, -1), py(to.id, -k), py(fr.id, k)],
+      ]
     }
     default:
       return null

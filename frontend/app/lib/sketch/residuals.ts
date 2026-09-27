@@ -177,6 +177,30 @@ function residualsFor(map: EntityMap, c: SketchConstraint): number[] | null {
       const r1 = operandRadius(o1), r2 = operandRadius(o2)
       return [c.value === 1 ? d - (r1 + r2) : d - Math.abs(r1 - r2)]
     }
+    case 'offsetLine': {
+      // refs=[A, B, P]: P's signed distance from A→B (left +) minus d; a
+      // zero-length line scores nothing (jacobian.ts skips it the same way)
+      const a = pointOf(map, c.refs[0]!); const b = pointOf(map, c.refs[1]!); const p = pointOf(map, c.refs[2]!)
+      if (!a || !b || !p || c.value == null) return null
+      const dx = b.x - a.x, dy = b.y - a.y
+      const L = Math.hypot(dx, dy)
+      if (L < 1e-12) return null
+      return [(dx * (p.y - a.y) - dy * (p.x - a.x)) / L - c.value]
+    }
+    case 'offsetRadius': {
+      // two circle operands ([C, S] pairs or circle ids): r2 − r1 − d
+      const ops = readCircleOperands(map, c.refs, 0)
+      if (!ops || ops.length !== 2 || c.value == null) return null
+      return [operandRadius(ops[1]!) - operandRadius(ops[0]!) - c.value]
+    }
+    case 'translatedFrom': {
+      // refs=[copy, orig, from, to]: copy = orig + k·(to − from)
+      const cp = pointOf(map, c.refs[0]!); const og = pointOf(map, c.refs[1]!)
+      const fr = pointOf(map, c.refs[2]!); const to = pointOf(map, c.refs[3]!)
+      if (!cp || !og || !fr || !to || c.value == null) return null
+      const k = c.value
+      return [cp.x - og.x - k * (to.x - fr.x), cp.y - og.y - k * (to.y - fr.y)]
+    }
     default:
       return null
   }

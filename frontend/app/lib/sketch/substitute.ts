@@ -4,6 +4,7 @@
 // "copy") a DETERMINISTIC function of a small set of source points:
 //   rotatedFrom[D, orig, center], θ°:  D = center + R(θ)·(orig − center)
 //   mirroredFrom[D, orig, line(a,b)]:  D = reflect(orig; a, b)
+//   translatedFrom[D, orig, from, to], k:  D = orig + k·(to − from)
 //
 // At mandala scale (repeat×N) the vast majority of points are such copies:
 // ~175 of a 181-point mandala are copies of ~6 base points. Keeping them as
@@ -30,11 +31,14 @@ export interface Contribution { id: EntityId; comp: ParamComp2; d: number }
 export interface DerivedRule {
   id: EntityId            // the derived (copy) point D
   constraintId: EntityId  // the defining rule — excluded from residuals/Jacobian
-  kind: 'rotatedFrom' | 'mirroredFrom'
+  kind: 'rotatedFrom' | 'mirroredFrom' | 'translatedFrom'
   origId: EntityId        // refs[1]
   centerId?: EntityId     // rotatedFrom: refs[2]
   axisAId?: EntityId      // mirroredFrom: axis line p1
   axisBId?: EntityId      // mirroredFrom: axis line p2
+  fromId?: EntityId       // translatedFrom: refs[2]
+  toId?: EntityId         // translatedFrom: refs[3]
+  k?: number              // translatedFrom: value
   cos: number             // rotatedFrom: cos θ (unused for mirror)
   sin: number             // rotatedFrom: sin θ
 }
@@ -61,6 +65,8 @@ export function buildEntityMap(doc: SketchDoc): EntityMap {
 // Reflection of (ogx,ogy) across the infinite line a→b. Null for a degenerate
 // (near-zero-length) axis. Pure function of its 6 numbers — matches
 // residuals.ts's mirroredFrom math exactly.
+const COPY_KINDS = new Set<string>(['rotatedFrom', 'mirroredFrom', 'translatedFrom'])
+
 function reflect(ogx: number, ogy: number, ax: number, ay: number, bx: number, by: number): { rx: number; ry: number } | null {
   const dx = bx - ax, dy = by - ay
   const L = Math.hypot(dx, dy)
@@ -83,7 +89,7 @@ export function analyzeDerived(doc: SketchDoc, held: Set<EntityId>): DerivedAnal
   // How many rotate/mirror constraints name each point as their copy (refs[0]).
   const copyCount = new Map<EntityId, number>()
   for (const c of doc.constraints) {
-    if (c.kind === 'rotatedFrom' || c.kind === 'mirroredFrom') {
+    if (COPY_KINDS.has(c.kind)) {
       const d = c.refs[0]!
       copyCount.set(d, (copyCount.get(d) ?? 0) + 1)
     }
@@ -91,7 +97,7 @@ export function analyzeDerived(doc: SketchDoc, held: Set<EntityId>): DerivedAnal
 
   const rules = new Map<EntityId, DerivedRule>()
   for (const c of doc.constraints) {
-    if (c.kind !== 'rotatedFrom' && c.kind !== 'mirroredFrom') continue
+    if (!COPY_KINDS.has(c.kind)) continue
     const d = c.refs[0]!
     if ((copyCount.get(d) ?? 0) !== 1) continue  // copy of >1 rule → keep free
     if (rules.has(d)) continue
@@ -102,6 +108,10 @@ export function analyzeDerived(doc: SketchDoc, held: Set<EntityId>): DerivedAnal
       if (!og || !ce || c.value == null) continue
       const a = c.value * Math.PI / 180
       rules.set(d, { id: d, constraintId: c.id, kind: 'rotatedFrom', origId: og.id, centerId: ce.id, cos: Math.cos(a), sin: Math.sin(a) })
+    } else if (c.kind === 'translatedFrom') {
+      const og = pt(map, c.refs[1]!); const fr = pt(map, c.refs[2]!); const to = pt(map, c.refs[3]!)
+      if (!og || !fr || !to || c.value == null) continue
+      rules.set(d, { id: d, constraintId: c.id, kind: 'translatedFrom', origId: og.id, fromId: fr.id, toId: to.id, k: c.value, cos: 0, sin: 0 })
     } else {
       const og = pt(map, c.refs[1]!); const l = map.get(c.refs[2]!)
       if (!og || !l || l.kind !== 'line') continue
@@ -117,7 +127,9 @@ export function analyzeDerived(doc: SketchDoc, held: Set<EntityId>): DerivedAnal
   // dependency cycle (shouldn't happen) → drop it back to a free parameter
   // (its defining rule stays active — correctness over speed).
   const sourcesOf = (r: DerivedRule): EntityId[] =>
-    r.kind === 'rotatedFrom' ? [r.origId, r.centerId!] : [r.origId, r.axisAId!, r.axisBId!]
+    r.kind === 'rotatedFrom' ? [r.origId, r.centerId!]
+    : r.kind === 'translatedFrom' ? [r.origId, r.fromId!, r.toId!]
+    : [r.origId, r.axisAId!, r.axisBId!]
   const emitted = new Set<EntityId>()
   const order: EntityId[] = []
   let progress = true
@@ -153,6 +165,12 @@ export function forwardSubstitute(map: EntityMap, order: EntityId[], rules: Map<
       const dx = og.x - ce.x, dy = og.y - ce.y
       D.x = ce.x + r.cos * dx - r.sin * dy
       D.y = ce.y + r.sin * dx + r.cos * dy
+    } else if (r.kind === 'translatedFrom') {
+      const og = map.get(r.origId) as PointEntity
+      const fr = map.get(r.fromId!) as PointEntity
+      const to = map.get(r.toId!) as PointEntity
+      D.x = og.x + r.k! * (to.x - fr.x)
+      D.y = og.y + r.k! * (to.y - fr.y)
     } else {
       const og = map.get(r.origId) as PointEntity
       const a = map.get(r.axisAId!) as PointEntity
@@ -183,6 +201,13 @@ export function derivedGradients(r: DerivedRule, map: EntityMap): { gx: Contribu
         { id: origId, comp: 'px', d: sin }, { id: origId, comp: 'py', d: cos },
         { id: centerId, comp: 'px', d: -sin }, { id: centerId, comp: 'py', d: 1 - cos },
       ],
+    }
+  }
+  if (r.kind === 'translatedFrom') {
+    const k = r.k!
+    return {
+      gx: [{ id: r.origId, comp: 'px', d: 1 }, { id: r.toId!, comp: 'px', d: k }, { id: r.fromId!, comp: 'px', d: -k }],
+      gy: [{ id: r.origId, comp: 'py', d: 1 }, { id: r.toId!, comp: 'py', d: k }, { id: r.fromId!, comp: 'py', d: -k }],
     }
   }
   const og = map.get(r.origId) as PointEntity

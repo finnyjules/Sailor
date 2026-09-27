@@ -185,6 +185,10 @@ export function rulePieces(doc: SketchDoc, c: SketchConstraint, ix: PieceIndex =
       return dedupe([...pairPieces(ix, r[0]!, r[1]!), ...operandPieces(ix, r, 2)])
     case 'tangentArcs':
       return dedupe(operandPieces(ix, r, 0))
+    case 'offsetLine':
+      return dedupe([...pairPieces(ix, r[0]!, r[1]!), entityPiece(ix, r[2]!)])
+    case 'offsetRadius':
+      return dedupe(operandPieces(ix, r, 0))
     default:
       return dedupe(r.map(id => entityPiece(ix, id)))
   }
@@ -222,6 +226,8 @@ export function ruleName(doc: SketchDoc, c: SketchConstraint, ix: PieceIndex = p
       return 'Perpendicular'
     case 'parallel': return 'Parallel'
     case 'midpoint': return 'Midpoint'
+    case 'offsetLine': case 'offsetRadius': return `Offset ${fmt(Math.abs(c.value ?? 0))}`
+    case 'translatedFrom': return 'Linear copy'
   }
 }
 
@@ -246,10 +252,10 @@ export function selectionKeys(doc: SketchDoc, sel: readonly EntityId[], segs: re
   return out
 }
 
-/** A Repeat / Mirror copy's own bookkeeping rule — hidden from the rules
- *  list like the canvas badges hide it (controller ruling C2: a ring of
+/** A Repeat / Mirror / Linear copy's own bookkeeping rule — hidden from the
+ *  rules list like the canvas badges hide it (controller ruling C2: a ring of
  *  copies would flood the list). */
-export const isCopyRule = (c: SketchConstraint): boolean => c.kind === 'rotatedFrom' || c.kind === 'mirroredFrom'
+export const isCopyRule = (c: SketchConstraint): boolean => c.kind === 'rotatedFrom' || c.kind === 'mirroredFrom' || c.kind === 'translatedFrom'
 
 /** Every rule that ties a selected piece, except each arc's own equal-ends
  *  rule (Ruling 11) and the copy rules (C2). A selected handle point counts

@@ -31,6 +31,11 @@ export type ConstraintKind =
   // pen stage 4 (tangency.ts): [A, B, C, S] or [A, B, circleId]; and
   // [C1, S1, C2, S2] (either pair may be a circle id) with value +1 outside / −1 inside
   | 'tangentLineArc' | 'tangentArcs'
+  // pen stage 8 (Ruling 1): offsetLine [A, B, P] value d — P's signed
+  // distance from line A→B is d (left positive); offsetRadius [C, S, C, T]
+  // value d — |C T| − |C S| = d (either pair may be a circle id);
+  // translatedFrom [copy, orig, from, to] value k — copy = orig + k·(to − from)
+  | 'offsetLine' | 'offsetRadius' | 'translatedFrom'
 
 export interface SketchConstraint {
   id: EntityId

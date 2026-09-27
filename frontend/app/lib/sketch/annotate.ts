@@ -12,6 +12,7 @@ const GLYPH: Record<ConstraintKind, string> = {
   equalDist: 'E', rotatedFrom: '↻', mirroredFrom: '⇄', collinear: 'S',
   perpendicular: '⊥', parallel: '∥', midpoint: 'M', equalRadius: 'E',
   tangentLineArc: 'T', tangentArcs: 'T',
+  offsetLine: '⇉', offsetRadius: '⇉', translatedFrom: '→',
 }
 
 // a representative world point to anchor the badge near, for the first resolvable ref
