@@ -344,7 +344,34 @@ function durOr(allowed: readonly number[], d: number): number {
  * sent to neither.
  */
 export const KLING_V3_FAL_APP = 'fal-ai/kling-video/v3/pro'
+
+/**
+ * Task 3 (characters stage 3): Kling 3's elements — one per character, a
+ * frontal face plus up to 3 more reference pictures (constraints.md), used
+ * ONLY alongside a start frame (fal's image-to-video requires
+ * `start_image_url`). Task 4 resolves each element's links to provider URLs
+ * before this builder runs.
+ */
+export const KLING_ELEMENTS_NEED_FRAME = 'Kling 3 needs a first frame to film characters. Make one or upload one.'
+export const KLING_ELEMENTS_TOO_MANY_PICTURES = 'Kling 3 takes a face and at most 3 more pictures per character.'
+
+interface KlingElement { frontal_image_url?: unknown; reference_image_urls?: unknown }
+
+/** null when `adv.elements` fits Kling 3's own rule; else the plain refusal. */
+export function klingElementsProblem(adv: Record<string, unknown>, hasFirstFrame: boolean): string | null {
+  const elements = Array.isArray(adv.elements) ? adv.elements as KlingElement[] : []
+  if (!elements.length) return null
+  if (!hasFirstFrame) return KLING_ELEMENTS_NEED_FRAME
+  for (const el of elements) {
+    const refs = Array.isArray(el.reference_image_urls) ? el.reference_image_urls : []
+    if (!el.frontal_image_url || refs.length > 3) return KLING_ELEMENTS_TOO_MANY_PICTURES
+  }
+  return null
+}
+
 export function klingV3Fal({ prompt, aspectRatio, duration, image, adv }: VideoBuildArgs): Omit<ServiceCall, 'provider'> {
+  const problem = klingElementsProblem(adv, !!image)
+  if (problem) throw new Error(problem)
   const inp: Record<string, unknown> = {
     prompt,
     duration: String(durOr([5, 10, 15], duration)),
@@ -354,6 +381,10 @@ export function klingV3Fal({ prompt, aspectRatio, duration, image, adv }: VideoB
   }
   if (image) inp.start_image_url = image
   else inp.aspect_ratio = arOr(KLING_AR, aspectRatio, '16:9')
+  const elements = Array.isArray(adv.elements) ? adv.elements as KlingElement[] : []
+  if (elements.length) {
+    inp.elements = elements.map(el => ({ frontal_image_url: el.frontal_image_url, reference_image_urls: el.reference_image_urls }))
+  }
   return { endpoint: `${KLING_V3_FAL_APP}/${image ? 'image-to-video' : 'text-to-video'}`, payload: inp }
 }
 

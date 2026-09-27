@@ -23,7 +23,7 @@ import { IMAGE_EDIT_MODELS, PRODUCT_SHOT_SLUG, imageEditCall } from '~~/server/r
 import { RESTYLE_NANO_BANANA_SLUGS, STYLE_TRANSFER_SLUG } from '~~/server/runner/generators/restyle'
 import {
   FLUX_2_DEV_FAL_APP, FLUX_2_MAX_FAL_APP, FLUX_2_PRO_FAL_APP, FLUX_2_PRO_REPLICATE, FLUX_3_REPLICATE_SLUG, KLING_V3_FAL_APP,
-  NANO_BANANA_PRO_REPLICATE, PIXVERSE_V6_FAL_APP, RECRAFT_V4_FAL_APP, RECRAFT_V4_PRO_FAL_APP,
+  NANO_BANANA_PRO_REPLICATE, PIXVERSE_V6_FAL_APP, RECRAFT_V4_FAL_APP, RECRAFT_V4_PRO_FAL_APP, klingV3Fal,
 } from '~~/server/runner/generators/twins'
 import type { OutputFile } from '~~/server/runner/types'
 import { checkPayload, loadProviderSchema } from './helpers/providerSchema'
@@ -172,6 +172,17 @@ describe('Veo 3.1 reference-to-video fits its saved fal schema', () => {
       }
     })
   }
+})
+
+// Task 3 (characters stage 3): Kling 3's elements (one per character: a
+// frontal face plus up to 3 more pictures) on fal's image-to-video, against
+// its own saved fal schema.
+describe('Kling 3 elements fit its saved fal schema', () => {
+  it('an elements payload passes the saved schema', () => {
+    const el = { frontal_image_url: 'https://fal.test/face.png', reference_image_urls: ['https://fal.test/p.png'] }
+    const call = klingV3Fal({ prompt: '@Element1 waves', aspectRatio: '16:9', duration: 5, seed: 0, image: 'https://fal.test/start.png', adv: { elements: [el] } })
+    expectFits('fal', call.endpoint, call.payload)
+  })
 })
 
 describe('Replicate Generate video builders fit the saved Replicate schemas', () => {

@@ -537,10 +537,14 @@ async function planNodeRequest(ctx: PlanContext): Promise<NodePlan> {
         const falFirst = FAL_FIRST_VIDEO[id]
         if (falFirst) {
           const call = falFirst(args)
+          // Kling 3's elements (Task 3, characters stage 3) carry a character's
+          // pictures; Replicate's Kling can't take them, so falling over would
+          // silently drop the character. No backup when they are sent.
+          const hasElements = Array.isArray(call.payload.elements) && (call.payload.elements as unknown[]).length > 0
           return {
             kind: 'provider', provider: 'fal', endpoint: call.endpoint, payload: call.payload, media: 'video', prefix: 'generate_video',
             uiFor: () => null,
-            backup: { provider: 'replicate', endpoint: onReplicate.slug, payload },
+            ...(hasElements ? {} : { backup: { provider: 'replicate', endpoint: onReplicate.slug, payload } }),
           }
         }
         return {

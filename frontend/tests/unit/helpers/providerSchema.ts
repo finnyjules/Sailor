@@ -36,6 +36,8 @@ const ANNOTATIONS = new Set([
   'readOnly', 'writeOnly', 'nullable', '_fal_ui_field',
   // fal's note on a file field ("Max file size: 50.0MB, Min width: 300px …"): prose, not a rule on the link.
   'limit_description',
+  // fal's own widget hint on a file field ({"field": "image"} / {"field": "video"}, Kling 3's elements, Task 3): prose too.
+  'ui',
 ])
 /** Keywords this checker applies. */
 const VALIDATORS = new Set([

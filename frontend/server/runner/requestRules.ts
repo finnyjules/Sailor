@@ -126,6 +126,7 @@ import { NO_FAMILIES, type RunnerFamily } from '#shared/runner/families'
 import { LARGEST_INPUT_PIXELS, sizePricedInput } from '#shared/pricing/editSettings'
 import { nodeImagePrompt } from './generators/image'
 import { RUNNER_VIDEO_MODELS, VEO_31_ONE_PICTURE, veo31HasExtras, veo31RefsProblem } from './generators/video'
+import { klingElementsProblem } from './generators/twins'
 import { H3_MAX_TURBO_APP, H3_MAX_TURBO_ENDPOINTS, H3_MAX_TURBO_ID, H3_MAX_TURBO_NEEDS_PROMPT } from './generators/h3MaxTurbo'
 import {
   GEMINI_OMNI_FLASH_ID, GEMINI_OMNI_FLASH_ONE_PICTURE, GEMINI_OMNI_FLASH_TEXT_TO_VIDEO,
@@ -704,6 +705,16 @@ export function requestProblems(prompt: ApiPrompt, opts: { runner?: boolean } = 
       if (isWan3Model(id)) {
         const p = wan3RequestProblem(id, inputs)
         if (p) out.push({ nodeId, classType: ct, input: p.input, message: p.message })
+      }
+      // Kling 3 on fal, on a runner run only (Task 3, characters stage 3): elements
+      // (a character's face plus up to 3 more pictures) need a start frame, and no
+      // more than 3 extra pictures each (its builder refuses the same at planning,
+      // but only after any hold; caught here first). The ComfyUI path never sends
+      // elements (Python doesn't know about them), so this is opts.runner-only.
+      if (opts.runner && id === 'kling-v3' && !isLink(inputs.model_options)) {
+        const adv = parseJsonObject(inputs.model_options)
+        const p = klingElementsProblem(adv, isLink(inputs.image) || !!firstFrame(null, adv))
+        if (p) out.push({ nodeId, classType: ct, input: 'model_options', message: p })
       }
       // Veo 3.1 and Veo 3.1 Fast, headed for the runner (always taken by it when the runner is
       // on: RUNNER_VIDEO_MODEL_IDS), take up to 3 reference pictures (Task 2, their builder refuses
