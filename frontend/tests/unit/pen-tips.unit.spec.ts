@@ -18,7 +18,8 @@ const ALL_TOOLS: PenTool[] = ['select', 'path', 'curve', 'line', 'circle', 'poin
 const DEMO_IDS = [...ALL_TOOLS, 'cleanup']
 const FIXED_IDS = ['guide', 'labels', 'undo', 'redo', 'close', 'finish', 'done', 'cancel',
   'fix', 'repeat', 'mirror', 'flip-h', 'flip-v', 'construction', 'delete',
-  'cleanup-apply', 'cleanup-cancel', 'cleanup-strength']
+  'cleanup-apply', 'cleanup-cancel', 'cleanup-strength',
+  'copy', 'copy-svg', 'paste', 'select-all', 'dissolve-point', 'prop-lock', 'prop-add-rule', 'prop-remove-rule']
 
 // every rule kind the rules row can show: run availableConstraints over every
 // single and pair selection of a drawing that has each kind of thing in it
@@ -94,6 +95,16 @@ describe('pen tips table', () => {
     expect(tipKeyLabel('⌘Z', false)).toBe('Ctrl+Z')
     expect(tipKeyLabel('⇧⌘Z', false)).toBe('Ctrl+Shift+Z')
     expect(tipKeyLabel('P', false)).toBe('P')
+  })
+
+  it('the menu’s actions carry their keys', () => {
+    expect(PEN_TIPS.construction!.key).toBe('X')
+    expect(PEN_TIPS['flip-h']!.key).toBe('⇧H')
+    expect(PEN_TIPS['flip-v']!.key).toBe('⇧V')
+    expect(PEN_TIPS.copy!.key).toBe('⌘C')
+    expect(PEN_TIPS.paste!.key).toBe('⌘V')
+    expect(PEN_TIPS['select-all']!.key).toBe('⌘A')
+    expect(tipKeyLabel('⇧H', false)).toBe('Shift+H')
   })
 })
 

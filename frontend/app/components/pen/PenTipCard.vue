@@ -20,7 +20,7 @@ import { PEN_TIPS, tipKeyLabel } from '~/composables/pen/penTips'
 import { PEN_TIP_DEMOS, DEMO_LOOP_MS, DEMO_W, DEMO_H, type PenTipFrame } from '~/composables/pen/penTipDemos'
 import { sketchPathData } from '~/lib/sketch/sketchPath'
 
-const props = withDefaults(defineProps<{ id: string; name?: string; side?: 'top' | 'bottom' }>(), { side: 'top' })
+const props = withDefaults(defineProps<{ id: string; name?: string; side?: 'top' | 'bottom' | 'left' | 'right'; reason?: string }>(), { side: 'top' })
 
 const tip = computed(() => PEN_TIPS[props.id])
 const title = computed(() => props.name ?? tip.value?.name ?? '')
@@ -97,6 +97,7 @@ const sparkleD = computed(() => {
             </g>
           </template>
         </svg>
+        <p v-if="reason" class="pen-tip-reason" data-pen-tip-reason>{{ reason }}</p>
         <p class="pen-tip-caption">{{ tip.caption }}</p>
       </TooltipContent>
     </TooltipPortal>
@@ -150,4 +151,5 @@ const sparkleD = computed(() => {
 .pen-tip-demo .cursor { fill: var(--popover); stroke: var(--tip-ink); stroke-width: 1.1; stroke-linejoin: round; }
 .pen-tip-demo .cursor.pressed { fill: var(--tip-ink); }
 .pen-tip-caption { margin-top: 6px; color: var(--tip-muted); text-wrap: pretty; }
+.pen-tip-reason { margin-top: 6px; color: #f59e0b; font-weight: 500; text-wrap: pretty; }
 </style>
