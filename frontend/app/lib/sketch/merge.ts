@@ -1,4 +1,4 @@
-import type { SketchDoc, SketchEntity, SketchConstraint, ConstraintKind } from './model'
+import type { SketchDoc, SketchEntity, SketchConstraint, ConstraintKind, SketchFill } from './model'
 
 const isNum = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v)
 const isStr = (v: unknown): v is string => typeof v === 'string' && v.length > 0
@@ -76,6 +76,34 @@ export function mergeSketchDoc(raw: unknown): SketchDoc {
       if (NEEDS_VALUE.has(c.kind) && !isNum(c.value)) continue
       seenK.add(c.id)
       doc.constraints.push({ id: c.id, kind: c.kind, refs: [...c.refs], ...(isNum(c.value) ? { value: c.value } : {}) } as SketchConstraint)
+    }
+  }
+  // pen stage 7: fills (optional — a drawing from before stage 7 has none), each
+  // kept only when its seed names pieces this drawing still has
+  if (Array.isArray(r.fills)) {
+    const points = new Set(doc.entities.filter(e => e.kind === 'point').map(e => e.id))
+    const circles = new Set(doc.entities.filter(e => e.kind === 'circle').map(e => e.id))
+    const seenF = new Set<string>()
+    const fills: SketchFill[] = []
+    for (const f of r.fills) {
+      const s = f?.seed
+      if (!f || !isStr(f.id) || seenF.has(f.id) || !s || typeof s !== 'object') continue
+      if (!isNum(s.t) || s.t < 0 || s.t > 1 || (s.side !== 1 && s.side !== -1)) continue
+      if (s.kind === 'line') { if (!points.has(s.a) || !points.has(s.b)) continue }
+      else if (s.kind === 'arc') { if (!points.has(s.a) || !points.has(s.b) || !points.has(s.c) || typeof s.ccw !== 'boolean') continue }
+      else if (s.kind === 'circle') { if (!circles.has(s.a) || s.b !== s.a || !points.has(s.c)) continue }
+      else continue
+      seenF.add(f.id)
+      fills.push({ id: f.id, seed: {
+        kind: s.kind, a: s.a, b: s.b,
+        ...(s.kind !== 'line' ? { c: s.c } : {}),
+        ...(s.kind === 'arc' ? { ccw: s.ccw } : {}),
+        t: s.t, side: s.side,
+      } })
+    }
+    if (fills.length) {
+      doc.fills = fills
+      if (isNum(r.fillGap) && r.fillGap > 0) doc.fillGap = r.fillGap
     }
   }
   return doc
