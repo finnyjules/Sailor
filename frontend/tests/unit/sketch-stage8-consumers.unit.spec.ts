@@ -5,7 +5,7 @@
 // checks — so none is ever left dangling, pulling the drawing invisibly.
 import { describe, it, expect } from 'vitest'
 import type { SketchDoc, EntityId } from '~/lib/sketch/model'
-import { addPoint, addLine, addPath, addConstraint, deleteEntity, mirrorEntities } from '~/lib/sketch/edit'
+import { addPoint, addLine, addPath, addCircle, addConstraint, deleteEntity, mirrorEntities } from '~/lib/sketch/edit'
 import { cutAt, removeSpan, dissolveAt, mergePoints } from '~/lib/sketch/trim'
 import { spanAt } from '~/lib/sketch/crossings'
 import { extractPieces, insertPieces, scalePieces } from '~/lib/sketch/clipboard'
@@ -14,6 +14,7 @@ import { copyPoints } from '~/lib/sketch/cleanup/context'
 import { runCleanup } from '~/lib/sketch/cleanup'
 import { checkRule, quickRuleCheck } from '~/lib/sketch/ruleCheck'
 import { constraintResiduals } from '~/lib/sketch/residuals'
+import { solve } from '~/lib/sketch/solve'
 
 const doc = (): SketchDoc => ({ entities: [], constraints: [] })
 const rules = (d: SketchDoc, kind: string) => d.constraints.filter(c => c.kind === kind)
@@ -149,5 +150,59 @@ describe('Clean up and the rule checks', () => {
     const spec = { kind: 'parallel' as const, refs: [a, b, p, q] }
     expect(quickRuleCheck(d, spec)).toBe('ok')           // no equivalent rule written: the cheap check allows it
     expect(checkRule(d, spec)).toBe('already')           // the full check finds it implied
+  })
+})
+
+// Fix round 1 (review-t2-verdict.md):
+// Important — trimming an end of the offset copy itself must re-aim that end's
+// offsetLine (Q → the new end), not drop it: the copy is still the same offset
+// line, just shorter. Minor — the new deleteEntity path-segment branch needs its
+// own test, and trimming a SOURCE circle named as a plain circle id in an
+// offsetRadius must re-aim that operand onto the arc it becomes, not drop it.
+describe('Fix round 1: trimming the copy itself, and the new consumer branches', () => {
+  it('trimming the offset copy’s own end re-aims its offsetLine; the copy stays parallel when the source turns', () => {
+    const { d, a, b, cp } = offsetPair()
+    ;(d.entities.find(e => e.id === a) as { fixed?: boolean }).fixed = true
+    // a cutter crossing the copy (P(0,1)–Q(10,1)) at x=7
+    const c1 = addPoint(d, 7, -5), c2 = addPoint(d, 7, 5)
+    addLine(d, c1, c2)
+    const span = spanAt(d, { kind: 'seg', pathId: cp, segIndex: 0 }, 0.95)   // near Q's end (t≈1)
+    expect(span).not.toBeNull()
+    const r = removeSpan(d, span!)
+    expect(r.ok).toBe(true)
+    expect(r.droppedRules).toBe(0)                       // re-aimed, not dropped
+    expect(rules(d, 'offsetLine')).toHaveLength(2)        // both ends still tied
+    // turn the source line: the copy stays parallel at distance 1
+    expect(solve(d, { drag: { point: b, x: 0, y: 4 } }).converged).toBe(true)
+    expect(constraintResiduals(d).every(v => Math.abs(v) < 1e-4)).toBe(true)   // solve's own tolerance (default 1e-6 on the norm)
+    noDangling(d)
+  })
+  it('deleting a path source keeps its offsetLine while another piece still spans the same two points, drops it once none does', () => {
+    const d = doc()
+    const a = addPoint(d, 0, 0), b = addPoint(d, 10, 0), p = addPoint(d, 0, 1)
+    const path = addPath(d, [a, b], [{ kind: 'line' }])
+    const spare = addLine(d, a, b)   // a second entity spans the same two points
+    addPath(d, [p, addPoint(d, 10, 1)], [{ kind: 'line' }])
+    addConstraint(d, 'offsetLine', [a, b, p], 1)
+    deleteEntity(d, path)
+    expect(rules(d, 'offsetLine')).toHaveLength(1)       // the spare line a–b still spans it
+    deleteEntity(d, spare)
+    expect(rules(d, 'offsetLine')).toHaveLength(0)       // nothing spans a–b any more
+    noDangling(d)
+  })
+  it('trimming a SOURCE circle into an arc re-aims an offsetRadius that named it as a plain circle', () => {
+    const d = doc()
+    const C = addPoint(d, 0, 0)
+    const circ = addCircle(d, C, 5)
+    const cc = addPoint(d, 20, 0), ct = addPoint(d, 23, 0)   // an unrelated copy operand [C, T]
+    addConstraint(d, 'offsetRadius', [circ, cc, ct], -1)
+    addLine(d, addPoint(d, 0, -10), addPoint(d, 0, 10))       // crosses the circle at (0,±5)
+    const res = removeSpan(d, spanAt(d, { kind: 'circle', id: circ }, 0)!)   // right half removed
+    expect(res.ok).toBe(true)
+    expect(res.droppedRules).toBe(0)                          // re-aimed, not dropped
+    const k = rules(d, 'offsetRadius')[0]!
+    expect(k.refs[0]).toBe(C)                                 // the circle id is gone, replaced by [C, x1]
+    expect(k.refs[2]).toBe(cc); expect(k.refs[3]).toBe(ct)     // the other operand is untouched
+    noDangling(d)
   })
 })

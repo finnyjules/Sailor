@@ -244,6 +244,19 @@ function followPair(doc: SketchDoc, a: EntityId, b: EntityId, ev: PairEvent): Se
       if (info.cat === 'dir') copies.push({ ...c, refs: second })
     }
   }
+  // an offsetLine's third ref is a single point on the offset copy itself, not
+  // part of a pair pairSlots tracks: when that exact end is trimmed away (its
+  // piece is moved or grown, not the whole line removed), the rule follows to
+  // the new end — the copy is still the same offset line, just shorter/longer
+  // (the arc form already re-aims the same way through followArcOperands).
+  if (ev.kind === 'moved' || ev.kind === 'grow') {
+    for (const c of doc.constraints) {
+      if (c.kind === 'offsetLine' && c.refs.length === 3 && c.refs[2] === ev.from && !touched.has(c.id) && !remove.has(c.id)) {
+        c.refs = [c.refs[0]!, c.refs[1]!, ev.to]
+        touched.add(c.id)
+      }
+    }
+  }
   removeRules(doc, remove)
   for (const k of copies) touched.add(addConstraint(doc, k.kind, k.refs, k.value))
   return touched
@@ -613,6 +626,9 @@ function removeCircleSpan(doc: SketchDoc, span: Span & { ref: { kind: 'circle' }
     } else if (c.kind === 'concentric') {
       const target = concentricCentre(doc, c, circ.id, C, shareWith)
       if (target) { shareWith = target; tr.excuse(c.id) }       // kept by sharing the centre
+    } else if (c.kind === 'offsetRadius') {
+      const refs = reaimOffsetRadiusCircle(c.refs, circ.id, C, x1)
+      if (refs) { kept.push({ id: c.id, kind: 'offsetRadius', refs, value: c.value }); tr.excuse(c.id) }
     }
     // every other circle rule (tangent, equal radius, radius…) is dropped and counted
   }
@@ -636,6 +652,18 @@ function pinnedOnlyTo(doc: SketchDoc, circId: EntityId): Set<EntityId> {
     if (!others) out.add(q)
   }
   return out
+}
+
+// an offsetRadius whose circle-id operand is `circId` (the source circle just
+// trimmed into a path arc on the same centre C, one new end S): the operand
+// becomes the point-pair form [C, S] in its place. null when circId isn't one
+// of the (at most two) operands, or sits where a pair, not a solo id, belongs.
+function reaimOffsetRadiusCircle(refs: EntityId[], circId: EntityId, C: EntityId, S: EntityId): EntityId[] | null {
+  const idx = refs.indexOf(circId)
+  if (idx < 0) return null
+  if (refs.length === 2) return idx === 0 ? [C, S, refs[1]!] : [refs[0]!, C, S]
+  if (refs.length === 3) return idx === 0 ? [C, S, refs[1]!, refs[2]!] : idx === 2 ? [refs[0]!, refs[1]!, C, S] : null
+  return null
 }
 
 // the centre point a concentric rule can be kept through, or null when it must be dropped
