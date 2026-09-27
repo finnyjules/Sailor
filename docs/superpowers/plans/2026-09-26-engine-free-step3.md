@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** everything Sailor offers runs without ComfyUI (except the stock local-diffusion nodes and blueprints, which stay local-only); this plan builds the first three slices in full — R0, results that aren't files passed between runner nodes; R1, the text and data cards; and R2, the picture effects (expanded 2026-09-26) — and outlines R3–R11.
+**Goal:** everything Sailor offers runs without ComfyUI (except the stock local-diffusion nodes and blueprints, which stay local-only); this plan builds the first three slices in full — R0, results that aren't files passed between runner nodes; R1, the text and data cards; and R2, the picture effects (expanded 2026-09-26); and R3, the paid-model nodes (expanded 2026-09-27) — and outlines R4–R11.
 
 **Architecture:** a runner node's results become per-slot *values* (`NodeRecord.values`): files as today, plus masks, text, numbers, true/false, JSON text and 3D model addresses. At a node's turn, every wire that brings a value is replaced by that value before the node's request is built, so every existing builder, check and prompt sees a plain value, as ComfyUI's `execute()` does. Prices keep reading the workflow as sent (a wired input is priced at its most expensive, as today). Bytes the runner makes itself are kept by sha256 in a run-scoped folder beside the run store. Which wires may carry values is one shared table (`shared/runner/`), read by the browser and the server. New cards run as a new `derive` plan kind: computed on the server, no provider, no charge.
 
@@ -59,6 +59,11 @@ New files:
 | `frontend/server/runner/cards/shaderEffect.ts`, `frontend/app/lib/runner/shaderBake.ts`, `frontend/shared/runner/shaderBakeKey.ts` | R2.10: the Shader effect replayed from the browser's bake. |
 | `frontend/server/api/runs/preview.post.ts`, `frontend/server/runner/preview.ts`, `frontend/app/lib/runner/livePreview.ts` | R2.11: live previews through the runner, free. |
 | `scripts/runner_effects_fixtures.py` | Python fixtures for R2, one file per group (`runner-effects-<group>.json`). |
+| `frontend/server/runner/rawJson.ts`, `frontend/shared/runner/pyJson.ts` | R3.1: a provider answer's body text kept beside its parsed form; Python's `json.loads` / `json.dumps` / `str()` for value outputs. |
+| `frontend/shared/pricing/paidRates.ts`, `paidSettings.ts` | R3.2: rate cards for the paid nodes' endpoints, and the calls each node's settings make (one price calculation with `priceNode`). |
+| `frontend/server/runner/generators/{llm,describe,repair,layers,splitLayers,audioGen,gen3d,soundIn,textEffects,imageExtras,lora,restyleLora,nanoExtras,turntable}.ts` | R3.3–R3.17: each paid node's request builder and answer reader, ported from the Python. |
+| `frontend/shared/runner/shotPresets.ts` | R3.11: Film a shot's presets and shot phrases, shared by the browser and the runner. |
+| `scripts/runner_paid_fixtures.py` | Python fixtures for R3 (every call a node makes, and its output from recorded answers), one file per group (`runner-paid-<group>.json`). |
 
 Modified: `server/runner/types.ts`, `engine.ts`, `executors.ts`, `metering.ts`, `store.ts`, `results.ts`, `inputs.ts`, `index.ts`, `compositor/plan.ts`; `shared/runner/eligibility.ts`, `families.ts`, `validate.ts`; `app/lib/taste/styleBlock.ts`; `server/api/render-template.post.ts`.
 
@@ -2840,41 +2845,708 @@ Record the results in `.superpowers/sdd/2026-09-26-engine-free-step3/progress.md
 
 ---
 
-# R3–R11 — outline tasks (to be expanded before they are built)
+# R3 — Paid-model nodes
+
+R3 moves Sailor's remaining paid nodes into the runner: the 35 visible Replicate classes of `comfy_api_nodes/nodes_replicate.py` the runner doesn't take yet (inventory §1(a)), plus Pose Mannequin, Lens reframe and Turntable from `comfy_extras/`, and the hidden "Remote" twins whose Python is the very same call (ruling (q)). Each becomes a provider plan built from the real Python and proven by its request fixtures, priced in `frontend/shared/pricing/`, and switched on one family at a time after its live paid check. The outline's eight tasks are replaced by the eighteen below (expanded 2026-09-27); `.superpowers/sdd/2026-09-26-engine-free-step3/r3-expansion-report.md` lists the corrections to the outline and why.
+
+**Order.** R3.1 (the engine's new plan shapes) comes first, then R3.2 (price, moderation and fixture harness), which uses R3.1's plan types. After both, R3.3–R3.9 and R3.11–R3.16 are independent of each other, one family each; they all edit `executors.ts`, `eligibility.ts` and the price module, so the controller runs at most two at once and merges. R3.10 (sound in) and R3.17 (Turntable with views) wait for R5.1 (ffmpeg). R3.18 is the controller's check.
+
+**Families** (each off by default; each needs `cards` on, `FAMILY_REQUIRES`, as R2's do: their inputs come from Image cards and LoadImage, and their values go to Text cards and wired prompts, all `cards` machinery):
+
+| Family | Task | Classes |
+|---|---|---|
+| `llm-text` | R3.3 | Chat with an LLM, Improve a prompt, Summarize, Translate, Rewrite in a tone, Brainstorm ideas, Think step by step |
+| `describe` | R3.4 | Describe an image (+ twin), Describe a video, Extract text, Find objects |
+| `image-repair` | R3.5 | Upscale, Enhance detail, Fix faces (+ twin), Restore an old photo (+ twin), Remove background (+ twin) |
+| `layers` | R3.6, R3.7 | Separate text from image, Layerize an image, Expand / outpaint, Separate background and foreground |
+| `audio-gen` | R3.8 | Generate music (+ twin), Generate speech (+ twin) |
+| `gen-3d` | R3.9 | Generate a 3D model (+ twin), Multi-View → 3D |
+| `sound-in` | R3.10 | Transcribe audio (+ twin), Identify speakers, Clone a singing voice, Sync lips to audio (+ twin) |
+| `film-shot` | R3.11 | Film a shot's preset path |
+| `image-extras` | R3.12 | Text effect, Sketch to image, Generate face references |
+| `lora` | R3.13, R3.14 | Flux Dev + LoRA, Flux Dev + LoRAs, Restyle an Image · Style LoRA |
+| `nano-extras` | R3.15 | Pose Mannequin, Lens · 3D Reframe |
+| `turntable` | R3.16, R3.17 | Turntable |
+
+## Rules every paid node follows (binding for R3.3–R3.17)
+
+1. **From node to provider plan.** Each class gets a builder in `frontend/server/runner/generators/<group>.ts` that turns the node's inputs (after `withWiredValues`, so a wired text arrives as typed) into exactly the payload the Python `execute` sends, and a case in `planNode` (`executors.ts`) that returns one of:
+   - a `provider` plan (one call), `media` as the node's output: `'image'`, `'video'`, `'audio'`, `'glb'` or `'value'` (R3.1);
+   - a `pipeline` plan (several calls, R3.1) for Separate background and foreground, Flux Dev + LoRAs' reload retry, Restyle with a style LoRA and Turntable with views;
+   - a `pass` plan where Python makes no call (rule 8).
+
+   Python's own conversions are ported, not re-invented: `str.strip()` is `pyStrip`, `int()`/`float()` are `pyText.ts`, a Python `bool(x)` is `pyTruthy`. Where Python reads `_first_output_url` the plan takes the first URL only (`take: 'first'`).
+2. **Values out.** A `STRING` output is a value: kind `'text'`, or `'json'` for the four JSON outputs (Find objects, Identify speakers, and the two `layers_json`). Its text is byte-identical to Python's: token lists joined with `pyStr` of each item, then `pyStrip` where Python strips; JSON through `pyJsonDumps` of the answer as Python's `json.loads` read it (R3.1: numbers keep their int/float form, keys their order). A GLB output is `{ kind: 'glb', url, file }` with Sailor's own saved copy (spec ruling 1, R3.9). The class's `OUTPUT_KINDS` row applies only while its family is on (`outputKindsFor`, as R2 generalised it).
+3. **Files out.** A picture is saved as the runner has saved provider pictures since Phase B (the bytes as downloaded, `extFor`), except where Python changes the pixels before its output (drops alpha with `tensor[..., :3]`, picks one of several answers): then the kept file is the PNG Python's tensor would save, 8-bit by R1.5's truncation rule (`trunc(f32(255·x))` of the decoded `/255` value). Where Python calls `save_generation_output(tensor, prefix)` the node's ui is `{ images: [<the saved file>], animated: [false] }` under the same prefix; where Python returns no ui, `uiFor` returns null. A sound is saved with the extension of the answer (`extFor` with fallback `wav`), a video with `mp4`. Every download is capped at `MAX_MEDIA_BYTES` (`server/utils/graphInputSeconds.ts:47`, 512 MiB) unless the task names a lower cap; over it, the node fails plainly after the call (the call is charged: it was made).
+4. **Request fixtures come from the real Python.** `scripts/runner_paid_fixtures.py --group <g>` (R3.2) imports each class, blocks the network before any node module loads, and runs `execute` with every provider call patched (`capture_calls`, R3.2, which extends `runner_builder_fixtures.py`'s `capture_first_call`): pictures arrive as `IMG:<input name>`, sounds as `WAV:<input name>`, uploads as `UPLOAD:<file name>`. It records every call in order as `{ provider, endpoint, payload }`. The TypeScript builder, given the same inputs, must produce payloads deep-equal to Python's, call by call. `frontend/tests/unit/fixtures/runner-builders.json` is not touched: if `runner_builder_fixtures.py` must change to share a helper, regenerate it and `git diff` must show nothing.
+5. **Answer fixtures give the node's output.** For each class the script also feeds recorded or hand-written provider answers (a token list, a plain string, `null`, a dict, a JSON body text with `1.0`, `1e5` and non-ASCII) into the patched call and records what the node returns: the text or JSON string exactly, which answer URL it chose, and its ui. The TypeScript `valuesOf` / `take` / `urlsOf` must give byte-identical text and the same URL choice.
+6. **Schemas saved.** Before a task is dispatched the controller saves each endpoint's published schema with `frontend/scripts/snapshot_provider_schemas.mjs` (free GETs only, never a prediction) into `frontend/tests/unit/fixtures/provider-schemas/`. Every payload the builder makes over the fixture set passes `checkPayload` (`tests/unit/helpers/providerSchema.ts`), as `runner-provider-schemas.unit.spec.ts` does for the line-up. Where the Python sends something the schema doesn't declare, the task reports it; the controller rules (the line-up's S1b precedent: follow the schema).
+7. **One price calculation, hold and charge.**
+   - Each class is priced by `priceNode` (`frontend/shared/pricing/nodePrice.ts:223`) through R3.2's `paidCalls` (the calls its settings can make) and rate cards (`paidRates.ts`, or an existing `EDIT_RATES` / `VIDEO_RATES` / `CLIP_RATES` card for an endpoint already carded). The class's flat row in `GRAPH_NODE_CREDITS` (`server/utils/priceBook.ts:266-354`) is removed in the same task, so the ComfyUI path's charge moves to the same calculation, and `PRICE_BOOK_VERSION` (`priceBook.ts:151`) is bumped once per task.
+   - A rate card carries `service`, `source`, `read` (ISO date) and `confidence`, as `editRates.ts` does. Every figure is read from the provider's page or saved schema by the task, never from a badge. A card whose confidence is `estimate` (GPU-time billing) blocks switch-on until the live check measures it.
+   - **The hold is the ceiling, taken at the start:** the dearest call the node's settings can make, every linked input at its most expensive (the price module's rule), and for a pipeline every call it may make (`editStepsUsd`'s shape: the first service marked up, fallbacks and backups covered at cost). Media-priced nodes (by picture size, sound or video length) are measured before the hold, as F22/F23 do (`nodeMedia.ts`).
+   - **The charge comes from the same calculation**, fed with what was actually sent or made (the measured media, the token counts the answer reports, the calls that finished), and is **never above the hold**: the engine charges `min(hold, charge)` and reports a charge that would exceed it (`runner.charge.above-hold`).
+   - An unpriced class or model (`priceNode` refuses, or prices at 0) is refused in hosted before the hold (`unpricedProviderNode`, `metering.ts:96`); local runs it free, as today.
+8. **No-call branches.** Where Python returns before calling anyone (a blank text to summarise, a Pose Mannequin with a baked result, no pose source), the plan is a `pass` (or a value with no call) and R3.2's `paidNoCall(classType, inputs)` says so from the inputs as sent, so `stageEstimate` holds nothing for it (as `actionPassThrough` does, `metering.ts:159-176`) and nothing is charged. A wired input that decides the branch is priced as if the call were made; the hold for it is let go at the node's turn.
+9. **Refusals before the hold, in plain words.** Anything the runner can tell from the prompt as sent or from a measured header is refused at the start of the take, before any hold: a setting the provider's schema refuses, a picture over its cap, a sound over its length, an unpriced model, a file the user doesn't own, text over the moderation limit. Messages are sentence case, plain, with no class names, field names or ids ("Improve a prompt needs an idea to work on.", not "ImprovePromptNode: idea is empty"). Where Python raises at run time with its own words (Describe a video's `"video_url is required."`), the runner refuses before the hold with plain words and the task lists the mapping. A known Python quirk that costs money (a call Python makes and then fails) is refused before the call, under the line-up's precedent (F8/F13 ruling rows).
+10. **Every text sent is moderated** (hosted, fail-closed, G3). Each class lists the inputs whose text reaches a provider in R3.2's `PAID_TEXT_INPUTS`; `extraPromptTexts` reads them at the start (typed text), and R0.5's node-turn check covers wired text. Text Sailor writes itself (system prompts, templates, shot phrases) is not moderated; the user's part inside it is.
+11. **Hosted ownership of every file handed off.** Every file a node sends (a picture, a sound, a baked file named in a widget, a LoRA, a voice) must be the user's own in hosted: `collectInputFiles` (`server/runner/inputs.ts:75`) lists widget-named files, and the start-of-take picture check (`cardPictureFiles`, `cards/bakeReplay.ts:83`) covers pictures read from Image cards and LoadImage. Files a node saves go under the user's subfolder (`userSubfolder`) and are recorded with `metering.addOutput`, including files saved to the input folder (Seedream layers, R3.6).
+12. **Partial charges for multi-call nodes.** A pipeline records each call (`NodeRecord.calls`, R3.1). If the node fails or is stopped midway, it is charged for the calls that finished, priced by the same calculation, never above its hold (ruling (f)). A call that failed at the provider is not charged. Resume after a restart replays finished calls from the record and never sends one twice.
+13. **Backups** only where the other service runs the same model and its schema carries every setting the first request carries, and only if its at-cost price doesn't raise the node's price (spec money rule 2). Each task's port table says "no backup" with the reason, or names the backup; each backup gets a `RUNNER_ROUTES` row (`generators/twins.ts:204`) and a live check of its own with `NUXT_RUNNER_BACKUP` on. Backups stay opt-in (`NUXT_RUNNER_BACKUP`, line-up F11).
+14. **Families off by default.** A family is switched on only after (a) every endpoint in it has a rate card, (b) its live paid check passed with the user's go (one cheap call per family and per backup; one per endpoint whose card is an estimate), with `NUXT_RUNNER_BACKUP=off` for the first-service calls, and (c) the controller records the measured prices with source and date.
+15. **Families-off parity.** With every R3 family off: `runnerTakesNode`, `nodesNeedingEngine`, `outputKindsFor`, `PICTURE_OUTPUTS` and `valueWiresAllowed` answer exactly as before R3.1 over every saved project graph (`user/sailor/projects/*`, the 866-graph check of R2.1), and every existing `runner-*.unit.spec.ts` stays green unchanged. The only intended change with families off is the ComfyUI path's price for classes whose flat row a task replaces (rule 7), pinned per class in `price-graph.unit.spec.ts`.
+16. **Tests** go in `frontend/tests/unit/runner-paid-<group>.unit.spec.ts`, with the shared helpers in `tests/unit/__runner__/paidParity.ts` (R3.2). For every fixture case: the builder's payloads deep-equal Python's in order; each payload passes its saved schema; the answer fixtures give Python's output byte for byte; through `planNode` and the kit (`cards` and the family on), the engine sends those payloads to the fake provider, keeps the values or files, and charges `priceNode`'s figure. Plus per task: the hold equals the ceiling and the charge the same calculation on the answer; a refusal happens before `ledger.hold`; moderation sees every listed text; with the family off the class is left to the engine and `nodesNeedingEngine` names it; the families-off invariant (rule 15).
+17. **Every task's run line:** `cd /Users/julien/Documents/GitHub/Sailor && .venv/bin/python scripts/runner_paid_fixtures.py --group <g>` (twice; the second time `git diff --stat` shows the group file unchanged), then `cd frontend && env -u FAL_KEY -u FAL_API_KEY -u NUXT_REPLICATE_TOKEN -u REPLICATE_API_TOKEN npx vitest run tests/unit/runner-paid-<g>.unit.spec.ts tests/unit/runner- tests/unit/price-graph.unit.spec.ts tests/unit/edit-pricing.unit.spec.ts`, and the typecheck from the Global Constraints. Report (no commit).
+
+### Task R3.1: Paid plans that make sounds, 3D files, values and several calls
+
+No family: engine machinery, proven with stand-in plans (the `vi.mock` pattern of `runner-value-results.unit.spec.ts`).
+
+**Files:**
+- Modify `frontend/server/runner/executors.ts`: the provider plan (`NodePlan`, :162-185) and a new `pipeline` kind.
+- Modify `frontend/server/runner/types.ts`: `NodeRecord.calls` (:103-155).
+- Modify `frontend/server/runner/engine.ts`: `waitForResult`'s media (:1130, :1259-1274), the download and save branch (:1162-1188), the value branch (:1145-1160), the stage charge (:786-790), and pipeline execution and resume.
+- Modify `frontend/server/runner/replicateQueue.ts` (`replicateOutputUrls` :67-71; the JSON reads :129, :192, :223) and `falQueue.ts` (`falOutputUrls`; the JSON reads :89, :115, :135): outputs for `'audio'` and `'glb'`, and the raw body kept for value answers.
+- Modify `frontend/server/runner/results.ts` (`extFor` :124: fallbacks `wav`, `glb`).
+- Create `frontend/server/runner/rawJson.ts` and `frontend/shared/runner/pyJson.ts`.
+- Modify `frontend/tests/unit/__runner__/kit.ts` (`createFakeFal` :27, `createFakeReplicate` :81): programmable answers.
+- Test: `frontend/tests/unit/runner-paid-machinery.unit.spec.ts`, `frontend/tests/unit/py-json.unit.spec.ts`.
+
+**Interfaces:**
+- Consumes: R0.1 `RunnerValue`, R0.6 value plans and `ResultEntry`, `checkValue` / `filesOfValues` (`values.ts:44-67`), `DeriveIO` / `Derived`, `Handoff.toUrlBytes`, `ResultStore.save`, `metering.addOutput`.
+- Produces (executors.ts):
+  ```ts
+  | {
+    kind: 'provider'; provider: RunnerProvider; endpoint: string; payload: Record<string, unknown>
+    media: 'image' | 'video' | 'audio' | 'glb' | 'value'; prefix: string
+    uiFor(files: OutputFile[]): Record<string, unknown> | null
+    /** Python reads `_first_output_url`: only the first URL is downloaded. Default 'all' (as before R3). */
+    take?: 'first' | 'all'
+    /** The answer's file URLs where they aren't Replicate's `output` list or fal's `images`/`video` (Trellis's `model_file`, Layerize's pick by extension). */
+    urlsOf?(result: unknown): string[]
+    /** Python drops alpha before its output: the file kept is the RGB PNG of the decoded pixels (rule 3). */
+    rgb?: true
+    /** For media 'value': the node's values; `raw` is the answer's body text (rawJson.ts) or null. */
+    valuesOf?(result: unknown, raw: string | null): Record<number, RunnerValue>
+    /** Token-priced nodes: credits for what the answer reports it used, or null (charge the hold). Never above the hold. */
+    chargeOf?(result: unknown): number | null
+    backup?: ProviderBackup
+    keep?: KeepStep
+  }
+  | { kind: 'pipeline'; prefix: string; run(io: PipelineIO): Promise<Derived> }
+  ```
+  ```ts
+  export interface PipelineCall {
+    /** Stable within the node (e.g. 'cutout', 'fill', 'nb-1'): a resumed run matches calls by it. */
+    key: string
+    provider: RunnerProvider; endpoint: string; payload: Record<string, unknown>
+    media: 'image' | 'video' | 'value'
+    backup?: ProviderBackup
+    /** This call's price basis in dollars (the price module's figure for it). */
+    usd: number
+  }
+  export interface PipelineIO extends DeriveIO {
+    call(c: PipelineCall): Promise<{ result: unknown; raw: string | null; urls: string[] }>
+    download(url: string, o?: { maxBytes?: number }): Promise<{ bytes: Uint8Array; contentType: string | null }>
+    /** Hands off bytes the node made itself (a mask, an RGB copy): kept by sha256, then uploaded. */
+    handOff(bytes: Uint8Array, name: string): Promise<string>
+    toUrl(file: OutputFile): Promise<string>
+  }
+  ```
+  types.ts:
+  ```ts
+  export interface CallRecord {
+    key: string; provider: RunnerProvider; endpoint: string; payload: Record<string, unknown>
+    request: PendingRequest | null
+    status: 'sent' | 'done' | 'error'
+    usd: number
+    /** The answer, kept so a resumed run replays it instead of calling again. */
+    answer?: { result: unknown; raw: string | null; urls: string[] }
+  }
+  // NodeRecord gains:
+  calls?: CallRecord[]
+  ```
+  rawJson.ts: `rememberRaw(parsed: object, text: string): void`; `rawTextOf(result: unknown): string | null` (a `WeakMap` keyed by the parsed object; the queue clients read the body as text, `JSON.parse` it and remember the text).
+  shared/runner/pyJson.ts:
+  ```ts
+  export type PyJson = null | boolean | string | { int: string } | { float: number } | PyJson[] | { obj: [string, PyJson][] }
+  /** Python's json.loads: an integer lexeme stays an int (any size), one with '.', 'e' or 'E' is a float; a repeated key keeps its first place and its last value. */
+  export function parsePyJson(text: string): PyJson
+  /** Python's json.dumps defaults: ensure_ascii, separators ', ' and ': ', float repr, NaN / Infinity / -Infinity. */
+  export function pyJsonDumps(v: PyJson): string
+  /** Python's str() of a JSON scalar: strings as they are, int digits, float repr, 'True' / 'False' / 'None'. Throws PY_STR_UNREADABLE on a list or dict. */
+  export function pyStr(v: PyJson): string
+  export function pyFloatRepr(x: number): string
+  export const PY_STR_UNREADABLE = 'The model answered in a form Sailor can’t read'
+  ```
+  kit.ts: `createFakeReplicate(o?: { answer?(req: { model: string; input: Record<string, unknown> }): unknown; bodyText?(req): string })` and `createFakeFal(o?: { answer?(req: { endpoint: string; input: Record<string, unknown> }): unknown; bodyText?(req): string })`; without `answer`, today's picture answers.
+
+**Behaviour:**
+- `'glb'` waits as a video does (Python polls the 3D calls with `_VIDEO_POLL_DEADLINE_SEC`, 30 min, `nodes_replicate.py:122`); `'audio'` and `'value'` wait as a picture (Python's default 5-minute poll, `_DEFAULT_POLL_DEADLINE_SEC`, :121) unless the task says video (Describe a video, `:5447`; Sync lips to audio, `:4936`).
+- `'glb'`: the first URL (or `urlsOf`) is downloaded, saved as `<prefix>_<n>_.glb` in the user's output subfolder, recorded with `addOutput`, and the node's slot 0 value is `{ kind: 'glb', url: '/view?filename=<name>&subfolder=<sub>&type=output', file }`. Reuse (R0.6) gives the same value back.
+- Pipelines: `execNode` runs `plan.run(io)`. Each `io.call` looks up `rec.calls` by key: a `done` call returns its kept answer; a `sent` call waits on its recorded request (as a resumed provider node does); otherwise it is sent (with its backup under the backup rules) and written down before and after. A resumed call whose payload differs from the recorded one fails the node plainly and cancels the recorded request (the F12 rule). Stop cancels the call in flight.
+- The stage charge (:786-790) sums `chargeableCredits(rec)`: a `done`, not reused node's `rec.credits`; for a node with `calls`, `creditsForUsd` of the finished calls' summed `usd` whether the node ended done, error or stopped; never above the node's hold share.
+- `chargeOf`: after a value answer, `rec.credits = min(rec.credits, chargeOf(result) ?? rec.credits)`.
+- A value answer's `raw` is the provider's body text for the prediction (Replicate) or result (fal).
+
+**Test (`runner-paid-machinery`), each a separate `it`:**
+- an audio plan: a fake Replicate WAV URL is downloaded, saved `.wav`, and handed to the next node; an MP3 answer is saved `.mp3`;
+- a glb plan: saved `.glb`, value `{ kind: 'glb', url: '/view?…', file }`; a Model3D card reads it; reuse gives the same value; hosted: the file is recorded as the user's output;
+- `take: 'first'` downloads one of three URLs; `rgb` keeps an RGB PNG whose pixels are the decoded RGB (trunc rule) of an RGBA answer;
+- `rawTextOf` gives the body text for Replicate and fal answers from the fake clients' `bodyText`;
+- a pipeline of three calls: all three sent in order, charged `creditsForUsd(Σ usd)`; the second call fails: charged for the first only, the third never sent; Stop during the second: the second cancelled, charged the first; a restart after the second call's answer: resumed, the first two never re-sent, the third sent once; a resumed pipeline whose second payload differs fails plainly and cancels;
+- `chargeOf` lowers the charge; one returning more than the hold is charged the hold and reported;
+- with no R3 plan in a prompt, every existing `runner-*.unit.spec.ts` is green unchanged.
+
+**Test (`py-json`):** `parsePyJson` + `pyJsonDumps` reproduce Python's `json.dumps(json.loads(t))` on a fixture list of bodies written by `scripts/runner_paid_fixtures.py --group machinery` (ints past 2⁵³, `1.0`, `1e5`, `1E-7`, `-0.0`, `NaN`, `Infinity`, non-ASCII, astral characters as surrogate pairs, repeated keys, nesting); `pyFloatRepr` matches Python's `repr` on 10,000 recorded doubles; `pyStr` on every scalar.
+
+**Acceptance:** all of the above; the families-off invariant holds (rule 15); the esbuild and typecheck guards pass.
+
+---
+
+### Task R3.2: The price module, moderation lists and the paid fixtures harness
+
+No family: the shared pieces every R3 task fills in.
+
+**Files:**
+- Create `frontend/shared/pricing/paidRates.ts`: `PAID_RATES: Record<string, PaidRate>` and `paidCallUsd(call: PaidCall): number | null`, which falls back to `editUsd` / `videoPriceUsd` / the clip cards for an endpoint carded there already.
+- Create `frontend/shared/pricing/paidSettings.ts`: `PAID_NODE_CLASSES`, `paidCalls`, `paidNoCall`.
+- Modify `frontend/shared/pricing/nodePrice.ts`: `priceNode` (:223) prices `PAID_NODE_CLASSES` through `paidCalls`; `SHARED_PRICED_CLASS_SET` (:95) includes them; `PriceOptions` gains `inputChars?: number` and `answerUsage?: { inputTokens: number; outputTokens: number }`.
+- Modify `frontend/server/runner/metering.ts`: `PAID_TEXT_INPUTS` read by `extraPromptTexts` (:125); `stageEstimate` (:159) skips `paidNoCall` nodes as it skips `actionPassThrough` ones.
+- Create `scripts/runner_paid_fixtures.py` and `frontend/tests/unit/__runner__/paidParity.ts`.
+- Test: `frontend/tests/unit/runner-paid-pricing.unit.spec.ts`.
+
+**Interfaces:**
+```ts
+// paidRates.ts
+interface RateMeta { service: 'fal' | 'replicate'; source: string; read: string; confidence: 'verified' | 'estimate' }
+export type PaidRate =
+  | (RateMeta & { unit: 'per_call', usd: number })
+  | (RateMeta & { unit: 'per_token', inputPerMillion: number, outputPerMillion: number })
+  | (RateMeta & { unit: 'per_input_second', perSecond: number, minSeconds?: number })
+  | (RateMeta & { unit: 'per_output_second', perSecond: number })
+  | (RateMeta & { unit: 'per_thousand_chars', perThousand: number })
+  | (RateMeta & { unit: 'gpu_ceiling', usd: number, note: string })
+export interface PaidCall {
+  endpoint: string
+  tier?: string | null
+  inputTokens?: number; outputTokens?: number
+  inputSeconds?: number; outputSeconds?: number
+  chars?: number
+  inputPixels?: number | null; outputPixels?: number | null
+  fallbacks?: PaidCall[]
+}
+export function paidCallUsd(call: PaidCall): number | null
+
+// paidSettings.ts
+export const PAID_NODE_CLASSES: readonly string[]      // filled by each task
+export type PaidCalls = { steps: { call: PaidCall, times: number }[] } | { refused: string }
+/** The calls the node's settings can make, at their most expensive where an input is linked. `usage`: what the answer reported (token nodes), for the charge. */
+export function paidCalls(classType: string, inputs: NodeInputs, opts: PriceOptions): PaidCalls
+/** True when Python returns before calling anyone, decided from the inputs as sent (rule 8). */
+export function paidNoCall(classType: string, inputs: NodeInputs): boolean
+
+// metering.ts
+export const PAID_TEXT_INPUTS: Readonly<Record<string, readonly string[]>>   // filled by each task
+```
+The node's price is `editStepsUsd`'s rule over `steps` (the first service marked up, fallbacks at cost), turned into credits by `creditsForUsd`.
+
+**`scripts/runner_paid_fixtures.py`:**
+- imports `block_network`, `_node_modules` and the patch list from `scripts/runner_builder_fixtures.py` (unchanged) and calls `block_network()` before any node import;
+- `capture_calls(node_cls, answers: list, **kwargs) -> dict`: patches `_run_prediction`, `fal_refs.run_fal_prediction`, `_upload_public_file`, `_lipsync_hosted_media_url`, `_image_tensor_to_data_url` (→ `IMG:<name>`), `_audio_dict_to_wav_data_url` (→ `WAV:<name>`), `download_url_to_image_tensor`, `download_url_to_video_output`, `_download_url_to_audio_dict`, `save_generation_output`, `save_live_preview`, `save_image_to_input` and aiohttp GETs of JSON links (served from the case); each patched call records `{ provider, endpoint, payload }` and returns the next answer; it returns `{ calls, output, ui }` with `output` as Python returned it (strings verbatim; tensors as the URL they came from);
+- `--group <g>` writes `frontend/tests/unit/fixtures/runner-paid-<g>.json`, sorted keys, stable bytes;
+- group `machinery`: the `pyJson` cases of R3.1.
+
+**`paidParity.ts`:** `runPaidCase(c: PaidCase, o: { families: ReadonlySet<RunnerFamily>; hosted?: boolean })` builds the node's prompt, runs it through the kit with the case's answers, and returns `{ sent: FakeRequest[], values, files, credits }`; `expectCalls(sent, pyCalls)` (pictures compared by input name, `IMG:<name>` ↔ the handed-off file's source).
+
+**Test (`runner-paid-pricing`):**
+- a stand-in class with a per-token card: the hold is `creditsForUsd` of the ceiling; `answerUsage` below it prices below it; above it is capped at the hold;
+- a stand-in pipeline: price = `editStepsUsd` of its steps; a partial price of its first step is ≤ the whole;
+- `paidNoCall` → `stageEstimate` holds nothing;
+- `PAID_TEXT_INPUTS` texts reach `moderate` at the start (typed) and not twice;
+- `GRAPH_NODE_CREDITS` still prices every class no task has moved (the price-graph coverage guard passes).
+
+**Acceptance:** all green; `runner-builders.json` byte-identical; no family added.
+
+---
+
+### Task R3.3: The seven LLM text nodes (family `llm-text`)
+
+**Port:**
+
+| Class | Python | Provider · model | Sent (payload) | Outputs | Pricing basis |
+|---|---|---|---|---|---|
+| ChatLLMNode | `nodes_replicate.py:5584-5637` | Replicate `openai/gpt-5`, `anthropic/claude-4.5-sonnet`, `google/gemini-3-flash` by `model` (:5614-5627) | GPT-5: `{prompt, temperature, max_completion_tokens, system_prompt?}`; Claude: `{prompt, temperature, max_tokens, system_prompt?}`; Gemini: `{prompt, temperature, max_output_tokens, system_instruction?}`; the system key only when `system_prompt` is non-empty (Python truthiness) | slot 0 text: `''.join(str(x))` of a list, or the string, or `str(out or "")`, then `.strip()` (:5629-5637); no ui | tokens: in ≤ UTF-8 bytes of prompt + system; out ≤ `max_tokens` (1–8192, :5603) |
+| ImprovePromptNode | `:5657-5698` | `openai/gpt-5-nano` | `{prompt: idea, system_prompt: _IMPROVE_PROMPT_SYSTEM_BASE.format(kind=target), temperature: 0.7, max_completion_tokens: 200}` (:5648-5654, :5683-5689) | text as Chat; no ui | tokens, out 200 |
+| SummarizeTextNode | `:5774-5808` | `_run_llm` (:5723-5754) over `_SUMMARIZE_MODELS` (:5765): Gemini 3 Flash, GPT-5 nano, Claude 4.5 Haiku | system `"You are a precise summarizer. " + _SUMMARIZE_LENGTHS[length] + …` (:5766-5771, :5802-5806), temperature 0.3, max 400 | text; ui `{text: [result]}`; blank `text` → `""`, ui `{text: [""]}`, no call (:5800-5801) | tokens, out 400 |
+| TranslateTextNode | `:5828-5864` | `_run_llm("Gemini 3 Flash")` | target = `custom_language.strip()` or `target_language` (:5820-5825); system :5858-5862; temperature 0.2; max 2048 | as Summarize; blank → no call | tokens, out 2048 |
+| RewriteToneNode | `:5904-5939` | `_REWRITE_MODELS` (:5875): Claude 4.5 Haiku, Gemini 3 Flash, Claude 4.5 Sonnet | `_TONE_GUIDANCE` (:5889-5901, tones :5876-5888), system :5933-5937; temperature 0.6; max 1024 | as Summarize; blank → no call | tokens, out 1024 |
+| BrainstormIdeasNode | `:5961-6018` | `_run_llm("GPT-5 mini")` | angles `_BRAINSTORM_ANGLES` (:5951-5958); system :5991-5996 with `count` (2–12); temperature 0.9; max 600 | the clean-up loop (:6001-6017: `splitlines`, strip, drop leading `-•*` and `1.`/`1)` markers, first `count` lines, `"\n".join`); ui `{text: [joined]}`; blank → no call | tokens, out 600 |
+| ReasonStepByStepNode | `:6033-6073` | `_REASON_MODELS` (:6030): DeepSeek R1 (OpenAI-shaped, :5718), GPT-5, Claude 4.5 Sonnet | system by `include_reasoning` (:6062-6071); temperature 0.4; max 2048 | as Summarize; blank → no call | tokens, out 2048 |
+
+`_run_llm`'s slug table (`_LLM_MODEL_SLUGS`, :5710-5719) and its three input shapes (:5737-5746) are ported once. The seven endpoints: `openai/gpt-5`, `openai/gpt-5-mini`, `openai/gpt-5-nano`, `anthropic/claude-4.5-sonnet`, `anthropic/claude-4.5-haiku`, `google/gemini-3-flash`, `deepseek-ai/deepseek-r1`. No backup: no fal twin of these models has a saved schema or a rate card.
+
+**Deviations (precedent, not new rulings):** a blank `prompt` (Chat) or `idea` (Improve a prompt) is refused before the hold ("Chat with an LLM needs a question." / "Improve a prompt needs an idea to work on."): Python sends it and pays for an empty answer (the line-up's empty-prompt rows, F8/F13). The four nodes that return `""` for blank text keep Python's behaviour (no call, no charge).
+
+**Files:**
+- Create `frontend/server/runner/generators/llm.ts`: `LLM_MODEL_SLUGS`, `llmInput(model, prompt, { system, temperature, maxTokens })`, the seven builders, `llmText(result)` (the join / `pyStr` / `pyStrip`), `brainstormLines(text, count)`.
+- Modify `frontend/shared/runner/pyText.ts`: `pySplitlines(s)` (Python's `str.splitlines` line breaks: `\n`, `\r`, `\r\n`, `\v`, `\f`, `\x1c`–`\x1e`, `\x85`, ` `, ` `) and `pyIsDigit(ch)` (Unicode `Nd` plus the digit-like characters Python's `str.isdigit` accepts; checked by fixture).
+- Modify `executors.ts` (seven cases), `eligibility.ts` (rows: `family: 'llm-text'`, widgets from the schema with their options and bounds, `valueInputs` on each text input `['text', 'json']`), `shared/runner/values.ts` (`OUTPUT_KINDS` rows `{ 0: 'text' }`), `families.ts` (`llm-text`, `FAMILY_REQUIRES` → `cards`), `validate.ts` (`RUNNER_OUTPUT_CLASSES`: all seven are `is_output_node`), `paidSettings.ts` / `paidRates.ts` (seven token cards), `priceBook.ts` (drop rows :343-349), `metering.ts` (`PAID_TEXT_INPUTS`: Chat `prompt`, `system_prompt`; Improve `idea`; Summarize, Translate, Rewrite `text`, Translate also `custom_language`; Brainstorm `topic`; Reason `question`), `scripts/runner_paid_fixtures.py` (group `llm`).
+- Test: `frontend/tests/unit/runner-paid-llm.unit.spec.ts`.
+
+**Interfaces:** consumes R3.1's value plans and `chargeOf`, R3.2's `paidCalls` (token calls with `inputTokens` = UTF-8 bytes of every text sent, capped per text at `MODERATION_MAX_INPUT_BYTES` in hosted, `server/utils/moderation.ts:38`; `outputTokens` = the max sent), `pyStrip`. Produces `planLlm(ctx: PlanContext): NodePlan` and the seven builders `chatLlmInput(inputs)`, `improvePromptInput(inputs)`, `summarizeInput(inputs)`, `translateInput(inputs)`, `rewriteInput(inputs)`, `brainstormInput(inputs)`, `reasonInput(inputs)`, each `{ slug: string; input: Record<string, unknown> } | { noCall: true }`.
+
+**Pricing.** Hold: the token ceiling above at each endpoint's card (ruling (c)). Charge: the token counts the prediction reports (the saved schema and the live check show where Replicate puts them), through the same card; no counts → the hold.
+
+**Fixtures (`llm`):** every class × every model × blank, spaces-only, one line, 2,000 characters, non-ASCII and emoji text; Chat with and without a system prompt, temperature 0, 1 and 2, max tokens 1 and 8192; Translate with each language and a custom one with spaces around it; every tone and angle; Brainstorm counts 2 and 12. Answers: a token list, a string with surrounding spaces, `null`, `[1, 2.0, true, null]`, a numbered and bulleted list with blank lines, ` ` and `\x85` line breaks, `"１."` (a full-width digit) for the clean-up loop.
+
+**Test:** rule 16. Also: a Text card fed by Summarize shows Python's text; Summarize → Generate an image's `prompt_in` is moderated at the node's turn (R0.5) and refused when blocked; a blank wired text makes no call and releases its hold; the hold for Chat at `max_tokens` 8192 equals the card's ceiling; reuse follows ruling (d).
+
+**Acceptance:** payloads equal Python's on every case; outputs byte-identical; the charge never exceeds the hold.
+
+**Live check (`llm-text`):**
+
+| Call | Settings | Est. cost |
+|---|---|---|
+| Summarize text | Gemini 3 Flash, "Short", 1 sentence in | ≈ $0.001 (badge `:5794`) |
+| Summarize text | GPT-5 nano | ≈ $0.001 |
+| Summarize text | Claude 4.5 Haiku | ≈ $0.001 |
+| Rewrite in a tone | Claude 4.5 Sonnet | ≈ $0.002 (badge `:5924`) |
+| Brainstorm ideas | GPT-5 mini, count 2 | ≈ $0.003 (badge `:5982`) |
+| Chat with an LLM | GPT-5, max tokens 64 | ≈ $0.005 (badge `:5608`) |
+| Think step by step | DeepSeek R1 | ≈ $0.01 (badge `:6053`) |
+
+One call per endpoint, so each token card is checked against a real bill: ≈ $0.023.
+
+---
+
+### Task R3.4: Describe, read and find (family `describe`)
+
+**Port:**
+
+| Class | Python | Provider · model | Sent | Outputs | Pricing basis |
+|---|---|---|---|---|---|
+| DescribeImageNode | `nodes_replicate.py:4865-4896` | Replicate `lucataco/moondream2` | `{image, prompt}` | text, joined and stripped as Chat; no ui | GPU time: `EDIT_RATES['lucataco/moondream2']` ($0.002, estimate, `editRates.ts:214`) |
+| DescribeImageRemoteNode (hidden twin) | `:2154-2195` | same | same (no `model` widget) | same | same |
+| DescribeVideoNode | `:5410-5456` | `google/gemini-2.5-flash`, 30-min wait (:5447) | `{prompt, videos: [video_url]}`; blank `video_url` raises (:5437-5438) | text, stripped | tokens (ruling (s)) |
+| ExtractTextNode | `:5209-5247` | `bytedance/dolphin` | `{file: image, output_format: "markdown_content"}` | list → `"\n".join(str(x))`; dict → `text` or `markdown` or `transcription` or `""`; string; else `""`; then strip (:5237-5246) | GPU time (badge $0.005, `:5225`) |
+| FindObjectsNode | `:5267-5305` | `zsxkib/yolo-world` | `{input_media: image, class_names: query, score_thr: confidence}` | slot 0 **json**: the answer string as it is, else `json.dumps(out)` (:5305) | GPU time (badge $0.005, `:5288`) |
+
+No backups (no same-model twin on fal is carded). A picture is sent as Python sends the first frame of its batch (`_image_tensor_to_data_url`, `:195-211`): the handed-off file of the linked slot.
+
+**Refusals before the hold:** Describe a video with a blank address → "Describe a video needs a link to the video."; an address that isn't `https:` in hosted → ruling (r).
+
+**Files:** create `frontend/server/runner/generators/describe.ts` (`describeImageInput`, `describeVideoInput`, `extractTextInput`, `findObjectsInput`, `extractTextOf(result)`, `findObjectsJson(result, raw)`); modify `executors.ts`, `eligibility.ts` (rows, `imageInputs: ['image']`, `valueInputs` for `prompt` / `query` `['text']`), `values.ts` (`OUTPUT_KINDS`: Describe ×2, Describe a video, Extract text `{ 0: 'text' }`; Find objects `{ 0: 'json' }`), `families.ts`, `validate.ts`, `paidSettings.ts` / `paidRates.ts`, `priceBook.ts` (rows :338-342), `metering.ts` (`PAID_TEXT_INPUTS`: `prompt`, `query`), the script (group `describe`). Test: `runner-paid-describe.unit.spec.ts`.
+
+**Interfaces:** consumes R3.1 (`valuesOf` with `raw`, `pyJsonDumps`), `pictureSourceOf`; produces `planDescribe(ctx): NodePlan`.
+
+**Fixtures (`describe`):** each class with the default prompt, an empty prompt, non-ASCII; Find objects at confidence 0, 0.25 and 1 and a query with spaces and commas; answers for Find objects as a string, a dict with float coordinates written `12.0`, `1e-3`, a list, `null`; Extract text as a list of pages, a dict with each key, a dict with none.
+
+**Test:** rule 16. Also: Find objects → Text card shows Python's exact JSON; a picture from Generate an image (4 channels) is handed off as its file, as the line-up's builders do.
+
+**Acceptance:** requests equal; JSON byte-identical to Python on every recorded answer.
+
+**Live check (`describe`):** Describe an image (default prompt, ≈ $0.002); Extract text (≈ $0.005); Find objects (≈ $0.005); Describe a video on a 3-second public clip (≈ $0.01, badge `:5431`). ≈ $0.022.
+
+---
+
+### Task R3.5: Upscale, enhance, fix faces, restore, remove background (family `image-repair`)
+
+**Port:**
+
+| Class | Python | Provider · model | Sent | Outputs | Pricing basis |
+|---|---|---|---|---|---|
+| UpscaleImageNode | `nodes_replicate.py:4173-4311` | `_UPSCALE_SLUGS` (:4164-4170): `philz1337x/clarity-upscaler`, `philz1337x/crystal-upscaler`, `nightmareai/real-esrgan`, `recraft-ai/recraft-crisp-upscale`, `topazlabs/image-upscale` | per engine, :4265-4306 (Clarity's `seed` only when > 0; Topaz's face fields only with `face_enhance`) | first URL, picture; no ui | already by settings and measured size: `editCalls` (`editSettings.ts:354-392`, `upscaleCall` :327-335) and `EDIT_RATES` (`editRates.ts:186-210`, :223-226) |
+| EnhanceDetailNode | `:4314-4392` | `build_enhance_input` (`replicate_refs.py:387-457`): Clarity at scale 1, Topaz with `upscale_factor "None"`, `fermatresearch/magic-image-refiner` at `"original"` | as `build_enhance_input` | first URL; no ui | already: `enhanceCall` (`editSettings.ts:337-341`) |
+| FixFacesNode | `:4473-4506` | `sczhou/codeformer` | `{image, codeformer_fidelity, background_enhance, face_upsample, upscale}` | first URL; no ui | per call (badge $0.005, `:4491`) |
+| CodeformerRemoteNode (hidden twin) | `:2102-2146` | same | same | first URL; ui `codeformer` | same |
+| RestorePhotoNode | `:4434-4465` | `flux-kontext-apps/restore-image` | `{input_image, safety_tolerance, output_format}` | first URL; ui `restore_photo` | per call (badge $0.04, `:4449`) |
+| RestorePhotoRemoteNode (hidden twin) | `:2063-2094` | same | same | same | same |
+| RemoveBackgroundNode | `:4400-4426` | `851-labs/background-remover` | `{image}` | first URL (RGBA kept); ui `remove_bg` | per call, $0.0004 (verified, `priceBook.ts` `MODEL_COSTS['851-labs/background-remover']`; carded here) |
+| RemoveBackgroundRemoteNode (hidden twin) | `:2029-2055` | same | same | same | same |
+
+No backups: fal's CodeFormer and ESRGAN bill per megapixel or compute-second, a different basis (inventory §1(c) notes), and the others aren't on fal.
+
+**Refusals before the hold:** a picture over `LARGEST_INPUT_PIXELS` (`editSettings.ts:65`) for the size-priced engines, through the existing `measuredInputProblem` (`requestRules.ts`) — already the ComfyUI gate's rule.
+
+**Files:** create `frontend/server/runner/generators/repair.ts` (`upscaleInput(inputs, image)`, `enhanceInput(inputs, image)` — a port of `build_enhance_input` — `fixFacesInput`, `restorePhotoInput`, `removeBackgroundInput`); modify `executors.ts`, `eligibility.ts` (rows with the schema's widgets; the upscalers keep their `model` widget per engine), `families.ts`, `validate.ts` (Remove background, Restore photo and the twins are output nodes), `paidRates.ts` (three per-call cards) and `paidSettings.ts`, `priceBook.ts` (rows :294-299), `metering.ts` (`PAID_TEXT_INPUTS`: Upscale and Enhance `prompt`, `negative_prompt`), the script (group `repair`). Test: `runner-paid-repair.unit.spec.ts`.
+
+**Interfaces:** consumes `measuredInput` (`metering.ts:59`), `editCalls`, R3.1 `take: 'first'`; produces `planRepair(ctx): NodePlan`.
+
+**Fixtures (`repair`):** every engine at default; Clarity seeds 0 and 42, scale 1 and 10; Topaz each factor, face enhance on and off; Crystal each format; Real-ESRGAN face enhance; Enhance each engine at detail 0, 0.4, 1; Fix faces upscale 1 and 4; Restore both formats.
+
+**Test:** rule 16. Also: a 4K picture into Upscale Topaz 6x is refused before the hold; the hosted gate's chained sizing (G1) sizes Upscale's output as input × factor².
+
+**Acceptance:** requests equal; prices unchanged for Upscale and Enhance (the ComfyUI path's figures), new for the three per-call nodes.
+
+**Live check (`image-repair`):** Real-ESRGAN 2× on a 512² picture ($0.002); Recraft Crisp ($0.006); Crystal ≤ 4.4 MP ($0.05); Topaz "None" ($0.08); Clarity at scale 1 (card floor $0.20, estimate — required); Enhance "Diffusion Refine" (floor $0.10, estimate — required); Fix faces (≈ $0.005); Restore (≈ $0.04); Remove background ($0.0004). ≈ $0.48.
+
+---
+
+### Task R3.6: Layers from one call, and outpaint (family `layers`)
+
+**Port:**
+
+| Class | Python | Provider · model | Sent | Outputs | Pricing basis |
+|---|---|---|---|---|---|
+| LayerizeGraphicNode | `nodes_replicate.py:4514-4595` | Replicate `ideogram-ai/layerize` | `{flat_graphic_image, prompt: prompt.strip() (only when non-blank), seed (when > 0, max 0x7FFFFFFF)}` (:4554-4559) | slot 0 picture: the first URL with a picture extension, else the first that isn't the JSON (:4566-4574); slot 1 **json**: the JSON link's body text as it came (30 s timeout); on a fetch failure `json.dumps({"error": "failed to fetch layer data: <why>"})` (:4576-4587); ui `layerize` images plus `text: [layers_json]` when non-empty | per call (badge $0.08, `:4548`) |
+| SeedreamLayerizeNode | `:4719-4774`, `seedream_layerize.py:12-60` | fal `bytedance/seedream/v5/pro/layerize` (no function), 300 s wait | `{prompt: prompt or "", image_url, image_size}` (`image_size` outside `auto`, `auto_1K`, `auto_1.5K`, `auto_2K` becomes `auto`) | each layer downloaded and saved to the **input** folder as `seedream_layer_<n>_.png` (RGBA kept, trunc rule); slot 1 **json** `json.dumps({"source": "seedream", "width": W, "height": H, "layers": [{filename, z_index, box, name, description}]})`; slot 0 the answer's `images[0]`, else the input picture; ui `seedream_layerize` plus `text` when there are layers | per call (badge $0.34, `:4742`); fal's rate read into a card |
+| OutpaintImageNode | `:4789-4857` | Flux Fill: `black-forest-labs/flux-fill-pro` `{image, outpaint: direction, prompt, output_format: "png", safety_tolerance: 6, seed?}`; Bria Expand: `bria/expand-image` `{image, aspect_ratio, prompt?, seed?}` (:4831-4849) | first URL, alpha dropped (`rgb`, :4854-4856); no ui | per call by engine (badge $0.05, `:4823`) |
+
+No backups (none carded). Layerize's error text: the runner's `<why>` is its own plain words, not aiohttp's message — a documented difference on a failure path only.
+
+**Files:** create `frontend/server/runner/generators/layers.ts` (`layerizeInput`, `layerizeUrls(result)`, `seedreamLayerizeInput`, `parseSeedreamLayers(result)` — a port of `seedream_layerize.py:23-60` — `outpaintInput`); modify `executors.ts` (Seedream Layerize is a `pipeline` of one call plus its downloads, so the layers are saved in order with their names), `eligibility.ts` (rows; `imageInputs: ['image']`), `values.ts` (`OUTPUT_KINDS`: Layerize and Seedream `{ 1: 'json' }`), `PICTURE_OUTPUTS` (slot 0), `families.ts`, `validate.ts` (both layerizers are output nodes), `paidRates.ts` / `paidSettings.ts`, `priceBook.ts` (rows :289, :291, :293), `metering.ts` (`PAID_TEXT_INPUTS`: `prompt`), `inputs.ts` (Seedream's saved layers counted as the user's input files), the script (group `layers`). Test: `runner-paid-layers.unit.spec.ts`.
+
+**Interfaces:** consumes R3.1 (`urlsOf`, `rgb`, `pipeline`), `ResultStore.save` with `folder: 'input'` (a new option: the user's input subfolder, `metering.addOutput` owning it; ruling (o)); produces `planLayers(ctx): NodePlan`.
+
+**Fixtures (`layers`):** Layerize with blank and spaced prompts, seeds 0, 1, 2³¹−1; answers with the picture first, the JSON first, no extension, no JSON link, a JSON link that fails. Seedream every `image_size` and a bad one; answers with 2 and 17 layers, a layer without `bounding_box`, a non-dict layer, no `images`. Outpaint every direction and ratio, seeds 0 and 42, an RGBA answer.
+
+**Test:** rule 16. Also: Layerize's `layers_json` feeds a Text card byte-identically; Seedream's layer files are owned by the user in hosted and refused to another user.
+
+**Acceptance:** requests equal; JSON byte-identical; the picture chosen is Python's.
+
+**Live check (`layers`):** Layerize a 512² poster (≈ $0.08); Seedream Layerize at `auto_1K` (≈ $0.34, badge); Outpaint Flux Fill "Make square" (≈ $0.05); Outpaint Bria Expand 1:1 (≈ $0.04, `:4803`). ≈ $0.51.
+
+---
+
+### Task R3.7: Separate background and foreground (family `layers`)
+
+**Port:** `SplitPhotoLayersNode`, `nodes_replicate.py:4614-4711`, a pipeline:
+
+| Call | Python | Provider · model | Sent | When |
+|---|---|---|---|---|
+| `cutout` | :4659-4663 | Replicate `851-labs/background-remover` | `{image, background_type: "rgba", format: "png"}` | always |
+| `map` | :4672-4677 | same | `{image, background_type: "map", format: "png"}` | only when the cutout has no alpha |
+| `fill` | :4688-4698 | `_PHOTO_FILL_SLUGS[background_fill]` (:4608-4611): `zylim0702/remove-object` ("LaMa (fast)") or `bria/eraser` ("Bria Eraser (quality)") | `{image: the RGB of the input (alpha dropped, :4695), mask: PNG data URL}` | always |
+
+- The mask: the cutout's alpha as `round(clamp(a)·255)` (:4669-4670; the identity on an 8-bit PNG's alpha), or the map's channel 0; then, when `mask_grow` > 0, PIL's `MaxFilter(2·mask_grow + 1)` (:4680-4681); saved as an 8-bit greyscale PNG. The runner's `maxFilterL(l, w, h, size)` ports PIL's `RankFilter` max over a square, edges as PIL's fixture shows (PIL expands the image before filtering; the fixture proves the edge rule). The mask and the RGB copy are handed off by `io.handOff` (kept bytes, sha256).
+- Outputs: slot 0 subject (the cutout as downloaded, RGBA kept), slot 1 background (alpha dropped, `rgb`). ui: `{ images: [split_subject file, split_background file], animated: [false] }` in slot order (:4706-4710).
+- Price: hold = cutout + map + fill (the worst case, three calls); charge = the calls made (rule 12). Rate cards: `851-labs/background-remover` (R3.5), the two fill models (read by the task; the node's description quotes "~$0.003 total" for LaMa and "~$0.04" for Bria, `:4629-4630`).
+
+**Files:** create `frontend/server/runner/generators/splitLayers.ts` (`planSplitLayers(ctx): NodePlan`, the mask step); create `frontend/server/runner/pixels/maxFilter.ts` (`maxFilterL`, self-contained, run on the Frame's worker with its Stop checks, as R2's cores are); modify `executors.ts`, `eligibility.ts` (row; `PICTURE_OUTPUTS: { SplitPhotoLayersNode: [0, 1] }`), `validate.ts`, `paidSettings.ts`, `priceBook.ts` (row :292), the script (group `split`, with `MaxFilter` fixtures). Test: `runner-paid-split.unit.spec.ts`.
+
+**Fixtures (`split`):** the three calls in order for both fill engines, `mask_grow` 0, 1, 12 and 50, an RGBA and an RGB input; the mask PNG's pixels (not its bytes: PIL's and sharp's PNG encoders differ) for each case; the no-alpha path (the `map` call); `MaxFilter` alone on 37×23 and 320×200 masks at sizes 3, 25 and 101.
+
+**Test:** rule 16. Also: the mask sent decodes to Python's mask pixels exactly; a fill failure charges the cutout only; a restart after the cutout resumes at the fill; a picture 50 px wide with `mask_grow` 50 matches Python.
+
+**Acceptance:** calls and mask pixels exactly Python's; partial charges as rule 12.
+
+**Live check (`layers`, the same family as R3.6):** Separate with LaMa on a 512² photo (≈ $0.003); with Bria Eraser (≈ $0.04). ≈ $0.045.
+
+---
+
+### Task R3.8: Music and speech (family `audio-gen`)
+
+**Port:**
+
+| Class | Python | Provider · model | Sent | Outputs | Pricing basis |
+|---|---|---|---|---|---|
+| GenerateMusicNode | `nodes_replicate.py:5057-5087` → `MusicGenRemoteNode.execute` (:1722-1737) | Replicate `meta/musicgen` | `{prompt, duration (1–30), model_version, temperature, output_format: "wav", normalization_strategy: "peak", top_p (when > 0), seed (when > 0)}` | slot 0 a sound file (first URL, `.wav`) | GPU time by duration (badge $0.02, `:5078`) |
+| MusicGenRemoteNode (hidden twin) | `:1689-1737` | same | same | same | same |
+| GenerateSpeechNode | `:5094-5126` → `MiniMaxSpeechRemoteNode.execute` (:1818-1836) | `minimax/speech-02-hd` | `{text, voice_id, speed, volume, pitch, sample_rate: 32000, bitrate: 128000, channel: "mono", english_normalization: true, emotion (unless "auto"), language_boost (unless "auto")}` | slot 0 a sound file (first URL) | per thousand characters of `text` (badge $0.30 / 1K, `:5117`); a wired text at its ceiling (the moderation limit in hosted) |
+| MiniMaxSpeechRemoteNode (hidden twin) | `:1783-1836` | same | same | same | same |
+
+- Voices: `_MINIMAX_VOICES` (:1744-1749) plus cloned ids read from `models/voices/*.json` (`_list_cloned_voice_ids`, :1753-1780); a cloned id in hosted follows ruling (j).
+- Python's output is a decoded waveform; the runner's is the sound file. Its readers, until R5.2: the Audio card (`comfy_extras/nodes_audio.py:279-350`) with `source` wired from one of these classes and `export` off shows the file (ruling (t)); Lip-sync a character on sync-3 reading it through that card. Any other reader is left to the engine.
+- No backups (MiniMax Speech and MusicGen aren't carded on fal).
+
+**Files:** create `frontend/server/runner/generators/audioGen.ts` (`musicGenInput`, `speechInput`, `MINIMAX_VOICES`); modify `executors.ts` (media `'audio'`), `eligibility.ts` (rows; the `Audio` row's `linkSources.source` gains `[['GenerateMusicNode', 0], ['GenerateSpeechNode', 0], ['MusicGenRemoteNode', 0], ['MiniMaxSpeechRemoteNode', 0]]` while `audio-gen` is on, and its `mustNotLink` drops `source` for them), `families.ts`, `paidRates.ts` / `paidSettings.ts` (`chars` = Python's `len(text)`, counted in code points), `priceBook.ts` (rows :325-328), `metering.ts` (`PAID_TEXT_INPUTS`: Music `prompt`, Speech `text`), the script (group `audio-gen`). Test: `runner-paid-audio-gen.unit.spec.ts`.
+
+**Interfaces:** consumes R3.1 media `'audio'`; produces `planAudioGen(ctx): NodePlan`.
+
+**Fixtures (`audio-gen`):** Music at durations 1 and 30, each version, top_p 0 and 0.5, seeds 0 and 7; Speech with every emotion and language boost, speed and pitch bounds, a non-ASCII text (character count), a cloned id.
+
+**Test:** rule 16. Also: the Audio card shows the node's file and plays it; export on leaves the card to the engine; Speech's hold for a wired text is the ceiling, its charge the characters sent.
+
+**Acceptance:** requests equal; the sound saved with the answer's extension; priced from the settings sent.
+
+**Live check (`audio-gen`):** Generate music, 1 s, "large" (≈ $0.02, badge); Generate speech, 20 characters (≈ $0.006 at the badge's $0.30 / 1K). ≈ $0.03.
+
+---
+
+### Task R3.9: 3D (family `gen-3d`)
+
+**Port:**
+
+| Class | Python | Provider · model | Sent | Outputs | Pricing basis |
+|---|---|---|---|---|---|
+| Generate3DNode | `nodes_replicate.py:5133-5164` → `Hunyuan3DRemoteNode.execute` (:1876-1894) | Replicate `tencent/hunyuan3d-2`, 30-min wait | `{image, steps, guidance_scale, octree_resolution, remove_background, texture, seed (when > 0)}` | slot 0 **glb** (first URL) | GPU time (badge $0.30, `:5152`) |
+| Hunyuan3DRemoteNode (hidden twin) | `:1844-1894` | same | same | same | same |
+| Hunyuan3DMultiViewNode | `:1902-2021` | by `engine`: `tencent/hunyuan3d-2mv` (:1966-1980), `hyper3d/rodin` (:1982-2003), `firtoz/trellis` (:2005-2021) | Hunyuan: `{front_image, steps, guidance_scale, octree_resolution, remove_background, file_type: "glb", back/left/right_image?, seed?}`; Rodin: `{images: [front, back?, left?, right?], prompt: prompt.strip() or "a full-body character", material: "PBR", mesh_mode: "Quad", quality, geometry_file_format: "glb", tapose, quality_override (when poly > 0), seed % 65536 (when > 0)}`; Trellis: `{images, generate_model: true, generate_color: false, texture_size: 1024, mesh_simplify: 0.95, seed and randomize_seed: false (when > 0)}` | slot 0 **glb**: Trellis's `output.model_file`, else the first URL (`urlsOf`) | GPU time per engine (badge $0.30, `:1951`; the description's "~$0.30–0.60", `:1916`) |
+
+- The GLB is saved as Sailor's own copy (spec ruling 1; ruling (k)): value `{ kind: 'glb', url: '/view?filename=…&subfolder=…&type=output', file }`, read by the Model3D card (`eligibility.ts:649`), 3D Studio's `glb_url` and a Text card (the address as text). The address survives the provider link's expiry.
+- Hunyuan3DMultiViewNode's `front_image` is required; the other views optional (`imageInputs`), `prompt` optional and moderated.
+- No backups for now: fal's `fal-ai/hunyuan3d/v2`, `fal-ai/hyper3d/rodin` and `fal-ai/trellis-2` (`MODEL_COSTS`, `priceBook.ts`) have no saved schema, so it isn't known whether they are the same versions or can carry these settings; a later task may add them under rule 13.
+
+**Files:** create `frontend/server/runner/generators/gen3d.ts` (`hunyuan3dInput`, `multiViewInput(engine, …)`, `trellisGlbUrl(result)`); modify `executors.ts` (media `'glb'`), `eligibility.ts` (rows), `values.ts` (`OUTPUT_KINDS` `{ 0: 'glb' }` for the three), `families.ts`, `validate.ts` (all three are output nodes), `paidRates.ts` / `paidSettings.ts` (one card per engine), `priceBook.ts` (rows :333-335), `metering.ts` (`PAID_TEXT_INPUTS`: Multi-View `prompt`), the script (group `gen-3d`). Test: `runner-paid-3d.unit.spec.ts`.
+
+**Fixtures (`gen-3d`):** each engine with one, two and four views; seeds 0, 1, 65 536 and 0xFFFFFFFF (Rodin's modulo); Rodin blank and spaced prompts, poly 0 and 300 000, every quality; Trellis answers as a dict with `model_file`, a dict without, a list.
+
+**Test:** rule 16. Also: the saved GLB's address is served by `/view` to its owner and refused to another user in hosted; a Model3D card and 3D Studio read it; a 600 MB answer is refused by the download cap after the call and charged (rule 3).
+
+**Acceptance:** requests equal; the value is Sailor's own address.
+
+**Live check (`gen-3d`):** Generate a 3D model at steps 20, octree 128, no texture (≈ $0.30, badge); Multi-View Hunyuan3D-2mv, front only (≈ $0.30); Rodin at "extra-low" (≈ $0.60, the description's top); Trellis front only (≈ $0.30). ≈ $1.50.
+
+---
+
+### Task R3.10: Sound in — transcribe, identify speakers, clone a singing voice, sync lips (family `sound-in`; after R5.1)
+
+Each of these sends a sound Python has decoded and re-encoded as a 16-bit WAV of at most 60 seconds (`_audio_dict_to_wav_data_url`, `nodes_replicate.py:379-421`: the first `int(60 · rate)` samples, `clamp(-1, 1) · 32767` truncated to int16, `pcm_s16le`, mono or stereo by channel count). The runner makes the same samples with R5.1's ffmpeg decode (float32, as `comfy_extras/nodes_audio.py` `load` reads it) and writes its own WAV; parity is on the decoded samples (PyAV's WAV header carries an encoder tag, so the bytes differ). Ruling (l) is whether to wait for R5.1 or send the file as it is.
+
+**Port:**
+
+| Class | Python | Provider · model | Sent | Outputs | Pricing basis |
+|---|---|---|---|---|---|
+| TranscribeAudioNode | `nodes_replicate.py:5024-5050` → `WhisperRemoteNode.execute` (:1662-1681) | fal `fal-ai/wizper` (no function); the WAV uploaded to fal storage (`_lipsync_hosted_media_url`, :2311-2332) | `{audio_url, task: "translate" \| "transcribe", version: "3", language (unless "auto")}` | slot 0 text: `str(result.text or "")`, **not** stripped | per second of the sound sent (≤ 60 s; badge $0.005/min, `:5042`) |
+| WhisperRemoteNode (hidden twin) | `:1631-1681` | same | same | same | same |
+| IdentifySpeakersNode | `:5531-5569` | Replicate `thomasmol/whisper-diarization` | `{file: WAV data URL, num_speakers (when > 0), language (unless "auto")}` | slot 0 **json**: the answer string, else `json.dumps(output)` | per second sent (badge $0.05/min, `:5553`) |
+| CloneSingingVoiceNode | `:5470-5523` | `zsxkib/realistic-voice-cloning` | `{song_input: WAV, rvc_model, pitch_change, pitch_change_all: float(semitones), pitch_detection_algorithm, output_format, custom_rvc_model_download_url (when "CUSTOM" and set)}`; presets `_RVC_PRESET_VOICES` (:5464-5467) | slot 0 a sound file | per second sent (badge $0.02/min, `:5502`); ruling (m) |
+| LipsyncNode | `:4904-4940` | `sync/lipsync-2-pro`, 30-min wait | `{video: video_url as typed, audio: WAV, sync_mode}`; blank `video_url` raises (:4929-4930) | slot 0 video (first URL) | already per measured second: `clipSettings.ts:508-514`, `CLIP_RATES['sync/lipsync-2-pro']` $0.08325/s (`clipRates.ts:109-112`) |
+| LipsyncRemoteNode (hidden twin) | `:2203-2256` | same | same | same | same |
+
+- Sources: an Audio card holding a file (the sync-3 machinery, `mediaInputs.ts`), and after R5.2 any runner sound. Measured before the hold (`nodeMedia.ts` gains a `'sound-in'` kind); a sound longer than 60 s is sent cut to 60 s, as Python does, and priced at 60 s.
+- Hosted: the Audio card's file and a `/view` video link must be the user's own (rule 11); ruling (r) for typed addresses.
+
+**Files:** create `frontend/server/runner/generators/soundIn.ts` (`wizperInput`, `diarizationInput`, `rvcInput`, `lipsync2ProInput`), `frontend/server/runner/soundWav.ts` (`pythonWav(file): Promise<{ wav: Uint8Array; seconds: number }>`, on R5.1's `decodeAudio`); modify `executors.ts`, `eligibility.ts`, `values.ts` (Transcribe ×2 `{ 0: 'text' }`, Identify `{ 0: 'json' }`), `families.ts`, `nodeMedia.ts`, `paidRates.ts` / `paidSettings.ts`, `priceBook.ts` (rows :323-324, :329-330), `metering.ts` (`PAID_TEXT_INPUTS`: none but the RVC URL is not text), the script (group `sound-in`; Python's WAV samples recorded). Test: `runner-paid-sound-in.unit.spec.ts`.
+
+**Fixtures (`sound-in`):** 3 s mono and stereo clips at 16, 44.1 and 48 kHz, a 75 s clip (cut at 60 s), a clip with samples beyond ±1; each class's settings across their options; wizper answers with `text` missing, `null`, surrounding spaces.
+
+**Test:** rule 16. Also: the WAV's samples equal Python's exactly; a 75 s clip is priced at 60 s; Transcribe's text keeps its spaces (Python doesn't strip).
+
+**Acceptance:** requests equal (sound compared by samples); outputs byte-identical.
+
+**Live check (`sound-in`):** Transcribe 10 s (≈ $0.001); Identify speakers 10 s (≈ $0.01); Clone a singing voice 10 s, preset "Guitar" (≈ $0.004); Sync lips to audio 2 s ($0.17). ≈ $0.19.
+
+---
+
+### Task R3.11: Film a shot — the preset path (family `film-shot`)
+
+Already taken (commit 729060504, `eligibility.ts:1186-1211`): a shot-directed Film a shot (`__shot_directed` in `model_options`) on Seedance 2.0, Veo 3.1, Veo 3.1 Fast, and Kling 3 with `replicate-video`. This task takes the rest: a Film a shot whose prompt the node writes from a preset.
+
+**Port:** `FilmShotNode`, `nodes_replicate.py:4016-4152`, and `comfy_api_nodes/shot_presets.py`:
+- the 28 presets (`PRESETS`, :38-189), the override options (`SIZE_OPTIONS` … `COMPOSITION_OPTIONS`, :199-231, `AUTO = "auto (preset)"`, :20; default preset `"push-in"`, :22);
+- `resolve_recipe` (:236-247: an unknown preset falls back to the default; an override that isn't `AUTO` replaces the preset's field);
+- `dialect_for_model` (:307-313: `veo*` → veo, `hailuo*` → hailuo, else standard) and `build_shot_phrase` (:289-304, the three dialects; `_hailuo_brackets` :276-282 over `_HAILUO_COMMANDS` :251-273; `_cap` :285-286);
+- `full_prompt = f"{shot_phrase} {prompt.strip()}".strip()` unless shot-directed (:4124-4134); `model_options` JSON (a bad or non-object one is `{}`, :4110-4115), `__shot_directed` popped, local `/view` refs resolved (`_resolve_local_refs`, :3812-3826; the runner's `shotRefs.ts`);
+- `fabric-1.0` refused (:4098-4102) and an image-to-video-only model without `image` refused (:4104-4108), both before the hold: "Film a shot can't use a lip-sync model. Pick a camera model." and "This model needs a first frame. Connect a picture to Film a shot.";
+- the request is then exactly Generate a video's for that model (`planVideoGeneration`, `executors.ts`), so its backups and checks are Generate a video's.
+
+Taken on every video model the runner films for Generate a video, each under that model's own family as well as `film-shot`. Pricing already exists (`FilmShotNode` is model-priced, `nodePrice.ts:79`); the video rate cards are the line-up's.
+
+**Files:** create `frontend/shared/runner/shotPresets.ts` (`SHOT_PRESETS`, the option lists, `resolveShotRecipe`, `shotDialectForModel`, `buildShotPhrase`; shared so the canvas can preview the phrase later); modify `eligibility.ts` (`filmShotTaken` :1205: a non-directed shot is taken while `film-shot` is on and the model's own rule allows it; the preset and overrides are widgets checked against the option lists), `executors.ts` (`FilmShotNode` case :611: the phrase), `families.ts`, the script (group `film-shot`). Test: `runner-paid-film-shot.unit.spec.ts`.
+
+**Fixtures (`film-shot`):** every preset × three dialects (a Veo, a Hailuo and a standard model) with blank and spaced prompts; each override on its own and all five at once; an unknown preset; `model_options` bad JSON, a list, `__shot_directed: false`; `capture_first_call` on FilmShotNode for every model in the node's list, with and without `image`.
+
+**Test:** rule 16. Also: the shot-directed cases of `runner-film-shot.unit.spec.ts` are unchanged; with `film-shot` off a preset shot stays with the engine.
+
+**Acceptance:** the phrase and the request equal Python's on every case.
+
+**Live check (`film-shot`):** one preset shot on the cheapest model the node offers, e.g. PixVerse v6 360p silent 5 s on fal (5 × $0.025 = $0.125, `videoRates.ts:299-303`). ≈ $0.13.
+
+---
+
+### Task R3.12: Text effect, sketch to image, face references (family `image-extras`)
+
+**Port:**
+
+| Class | Python | Provider · model | Sent | Outputs | Pricing basis |
+|---|---|---|---|---|---|
+| TextEffectNode | `nodes_replicate.py:3691-3762`, `text_effects.py:1-244` | generate: Replicate `ideogram-ai/ideogram-v3-turbo`; restyle (a picture wired): `black-forest-labs/flux-kontext-pro` | generate `{prompt: build_prompt(effect, text), aspect_ratio: aspect_ok(ar), magic_prompt_option: "Off", seed?}`; restyle `{prompt: build_edit_prompt(effect, text, freedom), input_image, aspect_ratio: edit_aspect(ar), output_format: "png", seed?}` (`build_text_effect_request`, :200-244) | first URL; ui `text_effect` | per call by path (badge $0.04, `:3738`) |
+| SketchToImageNode | `:5171-5201` | `google/nano-banana` | `{prompt, image_input: [image]}` | first URL; no ui | per call: `EDIT_RATES['google/nano-banana']` $0.039 (verified, `editRates.ts:161`) |
+| ConsistentFaceNode | `:5313-5353` | `ideogram-ai/ideogram-character` | `{prompt, character_reference_image, aspect_ratio, seed (when > 0)}` | first URL; no ui | per call ($0.08 estimate, `MODEL_COSTS['ideogram-ai/ideogram-character']`) |
+
+- Text effect's catalogue: the 16 effects (`EFFECTS`, `text_effects.py:61-118`), `build_prompt` (blank text → `"TEXT"`, unknown effect → the default), `_preserve_clause` (the freedom bands 0.12 / 0.45 / 0.78), `aspect_ok`, `edit_aspect`, `MATCH_INPUT_AR = "Match input"`. Generate mode with blank text is refused before the hold with Python's words, "Enter some text to render." (`text_effects.py:236`).
+- Replicate's Ideogram V3 takes a seed only up to 2³¹−1 (`twins.ts` RUNNER_ROUTES reason for `image:ideogram-v3-*`); the node's seed goes to 0xFFFFFFFF, so Python sends a seed Replicate refuses after the hold. The runner refuses it first: "Text effect takes a seed up to 2147483647. Pick a smaller one." (precedent: refuse what the provider would refuse).
+- No backups now: fal's `fal-ai/ideogram/v3` and `fal-ai/flux-pro/kontext` are the same models, but Replicate's own prices for these slugs aren't carded, so the backup rule can't be checked; a later task adds them.
+
+**Files:** create `frontend/server/runner/generators/textEffects.ts` (the catalogue and builders, ported line for line), `frontend/server/runner/generators/imageExtras.ts` (`sketchInput`, `consistentFaceInput`); modify `executors.ts`, `eligibility.ts` (rows; `imageInputs`), `families.ts`, `paidRates.ts` / `paidSettings.ts` (Ideogram V3 Turbo and Kontext Pro on Replicate, Ideogram Character), `priceBook.ts` (rows :287-288, :290), `metering.ts` (`PAID_TEXT_INPUTS`: Text effect `text`, the others `prompt`), the script (group `image-extras`). Test: `runner-paid-image-extras.unit.spec.ts`.
+
+**Fixtures (`image-extras`):** every effect × both paths × freedom 0, 0.12, 0.45, 0.78, 1 and none; every ratio in both paths; seeds 0, 42, 2³¹−1, 2³¹; Sketch and Face with blank and non-ASCII prompts, every ratio.
+
+**Test:** rule 16. Also: the gallery catalogue (`app/data/text-effects.ts`) has the same ids as the port.
+
+**Acceptance:** requests equal on every case.
+
+**Live check (`image-extras`):** Text effect generate "HELLO" 1:1 (≈ $0.03, fal's carded figure for the same model as a stand-in); restyle a 512² word picture (≈ $0.04); Sketch to image ($0.039); Face references 1:1 ($0.08, estimate — required). ≈ $0.19.
+
+---
+
+### Task R3.13: Flux Dev + LoRA and Flux Dev + LoRAs (family `lora`)
+
+**Port:**
+
+| Class | Python | Provider · model | Sent | Outputs | Pricing basis |
+|---|---|---|---|---|---|
+| FluxLoRARemoteNode | `nodes_replicate.py:480-665` | the user's trained model run directly (`resolve_flux_lora_plan`, `replicate_refs.py:233-249`), else `black-forest-labs/flux-dev-lora` | `{prompt, aspect_ratio, megapixels, num_inference_steps, num_outputs: 1, output_format: "png", disable_safety_checker: false, seed?}`; image-to-image adds `{image, prompt_strength}`; trained model: `guidance_scale`, `lora_scale`; flux-dev-lora: `guidance`, and `lora_weights` + `lora_scale` when a ref resolved (:618-656) | first URL, alpha dropped; ui `flux_lora` | per call: `EDIT_RATES['black-forest-labs/flux-dev-lora']` $0.04 (estimate, `editRates.ts:219`); the LoRA category (`LORA_RENDER_CREDITS`, `priceBook.ts:175`) |
+| FluxMultiLoRARemoteNode | `:678-977` | `lucataco/flux-dev-multi-lora` | `{prompt (prompt_in folded ahead, style_in prepended, :883-887), aspect_ratio, num_inference_steps, guidance_scale, hf_loras, lora_scales, num_outputs: 1, output_format: "png", disable_safety_checker: false, seed?}` + `{image, prompt_strength}` | first URL, alpha dropped; ui `flux_multilora` | per call × 2 (the reload retry, ruling (g)) |
+
+- LoRA resolution: `_read_lora_sidecar` (`replicate_refs.py:95-111`), `_resolve_trained_model` (:114-132), `_is_replicate_model_ref` (:135-150), `_bare_owner_model` (:153-157), `_resolve_lora_url` (:160-174), `_resolve_lora_weights_url` (:177-193), `_replicate_model_to_lora_ref` (:196-206), `_normalize_lora_ref` (:209-230), `_multilora_collect` (:517-540), and `_autodetect_huggingface` (`nodes_replicate.py:162-192`, ruling (h)).
+- Flux Dev + LoRAs' reload guard: the order is reversed on every other call with two or more LoRAs (a process-wide toggle, :927-931; the runner keeps its own, ruling (g)); after the answer, if its logs lack `"Downloading LoRA weights"`, it calls once more with the order flipped (:955-968). That is a `pipeline` of one or two calls.
+- `prompt_in` and `style_in` take wired text (R1.2's pattern: `valueInputs: { prompt_in: ['text'], style_in: ['text'] }`), `_fold_prompt_in` (:113-117) ported.
+- Hosted: ruling (i).
+- No backups (fal's `fal-ai/flux-lora` is another service's LoRA loader, priced per megapixel, `MODEL_COSTS`).
+
+**Files:** create `frontend/server/runner/generators/lora.ts` (the resolution functions, `fluxLoraInput`, `fluxMultiLoraInput`, `foldPromptIn`), `frontend/server/runner/loraFiles.ts` (reads a sidecar from `models/loras/` by name, refuses a path outside it, hosted ownership per ruling (i)); modify `executors.ts`, `eligibility.ts` (rows; `lora_name` / `lora_a`…`lora_d` checked against the LoRA list the canvas sends), `families.ts`, `inputs.ts` (LoRA sidecars named by widgets), `paidSettings.ts`, `priceBook.ts` (rows :272-273), `metering.ts` (`PAID_TEXT_INPUTS`: `prompt`, and the wired `prompt_in` / `style_in` at the node's turn), the script (group `lora`, with fixture sidecars in a temporary `models/loras/`). Test: `runner-paid-lora.unit.spec.ts`.
+
+**Fixtures (`lora`):** a sidecar with `replicate_model` (with and without `:version`), one with `replicate_url` only, none, a broken JSON; `lora_url` as a trained ref, an `https://huggingface.co/…` URL, `hf.co/…`, a bare `owner/model`, a `.safetensors` URL; image-to-image on and off; seeds 0 and 42; Flux Dev + LoRAs with 0, 1, 2 and 4 slots, a repeated LoRA (collapsed to its highest scale), `prompt_in` and `style_in` blank and set; answers whose logs have and lack the marker.
+
+**Test:** rule 16. Also: with the marker missing, the second call is sent with the order flipped and charged; with it present, one call; the rotation alternates across two runs in one process.
+
+**Acceptance:** requests equal on every case (with the network blocked, as the fixtures run: the HuggingFace look-up's offline branch).
+
+**Live check (`lora`):** Flux Dev + LoRA with a public HuggingFace LoRA URL, 0.25 MP (≈ $0.04); with a trained model of the user's (≈ $0.04); Flux Dev + LoRAs with two public LoRAs (≈ $0.04, ≈ $0.08 if the retry fires). ≈ $0.16.
+
+---
+
+### Task R3.14: Restyle an Image · Style LoRA (family `lora`)
+
+**Port:** `RestyleWithLoRANode`, `nodes_replicate.py:3234-3432`, a pipeline whose calls are already priced (`editSteps`, `editSettings.ts:557-567`; `RESTYLE_LORA_NB_RETRIES = 2`, :547):
+
+| Call | Python | Provider · model | Sent |
+|---|---|---|---|
+| `describe` | :3328-3345 | Replicate `lucataco/moondream2` | `{image: content, prompt: describe_prompt}` (the old default `"Describe this image in detail."` becomes `_RESTYLE_DESCRIBE_PROMPT`, :337-341, :3328-3329) |
+| `stylize` | :3347-3386 | the LoRA plan (R3.13's `resolve_flux_lora_plan`): the trained model or `black-forest-labs/flux-dev-lora` | `{prompt: build_flux_style_prompt(trigger, sidecar_aesthetic(sidecar), caption) (replicate_refs.py:460-514), image: content, prompt_strength, num_inference_steps, num_outputs: 1, output_format: "png", disable_safety_checker: false, seed: int(seed)}` + guidance / LoRA fields as R3.13 |
+| `classify-ref` | `_classify_image_style` (:344-376) | `lucataco/moondream2` | `{image: style_url, prompt: <the classify text, :357-365>}`; any failure → `"photo"`; `classify_style_answer` (`replicate_refs.py:331-348`) |
+| `nb-1` … `nb-3` | :3401-3423 | Nano Banana 2 edit: fal `fal-ai/nano-banana-2/edit` first, as Python's `_run_nano_banana_edit` (:1165-1223) | `[content, style_url]`, `build_restyle_instruction(structure_strength, extra_style_direction)` (`replicate_refs.py:351-378`, `+ RESTYLE_ANTIPHOTO_RETRY` :315 from the second attempt), resolution, output format, seed `(seed + attempt) & 0xFFFFFFFF` |
+| `classify-1` … | :3420 | `lucataco/moondream2` | each NB answer, only for an illustration target |
+
+- `restyle_style_strength_to_knobs` (`replicate_refs.py:294-312`) gives the structure strength and the Flux prompt strength. A caption that comes back empty is `"a high quality image"` (:3344-3345). A photo target takes the first NB answer; an illustration target stops at the first answer still classified an illustration, else the Flux picture is the result (:3425). Alpha dropped; ui `restyle_lora`.
+- The stylize answer is handed to NB by its provider link (Python does, :3380-3383); the runner hands off its own kept copy instead (the hand-off rule: never a provider link that can expire), the same picture.
+- NB step: fal first, no backup — Replicate's Nano Banana 2 takes no seed (`twins.ts` reason for `image:nano-banana-2`), and this node's seeds are its promise of repeatable results. Python's middle step (fal Nano Banana Pro) is not sent; its price stays covered (`editSteps` prices the chain).
+- Partial charges per call (rule 12): e.g. a failure in `nb-2` charges describe, stylize, classify-ref, nb-1 and classify-1.
+
+**Files:** create `frontend/server/runner/generators/restyleLora.ts` (`planRestyleLora(ctx): NodePlan`, the ported helpers `buildFluxStylePrompt`, `sidecarAesthetic`, `aestheticToKeywords`, `classifyStyleAnswer`, `restyleStyleStrengthToKnobs`); modify `executors.ts`, `eligibility.ts` (row), `families.ts`, `validate.ts` (output node), `metering.ts` (`PAID_TEXT_INPUTS`: `describe_prompt`, `extra_style_direction`), the script (group `restyle-lora`, answers scripted for each branch). Test: `runner-paid-restyle-lora.unit.spec.ts`.
+
+**Fixtures (`restyle-lora`):** style strength 0, 0.5, 1 with flux strength 0 and 0.7; a trained-model sidecar and a URL LoRA; photo target; illustration target that holds on the first, the third, and never; a classifier that fails; an empty caption; seeds 0 and 0xFFFFFFFF (the mask on the NB seed); each resolution and format.
+
+**Test:** rule 16 (every call in order equals Python's). Also: the partial charges above; a restart between `nb-1` and `classify-1` resumes without re-sending.
+
+**Acceptance:** call sequences equal Python's for every branch; the charge is the calls made, never above the hold.
+
+**Live check (`lora`, with R3.13):** one photo-target restyle at 1K (describe + stylize + classify + one NB: ≈ $0.002 + $0.04 + $0.002 + $0.08 = $0.124); one illustration target (up to ≈ $0.29). ≈ $0.29 budgeted.
+
+---
+
+### Task R3.15: Pose Mannequin and Lens · 3D Reframe (family `nano-extras`)
+
+**Port:**
+
+| Class | Python | Provider · model | Sent | Outputs | Pricing basis |
+|---|---|---|---|---|---|
+| LensReframe | `comfy_extras/nodes_lens_reframe.py:30-83` | Replicate `google/nano-banana-2` | `{prompt: reframe_instruction(source, target, strength, custom_focal) (_lenses.py:65-90), image_input: [image], resolution: "1K", output_format: "png"}` | first URL; ui `reframe` | already: `editSettings.ts:271` (`google/nano-banana-2` 1K, $0.067 verified, `editRates.ts:137-140`) |
+| PoseMannequin | `comfy_extras/nodes_pose_mannequin.py:54-142` | `google/nano-banana-2` | `{prompt: pose_instruction(source, prompt, pose_prompt) (_pose_prompts.py:50-68), image_input: [character, cond or pose_image], resolution: "1K", output_format: "png"}` | first URL; ui `pose` (a call); the baked result or the character as a live preview (no call) | NB2 1K as Lens reframe for a call; nothing for the no-call branches (ruling (p)) |
+
+- Pose Mannequin's branches (:115-140): `image` mode with both pictures → call; `prompt` mode with a non-blank `pose_prompt` → call; mannequin mode: a readable `result_image` is the result (no call); else `pose_cond_image` or `mannequin_image` with the character → call; otherwise the character passes through (no call). The baked files are loaded as Python's `_load_input_image` does (:35-45: EXIF turned, RGB), which is R1.3's `rgbTurnedPng` (`pictures/pythonView.ts:105`); the no-call branches' ui is a live preview of that picture (unique for the baked result, :130).
+- Lens reframe: only an `image`-wired node is taken (Python's blank 16×16 path, :61-63, stays with the engine).
+- Backup: fal `fal-ai/nano-banana-2/edit` via `nanoBananaOnFal` (`twins.ts:599`), as the nano actions have it (Replicate first, fal the backup at cost, `RUNNER_ROUTES` rows `LensReframe` and `PoseMannequin`); the price already covers it for Lens reframe (the nano-action call shape).
+- Hosted: the three baked file names are the user's own (`collectInputFiles`), checked at the start of the take (`cardPictureFiles` rule).
+
+**Files:** create `frontend/server/runner/generators/nanoExtras.ts` (`reframeInstruction`, `LENSES` (ported from `_lenses.py:9-39`), `poseInstruction`, `posePlanBranch(inputs)`); modify `executors.ts`, `eligibility.ts` (rows; `imageInputs`; the mode widget), `families.ts`, `validate.ts` (both output nodes), `inputs.ts`, `paidSettings.ts` (`paidNoCall` for Pose Mannequin; `editSettings.ts` gains `PoseMannequin: nanoAction`), `priceBook.ts` (row :352), `metering.ts` (`PAID_TEXT_INPUTS`: Pose `prompt`, `pose_prompt`), `twins.ts` (two rows), the script (group `nano-extras`). Test: `runner-paid-nano-extras.unit.spec.ts`.
+
+**Fixtures (`nano-extras`):** every lens pair including Custom with focal 10 and 300, strength 0, 1, 1.5; every Pose branch, blank and spaced prompts and pose prompts, a baked file with EXIF orientation 6, a missing baked file.
+
+**Test:** rule 16. Also: a baked result makes no call and no charge; the fal backup sends the same prompt and pictures.
+
+**Acceptance:** requests equal; no-call branches free.
+
+**Live check (`nano-extras`):** Lens reframe 50 → 85 mm on Replicate ($0.067); Pose Mannequin prompt mode ($0.067); the fal backup once with `NUXT_RUNNER_BACKUP=on` and Replicate forced off ($0.08). ≈ $0.21.
+
+---
+
+### Task R3.16: Turntable, front view only (family `turntable`)
+
+**Port:** `TurntableNode`, `comfy_extras/nodes_turntable.py:23-99`, path A (:70-78): no right, back or left view wired → one call to Luma Ray 2 720p through the video table: `spec.build_input(simple_spin_instruction(direction, instructions), "1:1", 5, 0, image, None, {"loop": True})` → `_b_luma_ray_2_720p` (`video_models.py:432-443`) → Replicate `luma/ray-2-720p` `{prompt, aspect_ratio: "1:1", duration: 5, loop: true, start_image_url}`. Prompts: `_turntable_prompts.py:5-26` (`_SPIN`, `_append`). Output: a video (first URL); Python returns no ui.
+
+- Views wired → left to the engine until R3.17.
+- Price: `videoPriceUsd('luma-ray-2-720p', 5 s)` = 5 × $0.18 = $0.90 (`videoRates.ts:250-253`) → 135 credits, against the flat 75 today (`priceBook.ts:353`; ruling (b)).
+- No backup (Luma Ray 2 is hidden; `RUNNER_ROUTES['video:luma-ray-2-720p']` has none).
+
+**Files:** create `frontend/server/runner/generators/turntable.ts` (`simpleSpinInstruction`, `segmentInstruction`, `planSegments` (a port of `_turntable_plan.py:10-28`, used by R3.17)); modify `executors.ts` (reuses `planVideoGeneration`'s Luma builder), `eligibility.ts` (row: `mustNotLink: ['right_reference', 'back_reference', 'left_reference']` until R3.17), `families.ts`, `validate.ts`, `paidSettings.ts` (the path's video call), `priceBook.ts` (row :353), `metering.ts` (`PAID_TEXT_INPUTS`: `instructions`), the script (group `turntable`). Test: `runner-paid-turntable.unit.spec.ts`.
+
+**Fixtures (`turntable`):** both directions, blank, spaced and set instructions; `plan_segments` for every subset of views and both directions (for R3.17).
+
+**Test:** rule 16.
+
+**Acceptance:** request equal; priced 135.
+
+**Live check (`turntable`):** one front-only spin ($0.90).
+
+---
+
+### Task R3.17: Turntable with views (family `turntable`; after R5.1)
+
+**Port:** path B (`nodes_turntable.py:80-97`): `plan_segments(extra, direction)` arcs; for each, Seedance 2.0 through the video table (`video_models.py:563-570`, `_b_seedance_2_0` :286-310): fal `bytedance/seedance-2.0`, function "firstLast" (`_fal_fn_for_input`, `nodes_replicate.py:3829-3838`), `{prompt: segment_instruction(degrees, direction, instructions), duration: "5", resolution: "720p", image_url: <start view>, end_image_url: <end view>}`; then `stitch_clips` (`_turntable_stitch.py:15-61`): every clip after the first drops its first frame; output H.264 `yuv420p`, CRF 20, preset veryfast, at the first clip's size and frame rate, frames numbered in the output's own time base.
+
+- A `pipeline` of 2–4 calls (`seg-1` …), then the stitch on R5.1's `encodeVideo`.
+- Parity: the frame count, frame rate and duration equal Python's; decoded frames within the lossy tolerance the ledger ruled (≤ 2/255 mean, ≤ 8/255 max); the concatenation order and dropped frames exact.
+- Price: segments × 5 s × $0.3034 at 720p (`videoRates.ts:125-129`): 2 segments $3.03, 4 segments $6.07 (ruling (b)). Partial charges per segment (rule 12).
+- No backup (Seedance 2.0 has none, `RUNNER_ROUTES['video:seedance-2.0']`).
+
+**Files:** modify `turntable.ts` (the pipeline), `eligibility.ts` (drop the `mustNotLink`), `paidSettings.ts`; create `frontend/server/runner/turntableStitch.ts` (`stitchClips(files): Promise<Uint8Array>` on R5.1); the script (group `turntable-views`, clips decoded to frame hashes). Test: `runner-paid-turntable-views.unit.spec.ts`.
+
+**Test:** rule 16. Also: a failure in segment 3 charges segments 1–2; the stitched clip's frame count is Σ frames − (segments − 1).
+
+**Acceptance:** requests equal; stitch parity as above.
+
+**Live check (`turntable`):** front + back (2 segments, $3.03).
+
+---
+
+### Task R3.18: Controller check, fixture-level and in the browser (not delegated)
+
+- [ ] Real routes and engine, fake ledger, hosted mode, `NUXT_RUNNER_FAMILIES=cards,llm-text,describe,image-repair,layers,audio-gen,gen-3d,film-shot,image-extras,lora,nano-extras,turntable` (plus `sound-in` after R5.1), no provider keys, the fake providers answering from the fixtures:
+  - Text → Summarize text → Generate an image's `prompt_in` → Image card;
+  - Image card → Describe an image → Text card;
+  - LoadImage → Separate background and foreground → Frame (both layers);
+  - Image card → Upscale (Real-ESRGAN) → Remove background → Save image;
+  - Generate music → Audio card;
+  - Image card → Generate a 3D model → Model3D card;
+  - Image card → Flux Dev + LoRAs → Image card;
+  - Image card → Restyle an Image · Style LoRA (illustration branch, second attempt holds);
+  - Pose Mannequin with a baked result (free).
+
+  For each: the requests equal the fixtures, every value and file is Python's, each hold is the ceiling and each charge `priceNode`'s figure for what ran, never above the hold.
+- [ ] A failure injected mid-pipeline charges the finished calls only; a restart mid-pipeline sends no call twice.
+- [ ] With every R3 family off, the needs-engine list over every saved project is identical to before R3.1; every `runner-*.unit.spec.ts` green unchanged; the ComfyUI path's prices differ only where a task moved a class (listed with old and new credits).
+- [ ] The live paid checks (each task's list), with the user's go, `NUXT_RUNNER_BACKUP=off` except the backup checks; the measured prices recorded with source and date; an estimate card that the bill contradicts is corrected before switch-on.
+- [ ] The browser check on the shared :3002 server (the controller's), families on in the local `.env`: run a saved project with an LLM node and a 3D node with ComfyUI stopped; the Text card and the 3D viewer show the results; the badge shows the ceiling and the run's charge the calculation.
+- [ ] The full unit suite (or every area R3 touched) green with the keys unset; the typecheck clean; `runner-builders.json` unchanged.
+
+Record the results in `.superpowers/sdd/2026-09-26-engine-free-step3/progress.md` and `docs/STATE.md`. The R3 families stay off in hosted until the user says otherwise.
+
+### Controller rulings needed before R3 is built
+
+- **(a) Prices for models Sailor hasn't priced yet.** Almost every R3 node is charged today from the rough "about $x" figure on its own badge (`GRAPH_NODE_CREDITS`), not from the provider's real price. The plan gives each model a proper price read from its provider's page, moves both paths (runner and ComfyUI) onto it, and keeps a family off until its live check confirms the price. *Recommend:* yes. *Cost:* some ComfyUI-path prices change (a few up, like Turntable; some down); a model whose page gives no clear price waits for a measured call.
+- **(b) Turntable is priced below cost today.** The flat 75 credits assume $0.50; the front-only spin costs $0.90 (Luma Ray 2, 5 s × $0.18), and with extra views $3.03–$6.07 (Seedance 720p, 5 s per arc). *Recommend:* price it by what it sends, on both paths, now (135 credits front-only; 456–911 with views). *Cost:* the node gets much dearer with views; the alternative keeps losing money on every run.
+- **(c) The hold and charge for text models priced by the word (tokens).** Sailor can't know in advance how long the model's answer will be. *Recommend:* hold for the most it could cost — the text sent counted generously (one token per byte, at most the 32,768-byte moderation limit per text in hosted) plus the node's maximum answer length — then charge what the provider reports it used, never more than the hold; if it reports nothing, charge the hold. *Cost:* the up-front hold can be 10–20× the final charge (e.g. Chat with GPT-5 at 8,192 tokens); a user near zero credits may be refused a cheap question. The alternative, a flat per-call price, overcharges short answers or loses on long ones.
+- **(d) Text nodes and repeat runs.** ComfyUI reuses a node's last answer when nothing about it changed; Sailor's runner only reuses results that carry a seed, and these text nodes have none. *Recommend:* give back the last answer when the request is byte-for-byte the same (as ComfyUI does), free. *Cost:* someone who wants a fresh answer to the same question has to change something (ComfyUI users already do); the alternative charges for every repeat.
+- **(e) "Describe nodes sharing a call".** The outline expected describe nodes to share one call; in Python they never do — each node makes its own call, and the only hidden describe step is inside Restyle with a style LoRA. *Recommend:* one call per node, as Python. *Cost:* none (two identical Describe nodes in one run are charged twice, as today).
+- **(f) Charging for part of a node.** A node that makes several calls (Separate background and foreground, Flux Dev + LoRAs' retry, Restyle with a style LoRA, Turntable with views) may fail after some calls were made and paid for. The ComfyUI path charges such a node nothing (it only charges whole nodes that finished). *Recommend:* the runner charges the calls that finished, from the same price calculation and never above the hold — the spirit of your 09-26 "charge the nodes that finished". *Cost:* the two paths charge differently for a half-finished node; the alternative leaves Sailor paying for those calls.
+- **(g) Flux Dev + LoRAs' second call.** Replicate's shared multi-LoRA model sometimes skips loading the LoRAs; Python spots this in the logs and quietly calls again (paid), and it flips the LoRA order on every other call using a counter shared across the whole Python process. *Recommend:* keep the retry, hold for two calls, charge the calls made; keep the runner's own order counter (it can't match Python's). *Cost:* the hold doubles (8 → about 16 credits); runs occasionally cost twice. The alternative drops the retry and sometimes returns a picture without the LoRA.
+- **(h) The HuggingFace look-up.** For a bare "owner/model" LoRA address, Python first asks huggingface.co whether that model exists and, if so, sends it as a HuggingFace address. *Recommend:* the runner makes the same look-up through its safe fetcher (8-second limit, as Python). *Cost:* one outside request per such run; without it, those LoRAs would be read as Replicate models and fail.
+- **(i) LoRA files in hosted.** Trained LoRAs live in one shared `models/loras/` folder with no owner, and a trained-model address like "finnyjules/…" runs a private model under Sailor's own Replicate account. *Recommend:* in hosted, refuse LoRAs picked by name and private trained-model addresses until LoRAs are stored per user; allow public LoRA links (HuggingFace, CivitAI, `.safetensors`). Local unchanged. *Cost:* hosted users can't use trained LoRAs yet; the alternative lets any user run anyone's LoRA and Sailor's private models on Sailor's bill.
+- **(j) Cloned voices in hosted.** Generate speech lists cloned voices from one shared `models/voices/` folder. *Recommend:* hosted offers only the 17 preset voices until voices are stored per user. *Cost:* hosted users can't use a cloned voice yet.
+- **(k) Where 3D files are kept.** Python hands on the provider's link, which expires within hours. *Recommend (spec ruling 1):* save Sailor's own copy in the user's output folder as a normal asset, hand on its address, cap the download at 512 MiB. *Cost:* disk space per model (typically a few to tens of MB).
+- **(l) Nodes that send a sound wait for the server's video/sound tools.** Transcribe, Identify speakers, Clone a singing voice and Sync lips to audio send a re-encoded 60-second WAV, which needs ffmpeg (R5.1). *Recommend:* build them after R5.1 so the sound sent matches Python's. *Cost:* those four keep needing ComfyUI until then. The alternative sends the original sound file as it is (a different file from Python's WAV, and not cut at 60 s), refusing anything longer than 60 s. No R3 node lacks a hosted service otherwise; Turntable's stitching is the other piece waiting on R5.1.
+- **(m) Real people's voices.** Clone a singing voice offers presets named Trump, Biden, Obama and Drake (and cartoon characters). *Recommend:* refuse those presets in hosted with a plain message; keep "Guitar", "Voilin" (sic) and custom models. *Cost:* fewer presets in hosted; the alternative is a legal and misuse risk on Sailor's own service.
+- **(n) Film a shot's own switch.** *Recommend:* the preset path gets its own family `film-shot`, so it can be turned on separately from the shot-directed path that already runs. *Cost:* one more switch.
+- **(o) Seedream layers in hosted.** Layerize an image saves each layer into the shared input folder so the Frame can open it. *Recommend:* save them in the user's own input folder and record them as the user's, so only they can open them. *Cost:* none visible; the alternative exposes layer names to other users.
+- **(p) Pose Mannequin's free branches.** With a baked result, or nothing to pose with, the node makes no call, yet both paths charge a flat 10 credits (badge $0.05) — and a real call costs $0.067, so 10 is below cost. *Recommend:* charge nothing for the no-call branches and 14 credits (Nano Banana 2 at 1K) for a call, on both paths. *Cost:* a real re-pose gets dearer by 4 credits.
+- **(q) The hidden "Remote" twins.** The 09-26 ruling remaps them to their visible twin. *Recommend:* R3 takes the nine whose Python is the very same call (Describe Image · Moondream, Whisper, MusicGen, MiniMax Speech, Hunyuan3D, Remove Background, Restore Photo, CodeFormer, Lipsync · sync.so) with the visible node's builder; the other seven (Flux 1.1 Pro, Ideogram V3 Turbo, Flux Kontext, Clarity Upscale, Seedance 2.0, Veo 3, Kling 2.1) are left to a later remap task. *Cost:* none beyond nine more rows.
+- **(r) Web addresses typed into a node.** Describe a video and Sync lips to audio take a video address as typed; Python sends it on unchanged. *Recommend:* in hosted, refuse anything but an `https:` address or the user's own uploaded file, before the hold. *Cost:* local-only forms (data links, `/view` links of other users) are refused in hosted.
+- **(s) Describe a video's price.** It's priced by how long the video is, but Sailor never sees a video given by web address. *Recommend:* in hosted, take only a video the user uploaded to Sailor (measured, then priced by its length); leave web addresses to local use. *Cost:* hosted users must upload the video first. The alternative holds a large fixed ceiling on every call.
+- **(t) How a made sound is shown.** Python's Audio card shows a FLAC copy it encodes; before R5 the runner can't encode FLAC. *Recommend:* the Audio card shows the provider's own file (WAV or MP3) until R5, and a card with "export" on stays with ComfyUI. *Cost:* a different file format on the card, same sound.
+
+### R3 size
+
+Eighteen tasks: two of machinery (R3.1, R3.2), fifteen porting tasks (R3.3–R3.17) and the controller's check (R3.18). They cover 38 classes — the 35 visible Replicate classes not yet taken, plus Pose Mannequin, Lens · 3D Reframe and Turntable — and nine hidden twins, in twelve families (`llm-text`, `describe`, `image-repair`, `layers`, `audio-gen`, `gen-3d`, `sound-in`, `film-shot`, `image-extras`, `lora`, `nano-extras`, `turntable`). Two tasks (R3.10, R3.17) wait for R5.1. The live paid checks come to about **$7.70** in all (about **$4.50** for everything that doesn't wait on R5.1), estimated from the code's rate cards and, where none exists, the nodes' own price badges; the largest single items are Turntable with views ($3.03), 3D ($1.50) and the front-only spin ($0.90).
+
+---
+
+# R4–R11 — outline tasks (to be expanded before they are built)
 
 Each outline task becomes a full task (tests and code) when its slice starts. Every paid family: its own switch, off by default; priced in `frontend/shared/pricing/` before switch-on; the backup rule; a live paid check with the user's go.
-
-### Task R3.1: The eight LLM text nodes
-
-BrainstormIdeasNode, ChatLLMNode, ImprovePromptNode, ReasonStepByStepNode, RewriteToneNode, SummarizeTextNode, TranslateTextNode (Replicate LLM tables in `comfy_api_nodes/nodes_replicate.py:5584-6060`), and the Describe nodes' text outputs where they share the call. Provider plans with `media: 'value'` (R0.6), builders proven by `capture_first_call` fixtures, token-priced in `shared/pricing/` (`anthropicTokens.ts` pattern) with the hold at the maximum output tokens. Family `llm-text`. Acceptance: request fixtures equal; a text result feeds a Text card and Generate an image's idea socket (moderated at the turn, R0.5); reuse returns the text; the charge never exceeds the hold.
-
-### Task R3.2: Describe, read, find and diarize
-
-DescribeImageNode, DescribeVideoNode, ExtractTextNode, FindObjectsNode (JSON boxes), IdentifySpeakersNode (JSON segments), TranscribeAudioNode (fal wizper, shared with R7.3). `media: 'value'`, the exact Python string in `json` values. Family `describe`. Acceptance: request fixtures equal; the JSON text byte-equal to Python's on recorded provider answers (fixtures of the answer → the node's output).
-
-### Task R3.3: Upscale, enhance, fix faces, restore
-
-UpscaleImageNode (each engine), EnhanceDetailNode, FixFacesNode, RestorePhotoNode. Upscale's price by measured input size (model line-up open question 2: the runner measures). Family `image-repair`. Acceptance: request fixtures; size-priced hold from the measured picture; refusal above the input cap before the hold.
-
-### Task R3.4: Layers and outpaint
-
-SplitPhotoLayersNode, LayerizeGraphicNode, SeedreamLayerizeNode, OutpaintImageNode — several calls per node, pictures on several output slots (R0 values). Family `layers`. Acceptance: every call's request equals the fixture in order; a failure midway charges only the calls that finished (as `1d4c2c04c` does on the ComfyUI path).
-
-### Task R3.5: Music, speech and voice
-
-GenerateMusicNode, GenerateSpeechNode, CloneSingingVoiceNode — sound outputs as files; the sound hand-off (`handoff.ts` already sends sounds). Family `audio-gen`. Acceptance: request fixtures; the sound saved with the right extension; length-priced nodes priced from the settings sent.
-
-### Task R3.6: 3D
-
-Generate3DNode and Hunyuan3DMultiViewNode: the GLB downloaded and saved as an output asset, the value `{ kind: 'glb', url: <Sailor /view address>, file }` (spec ruling 1); Model3D (R1.1) and 3D Studio's `glb_url` read it. Family `gen-3d`. Acceptance: request fixtures; the address survives the provider link's expiry; hosted ownership of the saved GLB.
-
-### Task R3.7: Film a shot, text effects, sketch, faces and LoRAs
-
-FilmShotNode (the video table plus shot presets), TextEffectNode (the `text_effects.py` table), SketchToImageNode, ConsistentFaceNode, FluxLoRARemoteNode, FluxMultiLoRARemoteNode, RestyleWithLoRANode (several calls and its retry loop). LoRA files are read from `models/loras/` by name and handed off (hosted: the user's own). Family per group. Acceptance: request fixtures; RestyleWithLoRA's retry charges only the calls made.
-
-### Task R3.8: Pose Mannequin, Lens reframe, Turntable
-
-PoseMannequin and LensReframe (Nano Banana 2 on Replicate with the editor's bake replayed, R1.3's machinery); TurntableNode after R5 (segments plus an ffmpeg concat). Families `nano-extras`, `turntable`. Acceptance: request fixtures; Turntable's concat output equals Python's frame count and duration.
 
 ### Task R4.1: Retire the 182 partner nodes (decision 3)
 
@@ -2951,4 +3623,5 @@ Lip-sync a character's Fabric and auto engines, and `sync` below sync-3 (measure
 - **Spec coverage.** Decisions 1 → R7.1–R7.4; 2 → Open question 1, R8.4; 3 → R4.1; 4 → R10.2; 5 → R9.1; 6 → R10.3; 7 → R5.1; 8 → Global Constraints, every porting task; 9 → R2.10; 10 → R8.1–R8.4. Money rules → Global Constraints, R0.4 (price reads wires), R0.5 (refusal before hold), R0.6 (charged once), R1.2 (charge unchanged by wires). Slice map R0–R11 → the task list. "Persisted, resumable, sha-keyed" → R0.1 (record), R0.2 (kept by sha, swept), R0.6 (restart test). Masks and picture lists → R0.1, R0.7, R1.3, R1.4, R1.6.
 - **Types used across tasks.** `RunnerValue` (R0.1) with `mask.files` everywhere; `slotValue`, `filesOf`, `filesOfValues`, `literalOf`, `checkValue`, `withWiredValues` (values.ts); `KeptBytes.put(runId, bytes, ext)`; `DeriveIO` / `Derived` / `staticDerive` (R0.4) — `saveAsset` gains `subfolder?`/`folder?` in R1.5 by name; `ResultEntry` (R0.6); `outputKind`, `valueInputsOf`, `valueWiresAllowed`, `STATIC_VALUES`, `staticValueOf`, `staticWiredTexts` (R0.3).
 - **R2 (expanded 2026-09-26).** Decision 8 → R2 rule 10 (exact / library classes) and R2.9 (Add noise); decision 9 → R2.10; the ledger's rulings → R2 rules 7–9 (worker, one file at a time, per-node cap, start-of-take refusals), 11 (fixtures from real Python, byte-identical, multi-threaded torch) and 12 (families-off invariant); the 78 inventory classes → R2.1 (3) + R2.4 (26) + R2.5 (13) + R2.6 (4) + R2.7 (15) + R2.8 (6) + R2.9 (11); Painter (spec ruling 4) → R2.8; the ~45 live-preview classes' engine runs → R2.11. Rulings the controller still owes: R2 (a)–(f).
+- **R3 (expanded 2026-09-27).** Spec money rules 1–5 → R3 rules 7, 9, 13, 14; parity ("paid nodes: the request is identical") → rules 4–5; spec ruling 1 (3D address) → R3.9; the 38 classes → R3.3 (7) + R3.4 (4) + R3.5 (5) + R3.6 (3) + R3.7 (1) + R3.8 (2) + R3.9 (2) + R3.10 (4) + R3.11 (1, the preset path) + R3.12 (3) + R3.13 (2) + R3.14 (1) + R3.15 (2) + R3.16/R3.17 (1), with nine hidden twins. Rulings the controller still owes: R3 (a)–(t).
 - **Known gaps, deliberate:** JPEG/WebP EXIF metadata not written (R1.5); Get image size's progress text not shown (R1.4); Gate choices on a text value (spec ruling 2).
