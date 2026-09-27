@@ -74,10 +74,17 @@ function isGuide(doc: SketchDoc, ref: CurveRef): boolean {
   return !!e && e.kind !== 'point' && !!e.construction
 }
 
-/** Points that are Repeat / Mirror copies (the copy of a rotatedFrom / mirroredFrom rule). */
+/** Points that are copies: of Repeat / Mirror / Linear (rotatedFrom /
+ *  mirroredFrom / translatedFrom's first ref) and offset points (offsetLine's
+ *  third ref, offsetRadius' second pair's point) — Clean up detects on
+ *  sources only and never ties a copy to its source (pen stage 8). */
 export function copyPoints(doc: SketchDoc): Set<EntityId> {
   const out = new Set<EntityId>()
-  for (const c of doc.constraints) if (c.kind === 'rotatedFrom' || c.kind === 'mirroredFrom') out.add(c.refs[0]!)
+  for (const c of doc.constraints) {
+    if (c.kind === 'rotatedFrom' || c.kind === 'mirroredFrom' || c.kind === 'translatedFrom') out.add(c.refs[0]!)
+    else if (c.kind === 'offsetLine') out.add(c.refs[2]!)
+    else if (c.kind === 'offsetRadius' && c.refs.length === 4) out.add(c.refs[3]!)
+  }
   return out
 }
 

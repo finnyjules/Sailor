@@ -140,8 +140,9 @@ type PairEvent =
   | { kind: 'cut'; x: EntityId }                          // (a,b) → (a,x) + (x,b), nothing moves
 
 // 'tan': a tangent line — follows its line like a direction, but on a split or
-// cut only the half nearest the touch point keeps it (the arc touches one half)
-type PairCat = 'dir' | 'len' | 'pin' | 'tan'
+// cut only the half nearest the touch point keeps it (the arc touches one half).
+// 'off': an offsetLine — the same, but nearest its offset point's foot on the line.
+type PairCat = 'dir' | 'len' | 'pin' | 'tan' | 'off'
 
 function pairSlots(doc: SketchDoc, c: SketchConstraint, centres: Set<EntityId>): { cat: PairCat; slots: [number, number][] } | null {
   const r = c.refs
@@ -162,6 +163,8 @@ function pairSlots(doc: SketchDoc, c: SketchConstraint, centres: Set<EntityId>):
       return r.length === 3 ? { cat: 'pin', slots: [[0, 1]] } : null
     case 'tangentLineArc':
       return r.length >= 3 ? { cat: 'tan', slots: [[0, 1]] } : null
+    case 'offsetLine':
+      return r.length === 3 ? { cat: 'off', slots: [[0, 1]] } : null
     default:
       return null
   }
@@ -174,9 +177,23 @@ function distToSegment(p: Vec2, a: Vec2, b: Vec2): number {
   return Math.hypot(p.x - (a.x + t * dx), p.y - (a.y + t * dy))
 }
 
-// of a tangent rule's two candidate line pairs, the one whose piece is nearer where it touches
+// the spot a rule on a line belongs near: a tangent line's touch point, an
+// offset line's copy point dropped onto the line
+function ruleSpot(doc: SketchDoc, c: SketchConstraint): Vec2 | null {
+  if (c.kind === 'offsetLine') {
+    const a = getPoint(doc, c.refs[0]!), b = getPoint(doc, c.refs[1]!), p = getPoint(doc, c.refs[2]!)
+    if (!a || !b || !p) return null
+    const dx = b.x - a.x, dy = b.y - a.y, L2 = dx * dx + dy * dy
+    if (L2 < 1e-18) return null
+    const t = ((p.x - a.x) * dx + (p.y - a.y) * dy) / L2
+    return { x: a.x + t * dx, y: a.y + t * dy }
+  }
+  return tangentTouchPoint(doc, c)
+}
+
+// of a tangent/offset rule's two candidate line pairs, the one whose piece is nearer where it touches
 function nearerHalf(doc: SketchDoc, c: SketchConstraint, first: EntityId[], second: EntityId[]): EntityId[] {
-  const touch = tangentTouchPoint(doc, c)
+  const touch = ruleSpot(doc, c)
   const d = (refs: EntityId[]) => {
     const a = getPoint(doc, refs[0]!), b = getPoint(doc, refs[1]!)
     return touch && a && b ? distToSegment(touch, a, b) : Infinity
@@ -206,7 +223,7 @@ function followPair(doc: SketchDoc, a: EntityId, b: EntityId, ev: PairEvent): Se
     } else if (ev.kind === 'moved' || ev.kind === 'grow') {
       if (info.cat === 'len') remove.add(c.id)        // the length changed
       else { c.refs = rewrite(ev.from, ev.to); touched.add(c.id) }
-    } else if (ev.kind === 'cut' && info.cat === 'tan') {
+    } else if (ev.kind === 'cut' && (info.cat === 'tan' || info.cat === 'off')) {
       c.refs = nearerHalf(doc, c, rewrite(b, ev.x), rewrite(a, ev.x))
       touched.add(c.id)
     } else if (ev.kind === 'cut') {
@@ -219,7 +236,7 @@ function followPair(doc: SketchDoc, a: EntityId, b: EntityId, ev: PairEvent): Se
       copies.push({ ...c, refs: second })
     } else {
       if (info.cat === 'len') { remove.add(c.id); continue }
-      if (info.cat === 'tan') { c.refs = nearerHalf(doc, c, rewrite(b, ev.x0), rewrite(a, ev.x1)); touched.add(c.id); continue }
+      if (info.cat === 'tan' || info.cat === 'off') { c.refs = nearerHalf(doc, c, rewrite(b, ev.x0), rewrite(a, ev.x1)); touched.add(c.id); continue }
       const first = rewrite(b, ev.x0)
       const second = rewrite(a, ev.x1)
       c.refs = first
@@ -258,6 +275,14 @@ function operandSlots(doc: SketchDoc, c: SketchConstraint): [number, number][] {
   const r = c.refs
   if (c.kind === 'equalDist') return r.length === 4 ? [[0, 1], [2, 3]] : []
   if (c.kind === 'tangentLineArc') return r.length === 4 ? [[2, 3]] : []
+  if (c.kind === 'offsetRadius') {
+    const out: [number, number][] = []
+    for (let i = 0; i < r.length;) {
+      if (getEntity(doc, r[i]!)?.kind === 'circle') { i += 1; continue }
+      out.push([i, i + 1]); i += 2
+    }
+    return out
+  }
   if (c.kind !== 'tangentArcs') return []
   const out: [number, number][] = []
   for (let i = 0; i < r.length;) {
@@ -839,6 +864,19 @@ function isTrivial(doc: SketchDoc, c: SketchConstraint): boolean {
       const ops = operandCentres(doc, c)
       return ops.some(o => o.degenerate) || (ops.length === 2 && ops[0]!.c === ops[1]!.c)
     }
+    case 'offsetLine':
+      return r[0] === r[1] || r[2] === r[0] || r[2] === r[1]
+    case 'offsetRadius': {
+      const ops: string[] = []
+      for (let i = 0; i < r.length;) {
+        if (getEntity(doc, r[i]!)?.kind === 'circle') { ops.push(r[i]!); i += 1; continue }
+        if (r[i] === r[i + 1]) return true            // a pair collapsed to one point
+        ops.push(`${r[i]},${r[i + 1]}`); i += 2
+      }
+      return ops.length === 2 && ops[0] === ops[1]
+    }
+    case 'translatedFrom':
+      return r[0] === r[1] || r[2] === r[3]
     default:
       return false
   }

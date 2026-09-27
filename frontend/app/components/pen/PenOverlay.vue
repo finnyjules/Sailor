@@ -224,7 +224,10 @@ const marks = computed(() => constraintMarks(doc.value))
 // dropped from the model, only hidden from this badge layer) that nobody
 // clicks to remove by hand. They are the bulk of badge clutter on a
 // many-petal Repeat/Mirror drawing; hiding them is display-only.
-const STRUCTURAL_MARK_KINDS: ConstraintKind[] = ['rotatedFrom', 'mirroredFrom', 'equalDist']
+// Linear copies and offsets (pen stage 8): translatedFrom is a copy rule like
+// rotatedFrom/mirroredFrom; offsetLine/offsetRadius would bury the drawing in
+// a badge per offset point (Ruling 18).
+const STRUCTURAL_MARK_KINDS: ConstraintKind[] = ['rotatedFrom', 'mirroredFrom', 'equalDist', 'translatedFrom', 'offsetLine', 'offsetRadius']
 // a smooth point's "S" badge (its collinear rule [hIn, anchor, hOut]) sits at
 // a handle; while that path's handles are hidden the badge would float in empty
 // space, so it hides with them. (An arc tangent joint's collinear rule holds no

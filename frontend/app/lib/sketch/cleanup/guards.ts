@@ -59,7 +59,7 @@ function pointsOf(map: ReadonlyMap<EntityId, SketchEntity>, id: EntityId): Entit
 const JOINING = new Set<ConstraintKind>([
   'coincident', 'pointOnLine', 'pointOnCircle', 'collinear', 'midpoint', 'concentric',
   'tangentLineCircle', 'tangentCircleCircle', 'tangentLineArc', 'tangentArcs',
-  'rotatedFrom', 'mirroredFrom',
+  'rotatedFrom', 'mirroredFrom', 'offsetLine', 'offsetRadius', 'translatedFrom',
 ])
 export function joinsParts(c: SketchConstraint): boolean {
   return JOINING.has(c.kind) || (c.kind === 'equalDist' && c.refs.length === 4 && c.refs[0] === c.refs[2])

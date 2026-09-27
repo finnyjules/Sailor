@@ -132,7 +132,8 @@ export function hasClosedPieces(clip: SketchDoc): boolean {
  *  (about the same middle) when `flipY` — how a copy keeps its on-screen size
  *  and look in a pen that draws in other units, or with y the other way up.
  *  Lengths held by rules (distance, radius) scale with it; an upside-down
- *  copy runs its arcs and its Repeat turns the other way. A new drawing. */
+ *  copy runs its arcs and its Repeat turns the other way. Offset distances
+ *  scale; upside down, an offset lies on the other side. A new drawing. */
 export function scalePieces(clip: SketchDoc, factor: number, flipY = false): SketchDoc {
   const ctr = piecesCentre(clip)
   const fy = flipY ? -factor : factor
@@ -145,8 +146,8 @@ export function scalePieces(clip: SketchDoc, factor: number, flipY = false): Ske
   })
   const constraints = clip.constraints.map(k => {
     const c = { ...k, refs: [...k.refs] }
-    if (c.value != null && (c.kind === 'distance' || c.kind === 'radius')) c.value *= factor
-    else if (c.value != null && flipY && c.kind === 'rotatedFrom') c.value = -c.value
+    if (c.value != null && (c.kind === 'distance' || c.kind === 'radius' || c.kind === 'offsetLine' || c.kind === 'offsetRadius')) c.value *= factor
+    if (c.value != null && flipY && (c.kind === 'rotatedFrom' || c.kind === 'offsetLine')) c.value = -c.value
     return c
   })
   const out: SketchDoc = { entities, constraints }

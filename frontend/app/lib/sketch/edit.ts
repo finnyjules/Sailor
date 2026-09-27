@@ -137,8 +137,8 @@ export function deleteEntity(doc: SketchDoc, id: EntityId, opts: { keepGuideEnds
   // drop constraints that reference the removed entity
   doc.constraints = doc.constraints.filter(c => !c.refs.includes(id))
   if (e.kind === 'line' && !spansLine(doc, e.p1, e.p2)) {
-    // a tangent line names its ends, not its id: it goes with the last piece between them
-    doc.constraints = doc.constraints.filter(c => !(c.kind === 'tangentLineArc' &&
+    // a tangent or offset line names its ends, not its id: it goes with the last piece between them
+    doc.constraints = doc.constraints.filter(c => !((c.kind === 'tangentLineArc' || c.kind === 'offsetLine') &&
       ((c.refs[0] === e.p1 && c.refs[1] === e.p2) || (c.refs[0] === e.p2 && c.refs[1] === e.p1))))
   }
   if (e.kind === 'line' && e.construction && !opts.keepGuideEnds) {
@@ -158,6 +158,14 @@ export function deleteEntity(doc: SketchDoc, id: EntityId, opts: { keepGuideEnds
   if (e.kind === 'path') {
     // drop this path's auto equalDist rules (their refs don't include the path's own id)
     doc.constraints = doc.constraints.filter(c => !(c.kind === 'equalDist' && arcEqualDistRefs.some(refs => refsEqual(refs, c.refs))))
+    // tangent / offset lines that named one of its straight pieces go with the last piece between those ends
+    e.segments.forEach((s, i) => {
+      if (s.kind !== 'line') return
+      const a = e.anchors[i]!, b = e.anchors[(i + 1) % e.anchors.length]!
+      if (spansLine(doc, a, b)) return
+      doc.constraints = doc.constraints.filter(c => !((c.kind === 'tangentLineArc' || c.kind === 'offsetLine') &&
+        ((c.refs[0] === a && c.refs[1] === b) || (c.refs[0] === b && c.refs[1] === a))))
+    })
     // orphan-clean: points this path exclusively owned, now unreferenced and not fixed
     for (const pid of memberPoints) {
       const p = getPoint(doc, pid)
@@ -248,11 +256,13 @@ function copyFills(doc: SketchDoc, fills: SketchFill[], map: Map<EntityId, Entit
 }
 
 // constraints fully inside the closure get copied with mapped refs
-function copyClosureConstraints(doc: SketchDoc, map: Map<EntityId, EntityId>): void {
+function copyClosureConstraints(doc: SketchDoc, map: Map<EntityId, EntityId>, mirrored = false): void {
   const source = new Set(map.keys())
   for (const c of [...doc.constraints]) {
     if (c.refs.length > 0 && c.refs.every(r => source.has(r))) {
-      addConstraint(doc, c.kind, c.refs.map(r => map.get(r)!), c.value)
+      // a mirror copy's left is the original's right (Ruling 19)
+      const value = mirrored && c.kind === 'offsetLine' && c.value != null ? -c.value : c.value
+      addConstraint(doc, c.kind, c.refs.map(r => map.get(r)!), value)
     }
   }
 }
@@ -372,7 +382,7 @@ export function mirrorEntities(doc: SketchDoc, ids: EntityId[], axisLine: Entity
   }
   const ents = new Map<EntityId, EntityId>()
   created.push(...copyStructure(doc, ids, map, true, ents))
-  copyClosureConstraints(doc, map)
+  copyClosureConstraints(doc, map, true)
   copyFills(doc, carried, map, ents, { mirror: Math.atan2(diry, dirx) })
   fillCopiedAreas(doc, moveAreas(srcAreas, p => { const s = (p.x - a.x) * nx + (p.y - a.y) * ny; return { x: p.x - 2 * s * nx, y: p.y - 2 * s * ny } }, sd => mapSeed(sd, copiedId(map, ents), { mirror: Math.atan2(diry, dirx) })))
   return created
