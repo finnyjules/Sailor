@@ -56,6 +56,15 @@ export interface Sheet {
   U: number
   /** Stage 3: where this sheet's y = 0 sits on the Frame, kit units (0 unless composing on a band). */
   Y0: number
+  /** Stage 3: the rows layouts compose on (this sheet's coordinates). Empty with rows off, with
+   *  fewer than three rows, and on the kit's own sheet. */
+  rows: { a: number; b: number }[]
+  /** Stage 3: the first row top at or after y (past the last row: its bottom); rows off: y up to the
+   *  baseline grid. The kit's own sheet: y. */
+  rowTop(y: number): number
+  /** Stage 3: the last row bottom at or before y (before the first row: its top); rows off: y down to
+   *  the baseline grid. The kit's own sheet: y. */
+  rowBottom(y: number): number
   DISPLAY: Style; SECOND: Style & { size: number }; INFO: Style & { size: number }
   X(c: number): number; XR(c: number): number; SPAN(a: number, b: number): number; L(r: number): number; Xr(c: number): number
   /** The line a bottom or a baseline on design row `r` sits on (stage 3). The kit's own sheet: `L`. */
@@ -212,7 +221,23 @@ export function makeSheet(o: SheetOpts): Sheet {
   /** The grid band's top on this sheet (the kit's own sheet: its margin). */
   const T0 = gb ? gb.top - Y0 : M
   const RH = gb ? (gb.bottom - gb.top) / NR : (H - 2 * M) / NR
-  const GAP = RH * 0.5
+  const EPS = 1e-6
+  // The baseline grid is every U from the FRAME's top: a sheet y is y + Y0 on the Frame.
+  const gridUp = (y: number) => (U ? Math.ceil((y + Y0) / U - EPS) * U - Y0 : y)
+  const gridDown = (y: number) => (U ? Math.floor((y + Y0) / U + EPS) * U - Y0 : y)
+  /** The rows layouts compose on: the grid's own, when it has at least three (ruling 6). */
+  const rows = lay && lay.rows.length >= 3 ? lay.rows.map(t => ({ a: t.a * k - Y0, b: (t.a + t.w) * k - Y0 })) : []
+  const rowTop = (y: number): number => {
+    if (!rows.length) return gridUp(y)
+    for (const r of rows) if (r.a >= y - EPS) return r.a
+    return rows[rows.length - 1]!.b
+  }
+  const rowBottom = (y: number): number => {
+    if (!rows.length) return gridDown(y)
+    for (let i = rows.length - 1; i >= 0; i--) if (rows[i]!.b <= y + EPS) return rows[i]!.b
+    return rows[0]!.a
+  }
+  const GAP = U ? Math.max(U, Math.round(RH * 0.5 / U) * U) : RH * 0.5
   const CAP = measure.capAbove('title') + measure.baseBelow('title')
 
   const [colA, colB] = o.colRange ?? [1, NC]                          // the real columns the design grid spans
@@ -222,8 +247,8 @@ export function makeSheet(o: SheetOpts): Sheet {
   const X = (c: number) => Xr(cs(c))                                  // left edge of design column c
   const XR = (c: number) => Xr(ce(c)) + CW                            // right edge of design column c
   const SPAN = (a: number, b: number) => XR(b) - X(a)
-  const L = (r: number) => T0 + r * RH                                // line under design row r; L(0) = the top margin
-  const LB = L                                                        // stage 3: a bottom on row r (Task 5 gives it rows)
+  const L = lay ? (r: number) => rowTop(T0 + r * RH) : (r: number) => T0 + r * RH   // a top on design row r; L(0) = the top margin
+  const LB = lay ? (r: number) => rowBottom(T0 + r * RH) : L                        // a bottom or baseline on row r
 
   // Swiss styles — minimum text size from the format's viewing width (Stage 2), Stage 1 sizes when absent.
   const infoSize = kb.infoSize
@@ -447,7 +472,7 @@ export function makeSheet(o: SheetOpts): Sheet {
 
   return {
     measure,
-    W, H, M, G, NC, CW, RH, GAP, CAP, B, defaultMargin, U, Y0,
+    W, H, M, G, NC, CW, RH, GAP, CAP, B, defaultMargin, U, Y0, rows, rowTop, rowBottom,
     DISPLAY, SECOND, INFO,
     X, XR, SPAN, L, LB, Xr,
     w100, fitSize, sizeFor, blockH, countLines, dateLines, breakLines, balance,

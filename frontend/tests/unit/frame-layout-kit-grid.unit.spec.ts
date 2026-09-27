@@ -95,3 +95,69 @@ describe('the sheet on the layout grid — the band', () => {
     expect(makeSheet({ frameW: 1080, frameH: 1920, measure, layout: r }).B).toBeCloseTo(makeSheet({ frameW: 1080, frameH: 1920, measure }).B, 9)
   })
 })
+
+describe('the sheet on the layout grid — rows', () => {
+  // own(): rows' tops 6, 14, … 86 and bottoms 12, 20, … 92 (kit units); the band is the whole Frame.
+  const tops = Array.from({ length: 11 }, (_, i) => 6 + 8 * i)
+  const bottoms = tops.map(t => t + 6)
+  it('rows on: every L(r) is a row top (the last row\'s bottom past the end), every LB(r) a row bottom', () => {
+    const S = sheetOn(own())
+    expect(S.rows.map(r => r.a)).toEqual(tops.map(t => expect.closeTo(t, 9)))
+    // Up to the last row top (86: proportional row 14.5) L is a row top; from the first row bottom
+    // (12: proportional row 1.5) LB is a row bottom.
+    for (let r = 0; r <= 14.5; r += 0.5) expect(tops.some(t => Math.abs(S.L(r) - t) < 1e-9), `L(${r}) = ${S.L(r)}`).toBe(true)
+    for (let r = 1.5; r <= 16; r += 0.5) expect(bottoms.some(b => Math.abs(S.LB(r) - b) < 1e-9), `LB(${r}) = ${S.LB(r)}`).toBe(true)
+    expect(S.L(15.5)).toBeCloseTo(92, 9)         // past the last row top: the last row's bottom
+    expect(S.LB(1)).toBeCloseTo(6, 9)            // before the first row bottom: the first row's top
+    expect(S.L(0)).toBeCloseTo(6, 9)
+    expect(S.L(1)).toBeCloseTo(14, 9)            // proportional 11.5 → the next row top
+    expect(S.L(16)).toBeCloseTo(92, 9)           // nothing starts at the bottom: the last row's bottom
+    expect(S.LB(16)).toBeCloseTo(92, 9)
+    expect(S.LB(8)).toBeCloseTo(44, 9)           // proportional 50 → the row bottom before it
+  })
+  it('L never goes up and LB never goes down as r grows', () => {
+    const S = sheetOn(own())
+    for (let r = 0; r < 16; r += 0.25) {
+      expect(S.L(r + 0.25)).toBeGreaterThanOrEqual(S.L(r) - 1e-9)
+      expect(S.LB(r + 0.25)).toBeGreaterThanOrEqual(S.LB(r) - 1e-9)
+    }
+  })
+  it('rows off: L rounds up and LB down to the baseline grid', () => {
+    const S = sheetOn(own({ rows: { mode: 'off', count: 8 } }))
+    expect(S.rows).toEqual([])
+    expect(S.L(1)).toBeCloseTo(12, 9)            // 11.5 → up to the unit (2)
+    expect(S.LB(8)).toBeCloseTo(50, 9)           // on the unit already
+    expect(S.LB(1)).toBeCloseTo(10, 9)           // 11.5 → down
+    for (let r = 0; r <= 16; r += 0.5) {
+      expect(Math.abs(S.L(r) / 2 - Math.round(S.L(r) / 2))).toBeLessThan(1e-9)
+      expect(Math.abs(S.LB(r) / 2 - Math.round(S.LB(r) / 2))).toBeLessThan(1e-9)
+    }
+  })
+  it('a grid with fewer than three rows counts as rows off (the 728×90 banner)', () => {
+    const lb = FRAME_FORMATS.find(f => f.id === 'ad-728x90')!
+    const r = resolveLayoutGrid(suggestedLayoutGrid(728, 90, lb), 728, 90, lb)
+    expect(r.rows.length).toBeLessThan(3)
+    const S = makeSheet({ frameW: 728, frameH: 90, measure, layout: r })
+    expect(S.rows).toEqual([])
+  })
+  it('on a band (a story) the rows are in the band\'s coordinates', () => {
+    const story = FRAME_FORMATS.find(f => f.id === 'meta-story')!
+    const r = resolveLayoutGrid(suggestedLayoutGrid(1080, 1920, story), 1080, 1920, story)
+    const S = makeSheet({ frameW: 1080, frameH: 1920, measure, layout: r })
+    expect(S.rows[0]!.a + S.Y0).toBeCloseTo(r.rows[0]!.a * 100 / 1080, 9)
+    expect(S.L(0) + S.Y0).toBeCloseTo(r.rows[0]!.a * 100 / 1080, 9)
+    const last = r.rows[r.rows.length - 1]!
+    expect(S.LB(16) + S.Y0).toBeCloseTo((last.a + last.w) * 100 / 1080, 9)
+  })
+  it('GAP is a whole number of units, at least one', () => {
+    const S = sheetOn(own())
+    expect(S.GAP / S.U).toBeCloseTo(Math.round(S.GAP / S.U), 9)
+    expect(S.GAP).toBeGreaterThanOrEqual(S.U - 1e-9)
+  })
+  it('rowTop / rowBottom on the kit\'s own sheet are the identity', () => {
+    const S = makeSheet({ frameW: 1000, frameH: 1000, measure })
+    expect(S.rowTop(13.37)).toBe(13.37)
+    expect(S.rowBottom(13.37)).toBe(13.37)
+    expect(S.rows).toEqual([])
+  })
+})
