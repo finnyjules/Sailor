@@ -107,3 +107,27 @@ export function piecesCentre(clip: SketchDoc): Vec2 {
 export function hasClosedPieces(clip: SketchDoc): boolean {
   return clip.entities.some(e => e.kind === 'circle' || (e.kind === 'path' && e.closed))
 }
+
+/** The copy resized about its middle by `factor`, and turned upside down
+ *  (about the same middle) when `flipY` — how a copy keeps its on-screen size
+ *  and look in a pen that draws in other units, or with y the other way up.
+ *  Lengths held by rules (distance, radius) scale with it; an upside-down
+ *  copy runs its arcs and its Repeat turns the other way. A new drawing. */
+export function scalePieces(clip: SketchDoc, factor: number, flipY = false): SketchDoc {
+  const ctr = piecesCentre(clip)
+  const fy = flipY ? -factor : factor
+  const entities = clip.entities.map(e => {
+    const c = copyEntity(e)
+    if (c.kind === 'point') { c.x = ctr.x + (c.x - ctr.x) * factor; c.y = ctr.y + (c.y - ctr.y) * fy }
+    else if (c.kind === 'circle') c.r *= factor
+    else if (c.kind === 'path' && flipY) c.segments = c.segments.map(s => (s.kind === 'arc' ? { ...s, sweep: s.sweep === 1 ? 0 : 1 } : s))
+    return c
+  })
+  const constraints = clip.constraints.map(k => {
+    const c = { ...k, refs: [...k.refs] }
+    if (c.value != null && (c.kind === 'distance' || c.kind === 'radius')) c.value *= factor
+    else if (c.value != null && flipY && c.kind === 'rotatedFrom') c.value = -c.value
+    return c
+  })
+  return { entities, constraints }
+}

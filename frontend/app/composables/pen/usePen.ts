@@ -47,7 +47,7 @@ import { solve, type DragTarget } from '~/lib/sketch/solve'
 import { bowTangentSnap, pieceOf, tangentRuleFor, curveKey, equivalentRuleKey, type BowTangentSnap } from '~/lib/sketch/tangency'
 import { dist, type Vec2 } from '~/lib/sketch/geom'
 import { constraintMarks, type ConstraintMark, type ArcDimensionMark } from '~/lib/sketch/annotate'
-import { applyView, type ViewMatrix } from '~/lib/sketch/view'
+import { applyView, invertView, isMirrored, type ViewMatrix } from '~/lib/sketch/view'
 import { pxToUnits, SNAP_PX, BOW_PX, MIN_RADIUS_PX } from '~/lib/sketch/tolerance'
 import {
   availableConstraints as availableConstraintsFor,
@@ -64,7 +64,7 @@ import { removeSpan, removeSegment, cutAt, canDissolve, dissolveAt, mergePoints,
 import { cloneDoc } from '~/lib/sketch/clone'
 import { runCleanup, STRENGTHS, type CleanupResult, type CleanupScope, type CleanupStrength, type FixKind } from '~/lib/sketch/cleanup'
 import { sketchPathData } from '~/lib/sketch/sketchPath'
-import { extractPieces, insertPieces, piecesCentre, hasClosedPieces } from '~/lib/sketch/clipboard'
+import { extractPieces, insertPieces, piecesCentre, hasClosedPieces, scalePieces } from '~/lib/sketch/clipboard'
 import { selectionLabel, topLevelIds, type PieceRef } from '~/lib/sketch/pieces'
 import { SIZE_REFUSED, STAY_PX, drawingDirForScreenAngle, arcEndForSweep, radiusPinOf, circleRadiusRuleOf, checkSizeEdit, stayed } from '~/lib/sketch/sizes'
 import { penClipboard, setPenClipboard, nextPasteStep, PASTE_STEP_PX } from './penClipboard'
@@ -95,8 +95,16 @@ export interface PenWheel { at: Vec2; layout: 'point' | 'segment'; slices: Wheel
 
 export const SPARKLE_LIFETIME_MS = 380
 
+// every pen gets its own number: a copy remembers the pen it came from, so a
+// paste into another pen can resize it to that pen's units (penClipboard.ts)
+let penSeq = 0
+
 // status when a join would need two fixed points to meet
 const BOTH_FIXED = 'Those two points are both fixed in different places'
+// a typed size of zero or less (Properties): said, not silently put back
+const LENGTH_POSITIVE = 'A length must be more than 0'
+const RADIUS_POSITIVE = 'A radius must be more than 0'
+const SWEEP_POSITIVE = 'A sweep must be more than 0°'
 // a text guide split in two by Trim or Delete: which piece the text follows
 const DISSOLVE_REFUSED = 'These two sides don’t line up, so they can’t merge'
 export const GUIDE_SPLIT_STATUS = 'The text follows the longer piece'
@@ -495,7 +503,7 @@ export function usePen(opts: {
       return handled
     }
     // pen stage 6: an open menu owns the keys (a ⌘ combo closes it and then
-    // goes on as usual), so does an open wheel
+    // goes on as usual), so does an open wheel (likewise)
     if (menu.value) {
       if ((ev.metaKey || ev.ctrlKey) && !MODIFIER_KEYS.has(ev.key)) closeMenu()
       else {
@@ -505,9 +513,12 @@ export function usePen(opts: {
       }
     }
     if (wheel.value) {
-      const handled = wheelKey(ev)
-      if (handled) { ev.preventDefault(); ev.stopPropagation() }
-      return handled
+      if ((ev.metaKey || ev.ctrlKey) && !MODIFIER_KEYS.has(ev.key)) closeWheel()
+      else {
+        const handled = wheelKey(ev)
+        if (handled) { ev.preventDefault(); ev.stopPropagation() }
+        return handled
+      }
     }
     if (arcDrag && !MODIFIER_KEYS.has(ev.key)) arcDragEnd()
     const ctx: PenKeyContext = {
@@ -527,7 +538,17 @@ export function usePen(opts: {
 
   function onBlur() {}
 
-  function apply(kind: ConstraintKind, value?: number) {
+  // `keep` (Properties' + list): the selection comes back after the rule is
+  // written — every piece still in the drawing (after a Coincident merge, the
+  // kept point) — so the new rule shows in the list it was added from. The
+  // menu and the rules row clear it, as since stage 1.
+  function keepSelectionAfter(sel: EntityId[], segs: { pathId: EntityId; segIndex: number }[]): void {
+    selection.value = [...sel]
+    selectedSegments.value = segs.map(s => ({ ...s }))
+    pruneSelections()
+  }
+  function apply(kind: ConstraintKind, value?: number, keep_ = false) {
+    const sel0 = [...selection.value], segs0 = selectedSegments.value.map(s => ({ ...s }))
     const spec = ruleSpecFor(doc.value, selection.value, selectedSegments.value, { kind, label: '' }, value)
     // two points: Coincident makes them ONE point — the second picked merges
     // into the first, which stays where it is (a `coincident` rule is only
@@ -545,6 +566,7 @@ export function usePen(opts: {
       const k = doc.value.entities.find(e => e.id === keep)
       if (k?.kind === 'point') sparkle(k.x, k.y)
       commitHistory()
+      if (keep_) keepSelectionAfter(sel0, segs0)
       return
     }
     // every other rule: written from ruleSpecFor (penRules.ts) — one point +
@@ -554,32 +576,37 @@ export function usePen(opts: {
     clearSegSel()
     runSolve()
     commitHistory()
+    if (keep_) keepSelectionAfter(sel0, segs0)
   }
 
   // Tangent (penRules tangentRuleForSelection): the rule for the two selected
   // pieces — the joint form where they meet, tangentLineArc / tangentArcs
   // where they don't. A rule already there that says the same (whatever order
   // its refs were written in — equivalentRuleKey) is not added twice.
-  function applyTangent() {
+  function applyTangent(keep = false) {
+    const sel0 = [...selection.value], segs0 = selectedSegments.value.map(s => ({ ...s }))
     const rule = tangentRuleForSelection(doc.value, selection.value, selectedSegments.value)
     clearSel()
     clearSegSel()
-    if (!rule) return
+    const back = () => { if (keep) keepSelectionAfter(sel0, segs0) }
+    if (!rule) { back(); return }
     const key = equivalentRuleKey(doc.value, rule)
-    if (doc.value.constraints.some(c => equivalentRuleKey(doc.value, c) === key)) return   // already there — no step
+    if (doc.value.constraints.some(c => equivalentRuleKey(doc.value, c) === key)) { back(); return }   // already there — no step
     const id = addConstraint(doc.value, rule.kind, rule.refs, rule.value)
     runSolve()
     sparkleAtConstraint(id)
     commitHistory()
+    back()
   }
 
-  async function applyWithValue(v: { kind: ConstraintKind; label: string; value?: boolean; tangent?: boolean }) {
-    if (v.tangent) { applyTangent(); return }
-    if (!v.value) { apply(v.kind); return }
+  async function applyWithValue(v: { kind: ConstraintKind; label: string; value?: boolean; tangent?: boolean }, o: { keepSelection?: boolean } = {}) {
+    const keep = !!o.keepSelection
+    if (v.tangent) { applyTangent(keep); return }
+    if (!v.value) { apply(v.kind, undefined, keep); return }
     const n = await requestValue(v.label, 3)
     if (n == null) return                    // cancelled → no constraint (Bug 3)
     if (!Number.isFinite(n)) return           // invalid → no constraint (Bug 3)
-    apply(v.kind, n)
+    apply(v.kind, n, keep)
   }
 
   // Deletes the selected entities, and any Option-selected segments through
@@ -1964,11 +1991,23 @@ export function usePen(opts: {
   // clipboard. Copy and Select all write no history; Paste and Dissolve are
   // one step each.
   const hasPick = () => selection.value.length > 0 || selectedSegments.value.length > 0
+  const penId = ++penSeq
+  // the host's drawing area, in screen px (PenOverlay reports its size): a
+  // paste from another pen lands in its middle
+  const viewSize = shallowRef<{ width: number; height: number } | null>(null)
+  function setViewSize(width: number, height: number): void {
+    const v = viewSize.value
+    if (!v || v.width !== width || v.height !== height) viewSize.value = { width, height }
+  }
+  function viewMiddle(): Vec2 | null {
+    const v = viewSize.value, inv = invertView(opts.view.value)
+    return v && inv && v.width > 0 && v.height > 0 ? applyView(inv, { x: v.width / 2, y: v.height / 2 }) : null
+  }
   function copySelection(): boolean {
     if (!hasPick()) return false
     const clip = extractPieces(doc.value, selection.value, selectedSegments.value)
     if (!clip.entities.length) return false
-    setPenClipboard(clip)
+    setPenClipboard(clip, { penId, unitsPerPx: pxToUnits(1, opts.view.value), mirrored: isMirrored(opts.view.value) })
     status.value = `Copied ${selectionLabel(doc.value, selection.value, selectedSegments.value)}`
     return true
   }
@@ -1979,21 +2018,34 @@ export function usePen(opts: {
     return OK
   }
   // `at` (the menu's Paste): the copy's centre lands there; else (⌘V) 16 px
-  // down-right on screen of where it was copied, 16 px more per paste
+  // down-right on screen of where it was copied, 16 px more per paste.
+  // Copied in ANOTHER pen (another host, drawing in its own units): the copy
+  // is first resized about its middle to the same on-screen size (the ratio
+  // of the two pens' units per px) and turned the same way up, and ⌘V centres
+  // it on the middle of this pen's view before the 16 px steps.
   function paste(at?: Vec2 | null): boolean {
     if (!pasteState().ok) return false
     const c = penClipboard.value!
     if (tool.value !== 'select') selectTool('select')
+    let clip = c.doc
+    const foreign = c.penId != null && c.penId !== penId
+    if (foreign && c.unitsPerPx && c.unitsPerPx > 0) {
+      const factor = pxToUnits(1, opts.view.value) / c.unitsPerPx
+      const flipY = !!c.mirrored !== isMirrored(opts.view.value)
+      if (Number.isFinite(factor) && factor > 0 && (Math.abs(factor - 1) > 1e-12 || flipY)) clip = scalePieces(clip, factor, flipY)
+    }
+    const ctr = piecesCentre(clip)
     let offset: Vec2 = { x: 0, y: 0 }
     if (at) {
-      const ctr = piecesCentre(c.doc)
       offset = { x: at.x - ctr.x, y: at.y - ctr.y }
     } else {
+      const mid = foreign ? viewMiddle() : null
+      if (mid) offset = { x: mid.x - ctr.x, y: mid.y - ctr.y }
       const step = screenDeltaToDrawing(opts.view.value, PASTE_STEP_PX, PASTE_STEP_PX)
       const k = nextPasteStep()
-      if (step) offset = { x: step.x * k, y: step.y * k }
+      if (step) offset = { x: offset.x + step.x * k, y: offset.y + step.y * k }
     }
-    const { top } = insertPieces(doc.value, c.doc, offset)
+    const { top } = insertPieces(doc.value, clip, offset)
     clearSegSel()
     selection.value = top
     runSolve()
@@ -2126,7 +2178,7 @@ export function usePen(opts: {
   }
   const unitDir = (A: Vec2, B: Vec2): Vec2 | null => { const n = Math.hypot(B.x - A.x, B.y - A.y); return n > 1e-12 ? { x: (B.x - A.x) / n, y: (B.y - A.y) / n } : null }
   function setLineLength(a: EntityId, b: EntityId, len: number): boolean {
-    if (!(len > 0)) return false
+    if (!(len > 0)) { if (Number.isFinite(len)) status.value = LENGTH_POSITIVE; return false }
     return moveLineEnd(a, b, unitDir, () => len)
   }
   function setLineAngle(a: EntityId, b: EntityId, deg: number): boolean {
@@ -2142,7 +2194,7 @@ export function usePen(opts: {
     return s && e ? { c: seg.center, s, e, sweep: seg.sweep } : null
   }
   function setArcRadiusValue(pathId: EntityId, segIndex: number, r: number): boolean {
-    if (!(r > 0)) return false
+    if (!(r > 0)) { if (Number.isFinite(r)) status.value = RADIUS_POSITIVE; return false }
     return tryEdit(d => {
       const a = arcParts(d, pathId, segIndex)
       if (!a) return null
@@ -2153,6 +2205,7 @@ export function usePen(opts: {
   }
   function setArcSweep(pathId: EntityId, segIndex: number, deg: number): boolean {
     if (!Number.isFinite(deg)) return false
+    if (!(deg > 0)) { status.value = SWEEP_POSITIVE; return false }
     const sweepDeg = Math.min(359.5, Math.max(0.5, deg))
     const a0 = arcParts(doc.value, pathId, segIndex)
     if (a0 && ptOf(doc.value, a0.e)?.fixed) { status.value = 'Fixed points stay where they are'; return false }
@@ -2167,6 +2220,7 @@ export function usePen(opts: {
   function setArcLength(pathId: EntityId, segIndex: number, len: number): boolean {
     const a = arcParts(doc.value, pathId, segIndex)
     const C = a && ptOf(doc.value, a.c), S = a && ptOf(doc.value, a.s)
+    if (Number.isFinite(len) && !(len > 0)) { status.value = LENGTH_POSITIVE; return false }
     if (!C || !S || !(len > 0)) return false
     const r = Math.hypot(S.x - C.x, S.y - C.y)
     return r > 1e-12 ? setArcSweep(pathId, segIndex, (len / r) * 180 / Math.PI) : false
@@ -2180,7 +2234,7 @@ export function usePen(opts: {
     else setArcRadius(pathId, segIndex, Math.hypot(S.x - C.x, S.y - C.y))
   }
   function setCircleRadius(id: EntityId, r: number): boolean {
-    if (!(r > 0)) return false
+    if (!(r > 0)) { if (Number.isFinite(r)) status.value = RADIUS_POSITIVE; return false }
     return tryEdit(d => {
       const c = d.entities.find(e => e.id === id)
       if (c?.kind !== 'circle') return null
@@ -2261,10 +2315,10 @@ export function usePen(opts: {
   }
   // settle, then run (a rule gets its full check here, unless the caller
   // just ran it — `prechecked` — and settling changed nothing); the refusal, or OK
-  function settleAndRun(id: string, at: Vec2 | null, prechecked = false): ActionState {
+  function settleAndRun(id: string, at: Vec2 | null, prechecked = false, keepSelection = false): ActionState {
     const before = docRevision.value
     settleLive()
-    const r = runItem(actionHost, id, at, prechecked && docRevision.value === before)
+    const r = runItem(actionHost, id, at, prechecked && docRevision.value === before, keepSelection)
     if (!r.ok) status.value = r.reason
     return r
   }
@@ -2339,12 +2393,14 @@ export function usePen(opts: {
   // one (or anything during a Clean up preview) does nothing and says why.
   // `prechecked`: the caller has just had checkRuleItem say yes for this
   // drawing (docRevision unchanged since), so the rule's trial solve isn't run twice.
-  function runAction(id: string, at: Vec2 | null = null, opts: { prechecked?: boolean } = {}): boolean {
+  // `keepSelection`: a rule added keeps the selection (Properties' + list —
+  // the new rule then shows in the list it was added from).
+  function runAction(id: string, at: Vec2 | null = null, opts: { prechecked?: boolean; keepSelection?: boolean } = {}): boolean {
     if (cleanup.value) return false
     const q = quickState(id)
     if (!q.ok) { status.value = q.reason; return false }
     closeMenus()
-    return settleAndRun(id, at, !!opts.prechecked).ok
+    return settleAndRun(id, at, !!opts.prechecked, !!opts.keepSelection).ok
   }
   // Properties' + list, when a rule is hovered (controller ruling C1): the
   // full check on demand — the cheap one first, then the window trial solve
@@ -2882,7 +2938,7 @@ export function usePen(opts: {
     setArcRadius, setConstraintValue, removeConstraintById, onArcDimClick, onConstraintMarkClick,
     commitDimension,
     // copy / paste / select all / dissolve a point (pen stage 6)
-    copySelection, pasteState, paste, copySvg, selectAll, dissolveState, dissolvePoint,
+    copySelection, pasteState, paste, copySvg, selectAll, dissolveState, dissolvePoint, viewSize, setViewSize,
     // Properties: typed sizes, the radius lock, the hover highlight (pen stage 6)
     highlight, setHighlight, setPointXY, setLineLength, setLineAngle, setArcRadiusValue, setArcSweep, setArcLength,
     toggleArcRadiusLock, setCircleRadius, toggleCircleRadiusLock,

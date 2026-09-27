@@ -63,7 +63,7 @@ test('a right-click on a line selects it and lists its rules and actions; a grey
   await expect(mi(page, 'construction')).toContainText('X')
   await expect(mi(page, 'mirror')).toHaveAttribute('aria-disabled', 'true')
   await mi(page, 'mirror').hover()
-  await expect(page.locator('[data-pen-tip-id="mirror"] [data-pen-tip-reason]')).toHaveText('Select a shape first')
+  await expect(page.locator('[data-pen-tip-id="mirror"] [data-pen-tip-reason]')).toHaveText('Select something to mirror besides the line')
   await mi(page, 'rule:horizontal').click()
   await expect(menu(page)).toHaveCount(0)
   const d = await D(page)
@@ -350,6 +350,58 @@ test('Properties: a line’s length and a point’s X typed; an arc’s lock, it
   expect(await page.evaluate(() => (window as any).__sketchDraw.highlight())).toEqual([])
 })
 
+test('Properties: + Add a rule keeps the selection, so the new rule shows in the list', async ({ page }) => {
+  await open(page); await load(page)
+  const props = page.getByTestId('sketch-pen-properties')
+  const l2 = await at(page, 5, 5.5)
+  await page.mouse.click(l2.x, l2.y)
+  await expect(props.locator('[data-props-header]')).toHaveText('1 line')
+  await props.locator('[data-act="rule-add"]').click()
+  await props.locator('[data-rule-add="rule:horizontal"]').click()
+  expect(await sel(page)).toEqual(['L2'])
+  await expect(props.locator('[data-props-header]')).toHaveText('1 line')
+  await expect(props.locator('[data-rule-row]')).toHaveText(['Horizontal — Line 2'])
+  // one undo step
+  await page.keyboard.press(`${META}+z`)
+  expect((await D(page)).constraints.map((k: any) => k.id)).toEqual(['k1', 'k2'])
+})
+
+test('Properties: a length of 0 says why it can’t be kept', async ({ page }) => {
+  await open(page); await load(page)
+  const props = page.getByTestId('sketch-pen-properties')
+  const l1 = await at(page, 5, 2)
+  await page.mouse.click(l1.x, l1.y)
+  const len = props.locator('[data-prop="length"] input')
+  await len.click({ clickCount: 3 }); await page.keyboard.type('0'); await page.keyboard.press('Enter')
+  await expect(page.locator('[data-status]')).toHaveText('A length must be more than 0')
+  await expect(len).toHaveValue('6')
+})
+
+test('a copy in the pen page pastes into the Frame in view, at the same size on screen', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 800 })
+  await open(page); await load(page)
+  const l1 = await at(page, 5, 2)
+  await page.mouse.click(l1.x, l1.y)
+  const b0 = (await page.locator('[data-ent="L1"]').boundingBox())!   // 6 units at 34 px per unit
+  await page.keyboard.press(`${META}+c`)
+  // the same page session (the pen's clipboard lives there): a client-side route to the Frame lab
+  await page.evaluate(() => (document.querySelector('#__nuxt') as any).__vue_app__.config.globalProperties.$router.push('/dev/frame-lab'))
+  await page.waitForSelector('[data-ready]')
+  await page.locator('[data-testid="compositor-stage"] button[title^="Pen"]:not([data-tool])').first().click()
+  await expect(page.locator('[data-tool="path"]')).toBeVisible()
+  const ov = page.locator('[data-testid="frame-pen-overlay"]')
+  const box = (await ov.boundingBox())!
+  await page.keyboard.press(`${META}+v`)
+  await expect(page.getByTestId('frame-pen-properties').locator('[data-props-header]')).toHaveText('1 line')
+  const pb = (await ov.locator('[data-ent]').last().boundingBox())!
+  expect(Math.abs(pb.width - b0.width)).toBeLessThan(4)
+  expect(Math.abs(pb.height - b0.height)).toBeLessThan(4)
+  // in view: its middle is inside the drawing area
+  const cx = pb.x + pb.width / 2, cy = pb.y + pb.height / 2
+  expect(cx).toBeGreaterThan(box.x); expect(cx).toBeLessThan(box.x + box.width)
+  expect(cy).toBeGreaterThan(box.y); expect(cy).toBeLessThan(box.y + box.height)
+})
+
 test('Repeat and Mirror copy rules never show in Properties or the menu', async ({ page }) => {
   await open(page)
   await page.evaluate(() => {
@@ -405,15 +457,19 @@ async function frameLine(page: Page, width: number) {
   await page.locator('[data-testid="compositor-stage"] button[title^="Pen"]:not([data-tool])').first().click()
   await expect(page.locator('[data-tool="path"]')).toBeVisible()
   const box = (await page.locator('[data-testid="frame-pen-overlay"]').boundingBox())!
-  // tools by key: at 1024 px the Frame's side panels cover the ends of the
-  // pen's tool row (reported; the Frame's layout, not stage 6)
-  await page.keyboard.press('l')
+  // tools by the real mouse: the pen's bar sits between the Frame's side
+  // panels at every width (its row wraps), so both ends of it take clicks
+  await page.locator('[data-tool="line"]').click()
   await expect(page.locator('[data-tool="line"]')).toHaveAttribute('aria-pressed', 'true')
   const y = box.y + box.height / 2
   await page.mouse.click(box.x + box.width * 0.3, y)
   await page.mouse.click(box.x + box.width * 0.6, y)
-  await page.keyboard.press('v')
+  await page.locator('[data-tool="select"]').click()
   await expect(page.locator('[data-tool="select"]')).toHaveAttribute('aria-pressed', 'true')
+  // Done and Cancel are clear of the side panels too (a trial click fails if
+  // anything covers them)
+  await page.locator('[data-act="done"]').click({ trial: true })
+  await page.locator('[data-act="cancel"]').click({ trial: true })
   return { box, y }
 }
 

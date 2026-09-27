@@ -171,6 +171,17 @@ describe('PenProperties', () => {
     expect(wrapper.find(`[data-rule-row="${s.tan}"]`).exists()).toBe(false)
   })
 
+  it('a length or radius of 0 reaches the pen, which says why (no silent floor)', async () => {
+    const s = scene()
+    s.pen.pick(s.line)
+    wrapper = mount(PenProperties, { props: { pen: s.pen } })
+    await nextTick()
+    await type(wrapper, '[data-prop="length"]', '0')
+    expect(s.pen.status.value).toBe('A length must be more than 0')
+    expect(shown(wrapper, '[data-prop="length"]')).toBe('4')
+    await type(wrapper, '[data-prop="length"]', '-2')
+    expect(s.pen.status.value).toBe('A length must be more than 0')
+  })
   it('an arc whose end is fixed: Sweep and Length disabled, Radius still typed', async () => {
     const s = scene()
     P(s.doc.value, s.p5).fixed = true
@@ -280,6 +291,10 @@ describe('PenProperties', () => {
     await nextTick()
     expect(s.doc.value.constraints.some(k => k.kind === 'vertical')).toBe(true)
     expect(wrapper.find('[data-rule-add]').exists()).toBe(false)
+    // the selection stays, so the new rule shows in this very list
+    expect(s.pen.selection.value).toEqual([s.p1, s.p5])
+    expect(wrapper.find('[data-props-header]').text()).toBe('2 points')
+    expect(wrapper.findAll('[data-rule-row]').map(r => r.text())).toContain('Vertical — Point 1 · Point 3')
     s.pen.undo()
     expect(s.doc.value.constraints.some(k => k.kind === 'vertical')).toBe(false)
     expect(s.pen.canUndo()).toBe(false)

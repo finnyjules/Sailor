@@ -325,3 +325,33 @@ describe('fix round 1', () => {
     pen.undo(); pen.undo(); expect(pen.canUndo()).toBe(false)
   })
 })
+
+describe('a size of 0 or less says why', () => {
+  it('Length, Radius, Sweep: a plain status, nothing moves, no step', () => {
+    let a = '', b = '', circle = '', P1 = ''
+    const { doc, pen } = mk(d => {
+      a = addPoint(d, 0, 0); b = addPoint(d, 4, 0); addLine(d, a, b)
+      circle = addCircle(d, addPoint(d, 10, 10), 2)
+      const s = addPoint(d, 20, 0), e = addPoint(d, 22, 2), c = addPoint(d, 22, 0)
+      P1 = addPath(d, [s, e], [{ kind: 'arc', center: c, sweep: 1 }])
+    })
+    const before = JSON.stringify(doc.value)
+    expect(pen.setLineLength(a, b, 0)).toBe(false)
+    expect(pen.status.value).toBe('A length must be more than 0')
+    pen.status.value = ''
+    expect(pen.setLineLength(a, b, -3)).toBe(false)
+    expect(pen.status.value).toBe('A length must be more than 0')
+    expect(pen.setCircleRadius(circle, 0)).toBe(false)
+    expect(pen.status.value).toBe('A radius must be more than 0')
+    pen.status.value = ''
+    expect(pen.setArcRadiusValue(P1, 0, -1)).toBe(false)
+    expect(pen.status.value).toBe('A radius must be more than 0')
+    pen.status.value = ''
+    expect(pen.setArcLength(P1, 0, 0)).toBe(false)
+    expect(pen.status.value).toBe('A length must be more than 0')
+    expect(pen.setArcSweep(P1, 0, 0)).toBe(false)
+    expect(pen.status.value).toBe('A sweep must be more than 0°')
+    expect(JSON.stringify(doc.value)).toBe(before)
+    expect(pen.canUndo()).toBe(false)
+  })
+})

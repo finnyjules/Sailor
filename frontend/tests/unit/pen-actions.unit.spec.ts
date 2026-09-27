@@ -47,7 +47,7 @@ describe('the list menu', () => {
     expect(item(pen, 'construction')!.key).toBe('X')
     expect(item(pen, 'flip-h')!.key).toBe('⇧H')
     expect(item(pen, 'delete')!.danger).toBe(true)
-    expect(item(pen, 'mirror')!.state).toEqual({ ok: false, reason: REASON.shape })
+    expect(item(pen, 'mirror')!.state).toEqual({ ok: false, reason: REASON.mirrorLine })
     expect(item(pen, 'paste')!.state).toEqual({ ok: false, reason: REASON.emptyClip })
   })
   it('stage 8’s items are absent, not greyed', () => {
@@ -377,4 +377,94 @@ describe('session ends close the menu and the wheel', () => {
       expect(pen.wheel.value).toBeNull()
     })
   }
+})
+
+describe('final-review fixes', () => {
+  it('Properties’ add keeps the selection: the new rule is listed where it was added (menu still clears)', () => {
+    const { doc, pen } = mk(twoLines)
+    pen.pick(l2)
+    expect(pen.runAction('rule:horizontal', null, { keepSelection: true })).toBe(true)
+    expect(doc.value.constraints.at(-1)!.kind).toBe('horizontal')
+    expect(pen.selection.value).toEqual([l2])
+    pen.undo()
+    expect(doc.value.constraints).toHaveLength(0)
+    // the menu's pick clears it, as since stage 1
+    pen.pick(l2)
+    pen.openMenu({ x: 0, y: 0 }, null)
+    pen.runMenuItem('rule:horizontal')
+    expect(pen.selection.value).toEqual([])
+  })
+  it('a kept Coincident merge selects the kept point', () => {
+    let p = '', q = ''
+    const { doc, pen } = mk(d => { p = addPoint(d, 0, 0); q = addPoint(d, 0.5, 0.5) })
+    pen.pick(p); pen.pick(q, true)
+    expect(pen.runAction('rule:coincident', null, { keepSelection: true })).toBe(true)
+    expect(doc.value.entities.filter(e => e.kind === 'point')).toHaveLength(1)
+    expect(pen.selection.value).toEqual([p])
+  })
+  it('a kept Option-picked segment stays picked', () => {
+    let P = ''
+    const { pen } = mk(d => {
+      const pts = [addPoint(d, 0, 0), addPoint(d, 4, 1), addPoint(d, 8, 0)]
+      P = addPath(d, pts, [{ kind: 'line' }, { kind: 'line' }])
+    })
+    pen.pickSegment(P, 0)
+    expect(pen.runAction('rule:horizontal', null, { keepSelection: true })).toBe(true)
+    expect(pen.selectedSegments.value).toEqual([{ pathId: P, segIndex: 0 }])
+  })
+  it('Mirror with a lone line says what else to pick; Flip and Make guide on a segment say to pick the path', () => {
+    let P = ''
+    const { pen } = mk(d => {
+      twoLines(d)
+      const pts = [addPoint(d, 0, 9), addPoint(d, 4, 10), addPoint(d, 8, 9)]
+      P = addPath(d, pts, [{ kind: 'line' }, { kind: 'line' }])
+    })
+    pen.pick(l1)
+    pen.openMenu({ x: 0, y: 0 }, null)
+    expect(item(pen, 'mirror')!.state).toEqual({ ok: false, reason: 'Select something to mirror besides the line' })
+    pen.closeMenu()
+    pen.clearSel()
+    pen.pickSegment(P, 1)
+    pen.openMenu({ x: 0, y: 0 }, null)
+    for (const id of ['flip-h', 'flip-v', 'construction', 'mirror']) {
+      expect(item(pen, id)!.state).toEqual({ ok: false, reason: 'Select the whole path, not one segment' })
+    }
+  })
+  it('an open wheel lets a ⌘ combo through: the wheel closes and ⌘Z undoes', () => {
+    const { doc, pen } = mk(twoLines)
+    pen.pick(l2)
+    pen.runAction('rule:horizontal')
+    pen.pick(l1)
+    expect(pen.openWheel({ x: 0, y: 0 })).toBe(true)
+    expect(pen.onKeydown(key('z', { metaKey: true }))).toBe(true)
+    expect(pen.wheel.value).toBeNull()
+    expect(doc.value.constraints).toHaveLength(0)
+    // a plain key is still swallowed by an open wheel
+    pen.pick(l1)
+    pen.openWheel({ x: 0, y: 0 })
+    expect(pen.onKeydown(key('v'))).toBe(true)
+    expect(pen.wheel.value).not.toBeNull()
+  })
+  it('the full check of a picked rule on a 150-piece drawing, through the pen, takes under 250 ms', () => {
+    const { pen } = mk(d => {
+      const pts = Array.from({ length: 151 }, (_, i) => addPoint(d, i * 2, (i % 2) * 1.5 + (i % 7) * 0.1))
+      for (let i = 0; i < 150; i++) {
+        const A = d.entities.find(e => e.id === pts[i]) as any, B = d.entities.find(e => e.id === pts[i + 1]) as any
+        addLine(d, pts[i]!, pts[i + 1]!)
+        addConstraint(d, 'distance', [pts[i]!, pts[i + 1]!], Math.hypot(A.x - B.x, A.y - B.y))
+      }
+    })
+    const lines = pen.doc.value.entities.filter(e => e.kind === 'line')
+    pen.pick(lines[40]!.id); pen.pick(lines[90]!.id, true)
+    const before = JSON.stringify(pen.doc.value)
+    let m = Infinity, r: unknown = null
+    for (let k = 0; k < 3; k++) {
+      const t0 = performance.now()
+      r = pen.checkRuleItem('rule:parallel')
+      m = Math.min(m, performance.now() - t0)
+    }
+    expect(r).toBeTruthy()
+    expect(m).toBeLessThan(250)
+    expect(JSON.stringify(pen.doc.value)).toBe(before)
+  })
 })

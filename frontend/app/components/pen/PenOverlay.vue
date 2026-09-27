@@ -51,10 +51,11 @@ import { applyView, invertView, viewToSvg, type ViewMatrix } from '~/lib/sketch/
 import { spanPathD, SPARKLE_LIFETIME_MS, isTypingInField, type Pen } from '~/composables/pen/usePen'
 import { pointRolesForDoc, type PointRole } from '~/lib/sketch/pointRoles'
 import { clampChipOrigin } from '~/lib/sketch/chipClamp'
-import { TOOL_KEYS, isCleanupKey, isActionKey, isApplePlatform } from '~/composables/pen/penKeys'
+import { TOOL_KEYS, isCleanupKey, isActionKey, isApple } from '~/composables/pen/penKeys'
 import { cleanupBadges, BADGE_H, type CleanupBadge } from '~/lib/sketch/cleanup'
 import { WHEEL_OPEN_PX, ACTIONS } from '~/composables/pen/penActions'
 import { pieceKey } from '~/lib/sketch/pieces'
+import { extractPieces, piecesCentre } from '~/lib/sketch/clipboard'
 import PenContextMenu from '~/components/pen/PenContextMenu.vue'
 import PenActionWheel from '~/components/pen/PenActionWheel.vue'
 
@@ -85,8 +86,7 @@ const emit = defineEmits<{
 // A Mac ctrl-click is `button === 0` plus a suppressed `contextmenu` — not a
 // real primary click. It is a right press (pen stage 6: the pen's own menu or
 // wheel), never a place / pick / drag.
-const isMacPlatform = typeof navigator !== 'undefined'
-  && isApplePlatform((navigator as any).userAgentData?.platform || navigator.platform)
+const isMacPlatform = isApple()
 function isCtrlContextClick(ev: PointerEvent) { return ev.ctrlKey && isMacPlatform }
 
 // the pen is read ONCE — fixed for the overlay's lifetime (re-key the overlay
@@ -103,7 +103,7 @@ const {
   trimDown, trimMove, trimUp, cutMove, cutClick, dissolveMove, dissolveClick, clearToolHover,
   arcDragStart, arcDragMove, arcDragEnd, arcDragTransient,
   cleanup: cleanupSession, toggleCleanupFix, toggleCleanupKind,
-  highlight, menu, wheel, openMenu, closeMenus, openWheel, wheelPointer, releaseWheel, closeWheel,
+  highlight, menu, wheel, openMenu, closeMenus, openWheel, wheelPointer, releaseWheel, closeWheel, setViewSize,
 } = props.pen
 
 const svgEl = ref<SVGSVGElement | null>(null)
@@ -675,6 +675,50 @@ function toDrawing(p: { x: number; y: number }): { x: number; y: number } | null
 function drawingXY(ev: PointerEvent) {
   return toDrawing(localXY(ev))
 }
+// svg-local pixels → client px (the inverse of localXY)
+function clientOf(p: { x: number; y: number }): { x: number; y: number } | null {
+  const el = svgEl.value
+  if (!el) return null
+  const ctm = el.getScreenCTM?.()
+  if (ctm && typeof DOMPoint !== 'undefined' && Number.isFinite(ctm.a)) {
+    const q = new DOMPoint(p.x, p.y).matrixTransform(ctm)
+    return { x: q.x, y: q.y }
+  }
+  const r = el.getBoundingClientRect()
+  const kx = props.width > 0 ? r.width / props.width : 1
+  const ky = props.height > 0 ? r.height / props.height : 1
+  return { x: r.left + p.x * kx, y: r.top + p.y * ky }
+}
+
+// the pen's drawing area, for a paste from another pen (it lands in the middle)
+watch(() => [props.width, props.height] as const, ([w, h]) => setViewSize(w, h), { immediate: true })
+// (No close on a view change as such: a host re-fits its view when its own
+// layout shifts — Shape Studio's preview shrinks as the rules row appears
+// on the right press's own pick — which must not close the menu just
+// opened. The user's own view moves all close it already: a wheel or pinch
+// (PenContextMenu), a press anywhere, the Frame's Space-pan and ⌘± keys.)
+// the menu from the keyboard (the ContextMenu key, ⇧F10): at the middle of the
+// selection (clamped to the drawing), or of the drawing when nothing is selected
+function isMenuKey(ev: KeyboardEvent): boolean {
+  return ev.key === 'ContextMenu' || (ev.key === 'F10' && ev.shiftKey && !ev.metaKey && !ev.ctrlKey && !ev.altKey)
+}
+function openMenuFromKeyboard(): boolean {
+  if (cleanupSession.value) return false
+  settleOverlayGesture()
+  const hasPick = selection.value.length > 0 || selectedSegments.value.length > 0
+  let local = { x: props.width / 2, y: props.height / 2 }
+  if (hasPick) {
+    const c = extractPieces(doc.value, selection.value, selectedSegments.value)
+    if (c.entities.length) {
+      const s = toScreen(piecesCentre(c))
+      local = { x: clamp(s.x, 0, props.width), y: clamp(s.y, 0, props.height) }
+    }
+  }
+  const at = clientOf(local)
+  if (!at) return false
+  openMenu(at, toDrawing(local))
+  return true
+}
 
 // ---------- right press: the list menu and the action wheel (pen stage 6) ----------
 // A right press (or a Mac ctrl-click) selects the piece under it first (in
@@ -1069,8 +1113,21 @@ function handleKeydownEvent(ev: KeyboardEvent): boolean {
   // highlighted item even while a toolbar button has focus, Escape closes it
   // and is never the host's 'cancel'
   if (menu.value || wheel.value) {
-    if (menu.value && ev.key === 'Enter') settleOverlayGesture()
-    return props.pen.onKeydown(ev)
+    // a ⌘ / Ctrl combo closes it (a live right press settles, so its release
+    // runs nothing) and then acts as usual (⌘Z undoes, ⌘V pastes)
+    if ((ev.metaKey || ev.ctrlKey) && !['Meta', 'Control', 'Shift', 'Alt'].includes(ev.key)) {
+      closeMenus()
+      settleOverlayGesture()
+    } else {
+      if (menu.value && ev.key === 'Enter') settleOverlayGesture()
+      return props.pen.onKeydown(ev)
+    }
+  }
+  // the ContextMenu key and ⇧F10 open the list menu, as a right-click would
+  if (isMenuKey(ev)) {
+    if (!openMenuFromKeyboard()) return false
+    ev.preventDefault(); ev.stopPropagation()
+    return true
   }
   // ⌥⇧C: the overlay's own live gesture (a marquee, a point drag, an arc
   // press) settles first, so no mid-drag point reaches history or the

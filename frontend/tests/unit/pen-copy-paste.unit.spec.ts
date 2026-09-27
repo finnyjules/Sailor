@@ -69,6 +69,45 @@ describe('Copy and Paste', () => {
     expect(lines(b.doc.value)).toHaveLength(1)
     expect(penClipboard.value).not.toBeNull()
   })
+  it('into another pen drawing in other units: the same size on screen, the same way up, in the middle of its view', () => {
+    // the pen page: 34 px per unit, y up; a line (0,0)→(4,2) with its length held and a quarter arc
+    let l = '', arcP = ''
+    const a = mk(d => {
+      const p = addPoint(d, 0, 0), q = addPoint(d, 4, 2)
+      l = addLine(d, p, q); addConstraint(d, 'distance', [p, q], Math.hypot(4, 2))
+      const s = addPoint(d, 6, 0), e = addPoint(d, 8, 2), c = addPoint(d, 8, 0)
+      arcP = addPath(d, [s, e], [{ kind: 'arc', center: c, sweep: 1 }])
+    })
+    a.pen.pick(l); a.pen.pick(arcP, true); a.pen.copySelection()
+    // a host drawing 10 px per unit, y down, 800 × 600 px on screen
+    const doc = ref<SketchDoc>({ entities: [], constraints: [] })
+    const V = { a: 10, b: 0, c: 0, d: 10, e: 0, f: 0 }
+    const b = usePen({ doc, view: ref(V) })
+    b.setViewSize(800, 600)
+    expect(b.paste()).toBe(true)
+    const d = doc.value
+    const nl = lines(d)[0]
+    const p1 = P(d, nl.p1), p2 = P(d, nl.p2)
+    const k = 34 / 10
+    // the same on-screen length: 4.47 units × 34 px = 15.2 units × 10 px
+    expect(Math.hypot(p2.x - p1.x, p2.y - p1.y)).toBeCloseTo(Math.hypot(4, 2) * k, 6)
+    expect(d.constraints.find(c => c.kind === 'distance')!.value).toBeCloseTo(Math.hypot(4, 2) * k, 6)
+    // the same way up: p2 was up-right of p1 on screen, and still is (y down here)
+    expect(p2.x).toBeGreaterThan(p1.x)
+    expect(p2.y).toBeLessThan(p1.y)
+    // the arc still bulges the same way on screen: its sweep turned over with y
+    const arc = d.entities.find(e => e.kind === 'path') as any
+    expect(arc.segments[0].sweep).toBe(0)
+    // centred on the view's middle (40, 30), then one 16 px step down-right
+    const xs = d.entities.filter(e => e.kind === 'point').map((e: any) => e.x)
+    const ys = d.entities.filter(e => e.kind === 'point').map((e: any) => e.y)
+    expect((Math.min(...xs) + Math.max(...xs)) / 2).toBeCloseTo(40 + 1.6, 6)
+    expect((Math.min(...ys) + Math.max(...ys)) / 2).toBeCloseTo(30 + 1.6, 6)
+    // pasting back into the pen it came from still steps 16 px from where it was
+    a.pen.paste()
+    const back = lines(a.doc.value).at(-1)
+    expect(P(a.doc.value, back.p1).x).toBeCloseTo(2 * 16 / 34, 9)
+  })
   it('copies Option-picked segments as pieces of their own', () => {
     let P1 = ''
     const { doc, pen } = mk(d => {

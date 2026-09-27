@@ -189,3 +189,11 @@ export function handlePenKey(ev: KeyboardEvent, ctx: PenKeyContext, local?: { ca
 export function isApplePlatform(platform: string | undefined | null): boolean {
   return /mac|iphone|ipad|ipod/i.test(platform || '')
 }
+
+/** This browser runs on an Apple platform — the ONE check every pen part uses
+ *  (the Mac ctrl-click right press, ⌘ glyphs in the cards and the menu).
+ *  Read when called, not at import, so it follows the page it runs in. */
+export function isApple(): boolean {
+  if (typeof navigator === 'undefined') return false
+  return isApplePlatform((navigator as { userAgentData?: { platform?: string } }).userAgentData?.platform || navigator.platform)
+}

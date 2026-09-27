@@ -35,6 +35,21 @@ afterEach(() => { wrapper?.unmount(); wrapper = null; document.body.innerHTML = 
 const q = (s: string) => document.body.querySelector(s) as HTMLElement | null
 
 describe('PenContextMenu', () => {
+  it('labels itself by its heading (presentation), and names the pen’s highlight as its active descendant', async () => {
+    const { l, pen } = mk()
+    pen.pick(l)
+    pen.openMenu({ x: 0, y: 0 }, null)
+    wrapper = mount(PenContextMenu, { props: { pen } })
+    await nextTick()
+    const menu = q('[data-pen-menu]')!, head = q('[data-pen-menu-header]')!
+    expect(head.getAttribute('role')).toBe('presentation')
+    expect(menu.getAttribute('aria-labelledby')).toBe(head.id)
+    expect(menu.hasAttribute('aria-activedescendant')).toBe(false)
+    pen.setMenuActive('rule:horizontal')
+    await nextTick()
+    const id = menu.getAttribute('aria-activedescendant')!
+    expect(document.getElementById(id)!.getAttribute('data-menu-item')).toBe('rule:horizontal')
+  })
   it('draws the heading, the items with keys, greyed ones hoverable; runs an enabled one', async () => {
     const { doc, l, pen } = mk()
     pen.pick(l)

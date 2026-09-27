@@ -129,7 +129,7 @@ watch(previewing, (open) => {
       <template v-if="hasEntitySelection">
         <PenTipCard id="fix"><button class="tbtn" data-verb="fix" aria-label="Fix" @click="fixSelected()">Fix</button></PenTipCard>
         <PenTipCard id="repeat"><button class="tbtn" data-verb="repeat" aria-label="Repeat…" @click="repeatPrompt()">Repeat…</button></PenTipCard>
-        <PenTipCard id="mirror"><button class="tbtn" data-verb="mirror" aria-label="Mirror" @click="doMirror()">Mirror</button></PenTipCard>
+        <PenTipCard id="mirror"><button class="tbtn" data-verb="mirror" aria-label="Mirror…" @click="doMirror()">Mirror…</button></PenTipCard>
         <PenTipCard id="flip-h"><button class="tbtn" data-verb="flip-h" aria-label="Flip horizontal" @click="flip('h')">Flip horizontal</button></PenTipCard>
         <PenTipCard id="flip-v"><button class="tbtn" data-verb="flip-v" aria-label="Flip vertical" @click="flip('v')">Flip vertical</button></PenTipCard>
         <PenTipCard id="construction"><button class="tbtn" data-verb="construction" aria-label="Make guide" @click="makeConstruction()">Make guide</button></PenTipCard>

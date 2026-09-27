@@ -17,6 +17,7 @@ import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { TooltipPortal, TooltipContent } from 'reka-ui'
 import { Tooltip, TooltipTrigger } from '~/components/ui/tooltip'
 import { PEN_TIPS, tipKeyLabel } from '~/composables/pen/penTips'
+import { isApple } from '~/composables/pen/penKeys'
 import { PEN_TIP_DEMOS, DEMO_LOOP_MS, DEMO_W, DEMO_H, type PenTipFrame } from '~/composables/pen/penTipDemos'
 import { sketchPathData } from '~/lib/sketch/sketchPath'
 
@@ -24,7 +25,7 @@ const props = withDefaults(defineProps<{ id: string; name?: string; side?: 'top'
 
 const tip = computed(() => PEN_TIPS[props.id])
 const title = computed(() => props.name ?? tip.value?.name ?? '')
-const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent)
+const isMac = isApple()
 const keyLabel = computed(() => (tip.value?.key ? tipKeyLabel(tip.value.key, isMac) : ''))
 const demoFn = computed(() => (tip.value?.demo ? PEN_TIP_DEMOS[tip.value.demo] : undefined))
 // removing tools get the pen's red; drawing previews its indigo; Select's

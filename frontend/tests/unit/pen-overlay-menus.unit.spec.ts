@@ -346,3 +346,59 @@ describe('PenOverlay hover highlight', () => {
     expect(m.wrapper.find(`[data-highlight="line:${m.l}"]`).exists()).toBe(false)
   })
 })
+
+describe('PenOverlay: final-review fixes', () => {
+  it('the ContextMenu key and ⇧F10 open the menu at the selection’s middle', async () => {
+    const m = mountIt('host'); wrapper = m.wrapper
+    const onHostKeydown = (m.wrapper.vm as any).onHostKeydown
+    m.pen.pick(m.l)
+    expect(onHostKeydown(new KeyboardEvent('keydown', { key: 'ContextMenu' }))).toBe(true)
+    expect(m.pen.menu.value!.header).toBe('1 line')
+    // the line runs (2,5)→(8,6): its middle (5, 5.5) is at (210, 213) in the svg
+    expect(m.pen.menu.value!.drawingAt!.x).toBeCloseTo(5, 9)
+    expect(m.pen.menu.value!.drawingAt!.y).toBeCloseTo(5.5, 9)
+    const at = m.pen.menu.value!.at
+    const r = m.wrapper.find('svg').element.getBoundingClientRect()
+    expect(at.x - r.left).toBeCloseTo(210, 6)
+    expect(at.y - r.top).toBeCloseTo(213, 6)
+    onHostKeydown(new KeyboardEvent('keydown', { key: 'Escape' }))
+    expect(m.pen.menu.value).toBeNull()
+    expect(onHostKeydown(new KeyboardEvent('keydown', { key: 'F10', shiftKey: true }))).toBe(true)
+    expect(m.pen.menu.value!.header).toBe('1 line')
+    // plain F10 is not the menu key
+    onHostKeydown(new KeyboardEvent('keydown', { key: 'Escape' }))
+    expect(onHostKeydown(new KeyboardEvent('keydown', { key: 'F10' }))).toBe(false)
+    expect(m.pen.menu.value).toBeNull()
+  })
+  it('with nothing selected the keyboard menu opens mid-drawing and offers Paste and Select all', async () => {
+    const m = mountIt('host'); wrapper = m.wrapper
+    expect((m.wrapper.vm as any).onHostKeydown(new KeyboardEvent('keydown', { key: 'ContextMenu' }))).toBe(true)
+    expect(m.pen.menu.value!.groups.flat().map(i => i.id)).toEqual(['paste', 'select-all'])
+  })
+  it('a host re-fitting its view (its own layout shifting) leaves the menu open', async () => {
+    const m = mountIt(); wrapper = m.wrapper
+    m.pen.pick(m.l)
+    m.pen.openMenu({ x: 10, y: 10 }, null)
+    await m.wrapper.setProps({ view: { ...view, e: view.e + 30 } })
+    expect(m.pen.menu.value).not.toBeNull()
+  })
+  it('a ⌘ combo with the wheel open closes it and acts; the trailing release runs nothing', async () => {
+    const m = mountIt('host'); wrapper = m.wrapper
+    m.pen.pick(m.l)
+    m.pen.runAction('rule:horizontal')
+    expect(m.doc.value.constraints).toHaveLength(1)
+    await m.wrapper.find(`[data-ent="${m.l}"]`).trigger('pointerdown', R(200, 210))
+    await m.wrapper.find('svg').trigger('pointermove', R(150, 160))
+    expect(m.pen.wheel.value).not.toBeNull()
+    expect((m.wrapper.vm as any).onHostKeydown(new KeyboardEvent('keydown', { key: 'z', metaKey: true }))).toBe(true)
+    expect(m.pen.wheel.value).toBeNull()
+    expect(m.doc.value.constraints).toHaveLength(0)
+    await m.wrapper.find('svg').trigger('pointerup', R(150, 160))
+    expect(m.pen.menu.value).toBeNull()
+    expect(m.pen.wheel.value).toBeNull()
+  })
+  it('reports its size to the pen, for a paste from another pen', () => {
+    const m = mountIt(); wrapper = m.wrapper
+    expect(m.pen.viewSize.value).toEqual({ width: 680, height: 460 })
+  })
+})

@@ -12,12 +12,17 @@ import type { Pen } from '~/composables/pen/usePen'
 import PenTipCard from '~/components/pen/PenTipCard.vue'
 import { TooltipProvider } from '~/components/ui/tooltip'
 import { tipKeyLabel } from '~/composables/pen/penTips'
+import { isApple } from '~/composables/pen/penKeys'
 
 const props = defineProps<{ pen: Pen }>()
 const { menu, closeMenu, runMenuItem, setMenuActive } = props.pen
-const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent)
+const isMac = isApple()
 
 const root = ref<HTMLElement | null>(null)
+// ids for aria-activedescendant: the pen-driven highlight (menu.active) is the
+// menu's active descendant, since the pen, not DOM focus, moves it
+const uid = `pen-menu-${Math.random().toString(36).slice(2, 8)}`
+const itemDomId = (id: string) => `${uid}-${id.replace(/[^\w-]/g, '_')}`
 const pos = ref({ x: menu.value?.at.x ?? 0, y: menu.value?.at.y ?? 0 })
 // keep the whole menu inside the window (8 px margin), measured once drawn
 async function place() {
@@ -63,14 +68,16 @@ onBeforeUnmount(() => {
 <template>
   <Teleport to="body">
     <TooltipProvider :delay-duration="350" :skip-delay-duration="600" disable-hoverable-content>
-      <div v-if="menu" ref="root" data-pen-menu role="menu" :aria-label="menu.header ?? 'Drawing'" class="pen-menu"
+      <div v-if="menu" ref="root" data-pen-menu role="menu" :aria-label="menu.header ? undefined : 'Drawing'"
+           :aria-labelledby="menu.header ? uid + '-header' : undefined"
+           :aria-activedescendant="menu.active ? itemDomId(menu.active) : undefined" class="pen-menu"
            :style="{ left: pos.x + 'px', top: pos.y + 'px' }" @contextmenu.prevent>
-        <div v-if="menu.header" class="pen-menu-header" data-pen-menu-header>{{ menu.header }}</div>
+        <div v-if="menu.header" :id="uid + '-header'" role="presentation" class="pen-menu-header" data-pen-menu-header>{{ menu.header }}</div>
         <template v-for="(group, gi) in menu.groups" :key="gi">
           <div v-if="gi > 0 || menu.header" class="pen-menu-sep" role="separator" />
           <PenTipCard v-for="it in group" :id="it.tip" :key="it.id" :name="it.label" side="right"
                       :reason="it.state.ok ? undefined : it.state.reason">
-            <button type="button" role="menuitem" tabindex="-1" class="pen-menu-item" :class="{ danger: it.danger }"
+            <button :id="itemDomId(it.id)" type="button" role="menuitem" tabindex="-1" class="pen-menu-item" :class="{ danger: it.danger }"
                     :data-menu-item="it.id" :aria-disabled="it.state.ok ? undefined : 'true'"
                     :data-active="menu.active === it.id ? '' : null"
                     @mouseenter="setMenuActive(it.state.ok ? it.id : null)" @click="runMenuItem(it.id)">

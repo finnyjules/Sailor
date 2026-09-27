@@ -19,4 +19,8 @@ export const REASON = {
   emptyClip: 'Nothing to paste',
   openOnly: 'Only open lines can go here',
   noPieces: 'Nothing to select',
+  // Mirror copies across a line: a line (or only lines) is the axis, not a copy
+  mirrorLine: 'Select something to mirror besides the line',
+  // Flip and Make guide work on whole pieces; an Option-picked segment is part of one
+  wholePath: 'Select the whole path, not one segment',
 } as const

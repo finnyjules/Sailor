@@ -5,7 +5,7 @@
 import { describe, it, expect } from 'vitest'
 import type { SketchDoc } from '~/lib/sketch/model'
 import { addPoint, addLine, addCircle, addPath, addConstraint } from '~/lib/sketch/edit'
-import { extractPieces, insertPieces, piecesCentre, hasClosedPieces } from '~/lib/sketch/clipboard'
+import { extractPieces, insertPieces, piecesCentre, hasClosedPieces, scalePieces } from '~/lib/sketch/clipboard'
 
 const empty = (): SketchDoc => ({ entities: [], constraints: [] })
 const P = (d: SketchDoc, id: string) => d.entities.find(e => e.id === id) as any
@@ -94,5 +94,34 @@ describe('centre and closed pieces', () => {
     const clip = extractPieces(d, [circle], [])
     expect(piecesCentre(clip)).toEqual({ x: 5, y: 5 })
     expect(hasClosedPieces(clip)).toBe(true)
+  })
+})
+
+describe('scalePieces', () => {
+  it('resizes about the middle; held lengths scale; upside down turns arcs and Repeat turns over', () => {
+    const d = empty()
+    const a = addPoint(d, 0, 0), b = addPoint(d, 4, 0)
+    addConstraint(d, 'distance', [a, b], 4)
+    const c = addCircle(d, addPoint(d, 2, 2), 1)
+    addConstraint(d, 'radius', [c], 1)
+    const s = addPoint(d, 1, 0), e = addPoint(d, 2, 1), m = addPoint(d, 2, 0)
+    addPath(d, [s, e], [{ kind: 'arc', center: m, sweep: 1 }])
+    addConstraint(d, 'rotatedFrom', [e, s, m], 90)
+    const before = JSON.stringify(d)
+    const ctr = piecesCentre(d)
+    const out = scalePieces(d, 2, true)
+    expect(JSON.stringify(d)).toBe(before)                       // a new drawing
+    expect(piecesCentre(out)).toEqual(ctr)                        // about its middle
+    expect(P(out, b).x - P(out, a).x).toBeCloseTo(8, 9)
+    expect(P(out, a).y).toBeCloseTo(ctr.y + (ctr.y - 0) * 2, 9)  // y turned over
+    expect(out.constraints.find(k => k.kind === 'distance')!.value).toBe(8)
+    expect(out.constraints.find(k => k.kind === 'radius')!.value).toBe(2)
+    expect((out.entities.find(x => x.id === c) as any).r).toBe(2)
+    expect((out.entities.find(x => x.kind === 'path') as any).segments[0].sweep).toBe(0)
+    expect(out.constraints.find(k => k.kind === 'rotatedFrom')!.value).toBe(-90)
+    // not turned over: arcs and turns as they were
+    const same = scalePieces(d, 0.5)
+    expect((same.entities.find(x => x.kind === 'path') as any).segments[0].sweep).toBe(1)
+    expect(same.constraints.find(k => k.kind === 'rotatedFrom')!.value).toBe(90)
   })
 })

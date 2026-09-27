@@ -2453,7 +2453,8 @@ function onKeydown(e: KeyboardEvent) {
     // Space on a focused Clean up control (strength, Cancel, Apply) presses
     // it — not pan; stopped so no bubble listener sees it, not prevented
     if (e.code === 'Space' && isCleanupBarFocused()) { e.stopPropagation(); return }
-    if (viewportKey(e)) { e.stopPropagation(); return }
+    // a viewport key (Space-pan, ⌘± zoom) closes the pen's menu or wheel first
+    if (viewportKey(e)) { penSession.value.pen.closeMenus(); e.stopPropagation(); return }
     penOverlayRef.value?.onHostKeydown(e)
     // Any other ⌘/Ctrl combo belongs to the pen too, so the browser's own
     // action (⌘S save page, ⌘D bookmark, ⌘G find, ⌘V paste) must not fire.
@@ -9739,10 +9740,12 @@ defineExpose({ editor, layoutGridResolved, layoutGrid, overlayGrid, viewLayoutGr
            timeline). Outside Motion the column is bottom-anchored and shrink-wraps
            to the tool bar's width (its widest child), so the prompt above stretches
            to match it. In Motion it spans the panel gap, as the timeline always has:
-           pinned by hand (the stage behind it is full-bleed), panel gutter + 16px. -->
-      <div class="absolute bottom-8 flex flex-col items-stretch gap-2 pointer-events-none"
-        :class="inspectorTab === 'motion' ? 'z-20' : ''"
-        :style="inspectorTab === 'motion' ? { left: (gapLeft + 16) + 'px', right: (gapRight + 16) + 'px' } : undefined">
+           pinned by hand (the stage behind it is full-bleed), panel gutter + 16px.
+           While the pen is open it is pinned the same way, its bar centred in the
+           gap and wrapping, so no end of it sits under a side panel at laptop widths. -->
+      <div class="absolute bottom-8 flex flex-col gap-2 pointer-events-none"
+        :class="[inspectorTab === 'motion' ? 'z-20' : '', penSession && inspectorTab !== 'motion' ? 'items-center' : 'items-stretch']"
+        :style="(inspectorTab === 'motion' || penSession) ? { left: (gapLeft + 16) + 'px', right: (gapRight + 16) + 'px' } : undefined">
       <!-- The one prompt (StudioPromptHost): always here, Motion included. What it
            brings back (changes, answers) shows above it, never in the inspector.
            Hidden while the edit-image prompt or the pen's own bar takes its place. -->

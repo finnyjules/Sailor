@@ -18,7 +18,7 @@
 // Stage 8 extends it: add `offset`, `round-corner` and `chamfer` to ACTIONS
 // and their ids to SELECTION_MENU's first group after `repeat` (Ruling 2).
 // Until then they are absent, not greyed.
-import type { Ref } from 'vue'
+import { toRaw, type Ref } from 'vue'
 import type { SketchDoc, EntityId } from '~/lib/sketch/model'
 import type { Vec2 } from '~/lib/sketch/geom'
 import { pointClosure } from '~/lib/sketch/edit'
@@ -34,7 +34,7 @@ export interface PenActionHost {
   /** drawing units per screen px — the full rule check's collapse guard */
   unitsPerPx?: () => number
   availableConstraints(): RuleOption[]
-  applyWithValue(o: RuleOption): unknown
+  applyWithValue(o: RuleOption, opts?: { keepSelection?: boolean }): unknown
   fixSelected(): void
   dissolveState(id: EntityId): ActionState
   dissolvePoint(id: EntityId): boolean
@@ -65,7 +65,16 @@ const hasPick = (h: PenActionHost) => h.selection.value.length > 0 || h.selected
 const hasShape = (h: PenActionHost) => h.selection.value.some(id => { const k = kindOf(h, id); return !!k && k !== 'point' })
 const pointsOf = (h: PenActionHost) => h.selection.value.filter(id => kindOf(h, id) === 'point')
 const onePoint = (h: PenActionHost) => h.selection.value.length === 1 && !h.selectedSegments.value.length && pointsOf(h).length === 1
-const canFlip = (h: PenActionHost) => (pointClosure(h.doc.value, h.selection.value).length >= 2 ? OK : no(REASON.shape))
+// nothing whole selected: an Option-picked segment is a picked piece, but
+// Flip and Make guide act on whole pieces — say so rather than "select a shape"
+const needShape = (h: PenActionHost) => no(h.selectedSegments.value.length ? REASON.wholePath : REASON.shape)
+const canFlip = (h: PenActionHost) => (pointClosure(h.doc.value, h.selection.value).length >= 2 ? OK : needShape(h))
+// doMirror's own rule: something selected that isn't a line (a line is the axis)
+const canMirror = (h: PenActionHost): ActionState => {
+  const sel = h.selection.value
+  if (sel.some(id => kindOf(h, id) !== 'line')) return OK
+  return sel.length ? no(REASON.mirrorLine) : needShape(h)
+}
 
 export const ACTIONS: Record<string, ActionDef> = {
   fix: {
@@ -84,11 +93,10 @@ export const ACTIONS: Record<string, ActionDef> = {
     state: h => (onePoint(h) ? h.dissolveState(pointsOf(h)[0]!) : no(REASON.onePoint)),
     run: h => { h.dissolvePoint(pointsOf(h)[0]!) },
   },
-  construction: { label: 'Make guide', tip: 'construction', key: 'X', state: h => (hasShape(h) ? OK : no(REASON.shape)), run: h => h.makeConstruction() },
+  construction: { label: 'Make guide', tip: 'construction', key: 'X', state: h => (hasShape(h) ? OK : needShape(h)), run: h => h.makeConstruction() },
   'flip-h': { label: 'Flip horizontal', tip: 'flip-h', key: '⇧H', state: canFlip, run: h => h.flip('h') },
   'flip-v': { label: 'Flip vertical', tip: 'flip-v', key: '⇧V', state: canFlip, run: h => h.flip('v') },
-  // doMirror's own rule: something selected that isn't a line (the axis)
-  mirror: { label: 'Mirror…', tip: 'mirror', state: h => (h.selection.value.some(id => kindOf(h, id) !== 'line') ? OK : no(REASON.shape)), run: h => h.doMirror() },
+  mirror: { label: 'Mirror…', tip: 'mirror', state: canMirror, run: h => h.doMirror() },
   repeat: { label: 'Repeat…', tip: 'repeat', state: h => (hasShape(h) ? OK : no(REASON.shape)), run: h => { void h.repeatPrompt() } },
   copy: { label: 'Copy', tip: 'copy', key: '⌘C', state: h => (hasPick(h) ? OK : no(REASON.nothing)), run: h => { h.copySelection() } },
   'copy-svg': { label: 'Copy as SVG', tip: 'copy-svg', state: h => (hasShape(h) || h.selectedSegments.value.length ? OK : no(REASON.shape)), run: h => { h.copySvg() } },
@@ -141,7 +149,9 @@ export function ruleState(doc: SketchDoc, sel: EntityId[], segs: SegRef[], o: Ru
 
 /** The full check, when a rule is picked (C1): the window trial solve. */
 export function pickRuleState(h: PenActionHost, o: RuleOption): ActionState {
-  const doc = h.doc.value, sel = h.selection.value, segs = h.selectedSegments.value
+  // the raw drawing and selection: walking a big drawing through Vue's
+  // reactive proxies costs many times more, and the check changes nothing
+  const doc = toRaw(h.doc.value), sel = toRaw(h.selection.value), segs = toRaw(h.selectedSegments.value)
   const spec = ruleSpecFor(doc, sel, segs, o, measuredValue(doc, sel, o))
   if (!spec) return no(REASON.notHere)
   const unitsPerPx = h.unitsPerPx?.()
@@ -172,14 +182,16 @@ export function menuFor(h: PenActionHost): { header: string | null; groups: PenM
 
 /** Run a menu item, wheel slice or key action. A rule gets the full check
  *  first (skipped when `prechecked`: the caller just ran it on this very
- *  drawing); an action its own state. Returns the refusal (nothing ran) or OK. */
-export function runItem(h: PenActionHost, id: string, at: Vec2 | null, prechecked = false): ActionState {
+ *  drawing); an action its own state. `keepSelection`: a rule added keeps the
+ *  selection (Properties' + list), instead of clearing it like the menu and
+ *  the rules row. Returns the refusal (nothing ran) or OK. */
+export function runItem(h: PenActionHost, id: string, at: Vec2 | null, prechecked = false, keepSelection = false): ActionState {
   if (id.startsWith('rule:')) {
     const o = h.availableConstraints().find(x => ruleItemId(x) === id)
     if (!o) return no(REASON.notHere)
     const s = prechecked ? OK : pickRuleState(h, o)
     if (!s.ok) return s
-    void h.applyWithValue(o)
+    void h.applyWithValue(o, keepSelection ? { keepSelection } : undefined)
     return OK
   }
   const d = ACTIONS[id]

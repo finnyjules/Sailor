@@ -102,17 +102,19 @@ function add(it: PenMenuItem) {
   if (!s.ok) { status.value = s.reason; return }   // greyed, says why; nothing added
   // the verdict is fresh (forgotten on any drawing change), so the pick
   // doesn't trial-solve a second time
-  if (runAction(it.id, null, { prechecked: s.ok && checked.value.has(it.id) })) adding.value = false
+  // the selection is kept, so the new rule shows in this very list
+  if (runAction(it.id, null, { prechecked: s.ok && checked.value.has(it.id), keepSelection: true })) adding.value = false
 }
 watch(adding, forget)
 watch(rawDoc, forget)
 watch([selection, selectedSegments], () => { adding.value = false; forget(); leaveRule() }, { deep: true })
 onBeforeUnmount(() => { stopRest(); setHighlight([]) })
 
-// ── sizes (Ruling 13) ──
+// ── sizes (Ruling 13) ── (no floor on the fields: a length, radius or sweep
+// of 0 or less reaches the pen, which says why it can't be, in the status)
 interface Row {
   key: 'x' | 'y' | 'length' | 'angle' | 'radius' | 'sweep'
-  label: string; unit?: string; value: number; min?: number; disabled?: boolean
+  label: string; unit?: string; value: number; disabled?: boolean
   submit: (n: number) => void
 }
 const rows = computed<Row[]>(() => {
@@ -126,18 +128,18 @@ const rows = computed<Row[]>(() => {
   }
   if (t.kind === 'line') {
     return [
-      { key: 'length', label: 'Length', value: s.length!, min: 0, disabled: s.fixed, submit: n => setLineLength(t.a, t.b, n) },
+      { key: 'length', label: 'Length', value: s.length!, disabled: s.fixed, submit: n => setLineLength(t.a, t.b, n) },
       { key: 'angle', label: 'Angle', unit: '°', value: s.angle!, disabled: s.fixed, submit: n => setLineAngle(t.a, t.b, n) },
     ]
   }
   if (t.kind === 'arc') {
     return [
-      { key: 'radius', label: 'Radius', value: s.radius!, min: 0, submit: n => setArcRadiusValue(t.pathId, t.segIndex, n) },
-      { key: 'length', label: 'Length', value: s.length!, min: 0, disabled: s.endFixed, submit: n => setArcLength(t.pathId, t.segIndex, n) },
-      { key: 'sweep', label: 'Sweep', unit: '°', value: s.sweep!, min: 0, disabled: s.endFixed, submit: n => setArcSweep(t.pathId, t.segIndex, n) },
+      { key: 'radius', label: 'Radius', value: s.radius!, submit: n => setArcRadiusValue(t.pathId, t.segIndex, n) },
+      { key: 'length', label: 'Length', value: s.length!, disabled: s.endFixed, submit: n => setArcLength(t.pathId, t.segIndex, n) },
+      { key: 'sweep', label: 'Sweep', unit: '°', value: s.sweep!, disabled: s.endFixed, submit: n => setArcSweep(t.pathId, t.segIndex, n) },
     ]
   }
-  return [{ key: 'radius', label: 'Radius', value: s.radius!, min: 0, submit: n => setCircleRadius(t.id, n) }]
+  return [{ key: 'radius', label: 'Radius', value: s.radius!, submit: n => setCircleRadius(t.id, n) }]
 })
 function toggleLock() {
   const t = target.value
@@ -155,7 +157,7 @@ function toggleLock() {
         <div v-for="r in rows" :key="r.key" class="row" :data-prop="r.key">
           <span class="name">{{ r.label }}</span>
           <span class="field">
-            <PenNumberInput :value="r.value" :min="r.min" :disabled="r.disabled" :aria-label="r.label" @submit="r.submit" />
+            <PenNumberInput :value="r.value" :disabled="r.disabled" :aria-label="r.label" @submit="r.submit" />
             <span class="unit" aria-hidden="true">{{ r.unit ?? '' }}</span>
           </span>
           <PenTipCard v-if="r.key === 'radius'" id="prop-lock" side="left">

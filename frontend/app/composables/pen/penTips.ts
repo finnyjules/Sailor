@@ -107,7 +107,7 @@ export const PEN_TIPS: Record<string, PenTip> = {
     caption: 'Pins the selected points where they are; rules and drags leave them in place.' },
   repeat: { name: 'Repeat…',
     caption: 'Copies the selection around a ring. Type how many, then click the centre.' },
-  mirror: { name: 'Mirror',
+  mirror: { name: 'Mirror…',
     caption: 'Copies the selection across a line. Pick the line; the copy follows the original.' },
   'flip-h': { name: 'Flip horizontal', key: '⇧H',
     caption: 'Flips the selection left to right, in place.' },
