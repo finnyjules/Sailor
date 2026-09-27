@@ -835,12 +835,6 @@ async function runVueWorkflow(
         return 'abort'
       }
     }
-    // Shader effects (step 3, R2.10): while `shader-bake` is on, the browser bakes each
-    // one the runner can replay into the prompt; one it couldn't is left to the engine.
-    if (directPrompt && runnerEnabled && runnerFamilies.has('shader-bake')) {
-      const bake = await bakeShaderEffectsForRun(directPrompt)
-      if (bake.failed.length) toast.error('A shader effect couldn’t be prepared for the run')
-    }
     return { plainWorkflow, directPrompt }
   }
 
@@ -885,6 +879,13 @@ async function runVueWorkflow(
   // second run's assembly.
   const { firstTake, extraTakes } = assembled
   const { plainWorkflow, directPrompt } = firstTake
+
+  // Shader effects (step 3, R2.10): outside the assembly lock, while `shader-bake` is on,
+  // the browser bakes each one the runner can replay, in takes that go to the runner.
+  if (useDirect && runnerEnabled && runnerFamilies.has('shader-bake')) {
+    const bake = await bakeShaderEffectsForRun([firstTake, ...extraTakes].map(tk => tk.directPrompt), runnerFamilies)
+    if (bake.failed.length) toast.error('A shader effect couldn’t be prepared', { description: 'It will run without Sailor’s runner.' })
+  }
 
   // Engine-free: with the local engine off, only what the runner takes goes
   // out. Anything else is refused here, naming the nodes that need the engine,
