@@ -22,7 +22,9 @@ const out = fileURLToPath(new URL('../server/native/objectInfo.baseline.json.gz'
 
 const require = createRequire(import.meta.url)
 const { createJiti } = createRequire(require.resolve('nuxt/package.json'))('jiti')
-const { blankFileLists } = await createJiti(import.meta.url).import(fileURLToPath(new URL('../server/native/objectInfo.ts', import.meta.url)))
+// objectInfo.ts reaches shared code through Nuxt's `#shared` alias, which jiti doesn't know on its own.
+const alias = { '#shared': fileURLToPath(new URL('../shared', import.meta.url)) }
+const { blankFileLists } = await createJiti(import.meta.url, { alias }).import(fileURLToPath(new URL('../server/native/objectInfo.ts', import.meta.url)))
 
 const args = process.argv.slice(2)
 let catalog
