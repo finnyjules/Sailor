@@ -75,10 +75,11 @@ export function componentOf(doc: SketchDoc, seeds: readonly EntityId[]): SketchD
   return { entities: doc.entities.filter(e => keep(e.id)), constraints: doc.constraints.filter(c => c.refs.some(keep)) }
 }
 
-/** **Ruling (fix round 1):** a candidate is first solved in a window — the
+/** **Ruling (fix rounds 1–2):** a candidate is first solved in a window — the
  *  points it touches and every point within this many hops of them (a hop =
- *  sharing a line, a path segment, its arc centre included, or a circle);
- *  everything else is held. Only when the window doesn't converge, or its
+ *  sharing a line, a path segment, its arc centre included, a circle, or a
+ *  rule), plus the radius of every circle centred in it; everything else is
+ *  held. Only when the window doesn't converge, or its
  *  answer fails a guard, is the whole connected part solved. */
 export const WINDOW_HOPS = 2
 
@@ -107,6 +108,7 @@ export function windowOf(doc: SketchDoc, seeds: readonly EntityId[], hops = WIND
       }
     }
   }
+  for (const c of doc.constraints) link([...new Set(c.refs.flatMap(r => pointsOf(map, r)))])
   const win = new Set<EntityId>(seeds.flatMap(id => pointsOf(map, id)))
   let front = [...win]
   for (let k = 0; k < hops; k++) {
@@ -114,6 +116,8 @@ export function windowOf(doc: SketchDoc, seeds: readonly EntityId[], hops = WIND
     for (const a of front) for (const b of next.get(a) ?? []) if (!win.has(b)) { win.add(b); grown.push(b) }
     front = grown
   }
+  // a circle whose centre may move may change its radius too
+  for (const e of doc.entities) if (e.kind === 'circle' && win.has(e.center)) win.add(e.id)
   return win
 }
 
@@ -145,6 +149,8 @@ export interface Baseline {
   cap: Map<EntityId, number>
   radius: Map<EntityId, { r: number; cap: number }>
   arcs: ArcRecord[]
+  /** every line and straight path segment (guides included) with its drawn length */
+  straights: { a: EntityId; b: EntityId; len: number }[]
 }
 
 // which side of its chord A→B the drawn arc's middle lies on (+1 / −1 / 0)
@@ -171,7 +177,21 @@ export function baselineOf(doc: SketchDoc, unitsPerPx: number): Baseline {
     if (p.kind === 'circle') radius.set(p.circle!, { r: p.geom.r!, cap: Math.max(floor, GUARD.MOVE_FRAC * p.geom.r!) })
     else if (p.kind === 'arc') arcs.push({ c: p.c!, a: p.a!, b: p.b!, side: arcSide(p.geom.a!, p.geom.b!, p.geom), span: Math.abs(p.geom.sweepAngle!), len: p.len, r: p.geom.r! })
   }
-  return { unitsPerPx, pos, cap, radius, arcs }
+  const straights: Baseline['straights'] = []
+  const lenOf = (a: EntityId, b: EntityId) => { const A = ctx.pts.get(a), B = ctx.pts.get(b); return A && B ? dist(A, B) : null }
+  for (const e of doc.entities) {
+    if (e.kind === 'line') { const L = lenOf(e.p1, e.p2); if (L != null) straights.push({ a: e.p1, b: e.p2, len: L }) }
+    else if (e.kind === 'path') {
+      const n = e.closed ? e.anchors.length : e.anchors.length - 1
+      for (let i = 0; i < n; i++) {
+        if (e.segments[i]?.kind !== 'line') continue
+        const a = e.anchors[i]!, b = e.anchors[(i + 1) % e.anchors.length]!
+        const L = lenOf(a, b)
+        if (L != null) straights.push({ a, b, len: L })
+      }
+    }
+  }
+  return { unitsPerPx, pos, cap, radius, arcs, straights }
 }
 
 /** A point moved further from where it started than its cap, or a circle's
@@ -228,18 +248,22 @@ export function arcBroken(doc: SketchDoc, base: Baseline, resolve: (id: EntityId
   return false
 }
 
-/** A guide line this fix made that the solve squeezed under 2 px — its
- *  direction rule (and a mirror about it) then says nothing. `created` are the
- *  ids the fix added. */
-export function guideCollapsed(doc: SketchDoc, created: ReadonlySet<EntityId>, unitsPerPx: number): boolean {
-  if (!created.size) return false
-  const min = GUARD.ARC_MIN_PX * unitsPerPx
+/** A straight piece squeezed under 2 px: a line or straight path segment
+ *  drawn at 2 px or more (ends resolved through merges; one whose two ends
+ *  became one point is a join's business, not a squeeze), or a guide line
+ *  this fix made (`created`). A rule can be met by shrinking a piece to a
+ *  point — Horizontal and Parallel to a held line, say — and that is never a
+ *  clean-up. */
+export function lineCollapsed(doc: SketchDoc, base: Baseline, resolve: (id: EntityId) => EntityId, created: ReadonlySet<EntityId> = new Set()): boolean {
+  const min = GUARD.ARC_MIN_PX * base.unitsPerPx
   const at = new Map<EntityId, Vec2>()
   for (const e of doc.entities) if (e.kind === 'point') at.set(e.id, e)
-  for (const e of doc.entities) {
-    if (e.kind !== 'line' || !created.has(e.id)) continue
-    const a = at.get(e.p1), b = at.get(e.p2)
-    if (a && b && dist(a, b) < min) return true
+  const short = (a: EntityId, b: EntityId) => { const A = at.get(a), B = at.get(b); return !!A && !!B && dist(A, B) < min }
+  for (const s of base.straights) {
+    if (s.len < min) continue
+    const a = resolve(s.a), b = resolve(s.b)
+    if (a !== b && short(a, b)) return true
   }
+  for (const e of doc.entities) if (e.kind === 'line' && created.has(e.id) && short(e.p1, e.p2)) return true
   return false
 }

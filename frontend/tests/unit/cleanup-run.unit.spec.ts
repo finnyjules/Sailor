@@ -10,7 +10,7 @@ import type { SketchDoc, EntityId } from '~/lib/sketch/model'
 import { addPoint, addLine, addCircle, addPath, addConstraint, repeatEntities } from '~/lib/sketch/edit'
 import { cloneDoc } from '~/lib/sketch/clone'
 import { constraintResiduals } from '~/lib/sketch/residuals'
-import { solveHeld, componentOf, baselineOf, movedTooFar, arcBroken } from '~/lib/sketch/cleanup/guards'
+import { solveHeld, componentOf, windowOf, baselineOf, movedTooFar, arcBroken } from '~/lib/sketch/cleanup/guards'
 import { runCleanup } from '~/lib/sketch/cleanup/run'
 import type { CleanupOptions } from '~/lib/sketch/cleanup/types'
 
@@ -77,6 +77,21 @@ describe('solveHeld and componentOf', () => {
     expect(part.constraints).toEqual([])
     expect(componentOf(d, [y]).constraints).toHaveLength(1)
     expect(componentOf(d, [y]).entities.map(e => e.id).sort()).toEqual([x, y, m].sort())
+  })
+})
+
+describe('windowOf', () => {
+  it('reaches two hops along pieces and rules, and frees the radius of a circle centred in it', () => {
+    const d = blank()
+    const p = addPoint(d, 0, 0), q = addPoint(d, 1, 0), c = addPoint(d, 2, 0), far = addPoint(d, 9, 9)
+    addLine(d, p, q); addLine(d, q, c)
+    const circ = addCircle(d, c, 1)
+    const x = addPoint(d, 20, 0), y = addPoint(d, 21, 0), z = addPoint(d, 22, 0)
+    addLine(d, x, y); addLine(d, y, z)
+    addConstraint(d, 'horizontal', [p, far])        // a rule is a hop
+    const w = windowOf(d, [p])
+    for (const id of [p, q, c, circ, far]) expect(w.has(id)).toBe(true)
+    for (const id of [x, y, z]) expect(w.has(id)).toBe(false)
   })
 })
 
@@ -236,6 +251,29 @@ describe('runCleanup', () => {
     expect(open.fixes.filter(f => f.kind === 'join' && f.on)).toHaveLength(1)
     expect(paths(open.doc).some(p => p.closed)).toBe(false)
     expect(paths(runCleanup(d, opts()).doc).some(p => p.closed)).toBe(true)
+  })
+  it('a short line tied by a rule to another line is never squeezed to nothing', () => {
+    for (const px of [6, 10, 12, 14]) {
+      const d = blank()
+      const A = lineAt(d, 0, 0, 3, px * U)
+      const B = lineAt(d, 0, 3, 3, 4)
+      addConstraint(d, 'parallel', [A.a, A.b, B.a, B.b])
+      const r = runCleanup(d, opts())
+      expect(len(r.doc, A) / U).toBeGreaterThan(2)
+      expect(maxRes(r.doc)).toBeLessThan(1e-3)
+    }
+  })
+  it('a short straight path segment tied by a rule to another line is never squeezed to nothing', () => {
+    for (const px of [6, 10, 12, 14]) {
+      const d = blank()
+      const a = addPoint(d, 0, 0), b = addPoint(d, px * U * Math.cos(rad(3)), px * U * Math.sin(rad(3)))
+      addPath(d, [a, b], [{ kind: 'line' }])
+      const B = lineAt(d, 0, 3, 3, 4)
+      addConstraint(d, 'parallel', [a, b, B.a, B.b])
+      const r = runCleanup(d, opts())
+      expect(len(r.doc, { a, b }) / U).toBeGreaterThan(2)
+      expect(maxRes(r.doc)).toBeLessThan(1e-3)
+    }
   })
   it('never joins two ends that may not move', () => {
     const d = blank()

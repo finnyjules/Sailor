@@ -16,7 +16,7 @@ import { equivalentRuleKey, type RuleSpec } from '../tangency'
 import { meanPoint } from './cluster'
 import { buildContext, heldForScope, copyPoints, type CleanupContext, type ContextEnv } from './context'
 import { RowBasis, freeSlots, rowsFor } from './rank'
-import { solveHeld, solveWindow, windowOf, reachesBeyond, componentOf, baselineOf, movedTooFar, arcBroken, guideCollapsed, type Baseline } from './guards'
+import { solveHeld, solveWindow, windowOf, reachesBeyond, componentOf, baselineOf, movedTooFar, arcBroken, lineCollapsed, type Baseline } from './guards'
 import { detectJoins, detectOnCurve, detectTangents } from './detect-topology'
 import { detectHV, detectParallelPerp } from './detect-directions'
 import { detectConcentric, detectMirrorPairs, detectEqualLengths, detectEqualRadii, detectEvenSpacing, detectRound } from './detect-shape'
@@ -108,7 +108,7 @@ function tryApply(work: SketchDoc, cand: Candidate, env: Env): boolean {
     changed = true
   }
   if (!changed) return false
-  const guarded = () => !movedTooFar(work, env.base) && !arcBroken(work, env.base, resolve) && !guideCollapsed(work, created, env.base.unitsPerPx)
+  const guarded = () => !movedTooFar(work, env.base) && !arcBroken(work, env.base, resolve) && !lineCollapsed(work, env.base, resolve, created)
   // a small window round the fix first; the whole connected part only when the
   // window can't settle it or settles it badly (a piece squeezed to nothing to
   // meet a rule whose other end is held)
