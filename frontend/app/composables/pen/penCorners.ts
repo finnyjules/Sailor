@@ -4,13 +4,13 @@
 // untouched until Apply, which is one history step; anything that ends the
 // gesture without Apply drops it (Global Constraints). Pure over the refs it
 // is handed (usePen builds it, as penCopies).
-import { shallowRef, toRaw, type Ref } from 'vue'
+import { shallowRef, toRaw, watch, type Ref } from 'vue'
 import type { SketchDoc, EntityId, PointEntity } from '~/lib/sketch/model'
 import type { Vec2 } from '~/lib/sketch/geom'
 import type { ViewMatrix } from '~/lib/sketch/view'
 import { pxToUnits } from '~/lib/sketch/tolerance'
 import { constraintResiduals } from '~/lib/sketch/residuals'
-import { cornersOf, cornerAt, cornerPreview, roundCorners, sizeFromPointer, fittingSize, type CornerKind, type Corner } from '~/lib/sketch/corners'
+import { cornersOf, cornerAt, cornerPreview, roundCorners, sizeFromPointer, fittingSize, pointIndex, type CornerKind, type Corner } from '~/lib/sketch/corners'
 
 export const CORNER_HIT_PX = 10
 export const CORNER_DEFAULT_PX = 12
@@ -58,22 +58,36 @@ export function createPenCorners(ctx: PenCornersContext) {
   const hover = shallowRef<EntityId | null>(null)
   const lastSize: Partial<Record<CornerKind, number>> = {}
   let press: { corner: EntityId; sx: number; sy: number; moved: boolean } | null = null
-  let cache: { rev: number; raw: SketchDoc; map: Map<EntityId, Corner> } | null = null
+  let cache: { rev: number; raw: SketchDoc; map: Map<EntityId, Corner>; points: Map<EntityId, PointEntity> } | null = null
+  // the drawing the live preview was built on: when it changes any other way
+  // (a menu action, Delete, undo…) the preview no longer describes it and is
+  // dropped untouched
+  let built: { rev: number; raw: SketchDoc } | null = null
 
   const raw = () => toRaw(ctx.doc.value)
   const active = () => ctx.tool.value === 'round' || ctx.tool.value === 'chamfer'
   const kindNow = (): CornerKind => (ctx.tool.value === 'chamfer' ? 'chamfer' : 'round')
   function corners(): Map<EntityId, Corner> {
     const d = raw()
-    if (!cache || cache.rev !== ctx.docRevision.value || cache.raw !== d) cache = { rev: ctx.docRevision.value, raw: d, map: cornersOf(d) }
+    if (!cache || cache.rev !== ctx.docRevision.value || cache.raw !== d) cache = { rev: ctx.docRevision.value, raw: d, map: cornersOf(d), points: pointIndex(d) }
     return cache.map
   }
+  /** Drops a preview built on a drawing that has since changed; true when it did. */
+  function dropStale(): boolean {
+    if (!view.value || (built && built.rev === ctx.docRevision.value && built.raw === raw())) return false
+    cancel(false)
+    return true
+  }
+  watch(() => [ctx.docRevision.value, ctx.doc.value], () => { dropStale() }, { flush: 'sync' })
+  /** Typed text that is no size ('0', '.', '0.0'): Enter and a release wait. */
+  const typedOk = (v: CornerToolView) => !v.typed || Number(v.typed) > 0
   function show(kind: CornerKind, picks: EntityId[], size: number, typed: string): void {
     const d = raw()
     const pv = cornerPreview(d, picks, kind, size)
     const first = d.entities.find(e => e.id === picks[0])
     const chip = first && first.kind === 'point' ? { x: first.x, y: first.y } : { x: 0, y: 0 }
     view.value = { kind, corners: picks, size, typed, d: pv.d, fits: pv.fits, bad: pv.bad, chip }
+    built = { rev: ctx.docRevision.value, raw: d }
   }
   function defaultSize(kind: CornerKind, picks: EntityId[]): number {
     return fittingSize(raw(), picks, kind, lastSize[kind] ?? pxToUnits(CORNER_DEFAULT_PX, ctx.view.value))
@@ -87,6 +101,7 @@ export function createPenCorners(ctx: PenCornersContext) {
   }
   function move(x: number, y: number): void {
     if (!active()) { if (hover.value) hover.value = null; return }
+    dropStale()
     if (press) {
       const v = view.value
       if (!v) return
@@ -97,13 +112,16 @@ export function createPenCorners(ctx: PenCornersContext) {
       show(v.kind, v.corners, sizeFromPointer(raw(), c, v.kind, { x, y }), '')
       return
     }
-    const hit = cornerAt(raw(), { x, y }, pxToUnits(CORNER_HIT_PX, ctx.view.value), corners())
+    const map = corners()
+    const hit = cornerAt(raw(), { x, y }, pxToUnits(CORNER_HIT_PX, ctx.view.value), map, cache!.points)
     if (hit !== hover.value) hover.value = hit
   }
   function down(x: number, y: number, additive: boolean): void {
     if (!active()) return
     ctx.closeMenus()
-    const hit = cornerAt(raw(), { x, y }, pxToUnits(CORNER_HIT_PX, ctx.view.value), corners())
+    dropStale()
+    const map = corners()
+    const hit = cornerAt(raw(), { x, y }, pxToUnits(CORNER_HIT_PX, ctx.view.value), map, cache!.points)
     if (!hit) { ctx.status.value = CORNER_MISS; return }
     const kind = kindNow(), v = view.value
     const had = v?.corners ?? []
@@ -125,25 +143,31 @@ export function createPenCorners(ctx: PenCornersContext) {
   }
   /** Digits, `.`, Backspace, Enter, Escape while a preview is live. */
   function key(ev: KeyboardEvent): boolean {
+    if (!active() || ev.metaKey || ev.ctrlKey || ev.altKey) return false
+    dropStale()
     const v = view.value
-    if (!v || !active() || ev.metaKey || ev.ctrlKey || ev.altKey) return false
+    if (!v) return false
     if (/^[0-9]$/.test(ev.key) || (ev.key === '.' && !v.typed.includes('.'))) { typeTo(v.typed + ev.key); return true }
     if (ev.key === 'Backspace' && v.typed) { typeTo(v.typed.slice(0, -1)); return true }
-    if (ev.key === 'Enter') { apply(); return true }
+    if (ev.key === 'Enter') { apply(); return true }   // typed text that is no size: Enter waits
     if (ev.key === 'Escape') { cancel(true); return true }
     return false
   }
   function apply(): boolean {
+    if (dropStale()) return false
     const v = view.value
-    if (!v) return false
+    if (!v || !typedOk(v)) return false
+    // a picked point that is no longer a corner is not "too big"
+    const map = corners()
+    if (v.corners.some(id => !map.has(id))) { cancel(false); ctx.status.value = CORNER_MISS; return false }
     if (!v.fits) { ctx.status.value = CORNER_TOO_BIG; return false }
     // roundCorners leaves the drawing exactly as it was when it refuses, and
     // on success copies its result back into the doc it was handed (the raw
     // one — never through Vue's proxies). The doc ref then gets a fresh shell
     // over those arrays so everything reading `doc.value` redraws.
     const work = raw()
-    const built = roundCorners(work, v.corners, v.kind, v.size)
-    if (!built.ok) { ctx.status.value = CORNER_TOO_BIG; return false }
+    const made = roundCorners(work, v.corners, v.kind, v.size)
+    if (!made.ok) { ctx.status.value = CORNER_TOO_BIG; return false }
     const at = v.corners.map(id => work.entities.find(e => e.id === id)).filter((e): e is PointEntity => e?.kind === 'point')
     press = null
     view.value = null
@@ -151,7 +175,7 @@ export function createPenCorners(ctx: PenCornersContext) {
     lastSize[v.kind] = v.size
     ctx.doc.value = { ...work }
     ctx.clearSel()
-    if (!rulesHold(work, built.rules)) ctx.runSolve()
+    if (!rulesHold(work, made.rules)) ctx.runSolve()
     ctx.commitHistory()
     for (const p of at.slice(0, 12)) ctx.sparkle(p.x, p.y)
     ctx.status.value = v.kind === 'round' ? 'Rounded' : 'Chamfered'
@@ -159,6 +183,7 @@ export function createPenCorners(ctx: PenCornersContext) {
   }
   function cancel(say: boolean): void {
     press = null
+    built = null
     const had = !!view.value
     view.value = null
     if (say && had) ctx.status.value = 'Cancelled'

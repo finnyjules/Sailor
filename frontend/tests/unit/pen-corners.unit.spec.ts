@@ -186,3 +186,92 @@ describe('speed', () => {
     expect((performance.now() - t) / 20).toBeLessThan(16)
   })
 })
+
+describe('fix round 1', () => {
+  it('a cancelled press (pointercancel) drops the preview and leaves the drawing exactly as it was', async () => {
+    const { pen, doc, live, changes } = setup()
+    const before = json(doc.value), c0 = changes()
+    const w = mount(PenOverlay, { props: { pen, view: DEV, width: 680, height: 460 }, attachTo: document.body })
+    pen.selectTool('round')
+    const svg = w.find('svg')
+    // (1, 1) is (74, 366) on screen; (1.3, 1.3) is (84.2, 355.8)
+    await svg.trigger('pointerdown', { button: 0, clientX: 74, clientY: 366, pointerId: 1 })
+    await svg.trigger('pointermove', { buttons: 1, clientX: 84.2, clientY: 355.8, pointerId: 1 })
+    expect(pen.cornerView.value).not.toBeNull()
+    await svg.trigger('pointercancel', { clientX: 84.2, clientY: 355.8, pointerId: 1 })
+    expect(pen.cornerView.value).toBeNull()
+    expect(json(doc.value)).toBe(before)
+    expect(changes()).toBe(c0)
+    expect(live()).toBe(0)
+    w.unmount()
+  })
+  it('a drawing changed under the preview another way drops it — never a misleading "too big"', () => {
+    const { pen, doc, path } = setup()
+    pen.selectTool('round')
+    pen.cornerDown(1, 1, false); pen.cornerUp()
+    expect(pen.cornerView.value).not.toBeNull()
+    // another path settles a change (as a menu action or Delete would)
+    doc.value.entities = doc.value.entities.filter(e => e.id !== path)
+    pen.commitHistory()
+    expect(pen.cornerView.value).toBeNull()
+    const s0 = pen.status.value
+    expect(pen.onKeydown(key('Enter'))).not.toBe(true)
+    expect(pen.status.value).not.toBe(CORNER_TOO_BIG)
+    expect(pen.status.value).toBe(s0)
+  })
+  it('the host swapping in another drawing drops the preview too', () => {
+    const { pen, doc } = setup()
+    pen.selectTool('chamfer')
+    pen.cornerDown(1, 1, false); pen.cornerUp()
+    doc.value = { entities: [], constraints: [] }
+    expect(pen.cornerView.value).toBeNull()
+  })
+  it('typed text that is no size (0, ".", 0.0) never applies the old size — Enter and a release wait', () => {
+    const { pen, doc } = setup()
+    const before = json(doc.value)
+    pen.selectTool('round')
+    for (const typed of [['0'], ['.'], ['0', '.', '0']]) {
+      pen.cornerDown(1, 1, false); pen.cornerUp()
+      const s0 = pen.status.value
+      for (const k of typed) expect(pen.onKeydown(key(k))).toBe(true)
+      expect(pen.onKeydown(key('Enter'))).toBe(true)
+      expect(json(doc.value)).toBe(before)
+      expect(pen.cornerView.value).not.toBeNull()
+      expect(pen.status.value).toBe(s0)
+      // a press-drag-release on the picked corner with that text typed waits too
+      pen.cornerDown(1, 1, false); pen.cornerMove(1.3, 1.3); pen.cornerUp()
+      expect(json(doc.value)).toBe(before)
+      pen.onKeydown(key('Escape'))
+    }
+    // a real size then applies
+    pen.cornerDown(1, 1, false); pen.cornerUp()
+    pen.onKeydown(key('1')); pen.onKeydown(key('Enter'))
+    expect(pen.status.value).toBe('Rounded')
+  })
+  it('the size used is remembered per kind for the next default', () => {
+    const { pen } = setup()
+    pen.selectTool('round')
+    pen.cornerDown(1, 1, false); pen.cornerUp()
+    pen.onKeydown(key('0')); pen.onKeydown(key('.')); pen.onKeydown(key('5')); pen.onKeydown(key('Enter'))
+    expect(pen.status.value).toBe('Rounded')
+    pen.cornerDown(5, 5, false); pen.cornerUp()
+    expect(pen.cornerView.value!.size).toBe(0.5)
+    pen.selectTool('chamfer')
+    pen.cornerDown(5, 5, false); pen.cornerUp()
+    expect(pen.cornerView.value!.size).toBeCloseTo(12 / 34, 9)   // Chamfer has its own
+  })
+  it('a drag frame with one corner picked on the 150-piece gear: typically ≤ 4 ms, asserted ≤ 16 ms', () => {
+    const { doc: g, anchors } = gear(150)
+    const doc = ref(g)
+    const pen = usePen({ doc, view: ref({ a: 20, b: 0, c: 0, d: -20, e: 300, f: 300 }) })
+    pen.selectTool('round')
+    const a0 = g.entities.find(e => e.id === anchors[10]) as any
+    pen.cornerDown(a0.x, a0.y, false)
+    for (let i = 1; i <= 5; i++) pen.cornerMove(a0.x * (1 - 0.004 * i), a0.y * (1 - 0.004 * i))   // warm
+    const t = performance.now()
+    for (let i = 1; i <= 40; i++) pen.cornerMove(a0.x * (1 - 0.002 * i), a0.y * (1 - 0.002 * i))
+    const per = (performance.now() - t) / 40
+    expect(pen.cornerView.value!.corners).toHaveLength(1)
+    expect(per).toBeLessThan(16)
+  })
+})

@@ -105,7 +105,7 @@ const {
   cleanup: cleanupSession, toggleCleanupFix, toggleCleanupKind,
   highlight, menu, wheel, openMenu, closeMenus, openWheel, wheelPointer, releaseWheel, closeWheel, setViewSize,
   fillHover, fillMove, fillClick, fillView, docRevision,
-  cornerView, cornerHover, cornerMove, cornerDown, cornerUp,
+  cornerView, cornerHover, cornerMove, cornerDown, cornerUp, cancelCorners,
 } = props.pen
 
 const svgEl = ref<SVGSVGElement | null>(null)
@@ -1067,6 +1067,9 @@ function onPointerLeave(ev: PointerEvent) {
   if (!props.active) return
   // mid right press the svg holds the pointer: a leave is ignored, a cancel ends it
   if (rightPress && ev.pointerId === rightPress.pointerId) { if (ev.type === 'pointercancel') endRightPress(ev); return }
+  // Round corner / Chamfer: a cancelled press (the system took the pointer)
+  // drops the preview, the drawing untouched; leaving the canvas settles as a release
+  if (ev.type === 'pointercancel' && isCornerTool()) { cancelCorners(); penCursor.value = null; clearToolHover(); return }
   onPointerUp(ev)
   penCursor.value = null
   clearToolHover()

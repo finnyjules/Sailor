@@ -5,7 +5,7 @@
 // setbacks; the corner point stays as a guide — the "virtual sharp" — tied to
 // both sides, so every rule that named it still holds (Ruling 4). Everything
 // is made of ordinary points, pieces and rules. Pure.
-import type { SketchDoc, EntityId, PathEntity, SegmentSpec, SketchEntity } from './model'
+import type { SketchDoc, EntityId, PathEntity, SegmentSpec, SketchEntity, PointEntity } from './model'
 import { getEntity, getPoint } from './model'
 import type { Vec2 } from './geom'
 import { addPoint, addConstraint, addPath } from './edit'
@@ -115,11 +115,19 @@ export function cornersOf(doc: SketchDoc): Map<EntityId, Corner> {
   return out
 }
 
+/** Every point by its id (one pass) — hand it to `cornerAt` with the cached
+ *  corners so a hover is a lookup per corner, not a search of the drawing. */
+export function pointIndex(doc: SketchDoc): Map<EntityId, PointEntity> {
+  const out = new Map<EntityId, PointEntity>()
+  for (const e of doc.entities) if (e.kind === 'point') out.set(e.id, e)
+  return out
+}
+
 /** The corner nearest `p` within `tol` (drawing units), or null. */
-export function cornerAt(doc: SketchDoc, p: Vec2, tol: number, corners: Map<EntityId, Corner> = cornersOf(doc)): EntityId | null {
+export function cornerAt(doc: SketchDoc, p: Vec2, tol: number, corners: Map<EntityId, Corner> = cornersOf(doc), points?: Map<EntityId, PointEntity>): EntityId | null {
   let best: EntityId | null = null, bd = tol
   for (const id of corners.keys()) {
-    const q = getPoint(doc, id)
+    const q = points ? points.get(id) : getPoint(doc, id)
     if (!q) continue
     const d = Math.hypot(q.x - p.x, q.y - p.y)
     if (d <= bd) { bd = d; best = id }
@@ -438,6 +446,40 @@ function buildAll(doc: SketchDoc, xs: readonly EntityId[], kind: CornerKind, siz
 
 // ── the preview ─────────────────────────────────────────────────────────────
 
+/** A fill-less, rule-less copy of just what building the corners `xs` reads
+ *  and changes: every piece that names one of them (as an end, a centre or a
+ *  handle — so `cornerCheck` sees exactly what it sees on the whole drawing)
+ *  and the points those pieces name. The preview and `fittingSize` build on
+ *  it, so a drag frame copies a few pieces, not the drawing. */
+function scopeOf(doc: SketchDoc, xs: readonly EntityId[]): SketchDoc {
+  const want = new Set(xs)
+  const pieces: SketchEntity[] = []
+  const pts = new Set<EntityId>()
+  for (const e of doc.entities) {
+    if (e.kind === 'point') continue
+    if (e.kind === 'line') {
+      if (want.has(e.p1) || want.has(e.p2)) { pieces.push({ ...e }); pts.add(e.p1); pts.add(e.p2) }
+      continue
+    }
+    if (e.kind === 'circle') {
+      if (want.has(e.center)) { pieces.push({ ...e }); pts.add(e.center) }
+      continue
+    }
+    const refs: EntityId[] = [...e.anchors]
+    for (const sg of e.segments) {
+      if (sg.kind === 'arc') refs.push(sg.center)
+      else if (sg.kind === 'cubic') { if (sg.h1) refs.push(sg.h1); if (sg.h2) refs.push(sg.h2) }
+    }
+    if (!refs.some(r => want.has(r))) continue
+    pieces.push({ ...e, anchors: [...e.anchors], segments: e.segments.map(sg => ({ ...sg })) })
+    for (const r of refs) pts.add(r)
+  }
+  for (const x of want) pts.add(x)
+  const points: SketchEntity[] = []
+  for (const e of doc.entities) if (e.kind === 'point' && pts.has(e.id)) points.push({ ...e })
+  return { entities: [...points, ...pieces], constraints: [] }
+}
+
 function rawCornerD(g: CornerGeom): string {
   const f = (v: number) => Number(v.toFixed(6))
   if (g.c) {
@@ -449,10 +491,10 @@ function rawCornerD(g: CornerGeom): string {
 
 /** What the corner tools show (Ruling 17): the new and shortened pieces as
  *  they would be, and every corner that can't be made (red: its circle or
- *  cut where it would fall, or '' for a ring). Builds on a fill-less clone;
- *  `doc` is never changed. */
+ *  cut where it would fall, or '' for a ring). Builds on a copy of only the
+ *  pieces at those corners (scopeOf); `doc` is never changed. */
 export function cornerPreview(doc: SketchDoc, xs: readonly EntityId[], kind: CornerKind, size: number): CornerPreview {
-  const work = cloneDoc({ entities: doc.entities, constraints: doc.constraints })
+  const work = scopeOf(doc, xs)
   const touched = new Set<EntityId>()
   const ends = new Set<EntityId>()
   const bad: { at: Vec2; d: string }[] = []
@@ -500,8 +542,7 @@ function segmentD(doc: SketchDoc, p: PathEntity, i: number): string {
 export function fittingSize(doc: SketchDoc, xs: readonly EntityId[], kind: CornerKind, want: number): number {
   let s = want
   for (let i = 0; i < 8; i++) {
-    const work = cloneDoc({ entities: doc.entities, constraints: doc.constraints })
-    if (buildAll(work, xs, kind, s).ok) return s
+    if (buildAll(scopeOf(doc, xs), xs, kind, s).ok) return s
     s /= 2
   }
   return want
