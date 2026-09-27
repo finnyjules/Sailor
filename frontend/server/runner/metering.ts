@@ -15,7 +15,7 @@ import { BASE_RENDER_CREDITS, OUTPUT_CLASS_TYPES, priceGraph } from '../utils/pr
 import { extractGraphPromptTexts } from '../utils/graphPromptText'
 import { MeterRefusalError } from '../utils/requestMeter'
 import { moderateTexts, moderationRefusal, type ModerationResult } from '../utils/moderation'
-import { outputKey } from '../utils/graphRuns'
+import { outputKey, savedInputKey } from '../utils/graphRuns'
 import { actionPassThrough } from './generators/actions'
 import type { OutputFile, StageCharge } from './types'
 import { sizePricedInput } from '#shared/pricing/editSettings'
@@ -232,6 +232,12 @@ export interface Metering {
   /** Returns the hold id, or null when nothing was held. Throws 402 when credits run short. */
   hold(userId: string | null, stageKey: string, credits: number): Promise<number | null>
   addOutput(userId: string | null, stageKey: string, file: OutputFile): Promise<void>
+  /**
+   * An input file the runner saved for this stage (R3.6: Layerize an image's
+   * layers), recorded under its own kind (graphRuns.ts savedInputKey), so the
+   * user owns it (inputs.ts ownsSaved). Not an asset.
+   */
+  addSavedInput(userId: string | null, stageKey: string, file: OutputFile): Promise<void>
   /** Charge `actual` (0 → drop the hold). Mutates `charge`. */
   finish(userId: string | null, charge: StageCharge, actual: number): Promise<void>
 }
@@ -299,6 +305,15 @@ export function createMetering(d: {
       }
       catch (e) {
         console.error('[runner] output ownership row failed — result may not be viewable', { stageKey, error: e })
+      }
+    },
+    async addSavedInput(userId, stageKey, file) {
+      if (!d.hosted() || !userId) return
+      try {
+        await d.graphRuns.appendOutput(stageKey, savedInputKey(file))
+      }
+      catch (e) {
+        console.error('[runner] saved input ownership row failed — file may not be usable', { stageKey, error: e })
       }
     },
     async finish(userId, charge, actual) {

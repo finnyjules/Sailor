@@ -119,6 +119,53 @@ export async function rgbTurnedPng(bytes: Uint8Array): Promise<{ png: Uint8Array
   return { png: new Uint8Array(png), w, h }
 }
 
+/** PIL's MULDIV255 (Convert.c): a × b / 255, rounded as Pillow rounds it. */
+function mulDiv255(a: number, b: number): number {
+  const t = a * b + 128
+  return ((t >> 8) + t) >> 8
+}
+
+/**
+ * A provider's picture as PIL's `Image.open(…).convert("RGBA")` reads it
+ * (bytesio_to_image_tensor): 8-bit RGBA, first frame, no EXIF turn, no ICC
+ * conversion. sharp gives the same pixels but for two kinds (R3.6 fix round 1):
+ *  - 16-bit greyscale without alpha: PIL's mode I;16 converts by clipping
+ *    each value to 255, where sharp keeps the high byte;
+ *  - CMYK (a CMYK JPEG): PIL converts naively (Convert.c cmyk2rgb:
+ *    `255 − k − c·(255 − k)/255`, alpha 255), where sharp colour-manages.
+ * Both are read raw and converted here as PIL does. Every other picture
+ * (8-bit, palette, grey with alpha, 16-bit colour, whose high byte is PIL's
+ * too) is sharp's sRGB with alpha.
+ */
+export async function pilRgba(bytes: Uint8Array): Promise<{ data: Uint8Array; info: { width: number; height: number } }> {
+  const open = () => sharp(bytes, { pages: 1, page: 0, ignoreIcc: true, limitInputPixels: MAX_INPUT_PIXELS })
+  const meta = await open().metadata()
+  if (meta.space === 'cmyk' && meta.channels === 4) {
+    const { data, info } = await open().pipelineColourspace('cmyk').toColourspace('cmyk').raw({ depth: 'uchar' }).toBuffer({ resolveWithObject: true })
+    const n = info.width * info.height
+    const out = new Uint8Array(n * 4)
+    for (let i = 0; i < n; i++) {
+      const nk = 255 - data[i * 4 + 3]!
+      for (let c = 0; c < 3; c++) out[i * 4 + c] = Math.min(255, Math.max(0, nk - mulDiv255(data[i * 4 + c]!, nk)))
+      out[i * 4 + 3] = 255
+    }
+    return { data: out, info: { width: info.width, height: info.height } }
+  }
+  if (meta.depth === 'ushort' && meta.channels === 1 && !meta.hasAlpha) {
+    const { data, info } = await open().toColourspace('grey16').raw({ depth: 'ushort' }).toBuffer({ resolveWithObject: true })
+    const grey = new Uint16Array(data.buffer, data.byteOffset, data.length / 2)
+    const n = info.width * info.height
+    const out = new Uint8Array(n * 4)
+    for (let i = 0; i < n; i++) {
+      const v = Math.min(255, grey[i]!)
+      out[i * 4] = v; out[i * 4 + 1] = v; out[i * 4 + 2] = v; out[i * 4 + 3] = 255
+    }
+    return { data: out, info: { width: info.width, height: info.height } }
+  }
+  const { data, info } = await open().toColourspace('srgb').ensureAlpha().raw({ depth: 'uchar' }).toBuffer({ resolveWithObject: true })
+  return { data: new Uint8Array(data.buffer, data.byteOffset, data.length), info: { width: info.width, height: info.height } }
+}
+
 /**
  * A provider's picture as a Python paid node that drops alpha saves it (R3
  * rule 3): bytesio_to_image_tensor reads it with PIL's .convert("RGBA") (no
@@ -128,13 +175,12 @@ export async function rgbTurnedPng(bytes: Uint8Array): Promise<{ png: Uint8Array
  * every 8-bit v it is v again). The result is that RGB picture as a PNG.
  */
 export async function answerRgbPng(bytes: Uint8Array): Promise<Uint8Array> {
-  const { data, info } = await sharp(bytes, { pages: 1, page: 0, ignoreIcc: true, limitInputPixels: MAX_INPUT_PIXELS })
-    .toColourspace('srgb').ensureAlpha().raw({ depth: 'uchar' }).toBuffer({ resolveWithObject: true })
+  const { data, info } = await pilRgba(bytes)
   const n = info.width * info.height
   const rgb = new Uint8Array(n * 3)
   for (let i = 0; i < n; i++) {
     for (let c = 0; c < 3; c++) {
-      const x = Math.fround(data[i * info.channels + c]! / 255)
+      const x = Math.fround(data[i * 4 + c]! / 255)
       rgb[i * 3 + c] = Math.min(255, Math.max(0, Math.trunc(Math.fround(255 * x))))
     }
   }
@@ -150,8 +196,7 @@ export async function answerRgbPng(bytes: Uint8Array): Promise<Uint8Array> {
  * truncation, which gives every 8-bit value back — written as an RGBA PNG.
  */
 export async function answerRgbaPng(bytes: Uint8Array): Promise<Uint8Array> {
-  const { data, info } = await sharp(bytes, { pages: 1, page: 0, ignoreIcc: true, limitInputPixels: MAX_INPUT_PIXELS })
-    .toColourspace('srgb').ensureAlpha().raw({ depth: 'uchar' }).toBuffer({ resolveWithObject: true })
+  const { data, info } = await pilRgba(bytes)
   const n = info.width * info.height
   const rgba = new Uint8Array(n * 4)
   for (let i = 0; i < n * 4; i++) {

@@ -27,14 +27,14 @@ import { callCredits } from '#shared/pricing/pipelinePrice'
 import { creditsForUsd } from '#shared/pricing/markup'
 import { parsePyJson } from '#shared/runner/pyJson'
 import { GRAPH_NODE_CREDITS, PRICE_BOOK_VERSION, priceGraph } from '~~/server/utils/priceBook'
-import { outputKey } from '~~/server/utils/graphRuns'
+import { outputKey, savedInputKey } from '~~/server/utils/graphRuns'
 import { shortUserHash } from '~~/server/utils/meterGraphRun'
 import { PAID_TEXT_INPUTS, extraPromptTexts } from '~~/server/runner/metering'
 import { planNode, type NodePlan, type PipelineIO } from '~~/server/runner/executors'
-import { assertFilesOwned, collectInputFiles, type OwnershipCheck } from '~~/server/runner/inputs'
+import { assertFilesOwned, collectInputFiles, savedInputOwned, type OwnershipCheck } from '~~/server/runner/inputs'
 import { answerTimeout } from '~~/server/runner/answerDownload'
 import {
-  LAYERIZE_NO_OUTPUT, LAYERIZE_NO_PICTURE, layerDataError, layerDataText, layerDataWhy, layerizeUrls, parseSeedreamLayers,
+  LAYERIZE_NO_OUTPUT, LAYERIZE_NO_PICTURE, SEEDREAM_ANSWER_UNREADABLE, SEEDREAM_TOO_MANY_LAYERS, layerDataError, layerDataText, layerDataWhy, layerizeUrls, parseSeedreamLayers,
   seedreamAnsweredUsd, seedreamImagesMade,
 } from '~~/server/runner/generators/layers'
 import { RUNNER_ROUTES } from '~~/server/runner/generators/twins'
@@ -108,6 +108,7 @@ async function runPipeline(c: PaidCase, plan: Extract<NodePlan, { kind: 'pipelin
       return { filename: `${o.prefix}_${String(count + n * 0).padStart(5, '0')}_.${o.ext}`, subfolder: '', type: (o.folder ?? 'output') as OutputFile['type'] }
     },
     read: async () => new Uint8Array(Buffer.from(c.picture_files!.image!, 'base64')),
+    savedOnce: async (_call: string, _key: string, make: () => Promise<OutputFile>) => make(),
   } as unknown as PipelineIO
   n++
   const made = await plan.run(io)
@@ -206,6 +207,12 @@ describe('every fixture case: what Python sends and returns', () => {
       await expect(runPipeline(c, plan)).rejects.toThrow(want)
       return
     }
+    if (c.name === 'seedream · a name that is a list') {
+      // Fix round 1 (R3.4's ruling): Python prints the list's repr; the runner fails plainly, in Seedream's words.
+      deviations.push(c.name)
+      await expect(runPipeline(c, plan)).rejects.toThrow(SEEDREAM_ANSWER_UNREADABLE)
+      return
+    }
     const { made, calls, downloads, saves } = await runPipeline(c, plan)
     expect(calls.length).toBe(1)
     expect({ provider: calls[0]!.provider, endpoint: calls[0]!.endpoint, payload: asPython(calls[0]!.payload) }).toEqual({ provider: py.provider, endpoint: py.endpoint, payload: py.payload })
@@ -247,10 +254,14 @@ describe('every fixture case: what Python sends and returns', () => {
       expect(layers.every(s => s.folder === 'input' && s.ext === 'png')).toBe(true)
       const named = (JSON.parse(pyJson) as { layers: { filename: string }[] }).layers
       expect(layers.length).toBe(named.length)
-      const layerGets = (c.gets ?? []).map(g => g.url).filter(u => /layer_\d+\.png$/.test(u))
+      // Python's own pixels (fix round 1): the sha256 of what save_image_to_input wrote, recorded by the fixture.
+      const pySaved = (c as PaidCase & { saved_inputs: { file: string; shape: number[]; sha256: string }[] }).saved_inputs
+      expect((pySaved ?? []).map(x => x.file)).toEqual(named.map(l => l.filename))
       for (const [i, s] of layers.entries()) {
-        expect((await sharp(s.bytes).metadata()).channels).toBe(4)
-        expect(Buffer.compare(await rgbaOf(s.bytes), await rgbaOf(Buffer.from(c.files![layerGets[i]!]!, 'base64'))), `layer ${i}`).toBe(0)
+        const { data, info } = await sharp(s.bytes).raw().toBuffer({ resolveWithObject: true })
+        expect(info.channels).toBe(4)
+        expect([info.height, info.width, 4]).toEqual(pySaved[i]!.shape)
+        expect(createHash('sha256').update(data).digest('hex'), `layer ${i}`).toBe(pySaved[i]!.sha256)
       }
     }
   })
@@ -260,13 +271,13 @@ describe('every fixture case: what Python sends and returns', () => {
   })
 
   it('the only differences are the runner\'s own words for a layer JSON that couldn\'t be fetched', () => {
-    expect(deviations.sort()).toEqual(['layerize · answer · JSON link 404', 'layerize · answer · JSON link fails'])
+    expect(deviations.sort()).toEqual(['layerize · answer · JSON link 404', 'layerize · answer · JSON link fails', 'seedream · a name that is a list'])
   })
 })
 
 describe('every fixture case through the engine (cards and layers on)', () => {
   // (An image_size the node doesn't offer never reaches the runner: ComfyUI's validation refuses it, below.)
-  const calling = CASES.filter(c => !c.error && c.name !== 'seedream · image_size 8K')
+  const calling = CASES.filter(c => !c.error && c.name !== 'seedream · image_size 8K' && c.name !== 'seedream · a name that is a list')
 
   it.each(calling.map(c => [c.name, c] as const))('%s — sent, kept and priced', async (_n, c) => {
     const run = await runPaidCase(c, { families: ON })
@@ -288,7 +299,8 @@ describe('every fixture case through the engine (cards and layers on)', () => {
   })
 
   it('Outpaint with an RGBA answer keeps Python\'s RGB picture (sha256 of its 8-bit bytes)', async () => {
-    for (const name of ['outpaint · Flux Fill RGBA answer', 'outpaint · Bria Expand RGBA answer', 'outpaint · Flux Fill Zoom out 2x']) {
+    // Fix round 1: a CMYK JPEG and a 16-bit greyscale PNG, which PIL reads its own way.
+    for (const name of ['outpaint · Flux Fill RGBA answer', 'outpaint · Bria Expand RGBA answer', 'outpaint · Flux Fill Zoom out 2x', 'outpaint · Flux Fill CMYK JPEG answer', 'outpaint · Bria Expand 16-bit grey answer']) {
       const c = caseNamed(name)
       const k = makeKit({
         replicate: createFakeReplicate({ bodyText: () => JSON.stringify({ id: 'p', status: 'succeeded', ...(c.answers[0] as object) }) }),
@@ -438,13 +450,42 @@ describe('hold and charge (hosted)', () => {
   })
 
   it('an answer claiming more pictures than the hold covers is charged the hold, reported', async () => {
-    const layers = Array.from({ length: 20 }, (_, i) => ({ image: { url: `https://r.test/l${i}.png`, width: 4000, height: 4000 }, z_index: i }))
-    const body = JSON.stringify({ images: [], layers })
+    // 17 layers (all it keeps) but 20 pictures listed: priced at 20, above the hold of 17.
+    const layers = Array.from({ length: 17 }, (_, i) => ({ image: { url: `https://r.test/l${i}.png`, width: 4000, height: 4000 }, z_index: i }))
+    const images = Array.from({ length: 20 }, (_, i) => ({ url: `https://r.test/i${i}.png`, width: 4000, height: 4000 }))
+    const body = JSON.stringify({ images, layers })
     const { k, run } = await seedreamRun({ __body__: body })
     const rec = run.takes[0]!.nodes.n!
     expect(rec.status, rec.error ?? '').toBe('done')
     expect([...k.ledger.holds.values()].map(h => [h.credits, h.actual])).toEqual([[173, 173]])
     expect((k.deps.reportError as ReturnType<typeof vi.fn>).mock.calls.some(([, ctx]) => (ctx as { site: string }).site === 'runner.charge.above-hold')).toBe(true)
+  })
+
+  // Fix round 1, ruling 1: a name Sailor refuses fails the node plainly; the finished call is charged as answered.
+  it('a layer name that is a list fails plainly and is charged the pictures made at their own rate (the reviewer\'s 31, not 61)', async () => {
+    const layers = Array.from({ length: 6 }, (_, i) => ({ image: { url: `https://r.test/l${i}.png`, width: 64, height: 48 }, z_index: i, ...(i === 3 ? { name: ['a', 1.0, null] } : {}) }))
+    const { k, run } = await seedreamRun({ __body__: JSON.stringify({ images: [{ url: 'https://r.test/flat.png', width: 64, height: 48 }], layers }) })
+    const rec = run.takes[0]!.nodes.n!
+    expect(rec.status).toBe('error')
+    expect(rec.error).toBe(SEEDREAM_ANSWER_UNREADABLE)
+    expect(rec.calls![0]!.usd).toBe(tidy(6 * 0.03375))
+    expect([...k.ledger.holds.values()].map(h => [h.credits, h.actual])).toEqual([[173, 31]])
+    expect(creditsForUsd(6 * 0.0675)).toBe(61)
+    // Nothing was downloaded: the node stopped at the answer.
+    expect((k.deps.download as ReturnType<typeof vi.fn>).mock.calls).toEqual([])
+  })
+
+  // Fix round 1, ruling 8: fal makes at most 17; more is refused before any layer is downloaded.
+  it('an answer of 18 layers is refused before downloading any; charged as answered, never above the hold', async () => {
+    const layers = Array.from({ length: 18 }, (_, i) => ({ image: { url: `https://r.test/l${i}.png`, width: 64, height: 48 }, z_index: i }))
+    const { k, run } = await seedreamRun({ __body__: JSON.stringify({ images: [], layers }) })
+    const rec = run.takes[0]!.nodes.n!
+    expect(rec.status).toBe('error')
+    expect(rec.error).toBe(SEEDREAM_TOO_MANY_LAYERS)
+    expect(rec.error).not.toMatch(/Node|_/)
+    expect((k.deps.download as ReturnType<typeof vi.fn>).mock.calls).toEqual([])
+    expect(readdirSync(join(k.root, 'input'), { recursive: true }).filter(f => String(f).includes('seedream_layer'))).toEqual([])
+    expect([...k.ledger.holds.values()].map(h => [h.credits, h.actual])).toEqual([[173, creditsForUsd(18 * 0.03375)]])
   })
 
   it('a layer that can\'t be downloaded fails the node; its call was not delivered, so not charged', async () => {
@@ -522,8 +563,9 @@ describe('Seedream\'s layers: the user\'s own input files (ruling (o))', () => {
     const created = (k.graphRuns.create.mock.calls as unknown as [{ promptId: string; userId: string }][]).map(x => x[0])
     const appended = k.graphRuns.appendOutput.mock.calls as unknown as [string, string][]
     for (const l of json.layers) {
-      const key = outputKey({ filename: l.filename.split('/')[1]!, subfolder: sub, type: 'input' })
-      expect(appended.map(a => a[1])).toContain(key)
+      // Under the runner's own record kind (fix round 1), never an `input:` key a history could carry.
+      expect(appended.map(a => a[1])).toContain(savedInputKey({ filename: l.filename.split('/')[1]!, subfolder: sub }))
+      expect(appended.map(a => a[1])).not.toContain(outputKey({ filename: l.filename.split('/')[1]!, subfolder: sub, type: 'input' }))
     }
     expect(rec.outputs.every(f => f.type === 'output')).toBe(true)
     // Ownership as the server checks it: uploads by owner, else the keys the user's runs recorded.
@@ -531,7 +573,7 @@ describe('Seedream\'s layers: the user\'s own input files (ruling (o))', () => {
     const check: OwnershipCheck = {
       ownsInput: async () => false,
       ownsOutput: async () => false,
-      ownsSaved: async (userId, f) => ownedBy(userId).has(outputKey(f)),
+      ownsSaved: async (userId, f) => savedInputOwned(userId, f, ownedBy(userId)),
     }
     const frame: ApiPrompt = {
       l: { class_type: 'LoadImage', inputs: { image: json.layers[1]!.filename, upload: 'image' } },
@@ -543,6 +585,12 @@ describe('Seedream\'s layers: the user\'s own input files (ruling (o))', () => {
     await expect(assertFilesOwned(files, 'user_2', true, check)).rejects.toThrow('isn’t one of yours')
     // Without the saved-file record (an older server), an input file is owned only by its upload.
     await expect(assertFilesOwned(files, k.userId, true, { ownsInput: async () => false, ownsOutput: async () => true })).rejects.toThrow('isn’t one of yours')
+    // Hardening (fix round 1): an `input:` key (what a ComfyUI history could hold) never counts, nor the runner's
+    // kind for a file outside the user's own subfolder.
+    const f = files[0]!
+    expect(savedInputOwned(k.userId!, f, new Set([outputKey(f)]))).toBe(false)
+    expect(savedInputOwned(k.userId!, { ...f, subfolder: 'u_other' }, new Set([savedInputKey({ ...f, subfolder: 'u_other' })]))).toBe(false)
+    expect(savedInputOwned(k.userId!, f, new Set([savedInputKey(f)]))).toBe(true)
   })
 
   it('locally: saved at the input folder\'s root with Python\'s names, the JSON byte-identical', async () => {
@@ -667,4 +715,43 @@ describe('with layers off (rule 15)', () => {
     expect(graphs).toBeGreaterThanOrEqual(800)
     console.info(`layers families-off invariant: ${graphs} saved graphs`)
   }, 600_000)
+})
+
+// Fix round 1, ruling 6: a resumed node reuses the layers it saved, under their names.
+describe('Seedream resumed after a restart', () => {
+  it('the layers saved before the restart are reused, not downloaded or saved again; the rest follow in order', async () => {
+    const c = caseNamed('seedream · 17 layers')
+    const fal = createFakeFal({ bodyText: () => (c.answers[0] as Raw).__body__ })
+    const hang = { on: true }
+    const got: string[] = []
+    const download = async (url: string) => {
+      if (hang.on && url.endsWith('/layer_3.png')) await new Promise<void>(() => {})
+      got.push(url)
+      return { bytes: new Uint8Array(Buffer.from(c.files![url]!, 'base64')), contentType: 'image/png' }
+    }
+    const k1 = makeKit({ hosted: true, fal, deps: { families: () => ON, download } })
+    writeFileSync(join(k1.root, 'input', 'image.png'), Buffer.from(c.picture_files!.image!, 'base64'))
+    const { runId } = await k1.engine.startRun({ userId: k1.userId, takes: [withPicture(c)], ...START })
+    const until = async (ok: () => boolean) => { for (let i = 0; i < 500 && !ok(); i++) await new Promise(r => setTimeout(r, 5)) }
+    await until(() => got.length === 3)
+    await new Promise(r => setTimeout(r, 30))
+    const mid = (await k1.store.get(runId))!.takes[0]!.nodes.n!
+    expect(Object.keys(mid.calls![0]!.saved ?? {})).toEqual(['layer-0', 'layer-1', 'layer-2'])
+    hang.on = false
+    const k2 = makeKit({ hosted: true, dir: k1.dir, root: k1.root, fal, ledger: k1.ledger, deps: { families: () => ON, download } })
+    expect(await k2.engine.reattach()).toBe(1)
+    await k2.engine.settled(runId)
+    const rec = (await k2.store.get(runId))!.takes[0]!.nodes.n!
+    expect(rec.status, rec.error ?? '').toBe('done')
+    // Each layer downloaded once, in order; the call sent once.
+    const layerGets = got.filter(u => /layer_\d+\.png$/.test(u))
+    expect(layerGets).toEqual(Array.from({ length: 17 }, (_, i) => `https://r.test/seedream/layer_${i}.png`))
+    expect(fal.submitted().length).toBe(1)
+    // Seventeen files, named 1 to 17 as the JSON says: none saved twice.
+    const sub = `u_${shortUserHash(k1.userId!)}`
+    const onDisk = readdirSync(join(k1.root, 'input', sub)).filter(f => f.startsWith('seedream_layer')).sort()
+    const named = (JSON.parse((rec.values![1] as { text: string }).text) as { layers: { filename: string }[] }).layers.map(l => l.filename)
+    expect(onDisk).toEqual(Array.from({ length: 17 }, (_, i) => `seedream_layer_${String(i + 1).padStart(5, '0')}_.png`))
+    expect(named).toEqual(onDisk.map(f => `${sub}/${f}`))
+  })
 })

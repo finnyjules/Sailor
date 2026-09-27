@@ -128,6 +128,12 @@ export interface CallRecord {
    * it; reported as runner.download.lost).
    */
   lost?: true
+  /**
+   * Files the node saved from this call's answer, by the node's own key
+   * (R3.6 fix round 1: Layerize an image's layers): a resumed node reuses
+   * them instead of downloading and saving them again under new names.
+   */
+  saved?: Record<string, OutputFile>
 }
 
 export type NodeStatus = 'waiting' | 'running' | 'done' | 'error' | 'skipped' | 'paused' | 'dropped' | 'stopped'

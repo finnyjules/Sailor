@@ -12,6 +12,7 @@ import { runnerEnabled, runnerFamilies } from '../../runner/config'
 import { assertRateLimit } from '../../lib/rateLimit'
 import { previewArrival, previewDepsOverride, runPreview, type PreviewDeps } from '../../runner/preview'
 import { createEngineResultStore } from '../../runner/results'
+import { savedInputOwned } from '../../runner/inputs'
 import { canonicalUploadKey, engineDirForType, uploadOwner } from '../../utils/inputUploads'
 import { ownedOutputKeys, outputKey } from '../../utils/graphRuns'
 import { isHosted } from '../../utils/deployMode'
@@ -32,7 +33,7 @@ function deps(): PreviewDeps {
       ownsInput: async (userId, f) => (await uploadOwner(canonicalUploadKey('input', f.subfolder, f.filename))) === userId,
       ownsOutput: async (userId, f) => (await ownedOutputKeys(userId)).has(outputKey(f)),
       // Layerize an image's layers (R3.6): saved to the input folder by the user's own run.
-      ownsSaved: async (userId, f) => f.type === 'input' && (await ownedOutputKeys(userId)).has(outputKey(f)),
+      ownsSaved: async (userId, f) => savedInputOwned(userId, f, await ownedOutputKeys(userId)),
     },
   }
   return realDeps

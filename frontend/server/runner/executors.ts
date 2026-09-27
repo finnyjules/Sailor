@@ -213,6 +213,12 @@ export interface PipelineIO extends DeriveIO {
    * without it, so its call was delivered).
    */
   download(url: string, o?: { maxBytes?: number; kind?: AnswerKind; optional?: true }): Promise<{ bytes: Uint8Array; contentType: string | null }>
+  /**
+   * A file saved from call `callKey`'s answer under the node's own `key`
+   * (R3.6 fix round 1): the file already saved for it (a resumed node,
+   * the file still there), else `make()`'s, written down on that call.
+   */
+  savedOnce(callKey: string, key: string, make: () => Promise<OutputFile>): Promise<OutputFile>
   /** Hands off bytes the node made itself (a mask, an RGB copy): kept by sha256, then uploaded. */
   handOff(bytes: Uint8Array, name: string): Promise<string>
   toUrl(file: OutputFile): Promise<string>

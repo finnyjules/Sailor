@@ -28,6 +28,20 @@ export function outputKey(o: { filename: string; subfolder?: string; type?: stri
 }
 
 /**
+ * The record kind of an input file the runner saved itself (R3.6 fix round
+ * 1: Layerize an image's layers): written only by the runner's own save
+ * (metering.addSavedInput), never harvested from ComfyUI's history
+ * (meterGraphRun.ts historyOutputKeys skips it), so it can't be claimed
+ * through a node's ui.
+ */
+export const RUNNER_SAVED_INPUT = 'runner-saved-input'
+
+/** The graph_runs key of an input file the runner saved: `runner-saved-input:<subfolder>:<filename>`. */
+export function savedInputKey(o: { filename: string; subfolder?: string }): string {
+  return outputKey({ filename: o.filename, subfolder: o.subfolder ?? '', type: RUNNER_SAVED_INPUT })
+}
+
+/**
  * `target` (review I4) is the engine base URL that actually ran the prompt —
  * `http://127.0.0.1:8188` for the main instance, `:8189+N` for a pool worker
  * picked by `?comfyWorker=N`. The /view race-window harvest polls it; without

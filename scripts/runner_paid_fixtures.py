@@ -100,6 +100,29 @@ def png_bytes(w: int, h: int, seed: int, mode: str = "RGB") -> bytes:
     return buf.getvalue()
 
 
+def cmyk_jpeg_bytes(w: int, h: int, seed: int) -> bytes:
+    """A small deterministic CMYK JPEG (R3.6 fix round 1: PIL converts CMYK naively)."""
+    import io
+    from PIL import Image
+    rng = random.Random(seed)
+    img = Image.frombytes("CMYK", (w, h), bytes(rng.randrange(256) for _ in range(w * h * 4)))
+    buf = io.BytesIO()
+    img.save(buf, format="JPEG", quality=95)
+    return buf.getvalue()
+
+
+def grey16_png_bytes(w: int, h: int, seed: int) -> bytes:
+    """A small deterministic 16-bit greyscale PNG (PIL's I;16), with values below and above 255."""
+    import io
+    import numpy as np
+    from PIL import Image
+    rng = random.Random(seed)
+    arr = np.array([rng.choice((rng.randrange(256), rng.randrange(65536))) for _ in range(w * h)], dtype=np.uint16).reshape(h, w)
+    buf = io.BytesIO()
+    Image.fromarray(arr).save(buf, format="PNG")
+    return buf.getvalue()
+
+
 def wav_bytes(seconds: float, rate: int, seed: int, channels: int = 1) -> bytes:
     """A small deterministic 16-bit PCM WAV (a case's input or answer sound)."""
     import io
@@ -256,6 +279,7 @@ def capture_calls(node_cls, answers: list, links: dict | None = None, files: dic
     gets: list = []
     queue = list(answers)
     counters: dict = {}
+    saved_inputs: list = []
     served = _served(links or {}, files or {})
     named: dict = {}  # id(object) → (kind, label); objects kept alive in `keep`
     keep: list = []
@@ -373,7 +397,12 @@ def capture_calls(node_cls, answers: list, links: dict | None = None, files: dic
 
     def fake_to_input(tensor, filename_prefix="layer"):
         counters[filename_prefix] = counters.get(filename_prefix, 0) + 1
-        return f"{filename_prefix}_{counters[filename_prefix]:05}_.png"
+        file = f"{filename_prefix}_{counters[filename_prefix]:05}_.png"
+        # What save_image_to_input writes (R3.6 fix round 1): the 8-bit pixels, by its own rule.
+        img = tensor if tensor.ndim == 3 else tensor[0]
+        arr = np.clip(255.0 * img.detach().cpu().float().numpy(), 0, 255).astype(np.uint8)
+        saved_inputs.append({"file": file, "shape": list(arr.shape), "sha256": hashlib.sha256(arr.tobytes()).hexdigest()})
+        return file
 
     for pname, data in (pictures or {}).items():
         kwargs[pname] = name(_picture_tensor(data), "input", pname)
@@ -423,6 +452,8 @@ def capture_calls(node_cls, answers: list, links: dict | None = None, files: dic
     args = getattr(out, "args", out)
     result["output"] = jsonable(list(args) if isinstance(args, tuple) else args)
     result["ui"] = jsonable(getattr(out, "ui", None))
+    if saved_inputs:
+        result["saved_inputs"] = saved_inputs
     return result
 
 
@@ -453,6 +484,8 @@ def paid_case(name: str, node_cls, widgets: dict, answers: list, pictures=(), so
         case["files"] = files
     if "error" in got:
         case["error"] = got["error"]
+    if "saved_inputs" in got:
+        case["saved_inputs"] = got["saved_inputs"]
     return case
 
 
@@ -975,6 +1008,13 @@ def layers_group() -> dict:
     # The base layer has no width: the size comes from images[0].
     seedream("base without a width", {}, _seedream_answer([_seedream_layer(0, image={"url": "https://r.test/seedream/layer_0.png"}), _seedream_layer(1)]))
     seedream("no layers", {}, {"images": [{"url": SEEDREAM_FLAT, "width": 64, "height": 48}], "layers": None})
+    # Fix round 1: layers PIL reads its own way (a CMYK JPEG, 16-bit greyscale), and a Python-only name (a list).
+    odd_files = _seedream_answer([_seedream_layer(0), _seedream_layer(1), _seedream_layer(2)])
+    seedream("CMYK and 16-bit grey layers", {}, odd_files, files={
+        SEEDREAM_FLAT: rgba(40), "https://r.test/seedream/layer_0.png": rgba(41),
+        "https://r.test/seedream/layer_1.png": _b64(cmyk_jpeg_bytes(8, 6, 60)),
+        "https://r.test/seedream/layer_2.png": _b64(grey16_png_bytes(8, 6, 61))})
+    seedream("a name that is a list", {}, _seedream_answer([_seedream_layer(0), _seedream_layer(1, name=["a", 1.0, None])]))
 
     # ── Expand / outpaint: every direction (Flux Fill) and ratio (Bria Expand), seeds, prompts, an RGBA answer.
     out = "https://r.test/outpaint.png"
@@ -995,6 +1035,9 @@ def layers_group() -> dict:
         outpaint(f"{model} prompt spaces only", {"model": model, "prompt": "   "})
         outpaint(f"{model} RGBA answer", {"model": model}, fill=rgba(51))
     outpaint("Flux Fill answer a string", {}, {"output": out})
+    # Fix round 1: answers PIL reads its own way.
+    outpaint("Flux Fill CMYK JPEG answer", {}, fill=_b64(cmyk_jpeg_bytes(8, 6, 52)))
+    outpaint("Bria Expand 16-bit grey answer", {"model": "Bria Expand"}, fill=_b64(grey16_png_bytes(8, 6, 53)))
     outpaint("Bria Expand seed 2^32-1", {"model": "Bria Expand", "seed": 2 ** 32 - 1})
     return {"cases": cases}
 

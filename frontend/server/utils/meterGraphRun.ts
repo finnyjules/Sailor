@@ -20,7 +20,7 @@ import { normalizeHostedPrompt } from './hostedPrompt'
 import { storedNodeCatalog } from '../native/objectInfo'
 import { graphInputSeconds, mediaSeconds, seedanceReferenceSeconds, type MediaFile, type MediaKind } from './graphInputSeconds'
 import { MeterRefusalError } from './requestMeter'
-import { createGraphRun, resolveGraphRun, outputKey, ownedOutputKeys } from './graphRuns'
+import { createGraphRun, resolveGraphRun, outputKey, ownedOutputKeys, RUNNER_SAVED_INPUT } from './graphRuns'
 import { partialCharge, settleOnCompletion, type HistoryEntry, type RunChargePlan } from './settleWatcher'
 import { FRAME_RENDER_TYPES } from '#shared/runner/eligibility'
 import { stripForeignComfyOrgCreds } from './spikeAuth'
@@ -824,7 +824,8 @@ function historyOutputKeys(entry: { outputs?: unknown } | null | undefined): str
   for (const node of Object.values(nodeOutputs)) {
     for (const arr of [node?.images, node?.gifs, node?.videos, node?.audio]) {
       if (!Array.isArray(arr)) continue
-      for (const f of arr) if (f?.filename) outputs.push(outputKey(f))
+      // The runner's own saved-input kind is never taken from a history (R3.6 fix round 1).
+      for (const f of arr) if (f?.filename && f.type !== RUNNER_SAVED_INPUT) outputs.push(outputKey(f))
     }
   }
   return outputs

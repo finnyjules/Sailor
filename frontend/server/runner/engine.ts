@@ -1214,8 +1214,8 @@ export function createEngine(deps: EngineDeps) {
             assets.push(f)
           }
           // Saved into the input folder (R3.6, Layerize an image's layers): recorded
-          // as this run's, so the user owns it (inputs.ts), but not an asset.
-          if (folder === 'input') await deps.metering.addOutput(run.userId, stageKey, f)
+          // under the runner's own kind, so the user owns it (inputs.ts), but not an asset.
+          if (folder === 'input') await deps.metering.addSavedInput(run.userId, stageKey, f)
           return f
         },
         savePreview: (bytes, o) => deps.results.saveLivePreview(bytes, { nodeId: o.nodeId ?? id, userId: run.userId }),
@@ -1284,6 +1284,17 @@ export function createEngine(deps: EngineDeps) {
                 else if (!nodeSignal.aborted) await lostDownload(run, rec, url, e, stageKey, id)
                 throw e
               }
+            },
+            savedOnce: async (callKey, key, make) => {
+              const cr = rec.calls?.find(c => c.key === callKey && c.status === 'done')
+              const prior = cr?.saved && Object.prototype.hasOwnProperty.call(cr.saved, key) ? cr.saved[key] : undefined
+              if (prior && await files.exists(prior)) return prior
+              const f = await make()
+              if (cr) {
+                (cr.saved ??= {})[key] = f
+                await persist(run)
+              }
+              return f
             },
             handOff: async (bytes, name) => {
               const f = await kept.put(run.id, bytes, keptExtOf(name))

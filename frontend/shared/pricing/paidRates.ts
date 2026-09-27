@@ -144,9 +144,9 @@ export const PAID_RATES: Record<string, PaidRate> = {
     service: 'replicate', source: 'https://replicate.com/ideogram-ai/layerize', read: '2026-09-27', confidence: 'estimate',
   },
   // Layerize an image: fal's page, "$0.03375 per generated layer for total pixel area under
-  // 1536x1536 … $0.0675 per generated layer" over it (`billing_unit: images`, price 0.03375). An
-  // estimate until the live check: whether the base picture counts as a layer, and the area
-  // each `image_size` makes, are not on the page.
+  // 1536x1536 … $0.0675 per generated layer" over it (`billing_unit: images`, price 0.03375); the
+  // area is the generated base layer's (the page). An estimate until the live check: whether the
+  // base picture counts as a layer, and the area `auto_1K` makes, are not on the page.
   'bytedance/seedream/v5/pro/layerize': {
     unit: 'per_output_image', perImage: 0.03375, large: { fromPixels: 1536 * 1536, perImage: 0.0675 },
     service: 'fal', source: 'https://fal.ai/models/bytedance/seedream/v5/pro/layerize', read: '2026-09-27', confidence: 'estimate',

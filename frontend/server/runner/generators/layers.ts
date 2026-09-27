@@ -28,7 +28,7 @@ import { parsePyJson, pyJsonDumps, pyStr, type PyJson } from '#shared/runner/pyJ
 import { PY_INT_RE, pyNumStrip, pyStrip } from '#shared/runner/pyText'
 import { pyFalsy } from '#shared/runner/llm'
 import {
-  LAYERIZE_SLUG, OUTPAINT_SLUGS, SEEDREAM_IMAGE_SIZES, SEEDREAM_LAYERIZE_APP, type LayersClass, type OutpaintModel,
+  LAYERIZE_SLUG, OUTPAINT_SLUGS, SEEDREAM_IMAGE_SIZES, SEEDREAM_LAYERIZE_APP, SEEDREAM_MAX_IMAGES, type LayersClass, type OutpaintModel,
 } from '#shared/runner/layers'
 import { paidCallUsd } from '#shared/pricing/paidRates'
 import { seedreamCallAnswered, seedreamCallCeiling } from '#shared/pricing/paidSettings'
@@ -220,6 +220,12 @@ async function layerData(io: PipelineIO, url: string): Promise<string> {
 /** What the Seedream answer is not, in plain words (Python raises on it). */
 export const SEEDREAM_ANSWER_UNREADABLE = 'The service answered in a form Sailor can’t read'
 
+/**
+ * More layers than fal makes (its schema: the base and up to 16): refused
+ * before any is downloaded (R3.6 fix round 1; Python downloads them all).
+ */
+export const SEEDREAM_TOO_MANY_LAYERS = `The service sent back more than ${SEEDREAM_MAX_IMAGES} layers, more than Layerize an image makes`
+
 const isObj = (v: PyJson): v is { obj: [string, PyJson][] } => !!v && typeof v === 'object' && !Array.isArray(v) && 'obj' in v
 
 /** Python's `d.get(key)` (None when absent). */
@@ -289,7 +295,20 @@ export interface SeedreamLayer {
  * `images[0]`'s, else 0. Python's AttributeError / TypeError / ValueError on
  * a malformed answer fail the node plainly.
  */
-export function parseSeedreamLayers(result: PyJson): { layers: SeedreamLayer[]; width: { int: string }; height: { int: string } } {
+/**
+ * A layer's `str(x or "")`. A list or a dict (Python prints its repr; fal's
+ * schema says text or null) fails the node plainly (R3.4's ruling for dict
+ * answers, R3.6 fix round 1); `lenient` (pricing only) reads it as "".
+ */
+function layerText(v: PyJson | null, lenient: boolean): string {
+  try { return pyStr(v ?? '') }
+  catch {
+    if (lenient) return ''
+    throw new Error(SEEDREAM_ANSWER_UNREADABLE)
+  }
+}
+
+export function parseSeedreamLayers(result: PyJson, o: { lenient?: boolean } = {}): { layers: SeedreamLayer[]; width: { int: string }; height: { int: string } } {
   if (!pyFalsy(result) && !isObj(result)) throw new Error(SEEDREAM_ANSWER_UNREADABLE)
   const root = isObj(result) ? result : { obj: [] as [string, PyJson][] }
   const raw = getOr(root, 'layers')
@@ -309,8 +328,8 @@ export function parseSeedreamLayers(result: PyJson): { layers: SeedreamLayer[]; 
       url,
       z_index: pyIntJson(z === undefined ? { int: '0' } : z),
       box,
-      name: pyStr(getOr(layer, 'name') ?? ''),
-      description: pyStr(getOr(layer, 'description') ?? ''),
+      name: layerText(getOr(layer, 'name'), !!o.lenient),
+      description: layerText(getOr(layer, 'description'), !!o.lenient),
       width: pyIntJson(getOr(img, 'width') ?? { int: '0' }),
       height: pyIntJson(getOr(img, 'height') ?? { int: '0' }),
     })
@@ -346,7 +365,8 @@ export function seedreamAnsweredUsd(result: unknown, raw: string | null): number
   catch { return null }
   let pixels: number | null = null
   try {
-    const { width, height } = parseSeedreamLayers(answer)
+    // A name or description Sailor refuses doesn't change what fal made (R3.1: a finished call is charged as answered).
+    const { width, height } = parseSeedreamLayers(answer, { lenient: true })
     const px = Number(width.int) * Number(height.int)
     pixels = Number.isFinite(px) && px > 0 ? px : null
   }
@@ -374,8 +394,10 @@ function layerizePlan(inputs: Record<string, unknown>, image: string): NodePlan 
       if (!urls.length) throw new Error(LAYERIZE_NO_OUTPUT)
       if (!picture) throw new Error(LAYERIZE_NO_PICTURE)
       // The picture as downloaded (Python keeps its alpha), shown under `layerize` (save_generation_output).
-      const got = await io.download(picture)
-      const file = await io.saveAsset(got.bytes, { prefix: 'layerize', ext: answerExt('image', got.bytes, got.contentType, picture) })
+      const file = await io.savedOnce('layerize', 'picture', async () => {
+        const got = await io.download(picture)
+        return io.saveAsset(got.bytes, { prefix: 'layerize', ext: answerExt('image', got.bytes, got.contentType, picture) })
+      })
       const text = json ? await layerData(io, json) : ''
       const values: Record<number, RunnerValue> = { 0: { kind: 'files', files: [file] }, 1: { kind: 'json', text } }
       return { values, ui: shown(file, text ? text : null) }
@@ -397,11 +419,15 @@ function seedreamPlan(ctx: PlanContext, inputs: Record<string, unknown>, image: 
       })
       const answer = answerJson(r.result, r.raw)
       const { layers, width, height } = parseSeedreamLayers(answer)
+      if (layers.length > SEEDREAM_MAX_IMAGES) throw new Error(SEEDREAM_TOO_MANY_LAYERS)
       // Each layer as save_image_to_input writes it: an RGBA PNG in the input folder, in order.
+      // A resumed node reuses the layers it saved already, under their names (fix round 1).
       const kept: PyJson[] = []
-      for (const l of layers) {
-        const got = await io.download(l.url)
-        const f = await io.saveAsset(await answerRgbaPng(got.bytes), { prefix: 'seedream_layer', ext: 'png', folder: 'input' })
+      for (const [i, l] of layers.entries()) {
+        const f = await io.savedOnce('layerize', `layer-${i}`, async () => {
+          const got = await io.download(l.url)
+          return io.saveAsset(await answerRgbaPng(got.bytes), { prefix: 'seedream_layer', ext: 'png', folder: 'input' })
+        })
         kept.push({ obj: [['filename', inputName(f)], ['z_index', l.z_index], ['box', l.box], ['name', l.name], ['description', l.description]] })
       }
       const json = pyJsonDumps({ obj: [['source', 'seedream'], ['width', width], ['height', height], ['layers', kept]] })
@@ -414,14 +440,17 @@ function seedreamPlan(ctx: PlanContext, inputs: Record<string, unknown>, image: 
       let preview: OutputFile
       if (url !== null) {
         if (typeof url !== 'string') throw new Error(SEEDREAM_ANSWER_UNREADABLE)
-        const got = await io.download(url)
-        preview = await io.saveAsset(got.bytes, { prefix: 'seedream_layerize', ext: answerExt('image', got.bytes, got.contentType, url) })
+        preview = await io.savedOnce('layerize', 'preview', async () => {
+          const got = await io.download(url)
+          return io.saveAsset(got.bytes, { prefix: 'seedream_layerize', ext: answerExt('image', got.bytes, got.contentType, url) })
+        })
       }
       else {
         // Python saves the input picture itself; the runner saves a copy of its file.
-        const bytes = await io.read(source)
-        const ext = answerExt('image', bytes, null, source.filename)
-        preview = await io.saveAsset(bytes, { prefix: 'seedream_layerize', ext })
+        preview = await io.savedOnce('layerize', 'preview', async () => {
+          const bytes = await io.read(source)
+          return io.saveAsset(bytes, { prefix: 'seedream_layerize', ext: answerExt('image', bytes, null, source.filename) })
+        })
       }
       const values: Record<number, RunnerValue> = { 0: { kind: 'files', files: [preview] }, 1: { kind: 'json', text: json } }
       return { values, ui: shown(preview, kept.length ? json : null) }

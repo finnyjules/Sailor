@@ -9,6 +9,8 @@
 import { isLink, type ApiPrompt } from '#shared/runner/graph'
 import { parseShaderBaked } from '#shared/runner/shaderBakeKey'
 import { MeterRefusalError } from '../utils/requestMeter'
+import { savedInputKey } from '../utils/graphRuns'
+import { userSubfolder } from './results'
 import type { OutputFile } from './types'
 
 export const MOODBOARD_MAX_REFS = 3
@@ -132,6 +134,16 @@ export interface OwnershipCheck {
    * Absent: none is.
    */
   ownsSaved?(userId: string, file: OutputFile): Promise<boolean>
+}
+
+/**
+ * Whether `keys` (the user's graph_runs keys) record this input file as one
+ * the runner saved for them (R3.6 fix round 1): the runner's own kind
+ * (savedInputKey, never harvested from ComfyUI), and in the user's own
+ * input subfolder.
+ */
+export function savedInputOwned(userId: string, f: OutputFile, keys: ReadonlySet<string>): boolean {
+  return f.type === 'input' && f.subfolder === userSubfolder(userId, true) && keys.has(savedInputKey(f))
 }
 
 export async function assertFilesOwned(

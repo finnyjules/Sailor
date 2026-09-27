@@ -12,6 +12,7 @@ import { createFileKeptBytes } from './keptBytes'
 import { createMetering } from './metering'
 import { createRunEvents } from './events'
 import { createGenerationRecords } from './records'
+import { savedInputOwned } from './inputs'
 import { runnerBackup, runnerFamilies, webhookBaseUrl, RUNNER_PER_USER_LIMIT } from './config'
 import { engineDirForType, uploadOwner, canonicalUploadKey } from '../utils/inputUploads'
 import { uploadToFalStorage } from '../utils/falStorage'
@@ -61,7 +62,7 @@ export function getEngine(): Engine {
       ownsInput: async (userId, f) => (await uploadOwner(canonicalUploadKey('input', f.subfolder, f.filename))) === userId,
       ownsOutput: async (userId, f) => (await ownedOutputKeys(userId)).has(outputKey(f)),
       // Layerize an image's layers (R3.6): saved to the input folder by the user's own run.
-      ownsSaved: async (userId, f) => f.type === 'input' && (await ownedOutputKeys(userId)).has(outputKey(f)),
+      ownsSaved: async (userId, f) => savedInputOwned(userId, f, await ownedOutputKeys(userId)),
     },
     records: createGenerationRecords({
       hosted: isHosted,
