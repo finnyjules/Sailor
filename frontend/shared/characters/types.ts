@@ -11,6 +11,8 @@ export type CharacterStateStatus = 'draft' | 'testing' | 'locked'
 export interface StressResult { passes: number; total: number; at: string }
 
 export type CheckVerdict = 'match' | 'unsure' | 'different' | 'no-face'
+/** One character's face score for a video take's frames (spec: Checks, Task 9). */
+export interface TakeFaceScore { slug: string; name: string; best: number | null; verdict: CheckVerdict }
 export interface Check {
   verdict: CheckVerdict
   /** Similarity on the checker's scale (AWS Rekognition: 0–100). Absent for 'no-face'. */
