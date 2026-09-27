@@ -15,6 +15,7 @@ import { addPoint, addPath, addLine } from '~/lib/sketch/edit'
 import { usePen, isCleanupBarFocused } from '~/composables/pen/usePen'
 import { REPEAT_NEED_SHAPE, REPEAT_HINT_CENTRE, REPEAT_HINT_PATH, REPEAT_BAD_PATH, REPEAT_CURVE_PATH, REPEAT_CANT } from '~/composables/pen/penRepeat'
 import { squarePath } from './__fixtures__/penStage8'
+import { roundCorners } from '~/lib/sketch/corners'
 
 vi.mock('~/components/pen/PenTipCard.vue', async () => {
   const { defineComponent: dc } = await import('vue')
@@ -233,6 +234,14 @@ describe('reasons, drops and typed values', () => {
     pen.pick(path); pen.repeatPrompt()
     expect(pen.repeat.value!.distance).toBeCloseTo(1.25, 9)
   })
+  it('the default linear distance measures what a shallow arc draws, not its far-off centre', () => {
+    const { pen, doc } = setup()
+    // (0,0) → (0,4) bulging right round (−10, 2): it draws 0 ≤ x ≤ 0.198
+    const d = doc.value
+    const arc = addPath(d, [addPoint(d, 0, 0), addPoint(d, 0, 4)], [{ kind: 'arc', center: addPoint(d, -10, 2), sweep: 1 }])
+    pen.pick(arc); pen.repeatPrompt()
+    expect(pen.repeat.value!.distance).toBeCloseTo(1.25 * (Math.hypot(10, 2) - 10), 9)
+  })
   it('undo while open only closes it; a change to the drawing by another path drops it untouched', () => {
     const { pen, doc, path, changes } = setup()
     pen.selectTool('line'); pen.place(20, 20); pen.place(21, 20); pen.selectTool('select')
@@ -291,6 +300,21 @@ describe('fix round 1', () => {
     expect(pen.valueRequest.value).toBeNull()
     w.unmount()
   })
+  it('a guide dot (a virtual sharp, a linear guide end) takes a press on its whole disc and still looks hollow', async () => {
+    const { pen, doc, pts } = setup()
+    const g = addPoint(doc.value, 5, 5, { construction: true })
+    expect(roundCorners(doc.value, [pts[1]!], 'round', 0.2).ok).toBe(true)
+    const w = mount(PenOverlay, { props: { pen, view: DEV, width: 680, height: 460 }, attachTo: document.body })
+    await nextTick()
+    for (const id of [g, pts[1]!]) {
+      const dot = w.find(`circle[data-point="${id}"]`)
+      expect(dot.attributes('data-construction')).toBeDefined()
+      expect(dot.attributes('fill')).toBe('none')
+      expect(dot.attributes('pointer-events')).toBe('all')
+    }
+    expect(w.find(`circle[data-point="${pts[0]}"]`).attributes('pointer-events')).toBeUndefined()
+    w.unmount()
+  })
   it('Enter in a field and a click on Apply with the same text make identical drawings', async () => {
     const run = async (how: 'enter' | 'click') => {
       const { pen, doc, path } = setup()
@@ -309,6 +333,95 @@ describe('fix round 1', () => {
     const a = await run('enter'), b = await run('click')
     expect(a).toBe(b)
     expect(a).toContain('"value":120')
+  })
+  // final fix wave (b): fields commit when left, a value that is no value
+  // reverts, Enter with a refused value does nothing
+  async function linearPanel() {
+    const t = setup()
+    const w = mount(PenProperties, { props: { pen: t.pen }, attachTo: document.body })
+    t.pen.pick(t.path); t.pen.repeatPrompt(); await nextTick()
+    await w.find('[data-repeat-mode="linear"]').trigger('click')
+    return { ...t, w, field: (f: string) => w.find(`[data-repeat-field="${f}"] input`) }
+  }
+  it('Copies 3, Tab, Distance 6, click Apply: 3 copies at 6', async () => {
+    const { pen, doc, w, field } = await linearPanel()
+    const count = field('count')
+    ;(count.element as HTMLInputElement).focus()
+    await count.setValue('3')
+    await count.trigger('keydown', { key: 'Tab' })
+    ;(field('distance').element as HTMLInputElement).focus()   // Tab moves the focus: count blurs
+    expect(pen.repeat.value!.count).toBe(3)                     // committed on leaving, preview follows
+    expect(pen.repeat.value!.preview.ok).toBe(true)
+    const before = pen.repeat.value!.preview.d
+    await field('distance').setValue('6')
+    await w.find('[data-act="repeat-apply"]').trigger('click') // the focus stays in the field through the click
+    expect(pen.repeat.value).toBeNull()
+    const tf = doc.value.constraints.filter(c => c.kind === 'translatedFrom')
+    expect(new Set(tf.map(c => c.value))).toEqual(new Set([1, 2]))   // 2 copies + the original = 3
+    const g = doc.value.entities.find(e => e.kind === 'line' && e.construction) as { p1: string; p2: string }
+    const P = (id: string) => doc.value.entities.find(e => e.id === id) as { x: number; y: number }
+    expect(Math.hypot(P(g.p2).x - P(g.p1).x, P(g.p2).y - P(g.p1).y)).toBeCloseTo(6, 9)
+    expect(before).not.toBe('')
+    w.unmount()
+  })
+  it('leaving a field with no value in it puts the shown value back; the preview is unchanged', async () => {
+    const { pen, w, field } = await linearPanel()
+    const d = field('distance'), was = pen.repeat.value!.distance, shown = (d.element as HTMLInputElement).value
+    ;(d.element as HTMLInputElement).focus()
+    await d.setValue('0')
+    ;(d.element as HTMLInputElement).blur(); await nextTick(); await nextTick()
+    expect(pen.repeat.value!.distance).toBe(was)
+    expect((d.element as HTMLInputElement).value).toBe(shown)
+    const c = field('count')
+    ;(c.element as HTMLInputElement).focus()
+    await c.setValue('1')
+    ;(c.element as HTMLInputElement).blur(); await nextTick()
+    expect(pen.repeat.value!.count).toBe(6)
+    expect((c.element as HTMLInputElement).value).toBe('6')
+    w.unmount()
+  })
+  it('Enter with a refused value does nothing: 0 in Distance, 1 in Copies, 0 in Sweep', async () => {
+    const { pen, doc, w, field } = await linearPanel()
+    const before = json(doc.value)
+    for (const [f, v] of [['distance', '0'], ['count', '1']] as const) {
+      const el = field(f)
+      ;(el.element as HTMLInputElement).focus()
+      await el.setValue(v); await el.trigger('keydown', { key: 'Enter' })
+      expect(pen.repeat.value).not.toBeNull()
+      expect(json(doc.value)).toBe(before)
+    }
+    await w.find('[data-repeat-mode="radial"]').trigger('click')
+    pen.repeatPick({ kind: 'empty', at: { x: 0, y: 0 } }); await nextTick()
+    const sw = field('sweep')
+    ;(sw.element as HTMLInputElement).focus()
+    await sw.setValue('0'); await sw.trigger('keydown', { key: 'Enter' })
+    expect(pen.repeat.value).not.toBeNull()
+    expect(json(doc.value)).toBe(before)
+    w.unmount()
+  })
+  it('Apply with a refused value still being typed does nothing, and the field shows the value again', async () => {
+    const { pen, doc, w, field } = await linearPanel()
+    const before = json(doc.value)
+    const d = field('distance')
+    ;(d.element as HTMLInputElement).focus()
+    await d.setValue('0')
+    await w.find('[data-act="repeat-apply"]').trigger('click')
+    expect(pen.repeat.value).not.toBeNull()
+    expect(json(doc.value)).toBe(before)
+    w.unmount()
+  })
+  it('Enter on an untouched field applies the value it stands for, not its rounded text', async () => {
+    const { pen, w, field } = await linearPanel()
+    pen.setRepeat({ distance: 3.14159 }); await nextTick()
+    const d = field('distance')
+    expect((d.element as HTMLInputElement).value).toBe('3.14')
+    ;(d.element as HTMLInputElement).focus()
+    await d.trigger('keydown', { key: 'Enter' })
+    expect(pen.repeat.value).toBeNull()
+    const P = (id: string) => pen.doc.value.entities.find(e => e.id === id) as { x: number; y: number }
+    const G = pen.doc.value.entities.find(e => e.kind === 'line' && e.construction) as { p1: string; p2: string }
+    expect(Math.hypot(P(G.p2).x - P(G.p1).x, P(G.p2).y - P(G.p1).y)).toBeCloseTo(3.14159, 9)
+    w.unmount()
   })
   it('a copy refused after the preview was drawn says so, and leaves the drawing byte-identical', () => {
     const { pen, doc, path } = setup()

@@ -1432,6 +1432,9 @@ defineExpose({
     <template v-for="{ p, s, handle, role } in pts" :key="p.id">
       <!-- the hit target: same size and pointer behaviour as before a role
            had a distinct look — [data-point] click/drag specs rely on this.
+           Hollow dots (a Bézier handle, a guide point: a virtual sharp, a
+           linear guide's end) take a press on their whole disc, not just the
+           ring, so a press on the centre drags them, never the line beneath.
            When a distinct glyph is drawn on top (below), this stays invisible
            and only the glyph carries the visible look. -->
       <circle :cx="s.x" :cy="s.y" :r="pointRadius(p)"
@@ -1439,7 +1442,7 @@ defineExpose({
               :stroke="hasDistinctRoleGlyph(p, role, handle) ? 'transparent' : pointStroke(p, handle)" stroke-width="1.5"
               :style="{ cursor: tool === 'select' ? 'grab' : 'crosshair' }"
               @pointerdown="(ev) => onPointerDownPoint(p.id, ev)" @pointerup="(ev) => onPointerUpPoint(p.id, ev)"
-              :pointer-events="active ? (handle ? 'all' : undefined) : 'none'"
+              :pointer-events="active ? (handle || p.construction ? 'all' : undefined) : 'none'"
               :data-point="p.id" :data-construction="p.construction ? '' : null" :data-handle="handle ? '' : null"
               :data-point-role="handle ? null : role" />
       <!-- JOINT: small solid dot -->

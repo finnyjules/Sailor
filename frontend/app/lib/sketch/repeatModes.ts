@@ -73,9 +73,33 @@ export function selectionCentre(doc: SketchDoc, ids: readonly EntityId[]): Vec2 
   return drawnCentre(doc, ids, false) ?? drawnCentre(doc, ids, true)
 }
 
+/** How far what the selection DRAWS reaches along the unit direction `dir`
+ *  (`lo`, `hi` of the drawn points projected on it) — the same drawn geometry
+ *  as `selectionCentre` (arcs by their ends and the points they sweep through
+ *  that lie furthest along `dir`, never their centre point; no handles, no
+ *  guides unless nothing else). Null when nothing resolves. */
+export function selectionExtent(doc: SketchDoc, ids: readonly EntityId[], dir: Vec2): { lo: number; hi: number } | null {
+  const th = Math.atan2(dir.y, dir.x)
+  for (const guides of [false, true]) {
+    let lo = Infinity, hi = -Infinity
+    walkDrawn(doc, ids, guides, [th, th + Math.PI], (x, y) => { const t = x * dir.x + y * dir.y; if (t < lo) lo = t; if (t > hi) hi = t })
+    if (Number.isFinite(lo)) return { lo, hi }
+  }
+  return null
+}
+
 function drawnCentre(doc: SketchDoc, ids: readonly EntityId[], guides: boolean): Vec2 | null {
   let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity
   const grow = (x: number, y: number) => { x0 = Math.min(x0, x); y0 = Math.min(y0, y); x1 = Math.max(x1, x); y1 = Math.max(y1, y) }
+  walkDrawn(doc, ids, guides, [0, Math.PI / 2, Math.PI, 3 * Math.PI / 2], grow)
+  return Number.isFinite(x0) ? { x: (x0 + x1) / 2, y: (y0 + y1) / 2 } : null
+}
+
+// every drawn point that can bound the selection when looking along the
+// directions `extremes` (angles): line and anchor ends, the points of a circle
+// or an arc (only where the arc sweeps through them) at those angles, and
+// points sampled on Bézier pieces
+function walkDrawn(doc: SketchDoc, ids: readonly EntityId[], guides: boolean, extremes: readonly number[], grow: (x: number, y: number) => void): void {
   const G = (p: Vec2 | undefined) => { if (p) grow(p.x, p.y) }
   for (const id of ids) {
     const e = getEntity(doc, id)
@@ -84,7 +108,7 @@ function drawnCentre(doc: SketchDoc, ids: readonly EntityId[], guides: boolean):
     if (e.kind === 'line') { G(getPoint(doc, e.p1)); G(getPoint(doc, e.p2)); continue }
     if (e.kind === 'circle') {
       const c = getPoint(doc, e.center)
-      if (c) { grow(c.x - e.r, c.y - e.r); grow(c.x + e.r, c.y + e.r) }
+      if (c) for (const th of extremes) grow(c.x + e.r * Math.cos(th), c.y + e.r * Math.sin(th))
       continue
     }
     const n = e.anchors.length, count = e.closed ? n : n - 1
@@ -99,8 +123,7 @@ function drawnCentre(doc: SketchDoc, ids: readonly EntityId[], guides: boolean):
         const a0 = Math.atan2(a.y - c.y, a.x - c.x), a1 = Math.atan2(b.y - c.y, b.x - c.x)
         const ccw = (((a1 - a0) % TAU) + TAU) % TAU
         // the arc runs ccw from a0 by ccw (sweep 1) or cw by TAU − ccw (sweep 0)
-        for (let q = 0; q < 4; q++) {
-          const th = q * Math.PI / 2
+        for (const th of extremes) {
           const along = s.sweep === 1 ? (((th - a0) % TAU) + TAU) % TAU : (((a0 - th) % TAU) + TAU) % TAU
           const span = s.sweep === 1 ? ccw : TAU - ccw
           if (along <= span) grow(c.x + r * Math.cos(th), c.y + r * Math.sin(th))
@@ -116,7 +139,6 @@ function drawnCentre(doc: SketchDoc, ids: readonly EntityId[], guides: boolean):
       }
     }
   }
-  return Number.isFinite(x0) ? { x: (x0 + x1) / 2, y: (y0 + y1) / 2 } : null
 }
 
 export interface PathWalk { length: number; closed: boolean; at(s: number): Vec2 }

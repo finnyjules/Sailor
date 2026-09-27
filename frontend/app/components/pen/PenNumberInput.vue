@@ -12,34 +12,59 @@
 // the Properties panel's sizes). The value row turns that off — its ✓ button
 // takes focus before its click, and must still commit what was typed. After
 // a submit the field shows `value` again (a refused size keeps the old one).
+//
+// `commitOnBlur` (the Repeat panel, pen stage 8): leaving the field (Tab, a
+// click elsewhere) commits a changed, valid value as `change` and puts back an
+// invalid one; Enter's `submit` then also says whether the text had changed
+// from what the field showed. `flush()` does what leaving does, for a button that
+// keeps the focus in the field through its click.
 import { nextTick, ref, watch } from 'vue'
 
 defineOptions({ inheritAttrs: false })
-const props = withDefaults(defineProps<{ value: number; min?: number; disabled?: boolean; revertOnBlur?: boolean }>(), {
-  min: undefined, disabled: false, revertOnBlur: true,
+const props = withDefaults(defineProps<{ value: number; min?: number; disabled?: boolean; revertOnBlur?: boolean; commitOnBlur?: boolean }>(), {
+  min: undefined, disabled: false, revertOnBlur: true, commitOnBlur: false,
 })
-const emit = defineEmits<{ submit: [value: number]; cancel: [] }>()
+const emit = defineEmits<{ submit: [value: number, changed?: boolean]; change: [value: number]; cancel: [] }>()
 const show = (v: number) => (Number.isFinite(v) ? String(Number(v.toFixed(2))) : '')
 const draft = ref(show(props.value))
 const el = ref<HTMLInputElement | null>(null)
 watch(() => props.value, (v) => { draft.value = show(v) })
 
 function revert() { draft.value = show(props.value) }
+const text = () => String(draft.value ?? '').trim()   // v-model on type=number may hand back a number
+// the typed number, or null when it is no number or below `min`
+function typed(): number | null {
+  const t = text(), n = Number(t)
+  if (t === '' || !Number.isFinite(n)) return null
+  return props.min != null && n < props.min ? null : n
+}
 function commit() {
-  const text = String(draft.value ?? '').trim()   // v-model on type=number may hand back a number
-  const n = Number(text)
-  if (text === '' || !Number.isFinite(n)) return
-  if (props.min != null && n < props.min) return
-  emit('submit', n)
+  const n = typed()
+  if (n == null) return
+  if (props.commitOnBlur) emit('submit', n, text() !== show(props.value))
+  else emit('submit', n)
   // the value changed → the watch shows it; refused → the old value comes back
   void nextTick(revert)
+}
+// leaving the field (commitOnBlur): a changed, valid value commits; anything
+// else shows the value again. False when what was typed was no value.
+function flush(): boolean {
+  if (text() === show(props.value)) return true
+  const n = typed()
+  if (n == null) { revert(); return false }
+  emit('change', n)
+  void nextTick(revert)
+  return true
 }
 function onKeydown(ev: KeyboardEvent) {
   if (ev.key === 'Enter') { ev.preventDefault(); ev.stopPropagation(); commit() }
   else if (ev.key === 'Escape') { ev.preventDefault(); ev.stopPropagation(); revert(); emit('cancel') }
 }
-function onBlur() { if (props.revertOnBlur) revert() }
-defineExpose({ focus: () => el.value?.focus(), commit })
+function onBlur() {
+  if (props.commitOnBlur) flush()
+  else if (props.revertOnBlur) revert()
+}
+defineExpose({ focus: () => el.value?.focus(), commit, flush })
 </script>
 
 <template>

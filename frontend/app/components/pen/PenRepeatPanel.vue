@@ -5,11 +5,13 @@
 // panel with no change of its own. Buttons never take focus from a mouse
 // press (mousedown.prevent): Space keeps panning after a click, and a
 // focused button got there by keyboard (isCleanupBarFocused covers this
-// panel). A field's Enter commits what it holds, blurs it (for the same
-// reason) and applies — the same as clicking Apply, which commits a field
-// still being typed first (the field keeps focus through the click). Leaving
-// a field any other way puts the shown value back, so what the fields show
-// is always what the preview shows. Hints live in the cards, not here.
+// panel). Fields commit when they are left (Tab, a click elsewhere) and the
+// preview follows; a value that is no value goes back to the shown one. A
+// field's Enter commits what it holds, blurs it (for the same reason) and
+// applies — unless the value is refused (0 copies apart, a sweep of 0), then
+// it does nothing. A click on Apply commits the field still being typed
+// first (it keeps focus through the click), and applies only when that value
+// is taken. Hints live in the cards, not here.
 import { ref } from 'vue'
 import type { Pen } from '~/composables/pen/usePen'
 import type { RepeatMode, RepeatPatch } from '~/composables/pen/penRepeat'
@@ -28,18 +30,22 @@ function blurField(): void {
   const a = typeof document !== 'undefined' ? (document.activeElement as HTMLElement | null) : null
   if (a?.closest?.('[data-repeat-panel]')) a.blur()
 }
-// while Apply commits the fields, their submits only set (Apply applies once)
-let committing = false
-function submit(patch: RepeatPatch): void {
-  setRepeat(patch)
-  if (committing) return
+// a field left, or flushed by Apply: set only; remembers a refusal for Apply
+let refused = false
+function change(patch: RepeatPatch): void {
+  if (!setRepeat(patch)) refused = true
+}
+// a field's Enter: an unchanged field only applies (its shown text is
+// rounded, and must not replace the value it shows)
+function submit(patch: RepeatPatch, changed = true): void {
+  if (changed && !setRepeat(patch)) return
   blurField()
   applyRepeatPanel()
 }
 function apply(): void {
-  committing = true
-  try { for (const f of [countField.value, sweepField.value, angleField.value, distanceField.value]) f?.commit() }
-  finally { committing = false }
+  refused = false
+  for (const f of [countField.value, sweepField.value, angleField.value, distanceField.value]) if (f && !f.flush()) refused = true
+  if (refused) return
   blurField()
   applyRepeatPanel()
 }
@@ -57,7 +63,7 @@ function apply(): void {
 
     <div class="row" data-repeat-field="count">
       <span class="name">Copies</span>
-      <PenNumberInput ref="countField" :value="repeat.count" :min="2" aria-label="Copies" @submit="n => submit({ count: n })" />
+      <PenNumberInput ref="countField" :value="repeat.count" :min="2" aria-label="Copies" commit-on-blur @change="n => change({ count: n })" @submit="(n, c) => submit({ count: n }, c)" />
       <span class="unit" aria-hidden="true" />
     </div>
 
@@ -65,7 +71,7 @@ function apply(): void {
       <div class="row" data-repeat-field="centre"><span class="name">Centre</span><span class="value">{{ repeatNames.centre }}</span></div>
       <div class="row" data-repeat-field="sweep">
         <span class="name">Sweep</span>
-        <PenNumberInput ref="sweepField" :value="repeat.sweep" aria-label="Sweep" @submit="n => submit({ sweep: n })" />
+        <PenNumberInput ref="sweepField" :value="repeat.sweep" aria-label="Sweep" commit-on-blur @change="n => change({ sweep: n })" @submit="(n, c) => submit({ sweep: n }, c)" />
         <span class="unit" aria-hidden="true">°</span>
       </div>
     </template>
@@ -73,7 +79,7 @@ function apply(): void {
     <template v-else-if="repeat.mode === 'linear'">
       <div class="row" data-repeat-field="angle">
         <span class="name">Angle</span>
-        <PenNumberInput ref="angleField" :value="repeat.angle" aria-label="Angle" @submit="n => submit({ angle: n })" />
+        <PenNumberInput ref="angleField" :value="repeat.angle" aria-label="Angle" commit-on-blur @change="n => change({ angle: n })" @submit="(n, c) => submit({ angle: n }, c)" />
         <span class="unit" aria-hidden="true">°</span>
       </div>
       <PenTipCard id="repeat-spacing" side="left">
@@ -84,7 +90,7 @@ function apply(): void {
       </PenTipCard>
       <div class="row" data-repeat-field="distance">
         <span class="name">Distance</span>
-        <PenNumberInput ref="distanceField" :value="repeat.distance" aria-label="Distance" @submit="n => submit({ distance: n })" />
+        <PenNumberInput ref="distanceField" :value="repeat.distance" aria-label="Distance" commit-on-blur @change="n => change({ distance: n })" @submit="(n, c) => submit({ distance: n }, c)" />
         <span class="unit" aria-hidden="true" />
       </div>
     </template>

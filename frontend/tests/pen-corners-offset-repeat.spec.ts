@@ -10,9 +10,9 @@
 // Offset… / Round corner… / Chamfer…; the buttons and the panel fit at laptop
 // widths. __sketchDraw only sets drawings up and reads state.
 //
-// The Repeat panel's number fields apply on Enter (a field's Enter commits it
-// and applies, Ruling of Task 8 fix round 1) and put the shown value back when
-// left any other way — so each run below types at most one field.
+// The Repeat panel's number fields commit when left (Tab, a click elsewhere)
+// and the preview follows; a field's Enter commits it and applies; a click on
+// Apply commits the field still being typed (final fix wave ruling).
 import { test, expect, type Page } from '@playwright/test'
 
 const META = process.platform === 'darwin' ? 'Meta' : 'Control'
@@ -248,9 +248,7 @@ test('Repeat… Linear: previewed only, Enter in Copies applies as one step; the
   const guide = d1.entities.find((e: any) => e.kind === 'line' && e.construction)
   const to = d1.entities.find((e: any) => e.id === guide.p2)
   expect(to.x).toBeCloseTo(8, 6); expect(to.y).toBeCloseTo(3, 6)
-  // the guide's far end, dragged up by 2 with the real mouse. The press lands
-  // on the guide dot's ring, 4 px right of its centre: a press on the centre
-  // falls through to the guide line (see the test.fail below)
+  // the guide's far end, dragged up by 2 with the real mouse, pressed on its ring
   const e0 = await at(page, to.x, to.y)
   await page.mouse.move(e0.x + 4, e0.y); await page.mouse.down()
   for (let i = 1; i <= 8; i++) await page.mouse.move(e0.x + 4, e0.y - (68 * i) / 8)
@@ -268,12 +266,10 @@ test('Repeat… Linear: previewed only, Enter in Copies applies as one step; the
   await expect.poll(async () => JSON.stringify(await doc(page))).toBe(d0)
 })
 
-// App bug found by this task (reported, not fixed here): a guide point is drawn
-// as a hollow dot (fill none), so only its 1.5 px ring takes the pointer — a
-// press on the dot's centre hits the guide line under it, selects the line and
-// the drag moves nothing. A drawn line's end drags from its centre. Marked
-// test.fail so it turns red (remove the mark) once guide dots take presses.
-test.fail('a press on the centre of the linear guide’s far end drags it', async ({ page }) => {
+// A guide point is drawn as a hollow dot; its whole disc takes the press
+// (final fix wave), so a press on its centre drags it rather than selecting
+// the guide line beneath (Task 10 found it; it was pinned by a test.fail).
+test('a press on the centre of the linear guide’s far end drags it', async ({ page }) => {
   await open(page); await load(page, SQUARE)
   await repeatFromMenu(page)
   await page.locator('[data-repeat-mode="linear"]').click()
@@ -285,6 +281,49 @@ test.fail('a press on the centre of the linear guide’s far end drags it', asyn
   await drag(page, [to.x, to.y], [to.x, to.y + 2])
   const moved = (await doc(page)).entities.find((e: any) => e.id === guide.p2)
   expect(moved.y).toBeCloseTo(5, 3)
+})
+
+// (chamfered: a rounded corner's radius chip sits over its sharp, see the report)
+test('a press on the centre of a virtual sharp drags the chamfered corner', async ({ page }) => {
+  await open(page); await load(page, SQUARE)
+  await page.keyboard.press('h')
+  await click(page, 5, 5)
+  await page.keyboard.type('1.5'); await page.keyboard.press('Enter')
+  await expect(status(page)).toHaveText('Chamfered')
+  const d1 = await doc(page)
+  expect(d1.entities.find((e: any) => e.id === 'c').construction).toBe(true)
+  await page.keyboard.press('v')
+  await drag(page, [5, 5], [6, 6])
+  const d2 = await doc(page)
+  const c = d2.entities.find((e: any) => e.id === 'c')
+  expect(c.x).toBeGreaterThan(5.5); expect(c.y).toBeGreaterThan(5.5)
+  // the cut went with it: its two ends stay equally far from the sharp
+  const P = (id: string) => d2.entities.find((e: any) => e.id === id)
+  const ends = pathOf(d2).anchors.filter((id: string) => !['a', 'b', 'd'].includes(id)).map(P)
+  expect(ends).toHaveLength(2)
+  const r = ends.map((p: any) => Math.hypot(p.x - c.x, p.y - c.y))
+  expect(r[0]).toBeCloseTo(r[1], 3)
+  expect(Math.max(...ends.map((p: any) => p.x + p.y))).toBeGreaterThan(8.6)   // it moved out from (5, 3.5) / (3.5, 5)
+})
+
+test('the Repeat panel: Copies 3, Tab, Distance 6, click Apply — 3 copies at 6', async ({ page }) => {
+  await open(page); await load(page, SQUARE)
+  await repeatFromMenu(page)
+  await page.locator('[data-repeat-mode="linear"]').click()
+  const count = page.locator('[data-repeat-field="count"] input')
+  await count.click(); await count.fill('3'); await page.keyboard.press('Tab')
+  const distance = page.locator('[data-repeat-field="distance"] input')
+  await expect(count).toHaveValue('3')                                   // kept on leaving
+  await expect.poll(async () => (await read(page, 'repeatPanel'))?.count).toBe(3)
+  await distance.click(); await distance.fill('6')
+  await page.locator('[data-act="repeat-apply"]').click()
+  await expect(page.locator('[data-repeat-panel]')).toHaveCount(0)
+  await expect(status(page)).toHaveText('Repeated ×3')
+  const d = await doc(page)
+  expect(drawnPaths(d)).toHaveLength(3)
+  const guide = d.entities.find((e: any) => e.kind === 'line' && e.construction)
+  const P = (id: string) => d.entities.find((e: any) => e.id === id)
+  expect(Math.hypot(P(guide.p2).x - P(guide.p1).x, P(guide.p2).y - P(guide.p1).y)).toBeCloseTo(6, 6)
 })
 
 test('Repeat… Along a path (Apply) and Radial with a sweep (Enter in Sweep)', async ({ page }) => {

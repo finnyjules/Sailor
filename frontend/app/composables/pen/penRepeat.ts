@@ -16,10 +16,10 @@ import type { SketchDoc, EntityId } from '~/lib/sketch/model'
 import type { Vec2 } from '~/lib/sketch/geom'
 import type { ViewMatrix } from '~/lib/sketch/view'
 import { pxToUnits } from '~/lib/sketch/tolerance'
-import { addPoint, addLine, pointClosure, repeatEntities, translateEntities, copyAlongPath } from '~/lib/sketch/edit'
+import { addPoint, addLine, repeatEntities, translateEntities, copyAlongPath } from '~/lib/sketch/edit'
 import { drawingDirForScreenAngle } from '~/lib/sketch/sizes'
 import { pieceIndex, pieceNames, pieceKey, type PieceRef } from '~/lib/sketch/pieces'
-import { radialPlacements, linearPlacements, alongPlacements, copiesPreviewD, selectionCentre, pathWalk, type Placement, type Spacing } from '~/lib/sketch/repeatModes'
+import { radialPlacements, linearPlacements, alongPlacements, copiesPreviewD, selectionCentre, selectionExtent, pathWalk, type Placement, type Spacing } from '~/lib/sketch/repeatModes'
 import { rulesHold } from './penCorners'
 
 export type RepeatMode = 'radial' | 'linear' | 'along'
@@ -123,26 +123,13 @@ export function createPenRepeat(ctx: PenRepeatContext) {
     if (s.mode === 'linear') return REPEAT_NO_DIRECTION
     return s.along ? (pathRefusal(s.units, s.along, s.count) ?? REPEAT_NO_PATH) : REPEAT_HINT_PATH
   }
-  // the selection's width along the linear direction, × 1.25 (Ruling 14)
+  // the selection's drawn width along the linear direction, × 1.25 (Ruling
+  // 14) — measured on what it draws (selectionExtent: arcs by the points they
+  // sweep through, never their centres or handles), as the centre is
   function defaultDistance(units: EntityId[], angle: number): number {
-    const d = raw(), dir = drawingDirForScreenAngle(ctx.view.value, angle)
-    let lo = Infinity, hi = -Infinity
-    if (dir) {
-      const byId = new Map(d.entities.map(e => [e.id, e]))
-      for (const id of pointClosure(d, units)) {
-        const p = byId.get(id)
-        if (p?.kind !== 'point') continue
-        const t = p.x * dir.x + p.y * dir.y
-        lo = Math.min(lo, t); hi = Math.max(hi, t)
-      }
-      for (const id of units) {
-        const e = byId.get(id)
-        if (e?.kind !== 'circle') continue
-        const c = byId.get(e.center)
-        if (c?.kind === 'point') { const t = c.x * dir.x + c.y * dir.y; lo = Math.min(lo, t - e.r); hi = Math.max(hi, t + e.r) }
-      }
-    }
-    const w = hi - lo
+    const dir = drawingDirForScreenAngle(ctx.view.value, angle)
+    const x = dir ? selectionExtent(raw(), units, dir) : null
+    const w = x ? x.hi - x.lo : NaN
     return Number.isFinite(w) && w > 0 ? 1.25 * w : pxToUnits(40, ctx.view.value)
   }
 
@@ -158,18 +145,33 @@ export function createPenRepeat(ctx: PenRepeatContext) {
     })
     return true
   }
-  function set(patch: RepeatPatch): void {
+  /** Applies the patch; false when a value in it was refused (no value, out
+   *  of range: the old one is kept) — the panel's Enter then does nothing.
+   *  A count rounded or capped at REPEAT_MAX is taken, not refused. */
+  /** Applies the patch; false when a value in it was refused (no value, out
+   *  of range: the old one is kept) — the panel's Enter then does nothing.
+   *  A count rounded, or capped at REPEAT_MAX, is taken. */
+  function set(patch: RepeatPatch): boolean {
     const s = state.value
-    if (!s) return
+    if (!s) return false
     const next = { ...s, ...patch }
     // a value that is no value ('0', '.', empty, out of range) keeps the old one
-    next.count = Number.isFinite(next.count) && next.count >= 2 ? Math.min(REPEAT_MAX, Math.round(next.count)) : s.count
-    if (!(next.sweep > 0) || next.sweep > 360) next.sweep = s.sweep
-    if (!(next.distance > 0) || !Number.isFinite(next.distance)) next.distance = s.distance
-    if (!Number.isFinite(next.angle)) next.angle = s.angle
-    if (!MODES.includes(next.mode)) next.mode = s.mode
-    if (!SPACINGS.includes(next.spacing)) next.spacing = s.spacing
+    const bad = {
+      count: !(Number.isFinite(next.count) && next.count >= 2),
+      sweep: !(next.sweep > 0) || next.sweep > 360,
+      distance: !(next.distance > 0) || !Number.isFinite(next.distance),
+      angle: !Number.isFinite(next.angle),
+      mode: !MODES.includes(next.mode),
+      spacing: !SPACINGS.includes(next.spacing),
+    }
+    next.count = bad.count ? s.count : Math.min(REPEAT_MAX, Math.round(next.count))
+    if (bad.sweep) next.sweep = s.sweep
+    if (bad.distance) next.distance = s.distance
+    if (bad.angle) next.angle = s.angle
+    if (bad.mode) next.mode = s.mode
+    if (bad.spacing) next.spacing = s.spacing
     state.value = withPreview(next)
+    return !(Object.keys(bad) as (keyof typeof bad)[]).some(k => k in patch && bad[k])
   }
   function pick(t: RepeatTarget): void {
     const s = state.value

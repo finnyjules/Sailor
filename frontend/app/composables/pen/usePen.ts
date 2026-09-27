@@ -2074,7 +2074,7 @@ export function usePen(opts: {
     clearSel: () => { clearSel(); clearSegSel() }, closeMenus,
   })
   const repeat = penRepeat.state, repeatHint = penRepeat.hint, repeatNames = penRepeat.names
-  function setRepeat(patch: RepeatPatch): void { penRepeat.set(patch) }
+  function setRepeat(patch: RepeatPatch): boolean { return penRepeat.set(patch) }
   function repeatPick(t: RepeatTarget): void { penRepeat.pick(t) }
   function applyRepeatPanel(): boolean { return penRepeat.apply() }
   function cancelRepeat(): void { penRepeat.cancel() }
