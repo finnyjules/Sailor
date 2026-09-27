@@ -51,5 +51,7 @@ export async function judgeSameCharacter(fetchImpl: typeof fetch, apiKey: string
   if (!res.ok) throw new FaceCheckError('aws', `Character check failed (${res.status})`)
   const data = await res.json() as { stop_reason?: string }
   if (data.stop_reason === 'refusal') throw new FaceCheckError('aws', 'Character check was declined')
-  return parseJudgement(extractModelText(data))
+  let text: string
+  try { text = extractModelText(data) } catch { return UNREADABLE }
+  return parseJudgement(text)
 }

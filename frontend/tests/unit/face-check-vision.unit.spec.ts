@@ -42,4 +42,8 @@ describe('judgeSameCharacter', () => {
     await expect(judgeSameCharacter(fakeFetch(500, { error: { message: 'x' } }).f, 'k', img, img)).rejects.toMatchObject({ code: 'aws' })
     await expect(judgeSameCharacter(fakeFetch(200, { stop_reason: 'refusal', content: [] }).f, 'k', img, img)).rejects.toMatchObject({ code: 'aws' })
   })
+  it('never lets an empty, non-refusal response throw', async () => {
+    expect(await judgeSameCharacter(fakeFetch(200, { content: [] }).f, 'k', img, img))
+      .toEqual({ verdict: 'unsure', note: 'Could not read the check' })
+  })
 })
