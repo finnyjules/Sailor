@@ -180,6 +180,66 @@ test('the keyboard: Tab reaches Gentle, Normal, Strong, Cancel and Apply; Enter 
   expect(paths(d)[0].closed).toBe(true)
 })
 
+test('the keyboard: Space presses a Tab-focused strength button (not the page’s pan); the arrows move the strength', async ({ page }) => {
+  await open(page)
+  await loadFlower(page)
+  await page.locator('[data-act="cleanup"]').click()
+  await expect(bar(page)).toBeVisible()
+  const strong = page.locator('[data-strength="strong"]')
+  for (let i = 0; i < 20 && !(await strong.evaluate(el => el === document.activeElement)); i++) await page.keyboard.press('Tab')
+  await expect(strong).toBeFocused()
+  await expect(page.locator('[data-strength="normal"]')).toHaveAttribute('aria-checked', 'true')
+  await page.keyboard.press('Space')
+  await expect(strong).toHaveAttribute('aria-checked', 'true')
+  await expect(page.locator('svg').first()).not.toHaveCSS('cursor', 'grab')
+  // radio-group keys: ← / → move the strength and the focus with it, round the ends
+  await page.keyboard.press('ArrowLeft')
+  await expect(page.locator('[data-strength="normal"]')).toHaveAttribute('aria-checked', 'true')
+  await expect(page.locator('[data-strength="normal"]')).toBeFocused()
+  await page.keyboard.press('ArrowLeft')
+  await page.keyboard.press('ArrowLeft')
+  await expect(strong).toHaveAttribute('aria-checked', 'true')
+  await expect(strong).toBeFocused()
+  await page.keyboard.press('ArrowRight')
+  await expect(page.locator('[data-strength="gentle"]')).toHaveAttribute('aria-checked', 'true')
+  await expect(bar(page)).toBeVisible()
+})
+
+test('after Apply the next Enter finishes the pen; after Cancel the next Escape reaches the page', async ({ page }) => {
+  await open(page)
+  await loadFlower(page)
+  const status = () => page.evaluate(() => (window as any).__sketchDraw.status())
+  await page.locator('[data-act="cleanup"]').click()
+  await expect(bar(page)).toBeVisible()
+  await page.keyboard.press('Enter')
+  await expect(bar(page)).toHaveCount(0)
+  expect(await status()).toMatch(/^Cleaned up · \d+ changes$/)
+  await expect(page.locator('[data-act="cleanup"]')).not.toBeFocused()
+  await page.keyboard.press('Enter')
+  expect(await status()).toBe('done')                     // not Clean up again
+  await expect(bar(page)).toHaveCount(0)
+  expect(paths(await doc(page))).toHaveLength(1)
+
+  await page.locator('[data-act="cleanup"]').click()
+  await expect(bar(page)).toBeVisible()
+  await page.keyboard.press('Escape')
+  await expect(bar(page)).toHaveCount(0)
+  expect(await status()).toBe('Clean up cancelled')
+  await page.keyboard.press('Escape')
+  expect(await status()).toBe('cancelled')
+  // with every fix off, Enter does nothing (Apply is disabled too)
+  await page.locator('[data-act="cleanup"]').click()
+  for (let round = 0; round < 20; round++) {
+    const on = page.locator('.cleanup-badge[data-on]')
+    if (!(await on.count())) break
+    await on.first().click()
+  }
+  await expect(page.locator('[data-act="cleanup-apply"]')).toBeDisabled()
+  await page.keyboard.press('Enter')
+  await expect(bar(page)).toBeVisible()
+  await page.keyboard.press('Escape')
+})
+
 test('Strength: a line 6° off level is only levelled at Strong; Cancel closes', async ({ page }) => {
   await open(page)
   await page.evaluate(() => {
@@ -305,9 +365,8 @@ test('the Frame: the trimmed flower cleaned up in the pen becomes one closed loo
   await expect(joins(page)).toHaveCount(4)
   await page.keyboard.press('Enter')
   await expect(bar(page)).toHaveCount(0)
-  // (a second Enter here would press the still-focused Clean up button again,
-  // as with any focused pen button — so the pen is finished with Done)
-  await page.locator('[data-act="done"]').click()
+  // the next Enter finishes the pen (the Clean up button gave up its focus)
+  await page.keyboard.press('Enter')
   await expect(page.locator('[data-tool="path"]')).toBeHidden()
 
   const done = (await layers(page)).find((l: any) => l.id === layer.id)
@@ -322,7 +381,7 @@ test('the Frame: the trimmed flower cleaned up in the pen becomes one closed loo
   expect(isBlue(await pixel(page, { x: centre.x, y: centre.y - 50 - 35 }))).toBe(true)
 })
 
-test('the Frame’s pen offers Clean up; Escape closes it and leaves the pen open', async ({ page }) => {
+test('the Frame’s pen offers Clean up; Space presses a Tab-focused strength; Escape closes it and leaves the pen open', async ({ page }) => {
   await page.goto('/dev/frame-lab')
   await page.waitForSelector('[data-ready]')
   await framePenButton(page).click()
@@ -334,6 +393,12 @@ test('the Frame’s pen offers Clean up; Escape closes it and leaves the pen ope
   await btn.click()
   await expect(bar(page)).toBeVisible()
   await expect(page.locator('[data-cleanup-note]')).toHaveText('Nothing to change')
+  // Space presses a strength button Tab reached — the Frame's Space-to-pan leaves it alone
+  const strong = page.locator('[data-strength="strong"]')
+  for (let i = 0; i < 40 && !(await strong.evaluate(el => el === document.activeElement)); i++) await page.keyboard.press('Tab')
+  await expect(strong).toBeFocused()
+  await page.keyboard.press('Space')
+  await expect(strong).toHaveAttribute('aria-checked', 'true')
   await page.keyboard.press('Escape')
   await expect(bar(page)).toHaveCount(0)
   await expect(page.locator('[data-tool="path"]')).toBeVisible()

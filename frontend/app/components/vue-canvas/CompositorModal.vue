@@ -87,7 +87,7 @@ import { promptNodeLabel } from '~/lib/prompt/canvasPromptContext'
 import AgentSweep from '~/components/agent/AgentSweep.vue'
 import { useFramePenSession } from '~/composables/frame/useFramePenSession'
 import { cloneDoc } from '~/lib/sketch/clone'
-import { isTypingInField } from '~/composables/pen/usePen'
+import { isTypingInField, isControlKeyboardFocused } from '~/composables/pen/usePen'
 import PenOverlay from '~/components/pen/PenOverlay.vue'
 import PenToolbar from '~/components/pen/PenToolbar.vue'
 import { useBrushPaint, paintTargetMatches, effectLayerMatches } from '~/composables/useBrushPaint'
@@ -2449,6 +2449,9 @@ function onKeydown(e: KeyboardEvent) {
   // bubble handleKeydown returns at once while a session is open.
   if (penSession.value) {
     if (isTypingInField()) return
+    // Space on a pen control Tab reached (Clean up's strength, Apply) presses
+    // it — not pan; stopped so no bubble listener sees it, not prevented
+    if (e.code === 'Space' && isControlKeyboardFocused()) { e.stopPropagation(); return }
     if (viewportKey(e)) { e.stopPropagation(); return }
     penOverlayRef.value?.onHostKeydown(e)
     // Any other ⌘/Ctrl combo belongs to the pen too, so the browser's own

@@ -11,7 +11,7 @@ import { repeatEntities, mirrorEntities } from '~/lib/sketch/edit'
 import { sketchPathData } from '~/lib/sketch/sketchPath'
 import { mergeSketchDoc } from '~/lib/sketch/merge'
 import { applyView, invertView, type ViewMatrix } from '~/lib/sketch/view'
-import { usePen, isTypingInField, type PenTool } from '~/composables/pen/usePen'
+import { usePen, isTypingInField, isControlKeyboardFocused, type PenTool } from '~/composables/pen/usePen'
 import PenOverlay from '~/components/pen/PenOverlay.vue'
 import PenToolbar from '~/components/pen/PenToolbar.vue'
 
@@ -135,7 +135,8 @@ function onKeydown(ev: KeyboardEvent) {
   if (isTypingInField()) return
   const meta = ev.metaKey || ev.ctrlKey
   if (meta && ev.key.toLowerCase() === '0') { ev.preventDefault(); ev.stopImmediatePropagation(); fitView(); return }
-  if (!meta && (ev.code === 'Space' || ev.key === ' ')) { ev.preventDefault(); ev.stopImmediatePropagation(); spaceHeld.value = true; return }
+  // Space on a control Tab reached (a strength button, Apply) presses it
+  if (!meta && (ev.code === 'Space' || ev.key === ' ') && !isControlKeyboardFocused()) { ev.preventDefault(); ev.stopImmediatePropagation(); spaceHeld.value = true; return }
 }
 function onKeyup(ev: KeyboardEvent) {
   if (ev.code === 'Space' || ev.key === ' ') spaceHeld.value = false

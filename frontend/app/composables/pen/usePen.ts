@@ -63,7 +63,7 @@ import { createPenCopies, type PendingOp } from './penCopies'
 import { nearestCurve, spanAt, curveGeom, paramOf, pointAt, type Span, type CurveGeom } from '~/lib/sketch/crossings'
 import { removeSpan, removeSegment, cutAt, canDissolve, dissolveAt, mergePoints, sameKey } from '~/lib/sketch/trim'
 import { cloneDoc } from '~/lib/sketch/clone'
-import { runCleanup, type CleanupResult, type CleanupScope, type CleanupStrength, type FixKind } from '~/lib/sketch/cleanup'
+import { runCleanup, STRENGTHS, type CleanupResult, type CleanupScope, type CleanupStrength, type FixKind } from '~/lib/sketch/cleanup'
 
 // NUDGE_PX / NUDGE_PX_SHIFT / screenDeltaToDrawing now live in penKeys.ts
 // (they exist only for the arrow-key nudge in the key handler); re-exported
@@ -1948,7 +1948,9 @@ export function usePen(opts: {
   // mutated, so the overlay's and toolbar's computeds follow it.
   // `memo` keeps every answer of this session keyed by strength + the sorted
   // switched-off ids, so switching a badge back and forth is instant; it is
-  // carried from object to object and dies with the session.
+  // carried from object to object and dies with the session. A run that ran
+  // out of time (`result.stopped`, see runCleanup's budget) depends on the
+  // machine's speed; the memo still keeps one answer per setting per session.
   interface CleanupSession {
     strength: CleanupStrength
     off: ReadonlySet<string>
@@ -2042,8 +2044,16 @@ export function usePen(opts: {
     const t = (ev.target ?? (typeof document !== 'undefined' ? document.activeElement : null)) as Element | null
     return !!(t && typeof t.closest === 'function' && t.closest('[data-act="cleanup-cancel"]'))
   }
+  // the focused strength control (PenToolbar's [data-strength] radios), if any
+  function focusedStrength(ev: KeyboardEvent): Element | null {
+    const t = (ev.target ?? (typeof document !== 'undefined' ? document.activeElement : null)) as Element | null
+    return t && typeof t.closest === 'function' ? t.closest('[data-strength]') : null
+  }
+  const STRENGTH_STEP: Record<string, number> = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 }
   // keys while a preview is open: Enter applies — except on a focused Cancel
-  // button, where it cancels, matching what a native button does with Enter —
+  // button, where it cancels, matching what a native button does with Enter,
+  // and with every fix off, where it does nothing —
+  // ←/→/↑/↓ on a focused strength control move the strength —
   // Escape / ⌥⇧C always cancel, ⌘Z / ⌘Y only close it; every other plain key
   // is swallowed so nothing edits the drawing under the preview — except
   // Tab / ⇧Tab, and Space on a focused control, left to the browser so the
@@ -2055,8 +2065,25 @@ export function usePen(opts: {
       if (k === 'z' || k === 'y') { cancelCleanup(); return true }
       return false
     }
-    if (ev.key === 'Enter') { if (isCancelFocused(ev)) cancelCleanup(); else applyCleanup(); return true }
+    if (ev.key === 'Enter') {
+      if (isCancelFocused(ev)) cancelCleanup()
+      // with every fix off Enter does nothing, as the disabled Apply button
+      else if (cleanup.value?.result.fixes.some(f => f.on)) applyCleanup()
+      return true
+    }
     if (ev.key === 'Escape' || isCleanupKey(ev)) { cancelCleanup(); return true }
+    // the strength control is a radio group: the arrows move it (round the
+    // ends) and take the focus along, since Space may be the host's pan key
+    const step = STRENGTH_STEP[ev.key]
+    const radio = step && !ev.altKey && !ev.shiftKey ? focusedStrength(ev) : null
+    if (radio && cleanup.value) {
+      const i = STRENGTHS.indexOf((radio.getAttribute('data-strength') ?? cleanup.value.strength) as CleanupStrength)
+      const next = STRENGTHS[(Math.max(0, i) + step! + STRENGTHS.length) % STRENGTHS.length]!
+      setCleanupStrength(next)
+      const to = radio.closest('[role="radiogroup"]')?.querySelector(`[data-strength="${next}"]`) as HTMLElement | null | undefined
+      to?.focus?.()
+      return true
+    }
     // keyboard access to the strength / Apply / Cancel row: Tab / ⇧Tab move
     // focus, and Space presses a focused button or control
     if (ev.key === 'Tab') return false
@@ -2432,4 +2459,16 @@ export function isTypingInField(): boolean {
   if (typeof document === 'undefined') return false
   const el = document.activeElement
   return !!el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || (el as HTMLElement).isContentEditable)
+}
+
+/** True while a button, radio or other control has KEYBOARD focus (Tab got it
+ *  there: `:focus-visible`) — Space then presses it, so a host's hold-Space-to-
+ *  pan must leave Space alone. A control focused by a mouse click keeps
+ *  Space-to-pan (browsers leave a clicked button focused, and pan is what the
+ *  mouse user wants). Reads `document` only when called. */
+export function isControlKeyboardFocused(): boolean {
+  if (typeof document === 'undefined') return false
+  const el = document.activeElement as HTMLElement | null
+  if (!el || el === document.body || !el.closest?.('button, input, select, [role="button"], [role="radio"], [role="checkbox"], [role="switch"], [role="tab"]')) return false
+  try { return el.matches(':focus-visible') } catch { return false }
 }

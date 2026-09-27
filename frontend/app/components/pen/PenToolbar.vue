@@ -9,7 +9,7 @@
 // place of its own bottom toolbar (Plan B) — so this component assumes
 // nothing about its own position (no `position: absolute/fixed` here). The
 // host places it.
-import { computed, type Component } from 'vue'
+import { computed, watch, type Component } from 'vue'
 import type { Pen, PenTool } from '~/composables/pen/usePen'
 import StudioButton from '~/components/vue-canvas/studio/StudioButton.vue'
 import PenValueRow from '~/components/pen/PenValueRow.vue'
@@ -99,7 +99,16 @@ const cleanupNote = computed(() => {
   if (!s) return ''
   if (s.result.refused === 'tooBig') return 'Too much to clean up at once — select a part'
   if (s.result.refused === 'conflict') return 'Some rules don’t hold, so nothing is safe to change'
+  if (s.result.stopped) return 'Stopped early — select a part to clean up the rest'
   return s.result.fixes.length ? '' : 'Nothing to change'
+})
+// when the preview closes (Apply, Cancel, Escape…), the Clean up button — or
+// a control of its bar — gives up focus, so the next Enter finishes the pen
+// instead of reopening Clean up, and the next Escape reaches the host
+watch(previewing, (open) => {
+  if (open || typeof document === 'undefined') return
+  const a = document.activeElement as HTMLElement | null
+  if (a?.closest?.('[data-act="cleanup"], [data-cleanup-bar]')) a.blur()
 })
 </script>
 
