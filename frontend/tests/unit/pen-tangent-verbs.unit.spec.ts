@@ -52,6 +52,21 @@ describe('Tangent on two segments that don’t meet', () => {
     for (let i = 0; i < 2; i++) { pen.pickSegment(line, 0); pen.pickSegment(arc, 0, true); pen.applyWithValue(tangentOf(pen)!) }
     expect(doc.value.constraints.filter(c => c.kind === 'tangentLineArc')).toHaveLength(1)
   })
+  it('applying it twice leaves exactly one history step — nothing to undo past it', () => {
+    const before = { constraints: 0 }
+    let line = '', arc = ''
+    const { doc, pen } = mk(d => {
+      line = addPath(d, [addPoint(d, 3, 4), addPoint(d, 11, 4)], [{ kind: 'line' }])
+      arc = addPath(d, [addPoint(d, 4, 6), addPoint(d, 10, 6)], [{ kind: 'arc', center: addPoint(d, 7, 9), sweep: 1 }])
+    })
+    before.constraints = doc.value.constraints.length
+    for (let i = 0; i < 2; i++) { pen.pickSegment(line, 0); pen.pickSegment(arc, 0, true); pen.applyWithValue(tangentOf(pen)!) }
+    expect(pen.canUndo()).toBe(true)
+    pen.undo()
+    // one undo removes the rule entirely — the duplicate application pushed no step of its own
+    expect(doc.value.constraints.length).toBe(before.constraints)
+    expect(pen.canUndo()).toBe(false)
+  })
   it('two arc segments → Tangent (side from the geometry) and Equal', () => {
     let a1 = '', a2 = '', C1 = '', S1 = '', C2 = '', S2 = ''
     const { doc, pen } = mk(d => {

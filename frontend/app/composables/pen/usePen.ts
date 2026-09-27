@@ -496,11 +496,10 @@ export function usePen(opts: {
     clearSegSel()
     if (!rule) return
     const key = sameKey({ id: '', kind: rule.kind, refs: rule.refs, value: rule.value })
-    if (!doc.value.constraints.some(c => sameKey(c) === key)) {
-      const id = addConstraint(doc.value, rule.kind, rule.refs, rule.value)
-      runSolve()
-      sparkleAtConstraint(id)
-    }
+    if (doc.value.constraints.some(c => sameKey(c) === key)) return   // already there — no step
+    const id = addConstraint(doc.value, rule.kind, rule.refs, rule.value)
+    runSolve()
+    sparkleAtConstraint(id)
     commitHistory()
   }
 
