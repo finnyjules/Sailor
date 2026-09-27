@@ -4796,6 +4796,9 @@ function drawLayerContentBody(ctx: CanvasRenderingContext2D, layer: LocalLayer, 
     if (needsComputedOutline(layer)) {
       const gd = computedOutlineD(layer, W, rs)
       if (gd != null) {
+        // pen stage 7: the filled areas take the same geometry effects as the outline; an
+        // effect that empties them ('' or null) leaves '' — the layer then fills nothing, never `d`
+        const fillD = layer.fillD != null ? (computedOutlineD({ ...layer, d: layer.fillD }, W, rs) ?? '') : undefined
         // Path geometry runs in LOCAL units; `drawPath` scales the ctx by `scale·W` itself, so
         // the shadow body — built in the SAME local units as `gd` — must be painted under the
         // same transform. gW = 1/scale so `length·gW` local units land at `length·W` px on
@@ -4804,11 +4807,10 @@ function drawLayerContentBody(ctx: CanvasRenderingContext2D, layer: LocalLayer, 
         if (longShadowEffectOf(layer)) {
           const s = ((layer as unknown as { scale?: number }).scale || 1) * W
           ctx.save(); ctx.scale(s, s)
-          maybePaintLongShadow(ctx, layer, gd, 1 / ((layer as unknown as { scale?: number }).scale || 1))
+          // a drawing with filled areas casts from those (Ruling 10), else from its outline
+          maybePaintLongShadow(ctx, layer, fillD != null ? fillD : gd, 1 / ((layer as unknown as { scale?: number }).scale || 1))
           ctx.restore()
         }
-        // pen stage 7: the filled areas take the same geometry effects as the outline
-        const fillD = layer.fillD ? computedOutlineD({ ...layer, d: layer.fillD }, W, rs) ?? undefined : undefined
         drawPath(ctx, { ...layer, d: gd, fillD }, W)
       }
     } else {
@@ -5920,14 +5922,19 @@ function drawPath(ctx: CanvasRenderingContext2D, layer: PathLayer, W: number) {
   const p = path2dFor(layer.d)
   if (!p) return
   // pen stage 7: a drawing with filled areas fills those (`fillD`, non-zero) and
-  // strokes its outline `d`; without `fillD` this is exactly the old fill of `d`
-  const fp = layer.fillD ? path2dFor(layer.fillD) : null
-  const fillPath = fp ?? p
-  const fillRule = fp ? 'nonzero' : (layer.fillRule || 'nonzero')
+  // strokes its outline `d`; without the field this is exactly the old fill of `d`.
+  // Keyed on the field's PRESENCE: a `fillD` that is '' (an effect emptied it) or
+  // won't parse fills nothing — a filled drawing never falls back to filling `d`
+  const hasFillD = layer.fillD != null
+  const fp = hasFillD ? path2dFor(layer.fillD!) : null
+  const fillPath = hasFillD ? fp : p
+  const fillRule = hasFillD ? 'nonzero' : (layer.fillRule || 'nonzero')
   const s = (layer.scale || 1) * W
   ctx.save()
   ctx.scale(s, s)
-  if (isFoilFill(layer.fill)) {
+  if (!fillPath) {
+    // filled areas present but empty: nothing to fill
+  } else if (isFoilFill(layer.fill)) {
     paintFoilRegion(ctx, layer.fill, (c, ink) => { c.fillStyle = ink; c.fill(fillPath, fillRule) })
   } else if (hasPaint(layer.fill)) {
     ctx.fillStyle = resolvePaint(ctx, layer.fill, layer.bbox, _fieldCtx)

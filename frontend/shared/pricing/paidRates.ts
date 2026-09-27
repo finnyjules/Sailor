@@ -139,6 +139,18 @@ function ownUsd(call: PaidCall, rates: Readonly<Record<string, PaidRate>>): numb
 }
 
 /**
+ * The other card that prices an endpoint already (edit, clip or video
+ * model), or null. A paid card must never duplicate one (each rate lives in
+ * one place): a test holds PAID_RATES to that.
+ */
+export function otherCardFor(endpoint: string): 'edit' | 'clip' | 'video' | null {
+  if (editRate(endpoint)) return 'edit'
+  if (clipRate(endpoint)) return 'clip'
+  if (videoRate(endpoint)) return 'video'
+  return null
+}
+
+/**
  * The price basis of one call, in dollars: the first service's price (which
  * carries the markup), or each fallback covered at cost, whichever is higher
  * (editRates.ts editMaxUsd's rule). Its credits are `callCredits({ usd })`.

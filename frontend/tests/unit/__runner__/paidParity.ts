@@ -16,10 +16,21 @@ import sharp from 'sharp'
 import type { ApiPrompt } from '#shared/runner/graph'
 import type { RunnerFamily } from '#shared/runner/families'
 import type { OutputFile, RunnerValue } from '~~/server/runner/types'
+import { parsePyJson, pyJsonDumps, type PyJson } from '#shared/runner/pyJson'
 import { createFakeFal, createFakeReplicate, makeKit, type FakeRequest } from './kit'
 
-/** One provider call as Python made it (capture_calls). */
-export interface PyCall { provider: 'fal' | 'replicate'; endpoint: string; payload: Record<string, unknown> }
+/**
+ * One provider call as Python made it (capture_calls). `payload_json`: the
+ * payload as Python's wire has it (json.dumps, keys sorted), so a float
+ * written `1.0` is told from an int `1`; absent on hand-made calls.
+ */
+export interface PyCall { provider: 'fal' | 'replicate'; endpoint: string; payload: Record<string, unknown>; payload_json?: string }
+
+/** A GET a node made: its URL and the status served (capture_calls `gets`). */
+export interface PyGet { url: string; status: number | null }
+
+/** A JSON link's body as served: its text, or a status with a text (a 404). */
+export type LinkBody = string | { status: number; text: string }
 
 /** A body text given as it is (numbers keep their written form): `{ __body__: '<text>' }`. */
 export interface RawBody { __body__: string }
@@ -35,8 +46,15 @@ export interface PaidCase {
   sounds?: string[]
   /** The provider's answers in call order: Replicate's prediction, fal's result body, or a raw body text. */
   answers: unknown[]
-  /** Linked JSON files the node fetches (served by the fake download), by URL. */
-  links?: Record<string, string>
+  /** The input files Python was given, base64, by input name (else a small picture of its own per input). */
+  picture_files?: Record<string, string>
+  sound_files?: Record<string, string>
+  /** Linked JSON files the node fetches, by URL (a status besides 200 as `{ status, text }`). */
+  links?: Record<string, LinkBody>
+  /** Answer files the node downloads, base64, by URL. */
+  files?: Record<string, string>
+  /** Every GET Python made, in order. */
+  gets?: PyGet[]
   /** Python's calls, in order. */
   calls: PyCall[]
   /** What Python's execute returned (strings verbatim; a picture as the URL it came from). */
@@ -104,12 +122,18 @@ export async function runPaidCase(c: PaidCase, o: { families: ReadonlySet<Runner
       return r
     }) as typeof submit
   }
+  // Served exactly as Python's capture served them: a GET the case doesn't serve fails the case.
   const download = async (url: string) => {
-    if (c.links && Object.prototype.hasOwnProperty.call(c.links, url)) {
-      return { bytes: new TextEncoder().encode(c.links[url]!), contentType: 'application/json' }
+    const link = c.links && Object.prototype.hasOwnProperty.call(c.links, url) ? c.links[url]! : undefined
+    if (link !== undefined) {
+      const { status, text } = typeof link === 'string' ? { status: 200, text: link } : link
+      if (status !== 200) throw new Error(`HTTP ${status} for ${url}`)
+      return { bytes: new TextEncoder().encode(text), contentType: 'application/json' }
     }
-    if (PICTURE.test(url)) return { bytes: await pictureBytes(url), contentType: 'image/png' }
-    return { bytes: new TextEncoder().encode(url), contentType: null }
+    if (c.files && Object.prototype.hasOwnProperty.call(c.files, url)) {
+      return { bytes: new Uint8Array(Buffer.from(c.files[url]!, 'base64')), contentType: PICTURE.test(url) ? 'image/png' : null }
+    }
+    throw new Error(`${c.name}: GET ${url} is not served by the case`)
   }
   const k = makeKit({ hosted: o.hosted, fal, replicate, deps: { download, families: () => o.families } })
 
@@ -117,7 +141,8 @@ export async function runPaidCase(c: PaidCase, o: { families: ReadonlySet<Runner
   for (const name of c.pictures ?? []) {
     const file = `${name}.png`
     mkdirSync(join(k.root, 'input'), { recursive: true })
-    writeFileSync(join(k.root, 'input', file), await pictureBytes(name))
+    const given = c.picture_files?.[name]
+    writeFileSync(join(k.root, 'input', file), given ? new Uint8Array(Buffer.from(given, 'base64')) : await pictureBytes(name))
     prompt[`p_${name}`] = { class_type: 'LoadImage', inputs: { image: file, upload: 'image' } }
     prompt[NODE]!.inputs[name] = [`p_${name}`, 0]
   }
@@ -142,11 +167,29 @@ export function normalizeSent(sent: readonly SentCall[], pictures: readonly stri
   return sent.map(s => ({ provider: s.provider, endpoint: s.endpoint, payload: walk(s.payload) as Record<string, unknown> }))
 }
 
-/** The engine sent exactly Python's calls, in order: service, endpoint and payload (deep-equal). */
+/** A payload as a wire text with keys sorted: numbers keep their written form (pyJson). */
+export function wireText(payload: unknown): string {
+  const sorted = (v: PyJson): PyJson => {
+    if (Array.isArray(v)) return v.map(sorted)
+    if (v && typeof v === 'object' && 'obj' in v) {
+      return { obj: [...v.obj].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)).map(([k, x]) => [k, sorted(x)] as [string, PyJson]) }
+    }
+    return v
+  }
+  return pyJsonDumps(sorted(parsePyJson(JSON.stringify(payload))))
+}
+
+/**
+ * The engine sent exactly Python's calls, in order: service, endpoint and
+ * payload (deep-equal). Where Python's wire text is recorded
+ * (`payload_json`), the payloads are compared as wire texts too, so Python's
+ * `1.0` and a sent `1` differ, as they do on the wire.
+ */
 export function expectCalls(sent: readonly SentCall[], pyCalls: readonly PyCall[], pictures: readonly string[] = [], sounds: readonly string[] = []): void {
   const got = normalizeSent(sent, pictures, sounds)
   expect(got.length, 'the number of calls').toBe(pyCalls.length)
   for (const [i, py] of pyCalls.entries()) {
     expect(got[i], `call ${i + 1}`).toEqual({ provider: py.provider, endpoint: py.endpoint, payload: py.payload })
+    if (py.payload_json !== undefined) expect(wireText(got[i]!.payload), `call ${i + 1} on the wire`).toBe(py.payload_json)
   }
 }

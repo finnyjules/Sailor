@@ -32,6 +32,7 @@ import type { GeoShapeConfig } from '~/lib/geoshape/config'
 import { sketchOutlineBounds } from '~/lib/geoshape/shapes'
 import { naturalExtent, refitFactor, shapePenView, commitDrawn, type PreviewFrame } from '~/lib/geoshape/penShape'
 import { usePen, type Pen, type PenTool } from '~/composables/pen/usePen'
+import { fillPathData } from '~/lib/sketch/fills'
 
 export interface ShapePenHost {
   /** The live, reactive studio doc. */
@@ -66,11 +67,13 @@ export function resizedFrame(frame: PreviewFrame, cssW: number, cssH: number): P
 }
 
 /** The tools a Drawn shape offers (Select is always added by the pen). */
-export const SHAPE_PEN_TOOLS: PenTool[] = ['select', 'path', 'curve', 'line', 'circle', 'point', 'trim', 'cut', 'dissolve']
+export const SHAPE_PEN_TOOLS: PenTool[] = ['select', 'path', 'curve', 'line', 'circle', 'point', 'trim', 'cut', 'dissolve', 'fill']
 
-/** True when the drawing's visible outline has a closed path or a circle. */
+/** True when the drawing's visible outline has a closed path or a circle — or
+ *  (pen stage 7) a filled area, which the shape then is. */
 export function hasClosedOutline(doc: SketchDoc): boolean {
   return doc.entities.some(e => !e.construction && ((e.kind === 'path' && e.closed) || e.kind === 'circle'))
+    || !!fillPathData(doc)
 }
 
 type Original = Pick<GeoShapeConfig, 'shape' | 'size'> & { sketch: SketchDoc | undefined }
