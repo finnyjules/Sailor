@@ -74,6 +74,20 @@ The brush toolbar gains a **Paint** row: Colour (as before) or six live material
 
 **Next.** Part 3: "More shaders" from the full library and painted effects.
 
+### The pen — Clean up (stage 5) — LANDED 2026-09-27
+
+Spec `docs/superpowers/specs/2026-09-26-pen-stages-4-8-design.md` (Stage 5), plan `docs/superpowers/plans/2026-09-26-pen-stage-5-clean-up.md`; commits 4fd5c9c64 … 1eac787b7, final fixes 53155595e, 4903cecf1, ccc8f34ac, c3c9bf2ea, e162be829. On the pen page, in the Frame and in Shape Studio:
+
+- **Clean up** (button after Dissolve, or ⌥⇧C) makes a drawing feel right: it joins ends that nearly meet, pins points that nearly sit on a curve, smooths nearly smooth joints, squares nearly level/upright/parallel/square lines, gives nearly shared centres one centre, finds mirror pairs within a shape, evens nearly equal lengths, radii and spacing, and rounds sizes near a whole unit. It works on the selection, else the whole drawing.
+- **Preview first:** the cleaned drawing shows solid over a faint ghost, one badge per fix ("Joined", "Tangent", "Square", "Same radius ×4"…); click a badge to switch that fix off or on; Gentle / Normal / Strong; Apply (Enter) is one undo step, Cancel (Esc) changes nothing. Arrow keys change the strength.
+- **The owner's trimmed flower** (petals left as separate open pieces) joins into one closed loop, so the Frame fills its centre.
+
+**Proof.** 809 unit tests (cleanup-*, pen-*, sketch-*) incl. a 148-piece connected drawing and a 37-rectangle grid; real-mouse `tests/pen-cleanup.spec.ts` plus the other eight pen specs, 89/89, at 1280 and 1024 wide, in all three hosts.
+
+**Rulings.** Tolerances in screen px at the zoom Clean up opened at; always solved from the original drawing, cached per switch set; each fix solved in a small window first (two hops along pieces and rules), the whole connected part only if needed, a size nudge never; a fix is refused if it moves anything more than max(8 px, 10 %), flips or shrinks an arc, squeezes a line under 2 px, or adds nothing; Mirror pairs only inside one shape; an 800 ms budget per run ("Stopped early — select a part to clean up the rest"); a drawing whose own rules don't hold is refused; Enter on a focused Cancel cancels; the hosts skip Space-to-pan only inside the Clean up bar.
+
+**Known limits.** Switching a fix off can surface new ones; badges are mouse-only; an Evenly spaced guide can join two shapes so a second run may pair them as mirrors; merges drop degenerate rules without counting them; shallow arcs can be refused by the centre movement cap.
+
 ### The pen — tangency done right (stage 4) — LANDED 2026-09-26
 
 Spec `docs/superpowers/specs/2026-09-26-pen-stages-4-8-design.md`, plan `docs/superpowers/plans/2026-09-26-pen-stage-4-tangency.md`; commits 0ea65d6ed … 775281ade, final fixes cb3a5579d + 0883742ce. On the pen page, in the Frame and in Shape Studio:
