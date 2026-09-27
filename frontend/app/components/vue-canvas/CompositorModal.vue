@@ -7500,8 +7500,10 @@ function drawMaskShape(ctx: CanvasRenderingContext2D, l: any, W: number) {
     ctx.beginPath(); ctx.ellipse(0, 0, w / 2, h / 2, 0, 0, Math.PI * 2); ctx.fill()
   } else if (l.kind === 'path') {
     try {
-      const p = new Path2D(l.d), s = (l.scale || 1) * W
-      ctx.save(); ctx.scale(s, s); ctx.fill(p, l.fillRule || 'nonzero'); ctx.restore()
+      // pen stage 7: a drawing with filled areas masks those (non-zero), never its outline `d`
+      const filled = l.fillD != null
+      const p = new Path2D(filled ? l.fillD : l.d), s = (l.scale || 1) * W
+      ctx.save(); ctx.scale(s, s); ctx.fill(p, filled ? 'nonzero' : (l.fillRule || 'nonzero')); ctx.restore()
     } catch { /* bad path data */ }
   } else if (l.kind === 'line') {
     const w = l.w * W

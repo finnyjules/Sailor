@@ -198,3 +198,21 @@ describe('Frame: the layer session and fills', () => {
     expect('fillD' in get('L')).toBe(false)
   })
 })
+
+describe('fix round 1: Cancel never overwrites a colour set mid-session', () => {
+  it('filled by the pen, recoloured by the user, cancelled: the user’s colour stays', () => {
+    const d: SketchDoc = { entities: [], constraints: [] }
+    crossingLines(d)
+    const l = { id: 'L', kind: 'path', x: 0.5, y: 0.5, scale: 1, rotation: 0, d: sketchToLocalD(d), sketch: d, bbox: { w: 0.2, h: 0.2 }, ...PEN_STYLE_OPEN }
+    const { host, get } = liveHost([l])
+    const s = useFramePenSession(host)
+    s.open({ kind: 'layer', id: 'L' })
+    const pen = s.session.value!.pen
+    pen.selectTool('fill'); pen.fillClick(0, 3)
+    expect(get('L').fill).toBe(PEN_STYLE_CLOSED.fill)
+    host.commit(host.layers().map((x: any) => (x.id === 'L' ? { ...x, fill: '#00ff00' } : x)))   // the inspector
+    s.cancelSession()
+    expect('fillD' in get('L')).toBe(false)
+    expect(get('L').fill).toBe('#00ff00')
+  })
+})

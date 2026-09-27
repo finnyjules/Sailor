@@ -429,13 +429,14 @@ export function useFramePenSession(host: FramePenHost) {
       const id = s.target.id, orig = original, wrote = recorded, filled = penFilled
       close()
       // only what the pen wrote goes back (previews touch d/sketch/fillD alone,
-      // and the fill colour only when the pen gave it), so an inspector edit made
+      // and the fill colour only when the pen gave it and it is still the pen's
+      // colour — a colour the user picked meanwhile stays), so an inspector edit made
       // meanwhile (fill, stroke) survives; nothing written → nothing to put back,
       // and no undo step was left behind
       if (wrote) {
         writeLayer(id, l => {
           const { fillD: _pen, ...rest } = l
-          return { ...rest, d: orig.d, sketch: orig.sketch, ...(orig.fillD ? { fillD: orig.fillD } : {}), ...(filled ? { fill: orig.fill } : {}) }
+          return { ...rest, d: orig.d, sketch: orig.sketch, ...(orig.fillD ? { fillD: orig.fillD } : {}), ...(filled && l.fill === PEN_STYLE_CLOSED.fill ? { fill: orig.fill } : {}) }
         })
       }
       return

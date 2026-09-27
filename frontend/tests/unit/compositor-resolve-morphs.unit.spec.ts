@@ -142,3 +142,16 @@ describe('resolveMorphs: letter behaviours ride the morph', () => {
     expect((out.localLayers[0] as unknown as { motionPieces?: unknown }).motionPieces).toBeUndefined()
   })
 })
+
+describe('resolveMorphs and a drawing’s filled areas (pen stage 7)', () => {
+  it('the swapped clone drops fillD (the morph’s outline is the whole face)', () => {
+    const a = createPathLayer({ id: 'A', d: SQUARE, fillD: SQUARE, sketch: { entities: [], constraints: [] } } as never)
+    const b = createPathLayer({ id: 'B', d: STAR_ISH, x: 0.7, y: 0.3 })
+    expect((a as unknown as { fillD?: string }).fillD).toBe(SQUARE)
+    const out = run([morphing(a, b, 0.5), b])
+    const clone = out.localLayers[0]! as unknown as Record<string, unknown>
+    expect(clone.kind).toBe('path')
+    expect(clone.d).not.toBe(SQUARE)
+    expect(clone.fillD).toBeUndefined()
+  })
+})

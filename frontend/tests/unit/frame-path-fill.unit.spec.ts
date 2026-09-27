@@ -75,3 +75,29 @@ describe('geometry effects and fillD', () => {
     expect(log.some(x => x.startsWith(`fill(Path(${TRI})`))).toBe(false)
   })
 })
+describe('fix round 1: a filled layer never fills d', () => {
+  it('fillD present but empty: nothing is filled, d is still stroked', () => {
+    const l = createPathLayer({ id: 'e', d: OPEN, fillD: '', sketch: { entities: [], constraints: [] }, fill: '#3b82f6', stroke: '#111111', strokeWidth: 0.004 } as any)
+    const log = record(l)
+    expect(log.some(x => x.startsWith('fill('))).toBe(false)
+    expect(log).toContain(`stroke(Path(${OPEN}))`)
+  })
+  it('a geometry effect that empties fillD: nothing is filled (the effect’s d is still stroked)', () => {
+    // trim drops a zero-length ring: 'M 0 0 Z' → '' while the open lines survive
+    const eff = { id: 'e1', type: 'trim', start: 0, end: 0.999, offset: 0, visible: true }
+    const l = createPathLayer({ id: 'e2', d: OPEN, fillD: 'M 0 0 Z', sketch: { entities: [], constraints: [] }, fill: '#3b82f6', stroke: '#111111', strokeWidth: 0.004, effects: [eff] } as any)
+    const log = record(l)
+    expect(log.some(x => x.startsWith('fill('))).toBe(false)
+    expect(log.some(x => x.startsWith('stroke(Path('))).toBe(true)
+  })
+  it('a long shadow casts from the filled areas when there are any', async () => {
+    const { longShadowBody } = await import('~/lib/compositor/geometryEffects')
+    const eff = { id: 's1', type: 'long_shadow', angle: 45, length: 0.05, color: 'rgba(0,0,0,0.35)', visible: true }
+    const l = createPathLayer({ id: 's', d: OPEN, fillD: TRI, sketch: { entities: [], constraints: [] }, fill: '#3b82f6', stroke: '#111111', strokeWidth: 0.004, effects: [eff] } as any)
+    const log = record(l)
+    const fromFill = longShadowBody(TRI, Math.PI / 4, 0.05)
+    const fromD = longShadowBody(OPEN, Math.PI / 4, 0.05)
+    expect(fromFill).not.toBe(fromD)
+    expect(log).toContain(`fill(Path(${fromFill}))`)
+  })
+})
