@@ -413,9 +413,6 @@ describe.skipIf(!hasPython)('models/status', () => {
     compare('empty')
 
     const m = (...p: string[]) => path.join(root, 'models', ...p)
-    sized(m('insightface', 'inswapper_128.onnx'), 554_253_681) // right size: present
-    sized(m('face_restore', 'codeformer.onnx'), 1234) // wrong size: missing
-    sized(m('wav2lip', 'wav2lip_gan.onnx'), 10) // unknown size, non-empty: present
     sized(m('rife', 'rife_v4.6.onnx'), 0) // unknown size, empty: missing
     sized(m('sam', 'mobile_sam.encoder.onnx'), 5)
     fs.mkdirSync(m('upscale_models', 'RealESRGAN_x2plus.pth'), { recursive: true }) // a folder, not a file

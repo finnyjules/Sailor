@@ -67,9 +67,7 @@ export function modelBundles(e: BundleEnv): ModelBundle[] {
   }
 
   return [
-    one('facerestore', 'Face Restoration', 'codeformer.onnx', m('face_restore', 'codeformer.onnx'), 376_322_336),
     one('objectremove', 'Object Removal', 'lama_fp32.onnx', m('lama', 'lama_fp32.onnx'), 205_653_341),
-    one('lipsync', 'Lip Sync', 'wav2lip_gan.onnx', m('wav2lip', 'wav2lip_gan.onnx'), 0),
     {
       key: 'subjecttrack',
       label: 'Subject Mask',

@@ -71,7 +71,7 @@ export type Domain = 'image' | 'text' | 'audio' | 'video' | '3d'
 export type ModelBundleKey =
   | 'bgremove' | 'upscale'
   | 'frameinterp' | 'subjecttrack'
-  | 'facerestore' | 'lipsync' | 'objectremove'
+  | 'objectremove'
   | 'whisper' | 'demucs'
   | 'depth'
 
@@ -281,7 +281,6 @@ export const TOOLBOX_SECTIONS: ToolboxSection[] = [
   {
     title: 'Local AI',
     items: [
-      { nodeType: 'FaceRestore', label: 'Face Restore', description: 'CodeFormer face restoration — sharpens facial detail and fixes muddy AI-generated or low-res faces. Pairs perfectly with Face Swap. Downloads ~360 MB on first use.', icon: Sparkles, requiresModels: 'facerestore' },
       { nodeType: 'BackgroundRemove', label: 'Remove BG', description: 'Knock out the background and emit a clean alpha mask. Downloads ~179 MB on first use.', icon: PhSelectionForeground, requiresModels: 'bgremove' },
       { nodeType: 'SubjectMask', label: 'Subject Mask', description: 'Click a point on the subject — MobileSAM segments it into a mask. Works on every frame of a video. Downloads ~55 MB on first use.', icon: MousePointerClick, requiresModels: 'subjecttrack' },
       { nodeType: 'ObjectRemove', label: 'Object Removal', description: 'LaMa inpainting — clean removal of distractions, watermarks, or whole subjects. Downloads ~196 MB on first use.', icon: WandSparkles, requiresModels: 'objectremove' },
@@ -431,7 +430,6 @@ export const TOOLBOX_SECTIONS: ToolboxSection[] = [
     title: 'Local AI',
     items: [
       { nodeType: 'FrameInterpolateAI',   label: 'Slow Motion AI',     description: 'RIFE 4.6 frame interpolation — handles fast action and complex scenes far better than classical optical flow. Downloads ~32 MB on first use.', icon: Hourglass, requiresModels: 'frameinterp' },
-      { nodeType: 'LipSync',              label: 'Lip Sync',           description: 'Wav2Lip — re-syncs the mouth region of a talking head to a new audio clip. Downloads ~140 MB on first use.', icon: Mic, requiresModels: 'lipsync' },
     ],
   },
   {

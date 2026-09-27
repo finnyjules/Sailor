@@ -28,7 +28,7 @@ import {
 // Pick which brand to show on the corner chip. Replicate is just transport;
 // the chip should say BFL for a Flux node, Ideogram for an Ideogram node,
 // etc. Falls back to the actual API provider when no model brand is known
-// (multi-model nodes, indie models like CodeFormer).
+// (multi-model nodes, indie models with no dedicated brand chip).
 function chipProvider(item: PartnerNode): string {
   return getModelBrand(item.nodeType) || item.provider
 }

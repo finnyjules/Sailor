@@ -12,7 +12,7 @@ import type { ModelBundleKey } from '~/data/toolbox-items'
 export const ALL_MODEL_BUNDLES: ModelBundleKey[] = [
   'bgremove', 'upscale',
   'frameinterp', 'subjecttrack',
-  'facerestore', 'lipsync', 'objectremove',
+  'objectremove',
   'whisper', 'demucs', 'depth',
 ]
 

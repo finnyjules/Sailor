@@ -32,7 +32,7 @@ class ModelFile:
 
 # A logical bundle (= what's behind one toolbox card). May contain multiple
 # files. May also have a `prepare_fn` that runs *after* downloads finish — e.g.
-# trigger insightface's own auto-download of the buffalo_l package.
+# warm a model into memory once its files are on disk.
 #
 # `ready_check_fn`, if set, overrides the default "all files exist on disk"
 # check. Useful when the bundle is managed by an opaque cache (faster-whisper,

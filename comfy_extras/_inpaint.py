@@ -20,7 +20,7 @@ from comfy_extras._model_downloads import (
 )
 
 # Carve mirrors the official big-lama as a single fp32 ONNX, which means we can
-# lean on onnxruntime (already pulled in by insightface/rembg) instead of
+# lean on onnxruntime (already pulled in by rembg) instead of
 # bundling the PyTorch source.
 _MODELS_ROOT = os.path.join(folder_paths.models_dir, "lama")
 _MODEL_PATH = os.path.join(_MODELS_ROOT, "lama_fp32.onnx")
