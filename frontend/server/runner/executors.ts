@@ -66,6 +66,7 @@ import {
   checkStyleSource, isNanoBananaRestyle, isRestyleModel, isUnreadableFile, restyleCall, structureStrengthOf,
 } from './generators/restyle'
 import { moodboardFiles, parseInputFileRef } from './inputs'
+import { resolveShotRefs } from './shotRefs'
 import { pictureSourceOf, planCompositor } from './compositor/plan'
 import { planKeepSubject, type KeepHeld, type KeepHold, type KeepStep } from './compositor/keep'
 import {
@@ -257,6 +258,130 @@ export function staticDerive(ctx: PlanContext, ui?: (values: Record<number, Runn
     values[slot] = v
   }
   return { kind: 'derive', derive: async () => ({ values, ui: ui ? ui(values) : null }) }
+}
+
+/**
+ * Generate a video's request (and a shot-directed Film a shot's, Task 4):
+ * the model tables, backups and Seedance / Veo / Kling checks. `first` makes
+ * the first frame's provider link, or is null for none; it is called only
+ * where the model sends one (a text-to-video-only Replicate model ignores a
+ * linked picture, as Python does, so it isn't handed off at all).
+ */
+async function planVideoGeneration(inputs: Record<string, unknown>, first: (() => Promise<string>) | null): Promise<NodePlan> {
+  const id = resolveVideoModelId(inputs.model)
+  // Wan 3.0 (family wan-3): fal only, the endpoint by mode (wan3.ts); no backup.
+  if (isWan3Model(id)) {
+    const call = wan3Call(id, {
+      prompt: asText(inputs.prompt),
+      aspectRatio: asText(inputs.aspect_ratio) || '16:9',
+      duration: asInt(inputs.duration, RUNNER_WAN3_MODELS[id].defaultDuration),
+      seed: asInt(inputs.seed, 0),
+      image: first ? await first() : null,
+      adv: parseJsonObject(inputs.model_options),
+    })
+    return {
+      kind: 'provider', provider: call.provider, endpoint: call.endpoint, payload: call.payload, media: 'video', prefix: 'generate_video',
+      uiFor: () => null,
+    }
+  }
+  // LTX-2.5 Fast (family ltx-2.5-fast): Replicate only, its own builder (ltx25Fast.ts); no backup.
+  if (isLtx25FastModel(id)) {
+    const payload = ltx25Fast({
+      prompt: asText(inputs.prompt),
+      aspectRatio: asText(inputs.aspect_ratio) || '16:9',
+      duration: asInt(inputs.duration, LTX_25_FAST_DEFAULT_SECONDS),
+      seed: asInt(inputs.seed, 0),
+      image: first ? await first() : null,
+      adv: parseJsonObject(inputs.model_options),
+    })
+    return {
+      kind: 'provider', provider: 'replicate', endpoint: LTX_25_FAST_REPLICATE_SLUG, payload, media: 'video', prefix: 'generate_video',
+      uiFor: () => null,
+    }
+  }
+  // Luma Ray 3.2 (family luma-ray-3.2): Replicate first, fal the backup for image-to-video only (lumaRay32.ts).
+  if (isLumaRay32Model(id)) {
+    const { call, backup } = lumaRay32Call({
+      prompt: asText(inputs.prompt),
+      aspectRatio: asText(inputs.aspect_ratio) || '16:9',
+      duration: asInt(inputs.duration, LUMA_RAY_32_DEFAULT_SECONDS),
+      seed: asInt(inputs.seed, 0),
+      image: first ? await first() : null,
+      adv: parseJsonObject(inputs.model_options),
+    })
+    return {
+      kind: 'provider', provider: call.provider, endpoint: call.endpoint, payload: call.payload, media: 'video', prefix: 'generate_video',
+      uiFor: () => null,
+      ...(backup ? { backup } : {}),
+    }
+  }
+  // A model that isn't one of the fal ids goes to Replicate, its Python
+  // provider (family replicate-video): _run_prediction on the slug, the
+  // first output URL is the clip. The first frame goes in the model's own
+  // field; a text-to-video-only model ignores a linked one, as Python
+  // does, so it isn't handed off at all.
+  const onReplicate = RUNNER_REPLICATE_VIDEO_MODELS[id]
+  if (!RUNNER_VIDEO_MODELS[id] && onReplicate) {
+    const i2vFirst = onReplicate.modes.includes('i2v') ? first : null
+    const args = {
+      prompt: asText(inputs.prompt),
+      aspectRatio: asText(inputs.aspect_ratio) || '16:9',
+      duration: asInt(inputs.duration, onReplicate.defaultDuration),
+      seed: asInt(inputs.seed, 0),
+      image: i2vFirst ? await i2vFirst() : null,
+      adv: parseJsonObject(inputs.model_options),
+    }
+    const payload = onReplicate.build(args)
+    // Kling 3.0 and PixVerse v6 go to fal first; this Replicate request is their backup (twins.ts).
+    const falFirst = FAL_FIRST_VIDEO[id]
+    if (falFirst) {
+      const call = falFirst(args)
+      // Kling 3's elements (Task 3, characters stage 3) carry a character's
+      // pictures; Replicate's Kling can't take them, so falling over would
+      // silently drop the character. No backup when they are sent.
+      const hasElements = Array.isArray(call.payload.elements) && (call.payload.elements as unknown[]).length > 0
+      return {
+        kind: 'provider', provider: 'fal', endpoint: call.endpoint, payload: call.payload, media: 'video', prefix: 'generate_video',
+        uiFor: () => null,
+        ...(hasElements ? {} : { backup: { provider: 'replicate', endpoint: onReplicate.slug, payload } }),
+      }
+    }
+    return {
+      kind: 'provider', provider: 'replicate', endpoint: onReplicate.slug, payload, media: 'video', prefix: 'generate_video',
+      uiFor: () => null,
+    }
+  }
+  // Hailuo H3 Max Turbo (family h3-max-turbo): H3 Max's builder on its own fal app (h3MaxTurbo.ts); no backup.
+  // Gemini Omni Flash (family gemini-omni-flash): its own builder on fal (geminiOmniFlash.ts); no backup.
+  // Veo 3.1 Lite (family veo-3.1-lite): Veo 3.1's builder on its own fal app (veo31Lite.ts); no backup.
+  // HappyHorse 1.1 (family happyhorse-1.1): its own builder on fal, Replicate the backup (happyHorse11.ts, twins.ts VIDEO_BACKUPS).
+  // Grok Imagine Video 1.5 (family grok-imagine-video-1.5): its own builder on fal, Replicate the backup for
+  // image-to-video at 480p or 720p (grokImagineVideo15.ts, twins.ts VIDEO_BACKUPS).
+  const desc = RUNNER_VIDEO_MODELS[id] ?? RUNNER_ONLY_FAL_VIDEO_MODELS[id] ?? RUNNER_GEMINI_OMNI_FLASH_MODELS[id] ?? RUNNER_VEO_31_LITE_MODELS[id]
+    ?? RUNNER_HAPPYHORSE_11_MODELS[id] ?? RUNNER_GROK_IMAGINE_VIDEO_15_MODELS[id]
+  if (!desc) throw new Error(`Unknown video model: ${String(inputs.model)}`)
+  // Seedance 2.0: a first frame beside references is refused, not sent with them dropped (requestRules.ts).
+  if (id === 'seedance-2.0') {
+    const refused = seedanceReferenceProblem(parseJsonObject(inputs.model_options), !!first)
+    if (refused) throw new Error(refused.message)
+  }
+  const image = first ? await first() : null
+  const payload = desc.build({
+    prompt: asText(inputs.prompt),
+    aspectRatio: asText(inputs.aspect_ratio) || '16:9',
+    duration: asInt(inputs.duration, desc.defaultDuration),
+    seed: asInt(inputs.seed, 0),
+    image,
+    adv: parseJsonObject(inputs.model_options),
+  })
+  const fn = falVideoFn(payload, desc.fnByMode)
+  const backup = VIDEO_BACKUPS[id]?.(payload)
+  return {
+    kind: 'provider', provider: 'fal', endpoint: fn ? `${desc.app}/${fn}` : desc.app, payload, media: 'video', prefix: 'generate_video',
+    // GenerateVideoNode shows nothing itself; the Video card after it does.
+    uiFor: () => null,
+    ...(backup ? { backup } : {}),
+  }
 }
 
 async function planNodeRequest(ctx: PlanContext): Promise<NodePlan> {
@@ -466,124 +591,24 @@ async function planNodeRequest(ctx: PlanContext): Promise<NodePlan> {
     }
 
     case 'GenerateVideoNode': {
-      const id = resolveVideoModelId(inputs.model)
-      // Wan 3.0 (family wan-3): fal only, the endpoint by mode (wan3.ts); no backup.
-      if (isWan3Model(id)) {
-        const first = linkedFirstFile('image')
-        const call = wan3Call(id, {
-          prompt: asText(inputs.prompt),
-          aspectRatio: asText(inputs.aspect_ratio) || '16:9',
-          duration: asInt(inputs.duration, RUNNER_WAN3_MODELS[id].defaultDuration),
-          seed: asInt(inputs.seed, 0),
-          image: first ? await ctx.toUrl(first) : null,
-          adv: parseJsonObject(inputs.model_options),
-        })
-        return {
-          kind: 'provider', provider: call.provider, endpoint: call.endpoint, payload: call.payload, media: 'video', prefix: 'generate_video',
-          uiFor: () => null,
-        }
-      }
-      // LTX-2.5 Fast (family ltx-2.5-fast): Replicate only, its own builder (ltx25Fast.ts); no backup.
-      if (isLtx25FastModel(id)) {
-        const first = linkedFirstFile('image')
-        const payload = ltx25Fast({
-          prompt: asText(inputs.prompt),
-          aspectRatio: asText(inputs.aspect_ratio) || '16:9',
-          duration: asInt(inputs.duration, LTX_25_FAST_DEFAULT_SECONDS),
-          seed: asInt(inputs.seed, 0),
-          image: first ? await ctx.toUrl(first) : null,
-          adv: parseJsonObject(inputs.model_options),
-        })
-        return {
-          kind: 'provider', provider: 'replicate', endpoint: LTX_25_FAST_REPLICATE_SLUG, payload, media: 'video', prefix: 'generate_video',
-          uiFor: () => null,
-        }
-      }
-      // Luma Ray 3.2 (family luma-ray-3.2): Replicate first, fal the backup for image-to-video only (lumaRay32.ts).
-      if (isLumaRay32Model(id)) {
-        const first = linkedFirstFile('image')
-        const { call, backup } = lumaRay32Call({
-          prompt: asText(inputs.prompt),
-          aspectRatio: asText(inputs.aspect_ratio) || '16:9',
-          duration: asInt(inputs.duration, LUMA_RAY_32_DEFAULT_SECONDS),
-          seed: asInt(inputs.seed, 0),
-          image: first ? await ctx.toUrl(first) : null,
-          adv: parseJsonObject(inputs.model_options),
-        })
-        return {
-          kind: 'provider', provider: call.provider, endpoint: call.endpoint, payload: call.payload, media: 'video', prefix: 'generate_video',
-          uiFor: () => null,
-          ...(backup ? { backup } : {}),
-        }
-      }
-      // A model that isn't one of the fal ids goes to Replicate, its Python
-      // provider (family replicate-video): _run_prediction on the slug, the
-      // first output URL is the clip. The first frame goes in the model's own
-      // field; a text-to-video-only model ignores a linked one, as Python
-      // does, so it isn't handed off at all.
-      const onReplicate = RUNNER_REPLICATE_VIDEO_MODELS[id]
-      if (!RUNNER_VIDEO_MODELS[id] && onReplicate) {
-        const first = onReplicate.modes.includes('i2v') ? linkedFirstFile('image') : null
-        const args = {
-          prompt: asText(inputs.prompt),
-          aspectRatio: asText(inputs.aspect_ratio) || '16:9',
-          duration: asInt(inputs.duration, onReplicate.defaultDuration),
-          seed: asInt(inputs.seed, 0),
-          image: first ? await ctx.toUrl(first) : null,
-          adv: parseJsonObject(inputs.model_options),
-        }
-        const payload = onReplicate.build(args)
-        // Kling 3.0 and PixVerse v6 go to fal first; this Replicate request is their backup (twins.ts).
-        const falFirst = FAL_FIRST_VIDEO[id]
-        if (falFirst) {
-          const call = falFirst(args)
-          // Kling 3's elements (Task 3, characters stage 3) carry a character's
-          // pictures; Replicate's Kling can't take them, so falling over would
-          // silently drop the character. No backup when they are sent.
-          const hasElements = Array.isArray(call.payload.elements) && (call.payload.elements as unknown[]).length > 0
-          return {
-            kind: 'provider', provider: 'fal', endpoint: call.endpoint, payload: call.payload, media: 'video', prefix: 'generate_video',
-            uiFor: () => null,
-            ...(hasElements ? {} : { backup: { provider: 'replicate', endpoint: onReplicate.slug, payload } }),
-          }
-        }
-        return {
-          kind: 'provider', provider: 'replicate', endpoint: onReplicate.slug, payload, media: 'video', prefix: 'generate_video',
-          uiFor: () => null,
-        }
-      }
-      // Hailuo H3 Max Turbo (family h3-max-turbo): H3 Max's builder on its own fal app (h3MaxTurbo.ts); no backup.
-      // Gemini Omni Flash (family gemini-omni-flash): its own builder on fal (geminiOmniFlash.ts); no backup.
-      // Veo 3.1 Lite (family veo-3.1-lite): Veo 3.1's builder on its own fal app (veo31Lite.ts); no backup.
-      // HappyHorse 1.1 (family happyhorse-1.1): its own builder on fal, Replicate the backup (happyHorse11.ts, twins.ts VIDEO_BACKUPS).
-      // Grok Imagine Video 1.5 (family grok-imagine-video-1.5): its own builder on fal, Replicate the backup for
-      // image-to-video at 480p or 720p (grokImagineVideo15.ts, twins.ts VIDEO_BACKUPS).
-      const desc = RUNNER_VIDEO_MODELS[id] ?? RUNNER_ONLY_FAL_VIDEO_MODELS[id] ?? RUNNER_GEMINI_OMNI_FLASH_MODELS[id] ?? RUNNER_VEO_31_LITE_MODELS[id]
-        ?? RUNNER_HAPPYHORSE_11_MODELS[id] ?? RUNNER_GROK_IMAGINE_VIDEO_15_MODELS[id]
-      if (!desc) throw new Error(`Unknown video model: ${String(inputs.model)}`)
-      const first = linkedFirstFile('image')
-      // Seedance 2.0: a first frame beside references is refused, not sent with them dropped (requestRules.ts).
-      if (id === 'seedance-2.0') {
-        const refused = seedanceReferenceProblem(parseJsonObject(inputs.model_options), !!first)
-        if (refused) throw new Error(refused.message)
-      }
-      const image = first ? await ctx.toUrl(first) : null
-      const payload = desc.build({
-        prompt: asText(inputs.prompt),
-        aspectRatio: asText(inputs.aspect_ratio) || '16:9',
-        duration: asInt(inputs.duration, desc.defaultDuration),
-        seed: asInt(inputs.seed, 0),
-        image,
-        adv: parseJsonObject(inputs.model_options),
-      })
-      const fn = falVideoFn(payload, desc.fnByMode)
-      const backup = VIDEO_BACKUPS[id]?.(payload)
-      return {
-        kind: 'provider', provider: 'fal', endpoint: fn ? `${desc.app}/${fn}` : desc.app, payload, media: 'video', prefix: 'generate_video',
-        // GenerateVideoNode shows nothing itself; the Video card after it does.
-        uiFor: () => null,
-        ...(backup ? { backup } : {}),
-      }
+      const f = linkedFirstFile('image')
+      return planVideoGeneration(inputs, f ? () => ctx.toUrl(f) : null)
+    }
+
+    // A shot-directed Film a shot (Task 4, characters stage 3; runnerTakesNode
+    // takes no other): its `/view` reference links become provider links
+    // (shotRefs.ts), `image_url` is the first frame unless a picture is
+    // linked, and the rest is planned exactly as Generate a video. Its
+    // prompt is Shot Director's own, sent as typed (Python's shot_directed
+    // path adds no preset phrase). It shows its video on itself, as on ComfyUI.
+    case 'FilmShotNode': {
+      const resolved = await resolveShotRefs(parseJsonObject(inputs.model_options), ctx.toUrl)
+      const f = linkedFirstFile('image')
+      const firstFrame = resolved.firstFrame
+      const first = f ? () => ctx.toUrl(f) : firstFrame ? async () => firstFrame : null
+      const plan = await planVideoGeneration({ ...inputs, model_options: JSON.stringify(resolved.adv) }, first)
+      if (plan.kind !== 'provider') return plan
+      return { ...plan, prefix: 'film_shot', uiFor: files => ({ images: files, animated: [true] }) }
     }
 
     // ── fal-edit family (nodes_replicate.py EditImageNode :2725) ──

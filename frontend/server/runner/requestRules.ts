@@ -42,7 +42,8 @@
  *    when it is on), take up to 3 reference pictures instead (Task 2,
  *    veo31RefsProblem); on the ComfyUI /prompt gate (opts.runner unset —
  *    Python never sends references) they keep the same full refusal as
- *    Lite. Film a shot stays ComfyUI-only for all three (Task 4);
+ *    Lite. A shot-directed Film a shot the runner takes (Task 4) gets the
+ *    runner's rule; every other Film a shot keeps the ComfyUI one;
  *  - HappyHorse 1.1 (F18) with a last frame, or reference pictures, videos or
  *    sounds, in its options: its endpoints take one first frame at most and no
  *    sound (happyHorse11.ts HAPPYHORSE_11_ONE_PICTURE); and its text-to-video
@@ -121,12 +122,13 @@
  */
 import { isLink, type ApiNode, type ApiPrompt } from '#shared/runner/graph'
 import { withStaticWiredValues } from '#shared/runner/staticValues'
-import { RUNNER_VIDEO_MODEL_IDS, classUpgradeOn, resolveVideoModelId } from '#shared/runner/eligibility'
+import { RUNNER_VIDEO_MODEL_IDS, classUpgradeOn, isShotDirected, resolveVideoModelId } from '#shared/runner/eligibility'
 import { NO_FAMILIES, type RunnerFamily } from '#shared/runner/families'
 import { LARGEST_INPUT_PIXELS, sizePricedInput } from '#shared/pricing/editSettings'
 import { nodeImagePrompt } from './generators/image'
 import { RUNNER_VIDEO_MODELS, VEO_31_ONE_PICTURE, veo31HasExtras, veo31RefsProblem } from './generators/video'
 import { klingElementsProblem } from './generators/twins'
+import { shotRefProblem } from './shotRefs'
 import { H3_MAX_TURBO_APP, H3_MAX_TURBO_ENDPOINTS, H3_MAX_TURBO_ID, H3_MAX_TURBO_NEEDS_PROMPT } from './generators/h3MaxTurbo'
 import {
   GEMINI_OMNI_FLASH_ID, GEMINI_OMNI_FLASH_ONE_PICTURE, GEMINI_OMNI_FLASH_TEXT_TO_VIDEO,
@@ -310,6 +312,19 @@ export const SEEDANCE_TOO_MUCH_SOUND = 'Seedance 2.0 takes at most 15 s of refer
 /** G1 follow-up: a Seedance reference past the hosted gate's per-run read limit (SEEDANCE_REFERENCE_READS). */
 export const SEEDANCE_TOO_MANY_REFERENCES = 'This run has more Seedance 2.0 reference videos and sounds than Sailor can check at once. Run fewer at a time.'
 export const SEEDANCE_UNMEASURED_REFERENCE = 'Seedance 2.0 can’t check how long a reference video or sound is. Use one uploaded to Sailor.'
+
+/**
+ * Kling 3's elements (a character's pictures, characters stage 3) reach fal
+ * only through the runner. Python's Kling builder ignores them, so on the
+ * ComfyUI path (the Kling switch off) a node that carries them is refused,
+ * never run with the character silently dropped (Ruling B, Task 4).
+ */
+export const KLING_ELEMENTS_COMFY_WORDS = 'Kling 3 films characters only through Sailor\'s runner, which is off for Kling here. Pick Seedance or Veo, or switch Kling on.'
+
+/** Whether these options carry any Kling element. */
+function hasKlingElements(adv: Record<string, unknown>): boolean {
+  return Array.isArray(adv.elements) && adv.elements.length > 0
+}
 
 /**
  * What is wrong with Seedance 2.0's reference lists in these options, or null.
@@ -702,6 +717,10 @@ export function requestProblems(prompt: ApiPrompt, opts: { runner?: boolean } = 
         const p = seedanceReferenceProblem(parseJsonObject(inputs.model_options), isLink(inputs.image))
         if (p) out.push({ nodeId, classType: ct, input: 'model_options', message: p.message })
       }
+      // The ComfyUI /prompt gate (opts.runner unset): Python drops elements, so they are refused (Ruling B).
+      if (!opts.runner && !isLink(inputs.model_options) && hasKlingElements(parseJsonObject(inputs.model_options))) {
+        out.push({ nodeId, classType: ct, input: 'model_options', message: KLING_ELEMENTS_COMFY_WORDS })
+      }
       if (isWan3Model(id)) {
         const p = wan3RequestProblem(id, inputs)
         if (p) out.push({ nodeId, classType: ct, input: p.input, message: p.message })
@@ -800,17 +819,49 @@ export function requestProblems(prompt: ApiPrompt, opts: { runner?: boolean } = 
       const p = topazVideoNodeProblem(prompt, nodeId)
       if (p) out.push({ nodeId, classType: ct, input: p.input, message: p.message })
     }
-    // Film a shot on Seedance 2.0 (ComfyUI path only): a first frame beside references is refused,
-    // never sent with the references dropped; the counts too (the same check as Generate a video's).
-    else if (ct === 'FilmShotNode' && inputs.model === 'seedance-2.0' && !isLink(inputs.model_options)) {
-      const p = seedanceReferenceProblem(parseJsonObject(inputs.model_options), isLink(inputs.image))
-      if (p) out.push({ nodeId, classType: ct, input: 'model_options', message: p.message })
+    // A shot-directed Film a shot on a runner run (Task 4: runnerTakesNode takes no other Film a
+    // shot, and this gate runs only on prompts the runner takes). The runner plans it exactly as
+    // Generate a video (executors.ts planVideoGeneration), with `image_url` its first frame, so it
+    // gets Generate a video's runner checks: Seedance 2.0's references, Kling 3's elements, and
+    // Veo 3.1 / Fast's up-to-3 reference pictures (not the ComfyUI path's one-picture rule below).
+    else if (ct === 'FilmShotNode' && opts.runner && isShotDirected(inputs)) {
+      const id = resolveVideoModelId(inputs.model)
+      const adv = parseJsonObject(inputs.model_options)
+      const hasFirst = isLink(inputs.image) || !!firstFrame(null, adv)
+      // A reference link the runner can't resolve (shotRefs.ts) is refused before the hold.
+      const bad = shotRefProblem(adv)
+      if (bad) out.push({ nodeId, classType: ct, input: 'model_options', message: bad })
+      if (id === 'seedance-2.0') {
+        const p = seedanceReferenceProblem(adv, isLink(inputs.image))
+        if (p) out.push({ nodeId, classType: ct, input: 'model_options', message: p.message })
+      }
+      if (id === 'kling-v3') {
+        const p = klingElementsProblem(adv, hasFirst)
+        if (p) out.push({ nodeId, classType: ct, input: 'model_options', message: p })
+      }
+      if (VEO_31_MODEL_IDS.includes(id) && (RUNNER_VIDEO_MODEL_IDS as readonly string[]).includes(id)) {
+        const p = veo31RefsProblem(adv, hasFirst)
+        if (p) out.push({ nodeId, classType: ct, input: 'model_options', message: p })
+      }
     }
-    // Film a shot on Veo 3.1 (ComfyUI path only): Python's builder, like the runner's, sends no last frame
-    // and no references, so they are refused with the same words as Generate a video.
-    else if (ct === 'FilmShotNode' && VEO_31_MODEL_IDS.includes(resolveVideoModelId(inputs.model)) && !isLink(inputs.model_options)
-      && veo31HasExtras(parseJsonObject(inputs.model_options))) {
-      out.push({ nodeId, classType: ct, input: 'model_options', message: VEO_31_ONE_PICTURE })
+    // Film a shot on the ComfyUI path (every other Film a shot, and any on the /prompt gate).
+    else if (ct === 'FilmShotNode' && !isLink(inputs.model_options)) {
+      const adv = parseJsonObject(inputs.model_options)
+      // Kling 3's elements: Python drops them, so they are refused (Ruling B, Task 4).
+      if (hasKlingElements(adv)) {
+        out.push({ nodeId, classType: ct, input: 'model_options', message: KLING_ELEMENTS_COMFY_WORDS })
+      }
+      // Seedance 2.0: a first frame beside references is refused, never sent with the references
+      // dropped; the counts too (the same check as Generate a video's).
+      if (inputs.model === 'seedance-2.0') {
+        const p = seedanceReferenceProblem(adv, isLink(inputs.image))
+        if (p) out.push({ nodeId, classType: ct, input: 'model_options', message: p.message })
+      }
+      // Veo 3.1: Python's builder sends no last frame and no references, so they are refused with
+      // the same words as Generate a video.
+      else if (VEO_31_MODEL_IDS.includes(resolveVideoModelId(inputs.model)) && veo31HasExtras(adv)) {
+        out.push({ nodeId, classType: ct, input: 'model_options', message: VEO_31_ONE_PICTURE })
+      }
     }
   }
   return out

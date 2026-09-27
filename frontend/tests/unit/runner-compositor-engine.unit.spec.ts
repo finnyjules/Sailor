@@ -454,8 +454,9 @@ describe('server health: caps, sources, Stop', () => {
   })
 
   it('every runner image class is a picture source (drift guard); the video ones are not', () => {
-    // Lip-sync a character on sync-3 (Task F22) and Enhance a video on Topaz (Task F23) make a video.
-    for (const c of PROVIDER_TYPES) expect(IMAGE_OUTPUT_CLASSES.has(c), c).toBe(c !== 'GenerateVideoNode' && c !== 'LipSyncNode' && c !== 'EnhanceVideoNode')
+    // Lip-sync a character on sync-3 (Task F22), Enhance a video on Topaz (Task F23) and Film a shot (Task 4) make a video.
+    const videos = new Set(['GenerateVideoNode', 'LipSyncNode', 'EnhanceVideoNode', 'FilmShotNode'])
+    for (const c of PROVIDER_TYPES) expect(IMAGE_OUTPUT_CLASSES.has(c), c).toBe(!videos.has(c))
     expect(IMAGE_OUTPUT_CLASSES.has('Video')).toBe(false)
   })
 

@@ -744,7 +744,7 @@ export const SWITCHED_CLASSES: Readonly<Record<string, RunnerFamily>> = {
  * render (LOCAL_RENDER_TYPES), to go to the runner.
  */
 export const PROVIDER_TYPES: ReadonlySet<string> = new Set([
-  'GenerateImageNode', 'GenerateVideoNode',
+  'GenerateImageNode', 'GenerateVideoNode', 'FilmShotNode',
   ...Object.entries(RUNNER_NODE_RULES).filter(([, r]) => !r.local).map(([k]) => k),
 ])
 
@@ -1153,6 +1153,38 @@ export function valueWiresAllowed(
 }
 
 /**
+ * A Film a shot Shot Director drives (dispatch.ts buildFilmShotPatch): its
+ * `model_options` are typed (not wired) JSON with `__shot_directed: true`.
+ * Any other Film a shot (presets, overrides) stays on ComfyUI.
+ */
+export function isShotDirected(inputs: Record<string, unknown>): boolean {
+  const raw = inputs.model_options
+  if (typeof raw !== 'string' || isLink(raw)) return false
+  let v: unknown
+  try { v = JSON.parse(raw) }
+  catch { return false }
+  return !!v && typeof v === 'object' && !Array.isArray(v) && (v as Record<string, unknown>).__shot_directed === true
+}
+
+/**
+ * The Film a shot models the runner films (Task 4, characters stage 3), as on
+ * Generate a video: Seedance 2.0 and Veo 3.1 (Fast) with no family, Kling 3
+ * with the replicate-video family (the same switch as Generate a video's).
+ */
+const FILM_SHOT_RUNNER_MODELS: Readonly<Record<string, RunnerFamily | null>> = {
+  'seedance-2.0': null, 'veo-3.1': null, 'veo-3.1-fast': null, 'kling-v3': 'replicate-video',
+}
+
+/** Whether the runner takes this Film a shot: shot-directed, no sound or words wired in, on one of its models. */
+function filmShotTaken(inputs: Record<string, unknown>, families: ReadonlySet<RunnerFamily>): boolean {
+  if (!isShotDirected(inputs) || isLink(inputs.audio) || isLink(inputs.prompt)) return false
+  const model = resolveVideoModelId(inputs.model)
+  if (!Object.prototype.hasOwnProperty.call(FILM_SHOT_RUNNER_MODELS, model)) return false
+  const family = FILM_SHOT_RUNNER_MODELS[model]
+  return !family || familyOn(family, families)
+}
+
+/**
  * Whether the runner can take this one node of the prompt: a runner node type,
  * on a runner model, asking for one picture, with no sound wired into a
  * video, and reading only from nodes in the same prompt — or a class (or
@@ -1169,7 +1201,10 @@ export function runnerTakesNode(prompt: ApiPrompt, id: string, families: Readonl
   const inputs = n.inputs ?? {}
   const rule = families.size ? RUNNER_NODE_RULES[n.class_type] : undefined
   const byRule = !!rule && nodeRuleAllows(n.class_type, rule, inputs, families, opts, id) && graphRuleAllows(prompt, id, rule, families)
-  if (!RUNNER_NODE_TYPES.has(n.class_type) && !byRule) return false
+  if (n.class_type === 'FilmShotNode') {
+    if (!filmShotTaken(inputs, families)) return false
+  }
+  else if (!RUNNER_NODE_TYPES.has(n.class_type) && !byRule) return false
   if (n.class_type === 'GenerateImageNode') {
     if (!IMAGE_IDS.has(String(inputs.model)) && !byRule) return false
     if (asksForSeveralImages(inputs)) return false

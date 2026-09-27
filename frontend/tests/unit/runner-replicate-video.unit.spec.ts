@@ -38,7 +38,7 @@ import { BASE_RENDER_CREDITS } from '~~/server/utils/priceBook'
 import type { OutputFile } from '~~/server/runner/types'
 import { createFakeLedger, createFakeReplicate, gatedFlow, makeKit } from './__runner__/kit'
 import { expectPythonParity } from './helpers/pythonParity'
-import { requestProblems } from '~~/server/runner/requestRules'
+import { KLING_ELEMENTS_COMFY_WORDS, requestProblems } from '~~/server/runner/requestRules'
 
 interface VideoArgs { prompt: string; ar: string; dur: number; seed: number; image: string | null; adv: Record<string, unknown> }
 interface ReplicateVideoCase {
@@ -236,7 +236,8 @@ describe('Kling 3 on fal takes characters as elements (Task 3, characters stage 
       model: 'kling-v3', prompt: '@Element1 waves', aspect_ratio: '16:9', duration: '5', seed: 0,
       model_options: JSON.stringify({ elements: [el] }),
     } }
-    expect(requestProblems({ n: node })).toEqual([]) // the ComfyUI /prompt gate (opts.runner unset) never sends elements, so it isn't judged
+    // The ComfyUI /prompt gate (opts.runner unset): Python drops elements, so they are refused (Ruling B, Task 4).
+    expect(requestProblems({ n: node })).toEqual([{ nodeId: 'n', classType: 'GenerateVideoNode', input: 'model_options', message: KLING_ELEMENTS_COMFY_WORDS }])
     expect(requestProblems({ n: node }, { runner: true })).toEqual([{ nodeId: 'n', classType: 'GenerateVideoNode', input: 'model_options', message: KLING_ELEMENTS_NEED_FRAME }])
     const withFirst = { class_type: 'GenerateVideoNode', inputs: { ...node.inputs, image: ['src', 0] } }
     expect(requestProblems({ n: withFirst }, { runner: true })).toEqual([])
