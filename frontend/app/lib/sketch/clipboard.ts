@@ -10,7 +10,7 @@ import type { Vec2 } from './geom'
 import { pointClosure, addConstraint } from './edit'
 import { freshId } from './ids'
 import { segCount, type SegPick } from './pieces'
-import { fillsWithin, freshFillId, mapSeed } from './fills'
+import { fillsWithin, freshFillId, mapSeed, fillAreas, fillCopiedAreas } from './fills'
 
 function copyEntity(e: SketchEntity): SketchEntity {
   if (e.kind === 'path') return { ...e, anchors: [...e.anchors], segments: e.segments.map(s => ({ ...s })) }
@@ -89,6 +89,10 @@ export function insertPieces(doc: SketchDoc, clip: SketchDoc, offset: Vec2): { c
     list.push({ id: freshFillId(doc), seed: mapSeed(f.seed, m) })
   }
   if (clip.fills?.length && !hadFills && doc.fillGap == null && clip.fillGap != null) doc.fillGap = clip.fillGap
+  // a copy landing over other pieces is cut into several areas: fill all of
+  // those inside the copied filled areas (read from the clip, moved), not
+  // just the one each seed finds
+  if (clip.fills?.length) fillCopiedAreas(doc, fillAreas(clip, clip.fills, p => ({ x: p.x + offset.x, y: p.y + offset.y })))
   const used = new Set<EntityId>()
   for (const e of added) {
     if (e.kind === 'line') { used.add(e.p1); used.add(e.p2) }

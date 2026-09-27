@@ -87,6 +87,7 @@ import { promptNodeLabel } from '~/lib/prompt/canvasPromptContext'
 import AgentSweep from '~/components/agent/AgentSweep.vue'
 import { useFramePenSession } from '~/composables/frame/useFramePenSession'
 import { cloneDoc } from '~/lib/sketch/clone'
+import { withoutFills } from '~/lib/sketch/fills'
 import { isTypingInField, isCleanupBarFocused } from '~/composables/pen/usePen'
 import PenOverlay from '~/components/pen/PenOverlay.vue'
 import PenToolbar from '~/components/pen/PenToolbar.vue'
@@ -6439,7 +6440,7 @@ function useFramePathAsGuide(l: any, pathLayerId: string) {
   const src = (localLayers.value as any[]).find(x => x.id === pathLayerId)
   if (!src?.d) return
   // always set `sketch` (the source's drawing, or none) so a stale guide drawing never survives
-  setTextPath(l, { follow: 'custom', d: src.d, size: (src.bbox?.w ?? 0.3) * (src.scale ?? 1), sketch: src.sketch ? cloneDoc(src.sketch) : undefined })
+  setTextPath(l, { follow: 'custom', d: src.d, size: (src.bbox?.w ?? 0.3) * (src.scale ?? 1), sketch: src.sketch ? withoutFills(cloneDoc(src.sketch)) : undefined })
 }
 const TEXT_FOLLOW_OPTIONS: { v: TextPathFollow | 'off'; label: string }[] = [
   { v: 'off', label: 'Off' },

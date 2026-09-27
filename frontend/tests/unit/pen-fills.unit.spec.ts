@@ -12,7 +12,7 @@ vi.mock('~/lib/sketch/faces', async (orig) => {
   return { ...m, facesFor: vi.fn(m.facesFor) }
 })
 import { facesFor } from '~/lib/sketch/faces'
-import { fillTarget } from '~/lib/sketch/fills'
+import { fillTarget, fillState } from '~/lib/sketch/fills'
 import { ref } from 'vue'
 import type { SketchDoc } from '~/lib/sketch/model'
 import { addPoint, addPath, addLine, addCircle } from '~/lib/sketch/edit'
@@ -200,9 +200,12 @@ describe('the pen’s Fill tool', () => {
     expect(g.doc.value.entities.some(e => e.kind === 'line')).toBe(true)
     expect(g.doc.value.fills).toBeUndefined()
     expect(g.doc.value.fillGap).toBeUndefined()
-    // the same copy into a pen that can fill keeps its fill
+    // the same copy into a pen that can fill keeps its fill — all of it: it
+    // lands over the target's own square, which cuts it in two, and both parts fill
     const f = penWithSquare()
     f.pen.paste()
-    expect(f.doc.value.fills?.length).toBe(1)
+    expect(f.doc.value.fills?.length).toBeGreaterThanOrEqual(1)
+    const st = fillState(f.doc.value)
+    expect(st.filled.reduce((a, g) => a + Math.abs(st.fs.faces[g]!.area), 0)).toBeCloseTo(16, 6)
   })
 })

@@ -1,7 +1,7 @@
 import type { SketchDoc, EntityId, ConstraintKind, LineEntity, CircleEntity, PathEntity, SegmentSpec, SketchFill } from './model'
 import { getEntity, getPoint } from './model'
 import { freshId } from './ids'
-import { fillsWithin, freshFillId, mapSeed } from './fills'
+import { fillsWithin, freshFillId, mapSeed, fillAreas, moveAreas, fillCopiedAreas, type FillArea } from './fills'
 
 export function addPoint(doc: SketchDoc, x: number, y: number, opts: { fixed?: boolean; construction?: boolean } = {}): EntityId {
   const id = freshId(doc, 'p')
@@ -264,6 +264,8 @@ export function repeatEntities(doc: SketchDoc, ids: EntityId[], center: EntityId
   if (!pts.every(pid => !!getPoint(doc, pid))) return []
   // pen stage 7: the source's fills whose whole area this copies (read before any copy exists)
   const carried = fillsWithin(doc, new Set([...pts, ...ids]), ids.flatMap(id => getEntity(doc, id) ?? []))
+  const srcAreas = fillAreas(doc, carried, p => p)
+  const areas: FillArea[] = []
   const all: EntityId[][] = []
   for (let k = 1; k < count; k++) {
     const angle = k * (360 / count)
@@ -285,8 +287,12 @@ export function repeatEntities(doc: SketchDoc, ids: EntityId[], center: EntityId
     created.push(...copyStructure(doc, ids, map, false, ents))
     copyClosureConstraints(doc, map)
     copyFills(doc, carried, map, ents, { turn: rad })
+    areas.push(...moveAreas(srcAreas, p => ({ x: ce.x + co * (p.x - ce.x) - si * (p.y - ce.y), y: ce.y + si * (p.x - ce.x) + co * (p.y - ce.y) })))
     all.push(created)
   }
+  // copies landing over their neighbours are cut into several areas: fill
+  // every one inside a copied filled area
+  fillCopiedAreas(doc, areas)
   return all
 }
 
@@ -350,6 +356,7 @@ export function mirrorEntities(doc: SketchDoc, ids: EntityId[], axisLine: Entity
   if (!pts.every(pid => !!getPoint(doc, pid))) return []
   // pen stage 7: the source's fills whose whole area this copies (read before any copy exists)
   const carried = fillsWithin(doc, new Set([...pts, ...ids]), ids.flatMap(id => getEntity(doc, id) ?? []))
+  const areas = fillAreas(doc, carried, p => { const s = (p.x - a.x) * nx + (p.y - a.y) * ny; return { x: p.x - 2 * s * nx, y: p.y - 2 * s * ny } })
   const map = new Map<EntityId, EntityId>()
   const created: EntityId[] = []
   for (const pid of pts) {
@@ -364,5 +371,6 @@ export function mirrorEntities(doc: SketchDoc, ids: EntityId[], axisLine: Entity
   created.push(...copyStructure(doc, ids, map, true, ents))
   copyClosureConstraints(doc, map)
   copyFills(doc, carried, map, ents, { mirror: Math.atan2(diry, dirx) })
+  fillCopiedAreas(doc, areas)
   return created
 }

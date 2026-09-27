@@ -216,3 +216,112 @@ describe('fix round 1: Cancel never overwrites a colour set mid-session', () => 
     expect(get('L').fill).toBe('#00ff00')
   })
 })
+
+describe('final review: the pen’s fill colour carried in from an earlier session', () => {
+  // a layer an earlier session filled: fillD present and the pen's fill colour
+  function filledLayer(style: object) {
+    const d: SketchDoc = { entities: [], constraints: [] }
+    crossingLines(d)
+    toggleFillAt(d, { x: 0, y: 3 }, 0)
+    return { id: 'L', kind: 'path', x: 0.5, y: 0.5, scale: 1, rotation: 0, d: sketchToLocalD(d), fillD: sketchFillToLocalD(d), sketch: d, bbox: { w: 0.2, h: 0.2 }, ...style }
+  }
+  it('emptying every area of an open drawing previews the open style (no closed-up blob); Cancel puts the fill back', () => {
+    const l = filledLayer(PEN_STYLE_CLOSED)
+    const { host, get } = liveHost([l])
+    const s = useFramePenSession(host)
+    s.open({ kind: 'layer', id: 'L' })
+    const pen = s.session.value!.pen
+    pen.selectTool('fill'); pen.fillClick(0, 3)
+    expect('fillD' in get('L')).toBe(false)
+    expect(get('L').fill).toBe('none')
+    expect(get('L').stroke).toBe(PEN_STYLE_OPEN.stroke)
+    s.cancelSession()
+    expect(get('L')).toMatchObject(PEN_STYLE_CLOSED)
+    expect(get('L').fillD).toBe(l.fillD)
+  })
+  it('emptied then filled again in the same session: the layer’s own style comes back', () => {
+    const l = filledLayer(PEN_STYLE_CLOSED)
+    const { host, get } = liveHost([l])
+    const s = useFramePenSession(host)
+    s.open({ kind: 'layer', id: 'L' })
+    const pen = s.session.value!.pen
+    pen.selectTool('fill'); pen.fillClick(0, 3)
+    expect(get('L').fill).toBe('none')
+    pen.fillClick(0, 3)
+    expect(get('L')).toMatchObject(PEN_STYLE_CLOSED)
+    expect(get('L').fillD).toBeTruthy()
+  })
+  it('the commit after emptying keeps the open style', () => {
+    const { host, get } = liveHost([filledLayer(PEN_STYLE_CLOSED)])
+    const s = useFramePenSession(host)
+    s.open({ kind: 'layer', id: 'L' })
+    const pen = s.session.value!.pen
+    pen.selectTool('fill'); pen.fillClick(0, 3)
+    s.commitSession()
+    expect(get('L')).toMatchObject(PEN_STYLE_OPEN)
+  })
+  it('a closed drawing emptied keeps its fill (its closed outline paints it)', () => {
+    const d: SketchDoc = { entities: [], constraints: [] }
+    const p = [[0, 0], [10, 0], [10, 10], [0, 10]].map(([x, y]) => addPoint(d, x!, y!))
+    addPath(d, p, p.map(() => ({ kind: 'line' as const })), true)
+    toggleFillAt(d, { x: 5, y: 5 }, 0)
+    const l = { id: 'L', kind: 'path', x: 0.5, y: 0.5, scale: 1, rotation: 0, d: sketchToLocalD(d), fillD: sketchFillToLocalD(d), sketch: d, bbox: { w: 0.1, h: 0.1 }, ...PEN_STYLE_CLOSED }
+    const { host, get } = liveHost([l])
+    const s = useFramePenSession(host)
+    s.open({ kind: 'layer', id: 'L' })
+    const pen = s.session.value!.pen
+    pen.selectTool('fill'); pen.fillClick(5, 5)
+    expect('fillD' in get('L')).toBe(false)
+    expect(get('L')).toMatchObject(PEN_STYLE_CLOSED)
+  })
+})
+
+describe('final review: a new filled drawing with pieces outside its filled areas keeps the outline', () => {
+  function drawNew(draw: (d: SketchDoc) => void, fillAt: [number, number]) {
+    const { host, added } = liveHost([])
+    const s = useFramePenSession(host)
+    s.open({ kind: 'new' })
+    const pen = s.session.value!.pen
+    draw(s.session.value!.doc.value)
+    pen.commitHistory()
+    pen.selectTool('fill'); pen.fillClick(...fillAt)
+    s.commitSession()
+    return added[0]
+  }
+  const triangle = (d: SketchDoc) => {
+    const a = addPoint(d, -10, 0), b = addPoint(d, 10, 0), c = addPoint(d, 0, 14)
+    addLine(d, a, b); addLine(d, b, c); addLine(d, c, a)
+    return c
+  }
+  it('lines running on past the area: fill and the pen’s outline stroke', () => {
+    const layer = drawNew(crossingLines, [0, 3])
+    expect(layer.fillD).toBeTruthy()
+    expect(layer).toMatchObject({ fill: PEN_STYLE_CLOSED.fill, stroke: PEN_STYLE_OPEN.stroke, strokeWidth: PEN_STYLE_OPEN.strokeWidth })
+  })
+  it('a stem: fill and stroke', () => {
+    const layer = drawNew(d => { const c = triangle(d); addLine(d, c, addPoint(d, 0, 30)) }, [0, 4])
+    expect(layer).toMatchObject({ fill: PEN_STYLE_CLOSED.fill, stroke: PEN_STYLE_OPEN.stroke, strokeWidth: PEN_STYLE_OPEN.strokeWidth })
+  })
+  it('an unfilled petal beside a filled one: fill and stroke', () => {
+    const layer = drawNew(d => {
+      triangle(d)
+      const p = [[20, 0], [30, 0], [30, 10], [20, 10]].map(([x, y]) => addPoint(d, x!, y!))
+      addPath(d, p, p.map(() => ({ kind: 'line' as const })), true)
+    }, [0, 4])
+    expect(layer).toMatchObject({ fill: PEN_STYLE_CLOSED.fill, stroke: PEN_STYLE_OPEN.stroke, strokeWidth: PEN_STYLE_OPEN.strokeWidth })
+  })
+  it('every piece an edge of a filled area: the pen’s closed style, as before', () => {
+    const layer = drawNew(triangle, [0, 4])
+    expect(layer.fillD).toBeTruthy()
+    expect(layer).toMatchObject(PEN_STYLE_CLOSED)
+  })
+})
+
+describe('final review: “Text on this path” copies the drawing without its fills', () => {
+  it('the Frame editor hands a text guide the path’s drawing through withoutFills (source check: the SFC is too big to mount here)', async () => {
+    const { readFileSync } = await import('node:fs')
+    const src = readFileSync(new URL('../../app/components/vue-canvas/CompositorModal.vue', import.meta.url), 'utf8')
+    const fn = src.slice(src.indexOf('function useFramePathAsGuide'), src.indexOf('const TEXT_FOLLOW_OPTIONS'))
+    expect(fn).toContain('withoutFills(cloneDoc(src.sketch))')
+  })
+})

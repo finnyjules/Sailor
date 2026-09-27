@@ -9,7 +9,7 @@
 import type { SketchDoc, SketchFill, FillSeed, EntityId, SketchEntity } from './model'
 import { getPoint, getEntity } from './model'
 import type { Vec2 } from './geom'
-import { facesFor, faceAt, facesD, faceOfHalfEdge, facePieceKey, type FaceSet, type FacePiece, type HalfEdge } from './faces'
+import { facesFor, faceAt, facesD, faceOfHalfEdge, facePieceKey, winding, type Box, type FaceSet, type FacePiece, type HalfEdge } from './faces'
 
 /** How far (screen px, at the zoom of the first fill) a nearly-closed area's
  *  gap may be and still fill — Clean up's join distance. */
@@ -134,6 +134,30 @@ export function fillPathData(doc: SketchDoc, scale = 1): string {
   return st.filled.length ? facesD(st.fs, st.filled, scale) : ''
 }
 
+/** True when the drawing has pieces that are not edges of its filled areas
+ *  (a stem, a line running on past an area, an unfilled petal, a curve, a
+ *  spur inside an area) — what a fill alone would not show, so a new filled
+ *  drawing keeps the pen's outline stroke too. False with nothing filled. */
+export function hasPiecesOutsideFills(doc: SketchDoc): boolean {
+  if (!doc.fills?.length) return false
+  const st = fillState(doc)
+  if (!st.filled.length) return false
+  const { fs } = st
+  const filled = new Set(st.filled)
+  const edgeOfFill = (h: number) => {
+    const f = faceOfHalfEdge(fs, h)
+    if (f == null || !filled.has(f)) return false
+    // a spur: its way back lies on the same cycle — no area's edge
+    return fs.cycleOf[h] !== fs.cycleOf[h ^ 1]
+  }
+  for (let pi = 0; pi < fs.pieceEdges.length; pi++) {
+    if (fs.pieces[pi]!.kind === 'bridge') continue
+    for (const h of fs.pieceEdges[pi]!) if (!edgeOfFill(h) && !edgeOfFill(h ^ 1)) return true
+  }
+  // curves bound nothing (Ruling 1): a drawn one is always outside
+  return doc.entities.some(e => !e.construction && e.kind === 'path' && e.segments.some(sg => sg.kind === 'cubic'))
+}
+
 function pointOnHalfEdge(e: HalfEdge, u: number): Vec2 {
   const k = e.t1 === e.t0 ? 0.5 : (u - e.t0) / (e.t1 - e.t0)
   if (e.kind === 'line') return { x: e.p0.x + (e.p1.x - e.p0.x) * k, y: e.p0.y + (e.p1.y - e.p0.y) * k }
@@ -203,6 +227,98 @@ export function addFillAt(doc: SketchDoc, p: Vec2): boolean {
   if (!seed) return false
   doc.fills = [...fills, { id: freshFillId(doc), seed }]
   return true
+}
+
+// ── copies fill their whole area ────────────────────────────────────────────
+
+/** A filled area's outline, to test copied faces against: its outer polygon
+ *  and its holes' (drawing coordinates, after the copy's move). */
+export interface FillArea { outer: Vec2[]; holes: Vec2[][]; box: Box }
+
+/** The areas `fills` fill in `doc` (asleep ones have none), each point sent
+ *  through `move` — where a copy of those areas lands. Read before the copy
+ *  exists (a copy over the source cuts the source's own area). */
+export function fillAreas(doc: SketchDoc, fills: readonly SketchFill[], move: (p: Vec2) => Vec2): FillArea[] {
+  if (!fills.length) return []
+  const fs = fillFaces(doc)
+  const out: FillArea[] = []
+  const seen = new Set<number>()
+  for (const f of fills) {
+    const g = resolveFill(fs, f)
+    if (g == null || seen.has(g)) continue
+    seen.add(g)
+    const face = fs.faces[g]!
+    out.push({ outer: fs.cycles[face.outer]!.poly, holes: face.holes.map(h => fs.cycles[h]!.poly), box: face.box })
+  }
+  return moveAreas(out, move)
+}
+
+/** The same areas sent through `move` (a copy's turn or mirror). */
+export function moveAreas(areas: readonly FillArea[], move: (p: Vec2) => Vec2): FillArea[] {
+  return areas.map(a => {
+    const outer = a.outer.map(move)
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity
+    for (const q of outer) { x0 = Math.min(x0, q.x); y0 = Math.min(y0, q.y); x1 = Math.max(x1, q.x); y1 = Math.max(y1, q.y) }
+    return { outer, holes: a.holes.map(h => h.map(move)), box: { x0, y0, x1, y1 } }
+  })
+}
+
+function distToPoly(poly: Vec2[], p: Vec2): number {
+  let best = Infinity
+  for (let i = 0, n = poly.length; i < n; i++) {
+    const a = poly[i]!, b = poly[(i + 1) % n]!
+    const dx = b.x - a.x, dy = b.y - a.y
+    const L2 = dx * dx + dy * dy
+    const k = L2 ? Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / L2)) : 0
+    best = Math.min(best, Math.hypot(p.x - a.x - dx * k, p.y - a.y - dy * k))
+  }
+  return best
+}
+
+/** A point as deep inside face g as a few tries find (steps in from the
+ *  middles of its longest edges; the one farthest from its outline wins) —
+ *  far from any edge, so a flattened arc of another outline can't misplace it. */
+export function deepPoint(fs: FaceSet, g: number): Vec2 | null {
+  const face = fs.faces[g]!
+  const size = Math.hypot(face.box.x1 - face.box.x0, face.box.y1 - face.box.y0)
+  const edges = [...fs.cycles[face.outer]!.edges].sort((a, b) => fs.halfEdges[b]!.len - fs.halfEdges[a]!.len).slice(0, 8)
+  const outlines = faceCycles(fs, g).map(ci => fs.cycles[ci]!.poly)
+  let best: Vec2 | null = null, bestD = -1
+  for (const step of [0.3, 0.15, 0.08, 0.04, 0.02, 1e-2, 1e-3]) {
+    for (const h of edges) {
+      const e = fs.halfEdges[h]!
+      const m = pointOnHalfEdge(e, (e.t0 + e.t1) / 2)
+      let tx: number, ty: number
+      if (e.kind === 'line') { tx = e.p1.x - e.p0.x; ty = e.p1.y - e.p0.y }
+      else { const a = e.a0! + e.sweep! / 2; const s = e.sweep! > 0 ? 1 : -1; tx = -Math.sin(a) * s; ty = Math.cos(a) * s }
+      const L = Math.hypot(tx, ty) || 1
+      const p = { x: m.x - (ty / L) * step * size, y: m.y + (tx / L) * step * size }
+      if (faceAt(fs, p) !== g) continue
+      const d = Math.min(...outlines.map(o => distToPoly(o, p)))
+      if (d > bestD) { bestD = d; best = p }
+    }
+  }
+  return best
+}
+
+const inArea = (a: FillArea, p: Vec2) =>
+  p.x >= a.box.x0 && p.x <= a.box.x1 && p.y >= a.box.y0 && p.y <= a.box.y1
+  && winding(a.outer, p) !== 0 && !a.holes.some(h => winding(h, p) !== 0)
+
+/** After a copy lands: fill every face of `doc` whose inside lies inside one
+ *  of the copied filled areas — the copy may overlap other pieces, which cut
+ *  its area into several faces, and its seed finds only one of them. Never on
+ *  a guess: only faces whose deep point is inside a copied area. */
+export function fillCopiedAreas(doc: SketchDoc, areas: readonly FillArea[]): void {
+  if (!areas.length) return
+  const fs = fillFaces(doc)
+  const pts: Vec2[] = []
+  fs.faces.forEach((face, g) => {
+    if (!areas.some(a => face.box.x0 <= a.box.x1 && face.box.x1 >= a.box.x0 && face.box.y0 <= a.box.y1 && face.box.y1 >= a.box.y0)) return
+    const p = deepPoint(fs, g)
+    if (p && areas.some(a => inArea(a, p))) pts.push(p)
+  })
+  for (const p of pts) addFillAt(doc, p)
 }
 
 // ── carrying fills across an edit ───────────────────────────────────────────

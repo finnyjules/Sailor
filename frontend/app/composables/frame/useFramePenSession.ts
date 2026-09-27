@@ -57,7 +57,7 @@ import {
   penOutlines, withPenOutlines,
   type LayerPlacement,
 } from '~/lib/compositor/penFrame'
-import { fillPathData, withoutFills } from '~/lib/sketch/fills'
+import { fillPathData, withoutFills, hasPiecesOutsideFills } from '~/lib/sketch/fills'
 import { hasPaint } from '~/lib/paint/resolve'
 import { customGuideMapping, guideSizeToTargetWidthPx } from '~/lib/compositor/textPath'
 
@@ -87,6 +87,9 @@ export const FRAME_PEN_TOOLS: PenTool[] = ['select', 'path', 'curve', 'line', 'c
  *  filled open path would draw a chord-closed blob, which reads as a bug. */
 export const PEN_STYLE_CLOSED = { fill: '#3b82f6', stroke: '', strokeWidth: 0 } as const
 export const PEN_STYLE_OPEN = { fill: 'none', stroke: '#3b82f6', strokeWidth: 0.004 } as const
+/** Pen stage 7: a new filled drawing with pieces outside its filled areas —
+ *  the pen's fill and its outline stroke (what a reopened open layer gets). */
+export const PEN_STYLE_FILLED_OUTLINED = { fill: PEN_STYLE_CLOSED.fill, stroke: PEN_STYLE_OPEN.stroke, strokeWidth: PEN_STYLE_OPEN.strokeWidth } as const
 
 /** The style a path layer takes when its closed drawing is made open (Trim,
  *  Cut, Delete — or, pen stage 7, its last filled area emptied): the pen's own
@@ -223,6 +226,11 @@ export function useFramePenSession(host: FramePenHost) {
   // `{ kind: 'layer' }`: the pen gave the layer its fill colour (its first filled
   // area, on a layer whose fill painted nothing) — Cancel puts the old fill back
   let penFilled = false
+  // `{ kind: 'layer' }`: the layer came in filled by the pen's fill colour (an
+  // earlier session's fill), and this session's preview gave it the open style
+  // when its last filled area went — so an open drawing never previews its
+  // chord-closed blob; Cancel (or a fill coming back) puts its own style back
+  let penOpened = false
   function ensureRecorded() {
     if (recorded) return
     recorded = true
@@ -235,6 +243,7 @@ export function useFramePenSession(host: FramePenHost) {
     guideAnchor = null
     recorded = false
     penFilled = false
+    penOpened = false
     if (!s) return
     session.value = null
     s.pen.dispose()
@@ -250,6 +259,10 @@ export function useFramePenSession(host: FramePenHost) {
     if (!found || found.kind !== 'path' || !found.sketch) return
     close()
     original = found
+    // its fill is the pen's and came with its filled areas (an earlier session)
+    const cameFilled = found.fill === PEN_STYLE_CLOSED.fill && !!fillPathData(found.sketch)
+    const ownStyle = { fill: found.fill, stroke: found.stroke, strokeWidth: found.strokeWidth }
+    const stillOpened = (l: any) => l.fill === PEN_STYLE_OPEN.fill && l.stroke === PEN_STYLE_OPEN.stroke && l.strokeWidth === PEN_STYLE_OPEN.strokeWidth
     let written = JSON.stringify(found.sketch)   // the drawing the layer currently shows
     const doc = ref<SketchDoc>(cloneDoc(found.sketch))
     // Read the placement from the LIVE layer (previews never touch x/y), so a
@@ -268,6 +281,12 @@ export function useFramePenSession(host: FramePenHost) {
       const sk = cloneDoc(shown)
       writeLayer(id, l => {
         const next = withPenOutlines(l, sk)
+        // the open style this session previewed goes when the drawing paints
+        // again by itself (a filled area back, or a closed outline)
+        if (penOpened && (next.fillD || isClosedDrawing(sk))) {
+          penOpened = false
+          if (stillOpened(l)) return { ...next, ...ownStyle }
+        }
         if (next.fillD) {
           if (hasPaint(l.fill)) return next
           penFilled = true
@@ -279,6 +298,12 @@ export function useFramePenSession(host: FramePenHost) {
         if (penFilled) {
           penFilled = false
           if (l.fill === PEN_STYLE_CLOSED.fill) return { ...next, fill: found.fill }
+        }
+        // the pen's fill came in with the filled areas, and the last one went
+        // from a drawing that is not closed: preview what the commit will write
+        if (cameFilled && !penOpened && l.fill === PEN_STYLE_CLOSED.fill && !isClosedDrawing(sk)) {
+          const o = openedStyle(l)
+          if (o.fill === PEN_STYLE_OPEN.fill) { penOpened = true; return { ...next, ...o } }
         }
         return next
       })
@@ -364,7 +389,10 @@ export function useFramePenSession(host: FramePenHost) {
         if (r) {
           const { W, H } = host.size()
           const { x, y } = placementAfterRecentre({ x: 0.5, y: 0.5, scale: 1 }, r.shiftLocal, W, H)
-          const style = isClosedDrawing(r.sketch) ? PEN_STYLE_CLOSED : PEN_STYLE_OPEN
+          // a filled drawing with pieces the fill doesn't show (a stem, an
+          // unfilled petal) keeps the pen's outline too, as a reopened one does
+          const style = !isClosedDrawing(r.sketch) ? PEN_STYLE_OPEN
+            : hasPiecesOutsideFills(r.sketch) ? PEN_STYLE_FILLED_OUTLINED : PEN_STYLE_CLOSED
           const layer = createPathLayer({
             ...penOutlines(r.sketch), sketch: r.sketch, bbox: r.bbox, scale: 1, x, y, ...style,
           } as any)
@@ -426,7 +454,7 @@ export function useFramePenSession(host: FramePenHost) {
       return
     }
     if (s?.target.kind === 'layer' && original) {
-      const id = s.target.id, orig = original, wrote = recorded, filled = penFilled
+      const id = s.target.id, orig = original, wrote = recorded, filled = penFilled, opened = penOpened
       close()
       // only what the pen wrote goes back (previews touch d/sketch/fillD alone,
       // and the fill colour only when the pen gave it and it is still the pen's
@@ -436,7 +464,10 @@ export function useFramePenSession(host: FramePenHost) {
       if (wrote) {
         writeLayer(id, l => {
           const { fillD: _pen, ...rest } = l
-          return { ...rest, d: orig.d, sketch: orig.sketch, ...(orig.fillD ? { fillD: orig.fillD } : {}), ...(filled && l.fill === PEN_STYLE_CLOSED.fill ? { fill: orig.fill } : {}) }
+          const style = opened && l.fill === PEN_STYLE_OPEN.fill && l.stroke === PEN_STYLE_OPEN.stroke && l.strokeWidth === PEN_STYLE_OPEN.strokeWidth
+            ? { fill: orig.fill, stroke: orig.stroke, strokeWidth: orig.strokeWidth }
+            : filled && l.fill === PEN_STYLE_CLOSED.fill ? { fill: orig.fill } : {}
+          return { ...rest, d: orig.d, sketch: orig.sketch, ...(orig.fillD ? { fillD: orig.fillD } : {}), ...style }
         })
       }
       return
