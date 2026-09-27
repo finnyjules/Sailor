@@ -11,7 +11,7 @@
 // pendingPath, pathDrag, curve state, dimBuffer, status text…) reach far
 // beyond what this module is handed (just `doc` + the two change signals),
 // so they can't move here without dragging most of usePen.ts along with them.
-import { ref, type Ref } from 'vue'
+import { ref, toRaw, type Ref } from 'vue'
 import type { SketchDoc } from '~/lib/sketch/model'
 import { cloneDoc } from '~/lib/sketch/clone'
 
@@ -63,6 +63,12 @@ export function createPenHistory(opts: { doc: Ref<SketchDoc>; onChange?: () => v
     rev.value++
     return true
   }
+  /** The drawing as the last settled step left it (plain, never to be
+   *  changed) — what the next step's fills are carried from (pen stage 7). */
+  function current(): SketchDoc | null {
+    const top = history.value[histPtr.value]
+    return top ? toRaw(top) : null
+  }
   function canUndo() { return histPtr.value > 0 }
   function canRedo() { return histPtr.value < history.value.length - 1 }
 
@@ -77,5 +83,5 @@ export function createPenHistory(opts: { doc: Ref<SketchDoc>; onChange?: () => v
 
   function live(): void { opts.onLiveChange?.() }
 
-  return { initHistory, commitHistory, undo, redo, canUndo, canRedo, revert, live, rev }
+  return { initHistory, commitHistory, undo, redo, canUndo, canRedo, revert, live, rev, current }
 }

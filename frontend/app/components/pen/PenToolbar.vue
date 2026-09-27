@@ -80,6 +80,7 @@ const TOOL_HINTS: Record<PenTool, string> = {
   trim: 'Click a piece between crossings to remove it, or sweep across several',
   cut: 'Click a line or arc to add a point there',
   dissolve: 'Click a point between two pieces that line up to merge them',
+  fill: 'Click an enclosed area to fill it, or a filled one to empty it',
 }
 
 const hasEntitySelection = computed(() => selection.value.length > 0)

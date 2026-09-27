@@ -61,6 +61,8 @@ import { handlePenKey, isCleanupKey, type PenKeyContext, NUDGE_PX, NUDGE_PX_SHIF
 import { createPenCopies, type PendingOp } from './penCopies'
 import { nearestCurve, spanAt, curveGeom, paramOf, pointAt, type Span, type CurveGeom } from '~/lib/sketch/crossings'
 import { removeSpan, removeSegment, cutAt, canDissolve, dissolveAt, mergePoints, sameKey } from '~/lib/sketch/trim'
+import { FILL_GAP_PX, fillTarget, toggleFillAt, fillState, gapMarkers, reconcileFills, withoutFills } from '~/lib/sketch/fills'
+import { facesD } from '~/lib/sketch/faces'
 import { cloneDoc } from '~/lib/sketch/clone'
 import { runCleanup, STRENGTHS, type CleanupResult, type CleanupScope, type CleanupStrength, type FixKind } from '~/lib/sketch/cleanup'
 import { sketchPathData } from '~/lib/sketch/sketchPath'
@@ -82,8 +84,9 @@ export { NUDGE_PX, NUDGE_PX_SHIFT, screenDeltaToDrawing }
 // 'path' is the arc Pen; 'curve' is the Bézier Curve tool. Both add to the
 // same pending path (see selectTool / curveDown). 'trim' removes the piece of
 // a curve between crossings, 'cut' adds a point on a line or arc, 'dissolve'
-// merges the two pieces at a point back into one (see the Trim section).
-export type PenTool = 'select' | 'point' | 'line' | 'circle' | 'path' | 'curve' | 'trim' | 'cut' | 'dissolve'
+// merges the two pieces at a point back into one (see the Trim section);
+// 'fill' fills and empties the areas the drawing encloses (pen stage 7).
+export type PenTool = 'select' | 'point' | 'line' | 'circle' | 'path' | 'curve' | 'trim' | 'cut' | 'dissolve' | 'fill'
 // cleanup: Clean up (pen stage 5) is offered unless a host sets it false
 export interface PenOptions { openOnly?: boolean; tools?: PenTool[]; cleanup?: boolean }
 
@@ -94,6 +97,11 @@ export interface PenMenu { at: Vec2; drawingAt: Vec2 | null; header: string | nu
 export interface PenWheel { at: Vec2; layout: 'point' | 'segment'; slices: WheelSlice[]; hover: WheelDir | null }
 
 export const SPARKLE_LIFETIME_MS = 380
+
+// pen stage 7: a Fill click that lands on no enclosed area
+export const FILL_MISS = 'Click inside an enclosed area'
+export interface FillView { d: string; gaps: Vec2[]; filled: number; asleep: number }
+const NO_FILLS: FillView = Object.freeze({ d: '', gaps: [], filled: 0, asleep: 0 }) as FillView
 
 // every pen gets its own number: a copy remembers the pen it came from, so a
 // paste into another pen can resize it to that pen's units (penClipboard.ts)
@@ -289,13 +297,13 @@ export function usePen(opts: {
   // to it); openOnly drops Circle even if the host listed it — an open-path
   // guide has no use for a closed shape. See PenToolbar for how `tools` gates
   // the toolbar's own buttons.
-  const ALL_PEN_TOOLS: PenTool[] = ['select', 'point', 'line', 'circle', 'path', 'curve', 'trim', 'cut', 'dissolve']
+  const ALL_PEN_TOOLS: PenTool[] = ['select', 'point', 'line', 'circle', 'path', 'curve', 'trim', 'cut', 'dissolve', 'fill']
   const openOnly = !!opts.options?.openOnly
   const cleanupAllowed = opts.options?.cleanup !== false
   const resolvedTools: PenTool[] = (() => {
     let list = opts.options?.tools ? opts.options.tools.filter(t => ALL_PEN_TOOLS.includes(t)) : [...ALL_PEN_TOOLS]
     if (!list.includes('select')) list = ['select', ...list]
-    if (openOnly) list = list.filter(t => t !== 'circle')
+    if (openOnly) list = list.filter(t => t !== 'circle' && t !== 'fill')
     return list
   })()
   // frozen: fixed for the pen's lifetime, same as resolvedTools/openOnly above
@@ -438,7 +446,26 @@ export function usePen(opts: {
   // transient-state resets, in the same order the inline version had, before
   // firing onChange.
   const penHistory = createPenHistory({ doc, onChange: opts.onChange, onLiveChange: opts.onLiveChange })
-  const { commitHistory, initHistory, canUndo, canRedo } = penHistory
+  const { initHistory, canUndo, canRedo } = penHistory
+  // Every settled step carries the fills first (pen stage 7): each area that
+  // takes up part of a filled area is filled (a split fills both halves), two
+  // fills on one area become one, a fill whose area opened sleeps — measured
+  // against the drawing as the last step left it. A drawing with no fills
+  // does no work here. (A function declaration, so createPenCopies and every
+  // verb get the settling version.)
+  function commitHistory() {
+    settleFills()
+    penHistory.commitHistory()
+  }
+  function settleFills(): void {
+    const now = toRaw(doc.value)
+    if (!now.fills?.length) { if (now.fillGap != null) delete now.fillGap; return }
+    const before = penHistory.current()
+    if (!before) return
+    const next = reconcileFills(before, now)
+    if (next.length) now.fills = next
+    else { delete now.fills; delete now.fillGap }
+  }
   /** bumps on every commit, undo, redo and fresh start (penHistory.ts) */
   const docRevision = penHistory.rev
   function undo() {
@@ -1455,7 +1482,7 @@ export function usePen(opts: {
     // Select: the join a point drag would make on release (dropSnap below)
     if (t === 'select') { const d = dropSnap.value; return d ? { x: d.x, y: d.y, kind: snapPreviewKind(d) } : null }
     // otherwise only the tools that place points (never Trim, Cut or Dissolve)
-    if (!c || t === 'trim' || t === 'cut' || t === 'dissolve') return null
+    if (!c || t === 'trim' || t === 'cut' || t === 'dissolve' || t === 'fill') return null
     if (t === 'circle' && pending.value?.kind === 'circle') return null
     const base = t === 'path' ? (placementPreview.value ?? c) : c
     const ex = [...handleIds()]
@@ -1922,8 +1949,48 @@ export function usePen(opts: {
     dissolveMove(x, y)
   }
 
+  // --- Fill (pen stage 7: lib/sketch/faces.ts + fills.ts) ---
+  // Hovering shows the area under the pointer (fillHover: its outline in
+  // drawing space, and whether it is filled — a click then empties it); a
+  // click fills or empties it as one step. Faces are cached by geometry
+  // (facesFor), so a hover where nothing moved is a lookup, and read on the
+  // raw drawing (never through Vue's proxies). The first fill fixes the
+  // drawing's gap (FILL_GAP_PX at this zoom, stored in drawing units). A
+  // Clean up preview blocks the tool (its preview is not the drawing).
+  const fillHover = shallowRef<{ d: string; filled: boolean } | null>(null)
+  const fillGapUnits = () => pxToUnits(FILL_GAP_PX, opts.view.value)
+  function fillMove(x: number, y: number) {
+    if (tool.value !== 'fill' || cleanup.value) { if (fillHover.value) fillHover.value = null; return }
+    const t = fillTarget(toRaw(doc.value), { x, y }, fillGapUnits())
+    const prev = fillHover.value
+    if (!t) { if (prev) fillHover.value = null; return }
+    if (!prev || prev.d !== t.d || prev.filled !== t.filled) fillHover.value = { d: t.d, filled: t.filled }
+  }
+  function fillClick(x: number, y: number) {
+    if (tool.value !== 'fill' || cleanup.value) return
+    closeMenus()
+    const raw = toRaw(doc.value)
+    const hit = fillTarget(raw, { x, y }, fillGapUnits())
+    if (!hit) { status.value = FILL_MISS; return }
+    if (!toggleFillAt(raw, { x, y }, fillGapUnits())) return
+    commitHistory()
+    status.value = hit.filled ? 'Emptied' : 'Filled'
+    fillHover.value = null
+    fillMove(x, y)
+  }
+  /** What the overlay shows for fills: the filled areas as one outline
+   *  (drawing space), the rings at the open ends of a sleeping fill's drawing,
+   *  and how many areas are filled / fills sleep. Nothing to do without fills. */
+  function fillView(): FillView {
+    const raw = toRaw(doc.value)
+    if (!raw.fills?.length) return NO_FILLS
+    const st = fillState(raw)
+    return { d: st.filled.length ? facesD(st.fs, st.filled) : '', gaps: gapMarkers(raw), filled: st.filled.length, asleep: st.asleep.length }
+  }
+
   // the pointer left the drawing: nothing is under it any more
   function clearToolHover() {
+    fillHover.value = null
     trimHover.value = null
     cutHover.value = null
     dissolveHover.value = null
@@ -2027,7 +2094,8 @@ export function usePen(opts: {
     if (!pasteState().ok) return false
     const c = penClipboard.value!
     if (tool.value !== 'select') selectTool('select')
-    let clip = c.doc
+    // a pen that can't fill (a text guide) takes the pieces without their fills
+    let clip = openOnly ? withoutFills(c.doc) : c.doc
     const foreign = c.penId != null && c.penId !== penId
     if (foreign && c.unitsPerPx && c.unitsPerPx > 0) {
       const factor = pxToUnits(1, opts.view.value) / c.unitsPerPx
@@ -2932,6 +3000,8 @@ export function usePen(opts: {
     // trim / cut / dissolve
     trimHover, trimHoverEnds, trimGhosts, cutHover, dissolveHover,
     trimDown, trimMove, trimUp, cutMove, cutClick, dissolveMove, dissolveClick, clearToolHover, clearTrimGhosts,
+    // fill (pen stage 7)
+    fillHover, fillMove, fillClick, fillView,
     // verbs
     runSolve, apply, applyWithValue, applyTangent, availableConstraints, orderRefs, del, nudge, fixSelected, makeConstruction, flip,
     repeatPrompt, armRepeat, doRepeat, applyRepeat, doMirror, applyMirror, cancelPendingOp,
