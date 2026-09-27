@@ -28,6 +28,7 @@ import {
   priceGraph,
 } from '../../server/utils/priceBook'
 import { creditsForUsd } from '~/lib/pricing'
+import { PAID_NODE_CLASSES } from '#shared/pricing/paidSettings'
 import { IMAGE_MODELS } from '~~/app/data/image-models'
 import { VIDEO_MODELS } from '~~/app/data/video-models'
 import { videoUsd } from '#shared/pricing/videoRates'
@@ -77,8 +78,10 @@ function comfyExtrasProviderClasses(): string[] {
 const EXTRAS_CLASSES = comfyExtrasProviderClasses()
 const ALL_PROVIDER_CLASSES = [...REPLICATE_CLASSES, ...EXTRAS_CLASSES]
 
-function classify(c: string): 'flat' | 'model' | 'settings' | 'per-second' | 'exempt' | 'UNCLASSIFIED' {
+function classify(c: string): 'flat' | 'model' | 'settings' | 'per-second' | 'paid' | 'exempt' | 'UNCLASSIFIED' {
   if (c in GRAPH_NODE_CREDITS) return 'flat'
+  // Step 3, R3: priced by the calls its settings make (shared/pricing/paidSettings.ts).
+  if (PAID_NODE_CLASSES.includes(c)) return 'paid'
   if (MODEL_PRICED_NODE_CLASSES.includes(c)) return 'model'
   if (SETTING_PRICED_NODE_CLASSES.includes(c)) return 'settings'
   if (REMOTE_VIDEO_NODE_CLASSES.includes(c)) return 'per-second'
@@ -96,7 +99,7 @@ describe('graph price book coverage', () => {
     const unclassified = ALL_PROVIDER_CLASSES.filter(c => classify(c) === 'UNCLASSIFIED')
     expect(unclassified).toEqual([])
     // One price per class: no class sits in two tables.
-    const doubled = ALL_PROVIDER_CLASSES.filter(c => [c in GRAPH_NODE_CREDITS, MODEL_PRICED_NODE_CLASSES.includes(c), SETTING_PRICED_NODE_CLASSES.includes(c), REMOTE_VIDEO_NODE_CLASSES.includes(c)].filter(Boolean).length > 1)
+    const doubled = ALL_PROVIDER_CLASSES.filter(c => [c in GRAPH_NODE_CREDITS, MODEL_PRICED_NODE_CLASSES.includes(c), SETTING_PRICED_NODE_CLASSES.includes(c), REMOTE_VIDEO_NODE_CLASSES.includes(c), PAID_NODE_CLASSES.includes(c)].filter(Boolean).length > 1)
     expect(doubled).toEqual([])
   })
 
@@ -373,7 +376,8 @@ describe('golden price table (no price changed by the shared pricing move)', () 
     expect(Object.keys(golden.modelPriced).sort()).toEqual([...MODEL_PRICED_NODE_CLASSES].sort())
     // Task P4 moved the edit classes from the flat table to their settings.
     // Task P5 moved the older video and lip-sync nodes to a per-second price.
-    expect(Object.keys(golden.flat).sort()).toEqual([...Object.keys(GRAPH_NODE_CREDITS), ...SETTING_PRICED_NODE_CLASSES, ...REMOTE_VIDEO_NODE_CLASSES].sort())
+    // Step 3, R3 moved the paid classes to their calls (shared/pricing/paidSettings.ts).
+    expect(Object.keys(golden.flat).sort()).toEqual([...Object.keys(GRAPH_NODE_CREDITS), ...SETTING_PRICED_NODE_CLASSES, ...REMOTE_VIDEO_NODE_CLASSES, ...PAID_NODE_CLASSES].sort())
     // Both outcomes are present, so a pricer that refused (or priced) everything would fail.
     const cells = Object.values(golden.modelPriced).flatMap(row => Object.values(row))
     expect(cells.filter(c => c === 'refused').length).toBeGreaterThan(50)
@@ -415,6 +419,10 @@ describe('golden price table (no price changed by the shared pricing move)', () 
       // A setting-priced edit class keeps only its shape: it still prices.
       // So does a per-second class (Task P5).
       if (SETTING_PRICED_NODE_CLASSES.includes(ct) || REMOTE_VIDEO_NODE_CLASSES.includes(ct)) { if (typeof got !== 'number') drift.push(`${ct}: recorded ${want}, now ${got}`) }
+      // A paid class (step 3, R3, ruling (a)) is re-priced by its calls, from the settings the canvas
+      // writes (a bare node has no model to price): its figures are pinned by its task's spec
+      // (R3.3: runner-paid-llm.unit.spec.ts, and the per-class pin below).
+      else if (PAID_NODE_CLASSES.includes(ct)) continue
       else if (got !== want) drift.push(`${ct}: recorded ${want}, now ${got}`)
     }
     expect(drift).toEqual([])
@@ -533,5 +541,37 @@ describe('one price calculation (guard)', () => {
     const client = await import('~/lib/pricing')
     expect(creditsForUsdServer).toBe(shared.creditsForUsd)
     expect(client.creditsForUsd).toBe(shared.creditsForUsd)
+  })
+})
+
+// ───────────────────────────────────────────────────────────────────────────
+// Step 3, R3.3 (ruling (a), user-approved): the seven LLM text nodes leave
+// their flat rows (1 credit each, 2 for Think step by step) for Replicate's
+// per-token cards. The ComfyUI path can't read the answer's usage, so it
+// charges the ceiling: the text sent (one token per byte) plus the answer
+// limit sent. Pinned per class, at the settings the canvas writes by default.
+// ───────────────────────────────────────────────────────────────────────────
+describe('the LLM text nodes on the ComfyUI path (R3.3)', () => {
+  const at = (ct: string, inputs: Record<string, unknown>) => priceGraph({ 1: { class_type: ct, inputs } }).nodes!['1']
+  it('each class, default settings', () => {
+    expect(at('ChatLLMNode', { model: 'Gemini 3 Flash', prompt: 'Hello', system_prompt: '', temperature: 1, max_tokens: 1024 })).toBe(1)
+    expect(at('ImprovePromptNode', { model: 'GPT-5 nano', idea: 'a cat', target: 'image' })).toBe(1)
+    expect(at('SummarizeTextNode', { text: 'Some text', length: 'Short', model: 'Gemini 3 Flash' })).toBe(1)
+    expect(at('TranslateTextNode', { text: 'Hello', target_language: 'English', custom_language: '' })).toBe(2)
+    expect(at('RewriteToneNode', { text: 'We sell shoes', tone: 'Punchy', model: 'Claude 4.5 Haiku' })).toBe(2)
+    expect(at('BrainstormIdeasNode', { topic: 'Coffee', count: 3, angle: 'Variations' })).toBe(1)
+    expect(at('ReasonStepByStepNode', { question: '17 * 23?', include_reasoning: false, model: 'DeepSeek R1' })).toBe(5)
+  })
+  it('the dearest settings: Chat on GPT-5 or Claude 4.5 Sonnet at 8192 max tokens, Think step by step on GPT-5 or Claude', () => {
+    const chat = (model: string) => at('ChatLLMNode', { model, prompt: 'Hello', system_prompt: '', temperature: 1, max_tokens: 8192 })
+    expect(chat('GPT-5')).toBe(17)
+    expect(chat('Claude 4.5 Sonnet')).toBe(19)
+    expect(chat('Gemini 3 Flash')).toBe(5)
+    const reason = (model: string) => at('ReasonStepByStepNode', { question: '17 * 23?', include_reasoning: true, model })
+    expect(reason('GPT-5')).toBe(5)
+    expect(reason('Claude 4.5 Sonnet')).toBe(7)
+  })
+  it('a model the node doesn\'t know is refused, never priced low', () => {
+    expect(() => at('ChatLLMNode', { model: 'GPT-9', prompt: 'x', system_prompt: '', temperature: 1, max_tokens: 64 })).toThrow(UnpricedGraphError)
   })
 })

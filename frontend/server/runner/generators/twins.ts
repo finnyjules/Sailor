@@ -325,6 +325,10 @@ export const RUNNER_ROUTES: Readonly<Record<string, Route>> = {
   'FixFacesNode+fix-faces': r('fal', null, 'Replicate\'s Topaz is another app with its own settings and no face-enhancement strength'),
   'FaceSwap+face-swap': r('fal', null, 'Replicate has no Easel face swap'),
   'PersonSwapVideo+person-swap-video': r('fal', null, 'Replicate has no Pixverse Swap'),
+  // R3.3, the LLM text nodes (family llm-text): Replicate, as Python.
+  ...Object.fromEntries([
+    'ChatLLMNode', 'ImprovePromptNode', 'SummarizeTextNode', 'TranslateTextNode', 'RewriteToneNode', 'BrainstormIdeasNode', 'ReasonStepByStepNode',
+  ].map(ct => [ct, r('replicate', null, 'no fal twin of these models has a saved schema or a rate card')])),
 }
 
 // ── Generate video: the two models moved to fal first ──────────────────────

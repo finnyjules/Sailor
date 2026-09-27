@@ -175,6 +175,8 @@ import { SYNC_3_APP, sync3NodeProblem } from './generators/sync3'
 import { TOPAZ_VIDEO_APP, topazVideoNodeProblem } from './generators/topazVideo'
 import { TOPAZ_VIDEO_MAX_FACTOR, TOPAZ_VIDEO_MIN_FACTOR, TOPAZ_VIDEO_UNKNOWN_SETTING } from '#shared/runner/topazVideo'
 import { isSync3LipSync, sync3ModeRefusal } from '#shared/runner/lipSync'
+import { llmRequestProblem } from '#shared/runner/llm'
+import { isLlmTextClass } from './generators/llm'
 import { FACE_SWAP_NEEDS_GENDER, faceSwapGender } from '#shared/runner/faceSwap'
 import { pixverseSwapNodeProblem } from './generators/pixverseSwap'
 
@@ -911,6 +913,14 @@ export function requestProblems(prompt: ApiPrompt, opts: { runner?: boolean } = 
       else if (VEO_31_MODEL_IDS.includes(resolveVideoModelId(inputs.model)) && veo31HasExtras(adv)) {
         out.push({ nodeId, classType: ct, input: 'model_options', message: VEO_31_ONE_PICTURE })
       }
+    }
+    // The LLM text nodes (R3.3), on a runner run only: a blank question or
+    // idea, a Claude answer limit under Replicate's 1024, a model Sailor
+    // doesn't know (#shared/runner/llm llmRequestProblem; planLlm refuses the
+    // same for a wired text at the node's turn).
+    if (opts.runner && isLlmTextClass(ct)) {
+      const p = llmRequestProblem(ct, inputs)
+      if (p) out.push({ nodeId, classType: ct, input: p.input, message: p.message })
     }
   }
   return out

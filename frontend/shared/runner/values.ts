@@ -30,6 +30,15 @@ export const OUTPUT_KINDS: Readonly<Record<string, Readonly<Record<number, Value
   // R1.4: the picture utilities' values.
   GetImageSize: { 0: 'number', 1: 'number', 2: 'number' },
   ImageToMask: { 0: 'mask' },
+  // R3.3: the LLM text nodes' STRING (a value only while `llm-text` is on:
+  // eligibility.ts outputKindsFor drops these rows with it off).
+  ChatLLMNode: { 0: 'text' },
+  ImprovePromptNode: { 0: 'text' },
+  SummarizeTextNode: { 0: 'text' },
+  TranslateTextNode: { 0: 'text' },
+  RewriteToneNode: { 0: 'text' },
+  BrainstormIdeasNode: { 0: 'text' },
+  ReasonStepByStepNode: { 0: 'text' },
 }
 
 /** What a wire carries: the source's declared kind for that slot (through Gates), files by default. */

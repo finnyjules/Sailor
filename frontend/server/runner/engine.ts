@@ -1313,7 +1313,8 @@ export function createEngine(deps: EngineDeps) {
       if (!resuming) rec.credits = nodeCredits(take.prompt[id]!, inputPixels, families, inputSeconds)
       const fp = resuming
         ? rec.fingerprint
-        : isReusable(plan.payload)
+        // Reused with an explicit seed; an LLM text node's request by itself (ruling (d)).
+        : isReusable(plan.payload) || plan.reuse === 'same-request'
           ? requestFingerprint(fingerprintEndpoint(plan.provider, plan.endpoint), withKeep(plan.payload, plan.keep), u => deps.handoff.hashOf(u))
           : null
       rec.fingerprint = fp
@@ -1330,7 +1331,7 @@ export function createEngine(deps: EngineDeps) {
           rec.status = 'done'
           rec.endedAt = deps.now()
           await persist(run)
-          const ui = plan.uiFor(priorFiles)
+          const ui = plan.uiFor(priorFiles, priorHasValues ? prior.values : undefined)
           if (ui) publish(run, ev.executed(stageKey, id, ui))
           return
         }
@@ -1414,7 +1415,7 @@ export function createEngine(deps: EngineDeps) {
         rec.endedAt = deps.now()
         await fileResult({ files: rec.outputs, values })
         await persist(run).catch(e => deps.reportError(e, { site: 'runner.node.save', stageKey, node: id }))
-        const ui = plan.uiFor(rec.outputs)
+        const ui = plan.uiFor(rec.outputs, values)
         if (ui) publish(run, ev.executed(stageKey, id, ui))
         return
       }

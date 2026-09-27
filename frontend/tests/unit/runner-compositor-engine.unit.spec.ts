@@ -457,7 +457,9 @@ describe('server health: caps, sources, Stop', () => {
     // Lip-sync a character on sync-3 (Task F22), Enhance a video on Topaz (Task F23), Film a shot (Task 4) and
     // Person swap (video) on Pixverse Swap (non-commercial face models replacement) make a video.
     const videos = new Set(['GenerateVideoNode', 'LipSyncNode', 'EnhanceVideoNode', 'FilmShotNode', 'PersonSwapVideo'])
-    for (const c of PROVIDER_TYPES) expect(IMAGE_OUTPUT_CLASSES.has(c), c).toBe(!videos.has(c))
+    // The LLM text nodes (R3.3) hand on text.
+    const texts = new Set(['ChatLLMNode', 'ImprovePromptNode', 'SummarizeTextNode', 'TranslateTextNode', 'RewriteToneNode', 'BrainstormIdeasNode', 'ReasonStepByStepNode'])
+    for (const c of PROVIDER_TYPES) expect(IMAGE_OUTPUT_CLASSES.has(c), c).toBe(!videos.has(c) && !texts.has(c))
     expect(IMAGE_OUTPUT_CLASSES.has('Video')).toBe(false)
   })
 

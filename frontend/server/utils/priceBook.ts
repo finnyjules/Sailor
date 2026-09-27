@@ -149,7 +149,13 @@ export { VIDEO_RATES, MODEL_PRICED_NODE_CLASSES, SETTING_PRICED_NODE_CLASSES, RE
 // generator's stated largest), on the prompt as ComfyUI will run it
 // (`__value__` unwrapped, numbers coerced), and refuses one it can't size.
 // No rate moves.
-export const PRICE_BOOK_VERSION = 'lineup-g1'
+// r3-llm-text (step 3, R3.3, ruling (a)): the seven LLM text nodes leave
+// their flat rows (1–2 credits from their badges) and are priced by tokens
+// at Replicate's own per-token cards (paidRates.ts): the hold is the most the
+// request can cost (the text sent, one token per byte, plus the answer limit
+// sent), the charge what the prediction reports it used. On the ComfyUI path
+// (which can't read the usage) the charge is that ceiling. No other price moves.
+export const PRICE_BOOK_VERSION = 'r3-llm-text'
 
 export const BASE_RENDER_CREDITS = 1
 
@@ -339,13 +345,9 @@ export const GRAPH_NODE_CREDITS: Record<string, number> = {
   DescribeVideoNode: 2,            // badge $0.01
   ExtractTextNode: 1,              // badge $0.005
   FindObjectsNode: 1,              // badge $0.005
-  ChatLLMNode: 1,                  // badge $0.005
-  ImprovePromptNode: 1,            // badge $0.001
-  SummarizeTextNode: 1,            // badge $0.001
-  TranslateTextNode: 1,            // badge $0.001
-  RewriteToneNode: 1,              // badge $0.002
-  BrainstormIdeasNode: 1,          // badge $0.003
-  ReasonStepByStepNode: 2,         // badge $0.01
+  // The seven LLM text nodes (Chat, Improve a prompt, Summarize, Translate,
+  // Rewrite, Brainstorm, Think step by step) are priced by their tokens
+  // since R3.3 (shared/pricing/paidSettings.ts), on both paths.
 
   // — comfy_extras wrappers that dispatch through nodes_replicate —
   PoseMannequin: 10,               // badge $0.05 (Python class PoseMannequinNode)

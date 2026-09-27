@@ -16,6 +16,10 @@ import {
   asciiGlyphsArePortable, effectFamilyOn, effectOutputSizeFits, effectPreviewName, effectRows, effectSwitchedClasses, effectTextIsPortable, painterInputsArePortable,
 } from './effects'
 import { SHADER_ASPECTS, shaderBakeTaken } from './shaderBakeKey'
+import {
+  BRAINSTORM_ANGLES, CHAT_LLM_MODELS, IMPROVE_PROMPT_MODELS, IMPROVE_PROMPT_TARGETS, REASON_MODELS, REWRITE_MODELS, REWRITE_TONES,
+  SUMMARIZE_LENGTHS, SUMMARIZE_MODELS, TRANSLATE_LANGUAGES,
+} from './llm'
 
 export const RUNNER_NODE_TYPES: ReadonlySet<string> = new Set([
   'GenerateImageNode', 'GenerateVideoNode', 'ComfyGateNode', 'Image', 'Video',
@@ -463,6 +467,71 @@ export const RUNNER_NODE_RULES: Readonly<Record<string, RunnerNodeRule>> = {
       resolution: { type: 'COMBO', required: true, options: PERSON_SWAP_RESOLUTIONS },
     },
   },
+  // ── llm-text (step 3, R3.3): the seven LLM text nodes on Replicate ──
+  // Each text input takes a text wire (R0: the value arrives as typed); every
+  // other setting is a widget as ComfyUI validates it (define_schema's
+  // options and bounds). A wired widget leaves the node to the engine.
+  ChatLLMNode: {
+    family: 'llm-text',
+    valueInputs: { prompt: ['text', 'json'], system_prompt: ['text', 'json'] },
+    required: ['prompt', 'system_prompt'],
+    widgets: {
+      model: { type: 'COMBO', required: true, options: CHAT_LLM_MODELS },
+      temperature: { type: 'FLOAT', required: true, min: 0, max: 2 },
+      max_tokens: { type: 'INT', required: true, min: 1, max: 8192 },
+    },
+  },
+  ImprovePromptNode: {
+    family: 'llm-text',
+    valueInputs: { idea: ['text', 'json'] },
+    required: ['idea'],
+    widgets: {
+      model: { type: 'COMBO', required: true, options: IMPROVE_PROMPT_MODELS },
+      target: { type: 'COMBO', required: true, options: IMPROVE_PROMPT_TARGETS },
+    },
+  },
+  SummarizeTextNode: {
+    family: 'llm-text',
+    valueInputs: { text: ['text', 'json'] },
+    required: ['text'],
+    widgets: {
+      length: { type: 'COMBO', required: true, options: Object.keys(SUMMARIZE_LENGTHS) },
+      model: { type: 'COMBO', required: true, options: SUMMARIZE_MODELS },
+    },
+  },
+  TranslateTextNode: {
+    family: 'llm-text',
+    valueInputs: { text: ['text', 'json'], custom_language: ['text', 'json'] },
+    required: ['text', 'custom_language'],
+    widgets: { target_language: { type: 'COMBO', required: true, options: TRANSLATE_LANGUAGES } },
+  },
+  RewriteToneNode: {
+    family: 'llm-text',
+    valueInputs: { text: ['text', 'json'] },
+    required: ['text'],
+    widgets: {
+      tone: { type: 'COMBO', required: true, options: REWRITE_TONES },
+      model: { type: 'COMBO', required: true, options: REWRITE_MODELS },
+    },
+  },
+  BrainstormIdeasNode: {
+    family: 'llm-text',
+    valueInputs: { topic: ['text', 'json'] },
+    required: ['topic'],
+    widgets: {
+      count: { type: 'INT', required: true, min: 2, max: 12 },
+      angle: { type: 'COMBO', required: true, options: Object.keys(BRAINSTORM_ANGLES) },
+    },
+  },
+  ReasonStepByStepNode: {
+    family: 'llm-text',
+    valueInputs: { question: ['text', 'json'] },
+    required: ['question'],
+    widgets: {
+      include_reasoning: { type: 'BOOLEAN', required: true },
+      model: { type: 'COMBO', required: true, options: REASON_MODELS },
+    },
+  },
   // ── restyle (Task B8): Nano Banana 2 / Pro on fal, Nano Banana on
   // Replicate. The prompt and the taste wire (style_in, a Moodboard card's
   // style block) take a text wire (R1.2): the card's value arrives as if
@@ -789,6 +858,14 @@ export const SWITCHED_CLASSES: Readonly<Record<string, RunnerFamily>> = {
   // R2: each ported effect, by its family.
   ...effectSwitchedClasses(),
   ShaderEffect: 'shader-bake',
+  // R3.3: the LLM text nodes.
+  ChatLLMNode: 'llm-text',
+  ImprovePromptNode: 'llm-text',
+  SummarizeTextNode: 'llm-text',
+  TranslateTextNode: 'llm-text',
+  RewriteToneNode: 'llm-text',
+  BrainstormIdeasNode: 'llm-text',
+  ReasonStepByStepNode: 'llm-text',
 }
 
 /**
@@ -1160,19 +1237,43 @@ type OutputKinds = Readonly<Record<string, Readonly<Record<number, ValueKind>>>>
 const effectKindsCache = new Map<string, OutputKinds>()
 
 /**
+ * The OUTPUT_KINDS rows a paid family declares (R3): each applies only while
+ * its family is on. With it off, that class's slots carry files, as before R3.
+ */
+const PAID_OUTPUT_KIND_FAMILY: Readonly<Record<string, RunnerFamily>> = {
+  ChatLLMNode: 'llm-text',
+  ImprovePromptNode: 'llm-text',
+  SummarizeTextNode: 'llm-text',
+  TranslateTextNode: 'llm-text',
+  RewriteToneNode: 'llm-text',
+  BrainstormIdeasNode: 'llm-text',
+  ReasonStepByStepNode: 'llm-text',
+}
+const withoutPaidRows = (kinds: OutputKinds): OutputKinds =>
+  Object.fromEntries(Object.entries(kinds).filter(([cls]) => !Object.prototype.hasOwnProperty.call(PAID_OUTPUT_KIND_FAMILY, cls)))
+const OUTPUT_KINDS_BASE = withoutPaidRows(OUTPUT_KINDS)
+const OUTPUT_KINDS_CARDS_OFF_BASE = withoutPaidRows(OUTPUT_KINDS_CARDS_OFF)
+
+/**
  * What each class's output slots carry with these families on: each class's
  * declared kinds apply only while the family that declares them is on (the
  * cards' rows with `cards`; an effect's mask outputs with its own family and
- * `cards`, R2). With none of them on, exactly the table before R1.3.
+ * `cards`, R2; a paid node's with its own family, R3). With none of them on,
+ * exactly the table before R1.3.
  */
 export function outputKindsFor(families: ReadonlySet<RunnerFamily>): OutputKinds {
-  const base = families.has('cards') ? OUTPUT_KINDS : OUTPUT_KINDS_CARDS_OFF
+  const base = families.has('cards') ? OUTPUT_KINDS_BASE : OUTPUT_KINDS_CARDS_OFF_BASE
   const on = Object.keys(EFFECT_OUTPUT_KINDS).filter(cls => effectFamilyOn(cls, families))
-  if (!on.length) return base
-  const key = on.join(',')
+  const paid = Object.keys(PAID_OUTPUT_KIND_FAMILY).filter(cls => familyOn(PAID_OUTPUT_KIND_FAMILY[cls]!, families))
+  if (!on.length && !paid.length) return base
+  const key = `${on.join(',')}|${paid.join(',')}`
   let kinds = effectKindsCache.get(key)
   if (!kinds) {
-    kinds = { ...base, ...Object.fromEntries(on.map(cls => [cls, EFFECT_OUTPUT_KINDS[cls]!])) }
+    kinds = {
+      ...base,
+      ...Object.fromEntries(paid.map(cls => [cls, OUTPUT_KINDS[cls]!])),
+      ...Object.fromEntries(on.map(cls => [cls, EFFECT_OUTPUT_KINDS[cls]!])),
+    }
     effectKindsCache.set(key, kinds)
   }
   return kinds

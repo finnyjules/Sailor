@@ -20,6 +20,17 @@ Groups:
                scalars — str(json.loads(text)) of every kind of scalar
                floats  — 10,000 seeded doubles (their IEEE-754 bits, big-endian
                          hex) with repr()
+  llm        (R3.3) the seven LLM text nodes (Chat with an LLM, Improve a prompt,
+             Summarize, Translate, Rewrite in a tone, Brainstorm ideas, Think
+             step by step), for frontend/server/runner/generators/llm.ts
+             (tests/unit/runner-paid-llm.unit.spec.ts):
+               cases          — paid_case of every class × model × text kind
+                                (blank, spaces, one line, 2,000 characters,
+                                non-ASCII, emoji) and of every setting the
+                                brief names, with token-list, string, null,
+                                mixed and multi-line answers
+               isdigit_ranges — the code points str.isdigit() accepts, as
+                                [first, last] ranges (Brainstorm's clean-up)
 
 The network is blocked (as in compositor_fixtures.py): every outbound connect
 and DNS lookup raises and the provider keys are removed before any node module
@@ -539,8 +550,127 @@ def machinery_group() -> dict:
     return {"bodies": bodies, "scalars": scalars, "floats": _machinery_floats()}
 
 
+# ── llm (R3.3): the seven LLM text nodes ────────────────────────────────────
+
+LLM_TEXTS = {
+    "blank": "",
+    "spaces": "   \t ",
+    "one line": "A red fox jumps over a sleeping dog.",
+    "2000 chars": ("The quick brown fox jumps over the lazy dog. " * 45)[:2000],
+    "non-ASCII": "Caf\u00e9 na\u00efve \u2014 \u65e5\u672c\u8a9e\u306e\u30c6\u30ad\u30b9\u30c8, \u00fcber \u0161\u0107",
+    "emoji": "\U0001f389 party time \U0001f600 with \U0001f98a",
+}
+
+
+def _llm_body(output, metrics=True, raw_output=None) -> dict:
+    """A Replicate prediction body as text (numbers keep their written form)."""
+    out_text = raw_output if raw_output is not None else json.dumps(output)
+    m = ', "metrics": {"input_token_count": 37, "output_token_count": 12, "predict_time": 0.5}' if metrics else ""
+    return {"__body__": '{"id": "p1", "status": "succeeded", "output": ' + out_text + m + "}"}
+
+
+LLM_ANSWERS = {
+    "token list": _llm_body(["Hello", ",", " world", "!"]),
+    "string with spaces": _llm_body("  \n  A tidy answer.\u3000 \n"),
+    "null": _llm_body(None),
+    "mixed list": _llm_body(None, raw_output="[1, 2.0, true, null]"),
+    "no metrics": _llm_body(["No", " metrics"], metrics=False),
+    "list with markers": _llm_body(
+        "1. First idea\n\n- Second idea\n  * Third idea\n2) Fourth\n\u2022 Fifth\n\n10. Tenth stays numbered\n1.2.3 nested"),
+    "unicode breaks": _llm_body("alpha\u2028- beta\x85gamma\r\ndelta\rep\x0bzeta\x0ceta\x1ctheta\x1diota\x1ekappa\u2029lambda"),
+    "full-width digit": _llm_body("\uff11. full width one\n\u00b2) superscript two\n\u2460. circled one\n\U0001d7ce. math zero\n\u0663) arabic three"),
+    "numbers": _llm_body(None, raw_output="42"),
+    "false": _llm_body(None, raw_output="false"),
+    "float": _llm_body(None, raw_output="1e5"),
+}
+
+
+def llm_group() -> dict:
+    import runner_builder_fixtures as rbf
+    nr, _fal, _extras = rbf._node_modules()
+    answer = [LLM_ANSWERS["token list"]]
+    cases: list = []
+
+    def add(name, cls, widgets, answers=None):
+        cases.append(paid_case(name, cls, widgets, answers if answers is not None else answer))
+
+    # Every class × model × text kind.
+    per_model = [
+        ("chat", nr.ChatLLMNode, list(nr._CHAT_LLM_MODELS),
+         lambda m, t: {"model": m, "prompt": t, "system_prompt": "", "temperature": 1.0, "max_tokens": 1024}),
+        ("improve", nr.ImprovePromptNode, ["GPT-5 nano"], lambda m, t: {"model": m, "idea": t, "target": "image"}),
+        ("summarize", nr.SummarizeTextNode, list(nr._SUMMARIZE_MODELS), lambda m, t: {"text": t, "length": "Short", "model": m}),
+        ("translate", nr.TranslateTextNode, [None], lambda m, t: {"text": t, "target_language": "French", "custom_language": ""}),
+        ("rewrite", nr.RewriteToneNode, list(nr._REWRITE_MODELS), lambda m, t: {"text": t, "tone": "Punchy", "model": m}),
+        ("brainstorm", nr.BrainstormIdeasNode, [None], lambda m, t: {"topic": t, "count": 3, "angle": "Variations"}),
+        ("reason", nr.ReasonStepByStepNode, list(nr._REASON_MODELS), lambda m, t: {"question": t, "include_reasoning": False, "model": m}),
+    ]
+    for tag, cls, models, widgets in per_model:
+        for m in models:
+            for kind, text in LLM_TEXTS.items():
+                add(f"{tag} · {m or 'fixed model'} · {kind}", cls, widgets(m, text))
+
+    # Chat: with and without a system prompt, temperature 0, 1 and 2, max tokens 1 and 8192, on each model.
+    for m in nr._CHAT_LLM_MODELS:
+        for system in ("", "You are a concise copywriter. \u2728"):
+            for temp in (0.0, 1.0, 2.0):
+                for mx in (1, 8192):
+                    add(f"chat · {m} · system {'on' if system else 'off'} · t{temp} · max {mx}", nr.ChatLLMNode,
+                        {"model": m, "prompt": "Name a colour.", "system_prompt": system, "temperature": temp, "max_tokens": mx})
+    add("chat · spaces-only system prompt is sent", nr.ChatLLMNode,
+        {"model": "GPT-5", "prompt": "Hi", "system_prompt": "  ", "temperature": 0.35, "max_tokens": 64})
+
+    # Improve: both targets.
+    for target in ("image", "video"):
+        add(f"improve · target {target}", nr.ImprovePromptNode, {"model": "GPT-5 nano", "idea": "a cat on a skateboard", "target": target})
+
+    # Summarize: every length.
+    for length in nr._SUMMARIZE_LENGTHS:
+        add(f"summarize · {length}", nr.SummarizeTextNode, {"text": "Long text here.", "length": length, "model": "Gemini 3 Flash"})
+
+    # Translate: every language, and a custom one with spaces around it (and a blank custom one).
+    for lang in nr._TRANSLATE_LANGUAGES:
+        add(f"translate · {lang}", nr.TranslateTextNode, {"text": "Good morning", "target_language": lang, "custom_language": ""})
+    add("translate · custom with spaces", nr.TranslateTextNode, {"text": "Good morning", "target_language": "German", "custom_language": "  Welsh \u3000"})
+    add("translate · custom spaces only", nr.TranslateTextNode, {"text": "Good morning", "target_language": "Korean", "custom_language": " \t "})
+
+    # Rewrite: every tone.
+    for tone in nr._REWRITE_TONES:
+        add(f"rewrite · {tone}", nr.RewriteToneNode, {"text": "We sell shoes.", "tone": tone, "model": "Claude 4.5 Haiku"})
+
+    # Brainstorm: every angle, counts 2 and 12.
+    for angle in nr._BRAINSTORM_ANGLES:
+        add(f"brainstorm · {angle}", nr.BrainstormIdeasNode, {"topic": "A poster for a coffee shop", "count": 3, "angle": angle})
+    for count in (2, 12):
+        add(f"brainstorm · count {count}", nr.BrainstormIdeasNode, {"topic": "Coffee", "count": count, "angle": "Free"})
+
+    # Reason: with and without the reasoning shown.
+    for m in nr._REASON_MODELS:
+        for inc in (False, True):
+            add(f"reason · {m} · reasoning {'shown' if inc else 'hidden'}", nr.ReasonStepByStepNode,
+                {"question": "What is 17 * 23?", "include_reasoning": inc, "model": m})
+
+    # Every answer shape, through Chat (no ui), Summarize (ui) and Brainstorm (the clean-up), at counts 2 and 12.
+    for aname, ans in LLM_ANSWERS.items():
+        add(f"answer · chat · {aname}", nr.ChatLLMNode,
+            {"model": "GPT-5", "prompt": "Say hi", "system_prompt": "", "temperature": 0.5, "max_tokens": 64}, [ans])
+        add(f"answer · summarize · {aname}", nr.SummarizeTextNode, {"text": "Text", "length": "Short", "model": "GPT-5 nano"}, [ans])
+        for count in (2, 12):
+            add(f"answer · brainstorm {count} · {aname}", nr.BrainstormIdeasNode, {"topic": "Tea", "count": count, "angle": "Free"}, [ans])
+
+    digits = [c for c in range(0x110000) if chr(c).isdigit()]
+    ranges: list = []
+    for c in digits:
+        if ranges and ranges[-1][1] == c - 1:
+            ranges[-1][1] = c
+        else:
+            ranges.append([c, c])
+    return {"cases": cases, "isdigit_ranges": ranges}
+
+
 GROUPS = {
     "machinery": machinery_group,
+    "llm": llm_group,
 }
 
 

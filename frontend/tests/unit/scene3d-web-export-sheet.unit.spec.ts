@@ -9,6 +9,8 @@ import { mount } from '@vue/test-utils'
 import Sheet, { assetDisplayName, failureSentence } from '~/components/vue-canvas/Scene3DWebExportSheet.vue'
 import { failureAdvice, failureClause, failureName, plainFailureReason } from '~/lib/scene3d/assetNames'
 import type { AssetFailure } from '~/lib/scene3d/assetTracker'
+import StudioHint from '~/components/vue-canvas/studio/StudioHint.vue'
+import StudioSwitch from '~/components/vue-canvas/studio/StudioSwitch.vue'
 
 type Props = InstanceType<typeof Sheet>['$props']
 const BASE = {
@@ -88,7 +90,8 @@ describe('Scene3DWebExportSheet', () => {
     const w = mountWith()
     const radios = w.findAll('[role="radiogroup"][aria-label="Size"] [role="radio"]')
     expect(radios.map(r => r.text())).toEqual(['Output · 1200×800', '2× sharp · 2400×1600'])
-    expect(w.text()).toContain('Sharp looks crisper on high-resolution screens and makes the file about four times bigger.')
+    // The size trade-off is a tooltip on the row, not a line in the sheet.
+    expect(w.findAllComponents(StudioHint).map(h => h.props('text'))).toContain('Sharp looks crisper on high-resolution screens. The file is about four times bigger.')
   })
 
   it('renders one line per failure, a model with what to do', () => {
@@ -144,7 +147,8 @@ describe('Scene3DWebExportSheet', () => {
     const warning = 'Cinematic simplifies the shader material on 1 object.'
     expect(mountWith({ cinematic: true, cinematicWarning: warning }).text()).toContain(warning)
     expect(mountWith({ cinematic: false, cinematicWarning: warning }).text()).not.toContain(warning)
-    expect(mountWith({ cinematic: true }).text()).toContain('Path-traced, like the Cinematic view. Much slower to export.')
+    const cine = mountWith({ cinematic: true }).findAllComponents(StudioSwitch).find(sw => sw.props('label') === 'Cinematic')
+    expect(cine?.props('hint')).toBe('Path-traced, like the Cinematic view. Much slower to export.')
   })
 
   it('shows progress and a Cancel while working', async () => {

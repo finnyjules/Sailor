@@ -61,6 +61,14 @@ const EDIT_BASE: Record<string, Record<string, unknown>> = {
   FaceSwap: { source_face: LINK, target_frames: LINK, gender: 'Female', keep_hair_from: 'The picture' },
   PersonSwapVideo: { image: LINK, video_url: '/view?filename=clip.mp4&type=input', resolution: '720p' },
   RestyleFromImageNode: { content_image: LINK, style_image: LINK },
+  // The LLM text nodes (R3.3): their widgets as the canvas writes them.
+  ChatLLMNode: { model: 'Gemini 3 Flash', prompt: 'hi', system_prompt: '', temperature: 1, max_tokens: 1024 },
+  ImprovePromptNode: { model: 'GPT-5 nano', idea: 'a cat', target: 'image' },
+  SummarizeTextNode: { text: 'a long text', length: 'Short', model: 'Gemini 3 Flash' },
+  TranslateTextNode: { text: 'hello', target_language: 'French', custom_language: '' },
+  RewriteToneNode: { text: 'we sell shoes', tone: 'Punchy', model: 'Claude 4.5 Haiku' },
+  BrainstormIdeasNode: { topic: 'coffee', count: 3, angle: 'Variations' },
+  ReasonStepByStepNode: { question: '17 * 23?', include_reasoning: false, model: 'DeepSeek R1' },
   // sync-3 lip-sync (Task F22): the studio's face video and sound.
   LipSyncNode: {
     engine: 'sync-3',

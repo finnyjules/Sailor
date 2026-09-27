@@ -129,10 +129,18 @@ export type RunnerFamily =
   | 'shader-bake'
   /** The effects' live previews through the runner (R2.11). Needs `cards`. */
   | 'live-previews'
+  /**
+   * The seven LLM text nodes on Replicate (step 3, R3.3): Chat with an LLM,
+   * Improve a prompt, Summarize, Translate, Rewrite in a tone, Brainstorm
+   * ideas, Think step by step. Needs `cards`: their text goes to Text cards
+   * and wired prompts, cards machinery. Off: they go to ComfyUI, as before.
+   */
+  | 'llm-text'
 
 export const RUNNER_FAMILIES: readonly RunnerFamily[] = [
   'fal-edit', 'replicate-image', 'replicate-video', 'nano-actions', 'ref-edits', 'restyle', 'frame', 'wan-3', 'gpt-image-2.5', 'h3-max-turbo', 'gemini-omni-flash', 'veo-3.1-lite', 'qwen-image-3', 'grok-imagine-2', 'ideogram-4', 'seedream-5-pro-edit', 'qwen-2511-angles', 'nano-banana-2-blend', 'bria-product-shot', 'muse-image', 'nano-banana-2-lite', 'reve-2.1', 'recraft-v4.1', 'krea-2', 'happyhorse-1.1', 'grok-imagine-video-1.5', 'ltx-2.5-fast', 'luma-ray-3.2', 'sync-3', 'topaz-video', 'fix-faces', 'face-swap', 'person-swap-video', 'cards',
   'effects-tone', 'effects-blur', 'effects-cells', 'effects-warp', 'effects-mask', 'effects-noise', 'shader-bake', 'live-previews',
+  'llm-text',
 ]
 
 /**
@@ -148,6 +156,7 @@ export const FAMILY_REQUIRES: Partial<Record<RunnerFamily, RunnerFamily>> = {
   'effects-noise': 'cards',
   'shader-bake': 'cards',
   'live-previews': 'cards',
+  'llm-text': 'cards',
 }
 
 const KNOWN: ReadonlySet<string> = new Set(RUNNER_FAMILIES)

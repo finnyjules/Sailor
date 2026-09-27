@@ -2,7 +2,7 @@
  * What each paid-model call (step 3, R3: the Replicate classes, Pose
  * Mannequin, Lens reframe and Turntable) costs Sailor at its service, keyed by
  * the endpoint the call goes to (a fal app id or a Replicate slug). Each R3
- * task adds the cards for its own endpoints; the table is empty until then.
+ * task adds the cards for its own endpoints (R3.3: the seven LLM models).
  *
  * Units, following the service:
  *  - `per_call`: dollars per call;
@@ -74,8 +74,29 @@ export interface PaidCall {
   fallbacks?: PaidCall[]
 }
 
-/** The paid cards. Filled by each R3 task (R3.3–R3.17); empty until then. */
-export const PAID_RATES: Record<string, PaidRate> = {}
+/**
+ * Replicate's per-token cards for the LLM text nodes (R3.3), read 2026-09-27
+ * from each model page's billing table (the `billingConfig` the page embeds:
+ * `token_input_count` and `token_output_count`, the same counts a prediction
+ * reports in its `metrics`). A figure the page gives per thousand tokens is
+ * written here per million.
+ */
+const REPLICATE_TOKEN_CARD = (slug: string, inputPerMillion: number, outputPerMillion: number): PaidRate => ({
+  unit: 'per_token', inputPerMillion, outputPerMillion,
+  service: 'replicate', source: `https://replicate.com/${slug}`, read: '2026-09-27', confidence: 'verified',
+})
+
+/** The paid cards. Filled by each R3 task (R3.3–R3.17). */
+export const PAID_RATES: Record<string, PaidRate> = {
+  // R3.3, the LLM text nodes: $ per million input tokens, $ per million output tokens.
+  'openai/gpt-5': REPLICATE_TOKEN_CARD('openai/gpt-5', 1.25, 10), // output "$0.01 per thousand"
+  'openai/gpt-5-mini': REPLICATE_TOKEN_CARD('openai/gpt-5-mini', 0.25, 2),
+  'openai/gpt-5-nano': REPLICATE_TOKEN_CARD('openai/gpt-5-nano', 0.05, 0.4),
+  'anthropic/claude-4.5-sonnet': REPLICATE_TOKEN_CARD('anthropic/claude-4.5-sonnet', 3, 15), // output "$0.015 per thousand"
+  'anthropic/claude-4.5-haiku': REPLICATE_TOKEN_CARD('anthropic/claude-4.5-haiku', 1, 5),
+  'google/gemini-3-flash': REPLICATE_TOKEN_CARD('google/gemini-3-flash', 0.5, 3),
+  'deepseek-ai/deepseek-r1': REPLICATE_TOKEN_CARD('deepseek-ai/deepseek-r1', 3.75, 10), // output "$0.01 per thousand"
+}
 
 const own = <T>(o: Record<string, T>, k: string): T | undefined =>
   (Object.prototype.hasOwnProperty.call(o, k) ? o[k] : undefined)

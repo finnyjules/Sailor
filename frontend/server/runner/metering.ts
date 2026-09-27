@@ -130,7 +130,16 @@ export const TASTE_TEXT_INPUTS: readonly string[] = ['style_in']
  * (system prompts, templates) is not listed. Filled by each R3 task. Read by
  * both paths' start checks (extraPromptTexts).
  */
-export const PAID_TEXT_INPUTS: Readonly<Record<string, readonly string[]>> = {}
+export const PAID_TEXT_INPUTS: Readonly<Record<string, readonly string[]>> = {
+  // R3.3, the LLM text nodes (Sailor's system prompts are not listed; Translate's custom language is the user's).
+  ChatLLMNode: ['prompt', 'system_prompt'],
+  ImprovePromptNode: ['idea'],
+  SummarizeTextNode: ['text'],
+  TranslateTextNode: ['text', 'custom_language'],
+  RewriteToneNode: ['text'],
+  BrainstormIdeasNode: ['topic'],
+  ReasonStepByStepNode: ['question'],
+}
 
 /** The non-blank values of RUNNER_EXTRA_TEXT_INPUTS (a typed-in taste, a paid class's PAID_TEXT_INPUTS) across the prompt, each on its own. */
 export function extraPromptTexts(prompt: ApiPrompt): string[] {

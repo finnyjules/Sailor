@@ -160,7 +160,7 @@ exports[`shader fills enter the agent vocabulary > is a characterization snapsho
   {
     "default": "glyph",
     "group": "Paint",
-    "hint": "Which box this layer is measured against: each glyph, the whole word, or the frame (so the type moves over a fill that stays put).",
+    "hint": "Which box this layer is measured against: each glyph, the whole word, or the frame. A shader pinned to the frame stays put whatever this says.",
     "key": "layer.anchor",
     "kind": "select",
     "label": "Fill anchor",
@@ -270,7 +270,7 @@ exports[`shader fills enter the agent vocabulary > is a characterization snapsho
   {
     "default": "glyph",
     "group": "Paint",
-    "hint": "Which box this layer is measured against: each glyph, the whole word, or the frame (so the type moves over a fill that stays put).",
+    "hint": "Which box this layer is measured against: each glyph, the whole word, or the frame. A shader pinned to the frame stays put whatever this says.",
     "key": "appearance.Lfill.anchor",
     "kind": "select",
     "label": "Fill · Fill anchor",
@@ -552,7 +552,7 @@ exports[`vtAgentControls > is a characterization snapshot, with and without a fo
   {
     "default": "glyph",
     "group": "Paint",
-    "hint": "Which box this layer is measured against: each glyph, the whole word, or the frame (so the type moves over a fill that stays put).",
+    "hint": "Which box this layer is measured against: each glyph, the whole word, or the frame. A shader pinned to the frame stays put whatever this says.",
     "key": "layer.anchor",
     "kind": "select",
     "label": "Fill anchor",
@@ -669,7 +669,7 @@ exports[`vtAgentControls > is a characterization snapshot, with and without a fo
   {
     "default": "glyph",
     "group": "Paint",
-    "hint": "Which box this layer is measured against: each glyph, the whole word, or the frame (so the type moves over a fill that stays put).",
+    "hint": "Which box this layer is measured against: each glyph, the whole word, or the frame. A shader pinned to the frame stays put whatever this says.",
     "key": "appearance.Lfill.anchor",
     "kind": "select",
     "label": "Fill · Fill anchor",
@@ -877,7 +877,7 @@ exports[`vtAgentControls > is a characterization snapshot, with and without a fo
   {
     "default": "glyph",
     "group": "Paint",
-    "hint": "Which box this layer is measured against: each glyph, the whole word, or the frame (so the type moves over a fill that stays put).",
+    "hint": "Which box this layer is measured against: each glyph, the whole word, or the frame. A shader pinned to the frame stays put whatever this says.",
     "key": "layer.anchor",
     "kind": "select",
     "label": "Fill anchor",
@@ -1060,7 +1060,7 @@ exports[`vtAgentControls > is a characterization snapshot, with and without a fo
   {
     "default": "glyph",
     "group": "Paint",
-    "hint": "Which box this layer is measured against: each glyph, the whole word, or the frame (so the type moves over a fill that stays put).",
+    "hint": "Which box this layer is measured against: each glyph, the whole word, or the frame. A shader pinned to the frame stays put whatever this says.",
     "key": "appearance.Lstroke.anchor",
     "kind": "select",
     "label": "Stroke · Fill anchor",

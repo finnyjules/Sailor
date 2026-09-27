@@ -50,6 +50,9 @@ export const RUNNER_OUTPUT_CLASSES: ReadonlySet<string> = new Set([
   'PersonSwapVideo',
   ...EFFECT_OUTPUT_NODES,
   'ShaderEffect',
+  // R3.3: the LLM text nodes are ComfyUI output nodes (is_output_node=True).
+  'ChatLLMNode', 'ImprovePromptNode', 'SummarizeTextNode', 'TranslateTextNode',
+  'RewriteToneNode', 'BrainstormIdeasNode', 'ReasonStepByStepNode',
 ])
 
 /** ComfyUI's node_errors entry for a node that failed validation. */

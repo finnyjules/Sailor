@@ -20,6 +20,7 @@ import { SHARED_PRICED_CLASS_SET, priceNode } from '#shared/pricing/nodePrice'
 import { creditsForUsd, usdChargedAtCost } from '#shared/pricing/markup'
 import { callCredits, callsCredits } from '#shared/pricing/pipelinePrice'
 import { PAID_RATES, otherCardFor, paidCallUsd } from '#shared/pricing/paidRates'
+import { LLM_ENDPOINTS, LLM_TEXT_CLASSES } from '#shared/runner/llm'
 import { PAID_NODE_CLASSES, TOKEN_TEXT_CAP_BYTES, paidCalls, paidNoCall, tokenCeiling, utf8Bytes } from '#shared/pricing/paidSettings'
 import { MODERATION_MAX_INPUT_BYTES } from '~~/server/utils/moderation'
 import { editUsd } from '#shared/pricing/editRates'
@@ -137,8 +138,8 @@ describe('paidCallUsd', () => {
     expect(paidCallUsd({ endpoint: 'gpu', fallbacks: [{ endpoint: 'call' }] }, T)).toBe(0.35)
     expect(paidCallUsd({ endpoint: 'call', fallbacks: [{ endpoint: 'nobody/knows' }] }, T)).toBeNull()
   })
-  it('the real table adds no price: empty until a task fills it', () => {
-    expect(Object.keys(PAID_RATES)).toEqual([])
+  it('the real table holds only the cards the tasks added (R3.3: the LLM text nodes)', () => {
+    expect(Object.keys(PAID_RATES).sort()).toEqual([...LLM_ENDPOINTS].sort())
   })
   it('no paid card duplicates an edit, clip or video card (each rate lives in one place)', () => {
     for (const endpoint of Object.keys(PAID_RATES)) expect(otherCardFor(endpoint), endpoint).toBeNull()
@@ -189,9 +190,9 @@ describe('tokenCeiling', () => {
 // ── priceNode ────────────────────────────────────────────────────────────────
 
 describe('priceNode for a paid class', () => {
-  it('stand-ins are shared-priced classes; the real list is empty (no family, no price moved)', () => {
+  it('stand-ins are shared-priced classes; the real list is the tasks\' classes (R3.3: the LLM text nodes)', () => {
     for (const ct of Object.keys(STAND_IN)) expect(SHARED_PRICED_CLASS_SET.has(ct)).toBe(true)
-    expect(PAID_NODE_CLASSES).toEqual(Object.keys(STAND_IN))
+    expect(PAID_NODE_CLASSES).toEqual([...LLM_TEXT_CLASSES, ...Object.keys(STAND_IN)])
   })
 
   it('a token node: the hold is creditsForUsd of the ceiling (rule (c), tokenCeiling)', () => {
@@ -245,15 +246,16 @@ describe('priceNode for a paid class', () => {
   })
 
   it('the real paidCalls refuses a class no task has planned, and paidNoCall is false for it', () => {
-    expect(paidCalls('SummarizeTextNode', { text: '' }, {})).toEqual({ refused: 'SummarizeTextNode is not priced by its calls' })
-    expect(paidNoCall('SummarizeTextNode', { text: '' })).toBe(false)
+    expect(paidCalls('DescribeImageNode', { prompt: '' }, {})).toEqual({ refused: 'DescribeImageNode is not priced by its calls' })
+    expect(paidNoCall('DescribeImageNode', { prompt: '' })).toBe(false)
   })
 })
 
 describe('GRAPH_NODE_CREDITS', () => {
   it('still prices every class no task has moved, at its flat figure', () => {
     const rows = Object.entries(GRAPH_NODE_CREDITS)
-    expect(rows.length).toBeGreaterThan(40)
+    // (R3.3 moved the seven LLM text nodes out.)
+    expect(rows.length).toBeGreaterThan(30)
     for (const [ct, flat] of rows) {
       expect(PAID_NODE_CLASSES.includes(ct), ct).toBe(false)
       expect(priceGraph({ n: { class_type: ct, inputs: {} } }).nodes!.n, ct).toBe(flat)
@@ -283,8 +285,8 @@ describe('PAID_TEXT_INPUTS', () => {
   const table = PAID_TEXT_INPUTS as Record<string, readonly string[]>
   afterEach(() => { delete table.GenerateImageNode; delete table.TestTokenNode })
 
-  it('is empty until a task fills it', () => {
-    expect(Object.keys(PAID_TEXT_INPUTS)).toEqual([])
+  it('lists only the tasks\' classes (R3.3: the LLM text nodes)', () => {
+    expect(Object.keys(PAID_TEXT_INPUTS)).toEqual([...LLM_TEXT_CLASSES])
   })
 
   it('extraPromptTexts reads a paid class’s listed inputs (typed text only)', () => {

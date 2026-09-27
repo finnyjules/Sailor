@@ -121,6 +121,7 @@ import { planShaderEffect } from './cards/shaderEffect'
 import { effectSpec } from './effects/table'
 import { planEffect } from './effects/plan'
 import { planPainter } from './effects/painter'
+import { planLlm } from './generators/llm'
 import type { KeptExt } from './keptBytes'
 import type { AnswerKind } from './answerDownload'
 import { filesOf } from './values'
@@ -213,7 +214,14 @@ export type NodePlan =
      * `valuesOf`; nothing is downloaded.
      */
     media: 'image' | 'video' | 'audio' | 'glb' | 'value'; prefix: string
-    uiFor(files: OutputFile[]): Record<string, unknown> | null
+    /** What the node shows, from its files (and, for media 'value', the values it hands on). */
+    uiFor(files: OutputFile[], values?: Record<number, RunnerValue>): Record<string, unknown> | null
+    /**
+     * 'same-request' (ruling (d), the LLM text nodes): a request byte-identical
+     * to one this user already made gives back that answer, free, although it
+     * carries no seed. Absent: reused only with an explicit seed (fingerprint.ts).
+     */
+    reuse?: 'same-request'
     /** Python reads `_first_output_url`: only the first URL is downloaded. Default 'all' (as before R3). */
     take?: 'first' | 'all'
     /** The answer's file URLs where they aren't Replicate's `output` list or fal's `images`/`video` (Trellis's `model_file`, Layerize's pick by extension). */
@@ -1021,6 +1029,15 @@ async function planNodeRequest(ctx: PlanContext): Promise<NodePlan> {
       return staticDerive(ctx)
 
     // ── cards (step 3, R1.1): Text, Moodboard, 3D model ──
+    // ── llm-text (R3.3): the seven LLM text nodes, one Replicate call each (generators/llm.ts) ──
+    case 'ChatLLMNode':
+    case 'ImprovePromptNode':
+    case 'SummarizeTextNode':
+    case 'TranslateTextNode':
+    case 'RewriteToneNode':
+    case 'BrainstormIdeasNode':
+    case 'ReasonStepByStepNode':
+      return planLlm(ctx)
     case 'Text': return staticDerive(ctx, textCardUi)
     case 'Moodboard': return staticDerive(ctx)
     case 'Model3D': return staticDerive(ctx, textCardUi)
