@@ -1,6 +1,6 @@
 # The pen, stages 4–8 — tangency, Clean up, menus and properties, fills, corners / offset / repeat
 
-Status: designed 2026-09-26 on the owner's "let's build stage 4-8 first"; stage 4 built 2026-09-26; stage 5 built 2026-09-27
+Status: designed 2026-09-26 on the owner's "let's build stage 4-8 first"; stage 4 built 2026-09-26; stage 5 built 2026-09-27; stage 6 built 2026-09-27
 
 ## Why
 

@@ -74,6 +74,21 @@ The brush toolbar gains a **Paint** row: Colour (as before) or six live material
 
 **Next.** Part 3: "More shaders" from the full library and painted effects.
 
+### The pen — right-click menu, action wheel, Properties (stage 6) — LANDED 2026-09-27
+
+Spec `docs/superpowers/specs/2026-09-26-pen-stages-4-8-design.md` (Stage 6), plan `docs/superpowers/plans/2026-09-27-pen-stage-6-menus-properties.md`; commits 0e5333b79 … 42f0bfb89, final fix d47b364d2. On the pen page, in the Frame and in Shape Studio:
+
+- **Right-click** opens a menu headed by what is selected ("2 points", "1 arc"): the rules the rules row offers, then Make guide (X), Flip (⇧H / ⇧V), Mirror…, Repeat…, Copy (⌘C), Copy as SVG, Paste (⌘V), Delete — each with its key; greyed items say why in their card. On empty space: Paste and Select all (⌘A). The ContextMenu key and ⇧F10 open it too.
+- **Right-press and drag** opens an 8-slice action wheel (Zoah's layouts for points and for segments); release on a slice to run it, in the middle to cancel.
+- **Properties** replaces the side panel while the pen is open: a point's X/Y, a line's length and angle (as seen on screen), an arc's radius (with a lock), length and sweep, a circle's radius (lock); the selection's rules by name ("Tangent — Line 2 · Arc 1"), hover lights both pieces, × removes, + adds any rule — refused in plain words ("Already true", "Conflicts with another rule").
+- **Copy and paste inside the pen**, with the rules among the pieces, across the pen page, the Frame and Shape Studio at the same on-screen size.
+
+**Proof.** 995 unit tests (pen-*, sketch-*, cleanup-*); real-mouse `tests/pen-menus.spec.ts` (20) plus the other nine pen specs, 112/112, all three hosts, 1280 and 1024 wide.
+
+**Rulings.** One action registry feeds the menu, the wheel and Properties; the rules row is unchanged. Opening a menu does only cheap checks; the "Conflicts" check runs a small window solve only when a rule is hovered or picked, and an uncertain answer never refuses. Repeat and Mirror copy links stay hidden from Properties. A typed size is solved on a copy first and never leaves a rejected shape in the Frame. Piece names are numbered per kind in drawing order. While the pen is open the Frame's bottom tool row sits between its side panels.
+
+**Known limits.** Stage 8 items (Offset, Round corner, Chamfer) are absent until built; screen readers don't hear the menu's keyboard highlight; on Windows/Linux ⇧F10 may also show the browser's menu; cross-host paste doesn't match a rotated target; a menu can float over a view the host re-fits itself.
+
 ### The pen — Clean up (stage 5) — LANDED 2026-09-27
 
 Spec `docs/superpowers/specs/2026-09-26-pen-stages-4-8-design.md` (Stage 5), plan `docs/superpowers/plans/2026-09-26-pen-stage-5-clean-up.md`; commits 4fd5c9c64 … 1eac787b7, final fixes 53155595e, 4903cecf1, ccc8f34ac, c3c9bf2ea, e162be829. On the pen page, in the Frame and in Shape Studio:
