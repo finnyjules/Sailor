@@ -142,6 +142,29 @@ describe('useCharacters', () => {
     expect(portraitUrl(c, 'punk')).toBe('/view?filename=p1.png&type=input')
   })
 
+  it('resolveCastSets returns /view URLs by role, keeping missing roles null', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => ({ characters: [] }) }))
+    const { useCharacters } = await import('~/composables/useCharacters')
+    const { characters, resolveCastSets } = useCharacters()
+    characters.value = [{
+      ...REVA,
+      states: [
+        { ...REVA.states[0]!, panels: [{ slot: 'portrait', filename: 'portrait.png' }, { slot: 'body-front', filename: 'bf.png' }] },
+        REVA.states[1]!,
+      ],
+    }]
+    expect(resolveCastSets([{ slug: 'reva', stateId: null }, { slug: 'ghost', stateId: null }])).toEqual({
+      reva: {
+        name: 'Reva',
+        front: '/view?filename=portrait.png&type=input',
+        portrait: '/view?filename=portrait.png&type=input',
+        bodyFront: '/view?filename=bf.png&type=input',
+        bodyBack: null,
+      },
+      ghost: { name: 'ghost', front: null, portrait: null, bodyFront: null, bodyBack: null },
+    })
+  })
+
   it('stateDescriptors maps slug → descriptor, dropping empty/whitespace ones', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => ({ characters: [] }) }))
     const { useCharacters } = await import('~/composables/useCharacters')

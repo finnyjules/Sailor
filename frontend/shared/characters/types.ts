@@ -118,7 +118,8 @@ export function panelFilename(state: Pick<CharacterState, 'panels'>, slot: Panel
 
 /**
  * The consumption list, identity-asset-first: once a composite sheet exists it
- * leads (so CAST_REF_CAP=1 sends the sheet); before that, cover-first refs.
+ * leads (so it is the first, highest-weighted reference); before that,
+ * cover-first refs.
  */
 export function identityRefs(state?: CharacterState): string[] {
   if (!state) return []
@@ -126,20 +127,43 @@ export function identityRefs(state?: CharacterState): string[] {
   return state.sheetImage ? [state.sheetImage, ...rest] : rest
 }
 
+export interface IdentityRefSet { name: string; front: string | null; portrait: string | null; bodyFront: string | null; bodyBack: string | null }
+
+/** The look's face, else the character's approved face (spec: one face per character). */
+export function lookFaceFilename(record: CharacterRecord, state: CharacterState | undefined): string | null {
+  return state?.face?.filename ?? record.face?.filename ?? null
+}
+
+/** Every clean single-person picture of one look, by role. Never the sheet grid. */
+export function identityRefSet(record: CharacterRecord, state: CharacterState | undefined): IdentityRefSet {
+  const cover = state ? coverFirstRefs(state)[0] ?? null : null
+  const front = (state ? panelFilename(state, 'face-neutral') : null)
+    ?? lookFaceFilename(record, state)
+    ?? (state ? panelFilename(state, 'portrait') : null)
+    ?? cover
+  return {
+    name: record.name,
+    front,
+    portrait: state ? panelFilename(state, 'portrait') : null,
+    bodyFront: state ? panelFilename(state, 'body-front') : null,
+    bodyBack: state ? panelFilename(state, 'body-back') : null,
+  }
+}
+
 /**
  * What a VIDEO model gets for one character look: at most two pictures of the
  * same person. The combined sheet grid is never sent — Seedance's own guide
  * warns multi-view images read as several people. Portrait + full-body front
- * come from one generation, so they are one person; without panels, only the
- * cover (two photos could be two different people).
+ * come from one generation, so they are one person; the face stands in for a
+ * missing portrait; without panels, only the front (cover) alone — two photos
+ * could be two different people.
  */
-export function videoIdentityRefs(state?: CharacterState): string[] {
-  if (!state) return []
-  const panels = [panelFilename(state, 'portrait'), panelFilename(state, 'body-front')]
+export function videoIdentityRefs(record: CharacterRecord, state: CharacterState | undefined): string[] {
+  const set = identityRefSet(record, state)
+  const refs = [set.portrait ?? lookFaceFilename(record, state), set.bodyFront]
     .filter((f): f is string => !!f)
-  if (panels.length) return panels
-  const cover = coverFirstRefs(state)[0]
-  return cover ? [cover] : []
+  if (refs.length) return [...new Set(refs)]
+  return set.front ? [set.front] : []
 }
 
 /** Visible text for a non-locked state's flag in cast/state pickers — never hidden, just badged. */
