@@ -92,7 +92,7 @@ export function insertPieces(doc: SketchDoc, clip: SketchDoc, offset: Vec2): { c
   // a copy landing over other pieces is cut into several areas: fill all of
   // those inside the copied filled areas (read from the clip, moved), not
   // just the one each seed finds
-  if (clip.fills?.length) fillCopiedAreas(doc, fillAreas(clip, clip.fills, p => ({ x: p.x + offset.x, y: p.y + offset.y })))
+  if (clip.fills?.length) fillCopiedAreas(doc, fillAreas(clip, clip.fills, p => ({ x: p.x + offset.x, y: p.y + offset.y }), sd => mapSeed(sd, m)))
   const used = new Set<EntityId>()
   for (const e of added) {
     if (e.kind === 'line') { used.add(e.p1); used.add(e.p2) }

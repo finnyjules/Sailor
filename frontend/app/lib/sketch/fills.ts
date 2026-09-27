@@ -232,13 +232,15 @@ export function addFillAt(doc: SketchDoc, p: Vec2): boolean {
 // ── copies fill their whole area ────────────────────────────────────────────
 
 /** A filled area's outline, to test copied faces against: its outer polygon
- *  and its holes' (drawing coordinates, after the copy's move). */
-export interface FillArea { outer: Vec2[]; holes: Vec2[][]; box: Box }
+ *  and its holes' (drawing coordinates, after the copy's move), and the seed
+ *  of the fill that fills it (the copy's own seed, once mapped). */
+export interface FillArea { outer: Vec2[]; holes: Vec2[][]; box: Box; seed: FillSeed }
 
 /** The areas `fills` fill in `doc` (asleep ones have none), each point sent
- *  through `move` — where a copy of those areas lands. Read before the copy
- *  exists (a copy over the source cuts the source's own area). */
-export function fillAreas(doc: SketchDoc, fills: readonly SketchFill[], move: (p: Vec2) => Vec2): FillArea[] {
+ *  through `move` and each seed through `mapS` — where a copy of those areas
+ *  lands. Read before the copy exists (a copy over the source cuts the
+ *  source's own area). */
+export function fillAreas(doc: SketchDoc, fills: readonly SketchFill[], move: (p: Vec2) => Vec2, mapS: (s: FillSeed) => FillSeed = s => s): FillArea[] {
   if (!fills.length) return []
   const fs = fillFaces(doc)
   const out: FillArea[] = []
@@ -248,18 +250,18 @@ export function fillAreas(doc: SketchDoc, fills: readonly SketchFill[], move: (p
     if (g == null || seen.has(g)) continue
     seen.add(g)
     const face = fs.faces[g]!
-    out.push({ outer: fs.cycles[face.outer]!.poly, holes: face.holes.map(h => fs.cycles[h]!.poly), box: face.box })
+    out.push({ outer: fs.cycles[face.outer]!.poly, holes: face.holes.map(h => fs.cycles[h]!.poly), box: face.box, seed: f.seed })
   }
-  return moveAreas(out, move)
+  return moveAreas(out, move, mapS)
 }
 
-/** The same areas sent through `move` (a copy's turn or mirror). */
-export function moveAreas(areas: readonly FillArea[], move: (p: Vec2) => Vec2): FillArea[] {
+/** The same areas sent through `move` (a copy's turn or mirror), their seeds through `mapS`. */
+export function moveAreas(areas: readonly FillArea[], move: (p: Vec2) => Vec2, mapS: (s: FillSeed) => FillSeed = s => s): FillArea[] {
   return areas.map(a => {
     const outer = a.outer.map(move)
     let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity
     for (const q of outer) { x0 = Math.min(x0, q.x); y0 = Math.min(y0, q.y); x1 = Math.max(x1, q.x); y1 = Math.max(y1, q.y) }
-    return { outer, holes: a.holes.map(h => h.map(move)), box: { x0, y0, x1, y1 } }
+    return { outer, holes: a.holes.map(h => h.map(move)), box: { x0, y0, x1, y1 }, seed: mapS(a.seed) }
   })
 }
 
@@ -273,6 +275,16 @@ function distToPoly(poly: Vec2[], p: Vec2): number {
     best = Math.min(best, Math.hypot(p.x - a.x - dx * k, p.y - a.y - dy * k))
   }
   return best
+}
+
+// p lies in face g: inside its outer outline and in none of its holes (the
+// faces nested inside g are its holes, so this is faceAt(fs, p) === g
+// without testing every face)
+function inFace(fs: FaceSet, g: number, p: Vec2): boolean {
+  const f = fs.faces[g]!
+  if (p.x < f.box.x0 || p.x > f.box.x1 || p.y < f.box.y0 || p.y > f.box.y1) return false
+  if (winding(fs.cycles[f.outer]!.poly, p) === 0) return false
+  return !f.holes.some(h => Math.abs(fs.cycles[h]!.area) > fs.tol * fs.tol && winding(fs.cycles[h]!.poly, p) !== 0)
 }
 
 /** A point as deep inside face g as a few tries find (steps in from the
@@ -293,7 +305,7 @@ export function deepPoint(fs: FaceSet, g: number): Vec2 | null {
       else { const a = e.a0! + e.sweep! / 2; const s = e.sweep! > 0 ? 1 : -1; tx = -Math.sin(a) * s; ty = Math.cos(a) * s }
       const L = Math.hypot(tx, ty) || 1
       const p = { x: m.x - (ty / L) * step * size, y: m.y + (tx / L) * step * size }
-      if (faceAt(fs, p) !== g) continue
+      if (!inFace(fs, g, p)) continue
       const d = Math.min(...outlines.map(o => distToPoly(o, p)))
       if (d > bestD) { bestD = d; best = p }
     }
@@ -305,18 +317,33 @@ const inArea = (a: FillArea, p: Vec2) =>
   p.x >= a.box.x0 && p.x <= a.box.x1 && p.y >= a.box.y0 && p.y <= a.box.y1
   && winding(a.outer, p) !== 0 && !a.holes.some(h => winding(h, p) !== 0)
 
-/** After a copy lands: fill every face of `doc` whose inside lies inside one
- *  of the copied filled areas — the copy may overlap other pieces, which cut
- *  its area into several faces, and its seed finds only one of them. Never on
- *  a guess: only faces whose deep point is inside a copied area. */
+/** After a copy lands: fill every face of `doc` that lies inside one of the
+ *  copied filled areas — the copy may overlap other pieces, which cut its
+ *  area into several faces, and its seed finds only one of them. Never on a
+ *  guess: an area counts only when the copy's own seed finds a closed area in
+ *  the target (a copy that stays open there sleeps, and fills nothing), and a
+ *  face only when its box and its whole outline lie inside the area (points on
+ *  the area's own edge count as inside) and its deep point is inside it — so a
+ *  face straddling the copied outline is never filled. */
 export function fillCopiedAreas(doc: SketchDoc, areas: readonly FillArea[]): void {
   if (!areas.length) return
   const fs = fillFaces(doc)
+  const closed = areas.filter(a => resolveFill(fs, { id: '', seed: a.seed }) != null)
+  if (!closed.length) return
+  const tolOf = (a: FillArea) => Math.max(fs.tol, 2e-3 * Math.hypot(a.box.x1 - a.box.x0, a.box.y1 - a.box.y0))
+  const onOrIn = (a: FillArea, p: Vec2, tol: number) =>
+    inArea(a, p) || [a.outer, ...a.holes].some(o => distToPoly(o, p) <= tol)
   const pts: Vec2[] = []
   fs.faces.forEach((face, g) => {
-    if (!areas.some(a => face.box.x0 <= a.box.x1 && face.box.x1 >= a.box.x0 && face.box.y0 <= a.box.y1 && face.box.y1 >= a.box.y0)) return
+    const b = face.box
+    const fits = closed.filter(a => {
+      const tol = tolOf(a)
+      return b.x0 >= a.box.x0 - tol && b.x1 <= a.box.x1 + tol && b.y0 >= a.box.y0 - tol && b.y1 <= a.box.y1 + tol
+        && fs.cycles[face.outer]!.poly.every(p => onOrIn(a, p, tol))
+    })
+    if (!fits.length) return
     const p = deepPoint(fs, g)
-    if (p && areas.some(a => inArea(a, p))) pts.push(p)
+    if (p && fits.some(a => inArea(a, p))) pts.push(p)
   })
   for (const p of pts) addFillAt(doc, p)
 }

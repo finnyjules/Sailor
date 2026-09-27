@@ -124,3 +124,47 @@ describe('Repeat and Mirror over overlapping neighbours fill each copy whole', (
     expect(findFaces(d).faces.length).toBeGreaterThan(3)
   })
 })
+
+describe('a copy that stays open in the target fills nothing (never on a guess)', () => {
+  // a 4×4 square closed only across a 0.04 gap, filled at a fill gap of 0.1
+  function gapClip() {
+    const s = doc()
+    const ids = [[0.04, 0], [4, 0], [4, 4], [0, 4], [0, 0.03]].map(([x, y]) => addPoint(s, x!, y!))
+    const P = addPath(s, ids, ids.slice(1).map(() => ({ kind: 'line' as const })), false)
+    toggleFillAt(s, { x: 2, y: 2 }, 0.1)
+    expect(fillState(s).filled).toHaveLength(1)
+    return extractPieces(s, [P], [])
+  }
+  for (const size of [6, 20]) {
+    it(`pasted inside an unfilled ${size}×${size} square of a drawing whose fill has no gap: the big square stays empty, the copy’s fill sleeps`, () => {
+      const clip = gapClip()
+      const d = doc()
+      poly(d, [[0, 0], [size, 0], [size, size], [0, size]])
+      poly(d, [[30, 0], [32, 0], [32, 2], [30, 2]])
+      toggleFillAt(d, { x: 31, y: 1 }, 0)
+      expect(d.fillGap).toBeUndefined()
+      const before = cloneDoc(d)
+      const off = (size - 4) / 2
+      insertPieces(d, clip, { x: off, y: off })
+      settle(before, d)
+      const st = fillState(d)
+      const big = faceAt(st.fs, { x: 0.3, y: 0.3 })!
+      expect(big).not.toBeNull()
+      expect(st.filled.includes(big)).toBe(false)
+      expect(st.filled).toHaveLength(1)   // the small square's own fill only
+      expect(d.fills).toHaveLength(2)
+      expect(st.asleep).toHaveLength(1)
+    })
+    it(`the same paste into a drawing with no fills brings its gap: the copy closes and only it fills (${size}×${size})`, () => {
+      const clip = gapClip()
+      const d = doc()
+      poly(d, [[0, 0], [size, 0], [size, size], [0, size]])
+      const off = (size - 4) / 2
+      insertPieces(d, clip, { x: off, y: off })
+      const st = fillState(d)
+      expect(st.filled).toHaveLength(1)
+      expect(st.filled.includes(faceAt(st.fs, { x: off + 2, y: off + 2 })!)).toBe(true)
+      expect(st.filled.includes(faceAt(st.fs, { x: 0.3, y: 0.3 })!)).toBe(false)
+    })
+  }
+})
