@@ -70,6 +70,20 @@ export function castMemberPictures(value: IdentityRefSet | string[] | undefined,
   return imagesModeRefs(value, profile)
 }
 
+/**
+ * True when an `images`-mode model's cast pictures stay out of the request:
+ * first/last-frame mode on a model that can't send references beside a first
+ * frame (Ruling J). The characters are then named in the prompt without tags.
+ */
+export function castPicturesLeftOut(sheet: ShotSheet, profile: ModelProfile): boolean {
+  return profile.castMode === 'images' && sheet.mode === 'firstLastFrame' && !profile.refsWithFirstFrame
+}
+
+/** First/last-frame mode, a cast, no first frame, on a model that can't send references beside one. */
+export function castNeedsFirstFrameWords(profile: ModelProfile): string {
+  return `${profile.label} films characters here from a first frame. Make one from the cast, upload one, or switch to reference mode.`
+}
+
 export function materializeCast(
   sheet: ShotSheet,
   resolved: CastResolved,
@@ -108,6 +122,22 @@ export function materializeCast(
       bundles.push({ slug: m.slug, front, refs })
     }
     return { sheet: { ...sheet, references: renumber(manual) }, issues, bundles }
+  }
+
+  // Ruling J (stage 3 final fix): a model that can't send references beside a
+  // first frame gets NO cast pictures in first/last-frame mode — the made
+  // first frame already holds the characters, and castClause names them
+  // without picture tags. The rules' first-frame-drops-refs warning says so.
+  // With no first frame set, the characters would reach the model as names
+  // alone, so that is refused in words instead.
+  if (castPicturesLeftOut(sheet, profile)) {
+    if (!sheet.firstFrame) {
+      issues.push({ level: 'error', code: 'cast-needs-first-frame', message: castNeedsFirstFrameWords(profile) })
+    }
+    for (const m of members) {
+      if (!imagesModeRefs(resolved[m.slug], profile).length) noRefsIssue(m)
+    }
+    return { sheet: { ...sheet, references: renumber(manual) }, issues, bundles: [] }
   }
 
   const manualImages = manual.filter(r => r.kind === 'image').length
@@ -164,6 +194,20 @@ export function castClause(
       const d = descriptors?.[b.slug]?.trim()
       return d ? `${name} (${d}) ${tag}` : `${name} ${tag}`
     })
+    return `Characters: ${parts.join('; ')}.`
+  }
+
+  // Ruling J: no cast pictures are sent (castPicturesLeftOut), so the cast is
+  // named without picture tags — the first frame already shows them.
+  if (castPicturesLeftOut(sheet, profile)) {
+    if (!sheet.cast.length) return ''
+    const seen = new Set<string>()
+    const parts = sheet.cast
+      .filter(m => !seen.has(m.slug) && seen.add(m.slug))
+      .map((m) => {
+        const d = descriptors?.[m.slug]?.trim()
+        return d ? `${m.name} (${d})` : m.name
+      })
     return `Characters: ${parts.join('; ')}.`
   }
 

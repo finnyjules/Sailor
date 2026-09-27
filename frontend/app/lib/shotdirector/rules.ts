@@ -29,6 +29,8 @@ export interface RefCaps {
   supportsLastFrame: boolean
   /** can cast references and a first frame be sent together. */
   refsWithFirstFrame: boolean
+  /** the ratios reference mode takes, and the words for another (Veo: 16:9 / 9:16). Absent = any. */
+  referenceAspectRatios?: { allowed: readonly string[], message: string }
 }
 
 function countKind(sheet: ShotSheet, kind: RefKind): number {
@@ -52,6 +54,10 @@ export function validateShotSheet(sheet: ShotSheet, caps: RefCaps): ValidationIs
   }
   if (sheet.mode === 'firstLastFrame' && !caps.supportsFirstLastFrame) {
     err('firstlast-unsupported', 'This model does not support first/last-frame input.')
+  }
+  if (sheet.mode === 'reference' && caps.referenceAspectRatios
+    && !caps.referenceAspectRatios.allowed.includes(sheet.format.aspectRatio)) {
+    err('reference-ratio-unsupported', caps.referenceAspectRatios.message)
   }
   if (caps.requiresFirstFrame && !sheet.firstFrame) {
     err('first-frame-required', `${caps.label} needs a first frame. Make one from the cast or upload one.`)

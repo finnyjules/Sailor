@@ -73,15 +73,30 @@ export function veo31RefsProblem(adv: Record<string, unknown>, hasFirstFrame: bo
   return null
 }
 
+/**
+ * Ruling L (characters stage 3 final fix): fal's Veo 3.1 reference-to-video
+ * takes 16:9 or 9:16 only. Another ratio with reference pictures is refused
+ * in these words (the runner gate reports it before the hold, and Shot
+ * Director's rules raise it), never sent as 16:9.
+ */
+export const VEO_31_REFS_RATIO_WORDS = 'Veo 3.1 reference pictures work only in 16:9 or 9:16.'
+
+/** null when the ratio fits Veo 3.1's reference pictures (or none are sent); else VEO_31_REFS_RATIO_WORDS. An empty ratio is the builder's 16:9. */
+export function veo31RefsRatioProblem(adv: Record<string, unknown>, aspectRatio: string): string | null {
+  const pics = Array.isArray(adv.image_urls) ? adv.image_urls.length : 0
+  if (!pics) return null
+  return VEO_AR.has(aspectRatio || '16:9') ? null : VEO_31_REFS_RATIO_WORDS
+}
+
 function veo31({ prompt, aspectRatio, duration, seed, image, adv }: VideoBuildArgs) {
-  const p = veo31RefsProblem(adv, !!(image || adv.image_url))
+  const p = veo31RefsProblem(adv, !!(image || adv.image_url)) ?? veo31RefsRatioProblem(adv, aspectRatio)
   if (p) throw new Error(p)
   const pics = Array.isArray(adv.image_urls) ? adv.image_urls as unknown[] : []
   if (pics.length) {
     return {
       prompt,
       image_urls: pics,
-      aspect_ratio: arOr(VEO_AR, aspectRatio, '16:9'),
+      aspect_ratio: aspectRatio || '16:9',
       duration: '8s',
       resolution: lowerEnum(adv, 'resolution', VEO_RESOLUTIONS, '720p'),
       generate_audio: optBool(adv, 'generate_audio', true),
@@ -229,8 +244,20 @@ function runwayGen45({ prompt, aspectRatio, duration, seed, image }: VideoBuildA
   return inp
 }
 
+/**
+ * Ruling H (characters stage 3 final fix): Kling 3's last frame
+ * (`end_image_url` in the options) is sent on fal (twins.ts klingV3Fal,
+ * `end_image_url`) and on this Replicate backup (`end_image`), both only
+ * beside a start frame (both schemas: the last frame "requires start_image").
+ * Without one it is refused in these words, never dropped.
+ */
+export const KLING_LAST_FRAME_NEEDS_FIRST = 'Kling 3 needs a first frame to use a last frame. Add a first frame or remove the last one.'
+
 // _b_kling_v3 (:252). kwaivgi/kling-v3-video has no `cfg_scale` and no seed (Python sends both).
+// The last frame goes as `end_image` beside the start frame (Ruling H; Python sends none).
 function klingV3({ prompt, aspectRatio, duration, image, adv }: VideoBuildArgs) {
+  const last = optStr(adv, 'end_image_url', '')
+  if (last && !image) throw new Error(KLING_LAST_FRAME_NEEDS_FIRST)
   const inp: Record<string, unknown> = {
     prompt,
     aspect_ratio: arOr(KLING_AR, aspectRatio, '16:9'),
@@ -239,6 +266,7 @@ function klingV3({ prompt, aspectRatio, duration, image, adv }: VideoBuildArgs) 
   }
   setNegative(inp, adv)
   if (image) inp.start_image = image
+  if (image && last) inp.end_image = last
   return inp
 }
 

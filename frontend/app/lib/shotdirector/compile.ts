@@ -125,6 +125,7 @@ export function compileShot(
     requiresFirstFrame: profile.requiresFirstFrame,
     supportsLastFrame: profile.supportsLastFrame,
     refsWithFirstFrame: profile.refsWithFirstFrame,
+    referenceAspectRatios: profile.referenceAspectRatios,
   }
   const issues = validateShotSheet(sheet, caps)
   const clause = castClause(sheet, profile, opts?.castDescriptors, opts?.castBundles)

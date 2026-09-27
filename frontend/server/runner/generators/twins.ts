@@ -184,6 +184,7 @@ import { HAPPYHORSE_11_ID, happyHorse11OnReplicate } from './happyHorse11'
 import { GROK_IMAGINE_VIDEO_15_ID, grokImagineVideo15OnReplicate } from './grokImagineVideo15'
 import { arOr, maybeSetSeed, optBool, optEnum, optStr } from './opts'
 import type { VideoBuildArgs } from './types'
+import { KLING_LAST_FRAME_NEEDS_FIRST } from './video'
 
 export interface ServiceCall { provider: RunnerProvider; endpoint: string; payload: Record<string, unknown> }
 
@@ -354,11 +355,14 @@ export const KLING_V3_FAL_APP = 'fal-ai/kling-video/v3/pro'
  */
 export const KLING_ELEMENTS_NEED_FRAME = 'Kling 3 needs a first frame to film characters. Make one or upload one.'
 export const KLING_ELEMENTS_TOO_MANY_PICTURES = 'Kling 3 takes a face and at most 3 more pictures per character.'
+// Kling 3's last frame (Ruling H): see video.ts KLING_LAST_FRAME_NEEDS_FIRST.
+export { KLING_LAST_FRAME_NEEDS_FIRST }
 
 interface KlingElement { frontal_image_url?: unknown; reference_image_urls?: unknown }
 
-/** null when `adv.elements` fits Kling 3's own rule; else the plain refusal. */
+/** null when `adv.elements` and the last frame fit Kling 3's own rule; else the plain refusal. */
 export function klingElementsProblem(adv: Record<string, unknown>, hasFirstFrame: boolean): string | null {
+  if (optStr(adv, 'end_image_url', '') && !hasFirstFrame) return KLING_LAST_FRAME_NEEDS_FIRST
   const elements = Array.isArray(adv.elements) ? adv.elements as KlingElement[] : []
   if (!elements.length) return null
   if (!hasFirstFrame) return KLING_ELEMENTS_NEED_FRAME
@@ -379,7 +383,11 @@ export function klingV3Fal({ prompt, aspectRatio, duration, image, adv }: VideoB
     // Always sent: fal's own default is not empty (see above).
     negative_prompt: optStr(adv, 'negative_prompt', ''),
   }
-  if (image) inp.start_image_url = image
+  if (image) {
+    inp.start_image_url = image
+    const last = optStr(adv, 'end_image_url', '')
+    if (last) inp.end_image_url = last
+  }
   else inp.aspect_ratio = arOr(KLING_AR, aspectRatio, '16:9')
   const elements = Array.isArray(adv.elements) ? adv.elements as KlingElement[] : []
   if (elements.length) {

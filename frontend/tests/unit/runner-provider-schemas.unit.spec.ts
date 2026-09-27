@@ -183,6 +183,20 @@ describe('Kling 3 elements fit its saved fal schema', () => {
     const call = klingV3Fal({ prompt: '@Element1 waves', aspectRatio: '16:9', duration: 5, seed: 0, image: 'https://fal.test/start.png', adv: { elements: [el] } })
     expectFits('fal', call.endpoint, call.payload)
   })
+  // Ruling H (stage 3 final fix): the last frame goes with the start frame, on fal and on the Replicate backup.
+  it('a last frame beside the start frame passes the saved fal and Replicate schemas', () => {
+    const el = { frontal_image_url: 'https://fal.test/face.png', reference_image_urls: [] }
+    const args = { prompt: '@Element1 waves', aspectRatio: '16:9', duration: 5, seed: 0, image: 'https://fal.test/start.png', adv: { end_image_url: 'https://fal.test/last.png', elements: [el] } }
+    const call = klingV3Fal(args)
+    expect(call.endpoint).toBe('fal-ai/kling-video/v3/pro/image-to-video')
+    expect(call.payload.end_image_url).toBe('https://fal.test/last.png')
+    expectFits('fal', call.endpoint, call.payload)
+    const d = RUNNER_REPLICATE_VIDEO_MODELS['kling-v3']!
+    const payload = d.build({ ...args, adv: { end_image_url: 'https://fal.test/last.png' } })
+    expect(payload.start_image).toBe('https://fal.test/start.png')
+    expect(payload.end_image).toBe('https://fal.test/last.png')
+    expectFits('replicate', d.slug, payload)
+  })
 })
 
 describe('Replicate Generate video builders fit the saved Replicate schemas', () => {
