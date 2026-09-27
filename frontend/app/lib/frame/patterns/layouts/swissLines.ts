@@ -28,19 +28,19 @@ const titleRole = (i: number) => (i ? 'title' + i : 'title')
 export const spacedLines: LayoutDef = {
   id: 'spacedLines', name: 'Spaced lines', fits: [...LINES],
   fn(S, { c, ph, words }) {
-    const { X, SPAN, L, M, GAP, CAP, fitSize, disp, infoStack, photoIn } = S
+    const { X, SPAN, L, LB, M, GAP, CAP, fitSize, disp, infoStack, photoIn } = S
     const n = words.length
-    const total = L(16) - M
+    const total = LB(16) - M
     const size = Math.min(fitSize(words, SPAN(1, 9)), total / (n * CAP * 1.35))
     const cap = CAP * size
     const els: El[] = []
     words.forEach((w, i) => {
-      const base = n === 1 ? L(16) : M + cap + i * (total - cap) / (n - 1)
+      const base = n === 1 ? LB(16) : M + cap + i * (total - cap) / (n - 1)
       els.push(disp(w, { size, x: X(1), base, role: titleRole(i) }))
     })
     const st = infoStack(presentItems(c, COLUMN), 10, 12, M)
     els.push(...st.els)
-    if (ph) els.push(photoIn({ c1: 10, c2: 12, top: st.bottom + GAP * 2, bottom: L(16) }, { ay: 'bottom' }))
+    if (ph) els.push(photoIn({ c1: 10, c2: 12, top: st.bottom + GAP * 2, bottom: LB(16) }, { ay: 'bottom' }))
     return { els, did: 'Each word on its own line, the lines spread from the top margin to the foot.' }
   },
 }
@@ -51,12 +51,12 @@ export const ragged: LayoutDef = {
   // Its seed (index 10) starts the second line on column 4, 7 or 5 for arr 0, 1, 2.
   arrLabels: ['Short indent', 'Long indent', 'Medium indent'],
   fn(S, { c, ph, r, words }) {
-    const { X, SPAN, L, M, GAP, CAP, DISPLAY, w100, disp, infoRow, photoIn, pick, FOOT3 } = S
+    const { X, SPAN, L, LB, M, GAP, CAP, DISPLAY, w100, disp, infoRow, photoIn, pick, FOOT3 } = S
     const starts = words.map((_, i) => i === 0 ? 1 : pick(r, [1, 3, 4, 5, 7]))
     const maxH = ph ? L(13) - L(7) : L(13) - M
     let size = Math.min(...words.map((w, i) => SPAN(starts[i]!, 12) * 100 / w100(w, DISPLAY)))
     size = Math.min(size, maxH / ((words.length - 1) * DISPLAY.lh + CAP))
-    const lastBase = L(13)
+    const lastBase = LB(13)
     const firstBase = lastBase - (words.length - 1) * DISPLAY.lh * size
     const els: El[] = words.map((w, i) => disp(w, { size, x: X(starts[i]!), base: firstBase + i * DISPLAY.lh * size, role: titleRole(i) }))
     const f = infoRow(c, FOOT3, 'foot'); els.push(...f.els)
@@ -133,7 +133,7 @@ export const diagonal: LayoutDef = {
   // Its seed (index 18) turns the title 36° for arr 0 and 2 (the same run) and 26° for arr 1.
   arrLabels: ['Steep', 'Gentle'],
   fn(S, { c, ph, r, lines }) {
-    const { X, XR, SPAN, L, M, GAP, CAP, DISPLAY, SECOND, INFO, w100, blockH, countLines, disp, sec, info, photoIn, pick } = S
+    const { X, XR, SPAN, L, LB, M, GAP, CAP, DISPLAY, SECOND, INFO, w100, blockH, countLines, disp, sec, info, photoIn, pick } = S
     const deg = pick(r, [-18, -26, -36]), a = Math.abs(deg) * Math.PI / 180
     const els: El[] = []
     let headB = M
@@ -142,10 +142,10 @@ export const diagonal: LayoutDef = {
       headB = M + blockH(countLines(c.details, SPAN(1, 8), SECOND, SECOND.size), SECOND.size, SECOND.lh)
     }
     if (c.date) els.push(info(c.date, { x: X(9), w: SPAN(9, 12), top: M, role: 'date' }))
-    let footTop = L(16)
+    let footTop = LB(16)
     if (c.caption) {
-      els.push(info(c.caption, { x: X(1), w: SPAN(1, 6), base: L(16), role: 'caption' }))
-      footTop = L(16) - blockH(countLines(c.caption, SPAN(1, 6), { ...INFO, role: 'caption' }, INFO.size), INFO.size, INFO.lh)
+      els.push(info(c.caption, { x: X(1), w: SPAN(1, 6), base: LB(16), role: 'caption' }))
+      footTop = LB(16) - blockH(countLines(c.caption, SPAN(1, 6), { ...INFO, role: 'caption' }, INFO.size), INFO.size, INFO.lh)
     }
     let zTop = headB + GAP
     if (ph) {
@@ -206,14 +206,14 @@ export const kicker: LayoutDef = {
 export const sidebar: LayoutDef = {
   id: 'sidebar', name: 'Sidebar', fits: [...LINES], smallText: true,
   fn(S, { c, ph, lines }) {
-    const { X, SPAN, L, M, GAP, DISPLAY, sizeFor, blockH, disp, infoStack, photoIn } = S
-    const maxH = (ph ? L(8) : L(16)) - M
+    const { X, SPAN, L, LB, M, GAP, DISPLAY, sizeFor, blockH, disp, infoStack, photoIn } = S
+    const maxH = (ph ? L(8) : LB(16)) - M
     const size = sizeFor(lines, SPAN(1, 8), maxH)
     const els: El[] = [disp(lines.join('\n'), { size, x: X(1), top: M })]
     const st = infoStack(presentItems(c, COLUMN), 10, 12, M)
     els.push(...st.els)
     const tb = M + blockH(lines.length, size, DISPLAY.lh)
-    if (ph) els.push(photoIn({ c1: 1, c2: 8, top: tb + GAP, bottom: L(16) }, { ax: 'left', ay: 'bottom' }))
+    if (ph) els.push(photoIn({ c1: 1, c2: 8, top: tb + GAP, bottom: LB(16) }, { ax: 'left', ay: 'bottom' }))
     return { els, did: 'Title in eight columns; information in the last three, from the same cap line.' }
   },
 }

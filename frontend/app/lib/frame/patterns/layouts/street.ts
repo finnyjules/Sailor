@@ -54,22 +54,22 @@ const footDetails = (c: Content): string | undefined => (c.details && sideLine(c
  *  `details` (ruling R10): the details line above the fine print in the same column, where it fits
  *  (two lines at most, clear of the button); else it is left out (the planner hides and quotes it). */
 function streetFoot(S: Sheet, c: Content, o: { color?: Colour; bg?: Colour; fg?: Colour; cap?: [number, number]; details?: string } = {}): { els: El[]; top: number } {
-  const { X, SPAN, L, GAP, INFO, countLines, blockH, info, button } = S
+  const { X, SPAN, L, LB, GAP, INFO, countLines, blockH, info, button } = S
   const [a, b] = o.cap ?? [7, 12]
-  const els: El[] = []; let top = L(16)
+  const els: El[] = []; let top = LB(16)
   let btnBox: { x1: number; y0: number } | null = null
   if (c.action) {
     const bo = { bg: o.bg ?? 'ink', fg: o.fg ?? 'field' }
     const h = button(c.action, X(1), 0, bo).btn.h
-    const bt = button(c.action, X(1), L(16) - h, bo)
+    const bt = button(c.action, X(1), LB(16) - h, bo)
     els.push(bt.btn, bt.text); top = bt.btn.y
     btnBox = { x1: bt.btn.x + bt.btn.w, y0: bt.btn.y }
   }
-  let base = L(16)
+  let base = LB(16)
   if (c.caption) {
     const n = countLines(c.caption, SPAN(a, b), INFO, INFO.size)
-    els.push(info(c.caption, { x: X(a), w: SPAN(a, b), align: 'right', base: L(16), color: o.color ?? 'ink', role: 'caption' }))
-    const capTop = L(16) - blockH(n, INFO.size, INFO.lh)
+    els.push(info(c.caption, { x: X(a), w: SPAN(a, b), align: 'right', base: LB(16), color: o.color ?? 'ink', role: 'caption' }))
+    const capTop = LB(16) - blockH(n, INFO.size, INFO.lh)
     top = Math.min(top, capTop)
     base = capTop - INFO.size * 1.25
   }
@@ -135,14 +135,14 @@ export const stTag: LayoutDef = {
 export const stDrop: LayoutDef = {
   id: 'stDrop', name: 'Drop', fits: [...ALL], style: 'street',
   fn(S, { c, ph, lines }) {
-    const { X, XR, SPAN, L, M, GAP, CAP, DISPLAY, fitSize, sizeFor, blockH, w100, disp, photoIn } = S
+    const { X, XR, SPAN, L, LB, M, GAP, CAP, DISPLAY, fitSize, sizeFor, blockH, w100, disp, photoIn } = S
     const els: El[] = []
     const side = sideLine(c)
     if (side) {
       const st = { ...DISPLAY, role: side.role }
-      const nsz = Math.min(fitSize([side.s], L(16) - M, st), SPAN(11, 12) / CAP)
+      const nsz = Math.min(fitSize([side.s], LB(16) - M, st), SPAN(11, 12) / CAP)
       const cap = CAP * nsz, k = w100(side.s, st) / 100 * nsz
-      els.push(disp(side.s, { size: nsz, x: XR(12) - cap, top: L(16), rot: -90, origin: 'top left', w: k, color: 'accent', role: side.role }))
+      els.push(disp(side.s, { size: nsz, x: XR(12) - cap, top: LB(16), rot: -90, origin: 'top left', w: k, color: 'accent', role: side.role }))
     }
     const foot = streetFoot(S, c, { cap: [5, 10], details: footDetails(c) })
     const size = sizeFor(lines, SPAN(1, 10), (ph ? L(7) : foot.top - GAP * 2) - M)
@@ -164,7 +164,7 @@ const hits = (a: Box, b: Box) => Math.min(a.x1, b.x1) - Math.max(a.x0, b.x0) > 0
 export const stRepeat: LayoutDef = {
   id: 'stRepeat', name: 'Repeat', fits: [...ALL], style: 'street',
   fn(S, { c, ph, lines }) {
-    const { X, XR, SPAN, L, M, RH, GAP, CAP, DISPLAY, PHOTO_ASPECT, fitSize, sizeFor, blockH, disp, tag } = S
+    const { X, XR, SPAN, L, LB, M, RH, GAP, CAP, DISPLAY, PHOTO_ASPECT, fitSize, sizeFor, blockH, disp, tag } = S
     const side = sideLine(c)
     const els: El[] = []
     const foot = streetFoot(S, c, { details: footDetails(c) })
@@ -189,7 +189,7 @@ export const stRepeat: LayoutDef = {
     const ts = fitSize([c.title], SPAN(1, 12)), rowH = CAP * ts * 1.18, rowGap = rowH - CAP * ts
     const rows: number[] = []
     for (let y = tTop - rowGap - CAP * ts - GAP; y >= M - 0.01; y -= rowH) rows.unshift(y)
-    for (let y = tTop + tH + rowGap + GAP; y + CAP * ts <= L(16) + 0.01; y += rowH) rows.push(y)
+    for (let y = tTop + tH + rowGap + GAP; y + CAP * ts <= LB(16) + 0.01; y += rowH) rows.push(y)
     let n = 0
     for (const y of rows) {
       const row: Box = { x0: 0, y0: y, x1: 100, y1: y + CAP * ts }

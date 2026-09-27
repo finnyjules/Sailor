@@ -38,10 +38,10 @@ export const edCover: LayoutDef = {
   id: 'edCover', name: 'Cover', fits: [...ALL], style: 'editorial',
   needs: { image: true },
   fn(S, { c, ph, lines }) {
-    const { X, SPAN, L, M, RH, GAP, CAP, INFO, countLines, blockH, sizeFor, info, disp, cover, logo, logoH } = S
+    const { X, SPAN, LB, M, RH, GAP, CAP, INFO, countLines, blockH, sizeFor, info, disp, cover, logo, logoH } = S
     const cx = centre(S), els: El[] = [cover(ph)]
     if (c.logo) els.push(logo(cx, M, logoH(), { aspect: c.logo.aspect, align: 'center' }))
-    let yb = L(16)
+    let yb = LB(16)
     if (c.action) { const b = linkUp(S, c, cx, yb, 'field'); els.push(...b.els); yb = b.top - GAP * 1.4 }
     for (const k of ['caption', 'date'] as const) {
       const s = c[k]; if (!s) continue
@@ -65,11 +65,11 @@ export const edFramed: LayoutDef = {
   needs: { image: true },
   arrLabels: ['Larger image', 'Smaller image'],
   fn(S, { c, ph, lines, arr = 0 }) {
-    const { X, SPAN, L, M, RH, GAP, INFO, DISPLAY, PHOTO_ASPECT, countLines, blockH, sizeFor, info, disp, logo, logoH, clear } = S
+    const { X, SPAN, LB, M, RH, GAP, INFO, DISPLAY, PHOTO_ASPECT, countLines, blockH, sizeFor, info, disp, logo, logoH, clear } = S
     const cx = centre(S), els: El[] = []
     let y = M
     if (c.logo) { const lg = logo(cx, y, logoH(), { aspect: c.logo.aspect, align: 'center' }); els.push(lg); y += lg.h + clear(lg) * 1.3 }
-    let yb = L(16)
+    let yb = LB(16)
     if (c.action) { const b = linkUp(S, c, cx, yb); els.push(...b.els); yb = b.top - GAP * 1.4 }
     for (const k of ['caption', 'date', 'details'] as const) {
       const s = c[k]; if (!s) continue
@@ -91,7 +91,7 @@ export const edFramed: LayoutDef = {
 export const edQuiet: LayoutDef = {
   id: 'edQuiet', name: 'Quiet', fits: [...ALL], style: 'editorial',
   fn(S, { c, ph, lines }) {
-    const { X, SPAN, L, M, RH, GAP, CAP, INFO, DISPLAY, PHOTO_ASPECT, countLines, blockH, sizeFor, info, disp, logo, logoH, clear } = S
+    const { X, SPAN, L, LB, M, RH, GAP, CAP, INFO, DISPLAY, PHOTO_ASPECT, countLines, blockH, sizeFor, info, disp, logo, logoH, clear } = S
     const cx = centre(S), els: El[] = []
     const size = Math.min(sizeFor(lines, SPAN(3, 10), RH * 3), cap2(S))
     const tH = blockH(lines.length, size, DISPLAY.lh), tTop = (ph ? L(10) : L(7.5)) - tH / 2
@@ -105,7 +105,7 @@ export const edQuiet: LayoutDef = {
       els.push(info(s, { x: X(3), w: SPAN(3, 10), align: 'center', top: y, role: k }))
       y += blockH(n, INFO.size, INFO.lh) + GAP * 0.7
     }
-    let yb = L(16)
+    let yb = LB(16)
     if (c.logo) {
       const h = logoH(), lg = logo(cx, yb - h, h, { aspect: c.logo.aspect, align: 'center' })
       els.push(lg); yb = lg.y - clear(lg)

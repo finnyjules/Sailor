@@ -22,12 +22,12 @@ export const plate: LayoutDef = {
   id: 'plate', name: 'Plate', fits: [...ALL],
   needs: { image: true },
   fn(S, { c, ph, lines }) {
-    const { X, SPAN, L, M, GAP, sizeFor, disp, infoStack, PHOTO_ASPECT } = S
+    const { X, SPAN, L, LB, M, GAP, sizeFor, disp, infoStack, PHOTO_ASPECT } = S
     const h = Math.min(SPAN(1, 9) * PHOTO_ASPECT, L(10) - M), w = h / PHOTO_ASPECT
     const els: El[] = [{ k: 'p', x: X(1), y: M, w, h, stand: !ph, role: 'photo' }]
     els.push(...infoStack(presentItems(c, COLUMN), 10, 12, M).els)
     const top = M + h + GAP * 1.5
-    const size = sizeFor(lines, SPAN(1, 12), L(16) - top)
+    const size = sizeFor(lines, SPAN(1, 12), LB(16) - top)
     els.push(disp(lines.join('\n'), { size, x: X(1), top }))
     return { els, did: 'Like a museum plate: the image in nine columns, the smaller text in a column beside it, the title underneath.' }
   },
@@ -38,11 +38,11 @@ export const panel: LayoutDef = {
   id: 'panel', name: 'Panel', fits: [...ALL],
   needs: { image: true },
   fn(S, { c, ph, lines }) {
-    const { X, XR, SPAN, L, M, H, GAP, sizeFor, disp, info, infoRowAt, cover } = S
+    const { X, XR, SPAN, L, LB, M, H, GAP, sizeFor, disp, info, infoRowAt, cover } = S
     const els: El[] = [cover(ph)]
     const px = XR(8) + M, py = L(9)
     els.push({ k: 'r', x: 0, y: py, w: px, h: H - py, color: 'field', role: 'panel', ok: true, bleed: true })
-    const f = infoRowAt(c, [['details', 1, 4], ['date', 5, 8]], L(16))
+    const f = infoRowAt(c, [['details', 1, 4], ['date', 5, 8]], LB(16))
     els.push(...f.els)
     const top = py + M
     const size = sizeFor(lines, SPAN(1, 8), f.top - GAP * 1.5 - top)
@@ -57,11 +57,11 @@ export const sideSplit: LayoutDef = {
   id: 'sideSplit', name: 'Side split', fits: [...ALL],
   needs: { image: true },
   fn(S, { c, ph, words, lines, kind }) {
-    const { X, XR, SPAN, L, M, W, H, G, GAP, sizeFor, disp, stackBottom, cover } = S
+    const { X, XR, SPAN, L, LB, M, W, H, G, GAP, sizeFor, disp, stackBottom, cover } = S
     const els: El[] = [cover(ph)]
     const px = XR(5) + G / 2
     els.push({ k: 'r', x: px, y: 0, w: W - px, h: H, color: 'field', role: 'panel', ok: true, bleed: true })
-    const st = stackBottom(presentItems(c, COLUMN), 7, 12, L(16))
+    const st = stackBottom(presentItems(c, COLUMN), 7, 12, LB(16))
     els.push(...st.els)
     const ls = kind === 'word' ? lines : words
     const size = sizeFor(ls, SPAN(7, 12), st.top - GAP * 2 - M)
@@ -75,7 +75,7 @@ export const cross: LayoutDef = {
   id: 'cross', name: 'Cross', fits: [...ALL],
   needs: { image: true }, keepScale: true,
   fn(S, { c, ph, kind, lines }) {
-    const { X, XR, SPAN, L, M, W, RH, CAP, DISPLAY, fitSize, disp, sec, info, PHOTO_ASPECT } = S
+    const { X, XR, SPAN, L, LB, M, W, RH, CAP, DISPLAY, fitSize, disp, sec, info, PHOTO_ASPECT } = S
     const top = L(3), h = Math.min(SPAN(4, 9) * PHOTO_ASPECT, L(14) - top), w = h / PHOTO_ASPECT
     const els: El[] = [{ k: 'p', x: (X(4) + XR(9) - w) / 2, y: top, w, h, stand: !ph, role: 'photo', ok: true }]
     const ls = kind === 'sentence' ? lines : [c.title]
@@ -85,7 +85,7 @@ export const cross: LayoutDef = {
     els.push(disp(ls.join('\n'), { size, x: M - 0.04 * size, base, bleed: true, ok: true }))
     if (c.details) els.push(sec(c.details, { x: X(1), w: SPAN(1, 8), top: M }))
     if (c.date) els.push(info(c.date, { x: X(9), w: SPAN(9, 12), top: M, role: 'date' }))
-    if (c.caption) els.push(info(c.caption, { x: X(1), w: SPAN(1, 6), base: L(16), role: 'caption' }))
+    if (c.caption) els.push(info(c.caption, { x: X(1), w: SPAN(1, 6), base: LB(16), role: 'caption' }))
     return { els, did: 'A small centred image; the title runs across it and off the right edge.' }
   },
 }
@@ -95,7 +95,7 @@ export const overlap: LayoutDef = {
   id: 'overlap', name: 'Overlap', fits: [...ALL],
   needs: { image: true },
   fn(S, { c, ph, lines }) {
-    const { X, SPAN, L, M, W, RH, sizeFor, disp, sec, info, PHOTO_ASPECT } = S
+    const { X, SPAN, L, LB, M, W, RH, sizeFor, disp, sec, info, PHOTO_ASPECT } = S
     const top = L(2), h = Math.min((W - X(5)) * PHOTO_ASPECT, L(14) - top), w = h / PHOTO_ASPECT, x = W - w
     const els: El[] = [{ k: 'p', x, y: top, w, h, stand: !ph, role: 'photo', ok: true, bleed: true }]
     const size = sizeFor(lines, SPAN(1, 8), RH * 6)
@@ -103,7 +103,7 @@ export const overlap: LayoutDef = {
     els.push(disp(lines.join('\n'), { size, x: X(1), base, ok: true }))
     if (c.details) els.push(sec(c.details, { x: X(1), w: SPAN(1, 4), top: M }))
     if (c.date) els.push(info(c.date, { x: X(9), w: SPAN(9, 12), top: M, role: 'date' }))
-    if (c.caption) els.push(info(c.caption, { x: X(1), w: SPAN(1, 6), base: L(16), role: 'caption' }))
+    if (c.caption) els.push(info(c.caption, { x: X(1), w: SPAN(1, 6), base: LB(16), role: 'caption' }))
     return { els, did: 'The image bleeds off the right edge; the title steps onto its left side.' }
   },
 }
@@ -130,14 +130,14 @@ export const column: LayoutDef = {
   id: 'column', name: 'Column', fits: [...ALL],
   needs: { image: true },
   fn(S, { c, ph, kind, words, lines }) {
-    const { X, SPAN, L, M, GAP, sizeFor, disp, infoStack, PHOTO_ASPECT } = S
+    const { X, SPAN, L, LB, M, GAP, sizeFor, disp, infoStack, PHOTO_ASPECT } = S
     const items = presentItems(c, COLUMN)
     const st0 = infoStack(items, 1, 4, 0)
-    const h = Math.min(SPAN(1, 4) * PHOTO_ASPECT, L(16) - M - st0.bottom - GAP), w = h / PHOTO_ASPECT
+    const h = Math.min(SPAN(1, 4) * PHOTO_ASPECT, LB(16) - M - st0.bottom - GAP), w = h / PHOTO_ASPECT
     const els: El[] = [{ k: 'p', x: X(1), y: M, w, h, stand: !ph, role: 'photo' }]
     els.push(...infoStack(items, 1, 4, M + h + GAP).els)
     const ls = kind === 'word' ? lines : words
-    const size = sizeFor(ls, SPAN(6, 12), L(16) - M)
+    const size = sizeFor(ls, SPAN(6, 12), LB(16) - M)
     els.push(disp(ls.join('\n'), { size, x: X(6), top: M }))
     return { els, did: 'The image in the first four columns; the title hangs from the same top line beside it.' }
   },

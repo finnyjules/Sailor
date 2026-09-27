@@ -46,6 +46,8 @@ export interface Sheet {
   defaultMargin: boolean
   DISPLAY: Style; SECOND: Style & { size: number }; INFO: Style & { size: number }
   X(c: number): number; XR(c: number): number; SPAN(a: number, b: number): number; L(r: number): number; Xr(c: number): number
+  /** The line a bottom or a baseline on design row `r` sits on (stage 3). The kit's own sheet: `L`. */
+  LB(r: number): number
   w100(s: string, st?: Style): number
   fitSize(lines: string[], width: number, st?: Style): number
   sizeFor(lines: string[], width: number, maxH: number, st?: Style): number
@@ -180,6 +182,7 @@ export function makeSheet(o: SheetOpts): Sheet {
   const XR = (c: number) => Xr(ce(c)) + CW                            // right edge of design column c
   const SPAN = (a: number, b: number) => XR(b) - X(a)
   const L = (r: number) => M + r * RH                                 // line under design row r; L(0) = top margin
+  const LB = L                                                        // stage 3: a bottom on row r (Task 5 gives it rows)
 
   // Swiss styles — minimum text size from the format's viewing width (Stage 2), Stage 1 sizes when absent.
   const infoSize = kb.infoSize
@@ -291,10 +294,10 @@ export function makeSheet(o: SheetOpts): Sheet {
       const n = countLines(s, SPAN(a, b), infoIn(key), INFO.size)
       extent = Math.max(extent, blockH(n, INFO.size, INFO.lh))
       const e: Partial<TextEl> = { x: X(a), w: SPAN(a, b), wt: key === 'details' ? 500 : INFO.wt, role: key }
-      if (where === 'foot') e.base = L(16); else e.top = M
+      if (where === 'foot') e.base = LB(16); else e.top = L(0)
       els.push(info(s, e))
     }
-    return { els, top: where === 'foot' ? L(16) - extent : M, bottom: where === 'foot' ? L(16) : M + extent }
+    return { els, top: where === 'foot' ? LB(16) - extent : L(0), bottom: where === 'foot' ? LB(16) : L(0) + extent }
   }
   function infoRowAt(c: Content, spec: [TextKey, number, number][], base: number) {
     const els: TextEl[] = []; let extent = 0
@@ -405,7 +408,7 @@ export function makeSheet(o: SheetOpts): Sheet {
     measure,
     W, H, M, G, NC, CW, RH, GAP, CAP, B, defaultMargin,
     DISPLAY, SECOND, INFO,
-    X, XR, SPAN, L, Xr,
+    X, XR, SPAN, L, LB, Xr,
     w100, fitSize, sizeFor, blockH, countLines, dateLines, breakLines, balance,
     text, disp, sec, info, rule,
     infoStack, infoRow, infoRowAt, stackBottom, photoIn, cover, pick, q,

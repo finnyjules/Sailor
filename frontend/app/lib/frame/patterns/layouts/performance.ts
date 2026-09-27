@@ -74,7 +74,7 @@ export function offerBox(S: Sheet, c: Content, bx: { x: number; w: number; botto
 
 /** The offer at the foot of design columns `a`..`b`. */
 const offerStack = (S: Sheet, c: Content, a: number, b: number, align: 'left' | 'center' = 'left') =>
-  offerBox(S, c, { x: S.X(a), w: S.SPAN(a, b), bottom: S.L(16) }, align)
+  offerBox(S, c, { x: S.X(a), w: S.SPAN(a, b), bottom: S.LB(16) }, align)
 
 /** The logo (when the brand kit has one) and the headline from the top margin. */
 export function headStack(S: Sheet, c: Content, lines: string[], a: number, b: number, align: 'left' | 'center' = 'left', maxRows = 1.9): { els: El[]; bottom: number } {
@@ -173,16 +173,16 @@ export const perfCard: LayoutDef = {
   needs: { image: true },
   arrLabels: ['Card left', 'Card right'],
   fn(S, { c, ph, lines, arr = 0 }) {
-    const { X, SPAN, L, M, INFO, cover, band } = S
+    const { X, SPAN, LB, M, INFO, cover, band } = S
     const head = headStack(S, c, lines, 1, 12)
     // The prototype pads the card by exactly the checker's minimum (0.9 × the margin) when the
     // margin wins; the checker's rule 6 allows 1e-6 of rounding for that tie (ruling R5).
     const [a, b] = arr === 1 ? [6, 12] : [1, 7], pad = Math.max(M * 0.9, INFO.size * 2.2)
-    const offer = offerBox(S, c, { x: X(a) + pad, w: SPAN(a, b) - 2 * pad, bottom: L(16) - pad })
+    const offer = offerBox(S, c, { x: X(a) + pad, w: SPAN(a, b) - 2 * pad, bottom: LB(16) - pad })
     const cardTop = offer.top - pad
     return {
       els: [cover(ph), band('top', 0, head.bottom), ...head.els,
-        { k: 'r', x: X(a), y: cardTop, w: SPAN(a, b), h: L(16) - cardTop, color: 'field', radius: 1.4, role: 'card', ok: true }, ...offer.els],
+        { k: 'r', x: X(a), y: cardTop, w: SPAN(a, b), h: LB(16) - cardTop, color: 'field', radius: 1.4, role: 'card', ok: true }, ...offer.els],
       did: 'The product fills the page; the offer sits on a solid card in a corner.',
     }
   },
