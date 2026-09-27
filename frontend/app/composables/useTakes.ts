@@ -19,6 +19,8 @@
  * frontend gains a test runner.
  */
 
+import type { TakeFaceScore } from '#shared/characters/types'
+
 export interface Take {
   id: string
   createdAt: number
@@ -38,6 +40,8 @@ export interface Take {
   draft?: boolean
   /** Id of the draft take this final result was promoted from. */
   promotedFrom?: string
+  /** Shot Director video takes: how each cast member's face scored on its frames. */
+  faceScores?: TakeFaceScore[]
 }
 
 /** Node-data fields the takes system reads/writes. Mixed into the node's data. */

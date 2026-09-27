@@ -12,6 +12,7 @@
 import { creditsForUsd } from '../../shared/pricing/markup'
 import { MODEL_PRICED_NODE_CLASSES, REMOTE_VIDEO_NODE_CLASSES, SETTING_PRICED_NODE_CLASSES, SHARED_PRICED_CLASS_SET, familyPricedClass, priceNode } from '../../shared/pricing/nodePrice'
 import { VIDEO_RATES } from '../../shared/pricing/videoRates'
+import { pipelineCallsOf } from '../../shared/pricing/pipelinePrice'
 import type { InputSeconds } from '../../shared/pricing/clipSettings'
 import type { RunnerFamily } from '../../shared/runner/families'
 export { VIDEO_RATES, MODEL_PRICED_NODE_CLASSES, SETTING_PRICED_NODE_CLASSES, REMOTE_VIDEO_NODE_CLASSES }
@@ -471,7 +472,8 @@ export function priceGraph(prompt: Record<string, { class_type: string; inputs?:
     if (OUTPUT_CLASS_TYPES.has(ct)) hasOutput = true
 
     // A class a switched-on family moves to another service (Enhance a video on fal's Topaz, F23) is priced there.
-    if (SHARED_PRICED_CLASS_SET.has(ct) || familyPricedClass(ct, opts.families)) {
+    // A pipeline class (R3.1) is priced by its calls, through priceNode.
+    if (SHARED_PRICED_CLASS_SET.has(ct) || familyPricedClass(ct, opts.families) || pipelineCallsOf(ct, (prompt[id]?.inputs ?? {}) as Record<string, unknown>) !== null) {
       const inputs = prompt[id]?.inputs
       const px = opts.inputPixels && Object.prototype.hasOwnProperty.call(opts.inputPixels, id) ? opts.inputPixels[id] : undefined
       const secs = opts.inputSeconds && Object.prototype.hasOwnProperty.call(opts.inputSeconds, id) ? opts.inputSeconds[id] : undefined

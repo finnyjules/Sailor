@@ -34,6 +34,13 @@ export function isCleanupKey(ev: KeyboardEvent): boolean {
   return ev.altKey && ev.shiftKey && !ev.metaKey && !ev.ctrlKey && ev.code === 'KeyC'
 }
 
+/** X (Make guide), ⇧H / ⇧V (flip) — the pen stage 6 action letters. */
+export function isActionKey(ev: KeyboardEvent): boolean {
+  if (ev.metaKey || ev.ctrlKey || ev.altKey || ev.key.length !== 1) return false
+  const k = ev.key.toLowerCase()
+  return (!ev.shiftKey && k === 'x') || (ev.shiftKey && (k === 'h' || k === 'v'))
+}
+
 export interface PenKeyContext {
   tool: Ref<PenTool>
   pendingPath: Ref<PendingPath>
@@ -63,6 +70,10 @@ export interface PenKeyContext {
   // Clean up (pen stage 5): whether the host offers it, and the toggle
   cleanupAllowed: boolean
   toggleCleanup: () => void
+  // pen stage 6: X / ⇧H / ⇧V / ⌘C / ⌘V / ⌘A run a registry action when it can
+  // act now (penActions.ts ACTIONS; the pen settles its live gestures first);
+  // false leaves the key to the host
+  runKeyAction: (id: string) => boolean
 }
 
 // single-letter tool keys — only with no modifier, and only for a tool the
@@ -70,7 +81,7 @@ export interface PenKeyContext {
 // toolbar's tooltip cards show the same letters (penTips.ts PEN_TIPS[tool].key).
 export const TOOL_KEYS: Record<string, PenTool> = {
   v: 'select', p: 'path', b: 'curve', l: 'line', o: 'circle', n: 'point',
-  t: 'trim', c: 'cut', d: 'dissolve',
+  t: 'trim', c: 'cut', d: 'dissolve', g: 'fill',
 }
 
 // Returns true when the key did something. usePen.ts's onKeydown reads that
@@ -89,6 +100,11 @@ export function handlePenKey(ev: KeyboardEvent, ctx: PenKeyContext, local?: { ca
     const key = ev.key.toLowerCase()
     if (key === 'z' && !ev.shiftKey) { ctx.undo(); return true }
     if ((key === 'z' && ev.shiftKey) || key === 'y') { ctx.redo(); return true }
+    // pen stage 6: ⌘C copies a selection, ⌘V pastes the pen's own clipboard,
+    // ⌘A selects every piece — each only when it can act
+    if (!ev.shiftKey && !ev.altKey && (key === 'c' || key === 'v' || key === 'a')) {
+      return ctx.runKeyAction(key === 'c' ? 'copy' : key === 'v' ? 'paste' : 'select-all')
+    }
     return false
   }
   // ⌥⇧C: Clean up — only in a host that offers it
@@ -109,6 +125,12 @@ export function handlePenKey(ev: KeyboardEvent, ctx: PenKeyContext, local?: { ca
   const gestureActive = ctx.tool.value === 'path' && !!ctx.pendingPath.value
   if (gestureActive && /^[0-9]$/.test(ev.key)) { ctx.dimBuffer.value += ev.key; return true }
   if (gestureActive && ev.key === '.' && !ctx.dimBuffer.value.includes('.')) { ctx.dimBuffer.value += '.'; return true }
+
+  // pen stage 6: X makes the selection a guide, ⇧H / ⇧V flip it
+  if (isActionKey(ev)) {
+    const k = ev.key.toLowerCase()
+    return ctx.runKeyAction(k === 'x' ? 'construction' : k === 'h' ? 'flip-h' : 'flip-v')
+  }
 
   if (!ev.shiftKey && !ev.altKey && ev.key.length === 1) {
     const t = TOOL_KEYS[ev.key.toLowerCase()]
@@ -159,4 +181,19 @@ export function handlePenKey(ev: KeyboardEvent, ctx: PenKeyContext, local?: { ca
     return true
   }
   return false
+}
+
+/** An Apple platform (a Mac ctrl-click is a right press there). Case-blind:
+ *  Chrome's `navigator.userAgentData.platform` reads "macOS", while the older
+ *  `navigator.platform` reads "MacIntel". */
+export function isApplePlatform(platform: string | undefined | null): boolean {
+  return /mac|iphone|ipad|ipod/i.test(platform || '')
+}
+
+/** This browser runs on an Apple platform — the ONE check every pen part uses
+ *  (the Mac ctrl-click right press, ⌘ glyphs in the cards and the menu).
+ *  Read when called, not at import, so it follows the page it runs in. */
+export function isApple(): boolean {
+  if (typeof navigator === 'undefined') return false
+  return isApplePlatform((navigator as { userAgentData?: { platform?: string } }).userAgentData?.platform || navigator.platform)
 }

@@ -103,17 +103,19 @@ describe('detectEvenSpacing', () => {
 })
 
 describe('detectMirrorPairs', () => {
-  it('two lines mirrored across an upright 3.4 px off → a new axis between them and mirror rules', () => {
+  it('two lines of one shape mirrored across an upright 3.4 px off → a new axis between them and mirror rules', () => {
     const d = blank()
     const L = { a: addPoint(d, 1, 1), b: addPoint(d, 3, 4) }; addLine(d, L.a, L.b)
     const R = { a: addPoint(d, 9.1, 1), b: addPoint(d, 7, 4) }; addLine(d, R.a, R.b)
+    addLine(d, L.b, R.b)   // one shape: a line joins the two
     const c = detectMirrorPairs(buildContext(d, env()))
     expect(c).toHaveLength(1)
     expect(c[0]).toMatchObject({ kind: 'mirror', label: 'Mirror pair' })
     expect(c[0]!.id.startsWith('mirror:v:')).toBe(true)
     const w = cloneDoc(d), guides = new Map<string, string>()
     const rules = c[0]!.prepare!(w, guides)
-    const axis = w.entities.find(e => e.id === guides.get('axis:v')) as any
+    expect([...guides.keys()]).toEqual([`axis:v:${[L.a, L.b, R.a, R.b].sort()[0]}`])   // the shape's own axis
+    const axis = w.entities.find(e => e.id === [...guides.values()][0]) as any
     expect(axis).toMatchObject({ kind: 'line', construction: true })
     expect(P(w, axis.p1).x).toBeCloseTo(5.025, 9)
     expect(P(w, axis.p2).x).toBeCloseTo(5.025, 9)
@@ -124,6 +126,24 @@ describe('detectMirrorPairs', () => {
     ])
     // a second fix on the same axis reuses it
     expect(c[0]!.prepare!(w, guides)).toHaveLength(2)
+  })
+  it('two separate shapes are never paired, however well they mirror', () => {
+    const d = blank()
+    addLine(d, addPoint(d, 1, 1), addPoint(d, 3, 4)); addLine(d, addPoint(d, 9.05, 1), addPoint(d, 7.05, 4))
+    expect(detectMirrorPairs(buildContext(d, env()))).toHaveLength(0)
+  })
+  it('each shape gets its own axis', () => {
+    const d = blank()
+    for (const y of [0, 10]) {
+      const a = addPoint(d, 1, y + 1), b = addPoint(d, 3, y + 4), p = addPoint(d, 9.1, y + 1), q = addPoint(d, 7, y + 4)
+      addLine(d, a, b); addLine(d, p, q); addLine(d, b, q)
+    }
+    const c = detectMirrorPairs(buildContext(d, env()))
+    const v = c.filter(x => x.id.startsWith('mirror:v:'))
+    expect(v).toHaveLength(2)
+    const w = cloneDoc(d), guides = new Map<string, string>()
+    for (const x of v) x.prepare!(w, guides)
+    expect(new Set(guides.values()).size).toBe(2)
   })
   it('pieces too far off mirroring are left alone', () => {
     const d = blank()

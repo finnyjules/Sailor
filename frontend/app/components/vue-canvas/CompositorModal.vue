@@ -60,7 +60,7 @@ import { layoutKeyAction } from '~/lib/frame/layoutKeys'
 import { snapshotFrameAsTemplate, addSlot } from '~/lib/frametemplate/author'
 import { placeTemplate, setInstanceSlot, freezeInstance, staleInstances, updateInstance, applySlotToLayer } from '~/lib/frametemplate/apply'
 import type { Template, TemplateInstance, SlotKind } from '~/lib/frametemplate/types'
-import { resolveLayout, frameDocFromProps, isResponsiveFrame, effectivePins, guideLinesFor, moveUnitAtView, resizeLayerAtView, scaleLayerAtView, rotateLayerAtView, hitTestView, viewSelectionGeometry, layoutScaleOf, type LayoutResult, type Pins, type ViewEdit, type UnitInfo } from '~/lib/frame/responsive'
+import { resolveLayout, frameDocFromProps, isResponsiveFrame, effectivePins, guideLinesFor, moveUnitAtView, resizeLayerAtView, scaleLayerAtView, rotateLayerAtView, hitTestView, viewSelectionGeometry, layoutScaleOf, gridsAt, type LayoutResult, type Pins, type ViewEdit, type UnitInfo } from '~/lib/frame/responsive'
 import { mapKeyToEdit, snapAngle } from '~/lib/compositor/layerEdits'
 import { resizeBox, type Handle } from '~/lib/compositor/resizeBox'
 import ResponsivePinsCard from './ResponsivePinsCard.vue'
@@ -87,9 +87,10 @@ import { promptNodeLabel } from '~/lib/prompt/canvasPromptContext'
 import AgentSweep from '~/components/agent/AgentSweep.vue'
 import { useFramePenSession } from '~/composables/frame/useFramePenSession'
 import { cloneDoc } from '~/lib/sketch/clone'
-import { isTypingInField } from '~/composables/pen/usePen'
+import { isTypingInField, isCleanupBarFocused } from '~/composables/pen/usePen'
 import PenOverlay from '~/components/pen/PenOverlay.vue'
 import PenToolbar from '~/components/pen/PenToolbar.vue'
+import PenProperties from '~/components/pen/PenProperties.vue'
 import { useBrushPaint, paintTargetMatches, effectLayerMatches } from '~/composables/useBrushPaint'
 import { paintGalleryInclude, effectGalleryInclude, brushEffectLabel, DEFAULT_BRUSH_EFFECT, EFFECT_LAYER_FILL, withPaintedEffect, brushIdIsStale } from '~/lib/brushTips/effects'
 import { myEffectsLoaded } from '~/lib/myEffects/library'
@@ -178,6 +179,7 @@ import LayoutGridOverlay from './LayoutGridOverlay.vue'
 import LayoutGridSection from './LayoutGridSection.vue'
 import LayerGridFields from './LayerGridFields.vue'
 import { tracksFromLength, lengthFromTracks } from '~/lib/frame/layoutGrid'
+import type { ResolvedLayoutGrid, LayoutSpan } from '~/lib/frame/layoutGrid'
 import { formatFor } from '~/lib/frame/formats'
 import MotionBandTimeline from '~/components/vue-canvas/compositor/MotionBandTimeline.vue'
 import MotionGallery from '~/components/vue-canvas/compositor/MotionGallery.vue'
@@ -943,6 +945,10 @@ const movingBox = computed(() => {
 })
 const frameFormatLabel = computed(() => formatFor(compositor.value?.data?.properties as any, designSize.value.w, designSize.value.h)?.label ?? 'this size')
 watch(() => compositor.value?.id, id => { if (id) ensureLayoutGrid() }, { immediate: true })
+// The Layer section's Grid fields and Re-snap place a layer on the DESIGN grid: at a viewing size
+// they snap back to the design size first, then apply (as placing a template does).
+function onLayerSpan(id: string, p: Partial<LayoutSpan>) { viewOnlyGuard(); setLayerSpan(id, p) }
+function onResnapSelected() { viewOnlyGuard(); resnapSelected() }
 // ⌃G toggles the grid on a Mac, where ⌘G is Group; elsewhere Ctrl+G is Group, so it's ⌃⇧4 (Figma).
 const IS_MAC = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform)
 
@@ -2444,7 +2450,11 @@ function onKeydown(e: KeyboardEvent) {
   // bubble handleKeydown returns at once while a session is open.
   if (penSession.value) {
     if (isTypingInField()) return
-    if (viewportKey(e)) { e.stopPropagation(); return }
+    // Space on a focused Clean up control (strength, Cancel, Apply) presses
+    // it — not pan; stopped so no bubble listener sees it, not prevented
+    if (e.code === 'Space' && isCleanupBarFocused()) { e.stopPropagation(); return }
+    // a viewport key (Space-pan, ⌘± zoom) closes the pen's menu or wheel first
+    if (viewportKey(e)) { penSession.value.pen.closeMenus(); e.stopPropagation(); return }
     penOverlayRef.value?.onHostKeydown(e)
     // Any other ⌘/Ctrl combo belongs to the pen too, so the browser's own
     // action (⌘S save page, ⌘D bookmark, ⌘G find, ⌘V paste) must not fire.
@@ -3774,6 +3784,9 @@ interface ViewHandleDragBase { unit: UnitInfo; layer: LocalLayer; sx: number; sy
 const viewDrag = ref<null | {
   kind: 'move'; sx: number; sy: number; dx: number; dy: number
   units: UnitInfo[]; layers: LocalLayer[]; recorded: boolean; pointerId: number; el: HTMLElement
+  /** The pointer has travelled 4 screen px (the fade's own threshold, as at the design size) —
+   *  set even when nothing is written, so a welded unit's drag still fades the modules in. */
+  moved: boolean
 } | (ViewHandleDragBase & {
   kind: 'resize'; handle: Handle; start: { cx: number; cy: number; w: number; h: number }
   p0: { x: number; y: number }; fields: { w: string; h: string | null }; locked: boolean
@@ -3782,6 +3795,21 @@ const viewDrag = ref<null | {
 }) | (ViewHandleDragBase & {
   kind: 'rotate'; cx: number; cy: number; startAngle: number; startRot: number; local: { w: number; h: number }
 })>(null)
+// ── The layout grid at a viewing size (spec "Responsive Frames": the overlay uses the same scaled
+// grid as the resolver). gridsAt is the call resolveLayout makes, with the same inputs (the grid and
+// format read at the design size), so the overlay and the layout can't disagree. It is recomputed
+// here rather than read off `resolved.grid` because a Frame with no layers resolves to null there
+// (resolveLayout returns early), and the overlay must still show the grid of an empty Frame. Snapping, the
+// covered fill, the badge and text marks are design-size tools and stay off at a viewing size; a
+// view move still fades the modules in, as a design-size move does. Fixed Frames: always the design grid.
+const viewLayoutGrid = computed<ResolvedLayoutGrid | null>(() => resolved.value?.grid ?? null)
+const overlayGrid = computed<ResolvedLayoutGrid>(() => {
+  if (!frameIsResponsive.value || atDesign.value) return layoutGridResolved.value
+  const d = designSize.value
+  const fmt = formatFor(compositor.value?.data?.properties as any, d.w, d.h)
+  return gridsAt(layoutGrid.value, fmt, d.w, d.h, viewSize.w, viewSize.h)?.view ?? layoutGridResolved.value
+})
+const viewLayerMoving = computed(() => viewDrag.value?.kind === 'move' && viewDrag.value.moved)
 function onViewPointerDown(e: PointerEvent) {
   const t = e.target as HTMLElement | null
   // In-canvas chrome keeps its own clicks: handles, the generate / smart / edit-result toolbars,
@@ -3804,7 +3832,7 @@ function onViewPointerDown(e: PointerEvent) {
   if (!units.length) return
   const el = e.currentTarget as HTMLElement
   el.setPointerCapture?.(e.pointerId)
-  viewDrag.value = { kind: 'move', sx: e.clientX, sy: e.clientY, dx: 0, dy: 0, units, layers: localLayers.value.slice(), recorded: false, pointerId: e.pointerId, el }
+  viewDrag.value = { kind: 'move', sx: e.clientX, sy: e.clientY, dx: 0, dy: 0, units, layers: localLayers.value.slice(), recorded: false, moved: false, pointerId: e.pointerId, el }
 }
 /** Screen delta since pointer-down → view px (the artboard's on-screen rect includes the zoom). */
 function viewDelta(e: PointerEvent, d: { sx: number; sy: number }): { dx: number; dy: number } {
@@ -3816,6 +3844,7 @@ function onViewPointerMove(e: PointerEvent) {
   const d = viewDrag.value; if (!d || d.kind !== 'move' || e.pointerId !== d.pointerId) return
   // Snapped back to the design size mid-drag (a design-only tool's shortcut): settle and stop.
   if (!viewEditing.value) { onViewPointerUp(); return }
+  if (!d.moved && Math.hypot(e.clientX - d.sx, e.clientY - d.sy) >= 4) d.moved = true
   if (!d.recorded && Math.hypot(e.clientX - d.sx, e.clientY - d.sy) < 3) return // a click, not a drag yet
   const { dx, dy } = viewDelta(e, d)
   const { w: W0, h: H0 } = designSize.value
@@ -8764,7 +8793,7 @@ onUnmounted(() => {
 // Dev-lab / test hook only — nothing in the app reads this. Lets /dev/frame-lab
 // hand a concrete `editor` (historyRev, layoutGridResolved, …) to
 // `window.__frameLab` without every caller needing its own copy of the editor wiring.
-defineExpose({ editor, layoutGridResolved, layoutGrid })
+defineExpose({ editor, layoutGridResolved, layoutGrid, overlayGrid, viewLayoutGrid })
 </script>
 
 <template>
@@ -9088,8 +9117,9 @@ defineExpose({ editor, layoutGridResolved, layoutGrid })
         />
 
         <!-- Layout grid — editor guide only: DOM over the artboard, outside every paint/bake path. -->
-        <LayoutGridOverlay :grid="layoutGridResolved" :show="layoutGrid.show" :moving="dragMoving" :covered="movingBox"
-          :text-marks="selectedTextMarks" :w="canvasDisplay.w" :h="canvasDisplay.h" />
+        <LayoutGridOverlay :grid="overlayGrid" :show="layoutGrid.show"
+          :moving="atDesign ? dragMoving : viewLayerMoving" :covered="atDesign ? movingBox : null"
+          :text-marks="atDesign ? selectedTextMarks : null" :w="canvasDisplay.w" :h="canvasDisplay.h" />
 
         <!-- Covered areas — the Layout tab's editor guide: where the Frame's format puts the
              platform's own interface (or may crop). Same box as the grid overlay (pans and zooms
@@ -9710,10 +9740,12 @@ defineExpose({ editor, layoutGridResolved, layoutGrid })
            timeline). Outside Motion the column is bottom-anchored and shrink-wraps
            to the tool bar's width (its widest child), so the prompt above stretches
            to match it. In Motion it spans the panel gap, as the timeline always has:
-           pinned by hand (the stage behind it is full-bleed), panel gutter + 16px. -->
-      <div class="absolute bottom-8 flex flex-col items-stretch gap-2 pointer-events-none"
-        :class="inspectorTab === 'motion' ? 'z-20' : ''"
-        :style="inspectorTab === 'motion' ? { left: (gapLeft + 16) + 'px', right: (gapRight + 16) + 'px' } : undefined">
+           pinned by hand (the stage behind it is full-bleed), panel gutter + 16px.
+           While the pen is open it is pinned the same way, its bar centred in the
+           gap and wrapping, so no end of it sits under a side panel at laptop widths. -->
+      <div class="absolute bottom-8 flex flex-col gap-2 pointer-events-none"
+        :class="[inspectorTab === 'motion' ? 'z-20' : '', penSession && inspectorTab !== 'motion' ? 'items-center' : 'items-stretch']"
+        :style="(inspectorTab === 'motion' || penSession) ? { left: (gapLeft + 16) + 'px', right: (gapRight + 16) + 'px' } : undefined">
       <!-- The one prompt (StudioPromptHost): always here, Motion included. What it
            brings back (changes, answers) shows above it, never in the inspector.
            Hidden while the edit-image prompt or the pen's own bar takes its place. -->
@@ -9801,12 +9833,12 @@ defineExpose({ editor, layoutGridResolved, layoutGrid })
           :class="[atDesign ? 'text-white/60' : 'text-[#3b82f6]', { invisible: !!viewDrag }]"
           @click.stop>
           <span>{{ viewReadout }}</span>
-          <input type="number" min="1"
+          <input type="number" min="1" data-testid="frame-view-w"
             class="w-14 bg-transparent text-right tabular-nums outline-none"
             :value="Math.round(viewSize.w)"
             @change="setViewDim('w', ($event.target as HTMLInputElement).value)" />
           <span class="text-white/30">×</span>
-          <input type="number" min="1"
+          <input type="number" min="1" data-testid="frame-view-h"
             class="w-14 bg-transparent tabular-nums outline-none"
             :value="Math.round(viewSize.h)"
             @change="setViewDim('h', ($event.target as HTMLInputElement).value)" />
@@ -10183,8 +10215,12 @@ defineExpose({ editor, layoutGridResolved, layoutGrid })
                   @click="inspectorTab = 'layout'">Layout</button>
         </div>
       </div>
+      <!-- The shared pen's Properties take the panel's body while a session is
+           open (pen stage 6); the tabs stay — Motion still closes the pen. -->
+      <PenProperties v-if="penSession" :key="penSession.key" :pen="penSession.pen"
+                     data-testid="frame-pen-properties" class="flex-1 min-h-0 overflow-y-auto" />
       <!-- Brand kits (opening the palette takes over the inspector) -->
-      <template v-if="brandOpen">
+      <template v-else-if="brandOpen">
         <div class="px-4 py-3 border-b border-white/10 flex items-center gap-2">
           <Palette class="size-3.5 text-white/70" />
           <span class="text-sm font-medium">Brand kits</span>
@@ -11590,7 +11626,7 @@ defineExpose({ editor, layoutGridResolved, layoutGrid })
           <component :is="kindIcon(selectedLocal.kind)" class="size-3.5 text-white/60" />
           <span class="text-sm font-medium truncate" data-testid="frame-layer-head">{{ selectedLayerHead }}</span>
           <div class="ml-auto flex items-center gap-1">
-            <button v-if="layoutGrid.show" class="text-white/40 hover:text-white/80 p-1" title="Re-snap to grid" @click="resnapSelected"><LayoutGrid class="size-3.5" /></button>
+            <button v-if="layoutGrid.show" class="text-white/40 hover:text-white/80 p-1" title="Re-snap to grid" @click="onResnapSelected"><LayoutGrid class="size-3.5" /></button>
             <button class="text-white/40 hover:text-white/80 p-1" title="Bring forward" @click="moveStackZ(localKey(selectedLocal.id), 1)"><ArrowUp class="size-3.5" /></button>
             <button class="text-white/40 hover:text-white/80 p-1" title="Send backward" @click="moveStackZ(localKey(selectedLocal.id), -1)"><ArrowDown class="size-3.5" /></button>
             <button class="text-white/40 hover:text-red-400 p-1" title="Delete" @click="deleteLocal(selectedLocal.id)"><Trash2 class="size-3.5" /></button>
@@ -12659,7 +12695,7 @@ defineExpose({ editor, layoutGridResolved, layoutGrid })
                 :cols-reason="spanReasons(selectedLocal).cols" :rows-reason="spanReasons(selectedLocal).rows"
                 :disabled="!!selectedLocal.rotation || penLocksSelected"
                 :disabled-reason="penLocksSelected ? 'Finish the pen first' : selectedLocal.rotation ? 'Straighten the layer to place it on the grid' : undefined"
-                @update="(p) => setLayerSpan(selectedLocal!.id, p)" />
+                @update="(p) => onLayerSpan(selectedLocal!.id, p)" />
             </div>
             <!-- Common: align the layer to the frame (edges + centres) -->
             <div :title="penLocksSelected ? 'Finish the pen first' : undefined"><fieldset :disabled="penLocksSelected" :inert="penLocksSelected" class="m-0 p-0 border-0 min-w-0" :class="penLocksSelected ? 'opacity-50' : ''">

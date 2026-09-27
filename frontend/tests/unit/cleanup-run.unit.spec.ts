@@ -10,13 +10,15 @@ import type { SketchDoc, EntityId } from '~/lib/sketch/model'
 import { addPoint, addLine, addCircle, addPath, addConstraint, repeatEntities } from '~/lib/sketch/edit'
 import { cloneDoc } from '~/lib/sketch/clone'
 import { constraintResiduals } from '~/lib/sketch/residuals'
+import { solve } from '~/lib/sketch/solve'
 import { solveHeld, componentOf, windowOf, baselineOf, movedTooFar, arcBroken } from '~/lib/sketch/cleanup/guards'
 import { runCleanup } from '~/lib/sketch/cleanup/run'
 import type { CleanupOptions } from '~/lib/sketch/cleanup/types'
 
 const U = 1 / 34
 const blank = (): SketchDoc => ({ entities: [], constraints: [] })
-const opts = (o: Partial<CleanupOptions> = {}): CleanupOptions => ({ unitsPerPx: U, strength: 'normal', ...o })
+// a huge time budget: these tests must not depend on how fast the machine is
+const opts = (o: Partial<CleanupOptions> = {}): CleanupOptions => ({ unitsPerPx: U, strength: 'normal', budgetMs: Infinity, ...o })
 const P = (d: SketchDoc, id: EntityId) => d.entities.find(e => e.id === id) as any
 const paths = (d: SketchDoc) => d.entities.filter(e => e.kind === 'path') as any[]
 const maxRes = (d: SketchDoc) => Math.max(0, ...constraintResiduals(d).map(Math.abs))
@@ -35,6 +37,31 @@ function flower(d: SketchDoc): void {
     const s = addPoint(d, x0, y0), e = addPoint(d, ex, ey), c = addPoint(d, (x0 + ex) / 2, (y0 + ey) / 2)
     addPath(d, [s, e], [{ kind: 'arc', center: c, sweep: 1 }])
   }
+}
+
+// n closed four-sided shapes, each a hair off a 4 × 3 rectangle, 7 to a row
+function rectGrid(d: SketchDoc, n: number): EntityId[][] {
+  let seed = 7
+  const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647 - 0.5)
+  const out: EntityId[][] = []
+  for (let i = 0; i < n; i++) {
+    const x = (i % 7) * 6, y = Math.floor(i / 7) * 6
+    const p = ([[0, 0], [4, 0], [4, 3], [0, 3]] as const).map(([dx, dy]) => addPoint(d, x + dx + rnd() * 0.15, y + dy + rnd() * 0.15))
+    addPath(d, p, [{ kind: 'line' }, { kind: 'line' }, { kind: 'line' }, { kind: 'line' }], true)
+    out.push(p)
+  }
+  return out
+}
+// the drawing without Clean up's guides and the rules that use them
+function withoutGuides(d: SketchDoc): SketchDoc {
+  const guide = new Set(d.entities.filter(e => (e as any).construction).map(e => e.id))
+  return { entities: d.entities.filter(e => !guide.has(e.id)), constraints: d.constraints.filter(c => !c.refs.some(r => guide.has(r))) }
+}
+const partHas = (d: SketchDoc, seed: EntityId, id: EntityId) => componentOf(d, [seed]).entities.some(e => e.id === id)
+// every Mirror pair rule ties two points that were one shape already
+function mirrorStaysInOneShape(d: SketchDoc): void {
+  const bare = withoutGuides(d)
+  for (const c of d.constraints) if (c.kind === 'mirroredFrom') expect(partHas(bare, c.refs[0]!, c.refs[1]!)).toBe(true)
 }
 
 // one connected drawing: n pieces (lines and shallow arcs in turn) round a ring,
@@ -81,7 +108,7 @@ describe('solveHeld and componentOf', () => {
 })
 
 describe('windowOf', () => {
-  it('reaches two hops along pieces and rules, and frees the radius of a circle centred in it', () => {
+  it('reaches two hops along pieces and positional rules (not size rules), and frees the radius of a circle centred in it', () => {
     const d = blank()
     const p = addPoint(d, 0, 0), q = addPoint(d, 1, 0), c = addPoint(d, 2, 0), far = addPoint(d, 9, 9)
     addLine(d, p, q); addLine(d, q, c)
@@ -92,6 +119,9 @@ describe('windowOf', () => {
     const w = windowOf(d, [p])
     for (const id of [p, q, c, circ, far]) expect(w.has(id)).toBe(true)
     for (const id of [x, y, z]) expect(w.has(id)).toBe(false)
+    // a size rule to another shape is not a hop (the window solve holds what it reaches)
+    addConstraint(d, 'equalDist', [p, q, x, y])
+    for (const id of [x, y, z]) expect(windowOf(d, [p]).has(id)).toBe(false)
   })
 })
 
@@ -149,6 +179,44 @@ describe('runCleanup', () => {
     expect(ps[0].closed).toBe(true)
     expect(ps[0].segments.map((s: any) => s.kind)).toEqual(['arc', 'arc', 'arc', 'arc'])
     expect(maxRes(r.doc)).toBeLessThan(1e-3)
+  })
+  it('the joined flower’s Mirror pairs stay inside the one loop', () => {
+    const d = blank(); flower(d)
+    const r = runCleanup(d, opts())
+    expect(paths(r.doc)).toHaveLength(1)
+    mirrorStaysInOneShape(r.doc)
+  })
+  it('never pairs two separate shapes: dragging one rectangle after Apply leaves the other where it is', () => {
+    const d = blank()
+    // two rectangles a hair off mirroring each other across the upright between them
+    const A = [[0, 0], [4, 0.05], [4.02, 3], [0.03, 3.04]].map(([x, y]) => addPoint(d, x!, y!))
+    const B = [[8.1, 0.02], [12.05, 0], [12.1, 3.03], [8.12, 3]].map(([x, y]) => addPoint(d, x!, y!))
+    for (const p of [A, B]) addPath(d, p, [{ kind: 'line' }, { kind: 'line' }, { kind: 'line' }, { kind: 'line' }], true)
+    const all = runCleanup(d, opts())
+    mirrorStaysInOneShape(all.doc)
+    // Same length and Evenly spaced tie separate shapes on purpose; with them off nothing may
+    const tie = new Set(all.fixes.filter(f => f.kind === 'equalLength' || f.kind === 'evenSpacing').map(f => f.id))
+    const r = runCleanup(d, opts({ off: tie }))
+    expect(r.fixes.some(f => f.on)).toBe(true)
+    mirrorStaysInOneShape(r.doc)
+    for (const b of B) expect(partHas(r.doc, A[0]!, b)).toBe(false)
+    const w = cloneDoc(r.doc)
+    const before = B.map(id => [P(w, id).x, P(w, id).y])
+    const a1 = { ...P(w, A[1]!) }
+    solve(w, { maxIter: 120, drag: { point: A[1]!, x: a1.x + 0.7, y: a1.y + 0.4 } })
+    expect(Math.hypot(P(w, A[1]!).x - a1.x, P(w, A[1]!).y - a1.y)).toBeGreaterThan(0.3)   // the drag moved A
+    B.forEach((id, i) => { expect(P(w, id).x).toBeCloseTo(before[i]![0]!, 6); expect(P(w, id).y).toBeCloseTo(before[i]![1]!, 6) })
+  })
+  it('refuses when the drawing’s own rules don’t hold, and moves nothing', () => {
+    const d = blank()
+    const a = addPoint(d, 0, 0), b = addPoint(d, 5, 1.5)
+    addLine(d, a, b)
+    addConstraint(d, 'horizontal', [a, b])   // says level, but it isn't
+    lineAt(d, 0, 4, 2, 6)
+    const r = runCleanup(d, opts())
+    expect(r.refused).toBe('conflict')
+    expect(r.fixes).toEqual([])
+    expect(JSON.stringify(r.doc)).toBe(JSON.stringify(d))
   })
   it('gives the same answer for the same switches', () => {
     const d = blank(); flower(d)
@@ -293,8 +361,9 @@ describe('runCleanup', () => {
   it('a mirror pair the rules can’t allow leaves no guide behind', () => {
     const make = (fixed: boolean) => {
       const d = blank()
-      addCircle(d, addPoint(d, 0, 0, { fixed }), 1)
-      addCircle(d, addPoint(d, 10, 0.1, { fixed }), 1)
+      const ca = addPoint(d, 0, 0, { fixed }), cb = addPoint(d, 10, 0.1, { fixed })
+      addCircle(d, ca, 1); addCircle(d, cb, 1)
+      addLine(d, ca, cb)   // one shape: a line joins the centres
       return d
     }
     // control: free centres are mirrored about a new upright guide
@@ -338,6 +407,103 @@ describe('runCleanup', () => {
     expect(r.fixes.some(f => f.on)).toBe(true)
     expect(maxRes(r.doc)).toBeLessThan(1e-3)
   })
+  it('stops when its time budget runs out, keeping what it accepted', () => {
+    const d = blank(); flower(d)
+    const all = runCleanup(d, opts())
+    let t = 0
+    const r = runCleanup(d, opts({ budgetMs: 25, now: () => (t += 10) }))   // every look at the clock is 10 ms later
+    expect(r.stopped).toBe(true)
+    expect(all.stopped).toBeFalsy()
+    const on = r.fixes.filter(f => f.on)
+    expect(on.length).toBeGreaterThan(0)
+    expect(r.fixes.length).toBeLessThan(all.fixes.length)
+    for (const f of r.fixes) expect(all.fixes.map(x => x.id)).toContain(f.id)   // the first ones tried, same answer
+    expect(maxRes(r.doc)).toBeLessThan(1e-3)
+    // a spent budget before anything is tried: nothing changes
+    let u = 0
+    const none = runCleanup(d, opts({ budgetMs: 0, now: () => (u += 1) }))
+    expect(none.stopped).toBe(true)
+    expect(none.fixes).toEqual([])
+    expect(JSON.stringify(none.doc)).toBe(JSON.stringify(d))
+  })
+  it('a budget stop still lists the fixes switched off in the passes it didn’t reach', () => {
+    const d = blank(); flower(d)
+    const lvl = lineAt(d, 0, 20, 2, 6)                     // 2° off level: Horizontal, a later pass
+    const all = runCleanup(d, opts())
+    const h = all.fixes.find(f => f.kind === 'horizontal' && f.id.includes(lvl.a))!
+    expect(h).toBeDefined()
+    let t = 0
+    const r = runCleanup(d, opts({ budgetMs: 25, now: () => (t += 10), off: new Set([h.id]) }))
+    expect(r.stopped).toBe(true)
+    expect(r.fixes.some(f => f.kind === 'join' && f.on)).toBe(true)
+    expect(r.fixes.find(f => f.id === h.id)).toMatchObject({ on: false, label: 'Horizontal' })
+    expect(r.fixes.filter(f => f.kind !== 'join').map(f => f.id)).toEqual([h.id])   // nothing else from the later passes
+  })
+  it('Clean up again on its own result: fast, no Mirror pair across shapes (its Same length rules don’t weld shapes together)', () => {
+    const d = blank()
+    rectGrid(d, 37)
+    const r1 = runCleanup(d, opts())
+    // two near-mirrored rectangles, whose first run ties them by Same length / Evenly spaced
+    const e = blank()
+    const A = [[0, 0], [4, 0.05], [4.02, 3], [0.03, 3.04]].map(([x, y]) => addPoint(e, x!, y!))
+    const B = [[8.1, 0.02], [12.05, 0], [12.1, 3.03], [8.12, 3]].map(([x, y]) => addPoint(e, x!, y!))
+    for (const p of [A, B]) addPath(e, p, [{ kind: 'line' }, { kind: 'line' }, { kind: 'line' }, { kind: 'line' }], true)
+    // (Evenly spaced is switched off: its guide point sits between the shapes, which is a real tie)
+    const spacing = new Set(runCleanup(e, opts()).fixes.filter(f => f.kind === 'evenSpacing').map(f => f.id))
+    const e1 = runCleanup(e, opts({ off: spacing }))
+    const tiesAB = (c: { kind: string; refs: string[] }) => c.kind === 'equalDist' && c.refs.some(id => A.includes(id)) && c.refs.some(id => B.includes(id))
+    expect(e1.doc.constraints.some(tiesAB)).toBe(true)   // Same length ties the two rectangles
+    for (const strength of ['normal', 'strong'] as const) {
+      for (const [first, pieces] of [[r1, 148], [e1, 8]] as const) {
+        const doc = first.doc
+        const t0 = performance.now()
+        const r2 = runCleanup(doc, opts({ strength }))
+        expect(performance.now() - t0).toBeLessThan(2000)
+        expect(r2.refused).toBeUndefined()
+        mirrorStaysInOneShape(r2.doc)
+        expect(maxRes(r2.doc)).toBeLessThan(1e-3)
+        // a size the first run made whole is not offered again
+        const rounded = first.fixes.filter(f => f.kind === 'round' && f.on).length
+        expect(r2.fixes.filter(f => f.kind === 'round').length).toBeLessThanOrEqual(pieces - rounded)
+      }
+    }
+    expect(partHas(e1.doc, A[0]!, B[0]!)).toBe(false)   // Same length doesn't make them one shape
+  }, 30000)
+  it('with a selection, only the rules of the part it touches must hold', () => {
+    const d = blank()
+    const a = addPoint(d, 0, 10), b = addPoint(d, 5, 11.5)
+    addLine(d, a, b)
+    addConstraint(d, 'horizontal', [a, b])   // broken, but far from the selection
+    const l = lineAt(d, 0, 0, 2, 6)
+    const r = runCleanup(d, opts({ scope: { entities: [l.id], segments: [] } }))
+    expect(r.refused).toBeUndefined()
+    expect(r.fixes.find(f => f.kind === 'horizontal')?.on).toBe(true)
+    expect(runCleanup(d, opts()).refused).toBe('conflict')
+    // a broken rule in the selected part still refuses
+    expect(runCleanup(d, opts({ scope: { entities: [l.id, d.entities.find(e => e.kind === 'line' && (e as any).p1 === a)!.id], segments: [] } })).refused).toBe('conflict')
+  })
+  it('37 slightly crooked rectangles: opens in well under 2 s at the default budget', () => {
+    const d = blank(); rectGrid(d, 37)
+    const t0 = performance.now()
+    const r = runCleanup(d, { unitsPerPx: U, strength: 'normal' })
+    expect(performance.now() - t0).toBeLessThan(2000)
+    expect(r.stopped).toBeFalsy()                     // the whole run fits in the default budget
+    expect(r.fixes.some(f => f.on)).toBe(true)
+    expect(maxRes(r.doc)).toBeLessThan(1e-3)
+    mirrorStaysInOneShape(r.doc)
+  })
+  it('37 slightly crooked rectangles, no budget: every fix tried, still in seconds, no shape tied to another', () => {
+    const d = blank()
+    const rects = rectGrid(d, 37)
+    const t0 = performance.now()
+    const r = runCleanup(d, opts())
+    const ms = performance.now() - t0
+    expect(r.stopped).toBeFalsy()
+    expect(ms).toBeLessThan(5000)   // ~0.1 s here; ~54 s before (Mirror pairs across shapes + whole-drawing nudge solves)
+    expect(maxRes(r.doc)).toBeLessThan(1e-3)
+    mirrorStaysInOneShape(r.doc)
+    for (let i = 1; i < rects.length; i++) expect(partHas(r.doc, rects[0]![0]!, rects[i]![0]!)).toBe(false)
+  }, 60000)
   it('cleans one connected drawing of 120 pieces fast enough to re-run on every switch', () => {
     const d = blank(); ring(d, 120)
     const t0 = performance.now()

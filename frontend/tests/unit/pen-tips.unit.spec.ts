@@ -9,16 +9,18 @@ import type { SketchDoc, EntityId } from '~/lib/sketch/model'
 import type { ViewMatrix } from '~/lib/sketch/view'
 import { addPoint, addLine, addCircle, addPath } from '~/lib/sketch/edit'
 import { sketchPathData } from '~/lib/sketch/sketchPath'
+import { fillPathData } from '~/lib/sketch/fills'
 import { availableConstraints, type SegRef } from '~/composables/pen/penRules'
 import { usePen, type PenTool } from '~/composables/pen/usePen'
 import { PEN_TIPS, tipKeyLabel } from '~/composables/pen/penTips'
 import { PEN_TIP_DEMOS, PEN_DEMO_TOOLS } from '~/composables/pen/penTipDemos'
 
-const ALL_TOOLS: PenTool[] = ['select', 'path', 'curve', 'line', 'circle', 'point', 'trim', 'cut', 'dissolve']
+const ALL_TOOLS: PenTool[] = ['select', 'path', 'curve', 'line', 'circle', 'point', 'trim', 'cut', 'dissolve', 'fill']
 const DEMO_IDS = [...ALL_TOOLS, 'cleanup']
 const FIXED_IDS = ['guide', 'labels', 'undo', 'redo', 'close', 'finish', 'done', 'cancel',
   'fix', 'repeat', 'mirror', 'flip-h', 'flip-v', 'construction', 'delete',
-  'cleanup-apply', 'cleanup-cancel', 'cleanup-strength']
+  'cleanup-apply', 'cleanup-cancel', 'cleanup-strength',
+  'copy', 'copy-svg', 'paste', 'select-all', 'dissolve-point', 'prop-lock', 'prop-add-rule', 'prop-remove-rule']
 
 // every rule kind the rules row can show: run availableConstraints over every
 // single and pair selection of a drawing that has each kind of thing in it
@@ -75,10 +77,10 @@ describe('pen tips table', () => {
 
   it('the drawing tools carry their single-letter keys', () => {
     const keys = Object.fromEntries(ALL_TOOLS.map(t => [t, PEN_TIPS[t]!.key]))
-    expect(keys).toEqual({ select: 'V', path: 'P', curve: 'B', line: 'L', circle: 'O', point: 'N', trim: 'T', cut: 'C', dissolve: 'D' })
+    expect(keys).toEqual({ select: 'V', path: 'P', curve: 'B', line: 'L', circle: 'O', point: 'N', trim: 'T', cut: 'C', dissolve: 'D', fill: 'G' })
   })
 
-  it('the nine drawing and editing tools and Clean up have a demo, and nothing else does', () => {
+  it('the ten drawing and editing tools and Clean up have a demo, and nothing else does', () => {
     expect([...PEN_DEMO_TOOLS].sort()).toEqual([...DEMO_IDS].sort())
     for (const t of DEMO_IDS) expect(PEN_TIPS[t]!.demo).toBe(t)
     for (const id of FIXED_IDS) expect(PEN_TIPS[id]!.demo).toBeUndefined()
@@ -94,6 +96,16 @@ describe('pen tips table', () => {
     expect(tipKeyLabel('⌘Z', false)).toBe('Ctrl+Z')
     expect(tipKeyLabel('⇧⌘Z', false)).toBe('Ctrl+Shift+Z')
     expect(tipKeyLabel('P', false)).toBe('P')
+  })
+
+  it('the menu’s actions carry their keys', () => {
+    expect(PEN_TIPS.construction!.key).toBe('X')
+    expect(PEN_TIPS['flip-h']!.key).toBe('⇧H')
+    expect(PEN_TIPS['flip-v']!.key).toBe('⇧V')
+    expect(PEN_TIPS.copy!.key).toBe('⌘C')
+    expect(PEN_TIPS.paste!.key).toBe('⌘V')
+    expect(PEN_TIPS['select-all']!.key).toBe('⌘A')
+    expect(tipKeyLabel('⇧H', false)).toBe('Shift+H')
   })
 })
 
@@ -115,9 +127,21 @@ describe('pen tip demos', () => {
   it.each(DEMO_IDS)('%s acts out a gesture: the drawing changes and the cursor presses', (t) => {
     const demo = PEN_TIP_DEMOS[t]!
     const frames = Array.from({ length: 48 }, (_, i) => demo(i / 48))
-    expect(new Set(frames.map(f => sketchPathData(f.doc) + JSON.stringify(f.dots ?? []))).size).toBeGreaterThan(1)
+    // (Fill changes what is filled, not the outline)
+    expect(new Set(frames.map(f => sketchPathData(f.doc) + JSON.stringify(f.dots ?? []) + JSON.stringify(f.doc.fills ?? []))).size).toBeGreaterThan(1)
     expect(frames.some(f => f.pressed)).toBe(true)
     expect(frames.some(f => !f.pressed)).toBe(true)
+  })
+
+  it('fill shows the lens hatched, fills it on the click, then points at the crescent', () => {
+    const hover = PEN_TIP_DEMOS.fill!(0.4)
+    const done = PEN_TIP_DEMOS.fill!(0.7)
+    const next = PEN_TIP_DEMOS.fill!(0.9)
+    expect(hover.hatchAt).toBeTruthy()
+    expect(hover.doc.fills).toBeUndefined()
+    expect(done.doc.fills).toHaveLength(1)
+    expect(fillPathData(done.doc)).toMatch(/^M .* Z$/)
+    expect(next.hatchAt && next.hatchAt.x).toBeLessThan(60)
   })
 
   it('trim removes the hovered piece and leaves a ghost of it', () => {

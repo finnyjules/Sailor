@@ -171,7 +171,7 @@ function arcParamRaw(a0: number, sweepAngle: number, ang: number): number | null
   return Math.min(1, Math.max(0, t))
 }
 
-interface IntersectionPoint { p: Vec2; tSelf: number; tOther: number }
+export interface IntersectionPoint { p: Vec2; tSelf: number; tOther: number }
 
 function lineLine(g1: CurveGeom, g2: CurveGeom): IntersectionPoint[] {
   const a1 = g1.a!, b1 = g1.b!, a2 = g2.a!, b2 = g2.b!
@@ -246,7 +246,7 @@ function circleCircleLike(g1: CurveGeom, g2: CurveGeom): IntersectionPoint[] {
   return out
 }
 
-function intersect(g1: CurveGeom, g2: CurveGeom): IntersectionPoint[] {
+export function intersectCurves(g1: CurveGeom, g2: CurveGeom): IntersectionPoint[] {
   if (g1.kind === 'line' && g2.kind === 'line') return lineLine(g1, g2)
   if (g1.kind === 'line') return lineCircleLike(g1, g2)
   if (g2.kind === 'line') return lineCircleLike(g2, g1).map(x => ({ p: x.p, tSelf: x.tOther, tOther: x.tSelf }))
@@ -282,7 +282,7 @@ export function crossingsOn(doc: SketchDoc, ref: CurveRef): Crossing[] {
     const g2 = curveGeom(doc, other)
     if (!g2) continue
     const shared = sharedAnchorPoints(doc, ref, other)
-    for (const ip of intersect(g, g2)) {
+    for (const ip of intersectCurves(g, g2)) {
       if (shared.some(s => dist(ip.p, s) < EPS_LEN)) continue
       out.push({ t: ip.tSelf, point: ip.p, cutter: other, cutterT: ip.tOther })
     }

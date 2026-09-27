@@ -11,16 +11,19 @@ import {
   type RefKind, type RefRole, type CastMember,
 } from '~/lib/shotdirector/types'
 import { formatShotUSD } from '~/lib/shotdirector/price'
-import { buildKeyframePrompt, KEYFRAME_COST_USD } from '~/lib/shotdirector/keyframe'
-import { uploadRefFile } from '~/lib/shotdirector/refUpload'
-import { CAST_REF_CAP } from '~/lib/shotdirector/cast'
+import { buildKeyframePrompt, startFrameImages, KEYFRAME_COST_USD } from '~/lib/shotdirector/keyframe'
+import { uploadRefFile, viewRefUrl } from '~/lib/shotdirector/refUpload'
+import { pickState } from '#shared/characters/types'
+import { castMemberPictures } from '~/lib/shotdirector/cast'
+import { SHOT_MODEL_CHOICES } from '~/lib/shotdirector/profiles'
 import StudioSection from '~/components/vue-canvas/StudioSection.vue'
 import CharacterPickerModal from '~/components/vue-canvas/CharacterPickerModal.vue'
 import ShotViewfinder from '~/components/vue-canvas/ShotViewfinder.vue'
 import ShotCameraPicker from '~/components/vue-canvas/ShotCameraPicker.vue'
 import { emitCharacterEvent } from '~/lib/characters/bus'
+import { latestShotTakeScores, faceScoreChip } from '~/lib/shotdirector/takeScores'
 
-const props = defineProps<{ nodeId: string; nodes: any[] }>()
+const props = defineProps<{ nodeId: string; nodes: any[]; edges?: any[] }>()
 const emit = defineEmits<{ (e: 'close'): void }>()
 
 const node = computed(() => props.nodes.find(n => String(n.id) === String(props.nodeId)))
@@ -33,11 +36,11 @@ function persist(s: any) {
   n.data.properties.sailor_shotDirector = s
 }
 
-const { resolveStateRefs, coverUrl, characters } = useCharacters()
-const { sheet, result, addReference, removeReference, update, rerollSeed, addCastMember, removeCastMember } = useShotDirector(
+const { resolveCastSets, coverUrl, characters } = useCharacters()
+const { sheet, result, profile, addReference, removeReference, update, rerollSeed, setModel, addCastMember, removeCastMember } = useShotDirector(
   node.value?.data?.properties?.sailor_shotDirector,
   persist,
-  picks => resolveStateRefs(picks),
+  picks => resolveCastSets(picks),
   picks => missingStateIssues(picks, characters.value),
 )
 
@@ -69,17 +72,29 @@ function variantLabel(m: CastMember): string | null {
   const v = c?.states.find(x => x.id === m.stateId)
   return v ? v.label : null
 }
-/** The photos each cast member contributes, with their [ImageN] tag range —
- *  so "what is [Image2]?" is answerable by looking at the Cast section. */
+/** The photos each cast member contributes, with the tag the chosen model
+ *  reads them by (@Image1–2, image 3, @Element1) — so "what is @Image2?" is
+ *  answerable by looking at the Cast section. */
 const castRefRows = computed(() => {
-  let tag = 1
-  const resolved = resolveStateRefs(sheet.value.cast.map(m => ({ slug: m.slug, stateId: m.stateId })))
+  const p = profile.value
+  let slot = 1
+  const resolved = resolveCastSets(sheet.value.cast.map(m => ({ slug: m.slug, stateId: m.stateId })))
   return sheet.value.cast.map((m) => {
-    // What is actually sent: up to CAST_REF_CAP pictures of one person.
-    const urls = resolved[m.slug]?.slice(0, CAST_REF_CAP) ?? []
-    const start = tag
-    tag += urls.length
-    return { slug: m.slug, name: m.name, variantLabel: variantLabel(m), urls, start, end: tag - 1 }
+    // What is actually sent to the chosen model (same pick as materializeCast).
+    const urls = castMemberPictures(resolved[m.slug], p)
+    const start = slot
+    let tags: string[]
+    let tag: string
+    if (p.castMode === 'elements') {
+      // one element per character, all its pictures under one tag
+      tag = urls.length ? p.refTag('image', slot++) : ''
+      tags = urls.map(() => tag)
+    } else {
+      tags = urls.map((_, i) => p.refTag('image', start + i))
+      slot += urls.length
+      tag = urls.length > 1 ? `${tags[0]}–${slot - 1}` : (tags[0] ?? '')
+    }
+    return { slug: m.slug, name: m.name, variantLabel: variantLabel(m), urls, tag, tags }
   })
 })
 function onRemoveCast(m: CastMember) {
@@ -112,6 +127,11 @@ function onNewTake() {
   rerollSeed()
   onGenerate()
 }
+
+/** The latest take's face scores, one chip per cast member. */
+const takeScoreChips = computed(() =>
+  latestShotTakeScores(props.nodes, props.edges ?? [], props.nodeId).map(s => ({ key: s.slug, ...faceScoreChip(s) })),
+)
 
 // ── Copy actions ──────────────────────────────────────────────────────────────
 const copiedPrompt = ref(false)
@@ -212,9 +232,26 @@ const previewBusy = ref(false)
 const previewError = ref<string | null>(null)
 const previewKey = ref<string | null>(null)
 
+// With a cast, the frame is made from each member's clean pictures (front,
+// full-body front, their look's clothes) with a line naming who is which image
+// — never the combined sheet grid. Without a cast: the subject image, as before.
+const castStartFrame = computed(() => {
+  if (!sheet.value.cast.length) return null
+  const sets = resolveCastSets(sheet.value.cast.map(m => ({ slug: m.slug, stateId: m.stateId })))
+  const members = sheet.value.cast.flatMap((m) => {
+    const set = sets[m.slug]
+    if (!set) return []
+    const c = characters.value.find(x => x.slug === m.slug)
+    const clothes = c ? (pickState(c, m.stateId)?.clothes ?? []).map(g => viewRefUrl(g.filename)) : []
+    return [{ name: m.name, set, clothes }]
+  })
+  const made = startFrameImages(members, environmentImage.value)
+  return made.urls.length ? made : null
+})
+
 // What the keyframe depends on — when this drifts from previewKey, it's stale.
 const previewSignature = computed(() =>
-  JSON.stringify([result.value.prompt, subjectImage.value, environmentImage.value, sheet.value.format.aspectRatio]))
+  JSON.stringify([result.value.prompt, subjectImage.value, environmentImage.value, sheet.value.format.aspectRatio, castStartFrame.value]))
 const keyframeStale = computed(() => !!previewFrame.value && previewKey.value !== previewSignature.value)
 const canPreview = computed(() => !!(subjectImage.value || environmentImage.value || sheet.value.subject.trim()))
 
@@ -233,12 +270,16 @@ async function generatePreview() {
   previewError.value = null
   const sig = previewSignature.value
   try {
-    const person = subjectImage.value
     const location = environmentImage.value
-    const images: string[] = []
-    if (person) images.push(await fetchImageAsDataUrl(person))
-    if (location) images.push(await fetchImageAsDataUrl(location))
-    const prompt = buildKeyframePrompt(sheet.value, { hasPerson: !!person, hasLocation: !!location })
+    const made = castStartFrame.value
+    const person = made ? null : subjectImage.value
+    const urls = made ? made.urls : [person, location].filter((u): u is string => !!u)
+    const images = await Promise.all(urls.map(fetchImageAsDataUrl))
+    const prompt = buildKeyframePrompt(sheet.value, {
+      hasPerson: made ? true : !!person,
+      hasLocation: !!location,
+      castLine: made?.castLine,
+    })
     const res = await $fetch<{ images?: string[] }>('/api/inpaint/nano-gen', {
       method: 'POST',
       body: { prompt, images, aspect_ratio: sheet.value.format.aspectRatio },
@@ -251,6 +292,24 @@ async function generatePreview() {
     previewError.value = err instanceof Error ? err.message : 'Preview failed'
   } finally {
     previewBusy.value = false
+  }
+}
+
+// ── Use the preview as the first frame ────────────────────────────────────────
+const firstFrameBusy = ref(false)
+async function useAsFirstFrame() {
+  const frame = previewFrame.value
+  if (!frame || firstFrameBusy.value) return
+  firstFrameBusy.value = true
+  previewError.value = null
+  try {
+    const blob = await fetch(frame).then(r => r.blob())
+    const url = await uploadRefFile(new File([blob], 'first-frame.png', { type: blob.type || 'image/png' }))
+    update(s => ({ ...s, firstFrame: url, mode: 'firstLastFrame' }))
+  } catch (err) {
+    previewError.value = err instanceof Error ? err.message : 'Upload failed'
+  } finally {
+    firstFrameBusy.value = false
   }
 }
 
@@ -380,6 +439,15 @@ function patchBeat(id: string, patch: Record<string, unknown>) {
 // widened to support it (follow-up).
 const ASPECT_RATIOS = ['16:9', '9:16', '1:1', '4:3', '3:4', '21:9']
 const DURATIONS = [5, 10, 15]
+/** The lengths the chosen model can render; Auto only where it takes any length. */
+const durationChoices = computed(() => profile.value.durations ?? DURATIONS)
+// One line per model for the Model label's tooltip: what it is good at.
+const MODEL_TIPS: Record<string, string> = {
+  'seedance-2.0': 'Takes the most reference pictures, plus video and sound',
+  'kling-v3': 'Keeps characters steady, starting from a first frame',
+  'veo-3.1': 'Lifelike motion and sound, in 8-second clips',
+  'veo-3.1-fast': 'Veo, quicker and cheaper',
+}
 const RESOLUTIONS = ['720p', '1080p']
 
 const durationLabel = computed(() =>
@@ -426,7 +494,15 @@ function patchDialogue(i: number, patch: { speaker?: string; line?: string }) {
       <!-- Header -->
       <div class="flex shrink-0 items-center gap-2 border-b border-white/[0.06] px-4 pt-3 pb-2.5">
         <span class="text-[13px] font-medium tracking-[-0.01em] text-white/90">Shot Director</span>
-        <span class="ml-1 rounded border border-white/10 bg-white/[0.04] px-1.5 py-0.5 text-[10px] text-white/40">Seedance 2.0</span>
+        <select
+          :value="profile.id"
+          :title="MODEL_TIPS[profile.id]"
+          aria-label="Model"
+          class="ml-1 cursor-pointer rounded border border-white/15 bg-white/[0.06] px-1.5 py-0.5 text-[11px] text-white/80 outline-none hover:border-white/25 focus:border-white/30"
+          @change="setModel(($event.target as HTMLSelectElement).value)"
+        >
+          <option v-for="m in SHOT_MODEL_CHOICES" :key="m.id" :value="m.id" class="bg-neutral-900">{{ m.label }}</option>
+        </select>
         <span class="flex-1" />
         <span class="rounded border border-white/10 px-1.5 py-0.5 text-[11px] text-white/30">esc</span>
         <button type="button" aria-label="Close" class="ml-1 text-white/40 transition hover:text-white/80" @click="emit('close')">
@@ -456,8 +532,10 @@ function patchDialogue(i: number, patch: { speaker?: string; line?: string }) {
             <div class="flex items-center gap-0 border-b border-white/[0.08] p-1">
               <button
                 type="button"
-                class="flex-1 rounded py-1.5 text-[11px] font-medium transition-colors"
+                class="flex-1 rounded py-1.5 text-[11px] font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:text-white/40"
                 :class="sheet.mode === 'reference' ? 'bg-white/10 text-white' : 'text-white/40 hover:text-white/70'"
+                :disabled="profile.requiresFirstFrame"
+                :title="profile.requiresFirstFrame ? `${profile.label} starts from a first frame.` : undefined"
                 @click="update(s => ({ ...s, mode: 'reference' }))"
               >Reference</button>
               <button
@@ -468,8 +546,8 @@ function patchDialogue(i: number, patch: { speaker?: string; line?: string }) {
               >First / Last frame</button>
             </div>
 
-            <!-- Reference mode -->
-            <div v-if="sheet.mode === 'reference'" class="space-y-4 p-3">
+            <!-- Cast (every mode), then the mode's own references -->
+            <div class="space-y-4 p-3">
 
               <!-- Hidden file inputs -->
               <input ref="fileInputImage" type="file" accept="image/*" class="hidden" @change="onFileAdd('image', $event)" />
@@ -507,9 +585,9 @@ function patchDialogue(i: number, patch: { speaker?: string; line?: string }) {
                     <img
                       v-for="(u, i) in row.urls" :key="u" :src="u"
                       class="h-9 w-9 rounded border border-white/[0.08] object-cover"
-                      :title="`[Image${row.start + i}]`"
+                      :title="row.tags[i]"
                     >
-                    <span v-if="row.urls.length" class="text-[10px] tabular-nums text-white/30">[Image{{ row.start }}{{ row.end > row.start ? `–${row.end}` : '' }}]</span>
+                    <span v-if="row.urls.length" class="text-[10px] tabular-nums text-white/30">{{ row.tag }}</span>
                     <span v-else class="text-[10px] text-red-400/80">{{ row.variantLabel ? `${row.variantLabel} — ` : '' }}no photos yet — add some to their sheet</span>
                   </div>
                   <p class="text-[10px] leading-relaxed text-white/35">
@@ -525,6 +603,9 @@ function patchDialogue(i: number, patch: { speaker?: string; line?: string }) {
                 @pick="(slug, name, stateId) => { addCastMember(slug, name, 'picker', stateId); castPickerOpen = false }"
                 @close="castPickerOpen = false"
               />
+
+            <!-- Reference mode -->
+            <template v-if="sheet.mode === 'reference'">
 
               <!-- Images (≤9) -->
               <div>
@@ -649,10 +730,10 @@ function patchDialogue(i: number, patch: { speaker?: string; line?: string }) {
                   </div>
                 </div>
               </div>
-            </div>
+            </template>
 
             <!-- First / Last frame mode -->
-            <div v-else class="space-y-3 p-3">
+            <div v-else class="space-y-3">
               <input ref="fileInputFirst" type="file" accept="image/*" class="hidden" @change="onFrameFile('firstFrame', $event)" />
               <input ref="fileInputLast" type="file" accept="image/*" class="hidden" @change="onFrameFile('lastFrame', $event)" />
               <div class="flex gap-3">
@@ -679,6 +760,7 @@ function patchDialogue(i: number, patch: { speaker?: string; line?: string }) {
                   <button v-if="sheet.lastFrame" type="button" class="mt-1 text-[10px] text-white/30 hover:text-white/60" @click="update(s => ({ ...s, lastFrame: undefined }))">Remove</button>
                 </div>
               </div>
+            </div>
             </div>
           </div>
 
@@ -920,8 +1002,8 @@ function patchDialogue(i: number, patch: { speaker?: string; line?: string }) {
                   class="w-full rounded border border-white/10 bg-[#0e0e10] px-2 py-1.5 text-[11px] text-white/80 outline-none focus:border-white/25"
                   @change="setDuration(($event.target as HTMLSelectElement).value)"
                 >
-                  <option value="auto" class="bg-neutral-900">Auto</option>
-                  <option v-for="d in DURATIONS" :key="d" :value="String(d)" class="bg-neutral-900">{{ d }}s</option>
+                  <option v-if="!profile.durations" value="auto" class="bg-neutral-900">Auto</option>
+                  <option v-for="d in durationChoices" :key="d" :value="String(d)" class="bg-neutral-900">{{ d }}s</option>
                 </select>
               </div>
               <!-- Resolution -->
@@ -1020,7 +1102,7 @@ function patchDialogue(i: number, patch: { speaker?: string; line?: string }) {
           />
 
           <!-- Keyframe preview: a photoreal still from the same refs Seedance uses -->
-          <div v-if="sheet.mode === 'reference'" class="flex flex-col gap-1">
+          <div class="flex flex-col gap-1">
             <button
               type="button"
               class="gen-pastel flex items-center justify-center gap-1.5 rounded px-3 py-1.5 text-[11px] font-medium text-neutral-900 transition disabled:opacity-40 disabled:cursor-not-allowed"
@@ -1039,6 +1121,14 @@ function patchDialogue(i: number, patch: { speaker?: string; line?: string }) {
             <p v-if="previewError" class="text-[10px] text-red-400/80">{{ previewError }}</p>
             <p v-else class="text-[10px] leading-relaxed text-white/30">A quick photoreal still from your references — a real look before the slow full run.</p>
           </div>
+
+          <button
+            v-if="previewFrame && !previewBusy"
+            type="button"
+            class="-mt-2 flex items-center justify-center gap-1.5 rounded border border-white/10 px-3 py-1.5 text-[11px] text-white/70 transition hover:bg-white/10 hover:text-white/90 disabled:opacity-40 disabled:cursor-not-allowed"
+            :disabled="firstFrameBusy"
+            @click="useAsFirstFrame"
+          >{{ firstFrameBusy ? 'Saving…' : 'Use as first frame' }}</button>
 
           <!-- Issues (errors block generate) -->
           <div v-if="result.issues.length > 0" class="space-y-1">
@@ -1101,6 +1191,12 @@ function patchDialogue(i: number, patch: { speaker?: string; line?: string }) {
       <div class="flex shrink-0 items-center gap-2 border-t border-white/[0.06] px-4 py-2.5">
         <span class="text-[10px] text-white/25">Failed runs aren't charged.</span>
         <span class="flex-1" />
+        <span
+          v-for="c in takeScoreChips" :key="c.key"
+          class="rounded-full border px-2 py-0.5 text-[11px] tabular-nums"
+          :class="c.tone === 'amber' ? 'border-amber-400/30 bg-amber-400/10 text-amber-300/90' : 'border-white/10 bg-white/[0.05] text-white/70'"
+          :title="c.tip"
+        >{{ c.text }}</span>
         <button
           type="button"
           class="rounded bg-white/[0.06] px-2.5 py-1.5 text-[12px] text-white/70 transition hover:bg-white/10 disabled:opacity-40 disabled:cursor-not-allowed"
@@ -1117,7 +1213,7 @@ function patchDialogue(i: number, patch: { speaker?: string; line?: string }) {
           :title="'Estimated provider cost for this shot'"
           @click="onGenerate"
         >
-          Generate · {{ formatShotUSD(sheet) }}
+          Generate · {{ formatShotUSD(sheet, sheet.model) }}
         </button>
       </div>
     </div>

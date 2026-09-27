@@ -8,6 +8,9 @@
  *   PUT  cancel_url           -> 202 requested / 400 already completed / 404 unknown
  */
 import { getFalToken } from '../utils/falStorage'
+import { parseRemembered } from './rawJson'
+import { FetchRefused, TooManyRedirects } from '../templates/safeFetch'
+import type { AnswerFetchOnce } from './answerDownload'
 
 export const FAL_QUEUE_BASE = 'https://queue.fal.run'
 
@@ -86,7 +89,7 @@ export async function falSubmit(
     const t = await r.text().catch(() => '')
     throw new FalError(`fal submit ${r.status}: ${t || r.statusText}`, r.status)
   }
-  const body = await r.json() as Record<string, unknown>
+  const body = parseRemembered<Record<string, unknown>>(await r.text())
   const requestId = String(body.request_id ?? '')
   if (!requestId) throw new FalError('fal submit returned no request id', null)
   return {
@@ -112,7 +115,7 @@ export async function falStatus(statusUrl: string, opts: { logs?: boolean } = {}
     }
     return transientStatus()
   }
-  const body = await r.json() as Record<string, unknown>
+  const body = parseRemembered<Record<string, unknown>>(await r.text())
   const logs = Array.isArray(body.logs)
     ? (body.logs as unknown[]).filter((l): l is { message: string } => !!l && typeof (l as any).message === 'string')
     : []
@@ -132,29 +135,47 @@ export async function falResult<T = unknown>(responseUrl: string): Promise<T> {
     const t = await r.text().catch(() => '')
     throw new FalError(`fal result ${r.status}: ${t}`, r.status)
   }
-  return await r.json() as T
+  // Read as text, so a value answer keeps its body (rawJson.ts).
+  return parseRemembered<T>(await r.text())
 }
 
 /**
  * Fetch a finished result file (a fal.media URL). A network error or a 5xx is
  * tried again, three tries in all, waiting 1s then 2s; a 4xx fails at once.
+ * `fetchOnce` (the runner's, server/runner/answerDownload.ts): each try goes
+ * through the safe-fetch policy with the kind's byte cap and time limit; a
+ * refusal by that policy (a private address, too large, too slow, too many
+ * redirects) fails at once, as does Stop (`signal`). Without it (the unit
+ * tests of the retries), a plain fetch.
  */
 export async function downloadResult(
   url: string,
-  opts: { sleep?: (ms: number) => Promise<void> } = {},
+  opts: { sleep?: (ms: number) => Promise<void>; maxBytes?: number; signal?: AbortSignal; fetchOnce?: AnswerFetchOnce } = {},
 ): Promise<{ bytes: Uint8Array; contentType: string | null }> {
   const sleep = opts.sleep ?? (ms => new Promise<void>(r => setTimeout(r, ms)))
   const waits = [1000, 2000]
   for (let attempt = 0; ; attempt++) {
+    if (opts.signal?.aborted) throw new Error('Stopped')
     let failure: Error
     let final = false
     try {
-      const r = await fetch(url)
-      if (r.ok) return { bytes: new Uint8Array(await r.arrayBuffer()), contentType: r.headers.get('content-type') }
-      failure = new Error(`Could not download the result (${r.status})`)
-      final = r.status < 500
+      if (opts.fetchOnce) {
+        const r = await opts.fetchOnce(url, { ...(opts.maxBytes !== undefined ? { maxBytes: opts.maxBytes } : {}), ...(opts.signal ? { signal: opts.signal } : {}) })
+        if (r.status >= 200 && r.status < 300) return { bytes: r.bytes, contentType: r.contentType }
+        failure = new Error(`Could not download the result (${r.status})`)
+        final = r.status < 500
+      }
+      else {
+        const r = await fetch(url)
+        if (r.ok) return { bytes: new Uint8Array(await r.arrayBuffer()), contentType: r.headers.get('content-type') }
+        failure = new Error(`Could not download the result (${r.status})`)
+        final = r.status < 500
+      }
     }
     catch (e) {
+      if (e instanceof FetchRefused) throw e
+      if (e instanceof TooManyRedirects) throw new Error('Could not download the result (it was redirected too many times)')
+      if (opts.signal?.aborted) throw new Error('Stopped')
       failure = e instanceof Error ? e : new Error(String(e)) // no answer, or the body broke off
     }
     if (final || attempt >= waits.length) throw failure
@@ -209,9 +230,33 @@ export function falVideoUrl(result: unknown): string | null {
   return typeof url === 'string' && url ? url : null
 }
 
-/** The files a finished fal result points at: every image, or the one video. */
-export function falOutputUrls(result: unknown, media: 'image' | 'video'): string[] {
-  return media === 'image' ? falImageUrls(result) : [falVideoUrl(result)].filter((u): u is string => !!u)
+/** A fal sound answer's file: `audio` (the speech and music apps), else `audio_file`. */
+export function falAudioUrl(result: unknown): string | null {
+  const r = result as { audio?: { url?: unknown }; audio_file?: { url?: unknown } } | null
+  const url = r?.audio?.url ?? r?.audio_file?.url
+  return typeof url === 'string' && url ? url : null
+}
+
+/** A fal 3D answer's file: `model_glb`, else `model_mesh` (the image-to-3D apps). */
+export function falGlbUrl(result: unknown): string | null {
+  const r = result as { model_glb?: { url?: unknown }; model_mesh?: { url?: unknown } } | null
+  const url = r?.model_glb?.url ?? r?.model_mesh?.url
+  return typeof url === 'string' && url ? url : null
+}
+
+/**
+ * What a provider node's answer is (R3.1): pictures, a video, a sound, a 3D
+ * file (each downloaded and saved), or a value (the answer itself is the
+ * result: nothing is downloaded).
+ */
+export type OutputMedia = 'image' | 'video' | 'audio' | 'glb' | 'value'
+
+/** The files a finished fal result points at: every image, or the one video, sound or 3D file; none for a value. */
+export function falOutputUrls(result: unknown, media: OutputMedia): string[] {
+  if (media === 'value') return []
+  if (media === 'image') return falImageUrls(result)
+  const url = media === 'video' ? falVideoUrl(result) : media === 'audio' ? falAudioUrl(result) : falGlbUrl(result)
+  return url ? [url] : []
 }
 
 export type FalClient = {
@@ -226,7 +271,7 @@ export type FalClient = {
  * (replicateQueue.ts). The shape is fal's, plus where the result's files are.
  */
 export type ProviderClient = FalClient & {
-  outputUrls(result: unknown, media: 'image' | 'video'): string[]
+  outputUrls(result: unknown, media: OutputMedia): string[]
 }
 
 export const realFalClient: ProviderClient = {

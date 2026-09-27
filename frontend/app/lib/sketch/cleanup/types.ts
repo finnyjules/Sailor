@@ -38,6 +38,7 @@ export const GUARD = {
   ARC_MIN_PX: 2,         // no arc ends shorter than this (length or radius); no line under it is looked at
   MAX_PIECES: 150,       // above this Clean up refuses (select a part)
   ROUND_MIN_UNIT_PX: 4,  // round sizes only when one drawing unit is at least this big on screen
+  BUDGET_MS: 800,        // one run stops trying fixes after this long (keeps what it accepted)
 } as const
 
 export type FixKind =
@@ -86,6 +87,14 @@ export interface CleanupOptions {
   scope?: CleanupScope | null   // null: the whole drawing
   off?: ReadonlySet<string>     // fix ids switched off
   openOnly?: boolean            // a join may not close a path
+  /** **Ruling (final review):** a run stops trying candidates once this many
+   *  ms have passed (default `GUARD.BUDGET_MS`), keeps what it accepted and
+   *  says `stopped`. A stop makes the answer depend on the machine's speed —
+   *  the same switches can give a different answer on a slower run — so
+   *  tests pass a huge budget, or a fake `now`. */
+  budgetMs?: number
+  /** the clock the budget reads (default `performance.now`) */
+  now?: () => number
 }
 
 export interface CleanupFix { id: string; kind: FixKind; label: string; on: boolean; at: Vec2 }
@@ -94,4 +103,6 @@ export interface CleanupResult {
   doc: SketchDoc
   fixes: CleanupFix[]
   refused?: 'conflict' | 'tooBig'
+  /** the time budget ran out: candidates after that point were not tried */
+  stopped?: boolean
 }

@@ -4,7 +4,11 @@
 // the drawing the passes before it left, tries its candidates best first,
 // and keeps a candidate only when the held solve converges, it adds
 // something, and the guards pass. Always from the drawing it is given, so
-// the same switches give the same answer.
+// the same switches give the same answer — unless the time budget runs out
+// (`budgetMs`, 800 ms by default): the run then stops, keeps what it
+// accepted and says `stopped`, and where it stopped depends on the machine's
+// speed. The pen memoises each answer per strength + switches for the
+// session, so one session still shows one answer per setting.
 import type { SketchDoc, EntityId } from '../model'
 import type { Vec2 } from '../geom'
 import { getPoint } from '../model'
@@ -16,7 +20,7 @@ import { equivalentRuleKey, type RuleSpec } from '../tangency'
 import { meanPoint } from './cluster'
 import { buildContext, heldForScope, copyPoints, type CleanupContext, type ContextEnv } from './context'
 import { RowBasis, freeSlots, rowsFor } from './rank'
-import { solveHeld, solveWindow, windowOf, reachesBeyond, componentOf, baselineOf, movedTooFar, arcBroken, lineCollapsed, type Baseline } from './guards'
+import { solveWindow, windowOf, windowOfPart, reachesBeyond, componentOf, baselineOf, movedTooFar, arcBroken, lineCollapsed, type Baseline } from './guards'
 import { detectJoins, detectOnCurve, detectTangents } from './detect-topology'
 import { detectHV, detectParallelPerp } from './detect-directions'
 import { detectConcentric, detectMirrorPairs, detectEqualLengths, detectEqualRadii, detectEvenSpacing, detectRound } from './detect-shape'
@@ -40,6 +44,13 @@ function resolveIn(alias: ReadonlyMap<EntityId, EntityId>, id: EntityId): Entity
   let x = id
   for (let k = 0; alias.has(x) && k < 10000; k++) x = alias.get(x)!
   return x
+}
+// the drawing with only the rules of the parts a scope touches (all of it with no scope)
+function scopeRules(doc: SketchDoc, scope: CleanupOptions['scope']): SketchDoc {
+  if (!scope) return doc
+  const seeds = [...scope.entities, ...scope.segments.map(x => x.pathId)]
+  if (!seeds.some(id => doc.entities.some(e => e.id === id))) return doc
+  return { entities: doc.entities, constraints: componentOf(doc, seeds).constraints }
 }
 const residualNorm = (doc: SketchDoc) => Math.sqrt(constraintResiduals(doc).reduce((s, r) => s + r * r, 0))
 
@@ -111,15 +122,18 @@ function tryApply(work: SketchDoc, cand: Candidate, env: Env): boolean {
   const guarded = () => !movedTooFar(work, env.base) && !arcBroken(work, env.base, resolve) && !lineCollapsed(work, env.base, resolve, created)
   // a small window round the fix first; the whole connected part only when the
   // window can't settle it or settles it badly (a piece squeezed to nothing to
-  // meet a rule whose other end is held)
+  // meet a rule whose other end is held). **Ruling (final review):** never for
+  // a nudge — a rounded size the window can't take is dropped (solving a big
+  // part for it cost ~80 s on a grid of mirrored shapes).
   const was = snapshotShape(work)
   const win = windowOf(work, seeds)
   let ok = solveWindow(work, win, env.held) && guarded()
-  if (!ok) {
+  if (!ok && !cand.nudge) {
     const part = componentOf(work, seeds)
     if (reachesBeyond(part, win)) {        // else the window was the whole part: same answer
       restoreShape(work, was)
-      ok = solveHeld(part, env.held) && guarded()
+      // the whole part moves; anything a size rule reaches in another part is held
+      ok = solveWindow(work, windowOfPart(part), env.held) && guarded()
     }
   }
   if (temp) removeConstraint(work, temp)
@@ -150,7 +164,14 @@ export function runCleanup(input: SketchDoc, o: CleanupOptions): CleanupResult {
   const env0: ContextEnv = { held, copies: copyPoints(work), s: STRENGTH_FACTOR[o.strength], unitsPerPx: o.unitsPerPx, openOnly: !!o.openOnly }
   if (buildContext(work, env0).pieces.length > GUARD.MAX_PIECES) return { doc: cloneDoc(input), fixes: [], refused: 'tooBig' }
   const base = baselineOf(work, o.unitsPerPx)
-  if (residualNorm(work) >= 1e-3 && !solveHeld(work, held)) return { doc: cloneDoc(input), fixes: [], refused: 'conflict' }
+  // Ruling 19: rules that don't hold before Clean up starts → nothing is safe
+  // to change (re-solving them here would fold that movement into Apply)
+  // — the rules of the part the scope touches (the whole drawing with no scope)
+  if (residualNorm(scopeRules(work, o.scope)) >= 1e-3) return { doc: cloneDoc(input), fixes: [], refused: 'conflict' }
+  const now = o.now ?? (() => performance.now())
+  const budget = o.budgetMs ?? GUARD.BUDGET_MS
+  const t0 = now()
+  let stopped = false
   const alias = new Map<EntityId, EntityId>()
   let guides = new Map<string, EntityId>()
   const tried: { cand: Candidate; on: boolean; spot: Vec2 | null }[] = []
@@ -160,6 +181,9 @@ export function runCleanup(input: SketchDoc, o: CleanupOptions): CleanupResult {
     return at.length ? meanPoint(at) : null
   }
   for (const pass of PASSES) {
+    // after a budget stop the later passes are still looked at, but only to
+    // list the fixes switched off in them — so their badges don't vanish
+    if (stopped && !off.size) break
     const ctx = buildContext(work, env0)
     const cands = pass.flatMap(detect => detect(ctx)).sort((a, b) => b.score - a.score || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
     const seen = new Set<string>()
@@ -168,6 +192,7 @@ export function runCleanup(input: SketchDoc, o: CleanupOptions): CleanupResult {
       seen.add(cand.id)
       const spot = spotIn(work, cand)
       if (off.has(cand.id)) { tried.push({ cand, on: false, spot }); continue }
+      if (stopped || now() - t0 > budget) { stopped = true; continue }
       const snap = cloneDoc(work), snapAlias = new Map(alias), snapGuides = new Map(guides)
       if (tryApply(work, cand, { held, base, alias, guides, openOnly: !!o.openOnly })) { tried.push({ cand, on: true, spot }); continue }
       work = snap
@@ -182,5 +207,5 @@ export function runCleanup(input: SketchDoc, o: CleanupOptions): CleanupResult {
     const at = spotIn(work, cand) ?? spot
     if (at) fixes.push({ id: cand.id, kind: cand.kind, label: cand.label, on, at })
   }
-  return { doc: work, fixes }
+  return stopped ? { doc: work, fixes, stopped } : { doc: work, fixes }
 }

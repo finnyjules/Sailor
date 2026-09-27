@@ -50,12 +50,21 @@
  * badge may show that ceiling while the charge reads the measured size, so
  * the badge is never below the charge.
  *
+ * The paid-model classes (step 3, R3: PAID_NODE_CLASSES) are priced by the
+ * calls their settings can make (paidSettings.ts paidCalls) on the paid
+ * cards (paidRates.ts): each call's price basis turned into credits on its
+ * own, summed (paidStepsPrice). A text model's hold is its ceiling; given
+ * `opts.answerUsage` it is priced as used, never above that ceiling.
+ *
  * Relative imports on purpose: this module is loaded by Nitro, the Vue app
  * and vitest alike.
  */
 import { IMAGE_MODELS } from '../../app/data/image-models'
 import { LEGACY_VIDEO_MODEL_IDS } from '../../app/data/video-prices'
 import { creditsForUsd } from './markup'
+import { callCredits, callsCredits, pipelineCallsOf } from './pipelinePrice'
+import { paidCallUsd } from './paidRates'
+import { PAID_NODE_CLASSES, paidCalls, type PaidCalls } from './paidSettings'
 import { editMaxUsd, editStepsUsd } from './editRates'
 import { SETTING_PRICED_NODE_CLASSES, editCalls, editSteps } from './editSettings'
 import { imagePriceMaxUsd, imagePriceUsd, imageRate } from './imageRates'
@@ -88,11 +97,15 @@ export const MODEL_PRICED_CLASS_SET: ReadonlySet<string> = new Set(MODEL_PRICED_
 export { SETTING_PRICED_NODE_CLASSES }
 const SETTING_PRICED_CLASS_SET: ReadonlySet<string> = new Set(SETTING_PRICED_NODE_CLASSES)
 
+/** The paid-model classes (step 3, R3) priced by their calls (paidSettings.ts); filled by each R3 task. */
+export { PAID_NODE_CLASSES }
+const PAID_CLASS_SET: ReadonlySet<string> = new Set(PAID_NODE_CLASSES)
+
 /**
- * Every class this module prices — model-priced and setting-priced. The
+ * Every class this module prices — model-priced, setting-priced and paid. The
  * charge (priceGraph) and the node badge both price these through priceNode.
  */
-export const SHARED_PRICED_CLASS_SET: ReadonlySet<string> = new Set([...MODEL_PRICED_NODE_CLASSES, ...SETTING_PRICED_NODE_CLASSES, ...REMOTE_VIDEO_NODE_CLASSES])
+export const SHARED_PRICED_CLASS_SET: ReadonlySet<string> = new Set([...MODEL_PRICED_NODE_CLASSES, ...SETTING_PRICED_NODE_CLASSES, ...REMOTE_VIDEO_NODE_CLASSES, ...PAID_NODE_CLASSES])
 
 /**
  * Classes priced here only while a runner family moves them onto another
@@ -203,6 +216,49 @@ export interface PriceOptions {
    * it prices as before.
    */
   families?: ReadonlySet<RunnerFamily>
+  /**
+   * Characters of the text a paid text node sends, where the caller measured
+   * them (paidSettings.ts: its hold counts them generously); unmeasured, the
+   * node's own ceiling.
+   */
+  inputChars?: number
+  /**
+   * The tokens a paid text node's answer reported, for the charge
+   * (ruling (c)); priceNode never prices it above the node's hold.
+   */
+  answerUsage?: { inputTokens: number; outputTokens: number }
+}
+
+/**
+ * A paid node's price from its calls: each call's price basis
+ * (paidRates.ts paidCallUsd, fallbacks at cost) turned into credits on its
+ * own and summed, `times` over (pipelinePrice.ts callCredits, the R3.1
+ * ruling), never the markup of the summed dollars. `usd` is the summed basis.
+ */
+export function paidStepsPrice(p: PaidCalls): NodePrice {
+  if ('refused' in p) return p
+  let usd = 0
+  let credits = 0
+  for (const { call, times } of p.steps) {
+    const basis = paidCallUsd(call)
+    if (basis == null) return { refused: `${call.endpoint} has no listed price` }
+    usd += basis * times
+    credits += callCredits({ usd: basis }) * times
+  }
+  return { usd: Math.round(usd * 1e8) / 1e8, credits }
+}
+
+/**
+ * A paid node: the hold is the ceiling its settings can reach; with
+ * `answerUsage` the calls as used, never above that ceiling (and the
+ * ceiling when the used calls can't be priced).
+ */
+function paidNodePrice(classType: string, inputs: NodeInputs, opts: PriceOptions): NodePrice {
+  const { answerUsage, ...rest } = opts
+  const ceiling = paidStepsPrice(paidCalls(classType, inputs, rest))
+  if ('refused' in ceiling || !answerUsage) return ceiling
+  const used = paidStepsPrice(paidCalls(classType, inputs, opts))
+  return 'refused' in used || used.credits > ceiling.credits ? ceiling : used
 }
 
 /**
@@ -226,6 +282,11 @@ export type NodePrice =
  * UnpricedGraphError; the badge and estimate treat it as "no price".
  */
 export function priceNode(classType: string, inputs: NodeInputs | null | undefined, opts: PriceOptions = {}): NodePrice {
+  // A node that makes several calls (a runner pipeline, R3.1): the sum of each call's credits.
+  const planned = pipelineCallsOf(classType, inputs ?? {})
+  if (planned) return { usd: planned.reduce((s, c) => s + c.usd, 0), credits: callsCredits(planned) }
+  // A paid-model class (step 3, R3): the calls its settings can make.
+  if (PAID_CLASS_SET.has(classType)) return paidNodePrice(classType, inputs ?? {}, opts)
   if (SETTING_PRICED_CLASS_SET.has(classType)) {
     const usd = editNodeUsd(classType, inputs ?? {}, opts)
     return typeof usd === 'number' ? { usd, credits: creditsForUsd(usd) } : usd

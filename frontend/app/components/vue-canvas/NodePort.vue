@@ -86,14 +86,14 @@ const displayLabel = computed(() => toTitleCase(props.label))
   <div
     class="node-port absolute size-4 transition-opacity duration-150"
     :class="[
-      side === 'left' ? '-left-2' : '-right-2',
+      side === 'left' ? '-left-2 node-port--left' : '-right-2 node-port--right',
       dimmed ? 'opacity-25' : 'opacity-100',
     ]"
-    :style="{ top: `calc(50% - ${HIT_HALF}px + ${offset}px)` }"
+    :style="{ top: `calc(50% - ${HIT_HALF}px + ${offset}px)`, '--port-color': color }"
   >
     <!-- Visible dot: dark fill, type-coloured ring. Never the hit target. -->
     <span
-      class="node-port__dot pointer-events-none absolute left-1/2 top-1/2 size-3 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 bg-[#1a1a1a] transition-shadow duration-150"
+      class="node-port__dot pointer-events-none absolute rounded-full border-2 bg-[#1a1a1a]"
       :style="{
         borderColor: disabled ? '#4b5563' : color,
         boxShadow: forceLabel ? `0 0 0 3px ${color}44` : undefined,
@@ -103,9 +103,9 @@ const displayLabel = computed(() => toTitleCase(props.label))
     <!-- Label: hover-revealed, or forced while dragging a compatible wire. It
          extends away from the card, so unlike the dot it is never occluded. -->
     <span
-      class="node-port__label pointer-events-none absolute top-1/2 -translate-y-1/2 whitespace-nowrap rounded border border-white/10 bg-[#12141a] px-1.5 py-0.5 text-[9px] leading-none transition-opacity duration-150"
+      class="node-port__label pointer-events-none absolute top-1/2 -translate-y-1/2 whitespace-nowrap rounded-[6px] border border-white/10 bg-[#222] px-[7px] py-[3px] text-[11px] font-medium leading-none transition-opacity duration-150"
       :class="[
-        side === 'left' ? 'right-5' : 'left-5',
+        side === 'left' ? 'right-6' : 'left-6',
         forceLabel ? 'opacity-100' : 'opacity-0',
       ]"
       :style="{ color }"
@@ -145,12 +145,25 @@ const displayLabel = computed(() => toTitleCase(props.label))
 </template>
 
 <style scoped>
-/* Hover reveals the label. Kept in CSS rather than JS so it costs no reactivity
-   on a canvas that can hold hundreds of ports. */
-.node-port:hover .node-port__label {
-  opacity: 1;
+/* Hover reveals this port's name, and only this port's. CSS, not JS: a canvas can hold
+   hundreds of ports. */
+.node-port__dot {
+  left: 50%;
+  top: 50%;
+  width: 12px;
+  height: 12px;
+  transform: translate(-50%, -50%);
+  transition: width 0.16s cubic-bezier(0.3, 0.7, 0.4, 1), height 0.16s cubic-bezier(0.3, 0.7, 0.4, 1),
+    transform 0.16s cubic-bezier(0.3, 0.7, 0.4, 1), background-color 0.16s, box-shadow 0.16s;
 }
+.node-port:hover .node-port__label { opacity: 1; }
 .node-port:hover .node-port__dot {
-  box-shadow: 0 0 0 3px rgb(255 255 255 / 0.15);
+  width: 16px;
+  height: 16px;
+  background: var(--port-color);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--port-color) 22%, transparent);
 }
+/* Out from under the node's edge, so the grown dot is grabbable. */
+.node-port--left:hover .node-port__dot { transform: translate(calc(-50% - 5px), -50%); }
+.node-port--right:hover .node-port__dot { transform: translate(calc(-50% + 5px), -50%); }
 </style>

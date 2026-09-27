@@ -111,13 +111,37 @@ describe('useShotDirector', () => {
     expect(result.value.prompt).not.toContain('@Image')
   })
 
-  it('profile is fixed to seedance-2.0', () => {
+  it('profile follows the sheet\'s model (Seedance 2.0 by default)', () => {
+    const { profile, update } = useShotDirector(createDefaultShotSheet(), () => {})
+    expect(profile.value.id).toBe('seedance-2.0')
+    update(s => ({ ...s, model: 'veo-3.1' }))
+    expect(profile.value.id).toBe('veo-3.1')
+  })
+
+  it('setModel writes the model, switches Kling to first/last frame, clamps Veo\'s duration, and persists', () => {
+    let persisted: ShotSheet | undefined
     const initial = createDefaultShotSheet()
-    const persist = () => {}
+    initial.format.durationS = 15
+    const { sheet, setModel } = useShotDirector(initial, (s) => { persisted = s })
+    setModel('kling-v3')
+    expect(sheet.value.model).toBe('kling-v3')
+    expect(sheet.value.mode).toBe('firstLastFrame')
+    expect(sheet.value.format.durationS).toBe(15)
+    setModel('veo-3.1')
+    expect(sheet.value.format.durationS).toBe(8)
+    expect(persisted?.model).toBe('veo-3.1')
+  })
 
-    const { profile } = useShotDirector(initial, persist)
-
-    expect(profile.id).toBe('seedance-2.0')
+  it('compiles cast identity sets for Kling as elements', () => {
+    const V = (n: string) => `/view?filename=${n}&type=input`
+    const initial = createDefaultShotSheet()
+    initial.model = 'kling-v3'
+    initial.mode = 'firstLastFrame'
+    initial.firstFrame = 'data:image/png;base64,f'
+    initial.cast = [{ slug: 'vera', name: 'Vera', via: 'picker', stateId: null }]
+    const resolve = () => ({ vera: { name: 'Vera', front: V('f.png'), portrait: V('p.png'), bodyFront: null, bodyBack: null } })
+    const { result } = useShotDirector(initial, () => {}, resolve)
+    expect(result.value.input.elements).toEqual([{ frontal_image_url: V('f.png'), reference_image_urls: [V('p.png')] }])
   })
 
   it('result is a computed value that updates reactively', () => {

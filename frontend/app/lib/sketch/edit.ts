@@ -1,6 +1,7 @@
-import type { SketchDoc, EntityId, ConstraintKind, LineEntity, CircleEntity, PathEntity, SegmentSpec } from './model'
+import type { SketchDoc, EntityId, ConstraintKind, LineEntity, CircleEntity, PathEntity, SegmentSpec, SketchFill } from './model'
 import { getEntity, getPoint } from './model'
 import { freshId } from './ids'
+import { fillsWithin, freshFillId, mapSeed } from './fills'
 
 export function addPoint(doc: SketchDoc, x: number, y: number, opts: { fixed?: boolean; construction?: boolean } = {}): EntityId {
   const id = freshId(doc, 'p')
@@ -91,7 +92,9 @@ function spansLine(doc: SketchDoc, a: EntityId, b: EntityId): boolean {
 }
 
 // Delete an entity and everything that structurally depends on it.
-export function deleteEntity(doc: SketchDoc, id: EntityId): void {
+/** `keepGuideEnds`: a guide line's ends stay even when nothing else uses them
+ *  (mergePoints dropping a line squeezed to one point must not take the point). */
+export function deleteEntity(doc: SketchDoc, id: EntityId, opts: { keepGuideEnds?: boolean } = {}): void {
   const e = getEntity(doc, id)
   if (!e) return
   // entities that reference this one and must go too (only points have dependents)
@@ -137,6 +140,20 @@ export function deleteEntity(doc: SketchDoc, id: EntityId): void {
     // a tangent line names its ends, not its id: it goes with the last piece between them
     doc.constraints = doc.constraints.filter(c => !(c.kind === 'tangentLineArc' &&
       ((c.refs[0] === e.p1 && c.refs[1] === e.p2) || (c.refs[0] === e.p2 && c.refs[1] === e.p1))))
+  }
+  if (e.kind === 'line' && e.construction && !opts.keepGuideEnds) {
+    // a guide line's own guide ends go with it when nothing else uses them — a
+    // rule tying only its two ends (a Clean up axis's Vertical / Horizontal)
+    // goes too; an end another piece or rule still uses stays
+    const ends = new Set([e.p1, e.p2])
+    const onlyEnds = (c: { refs: EntityId[] }) => c.refs.every(r => ends.has(r))
+    for (const pid of ends) {
+      const p = getPoint(doc, pid)
+      if (!p || !p.construction || p.fixed || isPointReferenced(doc, pid)) continue
+      if (doc.constraints.some(c => c.refs.includes(pid) && !onlyEnds(c))) continue
+      doc.constraints = doc.constraints.filter(c => !(c.refs.includes(pid) && onlyEnds(c)))
+      deleteEntity(doc, pid)
+    }
   }
   if (e.kind === 'path') {
     // drop this path's auto equalDist rules (their refs don't include the path's own id)
@@ -193,14 +210,15 @@ export function pointClosure(doc: SketchDoc, ids: EntityId[]): EntityId[] {
   return rawPointRefs(doc, ids).filter(pid => !!getPoint(doc, pid))
 }
 
-// copy the selected non-point entities with point ids remapped; returns created ids
-function copyStructure(doc: SketchDoc, ids: EntityId[], map: Map<EntityId, EntityId>, flipSweep: boolean): EntityId[] {
+// copy the selected non-point entities with point ids remapped; returns created ids.
+// `ents` (pen stage 7): records each copied circle's new id, for its fills
+function copyStructure(doc: SketchDoc, ids: EntityId[], map: Map<EntityId, EntityId>, flipSweep: boolean, ents?: Map<EntityId, EntityId>): EntityId[] {
   const created: EntityId[] = []
   for (const id of ids) {
     const e = getEntity(doc, id)
     if (!e || e.kind === 'point') continue
     if (e.kind === 'line') created.push(addLine(doc, map.get(e.p1)!, map.get(e.p2)!, e.construction ? { construction: true } : {}))
-    else if (e.kind === 'circle') created.push(addCircle(doc, map.get(e.center)!, e.r, e.construction ? { construction: true } : {}))
+    else if (e.kind === 'circle') { const nc = addCircle(doc, map.get(e.center)!, e.r, e.construction ? { construction: true } : {}); ents?.set(e.id, nc); created.push(nc) }
     else if (e.kind === 'path') {
       const segs: SegmentSpec[] = e.segments.map(s =>
         s.kind === 'arc' ? { kind: 'arc', center: map.get(s.center)!, sweep: (flipSweep ? (1 - s.sweep) as 0 | 1 : s.sweep) }
@@ -214,6 +232,16 @@ function copyStructure(doc: SketchDoc, ids: EntityId[], map: Map<EntityId, Entit
     }
   }
   return created
+}
+
+// pen stage 7: the fills a copy carries, re-seeded onto it
+function copyFills(doc: SketchDoc, fills: SketchFill[], map: Map<EntityId, EntityId>, ents: Map<EntityId, EntityId>, how: { mirror?: number; turn?: number }): void {
+  if (!fills.length) return
+  const m = (id: EntityId) => map.get(id) ?? ents.get(id) ?? id
+  for (const f of fills) {
+    const list = doc.fills ?? (doc.fills = [])
+    list.push({ id: freshFillId(doc), seed: mapSeed(f.seed, m, how) })
+  }
 }
 
 // constraints fully inside the closure get copied with mapped refs
@@ -234,6 +262,8 @@ export function repeatEntities(doc: SketchDoc, ids: EntityId[], center: EntityId
   // check the full closure resolves before creating anything
   const pts = rawPointRefs(doc, ids)
   if (!pts.every(pid => !!getPoint(doc, pid))) return []
+  // pen stage 7: the source's fills whose whole area this copies (read before any copy exists)
+  const carried = fillsWithin(doc, new Set([...pts, ...ids]), ids.flatMap(id => getEntity(doc, id) ?? []))
   const all: EntityId[][] = []
   for (let k = 1; k < count; k++) {
     const angle = k * (360 / count)
@@ -251,8 +281,10 @@ export function repeatEntities(doc: SketchDoc, ids: EntityId[], center: EntityId
       created.push(nid)
       addConstraint(doc, 'rotatedFrom', [nid, pid, center], angle)
     }
-    created.push(...copyStructure(doc, ids, map, false))
+    const ents = new Map<EntityId, EntityId>()
+    created.push(...copyStructure(doc, ids, map, false, ents))
     copyClosureConstraints(doc, map)
+    copyFills(doc, carried, map, ents, { turn: rad })
     all.push(created)
   }
   return all
@@ -316,6 +348,8 @@ export function mirrorEntities(doc: SketchDoc, ids: EntityId[], axisLine: Entity
   // check the full closure resolves before creating anything
   const pts = rawPointRefs(doc, ids)
   if (!pts.every(pid => !!getPoint(doc, pid))) return []
+  // pen stage 7: the source's fills whose whole area this copies (read before any copy exists)
+  const carried = fillsWithin(doc, new Set([...pts, ...ids]), ids.flatMap(id => getEntity(doc, id) ?? []))
   const map = new Map<EntityId, EntityId>()
   const created: EntityId[] = []
   for (const pid of pts) {
@@ -326,7 +360,9 @@ export function mirrorEntities(doc: SketchDoc, ids: EntityId[], axisLine: Entity
     created.push(nid)
     addConstraint(doc, 'mirroredFrom', [nid, pid, axisLine])
   }
-  created.push(...copyStructure(doc, ids, map, true))
+  const ents = new Map<EntityId, EntityId>()
+  created.push(...copyStructure(doc, ids, map, true, ents))
   copyClosureConstraints(doc, map)
+  copyFills(doc, carried, map, ents, { mirror: Math.atan2(diry, dirx) })
   return created
 }

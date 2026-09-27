@@ -648,6 +648,12 @@ export interface PathLayer extends LayerCommon, StrokeStyleFields {
    *  build a fresh layer or copy the whole one, so they never see this field).
    *  The `sketch/model` dependency here is type-only (erased at build). */
   sketch?: import('~/lib/sketch/model').SketchDoc
+  /** Pen stage 7: the drawing's filled areas as ONE closed outline (LOCAL units, true arcs,
+   *  filled non-zero), present only when this layer came from the pen (`sketch`) and at least
+   *  one area is filled. INVARIANT: `fillD === sketchFillToLocalD(sketch)` whenever present,
+   *  and absent when that is '' (`penFrame.ts`). The painter FILLS `fillD` and strokes `d`;
+   *  a layer without it paints exactly as before. Anything that drops `sketch` drops this too. */
+  fillD?: string
 }
 
 export interface LineLayer extends LayerCommon {
@@ -1698,6 +1704,8 @@ export function resolveMorphs(
       ...writeStackToLayer(stack),
       ...lerpPlacement(layer, target, mm.amount),
       kind: 'path', d, bbox: ringsBBoxOfD(d), scale: sT / W, fillRule: 'nonzero',
+      // a drawing's filled areas don't morph (the morph's outline is the whole face)
+      fillD: undefined,
       motionScale: undefined, textMotion: undefined, motionPieces: pieces,
       fill,
       stroke: boldPx > 0 ? fill : '', strokeWidth: boldPx > 0 ? boldPx / sT : 0, strokes: undefined,
@@ -4799,7 +4807,9 @@ function drawLayerContentBody(ctx: CanvasRenderingContext2D, layer: LocalLayer, 
           maybePaintLongShadow(ctx, layer, gd, 1 / ((layer as unknown as { scale?: number }).scale || 1))
           ctx.restore()
         }
-        drawPath(ctx, { ...layer, d: gd }, W)
+        // pen stage 7: the filled areas take the same geometry effects as the outline
+        const fillD = layer.fillD ? computedOutlineD({ ...layer, d: layer.fillD }, W, rs) ?? undefined : undefined
+        drawPath(ctx, { ...layer, d: gd, fillD }, W)
       }
     } else {
       drawPath(ctx, layer, W)
@@ -5902,21 +5912,26 @@ function drawPath(ctx: CanvasRenderingContext2D, layer: PathLayer, W: number) {
       if (!(pc.opacity > 0) || !pc.d) continue
       ctx.save()
       ctx.globalAlpha *= pc.opacity
-      drawPath(ctx, { ...layer, d: pc.d, motionPieces: undefined } as unknown as PathLayer, W)
+      drawPath(ctx, { ...layer, d: pc.d, fillD: undefined, motionPieces: undefined } as unknown as PathLayer, W)
       ctx.restore()
     }
     return
   }
   const p = path2dFor(layer.d)
   if (!p) return
+  // pen stage 7: a drawing with filled areas fills those (`fillD`, non-zero) and
+  // strokes its outline `d`; without `fillD` this is exactly the old fill of `d`
+  const fp = layer.fillD ? path2dFor(layer.fillD) : null
+  const fillPath = fp ?? p
+  const fillRule = fp ? 'nonzero' : (layer.fillRule || 'nonzero')
   const s = (layer.scale || 1) * W
   ctx.save()
   ctx.scale(s, s)
   if (isFoilFill(layer.fill)) {
-    paintFoilRegion(ctx, layer.fill, (c, ink) => { c.fillStyle = ink; c.fill(p, layer.fillRule || 'nonzero') })
+    paintFoilRegion(ctx, layer.fill, (c, ink) => { c.fillStyle = ink; c.fill(fillPath, fillRule) })
   } else if (hasPaint(layer.fill)) {
     ctx.fillStyle = resolvePaint(ctx, layer.fill, layer.bbox, _fieldCtx)
-    ctx.fill(p, layer.fillRule || 'nonzero')
+    ctx.fill(fillPath, fillRule)
   }
   // Set unconditionally: `ctx` is inside this function's own save/restore and nothing
   // between here and the restore reads either, so a path with no stroke is unaffected.

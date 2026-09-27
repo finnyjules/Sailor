@@ -13,18 +13,20 @@
 // The card is portalled to <body> and sits above every modal (z-[10050]) —
 // the pen toolbar lives inside the Frame editor and Shape Studio modals. The
 // demo's rAF loop runs only while the card is open.
-import { computed, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, ref, watch, useId } from 'vue'
 import { TooltipPortal, TooltipContent } from 'reka-ui'
 import { Tooltip, TooltipTrigger } from '~/components/ui/tooltip'
 import { PEN_TIPS, tipKeyLabel } from '~/composables/pen/penTips'
+import { isApple } from '~/composables/pen/penKeys'
 import { PEN_TIP_DEMOS, DEMO_LOOP_MS, DEMO_W, DEMO_H, type PenTipFrame } from '~/composables/pen/penTipDemos'
 import { sketchPathData } from '~/lib/sketch/sketchPath'
+import { fillPathData, fillTarget } from '~/lib/sketch/fills'
 
-const props = withDefaults(defineProps<{ id: string; name?: string; side?: 'top' | 'bottom' }>(), { side: 'top' })
+const props = withDefaults(defineProps<{ id: string; name?: string; side?: 'top' | 'bottom' | 'left' | 'right'; reason?: string }>(), { side: 'top' })
 
 const tip = computed(() => PEN_TIPS[props.id])
 const title = computed(() => props.name ?? tip.value?.name ?? '')
-const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent)
+const isMac = isApple()
 const keyLabel = computed(() => (tip.value?.key ? tipKeyLabel(tip.value.key, isMac) : ''))
 const demoFn = computed(() => (tip.value?.demo ? PEN_TIP_DEMOS[tip.value.demo] : undefined))
 // removing tools get the pen's red; drawing previews its indigo; Select's
@@ -56,6 +58,10 @@ const frame = computed<PenTipFrame | null>(() => (open.value && demoFn.value ? d
 const drawD = computed(() => (frame.value ? sketchPathData(frame.value.doc) : ''))
 const tintD = computed(() => (frame.value?.tint ? sketchPathData(frame.value.tint) : ''))
 const ghostD = computed(() => (frame.value?.ghost ? sketchPathData(frame.value.ghost) : ''))
+// the Fill demo: the areas its drawing fills, and the area under its hover
+const fillD = computed(() => (frame.value?.doc.fills?.length ? fillPathData(frame.value.doc) : ''))
+const hatchD = computed(() => (frame.value?.hatchAt ? fillTarget(frame.value.doc, frame.value.hatchAt, 0)?.d ?? '' : ''))
+const hatchId = `pen-tip-hatch-${useId().replace(/[^a-zA-Z0-9_-]/g, '')}`
 const sparkleD = computed(() => {
   const f = frame.value
   if (!f?.sparkle) return ''
@@ -85,6 +91,13 @@ const sparkleD = computed(() => {
           :viewBox="`0 0 ${DEMO_W} ${DEMO_H}`" aria-hidden="true"
         >
           <template v-if="frame">
+            <defs v-if="hatchD">
+              <pattern :id="hatchId" patternUnits="userSpaceOnUse" width="5" height="5" patternTransform="rotate(45)">
+                <line x1="0" y1="0" x2="0" y2="5" class="hatch-line" />
+              </pattern>
+            </defs>
+            <path v-if="fillD" :d="fillD" class="fill-area" />
+            <path v-if="hatchD" :d="hatchD" class="fill-hatch" :fill="`url(#${hatchId})`" />
             <path v-if="ghostD" :d="ghostD" class="ghost" />
             <path :d="drawD" class="ink" />
             <path v-if="tintD" :d="tintD" class="tint" />
@@ -97,6 +110,7 @@ const sparkleD = computed(() => {
             </g>
           </template>
         </svg>
+        <p v-if="reason" class="pen-tip-reason" data-pen-tip-reason>{{ reason }}</p>
         <p class="pen-tip-caption">{{ tip.caption }}</p>
       </TooltipContent>
     </TooltipPortal>
@@ -143,6 +157,9 @@ const sparkleD = computed(() => {
 .pen-tip-demo.tone-grab { --tip-hot: #f59e0b; }
 .pen-tip-demo .ink { fill: none; stroke: var(--tip-ink); stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
 .pen-tip-demo .tint { fill: none; stroke: var(--tip-hot); stroke-width: 3.2; stroke-opacity: 0.6; stroke-linecap: round; }
+.pen-tip-demo .fill-area { fill: var(--tip-hot); fill-opacity: 0.3; stroke: none; }
+.pen-tip-demo .fill-hatch { stroke: none; }
+.pen-tip-demo .hatch-line { stroke: var(--tip-hot); stroke-width: 1.4; }
 .pen-tip-demo .ghost { fill: none; stroke: var(--tip-ink); stroke-width: 1.2; stroke-dasharray: 1 3; stroke-linecap: round; opacity: 0.6; }
 .pen-tip-demo .dot { fill: var(--popover); stroke: var(--tip-ink); stroke-width: 1.2; }
 .pen-tip-demo .hot { fill: none; stroke: var(--tip-hot); stroke-width: 1.5; }
@@ -150,4 +167,5 @@ const sparkleD = computed(() => {
 .pen-tip-demo .cursor { fill: var(--popover); stroke: var(--tip-ink); stroke-width: 1.1; stroke-linejoin: round; }
 .pen-tip-demo .cursor.pressed { fill: var(--tip-ink); }
 .pen-tip-caption { margin-top: 6px; color: var(--tip-muted); text-wrap: pretty; }
+.pen-tip-reason { margin-top: 6px; color: #f59e0b; font-weight: 500; text-wrap: pretty; }
 </style>

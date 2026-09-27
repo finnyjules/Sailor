@@ -126,7 +126,7 @@ import { RUNNER_VIDEO_MODEL_IDS, classUpgradeOn, isShotDirected, resolveVideoMod
 import { NO_FAMILIES, type RunnerFamily } from '#shared/runner/families'
 import { LARGEST_INPUT_PIXELS, sizePricedInput } from '#shared/pricing/editSettings'
 import { nodeImagePrompt } from './generators/image'
-import { RUNNER_VIDEO_MODELS, VEO_31_ONE_PICTURE, veo31HasExtras, veo31RefsProblem } from './generators/video'
+import { RUNNER_VIDEO_MODELS, VEO_31_ONE_PICTURE, veo31HasExtras, veo31RefsProblem, veo31RefsRatioProblem } from './generators/video'
 import { klingElementsProblem } from './generators/twins'
 import { shotRefProblem } from './shotRefs'
 import { H3_MAX_TURBO_APP, H3_MAX_TURBO_ENDPOINTS, H3_MAX_TURBO_ID, H3_MAX_TURBO_NEEDS_PROMPT } from './generators/h3MaxTurbo'
@@ -322,6 +322,16 @@ export const SEEDANCE_UNMEASURED_REFERENCE = 'Seedance 2.0 can’t check how lon
  * never run with the character silently dropped (Ruling B, Task 4).
  */
 export const KLING_ELEMENTS_COMFY_WORDS = 'Kling 3 films characters only through Sailor\'s runner, and this shot can\'t go there. Pick Seedance or Veo, or switch Kling on.'
+
+/**
+ * The ComfyUI path: a shot-directed Film a shot whose options carry a first or
+ * last frame on a model other than Seedance 2.0 (Python reads those frames for
+ * Seedance only), Ruling I of the characters stage 3 final fix.
+ */
+export const SHOT_FRAMES_RUNNER_ONLY_WORDS
+  = 'This model gets Shot Director\'s first and last frames only through Sailor\'s runner, and this shot can\'t go there. Pick Seedance, or remove the frames.'
+
+const optionFrame = (v: unknown): boolean => v != null && v !== ''
 
 /** Runner: elements on a model other than Kling 3, which would drop them (Task 4 fix, minor a). */
 export const ELEMENTS_ONLY_KLING_WORDS = 'Only Kling 3 takes characters as elements. Pick Kling 3, or send pictures instead.'
@@ -757,6 +767,9 @@ export function requestProblems(prompt: ApiPrompt, opts: { runner?: boolean } = 
           const hasFirst = isLink(inputs.image) || !!firstFrame(null, adv)
           const p = veo31RefsProblem(adv, hasFirst)
           if (p) out.push({ nodeId, classType: ct, input: 'model_options', message: p })
+          // Reference pictures take 16:9 or 9:16 only (Ruling L); a wired ratio is judged at planning.
+          const r = isLink(inputs.aspect_ratio) ? null : veo31RefsRatioProblem(adv, asText(inputs.aspect_ratio))
+          if (r) out.push({ nodeId, classType: ct, input: 'aspect_ratio', message: r })
         }
         else if (veo31HasExtras(adv)) {
           out.push({ nodeId, classType: ct, input: 'model_options', message: VEO_31_ONE_PICTURE })
@@ -868,11 +881,21 @@ export function requestProblems(prompt: ApiPrompt, opts: { runner?: boolean } = 
       if (VEO_31_MODEL_IDS.includes(id) && (RUNNER_VIDEO_MODEL_IDS as readonly string[]).includes(id)) {
         const p = veo31RefsProblem(adv, hasFirst)
         if (p) out.push({ nodeId, classType: ct, input: 'model_options', message: p })
+        // Reference pictures take 16:9 or 9:16 only (Ruling L); a wired ratio is judged at planning.
+        const r = isLink(inputs.aspect_ratio) ? null : veo31RefsRatioProblem(adv, asText(inputs.aspect_ratio))
+        if (r) out.push({ nodeId, classType: ct, input: 'aspect_ratio', message: r })
       }
     }
     // Film a shot on the ComfyUI path (every other Film a shot, and any on the /prompt gate).
     else if (ct === 'FilmShotNode' && !isLink(inputs.model_options)) {
       const adv = parseJsonObject(inputs.model_options)
+      // Shot Director's first and last frames ride in the options (`image_url`, `end_image_url`);
+      // Python reads them only for Seedance 2.0 (every other builder reads the wired picture alone),
+      // so a shot-directed one on another model is refused here, never sent without its frames (Ruling I).
+      if (isShotDirected(inputs) && resolveVideoModelId(inputs.model) !== 'seedance-2.0'
+        && (optionFrame(adv.image_url) || optionFrame(adv.end_image_url))) {
+        out.push({ nodeId, classType: ct, input: 'model_options', message: SHOT_FRAMES_RUNNER_ONLY_WORDS })
+      }
       // Kling 3's elements: Python drops them, so they are refused (Ruling B, Task 4).
       if (hasKlingElements(adv)) {
         out.push({ nodeId, classType: ct, input: 'model_options', message: KLING_ELEMENTS_COMFY_WORDS })

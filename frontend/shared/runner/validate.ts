@@ -40,7 +40,8 @@ import { linksOf, type ApiPrompt } from './graph'
  * the Text and 3D model cards with `cards` (R1.1; the Moodboard is not one);
  * Save image and Preview image with `cards` (R1.5); Smart Layout with
  * `cards` (R1.6); every ported effect that is one (R2: all but Painter, as
- * define_schema's is_output_node says, ./effects.ts EFFECT_OUTPUT_NODES).
+ * define_schema's is_output_node says, ./effects.ts EFFECT_OUTPUT_NODES);
+ * the Shader effect with `shader-bake` (R2.10).
  */
 export const RUNNER_OUTPUT_CLASSES: ReadonlySet<string> = new Set([
   'Image', 'Video', 'Compositor', 'Audio', 'Text', 'Model3D', 'SaveImage', 'PreviewImage', 'SmartLayout',
@@ -48,6 +49,7 @@ export const RUNNER_OUTPUT_CLASSES: ReadonlySet<string> = new Set([
   'SwapBackgroundNode', 'SwapProductNode', 'PersonSwap', 'RotateCameraNode', 'ProductShotNode', 'RestyleFromImageNode', 'FixFacesNode', 'FaceSwap',
   'PersonSwapVideo',
   ...EFFECT_OUTPUT_NODES,
+  'ShaderEffect',
 ])
 
 /** ComfyUI's node_errors entry for a node that failed validation. */

@@ -42,7 +42,7 @@
 //   / `onHostBlur()`. `onHostKeydown` runs the same typing guard and
 //   focused-control rule before touching the pen, and returns whether it
 //   consumed the key.
-import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted, useId } from 'vue'
 import type { SketchDoc, EntityId, ConstraintKind, SegmentSpec } from '~/lib/sketch/model'
 import { addPoint } from '~/lib/sketch/edit'
 import { sketchPathData, entityPath } from '~/lib/sketch/sketchPath'
@@ -51,8 +51,13 @@ import { applyView, invertView, viewToSvg, type ViewMatrix } from '~/lib/sketch/
 import { spanPathD, SPARKLE_LIFETIME_MS, isTypingInField, type Pen } from '~/composables/pen/usePen'
 import { pointRolesForDoc, type PointRole } from '~/lib/sketch/pointRoles'
 import { clampChipOrigin } from '~/lib/sketch/chipClamp'
-import { TOOL_KEYS, isCleanupKey } from '~/composables/pen/penKeys'
+import { TOOL_KEYS, isCleanupKey, isActionKey, isApple } from '~/composables/pen/penKeys'
 import { cleanupBadges, BADGE_H, type CleanupBadge } from '~/lib/sketch/cleanup'
+import { WHEEL_OPEN_PX, ACTIONS } from '~/composables/pen/penActions'
+import { pieceKey } from '~/lib/sketch/pieces'
+import { extractPieces, piecesCentre } from '~/lib/sketch/clipboard'
+import PenContextMenu from '~/components/pen/PenContextMenu.vue'
+import PenActionWheel from '~/components/pen/PenActionWheel.vue'
 
 const props = withDefaults(defineProps<{
   pen: Pen
@@ -68,6 +73,9 @@ const props = withDefaults(defineProps<{
   // (see the block above the keyboard section below).
   keyboard?: 'window' | 'host'
 }>(), { cursor: 'crosshair', active: true, keyboard: 'window' })
+// multi-root (pen stage 6): the svg plus the teleported menu and wheel — host
+// attrs (a class, a data-testid) go on the svg, never lost on a fragment
+defineOptions({ inheritAttrs: false })
 // read ONCE — see the HOST CONTRACT note above (`pen` gets the same treatment)
 const keyboardMode = props.keyboard
 const emit = defineEmits<{
@@ -76,10 +84,9 @@ const emit = defineEmits<{
 }>()
 
 // A Mac ctrl-click is `button === 0` plus a suppressed `contextmenu` — not a
-// real primary click. Treat it like any other button, so it opens the (now
-// suppressed) context menu instead of placing/picking/dragging a point.
-const isMacPlatform = typeof navigator !== 'undefined'
-  && (/Mac|iPhone|iPad|iPod/.test((navigator as any).userAgentData?.platform || navigator.platform || ''))
+// real primary click. It is a right press (pen stage 6: the pen's own menu or
+// wheel), never a place / pick / drag.
+const isMacPlatform = isApple()
 function isCtrlContextClick(ev: PointerEvent) { return ev.ctrlKey && isMacPlatform }
 
 // the pen is read ONCE — fixed for the overlay's lifetime (re-key the overlay
@@ -96,6 +103,8 @@ const {
   trimDown, trimMove, trimUp, cutMove, cutClick, dissolveMove, dissolveClick, clearToolHover,
   arcDragStart, arcDragMove, arcDragEnd, arcDragTransient,
   cleanup: cleanupSession, toggleCleanupFix, toggleCleanupKind,
+  highlight, menu, wheel, openMenu, closeMenus, openWheel, wheelPointer, releaseWheel, closeWheel, setViewSize,
+  fillHover, fillMove, fillClick, fillView, docRevision,
 } = props.pen
 
 const svgEl = ref<SVGSVGElement | null>(null)
@@ -501,6 +510,22 @@ const dissolveHoverScreen = computed(() => {
   return h ? { ...toScreen(h), ok: h.ok } : null
 })
 
+// ---------- Fill (pen stage 7) ----------
+// The filled areas, a soft tint in drawing space under the outline, in every
+// tool; the rings at the open ends of a sleeping fill's drawing (screen
+// space); and in the Fill tool the area under the pointer, hatched in screen
+// space (so the hatch keeps its spacing under any zoom or rotation) through a
+// clip of that area's outline drawn in drawing space. Read on the drawing as
+// it settles (docRevision) and as it moves (pathDrawing), so it follows drags
+// and does no work while nothing moves.
+const fillShown = computed(() => { void docRevision.value; void pathDrawing.value; return fillView() })
+const fillGapScreens = computed(() => fillShown.value.gaps.map(p => toScreen(p)))
+const fillHoverShown = computed(() => (tool.value === 'fill' && !cleanupSession.value ? fillHover.value : null))
+// ids unique to this overlay (a page may show two pens)
+const fillUid = useId().replace(/[^a-zA-Z0-9_-]/g, '')
+const hatchId = `pen-fill-hatch-${fillUid}`
+const hatchClipId = `pen-fill-clip-${fillUid}`
+
 // screen-space sparkles: a small burst of short rays radiating from the
 // point, ease-out pop + linear fade to 0 by SPARKLE_LIFETIME_MS.
 const SPARKLE_RAYS = 6
@@ -551,6 +576,31 @@ function onCleanupBadgeClick(b: CleanupBadge) {
   if (b.collapsed) toggleCleanupKind(b.kind)
   else toggleCleanupFix(b.key)
 }
+
+// the Properties panel's hover (pen stage 6): the pieces of the rule under
+// the pointer — lines, circles and segments in drawing space, points as
+// screen-space rings
+const HIGHLIGHT = '#06b6d4'
+const highlightPaths = computed(() => {
+  if (cleanupSession.value) return []
+  const out: { key: string; d: string }[] = []
+  for (const p of highlight.value) {
+    if (p.kind === 'point') continue
+    const d = p.kind === 'seg' ? segmentPathDrawing(p.pathId, p.segIndex) : entityPathDrawing(p.id)
+    if (d) out.push({ key: pieceKey(p), d })
+  }
+  return out
+})
+const highlightPoints = computed(() => {
+  if (cleanupSession.value) return []
+  const out: { key: string; x: number; y: number }[] = []
+  for (const p of highlight.value) {
+    if (p.kind !== 'point') continue
+    const s = screenPt(p.id)
+    if (s) out.push({ key: pieceKey(p), ...s })
+  }
+  return out
+})
 
 // ---------- pointer input ----------
 
@@ -642,8 +692,127 @@ function toDrawing(p: { x: number; y: number }): { x: number; y: number } | null
 function drawingXY(ev: PointerEvent) {
   return toDrawing(localXY(ev))
 }
+// svg-local pixels → client px (the inverse of localXY)
+function clientOf(p: { x: number; y: number }): { x: number; y: number } | null {
+  const el = svgEl.value
+  if (!el) return null
+  const ctm = el.getScreenCTM?.()
+  if (ctm && typeof DOMPoint !== 'undefined' && Number.isFinite(ctm.a)) {
+    const q = new DOMPoint(p.x, p.y).matrixTransform(ctm)
+    return { x: q.x, y: q.y }
+  }
+  const r = el.getBoundingClientRect()
+  const kx = props.width > 0 ? r.width / props.width : 1
+  const ky = props.height > 0 ? r.height / props.height : 1
+  return { x: r.left + p.x * kx, y: r.top + p.y * ky }
+}
+
+// the pen's drawing area, for a paste from another pen (it lands in the middle)
+watch(() => [props.width, props.height] as const, ([w, h]) => setViewSize(w, h), { immediate: true })
+// (No close on a view change as such: a host re-fits its view when its own
+// layout shifts — Shape Studio's preview shrinks as the rules row appears
+// on the right press's own pick — which must not close the menu just
+// opened. The user's own view moves all close it already: a wheel or pinch
+// (PenContextMenu), a press anywhere, the Frame's Space-pan and ⌘± keys.)
+// the menu from the keyboard (the ContextMenu key, ⇧F10): at the middle of the
+// selection (clamped to the drawing), or of the drawing when nothing is selected
+function isMenuKey(ev: KeyboardEvent): boolean {
+  return ev.key === 'ContextMenu' || (ev.key === 'F10' && ev.shiftKey && !ev.metaKey && !ev.ctrlKey && !ev.altKey)
+}
+function openMenuFromKeyboard(): boolean {
+  if (cleanupSession.value) return false
+  settleOverlayGesture()
+  const hasPick = selection.value.length > 0 || selectedSegments.value.length > 0
+  let local = { x: props.width / 2, y: props.height / 2 }
+  if (hasPick) {
+    const c = extractPieces(doc.value, selection.value, selectedSegments.value)
+    if (c.entities.length) {
+      const s = toScreen(piecesCentre(c))
+      local = { x: clamp(s.x, 0, props.width), y: clamp(s.y, 0, props.height) }
+    }
+  }
+  const at = clientOf(local)
+  if (!at) return false
+  openMenu(at, toDrawing(local))
+  return true
+}
+
+// ---------- right press: the list menu and the action wheel (pen stage 6) ----------
+// A right press (or a Mac ctrl-click) selects the piece under it first (in
+// Select only; Option on a segment picks just that segment); released where it
+// was pressed it opens the list menu, dragged past WHEEL_OPEN_PX it opens the
+// wheel at the press point and the release picks a slice. The svg holds the
+// pointer until the release, so the wheel keeps tracking outside the drawing.
+// It only settles the overlay's own live gesture (marquee, point drag, arc
+// press) — a half-drawn path is never finished or dropped. Ignored while the
+// overlay is parked (the host's own right-click is then left alone) and during
+// a Clean up preview.
+type RightTarget = { kind: 'point' | 'line' | 'circle'; id: EntityId } | { kind: 'seg'; pathId: EntityId; segIndex: number }
+let rightPress: { pointerId: number; x: number; y: number; at: { x: number; y: number } | null; empty: boolean; wheel: boolean } | null = null
+// a right press settled mid-press (a tool key, parking): its trailing
+// button-2 / ctrl-click release is swallowed rather than read as a left gesture's end
+let settledRightId: number | null = null
+function isRightPress(ev: PointerEvent) { return ev.button === 2 || isCtrlContextClick(ev) }
+function isPicked(t: RightTarget): boolean {
+  if (t.kind === 'seg') return selection.value.includes(t.pathId) || selectedSegments.value.some(s => s.pathId === t.pathId && s.segIndex === t.segIndex)
+  return selection.value.includes(t.id)
+}
+function startRightPress(ev: PointerEvent, target: RightTarget | null): void {
+  if (!props.active) return
+  // the pen's press: the svg's own handler (bubbling) and the host never see it
+  ev.stopPropagation()
+  ev.preventDefault()
+  if (cleanupSession.value) return
+  settleOverlayGesture()
+  settledRightId = null
+  if (tool.value === 'select' && target && !isPicked(target)) {
+    if (target.kind === 'seg') { if (ev.altKey) pickSegment(target.pathId, target.segIndex); else pick(target.pathId) }
+    else pick(target.id)
+  }
+  closeMenus()
+  rightPress = { pointerId: ev.pointerId, x: ev.clientX, y: ev.clientY, at: drawingXY(ev), empty: !target, wheel: false }
+  try { svgEl.value?.setPointerCapture?.(ev.pointerId) } catch { /* not every environment has it */ }
+}
+// a press whose release was lost (window blur, a capture that failed with the
+// release outside, a lost capture): dropped — no menu, no slice
+function cancelRightPress(): void {
+  const rp = rightPress
+  if (!rp) return
+  rightPress = null
+  try { svgEl.value?.releasePointerCapture?.(rp.pointerId) } catch { /* already released */ }
+  closeWheel()
+}
+// a left press with a press still recorded: its release was lost
+function dropStaleRightPress(): void {
+  settledRightId = null
+  cancelRightPress()
+}
+function onLostPointerCapture(ev: PointerEvent): void {
+  if (rightPress && ev.pointerId === rightPress.pointerId) cancelRightPress()
+}
+function rightPressMove(ev: PointerEvent): void {
+  const rp = rightPress!
+  if (ev.buttons === 0) { cancelRightPress(); return }   // no button held: the release was lost
+  if (!rp.wheel && Math.hypot(ev.clientX - rp.x, ev.clientY - rp.y) >= WHEEL_OPEN_PX) {
+    rp.wheel = true
+    openWheel({ x: rp.x, y: rp.y })   // nothing selected → no wheel; the release then does nothing
+  }
+  if (rp.wheel) wheelPointer({ x: ev.clientX, y: ev.clientY })
+}
+function endRightPress(ev: PointerEvent): void {
+  const rp = rightPress!
+  rightPress = null
+  try { svgEl.value?.releasePointerCapture?.(rp.pointerId) } catch { /* already released */ }
+  if (ev.type === 'pointercancel') { closeWheel(); return }
+  if (rp.wheel) { releaseWheel(); return }
+  if (rp.empty && tool.value === 'select') { clearSel(); clearSegSel() }
+  openMenu({ x: rp.x, y: rp.y }, rp.at)
+}
+const entityKind = (id: EntityId) => (doc.value.entities.find(e => e.id === id)?.kind ?? 'line') as 'point' | 'line' | 'circle'
 
 function onEntityPointerDown(id: EntityId, ev: PointerEvent) {
+  if (isRightPress(ev)) { startRightPress(ev, { kind: entityKind(id), id }); return }
+  dropStaleRightPress()
   if (!props.active || ev.button !== 0 || isCtrlContextClick(ev)) return
   if (cleanupSession.value) return   // a Clean up preview: only its badges take clicks
   // guided Mirror: a line click supplies the axis
@@ -657,6 +826,8 @@ function onEntityPointerDown(id: EntityId, ev: PointerEvent) {
 }
 function onPointerDownPoint(id: EntityId, ev: PointerEvent) {
   settleArcPress()
+  if (isRightPress(ev)) { startRightPress(ev, { kind: 'point', id }); return }
+  dropStaleRightPress()
   if (!props.active || ev.button !== 0 || isCtrlContextClick(ev) || tool.value !== 'select') return
   if (cleanupSession.value) return
   // guided Repeat: this point is the ring center
@@ -681,6 +852,8 @@ function onPointerUpPoint(id: EntityId, ev: PointerEvent) {
 }
 function onSegmentPointerDown(pathId: EntityId, segIndex: number, ev: PointerEvent) {
   settleArcPress()
+  if (isRightPress(ev)) { startRightPress(ev, { kind: 'seg', pathId, segIndex }); return }
+  dropStaleRightPress()
   if (!props.active || ev.button !== 0 || isCtrlContextClick(ev) || tool.value !== 'select') return
   if (cleanupSession.value) return
   // guided ops treat a path-body click as picking the whole path (the unit)
@@ -700,6 +873,8 @@ function onSegmentPointerDown(pathId: EntityId, segIndex: number, ev: PointerEve
 }
 function onPointerDownSvg(ev: PointerEvent) {
   settleArcPress()
+  if (isRightPress(ev)) { startRightPress(ev, null); return }
+  dropStaleRightPress()
   if (!props.active || ev.button !== 0 || isCtrlContextClick(ev)) return
   if (cleanupSession.value) return
   if (tool.value === 'select') {
@@ -727,6 +902,7 @@ function onPointerDownSvg(ev: PointerEvent) {
   if (tool.value === 'trim') { trimDown(w.x, w.y); return }
   if (tool.value === 'cut') { cutClick(w.x, w.y); return }
   if (tool.value === 'dissolve') { dissolveClick(w.x, w.y); return }
+  if (tool.value === 'fill') { fillClick(w.x, w.y); return }
   if (tool.value === 'path') { pathDown(w.x, w.y, ev.shiftKey); return }
   if (tool.value === 'curve') { curveDown(w.x, w.y); return }
   const { x, y } = w
@@ -734,6 +910,7 @@ function onPointerDownSvg(ev: PointerEvent) {
 }
 function onPointerMove(ev: PointerEvent) {
   if (!props.active) return
+  if (rightPress && ev.pointerId === rightPress.pointerId) { rightPressMove(ev); return }
   if (cleanupSession.value) return
   if (marqueeStart) {
     if (ev.buttons === 0) return   // button released off-canvas — pointerup/leave settles it
@@ -757,11 +934,12 @@ function onPointerMove(ev: PointerEvent) {
     if (w) curveMove(w.x, w.y)
     return
   }
-  if (tool.value === 'trim' || tool.value === 'cut' || tool.value === 'dissolve') {
+  if (tool.value === 'trim' || tool.value === 'cut' || tool.value === 'dissolve' || tool.value === 'fill') {
     const w = drawingXY(ev)
     if (!w) { clearToolHover(); return }
     if (tool.value === 'trim') trimMove(w.x, w.y)
     else if (tool.value === 'cut') cutMove(w.x, w.y)
+    else if (tool.value === 'fill') fillMove(w.x, w.y)
     else dissolveMove(w.x, w.y)
     return
   }
@@ -807,6 +985,11 @@ function onPointerMove(ev: PointerEvent) {
 function noJoinKey(ev: PointerEvent) { return ev.metaKey || ev.ctrlKey }
 function onPointerUp(ev: PointerEvent) {
   if (!props.active) return
+  if (rightPress && ev.pointerId === rightPress.pointerId) { endRightPress(ev); return }
+  if (settledRightId !== null && ev.pointerId === settledRightId && (ev.button === 2 || isCtrlContextClick(ev))) {
+    settledRightId = null
+    return
+  }
   // settle an arc press first (whatever the tool is by now — a tool key mid
   // press already settled the pen's side): a live bow/centre drag is one
   // step; a still press was only the path pick
@@ -854,6 +1037,8 @@ function onPointerUp(ev: PointerEvent) {
 }
 function onPointerLeave(ev: PointerEvent) {
   if (!props.active) return
+  // mid right press the svg holds the pointer: a leave is ignored, a cancel ends it
+  if (rightPress && ev.pointerId === rightPress.pointerId) { if (ev.type === 'pointercancel') endRightPress(ev); return }
   onPointerUp(ev)
   penCursor.value = null
   clearToolHover()
@@ -879,6 +1064,7 @@ watch(() => props.active, (on) => {
 // the overlay's own live gesture, settled: a marquee is dropped (no selection
 // change); a moved point drag commits as its own step with no join
 function settleOverlayGesture(): void {
+  if (rightPress) { settledRightId = rightPress.pointerId; cancelRightPress() }
   settleArcPress()
   cancelMarquee()
   if (moved && tool.value === 'select') { if (dragId) dropPoint(dragId, true); else commitHistory() }
@@ -891,6 +1077,21 @@ function isToolKey(ev: KeyboardEvent): boolean {
   const t = TOOL_KEYS[ev.key.toLowerCase()]
   return !!t && props.pen.options.tools.includes(t)
 }
+// ⌘C / ⌘V / ⌘A (Ctrl off a Mac) — with X / ⇧H / ⇧V (isActionKey) the pen stage
+// 6 action keys; the overlay settles its own gesture before any of them
+function isClipboardKey(ev: KeyboardEvent): boolean {
+  if (!(ev.metaKey || ev.ctrlKey) || ev.shiftKey || ev.altKey) return false
+  const k = ev.key.toLowerCase()
+  return k === 'c' || k === 'v' || k === 'a'
+}
+// …settled only when the pen will act on it (the registry's own cheap state);
+// a ⌘C with nothing selected leaves a live marquee alone
+function clipboardKeyActs(ev: KeyboardEvent): boolean {
+  if (!isClipboardKey(ev)) return false
+  const k = ev.key.toLowerCase()
+  const def = ACTIONS[k === 'c' ? 'copy' : k === 'v' ? 'paste' : 'select-all']
+  return !!def && def.state(props.pen).ok
+}
 
 // ---------- keyboard ----------
 
@@ -898,6 +1099,8 @@ function isToolKey(ev: KeyboardEvent): boolean {
 // must not also finish a path or commit. Escape still reaches the pen (a
 // focused toolbar button is the normal state right after picking a tool, and
 // Escape must still cancel a path), but is not handed to the host as 'cancel'.
+// (After Apply / Cancel the Clean up button gives its focus up — PenToolbar —
+// so the next Enter / Escape are the pen's and the host's again.)
 function focusedControl(ev: KeyboardEvent): boolean {
   const CONTROLS = 'button, a[href], select, [role="button"], [role="link"]'
   const t = ev.target as Element | null
@@ -924,6 +1127,27 @@ function handleKeydownEvent(ev: KeyboardEvent): boolean {
   // focused-control rule: Enter applies even while a toolbar button (the
   // Clean up button just clicked) has focus
   if (cleanupSession.value) return props.pen.onKeydown(ev)
+  // pen stage 6: an open menu or wheel owns the keys (arrows, Tab, Home / End,
+  // Enter, Escape), ahead of the focused-control rule — Enter runs the
+  // highlighted item even while a toolbar button has focus, Escape closes it
+  // and is never the host's 'cancel'
+  if (menu.value || wheel.value) {
+    // a ⌘ / Ctrl combo closes it (a live right press settles, so its release
+    // runs nothing) and then acts as usual (⌘Z undoes, ⌘V pastes)
+    if ((ev.metaKey || ev.ctrlKey) && !['Meta', 'Control', 'Shift', 'Alt'].includes(ev.key)) {
+      closeMenus()
+      settleOverlayGesture()
+    } else {
+      if (menu.value && ev.key === 'Enter') settleOverlayGesture()
+      return props.pen.onKeydown(ev)
+    }
+  }
+  // the ContextMenu key and ⇧F10 open the list menu, as a right-click would
+  if (isMenuKey(ev)) {
+    if (!openMenuFromKeyboard()) return false
+    ev.preventDefault(); ev.stopPropagation()
+    return true
+  }
   // ⌥⇧C: the overlay's own live gesture (a marquee, a point drag, an arc
   // press) settles first, so no mid-drag point reaches history or the
   // drawing the preview starts from
@@ -933,7 +1157,7 @@ function handleKeydownEvent(ev: KeyboardEvent): boolean {
   // switching tools mid marquee or mid point drag: settle it first, or the
   // marquee stays live (swallowing later moves) and the dragged point is left
   // mid-solve, folded into whatever step comes next
-  if (isToolKey(ev)) settleOverlayGesture()
+  if (isToolKey(ev) || isActionKey(ev) || clipboardKeyActs(ev)) settleOverlayGesture()
   // any real key mid arc drag: the pen settles its side (usePen.onKeydown),
   // so the overlay's press goes too — the rest of that press is a plain one
   else if (!ARC_PRESS_KEEP_KEYS.has(ev.key)) settleArcPress()
@@ -954,7 +1178,8 @@ function handleKeydownEvent(ev: KeyboardEvent): boolean {
 }
 function onKeydown(ev: KeyboardEvent) { handleKeydownEvent(ev) }
 function onKeyup(ev: KeyboardEvent) { if (props.active) props.pen.onKeyup(ev) }
-function onBlur() { props.pen.onBlur() }
+// a blur mid right press loses its release: drop the press, close the wheel
+function onBlur() { cancelRightPress(); closeWheel(); props.pen.onBlur() }
 
 onMounted(() => {
   if (keyboardMode === 'host') return
@@ -982,13 +1207,16 @@ defineExpose({
 </script>
 
 <template>
-  <svg ref="svgEl" :width="width" :height="height"
+  <svg v-bind="$attrs" ref="svgEl" data-pen-overlay :width="width" :height="height"
        :style="{ position: 'absolute', left: 0, top: 0, display: 'block', touchAction: 'none', cursor: svgCursor, pointerEvents: active ? undefined : 'none' }"
        @pointerdown="onPointerDownSvg" @pointermove="onPointerMove" @pointerup="onPointerUp" @pointerleave="onPointerLeave" @pointercancel="onPointerLeave"
+       @lostpointercapture="onLostPointerCapture"
        @contextmenu.prevent>
     <!-- drawing space: the view matrix does scale, rotation and mirroring -->
     <g :transform="svgTransform">
       <template v-if="!cleanupSession">
+      <!-- filled areas (pen stage 7): a soft tint under the outline -->
+      <path v-if="fillShown.d" :d="fillShown.d" fill="#6366f1" fill-opacity="0.16" stroke="none" pointer-events="none" data-fill-area />
       <path :d="pathDrawing" fill="none" stroke="#3730a3" stroke-width="1.5" vector-effect="non-scaling-stroke" />
       <path :d="constructionDrawing" fill="none" stroke="#9ca3af" stroke-width="1.5" stroke-dasharray="4 3" vector-effect="non-scaling-stroke" />
       <template v-for="e in doc.entities" :key="'hit-' + e.id">
@@ -1012,6 +1240,9 @@ defineExpose({
         <path :d="segmentPathDrawing(s.pathId, s.segIndex)" fill="none" stroke="#f59e0b" stroke-width="2.5"
               vector-effect="non-scaling-stroke" pointer-events="none" data-seg-selected />
       </template>
+      <!-- Properties hover (pen stage 6): the pieces of the rule under the pointer -->
+      <path v-for="h in highlightPaths" :key="'hl-' + h.key" :d="h.d" fill="none" :stroke="HIGHLIGHT" stroke-width="3.5"
+            stroke-linecap="round" vector-effect="non-scaling-stroke" pointer-events="none" :data-highlight="h.key" />
       </template>
       <!-- Clean up preview: the drawing as it is, a faint dotted ghost; the
            cleaned drawing's guides dashed and the cleaned drawing on top -->
@@ -1038,6 +1269,20 @@ defineExpose({
       <path v-for="(d, i) in trimGhosts" :key="'ghost-' + i" :d="d" fill="none" stroke="#3730a3" stroke-width="1"
             stroke-dasharray="1 3" opacity="0.35" vector-effect="non-scaling-stroke" data-trim-ghost />
     </g>
+    <!-- Fill: the area under the pointer, hatched (indigo: a click fills it;
+         red: it is filled and a click empties it) -->
+    <template v-if="fillHoverShown">
+      <defs>
+        <pattern :id="hatchId" patternUnits="userSpaceOnUse" width="6" height="6" patternTransform="rotate(45)">
+          <line x1="0" y1="0" x2="0" y2="6" :stroke="fillHoverShown.filled ? '#ef4444' : '#4f46e5'" stroke-width="1.5" />
+        </pattern>
+        <clipPath :id="hatchClipId">
+          <path :d="fillHoverShown.d" :transform="svgTransform" />
+        </clipPath>
+      </defs>
+      <rect x="0" y="0" :width="width" :height="height" :fill="`url(#${hatchId})`" :clip-path="`url(#${hatchClipId})`"
+            opacity="0.7" pointer-events="none" data-fill-hover :data-filled="fillHoverShown.filled ? 'yes' : 'no'" />
+    </template>
     <g v-if="trimHoverD" :transform="svgTransform" pointer-events="none" data-trim-hover>
       <path :d="trimHoverD" fill="none" stroke="#ef4444" stroke-opacity="0.55" stroke-width="4" stroke-linecap="round"
             vector-effect="non-scaling-stroke" />
@@ -1090,6 +1335,11 @@ defineExpose({
     </template>
     <circle v-if="cutHoverScreen" :cx="cutHoverScreen.x" :cy="cutHoverScreen.y" r="5" fill="#fff" stroke="#ef4444"
             stroke-width="1.5" pointer-events="none" data-cut-hover />
+    <!-- a sleeping fill: rings at the open ends that keep its area from closing -->
+    <template v-if="!cleanupSession">
+      <circle v-for="(g, i) in fillGapScreens" :key="'fillgap-' + i" :cx="g.x" :cy="g.y" r="6" fill="none"
+              stroke="#f59e0b" stroke-width="1.5" stroke-dasharray="3 2.5" pointer-events="none" data-fill-gap />
+    </template>
     <circle v-if="dissolveHoverScreen" :cx="dissolveHoverScreen.x" :cy="dissolveHoverScreen.y" r="9" fill="none"
             :stroke="dissolveHoverScreen.ok ? '#16a34a' : '#9ca3af'" stroke-width="2" pointer-events="none"
             :data-dissolve-hover="dissolveHoverScreen.ok ? 'ok' : 'no'" />
@@ -1161,11 +1411,16 @@ defineExpose({
     </g>
     <rect v-if="marqueeRect" :x="marqueeRect.x" :y="marqueeRect.y" :width="marqueeRect.w" :height="marqueeRect.h"
           fill="rgba(37,99,235,0.08)" stroke="#2563eb" stroke-width="1" stroke-dasharray="4 3" pointer-events="none" data-marquee />
+    <circle v-for="h in highlightPoints" :key="'hlp-' + h.key" :cx="h.x" :cy="h.y" r="8" fill="none"
+            :stroke="HIGHLIGHT" stroke-width="2" pointer-events="none" :data-highlight="h.key" />
     <g v-for="p in sparkleRender" :key="'sparkle-' + p.id" pointer-events="none" data-sparkle :style="{ opacity: p.opacity }">
       <line v-for="(r, i) in p.rays" :key="i" :x1="r.x1" :y1="r.y1" :x2="r.x2" :y2="r.y2"
             stroke="#f59e0b" stroke-width="1.5" stroke-linecap="round" />
     </g>
   </svg>
+  <!-- pen stage 6: the list menu and the wheel, each teleported to <body> -->
+  <PenContextMenu v-if="menu" :pen="pen" />
+  <PenActionWheel v-if="wheel" :pen="pen" />
 </template>
 
 <style scoped>

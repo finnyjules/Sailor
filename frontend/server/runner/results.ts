@@ -119,8 +119,13 @@ export function nextLivePreview(names: string[], prefix: string): number {
 const EXT_BY_TYPE: Record<string, string> = {
   'image/png': 'png', 'image/jpeg': 'jpg', 'image/jpg': 'jpg', 'image/webp': 'webp',
   'video/mp4': 'mp4', 'video/webm': 'webm', 'video/quicktime': 'mov',
+  // R3.1: sounds and 3D files (the fallbacks their plans pass are `wav` and `glb`).
+  'audio/wav': 'wav', 'audio/x-wav': 'wav', 'audio/wave': 'wav', 'audio/vnd.wave': 'wav',
+  'audio/mpeg': 'mp3', 'audio/mp3': 'mp3', 'audio/flac': 'flac', 'audio/x-flac': 'flac', 'audio/ogg': 'ogg',
+  'model/gltf-binary': 'glb',
 }
 
+/** The saved file's extension: by the answer's content type, else the URL's own, else `fallback` (png, mp4, wav or glb by what the plan makes). */
 export function extFor(contentType: string | null, url: string, fallback: string): string {
   const ct = (contentType ?? '').split(';')[0]!.trim().toLowerCase()
   if (EXT_BY_TYPE[ct]) return EXT_BY_TYPE[ct]!

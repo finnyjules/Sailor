@@ -6,7 +6,7 @@ import { Handle, Position } from '@vue-flow/core'
 import { Clapperboard, Pencil } from 'lucide-vue-next'
 import { hydrateShotSheet } from '~/lib/shotdirector/hydrate'
 import { compileShot } from '~/lib/shotdirector/compile'
-import { getProfile } from '~/lib/shotdirector/profiles'
+import { sheetProfile } from '~/lib/shotdirector/prepare'
 import { registerStudioBaker, unregisterStudioBaker } from '~/lib/studio/cascade'
 import { useCharacters } from '~/composables/useCharacters'
 
@@ -21,14 +21,14 @@ const props = defineProps<{
   }
 }>()
 
-const profile = getProfile('seedance-2.0')
 const { stateDescriptors } = useCharacters()
 
 const config = computed(() => hydrateShotSheet(props.data?.properties?.sailor_shotDirector))
+const profile = computed(() => sheetProfile(config.value))
 
 const compiled = computed(() => {
   const castDescriptors = stateDescriptors(config.value.cast.map(m => ({ slug: m.slug, stateId: m.stateId })))
-  return compileShot(config.value, profile, { castDescriptors })
+  return compileShot(config.value, profile.value, { castDescriptors })
 })
 
 const subject = computed(() => config.value.subject.trim() || 'Untitled shot')
@@ -103,7 +103,7 @@ function generate() {
       <!-- Model chip -->
       <div class="flex items-center gap-1.5">
         <span class="rounded border border-white/10 bg-white/5 px-1.5 py-0.5 text-[10px] text-white/50 tracking-tight">
-          Seedance 2.0
+          {{ profile.label }}
         </span>
       </div>
 
@@ -142,7 +142,7 @@ function generate() {
       </button>
       <button
         class="rounded bg-action/15 px-2 py-1 text-[11px] font-medium text-action hover:bg-action/25"
-        title="Compile the shot and run Seedance"
+        :title="`Compile the shot and run ${profile.label}`"
         @click.stop="generate"
       >
         Generate

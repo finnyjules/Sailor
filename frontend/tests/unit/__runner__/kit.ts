@@ -11,6 +11,7 @@ import { createEngineResultStore } from '~~/server/runner/results'
 import { createHandoff } from '~~/server/runner/handoff'
 import { createMetering, type LedgerPort } from '~~/server/runner/metering'
 import { createRunEvents } from '~~/server/runner/events'
+import { parseRemembered as remembered } from '~~/server/runner/rawJson'
 import type { RunnerMessage } from '#shared/runner/messages'
 import type { ApiPrompt } from '#shared/runner/graph'
 
@@ -24,7 +25,22 @@ export interface FakeRequest {
   cancelled: boolean
 }
 
-export function createFakeFal() {
+/**
+ * A programmed answer (R3.1). fal: `answer` gives the result body; Replicate:
+ * the prediction's `output`. `bodyText`, when given, is the body text itself
+ * (parsed, and remembered as the answer's raw text, as the real clients do).
+ * Without either, today's picture answers.
+ */
+export interface FakeFalAnswers {
+  answer?(req: { endpoint: string; input: Record<string, unknown> }): unknown
+  bodyText?(req: { endpoint: string; input: Record<string, unknown> }): string
+}
+export interface FakeReplicateAnswers {
+  answer?(req: { model: string; input: Record<string, unknown> }): unknown
+  bodyText?(req: { model: string; input: Record<string, unknown> }): string
+}
+
+export function createFakeFal(o: FakeFalAnswers = {}) {
   const reqs = new Map<string, FakeRequest>()
   let seq = 0
   const next = { hold: 0, fail: 0 }
@@ -50,6 +66,10 @@ export function createFakeFal() {
     }) as any,
     result: vi.fn(async (url: string) => {
       const id = idOf(url)
+      const r = reqs.get(id)
+      const req = r ? { endpoint: r.endpoint, input: r.payload } : null
+      if (req && o.bodyText) return remembered(o.bodyText(req))
+      if (req && o.answer) return remembered(JSON.stringify(o.answer(req)))
       return { images: [{ url: `https://fal.media/${id}.png` }], video: { url: `https://fal.media/${id}.mp4` } }
     }) as any,
     cancel: vi.fn(async (url: string) => {
@@ -78,11 +98,19 @@ export const REPLICATE_REFUSAL = 'The input or output was flagged as sensitive'
  * Replicate's own states mapped the way the real client maps them:
  * starting → IN_QUEUE, processing → IN_PROGRESS, succeeded/failed/canceled → COMPLETED.
  */
-export function createFakeReplicate() {
+export function createFakeReplicate(o: FakeReplicateAnswers = {}) {
   const reqs = new Map<string, FakeRequest & { transient: boolean }>()
   let seq = 0
   const next = { hold: 0, fail: 0, transient: 0 }
   const idOf = (url: string) => /^replicate:\/\/(pred\d+)/.exec(url)![1]!
+  /** The finished prediction's body: programmed, or today's picture. */
+  const prediction = (id: string): unknown => {
+    const r = reqs.get(id)
+    const req = r ? { model: r.endpoint, input: r.payload } : null
+    if (req && o.bodyText) return remembered(o.bodyText(req))
+    if (req && o.answer) return remembered(JSON.stringify({ id, status: 'succeeded', output: o.answer(req) }))
+    return { id, status: 'succeeded', output: [`https://replicate.delivery/${id}.png`] }
+  }
   const client: ProviderClient = {
     submit: vi.fn(async (slug: string, payload: Record<string, unknown>) => {
       const id = `pred${++seq}`
@@ -104,12 +132,9 @@ export function createFakeReplicate() {
       if (r.failWith) return { ...base, status: 'COMPLETED', error: `Replicate: ${r.failWith}`, retryable: isTransientReplicateError(r.failWith) }
       // Matches the real client: the terminal status body already carries the
       // output, so the engine reads it from `raw` and never calls `result`.
-      return { ...base, status: 'COMPLETED', raw: { id: r.id, status: 'succeeded', output: [`https://replicate.delivery/${r.id}.png`] } }
+      return { ...base, status: 'COMPLETED', raw: prediction(r.id) }
     }) as any,
-    result: vi.fn(async (url: string) => {
-      const id = idOf(url)
-      return { id, status: 'succeeded', output: [`https://replicate.delivery/${id}.png`] }
-    }) as any,
+    result: vi.fn(async (url: string) => prediction(idOf(url))) as any,
     cancel: vi.fn(async (url: string) => {
       reqs.get(idOf(url))!.cancelled = true
       return 'cancelled' as const

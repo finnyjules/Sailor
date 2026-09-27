@@ -39,7 +39,34 @@ export interface SketchConstraint {
   value?: number       // for 'distance' and 'radius'
 }
 
-export interface SketchDoc { entities: SketchEntity[]; constraints: SketchConstraint[] }
+/** Pen stage 7: where a filled area is — a spot on one of its edges, so the
+ *  fill follows the drawing (see lib/sketch/fills.ts). The piece is named by
+ *  its points in its own direction of travel: a line p1→p2 or a straight path
+ *  piece anchor i→i+1; an arc path piece anchor i→i+1 about centre `c`,
+ *  turning counter-clockwise when `ccw`; a circle by its own id (`a` and `b`)
+ *  and its centre `c`. `t` is how far along it (0..1 from `a`; a circle: the
+ *  angle / 2π counter-clockwise from +x), `side` which side the area lies on
+ *  (1 = left of the direction of travel, −1 = right). */
+export interface FillSeed {
+  kind: 'line' | 'arc' | 'circle'
+  a: EntityId
+  b: EntityId
+  c?: EntityId
+  ccw?: boolean
+  t: number
+  side: 1 | -1
+}
+export interface SketchFill { id: EntityId; seed: FillSeed }
+
+export interface SketchDoc {
+  entities: SketchEntity[]
+  constraints: SketchConstraint[]
+  /** pen stage 7: filled areas (absent = none; a drawing from before stage 7) */
+  fills?: SketchFill[]
+  /** pen stage 7: how far (drawing units) an open end may stop short and its
+   *  area still fill — fixed at the first fill, cleared with the last */
+  fillGap?: number
+}
 
 export function getEntity(doc: SketchDoc, id: EntityId): SketchEntity | undefined {
   return doc.entities.find(e => e.id === id)

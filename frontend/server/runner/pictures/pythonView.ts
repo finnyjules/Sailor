@@ -118,3 +118,26 @@ export async function rgbTurnedPng(bytes: Uint8Array): Promise<{ png: Uint8Array
     .toColourspace('srgb').removeAlpha().png({ compressionLevel: 6 }).toBuffer()
   return { png: new Uint8Array(png), w, h }
 }
+
+/**
+ * A provider's picture as a Python paid node that drops alpha saves it (R3
+ * rule 3): bytesio_to_image_tensor reads it with PIL's .convert("RGBA") (no
+ * EXIF turn, no ICC conversion), `/ 255.0` in float32, `tensor[..., :3]`, and
+ * save_generation_output writes `np.clip(255.0 * x, 0, 255).astype(np.uint8)`,
+ * i.e. trunc(f32(255·f32(v/255))) of each 8-bit value v (R1.5's rule; for
+ * every 8-bit v it is v again). The result is that RGB picture as a PNG.
+ */
+export async function answerRgbPng(bytes: Uint8Array): Promise<Uint8Array> {
+  const { data, info } = await sharp(bytes, { pages: 1, page: 0, ignoreIcc: true, limitInputPixels: MAX_INPUT_PIXELS })
+    .toColourspace('srgb').ensureAlpha().raw({ depth: 'uchar' }).toBuffer({ resolveWithObject: true })
+  const n = info.width * info.height
+  const rgb = new Uint8Array(n * 3)
+  for (let i = 0; i < n; i++) {
+    for (let c = 0; c < 3; c++) {
+      const x = Math.fround(data[i * info.channels + c]! / 255)
+      rgb[i * 3 + c] = Math.min(255, Math.max(0, Math.trunc(Math.fround(255 * x))))
+    }
+  }
+  const png = await sharp(rgb, { raw: { width: info.width, height: info.height, channels: 3 } }).png({ compressionLevel: 6 }).toBuffer()
+  return new Uint8Array(png)
+}

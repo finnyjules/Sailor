@@ -547,8 +547,10 @@ export function pathLayersToSvgDoc(layers: PathLayer[], aspect = 1): SvgDocument
 
     const fill = svgPaint(l.fill)
     if (fill.flattened) say('its fill exports as one flat colour')
-    children.push(
-      `<path d="${esc(l.d)}" fill="${fill.color}" fill-rule="${l.fillRule || 'nonzero'}"/>`,
+    // pen stage 7: a drawing with filled areas fills those (non-zero), its outline stays `d`
+    children.push(l.fillD
+      ? `<path d="${esc(l.fillD)}" fill="${fill.color}" fill-rule="nonzero"/>`
+      : `<path d="${esc(l.d)}" fill="${fill.color}" fill-rule="${l.fillRule || 'nonzero'}"/>`,
     )
 
     // Painted last-row-first, exactly as `paintStrokeStack` does — see the header.

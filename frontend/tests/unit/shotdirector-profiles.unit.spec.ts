@@ -7,6 +7,7 @@ import {
   VEO_31_FAST_PROFILE,
   SHOT_MODEL_CHOICES,
   getProfile,
+  clampDuration,
 } from '../../app/lib/shotdirector/profiles'
 import type { IdentityRefSet } from '../../shared/characters/types'
 
@@ -260,5 +261,40 @@ describe('SHOT_MODEL_CHOICES', () => {
 describe('getProfile', () => {
   it('resolves kling-v3', () => {
     expect(getProfile('kling-v3')).toBe(KLING_V3_PROFILE)
+  })
+})
+
+describe('durations / clampDuration', () => {
+  it('declares each model\'s allowed clip lengths', () => {
+    expect(SEEDANCE_PROFILE.durations).toBeNull()
+    expect(KLING_V3_PROFILE.durations).toEqual([5, 10, 15])
+    expect(VEO_31_PROFILE.durations).toEqual([8])
+    expect(VEO_31_FAST_PROFILE.durations).toEqual([8])
+  })
+
+  it('passes seconds through unchanged for an unclamped (null) profile', () => {
+    expect(clampDuration(SEEDANCE_PROFILE, 7)).toBe(7)
+    expect(clampDuration(SEEDANCE_PROFILE, 13)).toBe(13)
+  })
+
+  it('maps <= 0 to the dispatch default (5) for an unclamped profile', () => {
+    expect(clampDuration(SEEDANCE_PROFILE, -1)).toBe(5)
+    expect(clampDuration(SEEDANCE_PROFILE, 0)).toBe(5)
+  })
+
+  it('maps <= 0 to the first allowed value for a clamped profile', () => {
+    expect(clampDuration(KLING_V3_PROFILE, -1)).toBe(5)
+    expect(clampDuration(VEO_31_PROFILE, 0)).toBe(8)
+  })
+
+  it('rounds to the nearest allowed value, the larger one on a tie', () => {
+    expect(clampDuration(KLING_V3_PROFILE, 7)).toBe(5) // |7-5|=2 < |7-10|=3
+    expect(clampDuration(KLING_V3_PROFILE, 8)).toBe(10) // tie (both 2 away) -> larger
+    expect(clampDuration(KLING_V3_PROFILE, 20)).toBe(15)
+  })
+
+  it('always returns the single allowed value for a one-option profile (Veo)', () => {
+    expect(clampDuration(VEO_31_PROFILE, 3)).toBe(8)
+    expect(clampDuration(VEO_31_PROFILE, 100)).toBe(8)
   })
 })

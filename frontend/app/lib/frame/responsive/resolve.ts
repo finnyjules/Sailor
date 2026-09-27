@@ -1,14 +1,25 @@
 import type { LocalLayer } from '~/composables/useCompositorLayers'
 import { fitScale, spareRoom, guardedRoom, applyMap } from './axis'
 import { inferAxisPin, axisOfV } from './infer'
-import { gridsAt, holdOf, type AxisRef } from './spans'
+import { gridsAt, holdOf, spansAtView, type AxisRef } from './spans'
 import { buildUnits } from './units'
 import { placeLayer, textNaturalHeightPx } from './stretch'
 import { remapMotion } from './motion'
-import type { AxisMap, AxisPin, FrameDoc, LayoutResult, ResolveOptions, ResolvedBox, UnitInfo } from './types'
+import type { AxisMap, AxisPin, FrameDoc, LayoutResult, RefChoice, ResolveOptions, ResolvedBox, UnitInfo } from './types'
 
 function identityResult(frame: FrameDoc, gridBox: LayoutResult['grid']): LayoutResult {
   return { layers: frame.layers, motion: frame.motion, grid: gridBox, boxes: new Map(), maps: new Map(), units: new Map(), identity: true }
+}
+
+/** The map a pin of `kind` makes against the reference `ref` (a 'both' that cannot stretch places centred). */
+function refMap(kind: AxisPin, canStretch: boolean, s: number, ref: AxisRef): AxisMap {
+  const spare = ref.bExtent - s * ref.dExtent
+  const { u, o } = guardedRoom(Math.max(0, spare), s * ref.dExtent)
+  const effective: AxisPin = kind === 'both' && !canStretch ? 'center' : kind
+  // `applyMap` reads the ABSOLUTE design coordinate (`o + s·p`; only 'relative' subtracts
+  // refStart), so the reference's own fitted start must be taken back out of `o` — otherwise a
+  // section that does not begin at the origin counts its start twice and pushes past the frame.
+  return { kind: effective, s, u, o: ref.bStart + o - s * ref.dStart, ref: ref.dExtent, refStart: ref.dStart }
 }
 
 /** One axis of one unit: the map plus the resolved near/far edges in box px. */
@@ -18,13 +29,8 @@ function resolveAxis(
   ref: AxisRef,
   kSize: number,                            // kSize: px per design px for this unit's SIZE (s, or 1 for keepSize)
 ): { map: AxisMap; near: number; far: number; stretched: boolean } {
-  const spare = ref.bExtent - s * ref.dExtent
-  const { u, o } = guardedRoom(Math.max(0, spare), s * ref.dExtent)
-  const effective: AxisPin = kind === 'both' && !canStretch ? 'center' : kind
-  // `applyMap` reads the ABSOLUTE design coordinate (`o + s·p`; only 'relative' subtracts
-  // refStart), so the reference's own fitted start must be taken back out of `o` — otherwise a
-  // section that does not begin at the origin counts its start twice and pushes past the frame.
-  const map: AxisMap = { kind: effective, s, u, o: ref.bStart + o - s * ref.dStart, ref: ref.dExtent, refStart: ref.dStart }
+  const map = refMap(kind, canStretch, s, ref)
+  const effective = map.kind
   const size = uExtent * kSize
   if (effective === 'both') {
     // Bleed: a side whose design gap to the reference edge is ≤ 0 holds the REAL edge.
@@ -93,6 +99,28 @@ export function resolveLayout(frame: FrameDoc, W: number, H: number, opts: Resol
           unitId: unit.id, kind: unit.kind, memberIds: unit.memberIds, canStretch, kSize,
           designBox: unit.box, mappedBox: unitBox, refDesign, refView,
           h: hx.map, v: vy.map, hExplicit: unit.pins?.h != null, vExplicit: unit.pins?.v != null,
+          onGrid: hold.onGrid, vBox: hold.vBox, vCanStretch: hold.vCanStretch,
+          holdAt: (box, lonePatch) => {
+            // The same holdOf the next resolve runs, on the edited design box (and the lone layer as edited).
+            const lone2 = lone && lonePatch ? ({ ...lone, ...lonePatch } as LocalLayer) : lone
+            const h2 = holdOf({ ...unit, box }, lone2, grids, W0, H0, W, H, ctx)
+            return {
+              refDesign: { x: h2.h.dStart, y: h2.v.dStart, w: h2.h.dExtent, h: h2.v.dExtent },
+              refView: { x: h2.h.bStart, y: h2.v.bStart, w: h2.h.bExtent, h: h2.v.bExtent },
+              onGrid: h2.onGrid, vBox: h2.vBox, vCanStretch: h2.vCanStretch,
+              inferred: {
+                h: inferAxisPin(box.x, box.w, h2.h.dStart, h2.h.dExtent, canStretch),
+                v: inferAxisPin(h2.vBox.y, h2.vBox.h, h2.v.dStart, h2.v.dExtent, canStretch && h2.vCanStretch),
+              },
+              map: (axis, kind) => refMap(kind, canStretch, s, axis === 'h' ? h2.h : h2.v),
+            }
+          },
+          refsAtView: (axis, a, b) => {
+            const choice = (ref: AxisRef, onGrid: boolean): RefChoice => ({ ...ref, onGrid, map: kind => refMap(kind, canStretch, s, ref) })
+            const frameRef: AxisRef = axis === 'h' ? { dStart: 0, dExtent: W0, bStart: 0, bExtent: W } : { dStart: 0, dExtent: H0, bStart: 0, bExtent: H }
+            const spans = unit.pins?.holdTo === 'frame' ? [] : spansAtView(grids, axis, a, b, W0)
+            return [...spans.map(r => choice(r, true)), choice(frameRef, false)]
+          },
         }
       : null
 

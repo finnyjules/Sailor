@@ -28,6 +28,10 @@
  * the caller's signal ends a fetch, and a render's byte budget is taken from
  * as bytes arrive.
  * Round 4: `localhost` connects over IPv4 first (its addresses still all checked).
+ *
+ * The policy itself is `safeFetch` (step 3, R3.1 fix round 1): the runner's
+ * provider-answer downloads take it too (server/runner/answerDownload.ts),
+ * with their own words, byte cap and time limit, and no loopback exception.
  */
 import { BlockList, isIP } from 'node:net'
 import { lookup as dnsLookup } from 'node:dns'
@@ -120,15 +124,21 @@ export interface SafeFetchOptions {
 /** The URL's host without IPv6 brackets. */
 const hostOf = (u: URL) => u.hostname.replace(/^\[|\]$/g, '')
 
+/** What a refusal says, for the caller's own kind of file. */
+export interface SafeFetchWords { refused: string; tooLarge: string; timeout: string }
+
+const LAYOUT_WORDS: SafeFetchWords = { refused: FETCH_REFUSED, tooLarge: FETCH_TOO_LARGE, timeout: FETCH_TIMEOUT }
+
 /** One request, its answer's status, headers and body (at most `maxBytes`). */
-function requestOnce(u: URL, loopbackOk: boolean, o: { signal: AbortSignal; maxBytes: number; budget?: ByteBudget; stopped: () => boolean }): Promise<{ status: number; location?: string; contentType: string; data: ArrayBuffer }> {
+function requestOnce(u: URL, loopbackOk: boolean, o: { signal: AbortSignal; maxBytes: number; budget?: ByteBudget; stopped: () => boolean; words: SafeFetchWords; accept: string }): Promise<{ status: number; location?: string; contentType: string | null; data: ArrayBuffer }> {
+  const { words } = o
   const host = hostOf(u)
-  if (isIP(host) && !addressAllowed(host, loopbackOk)) return Promise.reject(new FetchRefused(FETCH_REFUSED))
+  if (isIP(host) && !addressAllowed(host, loopbackOk)) return Promise.reject(new FetchRefused(words.refused))
   const checkedLookup: LookupFunction = (hostname, options, cb) => {
     dnsLookup(hostname, { ...options, all: true }, (err, addresses) => {
       if (err) return (cb as (e: Error) => void)(err)
       const list = addresses as unknown as { address: string; family: number }[]
-      if (!list.length || list.some(a => !addressAllowed(a.address, loopbackOk))) return (cb as (e: Error) => void)(new FetchRefused(FETCH_REFUSED))
+      if (!list.length || list.some(a => !addressAllowed(a.address, loopbackOk))) return (cb as (e: Error) => void)(new FetchRefused(words.refused))
       // `localhost` over IPv4 first (fix round 4): on this kind of machine
       // [::1] can be another listener on the same port (a 426 answer).
       if (/^localhost\.?$/i.test(hostname)) list.sort((a, b) => (a.family === 4 ? 0 : 1) - (b.family === 4 ? 0 : 1))
@@ -139,17 +149,17 @@ function requestOnce(u: URL, loopbackOk: boolean, o: { signal: AbortSignal; maxB
   const lib = u.protocol === 'https:' ? https : http
   return new Promise((resolve, reject) => {
     // agent: false — a pooled keep-alive socket would skip the lookup, and so the check.
-    const req = lib.request(u, { method: 'GET', agent: false, lookup: checkedLookup, signal: o.signal, headers: { 'User-Agent': 'Sailor/1.0', Accept: 'image/*' } }, (res) => {
+    const req = lib.request(u, { method: 'GET', agent: false, lookup: checkedLookup, signal: o.signal, headers: { 'User-Agent': 'Sailor/1.0', Accept: o.accept } }, (res) => {
       const status = res.statusCode ?? 0
       if (status >= 300 && status < 400) {
         res.resume()
-        resolve({ status, location: res.headers.location, contentType: '', data: new ArrayBuffer(0) })
+        resolve({ status, location: res.headers.location, contentType: null, data: new ArrayBuffer(0) })
         return
       }
       const declared = Number(res.headers['content-length'])
       if (Number.isFinite(declared) && declared > o.maxBytes) {
         res.destroy()
-        reject(new FetchRefused(FETCH_TOO_LARGE))
+        reject(new FetchRefused(words.tooLarge))
         return
       }
       if (o.budget && Number.isFinite(declared) && declared > o.budget.left) {
@@ -163,7 +173,7 @@ function requestOnce(u: URL, loopbackOk: boolean, o: { signal: AbortSignal; maxB
         size += c.length
         if (size > o.maxBytes) {
           res.destroy()
-          reject(new FetchRefused(FETCH_TOO_LARGE))
+          reject(new FetchRefused(words.tooLarge))
           return
         }
         // The render's total, shared by its fetches (fix round 3).
@@ -181,7 +191,7 @@ function requestOnce(u: URL, loopbackOk: boolean, o: { signal: AbortSignal; maxB
         const buf = Buffer.concat(chunks)
         resolve({
           status,
-          contentType: String(res.headers['content-type'] || 'image/png'),
+          contentType: res.headers['content-type'] ? String(res.headers['content-type']) : null,
           data: buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength) as ArrayBuffer,
         })
       })
@@ -191,47 +201,83 @@ function requestOnce(u: URL, loopbackOk: boolean, o: { signal: AbortSignal; maxB
     req.on('socket', (sock) => {
       sock.once('connect', () => {
         const at = sock.remoteAddress
-        if (at && !addressAllowed(at, loopbackOk)) req.destroy(new FetchRefused(FETCH_REFUSED))
+        if (at && !addressAllowed(at, loopbackOk)) req.destroy(new FetchRefused(words.refused))
       })
     })
     req.on('error', (e) => {
       if (o.stopped()) reject(new Error('Stopped'))
-      else if (o.signal.aborted) reject(new FetchRefused(FETCH_TIMEOUT))
+      else if (o.signal.aborted) reject(new FetchRefused(words.timeout))
       else reject(e instanceof FetchRefused ? e : (e as Error & { cause?: unknown }).cause instanceof FetchRefused ? (e as Error & { cause: FetchRefused }).cause : e)
     })
     req.end()
   })
 }
 
+/** How one caller fetches under the policy above. */
+export interface SafeFetchPolicy {
+  /** Hosted (a shared server): no loopback exception. */
+  hosted: boolean
+  /** Locally, a loopback `/view` on ComfyUI's port (or these) is let through; false for callers that never need it. */
+  loopbackView: boolean
+  viewPorts?: readonly number[]
+  timeoutMs: number
+  maxBytes: number
+  words: SafeFetchWords
+  /** The Accept header. */
+  accept: string
+}
+
+/** A fetch whose redirects went past the limit. */
+export class TooManyRedirects extends Error {}
+
+/**
+ * The policy: http(s) only, every hop's address checked (and pinned), at
+ * most 3 redirects, `timeoutMs` in all, `maxBytes`, the caller's signal ends
+ * it ('Stopped'). The final answer's status is the caller's to judge.
+ */
+export async function safeFetch(url: string, p: SafeFetchPolicy, o: { signal?: AbortSignal; budget?: ByteBudget } = {}): Promise<{ status: number; contentType: string | null; data: ArrayBuffer }> {
+  const timeout = AbortSignal.timeout(p.timeoutMs)
+  // The caller's signal (a render's or a run's Stop, a disconnect, a deadline) ends the fetch too.
+  const signal = o.signal ? AbortSignal.any([timeout, o.signal]) : timeout
+  const stopped = () => !!o.signal?.aborted && !timeout.aborted
+  if (stopped()) throw new Error('Stopped')
+  let u = new URL(url)
+  for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
+    if (u.protocol !== 'http:' && u.protocol !== 'https:') throw new FetchRefused(p.words.refused)
+    const port = Number(u.port || (u.protocol === 'https:' ? 443 : 80))
+    const loopbackOk = p.loopbackView && !p.hosted && u.pathname === '/view' && (port === comfyViewPort() || !!p.viewPorts?.includes(port))
+    const r = await requestOnce(u, loopbackOk, { signal, maxBytes: p.maxBytes, budget: o.budget, stopped, words: p.words, accept: p.accept }).catch((e: unknown) => {
+      if (stopped()) throw new Error('Stopped')
+      if (signal.aborted && !(e instanceof FetchRefused)) throw new FetchRefused(p.words.timeout)
+      throw e
+    })
+    if (r.status >= 300 && r.status < 400 && r.location) {
+      u = new URL(r.location, u)
+      continue
+    }
+    return { status: r.status, contentType: r.contentType, data: r.data }
+  }
+  throw new TooManyRedirects('too many redirects')
+}
+
 /** The render's image fetcher under the policy above. */
 export function safeImageFetcher(opts: SafeFetchOptions): ImageFetcher {
-  const timeoutMs = opts.timeoutMs ?? FETCH_TIMEOUT_MS
-  const maxBytes = opts.maxBytes ?? FETCH_MAX_BYTES
+  const policy: SafeFetchPolicy = {
+    hosted: opts.hosted, loopbackView: true, viewPorts: opts.viewPorts,
+    timeoutMs: opts.timeoutMs ?? FETCH_TIMEOUT_MS, maxBytes: opts.maxBytes ?? FETCH_MAX_BYTES,
+    words: LAYOUT_WORDS, accept: 'image/*',
+  }
   return async (url, o = {}) => {
-    const timeout = AbortSignal.timeout(timeoutMs)
-    // The caller's signal (the render's Stop, disconnect or deadline) ends the fetch too.
-    const signal = o.signal ? AbortSignal.any([timeout, o.signal]) : timeout
-    const stopped = () => !!o.signal?.aborted && !timeout.aborted
-    if (stopped()) throw new Error('Stopped')
-    let u: URL
-    try { u = new URL(url) }
+    if (o.signal?.aborted) throw new Error('Stopped')
+    try { new URL(url) }
     catch { throw new Error(`image fetch failed (bad address): ${url.slice(0, 100)}`) }
-    for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
-      if (u.protocol !== 'http:' && u.protocol !== 'https:') throw new FetchRefused(FETCH_REFUSED)
-      const port = Number(u.port || (u.protocol === 'https:' ? 443 : 80))
-      const loopbackOk = !opts.hosted && u.pathname === '/view' && (port === comfyViewPort() || !!opts.viewPorts?.includes(port))
-      const r = await requestOnce(u, loopbackOk, { signal, maxBytes, budget: o.budget, stopped }).catch((e: unknown) => {
-        if (stopped()) throw new Error('Stopped')
-        if (signal.aborted && !(e instanceof FetchRefused)) throw new FetchRefused(FETCH_TIMEOUT)
-        throw e
-      })
-      if (r.status >= 300 && r.status < 400 && r.location) {
-        u = new URL(r.location, u)
-        continue
-      }
-      if (r.status < 200 || r.status >= 300) throw new Error(`image fetch failed (${r.status}): ${url.slice(0, 100)}`)
-      return { data: r.data, contentType: r.contentType }
+    let r: Awaited<ReturnType<typeof safeFetch>>
+    try { r = await safeFetch(url, policy, o) }
+    catch (e) {
+      if (e instanceof TooManyRedirects) throw new Error(`image fetch failed (too many redirects): ${url.slice(0, 100)}`)
+      throw e
     }
-    throw new Error(`image fetch failed (too many redirects): ${url.slice(0, 100)}`)
+    if (r.status < 200 || r.status >= 300) throw new Error(`image fetch failed (${r.status}): ${url.slice(0, 100)}`)
+    return { data: r.data, contentType: r.contentType ?? 'image/png' }
   }
 }

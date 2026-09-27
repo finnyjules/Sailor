@@ -3,7 +3,7 @@
 // solves the part of the drawing a fix touches), and the checks every
 // accepted fix must pass against the drawing as it was before Clean up — no
 // point moved too far, no arc turned inside out or squeezed away.
-import type { SketchDoc, SketchEntity, EntityId } from '../model'
+import type { SketchDoc, SketchEntity, EntityId, SketchConstraint, ConstraintKind } from '../model'
 import type { Vec2 } from '../geom'
 import { dist } from '../geom'
 import { cloneDoc } from '../clone'
@@ -47,11 +47,35 @@ function pointsOf(map: ReadonlyMap<EntityId, SketchEntity>, id: EntityId): Entit
   return out
 }
 
-/** The entities and rules of the connected parts of the drawing that `seeds`
- *  (ids of points, pieces or circles) belong to — two things are connected
- *  when a piece or a rule ties their points. The entity objects are the
- *  drawing's own (not copies), so solving the part solves the drawing. */
-export function componentOf(doc: SketchDoc, seeds: readonly EntityId[]): SketchDoc {
+/** **Ruling (final review, round 2):** which rules make two things one part —
+ *  positional and structural ones only. Size-only rules (a distance, an equal
+ *  radius, an equal length between separate pieces) and directions
+ *  (horizontal, vertical, parallel, perpendicular — where pieces share a
+ *  point they are one part already) do not: Clean up's own Same length would
+ *  otherwise weld a drawing of separate shapes into one. An equalDist
+ *  [C, p, C, q] holds a point on a circle round C (an arc's own ends, an On
+ *  curve pin) — positional. A size rule to another part is still solved: the
+ *  window solve holds whatever it reaches outside the window. */
+const JOINING = new Set<ConstraintKind>([
+  'coincident', 'pointOnLine', 'pointOnCircle', 'collinear', 'midpoint', 'concentric',
+  'tangentLineCircle', 'tangentCircleCircle', 'tangentLineArc', 'tangentArcs',
+  'rotatedFrom', 'mirroredFrom',
+])
+export function joinsParts(c: SketchConstraint): boolean {
+  return JOINING.has(c.kind) || (c.kind === 'equalDist' && c.refs.length === 4 && c.refs[0] === c.refs[2])
+}
+/** What a solve must reach together: the joining rules and the direction
+ *  rules (a Parallel between two separate lines turns both) — never a size
+ *  rule, whose far end the window solve holds. Shapes (partNames, for Mirror
+ *  pairs) are joined by joinsParts only. */
+const DIRECTION = new Set<ConstraintKind>(['horizontal', 'vertical', 'parallel', 'perpendicular'])
+export function joinsSolve(c: SketchConstraint): boolean {
+  return joinsParts(c) || DIRECTION.has(c.kind)
+}
+
+// union-find over the drawing's points: two points are one part when a piece
+// or a rule `joins` accepts ties them
+function partFinder(doc: SketchDoc, joins: (c: SketchConstraint) => boolean): { find: (x: EntityId) => EntityId; pts: (id: EntityId) => EntityId[] } {
   const map = new Map(doc.entities.map(e => [e.id, e]))
   const parent = new Map<EntityId, EntityId>()
   const find = (x: EntityId): EntityId => {
@@ -69,10 +93,36 @@ export function componentOf(doc: SketchDoc, seeds: readonly EntityId[]): SketchD
   }
   const pts = (id: EntityId) => pointsOf(map, id)
   for (const e of doc.entities) if (e.kind !== 'point') union(pts(e.id))
-  for (const c of doc.constraints) union(c.refs.flatMap(pts))
+  for (const c of doc.constraints) if (joins(c)) union(c.refs.flatMap(pts))
+  return { find, pts }
+}
+
+/** The entities of the connected parts of the drawing that `seeds` (ids of
+ *  points, pieces or circles) belong to — two things are connected when a
+ *  piece or a joining or direction rule (joinsSolve) ties their points — and every rule
+ *  that touches them (a size rule may reach another part: solve the part with
+ *  solveWindow, which holds what it reaches). The entity objects are the
+ *  drawing's own (not copies). */
+export function componentOf(doc: SketchDoc, seeds: readonly EntityId[]): SketchDoc {
+  const { find, pts } = partFinder(doc, joinsSolve)
   const roots = new Set(seeds.flatMap(pts).map(find))
   const keep = (id: EntityId) => pts(id).some(p => roots.has(find(p)))
   return { entities: doc.entities.filter(e => keep(e.id)), constraints: doc.constraints.filter(c => c.refs.some(keep)) }
+}
+
+/** The points and circle radii of a part (from componentOf), as a window. */
+export function windowOfPart(part: SketchDoc): Set<EntityId> {
+  return new Set(part.entities.filter(e => e.kind === 'point' || e.kind === 'circle').map(e => e.id))
+}
+
+/** Which connected part each point of the drawing is in, named by the
+ *  smallest point id of the part (so the name doesn't depend on order). */
+export function partNames(doc: SketchDoc): Map<EntityId, EntityId> {
+  const { find } = partFinder(doc, joinsParts)
+  const least = new Map<EntityId, EntityId>()
+  const ids = doc.entities.filter(e => e.kind === 'point').map(e => e.id)
+  for (const id of ids) { const r = find(id), m = least.get(r); if (m == null || id < m) least.set(r, id) }
+  return new Map(ids.map(id => [id, least.get(find(id))!]))
 }
 
 /** **Ruling (fix rounds 1–2):** a candidate is first solved in a window — the
@@ -108,7 +158,10 @@ export function windowOf(doc: SketchDoc, seeds: readonly EntityId[], hops = WIND
       }
     }
   }
-  for (const c of doc.constraints) link([...new Set(c.refs.flatMap(r => pointsOf(map, r)))])
+  // a hop along a positional or direction rule (joinsSolve); never along a
+  // size rule to another shape — solveWindow holds what such a rule reaches,
+  // instead of the window growing over every shape one Same length group ties
+  for (const c of doc.constraints) if (joinsSolve(c)) link([...new Set(c.refs.flatMap(r => pointsOf(map, r)))])
   const win = new Set<EntityId>(seeds.flatMap(id => pointsOf(map, id)))
   let front = [...win]
   for (let k = 0; k < hops; k++) {

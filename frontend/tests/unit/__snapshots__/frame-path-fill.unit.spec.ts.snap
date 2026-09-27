@@ -1,0 +1,57 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`a Frame path layer paints exactly as before stage 7 when it has no fillD > closed drawing, fill only 1`] = `
+[
+  "save()",
+  "globalAlpha = 1",
+  "globalCompositeOperation = source-over",
+  "translate(500, 400)",
+  "save()",
+  "scale(1000, 1000)",
+  "fillStyle = #3b82f6",
+  "fill(Path(M 0 0 L 0.1 0 L 0.05 0.1 Z), nonzero)",
+  "lineJoin = round",
+  "lineCap = round",
+  "restore()",
+  "restore()",
+]
+`;
+
+exports[`a Frame path layer paints exactly as before stage 7 when it has no fillD > library path, even-odd, fill and stroke 1`] = `
+[
+  "save()",
+  "globalAlpha = 1",
+  "globalCompositeOperation = source-over",
+  "translate(500, 400)",
+  "rotate(0.20943951023931953)",
+  "save()",
+  "scale(1500, 1500)",
+  "fillStyle = #111111",
+  "fill(Path(M 0 0 L 0.1 0 L 0.05 0.1 Z M 0.03 0.02 L 0.07 0.02 L 0.05 0.06 Z), evenodd)",
+  "lineJoin = round",
+  "lineCap = round",
+  "lineWidth = 0.002",
+  "strokeStyle = #eeeeee",
+  "stroke(Path(M 0 0 L 0.1 0 L 0.05 0.1 Z M 0.03 0.02 L 0.07 0.02 L 0.05 0.06 Z))",
+  "restore()",
+  "restore()",
+]
+`;
+
+exports[`a Frame path layer paints exactly as before stage 7 when it has no fillD > open drawing, stroke only 1`] = `
+[
+  "save()",
+  "globalAlpha = 1",
+  "globalCompositeOperation = source-over",
+  "translate(500, 400)",
+  "save()",
+  "scale(1000, 1000)",
+  "lineJoin = round",
+  "lineCap = round",
+  "lineWidth = 0.004",
+  "strokeStyle = #3b82f6",
+  "stroke(Path(M 0 0 L 0.1 0 M 0.02 -0.02 L 0.05 0.1))",
+  "restore()",
+  "restore()",
+]
+`;

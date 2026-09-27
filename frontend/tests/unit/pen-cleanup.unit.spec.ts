@@ -230,6 +230,52 @@ describe('Clean up in the pen', () => {
     expect(pen.canUndo()).toBe(false)
     expect(JSON.stringify(doc.value)).toBe(before)
   })
+  it('Enter with every fix switched off does nothing, like the disabled Apply button', () => {
+    const { doc, pen } = mk(flower)
+    const before = JSON.stringify(doc.value)
+    pen.startCleanup()
+    for (let round = 0; round < 20; round++) {
+      const on = pen.cleanup.value!.result.fixes.find(f => f.on)
+      if (!on) break
+      pen.toggleCleanupFix(on.id)
+    }
+    const session = pen.cleanup.value
+    expect(pen.onKeydown(key('Enter'))).toBe(true)          // still the pen's key: nothing reaches the host
+    expect(pen.cleanup.value).toBe(session)                 // the preview stays open, as it was
+    expect(pen.canUndo()).toBe(false)
+    expect(JSON.stringify(doc.value)).toBe(before)
+    expect(pen.onKeydown(key('Escape'))).toBe(true)
+    expect(pen.cleanup.value).toBeNull()
+  })
+  it('the arrow keys move a focused strength control, and focus with it', () => {
+    const { pen } = mk(flower)
+    pen.startCleanup()
+    const focused: string[] = []
+    const radios = new Map<string, any>()
+    const group = { querySelector: (sel: string) => radios.get(sel.match(/data-strength="(\w+)"/)?.[1] ?? '') ?? null }
+    for (const s of ['gentle', 'normal', 'strong']) {
+      const el: any = { getAttribute: (n: string) => (n === 'data-strength' ? s : null), focus: () => focused.push(s) }
+      el.closest = (sel: string) => (sel === '[data-strength]' ? el : sel === '[role="radiogroup"]' ? group : sel.includes('button') || sel.includes('radio') ? el : null)
+      radios.set(s, el)
+    }
+    let prevented = 0
+    const arrow = (k: string, on: string) => pen.onKeydown(key(k, { target: radios.get(on), preventDefault() { prevented++ } }))
+    expect(arrow('ArrowRight', 'normal')).toBe(true)
+    expect(pen.cleanup.value!.strength).toBe('strong')
+    expect(focused).toEqual(['strong'])
+    expect(arrow('ArrowLeft', 'strong')).toBe(true)
+    expect(arrow('ArrowUp', 'normal')).toBe(true)
+    expect(pen.cleanup.value!.strength).toBe('gentle')
+    expect(arrow('ArrowDown', 'gentle')).toBe(true)
+    expect(pen.cleanup.value!.strength).toBe('normal')
+    expect(arrow('ArrowLeft', 'gentle')).toBe(true)         // wraps round, as a radio group does
+    expect(pen.cleanup.value!.strength).toBe('strong')
+    expect(focused).toEqual(['strong', 'normal', 'gentle', 'normal', 'strong'])
+    expect(prevented).toBe(5)
+    // with no strength control focused an arrow does nothing (swallowed, as every plain key)
+    expect(pen.onKeydown(key('ArrowLeft'))).toBe(true)
+    expect(pen.cleanup.value!.strength).toBe('strong')
+  })
   it('tolerances stay at the zoom Clean up opened at', () => {
     const { pen, view } = mk(flower)
     pen.startCleanup()

@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest'
 import type { SketchDoc } from '~/lib/sketch/model'
 import { freshId } from '~/lib/sketch/ids'
 import { addPoint, addLine, addCircle, addConstraint, removeConstraint, deleteEntity } from '~/lib/sketch/edit'
+import { mergePoints } from '~/lib/sketch/trim'
 
 const emptyDoc = (): SketchDoc => ({ entities: [], constraints: [] })
 
@@ -62,5 +63,42 @@ describe('authoring ops', () => {
     expect(d.entities.find(e => e.id === C)).toBeUndefined()
     expect(d.entities.find(e => e.id === pc)).toBeDefined() // center point not auto-removed
     expect(d.constraints).toHaveLength(0)
+  })
+})
+
+describe('deleting a guide line', () => {
+  it('takes its own guide ends with it, and the rule that only ties them (a Clean up axis)', () => {
+    const d = emptyDoc()
+    const p = addPoint(d, 5, -1, { construction: true }), q = addPoint(d, 5, 9, { construction: true })
+    const axis = addLine(d, p, q, { construction: true })
+    addConstraint(d, 'vertical', [p, q])
+    const a = addPoint(d, 1, 1), b = addPoint(d, 9, 1)
+    addConstraint(d, 'mirroredFrom', [b, a, axis])
+    deleteEntity(d, axis)
+    expect(d.entities.map(e => e.id).sort()).toEqual([a, b].sort())
+    expect(d.constraints).toEqual([])
+  })
+  it('merging a guide line’s two ends into one keeps the point (the squeezed line goes, not its end)', () => {
+    const d = emptyDoc()
+    const p = addPoint(d, 0, 0, { construction: true }), q = addPoint(d, 0.01, 0, { construction: true })
+    addLine(d, p, q, { construction: true })
+    expect(mergePoints(d, q, p)).toBe(true)
+    expect(d.entities.map(e => e.id)).toEqual([p])
+  })
+  it('keeps an end another piece or rule still uses, and every end of a plain line', () => {
+    const d = emptyDoc()
+    const p = addPoint(d, 0, 0, { construction: true }), q = addPoint(d, 0, 5, { construction: true }), r = addPoint(d, 4, 5, { construction: true })
+    const g = addLine(d, p, q, { construction: true })
+    addLine(d, q, r, { construction: true })                    // q is shared with another guide
+    const x = addPoint(d, 3, 0)
+    addConstraint(d, 'horizontal', [p, x])                      // p is tied to a drawn point
+    deleteEntity(d, g)
+    expect(d.entities.map(e => e.id)).toEqual(expect.arrayContaining([p, q, r, x]))
+    expect(d.constraints.map(c => c.kind)).toEqual(['horizontal'])
+    const e = emptyDoc()
+    const s = addPoint(e, 0, 0), t = addPoint(e, 1, 0)
+    const l = addLine(e, s, t)
+    deleteEntity(e, l)
+    expect(e.entities.map(k => k.id).sort()).toEqual([s, t].sort())
   })
 })

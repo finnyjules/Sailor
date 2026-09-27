@@ -9,6 +9,7 @@ import { curveGeom, pointAt } from './crossings'
 import { addPoint, addLine, addCircle, addConstraint, deleteEntity, isPointReferenced } from './edit'
 import { freshId } from './ids'
 import { tangentTouchPoint } from './tangency'
+import { splitSeeds, joinSeeds, renameSeedPoints } from './fills'
 
 const TAU = Math.PI * 2
 const EPS_T = 1e-7
@@ -653,6 +654,7 @@ export function cutAt(doc: SketchDoc, ref: CurveRef, t: number): EntityId | null
     const x = addPoint(doc, at.x, at.y, cons ? { construction: true } : {})
     const { p1, p2 } = line
     followPair(doc, p1, p2, { kind: 'cut', x })
+    splitSeeds(doc, p1, p2, null, t, x)   // pen stage 7: a fill's seed stays on its half
     line.p2 = x
     const L2 = addLine(doc, x, p2, cons ? { construction: true } : {})
     copyLineDirection(doc, line.id, L2)
@@ -663,6 +665,10 @@ export function cutAt(doc: SketchDoc, ref: CurveRef, t: number): EntityId | null
   const [a, b] = segEnds(path, ref.segIndex)
   const x = addPoint(doc, at.x, at.y, path.construction ? { construction: true } : {})
   followPair(doc, a, b, { kind: 'cut', x })
+  const seg = path.segments[ref.segIndex]!
+  // pen stage 7: a fill's seed stays on its half (a cubic never gets here:
+  // curveGeom returns null for it, so cutAt has already refused)
+  splitSeeds(doc, a, b, seg.kind === 'arc' ? seg.center : null, t, x)
   splitSegment(doc, path, ref.segIndex, x)
   return x
 }
@@ -727,6 +733,13 @@ export function dissolveAt(doc: SketchDoc, pathId: EntityId, anchorIndex: number
   const q = path.anchors[anchorIndex]!
   const b = path.anchors[(anchorIndex + 1) % n]!
   const sIn = path.segments[inSeg]!, sOut = path.segments[outSeg]!
+  // pen stage 7: how much of the merged piece the first half was (by turn for
+  // arcs, by length for lines) — a fill's seed on either half moves onto it
+  const gIn = curveGeom(doc, { kind: 'seg', pathId, segIndex: inSeg })
+  const gOut = curveGeom(doc, { kind: 'seg', pathId, segIndex: outSeg })
+  const partOf = (g: typeof gIn) => (!g ? 0 : g.kind === 'line' ? dist(g.a!, g.b!) : Math.abs(g.sweepAngle ?? 0))
+  const share = partOf(gIn) / Math.max(1e-12, partOf(gIn) + partOf(gOut))
+  joinSeeds(doc, a, q, b, sIn.kind === 'arc' ? sIn.center : null, sOut.kind === 'arc' ? sOut.center : null, share)
   const loose: EntityId[] = [q]
   const touched = new Set<EntityId>([
     ...followPair(doc, a, q, { kind: 'grow', from: q, to: b }),
@@ -883,6 +896,11 @@ export function mergePoints(doc: SketchDoc, from: EntityId, into: EntityId): boo
   for (const c of doc.constraints) {
     if (c.refs.includes(from)) { c.refs = c.refs.map(sw); touched.add(c.id) }
   }
+  // pen stage 7: a fill's seed names the merged point. A merge that collapses
+  // the seed's own piece (its two ends merged) leaves the seed on no piece:
+  // a live fill is re-picked by the settle (reconcileFills finds its area by
+  // the edges it shares); a sleeping one has no area to find and is dropped.
+  renameSeedPoints(doc, from, into)
   doc.entities = doc.entities.filter(e => e.id !== from)
 
   // rules this merge touched that became meaningless or exact repeats
@@ -904,7 +922,7 @@ export function mergePoints(doc: SketchDoc, from: EntityId, into: EntityId): boo
   const loose: EntityId[] = []
   for (const e of [...doc.entities]) {
     if (!touched.has(e.id)) continue
-    if (e.kind === 'line' && e.p1 === e.p2) deleteEntity(doc, e.id)
+    if (e.kind === 'line' && e.p1 === e.p2) deleteEntity(doc, e.id, { keepGuideEnds: true })
     else if (e.kind === 'path') collapsePath(doc, e, loose)
   }
   cleanOrphans(doc, loose, into)

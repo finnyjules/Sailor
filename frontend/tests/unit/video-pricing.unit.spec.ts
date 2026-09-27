@@ -159,6 +159,8 @@ describe('settings parity: the price reads what the builder sends', () => {
       const refVariants: Record<string, unknown>[] = [
         {}, { video_urls: ['https://x/ref.mp4'] }, { video_urls: [] },
         { video_urls: ['https://x/ref.mp4'], image_url: 'https://x/first.png' },
+        // Reference pictures (Shot Director's image_urls): Veo 3.1 / Fast send them at 8 s whatever the duration (Ruling K).
+        { image_urls: ['https://x/a.png'] }, { image_urls: ['https://x/a.png', 'https://x/b.png', 'https://x/c.png'] }, { image_urls: [] },
       ]
       let cases = 0
       const drift: string[] = []
@@ -608,5 +610,28 @@ describe('the video gallery price label', () => {
     const src = readFileSync(fileURLToPath(new URL('../../app/components/vue-canvas/VideoModelGalleryModal.vue', import.meta.url)), 'utf8')
     expect(src).not.toContain('priceHint')
     expect(src).toContain('videoRateLabel')
+  })
+})
+
+// Ruling K (characters stage 3 final fix): Veo 3.1 / Fast with reference
+// pictures go to reference-to-video, always sent as 8 s, so they are priced at 8 s.
+describe('Veo 3.1 reference pictures are priced at the 8 s they are sent at', () => {
+  for (const model of ['veo-3.1', 'veo-3.1-fast']) {
+    for (const ct of VIDEO_CLASSES) {
+      it(`${ct} ${model}`, () => {
+        const refs = JSON.stringify({ __shot_directed: true, image_urls: ['/view?filename=a.png&type=input'] })
+        const at8 = providerUsd(ct, { model, duration: '8', model_options: '{}' })!
+        const at4 = providerUsd(ct, { model, duration: '4', model_options: '{}' })!
+        expect(at4).toBeLessThan(at8)
+        expect(providerUsd(ct, { model, duration: '4', model_options: refs })).toBeCloseTo(at8, 9)
+        expect(providerUsd(ct, { model, duration: '6', model_options: refs })).toBeCloseTo(at8, 9)
+        // No pictures: the duration still decides.
+        expect(providerUsd(ct, { model, duration: '4', model_options: JSON.stringify({ image_urls: [] }) })).toBeCloseTo(at4, 9)
+      })
+    }
+  }
+  it('other models keep their own length with reference pictures', () => {
+    expect(effectiveVideoSettings('seedance-2.0', '4', '16:9', { image_urls: ['https://x/a.png'] })!.seconds).toBe(4)
+    expect(effectiveVideoSettings('veo-3.1-lite', '4', '16:9', { image_urls: ['https://x/a.png'] })!.seconds).toBe(4)
   })
 })

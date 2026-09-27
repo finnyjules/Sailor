@@ -100,6 +100,7 @@ export function planPainter(ctx: PlanContext): NodePlan {
       const work = painterWork(params, image ? canvas : null, painterSize)
         + EFFECT_IO_WORK_PER_VALUE * 4 * ((image ? px(canvas) : 0) + px(painterSize) + 2 * px(canvas))
       if (work > EFFECT_MAX_WORK) throw new Error(EFFECT_TOO_MUCH_WORK)
+      io.spendWork?.(work)
 
       // Decoded here (sharp); worked on the worker.
       const handed: Record<string, PixelsPicture | EffectTensorIn | EffectRawIn> = {}

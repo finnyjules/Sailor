@@ -1,0 +1,4466 @@
+{
+ "note": "Written by tests/unit/runner-effects-e2e.unit.spec.ts with R212_PIN=1: per saved project canvas, the sha256 (16 hex) of its prompt and of nodesNeedingEngine with every effects family off (frame + cards; every family but the effects).",
+ "families": {
+  "frameCards": [
+   "cards",
+   "frame"
+  ],
+  "allButEffects": [
+   "bria-product-shot",
+   "cards",
+   "fal-edit",
+   "frame",
+   "gemini-omni-flash",
+   "gpt-image-2.5",
+   "grok-imagine-2",
+   "grok-imagine-video-1.5",
+   "h3-max-turbo",
+   "happyhorse-1.1",
+   "ideogram-4",
+   "krea-2",
+   "live-previews",
+   "ltx-2.5-fast",
+   "luma-ray-3.2",
+   "muse-image",
+   "nano-actions",
+   "nano-banana-2-blend",
+   "nano-banana-2-lite",
+   "qwen-2511-angles",
+   "qwen-image-3",
+   "recraft-v4.1",
+   "ref-edits",
+   "replicate-image",
+   "replicate-video",
+   "restyle",
+   "reve-2.1",
+   "seedream-5-pro-edit",
+   "shader-bake",
+   "sync-3",
+   "topaz-video",
+   "veo-3.1-lite",
+   "wan-3"
+  ]
+ },
+ "graphs": {
+  "000be661-6689-4793-abf2-4c7f8f8cffa5#0": {
+   "prompt": "3014d20426e229b8",
+   "frameCards": "251d12ec2763d5d8",
+   "allButEffects": "251d12ec2763d5d8"
+  },
+  "0086a136-99d6-4ceb-8781-5e6308835de8#0": {
+   "prompt": "ff809da3e2118efa",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "00a0304b-30ec-4943-bd1c-0ae04bd63f15#0": {
+   "prompt": "0d745d2c59e7ec67",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "014af19a-fa2c-4ae8-b631-38bcd608fa07#0": {
+   "prompt": "e2455c156389408c",
+   "frameCards": "bd546e62ae3c26b5",
+   "allButEffects": "bd546e62ae3c26b5"
+  },
+  "016fcedb-d786-4604-aca6-0ec9c008c432#0": {
+   "prompt": "1ea59104d1f138b0",
+   "frameCards": "dcb95cb21dd02618",
+   "allButEffects": "dcb95cb21dd02618"
+  },
+  "017eb4c5-a46e-4267-b327-defd711630eb#0": {
+   "prompt": "7cfffbe8bba26046",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "026c286c-a051-404a-b3ab-1ec889758b5d#0": {
+   "prompt": "7063cb06a44dbc08",
+   "frameCards": "09f6bdbe6122e455",
+   "allButEffects": "09f6bdbe6122e455"
+  },
+  "028ebde7-02d7-4339-a816-a04405fff235#0": {
+   "prompt": "44136fa355b3678a",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "02cad40c-b0c3-4dfb-93f3-34b9a336fb76#0": {
+   "prompt": "400c23af44cafd76",
+   "frameCards": "92f75bc7776f3469",
+   "allButEffects": "92f75bc7776f3469"
+  },
+  "02fc8d3c-6076-49fd-a732-92dec758c5d5#0": {
+   "prompt": "9037dd46e0189590",
+   "frameCards": "a998a2d2132cc21b",
+   "allButEffects": "a998a2d2132cc21b"
+  },
+  "0371c35a-e802-4bf5-9d6b-80f45f74c816#0": {
+   "prompt": "44136fa355b3678a",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "0384640a-4388-4597-a3d5-c3acb336dfdc#0": {
+   "prompt": "2a875813c7da86eb",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "03b6b30e-0fb1-4afc-ab06-7f40a2a82557#0": {
+   "prompt": "df3e260903201a9b",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "03bf05a3-7984-4a66-b30d-e5879c3fb7ec#0": {
+   "prompt": "91be14b19a0f57df",
+   "frameCards": "9bc0497ddefac4e6",
+   "allButEffects": "9bc0497ddefac4e6"
+  },
+  "05bd82ec-f5d2-477f-9849-8ce646b0a0fe#0": {
+   "prompt": "eebf2b7d6df44011",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "05fca450-8c92-4bcd-80fa-80a7508dd80f#0": {
+   "prompt": "3204e488cca7fef0",
+   "frameCards": "595747515eeea808",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "060668fc-cad3-44b1-8ab0-05a8f0eef69c#0": {
+   "prompt": "8efaef955f450058",
+   "frameCards": "c6a642ce97253fac",
+   "allButEffects": "f6636a6081030bab"
+  },
+  "061cbb77-81eb-4317-a322-31ea318b2a70#0": {
+   "prompt": "872b758ba98b4af4",
+   "frameCards": "44f1412a5405ac39",
+   "allButEffects": "44f1412a5405ac39"
+  },
+  "0786c225-cff2-4146-87bf-ba84b86b4aca#0": {
+   "prompt": "de598f80f1476fde",
+   "frameCards": "3d3c6c50622f792e",
+   "allButEffects": "3d3c6c50622f792e"
+  },
+  "07afd6b5-a300-4919-bd49-14a2ec2a9dfd#0": {
+   "prompt": "4e65cc19368932a3",
+   "frameCards": "47f615b85a023c83",
+   "allButEffects": "47f615b85a023c83"
+  },
+  "07b03e86-0b3d-4eec-a8c1-edf7cf0ad5a2#0": {
+   "prompt": "8620a518199fe71b",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "07c39a22-e4ed-4e76-8429-ef39e46676de#0": {
+   "prompt": "eea87ca62fa190bb",
+   "frameCards": "0ac4492cc8d4400b",
+   "allButEffects": "24fc7785419fd6aa"
+  },
+  "07d50b64-a881-4f64-8ad4-a68eda226a64#0": {
+   "prompt": "44136fa355b3678a",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "08070e6c-2e21-4c41-86e8-5e2ed1b2e96c#0": {
+   "prompt": "44136fa355b3678a",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "08207849-95a6-40e7-9479-9439921fc28b#0": {
+   "prompt": "44136fa355b3678a",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "0851f4f1-1b14-4fd1-9f52-2076049033f6#0": {
+   "prompt": "134e42813c97325d",
+   "frameCards": "9fdf95bc8bbe09fd",
+   "allButEffects": "9fdf95bc8bbe09fd"
+  },
+  "0851f4f1-1b14-4fd1-9f52-2076049033f6#1": {
+   "prompt": "44136fa355b3678a",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "0867032d-56c0-4c50-a02d-6a25425789d9#0": {
+   "prompt": "f134b00c36984ed2",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "08a6d02f-0584-43c0-8688-b50f284de7bc#0": {
+   "prompt": "44136fa355b3678a",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "096270f1-e432-4e9b-81ee-fc4857dd56f0#0": {
+   "prompt": "800231960335dc96",
+   "frameCards": "d30a94d9e9795991",
+   "allButEffects": "d30a94d9e9795991"
+  },
+  "0971beb3-5944-482b-bbef-e9c82c021454#0": {
+   "prompt": "813928a0a2dc86ad",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "0a139de8-16fa-46b7-9197-dc0e96a93fff#0": {
+   "prompt": "44136fa355b3678a",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "0a37292b-a764-4e27-a56a-f812fd77c210#0": {
+   "prompt": "44136fa355b3678a",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "0a4caa30-cfa4-4884-8454-650ab499c66d#0": {
+   "prompt": "c2964ef06a0384f2",
+   "frameCards": "03dfca5090da52ef",
+   "allButEffects": "03dfca5090da52ef"
+  },
+  "0a4caa30-cfa4-4884-8454-650ab499c66d#1": {
+   "prompt": "9aa211c6405d69d4",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "0a513321-a6a6-4189-94d8-26b3bc50b363#0": {
+   "prompt": "1460b466dee3c2fe",
+   "frameCards": "ae2a44c46720ffe9",
+   "allButEffects": "ae2a44c46720ffe9"
+  },
+  "0be37844-9d51-4b9d-a2bc-6949757fcd6a#0": {
+   "prompt": "de3fa878cfd12862",
+   "frameCards": "71b7c3d14c322f03",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "0c31d3b8-87a8-44c8-af71-a7ccde4a931f#0": {
+   "prompt": "b404a99642bb0edb",
+   "frameCards": "9a01a819d9e0c6d9",
+   "allButEffects": "9a01a819d9e0c6d9"
+  },
+  "0ca331e1-b090-4de8-9465-317d8b75f769#0": {
+   "prompt": "b085b4275468b762",
+   "frameCards": "d16978c1d2c0cbb7",
+   "allButEffects": "d16978c1d2c0cbb7"
+  },
+  "0de37680-efcd-43f0-b133-b4d21856b44e#0": {
+   "prompt": "c6e383d3fbd27205",
+   "frameCards": "e95aec55e5cc075f",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "0e207222-78bc-4747-b90b-2260d8a404ac#0": {
+   "prompt": "af25e287a033e3db",
+   "frameCards": "de29fa802e831ebc",
+   "allButEffects": "de29fa802e831ebc"
+  },
+  "0e4a7379-b346-4187-8fe6-66435aa339a0#0": {
+   "prompt": "764d6ecacd5af348",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "0e79d956-8ca6-4260-8b60-ce20424b9bbd#0": {
+   "prompt": "2b72c36b62856bc8",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "0ec2955b-0a23-4f8c-b347-7e7cf5abe05b#0": {
+   "prompt": "8bd036534ab5a658",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "0ed558a4-4271-456a-99a6-e590c7f5bc22#0": {
+   "prompt": "2d30d1405b036ba6",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "0eee1e9d-a505-4959-b56f-65021e766686#0": {
+   "prompt": "ba1055ffffc0cb48",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "0f3b57e2-c4b3-4698-8d5e-acbbaf411950#0": {
+   "prompt": "1aed46a5a5909f5d",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "0f53b679-c416-4b9f-a30e-91b044005199#0": {
+   "prompt": "f525206225384b8b",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "0f7d1172-5c92-4824-9798-31f65128430a#0": {
+   "prompt": "44136fa355b3678a",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "10f68e84-dd8a-4732-add9-171c85133c13#0": {
+   "prompt": "6b185af53f1232d3",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "10fa58a4-2a1c-4911-a325-169332e48e07#0": {
+   "prompt": "36517636acdbfd07",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "11240ec2-3dba-4a89-8b1d-8b0ef531867f#0": {
+   "prompt": "147cdc05d7eeb8cd",
+   "frameCards": "ce51e112dced7255",
+   "allButEffects": "ce51e112dced7255"
+  },
+  "1134900a-51c8-408f-a308-5d0eddb53b45#0": {
+   "prompt": "44136fa355b3678a",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "121da952-20bd-4ad5-9dfa-cd4f31db94cc#0": {
+   "prompt": "3a6577b99a5f2c75",
+   "frameCards": "43de3a417d75f481",
+   "allButEffects": "43de3a417d75f481"
+  },
+  "123ab8b2-7f5e-49d1-a2e0-9f8428ef0110#0": {
+   "prompt": "e3f96dee2fa4b2f0",
+   "frameCards": "e4fde9b9fab71c34",
+   "allButEffects": "e4fde9b9fab71c34"
+  },
+  "123dabed-0ad4-4ee0-960b-c4122cabd0b7#0": {
+   "prompt": "44136fa355b3678a",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "12a41a04-1ea6-4bec-a1b7-0a90e55ad3eb#0": {
+   "prompt": "0808814c109c7b2b",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "13a7a201-6f69-4708-b063-ffb81836eb84#0": {
+   "prompt": "37dc99d6c8760d3f",
+   "frameCards": "493c0b2452d3156a",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "13cf8338-5cff-4c8a-b340-b061a58ff9d7#0": {
+   "prompt": "2da9f988a7a5217b",
+   "frameCards": "141b8cc1a61cc3fb",
+   "allButEffects": "141b8cc1a61cc3fb"
+  },
+  "146c1e42-d931-4cba-b4ec-433e62b6a9cb#0": {
+   "prompt": "b86941b3a03b23c6",
+   "frameCards": "b4d721fe02ecbe23",
+   "allButEffects": "b4d721fe02ecbe23"
+  },
+  "14d0d929-9885-4b26-ab9c-94d5229f8ad0#0": {
+   "prompt": "44136fa355b3678a",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "156f8b8c-2316-4e04-a350-12568f7bf536#0": {
+   "prompt": "98244452b1df2bea",
+   "frameCards": "ee90dd1cd7805170",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "15a7b78f-0331-4630-b010-6aecdd36cb6b#0": {
+   "prompt": "f05b5751088dd625",
+   "frameCards": "e55cb4540c6926e5",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "15d64960-d116-4d07-8e8f-eacd3f06d2cb#0": {
+   "prompt": "053c8a3bb7876a19",
+   "frameCards": "dc6b2c2e3cc72486",
+   "allButEffects": "dc6b2c2e3cc72486"
+  },
+  "16252a2e-6214-49f7-87be-1af51e480064#0": {
+   "prompt": "b693b5d2c8208c8e",
+   "frameCards": "8e61800342bff1fe",
+   "allButEffects": "8e61800342bff1fe"
+  },
+  "162a14e5-acac-40b6-a964-603df751a5c6#0": {
+   "prompt": "1a37281a3493132a",
+   "frameCards": "9c9b5751c1f595ec",
+   "allButEffects": "9c9b5751c1f595ec"
+  },
+  "162e9d53-03b3-4a0c-b0b5-b2c55c89d16f#0": {
+   "prompt": "6d4f4741f8a3a87c",
+   "frameCards": "3339b5cf2c424bbc",
+   "allButEffects": "3339b5cf2c424bbc"
+  },
+  "1650d11b-ab7a-4632-a09d-9486e2222ab2#0": {
+   "prompt": "44136fa355b3678a",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "1662d920-fecc-4b00-bcec-f68b624dbb6d#0": {
+   "prompt": "4751eac06069a61f",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "169c5714-8581-4aee-b9da-f7e9477118eb#0": {
+   "prompt": "6412e874b93ac13f",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "16baa376-f911-468a-8593-a70c208820a0#0": {
+   "prompt": "a662af5d754c0bdf",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "16c38bb8-3d2b-4933-bd4c-ad5bf94428e8#0": {
+   "prompt": "bda580234b62a76f",
+   "frameCards": "ae640e61f727ede7",
+   "allButEffects": "ae640e61f727ede7"
+  },
+  "1718ceff-fed2-424d-b67e-667e1fd13ce7#0": {
+   "prompt": "35e5d260bfb5c32b",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "17290c1b-d59d-4ecc-863e-3347992d98e3#0": {
+   "prompt": "56ecab1ff588a37a",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "17a82d68-a64c-4b80-8e8f-1e3a5ae5a6b9#0": {
+   "prompt": "9963ac0de0779c93",
+   "frameCards": "ed2786934f0e2c1c",
+   "allButEffects": "ed2786934f0e2c1c"
+  },
+  "17d267c5-2835-4055-b966-290ba045ab8e#0": {
+   "prompt": "e297c42f17dcb738",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "17d267c5-2835-4055-b966-290ba045ab8e#1": {
+   "prompt": "509c47795aaed1f7",
+   "frameCards": "421aea7cdc23acf2",
+   "allButEffects": "421aea7cdc23acf2"
+  },
+  "188bac46-2df0-4e04-b279-dd7dfc545891#0": {
+   "prompt": "9f6f75edc5bd513a",
+   "frameCards": "41643d765b4bdeb0",
+   "allButEffects": "41643d765b4bdeb0"
+  },
+  "190ce133-c9ae-476b-a186-5fd84889e346#0": {
+   "prompt": "b55418fbe96159d0",
+   "frameCards": "5c727b88004ed466",
+   "allButEffects": "5c727b88004ed466"
+  },
+  "196ac1df-3540-482b-bed7-ef4321f370aa#0": {
+   "prompt": "fc01f482b89e323d",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "1990bc9c-1271-4717-922b-3f0ef95f469b#0": {
+   "prompt": "6c2528842c5d9b6e",
+   "frameCards": "50b472662cdeb890",
+   "allButEffects": "50b472662cdeb890"
+  },
+  "1a3d4d8b-436c-4575-818b-80fad1592f8d#0": {
+   "prompt": "44136fa355b3678a",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "1a67775c-032d-4562-8f45-983fd69928cc#0": {
+   "prompt": "09d95405e25e4e9d",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "1af3659f-6ee6-4d46-8d80-c884a78b54bd#0": {
+   "prompt": "2c234f2507ae9de1",
+   "frameCards": "6015a36a54d8a2b4",
+   "allButEffects": "6015a36a54d8a2b4"
+  },
+  "1b15941d-bada-4d6f-8e84-70ad5b8cdbc4#0": {
+   "prompt": "1c9c986c3f89143c",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "1b4250e0-fcd6-4080-acd6-89833390edd8#0": {
+   "prompt": "6ddad028423631e1",
+   "frameCards": "4fe9e53ab9878e20",
+   "allButEffects": "4fe9e53ab9878e20"
+  },
+  "1b62f47d-e918-4098-88b5-fa5f3e3480d6#0": {
+   "prompt": "44136fa355b3678a",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "1bb9a785-8a26-4f09-a9f6-787d069ce689#0": {
+   "prompt": "eba33b29afab8476",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "1cd4c4b4-f849-4e51-8581-0ee5dd38f82f#0": {
+   "prompt": "11246cd36611e042",
+   "frameCards": "e8b342b17d794a4f",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "1d26754a-1681-4287-a780-4450ec6a47d5#0": {
+   "prompt": "2e8d0a1354790c72",
+   "frameCards": "3cc75e677c95dd23",
+   "allButEffects": "3cc75e677c95dd23"
+  },
+  "1d2c4aa6-7e00-4074-a136-e53ed443b666#0": {
+   "prompt": "2889ecffe5510904",
+   "frameCards": "9bd345a86b876ba0",
+   "allButEffects": "9bd345a86b876ba0"
+  },
+  "1ddd42c6-d2b8-4d34-bf1e-aead9a6af96f#0": {
+   "prompt": "4ea2a7050874abce",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "1e323322-7485-4ca4-9c75-fbacb4d48025#0": {
+   "prompt": "7612e234112edf2c",
+   "frameCards": "4910efebc4d2b1b8",
+   "allButEffects": "4910efebc4d2b1b8"
+  },
+  "1e86951b-5982-4b4e-9832-729ab97b2aa5#0": {
+   "prompt": "2d0833dfb092b888",
+   "frameCards": "c6c6ac52590878fb",
+   "allButEffects": "c6c6ac52590878fb"
+  },
+  "1e88c24f-3867-4d11-a585-8d6fbb0005a8#0": {
+   "prompt": "fc517a7297b2412f",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "1eb8fd1b-b15f-4460-9264-cc89ab2aa036#0": {
+   "prompt": "6d79b5f4eb84a301",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "1ee388ab-197f-46e7-bb65-0e70bf2b192d#0": {
+   "prompt": "44136fa355b3678a",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "1f727ad7-3ca3-4270-82ba-b70269bbe408#0": {
+   "prompt": "e4b7cb749de01c9d",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "20139c66-dd58-438d-8afd-e9f97741f306#0": {
+   "prompt": "461cbe3de7d940b6",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "20202f10-eee3-4036-b65c-aeebedf6af60#0": {
+   "prompt": "1abb225da5061c81",
+   "frameCards": "3a13d4cf061ac46a",
+   "allButEffects": "3a13d4cf061ac46a"
+  },
+  "204aa666-a90c-4a0f-ad3e-484ba4c97e08#0": {
+   "prompt": "6153ec1c59bdfa92",
+   "frameCards": "ffacd9a3bf545d53",
+   "allButEffects": "ffacd9a3bf545d53"
+  },
+  "205c294a-1280-4521-8564-e71a86756e1f#0": {
+   "prompt": "b6aaae085ac23c2e",
+   "frameCards": "86a41208bf30af31",
+   "allButEffects": "86a41208bf30af31"
+  },
+  "20885420-5e72-414b-8458-a40797d28e92#0": {
+   "prompt": "027a547041af6827",
+   "frameCards": "69e2582ccf348a0d",
+   "allButEffects": "69e2582ccf348a0d"
+  },
+  "20a86aff-4d42-4aab-8e75-ad33eddfebb5#0": {
+   "prompt": "1aa77d06f681b63c",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "20b8fae4-b0e6-49ac-9b4e-cf9188a94afb#0": {
+   "prompt": "ffd8a727707b226f",
+   "frameCards": "5eb5029572093a89",
+   "allButEffects": "5eb5029572093a89"
+  },
+  "20e5bf56-202c-4566-9800-aae3cf54d10d#0": {
+   "prompt": "e230b15fe99de625",
+   "frameCards": "ebe3dade87533122",
+   "allButEffects": "ebe3dade87533122"
+  },
+  "217de5dc-5425-4cd4-a283-59acfae05fad#0": {
+   "prompt": "44136fa355b3678a",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "21a2cc29-eab5-4467-8340-ec1a62bdb4ce#0": {
+   "prompt": "f3774554ced83542",
+   "frameCards": "6dd61415c4a70f2b",
+   "allButEffects": "6dd61415c4a70f2b"
+  },
+  "21ca0ef2-5a12-4410-aaa2-406b0062199d#0": {
+   "prompt": "8f7c5710e6b649e3",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "21cbc0cf-7c83-4ec8-bc83-3d5b2baf020c#0": {
+   "prompt": "6b185af53f1232d3",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "2268cb57-1c8e-43e3-b5de-431ab815da61#0": {
+   "prompt": "44136fa355b3678a",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "22890fa4-8559-4257-82c3-35f4ad7c788a#0": {
+   "prompt": "44136fa355b3678a",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "22e234e1-a390-46df-bd8f-026a788077aa#0": {
+   "prompt": "44136fa355b3678a",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "22fd9bfd-e0c9-4675-b2e7-57e5426ff470#0": {
+   "prompt": "75bd12461d0fcc3c",
+   "frameCards": "5aebbb1c0ee90007",
+   "allButEffects": "5aebbb1c0ee90007"
+  },
+  "23259424-b0fc-4162-86d7-0e54e5dfd873#0": {
+   "prompt": "309e538323aa19c3",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "233af28d-5cb6-41c4-b908-9bed3ecebf80#0": {
+   "prompt": "6a3d88846bc01b9c",
+   "frameCards": "7e338263ac71c9c5",
+   "allButEffects": "7e338263ac71c9c5"
+  },
+  "23593586-cebd-45c1-8d8c-8ed0612a1c39#0": {
+   "prompt": "f378f247f724a14f",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "2371a7a5-026c-46a7-a166-7c0a77860503#0": {
+   "prompt": "3c52c1697847a8d5",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "23f2ebea-a79b-4090-a658-53f8e9fbd6d3#0": {
+   "prompt": "86e3726b0a1407ba",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "23f82c4e-8150-4a14-aa9c-8a6137c5e6e8#0": {
+   "prompt": "9c5ffb10d1e8744c",
+   "frameCards": "5f32afcb9b3b4006",
+   "allButEffects": "5f32afcb9b3b4006"
+  },
+  "242f6e5c-a07f-430d-b205-3c4f7cbcd5aa#0": {
+   "prompt": "44136fa355b3678a",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "24329191-39c8-4584-91d0-9479219d35b0#0": {
+   "prompt": "c1951bb338f9666a",
+   "frameCards": "06b3f873e10b2ae1",
+   "allButEffects": "06b3f873e10b2ae1"
+  },
+  "244a2c22-9ff1-4bd3-928a-f67c01c47294#0": {
+   "prompt": "5e3124fb967b8906",
+   "frameCards": "47120bca7626834a",
+   "allButEffects": "47120bca7626834a"
+  },
+  "24569569-ae5c-45ec-a0aa-edb034f97a28#0": {
+   "prompt": "03fe7a05d49f66ca",
+   "frameCards": "10fe3660780ae996",
+   "allButEffects": "10fe3660780ae996"
+  },
+  "24728778-d911-4700-aa86-49ad91f69a1b#0": {
+   "prompt": "dbc3ea197a9eeca8",
+   "frameCards": "f2558a221fd0b152",
+   "allButEffects": "f2558a221fd0b152"
+  },
+  "2495605e-4345-4bd3-aa52-bf6f2cbfef50#0": {
+   "prompt": "46e9faba95465524",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "24a3cc17-f1a3-4c72-93bd-094c7a10d4a0#0": {
+   "prompt": "fed2222749369442",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "24b6c781-9c65-470e-b712-e499003d4480#0": {
+   "prompt": "43b1afe14ebffc39",
+   "frameCards": "80831078b05e825c",
+   "allButEffects": "80831078b05e825c"
+  },
+  "263bf80a-c471-431d-9538-96fc08490805#0": {
+   "prompt": "dde515466dd80433",
+   "frameCards": "59e42162d2744ca2",
+   "allButEffects": "59e42162d2744ca2"
+  },
+  "267391a7-da67-4bd4-adda-827e121de732#0": {
+   "prompt": "44136fa355b3678a",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "268d983d-0acf-4979-9b5e-9b0021557176#0": {
+   "prompt": "5aff056cb5a6cbf3",
+   "frameCards": "b476fe45b7b98813",
+   "allButEffects": "b476fe45b7b98813"
+  },
+  "27a80e9c-907d-42a0-acbe-1b4422ce6d03#0": {
+   "prompt": "44136fa355b3678a",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "282515d2-fde4-42a2-9c91-e707bd7e8bb9#0": {
+   "prompt": "d2f54871734dd88a",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "28477bc1-74a3-4951-ba8b-3d1d096fc192#0": {
+   "prompt": "44136fa355b3678a",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "28f6038a-56e0-42a3-8c6d-805b6619010f#0": {
+   "prompt": "f3f639c3285c4c9a",
+   "frameCards": "00caaad6dc1d6818",
+   "allButEffects": "00caaad6dc1d6818"
+  },
+  "2910da54-0175-4812-bef0-0e06b5a5e8c3#0": {
+   "prompt": "721d58b54f311a19",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "294c5631-f3fb-489c-9470-d6adba1d6b52#0": {
+   "prompt": "44136fa355b3678a",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "2954b2f3-5f89-4ac8-8f0b-1eda550d0cb8#0": {
+   "prompt": "b1dfac5914be7e6a",
+   "frameCards": "2c6cb14db70d2e6b",
+   "allButEffects": "2c6cb14db70d2e6b"
+  },
+  "2985d014-a163-4fbd-8b57-0231c540736b#0": {
+   "prompt": "1f9a10bd833b15d8",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "2a869e26-0645-4c85-affb-a5c1924dcc1a#0": {
+   "prompt": "82c5633d58a8a259",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "2bc22f6f-567f-44a9-a92e-cd487e7118d5#0": {
+   "prompt": "74f9a51380c76ba4",
+   "frameCards": "0379e842fd09e6b7",
+   "allButEffects": "0379e842fd09e6b7"
+  },
+  "2bc7e275-1eff-4537-83cf-fd2f8627a0f7#0": {
+   "prompt": "2cc48ab7862998fa",
+   "frameCards": "d68ac8cf6545b1de",
+   "allButEffects": "d68ac8cf6545b1de"
+  },
+  "2bd03ba8-6e01-462e-94a0-4b16449fc9c5#0": {
+   "prompt": "84c5a886e7292bc5",
+   "frameCards": "861ca6defd69423f",
+   "allButEffects": "861ca6defd69423f"
+  },
+  "2c125f07-001b-4aba-a2c5-16f04e0e5f84#0": {
+   "prompt": "44136fa355b3678a",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "2c151770-b413-4dbd-ac32-47baa3b34784#0": {
+   "prompt": "44136fa355b3678a",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "2c152bc7-96ad-43b1-9cdb-2d237c37862d#0": {
+   "prompt": "494a3d56e6641fcd",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "2c4b7dd5-bb5e-48e5-8d34-c77ecbcc6303#0": {
+   "prompt": "f16d01653e465f75",
+   "frameCards": "f41b5cd6e7e97085",
+   "allButEffects": "f41b5cd6e7e97085"
+  },
+  "2c716913-7e87-41fe-b550-63b281204b99#0": {
+   "prompt": "44136fa355b3678a",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "2c94be50-068c-4ab6-8fa3-77fb60a135e5#0": {
+   "prompt": "e0a646c997517f4e",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "2cb31edd-c2d6-4186-a479-29f2f59404a2#0": {
+   "prompt": "538bd5fd5e9d5825",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "2cc91b76-ec94-41ea-a0b6-42458c188ff2#0": {
+   "prompt": "31ee0994d62e4022",
+   "frameCards": "f318f6a5445c69b9",
+   "allButEffects": "f318f6a5445c69b9"
+  },
+  "2d0730cc-8a5a-4904-85b7-1a19964b7c9f#0": {
+   "prompt": "35a378dfb233eee6",
+   "frameCards": "3a2864bd369c1ff4",
+   "allButEffects": "3a2864bd369c1ff4"
+  },
+  "2d40aa85-7c3c-4325-8264-34e82b6e381a#0": {
+   "prompt": "85ad6c22154799e9",
+   "frameCards": "c567d8c7080aaf0c",
+   "allButEffects": "ae9a74710e837ae3"
+  },
+  "2d7b19d2-b6b7-45ab-b860-1526184e581d#0": {
+   "prompt": "2b4ce9122a772e51",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "2d858f75-03c8-49af-ba4d-07be48beec58#0": {
+   "prompt": "0af038423bb31823",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "2f1a9913-391b-43de-bb30-cc0bf766a6cb#0": {
+   "prompt": "44136fa355b3678a",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "2f404bec-409b-4c16-97eb-57c0c78a3eb9#0": {
+   "prompt": "4838af7accad13a8",
+   "frameCards": "d2a1e7f4b32ed158",
+   "allButEffects": "d2a1e7f4b32ed158"
+  },
+  "2f466187-315f-4ccf-b9c9-338a2241df0b#0": {
+   "prompt": "5afcca225f7118a5",
+   "frameCards": "60dcfdfbc69c85fb",
+   "allButEffects": "60dcfdfbc69c85fb"
+  },
+  "2f58e8d0-8d4c-4c70-af1f-24a5c11b2eec#0": {
+   "prompt": "9826070c1922c2fa",
+   "frameCards": "069c25c7a56ec164",
+   "allButEffects": "069c25c7a56ec164"
+  },
+  "2f79ade4-491c-4fa8-9bfa-9f1b1ab77236#0": {
+   "prompt": "3fe288584947e7f2",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "2fbf227a-24f1-4c3f-abe0-c745472ad49f#0": {
+   "prompt": "44136fa355b3678a",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "3031fc0b-7b12-4f7c-b1e3-bc53e0ec253e#0": {
+   "prompt": "44136fa355b3678a",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "304cc53b-1c0d-41d3-a936-13337f649d62#0": {
+   "prompt": "b12fba24d024d75b",
+   "frameCards": "2686ba7a23a8c375",
+   "allButEffects": "2686ba7a23a8c375"
+  },
+  "30569754-47c4-46d1-99cb-73bbcb1c468d#0": {
+   "prompt": "44136fa355b3678a",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "305e3f9c-7c71-4de9-8fa8-802256791408#0": {
+   "prompt": "44136fa355b3678a",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "309093a0-50fa-4ff5-abbf-2f6b7825ef49#0": {
+   "prompt": "41ea5e2d526faf2e",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "30dce225-6668-4737-8aae-e3e7786af3bf#0": {
+   "prompt": "b993b870b3c9f00a",
+   "frameCards": "1d31add846437615",
+   "allButEffects": "1d31add846437615"
+  },
+  "3164ad10-0cf1-49a8-b562-2884f2cd043e#0": {
+   "prompt": "15cbc6e0d3a6feb3",
+   "frameCards": "4b017a95259f9586",
+   "allButEffects": "4b017a95259f9586"
+  },
+  "31d32aec-4616-4f51-810c-ab2f826b1dc0#0": {
+   "prompt": "05018e0ee4d51afe",
+   "frameCards": "dde54a11d2e94c9b",
+   "allButEffects": "dde54a11d2e94c9b"
+  },
+  "31d862f5-d032-4341-985d-bf07e49b18eb#0": {
+   "prompt": "bddf10debd05fc4b",
+   "frameCards": "006fac83e68ecb13",
+   "allButEffects": "006fac83e68ecb13"
+  },
+  "31dc2110-4e9a-4eef-bf10-b420d9311a9e#0": {
+   "prompt": "85a0277438e0f02c",
+   "frameCards": "f6cc71f0490616b9",
+   "allButEffects": "f6cc71f0490616b9"
+  },
+  "31e1fe48-6e84-4c91-b3be-4627411639ff#0": {
+   "prompt": "61d62e22bfb4382f",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "31f0f0d9-4547-48a8-9d53-c710e18ba281#0": {
+   "prompt": "44136fa355b3678a",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "32230aa1-8882-457b-8d6c-fa22b2bad491#0": {
+   "prompt": "f86ee34d26cffb02",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "327291e9-c7dc-4db5-bbe9-ef38da724f85#0": {
+   "prompt": "e7781eaf5325de10",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "32e3da34-b5d7-41bd-b6fc-b9df7ebbe2ca#0": {
+   "prompt": "d548f5e9fa59facd",
+   "frameCards": "5fd90d039e6231ef",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "3393b908-f3d5-4fba-8f39-0c9e8191a9a5#0": {
+   "prompt": "d651b690904ea141",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "33ad55c6-a712-4910-bc07-c50c3097ac3c#0": {
+   "prompt": "fa80cac264ce610a",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "33e4e88e-ec90-43a2-81c1-273d4e5244fb#0": {
+   "prompt": "9b777ef381d71ea8",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "33e9f074-d80d-4a5d-87e0-2539b4949979#0": {
+   "prompt": "94cb857feaf5d1f5",
+   "frameCards": "8a406a56f6cdb8bd",
+   "allButEffects": "8a406a56f6cdb8bd"
+  },
+  "3445d3ec-8c8e-421b-9e7b-a953ef235edf#0": {
+   "prompt": "845b50dea4c0712b",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "34a03c9c-2e35-40ec-9f76-8c2d112daeaf#0": {
+   "prompt": "08a6d8560b8ef0ed",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "34b9073e-ce20-426b-a821-9bca57edf616#0": {
+   "prompt": "550945c40c36c118",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "34cd813d-b809-4696-ad95-ed0304b41a8a#0": {
+   "prompt": "66f11db840c63695",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "3508fa44-19ed-4184-8f5f-86005ca8ef4c#0": {
+   "prompt": "44136fa355b3678a",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "3524f5b3-ceea-4ede-82cc-9e3e0eb55770#0": {
+   "prompt": "44136fa355b3678a",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "36b6010b-d829-4992-9044-558635b2eebd#0": {
+   "prompt": "01f547cb7fe8cfcb",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "36b8c60e-1137-4887-91a4-3c50ae567258#0": {
+   "prompt": "85cbe24bf2169e74",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "374f8f0a-25ab-438d-8d26-384e1c0d6fed#0": {
+   "prompt": "1a8ed9c3b4ca6566",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "37b2ec79-3e2e-4acd-b8b4-339c57306a48#0": {
+   "prompt": "b0dc669209ed823f",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "37b5757c-3540-4e4a-baab-ee8ab53a4473#0": {
+   "prompt": "707461562c679c6d",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "37c82e04-21c0-48bb-8fb2-d987f7bf3d24#0": {
+   "prompt": "44136fa355b3678a",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "382b9923-b1c9-4af8-9e02-53cd89ff2a33#0": {
+   "prompt": "ddade08bf2df1955",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "386b1c4f-f5b9-4cf4-8268-235140f9e523#0": {
+   "prompt": "bb2482ae4bb180ea",
+   "frameCards": "268a0f8cff53345a",
+   "allButEffects": "268a0f8cff53345a"
+  },
+  "388af1f1-9cfb-4e7d-acfe-16901c4327dc#0": {
+   "prompt": "7e7b0f5ef2d03ce1",
+   "frameCards": "a741634640b714ba",
+   "allButEffects": "a741634640b714ba"
+  },
+  "389c428b-e44b-4b8a-ae0a-0a76ede4abb5#0": {
+   "prompt": "cdc11ea6203a8a9b",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "38cce5ed-3d95-497a-aaba-cace46ccd62d#0": {
+   "prompt": "44136fa355b3678a",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "391d6d3f-0717-4d61-b799-744e1d5d65ff#0": {
+   "prompt": "d521a991334daa88",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "3982ae9c-759a-4182-a2a1-88012f7a6888#0": {
+   "prompt": "b41a154b68090e7e",
+   "frameCards": "7c5ffcfa81241249",
+   "allButEffects": "d1a2685ca0c3cdf9"
+  },
+  "39975662-9661-4610-aa9a-81ad200612b5#0": {
+   "prompt": "271d1100a298d85c",
+   "frameCards": "5b19b09988abb6ac",
+   "allButEffects": "5b19b09988abb6ac"
+  },
+  "3a60fab3-4369-4703-8df4-40d7e25751b5#0": {
+   "prompt": "4e1f77ffcc4d886f",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "3a74dd69-c1c0-4919-b6e9-341c02a09bca#0": {
+   "prompt": "6ad551cfc7c546db",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "3a9028fb-7546-4c26-8b1e-9875adbbcda9#0": {
+   "prompt": "d86b04319988d980",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "3aa1745e-2adf-4261-ae56-09d9bbae8f7a#0": {
+   "prompt": "fdc1191e640bf8e6",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "3ab28656-1bce-4827-833c-7db6e1844395#0": {
+   "prompt": "456c0b1bec7ae55a",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "3ad4f932-1c11-472f-b5f1-20f7676e9f67#0": {
+   "prompt": "a61ee7d564451e11",
+   "frameCards": "a2d464bbd5b8656e",
+   "allButEffects": "a2d464bbd5b8656e"
+  },
+  "3af49d07-cef4-4bbc-8cb6-ce85467eaaf3#0": {
+   "prompt": "44136fa355b3678a",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "3b0a9b57-468c-4534-bfa2-fb2b2c476d1e#0": {
+   "prompt": "56aaed2f975eb2af",
+   "frameCards": "63b23dcc78ac8957",
+   "allButEffects": "f32dcf69b9da148a"
+  },
+  "3b159be9-e219-43d8-9e58-0e0a9ab1f489#0": {
+   "prompt": "a3b20e79d16a6725",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "3b367b36-99ae-4857-83e7-2b566123a76b#0": {
+   "prompt": "3590c56f3e482c5b",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "3b5bb17e-8e98-45c6-aad6-088c743ba8f2#0": {
+   "prompt": "9e1fa7c4ec93aa61",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "3ba11a66-245c-41e4-85ff-13d426a0f80f#0": {
+   "prompt": "7a7e633463aaa2ac",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "3ba2db53-84ae-4325-b4dd-01e6f2a876e9#0": {
+   "prompt": "7c244a411738458d",
+   "frameCards": "8173c7c6c4fd5d64",
+   "allButEffects": "8173c7c6c4fd5d64"
+  },
+  "3baba311-9fb4-4302-aa0f-383c85d4a37b#0": {
+   "prompt": "44136fa355b3678a",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "3c08f69a-2410-4b0c-b065-a33104826f42#0": {
+   "prompt": "9f3f87e39e33c9cd",
+   "frameCards": "8733163f9eac8df3",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "3c78aaf2-3bd9-4aa7-b428-776109a58bdf#0": {
+   "prompt": "67e3dd2d2b154150",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "3c822324-7fc3-445a-98b2-d3605744a8fc#0": {
+   "prompt": "f9f06f1962815869",
+   "frameCards": "a3692cbdc1a7866f",
+   "allButEffects": "a3692cbdc1a7866f"
+  },
+  "3cc0ec63-96c4-40bb-967e-3dd1f5fc9a94#0": {
+   "prompt": "b0a2596d6eabd33b",
+   "frameCards": "26e4e4d325c3a7f4",
+   "allButEffects": "26e4e4d325c3a7f4"
+  },
+  "3d6a6639-9575-4899-a37f-b53304296276#0": {
+   "prompt": "5bce045e8164e807",
+   "frameCards": "1af70e3bdcbf21d0",
+   "allButEffects": "1af70e3bdcbf21d0"
+  },
+  "3d6b65e2-7829-4e8a-b2de-ab161b112d54#0": {
+   "prompt": "db6f8309d17599b6",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "3db0a2ae-f757-4e23-a4f1-9562888f831c#0": {
+   "prompt": "c14ab4c7c39274ff",
+   "frameCards": "6748b02bd4d4d7fd",
+   "allButEffects": "6748b02bd4d4d7fd"
+  },
+  "3e0104ff-d636-4974-9ecb-8c63bd23294e#0": {
+   "prompt": "44136fa355b3678a",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "3e08c31b-1f75-45eb-bb5f-75fec97a7a66#0": {
+   "prompt": "edf1b83fd9de8fa0",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "3e361279-b0c2-4c5f-b101-25b3fc773097#0": {
+   "prompt": "44136fa355b3678a",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "3ebd9ed5-36f6-418f-948f-08c90cf0b717#0": {
+   "prompt": "4ed7940362b5dc52",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "3f0b6e20-143b-4104-ac90-45335c48625d#0": {
+   "prompt": "44136fa355b3678a",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "3fac5b04-a7dc-4161-bd0d-61238c1ec87c#0": {
+   "prompt": "44136fa355b3678a",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "40918bef-0477-420b-9b89-b4c426847444#0": {
+   "prompt": "101b38cdaa54e83c",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "4098a3c4-7f0d-4a21-b4df-bf90df879718#0": {
+   "prompt": "44136fa355b3678a",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "40eecb8e-f9af-4a30-ba84-92bb35533ece#0": {
+   "prompt": "c5ec77c467ab457d",
+   "frameCards": "2692075109859751",
+   "allButEffects": "9530fadf007df562"
+  },
+  "41110a1b-232c-45c7-8145-192761133787#0": {
+   "prompt": "0d8e15b47fde0357",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "41239fa8-484d-4c34-8514-c6c9fd47e8c5#0": {
+   "prompt": "44136fa355b3678a",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "417626bc-0b0a-4dc4-bdd9-a440e8674d07#0": {
+   "prompt": "54895e416f62b807",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "41fdfd38-eaca-44d8-8b15-7cd9107c2896#0": {
+   "prompt": "44136fa355b3678a",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "43972999-82a8-4578-9870-5bb41c35ece9#0": {
+   "prompt": "37ba1d209a8a59cd",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "44522ec3-600a-4154-b338-a6e21ed57635#0": {
+   "prompt": "55fdfe1d633d5bd9",
+   "frameCards": "7964ef3e63bc1f92",
+   "allButEffects": "7964ef3e63bc1f92"
+  },
+  "44764870-a000-4e1d-ab33-3e46653cf7ec#0": {
+   "prompt": "e15c7f5127c6896f",
+   "frameCards": "23965943387465e4",
+   "allButEffects": "23965943387465e4"
+  },
+  "44f93170-1b8e-4208-9ec3-68959bd772fe#0": {
+   "prompt": "d5dfdebaa3f5f125",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "4523ec6d-e66c-44d4-95de-e59ea0cc4566#0": {
+   "prompt": "46b4e56c7e1fb477",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "4548e183-19b1-4e9d-8eac-424d91d2aec0#0": {
+   "prompt": "44136fa355b3678a",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "457f4f67-df59-4b59-93be-f11cfb68d85d#0": {
+   "prompt": "a091d472da8cd6aa",
+   "frameCards": "43a9f66d88839d7c",
+   "allButEffects": "43a9f66d88839d7c"
+  },
+  "464da0cc-5bbf-48f6-a2c1-84195489db99#0": {
+   "prompt": "7e339c1474e1fc68",
+   "frameCards": "8aa2be57cb49a110",
+   "allButEffects": "8aa2be57cb49a110"
+  },
+  "46810796-2c5b-4dbd-9777-2cc0af0d6f59#0": {
+   "prompt": "322693042e8caed6",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "468d4bda-f440-4371-b23d-9eb54cffbd27#0": {
+   "prompt": "5cd0e4628900ff92",
+   "frameCards": "c0eee5e1ea464fea",
+   "allButEffects": "c0eee5e1ea464fea"
+  },
+  "471adb36-ad92-4622-ae6c-1e82106f25a2#0": {
+   "prompt": "18bdb7882198a137",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "472f8178-7c19-440f-a90b-f86fd7384359#0": {
+   "prompt": "18a49e82d79afb12",
+   "frameCards": "2aabfe1a24046c5f",
+   "allButEffects": "2aabfe1a24046c5f"
+  },
+  "475f848b-3682-4d5a-afe2-e8d6c0ed22b4#0": {
+   "prompt": "c55f98211cef74ab",
+   "frameCards": "13a4d6ce2997fdc2",
+   "allButEffects": "13a4d6ce2997fdc2"
+  },
+  "47f665fe-ffb4-4d29-991b-47f690aad3c9#0": {
+   "prompt": "afc8ced6b07b87a9",
+   "frameCards": "985e4122b22ef7e2",
+   "allButEffects": "985e4122b22ef7e2"
+  },
+  "48438919-ef28-4964-827c-eb9c56e7b43c#0": {
+   "prompt": "75ad8dcd4a5f0ceb",
+   "frameCards": "593125ef3424dc05",
+   "allButEffects": "593125ef3424dc05"
+  },
+  "48537139-a4df-4da5-b742-1b7ab9719d9b#0": {
+   "prompt": "68744805418cc82e",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "48c2c93b-7305-45f4-9628-72d38e51c540#0": {
+   "prompt": "20d5f267f776977a",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "48d9daaf-5ee0-4918-aca9-29b72f6ddc39#0": {
+   "prompt": "cfe4e8e288db58d0",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "48ff81c0-5a90-4194-b07d-1c649a944eb8#0": {
+   "prompt": "3a9a0e125372f016",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "49d0da3a-d16d-49c8-bba8-812ea2645f25#0": {
+   "prompt": "d999f568af0becb5",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "4a0f0414-8b90-4ed1-adcf-0b9de15725c2#0": {
+   "prompt": "cd05ea5a5c188337",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "4a6eab46-68da-4df6-8479-fc8900cad000#0": {
+   "prompt": "a83002454b1fed89",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "4a82e925-ffa3-4730-8a95-437f73fdc855#0": {
+   "prompt": "44136fa355b3678a",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "4b238c18-42d4-4b06-92ae-b9aa2e9a6efc#0": {
+   "prompt": "209b99f264489879",
+   "frameCards": "7822a567dd6b8714",
+   "allButEffects": "7822a567dd6b8714"
+  },
+  "4d4b8c4f-240c-48bd-baba-2bdcedf610bd#0": {
+   "prompt": "c23b52fdceb164d4",
+   "frameCards": "4da4ca46aeeab8e4",
+   "allButEffects": "4da4ca46aeeab8e4"
+  },
+  "4de82132-cea8-49cf-b307-7cdd873350f4#0": {
+   "prompt": "c14514061701e531",
+   "frameCards": "d796fa812d40e6b8",
+   "allButEffects": "d796fa812d40e6b8"
+  },
+  "4e23c6dc-c779-47ba-84cf-7644acae0514#0": {
+   "prompt": "244d4d9c0776cc0a",
+   "frameCards": "9238c0c9a43e075f",
+   "allButEffects": "9238c0c9a43e075f"
+  },
+  "4e309ec1-ae22-4fc8-a5c3-2fdbb74808ea#0": {
+   "prompt": "81aee6f2cd1661b3",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "4e954521-faba-4754-81c5-b3deebf61a96#0": {
+   "prompt": "406a29dc257d891b",
+   "frameCards": "243f41f6001cac07",
+   "allButEffects": "243f41f6001cac07"
+  },
+  "4ebd9bf4-a30e-4f92-a6a8-5e5f98d05893#0": {
+   "prompt": "dabefea85029edce",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "4f3b5a7a-b84d-40c3-b210-f68da30dd4ef#0": {
+   "prompt": "edc587119de6f726",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "4f79773d-94e0-4a92-8e57-8d2cf85d276a#0": {
+   "prompt": "44136fa355b3678a",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "504e066a-efe1-4f9a-bf92-5d52ae5934bb#0": {
+   "prompt": "2e791c77a530cb61",
+   "frameCards": "c734c172bd3c3e14",
+   "allButEffects": "c734c172bd3c3e14"
+  },
+  "505d36f8-f79e-48fb-8d2c-637bed339b75#0": {
+   "prompt": "c1214441f5202f5d",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "50b0f4c5-c225-4f32-ae9e-b8f5da8c15cc#0": {
+   "prompt": "2bd1cd3439cc3234",
+   "frameCards": "9408e70ac538586f",
+   "allButEffects": "9408e70ac538586f"
+  },
+  "51088c81-f99e-4c7d-ad22-ecabdbdaa4e8#0": {
+   "prompt": "f604cebd46a5913a",
+   "frameCards": "2b185332e59d062d",
+   "allButEffects": "2b185332e59d062d"
+  },
+  "51914578-13a2-4a0c-ac14-16d34fddb5d0#0": {
+   "prompt": "e94af70dc5a6b2d5",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "51cd0008-5a1c-47e9-a190-7e1cb31586a4#0": {
+   "prompt": "63e476863dbffd70",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "51e5f7e3-7453-4096-976c-85630b30f01e#0": {
+   "prompt": "2aa42a1bc9ad0031",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "5276572c-551f-4b9e-8a61-b427a02865b2#0": {
+   "prompt": "a7c8c354a15ef38e",
+   "frameCards": "7cb1af62b9d54b8a",
+   "allButEffects": "7cb1af62b9d54b8a"
+  },
+  "530e5d4c-e869-4f62-aa98-c09f259d587a#0": {
+   "prompt": "b0b6aa820fb17275",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "53373f7a-40b0-41f5-bc70-914e8c120fb8#0": {
+   "prompt": "5e3a69f7a1466fc8",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "53715c95-a64f-408a-b70f-83bb83f41082#0": {
+   "prompt": "8abbe9dc776e3cd1",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "5377f2df-5ca5-47f7-9a70-e3e3d5002b1c#0": {
+   "prompt": "93c72a0465580056",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "53e30e6d-f8d3-4a6f-a663-e50c931d6add#0": {
+   "prompt": "f1b2fc2ed4be206b",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "54134352-4827-463e-89d9-5c6a3d43710f#0": {
+   "prompt": "44136fa355b3678a",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "54660187-c9e1-4493-ab6f-6bd7eab6fc7c#0": {
+   "prompt": "f04570703ae6eac5",
+   "frameCards": "4c3a208feea145dd",
+   "allButEffects": "f0e8c1bb6f915581"
+  },
+  "5486b476-6876-42fa-adc7-462b8b3b00c3#0": {
+   "prompt": "44136fa355b3678a",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "550b6e14-abe8-428c-9e33-4a148f1eef1c#0": {
+   "prompt": "c1175f37fdc112ba",
+   "frameCards": "14fee32113f960f5",
+   "allButEffects": "14fee32113f960f5"
+  },
+  "552328de-6689-42e8-9758-2ae286b792d1#0": {
+   "prompt": "9ead26f0718f8ffb",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "5583d52e-35a4-4bf3-86c0-76983c64bbcc#0": {
+   "prompt": "004bfa29bff0e6b7",
+   "frameCards": "5fb911ff154d046f",
+   "allButEffects": "5fb911ff154d046f"
+  },
+  "55d1efbf-8d70-4e11-b1ee-ec12fbea3584#0": {
+   "prompt": "44136fa355b3678a",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "56157385-08ca-4d66-8802-cf490309128e#0": {
+   "prompt": "0a7b2f7995118cb9",
+   "frameCards": "bc1594796f91c73c",
+   "allButEffects": "fd8b382f592c1f5e"
+  },
+  "5680a822-1e85-48e7-b00e-3a037c161605#0": {
+   "prompt": "89e10fbb05118e25",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "56b5dd1e-f5fb-4044-9007-15958ddb29c4#0": {
+   "prompt": "df5b19e2aa42d0aa",
+   "frameCards": "230a0e5d0cff7a7b",
+   "allButEffects": "8bacd93ceb210dd6"
+  },
+  "56b66a51-c712-4921-a785-fb1d97958b2c#0": {
+   "prompt": "44136fa355b3678a",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "57865363-c956-4e44-9476-b067f4f49eec#0": {
+   "prompt": "955c5b5f18462172",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "57f823d9-f920-4277-b2c5-657c12cdaf66#0": {
+   "prompt": "3c25cd545bfd424d",
+   "frameCards": "4f167d2e9433b7a7",
+   "allButEffects": "4f167d2e9433b7a7"
+  },
+  "580d5c27-6cb4-42e5-949c-38e486f94514#0": {
+   "prompt": "f1ff449d9315a9ab",
+   "frameCards": "57254184a717d541",
+   "allButEffects": "57254184a717d541"
+  },
+  "58208920-e6b9-4fe4-b2d3-ec02b85beb0d#0": {
+   "prompt": "e99bdfe8b5104c41",
+   "frameCards": "f2e17cf7210ef2c1",
+   "allButEffects": "f2e17cf7210ef2c1"
+  },
+  "5826565b-2bbd-4ef9-9430-b39c4f9e04fd#0": {
+   "prompt": "c3b729f46325f359",
+   "frameCards": "3b62b9d825228aed",
+   "allButEffects": "3b62b9d825228aed"
+  },
+  "583469dc-0c89-4a92-af9e-85b4addd7e64#0": {
+   "prompt": "a7f256354b8469e3",
+   "frameCards": "41cccebe729e3483",
+   "allButEffects": "41cccebe729e3483"
+  },
+  "58534659-b54a-4a64-9088-9b37541ef2d3#0": {
+   "prompt": "93ee975f0c5c8084",
+   "frameCards": "cbb049b72a636cf7",
+   "allButEffects": "cbb049b72a636cf7"
+  },
+  "5859f2ca-4caf-4b94-b036-39604c247b2c#0": {
+   "prompt": "d7c9058108747f9c",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "5866e7a5-94e4-4e6f-b0e2-2f2bd6a045de#0": {
+   "prompt": "44136fa355b3678a",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "5895539e-801a-4a0a-a651-a13d07c616bd#0": {
+   "prompt": "9dd1e7159ef9be46",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "58cb40ba-02a4-44d9-bcc4-d15807c3f652#0": {
+   "prompt": "de5a609f774c7e53",
+   "frameCards": "6d3762ff4d2fcbc1",
+   "allButEffects": "6d3762ff4d2fcbc1"
+  },
+  "58d5e42f-dc08-4c6f-bd36-bef53a961d3a#0": {
+   "prompt": "4d20729ccc77cf89",
+   "frameCards": "6d299b306fa2b9a6",
+   "allButEffects": "c441d16ddb874374"
+  },
+  "58d9a39f-6f8b-4f1a-b77f-f164f2525b74#0": {
+   "prompt": "07b8a91e07bbca5c",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "591647d2-56c3-41f5-a163-d65f3911d85b#0": {
+   "prompt": "2c1719d3770939dc",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "5916e553-2c91-4885-8f1f-3cb597d16a54#0": {
+   "prompt": "95246a549b12a032",
+   "frameCards": "0f48224977a17cd7",
+   "allButEffects": "0f48224977a17cd7"
+  },
+  "598b9854-a301-4a91-bd6b-6b5ee12108f8#0": {
+   "prompt": "565140d3f66c764e",
+   "frameCards": "a2f3e7155d28dfac",
+   "allButEffects": "a2f3e7155d28dfac"
+  },
+  "5a23a80c-0120-4975-88bd-02825a1f5d9a#0": {
+   "prompt": "17b8800dba0a03bb",
+   "frameCards": "23e6158ab16f9880",
+   "allButEffects": "23e6158ab16f9880"
+  },
+  "5a29073e-8e10-4dfe-9ece-0e0f0f083e20#0": {
+   "prompt": "a0d314fabdaa8a27",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "5a79ba36-e0d0-4e19-863f-ae06659467fe#0": {
+   "prompt": "e6d9a5fcc95f2302",
+   "frameCards": "ae8f5e90c33b92b0",
+   "allButEffects": "9e0d277e804513cb"
+  },
+  "5b3c7cb3-a383-4293-9e44-917a4b03f3c9#0": {
+   "prompt": "6b3ce41f8dc22f09",
+   "frameCards": "c59b643907030482",
+   "allButEffects": "c59b643907030482"
+  },
+  "5b659cfb-8cab-474f-995c-68572d09d275#0": {
+   "prompt": "478491fc622aa544",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "5bee4d3d-9970-4b61-ba76-c3c1f6333c2c#0": {
+   "prompt": "5270acb8776d38b9",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "5bfb000e-37d3-42fb-9689-028dde2311a9#0": {
+   "prompt": "8459d9459eb0c497",
+   "frameCards": "2e9349ea7d9443f3",
+   "allButEffects": "2e9349ea7d9443f3"
+  },
+  "5c94de45-f4db-4a0d-a0d9-95f374c8feb8#0": {
+   "prompt": "5bd7af56625e9e2a",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "5c99d191-df05-4b37-ba89-db1e1f924046#0": {
+   "prompt": "44136fa355b3678a",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "5cf0fa8c-0f0b-4178-9efe-05897baf4361#0": {
+   "prompt": "e7704fa49059d2f6",
+   "frameCards": "abba3b1d291e24ef",
+   "allButEffects": "abba3b1d291e24ef"
+  },
+  "5d41c762-287b-4f43-a28c-4b39e7fc6b10#0": {
+   "prompt": "44136fa355b3678a",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "5dc6c097-9000-4d1e-abea-0cf9a930aa54#0": {
+   "prompt": "6f6a3398782ebdfc",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "5e6b3ac4-7e81-4625-aa34-0ed01944055b#0": {
+   "prompt": "79660a9f7e319e04",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "5e7c98a0-fc4f-4a12-bdb5-121b23240ff7#0": {
+   "prompt": "af6619d4f77f7350",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "5f10a6c7-3eb1-4d6a-b9fb-e4b88ea21ebe#0": {
+   "prompt": "bb78197275df303c",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "5f308239-75ac-4fc5-b0de-2be820391b0d#0": {
+   "prompt": "44136fa355b3678a",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "60741e8e-fdff-4a9e-b04d-ddd49ac581ea#0": {
+   "prompt": "2b050f9d3b9745ec",
+   "frameCards": "04937f0f88ad1925",
+   "allButEffects": "5f851783216831c7"
+  },
+  "6089ee7d-062c-4940-b667-e6c6f161eed1#0": {
+   "prompt": "fd2f544bd912e7c9",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "6157bb2d-68bf-4b50-8e45-11ec536cf9f9#0": {
+   "prompt": "545e808d81bf64a7",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "6168a485-9939-4172-a267-9e0a3e803d40#0": {
+   "prompt": "cc92b8a5a2b065e0",
+   "frameCards": "a59b49e4a50c15d9",
+   "allButEffects": "a59b49e4a50c15d9"
+  },
+  "61c0b83e-4217-4570-b3d9-353ae0598381#0": {
+   "prompt": "d0b5544207799670",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "6216f50a-bb40-4a03-9794-e3e4f6c7cd6f#0": {
+   "prompt": "252443b51f09ef7e",
+   "frameCards": "01b1d99ae350f0b2",
+   "allButEffects": "01b1d99ae350f0b2"
+  },
+  "62303b0d-d971-4d02-b7d2-328bb7fa3314#0": {
+   "prompt": "92b7c4d0e5db47c8",
+   "frameCards": "ab7798aba65ad03c",
+   "allButEffects": "9f782acf3532fde8"
+  },
+  "62a7558f-dbd7-4fca-984a-3f2656e6419d#0": {
+   "prompt": "0e7405ce2a28de83",
+   "frameCards": "4048108fa543a6ed",
+   "allButEffects": "4048108fa543a6ed"
+  },
+  "62ce7a10-ff9b-459d-9892-db700d5becf6#0": {
+   "prompt": "830b03b574d58197",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "62f89dbc-091a-4a0c-b0ee-a9633a7f0fba#0": {
+   "prompt": "cf30eeb2d5b85347",
+   "frameCards": "7047d5bf3fec311c",
+   "allButEffects": "f33ff3a43f3da6bf"
+  },
+  "63b1018c-e833-4b53-890d-31e0dbca6a51#0": {
+   "prompt": "caa71b5d7713ea5b",
+   "frameCards": "2fa4f1547f22b2ab",
+   "allButEffects": "2fa4f1547f22b2ab"
+  },
+  "64433e36-68f7-47e4-a59d-0f8de3f1296e#0": {
+   "prompt": "44136fa355b3678a",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "6496df2a-66f1-465d-9373-b5becb6a75df#0": {
+   "prompt": "0136710aca818d72",
+   "frameCards": "a83baa3f71092a67",
+   "allButEffects": "a83baa3f71092a67"
+  },
+  "652e53cf-97f0-424e-a0bd-9849b540151f#0": {
+   "prompt": "44136fa355b3678a",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "65d36d66-3f51-4640-a701-457f231800b2#0": {
+   "prompt": "83821823482a8b51",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "66895930-cc77-419a-bcba-c218657b1cc6#0": {
+   "prompt": "22d6d0a7b53a581f",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "67454b94-96ef-44c1-9a9e-0d72039b0db7#0": {
+   "prompt": "3c4419903cd468a7",
+   "frameCards": "9f4abe5acaf08bc5",
+   "allButEffects": "9f4abe5acaf08bc5"
+  },
+  "6837a3e7-2fac-4713-9a7b-47cbb29668d9#0": {
+   "prompt": "14f2f9018a615c1c",
+   "frameCards": "593dda60843c8724",
+   "allButEffects": "593dda60843c8724"
+  },
+  "6847d329-6909-4739-907d-fdd1d8db7831#0": {
+   "prompt": "463b85d635f5c553",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "68a420e1-1c92-4448-9894-7a22b3bece0f#0": {
+   "prompt": "2bff5e387994c1d3",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "694e2ff4-3698-4bde-84bd-a448dc2dd8d6#0": {
+   "prompt": "2440a267396b33e2",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "696a7bde-a298-4a24-8fd8-41f6f424174b#0": {
+   "prompt": "d87ba70daf4f0f94",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "6a3dd89c-0a15-41b3-94ba-3587ac2e94fc#0": {
+   "prompt": "90d8bd52fac3d83d",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "6a6d707c-8228-43fd-bfe2-a92ca3eeb793#0": {
+   "prompt": "07fba51a63f5637d",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "6a6f1382-670d-443f-8e6f-24af75ade00a#0": {
+   "prompt": "30f19d7c4457a4dc",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "6aef627d-6b0d-49fa-ad09-2e0a06c71f25#0": {
+   "prompt": "db04fdc412ef53be",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "6b375e79-e300-4059-9d2a-b1aac58de6d1#0": {
+   "prompt": "911d8515e436f1e5",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "6b3dac4c-01e7-4704-9c96-597cc7b3e318#0": {
+   "prompt": "6b185af53f1232d3",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "6b558839-24f5-4f75-b8f0-db47db7549e3#0": {
+   "prompt": "44136fa355b3678a",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "6b7b7314-a131-4435-a2d5-5307690491fe#0": {
+   "prompt": "1681efe7a4618e28",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "6bc062b8-e135-42ea-acf9-3dbec4e3dbb4#0": {
+   "prompt": "0980df6f9eaa2e79",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "6bc1fb14-ff0d-4569-bc7f-dcb0bd345607#0": {
+   "prompt": "896e73ffe424c68b",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "6bc40172-f16e-445e-92da-cd6029ca5e6b#0": {
+   "prompt": "44136fa355b3678a",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "6bd2dc01-c633-4dd0-aa34-0a342e4253c9#0": {
+   "prompt": "c4b2918b1db49724",
+   "frameCards": "6d7481f27b0f6632",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "6bef013b-8174-413e-b82b-5ee7fea86ee7#0": {
+   "prompt": "bf11a47c8d7ad4b0",
+   "frameCards": "ebaae78da1b6b23e",
+   "allButEffects": "ebaae78da1b6b23e"
+  },
+  "6bfb7974-cfb5-404d-89d4-e4af03731cc9#0": {
+   "prompt": "44136fa355b3678a",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "6c30cd71-983a-489c-adb3-035a6cca85c1#0": {
+   "prompt": "44136fa355b3678a",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "6c749fbf-9eed-4ca5-80d5-b1b3a46fee1c#0": {
+   "prompt": "44136fa355b3678a",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "6cace09e-8a1f-4eb2-bf57-50f2d1f49cbe#0": {
+   "prompt": "44136fa355b3678a",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "6cf0da60-0520-4d1c-aa59-b232d3fefcf2#0": {
+   "prompt": "7cd7c8eb6e201baf",
+   "frameCards": "6a625086abf6c6f8",
+   "allButEffects": "3ec6302a09bdb690"
+  },
+  "6cff4896-b2e2-44fe-bde6-123f8cf32e5d#0": {
+   "prompt": "44136fa355b3678a",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "6d05fa03-2c5e-4e6c-88da-96877790df93#0": {
+   "prompt": "33d17bae3b29128d",
+   "frameCards": "82449fbe268fc6bf",
+   "allButEffects": "82449fbe268fc6bf"
+  },
+  "6d818f4a-fa88-4aa2-b60b-8950ab35733e#0": {
+   "prompt": "f72fccde416a481c",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "6f373693-da9a-492d-950d-0646efdfaac9#0": {
+   "prompt": "4c7f99575e739a19",
+   "frameCards": "6cda4878a2bb4b08",
+   "allButEffects": "6cda4878a2bb4b08"
+  },
+  "6f528912-9dab-4e49-970c-e809b8f2429c#0": {
+   "prompt": "c8efb450bb428250",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "7024eced-022d-4329-a11d-c07162bdef3e#0": {
+   "prompt": "079e516c2db98707",
+   "frameCards": "2053676fb6d26d9b",
+   "allButEffects": "2053676fb6d26d9b"
+  },
+  "704abdae-529e-4bae-a9ee-b9127e31f357#0": {
+   "prompt": "109d3e9f164b88a4",
+   "frameCards": "a99650a0a65c677e",
+   "allButEffects": "a99650a0a65c677e"
+  },
+  "705b64a0-6766-49c1-9a63-0c0ed9a5a1ac#0": {
+   "prompt": "995f75e06e602f24",
+   "frameCards": "4af47dd4b6a99987",
+   "allButEffects": "4af47dd4b6a99987"
+  },
+  "70623203-10ad-478c-a0bf-5f4eab87cc28#0": {
+   "prompt": "68b392183f18ab4b",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "709ac60a-d05e-44e3-8fcd-b79894d7f7c8#0": {
+   "prompt": "b4d6017000afa449",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "711613a3-322b-4c24-b840-116c87621053#0": {
+   "prompt": "42f0b69f0186b285",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "715bb78a-b229-4f80-8ca5-20f5ba16dd28#0": {
+   "prompt": "44136fa355b3678a",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "7172ccc5-f928-4349-b391-df6aad09163d#0": {
+   "prompt": "84cfaad8701e8482",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "718c2d04-068d-4382-a0fa-fe061e4c64e0#0": {
+   "prompt": "184aeacd1fa9f1e6",
+   "frameCards": "9b7c6f21052ff342",
+   "allButEffects": "9b7c6f21052ff342"
+  },
+  "71aabce0-03ed-45a9-8fe5-76b9dc8cb91c#0": {
+   "prompt": "44136fa355b3678a",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "71e20d4d-a3f6-41d3-9e93-08da672b5a17#0": {
+   "prompt": "44136fa355b3678a",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "71f3ea26-e1a2-4b6f-ac7c-0e78a1e7aa4e#0": {
+   "prompt": "7317353716028647",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "72a9c6e1-5026-4b83-adf5-a805a2c45d78#0": {
+   "prompt": "8550248f15818553",
+   "frameCards": "1d8048729a52d6bc",
+   "allButEffects": "1d8048729a52d6bc"
+  },
+  "72b530c3-3862-41f3-b2c3-0e40d14a7d52#0": {
+   "prompt": "7d85a0a578798ec7",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "72c6df1e-d259-438e-9d79-cac9e6233af6#0": {
+   "prompt": "1e154fc1719eeb0e",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "739fb554-6aa3-45ae-87f9-2c11b76c01f3#0": {
+   "prompt": "1460757bbe7a6f2b",
+   "frameCards": "dcd794951f18d870",
+   "allButEffects": "dcd794951f18d870"
+  },
+  "73a796c5-395d-4120-b74d-e24b9102d1b3#0": {
+   "prompt": "aca22e317292b0e7",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "74390642-6d4e-49b0-b2d2-cf4fcfc100c7#0": {
+   "prompt": "b265b3186993f15d",
+   "frameCards": "422d3c5be15a3401",
+   "allButEffects": "6137bb83a4185440"
+  },
+  "7459765d-2aa7-46ac-9229-eb6095abe00a#0": {
+   "prompt": "44136fa355b3678a",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "74e812eb-21b2-412a-8f55-ee5027c554b4#0": {
+   "prompt": "5cf5f95c265d549a",
+   "frameCards": "cda6cbf667d7678a",
+   "allButEffects": "cda6cbf667d7678a"
+  },
+  "750b4729-aa47-4fe3-be17-90031a72eac0#0": {
+   "prompt": "862610be20883bf9",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "75aa2c84-e930-4349-867e-240957800d4e#0": {
+   "prompt": "e0c08180ea09af8d",
+   "frameCards": "344b4e8aae38cd9a",
+   "allButEffects": "344b4e8aae38cd9a"
+  },
+  "76298720-3833-47b1-ab8a-7143d176279b#0": {
+   "prompt": "f645630db9e80548",
+   "frameCards": "11e20fb28e38084a",
+   "allButEffects": "11e20fb28e38084a"
+  },
+  "767c67ae-f7aa-462f-8b13-513cd8c43f49#0": {
+   "prompt": "52025f12009684b4",
+   "frameCards": "502a4a3306dc40b4",
+   "allButEffects": "502a4a3306dc40b4"
+  },
+  "7760b3b4-d6f7-49e3-a5b5-573c39506008#0": {
+   "prompt": "7d87bf7fb3b49078",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "780ecbee-ec90-47c1-9209-2f13d630cbb7#0": {
+   "prompt": "03cade88dc19592d",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "782d9b4c-3e60-4ea6-acbb-d5d1e293b7d7#0": {
+   "prompt": "44136fa355b3678a",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "7943885a-c723-417c-88a9-3963d72f7d9d#0": {
+   "prompt": "fc34b2517d0aa1a5",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "79aae1a1-72c2-4fd6-a8f1-5a0ef6f47a13#0": {
+   "prompt": "44136fa355b3678a",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "7a1447e4-9920-41a6-a77d-a44d94fbcf03#0": {
+   "prompt": "44136fa355b3678a",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "7a350544-9f56-4d01-bd70-958381e6d8e2#0": {
+   "prompt": "8612bc547719aadd",
+   "frameCards": "4a2e647fc9a99469",
+   "allButEffects": "4a2e647fc9a99469"
+  },
+  "7a66cff5-6275-4761-871e-294df613639d#0": {
+   "prompt": "be8343e3a5e6768b",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "7a79b418-5525-4559-8347-be7a30de1e6e#0": {
+   "prompt": "9edb7ed444f07406",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "7abf9580-5dbf-492c-b909-7a7722c0aaec#0": {
+   "prompt": "067a6fadecff0a7e",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "7b1adbbd-8ad1-48be-abfe-f1964b4a315a#0": {
+   "prompt": "97ffe3a2b59b5990",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "7be33e03-d7c5-41be-b7e8-bd5ed9edfcad#0": {
+   "prompt": "f8d34fc98dfe81ed",
+   "frameCards": "7826a37c6d309c36",
+   "allButEffects": "7826a37c6d309c36"
+  },
+  "7c0668b9-2a07-4f53-a506-3bfa943aa85b#0": {
+   "prompt": "0e97401b1ae714bb",
+   "frameCards": "19febbe99511f369",
+   "allButEffects": "19febbe99511f369"
+  },
+  "7c5fab95-6885-4225-972b-b3d4041b88b4#0": {
+   "prompt": "f7a61404ab9723bc",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "7c951a5d-037f-4d8b-946b-c8426d0c06fc#0": {
+   "prompt": "44136fa355b3678a",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "7cb2a732-54ae-4596-96bd-cdd63684da2b#0": {
+   "prompt": "5bb08c0cb7e0d985",
+   "frameCards": "d0b8fa71e8399229",
+   "allButEffects": "d0b8fa71e8399229"
+  },
+  "7cce89a1-3864-4f45-aabf-b2fb518dc176#0": {
+   "prompt": "616e22f64ba84f9e",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "7cfc8759-b087-494e-9237-04a24b736292#0": {
+   "prompt": "3e09fda8ea376cf6",
+   "frameCards": "3992c3b8a3955a32",
+   "allButEffects": "3992c3b8a3955a32"
+  },
+  "7d578f86-0dc2-488d-a460-faf981d36fb9#0": {
+   "prompt": "af7ba99b8803f8e1",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "7ddfbb68-f425-4384-a8f3-ab8eb0f006ef#0": {
+   "prompt": "1cc802a6e64cba5a",
+   "frameCards": "583169604ddcd3b8",
+   "allButEffects": "583169604ddcd3b8"
+  },
+  "7de1064c-dea8-41e9-9d4b-198ba4633140#0": {
+   "prompt": "60a38484502be52c",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "7e2ced06-5b35-4e35-a0d3-0bca16ed7de5#0": {
+   "prompt": "44136fa355b3678a",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "7e4b77c8-cfcd-458c-9c00-d7dc1a4394dc#0": {
+   "prompt": "f978a0e19e913d40",
+   "frameCards": "53c9d5b094024bce",
+   "allButEffects": "53c9d5b094024bce"
+  },
+  "7eaeafa1-7356-45e6-86b6-56051f9b66fa#0": {
+   "prompt": "845f742435688bbd",
+   "frameCards": "644abe8cdcb4a023",
+   "allButEffects": "644abe8cdcb4a023"
+  },
+  "7f061e6a-52e7-47d4-89f7-48a5f64c8476#0": {
+   "prompt": "225b64ce0de10e83",
+   "frameCards": "19d6264f51e81179",
+   "allButEffects": "19d6264f51e81179"
+  },
+  "7f146ee6-bfeb-4a1a-a9dc-8eb0e24c0c8a#0": {
+   "prompt": "6971cec6a946433c",
+   "frameCards": "df091d5e6275f44c",
+   "allButEffects": "df091d5e6275f44c"
+  },
+  "7f48efc0-32ef-4463-97b1-b4a286395b6a#0": {
+   "prompt": "d89316beab99fc37",
+   "frameCards": "abae913dda12d555",
+   "allButEffects": "98262ed6920a6c22"
+  },
+  "7fac8e78-af56-4d85-ba62-b4bc2fd6fb46#0": {
+   "prompt": "2671318db9a42473",
+   "frameCards": "74f39f1df58afcc0",
+   "allButEffects": "74f39f1df58afcc0"
+  },
+  "8018dc07-7fa6-4e39-b8fc-ae9e867c142d#0": {
+   "prompt": "833e55452a5a7649",
+   "frameCards": "e17ee2ee488d67b7",
+   "allButEffects": "e17ee2ee488d67b7"
+  },
+  "803ae011-2803-4f07-9d61-c3f308b182c0#0": {
+   "prompt": "9a041fd4e9c396f6",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "80466069-beac-4684-a2c0-fb7b86d0c0e2#0": {
+   "prompt": "ce1d26ab70f50ee4",
+   "frameCards": "68875cf7e7a86c4d",
+   "allButEffects": "68875cf7e7a86c4d"
+  },
+  "805e24b5-b4b2-4de3-af7f-6a268cce8114#0": {
+   "prompt": "8f4073eb3f72c2af",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "8065dd7d-8a1b-4023-9294-abc5833f6500#0": {
+   "prompt": "52f403e01d04864e",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "80e06398-c07d-4109-bb14-0fe193290930#0": {
+   "prompt": "fa4e487d1e60c65b",
+   "frameCards": "c604df2482a7b760",
+   "allButEffects": "c604df2482a7b760"
+  },
+  "8106d761-4606-4897-8c80-931a9d8ae94c#0": {
+   "prompt": "6cf5d71d292881f6",
+   "frameCards": "6506c9988c278c4c",
+   "allButEffects": "6506c9988c278c4c"
+  },
+  "812c9706-d4ec-47fe-9f62-970f01768734#0": {
+   "prompt": "44136fa355b3678a",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "8157235c-bf69-446b-9b09-fbd835123301#0": {
+   "prompt": "5097cea7ba7076d1",
+   "frameCards": "e980bb7beaf5bc8d",
+   "allButEffects": "e980bb7beaf5bc8d"
+  },
+  "81b98a02-0a41-41ad-a091-b241924dfe60#0": {
+   "prompt": "95491b0bcd850772",
+   "frameCards": "e7363166a7bd1d69",
+   "allButEffects": "e7363166a7bd1d69"
+  },
+  "81ecf761-3a27-4015-8347-a6b65fc55055#0": {
+   "prompt": "78545c0361717088",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "82c44356-d860-4956-a59d-c6f93565bdd0#0": {
+   "prompt": "12a319b8f52bc1fb",
+   "frameCards": "c50996a831202a57",
+   "allButEffects": "1fa858ceb3c8298b"
+  },
+  "832a3c77-2760-415b-9723-5623369a3cfa#0": {
+   "prompt": "94acc1944456bab4",
+   "frameCards": "c75d9be66c2537f9",
+   "allButEffects": "c75d9be66c2537f9"
+  },
+  "842fca02-26dc-48ee-99f2-09487d664104#0": {
+   "prompt": "44136fa355b3678a",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "844681a2-0b12-4b1a-878d-14f0a3d80c53#0": {
+   "prompt": "7aa7d06ce0f13f60",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "852fab63-b3a8-4a15-b6f6-3d1aab769b94#0": {
+   "prompt": "e46ba5b9f360f539",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "855c8f43-ebfc-4626-986f-26884909c684#0": {
+   "prompt": "3775fc42b044fe04",
+   "frameCards": "0eece15025b9958f",
+   "allButEffects": "bb3d96e14efd3f35"
+  },
+  "8678bea3-09c3-46b3-8a1d-4f74ceedab6f#0": {
+   "prompt": "13d349a7aa865930",
+   "frameCards": "c58698bc4d331d0f",
+   "allButEffects": "9ab34b62743e214a"
+  },
+  "877695ff-fd77-409f-8b81-cfb7327eed4d#0": {
+   "prompt": "ab019ea19aba0bd0",
+   "frameCards": "873a5e1242cbe35a",
+   "allButEffects": "873a5e1242cbe35a"
+  },
+  "87ecaac4-02b1-448b-aa26-233fce1c5e24#0": {
+   "prompt": "44136fa355b3678a",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "885607f4-a788-432f-bfc3-a0c8e0d8424b#0": {
+   "prompt": "9488b0a27cd247a2",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "8887b8c5-f146-4a9a-80e1-b232b7fdfe7b#0": {
+   "prompt": "c652b28ad96f7c6b",
+   "frameCards": "1f941e784f348ce0",
+   "allButEffects": "1f941e784f348ce0"
+  },
+  "88d02bb4-434c-4c38-ba2e-153a616e1314#0": {
+   "prompt": "44136fa355b3678a",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "89475f03-1805-44da-8a7c-eb9a30955d77#0": {
+   "prompt": "72835dadb3248510",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "897d50b6-a2f3-441a-9836-713b8472f2db#0": {
+   "prompt": "99c0f3f506aa7f6d",
+   "frameCards": "5e6893b8cffc9e21",
+   "allButEffects": "5e6893b8cffc9e21"
+  },
+  "89826d77-eefd-4efd-aae1-9b8f2bc9dd4a#0": {
+   "prompt": "d6a31ce65d6ad688",
+   "frameCards": "2b6e241a5f7d89a8",
+   "allButEffects": "2b6e241a5f7d89a8"
+  },
+  "898e959f-ef6a-4b1a-99f8-8bc2d609743d#0": {
+   "prompt": "e1ca6d97c2cec28a",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "898f2d0e-59bc-4634-ac1a-559417dce5ef#0": {
+   "prompt": "7d0556985aba9fce",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "8a15d4ed-0bb5-4593-9f82-196973cc1903#0": {
+   "prompt": "44136fa355b3678a",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "8b05fadb-6f24-40c0-a029-8c21c3b3f8a4#0": {
+   "prompt": "44136fa355b3678a",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "8b0ea795-1877-4e3e-a1ae-4d8aa8456eb7#0": {
+   "prompt": "44136fa355b3678a",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "8b45ed20-c50f-4600-99f4-915e0e5f97f2#0": {
+   "prompt": "1fcc3d2a32138a86",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "8b5b1bca-a31d-44d3-b611-712957ac6aad#0": {
+   "prompt": "a87c7c31b21a8318",
+   "frameCards": "58d44d17064e728c",
+   "allButEffects": "8253ee53808b5ab7"
+  },
+  "8c26ed0c-5849-4a34-96c9-cc7448c953da#0": {
+   "prompt": "9a9971508591cfa8",
+   "frameCards": "ce4d34bcfaac156a",
+   "allButEffects": "ce4d34bcfaac156a"
+  },
+  "8c59e9b0-9ec2-4f23-ba41-3e90913aa3e2#0": {
+   "prompt": "2c86120715c1b444",
+   "frameCards": "6a58eb5c74a9211b",
+   "allButEffects": "6a58eb5c74a9211b"
+  },
+  "8c7a9d29-5023-4d33-bf2b-690ab904b959#0": {
+   "prompt": "92be863c880d3a7b",
+   "frameCards": "da75ae6bb12daa3e",
+   "allButEffects": "2dd482bcc9c6848d"
+  },
+  "8c7f090b-1dd4-48d0-b10b-db721f85cbcc#0": {
+   "prompt": "44136fa355b3678a",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "8c8a67fd-70a7-4b68-8c2c-60025cf89640#0": {
+   "prompt": "4f5ab9c82fe5c2ca",
+   "frameCards": "caa0f9b3276e0272",
+   "allButEffects": "caa0f9b3276e0272"
+  },
+  "8cbc85d4-6166-419d-8a54-ead0d45ad1f0#0": {
+   "prompt": "391437e1f9def3ab",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "8cdf5ac4-9d84-4e5f-96d6-08af7fe5147d#0": {
+   "prompt": "dca2f9c997ac3dc6",
+   "frameCards": "79b292f78a313775",
+   "allButEffects": "79b292f78a313775"
+  },
+  "8d12473f-7ffa-4583-9149-7618614c9e42#0": {
+   "prompt": "2ff05ae585bc47a4",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "8d3ea13e-68c8-40ea-a9e3-72b08b90e625#0": {
+   "prompt": "71a11a13d134014b",
+   "frameCards": "5b95229481285359",
+   "allButEffects": "5b95229481285359"
+  },
+  "8d792ec2-2c81-49f6-87d6-565aeff83f80#0": {
+   "prompt": "56f3fa4372408723",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "8deece8a-64cd-449d-a2ea-337116fb635d#0": {
+   "prompt": "5396dbcd6e88b7a9",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "8e0511c0-3107-45b1-8b10-1cc8fd9aa63a#0": {
+   "prompt": "af1ce6826a7ce7a4",
+   "frameCards": "2d7c0666fdfa8d27",
+   "allButEffects": "2d7c0666fdfa8d27"
+  },
+  "8e1f88cb-addf-4e7d-b9eb-b2e49091d14c#0": {
+   "prompt": "e2720395472aefd7",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "8e902d1f-c819-4ed8-96ff-7070c6413e79#0": {
+   "prompt": "44136fa355b3678a",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "8f3f9326-87e1-4c91-b531-4ad20c5a3252#0": {
+   "prompt": "da769b5bf786347b",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "8f83bfd7-016a-40eb-9812-ac2144f4da44#0": {
+   "prompt": "72771858c93252e0",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "8f94262a-d8ae-4026-abeb-cdcc1ef1f4d7#0": {
+   "prompt": "44136fa355b3678a",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "8fe42181-c7f1-45c6-8d38-883c49331edc#0": {
+   "prompt": "43cdaf74e312dc06",
+   "frameCards": "3f997d716df725a2",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "90502c21-dc61-4422-b88f-aeee59b2b4ed#0": {
+   "prompt": "56efe4dbc8a49469",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "90bbd2cf-efc5-4f5a-8552-64f8298b6bb4#0": {
+   "prompt": "44136fa355b3678a",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "90c9dfd0-c721-4430-ae9c-dcedb00d2a23#0": {
+   "prompt": "0ccb90633c79c4bc",
+   "frameCards": "837c7b5284cff701",
+   "allButEffects": "837c7b5284cff701"
+  },
+  "90f84a64-b3cb-4e3f-ba32-0728a0dab6ae#0": {
+   "prompt": "bd4428e41f49bd23",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "91325146-dff4-4141-a838-08b45138f550#0": {
+   "prompt": "949d2faca7eba61c",
+   "frameCards": "5477871034b3b50c",
+   "allButEffects": "5477871034b3b50c"
+  },
+  "9166620d-ec89-40bf-9eb4-000d6e214235#0": {
+   "prompt": "82301cd1efd978fa",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "9188079f-1354-4783-9e3a-2b55eb62db76#0": {
+   "prompt": "3145fe804245b190",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "91c98844-9014-4817-a818-a9494315da62#0": {
+   "prompt": "4eb94596719593ad",
+   "frameCards": "be229ec6c80e73ed",
+   "allButEffects": "be229ec6c80e73ed"
+  },
+  "922047e9-e851-4d0c-888a-1052cc261809#0": {
+   "prompt": "44136fa355b3678a",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "925ddc44-c709-43f3-a4d8-3be1edd8782b#0": {
+   "prompt": "5ffd2cb17c5269f7",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "9265bf30-6b1f-445d-af46-da4bc27a58fb#0": {
+   "prompt": "15f5a046f15eecb3",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "927dcba5-e46c-4f53-b1fd-87126a78e1e7#0": {
+   "prompt": "0e63337e07c99849",
+   "frameCards": "3a14407041d08361",
+   "allButEffects": "3a14407041d08361"
+  },
+  "9352a518-4dfe-4491-85e3-6241c6d7b1d5#0": {
+   "prompt": "6ee357c20b162531",
+   "frameCards": "7c5dbe74e1c1f186",
+   "allButEffects": "7c5dbe74e1c1f186"
+  },
+  "937a05f3-6757-4c71-8558-028fab868a17#0": {
+   "prompt": "89b423dcc82c9274",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "9384f78b-0bb7-48b7-bba7-98349b1e778e#0": {
+   "prompt": "1783636bb24fa84a",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "93a6a8f9-fd7e-4252-8b65-c52371074314#0": {
+   "prompt": "93a8bc47fde58755",
+   "frameCards": "618862072f17918d",
+   "allButEffects": "618862072f17918d"
+  },
+  "94876629-103e-4399-bd81-b70650f5d6e1#0": {
+   "prompt": "44136fa355b3678a",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "948c164e-7b2a-408e-9dca-2c98f76f088f#0": {
+   "prompt": "c370a1d13c71c9ec",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "9518dd04-be32-4def-909d-09d6a50bdd4c#0": {
+   "prompt": "ff409ed1eef02453",
+   "frameCards": "0a6b955bd94f20ff",
+   "allButEffects": "0a6b955bd94f20ff"
+  },
+  "95446cc9-f84e-4413-a823-1494122cc06d#0": {
+   "prompt": "44136fa355b3678a",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "95605dc1-1005-422a-8018-d69fcf2c8d5f#0": {
+   "prompt": "44136fa355b3678a",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "958b353c-0031-4573-a3d7-29047c241bf0#0": {
+   "prompt": "dfb1135f3f11d11d",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "95b30974-fd1f-46dd-a4aa-78537d4c8b21#0": {
+   "prompt": "44136fa355b3678a",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "95b7fe3b-e4bc-4b80-bba4-39a34f57f2b4#0": {
+   "prompt": "38f5ae573df63ebc",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "95d28eea-0774-4e4c-bbc4-3faa6b15bc8f#0": {
+   "prompt": "52e92dc6ed7c1dd6",
+   "frameCards": "5fa38b13dfced14a",
+   "allButEffects": "5fa38b13dfced14a"
+  },
+  "96b56f6a-4561-414c-9b18-cc79856600b0#0": {
+   "prompt": "44136fa355b3678a",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "96c39602-012a-49b4-a4ee-3841cd82bb7c#0": {
+   "prompt": "95af4b689d4e7978",
+   "frameCards": "b4338ca222cd4df4",
+   "allButEffects": "b4338ca222cd4df4"
+  },
+  "97312cfe-de82-488f-a6ac-3ba347577312#0": {
+   "prompt": "f4653eb21069993e",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "976c8c17-b1d7-413e-8142-2fbef2355512#0": {
+   "prompt": "b7093bf07bf26b21",
+   "frameCards": "3b568e6478c0410e",
+   "allButEffects": "3b568e6478c0410e"
+  },
+  "9783b965-defa-470e-b9d7-ebe0e0c2836c#0": {
+   "prompt": "7943fff5c8dff090",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "978d1ead-3d55-4562-a635-6bcff5c21076#0": {
+   "prompt": "44136fa355b3678a",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "9820134f-9e90-4d0e-b81f-51f32053e2f2#0": {
+   "prompt": "500f25076962a07a",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "98a47245-1608-4e58-99fa-b1b262048cdd#0": {
+   "prompt": "054c76621f6594a0",
+   "frameCards": "ce602f9594f23bc0",
+   "allButEffects": "ce602f9594f23bc0"
+  },
+  "99299047-b33f-4afd-86a6-c7e5b5c1b9ec#0": {
+   "prompt": "44136fa355b3678a",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "99351670-fcfb-472c-9986-fc7f216786d2#0": {
+   "prompt": "12c52e699a6daffd",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "9983db5b-cf9c-48c5-93c1-33439dfce8d4#0": {
+   "prompt": "d89fef26bc5e8d40",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "99fb545d-53a2-4be9-bee4-ac00509ffb74#0": {
+   "prompt": "904bc1415006ccbc",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "9a81e090-decd-41cc-ad08-bc4c5b5939af#0": {
+   "prompt": "15b4c2d0469a08cf",
+   "frameCards": "995b027f7d2968ac",
+   "allButEffects": "995b027f7d2968ac"
+  },
+  "9b1adf90-a695-47d7-8dee-e394de875c28#0": {
+   "prompt": "87aee8a4c41f243d",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "9b59a093-7970-441a-b7c8-2ce2628010ab#0": {
+   "prompt": "44136fa355b3678a",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "9b8afb99-401d-47f9-a6fe-3cad65ad574b#0": {
+   "prompt": "723c00b0819ebd75",
+   "frameCards": "9c1c6929a86a7591",
+   "allButEffects": "e2775aba5d9555b8"
+  },
+  "9b9df944-a596-4c81-908d-dc0ae5be41b8#0": {
+   "prompt": "44136fa355b3678a",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "9c14fd2f-4fa8-4712-8d4a-2586c2ca1c53#0": {
+   "prompt": "44136fa355b3678a",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "9c2575fd-1da5-4506-9a85-1bf5fee77f5f#0": {
+   "prompt": "9e95bbe3fc1d3fec",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "9cd1cc2c-c9b9-46a2-954e-b3096f2b9cc9#0": {
+   "prompt": "74c1a8865be5c4fb",
+   "frameCards": "250fada1590c181a",
+   "allButEffects": "250fada1590c181a"
+  },
+  "9cda17f9-a328-4cb1-b46c-c48f1b2c58c6#0": {
+   "prompt": "78c1c12c6d8d3e53",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "9d066e9c-6d7d-42b3-b331-154ebeea2f7a#0": {
+   "prompt": "44136fa355b3678a",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "9d69d2c7-6b37-4b99-9424-573212322ac1#0": {
+   "prompt": "6b185af53f1232d3",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "9dbffdec-7255-4ceb-8961-c1f28b722c87#0": {
+   "prompt": "bef7cc3b09b6b63b",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "9dcde1e1-ce55-41e2-84db-a32f9a70d6da#0": {
+   "prompt": "44136fa355b3678a",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "9df58d1d-aefa-44e0-b177-f8900b195aeb#0": {
+   "prompt": "d406c0a1e22f9662",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "9e038f39-c867-42b5-876e-7030e3f2ed0c#0": {
+   "prompt": "3042862fc6532493",
+   "frameCards": "2c61625fb0b370b1",
+   "allButEffects": "2c61625fb0b370b1"
+  },
+  "9e07cbc6-4a21-42af-9309-5bda9dc2b780#0": {
+   "prompt": "e45d24ce11153d25",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "9e4d4a04-914f-4307-acb3-28cba2266d7a#0": {
+   "prompt": "f17509a35270b574",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "9e9237c4-4ce3-4c24-95c8-ce06230f2a5f#0": {
+   "prompt": "44136fa355b3678a",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "9ea00e32-0b4c-4138-844e-3bcb3d9fa427#0": {
+   "prompt": "44136fa355b3678a",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "9eb08b53-5982-44b1-a7e1-bfaacb0414b4#0": {
+   "prompt": "44136fa355b3678a",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "9f2eb6ae-2a1c-4ede-ad31-212568921d4d#0": {
+   "prompt": "23bf4d32456be0d2",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "9f6a5bfe-1cf5-4ac0-8130-54253cb4c253#0": {
+   "prompt": "44136fa355b3678a",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "9fc2b1a5-c0b9-4ce1-ae2f-1013c9a93b8d#0": {
+   "prompt": "c784345a1707e94b",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "a051e75e-c430-4ab8-9b76-5ca38aeb85d5#0": {
+   "prompt": "44136fa355b3678a",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "a07bcee0-177e-4739-b705-725c23b7718f#0": {
+   "prompt": "eebf4418041abd0e",
+   "frameCards": "f38b3198096c5823",
+   "allButEffects": "f38b3198096c5823"
+  },
+  "a0a5d21a-f11a-4078-ab59-c935de9c2d18#0": {
+   "prompt": "44136fa355b3678a",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "a0def68b-5cac-4099-8fb5-66859fa68490#0": {
+   "prompt": "9b64471ce98de11f",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "a1469b23-bafe-4df2-8907-f146a55bd648#0": {
+   "prompt": "44136fa355b3678a",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "a17253f3-a0de-4289-8dd2-4278f64f4d38#0": {
+   "prompt": "e0fbf386c9aa81e0",
+   "frameCards": "659936c7a8e619a9",
+   "allButEffects": "659936c7a8e619a9"
+  },
+  "a192f845-cbb3-46ae-8497-ce991c1e6ad2#0": {
+   "prompt": "10bd82b0e6465601",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "a1c17390-b495-4dda-ab58-9103fd23b216#0": {
+   "prompt": "233dad9471c61b95",
+   "frameCards": "e036932a002de52a",
+   "allButEffects": "e036932a002de52a"
+  },
+  "a1ed3e3c-6ab1-490d-85d3-991e310f4617#0": {
+   "prompt": "805bce18b061cfd5",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "a21e9d0b-8b43-449b-90b7-65de054fa27b#0": {
+   "prompt": "44136fa355b3678a",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "a3a6e8aa-edeb-4854-b583-55546a123800#0": {
+   "prompt": "c07b87990cdaf39b",
+   "frameCards": "d4faeeff3948ef9e",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "a3f06a3f-c0df-43a5-b48d-56d464f95fa5#0": {
+   "prompt": "06f0f6c867433231",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "a3fe1aa3-c4cd-4829-9dd3-3157543af1ec#0": {
+   "prompt": "44136fa355b3678a",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "a532e316-f921-4155-b649-856c55bffb9e#0": {
+   "prompt": "77259261abcb6b50",
+   "frameCards": "78b783b490f671ea",
+   "allButEffects": "1f3a3d7bf69b488e"
+  },
+  "a600866c-b7b4-4066-97d9-f37cffc7e7b9#0": {
+   "prompt": "44136fa355b3678a",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "a6452e03-635e-47dd-a395-f34a2680215f#0": {
+   "prompt": "bf98fee0df43e649",
+   "frameCards": "ffb93d42050274db",
+   "allButEffects": "ffb93d42050274db"
+  },
+  "a699a2c8-0ce7-43e7-b93b-f6e19ba97c75#0": {
+   "prompt": "507ef6e4b97a24dc",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "a6dc5d89-7eb7-4cf6-b229-a508eaccf230#0": {
+   "prompt": "a6f9c1a56b6cfb9d",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "a7af6d81-760e-4bb3-be90-99aed5bb85c8#0": {
+   "prompt": "30e1a095cf7cbec9",
+   "frameCards": "fbf94f00e1617c01",
+   "allButEffects": "fbf94f00e1617c01"
+  },
+  "a7f4ec57-5dd1-405e-bfb1-c98d8cb920ea#0": {
+   "prompt": "08f5be946c8117a7",
+   "frameCards": "8498d465036c4772",
+   "allButEffects": "8498d465036c4772"
+  },
+  "a88b6909-7738-4551-8a31-e01cf0f0e914#0": {
+   "prompt": "104668cfb1e6475b",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "a8bfb705-b367-4c09-b6dc-ffe93cbc08b6#0": {
+   "prompt": "44136fa355b3678a",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "a955f83a-5c71-4f4c-9248-c49d183612fa#0": {
+   "prompt": "4bc753e4c1f99963",
+   "frameCards": "c2845e9f1752da8b",
+   "allButEffects": "c2845e9f1752da8b"
+  },
+  "a9a179e1-aadb-4726-9c2b-71564a5333e4#0": {
+   "prompt": "44136fa355b3678a",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "a9e241a4-2a69-4456-8f25-60c4656f3fb9#0": {
+   "prompt": "bed5b68bf560e0d3",
+   "frameCards": "3e33e001f2727d07",
+   "allButEffects": "3e33e001f2727d07"
+  },
+  "aa2e80a7-ba66-4a2b-aed5-160ec50a68c5#0": {
+   "prompt": "d80de75b11915346",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "aa4f71f4-261e-49bc-ade7-da284bf03025#0": {
+   "prompt": "d182301d08a1bf4a",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "aa5a2f7b-f035-4d3c-9522-63707ff05426#0": {
+   "prompt": "2658df09fbb02325",
+   "frameCards": "7f45f76f5e7abe1b",
+   "allButEffects": "615dab37672a1016"
+  },
+  "aac51922-3617-449b-a4da-886bcfb7d151#0": {
+   "prompt": "44136fa355b3678a",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "aade6e01-2e4c-4e43-ad5c-beebe59fb622#0": {
+   "prompt": "727ac0dde26d39f4",
+   "frameCards": "c954ff090cf2d28a",
+   "allButEffects": "c954ff090cf2d28a"
+  },
+  "ab4fb0d6-bec0-45f0-8fac-ae7ef558b2f1#0": {
+   "prompt": "792b307f7e758941",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "ac17f286-1352-46d1-9c5a-58a2a51d8460#0": {
+   "prompt": "458f66ee6af79213",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "ac93f72b-de5e-4b8f-a5f5-d3a9c3584088#0": {
+   "prompt": "5e89a584bf24339f",
+   "frameCards": "d4d20f07540afbe6",
+   "allButEffects": "d4d20f07540afbe6"
+  },
+  "ad0810fd-0618-4d46-8651-b439bb50277d#0": {
+   "prompt": "44136fa355b3678a",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "ad27b35e-af04-4e53-aff9-8dc0554c207d#0": {
+   "prompt": "4601ad7593d03966",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "ad470724-458a-4b57-beab-c16304539f32#0": {
+   "prompt": "e53e48852e7e4760",
+   "frameCards": "64715f0f1f088dde",
+   "allButEffects": "64715f0f1f088dde"
+  },
+  "addfa8f5-5412-469c-98c3-3361a255a922#0": {
+   "prompt": "6b185af53f1232d3",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "ade61f5a-c3d7-46a1-a3af-385f97d6bd7f#0": {
+   "prompt": "89d90ed9ccd796ce",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "ae693ca4-556f-4465-a6bf-f8a7dc43ed17#0": {
+   "prompt": "dc99b51baaf847a1",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "aebdeb84-07b2-40d2-aeff-acadc9dcccc8#0": {
+   "prompt": "13364ae472e81ee8",
+   "frameCards": "cecf334bcb60aab7",
+   "allButEffects": "cecf334bcb60aab7"
+  },
+  "aeda4e1c-aee1-415b-bc8e-d1192936fc41#0": {
+   "prompt": "352cb22f5e8ffe5a",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "aedbc8b6-4607-4b6f-8b5c-c74e2cd35de7#0": {
+   "prompt": "b401f387fba28f75",
+   "frameCards": "8cbf18a256612a1c",
+   "allButEffects": "170c83a21de56ea4"
+  },
+  "aefedf61-dd39-476e-9934-9cc3c3caab62#0": {
+   "prompt": "44136fa355b3678a",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "af0e112f-1efc-43e7-b55c-567995467166#0": {
+   "prompt": "a0c7844c94a1de2a",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "af686ad9-4905-4030-acba-f454be3d35f8#0": {
+   "prompt": "3818779b17e17876",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "af74b3e2-e3bb-4bf9-b08d-64eafc2c16d6#0": {
+   "prompt": "c9125471aad09c2c",
+   "frameCards": "18ad63244a0fefe5",
+   "allButEffects": "18ad63244a0fefe5"
+  },
+  "afbefef9-5e1c-4f37-bfc2-bd859aa76e27#0": {
+   "prompt": "6e52da0b6c7fd171",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "b01e97a0-a235-423c-bfb1-7ca274bfd9a1#0": {
+   "prompt": "48f3a9ccbe16b929",
+   "frameCards": "7c4d65105a4bd85b",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "b11d3ca1-f11f-4b1f-a37d-2795f314b0d0#0": {
+   "prompt": "32d9ec91d7cabc1e",
+   "frameCards": "5dff293e10eb6620",
+   "allButEffects": "5dff293e10eb6620"
+  },
+  "b1352034-a562-48a6-a024-5d62198bdf94#0": {
+   "prompt": "3855cc45a9f0f6e9",
+   "frameCards": "0d5a0a27dbf2b9dd",
+   "allButEffects": "0d5a0a27dbf2b9dd"
+  },
+  "b161e4f1-3cdf-4021-9924-08c5abb59490#0": {
+   "prompt": "d684964f7accc73d",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "b192b72e-03cc-4c90-9336-520b22b83a13#0": {
+   "prompt": "f1256e73f8ab389f",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "b192c463-2865-4f00-b218-69bd34b2dbdc#0": {
+   "prompt": "8753bce10a34b794",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "b1965efa-0160-4d74-bc69-3d82bae1c726#0": {
+   "prompt": "44136fa355b3678a",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "b225e6ec-6293-414d-86d2-df0321db7460#0": {
+   "prompt": "44136fa355b3678a",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "b24b62a5-a073-4afe-b791-0534602a334e#0": {
+   "prompt": "ea2c561a17f3ba19",
+   "frameCards": "bd7ac0e9f7d693c8",
+   "allButEffects": "bd7ac0e9f7d693c8"
+  },
+  "b2c20885-f419-4b5f-bb52-96f65e7fc9ad#0": {
+   "prompt": "44136fa355b3678a",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "b2f634bf-4eb0-47be-86cc-22b1ada8f46b#0": {
+   "prompt": "44136fa355b3678a",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "b30ef49e-38de-4f99-84da-ed2ed83dea7e#0": {
+   "prompt": "44136fa355b3678a",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "b48d0f9e-31ea-4d4a-953f-fcd46b99b080#0": {
+   "prompt": "21435020c54f7802",
+   "frameCards": "43189ca3deea481a",
+   "allButEffects": "43189ca3deea481a"
+  },
+  "b4c4d3b4-dd36-4d15-895c-93e674579d23#0": {
+   "prompt": "d1a2dba177230bfd",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "b5c4c04b-478a-4a56-9513-447ef3830c21#0": {
+   "prompt": "4336259240a73e3c",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "b60b4c93-3f85-49b0-a066-450afb8eeeb9#0": {
+   "prompt": "10c248edb1997aaf",
+   "frameCards": "4356bd8002185f63",
+   "allButEffects": "4356bd8002185f63"
+  },
+  "b65c7ebd-e4bd-4f64-9765-0f606d73b4dd#0": {
+   "prompt": "7bbd697af6b77a2b",
+   "frameCards": "b1931dc9202bd604",
+   "allButEffects": "b1931dc9202bd604"
+  },
+  "b661212a-33f8-418c-beeb-9b96099b9f4a#0": {
+   "prompt": "44136fa355b3678a",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "b676a3ec-1c74-4ff4-9673-e3a36a5adfdb#0": {
+   "prompt": "9ae11301ae6b86ea",
+   "frameCards": "4d8ecf85af06b0d8",
+   "allButEffects": "4d8ecf85af06b0d8"
+  },
+  "b7309fe4-1e0a-40d7-8501-8ce8af747f72#0": {
+   "prompt": "db9284ec77a7222d",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "b762dcbf-3ca1-4ee6-83a8-0a190529c5d1#0": {
+   "prompt": "a06df297310ce4cd",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "b7b54f32-01bf-4340-bb64-71d1041a0c15#0": {
+   "prompt": "f4a184b837003366",
+   "frameCards": "6ae27d94d862b4b2",
+   "allButEffects": "6ae27d94d862b4b2"
+  },
+  "b7c0de7e-db80-4a95-aa8c-ea984d4a406f#0": {
+   "prompt": "c59c964569556117",
+   "frameCards": "08db48ff87a13468",
+   "allButEffects": "7c4fec522e090be7"
+  },
+  "b8017aa6-8226-40e2-aa60-ec641f23aa79#0": {
+   "prompt": "bc765eaf69310c1e",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "b85bf442-32e7-4ac0-829a-c37f2432cf7d#0": {
+   "prompt": "0190b8c0d83bc235",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "b88bfa78-dc7b-4070-b030-264fbdb48d68#0": {
+   "prompt": "c3daa671a719e9c0",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "b8fc1d47-37a5-4450-a6ba-77d062655e95#0": {
+   "prompt": "44136fa355b3678a",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "b917e6d9-f02a-40b9-ac33-8731655b71cb#0": {
+   "prompt": "ef8976dcb8f6c10d",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "b93b3ba4-b50f-4e17-b495-a54fcf69a70b#0": {
+   "prompt": "c4cbd2394f510f86",
+   "frameCards": "096d122199473903",
+   "allButEffects": "096d122199473903"
+  },
+  "b969500d-4887-4586-80e4-beda86ed671d#0": {
+   "prompt": "44136fa355b3678a",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "b982b6c3-f9d8-4845-b898-559ab576a02c#0": {
+   "prompt": "8b0e932ebd8a42bd",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "b99b93c0-df27-49d4-a34c-f65460b4f32b#0": {
+   "prompt": "36986447f99e9709",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "b9b3f118-85f3-46c4-a03d-3796515eb221#0": {
+   "prompt": "af6716831f09848f",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "b9b9c9a2-0ec1-431a-ac84-4d0011f294c1#0": {
+   "prompt": "5cdc9a05ff8df88d",
+   "frameCards": "cf29831477e0a943",
+   "allButEffects": "cf29831477e0a943"
+  },
+  "b9bcda29-51c3-4e04-8c8f-33d4109a6fe5#0": {
+   "prompt": "939385c55ba46cfa",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "b9e81752-9fd7-45e7-a631-4ea4854ea743#0": {
+   "prompt": "a3bf9103da2e2c55",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "ba241fff-9ba0-4d59-81bc-1a80ab8001f0#0": {
+   "prompt": "908ce103ecc5e021",
+   "frameCards": "45b417cb9ca885c0",
+   "allButEffects": "45b417cb9ca885c0"
+  },
+  "ba5258f0-8061-4e1a-a52b-11a62d860614#0": {
+   "prompt": "c22dc0144cc2bfbb",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "bab161ed-6568-47b0-8b23-b54168b80907#0": {
+   "prompt": "6ac9184a29dd063f",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "bac0a890-2af3-41f3-a804-71facd95bd62#0": {
+   "prompt": "44136fa355b3678a",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "bad9023d-1f93-47ba-9241-a77764aca0e7#0": {
+   "prompt": "ee31cfb985e50513",
+   "frameCards": "1234381a97d37cf4",
+   "allButEffects": "1234381a97d37cf4"
+  },
+  "bafe4d7e-ab51-40b5-8ba4-3a0529aeb90c#0": {
+   "prompt": "25998f4c59f3db34",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "bb4e665e-2b92-42b2-a9f2-6faae09a3023#0": {
+   "prompt": "44136fa355b3678a",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "bbd2b1ab-279b-42cc-b38c-4373ef63fba1#0": {
+   "prompt": "3e87a0f51cfdcc22",
+   "frameCards": "7ba78b2332a937cd",
+   "allButEffects": "540a226a7859b7a4"
+  },
+  "bc340201-4c1e-4bb1-9328-d5cf156243eb#0": {
+   "prompt": "ee624946c2e9ab7c",
+   "frameCards": "82a7da11fcedf66e",
+   "allButEffects": "8a7f3a04da20334c"
+  },
+  "bc524074-0ac2-4073-963c-565fea821d77#0": {
+   "prompt": "49f71be72af7f2dc",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "bc529e68-c7f9-45e8-a5ee-3b4d397eea1e#0": {
+   "prompt": "44136fa355b3678a",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "bc593368-7ac4-4234-990f-42c6419e5645#0": {
+   "prompt": "6936421861f8f7d8",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "bd365bd2-7fef-49a7-a6fa-6fac8871571a#0": {
+   "prompt": "44136fa355b3678a",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "be6faa03-c34a-4ca5-9cc0-2dd94df7a2c5#0": {
+   "prompt": "591770c7f161c940",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "bec3f8e4-c89c-40b3-bbaa-6fa750f69473#0": {
+   "prompt": "7c6d0c26f5fe54fb",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "bef61590-925e-40ce-9f89-32ce9efc4922#0": {
+   "prompt": "dc620f5c90f236c7",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "c05f216f-2aee-4061-843b-065f825e9d69#0": {
+   "prompt": "ea3e14be81ade237",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "c100043c-ac15-477b-b9b3-4a5dacb93c53#0": {
+   "prompt": "44136fa355b3678a",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "c12807a6-2af4-4112-99a6-00abc0e932fa#0": {
+   "prompt": "d4b25c9c0440c80e",
+   "frameCards": "8ee5344faaa53605",
+   "allButEffects": "8ee5344faaa53605"
+  },
+  "c21f3203-ed05-4a60-9c22-169ce9e50b1e#0": {
+   "prompt": "b91ffe38e75efa66",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "c227e7eb-5714-417f-a0cd-df37e2855141#0": {
+   "prompt": "ba967c507d0ddd3d",
+   "frameCards": "60eef090f325460f",
+   "allButEffects": "60eef090f325460f"
+  },
+  "c23e38cb-d5cc-467c-99f2-07dbd08d7a9f#0": {
+   "prompt": "2f9cc96dac18a9c3",
+   "frameCards": "fd7daed13b797d54",
+   "allButEffects": "fd7daed13b797d54"
+  },
+  "c259931a-e859-411c-82e6-a4f7e9dfeb62#0": {
+   "prompt": "3afb0f15dd5de59e",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "c293146c-0ea2-445d-b7ac-5a0954fd38db#0": {
+   "prompt": "5ea46a6637117997",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "c3000c97-d8c9-465e-b188-120384664802#0": {
+   "prompt": "50fc9c84b04b7e9f",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "c31e8c3b-7d08-4f11-9348-4f8fae9c66ff#0": {
+   "prompt": "44136fa355b3678a",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "c381f3a5-5403-47e5-8a59-71102bea2551#0": {
+   "prompt": "fbc3fbd1e18798a2",
+   "frameCards": "2f7f48aee8ba75b0",
+   "allButEffects": "2f7f48aee8ba75b0"
+  },
+  "c3862ab0-439e-46bd-ac91-277b14a1384b#0": {
+   "prompt": "8f4266a719243d70",
+   "frameCards": "1ca1d9dda02eaacd",
+   "allButEffects": "c23993f60a75f6fa"
+  },
+  "c44b3787-7a9a-4201-93fc-a1b7a0c3251c#0": {
+   "prompt": "6b185af53f1232d3",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "c4ae5d7b-c97d-48e5-bb12-73ee96e3d025#0": {
+   "prompt": "6d5351d79e2042ef",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "c56da199-b7e6-4846-a7fc-46c8d6c20e27#0": {
+   "prompt": "44136fa355b3678a",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "c573cfbc-ed51-436a-af6b-40e03559e65b#0": {
+   "prompt": "148c50fdd1353237",
+   "frameCards": "25171afc40d5587f",
+   "allButEffects": "25171afc40d5587f"
+  },
+  "c59a8610-fd82-4db4-bf63-4be7874789ec#0": {
+   "prompt": "44136fa355b3678a",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "c61b2ee5-ecf5-4b4e-8cd4-cc1356839c18#0": {
+   "prompt": "c71399def65211f2",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "c62e9a36-8f20-40e5-a6c7-b9d63d9804e5#0": {
+   "prompt": "aca8004860e1443f",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "c6303a55-280a-43de-aec3-4c4de83f24ab#0": {
+   "prompt": "0787e850bf4e5b14",
+   "frameCards": "543ea2e3ac248696",
+   "allButEffects": "543ea2e3ac248696"
+  },
+  "c638d7d1-a187-421a-98eb-3aae18b97262#0": {
+   "prompt": "44136fa355b3678a",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "c63c3643-9b5b-4ec9-8c72-e3aea6b7b929#0": {
+   "prompt": "4c6809fc8a4f5b4d",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "c641a2c1-7044-4f50-88dd-17a5a58be87d#0": {
+   "prompt": "44136fa355b3678a",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "c6cfd2f6-72e1-4f1e-a87a-3107de8d1852#0": {
+   "prompt": "698013a6e4819bcf",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "c6ec1699-6b51-4832-9e56-6d3e1cc38ce4#0": {
+   "prompt": "44136fa355b3678a",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "c716252c-985c-4eb8-87ed-2bd54acbb2ac#0": {
+   "prompt": "ddaaed048c1eccca",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "c743b6e7-b0b3-45be-aaad-7d3d93de010f#0": {
+   "prompt": "7b4bf41f42e919bc",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "c751beef-7b4b-48e4-8467-63821c724677#0": {
+   "prompt": "e32d1724bef6e8d2",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "c8d7b0b2-a887-4513-a557-6a10ee63a3f2#0": {
+   "prompt": "d72175bb6819540f",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "c92b8d60-7c3c-4665-8c6b-3048736bf8da#0": {
+   "prompt": "307114234b5677d9",
+   "frameCards": "4331b772ca16e8b6",
+   "allButEffects": "4331b772ca16e8b6"
+  },
+  "c94be283-d501-42d5-aab6-7eed66a52741#0": {
+   "prompt": "44136fa355b3678a",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "c97313b9-bab0-47f0-88f5-b15d68b846d5#0": {
+   "prompt": "1e468f7759b9c66a",
+   "frameCards": "fc5abaee063ced4b",
+   "allButEffects": "fc5abaee063ced4b"
+  },
+  "c9e5449f-b377-43b9-8363-ed61c4364bb9#0": {
+   "prompt": "3b3cca6e09673fc1",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "ca740ea8-4e77-4c1a-b7d2-75c953bc8418#0": {
+   "prompt": "19fe9fe17ba4b690",
+   "frameCards": "b8d444c4bc0fd92f",
+   "allButEffects": "b8d444c4bc0fd92f"
+  },
+  "caf6e33e-f371-4c3d-817e-44f33bf443e1#0": {
+   "prompt": "ce1abafe9be76a52",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "caf96126-103c-434e-af53-14c2496ab9da#0": {
+   "prompt": "6573d2ca85f9c24b",
+   "frameCards": "d2ee7497aa94a54f",
+   "allButEffects": "d2ee7497aa94a54f"
+  },
+  "cba0388b-cba3-49b1-a4a6-8ca0ec7f5fc8#0": {
+   "prompt": "a72fa235ba08ba3c",
+   "frameCards": "965c5854a9b2479c",
+   "allButEffects": "965c5854a9b2479c"
+  },
+  "cbaf9927-2133-4123-a0ff-21f69d0959d8#0": {
+   "prompt": "f36106c8e7bc5349",
+   "frameCards": "896eb2ad464453e8",
+   "allButEffects": "896eb2ad464453e8"
+  },
+  "cbe965b2-e743-40b1-be86-208183e13d42#0": {
+   "prompt": "a8bc3250e84e3496",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "cc4b44f5-844f-4042-ae29-e8dc6028577a#0": {
+   "prompt": "6c302081a3f3faf5",
+   "frameCards": "88bc150b6f1f6146",
+   "allButEffects": "88bc150b6f1f6146"
+  },
+  "cc685ac5-1c24-4a54-b80a-fab1555485ad#0": {
+   "prompt": "a712e0e8611d42a4",
+   "frameCards": "a36d4935364fa8b6",
+   "allButEffects": "a36d4935364fa8b6"
+  },
+  "cc796465-9f81-461a-8501-4bee52137f36#0": {
+   "prompt": "ea89b2f8188d2c17",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "cc7a6d67-82c2-4629-b80f-c709628426fa#0": {
+   "prompt": "4f9128094719057b",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "cc8e8df6-f68e-45f8-b118-0a2aeaa2d0e0#0": {
+   "prompt": "f3f5388931bc0a2e",
+   "frameCards": "f1d19d595dc55cd6",
+   "allButEffects": "f1d19d595dc55cd6"
+  },
+  "ccac2625-9527-42ac-9688-884f5dc28e7f#0": {
+   "prompt": "bab56ea0f3394f67",
+   "frameCards": "0d5363bff18b4bf0",
+   "allButEffects": "0d5363bff18b4bf0"
+  },
+  "ccb8eb38-b8e6-4d5c-bfeb-7cf6b0532804#0": {
+   "prompt": "44136fa355b3678a",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "ccd03431-df6e-4a73-9fc3-d2a4ad73b4a3#0": {
+   "prompt": "ccf729527c33f204",
+   "frameCards": "897f19f5744c0c72",
+   "allButEffects": "897f19f5744c0c72"
+  },
+  "cce00cbd-89a0-400e-9da8-a2b48fcaa7ac#0": {
+   "prompt": "d361abbb7f017afa",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "cce322cd-c9d7-48cb-9cb3-bbbf022d7671#0": {
+   "prompt": "3f6d3f4ed8b2abc3",
+   "frameCards": "c604df2482a7b760",
+   "allButEffects": "c604df2482a7b760"
+  },
+  "ccf175f4-b787-478c-8394-86e9bec5c9d9#0": {
+   "prompt": "1b2f70472693ee6a",
+   "frameCards": "837e1563e6ace0a2",
+   "allButEffects": "7bcc45aec636619e"
+  },
+  "cd01ab02-b8d6-480b-9c2e-47d6027fe57a#0": {
+   "prompt": "c57e807aaa09d8a2",
+   "frameCards": "8b7028e626af7f27",
+   "allButEffects": "8b7028e626af7f27"
+  },
+  "cd19586c-5f3e-4862-975f-e4395bc39315#0": {
+   "prompt": "b4d189cb813a3a1e",
+   "frameCards": "b1e6ee9433ad6a83",
+   "allButEffects": "b1e6ee9433ad6a83"
+  },
+  "cd4d0cf7-eb97-45a6-a02f-dc7597477411#0": {
+   "prompt": "5c6cd5eee0d1e00c",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "cd55f345-ed79-46ed-ad5a-ad638acccee5#0": {
+   "prompt": "44136fa355b3678a",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "cd5c5bd9-7f78-4ef6-a882-8b1845d40cbc#0": {
+   "prompt": "a0b0692fea56c85e",
+   "frameCards": "6fe7da69e40f0af2",
+   "allButEffects": "6fe7da69e40f0af2"
+  },
+  "cdd4ac50-7b40-46dc-aae5-6a02c2d4a072#0": {
+   "prompt": "44136fa355b3678a",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "ce3a8619-c67a-458c-8b7c-6f633e69500c#0": {
+   "prompt": "4c3b43da4ba0ba6e",
+   "frameCards": "93fcd12cf6f8cc7b",
+   "allButEffects": "93fcd12cf6f8cc7b"
+  },
+  "ce5ac850-bab1-4d0d-b2ca-d687c595c2cf#0": {
+   "prompt": "54f4674d96d0af5d",
+   "frameCards": "d88de76379685ff1",
+   "allButEffects": "d88de76379685ff1"
+  },
+  "ce9ead98-b7aa-4fee-a881-9f83ced90fd6#0": {
+   "prompt": "6093129c940296e1",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "cea9d141-1a30-4cf9-9068-f55be9ccb279#0": {
+   "prompt": "ac80bda5cfb11fbf",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "ceeb569b-18b7-4778-924d-9b4d93f995cb#0": {
+   "prompt": "854b82ea9b9a236e",
+   "frameCards": "bd9133cbb50f1d8d",
+   "allButEffects": "bd9133cbb50f1d8d"
+  },
+  "cf04b9b5-697c-4bb0-8ae8-74456e51f815#0": {
+   "prompt": "bfde103970492087",
+   "frameCards": "dc6dc40b8998c36c",
+   "allButEffects": "dc6dc40b8998c36c"
+  },
+  "cf26c904-c26c-43af-b054-24b0b6a1f325#0": {
+   "prompt": "7ae25629f0aa1fb1",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "cf38d8f1-0d18-49e7-bcb9-eba9dc2f8cec#0": {
+   "prompt": "44136fa355b3678a",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "cf5f810d-0297-4fd8-b4d8-30d48b962d4e#0": {
+   "prompt": "0983cd2941509274",
+   "frameCards": "c5a6c5479ca108e7",
+   "allButEffects": "c5a6c5479ca108e7"
+  },
+  "cf686f04-e1cb-4552-964a-4a188f5f10f0#0": {
+   "prompt": "a5678e290425880f",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "cfa4058e-0cce-41b6-8525-f77e0929ac80#0": {
+   "prompt": "f4ad0d96429a0cd0",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "cff86a51-0f80-4dcb-aa10-9e916aef3373#0": {
+   "prompt": "04d7cdefb8cc425a",
+   "frameCards": "18f903583a04ba01",
+   "allButEffects": "18f903583a04ba01"
+  },
+  "d00b177c-f85f-41af-8112-d059e2f637e1#0": {
+   "prompt": "70fa8a03117f8232",
+   "frameCards": "a3df721b7c2dad41",
+   "allButEffects": "a3df721b7c2dad41"
+  },
+  "d017e51b-fffe-481d-8c05-51fdd6a823c9#0": {
+   "prompt": "44136fa355b3678a",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "d047c8c4-2247-490f-bc0b-6bf22ae2fde5#0": {
+   "prompt": "8fceb65dd1f1490f",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "d063483b-716e-407c-bb44-ee5e2234fa90#0": {
+   "prompt": "9b4ef3084a8b1334",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "d06a76ff-1086-497a-982d-b343344e710f#0": {
+   "prompt": "7038a5775b4d5061",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "d07d192f-aa5f-4292-ab51-f876cfd28f02#0": {
+   "prompt": "bc0c326b0401c86e",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "d0d49225-21c6-4860-8ffc-ae137bae90a1#0": {
+   "prompt": "627921c356d6726c",
+   "frameCards": "95ceda4dec22e183",
+   "allButEffects": "95ceda4dec22e183"
+  },
+  "d0d95b43-2619-42c9-9cf2-c36caeba4ced#0": {
+   "prompt": "c65d7cb32b47d6c2",
+   "frameCards": "998ddb27f5063a2b",
+   "allButEffects": "998ddb27f5063a2b"
+  },
+  "d11d11a0-b2fb-4fb3-9137-610afd60d3ba#0": {
+   "prompt": "ee513221163a0fd5",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "d123c389-c5fd-482b-bdbb-c6511179fe11#0": {
+   "prompt": "dad11b99f42e6a9a",
+   "frameCards": "8f5fb81dff8ee258",
+   "allButEffects": "8f5fb81dff8ee258"
+  },
+  "d16e1063-0e59-49cb-80a1-dc4d0d001a51#0": {
+   "prompt": "fc89205f594cde0c",
+   "frameCards": "e0f092691c010a1e",
+   "allButEffects": "89f0126863897972"
+  },
+  "d1e78f87-2c3e-4ef1-a44c-068968f2f0c0#0": {
+   "prompt": "bac8551b507a79ac",
+   "frameCards": "1f0d539ed1776fbb",
+   "allButEffects": "1f0d539ed1776fbb"
+  },
+  "d2108d19-acf4-4491-b3ec-db2360e1950a#0": {
+   "prompt": "f3c4d7b9c7af031c",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "d21181e6-7292-4b8d-bcf9-bb0120cb05e5#0": {
+   "prompt": "44136fa355b3678a",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "d272d667-42ad-4514-a812-b72fea511bca#0": {
+   "prompt": "8a0d03f4499b2eb8",
+   "frameCards": "a7771b55bd09d9df",
+   "allButEffects": "a7771b55bd09d9df"
+  },
+  "d281c57b-2ea1-4dca-b6b5-908ba9db684c#0": {
+   "prompt": "9f741ac073443f4d",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "d28c86ea-d8c3-49db-b47a-800d14bcc98e#0": {
+   "prompt": "c157b2a3a0489ce9",
+   "frameCards": "612491eca30f6d2f",
+   "allButEffects": "612491eca30f6d2f"
+  },
+  "d315c921-cf15-46a8-9ba9-8ba1887af628#0": {
+   "prompt": "b0fc6967612a6725",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "d319d952-b45b-4ca2-b765-bc69e10f571c#0": {
+   "prompt": "59f1c1f40ea89622",
+   "frameCards": "f14fbc1403641efd",
+   "allButEffects": "f14fbc1403641efd"
+  },
+  "d349f364-43a9-4daf-b3f6-0f1139cda02f#0": {
+   "prompt": "26d7ff37c9238db9",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "d35d4d4d-cef2-4449-baf6-6e7a53800c5d#0": {
+   "prompt": "994164606f900418",
+   "frameCards": "539e19b6af1c511d",
+   "allButEffects": "539e19b6af1c511d"
+  },
+  "d39e3c7e-394e-4bd2-8b7c-76c3a90ad960#0": {
+   "prompt": "f58661f0c888d632",
+   "frameCards": "1bb2c8376c308419",
+   "allButEffects": "1bb2c8376c308419"
+  },
+  "d3bda65e-32f7-4b69-b4de-e588729c03b3#0": {
+   "prompt": "d83965f6c2ac5836",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "d3e84c21-b55c-4d15-becc-b9e17546e4b1#0": {
+   "prompt": "44136fa355b3678a",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "d41eff5c-6748-4e71-a6cc-2c9ae2456070#0": {
+   "prompt": "725ccf79306d69bb",
+   "frameCards": "efe848c768199fd6",
+   "allButEffects": "efe848c768199fd6"
+  },
+  "d4281b2c-aea2-400c-925d-e717c2c0efbd#0": {
+   "prompt": "58c96448fb273f4f",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "d43be93a-720b-4d57-85a9-d159fadaffd9#0": {
+   "prompt": "d7d14edbe637d120",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "d47e1c0b-a2e6-43c7-8554-32c80f631b95#0": {
+   "prompt": "a47291a8e4baf68f",
+   "frameCards": "38a87deaea4ca1a5",
+   "allButEffects": "38a87deaea4ca1a5"
+  },
+  "d57280f9-e5d3-47f8-a4ff-7ccf5bae355f#0": {
+   "prompt": "44136fa355b3678a",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "d57fe957-570d-4718-87a1-69220ddaa8f6#0": {
+   "prompt": "07610d6e38e87dff",
+   "frameCards": "69cc40897c631eb3",
+   "allButEffects": "ca267435d52ce476"
+  },
+  "d5d8cea9-bc35-4b6a-a7b2-e87dd7b9f04a#0": {
+   "prompt": "cdeefd9a8aca9fc0",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "d5e78e66-8d1f-41c3-aa8e-e0f7a2bc067a#0": {
+   "prompt": "3da2e06e525d2eab",
+   "frameCards": "b93c676dc41d3c36",
+   "allButEffects": "b93c676dc41d3c36"
+  },
+  "d66eb983-3241-4ae1-8783-491f14aed557#0": {
+   "prompt": "ec980dc43bc67ec3",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "d672d1d5-b4d4-4e2e-8e74-4d244363cfa2#0": {
+   "prompt": "9bc11b4721c256ce",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "d688385c-ca46-41d5-887e-be10085a23d8#0": {
+   "prompt": "3dd186f1e6e4a8bd",
+   "frameCards": "eec11cc8b1c57c8c",
+   "allButEffects": "eec11cc8b1c57c8c"
+  },
+  "d6f0bcf8-0cd0-4e42-911a-031ec85ade36#0": {
+   "prompt": "4771ec4dfcb36246",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "d726095d-d0f5-4f93-a256-a5ec068c9a8d#0": {
+   "prompt": "d40e1cd69cac9f5b",
+   "frameCards": "4198a11827cef639",
+   "allButEffects": "4198a11827cef639"
+  },
+  "d73f492d-ccd4-426f-b7e8-d509d3f0f922#0": {
+   "prompt": "68e310abb8f6bcd8",
+   "frameCards": "f93679f309821d5c",
+   "allButEffects": "f93679f309821d5c"
+  },
+  "d7471cf2-eeb6-4b69-b320-23bab900ab45#0": {
+   "prompt": "56a75e8581751128",
+   "frameCards": "0073af8642a2fba1",
+   "allButEffects": "0073af8642a2fba1"
+  },
+  "d78c8125-3e12-48c6-8023-d99518268b11#0": {
+   "prompt": "7197b0fa444b33a1",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "d821b70f-3d4c-4c8f-bc12-c293e0e234f8#0": {
+   "prompt": "d0ca686250e8d4a6",
+   "frameCards": "d4ea74b623be9206",
+   "allButEffects": "d4ea74b623be9206"
+  },
+  "d8d811fc-2fb6-4aa2-93d5-7c9be5d7c8f7#0": {
+   "prompt": "278a873adfdfa27c",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "d91ac898-e109-4480-91d9-6b2050a58a26#0": {
+   "prompt": "44136fa355b3678a",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "d9383539-5f01-4f47-be95-2cc70ae19b2f#0": {
+   "prompt": "977cfb46a59cdf3f",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "d95ecb91-0124-46fa-8cb3-0026a31445ff#0": {
+   "prompt": "202c0dc97c1f6c5f",
+   "frameCards": "5d099cbf85ea9123",
+   "allButEffects": "5d099cbf85ea9123"
+  },
+  "d97a0daa-1639-412e-94ca-f1e248a23d7c#0": {
+   "prompt": "5b48a39549992302",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "d980f642-dc3d-4901-ae02-3df57f73c0a7#0": {
+   "prompt": "911388b4d662e1c2",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "d98e7144-40d7-4c71-ad12-bd57857e4871#0": {
+   "prompt": "7110099769dc5a23",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "d9c984e0-d7cb-4f6f-981c-ab89edaa7f19#0": {
+   "prompt": "41f66345f0e5974d",
+   "frameCards": "a14bf545f1395472",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "da56df00-fd81-459a-a615-3a681078add8#0": {
+   "prompt": "bee0f7eaad9cc3b2",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "da76bff9-4195-4d4b-aeff-a169104f53a3#0": {
+   "prompt": "e367e5085a265993",
+   "frameCards": "4e6fa13bbf608fd9",
+   "allButEffects": "4e6fa13bbf608fd9"
+  },
+  "da872f3b-6bef-4ea4-b687-e7eafebf9abe#0": {
+   "prompt": "27244e92294febe6",
+   "frameCards": "757ad642ffdb4700",
+   "allButEffects": "b33479c6366d8ebc"
+  },
+  "da91bb41-f2c1-4b5a-9bbf-a05067a5eb75#0": {
+   "prompt": "9f41d2203d6111fa",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "db214843-2677-46e7-a6ca-54a551449189#0": {
+   "prompt": "5f055994c2d6d454",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "db256d6a-9737-4709-9e4d-ed24661f4295#0": {
+   "prompt": "aa955f3f11045953",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "dbcb574c-4f9e-4a8c-999f-14654be39c85#0": {
+   "prompt": "9d5490f327584deb",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "dc038d97-8ed0-41e3-9f56-9aae81707d49#0": {
+   "prompt": "4738ab5940483081",
+   "frameCards": "8e109104c84489cc",
+   "allButEffects": "d2f6ae41e6ab5c45"
+  },
+  "dc0e954f-377f-4950-869d-009dbf812126#0": {
+   "prompt": "3884812218432aa3",
+   "frameCards": "ea9792b79670b623",
+   "allButEffects": "6d158faa384c116c"
+  },
+  "dc568fde-3ec1-4c3f-b069-4eb406435a37#0": {
+   "prompt": "cca40da627fb40db",
+   "frameCards": "eaee36f8a8ac747d",
+   "allButEffects": "eaee36f8a8ac747d"
+  },
+  "dc9c6564-1a27-45d1-9e7b-a2805145c1c3#0": {
+   "prompt": "13818b63b7de6c88",
+   "frameCards": "7dfac8ec3d343ea3",
+   "allButEffects": "7dfac8ec3d343ea3"
+  },
+  "dc9cbd7d-27c3-4817-8c20-3fef20dfd837#0": {
+   "prompt": "5ccbda8e618b0787",
+   "frameCards": "1c4b5de0f355b9c8",
+   "allButEffects": "1c4b5de0f355b9c8"
+  },
+  "dd3e2489-51e2-481f-b950-cee637373df9#0": {
+   "prompt": "6249da57edc7708b",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "dd55f275-b465-4e51-8c0f-c364a03984e8#0": {
+   "prompt": "e30741ca601a5512",
+   "frameCards": "ae21c3bdeee59af0",
+   "allButEffects": "ae21c3bdeee59af0"
+  },
+  "dd892342-ea3e-4b8c-9070-d4fcc075115a#0": {
+   "prompt": "7d8e50f76e2abaaa",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "dd9ffdbc-52f3-4cbd-8826-3635285679d5#0": {
+   "prompt": "603e07d979e82127",
+   "frameCards": "76dfbb7aecba2bcf",
+   "allButEffects": "af1c3af21d7cdc5d"
+  },
+  "dda036fd-40e0-4368-86e0-72c03d5fc753#0": {
+   "prompt": "c1b93c850d530d14",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "dda721f2-39d2-436a-b19f-61bb1794092f#0": {
+   "prompt": "44136fa355b3678a",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "ddd78888-ff5c-467c-b312-50b4c394691f#0": {
+   "prompt": "748193a60cc911b8",
+   "frameCards": "bcee3de5974c88db",
+   "allButEffects": "bcee3de5974c88db"
+  },
+  "de3b2ec3-cd22-499a-8c45-5dcc411bfb1f#0": {
+   "prompt": "f2d4b9e807641e04",
+   "frameCards": "5e1bce67f65df2f8",
+   "allButEffects": "b87cc9e7e9548747"
+  },
+  "de421196-dce8-401d-b5c0-626521895c0d#0": {
+   "prompt": "6084574837187470",
+   "frameCards": "1f141ed846bd6198",
+   "allButEffects": "1f141ed846bd6198"
+  },
+  "de7ff637-e64a-4614-bb66-b0de07f8c7a9#0": {
+   "prompt": "aea9fa73fddf2972",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "de9db992-2858-4c4f-aa47-b5c93c994e0f#0": {
+   "prompt": "0ee70ae3963e5338",
+   "frameCards": "877652211802df19",
+   "allButEffects": "561b58e9b08ab9c4"
+  },
+  "defd4110-242f-4b59-a704-26befc613eb3#0": {
+   "prompt": "d59bb3e8954794ec",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "df649d6a-75e2-429f-b3f9-e005390a8360#0": {
+   "prompt": "cce3466b40900bc4",
+   "frameCards": "6743e3955728609c",
+   "allButEffects": "4414937445db2eed"
+  },
+  "df99ee87-5751-4110-82ce-2830b4b47b12#0": {
+   "prompt": "44136fa355b3678a",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "e02b9685-6373-4c05-b9d2-5eb85a891a96#0": {
+   "prompt": "109421795dc68667",
+   "frameCards": "018c49d6b6307477",
+   "allButEffects": "018c49d6b6307477"
+  },
+  "e052874b-b9ce-45fd-91a6-48c753c013b5#0": {
+   "prompt": "a72d28d6a9c7912c",
+   "frameCards": "7cf02c217b31c8d1",
+   "allButEffects": "7cf02c217b31c8d1"
+  },
+  "e0a2ff2c-f98f-4a2f-9cc6-6157f7278589#0": {
+   "prompt": "44136fa355b3678a",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "e0a6b43d-9ebd-4c89-a5fd-fb475a129253#0": {
+   "prompt": "ba3cd18be80e359c",
+   "frameCards": "a26627b237143fc7",
+   "allButEffects": "a26627b237143fc7"
+  },
+  "e11364ad-fbcd-4e29-b857-6017669082f5#0": {
+   "prompt": "8157c97fd03ebf1b",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "e1897f3a-e116-4812-9739-4205df628cf5#0": {
+   "prompt": "ca0f3d53b0ba636e",
+   "frameCards": "b4f9b5eb20593d46",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "e18a40c1-d6b3-4dd6-80d2-ae4b570adc3e#0": {
+   "prompt": "3f11b87db5038f30",
+   "frameCards": "1e286e92cfcc2a3b",
+   "allButEffects": "1e286e92cfcc2a3b"
+  },
+  "e20e6be3-5478-448d-9ca6-ccab6755c85a#0": {
+   "prompt": "9d12f2682f8e6564",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "e215dc1c-1862-4129-b4c1-0d3e4bbadebf#0": {
+   "prompt": "c2141e6e6367ddef",
+   "frameCards": "db2ae9a160177b9b",
+   "allButEffects": "10a40b5fe890c915"
+  },
+  "e2fff345-d38d-4877-9cad-c4d8dbaa87cd#0": {
+   "prompt": "c2fb41fda57c813c",
+   "frameCards": "8b89450b0d8e97b7",
+   "allButEffects": "8b89450b0d8e97b7"
+  },
+  "e336b288-718c-4b33-96ac-b17fd17fe628#0": {
+   "prompt": "43b6ebe37bce645b",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "e38175e3-490b-46b8-9446-00e8fe96d355#0": {
+   "prompt": "dd0425fff28095d4",
+   "frameCards": "8c1589bb65b817e6",
+   "allButEffects": "8c1589bb65b817e6"
+  },
+  "e3e2751d-8491-4ade-9672-4ae3989396b7#0": {
+   "prompt": "6b3c437186dfcb38",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "e41cefc9-0ac7-497e-9f8f-eee8a6fe0f61#0": {
+   "prompt": "d8b314985a49cbd7",
+   "frameCards": "722135869b93aecb",
+   "allButEffects": "722135869b93aecb"
+  },
+  "e44bccc9-3ef1-4759-9551-1d24c3297aa3#0": {
+   "prompt": "a82487130bba53ba",
+   "frameCards": "c0530739f4971d17",
+   "allButEffects": "c0530739f4971d17"
+  },
+  "e4689a5b-a4d1-4257-8e31-d05f9e3bed1a#0": {
+   "prompt": "aab9e782d67c9cb1",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "e4792d5f-5e9f-4731-9394-d05aa978c065#0": {
+   "prompt": "c8b5788d9a692ef2",
+   "frameCards": "acd89f5f4c518fe9",
+   "allButEffects": "acd89f5f4c518fe9"
+  },
+  "e53ed8c4-f006-418d-ae2e-21bc8963530b#0": {
+   "prompt": "3a5a804bf81a1967",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "e573ebf8-9f09-44bc-9a3d-0d0f53976892#0": {
+   "prompt": "4b7cb424b881f0f4",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "e59573d7-8a21-4883-862c-ee438e0b8527#0": {
+   "prompt": "50a9d8007574dcd6",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "e5e391be-71fb-4102-b66d-da655658b5ef#0": {
+   "prompt": "b1d692e1db03c62b",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "e6881879-ac2b-4f4a-82d5-eddd416aab35#0": {
+   "prompt": "167f8cebeb219344",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "e6b9dd6b-3e59-4ed5-af67-5407aab5a20e#0": {
+   "prompt": "c01e1e492fca2f00",
+   "frameCards": "c171614c063a50ca",
+   "allButEffects": "c171614c063a50ca"
+  },
+  "e7032781-e764-4099-8998-884e2c8f4678#0": {
+   "prompt": "353f4409761c5237",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "e735a787-0c6c-416f-bbc1-af44b372ce14#0": {
+   "prompt": "033ba011d3a6e513",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "e7995d6f-8978-4bcc-b278-16bea454e378#0": {
+   "prompt": "44136fa355b3678a",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "e7ba0fb6-a089-4e9e-a181-111af83352ea#0": {
+   "prompt": "b89fa79fc9e8cf3e",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "e8c67d82-1e6f-4e27-b31c-095a14aea59c#0": {
+   "prompt": "7a2f949865032b68",
+   "frameCards": "9f87f9d2a026244b",
+   "allButEffects": "9f87f9d2a026244b"
+  },
+  "e8eaf1c1-f180-47e4-be62-3735261edc8f#0": {
+   "prompt": "44136fa355b3678a",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "e8f878f5-2426-40b2-939d-9af55c65bf5a#0": {
+   "prompt": "a9631cc16d92d97d",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "e95021ca-538c-401f-bbbb-11289fb54987#0": {
+   "prompt": "894d5cf9062bf5e3",
+   "frameCards": "53b41ab0dae62bef",
+   "allButEffects": "53b41ab0dae62bef"
+  },
+  "e95021ca-538c-401f-bbbb-11289fb54987#1": {
+   "prompt": "44136fa355b3678a",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "e9db1eae-335f-4179-8275-ed291dcfe6ce#0": {
+   "prompt": "44136fa355b3678a",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "e9dbfd54-ffb9-4dab-846c-183879796fde#0": {
+   "prompt": "2986d4ab9bc3aa23",
+   "frameCards": "61e1b44895647186",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "ea1559fe-8189-47a9-9416-bf3ee3d7148d#0": {
+   "prompt": "385ec123105165cf",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "ea7fae19-f759-4617-9c08-5c30ac3cebd2#0": {
+   "prompt": "c3d0f0cd09f8ed15",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "ea9185ac-31ec-43bc-bb1a-eafa6168cb8c#0": {
+   "prompt": "d0bb74d5a4b18451",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "eb4f6bcb-5415-4653-9a4c-fe4b4636db9c#0": {
+   "prompt": "44136fa355b3678a",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "eb690485-c336-46f5-b223-42c2946b5f08#0": {
+   "prompt": "44136fa355b3678a",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "eb79304f-7fa5-4ca0-9085-392b8f10a180#0": {
+   "prompt": "09762c1be4632a2a",
+   "frameCards": "8c2e27fc4c508463",
+   "allButEffects": "8c2e27fc4c508463"
+  },
+  "ebaa2d64-8819-4d64-8695-44a7e09def02#0": {
+   "prompt": "dfb9a10db9f2a21b",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "ebbb64e7-0b61-4bb6-865c-0a6f4cc9bc4d#0": {
+   "prompt": "44136fa355b3678a",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "ebf30ef2-e9f8-4d52-b350-9f790baf6617#0": {
+   "prompt": "d5184c893de9e79a",
+   "frameCards": "b630bc00ada4589f",
+   "allButEffects": "0646f59d24b64020"
+  },
+  "ebfd1f3c-0bfe-4e75-8453-3285c750a0a4#0": {
+   "prompt": "7124d7e55e60c4f8",
+   "frameCards": "d9cec4c0cae51c4e",
+   "allButEffects": "d9cec4c0cae51c4e"
+  },
+  "ec193bdd-e63a-4adc-a9e3-5f8049bc5fb7#0": {
+   "prompt": "4b07f562b32f73d3",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "ec607482-6110-4c2d-a933-7a3f6d38e4de#0": {
+   "prompt": "b516a7f492b5b8fd",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "ec63ac4c-8d0b-4b4c-a01d-915d0599613c#0": {
+   "prompt": "44136fa355b3678a",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "ec69b072-9db9-4edd-9675-f9eac960b8d4#0": {
+   "prompt": "3d4813bfc7c0ec94",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "ecb6f171-9a76-47b6-94af-98fba2be6409#0": {
+   "prompt": "44136fa355b3678a",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "ecfecfef-d710-4c73-ac3e-e21fae050b9f#0": {
+   "prompt": "50a02ed5e40409f0",
+   "frameCards": "6c0241353c7007fb",
+   "allButEffects": "6c0241353c7007fb"
+  },
+  "ed9cf8d6-01f9-4a29-9c0c-e36e9607c2ab#0": {
+   "prompt": "44136fa355b3678a",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "edb90f40-5a41-4961-9784-4f4347a25308#0": {
+   "prompt": "de5d5b82ea19a62e",
+   "frameCards": "39fd590a5f6bb3bc",
+   "allButEffects": "39fd590a5f6bb3bc"
+  },
+  "edefb08a-afd8-4758-ac36-14e0e624ff64#0": {
+   "prompt": "d2aa34f97a3c24fd",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "ee016819-432d-42bc-aa70-3a1cd7fd195b#0": {
+   "prompt": "f9f4d5814c24c72a",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "eee24a50-4ae7-4aff-ab34-17a961d7d061#0": {
+   "prompt": "02630d4eaad9bddc",
+   "frameCards": "77ca3f3275e376a8",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "ef1f37e1-e5a5-4d7e-a691-970b7ea40072#0": {
+   "prompt": "fcd94f81fec0754e",
+   "frameCards": "8f68f86cd3b3cb6b",
+   "allButEffects": "8f68f86cd3b3cb6b"
+  },
+  "ef2298dc-dd21-4ebf-aacb-94f6bbdc6104#0": {
+   "prompt": "619df64ac2e5eaf7",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "ef3b35e8-082d-4c1c-85c4-13ab9a724855#0": {
+   "prompt": "1498845903dcee25",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "efa853ab-9fa3-4467-b4f3-bc3b5bf9b759#0": {
+   "prompt": "e2ca830fccb0b2a0",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "efcf42ef-dacb-4830-a4c8-1ebe9664123e#0": {
+   "prompt": "17ac31c9477b1190",
+   "frameCards": "a2107f2a02d88fb3",
+   "allButEffects": "a2107f2a02d88fb3"
+  },
+  "f094f649-3a21-4353-b1ae-fc990b238dbf#0": {
+   "prompt": "921305c6f215c8c0",
+   "frameCards": "fa4aea24a3d4037b",
+   "allButEffects": "fa4aea24a3d4037b"
+  },
+  "f0c50aa5-665c-4e39-b136-9c8ddb4a8a0d#0": {
+   "prompt": "1a93cfec225cb101",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "f0eafaad-6cf5-4614-bbc9-fe8aee157c8f#0": {
+   "prompt": "9d53d6334e619639",
+   "frameCards": "6380832c0fe655ae",
+   "allButEffects": "6380832c0fe655ae"
+  },
+  "f14ad2d0-8bd9-4737-9499-2521486eebd9#0": {
+   "prompt": "44136fa355b3678a",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "f1b17ba4-3afe-4a53-b267-c49271575dbc#0": {
+   "prompt": "69fd33945aecd285",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "f1c682c7-abf3-431d-9f21-c410646f78f6#0": {
+   "prompt": "47ff8e6205c07a4d",
+   "frameCards": "eb017a9a99238dcd",
+   "allButEffects": "eb017a9a99238dcd"
+  },
+  "f1d002c4-4554-4533-88bd-6424165edef9#0": {
+   "prompt": "2e634cbc97c813e5",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "f202a4c5-1be4-4b98-8e32-29c93f2a0056#0": {
+   "prompt": "4ad5782992b51c9f",
+   "frameCards": "24b7d816123f0e12",
+   "allButEffects": "24b7d816123f0e12"
+  },
+  "f2f1792a-ed2e-40ff-b8e2-54f084b44af8#0": {
+   "prompt": "44136fa355b3678a",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "f338aaa8-d1fb-4665-8f56-ccffab56517d#0": {
+   "prompt": "44136fa355b3678a",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "f35ac28b-6129-490e-aab3-c75ada196f1d#0": {
+   "prompt": "7ca0ec9c7f4794d9",
+   "frameCards": "f9300280d01b8fdd",
+   "allButEffects": "f9300280d01b8fdd"
+  },
+  "f35e2b0d-e6a7-4b0a-b03f-fe08a39a74fa#0": {
+   "prompt": "8e59f5732ab335f7",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "f36c874b-5e37-4a1c-828a-7244a59aceec#0": {
+   "prompt": "4ac73f659c6d4e24",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "f4465426-acbf-4756-8a2b-7aca642ebef2#0": {
+   "prompt": "b2ee9180fbab2b13",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "f45458cf-ae56-4aac-a1b8-55f8e01573af#0": {
+   "prompt": "4606831771b7e65f",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "f4b56cb1-0f94-4b99-990b-b6b9b4852064#0": {
+   "prompt": "a36b97f54a0f3ed5",
+   "frameCards": "17548706e4e8155a",
+   "allButEffects": "17548706e4e8155a"
+  },
+  "f4dd55fd-98c9-4479-abf8-0f85d69743ea#0": {
+   "prompt": "27a6963ab956bf95",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "f4fb54c1-18fe-4046-8111-1ebc885ad3d0#0": {
+   "prompt": "722df24378328f06",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "f56784de-65dc-4aca-a4c2-abb3e41fc76b#0": {
+   "prompt": "7641f89a94e57502",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "f5e636a8-873b-4901-aa54-e70b364ef735#0": {
+   "prompt": "1c353d0f7157f638",
+   "frameCards": "46150f5ae91dc2eb",
+   "allButEffects": "60642817c3351263"
+  },
+  "f66c745a-6583-4f78-8c4c-693ffba1c366#0": {
+   "prompt": "601cfa16fe26d898",
+   "frameCards": "2976ea07e8cf9d99",
+   "allButEffects": "2976ea07e8cf9d99"
+  },
+  "f66e658b-9135-41da-a055-58ff45330188#0": {
+   "prompt": "9f2e271af242e322",
+   "frameCards": "1866d043dbea2df9",
+   "allButEffects": "1866d043dbea2df9"
+  },
+  "f77c4709-e4f4-49af-956a-c9c0790ca1a5#0": {
+   "prompt": "811af9faa1961f88",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "f78da596-feff-4f39-954f-33a05c09c6d0#0": {
+   "prompt": "9868f8be80dea2e6",
+   "frameCards": "fa6412bb622ea758",
+   "allButEffects": "fa6412bb622ea758"
+  },
+  "f816d982-fdc5-4eeb-a889-db8ab49c039c#0": {
+   "prompt": "fe7fbf0390210fef",
+   "frameCards": "620a1b2b064a49f3",
+   "allButEffects": "b429e39bb82731b9"
+  },
+  "f856b7b0-a71f-4d6d-b018-03d2c0967447#0": {
+   "prompt": "d7cd0b94513aad75",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "f8c32b9d-1789-41e1-a143-6e186bb3ad60#0": {
+   "prompt": "44136fa355b3678a",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "f8feecfb-2397-4e6e-ad84-88493ce15078#0": {
+   "prompt": "385de5606d29a731",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "f91159c0-827d-4cde-b707-32f0d4868b32#0": {
+   "prompt": "cf3c83255e921573",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "f9f54b3b-3b18-4997-9d29-afda53b79662#0": {
+   "prompt": "44136fa355b3678a",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "fa5dabcb-b6bc-49f3-a368-e72d2fa8dcfa#0": {
+   "prompt": "16699b103bf19e1a",
+   "frameCards": "1d373e50084251e4",
+   "allButEffects": "1d373e50084251e4"
+  },
+  "fa6fcabe-0bce-406d-b1f7-4e188e0fe65e#0": {
+   "prompt": "44136fa355b3678a",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "fac3bb10-f66b-4b93-a270-da4dff48096b#0": {
+   "prompt": "aa85743c5c5cb953",
+   "frameCards": "4b09a4cd3aca2eed",
+   "allButEffects": "4b09a4cd3aca2eed"
+  },
+  "fb14e70e-f4b0-4b78-aa90-996563eb29a0#0": {
+   "prompt": "5d8eadf5a38c3d0b",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "fb3fa1da-d50e-4a85-aada-4b8e2277a89e#0": {
+   "prompt": "846c8533794e0d4c",
+   "frameCards": "ab8e14a58385dc58",
+   "allButEffects": "ab8e14a58385dc58"
+  },
+  "fb460e00-62df-4a14-8058-ffe1655ffdff#0": {
+   "prompt": "068898535598bf1a",
+   "frameCards": "4857893d3fd9fdeb",
+   "allButEffects": "4857893d3fd9fdeb"
+  },
+  "fb8111e0-2873-4281-9466-b7d48aaf7b41#0": {
+   "prompt": "902f6aaa549f3fdc",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "fb92ada7-0cd2-4acd-a98a-824a04f5e6f9#0": {
+   "prompt": "44136fa355b3678a",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "fbf6caf8-0704-464c-a3af-9257ca44944f#0": {
+   "prompt": "1a0e7a6b5df5ec60",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "fc2b8c19-fbd3-4e98-9928-399636e1c2e3#0": {
+   "prompt": "29948d61f21a0acb",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "fc4874c7-5088-4428-83d8-ec5a3e95d174#0": {
+   "prompt": "95d695339b05bdc8",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "fc71b381-d7a0-4cd7-8e8e-4888541881c5#0": {
+   "prompt": "8ea2b5a7164aaedf",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "fcab7e57-5d9f-457a-9494-4b25d0622a07#0": {
+   "prompt": "44136fa355b3678a",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "fd17a5db-eaee-463a-a297-b94a3a01d0d5#0": {
+   "prompt": "2d6a46abc40ec670",
+   "frameCards": "a8e3b273849c0c4b",
+   "allButEffects": "a8e3b273849c0c4b"
+  },
+  "fd3092d3-374a-440a-91f3-16c60eebb189#0": {
+   "prompt": "44136fa355b3678a",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "fd3acf47-4dd5-4036-a77f-4603e7c568ea#0": {
+   "prompt": "7a68f0ab7794b12d",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "fd6991ef-ac3f-43c3-9cb2-528296709502#0": {
+   "prompt": "44136fa355b3678a",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "fd79d78d-beff-4500-82e1-1c5e94ad7e0d#0": {
+   "prompt": "48d3970bdeb54bd3",
+   "frameCards": "562053fb0ab50d3a",
+   "allButEffects": "562053fb0ab50d3a"
+  },
+  "fdde7dc6-c7ff-4c17-a0f3-7c3d40bbf85e#0": {
+   "prompt": "3696bde6ecf6e1de",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "feb76934-7c01-4be9-be1e-243e33aced46#0": {
+   "prompt": "d7306983649008e9",
+   "frameCards": "48741b34134399ef",
+   "allButEffects": "48741b34134399ef"
+  },
+  "ff5072f1-0a78-4a97-b790-d158c86f5e92#0": {
+   "prompt": "616a73e5caeec88d",
+   "frameCards": "4f53cda18c2baa0c",
+   "allButEffects": "4f53cda18c2baa0c"
+  },
+  "fff8a7a7-e351-4c59-9339-3c7de412dfab#0": {
+   "prompt": "1d35dc7c10eabf9f",
+   "frameCards": "63baea33e9af29da",
+   "allButEffects": "9c7b74162c018768"
+  }
+ }
+}

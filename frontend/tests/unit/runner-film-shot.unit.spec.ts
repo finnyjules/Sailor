@@ -12,9 +12,9 @@ import { VIEW_REF_REFUSED } from '#shared/pricing/clipSettings'
 import { PROVIDER_TYPES, isRunnerEligible, isShotDirected, runnerTakesNode } from '#shared/runner/eligibility'
 import { planNode } from '~~/server/runner/executors'
 import { resolveShotRefs, shotRefFilenames, shotRefProblem } from '~~/server/runner/shotRefs'
-import { ELEMENTS_ONLY_KLING_WORDS, KLING_ELEMENTS_COMFY_WORDS, SEEDANCE_TOO_MUCH_VIDEO, SEEDANCE_UNMEASURED_REFERENCE, requestProblems } from '~~/server/runner/requestRules'
+import { ELEMENTS_ONLY_KLING_WORDS, KLING_ELEMENTS_COMFY_WORDS, SEEDANCE_TOO_MUCH_VIDEO, SHOT_FRAMES_RUNNER_ONLY_WORDS, SEEDANCE_UNMEASURED_REFERENCE, requestProblems } from '~~/server/runner/requestRules'
 import { runnerReferenceProblems, seedanceReferenceSeconds } from '~~/server/utils/graphInputSeconds'
-import { VEO_31_ONE_PICTURE, VEO_31_REFS_WORDS } from '~~/server/runner/generators/video'
+import { KLING_LAST_FRAME_NEEDS_FIRST, VEO_31_ONE_PICTURE, VEO_31_REFS_RATIO_WORDS, VEO_31_REFS_WORDS } from '~~/server/runner/generators/video'
 import { KLING_ELEMENTS_NEED_FRAME } from '~~/server/runner/generators/twins'
 import { nodeCredits } from '~~/server/runner/metering'
 import { extractFileRefs, GRAPH_FILE_READERS } from '~~/server/utils/engineFileSurface'
@@ -192,7 +192,9 @@ describe('planning a shot-directed Film a shot', () => {
 describe('requestProblems for Film a shot', () => {
   const el = { frontal_image_url: view('face.png'), reference_image_urls: [] }
   it('the ComfyUI path refuses elements, on Film a shot and Generate a video', () => {
+    // Its first frame rides in the options too, which Python reads for Seedance only (Ruling I).
     expect(requestProblems({ n: shot('kling-v3', { image_url: view('s.png'), elements: [el] }) })).toEqual([
+      { nodeId: 'n', classType: 'FilmShotNode', input: 'model_options', message: SHOT_FRAMES_RUNNER_ONLY_WORDS },
       { nodeId: 'n', classType: 'FilmShotNode', input: 'model_options', message: KLING_ELEMENTS_COMFY_WORDS },
     ])
     expect(requestProblems({ n: video('kling-v3', { elements: [el] }, true) })).toEqual([
@@ -281,5 +283,66 @@ describe('fix round (Ruling D): Seedance reference lengths on a shot-directed Fi
   it('the ComfyUI gate is unchanged: it does not read a Film a shot', async () => {
     expect(await seedanceReferenceSeconds(overlong(), read)).toEqual([])
     expect(await seedanceReferenceSeconds(overlong(), read, { strict: true })).toEqual([])
+  })
+})
+
+// ── Stage 3 final fix wave (rulings H, I, L) ───────────────────────────────
+describe('final fix: frames and ratios on a shot-directed Film a shot', () => {
+  it('Ruling I: the ComfyUI path refuses option frames on every model but Seedance 2.0', () => {
+    const words = 'This model gets Shot Director\'s first and last frames only through Sailor\'s runner, and this shot can\'t go there. Pick Seedance, or remove the frames.'
+    expect(SHOT_FRAMES_RUNNER_ONLY_WORDS).toBe(words)
+    for (const model of ['veo-3.1', 'veo-3.1-fast', 'kling-v3']) {
+      const first = requestProblems({ n: shot(model, { image_url: view('f.png') }) })
+      expect(first.map(p => p.message), model).toContain(words)
+      const last = requestProblems({ n: shot(model, { image_url: view('f.png'), end_image_url: view('l.png') }) })
+      expect(last.map(p => p.message), model).toContain(words)
+    }
+    // Seedance 2.0 reads them in Python; a wired picture alone is Python's own first frame; an undirected shot is not judged.
+    expect(requestProblems({ n: shot('seedance-2.0', { image_url: view('f.png'), end_image_url: view('l.png') }) })).toEqual([])
+    expect(requestProblems({ n: shot('veo-3.1', {}, { image: true }) })).toEqual([])
+    expect(requestProblems({ n: shot('veo-3.1', { image_url: 'https://x/f.png' }, { directed: false }) }).map(p => p.message)).not.toContain(words)
+    // The runner gate is not this rule's.
+    expect(requestProblems({ n: shot('veo-3.1', { image_url: view('f.png') }) }, { runner: true })).toEqual([])
+  })
+
+  it('Ruling H: Kling 3 sends its last frame on fal and on the Replicate backup, and refuses one with no first frame', async () => {
+    const p = await plan(shot('kling-v3', { image_url: view('f.png'), end_image_url: view('l.png') }))
+    if (p.kind !== 'provider') throw new Error('not a provider plan')
+    expect(p.endpoint).toBe('fal-ai/kling-video/v3/pro/image-to-video')
+    expect(p.payload.start_image_url).toBe('https://fal/f.png')
+    expect(p.payload.end_image_url).toBe('https://fal/l.png')
+    expect(p.backup?.payload.start_image).toBe('https://fal/f.png')
+    expect(p.backup?.payload.end_image).toBe('https://fal/l.png')
+    await expect(plan(shot('kling-v3', { end_image_url: view('l.png') }))).rejects.toThrow(KLING_LAST_FRAME_NEEDS_FIRST)
+    expect(requestProblems({ n: shot('kling-v3', { end_image_url: view('l.png') }) }, { runner: true })).toEqual([
+      { nodeId: 'n', classType: 'FilmShotNode', input: 'model_options', message: KLING_LAST_FRAME_NEEDS_FIRST },
+    ])
+  })
+
+  it('Ruling L: Veo 3.1 reference pictures refuse a ratio other than 16:9 or 9:16, before the hold and at planning', async () => {
+    expect(VEO_31_REFS_RATIO_WORDS).toBe('Veo 3.1 reference pictures work only in 16:9 or 9:16.')
+    for (const model of ['veo-3.1', 'veo-3.1-fast']) {
+      const square = shot(model, { image_urls: [view('a.png')] })
+      square.inputs.aspect_ratio = '1:1'
+      expect(requestProblems({ n: square }, { runner: true }), model).toEqual([
+        { nodeId: 'n', classType: 'FilmShotNode', input: 'aspect_ratio', message: VEO_31_REFS_RATIO_WORDS },
+      ])
+      await expect(plan(square), model).rejects.toThrow(VEO_31_REFS_RATIO_WORDS)
+      const g = video(model, { image_urls: ['https://x/a.png'] })
+      g.inputs.aspect_ratio = '4:3'
+      expect(requestProblems({ n: g }, { runner: true }), model).toEqual([
+        { nodeId: 'n', classType: 'GenerateVideoNode', input: 'aspect_ratio', message: VEO_31_REFS_RATIO_WORDS },
+      ])
+      const tall = shot(model, { image_urls: [view('a.png')] })
+      tall.inputs.aspect_ratio = '9:16'
+      expect(requestProblems({ n: tall }, { runner: true })).toEqual([])
+      const p = await plan(tall)
+      if (p.kind !== 'provider') throw new Error('not a provider plan')
+      expect(p.payload.aspect_ratio).toBe('9:16')
+      // Without references the ratio rule doesn't apply (text-to-video keeps its own).
+      const t2v = shot(model)
+      t2v.inputs.aspect_ratio = '1:1'
+      expect(requestProblems({ n: t2v }, { runner: true })).toEqual([])
+    }
   })
 })

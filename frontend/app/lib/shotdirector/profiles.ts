@@ -38,6 +38,10 @@ export interface ModelProfile {
   requiresFirstFrame: boolean
   /** can cast references and a first frame be sent together. */
   refsWithFirstFrame: boolean
+  /** allowed clip lengths in seconds, or null when the model takes any length (no clamp). */
+  durations: number[] | null
+  /** the ratios reference mode takes and the words for another; absent = any ratio. */
+  referenceAspectRatios?: { allowed: readonly string[], message: string }
   /** in-prompt reference tag, e.g. [Image1] / @Element2 / "image 3". */
   refTag(kind: RefKind, slot: number): string
   /** assemble the model's Replicate/fal input from the sheet + compiled prompt (+ resolved cast bundles for `elements` mode). */
@@ -88,6 +92,7 @@ export const SEEDANCE_PROFILE: ModelProfile = {
   supportsLastFrame: true,
   requiresFirstFrame: false,
   refsWithFirstFrame: false,
+  durations: null,
   refTag: atTag,
   buildInput(sheet, prompt) {
     const input: ModelInput = {
@@ -132,6 +137,7 @@ export const KLING_V3_PROFILE: ModelProfile = {
   supportsLastFrame: true,
   requiresFirstFrame: true,
   refsWithFirstFrame: true,
+  durations: [5, 10, 15],
   refTag: (_kind, slot) => `@Element${slot}`,
   buildInput(sheet, prompt, cast) {
     const input: ModelInput = {
@@ -147,6 +153,9 @@ export const KLING_V3_PROFILE: ModelProfile = {
     return input
   },
 }
+
+/** The runner's words for another ratio (server/runner/generators/video.ts VEO_31_REFS_RATIO_WORDS; a test pins them equal). */
+export const VEO_31_REFS_RATIO_WORDS = 'Veo 3.1 reference pictures work only in 16:9 or 9:16.'
 
 function veoProfile(id: string, label: string): ModelProfile {
   return {
@@ -167,6 +176,10 @@ function veoProfile(id: string, label: string): ModelProfile {
     supportsLastFrame: false,
     requiresFirstFrame: false,
     refsWithFirstFrame: false,
+    durations: [8],
+    // fal's Veo 3.1 reference-to-video takes 16:9 or 9:16 only (Ruling L; the
+    // runner's builder refuses another ratio with the same words).
+    referenceAspectRatios: { allowed: ['16:9', '9:16'], message: VEO_31_REFS_RATIO_WORDS },
     refTag: (_kind, slot) => `image ${slot}`,
     buildInput(sheet, prompt) {
       const input: ModelInput = {
@@ -209,6 +222,7 @@ export const SEEDANCE_STUB_OTHER: ModelProfile = {
   supportsLastFrame: false,
   requiresFirstFrame: false,
   refsWithFirstFrame: false,
+  durations: null,
   refTag: bracketTag,
   buildInput(sheet, prompt) {
     return {
@@ -237,4 +251,26 @@ export const SHOT_MODEL_CHOICES: { id: string; label: string }[] = [
 
 export function getProfile(id: string): ModelProfile {
   return SHOT_PROFILES_BY_ID[id] ?? SEEDANCE_PROFILE
+}
+
+/**
+ * The clip length the model actually renders for a requested `seconds` — the
+ * duration widget (dispatch.ts) and estimateShotUSD (price.ts) both call this
+ * so the number shown and the number charged always agree. `null` durations
+ * (no clamp, e.g. Seedance) pass `seconds` through unchanged, except `<= 0`
+ * ("Auto"/unset), which falls back to today's dispatch default (5). A clamped
+ * profile (Kling, Veo) maps `<= 0` to its first allowed value, and otherwise
+ * to the nearest allowed value — the larger one on a tie.
+ */
+export function clampDuration(profile: ModelProfile, seconds: number): number {
+  const allowed = profile.durations
+  if (!allowed) return seconds <= 0 ? 5 : seconds
+  if (seconds <= 0) return allowed[0]!
+  let best = allowed[0]!
+  for (const d of allowed) {
+    const distance = Math.abs(d - seconds)
+    const bestDistance = Math.abs(best - seconds)
+    if (distance < bestDistance || (distance === bestDistance && d > best)) best = d
+  }
+  return best
 }

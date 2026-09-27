@@ -32,7 +32,7 @@ describe('useFramePenSession — new drawings', () => {
     expect(a.target).toEqual({ kind: 'new' })
     expect(a.doc.value.entities).toEqual([])
     expect(a.pen.tool.value).toBe('path')
-    expect(a.pen.options.tools).toEqual(['select', 'path', 'curve', 'line', 'circle', 'point', 'trim', 'cut', 'dissolve'])
+    expect(a.pen.options.tools).toEqual(['select', 'path', 'curve', 'line', 'circle', 'point', 'trim', 'cut', 'dissolve', 'fill'])
     expect(a.view.value).toEqual(newDrawingView(W, H))
     s.cancelSession()
     s.open({ kind: 'new' })

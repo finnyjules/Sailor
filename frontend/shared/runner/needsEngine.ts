@@ -12,6 +12,7 @@ import { isRunnerEligible, runnerTakesNode } from './eligibility'
 import { pruneInvalidOutputs } from './validate'
 import { NO_FAMILIES, type RunnerFamily } from './families'
 import { blockedModelRefusal, blockedModelUses, blockedModelsResponse, promptNodeTitle } from './blockedModels'
+import { shaderEngineReason } from './shaderBakeKey'
 
 /** The fallback title for a node with neither a title nor a known display name. */
 export const UNNAMED_NODE = 'Unnamed node'
@@ -30,18 +31,38 @@ export function nodesNeedingEngine(
   prompt: ApiPrompt,
   opts: { runnerOn: boolean; families?: ReadonlySet<RunnerFamily>; titleOf: (id: string) => string },
 ): string[] {
-  const families = opts.families ?? NO_FAMILIES
   if (!opts.runnerOn) return [...new Set(Object.keys(prompt).map(id => opts.titleOf(id)))]
+  return [...new Set(blockedNodes(prompt, opts.families ?? NO_FAMILIES).ids.map(id => opts.titleOf(id)))]
+}
+
+/** The ids (in the prompt ComfyUI would run) the runner refuses, with that prompt. */
+function blockedNodes(prompt: ApiPrompt, families: ReadonlySet<RunnerFamily>): { run: ApiPrompt; ids: string[] } {
   // What ComfyUI would run: outputs that fail validation are dropped first
   // (shared/runner/validate.ts). When every output fails, the runner itself
   // refuses the workflow with ComfyUI's message: nothing needs the engine.
   const pruned = pruneInvalidOutputs(prompt, families)
-  if (pruned.failed) return []
+  if (pruned.failed) return { run: {}, ids: [] }
   const run = pruned.prompt
   const ids = Object.keys(run)
-  let blocked = ids.filter(id => !runnerTakesNode(run, id, families))
-  if (!blocked.length && !isRunnerEligible(run, families, { afterPruning: pruned.dropped.length > 0 })) blocked = ids
-  return [...new Set(blocked.map(id => opts.titleOf(id)))]
+  const blocked = ids.filter(id => !runnerTakesNode(run, id, families))
+  if (!blocked.length && !isRunnerEligible(run, families, { afterPruning: pruned.dropped.length > 0 })) return { run, ids }
+  return { run, ids: blocked }
+}
+
+/**
+ * The plain reasons the shared rule gives for the nodes that need the engine
+ * (nodesNeedingEngine's nodes), each once, in prompt order (R2.10: a Shader
+ * effect whose picture is made in the same run). Empty with the runner off.
+ */
+export function needsEngineReasons(
+  prompt: ApiPrompt,
+  opts: { runnerOn: boolean; families?: ReadonlySet<RunnerFamily> },
+): string[] {
+  if (!opts.runnerOn) return []
+  const families = opts.families ?? NO_FAMILIES
+  const { run, ids } = blockedNodes(prompt, families)
+  const reasons = ids.map(id => shaderEngineReason(run, id, families)).filter((r): r is string => !!r)
+  return [...new Set(reasons)]
 }
 
 interface WorkflowNodeLike { id: string | number; type?: string; title?: string }
@@ -70,17 +91,18 @@ export function workflowNodeTitles(
 const MAX_NAMED = 4
 
 /**
- * The refusal's description: the nodes by their own titles, quoted.
+ * The refusal's description: the nodes by their own titles, quoted, then any
+ * plain reasons (needsEngineReasons), each a sentence.
  * `Only the engine can run “Upscale” and “Blur image”.`
  */
-export function needsEngineDescription(titles: string[]): string {
+export function needsEngineDescription(titles: string[], reasons: readonly string[] = []): string {
   const quoted = titles.slice(0, MAX_NAMED).map(t => `“${t}”`)
   const more = titles.length - quoted.length
   if (more > 0) quoted.push(`${more} more`)
   const list = quoted.length <= 1
     ? (quoted[0] ?? 'this workflow')
     : `${quoted.slice(0, -1).join(', ')} and ${quoted[quoted.length - 1]}`
-  return `Only the engine can run ${list}.`
+  return [`Only the engine can run ${list}.`, ...reasons.map(r => (/[.!?]$/.test(r) ? r : `${r}.`))].join(' ')
 }
 
 /**

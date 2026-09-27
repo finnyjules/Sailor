@@ -47,14 +47,13 @@ import { solve, type DragTarget } from '~/lib/sketch/solve'
 import { bowTangentSnap, pieceOf, tangentRuleFor, curveKey, equivalentRuleKey, type BowTangentSnap } from '~/lib/sketch/tangency'
 import { dist, type Vec2 } from '~/lib/sketch/geom'
 import { constraintMarks, type ConstraintMark, type ArcDimensionMark } from '~/lib/sketch/annotate'
-import { applyView, type ViewMatrix } from '~/lib/sketch/view'
+import { applyView, invertView, isMirrored, type ViewMatrix } from '~/lib/sketch/view'
 import { pxToUnits, SNAP_PX, BOW_PX, MIN_RADIUS_PX } from '~/lib/sketch/tolerance'
 import {
   availableConstraints as availableConstraintsFor,
   orderRefs as orderRefsFor,
-  segmentConstraintRefs,
-  pointSegmentRefs,
   tangentRuleForSelection,
+  ruleSpecFor,
   type RuleOption,
 } from './penRules'
 import { createPenHistory } from './penHistory'
@@ -62,8 +61,20 @@ import { handlePenKey, isCleanupKey, type PenKeyContext, NUDGE_PX, NUDGE_PX_SHIF
 import { createPenCopies, type PendingOp } from './penCopies'
 import { nearestCurve, spanAt, curveGeom, paramOf, pointAt, type Span, type CurveGeom } from '~/lib/sketch/crossings'
 import { removeSpan, removeSegment, cutAt, canDissolve, dissolveAt, mergePoints, sameKey } from '~/lib/sketch/trim'
+import { FILL_GAP_PX, fillTarget, toggleFillAt, fillState, gapMarkers, reconcileFills, withoutFills } from '~/lib/sketch/fills'
+import { facesD } from '~/lib/sketch/faces'
 import { cloneDoc } from '~/lib/sketch/clone'
-import { runCleanup, type CleanupResult, type CleanupScope, type CleanupStrength, type FixKind } from '~/lib/sketch/cleanup'
+import { runCleanup, STRENGTHS, type CleanupResult, type CleanupScope, type CleanupStrength, type FixKind } from '~/lib/sketch/cleanup'
+import { sketchPathData } from '~/lib/sketch/sketchPath'
+import { extractPieces, insertPieces, piecesCentre, hasClosedPieces, scalePieces } from '~/lib/sketch/clipboard'
+import { selectionLabel, topLevelIds, type PieceRef } from '~/lib/sketch/pieces'
+import { SIZE_REFUSED, STAY_PX, drawingDirForScreenAngle, arcEndForSweep, radiusPinOf, circleRadiusRuleOf, checkSizeEdit, stayed } from '~/lib/sketch/sizes'
+import { penClipboard, setPenClipboard, nextPasteStep, PASTE_STEP_PX } from './penClipboard'
+import { OK, no, REASON, type ActionState } from './penReasons'
+import {
+  ACTIONS, menuFor, runItem, wheelFor, wheelDirAt, ruleState, pickRuleState, ruleItemId, ruleItems as registryRuleItems,
+  type PenActionHost, type PenMenuItem, type WheelSlice, type WheelDir,
+} from './penActions'
 
 // NUDGE_PX / NUDGE_PX_SHIFT / screenDeltaToDrawing now live in penKeys.ts
 // (they exist only for the arrow-key nudge in the key handler); re-exported
@@ -73,15 +84,35 @@ export { NUDGE_PX, NUDGE_PX_SHIFT, screenDeltaToDrawing }
 // 'path' is the arc Pen; 'curve' is the Bézier Curve tool. Both add to the
 // same pending path (see selectTool / curveDown). 'trim' removes the piece of
 // a curve between crossings, 'cut' adds a point on a line or arc, 'dissolve'
-// merges the two pieces at a point back into one (see the Trim section).
-export type PenTool = 'select' | 'point' | 'line' | 'circle' | 'path' | 'curve' | 'trim' | 'cut' | 'dissolve'
+// merges the two pieces at a point back into one (see the Trim section);
+// 'fill' fills and empties the areas the drawing encloses (pen stage 7).
+export type PenTool = 'select' | 'point' | 'line' | 'circle' | 'path' | 'curve' | 'trim' | 'cut' | 'dissolve' | 'fill'
 // cleanup: Clean up (pen stage 5) is offered unless a host sets it false
 export interface PenOptions { openOnly?: boolean; tools?: PenTool[]; cleanup?: boolean }
 
+// pen stage 6: the right-click list menu and the action wheel, as pen state
+// (replaced on every change). `at` is the host's client px (where to draw);
+// `drawingAt` is where the menu's Paste lands.
+export interface PenMenu { at: Vec2; drawingAt: Vec2 | null; header: string | null; groups: PenMenuItem[][]; active: string | null }
+export interface PenWheel { at: Vec2; layout: 'point' | 'segment'; slices: WheelSlice[]; hover: WheelDir | null }
+
 export const SPARKLE_LIFETIME_MS = 380
+
+// pen stage 7: a Fill click that lands on no enclosed area
+export const FILL_MISS = 'Click inside an enclosed area'
+export interface FillView { d: string; gaps: Vec2[]; filled: number; asleep: number }
+const NO_FILLS: FillView = Object.freeze({ d: '', gaps: [], filled: 0, asleep: 0 }) as FillView
+
+// every pen gets its own number: a copy remembers the pen it came from, so a
+// paste into another pen can resize it to that pen's units (penClipboard.ts)
+let penSeq = 0
 
 // status when a join would need two fixed points to meet
 const BOTH_FIXED = 'Those two points are both fixed in different places'
+// a typed size of zero or less (Properties): said, not silently put back
+const LENGTH_POSITIVE = 'A length must be more than 0'
+const RADIUS_POSITIVE = 'A radius must be more than 0'
+const SWEEP_POSITIVE = 'A sweep must be more than 0°'
 // a text guide split in two by Trim or Delete: which piece the text follows
 const DISSOLVE_REFUSED = 'These two sides don’t line up, so they can’t merge'
 export const GUIDE_SPLIT_STATUS = 'The text follows the longer piece'
@@ -266,13 +297,13 @@ export function usePen(opts: {
   // to it); openOnly drops Circle even if the host listed it — an open-path
   // guide has no use for a closed shape. See PenToolbar for how `tools` gates
   // the toolbar's own buttons.
-  const ALL_PEN_TOOLS: PenTool[] = ['select', 'point', 'line', 'circle', 'path', 'curve', 'trim', 'cut', 'dissolve']
+  const ALL_PEN_TOOLS: PenTool[] = ['select', 'point', 'line', 'circle', 'path', 'curve', 'trim', 'cut', 'dissolve', 'fill']
   const openOnly = !!opts.options?.openOnly
   const cleanupAllowed = opts.options?.cleanup !== false
   const resolvedTools: PenTool[] = (() => {
     let list = opts.options?.tools ? opts.options.tools.filter(t => ALL_PEN_TOOLS.includes(t)) : [...ALL_PEN_TOOLS]
     if (!list.includes('select')) list = ['select', ...list]
-    if (openOnly) list = list.filter(t => t !== 'circle')
+    if (openOnly) list = list.filter(t => t !== 'circle' && t !== 'fill')
     return list
   })()
   // frozen: fixed for the pen's lifetime, same as resolvedTools/openOnly above
@@ -319,6 +350,7 @@ export function usePen(opts: {
   // (additive here; pickSegment is always an Option-click). A plain click
   // replaces everything; any other mix clears the segment selection.
   function pick(id: EntityId, additive = false) {
+    highlight.value = []   // the Properties hover belongs to the old selection
     if (!additive) { clearSegSel(); selection.value = [id]; return }
     const i = selection.value.indexOf(id)
     if (i >= 0) selection.value.splice(i, 1)
@@ -327,7 +359,11 @@ export function usePen(opts: {
     const pairs = selectedSegments.value.length === 1 && (sel.length === 0 || (sel.length === 1 && (isPointId(sel[0]!) || isLineOrCircleId(sel[0]!))))
     if (!pairs) clearSegSel()
   }
-  function clearSel() { selection.value = [] }
+  function clearSel() { selection.value = []; highlight.value = [] }
+  // what the Properties panel lights while a rule row is hovered (pen stage
+  // 6) — view state, no history; replaced, never mutated, so the overlay's
+  // computeds follow; cleared whenever the selection is replaced
+  const highlight = shallowRef<PieceRef[]>([])
 
   // --- segment selection: individual { pathId, segIndex } picks, distinct from
   // (and mutually exclusive with) whole-entity `selection` above. additive=false
@@ -410,8 +446,30 @@ export function usePen(opts: {
   // transient-state resets, in the same order the inline version had, before
   // firing onChange.
   const penHistory = createPenHistory({ doc, onChange: opts.onChange, onLiveChange: opts.onLiveChange })
-  const { commitHistory, initHistory, canUndo, canRedo } = penHistory
+  const { initHistory, canUndo, canRedo } = penHistory
+  // Every settled step carries the fills first (pen stage 7): each area that
+  // takes up part of a filled area is filled (a split fills both halves), two
+  // fills on one area become one, a fill whose area opened sleeps — measured
+  // against the drawing as the last step left it. A drawing with no fills
+  // does no work here. (A function declaration, so createPenCopies and every
+  // verb get the settling version.)
+  function commitHistory() {
+    settleFills()
+    penHistory.commitHistory()
+  }
+  function settleFills(): void {
+    const now = toRaw(doc.value)
+    if (!now.fills?.length) { if (now.fillGap != null) delete now.fillGap; return }
+    const before = penHistory.current()
+    if (!before) return
+    const next = reconcileFills(before, now)
+    if (next.length) now.fills = next
+    else { delete now.fills; delete now.fillGap }
+  }
+  /** bumps on every commit, undo, redo and fresh start (penHistory.ts) */
+  const docRevision = penHistory.rev
   function undo() {
+    closeMenus()
     // with a Clean up preview open, undo only closes it (as ⌘Z does) — it
     // never also steps back over the drawing under the preview
     if (cleanup.value) { cancelCleanup(); return }
@@ -431,6 +489,7 @@ export function usePen(opts: {
     opts.onChange?.()
   }
   function redo() {
+    closeMenus()
     if (cleanup.value) { cancelCleanup(); return }   // likewise: only closes the preview
     if (trimPress) trimUp()
     if (arcDrag) arcDragEnd()
@@ -470,12 +529,30 @@ export function usePen(opts: {
       if (handled) { ev.preventDefault(); ev.stopPropagation() }
       return handled
     }
+    // pen stage 6: an open menu owns the keys (a ⌘ combo closes it and then
+    // goes on as usual), so does an open wheel (likewise)
+    if (menu.value) {
+      if ((ev.metaKey || ev.ctrlKey) && !MODIFIER_KEYS.has(ev.key)) closeMenu()
+      else {
+        const handled = menuKey(ev)
+        if (handled) { ev.preventDefault(); ev.stopPropagation() }
+        return handled
+      }
+    }
+    if (wheel.value) {
+      if ((ev.metaKey || ev.ctrlKey) && !MODIFIER_KEYS.has(ev.key)) closeWheel()
+      else {
+        const handled = wheelKey(ev)
+        if (handled) { ev.preventDefault(); ev.stopPropagation() }
+        return handled
+      }
+    }
     if (arcDrag && !MODIFIER_KEYS.has(ev.key)) arcDragEnd()
     const ctx: PenKeyContext = {
       tool, pendingPath, dimBuffer, pendingOp, status, selection, selectedSegments, view: opts.view,
       cancelGesture: opts.cancelGesture,
       cancelPendingOp, undo, redo, cancelPath, commitDimension, finishPath, removeLastAnchor, del, nudge,
-      selectTool, isToolAllowed, clearTrimGhosts, cleanupAllowed, toggleCleanup,
+      selectTool, isToolAllowed, clearTrimGhosts, cleanupAllowed, toggleCleanup, runKeyAction,
     }
     const handled = handlePenKey(ev, ctx, local)
     if (handled) { ev.preventDefault(); ev.stopPropagation() }
@@ -488,25 +565,23 @@ export function usePen(opts: {
 
   function onBlur() {}
 
-  function apply(kind: ConstraintKind, value?: number) {
-    // one point + one segment: On curve / Midpoint (pointSegmentRefs)
-    if (selectedSegments.value.length && selection.value.length) {
-      const p = selection.value[0]!
-      const refs = selection.value.length === 1 && selectedSegments.value.length === 1
-        ? pointSegmentRefs(doc.value, kind, p, selectedSegments.value[0]!)
-        : null
-      if (refs) { const id = addConstraint(doc.value, kind, refs, value); sparkleAtConstraint(id) }
-      clearSel()
-      clearSegSel()
-      runSolve()
-      commitHistory()
-      return
-    }
+  // `keep` (Properties' + list): the selection comes back after the rule is
+  // written — every piece still in the drawing (after a Coincident merge, the
+  // kept point) — so the new rule shows in the list it was added from. The
+  // menu and the rules row clear it, as since stage 1.
+  function keepSelectionAfter(sel: EntityId[], segs: { pathId: EntityId; segIndex: number }[]): void {
+    selection.value = [...sel]
+    selectedSegments.value = segs.map(s => ({ ...s }))
+    pruneSelections()
+  }
+  function apply(kind: ConstraintKind, value?: number, keep_ = false) {
+    const sel0 = [...selection.value], segs0 = selectedSegments.value.map(s => ({ ...s }))
+    const spec = ruleSpecFor(doc.value, selection.value, selectedSegments.value, { kind, label: '' }, value)
     // two points: Coincident makes them ONE point — the second picked merges
     // into the first, which stays where it is (a `coincident` rule is only
     // ever read back from older drawings)
-    if (kind === 'coincident' && selection.value.length === 2 && selection.value.every(isPointId)) {
-      const [keep, gone] = selection.value as [EntityId, EntityId]
+    if (spec && 'merge' in spec) {
+      const [keep, gone] = spec.merge
       const refusal = joinRefusal(gone, keep)
       if (refusal) { status.value = refusal; return }
       clearSel()
@@ -518,48 +593,47 @@ export function usePen(opts: {
       const k = doc.value.entities.find(e => e.id === keep)
       if (k?.kind === 'point') sparkle(k.x, k.y)
       commitHistory()
+      if (keep_) keepSelectionAfter(sel0, segs0)
       return
     }
-    if (selectedSegments.value.length) {
-      const refs = segmentConstraintRefs(doc.value, kind, selectedSegments.value)
-      if (refs) { const id = addConstraint(doc.value, kind, refs, value); sparkleAtConstraint(id) }
-      clearSegSel()
-      runSolve()
-      commitHistory()
-      return
-    }
-    const refs = orderRefsFor(doc.value, kind, selection.value)
-    const id = addConstraint(doc.value, kind, refs, value)
-    sparkleAtConstraint(id)
+    // every other rule: written from ruleSpecFor (penRules.ts) — one point +
+    // one segment (On curve / Midpoint), segments, or entities
+    if (spec) { const id = addConstraint(doc.value, spec.kind, spec.refs, spec.value); sparkleAtConstraint(id) }
     clearSel()
+    clearSegSel()
     runSolve()
     commitHistory()
+    if (keep_) keepSelectionAfter(sel0, segs0)
   }
 
   // Tangent (penRules tangentRuleForSelection): the rule for the two selected
   // pieces — the joint form where they meet, tangentLineArc / tangentArcs
   // where they don't. A rule already there that says the same (whatever order
   // its refs were written in — equivalentRuleKey) is not added twice.
-  function applyTangent() {
+  function applyTangent(keep = false) {
+    const sel0 = [...selection.value], segs0 = selectedSegments.value.map(s => ({ ...s }))
     const rule = tangentRuleForSelection(doc.value, selection.value, selectedSegments.value)
     clearSel()
     clearSegSel()
-    if (!rule) return
+    const back = () => { if (keep) keepSelectionAfter(sel0, segs0) }
+    if (!rule) { back(); return }
     const key = equivalentRuleKey(doc.value, rule)
-    if (doc.value.constraints.some(c => equivalentRuleKey(doc.value, c) === key)) return   // already there — no step
+    if (doc.value.constraints.some(c => equivalentRuleKey(doc.value, c) === key)) { back(); return }   // already there — no step
     const id = addConstraint(doc.value, rule.kind, rule.refs, rule.value)
     runSolve()
     sparkleAtConstraint(id)
     commitHistory()
+    back()
   }
 
-  async function applyWithValue(v: { kind: ConstraintKind; label: string; value?: boolean; tangent?: boolean }) {
-    if (v.tangent) { applyTangent(); return }
-    if (!v.value) { apply(v.kind); return }
+  async function applyWithValue(v: { kind: ConstraintKind; label: string; value?: boolean; tangent?: boolean }, o: { keepSelection?: boolean } = {}) {
+    const keep = !!o.keepSelection
+    if (v.tangent) { applyTangent(keep); return }
+    if (!v.value) { apply(v.kind, undefined, keep); return }
     const n = await requestValue(v.label, 3)
     if (n == null) return                    // cancelled → no constraint (Bug 3)
     if (!Number.isFinite(n)) return           // invalid → no constraint (Bug 3)
-    apply(v.kind, n)
+    apply(v.kind, n, keep)
   }
 
   // Deletes the selected entities, and any Option-selected segments through
@@ -1408,7 +1482,7 @@ export function usePen(opts: {
     // Select: the join a point drag would make on release (dropSnap below)
     if (t === 'select') { const d = dropSnap.value; return d ? { x: d.x, y: d.y, kind: snapPreviewKind(d) } : null }
     // otherwise only the tools that place points (never Trim, Cut or Dissolve)
-    if (!c || t === 'trim' || t === 'cut' || t === 'dissolve') return null
+    if (!c || t === 'trim' || t === 'cut' || t === 'dissolve' || t === 'fill') return null
     if (t === 'circle' && pending.value?.kind === 'circle') return null
     const base = t === 'path' ? (placementPreview.value ?? c) : c
     const ex = [...handleIds()]
@@ -1875,8 +1949,48 @@ export function usePen(opts: {
     dissolveMove(x, y)
   }
 
+  // --- Fill (pen stage 7: lib/sketch/faces.ts + fills.ts) ---
+  // Hovering shows the area under the pointer (fillHover: its outline in
+  // drawing space, and whether it is filled — a click then empties it); a
+  // click fills or empties it as one step. Faces are cached by geometry
+  // (facesFor), so a hover where nothing moved is a lookup, and read on the
+  // raw drawing (never through Vue's proxies). The first fill fixes the
+  // drawing's gap (FILL_GAP_PX at this zoom, stored in drawing units). A
+  // Clean up preview blocks the tool (its preview is not the drawing).
+  const fillHover = shallowRef<{ d: string; filled: boolean } | null>(null)
+  const fillGapUnits = () => pxToUnits(FILL_GAP_PX, opts.view.value)
+  function fillMove(x: number, y: number) {
+    if (tool.value !== 'fill' || cleanup.value) { if (fillHover.value) fillHover.value = null; return }
+    const t = fillTarget(toRaw(doc.value), { x, y }, fillGapUnits())
+    const prev = fillHover.value
+    if (!t) { if (prev) fillHover.value = null; return }
+    if (!prev || prev.d !== t.d || prev.filled !== t.filled) fillHover.value = { d: t.d, filled: t.filled }
+  }
+  function fillClick(x: number, y: number) {
+    if (tool.value !== 'fill' || cleanup.value) return
+    closeMenus()
+    const raw = toRaw(doc.value)
+    const hit = fillTarget(raw, { x, y }, fillGapUnits())
+    if (!hit) { status.value = FILL_MISS; return }
+    if (!toggleFillAt(raw, { x, y }, fillGapUnits())) return
+    commitHistory()
+    status.value = hit.filled ? 'Emptied' : 'Filled'
+    fillHover.value = null
+    fillMove(x, y)
+  }
+  /** What the overlay shows for fills: the filled areas as one outline
+   *  (drawing space), the rings at the open ends of a sleeping fill's drawing,
+   *  and how many areas are filled / fills sleep. Nothing to do without fills. */
+  function fillView(): FillView {
+    const raw = toRaw(doc.value)
+    if (!raw.fills?.length) return NO_FILLS
+    const st = fillState(raw)
+    return { d: st.filled.length ? facesD(st.fs, st.filled) : '', gaps: gapMarkers(raw), filled: st.filled.length, asleep: st.asleep.length }
+  }
+
   // the pointer left the drawing: nothing is under it any more
   function clearToolHover() {
+    fillHover.value = null
     trimHover.value = null
     cutHover.value = null
     dissolveHover.value = null
@@ -1936,6 +2050,438 @@ export function usePen(opts: {
     clearSel(); runSolve(); commitHistory()
   }
 
+  // --- Copy / Paste / Select all / Dissolve a point (pen stage 6) ---
+  // The pen's own clipboard (penClipboard.ts) holds a copy of the pieces and
+  // the rules among them, shared by every pen on the page; pasting gives the
+  // pieces fresh ids (lib/sketch/clipboard.ts). Copy as SVG writes the
+  // selection's outline — the pen page's Copy SVG format — to the system
+  // clipboard. Copy and Select all write no history; Paste and Dissolve are
+  // one step each.
+  const hasPick = () => selection.value.length > 0 || selectedSegments.value.length > 0
+  const penId = ++penSeq
+  // the host's drawing area, in screen px (PenOverlay reports its size): a
+  // paste from another pen lands in its middle
+  const viewSize = shallowRef<{ width: number; height: number } | null>(null)
+  function setViewSize(width: number, height: number): void {
+    const v = viewSize.value
+    if (!v || v.width !== width || v.height !== height) viewSize.value = { width, height }
+  }
+  function viewMiddle(): Vec2 | null {
+    const v = viewSize.value, inv = invertView(opts.view.value)
+    return v && inv && v.width > 0 && v.height > 0 ? applyView(inv, { x: v.width / 2, y: v.height / 2 }) : null
+  }
+  function copySelection(): boolean {
+    if (!hasPick()) return false
+    const clip = extractPieces(doc.value, selection.value, selectedSegments.value)
+    if (!clip.entities.length) return false
+    setPenClipboard(clip, { penId, unitsPerPx: pxToUnits(1, opts.view.value), mirrored: isMirrored(opts.view.value) })
+    status.value = `Copied ${selectionLabel(doc.value, selection.value, selectedSegments.value)}`
+    return true
+  }
+  function pasteState(): ActionState {
+    const c = penClipboard.value
+    if (!c) return no(REASON.emptyClip)
+    if (openOnly && hasClosedPieces(c.doc)) return no(REASON.openOnly)
+    return OK
+  }
+  // `at` (the menu's Paste): the copy's centre lands there; else (⌘V) 16 px
+  // down-right on screen of where it was copied, 16 px more per paste.
+  // Copied in ANOTHER pen (another host, drawing in its own units): the copy
+  // is first resized about its middle to the same on-screen size (the ratio
+  // of the two pens' units per px) and turned the same way up, and ⌘V centres
+  // it on the middle of this pen's view before the 16 px steps.
+  function paste(at?: Vec2 | null): boolean {
+    if (!pasteState().ok) return false
+    const c = penClipboard.value!
+    if (tool.value !== 'select') selectTool('select')
+    // a pen that can't fill (a text guide) takes the pieces without their fills
+    let clip = openOnly ? withoutFills(c.doc) : c.doc
+    const foreign = c.penId != null && c.penId !== penId
+    if (foreign && c.unitsPerPx && c.unitsPerPx > 0) {
+      const factor = pxToUnits(1, opts.view.value) / c.unitsPerPx
+      const flipY = !!c.mirrored !== isMirrored(opts.view.value)
+      if (Number.isFinite(factor) && factor > 0 && (Math.abs(factor - 1) > 1e-12 || flipY)) clip = scalePieces(clip, factor, flipY)
+    }
+    const ctr = piecesCentre(clip)
+    let offset: Vec2 = { x: 0, y: 0 }
+    if (at) {
+      offset = { x: at.x - ctr.x, y: at.y - ctr.y }
+    } else {
+      const mid = foreign ? viewMiddle() : null
+      if (mid) offset = { x: mid.x - ctr.x, y: mid.y - ctr.y }
+      const step = screenDeltaToDrawing(opts.view.value, PASTE_STEP_PX, PASTE_STEP_PX)
+      const k = nextPasteStep()
+      if (step) offset = { x: offset.x + step.x * k, y: offset.y + step.y * k }
+    }
+    const { top } = insertPieces(doc.value, clip, offset)
+    clearSegSel()
+    selection.value = top
+    runSolve()
+    commitHistory()
+    status.value = `Pasted ${selectionLabel(doc.value, top, [])}`
+    return true
+  }
+  function copySvg(): string {
+    if (!hasPick()) return ''
+    const d = sketchPathData(extractPieces(doc.value, selection.value, selectedSegments.value))
+    if (!d) return ''
+    try { if (typeof navigator !== 'undefined') navigator.clipboard?.writeText(d)?.catch?.(() => {}) } catch {}
+    status.value = 'Copied as SVG'
+    return d
+  }
+  function selectAll(): boolean {
+    const ids = topLevelIds(doc.value)
+    if (!ids.length) return false
+    if (tool.value !== 'select') selectTool('select')
+    clearSegSel()
+    selection.value = ids
+    return true
+  }
+  // Dissolve on one selected point: it must sit between two pieces of a path
+  // (an open path's ends don't) — the Dissolve tool's rule
+  function dissolveSpot(id: EntityId): { pathId: EntityId; anchorIndex: number } | null {
+    for (const e of doc.value.entities) {
+      if (e.kind !== 'path') continue
+      const n = e.anchors.length
+      for (let k = 0; k < n; k++) {
+        if (e.anchors[k] !== id) continue
+        if (e.closed ? n >= 3 : k > 0 && k < n - 1) return { pathId: e.id, anchorIndex: k }
+      }
+    }
+    return null
+  }
+  function dissolveState(id: EntityId): ActionState {
+    const s = dissolveSpot(id)
+    if (!s) return no(REASON.notBetween)
+    return canDissolve(doc.value, s.pathId, s.anchorIndex, pxToUnits(DISSOLVE_PX, opts.view.value), DISSOLVE_DEG) ? OK : no(REASON.noMerge)
+  }
+  function dissolvePoint(id: EntityId): boolean {
+    const s = dissolveSpot(id)
+    const p = doc.value.entities.find(e => e.id === id)
+    if (!s || p?.kind !== 'point') return false
+    const { x, y } = p
+    const res = dissolveAt(doc.value, s.pathId, s.anchorIndex, pxToUnits(DISSOLVE_PX, opts.view.value), DISSOLVE_DEG)
+    if (!res.ok) { status.value = DISSOLVE_REFUSED; return false }
+    clearSel()
+    clearSegSel()
+    runSolve()
+    commitHistory()
+    sparkle(x, y)
+    return true
+  }
+
+  // --- Properties: typed sizes and the hover highlight (pen stage 6) ---
+  // A typed size is checked first on a copy — only the window round it
+  // (checkSizeEdit, the stage-5 window solve; never a big drawing whole). A
+  // certain "no" refuses it and changes nothing. Else the pen's normal solve
+  // runs on a plain copy (the dragged and stay points held, any temporary
+  // rule on the copy only); only when it settles are its positions copied
+  // into the drawing, as one step (an uncertain check is never a refusal on
+  // a guess). No live-change signal: a refused size never reaches a host.
+  // `seeds` are what the edit touches when it neither drags nor adds a rule
+  // (a rule's value changed). `stay` are the points a drag must leave where
+  // they are for the typed size to be kept (a line's other end, an arc's
+  // centre and start) — a solve that meets the rules by moving them has lost
+  // the typed size, and that is a refusal too.
+  type SizeEdit = { drag?: DragTarget; temp?: { kind: ConstraintKind; refs: EntityId[]; value: number }; seeds?: EntityId[]; stay?: EntityId[] }
+  function tryEdit(edit: (d: SketchDoc) => SizeEdit | null, own?: [EntityId, EntityId]): boolean {
+    const plan = edit(cloneDoc(doc.value))
+    if (!plan) return false
+    const seeds = plan.drag ? [plan.drag.point] : plan.temp ? plan.temp.refs : plan.seeds ?? []
+    const stay = plan.stay ?? []
+    const unitsPerPx = pxToUnits(1, opts.view.value)
+    // a plain copy with the edit made: the dragged point at its target, any
+    // temporary rule added, a rule's value changed
+    const trialOf = (): SketchDoc => {
+      const t = cloneDoc(doc.value)
+      const p = edit(t)!
+      if (p.drag) { const q = ptOf(t, p.drag.point); if (q) { q.x = p.drag.x; q.y = p.drag.y } }
+      if (p.temp) t.constraints.push({ id: '__size', kind: p.temp.kind, refs: [...p.temp.refs], value: p.temp.value })
+      return t
+    }
+    const verdict = checkSizeEdit(doc.value, {
+      fresh: trialOf, seeds, held: new Set([...(plan.drag ? [plan.drag.point] : []), ...stay]), unitsPerPx, own, stay,
+    })
+    if (verdict === 'refuse') { status.value = SIZE_REFUSED; return false }
+    // the pen's normal solve, on a plain copy with the dragged and the stay
+    // points held — never the live path (onLiveChange would hand a host a
+    // drawing that may yet be refused); the drawing changes only on success
+    const trial = trialOf()
+    for (const e of trial.entities) if (e.kind === 'point' && (e.id === plan.drag?.point || stay.includes(e.id))) e.fixed = true
+    const res = solve(trial, { maxIter: 120 })
+    if (!res.converged || !stayed(doc.value, trial, stay, STAY_PX * unitsPerPx)) { status.value = SIZE_REFUSED; return false }
+    edit(doc.value)   // a rule's value, a circle's radius
+    const solved = new Map(trial.entities.map(e => [e.id, e]))
+    for (const e of doc.value.entities) {
+      const t = solved.get(e.id)
+      if (e.kind === 'point' && t?.kind === 'point') { e.x = t.x; e.y = t.y }
+      else if (e.kind === 'circle' && t?.kind === 'circle') e.r = t.r
+    }
+    status.value = `solved · ${doc.value.entities.length} ent · ${doc.value.constraints.length} con`
+    commitHistory()
+    return true
+  }
+  const ptOf = (d: SketchDoc, id: EntityId) => { const p = d.entities.find(e => e.id === id); return p?.kind === 'point' ? p : null }
+  function setPointXY(id: EntityId, x: number, y: number): boolean {
+    const p = ptOf(doc.value, id)
+    if (!p || !Number.isFinite(x) || !Number.isFinite(y)) return false
+    if (p.fixed) { status.value = 'Fixed points stay where they are'; return false }
+    return tryEdit(() => ({ drag: { point: id, x, y } }))
+  }
+  // move the free end of a–b so it runs `len` along `dir` from the other end
+  function moveLineEnd(a: EntityId, b: EntityId, dirOf: (A: Vec2, B: Vec2) => Vec2 | null, lenOf: (A: Vec2, B: Vec2) => number): boolean {
+    const A0 = ptOf(doc.value, a), B0 = ptOf(doc.value, b)
+    if (!A0 || !B0) return false
+    if (A0.fixed && B0.fixed) { status.value = 'Fixed points stay where they are'; return false }
+    // a zero-length line: no direction to lengthen along, no length to turn
+    if (!dirOf(A0, B0) || !(lenOf(A0, B0) > 0)) { status.value = 'That line has no direction'; return false }
+    return tryEdit(d => {
+      const A = ptOf(d, a), B = ptOf(d, b)
+      if (!A || !B || (A.fixed && B.fixed)) return null
+      const dir = dirOf(A, B), len = lenOf(A, B)
+      if (!dir || !(len > 0)) return null
+      if (!B.fixed) return { drag: { point: b, x: A.x + dir.x * len, y: A.y + dir.y * len }, stay: [a] }
+      return { drag: { point: a, x: B.x - dir.x * len, y: B.y - dir.y * len }, stay: [b] }
+    }, [a, b])
+  }
+  const unitDir = (A: Vec2, B: Vec2): Vec2 | null => { const n = Math.hypot(B.x - A.x, B.y - A.y); return n > 1e-12 ? { x: (B.x - A.x) / n, y: (B.y - A.y) / n } : null }
+  function setLineLength(a: EntityId, b: EntityId, len: number): boolean {
+    if (!(len > 0)) { if (Number.isFinite(len)) status.value = LENGTH_POSITIVE; return false }
+    return moveLineEnd(a, b, unitDir, () => len)
+  }
+  function setLineAngle(a: EntityId, b: EntityId, deg: number): boolean {
+    if (!Number.isFinite(deg)) return false
+    return moveLineEnd(a, b, () => drawingDirForScreenAngle(opts.view.value, deg), (A, B) => Math.hypot(B.x - A.x, B.y - A.y))
+  }
+  function arcParts(d: SketchDoc, pathId: EntityId, segIndex: number) {
+    const p = d.entities.find(e => e.id === pathId)
+    if (p?.kind !== 'path') return null
+    const seg = p.segments[segIndex]
+    if (seg?.kind !== 'arc') return null
+    const s = p.anchors[segIndex], e = p.anchors[(segIndex + 1) % p.anchors.length]
+    return s && e ? { c: seg.center, s, e, sweep: seg.sweep } : null
+  }
+  function setArcRadiusValue(pathId: EntityId, segIndex: number, r: number): boolean {
+    if (!(r > 0)) { if (Number.isFinite(r)) status.value = RADIUS_POSITIVE; return false }
+    return tryEdit(d => {
+      const a = arcParts(d, pathId, segIndex)
+      if (!a) return null
+      const pin = radiusPinOf(d, a.c, a.s)
+      if (pin) { pin.value = r; return { seeds: [a.c, a.s] } }
+      return { temp: { kind: 'distance', refs: [a.c, a.s], value: r } }
+    })
+  }
+  function setArcSweep(pathId: EntityId, segIndex: number, deg: number): boolean {
+    if (!Number.isFinite(deg)) return false
+    if (!(deg > 0)) { status.value = SWEEP_POSITIVE; return false }
+    const sweepDeg = Math.min(359.5, Math.max(0.5, deg))
+    const a0 = arcParts(doc.value, pathId, segIndex)
+    if (a0 && ptOf(doc.value, a0.e)?.fixed) { status.value = 'Fixed points stay where they are'; return false }
+    return tryEdit(d => {
+      const a = arcParts(d, pathId, segIndex)
+      const C = a && ptOf(d, a.c), S = a && ptOf(d, a.s), E = a && ptOf(d, a.e)
+      if (!a || !C || !S || !E || E.fixed) return null
+      const to = arcEndForSweep(C, S, a.sweep === 1 ? 1 : -1, sweepDeg)
+      return { drag: { point: a.e, x: to.x, y: to.y }, stay: [a.c, a.s] }
+    })
+  }
+  function setArcLength(pathId: EntityId, segIndex: number, len: number): boolean {
+    const a = arcParts(doc.value, pathId, segIndex)
+    const C = a && ptOf(doc.value, a.c), S = a && ptOf(doc.value, a.s)
+    if (Number.isFinite(len) && !(len > 0)) { status.value = LENGTH_POSITIVE; return false }
+    if (!C || !S || !(len > 0)) return false
+    const r = Math.hypot(S.x - C.x, S.y - C.y)
+    return r > 1e-12 ? setArcSweep(pathId, segIndex, (len / r) * 180 / Math.PI) : false
+  }
+  function toggleArcRadiusLock(pathId: EntityId, segIndex: number): void {
+    const a = arcParts(doc.value, pathId, segIndex)
+    const C = a && ptOf(doc.value, a.c), S = a && ptOf(doc.value, a.s)
+    if (!a || !C || !S) return
+    const pin = radiusPinOf(doc.value, a.c, a.s)
+    if (pin) removeConstraintById(pin.id)
+    else setArcRadius(pathId, segIndex, Math.hypot(S.x - C.x, S.y - C.y))
+  }
+  function setCircleRadius(id: EntityId, r: number): boolean {
+    if (!(r > 0)) { if (Number.isFinite(r)) status.value = RADIUS_POSITIVE; return false }
+    return tryEdit(d => {
+      const c = d.entities.find(e => e.id === id)
+      if (c?.kind !== 'circle') return null
+      const rule = circleRadiusRuleOf(d, id)
+      if (rule) { rule.value = r; return { seeds: [id] } }
+      c.r = r
+      return { temp: { kind: 'radius', refs: [id], value: r } }
+    })
+  }
+  function toggleCircleRadiusLock(id: EntityId): void {
+    const c = doc.value.entities.find(e => e.id === id)
+    if (c?.kind !== 'circle') return
+    const rule = circleRadiusRuleOf(doc.value, id)
+    if (rule) { removeConstraintById(rule.id); return }
+    addConstraint(doc.value, 'radius', [id], c.r)
+    runSolve()
+    commitHistory()
+  }
+  // the Properties hover highlight (`highlight`) is declared by the selection
+  function setHighlight(p: PieceRef[]): void { highlight.value = p }
+
+  // --- the right-click menu and the action wheel (pen stage 6) ---
+  // Both read penActions.ts through `actionHost` (built below, just before
+  // the return — only called after setup). Opening either runs the cheap
+  // checks only (controller ruling C1: no solve); a picked rule gets the full
+  // check (penActions runItem) and a refusal leaves the drawing untouched.
+  // While one is open the pen owns the keys (menuKey / wheelKey); anything
+  // that ends the session closes them. Neither opens during a Clean up
+  // preview, and opening, moving over or closing writes no history step.
+  const menu = shallowRef<PenMenu | null>(null)
+  const wheel = shallowRef<PenWheel | null>(null)
+  function openMenu(at: Vec2, drawingAt: Vec2 | null): void {
+    if (cleanup.value) return
+    wheel.value = null
+    menu.value = { at, drawingAt, ...menuFor(actionHost), active: null }
+  }
+  function closeMenu(): void { menu.value = null }
+  function closeWheel(): void { wheel.value = null }
+  function closeMenus(): void { menu.value = null; wheel.value = null }
+  function setMenuActive(id: string | null): void {
+    const m = menu.value
+    if (m && m.active !== id) menu.value = { ...m, active: id }
+  }
+  // every live gesture settles before a menu item, wheel slice or action key
+  // runs (each its own step, if it changed anything) — the helpers a tool
+  // change and finishSession use: a live arc drag or Trim press settles; a
+  // half-armed Repeat / Mirror and a pending value request are dropped; a
+  // pending path of two or more points is finished (a lone point dropped); a
+  // Line / Circle's own start point is removed. The selection is kept. (The
+  // overlay's own gestures — marquee, point drag, arc press — are the
+  // overlay's to settle before it calls in.)
+  function settleLive(): void {
+    if (arcDrag) arcDragEnd()
+    if (trimPress) trimUp()
+    cancelPointDrop()
+    cancelPendingOp()
+    cancelValue()
+    if (pendingPath.value && pendingPath.value.anchors.length >= 2) finishPath(false)
+    const before = doc.value.entities.length
+    cleanupPendingPath()
+    deletePendingOwnPoint()
+    if (doc.value.entities.length !== before) commitHistory()
+    pending.value = null
+    pendingPath.value = null
+    setPathDrag(null)
+    resetCurveState()
+    dimBuffer.value = ''
+  }
+  // the cheap state of a registry id (no solve): an action's own state, a
+  // rule's quick check — what decides whether anything settles or runs
+  function quickState(id: string): ActionState {
+    if (id.startsWith('rule:')) {
+      const o = availableConstraints().find(x => ruleItemId(x) === id)
+      return o ? ruleState(doc.value, selection.value, selectedSegments.value, o) : no(REASON.notHere)
+    }
+    const d = ACTIONS[id]
+    return d ? d.state(actionHost) : no(REASON.notHere)
+  }
+  // settle, then run (a rule gets its full check here, unless the caller
+  // just ran it — `prechecked` — and settling changed nothing); the refusal, or OK
+  function settleAndRun(id: string, at: Vec2 | null, prechecked = false, keepSelection = false): ActionState {
+    const before = docRevision.value
+    settleLive()
+    const r = runItem(actionHost, id, at, prechecked && docRevision.value === before, keepSelection)
+    if (!r.ok) status.value = r.reason
+    return r
+  }
+  function runMenuItem(id: string): void {
+    const m = menu.value
+    const it = m?.groups.flat().find(i => i.id === id)
+    if (!m || !it || !it.state.ok || cleanup.value) return   // a greyed item does nothing; the menu stays
+    menu.value = null
+    const r = settleAndRun(id, m.drawingAt)
+    // the full check refused a rule: the menu stays, that item now greyed
+    // with its reason
+    if (!r.ok && !menu.value && !cleanup.value) {
+      menu.value = {
+        ...m,
+        groups: m.groups.map(g => g.map(i => (i.id === id ? { ...i, state: r } : i))),
+        active: m.active === id ? null : m.active,
+      }
+    }
+  }
+  function menuKey(ev: KeyboardEvent): boolean {
+    const m = menu.value!
+    if (MODIFIER_KEYS.has(ev.key)) return false
+    const order = m.groups.flat().filter(i => i.state.ok).map(i => i.id)
+    const step = (d: number) => {
+      if (!order.length) return
+      const i = m.active ? order.indexOf(m.active) : -1
+      setMenuActive(order[i < 0 ? (d > 0 ? 0 : order.length - 1) : (i + d + order.length) % order.length]!)
+    }
+    if (ev.key === 'Escape') { closeMenu(); return true }
+    if (ev.key === 'ArrowDown' || (ev.key === 'Tab' && !ev.shiftKey)) { step(1); return true }
+    if (ev.key === 'ArrowUp' || (ev.key === 'Tab' && ev.shiftKey)) { step(-1); return true }
+    if (ev.key === 'Home') { if (order.length) setMenuActive(order[0]!); return true }
+    if (ev.key === 'End') { if (order.length) setMenuActive(order.at(-1)!); return true }
+    if (ev.key === 'Enter') { if (m.active) runMenuItem(m.active); return true }
+    return true   // every other plain key is swallowed while the menu is open
+  }
+  function openWheel(at: Vec2): boolean {
+    if (cleanup.value) return false
+    const w = wheelFor(actionHost)
+    if (!w) return false
+    menu.value = null
+    wheel.value = { at, ...w, hover: null }
+    return true
+  }
+  function wheelPointer(at: Vec2): void {
+    const w = wheel.value
+    if (!w) return
+    const hover = wheelDirAt(at.x - w.at.x, at.y - w.at.y)
+    if (hover !== w.hover) wheel.value = { ...w, hover }
+  }
+  function releaseWheel(): void {
+    const w = wheel.value
+    wheel.value = null
+    const s = w?.hover ? w.slices.find(x => x.dir === w.hover) : null
+    if (!s || cleanup.value) return
+    if (!s.state.ok) { status.value = s.state.reason; return }
+    settleAndRun(s.id, null)
+  }
+  function wheelKey(ev: KeyboardEvent): boolean {
+    if (MODIFIER_KEYS.has(ev.key)) return false
+    if (ev.key === 'Escape') closeWheel()
+    return true   // every other plain key is swallowed while the wheel is open
+  }
+  // X / ⇧H / ⇧V / ⌘C / ⌘V / ⌘A (penKeys.ts): the pen's only when the action
+  // can act now — else false, and the key is left to the host
+  function runKeyAction(id: string): boolean {
+    if (cleanup.value || !ACTIONS[id] || !quickState(id).ok) return false
+    settleAndRun(id, null)
+    return true
+  }
+  // Properties' + list and any other caller: run a registry id now. A greyed
+  // one (or anything during a Clean up preview) does nothing and says why.
+  // `prechecked`: the caller has just had checkRuleItem say yes for this
+  // drawing (docRevision unchanged since), so the rule's trial solve isn't run twice.
+  // `keepSelection`: a rule added keeps the selection (Properties' + list —
+  // the new rule then shows in the list it was added from).
+  function runAction(id: string, at: Vec2 | null = null, opts: { prechecked?: boolean; keepSelection?: boolean } = {}): boolean {
+    if (cleanup.value) return false
+    const q = quickState(id)
+    if (!q.ok) { status.value = q.reason; return false }
+    closeMenus()
+    return settleAndRun(id, at, !!opts.prechecked, !!opts.keepSelection).ok
+  }
+  // Properties' + list, when a rule is hovered (controller ruling C1): the
+  // full check on demand — the cheap one first, then the window trial solve
+  // (penActions pickRuleState). Changes nothing and writes no step; an action
+  // id gets its own state.
+  function checkRuleItem(id: string): ActionState {
+    if (cleanup.value) return no(REASON.notHere)
+    const q = quickState(id)
+    if (!q.ok || !id.startsWith('rule:')) return q
+    const o = availableConstraints().find(x => ruleItemId(x) === id)
+    return o ? pickRuleState(actionHost, o) : no(REASON.notHere)
+  }
+
   // --- Clean up (pen stage 5, lib/sketch/cleanup) ---
   // A preview: the drawing stays exactly as it is while `cleanup` holds the
   // cleaned copy, re-solved from the drawing as it was when Clean up opened
@@ -1948,7 +2494,9 @@ export function usePen(opts: {
   // mutated, so the overlay's and toolbar's computeds follow it.
   // `memo` keeps every answer of this session keyed by strength + the sorted
   // switched-off ids, so switching a badge back and forth is instant; it is
-  // carried from object to object and dies with the session.
+  // carried from object to object and dies with the session. A run that ran
+  // out of time (`result.stopped`, see runCleanup's budget) depends on the
+  // machine's speed; the memo still keeps one answer per setting per session.
   interface CleanupSession {
     strength: CleanupStrength
     off: ReadonlySet<string>
@@ -1969,6 +2517,7 @@ export function usePen(opts: {
     return { ...s, result }
   }
   function startCleanup(): void {
+    closeMenus()
     if (!cleanupAllowed || cleanup.value) return
     finishSession()   // every live gesture settles first (its own step, if it changed anything); the selection is kept
     const picked = selection.value.length > 0 || selectedSegments.value.length > 0
@@ -2042,8 +2591,16 @@ export function usePen(opts: {
     const t = (ev.target ?? (typeof document !== 'undefined' ? document.activeElement : null)) as Element | null
     return !!(t && typeof t.closest === 'function' && t.closest('[data-act="cleanup-cancel"]'))
   }
+  // the focused strength control (PenToolbar's [data-strength] radios), if any
+  function focusedStrength(ev: KeyboardEvent): Element | null {
+    const t = (ev.target ?? (typeof document !== 'undefined' ? document.activeElement : null)) as Element | null
+    return t && typeof t.closest === 'function' ? t.closest('[data-strength]') : null
+  }
+  const STRENGTH_STEP: Record<string, number> = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 }
   // keys while a preview is open: Enter applies — except on a focused Cancel
-  // button, where it cancels, matching what a native button does with Enter —
+  // button, where it cancels, matching what a native button does with Enter,
+  // and with every fix off, where it does nothing —
+  // ←/→/↑/↓ on a focused strength control move the strength —
   // Escape / ⌥⇧C always cancel, ⌘Z / ⌘Y only close it; every other plain key
   // is swallowed so nothing edits the drawing under the preview — except
   // Tab / ⇧Tab, and Space on a focused control, left to the browser so the
@@ -2055,8 +2612,25 @@ export function usePen(opts: {
       if (k === 'z' || k === 'y') { cancelCleanup(); return true }
       return false
     }
-    if (ev.key === 'Enter') { if (isCancelFocused(ev)) cancelCleanup(); else applyCleanup(); return true }
+    if (ev.key === 'Enter') {
+      if (isCancelFocused(ev)) cancelCleanup()
+      // with every fix off Enter does nothing, as the disabled Apply button
+      else if (cleanup.value?.result.fixes.some(f => f.on)) applyCleanup()
+      return true
+    }
     if (ev.key === 'Escape' || isCleanupKey(ev)) { cancelCleanup(); return true }
+    // the strength control is a radio group: the arrows move it (round the
+    // ends) and take the focus along, since Space may be the host's pan key
+    const step = STRENGTH_STEP[ev.key]
+    const radio = step && !ev.altKey && !ev.shiftKey ? focusedStrength(ev) : null
+    if (radio && cleanup.value) {
+      const i = STRENGTHS.indexOf((radio.getAttribute('data-strength') ?? cleanup.value.strength) as CleanupStrength)
+      const next = STRENGTHS[(Math.max(0, i) + step! + STRENGTHS.length) % STRENGTHS.length]!
+      setCleanupStrength(next)
+      const to = radio.closest('[role="radiogroup"]')?.querySelector(`[data-strength="${next}"]`) as HTMLElement | null | undefined
+      to?.focus?.()
+      return true
+    }
     // keyboard access to the strength / Apply / Cancel row: Tab / ⇧Tab move
     // focus, and Space presses a focused button or control
     if (ev.key === 'Tab') return false
@@ -2228,6 +2802,7 @@ export function usePen(opts: {
 
   function selectTool(t: Tool) {
     if (!isToolAllowed(t)) return   // PenOptions.tools / openOnly: not a tool this host offers — no-op
+    closeMenus()
     closeCleanup()   // a tool change drops a Clean up preview
     if (arcDrag) arcDragEnd()   // a live arc drag settles as its own step
     // Pen ↔ Curve mid-path keeps drawing the same path: the next segment's kind
@@ -2275,6 +2850,7 @@ export function usePen(opts: {
   }
 
   function reset() {
+    closeMenus()
     closeCleanup()
     setArcDrag(null)   // dropped, never settled — the drawing is thrown away
     resetEditTools()
@@ -2318,6 +2894,7 @@ export function usePen(opts: {
   // A half-armed Repeat/Mirror is dropped. Commits one history step iff the
   // doc changed.
   function finishSession(): void {
+    closeMenus()
     closeCleanup()   // a Clean up preview is dropped, never applied
     if (arcDrag) arcDragEnd()   // a live arc drag settles as its own step
     pendingOp.value = null
@@ -2329,6 +2906,7 @@ export function usePen(opts: {
     deletePendingOwnPoint()
     const sel = selection.value.slice(), segs = selectedSegments.value.slice()
     clearTransient()
+    highlight.value = []
     // keep the user's selection — settling is not deselecting (but drop ids
     // the cleanup just deleted)
     selection.value = sel.filter(id => doc.value.entities.some(e => e.id === id))
@@ -2341,6 +2919,7 @@ export function usePen(opts: {
   // called by the overlay or toolbar — a host calls it on `cancel` if its
   // cancel means "discard".
   function revert(): void {
+    closeMenus()
     closeCleanup()
     trimPress = null   // discarded with everything else — never settled onto the reverted drawing
     setArcDrag(null)   // likewise a live arc drag
@@ -2366,6 +2945,7 @@ export function usePen(opts: {
   // doesn't resume mid-air once the overlay reactivates. Mirrors what the
   // overlay's own watcher already does for its point-drag/marquee state.
   function endGesture(): void {
+    closeMenus()
     closeCleanup()   // parking the pen drops a Clean up preview
     cancelPointDrop()
     setPathDrag(null)
@@ -2377,11 +2957,23 @@ export function usePen(opts: {
 
   // stop the sparkle loop — the host calls this when it unmounts
   function dispose() {
+    closeMenus()
     closeCleanup()
     cancelValue()   // a pending value request never outlives the pen
+    highlight.value = []
     if (sparkleRaf && typeof cancelAnimationFrame !== 'undefined') cancelAnimationFrame(sparkleRaf)
     sparkleRaf = 0
   }
+
+  // what penActions.ts runs against (pen stage 6)
+  const actionHost: PenActionHost = {
+    doc, selection, selectedSegments,
+    unitsPerPx: () => pxToUnits(1, opts.view.value),
+    availableConstraints, applyWithValue, fixSelected, dissolveState, dissolvePoint,
+    makeConstruction, flip, doMirror, repeatPrompt,
+    copySelection, copySvg, pasteState, paste, del, selectAll,
+  }
+  function ruleItems(): PenMenuItem[] { return registryRuleItems(actionHost) }
 
   initHistory()
 
@@ -2390,6 +2982,8 @@ export function usePen(opts: {
     doc,
     // resolved PenOptions (tools defaults to all tools; openOnly excludes circle)
     options,
+    // the host's view (Properties reads angles as on screen)
+    view: opts.view,
     // state
     tool, guideMode, showLabels, status, selection, selectedSegments, pending, pendingPath,
     pendingOp, opHint, cursor, dimBuffer, nextSegment, sparkles, sparkleClock, placementPreview, hoverSnap,
@@ -2406,15 +3000,25 @@ export function usePen(opts: {
     // trim / cut / dissolve
     trimHover, trimHoverEnds, trimGhosts, cutHover, dissolveHover,
     trimDown, trimMove, trimUp, cutMove, cutClick, dissolveMove, dissolveClick, clearToolHover, clearTrimGhosts,
+    // fill (pen stage 7)
+    fillHover, fillMove, fillClick, fillView,
     // verbs
     runSolve, apply, applyWithValue, applyTangent, availableConstraints, orderRefs, del, nudge, fixSelected, makeConstruction, flip,
     repeatPrompt, armRepeat, doRepeat, applyRepeat, doMirror, applyMirror, cancelPendingOp,
     setArcRadius, setConstraintValue, removeConstraintById, onArcDimClick, onConstraintMarkClick,
     commitDimension,
+    // copy / paste / select all / dissolve a point (pen stage 6)
+    copySelection, pasteState, paste, copySvg, selectAll, dissolveState, dissolvePoint, viewSize, setViewSize,
+    // Properties: typed sizes, the radius lock, the hover highlight (pen stage 6)
+    highlight, setHighlight, setPointXY, setLineLength, setLineAngle, setArcRadiusValue, setArcSweep, setArcLength,
+    toggleArcRadiusLock, setCircleRadius, toggleCircleRadiusLock,
+    // right-click menu and action wheel (pen stage 6)
+    menu, wheel, openMenu, closeMenu, closeMenus, setMenuActive, runMenuItem,
+    openWheel, wheelPointer, releaseWheel, closeWheel, ruleItems, runAction, checkRuleItem,
     // Clean up (pen stage 5)
     cleanup, toggleCleanup, startCleanup, applyCleanup, cancelCleanup, toggleCleanupFix, toggleCleanupKind, setCleanupStrength,
     // history
-    undo, redo, canUndo, canRedo, reset, revert, commitHistory, initHistory,
+    undo, redo, canUndo, canRedo, reset, revert, commitHistory, initHistory, docRevision,
     // session
     finishSession,
     // keys
@@ -2432,4 +3036,16 @@ export function isTypingInField(): boolean {
   if (typeof document === 'undefined') return false
   const el = document.activeElement
   return !!el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || (el as HTMLElement).isContentEditable)
+}
+
+/** True while focus is inside Clean up's strength / Cancel / Apply bar
+ *  (`[data-cleanup-bar]`) — Space then presses the focused control, so a
+ *  host's hold-Space-to-pan must leave Space alone. Nowhere else: a pen tool
+ *  button a mouse click left focused keeps Space-to-pan (`:focus-visible`
+ *  can't tell, it turns true on the first keydown). Reads `document` only
+ *  when called. */
+export function isCleanupBarFocused(): boolean {
+  if (typeof document === 'undefined') return false
+  const el = document.activeElement as HTMLElement | null
+  return !!el?.closest?.('[data-cleanup-bar]')
 }

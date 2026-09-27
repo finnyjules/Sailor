@@ -5,9 +5,10 @@
 // repeatPrompt (which asks for the count via usePen.ts's inline
 // requestValue, not a browser prompt) stay behind and call into this
 // module's applyRepeat/armRepeat.
-import type { Ref } from 'vue'
+import { toRaw, type Ref } from 'vue'
 import type { SketchDoc, EntityId } from '~/lib/sketch/model'
 import { repeatEntities, mirrorEntities, pointClosure } from '~/lib/sketch/edit'
+import { flipSeeds } from '~/lib/sketch/fills'
 
 export type PendingOp =
   | null
@@ -64,6 +65,8 @@ export function createPenCopies(ctx: PenCopiesContext) {
     const minX = Math.min(...pts.map(p => p.x)), maxX = Math.max(...pts.map(p => p.x))
     const minY = Math.min(...pts.map(p => p.y)), maxY = Math.max(...pts.map(p => p.y))
     const cx = (minX + maxX) / 2, cy = (minY + maxY) / 2
+    // pen stage 7: the fills inside turn over with the points (before they move)
+    flipSeeds(toRaw(ctx.doc.value), new Set([...ptIds, ...ctx.selection.value]), axis)
     for (const p of pts) { if (axis === 'h') p.x = 2 * cx - p.x; else p.y = 2 * cy - p.y }
     ctx.runSolve()
     ctx.commitHistory()

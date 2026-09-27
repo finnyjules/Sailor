@@ -2,7 +2,7 @@
 // What the pen toolbar's hover cards say (PenTipCard.vue): a name, the key
 // badge when there is a shortcut, and a one-line caption — keyed by button id
 // (tool ids, the fixed toolbar buttons, every rule kind availableConstraints
-// can offer, and the rules row's own verbs). The nine drawing and editing
+// can offer, and the rules row's own verbs). The ten drawing and editing
 // tools, and Clean up, also name a scripted demo in penTipDemos.ts.
 //
 // Copy rules: sentence case, no identifiers, say exactly what the button does
@@ -38,6 +38,8 @@ export const PEN_TIPS: Record<string, PenTip> = {
     caption: 'A new point on a line or arc, splitting it in two. Click where the cut goes.' },
   dissolve: { name: 'Dissolve', key: 'D', demo: 'dissolve',
     caption: 'Cut’s inverse: a point healed back into one piece, where the two sides line up. Click the point.' },
+  fill: { name: 'Fill', key: 'G', demo: 'fill',
+    caption: 'Fills an area the drawing encloses. Point to see the area, click to fill it; click a filled area to empty it.' },
   cleanup: { name: 'Clean up', key: '⌥⇧C', demo: 'cleanup',
     caption: 'Joins ends that nearly meet, squares what is nearly square and evens what is nearly even. Shows every change first; click one to leave it out.' },
 
@@ -90,9 +92,9 @@ export const PEN_TIPS: Record<string, PenTip> = {
   pointOnCircle: { name: 'Point on circle',
     caption: 'Keeps a point on a circle’s edge; it can still slide around it.' },
   horizontal: { name: 'Horizontal',
-    caption: 'Lays a line or segment flat.' },
+    caption: 'Lays a line or segment flat, or lines two points up side by side.' },
   vertical: { name: 'Vertical',
-    caption: 'Stands a line or segment straight up.' },
+    caption: 'Stands a line or segment straight up, or lines two points up one above the other.' },
   radius: { name: 'Radius',
     caption: 'Holds a circle at a set size. Type the radius.' },
   perpendicular: { name: 'Perpendicular',
@@ -107,16 +109,34 @@ export const PEN_TIPS: Record<string, PenTip> = {
     caption: 'Pins the selected points where they are; rules and drags leave them in place.' },
   repeat: { name: 'Repeat…',
     caption: 'Copies the selection around a ring. Type how many, then click the centre.' },
-  mirror: { name: 'Mirror',
+  mirror: { name: 'Mirror…',
     caption: 'Copies the selection across a line. Pick the line; the copy follows the original.' },
-  'flip-h': { name: 'Flip horizontal',
+  'flip-h': { name: 'Flip horizontal', key: '⇧H',
     caption: 'Flips the selection left to right, in place.' },
-  'flip-v': { name: 'Flip vertical',
+  'flip-v': { name: 'Flip vertical', key: '⇧V',
     caption: 'Flips the selection top to bottom, in place.' },
-  construction: { name: 'Make guide',
+  construction: { name: 'Make guide', key: 'X',
     caption: 'Turns the selection into guides that shape the drawing but aren’t drawn, or back again.' },
   delete: { name: 'Delete', key: '⌫',
     caption: 'Removes the selection.' },
+
+  // ── the right-click menu's actions and the Properties panel (pen stage 6) ──
+  copy: { name: 'Copy', key: '⌘C',
+    caption: 'Copies the selection with the rules between its pieces, to paste into this drawing or another.' },
+  'copy-svg': { name: 'Copy as SVG',
+    caption: 'Copies the outline of the selection as SVG path data, to paste into another app.' },
+  paste: { name: 'Paste', key: '⌘V',
+    caption: 'Adds what you copied, a little down and to the right, and selects it. From this menu it lands where you clicked.' },
+  'select-all': { name: 'Select all', key: '⌘A',
+    caption: 'Selects every piece of the drawing.' },
+  'dissolve-point': { name: 'Dissolve',
+    caption: 'Heals the selected point back into one piece, where the two sides line up.' },
+  'prop-lock': { name: 'Lock radius',
+    caption: 'Keeps this radius when other things change, as a rule. Click again to let it go.' },
+  'prop-add-rule': { name: 'Add a rule',
+    caption: 'Lists the rules you can add to the selection; one that can’t be added says why.' },
+  'prop-remove-rule': { name: 'Remove',
+    caption: 'Takes this rule off. The pieces stay where they are.' },
 }
 
 /** A tip's key badge text: Mac glyphs as-is on a Mac, spelled out elsewhere

@@ -64,6 +64,7 @@ import type { SpaceTypeState } from '~/lib/spacetype/state'
 import { useNodeSearch } from '~/composables/useNodeSearch'
 import { useNodeClipboard } from '~/composables/useNodeClipboard'
 import { buildTake, appendTake, refreshTakeDisplay, takeHasContent, tagTakeFromRunMeta } from '~/composables/useTakes'
+import { shotStudioForTake, castToScore, takeVideoUrl, scoreTakeFrames, withFaceScores } from '~/lib/shotdirector/takeScores'
 import type { Take } from '~/composables/useTakes'
 import { displaySnapshot, holdOnLanding, showOnData, type DisplaySnapshot, type TakesHold } from '~/lib/prompt/takesSession'
 import { revealDelta } from '~/lib/canvas/revealPan'
@@ -77,6 +78,7 @@ import { SKETCH_PROP, MAX_SKETCH_ITEMS, KEEP_CARD_SIZE, buildSketchPilePayload, 
 import { annotatedImageValueFromViewUrl } from '~/lib/promoteTempImages'
 import { applyMoodboardWireEffects, applyMoodboardToRestyleNode, clearMoodboardFromGenerateNode, syncMoodboardWidgets } from '~/lib/graph/moodboardApply'
 import { IMAGE_MODELS_BY_ID } from '~/data/image-models'
+import { createCanvasGlass, provideCanvasGlass } from '~/composables/useCanvasGlass'
 import { useMoodboards } from '~/composables/useMoodboards'
 import type { MoodboardEntry } from '~~/shared/taste/moodboard'
 import ComfyNode from '~/components/vue-canvas/ComfyNode.vue'
@@ -109,14 +111,12 @@ import BatchGridNode from './BatchGridNode.vue'
 import SketchPileNode from './SketchPileNode.vue'
 import MoodboardNode from './MoodboardNode.vue'
 import ReferenceNode from '~/components/vue-canvas/ReferenceNode.vue'
-import { buildFilmShotPatch, findShotTarget } from '~/lib/shotdirector/dispatch'
+import { findShotTarget } from '~/lib/shotdirector/dispatch'
 import { hydrateShotSheet, addRef } from '~/lib/shotdirector/hydrate'
-import { compileShot } from '~/lib/shotdirector/compile'
 import { syncCast, wireCastFor } from '~/lib/shotdirector/castEdges'
-import { getProfile } from '~/lib/shotdirector/profiles'
 import { hydrateLipSyncSheet } from '~/lib/lipsync/hydrate'
 import { compileLipSync } from '~/lib/lipsync/compile'
-import { materializeCast } from '~/lib/shotdirector/cast'
+import { prepareShotDispatch } from '~/lib/shotdirector/prepare'
 import { uploadRefFile } from '~/lib/shotdirector/refUpload'
 import { useCharacters } from '~/composables/useCharacters'
 import { defaultState, identityRefs, normalizeStateId } from '#shared/characters/types'
@@ -246,6 +246,7 @@ function applyPendingTakesForDisplayedCanvas() {
       const prevActive = target.data?.activeTakeId ?? null
       target.data = appendTake({ ...target.data }, tagged)
       holdClosedTakes(target, tagged, prevActive)
+      scoreShotTakeInBackground(String(target.id), tagged)
     }
   }
 }
@@ -1243,7 +1244,26 @@ const {
   onConnect, addEdges, fitView, fitBounds, zoomIn: vfZoomIn, zoomOut: vfZoomOut,
   project, removeNodes, removeEdges, viewport: vfViewport, onNodeDragStart, onNodeDragStop, onNodeDrag,
   onConnectStart, onConnectEnd, onEdgesChange, findNode, dimensions: vfDimensions, setViewport,
+  onMoveStart, onMoveEnd, getNodes, getEdges,
 } = useVueFlow()
+
+// Glass: real blur only at rest and only on nodes with something behind them.
+// Decided once per rest, never per frame (docs/superpowers/specs/2026-09-27-node-design-design.md).
+const canvasGlass = createCanvasGlass({
+  onMoveStart: (cb) => onMoveStart(cb),
+  onMoveEnd: (cb) => onMoveEnd(cb),
+  viewport: vfViewport,
+  boxes: () => getNodes.value
+    .filter(n => n.dimensions.width > 0)
+    .map(n => ({ id: n.id, x: n.computedPosition.x, y: n.computedPosition.y, w: n.dimensions.width, h: n.dimensions.height })),
+  wires: () => getEdges.value
+    .filter(e => e.sourceX != null && e.targetX != null)
+    .map(e => ({ source: e.source, target: e.target, sx: e.sourceX, sy: e.sourceY, tx: e.targetX, ty: e.targetY })),
+  size: () => ({ width: canvasRootRef.value?.clientWidth ?? 0, height: canvasRootRef.value?.clientHeight ?? 0 }),
+})
+provideCanvasGlass(canvasGlass)
+onNodeDragStop(() => canvasGlass.recompute())
+onMounted(() => canvasGlass.recompute())
 
 // Ports label themselves while a compatible wire is being dragged. Bound once,
 // here, because there is one canvas and every port reads the same drag.
@@ -3108,6 +3128,47 @@ function takeFromExecutedEvent(event: MessageEvent): any | null {
   return takeHasContent(take) ? take : null
 }
 
+// Shot Director: a video take on the card after a studio's film node is
+// scored against the cast's faces, in the background. Never awaited and never
+// throws into the take append; failures leave the take unscored. Keyed by
+// the output files so a same-run re-emission (appendTake replaces it in place
+// under a fresh id) is not scored twice.
+const shotTakesScored = new Set<string>()
+function scoreShotTakeInBackground(nodeId: string, take: any) {
+  try {
+    if (!take || take.faceScores) return
+    const videoUrl = takeVideoUrl(take)
+    if (!videoUrl) return
+    const studio = shotStudioForTake(nodes.value as any[], edges.value as any[], nodeId)
+    if (!studio) return
+    const cast = castToScore(studio.data)
+    if (!cast.length) return
+    const key = `${nodeId}|${take.sig || videoUrl.replace(/[?&]t=\d+/, '')}`
+    if (shotTakesScored.has(key)) return
+    shotTakesScored.add(key)
+    const takeId = String(take.id)
+    void scoreTakeFrames(videoUrl, cast, {
+      sample: async (url) => (await import('~/lib/shotdirector/takeFrames')).sampleTakeFrames(url),
+      post: async (body) => {
+        const res = await fetch('/api/characters-local/take-check', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        })
+        return { status: res.status, body: await res.json().catch(() => null) }
+      },
+    }).then((scores) => {
+      if (!scores.length) return
+      const card = (nodes.value as any[]).find((n: any) => String(n.id) === nodeId)
+      if (!card?.data) return
+      const next = withFaceScores(card.data, takeId, scores)
+      if (next !== card.data) card.data = next
+    }).catch((err) => console.warn('[shot-director] take face scores failed', err))
+  } catch (err) {
+    console.warn('[shot-director] take face scores failed', err)
+  }
+}
+
 // Listen for execution progress on the window pipe (the layout re-posts
 // direct-execution WS events here in the 'sailor-bridge' envelope).
 function handleBridgeMessage(event: MessageEvent) {
@@ -3382,6 +3443,7 @@ function handleBridgeMessage(event: MessageEvent) {
           const prevActive = target.data?.activeTakeId ?? null
           target.data = appendTake({ ...target.data }, tagged)
           holdClosedTakes(target, tagged, prevActive)
+          scoreShotTakeInBackground(String(target.id), tagged)
           // Prompt-bar sketch pad: the transient hidden pad's batch lands in the
           // ONE pile node (replacing the optimistic skeleton pile), not 4 anchor
           // cards. Routed by the pad's properties.sketchPad marker (id-agnostic —
@@ -4028,27 +4090,24 @@ async function handleShotDirectorGenerate(e: Event) {
 
   const sheet = hydrateShotSheet(studio.data?.properties?.sailor_shotDirector)
 
-  let effectiveSheet = sheet
-  let castIssues: import('~/lib/shotdirector/rules').ValidationIssue[] = []
+  // Cast pictures per character (IdentityRefSet); the sheet's chosen model
+  // decides which of them it sends and how (prepareShotDispatch).
+  let resolved: ReturnType<ReturnType<typeof useCharacters>['resolveCastSets']> = {}
   let castDescriptors: Record<string, string> = {}
   if (sheet.cast.length) {
     const store = useCharacters()
     await store.refresh()  // generate-time truth, same guarantee the old re-fetch gave
     const picks = sheet.cast.map(m => ({ slug: m.slug, stateId: m.stateId }))
-    const resolved = store.resolveStateRefs(picks)
-    const mat = materializeCast(sheet, resolved, getProfile('seedance-2.0'))
-    effectiveSheet = mat.sheet
-    castIssues = mat.issues
+    resolved = store.resolveCastSets(picks)
     castDescriptors = store.stateDescriptors(picks)
   }
-  const result = compileShot(effectiveSheet, getProfile('seedance-2.0'), { castDescriptors })
-  const errors = [...castIssues, ...result.issues].filter(i => i.level === 'error')
-  if (errors.length) {
-    studio.data.shotError = errors[0]!.message
+  const prepared = prepareShotDispatch(sheet, resolved, castDescriptors)
+  if (!prepared.ok) {
+    studio.data.shotError = prepared.error
     return
   }
 
-  const patch = buildFilmShotPatch(effectiveSheet, result)
+  const patch = prepared.patch
   const lite = (nodes.value as any[]).map(n => ({ id: String(n.id), nodeType: n.data?.nodeType as string | undefined }))
   const liteEdges = (edges.value as any[]).map(e => ({ source: String(e.source), target: String(e.target) }))
   let targetId = findShotTarget(lite, liteEdges, String(studio.id), studio.data?.properties?.sailor_shotDirectorTargetId)
@@ -8440,6 +8499,8 @@ defineExpose({
   <div
     ref="canvasRootRef"
     class="vue-node-canvas-root w-full h-full relative bg-[#0a0a0a] focus:outline-none"
+    :class="canvasGlass.rootClass.value"
+    :style="canvasGlass.rootStyle.value"
     tabindex="-1"
     @dragover.prevent
     @contextmenu.prevent
@@ -8839,6 +8900,7 @@ defineExpose({
         v-if="shotDirectorOpenForId"
         :node-id="shotDirectorOpenForId"
         :nodes="nodes as any[]"
+        :edges="edges as any[]"
         @close="shotDirectorOpenForId = null"
       />
     </Teleport>

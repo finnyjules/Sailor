@@ -68,7 +68,9 @@ import { withKeyedLock } from '~/lib/graph/keyedLock'
 import { shouldUseRunner, startRunnerRun, runnerGateAction, stopRunnerRuns, fetchRunnerRecord, runIdOfPrompt, isRunnerDeclined, type LegStarted } from '~/lib/runner/client'
 import { useRunnerEvents, ensureRunnerEvents } from '~/composables/useRunnerEvents'
 import { createRunnerEventBuffer, ownerTabForCanvas, runnerRunIdsForTab } from '~/lib/runner/routing'
-import { nodesNeedingEngine, workflowNodeTitles, needsEngineDescription, blockedRunRefusal } from '~/lib/runner/needsEngine'
+import { nodesNeedingEngine, workflowNodeTitles, needsEngineDescription, needsEngineReasons, blockedRunRefusal } from '~/lib/runner/needsEngine'
+import { bakeShaderEffectsForRun } from '~/lib/runner/shaderBake'
+import { deliverEnvelope, livePreviewsOn, runLivePreview, type LivePreviewEnv } from '~/lib/runner/livePreview'
 import { RUNNER_WORKER, isRunnerPromptId } from '#shared/runner/messages'
 import { NO_FAMILIES, parseFamilies } from '#shared/runner/families'
 import { RUNNER_STAGE_STALL_MS } from '#shared/runner/timeouts'
@@ -879,6 +881,13 @@ async function runVueWorkflow(
   const { firstTake, extraTakes } = assembled
   const { plainWorkflow, directPrompt } = firstTake
 
+  // Shader effects (step 3, R2.10): outside the assembly lock, while `shader-bake` is on,
+  // the browser bakes each one the runner can replay, in takes that go to the runner.
+  if (useDirect && runnerEnabled && runnerFamilies.has('shader-bake')) {
+    const bake = await bakeShaderEffectsForRun([firstTake, ...extraTakes].map(tk => tk.directPrompt), runnerFamilies)
+    if (bake.failed.length) toast.error('A shader effect couldn’t be prepared', { description: 'It will run without Sailor’s runner.' })
+  }
+
   // Engine-free: with the local engine off, only what the runner takes goes
   // out. Anything else is refused here, naming the nodes that need the engine,
   // instead of a /prompt that can only fail. An open run socket means the
@@ -888,6 +897,7 @@ async function runVueWorkflow(
     // refusal must name nodes across all of them too, or a take-2+-only
     // engine-bound node would dispatch to a /prompt that can only fail.
     const needsSet = new Set<string>()
+    const reasonSet = new Set<string>()
     for (const tk of [firstTake, ...extraTakes]) {
       if (!tk.directPrompt) continue
       for (const name of nodesNeedingEngine(tk.directPrompt, {
@@ -895,10 +905,11 @@ async function runVueWorkflow(
         families: runnerFamilies,
         titleOf: workflowNodeTitles(tk.plainWorkflow, objectInfo.value),
       })) needsSet.add(name)
+      for (const why of needsEngineReasons(tk.directPrompt, { runnerOn: runnerEnabled, families: runnerFamilies })) reasonSet.add(why)
     }
     const needs = [...needsSet]
     if (needs.length) {
-      toast.error('This workflow needs the local engine', { description: needsEngineDescription(needs) })
+      toast.error('This workflow needs the local engine', { description: needsEngineDescription(needs, [...reasonSet]) })
       if (activeTab.value?.type === 'project') updateTabStatus(activeTab.value.id, 'idle')
       currentRunSilent.value = false
       return false
@@ -2144,11 +2155,58 @@ function handleLiveRun(e: Event) {
   // the canvas, so an id-less event now refuses to run instead of running all.
   const nodeId = (e as CustomEvent).detail?.nodeId
   if (!nodeId) { console.warn('[LiveRun] dropped: no nodeId on sailor:liveRun'); return }
+  // Live previews through the runner (step 3, R2.11): a ported effect's preview is worked out by
+  // /api/runs/preview on the files the canvas shows, free, never touching /prompt or /api/runs.
+  // Only the route's own "not here" runs it as below (lib/runner/livePreview.ts).
+  if (livePreviewsOn(runnerEnabled, directExecutionEnabled.value, runnerFamilies)) {
+    void runLivePreview(String(nodeId), livePreviewEnv()).catch((err) => { console.warn('[LiveRun] runner preview failed', err) })
+    return
+  }
+  runLiveOnEngine(String(nodeId))
+}
+function runLiveOnEngine(nodeId: string) {
   pendingLiveRuns.value++
   // Safety: drop the counter if no execution_start arrives (e.g. queue rejected the prompt).
   if (pendingLiveRunsResetTimer) clearTimeout(pendingLiveRunsResetTimer)
   pendingLiveRunsResetTimer = setTimeout(() => { pendingLiveRuns.value = 0 }, 10000)
-  runVueWorkflow([String(nodeId)], { live: true })
+  runVueWorkflow([nodeId], { live: true })
+}
+/**
+ * What a runner live preview reads from this layout: the prompt built as a live run builds it,
+ * the canvas's nodes while that canvas is on screen, the old path, and how a shown preview lands
+ * (the runner's `executed` envelope for a silent stage, registered only until the layout and the
+ * canvas have handled it). A failed preview never goes on the run pipe.
+ */
+function livePreviewEnv(): LivePreviewEnv {
+  const canvas = vueCanvasRef.value
+  const tabId = activeTab.value?.id || ''
+  const doc = savedWorkflows[tabId]
+  const canvasId = isProjectDoc(doc) && canvas?.getFilteredWorkflow && canvas.getNodes ? doc.activeCanvasId : null
+  return {
+    runnerOn: runnerEnabled,
+    directOn: directExecutionEnabled.value,
+    families: runnerFamilies,
+    canvasId,
+    buildPrompt: (nodeId) => {
+      try {
+        const wf = JSON.parse(JSON.stringify(canvas.getFilteredWorkflow([nodeId], { live: true })))
+        if (!wf?.nodes?.length) return null
+        const plain = stripFrontendOnlyNodes(wf, FRONTEND_ONLY_NODE_TYPES).workflow
+        stripVarsLinks(plain)
+        return graphToPrompt(plain, objectInfo.value)
+      }
+      catch { return null }
+    },
+    nodes: () => {
+      const now = savedWorkflows[activeTab.value?.id || '']
+      return activeTab.value?.id === tabId && isProjectDoc(now) && now.activeCanvasId === canvasId ? (vueCanvasRef.value?.getNodes?.() ?? null) : null
+    },
+    runAsBefore: runLiveOnEngine,
+    show: (promptId, env) => {
+      registerRun({ promptId, tabId, live: true, worker: RUNNER_WORKER, canvasId })
+      deliverEnvelope(env, () => finishRun(promptId, 'done'))
+    },
+  }
 }
 
 onMounted(() => {

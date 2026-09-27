@@ -9,7 +9,7 @@
 // place of its own bottom toolbar (Plan B) — so this component assumes
 // nothing about its own position (no `position: absolute/fixed` here). The
 // host places it.
-import { computed, type Component } from 'vue'
+import { computed, watch, type Component } from 'vue'
 import type { Pen, PenTool } from '~/composables/pen/usePen'
 import StudioButton from '~/components/vue-canvas/studio/StudioButton.vue'
 import PenValueRow from '~/components/pen/PenValueRow.vue'
@@ -19,7 +19,7 @@ import { PEN_TIPS } from '~/composables/pen/penTips'
 import { STRENGTHS, type CleanupStrength } from '~/lib/sketch/cleanup'
 import {
   MousePointer2, Spline, PenTool as PenNib, Minus, Circle, Dot,
-  CircleDashed, Tag, Undo2, Redo2, Scissors, Slice, Bandage, WandSparkles,
+  CircleDashed, Tag, Undo2, Redo2, Scissors, Slice, Bandage, WandSparkles, PaintBucket,
 } from 'lucide-vue-next'
 
 // The root is the renderless TooltipProvider, so the host's class (the Frame
@@ -62,6 +62,7 @@ const ALL_TOOLS: { id: PenTool; icon: Component }[] = [
   { id: 'trim', icon: Scissors },
   { id: 'cut', icon: Slice },
   { id: 'dissolve', icon: Bandage },
+  { id: 'fill', icon: PaintBucket },
 ]
 const tipName = (id: string) => PEN_TIPS[id]?.name ?? id
 // only the tools this host offers (PenOptions.tools, resolved by usePen —
@@ -80,6 +81,7 @@ const TOOL_HINTS: Record<PenTool, string> = {
   trim: 'Click a piece between crossings to remove it, or sweep across several',
   cut: 'Click a line or arc to add a point there',
   dissolve: 'Click a point between two pieces that line up to merge them',
+  fill: 'Click an enclosed area to fill it, or a filled one to empty it',
 }
 
 const hasEntitySelection = computed(() => selection.value.length > 0)
@@ -99,7 +101,16 @@ const cleanupNote = computed(() => {
   if (!s) return ''
   if (s.result.refused === 'tooBig') return 'Too much to clean up at once — select a part'
   if (s.result.refused === 'conflict') return 'Some rules don’t hold, so nothing is safe to change'
+  if (s.result.stopped) return 'Stopped early — select a part to clean up the rest'
   return s.result.fixes.length ? '' : 'Nothing to change'
+})
+// when the preview closes (Apply, Cancel, Escape…), the Clean up button — or
+// a control of its bar — gives up focus, so the next Enter finishes the pen
+// instead of reopening Clean up, and the next Escape reaches the host
+watch(previewing, (open) => {
+  if (open || typeof document === 'undefined') return
+  const a = document.activeElement as HTMLElement | null
+  if (a?.closest?.('[data-act="cleanup"], [data-cleanup-bar]')) a.blur()
 })
 </script>
 
@@ -120,7 +131,7 @@ const cleanupNote = computed(() => {
       <template v-if="hasEntitySelection">
         <PenTipCard id="fix"><button class="tbtn" data-verb="fix" aria-label="Fix" @click="fixSelected()">Fix</button></PenTipCard>
         <PenTipCard id="repeat"><button class="tbtn" data-verb="repeat" aria-label="Repeat…" @click="repeatPrompt()">Repeat…</button></PenTipCard>
-        <PenTipCard id="mirror"><button class="tbtn" data-verb="mirror" aria-label="Mirror" @click="doMirror()">Mirror</button></PenTipCard>
+        <PenTipCard id="mirror"><button class="tbtn" data-verb="mirror" aria-label="Mirror…" @click="doMirror()">Mirror…</button></PenTipCard>
         <PenTipCard id="flip-h"><button class="tbtn" data-verb="flip-h" aria-label="Flip horizontal" @click="flip('h')">Flip horizontal</button></PenTipCard>
         <PenTipCard id="flip-v"><button class="tbtn" data-verb="flip-v" aria-label="Flip vertical" @click="flip('v')">Flip vertical</button></PenTipCard>
         <PenTipCard id="construction"><button class="tbtn" data-verb="construction" aria-label="Make guide" @click="makeConstruction()">Make guide</button></PenTipCard>

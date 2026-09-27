@@ -19,6 +19,7 @@ import { outputKey } from '../utils/graphRuns'
 import { actionPassThrough } from './generators/actions'
 import type { OutputFile, StageCharge } from './types'
 import { sizePricedInput } from '#shared/pricing/editSettings'
+import { paidNoCall } from '#shared/pricing/paidSettings'
 import { isLink } from '#shared/runner/graph'
 import { picturePixels } from '../utils/graphInputPixels'
 import { NO_FAMILIES, type RunnerFamily } from '#shared/runner/families'
@@ -121,13 +122,24 @@ export const RUNNER_EXTRA_TEXT_INPUTS: readonly string[] = ['target', 'find', 'r
 export const TASTE_TEXT_CLASSES: ReadonlySet<string> = new Set(['RestyleFromImageNode', 'GenerateImageNode'])
 export const TASTE_TEXT_INPUTS: readonly string[] = ['style_in']
 
-/** The non-blank values of RUNNER_EXTRA_TEXT_INPUTS (and a typed-in taste) across the prompt, each on its own. */
+/**
+ * The inputs of each paid-model class (step 3, R3) whose text reaches a
+ * provider (rule 10), moderated at the start when typed; a wired one is
+ * moderated as every wired text is (at the start when a card's settings
+ * decide it, else at the node's turn, R0.5). Text Sailor writes itself
+ * (system prompts, templates) is not listed. Filled by each R3 task. Read by
+ * both paths' start checks (extraPromptTexts).
+ */
+export const PAID_TEXT_INPUTS: Readonly<Record<string, readonly string[]>> = {}
+
+/** The non-blank values of RUNNER_EXTRA_TEXT_INPUTS (a typed-in taste, a paid class's PAID_TEXT_INPUTS) across the prompt, each on its own. */
 export function extraPromptTexts(prompt: ApiPrompt): string[] {
   const parts: string[] = []
   for (const node of Object.values(prompt ?? {})) {
     const inputs = node?.inputs
     if (!inputs || typeof inputs !== 'object') continue
-    const names = TASTE_TEXT_CLASSES.has(node.class_type) ? [...RUNNER_EXTRA_TEXT_INPUTS, ...TASTE_TEXT_INPUTS] : RUNNER_EXTRA_TEXT_INPUTS
+    const paid = Object.prototype.hasOwnProperty.call(PAID_TEXT_INPUTS, node.class_type) ? PAID_TEXT_INPUTS[node.class_type]! : []
+    const names = new Set([...RUNNER_EXTRA_TEXT_INPUTS, ...(TASTE_TEXT_CLASSES.has(node.class_type) ? TASTE_TEXT_INPUTS : []), ...paid])
     for (const name of names) {
       const v = inputs[name]
       if (typeof v === 'string' && v.trim()) parts.push(v)
@@ -148,7 +160,9 @@ export function hasOutputNode(prompt: ApiPrompt): boolean {
 /**
  * The hold for one stage: every node that may make a call, plus the render
  * credit. A nano-actions node that will hand its picture on (actionPassThrough,
- * the same rule planNode follows) makes no call and is not held. The render
+ * the same rule planNode follows) makes no call and is not held, nor is a
+ * paid node whose inputs as sent make Python return before calling anyone
+ * (paidNoCall, R3 rule 8). The render
  * credit is only ever charged on top of something made (a provider result,
  * or a finished Frame render: the Frame itself is free, but its stage pays
  * the render credit, as on the Python path), so a stage that can make
@@ -166,7 +180,7 @@ export function stageEstimate(
     const n = prompt[id]
     if (!n) continue
     if (LOCAL_RENDER_TYPES.has(n.class_type)) renders = true
-    else if (!actionPassThrough(n.class_type, n.inputs ?? {})) {
+    else if (!actionPassThrough(n.class_type, n.inputs ?? {}) && !paidNoCall(n.class_type, n.inputs ?? {})) {
       const m = measured && Object.prototype.hasOwnProperty.call(measured, id) ? measured[id] : undefined
       total += nodeCredits(n, undefined, families, m?.seconds)
     }

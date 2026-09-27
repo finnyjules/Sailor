@@ -62,11 +62,14 @@ Medium. Text that is the user's own content (a Text card's words) keeps its own 
 
 ## Instrument
 
-- **Dark glass shell:** 14px corners, border white 10%, fill `rgba(26,26,28,.58)` with a background blur (18px, saturation 1.4),
+- **Dark glass shell:** 16px corners, border white 10%, fill `rgba(26,26,28,.58)` with a background blur (18px, saturation 1.4),
   soft drop shadow.
-- **Blur only at rest.** While the canvas pans or zooms, swap to the no-blur version (same tint at `.86`, no blur) and
-  bring the blur back when it stops. Blur behind dozens of nodes, recomputed every frame, is what would bring back pan lag.
-- 8px inset inside the shell, so 14 − 8 = 6px corners on everything inside (the rule `StudioRow.vue` already follows).
+- **Blur only at rest, and only where it can show.** Real blur is added by one class on the canvas root, only on nodes
+  that have another node or a wire behind them, never while the canvas pans or zooms, below 0.5 zoom, or with more than
+  24 nodes on screen. Without blur the tint stays the same, so over empty canvas nothing changes. A benchmark in stage 1
+  decides whether this ships or whether the canvas runs tint-only (the exit route, at `.86` so wires don't show through). Blur behind dozens of nodes, recomputed every frame, is what would bring back pan lag.
+- 10px inset inside the shell, so 16 − 10 = 6px corners on everything inside. These are the live `ComfyNode.vue` values, which
+  `NodeCapsule.vue` must match; the prototype's 14/8 was not carried over.
 - **Prompt well:** darker glass (`rgba(0,0,0,.35)`), 6px corners, 12px padding, at least 88px tall.
 - **Settings rows are the studio row** (`StudioRow.vue`), so studio sliders, pickers and colours work on nodes as they do
   in studios:

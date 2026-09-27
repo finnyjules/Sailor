@@ -15,6 +15,7 @@ import {
   EFFECT_FAMILY_OF, EFFECT_OUTPUT_KINDS, EFFECT_PICTURE_OUTPUTS,
   asciiGlyphsArePortable, effectFamilyOn, effectOutputSizeFits, effectPreviewName, effectRows, effectSwitchedClasses, effectTextIsPortable, painterInputsArePortable,
 } from './effects'
+import { SHADER_ASPECTS, shaderBakeTaken } from './shaderBakeKey'
 
 export const RUNNER_NODE_TYPES: ReadonlySet<string> = new Set([
   'GenerateImageNode', 'GenerateVideoNode', 'ComfyGateNode', 'Image', 'Video',
@@ -127,8 +128,8 @@ export interface RunnerNodeRule {
   open?: { family: RunnerFamily; lifts: readonly ('feedsOnly')[] }
 }
 
-/** What an input check may read beside the node's inputs: its class, its id in the prompt, the host. */
-export interface InputCheckContext { classType: string; nodeId?: string; hosted?: boolean }
+/** What an input check may read beside the node's inputs: its class, its id in the prompt, the host, and (R2.10) the prompt. */
+export interface InputCheckContext { classType: string; nodeId?: string; hosted?: boolean; prompt?: ApiPrompt }
 
 /**
  * Checks of a node's own inputs, named by RunnerNodeRule.inputCheck. A node
@@ -172,10 +173,13 @@ export const INPUT_CHECKS: Readonly<Record<string, (inputs: Record<string, unkno
   // Painter (R2.8): its painter file's name and its colour read as Python reads
   // them (./effects.ts painterInputsArePortable); anything else is left to the engine.
   'painter': inputs => painterInputsArePortable(inputs),
+  // The Shader effect (R2.10): a bake of the browser's the runner can replay
+  // (./shaderBakeKey.ts shaderBakeTaken). Without the prompt, nothing to check it against.
+  'shader-bake': (_inputs, ctx) => !!ctx.prompt && ctx.nodeId !== undefined && shaderBakeTaken(ctx.prompt, ctx.nodeId),
 }
 
 /** The name of an input check (INPUT_CHECKS). */
-export type InputCheckName = 'moodboard-reading' | 'bake-params' | 'empty-image-caps' | 'smart-layout' | 'effect-preview-name' | 'effect-output-size' | 'effect-text' | 'ascii-glyphs' | 'painter'
+export type InputCheckName = 'moodboard-reading' | 'bake-params' | 'empty-image-caps' | 'smart-layout' | 'effect-preview-name' | 'effect-output-size' | 'effect-text' | 'ascii-glyphs' | 'painter' | 'shader-bake'
 
 /** nodes.py MAX_RESOLUTION: the most ComfyUI allows for a width or height widget. */
 export const COMFY_MAX_RESOLUTION = 16384
@@ -729,6 +733,24 @@ export const RUNNER_NODE_RULES: Readonly<Record<string, RunnerNodeRule>> = {
     listReaders: ['SaveImage', 'PreviewImage'],
     inputCheck: 'smart-layout',
   },
+  // ── shader-bake (step 3, R2.10): the Shader effect, replayed from the browser's bake ──
+  // (server/runner/cards/shaderEffect.ts). The widgets as the node's schema;
+  // `effect` is checked against the catalog by 'shader-bake' (an effect the
+  // runner doesn't know is left to the engine, which validates it).
+  ShaderEffect: {
+    family: 'shader-bake', local: 'render', imageInputs: ['image'],
+    widgets: {
+      effect: { type: 'STRING', required: true },
+      params: { type: 'STRING', required: true },
+      time: { type: 'FLOAT', required: true, min: 0, max: 3600 },
+      duration: { type: 'FLOAT', required: true, min: 0, max: 60 },
+      fps: { type: 'INT', required: true, min: 1, max: 60 },
+      seed: { type: 'INT', required: true, min: 0, max: 2 ** 31 - 1 },
+      resolution: { type: 'INT', required: true, min: 256, max: 2048 },
+      aspect: { type: 'COMBO', required: true, options: SHADER_ASPECTS },
+    },
+    inputCheck: 'shader-bake',
+  },
   // ── effects-* (step 3, R2): the still-picture effects (./effects.ts, server/runner/effects/) ──
   // Rows built from the real node schemas (./effectSchemas.generated.ts), one
   // per ported class; each needs its family and `cards`.
@@ -766,6 +788,7 @@ export const SWITCHED_CLASSES: Readonly<Record<string, RunnerFamily>> = {
   SmartLayout: 'cards',
   // R2: each ported effect, by its family.
   ...effectSwitchedClasses(),
+  ShaderEffect: 'shader-bake',
 }
 
 /**
@@ -897,6 +920,7 @@ export function nodeRuleAllows(
   families: ReadonlySet<RunnerFamily>,
   opts: RunnerEligibilityOptions = {},
   nodeId?: string,
+  prompt?: ApiPrompt,
 ): boolean {
   const need: string[] = [...(rule.mustLink ?? [])]
   let family: RunnerFamily | undefined = rule.family
@@ -920,7 +944,7 @@ export function nodeRuleAllows(
     if (!widgetValid(inputs, name, spec)) return false
   }
   if (rule.inputCheck) {
-    const ctx: InputCheckContext = { classType, nodeId, hosted: !!opts.hosted }
+    const ctx: InputCheckContext = { classType, nodeId, hosted: !!opts.hosted, prompt }
     const names: readonly InputCheckName[] = typeof rule.inputCheck === 'string' ? [rule.inputCheck] : rule.inputCheck
     if (names.some(name => !INPUT_CHECKS[name]!(inputs, ctx))) return false
   }
@@ -992,6 +1016,8 @@ function carriesImage(prompt: ApiPrompt, link: [string, number], families: Reado
     const d = from.inputs?.data_in
     return link[1] === 0 && isLink(d) && carriesImage(prompt, d, families, depth + 1)
   }
+  // The Shader effect's picture (R2.10), only while its family is on.
+  if (from.class_type === 'ShaderEffect') return link[1] === 0 && familyOn('shader-bake', families)
   if (Object.prototype.hasOwnProperty.call(PICTURE_OUTPUTS, from.class_type)) {
     if (Object.prototype.hasOwnProperty.call(EFFECT_FAMILY_OF, from.class_type) && !effectFamilyOn(from.class_type, families)) return false
     return families.has('cards') && PICTURE_OUTPUTS[from.class_type]!.includes(link[1])
@@ -1231,7 +1257,7 @@ export function runnerTakesNode(prompt: ApiPrompt, id: string, families: Readonl
   if (!n) return false
   const inputs = n.inputs ?? {}
   const rule = families.size ? RUNNER_NODE_RULES[n.class_type] : undefined
-  const byRule = !!rule && nodeRuleAllows(n.class_type, rule, inputs, families, opts, id) && graphRuleAllows(prompt, id, rule, families)
+  const byRule = !!rule && nodeRuleAllows(n.class_type, rule, inputs, families, opts, id, prompt) && graphRuleAllows(prompt, id, rule, families)
   if (n.class_type === 'FilmShotNode') {
     if (!filmShotTaken(inputs, families)) return false
   }

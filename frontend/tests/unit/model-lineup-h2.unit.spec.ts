@@ -327,8 +327,12 @@ describe('grep guard: no node is created with a hard-coded model outside dev/', 
     'app/lib/canvas/nodeActions.ts': ['Nano Banana 2'],
     // Display text of the action catalogue (the model a tool uses), not a node's widget.
     'app/data/action-catalog.ts': ['Clarity', 'Nano Banana', 'Nano Banana 2', 'Topaz'],
-    // Shot Director is built on Seedance's profile; packs are priced on a Seedance clip.
-    'app/lib/shotdirector/dispatch.ts': ['seedance-2.0'],
+    // Shot Director's default model is Seedance 2.0 (a sheet with no model, or an unknown one, falls back to it);
+    // the chosen model comes from the sheet. Packs are priced on a Seedance clip.
+    'app/lib/shotdirector/hydrate.ts': ['seedance-2.0'],
+    'app/lib/shotdirector/prepare.ts': ['seedance-2.0'],
+    'app/lib/shotdirector/price.ts': ['seedance-2.0'],
+    'app/lib/shotdirector/types.ts': ['seedance-2.0'],
     'server/utils/packs.ts': ['seedance-2.0'],
     // The inpaint route's own tiers, not a node's model widget.
     'server/api/inpaint/text2img.post.ts': ['flux-schnell'],

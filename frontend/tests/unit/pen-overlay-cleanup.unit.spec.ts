@@ -140,6 +140,19 @@ describe('PenOverlay — Clean up preview', () => {
     expect(wrapper.emitted('commit')).toBeUndefined()
     expect(doc.value.entities.length).toBe(n)
   })
+  it('with no preview, Enter on a focused Clean up button is the button’s (it opens Clean up), not the pen’s', async () => {
+    const { wrapper, pen } = mountFlower(); mounted = wrapper
+    const button = document.createElement('button')
+    button.setAttribute('data-act', 'cleanup')
+    document.body.appendChild(button)
+    button.focus()
+    const ev = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })
+    button.dispatchEvent(ev)
+    await nextTick()
+    expect(ev.defaultPrevented).toBe(false)                    // left to the button
+    expect(wrapper.emitted('commit')).toBeUndefined()
+    expect(pen.cleanup.value).toBeNull()
+  })
   it('keyboard="host": onHostKeydown routes the preview keys to the pen', async () => {
     const { wrapper, pen } = mountFlower('host'); mounted = wrapper
     expect((wrapper.vm as any).onHostKeydown(altShiftC())).toBe(true)

@@ -123,6 +123,12 @@ interface Rule {
   inputVideo?(adv: Adv, firstFrame: boolean): number
   /** Billed input pictures, given whether a first frame is linked. Absent = the settings carry no count. */
   inputImages?(adv: Adv, firstFrame: boolean): number
+  /**
+   * The length the builder sends when reference pictures (`image_urls`) go,
+   * whatever the node's duration: Veo 3.1 / Fast's reference-to-video is
+   * always sent as 8 s (video.ts veo31, Ruling K). Absent = the duration rule.
+   */
+  referenceSeconds?: number
 }
 
 const lower = (s: string) => s.toLowerCase()
@@ -168,8 +174,9 @@ const WAN_27_SECONDS = [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
 const RULES: Record<string, Rule> = {
   // ── fal (RUNNER_VIDEO_MODELS) ──
   // veo31: durOr([4,6,8]), resolution default 720p, generate_audio default true.
-  'veo-3.1': { durations: [4, 6, 8], defaultDuration: 8, resolution: resIn(['720p', '1080p', '4k'], '720p'), audio: audioOpt(true) },
-  'veo-3.1-fast': { durations: [4, 6, 8], defaultDuration: 8, resolution: resIn(['720p', '1080p', '4k'], '720p'), audio: audioOpt(true) },
+  // With reference pictures (image_urls) the builder always sends '8s' (reference-to-video).
+  'veo-3.1': { durations: [4, 6, 8], defaultDuration: 8, referenceSeconds: 8, resolution: resIn(['720p', '1080p', '4k'], '720p'), audio: audioOpt(true) },
+  'veo-3.1-fast': { durations: [4, 6, 8], defaultDuration: 8, referenceSeconds: 8, resolution: resIn(['720p', '1080p', '4k'], '720p'), audio: audioOpt(true) },
   // veo31Lite.ts: veo31 on Lite's app, a resolution outside 720p/1080p (4k) sent as 720p.
   'veo-3.1-lite': { durations: [4, 6, 8], defaultDuration: 8, resolution: resIn(['720p', '1080p'], '720p'), audio: audioOpt(true) },
   // flux3: durOr([5,10,15,20]), resolution 720p, generate_audio true.
@@ -284,7 +291,9 @@ export function effectiveVideoSettings(
   if (!hasVideoSettings(modelId)) return null
   const r = RULES[modelId]!
   const adv = readModelOptions(modelOptions)
-  const sent = r.durations ? durOr(r.durations, durationInt(duration, r.defaultDuration)) : r.fixedSeconds!
+  const withRefs = r.referenceSeconds !== undefined && Array.isArray(adv.image_urls) && adv.image_urls.length > 0
+  const sent = withRefs ? r.referenceSeconds!
+    : r.durations ? durOr(r.durations, durationInt(duration, r.defaultDuration)) : r.fixedSeconds!
   const seconds = Math.max(sent, r.pythonPathSeconds ?? 0)
   const inputVideoSeconds = r.inputVideo ? r.inputVideo(adv, pyTruthy(firstFrame)) : 0
   const out: VideoSettings = { seconds, resolution: r.resolution(adv), audio: r.audio(adv), inputVideoSeconds }

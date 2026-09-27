@@ -83,6 +83,33 @@ export interface UnitInfo {
   refView: ResolvedBox                             // the same, view px
   h: AxisMap; v: AxisMap                           // resolved maps; .kind is the held (effective) pin
   hExplicit: boolean; vExplicit: boolean           // the pin on that axis is stored
+  onGrid: { h: boolean; v: boolean }               // which axes hold to the grid (the others hold to the frame)
+  vBox: { y: number; h: number }                   // the vertical extent the vertical pin is read from (design px; a text on rows: capitals to last baseline)
+  vCanStretch: boolean                             // may a vertical 'both' be inferred (false for a lone text on rows)
+  /** What the unit would hold to if its design box were `box` (and its lone layer carried `lonePatch`), as the
+   *  resolver's next pass reads it. Lets an edit at a viewing size re-hold on drop. */
+  holdAt?: (box: ResolvedBox, lonePatch?: Record<string, unknown>) => HeldAt
+  /** The references a unit drawn over [a, b] (view px) on one axis could hold to after an edit at a
+   *  viewing size: every grid span holding [a, b] there (spansAtView), then the frame. */
+  refsAtView?: (axis: 'h' | 'v', a: number, b: number) => RefChoice[]
+}
+
+/** A reference an axis may hold to (design px / view px), with the map a pin makes against it. */
+export interface RefChoice {
+  dStart: number; dExtent: number; bStart: number; bExtent: number
+  onGrid: boolean
+  map: (kind: AxisPin) => AxisMap
+}
+
+/** One re-read of what a unit holds to (UnitInfo.holdAt). */
+export interface HeldAt {
+  refDesign: ResolvedBox; refView: ResolvedBox
+  onGrid: { h: boolean; v: boolean }
+  vBox: { y: number; h: number }; vCanStretch: boolean
+  /** The pin each axis would infer there (ignoring any stored pin). */
+  inferred: { h: AxisPin; v: AxisPin }
+  /** The map a pin of `kind` makes against that reference. */
+  map: (axis: 'h' | 'v', kind: AxisPin) => AxisMap
 }
 
 export interface LayoutResult {
