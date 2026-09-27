@@ -20,7 +20,7 @@ import { isLink } from '#shared/runner/graph'
 import { CARD_MAX_PIXELS } from '#shared/runner/eligibility'
 import {
   EFFECT_ERROR_MESSAGES, EFFECT_IO_WORK_PER_VALUE, EFFECT_MAX_WORK, EFFECT_PICTURES_TOO_LARGE, EFFECT_PICTURE_ANIMATED, EFFECT_TOO_MUCH_WORK,
-  EFFECT_PICTURE_TOO_LARGE_FOR_CLASS, EFFECT_START_SIZED_CLASSES, effectOutSize, effectPictureCap, effectPreviewName, effectSchemaOf,
+  EFFECT_PICTURE_TOO_LARGE_FOR_CLASS, EFFECT_START_SIZED_CLASSES, EFFECT_TOO_MUCH_MEMORY, effectOutSize, effectPeakFits, effectPictureCap, effectPreviewName, effectSchemaOf,
 } from '#shared/runner/effects'
 import type { EffectSchema } from '#shared/runner/effectSchemas.generated'
 import { pyFloatOf, pyIntOf, pyTruthy } from '#shared/runner/pyText'
@@ -153,8 +153,9 @@ export function planEffect(ctx: PlanContext): NodePlan {
     kind: 'derive',
     async derive(io) {
       const jobs = await planJobs(io, cls, spec, ins, params, schema.outputs.length)
-      // Add noise (R2.9, ruling (e)): its own seed from its settings and its files, so the noise holds still until one changes.
-      const opParams = spec.seeded ? { ...params, seed: addNoiseSeed(schema, params, jobs.hashes) } : params
+      // Add noise (R2.9, ruling (e) and fix round 1): the seed's first half from its settings and its node
+      // id; the worker adds the float32 values the op receives (addNoiseSeedOf).
+      const opParams = spec.seeded ? { ...params, seedBase: addNoiseSeedBase(schema, params, ctx.nodeId) } : params
       const want = {
         round: trunc.map((t, i) => !masks[i] && !t),
         trunc: trunc.map((t, i) => !masks[i] && t),
@@ -169,15 +170,15 @@ export function planEffect(ctx: PlanContext): NodePlan {
         let preview: OutputFile | null = null
         try {
           await worker.effectBegin({ cls, fn: spec.op, params: spec.prepare ? spec.prepare(opParams) : opParams, count: jobs.order.length })
-          // A two-pass effect (R2.9: Palette quantize) first hands the worker every picture of the batch
-          // to sample, in order; nothing comes back from that pass.
-          if (spec.gather) {
+          // A two-pass effect (R2.9: Palette quantize; Add noise over a batch of more than one) first
+          // hands the worker every picture of the batch to sample or hash, in order; nothing comes back.
+          if (jobs.twoPass) {
             for (let index = 0; index < jobs.order.length; index++) {
               stopped()
               const job = jobs.byKey.get(jobs.order[index]!)!
               const handed: Record<string, PixelsPicture | EffectMaskIn | EffectTensorIn> = {}
               for (const [name, x] of Object.entries(job.inputs)) handed[name] = await jobs.input(x)
-              await worker.effectRun({ index, inputs: handed, first: false, masks, want: { round: masks.map(() => false), trunc: masks.map(() => false), f32: masks.map(() => false) } })
+              await worker.effectRun({ index, inputs: handed, first: false, masks, want: { round: masks.map(() => false), trunc: masks.map(() => false), f32: masks.map(() => false) }, gather: true, hash: !!spec.seeded })
             }
           }
           const done = new Map<string, { files: OutputFile[]; tensors: (OutputFile | null)[] }>()
@@ -190,7 +191,8 @@ export function planEffect(ctx: PlanContext): NodePlan {
               const handed: Record<string, PixelsPicture | EffectMaskIn | EffectTensorIn> = {}
               for (const [name, x] of Object.entries(job.inputs)) handed[name] = await jobs.input(x)
               const first = index === 0
-              const r: EffectRunResult = await worker.effectRun({ index, inputs: handed, first, masks, want })
+              // A seeded effect on one picture hashes it in the same run (its one decode).
+              const r: EffectRunResult = await worker.effectRun({ index, inputs: handed, first, masks, want, ...(spec.seeded && !jobs.twoPass ? { hash: true } : {}) })
               out = { files: [], tensors: [] }
               for (const o of r.outputs) {
                 if ('mask16' in o) {
@@ -276,8 +278,6 @@ async function planJobs(io: DeriveIO, cls: string, spec: EffectSpec, ins: In[], 
   const { max: maxOne, message: tooLarge } = effectPictureCap(cls, io.hosted)
   const size = new Map<string, { w: number; h: number; c: number }>()
   const bytes = new Map<string, Uint8Array>()
-  // Each file's sha256, for a seeded effect (Add noise): the bytes the node reads.
-  const fileHash = new Map<string, string>()
   let total = 0
   const count = (key: string, s: { w: number; h: number; c: number }) => {
     if (s.w * s.h > maxOne) throw new Error(tooLarge)
@@ -296,7 +296,6 @@ async function planJobs(io: DeriveIO, cls: string, spec: EffectSpec, ins: In[], 
         const b = await io.read(f)
         const s = await pictureHeader(b, i.wire.source, maxOne, tooLarge)
         count(key, s)
-        if (spec.seeded) fileHash.set(key, createHash('sha256').update(i.tensors?.get(key) ? await io.read(i.tensors.get(key)!) : b).digest('hex'))
         // A picture an effect made is decoded from its tensor: its PNG is needed no more.
         if (!i.tensors?.has(key)) bytes.set(key, b)
       }
@@ -338,6 +337,10 @@ async function planJobs(io: DeriveIO, cls: string, spec: EffectSpec, ins: In[], 
     made += preview.w * preview.h
   }
   if (made > CARD_MAX_PIXELS) throw new Error(EFFECT_PICTURES_TOO_LARGE)
+  // The largest single array the op allocates (R2.9 fix round 1), before any pixel is decoded.
+  if (!effectPeakFits(cls, params, first, io.hosted)) throw new Error(EFFECT_TOO_MUCH_MEMORY)
+  // Two passes over the batch: a gathering effect, and a seeded one over more than one picture (its seed hashes them all first).
+  const twoPass = !!spec.gather || (!!spec.seeded && n > 1)
   const order: string[] = []
   const byKey = new Map<string, Job>()
   const uses = new Map<string, number>()
@@ -358,7 +361,7 @@ async function planJobs(io: DeriveIO, cls: string, spec: EffectSpec, ins: In[], 
     if (byKey.has(key)) continue
     byKey.set(key, job)
     // A two-pass effect reads each file twice.
-    for (const p of parts) uses.set(p, (uses.get(p) ?? 0) + (spec.gather ? 2 : 1))
+    for (const p of parts) uses.set(p, (uses.get(p) ?? 0) + (twoPass ? 2 : 1))
     // Reading, decoding, quantising and encoding (every input and the output, at 4 values a pixel), and the effect's own.
     const pixelsIn = parts.reduce((sum, p) => sum + ((size.get(p)?.w ?? 0) * (size.get(p)?.h ?? 0)), 0)
     const outPixels = out ? out.w * out.h : 0
@@ -369,7 +372,7 @@ async function planJobs(io: DeriveIO, cls: string, spec: EffectSpec, ins: In[], 
     }
   }
   // A two-pass effect reads and decodes every input twice.
-  if (spec.gather) work += EFFECT_IO_WORK_PER_VALUE * 4 * [...byKey.values()].reduce((sum, j) => sum + Object.values(j.inputs).reduce((a, x) => {
+  if (twoPass) work += EFFECT_IO_WORK_PER_VALUE * 4 * [...byKey.values()].reduce((sum, j) => sum + Object.values(j.inputs).reduce((a, x) => {
     const s = size.get(x.file ? keyOf(x.file) : 'blank')
     return a + (s ? s.w * s.h : 0)
   }, 0), 0)
@@ -397,24 +400,40 @@ async function planJobs(io: DeriveIO, cls: string, spec: EffectSpec, ins: In[], 
       throw new Error(PICTURE_UNREAD)
     }
   }
-  // The input files' sha256s in batch order (a blank: none), for addNoiseSeed.
-  const hashes = spec.seeded ? lists.flatMap(l => l.flatMap(f => (f ? [fileHash.get(keyOf(f)) ?? ''] : []))) : []
-  return { order, byKey, input, hashes }
+  return { order, byKey, input, twoPass }
 }
 
 /**
- * Add noise's seed (R2.9, controller ruling (e)): Python draws from the
- * process's generator, so no two runs match; the runner seeds its own from
- * the first 8 bytes of the sha256 of the node's widget values (as execute()
- * receives them, in the schema's order) and its input files' sha256s, in
- * batch order: the noise holds still while nothing changes, as ComfyUI's
- * cache keeps it, and changes with the picture or a setting. An unsigned
- * 64-bit seed, handed over exactly as a bigint.
+ * Add noise's seed (R2.9, controller ruling (e); fix round 1). Python draws
+ * from the process's generator, so no two runs match; the runner seeds its
+ * own so the noise holds still while nothing changes (as ComfyUI's cache
+ * keeps it) and changes with the picture or a setting. Two halves:
+ *   - here, on the main thread: the sha256 (hex) of the node's widget values
+ *     (as execute() receives them, in the schema's order) and its node id, so
+ *     two identical Add noise nodes draw different noise, as ComfyUI's one
+ *     global stream would;
+ *   - on the worker, during the one decode: each batch index's sha256 of the
+ *     float32 values the op receives (`name:c×h×w;` then the planar floats,
+ *     little-endian), whatever file they came from (compositor/worker.ts).
+ * The op folds them with addNoiseSeedOf into an unsigned 64-bit bigint.
  */
-export function addNoiseSeed(schema: EffectSchema, params: Record<string, unknown>, fileHashes: readonly string[]): bigint {
+export function addNoiseSeedBase(schema: EffectSchema, params: Record<string, unknown>, nodeId: string): string {
   const widgets = Object.keys(schema.widgets).map(name => [name, params[name] ?? null])
-  const digest = createHash('sha256').update(JSON.stringify({ widgets, files: fileHashes })).digest()
-  return digest.readBigUInt64BE(0)
+  return createHash('sha256').update(JSON.stringify({ widgets, node: nodeId })).digest('hex')
+}
+
+/**
+ * The seed from its two halves: FNV-1a 64 over `base|h0|h1|…` (UTF-16 code
+ * units of hex, so bytes). The noise core's own copy (core/noise.ts
+ * seedOf) must agree; the spec holds them equal through the worker.
+ */
+export function addNoiseSeedOf(base: string, hashes: readonly string[]): bigint {
+  const text = [base, ...hashes].join('|')
+  const mask = (BigInt(1) << BigInt(64)) - BigInt(1)
+  const prime = BigInt('1099511628211')
+  let h = BigInt('14695981039346656037')
+  for (let i = 0; i < text.length; i++) h = ((h ^ BigInt(text.charCodeAt(i))) * prime) & mask
+  return h
 }
 
 /**

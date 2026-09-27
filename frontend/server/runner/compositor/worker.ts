@@ -147,6 +147,19 @@ parentPort.on('message', (m) => {
             : v && v.rgba8 ? v
               : tk.fromPicture(v, isStopped)
       }
+      // A seeded effect (R2.9: Add noise): the sha256 of the float32 values the op receives, per batch index.
+      if (m.hash) {
+        const h = require('node:crypto').createHash('sha256')
+        for (const name of Object.keys(inputs)) {
+          const t = inputs[name]
+          h.update(name + ':' + t.c + 'x' + t.h + 'x' + t.w + ';')
+          h.update(new Uint8Array(t.data.buffer, t.data.byteOffset, t.data.byteLength))
+        }
+        if (!fx.state.inputHashes) fx.state.inputHashes = []
+        fx.state.inputHashes[m.index] = h.digest('hex')
+      }
+      // A two-pass effect's first pass (R2.9): the op gathers or is hashed; nothing comes back.
+      fx.state.gathering = !!m.gather
       // The batch's size too (R2.4): how torch split a long sum, and where its clamp kept a −0, depend on it.
       const r = fx.op(inputs, fx.params, isStopped, fx.state, m.index, fx.count)
       stopped()
@@ -416,6 +429,10 @@ export interface EffectRunJob {
   masks: boolean[]
   /** Which forms of each picture output: 8-bit round, 8-bit trunc, and the float32 tensor file (read by effects or Frames). */
   want: { round: boolean[]; trunc: boolean[]; f32: boolean[] }
+  /** A two-pass effect's first pass (R2.9): the op gathers (or is hashed); it returns no outputs. */
+  gather?: boolean
+  /** Hash the float32 values the op receives for this index into its batch state (R2.9: Add noise's seed). */
+  hash?: boolean
 }
 
 /** One output of an effect's run: a picture's 8-bit bytes (interleaved, its own channels) or a mask's scanlines. */
@@ -490,7 +507,7 @@ export function pixelsInWorker<T>(signal: AbortSignal | undefined, job: (w: Pixe
             buffers.push(...p.buffers)
           }
         }
-        return await call(t, { op: 'fx.run', index: job.index, inputs, first: job.first, masks: job.masks, want: job.want }, buffers) as EffectRunResult
+        return await call(t, { op: 'fx.run', index: job.index, inputs, first: job.first, masks: job.masks, want: job.want, gather: !!job.gather, hash: !!job.hash }, buffers) as EffectRunResult
       },
       async effectEnd() {
         await call(t, { op: 'fx.end' }, [])

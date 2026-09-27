@@ -251,6 +251,8 @@ const sizedBy = (cls: string): EffectSpec['outSize'] => (w, s) => (s ? effectOut
 // (GRID_VALUE); Add noise: a draw and an add a value (NOISE_VALUE).
 
 const GRAIN_PIXEL = 40
+/** A randn value drawn (mt19937, then Box–Muller in float): measured about 20 ns, counted 12. */
+const NORMAL_VALUE = 12
 const PALETTE_DISTANCE = 8
 const STIPPLE_PIXEL = 40
 const FLOW_PIXEL = 60
@@ -263,6 +265,14 @@ const noise = (name: string, batch: EffectSpec['batch'], work: NonNullable<Effec
 const generator = (name: string): EffectSpec => noise(name, 'generator', w => generatorWork(name, w) ?? 0, {
   outSize: w => EFFECT_WIDGET_SIZES[name]!(w) ?? { w: 0, h: 0 },
 })
+
+/** Film grain's work: its noise field drawn (and resized up when size > 1), and its per-pixel grain. */
+function filmGrainWork(w: Record<string, unknown>, s: Size): number {
+  if (num(w, 'amount') <= 0) return copyWork(s)
+  const size = num(w, 'size')
+  const field = s && size > 0 ? Math.max(2, Math.trunc(s.h / size)) * Math.max(2, Math.trunc(s.w / size)) : 0
+  return field * NORMAL_VALUE + (size > 1 ? px(s) * RESIZE_VALUE.bilinear! : 0) + px(filmGrainSize(w, s)) * GRAIN_PIXEL
+}
 
 /**
  * Film grain's output size: the picture's, except below size 1, where a side
@@ -367,7 +377,7 @@ export const EFFECTS: Readonly<Record<string, EffectSpec>> = {
   Painter: mask('Painter', (w, s) => painterWork(w, s, null), { batch: 'coupled' }),
   // ── effects-noise (R2.9) ──
   // One noise field for the whole batch (coupled, as the brief has it: nothing deduplicated).
-  FilmGrain: noise('FilmGrain', 'coupled', (w, s) => (num(w, 'amount') <= 0 ? copyWork(s) : px(filmGrainSize(w, s)) * GRAIN_PIXEL), { outSize: filmGrainSize }),
+  FilmGrain: noise('FilmGrain', 'coupled', filmGrainWork, { outSize: filmGrainSize }),
   // The same shifts for every picture of the batch (one draw per slice, per execute).
   Glitch: noise('Glitch', 'coupled', (_w, s) => 3 * copyWork(s)),
   PerlinNoise: generator('PerlinNoise'),

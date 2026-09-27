@@ -201,9 +201,71 @@ export function generatorWork(classType: string, inputs: Record<string, unknown>
   }
 }
 
+// ── Memory (R2.9 fix round 1) ────────────────────────────────────────────────
+
+/**
+ * The most float32 values one array an effect allocates may hold: 8192² × 4
+ * (1 GiB, the largest picture's own tensor), and 4096² × 4 (256 MiB) hosted.
+ * The time budget doesn't bound memory (Perlin noise's grid below scale 1
+ * outgrows the picture while its work stays cheap).
+ */
+export const EFFECT_MAX_VALUES = 8192 * 8192 * 4
+export const EFFECT_HOSTED_MAX_VALUES = 4096 * 4096 * 4
+export const EFFECT_TOO_MUCH_MEMORY = 'This effect would need too much memory at this setting. Use a smaller picture or a lighter setting.'
+
+/**
+ * The largest single array (float32 values) the runner's port of an
+ * effects-noise class allocates, from its widgets and (a picture class) its
+ * picture's size, every picture counted at 4 channels; null when the class
+ * has no count here (the earlier families: their largest is their picture,
+ * give or take a padded copy; R2.9 report) or a widget isn't known here.
+ *   Perlin noise — its largest octave's random grid (max(2, int(side / sc) + 1)
+ *                  a side, sc halving every octave), or its 3-channel output;
+ *   the other generators — their 3-channel output (Reaction-diffusion's state
+ *                  and padded copies are single planes);
+ *   Film grain   — its noise field (max(2, int(side / size)) a side) or its
+ *                  output (a side of 1 grows to the field's below size 1);
+ *   the other picture classes — the picture (Palette quantize's samples are
+ *                  96² a picture; Add noise's draw one picture's values at a time).
+ */
+export function effectPeakValues(classType: string, inputs: Record<string, unknown>, size: { w: number; h: number } | null): number | null {
+  if (EFFECT_GENERATOR_CLASSES.includes(classType)) {
+    const s = generatorSize(inputs)
+    if (!s) return null
+    let peak = 3 * s.w * s.h
+    if (classType === 'PerlinNoise') {
+      const o = widgetNumber(inputs.octaves, true)
+      let sc = widgetNumber(inputs.scale, false)
+      if (o === null || sc === null || !(sc > 0)) return null
+      for (let i = 0; i < o; i++) {
+        peak = Math.max(peak, Math.max(2, Math.trunc(s.w / sc) + 1) * Math.max(2, Math.trunc(s.h / sc) + 1))
+        sc /= 2
+      }
+    }
+    return peak
+  }
+  if (!size || !Object.prototype.hasOwnProperty.call(EFFECT_FAMILY_OF, classType) || EFFECT_FAMILY_OF[classType] !== 'effects-noise') return null
+  let peak = 4 * size.w * size.h
+  if (classType === 'FilmGrain') {
+    const grain = widgetNumber(inputs.size, false)
+    if (grain === null || !(grain > 0)) return null
+    const gh = Math.max(2, Math.trunc(size.h / grain))
+    const gw = Math.max(2, Math.trunc(size.w / grain))
+    peak = Math.max(peak, gh * gw, 4 * (size.h === 1 ? gh : size.h) * (size.w === 1 ? gw : size.w))
+  }
+  return peak
+}
+
+/** Whether an effect's largest single array fits the memory cap (unknown: yes, checked where it can be). */
+export function effectPeakFits(classType: string, inputs: Record<string, unknown>, size: { w: number; h: number } | null, hosted: boolean): boolean {
+  const peak = effectPeakValues(classType, inputs, size)
+  return peak === null || peak <= (hosted ? EFFECT_HOSTED_MAX_VALUES : EFFECT_MAX_VALUES)
+}
+
 /**
  * Whether what an effect's widgets decide on their own fits: its output size
- * within the caps, and a generator's work (its own and its output's I/O, as
+ * within the caps, its largest array within the memory cap (R2.9 fix round 1),
+ * and a generator's work (its own and its output's I/O, as
  * planEffect counts it) within EFFECT_MAX_WORK. Anything not known from the
  * widgets is checked at the node's turn. Over it, the node is left to the
  * engine (R2.9: Reaction-diffusion at 1024² × 3000, say).
@@ -212,6 +274,7 @@ export function effectOutputSizeFits(classType: string, inputs: Record<string, u
   const size = Object.prototype.hasOwnProperty.call(EFFECT_WIDGET_SIZES, classType) ? EFFECT_WIDGET_SIZES[classType]!(inputs) : null
   if (!size) return true
   if (size.w * size.h > (hosted ? EFFECT_HOSTED_MAX_PICTURE_PIXELS : EFFECT_MAX_PICTURE_PIXELS)) return false
+  if (!effectPeakFits(classType, inputs, null, hosted)) return false
   const work = generatorWork(classType, inputs)
   return work === null || work + EFFECT_IO_WORK_PER_VALUE * 4 * size.w * size.h <= EFFECT_MAX_WORK
 }

@@ -13,7 +13,8 @@
  * Flow field is the "warp" parity class (R2.7 amendment): torch's SLEEF cos /
  * sin move grid_sample's taps. Add noise is exact under the fixtures' seeds
  * (the runner handed the seed Python's global generator was given) and, with
- * the runner's own seed (addNoiseSeed), within the spec's visual bounds.
+ * the runner's own seed (addNoiseSeedBase / addNoiseSeedOf), within the
+ * spec's visual bounds. Every class's largest array is capped (effectPeakValues).
  */
 import { createHash } from 'node:crypto'
 import { createRequire } from 'node:module'
@@ -37,11 +38,12 @@ import { RUNNER_OUTPUT_CLASSES, runnerTakesWorkflow } from '#shared/runner/valid
 import { nodesNeedingEngine } from '#shared/runner/needsEngine'
 import {
   EFFECT_CLASSES_PORTED, EFFECT_ERROR_MESSAGES, EFFECT_FAMILIES, EFFECT_FAMILY_OF, EFFECT_GENERATOR_CLASSES, EFFECT_IO_WORK_PER_VALUE,
-  EFFECT_MAX_WORK, EFFECT_TOO_MUCH_WORK, effectOutputSizeFits, effectSchemaOf, generatorWork,
+  EFFECT_HOSTED_MAX_VALUES, EFFECT_MAX_VALUES, EFFECT_MAX_WORK, EFFECT_TOO_MUCH_MEMORY, EFFECT_TOO_MUCH_WORK, effectOutputSizeFits, effectPeakFits,
+  effectPeakValues, effectSchemaOf, generatorWork,
 } from '#shared/runner/effects'
 import { EFFECTS } from '~~/server/runner/effects/table'
 import { effectCores } from '~~/server/runner/effects/cores'
-import { addNoiseSeed } from '~~/server/runner/effects/plan'
+import { addNoiseSeedBase, addNoiseSeedOf } from '~~/server/runner/effects/plan'
 import type { Tensor } from '~~/server/runner/effects/core/tensor'
 import { decodeRaw } from '~~/server/runner/compositor/decode'
 import { workerScript } from '~~/server/runner/compositor/worker'
@@ -436,10 +438,21 @@ describe('kernels.ts conv2dWinograd3x3 against F.conv2d (torch\'s Winograd3x3Dep
 /** A generator case has no inputs: its prompt holds the node alone. */
 const saveImage = (from: [string, number]) => ({ class_type: 'SaveImage', inputs: { images: from, filename_prefix: 'ComfyUI', format: 'png', quality: 90, lossless_webp: false, png_compression: 4, scale: 1, max_dimension: 0, embed_metadata: false } })
 
-/** The input files' sha256s in batch order, as planEffect hashes them for Add noise's seed. */
-function fileHashesOf(c: NoiseCase): string[] {
-  const { files } = pictureOf(c as FxCase)
-  return Object.values(c.inputs).flatMap(i => i.files.map(f => createHash('sha256').update(files[f]!).digest('hex')))
+/** Each batch index's sha256 of the floats the op receives, as the worker hashes them for Add noise's seed. */
+async function floatHashesOf(c: NoiseCase): Promise<string[]> {
+  return (await tensorsOf(c as FxCase)).map((row) => {
+    const h = createHash('sha256')
+    for (const [name, t] of Object.entries(row)) {
+      h.update(`${name}:${t.c}x${t.h}x${t.w};`)
+      h.update(new Uint8Array(t.data.buffer, t.data.byteOffset, t.data.byteLength))
+    }
+    return h.digest('hex')
+  })
+}
+
+/** Add noise's own seed for a case run as node `nodeId` (plan.ts's half and the worker's). */
+async function ownSeedOf(c: NoiseCase, nodeId = c.node_id): Promise<bigint> {
+  return addNoiseSeedOf(addNoiseSeedBase(effectSchemaOf(c.class_type)!, paramsOf(c as FxCase), nodeId), await floatHashesOf(c))
 }
 
 describe('each class against Python', () => {
@@ -480,7 +493,7 @@ describe('each class against Python', () => {
       const files = filesOfValue(run.made.values[0])
       expect(files).toHaveLength(items.length)
       // Add noise draws from its own seed here: the kept pictures are the core's under that seed (Python's parity is the core's, above).
-      const own = EFFECTS[cls]!.seeded ? await coreRun(c, addNoiseSeed(effectSchemaOf(cls)!, paramsOf(c as FxCase), fileHashesOf(c))) : null
+      const own = EFFECTS[cls]!.seeded ? await coreRun(c, await ownSeedOf(c)) : null
       for (const [i, item] of items.entries()) {
         const got = await pngPixels(run.bytes(files[i]!))
         expect([got.w, got.h, got.channels]).toEqual([item.w, item.h, item.c])
@@ -621,18 +634,21 @@ describe('random numbers', () => {
     expect(rep.outputs![0]!.items[2]!.round8_sha256).not.toBe(rep.outputs![0]!.items[0]!.round8_sha256)
   }, 120_000)
 
-  it('Add noise\'s seed: the same settings and files give the same noise; a changed widget or file gives different noise', async () => {
+  it('Add noise\'s seed: the same settings, floats and node give the same noise; a changed widget, picture or node gives different noise', async () => {
     const schema = effectSchemaOf('AddNoise')!
     const w = { amount: 0.3, type: 'gaussian', monochromatic: false }
-    const a = addNoiseSeed(schema, w, ['aa', 'bb'])
+    const base = addNoiseSeedBase(schema, w, 'fx1')
+    const a = addNoiseSeedOf(base, ['aa', 'bb'])
     expect(typeof a).toBe('bigint')
-    expect(a).toBe(addNoiseSeed(schema, { ...w }, ['aa', 'bb']))
+    expect(a).toBe(addNoiseSeedOf(addNoiseSeedBase(schema, { ...w }, 'fx1'), ['aa', 'bb']))
     expect(a >= BigInt(0) && a < (BigInt(1) << BigInt(64))).toBe(true)
-    for (const other of [addNoiseSeed(schema, { ...w, amount: 0.31 }, ['aa', 'bb']), addNoiseSeed(schema, { ...w, type: 'uniform' }, ['aa', 'bb']),
-      addNoiseSeed(schema, { ...w, monochromatic: true }, ['aa', 'bb']), addNoiseSeed(schema, w, ['aa', 'bc']), addNoiseSeed(schema, w, ['bb', 'aa']), addNoiseSeed(schema, w, ['aa'])]) {
-      expect(other).not.toBe(a)
-    }
-    // Through planEffect: two runs of one node keep the same pixels; another file or amount changes them.
+    for (const other of [
+      addNoiseSeedOf(addNoiseSeedBase(schema, { ...w, amount: 0.31 }, 'fx1'), ['aa', 'bb']), addNoiseSeedOf(addNoiseSeedBase(schema, { ...w, type: 'uniform' }, 'fx1'), ['aa', 'bb']),
+      addNoiseSeedOf(addNoiseSeedBase(schema, { ...w, monochromatic: true }, 'fx1'), ['aa', 'bb']), addNoiseSeedOf(addNoiseSeedBase(schema, w, 'fx2'), ['aa', 'bb']),
+      addNoiseSeedOf(base, ['aa', 'bc']), addNoiseSeedOf(base, ['bb', 'aa']), addNoiseSeedOf(base, ['aa']),
+    ]) expect(other).not.toBe(a)
+    // Through planEffect (the worker hashing the floats the op receives): two runs of one node keep the same pixels;
+    // another amount, another picture, or another node (two identical Add noise nodes) change them.
     const c = FX.cases.find(x => x.name === 'AddNoise: seed 7, gaussian, mono False, rgb 37×23')!
     const kept = async (cc: NoiseCase) => {
       const r = await runEffectCase(cc as FxCase, { families: NOISE })
@@ -640,11 +656,35 @@ describe('random numbers', () => {
     }
     const first = await kept(c)
     expect(await kept(c)).toBe(first)
+    expect(first).toBe(sha256(tk.quantize((await coreRun(c, await ownSeedOf(c)))[0]!, 'round')))
     expect(await kept(variant(c, { widgets: { ...c.widgets, amount: 0.31 } }))).not.toBe(first)
-    const other = FX.cases.find(x => x.name === 'AddNoise: defaults, rgb 37×23')!
     expect(await kept(variant(c, { inputs: { image: { source: 'rgb', files: [FX.cases.find(x => x.name === 'Glitch: slices 2 on 40×9')!.inputs.image!.files[0]!] } } }))).not.toBe(first)
-    expect(other).toBeTruthy()
+    const twin = variant(c, { node_id: `${c.node_id}_twin` })
+    const second = await kept(twin)
+    expect(second, 'two identical Add noise nodes on one picture').not.toBe(first)
+    expect(second).toBe(sha256(tk.quantize((await coreRun(twin, await ownSeedOf(twin)))[0]!, 'round')))
+    // A batch of more than one: every picture hashed in a first pass, then drawn (the kept pictures are the core's under that seed).
+    const batch = FX.cases.find(x => x.name === 'AddNoise: seed 7, gaussian, a batch of two and a repeat')!
+    const r = await runEffectCase(batch as FxCase, { families: NOISE })
+    const own = await coreRun(batch, await ownSeedOf(batch))
+    const files = filesOfValue(r.made.values[0])
+    for (const [i, f] of files.entries()) expect(sha256((await pngPixels(r.bytes(f))).px), `batch picture ${i}`).toBe(sha256(tk.quantize(own[i]!, 'round')))
   }, 60_000)
+
+  it('Add noise\'s seed is the floats, not the file: a picture handed on as a kept float tensor seeds the noise as its floats do', async () => {
+    const c = FX.cases.find(x => x.name === 'AddNoise: seed 7, gaussian, mono False, rgb 37×23')!
+    const [row] = await tensorsOf(c as FxCase)
+    const h = createHash('sha256')
+    h.update(`image:${row!.image!.c}x${row!.image!.h}x${row!.image!.w};`)
+    h.update(new Uint8Array(row!.image!.data.buffer, row!.image!.data.byteOffset, row!.image!.data.byteLength))
+    expect(await floatHashesOf(c)).toEqual([h.digest('hex')])
+    // The same floats from a tensor file (tensorFileOf, read back as the worker reads it) hash the same.
+    const back = tk.fromTensorFile(tk.tensorFileOf(row!.image!))
+    const h2 = createHash('sha256')
+    h2.update(`image:${back.c}x${back.h}x${back.w};`)
+    h2.update(new Uint8Array(back.data.buffer, back.data.byteOffset, back.data.byteLength))
+    expect(h2.digest('hex')).toBe((await floatHashesOf(c))[0])
+  })
 
   it('Add noise\'s look under the runner\'s own seed: per-channel means within 2/255 and the noise\'s spread within 5% of Python\'s', () => {
     const s = 256
@@ -992,7 +1032,7 @@ describe('work and sizes', () => {
     const lines: string[] = []
     for (const [cls, w] of settings) {
       const total = generatorTotal(cls, w)
-      const fits = total <= EFFECT_MAX_WORK
+      const fits = total <= EFFECT_MAX_WORK && effectPeakFits(cls, w, null, false)
       expect(generatorWork(cls, w), cls).toBe(EFFECTS[cls]!.work!(w, null))
       expect(effectOutputSizeFits(cls, w, false), `${cls} ${JSON.stringify(w)}`).toBe(fits)
       expect(runnerTakesNode({ fx: effect(cls, null, w) }, 'fx', NOISE), `${cls} ${JSON.stringify(w)}`).toBe(fits)
@@ -1009,6 +1049,61 @@ describe('work and sizes', () => {
     expect(effectOutputSizeFits('ReactionDiffusion', { ...heavy, iterations: '3000' }, false)).toBe(false)
     console.info(`noise generators: ${lines.join('; ')}`)
   }, 120_000)
+
+  it('memory: every class\'s largest array within 8192² × 4 values locally (4096² × 4 hosted), else left to the engine (Perlin\'s octave grid below scale 1)', async () => {
+    expect(EFFECT_MAX_VALUES).toBe(268435456)
+    expect(EFFECT_HOSTED_MAX_VALUES).toBe(67108864)
+    const perlin = (side: number, octaves: number) => ({ ...defaultsOf('PerlinNoise'), width: side, height: side, octaves, scale: 4 })
+    // The largest octave's grid: max(2, int(side / (4 / 2^(octaves − 1))) + 1)² values.
+    const grid = (side: number, octaves: number) => (side * 2 ** (octaves - 1) / 4 + 1) ** 2
+    const rows: [number, number, boolean, boolean][] = [
+      // side, octaves, taken locally, taken hosted
+      [1024, 8, false, false], // 32,769² = 1.07 × 10⁹ values (4 GiB)
+      [2048, 7, false, false], // 32,769² again
+      [2048, 6, false, false], // 16,385² = 268,468,225: just over 8192² × 4
+      [512, 8, false, false], // 16,385² again
+      [512, 7, true, false], // 8,193² = 67,125,249: just over the hosted cap
+      [256, 7, true, true], // 4,097² = 16.8 M
+    ]
+    for (const [side, octaves, local, hosted] of rows) {
+      const w = perlin(side, octaves)
+      expect(effectPeakValues('PerlinNoise', w, null), `${side}² ${octaves} octaves`).toBe(Math.max(grid(side, octaves), 3 * side * side))
+      expect(effectOutputSizeFits('PerlinNoise', w, false), `${side}² ${octaves} octaves, local`).toBe(local)
+      expect(effectOutputSizeFits('PerlinNoise', w, true), `${side}² ${octaves} octaves, hosted`).toBe(hosted)
+      expect(runnerTakesNode({ fx: effect('PerlinNoise', null, w) }, 'fx', NOISE), `${side}² ${octaves} octaves`).toBe(local)
+    }
+    // At its turn (eligibility skipped), planEffect refuses it before drawing anything.
+    const { derive, mem } = await runBig('PerlinNoise', perlin(1024, 8), null)
+    await expect(derive()).rejects.toThrow(EFFECT_TOO_MUCH_MEMORY)
+    expect(mem.previews).toHaveLength(0)
+    expect(EFFECT_TOO_MUCH_MEMORY).toBe('This effect would need too much memory at this setting. Use a smaller picture or a lighter setting.')
+    // Every generator's other arrays are its 3-channel output (≤ 2048² × 3); every picture class's its picture or Film grain's field.
+    for (const cls of EFFECT_GENERATOR_CLASSES.filter(x => x !== 'PerlinNoise')) {
+      const w = { ...defaultsOf(cls), width: 2048, height: 2048 }
+      expect(effectPeakValues(cls, w, null), cls).toBe(3 * 2048 * 2048)
+    }
+    for (const cls of PICTURE_CLASSES) expect(effectPeakValues(cls, defaultsOf(cls), { w: 8192, h: 8192 }), cls).toBe(EFFECT_MAX_VALUES)
+    expect(effectPeakValues('FilmGrain', { amount: 0.5, size: 0.5 }, { w: 1, h: 8192 })).toBe(4 * 2 * 8192)
+    // The earlier families have no count here: their largest array is their picture (the R2.9 report lists padded copies).
+    expect(effectPeakValues('Blur', { type: 'gaussian', radius: 30 }, { w: 8192, h: 8192 })).toBeNull()
+  }, 60_000)
+
+  it('Film grain checks its field against the picture before drawing it, and counts the field in its work', () => {
+    const op = coreOp(EFFECTS.FilmGrain!.op) as unknown as Op
+    const x = tk.tensor(3, 2048, 2048)
+    let checks = 0
+    const t0 = performance.now()
+    expect(() => op({ image: x }, { amount: 0.5, size: 0.5, seed: 1 }, () => { checks++; return false }, {}, 0, 1)).toThrow('EFFECT_GRAIN_TOO_FINE')
+    expect(checks, 'no draw (each chunk checks Stop first)').toBe(0)
+    expect(performance.now() - t0).toBeLessThan(500)
+    const s = { w: 4096, h: 4096 }
+    const fine = EFFECTS.FilmGrain!.work!({ amount: 0.5, size: 0.5, seed: 1 }, s)
+    const coarse = EFFECTS.FilmGrain!.work!({ amount: 0.5, size: 4, seed: 1 }, s)
+    const one = EFFECTS.FilmGrain!.work!({ amount: 0.5, size: 1, seed: 1 }, s)
+    // The field: 8192² values at size 0.5, 4096² at size 1, 1024² at size 4.
+    expect(fine - one).toBe((8192 * 8192 - 4096 * 4096) * 12)
+    expect(one).toBeGreaterThan(coarse - 4096 * 4096 * 6)
+  })
 
   it('Film grain below size 1: the output grows on a side of 1 (torch\'s broadcast), and the plan sizes it before running', () => {
     const w = { amount: 0.5, size: 0.5, seed: 1 }

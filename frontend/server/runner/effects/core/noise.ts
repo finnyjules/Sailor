@@ -23,9 +23,9 @@
  * double first. Random numbers are drawn in chunks with a Stop check between
  * them (R2.3 ruling), from seeds passed exactly (a bigint for Add noise's).
  *
- * Parity (R2 rule 10): Glitch, Perlin noise, Voronoi (topk's tie order: the
- * band), Gradient, Reaction-diffusion (the Winograd laplacian) and Stipple are
- * EXACT. Film grain and Add noise's gaussian (randn's sin / cos / log), Fractal
+ * Parity (R2 rule 10): Glitch, Perlin noise, Voronoi (but at an exact tie
+ * of its two nearest sites: see Voronoi), Gradient, Reaction-diffusion (the
+ * Winograd laplacian) and Stipple are EXACT. Film grain and Add noise's gaussian (randn's sin / cos / log), Fractal
  * (sin) and Palette quantize (its means) are LIBRARY. Flow field is the "warp"
  * class (R2.7 amendment): torch's SLEEF cos / sin move grid_sample's taps.
  *
@@ -224,6 +224,11 @@ export function noiseCore(k: TensorCore, kn: KernelsCore, rng: RngCore) {
     const { h, w } = x
     const gh = Math.max(2, Math.trunc(h / size))
     const gw = Math.max(2, Math.trunc(w / size))
+    // The field's size against the picture's, before drawing it (Python raises either way).
+    const side = (a: number, b: number) => (a === b ? a : a === 1 ? b : b === 1 ? a : -1)
+    const oh = side(h, size > 1 ? h : gh)
+    const ow = side(w, size > 1 ? w : gw)
+    if (oh < 0 || ow < 0) throw new Error(GRAIN_TOO_FINE)
     const key = `${h}x${w}`
     let noise = state.grain as Tensor | undefined
     if (!noise || state.grainKey !== key) {
@@ -237,10 +242,6 @@ export function noiseCore(k: TensorCore, kn: KernelsCore, rng: RngCore) {
       state.grain = noise
       state.grainKey = key
     }
-    const side = (a: number, b: number) => (a === b ? a : a === 1 ? b : b === 1 ? a : -1)
-    const oh = side(h, noise.h)
-    const ow = side(w, noise.w)
-    if (oh < 0 || ow < 0) throw new Error(GRAIN_TOO_FINE)
     const luma = k.luma709(x, stop)
     const weight = new Float32Array(h * w)
     for (let i = 0; i < weight.length; i++) {
@@ -348,8 +349,13 @@ export function noiseCore(k: TensorCore, kn: KernelsCore, rng: RngCore) {
    * per pixel the squared distance to every site on linspace(0, 1) grids,
    * topk(2, smallest); an edge where sqrt(d1) − sqrt(d0) < edge_width;
    * colored: colours rand(points, 3) (drawn after the sites) of the nearest
-   * site × (1 − edge), else 1 − edge on three channels. EXACT (topk's tie
-   * order: the band).
+   * site × (1 − edge), else 1 − edge on three channels. EXACT but at a tie:
+   * where the two nearest sites are exactly equally far (float32), kernels.ts
+   * topk puts the lower index first and torch's order is its own (it agreed
+   * about half the time on synthetic ties). At edge_width > 0 a tie is an
+   * edge (black) either way; at edge_width 0 the whole pixel can take the
+   * other site's colour — not one level off. Exact ties never occurred in
+   * 800 trials (400 seeds × 2 grids × 400 points; R2.9 review).
    */
   function Voronoi(_inp: Inputs, p: Params, stop?: Stop): EffectResult {
     const w = Math.trunc(num(p, 'width'))
@@ -766,17 +772,35 @@ export function noiseCore(k: TensorCore, kn: KernelsCore, rng: RngCore) {
   // ── Add noise ───────────────────────────────────────────────────────────
 
   /**
+   * Add noise's seed from its two halves (plan.ts addNoiseSeedBase: the
+   * settings and node id; the worker: each batch index's sha256 of the floats
+   * the op receives): FNV-1a 64 over `base|h0|h1|…`, as plan.ts
+   * addNoiseSeedOf computes it.
+   */
+  function seedOf(base: string, hashes: string[] | undefined, count: number): bigint {
+    if (typeof base !== 'string' || !hashes || hashes.length < count) throw new Error('Add noise’s pictures were not hashed')
+    const text = [base, ...hashes.slice(0, count)].join('|')
+    const mask = (BigInt(1) << BigInt(64)) - BigInt(1)
+    const prime = BigInt('1099511628211')
+    let h = BigInt('14695981039346656037')
+    for (let i = 0; i < text.length; i++) h = ((h ^ BigInt(text.charCodeAt(i))) * prime) & mask
+    return h
+  }
+
+  /**
    * AddNoise (nodes_sharpen_noise.py:45-81): amount ≤ 0 is a clamp; else
    * image + amount·0.5·noise, clamped, the noise one draw over the whole
    * (B, H, W, C) batch ((B, H, W, 1) monochromatic, the same on every
    * channel): randn, or (rand − 0.5)·2 for uniform. Python draws from the
-   * process's global generator; the runner from its own, seeded by
-   * `seed` (the plan's addNoiseSeed of the node's settings and files, a
-   * bigint; the fixtures pass the seed they gave torch). The stream is kept
+   * process's global generator; the runner from its own, seeded by seedOf
+   * (the node's settings and id, and the floats it receives), or by `seed`
+   * when given (the fixtures pass the seed they gave torch). The stream is kept
    * in the batch state and read picture by picture. LIBRARY (randn); uniform
    * is exact.
    */
   function AddNoise(inp: Inputs, p: Params, stop?: Stop, state: State = {}, index = 0, count = 1): EffectResult {
+    // The first pass over a batch of more than one: the worker has hashed this picture (its seed needs them all).
+    if (state.gathering) return { outputs: [], preview: null }
     const x = inp.image!
     const amount = num(p, 'amount')
     if (amount <= 0) return { outputs: [clampedCopy(x, stop, index, count)], preview: null }
@@ -785,7 +809,7 @@ export function noiseCore(k: TensorCore, kn: KernelsCore, rng: RngCore) {
     const per = mono ? n : n * x.c
     const uniform = p.type === 'uniform'
     if (!state.stream) {
-      const g = seeded(typeof p.seed === 'string' ? BigInt(p.seed) : p.seed as bigint | number)
+      const g = seeded(p.seed !== undefined ? (typeof p.seed === 'string' ? BigInt(p.seed) : p.seed as bigint | number) : seedOf(p.seedBase as string, state.inputHashes as string[] | undefined, count))
       state.stream = uniform
         ? { next: (m: number) => { const r = randChunked(g, m, stop); for (let i = 0; i < m; i++) r[i] = f(f(r[i]! - 0.5) * 2.0); return r } }
         : normalStream(g, per * count, stop)
