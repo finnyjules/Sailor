@@ -55,7 +55,7 @@ export const ACTION_CATALOG: Record<string, ActionEntry> = {
   // -- Image · enhance --------------------------------------------------------
   UpscaleImageNode:      { useCase: 'Upscale an image',               model: 'Clarity',                                  intent: 'enhance' },
   RestorePhotoNode:      { useCase: 'Restore an old photo',           model: 'Flux Kontext · Restore',                   intent: 'enhance' },
-  FixFacesNode:          { useCase: 'Fix faces in a photo',           model: 'CodeFormer',                               intent: 'enhance' },
+  FixFacesNode:          { useCase: 'Fix faces in a photo',           model: 'Topaz',                                    intent: 'enhance' },
   EnhanceDetailNode:     { useCase: 'Enhance detail in an image',     model: 'Clarity / Topaz / Magic Refiner',          intent: 'enhance' },
   // -- Image · analyze --------------------------------------------------------
   DescribeImageNode:     { useCase: 'Describe an image',              model: 'Moondream 2',                              intent: 'analyze' },
@@ -97,7 +97,6 @@ export const DEPRECATED_NODES = new Set<string>([
   'ClarityUpscaleRemoteNode',
   'RemoveBackgroundRemoteNode',
   'RestorePhotoRemoteNode',
-  'CodeformerRemoteNode',
   'DescribeImageRemoteNode',
   'Seedance2RemoteNode',
   'Veo3RemoteNode',

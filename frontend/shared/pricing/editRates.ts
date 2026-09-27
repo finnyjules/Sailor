@@ -208,6 +208,17 @@ export const EDIT_RATES: Record<string, EditRate> = {
     beyondPerPixel: 1.36 / 512e6,
     ...verified('replicate', rep('topazlabs/image-upscale')),
   },
+  // Fix faces on fal's Topaz (family fix-faces): "For a single image, your
+  // request will cost $0.08 for up to 24MP, $0.16 for up to 48MP, $0.32 for
+  // up to 96MP, and up to $1.36 for 512MP output resolution" (llms.txt, read
+  // 2026-09-26). MP read as 1,000,000 pixels (fail-safe). Between 96 and 512
+  // MP fal names no step, so the top one.
+  'fal-ai/topaz/upscale/image': {
+    unit: 'by_output_pixels',
+    steps: [[24e6, 0.08], [48e6, 0.16], [96e6, 0.32], [512e6, 1.36]],
+    beyondPerPixel: 1.36 / 512e6,
+    ...verified('fal', fal('fal-ai/topaz/upscale/image')),
+  },
   // ── Restyle with a style LoRA (RestyleWithLoRANode, ComfyUI path) ───────
   // Moondream 2, billed by GPU time (L40S, $0.000975/s): "costs approximately
   // $0.0020 to run". The node captions once and classifies up to four times.

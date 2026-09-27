@@ -380,6 +380,7 @@ export const ROTATE_CAMERA_TOO_LARGE = 'Rotate camera takes pictures up to about
 export const FLUX_2_EDIT_TOO_LARGE = 'Flux 2 Pro takes pictures up to about 19 megapixels. Make this one smaller first.'
 export const UPSCALE_TOO_LARGE = 'Upscale an image takes pictures up to about 19 megapixels. Make this one smaller first.'
 export const ENHANCE_DETAIL_TOO_LARGE = 'Enhance detail takes pictures up to about 19 megapixels. Make this one smaller first.'
+export const FIX_FACES_TOO_LARGE = 'Fix faces takes pictures up to about 19 megapixels. Make this one smaller first.'
 
 /** A size-priced node by the name the user sees it by (its own, or its model's). */
 function sizePricedName(classType: string): string {
@@ -387,6 +388,7 @@ function sizePricedName(classType: string): string {
     case 'RotateCameraNode': return 'Rotate camera'
     case 'UpscaleImageNode': return 'Upscale an image'
     case 'EnhanceDetailNode': return 'Enhance detail'
+    case 'FixFacesNode': return 'Fix faces'
     // Edit an image and Blend scene: only FLUX.2 edit is priced by the picture's size.
     default: return 'Flux 2 Pro'
   }
@@ -427,6 +429,7 @@ function inputTooLargeWords(classType: string): string {
     case 'RotateCameraNode': return ROTATE_CAMERA_TOO_LARGE
     case 'UpscaleImageNode': return UPSCALE_TOO_LARGE
     case 'EnhanceDetailNode': return ENHANCE_DETAIL_TOO_LARGE
+    case 'FixFacesNode': return FIX_FACES_TOO_LARGE
     // Edit an image and Blend scene: only FLUX.2 edit is priced by the picture's size.
     default: return FLUX_2_EDIT_TOO_LARGE
   }

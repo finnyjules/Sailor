@@ -40,7 +40,9 @@
  * LipSyncNode on its sync-3 engine, family sync-3, fed by the studio's files
  * or an Audio card, which hands its own file on;
  * EnhanceVideoNode on fal's Topaz video upscale, family topaz-video, which
- * moves the whole node while it is on)
+ * moves the whole node while it is on;
+ * FixFacesNode on fal's Topaz image upscale with face enhancement, family
+ * fix-faces, which moves the whole node while it is on)
  * closely enough that the same workflow gives the same result.
  */
 import { GATE_CLASS, isLink, type ApiPrompt } from '#shared/runner/graph'
@@ -92,6 +94,7 @@ import { isKrea2Model, krea2Generate, krea2OnReplicate } from './generators/krea
 import { isSeedream5ProEdit, seedream5ProEdit } from './generators/seedream5ProEdit'
 import { qwen2511Angles } from './generators/qwen2511Angles'
 import { briaProductShot } from './generators/briaProductShot'
+import { topazFixFaces } from './generators/topazImage'
 import { sync3Lipsync, sync3NodeProblem, sync3Sources } from './generators/sync3'
 import { topazVideoNodeProblem, topazVideoSource, topazVideoUpscale } from './generators/topazVideo'
 import { TOPAZ_VIDEO_UNMEASURED, topazVideoPlan } from '#shared/runner/topazVideo'
@@ -767,6 +770,12 @@ async function planNodeRequest(ctx: PlanContext): Promise<NodePlan> {
         keepProductExact: flag('keep_product_exact', true),
         seed: asInt(inputs.seed, 0),
       }), 'product_shot', 'replicate')
+    }
+
+    // ── fix-faces: Fix faces on fal's Topaz, no backup (topazImage.ts) ──
+    case 'FixFacesNode': {
+      const image = await pictureUrl('image', 'There is no picture to fix')
+      return stillCall(topazFixFaces({ image, inputs }), 'fix_faces')
     }
 
     // ── restyle family (nodes_replicate.py RestyleFromImageNode :3070) ──

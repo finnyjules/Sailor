@@ -139,7 +139,7 @@ export const NODE_MODEL_BRAND: Record<string, string | null> = {
   UpscaleImageNode:     null,                 // Clarity — no brand
   RemoveBackgroundNode: null,                 // 851-labs/bg-remover
   RestorePhotoNode:     'BFL',                // Flux Kontext · Restore
-  FixFacesNode:         null,                 // CodeFormer
+  FixFacesNode:         null,                 // Topaz — no brand
   LayerizeGraphicNode:  'Ideogram',           // Ideogram Layerize
   SeedreamLayerizeNode: 'ByteDance',          // Seedream 5 Pro Layerize
   SplitPhotoLayersNode: null,                 // pipeline: bg-remover + LaMa/Bria Eraser

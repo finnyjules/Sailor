@@ -35,7 +35,7 @@ describe('parseFamilies', () => {
     expect([...parseFamilies(['fal-edit', 7, 'nope', 'ref-edits'])].sort()).toEqual(['fal-edit', 'ref-edits'])
   })
   it('knows the nine families', () => {
-    expect([...RUNNER_FAMILIES].sort()).toEqual(['bria-product-shot', 'cards', 'fal-edit', 'frame', 'gemini-omni-flash', 'gpt-image-2.5', 'grok-imagine-2', 'grok-imagine-video-1.5', 'h3-max-turbo', 'happyhorse-1.1', 'ideogram-4', 'krea-2', 'ltx-2.5-fast', 'luma-ray-3.2', 'muse-image', 'nano-actions', 'nano-banana-2-blend', 'nano-banana-2-lite', 'qwen-2511-angles', 'qwen-image-3', 'recraft-v4.1', 'ref-edits', 'replicate-image', 'replicate-video', 'restyle', 'reve-2.1', 'seedream-5-pro-edit', 'sync-3', 'topaz-video', 'veo-3.1-lite', 'wan-3',
+    expect([...RUNNER_FAMILIES].sort()).toEqual(['bria-product-shot', 'cards', 'fal-edit', 'fix-faces', 'frame', 'gemini-omni-flash', 'gpt-image-2.5', 'grok-imagine-2', 'grok-imagine-video-1.5', 'h3-max-turbo', 'happyhorse-1.1', 'ideogram-4', 'krea-2', 'ltx-2.5-fast', 'luma-ray-3.2', 'muse-image', 'nano-actions', 'nano-banana-2-blend', 'nano-banana-2-lite', 'qwen-2511-angles', 'qwen-image-3', 'recraft-v4.1', 'ref-edits', 'replicate-image', 'replicate-video', 'restyle', 'reve-2.1', 'seedream-5-pro-edit', 'sync-3', 'topaz-video', 'veo-3.1-lite', 'wan-3',
       // Step 3, R2.1: the picture effects, the Shader effect's bake and the live previews (each needs `cards`).
       'effects-tone', 'effects-blur', 'effects-cells', 'effects-warp', 'effects-mask', 'effects-noise', 'shader-bake', 'live-previews',
     ].sort())

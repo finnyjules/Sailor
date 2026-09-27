@@ -57,6 +57,7 @@ const EDIT_BASE: Record<string, Record<string, unknown>> = {
   GenerateFromReferencesNode: { image_1: LINK, prompt: 'a poster' },
   RotateCameraNode: { image: LINK },
   ProductShotNode: { image: LINK },
+  FixFacesNode: { image: LINK },
   RestyleFromImageNode: { content_image: LINK, style_image: LINK },
   // sync-3 lip-sync (Task F22): the studio's face video and sound.
   LipSyncNode: {

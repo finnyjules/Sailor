@@ -305,7 +305,7 @@ export const IMAGE_OUTPUT_CLASSES: ReadonlySet<string> = new Set([
   'GenerateImageNode', 'Image', 'Compositor', 'LoadImage',
   'EditImageNode', 'DevelopImageNode', 'RelightNode', 'BlendSceneNode',
   'RemoveObjectNode', 'TextEditNode', 'RecolorObjectNode', 'SwapBackgroundNode', 'SwapProductNode', 'PersonSwap',
-  'GenerateFromReferencesNode', 'RotateCameraNode', 'ProductShotNode', 'RestyleFromImageNode',
+  'GenerateFromReferencesNode', 'RotateCameraNode', 'ProductShotNode', 'RestyleFromImageNode', 'FixFacesNode',
 ])
 
 /**
@@ -428,6 +428,13 @@ export const RUNNER_NODE_RULES: Readonly<Record<string, RunnerNodeRule>> = {
     },
     mustLink: ['image'],
     mustNotLink: ['scene_prompt', 'aspect'],
+  },
+  // ── fix-faces: Fix faces on fal's Topaz (replaces CodeFormer) ──
+  FixFacesNode: {
+    upgrade: { family: 'fix-faces', label: 'Fix faces' },
+    mustLink: ['image'],
+    imageInputs: ['image'],
+    mustNotLink: ['strength', 'creativity', 'upscale'],
   },
   // ── restyle (Task B8): Nano Banana 2 / Pro on fal, Nano Banana on
   // Replicate. The prompt and the taste wire (style_in, a Moodboard card's

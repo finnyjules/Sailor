@@ -317,6 +317,7 @@ export const RUNNER_ROUTES: Readonly<Record<string, Route>> = {
   'ProductShotNode+bria-product-shot': r('fal', null, 'Replicate has no Bria Product Shot; its background swap is another model'),
   'LipSyncNode:sync-3': r('fal', null, 'Replicate has no sync-3 (its sync.so models are lipsync-2, lipsync-2-pro and react-1)'),
   'EnhanceVideoNode+topaz-video': r('fal', null, 'Replicate\'s Topaz video upscale bills an unspecified unit: its price can\'t be verified'),
+  'FixFacesNode+fix-faces': r('fal', null, 'Replicate\'s Topaz is another app with its own settings and no face-enhancement strength'),
 }
 
 // ── Generate video: the two models moved to fal first ──────────────────────

@@ -80,7 +80,7 @@ export const SETTING_PRICED_NODE_CLASSES: readonly string[] = [
   'EditImageNode', 'DevelopImageNode', 'RelightNode', 'BlendSceneNode',
   'RemoveObjectNode', 'TextEditNode', 'RecolorObjectNode', 'SwapBackgroundNode', 'SwapProductNode', 'PersonSwap', 'LensReframe',
   'GenerateFromReferencesNode', 'RotateCameraNode', 'ProductShotNode',
-  'RestyleFromImageNode', 'RestyleWithLoRANode',
+  'RestyleFromImageNode', 'RestyleWithLoRANode', 'FixFacesNode',
 ]
 
 const isLinked = (v: unknown) => Array.isArray(v)
@@ -197,6 +197,26 @@ const rotateCamera2511 = (px: number) => call(QWEN_2511_ANGLES_APP, null, { inpu
  * `shot_size`), billed per picture.
  */
 export const BRIA_PRODUCT_SHOT_APP = 'fal-ai/bria/product-shot'
+
+/** Fix faces on Topaz image upscale with face enhancement, fal (family fix-faces). */
+export const TOPAZ_IMAGE_APP = 'fal-ai/topaz/upscale/image'
+
+/** FixFacesNode's settings as the node declares them (comfy_api_nodes/nodes_replicate.py). */
+export const FIX_FACES_DEFAULTS = { strength: 0.8, creativity: 0, upscale: 2 } as const
+
+const clampNum = (v: unknown, lo: number, hi: number, def: number) => {
+  const n = typeof v === 'number' ? v : typeof v === 'string' && v.trim() ? Number(v) : NaN
+  return Number.isFinite(n) ? Math.min(hi, Math.max(lo, n)) : def
+}
+
+/** The node's settings, read as the request sends them: out-of-range clamped, unreadable the default. */
+export function fixFacesSettings(inputs: NodeInputs): { strength: number, creativity: number, upscale: number } {
+  return {
+    strength: clampNum(inputs.strength, 0, 1, FIX_FACES_DEFAULTS.strength),
+    creativity: clampNum(inputs.creativity, 0, 1, FIX_FACES_DEFAULTS.creativity),
+    upscale: Math.round(clampNum(inputs.upscale, 1, 4, FIX_FACES_DEFAULTS.upscale)),
+  }
+}
 
 const EDIT_IMAGE_MODELS: ModelCalls = {
   'Nano Banana 2': i => nanoBananaEdit(REP_NB2, nb2Tier(i)),
@@ -360,6 +380,13 @@ export function editCalls(classType: string, inputs: NodeInputs, opts: { inputPi
   if (classType === 'ProductShotNode' && classUpgradeOn(classType, opts.families ?? NO_FAMILIES)) {
     return { calls: [call(BRIA_PRODUCT_SHOT_APP)] }
   }
+  // Fix faces on Topaz (family fix-faces): billed by the output's size, the
+  // input (measured, or the cap) enlarged `upscale` times on each side. A
+  // linked upscale is priced at 4.
+  if (classType === 'FixFacesNode') {
+    const f = isLinked(inputs.upscale) ? 4 : fixFacesSettings(inputs).upscale
+    return { calls: [call(TOPAZ_IMAGE_APP, null, { output: pricedInputPixels(opts.inputPixels) * f * f })] }
+  }
   const fixed = hasOwn(FIXED, classType) ? FIXED[classType] : undefined
   if (fixed) return { calls: [fixed(inputs)] }
   const px = pricedInputPixels(opts.inputPixels)
@@ -393,6 +420,7 @@ export function editCalls(classType: string, inputs: NodeInputs, opts: { inputPi
  * its price doesn't read the size, so nothing is measured).
  */
 export function sizePricedInput(classType: string, inputs: NodeInputs, families: ReadonlySet<RunnerFamily> = NO_FAMILIES): string | null {
+  if (classType === 'FixFacesNode') return 'image'
   if (classType === 'UpscaleImageNode' || classType === 'EnhanceDetailNode') return 'image'
   if (classType === 'RotateCameraNode') return classUpgradeOn(classType, families) ? 'image' : null
   const flux2 = inputs.model === undefined || isLinked(inputs.model) || inputs.model === 'Flux 2 Pro'

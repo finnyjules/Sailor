@@ -173,6 +173,7 @@ const CLASS_TITLES: Readonly<Record<string, string>> = {
   UpscaleImageNode: 'Upscale an image',
   RotateCameraNode: 'Rotate camera',
   ProductShotNode: 'Product shot',
+  FixFacesNode: 'Fix faces',
   LipSyncNode: 'Lip-sync a character',
   EnhanceVideoNode: 'Enhance a video',
 }

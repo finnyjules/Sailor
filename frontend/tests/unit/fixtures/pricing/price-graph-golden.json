@@ -430,7 +430,6 @@
     "ChatLLMNode": 1,
     "ClarityUpscaleRemoteNode": 30,
     "CloneSingingVoiceNode": 4,
-    "CodeformerRemoteNode": 1,
     "ConsistentFaceNode": 16,
     "DescribeImageNode": 1,
     "DescribeImageRemoteNode": 1,

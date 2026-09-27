@@ -18,7 +18,6 @@ Image
 -  ClarityUpscaleRemoteNode   — Upscale an image · Clarity
 -  RemoveBackgroundRemoteNode — Remove background · 851-labs/background-remover
 -  RestorePhotoRemoteNode     — Restore an old photo · flux-kontext-apps/restore-image
--  CodeformerRemoteNode       — Fix faces in a photo · CodeFormer
 -  DescribeImageRemoteNode    — Describe an image · Moondream 2
 
 Video
@@ -2092,58 +2091,6 @@ class RestorePhotoRemoteNode(IO.ComfyNode):
         pred = await _run_prediction("flux-kontext-apps/restore-image", input_dict)
         tensor = await download_url_to_image_tensor(_first_output_url(pred), cls=cls)
         return IO.NodeOutput(tensor, ui=save_generation_output(tensor, "restore_photo"))
-
-
-# =============================================================================
-# Node: Fix faces in a photo (sczhou/codeformer)
-# =============================================================================
-
-
-class CodeformerRemoteNode(IO.ComfyNode):
-    @classmethod
-    def define_schema(cls):
-        return IO.Schema(
-            node_id="CodeformerRemoteNode",
-            display_name="Fix Faces · CodeFormer",
-            category="api node/image/Replicate",
-            description=(
-                "sczhou/codeformer — face-specific restoration. Sharpens, "
-                "de-blurs, and reconstructs damaged or low-res faces while "
-                "leaving the rest of the photo intact. Great for old portraits, "
-                "low-res screenshots, AI-generated faces with artifacts. "
-                "~$0.005 per image."
-            ),
-            inputs=[
-                IO.Image.Input("image", tooltip="Image containing faces to restore."),
-                IO.Float.Input(
-                    "codeformer_fidelity",
-                    default=0.5, min=0.0, max=1.0, step=0.05,
-                    tooltip="0 = stronger restoration (more change), 1 = more faithful (subtle).",
-                ),
-                IO.Boolean.Input("background_enhance", default=True, advanced=True,
-                                 tooltip="Also enhance the non-face background with Real-ESRGAN."),
-                IO.Boolean.Input("face_upsample", default=True, advanced=True,
-                                 tooltip="Upsample faces for higher final resolution."),
-                IO.Int.Input("upscale", default=2, min=1, max=4, step=1, advanced=True,
-                             tooltip="Final upscale factor relative to input."),
-            ],
-            outputs=[IO.Image.Output()],
-            price_badge=IO.PriceBadge(expr='{"type":"usd","usd":0.005,"format":{"approximate":true}}'),
-        )
-
-    @classmethod
-    async def execute(cls, image, codeformer_fidelity, background_enhance,
-                      face_upsample, upscale):
-        input_dict = {
-            "image": _image_tensor_to_data_url(image),
-            "codeformer_fidelity": codeformer_fidelity,
-            "background_enhance": background_enhance,
-            "face_upsample": face_upsample,
-            "upscale": upscale,
-        }
-        pred = await _run_prediction("sczhou/codeformer", input_dict)
-        tensor = await download_url_to_image_tensor(_first_output_url(pred), cls=cls)
-        return IO.NodeOutput(tensor, ui=save_generation_output(tensor, "codeformer"))
 
 
 # =============================================================================
@@ -4471,39 +4418,32 @@ class RestorePhotoNode(IO.ComfyNode):
 
 
 class FixFacesNode(IO.ComfyNode):
+    """Definition only: runs on Sailor's runner (family fix-faces, fal Topaz).
+    CodeFormer was removed (S-Lab licence, non-commercial)."""
+
     @classmethod
     def define_schema(cls):
         return IO.Schema(
             node_id="FixFacesNode",
             display_name="Fix faces in a photo",
             category="api node/image/Replicate",
-            description="Face-specific restoration — sharpens, de-blurs, reconstructs faces. ~$0.005 per image.",
+            description="Sharpens and rebuilds faces while upscaling, with Topaz. From about $0.08 a picture, by output size.",
             inputs=[
-                IO.Combo.Input("model", options=["CodeFormer"], default="CodeFormer"),
                 IO.Image.Input("image"),
-                IO.Float.Input("codeformer_fidelity", default=0.5, min=0.0, max=1.0, step=0.05,
-                               tooltip="0 = stronger restoration, 1 = more faithful."),
-                IO.Boolean.Input("background_enhance", default=True, advanced=True),
-                IO.Boolean.Input("face_upsample", default=True, advanced=True),
-                IO.Int.Input("upscale", default=2, min=1, max=4, step=1, advanced=True),
+                IO.Float.Input("strength", default=0.8, min=0.0, max=1.0, step=0.05,
+                               tooltip="How strongly faces are rebuilt."),
+                IO.Float.Input("creativity", default=0.0, min=0.0, max=1.0, step=0.05,
+                               tooltip="0 keeps the face the person's; higher invents more detail."),
+                IO.Int.Input("upscale", default=2, min=1, max=4, step=1,
+                             tooltip="How many times larger the picture comes back."),
             ],
             outputs=[IO.Image.Output()],
-            price_badge=IO.PriceBadge(expr='{"type":"usd","usd":0.005,"format":{"approximate":true}}'),
+            price_badge=IO.PriceBadge(expr='{"type":"usd","usd":0.08,"format":{"approximate":true}}'),
         )
 
     @classmethod
-    async def execute(cls, model, image, codeformer_fidelity, background_enhance,
-                      face_upsample, upscale):
-        input_dict = {
-            "image": _image_tensor_to_data_url(image),
-            "codeformer_fidelity": codeformer_fidelity,
-            "background_enhance": background_enhance,
-            "face_upsample": face_upsample,
-            "upscale": upscale,
-        }
-        pred = await _run_prediction("sczhou/codeformer", input_dict)
-        tensor = await download_url_to_image_tensor(_first_output_url(pred), cls=cls)
-        return IO.NodeOutput(tensor)
+    async def execute(cls, image, strength, creativity, upscale):
+        raise RuntimeError("Fix faces runs on Sailor's runner. Switch on the fix-faces family.")
 
 
 # =============================================================================
@@ -6100,7 +6040,7 @@ class ReplicateExtension(ComfyExtension):
             EnhanceDetailNode,          # Enhance Detail · Clarity / Topaz / Magic Refiner
             RemoveBackgroundNode,       # Remove background · 851-labs/bg-remover
             RestorePhotoNode,           # Restore an old photo · Flux Kontext Restore
-            FixFacesNode,               # Fix faces in a photo · CodeFormer
+            FixFacesNode,               # Fix faces in a photo · Topaz (runner only, family fix-faces)
             LayerizeGraphicNode,        # Separate text from image · Ideogram Layerize
             SplitPhotoLayersNode,       # Separate background and foreground · bg-remover + LaMa/Bria Eraser
             SeedreamLayerizeNode,       # Layerize an image (raster layers) · Seedream 5 Pro Layerize
@@ -6141,7 +6081,6 @@ class ReplicateExtension(ComfyExtension):
             ClarityUpscaleRemoteNode,
             RemoveBackgroundRemoteNode,
             RestorePhotoRemoteNode,
-            CodeformerRemoteNode,
             DescribeImageRemoteNode,
             Seedance2RemoteNode,
             Veo3RemoteNode,

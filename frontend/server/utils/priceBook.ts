@@ -278,8 +278,8 @@ export const GRAPH_NODE_CREDITS: Record<string, number> = {
 
   // — image generation / editing —
   // (Edit image, Develop, Generate from references, Blend scene, Restyle,
-  // Product shot, Rotate camera, Relight, Lens reframe and the Nano Banana
-  // actions are priced by their settings since lineup-p4: see
+  // Product shot, Fix faces, Rotate camera, Relight, Lens reframe and the
+  // Nano Banana actions are priced by their settings since lineup-p4: see
   // SETTING_PRICED_NODE_CLASSES below.)
   FluxProRemoteNode: 8,            // badge $0.04
   FluxKontextRemoteNode: 8,        // badge $0.04
@@ -293,8 +293,6 @@ export const GRAPH_NODE_CREDITS: Record<string, number> = {
   SeedreamLayerizeNode: 51,        // badge $0.34
   RestorePhotoRemoteNode: 8,       // badge $0.04
   RestorePhotoNode: 8,             // badge $0.04
-  CodeformerRemoteNode: 1,         // badge $0.005
-  FixFacesNode: 1,                 // badge $0.005
   RemoveBackgroundRemoteNode: 1,   // badge $0.001
   RemoveBackgroundNode: 1,         // badge $0.001
   // Clarity is RANGE-priced (own description: ~$0.05–0.20/image by
@@ -381,7 +379,7 @@ export const PROVIDER_NODE_CLASSES: string[] = [
   'IdeogramV3TurboRemoteNode', 'Veo3RemoteNode', 'Seedance2RemoteNode',
   'WhisperRemoteNode', 'MusicGenRemoteNode', 'MiniMaxSpeechRemoteNode',
   'Hunyuan3DRemoteNode', 'Hunyuan3DMultiViewNode', 'RemoveBackgroundRemoteNode',
-  'RestorePhotoRemoteNode', 'CodeformerRemoteNode', 'DescribeImageRemoteNode',
+  'RestorePhotoRemoteNode', 'DescribeImageRemoteNode',
   'LipsyncRemoteNode', 'GenerateImageNode', 'EditImageNode', 'DevelopImageNode',
   'GenerateFromReferencesNode', 'BlendSceneNode', 'RestyleFromImageNode',
   'RestyleWithLoRANode', 'ProductShotNode', 'RotateCameraNode', 'TextEffectNode',

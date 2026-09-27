@@ -48,6 +48,7 @@ import { RECRAFT_V41_FAL_APP, RECRAFT_V41_REPLICATE_SLUG } from '~~/server/runne
 import { KREA_2_FAL_APPS, KREA_2_REPLICATE_SLUGS } from '~~/server/runner/generators/krea2'
 import { QWEN_2511_ANGLES_APP } from '~~/server/runner/generators/qwen2511Angles'
 import { BRIA_PRODUCT_SHOT_APP } from '~~/server/runner/generators/briaProductShot'
+import { TOPAZ_IMAGE_APP } from '~~/server/runner/generators/topazImage'
 
 const readJson = (rel: string) => JSON.parse(readFileSync(fileURLToPath(new URL(rel, import.meta.url)), 'utf8'))
 const BUILDERS = readJson('./fixtures/runner-builders.json')
@@ -279,6 +280,8 @@ function runnerEndpoints(): string[] {
   out.add(`fal ${SYNC_3_APP}`)
   // Task F23: Topaz video upscale on fal, no backup (topazVideo.ts; its grid is runner-topaz-video.unit.spec.ts).
   out.add(`fal ${TOPAZ_VIDEO_APP}`)
+  // Fix faces on fal's Topaz image upscale with face enhancement, no backup (topazImage.ts; its grid is runner-fix-faces.unit.spec.ts).
+  out.add(`fal ${TOPAZ_IMAGE_APP}`)
   for (const d of Object.values(RUNNER_REPLICATE_IMAGE_MODELS)) out.add(`replicate ${d.slug}`)
   for (const d of Object.values(RUNNER_REPLICATE_VIDEO_MODELS)) out.add(`replicate ${d.slug}`)
   for (const app of [FLUX_2_EDIT_APP, FLUX_KONTEXT_APP, NANO_BANANA_2_EDIT_APP, NANO_BANANA_PRO_EDIT_APP]) out.add(`fal ${app}`)
