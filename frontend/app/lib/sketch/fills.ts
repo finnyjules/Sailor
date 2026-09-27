@@ -500,6 +500,11 @@ export function reconcileFills(before: SketchDoc, after: SketchDoc): SketchFill[
 
 const TAU = Math.PI * 2
 
+// a seed on the piece between a and b, named either way round. Two pieces
+// between the same two points (a line entity and a path's line segment, or
+// two paths' segments) are ONE piece to faces.ts (keyed by their points), so
+// the seed rides whichever of them the edit splits or joins — the same place
+// either way; the settle re-picks it if that stretch no longer bounds its area.
 const sameLine = (s: FillSeed, a: EntityId, b: EntityId) => s.kind === 'line' && ((s.a === a && s.b === b) || (s.a === b && s.b === a))
 const sameArc = (s: FillSeed, a: EntityId, b: EntityId, c: EntityId) => s.kind === 'arc' && s.c === c && ((s.a === a && s.b === b) || (s.a === b && s.b === a))
 

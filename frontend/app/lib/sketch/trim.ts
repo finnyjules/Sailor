@@ -666,7 +666,9 @@ export function cutAt(doc: SketchDoc, ref: CurveRef, t: number): EntityId | null
   const x = addPoint(doc, at.x, at.y, path.construction ? { construction: true } : {})
   followPair(doc, a, b, { kind: 'cut', x })
   const seg = path.segments[ref.segIndex]!
-  if (seg.kind !== 'cubic') splitSeeds(doc, a, b, seg.kind === 'arc' ? seg.center : null, t, x)   // pen stage 7
+  // pen stage 7: a fill's seed stays on its half (a cubic never gets here:
+  // curveGeom returns null for it, so cutAt has already refused)
+  splitSeeds(doc, a, b, seg.kind === 'arc' ? seg.center : null, t, x)
   splitSegment(doc, path, ref.segIndex, x)
   return x
 }
@@ -894,7 +896,11 @@ export function mergePoints(doc: SketchDoc, from: EntityId, into: EntityId): boo
   for (const c of doc.constraints) {
     if (c.refs.includes(from)) { c.refs = c.refs.map(sw); touched.add(c.id) }
   }
-  renameSeedPoints(doc, from, into)   // pen stage 7: a fill's seed names the merged point
+  // pen stage 7: a fill's seed names the merged point. A merge that collapses
+  // the seed's own piece (its two ends merged) leaves the seed on no piece:
+  // a live fill is re-picked by the settle (reconcileFills finds its area by
+  // the edges it shares); a sleeping one has no area to find and is dropped.
+  renameSeedPoints(doc, from, into)
   doc.entities = doc.entities.filter(e => e.id !== from)
 
   // rules this merge touched that became meaningless or exact repeats
