@@ -37,6 +37,19 @@ export interface LayoutGridPatch {
 
 const DEFAULT_ROWS: LayoutGrid['rows'] = { mode: 'square', count: 8 }
 const roundLine = (v: number) => Math.max(16, Math.round(v / 4) * 4)
+/** The capital height (em) the suggested Line is sized for: a typical sans (Inter 0.727, Helvetica
+ *  0.717). The Layout kit sets body text so its capitals are one unit (line / 2) tall; a Line of
+ *  2 × SUGGESTED_CAP × the kit's information size (rounded UP to 4 px) keeps that size at or above
+ *  the format's legibility floor for any face with capitals up to this tall (stage 3, ruling 2). */
+export const SUGGESTED_CAP = 0.72
+const ceilLine = (v: number) => Math.max(16, Math.ceil(v / 4 - 1e-9) * 4)
+const FITS: readonly ColumnFit[] = ['stretch', 'center', 'left']
+const MODES: readonly RowMode[] = ['off', 'square', 'count']
+/** Stored rows over the defaults; an unknown mode reads as the default's. */
+function rowsOf(raw: Partial<LayoutGrid['rows']> | undefined): LayoutGrid['rows'] {
+  const r = { ...DEFAULT_ROWS, ...(raw ?? {}) }
+  return MODES.includes(r.mode) ? r : { ...r, mode: DEFAULT_ROWS.mode }
+}
 const clampInt = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, Math.round(v)))
 // Dedupes by a rounded key (so rounding artifacts collapse) but keeps each value's original,
 // unrounded precision — callers compare these against the exact numbers they were built from.
@@ -52,7 +65,7 @@ const uniq = (vs: number[]) => {
 export function suggestedLayoutGrid(W: number, H: number, fmt: FrameFormat | null, keep?: { show?: boolean; rows?: LayoutGrid['rows'] }): LayoutGrid {
   const k = kitBasics(W, H, formatSheetOpts(fmt))
   const px = W / 100
-  const line = roundLine(k.infoSize * k.infoLh * px)
+  const line = ceilLine(2 * SUGGESTED_CAP * k.infoSize * px)
   const unit = line / 2
   const margin = Math.max(unit, Math.round((k.margin * px) / unit) * unit)
   return {
@@ -72,12 +85,13 @@ function hasLayers(props: Record<string, unknown> | undefined): boolean {
 export function readLayoutGrid(props: Record<string, unknown> | undefined, W: number, H: number, fmt: FrameFormat | null): LayoutGrid {
   const raw = props?.sailor_layoutGrid as Partial<LayoutGrid> | undefined
   if (raw && raw.v === 2) {
-    if (raw.auto !== false) return suggestedLayoutGrid(W, H, fmt, { show: raw.show ?? true, rows: { ...DEFAULT_ROWS, ...(raw.rows ?? {}) } })
+    if (raw.auto !== false) return suggestedLayoutGrid(W, H, fmt, { show: raw.show ?? true, rows: rowsOf(raw.rows) })
     const s = suggestedLayoutGrid(W, H, fmt)
+    const cols = { ...s.cols, ...(raw.cols ?? {}) }
     return {
       v: 2, auto: false, show: raw.show ?? true, line: raw.line ?? s.line,
-      cols: { ...s.cols, ...(raw.cols ?? {}) },
-      rows: { ...DEFAULT_ROWS, ...(raw.rows ?? {}) },
+      cols: FITS.includes(cols.fit) ? cols : { ...cols, fit: 'stretch' },
+      rows: rowsOf(raw.rows),
     }
   }
   // Migration from the old sailor_localGrid (fractions of width).

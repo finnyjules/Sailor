@@ -1,9 +1,11 @@
 import { describe, it, expect } from 'vitest'
 import {
   suggestedLayoutGrid, readLayoutGrid, resolveLayoutGrid, patchLayoutGrid, layoutGridProperty, describeLayoutGrid,
+  SUGGESTED_CAP,
   type LayoutGrid,
 } from '~/lib/frame/layoutGrid'
 import { FRAME_FORMATS } from '~/lib/frame/formats'
+import { kitBasics, formatSheetOpts } from '~/lib/frame/patterns/kit/sheet'
 
 const own = (over: Partial<LayoutGrid> = {}): LayoutGrid => ({
   v: 2, auto: false, show: true, line: 40,
@@ -78,8 +80,10 @@ describe('resolveLayoutGrid — rows on the baseline grid', () => {
     expect(r.rows).toEqual([])
   })
   it('Count mode never places a row past the bottom, even when the requested count cannot fit', () => {
-    // 728×90 leaderboard, line 16 (unit 8): 24 requested rows cannot possibly fit a 90 px frame.
-    const r = resolveLayoutGrid(own({ line: 16, rows: { mode: 'count', count: 24 } }), 728, 90)
+    // 300×300, line 16 (unit 8), margin 10: the band holds 9 rows of the minimum height, not 24.
+    const r = resolveLayoutGrid(own({ line: 16, cols: { count: 12, fit: 'stretch', margin: 10, gutter: 20, width: 0 }, rows: { mode: 'count', count: 24 } }), 300, 300)
+    expect(r.rows.length).toBeGreaterThan(0)
+    expect(r.rows.length).toBeLessThan(24)
     for (const row of r.rows) {
       expect(row.a).toBeGreaterThanOrEqual(r.top)
       expect(row.a + row.w).toBeLessThanOrEqual(r.bottom + 1e-9)
@@ -109,6 +113,16 @@ describe('suggestedLayoutGrid', () => {
   it('takes the format column override', () => {
     const lb = FRAME_FORMATS.find(f => f.id === 'ad-728x90')!
     expect(suggestedLayoutGrid(728, 90, lb).cols.count).toBe(24)
+  })
+  it('the Line gives one-unit capitals at or above the kit\'s information size, in every format (stage 3)', () => {
+    for (const f of FRAME_FORMATS) {
+      const g = suggestedLayoutGrid(f.w, f.h, f)
+      const infoPx = kitBasics(f.w, f.h, formatSheetOpts(f)).infoSize * f.w / 100
+      expect(g.line % 4, f.id).toBe(0)
+      expect(g.line, f.id).toBeGreaterThanOrEqual(16)
+      // capitals SUGGESTED_CAP em tall and one unit (line / 2) tall: size = unit / SUGGESTED_CAP
+      expect(g.line / 2 / SUGGESTED_CAP, f.id).toBeGreaterThanOrEqual(infoPx - 1e-9)
+    }
   })
 })
 
@@ -152,6 +166,18 @@ describe('readLayoutGrid', () => {
   it('an old generated grid becomes the auto grid', () => {
     const g = readLayoutGrid({ sailor_localGrid: { mode: 'generated' } }, 1080, 1350, null)
     expect(g.auto).toBe(true)
+  })
+  it('an own grid with unknown fit or rows mode reads back with the defaults', () => {
+    const bad = { ...own(), cols: { ...own().cols, fit: 'justify' }, rows: { mode: 'grid', count: 5 } }
+    const g = readLayoutGrid({ sailor_layoutGrid: bad }, 1080, 1350, null)
+    expect(g.cols.fit).toBe('stretch')
+    expect(g.rows).toEqual({ mode: 'square', count: 5 })
+  })
+  it('a partial stored rows object is merged over the defaults (own and auto)', () => {
+    const mine = readLayoutGrid({ sailor_layoutGrid: { ...own(), rows: { mode: 'count' } } }, 1080, 1350, null)
+    expect(mine.rows).toEqual({ mode: 'count', count: 8 })
+    const auto = readLayoutGrid({ sailor_layoutGrid: { v: 2, auto: true, show: true, rows: { mode: 'off' } } }, 1080, 1350, null)
+    expect(auto.rows).toEqual({ mode: 'off', count: 8 })
   })
 })
 
