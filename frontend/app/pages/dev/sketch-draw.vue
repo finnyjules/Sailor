@@ -9,6 +9,7 @@ import { ref, computed, onMounted, onUnmounted } from 'vue'
 import type { SketchDoc, EntityId, ConstraintKind } from '~/lib/sketch/model'
 import { repeatEntities, mirrorEntities } from '~/lib/sketch/edit'
 import { sketchPathData } from '~/lib/sketch/sketchPath'
+import { mergeSketchDoc } from '~/lib/sketch/merge'
 import { applyView, invertView, type ViewMatrix } from '~/lib/sketch/view'
 import { usePen, isTypingInField, type PenTool } from '~/composables/pen/usePen'
 import PenOverlay from '~/components/pen/PenOverlay.vue'
@@ -286,6 +287,14 @@ onMounted(() => {
     // call), sparkleCount() reads the live/pruned count.
     sparkle: (x: number, y: number) => sparkle(x, y),
     sparkleCount: () => sparkleCount(),
+    // pen stage 5 — Clean up: `load` sets up a drawing whose gaps are finer
+    // than the pen's own snap (the trimmed flower) as one settled step;
+    // `cleanup` reads the preview (never changes it)
+    load: (raw: unknown) => { reset(); doc.value = mergeSketchDoc(raw); commitHistory() },
+    cleanup: () => {
+      const s = pen.cleanup.value
+      return s ? { strength: s.strength, fixes: s.result.fixes.map(f => ({ id: f.id, kind: f.kind, label: f.label, on: f.on })) } : null
+    },
   }
   ready.value = true
   window.addEventListener('keydown', onKeydown, { capture: true })
