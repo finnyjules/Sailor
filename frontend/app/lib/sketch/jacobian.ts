@@ -491,3 +491,56 @@ export function buildJacobianSubstituted(
   }
   return out
 }
+
+/** One Jacobian row as its nonzero columns only. */
+export interface SparseRow { cols: number[]; vals: number[] }
+
+// Sparse Jacobian for large drawings: the same rows, in the same order, with
+// the same per-column sums as buildJacobianSubstituted (a column hit twice in
+// one row adds up in the same order) — only the zero columns are left out.
+// Every row touches a handful of params, so building an m×n dense array per
+// iteration was O(m·n) of zeros at a few hundred params.
+export function buildJacobianSparse(
+  doc: SketchDoc,
+  slots: SlotRef[],
+  constraints: SketchConstraint[],
+  derived: Map<EntityId, DerivedRule>,
+): SparseRow[] {
+  const map: EntityMap = new Map()
+  for (const e of doc.entities) map.set(e.id, e)
+
+  const colIndex = new Map<string, number>()
+  slots.forEach((s, i) => colIndex.set(slotKey(s.id, s.kind), i))
+
+  const gradCache = new Map<EntityId, { gx: { id: EntityId; comp: ParamComp; d: number }[]; gy: { id: EntityId; comp: ParamComp; d: number }[] }>()
+  const gradOf = (id: EntityId) => {
+    let g = gradCache.get(id)
+    if (!g) { g = derivedGradients(derived.get(id)!, map); gradCache.set(id, g) }
+    return g
+  }
+
+  const addEntry = (acc: Map<number, number>, id: EntityId, comp: ParamComp, d: number): void => {
+    if (comp !== 'r' && derived.has(id)) {
+      const g = gradOf(id)
+      const cs = comp === 'px' ? g.gx : g.gy
+      for (const ct of cs) addEntry(acc, ct.id, ct.comp, d * ct.d)
+      return
+    }
+    const idx = colIndex.get(slotKey(id, comp))
+    if (idx != null) acc.set(idx, (acc.get(idx) ?? 0) + d)
+  }
+
+  const out: SparseRow[] = []
+  for (const c of constraints) {
+    const rows = rowsFor(map, c)
+    if (!rows) continue
+    for (const row of rows) {
+      const acc = new Map<number, number>()
+      for (const entry of row) addEntry(acc, entry.param.id, entry.param.comp, entry.d)
+      const cols: number[] = [], vals: number[] = []
+      for (const [k, v] of acc) if (v !== 0) { cols.push(k); vals.push(v) }
+      out.push({ cols, vals })
+    }
+  }
+  return out
+}

@@ -1,12 +1,20 @@
 import type { SketchDoc, EntityId, PointEntity, CircleEntity } from './model'
 import { constraintResiduals } from './residuals'
 import { solveLinear } from './linalg'
-import { buildJacobian, buildJacobianSubstituted } from './jacobian'
+import { buildJacobian, buildJacobianSubstituted, buildJacobianSparse } from './jacobian'
+import { normalGraph, rcmOrder, solveNormalSparse } from './sparse'
 import { analyzeDerived, forwardSubstitute, buildEntityMap } from './substitute'
 
 export interface DragTarget { point: EntityId; x: number; y: number }
-export interface SolveOptions { maxIter?: number; tol?: number; drag?: DragTarget }
-export interface SolveResult { converged: boolean; iterations: number; residualNorm: number }
+export interface SolveOptions {
+  maxIter?: number; tol?: number; drag?: DragTarget
+  /** Asked before every step after the first: true ends the solve there, as
+   *  if the iterations had run out (a drag's per-frame time budget). */
+  outOfTime?: () => boolean
+  /** Free params from which a step is solved sparsely (SPARSE_MIN_PARAMS). */
+  sparseFrom?: number
+}
+export interface SolveResult { converged: boolean; iterations: number; residualNorm: number; timedOut?: boolean }
 
 type Slot =
   | { kind: 'px'; id: EntityId; e: PointEntity }
@@ -14,6 +22,16 @@ type Slot =
   | { kind: 'r'; id: EntityId; e: CircleEntity }
 
 const W_REG = 1e-4
+
+/** From this many free params (20 free points) on, each step is solved
+ *  sparsely (see sparse.ts) and the solve stops once it stalls; below it the
+ *  dense path runs exactly as it always has, so a small drawing's solve is
+ *  unchanged to the last bit. */
+export const SPARSE_MIN_PARAMS = 40
+// a step "gains nothing" below this share of the residual; this many in a row
+// ends a large drawing's solve
+const STALL_REL = 1e-8
+const STALL_STEPS = 3
 
 // Which scalars are free to move. Fixed points, the dragged point, and DERIVED
 // (copy) points are held. Captures the entity OBJECT reference per slot so
@@ -108,6 +126,10 @@ export function solve(doc: SketchDoc, opts: SolveOptions = {}): SolveResult {
 
   let lambda = 1e-3
   let iterations = 0
+  const sparse = n >= (opts.sparseFrom ?? SPARSE_MIN_PARAMS)
+  let timedOut = false
+  let fillOrder: number[] | null = null   // the sparse fill order, found once per solve
+  let flat = 0                            // steps in a row that gained nothing (large drawings)
   let rNorm = norm(residualAt(q).combined)
 
   if (n === 0) {
@@ -119,6 +141,7 @@ export function solve(doc: SketchDoc, opts: SolveOptions = {}): SolveResult {
   }
 
   for (let iter = 0; iter < maxIter; iter++) {
+    if (iter > 0 && opts.outOfTime?.()) { timedOut = true; break }
     iterations = iter + 1
     const r0 = residualAt(q)
     const r = r0.combined
@@ -137,40 +160,61 @@ export function solve(doc: SketchDoc, opts: SolveOptions = {}): SolveResult {
     // doc's entities already hold q (residualAt(q) above wrote them via
     // writeSlots before evaluating constraintResiduals), so buildJacobian
     // reads the correct state directly.
-    const m = r.length
-    // Substituted analytic Jacobian over the free (base) slots. With no derived
-    // points this is identical to buildJacobian(doc, slots) over doc.constraints.
-    const J: number[][] = derivedIds.size
-      ? buildJacobianSubstituted(doc, slots, activeConstraints, rules)
-      : buildJacobian(doc, slots) // fresh array each call — safe to extend in place
-    for (let j = 0; j < n; j++) {
-      const row = new Array(n).fill(0)
-      row[j] = W_REG
-      J.push(row)
-    }
-
-    // Gauss-Newton normal equations with LM damping: (JᵀJ + λI) δ = −Jᵀr
-    const JtJ: number[][] = Array.from({ length: n }, () => new Array(n).fill(0))
-    const Jtr: number[] = new Array(n).fill(0)
-    for (let a = 0; a < n; a++) {
-      for (let b = 0; b < n; b++) {
-        let s = 0
-        for (let i = 0; i < m; i++) s += J[i]![a]! * J[i]![b]!
-        JtJ[a]![b] = s + (a === b ? lambda : 0)
+    let delta: number[] | null
+    if (sparse) {
+      // the same step, sparsely: J's rows carry only their nonzero columns,
+      // the regularization rows are the diagonal W_REG² term
+      const rows = buildJacobianSparse(doc, slots, activeConstraints, rules)
+      const g = new Array<number>(n).fill(0)
+      rows.forEach(({ cols, vals }, i) => {
+        const ri = r[i]!
+        for (let k = 0; k < cols.length; k++) g[cols[k]!]! += vals[k]! * ri
+      })
+      for (let j = 0; j < n; j++) g[j] = -(g[j]! + W_REG * r[r0.hardLen + j]!)
+      fillOrder ??= rcmOrder(normalGraph(rows, n))
+      delta = solveNormalSparse(rows, n, lambda + W_REG * W_REG, g, fillOrder)
+    } else {
+      const m = r.length
+      // Substituted analytic Jacobian over the free (base) slots. With no derived
+      // points this is identical to buildJacobian(doc, slots) over doc.constraints.
+      const J: number[][] = derivedIds.size
+        ? buildJacobianSubstituted(doc, slots, activeConstraints, rules)
+        : buildJacobian(doc, slots) // fresh array each call — safe to extend in place
+      for (let j = 0; j < n; j++) {
+        const row = new Array(n).fill(0)
+        row[j] = W_REG
+        J.push(row)
       }
-      let s = 0
-      for (let i = 0; i < m; i++) s += J[i]![a]! * r[i]!
-      Jtr[a] = -s
-    }
 
-    const delta = solveLinear(JtJ, Jtr)
+      // Gauss-Newton normal equations with LM damping: (JᵀJ + λI) δ = −Jᵀr
+      const JtJ: number[][] = Array.from({ length: n }, () => new Array(n).fill(0))
+      const Jtr: number[] = new Array(n).fill(0)
+      for (let a = 0; a < n; a++) {
+        for (let b = 0; b < n; b++) {
+          let s = 0
+          for (let i = 0; i < m; i++) s += J[i]![a]! * J[i]![b]!
+          JtJ[a]![b] = s + (a === b ? lambda : 0)
+        }
+        let s = 0
+        for (let i = 0; i < m; i++) s += J[i]![a]! * r[i]!
+        Jtr[a] = -s
+      }
+
+      delta = solveLinear(JtJ, Jtr)
+    }
     if (!delta) { lambda *= 10; continue }
 
     const qNew = q.map((v, i) => v + delta[i]!)
     const rNew = norm(residualAt(qNew).combined)
+    // a large drawing stops once it is solved and no step gains anything:
+    // the rules can sit a hair above tol for good (the regularization pulls
+    // the other way), and the dense path would spend every remaining
+    // iteration on sub-nanometre steps
+    if (sparse) flat = rNorm - rNew > STALL_REL * rNorm ? 0 : flat + 1
     if (rNew < rNorm) { q = qNew; lambda = Math.max(lambda * 0.5, 1e-9) } // accept, less damping
     else { lambda *= 4 }                                                  // reject, more damping
     writeSlots(slots, q)
+    if (flat >= STALL_STEPS && hardNorm < 1e-3) break
   }
 
   writeSlots(slots, q)
@@ -178,5 +222,5 @@ export function solve(doc: SketchDoc, opts: SolveOptions = {}): SolveResult {
   rNorm = norm(final.combined.slice(0, final.hardLen)) // report HARD residual only
   const converged = rNorm < 1e-3
   if (!converged) restore(doc, snap)
-  return { converged, iterations, residualNorm: rNorm }
+  return { converged, iterations, residualNorm: rNorm, ...(timedOut ? { timedOut } : {}) }
 }

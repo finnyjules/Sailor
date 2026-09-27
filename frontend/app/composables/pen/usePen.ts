@@ -98,6 +98,8 @@ export interface PenMenu { at: Vec2; drawingAt: Vec2 | null; header: string | nu
 export interface PenWheel { at: Vec2; layout: 'point' | 'segment'; slices: WheelSlice[]; hover: WheelDir | null }
 
 export const SPARKLE_LIFETIME_MS = 380
+/** How long one drag frame's solve may run (runSolve with a drag). */
+export const DRAG_SOLVE_BUDGET_MS = 40
 
 // pen stage 7: a Fill click that lands on no enclosed area
 export const FILL_MISS = 'Click inside an enclosed area'
@@ -817,7 +819,11 @@ export function usePen(opts: {
       })),
       constraints: doc.value.constraints.map(c => ({ ...toRaw(c), refs: [...c.refs] })),
     }
-    const res = solve(plain, { maxIter: 120, drag })
+    // a drag solve has a frame's budget: past it the solve ends where it is
+    // (kept when the rules hold, otherwise the drawing stays at the last
+    // good frame and the next move tries again) — a drag never blocks the page
+    const until = drag ? performance.now() + DRAG_SOLVE_BUDGET_MS : 0
+    const res = solve(plain, { maxIter: 120, drag, ...(drag ? { outOfTime: () => performance.now() > until } : {}) })
     const solved = new Map(plain.entities.map(e => [e.id, e]))
     for (const e of doc.value.entities) {
       const s = solved.get(e.id)
