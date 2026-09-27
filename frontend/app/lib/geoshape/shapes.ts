@@ -4,7 +4,8 @@ import { fitShapePath } from '~/lib/shapes/geometry'
 import type { SketchDoc } from '~/lib/sketch/model'
 import { sketchPathData } from '~/lib/sketch/sketchPath'
 import { flattenPath } from '~/lib/compositor/pathFlatten'
-import { fillPathData } from '~/lib/sketch/fills'
+import { fillState } from '~/lib/sketch/fills'
+import { facesUnionD } from '~/lib/sketch/faces'
 
 export type BaseShapeKind =
   | 'circle' | 'square' | 'triangle' | 'diamond' | 'pentagon' | 'hexagon'
@@ -46,6 +47,15 @@ function libraryPath(id: string | undefined, size: number): string {
 
 const r5 = (v: number) => { const n = Math.round(v * 1e5) / 1e5; return Object.is(n, -0) ? 0 : n }
 
+/** Pen stage 7: a `sketch`'s filled areas as ONE closed outline (true arcs) — touching
+ *  areas MERGED (`facesUnionD`, mirroring `penFrame.ts`'s `sketchFillToLocalD`) so a
+ *  shared edge is never written twice. '' when nothing is filled or asleep. */
+function fillUnionPathData(sketch: SketchDoc | undefined): string {
+  if (!sketch?.fills?.length) return ''
+  const st = fillState(sketch)
+  return st.filled.length ? facesUnionD(st.fs, st.filled, 1) : ''
+}
+
 /**
  * The drawing's outline and its bounding box in drawing units — the ONE extent
  * measure the Drawn base shape uses. The box is of the FLATTENED outline
@@ -75,18 +85,24 @@ export function sketchOutlineBounds(sketch: SketchDoc | undefined):
  * A straight line (zero width or height) scales by its non-zero side; never throws.
  *
  * Pen stage 7: a drawing with filled areas IS those areas — the path is their
- * outline (`fillPathData`), fitted by the WHOLE drawing's box, so filling an
- * area never moves or resizes the shape. No area filled → the outline as before.
+ * outline, fitted by the WHOLE drawing's box, so filling an area never moves or
+ * resizes the shape. No area filled → the outline as before.
+ *
+ * Touching filled areas are written as their UNION (`facesUnionD`, the same helper
+ * the Frame uses — `lib/compositor/penFrame.ts`'s `sketchFillToLocalD`): Shape
+ * Studio strokes the raw path (`paintTarget` 'outline' / 'both', `lib/geoshape/
+ * boolean.ts`) and feeds it per clone into a paper `CompoundPath`, so a per-face
+ * outline (`facesD`) would draw the shared edge twice and show a seam.
  *
  * The transform is exact on the drawing's own path data (absolute M/L/C/A/Z from
- * `sketchPathData` / `fillPathData`): points map through scale-about-centre, and
+ * `sketchPathData` / `facesUnionD`): points map through scale-about-centre, and
  * an `A` arc keeps its rotation and flags while its radii scale by `k`.
  */
 export function drawnPath(sketch: SketchDoc | undefined, size: number): string {
   const ob = sketchOutlineBounds(sketch)
   if (!ob) return ''
   const { minX, minY, maxX, maxY } = ob
-  const d0 = fillPathData(sketch!) || ob.d
+  const d0 = fillUnionPathData(sketch) || ob.d
   const ext = Math.max(maxX - minX, maxY - minY)
   if (!(ext > 0) || !(size > 0)) return ''
   const k = size / ext, cx = (minX + maxX) / 2, cy = (minY + maxY) / 2
