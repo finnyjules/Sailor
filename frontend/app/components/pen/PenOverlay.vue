@@ -898,18 +898,13 @@ function isToolKey(ev: KeyboardEvent): boolean {
 // must not also finish a path or commit. Escape still reaches the pen (a
 // focused toolbar button is the normal state right after picking a tool, and
 // Escape must still cancel a path), but is not handed to the host as 'cancel'.
-// The Clean up button is not such a control: it keeps focus after Apply /
-// Cancel, and the next Enter must finish the pen (not reopen Clean up), the
-// next Escape reach the host.
+// (After Apply / Cancel the Clean up button gives its focus up — PenToolbar —
+// so the next Enter / Escape are the pen's and the host's again.)
 function focusedControl(ev: KeyboardEvent): boolean {
   const CONTROLS = 'button, a[href], select, [role="button"], [role="link"]'
-  const isControl = (el: Element | null | undefined) => {
-    const c = el?.closest?.(CONTROLS)
-    return !!c && !c.matches?.('[data-act="cleanup"]')
-  }
   const t = ev.target as Element | null
   const a = typeof document !== 'undefined' ? document.activeElement : null
-  return isControl(t) || isControl(a)
+  return !!(t?.closest?.(CONTROLS) || a?.closest?.(CONTROLS))
 }
 // Key ownership: a key the pen acts on is preventDefault-ed and
 // stopPropagation-ed inside pen.onKeydown; an Escape/Enter the overlay turns

@@ -205,6 +205,33 @@ test('the keyboard: Space presses a Tab-focused strength button (not the page’
   await expect(bar(page)).toBeVisible()
 })
 
+test('a tool button clicked with the mouse keeps Space-to-pan; Enter on a Tab-focused Clean up button opens Clean up', async ({ page }) => {
+  await open(page)
+  await loadFlower(page)
+  await page.locator('[data-tool="line"]').click()          // leaves the button focused
+  await expect(page.locator('[data-tool="line"]')).toBeFocused()
+  const svg = page.locator('svg[width="680"][height="460"]')
+  const box = (await svg.boundingBox())!
+  const cx = box.x + box.width / 2, cy = box.y + box.height / 2
+  const before = await page.evaluate(() => (window as any).__sketchDraw.getViewport())
+  await page.keyboard.down('Shift'); await page.keyboard.up('Shift')   // any key first (it turns :focus-visible on)
+  await page.keyboard.down('Space')
+  await page.mouse.move(cx, cy); await page.mouse.down()
+  await page.mouse.move(cx + 60, cy + 40, { steps: 5 })
+  await page.mouse.up(); await page.keyboard.up('Space')
+  expect(await page.evaluate(() => (window as any).__sketchDraw.getViewport())).not.toEqual(before)   // it panned
+  expect(await page.evaluate(() => (window as any).__sketchDraw.tool)).toBe('line')
+  expect(paths(await doc(page))).toHaveLength(4)            // nothing drawn, nothing pressed
+
+  const cleanupBtn = page.locator('[data-act="cleanup"]')
+  for (let i = 0; i < 30 && !(await cleanupBtn.evaluate(el => el === document.activeElement)); i++) await page.keyboard.press('Tab')
+  await expect(cleanupBtn).toBeFocused()
+  await page.keyboard.press('Enter')
+  await expect(bar(page)).toBeVisible()
+  expect(await page.evaluate(() => (window as any).__sketchDraw.status())).not.toBe('done')
+  await page.keyboard.press('Escape')
+})
+
 test('after Apply the next Enter finishes the pen; after Cancel the next Escape reaches the page', async ({ page }) => {
   await open(page)
   await loadFlower(page)
@@ -390,10 +417,22 @@ test('the Frame’s pen offers Clean up; Space presses a Tab-focused strength; E
   await expect(btn).toBeVisible()
   await btn.hover()
   await expect(page.locator('[data-pen-tip-id="cleanup"]')).toBeVisible()
+  // a pen tool button clicked with the mouse keeps the Frame's Space-to-pan
+  await page.locator('[data-tool="line"]').click()
+  const ob0 = (await frameOverlay(page).boundingBox())!
+  const sx = ob0.x + ob0.width / 2, sy = ob0.y + ob0.height / 2
+  await page.keyboard.down('Shift'); await page.keyboard.up('Shift')
+  await page.keyboard.down('Space')
+  await page.mouse.move(sx, sy); await page.mouse.down()
+  await page.mouse.move(sx + 50, sy + 30, { steps: 5 })
+  await page.mouse.up(); await page.keyboard.up('Space')
+  const ob1 = (await frameOverlay(page).boundingBox())!
+  expect(Math.hypot(ob1.x - ob0.x, ob1.y - ob0.y)).toBeGreaterThan(20)   // it panned
+  await expect(page.locator('[data-tool="line"]')).toHaveAttribute('aria-pressed', 'true')
   await btn.click()
   await expect(bar(page)).toBeVisible()
   await expect(page.locator('[data-cleanup-note]')).toHaveText('Nothing to change')
-  // Space presses a strength button Tab reached — the Frame's Space-to-pan leaves it alone
+  // Space presses a focused strength button — the Frame's Space-to-pan leaves it alone
   const strong = page.locator('[data-strength="strong"]')
   for (let i = 0; i < 40 && !(await strong.evaluate(el => el === document.activeElement)); i++) await page.keyboard.press('Tab')
   await expect(strong).toBeFocused()

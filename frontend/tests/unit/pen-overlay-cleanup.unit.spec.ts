@@ -140,40 +140,18 @@ describe('PenOverlay — Clean up preview', () => {
     expect(wrapper.emitted('commit')).toBeUndefined()
     expect(doc.value.entities.length).toBe(n)
   })
-  it('after the preview closes, Enter on a still-focused Clean up button finishes the pen instead of reopening Clean up', async () => {
-    const { wrapper, pen } = mountFlower(); mounted = wrapper
-    const button = document.createElement('button')
-    button.setAttribute('data-act', 'cleanup')
-    document.body.appendChild(button)
-    let reopened = 0
-    button.addEventListener('click', () => { reopened++; pen.toggleCleanup() })
-    button.focus()
-    pen.startCleanup(); await nextTick()
-    button.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }))
-    await nextTick()
-    expect(pen.cleanup.value).toBeNull()                      // applied
-    const again = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })
-    button.dispatchEvent(again)
-    await nextTick()
-    expect(again.defaultPrevented).toBe(true)                  // the button isn't pressed by it
-    expect(reopened).toBe(0)
-    expect(pen.cleanup.value).toBeNull()
-    expect(wrapper.emitted('commit')).toHaveLength(1)
-  })
-  it('after the preview closes, Escape on a still-focused Clean up button reaches the host', async () => {
+  it('with no preview, Enter on a focused Clean up button is the button’s (it opens Clean up), not the pen’s', async () => {
     const { wrapper, pen } = mountFlower(); mounted = wrapper
     const button = document.createElement('button')
     button.setAttribute('data-act', 'cleanup')
     document.body.appendChild(button)
     button.focus()
-    pen.startCleanup(); await nextTick()
-    button.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))
+    const ev = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })
+    button.dispatchEvent(ev)
     await nextTick()
+    expect(ev.defaultPrevented).toBe(false)                    // left to the button
+    expect(wrapper.emitted('commit')).toBeUndefined()
     expect(pen.cleanup.value).toBeNull()
-    expect(wrapper.emitted('cancel')).toBeUndefined()           // the first Escape only closed the preview
-    button.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))
-    await nextTick()
-    expect(wrapper.emitted('cancel')).toHaveLength(1)
   })
   it('keyboard="host": onHostKeydown routes the preview keys to the pen', async () => {
     const { wrapper, pen } = mountFlower('host'); mounted = wrapper

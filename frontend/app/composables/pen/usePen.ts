@@ -2461,14 +2461,14 @@ export function isTypingInField(): boolean {
   return !!el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || (el as HTMLElement).isContentEditable)
 }
 
-/** True while a button, radio or other control has KEYBOARD focus (Tab got it
- *  there: `:focus-visible`) — Space then presses it, so a host's hold-Space-to-
- *  pan must leave Space alone. A control focused by a mouse click keeps
- *  Space-to-pan (browsers leave a clicked button focused, and pan is what the
- *  mouse user wants). Reads `document` only when called. */
-export function isControlKeyboardFocused(): boolean {
+/** True while focus is inside Clean up's strength / Cancel / Apply bar
+ *  (`[data-cleanup-bar]`) — Space then presses the focused control, so a
+ *  host's hold-Space-to-pan must leave Space alone. Nowhere else: a pen tool
+ *  button a mouse click left focused keeps Space-to-pan (`:focus-visible`
+ *  can't tell, it turns true on the first keydown). Reads `document` only
+ *  when called. */
+export function isCleanupBarFocused(): boolean {
   if (typeof document === 'undefined') return false
   const el = document.activeElement as HTMLElement | null
-  if (!el || el === document.body || !el.closest?.('button, input, select, [role="button"], [role="radio"], [role="checkbox"], [role="switch"], [role="tab"]')) return false
-  try { return el.matches(':focus-visible') } catch { return false }
+  return !!el?.closest?.('[data-cleanup-bar]')
 }
