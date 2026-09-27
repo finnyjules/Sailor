@@ -95,6 +95,8 @@ export interface ShotFormat {
 export interface ShotSheet {
   intent: string
   mode: ShotMode
+  /** the video model this shot is made with (a profile id, see profiles.ts). Absent on old sheets = Seedance 2.0. */
+  model?: string
 
   subject: string
   action: string
@@ -233,6 +235,7 @@ export function createDefaultShotSheet(): ShotSheet {
   return {
     intent: '',
     mode: 'reference',
+    model: 'seedance-2.0',
     subject: '',
     action: '',
     environment: '',

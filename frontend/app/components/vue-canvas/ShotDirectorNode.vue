@@ -6,7 +6,7 @@ import { Handle, Position } from '@vue-flow/core'
 import { Clapperboard, Pencil } from 'lucide-vue-next'
 import { hydrateShotSheet } from '~/lib/shotdirector/hydrate'
 import { compileShot } from '~/lib/shotdirector/compile'
-import { getProfile } from '~/lib/shotdirector/profiles'
+import { sheetProfile } from '~/lib/shotdirector/prepare'
 import { registerStudioBaker, unregisterStudioBaker } from '~/lib/studio/cascade'
 import { useCharacters } from '~/composables/useCharacters'
 
@@ -21,14 +21,14 @@ const props = defineProps<{
   }
 }>()
 
-const profile = getProfile('seedance-2.0')
 const { stateDescriptors } = useCharacters()
 
 const config = computed(() => hydrateShotSheet(props.data?.properties?.sailor_shotDirector))
+const profile = computed(() => sheetProfile(config.value))
 
 const compiled = computed(() => {
   const castDescriptors = stateDescriptors(config.value.cast.map(m => ({ slug: m.slug, stateId: m.stateId })))
-  return compileShot(config.value, profile, { castDescriptors })
+  return compileShot(config.value, profile.value, { castDescriptors })
 })
 
 const subject = computed(() => config.value.subject.trim() || 'Untitled shot')

@@ -56,6 +56,20 @@ function elementsModeBundle(value: IdentityRefSet | string[] | undefined, profil
   return { front, refs: rest.filter(r => r !== front).slice(0, profile.castRefCap - 1) }
 }
 
+/**
+ * The pictures of one cast member the model will actually receive, in order:
+ * `images` mode → the model's own pick (capped); `elements` mode → the front
+ * first, then its other pictures (nothing when there is no front — that
+ * member is refused by materializeCast). For showing what a shot sends.
+ */
+export function castMemberPictures(value: IdentityRefSet | string[] | undefined, profile: ModelProfile): string[] {
+  if (profile.castMode === 'elements') {
+    const { front, refs } = elementsModeBundle(value, profile)
+    return front ? [front, ...refs] : []
+  }
+  return imagesModeRefs(value, profile)
+}
+
 export function materializeCast(
   sheet: ShotSheet,
   resolved: CastResolved,

@@ -13,7 +13,8 @@ import {
 import { formatShotUSD } from '~/lib/shotdirector/price'
 import { buildKeyframePrompt, KEYFRAME_COST_USD } from '~/lib/shotdirector/keyframe'
 import { uploadRefFile } from '~/lib/shotdirector/refUpload'
-import { CAST_REF_CAP } from '~/lib/shotdirector/cast'
+import { castMemberPictures } from '~/lib/shotdirector/cast'
+import { SHOT_MODEL_CHOICES } from '~/lib/shotdirector/profiles'
 import StudioSection from '~/components/vue-canvas/StudioSection.vue'
 import CharacterPickerModal from '~/components/vue-canvas/CharacterPickerModal.vue'
 import ShotViewfinder from '~/components/vue-canvas/ShotViewfinder.vue'
@@ -33,11 +34,11 @@ function persist(s: any) {
   n.data.properties.sailor_shotDirector = s
 }
 
-const { resolveStateRefs, coverUrl, characters } = useCharacters()
-const { sheet, result, addReference, removeReference, update, rerollSeed, addCastMember, removeCastMember } = useShotDirector(
+const { resolveCastSets, coverUrl, characters } = useCharacters()
+const { sheet, result, profile, addReference, removeReference, update, rerollSeed, setModel, addCastMember, removeCastMember } = useShotDirector(
   node.value?.data?.properties?.sailor_shotDirector,
   persist,
-  picks => resolveStateRefs(picks),
+  picks => resolveCastSets(picks),
   picks => missingStateIssues(picks, characters.value),
 )
 
@@ -69,17 +70,29 @@ function variantLabel(m: CastMember): string | null {
   const v = c?.states.find(x => x.id === m.stateId)
   return v ? v.label : null
 }
-/** The photos each cast member contributes, with their [ImageN] tag range —
- *  so "what is [Image2]?" is answerable by looking at the Cast section. */
+/** The photos each cast member contributes, with the tag the chosen model
+ *  reads them by (@Image1–2, image 3, @Element1) — so "what is @Image2?" is
+ *  answerable by looking at the Cast section. */
 const castRefRows = computed(() => {
-  let tag = 1
-  const resolved = resolveStateRefs(sheet.value.cast.map(m => ({ slug: m.slug, stateId: m.stateId })))
+  const p = profile.value
+  let slot = 1
+  const resolved = resolveCastSets(sheet.value.cast.map(m => ({ slug: m.slug, stateId: m.stateId })))
   return sheet.value.cast.map((m) => {
-    // What is actually sent: up to CAST_REF_CAP pictures of one person.
-    const urls = resolved[m.slug]?.slice(0, CAST_REF_CAP) ?? []
-    const start = tag
-    tag += urls.length
-    return { slug: m.slug, name: m.name, variantLabel: variantLabel(m), urls, start, end: tag - 1 }
+    // What is actually sent to the chosen model (same pick as materializeCast).
+    const urls = castMemberPictures(resolved[m.slug], p)
+    const start = slot
+    let tags: string[]
+    let tag: string
+    if (p.castMode === 'elements') {
+      // one element per character, all its pictures under one tag
+      tag = urls.length ? p.refTag('image', slot++) : ''
+      tags = urls.map(() => tag)
+    } else {
+      tags = urls.map((_, i) => p.refTag('image', start + i))
+      slot += urls.length
+      tag = urls.length > 1 ? `${tags[0]}–${slot - 1}` : (tags[0] ?? '')
+    }
+    return { slug: m.slug, name: m.name, variantLabel: variantLabel(m), urls, tag, tags }
   })
 })
 function onRemoveCast(m: CastMember) {
@@ -380,6 +393,15 @@ function patchBeat(id: string, patch: Record<string, unknown>) {
 // widened to support it (follow-up).
 const ASPECT_RATIOS = ['16:9', '9:16', '1:1', '4:3', '3:4', '21:9']
 const DURATIONS = [5, 10, 15]
+/** The lengths the chosen model can render; Auto only where it takes any length. */
+const durationChoices = computed(() => profile.value.durations ?? DURATIONS)
+// One line per model for the Model label's tooltip: what it is good at.
+const MODEL_TIPS: Record<string, string> = {
+  'seedance-2.0': 'Takes the most reference pictures, plus video and sound',
+  'kling-v3': 'Keeps characters steady, starting from a first frame',
+  'veo-3.1': 'Lifelike motion and sound, in 8-second clips',
+  'veo-3.1-fast': 'Veo, quicker and cheaper',
+}
 const RESOLUTIONS = ['720p', '1080p']
 
 const durationLabel = computed(() =>
@@ -507,9 +529,9 @@ function patchDialogue(i: number, patch: { speaker?: string; line?: string }) {
                     <img
                       v-for="(u, i) in row.urls" :key="u" :src="u"
                       class="h-9 w-9 rounded border border-white/[0.08] object-cover"
-                      :title="`[Image${row.start + i}]`"
+                      :title="row.tags[i]"
                     >
-                    <span v-if="row.urls.length" class="text-[10px] tabular-nums text-white/30">[Image{{ row.start }}{{ row.end > row.start ? `–${row.end}` : '' }}]</span>
+                    <span v-if="row.urls.length" class="text-[10px] tabular-nums text-white/30">{{ row.tag }}</span>
                     <span v-else class="text-[10px] text-red-400/80">{{ row.variantLabel ? `${row.variantLabel} — ` : '' }}no photos yet — add some to their sheet</span>
                   </div>
                   <p class="text-[10px] leading-relaxed text-white/35">
@@ -900,6 +922,17 @@ function patchDialogue(i: number, patch: { speaker?: string; line?: string }) {
 
           <!-- ═══ FORMAT BAR ══════════════════════════════════════════════════ -->
           <StudioSection title="Format">
+            <!-- Model -->
+            <div>
+              <label class="mb-1 block text-[11px] text-white/45" :title="MODEL_TIPS[profile.id]">Model</label>
+              <select
+                :value="profile.id"
+                class="w-full rounded border border-white/10 bg-[#0e0e10] px-2 py-1.5 text-[11px] text-white/80 outline-none focus:border-white/25"
+                @change="setModel(($event.target as HTMLSelectElement).value)"
+              >
+                <option v-for="m in SHOT_MODEL_CHOICES" :key="m.id" :value="m.id" class="bg-neutral-900">{{ m.label }}</option>
+              </select>
+            </div>
             <div class="grid grid-cols-2 gap-x-3 gap-y-2.5">
               <!-- Aspect ratio -->
               <div v-if="sheet.mode === 'reference'">
@@ -920,8 +953,8 @@ function patchDialogue(i: number, patch: { speaker?: string; line?: string }) {
                   class="w-full rounded border border-white/10 bg-[#0e0e10] px-2 py-1.5 text-[11px] text-white/80 outline-none focus:border-white/25"
                   @change="setDuration(($event.target as HTMLSelectElement).value)"
                 >
-                  <option value="auto" class="bg-neutral-900">Auto</option>
-                  <option v-for="d in DURATIONS" :key="d" :value="String(d)" class="bg-neutral-900">{{ d }}s</option>
+                  <option v-if="!profile.durations" value="auto" class="bg-neutral-900">Auto</option>
+                  <option v-for="d in durationChoices" :key="d" :value="String(d)" class="bg-neutral-900">{{ d }}s</option>
                 </select>
               </div>
               <!-- Resolution -->
@@ -1117,7 +1150,7 @@ function patchDialogue(i: number, patch: { speaker?: string; line?: string }) {
           :title="'Estimated provider cost for this shot'"
           @click="onGenerate"
         >
-          Generate · {{ formatShotUSD(sheet) }}
+          Generate · {{ formatShotUSD(sheet, sheet.model) }}
         </button>
       </div>
     </div>

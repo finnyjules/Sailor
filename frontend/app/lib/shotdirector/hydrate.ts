@@ -7,6 +7,7 @@ import {
   type CameraDirection, type CameraMove, type CastMember, type Ref, type RefKind, type ShotSheet,
 } from './types'
 import { normalizeStateId } from '#shared/characters/types'
+import { SHOT_MODEL_CHOICES } from './profiles'
 
 function obj(v: unknown): Record<string, unknown> {
   return v && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, unknown>) : {}
@@ -41,6 +42,8 @@ export function hydrateShotSheet(raw: unknown): ShotSheet {
   return {
     intent: str(r.intent, d.intent),
     mode: r.mode === 'firstLastFrame' ? 'firstLastFrame' : 'reference',
+    // Only a selectable model survives; anything else (old sheets, stale ids) is Seedance 2.0.
+    model: typeof r.model === 'string' && SHOT_MODEL_CHOICES.some(c => c.id === r.model) ? r.model : 'seedance-2.0',
     subject: str(r.subject, d.subject),
     action: str(r.action, d.action),
     environment: str(r.environment, d.environment),

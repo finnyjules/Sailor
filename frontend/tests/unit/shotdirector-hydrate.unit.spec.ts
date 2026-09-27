@@ -55,3 +55,20 @@ describe('reference helpers', () => {
     expect(s2.references).toEqual([{ kind: 'image', slot: 2, src: 'b', role: 'style-transfer' }])
   })
 })
+
+describe('hydrateShotSheet — model', () => {
+  it('defaults the model to Seedance 2.0 when none is stored', () => {
+    expect(hydrateShotSheet({}).model).toBe('seedance-2.0')
+    expect(createDefaultShotSheet().model).toBe('seedance-2.0')
+  })
+
+  it('keeps a known model id', () => {
+    expect(hydrateShotSheet({ model: 'kling-v3' }).model).toBe('kling-v3')
+    expect(hydrateShotSheet({ model: 'veo-3.1-fast' }).model).toBe('veo-3.1-fast')
+  })
+
+  it('falls back to Seedance 2.0 for an unknown or non-string id', () => {
+    expect(hydrateShotSheet({ model: 'sora-9' }).model).toBe('seedance-2.0')
+    expect(hydrateShotSheet({ model: 42 }).model).toBe('seedance-2.0')
+  })
+})

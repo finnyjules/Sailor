@@ -109,14 +109,12 @@ import BatchGridNode from './BatchGridNode.vue'
 import SketchPileNode from './SketchPileNode.vue'
 import MoodboardNode from './MoodboardNode.vue'
 import ReferenceNode from '~/components/vue-canvas/ReferenceNode.vue'
-import { buildFilmShotPatch, findShotTarget } from '~/lib/shotdirector/dispatch'
+import { findShotTarget } from '~/lib/shotdirector/dispatch'
 import { hydrateShotSheet, addRef } from '~/lib/shotdirector/hydrate'
-import { compileShot } from '~/lib/shotdirector/compile'
 import { syncCast, wireCastFor } from '~/lib/shotdirector/castEdges'
-import { getProfile } from '~/lib/shotdirector/profiles'
 import { hydrateLipSyncSheet } from '~/lib/lipsync/hydrate'
 import { compileLipSync } from '~/lib/lipsync/compile'
-import { materializeCast } from '~/lib/shotdirector/cast'
+import { prepareShotDispatch } from '~/lib/shotdirector/prepare'
 import { uploadRefFile } from '~/lib/shotdirector/refUpload'
 import { useCharacters } from '~/composables/useCharacters'
 import { defaultState, identityRefs, normalizeStateId } from '#shared/characters/types'
@@ -4028,27 +4026,24 @@ async function handleShotDirectorGenerate(e: Event) {
 
   const sheet = hydrateShotSheet(studio.data?.properties?.sailor_shotDirector)
 
-  let effectiveSheet = sheet
-  let castIssues: import('~/lib/shotdirector/rules').ValidationIssue[] = []
+  // Cast pictures per character (IdentityRefSet); the sheet's chosen model
+  // decides which of them it sends and how (prepareShotDispatch).
+  let resolved: ReturnType<ReturnType<typeof useCharacters>['resolveCastSets']> = {}
   let castDescriptors: Record<string, string> = {}
   if (sheet.cast.length) {
     const store = useCharacters()
     await store.refresh()  // generate-time truth, same guarantee the old re-fetch gave
     const picks = sheet.cast.map(m => ({ slug: m.slug, stateId: m.stateId }))
-    const resolved = store.resolveStateRefs(picks)
-    const mat = materializeCast(sheet, resolved, getProfile('seedance-2.0'))
-    effectiveSheet = mat.sheet
-    castIssues = mat.issues
+    resolved = store.resolveCastSets(picks)
     castDescriptors = store.stateDescriptors(picks)
   }
-  const result = compileShot(effectiveSheet, getProfile('seedance-2.0'), { castDescriptors })
-  const errors = [...castIssues, ...result.issues].filter(i => i.level === 'error')
-  if (errors.length) {
-    studio.data.shotError = errors[0]!.message
+  const prepared = prepareShotDispatch(sheet, resolved, castDescriptors)
+  if (!prepared.ok) {
+    studio.data.shotError = prepared.error
     return
   }
 
-  const patch = buildFilmShotPatch(effectiveSheet, result)
+  const patch = prepared.patch
   const lite = (nodes.value as any[]).map(n => ({ id: String(n.id), nodeType: n.data?.nodeType as string | undefined }))
   const liteEdges = (edges.value as any[]).map(e => ({ source: String(e.source), target: String(e.target) }))
   let targetId = findShotTarget(lite, liteEdges, String(studio.id), studio.data?.properties?.sailor_shotDirectorTargetId)

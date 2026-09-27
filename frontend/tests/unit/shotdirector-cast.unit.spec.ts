@@ -371,3 +371,27 @@ describe('materializeCast — images mode with IdentityRefSet (Veo, castRefCap 3
     expect(warning!.message).toContain('3-image budget')
   })
 })
+
+describe('castMemberPictures', () => {
+  const V = (n: string) => `/view?filename=${n}&type=input`
+  const set = { name: 'Vera', front: V('f.png'), portrait: V('p.png'), bodyFront: V('bf.png'), bodyBack: V('bb.png') }
+
+  it('Seedance: portrait + body front', async () => {
+    const { castMemberPictures } = await import('~/lib/shotdirector/cast')
+    const { SEEDANCE_PROFILE } = await import('~/lib/shotdirector/profiles')
+    expect(castMemberPictures(set, SEEDANCE_PROFILE)).toEqual([V('p.png'), V('bf.png')])
+  })
+
+  it('Kling: the front first, then up to three more', async () => {
+    const { castMemberPictures } = await import('~/lib/shotdirector/cast')
+    const { KLING_V3_PROFILE } = await import('~/lib/shotdirector/profiles')
+    expect(castMemberPictures(set, KLING_V3_PROFILE)).toEqual([V('f.png'), V('p.png'), V('bf.png'), V('bb.png')])
+  })
+
+  it('Kling with no front sends nothing', async () => {
+    const { castMemberPictures } = await import('~/lib/shotdirector/cast')
+    const { KLING_V3_PROFILE } = await import('~/lib/shotdirector/profiles')
+    expect(castMemberPictures({ ...set, front: null }, KLING_V3_PROFILE)).toEqual([])
+    expect(castMemberPictures(undefined, KLING_V3_PROFILE)).toEqual([])
+  })
+})
