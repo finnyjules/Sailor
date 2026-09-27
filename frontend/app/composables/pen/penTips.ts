@@ -2,7 +2,7 @@
 // What the pen toolbar's hover cards say (PenTipCard.vue): a name, the key
 // badge when there is a shortcut, and a one-line caption — keyed by button id
 // (tool ids, the fixed toolbar buttons, every rule kind availableConstraints
-// can offer, and the rules row's own verbs). The ten drawing and editing
+// can offer, and the rules row's own verbs). The drawing and editing
 // tools, and Clean up, also name a scripted demo in penTipDemos.ts.
 //
 // Copy rules: sentence case, no identifiers, say exactly what the button does
@@ -40,6 +40,10 @@ export const PEN_TIPS: Record<string, PenTip> = {
     caption: 'Cut’s inverse: a point healed back into one piece, where the two sides line up. Click the point.' },
   fill: { name: 'Fill', key: 'G', demo: 'fill',
     caption: 'Fills an area the drawing encloses. Point to see the area, click to fill it; click a filled area to empty it.' },
+  round: { name: 'Round corner', key: 'F', demo: 'round',
+    caption: 'Turns a corner into a smooth arc. Drag from the corner, or click it and type the radius; Shift-click more corners to give them the same one.' },
+  chamfer: { name: 'Chamfer', key: 'H', demo: 'chamfer',
+    caption: 'Cuts a corner off straight, the same distance back along both sides. Drag from the corner, or click it and type how far.' },
   cleanup: { name: 'Clean up', key: '⌥⇧C', demo: 'cleanup',
     caption: 'Joins ends that nearly meet, squares what is nearly square and evens what is nearly even. Shows every change first; click one to leave it out.' },
 

@@ -312,6 +312,31 @@ function fill(t: number): PenTipFrame {
   }
 }
 
+// Round corner / Chamfer: an L; press on its corner and drag inward — the
+// corner rounds (or is cut) further as the drag goes on.
+function corner(kind: 'round' | 'chamfer') {
+  return (t: number): PenTipFrame => {
+    const A = v(40, 80), X = v(40, 24), B = v(128, 24)
+    const at = v(X.x + 1, X.y + 2)
+    const cursor = track(t, [[0.04, v(120, 80)], [0.3, at], [0.4, at], [0.7, v(62, 46)], [0.9, v(62, 46)]])
+    const r = 30 * prog(t, 0.4, 0.7)
+    const s = sk()
+    if (r < 0.5) s.path([A, X, B], ['line', 'line'])
+    else {
+      const T1 = v(X.x, X.y + r), T2 = v(X.x + r, X.y)
+      const mid = v(X.x + r * (1 - Math.SQRT1_2), X.y + r * (1 - Math.SQRT1_2))
+      s.path([A, T1, T2, B], ['line', kind === 'round' ? { via: mid } : 'line', 'line'])
+    }
+    return {
+      doc: s.doc, cursor, pressed: within(t, 0.4, 0.72),
+      dots: r < 0.5 ? [A, X, B] : [A, B],
+      hot: t >= 0.28 && t < 0.4 ? [X] : [],
+      ...sparkleAt(t, 0.72, v(X.x + 9, X.y + 9)),
+    }
+  }
+}
+const round = corner('round'), chamfer = corner('chamfer')
+
 // Clean up: a shape whose top doesn't quite close and whose base sits a
 // little off level; press, and it tidies — the ends join, the base levels,
 // the old drawing stays as a faint ghost.
@@ -337,6 +362,6 @@ function cleanup(t: number): PenTipFrame {
 }
 
 export const PEN_TIP_DEMOS: Record<string, (t: number) => PenTipFrame> = {
-  select, path, curve, line, circle, point, trim, cut, dissolve, fill, cleanup,
+  select, path, curve, line, circle, point, trim, cut, dissolve, fill, round, chamfer, cleanup,
 }
 export const PEN_DEMO_TOOLS = Object.keys(PEN_TIP_DEMOS)

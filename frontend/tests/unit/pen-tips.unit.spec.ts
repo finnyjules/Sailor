@@ -15,7 +15,7 @@ import { usePen, type PenTool } from '~/composables/pen/usePen'
 import { PEN_TIPS, tipKeyLabel } from '~/composables/pen/penTips'
 import { PEN_TIP_DEMOS, PEN_DEMO_TOOLS } from '~/composables/pen/penTipDemos'
 
-const ALL_TOOLS: PenTool[] = ['select', 'path', 'curve', 'line', 'circle', 'point', 'trim', 'cut', 'dissolve', 'fill']
+const ALL_TOOLS: PenTool[] = ['select', 'path', 'curve', 'line', 'circle', 'point', 'trim', 'cut', 'dissolve', 'fill', 'round', 'chamfer']
 const DEMO_IDS = [...ALL_TOOLS, 'cleanup']
 const FIXED_IDS = ['guide', 'labels', 'undo', 'redo', 'close', 'finish', 'done', 'cancel',
   'fix', 'repeat', 'mirror', 'flip-h', 'flip-v', 'construction', 'delete',
@@ -77,10 +77,10 @@ describe('pen tips table', () => {
 
   it('the drawing tools carry their single-letter keys', () => {
     const keys = Object.fromEntries(ALL_TOOLS.map(t => [t, PEN_TIPS[t]!.key]))
-    expect(keys).toEqual({ select: 'V', path: 'P', curve: 'B', line: 'L', circle: 'O', point: 'N', trim: 'T', cut: 'C', dissolve: 'D', fill: 'G' })
+    expect(keys).toEqual({ select: 'V', path: 'P', curve: 'B', line: 'L', circle: 'O', point: 'N', trim: 'T', cut: 'C', dissolve: 'D', fill: 'G', round: 'F', chamfer: 'H' })
   })
 
-  it('the ten drawing and editing tools and Clean up have a demo, and nothing else does', () => {
+  it('the drawing and editing tools and Clean up have a demo, and nothing else does', () => {
     expect([...PEN_DEMO_TOOLS].sort()).toEqual([...DEMO_IDS].sort())
     for (const t of DEMO_IDS) expect(PEN_TIPS[t]!.demo).toBe(t)
     for (const id of FIXED_IDS) expect(PEN_TIPS[id]!.demo).toBeUndefined()
@@ -156,6 +156,15 @@ describe('pen tip demos', () => {
     expect(sketchPathData(PEN_TIP_DEMOS.path!(0.1).doc)).not.toMatch(/ A /)
     expect(sketchPathData(PEN_TIP_DEMOS.path!(0.85).doc)).toMatch(/ A /)
   })
+  it('round corner and chamfer demos round and cut the corner as the drag goes on', () => {
+    for (const id of ['round', 'chamfer']) {
+      const early = PEN_TIP_DEMOS[id]!(0.1), late = PEN_TIP_DEMOS[id]!(0.8)
+      const pieces = (f: typeof early) => f.doc.entities.filter(e => e.kind === 'path').flatMap(e => (e as any).segments)
+      expect(pieces(early)).toHaveLength(2)
+      expect(pieces(late)).toHaveLength(3)
+      expect(pieces(late)[1].kind).toBe(id === 'round' ? 'arc' : 'line')
+    }
+  })
 })
 
 describe('pen tool keys', () => {
@@ -179,6 +188,15 @@ describe('pen tool keys', () => {
     // caps lock gives upper case — still the tool
     expect(pen.onKeydown(key('P'))).toBe(true)
     expect(pen.tool.value).toBe('path')
+  })
+
+  it('F and H pick Round corner and Chamfer', () => {
+    const pen = mk()
+    const want: Record<string, PenTool> = { f: 'round', h: 'chamfer' }
+    for (const [k, t] of Object.entries(want)) {
+      expect(pen.onKeydown(key(k)), k).toBe(true)
+      expect(pen.tool.value).toBe(t)
+    }
   })
 
   it('ignores the keys with a modifier held', () => {

@@ -74,6 +74,9 @@ export interface PenKeyContext {
   // act now (penActions.ts ACTIONS; the pen settles its live gestures first);
   // false leaves the key to the host
   runKeyAction: (id: string) => boolean
+  // pen stage 8: a live corner / offset preview's own keys — digits, '.',
+  // '−', Backspace, Enter, Escape; true when the preview took the key
+  previewKey: (ev: KeyboardEvent) => boolean
 }
 
 // single-letter tool keys — only with no modifier, and only for a tool the
@@ -82,6 +85,7 @@ export interface PenKeyContext {
 export const TOOL_KEYS: Record<string, PenTool> = {
   v: 'select', p: 'path', b: 'curve', l: 'line', o: 'circle', n: 'point',
   t: 'trim', c: 'cut', d: 'dissolve', g: 'fill',
+  f: 'round', h: 'chamfer',
 }
 
 // Returns true when the key did something. usePen.ts's onKeydown reads that
@@ -113,6 +117,10 @@ export function handlePenKey(ev: KeyboardEvent, ctx: PenKeyContext, local?: { ca
     ctx.toggleCleanup()
     return true
   }
+  // pen stage 8: a live Round corner / Chamfer / Offset preview takes its
+  // digits, Backspace, Enter and Escape first (tool letters still switch —
+  // selectTool drops the preview)
+  if (ctx.previewKey(ev)) return true
   // (viewport keys — ⌘0 fit, Space pan — are the host's; it handles them
   // before delegating here)
 

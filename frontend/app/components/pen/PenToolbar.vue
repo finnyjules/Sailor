@@ -20,6 +20,7 @@ import { STRENGTHS, type CleanupStrength } from '~/lib/sketch/cleanup'
 import {
   MousePointer2, Spline, PenTool as PenNib, Minus, Circle, Dot,
   CircleDashed, Tag, Undo2, Redo2, Scissors, Slice, Bandage, WandSparkles, PaintBucket,
+  SquareRoundCorner, Octagon,
 } from 'lucide-vue-next'
 
 // The root is the renderless TooltipProvider, so the host's class (the Frame
@@ -49,7 +50,8 @@ function done() {
 }
 
 // Tool row: Select, Pen (arcs), Curve (Bézier), Line, Circle, Point, then the
-// editing tools Trim, Cut and Dissolve. Pen and Curve add to the same path.
+// editing tools Trim, Cut and Dissolve, Fill, then Round corner and Chamfer
+// (pen stage 8). Pen and Curve add to the same path.
 // Every button's name, key and caption live in penTips.ts (PEN_TIPS) and show
 // on its hover card (PenTipCard) — no native `title` tooltips here.
 const ALL_TOOLS: { id: PenTool; icon: Component }[] = [
@@ -63,6 +65,8 @@ const ALL_TOOLS: { id: PenTool; icon: Component }[] = [
   { id: 'cut', icon: Slice },
   { id: 'dissolve', icon: Bandage },
   { id: 'fill', icon: PaintBucket },
+  { id: 'round', icon: SquareRoundCorner },
+  { id: 'chamfer', icon: Octagon },
 ]
 const tipName = (id: string) => PEN_TIPS[id]?.name ?? id
 // only the tools this host offers (PenOptions.tools, resolved by usePen —
@@ -82,6 +86,8 @@ const TOOL_HINTS: Record<PenTool, string> = {
   cut: 'Click a line or arc to add a point there',
   dissolve: 'Click a point between two pieces that line up to merge them',
   fill: 'Click an enclosed area to fill it, or a filled one to empty it',
+  round: 'Drag from a corner to round it, or click it and type the radius · Shift-click adds corners',
+  chamfer: 'Drag from a corner to cut it off, or click it and type how far · Shift-click adds corners',
 }
 
 const hasEntitySelection = computed(() => selection.value.length > 0)

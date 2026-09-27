@@ -59,6 +59,7 @@ import {
 import { createPenHistory } from './penHistory'
 import { handlePenKey, isCleanupKey, type PenKeyContext, NUDGE_PX, NUDGE_PX_SHIFT, screenDeltaToDrawing } from './penKeys'
 import { createPenCopies, type PendingOp } from './penCopies'
+import { createPenCorners } from './penCorners'
 import { nearestCurve, spanAt, curveGeom, paramOf, pointAt, type Span, type CurveGeom } from '~/lib/sketch/crossings'
 import { removeSpan, removeSegment, cutAt, canDissolve, dissolveAt, mergePoints, sameKey } from '~/lib/sketch/trim'
 import { FILL_GAP_PX, fillTarget, toggleFillAt, fillState, gapMarkers, reconcileFills, withoutFills } from '~/lib/sketch/fills'
@@ -86,7 +87,7 @@ export { NUDGE_PX, NUDGE_PX_SHIFT, screenDeltaToDrawing }
 // a curve between crossings, 'cut' adds a point on a line or arc, 'dissolve'
 // merges the two pieces at a point back into one (see the Trim section);
 // 'fill' fills and empties the areas the drawing encloses (pen stage 7).
-export type PenTool = 'select' | 'point' | 'line' | 'circle' | 'path' | 'curve' | 'trim' | 'cut' | 'dissolve' | 'fill'
+export type PenTool = 'select' | 'point' | 'line' | 'circle' | 'path' | 'curve' | 'trim' | 'cut' | 'dissolve' | 'fill' | 'round' | 'chamfer'
 // cleanup: Clean up (pen stage 5) is offered unless a host sets it false
 export interface PenOptions { openOnly?: boolean; tools?: PenTool[]; cleanup?: boolean }
 
@@ -297,7 +298,7 @@ export function usePen(opts: {
   // to it); openOnly drops Circle even if the host listed it — an open-path
   // guide has no use for a closed shape. See PenToolbar for how `tools` gates
   // the toolbar's own buttons.
-  const ALL_PEN_TOOLS: PenTool[] = ['select', 'point', 'line', 'circle', 'path', 'curve', 'trim', 'cut', 'dissolve', 'fill']
+  const ALL_PEN_TOOLS: PenTool[] = ['select', 'point', 'line', 'circle', 'path', 'curve', 'trim', 'cut', 'dissolve', 'fill', 'round', 'chamfer']
   const openOnly = !!opts.options?.openOnly
   const cleanupAllowed = opts.options?.cleanup !== false
   const resolvedTools: PenTool[] = (() => {
@@ -470,6 +471,7 @@ export function usePen(opts: {
   const docRevision = penHistory.rev
   function undo() {
     closeMenus()
+    dropPreviews()   // before the guard: ⌘Z with nothing to undo still drops a preview
     // with a Clean up preview open, undo only closes it (as ⌘Z does) — it
     // never also steps back over the drawing under the preview
     if (cleanup.value) { cancelCleanup(); return }
@@ -490,6 +492,7 @@ export function usePen(opts: {
   }
   function redo() {
     closeMenus()
+    dropPreviews()
     if (cleanup.value) { cancelCleanup(); return }   // likewise: only closes the preview
     if (trimPress) trimUp()
     if (arcDrag) arcDragEnd()
@@ -551,6 +554,7 @@ export function usePen(opts: {
     const ctx: PenKeyContext = {
       tool, pendingPath, dimBuffer, pendingOp, status, selection, selectedSegments, view: opts.view,
       cancelGesture: opts.cancelGesture,
+      previewKey: (e: KeyboardEvent) => penCorners.key(e),
       cancelPendingOp, undo, redo, cancelPath, commitDimension, finishPath, removeLastAnchor, del, nudge,
       selectTool, isToolAllowed, clearTrimGhosts, cleanupAllowed, toggleCleanup, runKeyAction,
     }
@@ -1994,6 +1998,7 @@ export function usePen(opts: {
     trimHover.value = null
     cutHover.value = null
     dissolveHover.value = null
+    penCorners.hover.value = null
   }
   // Escape in Trim: true when there were ghosts to clear
   function clearTrimGhosts(): boolean {
@@ -2016,6 +2021,23 @@ export function usePen(opts: {
   // and call into it.
   const penCopies = createPenCopies({ doc, selection, pendingOp, status, clearSel, runSolve, commitHistory })
   const { applyRepeat, applyMirror, armRepeat, doMirror, flip } = penCopies
+
+  // --- Round corner / Chamfer (pen stage 8): see penCorners.ts — the preview
+  // is overlay-only; Apply is one step; anything else drops it untouched
+  // (`cleanup` is a const declared further down, read only when cornerDown runs)
+  const penCorners = createPenCorners({
+    doc, view: opts.view, tool, status, docRevision, commitHistory, runSolve,
+    clearSel: () => { clearSel(); clearSegSel() }, closeMenus, sparkle,
+  })
+  const cornerView = penCorners.view, cornerHover = penCorners.hover
+  function cornerMove(x: number, y: number) { penCorners.move(x, y) }
+  function cornerDown(x: number, y: number, additive = false) { if (!cleanup.value) penCorners.down(x, y, additive) }
+  function cornerUp() { penCorners.up() }
+  function applyCorners(): boolean { return penCorners.apply() }
+  function cancelCorners(): void { penCorners.cancel(false) }
+  // every overlay-only preview dropped untouched — a tool change, undo / redo,
+  // reset, revert, finishing, parking, dispose, opening Clean up
+  function dropPreviews(): void { penCorners.cancel(false) }
   // kept for the test hook / fast path: exact-selection repeat (1 point + units)
   function doRepeat(count: number) {
     const ptSel = selection.value.filter(id => isPointId(id))
@@ -2519,6 +2541,7 @@ export function usePen(opts: {
   function startCleanup(): void {
     closeMenus()
     if (!cleanupAllowed || cleanup.value) return
+    dropPreviews()   // a corner preview is dropped, never applied
     finishSession()   // every live gesture settles first (its own step, if it changed anything); the selection is kept
     const picked = selection.value.length > 0 || selectedSegments.value.length > 0
     const scope: CleanupScope | null = picked
@@ -2802,6 +2825,7 @@ export function usePen(opts: {
 
   function selectTool(t: Tool) {
     if (!isToolAllowed(t)) return   // PenOptions.tools / openOnly: not a tool this host offers — no-op
+    const carried = selection.value.slice()   // the corner tools start from the selection (cleared below)
     closeMenus()
     closeCleanup()   // a tool change drops a Clean up preview
     if (arcDrag) arcDragEnd()   // a live arc drag settles as its own step
@@ -2830,6 +2854,7 @@ export function usePen(opts: {
     cancelPendingOp()   // a half-armed Repeat/Mirror never survives a tool switch
     cancelValue()       // a pending value request (Distance/Radius/Copies) never survives a tool switch
     resetEditTools()    // Trim's ghosts and every hover target go with the tool
+    dropPreviews()      // so does a corner preview, untouched
     // switching to a draw tool must not carry a stale entity/segment
     // selection along with it — the verb bar, arrow-nudge, and Backspace-
     // delete all act on `selection`/`selectedSegments`, and a leftover pick
@@ -2847,11 +2872,13 @@ export function usePen(opts: {
     resetCurveState()
     cursor.value = null
     dimBuffer.value = ''
+    if (t === 'round' || t === 'chamfer') penCorners.start(t, carried)
   }
 
   function reset() {
     closeMenus()
     closeCleanup()
+    dropPreviews()
     setArcDrag(null)   // dropped, never settled — the drawing is thrown away
     resetEditTools()
     cleanupPendingPath()
@@ -2896,6 +2923,7 @@ export function usePen(opts: {
   function finishSession(): void {
     closeMenus()
     closeCleanup()   // a Clean up preview is dropped, never applied
+    dropPreviews()   // so is a corner preview
     if (arcDrag) arcDragEnd()   // a live arc drag settles as its own step
     pendingOp.value = null
     if (pendingPath.value && pendingPath.value.anchors.length >= 2) {
@@ -2921,6 +2949,7 @@ export function usePen(opts: {
   function revert(): void {
     closeMenus()
     closeCleanup()
+    dropPreviews()
     trimPress = null   // discarded with everything else — never settled onto the reverted drawing
     setArcDrag(null)   // likewise a live arc drag
     penHistory.revert()   // doc.value = cloneDoc(opening); initHistory()
@@ -2947,6 +2976,7 @@ export function usePen(opts: {
   function endGesture(): void {
     closeMenus()
     closeCleanup()   // parking the pen drops a Clean up preview
+    dropPreviews()   // and a corner preview
     cancelPointDrop()
     setPathDrag(null)
     curveDrag.value = null
@@ -2959,6 +2989,7 @@ export function usePen(opts: {
   function dispose() {
     closeMenus()
     closeCleanup()
+    dropPreviews()
     cancelValue()   // a pending value request never outlives the pen
     highlight.value = []
     if (sparkleRaf && typeof cancelAnimationFrame !== 'undefined') cancelAnimationFrame(sparkleRaf)
@@ -3002,6 +3033,8 @@ export function usePen(opts: {
     trimDown, trimMove, trimUp, cutMove, cutClick, dissolveMove, dissolveClick, clearToolHover, clearTrimGhosts,
     // fill (pen stage 7)
     fillHover, fillMove, fillClick, fillView,
+    // round corner / chamfer (pen stage 8)
+    cornerView, cornerHover, cornerMove, cornerDown, cornerUp, applyCorners, cancelCorners,
     // verbs
     runSolve, apply, applyWithValue, applyTangent, availableConstraints, orderRefs, del, nudge, fixSelected, makeConstruction, flip,
     repeatPrompt, armRepeat, doRepeat, applyRepeat, doMirror, applyMirror, cancelPendingOp,

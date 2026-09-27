@@ -318,6 +318,11 @@ onMounted(() => {
         area: st ? st.filled.reduce((s, f) => s + st.fs.faces[f]!.area, 0) : 0,
       }
     },
+    // pen stage 8 — read the corner tools' preview (never change it)
+    corner: () => {
+      const v = pen.cornerView.value
+      return v ? { kind: v.kind, corners: v.corners.slice(), size: v.size, typed: v.typed, fits: v.fits, bad: v.bad.length } : null
+    },
   }
   ready.value = true
   window.addEventListener('keydown', onKeydown, { capture: true })

@@ -105,6 +105,7 @@ const {
   cleanup: cleanupSession, toggleCleanupFix, toggleCleanupKind,
   highlight, menu, wheel, openMenu, closeMenus, openWheel, wheelPointer, releaseWheel, closeWheel, setViewSize,
   fillHover, fillMove, fillClick, fillView, docRevision,
+  cornerView, cornerHover, cornerMove, cornerDown, cornerUp,
 } = props.pen
 
 const svgEl = ref<SVGSVGElement | null>(null)
@@ -529,6 +530,27 @@ const fillUid = useId().replace(/[^a-zA-Z0-9_-]/g, '')
 const hatchId = `pen-fill-hatch-${fillUid}`
 const hatchClipId = `pen-fill-clip-${fillUid}`
 
+// ---------- Round corner / Chamfer (pen stage 8) ----------
+// The preview in drawing space, the picked and hovered corners ringed and the
+// size chip in screen space. Only the overlay reads the preview; the drawing
+// is untouched until Apply.
+const isCornerTool = () => tool.value === 'round' || tool.value === 'chamfer'
+const cornerShown = computed(() => (cleanupSession.value ? null : cornerView.value))
+const cornerRings = computed(() => {
+  const v = cornerShown.value
+  return v ? v.corners.map(id => screenPt(id)).filter((s): s is { x: number; y: number } => !!s) : []
+})
+const cornerHoverScreen = computed(() => (cornerHover.value && isCornerTool() ? screenPt(cornerHover.value) : null))
+const cornerChip = computed(() => {
+  const v = cornerShown.value
+  if (!v) return null
+  const s = toScreen(v.chip)
+  const size = v.size.toFixed(2).replace(/0$/, '')
+  const text = v.typed ? `${v.typed}|` : v.kind === 'round' ? `R ${size}` : size
+  const w = 8 + text.length * 6
+  return { ...chipOrigin(s, w), w, text }
+})
+
 // screen-space sparkles: a small burst of short rays radiating from the
 // point, ease-out pop + linear fade to 0 by SPARKLE_LIFETIME_MS.
 const SPARKLE_RAYS = 6
@@ -906,6 +928,7 @@ function onPointerDownSvg(ev: PointerEvent) {
   if (tool.value === 'cut') { cutClick(w.x, w.y); return }
   if (tool.value === 'dissolve') { dissolveClick(w.x, w.y); return }
   if (tool.value === 'fill') { fillClick(w.x, w.y); return }
+  if (isCornerTool()) { cornerDown(w.x, w.y, ev.shiftKey); return }
   if (tool.value === 'path') { pathDown(w.x, w.y, ev.shiftKey); return }
   if (tool.value === 'curve') { curveDown(w.x, w.y); return }
   const { x, y } = w
@@ -937,12 +960,13 @@ function onPointerMove(ev: PointerEvent) {
     if (w) curveMove(w.x, w.y)
     return
   }
-  if (tool.value === 'trim' || tool.value === 'cut' || tool.value === 'dissolve' || tool.value === 'fill') {
+  if (tool.value === 'trim' || tool.value === 'cut' || tool.value === 'dissolve' || tool.value === 'fill' || isCornerTool()) {
     const w = drawingXY(ev)
     if (!w) { clearToolHover(); return }
     if (tool.value === 'trim') trimMove(w.x, w.y)
     else if (tool.value === 'cut') cutMove(w.x, w.y)
     else if (tool.value === 'fill') fillMove(w.x, w.y)
+    else if (isCornerTool()) cornerMove(w.x, w.y)
     else dissolveMove(w.x, w.y)
     return
   }
@@ -1006,6 +1030,7 @@ function onPointerUp(ev: PointerEvent) {
     else trimUp()
     return
   }
+  if (isCornerTool()) { cornerUp(); return }
   if (tool.value === 'path' && getPathDrag()) {
     const w = drawingXY(ev)
     if (w) pathUp(w.x, w.y)
@@ -1271,6 +1296,23 @@ defineExpose({
     <g v-if="trimGhosts.length && tool === 'trim'" :transform="svgTransform" pointer-events="none">
       <path v-for="(d, i) in trimGhosts" :key="'ghost-' + i" :d="d" fill="none" stroke="#3730a3" stroke-width="1"
             stroke-dasharray="1 3" opacity="0.35" vector-effect="non-scaling-stroke" data-trim-ghost />
+    </g>
+    <!-- Round corner / Chamfer: the new and shortened pieces (indigo: it
+         fits; red dashed: a corner it doesn't fit), the picked corners ringed,
+         the corner under the pointer, the size chip -->
+    <g v-if="cornerShown" :transform="svgTransform" pointer-events="none">
+      <path v-if="cornerShown.d && cornerShown.fits" :d="cornerShown.d" fill="none" stroke="#6366f1" stroke-width="2"
+            vector-effect="non-scaling-stroke" data-corner-preview data-fits="yes" />
+      <path v-for="(b, i) in cornerShown.bad.filter(x => x.d)" :key="'cbad-' + i" :d="b.d" fill="none" stroke="#ef4444"
+            stroke-width="2" stroke-dasharray="4 3" vector-effect="non-scaling-stroke" data-corner-bad />
+    </g>
+    <circle v-for="(s, i) in cornerRings" :key="'cpick-' + i" :cx="s.x" :cy="s.y" r="8" fill="none"
+            :stroke="cornerShown?.fits ? '#6366f1' : '#ef4444'" stroke-width="2" pointer-events="none" data-corner-picked />
+    <circle v-if="cornerHoverScreen" :cx="cornerHoverScreen.x" :cy="cornerHoverScreen.y" r="10" fill="none"
+            stroke="#6366f1" stroke-opacity="0.6" stroke-width="2" pointer-events="none" data-corner-hover />
+    <g v-if="cornerChip" pointer-events="none" data-corner-chip>
+      <rect :x="cornerChip.x" :y="cornerChip.y" :width="cornerChip.w" height="14" rx="3" fill="#111827" opacity="0.85" />
+      <text :x="cornerChip.x + 4" :y="cornerChip.y + 11" fill="#e5e7eb" font-size="10" font-family="ui-monospace, monospace">{{ cornerChip.text }}</text>
     </g>
     <!-- Fill: the area under the pointer, hatched (indigo: a click fills it;
          red: it is filled and a click empties it) -->
