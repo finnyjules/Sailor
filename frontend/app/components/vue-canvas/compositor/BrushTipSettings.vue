@@ -7,6 +7,7 @@
 import { computed } from 'vue'
 import type { useBrushPaint } from '~/composables/useBrushPaint'
 import { TIPS } from '~/lib/brushTips/tips'
+import BrushSteadySettings from './BrushSteadySettings.vue'
 
 const props = defineProps<{ brush: ReturnType<typeof useBrushPaint> }>()
 
@@ -42,6 +43,9 @@ function reset() {
     </div>
     <p class="note">Changes apply to your next stroke.</p>
     <button class="reset" data-testid="brush-tip-reset" @click="reset()">Reset to defaults</button>
+    <div class="steady-divider">
+      <BrushSteadySettings :brush="brush" />
+    </div>
   </div>
 </template>
 
@@ -104,4 +108,8 @@ function reset() {
   cursor: pointer;
 }
 .reset:hover { background: rgba(255, 255, 255, 0.12); }
+.steady-divider {
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  padding-top: 12px;
+}
 </style>
