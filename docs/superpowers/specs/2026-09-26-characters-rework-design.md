@@ -51,7 +51,9 @@
 - The chained "portrait first" pipeline goes.
 
 **What's risky**
-- **The face checker's licence.** The model we tested with (InsightFace buffalo_l) is, as far as we know, licensed for non-commercial research only. The hosted product needs a commercially usable one. This is the one real blocker; see Open questions.
+- **The face checker.** The model we tested with (InsightFace buffalo_l) is licensed for non-commercial research only, and no free face-matching model has clean commercial weights.
+  - **Proposed:** AWS Rekognition "Compare faces", at $0.001 a picture. It needs a consent step and an opt-out from AWS training on our data. See Checks.
+  - The same licence problem already affects three shipped features: Face Swap, Face restore and Lip-sync. That is a hosting blocker outside this spec; see "Also found" at the end.
 - **GPT Image 2.5 refuses some prompts.**
   - It refused headless-body wording, which we worked around.
   - It refused changing a visible face to heavier. Nano Banana Pro did it.
@@ -162,7 +164,26 @@ Ideogram Character, the portrait-first chain, the 10-pose test, and the 3D body 
 
 Every picture of her is scored against **the right face**: the look's own face if it has one, otherwise the approved face. That includes photos, sheet panels, generated images and video frames.
 
-| Score | Verdict | What you see |
+**The checker: AWS Rekognition "Compare faces"** ([pricing](https://aws.amazon.com/rekognition/pricing/), [API](https://docs.aws.amazon.com/rekognition/latest/APIReference/API_CompareFaces.html)).
+- **Cost:** $0.001 a picture.
+- **Stateless:** nothing is stored at AWS.
+- **Output:** a 0–100 similarity score. Called from Sailor's server.
+
+Why this one:
+- **InsightFace**, the model we tested with, is research-only. A commercial licence is negotiated by email with no public price.
+- **No open face-embedding model has clean commercial weights.** SFace, facenet, AdaFace, EdgeFace and GhostFaceNets were all trained on research-only photo collections.
+- **Azure Face** needs Microsoft's Limited Access approval.
+- **Vision models** (Claude, GPT, Gemini) are limited by their biometric usage rules and give no calibrated score.
+
+Conditions attached:
+- **Opt out of training.** Set the AWS Organizations AI-services opt-out, so our inputs aren't used to train Amazon's models.
+- **Get consent for real faces.** For characters made from real photos (the photos and canvas routes), a biometric notice and consent step that names AWS. It extends the likeness checkbox at creation. BIPA, GDPR Article 9 and similar laws treat a face embedding of a real person as biometric data.
+- **Characters from a description need no consent step.** They are AI-made faces only.
+- **Delete what we keep.** Scores are stored; face data is not. Deleting a character deletes its photos.
+
+**Thresholds** are placeholders until re-measured on AWS's 0–100 scale. Our ArcFace numbers don't carry over. Re-measure on Jene, who must flag, and Reva, who must pass (a few cents), before any flag is shown:
+
+| Score (ArcFace, as measured) | Verdict | What you see |
 |---|---|---|
 | ≥ 0.80 | match | nothing |
 | 0.60–0.80 | unsure | amber: "May not be Reva", with Redo |
@@ -238,7 +259,7 @@ Each stage ships on its own and is checked in the real app before the next one s
    - Seedance cast sends portrait + body front, not the grid (`lib/shotdirector/cast.ts`, `identityRefs`).
    - Veo routes references to `reference-to-video` (`comfy_api_nodes/video_models.py` `_veo31_fal_input`).
 1. **Model and reading old records:** looks with clothes, character-level photos and face, the `madeFrom` stamps. Unit tests for converting all three past record formats.
-2. **The face checker as a service:** the licence decision first (see Open questions), then scores, the thresholds, the padding, and checks run on read. Test it against Jene (it must flag her) and Reva (she must pass).
+2. **The face checker as a service:** AWS Compare faces behind one server route, with the training opt-out set, the consent step for real-photo characters, thresholds re-measured on Jene (must flag) and Reva (must pass), and checks run on read.
 3. **The sheet pipeline:** GPT Sunburst with automatic fallback to Nano Banana Pro, the tested wording, clothes stated, staleness, and redo with the other model. One live run per character route, about $0.50.
 4. **The character page and panel:** the new UI from the prototype, with body presets and the voice row stored but not yet sent.
 5. **Creation:** describe (casting call), photos (checks, "which one?", likeness), from the canvas.
@@ -256,11 +277,29 @@ Tests at every stage:
 
 ## Open questions
 
-1. **The face checker's licence and where it runs. This blocks stage 2.**
-   - buffalo_l is, as far as we know, research-only (to confirm).
-   - Options: a commercially licensed face-embedding model run in Nitro with onnxruntime-node; a paid face-compare API; or a vision-LLM "same person?" judgement (slower, costs per call, no hard score).
-   - Whichever is chosen must be re-calibrated on Jene and Reva, because thresholds don't carry over between models.
+1. **The face checker: AWS Compare faces proposed** (see Checks). Still to confirm:
+   - the exact consent wording, and whether a lawyer should read it before hosting;
+   - whether a paid InsightFace licence is worth asking about as an alternative that runs on our own server.
 2. **Thresholds.** 0.80 and 0.60 come from two characters. Log every score with its verdict and your decision (Redo or keep), then tune.
 3. **Does the 3D body figure stay** as a preview in the Body editor, or go? It can't be a generation input unless its shape range is rebuilt.
 4. **A shared wardrobe library** for clothes and props across characters. Deferred until outfits actually get reused.
 5. **GPT likeness refusals in the photo route.** Measure how often they happen. If it's often, Nano Banana Pro may be the better default for photo-origin characters.
+
+---
+
+## Also found: shipped features built on non-commercial models (a hosting blocker, separate job)
+
+Checking the face checker's licence showed that three features Sailor already ships use models licensed for non-commercial use only. All three run on the local ComfyUI engine, which is being retired anyway. This is **not part of the character rework**. It must be settled before hosted launch.
+
+| Feature (file) | Restricted model(s) | Replacement |
+|---|---|---|
+| Face Swap node and app (`comfy_extras/nodes_face.py`) | InsightFace buffalo_l + inswapper_128 ([licence](https://github.com/deepinsight/insightface)) | fal `easel-ai/advanced-face-swap` for images (~$0.05) and Pixverse Swap for video (~$0.15–0.40 per 5 s). A/B against GPT Image 2.5 / Nano Banana Pro "put this face here". |
+| Face restore (`comfy_extras/nodes_face_restore.py`; also the Replicate `CodeformerRemoteNode` / `FixFacesNode`) | buffalo_l + CodeFormer, S-Lab non-commercial ([licence](https://github.com/sczhou/CodeFormer/blob/master/LICENSE)) | Topaz image upscale with face enhancement on fal (~$0.08) |
+| Lip-sync, local (`comfy_extras/nodes_lip_sync.py`) | buffalo_l + Wav2Lip, "commercial use strictly prohibited" ([repo](https://github.com/Rudrabha/Wav2Lip)) | sync-3, already in the runner; optionally LatentSync (Apache 2.0, ~$0.20) as a cheap tier |
+
+If face *detection* is still needed anywhere after this, OpenCV YuNet (MIT) or MediaPipe BlazeFace (Apache 2.0) replace InsightFace's detector.
+
+Not yet checked:
+- fal's own commercial terms for Easel and Topaz;
+- what LatentSync was trained on;
+- face-swap quality with the edit models.
