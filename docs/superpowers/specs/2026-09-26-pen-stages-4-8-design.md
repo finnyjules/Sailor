@@ -8,7 +8,7 @@ Stages 1–3 (trim, tooltip cards, coincident) closed the first half of the Zoah
 
 ## Shared ground
 
-- **One pen, three hosts.** Every stage lands in the shared pen (`usePen`, `PenOverlay`, `PenToolbar`, `lib/sketch/`) and so appears on the pen page (`/dev/sketch-draw`), in the Frame and in Shape Studio. A host that can't use a feature leaves it out through `PenOptions.tools` (and the new `PenOptions.features`, below).
+- **One pen, three hosts.** Every stage lands in the shared pen (`usePen`, `PenOverlay`, `PenToolbar`, `lib/sketch/`) and so appears on the pen page (`/dev/sketch-draw`), in the Frame and in Shape Studio. A host that can't use a feature leaves it out through `PenOptions.tools`.
 - **Model rule (Onshape's principle):** few pieces (points, lines, arcs in paths, circles) plus separate rules. New features are *macros* that create ordinary pieces and rules; they never add new piece types. New rule kinds are allowed when an existing one can't say it; each gets a residual, an analytic Jacobian row (or the local numeric fallback `mirroredFrom` uses) and unit tests.
 - **Tolerances** are screen px through `pxToUnits`, as now.
 - **Every gesture is one undo step.** Every new tool key follows the stage-2 rules (no modifier, not typing, host offers it, settles a live gesture first).
