@@ -161,3 +161,32 @@ describe('the sheet on the layout grid — rows', () => {
     expect(S.rows).toEqual([])
   })
 })
+
+describe('the sheet on the layout grid — L(0) and LB(16) are the resolved grid\'s top and bottom', () => {
+  // A Center-fit grid (its left margin x0 = 230 px, far wider than cols.margin 60) and a zero-margin
+  // stretch grid (its top forced down to one unit). The band's padding differs from the vertical
+  // margins in both; L / LB must still read the resolved top, rows and bottom.
+  const center = (rows: LayoutGrid['rows']) => own({ cols: { count: 6, fit: 'center', margin: 60, gutter: 20, width: 60 }, rows })
+  const zero = (rows: LayoutGrid['rows']) => own({ cols: { count: 12, fit: 'stretch', margin: 0, gutter: 20, width: 0 }, rows })
+  const k = 100 / 1000
+  for (const [name, make] of [['Center fit', center], ['zero margin', zero]] as const) {
+    for (const rowsOn of [true, false]) {
+      it(`${name}, rows ${rowsOn ? 'on' : 'off'}: band and whole sheets`, () => {
+        const g = make(rowsOn ? { mode: 'count', count: 6 } : { mode: 'off', count: 6 })
+        const r = resolveLayoutGrid(g, 1000, 1000)
+        if (rowsOn) expect(r.rows.length).toBeGreaterThanOrEqual(3)
+        const last = r.rows[r.rows.length - 1]
+        const bottom = rowsOn ? (last!.a + last!.w) * k : r.bottom * k
+        for (const whole of [false, true]) {
+          const S = makeSheet({ frameW: 1000, frameH: 1000, measure, layout: r, whole })
+          expect(S.L(0) + S.Y0).toBeCloseTo(r.top * k, 9)
+          expect(S.LB(16) + S.Y0).toBeCloseTo(bottom, 9)
+        }
+      })
+    }
+  }
+  it('the Center-fit grid really pads its band with x0 (the case this guards)', () => {
+    const r = resolveLayoutGrid(center({ mode: 'count', count: 6 }), 1000, 1000)
+    expect(r.margin).toBeGreaterThan(r.top + 1)
+  })
+})
