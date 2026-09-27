@@ -5,7 +5,7 @@ import { claimNew } from '~~/server/utils/ownedJsonStore'
 import { emptyState } from '#shared/characters/types'
 
 export default defineEventHandler(async (event) => {
-  const body = await readBody(event) as { name?: string }
+  const body = await readBody(event) as { name?: string, origin?: string, likenessConfirmed?: boolean, style?: string, linkedFrom?: string }
   const name = (body?.name || '').trim()
   const slug = slugifyCharacterName(name)
   if (!name || !slug) throw createError({ statusCode: 400, message: 'A usable character name is required' })
@@ -16,9 +16,18 @@ export default defineEventHandler(async (event) => {
   try { await fs.access(file); throw createError({ statusCode: 409, message: `Character '${slug}' already exists` }) }
   catch (e: any) { if (e?.statusCode === 409) throw e }
 
+  // linkedFrom is kept only if it names an existing character's slug.
+  const linkedFrom = typeof body?.linkedFrom === 'string' && slugifyCharacterName(body.linkedFrom) === body.linkedFrom
+    && await fs.access(path.join(dir, `${body.linkedFrom}.json`)).then(() => true, () => false) ? body.linkedFrom : null
+
   const now = new Date().toISOString()
   const record: CharacterRecord = {
     name, slug,
+    face: null, photos: [], voice: null,
+    origin: body?.origin === 'described' || body?.origin === 'canvas' ? body.origin : 'photos',
+    likenessConfirmed: body?.likenessConfirmed === true,
+    style: body?.style === 'anime' ? 'anime' : 'photo',
+    linkedFrom,
     states: [emptyState('default', 'Default')],
     loraName: null, trigger: null, bodyShape: null, notes: '', createdAt: now, updatedAt: now,
   }

@@ -5484,7 +5484,7 @@ interface TextOutlineCollect {
 /** Fill mode: the largest fontSize (normalized to width) at which the wrapped
  *  text still fits boxW (and boxH when set). A binary search over the same wrap +
  *  measure the renderer uses, so what fits here is what draws. */
-function fillFontSize(ctx: CanvasRenderingContext2D, layer: TextLayer, W: number): number {
+export function fillFontSize(ctx: CanvasRenderingContext2D, layer: TextLayer, W: number): number {
   const boxWpx = (layer.boxW ?? 0) * W
   if (!(boxWpx > 0)) return layer.fontSize
   const boxHpx = (layer.boxH ?? 0) * W

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { isRunnerEligible, resolveVideoModelId, RUNNER_IMAGE_MODEL_IDS, RUNNER_VIDEO_MODEL_IDS } from '#shared/runner/eligibility'
+import { isRunnerEligible, resolveVideoModelId, runnerTakesNode, RUNNER_IMAGE_MODEL_IDS, RUNNER_VIDEO_MODEL_IDS } from '#shared/runner/eligibility'
 import type { ApiPrompt } from '#shared/runner/graph'
 
 const img = (model = 'flux-schnell') => ({ class_type: 'GenerateImageNode', inputs: { model, prompt: 'x', aspect_ratio: '1:1', seed: 1, model_options: '{}' } })
@@ -53,5 +53,21 @@ describe('isRunnerEligible', () => {
   it('lists exactly the 9 + 6 runner models', () => {
     expect(RUNNER_IMAGE_MODEL_IDS).toHaveLength(9)
     expect(RUNNER_VIDEO_MODEL_IDS).toHaveLength(6)
+  })
+})
+
+describe('runnerTakesNode: Film a shot (Task 4, characters stage 3)', () => {
+  const shot = (model: string, opts: Record<string, unknown>) => ({ class_type: 'FilmShotNode', inputs: {
+    preset: 'slow_push_in', prompt: 'x', model, aspect_ratio: '16:9', duration: '5', seed: 0, model_options: JSON.stringify(opts),
+  } })
+  it('takes a shot-directed one on Seedance 2.0 or Veo 3.1; a preset one stays on ComfyUI', () => {
+    expect(runnerTakesNode({ n: shot('seedance-2.0', { __shot_directed: true }) }, 'n')).toBe(true)
+    expect(runnerTakesNode({ n: shot('veo-3.1', { __shot_directed: true }) }, 'n')).toBe(true)
+    expect(runnerTakesNode({ n: shot('seedance-2.0', {}) }, 'n')).toBe(false)
+    expect(isRunnerEligible({ n: shot('seedance-2.0', {}) })).toBe(false)
+  })
+  it('Kling 3 only with the replicate-video family', () => {
+    expect(runnerTakesNode({ n: shot('kling-v3', { __shot_directed: true }) }, 'n')).toBe(false)
+    expect(runnerTakesNode({ n: shot('kling-v3', { __shot_directed: true }) }, 'n', new Set(['replicate-video']))).toBe(true)
   })
 })

@@ -5,7 +5,7 @@
  * (rule 7). Its classes are exactly shared/runner/effects.ts
  * EFFECT_CLASSES_PORTED (a test holds them equal).
  */
-import { effectOutSize, type EffectFamily } from '#shared/runner/effects'
+import { EFFECT_WIDGET_SIZES, effectOutSize, generatorWork, type EffectFamily } from '#shared/runner/effects'
 import { hexToRgb, parseDuotone, parseStops } from '#shared/runner/gradientStops'
 import { asciiPrepare } from './asciiGlyphs'
 
@@ -36,6 +36,19 @@ export interface EffectSpec {
    * import). Everything else keeps its value.
    */
   prepare?(widgets: Record<string, unknown>): Record<string, unknown>
+  /**
+   * The inputs' batches must be equal (R2.8: Merge alpha's torch.cat doesn't
+   * broadcast a batch of one against more); otherwise rule 5's equal-or-one.
+   */
+  equalBatches?: true
+  /**
+   * Two passes over the batch (R2.9: Palette quantize samples every picture,
+   * then snaps each): the plan hands the worker every picture once with
+   * nothing wanted back, then again for the outputs.
+   */
+  gather?: true
+  /** The op draws from a seed the plan derives from the node's settings and files (R2.9: Add noise, ruling (e)); handed in as `seed`. */
+  seeded?: true
 }
 
 const tone = (name: string, prepare?: EffectSpec['prepare']): EffectSpec => ({ family: 'effects-tone', op: `tone.${name}`, batch: 'pure', ...(prepare ? { prepare } : {}) })
@@ -190,8 +203,88 @@ function resizeWork(w: Record<string, unknown>, s: Size): number {
   return out * WORK_CHANNELS * RESIZE_VALUE[mode]! + (mode === 'area' ? px(s) * WORK_CHANNELS * AREA_IN : 0)
 }
 
+// ── effects-mask (R2.8): the work each asks for (rule 7) ──
+//
+// In the same units (0.37 × 10⁹ a second), every picture counted at 4
+// channels. Measured on the development Mac (R2.8 report: each op at 1024²
+// × 4 in this thread, the constants set so every op's time at the unit's
+// rate is at or above its measured time): a per-value step (a blend mode, a
+// product, a clamp) MASK_VALUE a value; a bilinear resize of the top or the
+// mask RESIZE_VALUE.bilinear a value, counted whether or not the sizes differ
+// (the header of the second input isn't read for it); a luma or a colour
+// distance MASK_PIXEL a pixel; Matte grow / shrink's max pool, taken one side
+// at a time, POOL_STEP a step (2k a pixel), and its feather the gaussian's
+// 2·ksize taps a pixel on one channel.
+
+const MASK_VALUE = 4
+const MASK_PIXEL = 12
+const POOL_STEP = 2
+
+const mask = (name: string, work: NonNullable<EffectSpec['work']>, extra: Partial<EffectSpec> = {}): EffectSpec =>
+  ({ family: 'effects-mask', op: `mask.${name}`, batch: 'pure', work, ...extra })
+
+/** Matte grow / shrink's work: its max pool one side at a time, and its feather on one channel. */
+function matteWork(w: Record<string, unknown>, s: Size): number {
+  const amount = num(w, 'amount')
+  const feather = num(w, 'feather')
+  const kk = amount !== 0 ? Math.abs(pyRound(amount)) * 2 + 1 : 1
+  return px(s) * ((kk > 1 ? 2 * kk * POOL_STEP : 0) + (feather > 0 ? 2 * ksizeOf(feather) : 0) + 3 * MASK_VALUE)
+}
+
 /** The output size of a class that changes it (effectOutSize), else the input's. */
 const sizedBy = (cls: string): EffectSpec['outSize'] => (w, s) => (s ? effectOutSize(cls, w, s) ?? s : { w: 0, h: 0 })
+
+// ── effects-noise (R2.9): the work each asks for (rule 7) ──
+//
+// In the same units (0.37 × 10⁹ a second), every picture counted at 4
+// channels. Measured on the development Mac (R2.9 report: each op at 1024²
+// (a generator at its largest) in this thread, the constants set so every
+// op's time at the unit's rate is at or above its measured time). The
+// generators' own work comes from their widgets alone
+// (shared/runner/effects.ts generatorWork, the same numbers the eligibility
+// check reads). Film grain: its noise drawn and resized, and its per-pixel
+// grain (GRAIN_PIXEL); Glitch: its rolls (COPY_VALUE a value, three
+// passes); Palette quantize: a distance per sample and centre per iteration
+// and per pixel and centre (PALETTE_DISTANCE), and its area sample; Stipple:
+// its luma, pow, pool and stamp (STIPPLE_PIXEL); Flow field: its two value
+// noises and its grid (FLOW_PIXEL) and the grid_sample of every channel
+// (GRID_VALUE); Add noise: a draw and an add a value (NOISE_VALUE).
+
+const GRAIN_PIXEL = 40
+/** A randn value drawn (mt19937, then Box–Muller in float): measured about 20 ns, counted 12. */
+const NORMAL_VALUE = 12
+const PALETTE_DISTANCE = 8
+const STIPPLE_PIXEL = 40
+const FLOW_PIXEL = 60
+const NOISE_VALUE = 24
+
+const noise = (name: string, batch: EffectSpec['batch'], work: NonNullable<EffectSpec['work']>, extra: Partial<EffectSpec> = {}): EffectSpec =>
+  ({ family: 'effects-noise', op: `noise.${name}`, batch, work, ...extra })
+
+/** A generator: its size and work from its widgets alone. */
+const generator = (name: string): EffectSpec => noise(name, 'generator', w => generatorWork(name, w) ?? 0, {
+  outSize: w => EFFECT_WIDGET_SIZES[name]!(w) ?? { w: 0, h: 0 },
+})
+
+/** Film grain's work: its noise field drawn (and resized up when size > 1), and its per-pixel grain. */
+function filmGrainWork(w: Record<string, unknown>, s: Size): number {
+  if (num(w, 'amount') <= 0) return copyWork(s)
+  const size = num(w, 'size')
+  const field = s && size > 0 ? Math.max(2, Math.trunc(s.h / size)) * Math.max(2, Math.trunc(s.w / size)) : 0
+  return field * NORMAL_VALUE + (size > 1 ? px(s) * RESIZE_VALUE.bilinear! : 0) + px(filmGrainSize(w, s)) * GRAIN_PIXEL
+}
+
+/**
+ * Film grain's output size: the picture's, except below size 1, where a side
+ * of 1 grows to the noise field's (max(2, int(1 / size)), torch's broadcast).
+ */
+function filmGrainSize(w: Record<string, unknown>, s: Size): { w: number; h: number } {
+  if (!s) return { w: 0, h: 0 }
+  const size = num(w, 'size')
+  if (num(w, 'amount') <= 0 || size > 1) return s
+  const grow = (side: number) => (side === 1 ? Math.max(2, Math.trunc(1 / size)) : side)
+  return { w: grow(s.w), h: grow(s.h) }
+}
 
 export const EFFECTS: Readonly<Record<string, EffectSpec>> = {
   // ── effects-tone (R2.1 pilots): per pixel, exact ──
@@ -272,6 +365,58 @@ export const EFFECTS: Readonly<Record<string, EffectSpec>> = {
   // `samples` grid_samples of every channel, each with its grid and the running sum.
   GodRays: warp('GodRays', (w, s) => Math.max(1, Math.trunc(num(w, 'samples'))) * px(s) * (WORK_CHANNELS * GRID_VALUE + GODRAYS_PIXEL) + copyWork(s)),
   Mirror: warp('Mirror', (_w, s) => copyWork(s)),
+  // ── effects-mask (R2.8): exact, but Matte grow / shrink's feather (library) ──
+  // Blend carries nothing across its batch, but its base and top are paired by index (the brief: coupled).
+  Blend: mask('Blend', (_w, s) => px(s) * WORK_CHANNELS * (3 * MASK_VALUE + RESIZE_VALUE.bilinear!), { batch: 'coupled' }),
+  ApplyMask: mask('ApplyMask', (_w, s) => px(s) * (WORK_CHANNELS * 2 * MASK_VALUE + RESIZE_VALUE.bilinear!)),
+  ThresholdMask: mask('ThresholdMask', (_w, s) => px(s) * (MASK_PIXEL + WORK_CHANNELS * 2 * MASK_VALUE)),
+  ColorRangeMask: mask('ColorRangeMask', (_w, s) => px(s) * (MASK_PIXEL + WORK_CHANNELS * 2 * MASK_VALUE)),
+  MatteGrowShrink: mask('MatteGrowShrink', matteWork),
+  MergeAlpha: mask('MergeAlpha', (_w, s) => px(s) * (WORK_CHANNELS * 2 * MASK_VALUE + RESIZE_VALUE.bilinear!), { equalBatches: true }),
+  // Painter has a plan of its own (effects/painter.ts): the base's first picture and a painter file.
+  Painter: mask('Painter', (w, s) => painterWork(w, s, null), { batch: 'coupled' }),
+  // ── effects-noise (R2.9) ──
+  // One noise field for the whole batch (coupled, as the brief has it: nothing deduplicated).
+  FilmGrain: noise('FilmGrain', 'coupled', filmGrainWork, { outSize: filmGrainSize }),
+  // The same shifts for every picture of the batch (one draw per slice, per execute).
+  Glitch: noise('Glitch', 'coupled', (_w, s) => 3 * copyWork(s)),
+  PerlinNoise: generator('PerlinNoise'),
+  Voronoi: generator('Voronoi'),
+  GradientGenerator: generator('GradientGenerator'),
+  // One k-means over every picture's sample: two passes (gather).
+  PaletteQuantize: noise('PaletteQuantize', 'coupled', (w, s) => {
+    const kk = Math.max(2, Math.trunc(num(w, 'colors')))
+    const side = s ? Math.min(96, s.w, s.h) : 0
+    return (side * side * kk * Math.max(1, Math.trunc(num(w, 'iterations'))) + px(s) * kk) * PALETTE_DISTANCE + copyWork(s)
+  }, { gather: true }),
+  ReactionDiffusion: generator('ReactionDiffusion'),
+  Fractal: generator('Fractal'),
+  // rand over (b, sh, sw), b-major: one stream across the batch.
+  Stipple: noise('Stipple', 'coupled', (_w, s) => px(s) * STIPPLE_PIXEL, {
+    prepare: w => ({ ...w, dot: hexToRgb(String(w.dot_color), [0, 0, 0]), bg: hexToRgb(String(w.bg_color), [1, 1, 1]) }),
+  }),
+  // The same field for every picture.
+  FlowField: noise('FlowField', 'pure', (_w, s) => px(s) * (WORK_CHANNELS * GRID_VALUE + FLOW_PIXEL)),
+  // One draw over the whole batch, from the node's own seed.
+  AddNoise: noise('AddNoise', 'coupled', (_w, s) => px(s) * WORK_CHANNELS * NOISE_VALUE, { seeded: true }),
+}
+
+/**
+ * Painter's work: the canvas's composite, and Pillow's Lanczos of the painter
+ * file when its size differs (each pass's taps, 2·ceil(3·scale) + 1 a value,
+ * 4 bands). `size`: the picture wired in (the canvas), else width × height;
+ * `file`: the painter file's size.
+ */
+export function painterWork(w: Record<string, unknown>, size: Size, file: Size): number {
+  const canvas = size ?? { w: Math.trunc(num(w, 'width')), h: Math.trunc(num(w, 'height')) }
+  let work = px(canvas) * WORK_CHANNELS * 3 * MASK_VALUE
+  if (file && (file.w !== canvas.w || file.h !== canvas.h)) {
+    const taps = (inSize: number, out: number) => 2 * Math.ceil(3 * Math.max(1, inSize / out)) + 1
+    if (file.w !== canvas.w) work += canvas.w * file.h * 4 * taps(file.w, canvas.w)
+    if (file.h !== canvas.h) work += canvas.w * canvas.h * 4 * taps(file.h, canvas.h)
+    work += px(file) * 4 * 2
+  }
+  return work
 }
 
 /** The runner's spec for an effect class, or undefined when the class is not an effect it ports. */

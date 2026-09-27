@@ -336,3 +336,18 @@ describe('faceOf', () => {
     expect(faceOf(undefined)).toBe('caption')
   })
 })
+
+describe('layout kit — bottom anchors (stage 3)', () => {
+  it('on the kit\'s own sheet LB is L, for every design row', () => {
+    for (const [w, h] of [[895, 1280], [1280, 400]] as const) {
+      const S = sheet(w, h)
+      for (let r = 0; r <= 16; r += 0.5) expect(S.LB(r)).toBe(S.L(r))
+    }
+  })
+  it('a foot info row stands on LB(16); a head row hangs from L(0)', () => {
+    const S = sheet(895, 1280)
+    const c = { title: 'T', details: 'Ines Vollmer', date: '19.09.–15.11.2026', caption: 'Kunstraum Lenz' }
+    expect(S.infoRow(c, S.FOOT3, 'foot').bottom).toBe(S.LB(16))
+    expect(S.infoRow(c, S.FOOT3, 'head').top).toBe(S.L(0))
+  })
+})

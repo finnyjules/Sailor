@@ -36,7 +36,7 @@ import {
 import { createGateReads, type GateReads } from './graphInputPixels'
 import { readModelOptions } from '../../shared/pricing/videoSettings'
 import { readViewRef } from '../../shared/pricing/clipSettings'
-import { resolveVideoModelId } from '../../shared/runner/eligibility'
+import { isShotDirected, resolveVideoModelId } from '../../shared/runner/eligibility'
 import { SEEDANCE_REFERENCE_MAX_SECONDS, SEEDANCE_TOO_MANY_REFERENCES, SEEDANCE_TOO_MUCH_SOUND, SEEDANCE_TOO_MUCH_VIDEO, SEEDANCE_UNMEASURED_REFERENCE, type RequestProblem } from '../runner/requestRules'
 
 type Prompt = Record<string, { class_type?: unknown; inputs?: unknown } | undefined>
@@ -247,7 +247,7 @@ export async function graphInputSeconds(
 export async function seedanceReferenceSeconds(
   prompt: Prompt,
   read: (file: MediaFile, kind: MediaKind) => Promise<number | null> = engineMediaSeconds,
-  opts: { strict?: boolean, reads?: GateReads } = {},
+  opts: { strict?: boolean, reads?: GateReads, filmShots?: boolean } = {},
 ): Promise<RequestProblem[]> {
   const out: RequestProblem[] = []
   // With `reads` (the hosted gate, G1 follow-up): each distinct reference is
@@ -263,9 +263,9 @@ export async function seedanceReferenceSeconds(
       return (await read(file, kind).catch(() => null)) ?? -1
     }, 'references').then(v => (v == null ? (ran ? null : OVER) : v === -1 ? null : v))
   }
-  for (const list of seedanceReferenceLists(prompt)) {
+  for (const list of seedanceReferenceLists(prompt, !!opts.filmShots)) {
     const lengths = await Promise.all(list.names.map(name => (name ? readOne(name, list.kind) : Promise.resolve(null))))
-    const problem = (message: string): RequestProblem => ({ nodeId: list.nodeId, classType: 'GenerateVideoNode', input: 'model_options', message })
+    const problem = (message: string): RequestProblem => ({ nodeId: list.nodeId, classType: list.classType, input: 'model_options', message })
     if (lengths.some(s => s === OVER)) { out.push(problem(SEEDANCE_TOO_MANY_REFERENCES)); continue }
     if (opts.strict && lengths.some(s => s == null)) { out.push(problem(SEEDANCE_UNMEASURED_REFERENCE)); continue }
     const total = (lengths as (number | null)[]).reduce<number>((n, s) => n + (s ?? 0), 0)
@@ -278,13 +278,17 @@ export async function seedanceReferenceSeconds(
  * Each Seedance 2.0 node's reference videos and sounds that would be sent
  * (no first frame, options not wired): per list, each element's `/view` input
  * name, or null where it isn't one (an external link, a refused path).
+ * `filmShots` (the runner's own check only, Task 4 Ruling D): a shot-directed
+ * Film a shot too, which the runner plans exactly as Generate a video. The
+ * ComfyUI gate leaves it out, as before.
  */
-function seedanceReferenceLists(prompt: Prompt): { nodeId: string, kind: MediaKind, tooMuch: string, names: (string | null)[] }[] {
-  const out: { nodeId: string, kind: MediaKind, tooMuch: string, names: (string | null)[] }[] = []
+function seedanceReferenceLists(prompt: Prompt, filmShots = false): { nodeId: string, classType: string, kind: MediaKind, tooMuch: string, names: (string | null)[] }[] {
+  const out: { nodeId: string, classType: string, kind: MediaKind, tooMuch: string, names: (string | null)[] }[] = []
   if (!prompt || typeof prompt !== 'object') return out
   for (const [nodeId, node] of Object.entries(prompt)) {
-    if (node?.class_type !== 'GenerateVideoNode') continue
+    const classType = node?.class_type
     const inputs = inputsOf(node)
+    if (classType !== 'GenerateVideoNode' && !(filmShots && classType === 'FilmShotNode' && isShotDirected(inputs))) continue
     if (resolveVideoModelId(inputs.model) !== 'seedance-2.0' || Array.isArray(inputs.model_options) || Array.isArray(inputs.image)) continue
     const options = readModelOptions(inputs.model_options)
     if (typeof options.image_url === 'string' && options.image_url) continue
@@ -295,7 +299,7 @@ function seedanceReferenceLists(prompt: Prompt): { nodeId: string, kind: MediaKi
       const list = options[key]
       if (!Array.isArray(list) || !list.length) continue
       out.push({
-        nodeId, kind, tooMuch,
+        nodeId, classType, kind, tooMuch,
         names: list.map((v) => {
           let r: ReturnType<typeof readViewRef> = null
           try { r = readViewRef(v) }
@@ -350,11 +354,11 @@ export async function runnerReferenceProblems(
   },
 ): Promise<RequestProblem | null> {
   for (const p of prompts) {
-    const files = seedanceReferenceLists(p).flatMap(l => l.names)
+    const files = seedanceReferenceLists(p, true).flatMap(l => l.names)
       .map(n => (n ? inputFileOf(n) : null))
       .filter((f): f is NonNullable<typeof f> => f != null)
     if (files.length) await o.assertOwned(files)
-    const problems = await seedanceReferenceSeconds(p, runnerMediaReader(o.readFile), { strict: o.strict })
+    const problems = await seedanceReferenceSeconds(p, runnerMediaReader(o.readFile), { strict: o.strict, filmShots: true })
     if (problems.length) return problems[0]!
   }
   return null

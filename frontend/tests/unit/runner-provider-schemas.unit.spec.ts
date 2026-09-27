@@ -16,13 +16,14 @@ import { describe, expect, it } from 'vitest'
 import { planNode } from '~~/server/runner/executors'
 import { RUNNER_IMAGE_MODELS, RUNNER_REPLICATE_IMAGE_MODELS, imageAppFor } from '~~/server/runner/generators/image'
 import { RUNNER_REPLICATE_VIDEO_MODELS, RUNNER_VIDEO_MODELS, falVideoFn } from '~~/server/runner/generators/video'
+import { videoPriceUsd } from '#shared/pricing/videoRates'
 import { FLUX_2_EDIT_APP, FLUX_KONTEXT_APP, NANO_BANANA_2_EDIT_APP, NANO_BANANA_PRO_EDIT_APP } from '~~/server/runner/generators/edit'
 import { NANO_BANANA_2_SLUG, NANO_BANANA_SLUG } from '~~/server/runner/generators/actions'
 import { IMAGE_EDIT_MODELS, PRODUCT_SHOT_SLUG, imageEditCall } from '~~/server/runner/generators/refEdits'
 import { RESTYLE_NANO_BANANA_SLUGS, STYLE_TRANSFER_SLUG } from '~~/server/runner/generators/restyle'
 import {
   FLUX_2_DEV_FAL_APP, FLUX_2_MAX_FAL_APP, FLUX_2_PRO_FAL_APP, FLUX_2_PRO_REPLICATE, FLUX_3_REPLICATE_SLUG, KLING_V3_FAL_APP,
-  NANO_BANANA_PRO_REPLICATE, PIXVERSE_V6_FAL_APP, RECRAFT_V4_FAL_APP, RECRAFT_V4_PRO_FAL_APP,
+  NANO_BANANA_PRO_REPLICATE, PIXVERSE_V6_FAL_APP, RECRAFT_V4_FAL_APP, RECRAFT_V4_PRO_FAL_APP, klingV3Fal,
 } from '~~/server/runner/generators/twins'
 import type { OutputFile } from '~~/server/runner/types'
 import { checkPayload, loadProviderSchema } from './helpers/providerSchema'
@@ -146,6 +147,45 @@ describe('fal Generate video builders fit the saved fal schemas', () => {
       expectFits('fal', fn ? `${d.app}/${fn}` : d.app, payload)
     })
   }
+})
+
+// Task 2 (characters stage 3): Veo 3.1 and Veo 3.1 Fast's reference-to-video
+// payload (up to 3 reference pictures, no first frame) against its own saved
+// fal schema, and the rate card against the fixture's pricingText.
+describe('Veo 3.1 reference-to-video fits its saved fal schema', () => {
+  for (const id of ['veo-3.1', 'veo-3.1-fast']) {
+    it(`${id}`, () => {
+      const d = RUNNER_VIDEO_MODELS[id]!
+      const payload = d.build({ prompt: 'Reva walks', aspectRatio: '9:16', duration: 5, seed: 0, image: null, adv: { image_urls: ['https://fal.test/a.png', 'https://fal.test/b.png', 'https://fal.test/c.png'] } })
+      const fn = falVideoFn(payload, d.fnByMode)
+      expect(fn).toBe('reference-to-video')
+      expectFits('fal', `${d.app}/${fn}`, payload)
+
+      // The fixture's own pricingText, and videoPriceUsd reading the same numbers.
+      const fixture = schemaFor('fal', `${d.app}/${fn}`)
+      if (id === 'veo-3.1') {
+        expect(fixture.pricingText).toContain('$0.20 without audio or $0.40 with audio for 720p or 1080p')
+        expect(videoPriceUsd('veo-3.1', { seconds: 1, resolution: '1080p', audio: false, inputVideoSeconds: 0 })).toBe(0.20)
+        expect(videoPriceUsd('veo-3.1', { seconds: 1, resolution: '1080p', audio: true, inputVideoSeconds: 0 })).toBe(0.40)
+      }
+      else {
+        expect(fixture.pricingText).toContain('$0.10** (audio off) or **$0.15** (audio on)')
+        expect(videoPriceUsd('veo-3.1-fast', { seconds: 1, resolution: '1080p', audio: false, inputVideoSeconds: 0 })).toBe(0.10)
+        expect(videoPriceUsd('veo-3.1-fast', { seconds: 1, resolution: '1080p', audio: true, inputVideoSeconds: 0 })).toBe(0.15)
+      }
+    })
+  }
+})
+
+// Task 3 (characters stage 3): Kling 3's elements (one per character: a
+// frontal face plus up to 3 more pictures) on fal's image-to-video, against
+// its own saved fal schema.
+describe('Kling 3 elements fit its saved fal schema', () => {
+  it('an elements payload passes the saved schema', () => {
+    const el = { frontal_image_url: 'https://fal.test/face.png', reference_image_urls: ['https://fal.test/p.png'] }
+    const call = klingV3Fal({ prompt: '@Element1 waves', aspectRatio: '16:9', duration: 5, seed: 0, image: 'https://fal.test/start.png', adv: { elements: [el] } })
+    expectFits('fal', call.endpoint, call.payload)
+  })
 })
 
 describe('Replicate Generate video builders fit the saved Replicate schemas', () => {

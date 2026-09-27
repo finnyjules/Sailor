@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { createRectLayer, createTextLayer } from '~/composables/useCompositorLayers'
-import { defaultGrid } from '~/lib/compositor/mosaicGrid'
+import type { LayoutGrid } from '~/lib/frame/layoutGrid'
 import { effectivePins, guideLinesFor } from '~/lib/frame/responsive/preview'
 import { axisMap } from '~/lib/frame/responsive/axis'
 import type { FrameDoc } from '~/lib/frame/responsive/types'
@@ -8,6 +8,13 @@ import type { FrameDoc } from '~/lib/frame/responsive/types'
 const doc = (layers: FrameDoc['layers'], extra: Partial<FrameDoc> = {}): FrameDoc => ({
   responsive: true, designW: 1000, designH: 500, layers, stackOrder: layers.map(l => `l:${l.id}`),
   groups: [], grid: null, motion: null, ...extra,
+})
+
+/** An own layout grid: 2 columns of 500 on the 1000-wide design (margin 0, gutter 0), rows off, unit 20. */
+const own = (over: Partial<LayoutGrid> = {}): LayoutGrid => ({
+  v: 2, auto: false, show: true, line: 40,
+  cols: { count: 2, fit: 'stretch', margin: 0, gutter: 0, width: 0 },
+  rows: { mode: 'off', count: 4 }, ...over,
 })
 
 describe('effectivePins', () => {
@@ -31,19 +38,29 @@ describe('effectivePins', () => {
     const e = effectivePins(doc([a, b], { groups: [{ id: 'g', pins: { h: 'right' } }] }), 'a', null)!
     expect(e.unitId).toBe('g'); expect(e.h).toBe('right'); expect(e.hAuto).toBe(false)
   })
-  it('section availability follows the grid', () => {
-    const grid = { ...defaultGrid(), mode: 'explicit' as const, columns: 2, rows: 1, margin: 0, gutter: 0 }
-    const inside = createRectLayer({ id: 'a', x: 0.25, y: 0.5, w: 0.05, h: 0.1 })  // inside section 0 (0..500)
-    const straddle = createRectLayer({ id: 'b', x: 0.5, y: 0.5, w: 0.4, h: 0.1 })   // spans the divide
-    expect(effectivePins(doc([inside], { grid }), 'a', null)!.sectionAvailable).toBe(true)
-    expect(effectivePins(doc([straddle], { grid }), 'b', null)!.sectionAvailable).toBe(false)
-    expect(effectivePins(doc([inside], { grid }), 'a', null)!.holdTo).toBe('section')
+  it('grid availability follows the columns', () => {
+    const inside = createRectLayer({ id: 'a', x: 0.25, y: 0.5, w: 0.05, h: 0.1 })  // in column 1 (0..500)
+    const straddle = createRectLayer({ id: 'b', x: 0.5, y: 0.5, w: 0.4, h: 0.1 })   // 300..700, across the divide
+    expect(effectivePins(doc([inside], { grid: own() }), 'a', null)!.gridAvailable).toBe(true)
+    expect(effectivePins(doc([straddle], { grid: own() }), 'b', null)!.gridAvailable).toBe(false)
+    expect(effectivePins(doc([inside], { grid: own() }), 'a', null)!.holdTo).toBe('grid')
+    expect(effectivePins(doc([straddle], { grid: own() }), 'b', null)!.holdTo).toBe('frame')
   })
-  it('holdTo frame overrides an available section', () => {
-    const grid = { ...defaultGrid(), mode: 'explicit' as const, columns: 2, rows: 1, margin: 0, gutter: 0 }
+  it('holdTo frame overrides an available grid', () => {
     const l = createRectLayer({ id: 'a', x: 0.25, y: 0.5, w: 0.05, h: 0.1, pins: { holdTo: 'frame' } })
-    const e = effectivePins(doc([l], { grid }), 'a', null)!
-    expect(e.holdTo).toBe('frame'); expect(e.holdAuto).toBe(false); expect(e.sectionAvailable).toBe(true)
+    const e = effectivePins(doc([l], { grid: own() }), 'a', null)!
+    expect(e.holdTo).toBe('frame'); expect(e.holdAuto).toBe(false); expect(e.gridAvailable).toBe(true)
+  })
+  it('pins are inferred against what the layer holds to, as the resolver infers them', () => {
+    // 425..475: at the right of column 1, but left of the frame's centre
+    const l = createRectLayer({ id: 'a', x: 0.45, y: 0.5, w: 0.05, h: 0.1 })
+    expect(effectivePins(doc([l], { grid: own() }), 'a', null)!.h).toBe('right')
+    expect(effectivePins(doc([l]), 'a', null)!.h).toBe('left')
+  })
+  it('an unknown stored holdTo reads as automatic', () => {
+    const l = createRectLayer({ id: 'a', x: 0.25, y: 0.5, w: 0.05, h: 0.1, pins: { holdTo: 'section' as any } })
+    const e = effectivePins(doc([l], { grid: own() }), 'a', null)!
+    expect(e.holdTo).toBe('grid'); expect(e.holdAuto).toBe(true)
   })
   it('returns null for an unknown layer id', () => {
     expect(effectivePins(doc([createRectLayer({ id: 'a' })]), 'zzz', null)).toBeNull()

@@ -358,7 +358,8 @@ describe('what the cases pin', () => {
       expect(new Set(plane).size).toBe(1)
     }
     // Through planEffect, each picture of the batch is told the batch's size.
-    const run = await runEffectCase(pair as FxCase, { families: CELLS, prompt: { ...pictureOf(pair as FxCase).prompt, next: effect('AdjustInvert', [pair.node_id, 0], { amount: 0 }) } })
+    // (Its reader's family on too: a float tensor is kept only for a reader that runs on the runner, R2.8 fix round 2.)
+    const run = await runEffectCase(pair as FxCase, { families: new Set<RunnerFamily>([...CELLS, 'effects-tone']), prompt: { ...pictureOf(pair as FxCase).prompt, next: effect('AdjustInvert', [pair.node_id, 0], { amount: 0 }) } })
     const value = run.made.values[0] as Extract<RunnerValue, { kind: 'files' }>
     expect(value.tensors).toHaveLength(2)
     for (const [i, item] of pair.outputs![0]!.items.entries()) expectExactItem(tk.fromTensorFile(run.bytes(value.tensors![i]!)), item, `picture ${i}, its float`)

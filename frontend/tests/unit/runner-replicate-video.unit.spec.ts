@@ -26,7 +26,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { planNode } from '~~/server/runner/executors'
 import { nodeCredits, unpricedProviderNode } from '~~/server/runner/metering'
 import { RUNNER_REPLICATE_VIDEO_MODELS, RUNNER_VIDEO_MODELS } from '~~/server/runner/generators/video'
-import { FAL_FIRST_VIDEO } from '~~/server/runner/generators/twins'
+import { FAL_FIRST_VIDEO, KLING_ELEMENTS_NEED_FRAME, klingElementsProblem, klingV3Fal } from '~~/server/runner/generators/twins'
 import {
   LEGACY_VIDEO_MODEL_REMAP, PROVIDER_TYPES, RUNNER_NODE_RULES, RUNNER_REPLICATE_VIDEO_MODEL_IDS, RUNNER_VIDEO_MODEL_IDS,
   isRunnerEligible, runnerTakesNode,
@@ -38,6 +38,7 @@ import { BASE_RENDER_CREDITS } from '~~/server/utils/priceBook'
 import type { OutputFile } from '~~/server/runner/types'
 import { createFakeLedger, createFakeReplicate, gatedFlow, makeKit } from './__runner__/kit'
 import { expectPythonParity } from './helpers/pythonParity'
+import { KLING_ELEMENTS_COMFY_WORDS, requestProblems } from '~~/server/runner/requestRules'
 
 interface VideoArgs { prompt: string; ar: string; dur: number; seed: number; image: string | null; adv: Record<string, unknown> }
 interface ReplicateVideoCase {
@@ -183,6 +184,63 @@ describe('replicate-video plans', () => {
       if (p.kind !== 'provider') throw new Error('expected a provider plan')
       expect(p.provider, id).toBe('fal')
     }
+  })
+})
+
+describe('Kling 3 on fal takes characters as elements (Task 3, characters stage 3)', () => {
+  const el = { frontal_image_url: 'https://f/face.png', reference_image_urls: ['https://f/p.png', 'https://f/bf.png'] }
+
+  it('elements ride along with the start frame on image-to-video', () => {
+    const call = klingV3Fal({ prompt: '@Element1 waves', aspectRatio: '16:9', duration: 5, seed: 0, image: 'https://f/start.png', adv: { elements: [el] } })
+    expect(call.endpoint).toBe('fal-ai/kling-video/v3/pro/image-to-video')
+    expect(call.payload.elements).toEqual([el])
+    expect(call.payload.start_image_url).toBe('https://f/start.png')
+  })
+
+  it('refuses elements without a start frame, and more than 3 extra pictures', () => {
+    expect(klingElementsProblem({ elements: [el] }, false)).toBe(KLING_ELEMENTS_NEED_FRAME)
+    expect(() => klingV3Fal({ prompt: 'x', aspectRatio: '16:9', duration: 5, seed: 0, image: null, adv: { elements: [el] } })).toThrow(KLING_ELEMENTS_NEED_FRAME)
+    expect(klingElementsProblem({ elements: [{ frontal_image_url: 'a', reference_image_urls: ['1', '2', '3', '4'] }] }, true)).toMatch(/at most 3/)
+    expect(klingElementsProblem({}, false)).toBeNull()
+  })
+
+  it('no elements: payload unchanged from today', () => {
+    const call = klingV3Fal({ prompt: 'x', aspectRatio: '16:9', duration: 5, seed: 0, image: 'https://f/s.png', adv: {} })
+    expect(call.payload).not.toHaveProperty('elements')
+  })
+
+  it('planNode never carries a Replicate backup when elements are sent (it would silently drop the character)', async () => {
+    const plan = await planNode({
+      prompt: {
+        n: {
+          class_type: 'GenerateVideoNode',
+          inputs: {
+            model: 'kling-v3', prompt: '@Element1 waves', aspect_ratio: '16:9', duration: '5', seed: 0,
+            model_options: JSON.stringify({ elements: [el] }), image: ['src', 0],
+          },
+        },
+      },
+      nodeId: 'n',
+      filesFrom: () => [{ filename: 'src.png', subfolder: '', type: 'output' }],
+      toUrl: async () => 'https://fal.storage/first.png',
+      gateOpen: false,
+    })
+    if (plan.kind !== 'provider') throw new Error('expected a provider plan')
+    expect(plan.provider).toBe('fal')
+    expect(plan.payload.elements).toEqual([el])
+    expect(plan.backup).toBeUndefined()
+  })
+
+  it('the runner engine gate (requestProblems with runner: true) refuses elements without a start frame, before any hold', () => {
+    const node = { class_type: 'GenerateVideoNode', inputs: {
+      model: 'kling-v3', prompt: '@Element1 waves', aspect_ratio: '16:9', duration: '5', seed: 0,
+      model_options: JSON.stringify({ elements: [el] }),
+    } }
+    // The ComfyUI /prompt gate (opts.runner unset): Python drops elements, so they are refused (Ruling B, Task 4).
+    expect(requestProblems({ n: node })).toEqual([{ nodeId: 'n', classType: 'GenerateVideoNode', input: 'model_options', message: KLING_ELEMENTS_COMFY_WORDS }])
+    expect(requestProblems({ n: node }, { runner: true })).toEqual([{ nodeId: 'n', classType: 'GenerateVideoNode', input: 'model_options', message: KLING_ELEMENTS_NEED_FRAME }])
+    const withFirst = { class_type: 'GenerateVideoNode', inputs: { ...node.inputs, image: ['src', 0] } }
+    expect(requestProblems({ n: withFirst }, { runner: true })).toEqual([])
   })
 })
 

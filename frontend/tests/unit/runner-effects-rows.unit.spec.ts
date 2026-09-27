@@ -17,7 +17,7 @@ import { FAMILY_REQUIRES, RUNNER_FAMILIES, type RunnerFamily } from '#shared/run
 import { EFFECTS } from '~~/server/runner/effects/table'
 import { effectCores } from '~~/server/runner/effects/cores'
 
-/** The classes ported so far: the pilots (R2.1), the rest of effects-tone (R2.4), effects-blur (R2.5), effects-cells (R2.6) and effects-warp (R2.7). */
+/** The classes ported so far: the pilots (R2.1), the rest of effects-tone (R2.4), effects-blur (R2.5), effects-cells (R2.6), effects-warp (R2.7) and effects-mask (R2.8). */
 const PORTED = [
   'AdjustExposure', 'AdjustInvert', 'AdjustThreshold',
   'AdjustBrightnessContrast', 'AdjustColor', 'AdjustCurves', 'AdjustLevels',
@@ -27,9 +27,12 @@ const PORTED = [
   'Sharpen', 'Denoise', 'AdjustGlow', 'HighPass', 'Emboss', 'FindEdges', 'Blur', 'Bokeh', 'TiltShift', 'FrequencySeparation', 'HeightmapRelief', 'Outline', 'Sparkle',
   'Pixelate', 'Halftone', 'Kuwahara', 'Ascii',
   'CropImage', 'ResizeImage', 'RotateImage', 'FlipImage', 'Pinch', 'Twirl', 'Wave', 'LensCorrection', 'Kaleidoscope', 'PolarCoords', 'Fisheye', 'ChromaticAberration', 'CRT', 'Mirror', 'GodRays',
+  'Blend', 'ApplyMask', 'ThresholdMask', 'ColorRangeMask', 'MatteGrowShrink', 'MergeAlpha', 'Painter',
+  'FilmGrain', 'Glitch', 'PerlinNoise', 'Voronoi', 'GradientGenerator', 'PaletteQuantize', 'ReactionDiffusion', 'Fractal', 'Stipple', 'FlowField', 'AddNoise',
 ]
-/** Picture outputs: one, except FrequencySeparation's two (low, high). */
-const pictureSlots = (cls: string) => (cls === 'FrequencySeparation' ? [0, 1] : [0])
+/** Picture outputs: one, except FrequencySeparation's two (low, high), and none for the classes that make only a mask (R2.8). */
+const MASK_ONLY = ['ThresholdMask', 'ColorRangeMask', 'MatteGrowShrink']
+const pictureSlots = (cls: string) => (cls === 'FrequencySeparation' ? [0, 1] : MASK_ONLY.includes(cls) ? [] : [0])
 
 /** The inventory's 78 still-picture effects (plan R2.4–R2.9 and the pilots), and Painter. */
 const INVENTORY: Record<string, string[]> = {
@@ -104,13 +107,16 @@ describe('the rows', () => {
       }
       expect(row.family).toBe(s.family)
       expect(row.local).toBe('render')
-      expect(row.imageInputs).toEqual(s.images.map(i => i.name))
-      expect(row.mustLink).toEqual(s.images.filter(i => i.required).map(i => i.name))
+      expect(row.imageInputs ?? []).toEqual(s.images.map(i => i.name))
+      // Required pictures, then required masks (R2.8).
+      expect(row.mustLink ?? []).toEqual([...s.images, ...s.masks].filter(i => i.required).map(i => i.name))
       expect(row.required).toEqual(row.mustLink)
-      // R2.4: a class with colour text also checks the runner reads it as Python does; R2.6: Ascii its characters.
+      // R2.4: a class with colour text also checks the runner reads it as Python does; R2.6: Ascii its characters;
+      // R2.8: Painter its file name and colour, and no live preview's name.
       expect(row.inputCheck).toEqual(Object.prototype.hasOwnProperty.call(EFFECT_TEXT_WIDGETS, cls)
         ? ['effect-preview-name', 'effect-output-size', 'effect-text']
-        : cls === 'Ascii' ? ['effect-preview-name', 'effect-output-size', 'ascii-glyphs'] : ['effect-preview-name', 'effect-output-size'])
+        : cls === 'Ascii' ? ['effect-preview-name', 'effect-output-size', 'ascii-glyphs']
+          : cls === 'Painter' ? ['effect-output-size', 'painter'] : ['effect-preview-name', 'effect-output-size'])
     }
   })
 
@@ -120,16 +126,19 @@ describe('the rows', () => {
       expect(LOCAL_RENDER_TYPES.has(cls)).toBe(true)
       expect(PROVIDER_TYPES.has(cls)).toBe(false)
       expect(FRAME_RENDER_TYPES.has(cls)).toBe(false)
-      expect(RUNNER_OUTPUT_CLASSES.has(cls)).toBe(true)
+      // Every class is an output node but Painter (as Python's schema says).
+      expect(RUNNER_OUTPUT_CLASSES.has(cls)).toBe(cls !== 'Painter')
       expect(PICTURE_OUTPUTS[cls]).toEqual(pictureSlots(cls))
     }
     expect([...FRAME_RENDER_TYPES]).toEqual(['Compositor'])
-    expect(EFFECT_OUTPUT_NODES).toEqual(EFFECT_CLASSES_PORTED)
+    expect(EFFECT_OUTPUT_NODES).toEqual(EFFECT_CLASSES_PORTED.filter(cls => cls !== 'Painter'))
     expect(EFFECT_PICTURE_OUTPUTS).toEqual(Object.fromEntries(PORTED.map(cls => [cls, pictureSlots(cls)])))
-    // None of the ported classes makes a mask: the output kinds are the cards' whatever the families.
-    expect(EFFECT_OUTPUT_KINDS).toEqual({})
+    // R2.8: the mask classes' mask slots; the output kinds change only with effects-mask (and cards) on.
+    expect(EFFECT_OUTPUT_KINDS).toEqual({ ThresholdMask: { 0: 'mask' }, ColorRangeMask: { 0: 'mask' }, MatteGrowShrink: { 0: 'mask' }, Painter: { 1: 'mask' } })
     const all = new Set<RunnerFamily>(RUNNER_FAMILIES)
-    expect(outputKindsFor(all)).toBe(outputKindsFor(new Set<RunnerFamily>(['cards'])))
+    const noMask = new Set<RunnerFamily>(RUNNER_FAMILIES.filter(f => f !== 'effects-mask'))
+    expect(outputKindsFor(noMask)).toBe(outputKindsFor(new Set<RunnerFamily>(['cards'])))
+    expect(outputKindsFor(all)).not.toBe(outputKindsFor(new Set<RunnerFamily>(['cards'])))
   })
 
   it('the families: eight new ones, each needing cards; the picture caps', () => {

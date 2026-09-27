@@ -90,15 +90,34 @@ parentPort.on('message', (m) => {
     // The picture utilities (R1.4, ../pixels/core.ts).
     else if (m.op === 'px.channel') {
       stopped()
-      value = px.channelMask16(m.picture, m.index)
+      value = px.channelMask16(m.picture, m.index, !!m.float)
+      transfer = value.data ? [value.scanlines.buffer, value.data.buffer] : [value.scanlines.buffer]
+    }
+    // A picture an effect made, as its kept float32 tensor (R2.8 fix round 2): Image to mask's channel, Text mask's clip.
+    else if (m.op === 'px.channelTensor') {
+      stopped()
+      const t = built.tk.fromTensorFile(m.tensorFile)
+      if (m.index >= t.c) throw new Error('This picture has no alpha channel to make a mask from')
+      const n = t.w * t.h
+      const data = t.data.slice(m.index * n, (m.index + 1) * n)
+      value = { w: t.w, h: t.h, scanlines: px.mask16Of(t.w, t.h, i => data[i]) }
       transfer = [value.scanlines.buffer]
+      if (m.float) { value.data = data; transfer.push(data.buffer) }
+    }
+    else if (m.op === 'px.clipTensor') {
+      stopped()
+      if (!clipAlpha) throw new Error('The mask to clip with was not made')
+      const t = built.tk.fromTensorFile(m.tensorFile)
+      value = px.clipPlanar(t.c, t.w, t.h, t.data, clipAlpha, !!m.trunc)
+      transfer = [value.px.buffer]
     }
     else if (m.op === 'px.clipBegin') {
       stopped()
       const r = px.clipBegin(m.l, m.mw, m.mh, m.w, m.h)
       clipAlpha = r.alpha
-      value = { scanlines: r.scanlines }
-      transfer = [r.scanlines.buffer]
+      // The float mask goes back only when asked for (it is handed on to an effect, R2.8 fix round 1).
+      value = m.float ? { scanlines: r.scanlines, mask: r.mask } : { scanlines: r.scanlines }
+      transfer = m.float ? [r.scanlines.buffer, r.mask.buffer] : [r.scanlines.buffer]
     }
     else if (m.op === 'px.clip') {
       stopped()
@@ -122,10 +141,25 @@ parentPort.on('message', (m) => {
       const inputs = {}
       for (const name of Object.keys(m.inputs)) {
         const v = m.inputs[name]
+        // A painter file (R2.8) is handed on as its 8-bit RGBA: Painter resizes it before any float.
         inputs[name] = v && v.mask16 ? tk.fromMask16(v.mask16, v.w, v.h)
           : v && v.tensorFile ? tk.fromTensorFile(v.tensorFile)
-            : tk.fromPicture(v, isStopped)
+            : v && v.rgba8 ? v
+              : tk.fromPicture(v, isStopped)
       }
+      // A seeded effect (R2.9: Add noise): the sha256 of the float32 values the op receives, per batch index.
+      if (m.hash) {
+        const h = require('node:crypto').createHash('sha256')
+        for (const name of Object.keys(inputs)) {
+          const t = inputs[name]
+          h.update(name + ':' + t.c + 'x' + t.h + 'x' + t.w + ';')
+          h.update(new Uint8Array(t.data.buffer, t.data.byteOffset, t.data.byteLength))
+        }
+        if (!fx.state.inputHashes) fx.state.inputHashes = []
+        fx.state.inputHashes[m.index] = h.digest('hex')
+      }
+      // A two-pass effect's first pass (R2.9): the op gathers or is hashed; nothing comes back.
+      fx.state.gathering = !!m.gather
       // The batch's size too (R2.4): how torch split a long sum, and where its clamp kept a −0, depend on it.
       const r = fx.op(inputs, fx.params, isStopped, fx.state, m.index, fx.count)
       stopped()
@@ -133,8 +167,11 @@ parentPort.on('message', (m) => {
       r.outputs.forEach((t, i) => {
         if (m.masks[i]) {
           const mask16 = tk.mask16(t)
-          outputs.push({ w: t.w, h: t.h, mask16 })
+          const o = { w: t.w, h: t.h, mask16 }
           transfer.push(mask16.buffer)
+          // Read by an effect or a Frame: the float mask too (R2.8 fix round 1).
+          if (m.want.f32 && m.want.f32[i]) { o.tensorFile = tk.tensorFileOf(t); transfer.push(o.tensorFile.buffer) }
+          outputs.push(o)
           return
         }
         const o = { w: t.w, h: t.h, channels: t.c }
@@ -343,7 +380,7 @@ export const PIXELS_TIMEOUT_MESSAGE = 'This card took longer than 2 minutes to w
 export const EFFECT_TIMEOUT_MESSAGE = 'This effect took longer than 2 minutes to work on its pictures, so it was stopped'
 
 /** 16-bit mask scanlines (keep.ts maskPngFromScanlines encodes them), w × h. */
-export interface MaskScanlines { w: number; h: number; scanlines: Uint8Array }
+export interface MaskScanlines { w: number; h: number; scanlines: Uint8Array; data?: Float32Array }
 /** 8-bit pixels as `_image_tensor_to_data_url` sends them, interleaved RGB or RGBA. */
 export interface HandOff8 { w: number; h: number; channels: 3 | 4; px: Uint8Array }
 
@@ -353,9 +390,13 @@ export interface HandOff8 { w: number; h: number; channels: 3 | 4; px: Uint8Arra
  */
 export interface PixelsWorker {
   /** ImageToMask: channel `index` of the picture's tensor as a mask. */
-  channelMask(picture: RawPicture, index: number): Promise<MaskScanlines>
-  /** Text mask with a source: the render's luma as the mask, resized to w × h; kept on the worker for `clip`. */
-  clipBegin(l: Uint8Array, mw: number, mh: number, w: number, h: number): Promise<Uint8Array>
+  channelMask(picture: RawPicture, index: number, float?: boolean): Promise<MaskScanlines>
+  /** Text mask with a source: the render's luma as the mask, resized to w × h; kept on the worker for `clip`. `float`: the float32 mask back too. */
+  clipBegin(l: Uint8Array, mw: number, mh: number, w: number, h: number, float?: boolean): Promise<{ scanlines: Uint8Array; mask?: Float32Array }>
+  /** Image to mask of a picture an effect made: channel `index` of its kept float32 tensor (R2.8 fix round 2). */
+  channelMaskTensor(tensorFile: Uint8Array, index: number, float?: boolean): Promise<MaskScanlines>
+  /** Text mask with a source an effect made: its kept float32 tensor × (1 − mask) (R2.8 fix round 2). */
+  clipTensor(tensorFile: Uint8Array, trunc?: boolean): Promise<HandOff8>
   /** Text mask with a source: one source picture × (1 − mask); `trunc`: quantised as save_images does (core.ts clip). */
   clip(picture: RawPicture, trunc?: boolean): Promise<HandOff8>
   /** Save image (R1.5): the pixels save_images encodes, w × h (Lanczos when that differs), flattened onto white for JPEG. */
@@ -378,18 +419,24 @@ export interface PixelsWorker {
 export interface EffectMaskIn { mask16: Uint8Array; w: number; h: number }
 /** A picture another effect made, as the float32 tensor it kept (effects/core/tensor.ts tensorFileOf). */
 export interface EffectTensorIn { tensorFile: Uint8Array }
+/** A painter file (R2.8), RGBA8 as decoded, handed to the op as it is (effects/core/mask.ts PainterFile). */
+export interface EffectRawIn { rgba8: Uint8Array; w: number; h: number }
 
 export interface EffectRunJob {
   index: number
-  inputs: Record<string, PixelsPicture | EffectMaskIn | EffectTensorIn>
+  inputs: Record<string, PixelsPicture | EffectMaskIn | EffectTensorIn | EffectRawIn>
   first: boolean
   masks: boolean[]
   /** Which forms of each picture output: 8-bit round, 8-bit trunc, and the float32 tensor file (read by effects or Frames). */
   want: { round: boolean[]; trunc: boolean[]; f32: boolean[] }
+  /** A two-pass effect's first pass (R2.9): the op gathers (or is hashed); it returns no outputs. */
+  gather?: boolean
+  /** Hash the float32 values the op receives for this index into its batch state (R2.9: Add noise's seed). */
+  hash?: boolean
 }
 
 /** One output of an effect's run: a picture's 8-bit bytes (interleaved, its own channels) or a mask's scanlines. */
-export type EffectOut = { w: number; h: number; channels: number; round8?: Uint8Array; trunc8?: Uint8Array; tensorFile?: Uint8Array } | { w: number; h: number; mask16: Uint8Array }
+export type EffectOut = { w: number; h: number; channels: number; round8?: Uint8Array; trunc8?: Uint8Array; tensorFile?: Uint8Array } | { w: number; h: number; mask16: Uint8Array; tensorFile?: Uint8Array }
 
 export interface EffectRunResult {
   outputs: EffectOut[]
@@ -406,13 +453,21 @@ export function pixelsInWorker<T>(signal: AbortSignal | undefined, job: (w: Pixe
   return onWorker(signal, timeout, async (t, live) => {
     const w: PixelsWorker = {
       live,
-      async channelMask(picture, index) {
+      async channelMask(picture, index, float = false) {
         const p = handOver(picture)
-        return await call(t, { op: 'px.channel', picture: p.picture, index }, p.buffers) as MaskScanlines
+        return await call(t, { op: 'px.channel', picture: p.picture, index, float }, p.buffers) as MaskScanlines
       },
-      async clipBegin(l, mw, mh, width, height) {
+      async clipBegin(l, mw, mh, width, height, float = false) {
         const own = l.byteOffset === 0 && l.byteLength === l.buffer.byteLength ? l : l.slice()
-        return (await call(t, { op: 'px.clipBegin', l: own, mw, mh, w: width, h: height }, [own.buffer as ArrayBuffer]) as { scanlines: Uint8Array }).scanlines
+        return await call(t, { op: 'px.clipBegin', l: own, mw, mh, w: width, h: height, float }, [own.buffer as ArrayBuffer]) as { scanlines: Uint8Array; mask?: Float32Array }
+      },
+      async channelMaskTensor(tensorFile, index, float = false) {
+        const own = tensorFile.byteOffset === 0 && tensorFile.byteLength === tensorFile.buffer.byteLength && !(tensorFile.buffer instanceof SharedArrayBuffer) ? tensorFile : tensorFile.slice()
+        return await call(t, { op: 'px.channelTensor', tensorFile: own, index, float }, [own.buffer as ArrayBuffer]) as MaskScanlines
+      },
+      async clipTensor(tensorFile, trunc = false) {
+        const own = tensorFile.byteOffset === 0 && tensorFile.byteLength === tensorFile.buffer.byteLength && !(tensorFile.buffer instanceof SharedArrayBuffer) ? tensorFile : tensorFile.slice()
+        return await call(t, { op: 'px.clipTensor', tensorFile: own, trunc }, [own.buffer as ArrayBuffer]) as HandOff8
       },
       async clip(picture, trunc = false) {
         const p = handOver(picture)
@@ -440,13 +495,19 @@ export function pixelsInWorker<T>(signal: AbortSignal | undefined, job: (w: Pixe
             inputs[name] = { tensorFile: own }
             buffers.push(own.buffer as ArrayBuffer)
           }
+          else if ('rgba8' in v) {
+            const b = v.rgba8
+            const own = b.byteOffset === 0 && b.byteLength === b.buffer.byteLength && !(b.buffer instanceof SharedArrayBuffer) ? b : b.slice()
+            inputs[name] = { rgba8: own, w: v.w, h: v.h }
+            buffers.push(own.buffer as ArrayBuffer)
+          }
           else {
             const p = handOver(v as Picture)
             inputs[name] = p.picture
             buffers.push(...p.buffers)
           }
         }
-        return await call(t, { op: 'fx.run', index: job.index, inputs, first: job.first, masks: job.masks, want: job.want }, buffers) as EffectRunResult
+        return await call(t, { op: 'fx.run', index: job.index, inputs, first: job.first, masks: job.masks, want: job.want, gather: !!job.gather, hash: !!job.hash }, buffers) as EffectRunResult
       },
       async effectEnd() {
         await call(t, { op: 'fx.end' }, [])

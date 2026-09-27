@@ -32,8 +32,8 @@ const anyAuto = () => props.pins.hAuto && props.pins.vAuto && props.pins.keepAut
       :model-value="pins.v" @update:model-value="(v: string) => emit('patch', { v: v as any })" />
     <StudioSwitch label="Keep size" :model-value="pins.keepSize"
       @update:model-value="(v: boolean) => emit('patch', { keepSize: v })" />
-    <StudioSelect v-if="pins.sectionAvailable" label="Holds to"
-      :options="['section', 'frame']" :option-labels="['Section', 'Whole frame']"
+    <StudioSelect v-if="pins.gridAvailable" label="Holds to"
+      :options="['grid', 'frame']" :option-labels="['Grid', 'Whole frame']"
       :model-value="pins.holdTo" @update:model-value="(v: string) => emit('patch', v === 'frame' ? { holdTo: 'frame' } : { holdTo: undefined } as any)" />
   </StudioSection>
 </template>

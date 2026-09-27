@@ -38,6 +38,7 @@ import { GATE_CLASS, linksOf, type ApiPrompt } from '#shared/runner/graph'
 import { pyIntOf } from '#shared/runner/pyText'
 import type { RawPicture } from '../compositor/plane'
 import { maskPngFromScanlines } from '../compositor/keep'
+import { floatReadBy, keptTensorsBehind, maskTensorBytes } from '../effects/tensorFiles'
 import { pixelsInWorker, type HandOff8 } from '../compositor/worker'
 import { pixels } from '../pixels/core'
 import { decoded, keyOf, sizes, wired, type Wired } from '../effects/io'
@@ -129,17 +130,28 @@ const CHANNELS = ['red', 'green', 'blue', 'alpha'] as const
 
 export function planImageToMask(ctx: PlanContext): NodePlan {
   const w = wired(ctx, 'image')
+  // A picture an effect made is read as the float32 tensor it kept, as Python's Image to mask reads it (R2.8 fix round 2).
+  const link = ctx.prompt[ctx.nodeId]!.inputs?.image as [string, number]
+  const kept = keptTensorsBehind(ctx, link)
   const index = CHANNELS.indexOf(ctx.prompt[ctx.nodeId]!.inputs?.channel as typeof CHANNELS[number])
   if (index < 0) throw new Error('This card’s channel is not red, green, blue or alpha')
+  // Read by an effect or a Frame: the float mask is kept too, and handed on (R2.8 fix round 1).
+  const float = floatReadBy(ctx.prompt, ctx.nodeId, 0, ctx.families, 'mask')
   return {
     kind: 'derive',
     async derive(io) {
       await sizes(io, w, true)
+      const tensorOf = new Map<string, OutputFile>()
       const files = await pixelsInWorker(io.signal, worker => perFile(io, w, async (file) => {
-        const m = await worker.channelMask(await decoded(io, w.source, file), index)
-        return io.keep(await maskPngFromScanlines(m.scanlines, m.w, m.h), 'png')
+        const tensor = file ? kept?.get(keyOf(file)) : undefined
+        const m = tensor ? await worker.channelMaskTensor(await io.read(tensor), index, float) : await worker.channelMask(await decoded(io, w.source, file), index, float)
+        const png = await io.keep(await maskPngFromScanlines(m.scanlines, m.w, m.h), 'png')
+        if (m.data) tensorOf.set(file ? keyOf(file) : 'blank', await io.keep(maskTensorBytes({ w: m.w, h: m.h, data: m.data }), 'bin'))
+        return png
       }))
-      return { values: { 0: { kind: 'mask', files } }, ui: null }
+      // One tensor per mask, by the picture each came from (two pictures may round to the same 16 bits).
+      const tensors = float ? { tensors: (w.files.length ? w.files.map(f => keyOf(f)) : ['blank']).map(k => tensorOf.get(k)!) } : {}
+      return { values: { 0: { kind: 'mask', files, ...tensors } }, ui: null }
     },
   }
 }
@@ -179,25 +191,31 @@ export function planTextMaskWithSource(ctx: PlanContext): NodePlan {
   const inputs = ctx.prompt[ctx.nodeId]!.inputs ?? {}
   const render = textMaskRender(inputs.params)
   const w = wired(ctx, 'source')
+  // A source an effect made is read as the float32 tensor it kept (R2.8 fix round 2).
+  const kept = keptTensorsBehind(ctx, inputs.source as [string, number])
   // Kept as the pixels its readers write: Python's Save image truncates the float (R1.5 follow-up).
   const trunc = onlySavesRead(ctx.prompt, ctx.nodeId, 0)
+  // Its mask read by an effect or a Frame: the float mask is kept too (R2.8 fix round 1).
+  const float = floatReadBy(ctx.prompt, ctx.nodeId, 1, ctx.families, 'mask')
   return {
     kind: 'derive',
     async derive(io) {
       // As Python: no render gives the blank whatever the source; a render that won't load fails first.
-      if (!render) return { values: await blankBake(io), ui: null }
+      if (!render) return { values: await blankBake(io, float), ui: null }
       const luma = await loadTextMaskLuma(io, render)
       const all = [...(await sizes(io, w, true)).values()]
       const size = all[0] ?? { w: 1, h: 1 }
       if (all.some(s => s.w !== size.w || s.h !== size.h)) throw new Error(BATCH_SIZES_DIFFER)
       return await pixelsInWorker(io.signal, async (worker) => {
-        const scanlines = await worker.clipBegin(luma.l, luma.w, luma.h, size.w, size.h)
-        const mask = await io.keep(await maskPngFromScanlines(scanlines, size.w, size.h), 'png')
+        const begun = await worker.clipBegin(luma.l, luma.w, luma.h, size.w, size.h, float)
+        const mask = await io.keep(await maskPngFromScanlines(begun.scanlines, size.w, size.h), 'png')
+        const tensors = begun.mask ? { tensors: [await io.keep(maskTensorBytes({ w: size.w, h: size.h, data: begun.mask }), 'bin')] } : {}
         const images = await perFile(io, w, async (file) => {
-          const out = await worker.clip(await decoded(io, w.source, file), trunc)
+          const tensor = file ? kept?.get(keyOf(file)) : undefined
+          const out = tensor ? await worker.clipTensor(await io.read(tensor), trunc) : await worker.clip(await decoded(io, w.source, file), trunc)
           return io.keep(await handOffPng(out), 'png')
         })
-        return { values: { 0: { kind: 'files', files: images }, 1: { kind: 'mask', files: [mask] } }, ui: null }
+        return { values: { 0: { kind: 'files', files: images }, 1: { kind: 'mask', files: [mask], ...tensors } }, ui: null }
       })
     },
   }

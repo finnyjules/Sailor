@@ -36,10 +36,12 @@ const ANNOTATIONS = new Set([
   'readOnly', 'writeOnly', 'nullable', '_fal_ui_field',
   // fal's note on a file field ("Max file size: 50.0MB, Min width: 300px …"): prose, not a rule on the link.
   'limit_description',
+  // fal's own widget hint on a file field ({"field": "image"} / {"field": "video"}, Kling 3's elements, Task 3): prose too.
+  'ui',
 ])
 /** Keywords this checker applies. */
 const VALIDATORS = new Set([
-  '$ref', 'type', 'enum', 'minimum', 'maximum', 'exclusiveMinimum', 'exclusiveMaximum',
+  '$ref', 'type', 'enum', 'const', 'minimum', 'maximum', 'exclusiveMinimum', 'exclusiveMaximum',
   'minLength', 'maxLength', 'pattern', 'required', 'properties', 'additionalProperties',
   'items', 'minItems', 'maxItems', 'anyOf', 'allOf',
 ])
@@ -116,6 +118,11 @@ function check(fixture: ProviderSchemaFixture, schema: Schema, v: unknown, path:
     if (!options.some(o => show(o) === show(v)) && !(v === null && schema.nullable === true)) {
       errs.push(`${at(path)}: ${show(v)} is not one of ${options.map(show).join(', ')}`)
     }
+  }
+
+  // `const` (fal-ai/veo3.1/reference-to-video's fixed 8 s duration): the sent value must equal it exactly.
+  if (has(schema, 'const') && show(v) !== show(schema.const)) {
+    errs.push(`${at(path)}: ${show(v)} is not ${show(schema.const)}`)
   }
 
   if (typeof v === 'number') {

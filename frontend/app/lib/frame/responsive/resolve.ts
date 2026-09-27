@@ -1,13 +1,11 @@
 import type { LocalLayer } from '~/composables/useCompositorLayers'
 import { fitScale, spareRoom, guardedRoom, applyMap } from './axis'
 import { inferAxisPin, axisOfV } from './infer'
-import { sectionsAt, sectionOf } from './sections'
-import { buildUnits, type Box } from './units'
+import { gridsAt, holdOf, type AxisRef } from './spans'
+import { buildUnits } from './units'
 import { placeLayer, textNaturalHeightPx } from './stretch'
 import { remapMotion } from './motion'
 import type { AxisMap, AxisPin, FrameDoc, LayoutResult, ResolveOptions, ResolvedBox, UnitInfo } from './types'
-
-interface Ref { design: Box; box: Box }
 
 function identityResult(frame: FrameDoc, gridBox: LayoutResult['grid']): LayoutResult {
   return { layers: frame.layers, motion: frame.motion, grid: gridBox, boxes: new Map(), maps: new Map(), units: new Map(), identity: true }
@@ -17,7 +15,7 @@ function identityResult(frame: FrameDoc, gridBox: LayoutResult['grid']): LayoutR
 function resolveAxis(
   kind: AxisPin, canStretch: boolean, s: number,
   uStart: number, uExtent: number,          // the unit's design box on this axis
-  ref: { dStart: number; dExtent: number; bStart: number; bExtent: number },
+  ref: AxisRef,
   kSize: number,                            // kSize: px per design px for this unit's SIZE (s, or 1 for keepSize)
 ): { map: AxisMap; near: number; far: number; stretched: boolean } {
   const spare = ref.bExtent - s * ref.dExtent
@@ -52,15 +50,14 @@ export function resolveLayout(frame: FrameDoc, W: number, H: number, opts: Resol
   const kv = s * H0 / H
   const kvKeep = H0 / H
   const ctx = opts.measureCtx ?? null
-  const sections = sectionsAt(frame.grid, W0, H0, s, W, H)
-  const gridOut: LayoutResult['grid'] = sections ? { xs: sections.box.xs, ys: sections.box.ys, regions: sections.box.regions } : null
+  const grids = gridsAt(frame.grid, frame.format ?? null, W0, H0, W, H)
+  const gridOut: LayoutResult['grid'] = grids ? grids.view : null
   // Read keepSize straight off the stored pins, BEFORE buildUnits: the fast path must not pay
   // for a canvas text measurement per layer just to discover it had nothing to do.
   const hasKeep = frame.layers.some(l => l.pins?.keepSize) || frame.groups.some(g => g.pins?.keepSize)
   if (!opts.withBoxes && spare.x === 0 && spare.y === 0 && Math.abs(k - 1) < 1e-12 && !hasKeep) return identityResult(frame, gridOut)
   const units = buildUnits(frame.layers, frame.groups, ctx, W0, H0)
 
-  const frameRef: Ref = { design: { x: 0, y: 0, w: W0, h: H0 }, box: { x: 0, y: 0, w: W, h: H } }
   const byId = new Map(frame.layers.map(l => [l.id, l]))
   const boxes = new Map<string, ResolvedBox>()
   const maps = new Map<string, { h: AxisMap; v: AxisMap }>()
@@ -70,12 +67,12 @@ export function resolveLayout(frame: FrameDoc, W: number, H: number, opts: Resol
   const placed = new Map<string, LocalLayer>()
 
   for (const unit of units) {
-    // Reference rectangle: the design section the unit sits in, unless held to the frame.
-    let ref = frameRef
-    if (sections && unit.pins?.holdTo !== 'frame') {
-      const i = sectionOf(unit.box, sections.design.regions, 0.01 * W0)
-      if (i >= 0) ref = { design: sections.design.regions[i]!, box: sections.box.regions[i]! }
-    }
+    // What the unit holds to, per axis: its columns (and rows) on the layout grid when it lies on
+    // them, else the frame — the same rule the pins card reads (effectivePins).
+    const lone = unit.kind === 'layer' ? byId.get(unit.memberIds[0]!) : undefined
+    const hold = holdOf(unit, lone, grids, W0, H0, W, H, ctx)
+    const refDesign: ResolvedBox = { x: hold.h.dStart, y: hold.v.dStart, w: hold.h.dExtent, h: hold.v.dExtent }
+    const refView: ResolvedBox = { x: hold.h.bStart, y: hold.v.bStart, w: hold.h.bExtent, h: hold.v.bExtent }
     const keep = !!unit.pins?.keepSize
     const kSize = keep ? 1 : s
     const kLayer = keep ? kKeep : k
@@ -83,17 +80,18 @@ export function resolveLayout(frame: FrameDoc, W: number, H: number, opts: Resol
     // Keeping its size is the opposite of stretching: a keepSize unit is always PLACED, so a
     // 'both' pin — stored or inferred — reads as 'center' on both axes.
     const canStretch = unit.canStretch && !keep
-    const hPin: AxisPin = unit.pins?.h ?? inferAxisPin(unit.box.x, unit.box.w, ref.design.x, ref.design.w, canStretch)
-    const vPin: AxisPin = unit.pins?.v ? axisOfV(unit.pins.v) : inferAxisPin(unit.box.y, unit.box.h, ref.design.y, ref.design.h, canStretch)
-    const hx = resolveAxis(hPin, canStretch, s, unit.box.x, unit.box.w, { dStart: ref.design.x, dExtent: ref.design.w, bStart: ref.box.x, bExtent: ref.box.w }, kSize)
-    const vy = resolveAxis(vPin, canStretch, s, unit.box.y, unit.box.h, { dStart: ref.design.y, dExtent: ref.design.h, bStart: ref.box.y, bExtent: ref.box.h }, kSize)
+    const hPin: AxisPin = unit.pins?.h ?? inferAxisPin(unit.box.x, unit.box.w, hold.h.dStart, hold.h.dExtent, canStretch)
+    // Text on rows reads its pin from its capitals and baselines (hold.vBox) and never infers a stretch.
+    const vPin: AxisPin = unit.pins?.v ? axisOfV(unit.pins.v) : inferAxisPin(hold.vBox.y, hold.vBox.h, hold.v.dStart, hold.v.dExtent, canStretch && hold.vCanStretch)
+    const hx = resolveAxis(hPin, canStretch, s, unit.box.x, unit.box.w, hold.h, kSize)
+    const vy = resolveAxis(vPin, canStretch, s, unit.box.y, unit.box.h, hold.v, kSize)
     const unitBox: ResolvedBox = { x: hx.near, y: vy.near, w: hx.far - hx.near, h: vy.far - vy.near }
     const ucx = unit.box.x + unit.box.w / 2, ucy = unit.box.y + unit.box.h / 2
     const ucx2 = unitBox.x + unitBox.w / 2, ucy2 = unitBox.y + unitBox.h / 2
     const info: Omit<UnitInfo, 'viewBox'> | null = withBoxes
       ? {
           unitId: unit.id, kind: unit.kind, memberIds: unit.memberIds, canStretch, kSize,
-          designBox: unit.box, mappedBox: unitBox, refDesign: ref.design, refView: ref.box,
+          designBox: unit.box, mappedBox: unitBox, refDesign, refView,
           h: hx.map, v: vy.map, hExplicit: unit.pins?.h != null, vExplicit: unit.pins?.v != null,
         }
       : null

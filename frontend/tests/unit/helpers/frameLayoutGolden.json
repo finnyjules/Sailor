@@ -1,0 +1,266 @@
+{
+ "runoff": {
+  "sig": "570bb16520f81491",
+  "count": 172
+ },
+ "statement": {
+  "sig": "9ad7ee5a67e4d4ad",
+  "count": 618
+ },
+ "index": {
+  "sig": "96ec4a20d64270d9",
+  "count": 270
+ },
+ "shapeCounter": {
+  "sig": "ea06dd81315b314e",
+  "count": 128
+ },
+ "photoBehind": {
+  "sig": "9c5e849c63e5983d",
+  "count": 61
+ },
+ "fullBleed": {
+  "sig": "b30980d92e06d6c3",
+  "count": 102
+ },
+ "tilt": {
+  "sig": "5bedaba2d9595af6",
+  "count": 204
+ },
+ "bottomHeavy": {
+  "sig": "3e93b54ac57f531c",
+  "count": 268
+ },
+ "fourCorners": {
+  "sig": "afb3525167d7d55d",
+  "count": 264
+ },
+ "spacedLines": {
+  "sig": "d7ffa1d3beef570d",
+  "count": 59
+ },
+ "ragged": {
+  "sig": "00943b24fcc05ba6",
+  "count": 133
+ },
+ "edges": {
+  "sig": "e4c8f5246daae360",
+  "count": 75
+ },
+ "staircase": {
+  "sig": "1efaa306a3ac60e9",
+  "count": 48
+ },
+ "block": {
+  "sig": "25a273d85f51e1f8",
+  "count": 49
+ },
+ "knockout": {
+  "sig": "e10efd05c542f7cb",
+  "count": 222
+ },
+ "shapeBleed": {
+  "sig": "750ed0b7967892f9",
+  "count": 172
+ },
+ "badge": {
+  "sig": "3c35d015102a28ed",
+  "count": 209
+ },
+ "split": {
+  "sig": "b09dba0edb7b68c2",
+  "count": 87
+ },
+ "diagonal": {
+  "sig": "d9f6d44eb395b7c8",
+  "count": 274
+ },
+ "wall": {
+  "sig": "7e089fb9761b71de",
+  "count": 50
+ },
+ "scatter": {
+  "sig": "da177a0fbe72f1d2",
+  "count": 128
+ },
+ "cascade": {
+  "sig": "bdb37024549120eb",
+  "count": 21
+ },
+ "ring": {
+  "sig": "3849aadba81c331f",
+  "count": 18
+ },
+ "cells": {
+  "sig": "262c5a2a5f5f4071",
+  "count": 67
+ },
+ "kicker": {
+  "sig": "37ef143cf24d1228",
+  "count": 49
+ },
+ "sidebar": {
+  "sig": "1691b29279e9d80b",
+  "count": 206
+ },
+ "footer": {
+  "sig": "8aac32d9c8077983",
+  "count": 306
+ },
+ "plate": {
+  "sig": "9395651c4f274c60",
+  "count": 87
+ },
+ "panel": {
+  "sig": "f8235073f415b7f2",
+  "count": 82
+ },
+ "sideSplit": {
+  "sig": "99a0d2d7cee2af41",
+  "count": 41
+ },
+ "cross": {
+  "sig": "b448eb64ade5f624",
+  "count": 31
+ },
+ "overlap": {
+  "sig": "666db96e9ffb699a",
+  "count": 92
+ },
+ "stamp": {
+  "sig": "b4228898c6a446f7",
+  "count": 105
+ },
+ "column": {
+  "sig": "f7df2109a5dd1681",
+  "count": 54
+ },
+ "rising": {
+  "sig": "a3ec40de435a492e",
+  "count": 98
+ },
+ "overprint": {
+  "sig": "c0e7b3869d59a156",
+  "count": 307
+ },
+ "dateBehind": {
+  "sig": "bf40fa5474179695",
+  "count": 311
+ },
+ "tightStack": {
+  "sig": "276ba4c671da7686",
+  "count": 224
+ },
+ "behindPhoto": {
+  "sig": "faf22ec293dcd52f",
+  "count": 40
+ },
+ "collage": {
+  "sig": "6faba128f5fa629b",
+  "count": 82
+ },
+ "label": {
+  "sig": "513205bd49c8cd89",
+  "count": 76
+ },
+ "ghost": {
+  "sig": "4aea403720160299",
+  "count": 102
+ },
+ "perfOffer": {
+  "sig": "627e624760f35a2f",
+  "count": 67
+ },
+ "perfSticker": {
+  "sig": "fd5af7f836fa687b",
+  "count": 38
+ },
+ "perfPriceTag": {
+  "sig": "2478ab9ad364dce6",
+  "count": 86
+ },
+ "perfCard": {
+  "sig": "ca52a7288cc11ec4",
+  "count": 86
+ },
+ "perfCentred": {
+  "sig": "881c4a21c02ac983",
+  "count": 12
+ },
+ "perfStrip": {
+  "sig": "6e3f2fbe2dfb3b83",
+  "count": 18
+ },
+ "perfOfferFirst": {
+  "sig": "b483452deb60380f",
+  "count": 4
+ },
+ "perfStat": {
+  "sig": "2186c43e386e7bc2",
+  "count": 5
+ },
+ "perfReview": {
+  "sig": "5e5dbab5415e922f",
+  "count": 4
+ },
+ "perfVersus": {
+  "sig": "48baac466b39f653",
+  "count": 4
+ },
+ "perfBeforeAfter": {
+  "sig": "2ba47ae19aab71c1",
+  "count": 16
+ },
+ "perfCallouts": {
+  "sig": "3b2be3d55ad31aac",
+  "count": 16
+ },
+ "perfListicle": {
+  "sig": "79a4134d2236afff",
+  "count": 12
+ },
+ "perfNotes": {
+  "sig": "675726606f10be15",
+  "count": 12
+ },
+ "perfPostit": {
+  "sig": "a73344d47b6a5314",
+  "count": 16
+ },
+ "edCover": {
+  "sig": "6e2bb8aaf5a2fab2",
+  "count": 47
+ },
+ "edFramed": {
+  "sig": "b619f6078fb55a37",
+  "count": 54
+ },
+ "edQuiet": {
+  "sig": "efcc5ae34670fa77",
+  "count": 96
+ },
+ "edDiptych": {
+  "sig": "3d32a36e37b0646f",
+  "count": 102
+ },
+ "stFill": {
+  "sig": "4badfd9448c21d84",
+  "count": 223
+ },
+ "stTag": {
+  "sig": "9445fb8756367d44",
+  "count": 50
+ },
+ "stDrop": {
+  "sig": "28b4e41ab0f6d2e9",
+  "count": 97
+ },
+ "stRepeat": {
+  "sig": "07a30a3e53289a0b",
+  "count": 129
+ },
+ "stStrip": {
+  "sig": "41ba6e0b9421daaf",
+  "count": 17
+ }
+}

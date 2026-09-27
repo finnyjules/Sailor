@@ -417,7 +417,8 @@ describe('colour text read as Python reads it', () => {
     for (const cls of EFFECT_CLASSES_PORTED) {
       const has = Object.prototype.hasOwnProperty.call(EFFECT_TEXT_WIDGETS, cls)
       // (R2.6: Ascii checks its characters instead.)
-      expect(RUNNER_NODE_RULES[cls]!.inputCheck, cls).toEqual(has ? ['effect-preview-name', 'effect-output-size', 'effect-text'] : cls === 'Ascii' ? ['effect-preview-name', 'effect-output-size', 'ascii-glyphs'] : ['effect-preview-name', 'effect-output-size'])
+      // (R2.8: Painter checks its file name and colour, and writes no live preview.)
+      expect(RUNNER_NODE_RULES[cls]!.inputCheck, cls).toEqual(has ? ['effect-preview-name', 'effect-output-size', 'effect-text'] : cls === 'Ascii' ? ['effect-preview-name', 'effect-output-size', 'ascii-glyphs'] : cls === 'Painter' ? ['effect-output-size', 'painter'] : ['effect-preview-name', 'effect-output-size'])
     }
     for (const [cls, widgets] of Object.entries(EFFECT_TEXT_WIDGETS)) {
       for (const name of Object.keys(widgets)) expect(EFFECT_SCHEMAS[cls]!.widgets[name]!.type, `${cls}.${name}`).toBe('STRING')

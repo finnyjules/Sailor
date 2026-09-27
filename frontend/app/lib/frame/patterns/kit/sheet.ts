@@ -3,6 +3,7 @@ import type { BandEl, ButtonEl, Colour, Content, LineEl, LogoEl, Measure, Missin
 import { STYLES } from './styles'
 import type { StyleId } from './styles'
 import type { FrameFormat } from '~/lib/frame/formats'
+import type { ResolvedLayoutGrid } from '~/lib/frame/layoutGrid'
 
 // ═══════════════════════ the kit ═══════════════════════
 // Ported from the prototype (docs/superpowers/specs/assets/2026-09-23-frame-layout-system/
@@ -14,6 +15,13 @@ import type { FrameFormat } from '~/lib/frame/formats'
 export interface SheetOpts {
   frameW: number; frameH: number
   grid?: { mode: 'off' | 'explicit' | 'generated'; margin: number; gutter: number; columns: number } | null
+  /** Stage 3: the Frame's layout grid, resolved at frameW × frameH (px). Given, the sheet's columns,
+   *  band, rows and type come from it; `grid`, `composeH` and the format's `nc` / `keepSide` are then
+   *  not read. Absent: the kit's own sheet, exactly as before. */
+  layout?: ResolvedLayoutGrid
+  /** With `layout`: the sheet covers the whole Frame (Y0 0, the full height) instead of the grid's
+   *  band — the sheet the checker, the settle and the ops use. */
+  whole?: boolean
   measure: Measure
   /** Multiplies every fitted size (a variation's scale). Default 1. */
   scale?: number
@@ -44,8 +52,30 @@ export interface Sheet {
   /** The margin is the kit's own (`min(4, 6% of H)`) — not the Frame's grid margin, and not widened
    *  to a platform's side keep-clear (a story). Optical nudges past the margin apply only then. */
   defaultMargin: boolean
+  /** Stage 3: the baseline grid's step, kit units (0: the kit's own sheet, no grid). */
+  U: number
+  /** Stage 3: where this sheet's y = 0 sits on the Frame, kit units (0 unless composing on a band). */
+  Y0: number
+  /** Stage 3: the rows layouts compose on (this sheet's coordinates). Empty with rows off, with
+   *  fewer than three rows, and on the kit's own sheet. */
+  rows: { a: number; b: number }[]
+  /** Stage 3: the first row top at or after y (past the last row: its bottom); rows off: y up to the
+   *  baseline grid. The kit's own sheet: y. */
+  rowTop(y: number): number
+  /** Stage 3: the last row bottom at or before y (before the first row: its top); rows off: y down to
+   *  the baseline grid. The kit's own sheet: y. */
+  rowBottom(y: number): number
+  /** Stage 3: on the grid, the nearest size below (`'up'`: above) whose capitals in `role`'s face are
+   *  a whole number of units — never under INFO.size when `size` was at least that. The kit's own
+   *  sheet: `size`. */
+  qSize(size: number, role?: string, dir?: 'down' | 'up'): number
+  /** Stage 3: on the grid, the line height whose line spacing (lh × size) is the nearest whole number
+   *  of units, at least one. The kit's own sheet: `lh`. */
+  lhFor(size: number, lh: number): number
   DISPLAY: Style; SECOND: Style & { size: number }; INFO: Style & { size: number }
   X(c: number): number; XR(c: number): number; SPAN(a: number, b: number): number; L(r: number): number; Xr(c: number): number
+  /** The line a bottom or a baseline on design row `r` sits on (stage 3). The kit's own sheet: `L`. */
+  LB(r: number): number
   w100(s: string, st?: Style): number
   fitSize(lines: string[], width: number, st?: Style): number
   sizeFor(lines: string[], width: number, maxH: number, st?: Style): number
@@ -149,56 +179,129 @@ export function formatSheetOpts(fmt: FrameFormat | null): SheetOpts['format'] {
   return { view: fmt.view, nc: fmt.nc, ...(keepSide != null ? { keepSide } : {}) }
 }
 
+/** The band a sheet on the layout grid composes on (kit units, percent of frame width). Layouts are
+ *  written "margin to margin", so the band is chosen to make their margin `m` (the grid's own left
+ *  margin) land on the grid's `top` and `bottom`, which already stop at a format's covered areas:
+ *  the band starts `m` above the grid's top (`y0`, on the Frame) and is `h` tall. */
+export function gridBand(r: ResolvedLayoutGrid, frameW: number): { y0: number; h: number; m: number; top: number; bottom: number } {
+  const k = 100 / frameW
+  const m = r.margin * k, top = r.top * k, bottom = r.bottom * k
+  return { y0: top - m, h: bottom - top + 2 * m, m, top, bottom }
+}
+
 export function makeSheet(o: SheetOpts): Sheet {
   const { measure } = o
   const SCALE = o.scale ?? 1
   const FLIP = !!o.flip
-  const grid = o.grid ?? null
+  const grid = o.layout ? null : (o.grid ?? null)
   const gridOn = !!grid && grid.mode !== 'off'
+  const lay = o.layout ?? null
+  const k = 100 / o.frameW                                            // px → kit units
+  const gb = lay ? gridBand(lay, o.frameW) : null
 
   const W = 100
   const H_full = 100 * o.frameH / o.frameW
-  const H = o.composeH ?? H_full
+  const H = gb ? (o.whole ? H_full : gb.h) : (o.composeH ?? H_full)
+  /** Where y = 0 of this sheet sits on the Frame. */
+  const Y0 = gb && !o.whole ? gb.y0 : 0
   const kb = kitBasics(o.frameW, o.frameH, o.format, o.style ?? 'swiss')
   const B = kb.B   // size unit: 1 on the portrait poster — from the FULL height
   const kitM = Math.min(4, H * 0.06)
-  let M = gridOn ? grid!.margin * 100 : kitM
-  if (o.format?.keepSide != null) M = Math.max(M, o.format.keepSide * 100)
-  const defaultMargin = !gridOn && M === kitM
-  const NC = grid?.mode === 'explicit' ? grid.columns : (o.format?.nc ?? (H_full / W >= 0.7 ? 12 : W / H_full >= 2.5 ? 20 : 16))
-  const G = gridOn ? grid!.gutter * 100 : 1.6 * B
-  const CW = (W - 2 * M - (NC - 1) * G) / NC
-  const RH = (H - 2 * M) / NR
-  const GAP = RH * 0.5
+  /** Stage 3: the baseline grid's step (kit units); 0 on the kit's own sheet. */
+  const U = lay ? lay.unit * k : 0
+  let M: number, NC: number, G: number
+  if (lay) {
+    NC = lay.cols.length
+    M = lay.cols[0]!.a * k
+    G = NC > 1 ? (lay.cols[1]!.a - lay.cols[0]!.a - lay.cols[0]!.w) * k : 0
+  } else {
+    M = gridOn ? grid!.margin * 100 : kitM
+    if (o.format?.keepSide != null) M = Math.max(M, o.format.keepSide * 100)
+    NC = grid?.mode === 'explicit' ? grid.columns : (o.format?.nc ?? (H_full / W >= 0.7 ? 12 : W / H_full >= 2.5 ? 20 : 16))
+    G = gridOn ? grid!.gutter * 100 : 1.6 * B
+  }
+  // On the grid the margin is the kit's own when it is the kit's margin on the unit and no side is kept
+  // clear (the suggested grid); optical nudges past the margin apply only then.
+  const kitOnUnit = U ? Math.max(U, Math.round(Math.min(4, H_full * 0.06) / U) * U) : kitM
+  const defaultMargin = lay ? o.format?.keepSide == null && Math.abs(M - kitOnUnit) < 1e-6 : !gridOn && M === kitM
+  const CW = lay ? lay.cols[0]!.w * k : (W - 2 * M - (NC - 1) * G) / NC
+  /** The grid band's top on this sheet (the kit's own sheet: its margin). */
+  const T0 = gb ? gb.top - Y0 : M
+  const RH = gb ? (gb.bottom - gb.top) / NR : (H - 2 * M) / NR
+  const EPS = 1e-6
+  // The baseline grid is every U from the FRAME's top: a sheet y is y + Y0 on the Frame.
+  const gridUp = (y: number) => (U ? Math.ceil((y + Y0) / U - EPS) * U - Y0 : y)
+  const gridDown = (y: number) => (U ? Math.floor((y + Y0) / U + EPS) * U - Y0 : y)
+  /** The rows layouts compose on: the grid's own, when it has at least three (ruling 6). */
+  const rows = lay && lay.rows.length >= 3 ? lay.rows.map(t => ({ a: t.a * k - Y0, b: (t.a + t.w) * k - Y0 })) : []
+  const rowTop = (y: number): number => {
+    if (!rows.length) return gridUp(y)
+    for (const r of rows) if (r.a >= y - EPS) return r.a
+    return rows[rows.length - 1]!.b
+  }
+  const rowBottom = (y: number): number => {
+    if (!rows.length) return gridDown(y)
+    for (let i = rows.length - 1; i >= 0; i--) if (rows[i]!.b <= y + EPS) return rows[i]!.b
+    return rows[0]!.a
+  }
+  const GAP = U ? Math.max(U, Math.round(RH * 0.5 / U) * U) : RH * 0.5
   const CAP = measure.capAbove('title') + measure.baseBelow('title')
 
   const [colA, colB] = o.colRange ?? [1, NC]                          // the real columns the design grid spans
-  const Xr = (c: number) => M + (c - 1) * (CW + G)
+  const Xr = (c: number) => M + (c - 1) * (CW + G)                    // real column c's left edge (the grid's own)
   const cs = (c: number) => colA + Math.round((c - 1) * (colB - colA + 1) / 12)   // design column → real start column
   const ce = (c: number) => colA - 1 + Math.round(c * (colB - colA + 1) / 12)     // design column → real end column
   const X = (c: number) => Xr(cs(c))                                  // left edge of design column c
   const XR = (c: number) => Xr(ce(c)) + CW                            // right edge of design column c
   const SPAN = (a: number, b: number) => XR(b) - X(a)
-  const L = (r: number) => M + r * RH                                 // line under design row r; L(0) = top margin
+  const L = lay ? (r: number) => rowTop(T0 + r * RH) : (r: number) => T0 + r * RH   // a top on design row r; L(0) = the top margin
+  const LB = lay ? (r: number) => rowBottom(T0 + r * RH) : L                        // a bottom or baseline on row r
 
   // Swiss styles — minimum text size from the format's viewing width (Stage 2), Stage 1 sizes when absent.
-  const infoSize = kb.infoSize
-  const secondSize = o.format?.view ? Math.max(4.4 * B, 1.6 * infoSize) : 4.4 * B
+  const sty = STYLES[o.style ?? 'swiss']
+  /** A face's capital height (em): 'H' from its top to its baseline. */
+  const capOf = (role: string | undefined) => { const f = faceOf(role); return measure.capAbove(f) + measure.baseBelow(f) }
+  const upU = (v: number) => (U ? Math.ceil(v / U - EPS) * U : v)     // a length, up to whole units
+  // Stage 3 (rulings 1, 3): on the grid, body text's capitals are one unit tall in the caption face —
+  // unless the format's legibility floor is bigger; then the floor, on whole-unit line spacing.
+  const viewFloor = o.format?.view ? 900 / o.format.view : 0
+  const oneUnit = U ? U / capOf('caption') : 0
+  const infoSize = U ? Math.max(oneUnit, viewFloor) : kb.infoSize
+  const infoLh = !U ? sty.info.lh
+    : infoSize <= oneUnit + EPS ? 2 * U / infoSize
+    : Math.max(2 * U, upU(infoSize * sty.info.lh)) / infoSize
+  const qSize = (size: number, role?: string, dir: 'down' | 'up' = 'down'): number => {
+    if (!U || !(size > 0)) return size
+    const q = U / capOf(role)
+    const n = size / q
+    const s = Math.max(1, dir === 'up' ? Math.ceil(n - EPS) : Math.floor(n + EPS)) * q
+    return s < infoSize - EPS && size >= infoSize - EPS ? size : s
+  }
+  const lhFor = (size: number, lh: number): number => (U && size > 0 ? Math.max(1, Math.round(lh * size / U)) * U / size : lh)
+  const secondRaw = o.format?.view ? Math.max(4.4 * B, 1.6 * infoSize) : 4.4 * B
+  const secondSize = qSize(secondRaw, 'details')
   // The style's display and information type; `upper` only when the style sets capitals, so the
   // Swiss styles are exactly the Stage 1 objects.
-  const sty = STYLES[o.style ?? 'swiss']
   const upperOf = (u: boolean | undefined) => (u ? { upper: true } : {})
   const DISPLAY: Style = { role: 'title', wt: sty.display.wt, ls: sty.display.ls, lh: sty.display.lh, ...upperOf(sty.display.upper) }
   const SECOND: Style & { size: number } = { role: 'details', size: secondSize, wt: 500, ls: -0.02, lh: 1.04 }
-  const INFO: Style & { size: number } = { role: 'caption', size: infoSize, wt: sty.info.wt, ls: sty.info.ls, lh: sty.info.lh, ...upperOf(sty.info.upper) }
+  const INFO: Style & { size: number } = { role: 'caption', size: infoSize, wt: sty.info.wt, ls: sty.info.ls, lh: infoLh, ...upperOf(sty.info.upper) }
 
   // measurement: width at size 100, with the letter spacing the layout will set
   const w100 = (s: string, st: Style = DISPLAY) => measure.w100(s, st.role ?? 'title', st.ls, st.upper)
-  const fitSize = (lines: string[], width: number, st: Style = DISPLAY) =>
+  const fitRaw = (lines: string[], width: number, st: Style) =>
     SCALE * Math.min(...lines.map(l => width * 100 / Math.max(1, w100(l, st))))
-  const blockH = (n: number, size: number, lh: number) => ((n - 1) * lh + CAP) * size
-  const sizeFor = (lines: string[], width: number, maxH: number, st: Style = DISPLAY) =>
-    Math.min(fitSize(lines, width, st), SCALE * maxH / ((lines.length - 1) * st.lh + CAP))
+  const fitSize = (lines: string[], width: number, st: Style = DISPLAY) => qSize(fitRaw(lines, width, st), st.role)
+  const blockH = (n: number, size: number, lh: number) => ((n - 1) * lhFor(size, lh) + CAP) * size
+  const sizeFor = (lines: string[], width: number, maxH: number, st: Style = DISPLAY) => {
+    const raw = Math.min(fitRaw(lines, width, st), SCALE * maxH / ((lines.length - 1) * st.lh + CAP))
+    if (!U) return raw
+    // Trimmed to whole-unit capitals, then down a step at a time until its whole-unit line spacing fits.
+    const q = U / capOf(st.role)
+    let s = qSize(raw, st.role)
+    while (s - q >= infoSize - EPS && ((lines.length - 1) * lhFor(s, st.lh) + CAP) * s > SCALE * maxH + EPS) s -= q
+    return s
+  }
   function breakLines(words: string[], width: number, size: number, st: Style): string[] {
     const out: string[] = []; let cur = ''
     for (const w of words) {
@@ -260,14 +363,21 @@ export function makeSheet(o: SheetOpts): Sheet {
   // A flowing date line (its own box, `w`) that has to break after its range dash becomes placed
   // lines — the mechanism a title's line breaks use (`pre`: the op carries the lines as runs, the
   // layer's text is never rewritten), so the break measured here is the break drawn.
+  /** Stage 3: on the grid, the size trimmed to whole-unit capitals in its own face (`sized`) and the
+   *  line spacing a whole number of units. Turned text and text inside a shape keep theirs. */
+  const onGridType = <T extends Partial<TextEl>>(e: T, sized: boolean): T => {
+    if (!U || e.rot || e.inside || e.size == null) return e
+    const size = sized ? qSize(e.size, e.role) : e.size
+    return { ...e, size, ...(e.lh != null ? { lh: lhFor(size, e.lh) } : {}) }
+  }
   const text = (s: string, o: Partial<TextEl>): TextEl => {
-    const e = { k: 't', s, ...o } as TextEl
+    const e = { k: 't', s, ...onGridType(o, false) } as TextEl
     if (e.pre || e.w == null || faceOf(e.role) !== 'date' || e.size == null) return e
     const dl = dateLines(s, e.w, { role: 'date', ls: e.ls ?? 0, lh: e.lh, upper: e.upper }, e.size)
     return dl ? { ...e, s: dl.join('\n'), pre: true } : e
   }
-  const disp = (s: string, o: Partial<TextEl>) => text(s, { wt: DISPLAY.wt, ls: DISPLAY.ls, lh: DISPLAY.lh, role: 'title', pre: true, ...upperOf(DISPLAY.upper), ...o })
-  const sec = (s: string, o: Partial<TextEl>) => text(s, { size: SECOND.size, wt: SECOND.wt, ls: SECOND.ls, lh: SECOND.lh, role: 'details', ...o })
+  const disp = (s: string, o: Partial<TextEl>) => text(s, onGridType({ wt: DISPLAY.wt, ls: DISPLAY.ls, lh: DISPLAY.lh, role: 'title', pre: true, ...upperOf(DISPLAY.upper), ...o }, true))
+  const sec = (s: string, o: Partial<TextEl>) => text(s, onGridType({ size: SECOND.size, wt: SECOND.wt, ls: SECOND.ls, lh: SECOND.lh, role: 'details', ...o }, true))
   const info = (s: string, o: Partial<TextEl>) => text(s, { role: 'info', size: INFO.size, wt: INFO.wt, ls: INFO.ls, lh: INFO.lh, ...upperOf(INFO.upper), ...o })
   const rule = (x: number, y: number, w: number): RuleEl => ({ k: 'l', x, y, w })
   /** INFO measured in the face of the element's own role. */
@@ -279,7 +389,7 @@ export function makeSheet(o: SheetOpts): Sheet {
     items.forEach((it, i) => {
       const n = countLines(it.s, w, infoIn(it.role), INFO.size)
       els.push(info(it.s, { x: X(c1), w, top: y, wt: it.wt || INFO.wt, role: it.role || 'info' }))
-      y += blockH(n, INFO.size, INFO.lh) + (i < items.length - 1 ? INFO.size * 1.25 : 0)
+      y += blockH(n, INFO.size, INFO.lh) + (i < items.length - 1 ? upU(INFO.size * 1.25) : 0)
     })
     return { els, bottom: y }
   }
@@ -291,10 +401,10 @@ export function makeSheet(o: SheetOpts): Sheet {
       const n = countLines(s, SPAN(a, b), infoIn(key), INFO.size)
       extent = Math.max(extent, blockH(n, INFO.size, INFO.lh))
       const e: Partial<TextEl> = { x: X(a), w: SPAN(a, b), wt: key === 'details' ? 500 : INFO.wt, role: key }
-      if (where === 'foot') e.base = L(16); else e.top = M
+      if (where === 'foot') e.base = LB(16); else e.top = L(0)
       els.push(info(s, e))
     }
-    return { els, top: where === 'foot' ? L(16) - extent : M, bottom: where === 'foot' ? L(16) : M + extent }
+    return { els, top: where === 'foot' ? LB(16) - extent : L(0), bottom: where === 'foot' ? LB(16) : L(0) + extent }
   }
   function infoRowAt(c: Content, spec: [TextKey, number, number][], base: number) {
     const els: TextEl[] = []; let extent = 0
@@ -373,8 +483,8 @@ export function makeSheet(o: SheetOpts): Sheet {
     return { k: 'logo', x: o.align === 'center' ? x - w / 2 : o.align === 'right' ? x - w : x, y: top, w, h, role: 'logo' }
   }
   // Spacing, from the type rather than per layout:
-  const gapBelow = (s: number) => Math.max(s * 0.4, INFO.size * 1.1)
-  const groupGap = () => Math.max(RH * 1.4, INFO.size * 3.4)
+  const gapBelow = (s: number) => upU(Math.max(s * 0.4, INFO.size * 1.1))
+  const groupGap = () => upU(Math.max(RH * 1.4, INFO.size * 3.4))
   const inset = () => Math.max(M, INFO.size * 2.4)
   // A rotated tag in accent (Street), the prototype's `tag()` (~1159), maths verbatim. The text is
   // the user's own line (`role`), measured in that line's face with the display style.
@@ -394,8 +504,12 @@ export function makeSheet(o: SheetOpts): Sheet {
   }
 
   // ── Stage 4 pieces: owned words, stars and leader lines ──
-  const own = (s: string, o: Partial<OwnTextEl>): OwnTextEl =>
-    ({ k: 'own', s, x: 0, size: INFO.size, wt: INFO.wt ?? 400, ls: 0, lh: 1, role: 'own', ...o } as OwnTextEl)
+  const own = (s: string, o: Partial<OwnTextEl>): OwnTextEl => {
+    const e = { k: 'own', s, x: 0, size: INFO.size, wt: INFO.wt ?? 400, ls: 0, lh: 1, role: 'own', ...o } as OwnTextEl
+    if (!U || e.rot) return e
+    const size = e.size > infoSize + EPS ? qSize(e.size, 'caption') : e.size
+    return { ...e, size, lh: lhFor(size, e.lh) }
+  }
   const stars = (value: number, x: number, y: number, size: number): StarsEl =>
     ({ k: 'stars', x, y, size, value, role: 'stars' })
   const leader = (x1: number, y1: number, x2: number, y2: number): LineEl =>
@@ -403,9 +517,9 @@ export function makeSheet(o: SheetOpts): Sheet {
 
   return {
     measure,
-    W, H, M, G, NC, CW, RH, GAP, CAP, B, defaultMargin,
+    W, H, M, G, NC, CW, RH, GAP, CAP, B, defaultMargin, U, Y0, rows, rowTop, rowBottom, qSize, lhFor,
     DISPLAY, SECOND, INFO,
-    X, XR, SPAN, L, Xr,
+    X, XR, SPAN, L, LB, Xr,
     w100, fitSize, sizeFor, blockH, countLines, dateLines, breakLines, balance,
     text, disp, sec, info, rule,
     infoStack, infoRow, infoRowAt, stackBottom, photoIn, cover, pick, q,

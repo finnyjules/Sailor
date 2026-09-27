@@ -52,7 +52,7 @@ export const statement: LayoutDef = {
   // Its seed (index 1) draws the title to the foot for arr 0 and 2 (the same run) and to the top for arr 1.
   arrLabels: ['Title low', 'Title high'],
   fn(S, { c, ph, r, lines }) {
-    const { X, SPAN, L, M, GAP, DISPLAY, sizeFor, blockH, disp, infoRow, photoIn, FOOT3 } = S
+    const { X, SPAN, L, LB, M, GAP, DISPLAY, sizeFor, blockH, disp, infoRow, photoIn, FOOT3 } = S
     const top = r() < 0.5
     const maxH = (ph ? L(8) : L(12)) - M
     const size = sizeFor(lines, SPAN(1, 12), maxH)
@@ -63,9 +63,9 @@ export const statement: LayoutDef = {
       const f = infoRow(c, FOOT3, 'foot'); els.push(...f.els)
       if (ph) els.push(photoIn({ c1: 1, c2: 12, top: M + h + GAP, bottom: f.top - GAP }, { ay: 'bottom' }))
     } else {
-      els.push(disp(lines.join('\n'), { size, x: X(1), base: L(16) }))
+      els.push(disp(lines.join('\n'), { size, x: X(1), base: LB(16) }))
       const hd = infoRow(c, FOOT3, 'head'); els.push(...hd.els)
-      if (ph) els.push(photoIn({ c1: 1, c2: 12, top: hd.bottom + GAP, bottom: L(16) - h - GAP }))
+      if (ph) els.push(photoIn({ c1: 1, c2: 12, top: hd.bottom + GAP, bottom: LB(16) - h - GAP }))
     }
     return { els, did: `One word per line, fitted to the margins, ${top ? 'from the top' : 'on the foot'}.` }
   },
@@ -75,7 +75,7 @@ export const statement: LayoutDef = {
 export const index: LayoutDef = {
   id: 'index', name: 'Index', fits: [...ALL], smallText: true,
   fn(S, { c, ph, lines }) {
-    const { X, SPAN, L, M, RH, GAP, CAP, DISPLAY, INFO, fitSize, sizeFor, blockH, countLines, disp, info, rule, photoIn, q } = S
+    const { X, SPAN, L, LB, M, RH, GAP, CAP, DISPLAY, INFO, fitSize, sizeFor, blockH, countLines, disp, info, rule, photoIn, q } = S
     const size = sizeFor(lines, SPAN(1, 8), RH * 5)
     const tb = M + blockH(lines.length, size, DISPLAY.lh)
     const els: El[] = [disp(lines.join('\n'), { size, x: X(1), top: M })]
@@ -91,9 +91,9 @@ export const index: LayoutDef = {
     let dSize = 0
     if (c.date) {
       dSize = Math.min(fitSize([c.date], SPAN(1, 12), { ...DISPLAY, role: 'date' }), RH * 2.4 / CAP)
-      els.push(disp(c.date, { size: dSize, x: X(1), base: L(16), color: 'accent', role: 'date' }))
+      els.push(disp(c.date, { size: dSize, x: X(1), base: LB(16), color: 'accent', role: 'date' }))
     }
-    if (ph) els.push(photoIn({ c1: 1, c2: 8, top: tb + GAP * 1.5, bottom: L(16) - CAP * dSize - GAP }, { ax: 'left' }))
+    if (ph) els.push(photoIn({ c1: 1, c2: 8, top: tb + GAP * 1.5, bottom: LB(16) - CAP * dSize - GAP }, { ax: 'left' }))
     return { els, did: `Title top-left, a ruled table on the right, ${q(c.date)} large at the foot in accent.` }
   },
 }
@@ -140,11 +140,11 @@ export const fullBleed: LayoutDef = {
   id: 'fullBleed', name: 'Full bleed', fits: [...ALL],
   needs: { image: true },
   fn(S, { c, ph, lines }) {
-    const { X, SPAN, L, W, H, RH, sizeFor, disp, infoRow, FOOT3, PHOTO_ASPECT } = S
+    const { X, SPAN, L, LB, W, H, RH, sizeFor, disp, infoRow, FOOT3, PHOTO_ASPECT } = S
     const w = Math.max(W, H / PHOTO_ASPECT), h = w * PHOTO_ASPECT
     const els: El[] = [{ k: 'p', x: (W - w) / 2, y: (H - h) / 2, w, h, stand: !ph, role: 'photo', ok: true, bleed: true }]
     const size = sizeFor(lines, SPAN(1, 12), RH * 5)
-    els.push(disp(lines.join('\n'), { size, x: X(1), base: L(16), color: 'field' }))
+    els.push(disp(lines.join('\n'), { size, x: X(1), base: LB(16), color: 'field' }))
     const hd = infoRow(c, FOOT3, 'head')
     hd.els.forEach(e => { e.color = 'field' }); els.push(...hd.els)
     return { els, did: 'The image covers the page; title and information overprint it in the field colour.' }
@@ -156,14 +156,14 @@ export const tilt: LayoutDef = {
   id: 'tilt', name: 'Tilt', fits: [...ALL],
   premise: { rotated: ['title'] },
   fn(S, { c, ph, kind, lines }) {
-    const { X, SPAN, L, M, G, GAP, CAP, DISPLAY, SECOND, fitSize, blockH, countLines, w100, disp, sec, infoStack, photoIn } = S
-    const len = L(16) - M
+    const { X, SPAN, L, LB, M, G, GAP, CAP, DISPLAY, SECOND, fitSize, blockH, countLines, w100, disp, sec, infoStack, photoIn } = S
+    const len = LB(16) - M
     const ls = kind === 'sentence' ? lines : [c.title]
     const hh = (ls.length - 1) * DISPLAY.lh + CAP
     const size = Math.min(fitSize(ls, len), SPAN(1, 7) / hh)
     const cap = hh * size
     const k = Math.max(...ls.map(l => w100(l, DISPLAY))) / 100 * size
-    const els: El[] = [disp(ls.join('\n'), { size, x: M, top: L(16), rot: -90, origin: 'top left', w: k })]
+    const els: El[] = [disp(ls.join('\n'), { size, x: M, top: LB(16), rot: -90, origin: 'top left', w: k })]
     let sc = 1; while (sc < 12 && X(sc) < M + cap + G) sc++
     sc = Math.min(sc, 9)
     let dBottom = M
@@ -174,9 +174,9 @@ export const tilt: LayoutDef = {
     }
     const st = infoStack(stackItems(c, [['date'], ['caption']]), sc, 12, 0)
     const stH = st.bottom
-    st.els.forEach(e => { e.top = (e.top ?? 0) + L(16) - stH })
+    st.els.forEach(e => { e.top = (e.top ?? 0) + LB(16) - stH })
     els.push(...st.els)
-    if (ph) els.push(photoIn({ c1: sc, c2: 12, top: dBottom + GAP, bottom: L(16) - stH - GAP }))
+    if (ph) els.push(photoIn({ c1: sc, c2: 12, top: dBottom + GAP, bottom: LB(16) - stH - GAP }))
     return { els, did: 'Title turned to run up the left edge; everything else hangs from the next free column.' }
   },
 }
@@ -185,11 +185,11 @@ export const tilt: LayoutDef = {
 export const bottomHeavy: LayoutDef = {
   id: 'bottomHeavy', name: 'Bottom-heavy', fits: [...ALL],
   fn(S, { c, ph, lines }) {
-    const { X, SPAN, L, M, GAP, DISPLAY, SECOND, sizeFor, blockH, countLines, disp, sec, infoStack, photoIn } = S
-    const maxH = L(16) - (ph ? L(9) : L(5))
+    const { X, SPAN, L, LB, M, GAP, DISPLAY, SECOND, sizeFor, blockH, countLines, disp, sec, infoStack, photoIn } = S
+    const maxH = LB(16) - (ph ? L(9) : L(5))
     const size = sizeFor(lines, SPAN(1, 12), maxH)
-    const capTop = L(16) - blockH(lines.length, size, DISPLAY.lh)
-    const els: El[] = [disp(lines.join('\n'), { size, x: X(1), base: L(16) })]
+    const capTop = LB(16) - blockH(lines.length, size, DISPLAY.lh)
+    const els: El[] = [disp(lines.join('\n'), { size, x: X(1), base: LB(16) })]
     let detailsBottom = M
     if (c.details) {
       els.push(sec(c.details, { x: X(1), w: SPAN(1, 8), top: M }))
@@ -208,10 +208,10 @@ export const bottomHeavy: LayoutDef = {
 export const fourCorners: LayoutDef = {
   id: 'fourCorners', name: 'Four corners', fits: [...ALL], smallText: true,
   fn(S, { c, ph, lines }) {
-    const { X, SPAN, L, M, GAP, DISPLAY, SECOND, sizeFor, blockH, countLines, disp, sec, info, photoIn } = S
+    const { X, SPAN, L, LB, M, GAP, DISPLAY, SECOND, sizeFor, blockH, countLines, disp, sec, info, photoIn } = S
     const maxH = ph ? L(12) - L(8) : L(12) - L(3)
     const size = sizeFor(lines, SPAN(1, 10), maxH)
-    const base = L(12)
+    const base = LB(12)
     const capTop = base - blockH(lines.length, size, DISPLAY.lh)
     const els: El[] = [disp(lines.join('\n'), { size, x: X(1), base })]
     let detailsH = 0
@@ -221,7 +221,7 @@ export const fourCorners: LayoutDef = {
       detailsH = blockH(dn, SECOND.size, SECOND.lh)
     }
     if (c.date) els.push(info(c.date, { x: X(9), w: SPAN(9, 12), top: M, role: 'date' }))
-    if (c.caption) els.push(info(c.caption, { x: X(1), w: SPAN(1, 6), base: L(16), role: 'caption' }))
+    if (c.caption) els.push(info(c.caption, { x: X(1), w: SPAN(1, 6), base: LB(16), role: 'caption' }))
     if (ph) els.push(photoIn({ c1: 1, c2: 12, top: M + detailsH + GAP, bottom: capTop - GAP }))
     return { els, did: 'Title flush-left mid-page; the small texts pinned to three corners of the grid.' }
   },

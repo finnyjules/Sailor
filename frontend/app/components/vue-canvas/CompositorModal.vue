@@ -43,7 +43,7 @@ import { framePresentKeys, finalizeWiredSentinels, reconcileWiredContent, syncWi
 import { createWiredMaskCache } from '~/lib/compositor/wiredMaskCache'
 import { readWiredTreatments, setWiredMask, setWiredMaskShowSource, setWiredMaskUrl, maskCandidateKeys } from '~/composables/useWiredTreatments'
 import { maskBreakFromEdge, type MaskBreak, type MaskBreakEdge } from '~/lib/compositor/maskBreak'
-import { useLocalLayerEditor, resizableKind, cornerResizableKind, aspectLockedResizeKind, textBoxResizable, boxHandles as editorBoxHandles } from '~/composables/useLocalLayerEditor'
+import { useLocalLayerEditor, resizableKind, cornerResizableKind, aspectLockedResizeKind, textBoxResizable, canSpanColumns, canSpanRows, spanReasons, boxHandles as editorBoxHandles } from '~/composables/useLocalLayerEditor'
 import { useLayoutVary, faceTargets } from '~/composables/useLayoutVary'
 import LayoutVaryPanel from '~/components/vue-canvas/compositor/LayoutVaryPanel.vue'
 import KeepClearOverlay from '~/components/vue-canvas/compositor/KeepClearOverlay.vue'
@@ -176,6 +176,8 @@ import { isAbortError, throwIfAborted } from '~/lib/engine/videoRecorder'
 import { hostedModeEnabled } from '~/lib/hostedMode'
 import LayoutGridOverlay from './LayoutGridOverlay.vue'
 import LayoutGridSection from './LayoutGridSection.vue'
+import LayerGridFields from './LayerGridFields.vue'
+import { tracksFromLength, lengthFromTracks } from '~/lib/frame/layoutGrid'
 import { formatFor } from '~/lib/frame/formats'
 import MotionBandTimeline from '~/components/vue-canvas/compositor/MotionBandTimeline.vue'
 import MotionGallery from '~/components/vue-canvas/compositor/MotionGallery.vue'
@@ -905,7 +907,7 @@ const {
   background, setBackground,
   postEffects, setPostEffects,
   frameLight, setFrameLight,
-  layoutGrid, layoutGridResolved, setLayoutGrid, ensureLayoutGrid, dragMoving,
+  layoutGrid, layoutGridResolved, setLayoutGrid, ensureLayoutGrid, dragMoving, dragging: editorDragging,
   undo, redo, canUndo, canRedo,
   selectedIds, selectedLayers, toggleSelect, applyBoolean, alignSelected, alignToFrame, recordHistory, commit, handleEditorKey, pasteClipboard,
   selectionBox, selectionHandles, startGroupResize,
@@ -915,7 +917,7 @@ const {
   editingLayerNameId, layerNameDraft, startLayerRename, commitLayerRename,
   snapGuides, marquee, startMarquee, moveMarquee, endMarquee,
   hud,
-  resnapSelected,
+  resnapSelected, layerGridBox, layerSpan, setLayerSpan, selectedTextMarks, selectedGridBox, selectedSpan,
 } = editor
 
 // ── Layout grid (spec 2026-09-26-frame-layout-grid-design) ──────────────────
@@ -928,16 +930,16 @@ const movingBox = computed(() => {
   // A move drags the whole selection (or just the pressed layer when it isn't selected).
   const moving = selectedLayers.value.length ? selectedLayers.value : (selectedLocal.value ? [selectedLocal.value] : [])
   if (!moving.length) return null
-  const { w: W, h: H } = editorDims()
+  // One selected layer: the editor's shared measurement (measured once per change).
+  if (moving.length === 1 && moving[0]!.id === selectedLocal.value?.id && selectedGridBox.value) return selectedGridBox.value
+  // Each layer's box in grid px, as the Layer section counts it — text from its capitals.
   let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity
   for (const l of moving) {
-    const b = boxPx(l)                                      // the same box the handles use
-    const cx = l.x * W, cy = l.y * H + textVAlignCenterOffset(l, b.h)
-    x0 = Math.min(x0, cx - b.w / 2); x1 = Math.max(x1, cx + b.w / 2)
-    y0 = Math.min(y0, cy - b.h / 2); y1 = Math.max(y1, cy + b.h / 2)
+    const b = layerGridBox(l)
+    x0 = Math.min(x0, b.x); x1 = Math.max(x1, b.x + b.w)
+    y0 = Math.min(y0, b.y); y1 = Math.max(y1, b.y + b.h)
   }
-  const kx = layoutGridResolved.value.W / Math.max(1, W), ky = layoutGridResolved.value.H / Math.max(1, H)
-  return { x: x0 * kx, y: y0 * ky, w: (x1 - x0) * kx, h: (y1 - y0) * ky }
+  return { x: x0, y: y0, w: x1 - x0, h: y1 - y0 }
 })
 const frameFormatLabel = computed(() => formatFor(compositor.value?.data?.properties as any, designSize.value.w, designSize.value.h)?.label ?? 'this size')
 watch(() => compositor.value?.id, id => { if (id) ensureLayoutGrid() }, { immediate: true })
@@ -2399,9 +2401,11 @@ async function onCanvasDrop(e: DragEvent) {
   }
 }
 
-/** Keys that edit the selection or the history (arrows, ⌘C/⌘V/⌘D, Delete, ⌘Z, ⌘G, ⌘X, ⌘A). */
+/** Keys that edit the selection or the history (arrows, ⌘C/⌘V/⌘D, Delete, ⌘Z, ⌘G, ⌘X, ⌘A,
+ *  and the grid toggle ⌃⇧4 — ⌃G is already covered by 'g'). */
 function isViewDragEditKey(e: KeyboardEvent): boolean {
   if (mapKeyToEdit(e, 1, 10) || e.key === 'Delete' || e.key === 'Backspace') return true
+  if ((e.metaKey || e.ctrlKey) && e.code === 'Digit4') return true
   return (e.metaKey || e.ctrlKey) && ['z', 'g', 'x', 'a'].includes(e.key.toLowerCase())
 }
 /** The viewport keys — Space (hold to pan) and ⌘/Ctrl = − 0 2 (zoom in, out,
@@ -2532,13 +2536,14 @@ function onKeydown(e: KeyboardEvent) {
     e.preventDefault(); e.stopPropagation()
     if (e.shiftKey) redoFrame(); else undoFrame()
   } else if ((e.key === 'g' || e.key === 'G') && e.ctrlKey && !e.metaKey && IS_MAC && !editingId.value) {
-    // ⌃G shows or hides the layout grid (Figma); ⌘G stays Group on Mac.
+    // ⌃G shows or hides the layout grid (Figma); ⌘G stays Group on Mac. Swallowed mid-gesture:
+    // a grid toggle would record its own undo step inside the drag's.
     e.preventDefault(); e.stopPropagation()
-    setLayoutGrid({ ...layoutGrid.value, show: !layoutGrid.value.show })
+    if (!editorDragging.value) setLayoutGrid({ ...layoutGrid.value, show: !layoutGrid.value.show })
   } else if (!IS_MAC && e.ctrlKey && e.shiftKey && e.code === 'Digit4' && !editingId.value) {
-    // Off a Mac ⌃G is Group, so the grid toggle is Figma's ⌃⇧4.
+    // Off a Mac ⌃G is Group, so the grid toggle is Figma's ⌃⇧4. Swallowed mid-gesture (as ⌃G).
     e.preventDefault(); e.stopPropagation()
-    setLayoutGrid({ ...layoutGrid.value, show: !layoutGrid.value.show })
+    if (!editorDragging.value) setLayoutGrid({ ...layoutGrid.value, show: !layoutGrid.value.show })
   } else if (meta && (e.key === 'g' || e.key === 'G') && !editingId.value) {
     e.preventDefault(); e.stopPropagation()
     if (e.shiftKey) ungroupSelected(); else groupSelected()
@@ -6217,31 +6222,31 @@ const outWidth = computed(() => {
 function pxW(norm: number) { return Math.round(norm * outWidth.value) }
 function setSizePx(id: string, key: string, px: number) { setLocal(id, { [key]: Math.max(0, px) / outWidth.value }) }
 
-// Text-box dimensions in the unit the user is thinking in: pixels, % of the
-// composition width, or grid columns (1/columns of the width — the module).
-// Values are stored normalized to width, so a column reads as boxW·columns.
+// Text-box dimensions in the unit the user is thinking in: pixels, % of the composition, or grid
+// tracks. "col" is one column plus one gutter per step, less the last gutter, so a box four columns
+// wide reads 4 (spec: the "col" unit). Height counts rows (row + row gap) when the grid has rows,
+// else the column pitch (a square module). boxW and boxH are both stored normalised to WIDTH.
 const boxUnit = ref<'col' | '%' | 'px'>('col')
-// One column plus one gutter of the layout grid, as a fraction of the width (the "col" unit).
-const colPitchFrac = computed(() => { const r = layoutGridResolved.value; const c = r.cols; return c.length > 1 ? (c[1]!.a - c[0]!.a) / r.W : (c[0]?.w ?? r.W) / r.W })
-// boxW and boxH are BOTH stored normalized to width. So px is absolute for both
-// (·width = px), but % and columns/rows must read against the axis the user means:
-// width for the width field, HEIGHT for the height field — via the W/H factor.
+function boxUnitTracks(dim: 'w' | 'h') {
+  const r = layoutGridResolved.value
+  return dim === 'h' && r.rows.length > 1 ? r.rows : r.cols
+}
+// % must read against the axis the user means: width for the width field, HEIGHT for the height
+// field — via the W/H factor.
 function boxToUnit(norm: number | undefined, dim: 'w' | 'h' = 'w'): string | number {
   if (!norm) return ''
   if (boxUnit.value === 'px') return pxW(norm)
-  const frac = dim === 'h' ? norm * outWidth.value / Math.max(1, outHeight.value) : norm
-  if (boxUnit.value === '%') return Math.round(frac * 100)
-  return Math.round(frac / colPitchFrac.value * 10) / 10
+  if (boxUnit.value === '%') return Math.round((dim === 'h' ? norm * outWidth.value / Math.max(1, outHeight.value) : norm) * 100)
+  const r = layoutGridResolved.value
+  return Math.round(tracksFromLength(boxUnitTracks(dim), norm * r.W) * 10) / 10
 }
 function setBoxDim(id: string, key: 'boxW' | 'boxH', raw: string) {
   const v = parseFloat(raw)
   let norm: number | undefined
   if (!(v > 0)) norm = undefined
   else if (boxUnit.value === 'px') norm = v / outWidth.value
-  else {
-    const frac = boxUnit.value === '%' ? v / 100 : v * colPitchFrac.value
-    norm = key === 'boxH' ? frac * outHeight.value / Math.max(1, outWidth.value) : frac
-  }
+  else if (boxUnit.value === '%') norm = key === 'boxH' ? (v / 100) * outHeight.value / Math.max(1, outWidth.value) : v / 100
+  else norm = lengthFromTracks(boxUnitTracks(key === 'boxH' ? 'h' : 'w'), v) / layoutGridResolved.value.W
   setLocal(id, { [key]: norm } as any)
 }
 function setBoxFit(l: any, fit: 'wrap' | 'shrink' | 'fill' | 'break') { setLocal(l.id, { boxFit: fit } as any) }
@@ -9084,7 +9089,7 @@ defineExpose({ editor, layoutGridResolved, layoutGrid })
 
         <!-- Layout grid — editor guide only: DOM over the artboard, outside every paint/bake path. -->
         <LayoutGridOverlay :grid="layoutGridResolved" :show="layoutGrid.show" :moving="dragMoving" :covered="movingBox"
-          :w="canvasDisplay.w" :h="canvasDisplay.h" />
+          :text-marks="selectedTextMarks" :w="canvasDisplay.w" :h="canvasDisplay.h" />
 
         <!-- Covered areas — the Layout tab's editor guide: where the Frame's format puts the
              platform's own interface (or may crop). Same box as the grid overlay (pans and zooms
@@ -12646,6 +12651,16 @@ defineExpose({ editor, layoutGridResolved, layoutGrid })
                 @input="setSizePx(selectedLocal!.id, 'w', parseFloat(($event.target as HTMLInputElement).value) || 1)" />
             </div>
 
+            <!-- Where the layer sits on the layout grid (spec "The editor"): its first column/row and how many. -->
+            <div v-if="layoutGrid.show">
+              <div class="panel-label mb-1.5">Grid</div>
+              <LayerGridFields :span="selectedSpan ?? layerSpan(selectedLocal)" :col-count="layoutGridResolved.cols.length" :row-count="layoutGridResolved.rows.length"
+                :can-span-cols="canSpanColumns(selectedLocal)" :can-span-rows="canSpanRows(selectedLocal)"
+                :cols-reason="spanReasons(selectedLocal).cols" :rows-reason="spanReasons(selectedLocal).rows"
+                :disabled="!!selectedLocal.rotation || penLocksSelected"
+                :disabled-reason="penLocksSelected ? 'Finish the pen first' : selectedLocal.rotation ? 'Straighten the layer to place it on the grid' : undefined"
+                @update="(p) => setLayerSpan(selectedLocal!.id, p)" />
+            </div>
             <!-- Common: align the layer to the frame (edges + centres) -->
             <div :title="penLocksSelected ? 'Finish the pen first' : undefined"><fieldset :disabled="penLocksSelected" :inert="penLocksSelected" class="m-0 p-0 border-0 min-w-0" :class="penLocksSelected ? 'opacity-50' : ''">
               <div class="panel-label mb-1.5">Align to frame</div>

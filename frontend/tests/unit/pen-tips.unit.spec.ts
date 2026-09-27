@@ -15,8 +15,10 @@ import { PEN_TIPS, tipKeyLabel } from '~/composables/pen/penTips'
 import { PEN_TIP_DEMOS, PEN_DEMO_TOOLS } from '~/composables/pen/penTipDemos'
 
 const ALL_TOOLS: PenTool[] = ['select', 'path', 'curve', 'line', 'circle', 'point', 'trim', 'cut', 'dissolve']
+const DEMO_IDS = [...ALL_TOOLS, 'cleanup']
 const FIXED_IDS = ['guide', 'labels', 'undo', 'redo', 'close', 'finish', 'done', 'cancel',
-  'fix', 'repeat', 'mirror', 'flip-h', 'flip-v', 'construction', 'delete']
+  'fix', 'repeat', 'mirror', 'flip-h', 'flip-v', 'construction', 'delete',
+  'cleanup-apply', 'cleanup-cancel', 'cleanup-strength']
 
 // every rule kind the rules row can show: run availableConstraints over every
 // single and pair selection of a drawing that has each kind of thing in it
@@ -53,7 +55,7 @@ function everyRuleKind(): string[] {
 
 describe('pen tips table', () => {
   const ruleKinds = everyRuleKind()
-  const ids = [...ALL_TOOLS, ...FIXED_IDS, ...ruleKinds]
+  const ids = [...DEMO_IDS, ...FIXED_IDS, ...ruleKinds]
 
   it('the rule sweep finds the rules row vocabulary', () => {
     for (const k of ['coincident', 'distance', 'tangentLineCircle', 'perpendicular', 'radius', 'midpoint', 'onCurve', 'tangent', 'equalArcs']) expect(ruleKinds).toContain(k)
@@ -76,10 +78,15 @@ describe('pen tips table', () => {
     expect(keys).toEqual({ select: 'V', path: 'P', curve: 'B', line: 'L', circle: 'O', point: 'N', trim: 'T', cut: 'C', dissolve: 'D' })
   })
 
-  it('the nine drawing and editing tools have a demo, and nothing else does', () => {
-    expect([...PEN_DEMO_TOOLS].sort()).toEqual([...ALL_TOOLS].sort())
-    for (const t of ALL_TOOLS) expect(PEN_TIPS[t]!.demo).toBe(t)
+  it('the nine drawing and editing tools and Clean up have a demo, and nothing else does', () => {
+    expect([...PEN_DEMO_TOOLS].sort()).toEqual([...DEMO_IDS].sort())
+    for (const t of DEMO_IDS) expect(PEN_TIPS[t]!.demo).toBe(t)
     for (const id of FIXED_IDS) expect(PEN_TIPS[id]!.demo).toBeUndefined()
+  })
+  it('Clean up carries ⌥⇧C, spelled out off a Mac', () => {
+    expect(PEN_TIPS.cleanup!.key).toBe('⌥⇧C')
+    expect(tipKeyLabel('⌥⇧C', true)).toBe('⌥⇧C')
+    expect(tipKeyLabel('⌥⇧C', false)).toBe('Alt+Shift+C')
   })
 
   it('shows modifier keys the platform way', () => {
@@ -91,7 +98,7 @@ describe('pen tips table', () => {
 })
 
 describe('pen tip demos', () => {
-  it.each(ALL_TOOLS)('%s draws something at every beat', (t) => {
+  it.each(DEMO_IDS)('%s draws something at every beat', (t) => {
     const demo = PEN_TIP_DEMOS[t]!
     expect(demo).toBeTypeOf('function')
     for (const at of [0, 0.25, 0.5, 0.75, 0.9, 0.999]) {
@@ -105,7 +112,7 @@ describe('pen tip demos', () => {
     }
   })
 
-  it.each(ALL_TOOLS)('%s acts out a gesture: the drawing changes and the cursor presses', (t) => {
+  it.each(DEMO_IDS)('%s acts out a gesture: the drawing changes and the cursor presses', (t) => {
     const demo = PEN_TIP_DEMOS[t]!
     const frames = Array.from({ length: 48 }, (_, i) => demo(i / 48))
     expect(new Set(frames.map(f => sketchPathData(f.doc) + JSON.stringify(f.dots ?? []))).size).toBeGreaterThan(1)

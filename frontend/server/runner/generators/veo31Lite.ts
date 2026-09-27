@@ -27,7 +27,7 @@
  * the node sends, the reason Veo 3.1 and Veo 3.1 Fast have none either
  * (twins.ts).
  */
-import { RUNNER_VIDEO_MODELS } from './video'
+import { RUNNER_VIDEO_MODELS, VEO_31_ONE_PICTURE, veo31HasExtras } from './video'
 import type { VideoBuildArgs, VideoModelDesc } from './types'
 
 export const VEO_31_LITE_ID = 'veo-3.1-lite'
@@ -44,8 +44,15 @@ export const VEO_31_LITE_RESOLUTIONS = ['720p', '1080p']
 
 const VEO_31 = RUNNER_VIDEO_MODELS['veo-3.1']!
 
-/** Veo 3.1's request, with a resolution Lite lacks (4k) sent as the 720p default. */
+/**
+ * Veo 3.1's request, with a resolution Lite lacks (4k) sent as the 720p
+ * default. Since Task 2, Veo 3.1's own builder takes up to 3 reference
+ * pictures; Lite has no reference-to-video endpoint wired here, so it still
+ * refuses every extra (a last frame, or reference pictures, videos or
+ * sounds) in front of that shared builder, as it always has.
+ */
 export function veo31Lite(a: VideoBuildArgs): Record<string, unknown> {
+  if (veo31HasExtras(a.adv)) throw new Error(VEO_31_ONE_PICTURE)
   const inp = VEO_31.build(a)
   if (!VEO_31_LITE_RESOLUTIONS.includes(String(inp.resolution))) inp.resolution = '720p'
   return inp

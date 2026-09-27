@@ -101,9 +101,9 @@ describe('eligibility with families', () => {
       for (const f of named.filter(Boolean)) expect(RUNNER_FAMILIES).toContain(f)
     }
   })
-  it('the provider set is the two generators plus every rule row the runner does not compute itself', () => {
+  it('the provider set is the two generators, Film a shot (Task 4), plus every rule row the runner does not compute itself', () => {
     const provider = Object.entries(RUNNER_NODE_RULES).filter(([, r]) => !r.local).map(([k]) => k)
-    expect([...PROVIDER_TYPES].sort()).toEqual([...new Set(['GenerateImageNode', 'GenerateVideoNode', ...provider])].sort())
+    expect([...PROVIDER_TYPES].sort()).toEqual([...new Set(['GenerateImageNode', 'GenerateVideoNode', 'FilmShotNode', ...provider])].sort())
     expect(PROVIDER_TYPES.has('Compositor')).toBe(false)
     expect(PROVIDER_TYPES.has('LoadImage')).toBe(false)
   })

@@ -38,6 +38,14 @@ export default defineNuxtConfig({
     // Set via NUXT_ANTHROPIC_API_KEY. Users may still paste their own key in
     // Settings → AI as a per-browser override; that one is sent per-request.
     anthropicApiKey: '',
+    // Server-only AWS credentials for the character face checker (AWS
+    // Rekognition CompareFaces, $0.001/image). NUXT_AWS_REGION /
+    // NUXT_AWS_ACCESS_KEY_ID / NUXT_AWS_SECRET_ACCESS_KEY. Empty keys → the
+    // SDK's default chain (env AWS_*, profile). Account must have the
+    // Organizations AI-services opt-out set (spec: Checks).
+    awsRegion: 'us-east-1',
+    awsAccessKeyId: '',
+    awsSecretAccessKey: '',
     // Max number of extra headless ComfyUI worker instances (see
     // server/utils/comfyWorkerPool.ts) parallel dispatch can spawn for
     // cloud-only prompts. Clamped to [0,4] at read time. Override via

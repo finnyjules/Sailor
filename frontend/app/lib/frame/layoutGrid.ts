@@ -37,6 +37,19 @@ export interface LayoutGridPatch {
 
 const DEFAULT_ROWS: LayoutGrid['rows'] = { mode: 'square', count: 8 }
 const roundLine = (v: number) => Math.max(16, Math.round(v / 4) * 4)
+/** The capital height (em) the suggested Line is sized for: a typical sans (Inter 0.727, Helvetica
+ *  0.717). The Layout kit sets body text so its capitals are one unit (line / 2) tall; a Line of
+ *  2 × SUGGESTED_CAP × the kit's information size (rounded UP to 4 px) keeps that size at or above
+ *  the format's legibility floor for any face with capitals up to this tall (stage 3, ruling 2). */
+export const SUGGESTED_CAP = 0.72
+const ceilLine = (v: number) => Math.max(16, Math.ceil(v / 4 - 1e-9) * 4)
+const FITS: readonly ColumnFit[] = ['stretch', 'center', 'left']
+const MODES: readonly RowMode[] = ['off', 'square', 'count']
+/** Stored rows over the defaults; an unknown mode reads as the default's. */
+function rowsOf(raw: Partial<LayoutGrid['rows']> | undefined): LayoutGrid['rows'] {
+  const r = { ...DEFAULT_ROWS, ...(raw ?? {}) }
+  return MODES.includes(r.mode) ? r : { ...r, mode: DEFAULT_ROWS.mode }
+}
 const clampInt = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, Math.round(v)))
 // Dedupes by a rounded key (so rounding artifacts collapse) but keeps each value's original,
 // unrounded precision — callers compare these against the exact numbers they were built from.
@@ -52,7 +65,7 @@ const uniq = (vs: number[]) => {
 export function suggestedLayoutGrid(W: number, H: number, fmt: FrameFormat | null, keep?: { show?: boolean; rows?: LayoutGrid['rows'] }): LayoutGrid {
   const k = kitBasics(W, H, formatSheetOpts(fmt))
   const px = W / 100
-  const line = roundLine(k.infoSize * k.infoLh * px)
+  const line = ceilLine(2 * SUGGESTED_CAP * k.infoSize * px)
   const unit = line / 2
   const margin = Math.max(unit, Math.round((k.margin * px) / unit) * unit)
   return {
@@ -72,12 +85,13 @@ function hasLayers(props: Record<string, unknown> | undefined): boolean {
 export function readLayoutGrid(props: Record<string, unknown> | undefined, W: number, H: number, fmt: FrameFormat | null): LayoutGrid {
   const raw = props?.sailor_layoutGrid as Partial<LayoutGrid> | undefined
   if (raw && raw.v === 2) {
-    if (raw.auto !== false) return suggestedLayoutGrid(W, H, fmt, { show: raw.show ?? true, rows: { ...DEFAULT_ROWS, ...(raw.rows ?? {}) } })
+    if (raw.auto !== false) return suggestedLayoutGrid(W, H, fmt, { show: raw.show ?? true, rows: rowsOf(raw.rows) })
     const s = suggestedLayoutGrid(W, H, fmt)
+    const cols = { ...s.cols, ...(raw.cols ?? {}) }
     return {
       v: 2, auto: false, show: raw.show ?? true, line: raw.line ?? s.line,
-      cols: { ...s.cols, ...(raw.cols ?? {}) },
-      rows: { ...DEFAULT_ROWS, ...(raw.rows ?? {}) },
+      cols: FITS.includes(cols.fit) ? cols : { ...cols, fit: 'stretch' },
+      rows: rowsOf(raw.rows),
     }
   }
   // Migration from the old sailor_localGrid (fractions of width).
@@ -161,4 +175,79 @@ export function layoutGridProperty(g: LayoutGrid): { sailor_layoutGrid: LayoutGr
 export function describeLayoutGrid(g: LayoutGrid): string {
   const rows = g.rows.mode === 'off' ? 'no rows' : g.rows.mode === 'square' ? 'square rows' : `${g.rows.count} rows`
   return `${g.cols.count} columns, ${rows}, line ${g.line} px${g.show ? '' : ', hidden'}`
+}
+
+/** The columns (and rows, when there are rows) a layer covers: 1-based first, and how many. */
+export interface LayoutSpan { col: number; cols: number; row: number | null; rows: number | null }
+
+/** First and last track a [lo, hi] extent covers: the first is the track whose START is nearest lo
+ *  among those that start before hi; the last is the track whose END is nearest hi among those that
+ *  end after lo. So a small box inside one track covers just that track. 0-based.
+ *  A box that overlaps NO track's interior (it sits wholly inside a gutter) covers only the single
+ *  nearest track, by distance from the box's centre to the track's centre — ties go to the lower index.
+ *  A box straddling one track edge (its nearest start is right of its nearest end) covers the track
+ *  it overlaps more — ties go to the lower index. */
+function spanIdx(tracks: Track[], lo: number, hi: number): [number, number] {
+  const overlapsAny = tracks.some(t => t.a < hi && t.a + t.w > lo)
+  if (!overlapsAny) {
+    const c = (lo + hi) / 2
+    let best = 0, bd = Infinity
+    tracks.forEach((t, i) => {
+      const d = Math.abs((t.a + t.w / 2) - c)
+      if (d < bd) { bd = d; best = i }
+    })
+    return [best, best]
+  }
+  let first = -1, last = -1, bf = Infinity, bl = Infinity
+  tracks.forEach((t, i) => {
+    if (t.a < hi) { const d = Math.abs(t.a - lo); if (d < bf) { bf = d; first = i } }
+    if (t.a + t.w > lo) { const d = Math.abs(t.a + t.w - hi); if (d < bl) { bl = d; last = i } }
+  })
+  if (first < 0) first = 0
+  if (last < 0) last = tracks.length - 1
+  if (last < first) {
+    // The box straddles one track edge without spanning a whole track: it covers the side it overlaps more.
+    const ov = (t: Track) => Math.min(hi, t.a + t.w) - Math.max(lo, t.a)
+    const pick = ov(tracks[last]!) >= ov(tracks[first]!) ? last : first
+    return [pick, pick]
+  }
+  return [first, last]
+}
+
+/** The span a box (grid px) covers. Text passes its capitals-to-last-baseline extent as y/h. */
+export function spanOf(box: { x: number; y: number; w: number; h: number }, r: ResolvedLayoutGrid): LayoutSpan {
+  const [c0, c1] = spanIdx(r.cols, box.x, box.x + box.w)
+  if (!r.rows.length) return { col: c0 + 1, cols: c1 - c0 + 1, row: null, rows: null }
+  const [r0, r1] = spanIdx(r.rows, box.y, box.y + box.h)
+  return { col: c0 + 1, cols: c1 - c0 + 1, row: r0 + 1, rows: r1 - r0 + 1 }
+}
+
+/** Where a span sits on the grid (px), clamped inside it. y/h are null when rows are off. */
+export function placeOnSpan(s: LayoutSpan, r: ResolvedLayoutGrid): { x: number; w: number; y: number | null; h: number | null } {
+  const nc = r.cols.length
+  const c0 = clampInt(s.col, 1, nc) - 1
+  const c1 = Math.min(nc - 1, c0 + Math.max(1, Math.round(s.cols)) - 1)
+  const x = r.cols[c0]!.a, w = r.cols[c1]!.a + r.cols[c1]!.w - x
+  if (!r.rows.length || s.row == null) return { x, w, y: null, h: null }
+  const nr = r.rows.length
+  const r0 = clampInt(s.row, 1, nr) - 1
+  const r1 = Math.min(nr - 1, r0 + Math.max(1, Math.round(s.rows ?? 1)) - 1)
+  const y = r.rows[r0]!.a
+  return { x, w, y, h: r.rows[r1]!.a + r.rows[r1]!.w - y }
+}
+
+/** One track plus one gap (the pitch), and the gap. A single track: its own size, no gap. */
+function pitchOf(tracks: Track[]): { pitch: number; gap: number } {
+  if (tracks.length > 1) { const p = tracks[1]!.a - tracks[0]!.a; return { pitch: p, gap: p - tracks[0]!.w } }
+  return { pitch: tracks[0]?.w ?? 0, gap: 0 }
+}
+/** How many tracks a length spans: n tracks are n pitches less one gap (the text box "col" unit). */
+export function tracksFromLength(tracks: Track[], px: number): number {
+  const { pitch, gap } = pitchOf(tracks)
+  return pitch > 0 ? (px + gap) / pitch : 0
+}
+/** The length of n tracks: n pitches less one gap. */
+export function lengthFromTracks(tracks: Track[], n: number): number {
+  const { pitch, gap } = pitchOf(tracks)
+  return Math.max(1, n * pitch - gap)
 }

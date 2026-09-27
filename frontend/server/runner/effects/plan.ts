@@ -12,14 +12,15 @@
  * widgets, the wires and the preview's name. Effects count as work (render
  * credit on a full run); nothing here is charged on its own.
  */
+import { createHash } from 'node:crypto'
 import sharp from 'sharp'
 import type { DeriveIO, NodePlan, PlanContext } from '../executors'
 import type { OutputFile, RunnerValue } from '../types'
 import { isLink } from '#shared/runner/graph'
 import { CARD_MAX_PIXELS } from '#shared/runner/eligibility'
 import {
-  EFFECT_ERROR_MESSAGES, EFFECT_MAX_WORK, EFFECT_PICTURES_TOO_LARGE, EFFECT_PICTURE_ANIMATED, EFFECT_TOO_MUCH_WORK,
-  EFFECT_PICTURE_TOO_LARGE_FOR_CLASS, EFFECT_START_SIZED_CLASSES, effectOutSize, effectPictureCap, effectPreviewName, effectSchemaOf,
+  EFFECT_ERROR_MESSAGES, EFFECT_IO_WORK_PER_VALUE, EFFECT_MAX_WORK, EFFECT_PICTURES_TOO_LARGE, EFFECT_PICTURE_ANIMATED, EFFECT_TOO_MUCH_WORK,
+  EFFECT_PICTURE_TOO_LARGE_FOR_CLASS, EFFECT_START_SIZED_CLASSES, EFFECT_TOO_MUCH_MEMORY, effectOutSize, effectPeakFits, effectPictureCap, effectPreviewName, effectSchemaOf,
 } from '#shared/runner/effects'
 import type { EffectSchema } from '#shared/runner/effectSchemas.generated'
 import { pyFloatOf, pyIntOf, pyTruthy } from '#shared/runner/pyText'
@@ -87,18 +88,18 @@ export function effectOutRefusal(
 }
 
 /** A plain message for a key a core throws (rule 6); anything else as it is. */
-function plain(e: unknown): Error {
+export function plain(e: unknown): Error {
   if (e instanceof Error && Object.prototype.hasOwnProperty.call(EFFECT_ERROR_MESSAGES, e.message)) return new Error(EFFECT_ERROR_MESSAGES[e.message])
   return e instanceof Error ? e : new Error(String(e))
 }
 
-/** A mask wire's kept files (a mask value, R1.3). */
-function wiredMask(ctx: PlanContext, name: string): OutputFile[] {
+/** A mask wire's kept files (a mask value, R1.3), and the float32 tensors kept beside them when its maker kept them (R2.8 fix round 1). */
+function wiredMask(ctx: PlanContext, name: string): { files: OutputFile[]; tensors: OutputFile[] | null } {
   const v = ctx.prompt[ctx.nodeId]!.inputs?.[name]
   if (!isLink(v)) throw new Error(EFFECT_MASK_MISSING)
   const value = ctx.valueFrom?.(v)
   if (value?.kind !== 'mask' || !value.files.length) throw new Error(EFFECT_MASK_MISSING)
-  return value.files
+  return { files: value.files, tensors: value.tensors && value.tensors.length === value.files.length ? value.tensors : null }
 }
 
 /** A kept mask's size from its PNG header. */
@@ -112,7 +113,7 @@ function maskSize(bytes: Uint8Array): { w: number; h: number } {
 }
 
 /** The 8-bit pixels of an output (or the preview) as a PNG, with its own channels. */
-async function png8(px: Uint8Array, w: number, h: number, channels: number, level: number): Promise<Uint8Array> {
+export async function png8(px: Uint8Array, w: number, h: number, channels: number, level: number): Promise<Uint8Array> {
   const out = await sharp(px, { raw: { width: w, height: h, channels: channels as 1 | 2 | 3 | 4 }, limitInputPixels: false })
     .png({ compressionLevel: level }).toBuffer()
   return new Uint8Array(out)
@@ -121,10 +122,11 @@ async function png8(px: Uint8Array, w: number, h: number, channels: number, leve
 /** One input of the node: a picture wire (its source, files, and the tensors an effect kept for them) or a mask wire. */
 type In =
   | { name: string; kind: 'image'; wire: Wired; tensors: Map<string, OutputFile> | null }
-  | { name: string; kind: 'mask'; files: OutputFile[] }
+  /** `tensors`: each mask's float32 tensor (read instead of its 16-bit PNG, which gives only the size); null: the PNGs. */
+  | { name: string; kind: 'mask'; files: OutputFile[]; tensors: OutputFile[] | null }
 
 /** Its files, one per batch index; Python's 1×1 blank as one picture with no file. */
-const batchFiles = (i: In): (OutputFile | null)[] => i.kind === 'mask' ? i.files : (i.wire.files.length ? i.wire.files : [null])
+const batchFiles = (i: In): (OutputFile | null)[] => i.kind === 'mask' ? i.tensors ?? i.files : (i.wire.files.length ? i.wire.files : [null])
 
 export function planEffect(ctx: PlanContext): NodePlan {
   const node = ctx.prompt[ctx.nodeId]!
@@ -138,19 +140,22 @@ export function planEffect(ctx: PlanContext): NodePlan {
     ...schema.images.filter(i => isLink(inputs[i.name])).map((i): In => ({
       name: i.name, kind: 'image', wire: wired(ctx, i.name), tensors: keptTensorsBehind(ctx, inputs[i.name] as [string, number]),
     })),
-    ...schema.masks.filter(m => isLink(inputs[m.name])).map((m): In => ({ name: m.name, kind: 'mask', files: wiredMask(ctx, m.name) })),
+    ...schema.masks.filter(m => isLink(inputs[m.name])).map((m): In => ({ name: m.name, kind: 'mask', ...wiredMask(ctx, m.name) })),
   ]
   const previewName = effectPreviewName(ctx.nodeId)
   if (!previewName) throw new Error('This effect’s preview can’t be named after this node')
   const masks = schema.outputs.map(o => o === 'mask')
   // Kept as the pixels its readers write: Save image / Preview image truncate the float (R1.5).
   const trunc = schema.outputs.map((o, slot) => o === 'image' && onlySavesRead(ctx.prompt, ctx.nodeId, slot))
-  // Read by an effect or a Frame: the float tensor is kept too (fix round 1).
-  const float = schema.outputs.map((o, slot) => o === 'image' && floatReadBy(ctx.prompt, ctx.nodeId, slot))
+  // Read by an effect or a Frame: the float tensor is kept too (fix round 1; a mask's too, R2.8 fix round 1).
+  const float = schema.outputs.map((o, slot) => floatReadBy(ctx.prompt, ctx.nodeId, slot, ctx.families, o === 'mask' ? 'mask' : 'picture'))
   return {
     kind: 'derive',
     async derive(io) {
       const jobs = await planJobs(io, cls, spec, ins, params, schema.outputs.length)
+      // Add noise (R2.9, ruling (e) and fix round 1): the seed's first half from its settings and its node
+      // id; the worker adds the float32 values the op receives (addNoiseSeedOf).
+      const opParams = spec.seeded ? { ...params, seedBase: addNoiseSeedBase(schema, params, ctx.nodeId) } : params
       const want = {
         round: trunc.map((t, i) => !masks[i] && !t),
         trunc: trunc.map((t, i) => !masks[i] && t),
@@ -164,7 +169,18 @@ export function planEffect(ctx: PlanContext): NodePlan {
         const tensors: OutputFile[][] = schema.outputs.map(() => [])
         let preview: OutputFile | null = null
         try {
-          await worker.effectBegin({ cls, fn: spec.op, params: spec.prepare ? spec.prepare(params) : params, count: jobs.order.length })
+          await worker.effectBegin({ cls, fn: spec.op, params: spec.prepare ? spec.prepare(opParams) : opParams, count: jobs.order.length })
+          // A two-pass effect (R2.9: Palette quantize; Add noise over a batch of more than one) first
+          // hands the worker every picture of the batch to sample or hash, in order; nothing comes back.
+          if (jobs.twoPass) {
+            for (let index = 0; index < jobs.order.length; index++) {
+              stopped()
+              const job = jobs.byKey.get(jobs.order[index]!)!
+              const handed: Record<string, PixelsPicture | EffectMaskIn | EffectTensorIn> = {}
+              for (const [name, x] of Object.entries(job.inputs)) handed[name] = await jobs.input(x)
+              await worker.effectRun({ index, inputs: handed, first: false, masks, want: { round: masks.map(() => false), trunc: masks.map(() => false), f32: masks.map(() => false) }, gather: true, hash: !!spec.seeded })
+            }
+          }
           const done = new Map<string, { files: OutputFile[]; tensors: (OutputFile | null)[] }>()
           for (let index = 0; index < jobs.order.length; index++) {
             const key = jobs.order[index]!
@@ -175,14 +191,19 @@ export function planEffect(ctx: PlanContext): NodePlan {
               const handed: Record<string, PixelsPicture | EffectMaskIn | EffectTensorIn> = {}
               for (const [name, x] of Object.entries(job.inputs)) handed[name] = await jobs.input(x)
               const first = index === 0
-              const r: EffectRunResult = await worker.effectRun({ index, inputs: handed, first, masks, want })
+              // A seeded effect on one picture hashes it in the same run (its one decode).
+              const r: EffectRunResult = await worker.effectRun({ index, inputs: handed, first, masks, want, ...(spec.seeded && !jobs.twoPass ? { hash: true } : {}) })
               out = { files: [], tensors: [] }
               for (const o of r.outputs) {
                 if ('mask16' in o) {
                   const png = await maskPngFromScanlines(o.mask16, o.w, o.h)
                   stopped()
                   out.files.push(await io.keep(png, 'png'))
-                  out.tensors.push(null)
+                  if (o.tensorFile) {
+                    stopped()
+                    out.tensors.push(await io.keep(o.tensorFile, 'bin'))
+                  }
+                  else out.tensors.push(null)
                   continue
                 }
                 const png = await png8((o.trunc8 ?? o.round8)!, o.w, o.h, o.channels, 6)
@@ -214,9 +235,8 @@ export function planEffect(ctx: PlanContext): NodePlan {
       schema.outputs.forEach((o, slot) => {
         const files = made.results[slot]!
         const kept = made.tensors[slot]!
-        values[slot] = o === 'mask'
-          ? { kind: 'mask', files }
-          : { kind: 'files', files, ...(kept.length && kept.length === files.length ? { tensors: kept } : {}) }
+        const tensors = kept.length && kept.length === files.length ? { tensors: kept } : {}
+        values[slot] = o === 'mask' ? { kind: 'mask', files, ...tensors } : { kind: 'files', files, ...tensors }
       })
       const ui = made.preview
         ? { images: [{ filename: made.preview.filename, subfolder: made.preview.subfolder, type: made.preview.type }], animated: [false] }
@@ -229,7 +249,8 @@ export function planEffect(ctx: PlanContext): NodePlan {
 /** One batch index's inputs: each input's file (null: Python's blank) and how to read it. */
 type JobInput =
   | { kind: 'image'; source: Wired['source']; file: OutputFile | null; tensor: OutputFile | null }
-  | { kind: 'mask'; file: OutputFile }
+  /** `tensor`: `file` is the mask's float32 tensor file, else its 16-bit PNG. */
+  | { kind: 'mask'; file: OutputFile; tensor: boolean }
 interface Job { inputs: Record<string, JobInput> }
 
 /**
@@ -238,9 +259,10 @@ interface Job { inputs: Record<string, JobInput> }
  * second). Measured (fix round 1 report): a 4096² × 4 picture decoded, made a
  * tensor, quantised, PNG-encoded and kept as a tensor file took 557 ms, about
  * 3 taps a value in and out together; 6 a value on each side leaves room for
- * pictures that compress slower than the synthetic one.
+ * pictures that compress slower than the synthetic one. Kept in
+ * shared/runner/effects.ts since R2.9 (the generators' widget check counts it too).
  */
-export const EFFECT_IO_WORK_PER_VALUE = 6
+export { EFFECT_IO_WORK_PER_VALUE }
 
 /**
  * The batch (rule 5), after the caps (rule 7). Inputs batched together must
@@ -279,20 +301,24 @@ async function planJobs(io: DeriveIO, cls: string, spec: EffectSpec, ins: In[], 
       }
     }
     else {
-      for (const f of i.files) {
-        const key = keyOf(f)
+      // A mask is known by its tensor file when it has one (two masks may share their 16 bits), its size read from its PNG.
+      for (const [k, f] of i.files.entries()) {
+        const t = i.tensors?.[k]
+        const key = keyOf(t ?? f)
         if (size.has(key)) continue
         stop()
         const b = await io.read(f)
         count(key, { ...maskSize(b), c: 1 })
-        bytes.set(key, b)
+        if (!t) bytes.set(key, b)
       }
     }
   }
   const lists = ins.map(batchFiles)
   const n = spec.batch === 'generator' && !lists.length ? 1 : Math.max(1, ...lists.map(l => l.length))
   if (lists.some(l => l.length !== 1 && l.length !== n)) throw new Error(EFFECT_ERROR_MESSAGES.EFFECT_BATCHES_DIFFER)
-  const firstPicture = ins.find(i => i.kind === 'image')
+  if (spec.equalBatches && lists.some(l => l.length !== n)) throw new Error(EFFECT_ERROR_MESSAGES.EFFECT_BATCHES_DIFFER)
+  // The output's size: the first picture's, or with no picture input the first mask's (R2.8: Matte grow / shrink).
+  const firstPicture = ins.find(i => i.kind === 'image') ?? ins[0]
   const firstFile = firstPicture ? batchFiles(firstPicture)[0] : undefined
   const firstSize = firstFile !== undefined ? size.get(firstFile ? keyOf(firstFile) : 'blank') ?? null : null
   const first = firstSize ? { w: firstSize.w, h: firstSize.h } : null
@@ -311,6 +337,10 @@ async function planJobs(io: DeriveIO, cls: string, spec: EffectSpec, ins: In[], 
     made += preview.w * preview.h
   }
   if (made > CARD_MAX_PIXELS) throw new Error(EFFECT_PICTURES_TOO_LARGE)
+  // The largest single array the op allocates (R2.9 fix round 1), before any pixel is decoded.
+  if (!effectPeakFits(cls, params, first, io.hosted)) throw new Error(EFFECT_TOO_MUCH_MEMORY)
+  // Two passes over the batch: a gathering effect, and a seeded one over more than one picture (its seed hashes them all first).
+  const twoPass = !!spec.gather || (!!spec.seeded && n > 1)
   const order: string[] = []
   const byKey = new Map<string, Job>()
   const uses = new Map<string, number>()
@@ -323,14 +353,15 @@ async function planJobs(io: DeriveIO, cls: string, spec: EffectSpec, ins: In[], 
       const file = l[l.length === 1 ? 0 : index] ?? null
       parts.push(file ? keyOf(file) : 'blank')
       job.inputs[i.name] = i.kind === 'mask'
-        ? { kind: 'mask', file: file! }
+        ? { kind: 'mask', file: file!, tensor: !!i.tensors }
         : { kind: 'image', source: i.wire.source, file, tensor: file ? i.tensors?.get(keyOf(file)) ?? null : null }
     })
     const key = spec.batch === 'pure' ? parts.join('\n') : String(index)
     order.push(key)
     if (byKey.has(key)) continue
     byKey.set(key, job)
-    for (const p of parts) uses.set(p, (uses.get(p) ?? 0) + 1)
+    // A two-pass effect reads each file twice.
+    for (const p of parts) uses.set(p, (uses.get(p) ?? 0) + (twoPass ? 2 : 1))
     // Reading, decoding, quantising and encoding (every input and the output, at 4 values a pixel), and the effect's own.
     const pixelsIn = parts.reduce((sum, p) => sum + ((size.get(p)?.w ?? 0) * (size.get(p)?.h ?? 0)), 0)
     const outPixels = out ? out.w * out.h : 0
@@ -340,6 +371,11 @@ async function planJobs(io: DeriveIO, cls: string, spec: EffectSpec, ins: In[], 
       work += spec.work(params, s0 ? { w: s0.w, h: s0.h } : first)
     }
   }
+  // A two-pass effect reads and decodes every input twice.
+  if (twoPass) work += EFFECT_IO_WORK_PER_VALUE * 4 * [...byKey.values()].reduce((sum, j) => sum + Object.values(j.inputs).reduce((a, x) => {
+    const s = size.get(x.file ? keyOf(x.file) : 'blank')
+    return a + (s ? s.w * s.h : 0)
+  }, 0), 0)
   // A preview of its own is quantised and encoded once, from the first picture.
   if (preview) work += EFFECT_IO_WORK_PER_VALUE * 4 * preview.w * preview.h
   if (work > EFFECT_MAX_WORK) throw new Error(EFFECT_TOO_MUCH_WORK)
@@ -352,6 +388,7 @@ async function planJobs(io: DeriveIO, cls: string, spec: EffectSpec, ins: In[], 
     const b = bytes.get(key)
     if (left <= 0) bytes.delete(key)
     if (x.kind === 'mask') {
+      if (x.tensor) return { tensorFile: await io.read(x.file).catch(() => { throw new Error(EFFECT_MASK_UNREAD) }) }
       const m = await readMaskPng(b!).catch(() => { throw new Error(EFFECT_MASK_UNREAD) })
       return { mask16: m.scanlines, w: m.w, h: m.h }
     }
@@ -363,7 +400,40 @@ async function planJobs(io: DeriveIO, cls: string, spec: EffectSpec, ins: In[], 
       throw new Error(PICTURE_UNREAD)
     }
   }
-  return { order, byKey, input }
+  return { order, byKey, input, twoPass }
+}
+
+/**
+ * Add noise's seed (R2.9, controller ruling (e); fix round 1). Python draws
+ * from the process's generator, so no two runs match; the runner seeds its
+ * own so the noise holds still while nothing changes (as ComfyUI's cache
+ * keeps it) and changes with the picture or a setting. Two halves:
+ *   - here, on the main thread: the sha256 (hex) of the node's widget values
+ *     (as execute() receives them, in the schema's order) and its node id, so
+ *     two identical Add noise nodes draw different noise, as ComfyUI's one
+ *     global stream would;
+ *   - on the worker, during the one decode: each batch index's sha256 of the
+ *     float32 values the op receives (`name:c×h×w;` then the planar floats,
+ *     little-endian), whatever file they came from (compositor/worker.ts).
+ * The op folds them with addNoiseSeedOf into an unsigned 64-bit bigint.
+ */
+export function addNoiseSeedBase(schema: EffectSchema, params: Record<string, unknown>, nodeId: string): string {
+  const widgets = Object.keys(schema.widgets).map(name => [name, params[name] ?? null])
+  return createHash('sha256').update(JSON.stringify({ widgets, node: nodeId })).digest('hex')
+}
+
+/**
+ * The seed from its two halves: FNV-1a 64 over `base|h0|h1|…` (UTF-16 code
+ * units of hex, so bytes). The noise core's own copy (core/noise.ts
+ * seedOf) must agree; the spec holds them equal through the worker.
+ */
+export function addNoiseSeedOf(base: string, hashes: readonly string[]): bigint {
+  const text = [base, ...hashes].join('|')
+  const mask = (BigInt(1) << BigInt(64)) - BigInt(1)
+  const prime = BigInt('1099511628211')
+  let h = BigInt('14695981039346656037')
+  for (let i = 0; i < text.length; i++) h = ((h ^ BigInt(text.charCodeAt(i))) * prime) & mask
+  return h
 }
 
 /**
@@ -371,16 +441,17 @@ async function planJobs(io: DeriveIO, cls: string, spec: EffectSpec, ins: In[], 
  * LoadImage), from its header (sharp, no pixel limit, so a picture over the
  * cap is refused in the effect's own words); refused as a card would refuse
  * it (16-bit, CMYK…), and a loader's animation refused (Python makes a batch
- * of its frames).
+ * of its frames) unless the node reads only the first (`firstOnly`: Painter,
+ * R2.8, takes image[:1]).
  */
-async function pictureHeader(b: Uint8Array, source: Wired['source'], maxOne: number, tooLarge: string): Promise<{ w: number; h: number; c: number }> {
+export async function pictureHeader(b: Uint8Array, source: Wired['source'], maxOne: number, tooLarge: string, firstOnly = false): Promise<{ w: number; h: number; c: number }> {
   const meta = await sharp(b, { limitInputPixels: false }).metadata().catch(() => { throw new Error(PICTURE_UNREADABLE) })
   if (!meta.width || !meta.height) throw new Error(PICTURE_UNREAD)
   if (meta.width * meta.height > maxOne) throw new Error(tooLarge)
   const why = pictureRefusalOf(meta, b)
   if (why) throw new Error(why)
   const loader = source === 'card' || source === 'load'
-  if (loader && pictureHasFrames(meta, b)) throw new Error(EFFECT_PICTURE_ANIMATED)
+  if (loader && !firstOnly && pictureHasFrames(meta, b)) throw new Error(EFFECT_PICTURE_ANIMATED)
   const turned = loader && (meta.orientation ?? 1) >= 5
   return turned ? { w: meta.height, h: meta.width, c: 4 } : { w: meta.width, h: meta.height, c: 4 }
 }

@@ -10,11 +10,12 @@ import type { Ref, ShotSheet } from '~/lib/shotdirector/types'
 import type { ValidationIssue } from '~/lib/shotdirector/rules'
 
 export const CAST_MAX = 3
-// Identity references sent per cast member = their COVER photo only. Seedance-class
-// reference-to-video maps each face image to a distinct person, so sending several
-// photos of ONE character spawns duplicate people (the "three bodies from one
-// character" bug). One cover per distinct member = one person per member.
-export const CAST_REF_CAP = 1
+// Identity references sent per cast member: at most two pictures of ONE person
+// (portrait + full-body front panel, or the cover alone — see
+// videoIdentityRefs). Never the combined sheet grid and never several photos:
+// Seedance maps visibly different views/people to distinct subjects, and the
+// clause marks the pair as one person.
+export const CAST_REF_CAP = 2
 
 export function materializeCast(
   sheet: ShotSheet,
@@ -38,11 +39,8 @@ export function materializeCast(
 
   const members = sheet.cast.filter((m, i) => sheet.cast.findIndex(x => x.slug === m.slug) === i)
   const manualImages = manual.filter(r => r.kind === 'image').length
-  // One cover per member (CAST_REF_CAP). Only warn when the manual refs + one
-  // cover each genuinely can't fit the image budget — compile then errors on the
-  // overflow. (No per-member "squeeze" anymore: each member always gets exactly
-  // their cover, never a reduced share.)
-  if (manualImages + members.length > profile.maxRefImages) {
+  const castImages = members.reduce((n, m) => n + Math.min(CAST_REF_CAP, (resolved[m.slug] ?? []).length), 0)
+  if (manualImages + castImages > profile.maxRefImages) {
     issues.push({
       level: 'warning', code: 'cast-refs-squeezed',
       message: `Manual references leave no room in the ${profile.maxRefImages}-image budget for all ${members.length} cast members — remove some manual references.`,
@@ -51,8 +49,7 @@ export function materializeCast(
 
   const castRefs: Ref[] = []
   for (const m of members) {
-    // resolved[slug] is cover-first (see useCharacters.resolveVariantRefs and the
-    // generate-time resolver), so slice(0, CAST_REF_CAP) is the cover.
+    // resolved[slug] is videoIdentityRefs order (portrait, body-front) — see useCharacters.
     const srcs = (resolved[m.slug] ?? []).slice(0, CAST_REF_CAP)
     if (!srcs.length) {
       const message = m.stateId
@@ -96,7 +93,8 @@ export function castClause(sheet: ShotSheet, profile: ModelProfile, descriptors?
   const parts = sheet.cast
     .filter(m => bySlug.has(m.slug))
     .map((m) => {
-      const tags = bySlug.get(m.slug)!.join(' ')
+      const tagList = bySlug.get(m.slug)!
+      const tags = tagList.join(' ') + (tagList.length > 1 ? ' (the same person)' : '')
       const d = descriptors?.[m.slug]?.trim()
       return d ? `${m.name} (${d}) ${tags}` : `${m.name} ${tags}`
     })

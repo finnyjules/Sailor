@@ -5,8 +5,8 @@
  * refreshes internally — there is no changed-event to dispatch or listen for.
  */
 import { ref } from 'vue'
-import type { BodySliderId, CharacterRecord, CharacterState } from '#shared/characters/types'
-import { coverFirstRefs, identityRefs, panelFilename, pickState } from '#shared/characters/types'
+import type { BodySliderId, CharacterRecord, CharacterState, IdentityRefSet } from '#shared/characters/types'
+import { coverFirstRefs, identityRefSet, panelFilename, pickState, videoIdentityRefs } from '#shared/characters/types'
 import { viewRefUrl } from '~/lib/shotdirector/refUpload'
 import { bodyPhrase } from '~/lib/characters/bodyPhrase'
 
@@ -76,10 +76,10 @@ export function useCharacters() {
   if (!fetchedOnce && typeof window !== 'undefined') void refresh()
 
   /**
-   * Resolve a list of { slug, stateId } picks to /view URLs, keyed by slug.
-   * Identity-first: once a state has a composite sheet it leads, then
-   * cover-first refs. Unknown state ids (or null) fall back to the
-   * character's default state. Unknown slugs map to an empty array.
+   * Resolve picks to the /view URLs a VIDEO model gets: at most two
+   * same-person pictures (videoIdentityRefs). Unknown state ids (or null)
+   * fall back to the character's default state. Unknown slugs map to an
+   * empty array.
    */
   function resolveStateRefs(picks: { slug: string; stateId: string | null }[]): Record<string, string[]> {
     const bySlug = new Map(characters.value.map(c => [c.slug, c]))
@@ -87,7 +87,31 @@ export function useCharacters() {
     for (const { slug, stateId } of picks) {
       const c = bySlug.get(slug)
       const state = c ? pickState(c, stateId) : undefined
-      out[slug] = identityRefs(state).map(viewRefUrl)
+      out[slug] = c ? videoIdentityRefs(c, state).map(viewRefUrl) : []
+    }
+    return out
+  }
+
+  /**
+   * Every look's identity refs by role, resolved to /view URLs — for
+   * per-model Shot Director profiles (Kling elements, Veo references) that
+   * need more than the video pair. Unknown slugs/state ids fall back like
+   * resolveStateRefs; a missing role stays `null`.
+   */
+  function resolveCastSets(picks: { slug: string; stateId: string | null }[]): Record<string, IdentityRefSet> {
+    const bySlug = new Map(characters.value.map(c => [c.slug, c]))
+    const out: Record<string, IdentityRefSet> = {}
+    for (const { slug, stateId } of picks) {
+      const c = bySlug.get(slug)
+      const state = c ? pickState(c, stateId) : undefined
+      const set = c ? identityRefSet(c, state) : { name: slug, front: null, portrait: null, bodyFront: null, bodyBack: null }
+      out[slug] = {
+        name: set.name,
+        front: set.front ? viewRefUrl(set.front) : null,
+        portrait: set.portrait ? viewRefUrl(set.portrait) : null,
+        bodyFront: set.bodyFront ? viewRefUrl(set.bodyFront) : null,
+        bodyBack: set.bodyBack ? viewRefUrl(set.bodyBack) : null,
+      }
     }
     return out
   }
@@ -191,7 +215,7 @@ export function useCharacters() {
 
   return {
     characters, loading, error, refresh,
-    resolveStateRefs, resolveRefs, coverUrl, portraitUrl, stateDescriptors,
+    resolveStateRefs, resolveRefs, resolveCastSets, coverUrl, portraitUrl, stateDescriptors,
     patchCharacter, patchState, replaceStates, removeCharacter,
   }
 }

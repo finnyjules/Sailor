@@ -25,7 +25,7 @@ export const overprint: LayoutDef = {
   premise: { overlap: [['title', 'details']] },
   accentCopy: 'details',
   fn(S, { c, ph, lines, accentCopy }) {
-    const { X, SPAN, L, M, GAP, DISPLAY, sizeFor, blockH, disp, info, infoRow, infoStack, photoIn, FOOT2, FOOT3, q } = S
+    const { X, SPAN, L, LB, M, GAP, DISPLAY, sizeFor, blockH, disp, info, infoRow, infoStack, photoIn, FOOT2, FOOT3, q } = S
     // Ruling D2 (recolour off): the big details are the layout's own accent copy, and the user's
     // details line joins the small information — the top-left column with the date beside an
     // image, else the foot row (FOOT3, the Swiss row with the details).
@@ -45,7 +45,7 @@ export const overprint: LayoutDef = {
       if (copy) els.push(...infoStack([{ s: c.details!, wt: 500, role: 'details' }, ...(c.date ? [{ s: c.date, role: 'date' }] : [])], 1, 6, M).els)
       else if (c.date) els.push(info(c.date, { x: X(1), w: SPAN(1, 6), top: M, role: 'date' }))
       els.push(photoIn({ c1: 7, c2: 12, top: M, bottom: tTop - GAP }))
-      if (c.caption) els.push(info(c.caption, { x: X(1), w: SPAN(1, 6), base: L(16), role: 'caption' }))
+      if (c.caption) els.push(info(c.caption, { x: X(1), w: SPAN(1, 6), base: LB(16), role: 'caption' }))
     } else els.push(...infoRow(c, copy ? FOOT3 : FOOT2, 'foot').els)
     return { els, did: `${q(c.details)}, set as large as the title, overprints its lower half in accent.` }
   },
@@ -103,7 +103,7 @@ export const behindPhoto: LayoutDef = {
   needs: { image: true },
   premise: { overlap: [['title', 'photo']] },
   fn(S, { c, ph, kind, lines }) {
-    const { X, XR, SPAN, L, M, RH, CAP, DISPLAY, fitSize, disp, sec, info, PHOTO_ASPECT } = S
+    const { X, XR, SPAN, L, LB, M, RH, CAP, DISPLAY, fitSize, disp, sec, info, PHOTO_ASPECT } = S
     const top = L(2.5), h = Math.min(SPAN(4, 9) * PHOTO_ASPECT, L(14) - top), w = h / PHOTO_ASPECT
     const photo: PhotoEl = { k: 'p', x: (X(4) + XR(9) - w) / 2, y: top, w, h, stand: !ph, role: 'photo', over: ['title'] }
     const ls = kind === 'sentence' ? lines : [c.title]
@@ -113,7 +113,7 @@ export const behindPhoto: LayoutDef = {
     const els: El[] = [disp(ls.join('\n'), { size, x: X(1), w: SPAN(1, 12), base, over: ['photo'], just: ls.length === 1 && ls[0]!.includes(' ') }), photo]
     if (c.details) els.push(sec(c.details, { x: X(1), w: SPAN(1, 8), top: M }))
     if (c.date) els.push(info(c.date, { x: X(9), w: SPAN(9, 12), top: M, role: 'date' }))
-    if (c.caption) els.push(info(c.caption, { x: X(1), w: SPAN(1, 6), base: L(16), role: 'caption' }))
+    if (c.caption) els.push(info(c.caption, { x: X(1), w: SPAN(1, 6), base: LB(16), role: 'caption' }))
     return { els, did: 'The title passes behind the image and shows on either side of it.' }
   },
 }
@@ -145,7 +145,7 @@ export const label: LayoutDef = {
   needs: { image: true },
   premise: { overlap: [['label', 'photo']] },
   fn(S, { c, ph, lines }) {
-    const { X, SPAN, L, M, GAP, INFO, sizeFor, disp, infoStack, PHOTO_ASPECT } = S
+    const { X, SPAN, L, LB, M, GAP, INFO, sizeFor, disp, infoStack, PHOTO_ASPECT } = S
     const h = Math.min(SPAN(1, 12) * PHOTO_ASPECT, L(10) - M), w = h / PHOTO_ASPECT
     const photo: PhotoEl = { k: 'p', x: X(1), y: M, w, h, stand: !ph, role: 'photo', over: ['label', 'details', 'date', 'caption'] }
     const pad = INFO.size * 1.1, lw = SPAN(1, 5) + 2 * pad
@@ -162,7 +162,7 @@ export const label: LayoutDef = {
       els.push(tag, ...st.els)
     }
     const top = ly + lh + GAP * 1.5
-    const size = sizeFor(lines, SPAN(1, 12), L(16) - top)
+    const size = sizeFor(lines, SPAN(1, 12), LB(16) - top)
     els.push(disp(lines.join('\n'), { size, x: X(1), top }))
     return { els, did: 'A tag in the field colour holds the smaller text and sits over the image’s corner.' }
   },
@@ -174,9 +174,9 @@ export const ghost: LayoutDef = {
   keepScale: true,
   premise: { overlap: [['title', 'details']] },
   fn(S, { c, ph, lines }) {
-    const { X, L, M, W, RH, GAP, CAP, DISPLAY, SPAN, fitSize, sizeFor, blockH, disp, infoRow, photoIn, FOOT2, q } = S
+    const { X, L, LB, M, W, RH, GAP, CAP, DISPLAY, SPAN, fitSize, sizeFor, blockH, disp, infoRow, photoIn, FOOT2, q } = S
     const size = sizeFor(lines, SPAN(1, 12), ph ? L(12) - L(8) : RH * 7)
-    const base = L(12)
+    const base = LB(12)
     const els: El[] = []
     if (c.details) {
       const gSize = Math.min(fitSize([c.details], (W - M) * 1.3, { ...DISPLAY, role: 'details' }), (L(15) - GAP - base) / (CAP * 0.5))

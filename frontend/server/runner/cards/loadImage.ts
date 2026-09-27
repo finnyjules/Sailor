@@ -13,6 +13,7 @@ import type { NodePlan, PlanContext } from '../executors'
 import { parseInputFileRef } from '../inputs'
 import { rgbTurnedPng } from '../pictures/pythonView'
 import { encodeMask, loadImageMask } from '../pictures/mask'
+import { floatReadBy, maskTensorBytes } from '../effects/tensorFiles'
 
 export function planLoadImageCard(ctx: PlanContext): NodePlan {
   const inputs = ctx.prompt[ctx.nodeId]!.inputs ?? {}
@@ -20,14 +21,18 @@ export function planLoadImageCard(ctx: PlanContext): NodePlan {
   if (!file) throw new Error('There is no picture to load')
   const onlyFrames = Object.values(ctx.prompt).every(n => n.class_type === 'Compositor' || !linksOf(n).some(l => l.from === ctx.nodeId))
   if (onlyFrames && !ctx.families?.has('cards')) return { kind: 'pass', files: [file], ui: null }
+  // Read by an effect or a Frame: the float mask is kept too, and handed on (R2.8 fix round 1).
+  const float = floatReadBy(ctx.prompt, ctx.nodeId, 1, ctx.families, 'mask')
   return {
     kind: 'derive',
     async derive(io) {
       const bytes = await io.read(file)
       const { png } = await rgbTurnedPng(bytes)
       const image = png ? await io.keep(png, 'png') : file
-      const mask = await io.keep(await encodeMask(await loadImageMask(bytes)), 'png')
-      return { values: { 0: { kind: 'files', files: [image] }, 1: { kind: 'mask', files: [mask] } }, ui: null }
+      const m = await loadImageMask(bytes)
+      const mask = await io.keep(await encodeMask(m), 'png')
+      const tensors = float ? { tensors: [await io.keep(maskTensorBytes(m), 'bin')] } : {}
+      return { values: { 0: { kind: 'files', files: [image] }, 1: { kind: 'mask', files: [mask], ...tensors } }, ui: null }
     },
   }
 }

@@ -77,7 +77,7 @@ export const perfOfferFirst: LayoutDef = {
   id: 'perfOfferFirst', name: 'Offer first', fits: [...ALL], style: 'performance', oneLineFirst: true,
   needs: { image: true }, needsContent: ['number'],
   fn(S, { c, ph, lines }) {
-    const { X, SPAN, RH, CAP, W, H, L, INFO, DISPLAY, fitSize, sizeFor, blockH, countLines, disp, info, logo, logoH, clear, gapBelow, inset, band } = S
+    const { X, SPAN, RH, CAP, W, H, LB, INFO, DISPLAY, fitSize, sizeFor, blockH, countLines, disp, info, logo, logoH, clear, gapBelow, inset, band } = S
     const num = numberOf(c)!
     const pad = inset()
     let y = topY(S)
@@ -98,7 +98,7 @@ export const perfOfferFirst: LayoutDef = {
     }
     const blockB = y + pad
     const { date: _number, caption: _caption, ...rest } = c              // both are on the panel
-    const foot = offerBox(S, rest, { x: X(1), w: SPAN(1, 12), bottom: L(16) })
+    const foot = offerBox(S, rest, { x: X(1), w: SPAN(1, 12), bottom: LB(16) })
     // The prototype does not guard it; a panel that reaches the foot leaves the product no room.
     const photo: El = foot.top - blockB > RH * 2
       ? { k: 'p', x: 0, y: blockB, w: W, h: H - blockB, stand: !ph, role: 'photo', ok: true, bleed: true }
@@ -117,7 +117,7 @@ export const perfStat: LayoutDef = {
   id: 'perfStat', name: 'Stat', fits: [...ALL], style: 'performance', oneLineFirst: true,
   needs: { image: true }, needsContent: ['stat'],
   fn(S, { c, ph }) {
-    const { X, SPAN, RH, CAP, W, L, DISPLAY, SECOND, fitSize, blockH, countLines, disp, sec, logo, logoH, clear, gapBelow, groupGap } = S
+    const { X, SPAN, RH, CAP, W, LB, DISPLAY, SECOND, fitSize, blockH, countLines, disp, sec, logo, logoH, clear, gapBelow, groupGap } = S
     const st = c.stat!
     let y = topY(S)
     const els: El[] = []
@@ -137,7 +137,7 @@ export const perfStat: LayoutDef = {
     y += blockH(n, SECOND.size, SECOND.lh)
     const top = y + groupGap()
     const { date: _number, ...rest } = c                                  // the stat is the figure
-    const foot = offerBox(S, rest, { x: X(1), w: SPAN(1, 12), bottom: L(16) })
+    const foot = offerBox(S, rest, { x: X(1), w: SPAN(1, 12), bottom: LB(16) })
     const h = foot.top - groupGap() * 0.7 - top
     els.unshift(h > RH * 3 ? { k: 'p', x: 0, y: top, w: W, h, stand: !ph, role: 'photo', bleed: true } : noRoom)
     return { els: [...els, ...foot.els], did: 'One giant figure and the line that explains it; the product runs edge to edge below.' }
@@ -149,7 +149,7 @@ export const perfReview: LayoutDef = {
   id: 'perfReview', name: 'Review', fits: [...ALL], style: 'performance', oneLineFirst: true,
   needs: { image: true }, needsContent: ['review'],
   fn(S, { c, ph }) {
-    const { X, XR, SPAN, RH, W, L, INFO, SECOND, DISPLAY, blockH, countLines, breakLines, text, disp, info, button, logo, logoH, stars, gapBelow, groupGap } = S
+    const { X, XR, SPAN, RH, W, LB, INFO, SECOND, DISPLAY, blockH, countLines, breakLines, text, disp, info, button, logo, logoH, stars, gapBelow, groupGap } = S
     const rv = c.review!
     const els: El[] = []
     let y = topY(S)
@@ -192,18 +192,18 @@ export const perfReview: LayoutDef = {
       y += blockH(n, INFO.size, INFO.lh)
     }
     const top = y + groupGap()
-    let footTop = L(16)
+    let footTop = LB(16)
     let btnMid: number | null = null
     if (c.action) {
       const bh = button(c.action, 0, 0).btn.h
-      const b = button(c.action, XR(12), L(16) - bh, { align: 'right' })
+      const b = button(c.action, XR(12), LB(16) - bh, { align: 'right' })
       els.push(b.btn, b.text)
       footTop = b.btn.y
       btnMid = b.btn.y + b.btn.h / 2
     }
     if (c.logo) {
       const h = logoH()
-      const lg = logo(X(1), btnMid != null ? btnMid - h / 2 : L(16) - h, h, { aspect: c.logo.aspect })
+      const lg = logo(X(1), btnMid != null ? btnMid - h / 2 : LB(16) - h, h, { aspect: c.logo.aspect })
       els.push(lg)
       footTop = Math.min(footTop, lg.y)
     }
@@ -222,7 +222,7 @@ export const perfVersus: LayoutDef = {
   id: 'perfVersus', name: 'Us vs them', fits: [...ALL], style: 'performance', oneLineFirst: true,
   needs: { image: true }, needsContent: ['compare'],
   fn(S, { c, ph, lines }) {
-    const { X, SPAN, RH, CAP, L, INFO, SECOND, DISPLAY, sizeFor, blockH, countLines, breakLines, text, disp, info, rule, own, gapBelow, groupGap } = S
+    const { X, SPAN, RH, CAP, LB, INFO, SECOND, DISPLAY, sizeFor, blockH, countLines, breakLines, text, disp, info, rule, own, gapBelow, groupGap } = S
     const cmp = c.compare!
     const els: El[] = []
     let y = topY(S)
@@ -260,7 +260,7 @@ export const perfVersus: LayoutDef = {
     })
     els.push(rule(X(1), y, SPAN(1, 12)))
     const { details: _details, ...rest } = c                              // the product name heads its column
-    const foot = offerBox(S, rest, { x: X(1), w: SPAN(1, 12), bottom: L(16) })
+    const foot = offerBox(S, rest, { x: X(1), w: SPAN(1, 12), bottom: LB(16) })
     // The product image grows into the height left under the table, full content width (in place
     // of the prototype's small image above it) — the same room-check other Performance ads use.
     const imgTop = y + groupGap()
@@ -298,9 +298,9 @@ export const perfBeforeAfter: LayoutDef = {
   id: 'perfBeforeAfter', name: 'Before / after', fits: [...ALL], style: 'performance', oneLineFirst: true,
   needs: { image: true }, needsContent: ['image2'],
   fn(S, { c, ph, lines }) {
-    const { X, SPAN, RH, W, L, INFO, SECOND, DISPLAY, sizeFor, blockH, disp, own, w100, gapBelow, inset } = S
+    const { X, SPAN, RH, W, LB, INFO, SECOND, DISPLAY, sizeFor, blockH, disp, own, w100, gapBelow, inset } = S
     const pad = inset()
-    const foot = offerBox(S, c, { x: X(1), w: SPAN(1, 12), bottom: L(16) })
+    const foot = offerBox(S, c, { x: X(1), w: SPAN(1, 12), bottom: LB(16) })
     const size = sizeFor(lines, SPAN(1, 12), RH * 1.6)
     const tb = foot.top - gapBelow(SECOND.size) * 1.5
     const bandTop = tb - blockH(lines.length, size, DISPLAY.lh) - pad
@@ -332,7 +332,7 @@ export const perfCallouts: LayoutDef = {
   id: 'perfCallouts', name: 'Feature callouts', fits: [...ALL], style: 'performance', oneLineFirst: true,
   needs: { image: true }, needsContent: ['list'],
   fn(S, { c, ph, lines }) {
-    const { X, XR, SPAN, RH, L, INFO, GAP, PHOTO_ASPECT, blockH, breakLines, text, leader, w100, groupGap } = S
+    const { X, XR, SPAN, RH, LB, INFO, GAP, PHOTO_ASPECT, blockH, breakLines, text, leader, w100, groupGap } = S
     const items = c.list!
     const n = items.length
     // The prototype pointed at three; two a side is the most that reads. Every line is placed (R5).
@@ -341,7 +341,7 @@ export const perfCallouts: LayoutDef = {
     const els: El[] = [...head.els]
     const y = head.bottom + groupGap()
     const { details: _details, ...rest } = c                              // as the prototype: no product name
-    const foot = offerBox(S, rest, { x: X(1), w: SPAN(1, 12), bottom: L(16) })
+    const foot = offerBox(S, rest, { x: X(1), w: SPAN(1, 12), bottom: LB(16) })
     const bottom = foot.top - groupGap()
     const h = Math.min(bottom - y, SPAN(4, 9) * PHOTO_ASPECT), w = h / PHOTO_ASPECT
     const px = (X(1) + XR(12)) / 2 - w / 2, py = y + (bottom - y - h) / 2
@@ -371,13 +371,13 @@ export const perfListicle: LayoutDef = {
   id: 'perfListicle', name: 'Reasons why', fits: [...ALL], style: 'performance', oneLineFirst: true,
   needs: { image: true }, needsContent: ['list'],
   fn(S, { c, ph, lines }) {
-    const { X, XR, SPAN, G, W, L, INFO, SECOND, DISPLAY, breakLines, text, own, groupGap } = S
+    const { X, XR, SPAN, G, W, LB, INFO, SECOND, DISPLAY, breakLines, text, own, groupGap } = S
     const items = c.list!
     const head = headStack(S, c, lines, 1, 12)
     const els: El[] = [...head.els]
     const y = head.bottom + groupGap()
     const { details: _details, ...rest } = c                              // as the prototype: no product name
-    const foot = offerBox(S, rest, { x: X(1), w: SPAN(1, 12), bottom: L(16) })
+    const foot = offerBox(S, rest, { x: X(1), w: SPAN(1, 12), bottom: LB(16) })
     const bottom = foot.top - groupGap(), slot = (bottom - y) / items.length
     if (slot < INFO.size * 3) return { els: [{ k: 'missing', why: 'no room for the list' }], did: '' }
     els.unshift({ k: 'p', x: X(8), y, w: W - X(8), h: bottom - y, stand: !ph, role: 'photo', bleed: true })
@@ -404,7 +404,7 @@ export const perfNotes: LayoutDef = {
   id: 'perfNotes', name: 'Notes app', fits: [...ALL], style: 'performance', oneLineFirst: true,
   needs: { image: true }, needsContent: ['list'],
   fn(S, { c, ph, lines }) {
-    const { X, XR, SPAN, RH, W, H, L, INFO, SECOND, PHOTO_ASPECT, sizeFor, blockH, breakLines, text, own, w100, gapBelow, groupGap } = S
+    const { X, XR, SPAN, RH, W, H, LB, INFO, SECOND, PHOTO_ASPECT, sizeFor, blockH, breakLines, text, own, w100, gapBelow, groupGap } = S
     // The notes app's own paper and amber, on purpose (ruling R6).
     const els: El[] = [{ k: 'r', x: 0, y: 0, w: W, h: H, hex: NOTES_PAPER, role: 'paper', ok: true, bleed: true }]
     let y = topY(S)
@@ -431,7 +431,7 @@ export const perfNotes: LayoutDef = {
       els.push(text(ll.join('\n'), { size: bs, ls: 0, lh: LH, x: tx, w: XR(12) - tx, top: y, role: listRole(i) }))
       y += blockH(ll.length, bs, LH) + bs * 0.6
     })
-    const top = y + groupGap(), h = Math.min(L(16) - top, SPAN(1, 7) * PHOTO_ASPECT), w = h / PHOTO_ASPECT
+    const top = y + groupGap(), h = Math.min(LB(16) - top, SPAN(1, 7) * PHOTO_ASPECT), w = h / PHOTO_ASPECT
     els.push(h > RH * 3 ? { k: 'p', x: X(1), y: top, w, h, stand: !ph, role: 'photo', radius: 1.6 } : noRoom)
     return { els, did: 'Looks like a phone note, not an ad: the headline, the list, the image pasted in. No logo, no button.' }
   },
@@ -451,9 +451,9 @@ export const perfPostit: LayoutDef = {
   id: 'perfPostit', name: 'Post-it', fits: [...ALL], style: 'performance', oneLineFirst: true,
   needs: { image: true }, needsContent: [],
   fn(S, { c, ph, lines }) {
-    const { X, SPAN, GAP, H, L, CAP, sizeFor, fitSize, blockH, text, w100, cover, band } = S
+    const { X, SPAN, GAP, H, LB, CAP, sizeFor, fitSize, blockH, text, w100, cover, band } = S
     const { date: _number, details: _details, ...cc } = c                 // the number goes on the note
-    const foot = offerBox(S, cc, { x: X(1), w: SPAN(1, 12), bottom: L(16) })
+    const foot = offerBox(S, cc, { x: X(1), w: SPAN(1, 12), bottom: LB(16) })
     const nw = SPAN(1, 7), nh = nw * 0.92, nx = X(1) + GAP, ny = topY(S) + GAP, pad = nw * 0.1, ROT = -4
     const LH = 1.02
     const T: Style = { role: 'title', ls: 0, lh: LH }, D: Style = { role: 'date', ls: 0, lh: LH }

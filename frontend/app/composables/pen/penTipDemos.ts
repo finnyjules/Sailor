@@ -1,7 +1,7 @@
 // app/composables/pen/penTipDemos.ts
 // The little looping animations on the pen toolbar's tooltip cards
-// (PenTipCard.vue): one scripted drawing per drawing/editing tool, acting out
-// the gesture in a few beats. Each demo is a pure function of t ∈ [0, 1)
+// (PenTipCard.vue): one scripted drawing per drawing/editing tool, and one for
+// Clean up, acting out the gesture in a few beats. Each demo is a pure function of t ∈ [0, 1)
 // (one loop, ~2.4 s) returning a SketchDoc the card renders through the pen's
 // own sketchPathData — so the demo looks exactly like the pen — plus the
 // cursor, whether it is pressed, and a few overlays (a highlight, a dotted
@@ -292,7 +292,31 @@ function dissolve(t: number): PenTipFrame {
   }
 }
 
+// Clean up: a shape whose top doesn't quite close and whose base sits a
+// little off level; press, and it tidies — the ends join, the base levels,
+// the old drawing stays as a faint ghost.
+function cleanup(t: number): PenTipFrame {
+  const done = t >= 0.53
+  const L = v(36, 70), R = v(124, 70), top = v(80, 22)
+  const Lo = v(36, 64), gapL = v(75, 25), gapR = v(85, 24)
+  const before = sk()
+    .path([Lo, gapL], [{ via: v(46, 36) }])
+    .path([gapR, R], [{ via: v(116, 36) }])
+    .line(Lo, R)
+  const after = sk()
+    .path([L, top, R], [{ via: v(44, 36) }, { via: v(116, 36) }])
+    .line(L, R)
+  const at = v(80, 88)
+  const cursor = track(t, [[0.04, v(140, 90)], [0.34, at], [0.64, at], [0.84, v(112, 82)]])
+  return {
+    doc: done ? after.doc : before.doc, cursor, pressed: within(t, 0.5, 0.56),
+    ghost: done ? before.doc : undefined,
+    dots: done ? [L, top, R] : [Lo, gapL, gapR, R],
+    ...sparkleAt(t, 0.53, top),
+  }
+}
+
 export const PEN_TIP_DEMOS: Record<string, (t: number) => PenTipFrame> = {
-  select, path, curve, line, circle, point, trim, cut, dissolve,
+  select, path, curve, line, circle, point, trim, cut, dissolve, cleanup,
 }
 export const PEN_DEMO_TOOLS = Object.keys(PEN_TIP_DEMOS)

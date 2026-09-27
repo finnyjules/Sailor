@@ -17,7 +17,7 @@ export const knockout: LayoutDef = {
   id: 'knockout', name: 'Knockout', fits: [...ALL],
   needs: { shape: true },
   fn(S, { c, ph, lines }) {
-    const { X, XR, SPAN, L, M, RH, GAP, SECOND, sizeFor, blockH, countLines, disp, sec, info, photoIn } = S
+    const { X, XR, SPAN, L, LB, M, RH, GAP, SECOND, sizeFor, blockH, countLines, disp, sec, info, photoIn } = S
     const bandTop = ph ? L(9) : L(5), bandBot = ph ? L(14) : L(11)
     const pad = RH * 0.6
     const ls = lines.length > 2 ? lines : [c.title]
@@ -30,7 +30,7 @@ export const knockout: LayoutDef = {
       dh = blockH(countLines(c.details, SPAN(1, 8), SECOND, SECOND.size), SECOND.size, SECOND.lh)
     }
     if (c.date) els.push(info(c.date, { x: X(9), w: SPAN(9, 12), top: M, role: 'date' }))
-    if (c.caption) els.push(info(c.caption, { x: X(1), w: SPAN(1, 6), base: L(16), role: 'caption' }))
+    if (c.caption) els.push(info(c.caption, { x: X(1), w: SPAN(1, 6), base: LB(16), role: 'caption' }))
     if (ph) els.push(photoIn({ c1: 1, c2: 12, top: M + dh + GAP, bottom: bandTop - GAP }))
     return { els, did: 'A full-width band in the ink colour; the title reversed out of it.' }
   },
@@ -41,11 +41,11 @@ export const shapeBleed: LayoutDef = {
   id: 'shapeBleed', name: 'Bleed', fits: [...ALL],
   needs: { shape: true }, ownPhoto: true,
   fn(S, { c, ph, lines }) {
-    const { X, SPAN, L, W, GAP, sizeFor, disp, sec, infoRow, FOOT2 } = S
+    const { X, SPAN, L, LB, W, GAP, sizeFor, disp, sec, infoRow, FOOT2 } = S
     const cy = L(4), rad = Math.min(W * 0.5, L(9) - cy), cx = W - rad * 0.4
     const els: El[] = [{ k: 'c', cx, cy, r: rad, photo: ph, color: 'accent', role: 'shape', bleed: true }]
     if (c.details) els.push(sec(c.details, { x: X(1), w: SPAN(1, 3), top: S.M }))
-    const base = L(14)
+    const base = LB(14)
     const size = sizeFor(lines, SPAN(1, 12), base - (cy + rad) - GAP * 1.5)
     els.push(disp(lines.join('\n'), { size, x: X(1), base }))
     els.push(...infoRow(c, FOOT2, 'foot').els)
@@ -58,7 +58,7 @@ export const badge: LayoutDef = {
   id: 'badge', name: 'Badge', fits: [...ALL], smallText: true,
   needs: { shape: true },
   fn(S, { c, ph, lines }) {
-    const { X, XR, SPAN, L, M, GAP, DISPLAY, SECOND, INFO, sizeFor, blockH, countLines, disp, sec, info, photoIn, q } = S
+    const { X, XR, SPAN, L, LB, M, GAP, DISPLAY, SECOND, INFO, sizeFor, blockH, countLines, disp, sec, info, photoIn, q } = S
     let rad = Math.min(SPAN(9, 12), L(5) - M) / 2
     // Kit fix (not in the prototype): the badge grows just enough to hold the date's real ink —
     // the renderer does not break inside a word, so on a short frame "19.09.–15.11.2026" spills
@@ -83,10 +83,10 @@ export const badge: LayoutDef = {
       els.push(sec(c.details, { x: X(1), w: SPAN(1, 7), top: M }))
       detB = M + blockH(countLines(c.details, SPAN(1, 7), SECOND, SECOND.size), SECOND.size, SECOND.lh)
     }
-    const base = L(14)
+    const base = LB(14)
     const size = sizeFor(lines, SPAN(1, 12), base - (ph ? L(9) : cy + rad + GAP))
     els.push(disp(lines.join('\n'), { size, x: X(1), base }))
-    if (c.caption) els.push(info(c.caption, { x: X(1), w: SPAN(1, 6), base: L(16), role: 'caption' }))
+    if (c.caption) els.push(info(c.caption, { x: X(1), w: SPAN(1, 6), base: LB(16), role: 'caption' }))
     const capTop = base - blockH(lines.length, size, DISPLAY.lh)
     if (ph) els.push(photoIn({ c1: 1, c2: 8, top: detB + GAP, bottom: capTop - GAP }, { ax: 'left' }))
     return { els, did: `${q(c.date)} in a small round badge, top right; the title large below.` }
@@ -98,8 +98,8 @@ export const split: LayoutDef = {
   id: 'split', name: 'Split', fits: [...ALL],
   needs: { image: true },
   fn(S, { c, ph, lines }) {
-    const { X, SPAN, L, W, GAP, SECOND, PHOTO_ASPECT, sizeFor, blockH, countLines, disp, sec, infoRow, FOOT2 } = S
-    const w = W, h = W * PHOTO_ASPECT, bottom = L(8)
+    const { X, SPAN, L, LB, W, GAP, SECOND, PHOTO_ASPECT, sizeFor, blockH, countLines, disp, sec, infoRow, FOOT2 } = S
+    const w = W, h = W * PHOTO_ASPECT, bottom = LB(8)
     const els: El[] = [{ k: 'p', x: 0, y: bottom - h, w, h, stand: !ph, role: 'photo', bleed: true }]
     let dB = bottom + GAP
     if (c.details) {
@@ -120,7 +120,7 @@ export const scatter: LayoutDef = {
   // Each arrangement is its own seeded deal of the letters into the cells.
   arrLabels: ['Deal 1', 'Deal 2', 'Deal 3'],
   fn(S, { c, ph, r }) {
-    const { X, SPAN, L, M, RH, GAP, CAP, fitSize, disp, infoRow, photoIn, FOOT3 } = S
+    const { X, SPAN, L, LB, M, RH, GAP, CAP, fitSize, disp, infoRow, photoIn, FOOT3 } = S
     const letters = [...c.title.replace(/\s+/g, '')]
     const cells: { i: number; j: number }[] = []
     for (let j = 0; j < 7; j++) for (let i = 0; i < 4; i++) {
@@ -132,7 +132,7 @@ export const scatter: LayoutDef = {
     const size = Math.min(fitSize(['W'], SPAN(1, 3) * 0.95), 2 * RH * 0.82 / CAP)
     const els: El[] = chosen.map((cc, n) => disp(letters[n]!, { size, x: X(cc.i * 3 + 1), top: L(cc.j * 2), role: 'title' + n }))
     els.push(...infoRow(c, FOOT3, 'foot').els)
-    if (ph) els.push(photoIn({ c1: 7, c2: 12, top: M, bottom: L(8) - GAP }))
+    if (ph) els.push(photoIn({ c1: 7, c2: 12, top: M, bottom: LB(8) - GAP }))
     return { els, did: 'Letters dealt into a 4 × 7 module grid, still in reading order.' }
   },
 }

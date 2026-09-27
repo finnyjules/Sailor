@@ -6,11 +6,32 @@
  */
 export type PanelSlot = 'body-front' | 'body-back' | 'portrait' | 'face-neutral' | 'face-smile'
 
-export interface CharacterPanel { slot: PanelSlot; filename: string }
-
 export type CharacterStateStatus = 'draft' | 'testing' | 'locked'
 
 export interface StressResult { passes: number; total: number; at: string }
+
+export type CheckVerdict = 'match' | 'unsure' | 'different' | 'no-face'
+export interface Check {
+  verdict: CheckVerdict
+  /** Similarity on the checker's scale (AWS Rekognition: 0–100). Absent for 'no-face'. */
+  score?: number
+  /** The face filename this check compared against — a different face makes the check stale. */
+  against: string
+  lookFit?: 'ok' | 'off'
+  note?: string
+  at: string
+}
+export interface FaceRef { filename: string; approvedAt: string }
+/** Fractions of the image (0..1) — which person, for photos with two people. */
+export interface FaceBox { x: number; y: number; w: number; h: number }
+export interface Photo { filename: string; check: Check | null; crop?: FaceBox }
+export interface Garment { id: string; filename: string; name: string }
+export interface MadeFrom { face: string; clothesKey: string; bodyKey: string; model: string }
+export interface VoiceRef { kind: 'stock' | 'trained'; id: string; label: string }
+export type CharacterOrigin = 'described' | 'photos' | 'canvas'
+export type CharacterStyle = 'photo' | 'anime'
+
+export interface CharacterPanel { slot: PanelSlot; filename: string; check?: Check | null; madeFrom?: MadeFrom | null }
 
 export interface CharacterState {
   /** Stable id. 'default' is an ordinary stored id — client-side addressing uses null for "the default". */
@@ -25,6 +46,10 @@ export interface CharacterState {
   panels: CharacterPanel[]
   /** Composite sheet filename in the input dir — THE identity asset once generated. */
   sheetImage: string | null
+  /** Clothing pieces for this look, their photos kept (sent as their own references). */
+  clothes: Garment[]
+  /** This look's own face, set when a body change moves the face and the user approves it. Null → the character's face. */
+  face: FaceRef | null
   status: CharacterStateStatus
   stressResult: StressResult | null
   updatedAt: string
@@ -41,6 +66,18 @@ export type BodySliderId = typeof BODY_SLIDERS[number]
 export interface CharacterRecord {
   name: string
   slug: string
+  /** The approved face — the anchor every picture is checked against. */
+  face: FaceRef | null
+  /** Photos of who she is, for all looks (was per-look refImages; those stay for old consumers). */
+  photos: Photo[]
+  voice: VoiceRef | null
+  origin: CharacterOrigin
+  /** The creator confirmed the right to use this person's likeness (photo/canvas origins). */
+  likenessConfirmed: boolean
+  /** Set at creation, never changes. Photo is checked by AWS, Anime by a vision model. */
+  style: CharacterStyle
+  /** Slug of the character this one was made from ("Make an anime version"), else null. */
+  linkedFrom: string | null
   states: CharacterState[]
   loraName: string | null
   trigger: string | null
@@ -81,12 +118,52 @@ export function panelFilename(state: Pick<CharacterState, 'panels'>, slot: Panel
 
 /**
  * The consumption list, identity-asset-first: once a composite sheet exists it
- * leads (so CAST_REF_CAP=1 sends the sheet); before that, cover-first refs.
+ * leads (so it is the first, highest-weighted reference); before that,
+ * cover-first refs.
  */
 export function identityRefs(state?: CharacterState): string[] {
   if (!state) return []
   const rest = coverFirstRefs(state)
   return state.sheetImage ? [state.sheetImage, ...rest] : rest
+}
+
+export interface IdentityRefSet { name: string; front: string | null; portrait: string | null; bodyFront: string | null; bodyBack: string | null }
+
+/** The look's face, else the character's approved face (spec: one face per character). */
+export function lookFaceFilename(record: CharacterRecord, state: CharacterState | undefined): string | null {
+  return state?.face?.filename ?? record.face?.filename ?? null
+}
+
+/** Every clean single-person picture of one look, by role. Never the sheet grid. */
+export function identityRefSet(record: CharacterRecord, state: CharacterState | undefined): IdentityRefSet {
+  const cover = state ? coverFirstRefs(state)[0] ?? null : null
+  const front = (state ? panelFilename(state, 'face-neutral') : null)
+    ?? lookFaceFilename(record, state)
+    ?? (state ? panelFilename(state, 'portrait') : null)
+    ?? cover
+  return {
+    name: record.name,
+    front,
+    portrait: state ? panelFilename(state, 'portrait') : null,
+    bodyFront: state ? panelFilename(state, 'body-front') : null,
+    bodyBack: state ? panelFilename(state, 'body-back') : null,
+  }
+}
+
+/**
+ * What a VIDEO model gets for one character look: at most two pictures of the
+ * same person. The combined sheet grid is never sent — Seedance's own guide
+ * warns multi-view images read as several people. Portrait + full-body front
+ * come from one generation, so they are one person; the face stands in for a
+ * missing portrait; without panels, only the front (cover) alone — two photos
+ * could be two different people.
+ */
+export function videoIdentityRefs(record: CharacterRecord, state: CharacterState | undefined): string[] {
+  const set = identityRefSet(record, state)
+  const refs = [set.portrait ?? lookFaceFilename(record, state), set.bodyFront]
+    .filter((f): f is string => !!f)
+  if (refs.length) return [...new Set(refs)]
+  return set.front ? [set.front] : []
 }
 
 /** Visible text for a non-locked state's flag in cast/state pickers — never hidden, just badged. */
@@ -110,7 +187,7 @@ export function draftBadge(status: CharacterStateStatus): string | null {
 export function emptyState(id: string, label: string): CharacterState {
   return {
     id, label, descriptor: '', refImages: [], coverIndex: 0,
-    panels: [], sheetImage: null, status: 'draft', stressResult: null,
+    panels: [], sheetImage: null, clothes: [], face: null, status: 'draft', stressResult: null,
     updatedAt: '',
   }
 }

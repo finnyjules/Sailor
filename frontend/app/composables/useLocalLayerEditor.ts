@@ -13,7 +13,7 @@ import {
   type PostEffect,
   createTextLayer, createRectLayer, createEllipseLayer, createLineLayer, createImageLayer,
   createPolygonLayer, createStarLayer,
-  localLayerBox, textVAlignCenterOffset, shapeToPathLayer, withWiredContent,
+  localLayerBox, textVAlignCenterOffset, shapeToPathLayer, withWiredContent, cornerPinActive,
   type WiredContentProvider, type WiredLayer,
 } from '~/composables/useCompositorLayers'
 import { svgToPathLayers, pathLayerBoolean, type BooleanOp } from '~/composables/useVectorSvg'
@@ -31,7 +31,9 @@ import { imageUrlToFile } from '~/lib/canvas/imageUrlToFile'
 import { syncAllWiredWidgets, wiredLayerHeight, type ContentDims } from '~/lib/compositor/wiredLayer'
 import { inject, type Ref } from 'vue'
 import type { BrandKit } from '~~/shared/brand/types'
-import { readLayoutGrid, resolveLayoutGrid, layoutGridProperty, type LayoutGrid, type ResolvedLayoutGrid } from '~/lib/frame/layoutGrid'
+import { readLayoutGrid, resolveLayoutGrid, layoutGridProperty, spanOf, placeOnSpan, type LayoutGrid, type LayoutSpan, type ResolvedLayoutGrid } from '~/lib/frame/layoutGrid'
+import { textMetrics, textMetricsGeneration } from '~/lib/frame/textMetrics'
+import { textSnapY, baselineRoundDy, resnapReach, type TextMarks } from '~/lib/frame/gridSnap'
 import { formatFor } from '~/lib/frame/formats'
 import { readFrameSizeState, writeFrameSizeState, type FrameSizeState } from '~/lib/frame/frameSize'
 import { readFrameLight, sanitizeLight, type FrameLight } from '~/lib/compositor/frameLight'
@@ -138,6 +140,27 @@ export function cornerResizableKind(kind: string): boolean {
 export function textBoxResizable(l: { kind: string; boxW?: number; boxH?: number; runs?: unknown[] } | null | undefined): boolean {
   if (!l || l.kind !== 'text' || l.runs?.length) return false
   return ((l.boxW ?? 0) > 0) || ((l.boxH ?? 0) > 0)
+}
+/** A layer whose WIDTH can be set to a span of columns (the Layer section's column Span): boxes,
+ *  wired layers (the height follows) and flowing text (it gets a text box of that width). */
+export function canSpanColumns(l: { kind: string; runs?: unknown[]; path?: unknown }): boolean {
+  if (l.kind === 'text') return !l.runs?.length && !l.path
+  return resizableKind(l.kind) || l.kind === 'wired'
+}
+/** A layer whose HEIGHT can be set to a span of rows: boxes only (text and wired follow their content). */
+export function canSpanRows(l: { kind: string }): boolean {
+  return resizableKind(l.kind)
+}
+/** Why a layer can't take a column / row span — the disabled Span field's tooltip. Undefined where it can. */
+export function spanReasons(l: { kind: string; runs?: unknown[]; path?: unknown }): { cols?: string; rows?: string } {
+  const cols = canSpanColumns(l) ? undefined
+    : l.kind === 'text' ? (l.path ? 'Text on a path follows its path' : 'Placed lines keep their own layout')
+      : "This layer's size can't follow columns"
+  const rows = canSpanRows(l) ? undefined
+    : l.kind === 'text' ? 'Text height follows its lines'
+      : l.kind === 'wired' ? 'Its height follows its content'
+        : "This layer's size can't follow rows"
+  return { cols, rows }
 }
 
 /** Compute handle positions (corners, edges, rotation, center) from box geometry
@@ -829,6 +852,8 @@ export function useLocalLayerEditor(opts: EditorOpts) {
   const MOVE_SLOP_PX = 4 // a press is a click until it travels this far (screen px)
   /** A move drag that has passed the slop — the overlay fades its modules in only then. */
   const dragMoving = computed(() => drag.value?.type === 'move' && !!(drag.value as any).moved)
+  /** Any editor gesture (move, resize, scale, rotate, group resize) is live. */
+  const dragging = computed(() => drag.value != null)
 
   // Grid snap lines, normalized to [0,1]. Only while the grid is shown — a hidden guide never
   // pulls a layer. Recomputed when the grid or the canvas dims change, not per pointer event.
@@ -879,25 +904,58 @@ export function useLocalLayerEditor(opts: EditorOpts) {
     attach()
   }
 
-  /** Snap the primary layer's edges/center to other layers + canvas center.
-   *  Returns adjusted (dx,dy) and sets the visible guide lines. */
+  /** A flowing text layer's capitals and baselines in grid (design) px, for a stored y — what text
+   *  snaps by (spec "Snapping"). Null for anything else, and for rotated or corner-pinned text (it
+   *  snaps as a box). */
+  function gridTextMarks(l: LocalLayer, y: number): TextMarks | null {
+    if (l.kind !== 'text' || l.rotation || cornerPinActive(l.cornerPin)) return null
+    const { w: Wd, h: Hd } = gridDims()
+    const m = textMetrics(l as TextLayer, Wd)
+    if (!m || !m.baselines.length) return null
+    const top = y * Hd + textVAlignCenterOffset(l, m.boxH) - m.boxH / 2
+    return { capTop: top + m.capTop, baselines: m.baselines.map(b => top + b) }
+  }
+
+  /** Snap the primary layer's edges/center to other layers + canvas center + the layout grid.
+   *  Returns adjusted (dx,dy) and sets the visible guide lines. With the grid shown, text snaps its
+   *  capitals / last baseline to the rows (else its first baseline to the baseline grid), and a box
+   *  with nothing in reach rounds its top to the baseline grid. */
   function applySnap(primaryId: string, ox: number, oy: number, dx: number, dy: number) {
     const W = dims().w, H = dims().h
     const prim = localLayers.value.find(l => l.id === primaryId)
     if (!prim) return { dx, dy }
     const b = boxPx(prim); const hx = b.w / 2 / W, hy = b.h / 2 / H
-    const cx = ox + dx, cy = oy + dy
+    // Snap the DRAWN box: valign shifts a text box's centre off its stored y (as hitTest does).
+    // The offset is constant during a move, so the returned dy applies to the stored y as-is.
+    const cx = ox + dx, cy = oy + dy + textVAlignCenterOffset(prim, b.h) / H
     const movingIds = new Set((drag.value as any)?.origins?.map((o: any) => o.id) ?? [primaryId])
     const others = [] as { cx: number; cy: number; hx: number; hy: number }[]
     for (const l of localLayers.value) {
       if (movingIds.has(l.id)) continue
       const lb = boxPx(l)
-      others.push({ cx: l.x, cy: l.y, hx: lb.w / 2 / W, hy: lb.h / 2 / H })
+      others.push({ cx: l.x, cy: l.y + textVAlignCenterOffset(l, lb.h) / H, hx: lb.w / 2 / W, hy: lb.h / 2 / H })
     }
     const gl = gridSnapLines.value
-    const res = computeSnapAdjust({ cx, cy, hx, hy }, others, SNAP_PX / W, SNAP_PX / H, [0, 0.5, 1], gl.xs, gl.ys)
-    snapGuides.value = { vx: res.guideX, hy: res.guideY }
-    return { dx: dx + res.dx, dy: dy + res.dy }
+    // Threshold in SCREEN px (the artboard's on-screen rect), like resize — steady at any zoom.
+    const r = getRect()
+    const thX = SNAP_PX / (r?.width || W), thY = SNAP_PX / (r?.height || H)
+    const res = computeSnapAdjust({ cx, cy, hx, hy }, others, thX, thY, [0, 0.5, 1], gl.xs, gl.ys)
+    let ady = res.dy, guideY = res.guideY
+    if (layoutGrid.value.show) {
+      const g = layoutGridResolved.value, Hd = gridDims().h
+      const marks = gridTextMarks(prim, oy + dy)
+      if (marks) {
+        // Text's y follows only the text rule while the grid is shown (its box edges aren't what you see).
+        const t = textSnapY(marks, g, thY * Hd)
+        ady = t.dy / Hd
+        guideY = t.guide != null ? t.guide / Hd : null
+      } else if (guideY == null) {
+        // Nothing within reach: the top rounds to the baseline grid.
+        ady = baselineRoundDy((cy - hy) * Hd, g.unit) / Hd
+      }
+    }
+    snapGuides.value = { vx: res.guideX, hy: guideY }
+    return { dx: dx + res.dx, dy: dy + ady }
   }
   function startScale(e: PointerEvent) {
     e.preventDefault(); e.stopPropagation()
@@ -1013,15 +1071,32 @@ export function useLocalLayerEditor(opts: EditorOpts) {
       // BOTH axes, exactly like a rect's.
       const cur = localLayers.value.find(l => l.id === d.id)
       const locked = aspectLockedResizeKind(cur?.kind ?? '')
-      // Snap the dragged corner/edge to the layout grid (unrotated layers; ⌥ turns it off).
+      // Snap the box EDGE the handle moves to the layout grid (unrotated layers; ⌥ turns it
+      // off). The edge follows the pointer by (p − p0), wherever inside the handle the press
+      // landed, so the edge — not the pointer — is what is compared with the lines; the pointer
+      // is then shifted by the same amount. Only the axes the handle moves snap or show a guide.
       let px = nx * W, py = ny * H
       if (!e.altKey && !d.rot) {
-        const gl = gridSnapLines.value, th = SNAP_PX * W / r.width   // screen px → design px
+        const gl = gridSnapLines.value
+        const thX = SNAP_PX * W / r.width, thY = SNAP_PX * H / r.height   // screen px → editor px
+        const sx = /l$/.test(d.handle) ? -1 : /r$/.test(d.handle) ? 1 : 0
+        const sy = d.handle.startsWith('t') ? -1 : d.handle.startsWith('b') ? 1 : 0
+        const nearest = (lines: number[], scale: number, edge: number, th: number) => {
+          let best: number | null = null
+          for (const f of lines) { const v = f * scale; if (Math.abs(v - edge) < th && (best == null || Math.abs(v - edge) < Math.abs(best - edge))) best = v }
+          return best
+        }
         let gx: number | null = null, gy: number | null = null
-        for (const x of gl.xs) { const v = x * W; if (Math.abs(v - px) < th && (gx == null || Math.abs(v - px) < Math.abs(gx - px))) gx = v }
-        for (const y of gl.ys) { const v = y * H; if (Math.abs(v - py) < th && (gy == null || Math.abs(v - py) < Math.abs(gy - py))) gy = v }
-        if (gx != null) px = gx
-        if (gy != null) py = gy
+        if (sx) {
+          const edge = d.start.cx + sx * d.start.w / 2 + (px - d.p0.x)
+          gx = nearest(gl.xs, W, edge, thX)
+          if (gx != null) px += gx - edge
+        }
+        if (sy && cur?.kind !== 'text') {   // a text box's height follows its text (spec "Snapping")
+          const edge = d.start.cy + sy * d.start.h / 2 + (py - d.p0.y)
+          gy = nearest(gl.ys, H, edge, thY)
+          if (gy != null) py += gy - edge
+        }
         snapGuides.value = { vx: gx != null ? gx / W : null, hy: gy != null ? gy / H : null }
       } else snapGuides.value = { vx: null, hy: null }
       const box = resizeBox(d.start, d.rot, d.handle, d.p0, { x: px, y: py }, { aspect: e.shiftKey || locked, fromCenter: e.altKey })
@@ -1075,8 +1150,8 @@ export function useLocalLayerEditor(opts: EditorOpts) {
   // Keys off the same `gridSnapLines` the drag-snap uses, so a re-snapped layer's
   // edges always land exactly on the lines the overlay draws.
 
-  /** Snap each currently-selected layer's box edges to the nearest grid line,
-   *  independently per layer, in one history step. A large threshold (0.5) means
+  /** Snap each currently-selected layer to the grid: box edges to the nearest lines; text by its
+   *  capitals and baselines. Independently per layer, in one history step. A large threshold (0.5) means
    *  it always finds the nearest line rather than requiring the layer to already
    *  be close — "re-snap", not "snap if close". No-op with the grid off or an
    *  empty selection. */
@@ -1086,17 +1161,103 @@ export function useLocalLayerEditor(opts: EditorOpts) {
     const sel = selectedLayers.value
     if (!sel.length) return
     const W = dims().w, H = dims().h
+    const g = layoutGridResolved.value, Hd = gridDims().h
     const patches = new Map<string, { x: number; y: number }>()
     for (const l of sel) {
       const b = boxPx(l)
       const hx = b.w / 2 / W, hy = b.h / 2 / H
-      const res = computeSnapAdjust({ cx: l.x, cy: l.y, hx, hy }, [], 0.5, 0.5, [], gl.xs, gl.ys)
-      if (res.dx || res.dy) patches.set(l.id, { x: l.x + res.dx, y: l.y + res.dy })
+      // The DRAWN centre (valign offset, as hitTest); the offset is unchanged by a move, so
+      // the adjustment applies to the stored y directly.
+      const res = computeSnapAdjust({ cx: l.x, cy: l.y + textVAlignCenterOffset(l, b.h) / H, hx, hy }, [], 0.5, 0.5, [], gl.xs, gl.ys)
+      let dy = res.dy
+      // Text: capitals / last baseline to the nearest row, else the baseline grid — as a move does.
+      const marks = gridTextMarks(l, l.y)
+      if (marks) dy = textSnapY(marks, g, resnapReach(g)).dy / Hd
+      if (res.dx || dy) patches.set(l.id, { x: l.x + res.dx, y: l.y + dy })
     }
     if (!patches.size) return
     recordHistory()
     commit(localLayers.value.map(l => (patches.has(l.id) ? stripOwner({ ...l, ...patches.get(l.id)! } as LocalLayer) : l)))
   }
+
+  // ── Where a layer sits on the grid (the Layer section's Column / Span, Row / Span) ─────────
+  /** The layer's box in grid (design) px. Text runs from its capitals to its last baseline, so its
+   *  rows are counted from the capitals (spec "The editor"). */
+  function layerGridMeasure(l: LocalLayer): { box: { x: number; y: number; w: number; h: number }; marks: TextMarks | null } {
+    const { w: Wd, h: Hd } = gridDims()
+    // Measured at the design size (not the display box scaled per axis), so a rounded display
+    // size can't put a typed Row a fraction off the row.
+    const b = withWiredContent(opts.wiredContent, () => localLayerBox(scratchCtx(), l, Wd, Hd))
+    const x = l.x * Wd - b.w / 2
+    const marks = gridTextMarks(l, l.y)
+    if (marks) return { box: { x, y: marks.capTop, w: b.w, h: Math.max(1, marks.baselines[marks.baselines.length - 1]! - marks.capTop) }, marks }
+    const cy = l.y * Hd + textVAlignCenterOffset(l, b.h)
+    return { box: { x, y: cy - b.h / 2, w: b.w, h: b.h }, marks: null }
+  }
+  function layerGridBox(l: LocalLayer): { x: number; y: number; w: number; h: number } {
+    return layerGridMeasure(l).box
+  }
+  function layerSpan(l: LocalLayer): LayoutSpan {
+    return spanOf(layerGridBox(l), layoutGridResolved.value)
+  }
+  /** The single selected layer's grid box, measured once per change and shared by the marks, the
+   *  Layer section's fields and the drag's covered cells. Re-measures when a web font loads. */
+  const selectedGridMeasure = computed(() => {
+    if (selectedIds.value.size > 1) return null
+    const l = selected.value; if (!l) return null
+    void textMetricsGeneration.value
+    return layerGridMeasure(l)
+  })
+  const selectedGridBox = computed(() => selectedGridMeasure.value?.box ?? null)
+  const selectedSpan = computed<LayoutSpan | null>(() => {
+    const b = selectedGridBox.value
+    return b ? spanOf(b, layoutGridResolved.value) : null
+  })
+  /** Move (Column, Row) or resize (Span) a layer onto the grid, in one undo step. A span the layer
+   *  can't take (text rows, a line's columns) changes nothing and records nothing. */
+  function setLayerSpan(id: string, p: Partial<LayoutSpan>) {
+    const l = localLayers.value.find(x => x.id === id); if (!l) return
+    const g = layoutGridResolved.value
+    const { w: Wd, h: Hd } = gridDims()
+    const box = layerGridBox(l)
+    const cur = spanOf(box, g)
+    const want = { ...cur, ...p }
+    // A first column/row is clamped so the span still fits: typing Column never pushes a
+    // multi-column box off the grid.
+    const cols = p.cols != null && canSpanColumns(l) ? Math.max(1, Math.round(p.cols)) : cur.cols
+    want.col = Math.min(Math.max(1, Math.round(want.col)), Math.max(1, g.cols.length - cols + 1))
+    if (want.row != null && g.rows.length) {
+      const rows = p.rows != null && canSpanRows(l) ? Math.max(1, Math.round(p.rows)) : (cur.rows ?? 1)
+      want.row = Math.min(Math.max(1, Math.round(want.row)), Math.max(1, g.rows.length - rows + 1))
+    }
+    const place = placeOnSpan(want, g)
+    const patch: Record<string, number> = {}
+    if (p.col != null || (p.cols != null && canSpanColumns(l))) {
+      const spanCols = p.cols != null && canSpanColumns(l)
+      const w = spanCols ? place.w : box.w
+      patch.x = (place.x + w / 2) / Wd                    // every kind's x is its box centre
+      if (spanCols) patch[l.kind === 'text' ? 'boxW' : 'w'] = w / Wd
+    }
+    if (place.y != null && (p.row != null || (p.rows != null && canSpanRows(l)))) {
+      if (l.kind === 'text') patch.y = l.y + (place.y - box.y) / Hd   // the capitals to the row top
+      else {
+        const spanRows = p.rows != null && canSpanRows(l)
+        const h = spanRows ? place.h! : box.h
+        patch.y = (place.y + h / 2) / Hd                  // boxes: no valign offset
+        if (spanRows) patch.h = h / Wd                    // h is normalised to width
+      }
+    }
+    if (!Object.keys(patch).length) return
+    recordHistory()
+    commit(localLayers.value.map(x => (x.id === id ? stripOwner({ ...x, ...patch } as LocalLayer) : x)))
+  }
+  /** The single selected text's capitals and baselines (grid px) with its box's x and width — the
+   *  overlay's accent marks. Null unless the grid is shown and exactly one flowing text is selected. */
+  const selectedTextMarks = computed(() => {
+    if (!layoutGrid.value.show) return null
+    const g = selectedGridMeasure.value; if (!g?.marks) return null
+    return { capTop: g.marks.capTop, baselines: g.marks.baselines, x: g.box.x, w: g.box.w }
+  })
 
   // Consumer binds these to the artboard element (capture phase recommended so
   // it wins over node-drag). Returns true if it handled (hit a layer).
@@ -1232,7 +1393,7 @@ export function useLocalLayerEditor(opts: EditorOpts) {
     writeBackground: writeBg, // non-recording: for callers that batch a layers write + background write under ONE recordHistory()
     postEffects, setPostEffects,
     frameLight, setFrameLight,
-    layoutGrid, layoutGridResolved, setLayoutGrid, ensureLayoutGrid, dragMoving, gridSnapLines,
+    layoutGrid, layoutGridResolved, setLayoutGrid, ensureLayoutGrid, dragMoving, dragging, gridSnapLines,
     undo, redo, canUndo, canRedo, historyRev,
     selectedIds, selectedLayers, toggleSelect, applyBoolean, alignSelected, alignToFrame, nudgeSelection, duplicateSelection, handleEditorKey,
     copySelection, pasteClipboard,
@@ -1242,5 +1403,6 @@ export function useLocalLayerEditor(opts: EditorOpts) {
     localGroups, commitBoth, writeGroups, setLayerGroup, setGroupParent, selectGroupById,
     snapGuides, marquee, startMarquee, moveMarquee, endMarquee,
     resnapSelected,
+    layerGridBox, layerSpan, setLayerSpan, selectedTextMarks, selectedGridBox, selectedSpan,
   }
 }

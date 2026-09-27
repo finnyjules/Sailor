@@ -176,28 +176,37 @@ export function pixelsCore() {
     return out
   }
 
-  /** ImageToMask: channel `index` of the picture's tensor, as a mask's 16-bit scanlines. No float tensor is built. */
-  function channelMask16(p: PixelsPicture, index: number): { w: number; h: number; scanlines: Uint8Array } {
+  /**
+   * ImageToMask: channel `index` of the picture's tensor, as a mask's 16-bit
+   * scanlines; with `float` (R2.8 fix round 1: read by an effect), the float32
+   * mask Python holds too (`data`), which the runner hands on.
+   */
+  function channelMask16(p: PixelsPicture, index: number, float = false): { w: number; h: number; scanlines: Uint8Array; data?: Float32Array } {
     if (index >= tensorChannels(p)) throw new Error('This picture has no alpha channel to make a mask from')
     const d = p.data
-    if (!d) return { w: p.w, h: p.h, scanlines: mask16Of(p.w, p.h, () => 0) }
+    if (!d) return { w: p.w, h: p.h, scanlines: mask16Of(p.w, p.h, () => 0), ...(float ? { data: new Float32Array(p.w * p.h) } : {}) }
     const table = channelTable(p.source, index)
-    return { w: p.w, h: p.h, scanlines: mask16Of(p.w, p.h, i => table[d[i * 4 + index]!]!) }
+    const scanlines = mask16Of(p.w, p.h, i => table[d[i * 4 + index]!]!)
+    if (!float) return { w: p.w, h: p.h, scanlines }
+    const data = new Float32Array(p.w * p.h)
+    for (let i = 0; i < data.length; i++) data[i] = table[d[i * 4 + index]!]!
+    return { w: p.w, h: p.h, scanlines, data }
   }
 
   /**
    * Text mask's clip, first half: the render's luma L (mw × mh) as the mask
    * 1 − L/255, resized to the source (w × h, a contiguous (1, 1, H, W)
-   * tensor) when the sizes differ. Returns 1 − mask for `clip` and the mask's
-   * 16-bit scanlines (the node's mask output).
+   * tensor) when the sizes differ. Returns 1 − mask for `clip`, the mask's
+   * 16-bit scanlines (the node's mask output) and the float32 mask itself
+   * (`mask`: handed on to an effect, R2.8 fix round 1).
    */
-  function clipBegin(l: Uint8Array, mw: number, mh: number, w: number, h: number): { alpha: Float32Array; scanlines: Uint8Array } {
+  function clipBegin(l: Uint8Array, mw: number, mh: number, w: number, h: number): { alpha: Float32Array; scanlines: Uint8Array; mask: Float32Array } {
     let m: Float32Array = new Float32Array(mw * mh)
     for (let i = 0; i < m.length; i++) m[i] = f(1 - f(l[i]! / 255))
     if (mw !== w || mh !== h) m = bilinear(m, 1, mh, mw, h, w, false)
     const alpha = new Float32Array(w * h)
     for (let i = 0; i < alpha.length; i++) alpha[i] = f(1 - m[i]!)
-    return { alpha, scanlines: mask16Of(w, h, i => m[i]!) }
+    return { alpha, scanlines: mask16Of(w, h, i => m[i]!), mask: m }
   }
 
   /**
@@ -226,6 +235,28 @@ export function pixelsCore() {
       }
     }
     return { w: p.w, h: p.h, channels: c, px }
+  }
+
+  /**
+   * Text mask's clip of a picture an effect made (R2.8 fix round 2): its kept
+   * float32 tensor (planar, `c` channels) × alpha, quantised as `clip` does.
+   */
+  function clipPlanar(c: number, w: number, h: number, data: Float32Array, alpha: Float32Array, trunc = false): { w: number; h: number; channels: 3 | 4; px: Uint8Array } {
+    const n = w * h
+    if (alpha.length !== n) throw new Error('The pictures this card reads are of different sizes')
+    if (c !== 3 && c !== 4) throw new Error('A picture this card reads could not be read')
+    const px = new Uint8Array(n * c)
+    for (let k = 0; k < c; k++) {
+      for (let i = 0; i < n; i++) {
+        const v = f(data[k * n + i]! * alpha[i]!)
+        if (trunc) {
+          const t = f(255 * v)
+          px[i * c + k] = t > 0 ? (t > 255 ? 255 : Math.trunc(t)) : 0
+        }
+        else px[i * c + k] = roundHalfEven(f((v > 0 ? (v > 1 ? 1 : v) : 0) * 255))
+      }
+    }
+    return { w, h, channels: c, px }
   }
 
   /**
@@ -359,6 +390,33 @@ export function pixelsCore() {
   }
 
   /**
+   * Pillow's Image.resize(size, LANCZOS) of an RGBA picture (interleaved 8-bit):
+   * resized premultiplied (RGBa, MULDIV255), then divided back (255·c / a,
+   * truncated; alpha 0 and 255 kept as they are). Save image's resize (R1.5)
+   * and Painter's file (R2.8).
+   */
+  function pilResizeRgba(px: Uint8Array, w: number, h: number, ow: number, oh: number, stop?: () => boolean): Uint8Array {
+    const pre = new Uint8Array(px.length)
+    for (let i = 0; i < px.length; i += 4) {
+      const a = px[i + 3]!
+      pre[i] = mulDiv255(px[i]!, a)
+      pre[i + 1] = mulDiv255(px[i + 1]!, a)
+      pre[i + 2] = mulDiv255(px[i + 2]!, a)
+      pre[i + 3] = a
+    }
+    const out = pilResize(pre, w, h, 4, ow, oh, stop)
+    for (let i = 0; i < out.length; i += 4) {
+      const a = out[i + 3]!
+      if (a === 0 || a === 255) continue
+      for (let b = 0; b < 3; b++) {
+        const v = Math.trunc((255 * out[i + b]!) / a)
+        out[i + b] = v > 255 ? 255 : v
+      }
+    }
+    return out
+  }
+
+  /**
    * Everything save_images does to a picture before encoding it: the tensor's
    * bytes (saveBytes); Image.resize(LANCZOS) to ow × oh when that differs;
    * for JPEG (`flatten`), an RGBA picture pasted onto white with its alpha as
@@ -368,28 +426,7 @@ export function pixelsCore() {
     const t = saveBytes(p)
     let px = t.px
     const c = t.channels
-    if (ow !== t.w || oh !== t.h) {
-      if (c === 4) {
-        const pre = new Uint8Array(px.length)
-        for (let i = 0; i < px.length; i += 4) {
-          const a = px[i + 3]!
-          pre[i] = mulDiv255(px[i]!, a)
-          pre[i + 1] = mulDiv255(px[i + 1]!, a)
-          pre[i + 2] = mulDiv255(px[i + 2]!, a)
-          pre[i + 3] = a
-        }
-        px = pilResize(pre, t.w, t.h, 4, ow, oh, stop)
-        for (let i = 0; i < px.length; i += 4) {
-          const a = px[i + 3]!
-          if (a === 0 || a === 255) continue
-          for (let b = 0; b < 3; b++) {
-            const v = Math.trunc((255 * px[i + b]!) / a)
-            px[i + b] = v > 255 ? 255 : v
-          }
-        }
-      }
-      else px = pilResize(px, t.w, t.h, 3, ow, oh, stop)
-    }
+    if (ow !== t.w || oh !== t.h) px = c === 4 ? pilResizeRgba(px, t.w, t.h, ow, oh, stop) : pilResize(px, t.w, t.h, 3, ow, oh, stop)
     if (!flatten || c === 3) return { w: ow, h: oh, channels: c, px }
     const n = ow * oh
     const rgb = new Uint8Array(n * 3)
@@ -403,7 +440,7 @@ export function pixelsCore() {
     return { w: ow, h: oh, channels: 3, px: rgb }
   }
 
-  return { roundHalfEven, bilinearKind, bilinear, tensorChannels, channelTable, mask16Of, channelMask16, clipBegin, clip, saveBytes, pilResize, savePixels }
+  return { roundHalfEven, bilinearKind, bilinear, tensorChannels, channelTable, mask16Of, channelMask16, clipBegin, clip, clipPlanar, saveBytes, pilResize, pilResizeRgba, savePixels }
 }
 
 export type PixelsCore = ReturnType<typeof pixelsCore>

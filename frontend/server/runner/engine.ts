@@ -12,7 +12,7 @@ import { staticWiredTexts } from '#shared/runner/staticValues'
 import { NO_VALID_OUTPUTS_MESSAGE, pruneInvalidOutputs, type ComfyNodeError } from '#shared/runner/validate'
 import { blockedModelUses, blockedModelsResponse } from '#shared/runner/blockedModels'
 import {
-  GATE_CLASS, dependenciesOf, downstreamNodes, legNodes, upstreamStage,
+  GATE_CLASS, dependenciesOf, downstreamNodes, isLink, legNodes, upstreamStage,
   type ApiPrompt, type TakeGateState,
 } from '#shared/runner/graph'
 import { RUNNER_NOT_ELIGIBLE, type GateChoice, type RunnerMessage } from '#shared/runner/messages'
@@ -32,6 +32,8 @@ import type { BackupSettings } from './config'
 import { linkedFileCheck, measuredInputProblem, requestProblems, unreadableInputWords } from './requestRules'
 import { isReusable, requestFingerprint } from './fingerprint'
 import { assertFilesOwned, collectInputFiles, parseInputFileRef, type OwnershipCheck } from './inputs'
+import { shotRefFilenames } from './shotRefs'
+import { parseJsonObject } from './generators/opts'
 import { cardPictureFiles, cardPictureRefusal } from './cards/bakeReplay'
 import { effectOutRefusal } from './effects/plan'
 import { PICTURE_ANIMATED, pictureHasFrames, pictureMeta, pictureRefusal } from './pictures/pythonView'
@@ -1513,6 +1515,17 @@ export function createEngine(deps: EngineDeps) {
     await deps.metering.spendGuard(i.userId)
     const inputFiles = new Map<string, OutputFile>()
     for (const p of prompts) for (const f of collectInputFiles(p)) inputFiles.set(`${f.type}:${f.subfolder}:${f.filename}`, f)
+    // A shot-directed Film a shot's reference links (`/view?…&type=input` in
+    // its options, Task 4): the runner resolves them into provider links, so
+    // they must be the caller's own files too. Generate a video resolves none.
+    for (const p of prompts) {
+      for (const n of Object.values(p)) {
+        if (n.class_type !== 'FilmShotNode' || isLink(n.inputs?.model_options)) continue
+        for (const filename of shotRefFilenames(parseJsonObject(n.inputs?.model_options))) {
+          inputFiles.set(`input::${filename}`, { filename, subfolder: '', type: 'input' })
+        }
+      }
+    }
     await assertFilesOwned([...inputFiles.values()], i.userId, deps.hosted(), deps.ownership)
     // Seedance 2.0 references: at most 15 s of video and 15 s of sound in all,
     // measured from their input files; hosted refuses one it can't measure

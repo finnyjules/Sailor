@@ -176,11 +176,11 @@ test.describe('the one prompt in studios', () => {
     await openStudio(page, 'ShaderStudio', 'sailor:openShaderStudio')
     const remix = page.getByTestId('studio-actions').locator('[data-testid="studio-action-row"][data-action-id="remix"]')
     await expect(remix).toContainText('Rewrite the effect')
-    await expect(remix.getByTestId('studio-action-price')).toHaveText('48–88 credits')
+    await expect(remix.getByTestId('studio-action-price')).toHaveText('30–84 credits')
     await remix.click()
     await expect(page.getByTestId('prompt-mode-chip')).toContainText('Remix')
     // The chip carries the price before anything runs.
-    await expect(page.getByTestId('studio-prompt').getByTestId('prompt-note')).toHaveText('48–88 credits')
+    await expect(page.getByTestId('studio-prompt').getByTestId('prompt-note')).toHaveText('30–84 credits')
     await expect(prompt(page)).toBeFocused()
     await prompt(page).fill('ink on paper')
     await prompt(page).press('Enter')
@@ -245,7 +245,7 @@ test.describe('the one prompt in studios', () => {
     await expect(rows.nth(0).getByTestId('studio-action-price')).toHaveText('2–6 credits')
     await expect(rows.nth(1).getByTestId('studio-action-name')).toHaveText('Rewrite the effect')
     await expect(rows.nth(1).getByTestId('studio-action-description')).toHaveText('3 new versions of the code itself')
-    await expect(rows.nth(1).getByTestId('studio-action-price')).toHaveText('48–88 credits')
+    await expect(rows.nth(1).getByTestId('studio-action-price')).toHaveText('30–84 credits')
     // Names fit: never cut.
     for (const i of [0, 1]) {
       const fits = await rows.nth(i).getByTestId('studio-action-name').evaluate(el => el.scrollWidth <= el.clientWidth + 1)
@@ -282,7 +282,7 @@ test.describe('the one prompt in studios', () => {
     await expect(menu).toBeVisible()
     const describe = menu.locator('[data-action-id="new-layer"]')
     await expect(describe.getByTestId('studio-action-name')).toHaveText('Describe a new layer')
-    await expect(describe.getByTestId('studio-action-price')).toHaveText('48–88 credits')
+    await expect(describe.getByTestId('studio-action-price')).toHaveText('30–84 credits')
     await describe.click()
     await expect(menu).toHaveCount(0)
     await expect(page.getByTestId('prompt-mode-chip')).toContainText('New effect')

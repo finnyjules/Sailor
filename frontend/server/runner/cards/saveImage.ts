@@ -355,11 +355,16 @@ export function planSaveImage(ctx: PlanContext): NodePlan {
 /** PreviewImage's letters: 'p' twice and no 'w', as nodes.py has them. */
 const PREVIEW_LETTERS = 'abcdefghijklmnopqrstupvxyz'
 
+/** Five of PreviewImage's letters, drawn at random (nodes.py PreviewImage; comfy_api's UI.PreviewImage alike). */
+export function previewImageLetters(): string {
+  return Array.from({ length: 5 }, () => PREVIEW_LETTERS[Math.floor(Math.random() * PREVIEW_LETTERS.length)]).join('')
+}
+
 export function planPreviewImage(ctx: PlanContext): NodePlan {
   const node = ctx.prompt[ctx.nodeId]!
   const batches = batchesOf(ctx)
   const settings: SaveSettings = { prefix: 'ComfyUI', format: 'png', quality: 90, lossless: false, compression: 1, scale: 1, maxDimension: 0, embed: true }
-  const letters = Array.from({ length: 5 }, () => PREVIEW_LETTERS[Math.floor(Math.random() * PREVIEW_LETTERS.length)]).join('')
+  const letters = previewImageLetters()
   return {
     kind: 'derive',
     async derive(io) {

@@ -376,7 +376,8 @@ export const VIDEO_REF_STR_KEYS = ['image', 'last_frame_image', 'image_url', 'en
 /**
  * The input files a video model's `model_options` JSON makes the engine read,
  * as _resolve_local_refs walks it: each list key's elements and each string
- * key's value that is a `/view?…&type=input` link (parse_view_ref). A list key
+ * key's value that is a `/view?…&type=input` link (parse_view_ref), and each
+ * Kling element's `frontal_image_url` and `reference_image_urls[]`. A list key
  * that is not a list, or an element that is not a link, is passed through
  * untouched by the engine and names no file. Not a JSON object: nothing.
  * Unparseable: null, refused — we cannot vet what we cannot read.
@@ -399,6 +400,18 @@ function videoModelViewRefs(value: string): string[] | null {
   for (const k of VIDEO_REF_STR_KEYS) {
     const name = parseViewRef(opts[k])
     if (name) out.push(name)
+  }
+  // Kling 3's elements (characters stage 3): each one's face and reference pictures.
+  if (Array.isArray(opts.elements)) {
+    for (const e of opts.elements) {
+      if (!e || typeof e !== 'object' || Array.isArray(e)) continue
+      const el = e as Record<string, unknown>
+      const refs = Array.isArray(el.reference_image_urls) ? el.reference_image_urls : []
+      for (const v of [el.frontal_image_url, ...refs]) {
+        const name = parseViewRef(v)
+        if (name) out.push(name)
+      }
+    }
   }
   return out
 }

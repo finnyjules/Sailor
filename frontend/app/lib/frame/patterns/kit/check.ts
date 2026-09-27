@@ -8,7 +8,8 @@ import type { StyleId } from './styles'
 // Ported from the prototype (docs/superpowers/specs/assets/2026-09-23-frame-layout-system/
 // layout-pane.html, `check` + `pageCheck`). One checker every layout plan passes through:
 // collisions, off-page, minimum size, fit inside a shape, panel padding, and the layout's
-// own premise (roles it promised to overlap, bleed or rotate).
+// own premise (roles it promised to overlap, bleed or rotate), and on a layout grid: text on
+// the baseline grid and on the rows.
 
 export interface Box { x0: number; y0: number; x1: number; y1: number }
 
@@ -164,6 +165,62 @@ export function boxOf(e: El, S: Sheet): Box | null {
  *  renderer draws them (a word wider than its box spills past it), every other element its box. */
 export function inkBoxOf(e: El, S: Sheet): Box | null {
   return e.k === 't' ? textBox(e, S, true) : e.k === 'own' ? textBox(ownAsText(e), S, true) : boxOf(e, S)
+}
+
+// ── Stage 3: the layout grid (rules 11 and 12, and the planner's settle, `gridFit.ts`) ──
+/** Slack for the grid rules, kit units: a thousandth of a unit of width (0.01 px on a 1000 px Frame). */
+export const GRID_EPS = 1e-3
+
+/** Text the layout grid holds: flat lines — not turned, not set inside a shape (a button's label, a
+ *  tag's words, text in a circle). */
+export function onGridText(e: El): e is TextEl | OwnTextEl {
+  if (e.k === 'own') return !e.rot
+  return e.k === 't' && !e.rot && !e.inside
+}
+
+/** A flat text's first capital top and every baseline (the sheet's coordinates): the box `textBox`
+ *  measures, its lines `lh × size` apart. */
+export function textMarks(e: TextEl | OwnTextEl, S: Sheet): { capTop: number; baselines: number[] } {
+  const t = e.k === 'own' ? ownAsText(e) : e
+  const b = textBox(t, S)
+  const face = faceOf(t.role)
+  const cap = (S.measure.capAbove(face) + S.measure.baseBelow(face)) * t.size
+  const step = t.lh * t.size
+  const n = step > 1e-9 ? Math.max(1, Math.round((b.y1 - b.y0 - cap) / step) + 1) : 1
+  return { capTop: b.y0, baselines: Array.from({ length: n }, (_, i) => b.y0 + cap + i * step) }
+}
+
+/** A block of stacked text (rule 12): its lines, the one with the lowest baseline, the first capital
+ *  top, the first line's capital height, and the lowest baseline. */
+export interface TextBlock { els: (TextEl | OwnTextEl)[]; last: TextEl | OwnTextEl; capTop: number; capH: number; lastBase: number }
+
+/** Rule 12's blocks. Flat text that is placed (`top` or `base`), not free to lie anywhere (`ok`) and
+ *  not bleeding joins a block with another when the two overlap horizontally and one's capitals are
+ *  at most one row pitch below the other's last baseline. Ordered by capital top. */
+export function textBlocks(els: El[], S: Sheet): TextBlock[] {
+  const items = els
+    .filter(onGridText)
+    .filter(e => !e.ok && !e.bleed && (e.top != null || e.base != null))
+    .map(e => ({ e, m: textMarks(e, S), box: inkBoxOf(e, S)! }))
+    .sort((a, b) => a.m.capTop - b.m.capTop)
+  const pitch = S.rows.length > 1 ? S.rows[1]!.a - S.rows[0]!.a : 4 * S.U
+  const root = items.map((_, i) => i)
+  const find = (i: number): number => (root[i] === i ? i : (root[i] = find(root[i]!)))
+  for (let i = 0; i < items.length; i++) {
+    for (let j = i + 1; j < items.length; j++) {
+      const a = items[i]!, b = items[j]!
+      const xo = Math.min(a.box.x1, b.box.x1) - Math.max(a.box.x0, b.box.x0)
+      const gap = b.m.capTop - a.m.baselines[a.m.baselines.length - 1]!
+      if (xo > 0 && gap <= pitch + GRID_EPS) root[find(j)] = find(i)
+    }
+  }
+  const groups = new Map<number, typeof items>()
+  items.forEach((it, i) => { const r = find(i); groups.set(r, [...(groups.get(r) ?? []), it]) })
+  return [...groups.values()].map(g => {
+    const lastOf = (it: typeof items[number]) => it.m.baselines[it.m.baselines.length - 1]!
+    const low = g.reduce((a, b) => (lastOf(b) > lastOf(a) ? b : a))
+    return { els: g.map(it => it.e), last: low.e, capTop: g[0]!.m.capTop, capH: g[0]!.m.baselines[0]! - g[0]!.m.capTop, lastBase: lastOf(low) }
+  })
 }
 
 /** Layout decisions, Task 7: the free rooms inside `area` — axis-aligned rectangles that clear
@@ -438,6 +495,26 @@ export function checkPlan(els: El[], S: Sheet, premise?: LayoutDef['premise'], o
         }
       }
     })
+  }
+
+  // Rules 11 and 12 (Stage 3): on a sheet built on the Frame's layout grid, text sits on the grid.
+  if (S.U > 0) {
+    const U = S.U
+    // Rule 11: every baseline of flat text on the baseline grid (every U from the Frame's top).
+    for (const e of present) {
+      if (!onGridText(e) || (e.top == null && e.base == null)) continue
+      const off = textMarks(e, S).baselines.some(b => { const g = (b + S.Y0) / U; return Math.abs(g - Math.round(g)) * U > GRID_EPS })
+      if (off) issues.push(`${roleLabel(e)}: off the baseline grid`)
+    }
+    // Rule 12: with rows, each block hangs its first capitals from a row top (within one unit) or
+    // stands its lowest baseline on a row bottom.
+    if (S.rows.length) {
+      for (const bl of textBlocks(present, S)) {
+        const onTop = S.rows.some(r => bl.capTop >= r.a - GRID_EPS && bl.capTop < r.a + U - GRID_EPS)
+        const onBottom = S.rows.some(r => Math.abs(bl.lastBase - r.b) <= GRID_EPS)
+        if (!onTop && !onBottom) issues.push(`${roleLabel(bl.els[0]!)}: not on a row`)
+      }
+    }
   }
 
   return issues

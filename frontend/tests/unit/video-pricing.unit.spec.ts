@@ -14,7 +14,7 @@ import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import { VIDEO_MODELS } from '~~/app/data/video-models'
 import { LEGACY_VIDEO_MODEL_IDS } from '~~/app/data/video-prices'
-import { RUNNER_REPLICATE_VIDEO_MODELS, RUNNER_VIDEO_MODELS, VEO_31_ONE_PICTURE, veo31HasExtras } from '~~/server/runner/generators/video'
+import { RUNNER_REPLICATE_VIDEO_MODELS, RUNNER_VIDEO_MODELS, VEO_31_REFS_WORDS, veo31RefsProblem } from '~~/server/runner/generators/video'
 import { asInt, parseJsonObject } from '~~/server/runner/generators/opts'
 import { RUNNER_REPLICATE_VIDEO_MODEL_IDS, RUNNER_VIDEO_MODEL_IDS } from '#shared/runner/eligibility'
 import { MODEL_COSTS, UnpricedGraphError, priceGraph } from '~~/server/utils/priceBook'
@@ -171,9 +171,11 @@ describe('settings parity: the price reads what the builder sends', () => {
             if (snd !== undefined) adv.generate_audio = snd
             const modelOptions = JSON.stringify(adv)
             for (const image of images) {
-              // Veo 3.1 refuses references (F6 follow-up): nothing is sent, so there is nothing to price.
-              if (id.startsWith('veo-3.1') && veo31HasExtras(adv)) {
-                expect(() => desc.build({ prompt: 'p', aspectRatio: '16:9', duration: 8, seed: 0, image, adv })).toThrow(VEO_31_ONE_PICTURE)
+              // Veo 3.1 and Fast refuse a last frame, clips, sounds, more than 3 reference
+              // pictures, or references beside a first frame (Task 2): nothing is sent, so
+              // there is nothing to price. Up to 3 references alone are priced below, as sent.
+              if (id.startsWith('veo-3.1') && veo31RefsProblem(adv, !!(image || adv.image_url))) {
+                expect(() => desc.build({ prompt: 'p', aspectRatio: '16:9', duration: 8, seed: 0, image, adv })).toThrow(VEO_31_REFS_WORDS)
                 continue
               }
               // As the runner's executor calls it: asInt(duration, desc.defaultDuration), parseJsonObject(model_options).

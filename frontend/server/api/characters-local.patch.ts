@@ -1,12 +1,12 @@
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
 import {
-  parseCharacterRecord, sanitizeBodyShape, stateHygiene, validRefFilename,
+  faceRefHygiene, parseCharacterRecord, photoHygiene, sanitizeBodyShape, stateHygiene, validRefFilename, voiceHygiene,
   type CharacterRecord, type CharacterState,
 } from '~~/server/utils/characterRegistry'
 import { applyStatePatch, type StatePatchBody } from '~~/server/utils/characterStatePatch'
 import { guardMutation, releaseRecord } from '~~/server/utils/ownedJsonStore'
-import type { BodySliderId } from '#shared/characters/types'
+import type { BodySliderId, Photo } from '#shared/characters/types'
 
 export default defineEventHandler(async (event) => {
   const body = await readBody(event) as {
@@ -15,6 +15,7 @@ export default defineEventHandler(async (event) => {
     bodyShape?: Partial<Record<BodySliderId, number>> | null,
     states?: CharacterState[], statePatch?: StatePatchBody, remove?: true,
     expectedUpdatedAt?: string,
+    face?: { filename: string } | null, photos?: unknown[], voice?: unknown, likenessConfirmed?: boolean,
   }
   const slug = (body?.slug || '').trim()
   if (!slug || slug.includes('/') || slug.includes('\\') || slug.includes('..')) {
@@ -43,6 +44,21 @@ export default defineEventHandler(async (event) => {
   if (body.trigger !== undefined) record.trigger = body.trigger || null
   // Explicit null clears; an object goes through the same clamp/drop hygiene as parse.
   if (body.bodyShape !== undefined) record.bodyShape = body.bodyShape === null ? null : sanitizeBodyShape(body.bodyShape)
+
+  // origin, style and linkedFrom are deliberately not patchable here: where a
+  // character came from, its style, and what it was linked from at creation
+  // never change after the fact.
+  if (body.face !== undefined) {
+    if (body.face === null) record.face = null
+    else {
+      const f = faceRefHygiene({ filename: body.face?.filename, approvedAt: new Date().toISOString() })
+      if (!f) throw createError({ statusCode: 400, message: 'Invalid face' })
+      record.face = f
+    }
+  }
+  if (Array.isArray(body.photos)) record.photos = body.photos.map(photoHygiene).filter((p): p is Photo => !!p)
+  if (body.voice !== undefined) record.voice = body.voice === null ? null : voiceHygiene(body.voice)
+  if (typeof body.likenessConfirmed === 'boolean') record.likenessConfirmed = body.likenessConfirmed
 
   if (body.statePatch) {
     const result = applyStatePatch(record, body.statePatch, new Date().toISOString())
