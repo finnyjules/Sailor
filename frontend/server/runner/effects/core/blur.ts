@@ -28,6 +28,39 @@
  * (B, H, W, C) to (B, C, H, W) without a copy, and every step keeps that
  * memory format), which decides the area resize's division and the bilinear
  * resize's rounding (kernels.ts TorchLayout).
+ *
+ * ε PER CLASS (255-scale; R2 rule 10, at most 2⁻⁸), pinned at about 4× the
+ * worst |Δ| between this port's float and Python's (both clamped to
+ * [−0.01, 1.01]) over the fixture's cases and the whole ε sweep. The sweep:
+ *   cd /Users/julien/Documents/GitHub/Sailor && .venv/bin/python scripts/runner_effects_fixtures.py --group blur --sweep
+ * 455 cases: 24 seeds per class (numpy default_rng(900000 + 1000·class index
+ * + seed), seeds 0–23, classes in BLUR_CLASSES order; each draws every
+ * widget over its range, a textured / smooth / dotted picture of 3 or 4
+ * channels sized to fit, sometimes a batch of two) and the R2.5 reviewer's
+ * 143 probe cases (default_rng(7351)); 27 of them Python raises. Measured
+ * 2026-09-26, torch 2.10.0, 6 threads, Darwin arm64 (R2.5 fix round 1):
+ *
+ *   class                ε        worst |Δ|  ratio  worst at
+ *   Sharpen              7.3e-4   1.82e-4    4.0×   sweep seed 14, smooth 48×36×4
+ *   Denoise              2.5e-4   6.08e-5    4.1×   sweep seed 2, tex 41×29×4 ×2
+ *   AdjustGlow           2.5e-4   6.08e-5    4.1×   sweep seed 18, tex 53×53×4 ×2
+ *   HighPass             4.3e-4   1.06e-4    4.0×   sweep seed 13, tex 36×48×3
+ *   Emboss               9.2e-4   2.28e-4    4.0×   sweep seed 23, tex 61×45×3 ×2
+ *   FindEdges            6.1e-4   1.52e-4    4.0×   sweep seed 4, smooth 36×48×3
+ *   Blur                 3.1e-4   7.60e-5    4.1×   review "BIG blur g r17.5" (97×83×4)
+ *   Bokeh                1.9e-4   4.56e-5    4.2×   sweep seed 20, tex 41×46×4 ×2
+ *   TiltShift            1.9e-4   4.56e-5    4.2×   sweep seed 10, tex 102×98×4
+ *   FrequencySeparation  1.9e-4   4.56e-5    4.2×   sweep seed 3, tex 61×45×4
+ *   HeightmapRelief      1.8e-3   4.33e-4    4.2×   sweep seed 3, tex 36×48×3
+ *   Outline              2⁻⁸      1.47e-3    2.7×   sweep seed 11, tex 53×41×3, threshold 0.01
+ *   Sparkle              1.2e-3   2.89e-4    4.2×   sweep seed 20, dots 41×29×4 ×2
+ *
+ * Outline is capped at 2⁻⁸ (controller ruling, R2.5 fix round 2): its soft
+ * edge divides by max(0.01, threshold / 2), so at threshold 0.01 torch's own
+ * Sobel sums (library order) reach it multiplied by 100. The fixture keeps
+ * each class's worst case above as a probe; the spec
+ * (tests/unit/runner-effects-blur.unit.spec.ts LIBRARY_EPS) and the script
+ * (BLUR_LIBRARY_EPS) hold the same ε, and the spec measures it again.
  */
 import type { EffectResult, Tensor, TensorCore } from './tensor'
 import type { KernelsCore } from './kernels'
@@ -80,8 +113,49 @@ export function blurCore(k: TensorCore, kn: KernelsCore) {
     return kn.resizeArea(x, kn.areaOutSize(x.h, s), kn.areaOutSize(x.w, s), { ...layout, stop })
   }
 
-  /** F.interpolate(size=(h, w), mode='bilinear', align_corners=False) of a channels-last tensor. */
-  const bilinearUp = (x: Tensor, h: number, w: number) => kn.resizeBilinear(x, h, w, true)
+  /** A Stop check between single passes that run inside a kernel with no Stop of its own. */
+  function stopNow(stop: Stop): void {
+    if (stop?.()) throw new Error('Stopped')
+  }
+
+  /** Each pixel index of an h × w plane, a Stop check every 64 rows. */
+  function eachPixel(h: number, w: number, stop: Stop, each: (i: number) => void): void {
+    k.rows(h, stop, (y) => {
+      for (let i = y * w, end = i + w; i < end; i++) each(i)
+    })
+  }
+
+  /**
+   * F.interpolate(size=(h, w), mode='bilinear', align_corners=False) of a
+   * channels-last tensor. The kernel (pixels core) has no Stop of its own and
+   * its taps depend on the whole size, so Stop is checked before and after it.
+   */
+  function bilinearUp(x: Tensor, h: number, w: number, stop: Stop): Tensor {
+    stopNow(stop)
+    const out = kn.resizeBilinear(x, h, w, true)
+    stopNow(stop)
+    return out
+  }
+
+  /**
+   * tensor.pow(e) (kernels.ts powScalar: torch's special exponents, else pow
+   * rounded once), 64 rows of a channel at a time with a Stop check between:
+   * element by element, so the blocks give the same floats as one call.
+   */
+  function powRows(t: Tensor, e: number, stop: Stop): Tensor {
+    const out = k.tensor(t.c, t.h, t.w)
+    const n = t.w * t.h
+    for (let c = 0; c < t.c; c++) {
+      for (let y = 0; y < t.h; y += 64) {
+        stopNow(stop)
+        const rows = Math.min(64, t.h - y)
+        const at = c * n + y * t.w
+        const part = kn.powScalar({ c: 1, h: rows, w: t.w, data: t.data.subarray(at, at + rows * t.w) }, e)
+        out.data.set(part.data, at)
+      }
+    }
+    return out
+  }
 
   /**
    * A blur at `radius` that works on a smaller copy past 4 pixels (nodes_blur
@@ -93,7 +167,7 @@ export function blurCore(k: TensorCore, kn: KernelsCore) {
     if (scale > 1) {
       const small = areaDown(x, scale, layout, stop)
       const sigma = radius / scale
-      return bilinearUp(kn.gaussianBlur(small, ksizeOf(sigma), sigma, stop), x.h, x.w)
+      return bilinearUp(kn.gaussianBlur(small, ksizeOf(sigma), sigma, stop), x.h, x.w, stop)
     }
     return kn.gaussianBlur(x, ksizeOf(radius), radius, stop)
   }
@@ -150,7 +224,7 @@ export function blurCore(k: TensorCore, kn: KernelsCore) {
     const scale = Math.max(1, Math.trunc(radius / 4))
     const small = areaDown(highlights, scale, permuted(index, count), stop)
     const sigma = radius / scale
-    const blurred = bilinearUp(kn.gaussianBlur(small, ksizeOf(sigma), sigma, stop), x.h, x.w)
+    const blurred = bilinearUp(kn.gaussianBlur(small, ksizeOf(sigma), sigma, stop), x.h, x.w, stop)
     const a = k.s32(intensity)
     return { outputs: [map(x, stop, (v, c, i) => kn.clamp01(f(v + f(a * blurred.data[c * x.w * x.h + i]!))))], preview: null }
   }
@@ -262,7 +336,7 @@ export function blurCore(k: TensorCore, kn: KernelsCore) {
       const small = areaDown(x, scale, layout, stop)
       const { kernel, ks } = motionKernel(Math.max(2, pyRound(length / scale)), angle)
       const blurred = kn.conv2dDepthwise(padAll(small, ks >> 1), kernel, ks, ks, stop)
-      return bilinearUp(blurred, x.h, x.w)
+      return bilinearUp(blurred, x.h, x.w, stop)
     }
     const { kernel, ks } = motionKernel(length, angle)
     return kn.conv2dDepthwise(padAll(x, ks >> 1), kernel, ks, ks, stop)
@@ -277,15 +351,19 @@ export function blurCore(k: TensorCore, kn: KernelsCore) {
     const samples = 12
     const maxZoom = 1 + strength * 0.4
     const out = k.tensor(x.c, x.h, x.w)
+    // Each channel's rows in turn, a Stop check every 64 (x.c · h rows of w values).
+    const planeRows = x.c * x.h
     for (let i = 0; i < samples; i++) {
-      if (stop?.()) throw new Error('Stopped')
+      stopNow(stop)
       const t = i / (samples - 1)
       const s = 1 + t * (maxZoom - 1)
+      // affine_grid (kernels.ts) has no Stop of its own: checked before (above) and after it.
       const { gx, gy } = kn.affineGrid([[1 / s, 0, 0], [0, 1 / s, 0]], x.h, x.w)
+      stopNow(stop)
       const g = kn.gridSample(x, gx, gy, { padding: 'border', alignCorners: false, oh: x.h, ow: x.w }, stop)
-      for (let j = 0; j < out.data.length; j++) out.data[j] = f(out.data[j]! + g.data[j]!)
+      eachPixel(planeRows, x.w, stop, (j) => { out.data[j] = f(out.data[j]! + g.data[j]!) })
     }
-    for (let j = 0; j < out.data.length; j++) out.data[j] = f(out.data[j]! / samples)
+    eachPixel(planeRows, x.w, stop, (j) => { out.data[j] = f(out.data[j]! / samples) })
     return out
   }
 
@@ -335,11 +413,10 @@ export function blurCore(k: TensorCore, kn: KernelsCore) {
     }
     const total = f(kn.sumContiguous(disk, 0, disk.length))
     for (let i = 0; i < disk.length; i++) disk[i] = f(disk[i]! / total)
-    const boosted = kn.powScalar(small, boost)
-    if (stop?.()) throw new Error('Stopped')
+    const boosted = powRows(small, boost, stop)
     let blurred = kn.conv2dDepthwise(padAll(boosted, half), disk, side, side, stop)
-    blurred = kn.powScalar(map(blurred, stop, v => (v < 0 ? 0 : v)), 1 / boost)
-    if (scale > 1) blurred = bilinearUp(blurred, x.h, x.w)
+    blurred = powRows(map(blurred, stop, v => (v < 0 ? 0 : v)), 1 / boost, stop)
+    if (scale > 1) blurred = bilinearUp(blurred, x.h, x.w, stop)
     return { outputs: [clamped(blurred, stop)], preview: null }
   }
 
@@ -392,11 +469,11 @@ export function blurCore(k: TensorCore, kn: KernelsCore) {
     const both = k.tensor(x.c, x.h, 2 * x.w)
     const n = x.w * x.h
     for (let c = 0; c < x.c; c++) {
-      for (let y = 0; y < x.h; y++) {
+      k.rows(x.h, stop, (y) => {
         const row = c * 2 * n + y * 2 * x.w
         both.data.set(low.data.subarray(c * n + y * x.w, c * n + (y + 1) * x.w), row)
         both.data.set(high.data.subarray(c * n + y * x.w, c * n + (y + 1) * x.w), row + x.w)
-      }
+      })
     }
     return { outputs: [low, high], preview: both }
   }
@@ -467,20 +544,21 @@ export function blurCore(k: TensorCore, kn: KernelsCore) {
     const n = x.w * x.h
     const mag = new Float32Array(n)
     let amax = -Infinity
-    for (let i = 0; i < n; i++) {
+    eachPixel(x.h, x.w, stop, (i) => {
       const a = gx.data[i]!
       const b = gy.data[i]!
       const m = f(Math.sqrt(f(f(a * a) + f(b * b))))
       mag[i] = m
       if (m > amax || m !== m) amax = m
-    }
+    })
     const tiny = k.s32(1e-6)
     if (amax < tiny) amax = tiny
     const threshold = p.threshold as number
     const lo = k.s32(threshold * 0.5)
     const span = k.s32(Math.max(0.01, threshold * 0.5))
     let soft: Tensor = { c: 1, h: x.h, w: x.w, data: new Float32Array(n) }
-    for (let i = 0; i < n; i++) soft.data[i] = kn.clamp01(f(f(f(mag[i]! / amax) - lo) / span))
+    const top = amax
+    eachPixel(x.h, x.w, stop, (i) => { soft.data[i] = kn.clamp01(f(f(f(mag[i]! / top) - lo) / span)) })
     const kk = Math.max(1, pyRound(p.thickness as number))
     if (kk > 1) soft = kn.maxPool2d(soft, kk * 2 + 1, kk, stop)
     const em = soft.data
@@ -516,7 +594,7 @@ export function blurCore(k: TensorCore, kn: KernelsCore) {
     const thr = k.s32(p.threshold as number)
     const near = k.s32(1e-5)
     const flat = new Float32Array(n)
-    for (let i = 0; i < n; i++) flat[i] = lu[i]! >= f(lmax[i]! - near) && lu[i]! > thr ? lu[i]! : 0
+    eachPixel(x.h, x.w, stop, (i) => { flat[i] = lu[i]! >= f(lmax[i]! - near) && lu[i]! > thr ? lu[i]! : 0 })
     const maxN = Math.max(1, Math.trunc((p.max_density as number) * x.h * x.w))
     const top = kn.topk(flat, Math.min(maxN, n), true, stop)
     return top.filter(i => flat[i]! > thr)
@@ -598,10 +676,10 @@ export function blurCore(k: TensorCore, kn: KernelsCore) {
     }
     const intensity = k.s32(p.intensity as number)
     const flare = new Float32Array(n)
-    for (let i = 0; i < n; i++) {
+    eachPixel(x.h, x.w, stop, (i) => {
       const v = f(f(sum[i]!) * intensity)
       flare[i] = v < 0 ? 0 : v > 4 ? 4 : v
-    }
+    })
     return { outputs: [map(x, stop, (v, _c, i) => kn.clamp01(f(v + flare[i]!)))], preview: null }
   }
 

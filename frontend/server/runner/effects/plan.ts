@@ -274,12 +274,21 @@ async function planJobs(io: DeriveIO, spec: EffectSpec, ins: In[], params: Recor
   const firstFile = firstPicture ? batchFiles(firstPicture)[0] : undefined
   const firstSize = firstFile !== undefined ? size.get(firstFile ? keyOf(firstFile) : 'blank') ?? null : null
   const first = firstSize ? { w: firstSize.w, h: firstSize.h } : null
-  // Each output within the cap, and all of them together.
+  // Each output within the cap, and all of them together: every output slot of every batch
+  // index, and a preview that is a picture of its own (R2.5: FrequencySeparation's two outputs
+  // and its side-by-side preview).
   const out = spec.outSize ? spec.outSize(params, first) : first
+  const preview = spec.previewSize ? spec.previewSize(params, first) : null
+  let made = 0
   if (out) {
     if (out.w * out.h > maxOne) throw new Error(tooLarge)
-    if (out.w * out.h * n > CARD_MAX_PIXELS) throw new Error(EFFECT_PICTURES_TOO_LARGE)
+    made += out.w * out.h * n * outputs
   }
+  if (preview) {
+    if (preview.w * preview.h > maxOne) throw new Error(tooLarge)
+    made += preview.w * preview.h
+  }
+  if (made > CARD_MAX_PIXELS) throw new Error(EFFECT_PICTURES_TOO_LARGE)
   const order: string[] = []
   const byKey = new Map<string, Job>()
   const uses = new Map<string, number>()
@@ -309,6 +318,8 @@ async function planJobs(io: DeriveIO, spec: EffectSpec, ins: In[], params: Recor
       work += spec.work(params, s0 ? { w: s0.w, h: s0.h } : first)
     }
   }
+  // A preview of its own is quantised and encoded once, from the first picture.
+  if (preview) work += EFFECT_IO_WORK_PER_VALUE * 4 * preview.w * preview.h
   if (work > EFFECT_MAX_WORK) throw new Error(EFFECT_TOO_MUCH_WORK)
 
   /** One input of a job, as the worker takes it; each file's bytes let go after its last use. */

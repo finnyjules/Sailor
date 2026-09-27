@@ -23,6 +23,12 @@ export interface EffectSpec {
   /** The output size when it isn't the input's (Crop, Resize, generators). */
   outSize?(widgets: Record<string, unknown>, size: { w: number; h: number } | null): { w: number; h: number }
   /**
+   * The live preview's size when it is a picture of its own, not an output
+   * (FrequencySeparation's low and high side by side): counted in the caps
+   * with the outputs (rule 7).
+   */
+  previewSize?(widgets: Record<string, unknown>, size: { w: number; h: number } | null): { w: number; h: number } | null
+  /**
    * The widgets as the core takes them, when some need reading on the main
    * thread first (R2.4: colour text, parsed as Python parses it by
    * shared/runner/gradientStops.ts, which the self-contained cores can't
@@ -160,7 +166,11 @@ export const EFFECTS: Readonly<Record<string, EffectSpec>> = {
   Blur: blur('Blur', blurWork),
   Bokeh: blur('Bokeh', bokehWork),
   TiltShift: blur('TiltShift', (w, s) => scaledGaussWork(s, num(w, 'blur'))),
-  FrequencySeparation: blur('FrequencySeparation', (w, s) => gaussWork(px(s), num(w, 'radius'))),
+  FrequencySeparation: {
+    ...blur('FrequencySeparation', (w, s) => gaussWork(px(s), num(w, 'radius'))),
+    // show = combined: low and high side by side, 2w × h (show = high previews output 1, already counted).
+    previewSize: (w, s) => (w.show === 'combined' && s ? { w: 2 * s.w, h: s.h } : null),
+  },
   HeightmapRelief: blur('HeightmapRelief', (_w, s) => px(s) * (2 * 9 * CONV_TAP + 20)),
   Outline: blur('Outline', outlineWork, w => ({ ...w, line: hexToRgb(String(w.line_color), [0, 0, 0]), fill: hexToRgb(String(w.fill_color), [1, 1, 1]) })),
   Sparkle: blur('Sparkle', sparkleWork),

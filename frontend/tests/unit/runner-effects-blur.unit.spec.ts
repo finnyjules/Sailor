@@ -17,7 +17,7 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { inflateSync } from 'node:zlib'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import sharp from 'sharp'
 import { makeKit } from './__runner__/kit'
 import {
@@ -30,7 +30,8 @@ import { IMAGE_OUTPUT_CLASSES, PICTURE_OUTPUTS, RUNNER_NODE_RULES, isRunnerEligi
 import { runnerTakesWorkflow } from '#shared/runner/validate'
 import { nodesNeedingEngine } from '#shared/runner/needsEngine'
 import {
-  EFFECT_CLASSES_PORTED, EFFECT_ERROR_MESSAGES, EFFECT_FAMILIES, EFFECT_FAMILY_OF, EFFECT_MAX_WORK, EFFECT_TEXT_WIDGETS, EFFECT_TOO_MUCH_WORK,
+  EFFECT_CLASSES_PORTED, EFFECT_ERROR_MESSAGES, EFFECT_FAMILIES, EFFECT_FAMILY_OF, EFFECT_MAX_WORK, EFFECT_PICTURES_TOO_LARGE,
+  EFFECT_PICTURE_TOO_LARGE, EFFECT_PICTURE_TOO_LARGE_HOSTED, EFFECT_TEXT_WIDGETS, EFFECT_TOO_MUCH_WORK,
 } from '#shared/runner/effects'
 import { EFFECTS } from '~~/server/runner/effects/table'
 import { effectCores } from '~~/server/runner/effects/cores'
@@ -41,6 +42,25 @@ import { compositorCore } from '~~/server/runner/compositor/plane'
 import { planNode, type NodePlan } from '~~/server/runner/executors'
 import type { RunnerValue } from '~~/server/runner/types'
 import { createMemoryKeptBytes } from '~~/server/runner/keptBytes'
+
+/**
+ * The picture decoder, watched (fix round 1): every call is counted, and
+ * while `refuse` is set a call throws DECODED, so a test proves a refusal
+ * came before any pixel was decoded, or that a plan got past its caps and
+ * budget to the decode.
+ */
+const decodeWatch = vi.hoisted(() => ({ calls: 0, refuse: false }))
+vi.mock('~~/server/runner/compositor/decode', async (importOriginal) => {
+  const real = await importOriginal<typeof import('~~/server/runner/compositor/decode')>()
+  return {
+    ...real,
+    decodeRaw: (...a: Parameters<typeof real.decodeRaw>) => {
+      decodeWatch.calls++
+      if (decodeWatch.refuse) throw new Error('DECODED')
+      return real.decodeRaw(...a)
+    },
+  }
+})
 
 // ── The fixtures ─────────────────────────────────────────────────────────────
 
@@ -60,6 +80,22 @@ interface BlurFx extends Omit<FxFile, 'cases'> {
     name: string; inputs: FxCase['inputs']; effect: { class_type: string; node_id: string; widgets: Record<string, unknown> }
     frame: { widgets: Record<string, unknown>; w: number; h: number; c: number; image8: string; f32z: string }
   }
+  /** A small output's float32 (zlib), by the sha256 of its bytes: outputs that are the same are kept once (fix round 2). */
+  floats: Record<string, string>
+  /** The ε sweep's probes (fix round 2): each class's worst case, and a slice of the reviewer's. */
+  probes: SweepCase[]
+}
+/** A case of the ε sweep (fix round 1): a seed's pictures rebuilt here (`gen`), or a review case's kept (`u8z`). */
+interface SweepCase {
+  name: string
+  class_type: string
+  widgets: Record<string, unknown>
+  window: [number, number, number, number]
+  gen?: { seeds: number[]; kind: 'tex' | 'smooth' | 'dots' }
+  inputs: { w: number; h: number; c: number; sha256?: string; u8z?: string }[]
+  error?: { type: string; message: string }
+  stable?: true
+  outputs?: { w: number; h: number; c: number; f32s: string }[][]
 }
 const FX = withAssets(loadFixtures('blur') as unknown as FxFile) as unknown as BlurFx
 
@@ -67,26 +103,34 @@ const FX = withAssets(loadFixtures('blur') as unknown as FxFile) as unknown as B
 const BLUR_CLASSES = ['Sharpen', 'Denoise', 'AdjustGlow', 'HighPass', 'Emboss', 'FindEdges', 'Blur', 'Bokeh', 'TiltShift', 'FrequencySeparation', 'HeightmapRelief', 'Outline', 'Sparkle']
 
 /**
- * Each class's ε (255-scale): at least twice the worst |Δ| measured between
- * the port's float and Python's over this group (a test below), and at most
- * 2⁻⁸ (R2 rule 10). The fixture script holds the same table (its hashed
- * cases' bands are recorded at it). Every class is library.
+ * Each class's ε (255-scale), pinned at about 4× the worst |Δ| measured
+ * between the port's float and Python's (both clamped to [−0.01, 1.01]) over
+ * the fixture's cases and the whole ε sweep (`--group blur --sweep`; its
+ * result, seeds and command are tabled in server/runner/effects/core/blur.ts),
+ * and never above 2⁻⁸ (R2 rule 10). The fixture keeps each class's worst
+ * sweep case as a probe, so a test below measures the same worst again and
+ * holds ε between 4× and 8× of it. Outline alone is capped at 2⁻⁸, 2.7× its
+ * worst (1.47e-3, at threshold 0.01: its edge divided by 0.01, over torch's
+ * own Sobel sums, whose order is library math). The fixture script holds the
+ * same table (its hashed cases' bands are recorded at it).
  */
 const LIBRARY_EPS: Readonly<Record<string, number>> = {
-  Sharpen: 2 ** -8,
-  Denoise: 2 ** -8,
-  AdjustGlow: 2 ** -8,
-  HighPass: 2 ** -8,
-  Emboss: 2 ** -8,
-  FindEdges: 2 ** -8,
-  Blur: 2 ** -8,
-  Bokeh: 2 ** -8,
-  TiltShift: 2 ** -8,
-  FrequencySeparation: 2 ** -8,
-  HeightmapRelief: 2 ** -8,
-  Outline: 2 ** -8,
-  Sparkle: 2 ** -8,
+  Sharpen: 7.3e-4, // worst 1.82e-4 (sweep seed 14)
+  Denoise: 2.5e-4, // worst 6.08e-5 (sweep seed 2)
+  AdjustGlow: 2.5e-4, // worst 6.08e-5 (sweep seed 18)
+  HighPass: 4.3e-4, // worst 1.06e-4 (sweep seed 13)
+  Emboss: 9.2e-4, // worst 2.28e-4 (sweep seed 23)
+  FindEdges: 6.1e-4, // worst 1.52e-4 (sweep seed 4)
+  Blur: 3.1e-4, // worst 7.60e-5 (review BIG blur g r17.5)
+  Bokeh: 1.9e-4, // worst 4.56e-5 (sweep seed 20)
+  TiltShift: 1.9e-4, // worst 4.56e-5 (sweep seed 10)
+  FrequencySeparation: 1.9e-4, // worst 4.56e-5 (sweep seed 3)
+  HeightmapRelief: 1.8e-3, // worst 4.33e-4 (sweep seed 3)
+  Outline: 2 ** -8, // worst 1.47e-3 (sweep seed 11 (threshold 0.01))
+  Sparkle: 1.2e-3, // worst 2.89e-4 (sweep seed 20)
 }
+/** Classes whose ε is capped at 2⁻⁸, below 4× their worst. */
+const EPS_CAPPED: ReadonlySet<string> = new Set(['Outline'])
 
 const BLUR: ReadonlySet<RunnerFamily> = new Set(['cards', 'effects-blur'])
 const BLUR_EDIT: ReadonlySet<RunnerFamily> = new Set(['cards', 'effects-blur', 'fal-edit'])
@@ -111,9 +155,12 @@ function planarOf(f32: Float32Array, item: FxItem): Tensor {
   return t
 }
 
+/** A small item's float32 (zlib), its own or the fixture's shared copy; none for a hashed item. */
+const f32zOf = (item: BlurItem): string | undefined => item.f32z ?? (item.band ? undefined : FX.floats[item.f32_sha256!])
+
 /** A small item's float, and Python's 8-bit forms derived from it (checked against Python's hashes). */
 function pythonOf(item: BlurItem): { f32: Float32Array; round8: Uint8Array; trunc8: Uint8Array } {
-  const raw = inflateSync(b64(item.f32z!))
+  const raw = inflateSync(b64(f32zOf(item)!))
   const f32 = new Float32Array(raw.buffer, raw.byteOffset, raw.byteLength / 4)
   const t = planarOf(f32, item)
   const round8 = tk.quantize(t, 'round')
@@ -129,7 +176,7 @@ function pythonOf(item: BlurItem): { f32: Float32Array; round8: Uint8Array; trun
  * off, and with Python's bytes put back there, the hash of the rest).
  */
 function expectLibrary8(ts8: Uint8Array, item: BlurItem, mode: 'round' | 'trunc', eps: number, label: string): void {
-  if (item.f32z) {
+  if (f32zOf(item)) {
     const py = pythonOf(item)
     const want = mode === 'round' ? py.round8 : py.trunc8
     expect(ts8.length, label).toBe(want.length)
@@ -295,29 +342,185 @@ describe('each class against Python', () => {
       }
     }, c.hashed ? 60_000 : 20_000)
   }
+})
 
-  it('each class\'s ε is at least twice the worst difference measured, and at most 2⁻⁸', async () => {
-    const measured = new Map<string, number>()
-    const clamp = (v: number) => Math.min(1.01, Math.max(-0.01, v))
+// ── The ε sweep (fix round 1) ────────────────────────────────────────────────
+
+/** scripts/runner_effects_fixtures.py `sweep_pixels`: an 8-bit H × W × C field from integers alone. */
+function sweepPixels(w: number, h: number, c: number, seed: number, kind: string): Uint8Array {
+  let s = (seed >>> 0) || 0x9E3779B9
+  const next = () => {
+    s ^= s << 13; s >>>= 0
+    s ^= s >>> 17
+    s ^= s << 5; s >>>= 0
+    return s
+  }
+  const tri = (t: number) => { t %= 512; return t < 256 ? t : 511 - t }
+  const a = 1 + (seed % 7) * 3
+  const b = 5 + (seed % 11) * 2
+  const edge = Math.floor((w * (3 + (seed % 5))) / 10)
+  const out = new Uint8Array(w * h * c)
+  let o = 0
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      for (let k = 0; k < c; k++) {
+        let v: number
+        if (kind === 'dots') v = 12 + (next() & 15)
+        else if (kind === 'smooth') v = tri(x * a + y * b + k * 40)
+        else {
+          v = tri(x * a * 3 + y * b + k * 71) ^ (next() & 31)
+          if (x > edge) v = Math.min(255, v + 60)
+        }
+        out[o++] = v
+      }
+    }
+  }
+  if (kind === 'dots') {
+    for (let j = 0; j < Math.min(40, w * h); j++) {
+      const p = next() % (w * h)
+      for (let k = 0; k < c; k++) out[p * c + k] = Math.min(255, 128 + 3 * j)
+    }
+  }
+  return out
+}
+
+/** A sweep case's pictures as the node got them: u8 / 255 in float32, planar. */
+function sweepInputs(c: SweepCase): Tensor[] {
+  return c.inputs.map((inp, i) => {
+    const u8 = c.gen ? sweepPixels(inp.w, inp.h, inp.c, c.gen.seeds[i]!, c.gen.kind) : new Uint8Array(inflateSync(b64(inp.u8z!)))
+    if (inp.sha256) expect(sha256(u8), `${c.name}: picture ${i} rebuilt as the script made it`).toBe(inp.sha256)
+    const t = tk.tensor(inp.c, inp.h, inp.w)
+    const n = inp.w * inp.h
+    for (let j = 0; j < n; j++) for (let k = 0; k < inp.c; k++) t.data[k * n + j] = Math.fround(u8[j * inp.c + k]! / 255)
+    return t
+  })
+}
+
+/** A window's float32, unshuffled (every value's byte 0, then byte 1…), as a planar tensor. */
+function unshuffled(o: { c: number; f32s: string }, ww: number, wh: number): Tensor {
+  const raw = inflateSync(b64(o.f32s))
+  const count = raw.length / 4
+  const bytes = new Uint8Array(raw.length)
+  for (let i = 0; i < count; i++) for (let j = 0; j < 4; j++) bytes[i * 4 + j] = raw[j * count + i]!
+  return planarOf(new Float32Array(bytes.buffer), { w: ww, h: wh, c: o.c })
+}
+
+/** The same window of a runner tensor. */
+function windowOf(t: Tensor, [x0, y0, ww, wh]: SweepCase['window']): Tensor {
+  const out = tk.tensor(t.c, wh, ww)
+  for (let c = 0; c < t.c; c++) for (let y = 0; y < wh; y++) for (let x = 0; x < ww; x++) out.data[(c * wh + y) * ww + x] = t.data[(c * t.h + y0 + y) * t.w + x0 + x]!
+  return out
+}
+
+/**
+ * The ε sweep's cases. By default the fixture's probes (each class's worst
+ * case in the whole sweep, and a slice of the reviewer's cases). The whole
+ * sweep (24 seeds per class and every reviewer case) is run by
+ * `scripts/runner_effects_fixtures.py --group blur --sweep`, which hands its
+ * file over in BLUR_SWEEP_FILE (outside the repo) and prints what the ε test
+ * below measures.
+ */
+const WHOLE_SWEEP = process.env.BLUR_SWEEP_FILE
+const SWEEP: SweepCase[] = WHOLE_SWEEP ? (JSON.parse(readFileSync(WHOLE_SWEEP, 'utf8')) as { cases: SweepCase[] }).cases : FX.probes
+
+describe('the ε sweep: fresh pictures, sizes and settings, and the R2.5 reviewer\'s probe cases', () => {
+  it(WHOLE_SWEEP ? 'the whole sweep: at least 20 seeds working per class, and the reviewer\'s cases' : 'the probes: each class\'s worst seed (Blur\'s a reviewer case), and a slice of the reviewer\'s', () => {
+    for (const cls of BLUR_CLASSES) {
+      const seeds = SWEEP.filter(c => c.class_type === cls && c.gen && !c.error)
+      if (WHOLE_SWEEP) expect(seeds.length, cls).toBeGreaterThanOrEqual(20)
+      else expect(seeds.length, cls).toBe(cls === 'Blur' ? 0 : 1)
+    }
+    expect(SWEEP.filter(c => c.name.includes(': review ')).length).toBeGreaterThanOrEqual(WHOLE_SWEEP ? 130 : 60)
+    if (!WHOLE_SWEEP) expect(SWEEP.some(c => c.name === 'Blur: review BIG blur g r17.5')).toBe(true)
+  })
+
+  for (const c of SWEEP) {
+    const eps = LIBRARY_EPS[c.class_type]!
+    it(`${c.name}`, () => {
+      const op = coreOp(EFFECTS[c.class_type]!.op) as unknown as Op
+      const pics = sweepInputs(c)
+      const p = coreParams(c as unknown as BlurCase)
+      if (c.error) {
+        expect(() => pics.map((x, i) => op({ image: x }, p, undefined, {}, i, pics.length))).toThrow(raiseKey(c.error))
+        return
+      }
+      const runs = pics.map((x, i) => op({ image: x }, p, undefined, {}, i, pics.length))
+      for (const [slot, items] of c.outputs!.entries()) {
+        for (const [i, o] of items.entries()) {
+          const t = runs[i]!.outputs[slot]!
+          expect([t.w, t.h, t.c], `${c.name}, output ${slot}, picture ${i}`).toEqual([o.w, o.h, o.c])
+          const py = unshuffled(o, c.window[2], c.window[3])
+          const got = windowOf(t, c.window)
+          for (const mode of ['round', 'trunc'] as const) {
+            const want = tk.quantize(py, mode)
+            const have = tk.quantize(got, mode)
+            const pf = interleaved(py)
+            let far = -1
+            for (let j = 0; j < want.length; j++) {
+              const d = Math.abs(have[j]! - want[j]!)
+              if (d === 0) continue
+              const v = pf[j]! * 255
+              const edge = mode === 'trunc' ? Math.round(v) : Math.floor(v) + 0.5
+              if (d > 1 || !(Math.abs(v - edge) < eps)) { far = j; break }
+            }
+            expect(far, `${c.name}, output ${slot}, picture ${i}, ${mode}: first byte outside the band`).toBe(-1)
+          }
+        }
+      }
+    }, 30_000)
+  }
+})
+
+/** |Δ|·255 between two floats, each clamped to [−0.01, 1.01] (a value clamped away by every reader can't matter). */
+const delta = (a: number, b: number) => Math.abs(Math.min(1.01, Math.max(-0.01, a)) - Math.min(1.01, Math.max(-0.01, b))) * 255
+
+describe('each class\'s ε', () => {
+  it('is about 4× the worst difference measured over the fixture\'s cases and the sweep (at least 4×, at most 8×; Outline capped at 2⁻⁸), and at most 2⁻⁸', async () => {
+    const worst = new Map<string, number>(BLUR_CLASSES.map(c => [c, 0]))
+    const where = new Map<string, string>()
+    let at = ''
+    const bump = (cls: string, d: number) => { if (d > worst.get(cls)!) { worst.set(cls, d); where.set(cls, at) } }
     for (const c of FX.cases.filter(x => !x.error && !x.hashed)) {
       const runs = await coreRun(c)
+      at = c.name
       for (const [slot, o] of expected(c).entries()) {
         for (const [i, item] of o.items.entries()) {
           const py = pythonOf(item).f32
           const got = interleaved(runs[i]!.outputs[slot]!)
-          let w = measured.get(c.class_type) ?? 0
-          for (let j = 0; j < py.length; j++) w = Math.max(w, Math.abs(clamp(got[j]!) - clamp(py[j]!)) * 255)
-          measured.set(c.class_type, w)
+          for (let j = 0; j < py.length; j++) bump(c.class_type, delta(got[j]!, py[j]!))
         }
       }
     }
-    console.info(`blur library ε measured (worst |Δ|·255): ${[...measured].map(([k, v]) => `${k} ${v.toExponential(2)}`).join(', ')}`)
-    for (const [cls, eps] of Object.entries(LIBRARY_EPS)) {
-      expect(measured.has(cls), cls).toBe(true)
-      expect(2 * measured.get(cls)!, cls).toBeLessThanOrEqual(eps)
+    for (const c of SWEEP.filter(x => !x.error)) {
+      const op = coreOp(EFFECTS[c.class_type]!.op) as unknown as Op
+      const pics = sweepInputs(c)
+      const p = coreParams(c as unknown as BlurCase)
+      at = c.name
+      pics.forEach((x, i) => {
+        const r = op({ image: x }, p, undefined, {}, i, pics.length)
+        c.outputs!.forEach((items, slot) => {
+          const py = unshuffled(items[i]!, c.window[2], c.window[3])
+          const got = windowOf(r.outputs[slot]!, c.window)
+          for (let j = 0; j < py.data.length; j++) bump(c.class_type, delta(got.data[j]!, py.data[j]!))
+        })
+      })
+    }
+    console.info(`blur ε (255-scale) against the worst |Δ| measured:\n${BLUR_CLASSES.map(c => `  ${c}: ε ${LIBRARY_EPS[c]!.toExponential(2)}, worst ${worst.get(c)!.toExponential(2)} (${(LIBRARY_EPS[c]! / worst.get(c)!).toFixed(1)}×) at "${where.get(c)}"`).join('\n')}`)
+    for (const cls of BLUR_CLASSES) {
+      const w = worst.get(cls)!
+      const eps = LIBRARY_EPS[cls]!
+      expect(w, cls).toBeGreaterThan(0)
+      if (EPS_CAPPED.has(cls)) {
+        expect(eps, cls).toBe(2 ** -8)
+        expect(eps, cls).toBeGreaterThanOrEqual(2.5 * w)
+      }
+      else {
+        expect(eps, cls).toBeGreaterThanOrEqual(4 * w)
+        expect(eps, cls).toBeLessThanOrEqual(8 * w)
+      }
       expect(eps, cls).toBeLessThanOrEqual(2 ** -8)
     }
-  }, 300_000)
+  }, 600_000)
 })
 
 // ── Parts of the classes on their own ────────────────────────────────────────
@@ -426,48 +629,96 @@ describe('FrequencySeparation\'s two outputs', () => {
 
 // ── Work (rule 7) and speed ──────────────────────────────────────────────────
 
-/** A picture file as a Frame (source 'rgb') would keep it, run through planEffect on the real worker. */
-async function runBig(cls: string, widgets: Record<string, unknown>, png: Uint8Array) {
-  const c = { name: cls, class_type: cls, node_id: 'fx', widgets, inputs: { image: { source: 'rgb' as const, files: ['big.png'] } } }
+/** A picture file as a Frame (source 'rgb') would keep it (listed `count` times in the batch), run through planEffect on the real worker. */
+async function runBig(cls: string, widgets: Record<string, unknown>, png: Uint8Array, o: { count?: number; hosted?: boolean } = {}) {
+  const c = { name: cls, class_type: cls, node_id: 'fx', widgets, inputs: { image: { source: 'rgb' as const, files: Array.from({ length: o.count ?? 1 }, () => 'big.png') } } }
   const pic = pictureOf(c as FxCase)
-  const mem = memoryIO({ 'big.png': png }, 'fx')
-  const plan: NodePlan = await planNode({ prompt: pic.prompt, nodeId: 'fx', families: BLUR, gateOpen: false, filesFrom: pic.filesOf, toUrl: async () => '' })
+  const mem = memoryIO({ 'big.png': png }, 'fx', { hosted: o.hosted })
+  const plan: NodePlan = await planNode({ prompt: pic.prompt, nodeId: 'fx', families: BLUR, gateOpen: false, hosted: o.hosted, filesFrom: pic.filesOf, toUrl: async () => '' })
   return { mem, derive: () => (plan as Extract<NodePlan, { kind: 'derive' }>).derive(mem.io) }
 }
 
-describe('work and speed', () => {
-  it('HighPass at radius 30 on 8192² is over the budget and fails before any pixel is decoded', async () => {
-    const side = 8192
-    expect(EFFECTS.HighPass!.work!({ radius: 30 }, { w: side, h: side })).toBeGreaterThan(EFFECT_MAX_WORK)
-    const png = new Uint8Array(await sharp({ create: { width: side, height: side, channels: 3, background: { r: 90, g: 120, b: 200 } }, limitInputPixels: false }).png({ compressionLevel: 1 }).toBuffer())
-    const { mem, derive } = await runBig('HighPass', { radius: 30 }, png)
-    const t0 = performance.now()
-    await expect(derive()).rejects.toThrow(EFFECT_TOO_MUCH_WORK)
-    const ms = performance.now() - t0
+/** A one-colour PNG of side × side (cheap to make; its header is all a refusal reads). */
+const solids = new Map<number, Promise<Uint8Array>>()
+function solidPng(side: number): Promise<Uint8Array> {
+  if (!solids.has(side)) {
+    solids.set(side, sharp({ create: { width: side, height: side, channels: 3, background: { r: 90, g: 120, b: 200 } }, limitInputPixels: false })
+      .png({ compressionLevel: 1 }).toBuffer().then(b => new Uint8Array(b)))
+  }
+  return solids.get(side)!
+}
+
+/**
+ * What planEffect's caps and budget (plan.ts: I/O work included) make of
+ * this node on a side × side picture, with the decoder refusing to run:
+ * 'accepted' when the plan got past them to the decode, else the refusal's
+ * words, which then came before any pixel was decoded.
+ */
+async function gate(cls: string, widgets: Record<string, unknown>, side: number, o: { count?: number; hosted?: boolean } = {}): Promise<string> {
+  const { mem, derive } = await runBig(cls, widgets, await solidPng(side), o)
+  const before = decodeWatch.calls
+  decodeWatch.refuse = true
+  try {
+    await derive()
+    throw new Error('the decoder was not reached')
+  }
+  catch (e) {
+    const decoded = decodeWatch.calls - before
+    if (decoded > 0) return 'accepted'
     expect(mem.kept()).toBe(0)
     expect(mem.previews).toHaveLength(0)
-    // Decoding 8192² alone takes seconds; the refusal is from the header.
-    expect(ms).toBeLessThan(1500)
-    console.info(`HighPass r30 on 8192²: refused in ${ms.toFixed(0)} ms (work ${(EFFECTS.HighPass!.work!({ radius: 30 }, { w: side, h: side }) / 1e9).toFixed(1)} × 10⁹ > ${(EFFECT_MAX_WORK / 1e9).toFixed(1)} × 10⁹)`)
+    return (e as Error).message
+  }
+  finally { decodeWatch.refuse = false }
+}
+
+describe('work and speed', () => {
+  it('HighPass at radius 30 on 8192² is over the budget and fails before any pixel is decoded (the decoder is watched)', async () => {
+    const side = 8192
+    expect(EFFECTS.HighPass!.work!({ radius: 30 }, { w: side, h: side })).toBeGreaterThan(EFFECT_MAX_WORK)
+    expect(await gate('HighPass', { radius: 30 }, side)).toBe(EFFECT_TOO_MUCH_WORK)
+    // The watch has teeth: a light setting on the same picture gets to the decoder.
+    expect(await gate('HighPass', { radius: 0.5 }, side)).toBe('accepted')
   }, 60_000)
 
-  it('the budget: every class\'s defaults fit at 4096²; the heaviest settings and 8192² are reported', () => {
-    const at = (s: number) => ({ w: s, h: s })
+  it('the budget, through plan.ts\'s own total (I/O included): every class\'s defaults are accepted at 4096², Bokeh\'s refused at 8192²', async () => {
     const heaviest: Record<string, Record<string, unknown>> = {
       Sharpen: { amount: 4, radius: 10 }, Denoise: { strength: 5 }, AdjustGlow: { threshold: 0, intensity: 2, radius: 7.5 }, HighPass: { radius: 30 },
       Emboss: { depth: 4 }, FindEdges: { intensity: 4, invert: true }, Blur: { type: 'motion', length: 15, angle: 33, radius: 0, strength: 0 },
       Bokeh: { radius: 9.5, highlight_boost: 4 }, TiltShift: { position: 0.5, width: 0.2, blur: 7.5 }, FrequencySeparation: { radius: 30, show: 'combined' },
       HeightmapRelief: {}, Outline: { thickness: 4 }, Sparkle: { size: 80, max_density: 0.05 },
     }
+    const verdict = (m: string) => (m === 'accepted' ? 'ok' : m === EFFECT_TOO_MUCH_WORK ? 'over' : m === EFFECT_PICTURE_TOO_LARGE ? 'too large' : m)
     const report: string[] = []
     for (const cls of BLUR_CLASSES) {
-      const w4 = EFFECTS[cls]!.work!({ ...defaultsOf(cls), ...heaviest[cls] }, at(4096))
-      const w8 = EFFECTS[cls]!.work!(defaultsOf(cls), at(8192))
-      report.push(`${cls} ${(w4 / 1e9).toFixed(1)}/${(w8 / 1e9).toFixed(1)}`)
-      expect(EFFECTS[cls]!.work!(defaultsOf(cls), at(4096)), `${cls} defaults at 4096²`).toBeLessThan(EFFECT_MAX_WORK)
+      const d4 = await gate(cls, defaultsOf(cls), 4096)
+      expect(d4, `${cls} defaults at 4096²`).toBe('accepted')
+      const h4 = await gate(cls, { ...defaultsOf(cls), ...heaviest[cls] }, 4096)
+      expect(['accepted', EFFECT_TOO_MUCH_WORK], `${cls} heaviest at 4096²`).toContain(h4)
+      const d8 = await gate(cls, defaultsOf(cls), 8192)
+      // (FrequencySeparation's defaults show low and high side by side: 16384 × 8192, over the one-picture cap.)
+      expect(cls === 'FrequencySeparation' ? [EFFECT_PICTURE_TOO_LARGE] : ['accepted', EFFECT_TOO_MUCH_WORK], `${cls} defaults at 8192²`).toContain(d8)
+      report.push(`${cls} ${verdict(h4)}/${verdict(d8)}`)
     }
-    console.info(`blur work × 10⁹ (heaviest at 4096² / defaults at 8192²; budget ${(EFFECT_MAX_WORK / 1e9).toFixed(1)}): ${report.join(', ')}`)
-  })
+    expect(await gate('Bokeh', defaultsOf('Bokeh'), 8192)).toBe(EFFECT_TOO_MUCH_WORK)
+    console.info(`blur budget through plan.ts (heaviest at 4096² / defaults at 8192²): ${report.join(', ')}`)
+  }, 120_000)
+
+  it('FrequencySeparation: its second output and its side-by-side preview count toward the caps, refused before decoding', async () => {
+    const fs = (show: string) => ({ radius: 0.5, show })
+    // Hosted (4096² a picture): the combined preview is 8192 × 4096, a picture over the cap; low and high are within it.
+    expect(await gate('FrequencySeparation', fs('combined'), 4096, { hosted: true })).toBe(EFFECT_PICTURE_TOO_LARGE_HOSTED)
+    expect(await gate('FrequencySeparation', fs('low'), 4096, { hosted: true })).toBe('accepted')
+    expect(await gate('FrequencySeparation', fs('high'), 4096, { hosted: true })).toBe('accepted')
+    // Locally (8192²): the combined preview, 16384 × 8192, is over the one-picture cap.
+    expect(await gate('FrequencySeparation', fs('combined'), 8192)).toBe(EFFECT_PICTURE_TOO_LARGE)
+    // A batch of three 8192² pictures: 3 × 67 M pixels in each of two outputs is 403 M, over the 268 M cap
+    // (one output counted alone would be 201 M, within it); another effect on the same batch is not refused for size.
+    expect(await gate('FrequencySeparation', fs('low'), 8192, { count: 3 })).toBe(EFFECT_PICTURES_TOO_LARGE)
+    expect(await gate('Emboss', { depth: 1 }, 8192, { count: 3 })).not.toBe(EFFECT_PICTURES_TOO_LARGE)
+    expect(EFFECTS.FrequencySeparation!.previewSize!({ show: 'combined' }, { w: 37, h: 23 })).toEqual({ w: 74, h: 23 })
+    expect(EFFECTS.FrequencySeparation!.previewSize!({ show: 'high' }, { w: 37, h: 23 })).toBeNull()
+  }, 120_000)
 
   it('time check: Sharpen at radius 10 on a 4096² rgb picture, on the worker', async () => {
     const side = 4096
@@ -781,17 +1032,38 @@ describe('esbuild guard: the blur core survives Nitro’s build, with its kernel
 // ── Stop ─────────────────────────────────────────────────────────────────────
 
 describe('Stop', () => {
-  it('every class stops within one 64-row block', () => {
-    const x = tk.tensor(3, 256, 40)
-    for (let i = 0; i < x.data.length; i++) x.data[i] = (i % 97) / 97
-    for (const cls of BLUR_CLASSES) {
+  /** Each class's path, the downsampled and line and zoom paths too (fix round 1). */
+  const PATHS: [string, Record<string, unknown>][] = [
+    ...BLUR_CLASSES.map(cls => [cls, {}] as [string, Record<string, unknown>]),
+    ['Blur', { type: 'gaussian', radius: 2 }],
+    ['Blur', { type: 'gaussian', radius: 12 }],
+    ['Blur', { type: 'motion', length: 9, angle: 33 }],
+    ['Blur', { type: 'motion', length: 20, angle: 271 }],
+    ['Blur', { type: 'zoom', strength: 0.6 }],
+    ['AdjustGlow', { radius: 9 }],
+    ['Bokeh', { radius: 12, highlight_boost: 2.5 }],
+    ['Bokeh', { radius: 4, highlight_boost: 1.7 }],
+    ['TiltShift', { blur: 9 }],
+    ['FrequencySeparation', { show: 'combined' }],
+    ['Outline', { thickness: 3 }],
+  ]
+  const x = tk.tensor(3, 256, 40)
+  for (let i = 0; i < x.data.length; i++) x.data[i] = (i % 97) / 97
+
+  for (const [cls, over] of PATHS) {
+    it(`${cls} ${JSON.stringify(over)}: every Stop check along the run stops it`, () => {
       const op = coreOp(EFFECTS[cls]!.op) as unknown as Op
       const spec = EFFECTS[cls]!
-      const w = { ...defaultsOf(cls), ...(cls === 'Blur' ? { radius: 2 } : {}) }
+      const w = { ...defaultsOf(cls), ...over }
       const p = spec.prepare ? spec.prepare(w) : w
-      let calls = 0
-      expect(() => op({ image: x }, p, () => ++calls >= 2), cls).toThrow('Stopped')
-      expect(calls, cls).toBeGreaterThanOrEqual(2)
-    }
-  })
+      let total = 0
+      op({ image: x }, p, () => { total++; return false })
+      expect(total, 'checks in a whole run').toBeGreaterThanOrEqual(4)
+      for (const at of [1, 2, Math.ceil(total / 2), total - 1, total]) {
+        let calls = 0
+        expect(() => op({ image: x }, p, () => ++calls >= at), `stopped at check ${at} of ${total}`).toThrow('Stopped')
+        expect(calls).toBe(at)
+      }
+    })
+  }
 })

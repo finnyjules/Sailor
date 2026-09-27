@@ -1236,13 +1236,24 @@ BLUR_CLASSES = [
 ]
 
 # Every class is library (conv2d or a transcendental function). Each ε (255-scale; R2 rule 10: at
-# most 2⁻⁸) is at least twice the worst |Δ| measured against the TypeScript port over this group
-# (R2.5 report); tests/unit/runner-effects-blur.unit.spec.ts holds the same table. A hashed case's
-# band (and a kept preview's) is recorded at its class's ε.
+# most 2⁻⁸) is pinned at about 4× the worst |Δ| measured against the TypeScript port over this
+# group's cases and its ε sweep (R2.5 fix round 1), Outline capped at 2⁻⁸ (2.7× its worst: a
+# threshold of 0.01 divides its edge by 0.01); tests/unit/runner-effects-blur.unit.spec.ts holds the
+# same table and measures it again. A hashed case's band (and a kept preview's) is recorded at it.
 BLUR_LIBRARY_EPS = {
-    "Sharpen": 2.0 ** -8, "Denoise": 2.0 ** -8, "AdjustGlow": 2.0 ** -8, "HighPass": 2.0 ** -8, "Emboss": 2.0 ** -8,
-    "FindEdges": 2.0 ** -8, "Blur": 2.0 ** -8, "Bokeh": 2.0 ** -8, "TiltShift": 2.0 ** -8, "FrequencySeparation": 2.0 ** -8,
-    "HeightmapRelief": 2.0 ** -8, "Outline": 2.0 ** -8, "Sparkle": 2.0 ** -8,
+    "Sharpen": 7.3e-4,  # worst 1.82e-4
+    "Denoise": 2.5e-4,  # worst 6.08e-5
+    "AdjustGlow": 2.5e-4,  # worst 6.08e-5
+    "HighPass": 4.3e-4,  # worst 1.06e-4
+    "Emboss": 9.2e-4,  # worst 2.28e-4
+    "FindEdges": 6.1e-4,  # worst 1.52e-4
+    "Blur": 3.1e-4,  # worst 7.60e-5
+    "Bokeh": 1.9e-4,  # worst 4.56e-5
+    "TiltShift": 1.9e-4,  # worst 4.56e-5
+    "FrequencySeparation": 1.9e-4,  # worst 4.56e-5
+    "HeightmapRelief": 1.8e-3,  # worst 4.33e-4
+    "Outline": 2.0 ** -8,  # worst 1.47e-3
+    "Sparkle": 1.2e-3,  # worst 2.89e-4
 }
 
 
@@ -1375,6 +1386,345 @@ def blur_frame_chain(g: Group, cls, class_type: str, widgets: dict, file: str) -
                       "image8": b64(trunc8(image[0]).tobytes()), "f32z": b64(zlib.compress(f32, 9))}}
 
 
+# ── The ε sweep (R2.5 fix rounds 1 and 2) ───────────────────────────────────
+#
+# `--group blur --sweep` runs the whole sweep, hands it to the spec (BLUR_SWEEP_FILE, a file in
+# this run's temp directory) and prints each class's worst |Δ|: it writes nothing into the repo.
+# The committed fixture keeps only its probes (BLUR_PROBES: each class's worst case, and a slice
+# of the reviewer's cases). server/runner/effects/core/blur.ts records the sweep's result.
+#
+# Each class's ε is pinned at about 4× the worst |Δ| measured over a broad set of inputs the
+# standard set doesn't reach: BLUR_SWEEP_SEEDS seeds per class, each a picture of its own
+# (`sweep_pixels`: a textured, smooth or dotted field, 3 or 4 channels, sometimes a batch of two,
+# sized so the drawn settings fit it) with every widget drawn over its range (its max one time in
+# four, its min one in ten); and the R2.5 reviewer's probe cases (/private/tmp/r25probe/gen.py:
+# the same pictures from the same seed, the same settings), whose worst differences were above the
+# fixture's. Inputs reach the node as u8 / 255 in float32 (no loader). A seed's pictures are
+# rebuilt by the spec from integer arithmetic (their sha256 recorded); a review case's are kept
+# (zlib). Each output keeps its float32 over a window of at most BLUR_SWEEP_WINDOW² pixels (a
+# corner, the far corner or the middle, by seed), byte-shuffled and zlib'd (`f32s`).
+
+BLUR_SWEEP_SEEDS = 24
+BLUR_SWEEP_SIZES = [(41, 29), (37, 31), (29, 37), (48, 36), (53, 41), (36, 48), (61, 45)]
+BLUR_SWEEP_WINDOW = 32
+
+
+def shuffled_f32(t: torch.Tensor) -> str:
+    """A tensor's float32 (H × W × C, little-endian) byte-shuffled (every value's byte 0, then byte 1…)
+    and zlib'd, base64: neighbouring floats share their high bytes, which packs about twice as small."""
+    b = np.frombuffer(t.contiguous().cpu().numpy().astype("<f4").tobytes(), dtype=np.uint8).reshape(-1, 4)
+    return b64(zlib.compress(b.T.copy().tobytes(), 9))
+
+
+def sweep_pixels(w: int, h: int, c: int, seed: int, kind: str) -> np.ndarray:
+    """An 8-bit H × W × C field from integers alone (the spec rebuilds it): `tex` a triangle-wave
+    gradient with a step edge and xorshift noise; `smooth` the gradient alone; `dots` dark noise
+    with up to 40 bright spots of distinct levels."""
+    s = (seed & 0xFFFFFFFF) or 0x9E3779B9
+
+    def nxt() -> int:
+        nonlocal s
+        s ^= (s << 13) & 0xFFFFFFFF
+        s ^= s >> 17
+        s ^= (s << 5) & 0xFFFFFFFF
+        return s
+
+    def tri(t: int) -> int:
+        t %= 512
+        return t if t < 256 else 511 - t
+    a = 1 + (seed % 7) * 3
+    b = 5 + (seed % 11) * 2
+    edge = w * (3 + seed % 5) // 10
+    out = np.zeros((h, w, c), dtype=np.uint8)
+    for y in range(h):
+        for x in range(w):
+            for k in range(c):
+                if kind == "dots":
+                    v = 12 + (nxt() & 15)
+                elif kind == "smooth":
+                    v = tri(x * a + y * b + k * 40)
+                else:
+                    v = tri(x * a * 3 + y * b + k * 71) ^ (nxt() & 31)
+                    if x > edge:
+                        v = min(255, v + 60)
+                out[y, x, k] = v
+    if kind == "dots":
+        for j in range(min(40, w * h)):
+            p = nxt() % (w * h)
+            out[p // w, p % w, :] = min(255, 128 + 3 * j)
+    return out
+
+
+def sweep_need(class_type: str, w: dict) -> int:
+    """The smallest side the drawn settings work on (a reflect pad under the side, of the copy
+    a blur past its threshold works on)."""
+    ceil = math.ceil
+
+    def scaled(radius: float, step: float, pad_of) -> int:
+        scale = max(1, int(radius / step))
+        return (pad_of(radius / scale) + 1) * scale
+    if class_type in ("Sharpen", "HighPass", "FrequencySeparation"):
+        return ceil(3.0 * w["radius"]) + 1
+    if class_type == "Denoise":
+        return ceil(3.0 * w["strength"]) + 1
+    if class_type == "AdjustGlow":
+        return scaled(w["radius"], 4, lambda sg: ceil(3.0 * sg)) if w["radius"] > 0 else 2
+    if class_type == "TiltShift":
+        return scaled(w["blur"], 4, lambda sg: ceil(3.0 * sg))
+    if class_type == "Blur":
+        if w["type"] == "gaussian" and w["radius"] > 0:
+            return scaled(w["radius"], 4, lambda sg: ceil(3.0 * sg))
+        if w["type"] == "motion" and w["length"] > 0:
+            length = int(round(w["length"]))
+            scale = max(1, int(length / 8))
+            line = max(2, int(round(length / scale))) if scale > 1 else length
+            return ((line if line % 2 else line + 1) // 2 + 1) * scale
+        return 2
+    if class_type == "Bokeh":
+        return scaled(w["radius"], 5, lambda r: ceil(r)) if w["radius"] > 0 else 2
+    return 2
+
+
+def sweep_window(rs: np.random.Generator, w: int, h: int) -> list:
+    ww, wh = min(BLUR_SWEEP_WINDOW, w), min(BLUR_SWEEP_WINDOW, h)
+    where = int(rs.integers(3))
+    x0, y0 = ((0, 0), (w - ww, h - wh), ((w - ww) // 2, (h - wh) // 2))[where]
+    return [int(x0), int(y0), int(ww), int(wh)]
+
+
+class BlurSweep:
+    """The sweep's cases: each run on the real node (Sparkle's topk watched as the group does:
+    where torch kept other values tied at its cut, the outputs are the node's with the lower
+    index first, `stable`)."""
+
+    def __init__(self, keep=None) -> None:
+        self.cases: list[dict] = []
+        # Which cases to run and keep (by name); None: all of them.
+        self.keep = keep
+
+    def case(self, name: str, cls, class_type: str, widgets: dict, u8s: list, window: list, gen: dict | None) -> None:
+        from unittest import mock
+        if self.keep is not None and not self.keep(name):
+            return
+        row: dict = {"name": name, "class_type": class_type, "widgets": widgets, "window": window}
+        if gen is not None:
+            row["gen"] = gen
+            row["inputs"] = [{"w": int(u.shape[1]), "h": int(u.shape[0]), "c": int(u.shape[2]), "sha256": sha(np.ascontiguousarray(u).tobytes())} for u in u8s]
+        else:
+            row["inputs"] = [{"w": int(u.shape[1]), "h": int(u.shape[0]), "c": int(u.shape[2]), "u8z": b64(zlib.compress(np.ascontiguousarray(u).tobytes(), 9))} for u in u8s]
+        x = torch.stack([torch.from_numpy(u.astype(np.float32) / np.float32(255.0)) for u in u8s])
+        chosen: list = []
+        real_topk = torch.topk
+
+        def topk(t, k, dim=-1, *a, **kw):
+            r = real_topk(t, k, dim, *a, **kw)
+            chosen.append((t.clone(), k, r.values.clone(), r.indices.clone()))
+            return r
+        try:
+            with mock.patch.object(torch, "topk", topk):
+                outs, _ui = run_node(cls, "sweep", image=x, **widgets)
+        except Exception as e:  # noqa: BLE001 — Python raises: the spec maps it to the runner's message
+            row["error"] = {"type": type(e).__name__, "message": str(e)}
+            self.cases.append(row)
+            return
+        if chosen:
+            flat, k, values, indices = chosen[0]
+            thr = torch.tensor(widgets["threshold"], dtype=flat.dtype)
+            differs = False
+            for b in range(flat.shape[0]):
+                got = sorted(int(i) for i, v in zip(indices[b].tolist(), values[b]) if v > thr)
+                order = torch.sort(flat[b], descending=True, stable=True).indices[:k]
+                differs = differs or got != sorted(int(i) for i in order.tolist() if flat[b, i] > thr)
+            if differs:
+                def stable_topk(t, k, dim=-1, *a, **kw):
+                    srt = torch.sort(t, dim=dim, descending=True, stable=True)
+                    return torch.return_types.topk((srt.values.narrow(dim, 0, k), srt.indices.narrow(dim, 0, k)))
+                with mock.patch.object(torch, "topk", stable_topk):
+                    outs, _ui = run_node(cls, "sweep", image=x, **widgets)
+                row["stable"] = True
+        x0, y0, ww, wh = window
+        row["outputs"] = [[{"w": int(o.shape[2]), "h": int(o.shape[1]), "c": int(o.shape[3]), "f32s": shuffled_f32(o[i, y0:y0 + wh, x0:x0 + ww, :])}
+                           for i in range(o.shape[0])] for o in outs]
+        self.cases.append(row)
+
+
+def sweep_widgets(rs: np.random.Generator, cls, class_type: str) -> dict:
+    """Every widget drawn over its range: its max one time in four, its min one in ten, else between."""
+    types = cls.INPUT_TYPES()
+    out: dict = {}
+    for section in ("required", "optional"):
+        for name, spec in (types.get(section) or {}).items():
+            kind, info = spec[0], (spec[1] if len(spec) > 1 else {})
+            if kind in ("FLOAT", "INT"):
+                lo, hi = info["min"], info["max"]
+                u = rs.random()
+                v = hi if u < 0.25 else lo if u < 0.35 else lo + (hi - lo) * rs.random()
+                out[name] = int(round(v)) if kind == "INT" else float(round(v, 2))
+            elif kind == "COMBO":
+                opts = info.get("options", [])
+                out[name] = opts[int(rs.integers(len(opts)))]
+            elif kind == "BOOLEAN":
+                out[name] = bool(rs.integers(2))
+            elif kind == "STRING":
+                out[name] = info.get("default", "")
+    if class_type == "Outline":
+        out["line_color"] = ["#3a7fc2", "f0e", "#000000", " #ffe8c4 "][int(rs.integers(4))]
+        out["fill_color"] = ["#ffffff", "#102030", "abc"][int(rs.integers(3))]
+    return out
+
+
+def blur_sweep(classes: dict, keep=None) -> list:
+    sw = BlurSweep(keep)
+    for ci, (node_id, cls) in enumerate(classes.items()):
+        for seed in range(BLUR_SWEEP_SEEDS):
+            if keep is not None and not any(n.startswith(f"{node_id}: sweep seed {seed},") for n in BLUR_WORST_SEEDS):
+                continue
+            rs = np.random.default_rng(900_000 + 1000 * ci + seed)
+            widgets = sweep_widgets(rs, cls, node_id)
+            need = sweep_need(node_id, widgets)
+            bw, bh = BLUR_SWEEP_SIZES[int(rs.integers(len(BLUR_SWEEP_SIZES)))]
+            w, h = max(bw, need + int(rs.integers(0, 12))), max(bh, need + int(rs.integers(0, 12)))
+            c = 3 if node_id == "Outline" else int(rs.choice([3, 4]))
+            kind = str(rs.choice(["dots", "tex"] if node_id == "Sparkle" else ["tex", "tex", "smooth", "dots"]))
+            n = 2 if rs.random() < 0.2 else 1
+            base = int(rs.integers(1, 2 ** 31))
+            gens = [base + i for i in range(n)]
+            pics = [sweep_pixels(w, h, c, g, kind) for g in gens]
+            sw.case(f"{node_id}: sweep seed {seed}, {kind} {w}×{h}×{c}{' ×2' if n == 2 else ''}", cls, node_id, widgets, pics,
+                    sweep_window(rs, w, h), {"seeds": gens, "kind": kind})
+    review_cases(sw, classes)
+    return sw.cases
+
+
+# Each class's worst case in the full sweep (R2.5 fix round 1, `--sweep`): kept in the fixture.
+BLUR_WORST_SEEDS = [
+    "Sharpen: sweep seed 14,", "Denoise: sweep seed 2,", "AdjustGlow: sweep seed 18,", "HighPass: sweep seed 13,",
+    "Emboss: sweep seed 23,", "FindEdges: sweep seed 4,", "Bokeh: sweep seed 20,", "TiltShift: sweep seed 10,",
+    "FrequencySeparation: sweep seed 3,", "HeightmapRelief: sweep seed 3,", "Outline: sweep seed 11,", "Sparkle: sweep seed 20,",
+]
+
+
+def blur_probe(name: str) -> bool:
+    """The fixture's probes: each class's worst seed; of the reviewer's cases every one but the 45-case
+    motion grid (its 271° row kept), Outline's 15-case grid (solid at each thickness, and every fill
+    at 2.5 kept) and the 97 × 83 ones (Blur's worst, 'BIG blur g r17.5', kept)."""
+    if any(name.startswith(w) for w in BLUR_WORST_SEEDS):
+        return True
+    if ": review " not in name:
+        return False
+    what = name.split(": review ", 1)[1]
+    if what.startswith("BIG"):
+        return what == "BIG blur g r17.5"
+    if what.startswith("motion a"):
+        return what.startswith("motion a271.0 ")
+    if what.startswith("outline t"):
+        return what.endswith(" solid") or what.startswith("outline t2.5 ")
+    return True
+
+
+def review_cases(sw: BlurSweep, classes: dict) -> None:
+    """The R2.5 reviewer's probe cases (/private/tmp/r25probe/gen.py), rebuilt: the same pictures
+    from the same generator and seed, in the same order, and the same settings."""
+    rng = np.random.default_rng(7351)
+
+    def pic(w, h, c, kind="tex"):
+        yy, xx = np.mgrid[0:h, 0:w].astype(np.float64)
+        a = np.zeros((h, w, c))
+        for ch in range(c):
+            base = 0.5 + 0.35 * np.sin(xx * (0.21 + 0.07 * ch) + yy * 0.13 * (ch + 1)) * np.cos(yy * 0.09 - xx * 0.05 * ch)
+            base += (xx > w * 0.6) * 0.25 - (yy < h * 0.3) * 0.2
+            base += rng.normal(0, 0.06, (h, w))
+            a[..., ch] = base
+        if kind == "dots":
+            a[...] = 0.05 + rng.random((h, w, c)) * 0.1
+            pts = rng.choice(h * w, size=40, replace=False)
+            for j, p in enumerate(pts):
+                y, x = divmod(int(p), w)
+                a[y, x, :] = 0.5 + j * 0.012
+        return np.clip(np.rint(np.clip(a, 0, 1) * 255), 0, 255).astype(np.uint8)
+
+    wrs = np.random.default_rng(7352)
+
+    def case(name, cls_name, widgets, imgs):
+        imgs = imgs if isinstance(imgs, list) else [imgs]
+        h, w = imgs[0].shape[:2]
+        sw.case(f"{cls_name}: review {name}", classes[cls_name], cls_name, widgets, imgs, sweep_window(wrs, w, h), None)
+
+    def blurw(**k):
+        return {"type": "gaussian", "radius": 0.0, "angle": 0.0, "length": 0.0, "strength": 0.0, **k}
+    A = pic(41, 29, 3); B = pic(37, 31, 4); C = pic(41, 29, 3); _D = pic(64, 48, 3); _D2 = pic(64, 48, 3)
+    S5 = pic(5, 4, 3); S9 = pic(9, 9, 4); S20 = pic(20, 14, 3); ONE5 = pic(5, 1, 3); TWO = pic(2, 2, 4)
+    case("sharpen a", "Sharpen", {"amount": 2.35, "radius": 3.7}, A)
+    case("sharpen 4ch max", "Sharpen", {"amount": 4.0, "radius": 0.3}, B)
+    case("sharpen r10", "Sharpen", {"amount": 1.15, "radius": 10.0}, B)
+    case("denoise 4ch", "Denoise", {"strength": 2.2}, B)
+    case("denoise max", "Denoise", {"strength": 5.0}, pic(29, 37, 3))
+    case("denoise small", "Denoise", {"strength": 5.0}, S20)
+    for r in (3.5, 4.0, 7.9, 8.0, 23.5):
+        case(f"glow r{r} 4ch", "AdjustGlow", {"threshold": 0.4, "intensity": 1.3, "radius": r}, B)
+    case("glow batch r12.5", "AdjustGlow", {"threshold": 0.33, "intensity": 0.85, "radius": 12.5}, [A, C])
+    case("glow area 0", "AdjustGlow", {"threshold": 0.1, "intensity": 1.0, "radius": 50.0}, S5)
+    case("glow small pad", "AdjustGlow", {"threshold": 0.1, "intensity": 1.0, "radius": 8.0}, S9)
+    case("highpass 4ch", "HighPass", {"radius": 7.5}, B)
+    case("highpass small", "HighPass", {"radius": 30.0}, A)
+    case("emboss 2.65", "Emboss", {"depth": 2.65}, B)
+    case("emboss .35", "Emboss", {"depth": 0.35}, A)
+    case("emboss 2x2", "Emboss", {"depth": 1.7}, TWO)
+    case("emboss 1-row", "Emboss", {"depth": 1.0}, ONE5)
+    case("findedges 4ch inv", "FindEdges", {"intensity": 2.7, "invert": True}, B)
+    case("findedges 3ch", "FindEdges", {"intensity": 0.65, "invert": False}, A)
+    for r in (3.5, 4.0, 7.9, 8.0, 17.5):
+        case(f"blur g r{r}", "Blur", blurw(radius=r), B)
+    case("blur g batch 11", "Blur", blurw(radius=11.0), [A, C])
+    case("blur g small", "Blur", blurw(radius=50.0), A)
+    for ang in (17.0, 123.5, 200.0, 333.0, 271.0):
+        for L in (0.4, 2.5, 3.0, 7.0, 9.0, 23.0, 47.0, 64.0, 79.0):
+            case(f"motion a{ang} L{L}", "Blur", blurw(type="motion", angle=ang, length=L), B if L in (9.0, 47.0) else A)
+    case("motion batch", "Blur", blurw(type="motion", angle=58.0, length=31.0), [A, C])
+    case("motion small", "Blur", blurw(type="motion", angle=58.0, length=13.0), S5)
+    for s in (0.23, 0.77, 1.0, 0.01):
+        case(f"zoom {s}", "Blur", blurw(type="zoom", strength=s), B)
+    case("zoom batch", "Blur", blurw(type="zoom", strength=0.61), [A, C])
+    for r, bo in ((3.5, 2.35), (4.9, 1.0), (5.0, 4.0), (7.5, 1.7), (9.5, 1.5), (12.5, 2.0), (30.0, 3.1)):
+        case(f"bokeh r{r} b{bo}", "Bokeh", {"radius": r, "highlight_boost": bo}, B if r != 30.0 else pic(97, 83, 4))
+    case("bokeh batch", "Bokeh", {"radius": 11.0, "highlight_boost": 1.9}, [A, C])
+    case("bokeh small", "Bokeh", {"radius": 9.5, "highlight_boost": 1.5}, S9)
+    case("tilt a", "TiltShift", {"position": 0.31, "width": 0.47, "blur": 13.5}, B)
+    case("tilt 1", "TiltShift", {"position": 0.93, "width": 0.02, "blur": 1.0}, A)
+    case("tilt batch", "TiltShift", {"position": 0.5, "width": 0.2, "blur": 7.5}, [A, C])
+    case("tilt small", "TiltShift", {"position": 0.5, "width": 0.2, "blur": 40.0}, S20)
+    for sh in ("low", "high", "combined"):
+        case(f"freq {sh}", "FrequencySeparation", {"radius": 2.5, "show": sh}, B)
+    case("relief keep 4ch", "HeightmapRelief", {"angle": 211.0, "elevation": 0.07, "depth": 9.3, "ambient": 0.13, "keep_color": True}, B)
+    case("relief gray", "HeightmapRelief", {"angle": 17.0, "elevation": 0.93, "depth": 0.4, "ambient": 0.71, "keep_color": False}, A)
+    case("relief 1-row", "HeightmapRelief", {"angle": 17.0, "elevation": 0.5, "depth": 1.0, "ambient": 0.3, "keep_color": False}, ONE5)
+    for th in (0.5, 1.5, 2.5, 3.4, 4.0):
+        for mode in ("solid", "source", "transparent_black"):
+            case(f"outline t{th} {mode}", "Outline", {"thickness": th, "threshold": 0.07 if th < 2 else 0.6, "line_color": "#3a7fc2",
+                                                      "fill_color": "f0e", "fill_mode": mode, "mix": 0.63}, A)
+    case("outline batch", "Outline", {"thickness": 2.0, "threshold": 0.2, "line_color": "#ff8800", "fill_color": "#102030", "fill_mode": "solid", "mix": 1.0}, [A, C])
+    case("outline 4ch", "Outline", {"thickness": 1.0, "threshold": 0.15, "line_color": "#000000", "fill_color": "#ffffff", "fill_mode": "source", "mix": 1.0}, B)
+    DOTS = pic(64, 48, 3, "dots"); DOTS2 = pic(64, 48, 3, "dots"); DOTS4 = pic(64, 48, 4, "dots")
+    case("sparkle maxn untied", "Sparkle", {"threshold": 0.3, "size": 11.0, "intensity": 1.7, "points": 5, "angle": -37.0, "max_density": 0.002}, DOTS)
+    case("sparkle maxn ks161", "Sparkle", {"threshold": 0.3, "size": 80.0, "intensity": 0.6, "points": 8, "angle": 123.0, "max_density": 0.0015}, DOTS)
+    case("sparkle 4ch batch", "Sparkle", {"threshold": 0.45, "size": 3.0, "intensity": 3.9, "points": 3, "angle": 11.0, "max_density": 0.004}, [DOTS4, pic(64, 48, 4, "dots")])
+    case("sparkle batch", "Sparkle", {"threshold": 0.3, "size": 6.0, "intensity": 1.0, "points": 4, "angle": 0.0, "max_density": 0.0025}, [DOTS, DOTS2])
+    case("sparkle tex", "Sparkle", {"threshold": 0.7, "size": 9.0, "intensity": 2.0, "points": 6, "angle": 45.0, "max_density": 0.05}, _D)
+    L1 = pic(97, 83, 4); L2 = pic(97, 83, 3); L3 = pic(97, 83, 3)
+    case("BIG glow r23.5 4ch", "AdjustGlow", {"threshold": 0.4, "intensity": 1.3, "radius": 23.5}, L1)
+    case("BIG glow batch r12.5", "AdjustGlow", {"threshold": 0.33, "intensity": 0.85, "radius": 12.5}, [L2, L3])
+    case("BIG blur g r17.5", "Blur", blurw(radius=17.5), L1)
+    case("BIG blur g batch 11", "Blur", blurw(radius=11.0), [L2, L3])
+    for ang in (17.0, 271.0, 333.0):
+        for L in (64.0, 79.0, 16.0, 80.0):
+            case(f"BIG motion a{ang} L{L}", "Blur", blurw(type="motion", angle=ang, length=L), L1)
+    case("BIG motion batch", "Blur", blurw(type="motion", angle=99.5, length=41.0), [L2, L3])
+    case("BIG tilt a", "TiltShift", {"position": 0.31, "width": 0.47, "blur": 13.5}, L1)
+    case("BIG tilt batch 40", "TiltShift", {"position": 0.62, "width": 0.11, "blur": 40.0}, [L2, L3])
+    case("BIG zoom batch", "Blur", blurw(type="zoom", strength=0.93), [L2, L3])
+    case("BIG bokeh batch 23", "Bokeh", {"radius": 23.0, "highlight_boost": 2.7}, [L2, L3])
+
+
 def blur() -> dict:
     import comfy_extras.nodes_blur as nb
     g = BlurGroup()
@@ -1474,18 +1824,56 @@ def blur() -> dict:
             kk = nb._motion_kernel(length, a).reshape(-1).contiguous()
             kernels.append({"length": length, "angle": a, "side": int(round(kk.numel() ** 0.5)), "f32": b64(kk.numpy().astype("<f4").tobytes())})
     frame = blur_frame_chain(g, classes["Sharpen"], "Sharpen", {"amount": 1.3, "radius": 1.5}, card4)
-    return {"cases": g.cases, "assets": {k: b64(v) for k, v in sorted(g.assets.items())},
-            "library_eps": BLUR_LIBRARY_EPS, "motion_kernels": kernels, "frame": frame}
+    # A small output's float is kept once, by the sha256 of its bytes (many settings leave the
+    # picture as it was, or make the same picture): `floats`, and the item keeps its sha256.
+    floats: dict = {}
+    for c in g.cases:
+        items = [it for key in ("outputs", "stable_outputs") for o in c.get(key) or [] for it in o["items"]]
+        if c.get("preview", {}).get("tensor"):
+            items.append(c["preview"]["tensor"])
+        for it in items:
+            if "f32z" in it:
+                floats[it["f32_sha256"]] = it.pop("f32z")
+    return {"cases": g.cases, "floats": floats, "assets": {k: b64(v) for k, v in sorted(g.assets.items())},
+            "library_eps": BLUR_LIBRARY_EPS, "motion_kernels": kernels, "frame": frame, "probes": blur_sweep(classes, blur_probe)}
 
 
 GROUPS = {"machinery": machinery, "kernels": kernels, "rng": rng, "tone": tone, "blur": blur}
 
 
+def blur_sweep_run() -> int:
+    """`--group blur --sweep`: the whole ε sweep, measured by the spec against the TypeScript port
+    (the file handed over lives in this run's temp directory); prints each class's worst |Δ| and ε.
+    Writes nothing into the repo."""
+    import subprocess
+    classes = {node_id: node_class(module, node_id) for module, node_id in BLUR_CLASSES}
+    cases = blur_sweep(classes)
+    path = os.path.join(WORK, "blur-sweep.json")
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump({"cases": cases}, f)
+    seeds = sum(1 for c in cases if "gen" in c)
+    print(f"ε sweep: {len(cases)} cases ({seeds} seeds, {len(cases) - seeds} of the reviewer's), {sum(1 for c in cases if 'error' in c)} Python raises")
+    env = {k: v for k, v in os.environ.items() if k not in PROVIDER_KEYS}
+    env["BLUR_SWEEP_FILE"] = path
+    r = subprocess.run(["npx", "vitest", "run", "tests/unit/runner-effects-blur.unit.spec.ts", "-t", "the ε sweep|each class's ε", "--testTimeout=60000", "--reporter=verbose"],
+                       cwd=os.path.join(ROOT, "frontend"), env=env, capture_output=True, text=True)
+    out = r.stdout + r.stderr
+    for line in out.splitlines():
+        if line.startswith("  ") and ": ε " in line or "Tests " in line or " × " in line or "blur ε" in line:
+            print(line)
+    return r.returncode
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--group", required=True, choices=sorted(GROUPS))
+    ap.add_argument("--sweep", action="store_true", help="blur only: run the whole ε sweep, print each class's worst |Δ|; writes nothing")
     args = ap.parse_args()
     check_threads()
+    if args.sweep:
+        if args.group != "blur":
+            ap.error("--sweep is the blur group's")
+        sys.exit(blur_sweep_run())
     body = GROUPS[args.group]()
     doc = {
         "note": f"Written by scripts/runner_effects_fixtures.py --group {args.group} from the real nodes. Do not edit.",
