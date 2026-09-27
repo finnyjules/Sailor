@@ -108,12 +108,12 @@ test('a Drawn shape is drawn with the shared pen, arranged by the studio, and th
   expect(await actionRows.count()).toBeGreaterThan(0)   // Try other settings, Randomize when the pen is closed
 
   // Edit it again. Nothing else edits the layer while the pen is open: no action rows
-  // (Try other settings, Randomize), the rail shut to pointer AND keyboard, the Shape rows locked.
+  // (Try other settings, Randomize), the rail replaced by the pen's Properties, the Shape rows locked.
   await page.getByTestId('shape-draw').click()
   await expect(page.locator('[data-tool="path"]')).toBeVisible()
-  await expect(page.getByTestId('shape-rail-lock')).toBeVisible()
+  await expect(page.getByTestId('shape-pen-properties')).toBeVisible()   // Properties take the rail's place
   await expect(actionRows).toHaveCount(0)
-  await expect(page.getByTestId('shape-rail')).toHaveAttribute('inert', /.*/)
+  await expect(page.getByTestId('shape-rail')).toHaveCount(0)
 
   const misalign = async () => {
     const [o, c] = [await overlay.boundingBox(), await page.getByTestId('shape-preview').boundingBox()]

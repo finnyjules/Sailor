@@ -149,7 +149,7 @@ test.describe('Frame pen (shared pen)', () => {
     expect((await layers(page)).length).toBe(before.length)
   })
 
-  test('paste, right-click and a file drop do nothing while the pen is open; each works again once it closes', async ({ page, context }) => {
+  test('paste, a file drop and the Frame\'s right-click menu do nothing while the pen is open; each works again once it closes', async ({ page, context }) => {
     await context.grantPermissions(['clipboard-read', 'clipboard-write'])
     const all = await layers(page)
     const pic = all.find((l: any) => l.kind === 'image')
@@ -200,7 +200,7 @@ test.describe('Frame pen (shared pen)', () => {
     // (a) paste: a real ⌘V with layer JSON on the clipboard, then a paste event itself
     await page.keyboard.press(`${META}+v`)
     await dispatchPaste()
-    // (b) right-click on the image layer
+    // (b) right-click on the image layer: the pen's own menu opens, never the image's
     await page.mouse.click(picAt.x, picAt.y, { button: 'right' })
     // (c) a dropped file
     await dropSvg()
@@ -210,6 +210,10 @@ test.describe('Frame pen (shared pen)', () => {
     await expect(menu).toHaveCount(0)
     await expect(penToolbar(page)).toBeVisible()
     await expect(overlay(page).locator(`circle[data-point="${firstId}"]`)).toHaveCount(1)
+    await expect(page.locator('[data-pen-menu]')).toBeVisible()
+    await page.keyboard.press('Escape')                       // closes the pen's menu; the pen stays open
+    await expect(page.locator('[data-pen-menu]')).toHaveCount(0)
+    await expect(penToolbar(page)).toBeVisible()
 
     // ── controls: with the pen closed, the same routes do act ──
     await page.keyboard.press('Escape'); await page.keyboard.press('Escape')
@@ -503,21 +507,15 @@ test.describe('Frame pen — a text layer\'s drawn path', () => {
     await page.mouse.move(p0.x, p0.y); await page.mouse.down(); await page.mouse.up()
     await expect(penPoints(page)).toHaveCount(1)
 
-    // the pen owns the text while it is open: its placement fields, Follow a path and
-    // Path size are disabled (not hidden), titled "Finish the pen first"
+    // the pen owns the text while it is open: the pen's Properties take the right
+    // panel's body (pen stage 6), so the text's placement fields, Follow a path,
+    // Path size and the panel's own path button are not there to change it
     const rotationInput = page.locator('div:has(> .panel-label:text-is("Rotation")) input').first()
     const alignButton = page.locator('fieldset:has(> .panel-label:text-is("Align to frame")) button').first()
     const sizeField = page.locator('div:has(> .panel-label:text-is("Path size")) input').first()
     const distort = page.locator('[data-testid="distort-fields"]')
-    for (const f of [rotationInput, alignButton, follow, sizeField, distort.locator('button', { hasText: 'Reset' })]) {
-      await expect(f).toBeVisible()
-      await expect(f).toBeDisabled()
-    }
-    await expect(distort).toHaveAttribute('inert', '')   // the Slant sliders take no pointer or keys
-    await expect(rotationInput).toHaveAttribute('title', 'Finish the pen first')
-    await expect(follow).toHaveAttribute('title', 'Finish the pen first')
-    // re-clicking the panel button mid-session does nothing: the drawing survives
-    await guideButton(page).click()
+    await expect(page.getByTestId('frame-pen-properties')).toBeVisible()
+    for (const f of [rotationInput, alignButton, follow, sizeField, distort, guideButton(page)]) await expect(f).toHaveCount(0)
     await expect(penToolbar(page)).toBeVisible()
     await expect(penPoints(page)).toHaveCount(1)
 

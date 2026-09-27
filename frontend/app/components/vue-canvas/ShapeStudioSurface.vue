@@ -27,6 +27,7 @@ import { sketchOutlineBounds } from '~/lib/geoshape/shapes'
 import { useShapePenSession } from '~/composables/geoshape/useShapePenSession'
 import PenOverlay from '~/components/pen/PenOverlay.vue'
 import PenToolbar from '~/components/pen/PenToolbar.vue'
+import PenProperties from '~/components/pen/PenProperties.vue'
 import StudioButton from '~/components/vue-canvas/studio/StudioButton.vue'
 import StudioRow from '~/components/vue-canvas/studio/StudioRow.vue'
 import {
@@ -640,7 +641,10 @@ async function exportSvg() {
     <template #aside>
       <!-- Locked while the pen is open: the session belongs to one layer. `inert` shuts the
            keyboard out too; the cover (outside it, so its title still shows) takes the pointer. -->
-      <div class="relative flex min-h-0 w-full">
+      <!-- pen stage 6: while the pen is open its Properties take the rail's place
+           (the rail was locked then anyway — the session belongs to one layer) -->
+      <PenProperties v-if="penSession" :key="penSession.key" :pen="penSession.pen" data-testid="shape-pen-properties" class="w-full" />
+      <div v-else class="relative flex min-h-0 w-full">
         <div class="flex min-h-0 w-full" :class="penSession ? 'opacity-50' : ''" :inert="!!penSession" data-testid="shape-rail">
           <StudioLayerStack
             :layers="railLayers"

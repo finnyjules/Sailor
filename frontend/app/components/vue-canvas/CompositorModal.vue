@@ -90,6 +90,7 @@ import { cloneDoc } from '~/lib/sketch/clone'
 import { isTypingInField, isCleanupBarFocused } from '~/composables/pen/usePen'
 import PenOverlay from '~/components/pen/PenOverlay.vue'
 import PenToolbar from '~/components/pen/PenToolbar.vue'
+import PenProperties from '~/components/pen/PenProperties.vue'
 import { useBrushPaint, paintTargetMatches, effectLayerMatches } from '~/composables/useBrushPaint'
 import { paintGalleryInclude, effectGalleryInclude, brushEffectLabel, DEFAULT_BRUSH_EFFECT, EFFECT_LAYER_FILL, withPaintedEffect, brushIdIsStale } from '~/lib/brushTips/effects'
 import { myEffectsLoaded } from '~/lib/myEffects/library'
@@ -10211,8 +10212,12 @@ defineExpose({ editor, layoutGridResolved, layoutGrid, overlayGrid, viewLayoutGr
                   @click="inspectorTab = 'layout'">Layout</button>
         </div>
       </div>
+      <!-- The shared pen's Properties take the panel's body while a session is
+           open (pen stage 6); the tabs stay — Motion still closes the pen. -->
+      <PenProperties v-if="penSession" :key="penSession.key" :pen="penSession.pen"
+                     data-testid="frame-pen-properties" class="flex-1 min-h-0 overflow-y-auto" />
       <!-- Brand kits (opening the palette takes over the inspector) -->
-      <template v-if="brandOpen">
+      <template v-else-if="brandOpen">
         <div class="px-4 py-3 border-b border-white/10 flex items-center gap-2">
           <Palette class="size-3.5 text-white/70" />
           <span class="text-sm font-medium">Brand kits</span>

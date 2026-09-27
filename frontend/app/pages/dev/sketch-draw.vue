@@ -14,6 +14,8 @@ import { applyView, invertView, type ViewMatrix } from '~/lib/sketch/view'
 import { usePen, isTypingInField, isCleanupBarFocused, type PenTool } from '~/composables/pen/usePen'
 import PenOverlay from '~/components/pen/PenOverlay.vue'
 import PenToolbar from '~/components/pen/PenToolbar.vue'
+import PenProperties from '~/components/pen/PenProperties.vue'
+import { pieceKey } from '~/lib/sketch/pieces'
 
 type Tool = PenTool
 
@@ -296,6 +298,13 @@ onMounted(() => {
       const s = pen.cleanup.value
       return s ? { strength: s.strength, fixes: s.result.fixes.map(f => ({ id: f.id, kind: f.kind, label: f.label, on: f.on })) } : null
     },
+    // pen stage 6 — read the right-click menu, the wheel and the Properties hover (never change them)
+    menu: () => {
+      const m = pen.menu.value
+      return m ? { header: m.header, items: m.groups.flat().map(i => ({ id: i.id, ok: i.state.ok })) } : null
+    },
+    wheel: () => (pen.wheel.value ? { layout: pen.wheel.value.layout, hover: pen.wheel.value.hover } : null),
+    highlight: () => pen.highlight.value.map(pieceKey),
   }
   ready.value = true
   window.addEventListener('keydown', onKeydown, { capture: true })
@@ -319,14 +328,23 @@ onUnmounted(() => {
       <button data-act="reset" @click="reset" style="padding: 4px 10px; border-radius: 6px; border: 1px solid #333; background: #1a1a1a; color: #fff; cursor: pointer">Reset</button>
       <span data-status style="margin-left: 8px; font-size: 12px; color: #9ca3af">{{ status }}</span>
     </div>
-    <div :style="{ position: 'relative', width: CANVAS_W + 'px', height: CANVAS_H + 'px', background: '#fafafa', borderRadius: '8px', overflow: 'hidden', touchAction: 'none' }"
-         @pointerdown.capture="onCanvasPointerDown" @pointermove.capture="onCanvasPointerMove"
-         @pointerup.capture="onCanvasPointerUp" @pointerleave="onCanvasPointerLeave" @wheel="onWheel">
-      <PenOverlay :pen="pen" :view="view" :width="CANVAS_W" :height="CANVAS_H" :cursor="svgCursor"
-                  @commit="handlePenCommit" @cancel="handlePenCancel" />
+    <div style="display: flex; gap: 12px; align-items: flex-start">
+      <!-- a fixed-width column, so a long rules row wraps under the canvas
+           instead of pushing Properties off a 1024 px screen -->
+      <div :style="{ flex: 'none', width: CANVAS_W + 'px' }">
+        <div :style="{ position: 'relative', width: CANVAS_W + 'px', height: CANVAS_H + 'px', background: '#fafafa', borderRadius: '8px', overflow: 'hidden', touchAction: 'none' }"
+             @pointerdown.capture="onCanvasPointerDown" @pointermove.capture="onCanvasPointerMove"
+             @pointerup.capture="onCanvasPointerUp" @pointerleave="onCanvasPointerLeave" @wheel="onWheel">
+          <PenOverlay :pen="pen" :view="view" :width="CANVAS_W" :height="CANVAS_H" :cursor="svgCursor"
+                      @commit="handlePenCommit" @cancel="handlePenCancel" />
+        </div>
+        <!-- the dev page has no overlay dock, so it places the toolbar below the
+             canvas — a host with one (the Frame editor) puts it there instead. -->
+        <PenToolbar :pen="pen" style="margin-top: 12px" @commit="handlePenCommit" @cancel="handlePenCancel" />
+      </div>
+      <!-- pen stage 6: the Properties panel beside the canvas -->
+      <PenProperties :pen="pen" data-testid="sketch-pen-properties"
+                     style="width: 240px; flex: none; background: #141414; border: 1px solid #2a2a2a; border-radius: 10px" />
     </div>
-    <!-- the dev page has no overlay dock, so it places the toolbar below the
-         canvas — a host with one (the Frame editor) puts it there instead. -->
-    <PenToolbar :pen="pen" style="margin-top: 12px" @commit="handlePenCommit" @cancel="handlePenCancel" />
   </div>
 </template>
