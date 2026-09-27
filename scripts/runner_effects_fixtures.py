@@ -52,6 +52,25 @@ Groups:
               when it isn't the first output. Where Sparkle's topk had values
               tied at its cut, the case also records what the node makes with
               the lower index kept first among them (the runner's topk).
+  cells     — (R2.6) Pixelate, Halftone, Kuwahara and Ascii over the standard
+              case set, plus: Pixelate at 1, 2, 3 and 64 (an area resize to
+              1 × 1: a mean) and a batch of two; Halftone at odd and even
+              cells and four angles; Kuwahara at every radius 1–12 (an odd
+              radius makes the picture one pixel larger); Ascii over every
+              preset, custom text (short: the default ramp; long; one with a
+              character outside the atlas), every colour mode × background ×
+              invert × blend × mix, the rolls, gamma and phase, pictures not
+              a whole number of cells; ten seeded random settings per class;
+              one effect into a Frame. Every class is exact: each output keeps
+              its sha256s and a small one its float32 (zlib, in `floats`).
+              ALSO WRITES the Ascii glyph atlas,
+              frontend/server/runner/effects/asciiGlyphs.bin (every cell 4–64 ×
+              character, rendered by the node's own _ascii_bitmaps), and its
+              character list, frontend/shared/runner/asciiGlyphSet.generated.ts.
+              The whole group runs with the node's _FONT_PATHS pointed at
+              DejaVu Sans Mono from matplotlib in this .venv (controller
+              ruling (d): Menlo can't be shipped), for the atlas and every
+              Ascii case alike.
 
 Every picture reaches a node as it does in a real run, through the real
 Python loader of its source (as scripts/compositor_fixtures.py):
@@ -1838,7 +1857,270 @@ def blur() -> dict:
             "library_eps": BLUR_LIBRARY_EPS, "motion_kernels": kernels, "frame": frame, "probes": blur_sweep(classes, blur_probe)}
 
 
-GROUPS = {"machinery": machinery, "kernels": kernels, "rng": rng, "tone": tone, "blur": blur}
+# ── Group `cells` (R2.6): cells and glyphs ───────────────────────────────
+
+# (module, node_id) of the 4 classes R2.6 ports. Every one is exact.
+CELLS_CLASSES = [
+    ("nodes_stylize", "Pixelate"), ("nodes_glsl_lens", "Halftone"),
+    ("nodes_glsl_stylize", "Kuwahara"), ("nodes_glsl_stylize", "Ascii"),
+]
+
+# The Ascii glyph atlas (controller ruling (d)): rendered with DejaVu Sans Mono (a free licence;
+# Menlo is Apple's and can't be shipped), for the atlas AND every Ascii case, by pointing the
+# node module's _FONT_PATHS at this file for the whole run (the engine itself is not edited).
+# A hosted ComfyUI with another FreeType could rasterise slightly differently: the shipped atlas
+# is the reference.
+CELLS_FONT = os.path.join(ROOT, ".venv", "lib", "python3.12", "site-packages", "matplotlib", "mpl-data", "fonts", "ttf", "DejaVuSansMono.ttf")
+ASCII_ATLAS = os.path.join(ROOT, "frontend", "server", "runner", "effects", "asciiGlyphs.bin")
+ASCII_GLYPH_SET = os.path.join(ROOT, "frontend", "shared", "runner", "asciiGlyphSet.generated.ts")
+ASCII_CELLS = (4, 64)
+
+
+def cells_use_dejavu() -> None:
+    import comfy_extras.nodes_glsl_stylize as st
+    assert os.path.isfile(CELLS_FONT), CELLS_FONT
+    st._FONT_PATHS = [CELLS_FONT]
+    st._ascii_bitmap_cache.clear()
+    assert getattr(st._load_mono_font(20), "path", None) == CELLS_FONT
+
+
+def ascii_characters() -> str:
+    """The atlas's characters: the union of the eight presets and printable ASCII 32–126, by code point."""
+    import comfy_extras.nodes_glsl_stylize as st
+    chars = set(chr(o) for o in range(32, 127))
+    for ramp in st._ASCII_PRESETS.values():
+        chars.update(ramp)
+    chars.update(st._ASCII_DEFAULT)
+    return "".join(sorted(chars))
+
+
+def ascii_atlas() -> dict:
+    """Renders every (cell, character) with the node's own _ascii_bitmaps (each character alone, as
+    it renders them) and writes asciiGlyphs.bin: gzip (level 9, no mtime) of 'SAG1', a u32 LE index
+    length, the index (JSON), then for each cell 4–64 and each character in order its cell × cell
+    uint8 bitmap (np.array of the Lanczos-shrunk render: the float the node uses is u / 255). Also
+    writes the character list the eligibility check reads, with the node's preset ramps and default
+    (asciiGlyphSet.generated.ts)."""
+    import gzip
+    import struct
+    import PIL
+    from PIL import features
+    import comfy_extras.nodes_glsl_stylize as st
+    chars = ascii_characters()
+    with open(CELLS_FONT, "rb") as fh:
+        font_sha = sha(fh.read())
+    index = {
+        "format": "SAG1: per cell (cell_min…cell_max), per character (in `characters` order), cell × cell uint8, row-major",
+        "characters": chars, "cell_min": ASCII_CELLS[0], "cell_max": ASCII_CELLS[1],
+        "font": os.path.basename(CELLS_FONT), "font_sha256": font_sha,
+        "pillow": PIL.__version__, "freetype": features.version("freetype2"),
+        "note": "Written by scripts/runner_effects_fixtures.py --group cells with the Ascii node's own _ascii_bitmaps. Do not edit.",
+    }
+    data = bytearray()
+    per_cell = []
+    for cell in range(ASCII_CELLS[0], ASCII_CELLS[1] + 1):
+        st._ascii_bitmap_cache.clear()
+        b = st._ascii_bitmaps(cell, chars, "cpu", torch.float32)
+        u8 = torch.round(b * 255.0).to(torch.uint8)
+        assert torch.equal(u8.float() / 255.0, b), cell
+        data += u8.numpy().tobytes()
+        per_cell.append({"cell": cell, "f32_sha256": sha(b.contiguous().numpy().astype("<f4").tobytes())})
+    st._ascii_bitmap_cache.clear()
+    head = json.dumps(index, sort_keys=True, ensure_ascii=True).encode("ascii")
+    raw = b"SAG1" + struct.pack("<I", len(head)) + head + bytes(data)
+    packed = gzip.compress(raw, compresslevel=9, mtime=0)
+    with open(ASCII_ATLAS, "wb") as fh:
+        fh.write(packed)
+    ts = (
+        "// Written by scripts/runner_effects_fixtures.py --group cells. Do not edit.\n"
+        "/**\n"
+        " * The characters the Ascii glyph atlas holds (server/runner/effects/asciiGlyphs.bin, step 3 R2.6):\n"
+        " * the union of the node's eight presets and printable ASCII 32–126, by code point. A custom\n"
+        " * `characters` ramp with any other character leaves the node to the engine.\n"
+        " */\n"
+        f"export const ASCII_GLYPH_CHARACTERS = {json.dumps(chars, ensure_ascii=True)}\n"
+        "\n"
+        "/** The node's preset ramps (nodes_glsl_stylize.py _ASCII_PRESETS), light to dark. */\n"
+        f"export const ASCII_PRESETS: Readonly<Record<string, string>> = {json.dumps(st._ASCII_PRESETS, ensure_ascii=True)}\n"
+        "\n"
+        "/** The ramp a custom text shorter than two characters falls back to (_ASCII_DEFAULT). */\n"
+        f"export const ASCII_DEFAULT = {json.dumps(st._ASCII_DEFAULT, ensure_ascii=True)}\n"
+    )
+    with open(ASCII_GLYPH_SET, "w", encoding="utf-8") as fh:
+        fh.write(ts)
+    return {"characters": chars, "entries": len(chars) * (ASCII_CELLS[1] - ASCII_CELLS[0] + 1), "file_sha256": sha(packed),
+            "file_bytes": len(packed), "raw_sha256": sha(raw), "index": index, "cells": per_cell}
+
+
+class CellsGroup(Group):
+    """The cells group's cases: every class is exact, so each output is its sha256s (float32, round8,
+    trunc8), and a small one's float32 too, zlib'd (`f32z`, kept once per distinct float in
+    `floats`: a failing test can then name the first value that differs)."""
+
+    def case(self, name: str, cls, class_type: str, widgets: dict, inputs: dict, hashed: bool = False) -> None:
+        self.seq += 1
+        node_id = f"fx{self.seq}"
+        tensors = {}
+        for key, (source, files) in inputs.items():
+            tensors[key] = load("blank", None, None) if source == "blank" else torch.cat([load(source, f, self.assets[f]) for f in files], dim=0)
+        row: dict = {"name": name, "class_type": class_type, "node_id": node_id, "widgets": widgets,
+                     "inputs": {k: {"source": s, "files": list(f)} for k, (s, f) in inputs.items()}}
+        if hashed:
+            row["hashed"] = True
+        try:
+            outs, ui = run_node(cls, node_id, **tensors, **widgets)
+        except Exception as e:  # Python raises: the runner's plain message is checked against it
+            row["error"] = {"type": type(e).__name__, "message": str(e)}
+            self.cases.append(row)
+            return
+        row["outputs"] = [record_tone_output(t, hashed, None) for t in outs]
+        if not hashed:
+            for t, o in zip(outs, row["outputs"]):
+                for i, item in enumerate(o["items"]):
+                    item["f32z"] = b64(zlib.compress(t[i].contiguous().cpu().numpy().astype("<f4").tobytes(), 9))
+        row["ui"] = {"images": ui["images"], "animated": list(ui["animated"])}
+        row["preview"] = read_preview(ui, True)
+        self.cases.append(row)
+
+
+# A few settings drawn at random (seeded) per class, on top of the standard set: combinations the
+# one-at-a-time set leaves untried.
+CELLS_RANDOM = 10
+
+
+def cells() -> dict:
+    cells_use_dejavu()
+    import comfy_extras.nodes_glsl_stylize as st
+    atlas = ascii_atlas()
+    cells_use_dejavu()
+    g = CellsGroup()
+    classes = {node_id: node_class(module, node_id) for module, node_id in CELLS_CLASSES}
+    for node_id, cls in classes.items():
+        standard_cases(g, cls, node_id)
+    rgb, card4, card3, prov = g.picture(37, 23, 3, 1), g.picture(23, 19, 4, 3), g.picture(23, 19, 3, 4), g.picture(29, 31, 4, 2)
+    four = (("rgb 37×23", "rgb", rgb), ("provider 29×31", "provider", prov), ("card 23×19 see-through", "card", card4), ("card 23×19 opaque", "card", card3))
+    defaults = {node_id: widget_settings(cls)[0] for node_id, cls in classes.items()}
+
+    def run(cls_name: str, label: str, over: dict, pics, hashed: bool = False) -> None:
+        for pname, source, file in pics:
+            g.case(f"{cls_name}: {label}, {pname}", classes[cls_name], cls_name, {**defaults[cls_name], **over}, {"image": (source, [file])}, hashed=hashed)
+
+    # Every numeric widget "between" at once.
+    for node_id, cls in classes.items():
+        _d, settings = widget_settings(cls)
+        mixed = dict(defaults[node_id])
+        for label, over in settings:
+            if " between (" in label:
+                mixed.update(over)
+        run(node_id, "every setting between", {k: v for k, v in mixed.items() if v != defaults[node_id].get(k)},
+            (("rgb 37×23", "rgb", rgb), ("card 23×19 see-through", "card", card4)))
+    # Pixelate: 1 (a clamp), 2, and 64 (bigger than the picture: an area resize to 1 × 1, a mean).
+    for size in (1, 2, 3, 64):
+        run("Pixelate", f"size {size}", {"size": size}, four)
+    wide = g.picture(150, 70, 3, 12)
+    run("Pixelate", "size 64 (a 2 × 1 area)", {"size": 64}, (("rgb 150×70", "rgb", wide),))
+    b1, b2 = g.picture(120, 90, 3, 13), g.picture(120, 90, 3, 14)
+    for size in (64, 7):
+        g.case(f"Pixelate: size {size}, a batch of two rgb 120×90", classes["Pixelate"], "Pixelate", {"size": size}, {"image": ("rgb", [b1, b2])})
+        g.case(f"Pixelate: size {size}, rgb 120×90", classes["Pixelate"], "Pixelate", {"size": size}, {"image": ("rgb", [b1])})
+    g.case("Pixelate: size 64, a batch of two provider 29×31", classes["Pixelate"], "Pixelate", {"size": 64},
+           {"image": ("provider", [prov, g.picture(29, 31, 4, 15)])})
+    # Halftone: an odd and an even cell at angles 0, 15 and 90; and a few more.
+    for cell in (7, 8, 2, 3):
+        for angle in (0.0, 15.0, 90.0, 45.0):
+            run("Halftone", f"cell {cell}, angle {angle}", {"cell_size": cell, "angle": angle}, (("rgb 37×23", "rgb", rgb), ("card 23×19 see-through", "card", card4)))
+    # Kuwahara: radius 1–12 on 37×23 (an odd radius makes the picture one pixel larger each way).
+    for r in range(1, 13):
+        run("Kuwahara", f"radius {r}", {"radius": r}, (("rgb 37×23", "rgb", rgb), ("card 23×19 see-through", "card", card4)))
+    # Ascii: every preset (the standard set), custom text short and long, the modes and their mixes.
+    ascii_d = defaults["Ascii"]
+    whole = g.picture(40, 30, 3, 16)
+    whole4 = g.picture(40, 30, 4, 17)
+    pics_a = (("rgb 37×23", "rgb", rgb), ("rgb 40×30", "rgb", whole), ("provider 40×30", "provider", whole4), ("card 23×19 see-through", "card", card4))
+    customs = ["x", "", "ab", "@%#*+=-:. ", " .:-=+*#%@abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789~!?",
+               " ░▒▓█·•●≡⠁⠇⠿⣿", "⠀⠁", "  ..", "é"]
+    for i, text in enumerate(customs):
+        run("Ascii", f"custom {i} ({len(text)} characters)", {"preset": "custom", "characters": text, "cell_size": 6}, pics_a[:2])
+    for preset in list(st._ASCII_PRESETS) + ["custom"]:
+        run("Ascii", f"preset {preset}, cell 5", {"preset": preset, "cell_size": 5}, pics_a[:2])
+    for mode in ("monochrome", "texture"):
+        for bg in (True, False):
+            for inv in (False, True):
+                for blend in ("normal", "multiply", "screen", "overlay"):
+                    for mix in (1.0, 0.5):
+                        run("Ascii", f"{mode}, background {bg}, invert {inv}, {blend}, mix {mix}",
+                            {"color_mode": mode, "background": bg, "invert_order": inv, "blend_mode": blend, "mix": mix, "cell_size": 5}, pics_a)
+    for px_, py_ in ((32, 0), (-32, 0), (0, 32), (0, -32), (7, -3), (-37, 23), (32, 32)):
+        run("Ascii", f"pos {px_}, {py_}", {"pos_x": max(-32, min(32, px_)), "pos_y": max(-32, min(32, py_)), "cell_size": 5}, pics_a[:3])
+    for gamma in (0.1, 3.0, 2.0, 0.5, 1.0005, 1.002, 0.37, 2.71):
+        for phase in (0.0, 1.0, 0.33):
+            run("Ascii", f"gamma {gamma}, phase {phase}", {"gamma": gamma, "phase": phase, "cell_size": 4}, pics_a[:1])
+    run("Ascii", "mix 0.999 (not mixed)", {"mix": 0.999, "cell_size": 5}, pics_a)
+    run("Ascii", "mix 0.9989 (mixed)", {"mix": 0.9989, "cell_size": 5}, pics_a)
+    for cell in (4, 9, 19, 23, 24, 37, 40):
+        run("Ascii", f"cell {cell}", {"cell_size": cell}, pics_a)
+    g.case("Ascii: texture, a batch of two files and a repeat", classes["Ascii"], "Ascii", {**ascii_d, "color_mode": "texture", "cell_size": 4},
+           {"image": ("rgb", [rgb, g.picture(37, 23, 3, 5), rgb])})
+
+    # Ties. Kuwahara on two flat halves: next to the edge, a quadrant wholly in each half has
+    # variance 0 (argmin takes the first). Ascii on black: the index lands on a half
+    # ((1 − 0)·2 + 0.25·2 = 2.5), which rounds to even.
+    def flat(name: str, w: int, h: int, fill) -> str:
+        arr = np.zeros((h, w, 3), dtype=np.uint8)
+        fill(arr)
+        buf = io.BytesIO()
+        PILImage.fromarray(arr, "RGB").save(buf, format="PNG")
+        g.assets.setdefault(name, buf.getvalue())
+        return name
+    halves = flat("halves_40x24.png", 40, 24, lambda a: a.__setitem__((slice(None), slice(20, None)), 255))
+    stripes = flat("stripes_40x24.png", 40, 24, lambda a: a.__setitem__((slice(None), slice(None, None, 4)), 200))
+    black = flat("black_40x30.png", 40, 30, lambda a: None)
+    for r in (2, 3, 4, 7):
+        for pname, file in (("two halves 40×24", halves), ("stripes 40×24", stripes)):
+            g.case(f"Kuwahara: radius {r}, {pname}", classes["Kuwahara"], "Kuwahara", {"radius": r}, {"image": ("rgb", [file])})
+    for inv in (False, True):
+        for phase in (0.25, 0.75):
+            g.case(f"Ascii: binary, phase {phase}, invert {inv}, black 40×30", classes["Ascii"], "Ascii",
+                   {**ascii_d, "preset": "binary", "phase": phase, "invert_order": inv, "cell_size": 10}, {"image": ("rgb", [black])})
+    # Settings drawn at random (seeded), every class.
+    rs = np.random.default_rng(2606)
+    presets = list(st._ASCII_PRESETS) + ["custom"]
+    for node_id, cls in classes.items():
+        for i in range(CELLS_RANDOM):
+            if node_id == "Pixelate":
+                over = {"size": int(rs.integers(1, 65))}
+            elif node_id == "Halftone":
+                over = {"cell_size": int(rs.integers(2, 49)), "angle": float(round(rs.uniform(0, 90), 2))}
+            elif node_id == "Kuwahara":
+                over = {"radius": int(rs.integers(1, 13))}
+            else:
+                over = {"preset": presets[int(rs.integers(0, len(presets)))], "characters": "".join(rs.choice(list(atlas["characters"]), int(rs.integers(1, 30)))),
+                        "cell_size": int(rs.integers(4, 12)), "gamma": float(round(rs.uniform(0.1, 3.0), 2)), "phase": float(round(rs.uniform(0, 1), 2)),
+                        "mix": float(round(rs.uniform(0, 1), 2)), "color_mode": ["monochrome", "texture"][int(rs.integers(0, 2))],
+                        "background": bool(rs.integers(0, 2)), "invert_order": bool(rs.integers(0, 2)),
+                        "pos_x": int(rs.integers(-32, 33)), "pos_y": int(rs.integers(-32, 33)),
+                        "blend_mode": ["normal", "multiply", "screen", "overlay"][int(rs.integers(0, 4))]}
+            pname, source, file = (("rgb 80×60", "rgb", g.picture(80, 60, 3, 11)), ("rgb 37×23", "rgb", rgb), ("card 23×19 opaque", "card", card3))[i % 3]
+            g.case(f"{node_id}: random {i}, {pname}", cls, node_id, {**defaults[node_id], **over}, {"image": (source, [file])})
+    # The large cases (hashed): settings that do the most work.
+    big = (("rgb 320×200", "rgb", g.picture(320, 200, 3, 6)),)
+    run("Pixelate", "size 3", {"size": 3}, big, hashed=True)
+    run("Halftone", "cell 13, angle 33", {"cell_size": 13, "angle": 33.0}, big, hashed=True)
+    run("Kuwahara", "radius 7", {"radius": 7}, big, hashed=True)
+    run("Ascii", "texture, overlay, mix 0.6, pos 5, -9", {"color_mode": "texture", "blend_mode": "overlay", "mix": 0.6, "pos_x": 5, "pos_y": -9, "cell_size": 7}, big, hashed=True)
+    run("Ascii", "blocks, gamma 0.37, phase 0.5", {"preset": "blocks", "gamma": 0.37, "phase": 0.5, "cell_size": 12}, big, hashed=True)
+    frame = tone_frame_chain(g, classes["Kuwahara"], "Kuwahara", {"radius": 3}, card4)
+    floats: dict = {}
+    for c in g.cases:
+        for o in c.get("outputs") or []:
+            for it in o["items"]:
+                if "f32z" in it:
+                    floats[it["f32_sha256"]] = it.pop("f32z")
+    return {"cases": g.cases, "floats": floats, "assets": {k: b64(v) for k, v in sorted(g.assets.items())},
+            "atlas": atlas, "frame": frame, "font": {"path": os.path.relpath(CELLS_FONT, ROOT), "sha256": atlas["index"]["font_sha256"]}}
+
+
+GROUPS = {"machinery": machinery, "kernels": kernels, "rng": rng, "tone": tone, "blur": blur, "cells": cells}
 
 
 def blur_sweep_run() -> int:

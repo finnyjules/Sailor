@@ -17,7 +17,7 @@ import { FAMILY_REQUIRES, RUNNER_FAMILIES, type RunnerFamily } from '#shared/run
 import { EFFECTS } from '~~/server/runner/effects/table'
 import { effectCores } from '~~/server/runner/effects/cores'
 
-/** The classes ported so far: the pilots (R2.1), the rest of effects-tone (R2.4) and effects-blur (R2.5). */
+/** The classes ported so far: the pilots (R2.1), the rest of effects-tone (R2.4), effects-blur (R2.5) and effects-cells (R2.6). */
 const PORTED = [
   'AdjustExposure', 'AdjustInvert', 'AdjustThreshold',
   'AdjustBrightnessContrast', 'AdjustColor', 'AdjustCurves', 'AdjustLevels',
@@ -25,6 +25,7 @@ const PORTED = [
   'AdjustVignette', 'AdjustShadowsHighlights', 'Duotone', 'SplitToning',
   'GradientMap', 'Posterize', 'Hologram', 'TwoDLight', 'LightLeak', 'LensFlare', 'Caustics', 'Blinds', 'CrossHatch', 'Dither',
   'Sharpen', 'Denoise', 'AdjustGlow', 'HighPass', 'Emboss', 'FindEdges', 'Blur', 'Bokeh', 'TiltShift', 'FrequencySeparation', 'HeightmapRelief', 'Outline', 'Sparkle',
+  'Pixelate', 'Halftone', 'Kuwahara', 'Ascii',
 ]
 /** Picture outputs: one, except FrequencySeparation's two (low, high). */
 const pictureSlots = (cls: string) => (cls === 'FrequencySeparation' ? [0, 1] : [0])
@@ -105,10 +106,10 @@ describe('the rows', () => {
       expect(row.imageInputs).toEqual(s.images.map(i => i.name))
       expect(row.mustLink).toEqual(s.images.filter(i => i.required).map(i => i.name))
       expect(row.required).toEqual(row.mustLink)
-      // R2.4: a class with colour text also checks the runner reads it as Python does.
+      // R2.4: a class with colour text also checks the runner reads it as Python does; R2.6: Ascii its characters.
       expect(row.inputCheck).toEqual(Object.prototype.hasOwnProperty.call(EFFECT_TEXT_WIDGETS, cls)
         ? ['effect-preview-name', 'effect-output-size', 'effect-text']
-        : ['effect-preview-name', 'effect-output-size'])
+        : cls === 'Ascii' ? ['effect-preview-name', 'effect-output-size', 'ascii-glyphs'] : ['effect-preview-name', 'effect-output-size'])
     }
   })
 

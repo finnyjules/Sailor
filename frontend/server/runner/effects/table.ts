@@ -7,6 +7,7 @@
  */
 import type { EffectFamily } from '#shared/runner/effects'
 import { hexToRgb, parseDuotone, parseStops } from '#shared/runner/gradientStops'
+import { asciiPrepare } from './asciiGlyphs'
 
 export interface EffectSpec {
   family: EffectFamily
@@ -121,6 +122,32 @@ function outlineWork(w: Record<string, unknown>, s: Size): number {
   return px(s) * (2 * 9 * CONV_TAP + (k > 1 ? (2 * k + 1) ** 2 : 0) + 10)
 }
 
+// ── effects-cells (R2.6): the work each asks for (rule 7) ──
+//
+// In the same units (0.37 × 10⁹ a second), every picture counted at 4
+// channels. Measured on the development Mac (R2.6 report: each op at 1024²
+// in this thread, calibrated so every op stays at or under the unit):
+// Pixelate's area and nearest passes CELLS_PASS a value each; Halftone its
+// per-pixel geometry (HALFTONE_PIXEL) and its luma's avg_pool2d, the
+// cell² window at every pixel of the (h + 1) × (w + 1) pool; Kuwahara its
+// two avg_pool2ds, (r + 1)² taps a value each, and its per-pixel quadrant
+// pick; Ascii a fixed ASCII_PIXEL a value (its pools visit each pixel once).
+
+const CELLS_PASS = 4
+const HALFTONE_PIXEL = 24
+const POOL_TAP = 1.5
+const KUWAHARA_PIXEL = 24
+const ASCII_PIXEL = 24
+
+const cells = (name: string, work: NonNullable<EffectSpec['work']>, extra: Partial<EffectSpec> = {}): EffectSpec =>
+  ({ family: 'effects-cells', op: `cells.${name}`, batch: 'pure', work, ...extra })
+
+/** Pixels one pixel larger each way (Halftone's even cell, Kuwahara's odd radius: the pool's size). */
+const px1 = (s: Size) => (s ? (s.w + 1) * (s.h + 1) : 0)
+
+/** Kuwahara's radius as its execute reads it. */
+const kuwaharaR = (w: Record<string, unknown>) => Math.max(1, Math.trunc(num(w, 'radius')))
+
 export const EFFECTS: Readonly<Record<string, EffectSpec>> = {
   // ── effects-tone (R2.1 pilots): per pixel, exact ──
   AdjustExposure: { family: 'effects-tone', op: 'tone.AdjustExposure', batch: 'pure' },
@@ -174,6 +201,14 @@ export const EFFECTS: Readonly<Record<string, EffectSpec>> = {
   HeightmapRelief: blur('HeightmapRelief', (_w, s) => px(s) * (2 * 9 * CONV_TAP + 20)),
   Outline: blur('Outline', outlineWork, w => ({ ...w, line: hexToRgb(String(w.line_color), [0, 0, 0]), fill: hexToRgb(String(w.fill_color), [1, 1, 1]) })),
   Sparkle: blur('Sparkle', sparkleWork),
+  // ── effects-cells (R2.6): exact ──
+  Pixelate: cells('Pixelate', (_w, s) => px(s) * WORK_CHANNELS * 2 * CELLS_PASS),
+  Halftone: cells('Halftone', (w, s) => px(s) * HALFTONE_PIXEL + px1(s) * num(w, 'cell_size') ** 2 * POOL_TAP),
+  Kuwahara: cells('Kuwahara', (w, s) => px1(s) * (WORK_CHANNELS * 2 * (kuwaharaR(w) + 1) ** 2 * POOL_TAP + KUWAHARA_PIXEL), {
+    // An odd radius pools with an even window: the output is one pixel larger each way.
+    outSize: (w, s) => (s && kuwaharaR(w) % 2 === 1 ? { w: s.w + 1, h: s.h + 1 } : s ?? { w: 0, h: 0 }),
+  }),
+  Ascii: cells('Ascii', (_w, s) => px(s) * WORK_CHANNELS * ASCII_PIXEL, { prepare: asciiPrepare }),
 }
 
 /** The runner's spec for an effect class, or undefined when the class is not an effect it ports. */

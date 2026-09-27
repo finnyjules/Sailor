@@ -14,6 +14,7 @@ import { pixels } from '../pixels/core'
 import { tensorCore } from './core/tensor'
 import { toneCore } from './core/tone'
 import { blurCore } from './core/blur'
+import { cellsCore } from './core/cells'
 import { kernelsCore } from './core/kernels'
 import { rngCore } from './core/rng'
 
@@ -33,14 +34,16 @@ export const EFFECT_CORES: readonly EffectCoreEntry[] = [
   { name: 'rng', fn: rngCore as EffectCoreEntry['fn'], args: [] },
   // R2.5: the blur and convolution effects (gaussian blur, depthwise conv, resizes, pools, topk).
   { name: 'blur', fn: blurCore as EffectCoreEntry['fn'], args: ['tk', 'kn'] },
+  // R2.6: cells and glyphs (area / nearest resizes, avg pooling, remainder).
+  { name: 'cells', fn: cellsCore as EffectCoreEntry['fn'], args: ['tk', 'kn'] },
 ]
 
 /** The cores whose functions are effect ops (not helpers). */
-export const EFFECT_OP_CORES: readonly string[] = ['tone', 'blur']
+export const EFFECT_OP_CORES: readonly string[] = ['tone', 'blur', 'cells']
 
 /** The cores in this thread (tests), built as the worker builds them. */
 export const effectCores = (() => {
   const tk = tensorCore(pixels)
   const kn = kernelsCore(tk, pixels)
-  return { px: pixels, tk, kn, tone: toneCore(tk, kn), rng: rngCore(), blur: blurCore(tk, kn) }
+  return { px: pixels, tk, kn, tone: toneCore(tk, kn), rng: rngCore(), blur: blurCore(tk, kn), cells: cellsCore(tk, kn) }
 })()

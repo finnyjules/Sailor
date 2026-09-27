@@ -15,8 +15,9 @@
  */
 import { EFFECT_SCHEMAS, type EffectSchema, type EffectSchemaFamily } from './effectSchemas.generated'
 import { duotoneTextIsPortable, hexTextIsPortable, stopsTextIsPortable } from './gradientStops'
+import { ASCII_DEFAULT, ASCII_GLYPH_CHARACTERS, ASCII_PRESETS } from './asciiGlyphSet.generated'
 import type { RunnerFamily } from './families'
-import type { RunnerNodeRule, RunnerWidgetSpec } from './eligibility'
+import type { InputCheckName, RunnerNodeRule, RunnerWidgetSpec } from './eligibility'
 import type { ValueKind } from './values'
 
 export type EffectFamily = EffectSchemaFamily
@@ -24,7 +25,7 @@ export type EffectFamily = EffectSchemaFamily
 /** Every effect family. */
 export const EFFECT_FAMILIES: readonly EffectFamily[] = ['effects-tone', 'effects-blur', 'effects-cells', 'effects-warp', 'effects-mask', 'effects-noise']
 
-/** The effects ported so far (R2.1: the three pilots; R2.4: the rest of effects-tone; R2.5: effects-blur). Each task adds its classes. */
+/** The effects ported so far (R2.1: the three pilots; R2.4: the rest of effects-tone; R2.5: effects-blur; R2.6: effects-cells). Each task adds its classes. */
 export const EFFECT_CLASSES_PORTED: readonly string[] = [
   'AdjustExposure', 'AdjustInvert', 'AdjustThreshold',
   'AdjustBrightnessContrast', 'AdjustColor', 'AdjustCurves', 'AdjustLevels',
@@ -32,6 +33,7 @@ export const EFFECT_CLASSES_PORTED: readonly string[] = [
   'AdjustVignette', 'AdjustShadowsHighlights', 'Duotone', 'SplitToning',
   'GradientMap', 'Posterize', 'Hologram', 'TwoDLight', 'LightLeak', 'LensFlare', 'Caustics', 'Blinds', 'CrossHatch', 'Dither',
   'Sharpen', 'Denoise', 'AdjustGlow', 'HighPass', 'Emboss', 'FindEdges', 'Blur', 'Bokeh', 'TiltShift', 'FrequencySeparation', 'HeightmapRelief', 'Outline', 'Sparkle',
+  'Pixelate', 'Halftone', 'Kuwahara', 'Ascii',
 ]
 
 /** Each effect class's family (every generated class, ported or not). */
@@ -130,6 +132,39 @@ export function effectTextIsPortable(classType: string, inputs: Record<string, u
     kind === 'hex' ? hexTextIsPortable(inputs[name]) : kind === 'stops' ? stopsTextIsPortable(inputs[name]) : duotoneTextIsPortable(inputs[name]))
 }
 
+// ── Ascii's characters (R2.6) ────────────────────────────────────────────────
+
+const GLYPHS: ReadonlySet<string> = new Set([...ASCII_GLYPH_CHARACTERS])
+
+/**
+ * The ramp the Ascii node draws with (nodes_glsl_stylize.py:275-281), one
+ * character per code point: its preset's, or with `custom` the text when it
+ * has at least two characters (else _ASCII_DEFAULT). Null when a custom text
+ * isn't a string (str() of a number the runner can't read as Python writes it).
+ */
+export function asciiRampOf(preset: unknown, characters: unknown): string[] | null {
+  if (preset !== 'custom') {
+    const ramp = typeof preset === 'string' && Object.prototype.hasOwnProperty.call(ASCII_PRESETS, preset) ? ASCII_PRESETS[preset]! : ASCII_DEFAULT
+    return [...ramp]
+  }
+  if (typeof characters !== 'string') return null
+  const chars = [...characters]
+  return chars.length >= 2 ? chars : [...ASCII_DEFAULT]
+}
+
+/** Whether every character of the ramp an Ascii node draws is in the runner's glyph atlas (server/runner/effects/asciiGlyphs.bin). */
+export function asciiGlyphsArePortable(inputs: Record<string, unknown>): boolean {
+  const ramp = asciiRampOf(inputs.preset, inputs.characters)
+  return !!ramp && ramp.every(ch => GLYPHS.has(ch))
+}
+
+/** The input checks a class carries beyond every effect's own (R2.4's colour text, R2.6's characters). */
+function extraChecks(cls: string): InputCheckName[] {
+  if (Object.prototype.hasOwnProperty.call(EFFECT_TEXT_WIDGETS, cls)) return ['effect-text']
+  if (cls === 'Ascii') return ['ascii-glyphs']
+  return []
+}
+
 // ── Rows (rule 1) ────────────────────────────────────────────────────────────
 
 /** A generated widget as ComfyUI's validation reads it (a COLOR is validated as nothing more than a value). */
@@ -149,8 +184,9 @@ function widgetSpec(w: EffectSchema['widgets'][string]): RunnerWidgetSpec {
  * live preview, so it counts as work, controller ruling (a)); its widgets as
  * ComfyUI validates them; its required pictures and masks linked; each IMAGE
  * input a picture and each MASK input a mask value; the node id fit for the
- * preview's name, an output size from the widgets within the caps, and any
- * colour text read as Python reads it (EFFECT_TEXT_WIDGETS).
+ * preview's name, an output size from the widgets within the caps, any
+ * colour text read as Python reads it (EFFECT_TEXT_WIDGETS), and Ascii's
+ * characters all in the runner's glyph atlas ('ascii-glyphs').
  */
 export function effectRows(): Record<string, RunnerNodeRule> {
   const rows: Record<string, RunnerNodeRule> = {}
@@ -164,9 +200,7 @@ export function effectRows(): Record<string, RunnerNodeRule> {
       ...(s.images.length ? { imageInputs: s.images.map(i => i.name) } : {}),
       ...(s.masks.length ? { valueInputs: Object.fromEntries(s.masks.map(m => [m.name, ['mask'] as const])) } : {}),
       widgets: Object.fromEntries(Object.entries(s.widgets).map(([k, w]) => [k, widgetSpec(w)])),
-      inputCheck: Object.prototype.hasOwnProperty.call(EFFECT_TEXT_WIDGETS, cls)
-        ? ['effect-preview-name', 'effect-output-size', 'effect-text']
-        : ['effect-preview-name', 'effect-output-size'],
+      inputCheck: ['effect-preview-name', 'effect-output-size', ...extraChecks(cls)],
     }
   }
   return rows
