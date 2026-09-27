@@ -11,8 +11,7 @@ test.describe('node lab', () => {
     await ports.first().hover()
     const dot = ports.first().locator('.node-port__dot')
     await expect.poll(async () => (await dot.boundingBox())?.width).toBeGreaterThan(15)
-    const shown = await page.locator('.node-port__label').evaluateAll(els => els.filter(e => getComputedStyle(e).opacity === '1').length)
-    expect(shown).toBe(1)
+    await expect.poll(() => page.locator('.node-port__label').evaluateAll(els => els.filter(e => getComputedStyle(e).opacity === '1').length)).toBe(1)
   })
 
   test('the Open bar rises on hover and is hidden at rest', async ({ page }) => {
