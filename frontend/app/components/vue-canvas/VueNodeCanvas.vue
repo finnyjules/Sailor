@@ -78,6 +78,7 @@ import { SKETCH_PROP, MAX_SKETCH_ITEMS, KEEP_CARD_SIZE, buildSketchPilePayload, 
 import { annotatedImageValueFromViewUrl } from '~/lib/promoteTempImages'
 import { applyMoodboardWireEffects, applyMoodboardToRestyleNode, clearMoodboardFromGenerateNode, syncMoodboardWidgets } from '~/lib/graph/moodboardApply'
 import { IMAGE_MODELS_BY_ID } from '~/data/image-models'
+import { createCanvasGlass, provideCanvasGlass } from '~/composables/useCanvasGlass'
 import { useMoodboards } from '~/composables/useMoodboards'
 import type { MoodboardEntry } from '~~/shared/taste/moodboard'
 import ComfyNode from '~/components/vue-canvas/ComfyNode.vue'
@@ -1243,7 +1244,26 @@ const {
   onConnect, addEdges, fitView, fitBounds, zoomIn: vfZoomIn, zoomOut: vfZoomOut,
   project, removeNodes, removeEdges, viewport: vfViewport, onNodeDragStart, onNodeDragStop, onNodeDrag,
   onConnectStart, onConnectEnd, onEdgesChange, findNode, dimensions: vfDimensions, setViewport,
+  onMoveStart, onMoveEnd, getNodes, getEdges,
 } = useVueFlow()
+
+// Glass: real blur only at rest and only on nodes with something behind them.
+// Decided once per rest, never per frame (docs/superpowers/specs/2026-09-27-node-design-design.md).
+const canvasGlass = createCanvasGlass({
+  onMoveStart: (cb) => onMoveStart(cb),
+  onMoveEnd: (cb) => onMoveEnd(cb),
+  viewport: vfViewport,
+  boxes: () => getNodes.value
+    .filter(n => n.dimensions.width > 0)
+    .map(n => ({ id: n.id, x: n.computedPosition.x, y: n.computedPosition.y, w: n.dimensions.width, h: n.dimensions.height })),
+  wires: () => getEdges.value
+    .filter(e => e.sourceX != null && e.targetX != null)
+    .map(e => ({ source: e.source, target: e.target, sx: e.sourceX, sy: e.sourceY, tx: e.targetX, ty: e.targetY })),
+  size: () => ({ width: canvasRootRef.value?.clientWidth ?? 0, height: canvasRootRef.value?.clientHeight ?? 0 }),
+})
+provideCanvasGlass(canvasGlass)
+onNodeDragStop(() => canvasGlass.recompute())
+onMounted(() => canvasGlass.recompute())
 
 // Ports label themselves while a compatible wire is being dragged. Bound once,
 // here, because there is one canvas and every port reads the same drag.
@@ -8479,6 +8499,8 @@ defineExpose({
   <div
     ref="canvasRootRef"
     class="vue-node-canvas-root w-full h-full relative bg-[#0a0a0a] focus:outline-none"
+    :class="canvasGlass.rootClass.value"
+    :style="canvasGlass.rootStyle.value"
     tabindex="-1"
     @dragover.prevent
     @contextmenu.prevent
