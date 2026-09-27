@@ -42,6 +42,26 @@ describe('scoreTake', () => {
     const compare = vi.fn(async () => { throw new Error('boom') })
     await expect(scoreTake([b('f1')], b('face'), compare)).rejects.toThrow('boom')
   })
+
+  it('vision verdicts: best is null, verdict is the best across frames (match > unsure > different > no-face), note is the winner\'s', async () => {
+    const compare = vi.fn(async (_s: Buffer, t: Buffer) => {
+      if (t.toString() === 'f1') return { verdict: 'different' as const, note: 'different hair' }
+      if (t.toString() === 'f2') return { verdict: 'match' as const, note: 'same character' }
+      return { verdict: 'unsure' as const, note: 'unclear angle' }
+    })
+    const out = await scoreTake([b('f1'), b('f2'), b('f3')], b('face'), compare)
+    expect(out.best).toBeNull()
+    expect(out.verdict).toBe('match')
+    expect(out.note).toBe('same character')
+  })
+
+  it('vision verdicts: no-face on every frame gives no-face overall', async () => {
+    const compare = vi.fn(async () => ({ verdict: 'no-face' as const }))
+    const out = await scoreTake([b('f1'), b('f2')], b('face'), compare)
+    expect(out.best).toBeNull()
+    expect(out.verdict).toBe('no-face')
+    expect(out.note).toBeUndefined()
+  })
 })
 
 describe('readTakeFrames', () => {
