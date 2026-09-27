@@ -28,7 +28,8 @@ const props = withDefaults(defineProps<{
   modelValue: string | number | boolean
   bound?: string | null
   bindable?: boolean
-}>(), { bound: null, bindable: true })
+  size?: 'compact' | 'comfortable'
+}>(), { bound: null, bindable: true, size: 'compact' })
 const emit = defineEmits<{
   (e: 'update:modelValue', v: string | number | boolean): void
   (e: 'promote'): void
@@ -326,20 +327,28 @@ function onValuePointerDown(e: PointerEvent) {
          nodes were rendering at `opacity-70`, which is now gone (see ComfyNode.vue). Fixing
          the cause beat compensating for it in every studio. -->
     <!-- 6px. Every input and button in the app is 6px — the rule is chosen directly, and
-         the card follows it rather than the other way round: the shell is 14 so that
-         14 - 8 inset = 6 keeps the corners concentric, which is what stops the bottom of
-         a node pinching against its run bar. 4px was tried first and read too sharp. -->
+         the card follows it rather than the other way round: the node is 32px with a
+         10px shell inset (16 − 10 = 6), which keeps the corners concentric and is what
+         stops the bottom of a node pinching against its run bar. 4px was tried first and
+         read too sharp. -->
     <div
-      class="group relative flex h-7 select-none items-center justify-between overflow-hidden rounded-[6px] bg-white/[0.05] px-2.5"
-      :class="numeric && !bound && !editing ? 'cursor-ew-resize' : ''"
+      data-studio-row
+      class="group relative flex select-none items-center justify-between overflow-hidden rounded-[6px]"
+      :class="[
+        numeric && !bound && !editing ? 'cursor-ew-resize' : '',
+        size === 'comfortable' ? 'h-8 px-[11px]' : 'h-7 px-2.5',
+        dragging ? 'bg-white/[0.065]' : 'bg-white/[0.03] hover:bg-white/[0.065]',
+        'transition-colors duration-150',
+      ]"
       @pointerdown="onPointerDown"
       @dblclick="onReset"
       @contextmenu.prevent="emit('menu', $event)"
     >
       <div
         v-if="band"
-        class="pointer-events-none absolute inset-y-0"
-        :style="{ left: band.left, width: band.width, background: bound ? 'rgba(244,114,182,0.32)' : 'rgba(255,255,255,0.22)' }"
+        data-row-band
+        class="pointer-events-none absolute inset-y-0 transition-[background-color] duration-150"
+        :style="{ left: band.left, width: band.width, background: bound ? 'rgba(244,114,182,0.32)' : (dragging ? 'rgba(255,255,255,0.16)' : 'rgba(255,255,255,0.1)') }"
       ></div>
 
       <!-- Ticks and handle: the row's mechanics, shown only when you are about to use it.
@@ -355,8 +364,8 @@ function onValuePointerDown(e: PointerEvent) {
           :style="tickStyle"
         ></div>
         <div
-          class="pointer-events-none absolute top-1/2 h-3.5 w-[2px] -translate-y-1/2 rounded-full opacity-0 transition-[opacity,background-color] [transition-duration:200ms,120ms] ease-out group-hover:opacity-100"
-          :class="dragging ? 'bg-white opacity-100' : 'bg-white/60'"
+          class="pointer-events-none absolute top-1/2 w-[2px] -translate-y-1/2 rounded-full opacity-0 transition-[opacity,background-color] [transition-duration:200ms,120ms] ease-out group-hover:opacity-100"
+          :class="[dragging ? 'bg-white opacity-100' : 'bg-white/60', size === 'comfortable' ? 'h-4' : 'h-3.5']"
           :style="{ left: `calc(${handlePct}% - 1px)` }"
         ></div>
       </template>
@@ -384,7 +393,7 @@ function onValuePointerDown(e: PointerEvent) {
         <TooltipProvider v-if="spec.hint" :delay-duration="200">
           <TooltipRoot>
             <TooltipTrigger as-child>
-              <span class="cursor-help truncate text-[11px] text-white/72 underline decoration-dotted decoration-white/20 underline-offset-2">{{ spec.label }}</span>
+              <span class="cursor-help truncate text-[11px] text-white/55 underline decoration-dotted decoration-white/20 underline-offset-2">{{ spec.label }}</span>
             </TooltipTrigger>
             <TooltipPortal>
               <TooltipContent
@@ -394,7 +403,7 @@ function onValuePointerDown(e: PointerEvent) {
             </TooltipPortal>
           </TooltipRoot>
         </TooltipProvider>
-        <span v-else class="truncate text-[11px] text-white/72">{{ spec.label }}</span>
+        <span v-else class="truncate text-[11px] text-white/55">{{ spec.label }}</span>
         <VariableGlyph
           v-if="bindable !== false && controlKindToVariableType(spec.kind)"
           :bound="bound ?? null"
