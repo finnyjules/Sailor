@@ -206,3 +206,27 @@ describe('Fix round 1: trimming the copy itself, and the new consumer branches',
     noDangling(d)
   })
 })
+
+// Fix round 2 (re-review): the round-1 re-aim only checked c.refs[2] === ev.from,
+// so trimming an UNRELATED line that merely shares the offset copy's end point (a
+// T-junction) silently re-pointed the offsetLine at a point on that other line.
+// Fixed by requiring the trimmed pair's OTHER end to carry the sibling offsetLine
+// on the same source (Ruling 10: both ends of a straight offset are pinned).
+describe('Fix round 2: an unrelated line sharing the copy’s end point must not steal its offsetLine', () => {
+  it('trimming a T-junction line at the offset copy’s end leaves the offsetLine alone', () => {
+    const { d, a, b, p, q } = offsetPair()
+    const rr = addPoint(d, 0, 6)
+    const l = addLine(d, p, rr)         // an unrelated line L = (P, R) sharing the copy's end P
+    // a cutter crossing L near its P end
+    const c1 = addPoint(d, -5, 2), c2 = addPoint(d, 5, 2)
+    addLine(d, c1, c2)
+    const span = spanAt(d, { kind: 'line', id: l }, 0.15)   // the piece nearest P
+    expect(span).not.toBeNull()
+    const r = removeSpan(d, span!)
+    expect(r.ok).toBe(true)
+    expect(r.droppedRules).toBe(0)
+    // both offsetLines still name the original ends, untouched by L's trim
+    expect(rules(d, 'offsetLine').map(c => c.refs)).toEqual([[a, b, p], [a, b, q]])
+    noDangling(d)
+  })
+})

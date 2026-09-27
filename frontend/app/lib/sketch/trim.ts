@@ -249,9 +249,18 @@ function followPair(doc: SketchDoc, a: EntityId, b: EntityId, ev: PairEvent): Se
   // piece is moved or grown, not the whole line removed), the rule follows to
   // the new end — the copy is still the same offset line, just shorter/longer
   // (the arc form already re-aims the same way through followArcOperands).
+  // Only when the trimmed pair (a, b) really IS the offset copy's own line:
+  // its other end must carry the sibling offsetLine on the same source
+  // (Ruling 10 — both ends of a straight offset are pinned this way). An
+  // unrelated line that merely shares this end point (a T-junction) is left
+  // alone, or it would be silently re-pointed at whatever that line becomes.
   if (ev.kind === 'moved' || ev.kind === 'grow') {
+    const other = ev.from === a ? b : a
     for (const c of doc.constraints) {
       if (c.kind === 'offsetLine' && c.refs.length === 3 && c.refs[2] === ev.from && !touched.has(c.id) && !remove.has(c.id)) {
+        const sibling = doc.constraints.some(k => k.kind === 'offsetLine' && k.id !== c.id &&
+          k.refs[2] === other && k.refs[0] === c.refs[0] && k.refs[1] === c.refs[1])
+        if (!sibling) continue
         c.refs = [c.refs[0]!, c.refs[1]!, ev.to]
         touched.add(c.id)
       }
