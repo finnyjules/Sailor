@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { parseCharacterRecord } from '~~/server/utils/characterRegistry'
 import { FaceCheckError } from '~~/server/utils/faceCheck/rekognition'
-import { MAX_COMPARES_PER_CALL, runChecks } from '~~/server/utils/faceCheck/run'
+import { applyOutcome, MAX_COMPARES_PER_CALL, runChecks } from '~~/server/utils/faceCheck/run'
 
 const rec = (photos: string[], face = 'face.png') => parseCharacterRecord(JSON.stringify({
   name: 'R', face: { filename: face, approvedAt: 't' }, photos: photos.map(f => ({ filename: f })),
@@ -38,5 +38,38 @@ describe('runChecks', () => {
   it('passes a verdict from the checker straight through', async () => {
     const out = await runChecks(rec(['a.png']), { readImage: async f => Buffer.from(f), compare: async () => ({ verdict: 'different', note: 'different hair colour' }), now: () => 'n' })
     expect(out.record.photos.find(p => p.filename === 'a.png')!.check).toEqual({ verdict: 'different', against: 'face.png', at: 'n', note: 'different hair colour' })
+  })
+
+  it('applyOutcome applies onto a different record and ignores targets no longer present', async () => {
+    const original = rec(['a.png', 'b.png'])
+    const { outcome } = await runChecks(original, { readImage: async f => Buffer.from(f), compare: async () => 95, now: () => 'n' })
+    // A record that changed meanwhile: 'b.png' removed, an extra look added.
+    const fresh = parseCharacterRecord(JSON.stringify({
+      name: 'R', face: { filename: 'face.png', approvedAt: 't' },
+      photos: [{ filename: 'a.png' }],
+      states: [
+        { id: 'default', label: 'D', refImages: [] },
+        { id: 'second', label: 'Second', refImages: [] },
+      ],
+    }), 'r')!
+    const applied = applyOutcome(fresh, outcome)
+    expect(applied.photos.find(p => p.filename === 'a.png')!.check?.verdict).toBe('match')
+    expect(applied.states.find(s => s.id === 'second')).toBeTruthy()
+    expect(applied.photos.find(p => p.filename === 'b.png')).toBeUndefined()
+  })
+
+  it('stops early on a plain error mid-pass, keeps partial results, and does not throw', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const compare = vi.fn(async (_s: Buffer, t: Buffer) => {
+      if (t.toString() === 'b.png') throw new Error('boom')
+      return 95
+    })
+    const out = await runChecks(rec(['a.png', 'b.png', 'c.png']), { readImage: async f => Buffer.from(f), compare, now: () => 'n' })
+    expect(out.failed).toBe(true)
+    expect(out.compared).toBe(1)
+    expect(out.record.photos.find(p => p.filename === 'a.png')!.check?.verdict).toBe('match')
+    expect(out.record.photos.find(p => p.filename === 'b.png')!.check).toBeNull()
+    expect(out.record.photos.find(p => p.filename === 'c.png')!.check).toBeNull()
+    warn.mockRestore()
   })
 })

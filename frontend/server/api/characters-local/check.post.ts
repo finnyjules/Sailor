@@ -5,7 +5,7 @@ import { guardMutation } from '~~/server/utils/ownedJsonStore'
 import { deployMode } from '~~/server/utils/deployMode'
 import { assertRateLimit } from '~~/server/lib/rateLimit'
 import { compareFaces, prepareForCompare, rekognitionClient } from '~~/server/utils/faceCheck/rekognition'
-import { runChecks } from '~~/server/utils/faceCheck/run'
+import { applyOutcome, runChecks } from '~~/server/utils/faceCheck/run'
 import { judgeSameCharacter } from '~~/server/utils/faceCheck/vision'
 import { resolveAnthropicKey } from '~~/server/lib/agentRequest'
 import { meterAssist } from '~~/server/utils/anthropicMeter'
@@ -51,7 +51,16 @@ export default defineEventHandler(async (event) => {
     compare,
     now: () => new Date().toISOString(),
   })
-  const next = { ...result.record, updatedAt: new Date().toISOString() }
+  // Re-read: the compare pass took a while (up to 40 slow remote calls), so a
+  // PATCH may have landed on this record meanwhile. Apply the outcome to the
+  // fresh copy instead of overwriting it with the stale one we started from.
+  let fresh
+  try { fresh = parseCharacterRecord(await fs.readFile(file, 'utf8'), slug) }
+  catch { throw createError({ statusCode: 404, message: `No character '${slug}'` }) }
+  if (!fresh) throw createError({ statusCode: 404, message: `No character '${slug}'` })
+  const next = { ...applyOutcome(fresh, result.outcome), updatedAt: new Date().toISOString() }
   await fs.writeFile(file, JSON.stringify(next, null, 2))
-  return { record: next, compared: result.compared, skipped: result.skipped }
+  return result.failed
+    ? { record: next, compared: result.compared, skipped: result.skipped, failed: 'The face check stopped early. Try again to check the rest.' }
+    : { record: next, compared: result.compared, skipped: result.skipped }
 })
