@@ -1,7 +1,7 @@
 // tests/unit/pen-actions.unit.spec.ts
 // Pen stage 6: the one action registry — the list menu for a selection and
 // for empty space (heading, rules, actions with keys, greyed with reasons,
-// stage 8's items absent), the wheel's point and segment layouts, the keys
+// stage 8's Offset…, Round corner… and Chamfer… after Repeat…), the wheel's point and segment layouts, the keys
 // while a menu or wheel is open, the new shortcut keys, and every session
 // end closing them. Availability is the cheap check only (controller ruling
 // C1): the full rule check runs when a rule is picked, and "unsure" is
@@ -11,17 +11,17 @@ import { describe, it, expect, beforeEach } from 'vitest'
 import { ref } from 'vue'
 import type { SketchDoc } from '~/lib/sketch/model'
 import { addPoint, addLine, addPath, addConstraint } from '~/lib/sketch/edit'
-import { usePen } from '~/composables/pen/usePen'
+import { usePen, type PenOptions } from '~/composables/pen/usePen'
 import { SELECTION_MENU, ACTIONS, wheelDirAt, stateFromCheck } from '~/composables/pen/penActions'
 import { clearPenClipboard } from '~/composables/pen/penClipboard'
 import { REASON } from '~/composables/pen/penReasons'
 import { isActionKey } from '~/composables/pen/penKeys'
 
 const DEV = { a: 34, b: 0, c: 0, d: -34, e: 40, f: 400 }
-function mk(build: (d: SketchDoc) => void = () => {}) {
+function mk(build: (d: SketchDoc) => void = () => {}, options?: PenOptions) {
   const doc = ref<SketchDoc>({ entities: [], constraints: [] })
   build(doc.value)
-  return { doc, pen: usePen({ doc, view: ref(DEV) }) }
+  return { doc, pen: usePen({ doc, view: ref(DEV), options }) }
 }
 const key = (k: string, o: Record<string, unknown> = {}) =>
   ({ key: k, code: '', metaKey: false, ctrlKey: false, shiftKey: false, altKey: false, preventDefault() {}, stopPropagation() {}, ...o }) as unknown as KeyboardEvent
@@ -43,16 +43,15 @@ describe('the list menu', () => {
     expect(m.header).toBe('1 line')
     expect(m.groups[0]!.map(i => i.id)).toEqual(['rule:horizontal', 'rule:vertical'])
     expect(m.groups.slice(1).map(g => g.map(i => i.id))).toEqual([
-      ['construction', 'flip-h', 'flip-v', 'mirror', 'repeat'], ['copy', 'copy-svg', 'paste'], ['delete']])
+      ['construction', 'flip-h', 'flip-v', 'mirror', 'repeat', 'offset', 'round-corner', 'chamfer'], ['copy', 'copy-svg', 'paste'], ['delete']])
     expect(item(pen, 'construction')!.key).toBe('X')
     expect(item(pen, 'flip-h')!.key).toBe('⇧H')
     expect(item(pen, 'delete')!.danger).toBe(true)
     expect(item(pen, 'mirror')!.state).toEqual({ ok: false, reason: REASON.mirrorLine })
     expect(item(pen, 'paste')!.state).toEqual({ ok: false, reason: REASON.emptyClip })
   })
-  it('stage 8’s items are absent, not greyed', () => {
-    expect(SELECTION_MENU.flat()).not.toContain('offset')
-    expect(Object.keys(ACTIONS)).not.toContain('round-corner')
+  it('stage 8’s items follow Repeat… in the first group', () => {
+    expect(SELECTION_MENU[0]!.slice(-4)).toEqual(['repeat', 'offset', 'round-corner', 'chamfer'])
   })
   it('a rule already there is greyed on opening; one that fights it is refused only when picked (C1)', () => {
     const { doc, pen } = mk(d => { twoLines(d); addConstraint(d, 'horizontal', [l1]) })
@@ -82,7 +81,7 @@ describe('the list menu', () => {
     pen.pick(a)
     pen.openMenu({ x: 0, y: 0 }, null)
     expect(pen.menu.value!.header).toBe('1 point')
-    expect(pen.menu.value!.groups[0]!.map(i => i.id)).toEqual(['fix', 'dissolve-point', 'construction', 'flip-h', 'flip-v', 'mirror', 'repeat'])
+    expect(pen.menu.value!.groups[0]!.map(i => i.id)).toEqual(['fix', 'dissolve-point', 'construction', 'flip-h', 'flip-v', 'mirror', 'repeat', 'offset', 'round-corner', 'chamfer'])
     expect(item(pen, 'dissolve-point')!.state).toEqual({ ok: false, reason: REASON.notBetween })
   })
   it('two points: Distance… is checked at the distance they have now', () => {
@@ -466,5 +465,63 @@ describe('final-review fixes', () => {
     expect(r).toBeTruthy()
     expect(m).toBeLessThan(250)
     expect(JSON.stringify(pen.doc.value)).toBe(before)
+  })
+})
+
+describe('pen stage 8 — Offset…, Round corner…, Chamfer…', () => {
+  const square = (d: SketchDoc) => {
+    const ids = [[0, 0], [4, 0], [4, 4], [0, 4]].map(([x, y]) => addPoint(d, x!, y!))
+    return { ids, path: addPath(d, ids, ids.map(() => ({ kind: 'line' as const })), true) }
+  }
+  it('a square’s corner: Round corner… and Chamfer… act, and start their tool with it picked', () => {
+    let s!: ReturnType<typeof square>
+    const { pen } = mk(d => { s = square(d) })
+    pen.pick(s.ids[0]!)
+    pen.openMenu({ x: 0, y: 0 }, null)
+    expect(item(pen, 'round-corner')).toMatchObject({ label: 'Round corner…', key: 'F', state: { ok: true } })
+    expect(item(pen, 'chamfer')).toMatchObject({ label: 'Chamfer…', key: 'H', state: { ok: true } })
+    expect(item(pen, 'offset')!.state).toEqual({ ok: false, reason: REASON.path })
+    pen.runMenuItem('round-corner')
+    expect(pen.tool.value).toBe('round')
+    expect(pen.cornerView.value?.corners).toEqual([s.ids[0]])
+  })
+  it('says why: not a corner, a Bézier joint, a straight run', () => {
+    let a = '', q = '', m = ''
+    const { pen } = mk(d => {
+      a = addPoint(d, 0, 0); q = addPoint(d, 4, 0); const r = addPoint(d, 8, 0), h = addPoint(d, 6, 2)
+      addPath(d, [a, q, r], [{ kind: 'line' }, { kind: 'cubic', h1: h, h2: null }])
+      const u = addPoint(d, 0, 9); m = addPoint(d, 4, 9); const w = addPoint(d, 8, 9)
+      addPath(d, [u, m, w], [{ kind: 'line' }, { kind: 'line' }])
+    })
+    const reason = () => { pen.openMenu({ x: 0, y: 0 }, null); const r = (item(pen, 'round-corner')!.state as { reason: string }).reason; pen.closeMenu(); return r }
+    pen.pick(a); expect(reason()).toBe(REASON.corner)        // an open end
+    pen.pick(q); expect(reason()).toBe(REASON.curveCorner)
+    pen.pick(m); expect(reason()).toBe(REASON.smoothCorner)
+  })
+  it('a path: Offset… acts and starts the tool with it; a Bézier path says why', () => {
+    let s!: ReturnType<typeof square>, bz = ''
+    const { pen } = mk(d => {
+      s = square(d)
+      const h = addPoint(d, 12, 3)
+      bz = addPath(d, [addPoint(d, 10, 0), addPoint(d, 14, 0)], [{ kind: 'cubic', h1: h, h2: null }])
+    })
+    pen.pick(bz); pen.openMenu({ x: 0, y: 0 }, null)
+    expect(item(pen, 'offset')!.state).toEqual({ ok: false, reason: REASON.curveOffset })
+    pen.closeMenu(); pen.pick(s.path); pen.openMenu({ x: 0, y: 0 }, null)
+    expect(item(pen, 'offset')).toMatchObject({ label: 'Offset…', key: 'E', state: { ok: true } })
+    pen.runMenuItem('offset')
+    expect(pen.tool.value).toBe('offset')
+    expect(pen.offsetView.value?.chains).toHaveLength(1)
+  })
+  it('a host without the tools leaves them out; an open-only pen keeps the corners, not Offset', () => {
+    let s!: ReturnType<typeof square>
+    const bare = mk(d => { s = square(d) }, { tools: ['select', 'path'] })
+    bare.pen.pick(s.path); bare.pen.openMenu({ x: 0, y: 0 }, null)
+    const ids = bare.pen.menu.value!.groups.flat().map(i => i.id)
+    for (const id of ['offset', 'round-corner', 'chamfer']) expect(ids).not.toContain(id)
+    const guide = mk(d => { s = square(d) }, { openOnly: true, tools: ['select', 'path', 'curve', 'round', 'chamfer', 'offset'] })
+    guide.pen.pick(s.path); guide.pen.openMenu({ x: 0, y: 0 }, null)
+    const gids = guide.pen.menu.value!.groups.flat().map(i => i.id)
+    expect(gids).toContain('round-corner'); expect(gids).toContain('chamfer'); expect(gids).not.toContain('offset')
   })
 })

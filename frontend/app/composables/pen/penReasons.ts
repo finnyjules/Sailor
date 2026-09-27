@@ -23,4 +23,10 @@ export const REASON = {
   mirrorLine: 'Select something to mirror besides the line',
   // Flip and Make guide work on whole pieces; an Option-picked segment is part of one
   wholePath: 'Select the whole path, not one segment',
+  // pen stage 8: Round corner / Chamfer / Offset
+  corner: 'Select a corner where two pieces meet',
+  curveCorner: 'Bézier curves can’t be rounded or cut',
+  smoothCorner: 'This corner is already smooth',
+  path: 'Select a path first',
+  curveOffset: 'Bézier curves can’t be offset',
 } as const

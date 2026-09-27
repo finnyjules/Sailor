@@ -4,7 +4,7 @@ import { addPoint, addPath } from '~/lib/sketch/edit'
 import { mergeLayer, type GeoStudioDoc } from '~/lib/geoshape/studio'
 import { sketchOutlineBounds } from '~/lib/geoshape/shapes'
 import { naturalExtent, type PreviewFrame } from '~/lib/geoshape/penShape'
-import { useShapePenSession, resizedFrame } from '~/composables/geoshape/useShapePenSession'
+import { useShapePenSession, resizedFrame, SHAPE_PEN_TOOLS } from '~/composables/geoshape/useShapePenSession'
 import { applyView } from '~/lib/sketch/view'
 import type { SketchDoc } from '~/lib/sketch/model'
 
@@ -197,6 +197,9 @@ describe('useShapePenSession', () => {
     s.cancelSession()
     expect(m.shape).toBe(shape)
     expect('sketch' in m).toBe(false)
+  })
+  it('Shape Studio’s pen offers Round corner, Chamfer and Offset (pen stage 8)', () => {
+    expect(SHAPE_PEN_TOOLS).toEqual(expect.arrayContaining(['round', 'chamfer', 'offset']))
   })
 })
 

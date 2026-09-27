@@ -3046,6 +3046,7 @@ export function usePen(opts: {
     availableConstraints, applyWithValue, fixSelected, dissolveState, dissolvePoint,
     makeConstruction, flip, doMirror, repeatPrompt,
     copySelection, copySvg, pasteState, paste, del, selectAll,
+    toolOffered: isToolAllowed, startTool: (t: PenTool) => selectTool(t),
   }
   function ruleItems(): PenMenuItem[] { return registryRuleItems(actionHost) }
 

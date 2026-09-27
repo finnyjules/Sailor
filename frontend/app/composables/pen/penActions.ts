@@ -15,17 +15,20 @@
 // Structural copy rules (rotatedFrom / mirroredFrom) are never offered —
 // availableConstraints never lists them (C2).
 //
-// Stage 8 extends it: add `offset`, `round-corner` and `chamfer` to ACTIONS
-// and their ids to SELECTION_MENU's first group after `repeat` (Ruling 2).
-// Until then they are absent, not greyed.
+// Pen stage 8: Offset…, Round corner… and Chamfer… pick their tools with the
+// selection as the start; hidden in a host that doesn't offer the tool
+// (Ruling 20).
 import { toRaw, type Ref } from 'vue'
 import type { SketchDoc, EntityId } from '~/lib/sketch/model'
 import type { Vec2 } from '~/lib/sketch/geom'
 import { pointClosure } from '~/lib/sketch/edit'
 import { checkRule, quickRuleCheck, type RuleCheck } from '~/lib/sketch/ruleCheck'
 import { selectionLabel, topLevelIds } from '~/lib/sketch/pieces'
+import { cornerCheck } from '~/lib/sketch/corners'
+import { offsetSource } from '~/lib/sketch/offset'
 import { ruleSpecFor, type RuleOption, type SegRef } from './penRules'
 import { OK, no, REASON, type ActionState } from './penReasons'
+import type { PenTool } from './usePen'
 
 export interface PenActionHost {
   doc: Ref<SketchDoc>
@@ -48,6 +51,10 @@ export interface PenActionHost {
   paste(at?: Vec2 | null): boolean
   del(): void
   selectAll(): boolean
+  /** pen stage 8: whether this host offers a tool (PenOptions.tools, resolved) */
+  toolOffered(t: PenTool): boolean
+  /** pen stage 8: pick a tool, the selection starting it (usePen selectTool) */
+  startTool(t: PenTool): void
 }
 
 export interface ActionDef {
@@ -76,6 +83,25 @@ const canMirror = (h: PenActionHost): ActionState => {
   return sel.length ? no(REASON.mirrorLine) : needShape(h)
 }
 
+// a selected point that is a corner lets Round corner / Chamfer act; else the plainest reason
+const cornerState = (h: PenActionHost): ActionState => {
+  const pts = pointsOf(h)
+  if (!pts.length) return no(REASON.corner)
+  const doc = toRaw(h.doc.value)
+  let why: string = REASON.corner
+  for (const id of pts) {
+    const c = cornerCheck(doc, id)
+    if (c.ok) return OK
+    if (c.why === 'curve') why = REASON.curveCorner
+    else if (c.why === 'smooth' && why === REASON.corner) why = REASON.smoothCorner
+  }
+  return no(why)
+}
+const offsetState = (h: PenActionHost): ActionState => {
+  const s = offsetSource(toRaw(h.doc.value), toRaw(h.selection.value), toRaw(h.selectedSegments.value))
+  return s.ok ? OK : no(s.why === 'curve' ? REASON.curveOffset : REASON.path)
+}
+
 export const ACTIONS: Record<string, ActionDef> = {
   fix: {
     label: 'Fix', tip: 'fix',
@@ -98,6 +124,9 @@ export const ACTIONS: Record<string, ActionDef> = {
   'flip-v': { label: 'Flip vertical', tip: 'flip-v', key: '⇧V', state: canFlip, run: h => h.flip('v') },
   mirror: { label: 'Mirror…', tip: 'mirror', state: canMirror, run: h => h.doMirror() },
   repeat: { label: 'Repeat…', tip: 'repeat', state: h => (hasShape(h) ? OK : no(REASON.shape)), run: h => { void h.repeatPrompt() } },
+  offset: { label: 'Offset…', tip: 'offset', key: 'E', shown: h => h.toolOffered('offset'), state: offsetState, run: h => h.startTool('offset') },
+  'round-corner': { label: 'Round corner…', tip: 'round', key: 'F', shown: h => h.toolOffered('round'), state: cornerState, run: h => h.startTool('round') },
+  chamfer: { label: 'Chamfer…', tip: 'chamfer', key: 'H', shown: h => h.toolOffered('chamfer'), state: cornerState, run: h => h.startTool('chamfer') },
   copy: { label: 'Copy', tip: 'copy', key: '⌘C', state: h => (hasPick(h) ? OK : no(REASON.nothing)), run: h => { h.copySelection() } },
   'copy-svg': { label: 'Copy as SVG', tip: 'copy-svg', state: h => (hasShape(h) || h.selectedSegments.value.length ? OK : no(REASON.shape)), run: h => { h.copySvg() } },
   paste: { label: 'Paste', tip: 'paste', key: '⌘V', state: h => h.pasteState(), run: (h, at) => { h.paste(at) } },
@@ -107,7 +136,7 @@ export const ACTIONS: Record<string, ActionDef> = {
 
 /** The selection menu's action groups (a line between groups) — Ruling 3. */
 export const SELECTION_MENU: string[][] = [
-  ['fix', 'dissolve-point', 'construction', 'flip-h', 'flip-v', 'mirror', 'repeat'],
+  ['fix', 'dissolve-point', 'construction', 'flip-h', 'flip-v', 'mirror', 'repeat', 'offset', 'round-corner', 'chamfer'],
   ['copy', 'copy-svg', 'paste'],
   ['delete'],
 ]

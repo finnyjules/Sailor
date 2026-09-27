@@ -32,7 +32,7 @@ describe('useFramePenSession — new drawings', () => {
     expect(a.target).toEqual({ kind: 'new' })
     expect(a.doc.value.entities).toEqual([])
     expect(a.pen.tool.value).toBe('path')
-    expect(a.pen.options.tools).toEqual(['select', 'path', 'curve', 'line', 'circle', 'point', 'trim', 'cut', 'dissolve', 'fill'])
+    expect(a.pen.options.tools).toEqual(['select', 'path', 'curve', 'line', 'circle', 'point', 'trim', 'cut', 'dissolve', 'fill', 'round', 'chamfer', 'offset'])
     expect(a.view.value).toEqual(newDrawingView(W, H))
     s.cancelSession()
     s.open({ kind: 'new' })
@@ -431,7 +431,7 @@ describe('useFramePenSession — a text layer\'s drawn guide', () => {
     const sess = s.session.value!
     expect(sess.target).toEqual({ kind: 'guide', textId: 't' })
     expect(sess.pen.options.openOnly).toBe(true)
-    expect(sess.pen.options.tools).toEqual(['select', 'path', 'curve', 'trim', 'cut', 'dissolve'])
+    expect(sess.pen.options.tools).toEqual(['select', 'path', 'curve', 'trim', 'cut', 'dissolve', 'round', 'chamfer'])
     expect(sess.pen.tool.value).toBe('path')
     const view0 = sess.view.value
     expect(view0).toEqual(layerView({ x: 0.4, y: 0.6, rotation: 20, skewX: 0, skewY: 0, scale: 1 }, W, H))

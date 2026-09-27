@@ -81,7 +81,7 @@ export interface FramePenSession {
 }
 
 /** The tools a new Frame drawing offers (Select is always added by the pen). */
-export const FRAME_PEN_TOOLS: PenTool[] = ['select', 'path', 'curve', 'line', 'circle', 'point', 'trim', 'cut', 'dissolve', 'fill']
+export const FRAME_PEN_TOOLS: PenTool[] = ['select', 'path', 'curve', 'line', 'circle', 'point', 'trim', 'cut', 'dissolve', 'fill', 'round', 'chamfer', 'offset']
 
 /** Plan B decision 4: a closed drawing is filled, an open one is stroked — a
  *  filled open path would draw a chord-closed blob, which reads as a bug. */
@@ -156,8 +156,10 @@ export function clonerBlocksRecentre(l: any): boolean {
     || (c.mode === 'radial' && !!c.faceCenter)
 }
 
-/** The tools a text guide offers: open paths only (no Line/Circle/Point), and the editing tools. */
-export const GUIDE_PEN_TOOLS: PenTool[] = ['select', 'path', 'curve', 'trim', 'cut', 'dissolve']
+/** The tools a text guide offers: open paths only (no Line/Circle/Point), and
+ *  the editing tools — and Round corner / Chamfer, which reshape the one line
+ *  (pen stage 8); no Offset — a second line the text can't follow. */
+export const GUIDE_PEN_TOOLS: PenTool[] = ['select', 'path', 'curve', 'trim', 'cut', 'dissolve', 'round', 'chamfer']
 
 /**
  * What a guide session fixes at open (see the header): the text's placement,
