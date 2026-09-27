@@ -249,7 +249,8 @@ function hiddenHandleRule(m: { id: EntityId; kind: ConstraintKind }): boolean {
 function chipOrigin(s: { x: number; y: number }, chipWidth: number) {
   return clampChipOrigin(s.x + 6, s.y - 16, chipWidth, props.width, props.height, 14)
 }
-const visibleMarks = computed(() => (cleanupSession.value ? [] : marks.value)
+// hidden (and so unclickable) while a preview is open: Clean up, the Repeat panel
+const visibleMarks = computed(() => (cleanupSession.value || repeatSession.value ? [] : marks.value)
   .filter(m => !STRUCTURAL_MARK_KINDS.includes(m.kind) && !hiddenHandleRule(m))
   .map(m => {
     const s = toScreen(m)
@@ -259,7 +260,7 @@ const visibleMarks = computed(() => (cleanupSession.value ? [] : marks.value)
   }))
 // persistent "R n.n" radius chips on every finished arc segment — pure read
 // of the doc, never solves; distinct from pathBowChip's live during-drag chip
-const arcDims = computed(() => (cleanupSession.value ? [] : arcDimensionMarks(doc.value)).map(m => {
+const arcDims = computed(() => (cleanupSession.value || repeatSession.value ? [] : arcDimensionMarks(doc.value)).map(m => {
   const s = toScreen(m)
   const w = 34
   const o = chipOrigin(s, w)
@@ -1470,7 +1471,7 @@ defineExpose({
         <text :x="x + 3" :y="y + 11" fill="#e5e7eb" font-size="10" font-family="ui-monospace, monospace">{{ m.glyph }}{{ m.text ? ' ' + m.text : '' }}</text>
       </g>
       <g v-for="{ m, w, x, y } in arcDims" :key="m.id" :pointer-events="active ? 'auto' : 'none'" style="cursor: pointer"
-         @pointerdown.stop @click.stop="onDimClick(m)">
+         :data-arc-dim="m.id" @pointerdown.stop @click.stop="onDimClick(m)">
         <rect :x="x" :y="y" :width="w" height="14" rx="3" fill="#111827" opacity="0.85" />
         <text :x="x + 3" :y="y + 11" fill="#e5e7eb" font-size="10" font-family="ui-monospace, monospace">{{ m.text }}</text>
       </g>

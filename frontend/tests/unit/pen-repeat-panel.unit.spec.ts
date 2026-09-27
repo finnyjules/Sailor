@@ -13,7 +13,7 @@ import type { SketchDoc } from '~/lib/sketch/model'
 import type { ViewMatrix } from '~/lib/sketch/view'
 import { addPoint, addPath, addLine } from '~/lib/sketch/edit'
 import { usePen, isCleanupBarFocused } from '~/composables/pen/usePen'
-import { REPEAT_NEED_SHAPE, REPEAT_HINT_CENTRE, REPEAT_HINT_PATH, REPEAT_BAD_PATH, REPEAT_CURVE_PATH } from '~/composables/pen/penRepeat'
+import { REPEAT_NEED_SHAPE, REPEAT_HINT_CENTRE, REPEAT_HINT_PATH, REPEAT_BAD_PATH, REPEAT_CURVE_PATH, REPEAT_CANT } from '~/composables/pen/penRepeat'
 import { squarePath } from './__fixtures__/penStage8'
 
 vi.mock('~/components/pen/PenTipCard.vue', async () => {
@@ -161,14 +161,17 @@ describe('the panel, the toolbar and the overlay', () => {
     pen.repeatPrompt(); await nextTick()
     expect(w.find('[data-repeat-panel]').exists()).toBe(true)
     expect(w.find('[data-props-rules]').exists()).toBe(false)
-    await w.find('[data-repeat-mode="linear"]').trigger('click')
-    expect(pen.repeat.value!.mode).toBe('linear')
-    expect(w.find('[data-repeat-field="distance"]').exists()).toBe(true)
+    // (fix round 1) a field's Enter commits, blurs and applies — refused
+    // here, Radial has no centre yet, so the panel stays open saying why
     const input = w.find('[data-repeat-field="count"] input')
     ;(input.element as HTMLInputElement).focus()
     await input.setValue('4'); await input.trigger('keydown', { key: 'Enter' })
     expect(pen.repeat.value!.count).toBe(4)
+    expect(pen.status.value).toBe(REPEAT_HINT_CENTRE)
     expect(document.activeElement).not.toBe(input.element)
+    await w.find('[data-repeat-mode="linear"]').trigger('click')
+    expect(pen.repeat.value!.mode).toBe('linear')
+    expect(w.find('[data-repeat-field="distance"]').exists()).toBe(true)
     const apply = w.find('[data-act="repeat-apply"]')
     const down = new MouseEvent('mousedown', { bubbles: true, cancelable: true })
     apply.element.dispatchEvent(down)
@@ -257,5 +260,66 @@ describe('reasons, drops and typed values', () => {
     expect(document.activeElement).toBe(w.find('[data-repeat-mode="linear"]').element)
     expect(pen.onKeydown(key(' ', { target: document.activeElement } as any))).toBe(false)   // Space presses the focused control
     w.unmount()
+  })
+})
+
+describe('fix round 1', () => {
+  // a path with an arc whose centre is known and a cubic-free outline; the
+  // arc badge (radius label) and a no-value rule badge are both drawn
+  function withBadges() {
+    const doc = ref<SketchDoc>({ entities: [], constraints: [] })
+    const sq = squarePath(doc.value, 1, 1, 1)
+    const c = addPoint(doc.value, 6, 1), a = addPoint(doc.value, 7, 1), b = addPoint(doc.value, 6, 2)
+    addPath(doc.value, [a, b], [{ kind: 'arc', center: c, sweep: 1 } as any])
+    doc.value.constraints.push({ id: 'k1', kind: 'horizontal', refs: [sq.pts[0]!, sq.pts[1]!] } as any)
+    const pen = usePen({ doc, view: ref(DEV) })
+    return { doc, pen, ...sq }
+  }
+  it('while the panel is open, rule badges and arc labels are hidden and their clicks change nothing', async () => {
+    const { doc, pen, path } = withBadges()
+    const w = mount(PenOverlay, { props: { pen, view: DEV, width: 680, height: 460 }, attachTo: document.body })
+    await nextTick()
+    const marks = w.findAll('[data-constraint]').length, dims = w.findAll('[data-arc-dim]').length
+    pen.pick(path); pen.repeatPrompt(); await nextTick()
+    expect(w.findAll('[data-constraint], [data-arc-dim]').length).toBe(0)
+    expect(marks).toBeGreaterThan(0); expect(dims).toBeGreaterThan(0)
+    const before = json(doc.value)
+    await pen.onConstraintMarkClick({ id: 'k1', kind: 'horizontal', text: null } as any, new MouseEvent('click'))
+    await pen.onArcDimClick({ id: `${doc.value.entities.find(e => e.kind === 'path' && e.id !== path)!.id}:0` } as any)
+    expect(json(doc.value)).toBe(before)
+    expect(pen.repeat.value).not.toBeNull()
+    expect(pen.valueRequest.value).toBeNull()
+    w.unmount()
+  })
+  it('Enter in a field and a click on Apply with the same text make identical drawings', async () => {
+    const run = async (how: 'enter' | 'click') => {
+      const { pen, doc, path } = setup()
+      const c = addPoint(doc.value, 0, 0)
+      const w = mount(PenProperties, { props: { pen }, attachTo: document.body })
+      pen.pick(path); pen.pick(c, true); pen.repeatPrompt(); await nextTick()
+      const input = w.find('[data-repeat-field="sweep"] input')
+      ;(input.element as HTMLInputElement).focus()
+      await input.setValue('120')
+      if (how === 'enter') await input.trigger('keydown', { key: 'Enter' })
+      else await w.find('[data-act="repeat-apply"]').trigger('click')
+      expect(pen.repeat.value).toBeNull()
+      w.unmount()
+      return json(doc.value)
+    }
+    const a = await run('enter'), b = await run('click')
+    expect(a).toBe(b)
+    expect(a).toContain('"value":120')
+  })
+  it('a copy refused after the preview was drawn says so, and leaves the drawing byte-identical', () => {
+    const { pen, doc, path } = setup()
+    pen.pick(path); pen.repeatPrompt()
+    pen.repeatPick({ kind: 'empty', at: { x: 0, y: 0 } })
+    // a dangling anchor: the preview skips it, the copy functions refuse
+    ;(doc.value.entities.find(e => e.id === path) as any).anchors.push('missing')
+    ;(doc.value.entities.find(e => e.id === path) as any).segments.push({ kind: 'line' })
+    const before = json(doc.value)
+    expect(pen.applyRepeatPanel()).toBe(false)
+    expect(pen.status.value).toBe(REPEAT_CANT)
+    expect(json(doc.value)).toBe(before)
   })
 })

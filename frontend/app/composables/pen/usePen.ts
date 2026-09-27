@@ -750,6 +750,7 @@ export function usePen(opts: {
   }
 
   async function onArcDimClick(m: ArcDimensionMark): Promise<void> {
+    if (cleanup.value || repeat.value) return   // a preview is open: the drawing takes no edits
     const sep = m.id.lastIndexOf(':')
     if (sep < 0) return
     const pathId = m.id.slice(0, sep)
@@ -785,6 +786,7 @@ export function usePen(opts: {
   // click. A value-bearing chip (distance/radius, m.text set) keeps M4's
   // plain-click-to-edit; shift+click removes it instead.
   async function onConstraintMarkClick(m: ConstraintMark, ev: MouseEvent): Promise<void> {
+    if (cleanup.value || repeat.value) return   // likewise
     if (m.text == null) { removeConstraintById(m.id); return }
     if (ev.shiftKey) { removeConstraintById(m.id); return }
     const c = doc.value.constraints.find(x => x.id === m.id)

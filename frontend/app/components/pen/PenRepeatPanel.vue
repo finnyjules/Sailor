@@ -5,8 +5,11 @@
 // panel with no change of its own. Buttons never take focus from a mouse
 // press (mousedown.prevent): Space keeps panning after a click, and a
 // focused button got there by keyboard (isCleanupBarFocused covers this
-// panel). A field blurs after its Enter for the same reason; Apply commits
-// a field still being typed first. Hints live in the cards, not here.
+// panel). A field's Enter commits what it holds, blurs it (for the same
+// reason) and applies — the same as clicking Apply, which commits a field
+// still being typed first (the field keeps focus through the click). Leaving
+// a field any other way puts the shown value back, so what the fields show
+// is always what the preview shows. Hints live in the cards, not here.
 import { ref } from 'vue'
 import type { Pen } from '~/composables/pen/usePen'
 import type { RepeatMode, RepeatPatch } from '~/composables/pen/penRepeat'
@@ -25,9 +28,19 @@ function blurField(): void {
   const a = typeof document !== 'undefined' ? (document.activeElement as HTMLElement | null) : null
   if (a?.closest?.('[data-repeat-panel]')) a.blur()
 }
-function submit(patch: RepeatPatch): void { setRepeat(patch); blurField() }
+// while Apply commits the fields, their submits only set (Apply applies once)
+let committing = false
+function submit(patch: RepeatPatch): void {
+  setRepeat(patch)
+  if (committing) return
+  blurField()
+  applyRepeatPanel()
+}
 function apply(): void {
-  for (const f of [countField.value, sweepField.value, angleField.value, distanceField.value]) f?.commit()
+  committing = true
+  try { for (const f of [countField.value, sweepField.value, angleField.value, distanceField.value]) f?.commit() }
+  finally { committing = false }
+  blurField()
   applyRepeatPanel()
 }
 </script>
@@ -44,7 +57,7 @@ function apply(): void {
 
     <div class="row" data-repeat-field="count">
       <span class="name">Copies</span>
-      <PenNumberInput ref="countField" :value="repeat.count" :min="2" :revert-on-blur="false" aria-label="Copies" @submit="n => submit({ count: n })" />
+      <PenNumberInput ref="countField" :value="repeat.count" :min="2" aria-label="Copies" @submit="n => submit({ count: n })" />
       <span class="unit" aria-hidden="true" />
     </div>
 
@@ -52,7 +65,7 @@ function apply(): void {
       <div class="row" data-repeat-field="centre"><span class="name">Centre</span><span class="value">{{ repeatNames.centre }}</span></div>
       <div class="row" data-repeat-field="sweep">
         <span class="name">Sweep</span>
-        <PenNumberInput ref="sweepField" :value="repeat.sweep" :revert-on-blur="false" aria-label="Sweep" @submit="n => submit({ sweep: n })" />
+        <PenNumberInput ref="sweepField" :value="repeat.sweep" aria-label="Sweep" @submit="n => submit({ sweep: n })" />
         <span class="unit" aria-hidden="true">°</span>
       </div>
     </template>
@@ -60,7 +73,7 @@ function apply(): void {
     <template v-else-if="repeat.mode === 'linear'">
       <div class="row" data-repeat-field="angle">
         <span class="name">Angle</span>
-        <PenNumberInput ref="angleField" :value="repeat.angle" :revert-on-blur="false" aria-label="Angle" @submit="n => submit({ angle: n })" />
+        <PenNumberInput ref="angleField" :value="repeat.angle" aria-label="Angle" @submit="n => submit({ angle: n })" />
         <span class="unit" aria-hidden="true">°</span>
       </div>
       <PenTipCard id="repeat-spacing" side="left">
@@ -71,7 +84,7 @@ function apply(): void {
       </PenTipCard>
       <div class="row" data-repeat-field="distance">
         <span class="name">Distance</span>
-        <PenNumberInput ref="distanceField" :value="repeat.distance" :revert-on-blur="false" aria-label="Distance" @submit="n => submit({ distance: n })" />
+        <PenNumberInput ref="distanceField" :value="repeat.distance" aria-label="Distance" @submit="n => submit({ distance: n })" />
         <span class="unit" aria-hidden="true" />
       </div>
     </template>

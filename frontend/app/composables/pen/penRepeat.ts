@@ -50,6 +50,8 @@ export const REPEAT_BAD_PATH = 'That path is being repeated — click another'
 export const REPEAT_CURVE_PATH = 'Bézier curves can’t be followed'
 export const REPEAT_NO_PATH = 'That path can’t be followed'
 export const REPEAT_NO_DIRECTION = 'That angle can’t be drawn in this view'
+/** the copy functions refused what the preview could draw (a broken drawing) */
+export const REPEAT_CANT = 'These shapes can’t be repeated'
 export const REPEAT_MAX = 64
 const MODIFIERS = new Set(['Shift', 'Meta', 'Control', 'Alt', 'CapsLock'])
 const MODES: RepeatMode[] = ['radial', 'linear', 'along']
@@ -212,7 +214,7 @@ export function createPenRepeat(ctx: PenRepeatContext) {
     if (!made.length) {
       work.entities.length = ne
       work.constraints.length = nc
-      ctx.status.value = refusal(s)
+      ctx.status.value = REPEAT_CANT
       return false
     }
     const added = work.constraints.slice(nc).map(c => c.id)
