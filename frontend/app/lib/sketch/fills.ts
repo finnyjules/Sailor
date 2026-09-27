@@ -6,7 +6,7 @@
 // merge → one, opened → asleep with a gap marker); the structural edits that
 // rename pieces (Cut, Dissolve, merging points, copies) move seeds themselves
 // through splitSeeds / joinSeeds / renameSeedPoints / mapSeed. Pure.
-import type { SketchDoc, SketchFill, FillSeed, EntityId } from './model'
+import type { SketchDoc, SketchFill, FillSeed, EntityId, SketchEntity } from './model'
 import { getPoint, getEntity } from './model'
 import type { Vec2 } from './geom'
 import { facesFor, faceAt, facesD, faceOfHalfEdge, facePieceKey, type FaceSet, type FacePiece, type HalfEdge } from './faces'
@@ -494,4 +494,119 @@ export function reconcileFills(before: SketchDoc, after: SketchDoc): SketchFill[
     out.push({ id: `F${n}`, seed: s2.seed }); taken.add(`F${n}`)
   }
   return out
+}
+
+// ── structural edits that rename pieces ─────────────────────────────────────
+
+const TAU = Math.PI * 2
+
+const sameLine = (s: FillSeed, a: EntityId, b: EntityId) => s.kind === 'line' && ((s.a === a && s.b === b) || (s.a === b && s.b === a))
+const sameArc = (s: FillSeed, a: EntityId, b: EntityId, c: EntityId) => s.kind === 'arc' && s.c === c && ((s.a === a && s.b === b) || (s.a === b && s.b === a))
+
+/** Cut: the piece a→b (an arc about c when given) now runs a→x→b, split at
+ *  its own parameter tc. Seeds on it move onto the half they lie on. */
+export function splitSeeds(doc: SketchDoc, a: EntityId, b: EntityId, c: EntityId | null, tc: number, x: EntityId): void {
+  for (const f of doc.fills ?? []) {
+    const s = f.seed
+    if (!(c ? sameArc(s, a, b, c) : sameLine(s, a, b))) continue
+    const fwd = s.a === a
+    const t = fwd ? s.t : 1 - s.t
+    const first = t <= tc
+    const u = first ? t / tc : (t - tc) / (1 - tc)
+    const [na, nb] = first ? [a, x] : [x, b]
+    f.seed = { ...s, a: fwd ? na : nb, b: fwd ? nb : na, t: fwd ? u : 1 - u }
+  }
+}
+
+/** Dissolve: pieces a→q and q→b became one piece a→b; `share` is how much of
+ *  it the first piece was (by length for lines, by turn for arcs). An arc's
+ *  centre becomes `c` (the first piece's). */
+export function joinSeeds(doc: SketchDoc, a: EntityId, q: EntityId, b: EntityId, c1: EntityId | null, c2: EntityId | null, share: number): void {
+  for (const f of doc.fills ?? []) {
+    const s = f.seed
+    const onFirst = c1 ? sameArc(s, a, q, c1) : sameLine(s, a, q)
+    const onSecond = !onFirst && (c2 ? sameArc(s, q, b, c2) : sameLine(s, q, b))
+    if (!onFirst && !onSecond) continue
+    const fwd = onFirst ? s.a === a : s.a === q
+    const t = fwd ? s.t : 1 - s.t
+    const u = onFirst ? t * share : share + t * (1 - share)
+    f.seed = { ...s, a: fwd ? a : b, b: fwd ? b : a, ...(c1 ? { c: c1 } : {}), t: fwd ? u : 1 - u }
+  }
+}
+
+/** Merging point `from` into `into`: seeds naming it name `into`. */
+export function renameSeedPoints(doc: SketchDoc, from: EntityId, into: EntityId): void {
+  const sw = (id: EntityId) => (id === from ? into : id)
+  for (const f of doc.fills ?? []) {
+    const s = f.seed
+    if (s.kind === 'circle') { if (s.c === from) f.seed = { ...s, c: into } }
+    else if (s.a === from || s.b === from || s.c === from) f.seed = { ...s, a: sw(s.a), b: sw(s.b), ...(s.c ? { c: sw(s.c) } : {}) }
+  }
+}
+
+/** A seed carried onto a copy: points renamed by `map`; `mirror` (the axis
+ *  angle, radians) reflects it, `turn` (radians) turns it about a centre. */
+export function mapSeed(s: FillSeed, map: (id: EntityId) => EntityId, how: { mirror?: number; turn?: number } = {}): FillSeed {
+  const out: FillSeed = { ...s, a: map(s.a), b: map(s.b), ...(s.c ? { c: map(s.c) } : {}) }
+  const wrap = (u: number) => ((u % 1) + 1) % 1
+  if (how.mirror != null) {
+    if (s.kind === 'circle') out.t = wrap((2 * how.mirror) / TAU - s.t)
+    else out.side = s.side === 1 ? -1 : 1
+    if (s.kind === 'arc') out.ccw = !s.ccw
+  }
+  if (how.turn != null && s.kind === 'circle') out.t = wrap(s.t + how.turn / TAU)
+  return out
+}
+
+/** The live fills whose whole area is bounded by pieces made only of the
+ *  points in `ids` (and its circles, by id) — what a copy of those points
+ *  carries. With `drawnBy` (a copy's own entities), every line and arc around
+ *  the area must also be one those entities draw: a copy that leaves out a
+ *  piece between two copied points (a chord, an unpicked segment) would fill
+ *  a different area, so it takes no fill. */
+export function fillsWithin(doc: SketchDoc, ids: ReadonlySet<EntityId>, drawnBy?: readonly SketchEntity[]): SketchFill[] {
+  if (!doc.fills?.length) return []
+  const fs = fillFaces(doc)
+  let drawn: Set<string> | null = null
+  if (drawnBy) {
+    drawn = new Set()
+    for (const e of drawnBy) {
+      if (e.kind === 'line') drawn.add(facePieceKey({ kind: 'line', a: e.p1, b: e.p2 }))
+      else if (e.kind === 'path') {
+        e.segments.forEach((sg, i) => {
+          const a = e.anchors[i]!, b = e.anchors[(i + 1) % e.anchors.length]!
+          if (sg.kind === 'line') drawn!.add(facePieceKey({ kind: 'line', a, b }))
+          else if (sg.kind === 'arc') drawn!.add(facePieceKey({ kind: 'arc', a, b, c: sg.center, ccw: sg.sweep === 1 }))
+        })
+      }
+    }
+  }
+  return doc.fills.filter(f => {
+    const g = resolveFill(fs, f)
+    if (g == null) return false
+    for (const ci of faceCycles(fs, g)) {
+      for (const h of fs.cycles[ci]!.edges) {
+        const p = fs.pieces[fs.halfEdges[h]!.piece]!
+        if (p.kind === 'circle' && !ids.has(p.id)) return false
+        if (drawn && (p.kind === 'line' || p.kind === 'arc') && !drawn.has(facePieceKey(p))) return false
+      }
+    }
+    return boundaryPoints(fs, g).every(id => ids.has(id))
+  })
+}
+
+/** Flip (⇧H / ⇧V) turns these points over in place: the fills inside them
+ *  lie on the other side of their lines, and a circle's seed turns with it.
+ *  Call before the points move. (Flip keeps each arc's turning, so an arc
+ *  seed is left for reconcileFills to carry.) */
+export function flipSeeds(doc: SketchDoc, ids: ReadonlySet<EntityId>, axis: 'h' | 'v'): void {
+  const inside = new Set(fillsWithin(doc, ids).map(f => f.id))
+  if (!inside.size) return
+  doc.fills = doc.fills!.map(f => {
+    if (!inside.has(f.id)) return f
+    const s = f.seed
+    if (s.kind === 'line') return { id: f.id, seed: { ...s, side: s.side === 1 ? -1 : 1 } }
+    if (s.kind === 'circle') return { id: f.id, seed: { ...s, t: ((((axis === 'h' ? 0.5 : 0) - s.t) % 1) + 1) % 1 } }
+    return f
+  })
 }

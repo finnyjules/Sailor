@@ -10,6 +10,7 @@ import type { Vec2 } from './geom'
 import { pointClosure, addConstraint } from './edit'
 import { freshId } from './ids'
 import { segCount, type SegPick } from './pieces'
+import { fillsWithin, freshFillId, mapSeed } from './fills'
 
 function copyEntity(e: SketchEntity): SketchEntity {
   if (e.kind === 'path') return { ...e, anchors: [...e.anchors], segments: e.segments.map(s => ({ ...s })) }
@@ -40,6 +41,12 @@ export function extractPieces(doc: SketchDoc, ids: readonly EntityId[], segs: re
   const have = new Set(out.entities.map(e => e.id))
   for (const c of doc.constraints) {
     if (c.refs.length && c.refs.every(r => have.has(r))) out.constraints.push({ ...c, refs: [...c.refs] })
+  }
+  // pen stage 7: the fills whose whole area is copied go with it
+  const fills = fillsWithin(doc, keep, out.entities)
+  if (fills.length) {
+    out.fills = fills.map(f => ({ id: f.id, seed: { ...f.seed } }))
+    if (doc.fillGap != null) out.fillGap = doc.fillGap
   }
   return out
 }
@@ -73,6 +80,15 @@ export function insertPieces(doc: SketchDoc, clip: SketchDoc, offset: Vec2): { c
     }
   }
   for (const c of clip.constraints) addConstraint(doc, c.kind, c.refs.map(m), c.value)
+  // pen stage 7: the copy's fills, on the pasted pieces. Its gap comes along
+  // only into a drawing with no fills yet (one that has fills keeps its own,
+  // or none: a gap must never appear under fills made without one)
+  const hadFills = !!doc.fills?.length
+  for (const f of clip.fills ?? []) {
+    const list = doc.fills ?? (doc.fills = [])
+    list.push({ id: freshFillId(doc), seed: mapSeed(f.seed, m) })
+  }
+  if (clip.fills?.length && !hadFills && doc.fillGap == null && clip.fillGap != null) doc.fillGap = clip.fillGap
   const used = new Set<EntityId>()
   for (const e of added) {
     if (e.kind === 'line') { used.add(e.p1); used.add(e.p2) }
@@ -129,5 +145,11 @@ export function scalePieces(clip: SketchDoc, factor: number, flipY = false): Ske
     else if (c.value != null && flipY && c.kind === 'rotatedFrom') c.value = -c.value
     return c
   })
-  return { entities, constraints }
+  const out: SketchDoc = { entities, constraints }
+  // pen stage 7: seeds by the same ids; upside down, each lies on the other side
+  if (clip.fills?.length) {
+    out.fills = clip.fills.map(f => ({ id: f.id, seed: flipY ? mapSeed(f.seed, id => id, { mirror: 0 }) : { ...f.seed } }))
+    if (clip.fillGap != null) out.fillGap = clip.fillGap * factor
+  }
+  return out
 }
