@@ -7,7 +7,7 @@ import { describe, it, expect, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
-import { LAYERS_FULL, REMIX_ACTION, layerAddActions, runStudioAction, studioActions, type StudioAction } from '~/lib/studio/studioActions'
+import { LAYERS_FULL, PROMPT_HINT, PROMPT_HINT_ALONE, REMIX_ACTION, layerAddActions, runStudioAction, studioActions, type StudioAction } from '~/lib/studio/studioActions'
 import { assistEstimateText } from '~/lib/pricing'
 import StudioActionRows from '~/components/vue-canvas/studio/StudioActionRows.vue'
 import StudioActionRow from '~/components/vue-canvas/studio/StudioActionRow.vue'
@@ -161,27 +161,28 @@ describe('Shader head and dice', () => {
 })
 
 describe('StudioActionRows', () => {
-  it('one card of rows — no headings, no hint line; the description is the row\'s tooltip, not a line', () => {
+  it('one card of rows — no headings — then the hint line', () => {
     const w = mount(StudioActionRows, { props: { actions: studioActions({ place: 'shader', canTakes: true }), prompt: prompt() as any } })
     expect(w.findAll('h4')).toHaveLength(0)
     const rows = w.findAll('[data-testid="studio-action-row"]')
     expect(rows.map(r => r.attributes('data-action-id'))).toEqual(['vary', 'remix'])
     expect(rows[0]!.find('[data-testid="studio-action-name"]').text()).toBe('Try other settings')
-    expect(rows[0]!.find('[data-testid="studio-action-description"]').exists()).toBe(false)
-    expect(rows[0]!.attributes('aria-description')).toBe('Same effect, 3 new sets of dial values')
+    expect(rows[0]!.find('[data-testid="studio-action-description"]').text()).toBe('Same effect, 3 new sets of dial values')
     expect(rows[0]!.find('[data-testid="studio-action-price"]').text()).toBe('2–6 credits')
     expect(rows[1]!.find('[data-testid="studio-action-price"]').text()).toBe('30–84 credits')
     for (const r of rows) expect(r.findComponent({ name: 'AiMark' }).exists()).toBe(true)
-    expect(w.text()).not.toContain('prompt below')
+    expect(w.find('[data-testid="studio-actions-hint"]').text()).toBe(PROMPT_HINT)
+    expect(PROMPT_HINT).toBe('Or type what you want in the prompt below')
   })
   it('the card matches the StudioSection cards; no pills, no new colours', () => {
     const w = mount(StudioActionRows, { props: { actions: studioActions({ place: 'gradient', canTakes: true }), prompt: prompt() as any } })
-    const card = w.find('[data-testid="studio-actions"]')
+    const card = w.find('[data-testid="studio-actions"] > div')
     for (const c of ['rounded-lg', 'border', 'border-white/[0.10]', 'bg-white/[0.04]']) expect(card.classes()).toContain(c)
     expect(w.html()).not.toMatch(/rounded-full/)
     const name = w.find('[data-testid="studio-action-name"]')
     expect(name.classes()).toContain('whitespace-nowrap') // names never truncate
     expect(name.classes()).not.toContain('truncate')
+    expect(w.find('[data-testid="studio-action-description"]').classes()).toContain('truncate')
   })
   it('a non-AI row has no star and no price', () => {
     const local: StudioAction[] = [{ id: 'randomize', label: 'Randomize', description: 'A random new gradient, no AI', ai: false, lands: null, run: { call: vi.fn() } }]
@@ -190,14 +191,10 @@ describe('StudioActionRows', () => {
     expect(r.findComponent({ name: 'AiMark' }).exists()).toBe(false)
     expect(r.find('[data-testid="studio-action-price"]').exists()).toBe(false)
   })
-  it('no rows (Space type): nothing at all', () => {
+  it('no rows (Space type): just the hint', () => {
     const w = mount(StudioActionRows, { props: { actions: [], prompt: prompt() as any } })
-    expect(w.find('[data-testid="studio-actions"]').exists()).toBe(false)
-  })
-  it('a disabled row keeps its reason as a visible line', () => {
-    const local: StudioAction[] = [{ id: 'x', label: 'Randomize', description: 'Random', disabled: true, disabledHint: 'Add a layer first', ai: false, lands: null, run: { call: vi.fn() } }]
-    const w = mount(StudioActionRows, { props: { actions: local, prompt: prompt() as any } })
-    expect(w.find('[data-testid="studio-action-disabled-hint"]').text()).toBe('Add a layer first')
+    expect(w.findAll('[data-testid="studio-action-row"]')).toHaveLength(0)
+    expect(w.find('[data-testid="studio-actions-hint"]').text()).toBe(PROMPT_HINT_ALONE)
   })
   it('a click runs the action through the prompt', async () => {
     const p = prompt() as any

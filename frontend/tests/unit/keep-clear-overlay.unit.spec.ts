@@ -6,7 +6,6 @@ import { describe, it, expect } from 'vitest'
 import { mount } from '@vue/test-utils'
 import KeepClearOverlay from '~/components/vue-canvas/compositor/KeepClearOverlay.vue'
 import LayoutVaryPanel from '~/components/vue-canvas/compositor/LayoutVaryPanel.vue'
-import StudioHint from '~/components/vue-canvas/studio/StudioHint.vue'
 
 const keep = { top: 0.14, bottom: 0.35, left: 0.06, right: 0.06 }
 
@@ -55,7 +54,7 @@ describe('LayoutVaryPanel — the format', () => {
   const base = { name: 'Statement', candidates: [], index: 0, choices: [], library: [], layoutId: 'statement', applied: true, frameW: 160, frameH: 90 }
   const stubs = { LayoutTile: true }
 
-  it('names the format, gives its rules on hover, and quotes the hidden lines (24 characters, then an ellipsis)', () => {
+  it('names the format, gives its rules, and quotes the hidden lines (24 characters, then an ellipsis)', () => {
     const wrap = mount(LayoutVaryPanel, { props: { ...base, format: {
       label: 'Video thumbnail · 16:9',
       notes: ['Seen about 170 px wide, so no text is smaller than 9 px there.', 'Carries the two most important lines.'],
@@ -63,11 +62,8 @@ describe('LayoutVaryPanel — the format', () => {
     } }, global: { stubs } })
     const block = wrap.get('[data-testid="layout-format"]')
     expect(wrap.get('[data-testid="layout-format-label"]').text()).toBe('Format: Video thumbnail · 16:9')
-    // The rules are the label's tooltip, not lines under it.
-    const hint = block.findComponent(StudioHint).props('text')
-    expect(hint).toContain('Seen about 170 px wide, so no text is smaller than 9 px there.')
-    expect(hint).toContain('Carries the two most important lines.')
-    expect(block.text()).not.toContain('Carries the two most important lines.')
+    expect(block.text()).toContain('Seen about 170 px wide, so no text is smaller than 9 px there.')
+    expect(block.text()).toContain('Carries the two most important lines.')
     expect(wrap.get('[data-testid="layout-format-hidden"]').text())
       .toBe('Not shown in this format: “19.09.–15.11.2026”, “Kunstraum Lenz, Hauptstr…”.')
   })

@@ -772,7 +772,7 @@ const MULTI_LAYER_SCENARIOS: MultiScenario[] = [
       ...FOCUS(),
       ...LAYER_SECTION,
     ],
-    anchors: ['ui.color.stops'],
+    anchors: ['ui.color.stops', 'ui.flow.intro'],
   },
   {
     // The inverse: the base is curve, so the SCHEMA would draw a Curve card — but the
@@ -792,7 +792,7 @@ const MULTI_LAYER_SCENARIOS: MultiScenario[] = [
       ...FOCUS(),
       ...LAYER_SECTION,
     ],
-    anchors: ['ui.color.stops', 'ui.shape.ringShape'],
+    anchors: ['ui.color.stops', 'ui.flow.intro', 'ui.shape.ringShape'],
   },
   {
     // template: `anyCenter` / `anyInnerRadius` — a GLOBAL row shows when ANY layer
@@ -809,7 +809,7 @@ const MULTI_LAYER_SCENARIOS: MultiScenario[] = [
       ...COLOR_PARAMS({ steps: true, hueDrift: true, falloff: true }),
       ...FOCUS(),
     ],
-    anchors: ['ui.color.stops', 'ui.color.direction', 'ui.shape.kind', 'ui.shape.direction', 'ui.shape.mirror'],
+    anchors: ['ui.color.stops', 'ui.color.direction', 'ui.flow.intro', 'ui.shape.kind', 'ui.shape.direction', 'ui.shape.mirror'],
   },
 ]
 

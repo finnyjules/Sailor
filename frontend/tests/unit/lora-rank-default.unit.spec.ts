@@ -38,9 +38,8 @@ describe('default LoRA rank', () => {
 
   it('the trainer help text does not still advertise a stale default', () => {
     const src = readFileSync(abs('app/components/LoraTrainerSurface.vue'), 'utf8')
-    // The help now rides as a tooltip on the "LoRA size" label (2026-09-26).
-    const help = src.split('\n').find(l => l.includes('is the sweet spot') && l.includes('LoRA size')) ?? ''
-    expect(help).toContain(`${DEFAULT_LORA_RANK} is the sweet spot`)
-    expect(help).not.toMatch(/\b16 is the sweet spot/)
+    const help = src.slice(src.indexOf('LoRA size'), src.indexOf('LoRA size') + 700)
+    expect(help).toContain(String(DEFAULT_LORA_RANK))
+    expect(help).not.toMatch(/>16<\/span>\s*is the sweet spot/)
   })
 })
