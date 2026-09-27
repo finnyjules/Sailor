@@ -30,7 +30,8 @@ import {
 import { GATE_CLASS, isLink, type ApiLink, type ApiPrompt } from '#shared/runner/graph'
 import { PROVIDER_TYPES } from '#shared/runner/eligibility'
 import { actionPassThrough } from '../generators/actions'
-import type { RunnerFamily } from '#shared/runner/families'
+import { familyOn, type RunnerFamily } from '#shared/runner/families'
+import { SPLIT_CLASS } from '#shared/runner/layers'
 import { encodeMask, loadImageMask, type Mask } from '../pictures/mask'
 import { floatReadBy, maskTensorBytes } from '../effects/tensorFiles'
 import { MAX_INPUT_PIXELS } from '../compositor/decode'
@@ -77,7 +78,8 @@ export function bakeRefusalWords(classType: string, why: string): string {
  * anything is held): 3D Studio's bakes, Text on path's and Text mask's
  * render, a LoadImage that runs as a card (with `cards` on; off, the
  * Frame reads its file as before), and the Image card file behind a picture
- * utility's picture wire (R1.4) or behind a Smart Layout's image layer (R1.6).
+ * utility's picture wire (R1.4) or behind a Smart Layout's image layer (R1.6),
+ * and the loader file behind Separate background and foreground's picture (R3.7).
  * A card whose settings name no file names none.
  */
 export function cardPictureFiles(prompt: ApiPrompt, families: ReadonlySet<RunnerFamily>): CardPictureFile[] {
@@ -127,6 +129,12 @@ export function cardPictureFiles(prompt: ApiPrompt, families: ReadonlySet<Runner
         const behind = isLink(v) ? cardFileBehind(prompt, v) : null
         if (behind) out.push({ ...behind, classType: 'Image' })
       }
+    }
+    // Separate background and foreground (R3.7 fix round 1) sends a loader's picture as
+    // Python's tensor (EXIF turned, RGB): the loader's file is checked here too.
+    if (n.class_type === SPLIT_CLASS && familyOn('layers', families) && isLink(inputs.image)) {
+      const loader = loaderFileBehind(prompt, inputs.image)
+      if (loader) out.push(loader)
     }
     // Save image and Preview image (R1.5) save every frame of the batch a
     // loader makes of an animation; the runner hands on its first frame, so

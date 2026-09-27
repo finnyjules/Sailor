@@ -4,17 +4,27 @@
  * Replicate calls built as its Python builds them. No backup: no same-model
  * twin on fal with the same settings is carded.
  *
+ *  0. The picture (fix round 1). Behind a loader (a LoadImage or an Image
+ *     card, `loaderFileBehind`), Python's picture is the loader's tensor:
+ *     `ImageOps.exif_transpose`, then RGB (pythonView.ts rgbTurnedPng, the
+ *     file itself when it already is that picture). Both calls are sent that
+ *     picture, so the cut-out (and its mask) comes back in the same shape as
+ *     the fill picture, EXIF-turned phone photos included. Any other source
+ *     (a picture a paid node downloaded: Python's tensor is the file read as
+ *     RGBA, not turned) is sent as it is, as every paid node sends it.
  *  1. `cutout` (:4601-4605): 851-labs/background-remover with
- *     `{image, background_type: "rgba", format: "png"}`; the picture is sent
- *     as Python sends the first frame of its batch (the handed-off file of
- *     the linked slot). Its first answer URL (`_first_output_url`) is the
- *     subject, kept as downloaded (its alpha kept) and shown under
- *     `split_subject`.
+ *     `{image, background_type: "rgba", format: "png"}`. Its first answer URL
+ *     (`_first_output_url`) is the subject, kept as downloaded (its alpha
+ *     kept) and shown under `split_subject`.
  *  2. The mask (:4611-4627): the cut-out's alpha as PIL's `.convert("RGBA")`
- *     reads it (pythonView.ts pilRgba, CMYK and 16-bit grey as PIL reads
+ *     reads it (pythonView.ts pilRaw, CMYK and 16-bit grey as PIL reads
  *     them), `round(clamp(a/255)·255)` (each 8-bit value back); grown by
- *     PIL's MaxFilter(2·mask_grow + 1) when mask_grow > 0 (../pixels/
- *     maxFilter.ts, on the Frame's worker); an 8-bit greyscale PNG, handed off.
+ *     PIL's MaxFilter(2·mask_grow + 1) when mask_grow > 0; an 8-bit greyscale
+ *     PNG, handed off. The per-pixel work runs on the Frame's worker with its
+ *     Stop checks (../pixels/pilPixels.ts, ../pixels/maxFilter.ts). A cut-out
+ *     that doesn't come back the fill picture's size is refused before the
+ *     fill is paid for (fix round 1: the mask and the picture always have one
+ *     shape; Python would send them and the fill would fail or smear).
  *     Python's other branch, the remover's matte (`background_type: "map"`,
  *     :4613-4620), is for a cut-out with no alpha, and never runs: a
  *     downloaded picture is always read as RGBA (bytesio_to_image_tensor), so
@@ -23,9 +33,10 @@
  *     two calls). The runner neither makes that call nor holds for it.
  *  3. `fill` (:4631-4640): the engine `background_fill` names
  *     (`_PHOTO_FILL_SLUGS`) with `{image, mask}`: the picture without its
- *     alpha (`image[..., :3]`: pythonView.ts pilRgbPng, handed off; the file
- *     itself when it already is an 8-bit RGB PNG, as Python sends the same
- *     tensor again) and the mask. Its first answer URL is the background,
+ *     alpha (`image[..., :3]`): behind a loader, the loader's picture (RGB
+ *     already); otherwise the file's RGB as PIL reads it, handed off (the
+ *     file itself when it already is an 8-bit RGB PNG, as Python sends the
+ *     same tensor again); and the mask. Its first answer URL is the background,
  *     alpha dropped (:4644-4645; rule 3: the RGB PNG of Python's tensor),
  *     shown under `split_background`.
  *
@@ -43,7 +54,8 @@ import { paidCallUsd } from '#shared/pricing/paidRates'
 import sharp from 'sharp'
 import { answerExt } from '../answerDownload'
 import { pixelsInWorker } from '../compositor/worker'
-import { answerRgbPng, pilRgba, pilRgbPng } from '../pictures/pythonView'
+import { answerRgbPng, isPlainRgbPng, pictureMeta, pilRaw, rgbTurnedPng } from '../pictures/pythonView'
+import { loaderFileBehind } from '../cards/bakeReplay'
 import type { NodePlan, PipelineIO, PlanContext } from '../executors'
 import type { OutputFile, RunnerValue } from '../types'
 import { firstOutputUrl } from './repair'
@@ -52,8 +64,10 @@ import { firstOutputUrl } from './repair'
 export const SPLIT_NO_SUBJECT = 'The service sent back no cut-out of the subject'
 /** The fill engine answered with no picture, after its call. */
 export const SPLIT_NO_BACKGROUND = 'The service sent back no background picture'
-/** Growing the mask on the Frame's worker took longer than its limit. */
-export const SPLIT_MASK_TIMEOUT = 'Growing the subject’s mask took longer than 2 minutes, so it was stopped'
+/** The mask or the picture's copy took longer than the worker's limit. */
+export const SPLIT_MASK_TIMEOUT = 'Making the subject’s mask took longer than 2 minutes, so it was stopped'
+/** The cut-out isn't the picture's size: the fill would get a mask of another shape (fix round 1). */
+export const SPLIT_SIZES_DIFFER = 'The cut-out came back a different size from the picture, so the background can’t be filled'
 
 // ── A widget as ComfyUI hands it to execute (missing: the node's default) ──
 
@@ -88,19 +102,6 @@ export function fillInput(image: string, mask: string): Record<string, unknown> 
   return { image, mask }
 }
 
-/**
- * The mask's pixels (:4611-4623): the cut-out's alpha as PIL reads it (one
- * byte a pixel, row by row), before any growing.
- */
-export async function cutoutAlpha(bytes: Uint8Array): Promise<{ l: Uint8Array; w: number; h: number }> {
-  const { data, info } = await pilRgba(bytes)
-  const n = info.width * info.height
-  const l = new Uint8Array(n)
-  // (alpha/255 clamped, ×255, rounded: each 8-bit value back.)
-  for (let i = 0; i < n; i++) l[i] = data[i * 4 + 3]!
-  return { l, w: info.width, h: info.height }
-}
-
 /** An 8-bit greyscale PNG of a mask (PIL's `Image.fromarray(alpha, mode="L")` saved as PNG). */
 export async function maskPng(l: Uint8Array, w: number, h: number): Promise<Uint8Array> {
   const png = await sharp(l, { raw: { width: w, height: h, channels: 1 } }).toColourspace('b-w').png({ compressionLevel: 6 }).toBuffer()
@@ -108,14 +109,36 @@ export async function maskPng(l: Uint8Array, w: number, h: number): Promise<Uint
 }
 
 /**
- * The mask Python sends: the cut-out's alpha, grown by MaxFilter(2·grow + 1)
- * when `grow` > 0 (on the Frame's worker, with its Stop checks), as an 8-bit
- * greyscale PNG.
+ * The mask Python sends, from the cut-out's bytes: its alpha as PIL reads it,
+ * grown by MaxFilter(2·grow + 1) when `grow` > 0 (on the Frame's worker), as
+ * an 8-bit greyscale PNG. `want`: the fill picture's size; a cut-out of
+ * another size is refused (SPLIT_SIZES_DIFFER).
  */
-export async function splitMask(cutout: Uint8Array, grow: number, signal: AbortSignal): Promise<Uint8Array> {
-  const { l, w, h } = await cutoutAlpha(cutout)
-  const grown = grow > 0 ? await pixelsInWorker(signal, worker => worker.maxFilter(l, w, h, grow * 2 + 1), SPLIT_MASK_TIMEOUT) : l
-  return maskPng(grown, w, h)
+export async function splitMask(cutout: Uint8Array, grow: number, signal: AbortSignal, want?: { w: number; h: number }): Promise<Uint8Array> {
+  const raw = await pilRaw(cutout)
+  if (want && (raw.width !== want.w || raw.height !== want.h)) throw new Error(SPLIT_SIZES_DIFFER)
+  const l = await pixelsInWorker(signal, worker => worker.splitMask(raw, grow > 0 ? grow * 2 + 1 : 1), SPLIT_MASK_TIMEOUT)
+  return maskPng(l, raw.width, raw.height)
+}
+
+/**
+ * The picture both calls see, and its size (step 0 above): behind a loader,
+ * the loader's picture (`picture` and `fill` null: the file itself already
+ * is it); otherwise the file as it is (`picture` null), its fill copy the RGB
+ * PIL reads (`fill` null: the file itself, an 8-bit RGB PNG already), made on
+ * the Frame's worker.
+ */
+export async function splitPictures(bytes: Uint8Array, fromLoader: boolean, signal: AbortSignal): Promise<{ picture: Uint8Array | null; fill: Uint8Array | null; w: number; h: number }> {
+  if (fromLoader) {
+    const { png, w, h } = await rgbTurnedPng(bytes)
+    return { picture: png, fill: png, w, h }
+  }
+  const meta = await pictureMeta(bytes)
+  if (isPlainRgbPng(meta, bytes)) return { picture: null, fill: null, w: meta.width!, h: meta.height! }
+  const raw = await pilRaw(bytes)
+  const rgb = await pixelsInWorker(signal, worker => worker.rgbOf(raw), SPLIT_MASK_TIMEOUT)
+  const png = await sharp(rgb, { raw: { width: raw.width, height: raw.height, channels: 3 } }).png({ compressionLevel: 6 }).toBuffer()
+  return { picture: null, fill: new Uint8Array(png), w: raw.width, h: raw.height }
 }
 
 // ── The plan ──
@@ -143,15 +166,18 @@ export async function planSplitLayers(ctx: PlanContext): Promise<NodePlan> {
   const fillSlug = PHOTO_FILL_SLUGS[photoFillOf(inputs.background_fill)]
   const grow = intOf(inputs.mask_grow, SPLIT_MASK_GROW.default)
   const image = await ctx.toUrl(source)
+  // Behind a LoadImage or an Image card: Python's picture is the loader's (EXIF turned, RGB).
+  const fromLoader = isLink(link) && !!loaderFileBehind(ctx.prompt, link)
   const cutoutUsd = callUsd(SPLIT_CUTOUT_SLUG)
   const fillUsd = callUsd(fillSlug)
   return {
     kind: 'pipeline', prefix: 'split_subject',
     run: async (io: PipelineIO) => {
-      // The picture without its alpha, read before any call: a file that can't be read fails the node uncharged.
-      const rgb = await pilRgbPng(await io.read(source))
-      const fillImage = rgb ? await io.handOff(rgb, 'split_image.png') : image
-      const cut = await io.call({ key: 'cutout', provider: 'replicate', endpoint: SPLIT_CUTOUT_SLUG, payload: cutoutInput(image), media: 'image', usd: cutoutUsd })
+      // The pictures, read before any call: a file that can't be read fails the node uncharged.
+      const pics = await splitPictures(await io.read(source), fromLoader, io.signal)
+      const picture = pics.picture ? await io.handOff(pics.picture, 'split_image.png') : image
+      const fillImage = pics.fill === pics.picture ? picture : pics.fill ? await io.handOff(pics.fill, 'split_image.png') : image
+      const cut = await io.call({ key: 'cutout', provider: 'replicate', endpoint: SPLIT_CUTOUT_SLUG, payload: cutoutInput(picture), media: 'image', usd: cutoutUsd })
       const cutUrl = firstUrl(cut.result, SPLIT_NO_SUBJECT)
       // The cut-out's bytes, kept for the run (not an asset until the node is done), so a
       // resumed node goes on at the fill without downloading it again.
@@ -162,7 +188,7 @@ export async function planSplitLayers(ctx: PlanContext): Promise<NodePlan> {
       })
       const cutBytes = fresh.got?.bytes ?? await io.read(keptCutout)
       const cutType = fresh.got?.contentType ?? null
-      const mask = await io.handOff(await splitMask(cutBytes, grow, io.signal), 'split_mask.png')
+      const mask = await io.handOff(await splitMask(cutBytes, grow, io.signal, { w: pics.w, h: pics.h }), 'split_mask.png')
       const fill = await io.call({ key: 'fill', provider: 'replicate', endpoint: fillSlug, payload: fillInput(fillImage, mask), media: 'image', usd: fillUsd })
       const bgUrl = firstUrl(fill.result, SPLIT_NO_BACKGROUND)
       // The background as Python's tensor saves it: alpha dropped (rule 3).

@@ -28,6 +28,7 @@ import { compositorCore, type Picture, type RawPicture } from './plane'
 import { composeFrame, type FrameBackend, type FrameLoaders } from './render'
 import { pixelsCore, type PixelsPicture } from '../pixels/core'
 import { EFFECT_CORES, type EffectCoreEntry } from '../effects/cores'
+import type { PilRaw } from '../pixels/pilPixels'
 
 /**
  * The worker's script around a core function's source text. `__name` is
@@ -129,6 +130,19 @@ parentPort.on('message', (m) => {
     else if (m.op === 'px.maxFilter') {
       stopped()
       value = built.maxf.maxFilterL(m.l, m.w, m.h, m.size, isStopped)
+      transfer = [value.buffer]
+    }
+    // Separate background and foreground (R3.7 fix round 1, ../pixels/pilPixels.ts): the cut-out's
+    // alpha as PIL reads it, grown by MaxFilter(size) when size > 1; and a picture's RGB.
+    else if (m.op === 'px.splitMask') {
+      stopped()
+      const l = built.pil.alphaOf(m.raw, isStopped)
+      value = m.size > 1 ? built.maxf.maxFilterL(l, m.raw.width, m.raw.height, m.size, isStopped) : l
+      transfer = [value.buffer]
+    }
+    else if (m.op === 'px.rgbOf') {
+      stopped()
+      value = built.pil.rgbOf(m.raw, isStopped)
       transfer = [value.buffer]
     }
     else if (m.op === 'px.save') {
@@ -407,6 +421,10 @@ export interface PixelsWorker {
   clip(picture: RawPicture, trunc?: boolean): Promise<HandOff8>
   /** PIL's MaxFilter(size) of an 8-bit greyscale mask, w × h, one byte a pixel (R3.7, ../pixels/maxFilter.ts). */
   maxFilter(l: Uint8Array, w: number, h: number, size: number): Promise<Uint8Array>
+  /** Split's mask (R3.7 fix round 1): the alpha of PIL's convert("RGBA") of `raw`, then MaxFilter(size) when size > 1. */
+  splitMask(raw: PilRaw, size: number): Promise<Uint8Array>
+  /** A picture's RGB as PIL's convert("RGBA") has it, 3 bytes a pixel (R3.7 fix round 1). */
+  rgbOf(raw: PilRaw): Promise<Uint8Array>
   /** Save image (R1.5): the pixels save_images encodes, w × h (Lanczos when that differs), flattened onto white for JPEG. */
   savePixels(picture: RawPicture, w: number, h: number, flatten: boolean): Promise<HandOff8>
   /** An effect (R2.1) starts its batch: `fn` its op ('<core>.<fn>'), `params` its widgets, `count` the batch's length. */
@@ -452,6 +470,11 @@ export interface EffectRunResult {
   preview?: { w: number; h: number; channels: number; px: Uint8Array }
 }
 
+/** Raw samples the worker takes over (transferred): always a copy of its own (sharp's buffers can't be transferred). */
+function ownRaw(raw: PilRaw): PilRaw {
+  return { ...raw, data: raw.data.slice() }
+}
+
 /**
  * A picture utility's pixel work on the Frame's worker, in the same queue,
  * under the same watchdog and Stop: `job` decodes and encodes on this thread
@@ -484,6 +507,14 @@ export function pixelsInWorker<T>(signal: AbortSignal | undefined, job: (w: Pixe
       async maxFilter(l, width, height, size) {
         const own = l.byteOffset === 0 && l.byteLength === l.buffer.byteLength && !(l.buffer instanceof SharedArrayBuffer) ? l : l.slice()
         return await call(t, { op: 'px.maxFilter', l: own, w: width, h: height, size }, [own.buffer as ArrayBuffer]) as Uint8Array
+      },
+      async splitMask(raw, size) {
+        const r = ownRaw(raw)
+        return await call(t, { op: 'px.splitMask', raw: r, size }, [r.data.buffer as ArrayBuffer]) as Uint8Array
+      },
+      async rgbOf(raw) {
+        const r = ownRaw(raw)
+        return await call(t, { op: 'px.rgbOf', raw: r }, [r.data.buffer as ArrayBuffer]) as Uint8Array
       },
       async savePixels(picture, width, height, flatten) {
         const p = handOver(picture)

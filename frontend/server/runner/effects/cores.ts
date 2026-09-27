@@ -21,6 +21,7 @@ import { noiseCore } from './core/noise'
 import { kernelsCore } from './core/kernels'
 import { rngCore } from './core/rng'
 import { maxFilterCore } from '../pixels/maxFilter'
+import { pilPixelsCore } from '../pixels/pilPixels'
 
 export interface EffectCoreEntry {
   /** The name the worker (and an op) knows the built core by. */
@@ -49,6 +50,8 @@ export const EFFECT_CORES: readonly EffectCoreEntry[] = [
   // R3.7: PIL's MaxFilter (Separate background and foreground grows its mask): a helper the
   // worker's `px.maxFilter` op calls, not an effect op.
   { name: 'maxf', fn: maxFilterCore as EffectCoreEntry['fn'], args: [] },
+  // R3.7 fix round 1: PIL's convert("RGBA") per pixel, and the channels Split takes (`px.splitMask`, `px.rgbOf`).
+  { name: 'pil', fn: pilPixelsCore as EffectCoreEntry['fn'], args: [] },
 ]
 
 /** The cores whose functions are effect ops (not helpers). */

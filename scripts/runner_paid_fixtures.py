@@ -158,13 +158,16 @@ def _unb64(text: str) -> bytes:
 
 
 def _picture_tensor(data: bytes, mode: str = "RGB"):
-    """A picture input as LoadImage hands it on: RGB, float32 /255, [1, H, W, 3];
-    `mode` "RGBA" as a node that keeps alpha hands it on (R3.7: [1, H, W, 4])."""
+    """A picture input as LoadImage (and the Image card) hands it on:
+    ImageOps.exif_transpose, then RGB, float32 /255, [1, H, W, 3]; `mode`
+    "RGBA" as a node that keeps alpha hands it on (R3.7: [1, H, W, 4]: a
+    downloaded picture, read as bytesio_to_image_tensor reads it, not turned)."""
     import io
     import numpy as np
     import torch
-    from PIL import Image
-    img = Image.open(io.BytesIO(data)).convert(mode)
+    from PIL import Image, ImageOps
+    img = Image.open(io.BytesIO(data))
+    img = img.convert(mode) if mode == "RGBA" else ImageOps.exif_transpose(img).convert(mode)
     return torch.from_numpy(np.array(img).astype(np.float32) / 255.0).unsqueeze(0)
 
 
@@ -265,7 +268,9 @@ def capture_calls(node_cls, answers: list, links: dict | None = None, files: dic
       that mode ("RGBA": a node upstream kept its alpha). `made_pixels`
       (R3.7): each `PNG:<sha256>` is also described in `made` by its decoded
       pixels (`{shape, sha256}` of the 8-bit array), since the TypeScript
-      side's PNG encoder writes other bytes for the same pixels.
+      side's PNG encoder writes other bytes for the same pixels; and each
+      picture input by the pixels its tensor holds (`loaded`, R3.7 fix
+      round 1: the loader's view, EXIF turned).
     - Every GET (aiohttp, and the download helpers) is recorded in `gets` as
       `{url, status}` and served from `links` (text, or `{status, text}` — a
       404 is served as asked; `{raise: message}` fails the fetch outright
@@ -427,8 +432,12 @@ def capture_calls(node_cls, answers: list, links: dict | None = None, files: dic
         saved_inputs.append({"file": file, "shape": list(arr.shape), "sha256": hashlib.sha256(arr.tobytes()).hexdigest()})
         return file
 
+    loaded: dict = {}
     for pname, data in (pictures or {}).items():
         kwargs[pname] = name(_picture_tensor(data, (picture_modes or {}).get(pname, "RGB")), "input", pname)
+        if made_pixels:
+            arr = np.clip(255.0 * kwargs[pname][0].numpy(), 0, 255).round().astype(np.uint8)
+            loaded[pname] = {"shape": list(arr.shape), "sha256": hashlib.sha256(arr.tobytes()).hexdigest()}
     for sname, data in (sounds or {}).items():
         kwargs[sname] = name(_sound_dict(data), "input", sname)
 
@@ -470,6 +479,9 @@ def capture_calls(node_cls, answers: list, links: dict | None = None, files: dic
     unserved = [g["url"] for g in gets if g["status"] is None]
     if unserved:
         raise RuntimeError(f"{node_cls.__name__}: GETs the case doesn't serve: {unserved}")
+    if made_pixels:
+        result["made"] = made
+        result["loaded"] = loaded
     if "error" in result:
         return result
     args = getattr(out, "args", out)
@@ -477,8 +489,6 @@ def capture_calls(node_cls, answers: list, links: dict | None = None, files: dic
     result["ui"] = jsonable(getattr(out, "ui", None))
     if saved_inputs:
         result["saved_inputs"] = saved_inputs
-    if made_pixels:
-        result["made"] = made
     return result
 
 
@@ -517,6 +527,8 @@ def paid_case(name: str, node_cls, widgets: dict, answers: list, pictures=(), so
         case["picture_modes"] = picture_modes
     if "made" in got:
         case["made"] = got["made"]
+    if "loaded" in got:
+        case["loaded"] = got["loaded"]
     return case
 
 
@@ -1145,6 +1157,20 @@ def _split_cutout(w: int, h: int, seed: int, kind: str = "RGBA") -> bytes:
     return buf.getvalue()
 
 
+def _exif_picture(w: int, h: int, seed: int, orientation: int, fmt: str) -> bytes:
+    """A deterministic RGB picture stored w × h with an EXIF orientation tag
+    (R3.7 fix round 1: a phone photo), as a JPEG or a PNG (its eXIf chunk)."""
+    import io
+    from PIL import Image
+    rng = random.Random(seed)
+    img = Image.frombytes("RGB", (w, h), bytes(rng.randrange(256) for _ in range(w * h * 3)))
+    exif = Image.Exif()
+    exif[0x0112] = orientation
+    buf = io.BytesIO()
+    img.save(buf, format=fmt, exif=exif, **({"quality": 95} if fmt == "JPEG" else {}))
+    return buf.getvalue()
+
+
 def split_group() -> dict:
     """R3.7: Separate background and foreground (SplitPhotoLayersNode). The
     remover's cut-out (alpha → the mask, grown by PIL's MaxFilter), then the
@@ -1161,9 +1187,9 @@ def split_group() -> dict:
     W, H = 48, 36
 
     def split(name, fill="LaMa (fast)", grow=12, mode="RGB", size=(W, H), cutout=None, background=None,
-              answers=None, seed=300):
+              answers=None, seed=300, picture=None):
         w, h = size
-        pic = png_bytes(w, h, seed, mode)
+        pic = picture if picture is not None else png_bytes(w, h, seed, mode)
         files = {SPLIT_CUTOUT: _b64(cutout if cutout is not None else _split_cutout(w, h, seed + 1)),
                  SPLIT_BACKGROUND: _b64(background if background is not None else png_bytes(w, h, seed + 2, "RGBA"))}
         cases.append(paid_case(f"split · {name}", nr.SplitPhotoLayersNode, {"background_fill": fill, "mask_grow": grow},
@@ -1188,6 +1214,10 @@ def split_group() -> dict:
                               ("I;16", "16-bit grey", grey16_png_bytes(W, H, 443))):
         split(f"a background in {label}", background=data, seed=440)
     split("answers the other way round (a list, then a string)", answers=[{"output": [SPLIT_CUTOUT]}, {"output": SPLIT_BACKGROUND}], seed=455)
+    # Fix round 1: phone photos, EXIF turned by the loader (Python's picture is the turned one; the remover
+    # answers in that shape). Stored 36 × 48 with orientation 6 (turned to 48 × 36), and 48 × 36 with 3 (180°).
+    split("an EXIF-6 JPEG from the loader", picture=_exif_picture(H, W, 480, 6, "JPEG"), seed=480)
+    split("an EXIF-3 PNG from the loader", fill="Bria Eraser (quality)", grow=1, picture=_exif_picture(W, H, 485, 3, "PNG"), seed=485)
     split("a cut-out answer with no output", answers=[{"output": None}], seed=460)
     split("a background answer with no output", answers=[{"output": SPLIT_CUTOUT}, {"output": []}], seed=470)
 
