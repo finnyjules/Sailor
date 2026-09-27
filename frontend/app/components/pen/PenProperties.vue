@@ -15,12 +15,14 @@
 //
 // Each host places it in its own side panel while the pen is open; it
 // assumes nothing about its position and fills the width it is given.
+// While Repeat… is open, the Repeat panel takes the body (pen stage 8).
 import { computed, ref, watch, onBeforeUnmount, toRaw } from 'vue'
 import type { Pen } from '~/composables/pen/usePen'
 import type { ActionState } from '~/composables/pen/penReasons'
 import type { PenMenuItem } from '~/composables/pen/penActions'
 import PenTipCard from '~/components/pen/PenTipCard.vue'
 import PenNumberInput from '~/components/pen/PenNumberInput.vue'
+import PenRepeatPanel from '~/components/pen/PenRepeatPanel.vue'
 import { TooltipProvider } from '~/components/ui/tooltip'
 import { pieceIndex, pieceNames, rulesForSelection, ruleLabel, rulePieces, selectionLabel, type PieceRef } from '~/lib/sketch/pieces'
 import { sizeTargetFor, measureSizes } from '~/lib/sketch/sizes'
@@ -30,7 +32,7 @@ import { Lock, LockOpen, Plus, X } from 'lucide-vue-next'
 defineOptions({ inheritAttrs: false })
 const props = defineProps<{ pen: Pen }>()
 const {
-  doc, view, status, selection, selectedSegments, cleanup, docRevision, availableConstraints, ruleItems, runAction, checkRuleItem,
+  doc, view, status, selection, selectedSegments, cleanup, repeat, docRevision, availableConstraints, ruleItems, runAction, checkRuleItem,
   setHighlight, removeConstraintById, setPointXY, setLineLength, setLineAngle,
   setArcRadiusValue, setArcLength, setArcSweep, toggleArcRadiusLock, setCircleRadius, toggleCircleRadiusLock,
 } = props.pen
@@ -151,6 +153,8 @@ function toggleLock() {
 <template>
   <TooltipProvider :delay-duration="350" :skip-delay-duration="600" disable-hoverable-content>
     <div v-bind="$attrs" data-pen-properties class="pen-props" :inert="!!cleanup" :class="{ previewing: !!cleanup }">
+      <PenRepeatPanel v-if="repeat" :pen="pen" />
+      <template v-else>
       <div class="head" data-props-header>{{ header }}</div>
 
       <div v-if="rows.length" class="sizes">
@@ -200,6 +204,7 @@ function toggleLock() {
           </div>
         </template>
       </div>
+      </template>
     </div>
   </TooltipProvider>
 </template>

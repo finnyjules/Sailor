@@ -61,6 +61,7 @@ import { handlePenKey, isCleanupKey, type PenKeyContext, NUDGE_PX, NUDGE_PX_SHIF
 import { createPenCopies, type PendingOp } from './penCopies'
 import { createPenCorners } from './penCorners'
 import { createPenOffset } from './penOffset'
+import { createPenRepeat, type RepeatPatch, type RepeatTarget } from './penRepeat'
 import { nearestCurve, spanAt, curveGeom, paramOf, pointAt, type Span, type CurveGeom } from '~/lib/sketch/crossings'
 import { removeSpan, removeSegment, cutAt, canDissolve, dissolveAt, mergePoints, sameKey } from '~/lib/sketch/trim'
 import { FILL_GAP_PX, fillTarget, toggleFillAt, fillState, gapMarkers, reconcileFills, withoutFills } from '~/lib/sketch/fills'
@@ -475,6 +476,7 @@ export function usePen(opts: {
   const docRevision = penHistory.rev
   function undo() {
     closeMenus()
+    if (repeat.value) { cancelRepeat(); return }   // the Repeat panel open: undo only closes it
     dropPreviews()   // before the guard: ⌘Z with nothing to undo still drops a preview
     // with a Clean up preview open, undo only closes it (as ⌘Z does) — it
     // never also steps back over the drawing under the preview
@@ -496,6 +498,7 @@ export function usePen(opts: {
   }
   function redo() {
     closeMenus()
+    if (repeat.value) { cancelRepeat(); return }   // likewise
     dropPreviews()
     if (cleanup.value) { cancelCleanup(); return }   // likewise: only closes the preview
     if (trimPress) trimUp()
@@ -533,6 +536,12 @@ export function usePen(opts: {
     // a Clean up preview owns the keys (cleanupKey)
     if (cleanup.value) {
       const handled = cleanupKey(ev)
+      if (handled) { ev.preventDefault(); ev.stopPropagation() }
+      return handled
+    }
+    // the Repeat panel owns the keys while it is open (penRepeat.key)
+    if (repeat.value) {
+      const handled = penRepeat.key(ev)
       if (handled) { ev.preventDefault(); ev.stopPropagation() }
       return handled
     }
@@ -2025,9 +2034,9 @@ export function usePen(opts: {
     trimGhosts.value = []
   }
 
-  // --- Repeat / Mirror / Flip: see penCopies.ts. doRepeat and repeatPrompt
-  // (the inline-value-request entry points — requestValue, above) stay here
-  // and call into it.
+  // --- Repeat / Mirror / Flip: see penCopies.ts. doRepeat (the test hooks'
+  // fast path) stays here and calls into it; Repeat… itself opens the Repeat
+  // panel (penRepeat.ts, pen stage 8).
   const penCopies = createPenCopies({ doc, selection, pendingOp, status, clearSel, runSolve, commitHistory })
   const { applyRepeat, applyMirror, armRepeat, doMirror, flip } = penCopies
 
@@ -2056,9 +2065,21 @@ export function usePen(opts: {
   function offsetUp() { penOffset.up() }
   function applyOffsetTool(): boolean { return penOffset.apply() }
   function cancelOffset(): void { penOffset.cancel(false) }
+  // --- the Repeat… panel (pen stage 8): see penRepeat.ts — overlay-only
+  // preview, Apply is one step, anything else drops it untouched
+  const penRepeat = createPenRepeat({
+    doc, view: opts.view, status, selection, docRevision, commitHistory, runSolve,
+    clearSel: () => { clearSel(); clearSegSel() }, closeMenus,
+  })
+  const repeat = penRepeat.state, repeatHint = penRepeat.hint, repeatNames = penRepeat.names
+  function setRepeat(patch: RepeatPatch): void { penRepeat.set(patch) }
+  function repeatPick(t: RepeatTarget): void { penRepeat.pick(t) }
+  function applyRepeatPanel(): boolean { return penRepeat.apply() }
+  function cancelRepeat(): void { penRepeat.cancel() }
   // every overlay-only preview dropped untouched — a tool change, undo / redo,
-  // reset, revert, finishing, parking, dispose, opening Clean up
-  function dropPreviews(): void { penCorners.cancel(false); penOffset.cancel(false) }
+  // reset, revert, finishing, parking, dispose, opening Clean up (and the
+  // Repeat panel with it; repeatPrompt drops before it opens one)
+  function dropPreviews(): void { penCorners.cancel(false); penOffset.cancel(false); penRepeat.cancel(false) }
   // kept for the test hook / fast path: exact-selection repeat (1 point + units)
   function doRepeat(count: number) {
     const ptSel = selection.value.filter(id => isPointId(id))
@@ -2066,17 +2087,14 @@ export function usePen(opts: {
     if (ptSel.length !== 1 || entSel.length === 0) return
     applyRepeat(entSel, ptSel[0]!, count)
   }
-  async function repeatPrompt() {
-    const ptSel = selection.value.filter(id => isPointId(id))
-    const entSel = selection.value.filter(id => !ptSel.includes(id))
-    if (entSel.length === 0) { status.value = 'Select a shape first, then Repeat…'; return }
-    const count = await requestValue('Copies around the ring', 6, 2)
-    if (count == null) return
-    if (!Number.isFinite(count) || count < 2) { status.value = 'Repeat needs a count of 2 or more'; return }
-    // fast path: a center point is already part of the selection
-    if (ptSel.length === 1) { applyRepeat(entSel, ptSel[0]!, count); return }
-    // guided: arm the center pick
-    armRepeat(entSel, count)
+  // Repeat… (rules row, menu, wheel): opens the Repeat panel on the
+  // selection's shapes (pen stage 8, Ruling 12) — no count is asked
+  function repeatPrompt(): boolean {
+    closeMenus()
+    if (cleanup.value || repeat.value) return false
+    settleLive()
+    dropPreviews()
+    return penRepeat.open()
   }
   function makeConstruction() {
     for (const id of selection.value) {
@@ -2378,7 +2396,7 @@ export function usePen(opts: {
   const menu = shallowRef<PenMenu | null>(null)
   const wheel = shallowRef<PenWheel | null>(null)
   function openMenu(at: Vec2, drawingAt: Vec2 | null): void {
-    if (cleanup.value) return
+    if (cleanup.value || repeat.value) return
     wheel.value = null
     menu.value = { at, drawingAt, ...menuFor(actionHost), active: null }
   }
@@ -2467,7 +2485,7 @@ export function usePen(opts: {
     return true   // every other plain key is swallowed while the menu is open
   }
   function openWheel(at: Vec2): boolean {
-    if (cleanup.value) return false
+    if (cleanup.value || repeat.value) return false
     const w = wheelFor(actionHost)
     if (!w) return false
     menu.value = null
@@ -2496,7 +2514,7 @@ export function usePen(opts: {
   // X / ⇧H / ⇧V / ⌘C / ⌘V / ⌘A (penKeys.ts): the pen's only when the action
   // can act now — else false, and the key is left to the host
   function runKeyAction(id: string): boolean {
-    if (cleanup.value || !ACTIONS[id] || !quickState(id).ok) return false
+    if (cleanup.value || repeat.value || !ACTIONS[id] || !quickState(id).ok) return false
     settleAndRun(id, null)
     return true
   }
@@ -2507,7 +2525,7 @@ export function usePen(opts: {
   // `keepSelection`: a rule added keeps the selection (Properties' + list —
   // the new rule then shows in the list it was added from).
   function runAction(id: string, at: Vec2 | null = null, opts: { prechecked?: boolean; keepSelection?: boolean } = {}): boolean {
-    if (cleanup.value) return false
+    if (cleanup.value || repeat.value) return false
     const q = quickState(id)
     if (!q.ok) { status.value = q.reason; return false }
     closeMenus()
@@ -2561,7 +2579,7 @@ export function usePen(opts: {
   }
   function startCleanup(): void {
     closeMenus()
-    if (!cleanupAllowed || cleanup.value) return
+    if (!cleanupAllowed || cleanup.value || repeat.value) return
     dropPreviews()   // a corner preview is dropped, never applied
     finishSession()   // every live gesture settles first (its own step, if it changed anything); the selection is kept
     const picked = selection.value.length > 0 || selectedSegments.value.length > 0
@@ -3059,6 +3077,8 @@ export function usePen(opts: {
     // round corner / chamfer (pen stage 8)
     cornerView, cornerHover, cornerMove, cornerDown, cornerUp, applyCorners, cancelCorners,
     offsetView, offsetHover, offsetMove, offsetDown, offsetUp, applyOffsetTool, cancelOffset,
+    // the Repeat… panel (pen stage 8; repeatPrompt, below, opens it)
+    repeat, repeatHint, repeatNames, setRepeat, repeatPick, applyRepeatPanel, cancelRepeat,
     // verbs
     runSolve, apply, applyWithValue, applyTangent, availableConstraints, orderRefs, del, nudge, fixSelected, makeConstruction, flip,
     repeatPrompt, armRepeat, doRepeat, applyRepeat, doMirror, applyMirror, cancelPendingOp,
@@ -3096,7 +3116,9 @@ export function isTypingInField(): boolean {
 }
 
 /** True while focus is inside Clean up's strength / Cancel / Apply bar
- *  (`[data-cleanup-bar]`) — Space then presses the focused control, so a
+ *  (`[data-cleanup-bar]`), or inside the Repeat panel (`[data-repeat-panel]`,
+ *  pen stage 8) — its buttons never take focus from a mouse press, so a
+ *  focused one got there by keyboard — Space then presses the focused control, so a
  *  host's hold-Space-to-pan must leave Space alone. Nowhere else: a pen tool
  *  button a mouse click left focused keeps Space-to-pan (`:focus-visible`
  *  can't tell, it turns true on the first keydown). Reads `document` only
@@ -3104,5 +3126,5 @@ export function isTypingInField(): boolean {
 export function isCleanupBarFocused(): boolean {
   if (typeof document === 'undefined') return false
   const el = document.activeElement as HTMLElement | null
-  return !!el?.closest?.('[data-cleanup-bar]')
+  return !!el?.closest?.('[data-cleanup-bar], [data-repeat-panel]')
 }

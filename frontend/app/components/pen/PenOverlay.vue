@@ -107,6 +107,7 @@ const {
   fillHover, fillMove, fillClick, fillView, docRevision,
   cornerView, cornerHover, cornerMove, cornerDown, cornerUp, cancelCorners,
   offsetView, offsetHover, offsetMove, offsetDown, offsetUp, cancelOffset,
+  repeat: repeatSession, repeatPick,
 } = props.pen
 
 const svgEl = ref<SVGSVGElement | null>(null)
@@ -557,6 +558,9 @@ const cornerChip = computed(() => {
 // drawing space; the distance chip in screen space. Only the overlay reads
 // the preview; the drawing is untouched until Apply.
 const offsetShown = computed(() => (cleanupSession.value ? null : offsetView.value))
+// ---------- the Repeat panel's preview (pen stage 8) ----------
+// the copies' outline (drawing space) and the ring's centre (screen space)
+const repeatCentreScreen = computed(() => (repeatSession.value?.preview.centre ? toScreen(repeatSession.value.preview.centre) : null))
 const offsetHoverD = computed(() => (tool.value === 'offset' && !offsetShown.value ? offsetHover.value : null))
 const offsetChip = computed(() => {
   const v = offsetShown.value
@@ -803,7 +807,7 @@ function startRightPress(ev: PointerEvent, target: RightTarget | null): void {
   // the pen's press: the svg's own handler (bubbling) and the host never see it
   ev.stopPropagation()
   ev.preventDefault()
-  if (cleanupSession.value) return
+  if (cleanupSession.value || repeatSession.value) return
   settleOverlayGesture()
   settledRightId = null
   if (tool.value === 'select' && target && !isPicked(target)) {
@@ -856,6 +860,12 @@ function onEntityPointerDown(id: EntityId, ev: PointerEvent) {
   dropStaleRightPress()
   if (!props.active || ev.button !== 0 || isCtrlContextClick(ev)) return
   if (cleanupSession.value) return   // a Clean up preview: only its badges take clicks
+  // the Repeat panel: a line or a circle is the path to repeat along
+  if (repeatSession.value) {
+    const k = entityKind(id)
+    if (k === 'line' || k === 'circle') repeatPick({ kind: 'piece', ref: { kind: k, id } })
+    ev.stopPropagation(); return
+  }
   // guided Mirror: a line click supplies the axis
   if (tool.value === 'select' && pendingOp.value?.kind === 'mirror' && (doc.value.entities.find(e => e.id === id) as any)?.kind === 'line') {
     applyMirror(pendingOp.value.units, id)
@@ -869,6 +879,11 @@ function onPointerDownPoint(id: EntityId, ev: PointerEvent) {
   settleArcPress()
   if (isRightPress(ev)) { startRightPress(ev, { kind: 'point', id }); return }
   dropStaleRightPress()
+  // the Repeat panel: this point is the ring's centre
+  if (repeatSession.value) {
+    if (props.active && ev.button === 0 && !isCtrlContextClick(ev)) { repeatPick({ kind: 'point', id }); ev.stopPropagation() }
+    return
+  }
   if (!props.active || ev.button !== 0 || isCtrlContextClick(ev) || tool.value !== 'select') return
   if (cleanupSession.value) return
   // guided Repeat: this point is the ring center
@@ -895,6 +910,11 @@ function onSegmentPointerDown(pathId: EntityId, segIndex: number, ev: PointerEve
   settleArcPress()
   if (isRightPress(ev)) { startRightPress(ev, { kind: 'seg', pathId, segIndex }); return }
   dropStaleRightPress()
+  // the Repeat panel: this piece's path is the one to repeat along
+  if (repeatSession.value) {
+    if (props.active && ev.button === 0 && !isCtrlContextClick(ev)) { repeatPick({ kind: 'piece', ref: { kind: 'seg', pathId, segIndex } }); ev.stopPropagation() }
+    return
+  }
   if (!props.active || ev.button !== 0 || isCtrlContextClick(ev) || tool.value !== 'select') return
   if (cleanupSession.value) return
   // guided ops treat a path-body click as picking the whole path (the unit)
@@ -918,6 +938,8 @@ function onPointerDownSvg(ev: PointerEvent) {
   dropStaleRightPress()
   if (!props.active || ev.button !== 0 || isCtrlContextClick(ev)) return
   if (cleanupSession.value) return
+  // the Repeat panel: empty space is a new centre there
+  if (repeatSession.value) { const w = drawingXY(ev); if (w) repeatPick({ kind: 'empty', at: w }); return }
   if (tool.value === 'select') {
     // guided Repeat with an empty-canvas click: drop a fresh FIXED center
     // where they clicked and repeat around it. Mirror needs a real line, so
@@ -954,7 +976,7 @@ function onPointerDownSvg(ev: PointerEvent) {
 function onPointerMove(ev: PointerEvent) {
   if (!props.active) return
   if (rightPress && ev.pointerId === rightPress.pointerId) { rightPressMove(ev); return }
-  if (cleanupSession.value) return
+  if (cleanupSession.value || repeatSession.value) return
   if (marqueeStart) {
     if (ev.buttons === 0) return   // button released off-canvas — pointerup/leave settles it
     const { x, y } = localXY(ev)
@@ -1177,7 +1199,8 @@ function handleKeydownEvent(ev: KeyboardEvent): boolean {
   // a Clean up preview owns the keys (usePen's cleanupKey) ahead of the
   // focused-control rule: Enter applies even while a toolbar button (the
   // Clean up button just clicked) has focus
-  if (cleanupSession.value) return props.pen.onKeydown(ev)
+  // …and so does the Repeat panel (pen stage 8, penRepeat.key)
+  if (cleanupSession.value || repeatSession.value) return props.pen.onKeydown(ev)
   // pen stage 6: an open menu or wheel owns the keys (arrows, Tab, Home / End,
   // Enter, Escape), ahead of the focused-control rule — Enter runs the
   // highlighted item even while a toolbar button has focus, Escape closes it
@@ -1352,6 +1375,17 @@ defineExpose({
     <g v-if="offsetChip" pointer-events="none" data-offset-chip>
       <rect :x="offsetChip.x" :y="offsetChip.y" :width="offsetChip.w" height="14" rx="3" fill="#111827" opacity="0.85" />
       <text :x="offsetChip.x + 4" :y="offsetChip.y + 11" fill="#e5e7eb" font-size="10" font-family="ui-monospace, monospace">{{ offsetChip.text }}</text>
+    </g>
+    <!-- the Repeat panel: the copies (the drawing is untouched until Apply)
+         and the ring's centre -->
+    <g v-if="repeatSession && repeatSession.preview.d" :transform="svgTransform" pointer-events="none">
+      <path :d="repeatSession.preview.d" fill="none" stroke="#6366f1" stroke-width="1.5" opacity="0.85"
+            vector-effect="non-scaling-stroke" data-repeat-preview />
+    </g>
+    <g v-if="repeatCentreScreen" pointer-events="none" data-repeat-centre>
+      <circle :cx="repeatCentreScreen.x" :cy="repeatCentreScreen.y" r="6" fill="none" stroke="#6366f1" stroke-width="1.5" />
+      <path :d="`M ${repeatCentreScreen.x - 9} ${repeatCentreScreen.y} H ${repeatCentreScreen.x + 9} M ${repeatCentreScreen.x} ${repeatCentreScreen.y - 9} V ${repeatCentreScreen.y + 9}`"
+            stroke="#6366f1" stroke-width="1.5" />
     </g>
     <!-- Fill: the area under the pointer, hatched (indigo: a click fills it;
          red: it is filled and a click empties it) -->

@@ -17,6 +17,7 @@ import PenTipCard from '~/components/pen/PenTipCard.vue'
 import { TooltipProvider } from '~/components/ui/tooltip'
 import { PEN_TIPS } from '~/composables/pen/penTips'
 import { STRENGTHS, type CleanupStrength } from '~/lib/sketch/cleanup'
+import { REPEAT_HINT_READY } from '~/composables/pen/penRepeat'
 import {
   MousePointer2, Spline, PenTool as PenNib, Minus, Circle, Dot,
   CircleDashed, Tag, Undo2, Redo2, Scissors, Slice, Bandage, WandSparkles, PaintBucket,
@@ -42,6 +43,7 @@ const {
   flip, makeConstruction, del, finishPath, cancelPendingOp,
   undo, redo, canUndo, canRedo, finishSession,
   cleanup, toggleCleanup, applyCleanup, cancelCleanup, setCleanupStrength,
+  repeat, repeatHint,
 } = props.pen
 
 function done() {
@@ -100,8 +102,9 @@ const isSelectIdle = computed(() => tool.value === 'select' && !hasAnySelection.
 
 // Clean up (pen stage 5): while its preview is open the rules row hides, the
 // tool row is disabled except Clean up itself, and the hint row becomes the
-// strength / Cancel / Apply bar
-const previewing = computed(() => !!cleanup.value)
+// strength / Cancel / Apply bar. The Repeat panel (pen stage 8) previews the
+// same way: the rows are off (Clean up too) and the hint row says what to click.
+const previewing = computed(() => !!cleanup.value || !!repeat.value)
 const STRENGTH_LABEL: Record<CleanupStrength, string> = { gentle: 'Gentle', normal: 'Normal', strong: 'Strong' }
 const cleanupHasOn = computed(() => !!cleanup.value?.result.fixes.some(f => f.on))
 const cleanupNote = computed(() => {
@@ -162,7 +165,7 @@ watch(previewing, (open) => {
         </button>
       </PenTipCard>
       <PenTipCard v-if="options.cleanup" id="cleanup">
-        <button class="tbtn icon toggle" data-act="cleanup" :aria-pressed="previewing" aria-label="Clean up"
+        <button class="tbtn icon toggle" data-act="cleanup" :aria-pressed="!!cleanup" :disabled="!!repeat" aria-label="Clean up"
                 @click="toggleCleanup()">
           <WandSparkles :size="16" />
         </button>
@@ -229,6 +232,7 @@ watch(previewing, (open) => {
           <button class="hint-btn primary" data-act="cleanup-apply" aria-label="Apply" :disabled="!cleanupHasOn" @click="applyCleanup()">Apply</button>
         </PenTipCard>
       </div>
+      <div v-else-if="repeat" data-repeat-hint class="hint">{{ repeatHint ?? REPEAT_HINT_READY }}</div>
       <div v-else-if="opHint" data-op-hint class="hint">
         <span>{{ opHint }}</span>
         <button class="hint-cancel" data-act="op-cancel" @click="cancelPendingOp()">Cancel (Esc)</button>

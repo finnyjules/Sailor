@@ -1,10 +1,10 @@
 // app/composables/pen/penCopies.ts
 // Repeat / Mirror / Flip — split out of usePen.ts verbatim (see usePen.ts's
 // HOST CONTRACT comment for the pen's overall contract). armRepeat/doMirror
-// arm `pendingOp` (the guided center/axis pick); usePen.ts's own doRepeat and
-// repeatPrompt (which asks for the count via usePen.ts's inline
-// requestValue, not a browser prompt) stay behind and call into this
-// module's applyRepeat/armRepeat.
+// arm `pendingOp` (the guided center/axis pick); usePen.ts's own doRepeat
+// stays behind and calls into this module's applyRepeat. Repeat… opens the
+// Repeat panel (penRepeat.ts, pen stage 8); armRepeat is kept for the
+// __sketchDraw.armRepeat test hook.
 import { toRaw, type Ref } from 'vue'
 import type { SketchDoc, EntityId } from '~/lib/sketch/model'
 import { repeatEntities, mirrorEntities, pointClosure } from '~/lib/sketch/edit'
@@ -42,7 +42,7 @@ export function createPenCopies(ctx: PenCopiesContext) {
     ctx.status.value = 'Mirrored'
   }
   // arm the guided center-pick for the given units + count (no prompt). Used by
-  // repeatPrompt's guided branch and the __sketchDraw.armRepeat test hook.
+  // the __sketchDraw.armRepeat test hook.
   function armRepeat(units: EntityId[], count: number) {
     if (!units.length || !Number.isFinite(count) || count < 2) return
     ctx.pendingOp.value = { kind: 'repeat', units: [...units], count }

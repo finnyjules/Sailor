@@ -1363,11 +1363,10 @@ test('guided Repeat: arm via Repeat verb, then a center-point click builds the r
   await expect(page.locator('[data-op-hint]')).toHaveCount(0)
 })
 
-test('inline value request: the real Repeat… button shows a toolbar input; typing a count and Enter arms the ring (no window.prompt)', async ({ page }) => {
+test('the real Repeat… button opens the Repeat panel beside the canvas; a click on empty space picks the centre; Apply makes the ring', async ({ page }) => {
   await page.goto('/dev/sketch-draw')
   await page.waitForSelector('[data-ready]')
   await page.waitForFunction(() => !!(window as any).__sketchDraw)
-
   await page.evaluate(() => {
     const D = (window as any).__sketchDraw
     D.reset()
@@ -1376,21 +1375,15 @@ test('inline value request: the real Repeat… button shows a toolbar input; typ
     D.setTool('select')
     D.pick(circle.id)
   })
-
-  // the real toolbar button — no window.prompt dialog to auto-dismiss
   await page.locator('[data-verb="repeat"]').click()
-  const input = page.locator('[data-testid="pen-value-input"]')
-  await expect(input).toBeVisible()
-  await expect(input).toBeFocused()
-
-  // real keystrokes: select the seeded default, type 5, commit with Enter
-  await page.keyboard.press('ControlOrMeta+A')
-  await page.keyboard.type('5')
-  await page.keyboard.press('Enter')
-
-  await expect(input).toHaveCount(0)   // the value row closes once resolved
-  const op = await page.evaluate(() => (window as any).__sketchDraw.pendingOp())
-  expect(op?.kind).toBe('repeat')
+  await expect(page.locator('[data-repeat-panel]')).toBeVisible()
+  await expect(page.locator('[data-testid="pen-value-input"]')).toHaveCount(0)
+  const b = (await page.locator('svg[data-pen-overlay]').boundingBox())!
+  await page.mouse.click(b.x + 40 + 34 * 8, b.y + 400 - 34 * 6)     // empty space at (8, 6)
+  await expect(page.locator('[data-repeat-preview]')).toHaveCount(1)
+  await page.locator('[data-act="repeat-apply"]').click()
+  await expect(page.locator('[data-repeat-panel]')).toHaveCount(0)
+  expect(await page.evaluate(() => (window as any).__sketchDraw.doc.entities.filter((e: any) => e.kind === 'circle').length)).toBe(6)
 })
 
 test('segment verbs: reject arc segments at the mutation layer (no constraint added)', async ({ page }) => {

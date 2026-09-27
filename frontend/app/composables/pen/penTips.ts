@@ -70,6 +70,17 @@ export const PEN_TIPS: Record<string, PenTip> = {
     caption: 'Closes Clean up and leaves the drawing as it was.' },
   'cleanup-strength': { name: 'Strength',
     caption: 'How far Clean up reaches: Gentle fixes only what is very close, Strong reaches further.' },
+  // the Repeat panel (pen stage 8)
+  'repeat-radial': { name: 'Radial',
+    caption: 'Copies round a centre: click a point, or empty space for a new one. A sweep under 360° spreads them over part of the turn.' },
+  'repeat-linear': { name: 'Linear',
+    caption: 'Copies in a row at an angle. They follow a dashed guide: drag its end later to change the gap or the angle.' },
+  'repeat-along': { name: 'Along a path',
+    caption: 'Copies spread evenly along a path you click, from its start. They are placed once and don’t follow later changes.' },
+  'repeat-spacing': { name: 'Step or span',
+    caption: 'Step: the distance from one copy to the next. Span: the distance from the original to the last copy.' },
+  'repeat-apply': { name: 'Apply', key: '↵', caption: 'Makes the copies, as one step.' },
+  'repeat-cancel': { name: 'Cancel', key: 'Esc', caption: 'Closes Repeat and leaves the drawing as it was.' },
 
   // ── rules (keyed by the rule kind availableConstraints offers, or its
   //    `tip` where the kind alone would name another card) ──
@@ -114,7 +125,7 @@ export const PEN_TIPS: Record<string, PenTip> = {
   fix: { name: 'Fix',
     caption: 'Pins the selected points where they are; rules and drags leave them in place.' },
   repeat: { name: 'Repeat…',
-    caption: 'Copies the selection around a ring. Type how many, then click the centre.' },
+    caption: 'Repeats the selection round a centre, in a row, or along a path. Set it up in the panel; the copies show first and are made when you apply.' },
   mirror: { name: 'Mirror…',
     caption: 'Copies the selection across a line. Pick the line; the copy follows the original.' },
   'flip-h': { name: 'Flip horizontal', key: '⇧H',

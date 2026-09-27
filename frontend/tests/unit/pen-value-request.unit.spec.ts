@@ -12,17 +12,15 @@ function mk() {
 }
 
 describe('inline value requests', () => {
-  it('Repeat… asks for a count and repeats on submit', async () => {
+  it('Repeat… opens the Repeat panel — no count is asked', () => {
     const { doc, pen } = mk()
     pen.selectTool('circle'); pen.place(0, 0); pen.place(1, 0)
     pen.selectTool('select')
     const circle = doc.value.entities.find(e => e.kind === 'circle')!
     pen.pick(circle.id)
-    const done = pen.repeatPrompt()
-    expect(pen.valueRequest.value?.label).toMatch(/copies/i)
-    pen.submitValue(4)
-    await done
-    expect(pen.pendingOp.value?.kind).toBe('repeat')
+    expect(pen.repeatPrompt()).toBe(true)
+    expect(pen.valueRequest.value).toBeNull()
+    expect(pen.repeat.value?.mode).toBe('radial')
   })
   it('cancel resolves with nothing applied', async () => {
     const { doc, pen } = mk()

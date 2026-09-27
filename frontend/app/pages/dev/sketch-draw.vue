@@ -328,6 +328,12 @@ onMounted(() => {
       const v = pen.offsetView.value
       return v ? { d: v.d, typed: v.typed, ok: v.ok, chains: v.chains.length } : null
     },
+    // …and the Repeat panel's (never change it; `repeat` above is the old
+    // set-up hook that makes a ring directly)
+    repeatPanel: () => {
+      const s = pen.repeat.value
+      return s ? { mode: s.mode, count: s.count, ok: s.preview.ok, centre: s.centre, along: s.along } : null
+    },
   }
   ready.value = true
   window.addEventListener('keydown', onKeydown, { capture: true })
