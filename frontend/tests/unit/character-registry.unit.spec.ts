@@ -142,7 +142,9 @@ describe('healRefImages across states', () => {
     expect(healed.states[0]!.refImages).toEqual(['b.png'])
     expect(healed.states[0]!.coverIndex).toBe(0)
     expect(healed.states[1]!.refImages).toEqual([])
-    expect(dropped).toBe(2)
+    // 2 from refImages, plus 2 more from the derived character-level photos
+    // (union of every state's refs) that also vanish — a.png and c.png.
+    expect(dropped).toBe(4)
   })
 })
 
@@ -194,7 +196,10 @@ describe('three-era migration', () => {
       }],
     }), 'cal')!
     const { record, dropped } = healRefImages(rec, f => !f.startsWith('gone'))
-    expect(dropped).toBe(3)
+    // 3 from this state's own refs/panel/sheet, plus 2 more from the derived
+    // character-level photos and face (both built from this same state's
+    // refs, since no top-level photos/face were stored) also vanishing.
+    expect(dropped).toBe(5)
     const s = record.states[0]!
     expect(s.refImages).toEqual(['a.png'])
     expect(s.panels).toEqual([{ slot: 'portrait', filename: 'p.png' }])
@@ -248,5 +253,74 @@ describe('rework field hygiene', () => {
     expect(s.clothes).toEqual([])
     expect(s.face).toBeNull()
     expect(s.panels[0]!.check ?? null).toBeNull()
+  })
+})
+
+describe('read-time conversion for the rework', () => {
+  const era2 = JSON.stringify({
+    name: 'Jene',
+    variants: [
+      { id: 'default', label: 'Default', refImages: ['a.png', 'b.png'], coverIndex: 1 },
+      { id: 'wet', label: 'Wet', refImages: ['b.png', 'c.png'], coverIndex: 0 },
+    ],
+  })
+  it('builds character photos from every look, default first, without duplicates', () => {
+    const r = parseCharacterRecord(era2, 'jene')!
+    expect(r.photos.map(p => p.filename)).toEqual(['a.png', 'b.png', 'c.png'])
+    expect(r.photos.every(p => p.check === null)).toBe(true)
+  })
+  it('takes the face from the default look\'s cover', () => {
+    expect(parseCharacterRecord(era2, 'jene')!.face).toEqual({ filename: 'b.png', approvedAt: '' })
+  })
+  it('defaults origin to photos, likeness unconfirmed, no voice, photo style, not linked', () => {
+    const r = parseCharacterRecord(era2, 'jene')!
+    expect(r.origin).toBe('photos')
+    expect(r.likenessConfirmed).toBe(false)
+    expect(r.voice).toBeNull()
+    expect(r.style).toBe('photo')
+    expect(r.linkedFrom).toBeNull()
+  })
+  it('keeps an anime style and a valid link, drops a junk link', () => {
+    const anime = parseCharacterRecord(JSON.stringify({ name: 'Aiko', style: 'anime', linkedFrom: 'reva', states: [] }), 'aiko')!
+    expect(anime.style).toBe('anime')
+    expect(anime.linkedFrom).toBe('reva')
+    const junk = parseCharacterRecord(JSON.stringify({ name: 'X', style: 'watercolour', linkedFrom: '../evil', states: [] }), 'x')!
+    expect(junk.style).toBe('photo')
+    expect(junk.linkedFrom).toBeNull()
+  })
+  it('keeps stored rework fields as they are', () => {
+    const r = parseCharacterRecord(JSON.stringify({
+      name: 'Maren', origin: 'described', likenessConfirmed: false,
+      face: { filename: 'f.png', approvedAt: '2026-09-27T00:00:00.000Z' },
+      photos: [{ filename: 'f.png', check: { verdict: 'match', score: 100, against: 'f.png', at: 't' } }],
+      voice: { kind: 'stock', id: 'warm', label: 'Warm, low' },
+      states: [{ id: 'default', label: 'Everyday', refImages: [] }],
+    }), 'maren')!
+    expect(r.origin).toBe('described')
+    expect(r.face!.filename).toBe('f.png')
+    expect(r.photos[0]!.check!.verdict).toBe('match')
+    expect(r.voice!.id).toBe('warm')
+  })
+  it('a character with no photos at all has no face', () => {
+    const r = parseCharacterRecord(JSON.stringify({ name: 'X', states: [{ id: 'default', label: 'D', refImages: [] }] }), 'x')!
+    expect(r.face).toBeNull()
+    expect(r.photos).toEqual([])
+  })
+})
+
+describe('healRefImages for rework fields', () => {
+  it('drops vanished photos, clothes and faces', () => {
+    const r = parseCharacterRecord(JSON.stringify({
+      name: 'R', face: { filename: 'gone-face.png', approvedAt: '' },
+      photos: [{ filename: 'keep.png' }, { filename: 'gone.png' }],
+      states: [{ id: 'default', label: 'D', refImages: ['keep.png'],
+        clothes: [{ id: 'g', filename: 'gone-coat.png', name: 'Coat' }], face: { filename: 'gone-look.png', approvedAt: '' } }],
+    }), 'r')!
+    const { record, dropped } = healRefImages(r, f => f === 'keep.png')
+    expect(record.photos.map(p => p.filename)).toEqual(['keep.png'])
+    expect(record.face).toBeNull()
+    expect(record.states[0]!.clothes).toEqual([])
+    expect(record.states[0]!.face).toBeNull()
+    expect(dropped).toBe(4)
   })
 })

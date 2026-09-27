@@ -14,7 +14,7 @@
 import type {
   BodySliderId, Check, CharacterPanel, CharacterRecord, CharacterState, FaceBox, FaceRef, Garment, MadeFrom, Photo, StressResult, VoiceRef,
 } from '#shared/characters/types'
-import { BODY_SLIDERS, emptyState } from '#shared/characters/types'
+import { BODY_SLIDERS, coverFirstRefs, emptyState } from '#shared/characters/types'
 
 export type { CharacterRecord, CharacterState }
 export { defaultState } from '#shared/characters/types'
@@ -179,17 +179,31 @@ export function parseCharacterRecord(raw: string, slug: string): CharacterRecord
     states = [...states.filter(v => v.id === 'default'), ...states.filter(v => v.id !== 'default')]
   }
 
+  const storedPhotos = Array.isArray(r.photos)
+    ? (r.photos as unknown[]).map(photoHygiene).filter((p): p is Photo => !!p)
+    : null
+  const photos: Photo[] = storedPhotos ?? (() => {
+    const seen = new Set<string>()
+    const out: Photo[] = []
+    for (const s of states) for (const f of s.refImages) {
+      if (!seen.has(f)) { seen.add(f); out.push({ filename: f, check: null }) }
+    }
+    return out
+  })()
+  const defaultCover = coverFirstRefs(states[0])[0]
+  const face = faceRefHygiene(r.face) ?? (defaultCover ? { filename: defaultCover, approvedAt: '' } : null)
+  const ORIGINS = new Set(['described', 'photos', 'canvas'])
+
   return {
     name: typeof r.name === 'string' && r.name.trim() ? r.name.trim() : slug,
     slug,
-    // Placeholder values — Task 4 adds real read-time conversion (photos/face/origin/style/linkedFrom).
-    face: null,
-    photos: [],
-    voice: null,
-    origin: 'photos',
-    likenessConfirmed: false,
-    style: 'photo',
-    linkedFrom: null,
+    face,
+    photos,
+    voice: voiceHygiene(r.voice),
+    origin: ORIGINS.has(r.origin as string) ? r.origin as CharacterRecord['origin'] : 'photos',
+    likenessConfirmed: r.likenessConfirmed === true,
+    style: r.style === 'anime' ? 'anime' : 'photo',
+    linkedFrom: typeof r.linkedFrom === 'string' && r.linkedFrom && slugifyCharacterName(r.linkedFrom) === r.linkedFrom ? r.linkedFrom : null,
     states,
     loraName: typeof r.loraName === 'string' && r.loraName ? r.loraName : null,
     trigger: typeof r.trigger === 'string' && r.trigger ? r.trigger : null,
@@ -224,6 +238,11 @@ export function healRefImages(
 
     const demoted = sheetVanished && v.status !== 'draft'
 
+    const keptClothes = v.clothes.filter(g => exists(g.filename))
+    totalDropped += v.clothes.length - keptClothes.length
+    const lookFaceVanished = v.face !== null && !exists(v.face.filename)
+    if (lookFaceVanished) totalDropped += 1
+
     return {
       ...v,
       refImages: keptRefs,
@@ -232,11 +251,18 @@ export function healRefImages(
       sheetImage,
       status: demoted ? 'draft' as const : v.status,
       stressResult: demoted ? null : v.stressResult,
+      clothes: keptClothes,
+      face: lookFaceVanished ? null : v.face,
     }
   })
+  const keptPhotos = record.photos.filter(p => exists(p.filename))
+  totalDropped += record.photos.length - keptPhotos.length
+  const faceVanished = record.face !== null && !exists(record.face.filename)
+  if (faceVanished) totalDropped += 1
+
   if (!totalDropped) return { record, dropped: 0 }
   return {
-    record: { ...record, states: healed },
+    record: { ...record, states: healed, photos: keptPhotos, face: faceVanished ? null : record.face },
     dropped: totalDropped,
   }
 }
