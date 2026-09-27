@@ -44,6 +44,8 @@ export const PEN_TIPS: Record<string, PenTip> = {
     caption: 'Turns a corner into a smooth arc. Drag from the corner, or click it and type the radius; Shift-click more corners to give them the same one.' },
   chamfer: { name: 'Chamfer', key: 'H', demo: 'chamfer',
     caption: 'Cuts a corner off straight, the same distance back along both sides. Drag from the corner, or click it and type how far.' },
+  offset: { name: 'Offset', key: 'E', demo: 'offset',
+    caption: 'A copy that runs alongside a path at a set distance and follows it when the path changes. Drag from the path, or click it and type the distance; type − for the other side.' },
   cleanup: { name: 'Clean up', key: '⌥⇧C', demo: 'cleanup',
     caption: 'Joins ends that nearly meet, squares what is nearly square and evens what is nearly even. Shows every change first; click one to leave it out.' },
 

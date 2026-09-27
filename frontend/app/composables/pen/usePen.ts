@@ -60,6 +60,7 @@ import { createPenHistory } from './penHistory'
 import { handlePenKey, isCleanupKey, type PenKeyContext, NUDGE_PX, NUDGE_PX_SHIFT, screenDeltaToDrawing } from './penKeys'
 import { createPenCopies, type PendingOp } from './penCopies'
 import { createPenCorners } from './penCorners'
+import { createPenOffset } from './penOffset'
 import { nearestCurve, spanAt, curveGeom, paramOf, pointAt, type Span, type CurveGeom } from '~/lib/sketch/crossings'
 import { removeSpan, removeSegment, cutAt, canDissolve, dissolveAt, mergePoints, sameKey } from '~/lib/sketch/trim'
 import { FILL_GAP_PX, fillTarget, toggleFillAt, fillState, gapMarkers, reconcileFills, withoutFills } from '~/lib/sketch/fills'
@@ -87,7 +88,7 @@ export { NUDGE_PX, NUDGE_PX_SHIFT, screenDeltaToDrawing }
 // a curve between crossings, 'cut' adds a point on a line or arc, 'dissolve'
 // merges the two pieces at a point back into one (see the Trim section);
 // 'fill' fills and empties the areas the drawing encloses (pen stage 7).
-export type PenTool = 'select' | 'point' | 'line' | 'circle' | 'path' | 'curve' | 'trim' | 'cut' | 'dissolve' | 'fill' | 'round' | 'chamfer'
+export type PenTool = 'select' | 'point' | 'line' | 'circle' | 'path' | 'curve' | 'trim' | 'cut' | 'dissolve' | 'fill' | 'round' | 'chamfer' | 'offset'
 // cleanup: Clean up (pen stage 5) is offered unless a host sets it false
 export interface PenOptions { openOnly?: boolean; tools?: PenTool[]; cleanup?: boolean }
 
@@ -297,16 +298,17 @@ export function usePen(opts: {
   // config, not a live ref — the HOST CONTRACT already says a new pen is
   // created to change anything fixed at setup). `tools` defaults to every
   // tool; Select is always included (there is no drawing without a way back
-  // to it); openOnly drops Circle even if the host listed it — an open-path
-  // guide has no use for a closed shape. See PenToolbar for how `tools` gates
+  // to it); openOnly drops Circle, Fill and Offset even if the host listed
+  // them — an open-path guide has no use for a closed shape, a fill or a
+  // second line. See PenToolbar for how `tools` gates
   // the toolbar's own buttons.
-  const ALL_PEN_TOOLS: PenTool[] = ['select', 'point', 'line', 'circle', 'path', 'curve', 'trim', 'cut', 'dissolve', 'fill', 'round', 'chamfer']
+  const ALL_PEN_TOOLS: PenTool[] = ['select', 'point', 'line', 'circle', 'path', 'curve', 'trim', 'cut', 'dissolve', 'fill', 'round', 'chamfer', 'offset']
   const openOnly = !!opts.options?.openOnly
   const cleanupAllowed = opts.options?.cleanup !== false
   const resolvedTools: PenTool[] = (() => {
     let list = opts.options?.tools ? opts.options.tools.filter(t => ALL_PEN_TOOLS.includes(t)) : [...ALL_PEN_TOOLS]
     if (!list.includes('select')) list = ['select', ...list]
-    if (openOnly) list = list.filter(t => t !== 'circle' && t !== 'fill')
+    if (openOnly) list = list.filter(t => t !== 'circle' && t !== 'fill' && t !== 'offset')   // an open-path guide has no use for a closed shape, a fill or a second line
     return list
   })()
   // frozen: fixed for the pen's lifetime, same as resolvedTools/openOnly above
@@ -556,7 +558,7 @@ export function usePen(opts: {
     const ctx: PenKeyContext = {
       tool, pendingPath, dimBuffer, pendingOp, status, selection, selectedSegments, view: opts.view,
       cancelGesture: opts.cancelGesture,
-      previewKey: (e: KeyboardEvent) => penCorners.key(e),
+      previewKey: (e: KeyboardEvent) => penCorners.key(e) || penOffset.key(e),
       cancelPendingOp, undo, redo, cancelPath, commitDimension, finishPath, removeLastAnchor, del, nudge,
       selectTool, isToolAllowed, clearTrimGhosts, cleanupAllowed, toggleCleanup, runKeyAction,
     }
@@ -2005,6 +2007,7 @@ export function usePen(opts: {
     cutHover.value = null
     dissolveHover.value = null
     penCorners.hover.value = null
+    penOffset.hover.value = null
   }
   // Escape in Trim: true when there were ghosts to clear
   function clearTrimGhosts(): boolean {
@@ -2041,9 +2044,21 @@ export function usePen(opts: {
   function cornerUp() { penCorners.up() }
   function applyCorners(): boolean { return penCorners.apply() }
   function cancelCorners(): void { penCorners.cancel(false) }
+  // --- Offset (pen stage 8): see penOffset.ts — overlay-only preview, Apply
+  // is one step, anything else drops it untouched
+  const penOffset = createPenOffset({
+    doc, view: opts.view, tool, status, docRevision, commitHistory, runSolve,
+    clearSel: () => { clearSel(); clearSegSel() }, closeMenus,
+  })
+  const offsetView = penOffset.view, offsetHover = penOffset.hover
+  function offsetMove(x: number, y: number) { penOffset.move(x, y) }
+  function offsetDown(x: number, y: number, additive = false, onePiece = false) { if (!cleanup.value) penOffset.down(x, y, additive, onePiece) }
+  function offsetUp() { penOffset.up() }
+  function applyOffsetTool(): boolean { return penOffset.apply() }
+  function cancelOffset(): void { penOffset.cancel(false) }
   // every overlay-only preview dropped untouched — a tool change, undo / redo,
   // reset, revert, finishing, parking, dispose, opening Clean up
-  function dropPreviews(): void { penCorners.cancel(false) }
+  function dropPreviews(): void { penCorners.cancel(false); penOffset.cancel(false) }
   // kept for the test hook / fast path: exact-selection repeat (1 point + units)
   function doRepeat(count: number) {
     const ptSel = selection.value.filter(id => isPointId(id))
@@ -2832,6 +2847,7 @@ export function usePen(opts: {
   function selectTool(t: Tool) {
     if (!isToolAllowed(t)) return   // PenOptions.tools / openOnly: not a tool this host offers — no-op
     const carried = selection.value.slice()   // the corner tools start from the selection (cleared below)
+    const carriedSegs = selectedSegments.value.slice()   // …and Offset from the picked pieces too
     closeMenus()
     closeCleanup()   // a tool change drops a Clean up preview
     if (arcDrag) arcDragEnd()   // a live arc drag settles as its own step
@@ -2879,6 +2895,7 @@ export function usePen(opts: {
     cursor.value = null
     dimBuffer.value = ''
     if (t === 'round' || t === 'chamfer') penCorners.start(t, carried)
+    if (t === 'offset') penOffset.start(carried, carriedSegs)
   }
 
   function reset() {
@@ -3041,6 +3058,7 @@ export function usePen(opts: {
     fillHover, fillMove, fillClick, fillView,
     // round corner / chamfer (pen stage 8)
     cornerView, cornerHover, cornerMove, cornerDown, cornerUp, applyCorners, cancelCorners,
+    offsetView, offsetHover, offsetMove, offsetDown, offsetUp, applyOffsetTool, cancelOffset,
     // verbs
     runSolve, apply, applyWithValue, applyTangent, availableConstraints, orderRefs, del, nudge, fixSelected, makeConstruction, flip,
     repeatPrompt, armRepeat, doRepeat, applyRepeat, doMirror, applyMirror, cancelPendingOp,

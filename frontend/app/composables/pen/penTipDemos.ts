@@ -337,6 +337,29 @@ function corner(kind: 'round' | 'chamfer') {
 }
 const round = corner('round'), chamfer = corner('chamfer')
 
+// Offset: a caret; press on it and drag up — a copy follows alongside,
+// its corner meeting sharp, further off as the drag goes on.
+function offsetCaret(pts: Vec2[], d: number): Vec2[] {
+  // left of travel in the card's y-down box: (dy, −dx) / L
+  const nrm = (a: Vec2, b: Vec2) => { const L = Math.hypot(b.x - a.x, b.y - a.y); return v((b.y - a.y) / L, -(b.x - a.x) / L) }
+  return pts.map((p, i) => {
+    const n1 = i > 0 ? nrm(pts[i - 1]!, p) : null, n2 = i < pts.length - 1 ? nrm(p, pts[i + 1]!) : null
+    if (!n1) return v(p.x + d * n2!.x, p.y + d * n2!.y)
+    if (!n2) return v(p.x + d * n1.x, p.y + d * n1.y)
+    const k = d / (1 + n1.x * n2.x + n1.y * n2.y)
+    return v(p.x + k * (n1.x + n2.x), p.y + k * (n1.y + n2.y))
+  })
+}
+function offset(t: number): PenTipFrame {
+  const src = [v(24, 76), v(80, 44), v(136, 76)]
+  const at = v(80, 46)
+  const cursor = track(t, [[0.04, v(140, 90)], [0.3, at], [0.4, at], [0.7, v(80, 24)], [0.9, v(80, 24)]])
+  const dd = 18 * prog(t, 0.4, 0.7)
+  const s = sk().path(src, ['line', 'line'])
+  if (dd > 0.5) s.path(offsetCaret(src, dd), ['line', 'line'])
+  return { doc: s.doc, cursor, pressed: within(t, 0.4, 0.72), dots: src, ...sparkleAt(t, 0.72, v(80, 44 - dd)) }
+}
+
 // Clean up: a shape whose top doesn't quite close and whose base sits a
 // little off level; press, and it tidies — the ends join, the base levels,
 // the old drawing stays as a faint ghost.
@@ -362,6 +385,6 @@ function cleanup(t: number): PenTipFrame {
 }
 
 export const PEN_TIP_DEMOS: Record<string, (t: number) => PenTipFrame> = {
-  select, path, curve, line, circle, point, trim, cut, dissolve, fill, round, chamfer, cleanup,
+  select, path, curve, line, circle, point, trim, cut, dissolve, fill, round, chamfer, offset, cleanup,
 }
 export const PEN_DEMO_TOOLS = Object.keys(PEN_TIP_DEMOS)

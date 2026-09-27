@@ -20,7 +20,7 @@ import { STRENGTHS, type CleanupStrength } from '~/lib/sketch/cleanup'
 import {
   MousePointer2, Spline, PenTool as PenNib, Minus, Circle, Dot,
   CircleDashed, Tag, Undo2, Redo2, Scissors, Slice, Bandage, WandSparkles, PaintBucket,
-  SquareRoundCorner, Octagon,
+  SquareRoundCorner, Octagon, SquareSquare,
 } from 'lucide-vue-next'
 
 // The root is the renderless TooltipProvider, so the host's class (the Frame
@@ -67,6 +67,7 @@ const ALL_TOOLS: { id: PenTool; icon: Component }[] = [
   { id: 'fill', icon: PaintBucket },
   { id: 'round', icon: SquareRoundCorner },
   { id: 'chamfer', icon: Octagon },
+  { id: 'offset', icon: SquareSquare },
 ]
 const tipName = (id: string) => PEN_TIPS[id]?.name ?? id
 // only the tools this host offers (PenOptions.tools, resolved by usePen —
@@ -88,6 +89,7 @@ const TOOL_HINTS: Record<PenTool, string> = {
   fill: 'Click an enclosed area to fill it, or a filled one to empty it',
   round: 'Drag from a corner to round it, or click it and type the radius · Shift-click adds corners',
   chamfer: 'Drag from a corner to cut it off, or click it and type how far · Shift-click adds corners',
+  offset: 'Drag from a path to set the distance, or click it and type it · type − for the other side',
 }
 
 const hasEntitySelection = computed(() => selection.value.length > 0)

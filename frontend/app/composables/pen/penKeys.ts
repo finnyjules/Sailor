@@ -85,7 +85,7 @@ export interface PenKeyContext {
 export const TOOL_KEYS: Record<string, PenTool> = {
   v: 'select', p: 'path', b: 'curve', l: 'line', o: 'circle', n: 'point',
   t: 'trim', c: 'cut', d: 'dissolve', g: 'fill',
-  f: 'round', h: 'chamfer',
+  f: 'round', h: 'chamfer', e: 'offset',
 }
 
 // Returns true when the key did something. usePen.ts's onKeydown reads that

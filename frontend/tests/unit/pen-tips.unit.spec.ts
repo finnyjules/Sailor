@@ -15,7 +15,7 @@ import { usePen, type PenTool } from '~/composables/pen/usePen'
 import { PEN_TIPS, tipKeyLabel } from '~/composables/pen/penTips'
 import { PEN_TIP_DEMOS, PEN_DEMO_TOOLS } from '~/composables/pen/penTipDemos'
 
-const ALL_TOOLS: PenTool[] = ['select', 'path', 'curve', 'line', 'circle', 'point', 'trim', 'cut', 'dissolve', 'fill', 'round', 'chamfer']
+const ALL_TOOLS: PenTool[] = ['select', 'path', 'curve', 'line', 'circle', 'point', 'trim', 'cut', 'dissolve', 'fill', 'round', 'chamfer', 'offset']
 const DEMO_IDS = [...ALL_TOOLS, 'cleanup']
 const FIXED_IDS = ['guide', 'labels', 'undo', 'redo', 'close', 'finish', 'done', 'cancel',
   'fix', 'repeat', 'mirror', 'flip-h', 'flip-v', 'construction', 'delete',
@@ -77,7 +77,7 @@ describe('pen tips table', () => {
 
   it('the drawing tools carry their single-letter keys', () => {
     const keys = Object.fromEntries(ALL_TOOLS.map(t => [t, PEN_TIPS[t]!.key]))
-    expect(keys).toEqual({ select: 'V', path: 'P', curve: 'B', line: 'L', circle: 'O', point: 'N', trim: 'T', cut: 'C', dissolve: 'D', fill: 'G', round: 'F', chamfer: 'H' })
+    expect(keys).toEqual({ select: 'V', path: 'P', curve: 'B', line: 'L', circle: 'O', point: 'N', trim: 'T', cut: 'C', dissolve: 'D', fill: 'G', round: 'F', chamfer: 'H', offset: 'E' })
   })
 
   it('the drawing and editing tools and Clean up have a demo, and nothing else does', () => {
@@ -165,6 +165,12 @@ describe('pen tip demos', () => {
       expect(pieces(late)[1].kind).toBe(id === 'round' ? 'arc' : 'line')
     }
   })
+  it('offset demo: a copy moves off the caret as the drag goes on', () => {
+    const early = PEN_TIP_DEMOS.offset!(0.1), late = PEN_TIP_DEMOS.offset!(0.8)
+    const paths = (f: typeof early) => f.doc.entities.filter(e => e.kind === 'path')
+    expect(paths(early)).toHaveLength(1)
+    expect(paths(late)).toHaveLength(2)
+  })
 })
 
 describe('pen tool keys', () => {
@@ -188,6 +194,12 @@ describe('pen tool keys', () => {
     // caps lock gives upper case — still the tool
     expect(pen.onKeydown(key('P'))).toBe(true)
     expect(pen.tool.value).toBe('path')
+  })
+
+  it('E picks Offset', () => {
+    const pen = mk()
+    expect(pen.onKeydown(key('e'))).toBe(true)
+    expect(pen.tool.value).toBe('offset')
   })
 
   it('F and H pick Round corner and Chamfer', () => {

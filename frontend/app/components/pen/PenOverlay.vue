@@ -106,6 +106,7 @@ const {
   highlight, menu, wheel, openMenu, closeMenus, openWheel, wheelPointer, releaseWheel, closeWheel, setViewSize,
   fillHover, fillMove, fillClick, fillView, docRevision,
   cornerView, cornerHover, cornerMove, cornerDown, cornerUp, cancelCorners,
+  offsetView, offsetHover, offsetMove, offsetDown, offsetUp, cancelOffset,
 } = props.pen
 
 const svgEl = ref<SVGSVGElement | null>(null)
@@ -551,6 +552,21 @@ const cornerChip = computed(() => {
   return { ...chipOrigin(s, w), w, text }
 })
 
+// ---------- Offset (pen stage 8) ----------
+// The source dashed, the offset (indigo / red) and the hovered path in
+// drawing space; the distance chip in screen space. Only the overlay reads
+// the preview; the drawing is untouched until Apply.
+const offsetShown = computed(() => (cleanupSession.value ? null : offsetView.value))
+const offsetHoverD = computed(() => (tool.value === 'offset' && !offsetShown.value ? offsetHover.value : null))
+const offsetChip = computed(() => {
+  const v = offsetShown.value
+  if (!v) return null
+  const sign = v.d < 0 ? '−' : ''
+  const text = v.typed ? `${sign}${v.typed}|` : `${sign}${Math.abs(v.d).toFixed(2).replace(/0$/, '')}`
+  const w = 8 + text.length * 6
+  return { ...chipOrigin(toScreen(v.chip), w), w, text }
+})
+
 // screen-space sparkles: a small burst of short rays radiating from the
 // point, ease-out pop + linear fade to 0 by SPARKLE_LIFETIME_MS.
 const SPARKLE_RAYS = 6
@@ -929,6 +945,7 @@ function onPointerDownSvg(ev: PointerEvent) {
   if (tool.value === 'dissolve') { dissolveClick(w.x, w.y); return }
   if (tool.value === 'fill') { fillClick(w.x, w.y); return }
   if (isCornerTool()) { cornerDown(w.x, w.y, ev.shiftKey); return }
+  if (tool.value === 'offset') { offsetDown(w.x, w.y, ev.shiftKey, ev.altKey); return }
   if (tool.value === 'path') { pathDown(w.x, w.y, ev.shiftKey); return }
   if (tool.value === 'curve') { curveDown(w.x, w.y); return }
   const { x, y } = w
@@ -960,13 +977,14 @@ function onPointerMove(ev: PointerEvent) {
     if (w) curveMove(w.x, w.y)
     return
   }
-  if (tool.value === 'trim' || tool.value === 'cut' || tool.value === 'dissolve' || tool.value === 'fill' || isCornerTool()) {
+  if (tool.value === 'trim' || tool.value === 'cut' || tool.value === 'dissolve' || tool.value === 'fill' || isCornerTool() || tool.value === 'offset') {
     const w = drawingXY(ev)
     if (!w) { clearToolHover(); return }
     if (tool.value === 'trim') trimMove(w.x, w.y)
     else if (tool.value === 'cut') cutMove(w.x, w.y)
     else if (tool.value === 'fill') fillMove(w.x, w.y)
     else if (isCornerTool()) cornerMove(w.x, w.y)
+    else if (tool.value === 'offset') offsetMove(w.x, w.y)
     else dissolveMove(w.x, w.y)
     return
   }
@@ -1031,6 +1049,7 @@ function onPointerUp(ev: PointerEvent) {
     return
   }
   if (isCornerTool()) { cornerUp(); return }
+  if (tool.value === 'offset') { offsetUp(); return }
   if (tool.value === 'path' && getPathDrag()) {
     const w = drawingXY(ev)
     if (w) pathUp(w.x, w.y)
@@ -1070,6 +1089,7 @@ function onPointerLeave(ev: PointerEvent) {
   // Round corner / Chamfer: a cancelled press (the system took the pointer)
   // drops the preview, the drawing untouched; leaving the canvas settles as a release
   if (ev.type === 'pointercancel' && isCornerTool()) { cancelCorners(); penCursor.value = null; clearToolHover(); return }
+  if (ev.type === 'pointercancel' && tool.value === 'offset') { cancelOffset(); penCursor.value = null; clearToolHover(); return }
   onPointerUp(ev)
   penCursor.value = null
   clearToolHover()
@@ -1316,6 +1336,22 @@ defineExpose({
     <g v-if="cornerChip" pointer-events="none" data-corner-chip>
       <rect :x="cornerChip.x" :y="cornerChip.y" :width="cornerChip.w" height="14" rx="3" fill="#111827" opacity="0.85" />
       <text :x="cornerChip.x + 4" :y="cornerChip.y + 11" fill="#e5e7eb" font-size="10" font-family="ui-monospace, monospace">{{ cornerChip.text }}</text>
+    </g>
+    <!-- Offset: the hovered path, the source dashed, the offset (indigo: it
+         can be made; red: too far), the distance chip -->
+    <g v-if="offsetShown || offsetHoverD" :transform="svgTransform" pointer-events="none">
+      <path v-if="offsetHoverD" :d="offsetHoverD" fill="none" stroke="#6366f1" stroke-opacity="0.5" stroke-width="3"
+            vector-effect="non-scaling-stroke" data-offset-hover />
+      <template v-if="offsetShown">
+        <path :d="offsetShown.source" fill="none" stroke="#6366f1" stroke-width="1.5" stroke-dasharray="4 3"
+              vector-effect="non-scaling-stroke" data-offset-source />
+        <path :d="offsetShown.preview" fill="none" :stroke="offsetShown.ok ? '#6366f1' : '#ef4444'" stroke-width="2"
+              vector-effect="non-scaling-stroke" data-offset-preview :data-ok="offsetShown.ok ? 'yes' : 'no'" />
+      </template>
+    </g>
+    <g v-if="offsetChip" pointer-events="none" data-offset-chip>
+      <rect :x="offsetChip.x" :y="offsetChip.y" :width="offsetChip.w" height="14" rx="3" fill="#111827" opacity="0.85" />
+      <text :x="offsetChip.x + 4" :y="offsetChip.y + 11" fill="#e5e7eb" font-size="10" font-family="ui-monospace, monospace">{{ offsetChip.text }}</text>
     </g>
     <!-- Fill: the area under the pointer, hatched (indigo: a click fills it;
          red: it is filled and a click empties it) -->

@@ -323,6 +323,11 @@ onMounted(() => {
       const v = pen.cornerView.value
       return v ? { kind: v.kind, corners: v.corners.slice(), size: v.size, typed: v.typed, fits: v.fits, bad: v.bad.length } : null
     },
+    // …and the Offset tool's (never change it)
+    offset: () => {
+      const v = pen.offsetView.value
+      return v ? { d: v.d, typed: v.typed, ok: v.ok, chains: v.chains.length } : null
+    },
   }
   ready.value = true
   window.addEventListener('keydown', onKeydown, { capture: true })
