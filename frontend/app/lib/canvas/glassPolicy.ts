@@ -8,6 +8,12 @@
  *
  * 'never' is the exit route: if the benchmark says blur costs frames, the canvas runs
  * 'never' and nothing else in the design changes.
+ *
+ * 'always' (the shipped decision, 2026-09-27): blur every glass shell, always — while
+ * panning, zooming or dragging, whatever is behind it — with one exception: below
+ * GLASS_LIMITS.minZoom the glass is too small to read, so it turns off, decided at rest
+ * like everything else here. No crowding limit and no "something behind" rule apply to
+ * 'always'; 'smart' keeps both, for the dev benchmark to compare against.
  */
 export const GLASS_LIMITS = { minZoom: 0.5, maxVisibleNodes: 24 }
 
@@ -15,7 +21,7 @@ export type GlassMode = 'smart' | 'always' | 'never'
 
 export function blurAllowed(s: { mode: GlassMode; moving: boolean; zoom: number; visibleNodes: number }): boolean {
   if (s.mode === 'never') return false
-  if (s.mode === 'always') return true
+  if (s.mode === 'always') return s.zoom >= GLASS_LIMITS.minZoom
   if (s.moving) return false
   if (s.zoom < GLASS_LIMITS.minZoom) return false
   if (s.visibleNodes > GLASS_LIMITS.maxVisibleNodes) return false

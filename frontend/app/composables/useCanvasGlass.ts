@@ -27,7 +27,7 @@ export interface GlassFlow {
  * settle, coalescing any number of calls. pause()/resume(): a node drag.
  */
 export function createCanvasGlass(flow: GlassFlow, opts: { mode?: Ref<GlassMode>; settleMs?: number } = {}) {
-  const mode = opts.mode ?? ref<GlassMode>('smart')
+  const mode = opts.mode ?? ref<GlassMode>('always')
   const settleMs = opts.settleMs ?? 150
   const moving = ref(false)
   const zoomAtRest = ref(flow.viewport.value.zoom)
@@ -43,8 +43,14 @@ export function createCanvasGlass(flow: GlassFlow, opts: { mode?: Ref<GlassMode>
     const { width, height } = flow.size()
     visible.value = countVisible(boxes, { ...vp, width, height })
     const allowedNow = blurAllowed({ mode: mode.value, moving: moving.value, zoom: vp.zoom, visibleNodes: visible.value })
-    if (allowedNow) blurIds.value = nodesWithSomethingBehind(boxes, flow.wires())
-    else if (blurIds.value.size) blurIds.value = new Set()
+    if (!allowedNow) {
+      if (blurIds.value.size) blurIds.value = new Set()
+    } else if (mode.value === 'always') {
+      // 'always' means every glass shell blurs — skip the "something behind it" test.
+      blurIds.value = new Set(boxes.map(b => b.id))
+    } else {
+      blurIds.value = nodesWithSomethingBehind(boxes, flow.wires())
+    }
   }
 
   function settleSoon() {

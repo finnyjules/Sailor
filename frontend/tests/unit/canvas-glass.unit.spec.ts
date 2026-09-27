@@ -20,9 +20,9 @@ function fakeFlow() {
 describe('createCanvasGlass', () => {
   beforeEach(() => { vi.useFakeTimers() })
 
-  it('blurs only overlapping nodes at rest', () => {
+  it('blurs only overlapping nodes at rest (smart)', () => {
     const f = fakeFlow()
-    const g = createCanvasGlass(f.flow)
+    const g = createCanvasGlass(f.flow, { mode: ref('smart') })
     g.recompute()
     expect(g.rootClass.value).toContain('canvas-glass--blur')
     expect(g.blurIds.value).toEqual(new Set(['a', 'b']))
@@ -30,9 +30,9 @@ describe('createCanvasGlass', () => {
 
   // Adapted: "moving" now comes from the viewport, not from move events, so this
   // drives a viewport write where it used to fire moveStart/moveEnd.
-  it('drops blur the moment the viewport moves, restores it after settling', async () => {
+  it('drops blur the moment the viewport moves, restores it after settling (smart)', async () => {
     const f = fakeFlow()
-    const g = createCanvasGlass(f.flow, { settleMs: 150 })
+    const g = createCanvasGlass(f.flow, { mode: ref('smart'), settleMs: 150 })
     g.recompute()
     f.viewport.value = { x: 10, y: 0, zoom: 1 }
     expect(g.rootClass.value).not.toContain('canvas-glass--blur')
@@ -55,9 +55,9 @@ describe('createCanvasGlass', () => {
     expect(g.rootStyle.value['--canvas-zoom']).toBe('2')
   })
 
-  it('a programmatic viewport write (no move events) drops blur, then publishes the zoom and restores blur', () => {
+  it('a programmatic viewport write (no move events) drops blur, then publishes the zoom and restores blur (smart)', () => {
     const f = fakeFlow()
-    const g = createCanvasGlass(f.flow, { settleMs: 150 })
+    const g = createCanvasGlass(f.flow, { mode: ref('smart'), settleMs: 150 })
     g.recompute()
     expect(g.rootClass.value).toContain('canvas-glass--blur')
     f.viewport.value = { x: -30, y: 12, zoom: 0.8 } // fitView / setViewport: no moveStart, no moveEnd
@@ -80,9 +80,9 @@ describe('createCanvasGlass', () => {
     expect(g.rootClass.value).toContain('canvas-glass--blur')
   })
 
-  it('several invalidate() calls coalesce into one recompute', () => {
+  it('several invalidate() calls coalesce into one recompute (smart)', () => {
     const f = fakeFlow()
-    const g = createCanvasGlass(f.flow, { settleMs: 150 })
+    const g = createCanvasGlass(f.flow, { mode: ref('smart'), settleMs: 150 })
     f.boxes.mockClear()
     g.invalidate(); g.invalidate(); g.invalidate()
     expect(f.boxes).not.toHaveBeenCalled()
@@ -92,9 +92,9 @@ describe('createCanvasGlass', () => {
     expect(g.blurIds.value).toEqual(new Set(['a', 'b']))
   })
 
-  it('pause() drops blur for a drag and resume() restores it after the settle', () => {
+  it('pause() drops blur for a drag and resume() restores it after the settle (smart)', () => {
     const f = fakeFlow()
-    const g = createCanvasGlass(f.flow, { settleMs: 150 })
+    const g = createCanvasGlass(f.flow, { mode: ref('smart'), settleMs: 150 })
     g.recompute()
     g.pause()
     expect(g.rootClass.value).not.toContain('canvas-glass--blur')
@@ -115,6 +115,50 @@ describe('createCanvasGlass', () => {
     expect(g.rootStyle.value['--canvas-zoom']).toBe('0.3')
     expect(g.rootClass.value).not.toContain('canvas-glass--blur')
     expect(g.blurIds.value.size).toBe(0)
+  })
+
+  it('default mode (always) keeps blur on through a viewport move', () => {
+    const f = fakeFlow()
+    const g = createCanvasGlass(f.flow) // default: 'always'
+    g.recompute()
+    expect(g.rootClass.value).toContain('canvas-glass--blur')
+    f.viewport.value = { x: 10, y: 0, zoom: 1 } // pan
+    expect(g.rootClass.value).toContain('canvas-glass--blur')
+    vi.advanceTimersByTime(150)
+    expect(g.rootClass.value).toContain('canvas-glass--blur')
+  })
+
+  it('default mode (always) marks a node with nothing behind it — what useNodeGlass reads', () => {
+    const f = fakeFlow()
+    const g = createCanvasGlass(f.flow) // default: 'always'
+    g.recompute()
+    // 'c' does not overlap a/b and has no wire behind it, yet 'always' blurs every node,
+    // so useNodeGlass('c') (which reads exactly this set) would resolve to true.
+    expect(g.blurIds.value.has('c')).toBe(true)
+  })
+
+  it('default mode (always) drops blur after settling at zoom 0.4 and restores it at 0.6', () => {
+    const f = fakeFlow()
+    const g = createCanvasGlass(f.flow, { settleMs: 150 }) // default: 'always'
+    g.recompute()
+    f.viewport.value = { x: 0, y: 0, zoom: 0.4 }
+    vi.advanceTimersByTime(150)
+    expect(g.rootClass.value).not.toContain('canvas-glass--blur')
+    expect(g.blurIds.value.size).toBe(0)
+    f.viewport.value = { x: 0, y: 0, zoom: 0.6 }
+    vi.advanceTimersByTime(150)
+    expect(g.rootClass.value).toContain('canvas-glass--blur')
+    expect(g.blurIds.value).toEqual(new Set(['a', 'b', 'c']))
+  })
+
+  it('pause() does not turn off blur in always mode', () => {
+    const f = fakeFlow()
+    const g = createCanvasGlass(f.flow) // default: 'always'
+    g.recompute()
+    g.pause()
+    expect(g.rootClass.value).toContain('canvas-glass--blur')
+    g.resume()
+    expect(g.rootClass.value).toContain('canvas-glass--blur')
   })
 
   it("mode 'never' keeps the root un-blurred and marks the mode", () => {

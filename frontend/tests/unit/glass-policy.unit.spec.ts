@@ -11,8 +11,14 @@ describe('blurAllowed', () => {
   it('blurs exactly at the zoom floor', () => { expect(blurAllowed({ ...base, zoom: GLASS_LIMITS.minZoom })).toBe(true) })
   it('never blurs when crowded', () => { expect(blurAllowed({ ...base, visibleNodes: GLASS_LIMITS.maxVisibleNodes + 1 })).toBe(false) })
   it("'never' is the exit route", () => { expect(blurAllowed({ ...base, mode: 'never' })).toBe(false) })
-  it("'always' ignores every limit (benchmark only)", () => {
-    expect(blurAllowed({ mode: 'always', moving: true, zoom: 0.1, visibleNodes: 500 })).toBe(true)
+  it("'always' blurs while moving", () => {
+    expect(blurAllowed({ mode: 'always', moving: true, zoom: 1, visibleNodes: 5 })).toBe(true)
+  })
+  it("'always' still turns off below the zoom floor", () => {
+    expect(blurAllowed({ mode: 'always', moving: false, zoom: GLASS_LIMITS.minZoom - 0.01, visibleNodes: 5 })).toBe(false)
+  })
+  it("'always' ignores the crowding limit", () => {
+    expect(blurAllowed({ mode: 'always', moving: false, zoom: 1, visibleNodes: 500 })).toBe(true)
   })
 })
 

@@ -1247,8 +1247,9 @@ const {
   onNodesInitialized, onNodesChange, getNodes, getEdges,
 } = useVueFlow()
 
-// Glass: real blur only at rest and only on nodes with something behind them.
-// Decided once per rest, never per frame (docs/superpowers/specs/2026-09-27-node-design-design.md).
+// Glass: real blur on every node shell, always — panning, zooming, dragging, whatever is
+// behind it — off only below GLASS_LIMITS.minZoom, decided at rest, never per frame
+// (docs/superpowers/specs/2026-09-27-node-design-design.md, "Glass decision 2026-09-27").
 // "Moving" is read from the viewport itself (fitView/setViewport/zoom buttons emit no move events).
 const canvasGlass = createCanvasGlass({
   viewport: vfViewport,
