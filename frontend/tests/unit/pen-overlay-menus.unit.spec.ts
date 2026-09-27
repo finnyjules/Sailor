@@ -164,6 +164,94 @@ describe('PenOverlay right press', () => {
   })
 })
 
+describe('PenOverlay: a right press whose release was lost', () => {
+  // the wheel is open over the nw slice (Horizontal) when the release goes missing
+  async function openWheelThenLose(m: ReturnType<typeof mountIt>) {
+    await m.wrapper.find(`[data-ent="${m.l}"]`).trigger('pointerdown', R(200, 210))
+    await m.wrapper.find('svg').trigger('pointermove', R(150, 160))
+    expect(m.pen.wheel.value!.hover).toBe('nw')
+  }
+  async function leftClick(m: ReturnType<typeof mountIt>) {
+    const svg = m.wrapper.find('svg')
+    await svg.trigger('pointermove', { ...L(150, 160, 0), pointerId: 1 })
+    await svg.trigger('pointerdown', { ...L(150, 160), pointerId: 1 })
+    await svg.trigger('pointerup', { ...L(150, 160, 0), pointerId: 1 })
+  }
+  it('a hover with no button held drops it; the next click runs nothing', async () => {
+    const m = mountIt(); wrapper = m.wrapper
+    await openWheelThenLose(m)
+    await m.wrapper.find('svg').trigger('pointermove', { ...R(140, 150), buttons: 0 })
+    expect(m.pen.wheel.value).toBeNull()
+    await leftClick(m)
+    expect(m.doc.value.constraints).toHaveLength(0)
+    expect(m.pen.wheel.value).toBeNull()
+    expect(m.pen.menu.value).toBeNull()
+  })
+  it('a left press drops it, so its release runs no slice', async () => {
+    const m = mountIt(); wrapper = m.wrapper
+    await openWheelThenLose(m)
+    const svg = m.wrapper.find('svg')
+    await svg.trigger('pointerdown', { ...L(150, 160), pointerId: 1 })
+    expect(m.pen.wheel.value).toBeNull()
+    await svg.trigger('pointerup', { ...L(150, 160, 0), pointerId: 1 })
+    expect(m.doc.value.constraints).toHaveLength(0)
+    expect(m.pen.menu.value).toBeNull()
+  })
+  it('a lost pointer capture drops it', async () => {
+    const m = mountIt(); wrapper = m.wrapper
+    await openWheelThenLose(m)
+    const svg = m.wrapper.find('svg')
+    await svg.trigger('lostpointercapture', { pointerId: 1 })
+    expect(m.pen.wheel.value).toBeNull()
+    await leftClick(m)
+    expect(m.doc.value.constraints).toHaveLength(0)
+    expect(m.pen.menu.value).toBeNull()
+  })
+  it('a window blur drops it (the host feeding blur too)', async () => {
+    const m = mountIt('host'); wrapper = m.wrapper
+    await openWheelThenLose(m)
+    ;(m.wrapper.vm as any).onHostBlur()
+    expect(m.pen.wheel.value).toBeNull()
+    await leftClick(m)
+    expect(m.doc.value.constraints).toHaveLength(0)
+    expect(m.pen.menu.value).toBeNull()
+  })
+  it('another pointer’s moves and release leave the press alone', async () => {
+    const m = mountIt(); wrapper = m.wrapper
+    await openWheelThenLose(m)
+    const svg = m.wrapper.find('svg')
+    await svg.trigger('pointermove', { ...R(300, 210), pointerId: 9 })
+    expect(m.pen.wheel.value!.hover).toBe('nw')
+    await svg.trigger('pointerup', { ...R(300, 210), pointerId: 9 })
+    expect(m.pen.wheel.value).not.toBeNull()
+    await svg.trigger('pointerup', R(150, 160))
+    expect(m.doc.value.constraints.at(-1)!.kind).toBe('horizontal')
+  })
+  it('a tool key mid press settles it: the trailing right release opens nothing', async () => {
+    const m = mountIt('host'); wrapper = m.wrapper
+    const svg = m.wrapper.find('svg')
+    await svg.trigger('pointerdown', R(600, 40))
+    expect((m.wrapper.vm as any).onHostKeydown(new KeyboardEvent('keydown', { key: 't' }))).toBe(true)
+    expect(m.pen.tool.value).toBe('trim')
+    await svg.trigger('pointerup', R(600, 40))
+    expect(m.pen.menu.value).toBeNull()
+    expect(m.doc.value.entities.some(e => e.id === m.l)).toBe(true)
+  })
+  it('a Mac ctrl-click while the menu is open reopens it there, like a right press', async () => {
+    const m = mountIt(); wrapper = m.wrapper
+    const svg = m.wrapper.find('svg')
+    await svg.trigger('pointerdown', R(600, 40))
+    await svg.trigger('pointerup', R(600, 40))
+    await nextTick()
+    expect(m.pen.menu.value!.at).toEqual({ x: 600, y: 40 })
+    const C = { button: 0, buttons: 1, ctrlKey: true, clientX: 200, clientY: 210, pointerId: 4 }
+    await m.wrapper.find(`[data-ent="${m.l}"]`).trigger('pointerdown', C)
+    await svg.trigger('pointerup', C)
+    expect(m.pen.menu.value!.at).toEqual({ x: 200, y: 210 })
+    expect(m.pen.menu.value!.header).toBe('1 line')
+  })
+})
+
 describe('PenOverlay keys while a menu or wheel is open', () => {
   it('keys go to the open menu, even with a host feeding them', async () => {
     const m = mountIt('host'); wrapper = m.wrapper
@@ -213,6 +301,15 @@ describe('PenOverlay keys while a menu or wheel is open', () => {
     await nextTick()
     expect(m.wrapper.find('[data-marquee]').exists()).toBe(false)
   })
+  it('⌘C with nothing selected leaves a live marquee alone', async () => {
+    const m = mountIt('host'); wrapper = m.wrapper
+    const svg = m.wrapper.find('svg')
+    await svg.trigger('pointerdown', L(600, 40))
+    await svg.trigger('pointermove', L(500, 100))
+    expect((m.wrapper.vm as any).onHostKeydown(new KeyboardEvent('keydown', { key: 'c', metaKey: true }))).toBe(false)
+    await nextTick()
+    expect(m.wrapper.find('[data-marquee]').exists()).toBe(true)
+  })
   it('⌘A settles a live marquee first', async () => {
     const m = mountIt('host'); wrapper = m.wrapper
     const svg = m.wrapper.find('svg')
@@ -232,11 +329,20 @@ describe('PenOverlay hover highlight', () => {
     const m = mountIt(); wrapper = m.wrapper
     m.pen.setHighlight([{ kind: 'line', id: m.l }])
     await nextTick()
-    expect(m.wrapper.find(`[data-highlight="line:${m.l}"]`).exists()).toBe(true)
+    const hl = m.wrapper.find(`[data-highlight="line:${m.l}"]`)
+    expect(hl.exists()).toBe(true)
+    expect(hl.element.tagName.toLowerCase()).toBe('path')
+    expect(hl.attributes('pointer-events')).toBe('none')
+    expect(hl.attributes('vector-effect')).toBe('non-scaling-stroke')
+    expect(hl.element.closest('g[transform]')).not.toBeNull()   // drawn in drawing space
     const p = (m.doc.value.entities.find(e => e.kind === 'point'))!.id
     m.pen.setHighlight([{ kind: 'point', id: p }])
     await nextTick()
-    expect(m.wrapper.find(`[data-highlight="point:${p}"]`).exists()).toBe(true)
+    const ring = m.wrapper.find(`[data-highlight="point:${p}"]`)
+    expect(ring.exists()).toBe(true)
+    expect(ring.attributes('pointer-events')).toBe('none')
+    expect(ring.attributes('r')).toBe('8')
+    expect(ring.element.closest('g[transform]')).toBeNull()      // a screen-space ring
     expect(m.wrapper.find(`[data-highlight="line:${m.l}"]`).exists()).toBe(false)
   })
 })

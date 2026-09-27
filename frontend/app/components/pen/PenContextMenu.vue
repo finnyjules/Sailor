@@ -42,7 +42,7 @@ function onWindowPointerDown(e: PointerEvent) {
   const t = e.target as Element | null
   if (t && (root.value?.contains(t) || t.closest?.('[data-pen-tip]'))) return
   closeMenu()
-  if (e.button !== 2 && t?.closest?.('[data-pen-overlay]')) { e.stopPropagation(); e.preventDefault() }
+  if (e.button !== 2 && !(e.ctrlKey && isMac) && t?.closest?.('[data-pen-overlay]')) { e.stopPropagation(); e.preventDefault() }
 }
 function onAway() { closeMenu() }
 onMounted(() => {
