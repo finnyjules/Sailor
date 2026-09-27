@@ -21,7 +21,7 @@ const SWISS_FRAMES: Frame[] = [
   { id: 'landscape', w: 1280, h: 720 }, { id: 'banner', w: 1280, h: 400 },
   fmt('meta-story'), fmt('pinterest-9x16'), fmt('pmax-landscape'), fmt('ad-300x250'), fmt('ad-728x90'),
 ]
-const STYLE_FRAMES: Frame[] = [{ id: 'portrait', w: 895, h: 1280 }, fmt('meta-story'), fmt('ad-300x250')]
+const STYLE_FRAMES: Frame[] = [{ id: 'portrait', w: 895, h: 1280 }, fmt('meta-story'), fmt('ad-300x250'), fmt('ad-728x90')]
 const STYLE_FIXTURES = { performance: adFrameLayers, editorial: galleryFrameLayers, street: eventFrameLayers } as const
 
 // The Stage 4 content layouts (`needsContent`) need the full ad Frame — a copy of the ads matrix's

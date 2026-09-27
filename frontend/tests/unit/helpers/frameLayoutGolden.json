@@ -168,99 +168,99 @@
   "count": 102
  },
  "perfOffer": {
-  "sig": "1251619931906ad6",
+  "sig": "627e624760f35a2f",
   "count": 67
  },
  "perfSticker": {
-  "sig": "6db6958874c41c1c",
+  "sig": "fd5af7f836fa687b",
   "count": 38
  },
  "perfPriceTag": {
-  "sig": "acfba961ba549ffc",
+  "sig": "2478ab9ad364dce6",
   "count": 86
  },
  "perfCard": {
-  "sig": "1962997509a1be13",
+  "sig": "ca52a7288cc11ec4",
   "count": 86
  },
  "perfCentred": {
-  "sig": "2e0ee7638e1c0950",
+  "sig": "881c4a21c02ac983",
   "count": 12
  },
  "perfStrip": {
-  "sig": "3aada7e3f441cefe",
-  "count": 0
+  "sig": "6e3f2fbe2dfb3b83",
+  "count": 18
  },
  "perfOfferFirst": {
-  "sig": "78c20ef346250123",
+  "sig": "b483452deb60380f",
   "count": 4
  },
  "perfStat": {
-  "sig": "2296fefb3dfd0aea",
+  "sig": "2186c43e386e7bc2",
   "count": 5
  },
  "perfReview": {
-  "sig": "b74f17fd4a988334",
+  "sig": "5e5dbab5415e922f",
   "count": 4
  },
  "perfVersus": {
-  "sig": "0a4ef01b87b0d085",
+  "sig": "48baac466b39f653",
   "count": 4
  },
  "perfBeforeAfter": {
-  "sig": "60a894dd4ccf51ad",
+  "sig": "2ba47ae19aab71c1",
   "count": 16
  },
  "perfCallouts": {
-  "sig": "aad85803336069fb",
+  "sig": "3b2be3d55ad31aac",
   "count": 16
  },
  "perfListicle": {
-  "sig": "7e697e95d8e92e4f",
+  "sig": "79a4134d2236afff",
   "count": 12
  },
  "perfNotes": {
-  "sig": "ecc6bbf4e88545f4",
+  "sig": "675726606f10be15",
   "count": 12
  },
  "perfPostit": {
-  "sig": "505745ac235b988f",
+  "sig": "a73344d47b6a5314",
   "count": 16
  },
  "edCover": {
-  "sig": "39d4d8ba6bf67dce",
-  "count": 43
+  "sig": "6e2bb8aaf5a2fab2",
+  "count": 47
  },
  "edFramed": {
-  "sig": "3dc268379acb236a",
-  "count": 50
+  "sig": "b619f6078fb55a37",
+  "count": 54
  },
  "edQuiet": {
-  "sig": "c633d20289190b3d",
-  "count": 84
+  "sig": "efcc5ae34670fa77",
+  "count": 96
  },
  "edDiptych": {
-  "sig": "66b7dbae6b1d09cf",
-  "count": 94
+  "sig": "3d32a36e37b0646f",
+  "count": 102
  },
  "stFill": {
-  "sig": "5cda8ba660a39d21",
-  "count": 211
+  "sig": "4badfd9448c21d84",
+  "count": 223
  },
  "stTag": {
-  "sig": "a3dc27271a55c32a",
-  "count": 45
+  "sig": "9445fb8756367d44",
+  "count": 50
  },
  "stDrop": {
-  "sig": "60b0736fc017c3fe",
+  "sig": "28b4e41ab0f6d2e9",
   "count": 97
  },
  "stRepeat": {
-  "sig": "c9d6c67a3c1f5398",
-  "count": 96
+  "sig": "07a30a3e53289a0b",
+  "count": 129
  },
  "stStrip": {
-  "sig": "5359a0f72116c1ad",
-  "count": 0
+  "sig": "41ba6e0b9421daaf",
+  "count": 17
  }
 }
