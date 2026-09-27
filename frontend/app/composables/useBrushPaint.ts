@@ -158,8 +158,10 @@ export function useBrushPaint() {
   function replaceTipSamples(samples: Sample[]) {
     if (!liveTip || !samples.length) return
     tipSamples = samples.map(p => ({ ...p }))
-    liveTip.pts.length = 0
-    liveTip.pts.push(...encodePts(tipSamples))
+    // A FRESH record, not an in-place rewrite: per-stroke caches (tipStrokeBox, replay memo)
+    // key on the object and assume append-only, so a replaced stroke must be a new object.
+    // Callers re-read liveTipStroke().
+    liveTip = { ...liveTip, pts: encodePts(tipSamples) }
   }
 
   return {

@@ -2565,6 +2565,7 @@ function onKeyup(e: KeyboardEvent) {
 // rather than stranding optDown + the crosshair with the next click drawing a box.
 function clearPan() {
   spaceDown.value = false; panning.value = false; panFrom = null
+  shiftDown = false // hold-to-snap's Shift, same stuck-key hazard
   penOverlayRef.value?.onHostBlur()
   optDown.value = false
   if (genSpring.value && !genDraw.value && !genHasMask.value && !genResult.value) disarmGenGesture()
@@ -7130,6 +7131,8 @@ function applySnap(L: TipLive) {
   brush.replaceTipSamples(out)
   snap.label = shapeLabel(sh, shiftDown)
   snapUi.label = snap.label
+  // replaceTipSamples swaps in a fresh record (per-stroke caches assume append-only): re-read it.
+  L.s = brush.liveTipStroke()!
   setLiveTipStroke(L.layerId, L.s)
   renderStack()
 }
@@ -7228,6 +7231,7 @@ function onTipPointerDown(e: PointerEvent, p: { nx: number; ny: number }) {
     path: [{ x: cx, y: cy, t }], finger: { x: cx, y: cy }, snap: null, snapTried: false, releasing: 0,
   }
   snapUi.on = true; snapUi.progress = null; snapUi.label = null
+  shiftDown = e.shiftKey
   // A moving material or a library shader animates the pending layer mid-stroke.
   tipLivePendingMoving.value = !!pending?.material?.moving || (isFill(pending?.fill) && fillIsShader(pending.fill) && pending.fill.shader.speed > 0)
   setLiveTipStroke(layerId, s)
@@ -7240,6 +7244,7 @@ function onTipPointerMove(e: PointerEvent) {
     const cx = ev.clientX, cy = ev.clientY, t = ev.timeStamp
     L.finger = { x: cx, y: cy }
     L.hold.move(cx, cy, t)
+    shiftDown = ev.shiftKey // a Shift keyup missed elsewhere can't stick
     if (L.snap) continue // snapped: the hand edits the shape instead of painting
     for (const p of L.st.input(cx, cy, t)) emitClient(L, p, t)
   }
@@ -9185,11 +9190,14 @@ onUnmounted(() => {
           :style="{ left: (brush.cursor.value.x * canvasDisplay.w - brushRingPx / 2) + 'px', top: (brush.cursor.value.y * canvasDisplay.h - brushRingPx / 2) + 'px', width: brushRingPx + 'px', height: brushRingPx + 'px', zIndex: 30 }"
         />
         <!-- Hold-to-snap feedback (a tip stroke in the hand) -->
-        <BrushSnapFeedback
+        <!-- Counter-scaled so the ring and tag keep their screen size at any zoom. -->
+        <div
           v-if="snapUi.on"
-          :x="snapUi.x" :y="snapUi.y" :progress="snapUi.progress" :label="snapUi.label"
-          style="z-index: 31"
-        />
+          class="absolute pointer-events-none"
+          :style="{ left: snapUi.x + 'px', top: snapUi.y + 'px', width: 0, height: 0, transform: `scale(${1 / (view.scale || 1)})`, transformOrigin: '0 0', zIndex: 31 }"
+        >
+          <BrushSnapFeedback :x="0" :y="0" :progress="snapUi.progress" :label="snapUi.label" />
+        </div>
 
         <!-- Drag-to-generate on-box bar: prompt + style + Generate. Shown after a
              valid box is dragged, before generation; the mini toolbar below replaces
