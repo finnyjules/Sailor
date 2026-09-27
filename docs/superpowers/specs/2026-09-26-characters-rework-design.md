@@ -24,7 +24,7 @@
 - **You can't invent a character.** Creating one needs a photo.
 - **The readiness process goes unused.** None of the five characters has ever reached "Ready".
 - **The sheet is sent to video in a form that works against us.** It goes as one combined grid image. Seedance's own guide warns that a picture showing several views of a person gets read as several people.
-- **Veo never receives the reference images at all.**
+- **Veo can't take reference images** in Sailor: a Veo request with them is refused.
 
 **What changes**
 - **A character is a face, not a pile of photos.**
@@ -255,16 +255,19 @@ These follow the prototype.
 
 Each stage ships on its own and is checked in the real app before the next one starts.
 
-0. **Quick fixes, now and separate from this spec:**
-   - Seedance cast sends portrait + body front, not the grid (`lib/shotdirector/cast.ts`, `identityRefs`).
-   - Veo routes references to `reference-to-video` (`comfy_api_nodes/video_models.py` `_veo31_fal_input`).
+0. **Quick fix:** Seedance cast sends portrait + body front, never the grid (`lib/shotdirector/cast.ts`, a new `videoIdentityRefs`).
 1. **Model and reading old records:** looks with clothes, character-level photos and face, the `madeFrom` stamps. Unit tests for converting all three past record formats.
 2. **The face checker as a service:** AWS Compare faces behind one server route, with the training opt-out set, the consent step for real-photo characters, thresholds re-measured on Jene (must flag) and Reva (must pass), and checks run on read.
-3. **The sheet pipeline:** GPT Sunburst with automatic fallback to Nano Banana Pro, the tested wording, clothes stated, staleness, and redo with the other model. One live run per character route, about $0.50.
-4. **The character page and panel:** the new UI from the prototype, with body presets and the voice row stored but not yet sent.
-5. **Creation:** describe (casting call), photos (checks, "which one?", likeness), from the canvas.
-6. **Canvas and images:** the character node as the only route in; any image generator accepts a character; "Appears in" and the star.
-7. **Video, per model:** what-to-send profiles as in the table, start frame first, then Kling through fal elements.
+3. **Video, per model** (moved up from 7 on 2026-09-26, so better video lands before the character screens):
+   - Shot Director profiles beyond Seedance, sending what the table in "What gets sent" says.
+   - **Kling 3 through fal**, as an element plus a start frame (moves Kling off Replicate).
+   - **Veo 3.1 references** through `veo3.1/reference-to-video`. Today the runner refuses a Veo request with reference pictures in plain words (`VEO_31_ONE_PICTURE`), and the Shot Director can only target Seedance, so this is new capability, not a silent bug. It needs a saved fal schema fixture first.
+   - **The start-frame route:** make the shot's first frame as an image from the character, then animate it.
+   - The face checker scores a few frames of every take, so models can be compared on real results.
+4. **The sheet pipeline:** GPT Sunburst with automatic fallback to Nano Banana Pro, the tested wording, clothes stated, staleness, and redo with the other model. One live run per character route, about $0.50.
+5. **The character page and panel:** the new UI from the prototype, with body presets and the voice row stored but not yet sent.
+6. **Creation:** describe (casting call), photos (checks, "which one?", likeness), from the canvas.
+7. **Canvas and images:** the character node as the only route in; any image generator accepts a character; "Appears in" and the star.
 8. **Voice to models,** then consider Vidu Q3.
 
 Tests at every stage:
