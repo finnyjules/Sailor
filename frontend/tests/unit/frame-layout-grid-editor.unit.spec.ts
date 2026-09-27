@@ -3,8 +3,9 @@
 import { describe, it, expect } from 'vitest'
 import { reactive } from 'vue'
 import { useLocalLayerEditor } from '~/composables/useLocalLayerEditor'
-import { createRectLayer, createTextLayer } from '~/composables/useCompositorLayers'
+import { createRectLayer, createTextLayer, textVAlignCenterOffset } from '~/composables/useCompositorLayers'
 import { patchLayoutGrid } from '~/lib/frame/layoutGrid'
+import { textMetrics } from '~/lib/frame/textMetrics'
 
 function editor(properties: Record<string, any> = {}) {
   const node = reactive({ id: 'f', data: { properties } }) as any
@@ -175,29 +176,6 @@ describe('resize snapping moves the box edge onto the line', () => {
   })
 })
 
-describe('valign top text snaps its DRAWN box', () => {
-  const H = 675
-  const topText = (y: number) => createTextLayer({ x: 0.5, y, boxW: 0.3, boxH: 0.1, valign: 'top' } as any)
-  it('move-snap lands the drawn bottom edge on the line', () => {
-    // box 54 px tall, stored y = the drawn top. Drawn bottom starts 40 px above H/2.
-    const layer = topText((H / 2 - 40 - 54) / H)
-    const { ed } = zoomedEditor({ sailor_localLayers: [layer] })
-    ed.onCanvasPointerDown(pe('pointerdown', 270, 200), layer.id)
-    window.dispatchEvent(pe('pointermove', 270, 238))                // drawn bottom now 2 px above H/2
-    window.dispatchEvent(pe('pointerup', 270, 238))
-    const l = ed.localLayers.value[0] as any
-    expect(l.y * H + 54).toBeCloseTo(H / 2, 6)
-  })
-  it('re-snap lands the drawn bottom edge on the nearest line', () => {
-    const layer = topText((H / 2 - 3 - 54) / H)                        // drawn bottom 3 px above H/2
-    const { ed } = zoomedEditor({ sailor_localLayers: [layer] })
-    ed.selectLocal(layer.id)
-    ed.resnapSelected()
-    const l = ed.localLayers.value[0] as any
-    expect(l.y * H + 54).toBeCloseTo(H / 2, 6)
-  })
-})
-
 describe('move-snap threshold is in screen px', () => {
   it('zoomed out to half, a box 4 screen px off a line snaps', () => {
     const probe = zoomedEditor({}, 0.5).ed
@@ -219,5 +197,128 @@ describe('move-snap threshold is in screen px', () => {
     window.dispatchEvent(pe('pointerup', sx + dxNorm * S, sy))
     const l = ed.localLayers.value[0] as any
     expect(l.x + l.w / 2).toBeCloseTo(target, 9)
+  })
+})
+
+// Stage 2: text snaps by what is drawn — capitals, last baseline, else the baseline grid — and a
+// box with nothing in reach rounds its top to the baseline grid.
+function rowsEditor(properties: Record<string, any>) {
+  const node = reactive({ id: 'f', data: { properties } }) as any
+  const rect = { left: 0, top: 0, width: 540, height: 675, right: 540, bottom: 675, x: 0, y: 0 } as DOMRect
+  const ed = useLocalLayerEditor({ node: () => node, dims: () => ({ w: 540, h: 675 }), designDims: () => ({ w: 1080, h: 1350 }), getRect: () => rect })
+  ed.ensureLayoutGrid()
+  ed.setLayoutGrid({ ...patchLayoutGrid(ed.layoutGrid.value, { rows: 'square' }), show: true }, false)
+  return { node, ed }
+}
+const HD = 1350, WD = 1080
+/** Capitals / baselines (design px) of a text layer stored at y — the editor's own reading. */
+const marksAt = (l: any, y: number) => {
+  const m = textMetrics(l, WD)!
+  const top = y * HD + textVAlignCenterOffset(l, m.boxH) - m.boxH / 2
+  return { capTop: top + m.capTop, baselines: m.baselines.map(b => top + b) }
+}
+/** The stored y that puts the capitals at `cap` (design px). */
+const yForCap = (l: any, cap: number) => { const m = textMetrics(l, WD)!; return (cap - textVAlignCenterOffset(l, m.boxH) + m.boxH / 2 - m.capTop) / HD }
+const onUnit = (v: number, unit: number) => Math.abs(v / unit - Math.round(v / unit)) < 1e-6
+const drag = (ed: any, id: string, dyScreen: number, o: Record<string, any> = {}) => {
+  ed.onCanvasPointerDown(pe('pointerdown', 270, 300), id)
+  window.dispatchEvent(pe('pointermove', 270, 300 + Math.sign(dyScreen) * 5, o))   // past the slop
+  window.dispatchEvent(pe('pointermove', 270, 300 + dyScreen, o))
+  window.dispatchEvent(pe('pointerup', 270, 300 + dyScreen, o))
+}
+
+describe('text snaps by its capitals and baselines', () => {
+  it('capitals dropped 2 screen px short of a row top land on it', () => {
+    const base = createTextLayer({ text: 'Grid', fontSize: 0.04, boxW: 0.4, valign: 'top', x: 0.5 } as any)
+    const probe = rowsEditor({}).ed.layoutGridResolved.value
+    const target = probe.rows[3]!.a
+    const layer = { ...base, y: yForCap(base, target - 40) }
+    const cap2base = marksAt(layer, layer.y).baselines[0]! - marksAt(layer, layer.y).capTop
+    const bottoms = [...probe.rows.map(r => r.a + r.w), probe.bottom]
+    expect(bottoms.every(b => Math.abs(target + cap2base - b) > 16)).toBe(true)   // the baseline can't compete
+    const { ed } = rowsEditor({ sailor_localLayers: [layer] })
+    drag(ed, layer.id, 18)                                           // 36 design px: capitals 4 px short
+    const l = ed.localLayers.value[0] as any
+    expect(marksAt(l, l.y).capTop).toBeCloseTo(target, 6)
+    expect(ed.snapGuides.value.hy).toBeNull()                        // guides clear on pointer up
+  })
+  it('the last baseline dropped near a row bottom lands on it', () => {
+    const base = createTextLayer({ text: 'One\nTwo', fontSize: 0.04, boxW: 0.4, valign: 'top', x: 0.5 } as any)
+    const g = rowsEditor({}).ed.layoutGridResolved.value
+    const m0 = marksAt({ ...base, y: 0 }, 0)
+    const span = m0.baselines[m0.baselines.length - 1]! - m0.capTop
+    const tops = [...g.rows.map(r => r.a), g.top]
+    // > 8, not the reach: a two-line span sits ~10 px above its own row top; after the drop the capitals
+    // are ~14 px off it (out of reach) while the baseline is 4 px off, so the baseline wins.
+    const k = g.rows.findIndex((r, i) => i > 1 && tops.every(t => Math.abs(r.a + r.w - span - t) > 8))
+    expect(k).toBeGreaterThan(1)
+    const bottom = g.rows[k]!.a + g.rows[k]!.w
+    const layer = { ...base, y: yForCap(base, bottom - span - 40) }
+    const { ed } = rowsEditor({ sailor_localLayers: [layer] })
+    drag(ed, layer.id, 18)
+    const l = ed.localLayers.value[0] as any
+    const m = marksAt(l, l.y)
+    expect(m.baselines[m.baselines.length - 1]!).toBeCloseTo(bottom, 6)
+  })
+  it('away from rows and margins, the first baseline lands on the baseline grid', () => {
+    const base = createTextLayer({ text: 'Mid', fontSize: 0.04, boxW: 0.4, valign: 'top', x: 0.5 } as any)
+    const layer = { ...base, y: 0.45 + 3 / HD }
+    const { ed } = zoomedEditor({ sailor_localLayers: [layer] })   // rows off: only the margins compete
+    drag(ed, layer.id, 7)
+    const l = ed.localLayers.value[0] as any
+    expect(onUnit(marksAt(l, l.y).baselines[0]!, ed.layoutGridResolved.value.unit)).toBe(true)
+  })
+  it('re-snap puts the capitals on the nearest row top', () => {
+    const base = createTextLayer({ text: 'Grid', fontSize: 0.04, boxW: 0.4, valign: 'top', x: 0.5 } as any)
+    const g = rowsEditor({}).ed.layoutGridResolved.value
+    const target = g.rows[2]!.a
+    const layer = { ...base, y: yForCap(base, target + 8) }
+    const m = marksAt(layer, layer.y)
+    const bottoms = [...g.rows.map(r => r.a + r.w), g.bottom]
+    expect(bottoms.every(b => Math.abs(m.baselines[0]! - b) > 8)).toBe(true)
+    const { ed } = rowsEditor({ sailor_localLayers: [layer] })
+    ed.selectLocal(layer.id)
+    ed.resnapSelected()
+    const l = ed.localLayers.value[0] as any
+    expect(marksAt(l, l.y).capTop).toBeCloseTo(target, 6)
+  })
+  it('resizing a text box never snaps its height (it follows the text)', () => {
+    const layer = createTextLayer({ text: 'Box', fontSize: 0.04, boxW: 0.4, boxH: 0.1, valign: 'top', x: 0.5, y: 0.3 } as any)
+    const { ed } = zoomedEditor({ sailor_localLayers: [layer] })   // rows off: H/2 is a line
+    ed.selectLocal(layer.id)
+    const bottom0 = 0.3 * 675 + 0.1 * 540                            // drawn bottom, screen px
+    ed.startResize('b', pe('pointerdown', 270, bottom0))
+    window.dispatchEvent(pe('pointermove', 270, 675 / 2 - 1))        // 1 px off the middle line
+    expect(ed.snapGuides.value.hy).toBeNull()
+    window.dispatchEvent(pe('pointerup', 270, 675 / 2 - 1))
+    const l = ed.localLayers.value[0] as any
+    expect(l.y * 675 + l.boxH * 540).toBeCloseTo(675 / 2 - 1, 6)
+  })
+})
+
+describe('a box with nothing in reach rounds its top to the baseline grid', () => {
+  const at = (o: number) => createRectLayer({ x: 0.5, y: (378 + o + 27) / HD, w: 0.2, h: 0.05 })   // top = 378 + o design px
+  // An offset whose dropped top (378 + o + 14) is OFF the baseline grid, so rounding is visible.
+  const offGrid = (unit: number) => [1, 2, 3, 5, 7, 9].find(o => !onUnit(378 + o + 14, unit))!
+  it('rounds the top when the grid is shown', () => {
+    const unit = zoomedEditor({}).ed.layoutGridResolved.value.unit
+    const layer = at(offGrid(unit))
+    const { ed } = zoomedEditor({ sailor_localLayers: [layer] })
+    drag(ed, layer.id, 7)                                            // 14 design px
+    const l = ed.localLayers.value[0] as any
+    expect(onUnit(l.y * HD - (l.h * WD) / 2, unit)).toBe(true)
+  })
+  it('places freely with ⌥, and when the grid is hidden', () => {
+    const unit = zoomedEditor({}).ed.layoutGridResolved.value.unit
+    const o = offGrid(unit)
+    const a = zoomedEditor({ sailor_localLayers: [at(o)] }).ed
+    drag(a, a.localLayers.value[0]!.id, 7, { altKey: true })
+    const la = a.localLayers.value[0] as any
+    expect(la.y * HD - (la.h * WD) / 2).toBeCloseTo(378 + o + 14, 6)
+    const b = zoomedEditor({ sailor_localLayers: [at(o)] }).ed
+    b.setLayoutGrid({ ...b.layoutGrid.value, show: false }, false)
+    drag(b, b.localLayers.value[0]!.id, 7)
+    const lb = b.localLayers.value[0] as any
+    expect(lb.y * HD - (lb.h * WD) / 2).toBeCloseTo(378 + o + 14, 6)
   })
 })

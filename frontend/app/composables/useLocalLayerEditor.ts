@@ -32,6 +32,8 @@ import { syncAllWiredWidgets, wiredLayerHeight, type ContentDims } from '~/lib/c
 import { inject, type Ref } from 'vue'
 import type { BrandKit } from '~~/shared/brand/types'
 import { readLayoutGrid, resolveLayoutGrid, layoutGridProperty, type LayoutGrid, type ResolvedLayoutGrid } from '~/lib/frame/layoutGrid'
+import { textMetrics } from '~/lib/frame/textMetrics'
+import { textSnapY, baselineRoundDy, resnapReach, type TextMarks } from '~/lib/frame/gridSnap'
 import { formatFor } from '~/lib/frame/formats'
 import { readFrameSizeState, writeFrameSizeState, type FrameSizeState } from '~/lib/frame/frameSize'
 import { readFrameLight, sanitizeLight, type FrameLight } from '~/lib/compositor/frameLight'
@@ -881,8 +883,21 @@ export function useLocalLayerEditor(opts: EditorOpts) {
     attach()
   }
 
-  /** Snap the primary layer's edges/center to other layers + canvas center.
-   *  Returns adjusted (dx,dy) and sets the visible guide lines. */
+  /** A flowing text layer's capitals and baselines in grid (design) px, for a stored y — what text
+   *  snaps by (spec "Snapping"). Null for anything else, and for rotated text (it snaps as a box). */
+  function gridTextMarks(l: LocalLayer, y: number): TextMarks | null {
+    if (l.kind !== 'text' || l.rotation) return null
+    const { w: Wd, h: Hd } = gridDims()
+    const m = textMetrics(l as TextLayer, Wd)
+    if (!m || !m.baselines.length) return null
+    const top = y * Hd + textVAlignCenterOffset(l, m.boxH) - m.boxH / 2
+    return { capTop: top + m.capTop, baselines: m.baselines.map(b => top + b) }
+  }
+
+  /** Snap the primary layer's edges/center to other layers + canvas center + the layout grid.
+   *  Returns adjusted (dx,dy) and sets the visible guide lines. With the grid shown, text snaps its
+   *  capitals / last baseline to the rows (else its first baseline to the baseline grid), and a box
+   *  with nothing in reach rounds its top to the baseline grid. */
   function applySnap(primaryId: string, ox: number, oy: number, dx: number, dy: number) {
     const W = dims().w, H = dims().h
     const prim = localLayers.value.find(l => l.id === primaryId)
@@ -901,9 +916,24 @@ export function useLocalLayerEditor(opts: EditorOpts) {
     const gl = gridSnapLines.value
     // Threshold in SCREEN px (the artboard's on-screen rect), like resize — steady at any zoom.
     const r = getRect()
-    const res = computeSnapAdjust({ cx, cy, hx, hy }, others, SNAP_PX / (r?.width || W), SNAP_PX / (r?.height || H), [0, 0.5, 1], gl.xs, gl.ys)
-    snapGuides.value = { vx: res.guideX, hy: res.guideY }
-    return { dx: dx + res.dx, dy: dy + res.dy }
+    const thX = SNAP_PX / (r?.width || W), thY = SNAP_PX / (r?.height || H)
+    const res = computeSnapAdjust({ cx, cy, hx, hy }, others, thX, thY, [0, 0.5, 1], gl.xs, gl.ys)
+    let ady = res.dy, guideY = res.guideY
+    if (layoutGrid.value.show) {
+      const g = layoutGridResolved.value, Hd = gridDims().h
+      const marks = gridTextMarks(prim, oy + dy)
+      if (marks) {
+        // Text's y follows only the text rule while the grid is shown (its box edges aren't what you see).
+        const t = textSnapY(marks, g, thY * Hd)
+        ady = t.dy / Hd
+        guideY = t.guide != null ? t.guide / Hd : null
+      } else if (guideY == null) {
+        // Nothing within reach: the top rounds to the baseline grid.
+        ady = baselineRoundDy((cy - hy) * Hd, g.unit) / Hd
+      }
+    }
+    snapGuides.value = { vx: res.guideX, hy: guideY }
+    return { dx: dx + res.dx, dy: dy + ady }
   }
   function startScale(e: PointerEvent) {
     e.preventDefault(); e.stopPropagation()
@@ -1040,7 +1070,7 @@ export function useLocalLayerEditor(opts: EditorOpts) {
           gx = nearest(gl.xs, W, edge, thX)
           if (gx != null) px += gx - edge
         }
-        if (sy) {
+        if (sy && cur?.kind !== 'text') {   // a text box's height follows its text (spec "Snapping")
           const edge = d.start.cy + sy * d.start.h / 2 + (py - d.p0.y)
           gy = nearest(gl.ys, H, edge, thY)
           if (gy != null) py += gy - edge
@@ -1098,8 +1128,8 @@ export function useLocalLayerEditor(opts: EditorOpts) {
   // Keys off the same `gridSnapLines` the drag-snap uses, so a re-snapped layer's
   // edges always land exactly on the lines the overlay draws.
 
-  /** Snap each currently-selected layer's box edges to the nearest grid line,
-   *  independently per layer, in one history step. A large threshold (0.5) means
+  /** Snap each currently-selected layer to the grid: box edges to the nearest lines; text by its
+   *  capitals and baselines. Independently per layer, in one history step. A large threshold (0.5) means
    *  it always finds the nearest line rather than requiring the layer to already
    *  be close — "re-snap", not "snap if close". No-op with the grid off or an
    *  empty selection. */
@@ -1109,6 +1139,7 @@ export function useLocalLayerEditor(opts: EditorOpts) {
     const sel = selectedLayers.value
     if (!sel.length) return
     const W = dims().w, H = dims().h
+    const g = layoutGridResolved.value, Hd = gridDims().h
     const patches = new Map<string, { x: number; y: number }>()
     for (const l of sel) {
       const b = boxPx(l)
@@ -1116,7 +1147,11 @@ export function useLocalLayerEditor(opts: EditorOpts) {
       // The DRAWN centre (valign offset, as hitTest); the offset is unchanged by a move, so
       // the adjustment applies to the stored y directly.
       const res = computeSnapAdjust({ cx: l.x, cy: l.y + textVAlignCenterOffset(l, b.h) / H, hx, hy }, [], 0.5, 0.5, [], gl.xs, gl.ys)
-      if (res.dx || res.dy) patches.set(l.id, { x: l.x + res.dx, y: l.y + res.dy })
+      let dy = res.dy
+      // Text: capitals / last baseline to the nearest row, else the baseline grid — as a move does.
+      const marks = gridTextMarks(l, l.y)
+      if (marks) dy = textSnapY(marks, g, resnapReach(g)).dy / Hd
+      if (res.dx || dy) patches.set(l.id, { x: l.x + res.dx, y: l.y + dy })
     }
     if (!patches.size) return
     recordHistory()
