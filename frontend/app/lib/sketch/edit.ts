@@ -2,6 +2,7 @@ import type { SketchDoc, EntityId, ConstraintKind, LineEntity, CircleEntity, Pat
 import { getEntity, getPoint } from './model'
 import { freshId } from './ids'
 import { fillsWithin, freshFillId, mapSeed, fillAreas, moveAreas, fillCopiedAreas, type FillArea } from './fills'
+import { radialAngles, linearFactors, rotateAbout, shiftBy, alongPoints, selectionCentre, type Spacing } from './repeatModes'
 
 export function addPoint(doc: SketchDoc, x: number, y: number, opts: { fixed?: boolean; construction?: boolean } = {}): EntityId {
   const id = freshId(doc, 'p')
@@ -267,9 +268,12 @@ function copyClosureConstraints(doc: SketchDoc, map: Map<EntityId, EntityId>, mi
   }
 }
 
-export function repeatEntities(doc: SketchDoc, ids: EntityId[], center: EntityId, count: number): EntityId[][] {
-  count = Math.round(count)
-  if (count < 2 || count > 64) return []
+/** Radial repeat: copies k = 1…count−1 turned about `center` by
+ *  radialAngles(count, sweep) (pen stage 8, Ruling 13 — the default sweep is
+ *  the full turn, exactly as before), each point tied by rotatedFrom. */
+export function repeatEntities(doc: SketchDoc, ids: EntityId[], center: EntityId, count: number, sweep = 360): EntityId[][] {
+  const angles = radialAngles(count, sweep)
+  if (!angles.length) return []
   const ce = getPoint(doc, center)
   if (!ce) return []
   // check the full closure resolves before creating anything
@@ -280,18 +284,16 @@ export function repeatEntities(doc: SketchDoc, ids: EntityId[], center: EntityId
   const srcAreas = fillAreas(doc, carried, p => p)
   const areas: FillArea[] = []
   const all: EntityId[][] = []
-  for (let k = 1; k < count; k++) {
-    const angle = k * (360 / count)
+  for (const angle of angles) {
     const rad = angle * Math.PI / 180
-    const co = Math.cos(rad), si = Math.sin(rad)
+    const place = rotateAbout(ce, angle)
     const map = new Map<EntityId, EntityId>()
     const created: EntityId[] = []
     for (const pid of pts) {
       // the rotation center, if itself part of the closure, is shared across copies
       if (pid === center) { map.set(pid, pid); continue }
-      const p = getPoint(doc, pid)!
-      const dx = p.x - ce.x, dy = p.y - ce.y
-      const nid = addPoint(doc, ce.x + co * dx - si * dy, ce.y + si * dx + co * dy)
+      const q = place(getPoint(doc, pid)!)
+      const nid = addPoint(doc, q.x, q.y)
       map.set(pid, nid)
       created.push(nid)
       addConstraint(doc, 'rotatedFrom', [nid, pid, center], angle)
@@ -300,11 +302,80 @@ export function repeatEntities(doc: SketchDoc, ids: EntityId[], center: EntityId
     created.push(...copyStructure(doc, ids, map, false, ents))
     copyClosureConstraints(doc, map)
     copyFills(doc, carried, map, ents, { turn: rad })
-    areas.push(...moveAreas(srcAreas, p => ({ x: ce.x + co * (p.x - ce.x) - si * (p.y - ce.y), y: ce.y + si * (p.x - ce.x) + co * (p.y - ce.y) }), sd => mapSeed(sd, copiedId(map, ents), { turn: rad })))
+    areas.push(...moveAreas(srcAreas, place, sd => mapSeed(sd, copiedId(map, ents), { turn: rad })))
     all.push(created)
   }
   // copies landing over their neighbours are cut into several areas: fill
   // every one inside a copied filled area
+  fillCopiedAreas(doc, areas)
+  return all
+}
+
+/** Linear repeat (pen stage 8, Ruling 14): copies k = 1…count−1 at
+ *  orig + f·(to − from), f = k (Step) or k/(count−1) (Span), each point tied
+ *  by translatedFrom [copy, orig, from, to] value f. [] when nothing can be made. */
+export function translateEntities(doc: SketchDoc, ids: EntityId[], from: EntityId, to: EntityId, count: number, spacing: Spacing): EntityId[][] {
+  const factors = linearFactors(count, spacing)
+  const F = getPoint(doc, from), T = getPoint(doc, to)
+  if (!factors.length || !F || !T || from === to) return []
+  const pts = rawPointRefs(doc, ids)
+  if (!pts.every(pid => !!getPoint(doc, pid)) || pts.includes(from) || pts.includes(to)) return []
+  const carried = fillsWithin(doc, new Set([...pts, ...ids]), ids.flatMap(id => getEntity(doc, id) ?? []))
+  const srcAreas = fillAreas(doc, carried, p => p)
+  const vec = { x: T.x - F.x, y: T.y - F.y }
+  const areas: FillArea[] = []
+  const all: EntityId[][] = []
+  for (const f of factors) {
+    const place = shiftBy(vec, f)
+    const map = new Map<EntityId, EntityId>()
+    const created: EntityId[] = []
+    for (const pid of pts) {
+      const q = place(getPoint(doc, pid)!)
+      const nid = addPoint(doc, q.x, q.y)
+      map.set(pid, nid); created.push(nid)
+      addConstraint(doc, 'translatedFrom', [nid, pid, from, to], f)
+    }
+    const ents = new Map<EntityId, EntityId>()
+    created.push(...copyStructure(doc, ids, map, false, ents))
+    copyClosureConstraints(doc, map)
+    copyFills(doc, carried, map, ents, {})
+    areas.push(...moveAreas(srcAreas, place, sd => mapSeed(sd, copiedId(map, ents))))
+    all.push(created)
+  }
+  fillCopiedAreas(doc, areas)
+  return all
+}
+
+/** Along a path (pen stage 8, Ruling 15): count − 1 copies moved so the
+ *  selection's centre lands on points spread evenly along `along`; not tied
+ *  to the original. [] for a Bézier path, a path being repeated, a bad count. */
+export function copyAlongPath(doc: SketchDoc, ids: EntityId[], along: EntityId, count: number): EntityId[][] {
+  if (ids.includes(along)) return []
+  const at = alongPoints(doc, along, count), c = selectionCentre(doc, ids)
+  if (!at || !c) return []
+  const pts = rawPointRefs(doc, ids)
+  if (!pts.every(pid => !!getPoint(doc, pid))) return []
+  const carried = fillsWithin(doc, new Set([...pts, ...ids]), ids.flatMap(id => getEntity(doc, id) ?? []))
+  const srcAreas = fillAreas(doc, carried, p => p)
+  const areas: FillArea[] = []
+  const all: EntityId[][] = []
+  for (const q of at) {
+    const place = shiftBy({ x: q.x - c.x, y: q.y - c.y }, 1)
+    const map = new Map<EntityId, EntityId>()
+    const created: EntityId[] = []
+    for (const pid of pts) {
+      const src = getPoint(doc, pid)!
+      const r = place(src)
+      const nid = addPoint(doc, r.x, r.y, src.fixed ? { fixed: true } : {})
+      map.set(pid, nid); created.push(nid)
+    }
+    const ents = new Map<EntityId, EntityId>()
+    created.push(...copyStructure(doc, ids, map, false, ents))
+    copyClosureConstraints(doc, map)
+    copyFills(doc, carried, map, ents, {})
+    areas.push(...moveAreas(srcAreas, place, sd => mapSeed(sd, copiedId(map, ents))))
+    all.push(created)
+  }
   fillCopiedAreas(doc, areas)
   return all
 }
