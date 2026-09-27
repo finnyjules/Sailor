@@ -575,6 +575,21 @@ const FLOWS: FamilyFlow[] = [
       face_enhancement: true, face_enhancement_strength: 0.8, face_enhancement_creativity: 0, output_format: 'png',
     },
   },
+  // Remove background on Replicate (family image-repair, step 3 R3.5), no backup:
+  // the Python call as it is (runner-paid-repair.unit.spec.ts has every class).
+  {
+    family: 'image-repair',
+    label: 'RemoveBackgroundNode on Replicate',
+    prompt: {
+      11: imageCard('image.png'),
+      1: { class_type: 'RemoveBackgroundNode', inputs: { model: '851-labs/bg-remover', image: ['11', 0] } },
+      2: outImage('1'),
+    },
+    files: ['image.png'],
+    provider: 'replicate',
+    endpoint: '851-labs/background-remover',
+    body: { image: storageUrl('image') },
+  },
   // Person swap (video) on fal's Pixverse Swap (family person-swap-video), no
   // backup (Replicate has no Pixverse Swap): the whole PersonSwapVideo node
   // runs only in the runner; there is no ComfyUI path at all (its Python

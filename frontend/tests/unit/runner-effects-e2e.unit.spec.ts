@@ -701,7 +701,11 @@ describe('R2.12 · every effects family off: the needs-engine list over every sa
   }, 600_000)
 
   projectsIt('equals the pinned per-graph hashes (fixtures/runner-effects-e2e-needs-engine.json; R212_PIN=1 writes it)', async () => {
-    const effectsOff: ReadonlySet<RunnerFamily> = new Set(RUNNER_FAMILIES.filter(x => !(EFFECT_FAMILIES as readonly string[]).includes(x)))
+    // Families added after the pin that take saved graphs' own nodes (R3.5's image-repair: Upscale, Restore,
+    // Remove background) are left off too: with them off the list is exactly as before them
+    // (runner-paid-repair.unit.spec.ts, rule 15), so the pin keeps measuring the effects alone.
+    const LATER: readonly string[] = ['image-repair']
+    const effectsOff: ReadonlySet<RunnerFamily> = new Set(RUNNER_FAMILIES.filter(x => !(EFFECT_FAMILIES as readonly string[]).includes(x) && !LATER.includes(x)))
     const sets: Record<string, ReadonlySet<RunnerFamily>> = { frameCards: FRAME_CARDS, allButEffects: effectsOff }
     const now: Record<string, { prompt: string } & Record<string, string>> = {}
     for (const g of await savedGraphs()) {

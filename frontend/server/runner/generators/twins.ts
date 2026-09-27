@@ -187,6 +187,7 @@ import { falNanoBananaEdit } from './edit'
 import { HAPPYHORSE_11_ID, happyHorse11OnReplicate } from './happyHorse11'
 import { GROK_IMAGINE_VIDEO_15_ID, grokImagineVideo15OnReplicate } from './grokImagineVideo15'
 import { arOr, maybeSetSeed, optBool, optEnum, optStr } from './opts'
+import { ENHANCE_ENGINES, UPSCALE_ENGINES } from '#shared/runner/repair'
 import type { VideoBuildArgs } from './types'
 import { KLING_LAST_FRAME_NEEDS_FIRST } from './video'
 
@@ -333,6 +334,12 @@ export const RUNNER_ROUTES: Readonly<Record<string, Route>> = {
   ...Object.fromEntries([
     'DescribeImageNode', 'DescribeImageRemoteNode', 'DescribeVideoNode', 'ExtractTextNode', 'FindObjectsNode',
   ].map(ct => [ct, r('replicate', null, 'no same-model twin on fal is carded')])),
+  // R3.5, upscale, enhance, restore and remove background (family image-repair): Replicate, as Python.
+  // The upscalers by engine; fal's Topaz is another app with its own settings, fal's ESRGAN bills by compute time.
+  ...Object.fromEntries([
+    ...UPSCALE_ENGINES.map(m => `UpscaleImageNode:${m}`), ...ENHANCE_ENGINES.map(m => `EnhanceDetailNode:${m}`),
+    'RestorePhotoNode', 'RestorePhotoRemoteNode', 'RemoveBackgroundNode', 'RemoveBackgroundRemoteNode',
+  ].map(key => [key, r('replicate', null, 'no same-model twin on fal with the same settings is carded')])),
 }
 
 // ── Generate video: the two models moved to fal first ──────────────────────

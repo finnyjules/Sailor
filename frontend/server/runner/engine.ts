@@ -33,7 +33,8 @@ import { createMemoryHeldBytes, type HeldBytes } from './heldBytes'
 import { createMemoryKeptBytes, type KeptBytes, type KeptExt } from './keptBytes'
 import { createFileAccess } from './fileAccess'
 import type { BackupSettings } from './config'
-import { linkedFileCheck, measuredInputProblem, requestProblems, unreadableInputWords } from './requestRules'
+import { linkedFileCheck, measuredInputProblem, pictureChangedWords, requestProblems, unreadableInputWords } from './requestRules'
+import { startPictureSizes } from './repairSizes'
 import { isReusable, requestFingerprint } from './fingerprint'
 import { assertFilesOwned, collectInputFiles, parseInputFileRef, type OwnershipCheck } from './inputs'
 import { shotRefFilenames } from './shotRefs'
@@ -1064,6 +1065,14 @@ export function createEngine(deps: EngineDeps) {
       const tooLarge = measuredInputProblem(take.prompt[id]!.class_type, inputPixels, families, take.prompt[id]!.inputs ?? {})
         ?? (deps.hosted() && measured.unreadable ? unreadableInputWords(take.prompt[id]!.class_type) : null)
       if (tooLarge) throw new Error(tooLarge)
+      // Upscale and Enhance detail (R3.5): the hold was priced on the size the
+      // start of the run measured (repairSizes.ts); a picture that would now
+      // cost more (a file changed meanwhile) is refused, its hold released.
+      const heldPixels = resuming ? undefined : take.measured?.[id]?.pixels
+      if (heldPixels !== undefined
+        && nodeCredits(take.prompt[id]!, inputPixels, families) > nodeCredits(take.prompt[id]!, heldPixels, families)) {
+        throw new Error(pictureChangedWords(take.prompt[id]!.class_type))
+      }
       // A file its model refuses (Product shot on Bria: over 12 MB, or not
       // JPEG, PNG or WebP; HappyHorse 1.1: over 20 MB; requestRules.ts),
       // before the hand-off; one too large by its size on disk is refused
@@ -1893,6 +1902,17 @@ export function createEngine(deps: EngineDeps) {
           const tooLarge = effectOutRefusal(c.resized, c.classType, await pictureMeta(bytes), deps.hosted())
           if (tooLarge) throw refuse(tooLarge, 400, { nodeId: c.resized.nodeId, classType: c.resized.classType, file: c.file.filename })
         }
+      }
+    }
+    // Upscale and Enhance detail (R3.5), hosted: the size of each one's picture,
+    // by the hosted gate's own walk (repairSizes.ts), before anything is held.
+    // One the price can't cover is refused now; the others' hold is priced on
+    // it, and their turn refuses a picture that has grown since.
+    if (deps.hosted()) {
+      for (const [index, p] of prompts.entries()) {
+        const sized = await startPictureSizes(p, f => files.read(f))
+        if (sized.problem) throw refuse(sized.problem.message, 400, { nodeId: sized.problem.nodeId, classType: sized.problem.classType })
+        for (const [nodeId, pixels] of Object.entries(sized.pixels)) measured[index]![nodeId] = { seconds: {}, sha: {}, pixels }
       }
     }
     await deps.metering.moderate(prompts, prompts.flatMap(p => staticWiredTexts(p)))

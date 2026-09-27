@@ -75,6 +75,13 @@ const EDIT_BASE: Record<string, Record<string, unknown>> = {
   DescribeVideoNode: { model: 'Gemini 2.5 Flash', video_url: 'https://example.test/clip.mp4', prompt: 'Describe this video in detail.' },
   ExtractTextNode: { model: 'ByteDance Dolphin', image: LINK },
   FindObjectsNode: { model: 'YOLO-World', image: LINK, query: 'person, car, dog', confidence: 0.25 },
+  // Upscale, enhance, restore and remove background (R3.5): the picture; the rest at the node's defaults.
+  UpscaleImageNode: { image: LINK },
+  EnhanceDetailNode: { image: LINK },
+  RestorePhotoNode: { model: 'Flux Kontext · Restore', image: LINK, safety_tolerance: 2, output_format: 'png' },
+  RestorePhotoRemoteNode: { image: LINK, safety_tolerance: '2', output_format: 'png' },
+  RemoveBackgroundNode: { model: '851-labs/bg-remover', image: LINK },
+  RemoveBackgroundRemoteNode: { image: LINK },
   // sync-3 lip-sync (Task F22): the studio's face video and sound.
   LipSyncNode: {
     engine: 'sync-3',

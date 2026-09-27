@@ -114,6 +114,20 @@ export const PAID_RATES: Record<string, PaidRate> = {
     service: 'replicate', source: 'https://replicate.com/zsxkib/yolo-world', read: '2026-09-27', confidence: 'estimate',
   },
   // (Describe an image's moondream2 is priced by its edit card, editRates.ts: $0.002, an estimate.)
+  // R3.5, restore and remove background (Upscale and Enhance detail keep their edit cards, editRates.ts).
+  // Restore an old photo (and its twin): the page's billing table, "$0.04 per output image"
+  // (`image_output_count`; "or 25 images for $1").
+  'flux-kontext-apps/restore-image': {
+    unit: 'per_call', usd: 0.04,
+    service: 'replicate', source: 'https://replicate.com/flux-kontext-apps/restore-image', read: '2026-09-27', confidence: 'verified',
+  },
+  // Remove background (and its twin), billed by GPU time (Nvidia T4, $0.000225/s): the page says
+  // "approximately $0.00037 to run", written here rounded up to the next hundredth of a cent (the
+  // figure the price book has charged it at). An estimate until the live check measures it.
+  '851-labs/background-remover': {
+    unit: 'gpu_ceiling', usd: 0.0004, note: 'T4 at $0.000225/s; page: approximately $0.00037 to run (read 2026-09-27), rounded up to the next $0.0001',
+    service: 'replicate', source: 'https://replicate.com/851-labs/background-remover', read: '2026-09-27', confidence: 'estimate',
+  },
 }
 
 const own = <T>(o: Record<string, T>, k: string): T | undefined =>

@@ -17,6 +17,10 @@ import {
 } from './effects'
 import { SHADER_ASPECTS, shaderBakeTaken } from './shaderBakeKey'
 import {
+  ENHANCE_ENGINES, REMOVE_BACKGROUND_MODELS, REPAIR_CLASSES, REPAIR_OUTPUT_FORMATS, RESTORE_PHOTO_MODELS,
+  TOPAZ_ENHANCE_MODELS, TOPAZ_SUBJECT_DETECTION, TOPAZ_UPSCALE_FACTORS, UPSCALE_ENGINES,
+} from './repair'
+import {
   BRAINSTORM_ANGLES, CHAT_LLM_MODELS, IMPROVE_PROMPT_MODELS, IMPROVE_PROMPT_TARGETS, REASON_MODELS, REWRITE_MODELS, REWRITE_TONES,
   SUMMARIZE_LENGTHS, SUMMARIZE_MODELS, TRANSLATE_LANGUAGES,
 } from './llm'
@@ -318,7 +322,16 @@ export const IMAGE_OUTPUT_CLASSES: ReadonlySet<string> = new Set([
   'EditImageNode', 'DevelopImageNode', 'RelightNode', 'BlendSceneNode',
   'RemoveObjectNode', 'TextEditNode', 'RecolorObjectNode', 'SwapBackgroundNode', 'SwapProductNode', 'PersonSwap',
   'GenerateFromReferencesNode', 'RotateCameraNode', 'ProductShotNode', 'RestyleFromImageNode', 'FixFacesNode', 'FaceSwap',
+  // R3.5 (image-repair): a picture only while that family is on (carriesImage, PAID_PICTURE_FAMILY).
+  ...REPAIR_CLASSES,
 ])
+
+/**
+ * The picture classes a paid family adds (R3): each one's output 0 carries a
+ * picture only while its family is on. With it off, a wire from it is no
+ * picture to the runner, exactly as before R3 (rule 15).
+ */
+const PAID_PICTURE_FAMILY: Readonly<Record<string, RunnerFamily>> = Object.fromEntries(REPAIR_CLASSES.map(c => [c, 'image-repair' as const]))
 
 /**
  * Classes whose picture outputs are other slots than output 0 alone, or that
@@ -866,6 +879,85 @@ export const RUNNER_NODE_RULES: Readonly<Record<string, RunnerNodeRule>> = {
     },
     inputCheck: 'shader-bake',
   },
+  // ── image-repair (step 3, R3.5): Upscale, Enhance detail, Restore an old
+  // photo and Remove background (+ the twins of the last two), on Replicate.
+  // The picture is a linked picture (the handed-off file); Upscale's and
+  // Enhance's prompts take a text wire (R0: the value arrives as typed); every
+  // other setting is a widget as ComfyUI validates it (define_schema's
+  // options and bounds). The two engine pickers keep their `model` per
+  // engine. A wired widget leaves the node to the engine.
+  UpscaleImageNode: {
+    models: Object.fromEntries(UPSCALE_ENGINES.map(m => [m, 'image-repair' as const])),
+    mustLink: ['image'],
+    imageInputs: ['image'],
+    valueInputs: { prompt: ['text'], negative_prompt: ['text'] },
+    required: ['prompt', 'negative_prompt'],
+    widgets: {
+      model: { type: 'COMBO', required: true, options: UPSCALE_ENGINES },
+      scale_factor: { type: 'FLOAT', required: true, min: 1, max: 10 },
+      creativity: { type: 'FLOAT', required: true, min: 0, max: 1 },
+      resemblance: { type: 'FLOAT', required: true, min: 0, max: 3 },
+      num_inference_steps: { type: 'INT', required: true, min: 10, max: 50 },
+      seed: { type: 'INT', required: true, min: 0, max: 0xFFFFFFFF },
+      face_enhance: { type: 'BOOLEAN', required: true },
+      topaz_enhance_model: { type: 'COMBO', required: true, options: TOPAZ_ENHANCE_MODELS },
+      topaz_upscale_factor: { type: 'COMBO', required: true, options: TOPAZ_UPSCALE_FACTORS },
+      topaz_subject_detection: { type: 'COMBO', required: true, options: TOPAZ_SUBJECT_DETECTION },
+      topaz_output_format: { type: 'COMBO', required: true, options: REPAIR_OUTPUT_FORMATS },
+      topaz_face_creativity: { type: 'FLOAT', required: true, min: 0, max: 1 },
+      topaz_face_strength: { type: 'FLOAT', required: true, min: 0, max: 1 },
+      crystal_creativity: { type: 'FLOAT', required: true, min: 0, max: 10 },
+      crystal_output_format: { type: 'COMBO', required: true, options: REPAIR_OUTPUT_FORMATS },
+    },
+  },
+  EnhanceDetailNode: {
+    models: Object.fromEntries(ENHANCE_ENGINES.map(m => [m, 'image-repair' as const])),
+    mustLink: ['image'],
+    imageInputs: ['image'],
+    valueInputs: { prompt: ['text'], negative_prompt: ['text'] },
+    required: ['prompt', 'negative_prompt'],
+    widgets: {
+      model: { type: 'COMBO', required: true, options: ENHANCE_ENGINES },
+      detail_strength: { type: 'FLOAT', required: true, min: 0, max: 1 },
+      resemblance: { type: 'FLOAT', required: true, min: 0, max: 3 },
+      num_inference_steps: { type: 'INT', required: true, min: 10, max: 50 },
+      seed: { type: 'INT', required: true, min: 0, max: 0xFFFFFFFF },
+      topaz_enhance_model: { type: 'COMBO', required: true, options: TOPAZ_ENHANCE_MODELS },
+      topaz_subject_detection: { type: 'COMBO', required: true, options: TOPAZ_SUBJECT_DETECTION },
+      topaz_output_format: { type: 'COMBO', required: true, options: REPAIR_OUTPUT_FORMATS },
+      refine_steps: { type: 'INT', required: true, min: 10, max: 50 },
+    },
+  },
+  RestorePhotoNode: {
+    family: 'image-repair',
+    mustLink: ['image'],
+    imageInputs: ['image'],
+    widgets: {
+      model: { type: 'COMBO', required: true, options: RESTORE_PHOTO_MODELS },
+      safety_tolerance: { type: 'INT', required: true, min: 1, max: 6 },
+      output_format: { type: 'COMBO', required: true, options: REPAIR_OUTPUT_FORMATS },
+    },
+  },
+  RestorePhotoRemoteNode: {
+    family: 'image-repair',
+    mustLink: ['image'],
+    imageInputs: ['image'],
+    widgets: {
+      safety_tolerance: { type: 'STRING', required: true },
+      output_format: { type: 'COMBO', required: true, options: REPAIR_OUTPUT_FORMATS },
+    },
+  },
+  RemoveBackgroundNode: {
+    family: 'image-repair',
+    mustLink: ['image'],
+    imageInputs: ['image'],
+    widgets: { model: { type: 'COMBO', required: true, options: REMOVE_BACKGROUND_MODELS } },
+  },
+  RemoveBackgroundRemoteNode: {
+    family: 'image-repair',
+    mustLink: ['image'],
+    imageInputs: ['image'],
+  },
   // ── effects-* (step 3, R2): the still-picture effects (./effects.ts, server/runner/effects/) ──
   // Rows built from the real node schemas (./effectSchemas.generated.ts), one
   // per ported class; each needs its family and `cards`.
@@ -918,6 +1010,8 @@ export const SWITCHED_CLASSES: Readonly<Record<string, RunnerFamily>> = {
   DescribeVideoNode: 'describe',
   ExtractTextNode: 'describe',
   FindObjectsNode: 'describe',
+  // R3.5: upscale, enhance, restore and remove background.
+  ...Object.fromEntries(REPAIR_CLASSES.map(c => [c, 'image-repair' as const])),
 }
 
 /**
@@ -1150,6 +1244,10 @@ function carriesImage(prompt: ApiPrompt, link: [string, number], families: Reado
   if (Object.prototype.hasOwnProperty.call(PICTURE_OUTPUTS, from.class_type)) {
     if (Object.prototype.hasOwnProperty.call(EFFECT_FAMILY_OF, from.class_type) && !effectFamilyOn(from.class_type, families)) return false
     return families.has('cards') && PICTURE_OUTPUTS[from.class_type]!.includes(link[1])
+  }
+  // A paid family's picture (R3.5's image-repair), only while that family is on.
+  if (Object.prototype.hasOwnProperty.call(PAID_PICTURE_FAMILY, from.class_type)) {
+    return link[1] === 0 && familyOn(PAID_PICTURE_FAMILY[from.class_type]!, families)
   }
   return link[1] === 0 && IMAGE_OUTPUT_CLASSES.has(from.class_type)
 }

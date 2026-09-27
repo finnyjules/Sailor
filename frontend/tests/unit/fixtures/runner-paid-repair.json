@@ -1,0 +1,3772 @@
+{
+ "cases": [
+  {
+   "answers": [
+    {
+     "output": [
+      "https://r.test/repaired.png"
+     ]
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "philz1337x/clarity-upscaler",
+     "payload": {
+      "creativity": 0.35,
+      "image": "IMG:image",
+      "negative_prompt": "(worst quality, low quality, normal quality:2)",
+      "num_inference_steps": 18,
+      "output_format": "png",
+      "prompt": "masterpiece, best quality, highres",
+      "resemblance": 0.6,
+      "scale_factor": 2.0
+     },
+     "payload_json": "{\"creativity\": 0.35, \"image\": \"IMG:image\", \"negative_prompt\": \"(worst quality, low quality, normal quality:2)\", \"num_inference_steps\": 18, \"output_format\": \"png\", \"prompt\": \"masterpiece, best quality, highres\", \"resemblance\": 0.6, \"scale_factor\": 2.0}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "UpscaleImageNode",
+   "files": {
+    "https://r.test/repaired.png": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/AOfu52Fe818w5JtILhXK51AHIB4SYXsP7QLA830WOAyj+wbziPxt145DCAMZu9YZtjUACABtaxrwwMvWJWWKrCyfqgfRPER+MwUeAe75WnLsB+PxY/j0EzE2sy8K4cS/yLaBOgHihATGE8F9j2lFVtlSQuGFOV2EZgnaFzEBYVFkZabEESENYPtNQ7UBXTMTgiiqG9Ll98BCSHEU9e0AAAAASUVORK5CYII="
+   },
+   "gets": [
+    {
+     "status": 200,
+     "url": "https://r.test/repaired.png"
+    }
+   ],
+   "name": "upscale \u00b7 Clarity default",
+   "output": [
+    {
+     "image": "https://r.test/repaired.png"
+    }
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "creativity": 0.35,
+    "crystal_creativity": 0.0,
+    "crystal_output_format": "png",
+    "face_enhance": false,
+    "model": "Clarity",
+    "negative_prompt": "(worst quality, low quality, normal quality:2)",
+    "num_inference_steps": 18,
+    "prompt": "masterpiece, best quality, highres",
+    "resemblance": 0.6,
+    "scale_factor": 2.0,
+    "seed": 0,
+    "topaz_enhance_model": "Standard V2",
+    "topaz_face_creativity": 0.0,
+    "topaz_face_strength": 0.8,
+    "topaz_output_format": "png",
+    "topaz_subject_detection": "None",
+    "topaz_upscale_factor": "2x"
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": [
+      "https://r.test/repaired.png"
+     ]
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "philz1337x/crystal-upscaler",
+     "payload": {
+      "creativity": 0.0,
+      "image": "IMG:image",
+      "output_format": "png",
+      "scale_factor": 2.0
+     },
+     "payload_json": "{\"creativity\": 0.0, \"image\": \"IMG:image\", \"output_format\": \"png\", \"scale_factor\": 2.0}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "UpscaleImageNode",
+   "files": {
+    "https://r.test/repaired.png": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/AOfu52Fe818w5JtILhXK51AHIB4SYXsP7QLA830WOAyj+wbziPxt145DCAMZu9YZtjUACABtaxrwwMvWJWWKrCyfqgfRPER+MwUeAe75WnLsB+PxY/j0EzE2sy8K4cS/yLaBOgHihATGE8F9j2lFVtlSQuGFOV2EZgnaFzEBYVFkZabEESENYPtNQ7UBXTMTgiiqG9Ll98BCSHEU9e0AAAAASUVORK5CYII="
+   },
+   "gets": [
+    {
+     "status": 200,
+     "url": "https://r.test/repaired.png"
+    }
+   ],
+   "name": "upscale \u00b7 Crystal default",
+   "output": [
+    {
+     "image": "https://r.test/repaired.png"
+    }
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "creativity": 0.35,
+    "crystal_creativity": 0.0,
+    "crystal_output_format": "png",
+    "face_enhance": false,
+    "model": "Crystal",
+    "negative_prompt": "(worst quality, low quality, normal quality:2)",
+    "num_inference_steps": 18,
+    "prompt": "masterpiece, best quality, highres",
+    "resemblance": 0.6,
+    "scale_factor": 2.0,
+    "seed": 0,
+    "topaz_enhance_model": "Standard V2",
+    "topaz_face_creativity": 0.0,
+    "topaz_face_strength": 0.8,
+    "topaz_output_format": "png",
+    "topaz_subject_detection": "None",
+    "topaz_upscale_factor": "2x"
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": [
+      "https://r.test/repaired.png"
+     ]
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "nightmareai/real-esrgan",
+     "payload": {
+      "face_enhance": false,
+      "image": "IMG:image",
+      "scale": 2.0
+     },
+     "payload_json": "{\"face_enhance\": false, \"image\": \"IMG:image\", \"scale\": 2.0}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "UpscaleImageNode",
+   "files": {
+    "https://r.test/repaired.png": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/AOfu52Fe818w5JtILhXK51AHIB4SYXsP7QLA830WOAyj+wbziPxt145DCAMZu9YZtjUACABtaxrwwMvWJWWKrCyfqgfRPER+MwUeAe75WnLsB+PxY/j0EzE2sy8K4cS/yLaBOgHihATGE8F9j2lFVtlSQuGFOV2EZgnaFzEBYVFkZabEESENYPtNQ7UBXTMTgiiqG9Ll98BCSHEU9e0AAAAASUVORK5CYII="
+   },
+   "gets": [
+    {
+     "status": 200,
+     "url": "https://r.test/repaired.png"
+    }
+   ],
+   "name": "upscale \u00b7 Real-ESRGAN default",
+   "output": [
+    {
+     "image": "https://r.test/repaired.png"
+    }
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "creativity": 0.35,
+    "crystal_creativity": 0.0,
+    "crystal_output_format": "png",
+    "face_enhance": false,
+    "model": "Real-ESRGAN",
+    "negative_prompt": "(worst quality, low quality, normal quality:2)",
+    "num_inference_steps": 18,
+    "prompt": "masterpiece, best quality, highres",
+    "resemblance": 0.6,
+    "scale_factor": 2.0,
+    "seed": 0,
+    "topaz_enhance_model": "Standard V2",
+    "topaz_face_creativity": 0.0,
+    "topaz_face_strength": 0.8,
+    "topaz_output_format": "png",
+    "topaz_subject_detection": "None",
+    "topaz_upscale_factor": "2x"
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": [
+      "https://r.test/repaired.png"
+     ]
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "recraft-ai/recraft-crisp-upscale",
+     "payload": {
+      "image": "IMG:image"
+     },
+     "payload_json": "{\"image\": \"IMG:image\"}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "UpscaleImageNode",
+   "files": {
+    "https://r.test/repaired.png": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/AOfu52Fe818w5JtILhXK51AHIB4SYXsP7QLA830WOAyj+wbziPxt145DCAMZu9YZtjUACABtaxrwwMvWJWWKrCyfqgfRPER+MwUeAe75WnLsB+PxY/j0EzE2sy8K4cS/yLaBOgHihATGE8F9j2lFVtlSQuGFOV2EZgnaFzEBYVFkZabEESENYPtNQ7UBXTMTgiiqG9Ll98BCSHEU9e0AAAAASUVORK5CYII="
+   },
+   "gets": [
+    {
+     "status": 200,
+     "url": "https://r.test/repaired.png"
+    }
+   ],
+   "name": "upscale \u00b7 Recraft Crisp default",
+   "output": [
+    {
+     "image": "https://r.test/repaired.png"
+    }
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "creativity": 0.35,
+    "crystal_creativity": 0.0,
+    "crystal_output_format": "png",
+    "face_enhance": false,
+    "model": "Recraft Crisp",
+    "negative_prompt": "(worst quality, low quality, normal quality:2)",
+    "num_inference_steps": 18,
+    "prompt": "masterpiece, best quality, highres",
+    "resemblance": 0.6,
+    "scale_factor": 2.0,
+    "seed": 0,
+    "topaz_enhance_model": "Standard V2",
+    "topaz_face_creativity": 0.0,
+    "topaz_face_strength": 0.8,
+    "topaz_output_format": "png",
+    "topaz_subject_detection": "None",
+    "topaz_upscale_factor": "2x"
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": [
+      "https://r.test/repaired.png"
+     ]
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "topazlabs/image-upscale",
+     "payload": {
+      "enhance_model": "Standard V2",
+      "face_enhancement": false,
+      "image": "IMG:image",
+      "output_format": "png",
+      "subject_detection": "None",
+      "upscale_factor": "2x"
+     },
+     "payload_json": "{\"enhance_model\": \"Standard V2\", \"face_enhancement\": false, \"image\": \"IMG:image\", \"output_format\": \"png\", \"subject_detection\": \"None\", \"upscale_factor\": \"2x\"}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "UpscaleImageNode",
+   "files": {
+    "https://r.test/repaired.png": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/AOfu52Fe818w5JtILhXK51AHIB4SYXsP7QLA830WOAyj+wbziPxt145DCAMZu9YZtjUACABtaxrwwMvWJWWKrCyfqgfRPER+MwUeAe75WnLsB+PxY/j0EzE2sy8K4cS/yLaBOgHihATGE8F9j2lFVtlSQuGFOV2EZgnaFzEBYVFkZabEESENYPtNQ7UBXTMTgiiqG9Ll98BCSHEU9e0AAAAASUVORK5CYII="
+   },
+   "gets": [
+    {
+     "status": 200,
+     "url": "https://r.test/repaired.png"
+    }
+   ],
+   "name": "upscale \u00b7 Topaz default",
+   "output": [
+    {
+     "image": "https://r.test/repaired.png"
+    }
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "creativity": 0.35,
+    "crystal_creativity": 0.0,
+    "crystal_output_format": "png",
+    "face_enhance": false,
+    "model": "Topaz",
+    "negative_prompt": "(worst quality, low quality, normal quality:2)",
+    "num_inference_steps": 18,
+    "prompt": "masterpiece, best quality, highres",
+    "resemblance": 0.6,
+    "scale_factor": 2.0,
+    "seed": 0,
+    "topaz_enhance_model": "Standard V2",
+    "topaz_face_creativity": 0.0,
+    "topaz_face_strength": 0.8,
+    "topaz_output_format": "png",
+    "topaz_subject_detection": "None",
+    "topaz_upscale_factor": "2x"
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": [
+      "https://r.test/repaired.png"
+     ]
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "philz1337x/clarity-upscaler",
+     "payload": {
+      "creativity": 0.35,
+      "image": "IMG:image",
+      "negative_prompt": "(worst quality, low quality, normal quality:2)",
+      "num_inference_steps": 18,
+      "output_format": "png",
+      "prompt": "masterpiece, best quality, highres",
+      "resemblance": 0.6,
+      "scale_factor": 2.0
+     },
+     "payload_json": "{\"creativity\": 0.35, \"image\": \"IMG:image\", \"negative_prompt\": \"(worst quality, low quality, normal quality:2)\", \"num_inference_steps\": 18, \"output_format\": \"png\", \"prompt\": \"masterpiece, best quality, highres\", \"resemblance\": 0.6, \"scale_factor\": 2.0}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "UpscaleImageNode",
+   "files": {
+    "https://r.test/repaired.png": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/AOfu52Fe818w5JtILhXK51AHIB4SYXsP7QLA830WOAyj+wbziPxt145DCAMZu9YZtjUACABtaxrwwMvWJWWKrCyfqgfRPER+MwUeAe75WnLsB+PxY/j0EzE2sy8K4cS/yLaBOgHihATGE8F9j2lFVtlSQuGFOV2EZgnaFzEBYVFkZabEESENYPtNQ7UBXTMTgiiqG9Ll98BCSHEU9e0AAAAASUVORK5CYII="
+   },
+   "gets": [
+    {
+     "status": 200,
+     "url": "https://r.test/repaired.png"
+    }
+   ],
+   "name": "upscale \u00b7 Clarity seed 0",
+   "output": [
+    {
+     "image": "https://r.test/repaired.png"
+    }
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "creativity": 0.35,
+    "crystal_creativity": 0.0,
+    "crystal_output_format": "png",
+    "face_enhance": false,
+    "model": "Clarity",
+    "negative_prompt": "(worst quality, low quality, normal quality:2)",
+    "num_inference_steps": 18,
+    "prompt": "masterpiece, best quality, highres",
+    "resemblance": 0.6,
+    "scale_factor": 2.0,
+    "seed": 0,
+    "topaz_enhance_model": "Standard V2",
+    "topaz_face_creativity": 0.0,
+    "topaz_face_strength": 0.8,
+    "topaz_output_format": "png",
+    "topaz_subject_detection": "None",
+    "topaz_upscale_factor": "2x"
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": [
+      "https://r.test/repaired.png"
+     ]
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "philz1337x/clarity-upscaler",
+     "payload": {
+      "creativity": 0.35,
+      "image": "IMG:image",
+      "negative_prompt": "(worst quality, low quality, normal quality:2)",
+      "num_inference_steps": 18,
+      "output_format": "png",
+      "prompt": "masterpiece, best quality, highres",
+      "resemblance": 0.6,
+      "scale_factor": 2.0,
+      "seed": 42
+     },
+     "payload_json": "{\"creativity\": 0.35, \"image\": \"IMG:image\", \"negative_prompt\": \"(worst quality, low quality, normal quality:2)\", \"num_inference_steps\": 18, \"output_format\": \"png\", \"prompt\": \"masterpiece, best quality, highres\", \"resemblance\": 0.6, \"scale_factor\": 2.0, \"seed\": 42}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "UpscaleImageNode",
+   "files": {
+    "https://r.test/repaired.png": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/AOfu52Fe818w5JtILhXK51AHIB4SYXsP7QLA830WOAyj+wbziPxt145DCAMZu9YZtjUACABtaxrwwMvWJWWKrCyfqgfRPER+MwUeAe75WnLsB+PxY/j0EzE2sy8K4cS/yLaBOgHihATGE8F9j2lFVtlSQuGFOV2EZgnaFzEBYVFkZabEESENYPtNQ7UBXTMTgiiqG9Ll98BCSHEU9e0AAAAASUVORK5CYII="
+   },
+   "gets": [
+    {
+     "status": 200,
+     "url": "https://r.test/repaired.png"
+    }
+   ],
+   "name": "upscale \u00b7 Clarity seed 42",
+   "output": [
+    {
+     "image": "https://r.test/repaired.png"
+    }
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "creativity": 0.35,
+    "crystal_creativity": 0.0,
+    "crystal_output_format": "png",
+    "face_enhance": false,
+    "model": "Clarity",
+    "negative_prompt": "(worst quality, low quality, normal quality:2)",
+    "num_inference_steps": 18,
+    "prompt": "masterpiece, best quality, highres",
+    "resemblance": 0.6,
+    "scale_factor": 2.0,
+    "seed": 42,
+    "topaz_enhance_model": "Standard V2",
+    "topaz_face_creativity": 0.0,
+    "topaz_face_strength": 0.8,
+    "topaz_output_format": "png",
+    "topaz_subject_detection": "None",
+    "topaz_upscale_factor": "2x"
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": [
+      "https://r.test/repaired.png"
+     ]
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "philz1337x/clarity-upscaler",
+     "payload": {
+      "creativity": 0.35,
+      "image": "IMG:image",
+      "negative_prompt": "(worst quality, low quality, normal quality:2)",
+      "num_inference_steps": 18,
+      "output_format": "png",
+      "prompt": "masterpiece, best quality, highres",
+      "resemblance": 0.6,
+      "scale_factor": 1.0
+     },
+     "payload_json": "{\"creativity\": 0.35, \"image\": \"IMG:image\", \"negative_prompt\": \"(worst quality, low quality, normal quality:2)\", \"num_inference_steps\": 18, \"output_format\": \"png\", \"prompt\": \"masterpiece, best quality, highres\", \"resemblance\": 0.6, \"scale_factor\": 1.0}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "UpscaleImageNode",
+   "files": {
+    "https://r.test/repaired.png": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/AOfu52Fe818w5JtILhXK51AHIB4SYXsP7QLA830WOAyj+wbziPxt145DCAMZu9YZtjUACABtaxrwwMvWJWWKrCyfqgfRPER+MwUeAe75WnLsB+PxY/j0EzE2sy8K4cS/yLaBOgHihATGE8F9j2lFVtlSQuGFOV2EZgnaFzEBYVFkZabEESENYPtNQ7UBXTMTgiiqG9Ll98BCSHEU9e0AAAAASUVORK5CYII="
+   },
+   "gets": [
+    {
+     "status": 200,
+     "url": "https://r.test/repaired.png"
+    }
+   ],
+   "name": "upscale \u00b7 Clarity scale 1.0",
+   "output": [
+    {
+     "image": "https://r.test/repaired.png"
+    }
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "creativity": 0.35,
+    "crystal_creativity": 0.0,
+    "crystal_output_format": "png",
+    "face_enhance": false,
+    "model": "Clarity",
+    "negative_prompt": "(worst quality, low quality, normal quality:2)",
+    "num_inference_steps": 18,
+    "prompt": "masterpiece, best quality, highres",
+    "resemblance": 0.6,
+    "scale_factor": 1.0,
+    "seed": 0,
+    "topaz_enhance_model": "Standard V2",
+    "topaz_face_creativity": 0.0,
+    "topaz_face_strength": 0.8,
+    "topaz_output_format": "png",
+    "topaz_subject_detection": "None",
+    "topaz_upscale_factor": "2x"
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": [
+      "https://r.test/repaired.png"
+     ]
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "philz1337x/clarity-upscaler",
+     "payload": {
+      "creativity": 0.35,
+      "image": "IMG:image",
+      "negative_prompt": "(worst quality, low quality, normal quality:2)",
+      "num_inference_steps": 18,
+      "output_format": "png",
+      "prompt": "masterpiece, best quality, highres",
+      "resemblance": 0.6,
+      "scale_factor": 10.0
+     },
+     "payload_json": "{\"creativity\": 0.35, \"image\": \"IMG:image\", \"negative_prompt\": \"(worst quality, low quality, normal quality:2)\", \"num_inference_steps\": 18, \"output_format\": \"png\", \"prompt\": \"masterpiece, best quality, highres\", \"resemblance\": 0.6, \"scale_factor\": 10.0}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "UpscaleImageNode",
+   "files": {
+    "https://r.test/repaired.png": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/AOfu52Fe818w5JtILhXK51AHIB4SYXsP7QLA830WOAyj+wbziPxt145DCAMZu9YZtjUACABtaxrwwMvWJWWKrCyfqgfRPER+MwUeAe75WnLsB+PxY/j0EzE2sy8K4cS/yLaBOgHihATGE8F9j2lFVtlSQuGFOV2EZgnaFzEBYVFkZabEESENYPtNQ7UBXTMTgiiqG9Ll98BCSHEU9e0AAAAASUVORK5CYII="
+   },
+   "gets": [
+    {
+     "status": 200,
+     "url": "https://r.test/repaired.png"
+    }
+   ],
+   "name": "upscale \u00b7 Clarity scale 10.0",
+   "output": [
+    {
+     "image": "https://r.test/repaired.png"
+    }
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "creativity": 0.35,
+    "crystal_creativity": 0.0,
+    "crystal_output_format": "png",
+    "face_enhance": false,
+    "model": "Clarity",
+    "negative_prompt": "(worst quality, low quality, normal quality:2)",
+    "num_inference_steps": 18,
+    "prompt": "masterpiece, best quality, highres",
+    "resemblance": 0.6,
+    "scale_factor": 10.0,
+    "seed": 0,
+    "topaz_enhance_model": "Standard V2",
+    "topaz_face_creativity": 0.0,
+    "topaz_face_strength": 0.8,
+    "topaz_output_format": "png",
+    "topaz_subject_detection": "None",
+    "topaz_upscale_factor": "2x"
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": [
+      "https://r.test/repaired.png"
+     ]
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "philz1337x/clarity-upscaler",
+     "payload": {
+      "creativity": 0.35,
+      "image": "IMG:image",
+      "negative_prompt": "(worst quality, low quality, normal quality:2)",
+      "num_inference_steps": 18,
+      "output_format": "png",
+      "prompt": "masterpiece, best quality, highres",
+      "resemblance": 0.6,
+      "scale_factor": 2.5
+     },
+     "payload_json": "{\"creativity\": 0.35, \"image\": \"IMG:image\", \"negative_prompt\": \"(worst quality, low quality, normal quality:2)\", \"num_inference_steps\": 18, \"output_format\": \"png\", \"prompt\": \"masterpiece, best quality, highres\", \"resemblance\": 0.6, \"scale_factor\": 2.5}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "UpscaleImageNode",
+   "files": {
+    "https://r.test/repaired.png": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/AOfu52Fe818w5JtILhXK51AHIB4SYXsP7QLA830WOAyj+wbziPxt145DCAMZu9YZtjUACABtaxrwwMvWJWWKrCyfqgfRPER+MwUeAe75WnLsB+PxY/j0EzE2sy8K4cS/yLaBOgHihATGE8F9j2lFVtlSQuGFOV2EZgnaFzEBYVFkZabEESENYPtNQ7UBXTMTgiiqG9Ll98BCSHEU9e0AAAAASUVORK5CYII="
+   },
+   "gets": [
+    {
+     "status": 200,
+     "url": "https://r.test/repaired.png"
+    }
+   ],
+   "name": "upscale \u00b7 Clarity scale 2.5",
+   "output": [
+    {
+     "image": "https://r.test/repaired.png"
+    }
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "creativity": 0.35,
+    "crystal_creativity": 0.0,
+    "crystal_output_format": "png",
+    "face_enhance": false,
+    "model": "Clarity",
+    "negative_prompt": "(worst quality, low quality, normal quality:2)",
+    "num_inference_steps": 18,
+    "prompt": "masterpiece, best quality, highres",
+    "resemblance": 0.6,
+    "scale_factor": 2.5,
+    "seed": 0,
+    "topaz_enhance_model": "Standard V2",
+    "topaz_face_creativity": 0.0,
+    "topaz_face_strength": 0.8,
+    "topaz_output_format": "png",
+    "topaz_subject_detection": "None",
+    "topaz_upscale_factor": "2x"
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": [
+      "https://r.test/repaired.png"
+     ]
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "philz1337x/clarity-upscaler",
+     "payload": {
+      "creativity": 0.35,
+      "image": "IMG:image",
+      "negative_prompt": "",
+      "num_inference_steps": 18,
+      "output_format": "png",
+      "prompt": "caf\u00e9 \u732b, sharp",
+      "resemblance": 0.6,
+      "scale_factor": 2.0
+     },
+     "payload_json": "{\"creativity\": 0.35, \"image\": \"IMG:image\", \"negative_prompt\": \"\", \"num_inference_steps\": 18, \"output_format\": \"png\", \"prompt\": \"caf\\u00e9 \\u732b, sharp\", \"resemblance\": 0.6, \"scale_factor\": 2.0}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "UpscaleImageNode",
+   "files": {
+    "https://r.test/repaired.png": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/AOfu52Fe818w5JtILhXK51AHIB4SYXsP7QLA830WOAyj+wbziPxt145DCAMZu9YZtjUACABtaxrwwMvWJWWKrCyfqgfRPER+MwUeAe75WnLsB+PxY/j0EzE2sy8K4cS/yLaBOgHihATGE8F9j2lFVtlSQuGFOV2EZgnaFzEBYVFkZabEESENYPtNQ7UBXTMTgiiqG9Ll98BCSHEU9e0AAAAASUVORK5CYII="
+   },
+   "gets": [
+    {
+     "status": 200,
+     "url": "https://r.test/repaired.png"
+    }
+   ],
+   "name": "upscale \u00b7 Clarity non-ASCII prompt",
+   "output": [
+    {
+     "image": "https://r.test/repaired.png"
+    }
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "creativity": 0.35,
+    "crystal_creativity": 0.0,
+    "crystal_output_format": "png",
+    "face_enhance": false,
+    "model": "Clarity",
+    "negative_prompt": "",
+    "num_inference_steps": 18,
+    "prompt": "caf\u00e9 \u732b, sharp",
+    "resemblance": 0.6,
+    "scale_factor": 2.0,
+    "seed": 0,
+    "topaz_enhance_model": "Standard V2",
+    "topaz_face_creativity": 0.0,
+    "topaz_face_strength": 0.8,
+    "topaz_output_format": "png",
+    "topaz_subject_detection": "None",
+    "topaz_upscale_factor": "2x"
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": [
+      "https://r.test/repaired.png"
+     ]
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "topazlabs/image-upscale",
+     "payload": {
+      "enhance_model": "Standard V2",
+      "face_enhancement": false,
+      "image": "IMG:image",
+      "output_format": "png",
+      "subject_detection": "None",
+      "upscale_factor": "None"
+     },
+     "payload_json": "{\"enhance_model\": \"Standard V2\", \"face_enhancement\": false, \"image\": \"IMG:image\", \"output_format\": \"png\", \"subject_detection\": \"None\", \"upscale_factor\": \"None\"}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "UpscaleImageNode",
+   "files": {
+    "https://r.test/repaired.png": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/AOfu52Fe818w5JtILhXK51AHIB4SYXsP7QLA830WOAyj+wbziPxt145DCAMZu9YZtjUACABtaxrwwMvWJWWKrCyfqgfRPER+MwUeAe75WnLsB+PxY/j0EzE2sy8K4cS/yLaBOgHihATGE8F9j2lFVtlSQuGFOV2EZgnaFzEBYVFkZabEESENYPtNQ7UBXTMTgiiqG9Ll98BCSHEU9e0AAAAASUVORK5CYII="
+   },
+   "gets": [
+    {
+     "status": 200,
+     "url": "https://r.test/repaired.png"
+    }
+   ],
+   "name": "upscale \u00b7 Topaz None face off",
+   "output": [
+    {
+     "image": "https://r.test/repaired.png"
+    }
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "creativity": 0.35,
+    "crystal_creativity": 0.0,
+    "crystal_output_format": "png",
+    "face_enhance": false,
+    "model": "Topaz",
+    "negative_prompt": "(worst quality, low quality, normal quality:2)",
+    "num_inference_steps": 18,
+    "prompt": "masterpiece, best quality, highres",
+    "resemblance": 0.6,
+    "scale_factor": 2.0,
+    "seed": 0,
+    "topaz_enhance_model": "Standard V2",
+    "topaz_face_creativity": 0.25,
+    "topaz_face_strength": 1.0,
+    "topaz_output_format": "png",
+    "topaz_subject_detection": "None",
+    "topaz_upscale_factor": "None"
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": [
+      "https://r.test/repaired.png"
+     ]
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "topazlabs/image-upscale",
+     "payload": {
+      "enhance_model": "Standard V2",
+      "face_enhancement": true,
+      "face_enhancement_creativity": 0.25,
+      "face_enhancement_strength": 1.0,
+      "image": "IMG:image",
+      "output_format": "png",
+      "subject_detection": "None",
+      "upscale_factor": "None"
+     },
+     "payload_json": "{\"enhance_model\": \"Standard V2\", \"face_enhancement\": true, \"face_enhancement_creativity\": 0.25, \"face_enhancement_strength\": 1.0, \"image\": \"IMG:image\", \"output_format\": \"png\", \"subject_detection\": \"None\", \"upscale_factor\": \"None\"}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "UpscaleImageNode",
+   "files": {
+    "https://r.test/repaired.png": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/AOfu52Fe818w5JtILhXK51AHIB4SYXsP7QLA830WOAyj+wbziPxt145DCAMZu9YZtjUACABtaxrwwMvWJWWKrCyfqgfRPER+MwUeAe75WnLsB+PxY/j0EzE2sy8K4cS/yLaBOgHihATGE8F9j2lFVtlSQuGFOV2EZgnaFzEBYVFkZabEESENYPtNQ7UBXTMTgiiqG9Ll98BCSHEU9e0AAAAASUVORK5CYII="
+   },
+   "gets": [
+    {
+     "status": 200,
+     "url": "https://r.test/repaired.png"
+    }
+   ],
+   "name": "upscale \u00b7 Topaz None face on",
+   "output": [
+    {
+     "image": "https://r.test/repaired.png"
+    }
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "creativity": 0.35,
+    "crystal_creativity": 0.0,
+    "crystal_output_format": "png",
+    "face_enhance": true,
+    "model": "Topaz",
+    "negative_prompt": "(worst quality, low quality, normal quality:2)",
+    "num_inference_steps": 18,
+    "prompt": "masterpiece, best quality, highres",
+    "resemblance": 0.6,
+    "scale_factor": 2.0,
+    "seed": 0,
+    "topaz_enhance_model": "Standard V2",
+    "topaz_face_creativity": 0.25,
+    "topaz_face_strength": 1.0,
+    "topaz_output_format": "png",
+    "topaz_subject_detection": "None",
+    "topaz_upscale_factor": "None"
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": [
+      "https://r.test/repaired.png"
+     ]
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "topazlabs/image-upscale",
+     "payload": {
+      "enhance_model": "Standard V2",
+      "face_enhancement": false,
+      "image": "IMG:image",
+      "output_format": "png",
+      "subject_detection": "None",
+      "upscale_factor": "2x"
+     },
+     "payload_json": "{\"enhance_model\": \"Standard V2\", \"face_enhancement\": false, \"image\": \"IMG:image\", \"output_format\": \"png\", \"subject_detection\": \"None\", \"upscale_factor\": \"2x\"}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "UpscaleImageNode",
+   "files": {
+    "https://r.test/repaired.png": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/AOfu52Fe818w5JtILhXK51AHIB4SYXsP7QLA830WOAyj+wbziPxt145DCAMZu9YZtjUACABtaxrwwMvWJWWKrCyfqgfRPER+MwUeAe75WnLsB+PxY/j0EzE2sy8K4cS/yLaBOgHihATGE8F9j2lFVtlSQuGFOV2EZgnaFzEBYVFkZabEESENYPtNQ7UBXTMTgiiqG9Ll98BCSHEU9e0AAAAASUVORK5CYII="
+   },
+   "gets": [
+    {
+     "status": 200,
+     "url": "https://r.test/repaired.png"
+    }
+   ],
+   "name": "upscale \u00b7 Topaz 2x face off",
+   "output": [
+    {
+     "image": "https://r.test/repaired.png"
+    }
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "creativity": 0.35,
+    "crystal_creativity": 0.0,
+    "crystal_output_format": "png",
+    "face_enhance": false,
+    "model": "Topaz",
+    "negative_prompt": "(worst quality, low quality, normal quality:2)",
+    "num_inference_steps": 18,
+    "prompt": "masterpiece, best quality, highres",
+    "resemblance": 0.6,
+    "scale_factor": 2.0,
+    "seed": 0,
+    "topaz_enhance_model": "Standard V2",
+    "topaz_face_creativity": 0.25,
+    "topaz_face_strength": 1.0,
+    "topaz_output_format": "png",
+    "topaz_subject_detection": "None",
+    "topaz_upscale_factor": "2x"
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": [
+      "https://r.test/repaired.png"
+     ]
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "topazlabs/image-upscale",
+     "payload": {
+      "enhance_model": "Standard V2",
+      "face_enhancement": true,
+      "face_enhancement_creativity": 0.25,
+      "face_enhancement_strength": 1.0,
+      "image": "IMG:image",
+      "output_format": "png",
+      "subject_detection": "None",
+      "upscale_factor": "2x"
+     },
+     "payload_json": "{\"enhance_model\": \"Standard V2\", \"face_enhancement\": true, \"face_enhancement_creativity\": 0.25, \"face_enhancement_strength\": 1.0, \"image\": \"IMG:image\", \"output_format\": \"png\", \"subject_detection\": \"None\", \"upscale_factor\": \"2x\"}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "UpscaleImageNode",
+   "files": {
+    "https://r.test/repaired.png": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/AOfu52Fe818w5JtILhXK51AHIB4SYXsP7QLA830WOAyj+wbziPxt145DCAMZu9YZtjUACABtaxrwwMvWJWWKrCyfqgfRPER+MwUeAe75WnLsB+PxY/j0EzE2sy8K4cS/yLaBOgHihATGE8F9j2lFVtlSQuGFOV2EZgnaFzEBYVFkZabEESENYPtNQ7UBXTMTgiiqG9Ll98BCSHEU9e0AAAAASUVORK5CYII="
+   },
+   "gets": [
+    {
+     "status": 200,
+     "url": "https://r.test/repaired.png"
+    }
+   ],
+   "name": "upscale \u00b7 Topaz 2x face on",
+   "output": [
+    {
+     "image": "https://r.test/repaired.png"
+    }
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "creativity": 0.35,
+    "crystal_creativity": 0.0,
+    "crystal_output_format": "png",
+    "face_enhance": true,
+    "model": "Topaz",
+    "negative_prompt": "(worst quality, low quality, normal quality:2)",
+    "num_inference_steps": 18,
+    "prompt": "masterpiece, best quality, highres",
+    "resemblance": 0.6,
+    "scale_factor": 2.0,
+    "seed": 0,
+    "topaz_enhance_model": "Standard V2",
+    "topaz_face_creativity": 0.25,
+    "topaz_face_strength": 1.0,
+    "topaz_output_format": "png",
+    "topaz_subject_detection": "None",
+    "topaz_upscale_factor": "2x"
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": [
+      "https://r.test/repaired.png"
+     ]
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "topazlabs/image-upscale",
+     "payload": {
+      "enhance_model": "Standard V2",
+      "face_enhancement": false,
+      "image": "IMG:image",
+      "output_format": "png",
+      "subject_detection": "None",
+      "upscale_factor": "4x"
+     },
+     "payload_json": "{\"enhance_model\": \"Standard V2\", \"face_enhancement\": false, \"image\": \"IMG:image\", \"output_format\": \"png\", \"subject_detection\": \"None\", \"upscale_factor\": \"4x\"}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "UpscaleImageNode",
+   "files": {
+    "https://r.test/repaired.png": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/AOfu52Fe818w5JtILhXK51AHIB4SYXsP7QLA830WOAyj+wbziPxt145DCAMZu9YZtjUACABtaxrwwMvWJWWKrCyfqgfRPER+MwUeAe75WnLsB+PxY/j0EzE2sy8K4cS/yLaBOgHihATGE8F9j2lFVtlSQuGFOV2EZgnaFzEBYVFkZabEESENYPtNQ7UBXTMTgiiqG9Ll98BCSHEU9e0AAAAASUVORK5CYII="
+   },
+   "gets": [
+    {
+     "status": 200,
+     "url": "https://r.test/repaired.png"
+    }
+   ],
+   "name": "upscale \u00b7 Topaz 4x face off",
+   "output": [
+    {
+     "image": "https://r.test/repaired.png"
+    }
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "creativity": 0.35,
+    "crystal_creativity": 0.0,
+    "crystal_output_format": "png",
+    "face_enhance": false,
+    "model": "Topaz",
+    "negative_prompt": "(worst quality, low quality, normal quality:2)",
+    "num_inference_steps": 18,
+    "prompt": "masterpiece, best quality, highres",
+    "resemblance": 0.6,
+    "scale_factor": 2.0,
+    "seed": 0,
+    "topaz_enhance_model": "Standard V2",
+    "topaz_face_creativity": 0.25,
+    "topaz_face_strength": 1.0,
+    "topaz_output_format": "png",
+    "topaz_subject_detection": "None",
+    "topaz_upscale_factor": "4x"
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": [
+      "https://r.test/repaired.png"
+     ]
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "topazlabs/image-upscale",
+     "payload": {
+      "enhance_model": "Standard V2",
+      "face_enhancement": true,
+      "face_enhancement_creativity": 0.25,
+      "face_enhancement_strength": 1.0,
+      "image": "IMG:image",
+      "output_format": "png",
+      "subject_detection": "None",
+      "upscale_factor": "4x"
+     },
+     "payload_json": "{\"enhance_model\": \"Standard V2\", \"face_enhancement\": true, \"face_enhancement_creativity\": 0.25, \"face_enhancement_strength\": 1.0, \"image\": \"IMG:image\", \"output_format\": \"png\", \"subject_detection\": \"None\", \"upscale_factor\": \"4x\"}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "UpscaleImageNode",
+   "files": {
+    "https://r.test/repaired.png": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/AOfu52Fe818w5JtILhXK51AHIB4SYXsP7QLA830WOAyj+wbziPxt145DCAMZu9YZtjUACABtaxrwwMvWJWWKrCyfqgfRPER+MwUeAe75WnLsB+PxY/j0EzE2sy8K4cS/yLaBOgHihATGE8F9j2lFVtlSQuGFOV2EZgnaFzEBYVFkZabEESENYPtNQ7UBXTMTgiiqG9Ll98BCSHEU9e0AAAAASUVORK5CYII="
+   },
+   "gets": [
+    {
+     "status": 200,
+     "url": "https://r.test/repaired.png"
+    }
+   ],
+   "name": "upscale \u00b7 Topaz 4x face on",
+   "output": [
+    {
+     "image": "https://r.test/repaired.png"
+    }
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "creativity": 0.35,
+    "crystal_creativity": 0.0,
+    "crystal_output_format": "png",
+    "face_enhance": true,
+    "model": "Topaz",
+    "negative_prompt": "(worst quality, low quality, normal quality:2)",
+    "num_inference_steps": 18,
+    "prompt": "masterpiece, best quality, highres",
+    "resemblance": 0.6,
+    "scale_factor": 2.0,
+    "seed": 0,
+    "topaz_enhance_model": "Standard V2",
+    "topaz_face_creativity": 0.25,
+    "topaz_face_strength": 1.0,
+    "topaz_output_format": "png",
+    "topaz_subject_detection": "None",
+    "topaz_upscale_factor": "4x"
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": [
+      "https://r.test/repaired.png"
+     ]
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "topazlabs/image-upscale",
+     "payload": {
+      "enhance_model": "Standard V2",
+      "face_enhancement": false,
+      "image": "IMG:image",
+      "output_format": "png",
+      "subject_detection": "None",
+      "upscale_factor": "6x"
+     },
+     "payload_json": "{\"enhance_model\": \"Standard V2\", \"face_enhancement\": false, \"image\": \"IMG:image\", \"output_format\": \"png\", \"subject_detection\": \"None\", \"upscale_factor\": \"6x\"}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "UpscaleImageNode",
+   "files": {
+    "https://r.test/repaired.png": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/AOfu52Fe818w5JtILhXK51AHIB4SYXsP7QLA830WOAyj+wbziPxt145DCAMZu9YZtjUACABtaxrwwMvWJWWKrCyfqgfRPER+MwUeAe75WnLsB+PxY/j0EzE2sy8K4cS/yLaBOgHihATGE8F9j2lFVtlSQuGFOV2EZgnaFzEBYVFkZabEESENYPtNQ7UBXTMTgiiqG9Ll98BCSHEU9e0AAAAASUVORK5CYII="
+   },
+   "gets": [
+    {
+     "status": 200,
+     "url": "https://r.test/repaired.png"
+    }
+   ],
+   "name": "upscale \u00b7 Topaz 6x face off",
+   "output": [
+    {
+     "image": "https://r.test/repaired.png"
+    }
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "creativity": 0.35,
+    "crystal_creativity": 0.0,
+    "crystal_output_format": "png",
+    "face_enhance": false,
+    "model": "Topaz",
+    "negative_prompt": "(worst quality, low quality, normal quality:2)",
+    "num_inference_steps": 18,
+    "prompt": "masterpiece, best quality, highres",
+    "resemblance": 0.6,
+    "scale_factor": 2.0,
+    "seed": 0,
+    "topaz_enhance_model": "Standard V2",
+    "topaz_face_creativity": 0.25,
+    "topaz_face_strength": 1.0,
+    "topaz_output_format": "png",
+    "topaz_subject_detection": "None",
+    "topaz_upscale_factor": "6x"
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": [
+      "https://r.test/repaired.png"
+     ]
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "topazlabs/image-upscale",
+     "payload": {
+      "enhance_model": "Standard V2",
+      "face_enhancement": true,
+      "face_enhancement_creativity": 0.25,
+      "face_enhancement_strength": 1.0,
+      "image": "IMG:image",
+      "output_format": "png",
+      "subject_detection": "None",
+      "upscale_factor": "6x"
+     },
+     "payload_json": "{\"enhance_model\": \"Standard V2\", \"face_enhancement\": true, \"face_enhancement_creativity\": 0.25, \"face_enhancement_strength\": 1.0, \"image\": \"IMG:image\", \"output_format\": \"png\", \"subject_detection\": \"None\", \"upscale_factor\": \"6x\"}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "UpscaleImageNode",
+   "files": {
+    "https://r.test/repaired.png": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/AOfu52Fe818w5JtILhXK51AHIB4SYXsP7QLA830WOAyj+wbziPxt145DCAMZu9YZtjUACABtaxrwwMvWJWWKrCyfqgfRPER+MwUeAe75WnLsB+PxY/j0EzE2sy8K4cS/yLaBOgHihATGE8F9j2lFVtlSQuGFOV2EZgnaFzEBYVFkZabEESENYPtNQ7UBXTMTgiiqG9Ll98BCSHEU9e0AAAAASUVORK5CYII="
+   },
+   "gets": [
+    {
+     "status": 200,
+     "url": "https://r.test/repaired.png"
+    }
+   ],
+   "name": "upscale \u00b7 Topaz 6x face on",
+   "output": [
+    {
+     "image": "https://r.test/repaired.png"
+    }
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "creativity": 0.35,
+    "crystal_creativity": 0.0,
+    "crystal_output_format": "png",
+    "face_enhance": true,
+    "model": "Topaz",
+    "negative_prompt": "(worst quality, low quality, normal quality:2)",
+    "num_inference_steps": 18,
+    "prompt": "masterpiece, best quality, highres",
+    "resemblance": 0.6,
+    "scale_factor": 2.0,
+    "seed": 0,
+    "topaz_enhance_model": "Standard V2",
+    "topaz_face_creativity": 0.25,
+    "topaz_face_strength": 1.0,
+    "topaz_output_format": "png",
+    "topaz_subject_detection": "None",
+    "topaz_upscale_factor": "6x"
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": [
+      "https://r.test/repaired.png"
+     ]
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "topazlabs/image-upscale",
+     "payload": {
+      "enhance_model": "Text Refine",
+      "face_enhancement": false,
+      "image": "IMG:image",
+      "output_format": "jpg",
+      "subject_detection": "Foreground",
+      "upscale_factor": "2x"
+     },
+     "payload_json": "{\"enhance_model\": \"Text Refine\", \"face_enhancement\": false, \"image\": \"IMG:image\", \"output_format\": \"jpg\", \"subject_detection\": \"Foreground\", \"upscale_factor\": \"2x\"}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "UpscaleImageNode",
+   "files": {
+    "https://r.test/repaired.png": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/AOfu52Fe818w5JtILhXK51AHIB4SYXsP7QLA830WOAyj+wbziPxt145DCAMZu9YZtjUACABtaxrwwMvWJWWKrCyfqgfRPER+MwUeAe75WnLsB+PxY/j0EzE2sy8K4cS/yLaBOgHihATGE8F9j2lFVtlSQuGFOV2EZgnaFzEBYVFkZabEESENYPtNQ7UBXTMTgiiqG9Ll98BCSHEU9e0AAAAASUVORK5CYII="
+   },
+   "gets": [
+    {
+     "status": 200,
+     "url": "https://r.test/repaired.png"
+    }
+   ],
+   "name": "upscale \u00b7 Topaz every other setting",
+   "output": [
+    {
+     "image": "https://r.test/repaired.png"
+    }
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "creativity": 0.35,
+    "crystal_creativity": 0.0,
+    "crystal_output_format": "png",
+    "face_enhance": false,
+    "model": "Topaz",
+    "negative_prompt": "(worst quality, low quality, normal quality:2)",
+    "num_inference_steps": 18,
+    "prompt": "masterpiece, best quality, highres",
+    "resemblance": 0.6,
+    "scale_factor": 2.0,
+    "seed": 0,
+    "topaz_enhance_model": "Text Refine",
+    "topaz_face_creativity": 0.0,
+    "topaz_face_strength": 0.8,
+    "topaz_output_format": "jpg",
+    "topaz_subject_detection": "Foreground",
+    "topaz_upscale_factor": "2x"
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": [
+      "https://r.test/repaired.png"
+     ]
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "philz1337x/crystal-upscaler",
+     "payload": {
+      "creativity": 3.5,
+      "image": "IMG:image",
+      "output_format": "png",
+      "scale_factor": 4.0
+     },
+     "payload_json": "{\"creativity\": 3.5, \"image\": \"IMG:image\", \"output_format\": \"png\", \"scale_factor\": 4.0}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "UpscaleImageNode",
+   "files": {
+    "https://r.test/repaired.png": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/AOfu52Fe818w5JtILhXK51AHIB4SYXsP7QLA830WOAyj+wbziPxt145DCAMZu9YZtjUACABtaxrwwMvWJWWKrCyfqgfRPER+MwUeAe75WnLsB+PxY/j0EzE2sy8K4cS/yLaBOgHihATGE8F9j2lFVtlSQuGFOV2EZgnaFzEBYVFkZabEESENYPtNQ7UBXTMTgiiqG9Ll98BCSHEU9e0AAAAASUVORK5CYII="
+   },
+   "gets": [
+    {
+     "status": 200,
+     "url": "https://r.test/repaired.png"
+    }
+   ],
+   "name": "upscale \u00b7 Crystal png",
+   "output": [
+    {
+     "image": "https://r.test/repaired.png"
+    }
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "creativity": 0.35,
+    "crystal_creativity": 3.5,
+    "crystal_output_format": "png",
+    "face_enhance": false,
+    "model": "Crystal",
+    "negative_prompt": "(worst quality, low quality, normal quality:2)",
+    "num_inference_steps": 18,
+    "prompt": "masterpiece, best quality, highres",
+    "resemblance": 0.6,
+    "scale_factor": 4.0,
+    "seed": 0,
+    "topaz_enhance_model": "Standard V2",
+    "topaz_face_creativity": 0.0,
+    "topaz_face_strength": 0.8,
+    "topaz_output_format": "png",
+    "topaz_subject_detection": "None",
+    "topaz_upscale_factor": "2x"
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": [
+      "https://r.test/repaired.png"
+     ]
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "philz1337x/crystal-upscaler",
+     "payload": {
+      "creativity": 3.5,
+      "image": "IMG:image",
+      "output_format": "jpg",
+      "scale_factor": 4.0
+     },
+     "payload_json": "{\"creativity\": 3.5, \"image\": \"IMG:image\", \"output_format\": \"jpg\", \"scale_factor\": 4.0}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "UpscaleImageNode",
+   "files": {
+    "https://r.test/repaired.png": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/AOfu52Fe818w5JtILhXK51AHIB4SYXsP7QLA830WOAyj+wbziPxt145DCAMZu9YZtjUACABtaxrwwMvWJWWKrCyfqgfRPER+MwUeAe75WnLsB+PxY/j0EzE2sy8K4cS/yLaBOgHihATGE8F9j2lFVtlSQuGFOV2EZgnaFzEBYVFkZabEESENYPtNQ7UBXTMTgiiqG9Ll98BCSHEU9e0AAAAASUVORK5CYII="
+   },
+   "gets": [
+    {
+     "status": 200,
+     "url": "https://r.test/repaired.png"
+    }
+   ],
+   "name": "upscale \u00b7 Crystal jpg",
+   "output": [
+    {
+     "image": "https://r.test/repaired.png"
+    }
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "creativity": 0.35,
+    "crystal_creativity": 3.5,
+    "crystal_output_format": "jpg",
+    "face_enhance": false,
+    "model": "Crystal",
+    "negative_prompt": "(worst quality, low quality, normal quality:2)",
+    "num_inference_steps": 18,
+    "prompt": "masterpiece, best quality, highres",
+    "resemblance": 0.6,
+    "scale_factor": 4.0,
+    "seed": 0,
+    "topaz_enhance_model": "Standard V2",
+    "topaz_face_creativity": 0.0,
+    "topaz_face_strength": 0.8,
+    "topaz_output_format": "png",
+    "topaz_subject_detection": "None",
+    "topaz_upscale_factor": "2x"
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": [
+      "https://r.test/repaired.png"
+     ]
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "nightmareai/real-esrgan",
+     "payload": {
+      "face_enhance": false,
+      "image": "IMG:image",
+      "scale": 3.0
+     },
+     "payload_json": "{\"face_enhance\": false, \"image\": \"IMG:image\", \"scale\": 3.0}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "UpscaleImageNode",
+   "files": {
+    "https://r.test/repaired.png": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/AOfu52Fe818w5JtILhXK51AHIB4SYXsP7QLA830WOAyj+wbziPxt145DCAMZu9YZtjUACABtaxrwwMvWJWWKrCyfqgfRPER+MwUeAe75WnLsB+PxY/j0EzE2sy8K4cS/yLaBOgHihATGE8F9j2lFVtlSQuGFOV2EZgnaFzEBYVFkZabEESENYPtNQ7UBXTMTgiiqG9Ll98BCSHEU9e0AAAAASUVORK5CYII="
+   },
+   "gets": [
+    {
+     "status": 200,
+     "url": "https://r.test/repaired.png"
+    }
+   ],
+   "name": "upscale \u00b7 Real-ESRGAN face off",
+   "output": [
+    {
+     "image": "https://r.test/repaired.png"
+    }
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "creativity": 0.35,
+    "crystal_creativity": 0.0,
+    "crystal_output_format": "png",
+    "face_enhance": false,
+    "model": "Real-ESRGAN",
+    "negative_prompt": "(worst quality, low quality, normal quality:2)",
+    "num_inference_steps": 18,
+    "prompt": "masterpiece, best quality, highres",
+    "resemblance": 0.6,
+    "scale_factor": 3.0,
+    "seed": 0,
+    "topaz_enhance_model": "Standard V2",
+    "topaz_face_creativity": 0.0,
+    "topaz_face_strength": 0.8,
+    "topaz_output_format": "png",
+    "topaz_subject_detection": "None",
+    "topaz_upscale_factor": "2x"
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": [
+      "https://r.test/repaired.png"
+     ]
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "nightmareai/real-esrgan",
+     "payload": {
+      "face_enhance": true,
+      "image": "IMG:image",
+      "scale": 3.0
+     },
+     "payload_json": "{\"face_enhance\": true, \"image\": \"IMG:image\", \"scale\": 3.0}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "UpscaleImageNode",
+   "files": {
+    "https://r.test/repaired.png": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/AOfu52Fe818w5JtILhXK51AHIB4SYXsP7QLA830WOAyj+wbziPxt145DCAMZu9YZtjUACABtaxrwwMvWJWWKrCyfqgfRPER+MwUeAe75WnLsB+PxY/j0EzE2sy8K4cS/yLaBOgHihATGE8F9j2lFVtlSQuGFOV2EZgnaFzEBYVFkZabEESENYPtNQ7UBXTMTgiiqG9Ll98BCSHEU9e0AAAAASUVORK5CYII="
+   },
+   "gets": [
+    {
+     "status": 200,
+     "url": "https://r.test/repaired.png"
+    }
+   ],
+   "name": "upscale \u00b7 Real-ESRGAN face on",
+   "output": [
+    {
+     "image": "https://r.test/repaired.png"
+    }
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "creativity": 0.35,
+    "crystal_creativity": 0.0,
+    "crystal_output_format": "png",
+    "face_enhance": true,
+    "model": "Real-ESRGAN",
+    "negative_prompt": "(worst quality, low quality, normal quality:2)",
+    "num_inference_steps": 18,
+    "prompt": "masterpiece, best quality, highres",
+    "resemblance": 0.6,
+    "scale_factor": 3.0,
+    "seed": 0,
+    "topaz_enhance_model": "Standard V2",
+    "topaz_face_creativity": 0.0,
+    "topaz_face_strength": 0.8,
+    "topaz_output_format": "png",
+    "topaz_subject_detection": "None",
+    "topaz_upscale_factor": "2x"
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": [
+      "https://r.test/repaired.png"
+     ]
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "philz1337x/clarity-upscaler",
+     "payload": {
+      "creativity": 0.1,
+      "image": "IMG:image",
+      "negative_prompt": "(worst quality, low quality, normal quality:2)",
+      "num_inference_steps": 18,
+      "output_format": "png",
+      "prompt": "masterpiece, best quality, highres",
+      "resemblance": 0.6,
+      "scale_factor": 1.0
+     },
+     "payload_json": "{\"creativity\": 0.1, \"image\": \"IMG:image\", \"negative_prompt\": \"(worst quality, low quality, normal quality:2)\", \"num_inference_steps\": 18, \"output_format\": \"png\", \"prompt\": \"masterpiece, best quality, highres\", \"resemblance\": 0.6, \"scale_factor\": 1.0}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "EnhanceDetailNode",
+   "files": {
+    "https://r.test/repaired.png": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/AOfu52Fe818w5JtILhXK51AHIB4SYXsP7QLA830WOAyj+wbziPxt145DCAMZu9YZtjUACABtaxrwwMvWJWWKrCyfqgfRPER+MwUeAe75WnLsB+PxY/j0EzE2sy8K4cS/yLaBOgHihATGE8F9j2lFVtlSQuGFOV2EZgnaFzEBYVFkZabEESENYPtNQ7UBXTMTgiiqG9Ll98BCSHEU9e0AAAAASUVORK5CYII="
+   },
+   "gets": [
+    {
+     "status": 200,
+     "url": "https://r.test/repaired.png"
+    }
+   ],
+   "name": "enhance \u00b7 Creative detail 0.0",
+   "output": [
+    {
+     "image": "https://r.test/repaired.png"
+    }
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "detail_strength": 0.0,
+    "model": "Creative",
+    "negative_prompt": "(worst quality, low quality, normal quality:2)",
+    "num_inference_steps": 18,
+    "prompt": "masterpiece, best quality, highres",
+    "refine_steps": 20,
+    "resemblance": 0.6,
+    "seed": 0,
+    "topaz_enhance_model": "Standard V2",
+    "topaz_output_format": "png",
+    "topaz_subject_detection": "None"
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": [
+      "https://r.test/repaired.png"
+     ]
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "philz1337x/clarity-upscaler",
+     "payload": {
+      "creativity": 0.30000000000000004,
+      "image": "IMG:image",
+      "negative_prompt": "(worst quality, low quality, normal quality:2)",
+      "num_inference_steps": 18,
+      "output_format": "png",
+      "prompt": "masterpiece, best quality, highres",
+      "resemblance": 0.6,
+      "scale_factor": 1.0
+     },
+     "payload_json": "{\"creativity\": 0.30000000000000004, \"image\": \"IMG:image\", \"negative_prompt\": \"(worst quality, low quality, normal quality:2)\", \"num_inference_steps\": 18, \"output_format\": \"png\", \"prompt\": \"masterpiece, best quality, highres\", \"resemblance\": 0.6, \"scale_factor\": 1.0}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "EnhanceDetailNode",
+   "files": {
+    "https://r.test/repaired.png": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/AOfu52Fe818w5JtILhXK51AHIB4SYXsP7QLA830WOAyj+wbziPxt145DCAMZu9YZtjUACABtaxrwwMvWJWWKrCyfqgfRPER+MwUeAe75WnLsB+PxY/j0EzE2sy8K4cS/yLaBOgHihATGE8F9j2lFVtlSQuGFOV2EZgnaFzEBYVFkZabEESENYPtNQ7UBXTMTgiiqG9Ll98BCSHEU9e0AAAAASUVORK5CYII="
+   },
+   "gets": [
+    {
+     "status": 200,
+     "url": "https://r.test/repaired.png"
+    }
+   ],
+   "name": "enhance \u00b7 Creative detail 0.4",
+   "output": [
+    {
+     "image": "https://r.test/repaired.png"
+    }
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "detail_strength": 0.4,
+    "model": "Creative",
+    "negative_prompt": "(worst quality, low quality, normal quality:2)",
+    "num_inference_steps": 18,
+    "prompt": "masterpiece, best quality, highres",
+    "refine_steps": 20,
+    "resemblance": 0.6,
+    "seed": 0,
+    "topaz_enhance_model": "Standard V2",
+    "topaz_output_format": "png",
+    "topaz_subject_detection": "None"
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": [
+      "https://r.test/repaired.png"
+     ]
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "philz1337x/clarity-upscaler",
+     "payload": {
+      "creativity": 0.6,
+      "image": "IMG:image",
+      "negative_prompt": "(worst quality, low quality, normal quality:2)",
+      "num_inference_steps": 18,
+      "output_format": "png",
+      "prompt": "masterpiece, best quality, highres",
+      "resemblance": 0.6,
+      "scale_factor": 1.0
+     },
+     "payload_json": "{\"creativity\": 0.6, \"image\": \"IMG:image\", \"negative_prompt\": \"(worst quality, low quality, normal quality:2)\", \"num_inference_steps\": 18, \"output_format\": \"png\", \"prompt\": \"masterpiece, best quality, highres\", \"resemblance\": 0.6, \"scale_factor\": 1.0}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "EnhanceDetailNode",
+   "files": {
+    "https://r.test/repaired.png": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/AOfu52Fe818w5JtILhXK51AHIB4SYXsP7QLA830WOAyj+wbziPxt145DCAMZu9YZtjUACABtaxrwwMvWJWWKrCyfqgfRPER+MwUeAe75WnLsB+PxY/j0EzE2sy8K4cS/yLaBOgHihATGE8F9j2lFVtlSQuGFOV2EZgnaFzEBYVFkZabEESENYPtNQ7UBXTMTgiiqG9Ll98BCSHEU9e0AAAAASUVORK5CYII="
+   },
+   "gets": [
+    {
+     "status": 200,
+     "url": "https://r.test/repaired.png"
+    }
+   ],
+   "name": "enhance \u00b7 Creative detail 1.0",
+   "output": [
+    {
+     "image": "https://r.test/repaired.png"
+    }
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "detail_strength": 1.0,
+    "model": "Creative",
+    "negative_prompt": "(worst quality, low quality, normal quality:2)",
+    "num_inference_steps": 18,
+    "prompt": "masterpiece, best quality, highres",
+    "refine_steps": 20,
+    "resemblance": 0.6,
+    "seed": 0,
+    "topaz_enhance_model": "Standard V2",
+    "topaz_output_format": "png",
+    "topaz_subject_detection": "None"
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": [
+      "https://r.test/repaired.png"
+     ]
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "philz1337x/clarity-upscaler",
+     "payload": {
+      "creativity": 0.30000000000000004,
+      "image": "IMG:image",
+      "negative_prompt": "(worst quality, low quality, normal quality:2)",
+      "num_inference_steps": 18,
+      "output_format": "png",
+      "prompt": "masterpiece, best quality, highres",
+      "resemblance": 0.6,
+      "scale_factor": 1.0,
+      "seed": 7
+     },
+     "payload_json": "{\"creativity\": 0.30000000000000004, \"image\": \"IMG:image\", \"negative_prompt\": \"(worst quality, low quality, normal quality:2)\", \"num_inference_steps\": 18, \"output_format\": \"png\", \"prompt\": \"masterpiece, best quality, highres\", \"resemblance\": 0.6, \"scale_factor\": 1.0, \"seed\": 7}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "EnhanceDetailNode",
+   "files": {
+    "https://r.test/repaired.png": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/AOfu52Fe818w5JtILhXK51AHIB4SYXsP7QLA830WOAyj+wbziPxt145DCAMZu9YZtjUACABtaxrwwMvWJWWKrCyfqgfRPER+MwUeAe75WnLsB+PxY/j0EzE2sy8K4cS/yLaBOgHihATGE8F9j2lFVtlSQuGFOV2EZgnaFzEBYVFkZabEESENYPtNQ7UBXTMTgiiqG9Ll98BCSHEU9e0AAAAASUVORK5CYII="
+   },
+   "gets": [
+    {
+     "status": 200,
+     "url": "https://r.test/repaired.png"
+    }
+   ],
+   "name": "enhance \u00b7 Creative seed 7",
+   "output": [
+    {
+     "image": "https://r.test/repaired.png"
+    }
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "detail_strength": 0.4,
+    "model": "Creative",
+    "negative_prompt": "(worst quality, low quality, normal quality:2)",
+    "num_inference_steps": 18,
+    "prompt": "masterpiece, best quality, highres",
+    "refine_steps": 20,
+    "resemblance": 0.6,
+    "seed": 7,
+    "topaz_enhance_model": "Standard V2",
+    "topaz_output_format": "png",
+    "topaz_subject_detection": "None"
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": [
+      "https://r.test/repaired.png"
+     ]
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "topazlabs/image-upscale",
+     "payload": {
+      "enhance_model": "Standard V2",
+      "image": "IMG:image",
+      "output_format": "png",
+      "subject_detection": "None",
+      "upscale_factor": "None"
+     },
+     "payload_json": "{\"enhance_model\": \"Standard V2\", \"image\": \"IMG:image\", \"output_format\": \"png\", \"subject_detection\": \"None\", \"upscale_factor\": \"None\"}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "EnhanceDetailNode",
+   "files": {
+    "https://r.test/repaired.png": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/AOfu52Fe818w5JtILhXK51AHIB4SYXsP7QLA830WOAyj+wbziPxt145DCAMZu9YZtjUACABtaxrwwMvWJWWKrCyfqgfRPER+MwUeAe75WnLsB+PxY/j0EzE2sy8K4cS/yLaBOgHihATGE8F9j2lFVtlSQuGFOV2EZgnaFzEBYVFkZabEESENYPtNQ7UBXTMTgiiqG9Ll98BCSHEU9e0AAAAASUVORK5CYII="
+   },
+   "gets": [
+    {
+     "status": 200,
+     "url": "https://r.test/repaired.png"
+    }
+   ],
+   "name": "enhance \u00b7 Faithful detail 0.0",
+   "output": [
+    {
+     "image": "https://r.test/repaired.png"
+    }
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "detail_strength": 0.0,
+    "model": "Faithful",
+    "negative_prompt": "(worst quality, low quality, normal quality:2)",
+    "num_inference_steps": 18,
+    "prompt": "masterpiece, best quality, highres",
+    "refine_steps": 20,
+    "resemblance": 0.6,
+    "seed": 0,
+    "topaz_enhance_model": "Standard V2",
+    "topaz_output_format": "png",
+    "topaz_subject_detection": "None"
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": [
+      "https://r.test/repaired.png"
+     ]
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "topazlabs/image-upscale",
+     "payload": {
+      "enhance_model": "Standard V2",
+      "image": "IMG:image",
+      "output_format": "png",
+      "subject_detection": "None",
+      "upscale_factor": "None"
+     },
+     "payload_json": "{\"enhance_model\": \"Standard V2\", \"image\": \"IMG:image\", \"output_format\": \"png\", \"subject_detection\": \"None\", \"upscale_factor\": \"None\"}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "EnhanceDetailNode",
+   "files": {
+    "https://r.test/repaired.png": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/AOfu52Fe818w5JtILhXK51AHIB4SYXsP7QLA830WOAyj+wbziPxt145DCAMZu9YZtjUACABtaxrwwMvWJWWKrCyfqgfRPER+MwUeAe75WnLsB+PxY/j0EzE2sy8K4cS/yLaBOgHihATGE8F9j2lFVtlSQuGFOV2EZgnaFzEBYVFkZabEESENYPtNQ7UBXTMTgiiqG9Ll98BCSHEU9e0AAAAASUVORK5CYII="
+   },
+   "gets": [
+    {
+     "status": 200,
+     "url": "https://r.test/repaired.png"
+    }
+   ],
+   "name": "enhance \u00b7 Faithful detail 0.4",
+   "output": [
+    {
+     "image": "https://r.test/repaired.png"
+    }
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "detail_strength": 0.4,
+    "model": "Faithful",
+    "negative_prompt": "(worst quality, low quality, normal quality:2)",
+    "num_inference_steps": 18,
+    "prompt": "masterpiece, best quality, highres",
+    "refine_steps": 20,
+    "resemblance": 0.6,
+    "seed": 0,
+    "topaz_enhance_model": "Standard V2",
+    "topaz_output_format": "png",
+    "topaz_subject_detection": "None"
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": [
+      "https://r.test/repaired.png"
+     ]
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "topazlabs/image-upscale",
+     "payload": {
+      "enhance_model": "Standard V2",
+      "image": "IMG:image",
+      "output_format": "png",
+      "subject_detection": "None",
+      "upscale_factor": "None"
+     },
+     "payload_json": "{\"enhance_model\": \"Standard V2\", \"image\": \"IMG:image\", \"output_format\": \"png\", \"subject_detection\": \"None\", \"upscale_factor\": \"None\"}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "EnhanceDetailNode",
+   "files": {
+    "https://r.test/repaired.png": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/AOfu52Fe818w5JtILhXK51AHIB4SYXsP7QLA830WOAyj+wbziPxt145DCAMZu9YZtjUACABtaxrwwMvWJWWKrCyfqgfRPER+MwUeAe75WnLsB+PxY/j0EzE2sy8K4cS/yLaBOgHihATGE8F9j2lFVtlSQuGFOV2EZgnaFzEBYVFkZabEESENYPtNQ7UBXTMTgiiqG9Ll98BCSHEU9e0AAAAASUVORK5CYII="
+   },
+   "gets": [
+    {
+     "status": 200,
+     "url": "https://r.test/repaired.png"
+    }
+   ],
+   "name": "enhance \u00b7 Faithful detail 1.0",
+   "output": [
+    {
+     "image": "https://r.test/repaired.png"
+    }
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "detail_strength": 1.0,
+    "model": "Faithful",
+    "negative_prompt": "(worst quality, low quality, normal quality:2)",
+    "num_inference_steps": 18,
+    "prompt": "masterpiece, best quality, highres",
+    "refine_steps": 20,
+    "resemblance": 0.6,
+    "seed": 0,
+    "topaz_enhance_model": "Standard V2",
+    "topaz_output_format": "png",
+    "topaz_subject_detection": "None"
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": [
+      "https://r.test/repaired.png"
+     ]
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "topazlabs/image-upscale",
+     "payload": {
+      "enhance_model": "Standard V2",
+      "image": "IMG:image",
+      "output_format": "png",
+      "subject_detection": "None",
+      "upscale_factor": "None"
+     },
+     "payload_json": "{\"enhance_model\": \"Standard V2\", \"image\": \"IMG:image\", \"output_format\": \"png\", \"subject_detection\": \"None\", \"upscale_factor\": \"None\"}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "EnhanceDetailNode",
+   "files": {
+    "https://r.test/repaired.png": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/AOfu52Fe818w5JtILhXK51AHIB4SYXsP7QLA830WOAyj+wbziPxt145DCAMZu9YZtjUACABtaxrwwMvWJWWKrCyfqgfRPER+MwUeAe75WnLsB+PxY/j0EzE2sy8K4cS/yLaBOgHihATGE8F9j2lFVtlSQuGFOV2EZgnaFzEBYVFkZabEESENYPtNQ7UBXTMTgiiqG9Ll98BCSHEU9e0AAAAASUVORK5CYII="
+   },
+   "gets": [
+    {
+     "status": 200,
+     "url": "https://r.test/repaired.png"
+    }
+   ],
+   "name": "enhance \u00b7 Faithful seed 7",
+   "output": [
+    {
+     "image": "https://r.test/repaired.png"
+    }
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "detail_strength": 0.4,
+    "model": "Faithful",
+    "negative_prompt": "(worst quality, low quality, normal quality:2)",
+    "num_inference_steps": 18,
+    "prompt": "masterpiece, best quality, highres",
+    "refine_steps": 20,
+    "resemblance": 0.6,
+    "seed": 7,
+    "topaz_enhance_model": "Standard V2",
+    "topaz_output_format": "png",
+    "topaz_subject_detection": "None"
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": [
+      "https://r.test/repaired.png"
+     ]
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "fermatresearch/magic-image-refiner",
+     "payload": {
+      "creativity": 0.15,
+      "image": "IMG:image",
+      "prompt": "masterpiece, best quality, highres",
+      "resemblance": 0.75,
+      "resolution": "original",
+      "steps": 20
+     },
+     "payload_json": "{\"creativity\": 0.15, \"image\": \"IMG:image\", \"prompt\": \"masterpiece, best quality, highres\", \"resemblance\": 0.75, \"resolution\": \"original\", \"steps\": 20}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "EnhanceDetailNode",
+   "files": {
+    "https://r.test/repaired.png": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/AOfu52Fe818w5JtILhXK51AHIB4SYXsP7QLA830WOAyj+wbziPxt145DCAMZu9YZtjUACABtaxrwwMvWJWWKrCyfqgfRPER+MwUeAe75WnLsB+PxY/j0EzE2sy8K4cS/yLaBOgHihATGE8F9j2lFVtlSQuGFOV2EZgnaFzEBYVFkZabEESENYPtNQ7UBXTMTgiiqG9Ll98BCSHEU9e0AAAAASUVORK5CYII="
+   },
+   "gets": [
+    {
+     "status": 200,
+     "url": "https://r.test/repaired.png"
+    }
+   ],
+   "name": "enhance \u00b7 Diffusion Refine detail 0.0",
+   "output": [
+    {
+     "image": "https://r.test/repaired.png"
+    }
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "detail_strength": 0.0,
+    "model": "Diffusion Refine",
+    "negative_prompt": "(worst quality, low quality, normal quality:2)",
+    "num_inference_steps": 18,
+    "prompt": "masterpiece, best quality, highres",
+    "refine_steps": 20,
+    "resemblance": 0.6,
+    "seed": 0,
+    "topaz_enhance_model": "Standard V2",
+    "topaz_output_format": "png",
+    "topaz_subject_detection": "None"
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": [
+      "https://r.test/repaired.png"
+     ]
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "fermatresearch/magic-image-refiner",
+     "payload": {
+      "creativity": 0.33,
+      "image": "IMG:image",
+      "prompt": "masterpiece, best quality, highres",
+      "resemblance": 0.75,
+      "resolution": "original",
+      "steps": 20
+     },
+     "payload_json": "{\"creativity\": 0.33, \"image\": \"IMG:image\", \"prompt\": \"masterpiece, best quality, highres\", \"resemblance\": 0.75, \"resolution\": \"original\", \"steps\": 20}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "EnhanceDetailNode",
+   "files": {
+    "https://r.test/repaired.png": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/AOfu52Fe818w5JtILhXK51AHIB4SYXsP7QLA830WOAyj+wbziPxt145DCAMZu9YZtjUACABtaxrwwMvWJWWKrCyfqgfRPER+MwUeAe75WnLsB+PxY/j0EzE2sy8K4cS/yLaBOgHihATGE8F9j2lFVtlSQuGFOV2EZgnaFzEBYVFkZabEESENYPtNQ7UBXTMTgiiqG9Ll98BCSHEU9e0AAAAASUVORK5CYII="
+   },
+   "gets": [
+    {
+     "status": 200,
+     "url": "https://r.test/repaired.png"
+    }
+   ],
+   "name": "enhance \u00b7 Diffusion Refine detail 0.4",
+   "output": [
+    {
+     "image": "https://r.test/repaired.png"
+    }
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "detail_strength": 0.4,
+    "model": "Diffusion Refine",
+    "negative_prompt": "(worst quality, low quality, normal quality:2)",
+    "num_inference_steps": 18,
+    "prompt": "masterpiece, best quality, highres",
+    "refine_steps": 20,
+    "resemblance": 0.6,
+    "seed": 0,
+    "topaz_enhance_model": "Standard V2",
+    "topaz_output_format": "png",
+    "topaz_subject_detection": "None"
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": [
+      "https://r.test/repaired.png"
+     ]
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "fermatresearch/magic-image-refiner",
+     "payload": {
+      "creativity": 0.6,
+      "image": "IMG:image",
+      "prompt": "masterpiece, best quality, highres",
+      "resemblance": 0.75,
+      "resolution": "original",
+      "steps": 20
+     },
+     "payload_json": "{\"creativity\": 0.6, \"image\": \"IMG:image\", \"prompt\": \"masterpiece, best quality, highres\", \"resemblance\": 0.75, \"resolution\": \"original\", \"steps\": 20}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "EnhanceDetailNode",
+   "files": {
+    "https://r.test/repaired.png": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/AOfu52Fe818w5JtILhXK51AHIB4SYXsP7QLA830WOAyj+wbziPxt145DCAMZu9YZtjUACABtaxrwwMvWJWWKrCyfqgfRPER+MwUeAe75WnLsB+PxY/j0EzE2sy8K4cS/yLaBOgHihATGE8F9j2lFVtlSQuGFOV2EZgnaFzEBYVFkZabEESENYPtNQ7UBXTMTgiiqG9Ll98BCSHEU9e0AAAAASUVORK5CYII="
+   },
+   "gets": [
+    {
+     "status": 200,
+     "url": "https://r.test/repaired.png"
+    }
+   ],
+   "name": "enhance \u00b7 Diffusion Refine detail 1.0",
+   "output": [
+    {
+     "image": "https://r.test/repaired.png"
+    }
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "detail_strength": 1.0,
+    "model": "Diffusion Refine",
+    "negative_prompt": "(worst quality, low quality, normal quality:2)",
+    "num_inference_steps": 18,
+    "prompt": "masterpiece, best quality, highres",
+    "refine_steps": 20,
+    "resemblance": 0.6,
+    "seed": 0,
+    "topaz_enhance_model": "Standard V2",
+    "topaz_output_format": "png",
+    "topaz_subject_detection": "None"
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": [
+      "https://r.test/repaired.png"
+     ]
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "fermatresearch/magic-image-refiner",
+     "payload": {
+      "creativity": 0.33,
+      "image": "IMG:image",
+      "prompt": "masterpiece, best quality, highres",
+      "resemblance": 0.75,
+      "resolution": "original",
+      "seed": 7,
+      "steps": 20
+     },
+     "payload_json": "{\"creativity\": 0.33, \"image\": \"IMG:image\", \"prompt\": \"masterpiece, best quality, highres\", \"resemblance\": 0.75, \"resolution\": \"original\", \"seed\": 7, \"steps\": 20}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "EnhanceDetailNode",
+   "files": {
+    "https://r.test/repaired.png": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/AOfu52Fe818w5JtILhXK51AHIB4SYXsP7QLA830WOAyj+wbziPxt145DCAMZu9YZtjUACABtaxrwwMvWJWWKrCyfqgfRPER+MwUeAe75WnLsB+PxY/j0EzE2sy8K4cS/yLaBOgHihATGE8F9j2lFVtlSQuGFOV2EZgnaFzEBYVFkZabEESENYPtNQ7UBXTMTgiiqG9Ll98BCSHEU9e0AAAAASUVORK5CYII="
+   },
+   "gets": [
+    {
+     "status": 200,
+     "url": "https://r.test/repaired.png"
+    }
+   ],
+   "name": "enhance \u00b7 Diffusion Refine seed 7",
+   "output": [
+    {
+     "image": "https://r.test/repaired.png"
+    }
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "detail_strength": 0.4,
+    "model": "Diffusion Refine",
+    "negative_prompt": "(worst quality, low quality, normal quality:2)",
+    "num_inference_steps": 18,
+    "prompt": "masterpiece, best quality, highres",
+    "refine_steps": 20,
+    "resemblance": 0.6,
+    "seed": 7,
+    "topaz_enhance_model": "Standard V2",
+    "topaz_output_format": "png",
+    "topaz_subject_detection": "None"
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": [
+      "https://r.test/repaired.png"
+     ]
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "philz1337x/clarity-upscaler",
+     "payload": {
+      "creativity": 0.30000000000000004,
+      "image": "IMG:image",
+      "negative_prompt": "blurry",
+      "num_inference_steps": 30,
+      "output_format": "png",
+      "prompt": "",
+      "resemblance": 1.25,
+      "scale_factor": 1.0
+     },
+     "payload_json": "{\"creativity\": 0.30000000000000004, \"image\": \"IMG:image\", \"negative_prompt\": \"blurry\", \"num_inference_steps\": 30, \"output_format\": \"png\", \"prompt\": \"\", \"resemblance\": 1.25, \"scale_factor\": 1.0}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "EnhanceDetailNode",
+   "files": {
+    "https://r.test/repaired.png": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/AOfu52Fe818w5JtILhXK51AHIB4SYXsP7QLA830WOAyj+wbziPxt145DCAMZu9YZtjUACABtaxrwwMvWJWWKrCyfqgfRPER+MwUeAe75WnLsB+PxY/j0EzE2sy8K4cS/yLaBOgHihATGE8F9j2lFVtlSQuGFOV2EZgnaFzEBYVFkZabEESENYPtNQ7UBXTMTgiiqG9Ll98BCSHEU9e0AAAAASUVORK5CYII="
+   },
+   "gets": [
+    {
+     "status": 200,
+     "url": "https://r.test/repaired.png"
+    }
+   ],
+   "name": "enhance \u00b7 Creative every other setting",
+   "output": [
+    {
+     "image": "https://r.test/repaired.png"
+    }
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "detail_strength": 0.4,
+    "model": "Creative",
+    "negative_prompt": "blurry",
+    "num_inference_steps": 30,
+    "prompt": "",
+    "refine_steps": 20,
+    "resemblance": 1.25,
+    "seed": 0,
+    "topaz_enhance_model": "Standard V2",
+    "topaz_output_format": "png",
+    "topaz_subject_detection": "None"
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": [
+      "https://r.test/repaired.png"
+     ]
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "topazlabs/image-upscale",
+     "payload": {
+      "enhance_model": "CGI",
+      "image": "IMG:image",
+      "output_format": "jpg",
+      "subject_detection": "All",
+      "upscale_factor": "None"
+     },
+     "payload_json": "{\"enhance_model\": \"CGI\", \"image\": \"IMG:image\", \"output_format\": \"jpg\", \"subject_detection\": \"All\", \"upscale_factor\": \"None\"}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "EnhanceDetailNode",
+   "files": {
+    "https://r.test/repaired.png": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/AOfu52Fe818w5JtILhXK51AHIB4SYXsP7QLA830WOAyj+wbziPxt145DCAMZu9YZtjUACABtaxrwwMvWJWWKrCyfqgfRPER+MwUeAe75WnLsB+PxY/j0EzE2sy8K4cS/yLaBOgHihATGE8F9j2lFVtlSQuGFOV2EZgnaFzEBYVFkZabEESENYPtNQ7UBXTMTgiiqG9Ll98BCSHEU9e0AAAAASUVORK5CYII="
+   },
+   "gets": [
+    {
+     "status": 200,
+     "url": "https://r.test/repaired.png"
+    }
+   ],
+   "name": "enhance \u00b7 Faithful every other setting",
+   "output": [
+    {
+     "image": "https://r.test/repaired.png"
+    }
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "detail_strength": 0.4,
+    "model": "Faithful",
+    "negative_prompt": "(worst quality, low quality, normal quality:2)",
+    "num_inference_steps": 18,
+    "prompt": "masterpiece, best quality, highres",
+    "refine_steps": 20,
+    "resemblance": 0.6,
+    "seed": 0,
+    "topaz_enhance_model": "CGI",
+    "topaz_output_format": "jpg",
+    "topaz_subject_detection": "All"
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": [
+      "https://r.test/repaired.png"
+     ]
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "fermatresearch/magic-image-refiner",
+     "payload": {
+      "creativity": 0.33,
+      "image": "IMG:image",
+      "prompt": "a crisp portrait",
+      "resemblance": 0.75,
+      "resolution": "original",
+      "steps": 50
+     },
+     "payload_json": "{\"creativity\": 0.33, \"image\": \"IMG:image\", \"prompt\": \"a crisp portrait\", \"resemblance\": 0.75, \"resolution\": \"original\", \"steps\": 50}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "EnhanceDetailNode",
+   "files": {
+    "https://r.test/repaired.png": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/AOfu52Fe818w5JtILhXK51AHIB4SYXsP7QLA830WOAyj+wbziPxt145DCAMZu9YZtjUACABtaxrwwMvWJWWKrCyfqgfRPER+MwUeAe75WnLsB+PxY/j0EzE2sy8K4cS/yLaBOgHihATGE8F9j2lFVtlSQuGFOV2EZgnaFzEBYVFkZabEESENYPtNQ7UBXTMTgiiqG9Ll98BCSHEU9e0AAAAASUVORK5CYII="
+   },
+   "gets": [
+    {
+     "status": 200,
+     "url": "https://r.test/repaired.png"
+    }
+   ],
+   "name": "enhance \u00b7 Diffusion Refine every other setting",
+   "output": [
+    {
+     "image": "https://r.test/repaired.png"
+    }
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "detail_strength": 0.4,
+    "model": "Diffusion Refine",
+    "negative_prompt": "(worst quality, low quality, normal quality:2)",
+    "num_inference_steps": 18,
+    "prompt": "a crisp portrait",
+    "refine_steps": 50,
+    "resemblance": 0.6,
+    "seed": 0,
+    "topaz_enhance_model": "Standard V2",
+    "topaz_output_format": "png",
+    "topaz_subject_detection": "None"
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": [
+      "https://r.test/repaired.png"
+     ]
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "flux-kontext-apps/restore-image",
+     "payload": {
+      "input_image": "IMG:image",
+      "output_format": "png",
+      "safety_tolerance": 2
+     },
+     "payload_json": "{\"input_image\": \"IMG:image\", \"output_format\": \"png\", \"safety_tolerance\": 2}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "RestorePhotoNode",
+   "files": {
+    "https://r.test/repaired.png": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/AOfu52Fe818w5JtILhXK51AHIB4SYXsP7QLA830WOAyj+wbziPxt145DCAMZu9YZtjUACABtaxrwwMvWJWWKrCyfqgfRPER+MwUeAe75WnLsB+PxY/j0EzE2sy8K4cS/yLaBOgHihATGE8F9j2lFVtlSQuGFOV2EZgnaFzEBYVFkZabEESENYPtNQ7UBXTMTgiiqG9Ll98BCSHEU9e0AAAAASUVORK5CYII="
+   },
+   "gets": [
+    {
+     "status": 200,
+     "url": "https://r.test/repaired.png"
+    }
+   ],
+   "name": "restore \u00b7 png",
+   "output": [
+    {
+     "image": "https://r.test/repaired.png"
+    }
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": {
+    "animated": [
+     false
+    ],
+    "images": [
+     {
+      "image": {
+       "image": "https://r.test/repaired.png"
+      },
+      "prefix": "restore_photo"
+     }
+    ]
+   },
+   "widgets": {
+    "model": "Flux Kontext \u00b7 Restore",
+    "output_format": "png",
+    "safety_tolerance": 2
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": [
+      "https://r.test/repaired.png"
+     ]
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "flux-kontext-apps/restore-image",
+     "payload": {
+      "input_image": "IMG:image",
+      "output_format": "png",
+      "safety_tolerance": 2
+     },
+     "payload_json": "{\"input_image\": \"IMG:image\", \"output_format\": \"png\", \"safety_tolerance\": 2}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "RestorePhotoRemoteNode",
+   "files": {
+    "https://r.test/repaired.png": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/AOfu52Fe818w5JtILhXK51AHIB4SYXsP7QLA830WOAyj+wbziPxt145DCAMZu9YZtjUACABtaxrwwMvWJWWKrCyfqgfRPER+MwUeAe75WnLsB+PxY/j0EzE2sy8K4cS/yLaBOgHihATGE8F9j2lFVtlSQuGFOV2EZgnaFzEBYVFkZabEESENYPtNQ7UBXTMTgiiqG9Ll98BCSHEU9e0AAAAASUVORK5CYII="
+   },
+   "gets": [
+    {
+     "status": 200,
+     "url": "https://r.test/repaired.png"
+    }
+   ],
+   "name": "restore twin \u00b7 png",
+   "output": [
+    {
+     "image": "https://r.test/repaired.png"
+    }
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": {
+    "animated": [
+     false
+    ],
+    "images": [
+     {
+      "image": {
+       "image": "https://r.test/repaired.png"
+      },
+      "prefix": "restore_photo"
+     }
+    ]
+   },
+   "widgets": {
+    "output_format": "png",
+    "safety_tolerance": "2"
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": [
+      "https://r.test/repaired.png"
+     ]
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "flux-kontext-apps/restore-image",
+     "payload": {
+      "input_image": "IMG:image",
+      "output_format": "jpg",
+      "safety_tolerance": 2
+     },
+     "payload_json": "{\"input_image\": \"IMG:image\", \"output_format\": \"jpg\", \"safety_tolerance\": 2}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "RestorePhotoNode",
+   "files": {
+    "https://r.test/repaired.png": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/AOfu52Fe818w5JtILhXK51AHIB4SYXsP7QLA830WOAyj+wbziPxt145DCAMZu9YZtjUACABtaxrwwMvWJWWKrCyfqgfRPER+MwUeAe75WnLsB+PxY/j0EzE2sy8K4cS/yLaBOgHihATGE8F9j2lFVtlSQuGFOV2EZgnaFzEBYVFkZabEESENYPtNQ7UBXTMTgiiqG9Ll98BCSHEU9e0AAAAASUVORK5CYII="
+   },
+   "gets": [
+    {
+     "status": 200,
+     "url": "https://r.test/repaired.png"
+    }
+   ],
+   "name": "restore \u00b7 jpg",
+   "output": [
+    {
+     "image": "https://r.test/repaired.png"
+    }
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": {
+    "animated": [
+     false
+    ],
+    "images": [
+     {
+      "image": {
+       "image": "https://r.test/repaired.png"
+      },
+      "prefix": "restore_photo"
+     }
+    ]
+   },
+   "widgets": {
+    "model": "Flux Kontext \u00b7 Restore",
+    "output_format": "jpg",
+    "safety_tolerance": 2
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": [
+      "https://r.test/repaired.png"
+     ]
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "flux-kontext-apps/restore-image",
+     "payload": {
+      "input_image": "IMG:image",
+      "output_format": "jpg",
+      "safety_tolerance": 2
+     },
+     "payload_json": "{\"input_image\": \"IMG:image\", \"output_format\": \"jpg\", \"safety_tolerance\": 2}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "RestorePhotoRemoteNode",
+   "files": {
+    "https://r.test/repaired.png": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/AOfu52Fe818w5JtILhXK51AHIB4SYXsP7QLA830WOAyj+wbziPxt145DCAMZu9YZtjUACABtaxrwwMvWJWWKrCyfqgfRPER+MwUeAe75WnLsB+PxY/j0EzE2sy8K4cS/yLaBOgHihATGE8F9j2lFVtlSQuGFOV2EZgnaFzEBYVFkZabEESENYPtNQ7UBXTMTgiiqG9Ll98BCSHEU9e0AAAAASUVORK5CYII="
+   },
+   "gets": [
+    {
+     "status": 200,
+     "url": "https://r.test/repaired.png"
+    }
+   ],
+   "name": "restore twin \u00b7 jpg",
+   "output": [
+    {
+     "image": "https://r.test/repaired.png"
+    }
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": {
+    "animated": [
+     false
+    ],
+    "images": [
+     {
+      "image": {
+       "image": "https://r.test/repaired.png"
+      },
+      "prefix": "restore_photo"
+     }
+    ]
+   },
+   "widgets": {
+    "output_format": "jpg",
+    "safety_tolerance": "2"
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": [
+      "https://r.test/repaired.png"
+     ]
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "flux-kontext-apps/restore-image",
+     "payload": {
+      "input_image": "IMG:image",
+      "output_format": "png",
+      "safety_tolerance": 6
+     },
+     "payload_json": "{\"input_image\": \"IMG:image\", \"output_format\": \"png\", \"safety_tolerance\": 6}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "RestorePhotoNode",
+   "files": {
+    "https://r.test/repaired.png": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/AOfu52Fe818w5JtILhXK51AHIB4SYXsP7QLA830WOAyj+wbziPxt145DCAMZu9YZtjUACABtaxrwwMvWJWWKrCyfqgfRPER+MwUeAe75WnLsB+PxY/j0EzE2sy8K4cS/yLaBOgHihATGE8F9j2lFVtlSQuGFOV2EZgnaFzEBYVFkZabEESENYPtNQ7UBXTMTgiiqG9Ll98BCSHEU9e0AAAAASUVORK5CYII="
+   },
+   "gets": [
+    {
+     "status": 200,
+     "url": "https://r.test/repaired.png"
+    }
+   ],
+   "name": "restore \u00b7 safety 6",
+   "output": [
+    {
+     "image": "https://r.test/repaired.png"
+    }
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": {
+    "animated": [
+     false
+    ],
+    "images": [
+     {
+      "image": {
+       "image": "https://r.test/repaired.png"
+      },
+      "prefix": "restore_photo"
+     }
+    ]
+   },
+   "widgets": {
+    "model": "Flux Kontext \u00b7 Restore",
+    "output_format": "png",
+    "safety_tolerance": 6
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": [
+      "https://r.test/repaired.png"
+     ]
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "flux-kontext-apps/restore-image",
+     "payload": {
+      "input_image": "IMG:image",
+      "output_format": "png",
+      "safety_tolerance": 1
+     },
+     "payload_json": "{\"input_image\": \"IMG:image\", \"output_format\": \"png\", \"safety_tolerance\": 1}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "RestorePhotoRemoteNode",
+   "files": {
+    "https://r.test/repaired.png": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/AOfu52Fe818w5JtILhXK51AHIB4SYXsP7QLA830WOAyj+wbziPxt145DCAMZu9YZtjUACABtaxrwwMvWJWWKrCyfqgfRPER+MwUeAe75WnLsB+PxY/j0EzE2sy8K4cS/yLaBOgHihATGE8F9j2lFVtlSQuGFOV2EZgnaFzEBYVFkZabEESENYPtNQ7UBXTMTgiiqG9Ll98BCSHEU9e0AAAAASUVORK5CYII="
+   },
+   "gets": [
+    {
+     "status": 200,
+     "url": "https://r.test/repaired.png"
+    }
+   ],
+   "name": "restore twin \u00b7 safety 1",
+   "output": [
+    {
+     "image": "https://r.test/repaired.png"
+    }
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": {
+    "animated": [
+     false
+    ],
+    "images": [
+     {
+      "image": {
+       "image": "https://r.test/repaired.png"
+      },
+      "prefix": "restore_photo"
+     }
+    ]
+   },
+   "widgets": {
+    "output_format": "png",
+    "safety_tolerance": "1"
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": [
+      "https://r.test/repaired.png"
+     ]
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "flux-kontext-apps/restore-image",
+     "payload": {
+      "input_image": "IMG:image",
+      "output_format": "png",
+      "safety_tolerance": 2
+     },
+     "payload_json": "{\"input_image\": \"IMG:image\", \"output_format\": \"png\", \"safety_tolerance\": 2}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "RestorePhotoRemoteNode",
+   "files": {
+    "https://r.test/repaired.png": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/AOfu52Fe818w5JtILhXK51AHIB4SYXsP7QLA830WOAyj+wbziPxt145DCAMZu9YZtjUACABtaxrwwMvWJWWKrCyfqgfRPER+MwUeAe75WnLsB+PxY/j0EzE2sy8K4cS/yLaBOgHihATGE8F9j2lFVtlSQuGFOV2EZgnaFzEBYVFkZabEESENYPtNQ7UBXTMTgiiqG9Ll98BCSHEU9e0AAAAASUVORK5CYII="
+   },
+   "gets": [
+    {
+     "status": 200,
+     "url": "https://r.test/repaired.png"
+    }
+   ],
+   "name": "restore twin \u00b7 safety text",
+   "output": [
+    {
+     "image": "https://r.test/repaired.png"
+    }
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": {
+    "animated": [
+     false
+    ],
+    "images": [
+     {
+      "image": {
+       "image": "https://r.test/repaired.png"
+      },
+      "prefix": "restore_photo"
+     }
+    ]
+   },
+   "widgets": {
+    "output_format": "png",
+    "safety_tolerance": "strict"
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": [
+      "https://r.test/repaired.png"
+     ]
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "flux-kontext-apps/restore-image",
+     "payload": {
+      "input_image": "IMG:image",
+      "output_format": "png",
+      "safety_tolerance": 2
+     },
+     "payload_json": "{\"input_image\": \"IMG:image\", \"output_format\": \"png\", \"safety_tolerance\": 2}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "RestorePhotoRemoteNode",
+   "files": {
+    "https://r.test/repaired.png": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/AOfu52Fe818w5JtILhXK51AHIB4SYXsP7QLA830WOAyj+wbziPxt145DCAMZu9YZtjUACABtaxrwwMvWJWWKrCyfqgfRPER+MwUeAe75WnLsB+PxY/j0EzE2sy8K4cS/yLaBOgHihATGE8F9j2lFVtlSQuGFOV2EZgnaFzEBYVFkZabEESENYPtNQ7UBXTMTgiiqG9Ll98BCSHEU9e0AAAAASUVORK5CYII="
+   },
+   "gets": [
+    {
+     "status": 200,
+     "url": "https://r.test/repaired.png"
+    }
+   ],
+   "name": "restore twin \u00b7 safety empty",
+   "output": [
+    {
+     "image": "https://r.test/repaired.png"
+    }
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": {
+    "animated": [
+     false
+    ],
+    "images": [
+     {
+      "image": {
+       "image": "https://r.test/repaired.png"
+      },
+      "prefix": "restore_photo"
+     }
+    ]
+   },
+   "widgets": {
+    "output_format": "png",
+    "safety_tolerance": ""
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": [
+      "https://r.test/repaired.png"
+     ]
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "flux-kontext-apps/restore-image",
+     "payload": {
+      "input_image": "IMG:image",
+      "output_format": "png",
+      "safety_tolerance": 2
+     },
+     "payload_json": "{\"input_image\": \"IMG:image\", \"output_format\": \"png\", \"safety_tolerance\": 2}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "RestorePhotoRemoteNode",
+   "files": {
+    "https://r.test/repaired.png": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/AOfu52Fe818w5JtILhXK51AHIB4SYXsP7QLA830WOAyj+wbziPxt145DCAMZu9YZtjUACABtaxrwwMvWJWWKrCyfqgfRPER+MwUeAe75WnLsB+PxY/j0EzE2sy8K4cS/yLaBOgHihATGE8F9j2lFVtlSQuGFOV2EZgnaFzEBYVFkZabEESENYPtNQ7UBXTMTgiiqG9Ll98BCSHEU9e0AAAAASUVORK5CYII="
+   },
+   "gets": [
+    {
+     "status": 200,
+     "url": "https://r.test/repaired.png"
+    }
+   ],
+   "name": "restore twin \u00b7 safety spaced",
+   "output": [
+    {
+     "image": "https://r.test/repaired.png"
+    }
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": {
+    "animated": [
+     false
+    ],
+    "images": [
+     {
+      "image": {
+       "image": "https://r.test/repaired.png"
+      },
+      "prefix": "restore_photo"
+     }
+    ]
+   },
+   "widgets": {
+    "output_format": "png",
+    "safety_tolerance": " 2"
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": [
+      "https://r.test/repaired.png"
+     ]
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "flux-kontext-apps/restore-image",
+     "payload": {
+      "input_image": "IMG:image",
+      "output_format": "png",
+      "safety_tolerance": 2
+     },
+     "payload_json": "{\"input_image\": \"IMG:image\", \"output_format\": \"png\", \"safety_tolerance\": 2}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "RestorePhotoRemoteNode",
+   "files": {
+    "https://r.test/repaired.png": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/AOfu52Fe818w5JtILhXK51AHIB4SYXsP7QLA830WOAyj+wbziPxt145DCAMZu9YZtjUACABtaxrwwMvWJWWKrCyfqgfRPER+MwUeAe75WnLsB+PxY/j0EzE2sy8K4cS/yLaBOgHihATGE8F9j2lFVtlSQuGFOV2EZgnaFzEBYVFkZabEESENYPtNQ7UBXTMTgiiqG9Ll98BCSHEU9e0AAAAASUVORK5CYII="
+   },
+   "gets": [
+    {
+     "status": 200,
+     "url": "https://r.test/repaired.png"
+    }
+   ],
+   "name": "restore twin \u00b7 safety decimal",
+   "output": [
+    {
+     "image": "https://r.test/repaired.png"
+    }
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": {
+    "animated": [
+     false
+    ],
+    "images": [
+     {
+      "image": {
+       "image": "https://r.test/repaired.png"
+      },
+      "prefix": "restore_photo"
+     }
+    ]
+   },
+   "widgets": {
+    "output_format": "png",
+    "safety_tolerance": "2.5"
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": [
+      "https://r.test/repaired.png"
+     ]
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "flux-kontext-apps/restore-image",
+     "payload": {
+      "input_image": "IMG:image",
+      "output_format": "png",
+      "safety_tolerance": 2
+     },
+     "payload_json": "{\"input_image\": \"IMG:image\", \"output_format\": \"png\", \"safety_tolerance\": 2}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "RestorePhotoRemoteNode",
+   "files": {
+    "https://r.test/repaired.png": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/AOfu52Fe818w5JtILhXK51AHIB4SYXsP7QLA830WOAyj+wbziPxt145DCAMZu9YZtjUACABtaxrwwMvWJWWKrCyfqgfRPER+MwUeAe75WnLsB+PxY/j0EzE2sy8K4cS/yLaBOgHihATGE8F9j2lFVtlSQuGFOV2EZgnaFzEBYVFkZabEESENYPtNQ7UBXTMTgiiqG9Ll98BCSHEU9e0AAAAASUVORK5CYII="
+   },
+   "gets": [
+    {
+     "status": 200,
+     "url": "https://r.test/repaired.png"
+    }
+   ],
+   "name": "restore twin \u00b7 safety minus",
+   "output": [
+    {
+     "image": "https://r.test/repaired.png"
+    }
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": {
+    "animated": [
+     false
+    ],
+    "images": [
+     {
+      "image": {
+       "image": "https://r.test/repaired.png"
+      },
+      "prefix": "restore_photo"
+     }
+    ]
+   },
+   "widgets": {
+    "output_format": "png",
+    "safety_tolerance": "-1"
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": [
+      "https://r.test/repaired.png"
+     ]
+    }
+   ],
+   "calls": [],
+   "class_type": "RestorePhotoRemoteNode",
+   "error": {
+    "message": "invalid literal for int() with base 10: '\u00b2'",
+    "type": "ValueError"
+   },
+   "files": {
+    "https://r.test/repaired.png": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/AOfu52Fe818w5JtILhXK51AHIB4SYXsP7QLA830WOAyj+wbziPxt145DCAMZu9YZtjUACABtaxrwwMvWJWWKrCyfqgfRPER+MwUeAe75WnLsB+PxY/j0EzE2sy8K4cS/yLaBOgHihATGE8F9j2lFVtlSQuGFOV2EZgnaFzEBYVFkZabEESENYPtNQ7UBXTMTgiiqG9Ll98BCSHEU9e0AAAAASUVORK5CYII="
+   },
+   "gets": [],
+   "name": "restore twin \u00b7 safety superscript",
+   "output": null,
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "output_format": "png",
+    "safety_tolerance": "\u00b2"
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": [
+      "https://r.test/repaired.png"
+     ]
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "flux-kontext-apps/restore-image",
+     "payload": {
+      "input_image": "IMG:image",
+      "output_format": "png",
+      "safety_tolerance": 3
+     },
+     "payload_json": "{\"input_image\": \"IMG:image\", \"output_format\": \"png\", \"safety_tolerance\": 3}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "RestorePhotoRemoteNode",
+   "files": {
+    "https://r.test/repaired.png": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/AOfu52Fe818w5JtILhXK51AHIB4SYXsP7QLA830WOAyj+wbziPxt145DCAMZu9YZtjUACABtaxrwwMvWJWWKrCyfqgfRPER+MwUeAe75WnLsB+PxY/j0EzE2sy8K4cS/yLaBOgHihATGE8F9j2lFVtlSQuGFOV2EZgnaFzEBYVFkZabEESENYPtNQ7UBXTMTgiiqG9Ll98BCSHEU9e0AAAAASUVORK5CYII="
+   },
+   "gets": [
+    {
+     "status": 200,
+     "url": "https://r.test/repaired.png"
+    }
+   ],
+   "name": "restore twin \u00b7 safety arabic-indic",
+   "output": [
+    {
+     "image": "https://r.test/repaired.png"
+    }
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": {
+    "animated": [
+     false
+    ],
+    "images": [
+     {
+      "image": {
+       "image": "https://r.test/repaired.png"
+      },
+      "prefix": "restore_photo"
+     }
+    ]
+   },
+   "widgets": {
+    "output_format": "png",
+    "safety_tolerance": "\u0663"
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": [
+      "https://r.test/repaired.png"
+     ]
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "851-labs/background-remover",
+     "payload": {
+      "image": "IMG:image"
+     },
+     "payload_json": "{\"image\": \"IMG:image\"}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "RemoveBackgroundNode",
+   "files": {
+    "https://r.test/repaired.png": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAYAAAD+Bd/7AAAA0UlEQVR4nAHGADn/APKJs0nDBb/3jOt0AErhvFOtax5mJqzPLAkfci7Y4znYAEWgUxpXKs3W8PTEDypihba5xZ46gXirur5bDsPcEA1xANoWxmg0cFsnjBLdjf+wGuu8aq2Q6fP2elXtul1gcAOJAtRFtZzgDuCRw/rIAj3F2g/5HDbD/KIhFFP2szQinv6EAUOI10Y43gerox425L6ru5DVjfbtV5NKwR2FV68N4PrdBEdzaCY/guXfOyEW2mz/0DoUIxy7Bxzq0NOHJMvxH4qSmGNj4H2z2XgAAAAASUVORK5CYII="
+   },
+   "gets": [
+    {
+     "status": 200,
+     "url": "https://r.test/repaired.png"
+    }
+   ],
+   "name": "remove background \u00b7 list",
+   "output": [
+    {
+     "image": "https://r.test/repaired.png"
+    }
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": {
+    "animated": [
+     false
+    ],
+    "images": [
+     {
+      "image": {
+       "image": "https://r.test/repaired.png"
+      },
+      "prefix": "remove_bg"
+     }
+    ]
+   },
+   "widgets": {
+    "model": "851-labs/bg-remover"
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": "https://r.test/repaired.png"
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "851-labs/background-remover",
+     "payload": {
+      "image": "IMG:image"
+     },
+     "payload_json": "{\"image\": \"IMG:image\"}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "RemoveBackgroundNode",
+   "files": {
+    "https://r.test/repaired.png": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAYAAAD+Bd/7AAAA0UlEQVR4nAHGADn/APKJs0nDBb/3jOt0AErhvFOtax5mJqzPLAkfci7Y4znYAEWgUxpXKs3W8PTEDypihba5xZ46gXirur5bDsPcEA1xANoWxmg0cFsnjBLdjf+wGuu8aq2Q6fP2elXtul1gcAOJAtRFtZzgDuCRw/rIAj3F2g/5HDbD/KIhFFP2szQinv6EAUOI10Y43gerox425L6ru5DVjfbtV5NKwR2FV68N4PrdBEdzaCY/guXfOyEW2mz/0DoUIxy7Bxzq0NOHJMvxH4qSmGNj4H2z2XgAAAAASUVORK5CYII="
+   },
+   "gets": [
+    {
+     "status": 200,
+     "url": "https://r.test/repaired.png"
+    }
+   ],
+   "name": "remove background \u00b7 string",
+   "output": [
+    {
+     "image": "https://r.test/repaired.png"
+    }
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": {
+    "animated": [
+     false
+    ],
+    "images": [
+     {
+      "image": {
+       "image": "https://r.test/repaired.png"
+      },
+      "prefix": "remove_bg"
+     }
+    ]
+   },
+   "widgets": {
+    "model": "851-labs/bg-remover"
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": [
+      "https://r.test/repaired.png",
+      "https://r.test/second.png"
+     ]
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "851-labs/background-remover",
+     "payload": {
+      "image": "IMG:image"
+     },
+     "payload_json": "{\"image\": \"IMG:image\"}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "RemoveBackgroundNode",
+   "files": {
+    "https://r.test/repaired.png": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAYAAAD+Bd/7AAAA0UlEQVR4nAHGADn/APKJs0nDBb/3jOt0AErhvFOtax5mJqzPLAkfci7Y4znYAEWgUxpXKs3W8PTEDypihba5xZ46gXirur5bDsPcEA1xANoWxmg0cFsnjBLdjf+wGuu8aq2Q6fP2elXtul1gcAOJAtRFtZzgDuCRw/rIAj3F2g/5HDbD/KIhFFP2szQinv6EAUOI10Y43gerox425L6ru5DVjfbtV5NKwR2FV68N4PrdBEdzaCY/guXfOyEW2mz/0DoUIxy7Bxzq0NOHJMvxH4qSmGNj4H2z2XgAAAAASUVORK5CYII="
+   },
+   "gets": [
+    {
+     "status": 200,
+     "url": "https://r.test/repaired.png"
+    }
+   ],
+   "name": "remove background \u00b7 two",
+   "output": [
+    {
+     "image": "https://r.test/repaired.png"
+    }
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": {
+    "animated": [
+     false
+    ],
+    "images": [
+     {
+      "image": {
+       "image": "https://r.test/repaired.png"
+      },
+      "prefix": "remove_bg"
+     }
+    ]
+   },
+   "widgets": {
+    "model": "851-labs/bg-remover"
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": [
+      "https://r.test/repaired.png"
+     ]
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "851-labs/background-remover",
+     "payload": {
+      "image": "IMG:image"
+     },
+     "payload_json": "{\"image\": \"IMG:image\"}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "RemoveBackgroundRemoteNode",
+   "files": {
+    "https://r.test/repaired.png": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAYAAAD+Bd/7AAAA0UlEQVR4nAHGADn/APKJs0nDBb/3jOt0AErhvFOtax5mJqzPLAkfci7Y4znYAEWgUxpXKs3W8PTEDypihba5xZ46gXirur5bDsPcEA1xANoWxmg0cFsnjBLdjf+wGuu8aq2Q6fP2elXtul1gcAOJAtRFtZzgDuCRw/rIAj3F2g/5HDbD/KIhFFP2szQinv6EAUOI10Y43gerox425L6ru5DVjfbtV5NKwR2FV68N4PrdBEdzaCY/guXfOyEW2mz/0DoUIxy7Bxzq0NOHJMvxH4qSmGNj4H2z2XgAAAAASUVORK5CYII="
+   },
+   "gets": [
+    {
+     "status": 200,
+     "url": "https://r.test/repaired.png"
+    }
+   ],
+   "name": "remove background twin \u00b7 list",
+   "output": [
+    {
+     "image": "https://r.test/repaired.png"
+    }
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": {
+    "animated": [
+     false
+    ],
+    "images": [
+     {
+      "image": {
+       "image": "https://r.test/repaired.png"
+      },
+      "prefix": "remove_bg"
+     }
+    ]
+   },
+   "widgets": {}
+  },
+  {
+   "answers": [
+    {
+     "output": "https://r.test/repaired.png"
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "851-labs/background-remover",
+     "payload": {
+      "image": "IMG:image"
+     },
+     "payload_json": "{\"image\": \"IMG:image\"}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "RemoveBackgroundRemoteNode",
+   "files": {
+    "https://r.test/repaired.png": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAYAAAD+Bd/7AAAA0UlEQVR4nAHGADn/APKJs0nDBb/3jOt0AErhvFOtax5mJqzPLAkfci7Y4znYAEWgUxpXKs3W8PTEDypihba5xZ46gXirur5bDsPcEA1xANoWxmg0cFsnjBLdjf+wGuu8aq2Q6fP2elXtul1gcAOJAtRFtZzgDuCRw/rIAj3F2g/5HDbD/KIhFFP2szQinv6EAUOI10Y43gerox425L6ru5DVjfbtV5NKwR2FV68N4PrdBEdzaCY/guXfOyEW2mz/0DoUIxy7Bxzq0NOHJMvxH4qSmGNj4H2z2XgAAAAASUVORK5CYII="
+   },
+   "gets": [
+    {
+     "status": 200,
+     "url": "https://r.test/repaired.png"
+    }
+   ],
+   "name": "remove background twin \u00b7 string",
+   "output": [
+    {
+     "image": "https://r.test/repaired.png"
+    }
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": {
+    "animated": [
+     false
+    ],
+    "images": [
+     {
+      "image": {
+       "image": "https://r.test/repaired.png"
+      },
+      "prefix": "remove_bg"
+     }
+    ]
+   },
+   "widgets": {}
+  },
+  {
+   "answers": [
+    {
+     "output": "https://r.test/repaired.png"
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "nightmareai/real-esrgan",
+     "payload": {
+      "face_enhance": false,
+      "image": "IMG:image",
+      "scale": 2.0
+     },
+     "payload_json": "{\"face_enhance\": false, \"image\": \"IMG:image\", \"scale\": 2.0}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "UpscaleImageNode",
+   "files": {
+    "https://r.test/repaired.png": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/AOfu52Fe818w5JtILhXK51AHIB4SYXsP7QLA830WOAyj+wbziPxt145DCAMZu9YZtjUACABtaxrwwMvWJWWKrCyfqgfRPER+MwUeAe75WnLsB+PxY/j0EzE2sy8K4cS/yLaBOgHihATGE8F9j2lFVtlSQuGFOV2EZgnaFzEBYVFkZabEESENYPtNQ7UBXTMTgiiqG9Ll98BCSHEU9e0AAAAASUVORK5CYII="
+   },
+   "gets": [
+    {
+     "status": 200,
+     "url": "https://r.test/repaired.png"
+    }
+   ],
+   "name": "upscale \u00b7 answer string",
+   "output": [
+    {
+     "image": "https://r.test/repaired.png"
+    }
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "creativity": 0.35,
+    "crystal_creativity": 0.0,
+    "crystal_output_format": "png",
+    "face_enhance": false,
+    "model": "Real-ESRGAN",
+    "negative_prompt": "(worst quality, low quality, normal quality:2)",
+    "num_inference_steps": 18,
+    "prompt": "masterpiece, best quality, highres",
+    "resemblance": 0.6,
+    "scale_factor": 2.0,
+    "seed": 0,
+    "topaz_enhance_model": "Standard V2",
+    "topaz_face_creativity": 0.0,
+    "topaz_face_strength": 0.8,
+    "topaz_output_format": "png",
+    "topaz_subject_detection": "None",
+    "topaz_upscale_factor": "2x"
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": [
+      "https://r.test/repaired.png",
+      "https://r.test/second.png"
+     ]
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "recraft-ai/recraft-crisp-upscale",
+     "payload": {
+      "image": "IMG:image"
+     },
+     "payload_json": "{\"image\": \"IMG:image\"}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "UpscaleImageNode",
+   "files": {
+    "https://r.test/repaired.png": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/AOfu52Fe818w5JtILhXK51AHIB4SYXsP7QLA830WOAyj+wbziPxt145DCAMZu9YZtjUACABtaxrwwMvWJWWKrCyfqgfRPER+MwUeAe75WnLsB+PxY/j0EzE2sy8K4cS/yLaBOgHihATGE8F9j2lFVtlSQuGFOV2EZgnaFzEBYVFkZabEESENYPtNQ7UBXTMTgiiqG9Ll98BCSHEU9e0AAAAASUVORK5CYII="
+   },
+   "gets": [
+    {
+     "status": 200,
+     "url": "https://r.test/repaired.png"
+    }
+   ],
+   "name": "upscale \u00b7 answer two",
+   "output": [
+    {
+     "image": "https://r.test/repaired.png"
+    }
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "creativity": 0.35,
+    "crystal_creativity": 0.0,
+    "crystal_output_format": "png",
+    "face_enhance": false,
+    "model": "Recraft Crisp",
+    "negative_prompt": "(worst quality, low quality, normal quality:2)",
+    "num_inference_steps": 18,
+    "prompt": "masterpiece, best quality, highres",
+    "resemblance": 0.6,
+    "scale_factor": 2.0,
+    "seed": 0,
+    "topaz_enhance_model": "Standard V2",
+    "topaz_face_creativity": 0.0,
+    "topaz_face_strength": 0.8,
+    "topaz_output_format": "png",
+    "topaz_subject_detection": "None",
+    "topaz_upscale_factor": "2x"
+   }
+  }
+ ]
+}

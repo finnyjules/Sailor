@@ -177,6 +177,7 @@ import { TOPAZ_VIDEO_MAX_FACTOR, TOPAZ_VIDEO_MIN_FACTOR, TOPAZ_VIDEO_UNKNOWN_SET
 import { isSync3LipSync, sync3ModeRefusal } from '#shared/runner/lipSync'
 import { llmRequestProblem } from '#shared/runner/llm'
 import { describeComfyPathProblem, describeRequestProblem } from '#shared/runner/describe'
+import { repairRequestProblem } from '#shared/runner/repair'
 import { isLlmTextClass } from './generators/llm'
 import { FACE_SWAP_NEEDS_GENDER, faceSwapGender } from '#shared/runner/faceSwap'
 import { pixverseSwapNodeProblem } from './generators/pixverseSwap'
@@ -460,6 +461,16 @@ export function unreadableInputWords(classType: string): string {
 export function tooManyPicturesWords(classType: string): string {
   const name = sizePricedName(classType)
   return `This run has more pictures than Sailor can check at once, and ${name} is charged by its picture's size. Run fewer pictures at a time.`
+}
+
+/**
+ * R3.5: the refusal at a size-priced node's turn when its picture would now
+ * cost more than the start of the run measured and held for it (hosted: an
+ * input file changed meanwhile). The node's hold is released.
+ */
+export function pictureChangedWords(classType: string): string {
+  const name = sizePricedName(classType)
+  return `The picture going into ${name} is larger than when this run started, and ${name} is charged by its size. Run it again.`
 }
 
 /** The refusal for a size-priced node's picture above the input cap, in the node's (or its model's) own words. */
@@ -931,6 +942,10 @@ export function requestProblems(prompt: ApiPrompt, opts: { runner?: boolean } = 
     // Replicate couldn't fetch. Nothing is read.
     const d = opts.runner ? describeRequestProblem(ct, inputs) : describeComfyPathProblem(ct, inputs)
     if (d) out.push({ nodeId, classType: ct, input: d.input, message: d.message })
+    // Restore photo's hidden twin (R3.5), on a runner run: a safety level the
+    // runner can't send as Python would (#shared/runner/repair restoreTwinSafety).
+    const r = opts.runner ? repairRequestProblem(ct, inputs) : null
+    if (r) out.push({ nodeId, classType: ct, input: r.input, message: r.message })
   }
   return out
 }

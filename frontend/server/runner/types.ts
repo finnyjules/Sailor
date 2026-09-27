@@ -221,6 +221,12 @@ export interface MeasuredMedia {
   }
   /** The sha256 of each file's bytes, by its part (a sync-3 node has both; a Topaz node only its video). */
   sha: { video?: string; audio?: string }
+  /**
+   * Upscale and Enhance detail (R3.5, hosted): the pixels of the picture the
+   * node is sent, as the start of the run sized it (repairSizes.ts; its
+   * `seconds` and `sha` are empty). The hold is priced on it.
+   */
+  pixels?: number
 }
 
 export type LegAction = 'run' | 'continue' | 'again' | 'redo' | 'restart'

@@ -39,6 +39,7 @@ import {
   DESCRIBE_CLASSES, DESCRIBE_ENDPOINTS, DESCRIBE_VIDEO_MAX_ANSWER_TOKENS, DESCRIBE_VIDEO_MAX_SECONDS, DESCRIBE_VIDEO_TOKENS_PER_SECOND,
   type DescribeClass,
 } from '../runner/describe'
+import { REPAIR_PER_CALL_CLASSES, REPAIR_PER_CALL_ENDPOINTS, type RepairPerCallClass } from '../runner/repair'
 
 /**
  * The most bytes of one moderated text in hosted (server/utils/moderation.ts
@@ -221,6 +222,19 @@ function describePlanner(classType: DescribeClass): PaidPlanner {
   }
 }
 
+// ── R3.5: restore and remove background (#shared/runner/repair) ──
+
+/**
+ * Restore an old photo and Remove background (and their twins): one call
+ * each, whatever their settings (the price per call, paidRates.ts). Upscale
+ * and Enhance detail are not here: they keep their price by the picture's
+ * size (editSettings.ts editCalls).
+ */
+function repairPlanner(classType: RepairPerCallClass): PaidPlanner {
+  const endpoint = REPAIR_PER_CALL_ENDPOINTS[classType]
+  return () => ({ steps: [{ call: { endpoint }, times: 1 }] })
+}
+
 /** Python returns "" before calling anyone when the text is blank (typed; a wired one is priced as a call). */
 function llmNoCall(classType: LlmTextClass): ((inputs: NodeInputs) => boolean) | null {
   const name = LLM_NO_CALL_INPUT[classType]
@@ -233,6 +247,7 @@ const LLM_CLASSES = Object.keys(LLM_CALL_SHAPES) as LlmTextClass[]
 const PAID_PLANNERS: Readonly<Record<string, PaidPlanner>> = {
   ...Object.fromEntries(LLM_CLASSES.map(c => [c, llmPlanner(c)])),
   ...Object.fromEntries(DESCRIBE_CLASSES.map(c => [c, describePlanner(c)])),
+  ...Object.fromEntries(REPAIR_PER_CALL_CLASSES.map(c => [c, repairPlanner(c)])),
 }
 
 /** Each paid class's no-call rule (rule 8), where Python has one. Filled by each R3 task. */

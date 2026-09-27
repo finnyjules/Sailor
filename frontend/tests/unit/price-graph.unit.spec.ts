@@ -608,3 +608,25 @@ describe('describe, read and find on the ComfyUI path (R3.4)', () => {
     }
   })
 })
+
+// ───────────────────────────────────────────────────────────────────────────
+// Step 3, R3.5 (ruling (a), user-approved): Restore an old photo and Remove
+// background (and their hidden twins) leave their flat rows for their calls,
+// read from Replicate's pages: Restore $0.04 an output picture (8 credits, as
+// before), Remove background by GPU time ($0.0004, an estimate: 1 credit, as
+// before). Upscale and Enhance detail keep their price by the picture's size.
+// ───────────────────────────────────────────────────────────────────────────
+describe('restore and remove background on the ComfyUI path (R3.5)', () => {
+  const at = (ct: string, inputs: Record<string, unknown>) => priceGraph({ 1: { class_type: ct, inputs } }).nodes!['1']
+  it('each class, default settings', () => {
+    expect(at('RestorePhotoNode', { model: 'Flux Kontext · Restore', image: ['2', 0], safety_tolerance: 2, output_format: 'png' })).toBe(8)
+    expect(at('RestorePhotoRemoteNode', { image: ['2', 0], safety_tolerance: '2', output_format: 'jpg' })).toBe(8)
+    expect(at('RemoveBackgroundNode', { model: '851-labs/bg-remover', image: ['2', 0] })).toBe(1)
+    expect(at('RemoveBackgroundRemoteNode', { image: ['2', 0] })).toBe(1)
+  })
+  it('Upscale and Enhance detail are unchanged: by the output of the largest input, unmeasured', () => {
+    expect(at('UpscaleImageNode', { model: 'Real-ESRGAN', image: ['2', 0], scale_factor: 2 })).toBe(1)
+    expect(at('UpscaleImageNode', { model: 'Topaz', image: ['2', 0], topaz_upscale_factor: '2x' })).toBe(48)
+    expect(at('EnhanceDetailNode', { model: 'Diffusion Refine', image: ['2', 0] })).toBe(89)
+  })
+})

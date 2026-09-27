@@ -31,6 +31,10 @@ Groups:
                                 mixed and multi-line answers
                isdigit_ranges — the code points str.isdigit() accepts, as
                                 [first, last] ranges (Brainstorm's clean-up)
+  repair     (R3.5) Upscale (every engine), Enhance detail (every engine),
+             Restore an old photo and Remove background (and their hidden
+             twins), for frontend/server/runner/generators/repair.ts
+             (tests/unit/runner-paid-repair.unit.spec.ts)
 
 The network is blocked (as in compositor_fixtures.py): every outbound connect
 and DNS lookup raises and the provider keys are removed before any node module
@@ -764,10 +768,100 @@ def describe_group() -> dict:
     return {"cases": cases}
 
 
+UPSCALE_DEFAULTS = {
+    "model": "Clarity", "prompt": "masterpiece, best quality, highres", "scale_factor": 2.0, "creativity": 0.35,
+    "resemblance": 0.6, "negative_prompt": "(worst quality, low quality, normal quality:2)", "num_inference_steps": 18,
+    "seed": 0, "face_enhance": False, "topaz_enhance_model": "Standard V2", "topaz_upscale_factor": "2x",
+    "topaz_subject_detection": "None", "topaz_output_format": "png", "topaz_face_creativity": 0.0,
+    "topaz_face_strength": 0.8, "crystal_creativity": 0.0, "crystal_output_format": "png",
+}
+ENHANCE_DEFAULTS = {
+    "model": "Creative", "prompt": "masterpiece, best quality, highres", "detail_strength": 0.4, "resemblance": 0.6,
+    "negative_prompt": "(worst quality, low quality, normal quality:2)", "num_inference_steps": 18, "seed": 0,
+    "topaz_enhance_model": "Standard V2", "topaz_subject_detection": "None", "topaz_output_format": "png", "refine_steps": 20,
+}
+REPAIR_OUT = "https://r.test/repaired.png"
+REPAIR_OUT_2 = "https://r.test/second.png"
+
+
+def repair_group() -> dict:
+    """R3.5: Upscale (every engine), Enhance detail (every engine), Restore an
+    old photo and Remove background, and the hidden twins of the last two.
+    Each answers one picture URL; the first of a list is the one downloaded
+    (`_first_output_url`)."""
+    import runner_builder_fixtures as rbf
+    nr, _fal, _extras = rbf._node_modules()
+    rgb = _b64(png_bytes(8, 6, 11))
+    rgba = _b64(png_bytes(8, 6, 12, "RGBA"))
+    cases: list = []
+
+    def add(name, cls, widgets, answer=None, files=None):
+        answers = [answer or {"output": [REPAIR_OUT]}]
+        cases.append(paid_case(name, cls, widgets, answers, pictures=["image"], files=files or {REPAIR_OUT: rgb}))
+
+    def up(name, **w):
+        add(f"upscale · {name}", nr.UpscaleImageNode, {**UPSCALE_DEFAULTS, **w})
+
+    def enh(name, **w):
+        add(f"enhance · {name}", nr.EnhanceDetailNode, {**ENHANCE_DEFAULTS, **w})
+
+    # Upscale: every engine at its default, then each setting the brief names.
+    for engine in ("Clarity", "Crystal", "Real-ESRGAN", "Recraft Crisp", "Topaz"):
+        up(f"{engine} default", model=engine)
+    for seed in (0, 42):
+        up(f"Clarity seed {seed}", seed=seed)
+    for scale in (1.0, 10.0, 2.5):
+        up(f"Clarity scale {scale}", scale_factor=scale)
+    up("Clarity non-ASCII prompt", prompt="caf\u00e9 \u732b, sharp", negative_prompt="")
+    for factor in ("None", "2x", "4x", "6x"):
+        for face in (False, True):
+            up(f"Topaz {factor} face {'on' if face else 'off'}", model="Topaz", topaz_upscale_factor=factor, face_enhance=face,
+               topaz_face_creativity=0.25, topaz_face_strength=1.0)
+    up("Topaz every other setting", model="Topaz", topaz_enhance_model="Text Refine", topaz_subject_detection="Foreground",
+       topaz_output_format="jpg")
+    for fmt in ("png", "jpg"):
+        up(f"Crystal {fmt}", model="Crystal", crystal_output_format=fmt, crystal_creativity=3.5, scale_factor=4.0)
+    for face in (False, True):
+        up(f"Real-ESRGAN face {'on' if face else 'off'}", model="Real-ESRGAN", face_enhance=face, scale_factor=3.0)
+    # Enhance detail: each engine at detail 0, 0.4 and 1; seeds and the other settings.
+    for engine in ("Creative", "Faithful", "Diffusion Refine"):
+        for detail in (0.0, 0.4, 1.0):
+            enh(f"{engine} detail {detail}", model=engine, detail_strength=detail)
+        enh(f"{engine} seed 7", model=engine, seed=7)
+    enh("Creative every other setting", resemblance=1.25, negative_prompt="blurry", num_inference_steps=30, prompt="")
+    enh("Faithful every other setting", model="Faithful", topaz_enhance_model="CGI", topaz_subject_detection="All", topaz_output_format="jpg")
+    enh("Diffusion Refine every other setting", model="Diffusion Refine", refine_steps=50, prompt="a crisp portrait")
+
+    # Restore an old photo and its twin: both formats; the twin's safety as text.
+    for fmt in ("png", "jpg"):
+        add(f"restore · {fmt}", nr.RestorePhotoNode, {"model": "Flux Kontext \u00b7 Restore", "safety_tolerance": 2, "output_format": fmt})
+        add(f"restore twin · {fmt}", nr.RestorePhotoRemoteNode, {"safety_tolerance": "2", "output_format": fmt})
+    # Safety 6: the node offers it (1-6); Replicate's schema says 0-2. Python sends it; the live check decides.
+    add("restore · safety 6", nr.RestorePhotoNode, {"model": "Flux Kontext \u00b7 Restore", "safety_tolerance": 6, "output_format": "png"})
+    for label, text in (("1", "1"), ("text", "strict"), ("empty", ""), ("spaced", " 2"), ("decimal", "2.5"), ("minus", "-1")):
+        add(f"restore twin · safety {label}", nr.RestorePhotoRemoteNode, {"safety_tolerance": text, "output_format": "png"})
+    # Digits Python's isdigit() takes that aren't 0-9: a superscript (int() raises, no call) and an Arabic-Indic three (sent as 3).
+    add("restore twin · safety superscript", nr.RestorePhotoRemoteNode, {"safety_tolerance": "\u00b2", "output_format": "png"})
+    add("restore twin · safety arabic-indic", nr.RestorePhotoRemoteNode, {"safety_tolerance": "\u0663", "output_format": "png"})
+
+    # Remove background and its twin: an RGBA cut-out; the answer as a list, a string, and a list of two (the first).
+    cut = {REPAIR_OUT: rgba}
+    add("remove background · list", nr.RemoveBackgroundNode, {"model": "851-labs/bg-remover"}, {"output": [REPAIR_OUT]}, cut)
+    add("remove background · string", nr.RemoveBackgroundNode, {"model": "851-labs/bg-remover"}, {"output": REPAIR_OUT}, cut)
+    add("remove background · two", nr.RemoveBackgroundNode, {"model": "851-labs/bg-remover"}, {"output": [REPAIR_OUT, REPAIR_OUT_2]}, cut)
+    add("remove background twin · list", nr.RemoveBackgroundRemoteNode, {}, {"output": [REPAIR_OUT]}, cut)
+    add("remove background twin · string", nr.RemoveBackgroundRemoteNode, {}, {"output": REPAIR_OUT}, cut)
+    # Upscale answering a plain string, and two URLs (the first is the picture).
+    add("upscale · answer string", nr.UpscaleImageNode, {**UPSCALE_DEFAULTS, "model": "Real-ESRGAN"}, {"output": REPAIR_OUT})
+    add("upscale · answer two", nr.UpscaleImageNode, {**UPSCALE_DEFAULTS, "model": "Recraft Crisp"}, {"output": [REPAIR_OUT, REPAIR_OUT_2]})
+    return {"cases": cases}
+
+
 GROUPS = {
     "machinery": machinery_group,
     "llm": llm_group,
     "describe": describe_group,
+    "repair": repair_group,
 }
 
 

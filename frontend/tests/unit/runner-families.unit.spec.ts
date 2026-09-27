@@ -42,6 +42,8 @@ describe('parseFamilies', () => {
       'llm-text',
       // Step 3, R3.4: describe, read and find (needs `cards`).
       'describe',
+      // Step 3, R3.5: upscale, enhance, restore and remove background (needs `cards`).
+      'image-repair',
     ].sort())
   })
 })

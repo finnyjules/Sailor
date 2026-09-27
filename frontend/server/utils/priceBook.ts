@@ -163,7 +163,13 @@ export { VIDEO_RATES, MODEL_PRICED_NODE_CLASSES, SETTING_PRICED_NODE_CLASSES, RE
 // video counted by its length (300 tokens a second; unmeasured, 45 minutes).
 // The ComfyUI path (which can't read the usage or see a video's length) is
 // charged the ceiling.
-export const PRICE_BOOK_VERSION = 'r3-describe'
+// r3-image-repair (step 3, R3.5, ruling (a)): Restore an old photo and Remove
+// background (and their hidden twins) leave their flat rows for their calls,
+// read from Replicate's pages: Restore at $0.04 an output picture (8 credits,
+// unchanged), Remove background at its GPU-time page ($0.0004, an estimate:
+// 1 credit, unchanged). Upscale and Enhance detail keep their price by the
+// picture's size. No price moves.
+export const PRICE_BOOK_VERSION = 'r3-image-repair'
 
 export const BASE_RENDER_CREDITS = 1
 
@@ -306,10 +312,8 @@ export const GRAPH_NODE_CREDITS: Record<string, number> = {
   LayerizeGraphicNode: 16,         // badge $0.08
   SplitPhotoLayersNode: 2,         // badge $0.01
   SeedreamLayerizeNode: 51,        // badge $0.34
-  RestorePhotoRemoteNode: 8,       // badge $0.04
-  RestorePhotoNode: 8,             // badge $0.04
-  RemoveBackgroundRemoteNode: 1,   // badge $0.001
-  RemoveBackgroundNode: 1,         // badge $0.001
+  // (Restore an old photo and Remove background, and their hidden twins, are
+  // priced by their calls since R3.5: shared/pricing/paidSettings.ts, on both paths.)
   // Clarity is RANGE-priced (own description: ~$0.05–0.20/image by
   // scale_factor) and the same slug is priced at range-top 30cr via the
   // UpscaleImageNode "Clarity" engine row — a badge-bottom price here would

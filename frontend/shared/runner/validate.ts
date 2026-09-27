@@ -55,6 +55,9 @@ export const RUNNER_OUTPUT_CLASSES: ReadonlySet<string> = new Set([
   'RewriteToneNode', 'BrainstormIdeasNode', 'ReasonStepByStepNode',
   // R3.4: describe, read and find are output nodes too (the twin as well).
   'DescribeImageNode', 'DescribeImageRemoteNode', 'DescribeVideoNode', 'ExtractTextNode', 'FindObjectsNode',
+  // R3.5: Remove background and Restore an old photo are output nodes (their
+  // hidden twins, Upscale and Enhance detail are not: define_schema says so).
+  'RemoveBackgroundNode', 'RestorePhotoNode',
 ])
 
 /** ComfyUI's node_errors entry for a node that failed validation. */

@@ -144,6 +144,9 @@ export const PAID_TEXT_INPUTS: Readonly<Record<string, readonly string[]>> = {
   DescribeImageRemoteNode: ['prompt'],
   DescribeVideoNode: ['prompt'],
   FindObjectsNode: ['query'],
+  // R3.5, Upscale and Enhance detail (their prompts reach Clarity and the refiner; the other engines send none).
+  UpscaleImageNode: ['prompt', 'negative_prompt'],
+  EnhanceDetailNode: ['prompt', 'negative_prompt'],
 }
 
 /** The non-blank values of RUNNER_EXTRA_TEXT_INPUTS (a typed-in taste, a paid class's PAID_TEXT_INPUTS) across the prompt, each on its own. */
@@ -186,7 +189,7 @@ export function hasOutputNode(prompt: ApiPrompt): boolean {
  */
 export function stageEstimate(
   prompt: ApiPrompt, nodeIds: Iterable<string>, includeBase: boolean, families: ReadonlySet<RunnerFamily> = NO_FAMILIES,
-  measured?: Readonly<Record<string, { seconds: InputSeconds }>>,
+  measured?: Readonly<Record<string, { seconds: InputSeconds; pixels?: number }>>,
 ): number {
   let total = 0
   let renders = false
@@ -196,7 +199,8 @@ export function stageEstimate(
     if (LOCAL_RENDER_TYPES.has(n.class_type)) renders = true
     else if (!actionPassThrough(n.class_type, n.inputs ?? {}) && !paidNoCall(n.class_type, n.inputs ?? {})) {
       const m = measured && Object.prototype.hasOwnProperty.call(measured, id) ? measured[id] : undefined
-      total += nodeCredits(n, undefined, families, m?.seconds)
+      // An Upscale or Enhance detail sized at the start (R3.5): priced on that picture, else the cap.
+      total += nodeCredits(n, m?.pixels, families, m?.seconds)
     }
   }
   return includeBase && (total > 0 || renders) ? total + BASE_RENDER_CREDITS : total

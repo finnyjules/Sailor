@@ -123,6 +123,7 @@ import { planEffect } from './effects/plan'
 import { planPainter } from './effects/painter'
 import { planLlm } from './generators/llm'
 import { planDescribe } from './generators/describe'
+import { planRepair } from './generators/repair'
 import type { KeptExt } from './keptBytes'
 import type { AnswerKind } from './answerDownload'
 import { filesOf } from './values'
@@ -1052,6 +1053,14 @@ async function planNodeRequest(ctx: PlanContext): Promise<NodePlan> {
     case 'ExtractTextNode':
     case 'FindObjectsNode':
       return planDescribe(ctx)
+    // ── image-repair (step 3, R3.5): Upscale, Enhance detail, Restore and Remove background (+ the twins), on Replicate ──
+    case 'UpscaleImageNode':
+    case 'EnhanceDetailNode':
+    case 'RestorePhotoNode':
+    case 'RestorePhotoRemoteNode':
+    case 'RemoveBackgroundNode':
+    case 'RemoveBackgroundRemoteNode':
+      return planRepair(ctx)
     case 'Text': return staticDerive(ctx, textCardUi)
     case 'Moodboard': return staticDerive(ctx)
     case 'Model3D': return staticDerive(ctx, textCardUi)
