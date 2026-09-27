@@ -1,12 +1,12 @@
 import { buildUnits, type Unit } from './units'
 import { inferAxisPin, V_NAME } from './infer'
-import { sectionsAt, sectionOf } from './sections'
+import { gridsAt, holdOf } from './spans'
 import type { FrameDoc, PinH, PinV, AxisMap, ResolvedBox } from './types'
 
 export interface EffectivePins {
-  h: PinH; v: PinV; keepSize: boolean; holdTo: 'frame' | 'section'
+  h: PinH; v: PinV; keepSize: boolean; holdTo: 'frame' | 'grid'
   hAuto: boolean; vAuto: boolean; keepAuto: boolean; holdAuto: boolean
-  sectionAvailable: boolean
+  gridAvailable: boolean
   unitId: string
 }
 
@@ -16,9 +16,7 @@ function unitOf(units: Unit[], layerId: string): Unit | null {
 }
 
 /**
- * The pins that apply to `layerId`'s unit: stored where present, inferred (and
- * flagged automatic) where absent. `holdTo` is 'section' when the grid is on and
- * the unit sits in one section, unless a stored `holdTo:'frame'` overrides.
+ * The pins that apply to `layerId`'s unit: stored where present, inferred (and flagged automatic) where absent — inferred against what the unit holds to (its grid span per axis, else the frame), as the resolver infers them. `holdTo` is 'grid' when the unit lies on grid columns or rows, unless a stored `holdTo: 'frame'` overrides.
  */
 export function effectivePins(frame: FrameDoc, layerId: string, ctx: CanvasRenderingContext2D | null): EffectivePins | null {
   const { designW: W0, designH: H0, grid } = frame
@@ -27,25 +25,24 @@ export function effectivePins(frame: FrameDoc, layerId: string, ctx: CanvasRende
   const unit = unitOf(units, layerId)
   if (!unit) return null
   const stored = unit.pins ?? {}
-  const ref = { x: 0, y: 0, w: W0, h: H0 }
-  const infH = inferAxisPin(unit.box.x, unit.box.w, ref.x, ref.w, unit.canStretch)
-  const infV = V_NAME[inferAxisPin(unit.box.y, unit.box.h, ref.y, ref.h, unit.canStretch)]
-
-  // Section availability: at the design size (s = 1), does the unit's box sit in one region?
-  let sectionAvailable = false
-  if (grid && grid.mode !== 'off') {
-    const sec = sectionsAt(grid, W0, H0, 1, W0, H0)   // s = 1 at the design size
-    if (sec) sectionAvailable = sectionOf(unit.box, sec.design.regions, 0.01 * W0) >= 0
-  }
+  // At the design size (W = W0): what the unit would hold to automatically, and what it holds to now.
+  const pair = gridsAt(grid, frame.format ?? null, W0, H0, W0, H0)
+  const lone = unit.kind === 'layer' ? frame.layers.find(l => l.id === unit.memberIds[0]) : undefined
+  const auto = holdOf({ ...unit, pins: { ...stored, holdTo: undefined } }, lone, pair, W0, H0, W0, H0, ctx)
+  const gridAvailable = auto.onGrid.h || auto.onGrid.v
   const holdStored = stored.holdTo === 'frame'
-  const holdTo: 'frame' | 'section' = holdStored ? 'frame' : (sectionAvailable ? 'section' : 'frame')
+  const hold = holdStored ? holdOf(unit, lone, pair, W0, H0, W0, H0, ctx) : auto
+  // Inferred against the same rectangle the resolver uses, so the card says what really happens.
+  const infH = inferAxisPin(unit.box.x, unit.box.w, hold.h.dStart, hold.h.dExtent, unit.canStretch)
+  const infV = V_NAME[inferAxisPin(hold.vBox.y, hold.vBox.h, hold.v.dStart, hold.v.dExtent, unit.canStretch && hold.vCanStretch)]
+  const holdTo: 'frame' | 'grid' = holdStored ? 'frame' : (gridAvailable ? 'grid' : 'frame')
 
   return {
     h: stored.h ?? infH, v: stored.v ?? infV, keepSize: stored.keepSize ?? false,
     holdTo,
     hAuto: stored.h == null, vAuto: stored.v == null, keepAuto: stored.keepSize == null,
-    holdAuto: stored.holdTo == null,
-    sectionAvailable,
+    holdAuto: !holdStored,
+    gridAvailable,
     unitId: unit.id,
   }
 }

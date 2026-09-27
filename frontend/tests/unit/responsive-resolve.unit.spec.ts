@@ -1,13 +1,21 @@
 import { describe, it, expect } from 'vitest'
 import { createRectLayer, createTextLayer, paintLayerStack, type LocalLayer } from '~/composables/useCompositorLayers'
 import { DEFAULT_CLONER } from '~/composables/useCloner'
-import { defaultGrid } from '~/lib/compositor/mosaicGrid'
+import type { LayoutGrid } from '~/lib/frame/layoutGrid'
+import { gridsAt } from '~/lib/frame/responsive/spans'
 import { resolveLayout, layoutScaleOf } from '~/lib/frame/responsive'
 import type { FrameDoc } from '~/lib/frame/responsive/types'
 
 const doc = (layers: FrameDoc['layers'], extra: Partial<FrameDoc> = {}): FrameDoc => ({
   responsive: true, designW: 1000, designH: 500, layers, stackOrder: layers.map(l => `l:${l.id}`),
   groups: [], grid: null, motion: null, ...extra,
+})
+
+/** An own layout grid: 2 columns of 500 on the 1000-wide design (margin 0, gutter 0), rows off, unit 20. */
+const own = (over: Partial<LayoutGrid> = {}): LayoutGrid => ({
+  v: 2, auto: false, show: true, line: 40,
+  cols: { count: 2, fit: 'stretch', margin: 0, gutter: 0, width: 0 },
+  rows: { mode: 'off', count: 4 }, ...over,
 })
 
 type M = { a: number; b: number; c: number; d: number; e: number; f: number }
@@ -137,7 +145,7 @@ describe('resolveLayout narrower box (1000×500 design in 500×500)', () => {
   })
 })
 
-describe('resolveLayout units and sections', () => {
+describe('resolveLayout units and the grid', () => {
   it('a group moves as one rigid unit by the group\'s pins', () => {
     const a = createRectLayer({ id: 'a', x: 0.1, y: 0.5, w: 0.1, h: 0.1, groupId: 'g' })
     const b = createRectLayer({ id: 'b', x: 0.3, y: 0.5, w: 0.1, h: 0.1, groupId: 'g' })
@@ -146,30 +154,50 @@ describe('resolveLayout units and sections', () => {
     expect(bx - ax).toBeCloseTo(200, 6)                   // arrangement kept (s = 1)
     expect(ax).toBeCloseTo(500 + 100 + 1000, 6)           // right pin
   })
-  it('a layer inside a grid section holds to that section', () => {
-    const grid = { ...defaultGrid(), mode: 'explicit' as const, columns: 2, rows: 1, margin: 0, gutter: 0 }
-    // section 0 spans 0..500 at the design; layer near its right edge
+  it('a layer on a column holds to that column', () => {
+    // column 1 spans 0..500 at the design; layer near its right edge
     const l = createRectLayer({ x: 0.45, y: 0.5, w: 0.05, h: 0.1 })   // box 425..475
-    const r = resolveLayout(doc([l], { grid }), 3000, 500)
-    // box grid: 2 columns of 1500 (s = 1, spare shared); section 0 = 0..1500, spare 1000 → u 500 o 250
-    // right pin inside section 0: 250 + 450 + 500 = 1200
+    const r = resolveLayout(doc([l], { grid: own() }), 3000, 500)
+    // view grid: 2 columns of 1500 (s = 1); column 1 = 0..1500, spare 1000 → u 500 o 250
+    // right pin inside column 1: 250 + 450 + 500 = 1200
     expect(r.layers[0]!.x * 3000).toBeCloseTo(1200, 6)
-    expect(r.grid!.regions[0]).toEqual({ x: 0, y: 0, w: 1500, h: 500 })
+    expect(r.grid!.cols[0]).toEqual({ a: 0, w: 1500 })
   })
-  it('a layer in a section that does not start at the origin holds to THAT section\'s edge', () => {
-    const grid = { ...defaultGrid(), mode: 'explicit' as const, columns: 2, rows: 1, margin: 0, gutter: 0 }
-    // section 1 = design 500..1000, box 1500..3000; layer box 900..950 sits inside it
+  it('a layer on a column that does not start at the origin holds to THAT column\'s edge', () => {
+    // column 2 = design 500..1000, view 1500..3000; layer box 900..950 sits in it
     const l = createRectLayer({ x: 0.925, y: 0.5, w: 0.05, h: 0.1 })
-    const r = resolveLayout(doc([l], { grid }), 3000, 500)
-    // o = 1500 (section box start) + 250 (guard) − 1·500 (fitted section design start) = 1250
+    const r = resolveLayout(doc([l], { grid: own() }), 3000, 500)
+    // o = 1500 (column view start) + 250 (guard) − 1·500 (fitted column design start) = 1250
     // right pin: 1250 + 925 + 500 = 2675 — inside the frame, not 3175
     expect(r.layers[0]!.x * 3000).toBeCloseTo(2675, 6)
   })
-  it('holdTo: frame overrides the section', () => {
-    const grid = { ...defaultGrid(), mode: 'explicit' as const, columns: 2, rows: 1, margin: 0, gutter: 0 }
+  it('holdTo: frame overrides the grid', () => {
     const l = createRectLayer({ x: 0.45, y: 0.5, w: 0.05, h: 0.1, pins: { holdTo: 'frame' } })
-    const r = resolveLayout(doc([l], { grid }), 3000, 500)
+    const r = resolveLayout(doc([l], { grid: own() }), 3000, 500)
     expect(r.layers[0]!.x * 3000).toBeCloseTo(500 + 450, 6)   // left of the frame centre → left pin
+  })
+  it('a layer running well past its columns holds to the frame, as before', () => {
+    const l = createRectLayer({ x: 0.48, y: 0.5, w: 0.16, h: 0.1 })  // 400..560: 60 px past column 1
+    const withGrid = resolveLayout(doc([l], { grid: own() }), 3000, 500)
+    const noGrid = resolveLayout(doc([l]), 3000, 500)
+    expect(withGrid.layers[0]!.x).toBeCloseTo(noGrid.layers[0]!.x, 12)
+  })
+  it('the last row stays the last row in a taller view', () => {
+    const g = own({ cols: { count: 4, fit: 'stretch', margin: 0, gutter: 0, width: 0 }, rows: { mode: 'square', count: 8 } })
+    const p = gridsAt(g, null, 1000, 1000, 1000, 2000)!
+    const last = p.design.rows[p.design.rows.length - 1]!, c = p.design.cols[1]!
+    const l = createRectLayer({ id: 'r', x: (c.a + c.w / 2) / 1000, y: (last.a + last.w / 2) / 1000, w: c.w / 1000, h: last.w / 1000 })
+    const r = resolveLayout(doc([l], { designH: 1000, grid: g }), 1000, 2000, { withBoxes: true })
+    const vl = p.view.rows[p.view.rows.length - 1]!, vc = p.view.cols[1]!
+    const b = r.boxes.get('r')!
+    expect(b.y).toBeCloseTo(vl.a, 6); expect(b.h).toBeCloseTo(vl.w, 6)
+    expect(b.x).toBeCloseTo(vc.a, 6); expect(b.w).toBeCloseTo(vc.w, 6)
+    expect(r.units.get('r')!.refView).toEqual({ x: vc.a, y: vl.a, w: vc.w, h: vl.w })
+  })
+  it('the grid it returns is the view grid gridsAt resolves (the overlay draws that one)', () => {
+    const l = createRectLayer({ x: 0.45, y: 0.5, w: 0.05, h: 0.1 })
+    const r = resolveLayout(doc([l], { grid: own() }), 3000, 500)
+    expect(r.grid).toEqual(gridsAt(own(), null, 1000, 500, 3000, 500)!.view)
   })
   it('a cloner\'s stamps keep their design spacing in a wider box', () => {
     const cloner = { ...DEFAULT_CLONER, enabled: true, mode: 'linear' as const, countX: 2, countY: 1, spacingX: 0.2, spacingY: 0 }

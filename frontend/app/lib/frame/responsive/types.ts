@@ -1,6 +1,7 @@
 import type { LocalLayer } from '~/composables/useCompositorLayers'
 import type { LayerGroup } from '~/lib/compositor/layerGroups'
-import type { FrameGrid } from '~/lib/compositor/mosaicGrid'
+import type { LayoutGrid, ResolvedLayoutGrid } from '~/lib/frame/layoutGrid'
+import type { FrameFormat } from '~/lib/frame/formats'
 import type { FrameMotion } from '~/lib/motion/types'
 
 /**
@@ -19,7 +20,7 @@ export interface Pins {
   h?: PinH
   v?: PinV
   keepSize?: boolean
-  /** 'frame' = hold to the whole frame even when inside a grid section. Absent = automatic. */
+  /** 'frame' = hold to the whole frame even where the layer sits on grid columns or rows. Absent (or anything else, e.g. an older 'section') = automatic. */
   holdTo?: 'frame'
 }
 
@@ -49,7 +50,10 @@ export interface FrameDoc {
   layers: LocalLayer[]
   stackOrder: StackKey[]
   groups: LayerGroup[]
-  grid: FrameGrid | null
+  /** The Frame's layout grid (readLayoutGrid at the design size), shown or hidden; null = hold to the frame. */
+  grid: LayoutGrid | null
+  /** The design size's format (covered areas shape the rows). Absent = none. */
+  format?: FrameFormat | null
   motion: FrameMotion | null
 }
 
@@ -75,7 +79,7 @@ export interface UnitInfo {
   designBox: ResolvedBox                           // design px, top-left
   viewBox: ResolvedBox                             // view px, top-left (as drawn)
   mappedBox: ResolvedBox                           // the span the pins place, view px — equals viewBox except for re-wrapped text
-  refDesign: ResolvedBox                           // the section or frame, design px
+  refDesign: ResolvedBox                           // the grid span or the frame, per axis, design px
   refView: ResolvedBox                             // the same, view px
   h: AxisMap; v: AxisMap                           // resolved maps; .kind is the held (effective) pin
   hExplicit: boolean; vExplicit: boolean           // the pin on that axis is stored
@@ -84,8 +88,8 @@ export interface UnitInfo {
 export interface LayoutResult {
   layers: LocalLayer[]
   motion: FrameMotion | null
-  /** Resolved grid lines/regions in box px, or null when the grid is off. */
-  grid: { xs: number[]; ys: number[]; regions: ResolvedBox[] } | null
+  /** The layout grid resolved at the viewing size (gridsAt(...).view), or null without a grid. */
+  grid: ResolvedLayoutGrid | null
   boxes: Map<string, ResolvedBox>
   maps: Map<string, { h: AxisMap; v: AxisMap }>
   /** Per member layer id: what an edit at this size needs. Empty unless `withBoxes`. */
