@@ -105,6 +105,18 @@ Groups:
               classes (NOISE_LIBRARY_EPS) a small float or a hashed band;
               FlowField (the "warp" class) as the warp group keeps it. `--sweep`
               measures the library ε and FlowField up to 8192² (writes nothing).
+  shader    — (R2.10) the Shader effect's pure half, no GL: the catalog's
+              version, the node's effect options and which effects are
+              generative; for each catalog effect, to_uniforms over
+              resolve_params of the defaults, of one non-default set, of one
+              set the browser reads differently (`nonportable`) and of one
+              malformed params string (Python's raise); _aspect_size for every
+              aspect (and an unknown one) at 256, 768, 2048 and a few odd
+              sizes; frame_plan cases; and the node's own raises before any
+              render (an unknown effect, a non-generative effect with no
+              picture, too many frames). No render is recorded: the browser
+              and moderngl are different GL implementations, and decision 9
+              makes the browser's bytes the result.
 
 Every picture reaches a node as it does in a real run, through the real
 Python loader of its source (as scripts/compositor_fixtures.py):
@@ -3458,7 +3470,140 @@ def noise_sweep_run() -> int:
     return code or c2
 
 
-GROUPS = {"machinery": machinery, "kernels": kernels, "rng": rng, "tone": tone, "blur": blur, "cells": cells, "warp": warp, "mask": mask, "noise": noise}
+# ── shader (R2.10): the Shader effect's pure half, no GL ─────────────────────
+
+# The non-default colours, one per colour param in turn: 6 digits (mixed case), 8 digits
+# (alpha dropped), 3 digits, and 6 with no '#'.
+SHADER_COLOURS = ["#1a2B3c", "#12345678", "#abc", "0e4d7f"]
+# A ramp given out of order, with positions past both ends and every colour form above.
+SHADER_STOPS = [
+    {"pos": 1.5, "color": "#ff0000"}, {"pos": 0.1, "color": "#00ff0080"},
+    {"pos": 0.5, "color": "#00f"}, {"pos": -0.2, "color": "123456"},
+]
+
+
+def shader_custom_params(eff) -> dict:
+    """One non-default set, as the node's own dials write it: the first float past its max, the
+    second under its min (both clamped), the rest 37 % of the way; each enum's last option; the
+    colours above in turn; the ramp above (cut to maxStops); and a key no param has (dropped)."""
+    out: dict = {}
+    floats = colours = 0
+    for p in eff.params:
+        if p.type == "float":
+            out[p.uniform] = p.max + 1.0 if floats == 0 else p.min - 1.0 if floats == 1 else p.min + (p.max - p.min) * 0.37
+            floats += 1
+        elif p.type == "enum":
+            out[p.uniform] = p.options[-1]["value"]
+        elif p.type == "color":
+            out[p.uniform] = SHADER_COLOURS[colours % len(SHADER_COLOURS)]
+            colours += 1
+        elif p.type == "gradient":
+            out[p.uniform] = SHADER_STOPS
+    out["u_not_a_param"] = 3.0
+    return out
+
+
+def shader_nonportable_params(eff) -> dict:
+    """Values Python reads one way and the browser's resolveValues another (a float as text, a
+    4-digit colour, a ramp as JSON text, an enum as true): the bake must refuse these."""
+    out: dict = {}
+    for p in eff.params:
+        if p.type == "float":
+            out[p.uniform] = "0.5"
+        elif p.type == "enum":
+            out[p.uniform] = True
+        elif p.type == "color":
+            out[p.uniform] = "#abcd"
+        elif p.type == "gradient":
+            out[p.uniform] = json.dumps(p.default)
+    return out
+
+
+def shader_uniform_case(eff, case: str, params: str) -> dict:
+    from comfy_extras._shader_effects import resolve_params, to_uniforms
+    row: dict = {"effect": eff.id, "case": case, "params": params}
+    try:
+        u = to_uniforms(eff, resolve_params(eff, params))
+    except ValueError as e:
+        row["error"] = str(e)
+        return row
+    row["uniforms"] = {k: list(v) if isinstance(v, tuple) else float(v) for k, v in u.items()}
+    return row
+
+
+def shader() -> dict:
+    from comfy_extras._shader_effects import frame_plan, load_catalog
+    from comfy_extras.nodes_shader_effects import LEGACY_EFFECT_IDS, MAX_OUTPUT_FRAMES, ShaderEffect, _aspect_size
+    catalog = load_catalog(refresh=True)
+    schema = ShaderEffect.define_schema()
+    options = {i.id: list(i.options) for i in schema.inputs if getattr(i, "options", None)}
+    # Each input as ComfyUI validates it: its kind, its range, whether it may be left out.
+    widgets = {}
+    for i in schema.inputs:
+        w = {"io": str(i.get_io_type()), "optional": bool(getattr(i, "optional", False))}
+        for a in ("min", "max", "default"):
+            if getattr(i, a, None) is not None:
+                w[a] = getattr(i, a)
+        widgets[i.id] = w
+
+    uniforms = []
+    for eff in catalog.effects.values():
+        uniforms.append(shader_uniform_case(eff, "default", "{}"))
+        uniforms.append(shader_uniform_case(eff, "blank", "   "))
+        uniforms.append(shader_uniform_case(eff, "custom", json.dumps(shader_custom_params(eff))))
+        uniforms.append(shader_uniform_case(eff, "nonportable", json.dumps(shader_nonportable_params(eff))))
+        uniforms.append(shader_uniform_case(eff, "malformed", "{not json"))
+
+    aspects = list(options["aspect"]) + ["2:1-unknown"]
+    # 72 at 16:9 lands on a half (40.5), which Python's round() takes to the even 40.
+    sizes = [
+        {"resolution": r, "aspect": a, "size": list(_aspect_size(r, a))}
+        for r in (256, 768, 2048, 72, 300, 1000, 1366) for a in aspects
+    ]
+
+    plans = []
+    for batch in (1, 2, 3):
+        for time in (0.0, 1.25):
+            for duration in (0.0, 0.01, 0.5, 2.0, 12.6):
+                for fps in (1, 5, 24, 60):
+                    plan = frame_plan(batch, time, duration, fps)
+                    plans.append({"batch": batch, "time": time, "duration": duration, "fps": fps,
+                                  "frames": len(plan), "plan": [list(x) for x in plan[:8]] + [list(plan[-1])]})
+
+    # The node's own raises before any render.
+    raises = []
+    generative = next(e.id for e in catalog.effects.values() if e.generative)
+    still = next(e.id for e in catalog.effects.values() if not e.generative)
+    base = {"params": "{}", "time": 0.0, "duration": 0.0, "fps": 24, "seed": 42, "resolution": 256, "aspect": "1:1"}
+    for name, over in (
+        ("unknown effect", {"effect": "not_an_effect"}),
+        ("no picture for a still effect", {"effect": still}),
+        ("too many frames", {"effect": generative, "duration": 60.0, "fps": 60}),
+        ("malformed params", {"effect": generative, "params": "{not json"}),
+    ):
+        try:
+            run_node(ShaderEffect, "s1", **{**base, **over})
+            raises.append({"name": name, "inputs": {**base, **over}, "error": None})
+        except ValueError as e:
+            raises.append({"name": name, "inputs": {**base, **over}, "error": str(e)})
+
+    return {
+        "catalog_version": catalog.version,
+        "effect_options": options["effect"],
+        "aspect_options": options["aspect"],
+        "inputs": widgets,
+        "output_node": bool(schema.is_output_node),
+        "generative": sorted(e.id for e in catalog.effects.values() if e.generative),
+        "legacy": LEGACY_EFFECT_IDS,
+        "max_output_frames": MAX_OUTPUT_FRAMES,
+        "uniforms": uniforms,
+        "aspect_sizes": sizes,
+        "frame_plans": plans,
+        "raises": raises,
+    }
+
+
+GROUPS = {"machinery": machinery, "kernels": kernels, "rng": rng, "tone": tone, "blur": blur, "cells": cells, "warp": warp, "mask": mask, "noise": noise, "shader": shader}
 
 
 def blur_sweep_run() -> int:

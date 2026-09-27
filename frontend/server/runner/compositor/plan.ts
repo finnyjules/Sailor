@@ -72,6 +72,10 @@ export function pictureSourceOf(prompt: ApiPrompt, link: ApiLink, depth = 0): Pi
     case 'SmartLayout':
       if (slot === 0) return 'rgb'
       break
+    // The Shader effect (R2.10): the browser's bake, kept as the tensor's own RGB.
+    case 'ShaderEffect':
+      if (slot === 0) return 'tensor'
+      break
     default:
       // An effect's picture (R2.1): the tensor it made, kept with its own channels.
       if (Object.prototype.hasOwnProperty.call(EFFECT_PICTURE_OUTPUTS, node.class_type)) {

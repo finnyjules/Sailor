@@ -30,7 +30,7 @@ import {
 import { GATE_CLASS, isLink, type ApiLink, type ApiPrompt } from '#shared/runner/graph'
 import { PROVIDER_TYPES } from '#shared/runner/eligibility'
 import { actionPassThrough } from '../generators/actions'
-import type { RunnerFamily } from '#shared/runner/families'
+import { familyOn, type RunnerFamily } from '#shared/runner/families'
 import { encodeMask, loadImageMask, type Mask } from '../pictures/mask'
 import { floatReadBy, maskTensorBytes } from '../effects/tensorFiles'
 import { MAX_INPUT_PIXELS } from '../compositor/decode'
@@ -120,6 +120,12 @@ export function cardPictureFiles(prompt: ApiPrompt, families: ReadonlySet<Runner
     }
     // Painter's painter file (R2.8), read as a card reads its file (16-bit, CMYK… refused before the hold).
     if (fx && n.class_type === 'Painter' && !isLink(inputs.mask)) add(inputs.mask)
+    // The Shader effect's picture (R2.10): the browser baked one frame of it, so the file must be
+    // one frame (Python renders a frame per frame of the batch its loader makes).
+    if (n.class_type === 'ShaderEffect' && familyOn('shader-bake', families) && isLink(inputs.image)) {
+      const loader = loaderFileBehind(prompt, inputs.image)
+      if (loader) out.push({ ...loader, oneFrame: true, animated: EFFECT_PICTURE_ANIMATED })
+    }
     // Smart Layout (R1.6) decodes each image layer's first frame as Python's tensor.
     if (n.class_type === 'SmartLayout') {
       for (const key of IMAGE_LAYERS) {

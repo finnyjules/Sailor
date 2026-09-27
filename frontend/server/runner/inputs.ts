@@ -3,10 +3,11 @@
  * pictures (GenerateImageNode.style_refs, RestyleFromImageNode.style_refs), pictures/clips/sounds loaded into an
  * unwired Image, Video or Audio card, a LoadImage's picture, the files the
  * bake-replay cards hand on (3D Studio's passes, Text on path's and Text
- * mask's render), and Painter's painter file. In hosted, every one must be
+ * mask's render), Painter's painter file, and the Shader effect's bake. In hosted, every one must be
  * the user's own.
  */
 import { isLink, type ApiPrompt } from '#shared/runner/graph'
+import { parseShaderBaked } from '#shared/runner/shaderBakeKey'
 import { MeterRefusalError } from '../utils/requestMeter'
 import type { OutputFile } from './types'
 
@@ -95,6 +96,13 @@ export function collectInputFiles(prompt: ApiPrompt): OutputFile[] {
     if (node.class_type === 'Painter' && !isLink(inputs.mask)) {
       const f = parseInputFileRef(inputs.mask)
       if (f) out.push(f)
+    }
+    // The Shader effect's bake (R2.10): every frame the browser uploaded.
+    if (node.class_type === 'ShaderEffect') {
+      for (const name of parseShaderBaked(inputs.sailor_baked)?.files ?? []) {
+        const f = parseInputFileRef(name)
+        if (f) out.push(f)
+      }
     }
     // The Frame editor's injected LoadImage (baked layers and masks).
     if (node.class_type === 'LoadImage' && !isLink(inputs.image)) {

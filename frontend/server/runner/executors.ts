@@ -106,6 +106,7 @@ import { planLoadImageCard } from './cards/loadImage'
 import { planEmptyImage, planGetImageSize, planImageToMask, planTextMaskWithSource } from './cards/utilities'
 import { imageCardShowingKept, planPreviewImage, planSaveImage } from './cards/saveImage'
 import { planSmartLayout } from './cards/smartLayout'
+import { planShaderEffect } from './cards/shaderEffect'
 import { effectSpec } from './effects/table'
 import { planEffect } from './effects/plan'
 import { planPainter } from './effects/painter'
@@ -960,6 +961,9 @@ async function planNodeRequest(ctx: PlanContext): Promise<NodePlan> {
 
     // ── cards (step 3, R1.6): Smart Layout renders its layout here ──
     case 'SmartLayout': return planSmartLayout(ctx)
+
+    // ── shader-bake (step 3, R2.10): the Shader effect replays the browser's bake ──
+    case 'ShaderEffect': return planShaderEffect(ctx)
 
     case 'Video': {
       let files: OutputFile[]
