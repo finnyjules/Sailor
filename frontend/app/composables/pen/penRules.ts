@@ -4,11 +4,15 @@
 // (doc, selection, segments) — moved verbatim out of pages/dev/sketch-draw.vue,
 // where they read the page's refs directly.
 import type { SketchDoc, EntityId, ConstraintKind } from '~/lib/sketch/model'
+import type { CurveRef } from '~/lib/sketch/crossings'
+import { pieceOf, tangentRuleFor, type RuleSpec } from '~/lib/sketch/tangency'
 
 // `tip`: the button's id in the rules row (its hover card, penTips.ts) when the
 // rule kind alone would name the wrong card — "On curve" is written as a
 // collinear or equalDist rule, which the row otherwise shows as other verbs
-export interface RuleOption { kind: ConstraintKind; label: string; value?: boolean; tip?: string }
+// `tangent`: the button runs the pen's applyTangent (the rule kind is worked
+// out from the two pieces — the joint form when they meet), not apply(kind)
+export interface RuleOption { kind: ConstraintKind; label: string; value?: boolean; tip?: string; tangent?: boolean }
 export interface SegRef { pathId: EntityId; segIndex: number }
 
 function selKinds(doc: SketchDoc, selection: EntityId[]): string[] {
@@ -49,6 +53,12 @@ export function availableConstraints(doc: SketchDoc, selection: EntityId[], segm
   // selections are kept together — see usePen pick/pickSegment): pin the
   // point onto that piece, or to the middle of a straight one
   if (ids.length && segments.length) {
+    // one line or circle + one segment: Tangent
+    if (ids.length === 1 && segments.length === 1 && (kinds[0] === 'line' || kinds[0] === 'circle')) {
+      const t = tangentOption(doc, ids, segments)
+      if (t) out.push(t)
+      return out
+    }
     if (ids.length !== 1 || kinds[0] !== 'point' || segments.length !== 1) return out
     const s = segments[0]!
     const path = doc.entities.find(e => e.id === s.pathId) as any
@@ -98,6 +108,10 @@ export function availableConstraints(doc: SketchDoc, selection: EntityId[], segm
     const [s1, s2] = segments as [SegRef, SegRef]
     if (isLineSegment(doc, s1) && isLineSegment(doc, s2)) {
       out.push({ kind: 'perpendicular', label: 'Perpendicular' }, { kind: 'parallel', label: 'Parallel' }, { kind: 'equalDist', label: 'Equal' })
+    } else {
+      const t = tangentOption(doc, [], segments)
+      if (t) out.push(t)
+      if (isArcSegment(doc, s1) && isArcSegment(doc, s2)) out.push({ kind: 'equalDist', label: 'Equal', tip: 'equalArcs' })
     }
   }
   // rules that need exact geometry (arcs, lines, circles) do nothing on a
@@ -106,7 +120,7 @@ export function availableConstraints(doc: SketchDoc, selection: EntityId[], segm
   return out
 }
 
-const EXACT_GEOMETRY_RULES: ConstraintKind[] = ['tangentLineCircle', 'tangentCircleCircle', 'radius', 'concentric', 'equalRadius']
+const EXACT_GEOMETRY_RULES: ConstraintKind[] = ['tangentLineCircle', 'tangentCircleCircle', 'radius', 'concentric', 'equalRadius', 'tangentLineArc', 'tangentArcs']
 
 // a selected segment is a cubic, or a selected path contains one
 function touchesCurve(doc: SketchDoc, selection: EntityId[], segments: SegRef[]): boolean {
@@ -142,6 +156,40 @@ export function isLineSegment(doc: SketchDoc, seg: SegRef): boolean {
   const path = doc.entities.find(e => e.id === seg.pathId) as any
   return !!path && path.kind === 'path' && path.segments[seg.segIndex]?.kind === 'line'
 }
+
+export function isArcSegment(doc: SketchDoc, seg: SegRef): boolean {
+  const path = doc.entities.find(e => e.id === seg.pathId) as any
+  return !!path && path.kind === 'path' && path.segments[seg.segIndex]?.kind === 'arc'
+}
+
+// the selection as tangent pieces: line and circle entities, then path
+// segments. Empty when anything else (a point, a whole path) is selected.
+function selectedCurveRefs(doc: SketchDoc, selection: EntityId[], segments: SegRef[]): CurveRef[] {
+  const out: CurveRef[] = []
+  for (const id of selection) {
+    const e = doc.entities.find(x => x.id === id)
+    if (e?.kind === 'line') out.push({ kind: 'line', id })
+    else if (e?.kind === 'circle') out.push({ kind: 'circle', id })
+    else return []
+  }
+  for (const s of segments) out.push({ kind: 'seg', pathId: s.pathId, segIndex: s.segIndex })
+  return out
+}
+
+/** The tangent rule for exactly two selected pieces, at least one of them a
+ *  path segment (two whole entities keep their own Tangent verbs). */
+export function tangentRuleForSelection(doc: SketchDoc, selection: EntityId[], segments: SegRef[]): RuleSpec | null {
+  if (!segments.length) return null
+  const refs = selectedCurveRefs(doc, selection, segments)
+  if (refs.length !== 2) return null
+  const p = pieceOf(doc, refs[0]!), q = pieceOf(doc, refs[1]!)
+  return p && q ? tangentRuleFor(doc, p, q) : null
+}
+
+function tangentOption(doc: SketchDoc, selection: EntityId[], segments: SegRef[]): RuleOption | null {
+  const rule = tangentRuleForSelection(doc, selection, segments)
+  return rule ? { kind: rule.kind, label: 'Tangent', tip: 'tangent', tangent: true } : null
+}
 // map 1 or 2 selected segments to the constraint's point refs — the segment
 // analogue of orderRefs, but simpler: there's exactly one ref shape per arity
 // (H/V take a segment's own 2-point pair directly; perpendicular/parallel/
@@ -149,7 +197,15 @@ export function isLineSegment(doc: SketchDoc, seg: SegRef): boolean {
 // Guard: all involved segments MUST be line segments (v1 scope — arc segments
 // are excluded from every segment-verb constraint).
 export function segmentConstraintRefs(doc: SketchDoc, kind: ConstraintKind, segs: SegRef[]): EntityId[] | null {
-  // Guard: reject if ANY involved segment is not a line segment
+  // two arc segments: Equal = the same radius, equalDist [C1, A1, C2, A2]
+  if (kind === 'equalDist' && segs.length === 2 && segs.every(s => isArcSegment(doc, s))) {
+    const pair = segs.map(s => {
+      const path = doc.entities.find(e => e.id === s.pathId) as any
+      return { c: path.segments[s.segIndex].center as EntityId, a: path.anchors[s.segIndex] as EntityId }
+    })
+    return [pair[0]!.c, pair[0]!.a, pair[1]!.c, pair[1]!.a]
+  }
+  // all other segment verbs are line-only
   if (!segs.every(seg => isLineSegment(doc, seg))) return null
 
   if (segs.length === 1 && (kind === 'horizontal' || kind === 'vertical')) {

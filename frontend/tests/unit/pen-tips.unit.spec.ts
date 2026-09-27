@@ -42,6 +42,12 @@ function everyRuleKind(): string[] {
   const arc = addPath(doc, [d, e], [{ kind: 'arc', center: f, sweep: 1 }], false)
   add([lone], [{ pathId: path, segIndex: 0 }])
   add([lone], [{ pathId: arc, segIndex: 0 }])
+  // two arcs, a line and an arc, a line entity with an arc (stage 4 Tangent / Equal)
+  const g = addPoint(doc, 60, 0), h = addPoint(doc, 64, 0), k = addPoint(doc, 62, 0)
+  const arc2 = addPath(doc, [g, h], [{ kind: 'arc', center: k, sweep: 1 }])
+  add([], [{ pathId: arc, segIndex: 0 }, { pathId: arc2, segIndex: 0 }])
+  add([], [{ pathId: path, segIndex: 0 }, { pathId: arc, segIndex: 0 }])
+  add([l1], [{ pathId: arc, segIndex: 0 }])
   return [...kinds]
 }
 
@@ -50,7 +56,7 @@ describe('pen tips table', () => {
   const ids = [...ALL_TOOLS, ...FIXED_IDS, ...ruleKinds]
 
   it('the rule sweep finds the rules row vocabulary', () => {
-    for (const k of ['coincident', 'distance', 'tangentLineCircle', 'perpendicular', 'radius', 'midpoint', 'onCurve']) expect(ruleKinds).toContain(k)
+    for (const k of ['coincident', 'distance', 'tangentLineCircle', 'perpendicular', 'radius', 'midpoint', 'onCurve', 'tangent', 'equalArcs']) expect(ruleKinds).toContain(k)
   })
 
   it.each(ids)('%s has a tip with a name and a sentence-case caption', (id) => {

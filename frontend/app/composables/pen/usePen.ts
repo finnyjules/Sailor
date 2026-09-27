@@ -53,6 +53,7 @@ import {
   orderRefs as orderRefsFor,
   segmentConstraintRefs,
   pointSegmentRefs,
+  tangentRuleForSelection,
   type RuleOption,
 } from './penRules'
 import { createPenHistory } from './penHistory'
@@ -277,19 +278,19 @@ export function usePen(opts: {
   // additive=false (plain click): selection becomes exactly [id]. additive=true
   // (shift-click / shift-marquee): toggle `id` within the current selection,
   // same as the old always-toggle behavior. Entity selection and segment
-  // selection (below) are mutually exclusive, with ONE exception: one point
-  // plus one Option-clicked segment stay selected together (the "On curve" /
-  // "Midpoint" pairing, penRules availableConstraints) when the second pick
-  // is a Shift- or Option-click (additive here; pickSegment is always an
-  // Option-click). A plain click replaces everything; any other mix clears
-  // the segment selection.
+  // selection (below) are mutually exclusive, with ONE exception: one point,
+  // line or circle plus one Option-clicked segment stay selected together
+  // (the "On curve" / "Midpoint" / Tangent pairing, penRules
+  // availableConstraints) when the second pick is a Shift- or Option-click
+  // (additive here; pickSegment is always an Option-click). A plain click
+  // replaces everything; any other mix clears the segment selection.
   function pick(id: EntityId, additive = false) {
     if (!additive) { clearSegSel(); selection.value = [id]; return }
     const i = selection.value.indexOf(id)
     if (i >= 0) selection.value.splice(i, 1)
     else selection.value.push(id)
     const sel = selection.value
-    const pairs = selectedSegments.value.length === 1 && (sel.length === 0 || (sel.length === 1 && isPointId(sel[0]!)))
+    const pairs = selectedSegments.value.length === 1 && (sel.length === 0 || (sel.length === 1 && (isPointId(sel[0]!) || isLineOrCircleId(sel[0]!))))
     if (!pairs) clearSegSel()
   }
   function clearSel() { selection.value = [] }
@@ -298,8 +299,8 @@ export function usePen(opts: {
   // (and mutually exclusive with) whole-entity `selection` above. additive=false
   // replaces; additive=true toggles the segment within the current set, mirroring
   // pick()'s own contract. Selecting a segment clears any live entity
-  // selection, except a single point while this leaves at most one segment
-  // (the point + segment pairing — see pick()).
+  // selection, except a single point, line or circle while this leaves at most
+  // one segment (the point/line/circle + segment pairing — see pick()).
   const selectedSegments = ref<{ pathId: EntityId; segIndex: number }[]>([])
   function pickSegment(pathId: EntityId, segIndex: number, additive = false) {
     if (!additive) selectedSegments.value = [{ pathId, segIndex }]
@@ -309,7 +310,7 @@ export function usePen(opts: {
       else selectedSegments.value.push({ pathId, segIndex })
     }
     const sel = selection.value
-    const pairs = selectedSegments.value.length <= 1 && sel.length === 1 && isPointId(sel[0]!)
+    const pairs = selectedSegments.value.length <= 1 && sel.length === 1 && (isPointId(sel[0]!) || isLineOrCircleId(sel[0]!))
     if (!pairs) clearSel()
   }
   function clearSegSel() { selectedSegments.value = [] }
@@ -364,6 +365,10 @@ export function usePen(opts: {
   })
   function isPointId(id: EntityId) {
     return (doc.value.entities.find(e => e.id === id) as any)?.kind === 'point'
+  }
+  function isLineOrCircleId(id: EntityId) {
+    const k = (doc.value.entities.find(e => e.id === id) as any)?.kind
+    return k === 'line' || k === 'circle'
   }
 
   // --- undo/redo history: see penHistory.ts. Its undo()/redo()/revert() do
@@ -482,7 +487,25 @@ export function usePen(opts: {
     commitHistory()
   }
 
-  async function applyWithValue(v: { kind: ConstraintKind; label: string; value?: boolean }) {
+  // Tangent (penRules tangentRuleForSelection): the rule for the two selected
+  // pieces — the joint form where they meet, tangentLineArc / tangentArcs
+  // where they don't. An identical rule already there is not added twice.
+  function applyTangent() {
+    const rule = tangentRuleForSelection(doc.value, selection.value, selectedSegments.value)
+    clearSel()
+    clearSegSel()
+    if (!rule) return
+    const key = sameKey({ id: '', kind: rule.kind, refs: rule.refs, value: rule.value })
+    if (!doc.value.constraints.some(c => sameKey(c) === key)) {
+      const id = addConstraint(doc.value, rule.kind, rule.refs, rule.value)
+      runSolve()
+      sparkleAtConstraint(id)
+    }
+    commitHistory()
+  }
+
+  async function applyWithValue(v: { kind: ConstraintKind; label: string; value?: boolean; tangent?: boolean }) {
+    if (v.tangent) { applyTangent(); return }
     if (!v.value) { apply(v.kind); return }
     const n = await requestValue(v.label, 3)
     if (n == null) return                    // cancelled → no constraint (Bug 3)
@@ -2013,7 +2036,7 @@ export function usePen(opts: {
     trimHover, trimHoverEnds, trimGhosts, cutHover, dissolveHover,
     trimDown, trimMove, trimUp, cutMove, cutClick, dissolveMove, dissolveClick, clearToolHover, clearTrimGhosts,
     // verbs
-    runSolve, apply, applyWithValue, availableConstraints, orderRefs, del, nudge, fixSelected, makeConstruction, flip,
+    runSolve, apply, applyWithValue, applyTangent, availableConstraints, orderRefs, del, nudge, fixSelected, makeConstruction, flip,
     repeatPrompt, armRepeat, doRepeat, applyRepeat, doMirror, applyMirror, cancelPendingOp,
     setArcRadius, setConstraintValue, removeConstraintById, onArcDimClick, onConstraintMarkClick,
     commitDimension,
