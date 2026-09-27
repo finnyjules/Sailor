@@ -141,3 +141,23 @@ export async function answerRgbPng(bytes: Uint8Array): Promise<Uint8Array> {
   const png = await sharp(rgb, { raw: { width: info.width, height: info.height, channels: 3 } }).png({ compressionLevel: 6 }).toBuffer()
   return new Uint8Array(png)
 }
+
+/**
+ * A provider's picture as a Python node that keeps alpha saves it into a
+ * file of its own (R3.6: Layerize an image's layers, `save_image_to_input`):
+ * PIL's .convert("RGBA") (no EXIF turn, no ICC conversion), `/ 255.0` in
+ * float32, then `np.clip(255.0 * x, 0, 255).astype(np.uint8)` — R1.5's
+ * truncation, which gives every 8-bit value back — written as an RGBA PNG.
+ */
+export async function answerRgbaPng(bytes: Uint8Array): Promise<Uint8Array> {
+  const { data, info } = await sharp(bytes, { pages: 1, page: 0, ignoreIcc: true, limitInputPixels: MAX_INPUT_PIXELS })
+    .toColourspace('srgb').ensureAlpha().raw({ depth: 'uchar' }).toBuffer({ resolveWithObject: true })
+  const n = info.width * info.height
+  const rgba = new Uint8Array(n * 4)
+  for (let i = 0; i < n * 4; i++) {
+    const x = Math.fround(data[i]! / 255)
+    rgba[i] = Math.min(255, Math.max(0, Math.trunc(Math.fround(255 * x))))
+  }
+  const png = await sharp(rgba, { raw: { width: info.width, height: info.height, channels: 4 } }).png({ compressionLevel: 6 }).toBuffer()
+  return new Uint8Array(png)
+}

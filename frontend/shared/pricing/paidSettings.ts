@@ -40,6 +40,9 @@ import {
   type DescribeClass,
 } from '../runner/describe'
 import { REPAIR_PER_CALL_CLASSES, REPAIR_PER_CALL_ENDPOINTS, type RepairPerCallClass } from '../runner/repair'
+import {
+  LAYERIZE_SLUG, OUTPAINT_SLUGS, SEEDREAM_1K_AREA, SEEDREAM_LAYERIZE_APP, SEEDREAM_MAX_IMAGES, type OutpaintModel,
+} from '../runner/layers'
 
 /**
  * The most bytes of one moderated text in hosted (server/utils/moderation.ts
@@ -235,6 +238,44 @@ function repairPlanner(classType: RepairPerCallClass): PaidPlanner {
   return () => ({ steps: [{ call: { endpoint }, times: 1 }] })
 }
 
+// ── R3.6: layers from one call, and outpaint (#shared/runner/layers) ──
+
+/**
+ * Layerize an image's call on fal, billed by the picture it makes: the hold
+ * is the most it can make (SEEDREAM_MAX_IMAGES) at the rate its size can
+ * reach (`auto_1K` stays under the page's area line; every other size, a
+ * wired one or one the node doesn't offer, is held at the dearer rate). The
+ * charge is the call as answered (`seedreamCallAnswered`): the runner prices
+ * what came back from this same card, never above this.
+ */
+export function seedreamCallCeiling(inputs: NodeInputs): PaidCall {
+  const size = inputs.image_size
+  return { endpoint: SEEDREAM_LAYERIZE_APP, outputImages: SEEDREAM_MAX_IMAGES, outputPixels: size === 'auto_1K' ? SEEDREAM_1K_AREA : null }
+}
+
+/** Layerize an image's call as answered: the pictures that came back and their area (null: not known, the dearer rate). */
+export function seedreamCallAnswered(images: number, pixels: number | null): PaidCall {
+  return { endpoint: SEEDREAM_LAYERIZE_APP, outputImages: images, outputPixels: pixels }
+}
+
+/** Outpaint's engine as set, or, wired or not one it offers, each (the dearest is priced). */
+function outpaintEndpoints(model: unknown): string[] {
+  const own = typeof model === 'string' && Object.prototype.hasOwnProperty.call(OUTPAINT_SLUGS, model)
+  return own ? [OUTPAINT_SLUGS[model as OutpaintModel]] : Object.values(OUTPAINT_SLUGS)
+}
+
+const LAYERS_PLANNERS: Readonly<Record<string, PaidPlanner>> = {
+  // Separate text from image: one call, whatever its settings.
+  LayerizeGraphicNode: () => ({ steps: [{ call: { endpoint: LAYERIZE_SLUG }, times: 1 }] }),
+  SeedreamLayerizeNode: inputs => ({ steps: [{ call: seedreamCallCeiling(inputs), times: 1 }] }),
+  // Expand / outpaint: one call on its engine's card (a wired engine at the dearest).
+  OutpaintImageNode: (inputs) => {
+    const endpoints = outpaintEndpoints(inputs.model)
+    const usd = (e: string) => paidCallUsd({ endpoint: e }) ?? Number.POSITIVE_INFINITY
+    return { steps: [{ call: { endpoint: endpoints.reduce((a, b) => (usd(b) > usd(a) ? b : a)) }, times: 1 }] }
+  },
+}
+
 /** Python returns "" before calling anyone when the text is blank (typed; a wired one is priced as a call). */
 function llmNoCall(classType: LlmTextClass): ((inputs: NodeInputs) => boolean) | null {
   const name = LLM_NO_CALL_INPUT[classType]
@@ -248,6 +289,7 @@ const PAID_PLANNERS: Readonly<Record<string, PaidPlanner>> = {
   ...Object.fromEntries(LLM_CLASSES.map(c => [c, llmPlanner(c)])),
   ...Object.fromEntries(DESCRIBE_CLASSES.map(c => [c, describePlanner(c)])),
   ...Object.fromEntries(REPAIR_PER_CALL_CLASSES.map(c => [c, repairPlanner(c)])),
+  ...LAYERS_PLANNERS,
 }
 
 /** Each paid class's no-call rule (rule 8), where Python has one. Filled by each R3 task. */

@@ -15,7 +15,11 @@
  *    (speech), in proportion;
  *  - `gpu_ceiling`: a model billed by GPU time, priced at a stated ceiling
  *    (`note` says how it was reached). Its confidence is `estimate` until a
- *    live call measures it, and an estimate blocks the family's switch-on.
+ *    live call measures it, and an estimate blocks the family's switch-on;
+ *  - `per_output_image`: dollars per picture the call makes (R3.6, fal's
+ *    Seedream layerize, `billing_unit: images`), at a dearer rate for
+ *    pictures of a larger area where the page has one (`large`: over
+ *    `fromPixels`; an area not known is priced at the dearer rate).
  *
  * An endpoint carded already elsewhere is priced by that card, so each rate
  * lives in one place: the edit cards (editRates.ts), the per-second clip
@@ -53,6 +57,7 @@ export type PaidRate =
   | (RateMeta & { unit: 'per_output_second', perSecond: number })
   | (RateMeta & { unit: 'per_thousand_chars', perThousand: number })
   | (RateMeta & { unit: 'gpu_ceiling', usd: number, note: string })
+  | (RateMeta & { unit: 'per_output_image', perImage: number, large?: { fromPixels: number, perImage: number } })
 
 /** One priced provider call: the endpoint and what it is billed by. */
 export interface PaidCall {
@@ -66,6 +71,8 @@ export interface PaidCall {
   inputSeconds?: number; outputSeconds?: number
   /** Characters of text sent (per_thousand_chars cards). */
   chars?: number
+  /** Pictures the call makes (per_output_image cards): the most it can make for a hold, what came back for a charge. */
+  outputImages?: number
   /** Pixels of the picture sent in and of the picture that comes back (the edit cards). */
   inputPixels?: number | null; outputPixels?: number | null
   /** Whether a clip comes back with sound (clip and video cards); absent, the dearer of the two. */
@@ -128,6 +135,32 @@ export const PAID_RATES: Record<string, PaidRate> = {
     unit: 'gpu_ceiling', usd: 0.0004, note: 'T4 at $0.000225/s; page: approximately $0.00037 to run (read 2026-09-27), rounded up to the next $0.0001',
     service: 'replicate', source: 'https://replicate.com/851-labs/background-remover', read: '2026-09-27', confidence: 'estimate',
   },
+  // R3.6, layers from one call, and outpaint (read 2026-09-27, plain GETs of the public pages).
+  // Separate text from image: the page's billing table, "$0.09 per output image"
+  // (`image_output_count`; "or around 11 images for $1"). The answer is one picture and a JSON
+  // file: an estimate until the live check shows the JSON isn't billed as a second picture.
+  'ideogram-ai/layerize': {
+    unit: 'per_call', usd: 0.09,
+    service: 'replicate', source: 'https://replicate.com/ideogram-ai/layerize', read: '2026-09-27', confidence: 'estimate',
+  },
+  // Layerize an image: fal's page, "$0.03375 per generated layer for total pixel area under
+  // 1536x1536 … $0.0675 per generated layer" over it (`billing_unit: images`, price 0.03375). An
+  // estimate until the live check: whether the base picture counts as a layer, and the area
+  // each `image_size` makes, are not on the page.
+  'bytedance/seedream/v5/pro/layerize': {
+    unit: 'per_output_image', perImage: 0.03375, large: { fromPixels: 1536 * 1536, perImage: 0.0675 },
+    service: 'fal', source: 'https://fal.ai/models/bytedance/seedream/v5/pro/layerize', read: '2026-09-27', confidence: 'estimate',
+  },
+  // Expand / outpaint: Flux Fill Pro, "$0.05 per output image" ("or 20 images for $1"); Bria
+  // Expand, "$0.04 per output image" ("or 25 images for $1"), each `image_output_count`.
+  'black-forest-labs/flux-fill-pro': {
+    unit: 'per_call', usd: 0.05,
+    service: 'replicate', source: 'https://replicate.com/black-forest-labs/flux-fill-pro', read: '2026-09-27', confidence: 'verified',
+  },
+  'bria/expand-image': {
+    unit: 'per_call', usd: 0.04,
+    service: 'replicate', source: 'https://replicate.com/bria/expand-image', read: '2026-09-27', confidence: 'verified',
+  },
 }
 
 const own = <T>(o: Record<string, T>, k: string): T | undefined =>
@@ -161,6 +194,14 @@ function paidCardUsd(rate: PaidRate, call: PaidCall): number | null {
     case 'per_thousand_chars': {
       const c = count(call.chars)
       return c === undefined ? null : tidy(rate.perThousand * c / 1000)
+    }
+    case 'per_output_image': {
+      const n = count(call.outputImages)
+      if (n === undefined) return null
+      // The larger area's rate unless the area is known to be under it.
+      const px = call.outputPixels
+      const small = !rate.large || (typeof px === 'number' && Number.isFinite(px) && px >= 0 && px < rate.large.fromPixels)
+      return tidy(n * (small ? rate.perImage : rate.large!.perImage))
     }
   }
 }

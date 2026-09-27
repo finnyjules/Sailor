@@ -390,7 +390,7 @@ describe('the price', () => {
       byResolution: { '720p': 0.01, '1080p': 0.02, '4k': 0.08, '720p/60fps': 0.02, '1080p/60fps': 0.04, '4k/60fps': 0.16 },
     })
     expect(CLIP_RATES[TOPAZ_VIDEO_ENDPOINT]).toBe(rate)
-    expect(PRICE_BOOK_VERSION).toBe('r3-image-repair')
+    expect(PRICE_BOOK_VERSION).toBe('r3-layers')
     // + PersonSwapVideo (person-swap-video), added by Task 3 (non-commercial face models replacement).
     expect(FAMILY_PRICED_CLASSES).toEqual({ EnhanceVideoNode: 'topaz-video', PersonSwapVideo: 'person-swap-video' })
   })

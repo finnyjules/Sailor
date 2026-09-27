@@ -643,3 +643,25 @@ describe('restore and remove background on the ComfyUI path (R3.5)', () => {
     expect(() => at('UpscaleImageNode', { image: ['2', 0] })).toThrow(UnpricedGraphError)
   })
 })
+
+// ───────────────────────────────────────────────────────────────────────────
+// R3.6 (ruling (a)): Separate text from image, Layerize an image and Expand /
+// outpaint leave their flat rows for their calls (the providers' pages):
+// Layerize $0.09 (16 → 18), Outpaint Flux Fill Pro $0.05 (10, as before) or
+// Bria Expand $0.04 (10 → 8), and Layerize an image on fal at its 17
+// pictures, $0.03375 each under 1536² (auto_1K: 87) and $0.0675 over (every
+// other size: 173; was 51). The ComfyUI path can't see how many came back:
+// it is charged that ceiling.
+// ───────────────────────────────────────────────────────────────────────────
+describe('layers from one call, and outpaint, on the ComfyUI path (R3.6)', () => {
+  const at = (ct: string, inputs: Record<string, unknown>) => priceGraph({ 1: { class_type: ct, inputs } }).nodes!['1']
+  it('each class, by its settings', () => {
+    expect(at('LayerizeGraphicNode', { model: 'Ideogram Layerize', image: ['2', 0], prompt: '', seed: 0 })).toBe(18)
+    expect(at('OutpaintImageNode', { model: 'Flux Fill', image: ['2', 0], prompt: '', direction: 'Make square', aspect_ratio: '16:9', seed: 0 })).toBe(10)
+    expect(at('OutpaintImageNode', { model: 'Bria Expand', image: ['2', 0], prompt: '', direction: 'Make square', aspect_ratio: '1:1', seed: 0 })).toBe(8)
+    expect(at('OutpaintImageNode', { model: ['9', 0], image: ['2', 0] })).toBe(10)
+    expect(at('SeedreamLayerizeNode', { image: ['2', 0], prompt: '', image_size: 'auto_1K' })).toBe(87)
+    for (const image_size of ['auto', 'auto_1.5K', 'auto_2K']) expect(at('SeedreamLayerizeNode', { image: ['2', 0], prompt: '', image_size }), image_size).toBe(173)
+    expect(at('SeedreamLayerizeNode', { image: ['2', 0], prompt: '' })).toBe(173)
+  })
+})

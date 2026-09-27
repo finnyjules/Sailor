@@ -147,6 +147,10 @@ export const PAID_TEXT_INPUTS: Readonly<Record<string, readonly string[]>> = {
   // R3.5, Upscale and Enhance detail (their prompts reach Clarity and the refiner; the other engines send none).
   UpscaleImageNode: ['prompt', 'negative_prompt'],
   EnhanceDetailNode: ['prompt', 'negative_prompt'],
+  // R3.6, the layerizers' and Outpaint's guidance (Layerize and Outpaint send it stripped, Seedream as typed).
+  LayerizeGraphicNode: ['prompt'],
+  SeedreamLayerizeNode: ['prompt'],
+  OutpaintImageNode: ['prompt'],
 }
 
 /** The non-blank values of RUNNER_EXTRA_TEXT_INPUTS (a typed-in taste, a paid class's PAID_TEXT_INPUTS) across the prompt, each on its own. */

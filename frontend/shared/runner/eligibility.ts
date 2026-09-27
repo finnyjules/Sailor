@@ -21,6 +21,9 @@ import {
   TOPAZ_ENHANCE_MODELS, TOPAZ_SUBJECT_DETECTION, TOPAZ_UPSCALE_FACTORS, UPSCALE_ENGINES,
 } from './repair'
 import {
+  LAYERIZE_MODELS, LAYERS_CLASSES, LAYERS_JSON_CLASSES, OUTPAINT_ASPECT_RATIOS, OUTPAINT_DIRECTIONS, OUTPAINT_MODELS, SEEDREAM_IMAGE_SIZES,
+} from './layers'
+import {
   BRAINSTORM_ANGLES, CHAT_LLM_MODELS, IMPROVE_PROMPT_MODELS, IMPROVE_PROMPT_TARGETS, REASON_MODELS, REWRITE_MODELS, REWRITE_TONES,
   SUMMARIZE_LENGTHS, SUMMARIZE_MODELS, TRANSLATE_LANGUAGES,
 } from './llm'
@@ -331,7 +334,11 @@ export const IMAGE_OUTPUT_CLASSES: ReadonlySet<string> = new Set([
  * picture only while its family is on. With it off, a wire from it is no
  * picture to the runner, exactly as before R3 (rule 15).
  */
-export const PAID_PICTURE_FAMILY: Readonly<Record<string, RunnerFamily>> = Object.fromEntries(REPAIR_CLASSES.map(c => [c, 'image-repair' as const]))
+export const PAID_PICTURE_FAMILY: Readonly<Record<string, RunnerFamily>> = {
+  ...Object.fromEntries(REPAIR_CLASSES.map(c => [c, 'image-repair' as const])),
+  // R3.6: the layerizers' picture (slot 0; slot 1 is their JSON) and the outpainted picture.
+  ...Object.fromEntries(LAYERS_CLASSES.map(c => [c, 'layers' as const])),
+}
 
 /**
  * Classes whose picture outputs are other slots than output 0 alone, or that
@@ -958,6 +965,45 @@ export const RUNNER_NODE_RULES: Readonly<Record<string, RunnerNodeRule>> = {
     mustLink: ['image'],
     imageInputs: ['image'],
   },
+  // ── layers (step 3, R3.6): Separate text from image and Layerize an image
+  // (their picture and their layers' JSON) and Expand / outpaint, on
+  // Replicate and fal. The picture is a linked picture (the handed-off file);
+  // the prompts take a text wire (R0: the value arrives as typed); every
+  // other setting is a widget as ComfyUI validates it (define_schema's
+  // options and bounds). Outpaint keeps its `model` per engine. A wired
+  // widget leaves the node to the engine.
+  LayerizeGraphicNode: {
+    models: Object.fromEntries(LAYERIZE_MODELS.map(m => [m, 'layers' as const])),
+    mustLink: ['image'],
+    imageInputs: ['image'],
+    valueInputs: { prompt: ['text'] },
+    required: ['prompt'],
+    widgets: {
+      model: { type: 'COMBO', required: true, options: LAYERIZE_MODELS },
+      seed: { type: 'INT', required: true, min: 0, max: 0x7FFFFFFF },
+    },
+  },
+  SeedreamLayerizeNode: {
+    family: 'layers',
+    mustLink: ['image'],
+    imageInputs: ['image'],
+    valueInputs: { prompt: ['text'] },
+    required: ['prompt'],
+    widgets: { image_size: { type: 'COMBO', options: SEEDREAM_IMAGE_SIZES } },
+  },
+  OutpaintImageNode: {
+    models: Object.fromEntries(OUTPAINT_MODELS.map(m => [m, 'layers' as const])),
+    mustLink: ['image'],
+    imageInputs: ['image'],
+    valueInputs: { prompt: ['text'] },
+    required: ['prompt'],
+    widgets: {
+      model: { type: 'COMBO', required: true, options: OUTPAINT_MODELS },
+      direction: { type: 'COMBO', required: true, options: OUTPAINT_DIRECTIONS },
+      aspect_ratio: { type: 'COMBO', required: true, options: OUTPAINT_ASPECT_RATIOS },
+      seed: { type: 'INT', required: true, min: 0, max: 0xFFFFFFFF },
+    },
+  },
   // ── effects-* (step 3, R2): the still-picture effects (./effects.ts, server/runner/effects/) ──
   // Rows built from the real node schemas (./effectSchemas.generated.ts), one
   // per ported class; each needs its family and `cards`.
@@ -1012,6 +1058,8 @@ export const SWITCHED_CLASSES: Readonly<Record<string, RunnerFamily>> = {
   FindObjectsNode: 'describe',
   // R3.5: upscale, enhance, restore and remove background.
   ...Object.fromEntries(REPAIR_CLASSES.map(c => [c, 'image-repair' as const])),
+  // R3.6: layers from one call, and outpaint.
+  ...Object.fromEntries(LAYERS_CLASSES.map(c => [c, 'layers' as const])),
 }
 
 /**
@@ -1404,6 +1452,7 @@ const PAID_OUTPUT_KIND_FAMILY: Readonly<Record<string, RunnerFamily>> = {
   DescribeVideoNode: 'describe',
   ExtractTextNode: 'describe',
   FindObjectsNode: 'describe',
+  ...Object.fromEntries(LAYERS_JSON_CLASSES.map(c => [c, 'layers' as const])),
 }
 const withoutPaidRows = (kinds: OutputKinds): OutputKinds =>
   Object.fromEntries(Object.entries(kinds).filter(([cls]) => !Object.prototype.hasOwnProperty.call(PAID_OUTPUT_KIND_FAMILY, cls)))

@@ -340,6 +340,11 @@ export const RUNNER_ROUTES: Readonly<Record<string, Route>> = {
     ...UPSCALE_ENGINES.map(m => `UpscaleImageNode:${m}`), ...ENHANCE_ENGINES.map(m => `EnhanceDetailNode:${m}`),
     'RestorePhotoNode', 'RestorePhotoRemoteNode', 'RemoveBackgroundNode', 'RemoveBackgroundRemoteNode',
   ].map(key => [key, r('replicate', null, 'no same-model twin on fal with the same settings is carded')])),
+  // R3.6, layers from one call, and outpaint (family layers): each on its own service, as Python.
+  'LayerizeGraphicNode:Ideogram Layerize': r('replicate', null, 'no same-model twin on fal is carded'),
+  'SeedreamLayerizeNode': r('fal', null, 'no same-model twin on Replicate is carded'),
+  'OutpaintImageNode:Flux Fill': r('replicate', null, 'no same-model twin on fal with the same settings is carded'),
+  'OutpaintImageNode:Bria Expand': r('replicate', null, 'no same-model twin on fal with the same settings is carded'),
 }
 
 // ── Generate video: the two models moved to fal first ──────────────────────

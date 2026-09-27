@@ -8,6 +8,8 @@
  * limit, the run's Stop, and a byte cap per kind of file:
  *   pictures, sounds, 3D files  512 MiB, 10 minutes
  *   videos                      2 GiB, 30 minutes (no lower limit than before)
+ *   JSON (R3.6, Layerize's      1 MiB, 30 seconds (Python's own time limit;
+ *   layer data)                 a value holds at most 262,144 characters)
  * What is kept is checked by kind too: a sound by its header (WAV, MP3,
  * FLAC, Ogg, MP4 audio, AAC), a 3D file by GLB's magic (`glTF`); a picture
  * or a video keeps an extension from its kind's list only, never whatever a
@@ -16,24 +18,25 @@
 import { safeFetch, type SafeFetchPolicy } from '../templates/safeFetch'
 import { extFor } from './results'
 
-export type AnswerKind = 'image' | 'video' | 'audio' | 'glb'
+export type AnswerKind = 'image' | 'video' | 'audio' | 'glb' | 'json'
 
 const MIB = 1024 * 1024
 /** The most bytes one answer file may be, by kind (controller ruling, R3.1 fix round 1). */
 export const ANSWER_MAX_BYTES: Readonly<Record<AnswerKind, number>> = {
-  image: 512 * MIB, audio: 512 * MIB, glb: 512 * MIB, video: 2048 * MIB,
+  image: 512 * MIB, audio: 512 * MIB, glb: 512 * MIB, video: 2048 * MIB, json: MIB,
 }
 /** How long one answer file may take to download, by kind. */
 export const ANSWER_TIMEOUT_MS: Readonly<Record<AnswerKind, number>> = {
-  image: 10 * 60_000, audio: 10 * 60_000, glb: 10 * 60_000, video: 30 * 60_000,
+  image: 10 * 60_000, audio: 10 * 60_000, glb: 10 * 60_000, video: 30 * 60_000, json: 30_000,
 }
 
-const NOUN: Record<AnswerKind, string> = { image: 'picture', video: 'video', audio: 'sound', glb: '3D model' }
+const NOUN: Record<AnswerKind, string> = { image: 'picture', video: 'video', audio: 'sound', glb: '3D model', json: 'data' }
 const sizeWords = (bytes: number) => bytes >= 1024 * MIB ? `${bytes / (1024 * MIB)} GB` : `${Math.floor(bytes / MIB)} MB`
 
 export const ANSWER_REFUSED = 'The service’s result points at a private network address, which is not allowed'
 export const answerTooLarge = (kind: AnswerKind, maxBytes: number) => `The ${NOUN[kind]} the service made is too large to keep (over ${sizeWords(maxBytes)})`
-export const answerTimeout = (kind: AnswerKind) => `The ${NOUN[kind]} the service made took longer than ${ANSWER_TIMEOUT_MS[kind] / 60_000} minutes to download`
+const timeWords = (ms: number) => (ms < 60_000 ? `${ms / 1000} seconds` : `${ms / 60_000} minutes`)
+export const answerTimeout = (kind: AnswerKind) => `The ${NOUN[kind]} the service made took longer than ${timeWords(ANSWER_TIMEOUT_MS[kind])} to download`
 export const ANSWER_NOT_GLB = 'The 3D model the service made isn’t a GLB file, so it can’t be kept'
 export const ANSWER_NOT_SOUND = 'The sound the service made isn’t a kind Sailor can keep'
 
@@ -83,7 +86,7 @@ const SAVED_EXTS: Record<'image' | 'video', readonly string[]> = {
   image: ['png', 'jpg', 'webp', 'gif', 'avif'],
   video: ['mp4', 'webm', 'mov'],
 }
-const DEFAULT_EXT: Record<AnswerKind, string> = { image: 'png', video: 'mp4', audio: 'wav', glb: 'glb' }
+const DEFAULT_EXT: Record<AnswerKind, string> = { image: 'png', video: 'mp4', audio: 'wav', glb: 'glb', json: 'json' }
 
 /**
  * The extension an answer file is saved with, checked by its kind: a 3D file
@@ -101,6 +104,8 @@ export function answerExt(kind: AnswerKind, bytes: Uint8Array, contentType: stri
     if (!ext) throw new Error(ANSWER_NOT_SOUND)
     return ext
   }
+  // Layer data (R3.6) is read as text, never saved.
+  if (kind === 'json') return 'json'
   const ext = extFor(contentType, url, DEFAULT_EXT[kind])
   return SAVED_EXTS[kind].includes(ext) ? ext : DEFAULT_EXT[kind]
 }

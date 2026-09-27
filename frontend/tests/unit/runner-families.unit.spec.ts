@@ -44,6 +44,8 @@ describe('parseFamilies', () => {
       'describe',
       // Step 3, R3.5: upscale, enhance, restore and remove background (needs `cards`).
       'image-repair',
+      // Step 3, R3.6: layers from one call, and outpaint (needs `cards`).
+      'layers',
     ].sort())
   })
 })

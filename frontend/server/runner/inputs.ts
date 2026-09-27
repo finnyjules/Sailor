@@ -126,6 +126,12 @@ export function collectInputFiles(prompt: ApiPrompt): OutputFile[] {
 export interface OwnershipCheck {
   ownsInput(userId: string, file: OutputFile): Promise<boolean>
   ownsOutput(userId: string, file: OutputFile): Promise<boolean>
+  /**
+   * An input file one of the user's runs saved there and recorded as its own
+   * (R3.6, ruling (o): Layerize an image's layers, metering.addOutput).
+   * Absent: none is.
+   */
+  ownsSaved?(userId: string, file: OutputFile): Promise<boolean>
 }
 
 export async function assertFilesOwned(
@@ -137,8 +143,10 @@ export async function assertFilesOwned(
   if (!hosted) return
   if (!userId) throw new MeterRefusalError('Sign in to run workflows', 401)
   for (const f of files) {
+    // An input file is the user's when they uploaded it, or when one of their
+    // runs saved it there (R3.6, ruling (o): Layerize an image's layers).
     const ok = f.type === 'output' ? await check.ownsOutput(userId, f)
-      : f.type === 'input' ? await check.ownsInput(userId, f)
+      : f.type === 'input' ? (await check.ownsInput(userId, f)) || (!!check.ownsSaved && await check.ownsSaved(userId, f))
         : false
     if (!ok) throw new MeterRefusalError('This workflow uses a file that isn’t one of yours', 403, { file: f.filename })
   }

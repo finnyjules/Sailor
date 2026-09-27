@@ -136,8 +136,8 @@ describe('the rows', () => {
     // R2.8: the mask classes' mask slots; the output kinds change only with effects-mask (and cards) on.
     expect(EFFECT_OUTPUT_KINDS).toEqual({ ThresholdMask: { 0: 'mask' }, ColorRangeMask: { 0: 'mask' }, MatteGrowShrink: { 0: 'mask' }, Painter: { 1: 'mask' } })
     const all = new Set<RunnerFamily>(RUNNER_FAMILIES)
-    // (R3.3's llm-text and R3.4's describe declare output kinds of their own, so they are left off here too.)
-    const noMask = new Set<RunnerFamily>(RUNNER_FAMILIES.filter(f => f !== 'effects-mask' && f !== 'llm-text' && f !== 'describe'))
+    // (R3.3's llm-text, R3.4's describe and R3.6's layers declare output kinds of their own, so they are left off here too.)
+    const noMask = new Set<RunnerFamily>(RUNNER_FAMILIES.filter(f => f !== 'effects-mask' && f !== 'llm-text' && f !== 'describe' && f !== 'layers'))
     expect(outputKindsFor(noMask)).toBe(outputKindsFor(new Set<RunnerFamily>(['cards'])))
     expect(outputKindsFor(all)).not.toBe(outputKindsFor(new Set<RunnerFamily>(['cards'])))
   })
@@ -148,8 +148,8 @@ describe('the rows', () => {
       expect(RUNNER_FAMILIES).toContain(f)
       expect(FAMILY_REQUIRES[f as RunnerFamily]).toBe('cards')
     }
-    // + R3.3's llm-text, R3.4's describe and R3.5's image-repair, which need cards too.
-    expect(Object.keys(FAMILY_REQUIRES).sort()).toEqual([...added, 'llm-text', 'describe', 'image-repair'].sort())
+    // + R3.3's llm-text, R3.4's describe, R3.5's image-repair and R3.6's layers, which need cards too.
+    expect(Object.keys(FAMILY_REQUIRES).sort()).toEqual([...added, 'llm-text', 'describe', 'image-repair', 'layers'].sort())
     expect(EFFECT_MAX_PICTURE_PIXELS).toBe(8192 * 8192)
     expect(EFFECT_HOSTED_MAX_PICTURE_PIXELS).toBe(HOSTED_MAX_FRAME_ARTBOARD_PIXELS)
   })

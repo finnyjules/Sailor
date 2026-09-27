@@ -58,6 +58,8 @@ export const RUNNER_OUTPUT_CLASSES: ReadonlySet<string> = new Set([
   // R3.5: Remove background and Restore an old photo are output nodes (their
   // hidden twins, Upscale and Enhance detail are not: define_schema says so).
   'RemoveBackgroundNode', 'RestorePhotoNode',
+  // R3.6: the two layerizers are output nodes (Expand / outpaint is not).
+  'LayerizeGraphicNode', 'SeedreamLayerizeNode',
 ])
 
 /** ComfyUI's node_errors entry for a node that failed validation. */

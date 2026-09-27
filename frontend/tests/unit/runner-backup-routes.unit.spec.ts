@@ -12,7 +12,7 @@
  *     no backup (Flux 2 Pro and Max: none for a webp picture; S3b).
  */
 import { describe, expect, it } from 'vitest'
-import { planNode, type NodePlan } from '~~/server/runner/executors'
+import { planNode, type NodePlan, type PipelineCall, type PipelineIO } from '~~/server/runner/executors'
 import { RUNNER_IMAGE_MODELS, RUNNER_REPLICATE_IMAGE_MODELS } from '~~/server/runner/generators/image'
 import { RUNNER_REPLICATE_VIDEO_MODELS, RUNNER_VIDEO_MODELS } from '~~/server/runner/generators/video'
 import {
@@ -82,6 +82,10 @@ const EDIT_BASE: Record<string, Record<string, unknown>> = {
   RestorePhotoRemoteNode: { image: LINK, safety_tolerance: '2', output_format: 'png' },
   RemoveBackgroundNode: { model: '851-labs/bg-remover', image: LINK },
   RemoveBackgroundRemoteNode: { image: LINK },
+  // Layers from one call, and outpaint (R3.6): the picture; the rest at the node's defaults.
+  LayerizeGraphicNode: { image: LINK, prompt: '', seed: 0 },
+  SeedreamLayerizeNode: { image: LINK, prompt: '', image_size: 'auto' },
+  OutpaintImageNode: { image: LINK, prompt: '', direction: 'Zoom out 1.5x', aspect_ratio: '16:9', seed: 0 },
   // sync-3 lip-sync (Task F22): the studio's face video and sound.
   LipSyncNode: {
     engine: 'sync-3',
@@ -107,6 +111,28 @@ async function plan(classType: string, inputs: Record<string, unknown>, families
   })
   if (p.kind !== 'provider') throw new Error(`${classType} made no call`)
   return p
+}
+
+/**
+ * A plan's first request: a provider plan's own, or a pipeline's first call
+ * (R3.6: the layerizers), caught as it is sent.
+ */
+async function firstCall(classType: string, inputs: Record<string, unknown>, families?: ReadonlySet<RunnerFamily>): Promise<Pick<ProviderPlan, 'provider' | 'endpoint' | 'payload' | 'backup'>> {
+  const p = await planNode({
+    prompt: { n: { class_type: classType, inputs } }, nodeId: 'n', gateOpen: false,
+    filesFrom: () => [{ filename: 'a.png', subfolder: '', type: 'output' }],
+    toUrl: async (f: OutputFile) => `https://pics.test/${f.filename}`,
+    ...(families ? { families } : {}),
+    measured: MEASURED,
+  })
+  if (p.kind === 'provider') return p
+  if (p.kind !== 'pipeline') throw new Error(`${classType} made no call`)
+  let first: PipelineCall | null = null
+  const sent = new Error('first call sent')
+  await p.run({ signal: new AbortController().signal, call: async (c: PipelineCall) => { first = c; throw sent } } as unknown as PipelineIO).catch((e) => { if (e !== sent) throw e })
+  if (!first) throw new Error(`${classType} made no call`)
+  const c = first as PipelineCall
+  return { provider: c.provider, endpoint: c.endpoint, payload: c.payload, ...(c.backup ? { backup: c.backup } : {}) }
 }
 
 /** The node a route key names, with everything it needs to make its call. */
@@ -223,7 +249,7 @@ describe('the first and backup services are the table\'s', () => {
   for (const [key, route] of Object.entries(RUNNER_ROUTES)) {
     it(`${key}: ${route.first} first, ${route.backup ?? 'no'} backup`, async () => {
       const { ct, inputs, families } = routeOf(key)
-      const p = await plan(ct, inputs, families)
+      const p = await firstCall(ct, inputs, families)
       expect(p.provider).toBe(route.first)
       expect(p.backup?.provider ?? null).toBe(route.backup)
       // A backup is the other service, and a row without one says why.

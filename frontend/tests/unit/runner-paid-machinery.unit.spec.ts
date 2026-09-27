@@ -616,8 +616,8 @@ describe('answer downloads go through the safe-fetch policy', () => {
     expect(Array.from(got.bytes)).toEqual([1])
     expect(flaky).toHaveBeenLastCalledWith('https://x.test/a.png', { maxBytes: 5 })
   })
-  it('caps by kind: 512 MiB for pictures, sounds and 3D, 2 GiB for videos; a larger ask is clamped', () => {
-    expect(ANSWER_MAX_BYTES).toEqual({ image: 512 * MIB, audio: 512 * MIB, glb: 512 * MIB, video: 2048 * MIB })
+  it('caps by kind: 512 MiB for pictures, sounds and 3D, 2 GiB for videos (R3.6: 1 MiB of layer JSON); a larger ask is clamped', () => {
+    expect(ANSWER_MAX_BYTES).toEqual({ image: 512 * MIB, audio: 512 * MIB, glb: 512 * MIB, video: 2048 * MIB, json: MIB })
     expect(answerCap('audio', 4096 * MIB)).toBe(512 * MIB)
     expect(answerCap('video')).toBe(2048 * MIB)
     expect(answerCap('glb', 10)).toBe(10)

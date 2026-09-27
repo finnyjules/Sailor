@@ -29,8 +29,8 @@ export interface PyCall { provider: 'fal' | 'replicate'; endpoint: string; paylo
 /** A GET a node made: its URL and the status served (capture_calls `gets`). */
 export interface PyGet { url: string; status: number | null }
 
-/** A JSON link's body as served: its text, or a status with a text (a 404). */
-export type LinkBody = string | { status: number; text: string }
+/** A JSON link's body as served: its text, a status with a text (a 404), or a fetch that fails outright (R3.6). */
+export type LinkBody = string | { status: number; text: string } | { raise: string }
 
 /** A body text given as it is (numbers keep their written form): `{ __body__: '<text>' }`. */
 export interface RawBody { __body__: string }
@@ -126,6 +126,7 @@ export async function runPaidCase(c: PaidCase, o: { families: ReadonlySet<Runner
   const download = async (url: string) => {
     const link = c.links && Object.prototype.hasOwnProperty.call(c.links, url) ? c.links[url]! : undefined
     if (link !== undefined) {
+      if (typeof link === 'object' && 'raise' in link) throw new Error(link.raise)
       const { status, text } = typeof link === 'string' ? { status: 200, text: link } : link
       if (status !== 200) throw new Error(`HTTP ${status} for ${url}`)
       return { bytes: new TextEncoder().encode(text), contentType: 'application/json' }

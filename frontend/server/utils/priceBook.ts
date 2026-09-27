@@ -169,7 +169,15 @@ export { VIDEO_RATES, MODEL_PRICED_NODE_CLASSES, SETTING_PRICED_NODE_CLASSES, RE
 // unchanged), Remove background at its GPU-time page ($0.0004, an estimate:
 // 1 credit, unchanged). Upscale and Enhance detail keep their price by the
 // picture's size. No price moves.
-export const PRICE_BOOK_VERSION = 'r3-image-repair'
+// r3-layers (step 3, R3.6, ruling (a)): Separate text from image, Layerize
+// an image and Expand / outpaint leave their flat rows for their calls, read
+// from the providers' pages: Layerize at $0.09 an output picture (16 → 18
+// credits); Outpaint by its engine, Flux Fill Pro $0.05 (10, unchanged) and
+// Bria Expand $0.04 (10 → 8); Layerize an image on fal at $0.03375 a
+// picture under 1536² and $0.0675 over, held (and on the ComfyUI path
+// charged) at its 17 pictures: `auto_1K` 87 credits, every other size 173
+// (was a flat 51). The runner charges the pictures that came back.
+export const PRICE_BOOK_VERSION = 'r3-layers'
 
 export const BASE_RENDER_CREDITS = 1
 
@@ -307,11 +315,10 @@ export const GRAPH_NODE_CREDITS: Record<string, number> = {
   IdeogramV3TurboRemoteNode: 6,    // badge $0.03 (Python class IdeogramV3TurboNode; node_id below)
   TextEffectNode: 8,               // badge $0.04
   SketchToImageNode: 8,            // badge $0.04
-  OutpaintImageNode: 10,           // badge $0.05
   ConsistentFaceNode: 16,          // badge $0.08
-  LayerizeGraphicNode: 16,         // badge $0.08
   SplitPhotoLayersNode: 2,         // badge $0.01
-  SeedreamLayerizeNode: 51,        // badge $0.34
+  // (Separate text from image, Layerize an image and Expand / outpaint are
+  // priced by their calls since R3.6: shared/pricing/paidSettings.ts, on both paths.)
   // (Restore an old photo and Remove background, and their hidden twins, are
   // priced by their calls since R3.5: shared/pricing/paidSettings.ts, on both paths.)
   // Clarity is RANGE-priced (own description: ~$0.05–0.20/image by

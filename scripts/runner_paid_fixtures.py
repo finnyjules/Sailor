@@ -35,6 +35,10 @@ Groups:
              Restore an old photo and Remove background (and their hidden
              twins), for frontend/server/runner/generators/repair.ts
              (tests/unit/runner-paid-repair.unit.spec.ts)
+  layers     (R3.6) Separate text from image (Layerize), Layerize an image
+             (Seedream) and Expand / outpaint (Flux Fill, Bria Expand), for
+             frontend/server/runner/generators/layers.ts
+             (tests/unit/runner-paid-layers.unit.spec.ts)
 
 The network is blocked (as in compositor_fixtures.py): every outbound connect
 and DNS lookup raises and the provider keys are removed before any node module
@@ -147,7 +151,10 @@ def _served(links: dict, files: dict) -> dict:
     """URL → (status, body bytes): `links` values are text or {status, text}; `files` values base64."""
     out = {}
     for url, v in (links or {}).items():
-        if isinstance(v, dict):
+        # {"raise": message}: the fetch itself fails (a dropped connection), as ConnectionError(message) (R3.6).
+        if isinstance(v, dict) and "raise" in v:
+            out[url] = ("raise", str(v["raise"]).encode("utf-8"))
+        elif isinstance(v, dict):
             out[url] = (int(v.get("status", 200)), str(v.get("text", "")).encode("utf-8"))
         else:
             out[url] = (200, str(v).encode("utf-8"))
@@ -222,7 +229,9 @@ def capture_calls(node_cls, answers: list, links: dict | None = None, files: dic
       encodes; a sound as `WAV:<sha256>`. Uploads become `UPLOAD:<file name>`.
     - Every GET (aiohttp, and the download helpers) is recorded in `gets` as
       `{url, status}` and served from `links` (text, or `{status, text}` — a
-      404 is served as asked) and `files` (URL → base64 bytes). The real
+      404 is served as asked; `{raise: message}` fails the fetch outright
+      with ConnectionError, recorded with status 0) and `files` (URL →
+      base64 bytes). The real
       decoders run on those bytes, so a node that works on a downloaded
       picture or sound goes on to its next call. A GET the case doesn't serve
       raises UnservedGet, which the node can't swallow, and fails the case.
@@ -261,6 +270,10 @@ def capture_calls(node_cls, answers: list, links: dict | None = None, files: dic
             gets.append({"url": url, "status": None})
             raise UnservedGet(f"GET {url!r} is not served by the case")
         status, body = served[url]
+        if status == "raise":
+            # A fetch that fails outright (R3.6: Layerize's layer JSON): recorded with status 0.
+            gets.append({"url": url, "status": 0})
+            raise ConnectionError(body.decode("utf-8"))
         gets.append({"url": url, "status": status})
         return status, body
 
@@ -857,11 +870,141 @@ def repair_group() -> dict:
     return {"cases": cases}
 
 
+LAYERIZE_BG = "https://r.test/layerize/bg.png"
+LAYERIZE_JSON = "https://r.test/layerize/layers.json"
+# The layer data as Ideogram writes it: non-ASCII, whole floats and an exponent kept as written.
+LAYERIZE_BODY = ('{"width": 1024, "height": 768, "layers": [{"type": "text", "text": "Café — SALE", '
+                 '"font_size": 48.0, "x": 1e2, "color": "#fff"}]}')
+SEEDREAM_FLAT = "https://r.test/seedream/flat.png"
+
+
+def _seedream_layer(i: int, **over) -> dict:
+    layer = {
+        "image": {"url": f"https://r.test/seedream/layer_{i}.png", "width": 64, "height": 48, "content_type": "image/png"},
+        "z_index": i,
+        "bounding_box": {"absolute": [i, i * 2, 32 + i, 24 + i], "normalized": [i * 10, i * 20, 500 + i, 500 + i]},
+        "name": f"layer {i}",
+        "description": f"element number {i}",
+    }
+    if i == 0:
+        layer.pop("bounding_box")
+        layer.pop("name")
+        layer.pop("description")
+    layer.update(over)
+    return layer
+
+
+def _seedream_answer(layers: list, images: list | None = None) -> dict:
+    return {"images": [{"url": SEEDREAM_FLAT, "width": 64, "height": 48}] if images is None else images, "layers": layers}
+
+
+def layers_group() -> dict:
+    """R3.6: Separate text from image (Ideogram Layerize), Layerize an image
+    (fal Seedream 5 Pro Layerize) and Expand / outpaint (Flux Fill, Bria
+    Expand). Layerize answers a picture and a JSON link (picked by
+    extension); Seedream answers its layers (each downloaded and saved to the
+    input folder) and a flat preview; Outpaint one picture, alpha dropped."""
+    import runner_builder_fixtures as rbf
+    nr, _fal, _extras = rbf._node_modules()
+    rgba = lambda seed: _b64(png_bytes(8, 6, seed, "RGBA"))  # noqa: E731
+    cases: list = []
+
+    # ── Separate text from image (Layerize): prompts and seeds, then every answer shape.
+    bg_files = {LAYERIZE_BG: rgba(21)}
+    layer_links = {LAYERIZE_JSON: LAYERIZE_BODY}
+    pair = {"output": [LAYERIZE_BG, LAYERIZE_JSON]}
+
+    def layerize(name, widgets, answer=None, links=None, files=None):
+        w = {"model": "Ideogram Layerize", "prompt": "", "seed": 0, **widgets}
+        cases.append(paid_case(f"layerize · {name}", nr.LayerizeGraphicNode, w, [answer or pair], pictures=["image"],
+                               links=layer_links if links is None else links, files=files or bg_files))
+
+    for pname, prompt in {"blank": "", "spaces only": "   ", "spaced": "  a summer sale poster \n", "non-ASCII": "affiche été — 猫"}.items():
+        layerize(f"prompt {pname}", {"prompt": prompt})
+    for seed in (0, 1, 2 ** 31 - 1):
+        layerize(f"seed {seed}", {"seed": seed})
+    layerize("answer · picture first", {}, pair)
+    layerize("answer · JSON first", {}, {"output": [LAYERIZE_JSON, LAYERIZE_BG]})
+    noext = "https://r.test/layerize/background"
+    layerize("answer · no extension", {}, {"output": [noext, LAYERIZE_JSON]}, files={noext: rgba(22)})
+    upper = "https://r.test/layerize/BG.PNG?sig=1.json"
+    layerize("answer · upper-case extension and a query", {}, {"output": [LAYERIZE_JSON, upper]}, files={upper: rgba(23)})
+    layerize("answer · no JSON link", {}, {"output": [LAYERIZE_BG]}, links={})
+    layerize("answer · a string", {}, {"output": LAYERIZE_BG}, links={})
+    layerize("answer · JSON link fails", {}, pair, links={LAYERIZE_JSON: {"raise": "Connection reset by peer"}})
+    # Python keeps a 404's body text (aiohttp's r.text() reads any status); the runner's error JSON instead (documented).
+    layerize("answer · JSON link 404", {}, pair, links={LAYERIZE_JSON: {"status": 404, "text": "Not Found"}})
+    layerize("answer · empty JSON body", {}, pair, links={LAYERIZE_JSON: ""})
+    layerize("answer · no output", {}, {"output": None}, links={})
+    layerize("answer · only the JSON link", {}, {"output": [LAYERIZE_JSON]}, links={})
+
+    # ── Layerize an image (Seedream): every image_size and a bad one; answers of 2 and 17 layers and odd layers.
+    def layer_files(layers: list, flat: bool = True) -> dict:
+        out = {SEEDREAM_FLAT: rgba(40)} if flat else {}
+        for i, layer in enumerate(layers):
+            url = (layer.get("image") or {}).get("url") if isinstance(layer, dict) and isinstance(layer.get("image"), dict) else None
+            if isinstance(url, str):
+                out[url] = rgba(41 + i)
+        return out
+
+    def seedream(name, widgets, answer, files=None):
+        w = {"prompt": "", "image_size": "auto", **widgets}
+        body = {"__body__": json.dumps(answer)} if not isinstance(answer, str) else {"__body__": answer}
+        parsed = json.loads(body["__body__"])
+        cases.append(paid_case(f"seedream · {name}", nr.SeedreamLayerizeNode, w, [body], pictures=["image"],
+                               files=files if files is not None else layer_files(parsed.get("layers") or [], bool(parsed.get("images")))))
+
+    two = _seedream_answer([_seedream_layer(0), _seedream_layer(1)])
+    for size in ("auto", "auto_1K", "auto_1.5K", "auto_2K", "8K"):
+        seedream(f"image_size {size}", {"image_size": size}, two)
+    seedream("prompt", {"prompt": "  keep the logo apart  "}, two)
+    seedream("17 layers", {}, _seedream_answer([_seedream_layer(i) for i in range(17)]))
+    seedream("a layer without bounding_box", {}, _seedream_answer([_seedream_layer(0), _seedream_layer(1, bounding_box=None), _seedream_layer(2)]))
+    seedream("a non-dict layer", {}, _seedream_answer([_seedream_layer(0), "not a layer", 7, _seedream_layer(1)]))
+    seedream("no images (the input is the preview)", {}, _seedream_answer([_seedream_layer(0), _seedream_layer(1)], images=[]))
+    # Numbers as fal might write them: a float box, a float z_index, whole floats; non-ASCII names; a layer with no url.
+    odd = ('{"images": [{"url": "' + SEEDREAM_FLAT + '", "width": 64.0, "height": 48}], "layers": ['
+           '{"image": {"url": "https://r.test/seedream/layer_0.png", "width": 64, "height": 48}, "z_index": 0}, '
+           '{"image": {"url": "https://r.test/seedream/layer_1.png"}, "z_index": 1.0, '
+           '"bounding_box": {"absolute": [1.5, 2.0, 30, 1e1]}, "name": "Café — 猫", "description": null}, '
+           '{"image": {"width": 3}, "z_index": 2}, '
+           '{"image": {"url": "https://r.test/seedream/layer_3.png"}, "z_index": "3", "bounding_box": {"absolute": [1, 2, 3]}, '
+           '"name": 5, "description": "😀 emoji"}]}')
+    seedream("odd numbers and names", {}, odd, files={SEEDREAM_FLAT: rgba(40), "https://r.test/seedream/layer_0.png": rgba(41),
+                                                         "https://r.test/seedream/layer_1.png": rgba(42), "https://r.test/seedream/layer_3.png": rgba(44)})
+    # The base layer has no width: the size comes from images[0].
+    seedream("base without a width", {}, _seedream_answer([_seedream_layer(0, image={"url": "https://r.test/seedream/layer_0.png"}), _seedream_layer(1)]))
+    seedream("no layers", {}, {"images": [{"url": SEEDREAM_FLAT, "width": 64, "height": 48}], "layers": None})
+
+    # ── Expand / outpaint: every direction (Flux Fill) and ratio (Bria Expand), seeds, prompts, an RGBA answer.
+    out = "https://r.test/outpaint.png"
+
+    def outpaint(name, widgets, answer=None, fill=None):
+        w = {"model": "Flux Fill", "prompt": "", "direction": "Zoom out 1.5x", "aspect_ratio": "16:9", "seed": 0, **widgets}
+        cases.append(paid_case(f"outpaint · {name}", nr.OutpaintImageNode, w, [answer or {"output": [out]}], pictures=["image"],
+                               files={out: fill or _b64(png_bytes(8, 6, 50))}))
+
+    for direction in ("Zoom out 1.5x", "Zoom out 2x", "Make square", "Left outpaint", "Right outpaint", "Top outpaint", "Bottom outpaint"):
+        outpaint(f"Flux Fill {direction}", {"direction": direction})
+    for ratio in ("1:1", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4", "9:16", "16:9"):
+        outpaint(f"Bria Expand {ratio}", {"model": "Bria Expand", "aspect_ratio": ratio})
+    for model in ("Flux Fill", "Bria Expand"):
+        for seed in (0, 42):
+            outpaint(f"{model} seed {seed}", {"model": model, "seed": seed})
+        outpaint(f"{model} prompt spaced", {"model": model, "prompt": "  a forest clearing, soft daylight \n"})
+        outpaint(f"{model} prompt spaces only", {"model": model, "prompt": "   "})
+        outpaint(f"{model} RGBA answer", {"model": model}, fill=rgba(51))
+    outpaint("Flux Fill answer a string", {}, {"output": out})
+    outpaint("Bria Expand seed 2^32-1", {"model": "Bria Expand", "seed": 2 ** 32 - 1})
+    return {"cases": cases}
+
+
 GROUPS = {
     "machinery": machinery_group,
     "llm": llm_group,
     "describe": describe_group,
     "repair": repair_group,
+    "layers": layers_group,
 }
 
 

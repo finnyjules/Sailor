@@ -710,9 +710,36 @@ export function createEngine(deps: EngineDeps) {
     call.provider = providerOf(call.request!)
     const urls = c.media === 'value' ? [] : clientFor(call.provider).outputUrls(result, c.media)
     call.answer = { result, raw: rawTextOf(result), urls }
+    // A call priced by what it made (R3.6): charged that, never above its hold.
+    if (c.usdOf) call.usd = answeredUsd(c, call.answer, stageKey, nodeId)
     call.status = 'done'
     await persist(run)
     return call.answer
+  }
+
+  /**
+   * A pipeline call's price basis from its answer (PipelineCall.usdOf, R3.6):
+   * only a finite figure of zero or more is believed, and never above the
+   * call's hold (`c.usd`); anything else charges the hold, reported.
+   */
+  function answeredUsd(c: PipelineCall, answer: NonNullable<CallRecord['answer']>, stageKey: string, nodeId: string): number {
+    let usd: unknown
+    try { usd = c.usdOf!(answer.result, answer.raw) }
+    catch (e) { usd = e instanceof Error ? e.message : String(e) }
+    if (usd == null) return c.usd
+    if (typeof usd !== 'number' || !Number.isFinite(usd) || usd < 0) {
+      deps.reportError(new Error(`This step’s answer gave a price Sailor can’t read (${String(usd)}); charged the hold`), {
+        site: 'runner.charge.unreadable', stageKey, node: nodeId, call: c.key, charge: String(usd), hold: c.usd,
+      })
+      return c.usd
+    }
+    if (usd > c.usd) {
+      deps.reportError(new Error(`A price of $${usd} is above this call’s hold of $${c.usd}; charged the hold`), {
+        site: 'runner.charge.above-hold', stageKey, node: nodeId, call: c.key, charge: usd, hold: c.usd,
+      })
+      return c.usd
+    }
+    return usd
   }
 
   /**
@@ -1186,6 +1213,9 @@ export function createEngine(deps: EngineDeps) {
             await deps.metering.addOutput(run.userId, stageKey, f)
             assets.push(f)
           }
+          // Saved into the input folder (R3.6, Layerize an image's layers): recorded
+          // as this run's, so the user owns it (inputs.ts), but not an asset.
+          if (folder === 'input') await deps.metering.addOutput(run.userId, stageKey, f)
           return f
         },
         savePreview: (bytes, o) => deps.results.saveLivePreview(bytes, { nodeId: o.nodeId ?? id, userId: run.userId }),
@@ -1249,7 +1279,9 @@ export function createEngine(deps: EngineDeps) {
                 return got
               }
               catch (e) {
-                if (!nodeSignal.aborted) await lostDownload(run, rec, url, e, stageKey, id)
+                // A file the node goes on without (R3.6, Layerize's layer JSON) leaves its call delivered.
+                if (!nodeSignal.aborted && o?.optional) deps.reportError(e, { site: 'runner.download.optional', stageKey, node: id, url })
+                else if (!nodeSignal.aborted) await lostDownload(run, rec, url, e, stageKey, id)
                 throw e
               }
             },
@@ -1268,7 +1300,10 @@ export function createEngine(deps: EngineDeps) {
         if (signal.aborted) throw new RunStopped()
         for (const v of Object.values(made.values)) checkValue(v)
         rec.values = made.values
-        rec.outputs = [...filesOfValues(made.values), ...assets]
+        // An asset a value names too (R3.6: a layerizer's picture) is listed once.
+        const named = filesOfValues(made.values)
+        const same = (a: OutputFile, b: OutputFile) => a.type === b.type && a.subfolder === b.subfolder && a.filename === b.filename
+        rec.outputs = [...named, ...assets.filter(a => !named.some(f => same(f, a)))]
         rec.status = 'done'
         rec.endedAt = deps.now()
         await persist(run).catch(e => deps.reportError(e, { site: 'runner.node.save', stageKey, node: id }))

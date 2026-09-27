@@ -124,6 +124,7 @@ import { planPainter } from './effects/painter'
 import { planLlm } from './generators/llm'
 import { planDescribe } from './generators/describe'
 import { planRepair } from './generators/repair'
+import { planLayers } from './generators/layers'
 import type { KeptExt } from './keptBytes'
 import type { AnswerKind } from './answerDownload'
 import { filesOf } from './values'
@@ -150,9 +151,12 @@ export interface DeriveIO {
   /**
    * Saves a result into the output folder as an asset of this run (counted as
    * the run's output), under `subfolder` when given; with `folder: 'temp'`
-   * (Preview image) into temp instead, not an asset. `counter`: ResultStore.save's.
+   * (Preview image) into temp instead, not an asset; with `folder: 'input'`
+   * (R3.6, Layerize an image's layers) into the input folder, the user's own
+   * subfolder in hosted, recorded as this run's (so the user owns it), not
+   * an asset. `counter`: ResultStore.save's.
    */
-  saveAsset(bytes: Uint8Array, o: { prefix: string; ext: string; subfolder?: string; folder?: 'output' | 'temp'; counter?: { prefix: string; offset: number } }): Promise<OutputFile>
+  saveAsset(bytes: Uint8Array, o: { prefix: string; ext: string; subfolder?: string; folder?: 'output' | 'temp' | 'input'; counter?: { prefix: string; offset: number } }): Promise<OutputFile>
   /** Saves a live preview into temp (as Python's save_live_preview(unique=True)). */
   savePreview(bytes: Uint8Array, o: { nodeId?: string }): Promise<OutputFile>
   /** Saves a picture to show in temp under its own name, overwriting (ResultStore.savePreviewAs). */
@@ -184,6 +188,13 @@ export interface PipelineCall {
   backup?: ProviderBackup
   /** This call's price basis in dollars (the price module's figure for it). */
   usd: number
+  /**
+   * A call priced by what it makes (R3.6, Layerize an image: the pictures
+   * that came back): its price basis from its answer, by the same card. The
+   * call is charged that, never above `usd` (its hold); a figure that isn't
+   * a finite number ≥ 0, or null, charges `usd`.
+   */
+  usdOf?(result: unknown, raw: string | null): number | null
 }
 
 /** What a pipeline may do: a derive plan's reads and saves, plus calls, downloads and hand-offs. */
@@ -197,9 +208,11 @@ export interface PipelineIO extends DeriveIO {
    * Downloads an answer's file under the safe-fetch policy (answerDownload.ts),
    * capped at `maxBytes`, never above its kind's cap (default 'image': 512 MiB;
    * a video 2 GiB); a sound or a 3D file is checked by its header. A file that
-   * can't be downloaded or kept makes its call undelivered (not charged).
+   * can't be downloaded or kept makes its call undelivered (not charged),
+   * unless it is `optional` (R3.6, Layerize's layer JSON: the node goes on
+   * without it, so its call was delivered).
    */
-  download(url: string, o?: { maxBytes?: number; kind?: AnswerKind }): Promise<{ bytes: Uint8Array; contentType: string | null }>
+  download(url: string, o?: { maxBytes?: number; kind?: AnswerKind; optional?: true }): Promise<{ bytes: Uint8Array; contentType: string | null }>
   /** Hands off bytes the node made itself (a mask, an RGB copy): kept by sha256, then uploaded. */
   handOff(bytes: Uint8Array, name: string): Promise<string>
   toUrl(file: OutputFile): Promise<string>
@@ -1061,6 +1074,11 @@ async function planNodeRequest(ctx: PlanContext): Promise<NodePlan> {
     case 'RemoveBackgroundNode':
     case 'RemoveBackgroundRemoteNode':
       return planRepair(ctx)
+    // ── layers (step 3, R3.6): Separate text from image, Layerize an image, Expand / outpaint ──
+    case 'LayerizeGraphicNode':
+    case 'SeedreamLayerizeNode':
+    case 'OutpaintImageNode':
+      return planLayers(ctx)
     case 'Text': return staticDerive(ctx, textCardUi)
     case 'Moodboard': return staticDerive(ctx)
     case 'Model3D': return staticDerive(ctx, textCardUi)

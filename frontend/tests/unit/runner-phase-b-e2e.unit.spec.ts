@@ -590,6 +590,22 @@ const FLOWS: FamilyFlow[] = [
     endpoint: '851-labs/background-remover',
     body: { image: storageUrl('image') },
   },
+  // Separate text from image on Replicate's Ideogram Layerize (family layers, step 3 R3.6), no
+  // backup: the Python call as it is, a pipeline of one call (runner-paid-layers.unit.spec.ts has
+  // every class, Outpaint and Seedream among them).
+  {
+    family: 'layers',
+    label: 'LayerizeGraphicNode on Ideogram Layerize',
+    prompt: {
+      11: imageCard('image.png'),
+      1: { class_type: 'LayerizeGraphicNode', inputs: { model: 'Ideogram Layerize', prompt: '', seed: 0, image: ['11', 0] } },
+      2: outImage('1'),
+    },
+    files: ['image.png'],
+    provider: 'replicate',
+    endpoint: 'ideogram-ai/layerize',
+    body: { flat_graphic_image: storageUrl('image') },
+  },
   // Person swap (video) on fal's Pixverse Swap (family person-swap-video), no
   // backup (Replicate has no Pixverse Swap): the whole PersonSwapVideo node
   // runs only in the runner; there is no ComfyUI path at all (its Python
@@ -787,7 +803,9 @@ describe('B10 · one workflow per family, POST /api/runs to the last event', () 
 
       const run = (await k.store.get(runId))!
       expect(run.status).toBe('done')
-      expect(run.takes[0]!.nodes['1']!.request!.provider).toBe(f.provider)
+      // A pipeline (R3.6's Layerize) keeps its one call's request on the call.
+      const node = run.takes[0]!.nodes['1']!
+      expect((node.request ?? node.calls?.[0]?.request)!.provider).toBe(f.provider)
       expect(k.records.write).toHaveBeenCalledTimes(1)
     }
     finally { await events.close() }

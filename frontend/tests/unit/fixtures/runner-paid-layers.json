@@ -1,0 +1,3990 @@
+{
+ "cases": [
+  {
+   "answers": [
+    {
+     "output": [
+      "https://r.test/layerize/bg.png",
+      "https://r.test/layerize/layers.json"
+     ]
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "ideogram-ai/layerize",
+     "payload": {
+      "flat_graphic_image": "IMG:image"
+     },
+     "payload_json": "{\"flat_graphic_image\": \"IMG:image\"}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "LayerizeGraphicNode",
+   "files": {
+    "https://r.test/layerize/bg.png": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAYAAAD+Bd/7AAAA0UlEQVR4nAHGADn/AFTW1pD1bvNdeAEHvdsjSnZ3Fd/Q4hGo/ju8C08tPwroAv7Z92hY8SCTACVerUkbqVDvmWsBs6k/x2c8ujng8EcVAQH7I3GiPjnmD3FVRcuKpYXcp2kwuaARAvU2K213zFhjAt/V1Kzw4Sg9XyzOu0zvVyn0GlowNXo+GbSdwRp6d0okAq13Dqat8gMSbgEEeH0hm+Z+O0aLnVMW0NXy38zSCNMOBM8XvKTXEUNfrUnHivhhHeWyRq+SGjMOgBWk+rtWqvdgA4hc5UtBzhkAAAAASUVORK5CYII="
+   },
+   "gets": [
+    {
+     "status": 200,
+     "url": "https://r.test/layerize/bg.png"
+    },
+    {
+     "status": 200,
+     "url": "https://r.test/layerize/layers.json"
+    }
+   ],
+   "links": {
+    "https://r.test/layerize/layers.json": "{\"width\": 1024, \"height\": 768, \"layers\": [{\"type\": \"text\", \"text\": \"Caf\u00e9 \u2014 SALE\", \"font_size\": 48.0, \"x\": 1e2, \"color\": \"#fff\"}]}"
+   },
+   "name": "layerize \u00b7 prompt blank",
+   "output": [
+    {
+     "image": "https://r.test/layerize/bg.png"
+    },
+    "{\"width\": 1024, \"height\": 768, \"layers\": [{\"type\": \"text\", \"text\": \"Caf\u00e9 \u2014 SALE\", \"font_size\": 48.0, \"x\": 1e2, \"color\": \"#fff\"}]}"
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": {
+    "animated": [
+     false
+    ],
+    "images": [
+     {
+      "image": {
+       "image": "https://r.test/layerize/bg.png"
+      },
+      "prefix": "layerize"
+     }
+    ],
+    "text": [
+     "{\"width\": 1024, \"height\": 768, \"layers\": [{\"type\": \"text\", \"text\": \"Caf\u00e9 \u2014 SALE\", \"font_size\": 48.0, \"x\": 1e2, \"color\": \"#fff\"}]}"
+    ]
+   },
+   "widgets": {
+    "model": "Ideogram Layerize",
+    "prompt": "",
+    "seed": 0
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": [
+      "https://r.test/layerize/bg.png",
+      "https://r.test/layerize/layers.json"
+     ]
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "ideogram-ai/layerize",
+     "payload": {
+      "flat_graphic_image": "IMG:image"
+     },
+     "payload_json": "{\"flat_graphic_image\": \"IMG:image\"}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "LayerizeGraphicNode",
+   "files": {
+    "https://r.test/layerize/bg.png": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAYAAAD+Bd/7AAAA0UlEQVR4nAHGADn/AFTW1pD1bvNdeAEHvdsjSnZ3Fd/Q4hGo/ju8C08tPwroAv7Z92hY8SCTACVerUkbqVDvmWsBs6k/x2c8ujng8EcVAQH7I3GiPjnmD3FVRcuKpYXcp2kwuaARAvU2K213zFhjAt/V1Kzw4Sg9XyzOu0zvVyn0GlowNXo+GbSdwRp6d0okAq13Dqat8gMSbgEEeH0hm+Z+O0aLnVMW0NXy38zSCNMOBM8XvKTXEUNfrUnHivhhHeWyRq+SGjMOgBWk+rtWqvdgA4hc5UtBzhkAAAAASUVORK5CYII="
+   },
+   "gets": [
+    {
+     "status": 200,
+     "url": "https://r.test/layerize/bg.png"
+    },
+    {
+     "status": 200,
+     "url": "https://r.test/layerize/layers.json"
+    }
+   ],
+   "links": {
+    "https://r.test/layerize/layers.json": "{\"width\": 1024, \"height\": 768, \"layers\": [{\"type\": \"text\", \"text\": \"Caf\u00e9 \u2014 SALE\", \"font_size\": 48.0, \"x\": 1e2, \"color\": \"#fff\"}]}"
+   },
+   "name": "layerize \u00b7 prompt spaces only",
+   "output": [
+    {
+     "image": "https://r.test/layerize/bg.png"
+    },
+    "{\"width\": 1024, \"height\": 768, \"layers\": [{\"type\": \"text\", \"text\": \"Caf\u00e9 \u2014 SALE\", \"font_size\": 48.0, \"x\": 1e2, \"color\": \"#fff\"}]}"
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": {
+    "animated": [
+     false
+    ],
+    "images": [
+     {
+      "image": {
+       "image": "https://r.test/layerize/bg.png"
+      },
+      "prefix": "layerize"
+     }
+    ],
+    "text": [
+     "{\"width\": 1024, \"height\": 768, \"layers\": [{\"type\": \"text\", \"text\": \"Caf\u00e9 \u2014 SALE\", \"font_size\": 48.0, \"x\": 1e2, \"color\": \"#fff\"}]}"
+    ]
+   },
+   "widgets": {
+    "model": "Ideogram Layerize",
+    "prompt": "   ",
+    "seed": 0
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": [
+      "https://r.test/layerize/bg.png",
+      "https://r.test/layerize/layers.json"
+     ]
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "ideogram-ai/layerize",
+     "payload": {
+      "flat_graphic_image": "IMG:image",
+      "prompt": "a summer sale poster"
+     },
+     "payload_json": "{\"flat_graphic_image\": \"IMG:image\", \"prompt\": \"a summer sale poster\"}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "LayerizeGraphicNode",
+   "files": {
+    "https://r.test/layerize/bg.png": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAYAAAD+Bd/7AAAA0UlEQVR4nAHGADn/AFTW1pD1bvNdeAEHvdsjSnZ3Fd/Q4hGo/ju8C08tPwroAv7Z92hY8SCTACVerUkbqVDvmWsBs6k/x2c8ujng8EcVAQH7I3GiPjnmD3FVRcuKpYXcp2kwuaARAvU2K213zFhjAt/V1Kzw4Sg9XyzOu0zvVyn0GlowNXo+GbSdwRp6d0okAq13Dqat8gMSbgEEeH0hm+Z+O0aLnVMW0NXy38zSCNMOBM8XvKTXEUNfrUnHivhhHeWyRq+SGjMOgBWk+rtWqvdgA4hc5UtBzhkAAAAASUVORK5CYII="
+   },
+   "gets": [
+    {
+     "status": 200,
+     "url": "https://r.test/layerize/bg.png"
+    },
+    {
+     "status": 200,
+     "url": "https://r.test/layerize/layers.json"
+    }
+   ],
+   "links": {
+    "https://r.test/layerize/layers.json": "{\"width\": 1024, \"height\": 768, \"layers\": [{\"type\": \"text\", \"text\": \"Caf\u00e9 \u2014 SALE\", \"font_size\": 48.0, \"x\": 1e2, \"color\": \"#fff\"}]}"
+   },
+   "name": "layerize \u00b7 prompt spaced",
+   "output": [
+    {
+     "image": "https://r.test/layerize/bg.png"
+    },
+    "{\"width\": 1024, \"height\": 768, \"layers\": [{\"type\": \"text\", \"text\": \"Caf\u00e9 \u2014 SALE\", \"font_size\": 48.0, \"x\": 1e2, \"color\": \"#fff\"}]}"
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": {
+    "animated": [
+     false
+    ],
+    "images": [
+     {
+      "image": {
+       "image": "https://r.test/layerize/bg.png"
+      },
+      "prefix": "layerize"
+     }
+    ],
+    "text": [
+     "{\"width\": 1024, \"height\": 768, \"layers\": [{\"type\": \"text\", \"text\": \"Caf\u00e9 \u2014 SALE\", \"font_size\": 48.0, \"x\": 1e2, \"color\": \"#fff\"}]}"
+    ]
+   },
+   "widgets": {
+    "model": "Ideogram Layerize",
+    "prompt": "  a summer sale poster \n",
+    "seed": 0
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": [
+      "https://r.test/layerize/bg.png",
+      "https://r.test/layerize/layers.json"
+     ]
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "ideogram-ai/layerize",
+     "payload": {
+      "flat_graphic_image": "IMG:image",
+      "prompt": "affiche \u00e9t\u00e9 \u2014 \u732b"
+     },
+     "payload_json": "{\"flat_graphic_image\": \"IMG:image\", \"prompt\": \"affiche \\u00e9t\\u00e9 \\u2014 \\u732b\"}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "LayerizeGraphicNode",
+   "files": {
+    "https://r.test/layerize/bg.png": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAYAAAD+Bd/7AAAA0UlEQVR4nAHGADn/AFTW1pD1bvNdeAEHvdsjSnZ3Fd/Q4hGo/ju8C08tPwroAv7Z92hY8SCTACVerUkbqVDvmWsBs6k/x2c8ujng8EcVAQH7I3GiPjnmD3FVRcuKpYXcp2kwuaARAvU2K213zFhjAt/V1Kzw4Sg9XyzOu0zvVyn0GlowNXo+GbSdwRp6d0okAq13Dqat8gMSbgEEeH0hm+Z+O0aLnVMW0NXy38zSCNMOBM8XvKTXEUNfrUnHivhhHeWyRq+SGjMOgBWk+rtWqvdgA4hc5UtBzhkAAAAASUVORK5CYII="
+   },
+   "gets": [
+    {
+     "status": 200,
+     "url": "https://r.test/layerize/bg.png"
+    },
+    {
+     "status": 200,
+     "url": "https://r.test/layerize/layers.json"
+    }
+   ],
+   "links": {
+    "https://r.test/layerize/layers.json": "{\"width\": 1024, \"height\": 768, \"layers\": [{\"type\": \"text\", \"text\": \"Caf\u00e9 \u2014 SALE\", \"font_size\": 48.0, \"x\": 1e2, \"color\": \"#fff\"}]}"
+   },
+   "name": "layerize \u00b7 prompt non-ASCII",
+   "output": [
+    {
+     "image": "https://r.test/layerize/bg.png"
+    },
+    "{\"width\": 1024, \"height\": 768, \"layers\": [{\"type\": \"text\", \"text\": \"Caf\u00e9 \u2014 SALE\", \"font_size\": 48.0, \"x\": 1e2, \"color\": \"#fff\"}]}"
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": {
+    "animated": [
+     false
+    ],
+    "images": [
+     {
+      "image": {
+       "image": "https://r.test/layerize/bg.png"
+      },
+      "prefix": "layerize"
+     }
+    ],
+    "text": [
+     "{\"width\": 1024, \"height\": 768, \"layers\": [{\"type\": \"text\", \"text\": \"Caf\u00e9 \u2014 SALE\", \"font_size\": 48.0, \"x\": 1e2, \"color\": \"#fff\"}]}"
+    ]
+   },
+   "widgets": {
+    "model": "Ideogram Layerize",
+    "prompt": "affiche \u00e9t\u00e9 \u2014 \u732b",
+    "seed": 0
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": [
+      "https://r.test/layerize/bg.png",
+      "https://r.test/layerize/layers.json"
+     ]
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "ideogram-ai/layerize",
+     "payload": {
+      "flat_graphic_image": "IMG:image"
+     },
+     "payload_json": "{\"flat_graphic_image\": \"IMG:image\"}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "LayerizeGraphicNode",
+   "files": {
+    "https://r.test/layerize/bg.png": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAYAAAD+Bd/7AAAA0UlEQVR4nAHGADn/AFTW1pD1bvNdeAEHvdsjSnZ3Fd/Q4hGo/ju8C08tPwroAv7Z92hY8SCTACVerUkbqVDvmWsBs6k/x2c8ujng8EcVAQH7I3GiPjnmD3FVRcuKpYXcp2kwuaARAvU2K213zFhjAt/V1Kzw4Sg9XyzOu0zvVyn0GlowNXo+GbSdwRp6d0okAq13Dqat8gMSbgEEeH0hm+Z+O0aLnVMW0NXy38zSCNMOBM8XvKTXEUNfrUnHivhhHeWyRq+SGjMOgBWk+rtWqvdgA4hc5UtBzhkAAAAASUVORK5CYII="
+   },
+   "gets": [
+    {
+     "status": 200,
+     "url": "https://r.test/layerize/bg.png"
+    },
+    {
+     "status": 200,
+     "url": "https://r.test/layerize/layers.json"
+    }
+   ],
+   "links": {
+    "https://r.test/layerize/layers.json": "{\"width\": 1024, \"height\": 768, \"layers\": [{\"type\": \"text\", \"text\": \"Caf\u00e9 \u2014 SALE\", \"font_size\": 48.0, \"x\": 1e2, \"color\": \"#fff\"}]}"
+   },
+   "name": "layerize \u00b7 seed 0",
+   "output": [
+    {
+     "image": "https://r.test/layerize/bg.png"
+    },
+    "{\"width\": 1024, \"height\": 768, \"layers\": [{\"type\": \"text\", \"text\": \"Caf\u00e9 \u2014 SALE\", \"font_size\": 48.0, \"x\": 1e2, \"color\": \"#fff\"}]}"
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": {
+    "animated": [
+     false
+    ],
+    "images": [
+     {
+      "image": {
+       "image": "https://r.test/layerize/bg.png"
+      },
+      "prefix": "layerize"
+     }
+    ],
+    "text": [
+     "{\"width\": 1024, \"height\": 768, \"layers\": [{\"type\": \"text\", \"text\": \"Caf\u00e9 \u2014 SALE\", \"font_size\": 48.0, \"x\": 1e2, \"color\": \"#fff\"}]}"
+    ]
+   },
+   "widgets": {
+    "model": "Ideogram Layerize",
+    "prompt": "",
+    "seed": 0
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": [
+      "https://r.test/layerize/bg.png",
+      "https://r.test/layerize/layers.json"
+     ]
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "ideogram-ai/layerize",
+     "payload": {
+      "flat_graphic_image": "IMG:image",
+      "seed": 1
+     },
+     "payload_json": "{\"flat_graphic_image\": \"IMG:image\", \"seed\": 1}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "LayerizeGraphicNode",
+   "files": {
+    "https://r.test/layerize/bg.png": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAYAAAD+Bd/7AAAA0UlEQVR4nAHGADn/AFTW1pD1bvNdeAEHvdsjSnZ3Fd/Q4hGo/ju8C08tPwroAv7Z92hY8SCTACVerUkbqVDvmWsBs6k/x2c8ujng8EcVAQH7I3GiPjnmD3FVRcuKpYXcp2kwuaARAvU2K213zFhjAt/V1Kzw4Sg9XyzOu0zvVyn0GlowNXo+GbSdwRp6d0okAq13Dqat8gMSbgEEeH0hm+Z+O0aLnVMW0NXy38zSCNMOBM8XvKTXEUNfrUnHivhhHeWyRq+SGjMOgBWk+rtWqvdgA4hc5UtBzhkAAAAASUVORK5CYII="
+   },
+   "gets": [
+    {
+     "status": 200,
+     "url": "https://r.test/layerize/bg.png"
+    },
+    {
+     "status": 200,
+     "url": "https://r.test/layerize/layers.json"
+    }
+   ],
+   "links": {
+    "https://r.test/layerize/layers.json": "{\"width\": 1024, \"height\": 768, \"layers\": [{\"type\": \"text\", \"text\": \"Caf\u00e9 \u2014 SALE\", \"font_size\": 48.0, \"x\": 1e2, \"color\": \"#fff\"}]}"
+   },
+   "name": "layerize \u00b7 seed 1",
+   "output": [
+    {
+     "image": "https://r.test/layerize/bg.png"
+    },
+    "{\"width\": 1024, \"height\": 768, \"layers\": [{\"type\": \"text\", \"text\": \"Caf\u00e9 \u2014 SALE\", \"font_size\": 48.0, \"x\": 1e2, \"color\": \"#fff\"}]}"
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": {
+    "animated": [
+     false
+    ],
+    "images": [
+     {
+      "image": {
+       "image": "https://r.test/layerize/bg.png"
+      },
+      "prefix": "layerize"
+     }
+    ],
+    "text": [
+     "{\"width\": 1024, \"height\": 768, \"layers\": [{\"type\": \"text\", \"text\": \"Caf\u00e9 \u2014 SALE\", \"font_size\": 48.0, \"x\": 1e2, \"color\": \"#fff\"}]}"
+    ]
+   },
+   "widgets": {
+    "model": "Ideogram Layerize",
+    "prompt": "",
+    "seed": 1
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": [
+      "https://r.test/layerize/bg.png",
+      "https://r.test/layerize/layers.json"
+     ]
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "ideogram-ai/layerize",
+     "payload": {
+      "flat_graphic_image": "IMG:image",
+      "seed": 2147483647
+     },
+     "payload_json": "{\"flat_graphic_image\": \"IMG:image\", \"seed\": 2147483647}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "LayerizeGraphicNode",
+   "files": {
+    "https://r.test/layerize/bg.png": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAYAAAD+Bd/7AAAA0UlEQVR4nAHGADn/AFTW1pD1bvNdeAEHvdsjSnZ3Fd/Q4hGo/ju8C08tPwroAv7Z92hY8SCTACVerUkbqVDvmWsBs6k/x2c8ujng8EcVAQH7I3GiPjnmD3FVRcuKpYXcp2kwuaARAvU2K213zFhjAt/V1Kzw4Sg9XyzOu0zvVyn0GlowNXo+GbSdwRp6d0okAq13Dqat8gMSbgEEeH0hm+Z+O0aLnVMW0NXy38zSCNMOBM8XvKTXEUNfrUnHivhhHeWyRq+SGjMOgBWk+rtWqvdgA4hc5UtBzhkAAAAASUVORK5CYII="
+   },
+   "gets": [
+    {
+     "status": 200,
+     "url": "https://r.test/layerize/bg.png"
+    },
+    {
+     "status": 200,
+     "url": "https://r.test/layerize/layers.json"
+    }
+   ],
+   "links": {
+    "https://r.test/layerize/layers.json": "{\"width\": 1024, \"height\": 768, \"layers\": [{\"type\": \"text\", \"text\": \"Caf\u00e9 \u2014 SALE\", \"font_size\": 48.0, \"x\": 1e2, \"color\": \"#fff\"}]}"
+   },
+   "name": "layerize \u00b7 seed 2147483647",
+   "output": [
+    {
+     "image": "https://r.test/layerize/bg.png"
+    },
+    "{\"width\": 1024, \"height\": 768, \"layers\": [{\"type\": \"text\", \"text\": \"Caf\u00e9 \u2014 SALE\", \"font_size\": 48.0, \"x\": 1e2, \"color\": \"#fff\"}]}"
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": {
+    "animated": [
+     false
+    ],
+    "images": [
+     {
+      "image": {
+       "image": "https://r.test/layerize/bg.png"
+      },
+      "prefix": "layerize"
+     }
+    ],
+    "text": [
+     "{\"width\": 1024, \"height\": 768, \"layers\": [{\"type\": \"text\", \"text\": \"Caf\u00e9 \u2014 SALE\", \"font_size\": 48.0, \"x\": 1e2, \"color\": \"#fff\"}]}"
+    ]
+   },
+   "widgets": {
+    "model": "Ideogram Layerize",
+    "prompt": "",
+    "seed": 2147483647
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": [
+      "https://r.test/layerize/bg.png",
+      "https://r.test/layerize/layers.json"
+     ]
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "ideogram-ai/layerize",
+     "payload": {
+      "flat_graphic_image": "IMG:image"
+     },
+     "payload_json": "{\"flat_graphic_image\": \"IMG:image\"}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "LayerizeGraphicNode",
+   "files": {
+    "https://r.test/layerize/bg.png": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAYAAAD+Bd/7AAAA0UlEQVR4nAHGADn/AFTW1pD1bvNdeAEHvdsjSnZ3Fd/Q4hGo/ju8C08tPwroAv7Z92hY8SCTACVerUkbqVDvmWsBs6k/x2c8ujng8EcVAQH7I3GiPjnmD3FVRcuKpYXcp2kwuaARAvU2K213zFhjAt/V1Kzw4Sg9XyzOu0zvVyn0GlowNXo+GbSdwRp6d0okAq13Dqat8gMSbgEEeH0hm+Z+O0aLnVMW0NXy38zSCNMOBM8XvKTXEUNfrUnHivhhHeWyRq+SGjMOgBWk+rtWqvdgA4hc5UtBzhkAAAAASUVORK5CYII="
+   },
+   "gets": [
+    {
+     "status": 200,
+     "url": "https://r.test/layerize/bg.png"
+    },
+    {
+     "status": 200,
+     "url": "https://r.test/layerize/layers.json"
+    }
+   ],
+   "links": {
+    "https://r.test/layerize/layers.json": "{\"width\": 1024, \"height\": 768, \"layers\": [{\"type\": \"text\", \"text\": \"Caf\u00e9 \u2014 SALE\", \"font_size\": 48.0, \"x\": 1e2, \"color\": \"#fff\"}]}"
+   },
+   "name": "layerize \u00b7 answer \u00b7 picture first",
+   "output": [
+    {
+     "image": "https://r.test/layerize/bg.png"
+    },
+    "{\"width\": 1024, \"height\": 768, \"layers\": [{\"type\": \"text\", \"text\": \"Caf\u00e9 \u2014 SALE\", \"font_size\": 48.0, \"x\": 1e2, \"color\": \"#fff\"}]}"
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": {
+    "animated": [
+     false
+    ],
+    "images": [
+     {
+      "image": {
+       "image": "https://r.test/layerize/bg.png"
+      },
+      "prefix": "layerize"
+     }
+    ],
+    "text": [
+     "{\"width\": 1024, \"height\": 768, \"layers\": [{\"type\": \"text\", \"text\": \"Caf\u00e9 \u2014 SALE\", \"font_size\": 48.0, \"x\": 1e2, \"color\": \"#fff\"}]}"
+    ]
+   },
+   "widgets": {
+    "model": "Ideogram Layerize",
+    "prompt": "",
+    "seed": 0
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": [
+      "https://r.test/layerize/layers.json",
+      "https://r.test/layerize/bg.png"
+     ]
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "ideogram-ai/layerize",
+     "payload": {
+      "flat_graphic_image": "IMG:image"
+     },
+     "payload_json": "{\"flat_graphic_image\": \"IMG:image\"}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "LayerizeGraphicNode",
+   "files": {
+    "https://r.test/layerize/bg.png": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAYAAAD+Bd/7AAAA0UlEQVR4nAHGADn/AFTW1pD1bvNdeAEHvdsjSnZ3Fd/Q4hGo/ju8C08tPwroAv7Z92hY8SCTACVerUkbqVDvmWsBs6k/x2c8ujng8EcVAQH7I3GiPjnmD3FVRcuKpYXcp2kwuaARAvU2K213zFhjAt/V1Kzw4Sg9XyzOu0zvVyn0GlowNXo+GbSdwRp6d0okAq13Dqat8gMSbgEEeH0hm+Z+O0aLnVMW0NXy38zSCNMOBM8XvKTXEUNfrUnHivhhHeWyRq+SGjMOgBWk+rtWqvdgA4hc5UtBzhkAAAAASUVORK5CYII="
+   },
+   "gets": [
+    {
+     "status": 200,
+     "url": "https://r.test/layerize/bg.png"
+    },
+    {
+     "status": 200,
+     "url": "https://r.test/layerize/layers.json"
+    }
+   ],
+   "links": {
+    "https://r.test/layerize/layers.json": "{\"width\": 1024, \"height\": 768, \"layers\": [{\"type\": \"text\", \"text\": \"Caf\u00e9 \u2014 SALE\", \"font_size\": 48.0, \"x\": 1e2, \"color\": \"#fff\"}]}"
+   },
+   "name": "layerize \u00b7 answer \u00b7 JSON first",
+   "output": [
+    {
+     "image": "https://r.test/layerize/bg.png"
+    },
+    "{\"width\": 1024, \"height\": 768, \"layers\": [{\"type\": \"text\", \"text\": \"Caf\u00e9 \u2014 SALE\", \"font_size\": 48.0, \"x\": 1e2, \"color\": \"#fff\"}]}"
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": {
+    "animated": [
+     false
+    ],
+    "images": [
+     {
+      "image": {
+       "image": "https://r.test/layerize/bg.png"
+      },
+      "prefix": "layerize"
+     }
+    ],
+    "text": [
+     "{\"width\": 1024, \"height\": 768, \"layers\": [{\"type\": \"text\", \"text\": \"Caf\u00e9 \u2014 SALE\", \"font_size\": 48.0, \"x\": 1e2, \"color\": \"#fff\"}]}"
+    ]
+   },
+   "widgets": {
+    "model": "Ideogram Layerize",
+    "prompt": "",
+    "seed": 0
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": [
+      "https://r.test/layerize/background",
+      "https://r.test/layerize/layers.json"
+     ]
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "ideogram-ai/layerize",
+     "payload": {
+      "flat_graphic_image": "IMG:image"
+     },
+     "payload_json": "{\"flat_graphic_image\": \"IMG:image\"}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "LayerizeGraphicNode",
+   "files": {
+    "https://r.test/layerize/background": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAYAAAD+Bd/7AAAA0UlEQVR4nAHGADn/AUd8DOQXwaREGExpe+VT/2csw79X1ZpIRk9LPyL0xDHBAV7dGa+y+WfiwfXeDO4ArvseDyGWBtwFr+tnMp3/5s1wAGNXD8CyW6i2YeMSIERnMxpj0j5L6xY9/0WR8vMhtTiEAtqyUPNuU4mhfaZI9eP6gSILsLvXcfVQMqvZ3L0bp9v1BIQHCrU5Feh/89NOHxInbdrtG/zTpEZy8/qlv1Iy2GTgAhs3TEeKQalgbDgPECf8bQFXWuI2Yq5Ami631lC9MkvLu21gxJYsJsAAAAAASUVORK5CYII="
+   },
+   "gets": [
+    {
+     "status": 200,
+     "url": "https://r.test/layerize/background"
+    },
+    {
+     "status": 200,
+     "url": "https://r.test/layerize/layers.json"
+    }
+   ],
+   "links": {
+    "https://r.test/layerize/layers.json": "{\"width\": 1024, \"height\": 768, \"layers\": [{\"type\": \"text\", \"text\": \"Caf\u00e9 \u2014 SALE\", \"font_size\": 48.0, \"x\": 1e2, \"color\": \"#fff\"}]}"
+   },
+   "name": "layerize \u00b7 answer \u00b7 no extension",
+   "output": [
+    {
+     "image": "https://r.test/layerize/background"
+    },
+    "{\"width\": 1024, \"height\": 768, \"layers\": [{\"type\": \"text\", \"text\": \"Caf\u00e9 \u2014 SALE\", \"font_size\": 48.0, \"x\": 1e2, \"color\": \"#fff\"}]}"
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": {
+    "animated": [
+     false
+    ],
+    "images": [
+     {
+      "image": {
+       "image": "https://r.test/layerize/background"
+      },
+      "prefix": "layerize"
+     }
+    ],
+    "text": [
+     "{\"width\": 1024, \"height\": 768, \"layers\": [{\"type\": \"text\", \"text\": \"Caf\u00e9 \u2014 SALE\", \"font_size\": 48.0, \"x\": 1e2, \"color\": \"#fff\"}]}"
+    ]
+   },
+   "widgets": {
+    "model": "Ideogram Layerize",
+    "prompt": "",
+    "seed": 0
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": [
+      "https://r.test/layerize/layers.json",
+      "https://r.test/layerize/BG.PNG?sig=1.json"
+     ]
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "ideogram-ai/layerize",
+     "payload": {
+      "flat_graphic_image": "IMG:image"
+     },
+     "payload_json": "{\"flat_graphic_image\": \"IMG:image\"}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "LayerizeGraphicNode",
+   "files": {
+    "https://r.test/layerize/BG.PNG?sig=1.json": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAYAAAD+Bd/7AAAA0UlEQVR4nAHGADn/AZQqCJ1EmK+lisYsxQ9gKS+6F8vUsbhGXzYFOwWnADgyASvyWve6YQNkwBHdz4122WNdzyQwBPOxsvGwTs54LXILADPEVeYRHNXJC1NzBnEd4y+xCMH7YhImh+5k65duLjRWAke93vFD6g7myQFgHQl69qLoEtA8qjWEVZHwPRXMSr2QBBGBeuq4Ruq5uwQZtRpApx0xAfr1Z4dU5YrKKOma58G0BAGspQUJKKIaeVfQl/lzMMll89G2F/OGVnsHkZiFvVHpTmxcFsfcMo8AAAAASUVORK5CYII="
+   },
+   "gets": [
+    {
+     "status": 200,
+     "url": "https://r.test/layerize/BG.PNG?sig=1.json"
+    },
+    {
+     "status": 200,
+     "url": "https://r.test/layerize/layers.json"
+    }
+   ],
+   "links": {
+    "https://r.test/layerize/layers.json": "{\"width\": 1024, \"height\": 768, \"layers\": [{\"type\": \"text\", \"text\": \"Caf\u00e9 \u2014 SALE\", \"font_size\": 48.0, \"x\": 1e2, \"color\": \"#fff\"}]}"
+   },
+   "name": "layerize \u00b7 answer \u00b7 upper-case extension and a query",
+   "output": [
+    {
+     "image": "https://r.test/layerize/BG.PNG?sig=1.json"
+    },
+    "{\"width\": 1024, \"height\": 768, \"layers\": [{\"type\": \"text\", \"text\": \"Caf\u00e9 \u2014 SALE\", \"font_size\": 48.0, \"x\": 1e2, \"color\": \"#fff\"}]}"
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": {
+    "animated": [
+     false
+    ],
+    "images": [
+     {
+      "image": {
+       "image": "https://r.test/layerize/BG.PNG?sig=1.json"
+      },
+      "prefix": "layerize"
+     }
+    ],
+    "text": [
+     "{\"width\": 1024, \"height\": 768, \"layers\": [{\"type\": \"text\", \"text\": \"Caf\u00e9 \u2014 SALE\", \"font_size\": 48.0, \"x\": 1e2, \"color\": \"#fff\"}]}"
+    ]
+   },
+   "widgets": {
+    "model": "Ideogram Layerize",
+    "prompt": "",
+    "seed": 0
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": [
+      "https://r.test/layerize/bg.png"
+     ]
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "ideogram-ai/layerize",
+     "payload": {
+      "flat_graphic_image": "IMG:image"
+     },
+     "payload_json": "{\"flat_graphic_image\": \"IMG:image\"}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "LayerizeGraphicNode",
+   "files": {
+    "https://r.test/layerize/bg.png": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAYAAAD+Bd/7AAAA0UlEQVR4nAHGADn/AFTW1pD1bvNdeAEHvdsjSnZ3Fd/Q4hGo/ju8C08tPwroAv7Z92hY8SCTACVerUkbqVDvmWsBs6k/x2c8ujng8EcVAQH7I3GiPjnmD3FVRcuKpYXcp2kwuaARAvU2K213zFhjAt/V1Kzw4Sg9XyzOu0zvVyn0GlowNXo+GbSdwRp6d0okAq13Dqat8gMSbgEEeH0hm+Z+O0aLnVMW0NXy38zSCNMOBM8XvKTXEUNfrUnHivhhHeWyRq+SGjMOgBWk+rtWqvdgA4hc5UtBzhkAAAAASUVORK5CYII="
+   },
+   "gets": [
+    {
+     "status": 200,
+     "url": "https://r.test/layerize/bg.png"
+    }
+   ],
+   "name": "layerize \u00b7 answer \u00b7 no JSON link",
+   "output": [
+    {
+     "image": "https://r.test/layerize/bg.png"
+    },
+    ""
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": {
+    "animated": [
+     false
+    ],
+    "images": [
+     {
+      "image": {
+       "image": "https://r.test/layerize/bg.png"
+      },
+      "prefix": "layerize"
+     }
+    ]
+   },
+   "widgets": {
+    "model": "Ideogram Layerize",
+    "prompt": "",
+    "seed": 0
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": "https://r.test/layerize/bg.png"
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "ideogram-ai/layerize",
+     "payload": {
+      "flat_graphic_image": "IMG:image"
+     },
+     "payload_json": "{\"flat_graphic_image\": \"IMG:image\"}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "LayerizeGraphicNode",
+   "files": {
+    "https://r.test/layerize/bg.png": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAYAAAD+Bd/7AAAA0UlEQVR4nAHGADn/AFTW1pD1bvNdeAEHvdsjSnZ3Fd/Q4hGo/ju8C08tPwroAv7Z92hY8SCTACVerUkbqVDvmWsBs6k/x2c8ujng8EcVAQH7I3GiPjnmD3FVRcuKpYXcp2kwuaARAvU2K213zFhjAt/V1Kzw4Sg9XyzOu0zvVyn0GlowNXo+GbSdwRp6d0okAq13Dqat8gMSbgEEeH0hm+Z+O0aLnVMW0NXy38zSCNMOBM8XvKTXEUNfrUnHivhhHeWyRq+SGjMOgBWk+rtWqvdgA4hc5UtBzhkAAAAASUVORK5CYII="
+   },
+   "gets": [
+    {
+     "status": 200,
+     "url": "https://r.test/layerize/bg.png"
+    }
+   ],
+   "name": "layerize \u00b7 answer \u00b7 a string",
+   "output": [
+    {
+     "image": "https://r.test/layerize/bg.png"
+    },
+    ""
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": {
+    "animated": [
+     false
+    ],
+    "images": [
+     {
+      "image": {
+       "image": "https://r.test/layerize/bg.png"
+      },
+      "prefix": "layerize"
+     }
+    ]
+   },
+   "widgets": {
+    "model": "Ideogram Layerize",
+    "prompt": "",
+    "seed": 0
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": [
+      "https://r.test/layerize/bg.png",
+      "https://r.test/layerize/layers.json"
+     ]
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "ideogram-ai/layerize",
+     "payload": {
+      "flat_graphic_image": "IMG:image"
+     },
+     "payload_json": "{\"flat_graphic_image\": \"IMG:image\"}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "LayerizeGraphicNode",
+   "files": {
+    "https://r.test/layerize/bg.png": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAYAAAD+Bd/7AAAA0UlEQVR4nAHGADn/AFTW1pD1bvNdeAEHvdsjSnZ3Fd/Q4hGo/ju8C08tPwroAv7Z92hY8SCTACVerUkbqVDvmWsBs6k/x2c8ujng8EcVAQH7I3GiPjnmD3FVRcuKpYXcp2kwuaARAvU2K213zFhjAt/V1Kzw4Sg9XyzOu0zvVyn0GlowNXo+GbSdwRp6d0okAq13Dqat8gMSbgEEeH0hm+Z+O0aLnVMW0NXy38zSCNMOBM8XvKTXEUNfrUnHivhhHeWyRq+SGjMOgBWk+rtWqvdgA4hc5UtBzhkAAAAASUVORK5CYII="
+   },
+   "gets": [
+    {
+     "status": 200,
+     "url": "https://r.test/layerize/bg.png"
+    },
+    {
+     "status": 0,
+     "url": "https://r.test/layerize/layers.json"
+    }
+   ],
+   "links": {
+    "https://r.test/layerize/layers.json": {
+     "raise": "Connection reset by peer"
+    }
+   },
+   "name": "layerize \u00b7 answer \u00b7 JSON link fails",
+   "output": [
+    {
+     "image": "https://r.test/layerize/bg.png"
+    },
+    "{\"error\": \"failed to fetch layer data: Connection reset by peer\"}"
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": {
+    "animated": [
+     false
+    ],
+    "images": [
+     {
+      "image": {
+       "image": "https://r.test/layerize/bg.png"
+      },
+      "prefix": "layerize"
+     }
+    ],
+    "text": [
+     "{\"error\": \"failed to fetch layer data: Connection reset by peer\"}"
+    ]
+   },
+   "widgets": {
+    "model": "Ideogram Layerize",
+    "prompt": "",
+    "seed": 0
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": [
+      "https://r.test/layerize/bg.png",
+      "https://r.test/layerize/layers.json"
+     ]
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "ideogram-ai/layerize",
+     "payload": {
+      "flat_graphic_image": "IMG:image"
+     },
+     "payload_json": "{\"flat_graphic_image\": \"IMG:image\"}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "LayerizeGraphicNode",
+   "files": {
+    "https://r.test/layerize/bg.png": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAYAAAD+Bd/7AAAA0UlEQVR4nAHGADn/AFTW1pD1bvNdeAEHvdsjSnZ3Fd/Q4hGo/ju8C08tPwroAv7Z92hY8SCTACVerUkbqVDvmWsBs6k/x2c8ujng8EcVAQH7I3GiPjnmD3FVRcuKpYXcp2kwuaARAvU2K213zFhjAt/V1Kzw4Sg9XyzOu0zvVyn0GlowNXo+GbSdwRp6d0okAq13Dqat8gMSbgEEeH0hm+Z+O0aLnVMW0NXy38zSCNMOBM8XvKTXEUNfrUnHivhhHeWyRq+SGjMOgBWk+rtWqvdgA4hc5UtBzhkAAAAASUVORK5CYII="
+   },
+   "gets": [
+    {
+     "status": 200,
+     "url": "https://r.test/layerize/bg.png"
+    },
+    {
+     "status": 404,
+     "url": "https://r.test/layerize/layers.json"
+    }
+   ],
+   "links": {
+    "https://r.test/layerize/layers.json": {
+     "status": 404,
+     "text": "Not Found"
+    }
+   },
+   "name": "layerize \u00b7 answer \u00b7 JSON link 404",
+   "output": [
+    {
+     "image": "https://r.test/layerize/bg.png"
+    },
+    "Not Found"
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": {
+    "animated": [
+     false
+    ],
+    "images": [
+     {
+      "image": {
+       "image": "https://r.test/layerize/bg.png"
+      },
+      "prefix": "layerize"
+     }
+    ],
+    "text": [
+     "Not Found"
+    ]
+   },
+   "widgets": {
+    "model": "Ideogram Layerize",
+    "prompt": "",
+    "seed": 0
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": [
+      "https://r.test/layerize/bg.png",
+      "https://r.test/layerize/layers.json"
+     ]
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "ideogram-ai/layerize",
+     "payload": {
+      "flat_graphic_image": "IMG:image"
+     },
+     "payload_json": "{\"flat_graphic_image\": \"IMG:image\"}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "LayerizeGraphicNode",
+   "files": {
+    "https://r.test/layerize/bg.png": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAYAAAD+Bd/7AAAA0UlEQVR4nAHGADn/AFTW1pD1bvNdeAEHvdsjSnZ3Fd/Q4hGo/ju8C08tPwroAv7Z92hY8SCTACVerUkbqVDvmWsBs6k/x2c8ujng8EcVAQH7I3GiPjnmD3FVRcuKpYXcp2kwuaARAvU2K213zFhjAt/V1Kzw4Sg9XyzOu0zvVyn0GlowNXo+GbSdwRp6d0okAq13Dqat8gMSbgEEeH0hm+Z+O0aLnVMW0NXy38zSCNMOBM8XvKTXEUNfrUnHivhhHeWyRq+SGjMOgBWk+rtWqvdgA4hc5UtBzhkAAAAASUVORK5CYII="
+   },
+   "gets": [
+    {
+     "status": 200,
+     "url": "https://r.test/layerize/bg.png"
+    },
+    {
+     "status": 200,
+     "url": "https://r.test/layerize/layers.json"
+    }
+   ],
+   "links": {
+    "https://r.test/layerize/layers.json": ""
+   },
+   "name": "layerize \u00b7 answer \u00b7 empty JSON body",
+   "output": [
+    {
+     "image": "https://r.test/layerize/bg.png"
+    },
+    ""
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": {
+    "animated": [
+     false
+    ],
+    "images": [
+     {
+      "image": {
+       "image": "https://r.test/layerize/bg.png"
+      },
+      "prefix": "layerize"
+     }
+    ]
+   },
+   "widgets": {
+    "model": "Ideogram Layerize",
+    "prompt": "",
+    "seed": 0
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": null
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "ideogram-ai/layerize",
+     "payload": {
+      "flat_graphic_image": "IMG:image"
+     },
+     "payload_json": "{\"flat_graphic_image\": \"IMG:image\"}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "LayerizeGraphicNode",
+   "error": {
+    "message": "Layerize returned no output.",
+    "type": "ValueError"
+   },
+   "files": {
+    "https://r.test/layerize/bg.png": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAYAAAD+Bd/7AAAA0UlEQVR4nAHGADn/AFTW1pD1bvNdeAEHvdsjSnZ3Fd/Q4hGo/ju8C08tPwroAv7Z92hY8SCTACVerUkbqVDvmWsBs6k/x2c8ujng8EcVAQH7I3GiPjnmD3FVRcuKpYXcp2kwuaARAvU2K213zFhjAt/V1Kzw4Sg9XyzOu0zvVyn0GlowNXo+GbSdwRp6d0okAq13Dqat8gMSbgEEeH0hm+Z+O0aLnVMW0NXy38zSCNMOBM8XvKTXEUNfrUnHivhhHeWyRq+SGjMOgBWk+rtWqvdgA4hc5UtBzhkAAAAASUVORK5CYII="
+   },
+   "gets": [],
+   "name": "layerize \u00b7 answer \u00b7 no output",
+   "output": null,
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "model": "Ideogram Layerize",
+    "prompt": "",
+    "seed": 0
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": [
+      "https://r.test/layerize/layers.json"
+     ]
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "ideogram-ai/layerize",
+     "payload": {
+      "flat_graphic_image": "IMG:image"
+     },
+     "payload_json": "{\"flat_graphic_image\": \"IMG:image\"}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "LayerizeGraphicNode",
+   "error": {
+    "message": "Layerize returned no background image.",
+    "type": "ValueError"
+   },
+   "files": {
+    "https://r.test/layerize/bg.png": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAYAAAD+Bd/7AAAA0UlEQVR4nAHGADn/AFTW1pD1bvNdeAEHvdsjSnZ3Fd/Q4hGo/ju8C08tPwroAv7Z92hY8SCTACVerUkbqVDvmWsBs6k/x2c8ujng8EcVAQH7I3GiPjnmD3FVRcuKpYXcp2kwuaARAvU2K213zFhjAt/V1Kzw4Sg9XyzOu0zvVyn0GlowNXo+GbSdwRp6d0okAq13Dqat8gMSbgEEeH0hm+Z+O0aLnVMW0NXy38zSCNMOBM8XvKTXEUNfrUnHivhhHeWyRq+SGjMOgBWk+rtWqvdgA4hc5UtBzhkAAAAASUVORK5CYII="
+   },
+   "gets": [],
+   "name": "layerize \u00b7 answer \u00b7 only the JSON link",
+   "output": null,
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "model": "Ideogram Layerize",
+    "prompt": "",
+    "seed": 0
+   }
+  },
+  {
+   "answers": [
+    {
+     "__body__": "{\"images\": [{\"url\": \"https://r.test/seedream/flat.png\", \"width\": 64, \"height\": 48}], \"layers\": [{\"image\": {\"url\": \"https://r.test/seedream/layer_0.png\", \"width\": 64, \"height\": 48, \"content_type\": \"image/png\"}, \"z_index\": 0}, {\"image\": {\"url\": \"https://r.test/seedream/layer_1.png\", \"width\": 64, \"height\": 48, \"content_type\": \"image/png\"}, \"z_index\": 1, \"bounding_box\": {\"absolute\": [1, 2, 33, 25], \"normalized\": [10, 20, 501, 501]}, \"name\": \"layer 1\", \"description\": \"element number 1\"}]}"
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "bytedance/seedream/v5/pro/layerize",
+     "payload": {
+      "image_size": "auto",
+      "image_url": "IMG:image",
+      "prompt": ""
+     },
+     "payload_json": "{\"image_size\": \"auto\", \"image_url\": \"IMG:image\", \"prompt\": \"\"}",
+     "provider": "fal"
+    }
+   ],
+   "class_type": "SeedreamLayerizeNode",
+   "files": {
+    "https://r.test/seedream/flat.png": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAYAAAD+Bd/7AAAA0UlEQVR4nAHGADn/AeoQfZB/MTX9eM2QkYbd2Tw5T2VMqvdQc1d6pDX9qCpHAOxQa/vdIFdoBC3vmzlhe+zoMvGp6JF+IxNMxV/kN9RhAQnW9XtoC27c4Lse1wcQ0lHFzwydW/J3wHsyyKMdLXfRBErJGSBIKswpWecZK/nRIjmFzP2ODNAmYmFWh8umx6DKAPcRWZYO9zB/5PWH9Hbnx6jm9Axm3blJyd4aagQCUac9AGiu37cGaztEVMg8InHa+S8EIZaaBnD3v0PcdCXFUCgRzXBgD9v8u84AAAAASUVORK5CYII=",
+    "https://r.test/seedream/layer_0.png": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAYAAAD+Bd/7AAAA0UlEQVR4nAHGADn/AcOqdlUC5xdvP+58HEvNmnU00pq7WnIxFdtj0uSHPwlSABuIonMNXd4dmsxKNi/QC/zKdQsrRSfqzdmPDgftpFpHASEUN0GyF5/xqEUJh3BiB3GimpljNDpDCSCDq76M5gYIAs9n6Th80dIM+VRdK3cs44z9SZDOjaiYPEPsRxlfjh7xBJRHVsVA2fOQbLb1DOazLqcRHhUjc6NmSRBzE+TZHqTbAAhxVM1MDcANd4oMfsVfFqde+iAUYb1cjfgs4AieNpvHwTNXmor/iCYAAAAASUVORK5CYII=",
+    "https://r.test/seedream/layer_1.png": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAYAAAD+Bd/7AAAA0UlEQVR4nAHGADn/ATkMjH05O6ivZsnbA5dn/jZn+dgpLeHzIIv+lv6m4FSFAn6k+5l5+I38vqlT9Kj9h8Ohw90A5Wl7DyccGngjTpG7Agva6ZAxNk95N9C/SYr4a6JzFsW5lsyIDwQFvtjXm+ViAFHYIMXD74AFOoiuOZbeUOgBhls2mGVOv1IApfoJObmdAXodeyix26gYFvsxR5d5Ehj0U3pIcb+TOXCMAlBWGqkFAqjzLvxOltUtAv8oa/j1ypIQ9vjrsp2//yGjwg9fPcfS5oVjIXyHhz0AAAAASUVORK5CYII="
+   },
+   "gets": [
+    {
+     "status": 200,
+     "url": "https://r.test/seedream/layer_0.png"
+    },
+    {
+     "status": 200,
+     "url": "https://r.test/seedream/layer_1.png"
+    },
+    {
+     "status": 200,
+     "url": "https://r.test/seedream/flat.png"
+    }
+   ],
+   "name": "seedream \u00b7 image_size auto",
+   "output": [
+    {
+     "image": "https://r.test/seedream/flat.png"
+    },
+    "{\"source\": \"seedream\", \"width\": 64, \"height\": 48, \"layers\": [{\"filename\": \"seedream_layer_00001_.png\", \"z_index\": 0, \"box\": null, \"name\": \"\", \"description\": \"\"}, {\"filename\": \"seedream_layer_00002_.png\", \"z_index\": 1, \"box\": [1, 2, 33, 25], \"name\": \"layer 1\", \"description\": \"element number 1\"}]}"
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": {
+    "animated": [
+     false
+    ],
+    "images": [
+     {
+      "image": {
+       "image": "https://r.test/seedream/flat.png"
+      },
+      "prefix": "seedream_layerize"
+     }
+    ],
+    "text": [
+     "{\"source\": \"seedream\", \"width\": 64, \"height\": 48, \"layers\": [{\"filename\": \"seedream_layer_00001_.png\", \"z_index\": 0, \"box\": null, \"name\": \"\", \"description\": \"\"}, {\"filename\": \"seedream_layer_00002_.png\", \"z_index\": 1, \"box\": [1, 2, 33, 25], \"name\": \"layer 1\", \"description\": \"element number 1\"}]}"
+    ]
+   },
+   "widgets": {
+    "image_size": "auto",
+    "prompt": ""
+   }
+  },
+  {
+   "answers": [
+    {
+     "__body__": "{\"images\": [{\"url\": \"https://r.test/seedream/flat.png\", \"width\": 64, \"height\": 48}], \"layers\": [{\"image\": {\"url\": \"https://r.test/seedream/layer_0.png\", \"width\": 64, \"height\": 48, \"content_type\": \"image/png\"}, \"z_index\": 0}, {\"image\": {\"url\": \"https://r.test/seedream/layer_1.png\", \"width\": 64, \"height\": 48, \"content_type\": \"image/png\"}, \"z_index\": 1, \"bounding_box\": {\"absolute\": [1, 2, 33, 25], \"normalized\": [10, 20, 501, 501]}, \"name\": \"layer 1\", \"description\": \"element number 1\"}]}"
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "bytedance/seedream/v5/pro/layerize",
+     "payload": {
+      "image_size": "auto_1K",
+      "image_url": "IMG:image",
+      "prompt": ""
+     },
+     "payload_json": "{\"image_size\": \"auto_1K\", \"image_url\": \"IMG:image\", \"prompt\": \"\"}",
+     "provider": "fal"
+    }
+   ],
+   "class_type": "SeedreamLayerizeNode",
+   "files": {
+    "https://r.test/seedream/flat.png": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAYAAAD+Bd/7AAAA0UlEQVR4nAHGADn/AeoQfZB/MTX9eM2QkYbd2Tw5T2VMqvdQc1d6pDX9qCpHAOxQa/vdIFdoBC3vmzlhe+zoMvGp6JF+IxNMxV/kN9RhAQnW9XtoC27c4Lse1wcQ0lHFzwydW/J3wHsyyKMdLXfRBErJGSBIKswpWecZK/nRIjmFzP2ODNAmYmFWh8umx6DKAPcRWZYO9zB/5PWH9Hbnx6jm9Axm3blJyd4aagQCUac9AGiu37cGaztEVMg8InHa+S8EIZaaBnD3v0PcdCXFUCgRzXBgD9v8u84AAAAASUVORK5CYII=",
+    "https://r.test/seedream/layer_0.png": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAYAAAD+Bd/7AAAA0UlEQVR4nAHGADn/AcOqdlUC5xdvP+58HEvNmnU00pq7WnIxFdtj0uSHPwlSABuIonMNXd4dmsxKNi/QC/zKdQsrRSfqzdmPDgftpFpHASEUN0GyF5/xqEUJh3BiB3GimpljNDpDCSCDq76M5gYIAs9n6Th80dIM+VRdK3cs44z9SZDOjaiYPEPsRxlfjh7xBJRHVsVA2fOQbLb1DOazLqcRHhUjc6NmSRBzE+TZHqTbAAhxVM1MDcANd4oMfsVfFqde+iAUYb1cjfgs4AieNpvHwTNXmor/iCYAAAAASUVORK5CYII=",
+    "https://r.test/seedream/layer_1.png": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAYAAAD+Bd/7AAAA0UlEQVR4nAHGADn/ATkMjH05O6ivZsnbA5dn/jZn+dgpLeHzIIv+lv6m4FSFAn6k+5l5+I38vqlT9Kj9h8Ohw90A5Wl7DyccGngjTpG7Agva6ZAxNk95N9C/SYr4a6JzFsW5lsyIDwQFvtjXm+ViAFHYIMXD74AFOoiuOZbeUOgBhls2mGVOv1IApfoJObmdAXodeyix26gYFvsxR5d5Ehj0U3pIcb+TOXCMAlBWGqkFAqjzLvxOltUtAv8oa/j1ypIQ9vjrsp2//yGjwg9fPcfS5oVjIXyHhz0AAAAASUVORK5CYII="
+   },
+   "gets": [
+    {
+     "status": 200,
+     "url": "https://r.test/seedream/layer_0.png"
+    },
+    {
+     "status": 200,
+     "url": "https://r.test/seedream/layer_1.png"
+    },
+    {
+     "status": 200,
+     "url": "https://r.test/seedream/flat.png"
+    }
+   ],
+   "name": "seedream \u00b7 image_size auto_1K",
+   "output": [
+    {
+     "image": "https://r.test/seedream/flat.png"
+    },
+    "{\"source\": \"seedream\", \"width\": 64, \"height\": 48, \"layers\": [{\"filename\": \"seedream_layer_00001_.png\", \"z_index\": 0, \"box\": null, \"name\": \"\", \"description\": \"\"}, {\"filename\": \"seedream_layer_00002_.png\", \"z_index\": 1, \"box\": [1, 2, 33, 25], \"name\": \"layer 1\", \"description\": \"element number 1\"}]}"
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": {
+    "animated": [
+     false
+    ],
+    "images": [
+     {
+      "image": {
+       "image": "https://r.test/seedream/flat.png"
+      },
+      "prefix": "seedream_layerize"
+     }
+    ],
+    "text": [
+     "{\"source\": \"seedream\", \"width\": 64, \"height\": 48, \"layers\": [{\"filename\": \"seedream_layer_00001_.png\", \"z_index\": 0, \"box\": null, \"name\": \"\", \"description\": \"\"}, {\"filename\": \"seedream_layer_00002_.png\", \"z_index\": 1, \"box\": [1, 2, 33, 25], \"name\": \"layer 1\", \"description\": \"element number 1\"}]}"
+    ]
+   },
+   "widgets": {
+    "image_size": "auto_1K",
+    "prompt": ""
+   }
+  },
+  {
+   "answers": [
+    {
+     "__body__": "{\"images\": [{\"url\": \"https://r.test/seedream/flat.png\", \"width\": 64, \"height\": 48}], \"layers\": [{\"image\": {\"url\": \"https://r.test/seedream/layer_0.png\", \"width\": 64, \"height\": 48, \"content_type\": \"image/png\"}, \"z_index\": 0}, {\"image\": {\"url\": \"https://r.test/seedream/layer_1.png\", \"width\": 64, \"height\": 48, \"content_type\": \"image/png\"}, \"z_index\": 1, \"bounding_box\": {\"absolute\": [1, 2, 33, 25], \"normalized\": [10, 20, 501, 501]}, \"name\": \"layer 1\", \"description\": \"element number 1\"}]}"
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "bytedance/seedream/v5/pro/layerize",
+     "payload": {
+      "image_size": "auto_1.5K",
+      "image_url": "IMG:image",
+      "prompt": ""
+     },
+     "payload_json": "{\"image_size\": \"auto_1.5K\", \"image_url\": \"IMG:image\", \"prompt\": \"\"}",
+     "provider": "fal"
+    }
+   ],
+   "class_type": "SeedreamLayerizeNode",
+   "files": {
+    "https://r.test/seedream/flat.png": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAYAAAD+Bd/7AAAA0UlEQVR4nAHGADn/AeoQfZB/MTX9eM2QkYbd2Tw5T2VMqvdQc1d6pDX9qCpHAOxQa/vdIFdoBC3vmzlhe+zoMvGp6JF+IxNMxV/kN9RhAQnW9XtoC27c4Lse1wcQ0lHFzwydW/J3wHsyyKMdLXfRBErJGSBIKswpWecZK/nRIjmFzP2ODNAmYmFWh8umx6DKAPcRWZYO9zB/5PWH9Hbnx6jm9Axm3blJyd4aagQCUac9AGiu37cGaztEVMg8InHa+S8EIZaaBnD3v0PcdCXFUCgRzXBgD9v8u84AAAAASUVORK5CYII=",
+    "https://r.test/seedream/layer_0.png": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAYAAAD+Bd/7AAAA0UlEQVR4nAHGADn/AcOqdlUC5xdvP+58HEvNmnU00pq7WnIxFdtj0uSHPwlSABuIonMNXd4dmsxKNi/QC/zKdQsrRSfqzdmPDgftpFpHASEUN0GyF5/xqEUJh3BiB3GimpljNDpDCSCDq76M5gYIAs9n6Th80dIM+VRdK3cs44z9SZDOjaiYPEPsRxlfjh7xBJRHVsVA2fOQbLb1DOazLqcRHhUjc6NmSRBzE+TZHqTbAAhxVM1MDcANd4oMfsVfFqde+iAUYb1cjfgs4AieNpvHwTNXmor/iCYAAAAASUVORK5CYII=",
+    "https://r.test/seedream/layer_1.png": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAYAAAD+Bd/7AAAA0UlEQVR4nAHGADn/ATkMjH05O6ivZsnbA5dn/jZn+dgpLeHzIIv+lv6m4FSFAn6k+5l5+I38vqlT9Kj9h8Ohw90A5Wl7DyccGngjTpG7Agva6ZAxNk95N9C/SYr4a6JzFsW5lsyIDwQFvtjXm+ViAFHYIMXD74AFOoiuOZbeUOgBhls2mGVOv1IApfoJObmdAXodeyix26gYFvsxR5d5Ehj0U3pIcb+TOXCMAlBWGqkFAqjzLvxOltUtAv8oa/j1ypIQ9vjrsp2//yGjwg9fPcfS5oVjIXyHhz0AAAAASUVORK5CYII="
+   },
+   "gets": [
+    {
+     "status": 200,
+     "url": "https://r.test/seedream/layer_0.png"
+    },
+    {
+     "status": 200,
+     "url": "https://r.test/seedream/layer_1.png"
+    },
+    {
+     "status": 200,
+     "url": "https://r.test/seedream/flat.png"
+    }
+   ],
+   "name": "seedream \u00b7 image_size auto_1.5K",
+   "output": [
+    {
+     "image": "https://r.test/seedream/flat.png"
+    },
+    "{\"source\": \"seedream\", \"width\": 64, \"height\": 48, \"layers\": [{\"filename\": \"seedream_layer_00001_.png\", \"z_index\": 0, \"box\": null, \"name\": \"\", \"description\": \"\"}, {\"filename\": \"seedream_layer_00002_.png\", \"z_index\": 1, \"box\": [1, 2, 33, 25], \"name\": \"layer 1\", \"description\": \"element number 1\"}]}"
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": {
+    "animated": [
+     false
+    ],
+    "images": [
+     {
+      "image": {
+       "image": "https://r.test/seedream/flat.png"
+      },
+      "prefix": "seedream_layerize"
+     }
+    ],
+    "text": [
+     "{\"source\": \"seedream\", \"width\": 64, \"height\": 48, \"layers\": [{\"filename\": \"seedream_layer_00001_.png\", \"z_index\": 0, \"box\": null, \"name\": \"\", \"description\": \"\"}, {\"filename\": \"seedream_layer_00002_.png\", \"z_index\": 1, \"box\": [1, 2, 33, 25], \"name\": \"layer 1\", \"description\": \"element number 1\"}]}"
+    ]
+   },
+   "widgets": {
+    "image_size": "auto_1.5K",
+    "prompt": ""
+   }
+  },
+  {
+   "answers": [
+    {
+     "__body__": "{\"images\": [{\"url\": \"https://r.test/seedream/flat.png\", \"width\": 64, \"height\": 48}], \"layers\": [{\"image\": {\"url\": \"https://r.test/seedream/layer_0.png\", \"width\": 64, \"height\": 48, \"content_type\": \"image/png\"}, \"z_index\": 0}, {\"image\": {\"url\": \"https://r.test/seedream/layer_1.png\", \"width\": 64, \"height\": 48, \"content_type\": \"image/png\"}, \"z_index\": 1, \"bounding_box\": {\"absolute\": [1, 2, 33, 25], \"normalized\": [10, 20, 501, 501]}, \"name\": \"layer 1\", \"description\": \"element number 1\"}]}"
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "bytedance/seedream/v5/pro/layerize",
+     "payload": {
+      "image_size": "auto_2K",
+      "image_url": "IMG:image",
+      "prompt": ""
+     },
+     "payload_json": "{\"image_size\": \"auto_2K\", \"image_url\": \"IMG:image\", \"prompt\": \"\"}",
+     "provider": "fal"
+    }
+   ],
+   "class_type": "SeedreamLayerizeNode",
+   "files": {
+    "https://r.test/seedream/flat.png": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAYAAAD+Bd/7AAAA0UlEQVR4nAHGADn/AeoQfZB/MTX9eM2QkYbd2Tw5T2VMqvdQc1d6pDX9qCpHAOxQa/vdIFdoBC3vmzlhe+zoMvGp6JF+IxNMxV/kN9RhAQnW9XtoC27c4Lse1wcQ0lHFzwydW/J3wHsyyKMdLXfRBErJGSBIKswpWecZK/nRIjmFzP2ODNAmYmFWh8umx6DKAPcRWZYO9zB/5PWH9Hbnx6jm9Axm3blJyd4aagQCUac9AGiu37cGaztEVMg8InHa+S8EIZaaBnD3v0PcdCXFUCgRzXBgD9v8u84AAAAASUVORK5CYII=",
+    "https://r.test/seedream/layer_0.png": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAYAAAD+Bd/7AAAA0UlEQVR4nAHGADn/AcOqdlUC5xdvP+58HEvNmnU00pq7WnIxFdtj0uSHPwlSABuIonMNXd4dmsxKNi/QC/zKdQsrRSfqzdmPDgftpFpHASEUN0GyF5/xqEUJh3BiB3GimpljNDpDCSCDq76M5gYIAs9n6Th80dIM+VRdK3cs44z9SZDOjaiYPEPsRxlfjh7xBJRHVsVA2fOQbLb1DOazLqcRHhUjc6NmSRBzE+TZHqTbAAhxVM1MDcANd4oMfsVfFqde+iAUYb1cjfgs4AieNpvHwTNXmor/iCYAAAAASUVORK5CYII=",
+    "https://r.test/seedream/layer_1.png": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAYAAAD+Bd/7AAAA0UlEQVR4nAHGADn/ATkMjH05O6ivZsnbA5dn/jZn+dgpLeHzIIv+lv6m4FSFAn6k+5l5+I38vqlT9Kj9h8Ohw90A5Wl7DyccGngjTpG7Agva6ZAxNk95N9C/SYr4a6JzFsW5lsyIDwQFvtjXm+ViAFHYIMXD74AFOoiuOZbeUOgBhls2mGVOv1IApfoJObmdAXodeyix26gYFvsxR5d5Ehj0U3pIcb+TOXCMAlBWGqkFAqjzLvxOltUtAv8oa/j1ypIQ9vjrsp2//yGjwg9fPcfS5oVjIXyHhz0AAAAASUVORK5CYII="
+   },
+   "gets": [
+    {
+     "status": 200,
+     "url": "https://r.test/seedream/layer_0.png"
+    },
+    {
+     "status": 200,
+     "url": "https://r.test/seedream/layer_1.png"
+    },
+    {
+     "status": 200,
+     "url": "https://r.test/seedream/flat.png"
+    }
+   ],
+   "name": "seedream \u00b7 image_size auto_2K",
+   "output": [
+    {
+     "image": "https://r.test/seedream/flat.png"
+    },
+    "{\"source\": \"seedream\", \"width\": 64, \"height\": 48, \"layers\": [{\"filename\": \"seedream_layer_00001_.png\", \"z_index\": 0, \"box\": null, \"name\": \"\", \"description\": \"\"}, {\"filename\": \"seedream_layer_00002_.png\", \"z_index\": 1, \"box\": [1, 2, 33, 25], \"name\": \"layer 1\", \"description\": \"element number 1\"}]}"
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": {
+    "animated": [
+     false
+    ],
+    "images": [
+     {
+      "image": {
+       "image": "https://r.test/seedream/flat.png"
+      },
+      "prefix": "seedream_layerize"
+     }
+    ],
+    "text": [
+     "{\"source\": \"seedream\", \"width\": 64, \"height\": 48, \"layers\": [{\"filename\": \"seedream_layer_00001_.png\", \"z_index\": 0, \"box\": null, \"name\": \"\", \"description\": \"\"}, {\"filename\": \"seedream_layer_00002_.png\", \"z_index\": 1, \"box\": [1, 2, 33, 25], \"name\": \"layer 1\", \"description\": \"element number 1\"}]}"
+    ]
+   },
+   "widgets": {
+    "image_size": "auto_2K",
+    "prompt": ""
+   }
+  },
+  {
+   "answers": [
+    {
+     "__body__": "{\"images\": [{\"url\": \"https://r.test/seedream/flat.png\", \"width\": 64, \"height\": 48}], \"layers\": [{\"image\": {\"url\": \"https://r.test/seedream/layer_0.png\", \"width\": 64, \"height\": 48, \"content_type\": \"image/png\"}, \"z_index\": 0}, {\"image\": {\"url\": \"https://r.test/seedream/layer_1.png\", \"width\": 64, \"height\": 48, \"content_type\": \"image/png\"}, \"z_index\": 1, \"bounding_box\": {\"absolute\": [1, 2, 33, 25], \"normalized\": [10, 20, 501, 501]}, \"name\": \"layer 1\", \"description\": \"element number 1\"}]}"
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "bytedance/seedream/v5/pro/layerize",
+     "payload": {
+      "image_size": "auto",
+      "image_url": "IMG:image",
+      "prompt": ""
+     },
+     "payload_json": "{\"image_size\": \"auto\", \"image_url\": \"IMG:image\", \"prompt\": \"\"}",
+     "provider": "fal"
+    }
+   ],
+   "class_type": "SeedreamLayerizeNode",
+   "files": {
+    "https://r.test/seedream/flat.png": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAYAAAD+Bd/7AAAA0UlEQVR4nAHGADn/AeoQfZB/MTX9eM2QkYbd2Tw5T2VMqvdQc1d6pDX9qCpHAOxQa/vdIFdoBC3vmzlhe+zoMvGp6JF+IxNMxV/kN9RhAQnW9XtoC27c4Lse1wcQ0lHFzwydW/J3wHsyyKMdLXfRBErJGSBIKswpWecZK/nRIjmFzP2ODNAmYmFWh8umx6DKAPcRWZYO9zB/5PWH9Hbnx6jm9Axm3blJyd4aagQCUac9AGiu37cGaztEVMg8InHa+S8EIZaaBnD3v0PcdCXFUCgRzXBgD9v8u84AAAAASUVORK5CYII=",
+    "https://r.test/seedream/layer_0.png": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAYAAAD+Bd/7AAAA0UlEQVR4nAHGADn/AcOqdlUC5xdvP+58HEvNmnU00pq7WnIxFdtj0uSHPwlSABuIonMNXd4dmsxKNi/QC/zKdQsrRSfqzdmPDgftpFpHASEUN0GyF5/xqEUJh3BiB3GimpljNDpDCSCDq76M5gYIAs9n6Th80dIM+VRdK3cs44z9SZDOjaiYPEPsRxlfjh7xBJRHVsVA2fOQbLb1DOazLqcRHhUjc6NmSRBzE+TZHqTbAAhxVM1MDcANd4oMfsVfFqde+iAUYb1cjfgs4AieNpvHwTNXmor/iCYAAAAASUVORK5CYII=",
+    "https://r.test/seedream/layer_1.png": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAYAAAD+Bd/7AAAA0UlEQVR4nAHGADn/ATkMjH05O6ivZsnbA5dn/jZn+dgpLeHzIIv+lv6m4FSFAn6k+5l5+I38vqlT9Kj9h8Ohw90A5Wl7DyccGngjTpG7Agva6ZAxNk95N9C/SYr4a6JzFsW5lsyIDwQFvtjXm+ViAFHYIMXD74AFOoiuOZbeUOgBhls2mGVOv1IApfoJObmdAXodeyix26gYFvsxR5d5Ehj0U3pIcb+TOXCMAlBWGqkFAqjzLvxOltUtAv8oa/j1ypIQ9vjrsp2//yGjwg9fPcfS5oVjIXyHhz0AAAAASUVORK5CYII="
+   },
+   "gets": [
+    {
+     "status": 200,
+     "url": "https://r.test/seedream/layer_0.png"
+    },
+    {
+     "status": 200,
+     "url": "https://r.test/seedream/layer_1.png"
+    },
+    {
+     "status": 200,
+     "url": "https://r.test/seedream/flat.png"
+    }
+   ],
+   "name": "seedream \u00b7 image_size 8K",
+   "output": [
+    {
+     "image": "https://r.test/seedream/flat.png"
+    },
+    "{\"source\": \"seedream\", \"width\": 64, \"height\": 48, \"layers\": [{\"filename\": \"seedream_layer_00001_.png\", \"z_index\": 0, \"box\": null, \"name\": \"\", \"description\": \"\"}, {\"filename\": \"seedream_layer_00002_.png\", \"z_index\": 1, \"box\": [1, 2, 33, 25], \"name\": \"layer 1\", \"description\": \"element number 1\"}]}"
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": {
+    "animated": [
+     false
+    ],
+    "images": [
+     {
+      "image": {
+       "image": "https://r.test/seedream/flat.png"
+      },
+      "prefix": "seedream_layerize"
+     }
+    ],
+    "text": [
+     "{\"source\": \"seedream\", \"width\": 64, \"height\": 48, \"layers\": [{\"filename\": \"seedream_layer_00001_.png\", \"z_index\": 0, \"box\": null, \"name\": \"\", \"description\": \"\"}, {\"filename\": \"seedream_layer_00002_.png\", \"z_index\": 1, \"box\": [1, 2, 33, 25], \"name\": \"layer 1\", \"description\": \"element number 1\"}]}"
+    ]
+   },
+   "widgets": {
+    "image_size": "8K",
+    "prompt": ""
+   }
+  },
+  {
+   "answers": [
+    {
+     "__body__": "{\"images\": [{\"url\": \"https://r.test/seedream/flat.png\", \"width\": 64, \"height\": 48}], \"layers\": [{\"image\": {\"url\": \"https://r.test/seedream/layer_0.png\", \"width\": 64, \"height\": 48, \"content_type\": \"image/png\"}, \"z_index\": 0}, {\"image\": {\"url\": \"https://r.test/seedream/layer_1.png\", \"width\": 64, \"height\": 48, \"content_type\": \"image/png\"}, \"z_index\": 1, \"bounding_box\": {\"absolute\": [1, 2, 33, 25], \"normalized\": [10, 20, 501, 501]}, \"name\": \"layer 1\", \"description\": \"element number 1\"}]}"
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "bytedance/seedream/v5/pro/layerize",
+     "payload": {
+      "image_size": "auto",
+      "image_url": "IMG:image",
+      "prompt": "  keep the logo apart  "
+     },
+     "payload_json": "{\"image_size\": \"auto\", \"image_url\": \"IMG:image\", \"prompt\": \"  keep the logo apart  \"}",
+     "provider": "fal"
+    }
+   ],
+   "class_type": "SeedreamLayerizeNode",
+   "files": {
+    "https://r.test/seedream/flat.png": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAYAAAD+Bd/7AAAA0UlEQVR4nAHGADn/AeoQfZB/MTX9eM2QkYbd2Tw5T2VMqvdQc1d6pDX9qCpHAOxQa/vdIFdoBC3vmzlhe+zoMvGp6JF+IxNMxV/kN9RhAQnW9XtoC27c4Lse1wcQ0lHFzwydW/J3wHsyyKMdLXfRBErJGSBIKswpWecZK/nRIjmFzP2ODNAmYmFWh8umx6DKAPcRWZYO9zB/5PWH9Hbnx6jm9Axm3blJyd4aagQCUac9AGiu37cGaztEVMg8InHa+S8EIZaaBnD3v0PcdCXFUCgRzXBgD9v8u84AAAAASUVORK5CYII=",
+    "https://r.test/seedream/layer_0.png": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAYAAAD+Bd/7AAAA0UlEQVR4nAHGADn/AcOqdlUC5xdvP+58HEvNmnU00pq7WnIxFdtj0uSHPwlSABuIonMNXd4dmsxKNi/QC/zKdQsrRSfqzdmPDgftpFpHASEUN0GyF5/xqEUJh3BiB3GimpljNDpDCSCDq76M5gYIAs9n6Th80dIM+VRdK3cs44z9SZDOjaiYPEPsRxlfjh7xBJRHVsVA2fOQbLb1DOazLqcRHhUjc6NmSRBzE+TZHqTbAAhxVM1MDcANd4oMfsVfFqde+iAUYb1cjfgs4AieNpvHwTNXmor/iCYAAAAASUVORK5CYII=",
+    "https://r.test/seedream/layer_1.png": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAYAAAD+Bd/7AAAA0UlEQVR4nAHGADn/ATkMjH05O6ivZsnbA5dn/jZn+dgpLeHzIIv+lv6m4FSFAn6k+5l5+I38vqlT9Kj9h8Ohw90A5Wl7DyccGngjTpG7Agva6ZAxNk95N9C/SYr4a6JzFsW5lsyIDwQFvtjXm+ViAFHYIMXD74AFOoiuOZbeUOgBhls2mGVOv1IApfoJObmdAXodeyix26gYFvsxR5d5Ehj0U3pIcb+TOXCMAlBWGqkFAqjzLvxOltUtAv8oa/j1ypIQ9vjrsp2//yGjwg9fPcfS5oVjIXyHhz0AAAAASUVORK5CYII="
+   },
+   "gets": [
+    {
+     "status": 200,
+     "url": "https://r.test/seedream/layer_0.png"
+    },
+    {
+     "status": 200,
+     "url": "https://r.test/seedream/layer_1.png"
+    },
+    {
+     "status": 200,
+     "url": "https://r.test/seedream/flat.png"
+    }
+   ],
+   "name": "seedream \u00b7 prompt",
+   "output": [
+    {
+     "image": "https://r.test/seedream/flat.png"
+    },
+    "{\"source\": \"seedream\", \"width\": 64, \"height\": 48, \"layers\": [{\"filename\": \"seedream_layer_00001_.png\", \"z_index\": 0, \"box\": null, \"name\": \"\", \"description\": \"\"}, {\"filename\": \"seedream_layer_00002_.png\", \"z_index\": 1, \"box\": [1, 2, 33, 25], \"name\": \"layer 1\", \"description\": \"element number 1\"}]}"
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": {
+    "animated": [
+     false
+    ],
+    "images": [
+     {
+      "image": {
+       "image": "https://r.test/seedream/flat.png"
+      },
+      "prefix": "seedream_layerize"
+     }
+    ],
+    "text": [
+     "{\"source\": \"seedream\", \"width\": 64, \"height\": 48, \"layers\": [{\"filename\": \"seedream_layer_00001_.png\", \"z_index\": 0, \"box\": null, \"name\": \"\", \"description\": \"\"}, {\"filename\": \"seedream_layer_00002_.png\", \"z_index\": 1, \"box\": [1, 2, 33, 25], \"name\": \"layer 1\", \"description\": \"element number 1\"}]}"
+    ]
+   },
+   "widgets": {
+    "image_size": "auto",
+    "prompt": "  keep the logo apart  "
+   }
+  },
+  {
+   "answers": [
+    {
+     "__body__": "{\"images\": [{\"url\": \"https://r.test/seedream/flat.png\", \"width\": 64, \"height\": 48}], \"layers\": [{\"image\": {\"url\": \"https://r.test/seedream/layer_0.png\", \"width\": 64, \"height\": 48, \"content_type\": \"image/png\"}, \"z_index\": 0}, {\"image\": {\"url\": \"https://r.test/seedream/layer_1.png\", \"width\": 64, \"height\": 48, \"content_type\": \"image/png\"}, \"z_index\": 1, \"bounding_box\": {\"absolute\": [1, 2, 33, 25], \"normalized\": [10, 20, 501, 501]}, \"name\": \"layer 1\", \"description\": \"element number 1\"}, {\"image\": {\"url\": \"https://r.test/seedream/layer_2.png\", \"width\": 64, \"height\": 48, \"content_type\": \"image/png\"}, \"z_index\": 2, \"bounding_box\": {\"absolute\": [2, 4, 34, 26], \"normalized\": [20, 40, 502, 502]}, \"name\": \"layer 2\", \"description\": \"element number 2\"}, {\"image\": {\"url\": \"https://r.test/seedream/layer_3.png\", \"width\": 64, \"height\": 48, \"content_type\": \"image/png\"}, \"z_index\": 3, \"bounding_box\": {\"absolute\": [3, 6, 35, 27], \"normalized\": [30, 60, 503, 503]}, \"name\": \"layer 3\", \"description\": \"element number 3\"}, {\"image\": {\"url\": \"https://r.test/seedream/layer_4.png\", \"width\": 64, \"height\": 48, \"content_type\": \"image/png\"}, \"z_index\": 4, \"bounding_box\": {\"absolute\": [4, 8, 36, 28], \"normalized\": [40, 80, 504, 504]}, \"name\": \"layer 4\", \"description\": \"element number 4\"}, {\"image\": {\"url\": \"https://r.test/seedream/layer_5.png\", \"width\": 64, \"height\": 48, \"content_type\": \"image/png\"}, \"z_index\": 5, \"bounding_box\": {\"absolute\": [5, 10, 37, 29], \"normalized\": [50, 100, 505, 505]}, \"name\": \"layer 5\", \"description\": \"element number 5\"}, {\"image\": {\"url\": \"https://r.test/seedream/layer_6.png\", \"width\": 64, \"height\": 48, \"content_type\": \"image/png\"}, \"z_index\": 6, \"bounding_box\": {\"absolute\": [6, 12, 38, 30], \"normalized\": [60, 120, 506, 506]}, \"name\": \"layer 6\", \"description\": \"element number 6\"}, {\"image\": {\"url\": \"https://r.test/seedream/layer_7.png\", \"width\": 64, \"height\": 48, \"content_type\": \"image/png\"}, \"z_index\": 7, \"bounding_box\": {\"absolute\": [7, 14, 39, 31], \"normalized\": [70, 140, 507, 507]}, \"name\": \"layer 7\", \"description\": \"element number 7\"}, {\"image\": {\"url\": \"https://r.test/seedream/layer_8.png\", \"width\": 64, \"height\": 48, \"content_type\": \"image/png\"}, \"z_index\": 8, \"bounding_box\": {\"absolute\": [8, 16, 40, 32], \"normalized\": [80, 160, 508, 508]}, \"name\": \"layer 8\", \"description\": \"element number 8\"}, {\"image\": {\"url\": \"https://r.test/seedream/layer_9.png\", \"width\": 64, \"height\": 48, \"content_type\": \"image/png\"}, \"z_index\": 9, \"bounding_box\": {\"absolute\": [9, 18, 41, 33], \"normalized\": [90, 180, 509, 509]}, \"name\": \"layer 9\", \"description\": \"element number 9\"}, {\"image\": {\"url\": \"https://r.test/seedream/layer_10.png\", \"width\": 64, \"height\": 48, \"content_type\": \"image/png\"}, \"z_index\": 10, \"bounding_box\": {\"absolute\": [10, 20, 42, 34], \"normalized\": [100, 200, 510, 510]}, \"name\": \"layer 10\", \"description\": \"element number 10\"}, {\"image\": {\"url\": \"https://r.test/seedream/layer_11.png\", \"width\": 64, \"height\": 48, \"content_type\": \"image/png\"}, \"z_index\": 11, \"bounding_box\": {\"absolute\": [11, 22, 43, 35], \"normalized\": [110, 220, 511, 511]}, \"name\": \"layer 11\", \"description\": \"element number 11\"}, {\"image\": {\"url\": \"https://r.test/seedream/layer_12.png\", \"width\": 64, \"height\": 48, \"content_type\": \"image/png\"}, \"z_index\": 12, \"bounding_box\": {\"absolute\": [12, 24, 44, 36], \"normalized\": [120, 240, 512, 512]}, \"name\": \"layer 12\", \"description\": \"element number 12\"}, {\"image\": {\"url\": \"https://r.test/seedream/layer_13.png\", \"width\": 64, \"height\": 48, \"content_type\": \"image/png\"}, \"z_index\": 13, \"bounding_box\": {\"absolute\": [13, 26, 45, 37], \"normalized\": [130, 260, 513, 513]}, \"name\": \"layer 13\", \"description\": \"element number 13\"}, {\"image\": {\"url\": \"https://r.test/seedream/layer_14.png\", \"width\": 64, \"height\": 48, \"content_type\": \"image/png\"}, \"z_index\": 14, \"bounding_box\": {\"absolute\": [14, 28, 46, 38], \"normalized\": [140, 280, 514, 514]}, \"name\": \"layer 14\", \"description\": \"element number 14\"}, {\"image\": {\"url\": \"https://r.test/seedream/layer_15.png\", \"width\": 64, \"height\": 48, \"content_type\": \"image/png\"}, \"z_index\": 15, \"bounding_box\": {\"absolute\": [15, 30, 47, 39], \"normalized\": [150, 300, 515, 515]}, \"name\": \"layer 15\", \"description\": \"element number 15\"}, {\"image\": {\"url\": \"https://r.test/seedream/layer_16.png\", \"width\": 64, \"height\": 48, \"content_type\": \"image/png\"}, \"z_index\": 16, \"bounding_box\": {\"absolute\": [16, 32, 48, 40], \"normalized\": [160, 320, 516, 516]}, \"name\": \"layer 16\", \"description\": \"element number 16\"}]}"
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "bytedance/seedream/v5/pro/layerize",
+     "payload": {
+      "image_size": "auto",
+      "image_url": "IMG:image",
+      "prompt": ""
+     },
+     "payload_json": "{\"image_size\": \"auto\", \"image_url\": \"IMG:image\", \"prompt\": \"\"}",
+     "provider": "fal"
+    }
+   ],
+   "class_type": "SeedreamLayerizeNode",
+   "files": {
+    "https://r.test/seedream/flat.png": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAYAAAD+Bd/7AAAA0UlEQVR4nAHGADn/AeoQfZB/MTX9eM2QkYbd2Tw5T2VMqvdQc1d6pDX9qCpHAOxQa/vdIFdoBC3vmzlhe+zoMvGp6JF+IxNMxV/kN9RhAQnW9XtoC27c4Lse1wcQ0lHFzwydW/J3wHsyyKMdLXfRBErJGSBIKswpWecZK/nRIjmFzP2ODNAmYmFWh8umx6DKAPcRWZYO9zB/5PWH9Hbnx6jm9Axm3blJyd4aagQCUac9AGiu37cGaztEVMg8InHa+S8EIZaaBnD3v0PcdCXFUCgRzXBgD9v8u84AAAAASUVORK5CYII=",
+    "https://r.test/seedream/layer_0.png": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAYAAAD+Bd/7AAAA0UlEQVR4nAHGADn/AcOqdlUC5xdvP+58HEvNmnU00pq7WnIxFdtj0uSHPwlSABuIonMNXd4dmsxKNi/QC/zKdQsrRSfqzdmPDgftpFpHASEUN0GyF5/xqEUJh3BiB3GimpljNDpDCSCDq76M5gYIAs9n6Th80dIM+VRdK3cs44z9SZDOjaiYPEPsRxlfjh7xBJRHVsVA2fOQbLb1DOazLqcRHhUjc6NmSRBzE+TZHqTbAAhxVM1MDcANd4oMfsVfFqde+iAUYb1cjfgs4AieNpvHwTNXmor/iCYAAAAASUVORK5CYII=",
+    "https://r.test/seedream/layer_1.png": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAYAAAD+Bd/7AAAA0UlEQVR4nAHGADn/ATkMjH05O6ivZsnbA5dn/jZn+dgpLeHzIIv+lv6m4FSFAn6k+5l5+I38vqlT9Kj9h8Ohw90A5Wl7DyccGngjTpG7Agva6ZAxNk95N9C/SYr4a6JzFsW5lsyIDwQFvtjXm+ViAFHYIMXD74AFOoiuOZbeUOgBhls2mGVOv1IApfoJObmdAXodeyix26gYFvsxR5d5Ehj0U3pIcb+TOXCMAlBWGqkFAqjzLvxOltUtAv8oa/j1ypIQ9vjrsp2//yGjwg9fPcfS5oVjIXyHhz0AAAAASUVORK5CYII=",
+    "https://r.test/seedream/layer_10.png": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAYAAAD+Bd/7AAAA0UlEQVR4nAHGADn/AHxSfXaCy+2vuMaOzgM6DoQQ9FqxmbzlYg/gVvAGHzY3AFntCN7UZr05+Fu35v084QXeFPIznesOp9cs0Y5z8PdtAsK45r8OAfddiZuU8l79t+gnPOX09PXWTezcvbla3s41AKPNqOrRpvQ/AkPIbtOFG8ioGYwQpQGU5yX3SLKMKPgAAtgRt0w0qwAFTY4N+yeWzyInDYss8ibPY/xvmQTm0H4rAqcYCyC/EX71A10ciA7pdx7ac4Huu3TN+uP5PTw0MrqZnBRltzxV3gQAAAAASUVORK5CYII=",
+    "https://r.test/seedream/layer_11.png": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAYAAAD+Bd/7AAAA0UlEQVR4nAHGADn/AIkb973QEUdR012x4QARxuAFeSNRV/Z2jPr/1D4RwS7KAjIoUQ6LfuhTi3spLWfxohbkyzTuBTbL46NnB+dFrB6sAiwLMvwMlxtxpOasFWgU2VlNfKsOPb7W8LHncwgoOB5FApoVzGIe+eRNc+gcluyBwweZxCqq2S6Q/0s4bK91XYzOATofO/etTOeNNihk0+sN9hQzD27JOghd6LKNGmtuRnqiAelADLJ3R6DKC3+owobS+hPo0B/W+SeCulciCeVH6UAPmC9cWe4KU4sAAAAASUVORK5CYII=",
+    "https://r.test/seedream/layer_12.png": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAYAAAD+Bd/7AAAA0UlEQVR4nAHGADn/AG7p97joDxJWsEOFHFYYuHXhZXVARrOizhyqjk4u08bgAhBmIy0NZ54emeWLFMTcEjKiE6eEj5W9l4wR06RDIu14AnoXgEzjqxdN3m8wnFv3r/j16dQ1BS38CgKJ+51vrx/ZAg0Xj4/gZJrCyxQQkDxCpiJkqezzG9VxABLXIvf0aNLaBKcJAAJgjK9F+OEyNyUjs0HlA/hsA/61JkZ2RQkHrnrrAXfQFcAfcFYPBahMrkzyi/8MgPJBBRcPm5c05FXEhmkhre9aadP5CQ4AAAAASUVORK5CYII=",
+    "https://r.test/seedream/layer_13.png": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAYAAAD+Bd/7AAAA0UlEQVR4nAHGADn/AEbgmPf5wnDkqMNqZhz95y6ultSLSDGFjuASwAa5iAB1AQpXRcJytiUiRk12lruuGP4xwd5iGPEzGCbdZcML/LtoAeV17VEZPK9SjmWVADi3pimAD+TWtAN3prUNTvspww79AZaTNu6a1AhgKxZO8wbqHmFCB7E44r64KIUyhurmUEq/ApHh3NbN6i/sdmeQhhgyE3LUWLP2x6zIBiD529rKWFeqAmbG6McVVgfsmQXquzJfYbTl59nuDgYDYF/eVUo70mT1xIxiTn05MicAAAAASUVORK5CYII=",
+    "https://r.test/seedream/layer_14.png": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAYAAAD+Bd/7AAAA0UlEQVR4nAHGADn/AC5kTJooXpottPHFxs+i2xSDFXYH7XIawXYt22N0adJXAZypBDY29aKDld1JoO32r/mN+vzw84WcilSS5rlwHm67ACrU5/75I/aGtT+PcsjY8VmNHXm11qW0ARK1Zvqn8JXPAIn6an5earHk+gUYMoJd9WzTPthkkGkOcfDzaNkNueCLAC/atdrJpiccRd5LDC4ciroYI9d7C+QpE7bbB9FyhUxFAJKIIMvyC6I+NhSaJHdYL/bkgg4owyBJ+coRqtU6JB8hqPpkEDFI4GYAAAAASUVORK5CYII=",
+    "https://r.test/seedream/layer_15.png": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAYAAAD+Bd/7AAAA0UlEQVR4nAHGADn/AQXymtdxPiVLNlKr6b+Z3LmkNH+6UOGf8YQuYdE9D5chAFlF/rgCEbwAADL/xbjzvmPt/xZsXK/vSQRhmkiA7ARCAQ+VUy4K/nhOBGTP8wDbquUsONG/r3shMR/+Fva48x7+AaBEQznWk4n+7aLH/sbpqeKyLw2p8+vWJtpFH8wZ3PU1AEDcuOudYQrdKt4Ok4V3FtBFbcqjOIIa5nG2Aw3uVtl8ADBQtN9f9KtE6APQb0fx/jls8T+/DXjGpPcgz6VymPEsOZ1k/nnk0E4AAAAASUVORK5CYII=",
+    "https://r.test/seedream/layer_16.png": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAYAAAD+Bd/7AAAA0UlEQVR4nAHGADn/ARW8CXOPOItsHRbA3wDB4zrBfBFPQAiSExprlh+yEP9bAeQG6uQmwC/K1lHVXbvpq6cgvO5XNpS/E+4+DOWlRyxKABI6FYuhaU9+FVsMNlHkWyjkV8FV1tJ5zUU3HHdJDw3jAD4Kh2G1o/XKw8lexK+8y2jVAfffPt4mzQQpihcDJxFbAeVoBV8sT1gauFSxnANskIAp5OOCAg7L8kyCEzVT9y+mBL/0N1dQvgY3fhE4P0Dm4PzkP/RE81ox+zJ7FxPBjDDvh0dXz70sJcEAAAAASUVORK5CYII=",
+    "https://r.test/seedream/layer_2.png": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAYAAAD+Bd/7AAAA0UlEQVR4nAHGADn/ABOSSey9Mej/Cd2+3slaHTY/wE4xUv1BxotdwCAZH18fAkEFQzt37kjroMwid3fPhuNK/BHz6Ju881O4MrQRmOINAE6dN9niE0sBNj9ACKw8/4TprsUsES9pz2POhdGny7EaAV9bYBoYPhGW6dVTFxOxJli+7iIaf3lkCTVC3z0ebyHAAnULYL+/bu4Q2zrcvtEukkdICSJQRQW1tMiAVPMCM4MNAr592R2tlpobo3zNycjqsRDnT/D6YW3H4OvYDHjdHgz7NV5ccWZjeAsAAAAASUVORK5CYII=",
+    "https://r.test/seedream/layer_3.png": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAYAAAD+Bd/7AAAA0UlEQVR4nAHGADn/ANE7WsJzlA5zOwQzUJvBz6a3Ja2QUTkjMIqhN5QRsMUxAiO4B57P8HCm29vgWCIwGafA0jwhxVUt1OhmWSJUH3SHAK45ch7dGPI+SVsCliCLJgPejFtiH4/3hiGo+SGR+5nNAiBhdAfFaVEF+svgNJBYBYlmAl4a8ugCn2orTsbvSN3uADmjpv5KAijPzsPlcHBQSwKqnwdsQlVgCCc9MMganc5BAY9SIqQUQeZtxqhb9+vr9TP8tTOGb6QBi9oHQwe/b4w+DZpY9uD8y+oAAAAASUVORK5CYII=",
+    "https://r.test/seedream/layer_4.png": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAYAAAD+Bd/7AAAA0UlEQVR4nAHGADn/AIvV+YMpm60LJfcFOpE8nxIiRYtObNsm0EkdEFikgLajBKX9NId/B5l4dgW66SITSUXdio7s1eqceRUPAtYlE95CAFZdBY8ZzTQBuY7o4Gaoinxz/A5MC4b1MFltIC4hQ8hTAtSHwv+qAI1SVpa89BH8MGT7zPKHBmkoRxwG/+sKeshOAebDG88H/vv2kAIJZTzFCiEOH0e5CQDUHgGLAVpZ0/4jBKiHk/35ecVE7Xu+DkHaoYOvybVA4iVkLbXxvMAHX1lPFG5aE0rHY8EAAAAASUVORK5CYII=",
+    "https://r.test/seedream/layer_5.png": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAYAAAD+Bd/7AAAA0UlEQVR4nAHGADn/ACfMFHVNEA8joxsPRZeoL8v1uE/x7ibrON1zrOOMTja1ASOr6887Ga/nCnbl6rlXvBw8KhylxA7cSzg3K+51C7PLBFUQQFdQHTAf+1WWfOQzIAHm/nXW+pwpYEqNQ3EB8S2qAP2clhd7AajIix36H6mW3wYmSmkIvpdWAAnLLXU9vAfRAk7Rh5fU/dr/xXVCPv/huZGDbcHzNfMk1O0OsOfwvdZ+AUAg2RZkA4eRkvHiwliouCdOMFHgza2LMQUak7UETRSbUlpdlmBXq80AAAAASUVORK5CYII=",
+    "https://r.test/seedream/layer_6.png": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAYAAAD+Bd/7AAAA0UlEQVR4nAHGADn/AbQg3Oj7Y+ngZVNHbOyx6tChU391FggGmAjSNFO7XpFGATK5xIH/u+fuwMQqRaFCsAKCfRoUcXqboD2HR+IhD9beBPTPL16VnMMSsPvRex+k4u7cbrzYVUuOBQPrOAcSG73gAIcVR1z7Zv3oBSVZTa0XeB/BPwstmhudek2LKfuvGjrTANW1m/pHIDvs6AneIZP6On20qVXsCzLr640MYJIUhvfEACM39Lmf0mguNJzPqrg3L9q4GbMcyImCa5Rr7pnj4aIc+a1h/e1ohpMAAAAASUVORK5CYII=",
+    "https://r.test/seedream/layer_7.png": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAYAAAD+Bd/7AAAA0UlEQVR4nAHGADn/AaFDmmI+EbXVHRwgGPX/n9bnsTXaeyHZllprFOXe29cWAEa031lmzY0NuzGTlf47OnNLqPGj3DgFvNjWogDP8NuEAE+8Yu5yVHJPUY3eyNsG6JYVMA0OAau8LuXgMeYs91FuASRlfLTsZV1ee0DHuU0i1iLKE6I2wARTE+M2G24eylJyACUsxwWOTT5ALjHC6ajvzJqV9WBBB+rUcJ49ZRFezjCrAM8Tt1Rur0piFBjgSv+/NRtzCiEeTHDGMhTl/lU6NpsnK85bueFDY/MAAAAASUVORK5CYII=",
+    "https://r.test/seedream/layer_8.png": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAYAAAD+Bd/7AAAA0UlEQVR4nAHGADn/ACKw0zilGRaNT+gXcJK+zA9/RjHYwKe3icwa02khgqNFBNfB1Erm4ek15BFNeNQgzxu1lOwHKGY82TN+A+9kSdvwATTQ/On6VHqToomO3+4LMOCbzqfuKjJpwLs1/tfPlfbvAmwIfRtF7S6rKTmAtBXMB6UXiRklAhUToTRoLt+p69+MBDs8ximNyu1hGnuKUgk/grr2MbQmtkXaI/bDIWsD4XUSAEOsNHAgMSPwK316qv7voLdlnxxb+JXjLCDpf9ZFCBEF2LBfC0MC1CMAAAAASUVORK5CYII=",
+    "https://r.test/seedream/layer_9.png": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAYAAAD+Bd/7AAAA0UlEQVR4nAHGADn/Af6Iunz0IHEmgIMjD8CGVcAucgVqzf0DAdVUAazcwrpaAIrrQIprPtI8/tpA/5kvvEwDtwTS8nJTMkaDwH2sERgoAHmG1+7WyPAtzj65Ggki4wSdorH+LZpR3GQ5LQVRQxlJBJYZ3xriU6SVsjGBMdSQUqQw3l3DmYb5NOsqDZwxPxGRASIONpnW4Er9h5nyzwARDLSAxv0hjmSFVqaO3+TFeDkoAP08UFWrZA92YvyT7ztuE7YPYyxySjbhPYP/bFe4xh00+LJcHOtQXnsAAAAASUVORK5CYII="
+   },
+   "gets": [
+    {
+     "status": 200,
+     "url": "https://r.test/seedream/layer_0.png"
+    },
+    {
+     "status": 200,
+     "url": "https://r.test/seedream/layer_1.png"
+    },
+    {
+     "status": 200,
+     "url": "https://r.test/seedream/layer_2.png"
+    },
+    {
+     "status": 200,
+     "url": "https://r.test/seedream/layer_3.png"
+    },
+    {
+     "status": 200,
+     "url": "https://r.test/seedream/layer_4.png"
+    },
+    {
+     "status": 200,
+     "url": "https://r.test/seedream/layer_5.png"
+    },
+    {
+     "status": 200,
+     "url": "https://r.test/seedream/layer_6.png"
+    },
+    {
+     "status": 200,
+     "url": "https://r.test/seedream/layer_7.png"
+    },
+    {
+     "status": 200,
+     "url": "https://r.test/seedream/layer_8.png"
+    },
+    {
+     "status": 200,
+     "url": "https://r.test/seedream/layer_9.png"
+    },
+    {
+     "status": 200,
+     "url": "https://r.test/seedream/layer_10.png"
+    },
+    {
+     "status": 200,
+     "url": "https://r.test/seedream/layer_11.png"
+    },
+    {
+     "status": 200,
+     "url": "https://r.test/seedream/layer_12.png"
+    },
+    {
+     "status": 200,
+     "url": "https://r.test/seedream/layer_13.png"
+    },
+    {
+     "status": 200,
+     "url": "https://r.test/seedream/layer_14.png"
+    },
+    {
+     "status": 200,
+     "url": "https://r.test/seedream/layer_15.png"
+    },
+    {
+     "status": 200,
+     "url": "https://r.test/seedream/layer_16.png"
+    },
+    {
+     "status": 200,
+     "url": "https://r.test/seedream/flat.png"
+    }
+   ],
+   "name": "seedream \u00b7 17 layers",
+   "output": [
+    {
+     "image": "https://r.test/seedream/flat.png"
+    },
+    "{\"source\": \"seedream\", \"width\": 64, \"height\": 48, \"layers\": [{\"filename\": \"seedream_layer_00001_.png\", \"z_index\": 0, \"box\": null, \"name\": \"\", \"description\": \"\"}, {\"filename\": \"seedream_layer_00002_.png\", \"z_index\": 1, \"box\": [1, 2, 33, 25], \"name\": \"layer 1\", \"description\": \"element number 1\"}, {\"filename\": \"seedream_layer_00003_.png\", \"z_index\": 2, \"box\": [2, 4, 34, 26], \"name\": \"layer 2\", \"description\": \"element number 2\"}, {\"filename\": \"seedream_layer_00004_.png\", \"z_index\": 3, \"box\": [3, 6, 35, 27], \"name\": \"layer 3\", \"description\": \"element number 3\"}, {\"filename\": \"seedream_layer_00005_.png\", \"z_index\": 4, \"box\": [4, 8, 36, 28], \"name\": \"layer 4\", \"description\": \"element number 4\"}, {\"filename\": \"seedream_layer_00006_.png\", \"z_index\": 5, \"box\": [5, 10, 37, 29], \"name\": \"layer 5\", \"description\": \"element number 5\"}, {\"filename\": \"seedream_layer_00007_.png\", \"z_index\": 6, \"box\": [6, 12, 38, 30], \"name\": \"layer 6\", \"description\": \"element number 6\"}, {\"filename\": \"seedream_layer_00008_.png\", \"z_index\": 7, \"box\": [7, 14, 39, 31], \"name\": \"layer 7\", \"description\": \"element number 7\"}, {\"filename\": \"seedream_layer_00009_.png\", \"z_index\": 8, \"box\": [8, 16, 40, 32], \"name\": \"layer 8\", \"description\": \"element number 8\"}, {\"filename\": \"seedream_layer_00010_.png\", \"z_index\": 9, \"box\": [9, 18, 41, 33], \"name\": \"layer 9\", \"description\": \"element number 9\"}, {\"filename\": \"seedream_layer_00011_.png\", \"z_index\": 10, \"box\": [10, 20, 42, 34], \"name\": \"layer 10\", \"description\": \"element number 10\"}, {\"filename\": \"seedream_layer_00012_.png\", \"z_index\": 11, \"box\": [11, 22, 43, 35], \"name\": \"layer 11\", \"description\": \"element number 11\"}, {\"filename\": \"seedream_layer_00013_.png\", \"z_index\": 12, \"box\": [12, 24, 44, 36], \"name\": \"layer 12\", \"description\": \"element number 12\"}, {\"filename\": \"seedream_layer_00014_.png\", \"z_index\": 13, \"box\": [13, 26, 45, 37], \"name\": \"layer 13\", \"description\": \"element number 13\"}, {\"filename\": \"seedream_layer_00015_.png\", \"z_index\": 14, \"box\": [14, 28, 46, 38], \"name\": \"layer 14\", \"description\": \"element number 14\"}, {\"filename\": \"seedream_layer_00016_.png\", \"z_index\": 15, \"box\": [15, 30, 47, 39], \"name\": \"layer 15\", \"description\": \"element number 15\"}, {\"filename\": \"seedream_layer_00017_.png\", \"z_index\": 16, \"box\": [16, 32, 48, 40], \"name\": \"layer 16\", \"description\": \"element number 16\"}]}"
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": {
+    "animated": [
+     false
+    ],
+    "images": [
+     {
+      "image": {
+       "image": "https://r.test/seedream/flat.png"
+      },
+      "prefix": "seedream_layerize"
+     }
+    ],
+    "text": [
+     "{\"source\": \"seedream\", \"width\": 64, \"height\": 48, \"layers\": [{\"filename\": \"seedream_layer_00001_.png\", \"z_index\": 0, \"box\": null, \"name\": \"\", \"description\": \"\"}, {\"filename\": \"seedream_layer_00002_.png\", \"z_index\": 1, \"box\": [1, 2, 33, 25], \"name\": \"layer 1\", \"description\": \"element number 1\"}, {\"filename\": \"seedream_layer_00003_.png\", \"z_index\": 2, \"box\": [2, 4, 34, 26], \"name\": \"layer 2\", \"description\": \"element number 2\"}, {\"filename\": \"seedream_layer_00004_.png\", \"z_index\": 3, \"box\": [3, 6, 35, 27], \"name\": \"layer 3\", \"description\": \"element number 3\"}, {\"filename\": \"seedream_layer_00005_.png\", \"z_index\": 4, \"box\": [4, 8, 36, 28], \"name\": \"layer 4\", \"description\": \"element number 4\"}, {\"filename\": \"seedream_layer_00006_.png\", \"z_index\": 5, \"box\": [5, 10, 37, 29], \"name\": \"layer 5\", \"description\": \"element number 5\"}, {\"filename\": \"seedream_layer_00007_.png\", \"z_index\": 6, \"box\": [6, 12, 38, 30], \"name\": \"layer 6\", \"description\": \"element number 6\"}, {\"filename\": \"seedream_layer_00008_.png\", \"z_index\": 7, \"box\": [7, 14, 39, 31], \"name\": \"layer 7\", \"description\": \"element number 7\"}, {\"filename\": \"seedream_layer_00009_.png\", \"z_index\": 8, \"box\": [8, 16, 40, 32], \"name\": \"layer 8\", \"description\": \"element number 8\"}, {\"filename\": \"seedream_layer_00010_.png\", \"z_index\": 9, \"box\": [9, 18, 41, 33], \"name\": \"layer 9\", \"description\": \"element number 9\"}, {\"filename\": \"seedream_layer_00011_.png\", \"z_index\": 10, \"box\": [10, 20, 42, 34], \"name\": \"layer 10\", \"description\": \"element number 10\"}, {\"filename\": \"seedream_layer_00012_.png\", \"z_index\": 11, \"box\": [11, 22, 43, 35], \"name\": \"layer 11\", \"description\": \"element number 11\"}, {\"filename\": \"seedream_layer_00013_.png\", \"z_index\": 12, \"box\": [12, 24, 44, 36], \"name\": \"layer 12\", \"description\": \"element number 12\"}, {\"filename\": \"seedream_layer_00014_.png\", \"z_index\": 13, \"box\": [13, 26, 45, 37], \"name\": \"layer 13\", \"description\": \"element number 13\"}, {\"filename\": \"seedream_layer_00015_.png\", \"z_index\": 14, \"box\": [14, 28, 46, 38], \"name\": \"layer 14\", \"description\": \"element number 14\"}, {\"filename\": \"seedream_layer_00016_.png\", \"z_index\": 15, \"box\": [15, 30, 47, 39], \"name\": \"layer 15\", \"description\": \"element number 15\"}, {\"filename\": \"seedream_layer_00017_.png\", \"z_index\": 16, \"box\": [16, 32, 48, 40], \"name\": \"layer 16\", \"description\": \"element number 16\"}]}"
+    ]
+   },
+   "widgets": {
+    "image_size": "auto",
+    "prompt": ""
+   }
+  },
+  {
+   "answers": [
+    {
+     "__body__": "{\"images\": [{\"url\": \"https://r.test/seedream/flat.png\", \"width\": 64, \"height\": 48}], \"layers\": [{\"image\": {\"url\": \"https://r.test/seedream/layer_0.png\", \"width\": 64, \"height\": 48, \"content_type\": \"image/png\"}, \"z_index\": 0}, {\"image\": {\"url\": \"https://r.test/seedream/layer_1.png\", \"width\": 64, \"height\": 48, \"content_type\": \"image/png\"}, \"z_index\": 1, \"bounding_box\": null, \"name\": \"layer 1\", \"description\": \"element number 1\"}, {\"image\": {\"url\": \"https://r.test/seedream/layer_2.png\", \"width\": 64, \"height\": 48, \"content_type\": \"image/png\"}, \"z_index\": 2, \"bounding_box\": {\"absolute\": [2, 4, 34, 26], \"normalized\": [20, 40, 502, 502]}, \"name\": \"layer 2\", \"description\": \"element number 2\"}]}"
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "bytedance/seedream/v5/pro/layerize",
+     "payload": {
+      "image_size": "auto",
+      "image_url": "IMG:image",
+      "prompt": ""
+     },
+     "payload_json": "{\"image_size\": \"auto\", \"image_url\": \"IMG:image\", \"prompt\": \"\"}",
+     "provider": "fal"
+    }
+   ],
+   "class_type": "SeedreamLayerizeNode",
+   "files": {
+    "https://r.test/seedream/flat.png": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAYAAAD+Bd/7AAAA0UlEQVR4nAHGADn/AeoQfZB/MTX9eM2QkYbd2Tw5T2VMqvdQc1d6pDX9qCpHAOxQa/vdIFdoBC3vmzlhe+zoMvGp6JF+IxNMxV/kN9RhAQnW9XtoC27c4Lse1wcQ0lHFzwydW/J3wHsyyKMdLXfRBErJGSBIKswpWecZK/nRIjmFzP2ODNAmYmFWh8umx6DKAPcRWZYO9zB/5PWH9Hbnx6jm9Axm3blJyd4aagQCUac9AGiu37cGaztEVMg8InHa+S8EIZaaBnD3v0PcdCXFUCgRzXBgD9v8u84AAAAASUVORK5CYII=",
+    "https://r.test/seedream/layer_0.png": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAYAAAD+Bd/7AAAA0UlEQVR4nAHGADn/AcOqdlUC5xdvP+58HEvNmnU00pq7WnIxFdtj0uSHPwlSABuIonMNXd4dmsxKNi/QC/zKdQsrRSfqzdmPDgftpFpHASEUN0GyF5/xqEUJh3BiB3GimpljNDpDCSCDq76M5gYIAs9n6Th80dIM+VRdK3cs44z9SZDOjaiYPEPsRxlfjh7xBJRHVsVA2fOQbLb1DOazLqcRHhUjc6NmSRBzE+TZHqTbAAhxVM1MDcANd4oMfsVfFqde+iAUYb1cjfgs4AieNpvHwTNXmor/iCYAAAAASUVORK5CYII=",
+    "https://r.test/seedream/layer_1.png": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAYAAAD+Bd/7AAAA0UlEQVR4nAHGADn/ATkMjH05O6ivZsnbA5dn/jZn+dgpLeHzIIv+lv6m4FSFAn6k+5l5+I38vqlT9Kj9h8Ohw90A5Wl7DyccGngjTpG7Agva6ZAxNk95N9C/SYr4a6JzFsW5lsyIDwQFvtjXm+ViAFHYIMXD74AFOoiuOZbeUOgBhls2mGVOv1IApfoJObmdAXodeyix26gYFvsxR5d5Ehj0U3pIcb+TOXCMAlBWGqkFAqjzLvxOltUtAv8oa/j1ypIQ9vjrsp2//yGjwg9fPcfS5oVjIXyHhz0AAAAASUVORK5CYII=",
+    "https://r.test/seedream/layer_2.png": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAYAAAD+Bd/7AAAA0UlEQVR4nAHGADn/ABOSSey9Mej/Cd2+3slaHTY/wE4xUv1BxotdwCAZH18fAkEFQzt37kjroMwid3fPhuNK/BHz6Ju881O4MrQRmOINAE6dN9niE0sBNj9ACKw8/4TprsUsES9pz2POhdGny7EaAV9bYBoYPhGW6dVTFxOxJli+7iIaf3lkCTVC3z0ebyHAAnULYL+/bu4Q2zrcvtEukkdICSJQRQW1tMiAVPMCM4MNAr592R2tlpobo3zNycjqsRDnT/D6YW3H4OvYDHjdHgz7NV5ccWZjeAsAAAAASUVORK5CYII="
+   },
+   "gets": [
+    {
+     "status": 200,
+     "url": "https://r.test/seedream/layer_0.png"
+    },
+    {
+     "status": 200,
+     "url": "https://r.test/seedream/layer_1.png"
+    },
+    {
+     "status": 200,
+     "url": "https://r.test/seedream/layer_2.png"
+    },
+    {
+     "status": 200,
+     "url": "https://r.test/seedream/flat.png"
+    }
+   ],
+   "name": "seedream \u00b7 a layer without bounding_box",
+   "output": [
+    {
+     "image": "https://r.test/seedream/flat.png"
+    },
+    "{\"source\": \"seedream\", \"width\": 64, \"height\": 48, \"layers\": [{\"filename\": \"seedream_layer_00001_.png\", \"z_index\": 0, \"box\": null, \"name\": \"\", \"description\": \"\"}, {\"filename\": \"seedream_layer_00002_.png\", \"z_index\": 1, \"box\": null, \"name\": \"layer 1\", \"description\": \"element number 1\"}, {\"filename\": \"seedream_layer_00003_.png\", \"z_index\": 2, \"box\": [2, 4, 34, 26], \"name\": \"layer 2\", \"description\": \"element number 2\"}]}"
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": {
+    "animated": [
+     false
+    ],
+    "images": [
+     {
+      "image": {
+       "image": "https://r.test/seedream/flat.png"
+      },
+      "prefix": "seedream_layerize"
+     }
+    ],
+    "text": [
+     "{\"source\": \"seedream\", \"width\": 64, \"height\": 48, \"layers\": [{\"filename\": \"seedream_layer_00001_.png\", \"z_index\": 0, \"box\": null, \"name\": \"\", \"description\": \"\"}, {\"filename\": \"seedream_layer_00002_.png\", \"z_index\": 1, \"box\": null, \"name\": \"layer 1\", \"description\": \"element number 1\"}, {\"filename\": \"seedream_layer_00003_.png\", \"z_index\": 2, \"box\": [2, 4, 34, 26], \"name\": \"layer 2\", \"description\": \"element number 2\"}]}"
+    ]
+   },
+   "widgets": {
+    "image_size": "auto",
+    "prompt": ""
+   }
+  },
+  {
+   "answers": [
+    {
+     "__body__": "{\"images\": [{\"url\": \"https://r.test/seedream/flat.png\", \"width\": 64, \"height\": 48}], \"layers\": [{\"image\": {\"url\": \"https://r.test/seedream/layer_0.png\", \"width\": 64, \"height\": 48, \"content_type\": \"image/png\"}, \"z_index\": 0}, \"not a layer\", 7, {\"image\": {\"url\": \"https://r.test/seedream/layer_1.png\", \"width\": 64, \"height\": 48, \"content_type\": \"image/png\"}, \"z_index\": 1, \"bounding_box\": {\"absolute\": [1, 2, 33, 25], \"normalized\": [10, 20, 501, 501]}, \"name\": \"layer 1\", \"description\": \"element number 1\"}]}"
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "bytedance/seedream/v5/pro/layerize",
+     "payload": {
+      "image_size": "auto",
+      "image_url": "IMG:image",
+      "prompt": ""
+     },
+     "payload_json": "{\"image_size\": \"auto\", \"image_url\": \"IMG:image\", \"prompt\": \"\"}",
+     "provider": "fal"
+    }
+   ],
+   "class_type": "SeedreamLayerizeNode",
+   "files": {
+    "https://r.test/seedream/flat.png": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAYAAAD+Bd/7AAAA0UlEQVR4nAHGADn/AeoQfZB/MTX9eM2QkYbd2Tw5T2VMqvdQc1d6pDX9qCpHAOxQa/vdIFdoBC3vmzlhe+zoMvGp6JF+IxNMxV/kN9RhAQnW9XtoC27c4Lse1wcQ0lHFzwydW/J3wHsyyKMdLXfRBErJGSBIKswpWecZK/nRIjmFzP2ODNAmYmFWh8umx6DKAPcRWZYO9zB/5PWH9Hbnx6jm9Axm3blJyd4aagQCUac9AGiu37cGaztEVMg8InHa+S8EIZaaBnD3v0PcdCXFUCgRzXBgD9v8u84AAAAASUVORK5CYII=",
+    "https://r.test/seedream/layer_0.png": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAYAAAD+Bd/7AAAA0UlEQVR4nAHGADn/AcOqdlUC5xdvP+58HEvNmnU00pq7WnIxFdtj0uSHPwlSABuIonMNXd4dmsxKNi/QC/zKdQsrRSfqzdmPDgftpFpHASEUN0GyF5/xqEUJh3BiB3GimpljNDpDCSCDq76M5gYIAs9n6Th80dIM+VRdK3cs44z9SZDOjaiYPEPsRxlfjh7xBJRHVsVA2fOQbLb1DOazLqcRHhUjc6NmSRBzE+TZHqTbAAhxVM1MDcANd4oMfsVfFqde+iAUYb1cjfgs4AieNpvHwTNXmor/iCYAAAAASUVORK5CYII=",
+    "https://r.test/seedream/layer_1.png": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAYAAAD+Bd/7AAAA0UlEQVR4nAHGADn/ANE7WsJzlA5zOwQzUJvBz6a3Ja2QUTkjMIqhN5QRsMUxAiO4B57P8HCm29vgWCIwGafA0jwhxVUt1OhmWSJUH3SHAK45ch7dGPI+SVsCliCLJgPejFtiH4/3hiGo+SGR+5nNAiBhdAfFaVEF+svgNJBYBYlmAl4a8ugCn2orTsbvSN3uADmjpv5KAijPzsPlcHBQSwKqnwdsQlVgCCc9MMganc5BAY9SIqQUQeZtxqhb9+vr9TP8tTOGb6QBi9oHQwe/b4w+DZpY9uD8y+oAAAAASUVORK5CYII="
+   },
+   "gets": [
+    {
+     "status": 200,
+     "url": "https://r.test/seedream/layer_0.png"
+    },
+    {
+     "status": 200,
+     "url": "https://r.test/seedream/layer_1.png"
+    },
+    {
+     "status": 200,
+     "url": "https://r.test/seedream/flat.png"
+    }
+   ],
+   "name": "seedream \u00b7 a non-dict layer",
+   "output": [
+    {
+     "image": "https://r.test/seedream/flat.png"
+    },
+    "{\"source\": \"seedream\", \"width\": 64, \"height\": 48, \"layers\": [{\"filename\": \"seedream_layer_00001_.png\", \"z_index\": 0, \"box\": null, \"name\": \"\", \"description\": \"\"}, {\"filename\": \"seedream_layer_00002_.png\", \"z_index\": 1, \"box\": [1, 2, 33, 25], \"name\": \"layer 1\", \"description\": \"element number 1\"}]}"
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": {
+    "animated": [
+     false
+    ],
+    "images": [
+     {
+      "image": {
+       "image": "https://r.test/seedream/flat.png"
+      },
+      "prefix": "seedream_layerize"
+     }
+    ],
+    "text": [
+     "{\"source\": \"seedream\", \"width\": 64, \"height\": 48, \"layers\": [{\"filename\": \"seedream_layer_00001_.png\", \"z_index\": 0, \"box\": null, \"name\": \"\", \"description\": \"\"}, {\"filename\": \"seedream_layer_00002_.png\", \"z_index\": 1, \"box\": [1, 2, 33, 25], \"name\": \"layer 1\", \"description\": \"element number 1\"}]}"
+    ]
+   },
+   "widgets": {
+    "image_size": "auto",
+    "prompt": ""
+   }
+  },
+  {
+   "answers": [
+    {
+     "__body__": "{\"images\": [], \"layers\": [{\"image\": {\"url\": \"https://r.test/seedream/layer_0.png\", \"width\": 64, \"height\": 48, \"content_type\": \"image/png\"}, \"z_index\": 0}, {\"image\": {\"url\": \"https://r.test/seedream/layer_1.png\", \"width\": 64, \"height\": 48, \"content_type\": \"image/png\"}, \"z_index\": 1, \"bounding_box\": {\"absolute\": [1, 2, 33, 25], \"normalized\": [10, 20, 501, 501]}, \"name\": \"layer 1\", \"description\": \"element number 1\"}]}"
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "bytedance/seedream/v5/pro/layerize",
+     "payload": {
+      "image_size": "auto",
+      "image_url": "IMG:image",
+      "prompt": ""
+     },
+     "payload_json": "{\"image_size\": \"auto\", \"image_url\": \"IMG:image\", \"prompt\": \"\"}",
+     "provider": "fal"
+    }
+   ],
+   "class_type": "SeedreamLayerizeNode",
+   "files": {
+    "https://r.test/seedream/layer_0.png": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAYAAAD+Bd/7AAAA0UlEQVR4nAHGADn/AcOqdlUC5xdvP+58HEvNmnU00pq7WnIxFdtj0uSHPwlSABuIonMNXd4dmsxKNi/QC/zKdQsrRSfqzdmPDgftpFpHASEUN0GyF5/xqEUJh3BiB3GimpljNDpDCSCDq76M5gYIAs9n6Th80dIM+VRdK3cs44z9SZDOjaiYPEPsRxlfjh7xBJRHVsVA2fOQbLb1DOazLqcRHhUjc6NmSRBzE+TZHqTbAAhxVM1MDcANd4oMfsVfFqde+iAUYb1cjfgs4AieNpvHwTNXmor/iCYAAAAASUVORK5CYII=",
+    "https://r.test/seedream/layer_1.png": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAYAAAD+Bd/7AAAA0UlEQVR4nAHGADn/ATkMjH05O6ivZsnbA5dn/jZn+dgpLeHzIIv+lv6m4FSFAn6k+5l5+I38vqlT9Kj9h8Ohw90A5Wl7DyccGngjTpG7Agva6ZAxNk95N9C/SYr4a6JzFsW5lsyIDwQFvtjXm+ViAFHYIMXD74AFOoiuOZbeUOgBhls2mGVOv1IApfoJObmdAXodeyix26gYFvsxR5d5Ehj0U3pIcb+TOXCMAlBWGqkFAqjzLvxOltUtAv8oa/j1ypIQ9vjrsp2//yGjwg9fPcfS5oVjIXyHhz0AAAAASUVORK5CYII="
+   },
+   "gets": [
+    {
+     "status": 200,
+     "url": "https://r.test/seedream/layer_0.png"
+    },
+    {
+     "status": 200,
+     "url": "https://r.test/seedream/layer_1.png"
+    }
+   ],
+   "name": "seedream \u00b7 no images (the input is the preview)",
+   "output": [
+    {
+     "image": "IMG:image"
+    },
+    "{\"source\": \"seedream\", \"width\": 64, \"height\": 48, \"layers\": [{\"filename\": \"seedream_layer_00001_.png\", \"z_index\": 0, \"box\": null, \"name\": \"\", \"description\": \"\"}, {\"filename\": \"seedream_layer_00002_.png\", \"z_index\": 1, \"box\": [1, 2, 33, 25], \"name\": \"layer 1\", \"description\": \"element number 1\"}]}"
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": {
+    "animated": [
+     false
+    ],
+    "images": [
+     {
+      "image": {
+       "image": "IMG:image"
+      },
+      "prefix": "seedream_layerize"
+     }
+    ],
+    "text": [
+     "{\"source\": \"seedream\", \"width\": 64, \"height\": 48, \"layers\": [{\"filename\": \"seedream_layer_00001_.png\", \"z_index\": 0, \"box\": null, \"name\": \"\", \"description\": \"\"}, {\"filename\": \"seedream_layer_00002_.png\", \"z_index\": 1, \"box\": [1, 2, 33, 25], \"name\": \"layer 1\", \"description\": \"element number 1\"}]}"
+    ]
+   },
+   "widgets": {
+    "image_size": "auto",
+    "prompt": ""
+   }
+  },
+  {
+   "answers": [
+    {
+     "__body__": "{\"images\": [{\"url\": \"https://r.test/seedream/flat.png\", \"width\": 64.0, \"height\": 48}], \"layers\": [{\"image\": {\"url\": \"https://r.test/seedream/layer_0.png\", \"width\": 64, \"height\": 48}, \"z_index\": 0}, {\"image\": {\"url\": \"https://r.test/seedream/layer_1.png\"}, \"z_index\": 1.0, \"bounding_box\": {\"absolute\": [1.5, 2.0, 30, 1e1]}, \"name\": \"Caf\u00e9 \u2014 \u732b\", \"description\": null}, {\"image\": {\"width\": 3}, \"z_index\": 2}, {\"image\": {\"url\": \"https://r.test/seedream/layer_3.png\"}, \"z_index\": \"3\", \"bounding_box\": {\"absolute\": [1, 2, 3]}, \"name\": 5, \"description\": \"\ud83d\ude00 emoji\"}]}"
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "bytedance/seedream/v5/pro/layerize",
+     "payload": {
+      "image_size": "auto",
+      "image_url": "IMG:image",
+      "prompt": ""
+     },
+     "payload_json": "{\"image_size\": \"auto\", \"image_url\": \"IMG:image\", \"prompt\": \"\"}",
+     "provider": "fal"
+    }
+   ],
+   "class_type": "SeedreamLayerizeNode",
+   "files": {
+    "https://r.test/seedream/flat.png": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAYAAAD+Bd/7AAAA0UlEQVR4nAHGADn/AeoQfZB/MTX9eM2QkYbd2Tw5T2VMqvdQc1d6pDX9qCpHAOxQa/vdIFdoBC3vmzlhe+zoMvGp6JF+IxNMxV/kN9RhAQnW9XtoC27c4Lse1wcQ0lHFzwydW/J3wHsyyKMdLXfRBErJGSBIKswpWecZK/nRIjmFzP2ODNAmYmFWh8umx6DKAPcRWZYO9zB/5PWH9Hbnx6jm9Axm3blJyd4aagQCUac9AGiu37cGaztEVMg8InHa+S8EIZaaBnD3v0PcdCXFUCgRzXBgD9v8u84AAAAASUVORK5CYII=",
+    "https://r.test/seedream/layer_0.png": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAYAAAD+Bd/7AAAA0UlEQVR4nAHGADn/AcOqdlUC5xdvP+58HEvNmnU00pq7WnIxFdtj0uSHPwlSABuIonMNXd4dmsxKNi/QC/zKdQsrRSfqzdmPDgftpFpHASEUN0GyF5/xqEUJh3BiB3GimpljNDpDCSCDq76M5gYIAs9n6Th80dIM+VRdK3cs44z9SZDOjaiYPEPsRxlfjh7xBJRHVsVA2fOQbLb1DOazLqcRHhUjc6NmSRBzE+TZHqTbAAhxVM1MDcANd4oMfsVfFqde+iAUYb1cjfgs4AieNpvHwTNXmor/iCYAAAAASUVORK5CYII=",
+    "https://r.test/seedream/layer_1.png": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAYAAAD+Bd/7AAAA0UlEQVR4nAHGADn/ATkMjH05O6ivZsnbA5dn/jZn+dgpLeHzIIv+lv6m4FSFAn6k+5l5+I38vqlT9Kj9h8Ohw90A5Wl7DyccGngjTpG7Agva6ZAxNk95N9C/SYr4a6JzFsW5lsyIDwQFvtjXm+ViAFHYIMXD74AFOoiuOZbeUOgBhls2mGVOv1IApfoJObmdAXodeyix26gYFvsxR5d5Ehj0U3pIcb+TOXCMAlBWGqkFAqjzLvxOltUtAv8oa/j1ypIQ9vjrsp2//yGjwg9fPcfS5oVjIXyHhz0AAAAASUVORK5CYII=",
+    "https://r.test/seedream/layer_3.png": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAYAAAD+Bd/7AAAA0UlEQVR4nAHGADn/ANE7WsJzlA5zOwQzUJvBz6a3Ja2QUTkjMIqhN5QRsMUxAiO4B57P8HCm29vgWCIwGafA0jwhxVUt1OhmWSJUH3SHAK45ch7dGPI+SVsCliCLJgPejFtiH4/3hiGo+SGR+5nNAiBhdAfFaVEF+svgNJBYBYlmAl4a8ugCn2orTsbvSN3uADmjpv5KAijPzsPlcHBQSwKqnwdsQlVgCCc9MMganc5BAY9SIqQUQeZtxqhb9+vr9TP8tTOGb6QBi9oHQwe/b4w+DZpY9uD8y+oAAAAASUVORK5CYII="
+   },
+   "gets": [
+    {
+     "status": 200,
+     "url": "https://r.test/seedream/layer_0.png"
+    },
+    {
+     "status": 200,
+     "url": "https://r.test/seedream/layer_1.png"
+    },
+    {
+     "status": 200,
+     "url": "https://r.test/seedream/layer_3.png"
+    },
+    {
+     "status": 200,
+     "url": "https://r.test/seedream/flat.png"
+    }
+   ],
+   "name": "seedream \u00b7 odd numbers and names",
+   "output": [
+    {
+     "image": "https://r.test/seedream/flat.png"
+    },
+    "{\"source\": \"seedream\", \"width\": 64, \"height\": 48, \"layers\": [{\"filename\": \"seedream_layer_00001_.png\", \"z_index\": 0, \"box\": null, \"name\": \"\", \"description\": \"\"}, {\"filename\": \"seedream_layer_00002_.png\", \"z_index\": 1, \"box\": [1.5, 2.0, 30, 10.0], \"name\": \"Caf\\u00e9 \\u2014 \\u732b\", \"description\": \"\"}, {\"filename\": \"seedream_layer_00003_.png\", \"z_index\": 3, \"box\": null, \"name\": \"5\", \"description\": \"\\ud83d\\ude00 emoji\"}]}"
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": {
+    "animated": [
+     false
+    ],
+    "images": [
+     {
+      "image": {
+       "image": "https://r.test/seedream/flat.png"
+      },
+      "prefix": "seedream_layerize"
+     }
+    ],
+    "text": [
+     "{\"source\": \"seedream\", \"width\": 64, \"height\": 48, \"layers\": [{\"filename\": \"seedream_layer_00001_.png\", \"z_index\": 0, \"box\": null, \"name\": \"\", \"description\": \"\"}, {\"filename\": \"seedream_layer_00002_.png\", \"z_index\": 1, \"box\": [1.5, 2.0, 30, 10.0], \"name\": \"Caf\\u00e9 \\u2014 \\u732b\", \"description\": \"\"}, {\"filename\": \"seedream_layer_00003_.png\", \"z_index\": 3, \"box\": null, \"name\": \"5\", \"description\": \"\\ud83d\\ude00 emoji\"}]}"
+    ]
+   },
+   "widgets": {
+    "image_size": "auto",
+    "prompt": ""
+   }
+  },
+  {
+   "answers": [
+    {
+     "__body__": "{\"images\": [{\"url\": \"https://r.test/seedream/flat.png\", \"width\": 64, \"height\": 48}], \"layers\": [{\"image\": {\"url\": \"https://r.test/seedream/layer_0.png\"}, \"z_index\": 0}, {\"image\": {\"url\": \"https://r.test/seedream/layer_1.png\", \"width\": 64, \"height\": 48, \"content_type\": \"image/png\"}, \"z_index\": 1, \"bounding_box\": {\"absolute\": [1, 2, 33, 25], \"normalized\": [10, 20, 501, 501]}, \"name\": \"layer 1\", \"description\": \"element number 1\"}]}"
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "bytedance/seedream/v5/pro/layerize",
+     "payload": {
+      "image_size": "auto",
+      "image_url": "IMG:image",
+      "prompt": ""
+     },
+     "payload_json": "{\"image_size\": \"auto\", \"image_url\": \"IMG:image\", \"prompt\": \"\"}",
+     "provider": "fal"
+    }
+   ],
+   "class_type": "SeedreamLayerizeNode",
+   "files": {
+    "https://r.test/seedream/flat.png": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAYAAAD+Bd/7AAAA0UlEQVR4nAHGADn/AeoQfZB/MTX9eM2QkYbd2Tw5T2VMqvdQc1d6pDX9qCpHAOxQa/vdIFdoBC3vmzlhe+zoMvGp6JF+IxNMxV/kN9RhAQnW9XtoC27c4Lse1wcQ0lHFzwydW/J3wHsyyKMdLXfRBErJGSBIKswpWecZK/nRIjmFzP2ODNAmYmFWh8umx6DKAPcRWZYO9zB/5PWH9Hbnx6jm9Axm3blJyd4aagQCUac9AGiu37cGaztEVMg8InHa+S8EIZaaBnD3v0PcdCXFUCgRzXBgD9v8u84AAAAASUVORK5CYII=",
+    "https://r.test/seedream/layer_0.png": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAYAAAD+Bd/7AAAA0UlEQVR4nAHGADn/AcOqdlUC5xdvP+58HEvNmnU00pq7WnIxFdtj0uSHPwlSABuIonMNXd4dmsxKNi/QC/zKdQsrRSfqzdmPDgftpFpHASEUN0GyF5/xqEUJh3BiB3GimpljNDpDCSCDq76M5gYIAs9n6Th80dIM+VRdK3cs44z9SZDOjaiYPEPsRxlfjh7xBJRHVsVA2fOQbLb1DOazLqcRHhUjc6NmSRBzE+TZHqTbAAhxVM1MDcANd4oMfsVfFqde+iAUYb1cjfgs4AieNpvHwTNXmor/iCYAAAAASUVORK5CYII=",
+    "https://r.test/seedream/layer_1.png": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAYAAAD+Bd/7AAAA0UlEQVR4nAHGADn/ATkMjH05O6ivZsnbA5dn/jZn+dgpLeHzIIv+lv6m4FSFAn6k+5l5+I38vqlT9Kj9h8Ohw90A5Wl7DyccGngjTpG7Agva6ZAxNk95N9C/SYr4a6JzFsW5lsyIDwQFvtjXm+ViAFHYIMXD74AFOoiuOZbeUOgBhls2mGVOv1IApfoJObmdAXodeyix26gYFvsxR5d5Ehj0U3pIcb+TOXCMAlBWGqkFAqjzLvxOltUtAv8oa/j1ypIQ9vjrsp2//yGjwg9fPcfS5oVjIXyHhz0AAAAASUVORK5CYII="
+   },
+   "gets": [
+    {
+     "status": 200,
+     "url": "https://r.test/seedream/layer_0.png"
+    },
+    {
+     "status": 200,
+     "url": "https://r.test/seedream/layer_1.png"
+    },
+    {
+     "status": 200,
+     "url": "https://r.test/seedream/flat.png"
+    }
+   ],
+   "name": "seedream \u00b7 base without a width",
+   "output": [
+    {
+     "image": "https://r.test/seedream/flat.png"
+    },
+    "{\"source\": \"seedream\", \"width\": 64, \"height\": 48, \"layers\": [{\"filename\": \"seedream_layer_00001_.png\", \"z_index\": 0, \"box\": null, \"name\": \"\", \"description\": \"\"}, {\"filename\": \"seedream_layer_00002_.png\", \"z_index\": 1, \"box\": [1, 2, 33, 25], \"name\": \"layer 1\", \"description\": \"element number 1\"}]}"
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": {
+    "animated": [
+     false
+    ],
+    "images": [
+     {
+      "image": {
+       "image": "https://r.test/seedream/flat.png"
+      },
+      "prefix": "seedream_layerize"
+     }
+    ],
+    "text": [
+     "{\"source\": \"seedream\", \"width\": 64, \"height\": 48, \"layers\": [{\"filename\": \"seedream_layer_00001_.png\", \"z_index\": 0, \"box\": null, \"name\": \"\", \"description\": \"\"}, {\"filename\": \"seedream_layer_00002_.png\", \"z_index\": 1, \"box\": [1, 2, 33, 25], \"name\": \"layer 1\", \"description\": \"element number 1\"}]}"
+    ]
+   },
+   "widgets": {
+    "image_size": "auto",
+    "prompt": ""
+   }
+  },
+  {
+   "answers": [
+    {
+     "__body__": "{\"images\": [{\"url\": \"https://r.test/seedream/flat.png\", \"width\": 64, \"height\": 48}], \"layers\": null}"
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "bytedance/seedream/v5/pro/layerize",
+     "payload": {
+      "image_size": "auto",
+      "image_url": "IMG:image",
+      "prompt": ""
+     },
+     "payload_json": "{\"image_size\": \"auto\", \"image_url\": \"IMG:image\", \"prompt\": \"\"}",
+     "provider": "fal"
+    }
+   ],
+   "class_type": "SeedreamLayerizeNode",
+   "files": {
+    "https://r.test/seedream/flat.png": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAYAAAD+Bd/7AAAA0UlEQVR4nAHGADn/AeoQfZB/MTX9eM2QkYbd2Tw5T2VMqvdQc1d6pDX9qCpHAOxQa/vdIFdoBC3vmzlhe+zoMvGp6JF+IxNMxV/kN9RhAQnW9XtoC27c4Lse1wcQ0lHFzwydW/J3wHsyyKMdLXfRBErJGSBIKswpWecZK/nRIjmFzP2ODNAmYmFWh8umx6DKAPcRWZYO9zB/5PWH9Hbnx6jm9Axm3blJyd4aagQCUac9AGiu37cGaztEVMg8InHa+S8EIZaaBnD3v0PcdCXFUCgRzXBgD9v8u84AAAAASUVORK5CYII="
+   },
+   "gets": [
+    {
+     "status": 200,
+     "url": "https://r.test/seedream/flat.png"
+    }
+   ],
+   "name": "seedream \u00b7 no layers",
+   "output": [
+    {
+     "image": "https://r.test/seedream/flat.png"
+    },
+    "{\"source\": \"seedream\", \"width\": 64, \"height\": 48, \"layers\": []}"
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": {
+    "animated": [
+     false
+    ],
+    "images": [
+     {
+      "image": {
+       "image": "https://r.test/seedream/flat.png"
+      },
+      "prefix": "seedream_layerize"
+     }
+    ]
+   },
+   "widgets": {
+    "image_size": "auto",
+    "prompt": ""
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": [
+      "https://r.test/outpaint.png"
+     ]
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "black-forest-labs/flux-fill-pro",
+     "payload": {
+      "image": "IMG:image",
+      "outpaint": "Zoom out 1.5x",
+      "output_format": "png",
+      "prompt": "",
+      "safety_tolerance": 6
+     },
+     "payload_json": "{\"image\": \"IMG:image\", \"outpaint\": \"Zoom out 1.5x\", \"output_format\": \"png\", \"prompt\": \"\", \"safety_tolerance\": 6}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "OutpaintImageNode",
+   "files": {
+    "https://r.test/outpaint.png": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/Af6Iun5q7q+wygCsPwdj8j+vgDd7CnjQrwIE7PIM7I47QBjA8tk5jS/LnreYJGwPEXAAA7cE0vJyUzJGg8B9rBEYKHmG1+7WyPAtAM4+uRoJIuMEnaKx/i2aUdxkOS0FUUMZSQAPn7YIWxt7nQ1M/M7dsk5yDZCrwaYWSvUBkUA6EIJInXCg0AR36rjnnpEH3Ob4JhmafCdFMVii9kAAAAAASUVORK5CYII="
+   },
+   "gets": [
+    {
+     "status": 200,
+     "url": "https://r.test/outpaint.png"
+    }
+   ],
+   "name": "outpaint \u00b7 Flux Fill Zoom out 1.5x",
+   "output": [
+    {
+     "tensor": {
+      "sha256": "17febd89e2802ef36ba65340679c39c4eb5f870ff54fef439d62804c406eda82",
+      "shape": [
+       1,
+       6,
+       8,
+       3
+      ]
+     }
+    }
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "aspect_ratio": "16:9",
+    "direction": "Zoom out 1.5x",
+    "model": "Flux Fill",
+    "prompt": "",
+    "seed": 0
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": [
+      "https://r.test/outpaint.png"
+     ]
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "black-forest-labs/flux-fill-pro",
+     "payload": {
+      "image": "IMG:image",
+      "outpaint": "Zoom out 2x",
+      "output_format": "png",
+      "prompt": "",
+      "safety_tolerance": 6
+     },
+     "payload_json": "{\"image\": \"IMG:image\", \"outpaint\": \"Zoom out 2x\", \"output_format\": \"png\", \"prompt\": \"\", \"safety_tolerance\": 6}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "OutpaintImageNode",
+   "files": {
+    "https://r.test/outpaint.png": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/Af6Iun5q7q+wygCsPwdj8j+vgDd7CnjQrwIE7PIM7I47QBjA8tk5jS/LnreYJGwPEXAAA7cE0vJyUzJGg8B9rBEYKHmG1+7WyPAtAM4+uRoJIuMEnaKx/i2aUdxkOS0FUUMZSQAPn7YIWxt7nQ1M/M7dsk5yDZCrwaYWSvUBkUA6EIJInXCg0AR36rjnnpEH3Ob4JhmafCdFMVii9kAAAAAASUVORK5CYII="
+   },
+   "gets": [
+    {
+     "status": 200,
+     "url": "https://r.test/outpaint.png"
+    }
+   ],
+   "name": "outpaint \u00b7 Flux Fill Zoom out 2x",
+   "output": [
+    {
+     "tensor": {
+      "sha256": "17febd89e2802ef36ba65340679c39c4eb5f870ff54fef439d62804c406eda82",
+      "shape": [
+       1,
+       6,
+       8,
+       3
+      ]
+     }
+    }
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "aspect_ratio": "16:9",
+    "direction": "Zoom out 2x",
+    "model": "Flux Fill",
+    "prompt": "",
+    "seed": 0
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": [
+      "https://r.test/outpaint.png"
+     ]
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "black-forest-labs/flux-fill-pro",
+     "payload": {
+      "image": "IMG:image",
+      "outpaint": "Make square",
+      "output_format": "png",
+      "prompt": "",
+      "safety_tolerance": 6
+     },
+     "payload_json": "{\"image\": \"IMG:image\", \"outpaint\": \"Make square\", \"output_format\": \"png\", \"prompt\": \"\", \"safety_tolerance\": 6}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "OutpaintImageNode",
+   "files": {
+    "https://r.test/outpaint.png": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/Af6Iun5q7q+wygCsPwdj8j+vgDd7CnjQrwIE7PIM7I47QBjA8tk5jS/LnreYJGwPEXAAA7cE0vJyUzJGg8B9rBEYKHmG1+7WyPAtAM4+uRoJIuMEnaKx/i2aUdxkOS0FUUMZSQAPn7YIWxt7nQ1M/M7dsk5yDZCrwaYWSvUBkUA6EIJInXCg0AR36rjnnpEH3Ob4JhmafCdFMVii9kAAAAAASUVORK5CYII="
+   },
+   "gets": [
+    {
+     "status": 200,
+     "url": "https://r.test/outpaint.png"
+    }
+   ],
+   "name": "outpaint \u00b7 Flux Fill Make square",
+   "output": [
+    {
+     "tensor": {
+      "sha256": "17febd89e2802ef36ba65340679c39c4eb5f870ff54fef439d62804c406eda82",
+      "shape": [
+       1,
+       6,
+       8,
+       3
+      ]
+     }
+    }
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "aspect_ratio": "16:9",
+    "direction": "Make square",
+    "model": "Flux Fill",
+    "prompt": "",
+    "seed": 0
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": [
+      "https://r.test/outpaint.png"
+     ]
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "black-forest-labs/flux-fill-pro",
+     "payload": {
+      "image": "IMG:image",
+      "outpaint": "Left outpaint",
+      "output_format": "png",
+      "prompt": "",
+      "safety_tolerance": 6
+     },
+     "payload_json": "{\"image\": \"IMG:image\", \"outpaint\": \"Left outpaint\", \"output_format\": \"png\", \"prompt\": \"\", \"safety_tolerance\": 6}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "OutpaintImageNode",
+   "files": {
+    "https://r.test/outpaint.png": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/Af6Iun5q7q+wygCsPwdj8j+vgDd7CnjQrwIE7PIM7I47QBjA8tk5jS/LnreYJGwPEXAAA7cE0vJyUzJGg8B9rBEYKHmG1+7WyPAtAM4+uRoJIuMEnaKx/i2aUdxkOS0FUUMZSQAPn7YIWxt7nQ1M/M7dsk5yDZCrwaYWSvUBkUA6EIJInXCg0AR36rjnnpEH3Ob4JhmafCdFMVii9kAAAAAASUVORK5CYII="
+   },
+   "gets": [
+    {
+     "status": 200,
+     "url": "https://r.test/outpaint.png"
+    }
+   ],
+   "name": "outpaint \u00b7 Flux Fill Left outpaint",
+   "output": [
+    {
+     "tensor": {
+      "sha256": "17febd89e2802ef36ba65340679c39c4eb5f870ff54fef439d62804c406eda82",
+      "shape": [
+       1,
+       6,
+       8,
+       3
+      ]
+     }
+    }
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "aspect_ratio": "16:9",
+    "direction": "Left outpaint",
+    "model": "Flux Fill",
+    "prompt": "",
+    "seed": 0
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": [
+      "https://r.test/outpaint.png"
+     ]
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "black-forest-labs/flux-fill-pro",
+     "payload": {
+      "image": "IMG:image",
+      "outpaint": "Right outpaint",
+      "output_format": "png",
+      "prompt": "",
+      "safety_tolerance": 6
+     },
+     "payload_json": "{\"image\": \"IMG:image\", \"outpaint\": \"Right outpaint\", \"output_format\": \"png\", \"prompt\": \"\", \"safety_tolerance\": 6}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "OutpaintImageNode",
+   "files": {
+    "https://r.test/outpaint.png": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/Af6Iun5q7q+wygCsPwdj8j+vgDd7CnjQrwIE7PIM7I47QBjA8tk5jS/LnreYJGwPEXAAA7cE0vJyUzJGg8B9rBEYKHmG1+7WyPAtAM4+uRoJIuMEnaKx/i2aUdxkOS0FUUMZSQAPn7YIWxt7nQ1M/M7dsk5yDZCrwaYWSvUBkUA6EIJInXCg0AR36rjnnpEH3Ob4JhmafCdFMVii9kAAAAAASUVORK5CYII="
+   },
+   "gets": [
+    {
+     "status": 200,
+     "url": "https://r.test/outpaint.png"
+    }
+   ],
+   "name": "outpaint \u00b7 Flux Fill Right outpaint",
+   "output": [
+    {
+     "tensor": {
+      "sha256": "17febd89e2802ef36ba65340679c39c4eb5f870ff54fef439d62804c406eda82",
+      "shape": [
+       1,
+       6,
+       8,
+       3
+      ]
+     }
+    }
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "aspect_ratio": "16:9",
+    "direction": "Right outpaint",
+    "model": "Flux Fill",
+    "prompt": "",
+    "seed": 0
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": [
+      "https://r.test/outpaint.png"
+     ]
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "black-forest-labs/flux-fill-pro",
+     "payload": {
+      "image": "IMG:image",
+      "outpaint": "Top outpaint",
+      "output_format": "png",
+      "prompt": "",
+      "safety_tolerance": 6
+     },
+     "payload_json": "{\"image\": \"IMG:image\", \"outpaint\": \"Top outpaint\", \"output_format\": \"png\", \"prompt\": \"\", \"safety_tolerance\": 6}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "OutpaintImageNode",
+   "files": {
+    "https://r.test/outpaint.png": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/Af6Iun5q7q+wygCsPwdj8j+vgDd7CnjQrwIE7PIM7I47QBjA8tk5jS/LnreYJGwPEXAAA7cE0vJyUzJGg8B9rBEYKHmG1+7WyPAtAM4+uRoJIuMEnaKx/i2aUdxkOS0FUUMZSQAPn7YIWxt7nQ1M/M7dsk5yDZCrwaYWSvUBkUA6EIJInXCg0AR36rjnnpEH3Ob4JhmafCdFMVii9kAAAAAASUVORK5CYII="
+   },
+   "gets": [
+    {
+     "status": 200,
+     "url": "https://r.test/outpaint.png"
+    }
+   ],
+   "name": "outpaint \u00b7 Flux Fill Top outpaint",
+   "output": [
+    {
+     "tensor": {
+      "sha256": "17febd89e2802ef36ba65340679c39c4eb5f870ff54fef439d62804c406eda82",
+      "shape": [
+       1,
+       6,
+       8,
+       3
+      ]
+     }
+    }
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "aspect_ratio": "16:9",
+    "direction": "Top outpaint",
+    "model": "Flux Fill",
+    "prompt": "",
+    "seed": 0
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": [
+      "https://r.test/outpaint.png"
+     ]
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "black-forest-labs/flux-fill-pro",
+     "payload": {
+      "image": "IMG:image",
+      "outpaint": "Bottom outpaint",
+      "output_format": "png",
+      "prompt": "",
+      "safety_tolerance": 6
+     },
+     "payload_json": "{\"image\": \"IMG:image\", \"outpaint\": \"Bottom outpaint\", \"output_format\": \"png\", \"prompt\": \"\", \"safety_tolerance\": 6}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "OutpaintImageNode",
+   "files": {
+    "https://r.test/outpaint.png": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/Af6Iun5q7q+wygCsPwdj8j+vgDd7CnjQrwIE7PIM7I47QBjA8tk5jS/LnreYJGwPEXAAA7cE0vJyUzJGg8B9rBEYKHmG1+7WyPAtAM4+uRoJIuMEnaKx/i2aUdxkOS0FUUMZSQAPn7YIWxt7nQ1M/M7dsk5yDZCrwaYWSvUBkUA6EIJInXCg0AR36rjnnpEH3Ob4JhmafCdFMVii9kAAAAAASUVORK5CYII="
+   },
+   "gets": [
+    {
+     "status": 200,
+     "url": "https://r.test/outpaint.png"
+    }
+   ],
+   "name": "outpaint \u00b7 Flux Fill Bottom outpaint",
+   "output": [
+    {
+     "tensor": {
+      "sha256": "17febd89e2802ef36ba65340679c39c4eb5f870ff54fef439d62804c406eda82",
+      "shape": [
+       1,
+       6,
+       8,
+       3
+      ]
+     }
+    }
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "aspect_ratio": "16:9",
+    "direction": "Bottom outpaint",
+    "model": "Flux Fill",
+    "prompt": "",
+    "seed": 0
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": [
+      "https://r.test/outpaint.png"
+     ]
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "bria/expand-image",
+     "payload": {
+      "aspect_ratio": "1:1",
+      "image": "IMG:image"
+     },
+     "payload_json": "{\"aspect_ratio\": \"1:1\", \"image\": \"IMG:image\"}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "OutpaintImageNode",
+   "files": {
+    "https://r.test/outpaint.png": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/Af6Iun5q7q+wygCsPwdj8j+vgDd7CnjQrwIE7PIM7I47QBjA8tk5jS/LnreYJGwPEXAAA7cE0vJyUzJGg8B9rBEYKHmG1+7WyPAtAM4+uRoJIuMEnaKx/i2aUdxkOS0FUUMZSQAPn7YIWxt7nQ1M/M7dsk5yDZCrwaYWSvUBkUA6EIJInXCg0AR36rjnnpEH3Ob4JhmafCdFMVii9kAAAAAASUVORK5CYII="
+   },
+   "gets": [
+    {
+     "status": 200,
+     "url": "https://r.test/outpaint.png"
+    }
+   ],
+   "name": "outpaint \u00b7 Bria Expand 1:1",
+   "output": [
+    {
+     "tensor": {
+      "sha256": "17febd89e2802ef36ba65340679c39c4eb5f870ff54fef439d62804c406eda82",
+      "shape": [
+       1,
+       6,
+       8,
+       3
+      ]
+     }
+    }
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "aspect_ratio": "1:1",
+    "direction": "Zoom out 1.5x",
+    "model": "Bria Expand",
+    "prompt": "",
+    "seed": 0
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": [
+      "https://r.test/outpaint.png"
+     ]
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "bria/expand-image",
+     "payload": {
+      "aspect_ratio": "2:3",
+      "image": "IMG:image"
+     },
+     "payload_json": "{\"aspect_ratio\": \"2:3\", \"image\": \"IMG:image\"}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "OutpaintImageNode",
+   "files": {
+    "https://r.test/outpaint.png": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/Af6Iun5q7q+wygCsPwdj8j+vgDd7CnjQrwIE7PIM7I47QBjA8tk5jS/LnreYJGwPEXAAA7cE0vJyUzJGg8B9rBEYKHmG1+7WyPAtAM4+uRoJIuMEnaKx/i2aUdxkOS0FUUMZSQAPn7YIWxt7nQ1M/M7dsk5yDZCrwaYWSvUBkUA6EIJInXCg0AR36rjnnpEH3Ob4JhmafCdFMVii9kAAAAAASUVORK5CYII="
+   },
+   "gets": [
+    {
+     "status": 200,
+     "url": "https://r.test/outpaint.png"
+    }
+   ],
+   "name": "outpaint \u00b7 Bria Expand 2:3",
+   "output": [
+    {
+     "tensor": {
+      "sha256": "17febd89e2802ef36ba65340679c39c4eb5f870ff54fef439d62804c406eda82",
+      "shape": [
+       1,
+       6,
+       8,
+       3
+      ]
+     }
+    }
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "aspect_ratio": "2:3",
+    "direction": "Zoom out 1.5x",
+    "model": "Bria Expand",
+    "prompt": "",
+    "seed": 0
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": [
+      "https://r.test/outpaint.png"
+     ]
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "bria/expand-image",
+     "payload": {
+      "aspect_ratio": "3:2",
+      "image": "IMG:image"
+     },
+     "payload_json": "{\"aspect_ratio\": \"3:2\", \"image\": \"IMG:image\"}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "OutpaintImageNode",
+   "files": {
+    "https://r.test/outpaint.png": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/Af6Iun5q7q+wygCsPwdj8j+vgDd7CnjQrwIE7PIM7I47QBjA8tk5jS/LnreYJGwPEXAAA7cE0vJyUzJGg8B9rBEYKHmG1+7WyPAtAM4+uRoJIuMEnaKx/i2aUdxkOS0FUUMZSQAPn7YIWxt7nQ1M/M7dsk5yDZCrwaYWSvUBkUA6EIJInXCg0AR36rjnnpEH3Ob4JhmafCdFMVii9kAAAAAASUVORK5CYII="
+   },
+   "gets": [
+    {
+     "status": 200,
+     "url": "https://r.test/outpaint.png"
+    }
+   ],
+   "name": "outpaint \u00b7 Bria Expand 3:2",
+   "output": [
+    {
+     "tensor": {
+      "sha256": "17febd89e2802ef36ba65340679c39c4eb5f870ff54fef439d62804c406eda82",
+      "shape": [
+       1,
+       6,
+       8,
+       3
+      ]
+     }
+    }
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "aspect_ratio": "3:2",
+    "direction": "Zoom out 1.5x",
+    "model": "Bria Expand",
+    "prompt": "",
+    "seed": 0
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": [
+      "https://r.test/outpaint.png"
+     ]
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "bria/expand-image",
+     "payload": {
+      "aspect_ratio": "3:4",
+      "image": "IMG:image"
+     },
+     "payload_json": "{\"aspect_ratio\": \"3:4\", \"image\": \"IMG:image\"}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "OutpaintImageNode",
+   "files": {
+    "https://r.test/outpaint.png": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/Af6Iun5q7q+wygCsPwdj8j+vgDd7CnjQrwIE7PIM7I47QBjA8tk5jS/LnreYJGwPEXAAA7cE0vJyUzJGg8B9rBEYKHmG1+7WyPAtAM4+uRoJIuMEnaKx/i2aUdxkOS0FUUMZSQAPn7YIWxt7nQ1M/M7dsk5yDZCrwaYWSvUBkUA6EIJInXCg0AR36rjnnpEH3Ob4JhmafCdFMVii9kAAAAAASUVORK5CYII="
+   },
+   "gets": [
+    {
+     "status": 200,
+     "url": "https://r.test/outpaint.png"
+    }
+   ],
+   "name": "outpaint \u00b7 Bria Expand 3:4",
+   "output": [
+    {
+     "tensor": {
+      "sha256": "17febd89e2802ef36ba65340679c39c4eb5f870ff54fef439d62804c406eda82",
+      "shape": [
+       1,
+       6,
+       8,
+       3
+      ]
+     }
+    }
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "aspect_ratio": "3:4",
+    "direction": "Zoom out 1.5x",
+    "model": "Bria Expand",
+    "prompt": "",
+    "seed": 0
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": [
+      "https://r.test/outpaint.png"
+     ]
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "bria/expand-image",
+     "payload": {
+      "aspect_ratio": "4:3",
+      "image": "IMG:image"
+     },
+     "payload_json": "{\"aspect_ratio\": \"4:3\", \"image\": \"IMG:image\"}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "OutpaintImageNode",
+   "files": {
+    "https://r.test/outpaint.png": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/Af6Iun5q7q+wygCsPwdj8j+vgDd7CnjQrwIE7PIM7I47QBjA8tk5jS/LnreYJGwPEXAAA7cE0vJyUzJGg8B9rBEYKHmG1+7WyPAtAM4+uRoJIuMEnaKx/i2aUdxkOS0FUUMZSQAPn7YIWxt7nQ1M/M7dsk5yDZCrwaYWSvUBkUA6EIJInXCg0AR36rjnnpEH3Ob4JhmafCdFMVii9kAAAAAASUVORK5CYII="
+   },
+   "gets": [
+    {
+     "status": 200,
+     "url": "https://r.test/outpaint.png"
+    }
+   ],
+   "name": "outpaint \u00b7 Bria Expand 4:3",
+   "output": [
+    {
+     "tensor": {
+      "sha256": "17febd89e2802ef36ba65340679c39c4eb5f870ff54fef439d62804c406eda82",
+      "shape": [
+       1,
+       6,
+       8,
+       3
+      ]
+     }
+    }
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "aspect_ratio": "4:3",
+    "direction": "Zoom out 1.5x",
+    "model": "Bria Expand",
+    "prompt": "",
+    "seed": 0
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": [
+      "https://r.test/outpaint.png"
+     ]
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "bria/expand-image",
+     "payload": {
+      "aspect_ratio": "4:5",
+      "image": "IMG:image"
+     },
+     "payload_json": "{\"aspect_ratio\": \"4:5\", \"image\": \"IMG:image\"}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "OutpaintImageNode",
+   "files": {
+    "https://r.test/outpaint.png": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/Af6Iun5q7q+wygCsPwdj8j+vgDd7CnjQrwIE7PIM7I47QBjA8tk5jS/LnreYJGwPEXAAA7cE0vJyUzJGg8B9rBEYKHmG1+7WyPAtAM4+uRoJIuMEnaKx/i2aUdxkOS0FUUMZSQAPn7YIWxt7nQ1M/M7dsk5yDZCrwaYWSvUBkUA6EIJInXCg0AR36rjnnpEH3Ob4JhmafCdFMVii9kAAAAAASUVORK5CYII="
+   },
+   "gets": [
+    {
+     "status": 200,
+     "url": "https://r.test/outpaint.png"
+    }
+   ],
+   "name": "outpaint \u00b7 Bria Expand 4:5",
+   "output": [
+    {
+     "tensor": {
+      "sha256": "17febd89e2802ef36ba65340679c39c4eb5f870ff54fef439d62804c406eda82",
+      "shape": [
+       1,
+       6,
+       8,
+       3
+      ]
+     }
+    }
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "aspect_ratio": "4:5",
+    "direction": "Zoom out 1.5x",
+    "model": "Bria Expand",
+    "prompt": "",
+    "seed": 0
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": [
+      "https://r.test/outpaint.png"
+     ]
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "bria/expand-image",
+     "payload": {
+      "aspect_ratio": "5:4",
+      "image": "IMG:image"
+     },
+     "payload_json": "{\"aspect_ratio\": \"5:4\", \"image\": \"IMG:image\"}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "OutpaintImageNode",
+   "files": {
+    "https://r.test/outpaint.png": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/Af6Iun5q7q+wygCsPwdj8j+vgDd7CnjQrwIE7PIM7I47QBjA8tk5jS/LnreYJGwPEXAAA7cE0vJyUzJGg8B9rBEYKHmG1+7WyPAtAM4+uRoJIuMEnaKx/i2aUdxkOS0FUUMZSQAPn7YIWxt7nQ1M/M7dsk5yDZCrwaYWSvUBkUA6EIJInXCg0AR36rjnnpEH3Ob4JhmafCdFMVii9kAAAAAASUVORK5CYII="
+   },
+   "gets": [
+    {
+     "status": 200,
+     "url": "https://r.test/outpaint.png"
+    }
+   ],
+   "name": "outpaint \u00b7 Bria Expand 5:4",
+   "output": [
+    {
+     "tensor": {
+      "sha256": "17febd89e2802ef36ba65340679c39c4eb5f870ff54fef439d62804c406eda82",
+      "shape": [
+       1,
+       6,
+       8,
+       3
+      ]
+     }
+    }
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "aspect_ratio": "5:4",
+    "direction": "Zoom out 1.5x",
+    "model": "Bria Expand",
+    "prompt": "",
+    "seed": 0
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": [
+      "https://r.test/outpaint.png"
+     ]
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "bria/expand-image",
+     "payload": {
+      "aspect_ratio": "9:16",
+      "image": "IMG:image"
+     },
+     "payload_json": "{\"aspect_ratio\": \"9:16\", \"image\": \"IMG:image\"}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "OutpaintImageNode",
+   "files": {
+    "https://r.test/outpaint.png": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/Af6Iun5q7q+wygCsPwdj8j+vgDd7CnjQrwIE7PIM7I47QBjA8tk5jS/LnreYJGwPEXAAA7cE0vJyUzJGg8B9rBEYKHmG1+7WyPAtAM4+uRoJIuMEnaKx/i2aUdxkOS0FUUMZSQAPn7YIWxt7nQ1M/M7dsk5yDZCrwaYWSvUBkUA6EIJInXCg0AR36rjnnpEH3Ob4JhmafCdFMVii9kAAAAAASUVORK5CYII="
+   },
+   "gets": [
+    {
+     "status": 200,
+     "url": "https://r.test/outpaint.png"
+    }
+   ],
+   "name": "outpaint \u00b7 Bria Expand 9:16",
+   "output": [
+    {
+     "tensor": {
+      "sha256": "17febd89e2802ef36ba65340679c39c4eb5f870ff54fef439d62804c406eda82",
+      "shape": [
+       1,
+       6,
+       8,
+       3
+      ]
+     }
+    }
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "aspect_ratio": "9:16",
+    "direction": "Zoom out 1.5x",
+    "model": "Bria Expand",
+    "prompt": "",
+    "seed": 0
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": [
+      "https://r.test/outpaint.png"
+     ]
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "bria/expand-image",
+     "payload": {
+      "aspect_ratio": "16:9",
+      "image": "IMG:image"
+     },
+     "payload_json": "{\"aspect_ratio\": \"16:9\", \"image\": \"IMG:image\"}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "OutpaintImageNode",
+   "files": {
+    "https://r.test/outpaint.png": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/Af6Iun5q7q+wygCsPwdj8j+vgDd7CnjQrwIE7PIM7I47QBjA8tk5jS/LnreYJGwPEXAAA7cE0vJyUzJGg8B9rBEYKHmG1+7WyPAtAM4+uRoJIuMEnaKx/i2aUdxkOS0FUUMZSQAPn7YIWxt7nQ1M/M7dsk5yDZCrwaYWSvUBkUA6EIJInXCg0AR36rjnnpEH3Ob4JhmafCdFMVii9kAAAAAASUVORK5CYII="
+   },
+   "gets": [
+    {
+     "status": 200,
+     "url": "https://r.test/outpaint.png"
+    }
+   ],
+   "name": "outpaint \u00b7 Bria Expand 16:9",
+   "output": [
+    {
+     "tensor": {
+      "sha256": "17febd89e2802ef36ba65340679c39c4eb5f870ff54fef439d62804c406eda82",
+      "shape": [
+       1,
+       6,
+       8,
+       3
+      ]
+     }
+    }
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "aspect_ratio": "16:9",
+    "direction": "Zoom out 1.5x",
+    "model": "Bria Expand",
+    "prompt": "",
+    "seed": 0
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": [
+      "https://r.test/outpaint.png"
+     ]
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "black-forest-labs/flux-fill-pro",
+     "payload": {
+      "image": "IMG:image",
+      "outpaint": "Zoom out 1.5x",
+      "output_format": "png",
+      "prompt": "",
+      "safety_tolerance": 6
+     },
+     "payload_json": "{\"image\": \"IMG:image\", \"outpaint\": \"Zoom out 1.5x\", \"output_format\": \"png\", \"prompt\": \"\", \"safety_tolerance\": 6}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "OutpaintImageNode",
+   "files": {
+    "https://r.test/outpaint.png": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/Af6Iun5q7q+wygCsPwdj8j+vgDd7CnjQrwIE7PIM7I47QBjA8tk5jS/LnreYJGwPEXAAA7cE0vJyUzJGg8B9rBEYKHmG1+7WyPAtAM4+uRoJIuMEnaKx/i2aUdxkOS0FUUMZSQAPn7YIWxt7nQ1M/M7dsk5yDZCrwaYWSvUBkUA6EIJInXCg0AR36rjnnpEH3Ob4JhmafCdFMVii9kAAAAAASUVORK5CYII="
+   },
+   "gets": [
+    {
+     "status": 200,
+     "url": "https://r.test/outpaint.png"
+    }
+   ],
+   "name": "outpaint \u00b7 Flux Fill seed 0",
+   "output": [
+    {
+     "tensor": {
+      "sha256": "17febd89e2802ef36ba65340679c39c4eb5f870ff54fef439d62804c406eda82",
+      "shape": [
+       1,
+       6,
+       8,
+       3
+      ]
+     }
+    }
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "aspect_ratio": "16:9",
+    "direction": "Zoom out 1.5x",
+    "model": "Flux Fill",
+    "prompt": "",
+    "seed": 0
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": [
+      "https://r.test/outpaint.png"
+     ]
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "black-forest-labs/flux-fill-pro",
+     "payload": {
+      "image": "IMG:image",
+      "outpaint": "Zoom out 1.5x",
+      "output_format": "png",
+      "prompt": "",
+      "safety_tolerance": 6,
+      "seed": 42
+     },
+     "payload_json": "{\"image\": \"IMG:image\", \"outpaint\": \"Zoom out 1.5x\", \"output_format\": \"png\", \"prompt\": \"\", \"safety_tolerance\": 6, \"seed\": 42}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "OutpaintImageNode",
+   "files": {
+    "https://r.test/outpaint.png": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/Af6Iun5q7q+wygCsPwdj8j+vgDd7CnjQrwIE7PIM7I47QBjA8tk5jS/LnreYJGwPEXAAA7cE0vJyUzJGg8B9rBEYKHmG1+7WyPAtAM4+uRoJIuMEnaKx/i2aUdxkOS0FUUMZSQAPn7YIWxt7nQ1M/M7dsk5yDZCrwaYWSvUBkUA6EIJInXCg0AR36rjnnpEH3Ob4JhmafCdFMVii9kAAAAAASUVORK5CYII="
+   },
+   "gets": [
+    {
+     "status": 200,
+     "url": "https://r.test/outpaint.png"
+    }
+   ],
+   "name": "outpaint \u00b7 Flux Fill seed 42",
+   "output": [
+    {
+     "tensor": {
+      "sha256": "17febd89e2802ef36ba65340679c39c4eb5f870ff54fef439d62804c406eda82",
+      "shape": [
+       1,
+       6,
+       8,
+       3
+      ]
+     }
+    }
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "aspect_ratio": "16:9",
+    "direction": "Zoom out 1.5x",
+    "model": "Flux Fill",
+    "prompt": "",
+    "seed": 42
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": [
+      "https://r.test/outpaint.png"
+     ]
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "black-forest-labs/flux-fill-pro",
+     "payload": {
+      "image": "IMG:image",
+      "outpaint": "Zoom out 1.5x",
+      "output_format": "png",
+      "prompt": "a forest clearing, soft daylight",
+      "safety_tolerance": 6
+     },
+     "payload_json": "{\"image\": \"IMG:image\", \"outpaint\": \"Zoom out 1.5x\", \"output_format\": \"png\", \"prompt\": \"a forest clearing, soft daylight\", \"safety_tolerance\": 6}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "OutpaintImageNode",
+   "files": {
+    "https://r.test/outpaint.png": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/Af6Iun5q7q+wygCsPwdj8j+vgDd7CnjQrwIE7PIM7I47QBjA8tk5jS/LnreYJGwPEXAAA7cE0vJyUzJGg8B9rBEYKHmG1+7WyPAtAM4+uRoJIuMEnaKx/i2aUdxkOS0FUUMZSQAPn7YIWxt7nQ1M/M7dsk5yDZCrwaYWSvUBkUA6EIJInXCg0AR36rjnnpEH3Ob4JhmafCdFMVii9kAAAAAASUVORK5CYII="
+   },
+   "gets": [
+    {
+     "status": 200,
+     "url": "https://r.test/outpaint.png"
+    }
+   ],
+   "name": "outpaint \u00b7 Flux Fill prompt spaced",
+   "output": [
+    {
+     "tensor": {
+      "sha256": "17febd89e2802ef36ba65340679c39c4eb5f870ff54fef439d62804c406eda82",
+      "shape": [
+       1,
+       6,
+       8,
+       3
+      ]
+     }
+    }
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "aspect_ratio": "16:9",
+    "direction": "Zoom out 1.5x",
+    "model": "Flux Fill",
+    "prompt": "  a forest clearing, soft daylight \n",
+    "seed": 0
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": [
+      "https://r.test/outpaint.png"
+     ]
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "black-forest-labs/flux-fill-pro",
+     "payload": {
+      "image": "IMG:image",
+      "outpaint": "Zoom out 1.5x",
+      "output_format": "png",
+      "prompt": "",
+      "safety_tolerance": 6
+     },
+     "payload_json": "{\"image\": \"IMG:image\", \"outpaint\": \"Zoom out 1.5x\", \"output_format\": \"png\", \"prompt\": \"\", \"safety_tolerance\": 6}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "OutpaintImageNode",
+   "files": {
+    "https://r.test/outpaint.png": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/Af6Iun5q7q+wygCsPwdj8j+vgDd7CnjQrwIE7PIM7I47QBjA8tk5jS/LnreYJGwPEXAAA7cE0vJyUzJGg8B9rBEYKHmG1+7WyPAtAM4+uRoJIuMEnaKx/i2aUdxkOS0FUUMZSQAPn7YIWxt7nQ1M/M7dsk5yDZCrwaYWSvUBkUA6EIJInXCg0AR36rjnnpEH3Ob4JhmafCdFMVii9kAAAAAASUVORK5CYII="
+   },
+   "gets": [
+    {
+     "status": 200,
+     "url": "https://r.test/outpaint.png"
+    }
+   ],
+   "name": "outpaint \u00b7 Flux Fill prompt spaces only",
+   "output": [
+    {
+     "tensor": {
+      "sha256": "17febd89e2802ef36ba65340679c39c4eb5f870ff54fef439d62804c406eda82",
+      "shape": [
+       1,
+       6,
+       8,
+       3
+      ]
+     }
+    }
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "aspect_ratio": "16:9",
+    "direction": "Zoom out 1.5x",
+    "model": "Flux Fill",
+    "prompt": "   ",
+    "seed": 0
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": [
+      "https://r.test/outpaint.png"
+     ]
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "black-forest-labs/flux-fill-pro",
+     "payload": {
+      "image": "IMG:image",
+      "outpaint": "Zoom out 1.5x",
+      "output_format": "png",
+      "prompt": "",
+      "safety_tolerance": 6
+     },
+     "payload_json": "{\"image\": \"IMG:image\", \"outpaint\": \"Zoom out 1.5x\", \"output_format\": \"png\", \"prompt\": \"\", \"safety_tolerance\": 6}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "OutpaintImageNode",
+   "files": {
+    "https://r.test/outpaint.png": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAYAAAD+Bd/7AAAA0UlEQVR4nAHGADn/AHxSfXaCy+2vuMaOzgM6DoQQ9FqxmbzlYg/gVvAGHzY3AFntCN7UZr05+Fu35v084QXeFPIznesOp9cs0Y5z8PdtAsK45r8OAfddiZuU8l79t+gnPOX09PXWTezcvbla3s41AKPNqOrRpvQ/AkPIbtOFG8ioGYwQpQGU5yX3SLKMKPgAAtgRt0w0qwAFTY4N+yeWzyInDYss8ibPY/xvmQTm0H4rAqcYCyC/EX71A10ciA7pdx7ac4Huu3TN+uP5PTw0MrqZnBRltzxV3gQAAAAASUVORK5CYII="
+   },
+   "gets": [
+    {
+     "status": 200,
+     "url": "https://r.test/outpaint.png"
+    }
+   ],
+   "name": "outpaint \u00b7 Flux Fill RGBA answer",
+   "output": [
+    {
+     "tensor": {
+      "sha256": "b8c119b14f2b77778343d23f08195d997a1d5f119d2108056363d945a3d6b618",
+      "shape": [
+       1,
+       6,
+       8,
+       3
+      ]
+     }
+    }
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "aspect_ratio": "16:9",
+    "direction": "Zoom out 1.5x",
+    "model": "Flux Fill",
+    "prompt": "",
+    "seed": 0
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": [
+      "https://r.test/outpaint.png"
+     ]
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "bria/expand-image",
+     "payload": {
+      "aspect_ratio": "16:9",
+      "image": "IMG:image"
+     },
+     "payload_json": "{\"aspect_ratio\": \"16:9\", \"image\": \"IMG:image\"}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "OutpaintImageNode",
+   "files": {
+    "https://r.test/outpaint.png": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/Af6Iun5q7q+wygCsPwdj8j+vgDd7CnjQrwIE7PIM7I47QBjA8tk5jS/LnreYJGwPEXAAA7cE0vJyUzJGg8B9rBEYKHmG1+7WyPAtAM4+uRoJIuMEnaKx/i2aUdxkOS0FUUMZSQAPn7YIWxt7nQ1M/M7dsk5yDZCrwaYWSvUBkUA6EIJInXCg0AR36rjnnpEH3Ob4JhmafCdFMVii9kAAAAAASUVORK5CYII="
+   },
+   "gets": [
+    {
+     "status": 200,
+     "url": "https://r.test/outpaint.png"
+    }
+   ],
+   "name": "outpaint \u00b7 Bria Expand seed 0",
+   "output": [
+    {
+     "tensor": {
+      "sha256": "17febd89e2802ef36ba65340679c39c4eb5f870ff54fef439d62804c406eda82",
+      "shape": [
+       1,
+       6,
+       8,
+       3
+      ]
+     }
+    }
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "aspect_ratio": "16:9",
+    "direction": "Zoom out 1.5x",
+    "model": "Bria Expand",
+    "prompt": "",
+    "seed": 0
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": [
+      "https://r.test/outpaint.png"
+     ]
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "bria/expand-image",
+     "payload": {
+      "aspect_ratio": "16:9",
+      "image": "IMG:image",
+      "seed": 42
+     },
+     "payload_json": "{\"aspect_ratio\": \"16:9\", \"image\": \"IMG:image\", \"seed\": 42}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "OutpaintImageNode",
+   "files": {
+    "https://r.test/outpaint.png": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/Af6Iun5q7q+wygCsPwdj8j+vgDd7CnjQrwIE7PIM7I47QBjA8tk5jS/LnreYJGwPEXAAA7cE0vJyUzJGg8B9rBEYKHmG1+7WyPAtAM4+uRoJIuMEnaKx/i2aUdxkOS0FUUMZSQAPn7YIWxt7nQ1M/M7dsk5yDZCrwaYWSvUBkUA6EIJInXCg0AR36rjnnpEH3Ob4JhmafCdFMVii9kAAAAAASUVORK5CYII="
+   },
+   "gets": [
+    {
+     "status": 200,
+     "url": "https://r.test/outpaint.png"
+    }
+   ],
+   "name": "outpaint \u00b7 Bria Expand seed 42",
+   "output": [
+    {
+     "tensor": {
+      "sha256": "17febd89e2802ef36ba65340679c39c4eb5f870ff54fef439d62804c406eda82",
+      "shape": [
+       1,
+       6,
+       8,
+       3
+      ]
+     }
+    }
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "aspect_ratio": "16:9",
+    "direction": "Zoom out 1.5x",
+    "model": "Bria Expand",
+    "prompt": "",
+    "seed": 42
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": [
+      "https://r.test/outpaint.png"
+     ]
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "bria/expand-image",
+     "payload": {
+      "aspect_ratio": "16:9",
+      "image": "IMG:image",
+      "prompt": "a forest clearing, soft daylight"
+     },
+     "payload_json": "{\"aspect_ratio\": \"16:9\", \"image\": \"IMG:image\", \"prompt\": \"a forest clearing, soft daylight\"}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "OutpaintImageNode",
+   "files": {
+    "https://r.test/outpaint.png": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/Af6Iun5q7q+wygCsPwdj8j+vgDd7CnjQrwIE7PIM7I47QBjA8tk5jS/LnreYJGwPEXAAA7cE0vJyUzJGg8B9rBEYKHmG1+7WyPAtAM4+uRoJIuMEnaKx/i2aUdxkOS0FUUMZSQAPn7YIWxt7nQ1M/M7dsk5yDZCrwaYWSvUBkUA6EIJInXCg0AR36rjnnpEH3Ob4JhmafCdFMVii9kAAAAAASUVORK5CYII="
+   },
+   "gets": [
+    {
+     "status": 200,
+     "url": "https://r.test/outpaint.png"
+    }
+   ],
+   "name": "outpaint \u00b7 Bria Expand prompt spaced",
+   "output": [
+    {
+     "tensor": {
+      "sha256": "17febd89e2802ef36ba65340679c39c4eb5f870ff54fef439d62804c406eda82",
+      "shape": [
+       1,
+       6,
+       8,
+       3
+      ]
+     }
+    }
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "aspect_ratio": "16:9",
+    "direction": "Zoom out 1.5x",
+    "model": "Bria Expand",
+    "prompt": "  a forest clearing, soft daylight \n",
+    "seed": 0
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": [
+      "https://r.test/outpaint.png"
+     ]
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "bria/expand-image",
+     "payload": {
+      "aspect_ratio": "16:9",
+      "image": "IMG:image"
+     },
+     "payload_json": "{\"aspect_ratio\": \"16:9\", \"image\": \"IMG:image\"}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "OutpaintImageNode",
+   "files": {
+    "https://r.test/outpaint.png": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/Af6Iun5q7q+wygCsPwdj8j+vgDd7CnjQrwIE7PIM7I47QBjA8tk5jS/LnreYJGwPEXAAA7cE0vJyUzJGg8B9rBEYKHmG1+7WyPAtAM4+uRoJIuMEnaKx/i2aUdxkOS0FUUMZSQAPn7YIWxt7nQ1M/M7dsk5yDZCrwaYWSvUBkUA6EIJInXCg0AR36rjnnpEH3Ob4JhmafCdFMVii9kAAAAAASUVORK5CYII="
+   },
+   "gets": [
+    {
+     "status": 200,
+     "url": "https://r.test/outpaint.png"
+    }
+   ],
+   "name": "outpaint \u00b7 Bria Expand prompt spaces only",
+   "output": [
+    {
+     "tensor": {
+      "sha256": "17febd89e2802ef36ba65340679c39c4eb5f870ff54fef439d62804c406eda82",
+      "shape": [
+       1,
+       6,
+       8,
+       3
+      ]
+     }
+    }
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "aspect_ratio": "16:9",
+    "direction": "Zoom out 1.5x",
+    "model": "Bria Expand",
+    "prompt": "   ",
+    "seed": 0
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": [
+      "https://r.test/outpaint.png"
+     ]
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "bria/expand-image",
+     "payload": {
+      "aspect_ratio": "16:9",
+      "image": "IMG:image"
+     },
+     "payload_json": "{\"aspect_ratio\": \"16:9\", \"image\": \"IMG:image\"}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "OutpaintImageNode",
+   "files": {
+    "https://r.test/outpaint.png": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAYAAAD+Bd/7AAAA0UlEQVR4nAHGADn/AHxSfXaCy+2vuMaOzgM6DoQQ9FqxmbzlYg/gVvAGHzY3AFntCN7UZr05+Fu35v084QXeFPIznesOp9cs0Y5z8PdtAsK45r8OAfddiZuU8l79t+gnPOX09PXWTezcvbla3s41AKPNqOrRpvQ/AkPIbtOFG8ioGYwQpQGU5yX3SLKMKPgAAtgRt0w0qwAFTY4N+yeWzyInDYss8ibPY/xvmQTm0H4rAqcYCyC/EX71A10ciA7pdx7ac4Huu3TN+uP5PTw0MrqZnBRltzxV3gQAAAAASUVORK5CYII="
+   },
+   "gets": [
+    {
+     "status": 200,
+     "url": "https://r.test/outpaint.png"
+    }
+   ],
+   "name": "outpaint \u00b7 Bria Expand RGBA answer",
+   "output": [
+    {
+     "tensor": {
+      "sha256": "b8c119b14f2b77778343d23f08195d997a1d5f119d2108056363d945a3d6b618",
+      "shape": [
+       1,
+       6,
+       8,
+       3
+      ]
+     }
+    }
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "aspect_ratio": "16:9",
+    "direction": "Zoom out 1.5x",
+    "model": "Bria Expand",
+    "prompt": "",
+    "seed": 0
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": "https://r.test/outpaint.png"
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "black-forest-labs/flux-fill-pro",
+     "payload": {
+      "image": "IMG:image",
+      "outpaint": "Zoom out 1.5x",
+      "output_format": "png",
+      "prompt": "",
+      "safety_tolerance": 6
+     },
+     "payload_json": "{\"image\": \"IMG:image\", \"outpaint\": \"Zoom out 1.5x\", \"output_format\": \"png\", \"prompt\": \"\", \"safety_tolerance\": 6}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "OutpaintImageNode",
+   "files": {
+    "https://r.test/outpaint.png": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/Af6Iun5q7q+wygCsPwdj8j+vgDd7CnjQrwIE7PIM7I47QBjA8tk5jS/LnreYJGwPEXAAA7cE0vJyUzJGg8B9rBEYKHmG1+7WyPAtAM4+uRoJIuMEnaKx/i2aUdxkOS0FUUMZSQAPn7YIWxt7nQ1M/M7dsk5yDZCrwaYWSvUBkUA6EIJInXCg0AR36rjnnpEH3Ob4JhmafCdFMVii9kAAAAAASUVORK5CYII="
+   },
+   "gets": [
+    {
+     "status": 200,
+     "url": "https://r.test/outpaint.png"
+    }
+   ],
+   "name": "outpaint \u00b7 Flux Fill answer a string",
+   "output": [
+    {
+     "tensor": {
+      "sha256": "17febd89e2802ef36ba65340679c39c4eb5f870ff54fef439d62804c406eda82",
+      "shape": [
+       1,
+       6,
+       8,
+       3
+      ]
+     }
+    }
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "aspect_ratio": "16:9",
+    "direction": "Zoom out 1.5x",
+    "model": "Flux Fill",
+    "prompt": "",
+    "seed": 0
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": [
+      "https://r.test/outpaint.png"
+     ]
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "bria/expand-image",
+     "payload": {
+      "aspect_ratio": "16:9",
+      "image": "IMG:image",
+      "seed": 4294967295
+     },
+     "payload_json": "{\"aspect_ratio\": \"16:9\", \"image\": \"IMG:image\", \"seed\": 4294967295}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "OutpaintImageNode",
+   "files": {
+    "https://r.test/outpaint.png": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/Af6Iun5q7q+wygCsPwdj8j+vgDd7CnjQrwIE7PIM7I47QBjA8tk5jS/LnreYJGwPEXAAA7cE0vJyUzJGg8B9rBEYKHmG1+7WyPAtAM4+uRoJIuMEnaKx/i2aUdxkOS0FUUMZSQAPn7YIWxt7nQ1M/M7dsk5yDZCrwaYWSvUBkUA6EIJInXCg0AR36rjnnpEH3Ob4JhmafCdFMVii9kAAAAAASUVORK5CYII="
+   },
+   "gets": [
+    {
+     "status": 200,
+     "url": "https://r.test/outpaint.png"
+    }
+   ],
+   "name": "outpaint \u00b7 Bria Expand seed 2^32-1",
+   "output": [
+    {
+     "tensor": {
+      "sha256": "17febd89e2802ef36ba65340679c39c4eb5f870ff54fef439d62804c406eda82",
+      "shape": [
+       1,
+       6,
+       8,
+       3
+      ]
+     }
+    }
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "aspect_ratio": "16:9",
+    "direction": "Zoom out 1.5x",
+    "model": "Bria Expand",
+    "prompt": "",
+    "seed": 4294967295
+   }
+  }
+ ]
+}

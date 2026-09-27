@@ -46,6 +46,10 @@ export const OUTPUT_KINDS: Readonly<Record<string, Readonly<Record<number, Value
   DescribeVideoNode: { 0: 'text' },
   ExtractTextNode: { 0: 'text' },
   FindObjectsNode: { 0: 'json' },
+  // R3.6: the two layerizers hand on their layers' JSON text on slot 1 (a
+  // value only while `layers` is on); slot 0 is their picture.
+  LayerizeGraphicNode: { 1: 'json' },
+  SeedreamLayerizeNode: { 1: 'json' },
 }
 
 /** What a wire carries: the source's declared kind for that slot (through Gates), files by default. */

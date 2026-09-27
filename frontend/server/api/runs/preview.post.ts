@@ -31,6 +31,8 @@ function deps(): PreviewDeps {
     ownership: {
       ownsInput: async (userId, f) => (await uploadOwner(canonicalUploadKey('input', f.subfolder, f.filename))) === userId,
       ownsOutput: async (userId, f) => (await ownedOutputKeys(userId)).has(outputKey(f)),
+      // Layerize an image's layers (R3.6): saved to the input folder by the user's own run.
+      ownsSaved: async (userId, f) => f.type === 'input' && (await ownedOutputKeys(userId)).has(outputKey(f)),
     },
   }
   return realDeps

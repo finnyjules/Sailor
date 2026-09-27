@@ -22,8 +22,13 @@ export interface SaveOptions {
    * Save image's prefix names it (`a/b`); `..` and absolute parts are refused.
    */
   subfolder?: string
-  /** 'output' (an asset; the default) or 'temp' (Preview image). */
-  folder?: 'output' | 'temp'
+  /**
+   * 'output' (an asset; the default), 'temp' (Preview image), or 'input'
+   * (R3.6: Layerize an image's layers, saved where the Frame opens them;
+   * hosted, in the user's own subfolder of it, and recorded as theirs by
+   * the engine).
+   */
+  folder?: 'output' | 'temp' | 'input'
   /**
    * The counter is read over files named `prefix` (not the file's own
    * prefix) and moved on by `offset`: Save image's `%batch_num%`, whose
