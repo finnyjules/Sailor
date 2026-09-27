@@ -54,8 +54,11 @@ import { usePen, type Pen, type PenTool } from '~/composables/pen/usePen'
 import { createPathLayer } from '~/composables/useCompositorLayers'
 import {
   sketchToLocalD, localOutlineBounds, recentreSketch, newDrawingView, placementAfterRecentre, layerView, guideView,
+  penOutlines, withPenOutlines,
   type LayerPlacement,
 } from '~/lib/compositor/penFrame'
+import { fillPathData, withoutFills } from '~/lib/sketch/fills'
+import { hasPaint } from '~/lib/paint/resolve'
 import { customGuideMapping, guideSizeToTargetWidthPx } from '~/lib/compositor/textPath'
 
 export type FramePenTarget = { kind: 'new' } | { kind: 'layer'; id: string } | { kind: 'guide'; textId: string }
@@ -78,7 +81,7 @@ export interface FramePenSession {
 }
 
 /** The tools a new Frame drawing offers (Select is always added by the pen). */
-export const FRAME_PEN_TOOLS: PenTool[] = ['select', 'path', 'curve', 'line', 'circle', 'point', 'trim', 'cut', 'dissolve']
+export const FRAME_PEN_TOOLS: PenTool[] = ['select', 'path', 'curve', 'line', 'circle', 'point', 'trim', 'cut', 'dissolve', 'fill']
 
 /** Plan B decision 4: a closed drawing is filled, an open one is stroked — a
  *  filled open path would draw a chord-closed blob, which reads as a bug. */
@@ -86,22 +89,34 @@ export const PEN_STYLE_CLOSED = { fill: '#3b82f6', stroke: '', strokeWidth: 0 } 
 export const PEN_STYLE_OPEN = { fill: 'none', stroke: '#3b82f6', strokeWidth: 0.004 } as const
 
 /** The style a path layer takes when its closed drawing is made open (Trim,
- *  Cut, Delete): the pen's own closed style (untouched) becomes the pen's open
- *  style; a style of the user's own keeps its fill and gains the pen's stroke
- *  only if it has no visible stroke; otherwise nothing changes. Mirrors Shape
- *  Studio, which paints an outline once the drawing is no longer closed. */
+ *  Cut, Delete — or, pen stage 7, its last filled area emptied): the pen's own
+ *  closed style (untouched) becomes the pen's open style; so does the pen's open
+ *  style that took the pen's fill colour with its first filled area
+ *  (`filledStyle`); a style of the user's own keeps its fill and gains the pen's
+ *  stroke only if it has no visible stroke; otherwise nothing changes. Mirrors
+ *  Shape Studio, which paints an outline once the drawing is no longer closed. */
 export function openedStyle(l: { fill?: string; stroke?: string; strokeWidth?: number }): Partial<typeof PEN_STYLE_OPEN> {
   const visibleStroke = !!l.stroke && (l.strokeWidth ?? 0) > 0
-  if (l.fill === PEN_STYLE_CLOSED.fill && !visibleStroke) return { ...PEN_STYLE_OPEN }
+  const pensOpenStroke = l.stroke === PEN_STYLE_OPEN.stroke && l.strokeWidth === PEN_STYLE_OPEN.strokeWidth
+  if (l.fill === PEN_STYLE_CLOSED.fill && (!visibleStroke || pensOpenStroke)) return { ...PEN_STYLE_OPEN }
   if (!visibleStroke) return { stroke: PEN_STYLE_OPEN.stroke, strokeWidth: PEN_STYLE_OPEN.strokeWidth }
   return {}
 }
 
 /** True when the drawing's visible outline is closed: any non-construction
- *  path that is closed, or any non-construction circle. */
+ *  path that is closed, or any non-construction circle — or (pen stage 7) it
+ *  has a filled area. */
 export function isClosedDrawing(doc: SketchDoc): boolean {
   return doc.entities.some(e =>
     !e.construction && ((e.kind === 'path' && e.closed) || e.kind === 'circle'))
+    || !!fillPathData(doc)
+}
+
+/** Pen stage 7: the fill a layer takes when its drawing gains a filled area
+ *  while its own fill paints nothing (an open drawing's style) — the pen's
+ *  fill colour. Nothing when it already has a fill of its own. */
+export function filledStyle(l: { fill?: unknown }): { fill?: string } {
+  return hasPaint(l.fill as never) ? {} : { fill: PEN_STYLE_CLOSED.fill }
 }
 
 /**
@@ -177,7 +192,8 @@ export function guideWrite(text: any, sk: SketchDoc, a: GuideAnchor, W: number, 
   const { x, y } = placementAfterRecentre(
     { x: a.x, y: a.y, rotation: a.rotation, skewX: a.skewX, skewY: a.skewY, scale: a.k },
     { x: m.mid.x - a.mid.x, y: m.mid.y - a.mid.y }, W, H)
-  return { ...text, x, y, path: { ...(text.path ?? {}), follow: 'custom', d, sketch: cloneDoc(sk), size } }
+  // a guide never fills (pen stage 7): its drawing is stored without fills
+  return { ...text, x, y, path: { ...(text.path ?? {}), follow: 'custom', d, sketch: withoutFills(cloneDoc(sk)), size } }
 }
 
 /**
@@ -204,6 +220,9 @@ export function useFramePenSession(host: FramePenHost) {
   // and whether this session has recorded its one undo step yet
   let original: any = null
   let recorded = false
+  // `{ kind: 'layer' }`: the pen gave the layer its fill colour (its first filled
+  // area, on a layer whose fill painted nothing) — Cancel puts the old fill back
+  let penFilled = false
   function ensureRecorded() {
     if (recorded) return
     recorded = true
@@ -215,6 +234,7 @@ export function useFramePenSession(host: FramePenHost) {
     original = null
     guideAnchor = null
     recorded = false
+    penFilled = false
     if (!s) return
     session.value = null
     s.pen.dispose()
@@ -246,7 +266,22 @@ export function useFramePenSession(host: FramePenHost) {
       written = json
       ensureRecorded()
       const sk = cloneDoc(shown)
-      writeLayer(id, l => ({ ...l, d: sketchToLocalD(sk), sketch: sk }))
+      writeLayer(id, l => {
+        const next = withPenOutlines(l, sk)
+        if (next.fillD) {
+          if (hasPaint(l.fill)) return next
+          penFilled = true
+          return { ...next, ...filledStyle(l) }
+        }
+        // the pen's fill colour goes when the last filled area it came with goes
+        // (unless the fill was changed meanwhile), so an open drawing is never
+        // left painting its chord-closed outline
+        if (penFilled) {
+          penFilled = false
+          if (l.fill === PEN_STYLE_CLOSED.fill) return { ...next, fill: found.fill }
+        }
+        return next
+      })
     }
     const pen = usePen({ doc, view, options: { tools: FRAME_PEN_TOOLS }, onChange: preview, onLiveChange: preview })
     pen.selectTool('select')
@@ -273,7 +308,7 @@ export function useFramePenSession(host: FramePenHost) {
     if (spec?.sketch && spec.d) {
       const m = customGuideMapping(spec.d, W, guideSizeToTargetWidthPx(spec.size, W))
       const gv = guideView(text, spec, W, H)
-      if (m && gv) { a.k = m.k; a.mid = m.mid; fixed = gv; start = cloneDoc(spec.sketch) }
+      if (m && gv) { a.k = m.k; a.mid = m.mid; fixed = gv; start = withoutFills(cloneDoc(spec.sketch)) }
     }
     // a fresh guide (or one without a drawing): draw at true size around the text's origin
     if (!fixed) fixed = layerView({ x: a.x, y: a.y, rotation: a.rotation, skewX: a.skewX, skewY: a.skewY, scale: 1 }, W, H)
@@ -331,7 +366,7 @@ export function useFramePenSession(host: FramePenHost) {
           const { x, y } = placementAfterRecentre({ x: 0.5, y: 0.5, scale: 1 }, r.shiftLocal, W, H)
           const style = isClosedDrawing(r.sketch) ? PEN_STYLE_CLOSED : PEN_STYLE_OPEN
           const layer = createPathLayer({
-            d: sketchToLocalD(r.sketch), sketch: r.sketch, bbox: r.bbox, scale: 1, x, y, ...style,
+            ...penOutlines(r.sketch), sketch: r.sketch, bbox: r.bbox, scale: 1, x, y, ...style,
           } as any)
           close()
           host.addPathLayers([layer])
@@ -371,11 +406,11 @@ export function useFramePenSession(host: FramePenHost) {
         const sk = cloneDoc(s.doc.value)
         const b = localOutlineBounds(sketchToLocalD(sk))!
         const bbox = { w: Math.max(b.maxX - b.minX, 0.001), h: Math.max(b.maxY - b.minY, 0.001) }
-        writeLayer(id, l => ({ ...l, d: sketchToLocalD(sk), sketch: sk, bbox, ...(opened ? openedStyle(l) : {}) }))
+        writeLayer(id, l => ({ ...withPenOutlines(l, sk), bbox, ...(opened ? openedStyle(l) : {}) }))
         return
       }
       const { x, y } = placementAfterRecentre(layerPlacementForView(live), r.shiftLocal, W, H)
-      writeLayer(id, l => ({ ...l, d: sketchToLocalD(r.sketch), sketch: r.sketch, bbox: r.bbox, x, y, ...(opened ? openedStyle(l) : {}) }))
+      writeLayer(id, l => ({ ...withPenOutlines(l, r.sketch), bbox: r.bbox, x, y, ...(opened ? openedStyle(l) : {}) }))
       return
     }
     close()
@@ -391,12 +426,18 @@ export function useFramePenSession(host: FramePenHost) {
       return
     }
     if (s?.target.kind === 'layer' && original) {
-      const id = s.target.id, orig = original, wrote = recorded
+      const id = s.target.id, orig = original, wrote = recorded, filled = penFilled
       close()
-      // only what the pen wrote goes back (previews touch d/sketch alone), so an
-      // inspector edit made meanwhile (fill, stroke) survives; nothing written →
-      // nothing to put back, and no undo step was left behind
-      if (wrote) writeLayer(id, l => ({ ...l, d: orig.d, sketch: orig.sketch }))
+      // only what the pen wrote goes back (previews touch d/sketch/fillD alone,
+      // and the fill colour only when the pen gave it), so an inspector edit made
+      // meanwhile (fill, stroke) survives; nothing written → nothing to put back,
+      // and no undo step was left behind
+      if (wrote) {
+        writeLayer(id, l => {
+          const { fillD: _pen, ...rest } = l
+          return { ...rest, d: orig.d, sketch: orig.sketch, ...(orig.fillD ? { fillD: orig.fillD } : {}), ...(filled ? { fill: orig.fill } : {}) }
+        })
+      }
       return
     }
     close()

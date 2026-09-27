@@ -680,7 +680,11 @@ function withoutSpurs(edges: number[]): number[] {
 }
 
 function cycleD(fs: FaceSet, ci: number, s: number): string {
-  const edges = withoutSpurs(fs.cycles[ci]!.edges)
+  return edgesD(fs, withoutSpurs(fs.cycles[ci]!.edges), s)
+}
+
+// one closed subpath through these half-edges, in order (true arcs), × s
+function edgesD(fs: FaceSet, edges: number[], s: number): string {
   if (!edges.length) return ''
   // a coordinate within a millionth of the weld tolerance of zero is zero
   // (cos π/2 and friends); -0 prints as 0
@@ -716,6 +720,56 @@ export function facesD(fs: FaceSet, faceIds: number[], scale = 1): string {
       const d = cycleD(fs, ci, scale)
       if (d) parts.push(d)
     }
+  }
+  return parts.join(' ')
+}
+
+/** The same faces as ONE merged outline: their union's boundary only — an
+ *  edge two filled faces share (and a spur, whose both sides are one face) is
+ *  left out, so filled faces that touch become one ring instead of rings that
+ *  run their shared edge twice. Non-zero fill paints exactly what `facesD`
+ *  paints; the difference is for anything that works ring by ring (the
+ *  Frame's geometry effects: offset, roughen…), which would otherwise open
+ *  seams between touching areas (pen stage 7). Outer rings counter-clockwise,
+ *  holes clockwise; coordinates × `scale`. A face on its own gives its own
+ *  outline, from the same first edge as `facesD`. */
+export function facesUnionD(fs: FaceSet, faceIds: number[], scale = 1): string {
+  const filled = new Set(faceIds.filter(f => !!fs.faces[f]))
+  if (!filled.size) return ''
+  // the half-edges of the filled faces' rings, in ring order (tiny holes are
+  // left out, as `facesD` leaves them out)
+  const nextOf = new Map<number, number>()
+  const order: number[] = []
+  for (const f of filled) {
+    const face = fs.faces[f]!
+    for (const ci of [face.outer, ...face.holes]) {
+      if (ci !== face.outer && !(Math.abs(fs.cycles[ci]!.area) > fs.tol * fs.tol)) continue
+      const edges = fs.cycles[ci]!.edges
+      edges.forEach((e, i) => { nextOf.set(e, edges[(i + 1) % edges.length]!); order.push(e) })
+    }
+  }
+  // on the union's boundary: the other side is not a filled face
+  const kept = (e: number) => {
+    if (!nextOf.has(e)) return false
+    const other = faceOfHalfEdge(fs, e ^ 1)
+    return other == null || !filled.has(other) || !nextOf.has(e ^ 1)
+  }
+  const seen = new Set<number>()
+  const parts: string[] = []
+  for (const start of order) {
+    if (seen.has(start) || !kept(start)) continue
+    const ring: number[] = []
+    let e = start, guard = 0
+    while (!seen.has(e) && guard++ <= order.length) {
+      seen.add(e); ring.push(e)
+      // the next boundary edge: along the ring; where that edge is shared,
+      // cross into the neighbouring filled face and carry on round the vertex
+      let n = nextOf.get(e)!, turns = 0
+      while (!kept(n) && turns++ <= order.length) n = nextOf.get(n ^ 1)!
+      e = n
+    }
+    const d = edgesD(fs, ring, scale)
+    if (d) parts.push(d)
   }
   return parts.join(' ')
 }

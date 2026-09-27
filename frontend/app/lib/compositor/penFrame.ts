@@ -52,6 +52,8 @@ import { sketchPathData } from '~/lib/sketch/sketchPath'
 import { flattenPath } from '~/lib/compositor/pathFlatten'
 import { applyView, type ViewMatrix } from '~/lib/sketch/view'
 import { customGuideMapping, guideSizeToTargetWidthPx } from '~/lib/compositor/textPath'
+import { fillState } from '~/lib/sketch/fills'
+import { facesUnionD } from '~/lib/sketch/faces'
 
 const DEG = Math.PI / 180
 
@@ -108,6 +110,35 @@ export function sketchToLocalD(sketch: SketchDoc): string {
     else if (e.kind === 'circle') { e.r /= SKETCH_UNITS }
   }
   return sketchPathData(scaled)
+}
+
+/** Pen stage 7: a stored `sketch`'s filled areas as ONE closed outline in LOCAL units
+ *  (true arcs, written for a non-zero fill); '' when nothing is filled. Anywhere a
+ *  `sketch` with filled areas is stored beside a `fillD`, `fillD ===
+ *  sketchFillToLocalD(sketch)` is the invariant. The faces come from the drawing in its
+ *  own units (so a host's preview and the overlay share one cached answer) and only the
+ *  written numbers are scaled. Filled areas that touch are written MERGED (their union's
+ *  boundary, `facesUnionD`): the painter fills the same pixels either way, but the
+ *  Frame's geometry effects work ring by ring and would open seams along a shared edge. */
+export function sketchFillToLocalD(sketch: SketchDoc): string {
+  if (!sketch.fills?.length) return ''
+  const st = fillState(sketch)
+  return st.filled.length ? facesUnionD(st.fs, st.filled, 1 / SKETCH_UNITS) : ''
+}
+
+/** What a pen-drawn path layer stores for its drawing: `d`, and `fillD` only when an
+ *  area is filled. */
+export function penOutlines(sketch: SketchDoc): { d: string; fillD?: string } {
+  const fillD = sketchFillToLocalD(sketch)
+  return fillD ? { d: sketchToLocalD(sketch), fillD } : { d: sketchToLocalD(sketch) }
+}
+
+/** `l` with the pen's drawing written into it: `d`, `sketch`, and `fillD` (dropped when
+ *  nothing is filled). A drawing without fills gives exactly `{ ...l, d, sketch }`. */
+export function withPenOutlines<L extends { fillD?: string }>(l: L, sketch: SketchDoc): Omit<L, 'fillD'> & { d: string; sketch: SketchDoc; fillD?: string } {
+  const { fillD: _old, ...rest } = l
+  const o = penOutlines(sketch)
+  return { ...rest, d: o.d, sketch, ...(o.fillD ? { fillD: o.fillD } : {}) }
 }
 
 /** Bounding box of a `d` (already in whatever units it's in) over every
