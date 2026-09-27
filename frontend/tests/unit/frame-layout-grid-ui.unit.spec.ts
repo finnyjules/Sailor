@@ -33,9 +33,15 @@ describe('LayoutGridOverlay', () => {
     expect(marks(overlay({ moving: true, covered }))).toBe(2)
     expect(marks(overlay({ moving: false, covered }))).toBe(0)
   })
-  it('keeps hairlines one CSS px at any display size', () => {
-    const line = overlay().findAll('svg').at(0)!.get('line')
-    expect(Number(line.attributes('stroke-width'))).toBeCloseTo(1080 / 540)
+  it('keeps hairlines one CSS px at any display size and zoom (non-scaling strokes)', () => {
+    // The modal zooms with a CSS transform, so a stroke width computed from the display size is
+    // only 1 px at zoom 1 — every stroked line/rect must be a non-scaling 1 px stroke instead.
+    const stroked = overlay({ moving: true }).findAll('line, rect').filter(el => el.attributes('stroke'))
+    expect(stroked.length).toBeGreaterThan(0)
+    for (const el of stroked) {
+      expect(el.attributes('stroke-width')).toBe('1')
+      expect(el.attributes('vector-effect')).toBe('non-scaling-stroke')
+    }
   })
 })
 

@@ -829,6 +829,8 @@ export function useLocalLayerEditor(opts: EditorOpts) {
   const MOVE_SLOP_PX = 4 // a press is a click until it travels this far (screen px)
   /** A move drag that has passed the slop — the overlay fades its modules in only then. */
   const dragMoving = computed(() => drag.value?.type === 'move' && !!(drag.value as any).moved)
+  /** Any editor gesture (move, resize, scale, rotate, group resize) is live. */
+  const dragging = computed(() => drag.value != null)
 
   // Grid snap lines, normalized to [0,1]. Only while the grid is shown — a hidden guide never
   // pulls a layer. Recomputed when the grid or the canvas dims change, not per pointer event.
@@ -886,16 +888,20 @@ export function useLocalLayerEditor(opts: EditorOpts) {
     const prim = localLayers.value.find(l => l.id === primaryId)
     if (!prim) return { dx, dy }
     const b = boxPx(prim); const hx = b.w / 2 / W, hy = b.h / 2 / H
-    const cx = ox + dx, cy = oy + dy
+    // Snap the DRAWN box: valign shifts a text box's centre off its stored y (as hitTest does).
+    // The offset is constant during a move, so the returned dy applies to the stored y as-is.
+    const cx = ox + dx, cy = oy + dy + textVAlignCenterOffset(prim, b.h) / H
     const movingIds = new Set((drag.value as any)?.origins?.map((o: any) => o.id) ?? [primaryId])
     const others = [] as { cx: number; cy: number; hx: number; hy: number }[]
     for (const l of localLayers.value) {
       if (movingIds.has(l.id)) continue
       const lb = boxPx(l)
-      others.push({ cx: l.x, cy: l.y, hx: lb.w / 2 / W, hy: lb.h / 2 / H })
+      others.push({ cx: l.x, cy: l.y + textVAlignCenterOffset(l, lb.h) / H, hx: lb.w / 2 / W, hy: lb.h / 2 / H })
     }
     const gl = gridSnapLines.value
-    const res = computeSnapAdjust({ cx, cy, hx, hy }, others, SNAP_PX / W, SNAP_PX / H, [0, 0.5, 1], gl.xs, gl.ys)
+    // Threshold in SCREEN px (the artboard's on-screen rect), like resize — steady at any zoom.
+    const r = getRect()
+    const res = computeSnapAdjust({ cx, cy, hx, hy }, others, SNAP_PX / (r?.width || W), SNAP_PX / (r?.height || H), [0, 0.5, 1], gl.xs, gl.ys)
     snapGuides.value = { vx: res.guideX, hy: res.guideY }
     return { dx: dx + res.dx, dy: dy + res.dy }
   }
@@ -1013,15 +1019,32 @@ export function useLocalLayerEditor(opts: EditorOpts) {
       // BOTH axes, exactly like a rect's.
       const cur = localLayers.value.find(l => l.id === d.id)
       const locked = aspectLockedResizeKind(cur?.kind ?? '')
-      // Snap the dragged corner/edge to the layout grid (unrotated layers; ⌥ turns it off).
+      // Snap the box EDGE the handle moves to the layout grid (unrotated layers; ⌥ turns it
+      // off). The edge follows the pointer by (p − p0), wherever inside the handle the press
+      // landed, so the edge — not the pointer — is what is compared with the lines; the pointer
+      // is then shifted by the same amount. Only the axes the handle moves snap or show a guide.
       let px = nx * W, py = ny * H
       if (!e.altKey && !d.rot) {
-        const gl = gridSnapLines.value, th = SNAP_PX * W / r.width   // screen px → design px
+        const gl = gridSnapLines.value
+        const thX = SNAP_PX * W / r.width, thY = SNAP_PX * H / r.height   // screen px → editor px
+        const sx = /l$/.test(d.handle) ? -1 : /r$/.test(d.handle) ? 1 : 0
+        const sy = d.handle.startsWith('t') ? -1 : d.handle.startsWith('b') ? 1 : 0
+        const nearest = (lines: number[], scale: number, edge: number, th: number) => {
+          let best: number | null = null
+          for (const f of lines) { const v = f * scale; if (Math.abs(v - edge) < th && (best == null || Math.abs(v - edge) < Math.abs(best - edge))) best = v }
+          return best
+        }
         let gx: number | null = null, gy: number | null = null
-        for (const x of gl.xs) { const v = x * W; if (Math.abs(v - px) < th && (gx == null || Math.abs(v - px) < Math.abs(gx - px))) gx = v }
-        for (const y of gl.ys) { const v = y * H; if (Math.abs(v - py) < th && (gy == null || Math.abs(v - py) < Math.abs(gy - py))) gy = v }
-        if (gx != null) px = gx
-        if (gy != null) py = gy
+        if (sx) {
+          const edge = d.start.cx + sx * d.start.w / 2 + (px - d.p0.x)
+          gx = nearest(gl.xs, W, edge, thX)
+          if (gx != null) px += gx - edge
+        }
+        if (sy) {
+          const edge = d.start.cy + sy * d.start.h / 2 + (py - d.p0.y)
+          gy = nearest(gl.ys, H, edge, thY)
+          if (gy != null) py += gy - edge
+        }
         snapGuides.value = { vx: gx != null ? gx / W : null, hy: gy != null ? gy / H : null }
       } else snapGuides.value = { vx: null, hy: null }
       const box = resizeBox(d.start, d.rot, d.handle, d.p0, { x: px, y: py }, { aspect: e.shiftKey || locked, fromCenter: e.altKey })
@@ -1090,7 +1113,9 @@ export function useLocalLayerEditor(opts: EditorOpts) {
     for (const l of sel) {
       const b = boxPx(l)
       const hx = b.w / 2 / W, hy = b.h / 2 / H
-      const res = computeSnapAdjust({ cx: l.x, cy: l.y, hx, hy }, [], 0.5, 0.5, [], gl.xs, gl.ys)
+      // The DRAWN centre (valign offset, as hitTest); the offset is unchanged by a move, so
+      // the adjustment applies to the stored y directly.
+      const res = computeSnapAdjust({ cx: l.x, cy: l.y + textVAlignCenterOffset(l, b.h) / H, hx, hy }, [], 0.5, 0.5, [], gl.xs, gl.ys)
       if (res.dx || res.dy) patches.set(l.id, { x: l.x + res.dx, y: l.y + res.dy })
     }
     if (!patches.size) return
@@ -1232,7 +1257,7 @@ export function useLocalLayerEditor(opts: EditorOpts) {
     writeBackground: writeBg, // non-recording: for callers that batch a layers write + background write under ONE recordHistory()
     postEffects, setPostEffects,
     frameLight, setFrameLight,
-    layoutGrid, layoutGridResolved, setLayoutGrid, ensureLayoutGrid, dragMoving, gridSnapLines,
+    layoutGrid, layoutGridResolved, setLayoutGrid, ensureLayoutGrid, dragMoving, dragging, gridSnapLines,
     undo, redo, canUndo, canRedo, historyRev,
     selectedIds, selectedLayers, toggleSelect, applyBoolean, alignSelected, alignToFrame, nudgeSelection, duplicateSelection, handleEditorKey,
     copySelection, pasteClipboard,

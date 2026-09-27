@@ -905,7 +905,7 @@ const {
   background, setBackground,
   postEffects, setPostEffects,
   frameLight, setFrameLight,
-  layoutGrid, layoutGridResolved, setLayoutGrid, ensureLayoutGrid, dragMoving,
+  layoutGrid, layoutGridResolved, setLayoutGrid, ensureLayoutGrid, dragMoving, dragging: editorDragging,
   undo, redo, canUndo, canRedo,
   selectedIds, selectedLayers, toggleSelect, applyBoolean, alignSelected, alignToFrame, recordHistory, commit, handleEditorKey, pasteClipboard,
   selectionBox, selectionHandles, startGroupResize,
@@ -2399,9 +2399,11 @@ async function onCanvasDrop(e: DragEvent) {
   }
 }
 
-/** Keys that edit the selection or the history (arrows, ⌘C/⌘V/⌘D, Delete, ⌘Z, ⌘G, ⌘X, ⌘A). */
+/** Keys that edit the selection or the history (arrows, ⌘C/⌘V/⌘D, Delete, ⌘Z, ⌘G, ⌘X, ⌘A,
+ *  and the grid toggle ⌃⇧4 — ⌃G is already covered by 'g'). */
 function isViewDragEditKey(e: KeyboardEvent): boolean {
   if (mapKeyToEdit(e, 1, 10) || e.key === 'Delete' || e.key === 'Backspace') return true
+  if ((e.metaKey || e.ctrlKey) && e.code === 'Digit4') return true
   return (e.metaKey || e.ctrlKey) && ['z', 'g', 'x', 'a'].includes(e.key.toLowerCase())
 }
 /** The viewport keys — Space (hold to pan) and ⌘/Ctrl = − 0 2 (zoom in, out,
@@ -2532,13 +2534,14 @@ function onKeydown(e: KeyboardEvent) {
     e.preventDefault(); e.stopPropagation()
     if (e.shiftKey) redoFrame(); else undoFrame()
   } else if ((e.key === 'g' || e.key === 'G') && e.ctrlKey && !e.metaKey && IS_MAC && !editingId.value) {
-    // ⌃G shows or hides the layout grid (Figma); ⌘G stays Group on Mac.
+    // ⌃G shows or hides the layout grid (Figma); ⌘G stays Group on Mac. Swallowed mid-gesture:
+    // a grid toggle would record its own undo step inside the drag's.
     e.preventDefault(); e.stopPropagation()
-    setLayoutGrid({ ...layoutGrid.value, show: !layoutGrid.value.show })
+    if (!editorDragging.value) setLayoutGrid({ ...layoutGrid.value, show: !layoutGrid.value.show })
   } else if (!IS_MAC && e.ctrlKey && e.shiftKey && e.code === 'Digit4' && !editingId.value) {
-    // Off a Mac ⌃G is Group, so the grid toggle is Figma's ⌃⇧4.
+    // Off a Mac ⌃G is Group, so the grid toggle is Figma's ⌃⇧4. Swallowed mid-gesture (as ⌃G).
     e.preventDefault(); e.stopPropagation()
-    setLayoutGrid({ ...layoutGrid.value, show: !layoutGrid.value.show })
+    if (!editorDragging.value) setLayoutGrid({ ...layoutGrid.value, show: !layoutGrid.value.show })
   } else if (meta && (e.key === 'g' || e.key === 'G') && !editingId.value) {
     e.preventDefault(); e.stopPropagation()
     if (e.shiftKey) ungroupSelected(); else groupSelected()
