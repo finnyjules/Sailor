@@ -2154,11 +2154,58 @@ function handleLiveRun(e: Event) {
   // the canvas, so an id-less event now refuses to run instead of running all.
   const nodeId = (e as CustomEvent).detail?.nodeId
   if (!nodeId) { console.warn('[LiveRun] dropped: no nodeId on sailor:liveRun'); return }
+  // Live previews through the runner (step 3, R2.11): a ported effect's preview is worked out by
+  // /api/runs/preview on the files the canvas shows, free, never touching /prompt or /api/runs.
+  // Anything the route doesn't take runs as before.
+  if (runnerEnabled && directExecutionEnabled.value && runnerFamilies.has('live-previews')) {
+    void previewThroughRunner(String(nodeId))
+      .catch((err) => { console.warn('[LiveRun] runner preview failed', err); return false })
+      .then((taken) => { if (!taken) runLiveOnEngine(String(nodeId)) })
+    return
+  }
+  runLiveOnEngine(String(nodeId))
+}
+function runLiveOnEngine(nodeId: string) {
   pendingLiveRuns.value++
   // Safety: drop the counter if no execution_start arrives (e.g. queue rejected the prompt).
   if (pendingLiveRunsResetTimer) clearTimeout(pendingLiveRunsResetTimer)
   pendingLiveRunsResetTimer = setTimeout(() => { pendingLiveRuns.value = 0 }, 10000)
-  runVueWorkflow([String(nodeId)], { live: true })
+  runVueWorkflow([nodeId], { live: true })
+}
+/**
+ * A live preview through the runner (lib/runner/livePreview.ts), or false to run it as before.
+ * The prompt is built as a live run builds it; the answer lands on the node as the runner's
+ * `executed` event (or its `execution_error`) through the in-page pipe, for a silent stage
+ * registered only until the layout and the canvas have handled it.
+ */
+async function previewThroughRunner(nodeId: string): Promise<boolean> {
+  const canvas = vueCanvasRef.value
+  const tabId = activeTab.value?.id || ''
+  const doc = savedWorkflows[tabId]
+  const canvasId = isProjectDoc(doc) ? doc.activeCanvasId : null
+  if (!canvas?.getFilteredWorkflow || !canvas.getNodes || !canvasId) return false
+  const lp = await import('~/lib/runner/livePreview')
+  let prompt: import('~/lib/graph/graphToPrompt').ApiPrompt
+  try {
+    const wf = JSON.parse(JSON.stringify(canvas.getFilteredWorkflow([nodeId], { live: true })))
+    if (!wf?.nodes?.length) return false
+    const plain = stripFrontendOnlyNodes(wf, FRONTEND_ONLY_NODE_TYPES).workflow
+    stripVarsLinks(plain)
+    prompt = graphToPrompt(plain, objectInfo.value)
+  }
+  catch { return false }
+  const nodes: any[] = canvas.getNodes() || []
+  const req = lp.livePreviewRequest(prompt, nodeId, runnerFamilies, id => lp.filesShownBy(nodes.find((n: any) => String(n.id) === id)?.data?.images))
+  if (!req) return false
+  const out = await lp.sendLivePreview({ ...req, canvasId })
+  if (out.kind === 'fallback') return false
+  if (out.kind === 'dropped') return true
+  const promptId = lp.previewPromptId()
+  const env = lp.previewEnvelope(promptId, canvasId, out, nodeId)
+  if (!env) return true
+  registerRun({ promptId, tabId, live: true, worker: RUNNER_WORKER, canvasId })
+  lp.deliverEnvelope(env, () => finishRun(promptId, 'done'))
+  return true
 }
 
 onMounted(() => {
