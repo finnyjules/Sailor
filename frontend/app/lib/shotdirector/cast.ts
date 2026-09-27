@@ -43,6 +43,11 @@ function imagesModeRefs(value: IdentityRefSet | string[] | undefined, profile: M
 }
 
 /** The front + up to `castRefCap - 1` other pictures for one `elements`-mode member. */
+/** Kling refuses an element with no reference pictures (fal 422), so a character with only a face sends the face again. */
+function withFrontFallback(front: string | null, refs: string[]): string[] {
+  return refs.length || !front ? refs : [front]
+}
+
 function elementsModeBundle(value: IdentityRefSet | string[] | undefined, profile: ModelProfile): { front: string | null, refs: string[] } {
   if (value === undefined) return { front: null, refs: [] }
   if (isRefSet(value)) {
@@ -50,10 +55,10 @@ function elementsModeBundle(value: IdentityRefSet | string[] | undefined, profil
     const refs = [value.portrait, value.bodyFront, value.bodyBack]
       .filter((r): r is string => !!r && r !== front)
       .slice(0, profile.castRefCap - 1)
-    return { front, refs }
+    return { front, refs: withFrontFallback(front, refs) }
   }
   const [front = null, ...rest] = value
-  return { front, refs: rest.filter(r => r !== front).slice(0, profile.castRefCap - 1) }
+  return { front, refs: withFrontFallback(front, rest.filter(r => r !== front).slice(0, profile.castRefCap - 1)) }
 }
 
 /**

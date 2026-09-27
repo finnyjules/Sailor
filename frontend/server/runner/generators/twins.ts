@@ -406,7 +406,11 @@ export function klingV3Fal({ prompt, aspectRatio, duration, image, adv }: VideoB
   else inp.aspect_ratio = arOr(KLING_AR, aspectRatio, '16:9')
   const elements = Array.isArray(adv.elements) ? adv.elements as KlingElement[] : []
   if (elements.length) {
-    inp.elements = elements.map(el => ({ frontal_image_url: el.frontal_image_url, reference_image_urls: el.reference_image_urls }))
+    // fal refuses an element with no reference pictures (422), so the face stands in when it is the only picture.
+    inp.elements = elements.map(el => ({
+      frontal_image_url: el.frontal_image_url,
+      reference_image_urls: el.reference_image_urls?.length ? el.reference_image_urls : [el.frontal_image_url],
+    }))
   }
   return { endpoint: `${KLING_V3_FAL_APP}/${image ? 'image-to-video' : 'text-to-video'}`, payload: inp }
 }

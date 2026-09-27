@@ -294,6 +294,12 @@ describe('materializeCast — elements mode (Kling)', () => {
     expect(bundles).toEqual([{ slug: 'reva', front: U('f'), refs: [U('bf'), U('bb')] }])
   })
 
+  it('a member with only a face sends the face as its reference too (fal refuses an empty list)', () => {
+    const s = sheetWithCast()
+    const { bundles } = materializeCast(s, { reva: refSet({ front: U('f') }), marcus: refSet({ front: U('m') }) }, KLING_V3_PROFILE)
+    expect(bundles.map(b => b.refs)).toEqual([[U('f')], [U('m')]])
+  })
+
   it('raises cast-member-no-refs for a member with no front, and still bundles the rest', () => {
     const s = sheetWithCast()
     const resolved = {
@@ -301,7 +307,7 @@ describe('materializeCast — elements mode (Kling)', () => {
       marcus: refSet({ front: U('marcus-front') }),
     }
     const { bundles, issues } = materializeCast(s, resolved, KLING_V3_PROFILE)
-    expect(bundles).toEqual([{ slug: 'marcus', front: U('marcus-front'), refs: [] }])
+    expect(bundles).toEqual([{ slug: 'marcus', front: U('marcus-front'), refs: [U('marcus-front')] }])
     const err = issues.find(i => i.code === 'cast-member-no-refs')
     expect(err).toBeDefined()
     expect(err!.message).toContain('Reva')

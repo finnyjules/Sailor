@@ -204,7 +204,11 @@ describe('Kling 3 on fal takes characters as elements (Task 3, characters stage 
     expect(klingElementsProblem({}, false)).toBeNull()
   })
 
-  it('no elements: payload unchanged from today', () => {
+  it('Kling 3: an element with no reference pictures sends its face as the reference (fal 422s on an empty list)', () => {
+  const call = klingV3Fal({ prompt: '@Element1 waves', aspectRatio: '16:9', duration: 5, seed: 0, image: 'https://f/start.png', adv: { elements: [{ frontal_image_url: 'https://f/face.png', reference_image_urls: [] }] } })
+  expect(call.payload.elements).toEqual([{ frontal_image_url: 'https://f/face.png', reference_image_urls: ['https://f/face.png'] }])
+})
+it('no elements: payload unchanged from today', () => {
     const call = klingV3Fal({ prompt: 'x', aspectRatio: '16:9', duration: 5, seed: 0, image: 'https://f/s.png', adv: {} })
     expect(call.payload).not.toHaveProperty('elements')
   })
