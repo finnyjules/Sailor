@@ -102,7 +102,7 @@ import { setLiveTipStroke } from '~/composables/useCompositorLayers'
 import { replayStroke } from '~/lib/brushTips/replay'
 import { REF_W as BRUSH_REF_W } from '~/lib/brushTips/tips'
 import type { TipStroke } from '~/lib/brushTips/record'
-import { Steadier, HoldWatch, holdMsOf, type TPt } from '~/lib/brushTips/steady'
+import { Steadier, HoldWatch, holdMsOf, type TPt, type SteadySettings } from '~/lib/brushTips/steady'
 import { fitShape, adjustShape, shapePoints, shapeLabel, medianSpeed, timedSamples, type Shape } from '~/lib/brushTips/quickShape'
 import StudioColor from '~/components/vue-canvas/studio/StudioColor.vue'
 import StudioColorField from '~/components/vue-canvas/studio/StudioColorField.vue'
@@ -2107,12 +2107,15 @@ const brush = useBrushPaint()
 // Steadying (steady.ts) runs in CLIENT px: `st` steadies the raw pointer, `hold` watches for a
 // hold-to-snap, `path` is the steadied line as painted, `finger` the latest raw point, `snap`
 // the shape the stroke snapped to (then the hand edits it), `releasing` the release time while
-// Streamline catches the line up to where the finger stopped.
+// Streamline catches the line up to where the finger stopped. `cfg` is the steadying settings
+// copied at pointerdown (a change applies to the next stroke), `len` the painted path's running
+// length, `snapDirty` a snapped shape waiting for tipHoldLoop to redraw it (once per frame).
 type TipSnap = { base: Shape; c0: { x: number; y: number }; speed: number; label: string }
 type TipLive = {
   layerId: string; pending: BrushLayer | null; s: TipStroke; down: boolean; raf: number; lastMoveT: number
   st: Steadier; hold: HoldWatch; path: TPt[]; finger: { x: number; y: number }
   snap: TipSnap | null; snapTried: boolean; releasing: number
+  cfg: SteadySettings; len: number; snapDirty: boolean
 }
 let tipLive: TipLive | null = null
 // True while `tipLive.pending` (a new layer not yet in the document) carries a MOVING material.
@@ -7100,20 +7103,19 @@ let shiftDown = false
 function onSnapShiftKey(e: KeyboardEvent) {
   if (e.shiftKey === shiftDown) return
   shiftDown = e.shiftKey
-  if (tipLive?.snap) applySnap(tipLive)
-}
-function tipPathLen(P: { x: number; y: number }[]): number {
-  let n = 0; for (let i = 1; i < P.length; i++) n += Math.hypot(P[i]!.x - P[i - 1]!.x, P[i]!.y - P[i - 1]!.y); return n
+  if (tipLive?.snap) tipLive.snapDirty = true
 }
 /** Paint one steadied client point into the live stroke. */
 function emitClient(L: TipLive, p: { x: number; y: number }, t: number) {
   const wn = clientXYToWidthNorm(p.x, p.y); if (!wn) return
   brush.extendTipStroke(wn.x, wn.y, t)
+  const last = L.path[L.path.length - 1]
+  if (last) L.len += Math.hypot(p.x - last.x, p.y - last.y)
   L.path.push({ x: p.x, y: p.y, t })
   L.lastMoveT = t
 }
 function snapEligible(L: TipLive): boolean {
-  return brush.steady.snap && L.s.tip !== 'spray' && !L.snapTried && tipPathLen(L.path) > 30
+  return L.cfg.snap && L.s.tip !== 'spray' && !L.snapTried && L.len > 30
 }
 function trySnap(L: TipLive) {
   const base = fitShape([...L.path, L.finger])
@@ -7124,6 +7126,7 @@ function trySnap(L: TipLive) {
 /** Redraw the live stroke along the snapped shape as the hand edits it, at an even speed. */
 function applySnap(L: TipLive) {
   const snap = L.snap; if (!snap) return
+  L.snapDirty = false
   const sh = adjustShape(snap.base, snap.c0, L.finger, shiftDown)
   const P = timedSamples(shapePoints(sh, shiftDown), snap.speed)
   const out: TPt[] = []
@@ -7144,7 +7147,7 @@ function updateSnapUi(L: TipLive, now: number) {
   }
   let progress: number | null = null
   if (!L.snap && !L.releasing && snapEligible(L)) {
-    const still = L.hold.stillFor(now), holdMs = holdMsOf(brush.steady.hold)
+    const still = L.hold.stillFor(now), holdMs = holdMsOf(L.cfg.hold)
     if (still > SNAP_RING_LEAD_MS) progress = Math.min(1, Math.max(0, (still - SNAP_RING_LEAD_MS) / (holdMs - SNAP_RING_LEAD_MS)))
   }
   snapUi.progress = progress
@@ -7173,8 +7176,8 @@ function tipHoldLoop() {
     for (const p of r.samples) emitClient(L, p, p.t)
     if (r.samples.length) renderStack()
     if (now - L.lastMoveT > TIP_HOLD_AFTER_MS) { brush.holdTipStroke(now); renderStack() }
-    if (snapEligible(L) && L.hold.stillFor(now) > holdMsOf(brush.steady.hold)) trySnap(L)
-  }
+    if (snapEligible(L) && L.hold.stillFor(now) > holdMsOf(L.cfg.hold)) trySnap(L)
+  } else if (L.snapDirty) applySnap(L) // the hand or Shift moved the shape: redraw once this frame
   updateSnapUi(L, now)
   L.raf = requestAnimationFrame(tipHoldLoop)
 }
@@ -7224,11 +7227,12 @@ function onTipPointerDown(e: PointerEvent, p: { nx: number; ny: number }) {
   const pending = existing ? null : newTipLayer(effectMode)
   const layerId = existing ? existing.id : pending!.id
   // The steadying settings are copied: a change applies to the next stroke.
-  const cx = e.clientX, cy = e.clientY, t = e.timeStamp
+  const cx = e.clientX, cy = e.clientY, t = e.timeStamp, cfg = { ...brush.steady }
   tipLive = {
     layerId, pending, s, down: true, raf: 0, lastMoveT: t,
-    st: new Steadier({ ...brush.steady }, cx, cy, t), hold: new HoldWatch(cx, cy, t),
+    st: new Steadier(cfg, cx, cy, t), hold: new HoldWatch(cx, cy, t),
     path: [{ x: cx, y: cy, t }], finger: { x: cx, y: cy }, snap: null, snapTried: false, releasing: 0,
+    cfg, len: 0, snapDirty: false,
   }
   snapUi.on = true; snapUi.progress = null; snapUi.label = null
   shiftDown = e.shiftKey
@@ -7240,21 +7244,24 @@ function onTipPointerDown(e: PointerEvent, p: { nx: number; ny: number }) {
 function onTipPointerMove(e: PointerEvent) {
   const L = tipLive; if (!L || !L.down || L.releasing) return
   const evs = (e.getCoalescedEvents?.() ?? []) as PointerEvent[]
+  let emitted = false
   for (const ev of evs.length ? evs : [e]) {
     const cx = ev.clientX, cy = ev.clientY, t = ev.timeStamp
     L.finger = { x: cx, y: cy }
     L.hold.move(cx, cy, t)
     shiftDown = ev.shiftKey // a Shift keyup missed elsewhere can't stick
     if (L.snap) continue // snapped: the hand edits the shape instead of painting
-    for (const p of L.st.input(cx, cy, t)) emitClient(L, p, t)
+    for (const p of L.st.input(cx, cy, t)) { emitClient(L, p, t); emitted = true }
   }
-  if (L.snap) applySnap(L)
-  renderStack()
+  // Snapped: tipHoldLoop redraws the shape once per frame. Otherwise composite only for new paint.
+  if (L.snap) L.snapDirty = true
+  else if (emitted) renderStack()
 }
 function onTipPointerUp() {
   const L = tipLive; if (!L || !L.down || L.releasing) return
+  if (L.snapDirty) applySnap(L) // the last hand move since the frame's redraw
   // Streamline still trailing the finger: let tipHoldLoop catch it up, then finish.
-  if (!L.snap && brush.steady.streamline > 0.001) {
+  if (!L.snap && L.cfg.streamline > 0.001) {
     const tg = L.st.target, pen = L.st.pen
     if (Math.hypot(tg.x - pen.x, tg.y - pen.y) > 0.6) { L.releasing = performance.now(); return }
   }
@@ -7292,7 +7299,12 @@ function commitTipStroke() {
   hideSnapUi()
   const L = tipLive; if (!L) return
   tipLive = null
-  L.releasing = 0 // a pending catch-up is dropped: commit what is there
+  // A quick next stroke cut the ≤ 350 ms catch-up short: finish the line to the finger first.
+  if (L.down && L.releasing) {
+    const tg = L.st.target, pen = L.st.pen
+    if (Math.hypot(tg.x - pen.x, tg.y - pen.y) > 0.6) emitClient(L, tg, performance.now())
+  }
+  L.releasing = 0
   tipLivePendingMoving.value = false
   if (L.raf) cancelAnimationFrame(L.raf)
   const s = L.down ? brush.endTipStroke() : L.s

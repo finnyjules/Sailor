@@ -83,4 +83,11 @@ describe('BrushTipSettings', () => {
     await w.get('[data-testid="brush-tip-reset"]').trigger('click')
     expect(brush.tipSettings.bristle.thin).toBe(0.15)
   })
+  it('says "changes apply to your next stroke" only as the Reset tooltip, not as visible copy', () => {
+    const brush = useBrushPaint()
+    const w = mount(BrushTipSettings, { props: { brush }, global: { stubs } })
+    expect(w.text()).not.toContain('Changes apply to your next stroke.')
+    expect(w.find('.note').exists()).toBe(false)
+    expect(w.get('[data-testid="brush-tip-reset"]').attributes('title')).toBe('Changes apply to your next stroke.')
+  })
 })

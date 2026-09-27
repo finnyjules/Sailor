@@ -42,7 +42,9 @@ function reset() {
       <input
         type="range" min="0" max="100" step="5"
         :value="pct(r.key)"
+        :title="r.title"
         :aria-label="r.label"
+        :aria-valuetext="`${pct(r.key)}%`"
         :data-testid="`brush-steady-${r.key}`"
         @input="setPct(r.key, Number(($event.target as HTMLInputElement).value))"
       />
@@ -54,7 +56,10 @@ function reset() {
         class="switch"
         type="button"
         data-testid="brush-steady-snap"
-        :aria-pressed="brush.steady.snap"
+        role="switch"
+        :aria-checked="brush.steady.snap"
+        aria-label="Hold to snap"
+        :title="SNAP_TITLE"
         @click="toggleSnap()"
       >{{ brush.steady.snap ? 'On' : 'Off' }}</button>
     </div>
@@ -63,7 +68,9 @@ function reset() {
       <input
         type="range" min="0" max="100" step="5"
         :value="pct('hold')"
+        :title="HOLD_TITLE"
         aria-label="Hold time"
+        :aria-valuetext="holdLabel()"
         data-testid="brush-steady-hold"
         @input="setPct('hold', Number(($event.target as HTMLInputElement).value))"
       />

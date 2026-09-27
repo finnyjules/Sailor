@@ -41,8 +41,7 @@ function reset() {
       />
       <span class="val tabular-nums">{{ pct(st.key) }}%</span>
     </div>
-    <p class="note">Changes apply to your next stroke.</p>
-    <button class="reset" data-testid="brush-tip-reset" @click="reset()">Reset to defaults</button>
+    <button class="reset" data-testid="brush-tip-reset" title="Changes apply to your next stroke." @click="reset()">Reset to defaults</button>
     <div class="steady-divider">
       <BrushSteadySettings :brush="brush" />
     </div>
@@ -90,11 +89,6 @@ function reset() {
   text-align: right;
   font-size: 10px;
   color: rgba(255, 255, 255, 0.5);
-}
-.note {
-  font-size: 10px;
-  color: rgba(255, 255, 255, 0.4);
-  margin: 0;
 }
 .reset {
   align-self: flex-start;

@@ -36,6 +36,28 @@ function rdp(P: Pt[], eps: number): Pt[] {
   if (md <= eps) return [a, b]
   return rdp(P.slice(0, mi + 1), eps).slice(0, -1).concat(rdp(P.slice(mi), eps))
 }
+/** A simplified polyline counts as a shape only when it has real corners: at every interior
+ *  vertex (closed: the wrap-around vertex V[0] == V[last] too) the drawn path turns by more than
+ *  CORNER rad. The turn is measured on the drawn path Q a short way either side of the vertex, not
+ *  along the simplified edges, so a smooth curve (whose coarse simplification always looks bent)
+ *  has no corners. Without real corners the stroke stays as drawn. */
+const CORNER = 0.6, CORNER_REACH = 5 // samples of Q (3 px apart) either side of a vertex
+function dirAng(a: Pt, b: Pt) { return Math.atan2(b.y - a.y, b.x - a.x) }
+function angDiff(a: number, b: number) { const t = b - a; return Math.abs(Math.atan2(Math.sin(t), Math.cos(t))) }
+function hasRealCorners(Q: Pt[], V: Pt[], closed: boolean): boolean {
+  const n = Q.length, idx = V.map(v => Q.indexOf(v)) // rdp keeps Q's point objects; a closed V's copied last point is -1
+  for (let i = 1; i < V.length - 1; i++) {
+    const j = idx[i]!, prev = idx[i - 1]!, next = idx[i + 1]! >= 0 ? idx[i + 1]! : n - 1
+    if (j < 0 || prev < 0) return false
+    const k = Math.max(1, Math.min(CORNER_REACH, Math.floor((j - prev) / 2), Math.floor((next - j) / 2)))
+    if (angDiff(dirAng(Q[j - k]!, Q[j]!), dirAng(Q[j]!, Q[j + k]!)) <= CORNER) return false
+  }
+  if (closed) { // wrap-around: the way the pen arrived at the end against the way it set off
+    const k = Math.max(1, Math.min(CORNER_REACH, Math.floor(n / 4)))
+    if (angDiff(dirAng(Q[n - 1 - k]!, Q[n - 1]!), dirAng(Q[0]!, Q[k]!)) <= CORNER) return false
+  }
+  return true
+}
 
 export function fitShape(raw: Pt[]): Shape | null {
   if (raw.length < 2) return null
@@ -62,7 +84,7 @@ export function fitShape(raw: Pt[]): Shape | null {
       return { kind: a / b < 1.12 ? 'circle' : 'ellipse', cx, cy, a, b, th, phase: Math.atan2(dv / b, du / a), dir: area >= 0 ? 1 : -1 }
     }
     const V = rdp(Q, Math.max(6, 0.06 * diag)); V[V.length - 1] = { ...V[0]! }
-    return V.length >= 4 ? { kind: 'shape', V, closed: true, cx, cy } : null
+    return V.length >= 4 && hasRealCorners(Q, V, true) ? { kind: 'shape', V, closed: true, cx, cy } : null
   }
   if (chord < 20) return null
   let md = 0; for (const q of Q) md = Math.max(md, Math.abs((B.x - A.x) * (A.y - q.y) - (A.x - q.x) * (B.y - A.y)) / chord)
@@ -75,7 +97,8 @@ export function fitShape(raw: Pt[]): Shape | null {
     if (res < 0.07) return { kind: 'arc', A: { ...A }, M: { ...M }, B: { ...B } }
   }
   const V = rdp(Q, Math.max(6, 0.06 * diag))
-  return V.length > 2 ? { kind: 'shape', V, closed: false, cx: 0, cy: 0 } : { kind: 'line', A: { ...A }, B: { ...B } }
+  if (V.length <= 2) return { kind: 'line', A: { ...A }, B: { ...B } }
+  return hasRealCorners(Q, V, false) ? { kind: 'shape', V, closed: false, cx: 0, cy: 0 } : null
 }
 
 export function adjustShape(base: Shape, c0: Pt, cur: Pt, shift: boolean): Shape {

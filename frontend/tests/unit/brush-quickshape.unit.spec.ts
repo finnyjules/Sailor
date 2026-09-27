@@ -7,6 +7,8 @@ const arc = Array.from({ length: 50 }, (_, i) => { const a = Math.PI * (0.1 + 0.
 const ellipse = Array.from({ length: 80 }, (_, i) => { const a = i / 79 * Math.PI * 2 * 1.02; return { x: 300 + Math.cos(a) * 160 + rnd() * 3, y: 300 + Math.sin(a) * 90 + rnd() * 3 } })
 const circle = Array.from({ length: 80 }, (_, i) => { const a = i / 79 * Math.PI * 2 * 1.02; return { x: 300 + Math.cos(a) * 100 + rnd() * 2, y: 300 + Math.sin(a) * 100 + rnd() * 2 } })
 const tri = (() => { const V = [{ x: 100, y: 400 }, { x: 250, y: 120 }, { x: 400, y: 400 }, { x: 104, y: 398 }]; const out = []; for (let k = 0; k < 3; k++) for (let i = 0; i < 30; i++) { const a = V[k]!, b = V[k + 1]!; out.push({ x: a.x + (b.x - a.x) * i / 30, y: a.y + (b.y - a.y) * i / 30 }) } out.push(V[3]!); return out })()
+const sCurve = Array.from({ length: 80 }, (_, i) => { const t = i / 79; return { x: 100 + t * 300, y: 300 + Math.sin(t * Math.PI * 2) * 60 } })
+const blob = Array.from({ length: 140 }, (_, i) => { const a = i / 139 * Math.PI * 2 * 1.02, r = 120 + 30 * Math.cos(3 * a); return { x: 300 + Math.cos(a) * r, y: 300 + Math.sin(a) * r } })
 const scribble = Array.from({ length: 60 }, (_, i) => ({ x: 100 + i * 4, y: 200 + Math.sin(i * 0.9) * 40 }))
 
 describe('quickShape', () => {
@@ -20,7 +22,10 @@ describe('quickShape', () => {
   it('recognises a closed triangle as a shape with corners', () => {
     const s = fitShape(tri)!; expect(s.kind).toBe('shape'); expect(shapeLabel(s, false)).toBe('Shape')
   })
+  it('a smooth S-curve has no corners, so it stays as drawn', () => { expect(fitShape(sCurve)).toBeNull() })
+  it('a smooth blob that is not an ellipse stays as drawn', () => { expect(fitShape(blob)).toBeNull() })
   it('a scribble is a shape or nothing, never a line/arc/ellipse', () => {
+    // its zigzag peaks are sharp corners, so it may still snap to a shape
     const s = fitShape(scribble); expect(s === null || s.kind === 'shape').toBe(true)
   })
   it('too short to snap', () => { expect(fitShape([{ x: 0, y: 0 }, { x: 5, y: 0 }, { x: 10, y: 1 }, { x: 12, y: 0 }])).toBeNull() })

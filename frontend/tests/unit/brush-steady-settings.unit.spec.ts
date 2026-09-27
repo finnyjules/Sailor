@@ -49,15 +49,36 @@ describe('BrushSteadySettings', () => {
     expect(w.find('[data-testid="brush-steady-hold"]').exists()).toBe(false)
   })
 
-  it('the snap switch shows On/Off and aria-pressed', async () => {
+  it('the snap switch is a named switch that reads On/Off', async () => {
     const brush = useBrushPaint()
     const w = mount(BrushSteadySettings, { props: { brush } })
     const btn = w.get('[data-testid="brush-steady-snap"]')
+    expect(btn.attributes('role')).toBe('switch')
+    expect(btn.attributes('aria-label')).toBe('Hold to snap')
     expect(btn.text()).toBe('On')
-    expect(btn.attributes('aria-pressed')).toBe('true')
+    expect(btn.attributes('aria-checked')).toBe('true')
     await btn.trigger('click')
     expect(btn.text()).toBe('Off')
-    expect(btn.attributes('aria-pressed')).toBe('false')
+    expect(btn.attributes('aria-checked')).toBe('false')
+  })
+
+  it('each slider speaks its value: percentages, and seconds for hold time', async () => {
+    const brush = useBrushPaint()
+    const w = mount(BrushSteadySettings, { props: { brush } })
+    expect(w.get('[data-testid="brush-steady-streamline"]').attributes('aria-valuetext')).toBe('30%')
+    expect(w.get('[data-testid="brush-steady-stabilise"]').attributes('aria-valuetext')).toBe('15%')
+    expect(w.get('[data-testid="brush-steady-filter"]').attributes('aria-valuetext')).toBe('40%')
+    expect(w.get('[data-testid="brush-steady-hold"]').attributes('aria-valuetext')).toBe('0.63 s')
+    await w.get('[data-testid="brush-steady-streamline"]').setValue(60)
+    expect(w.get('[data-testid="brush-steady-streamline"]').attributes('aria-valuetext')).toBe('60%')
+  })
+
+  it('each control carries its row tooltip, not only the label', () => {
+    const brush = useBrushPaint()
+    const w = mount(BrushSteadySettings, { props: { brush } })
+    const lbls = w.findAll('.lbl')
+    const ids = ['streamline', 'stabilise', 'filter', 'snap', 'hold']
+    ids.forEach((id, i) => expect(w.get(`[data-testid="brush-steady-${id}"]`).attributes('title')).toBe(lbls[i]!.attributes('title')))
   })
 
   it('Reset restores the defaults', async () => {
