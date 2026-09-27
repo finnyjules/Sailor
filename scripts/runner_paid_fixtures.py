@@ -5,6 +5,11 @@ stable bytes (run it twice: the second time `git diff --stat` shows nothing).
 
     cd /Users/julien/Documents/GitHub/Sailor && .venv/bin/python scripts/runner_paid_fixtures.py --group machinery
 
+Each R3 task adds its group: a list of node cases made by `paid_case`, which
+runs the class's real `execute` through `capture_calls` (every provider call,
+upload, download, save and JSON-link fetch patched out) and records the calls
+Python makes, in order, and what the node returns.
+
 Groups:
   machinery  (R3.1) Python's json module and float repr, for
              frontend/shared/runner/pyJson.ts (tests/unit/py-json.unit.spec.ts):
@@ -16,14 +21,20 @@ Groups:
 
 The network is blocked (as in compositor_fixtures.py): every outbound connect
 and DNS lookup raises and the provider keys are removed before any node module
-is imported. Nothing here needs the network.
+is imported. Nothing here needs the network. The node-level helpers of
+runner_builder_fixtures.py (its module list and save helpers) are imported
+only inside capture_calls, after the block: importing that module loads
+comfy_api_nodes.image_models at once.
 """
+import asyncio
+import contextlib
 import json
 import os
 import random
 import socket
 import struct
 import sys
+from unittest import mock
 
 PROVIDER_KEYS = ("FAL_KEY", "FAL_API_KEY", "NUXT_REPLICATE_TOKEN", "REPLICATE_API_TOKEN")
 
@@ -45,6 +56,215 @@ if __name__ == "__main__" and "--allow-network" not in sys.argv[1:]:
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 FIXTURES = os.path.join(ROOT, "frontend", "tests", "unit", "fixtures")
+
+
+# ── capture_calls (R3.2): every provider call a node's execute() makes ──────
+
+class FakeTensor:
+    """A picture (or other file) a patched download returned: the URL it came from."""
+    def __init__(self, url):
+        self.url = url
+
+    def __repr__(self):
+        return f"FakeTensor({self.url!r})"
+
+
+class FakeVideo(FakeTensor):
+    pass
+
+
+class FakeAudio(dict):
+    """A sound a patched download returned, as Comfy's AUDIO dict: its URL only."""
+    def __init__(self, url):
+        super().__init__(url=url)
+        self.url = url
+
+
+class _FakeResponse:
+    def __init__(self, url, links):
+        self.url = url
+        if url not in links:
+            raise RuntimeError(f"NETWORK BLOCKED: GET {url!r} is not one of the case's links")
+        self._text = links[url]
+        self.status = 200
+
+    async def text(self, *_a, **_k):
+        return self._text
+
+    async def read(self):
+        return self._text.encode("utf-8")
+
+    async def json(self, *_a, **_k):
+        return json.loads(self._text)
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *_exc):
+        return False
+
+
+def _fake_session(links: dict):
+    """aiohttp.ClientSession, answering GETs of the case's JSON links only."""
+    class FakeSession:
+        def __init__(self, *_a, **_k):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_exc):
+            return False
+
+        def get(self, url, *_a, **_k):
+            return _FakeResponse(url, links)
+
+        def post(self, url, *_a, **_k):
+            raise RuntimeError(f"NETWORK BLOCKED: POST {url!r}")
+
+        put = post
+
+        async def close(self):
+            pass
+    return FakeSession
+
+
+def _jsonable(v):
+    """What a node returned, as JSON: strings verbatim, a downloaded file as the URL it came from."""
+    if isinstance(v, FakeVideo):
+        return {"video": v.url}
+    if isinstance(v, FakeTensor):
+        return {"image": v.url}
+    if isinstance(v, FakeAudio):
+        return {"audio": v.url}
+    if v is None or isinstance(v, (bool, int, float, str)):
+        return v
+    if isinstance(v, (list, tuple)):
+        return [_jsonable(x) for x in v]
+    if isinstance(v, dict):
+        return {str(k): _jsonable(x) for k, x in v.items()}
+    return {"repr": repr(v)}
+
+
+def capture_calls(node_cls, answers: list, links: dict | None = None, **kwargs) -> dict:
+    """Run `node_cls.execute(**kwargs)` with every provider call, upload,
+    download, save and JSON-link fetch patched out. Each provider call
+    (Replicate `_run_prediction`, fal `run_fal_prediction`) records
+    `{provider, endpoint, payload}` and returns the next of `answers`
+    (Replicate: the prediction dict; fal: the result body; `{"__body__":
+    text}`: json.loads of that text, so numbers keep their written form on the
+    TypeScript side). Pictures are passed
+    as their input name and sent as `IMG:<name>`, sounds as `WAV:<name>`,
+    uploads as `UPLOAD:<file name>`; a downloaded answer comes back as the URL
+    it came from (FakeTensor / FakeVideo / FakeAudio); `links` serves the JSON
+    files a node fetches over aiohttp. Returns `{calls, output, ui}`: `output`
+    as Python returned it (strings verbatim, files as their URL) and `ui` as
+    it would show (a saved picture as `{prefix, image}`), or `error` with the
+    exception's type and message when execute raised."""
+    if "--allow-network" not in sys.argv[1:]:
+        block_network()
+    import aiohttp
+    from runner_builder_fixtures import SAVE_HELPERS, UNREADABLE_BOARD_PREFIX, _node_modules
+    nr, fal_refs, extras = _node_modules()
+    from comfy_api.latest._io import HiddenHolder
+
+    calls: list = []
+    queue = list(answers)
+    counters: dict = {}
+
+    def answer(provider, endpoint, payload):
+        # Serialised at once, so a later change to the dict can't alter the record.
+        calls.append({"provider": provider, "endpoint": endpoint, "payload": json.loads(json.dumps(payload))})
+        if not queue:
+            raise RuntimeError(f"no answer programmed for call {len(calls)} ({endpoint})")
+        a = queue.pop(0)
+        # A body text given as it is ({"__body__": text}, paidParity.ts RawBody): what json.loads reads of it.
+        return json.loads(a["__body__"]) if isinstance(a, dict) and set(a) == {"__body__"} else a
+
+    async def fake_replicate(model, input_dict, **_kw):
+        return answer("replicate", model, input_dict)
+
+    async def fake_fal(app, fn, input_dict, **_kw):
+        return answer("fal", f"{app}/{fn}" if fn else app, input_dict)
+
+    async def fake_upload(data, filename, content_type="application/octet-stream"):
+        return f"UPLOAD:{filename}"
+
+    async def fake_hosted(src, content_type, fallback_name):
+        return src if str(src).startswith(("http://", "https://")) or not src else f"UPLOAD:{fallback_name}"
+
+    async def fake_image(url, *_a, **_k):
+        return FakeTensor(url)
+
+    async def fake_video(url, *_a, **_k):
+        return FakeVideo(url)
+
+    async def fake_audio(url, *_a, **_k):
+        return FakeAudio(url)
+
+    def url_of(t):
+        return t.url if isinstance(t, FakeTensor) else repr(t)
+
+    def fake_generation(tensor, filename_prefix="generation"):
+        return {"images": [{"prefix": filename_prefix, "image": url_of(tensor)}], "animated": [False]}
+
+    def fake_live(tensor, node_id=None, unique=False):
+        return {"images": [{"live_preview": url_of(tensor)}]}
+
+    def fake_to_input(tensor, filename_prefix="layer"):
+        counters[filename_prefix] = counters.get(filename_prefix, 0) + 1
+        return f"{filename_prefix}_{counters[filename_prefix]:05}_.png"
+
+    saves = {"save_generation_output": fake_generation, "save_live_preview": fake_live, "save_image_to_input": fake_to_input}
+    patches = [
+        mock.patch.object(node_cls, "hidden", HiddenHolder.from_dict({"UNIQUE_ID": "fixture"})),
+        mock.patch.object(nr, "_run_prediction", fake_replicate),
+        mock.patch.object(fal_refs, "run_fal_prediction", fake_fal),
+        mock.patch.object(fal_refs, "get_fal_token", lambda: "fixture-token"),
+        mock.patch.object(nr, "_upload_public_file", fake_upload),
+        mock.patch.object(nr, "_lipsync_hosted_media_url", fake_hosted),
+        mock.patch.object(nr, "_image_tensor_to_data_url", lambda t: f"IMG:{t}"),
+        mock.patch.object(nr, "_audio_dict_to_wav_data_url", lambda a, max_seconds=None: f"WAV:{a}"),
+        mock.patch.object(nr, "download_url_to_image_tensor", fake_image),
+        mock.patch.object(nr, "download_url_to_video_output", fake_video),
+        mock.patch.object(nr, "_download_url_to_audio_dict", fake_audio),
+        mock.patch.object(nr, "_moodboard_ref_data_urls",
+                          lambda folder, files, input_dir=None: [f"BOARD:{f}" for f in files
+                                                                 if not f.startswith(UNREADABLE_BOARD_PREFIX)]),
+        mock.patch.object(aiohttp, "ClientSession", _fake_session(dict(links or {}))),
+    ]
+    for mod in [nr, *extras, sys.modules.get(node_cls.__module__)]:
+        for name in SAVE_HELPERS:
+            if mod is not None and hasattr(mod, name):
+                patches.append(mock.patch.object(mod, name, saves[name]))
+
+    with contextlib.ExitStack() as stack:
+        for p in patches:
+            stack.enter_context(p)
+        try:
+            out = asyncio.run(node_cls.execute(**kwargs))
+        except Exception as e:  # noqa: BLE001 — the node's own failure is part of the fixture
+            return {"calls": calls, "error": {"type": type(e).__name__, "message": str(e)}}
+    args = getattr(out, "args", out)
+    ui = getattr(out, "ui", None)
+    return {"calls": calls, "output": _jsonable(list(args) if isinstance(args, tuple) else args), "ui": _jsonable(ui)}
+
+
+def paid_case(name: str, node_cls, widgets: dict, answers: list, pictures: list = (), sounds: list = (),
+              links: dict | None = None) -> dict:
+    """One fixture case (tests/unit/__runner__/paidParity.ts PaidCase): the
+    node's widgets, its picture and sound inputs (passed by name), the
+    answers, and what capture_calls saw."""
+    kwargs = {**widgets, **{p: p for p in pictures}, **{s: s for s in sounds}}
+    got = capture_calls(node_cls, answers, links=links, **kwargs)
+    case = {"name": name, "class_type": node_cls.define_schema().node_id, "widgets": widgets,
+            "pictures": list(pictures), "sounds": list(sounds), "answers": answers, "calls": got["calls"],
+            "output": got.get("output"), "ui": got.get("ui")}
+    if links:
+        case["links"] = links
+    if "error" in got:
+        case["error"] = got["error"]
+    return case
 
 
 # ── machinery (R3.1): json.loads / json.dumps / str / repr ──────────────────
