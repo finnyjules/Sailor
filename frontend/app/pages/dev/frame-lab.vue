@@ -302,6 +302,8 @@ onMounted(() => {
     get editor() { return modalRef.value?.editor ?? null },
     get layoutGrid() { return modalRef.value?.layoutGrid ?? null },
     get layoutGridResolved() { return modalRef.value?.layoutGridResolved ?? null },
+    get overlayGrid() { return modalRef.value?.overlayGrid ?? null },
+    get viewLayoutGrid() { return modalRef.value?.viewLayoutGrid ?? null },
   }
 })
 </script>
