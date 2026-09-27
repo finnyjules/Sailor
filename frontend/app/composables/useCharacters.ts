@@ -6,7 +6,7 @@
  */
 import { ref } from 'vue'
 import type { BodySliderId, CharacterRecord, CharacterState } from '#shared/characters/types'
-import { coverFirstRefs, identityRefs, panelFilename, pickState } from '#shared/characters/types'
+import { coverFirstRefs, panelFilename, pickState, videoIdentityRefs } from '#shared/characters/types'
 import { viewRefUrl } from '~/lib/shotdirector/refUpload'
 import { bodyPhrase } from '~/lib/characters/bodyPhrase'
 
@@ -76,10 +76,10 @@ export function useCharacters() {
   if (!fetchedOnce && typeof window !== 'undefined') void refresh()
 
   /**
-   * Resolve a list of { slug, stateId } picks to /view URLs, keyed by slug.
-   * Identity-first: once a state has a composite sheet it leads, then
-   * cover-first refs. Unknown state ids (or null) fall back to the
-   * character's default state. Unknown slugs map to an empty array.
+   * Resolve picks to the /view URLs a VIDEO model gets: at most two
+   * same-person pictures (videoIdentityRefs). Unknown state ids (or null)
+   * fall back to the character's default state. Unknown slugs map to an
+   * empty array.
    */
   function resolveStateRefs(picks: { slug: string; stateId: string | null }[]): Record<string, string[]> {
     const bySlug = new Map(characters.value.map(c => [c.slug, c]))
@@ -87,7 +87,7 @@ export function useCharacters() {
     for (const { slug, stateId } of picks) {
       const c = bySlug.get(slug)
       const state = c ? pickState(c, stateId) : undefined
-      out[slug] = identityRefs(state).map(viewRefUrl)
+      out[slug] = videoIdentityRefs(state).map(viewRefUrl)
     }
     return out
   }

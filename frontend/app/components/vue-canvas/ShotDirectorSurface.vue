@@ -13,6 +13,7 @@ import {
 import { formatShotUSD } from '~/lib/shotdirector/price'
 import { buildKeyframePrompt, KEYFRAME_COST_USD } from '~/lib/shotdirector/keyframe'
 import { uploadRefFile } from '~/lib/shotdirector/refUpload'
+import { CAST_REF_CAP } from '~/lib/shotdirector/cast'
 import StudioSection from '~/components/vue-canvas/StudioSection.vue'
 import CharacterPickerModal from '~/components/vue-canvas/CharacterPickerModal.vue'
 import ShotViewfinder from '~/components/vue-canvas/ShotViewfinder.vue'
@@ -74,9 +75,8 @@ const castRefRows = computed(() => {
   let tag = 1
   const resolved = resolveStateRefs(sheet.value.cast.map(m => ({ slug: m.slug, stateId: m.stateId })))
   return sheet.value.cast.map((m) => {
-    // One cover per member is what actually gets sent (CAST_REF_CAP) — showing
-    // the cover here keeps the preview honest and matches the video output.
-    const urls = resolved[m.slug]?.slice(0, 1) ?? []
+    // What is actually sent: up to CAST_REF_CAP pictures of one person.
+    const urls = resolved[m.slug]?.slice(0, CAST_REF_CAP) ?? []
     const start = tag
     tag += urls.length
     return { slug: m.slug, name: m.name, variantLabel: variantLabel(m), urls, start, end: tag - 1 }

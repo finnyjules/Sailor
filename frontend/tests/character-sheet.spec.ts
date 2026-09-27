@@ -57,7 +57,10 @@ const FIXTURE = {
       descriptor: DESCRIPTOR,
       refImages: ['cover-cal.png'],
       coverIndex: 0,
-      panels: [],
+      panels: [
+        { slot: 'portrait', filename: 'portrait-cal.png' },
+        { slot: 'body-front', filename: 'front-cal.png' },
+      ],
       sheetImage: SHEET_FILENAME,
       status: 'locked',
       stressResult: null,
@@ -196,8 +199,9 @@ test.describe('Character sheet: images and video consume the same identity asset
     expect(modelOptionsRaw, 'model_options widget should exist (sailor_widget: internal — never rendered in the DOM)').toBeTruthy()
     const modelOptions = JSON.parse(modelOptionsRaw)
     expect(Array.isArray(modelOptions.image_urls) && modelOptions.image_urls.length > 0, 'image_urls should be populated from the cast').toBe(true)
-    expect(modelOptions.image_urls[0]).toContain(`filename=${SHEET_FILENAME}`)
-    expect(modelOptions.image_urls[0]).toContain('type=input')
+    expect(modelOptions.image_urls[0]).toContain('filename=portrait-cal.png')
+    expect(modelOptions.image_urls[1]).toContain('filename=front-cal.png')
+    expect(modelOptions.image_urls.some((u: string) => u.includes(SHEET_FILENAME)), 'the combined sheet is never sent to video').toBe(false)
   })
 
   test('Scenario B (image): roster "Image" button wires the SAME sheet filename into a ConsistentFaceNode', async ({ page }) => {
@@ -235,8 +239,7 @@ test.describe('Character sheet: images and video consume the same identity asset
     expect(imageNode, 'Image node should exist').toBeTruthy()
     expect(faceNode, 'ConsistentFaceNode should exist').toBeTruthy()
 
-    // Bare filename (not a /view URL) — the shape identityRefs()/coverFirstRefs()
-    // hand back, and the same sheet filename Scenario A sent as image_urls[0].
+    // The image path still uses the sheet (stage 6 of the rework changes it); video no longer does.
     expect(widgetByName(imageNode, 'image')).toBe(SHEET_FILENAME)
 
     const edges = await pullEdges(page)

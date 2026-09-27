@@ -25,9 +25,9 @@ describe('useCharacters', () => {
     const { characters, refresh, resolveRefs, coverUrl } = useCharacters()
     await refresh()
     expect(characters.value).toHaveLength(1)
-    // Cover-first: coverIndex 1 (r2) leads the resolved list.
+    // No panels on this state, so video gets the cover alone (coverIndex 1 → r2).
     expect(resolveRefs(['reva', 'ghost'])).toEqual({
-      reva: ['/view?filename=r2.png&type=input', '/view?filename=r1.png&type=input'],
+      reva: ['/view?filename=r2.png&type=input'],
       ghost: [],
     })
     expect(coverUrl(characters.value[0]!)).toBe('/view?filename=r2.png&type=input')
@@ -73,19 +73,19 @@ describe('useCharacters', () => {
     expect(resolveStateRefs([{ slug: 'reva', stateId: 'punk' }])).toEqual({
       reva: ['/view?filename=p1.png&type=input'],
     })
-    // Unknown state id falls back to the default state (cover-first: r2 leads).
+    // Unknown state id falls back to the default state (no panels → cover alone, r2).
     expect(resolveStateRefs([{ slug: 'reva', stateId: 'nonexistent' }])).toEqual({
-      reva: ['/view?filename=r2.png&type=input', '/view?filename=r1.png&type=input'],
+      reva: ['/view?filename=r2.png&type=input'],
     })
-    // null stateId → default state (cover-first).
+    // null stateId → default state (no panels → cover alone, r2).
     expect(resolveStateRefs([{ slug: 'reva', stateId: null }])).toEqual({
-      reva: ['/view?filename=r2.png&type=input', '/view?filename=r1.png&type=input'],
+      reva: ['/view?filename=r2.png&type=input'],
     })
     // Unknown slug → empty array.
     expect(resolveStateRefs([{ slug: 'ghost', stateId: null }])).toEqual({ ghost: [] })
   })
 
-  it('resolveStateRefs is identity-first: sheet leads when set, else cover-first', async () => {
+  it('resolveStateRefs is video-identity-first: portrait+body-front panels, else the cover alone — never the sheet', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => ({ characters: [] }) }))
     const { useCharacters } = await import('~/composables/useCharacters')
     const { characters, resolveStateRefs } = useCharacters()
@@ -97,12 +97,9 @@ describe('useCharacters', () => {
         REVA.states[1]!,
       ],
     }]
+    // No panels on this state, so it falls back to the cover alone — the sheet is never sent to video.
     expect(resolveStateRefs([{ slug: 'reva', stateId: null }])).toEqual({
-      reva: [
-        '/view?filename=sheet.png&type=input',
-        '/view?filename=r2.png&type=input',
-        '/view?filename=r1.png&type=input',
-      ],
+      reva: ['/view?filename=r2.png&type=input'],
     })
   })
 
