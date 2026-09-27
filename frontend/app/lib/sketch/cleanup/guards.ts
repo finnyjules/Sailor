@@ -47,11 +47,9 @@ function pointsOf(map: ReadonlyMap<EntityId, SketchEntity>, id: EntityId): Entit
   return out
 }
 
-/** The entities and rules of the connected parts of the drawing that `seeds`
- *  (ids of points, pieces or circles) belong to — two things are connected
- *  when a piece or a rule ties their points. The entity objects are the
- *  drawing's own (not copies), so solving the part solves the drawing. */
-export function componentOf(doc: SketchDoc, seeds: readonly EntityId[]): SketchDoc {
+// union-find over the drawing's points: two points are one part when a piece
+// or a rule ties them (a Repeat / Mirror rule included)
+function partFinder(doc: SketchDoc): { find: (x: EntityId) => EntityId; pts: (id: EntityId) => EntityId[] } {
   const map = new Map(doc.entities.map(e => [e.id, e]))
   const parent = new Map<EntityId, EntityId>()
   const find = (x: EntityId): EntityId => {
@@ -70,9 +68,28 @@ export function componentOf(doc: SketchDoc, seeds: readonly EntityId[]): SketchD
   const pts = (id: EntityId) => pointsOf(map, id)
   for (const e of doc.entities) if (e.kind !== 'point') union(pts(e.id))
   for (const c of doc.constraints) union(c.refs.flatMap(pts))
+  return { find, pts }
+}
+
+/** The entities and rules of the connected parts of the drawing that `seeds`
+ *  (ids of points, pieces or circles) belong to — two things are connected
+ *  when a piece or a rule ties their points. The entity objects are the
+ *  drawing's own (not copies), so solving the part solves the drawing. */
+export function componentOf(doc: SketchDoc, seeds: readonly EntityId[]): SketchDoc {
+  const { find, pts } = partFinder(doc)
   const roots = new Set(seeds.flatMap(pts).map(find))
   const keep = (id: EntityId) => pts(id).some(p => roots.has(find(p)))
   return { entities: doc.entities.filter(e => keep(e.id)), constraints: doc.constraints.filter(c => c.refs.some(keep)) }
+}
+
+/** Which connected part each point of the drawing is in, named by the
+ *  smallest point id of the part (so the name doesn't depend on order). */
+export function partNames(doc: SketchDoc): Map<EntityId, EntityId> {
+  const { find } = partFinder(doc)
+  const least = new Map<EntityId, EntityId>()
+  const ids = doc.entities.filter(e => e.kind === 'point').map(e => e.id)
+  for (const id of ids) { const r = find(id), m = least.get(r); if (m == null || id < m) least.set(r, id) }
+  return new Map(ids.map(id => [id, least.get(find(id))!]))
 }
 
 /** **Ruling (fix rounds 1–2):** a candidate is first solved in a window — the

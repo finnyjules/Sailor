@@ -9,6 +9,7 @@ import { addPoint, addLine } from '../edit'
 import type { RuleSpec } from '../tangency'
 import { clusterPairs, clusterSorted, clusterCircular, unambiguous, mean } from './cluster'
 import { pairKey, stableKey, typedSize, radiusOf, lineAngleDeg, linePieces, type CleanupContext, type Piece } from './context'
+import { partNames } from './guards'
 import { TOL, GUARD, countLabel, type Candidate } from './types'
 
 const isRound = (p: Piece) => p.kind === 'arc' || p.kind === 'circle'
@@ -119,9 +120,9 @@ function pairUp(ctx: CleanupContext, ps: Piece[], ax: Axis, tol: number): Match[
 }
 
 // the axis guide line: an existing guide, or a new one made once and shared through `guides`
-function axisLine(doc: SketchDoc, guides: Map<string, EntityId>, ax: Axis, box: Box): { line: EntityId; rules: RuleSpec[] } {
+function axisLine(doc: SketchDoc, guides: Map<string, EntityId>, ax: Axis, box: Box, part: EntityId): { line: EntityId; rules: RuleSpec[] } {
   if (ax.kind === 'line') return { line: ax.id, rules: [] }
-  const key = `axis:${ax.dir}`
+  const key = `axis:${ax.dir}:${part}`
   const had = guides.get(key)
   if (had && doc.entities.some(e => e.id === had)) return { line: had, rules: [] }
   const padX = Math.max(0.1 * (box.maxX - box.minX), box.pad), padY = Math.max(0.1 * (box.maxY - box.minY), box.pad)
@@ -133,13 +134,9 @@ function axisLine(doc: SketchDoc, guides: Map<string, EntityId>, ax: Axis, box: 
   return { line, rules: [{ kind: ax.dir === 'v' ? 'vertical' : 'horizontal', refs: [p, q] }] }
 }
 
-export function detectMirrorPairs(ctx: CleanupContext): Candidate[] {
-  const tol = ctx.tol(TOL.MIRROR_PX)
-  const ps = ctx.pieces.filter(p => !p.copy)
-  const scoped = ps.filter(p => p.inScope)
-  if (ps.length < 2 || !scoped.length) return []
+function boxOf(ctx: CleanupContext, ps: Piece[]): Box {
   const box: Box = { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity, pad: 20 * ctx.unitsPerPx }
-  for (const p of scoped) {
+  for (const p of ps) {
     const r = p.kind === 'circle' ? radiusOf(p) : 0
     for (const id of p.points) {
       const P = ctx.pts.get(id)!
@@ -147,6 +144,20 @@ export function detectMirrorPairs(ctx: CleanupContext): Candidate[] {
       box.minY = Math.min(box.minY, P.y - r); box.maxY = Math.max(box.maxY, P.y + r)
     }
   }
+  return box
+}
+
+/** **Ruling (final review):** a Mirror pair only pairs two pieces of the same
+ *  connected part (points shared, or tied by a rule — a Repeat / Mirror rule
+ *  counts), never two separate shapes, and each part gets its own axis — a
+ *  shared axis would tie the shapes together. An existing guide line serves
+ *  the part it is tied to; a free one serves the one part it pairs best. */
+export function detectMirrorPairs(ctx: CleanupContext): Candidate[] {
+  const tol = ctx.tol(TOL.MIRROR_PX)
+  const ps = ctx.pieces.filter(p => !p.copy)
+  const scoped = ps.filter(p => p.inScope)
+  if (ps.length < 2 || !scoped.length) return []
+  const box = boxOf(ctx, scoped)
   const axes: Axis[] = [
     { key: 'v', kind: 'new', dir: 'v', at: (box.minX + box.maxX) / 2 },
     { key: 'h', kind: 'new', dir: 'h', at: (box.minY + box.maxY) / 2 },
@@ -156,32 +167,55 @@ export function detectMirrorPairs(ctx: CleanupContext): Candidate[] {
     const a = ctx.pts.get(e.p1), b = ctx.pts.get(e.p2)
     if (a && b && dist(a, b) > 1e-9) axes.push({ key: e.id, kind: 'line', id: e.id, a: { x: a.x, y: a.y }, b: { x: b.x, y: b.y } })
   }
+  const names = partNames(ctx.doc)
+  const parts = new Map<EntityId, Piece[]>()
+  for (const p of ps) {
+    const k = names.get(p.points[0]!) ?? p.key
+    const list = parts.get(k)
+    if (list) list.push(p); else parts.set(k, [p])
+  }
   const out: Candidate[] = []
   for (const start of axes) {
-    let ax: Axis = start
-    let matches = pairUp(ctx, ps, ax, tol)
-    if (ax.kind === 'new' && matches.length) {
-      // the new axis goes through the middle of the matched pairs: each side moves half the mismatch
-      const dir = ax.dir
-      const mids: number[] = []
-      for (const m of matches) {
-        for (const [x, y] of m.pairs) { const X = ctx.pts.get(x)!, Y = ctx.pts.get(y)!; mids.push(dir === 'v' ? (X.x + Y.x) / 2 : (X.y + Y.y) / 2) }
+    type Found = { part: EntityId; axis: Axis; matches: Match[] }
+    let found: Found[] = []
+    for (const [part, members] of parts) {
+      if (members.length < 2 || !members.some(p => p.inScope)) continue
+      let ax: Axis = start
+      let matches = pairUp(ctx, members, ax, tol)
+      if (ax.kind === 'new' && matches.length) {
+        // the new axis goes through the middle of the matched pairs: each side moves half the mismatch
+        const dir = ax.dir
+        const mids: number[] = []
+        for (const m of matches) {
+          for (const [x, y] of m.pairs) { const X = ctx.pts.get(x)!, Y = ctx.pts.get(y)!; mids.push(dir === 'v' ? (X.x + Y.x) / 2 : (X.y + Y.y) / 2) }
+        }
+        ax = { ...ax, at: mean(mids) }
+        matches = pairUp(ctx, members, ax, tol)
       }
-      ax = { ...ax, at: mean(mids) }
-      matches = pairUp(ctx, ps, ax, tol)
+      if (matches.length) found.push({ part, axis: ax, matches })
     }
-    const axis = ax
-    for (const m of matches) {
-      out.push({
-        id: `mirror:${axis.key}:${[stableKey(m.p), stableKey(m.q)].sort().join('|')}`, kind: 'mirror', label: 'Mirror pair',
-        score: 1 - m.err / tol, anchor: [...new Set(m.pairs.flat())],
-        prepare: (doc, guides) => {
-          const { line, rules } = axisLine(doc, guides, axis, box)
-          for (const [o, c] of m.pairs) rules.push(o === c ? { kind: 'pointOnLine', refs: [o, line] } : { kind: 'mirroredFrom', refs: [c, o, line] })
-          if (m.p.kind === 'circle') rules.push({ kind: 'equalRadius', refs: [m.p.circle!, m.q.circle!] })
-          return rules
-        },
-      })
+    if (start.kind === 'line') {
+      const g = ctx.doc.entities.find(e => e.id === start.id)
+      const own = g?.kind === 'line' ? names.get(g.p1) : undefined
+      const worst = (f: Found) => Math.max(...f.matches.map(m => m.err))
+      if (own != null && parts.has(own)) found = found.filter(f => f.part === own)
+      // a free guide: the part with the most pairs, then the closest ones
+      else if (found.length > 1) found = [[...found].sort((x, y) => y.matches.length - x.matches.length || worst(x) - worst(y) || (x.part < y.part ? -1 : 1))[0]!]
+    }
+    for (const { part, axis, matches } of found) {
+      const partBox = boxOf(ctx, parts.get(part)!)
+      for (const m of matches) {
+        out.push({
+          id: `mirror:${axis.key}:${[stableKey(m.p), stableKey(m.q)].sort().join('|')}`, kind: 'mirror', label: 'Mirror pair',
+          score: 1 - m.err / tol, anchor: [...new Set(m.pairs.flat())],
+          prepare: (doc, guides) => {
+            const { line, rules } = axisLine(doc, guides, axis, partBox, part)
+            for (const [o, c] of m.pairs) rules.push(o === c ? { kind: 'pointOnLine', refs: [o, line] } : { kind: 'mirroredFrom', refs: [c, o, line] })
+            if (m.p.kind === 'circle') rules.push({ kind: 'equalRadius', refs: [m.p.circle!, m.q.circle!] })
+            return rules
+          },
+        })
+      }
     }
   }
   return out
