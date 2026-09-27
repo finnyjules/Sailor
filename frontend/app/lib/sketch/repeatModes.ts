@@ -60,14 +60,61 @@ function closure(doc: SketchDoc, ids: readonly EntityId[]): EntityId[] {
   return [...out].filter(id => !!getPoint(doc, id))
 }
 
-/** The middle of the box round the selection's points (a circle by its full extent). */
+/** Samples per Bézier piece when boxing the drawn curve (even, so t = ½ is one). */
+const CUBIC_SAMPLES = 32
+
+/** The middle of the box round what the selection DRAWS (fix round 1): lines
+ *  by their ends, arcs by their ends and the axis-extreme points they sweep
+ *  through (never their centre point), circles by centre ± r, Bézier pieces by
+ *  points sampled on the curve (never the handles). Guides and guide points
+ *  are left out — unless the selection is nothing but guides, then they count.
+ *  Null when nothing resolves. */
 export function selectionCentre(doc: SketchDoc, ids: readonly EntityId[]): Vec2 | null {
+  return drawnCentre(doc, ids, false) ?? drawnCentre(doc, ids, true)
+}
+
+function drawnCentre(doc: SketchDoc, ids: readonly EntityId[], guides: boolean): Vec2 | null {
   let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity
-  const grow = (x: number, y: number, r = 0) => { x0 = Math.min(x0, x - r); y0 = Math.min(y0, y - r); x1 = Math.max(x1, x + r); y1 = Math.max(y1, y + r) }
-  for (const id of closure(doc, ids)) { const p = getPoint(doc, id)!; grow(p.x, p.y) }
+  const grow = (x: number, y: number) => { x0 = Math.min(x0, x); y0 = Math.min(y0, y); x1 = Math.max(x1, x); y1 = Math.max(y1, y) }
+  const G = (p: Vec2 | undefined) => { if (p) grow(p.x, p.y) }
   for (const id of ids) {
     const e = getEntity(doc, id)
-    if (e?.kind === 'circle') { const c = getPoint(doc, e.center); if (c) grow(c.x, c.y, e.r) }
+    if (!e || (e.construction && !guides)) continue
+    if (e.kind === 'point') { G(e); continue }
+    if (e.kind === 'line') { G(getPoint(doc, e.p1)); G(getPoint(doc, e.p2)); continue }
+    if (e.kind === 'circle') {
+      const c = getPoint(doc, e.center)
+      if (c) { grow(c.x - e.r, c.y - e.r); grow(c.x + e.r, c.y + e.r) }
+      continue
+    }
+    const n = e.anchors.length, count = e.closed ? n : n - 1
+    for (const aid of e.anchors) G(getPoint(doc, aid))
+    for (let i = 0; i < count; i++) {
+      const s = e.segments[i], a = getPoint(doc, e.anchors[i]!), b = getPoint(doc, e.anchors[(i + 1) % n]!)
+      if (!s || !a || !b || s.kind === 'line') continue
+      if (s.kind === 'arc') {
+        const c = getPoint(doc, s.center)
+        const r = c ? Math.hypot(a.x - c.x, a.y - c.y) : 0
+        if (!c || r < 1e-6) continue                       // drawn as a straight piece (sketchPath)
+        const a0 = Math.atan2(a.y - c.y, a.x - c.x), a1 = Math.atan2(b.y - c.y, b.x - c.x)
+        const ccw = (((a1 - a0) % TAU) + TAU) % TAU
+        // the arc runs ccw from a0 by ccw (sweep 1) or cw by TAU − ccw (sweep 0)
+        for (let q = 0; q < 4; q++) {
+          const th = q * Math.PI / 2
+          const along = s.sweep === 1 ? (((th - a0) % TAU) + TAU) % TAU : (((a0 - th) % TAU) + TAU) % TAU
+          const span = s.sweep === 1 ? ccw : TAU - ccw
+          if (along <= span) grow(c.x + r * Math.cos(th), c.y + r * Math.sin(th))
+        }
+        continue
+      }
+      const h1 = s.h1 ? getPoint(doc, s.h1) : undefined, h2 = s.h2 ? getPoint(doc, s.h2) : undefined
+      const c1 = h1 ?? a, c2 = h2 ?? b
+      for (let k = 1; k < CUBIC_SAMPLES; k++) {
+        const t = k / CUBIC_SAMPLES, u = 1 - t
+        const w0 = u * u * u, w1 = 3 * u * u * t, w2 = 3 * u * t * t, w3 = t * t * t
+        grow(w0 * a.x + w1 * c1.x + w2 * c2.x + w3 * b.x, w0 * a.y + w1 * c1.y + w2 * c2.y + w3 * b.y)
+      }
+    }
   }
   return Number.isFinite(x0) ? { x: (x0 + x1) / 2, y: (y0 + y1) / 2 } : null
 }

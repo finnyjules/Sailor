@@ -11,7 +11,7 @@ import { solve } from '~/lib/sketch/solve'
 import { sketchPathData } from '~/lib/sketch/sketchPath'
 import { toggleFillAt, fillState, fillTarget } from '~/lib/sketch/fills'
 import { analyzeDerived } from '~/lib/sketch/substitute'
-import { radialAngles, linearFactors, selectionCentre, alongPoints, radialPlacements, linearPlacements, copiesPreviewD } from '~/lib/sketch/repeatModes'
+import { radialAngles, linearFactors, selectionCentre, alongPoints, radialPlacements, linearPlacements, alongPlacements, copiesPreviewD } from '~/lib/sketch/repeatModes'
 import { gear, rectGrid, squarePath } from './__fixtures__/penStage8'
 
 const doc = (): SketchDoc => ({ entities: [], constraints: [] })
@@ -274,5 +274,69 @@ describe('along a path: fills, refusals leave the drawing alone', () => {
     expect(copyAlongPath(d, [path], ring, 1)).toEqual([])
     expect(copyAlongPath(d, [path], ring, 65)).toEqual([])
     expect(d).toEqual(before)
+  })
+})
+
+// ── fix round 1: the centre is the box of what the selection DRAWS ─────────
+
+describe('the selection’s centre is the drawn geometry’s box', () => {
+  // a shallow arc from (−1, 0) to (1, 0) on a centre 100 below: its top is
+  // just above the chord, and the centre point must not pull the box down
+  const shallowArc = (d: SketchDoc, dx = 0, dy = 0) => {
+    const c = addPoint(d, dx, dy - 100)
+    return addPath(d, [addPoint(d, dx - 1, dy), addPoint(d, dx + 1, dy)], [{ kind: 'arc', center: c, sweep: 0 }])
+  }
+  const TOP = Math.hypot(1, 100) - 100                     // the arc's top above its chord
+  it('a shallow arc: ends and its top, never its centre point', () => {
+    const d = doc()
+    const arc = shallowArc(d)
+    const c = selectionCentre(d, [arc])!
+    expect(c.x).toBeCloseTo(0, 12); expect(c.y).toBeCloseTo(TOP / 2, 12)
+  })
+  it('a semicircle is centred on its middle, not its chord or centre', () => {
+    const d = doc()
+    const half = addPath(d, [addPoint(d, 1, 0), addPoint(d, -1, 0)], [{ kind: 'arc', center: addPoint(d, 0, 0), sweep: 1 }])
+    const c = selectionCentre(d, [half])!
+    expect(c.x).toBeCloseTo(0, 12); expect(c.y).toBeCloseTo(0.5, 12)
+  })
+  it('a Bézier piece by its curve, never its handles; guides left out', () => {
+    const d = doc()
+    const bz = addPath(d, [addPoint(d, 0, 0), addPoint(d, 4, 0)], [{ kind: 'cubic', h1: addPoint(d, 0, 4), h2: addPoint(d, 4, 4) }])
+    expect(selectionCentre(d, [bz])).toEqual({ x: 2, y: 1.5 })   // the curve peaks at y = 3 (t = ½)
+    const guide = addLine(d, addPoint(d, 50, 50, { construction: true }), addPoint(d, 60, 60, { construction: true }), { construction: true })
+    expect(selectionCentre(d, [bz, guide])).toEqual({ x: 2, y: 1.5 })
+    expect(selectionCentre(d, [guide])).toEqual({ x: 55, y: 55 })  // nothing but guides: they count
+  })
+  it('along a path: the shallow arc’s copies’ drawn centres land on the path', () => {
+    const d = doc()
+    const arc = shallowArc(d, 3, 7)
+    const rail = addPath(d, [addPoint(d, 0, -20), addPoint(d, 40, -20)], [{ kind: 'line' }])
+    const made = copyAlongPath(d, [arc], rail, 3)
+    expect(made).toHaveLength(2)
+    const want = [{ x: 20, y: -20 }, { x: 40, y: -20 }]
+    made.forEach((ids, i) => {
+      // the copy's drawn box worked out independently: its chord ends and its top
+      const piece = P(d, ids.find(id => P(d, id).kind === 'path')!)
+      const a = P(d, piece.anchors[0]), b = P(d, piece.anchors[1])
+      const mid = { x: (a.x + b.x) / 2, y: a.y + TOP / 2 }
+      expect(Math.abs(mid.x - want[i]!.x)).toBeLessThan(1e-9 * 40)
+      expect(Math.abs(mid.y - want[i]!.y)).toBeLessThan(1e-9 * 40)
+    })
+  })
+})
+
+describe('the preview draws exactly what the copies draw (sweep, Span, along a path)', () => {
+  it('a sweep below 360, Span and along a path', () => {
+    const d = doc()
+    const { path } = squarePath(d, 1, 0, 1)
+    const ctr = addPoint(d, 0, 0, { fixed: true })
+    const rail = addPath(d, [addPoint(d, 0, -5), addPoint(d, 10, -5)], [{ kind: 'line' }])
+    const r1 = structuredClone(d)
+    expect(copiesPreviewD(d, [path], radialPlacements({ x: 0, y: 0 }, 4, 90))).toBe(sketchPathData(onlyThese(r1, repeatEntities(r1, [path], ctr, 4, 90).flat())))
+    const r2 = structuredClone(d)
+    const f = addPoint(r2, 0, 0), t = addPoint(r2, 6, 2)
+    expect(copiesPreviewD(d, [path], linearPlacements({ x: 6, y: 2 }, 4, 'span'))).toBe(sketchPathData(onlyThese(r2, translateEntities(r2, [path], f, t, 4, 'span').flat())))
+    const r3 = structuredClone(d)
+    expect(copiesPreviewD(d, [path], alongPlacements(d, [path], rail, 4)!)).toBe(sketchPathData(onlyThese(r3, copyAlongPath(r3, [path], rail, 4).flat())))
   })
 })
