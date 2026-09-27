@@ -91,8 +91,8 @@ test.describe('Frame layout grid', () => {
     expect(Math.abs(nearest - leftEdgePx)).toBeLessThan(0.5)
   })
 
-  test('⌃G hides the grid and ⌘Z brings it back', async ({ page }) => {
-    await page.keyboard.press('Control+g')
+  test('⇧G hides the grid and ⌘Z brings it back', async ({ page }) => {
+    await page.keyboard.press('Shift+G')
     await expect(page.locator('[data-testid="compositor-grid-overlay"]')).toHaveCount(0)
     await page.keyboard.press('Meta+z')
     await expect(page.locator('[data-testid="compositor-grid-overlay"]')).toBeVisible()
@@ -158,14 +158,14 @@ test.describe('Frame layout grid', () => {
     expect((await frameLab(page)).layoutGrid.show).toBe(show0)
   })
 
-  test('⌃G does nothing in the middle of a drag', async ({ page }) => {
+  test('⇧G does nothing in the middle of a drag', async ({ page }) => {
     const cvBox = (await page.locator('[data-testid="compositor-stack-canvas"]').boundingBox())!
     const l = await page.evaluate(() => (window as any).__frameLab.node.data.properties.sailor_localLayers.find((x: any) => x.id === 'strokecenter'))
     const sx = cvBox.x + l.x * cvBox.width, sy = cvBox.y + l.y * cvBox.height
     await page.mouse.move(sx, sy)
     await page.mouse.down()
     await page.mouse.move(sx + 40, sy, { steps: 6 })
-    await page.keyboard.press('Control+g')
+    await page.keyboard.press('Shift+G')
     await expect(page.locator('[data-testid="compositor-grid-overlay"]')).toBeVisible()
     await page.mouse.up()
     expect((await frameLab(page)).layoutGrid.show).toBe(true)

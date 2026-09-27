@@ -11,9 +11,9 @@ import { patchLayoutGrid, type ColumnFit, type LayoutGrid, type LayoutGridPatch,
 
 const props = withDefaults(defineProps<{
   grid: LayoutGrid; resolved: ResolvedLayoutGrid; formatLabel: string
-  /** The platform's show/hide shortcut, named in the switch's tooltip (⌃G on a Mac, Ctrl+Shift+4 elsewhere). */
+  /** The platform's show/hide shortcut, named in the switch's tooltip (⇧G). */
   showShortcut?: string
-}>(), { showShortcut: '⌃G' })
+}>(), { showShortcut: '⇧G' })
 const emit = defineEmits<{ update: [g: LayoutGrid] }>()
 const patch = (p: LayoutGridPatch) => emit('update', patchLayoutGrid(props.grid, p))
 const colWidth = computed(() => Math.round(props.resolved.cols[0]?.w ?? 0))

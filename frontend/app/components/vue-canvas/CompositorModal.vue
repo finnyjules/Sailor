@@ -950,7 +950,7 @@ watch(() => compositor.value?.id, id => { if (id) ensureLayoutGrid() }, { immedi
 // they snap back to the design size first, then apply (as placing a template does).
 function onLayerSpan(id: string, p: Partial<LayoutSpan>) { viewOnlyGuard(); setLayerSpan(id, p) }
 function onResnapSelected() { viewOnlyGuard(); resnapSelected() }
-// ⌃G toggles the grid on a Mac, where ⌘G is Group; elsewhere Ctrl+G is Group, so it's ⌃⇧4 (Figma).
+// ⇧G toggles the grid everywhere (Chrome's Gemini takes ⌃G); off a Mac ⌃⇧4 (Figma) works too.
 const IS_MAC = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform)
 
 // The direct resize/scale/rotate handles are view-only at a viewing size: guard
@@ -2408,11 +2408,17 @@ async function onCanvasDrop(e: DragEvent) {
   }
 }
 
+/** ⇧G — the layout grid's show/hide key on every platform. */
+function isGridToggleKey(e: KeyboardEvent): boolean {
+  return e.shiftKey && !e.metaKey && !e.ctrlKey && !e.altKey && e.code === 'KeyG'
+}
+
 /** Keys that edit the selection or the history (arrows, ⌘C/⌘V/⌘D, Delete, ⌘Z, ⌘G, ⌘X, ⌘A,
- *  and the grid toggle ⌃⇧4 — ⌃G is already covered by 'g'). */
+ *  and the grid toggles ⇧G and ⌃⇧4). */
 function isViewDragEditKey(e: KeyboardEvent): boolean {
   if (mapKeyToEdit(e, 1, 10) || e.key === 'Delete' || e.key === 'Backspace') return true
   if ((e.metaKey || e.ctrlKey) && e.code === 'Digit4') return true
+  if (isGridToggleKey(e)) return true
   return (e.metaKey || e.ctrlKey) && ['z', 'g', 'x', 'a'].includes(e.key.toLowerCase())
 }
 /** The viewport keys — Space (hold to pan) and ⌘/Ctrl = − 0 2 (zoom in, out,
@@ -2546,9 +2552,9 @@ function onKeydown(e: KeyboardEvent) {
   if (meta && (e.key === 'z' || e.key === 'Z') && !editingId.value) {
     e.preventDefault(); e.stopPropagation()
     if (e.shiftKey) redoFrame(); else undoFrame()
-  } else if ((e.key === 'g' || e.key === 'G') && e.ctrlKey && !e.metaKey && IS_MAC && !editingId.value) {
-    // ⌃G shows or hides the layout grid (Figma); ⌘G stays Group on Mac. Swallowed mid-gesture:
-    // a grid toggle would record its own undo step inside the drag's.
+  } else if (isGridToggleKey(e) && !inField) {
+    // ⇧G shows or hides the layout grid (⌃G is taken by Chrome's Gemini before the page sees it).
+    // Swallowed mid-gesture: a grid toggle would record its own undo step inside the drag's.
     e.preventDefault(); e.stopPropagation()
     if (!editorDragging.value) setLayoutGrid({ ...layoutGrid.value, show: !layoutGrid.value.show })
   } else if (!IS_MAC && e.ctrlKey && e.shiftKey && e.code === 'Digit4' && !editingId.value) {
@@ -12949,7 +12955,7 @@ defineExpose({ editor, layoutGridResolved, layoutGrid, overlayGrid, viewLayoutGr
               </div>
             </div>
           </StudioSection>
-          <LayoutGridSection :grid="layoutGrid" :resolved="layoutGridResolved" :format-label="frameFormatLabel" :show-shortcut="IS_MAC ? '⌃G' : 'Ctrl+Shift+4'" @update="(g) => setLayoutGrid(g)" />
+          <LayoutGridSection :grid="layoutGrid" :resolved="layoutGridResolved" :format-label="frameFormatLabel" show-shortcut="⇧G" @update="(g) => setLayoutGrid(g)" />
           <!-- Canvas background fill (bottom-most; baked into the frame) -->
           <StudioSection title="Background">
             <FillControl allow-none :model-value="background"
