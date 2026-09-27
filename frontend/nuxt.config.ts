@@ -240,6 +240,7 @@ export default defineNuxtConfig({
 
   css: [
     '~/assets/css/main.css',
+    '~/assets/css/node-surfaces.css',
     '~/assets/css/comfyhub/global.scss',
     '~/assets/css/comfy-partner-icons.css',
   ],
