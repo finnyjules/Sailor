@@ -8755,6 +8755,11 @@ onUnmounted(() => {
   window.removeEventListener('sailor:placeTemplate', handlePlaceTemplateEvent)
   pause()
 })
+
+// Dev-lab / test hook only — nothing in the app reads this. Lets /dev/frame-lab
+// hand a concrete `editor` (historyRev, layoutGridResolved, …) to
+// `window.__frameLab` without every caller needing its own copy of the editor wiring.
+defineExpose({ editor, layoutGridResolved, layoutGrid })
 </script>
 
 <template>

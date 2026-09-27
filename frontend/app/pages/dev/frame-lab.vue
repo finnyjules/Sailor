@@ -287,12 +287,22 @@ const modalOpen = ref(true)
 // after a goto lands on dead HTML. Gate everything on onMounted and let tests
 // wait for [data-ready] — see the dev-harness hydration-race note.
 const ready = ref(false)
+// Template ref to the modal — CompositorModal exposes `editor` / `layoutGrid` /
+// `layoutGridResolved` (dev/test hook only) so a browser pass can read history
+// revisions and the resolved grid's own snap lines instead of inferring them
+// from pixels.
+const modalRef = ref<InstanceType<typeof CompositorModal> | null>(null)
 onMounted(() => {
   ready.value = true
   // Read-only handle on the live fixture so a browser pass can assert the
   // MIGRATED state (schema flag, layer array, stack order) instead of inferring
   // it from pixels. Dev page only — nothing in the app reads this.
-  ;(window as any).__frameLab = { node, nodes, edges, save: saveFixture, reset: resetFixture }
+  ;(window as any).__frameLab = {
+    node, nodes, edges, save: saveFixture, reset: resetFixture,
+    get editor() { return modalRef.value?.editor ?? null },
+    get layoutGrid() { return modalRef.value?.layoutGrid ?? null },
+    get layoutGridResolved() { return modalRef.value?.layoutGridResolved ?? null },
+  }
 })
 </script>
 
@@ -346,6 +356,7 @@ onMounted(() => {
 
     <CompositorModal
       v-if="ready && modalOpen"
+      ref="modalRef"
       :node-id="'n1'" :nodes="nodes" :edges="edges" @close="modalOpen = false"
     />
   </div>
