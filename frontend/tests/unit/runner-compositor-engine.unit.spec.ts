@@ -12,7 +12,7 @@ import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import sharp from 'sharp'
 import {
-  COMPOSITOR_BLEND_MODES, HOSTED_MAX_FRAME_ARTBOARD_PIXELS, IMAGE_OUTPUT_CLASSES, LOCAL_RENDER_TYPES, MAX_FRAME_COPIES,
+  COMPOSITOR_BLEND_MODES, HOSTED_MAX_FRAME_ARTBOARD_PIXELS, IMAGE_OUTPUT_CLASSES, LOCAL_RENDER_TYPES, MAX_FRAME_COPIES, PAID_PICTURE_FAMILY,
   MAX_FRAME_WORK, PROVIDER_TYPES, RUNNER_NODE_RULES,
   clonerCopies, isRunnerEligible, nodeRuleAllows, runnerTakesNode,
 } from '#shared/runner/eligibility'
@@ -461,7 +461,9 @@ describe('server health: caps, sources, Stop', () => {
     const texts = new Set(['ChatLLMNode', 'ImprovePromptNode', 'SummarizeTextNode', 'TranslateTextNode', 'RewriteToneNode', 'BrainstormIdeasNode', 'ReasonStepByStepNode',
       // Describe, read and find (R3.4) hand on text and JSON.
       'DescribeImageNode', 'DescribeImageRemoteNode', 'DescribeVideoNode', 'ExtractTextNode', 'FindObjectsNode'])
-    for (const c of PROVIDER_TYPES) expect(IMAGE_OUTPUT_CLASSES.has(c), c).toBe(!videos.has(c) && !texts.has(c))
+    // A paid family's picture classes (R3.5's image-repair) are pictures only while their family is on (PAID_PICTURE_FAMILY).
+    for (const c of PROVIDER_TYPES) expect(IMAGE_OUTPUT_CLASSES.has(c) || Object.prototype.hasOwnProperty.call(PAID_PICTURE_FAMILY, c), c).toBe(!videos.has(c) && !texts.has(c))
+    for (const c of Object.keys(PAID_PICTURE_FAMILY)) expect(IMAGE_OUTPUT_CLASSES.has(c), c).toBe(false)
     expect(IMAGE_OUTPUT_CLASSES.has('Video')).toBe(false)
   })
 

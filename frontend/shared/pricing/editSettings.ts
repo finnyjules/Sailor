@@ -395,6 +395,11 @@ export function editCalls(classType: string, inputs: NodeInputs, opts: { inputPi
   const px = pricedInputPixels(opts.inputPixels)
 
   if (classType === 'UpscaleImageNode' || classType === 'EnhanceDetailNode') {
+    // A wired engine (known only at run time): every engine the node offers, priced at the dearest (R3.5 fix round 1).
+    if (isLinked(inputs.model)) {
+      const engines = Object.keys(classType === 'UpscaleImageNode' ? UPSCALE_ENGINE_SLUGS : ENHANCE_ENGINE_SLUGS)
+      return { calls: engines.map(e => (classType === 'UpscaleImageNode' ? upscaleCall(e, inputs, px) : enhanceCall(e, px))!) }
+    }
     const engine = typeof inputs.model === 'string' ? inputs.model : ''
     if (!engine) return { refused: 'no model selected' }
     const c = classType === 'UpscaleImageNode' ? upscaleCall(engine, inputs, px) : enhanceCall(engine, px)

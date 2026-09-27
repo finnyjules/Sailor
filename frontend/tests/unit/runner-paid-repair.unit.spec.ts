@@ -16,7 +16,7 @@ import { normalizeSent, runPaidCase, wireText, type PaidCase } from './__runner_
 import { checkPayload, loadProviderSchema, type ProviderSchemaFixture } from './helpers/providerSchema'
 import type { ApiPrompt } from '#shared/runner/graph'
 import { RUNNER_FAMILIES, type RunnerFamily } from '#shared/runner/families'
-import { IMAGE_OUTPUT_CLASSES, RUNNER_NODE_RULES, isRunnerEligible, outputKindsFor, runnerTakesNode, valueWiresAllowed } from '#shared/runner/eligibility'
+import { IMAGE_OUTPUT_CLASSES, PAID_PICTURE_FAMILY, RUNNER_NODE_RULES, isRunnerEligible, outputKindsFor, runnerTakesNode, valueWiresAllowed } from '#shared/runner/eligibility'
 import { nodesNeedingEngine } from '#shared/runner/needsEngine'
 import { RUNNER_OUTPUT_CLASSES } from '#shared/runner/validate'
 import {
@@ -35,8 +35,8 @@ import { PAID_TEXT_INPUTS, extraPromptTexts, stageEstimate } from '~~/server/run
 import { planNode, type NodePlan } from '~~/server/runner/executors'
 import { firstOutputUrl } from '~~/server/runner/generators/repair'
 import { RUNNER_ROUTES } from '~~/server/runner/generators/twins'
-import { ENHANCE_DETAIL_TOO_LARGE, UPSCALE_TOO_LARGE, pictureChangedWords, requestProblems, unsizedInputWords } from '~~/server/runner/requestRules'
-import { startPictureSizes } from '~~/server/runner/repairSizes'
+import { ENHANCE_DETAIL_TOO_LARGE, UPSCALE_TOO_LARGE, pictureChangedWords, pictureOverMarginWords, requestProblems, unsizedInputWords } from '~~/server/runner/requestRules'
+import { predictedHoldPixels, startPictureSizes } from '~~/server/runner/repairSizes'
 
 const FIXTURE = JSON.parse(readFileSync(join(__dirname, 'fixtures', 'runner-paid-repair.json'), 'utf8')) as { cases: PaidCase[] }
 const CASES = FIXTURE.cases
@@ -418,7 +418,7 @@ describe('the picture\'s size, before the hold (hosted: the G1 walk)', () => {
     expect(k.ledger.hold).not.toHaveBeenCalled()
     // Alone, the 4K picture fits the input cap: Upscale takes it, held at its 6× output's price.
     const alone = await startPictureSizes({ l: p.l!, u: p.u! }, async () => new Uint8Array(await png(3840, 2160)))
-    expect(alone).toEqual({ pixels: { u: 3840 * 2160 }, problem: null })
+    expect(alone).toEqual({ pixels: { u: 3840 * 2160 }, predicted: [], problem: null })
   })
 
   it('a picture it can\'t size, or can\'t read, is refused before the hold (hosted), in the gate\'s words', async () => {
@@ -485,8 +485,64 @@ describe('the picture\'s size, before the hold (hosted: the G1 walk)', () => {
     expect([...k.ledger.holds.values()].map(h => h.state)).toEqual(['released'])
   })
 
+  // Fix round 1 (ruling 1): a predicted size (an upstream Upscale's factor) is held with 1.1× each side.
+  const chain = (answerSide: number) => {
+    const esrgan = CASES.find(c => c.name === 'upscale · Real-ESRGAN face off')!.widgets
+    return {
+      prompt: {
+        l: { class_type: 'LoadImage', inputs: { image: 'a.png', upload: 'image' } },
+        u: node('UpscaleImageNode', { ...esrgan, scale_factor: 2 }, 'l'),
+        c: node('UpscaleImageNode', { ...crystal, scale_factor: 2 }, 'u'),
+      } as ApiPrompt,
+      answerSide,
+    }
+  }
+  async function runChain(answerSide: number) {
+    const { prompt } = chain(answerSide)
+    const replicate = createFakeReplicate({ bodyText: ({ model }) => JSON.stringify({ id: 'p', status: 'succeeded', output: [`https://r.test/${model.replace('/', '_')}.png`] }) })
+    const answer = new Uint8Array(await png(answerSide, answerSide))
+    const k = makeKit({ hosted: true, replicate, deps: { families: () => ON, download: async () => ({ bytes: answer, contentType: 'image/png' }) } })
+    writeFileSync(join(k.root, 'input', 'a.png'), await png(524, 524))
+    const { runId } = await k.engine.startRun({ userId: k.userId, takes: [prompt], ...START })
+    await k.engine.settled(runId)
+    return { k, prompt, replicate, run: (await k.store.get(runId))! }
+  }
+
+  it('the reviewer\'s case: Real-ESRGAN 2× predicted 1048², answered 1050²: Crystal runs, charged at the real size', async () => {
+    const { k, prompt, run } = await runChain(1050)
+    const nodes = run.takes[0]!.nodes
+    expect(nodes.c!.status, nodes.c!.error ?? '').toBe('done')
+    expect(predictedHoldPixels(1048 * 1048)).toBe(Math.ceil(1048 * 1048 * 121 / 100))
+    expect(run.takes[0]!.measured).toEqual({
+      u: { seconds: {}, sha: {}, pixels: 524 * 524 },
+      c: { seconds: {}, sha: {}, pixels: predictedHoldPixels(1048 * 1048), predicted: true },
+    })
+    // 1050² × 4 = 4.41 MP: Crystal's $0.10 tier (at 1048² it would be $0.05), within the hold.
+    const real = (priceNode('UpscaleImageNode', prompt.c!.inputs, { inputPixels: 1050 * 1050 }) as { credits: number }).credits
+    const heldAt = (priceNode('UpscaleImageNode', prompt.c!.inputs, { inputPixels: predictedHoldPixels(1048 * 1048) }) as { credits: number }).credits
+    expect(real).toBe(creditsForUsd(0.10))
+    expect(nodes.c!.credits).toBe(real)
+    expect(real).toBeLessThanOrEqual(heldAt)
+    const esrgan = (priceNode('UpscaleImageNode', prompt.u!.inputs, { inputPixels: 524 * 524 }) as { credits: number }).credits
+    expect([...k.ledger.holds.values()].map(h => [h.credits, h.actual])).toEqual([[esrgan + heldAt, esrgan + real]])
+  })
+
+  it('a predicted picture past its margin is refused at its turn (1200² where 1048² was predicted)', async () => {
+    const { replicate, run } = await runChain(1200)
+    const nodes = run.takes[0]!.nodes
+    expect(nodes.u!.status).toBe('done')
+    expect(nodes.c!.status).toBe('error')
+    expect(nodes.c!.error).toBe(pictureOverMarginWords('UpscaleImageNode'))
+    expect(replicate.submitted().map(r => r.endpoint)).toEqual(['nightmareai/real-esrgan'])
+  })
+
+  it('the margin never passes the input cap', () => {
+    expect(predictedHoldPixels(LARGEST_INPUT_PIXELS - 10)).toBe(LARGEST_INPUT_PIXELS)
+    expect(predictedHoldPixels(100)).toBe(121)
+  })
+
   it('the refusals are plain words', () => {
-    for (const w of [pictureChangedWords('UpscaleImageNode'), pictureChangedWords('EnhanceDetailNode'), RESTORE_SAFETY_DIGITS]) {
+    for (const w of [pictureChangedWords('UpscaleImageNode'), pictureChangedWords('EnhanceDetailNode'), pictureOverMarginWords('EnhanceDetailNode'), RESTORE_SAFETY_DIGITS]) {
       expect(w).not.toMatch(/Node|_|\bid\b/)
     }
   })
@@ -570,7 +626,9 @@ describe('with image-repair off (rule 15)', () => {
       expect(runnerTakesNode(p, 'n', ON), c).toBe(true)
       expect(nodesNeedingEngine(p, { runnerOn: true, families: new Set(['cards']), titleOf: id => id })).toEqual(['n'])
       expect(RUNNER_OUTPUT_CLASSES.has(c), c).toBe(c === 'RemoveBackgroundNode' || c === 'RestorePhotoNode')
-      expect(IMAGE_OUTPUT_CLASSES.has(c)).toBe(true)
+      // A picture only while the family is on (PAID_PICTURE_FAMILY), never through IMAGE_OUTPUT_CLASSES (fix round 1).
+      expect(IMAGE_OUTPUT_CLASSES.has(c)).toBe(false)
+      expect(PAID_PICTURE_FAMILY[c]).toBe('image-repair')
       const rule = RUNNER_NODE_RULES[c]!
       if (c === 'UpscaleImageNode' || c === 'EnhanceDetailNode') expect(new Set(Object.values(rule.models!))).toEqual(new Set(['image-repair']))
       else expect(rule.family).toBe('image-repair')

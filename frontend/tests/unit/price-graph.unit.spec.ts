@@ -629,4 +629,17 @@ describe('restore and remove background on the ComfyUI path (R3.5)', () => {
     expect(at('UpscaleImageNode', { model: 'Topaz', image: ['2', 0], topaz_upscale_factor: '2x' })).toBe(48)
     expect(at('EnhanceDetailNode', { model: 'Diffusion Refine', image: ['2', 0] })).toBe(89)
   })
+  // Fix round 1 (ruling 4): a wired engine was refused as unpriced; it is now priced at the dearest engine the node offers.
+  it('Upscale and Enhance detail with a wired engine: the dearest engine, never refused', () => {
+    const engines = { UpscaleImageNode: ['Clarity', 'Crystal', 'Real-ESRGAN', 'Recraft Crisp', 'Topaz'], EnhanceDetailNode: ['Creative', 'Faithful', 'Diffusion Refine'] }
+    for (const [ct, list] of Object.entries(engines)) {
+      const rest = { image: ['2', 0], scale_factor: 2, topaz_upscale_factor: '2x' }
+      const dearest = Math.max(...list.map(model => at(ct, { ...rest, model })!))
+      expect(at(ct, { ...rest, model: ['9', 0] }), ct).toBe(dearest)
+    }
+    expect(at('UpscaleImageNode', { image: ['2', 0], scale_factor: 2, topaz_upscale_factor: '2x', model: ['9', 0] })).toBe(240)
+    expect(at('EnhanceDetailNode', { image: ['2', 0], model: ['9', 0] })).toBe(89)
+    // A missing engine is still refused (nothing says which the node runs).
+    expect(() => at('UpscaleImageNode', { image: ['2', 0] })).toThrow(UnpricedGraphError)
+  })
 })

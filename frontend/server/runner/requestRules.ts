@@ -473,6 +473,16 @@ export function pictureChangedWords(classType: string): string {
   return `The picture going into ${name} is larger than when this run started, and ${name} is charged by its size. Run it again.`
 }
 
+/**
+ * R3.5 fix round 1: the refusal at a size-priced node's turn when the picture
+ * a step before it made is larger than the size Sailor predicted and held for
+ * (with its margin). The node's hold is released.
+ */
+export function pictureOverMarginWords(classType: string): string {
+  const name = sizePricedName(classType)
+  return `The picture going into ${name} came out larger than Sailor allowed for when this run started, and ${name} is charged by its size. Run it again.`
+}
+
 /** The refusal for a size-priced node's picture above the input cap, in the node's (or its model's) own words. */
 function inputTooLargeWords(classType: string): string {
   switch (classType) {

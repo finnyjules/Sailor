@@ -322,8 +322,8 @@ export const IMAGE_OUTPUT_CLASSES: ReadonlySet<string> = new Set([
   'EditImageNode', 'DevelopImageNode', 'RelightNode', 'BlendSceneNode',
   'RemoveObjectNode', 'TextEditNode', 'RecolorObjectNode', 'SwapBackgroundNode', 'SwapProductNode', 'PersonSwap',
   'GenerateFromReferencesNode', 'RotateCameraNode', 'ProductShotNode', 'RestyleFromImageNode', 'FixFacesNode', 'FaceSwap',
-  // R3.5 (image-repair): a picture only while that family is on (carriesImage, PAID_PICTURE_FAMILY).
-  ...REPAIR_CLASSES,
+  // (A paid family's picture classes, R3.5's image-repair, are not here: they are pictures only
+  // while their family is on, PAID_PICTURE_FAMILY, which carriesImage reads first.)
 ])
 
 /**
@@ -331,7 +331,7 @@ export const IMAGE_OUTPUT_CLASSES: ReadonlySet<string> = new Set([
  * picture only while its family is on. With it off, a wire from it is no
  * picture to the runner, exactly as before R3 (rule 15).
  */
-const PAID_PICTURE_FAMILY: Readonly<Record<string, RunnerFamily>> = Object.fromEntries(REPAIR_CLASSES.map(c => [c, 'image-repair' as const]))
+export const PAID_PICTURE_FAMILY: Readonly<Record<string, RunnerFamily>> = Object.fromEntries(REPAIR_CLASSES.map(c => [c, 'image-repair' as const]))
 
 /**
  * Classes whose picture outputs are other slots than output 0 alone, or that
@@ -1245,7 +1245,8 @@ function carriesImage(prompt: ApiPrompt, link: [string, number], families: Reado
     if (Object.prototype.hasOwnProperty.call(EFFECT_FAMILY_OF, from.class_type) && !effectFamilyOn(from.class_type, families)) return false
     return families.has('cards') && PICTURE_OUTPUTS[from.class_type]!.includes(link[1])
   }
-  // A paid family's picture (R3.5's image-repair), only while that family is on.
+  // A paid family's picture (R3.5's image-repair), only while that family is on
+  // (read before IMAGE_OUTPUT_CLASSES, which doesn't list them).
   if (Object.prototype.hasOwnProperty.call(PAID_PICTURE_FAMILY, from.class_type)) {
     return link[1] === 0 && familyOn(PAID_PICTURE_FAMILY[from.class_type]!, families)
   }

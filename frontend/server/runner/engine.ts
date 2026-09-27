@@ -33,8 +33,8 @@ import { createMemoryHeldBytes, type HeldBytes } from './heldBytes'
 import { createMemoryKeptBytes, type KeptBytes, type KeptExt } from './keptBytes'
 import { createFileAccess } from './fileAccess'
 import type { BackupSettings } from './config'
-import { linkedFileCheck, measuredInputProblem, pictureChangedWords, requestProblems, unreadableInputWords } from './requestRules'
-import { startPictureSizes } from './repairSizes'
+import { linkedFileCheck, measuredInputProblem, pictureChangedWords, pictureOverMarginWords, requestProblems, unreadableInputWords } from './requestRules'
+import { predictedHoldPixels, startPictureSizes } from './repairSizes'
 import { isReusable, requestFingerprint } from './fingerprint'
 import { assertFilesOwned, collectInputFiles, parseInputFileRef, type OwnershipCheck } from './inputs'
 import { shotRefFilenames } from './shotRefs'
@@ -1068,10 +1068,14 @@ export function createEngine(deps: EngineDeps) {
       // Upscale and Enhance detail (R3.5): the hold was priced on the size the
       // start of the run measured (repairSizes.ts); a picture that would now
       // cost more (a file changed meanwhile) is refused, its hold released.
-      const heldPixels = resuming ? undefined : take.measured?.[id]?.pixels
-      if (heldPixels !== undefined
-        && nodeCredits(take.prompt[id]!, inputPixels, families) > nodeCredits(take.prompt[id]!, heldPixels, families)) {
-        throw new Error(pictureChangedWords(take.prompt[id]!.class_type))
+      // A predicted size (fix round 1) was held with a margin: refused only
+      // above it; inside it, charged at the real size (never above the hold).
+      const held = resuming ? undefined : take.measured?.[id]
+      if (held?.pixels !== undefined) {
+        const over = held.predicted
+          ? (inputPixels ?? Number.POSITIVE_INFINITY) > held.pixels
+          : nodeCredits(take.prompt[id]!, inputPixels, families) > nodeCredits(take.prompt[id]!, held.pixels, families)
+        if (over) throw new Error(held.predicted ? pictureOverMarginWords(take.prompt[id]!.class_type) : pictureChangedWords(take.prompt[id]!.class_type))
       }
       // A file its model refuses (Product shot on Bria: over 12 MB, or not
       // JPEG, PNG or WebP; HappyHorse 1.1: over 20 MB; requestRules.ts),
@@ -1321,6 +1325,8 @@ export function createEngine(deps: EngineDeps) {
       // it depends on them (sync-3 lip-sync; Topaz video upscale), measured
       // before planning.
       if (!resuming) rec.credits = nodeCredits(take.prompt[id]!, inputPixels, families, inputSeconds)
+      // A predicted size (fix round 1): the real size's price, never above what was held for it.
+      if (!resuming && held?.predicted && held.pixels !== undefined) rec.credits = Math.min(rec.credits, nodeCredits(take.prompt[id]!, held.pixels, families))
       const fp = resuming
         ? rec.fingerprint
         // Reused with an explicit seed; an LLM text node's request by itself (ruling (d)).
@@ -1912,7 +1918,12 @@ export function createEngine(deps: EngineDeps) {
       for (const [index, p] of prompts.entries()) {
         const sized = await startPictureSizes(p, f => files.read(f))
         if (sized.problem) throw refuse(sized.problem.message, 400, { nodeId: sized.problem.nodeId, classType: sized.problem.classType })
-        for (const [nodeId, pixels] of Object.entries(sized.pixels)) measured[index]![nodeId] = { seconds: {}, sha: {}, pixels }
+        for (const [nodeId, pixels] of Object.entries(sized.pixels)) {
+          // A predicted size (not read from a file) is held with a margin (fix round 1).
+          measured[index]![nodeId] = sized.predicted.includes(nodeId)
+            ? { seconds: {}, sha: {}, pixels: predictedHoldPixels(pixels), predicted: true }
+            : { seconds: {}, sha: {}, pixels }
+        }
       }
     }
     await deps.metering.moderate(prompts, prompts.flatMap(p => staticWiredTexts(p)))

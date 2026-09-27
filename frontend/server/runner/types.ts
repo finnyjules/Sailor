@@ -227,6 +227,12 @@ export interface MeasuredMedia {
    * `seconds` and `sha` are empty). The hold is priced on it.
    */
   pixels?: number
+  /**
+   * R3.5 fix round 1: `pixels` is a predicted size held with its margin
+   * (repairSizes.ts predictedHoldPixels), not one read from a file: at the
+   * node's turn the picture is refused only when larger than `pixels`.
+   */
+  predicted?: true
 }
 
 export type LegAction = 'run' | 'continue' | 'again' | 'redo' | 'restart'

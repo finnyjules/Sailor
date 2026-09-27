@@ -314,6 +314,12 @@ export function priceNode(classType: string, inputs: NodeInputs | null | undefin
   }
   if (!MODEL_PRICED_CLASS_SET.has(classType)) return { refused: 'not a model-priced class' }
   const picked = inputs?.model
+  // An engine picker (Upscale, Enhance detail) with its engine wired (known
+  // only at run time) is priced at its dearest engine (R3.5 fix round 1).
+  if ((classType === 'UpscaleImageNode' || classType === 'EnhanceDetailNode') && isLinkedInput(picked)) {
+    const price = editNodeUsd(classType, inputs!, opts)
+    return typeof price === 'number' ? { usd: price, credits: creditsForUsd(price) } : price
+  }
   const model = typeof picked === 'string' ? picked : ''
   if (!model) return { refused: 'no model selected' }
 
