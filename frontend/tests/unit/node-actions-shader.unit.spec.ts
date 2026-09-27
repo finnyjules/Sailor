@@ -11,8 +11,8 @@ describe('shader effect node actions (spec §7.3)', () => {
     expect(edit).toEqual([])
     expect(develop.map(a => a.label)).toEqual(['Remix…', 'New effect…'])
     expect(develop.map(a => a.id)).toEqual(['remix-effect', 'new-effect'])
-    expect(SHADER_GEN_ACTION_HINT).toBe('30–63 credits')
-    for (const a of develop) expect(actionHint(a, actionPrice(a, null, false))).toBe('3 takes · 30–63 credits')
+    expect(SHADER_GEN_ACTION_HINT).toBe('30–84 credits')
+    for (const a of develop) expect(actionHint(a, actionPrice(a, null, false))).toBe('3 takes · 30–84 credits')
   })
   it('a node with no effect picked offers New effect… only (Remix… needs an effect to start from)', () => {
     expect(actionsFor({ ...ctx, hasEffect: false }).develop.map(a => a.label)).toEqual(['New effect…'])

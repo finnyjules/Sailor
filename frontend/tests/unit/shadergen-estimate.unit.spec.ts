@@ -21,8 +21,8 @@ describe('estimateShaderGen', () => {
   it('reproduces spec §7.2’s 25–40¢ from the token envelope', () => {
     const e = estimateShaderGen()
     expect(e.usd[0]).toBeCloseTo(0.144, 4)  // 3 × (4.5k in × $4 + 1.5k out × $20) / 1M
-    expect(e.usd[1]).toBeCloseTo(0.312, 4)  // 3 × (6k × $4 + 4k × $20) / 1M
-    expect(e.credits).toEqual([30, 63])     // per call ×2, rounded up per call; 3 calls
+    expect(e.usd[1]).toBeCloseTo(0.3744, 4) // 3 × 1.2 × (6k × $4 + 4k × $20) / 1M
+    expect(e.credits).toEqual([30, 84])     // per call ×2, rounded up per call; 4 calls at the top end
   })
   it('scales with the take count', () => {
     expect(estimateShaderGen(1).usd[0]).toBeCloseTo(0.048, 4)
@@ -40,20 +40,20 @@ describe('estimateShaderGen with a reference picture', () => {
   it('adds the picture to every call', () => {
     const e = estimateShaderGen(SHADER_GEN_TAKES, { reference: true })
     expect(e.usd[0]).toBeCloseTo(3 * (4850 * 4 + 1500 * 20) / 1e6, 6)
-    expect(e.usd[1]).toBeCloseTo(3 * (6350 * 4 + 4000 * 20) / 1e6, 6)
-    expect(e.credits).toEqual([30, 66])
+    expect(e.usd[1]).toBeCloseTo(3 * 1.2 * (6350 * 4 + 4000 * 20) / 1e6, 6)
+    expect(e.credits).toEqual([30, 88])
     expect(estimateShaderGen(SHADER_GEN_TAKES, { reference: false })).toEqual(estimateShaderGen())
   })
 })
 
 describe('shaderGenEstimateText', () => {
   it('credits locally and hosted alike', () => {
-    expect(shaderGenEstimateText(false)).toBe('30–63 credits')
-    expect(shaderGenEstimateText(true)).toBe('30–63 credits')
+    expect(shaderGenEstimateText(false)).toBe('30–84 credits')
+    expect(shaderGenEstimateText(true)).toBe('30–84 credits')
   })
   it('higher with a reference picture', () => {
-    expect(shaderGenEstimateText(false, estimateShaderGen(SHADER_GEN_TAKES, { reference: true }))).toBe('30–66 credits')
-    expect(shaderGenEstimateText(true, estimateShaderGen(SHADER_GEN_TAKES, { reference: true }))).toBe('30–66 credits')
+    expect(shaderGenEstimateText(false, estimateShaderGen(SHADER_GEN_TAKES, { reference: true }))).toBe('30–88 credits')
+    expect(shaderGenEstimateText(true, estimateShaderGen(SHADER_GEN_TAKES, { reference: true }))).toBe('30–88 credits')
   })
 })
 

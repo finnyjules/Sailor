@@ -4,9 +4,9 @@
  * repair; every call is metered on its own (hold, then settle real usage ×2).
  * The envelope is per call, from the stage 5 paid measurement (2026-09-27, Opus 5.5
  * at effort medium, 5 requests × 3 takes, 16 calls): input 4.5–6.0k tokens, output
- * 1.4–4.6k (median ~2.7k), 16 calls for 15 takes. Sets cost $0.18–0.30 (36–66
- * credits). A repair is rare enough that the estimate assumes one call per take;
- * billing settles real usage either way.
+ * 1.4–4.6k (median ~2.7k); 20 calls for 18 takes over 6 requests. Sets cost
+ * $0.18–0.38 (36–76 credits) — the top is a set where a take needed a repair call,
+ * so the top of the range allows for one. Billing settles real usage either way.
  */
 import { SHADER_GEN_MODEL, SHADER_GEN_TAKES } from '../shadergen/model'
 import { ANTHROPIC_USD_PER_MTOK, anthropicCallCredits } from './anthropicTokens'
@@ -14,8 +14,8 @@ import { ANTHROPIC_USD_PER_MTOK, anthropicCallCredits } from './anthropicTokens'
 export const SHADER_GEN_ENVELOPE = {
   inputTokens: [4500, 6000],
   outputTokens: [1500, 4000],
-  /** calls per take: 1 (measured 16 calls for 15 takes; a repair is the exception) */
-  callsPerTake: [1, 1],
+  /** calls per take: 1 at best; 1.2 allows for a repair in the set (measured 20 calls for 18 takes) */
+  callsPerTake: [1, 1.2],
 } as const
 
 /** A reference picture (the look to aim for) is one more image on EVERY call of the set,

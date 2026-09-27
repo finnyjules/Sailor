@@ -25,8 +25,8 @@ import { PRODUCT_EXAMPLES } from '../app/lib/shadergen/productExamples'
  * Writes measure.json, index.html (a contact sheet) and the PNGs under
  * .superpowers/sdd/2026-09-25-ai-in-sailor-stage5-shader-gen/measure/<run>/.
  *
- * Expected cost (shared/pricing/shaderGenEstimate.ts, 3 takes): 30–63 credits a set, i.e. about
- * $0.14–$0.31 of model spend at list price (measured 2026-09-27: $0.18–0.30 a set); six sets ≈ $0.86–$1.87.
+ * Expected cost (shared/pricing/shaderGenEstimate.ts, 3 takes): 30–84 credits a set, i.e. about
+ * $0.14–$0.37 of model spend at list price (measured 2026-09-27: $0.18–0.38 a set); six sets ≈ $0.86–$2.25.
  */
 
 const LIVE = process.env.SHADERGEN_LIVE === '1'

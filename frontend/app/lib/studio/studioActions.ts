@@ -16,7 +16,7 @@ import type { StudioPromptApi } from '~/composables/useStudioPrompt'
 export type StudioActionRun = { mode: string; add?: boolean } | { kind: 'tweak'; fromMenu: true } | { call: () => void }
 /**
  * One inspector row. `description`: one plain line under the name saying what comes back.
- * `priceFor`: the row's price in credits (local and hosted alike, "30–63 credits") —
+ * `priceFor`: the row's price in credits (local and hosted alike, "30–84 credits") —
  * absent on a row that spends nothing. `lands`: where the result goes (takes / a step), kept
  * for the prompt's own bookkeeping; the row says it in its description.
  * `disabled`: shown but off, with `disabledHint` saying why in a plain sentence.
