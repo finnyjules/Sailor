@@ -10,7 +10,10 @@ const props = withDefaults(defineProps<{
   canRun: boolean
   running: boolean
   runLabel?: string
-}>(), { runLabel: 'Run this node' })
+  variant?: 'slim' | 'instrument'
+  price?: string | null
+  buttonText?: string
+}>(), { runLabel: 'Run this node', variant: 'slim', price: null, buttonText: 'Run' })
 
 const emit = defineEmits<{ run: [] }>()
 
@@ -30,6 +33,7 @@ function onRun() {
 
 <template>
   <div
+    v-if="variant === 'slim'"
     class="node-run-row relative flex items-center gap-2 h-7 px-2.5 border-t border-white/[0.06]"
     :data-tone="status.tone"
   >
@@ -45,6 +49,28 @@ function onRun() {
     >
       <Loader2 v-if="running" class="size-3 animate-spin" />
       <Play v-else class="size-3" fill="currentColor" />
+    </button>
+    <slot name="menu" />
+  </div>
+  <div
+    v-else
+    class="node-shell__foot node-run-row node-run-row--instrument"
+    :data-tone="status.tone"
+  >
+    <span class="shrink-0 size-1.5 rounded-full" :class="DOT[status.tone]" aria-hidden="true" />
+    <span data-run-status class="flex-1 min-w-0 truncate text-[12px] text-white/55" :title="status.text">{{ status.text }}</span>
+    <button
+      type="button"
+      class="nopan nodrag node-btn node-btn--primary disabled:opacity-40 disabled:cursor-not-allowed"
+      :aria-label="runLabel"
+      :title="runLabel"
+      :disabled="running || !canRun"
+      @click.stop="onRun"
+    >
+      <Loader2 v-if="running" class="size-3 animate-spin" />
+      <Play v-else class="size-2.5" fill="currentColor" />
+      <span>{{ buttonText }}</span>
+      <span v-if="price && !running" class="node-btn__price">{{ price }}</span>
     </button>
     <slot name="menu" />
   </div>
