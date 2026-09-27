@@ -97,10 +97,13 @@ import { MATERIAL_IDS, MATERIALS, type MaterialId } from '~/lib/brushTips/materi
 import { toWidthNorm, brushBoxFromStrokes, strokeRadiusPx, maskStrokeToLocal, type PaintStroke } from '~/lib/compositor/brushStamp'
 import BrushToolbar from '~/components/vue-canvas/compositor/BrushToolbar.vue'
 import BrushTipSettings from '~/components/vue-canvas/compositor/BrushTipSettings.vue'
+import BrushSnapFeedback from '~/components/vue-canvas/compositor/BrushSnapFeedback.vue'
 import { setLiveTipStroke } from '~/composables/useCompositorLayers'
 import { replayStroke } from '~/lib/brushTips/replay'
 import { REF_W as BRUSH_REF_W } from '~/lib/brushTips/tips'
 import type { TipStroke } from '~/lib/brushTips/record'
+import { Steadier, HoldWatch, holdMsOf, type TPt } from '~/lib/brushTips/steady'
+import { fitShape, adjustShape, shapePoints, shapeLabel, medianSpeed, timedSamples, type Shape } from '~/lib/brushTips/quickShape'
 import StudioColor from '~/components/vue-canvas/studio/StudioColor.vue'
 import StudioColorField from '~/components/vue-canvas/studio/StudioColorField.vue'
 import StudioButton from '~/components/vue-canvas/studio/StudioButton.vue'
@@ -2101,7 +2104,17 @@ async function deleteNodeAnchor() {
 const brush = useBrushPaint()
 // The in-progress Paint-mode tip stroke (see onTipPointerDown). Declared here, before
 // renderStack, so a render during setup never reads it in its temporal dead zone.
-let tipLive: { layerId: string; pending: BrushLayer | null; s: TipStroke; down: boolean; raf: number; lastMoveT: number } | null = null
+// Steadying (steady.ts) runs in CLIENT px: `st` steadies the raw pointer, `hold` watches for a
+// hold-to-snap, `path` is the steadied line as painted, `finger` the latest raw point, `snap`
+// the shape the stroke snapped to (then the hand edits it), `releasing` the release time while
+// Streamline catches the line up to where the finger stopped.
+type TipSnap = { base: Shape; c0: { x: number; y: number }; speed: number; label: string }
+type TipLive = {
+  layerId: string; pending: BrushLayer | null; s: TipStroke; down: boolean; raf: number; lastMoveT: number
+  st: Steadier; hold: HoldWatch; path: TPt[]; finger: { x: number; y: number }
+  snap: TipSnap | null; snapTried: boolean; releasing: number
+}
+let tipLive: TipLive | null = null
 // True while `tipLive.pending` (a new layer not yet in the document) carries a MOVING material.
 // `tipLive` is a plain let, so the live loop's predicate can't see the pending layer; this
 // reactive flag lets it start the wall clock mid-stroke instead of on release.
@@ -2110,6 +2123,11 @@ const tipLivePendingMoving = shallowRef(false)
 function clientToNorm(e: PointerEvent | MouseEvent) {
   const r = canvasRect(); if (!r) return null
   return { nx: (e.clientX - r.left) / r.width, ny: (e.clientY - r.top) / r.height }
+}
+/** A client point → width-normalised stroke coords (clientToNorm, then toWidthNorm). */
+function clientXYToWidthNorm(cx: number, cy: number): { x: number; y: number } | null {
+  const r = canvasRect(); if (!r) return null
+  return toWidthNorm((cx - r.left) / r.width, (cy - r.top) / r.height, canvasDisplay.w, canvasDisplay.h)
 }
 /** Canvas px per view px (the artboard is drawn at canvasDisplay, laid out at viewSize). */
 function viewScale(): number { return canvasDisplay.w / Math.max(1, viewSize.w) }
@@ -2558,6 +2576,8 @@ function onVisibility() { if (document.hidden) clearPan() }
 onMounted(() => {
   window.addEventListener('keydown', onKeydown, true)
   window.addEventListener('keyup', onKeyup, true)
+  window.addEventListener('keydown', onSnapShiftKey, true)
+  window.addEventListener('keyup', onSnapShiftKey, true)
   window.addEventListener('blur', clearPan)
   document.addEventListener('visibilitychange', onVisibility)
   // Test hooks (mirrors Scene3DStudioSurface's __scene3dDoc): read and replace the open
@@ -2612,6 +2632,8 @@ onMounted(() => {
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', onKeydown, true)
   window.removeEventListener('keyup', onKeyup, true)
+  window.removeEventListener('keydown', onSnapShiftKey, true)
+  window.removeEventListener('keyup', onSnapShiftKey, true)
   window.removeEventListener('blur', clearPan)
   document.removeEventListener('visibilitychange', onVisibility)
   if (import.meta.dev) {
@@ -7068,10 +7090,89 @@ const DRIP_TAIL_CAP_MS = 2000
 // timing, and interleaved zero-motion samples would halve bristle's speed estimate and skew
 // spray pooling. Held still, the loop still records dwell (spray pools, then drips).
 const TIP_HOLD_AFTER_MS = 20
+// Hold-to-snap feedback (BrushSnapFeedback): x / y in px inside the canvas box, where the
+// brush cursor ring lives. `on` while a tip stroke is in the hand.
+const snapUi = reactive<{ on: boolean; x: number; y: number; progress: number | null; label: string | null }>({ on: false, x: 0, y: 0, progress: null, label: null })
+const SNAP_RING_LEAD_MS = 150
+const RELEASE_CAP_MS = 350
+let shiftDown = false
+function onSnapShiftKey(e: KeyboardEvent) {
+  if (e.shiftKey === shiftDown) return
+  shiftDown = e.shiftKey
+  if (tipLive?.snap) applySnap(tipLive)
+}
+function tipPathLen(P: { x: number; y: number }[]): number {
+  let n = 0; for (let i = 1; i < P.length; i++) n += Math.hypot(P[i]!.x - P[i - 1]!.x, P[i]!.y - P[i - 1]!.y); return n
+}
+/** Paint one steadied client point into the live stroke. */
+function emitClient(L: TipLive, p: { x: number; y: number }, t: number) {
+  const wn = clientXYToWidthNorm(p.x, p.y); if (!wn) return
+  brush.extendTipStroke(wn.x, wn.y, t)
+  L.path.push({ x: p.x, y: p.y, t })
+  L.lastMoveT = t
+}
+function snapEligible(L: TipLive): boolean {
+  return brush.steady.snap && L.s.tip !== 'spray' && !L.snapTried && tipPathLen(L.path) > 30
+}
+function trySnap(L: TipLive) {
+  const base = fitShape([...L.path, L.finger])
+  if (!base) { L.snapTried = true; return } // no clean shape: leave the stroke as drawn
+  L.snap = { base, c0: { ...L.finger }, speed: medianSpeed(L.path), label: '' }
+  applySnap(L)
+}
+/** Redraw the live stroke along the snapped shape as the hand edits it, at an even speed. */
+function applySnap(L: TipLive) {
+  const snap = L.snap; if (!snap) return
+  const sh = adjustShape(snap.base, snap.c0, L.finger, shiftDown)
+  const P = timedSamples(shapePoints(sh, shiftDown), snap.speed)
+  const out: TPt[] = []
+  for (const q of P) { const wn = clientXYToWidthNorm(q.x, q.y); if (wn) out.push({ x: wn.x, y: wn.y, t: q.t }) }
+  brush.replaceTipSamples(out)
+  snap.label = shapeLabel(sh, shiftDown)
+  snapUi.label = snap.label
+  setLiveTipStroke(L.layerId, L.s)
+  renderStack()
+}
+function updateSnapUi(L: TipLive, now: number) {
+  const r = canvasRect()
+  if (r && r.width && r.height) {
+    snapUi.x = (L.finger.x - r.left) / r.width * canvasDisplay.w
+    snapUi.y = (L.finger.y - r.top) / r.height * canvasDisplay.h
+  }
+  let progress: number | null = null
+  if (!L.snap && !L.releasing && snapEligible(L)) {
+    const still = L.hold.stillFor(now), holdMs = holdMsOf(brush.steady.hold)
+    if (still > SNAP_RING_LEAD_MS) progress = Math.min(1, Math.max(0, (still - SNAP_RING_LEAD_MS) / (holdMs - SNAP_RING_LEAD_MS)))
+  }
+  snapUi.progress = progress
+  snapUi.label = L.snap?.label ?? null
+}
+function hideSnapUi() { snapUi.on = false; snapUi.progress = null; snapUi.label = null }
 function tipHoldLoop() {
   const L = tipLive; if (!L || !L.down) return
   const now = performance.now() // performance.now() and e.timeStamp share one timebase
-  if (now - L.lastMoveT > TIP_HOLD_AFTER_MS) { brush.holdTipStroke(now); renderStack() }
+  if (L.releasing) {
+    // Streamline finishes the line to where the finger stopped, quickly (≤ 350 ms).
+    const r = L.st.advance(now, true)
+    for (const p of r.samples) emitClient(L, p, p.t)
+    if (r.caughtUp || now - L.releasing > RELEASE_CAP_MS) {
+      const tg = L.st.target, pen = L.st.pen
+      if (Math.hypot(tg.x - pen.x, tg.y - pen.y) > 0.6) emitClient(L, tg, now)
+      finishTipRelease(L)
+      return
+    }
+    renderStack()
+    L.raf = requestAnimationFrame(tipHoldLoop)
+    return
+  }
+  if (!L.snap) {
+    const r = L.st.advance(now)
+    for (const p of r.samples) emitClient(L, p, p.t)
+    if (r.samples.length) renderStack()
+    if (now - L.lastMoveT > TIP_HOLD_AFTER_MS) { brush.holdTipStroke(now); renderStack() }
+    if (snapEligible(L) && L.hold.stillFor(now) > holdMsOf(brush.steady.hold)) trySnap(L)
+  }
+  updateSnapUi(L, now)
   L.raf = requestAnimationFrame(tipHoldLoop)
 }
 /** The layer a tip stroke starts when nothing selected matches (appended on top on commit,
@@ -7119,26 +7220,46 @@ function onTipPointerDown(e: PointerEvent, p: { nx: number; ny: number }) {
   const s = brush.liveTipStroke(); if (!s) return
   const pending = existing ? null : newTipLayer(effectMode)
   const layerId = existing ? existing.id : pending!.id
-  tipLive = { layerId, pending, s, down: true, raf: 0, lastMoveT: e.timeStamp }
+  // The steadying settings are copied: a change applies to the next stroke.
+  const cx = e.clientX, cy = e.clientY, t = e.timeStamp
+  tipLive = {
+    layerId, pending, s, down: true, raf: 0, lastMoveT: t,
+    st: new Steadier({ ...brush.steady }, cx, cy, t), hold: new HoldWatch(cx, cy, t),
+    path: [{ x: cx, y: cy, t }], finger: { x: cx, y: cy }, snap: null, snapTried: false, releasing: 0,
+  }
+  snapUi.on = true; snapUi.progress = null; snapUi.label = null
   // A moving material or a library shader animates the pending layer mid-stroke.
   tipLivePendingMoving.value = !!pending?.material?.moving || (isFill(pending?.fill) && fillIsShader(pending.fill) && pending.fill.shader.speed > 0)
   setLiveTipStroke(layerId, s)
   tipLive.raf = requestAnimationFrame(tipHoldLoop)
 }
 function onTipPointerMove(e: PointerEvent) {
-  const L = tipLive; if (!L || !L.down) return
+  const L = tipLive; if (!L || !L.down || L.releasing) return
   const evs = (e.getCoalescedEvents?.() ?? []) as PointerEvent[]
   for (const ev of evs.length ? evs : [e]) {
-    const q = clientToNorm(ev); if (!q) continue
-    const wn = toWidthNorm(q.nx, q.ny, canvasDisplay.w, canvasDisplay.h)
-    brush.extendTipStroke(wn.x, wn.y, ev.timeStamp)
-    L.lastMoveT = ev.timeStamp
+    const cx = ev.clientX, cy = ev.clientY, t = ev.timeStamp
+    L.finger = { x: cx, y: cy }
+    L.hold.move(cx, cy, t)
+    if (L.snap) continue // snapped: the hand edits the shape instead of painting
+    for (const p of L.st.input(cx, cy, t)) emitClient(L, p, t)
   }
+  if (L.snap) applySnap(L)
   renderStack()
 }
 function onTipPointerUp() {
-  const L = tipLive; if (!L || !L.down) return
+  const L = tipLive; if (!L || !L.down || L.releasing) return
+  // Streamline still trailing the finger: let tipHoldLoop catch it up, then finish.
+  if (!L.snap && brush.steady.streamline > 0.001) {
+    const tg = L.st.target, pen = L.st.pen
+    if (Math.hypot(tg.x - pen.x, tg.y - pen.y) > 0.6) { L.releasing = performance.now(); return }
+  }
+  finishTipRelease(L)
+}
+/** End the stroke after release (and any catch-up): commit it, or for spray run the drip tail. */
+function finishTipRelease(L: TipLive) {
   L.down = false
+  L.releasing = 0
+  hideSnapUi()
   cancelAnimationFrame(L.raf); L.raf = 0
   const s = brush.endTipStroke()
   if (!s) { setLiveTipStroke(L.layerId, null); tipLive = null; tipLivePendingMoving.value = false; renderStack(); return }
@@ -7163,8 +7284,10 @@ function onTipPointerUp() {
  *  the box and record ONE history step. Also the path for the tool closing mid-stroke or
  *  mid-drip (B, Done, Escape, switching to Mask). */
 function commitTipStroke() {
+  hideSnapUi()
   const L = tipLive; if (!L) return
   tipLive = null
+  L.releasing = 0 // a pending catch-up is dropped: commit what is there
   tipLivePendingMoving.value = false
   if (L.raf) cancelAnimationFrame(L.raf)
   const s = L.down ? brush.endTipStroke() : L.s
@@ -9060,6 +9183,12 @@ onUnmounted(() => {
           v-if="brush.active.value && brush.cursor.value"
           class="absolute pointer-events-none rounded-full border border-white/90 bg-white/10"
           :style="{ left: (brush.cursor.value.x * canvasDisplay.w - brushRingPx / 2) + 'px', top: (brush.cursor.value.y * canvasDisplay.h - brushRingPx / 2) + 'px', width: brushRingPx + 'px', height: brushRingPx + 'px', zIndex: 30 }"
+        />
+        <!-- Hold-to-snap feedback (a tip stroke in the hand) -->
+        <BrushSnapFeedback
+          v-if="snapUi.on"
+          :x="snapUi.x" :y="snapUi.y" :progress="snapUi.progress" :label="snapUi.label"
+          style="z-index: 31"
         />
 
         <!-- Drag-to-generate on-box bar: prompt + style + Generate. Shown after a
