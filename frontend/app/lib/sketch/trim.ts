@@ -8,6 +8,7 @@ import type { CurveRef, Span, SpanEnd } from './crossings'
 import { curveGeom, pointAt } from './crossings'
 import { addPoint, addLine, addCircle, addConstraint, deleteEntity, isPointReferenced } from './edit'
 import { freshId } from './ids'
+import { tangentTouchPoint } from './tangency'
 
 const TAU = Math.PI * 2
 const EPS_T = 1e-7
@@ -127,7 +128,8 @@ export const sameKey = (c: SketchConstraint) => `${c.kind}|${c.refs.join(',')}|$
 // The pen stores segment rules as point pairs: horizontal/vertical [a,b],
 // parallel/perpendicular [a,b,c,d] (Right angle [prev,c,c,next]), equalDist
 // [a,b,c,d], distance [a,b]; a point pinned to a path line segment is
-// collinear [A,B,p]. When a segment's pair changes, these follow it.
+// collinear [A,B,p]; a line tangent to a round piece is tangentLineArc
+// [A,B,…]. When a segment's pair changes, these follow it.
 
 type PairEvent =
   | { kind: 'removed' }                                  // (a,b) is gone
@@ -136,7 +138,9 @@ type PairEvent =
   | { kind: 'grow'; from: EntityId; to: EntityId }       // dissolve: (a,q) → (a,b)
   | { kind: 'cut'; x: EntityId }                          // (a,b) → (a,x) + (x,b), nothing moves
 
-type PairCat = 'dir' | 'len' | 'pin'
+// 'tan': a tangent line — follows its line like a direction, but on a split or
+// cut only the half nearest the touch point keeps it (the arc touches one half)
+type PairCat = 'dir' | 'len' | 'pin' | 'tan'
 
 function pairSlots(doc: SketchDoc, c: SketchConstraint, centres: Set<EntityId>): { cat: PairCat; slots: [number, number][] } | null {
   const r = c.refs
@@ -155,9 +159,28 @@ function pairSlots(doc: SketchDoc, c: SketchConstraint, centres: Set<EntityId>):
       return r.length === 4 ? { cat: 'len', slots: [[0, 1], [2, 3]] } : null
     case 'collinear':
       return r.length === 3 ? { cat: 'pin', slots: [[0, 1]] } : null
+    case 'tangentLineArc':
+      return r.length >= 3 ? { cat: 'tan', slots: [[0, 1]] } : null
     default:
       return null
   }
+}
+
+function distToSegment(p: Vec2, a: Vec2, b: Vec2): number {
+  const dx = b.x - a.x, dy = b.y - a.y
+  const L2 = dx * dx + dy * dy
+  const t = L2 < 1e-18 ? 0 : Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / L2))
+  return Math.hypot(p.x - (a.x + t * dx), p.y - (a.y + t * dy))
+}
+
+// of a tangent rule's two candidate line pairs, the one whose piece is nearer where it touches
+function nearerHalf(doc: SketchDoc, c: SketchConstraint, first: EntityId[], second: EntityId[]): EntityId[] {
+  const touch = tangentTouchPoint(doc, c)
+  const d = (refs: EntityId[]) => {
+    const a = getPoint(doc, refs[0]!), b = getPoint(doc, refs[1]!)
+    return touch && a && b ? distToSegment(touch, a, b) : Infinity
+  }
+  return d(second) < d(first) ? second : first
 }
 
 // returns the ids of rules it rewrote or created
@@ -182,6 +205,9 @@ function followPair(doc: SketchDoc, a: EntityId, b: EntityId, ev: PairEvent): Se
     } else if (ev.kind === 'moved' || ev.kind === 'grow') {
       if (info.cat === 'len') remove.add(c.id)        // the length changed
       else { c.refs = rewrite(ev.from, ev.to); touched.add(c.id) }
+    } else if (ev.kind === 'cut' && info.cat === 'tan') {
+      c.refs = nearerHalf(doc, c, rewrite(b, ev.x), rewrite(a, ev.x))
+      touched.add(c.id)
     } else if (ev.kind === 'cut') {
       // nothing moves: lengths and pins still hold on a and b; directions go to both halves
       if (info.cat !== 'dir') continue
@@ -192,6 +218,7 @@ function followPair(doc: SketchDoc, a: EntityId, b: EntityId, ev: PairEvent): Se
       copies.push({ ...c, refs: second })
     } else {
       if (info.cat === 'len') { remove.add(c.id); continue }
+      if (info.cat === 'tan') { c.refs = nearerHalf(doc, c, rewrite(b, ev.x0), rewrite(a, ev.x1)); touched.add(c.id); continue }
       const first = rewrite(b, ev.x0)
       const second = rewrite(a, ev.x1)
       c.refs = first
@@ -204,14 +231,61 @@ function followPair(doc: SketchDoc, a: EntityId, b: EntityId, ev: PairEvent): Se
   return touched
 }
 
-// arc radius pins [C,p,C,q]: when anchor `from` of an arc on centre C is gone, re-aim them at `to`
-function followRadius(doc: SketchDoc, centre: EntityId, from: EntityId, to: EntityId): void {
-  if (isPointReferenced(doc, from)) return   // still an anchor of another arc: its pins stay valid
-  for (const c of doc.constraints) {
-    if (c.kind !== 'equalDist' || c.refs[0] !== centre || c.refs[2] !== centre) continue
-    if (c.refs[1] === from) c.refs[1] = to
-    if (c.refs[3] === from) c.refs[3] = to
+// ── arc operands ─────────────────────────────────────────────────────────────
+// Rules name a path arc as [C, S] — its centre and one of its anchors: radius
+// pins and arc Equal (equalDist [C,S,…]), tangentLineArc [A,B,C,S], tangentArcs
+// [C1,S1,C2,S2] (either pair may be a circle id instead). Such a pair stays good
+// while S is an anchor of an arc on C; when an edit takes S off the arc it
+// re-aims at the arc's surviving anchor, or the rule goes (and is counted).
+
+// "C|S" for every anchor S of every arc segment on centre C
+function arcAnchorPairs(doc: SketchDoc): Set<string> {
+  const out = new Set<string>()
+  for (const e of doc.entities) {
+    if (e.kind !== 'path') continue
+    e.segments.forEach((s, i) => {
+      if (s.kind !== 'arc') return
+      const [a, b] = segEnds(e, i)
+      out.add(`${s.center}|${a}`); out.add(`${s.center}|${b}`)
+    })
   }
+  return out
+}
+
+// the [centre, point] slots of a rule that may name a round piece
+function operandSlots(doc: SketchDoc, c: SketchConstraint): [number, number][] {
+  const r = c.refs
+  if (c.kind === 'equalDist') return r.length === 4 ? [[0, 1], [2, 3]] : []
+  if (c.kind === 'tangentLineArc') return r.length === 4 ? [[2, 3]] : []
+  if (c.kind !== 'tangentArcs') return []
+  const out: [number, number][] = []
+  for (let i = 0; i < r.length;) {
+    const e = getEntity(doc, r[i]!)
+    if (e?.kind === 'circle') { i += 1; continue }
+    out.push([i, i + 1]); i += 2
+  }
+  return out
+}
+
+/** After an edit: every rule's [C, S] that named an arc anchor before (`before`,
+ *  from arcAnchorPairs) but no longer does re-aims at `hints["C|S"]` when that is
+ *  an anchor of an arc on C now, else the rule is removed. Arc invariants are
+ *  never touched. */
+function followArcOperands(doc: SketchDoc, before: Set<string>, hints: Map<string, EntityId> = new Map()): void {
+  const now = arcAnchorPairs(doc)
+  const invariants = arcInvariantIds(doc)
+  const remove = new Set<EntityId>()
+  for (const c of doc.constraints) {
+    if (invariants.has(c.id)) continue
+    for (const [i, j] of operandSlots(doc, c)) {
+      const key = `${c.refs[i]}|${c.refs[j]}`
+      if (!before.has(key) || now.has(key)) continue
+      const to = hints.get(key)
+      if (to && now.has(`${c.refs[i]}|${to}`)) { const refs = [...c.refs]; refs[j] = to; c.refs = refs }
+      else remove.add(c.id)
+    }
+  }
+  removeRules(doc, remove)
 }
 
 // line-entity rules by line id that should hold on both halves of a split line
@@ -396,7 +470,9 @@ export function removeSegment(doc: SketchDoc, pathId: EntityId, segIndex: number
   const path = getEntity(doc, pathId)
   if (!path || path.kind !== 'path' || segIndex < 0 || segIndex >= segCount(path)) return FAIL
   const tr = ruleTracker(doc)
+  const arcsBefore = arcAnchorPairs(doc)
   const loose = cutOutSegment(doc, path, segIndex)
+  followArcOperands(doc, arcsBefore)
   cleanOrphans(doc, loose)
   return { ok: true, droppedRules: tr.count() }
 }
@@ -442,6 +518,7 @@ function removeSegSpan(doc: SketchDoc, span: Span & { ref: { kind: 'seg' } }): T
   const tr = ruleTracker(doc)
   const cons = !!path.construction
   const [A, B] = segEnds(path, i)
+  const arcsBefore = arcAnchorPairs(doc)
   // pin both new ends first, while every cutter ref still points where it did
   const x0 = span.start.cutter ? endPoint(doc, tr, span.start, span.ref, cons) : null
   const x1 = span.end.cutter ? endPoint(doc, tr, span.end, span.ref, cons) : null
@@ -452,10 +529,13 @@ function removeSegSpan(doc: SketchDoc, span: Span & { ref: { kind: 'seg' } }): T
   if (x1) splitSegment(doc, path, i, x1)                      // [A→X1][X1→B]
   if (x0) { splitSegment(doc, path, i, x0); target = i + 1 }  // [A→X0][X0→X1]…
   const loose = cutOutSegment(doc, path, target)
+  // the arc's removed end → its new end on the same side
+  const hints = new Map<string, EntityId>()
   if (seg.kind === 'arc') {
-    if (x1 && !x0) followRadius(doc, seg.center, A, x1)
-    if (x0 && !x1) followRadius(doc, seg.center, B, x0)
+    if (x1 && !x0) hints.set(`${seg.center}|${A}`, x1)
+    if (x0 && !x1) hints.set(`${seg.center}|${B}`, x0)
   }
+  followArcOperands(doc, arcsBefore, hints)
   cleanOrphans(doc, loose)
   return { ok: true, droppedRules: tr.count() }
 }
@@ -664,18 +744,24 @@ export function dissolveAt(doc: SketchDoc, pathId: EntityId, anchorIndex: number
   path.segments.splice(outSeg, 1)
   if (C && C2) {
     touched.add(addConstraint(doc, 'equalDist', [C, a, C, b]))
-    // radius pins re-aim only at points that are about to go: q → a, and C2 → C.
-    // Arc invariants (of any arc still drawn) are never touched.
+    // arc operands [C|C2, q] (radius pins, arc Equal, tangent rules) re-aim:
+    // C2 → C when C2 is about to go; q → a when q is about to go, or when the
+    // operand is on the merged arc's centre and q is no longer an anchor of an
+    // arc there. Arc invariants (of any arc still drawn) are never touched.
     const invariants = arcInvariantIds(doc)
+    const now = arcAnchorPairs(doc)
     const qGoes = !isPointReferenced(doc, q) && !getPoint(doc, q)?.fixed
     const c2Goes = C2 !== C && !isPointReferenced(doc, C2) && !getPoint(doc, C2)?.fixed
     for (const c of doc.constraints) {
-      if (invariants.has(c.id) || c.kind !== 'equalDist' || c.refs[0] !== c.refs[2]) continue
-      const centre = c.refs[0]
-      if (centre !== C && centre !== C2) continue
+      if (invariants.has(c.id)) continue
       const refs = [...c.refs]
-      if (qGoes) { if (refs[1] === q) refs[1] = a; if (refs[3] === q) refs[3] = a }
-      if (c2Goes && centre === C2) { refs[0] = C; refs[2] = C }
+      for (const [i, j] of operandSlots(doc, c)) {
+        const centre: EntityId = refs[i]!
+        if (centre !== C && centre !== C2) continue
+        const into: EntityId = c2Goes && centre === C2 ? C : centre
+        refs[i] = into
+        if (refs[j] === q && (qGoes || (into === C && !now.has(`${C}|${q}`)))) refs[j] = a
+      }
       if (refs.some((r, i) => r !== c.refs[i])) { c.refs = refs; touched.add(c.id) }
     }
     if (C2 !== C) loose.push(C2)
@@ -731,9 +817,32 @@ function isTrivial(doc: SketchDoc, c: SketchConstraint): boolean {
       const a = getEntity(doc, r[0]!), b = getEntity(doc, r[1]!)
       return !!a && !!b && a.kind === 'circle' && b.kind === 'circle' && a.center === b.center
     }
+    case 'tangentLineArc': {
+      if (r[0] === r[1]) return true
+      const ops = operandCentres(doc, c)
+      return ops.some(o => o.degenerate || o.c === r[0] || o.c === r[1])
+    }
+    case 'tangentArcs': {
+      const ops = operandCentres(doc, c)
+      return ops.some(o => o.degenerate) || (ops.length === 2 && ops[0]!.c === ops[1]!.c)
+    }
     default:
       return false
   }
+}
+
+// the centre each round operand of a tangent rule names (a circle id → its
+// centre); `degenerate` when a [C, S] pair became one point
+function operandCentres(doc: SketchDoc, c: SketchConstraint): { c: EntityId; degenerate: boolean }[] {
+  const r = c.refs
+  let i = c.kind === 'tangentLineArc' ? 2 : 0
+  const out: { c: EntityId; degenerate: boolean }[] = []
+  while (i < r.length) {
+    const e = getEntity(doc, r[i]!)
+    if (e?.kind === 'circle') { out.push({ c: e.center, degenerate: false }); i += 1 }
+    else { out.push({ c: r[i]!, degenerate: r[i] === r[i + 1] }); i += 2 }
+  }
+  return out
 }
 
 /** Make `from` and `into` one point: every reference to `from` becomes `into`,

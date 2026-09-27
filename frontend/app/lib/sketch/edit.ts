@@ -75,6 +75,21 @@ function refsEqual(a: EntityId[], b: EntityId[]): boolean {
   return a.length === b.length && a.every((v, i) => v === b[i])
 }
 
+// is there still a line entity or path line segment running between a and b?
+function spansLine(doc: SketchDoc, a: EntityId, b: EntityId): boolean {
+  const pair = (x: EntityId, y: EntityId) => (x === a && y === b) || (x === b && y === a)
+  for (const e of doc.entities) {
+    if (e.kind === 'line' && pair(e.p1, e.p2)) return true
+    if (e.kind !== 'path') continue
+    const n = e.anchors.length
+    const count = e.closed ? n : n - 1
+    for (let i = 0; i < count; i++) {
+      if (e.segments[i]?.kind === 'line' && pair(e.anchors[i]!, e.anchors[(i + 1) % n]!)) return true
+    }
+  }
+  return false
+}
+
 // Delete an entity and everything that structurally depends on it.
 export function deleteEntity(doc: SketchDoc, id: EntityId): void {
   const e = getEntity(doc, id)
@@ -118,6 +133,11 @@ export function deleteEntity(doc: SketchDoc, id: EntityId): void {
   doc.entities = doc.entities.filter(x => x.id !== id)
   // drop constraints that reference the removed entity
   doc.constraints = doc.constraints.filter(c => !c.refs.includes(id))
+  if (e.kind === 'line' && !spansLine(doc, e.p1, e.p2)) {
+    // a tangent line names its ends, not its id: it goes with the last piece between them
+    doc.constraints = doc.constraints.filter(c => !(c.kind === 'tangentLineArc' &&
+      ((c.refs[0] === e.p1 && c.refs[1] === e.p2) || (c.refs[0] === e.p2 && c.refs[1] === e.p1))))
+  }
   if (e.kind === 'path') {
     // drop this path's auto equalDist rules (their refs don't include the path's own id)
     doc.constraints = doc.constraints.filter(c => !(c.kind === 'equalDist' && arcEqualDistRefs.some(refs => refsEqual(refs, c.refs))))
