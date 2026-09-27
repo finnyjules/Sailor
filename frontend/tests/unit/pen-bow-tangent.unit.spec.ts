@@ -1,10 +1,14 @@
+// @vitest-environment happy-dom
+//
 // tests/unit/pen-bow-tangent.unit.spec.ts
 // Pen stage 4, snapping while drawing: a bowing arc's circle snaps to touch a
 // nearby line, circle or arc (and releasing writes the rule); the joint's own
 // tangency wins; a typed radius skips it; a line leaving an arc's end along
 // its direction snaps onto the tangent and writes the joint rule.
 import { describe, it, expect } from 'vitest'
-import { ref } from 'vue'
+import { ref, nextTick } from 'vue'
+import { mount } from '@vue/test-utils'
+import PenOverlay from '~/components/pen/PenOverlay.vue'
 import type { SketchDoc, EntityId } from '~/lib/sketch/model'
 import { addPoint, addLine, addCircle, addPath } from '~/lib/sketch/edit'
 import { usePen, snapArcTangent } from '~/composables/pen/usePen'
@@ -131,5 +135,55 @@ describe('a line leaving an arc’s end', () => {
     const path = lastPath(doc.value)
     const E = path.anchors[1], C = path.segments[0].center
     expect(doc.value.constraints.some(c => c.kind === 'perpendicular' && c.refs[0] === C && c.refs[1] === E && c.refs[2] === E)).toBe(false)
+  })
+})
+
+// fix round 1: the screen never promises a rule that isn't written
+describe('no tangent promise without the rule', () => {
+  it('while a radius is typed, the overlay drops the green ghost and the T chip', async () => {
+    const { pen } = mk(d => { addLine(d, addPoint(d, 2, 2), addPoint(d, 16, 2)) })
+    const w = mount(PenOverlay, { props: { pen, view: DEV, width: 800, height: 600, active: true } })
+    try {
+      bowFrom6to12(pen, { x: 9, y: 2.1 }, false)
+      await nextTick()
+      expect(w.find('[data-bow-ghost]').attributes('data-tangent')).toBeDefined()
+      expect(w.find('[data-bow-tangent]').exists()).toBe(true)
+      pen.dimBuffer.value = '4'
+      await nextTick()
+      expect(w.find('[data-bow-ghost]').exists()).toBe(true)
+      expect(w.find('[data-bow-ghost]').attributes('data-tangent')).toBeUndefined()
+      expect(w.find('[data-bow-tangent]').exists()).toBe(false)
+      expect(pen.bowPreview({ x: 9, y: 2.1 }, { snap: false })!.touch).toBeNull()
+    } finally { w.unmount() }
+  })
+  it('after an arc, with the next segment an arc, the point is not moved onto the tangent', () => {
+    const { doc, pen } = mk(() => {})
+    pen.nextSegment.value = 'arc'
+    pen.place(4, 6); pen.place(10, 6)
+    pen.pathMove(12.2, 8.05)
+    expect(pen.placementPreview.value?.tangent).toBe(false)
+    pen.place(12.2, 8.05)
+    const pp = pen.pendingPath.value!
+    const N = P(doc.value, pp.anchors[2]!)
+    expect(N.x).toBeCloseTo(12.2, 9); expect(N.y).toBeCloseTo(8.05, 9)
+    expect(doc.value.constraints.some(c => c.kind === 'perpendicular')).toBe(false)
+  })
+  it('a typed line length along the tangent keeps the tangent rule', () => {
+    const { doc, pen } = mk(() => {})
+    pen.nextSegment.value = 'arc'
+    pen.place(4, 6); pen.place(10, 6)
+    pen.nextSegment.value = 'line'
+    pen.pathMove(12.2, 8.05)
+    expect(pen.placementPreview.value?.tangent).toBe(true)
+    pen.dimBuffer.value = '3'
+    pen.commitDimension()
+    pen.finishPath(false)
+    const path = lastPath(doc.value)
+    const [, E, N] = path.anchors
+    const C = path.segments[0].center
+    expect(doc.value.constraints.find(c => c.kind === 'perpendicular')!.refs).toEqual([C, E, E, N])
+    const c = P(doc.value, C), e = P(doc.value, E), n = P(doc.value, N)
+    expect(Math.hypot(n.x - e.x, n.y - e.y)).toBeCloseTo(3, 6)
+    expect((e.x - c.x) * (n.x - e.x) + (e.y - c.y) * (n.y - e.y)).toBeCloseTo(0, 6)
   })
 })

@@ -86,7 +86,7 @@ export const GUIDE_SPLIT_STATUS = 'The text follows the longer piece'
 // Shift-constrain (Illustrator/Figma-style): rotate `pt` about `prev` to the
 // nearest 45° increment, preserving the distance between them. Pure — no doc
 // reads/writes. Used for path line-segment placement only (see
-// pathPlacementXY and the host's rubber-band preview); arc-bow drags ignore it.
+// pathPlacement and the host's rubber-band preview); arc-bow drags ignore it.
 export function snapAngle(prev: Vec2, pt: Vec2): Vec2 {
   const d = dist(prev, pt)
   if (d < 1e-9) return pt
@@ -102,7 +102,7 @@ export const PERP_SNAP_RAD = (4 * Math.PI) / 180
 // Right-angle snap (no Shift): when the rubber band prev→pt is within `tolRad`
 // of perpendicular to the segment prevPrev→prev, project `pt` onto the
 // perpendicular through `prev`, keeping its signed distance along it. Pure —
-// no doc reads/writes. Used by pathPlacementXY; `snapped` tells the caller to
+// no doc reads/writes. Used by pathPlacement; `snapped` tells the caller to
 // capture the matching perpendicular constraint on placement.
 export function snapPerpendicular(prevPrev: Vec2, prev: Vec2, pt: Vec2, tolRad: number): { pt: Vec2; snapped: boolean } {
   const dx = prev.x - prevPrev.x, dy = prev.y - prevPrev.y
@@ -864,7 +864,7 @@ export function usePen(opts: {
   // angle-snap wins, but placePoint can still coincide with the snapped spot if
   // it happens to land on existing geometry. The path's first anchor (no prior
   // anchor yet) is never snapped — there's nothing to measure the angle from.
-  // Shift placement (pathPlacementXY/snapAngle, above) snaps the anchor's
+  // Shift placement (pathPlacement/snapAngle, above) snaps the anchor's
   // POSITION to 45° increments but on its own leaves no trace — the segment
   // un-squares the moment either anchor is dragged. When the snapped segment
   // lands exactly horizontal or vertical, capture that as a real
@@ -897,8 +897,11 @@ export function usePen(opts: {
     if (!prev || prev.kind !== 'point') return { x, y, perpendicular: false, tangent: false }
     if (shift) return { ...snapAngle({ x: prev.x, y: prev.y }, { x, y }), perpendicular: false, tangent: false }
     const lastSeg = pp.segments[pp.segments.length - 1]
-    // leaving an arc's end: snap onto its tangent (snapArcTangent)
+    // leaving an arc's end: snap onto its tangent (snapArcTangent) — only when
+    // the next segment is a line (pathDown always starts one; pathClick follows
+    // nextSegment), since only a line gets the rule (captureArcTangent)
     if (lastSeg && lastSeg.kind === 'arc') {
+      if (nextSegment.value === 'arc') return { x, y, perpendicular: false, tangent: false }
       const C = doc.value.entities.find(e => e.id === lastSeg.center) as any
       if (!C || C.kind !== 'point') return { x, y, perpendicular: false, tangent: false }
       const r = snapArcTangent({ x: C.x, y: C.y }, { x: prev.x, y: prev.y }, lastSeg.sweep, { x, y }, PERP_SNAP_RAD)
@@ -909,10 +912,6 @@ export function usePen(opts: {
     if (!pprev || pprev.kind !== 'point') return { x, y, perpendicular: false, tangent: false }
     const r = snapPerpendicular({ x: pprev.x, y: pprev.y }, { x: prev.x, y: prev.y }, { x, y }, PERP_SNAP_RAD)
     return { x: r.pt.x, y: r.pt.y, perpendicular: r.snapped, tangent: false }
-  }
-  function pathPlacementXY(x: number, y: number, shift: boolean): Vec2 {
-    const p = pathPlacement(x, y, shift)
-    return { x: p.x, y: p.y }
   }
 
   // live read of where the next path anchor would land under the cursor
@@ -1192,14 +1191,18 @@ export function usePen(opts: {
     if (!prev || prev.kind !== 'point') return
     // aim along where the point would land (Shift 45° / right-angle snap), so
     // the typed length follows the same direction the dimension line shows
-    const aim = pathPlacementXY(cursor.value.x, cursor.value.y, cursor.value.shift)
+    const aim = pathPlacement(cursor.value.x, cursor.value.y, cursor.value.shift)
     const dx = aim.x - prev.x, dy = aim.y - prev.y
     const d = Math.hypot(dx, dy)
     const dir = d > 1e-9 ? { x: dx / d, y: dy / d } : { x: 1, y: 0 }   // cursor sitting on the anchor: fall back to +x
-    const { id, own } = placePointOwn(prev.x + dir.x * value, prev.y + dir.y * value, [prevId], guideMode.value)
+    const target = { x: prev.x + dir.x * value, y: prev.y + dir.y * value }
+    const { id, own } = placePointOwn(target.x, target.y, [prevId], guideMode.value)
     pp.segments.push({ kind: 'line' })
     pp.anchors.push(id)
     pp.ownAnchors.push(own)
+    // aimed along the previous arc's tangent: keep it there (the rule the
+    // overlay's T chip promised). The right-angle snap has no such capture here.
+    captureArcTangent({ ...target, tangent: d > 1e-9 && aim.tangent }, id, own)
     const existing = findRadiusPin(prevId, id)
     if (existing) existing.value = value
     else addConstraint(doc.value, 'distance', [prevId, id], value)

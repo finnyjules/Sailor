@@ -320,8 +320,8 @@ const previewD = computed(() => {
     if (bowing && i === segCount - 1) {
       // just-placed segment bowing live under the pointer
       // (bowPreview: the same arc the ghost circle shows and the release commits,
-      // tangent snap included)
-      const arc = bowPreview(penCursor.value)
+      // tangent snap included — except while a radius is typed, which wins)
+      const arc = bowPreview(penCursor.value, { snap: !dimBuffer.value })
       if (arc) d += ` A ${arc.r} ${arc.r} 0 ${arc.large} ${arc.sweep} ${to.x} ${to.y}`
       else d += ` L ${to.x} ${to.y}`
     } else if (seg.kind === 'arc') {
@@ -394,7 +394,9 @@ const pathBowChip = computed(() => {
   if (tool.value !== 'path' || !pathDrag || !pathDrag.bowed || !penCursor.value) return null
   const p0 = worldPt(pathDrag.prevAnchor)
   if (!p0) return null
-  const pv = bowPreview(penCursor.value)
+  // a typed radius commits the unsnapped arc (applyArcDimension), so don't
+  // promise the tangent snap while one is being typed
+  const pv = bowPreview(penCursor.value, { snap: !dimBuffer.value })
   if (!pv) return null
   const mid = toScreen(pv.mid)
   const c = toScreen(pv.center)
