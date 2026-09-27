@@ -412,7 +412,9 @@ export function usePen(opts: {
   const penHistory = createPenHistory({ doc, onChange: opts.onChange, onLiveChange: opts.onLiveChange })
   const { commitHistory, initHistory, canUndo, canRedo } = penHistory
   function undo() {
-    closeCleanup()   // a Clean up preview is dropped, never applied
+    // with a Clean up preview open, undo only closes it (as ⌘Z does) — it
+    // never also steps back over the drawing under the preview
+    if (cleanup.value) { cancelCleanup(); return }
     if (trimPress) trimUp()   // a live Trim press settles before stepping back over it
     if (arcDrag) arcDragEnd()   // so does a live arc drag
     if (!penHistory.undo()) return
@@ -429,7 +431,7 @@ export function usePen(opts: {
     opts.onChange?.()
   }
   function redo() {
-    closeCleanup()
+    if (cleanup.value) { cancelCleanup(); return }   // likewise: only closes the preview
     if (trimPress) trimUp()
     if (arcDrag) arcDragEnd()
     if (!penHistory.redo()) return
@@ -2025,9 +2027,18 @@ export function usePen(opts: {
     for (const f of on.slice(0, 12)) sparkle(f.at.x, f.at.y)
     status.value = `Cleaned up · ${on.length} ${on.length === 1 ? 'change' : 'changes'}`
   }
+  // a button / field / control has focus (the key's target, else the
+  // document's active element) — Space then belongs to it
+  function isControlFocused(ev: KeyboardEvent): boolean {
+    const t = (ev.target ?? (typeof document !== 'undefined' ? document.activeElement : null)) as Element | null
+    if (!t || typeof (t as Element).closest !== 'function') return false
+    return !!t.closest('button, input, select, textarea, [role="button"], [role="radio"], [role="slider"], [role="tab"], [contenteditable="true"]')
+  }
   // keys while a preview is open: Enter applies, Escape / ⌥⇧C cancel, ⌘Z / ⌘Y
   // only close it; every other plain key is swallowed so nothing edits the
-  // drawing under the preview; other ⌘ combos and bare modifiers are not the pen's
+  // drawing under the preview — except Tab / ⇧Tab, and Space on a focused
+  // control, left to the browser so the keyboard reaches strength / Apply /
+  // Cancel; other ⌘ combos and bare modifiers are not the pen's
   function cleanupKey(ev: KeyboardEvent): boolean {
     if (ev.metaKey || ev.ctrlKey) {
       const k = ev.key.toLowerCase()
@@ -2036,6 +2047,10 @@ export function usePen(opts: {
     }
     if (ev.key === 'Enter') { applyCleanup(); return true }
     if (ev.key === 'Escape' || isCleanupKey(ev)) { cancelCleanup(); return true }
+    // keyboard access to the strength / Apply / Cancel row: Tab / ⇧Tab move
+    // focus, and Space presses a focused button or control
+    if (ev.key === 'Tab') return false
+    if (ev.key === ' ' && isControlFocused(ev)) return false
     return !MODIFIER_KEYS.has(ev.key)
   }
 

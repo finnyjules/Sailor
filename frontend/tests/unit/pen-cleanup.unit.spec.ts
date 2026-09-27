@@ -14,8 +14,9 @@ const DEV = { a: 34, b: 0, c: 0, d: -34, e: 40, f: 400 }
 function mk(build: (d: SketchDoc) => void = () => {}, options?: any) {
   const doc = ref<SketchDoc>({ entities: [], constraints: [] })
   build(doc.value)
-  const pen = usePen({ doc, view: ref(DEV), options })
-  return { doc, pen }
+  const view = ref({ ...DEV })
+  const pen = usePen({ doc, view, options })
+  return { doc, pen, view }
 }
 const key = (k: string, o: Record<string, unknown> = {}) =>
   ({ key: k, code: '', metaKey: false, ctrlKey: false, shiftKey: false, altKey: false, preventDefault() {}, stopPropagation() {}, ...o }) as unknown as KeyboardEvent
@@ -154,6 +155,75 @@ describe('Clean up in the pen', () => {
     pen.toggleCleanup()
     expect(pen.cleanup.value).toBeNull()
     expect(pen.onKeydown(key('Ç', CLEAN_UP))).toBe(false)
+  })
+  it('⌘Z or a direct undo / redo while previewing only closes the preview — no step back', () => {
+    const { doc, pen } = mk(flower)
+    addPoint(doc.value, 100, 100); pen.commitHistory()   // one committed edit to step back over
+    expect(pen.canUndo()).toBe(true)
+    const edited = JSON.stringify(doc.value)
+    pen.startCleanup()
+    expect(pen.onKeydown(key('z', { metaKey: true }))).toBe(true)
+    expect(pen.cleanup.value).toBeNull()
+    expect(pen.canUndo()).toBe(true)
+    expect(JSON.stringify(doc.value)).toBe(edited)
+    for (const step of ['undo', 'redo'] as const) {
+      pen.startCleanup()
+      pen[step]()
+      expect(pen.cleanup.value).toBeNull()
+      expect(pen.status.value).toBe('Clean up cancelled')
+      expect(pen.canUndo()).toBe(true)
+      expect(JSON.stringify(doc.value)).toBe(edited)
+    }
+    pen.undo()                                             // with no preview, undo steps back as ever
+    expect(pen.canUndo()).toBe(false)
+  })
+  it('Tab, and Space on a focused control, reach the strength / Apply / Cancel row', () => {
+    const { pen } = mk(flower)
+    pen.startCleanup()
+    let prevented = 0
+    const tab = key('Tab', { preventDefault() { prevented++ } })
+    expect(pen.onKeydown(tab)).toBe(false)
+    expect(pen.onKeydown(key('Tab', { shiftKey: true, preventDefault() { prevented++ } }))).toBe(false)
+    const button = { closest: (sel: string) => (sel.includes('button') ? button : null) }
+    expect(pen.onKeydown(key(' ', { target: button, preventDefault() { prevented++ } }))).toBe(false)
+    expect(prevented).toBe(0)
+    expect(pen.onKeydown(key(' '))).toBe(true)             // Space with nothing focused is swallowed
+    expect(pen.cleanup.value).not.toBeNull()
+    expect(pen.onKeydown(key('Enter', { target: button }))).toBe(true)   // Enter still applies
+    expect(pen.cleanup.value).toBeNull()
+  })
+  it.each(['redo', 'reset', 'revert', 'endGesture', 'dispose'] as const)('%s drops the preview', (end) => {
+    const { pen } = mk(flower)
+    pen.startCleanup()
+    expect(pen.cleanup.value).not.toBeNull()
+    pen[end]()
+    expect(pen.cleanup.value).toBeNull()
+  })
+  it('Apply with every fix switched off writes no step', () => {
+    const { doc, pen } = mk(flower)
+    const before = JSON.stringify(doc.value)
+    pen.startCleanup()
+    // switching a fix off can let others be found, so repeat until none is on
+    for (let round = 0; round < 20; round++) {
+      const on = pen.cleanup.value!.result.fixes.find(f => f.on)
+      if (!on) break
+      pen.toggleCleanupFix(on.id)
+    }
+    expect(pen.cleanup.value!.result.fixes.every(f => !f.on)).toBe(true)
+    pen.applyCleanup()
+    expect(pen.cleanup.value).toBeNull()
+    expect(pen.canUndo()).toBe(false)
+    expect(JSON.stringify(doc.value)).toBe(before)
+  })
+  it('tolerances stay at the zoom Clean up opened at', () => {
+    const { pen, view } = mk(flower)
+    pen.startCleanup()
+    const ids = pen.cleanup.value!.result.fixes.map(f => f.id).sort()
+    expect(ids.filter(id => id.startsWith('join'))).toHaveLength(4)
+    view.value = { ...DEV, a: 340, d: -340 }               // zoom in 10×: the gaps would be ~30 px now
+    pen.toggleCleanupFix(ids[0]!)                           // a fresh solve, not a memo hit
+    expect(pen.cleanup.value!.result.fixes.map(f => f.id).sort()).toEqual(ids)
+    expect(pen.cleanup.value!.unitsPerPx).toBeCloseTo(1 / 34)
   })
   it('switching back and forth is memoised for the session; a new session starts afresh', () => {
     const { pen } = mk(flower)
