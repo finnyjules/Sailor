@@ -9,7 +9,11 @@ import StudioSegmented from '~/components/vue-canvas/studio/StudioSegmented.vue'
 import StudioSwitch from '~/components/vue-canvas/studio/StudioSwitch.vue'
 import { patchLayoutGrid, type ColumnFit, type LayoutGrid, type LayoutGridPatch, type ResolvedLayoutGrid, type RowMode } from '~/lib/frame/layoutGrid'
 
-const props = defineProps<{ grid: LayoutGrid; resolved: ResolvedLayoutGrid; formatLabel: string }>()
+const props = withDefaults(defineProps<{
+  grid: LayoutGrid; resolved: ResolvedLayoutGrid; formatLabel: string
+  /** The platform's show/hide shortcut, named in the switch's tooltip (⌃G on a Mac, Ctrl+Shift+4 elsewhere). */
+  showShortcut?: string
+}>(), { showShortcut: '⌃G' })
 const emit = defineEmits<{ update: [g: LayoutGrid] }>()
 const patch = (p: LayoutGridPatch) => emit('update', patchLayoutGrid(props.grid, p))
 const colWidth = computed(() => Math.round(props.resolved.cols[0]?.w ?? 0))
@@ -41,7 +45,7 @@ const inputCls = 'w-full min-w-0 bg-transparent text-xs text-white/90 outline-no
       <span class="flex items-center gap-1" data-testid="layout-grid-actions">
         <button v-if="!grid.auto" type="button" class="text-white/40 hover:text-white/80 p-1" :title="`Use the suggested grid for ${formatLabel}`"
           data-testid="grid-suggested" @click.stop.prevent="emit('update', { ...grid, auto: true })"><RotateCcw class="size-3.5" /></button>
-        <span title="Show grid (⌃G)" data-testid="grid-show">
+        <span :title="`Show grid (${showShortcut})`" data-testid="grid-show">
           <StudioSwitch :model-value="grid.show" @update:model-value="(v: boolean) => patch({ show: v })" />
         </span>
       </span>

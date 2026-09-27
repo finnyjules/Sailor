@@ -1205,6 +1205,9 @@ function applyCommand(input: CompositorState, cmd: Command): CommandResult<Compo
       const a = (cmd.args ?? {}) as Record<string, any>
       if (a.generate === true || a.reroll === true || a.patch?.mode === 'generated')
         return { ok: false, reason: 'invalid', detail: "The Frame's grid is a layout guide; for a generated grid pattern use mosaic." }
+      // The old shape ({ patch: {...} }) no longer applies: say what to send instead of silently doing nothing.
+      if (a.patch !== undefined)
+        return { ok: false, reason: 'invalid', detail: 'setGrid takes flat args, not a patch: columns, gutter, margin, fit, width, rows, rowCount, line, show, suggested.' }
       const cur = state.grid
       if (!cur) return { ok: false, reason: 'invalid', detail: 'this frame has no grid yet' }
       if (a.suggested === true) return { ok: true, template: { ...state, grid: { ...cur, auto: true } }, inverse: snapshot() }

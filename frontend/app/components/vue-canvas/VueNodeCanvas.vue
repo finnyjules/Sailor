@@ -14,6 +14,7 @@ import { useSubgraphNavigation } from '~/composables/useSubgraphNavigation'
 import { matchStylesInText, type CanvasSnapshot, type StyleLite } from '~/lib/agent/surfaces/canvas'
 import { planFrameFromSelection, MAX_FRAME_LAYERS } from '~/lib/canvas/combineFrame'
 import { frameCardSize, placeRightOf, sendFailedToast, sentFrameData, sentFrameEdges, sentFrameToast } from '~/lib/frame/layoutSetSend'
+import { stampNewFrameGrid } from '~/lib/frame/newFrameGrid'
 import { computeRunLeafIds } from '~/lib/canvas/runLeaves'
 import { edgeTopologyKey } from '~/lib/canvas/edgeTopologyKey'
 import { edgesTouching, GhostRestores, freeInputSlot, clearRemovalMarks, removalEdgeIds, addClass, removeClass } from '~/lib/canvas/proposalPreview'
@@ -2016,6 +2017,9 @@ function createNodeData(nodeType: string, position: { x: number, y: number }, wi
       ...(nodeType === 'ComfyGateNode' ? { paused: false, promptId: null } : {}),
     },
   } as any
+  // A new Frame is born with a shown layout grid, so layers that arrive before the editor ever
+  // opens (Edit here, a template, a start-modal pick) don't get it classed as an old Frame.
+  if (nodeType === 'Compositor') stampNewFrameGrid(data.data)
   // Frontend-only Space Type node has no backend objectInfo, so `outputs` is
   // empty. Give it ONE wildcard output so the generated Image/Video artifact can
   // be wired from it (visual/provenance link only — SpaceType never executes).

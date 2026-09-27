@@ -33,6 +33,14 @@ describe('setGrid', () => {
     expect(r.ok).toBe(false)
     expect((r as any).detail).toMatch(/mosaic/)
   })
+  it('the old { patch } shape is refused, naming the flat args', () => {
+    for (const patch of [{ columns: 6 }, { mode: 'explicit' }, {}]) {
+      const r = applyCompositorCommand(baseState(), { op: 'setGrid', args: { patch } }) as any
+      expect(r.ok).toBe(false)
+      expect(r.reason).toBe('invalid')
+      expect(r.detail).toMatch(/columns.*gutter.*margin.*fit.*rows.*line.*show/)
+    }
+  })
   it('describe reads the grid out in plain words', () => {
     const d = describeCompositor(baseState()) as any
     expect(JSON.stringify(d)).toMatch(/12 columns, square rows, line \d+ px/)

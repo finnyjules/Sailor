@@ -925,12 +925,19 @@ const {
 /** The moving layer's box in grid (design) px, while a move has passed the slop; else null. */
 const movingBox = computed(() => {
   if (!dragMoving.value) return null
-  const l = selectedLocal.value; if (!l) return null
+  // A move drags the whole selection (or just the pressed layer when it isn't selected).
+  const moving = selectedLayers.value.length ? selectedLayers.value : (selectedLocal.value ? [selectedLocal.value] : [])
+  if (!moving.length) return null
   const { w: W, h: H } = editorDims()
-  const b = boxPx(l)                                        // the same box the handles use
-  const cx = l.x * W, cy = l.y * H + textVAlignCenterOffset(l, b.h)
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity
+  for (const l of moving) {
+    const b = boxPx(l)                                      // the same box the handles use
+    const cx = l.x * W, cy = l.y * H + textVAlignCenterOffset(l, b.h)
+    x0 = Math.min(x0, cx - b.w / 2); x1 = Math.max(x1, cx + b.w / 2)
+    y0 = Math.min(y0, cy - b.h / 2); y1 = Math.max(y1, cy + b.h / 2)
+  }
   const kx = layoutGridResolved.value.W / Math.max(1, W), ky = layoutGridResolved.value.H / Math.max(1, H)
-  return { x: (cx - b.w / 2) * kx, y: (cy - b.h / 2) * ky, w: b.w * kx, h: b.h * ky }
+  return { x: x0 * kx, y: y0 * ky, w: (x1 - x0) * kx, h: (y1 - y0) * ky }
 })
 const frameFormatLabel = computed(() => formatFor(compositor.value?.data?.properties as any, designSize.value.w, designSize.value.h)?.label ?? 'this size')
 watch(() => compositor.value?.id, id => { if (id) ensureLayoutGrid() }, { immediate: true })
@@ -9282,9 +9289,9 @@ onUnmounted(() => {
         </template>
 
         <!-- Snap guides (while dragging) -->
-        <div v-if="snapGuides.vx != null" class="absolute top-0 bottom-0 w-px bg-white/80 pointer-events-none"
+        <div v-if="snapGuides.vx != null" class="absolute top-0 bottom-0 w-px bg-[#5b7cff] pointer-events-none"
           :style="{ left: snapGuides.vx * canvasDisplay.w + 'px' }" />
-        <div v-if="snapGuides.hy != null" class="absolute left-0 right-0 h-px bg-white/80 pointer-events-none"
+        <div v-if="snapGuides.hy != null" class="absolute left-0 right-0 h-px bg-[#5b7cff] pointer-events-none"
           :style="{ top: snapGuides.hy * canvasDisplay.h + 'px' }" />
 
         <!-- Dimension HUD (while dragging) -->
@@ -12883,7 +12890,7 @@ onUnmounted(() => {
               </div>
             </div>
           </StudioSection>
-          <LayoutGridSection :grid="layoutGrid" :resolved="layoutGridResolved" :format-label="frameFormatLabel" @update="(g) => setLayoutGrid(g)" />
+          <LayoutGridSection :grid="layoutGrid" :resolved="layoutGridResolved" :format-label="frameFormatLabel" :show-shortcut="IS_MAC ? '⌃G' : 'Ctrl+Shift+4'" @update="(g) => setLayoutGrid(g)" />
           <!-- Canvas background fill (bottom-most; baked into the frame) -->
           <StudioSection title="Background">
             <FillControl allow-none :model-value="background"

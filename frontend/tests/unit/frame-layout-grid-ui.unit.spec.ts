@@ -76,6 +76,11 @@ describe('LayoutGridSection', () => {
     await w.get('[data-testid="grid-suggested"]').trigger('click')
     expect((w.emitted('update')![0]![0] as LayoutGrid).auto).toBe(true)
   })
+  it('the switch tooltip names the platform\'s shortcut', () => {
+    expect(section().get('[data-testid="grid-show"]').attributes('title')).toBe('Show grid (⌃G)')
+    const w = mount(LayoutGridSection, { props: { grid, resolved, formatLabel: 'x', showShortcut: 'Ctrl+Shift+4' } })
+    expect(w.get('[data-testid="grid-show"]').attributes('title')).toBe('Show grid (Ctrl+Shift+4)')
+  })
   it('the switch shows and hides the grid', async () => {
     const w = section()
     await w.get('[data-testid="grid-show"] button').trigger('click')

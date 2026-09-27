@@ -388,6 +388,9 @@ const selectedUnlinkedWired = computed(() =>
 const editMode = ref(false)
 function toggleEdit() { editMode.value ? exitEdit() : (editMode.value = true) }
 function exitEdit() { editMode.value = false; editor.endEdit(); editor.selectLocal(null) }
+// Entering edit mode fixes the layout grid the way opening the modal does: a Frame with no stored
+// grid gets one (hidden for an old Frame with layers, shown for an empty one) before a layer lands.
+watch(editMode, on => { if (on) editor.ensureLayoutGrid() })
 function onArtboardDblClick(e: MouseEvent) {
   // Edit mode FIRST, then begin text editing. The inline textarea is gated on
   // `editMode`, and paint deliberately skips the layer being edited — so

@@ -16,6 +16,7 @@
 import type { SetEntry } from './patterns/kit/set'
 import { applyFramePreset, readFrameSize } from './frameSize'
 import { layoutById } from './patterns/layouts/catalog'
+import { newFrameLayoutGrid } from './newFrameGrid'
 
 /** A Frame's display name, as the modal and the canvas name it. */
 export function frameDisplayName(data: { title?: unknown; subgraphName?: unknown } | null | undefined): string {
@@ -49,6 +50,9 @@ export function sentFrameData(source: Record<string, any>, entry: SetEntry): Rec
   if (size.w !== entry.w || size.h !== entry.h) return null
   const p = (data.properties ||= {}) as Record<string, any>
   p.sailor_localLayers = clone(entry.layers)
+  // A new Frame at a new size: the suggested auto grid for THIS size (a user grid's px were set
+  // for the source's size), keeping whether the source showed it.
+  p.sailor_layoutGrid = newFrameLayoutGrid(data, { show: (p.sailor_layoutGrid as { show?: boolean } | undefined)?.show ?? true })
   if (entry.groups) p.sailor_localGroups = clone(entry.groups)
   p.sailor_stackOrder = [...entry.plan.order]
   // The source's picker state (shape, image, palette, tags) is kept: it is what the set planned
