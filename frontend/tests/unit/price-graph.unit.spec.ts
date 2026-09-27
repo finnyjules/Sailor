@@ -594,4 +594,17 @@ describe('describe, read and find on the ComfyUI path (R3.4)', () => {
     expect(at('FindObjectsNode', { model: 'YOLO-World', image: ['2', 0], query: 'person, car, dog', confidence: 0.25 })).toBe(1)
     expect(at('DescribeVideoNode', { model: 'Gemini 2.5 Flash', video_url: 'https://example.test/a.mp4', prompt: 'Describe this video in detail.' })).toBe(62)
   })
+  // Fix round 1 (controller ruling): Python sends `video_url` unchanged, so on
+  // this path only an https address can work. Anything else is refused at the
+  // /prompt gate (hosted and local) before the hold, in plain words; a web
+  // address keeps the ceiling (the badge says "up to").
+  it('Describe a video: a web address is 62; an upload link or any other address is refused before the hold', async () => {
+    const { blockedPromptRefusal } = await import('../../server/utils/blockedModels')
+    const node = (video_url: string) => ({ 1: { class_type: 'DescribeVideoNode', inputs: { model: 'Gemini 2.5 Flash', video_url, prompt: 'Describe this video in detail.' } } })
+    expect(blockedPromptRefusal(node('https://example.test/a.mp4'))).toBeNull()
+    expect(priceGraph(node('https://example.test/a.mp4')).nodes!['1']).toBe(62)
+    for (const url of ['/view?filename=clip.mp4&type=input', 'http://example.test/a.mp4', 'data:video/mp4;base64,AAAA']) {
+      expect(blockedPromptRefusal(node(url))?.error.message, url).toBe('Describe a video needs a web address (https) here. To describe a video you uploaded, turn on Sailor’s runner for it.')
+    }
+  })
 })

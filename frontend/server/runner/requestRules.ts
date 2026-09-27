@@ -176,7 +176,7 @@ import { TOPAZ_VIDEO_APP, topazVideoNodeProblem } from './generators/topazVideo'
 import { TOPAZ_VIDEO_MAX_FACTOR, TOPAZ_VIDEO_MIN_FACTOR, TOPAZ_VIDEO_UNKNOWN_SETTING } from '#shared/runner/topazVideo'
 import { isSync3LipSync, sync3ModeRefusal } from '#shared/runner/lipSync'
 import { llmRequestProblem } from '#shared/runner/llm'
-import { describeRequestProblem } from '#shared/runner/describe'
+import { describeComfyPathProblem, describeRequestProblem } from '#shared/runner/describe'
 import { isLlmTextClass } from './generators/llm'
 import { FACE_SWAP_NEEDS_GENDER, faceSwapGender } from '#shared/runner/faceSwap'
 import { pixverseSwapNodeProblem } from './generators/pixverseSwap'
@@ -922,14 +922,15 @@ export function requestProblems(prompt: ApiPrompt, opts: { runner?: boolean } = 
       const p = llmRequestProblem(ct, inputs)
       if (p) out.push({ nodeId, classType: ct, input: p.input, message: p.message })
     }
-    // Describe a video (R3.4), on a runner run only: no address (Python raises
+    // Describe a video (R3.4), on a runner run: no address (Python raises
     // "video_url is required." before its call), or a file link Sailor can't
     // read. Hosted's own rule (an uploaded file only, ruling (s)) is the media
     // check's, next (describeVideoMedia.ts).
-    if (opts.runner) {
-      const p = describeRequestProblem(ct, inputs)
-      if (p) out.push({ nodeId, classType: ct, input: p.input, message: p.message })
-    }
+    // On the ComfyUI path (the /prompt gate, hosted and local; fix round 1):
+    // anything but an https address, which Python would send unchanged and
+    // Replicate couldn't fetch. Nothing is read.
+    const d = opts.runner ? describeRequestProblem(ct, inputs) : describeComfyPathProblem(ct, inputs)
+    if (d) out.push({ nodeId, classType: ct, input: d.input, message: d.message })
   }
   return out
 }

@@ -117,7 +117,14 @@ export function findObjectsJson(result: unknown, raw: string | null): string {
   return typeof out === 'string' ? out : pyJsonDumps(out)
 }
 
-/** The node's one value, from the answer. */
+/**
+ * The node's one value, from the answer. A dict where Python would print its
+ * repr (a top-level dict from Describe an image or a video, a list holding a
+ * dict or a list, a dict or list under Extract text's `text`) fails the node
+ * plainly (PY_STR_UNREADABLE) instead: R3.3's ruling for nested answers,
+ * extended to top-level dicts (R3.4 fix round 1). None of these models
+ * answers so.
+ */
 function valueOf(classType: DescribeClass, result: unknown, raw: string | null): RunnerValue {
   if (classType === 'FindObjectsNode') return { kind: 'json', text: findObjectsJson(result, raw) }
   const out = answerOutput(result, raw)

@@ -19,10 +19,10 @@ import { RUNNER_NODE_RULES, isRunnerEligible, outputKindsFor, runnerTakesNode, v
 import { nodesNeedingEngine } from '#shared/runner/needsEngine'
 import { OUTPUT_KINDS } from '#shared/runner/values'
 import { RUNNER_OUTPUT_CLASSES } from '#shared/runner/validate'
-import { parsePyJson } from '#shared/runner/pyJson'
+import { PY_STR_UNREADABLE, parsePyJson } from '#shared/runner/pyJson'
 import {
   DESCRIBE_CLASSES, DESCRIBE_ENDPOINTS, DESCRIBE_VIDEO_MAX_ANSWER_TOKENS, DESCRIBE_VIDEO_MAX_SECONDS, DESCRIBE_VIDEO_NEEDS_LINK,
-  DESCRIBE_VIDEO_TOKENS_PER_SECOND, DESCRIBE_VIDEO_TOO_LONG, DESCRIBE_VIDEO_UPLOAD_ONLY, describeRequestProblem, type DescribeClass,
+  DESCRIBE_VIDEO_NEEDS_WEB_ADDRESS, DESCRIBE_VIDEO_TOKENS_PER_SECOND, DESCRIBE_VIDEO_TOO_LONG, DESCRIBE_VIDEO_UPLOAD_ONLY, describeRequestProblem, type DescribeClass,
 } from '#shared/runner/describe'
 import { PAID_RATES, otherCardFor, paidCallUsd } from '#shared/pricing/paidRates'
 import { EDIT_RATES } from '#shared/pricing/editRates'
@@ -237,6 +237,18 @@ describe('every fixture case through the engine (cards and describe on)', () => 
 
 describe('the answers', () => {
   const out = (text: string) => parsePyJson(text)
+  it('a dict where Python prints its repr fails the node plainly (R3.3\'s ruling, extended to top-level dicts: fix round 1)', async () => {
+    const describe = await planOf(CASES.find(c => c.name === 'describe · default')!) as Extract<NodePlan, { kind: 'provider' }>
+    const extract = await planOf(CASES.find(c => c.name === 'extract · dict text')!) as Extract<NodePlan, { kind: 'provider' }>
+    // Python: "{'a': 1}", "a\n{'b': 1}" (repr); the runner refuses to guess a repr.
+    expect(() => describe.valuesOf!(null, '{"output": {"a": 1}}')).toThrow(PY_STR_UNREADABLE)
+    expect(() => describe.valuesOf!(null, '{"output": ["a", {"b": 1}]}')).toThrow(PY_STR_UNREADABLE)
+    expect(() => extract.valuesOf!(null, '{"output": ["a", {"b": 1}]}')).toThrow(PY_STR_UNREADABLE)
+    expect(() => extract.valuesOf!(null, '{"output": {"text": {"b": 1}}}')).toThrow(PY_STR_UNREADABLE)
+    // Find objects dumps any JSON: a dict is its answer.
+    const find = await planOf(CASES.find(c => c.name === 'answer · find · list')!) as Extract<NodePlan, { kind: 'provider' }>
+    expect(find.valuesOf!(null, '{"output": {"a": 1}}')).toEqual({ 0: { kind: 'json', text: '{"a": 1}' } })
+  })
   it('Extract text: a list joined by lines, a dict\'s text / markdown / transcription, a string, else ""', () => {
     expect(extractTextOf(out('["a", 1, 2.0, null, true]'))).toBe('a\n1\n2.0\nNone\nTrue')
     expect(extractTextOf(out('{"text": "", "markdown": [], "transcription": 0.0}'))).toBe('')
@@ -357,6 +369,25 @@ describe('moderation', () => {
 describe('Describe a video\'s video (rulings (r), (s))', () => {
   const node = (video_url: string, prompt = 'What happens?') => ({ class_type: 'DescribeVideoNode', inputs: { model: 'Gemini 2.5 Flash', video_url, prompt } })
   const answer = '{"id": "p", "status": "succeeded", "output": ["A ", "dog runs."], "metrics": {"input_token_count": 950, "output_token_count": 40}}'
+
+  it('the ComfyUI path (the /prompt gate, hosted and local): only an https address; the badge says "up to" (fix round 1)', async () => {
+    const { upstreamInputSeconds } = await import('~/lib/costEstimate')
+    const { blockedPromptRefusal } = await import('~~/server/utils/blockedModels')
+    for (const url of ['/view?filename=clip.mp4&type=input', 'http://example.test/a.mp4', 'data:video/mp4;base64,AAAA', ' https://example.test/a.mp4', 'ftp://x/a.mp4']) {
+      expect(requestProblems({ n: node(url) }).map(p => p.message), url).toEqual([DESCRIBE_VIDEO_NEEDS_WEB_ADDRESS])
+      expect(blockedPromptRefusal({ n: node(url) })?.error.message, url).toBe(DESCRIBE_VIDEO_NEEDS_WEB_ADDRESS)
+    }
+    for (const url of ['https://example.test/a.mp4', 'HTTPS://example.test/a.mp4']) expect(requestProblems({ n: node(url) }), url).toEqual([])
+    // A blank address is left to Python (it raises before any call); a wired one can't be judged.
+    expect(requestProblems({ n: node('') })).toEqual([])
+    expect(requestProblems({ n: { class_type: 'DescribeVideoNode', inputs: { ...node('').inputs, video_url: ['t', 0] } } })).toEqual([])
+    // The runner takes an upload (hosted: only an upload), so its own rules apply there.
+    expect(requestProblems({ n: node('/view?filename=clip.mp4&type=input') }, { runner: true })).toEqual([])
+    // The message names no identifiers.
+    expect(DESCRIBE_VIDEO_NEEDS_WEB_ADDRESS).not.toMatch(/video_url|Node|\/view/)
+    const canvas = { id: '5', data: { nodeType: 'DescribeVideoNode', widgetDefs: [], widgetsValues: [], inputs: [] } }
+    expect(upstreamInputSeconds(canvas, [canvas], [])).toEqual({ seconds: {}, upTo: true })
+  })
 
   it('the media node dispatch: an uploaded file is measured; an address is not', () => {
     const p: ApiPrompt = { 1: node('/view?filename=clip.mp4&type=input'), 2: node('https://example.test/a.mp4') }

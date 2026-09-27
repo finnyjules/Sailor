@@ -273,6 +273,10 @@ export function upstreamInputSeconds(node: any, nodes?: readonly any[] | null, e
   // its price is always the ceiling (60 s, above 1080p, 60 fps): "up to".
   // (With its switch off the class isn't priced here and the badge is Python's.)
   if (Object.prototype.hasOwnProperty.call(FAMILY_PRICED_CLASSES, ct)) return { seconds: {}, upTo: true }
+  // Describe a video (R3.4): the canvas can't see the video's length, so it is
+  // priced at its ceiling (45 minutes, the longest answer): "up to". The
+  // runner charges an uploaded video by its length and the tokens used.
+  if (ct === 'DescribeVideoNode') return { seconds: {}, upTo: true }
   const own = widgetValueMap(data.widgetDefs, data.widgetsValues, linkedInputNames(String(node.id), data.inputs, edges ?? []))
   const media = secondsPricedMedia(ct, own)
   if (!media) return null

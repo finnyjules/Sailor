@@ -66,6 +66,7 @@ export const DESCRIBE_VIDEO_MAX_ANSWER_TOKENS = 65_535
 export const DESCRIBE_VIDEO_NEEDS_LINK = 'Describe a video needs a link to the video.'
 export const DESCRIBE_VIDEO_UPLOAD_ONLY = 'Describe a video takes a video uploaded to Sailor here, so Sailor can measure it and price it. Upload the video first.'
 export const DESCRIBE_VIDEO_TOO_LONG = 'Describe a video takes videos up to 45 minutes.'
+export const DESCRIBE_VIDEO_NEEDS_WEB_ADDRESS = 'Describe a video needs a web address (https) here. To describe a video you uploaded, turn on Sailor’s runner for it.'
 export const DESCRIBE_VIDEO_UNMEASURED = 'Sailor couldn’t read this video’s length, so it can’t price it. Try an MP4, MOV or WebM file.'
 
 /** Where Describe a video's video comes from: nothing, a file uploaded to Sailor, or an address sent as typed. */
@@ -87,6 +88,21 @@ export function describeVideoSource(v: unknown): DescribeVideoSource {
   if (r?.refused) return { refused: r.refused }
   if (r?.name) return { inputFile: r.name }
   return { address: v }
+}
+
+/**
+ * The ComfyUI path's rule for Describe a video (R3.4 fix round 1, controller
+ * ruling), hosted and local, before the hold: Python sends `video_url`
+ * unchanged, so only a web address Replicate can fetch works there. A `/view`
+ * link to an upload (relative), a data: link or any other non-https address
+ * is refused in plain words; nothing is read or measured. A blank address is
+ * left to Python (it raises before any call); a wired one can't be judged.
+ */
+export function describeComfyPathProblem(classType: string, inputs: Record<string, unknown>): { input: string; message: string } | null {
+  if (classType !== 'DescribeVideoNode' || isLink(inputs.video_url)) return null
+  const v = inputs.video_url
+  if (typeof v !== 'string' || !v) return null
+  return /^https:\/\//i.test(v) ? null : { input: 'video_url', message: DESCRIBE_VIDEO_NEEDS_WEB_ADDRESS }
 }
 
 /**
