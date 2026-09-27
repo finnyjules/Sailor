@@ -14,7 +14,7 @@
  * "moving" from the viewport itself, so the animated run turns Smart's blur
  * off and the settle after it turns blur back on — no hand-fired callbacks.
  */
-import { ref, computed, nextTick, h, defineComponent, markRaw } from 'vue'
+import { ref, computed, nextTick, onMounted, onUnmounted, h, defineComponent, markRaw } from 'vue'
 import { VueFlow, useVueFlow, Position } from '@vue-flow/core'
 import '@vue-flow/core/dist/style.css'
 import '@vue-flow/core/dist/theme-default.css'
@@ -22,7 +22,7 @@ import NodeShell from '~/components/vue-canvas/surfaces/NodeShell.vue'
 import NodeWell from '~/components/vue-canvas/surfaces/NodeWell.vue'
 import NodePort from '~/components/vue-canvas/NodePort.vue'
 import { createCanvasGlass, provideCanvasGlass } from '~/composables/useCanvasGlass'
-import { countVisible, type GlassMode } from '~/lib/canvas/glassPolicy'
+import { countVisible, sampleWire, type GlassMode, type NodeBox, type Wire } from '~/lib/canvas/glassPolicy'
 
 definePageMeta({ layout: false })
 
@@ -128,14 +128,22 @@ const mode = ref<GlassMode>('smart')
 const canvasRootRef = ref<HTMLElement | null>(null)
 
 // Fix round 1, finding 1(c): blurAllowed's smart rule turns blur off once
-// more than GLASS_LIMITS.maxVisibleNodes (24) nodes are visible, and the
-// default (0,0,zoom 1) viewport put ~25 nodes on screen at the 1600×1000 dev
-// viewport (all 20 paired nodes plus the standalone grid's first row) — so
-// Smart silently measured the same as Never. This rest viewport frames just
-// the 10 overlapping pairs (20 nodes, comfortably under 24) and is where the
-// figure-eight pan/pinch-zoom below is centred, so the animated run still
-// crosses back and forth over the pairs the blur test cares about.
+// more than GLASS_LIMITS.maxVisibleNodes (24) nodes are visible. A FIXED
+// (0, 340, zoom 1) viewport was tuned for one window size (1600×1000) and
+// silently broke at another (1890×1063 put 25 nodes on screen, over the
+// limit, so Smart measured the same as Never). Fix round 2: the rest
+// viewport is now computed from the actual canvas size once nodes are
+// measured — see computeRestViewport() — searching for an offset that keeps
+// visible-node count between 12 and 20 (comfortably under the 24 limit, but
+// still a real subset, not just one pair), covers at least 3 overlapping
+// pairs, and includes at least one wire crossing behind a third node, so the
+// blur test still has both cases to measure. Kept only as the pre-measurement
+// mount default and the last-resort fallback if the search finds nothing.
 const REST_VIEWPORT = { x: 0, y: 340, zoom: 1 }
+// The rest viewport actually in use — recomputed once nodes are measured,
+// and again on window resize (fix round 2). Everything below (the pan/zoom
+// animation's centre, the mount default) reads this, not the constant.
+const restViewport = ref({ ...REST_VIEWPORT })
 
 const {
   onNodesInitialized, getNodes, getEdges, viewport: vfViewport, setViewport,
@@ -148,6 +156,102 @@ const getWires = () => getEdges.value
   .filter(e => e.sourceX != null && e.targetX != null)
   .map(e => ({ source: e.source, target: e.target, sx: e.sourceX, sy: e.sourceY, tx: e.targetX, ty: e.targetY }))
 const getSize = () => ({ width: canvasRootRef.value?.clientWidth ?? 0, height: canvasRootRef.value?.clientHeight ?? 0 })
+
+// Which node ids are the endpoints of an overlapping pair, keyed by pair
+// index — used below to require the chosen viewport actually shows several
+// full pairs, not just scattered singles.
+const pairIds: Array<[string, string]> = Array.from({ length: PAIR_COUNT }, (_, p) => [`bench-${p * 2}`, `bench-${p * 2 + 1}`])
+
+/**
+ * Fix round 2: find a zoom-1 (x, y) offset, from the real measured boxes and
+ * the real canvas size, such that:
+ *  - 12–20 nodes are visible (under GLASS_LIMITS.maxVisibleNodes=24, but not
+ *    trivially small either);
+ *  - at least 3 overlapping pairs are fully visible (both members);
+ *  - at least one wire passes behind a node that isn't either endpoint, and
+ *    that node is itself visible.
+ * A simple grid search over candidate offsets — the bench only needs one
+ * usable viewport, not an optimal one.
+ */
+function computeRestViewport(): { x: number; y: number; zoom: number } {
+  const boxes = getBoxes()
+  const wires = getWires()
+  const { width, height } = getSize()
+  if (!boxes.length || !width || !height) return { ...REST_VIEWPORT }
+
+  // Nodes with a wire passing behind them (excluding the wire's own
+  // endpoints) — a purely geometric property of the layout, independent of
+  // the viewport.
+  const wireBehindIds = new Set<string>()
+  for (const w of wires as Wire[]) {
+    const pts = sampleWire(w)
+    for (const b of boxes as NodeBox[]) {
+      if (b.id === w.source || b.id === w.target || wireBehindIds.has(b.id)) continue
+      if (pts.some(p => p.x > b.x + 2 && p.x < b.x + b.w - 2 && p.y > b.y + 2 && p.y < b.y + b.h - 2)) {
+        wireBehindIds.add(b.id)
+      }
+    }
+  }
+
+  const minX = Math.min(...boxes.map(b => b.x))
+  const maxX = Math.max(...boxes.map(b => b.x + b.w))
+  const minY = Math.min(...boxes.map(b => b.y))
+  const maxY = Math.max(...boxes.map(b => b.y + b.h))
+  // A node at (b.x, b.y, b.w, b.h) is visible under offset (ox, oy) when
+  // b.x+ox < width && b.y+oy < height && b.x+ox+b.w > 0 && b.y+oy+b.h > 0.
+  // So any offset that puts even one node on screen satisfies
+  // -maxX < ox < width-minX and -maxY < oy < height-minY — the full useful
+  // search range, not just offsets that align the content's top-left corner
+  // to the window's. (An earlier version bounded this too tightly and never
+  // found the crop that hides the standalone grid below the pairs.)
+  const STEP = 40
+  const oxLo = -maxX - STEP
+  const oxHi = width - minX + STEP
+  const oyLo = -maxY - STEP
+  const oyHi = height - minY + STEP
+
+  let best: { x: number; y: number; score: number } | null = null
+  for (let ox = oxLo; ox <= oxHi; ox += STEP) {
+    for (let oy = oyLo; oy <= oyHi; oy += STEP) {
+      const visibleIds = new Set(
+        boxes
+          .filter(b => {
+            const left = b.x + ox, top = b.y + oy, right = left + b.w, bottom = top + b.h
+            return right > 0 && bottom > 0 && left < width && top < height
+          })
+          .map(b => b.id),
+      )
+      const visible = visibleIds.size
+      if (visible < 12 || visible > 20) continue
+      const pairsVisible = pairIds.filter(([a, b]) => visibleIds.has(a) && visibleIds.has(b)).length
+      if (pairsVisible < 3) continue
+      let hasWireBehind = false
+      for (const id of wireBehindIds) { if (visibleIds.has(id)) { hasWireBehind = true; break } }
+      if (!hasWireBehind) continue
+      const score = Math.abs(visible - 16) // prefer the middle of the 12–20 band
+      if (!best || score < best.score) best = { x: ox, y: oy, score }
+    }
+  }
+  return best ? { x: best.x, y: best.y, zoom: 1 } : { ...REST_VIEWPORT }
+}
+
+let resizeTimer: ReturnType<typeof setTimeout> | null = null
+function refreshRestViewport() {
+  restViewport.value = computeRestViewport()
+  setViewport(restViewport.value)
+  if (mode.value === 'smart') canvasGlass.invalidate()
+}
+function handleResize() {
+  // Never fight a run in progress — only recompute at rest.
+  if (running.value) return
+  if (resizeTimer) clearTimeout(resizeTimer)
+  resizeTimer = setTimeout(refreshRestViewport, 150)
+}
+onMounted(() => window.addEventListener('resize', handleResize))
+onUnmounted(() => {
+  window.removeEventListener('resize', handleResize)
+  if (resizeTimer) clearTimeout(resizeTimer)
+})
 
 const canvasGlass = createCanvasGlass({
   viewport: vfViewport,
@@ -183,7 +287,13 @@ const blurredShellCount = computed(() => effectiveBlurIds.value.size)
 const visibleNodeCount = computed(() => countVisible(getBoxes(), { ...vfViewport.value, ...getSize() }))
 
 // Same as the real canvas: decide blur once the nodes have real dimensions.
-onNodesInitialized(() => canvasGlass.invalidate())
+// Fix round 2: also where the rest viewport is first computed for real —
+// boxes only have real widths/heights from this point on.
+onNodesInitialized(() => {
+  restViewport.value = computeRestViewport()
+  setViewport(restViewport.value)
+  canvasGlass.invalidate()
+})
 
 function setMode(next: GlassMode) {
   mode.value = next
@@ -208,8 +318,9 @@ const running = ref(false)
 
 // Measurement code as specified in the task 9 brief: rAF deltas over a
 // 6-second figure-eight pan followed by a 6-second pinch zoom (1 → 0.6 → 1),
-// both centred on REST_VIEWPORT rather than (0,0,1) so the pan stays over
-// the overlapping-pairs section the rest viewport frames.
+// both centred on restViewport (fix round 2: computed from the real canvas
+// size, not the REST_VIEWPORT constant) so the pan stays over the
+// overlapping-pairs section the rest viewport frames.
 async function runBench(label: string, blurredAtRest: number) {
   const deltas: number[] = []
   let last = performance.now(), live = true
@@ -218,12 +329,13 @@ async function runBench(label: string, blurredAtRest: number) {
   let blurredDuringPan = blurredAtRest
   let sampledMidPan = false
   const start = performance.now()
+  const rest = restViewport.value
   await new Promise<void>((resolve) => {
     const step = () => {
       const t = (performance.now() - start) / 1000
       if (t > 12) { resolve(); return }
-      if (t <= 6) setViewport({ x: REST_VIEWPORT.x + Math.sin(t * 2) * 400, y: REST_VIEWPORT.y + Math.sin(t * 4) * 150, zoom: REST_VIEWPORT.zoom })
-      else setViewport({ x: REST_VIEWPORT.x, y: REST_VIEWPORT.y, zoom: REST_VIEWPORT.zoom - 0.4 * Math.sin(((t - 6) / 6) * Math.PI) })
+      if (t <= 6) setViewport({ x: rest.x + Math.sin(t * 2) * 400, y: rest.y + Math.sin(t * 4) * 150, zoom: rest.zoom })
+      else setViewport({ x: rest.x, y: rest.y, zoom: rest.zoom - 0.4 * Math.sin(((t - 6) / 6) * Math.PI) })
       // Sampled once, at t≈3s (mid pan, per fix round 1 finding 1b).
       if (!sampledMidPan && t >= 3) { sampledMidPan = true; blurredDuringPan = sampleBlurredShellCount() }
       requestAnimationFrame(step)
