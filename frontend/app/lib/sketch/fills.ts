@@ -7,7 +7,7 @@
 // rename pieces (Cut, Dissolve, merging points, copies) move seeds themselves
 // through splitSeeds / joinSeeds / renameSeedPoints / mapSeed. Pure.
 import type { SketchDoc, SketchFill, FillSeed, EntityId } from './model'
-import { getPoint } from './model'
+import { getPoint, getEntity } from './model'
 import type { Vec2 } from './geom'
 import { facesFor, faceAt, facesD, faceOfHalfEdge, facePieceKey, type FaceSet, type FacePiece, type HalfEdge } from './faces'
 
@@ -208,8 +208,9 @@ export function addFillAt(doc: SketchDoc, p: Vec2): boolean {
 // ── carrying fills across an edit ───────────────────────────────────────────
 
 // a half-edge in its piece key's own orientation: the key, whether it runs
-// the key's way, and its parameter interval measured the key's way
-interface KeyedEdge { key: string; dir: boolean; lo: number; hi: number; circle: boolean; h: number }
+// the key's way, its parameter interval measured the key's way, and its
+// length per unit of parameter (to turn an overlap into a length)
+interface KeyedEdge { key: string; dir: boolean; lo: number; hi: number; circle: boolean; perT: number; h: number }
 function keyed(fs: FaceSet, h: number): KeyedEdge | null {
   const e = fs.halfEdges[h]!
   const p = fs.pieces[e.piece]!
@@ -220,21 +221,27 @@ function keyed(fs: FaceSet, h: number): KeyedEdge | null {
   const along = p.kind === 'circle' ? true : p.a <= p.b
   const u0 = along ? e.t0 : 1 - e.t0, u1 = along ? e.t1 : 1 - e.t1
   const dir = along ? e.forward : !e.forward
-  return { key, dir, lo: Math.min(u0, u1), hi: Math.max(u0, u1), circle: p.kind === 'circle', h }
+  const lo = Math.min(u0, u1), hi = Math.max(u0, u1)
+  return { key, dir, lo, hi, circle: p.kind === 'circle', perT: hi > lo ? e.len / (hi - lo) : 0, h }
 }
 
-// two stretches of one piece are the same stretch, or one holds the other:
-// they overlap by more than half the shorter one (a circle's may be read a
-// turn apart: one split at 0.9..1.1, the other at 0..0.1). Not merely "by a
-// hair": when a piece's end is dragged, the parameter where another piece
-// meets it slides, and the neighbouring areas' stretches overlap by a sliver
-// that says nothing about which area is which.
-function overlaps(m: KeyedEdge, k: KeyedEdge): boolean {
-  const need = Math.max(1e-9, 0.5 * Math.min(m.hi - m.lo, k.hi - k.lo))
-  for (const s of m.circle ? [0, 1, -1] : [0]) {
-    if (Math.min(m.hi + s, k.hi) - Math.max(m.lo + s, k.lo) > need) return true
+function keyIndex(fs: FaceSet): Map<string, KeyedEdge[]> {
+  const index = new Map<string, KeyedEdge[]>()
+  for (let h = 0; h < fs.halfEdges.length; h++) {
+    const k = keyed(fs, h)
+    if (!k) continue
+    const list = index.get(k.key)
+    if (list) list.push(k); else index.set(k.key, [k])
   }
-  return false
+  return index
+}
+
+// how much of one piece two stretches share, in parameter (a circle's may be
+// read a turn apart: one split at 0.9..1.1, the other at 0..0.1)
+function overlap(m: KeyedEdge, k: KeyedEdge): number {
+  let best = 0
+  for (const s of m.circle ? [0, 1, -1] : [0]) best = Math.max(best, Math.min(m.hi + s, k.hi) - Math.max(m.lo + s, k.lo))
+  return best
 }
 
 /** A face's cycles: its outer one, then its holes. */
@@ -243,20 +250,39 @@ export function faceCycles(fs: FaceSet, f: number): number[] {
   return [face.outer, ...face.holes]
 }
 
-// the faces of `after` that take up part of face fb of `before`, found by
-// the edges they share (same piece, same side, overlapping stretch)
-function sharedEdgeFaces(FB: FaceSet, fb: number, FA: FaceSet, index: Map<string, KeyedEdge[]>): Set<number> {
-  const out = new Set<number>()
-  for (const ci of faceCycles(FB, fb)) {
-    for (const h of FB.cycles[ci]!.edges) {
-      const k = keyed(FB, h)
-      if (!k) continue
-      for (const m of index.get(k.key) ?? []) {
-        if (m.dir !== k.dir || !overlaps(m, k)) continue
-        const g = faceOfHalfEdge(FA, m.h)
-        if (g != null) out.add(g)
-      }
+// which faces of `before` each face of `after` came from, by the edges they
+// share (same piece, same side, overlapping stretch): face g of `after`
+// comes from the old face(s) it shares the MOST boundary length with. A
+// split half shares edges only with the area it was cut from; a merged area
+// shares with both halves (ties count for both); a drag only slides where
+// pieces meet, so each area still shares most with its own old self — an
+// empty neighbour never takes a fill by a sliver of shared edge.
+function edgeOrigins(FB: FaceSet, FA: FaceSet): Map<number, Set<number>> {
+  const oldIndex = keyIndex(FB)
+  const share = new Map<number, Map<number, number>>()
+  for (let h = 0; h < FA.halfEdges.length; h++) {
+    const g = faceOfHalfEdge(FA, h)
+    if (g == null) continue
+    const m = keyed(FA, h)
+    if (!m) continue
+    for (const k of oldIndex.get(m.key) ?? []) {
+      if (k.dir !== m.dir) continue
+      const o = overlap(m, k)
+      if (o <= 1e-9) continue
+      const fb = faceOfHalfEdge(FB, k.h)
+      if (fb == null) continue
+      let row = share.get(g)
+      if (!row) share.set(g, row = new Map())
+      row.set(fb, (row.get(fb) ?? 0) + o * m.perT)
     }
+  }
+  const out = new Map<number, Set<number>>()
+  for (const [g, row] of share) {
+    let top = 0
+    for (const v of row.values()) if (v > top) top = v
+    const set = new Set<number>()
+    for (const [fb, v] of row) if (v >= top * (1 - 1e-6)) set.add(fb)
+    out.set(g, set)
   }
   return out
 }
@@ -297,31 +323,82 @@ export function boundaryPoints(fs: FaceSet, f: number): EntityId[] {
   return [...ids]
 }
 
-// face fb's boundary points are all still there, within 0.1 % of its size
+const sizeOf = (fs: FaceSet, f: number) => { const b = fs.faces[f]!.box; return Math.hypot(b.x1 - b.x0, b.y1 - b.y0) }
+
+// face fb's boundary is where it was: its points within 0.1 % of its size,
+// and its circles' radii too
 function stayedPut(before: SketchDoc, after: SketchDoc, FB: FaceSet, fb: number): boolean {
-  const b = FB.faces[fb]!.box
-  const tol = 1e-3 * Math.hypot(b.x1 - b.x0, b.y1 - b.y0)
+  const tol = 1e-3 * sizeOf(FB, fb)
   for (const id of boundaryPoints(FB, fb)) {
     const p = getPoint(before, id), q = getPoint(after, id)
     if (!p || !q || Math.hypot(p.x - q.x, p.y - q.y) > tol) return false
   }
+  for (const ci of faceCycles(FB, fb)) {
+    for (const h of FB.cycles[ci]!.edges) {
+      const p = FB.pieces[FB.halfEdges[h]!.piece]!
+      if (p.kind !== 'circle') continue
+      const a = getEntity(before, p.id), b = getEntity(after, p.id)
+      if (a?.kind !== 'circle' || b?.kind !== 'circle' || Math.abs(a.r - b.r) > tol) return false
+    }
+  }
   return true
+}
+
+// how far p is from half-edge e
+function distToHalfEdge(e: HalfEdge, p: Vec2): number {
+  if (e.kind === 'line') {
+    const dx = e.p1.x - e.p0.x, dy = e.p1.y - e.p0.y
+    const L2 = dx * dx + dy * dy
+    const k = L2 ? Math.max(0, Math.min(1, ((p.x - e.p0.x) * dx + (p.y - e.p0.y) * dy) / L2)) : 0
+    return Math.hypot(p.x - e.p0.x - dx * k, p.y - e.p0.y - dy * k)
+  }
+  const a = Math.atan2(p.y - e.c!.y, p.x - e.c!.x)
+  // is the angle a within the sweep from a0?
+  const s = e.sweep!
+  const rel = s > 0 ? ((a - e.a0!) % (2 * Math.PI) + 2 * Math.PI) % (2 * Math.PI) : ((e.a0! - a) % (2 * Math.PI) + 2 * Math.PI) % (2 * Math.PI)
+  if (rel <= Math.abs(s)) return Math.abs(Math.hypot(p.x - e.c!.x, p.y - e.c!.y) - e.r!)
+  return Math.min(Math.hypot(p.x - e.p0.x, p.y - e.p0.y), Math.hypot(p.x - e.p1.x, p.y - e.p1.y))
+}
+
+// face fb lost most of its outline to pieces REMOVED (trimmed or deleted) —
+// not moved, not cut in two: its area is gone, not opened. An old edge counts
+// as removed when its piece is gone from `after` and nothing of `after` runs
+// through its middle any more.
+function mostlyRemoved(FB: FaceSet, fb: number, FA: FaceSet): boolean {
+  const tol = Math.max(FA.tol, 1e-3 * sizeOf(FB, fb))
+  let total = 0, gone = 0
+  for (const ci of faceCycles(FB, fb)) {
+    for (const h of FB.cycles[ci]!.edges) {
+      const e = FB.halfEdges[h]!
+      total += e.len
+      const p = FB.pieces[e.piece]!
+      if (p.kind === 'bridge' || FA.byKey.has(facePieceKey(p))) continue
+      const m = pointOnHalfEdge(e, (e.t0 + e.t1) / 2)
+      let near = false
+      for (let k = 0; k < FA.halfEdges.length && !near; k += 2) near = distToHalfEdge(FA.halfEdges[k]!, m) <= tol
+      if (!near) gone += e.len
+    }
+  }
+  return gone > 0.5 * total
 }
 
 /** The fills `after` should have, given the drawing was `before` a moment
  *  ago: every fill whose seed still finds its face keeps it; every face that
- *  takes up part of a surviving fill's old face is filled too (split → both
- *  halves); faces holding two fills keep one (merge → one); a fill whose area
- *  opened sleeps on an edge it still has (or goes, if none is left); every
- *  seed ends on its own face. A fill missing from `after` was emptied on
- *  purpose and is never brought back. Never writes; an edit that changes
- *  nothing returns `after.fills`' own objects in their order. */
+ *  came from a surviving fill's old face is filled too (split → both halves;
+ *  see edgeOrigins), and, when the old face's outline did not move, every face
+ *  with an inside point in it; faces holding two fills keep the first (merge →
+ *  one); a fill whose area was opened by a gap sleeps on an edge it still has
+ *  (or goes, if none is left), and one whose outline was mostly trimmed away
+ *  goes; every seed ends on its own face. A fill missing from `after` was
+ *  emptied on purpose and is never brought back. Never writes; an edit that
+ *  changes nothing returns `after.fills`' own objects in their order. */
 export function reconcileFills(before: SketchDoc, after: SketchDoc): SketchFill[] {
   const now = after.fills ?? []
   if (!now.length) return []
-  // the faces each drawing's fills live on (what fillState shows)
+  // the faces each drawing's fills live on (what fillState shows); the old
+  // drawing's only when it had fills to carry
   const FA = fillFaces(after)
-  const FB = fillFaces(before)
+  const FB = before.fills?.length ? fillFaces(before) : null
   const was = new Map((before.fills ?? []).map(f => [f.id, f]))
   const claimed = new Map<number, SketchFill>()
   const asleep: SketchFill[] = []
@@ -333,28 +410,19 @@ export function reconcileFills(before: SketchDoc, after: SketchDoc): SketchFill[
   // the geometry did not change (the faces cache hands back the same set):
   // every fill already sits where it did, nothing split, nothing merged
   if (FA === FB && claimed.size + asleep.length === now.length && asleep.every(f => halfEdgeOfSeed(FA, f.seed) != null)) return [...now]
-  // index `after`'s half-edges by piece key, once (only when some fill had a face before)
-  let index: Map<string, KeyedEdge[]> | null = null
-  const indexOf = () => {
-    if (index) return index
-    index = new Map()
-    for (let h = 0; h < FA.halfEdges.length; h++) {
-      const k = keyed(FA, h)
-      if (!k) continue
-      const list = index.get(k.key)
-      if (list) list.push(k); else index.set(k.key, [k])
-    }
-    return index
-  }
+  let origins: Map<number, Set<number>> | null = null
   const pts = new Map<number, Vec2 | null>()
   const inside = (g: number) => { if (!pts.has(g)) pts.set(g, interiorPoint(FA, g)); return pts.get(g)! }
   const reborn = new Set<SketchFill>()
+  const dropped = new Set<SketchFill>()
   for (const f of now) {
     const old = was.get(f.id)
-    if (!old) continue
+    if (!old || !FB) continue
     const fb = resolveFill(FB, old)
     if (fb == null) continue
-    const grow = sharedEdgeFaces(FB, fb, FA, indexOf())
+    origins ??= edgeOrigins(FB, FA)
+    const grow = new Set<number>()
+    for (const [g, from] of origins) if (from.has(fb)) grow.add(g)
     if (stayedPut(before, after, FB, fb)) {
       const b = FB.faces[fb]!.box
       FA.faces.forEach((face, g) => {
@@ -371,11 +439,13 @@ export function reconcileFills(before: SketchDoc, after: SketchDoc): SketchFill[
       if (sleeping && !reborn.has(f)) { claimed.set(g, { id: f.id, seed }); reborn.add(f) }
       else claimed.set(g, { id: '', seed })
     }
-    if (sleeping && !reborn.has(f) && halfEdgeOfSeed(FA, f.seed) == null) {
-      // its area opened and its own edge went: sleep on an edge of the old
-      // area that is left and still open. If every edge left now bounds an
-      // area, those areas were filled above (or held another fill): the fill
-      // merged into them and goes.
+    if (!sleeping || reborn.has(f)) continue
+    // its area went this step: trimmed away → the fill goes; opened → it sleeps
+    if (mostlyRemoved(FB, fb, FA)) { dropped.add(f); continue }
+    if (halfEdgeOfSeed(FA, f.seed) == null) {
+      // its own edge went: sleep on an edge of the old area that is left and
+      // still open. If every edge left now bounds an area, those areas were
+      // filled above (or held another fill): the fill merged into them and goes.
       let moved: SketchFill | null = null
       for (const ci of faceCycles(FB, fb)) {
         for (const h of FB.cycles[ci]!.edges) {
@@ -403,7 +473,7 @@ export function reconcileFills(before: SketchDoc, after: SketchDoc): SketchFill[
     return seed ? (seed === f.seed ? f : { id: f.id, seed }) : null
   }
   for (const f of now) {
-    if (taken.has(f.id)) continue
+    if (taken.has(f.id) || dropped.has(f)) continue
     const own = byFill.get(f)
     const g = own ?? (reborn.has(f) ? rebornAt.get(f.id) : undefined)
     if (g != null) {

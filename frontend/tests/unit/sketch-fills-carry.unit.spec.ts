@@ -60,6 +60,106 @@ describe('reconcileFills', () => {
     expect(st.filled).toHaveLength(1)
     expect(faceAt(st.fs, { x: 1, y: 1 })).toBe(st.filled[0])
   })
+  it('dragging the divider far across keeps the empty half empty', () => {
+    const d = doc(); square(d, 0, 0, 4)
+    const a = addPoint(d, 2, 0), b = addPoint(d, 2, 4)
+    addLine(d, a, b)
+    toggleFillAt(d, { x: 1, y: 1 }, 0)
+    const before = cloneDoc(d)
+    pt(d, a).x = 0.8; pt(d, b).x = 0.8
+    settle(before, d)
+    expect(d.fills).toHaveLength(1)
+    const st = fillState(d)
+    expect(st.filled).toEqual([faceAt(st.fs, { x: 0.4, y: 1 })])
+    expect(st.fs.faces[st.filled[0]!]!.area).toBeCloseTo(3.2, 6)
+  })
+  it('dragging the far corners a long way keeps the empty half empty', () => {
+    const d = doc(); square(d, 0, 0, 4)
+    addLine(d, addPoint(d, 2, 0), addPoint(d, 2, 4))
+    toggleFillAt(d, { x: 1, y: 1 }, 0)
+    const before = cloneDoc(d)
+    pt(d, pathOf(d).anchors[1]!).x += 6; pt(d, pathOf(d).anchors[2]!).x += 6
+    settle(before, d)
+    expect(d.fills).toHaveLength(1)
+    const st = fillState(d)
+    expect(st.filled).toEqual([faceAt(st.fs, { x: 1, y: 1 })])
+  })
+  it('a filled strip whose divider is dragged up against the other keeps its fill on the strip only', () => {
+    const d = doc(); square(d, 0, 0, 10)
+    const a = addPoint(d, 4, 0), b = addPoint(d, 4, 10)
+    addLine(d, a, b); addLine(d, addPoint(d, 6, 0), addPoint(d, 6, 10))
+    toggleFillAt(d, { x: 5, y: 5 }, 0)
+    const before = cloneDoc(d)
+    pt(d, a).x = 5.95; pt(d, b).x = 5.95
+    settle(before, d)
+    expect(d.fills).toHaveLength(1)
+    const st = fillState(d)
+    expect(st.filled).toEqual([faceAt(st.fs, { x: 5.975, y: 5 })])
+    expect(st.fs.faces[st.filled[0]!]!.area).toBeCloseTo(0.5, 6)
+  })
+  it('a ring stays the only fill when its inner circle grows', () => {
+    const d = doc()
+    const O = addPoint(d, 0, 0); addCircle(d, O, 5); const small = addCircle(d, O, 1)
+    toggleFillAt(d, { x: 3, y: 0 }, 0)
+    const before = cloneDoc(d)
+    ;(d.entities.find(e => e.id === small) as { r: number }).r = 2
+    settle(before, d)
+    const st = fillState(d)
+    expect(st.filled).toEqual([faceAt(st.fs, { x: 3, y: 0 })])
+    expect(faceAt(st.fs, { x: 1.5, y: 0 })).not.toBe(st.filled[0])
+  })
+  it('a closed shape drawn inside a filled area is filled too (it takes up part of the old area)', () => {
+    const d = doc(); square(d, 0, 0, 10)
+    toggleFillAt(d, { x: 1, y: 1 }, 0)
+    const before = cloneDoc(d)
+    addCircle(d, addPoint(d, 5, 5), 2)
+    settle(before, d)
+    expect(d.fills).toHaveLength(2)
+    const st = fillState(d)
+    expect(st.filled).toContain(faceAt(st.fs, { x: 5, y: 5 }))
+    expect(st.filled).toContain(faceAt(st.fs, { x: 1, y: 1 }))
+  })
+  it('two filled areas merged keep the first fill, as it was', () => {
+    const d = doc(); square(d, 0, 0, 8)
+    const P = pathOf(d)
+    const line = addLine(d, addPoint(d, 4, 0), addPoint(d, 4, 8))
+    d.fills = [
+      { id: 'F1', seed: { kind: 'line', a: P.anchors[3]!, b: P.anchors[0]!, t: 0.5, side: 1 } },
+      { id: 'F2', seed: { kind: 'line', a: P.anchors[1]!, b: P.anchors[2]!, t: 0.5, side: 1 } },
+    ]
+    expect(fillState(d).filled).toHaveLength(2)
+    const before = cloneDoc(d)
+    expect(removeSpan(d, spanAt(d, { kind: 'line', id: line }, 0.5)!).ok).toBe(true)
+    const f1 = d.fills[0]
+    settle(before, d)
+    expect(d.fills).toHaveLength(1)
+    expect(d.fills![0]).toBe(f1)
+  })
+  it('trimming away most of a filled area’s outline drops the fill; opening a gap puts it to sleep', () => {
+    // a half-disc: its cap trimmed off leaves only the diameter — the area is gone
+    const d = doc()
+    const A = addPoint(d, -3, 0), B = addPoint(d, 3, 0)
+    const hd = addPath(d, [A, B], [{ kind: 'line' }, { kind: 'arc', center: addPoint(d, 0, 0), sweep: 1 }], true)
+    toggleFillAt(d, { x: 0, y: 1 }, 0)
+    expect(fillState(d).filled).toHaveLength(1)
+    const b1 = cloneDoc(d)
+    expect(removeSpan(d, spanAt(d, { kind: 'seg', pathId: hd, segIndex: 1 }, 0.5)!).ok).toBe(true)
+    settle(b1, d)
+    expect(d.fills).toBeUndefined()
+    // four lines meeting at their corners; one corner pulled apart opens a gap
+    const e = doc()
+    const q = [addPoint(e, 0, 0), addPoint(e, 4, 0), addPoint(e, 4, 4), addPoint(e, 0, 4)]
+    const loose = addPoint(e, 0, 0)
+    addLine(e, q[0]!, q[1]!); addLine(e, q[1]!, q[2]!); addLine(e, q[2]!, q[3]!); addLine(e, q[3]!, loose)
+    toggleFillAt(e, { x: 1, y: 1 }, 0)
+    expect(fillState(e).filled).toHaveLength(1)
+    const b2 = cloneDoc(e)
+    pt(e, loose).x = -1; pt(e, loose).y = 1
+    settle(b2, e)
+    expect(e.fills).toHaveLength(1)
+    expect(fillState(e).asleep).toHaveLength(1)
+    expect(gapMarkers(e).length).toBeGreaterThan(0)
+  })
   it('a line drawn across a filled area fills both halves; trimming the divider leaves one fill', () => {
     const d = doc(); square(d, 0, 0, 4)
     toggleFillAt(d, { x: 1, y: 1 }, 0)
