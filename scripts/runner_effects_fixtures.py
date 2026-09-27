@@ -118,6 +118,19 @@ Groups:
               and negative seeds. No render is recorded: the browser
               and moderngl are different GL implementations, and decision 9
               makes the browser's bytes the result.
+  e2e       — (R2.12) the controller check's workflows, each run node by node
+              as ComfyUI runs it (float hand-off, real loaders, the spec's
+              node ids): Image card → Adjust color → Blur; LoadImage →
+              Threshold mask → Apply mask → Frame; a provider's download →
+              Film grain; Painter → Merge alpha; Perlin noise → Gradient map;
+              a download → Blur → Adjust curves (the restart); Image card →
+              Blur → Adjust curves (the live preview). Small pictures: every
+              output keeps its float32 (zlib) and round8 / trunc8 (a MASK its
+              16 bits) whole, and each preview file's pixels.
+              `--addnoise-dir DIR` instead writes Add noise on the fixed
+              mid-grey ramp (both types, mono and colour, three global seeds)
+              as PNGs into DIR for the controller's eyes (writes nothing into
+              the repo).
 
 Every picture reaches a node as it does in a real run, through the real
 Python loader of its source (as scripts/compositor_fixtures.py):
@@ -3606,7 +3619,153 @@ def shader() -> dict:
     }
 
 
-GROUPS = {"machinery": machinery, "kernels": kernels, "rng": rng, "tone": tone, "blur": blur, "cells": cells, "warp": warp, "mask": mask, "noise": noise, "shader": shader}
+# ── Group `e2e` (R2.12): the controller check's workflows, node by node ─────
+#
+# frontend/tests/unit/runner-effects-e2e.unit.spec.ts runs each of these workflows through the real
+# /api/runs routes and compares every node against this file. Each chain runs as ComfyUI runs it:
+# every node fed the float tensor the one before made (a MASK too), each through the real loader
+# of its source (Image card, LoadImage, a provider's download), with the node ids the spec's
+# prompts use (so each live preview is named as the runner names it). Every picture here is small,
+# so each output keeps its float32 (zlib, `f32z`) and Python's 8-bit forms whole: `round8` (the
+# hand-off's) and `trunc8` (save_images / save_live_preview's); a MASK its float32 and the 16 bits
+# the runner keeps it as (`u16`). A node's preview file is read back whole (`preview.px`).
+
+def e2e_out(t: torch.Tensor) -> dict:
+    items = []
+    for i in range(t.shape[0]):
+        x = t[i].contiguous()
+        f32 = x.cpu().numpy().astype("<f4").tobytes()
+        if t.dim() == 3:
+            items.append({"w": int(x.shape[1]), "h": int(x.shape[0]), "c": 1, "f32z": b64(zlib.compress(f32, 9)),
+                          "u16": b64(quantise16(x).astype("<u2").tobytes())})
+        else:
+            items.append({"w": int(x.shape[1]), "h": int(x.shape[0]), "c": int(x.shape[2]), "f32z": b64(zlib.compress(f32, 9)),
+                          "round8": b64(round8(x).tobytes()), "trunc8": b64(trunc8(x).tobytes())})
+    return {"kind": "mask" if t.dim() == 3 else "image", "items": items}
+
+
+def e2e_step(cls, class_type: str, node_id: str, widgets: dict, **tensors) -> tuple[dict, tuple]:
+    """One node of a chain: its outputs, and its preview file as it wrote it (Painter's UI.PreviewImage too)."""
+    import random
+    random.seed(node_id)  # Painter's preview name (UI.PreviewImage's five random letters)
+    outs, ui = run_node(cls, node_id, **tensors, **widgets)
+    if hasattr(ui, "as_dict"):
+        ui = ui.as_dict()
+    step = {"class_type": class_type, "node_id": node_id, "widgets": widgets, "outputs": [e2e_out(t) for t in outs]}
+    if ui and ui.get("images"):
+        step["preview"] = read_preview(ui, False)
+    return step, outs
+
+
+def e2e_input_file(g: Group, name: str) -> None:
+    with open(os.path.join(WORK, "input", name), "wb") as f:
+        f.write(g.assets[name])
+
+
+E2E_FRAME = {"layer1_x": 0.0, "layer1_y": 0.0, "layer1_rotation": 10.0, "layer1_scale": 0.8, "layer1_opacity": 1.0,
+             "layer1_blend": "normal", "layer1_z": 1.0, "layer1_protect": False, "layer1_cloner": "", "width": 0, "height": 0, "motion_params": ""}
+
+
+def e2e() -> dict:
+    from unittest import mock
+    from comfy_api.latest._io import HiddenHolder
+    import comfy_extras.nodes_compositor as nc
+    from nodes import LoadImage
+    cls = lambda module, node_id: node_class(module, node_id)  # noqa: E731
+    g = MaskGroup()
+    flows: dict = {}
+
+    # 1. Image card → Adjust color → Blur → Save image.
+    card = g.picture(37, 23, 3, 1)
+    x = load("card", card, g.assets[card])
+    a, (x,) = e2e_step(cls("nodes_adjust_color", "AdjustColor"), "AdjustColor", "color", {"hue": 25.0, "saturation": 1.3, "lightness": 0.9}, image=x)
+    b, (x,) = e2e_step(cls("nodes_blur", "Blur"), "Blur", "blur", {"type": "gaussian", "radius": 2.5, "angle": 0.0, "length": 0.0, "strength": 1.0}, image=x)
+    flows["card_color_blur_save"] = {"card": {"source": "card", "file": card}, "steps": [a, b]}
+
+    # 2. LoadImage → Threshold mask → Apply mask (LoadImage's picture) → Frame (layer 1).
+    loaded = g.picture(37, 23, 4, 21)
+    e2e_input_file(g, loaded)
+    img, _load_mask = LoadImage().load_image(loaded)
+    t, (m,) = e2e_step(cls("nodes_composite", "ThresholdMask"), "ThresholdMask", "thresh", {"threshold": 0.45, "softness": 0.15, "invert": False}, image=img)
+    ap, (y,) = e2e_step(cls("nodes_composite", "ApplyMask"), "ApplyMask", "apply", {"invert": False}, image=img, mask=m)
+    previews = []
+    with mock.patch.object(nc.CompositorNode, "hidden", HiddenHolder.from_dict({"UNIQUE_ID": "frame"})), \
+            mock.patch.object(nc, "save_live_preview", lambda tt, *_a, **_k: previews.append(tt) or {}):
+        res = nc.CompositorNode.execute(layer1=y, **E2E_FRAME)
+    image = res.result[0]
+    assert previews and previews[0] is image
+    flows["load_threshold_apply_frame"] = {"load": {"source": "load", "file": loaded}, "steps": [t, ap],
+                                           "frame": {"widgets": E2E_FRAME, "w": int(image.shape[2]), "h": int(image.shape[1]), "trunc8": b64(trunc8(image[0]).tobytes())}}
+
+    # 3. Generate an image (its download) → Film grain → Edit an image (the hand-off's round8).
+    prov = g.picture(29, 31, 4, 2)
+    x = load("provider", prov, g.assets[prov])
+    fg, _ = e2e_step(cls("nodes_glsl_atmosphere", "FilmGrain"), "FilmGrain", "grain", {"amount": 0.3, "size": 1.5, "seed": 7}, image=x)
+    flows["generate_grain_edit"] = {"download": {"source": "provider", "file": prov}, "steps": [fg]}
+
+    # 4. Painter (a painter file, no picture) → Merge alpha (its picture and its mask) → Save image.
+    pfile = g.painter_file("painter_64x64_rgba.png", painter_image(64, 64, 32, "RGBA"))
+    pw = {"mask": pfile, "width": 64, "height": 64, "bg_color": "#2040ff"}
+    pa, (pim, pmask) = e2e_step(cls("nodes_painter", "Painter"), "Painter", "paint", pw)
+    ma, _ = e2e_step(cls("nodes_matte", "MergeAlpha"), "MergeAlpha", "merge", {"invert_mask": False}, image=pim, mask=pmask)
+    flows["painter_merge_save"] = {"painter_file": pfile, "steps": [pa, ma]}
+
+    # 5. Perlin noise → Gradient map → Preview image.
+    pn, (x,) = e2e_step(cls("nodes_glsl_generative", "PerlinNoise"), "PerlinNoise", "perlin",
+                        {"width": 64, "height": 64, "scale": 16.0, "octaves": 3, "persistence": 0.5, "seed": 5})
+    gm, _ = e2e_step(cls("nodes_glsl_unicorn", "GradientMap"), "GradientMap", "gmap",
+                     {"dark_color": "#1a2b3c", "light_color": "#f0e0d0", "midpoint": 0.45, "contrast": 1.3, "mix": 0.9}, image=x)
+    flows["perlin_gradient_preview"] = {"steps": [pn, gm]}
+
+    # The restart: Generate an image (its download) → Blur → Adjust curves → Save image.
+    x = load("provider", prov, g.assets[prov])
+    rb, (x,) = e2e_step(cls("nodes_blur", "Blur"), "Blur", "blur", {"type": "gaussian", "radius": 1.5, "angle": 0.0, "length": 0.0, "strength": 1.0}, image=x)
+    rc, _ = e2e_step(cls("nodes_adjust_curves", "AdjustCurves"), "AdjustCurves", "curves", {"blacks": 0.05, "midtones": 1.3, "whites": 0.9}, image=x)
+    flows["generate_blur_curves_save"] = {"download": {"source": "provider", "file": prov}, "steps": [rb, rc]}
+
+    # The live preview: Image card → Blur → Adjust curves.
+    card2 = g.picture(37, 23, 3, 5)
+    x = load("card", card2, g.assets[card2])
+    lb, (x,) = e2e_step(cls("nodes_blur", "Blur"), "Blur", "blur", {"type": "gaussian", "radius": 2.0, "angle": 0.0, "length": 0.0, "strength": 1.0}, image=x)
+    lc, _ = e2e_step(cls("nodes_adjust_curves", "AdjustCurves"), "AdjustCurves", "curves", {"blacks": 0.05, "midtones": 1.3, "whites": 0.9}, image=x)
+    flows["card_blur_curves_preview"] = {"card": {"source": "card", "file": card2}, "steps": [lb, lc]}
+
+    return {"flows": flows, "library_eps": {"Blur": BLUR_LIBRARY_EPS["Blur"], "AdjustCurves": TONE_LIBRARY_EPS["AdjustCurves"], "FilmGrain": NOISE_LIBRARY_EPS["FilmGrain"]},
+            "assets": {k: b64(v) for k, v in sorted(g.assets.items())}}
+
+
+# `--group e2e --addnoise-dir DIR`: Add noise on NOISE_STATS' fixed 256 × 256 mid-grey ramp, for the controller's
+# eyes (R2.12). Writes the ramp (ramp.png), Python's output for each type × mono / colour × global seed as
+# save_images writes it (python_<type>_<mono|colour>_s<seed>.png) and manifest.json into DIR; nothing into the repo.
+# The spec's side-by-side helper writes the runner's beside them.
+E2E_ADDNOISE_AMOUNT = 0.2
+E2E_ADDNOISE_SEEDS = (7, 8, 12345)
+
+
+def e2e_addnoise(out_dir: str) -> None:
+    os.makedirs(out_dir, exist_ok=True)
+    add_noise = node_class("nodes_sharpen_noise", "AddNoise")
+    s = NOISE_STATS_SIDE
+    y, x = np.meshgrid(np.arange(s), np.arange(s), indexing="ij")
+    v = (96 + (64 * (x + y)) // 510).astype(np.uint8)
+    rgb = np.repeat(v[:, :, None], 3, axis=2)
+    PILImage.fromarray(rgb, "RGB").save(os.path.join(out_dir, "ramp.png"))
+    img = torch.from_numpy(rgb.astype(np.float32) / np.float32(255.0))[None]
+    rows = []
+    for type_ in ("gaussian", "uniform"):
+        for mono in (False, True):
+            for seed in E2E_ADDNOISE_SEEDS:
+                torch.manual_seed(seed)
+                (out,), _ui = run_node(add_noise, f"an{seed}", image=img, amount=E2E_ADDNOISE_AMOUNT, type=type_, monochromatic=mono)
+                name = f"python_{type_}_{'mono' if mono else 'colour'}_s{seed}.png"
+                PILImage.fromarray(trunc8(out[0]), "RGB").save(os.path.join(out_dir, name))
+                rows.append({"type": type_, "monochromatic": mono, "seed": seed, "amount": E2E_ADDNOISE_AMOUNT, "python": name})
+    with open(os.path.join(out_dir, "manifest.json"), "w", encoding="utf-8") as f:
+        json.dump({"ramp": "ramp.png", "side": s, "rows": rows}, f, indent=1)
+    print(f"wrote {len(rows)} Add noise pictures → {out_dir}")
+
+
+GROUPS = {"machinery": machinery, "kernels": kernels, "rng": rng, "tone": tone, "blur": blur, "cells": cells, "warp": warp, "mask": mask, "noise": noise, "shader": shader, "e2e": e2e}
 
 
 def blur_sweep_run() -> int:
@@ -3636,8 +3795,14 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--group", required=True, choices=sorted(GROUPS))
     ap.add_argument("--sweep", action="store_true", help="blur, warp, mask and noise only: run the whole ε sweep, print each class's worst |Δ|; writes nothing")
+    ap.add_argument("--addnoise-dir", help="e2e only: write Add noise's pictures on the fixed ramp into this folder; writes nothing into the repo")
     args = ap.parse_args()
     check_threads()
+    if args.addnoise_dir:
+        if args.group != "e2e":
+            ap.error("--addnoise-dir is the e2e group's")
+        e2e_addnoise(args.addnoise_dir)
+        return
     if args.sweep:
         if args.group not in ("blur", "warp", "mask", "noise"):
             ap.error("--sweep is the blur, warp, mask and noise groups'")
