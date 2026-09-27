@@ -16,11 +16,11 @@ import type { ApiLink, ApiPrompt } from '#shared/runner/graph'
 import { RUNNER_FAMILIES, type RunnerFamily } from '#shared/runner/families'
 import { handoffView, orientOps, plainPngChunks, PICTURE_ANIMATED_SEE_THROUGH } from '~~/server/runner/pictures/handoffView'
 import { PICTURE_16_BIT, PICTURE_CMYK, PICTURE_UNREADABLE } from '~~/server/runner/pictures/pythonView'
-import { loaderHandoffs, loaderSourceOf } from '~~/server/runner/pictureHandoff'
+import { OVER_CAP_JPEG_QUALITY, loaderHandoffBytes, loaderHandoffs, loaderSourceOf } from '~~/server/runner/pictureHandoff'
 import { planNode, type NodePlan } from '~~/server/runner/executors'
 import { splitPictures } from '~~/server/runner/generators/splitLayers'
 import { isReusable, requestFingerprint } from '~~/server/runner/fingerprint'
-import { PRODUCT_SHOT_TOO_LARGE, linkedFileCheck } from '~~/server/runner/requestRules'
+import { PRODUCT_SHOT_MAX_BYTES, PRODUCT_SHOT_TOO_LARGE, backupInputProblem, inputFileCaps, linkedFileCheck } from '~~/server/runner/requestRules'
 import { nodeCredits } from '~~/server/runner/metering'
 import { RUNNER_REPLICATE_VIDEO_MODELS, RUNNER_VIDEO_MODELS } from '~~/server/runner/generators/video'
 import { RUNNER_WAN3_MODELS } from '~~/server/runner/generators/wan3'
@@ -30,6 +30,7 @@ import { RUNNER_VEO_31_LITE_MODELS } from '~~/server/runner/generators/veo31Lite
 import { RUNNER_HAPPYHORSE_11_MODELS } from '~~/server/runner/generators/happyHorse11'
 import { RUNNER_GROK_IMAGINE_VIDEO_15_MODELS } from '~~/server/runner/generators/grokImagineVideo15'
 import { LTX_25_FAST_ID } from '~~/server/runner/generators/ltx25Fast'
+import { HAPPYHORSE_11_BACKUP_MAX_PICTURE_BYTES, HAPPYHORSE_11_ID, HAPPYHORSE_11_MAX_PICTURE_BYTES } from '~~/server/runner/generators/happyHorse11'
 import { LUMA_RAY_32_ID } from '~~/server/runner/generators/lumaRay32'
 import { GPT_IMAGE_25_EDIT_OPTION } from '~~/server/runner/generators/gptImage25'
 import { SEEDREAM_5_PRO_EDIT_OPTION } from '~~/server/runner/generators/seedream5ProEdit'
@@ -343,7 +344,7 @@ const caseOf = (file: string, loader: 'LoadImage' | 'Image', cls = 'EditImageNod
 /** An RGB picture of random noise, which PNG can't shrink: `side`² pixels. */
 async function noiseJpeg(side: number): Promise<Uint8Array> {
   let x = 12345
-  const px = new Uint8Array(side * side * 3).map(() => ((x = (x * 1103515245 + 12345) >>> 0) >>> 24))
+  const px = new Uint8Array(side * side * 3).map(() => ((x = (Math.imul(x, 1103515245) + 12345) >>> 0) >>> 24))
   return new Uint8Array(await sharp(px, { raw: { width: side, height: side, channels: 3 } }).jpeg({ quality: 90 }).toBuffer())
 }
 
@@ -376,22 +377,6 @@ describe('R3.H — refused before the hold, and caps judged on the PNG that is s
     expect(sha(uploads[0]!.bytes)).toBe(sha(fileOf(c)))
     expect(uploads[0]!.url).toBe(`https://fal.storage/${c.filename}`)
   })
-
-  it('Product shot on Bria: a photo whose PNG is over 12 MB is refused before the hold, though its JPEG is far smaller', async () => {
-    const jpeg = await noiseJpeg(2100)
-    expect(jpeg.byteLength).toBeLessThan(12_000_000)
-    const png = await handoffView(jpeg, { keepsAlpha: true })
-    expect(png.png!.byteLength).toBeGreaterThan(12_000_000)
-    const k = makeKit({ deps: { families: () => new Set<RunnerFamily>(['cards', 'bria-product-shot']) } })
-    writeFileSync(join(k.root, 'input', 'photo.jpg'), jpeg)
-    const prompt: ApiPrompt = {
-      11: { class_type: 'Image', inputs: { image: 'photo.jpg', export: false, filename_prefix: 'ComfyUI', batch_index: -1 } },
-      1: { class_type: 'ProductShotNode', inputs: { scene_prompt: 'on a table', aspect: 'Square', product_size: 'Original', keep_product_exact: true, seed: 0, image: ['11', 0] } },
-    }
-    await expect(k.engine.startRun({ userId: k.userId, takes: [prompt], ...START })).rejects.toThrow(PRODUCT_SHOT_TOO_LARGE)
-    expect(k.ledger.hold).not.toHaveBeenCalled()
-    expect(k.fal.client.submit).not.toHaveBeenCalled()
-  }, 120_000)
 
   it('the node\'s turn judges a loader\'s picture on the bytes sent (and hands their size to the backup check)', async () => {
     const node = { class_type: 'ProductShotNode', inputs: { image: ['11', 0] } }
@@ -453,4 +438,153 @@ describe('R3.H — Separate background and foreground takes the same view', () =
     expect(pics.fill).toBe(pics.picture)
     expect(await pixelsOf(pics.picture!)).toEqual(pythonPicture(c))
   })
+})
+
+// ── Fix: JPEG over caps (controller's ruling, a departure from Python) ───────
+
+/**
+ * A 12 MP phone photo: 4032 × 3024 stored, EXIF 6 (upright 3024 × 4032), a
+ * JPEG of photo-like detail whose PNG (about 36 MB) is over every cap and
+ * whose quality-95 JPEG (about 5 MB) is under all of them.
+ */
+async function phonePhoto(): Promise<Uint8Array> {
+  let x = 99
+  const rnd = () => ((x = (Math.imul(x, 1103515245) + 12345) >>> 0) >>> 16) / 65536
+  const small = new Uint8Array(504 * 378 * 3).map(() => Math.floor(rnd() * 256))
+  const base = await sharp(small, { raw: { width: 504, height: 378, channels: 3 } }).resize(4032, 3024, { kernel: 'cubic' }).raw().toBuffer()
+  for (let i = 0; i < base.length; i++) base[i] = Math.max(0, Math.min(255, base[i]! + Math.round((rnd() - 0.5) * 10)))
+  const jpg = await sharp(base, { raw: { width: 4032, height: 3024, channels: 3 } }).jpeg({ quality: 92 }).withMetadata({ orientation: 6 }).toBuffer()
+  return new Uint8Array(jpg)
+}
+let PHONE: Promise<Uint8Array> | null = null
+const phone = () => (PHONE ??= phonePhoto())
+
+/** The sent JPEG is the loader's picture: upright, RGB, sRGB, no EXIF, close to the PNG's pixels (q95). */
+async function expectSameUprightPicture(sent: Uint8Array, source: Uint8Array): Promise<void> {
+  const meta = await sharp(sent).metadata()
+  expect([meta.format, meta.width, meta.height, meta.channels, meta.space, meta.orientation, meta.exif]).toEqual(['jpeg', 3024, 4032, 3, 'srgb', undefined, undefined])
+  const view = await handoffView(source, { keepsAlpha: true })
+  const a = await sharp(view.png!).raw().toBuffer()
+  const b = await sharp(sent).raw().toBuffer()
+  let diff = 0
+  for (let i = 0; i < a.length; i += 97) diff += Math.abs(a[i]! - b[i]!)
+  expect(diff / Math.ceil(a.length / 97)).toBeLessThan(4)
+}
+
+const productShot = (file: string): ApiPrompt => ({
+  11: { class_type: 'Image', inputs: { image: file, export: false, filename_prefix: 'ComfyUI', batch_index: -1 } },
+  1: { class_type: 'ProductShotNode', inputs: { scene_prompt: 'on a table', aspect: 'Square', product_size: 'Original', keep_product_exact: true, seed: 0, image: ['11', 0] } },
+})
+const happyHorse = (file: string): ApiPrompt => ({
+  11: { class_type: 'Image', inputs: { image: file, export: false, filename_prefix: 'ComfyUI', batch_index: -1 } },
+  1: { class_type: 'GenerateVideoNode', inputs: { model: HAPPYHORSE_11_ID, prompt: 'the sea moves', aspect_ratio: '16:9', duration: '5', seed: 3, model_options: '{}', image: ['11', 0] } },
+})
+
+describe('R3.H fix — JPEG over caps', () => {
+  it('loaderHandoffBytes chooses by the caps: PNG, the JPEG of the same picture, or the PNG with the backup dropped; RGBA keeps its PNG', async () => {
+    let x = 7
+    const px = new Uint8Array(64 * 48 * 3).map(() => ((x = (Math.imul(x, 1103515245) + 12345) >>> 0) >>> 24))
+    const src = new Uint8Array(await sharp(px, { raw: { width: 64, height: 48, channels: 3 } }).png().toBuffer())
+    const P = (await loaderHandoffBytes(src, { keepsAlpha: true })).bytes.byteLength
+    const J = (await sharp((await handoffView(src, { keepsAlpha: true })).png!).jpeg({ quality: OVER_CAP_JPEG_QUALITY }).toBuffer()).byteLength
+    expect(J).toBeLessThan(P)
+    const pick = async (cap: number, backupCap?: number) => (await loaderHandoffBytes(src, { keepsAlpha: true }, undefined, { cap, ...(backupCap ? { backupCap } : {}) })).format
+    expect(await pick(P)).toBe('png')
+    expect(await pick(P - 1)).toBe('jpeg')
+    expect(await pick(P, J)).toBe('jpeg') // the backup stays available
+    expect(await pick(P, J - 1)).toBe('png') // the PNG fits the model; the backup is dropped
+    expect(await pick(J - 1)).toBe('jpeg') // over even as a JPEG: the caller refuses it
+    // RGBA with see-through pixels: no JPEG, whatever the cap.
+    const rgba = new Uint8Array(await sharp(new Uint8Array(64 * 48 * 4).map((_, i) => (i % 4 === 3 ? 100 : px[i % px.length]!)), { raw: { width: 64, height: 48, channels: 4 } }).png().toBuffer())
+    expect((await loaderHandoffBytes(rgba, { keepsAlpha: true }, undefined, { cap: 10 })).format).toBe('png')
+    // No caps: Python's PNG, as before the fix.
+    expect((await loaderHandoffBytes(src, { keepsAlpha: true })).format).toBe('png')
+  })
+
+  it('a 12 MP phone JPEG into Product shot on Bria is handed off as a JPEG under 12 MB, not refused; charged as before', async () => {
+    const jpeg = await phone()
+    const view = await handoffView(jpeg, { keepsAlpha: true })
+    expect(view.png!.byteLength).toBeGreaterThan(PRODUCT_SHOT_MAX_BYTES)
+    const families = new Set<RunnerFamily>(['cards', 'bria-product-shot'])
+    const k = makeKit({ fal: createFakeFal({ answer: () => ({ images: [{ url: 'https://f.test/shot.png' }] }) }), deps: { families: () => families } })
+    writeFileSync(join(k.root, 'input', 'phone.jpg'), jpeg)
+    const { runId } = await k.engine.startRun({ userId: k.userId, takes: [productShot('phone.jpg')], ...START })
+    await k.engine.settled(runId)
+    const run = (await k.store.get(runId))!
+    expect(run.status).toBe('done')
+    expect(k.fal.submitted().map(r => r.endpoint)).toEqual(['fal-ai/bria/product-shot'])
+    const [[bytes, name]] = k.upload.mock.calls as unknown as [Uint8Array, string][]
+    expect(name).toBe('phone.jpg')
+    expect(k.fal.submitted()[0]!.payload.image_url).toBe('https://fal.storage/phone.jpg')
+    expect(bytes.byteLength).toBeLessThanOrEqual(PRODUCT_SHOT_MAX_BYTES)
+    await expectSameUprightPicture(bytes, jpeg)
+    // The fingerprint and reuse key follow the bytes sent; the price does not change.
+    expect(k.deps.handoff.hashOf('https://fal.storage/phone.jpg')).toBe(sha(bytes))
+    expect(run.takes[0]!.nodes['1']!.credits).toBe(nodeCredits(productShot('phone.jpg')['1']!, undefined, families))
+  }, 120_000)
+
+  for (const backup of [true, false]) {
+    it(`a 12 MP phone JPEG into HappyHorse 1.1 (backups ${backup ? 'on' : 'off'}) is handed off as a JPEG under both caps; ${backup ? 'the Replicate backup stays' : 'nothing refused'}`, async () => {
+      const jpeg = await phone()
+      const families = new Set<RunnerFamily>(['cards', 'happyhorse-1.1'])
+      const fal = createFakeFal({ answer: () => ({ video: { url: 'https://f.test/clip.mp4' } }) })
+      const k = makeKit({ fal, deps: { families: () => families, backup: () => ({ enabled: backup, stallMs: 0 }) } })
+      writeFileSync(join(k.root, 'input', 'phone.jpg'), jpeg)
+      const prompt = happyHorse('phone.jpg')
+      const { runId } = await k.engine.startRun({ userId: k.userId, takes: [prompt], ...START })
+      await k.engine.settled(runId)
+      const run = (await k.store.get(runId))!
+      expect(run.status).toBe('done')
+      expect(fal.submitted()).toHaveLength(1)
+      const [[bytes, name]] = k.upload.mock.calls as unknown as [Uint8Array, string][]
+      expect(name).toBe('phone.jpg')
+      expect(JSON.stringify(fal.submitted()[0]!.payload)).toContain('https://fal.storage/phone.jpg')
+      expect(bytes.byteLength).toBeLessThanOrEqual(HAPPYHORSE_11_BACKUP_MAX_PICTURE_BYTES)
+      expect(bytes.byteLength).toBeLessThanOrEqual(HAPPYHORSE_11_MAX_PICTURE_BYTES)
+      await expectSameUprightPicture(bytes, jpeg)
+      expect(k.deps.handoff.hashOf('https://fal.storage/phone.jpg')).toBe(sha(bytes))
+      expect(run.takes[0]!.nodes['1']!.credits).toBe(nodeCredits(prompt['1']!, undefined, families))
+      // The backup's request carries the same picture and takes its size: it is not dropped.
+      const plan = await planNode({
+        prompt, nodeId: '1', gateOpen: false, families, inputBytes: bytes.byteLength,
+        filesFrom: () => [{ filename: 'phone.jpg', subfolder: '', type: 'input' }],
+        toUrl: async f => `https://fal.storage/${f.filename}`,
+      })
+      if (plan.kind !== 'provider') throw new Error('HappyHorse is one provider call')
+      expect(plan.backup).toBeDefined()
+      expect(backupInputProblem(plan.backup!, bytes.byteLength)).toBeNull()
+    }, 120_000)
+  }
+
+  it('caps: Bria 12 MB; HappyHorse 20 MB with its backup at 10 MB; nothing else is capped', () => {
+    const on = new Set<RunnerFamily>(['cards', 'bria-product-shot', 'happyhorse-1.1'])
+    expect(inputFileCaps('ProductShotNode', on)).toEqual({ cap: PRODUCT_SHOT_MAX_BYTES })
+    expect(inputFileCaps('GenerateVideoNode', on, HAPPYHORSE_11_ID)).toEqual({ cap: HAPPYHORSE_11_MAX_PICTURE_BYTES, backupCap: HAPPYHORSE_11_BACKUP_MAX_PICTURE_BYTES })
+    expect(inputFileCaps('GenerateVideoNode', on, 'veo-3.1')).toBeNull()
+    expect(inputFileCaps('EditImageNode', on, 'Flux 2 Pro')).toBeNull()
+  })
+
+  it('an Image card with see-through pixels over Bria\'s cap is refused plainly before the hold (a JPEG would lose its alpha)', async () => {
+    let x = 3
+    const side = 2000
+    const px = new Uint8Array(side * side * 4).map((_, i) => (i % 4 === 3 ? 128 : ((x = (Math.imul(x, 1103515245) + 12345) >>> 0) >>> 24)))
+    const png = new Uint8Array(await sharp(px, { raw: { width: side, height: side, channels: 4 } }).png().toBuffer())
+    expect(png.byteLength).toBeGreaterThan(PRODUCT_SHOT_MAX_BYTES)
+    const k = makeKit({ deps: { families: () => new Set<RunnerFamily>(['cards', 'bria-product-shot']) } })
+    writeFileSync(join(k.root, 'input', 'cutout.png'), png)
+    await expect(k.engine.startRun({ userId: k.userId, takes: [productShot('cutout.png')], ...START })).rejects.toThrow(PRODUCT_SHOT_TOO_LARGE)
+    expect(k.ledger.hold).not.toHaveBeenCalled()
+    expect(k.fal.client.submit).not.toHaveBeenCalled()
+  }, 120_000)
+
+  it('a photo over Bria\'s cap even as a JPEG is refused plainly before the hold', async () => {
+    const jpeg = await noiseJpeg(4000)
+    const asJpeg = await loaderHandoffBytes(jpeg, { keepsAlpha: true }, undefined, { cap: PRODUCT_SHOT_MAX_BYTES })
+    expect(asJpeg.format).toBe('jpeg')
+    expect(asJpeg.bytes.byteLength).toBeGreaterThan(PRODUCT_SHOT_MAX_BYTES)
+    const k = makeKit({ deps: { families: () => new Set<RunnerFamily>(['cards', 'bria-product-shot']) } })
+    writeFileSync(join(k.root, 'input', 'noise.jpg'), jpeg)
+    await expect(k.engine.startRun({ userId: k.userId, takes: [productShot('noise.jpg')], ...START })).rejects.toThrow(PRODUCT_SHOT_TOO_LARGE)
+    expect(k.ledger.hold).not.toHaveBeenCalled()
+  }, 120_000)
 })

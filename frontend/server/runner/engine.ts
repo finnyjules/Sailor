@@ -33,14 +33,14 @@ import { createMemoryHeldBytes, type HeldBytes } from './heldBytes'
 import { createMemoryKeptBytes, type KeptBytes, type KeptExt } from './keptBytes'
 import { createFileAccess } from './fileAccess'
 import type { BackupSettings } from './config'
-import { inputFileProblem, linkedFileCheck, measuredInputProblem, pictureChangedWords, pictureOverMarginWords, requestProblems, unreadableInputWords } from './requestRules'
+import { checkedInputFile, inputFileCaps, inputFileProblem, linkedFileCheck, measuredInputProblem, pictureChangedWords, pictureOverMarginWords, requestProblems, unreadableInputWords } from './requestRules'
 import { predictedHoldPixels, startPictureSizes } from './repairSizes'
 import { isReusable, requestFingerprint } from './fingerprint'
 import { assertFilesOwned, collectInputFiles, parseInputFileRef, type OwnershipCheck } from './inputs'
 import { shotRefFilenames } from './shotRefs'
 import { parseJsonObject } from './generators/opts'
 import { cardPictureFiles, cardPictureRefusal } from './cards/bakeReplay'
-import { handoffPngName, loaderHandoffBytes, loaderHandoffs, loaderSourceOf, type LoaderSource } from './pictureHandoff'
+import { handoffPngName, loaderHandoffBytes, loaderHandoffs, loaderSourceOf, type HandoffCaps, type LoaderHandoff, type LoaderSource } from './pictureHandoff'
 import { handoffRefusal } from './pictures/handoffView'
 import { effectOutRefusal } from './effects/plan'
 import { PICTURE_ANIMATED, pictureHasFrames, pictureMeta, pictureRefusal } from './pictures/pythonView'
@@ -1114,17 +1114,28 @@ export function createEngine(deps: EngineDeps) {
       // A loader's picture (R3.H, ./pictureHandoff.ts) is handed off as the PNG
       // of the loader's tensor, made once for this turn from the loader's own
       // file: the file cap is judged on it, and it is what is sent.
-      const views = new Map<string, Promise<{ bytes: Uint8Array; made: boolean }>>()
-      const handedOffPicture = (src: LoaderSource) => {
-        const key = `${src.file.type}:${src.file.subfolder}:${src.file.filename}:${src.kind.keepsAlpha ? 'a' : ''}`
+      // The capped input (Bria, HappyHorse 1.1): over a cap, a JPEG of the same
+      // picture is sent instead (R3.H fix), the backup's cap counted while backups run.
+      const nodeInputs = take.prompt[id]!.inputs ?? {}
+      const cappedName = checkedInputFile(take.prompt[id]!.class_type, families, nodeInputs.model)
+      const capsOf = (link: unknown): HandoffCaps | null => {
+        const capped = cappedName ? nodeInputs[cappedName] : undefined
+        if (!isLink(capped) || !isLink(link) || capped[0] !== link[0] || capped[1] !== link[1]) return null
+        const caps = inputFileCaps(take.prompt[id]!.class_type, families, nodeInputs.model)
+        if (!caps) return null
+        return deps.backup?.().enabled ? caps : { cap: caps.cap }
+      }
+      const views = new Map<string, Promise<LoaderHandoff>>()
+      const handedOffPicture = (src: LoaderSource, caps: HandoffCaps | null) => {
+        const key = `${src.file.type}:${src.file.subfolder}:${src.file.filename}:${src.kind.keepsAlpha ? 'a' : ''}:${caps ? `${caps.cap}/${caps.backupCap ?? ''}` : ''}`
         let p = views.get(key)
-        if (!p) { p = readOnce(src.file).then(b => loaderHandoffBytes(b, src.kind, signal)); views.set(key, p) }
+        if (!p) { p = readOnce(src.file).then(b => loaderHandoffBytes(b, src.kind, signal, caps)); views.set(key, p) }
         return p
       }
       const loaderAt = (link: unknown) => loaderSourceOf(take.prompt, link, families)
       const fileCheck = resuming ? { problem: null } as Awaited<ReturnType<typeof linkedFileCheck>> : await linkedFileCheck(take.prompt[id]!, filesAt(take), readOnce, families, f => files.size(f), (link) => {
         const src = loaderAt(link)
-        return src ? handedOffPicture(src).then(v => v.bytes) : null
+        return src ? handedOffPicture(src, capsOf(link)).then(v => v.bytes) : null
       })
       if (fileCheck.problem) throw new Error(fileCheck.problem)
       // A media node (./nodeMedia.ts: sync-3 lip-sync, F22; Topaz video
@@ -1193,8 +1204,8 @@ export function createEngine(deps: EngineDeps) {
       const imageHandOff = async (f: OutputFile, link: ApiLink) => {
         const src = loaderAt(link)
         if (!src) return handOff(f)
-        const sent = await handedOffPicture(src)
-        return deps.handoff.toUrlBytes(sent.made ? handoffPngName(src.file) : src.file, sent.bytes)
+        const sent = await handedOffPicture(src, capsOf(link))
+        return deps.handoff.toUrlBytes(sent.made ? handoffPngName(src.file, sent.format) : src.file, sent.bytes)
       }
       // Resuming: the request written down is kept (and its price); the plan is
       // rebuilt only for its backup. If it can't be rebuilt now (a file gone),
@@ -1994,7 +2005,9 @@ export function createEngine(deps: EngineDeps) {
         const why = await handoffRefusal(bytes, h.kind)
         if (why) throw refuse(why, 400, { nodeId: h.nodeId, classType: p[h.nodeId]?.class_type, file: h.file.filename })
         if (h.checked) {
-          const sent = await loaderHandoffBytes(bytes, h.kind)
+          // Over the cap, the JPEG of the same picture (R3.H fix): refused only if even that is over.
+          const caps = inputFileCaps(h.classType, families, p[h.at]?.inputs?.model)
+          const sent = await loaderHandoffBytes(bytes, h.kind, undefined, caps && (deps.backup?.().enabled ? caps : { cap: caps.cap }))
           const problem = inputFileProblem(h.classType, sent.bytes, families, p[h.at]?.inputs?.model)
           if (problem) throw refuse(problem, 400, { nodeId: h.at, classType: h.classType })
         }

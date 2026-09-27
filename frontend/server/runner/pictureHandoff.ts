@@ -21,6 +21,7 @@ import { loaderFileBehind } from './cards/bakeReplay'
 import { actionPassThrough } from './generators/actions'
 import { pixelsInWorker } from './compositor/worker'
 import { handoffView, type LoaderKind } from './pictures/handoffView'
+import sharp from 'sharp'
 import { checkedInputFile } from './requestRules'
 import type { OutputFile } from './types'
 
@@ -42,20 +43,45 @@ export function loaderSourceOf(prompt: ApiPrompt, link: unknown, families: Reado
   return behind ? { nodeId: behind.nodeId, file: behind.file, kind: { keepsAlpha: behind.classType === 'Image' } } : null
 }
 
+/** A model's upload caps for the picture (requestRules.ts inputFileCaps); `backupCap` only while backups can run. */
+export interface HandoffCaps { cap: number; backupCap?: number }
+
+/** What is handed off: the bytes, whether they were made here, and their kind. */
+export interface LoaderHandoff { bytes: Uint8Array; made: boolean; format: 'png' | 'jpeg' }
+
+/** The quality of the JPEG handed off in place of a PNG over a cap (the controller's ruling). */
+export const OVER_CAP_JPEG_QUALITY = 95
+
 /**
  * The bytes a loader's file is handed off as: the PNG of its tensor (`made`),
  * or the file's own bytes when they already are that PNG. A CMYK or 16-bit
  * grey file is converted per pixel on the Frame's worker.
+ *
+ * Over a cap (R3.H fix, "JPEG over caps", a ruled departure from Python,
+ * which sends the PNG and fails at the provider): an RGB picture whose PNG is
+ * over the tightest cap is handed off as a quality-95 JPEG of the SAME
+ * picture (upright, RGB, sRGB, no EXIF), when that fits the backup's cap too
+ * (the backup stays available); else the PNG if it fits the model's own cap
+ * (the backup is dropped, as before); else the JPEG (under the model's cap,
+ * the backup dropped; over it, refused by the caller's check). An RGBA
+ * picture keeps its PNG (a JPEG has no alpha): over the cap it is refused.
  */
-export async function loaderHandoffBytes(bytes: Uint8Array, kind: LoaderKind, signal?: AbortSignal): Promise<{ bytes: Uint8Array; made: boolean }> {
+export async function loaderHandoffBytes(bytes: Uint8Array, kind: LoaderKind, signal?: AbortSignal, caps?: HandoffCaps | null): Promise<LoaderHandoff> {
   const view = await handoffView(bytes, kind, raw => pixelsInWorker(signal, w => w.rgbOf(raw), HANDOFF_TIMEOUT))
-  return view.png ? { bytes: view.png, made: true } : { bytes, made: false }
+  const png: LoaderHandoff = view.png ? { bytes: view.png, made: true, format: 'png' } : { bytes, made: false, format: 'png' }
+  if (!caps || view.channels === 4) return png
+  const tightest = Math.min(caps.cap, caps.backupCap ?? Number.POSITIVE_INFINITY)
+  if (png.bytes.byteLength <= tightest) return png
+  const jpg = await sharp(png.bytes).jpeg({ quality: OVER_CAP_JPEG_QUALITY }).toBuffer()
+  const jpeg: LoaderHandoff = { bytes: new Uint8Array(jpg.buffer, jpg.byteOffset, jpg.byteLength), made: true, format: 'jpeg' }
+  if (jpeg.bytes.byteLength <= tightest) return jpeg
+  return png.bytes.byteLength <= caps.cap ? png : jpeg
 }
 
-/** The upload name of a made PNG: the loader file's own name, as a .png. */
-export function handoffPngName(file: OutputFile): OutputFile {
+/** The upload name of made bytes: the loader file's own name, as a .png (or a .jpg, over a cap). */
+export function handoffPngName(file: OutputFile, format: 'png' | 'jpeg' = 'png'): OutputFile {
   const dot = file.filename.lastIndexOf('.')
-  return { ...file, filename: `${dot > 0 ? file.filename.slice(0, dot) : file.filename}.png` }
+  return { ...file, filename: `${dot > 0 ? file.filename.slice(0, dot) : file.filename}.${format === 'jpeg' ? 'jpg' : 'png'}` }
 }
 
 /**

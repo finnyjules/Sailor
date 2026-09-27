@@ -585,6 +585,18 @@ export function inputFileProblem(classType: string, bytes: Uint8Array, families:
 }
 
 /**
+ * The upload caps of the input checkedInputFile names (R3.H fix, "JPEG over
+ * caps"): its model's, and its backup's where one has a lower cap (HappyHorse
+ * 1.1's Replicate backup). Null for every other input. A loader's picture
+ * whose PNG is over one is handed off as a JPEG instead (../pictureHandoff.ts).
+ */
+export function inputFileCaps(classType: string, families: ReadonlySet<RunnerFamily>, model?: unknown): { cap: number; backupCap?: number } | null {
+  if (!checkedInputFile(classType, families, model)) return null
+  if (classType === 'GenerateVideoNode') return { cap: HAPPYHORSE_11_MAX_PICTURE_BYTES, backupCap: HAPPYHORSE_11_BACKUP_MAX_PICTURE_BYTES }
+  return { cap: PRODUCT_SHOT_MAX_BYTES }
+}
+
+/**
  * A checked file over its model's limit, from its size alone: HappyHorse 1.1
  * (fal image-to-video, "Max 20 MB"), else Bria Product Shot's 12 MB. Only
  * for a class checkedInputFile names.
