@@ -138,10 +138,18 @@ const EMPTY = (closed: boolean): OffsetChainGeom => ({ pts: [], radii: [], centr
 
 /** The offset at signed distance `d` (left of travel positive; a circle:
  *  outside positive). Not ok when `d` is 0 or the offset is too far anywhere:
- *  a radius shrunk to nothing, arc and line carriers that never cross, or a
- *  piece that would turn back on itself. Never changes `doc`. */
+ *  a radius shrunk to nothing, arc and line carriers that never cross, a
+ *  piece that would turn back on itself, or two pieces that aren't neighbours
+ *  meeting where the source's pieces don't. Never changes `doc`. */
 export function offsetGeom(doc: SketchDoc, chains: readonly OffsetChain[], d: number): OffsetGeom {
+  return geomOf(doc, chains, d).g
+}
+
+// offsetGeom, plus which joins of each chain are smooth with an arc on at
+// least one side (by point index) — applyOffset holds those differently
+function geomOf(doc: SketchDoc, chains: readonly OffsetChain[], d: number): { g: OffsetGeom; smooth: Set<number>[] } {
   const out: OffsetChainGeom[] = []
+  const smooth: Set<number>[] = []
   const pts = pointIndex(doc)
   let ok = Math.abs(d) > EPS
   for (const ch of chains) {
@@ -150,9 +158,12 @@ export function offsetGeom(doc: SketchDoc, chains: readonly OffsetChain[], d: nu
       const r = e?.kind === 'circle' ? e.r + d : -1
       if (!c || !(r > EPS)) ok = false
       out.push({ ...EMPTY(true), circle: { c: c ?? { x: 0, y: 0 }, r: Math.max(r, 0) } })
+      smooth.push(new Set())
       continue
     }
     const gs = ch.pieces.map(pc => pieceGeom(pts, pc))
+    const sm = new Set<number>()
+    smooth.push(sm)
     if (!gs.length || gs.some(g => !g)) { ok = false; out.push(EMPTY(ch.closed)); continue }
     const G = gs as PieceGeom[], m = G.length
     const cars = G.map(g => carrier(g, d))
@@ -165,8 +176,14 @@ export function offsetGeom(doc: SketchDoc, chains: readonly OffsetChain[], d: nu
       const naive = shift(next.A, normalAt(prev, next.A), d)
       const naiveNext = shift(next.A, normalAt(next, next.A), d)
       // a smooth join (tangent, or straight on): the naive point is exact, and
-      // looking for a crossing of two carriers that only touch would be noise
-      if (far(naive, naiveNext) <= SMOOTH_REL * Math.abs(d)) return { x: (naive.x + naiveNext.x) / 2, y: (naive.y + naiveNext.y) / 2 }
+      // looking for a crossing of two carriers that only touch would be noise.
+      // With an arc side it sits on that arc's radial line through the join
+      // (where applyOffset's collinear rule holds it)
+      if (far(naive, naiveNext) <= SMOOTH_REL * Math.abs(d)) {
+        if (next.kind === 'arc') { sm.add(j); return naiveNext }
+        if (prev.kind === 'arc') { sm.add(j); return naive }
+        return { x: (naive.x + naiveNext.x) / 2, y: (naive.y + naiveNext.y) / 2 }
+      }
       const cand = intersectCarriers(cars[(j - 1 + m) % m]!, cars[j]!)
       if (!cand.length) {
         // two straight carriers that never cross fold back on each other;
@@ -198,9 +215,80 @@ export function offsetGeom(doc: SketchDoc, chains: readonly OffsetChain[], d: nu
         if (!(s1 > EPS) || !(s1 < TAU - EPS)) ok = false
       }
     }
-    out.push({ pts: P, radii, centres, sweeps, closed: ch.closed })
+    const cg: OffsetChainGeom = { pts: P, radii, centres, sweeps, closed: ch.closed }
+    // pieces that aren't neighbours meeting where the source's don't: the
+    // copy crosses itself — too far (a source already crossing itself is fine)
+    if (ok && selfMeets(G, cg)) ok = false
+    out.push(cg)
   }
-  return { chains: out, ok }
+  return { g: { chains: out, ok }, smooth }
+}
+
+// ── the copy meeting itself ─────────────────────────────────────────────────
+
+type Seg = { kind: 'line'; p: Vec2; q: Vec2 } | { kind: 'arc'; p: Vec2; q: Vec2; c: Vec2; r: number; sgn: 1 | -1 }
+type Box = { x0: number; y0: number; x1: number; y1: number }
+
+function boxOf(s: Seg, tol: number): Box {
+  if (s.kind === 'arc') return { x0: s.c.x - s.r - tol, y0: s.c.y - s.r - tol, x1: s.c.x + s.r + tol, y1: s.c.y + s.r + tol }
+  return { x0: Math.min(s.p.x, s.q.x) - tol, y0: Math.min(s.p.y, s.q.y) - tol, x1: Math.max(s.p.x, s.q.x) + tol, y1: Math.max(s.p.y, s.q.y) + tol }
+}
+const boxesMeet = (a: Box, b: Box) => a.x0 <= b.x1 && b.x0 <= a.x1 && a.y0 <= b.y1 && b.y0 <= a.y1
+
+// how far round an arc (in its own direction) a point on its circle lies
+function arcAt(s: Extract<Seg, { kind: 'arc' }>, P: Vec2, tol: number): boolean {
+  const span = norm(s.sgn * (ang(s.c, s.q) - ang(s.c, s.p)))
+  const at = norm(s.sgn * (ang(s.c, P) - ang(s.c, s.p)))
+  const slack = tol / s.r
+  return at <= span + slack || at >= TAU - slack
+}
+function distTo(s: Seg, P: Vec2, tol: number): number {
+  if (s.kind === 'line') {
+    const dx = s.q.x - s.p.x, dy = s.q.y - s.p.y, L2 = dx * dx + dy * dy
+    const t = L2 > 0 ? Math.max(0, Math.min(1, ((P.x - s.p.x) * dx + (P.y - s.p.y) * dy) / L2)) : 0
+    return Math.hypot(P.x - s.p.x - t * dx, P.y - s.p.y - t * dy)
+  }
+  if (arcAt(s, P, tol)) return Math.abs(Math.hypot(P.x - s.c.x, P.y - s.c.y) - s.r)
+  return Math.min(far(P, s.p), far(P, s.q))
+}
+const carrierOf = (s: Seg): Carrier => s.kind === 'arc'
+  ? { kind: 'circle', c: s.c, r: s.r }
+  : (() => { const L = far(s.p, s.q) || 1; return { kind: 'line' as const, p: s.p, u: { x: (s.q.x - s.p.x) / L, y: (s.q.y - s.p.y) / L } } })()
+
+/** Do two pieces share a point (a crossing, a touch, an end on the other, an
+ *  overlap), within `tol`? */
+function segsMeet(a: Seg, b: Seg, tol: number): boolean {
+  if (distTo(b, a.p, tol) <= tol || distTo(b, a.q, tol) <= tol || distTo(a, b.p, tol) <= tol || distTo(a, b.q, tol) <= tol) return true
+  for (const X of intersectCarriers(carrierOf(a), carrierOf(b))) {
+    if (distTo(a, X, tol) <= tol && distTo(b, X, tol) <= tol) return true
+  }
+  return false
+}
+
+function selfMeets(G: PieceGeom[], cg: OffsetChainGeom): boolean {
+  const m = G.length
+  const minNon = cg.closed ? 4 : 3                // fewer pieces: every pair are neighbours
+  if (m < minNon) return false
+  const next = (i: number) => (cg.closed ? (i + 1) % m : i + 1)
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity
+  for (const p of cg.pts) { x0 = Math.min(x0, p.x); y0 = Math.min(y0, p.y); x1 = Math.max(x1, p.x); y1 = Math.max(y1, p.y) }
+  const tol = 1e-9 * (1 + Math.max(x1 - x0, y1 - y0))
+  const copy: Seg[] = [], cbox: Box[] = []
+  for (let i = 0; i < m; i++) {
+    const p = cg.pts[i]!, q = cg.pts[next(i)]!, r = cg.radii[i], c = cg.centres[i], sw = cg.sweeps[i]
+    const s: Seg = r != null && c && sw != null ? { kind: 'arc', p, q, c, r, sgn: sw === 1 ? 1 : -1 } : { kind: 'line', p, q }
+    copy.push(s); cbox.push(boxOf(s, tol))
+  }
+  const srcSeg = (i: number): Seg => { const g = G[i]!; return g.kind === 'arc' ? { kind: 'arc', p: g.A, q: g.B, c: g.C, r: g.R, sgn: g.sgn } : { kind: 'line', p: g.A, q: g.B } }
+  for (let i = 0; i < m; i++) {
+    for (let k = i + 2; k < m; k++) {
+      if (cg.closed && i === 0 && k === m - 1) continue   // neighbours round the loop
+      if (!boxesMeet(cbox[i]!, cbox[k]!)) continue
+      if (!segsMeet(copy[i]!, copy[k]!, tol)) continue
+      if (!segsMeet(srcSeg(i), srcSeg(k), tol)) return true
+    }
+  }
+  return false
 }
 
 const f = (v: number) => { const r = Number(v.toFixed(9)); return Object.is(r, -0) ? 0 : r }
@@ -242,7 +330,7 @@ export function offsetGeomD(g: OffsetGeom): string {
  *  Not ok — and `doc` left exactly as it was — when the distance is 0 or too
  *  far anywhere. */
 export function applyOffset(doc: SketchDoc, chains: readonly OffsetChain[], d: number): OffsetBuild {
-  const g = offsetGeom(doc, chains, d)
+  const { g, smooth } = geomOf(doc, chains, d)
   if (!g.ok) return { ok: false, created: [], rules: [] }
   const created: EntityId[] = [], rules: EntityId[] = []
   const rule = (...a: Parameters<typeof addConstraint>) => { const id = addConstraint(...a); rules.push(id); return id }
@@ -262,9 +350,30 @@ export function applyOffset(doc: SketchDoc, chains: readonly OffsetChain[], d: n
     const pid = addPath(doc, ids, segs, ch.closed)
     for (const c of doc.constraints.slice(before)) rules.push(c.id)   // each offset arc's own rule
     created.push(pid, ...ids)
+    // A smooth join with an arc side (Ruling 10, fix round 1): the two
+    // carriers only touch there, so holding the shared point on both is a
+    // double root the solver can't settle. One of the two rules becomes
+    // `collinear [C, X, X′]` — the copy point on the source join's radial
+    // line — in place of the straight side's offsetLine, or (arc to arc) of
+    // the next arc's offsetRadius. Exact while the source stays smooth.
+    const sm = smooth[k]!
+    const skipStart = new Set<number>(), skipEnd = new Set<number>()   // offsetLine at piece i's start / end
+    const skipRadius = new Set<number>()                                // offsetRadius of arc piece i
+    for (const j of sm) {
+      const prev = ch.pieces[(j - 1 + m) % m]!, next = ch.pieces[j]!
+      const X = next.a
+      if (prev.kind === 'line' && next.kind === 'arc') { skipEnd.add((j - 1 + m) % m); rule(doc, 'collinear', [next.c, X, at(j)]) }
+      else if (prev.kind === 'arc' && next.kind === 'line') { skipStart.add(j); rule(doc, 'collinear', [prev.c, X, at(j)]) }
+      else if (next.kind === 'arc') { skipRadius.add(j); rule(doc, 'collinear', [next.c, X, at(j)]) }
+    }
+    // a closed loop of arcs smooth all round: no arc would keep its radius
+    // rule, and the copy could grow or shrink freely — keep the first one's
+    if (ch.closed && skipRadius.size === m) skipRadius.delete(0)
     ch.pieces.forEach((pc, i) => {
-      if (pc.kind === 'line') { rule(doc, 'offsetLine', [pc.a, pc.b, at(i)], d); rule(doc, 'offsetLine', [pc.a, pc.b, at(i + 1)], d) }
-      else rule(doc, 'offsetRadius', [pc.c, pc.a, pc.c, at(i)], -(pc.sweep === 1 ? 1 : -1) * d)
+      if (pc.kind === 'line') {
+        if (!skipStart.has(i)) rule(doc, 'offsetLine', [pc.a, pc.b, at(i)], d)
+        if (!skipEnd.has(i)) rule(doc, 'offsetLine', [pc.a, pc.b, at(i + 1)], d)
+      } else if (!skipRadius.has(i)) rule(doc, 'offsetRadius', [pc.c, pc.a, pc.c, at(i)], -(pc.sweep === 1 ? 1 : -1) * d)
     })
     if (!ch.closed) {
       const first = ch.pieces[0]!, last = ch.pieces[m - 1]!

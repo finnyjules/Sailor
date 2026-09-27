@@ -299,8 +299,9 @@ describe('live: moving the source keeps the copy parallel at the distance, both 
     it(`an open chain of a line and an arc (${dist})`, () => {
       const d = doc()
       const a = addPoint(d, -4, 0, { fixed: true }), b = addPoint(d, 0, 0), ctr = addPoint(d, 0, 3), e = addPoint(d, 3, 3)
-      // straight along +x, then a counter-clockwise quarter turn up (tangent)
+      // straight along +x, then a counter-clockwise quarter turn up, kept tangent
       const path = addPath(d, [a, b, e], [{ kind: 'line' }, { kind: 'arc', center: ctr, sweep: 1 }])
+      addConstraint(d, 'perpendicular', [a, b, b, ctr])
       const built = applyOffset(d, chainsOf(d, [path]), dist)
       expect(built.ok).toBe(true)
       expect(allHold(d)).toBe(true)
@@ -321,6 +322,91 @@ describe('live: moving the source keeps the copy parallel at the distance, both 
       expectParallel(d, P(d, path), copyPath(d, built.created), dist)
     })
   }
+})
+
+describe('smooth joins stay solvable (fix round 1)', () => {
+  const maxRes = (d: SketchDoc) => Math.max(...constraintResiduals(d).map(Math.abs))
+  const size = (d: SketchDoc) => {
+    const ps = d.entities.filter(e => e.kind === 'point') as any[]
+    return Math.max(Math.max(...ps.map(p => p.x)) - Math.min(...ps.map(p => p.x)), Math.max(...ps.map(p => p.y)) - Math.min(...ps.map(p => p.y)))
+  }
+  for (const dist of [0.5, -0.5, -3]) {
+    it(`a rounded square offset ${dist}, a source anchor dragged: converges, rules hold, copy parallel`, () => {
+      const d = doc()
+      const { path, pts } = squarePath(d, 0, 0, 4)
+      P(d, pts[0]!).fixed = true
+      expect(roundCorners(d, pts, 'round', 1).ok).toBe(true)
+      const built = applyOffset(d, chainsOf(d, [path]), dist)
+      expect(built.ok).toBe(true)
+      expect(maxRes(d)).toBeLessThan(1e-7 * size(d))
+      // the four tangent joins are held on the corner arcs' radial lines
+      expect(d.constraints.filter(c => built.rules.includes(c.id) && c.kind === 'collinear')).toHaveLength(8)
+      const src = P(d, path) as PathEntity
+      const q = P(d, src.anchors[3]!)
+      const r = solve(d, { drag: { point: q.id, x: q.x + 0.7, y: q.y + 0.4 } })
+      expect(r.converged).toBe(true)
+      expect(r.iterations).toBeLessThan(20)
+      expect(maxRes(d)).toBeLessThan(1e-7 * size(d))
+      expectParallel(d, src, copyPath(d, built.created), dist)
+    })
+  }
+  for (const dist of [0.5, -0.5]) {
+    it(`arc to arc: an S of two arcs (${dist}) and a circle drawn as two arcs (${dist})`, () => {
+      const d = doc()
+      const c1 = addPoint(d, 0, 0, { fixed: true }), a = addPoint(d, 3, 0, { fixed: true }), x = addPoint(d, 0, 3)
+      const c2 = addPoint(d, 0, 6), b = addPoint(d, -3, 6)
+      const s = addPath(d, [a, x, b], [{ kind: 'arc', center: c1, sweep: 1 }, { kind: 'arc', center: c2, sweep: 0 }])
+      addConstraint(d, 'collinear', [c1, x, c2])   // kept smooth
+      const ctr = addPoint(d, 20, 0, { fixed: true }), p = addPoint(d, 23, 0), q = addPoint(d, 17, 0)
+      const ring = addPath(d, [p, q], [{ kind: 'arc', center: ctr, sweep: 1 }, { kind: 'arc', center: ctr, sweep: 1 }], true)
+      const b1 = applyOffset(d, chainsOf(d, [s]), dist), b2 = applyOffset(d, chainsOf(d, [ring]), dist)
+      expect(b1.ok && b2.ok).toBe(true)
+      expect(maxRes(d)).toBeLessThan(1e-7 * size(d))
+      // the loop of arcs keeps one radius rule, so the copy can't drift in size
+      expect(d.constraints.filter(c => b2.rules.includes(c.id) && c.kind === 'offsetRadius')).toHaveLength(1)
+      const r = solve(d, { drag: { point: b, x: -3.3, y: 6.5 } })
+      expect(r.converged).toBe(true); expect(r.iterations).toBeLessThan(20)
+      const r2 = solve(d, { drag: { point: p, x: 24, y: 1 } })
+      expect(r2.converged).toBe(true); expect(r2.iterations).toBeLessThan(20)
+      expect(maxRes(d)).toBeLessThan(1e-7 * size(d))
+      expectParallel(d, P(d, s), copyPath(d, b1.created), dist)
+      expectParallel(d, P(d, ring), copyPath(d, b2.created), dist)
+    })
+  }
+})
+
+describe('the copy crossing itself (fix round 1)', () => {
+  it('a dumbbell offset inside past its neck is refused; short of it, allowed', () => {
+    const d = doc()
+    const xy = [[-4, -2], [0, -2], [0, -0.2], [2, -0.2], [2, -2], [6, -2], [6, 2], [2, 2], [2, 0.2], [0, 0.2], [0, 2], [-4, 2]]
+    const pts = xy.map(([x, y]) => addPoint(d, x!, y!))
+    const path = addPath(d, pts, pts.map(() => ({ kind: 'line' as const })), true)
+    const chains = chainsOf(d, [path])
+    expect(offsetGeom(d, chains, 0.1).ok).toBe(true)
+    expect(offsetGeom(d, chains, 0.3).ok).toBe(false)
+    expect(offsetGeom(d, chains, 0.5).ok).toBe(false)
+    expect(offsetGeom(d, chains, -0.5).ok).toBe(true)
+    const before = JSON.stringify(d)
+    expect(applyOffset(d, chains, 0.3).ok).toBe(false)
+    expect(JSON.stringify(d)).toBe(before)
+  })
+  it('a source that already crosses itself (a figure eight) still offsets a little', () => {
+    const d = doc()
+    const xy = [[-2, -1], [2, 1], [2, -1], [-2, 1]]
+    const pts = xy.map(([x, y]) => addPoint(d, x!, y!))
+    const path = addPath(d, pts, pts.map(() => ({ kind: 'line' as const })), true)
+    const x8 = [[-1, -1], [1, 1], [4, 1], [4, -1], [1, -1], [-1, 1], [-4, 1], [-4, -1]]   // crosses at its waist
+    const qs = x8.map(([x, y]) => addPoint(d, x! + 20, y!))
+    const eight = addPath(d, qs, qs.map(() => ({ kind: 'line' as const })), true)
+    for (const dist of [0.1, -0.1]) {
+      expect(offsetGeom(d, chainsOf(d, [path]), dist).ok).toBe(true)
+      expect(offsetGeom(d, chainsOf(d, [eight]), dist).ok).toBe(true)
+    }
+    // two ends nearly touching (not crossing) that an offset pushes across: refused
+    const nq = [[0, 0], [3, 2], [5, 0], [3, -2], [0, 0.0001], [-3, 2], [-5, 0], [-3, -2]].map(([x, y]) => addPoint(d, x! + 40, y!))
+    const near = addPath(d, nq, nq.map(() => ({ kind: 'line' as const })), true)
+    expect(offsetGeom(d, chainsOf(d, [near]), 0.1).ok).toBe(false)
+  })
 })
 
 describe('speed (one connected drawing, a symmetric grid)', () => {
