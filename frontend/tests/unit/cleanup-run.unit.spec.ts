@@ -37,6 +37,22 @@ function flower(d: SketchDoc): void {
   }
 }
 
+// one connected drawing: n pieces (lines and shallow arcs in turn) round a ring,
+// each ending a hair short of the next one's start
+function ring(d: SketchDoc, n: number): void {
+  const R = 1.2 * n / (2 * Math.PI)
+  const at = (i: number) => { const t = 2 * Math.PI * i / n; return [R * Math.cos(t) + 50, R * Math.sin(t) + 50] as const }
+  for (let i = 0; i < n; i++) {
+    const [x0, y0] = at(i), [x1, y1] = at(i + 1)
+    const ex = x1 + 0.04 * Math.cos(i), ey = y1 + 0.04 * Math.sin(i * 1.7)
+    const s = addPoint(d, x0, y0), e = addPoint(d, ex, ey)
+    if (i % 2) {
+      const c = addPoint(d, (x0 + ex) / 2 - (ey - y0) * 2, (y0 + ey) / 2 + (ex - x0) * 2)
+      addPath(d, [s, e], [{ kind: 'arc', center: c, sweep: 1 }])
+    } else addPath(d, [s, e], [{ kind: 'line' }])
+  }
+}
+
 describe('solveHeld and componentOf', () => {
   it('keeps held points and held circle radii where they are', () => {
     const d = blank()
@@ -126,6 +142,10 @@ describe('runCleanup', () => {
     const joinId = a.fixes.find(f => f.kind === 'join')!.id
     const off = runCleanup(d, opts({ off: new Set([joinId]) }))
     expect(off.fixes.find(f => f.id === joinId)!.on).toBe(false)
+    // the other joins are found and kept either way (later fixes may pair differently once a gap stays open)
+    const others = a.fixes.filter(f => f.kind === 'join' && f.id !== joinId).map(f => f.id)
+    expect(others).toHaveLength(3)
+    for (const id of others) expect(off.fixes.find(f => f.id === id)?.on).toBe(true)
     expect(paths(off.doc)).toHaveLength(1)
     expect(paths(off.doc)[0].closed).toBe(false)
     expect(JSON.stringify(runCleanup(d, opts({ off: new Set() })))).toBe(JSON.stringify(a))
@@ -217,6 +237,48 @@ describe('runCleanup', () => {
     expect(paths(open.doc).some(p => p.closed)).toBe(false)
     expect(paths(runCleanup(d, opts()).doc).some(p => p.closed)).toBe(true)
   })
+  it('never joins two ends that may not move', () => {
+    const d = blank()
+    const A = addPoint(d, 0, 0), B = addPoint(d, 5, 0, { fixed: true })
+    const C = addPoint(d, 5.1, 0.05, { fixed: true }), D = addPoint(d, 9, 3)
+    addLine(d, A, B); addLine(d, C, D)
+    const r = runCleanup(d, opts())
+    expect(r.fixes.some(f => f.kind === 'join')).toBe(false)
+    expect(r.doc.entities.filter(e => e.kind === 'point')).toHaveLength(4)
+    // control: with one end free the same gap is joined
+    const e = blank()
+    const A2 = addPoint(e, 0, 0), B2 = addPoint(e, 5, 0, { fixed: true })
+    const C2 = addPoint(e, 5.1, 0.05), D2 = addPoint(e, 9, 3)
+    addLine(e, A2, B2); addLine(e, C2, D2)
+    expect(runCleanup(e, opts()).fixes.some(f => f.kind === 'join' && f.on)).toBe(true)
+  })
+  it('a mirror pair the rules can’t allow leaves no guide behind', () => {
+    const make = (fixed: boolean) => {
+      const d = blank()
+      addCircle(d, addPoint(d, 0, 0, { fixed }), 1)
+      addCircle(d, addPoint(d, 10, 0.1, { fixed }), 1)
+      return d
+    }
+    // control: free centres are mirrored about a new upright guide
+    const free = runCleanup(make(false), opts())
+    expect(free.fixes.some(f => f.kind === 'mirror' && f.on)).toBe(true)
+    expect(free.doc.entities.some(e => e.kind === 'line' && e.construction)).toBe(true)
+    // fixed centres at different heights can't mirror: the guide it made goes away with it
+    const d = make(true)
+    const r = runCleanup(d, opts())
+    expect(r.fixes.some(f => f.kind === 'mirror')).toBe(false)
+    expect(r.doc.entities).toHaveLength(d.entities.length)
+    expect(r.doc.entities.some(e => e.kind !== 'circle' && e.construction)).toBe(false)
+    expect(r.doc.constraints.map(c => c.kind)).toEqual(r.fixes.some(f => f.kind === 'equalRadius' && f.on) ? ['equalRadius'] : [])
+  })
+  it('a rounded size leaves no rule behind', () => {
+    const d = blank()
+    const l = lineAt(d, 0, 0, 30, 5.05)
+    const r = runCleanup(d, opts())
+    expect(r.fixes.find(f => f.kind === 'round')).toMatchObject({ on: true, label: 'Rounded to 5' })
+    expect(len(r.doc, l)).toBeCloseTo(5, 5)
+    expect(r.doc.constraints).toEqual([])
+  })
   it('refuses a drawing of more than 150 pieces', () => {
     const d = blank()
     for (let i = 0; i < 151; i++) addLine(d, addPoint(d, i * 3, 0), addPoint(d, i * 3 + 1, 1))
@@ -237,5 +299,18 @@ describe('runCleanup', () => {
     expect(performance.now() - t0).toBeLessThan(8000)
     expect(r.fixes.some(f => f.on)).toBe(true)
     expect(maxRes(r.doc)).toBeLessThan(1e-3)
+  })
+  it('cleans one connected drawing of 120 pieces fast enough to re-run on every switch', () => {
+    const d = blank(); ring(d, 120)
+    const t0 = performance.now()
+    const r = runCleanup(d, opts())
+    const ms = performance.now() - t0
+    expect(r.fixes.filter(f => f.kind === 'join' && f.on)).toHaveLength(120)
+    expect(paths(r.doc)).toHaveLength(1)
+    expect(paths(r.doc)[0].closed).toBe(true)
+    expect(maxRes(r.doc)).toBeLessThan(1e-3)
+    const t1 = performance.now()
+    runCleanup(d, opts({ off: new Set([r.fixes[0]!.id]) }))
+    expect(Math.max(ms, performance.now() - t1)).toBeLessThan(4000)   // ~0.2–0.8 s here; it took ~20 s before the window solve
   })
 })

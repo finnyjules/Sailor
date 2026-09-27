@@ -6,6 +6,7 @@
 // something, and the guards pass. Always from the drawing it is given, so
 // the same switches give the same answer.
 import type { SketchDoc, EntityId } from '../model'
+import type { Vec2 } from '../geom'
 import { getPoint } from '../model'
 import { cloneDoc } from '../clone'
 import { addConstraint, removeConstraint } from '../edit'
@@ -15,7 +16,7 @@ import { equivalentRuleKey, type RuleSpec } from '../tangency'
 import { meanPoint } from './cluster'
 import { buildContext, heldForScope, copyPoints, type CleanupContext, type ContextEnv } from './context'
 import { RowBasis, freeSlots, rowsFor } from './rank'
-import { solveHeld, componentOf, baselineOf, movedTooFar, arcBroken, type Baseline } from './guards'
+import { solveHeld, solveWindow, windowOf, reachesBeyond, componentOf, baselineOf, movedTooFar, arcBroken, guideCollapsed, type Baseline } from './guards'
 import { detectJoins, detectOnCurve, detectTangents } from './detect-topology'
 import { detectHV, detectParallelPerp } from './detect-directions'
 import { detectConcentric, detectMirrorPairs, detectEqualLengths, detectEqualRadii, detectEvenSpacing, detectRound } from './detect-shape'
@@ -107,9 +108,39 @@ function tryApply(work: SketchDoc, cand: Candidate, env: Env): boolean {
     changed = true
   }
   if (!changed) return false
-  if (!solveHeld(componentOf(work, seeds), env.held)) return false
+  const guarded = () => !movedTooFar(work, env.base) && !arcBroken(work, env.base, resolve) && !guideCollapsed(work, created, env.base.unitsPerPx)
+  // a small window round the fix first; the whole connected part only when the
+  // window can't settle it or settles it badly (a piece squeezed to nothing to
+  // meet a rule whose other end is held)
+  const was = snapshotShape(work)
+  const win = windowOf(work, seeds)
+  let ok = solveWindow(work, win, env.held) && guarded()
+  if (!ok) {
+    const part = componentOf(work, seeds)
+    if (reachesBeyond(part, win)) {        // else the window was the whole part: same answer
+      restoreShape(work, was)
+      ok = solveHeld(part, env.held) && guarded()
+    }
+  }
   if (temp) removeConstraint(work, temp)
-  return !movedTooFar(work, env.base) && !arcBroken(work, env.base, resolve)
+  return ok
+}
+
+// where every point and circle radius is, to put back after a window solve that didn't do
+function snapshotShape(doc: SketchDoc): Map<EntityId, number[]> {
+  const out = new Map<EntityId, number[]>()
+  for (const e of doc.entities) {
+    if (e.kind === 'point') out.set(e.id, [e.x, e.y])
+    else if (e.kind === 'circle') out.set(e.id, [e.r])
+  }
+  return out
+}
+function restoreShape(doc: SketchDoc, was: ReadonlyMap<EntityId, number[]>): void {
+  for (const e of doc.entities) {
+    const v = was.get(e.id)
+    if (!v) continue
+    if (e.kind === 'point') { e.x = v[0]!; e.y = v[1]! } else if (e.kind === 'circle') e.r = v[0]!
+  }
 }
 
 export function runCleanup(input: SketchDoc, o: CleanupOptions): CleanupResult {
@@ -122,7 +153,12 @@ export function runCleanup(input: SketchDoc, o: CleanupOptions): CleanupResult {
   if (residualNorm(work) >= 1e-3 && !solveHeld(work, held)) return { doc: cloneDoc(input), fixes: [], refused: 'conflict' }
   const alias = new Map<EntityId, EntityId>()
   let guides = new Map<string, EntityId>()
-  const tried: { cand: Candidate; on: boolean }[] = []
+  const tried: { cand: Candidate; on: boolean; spot: Vec2 | null }[] = []
+  // the mean of a candidate's anchor points in `doc` (ids resolved through merges), if any are left
+  const spotIn = (doc: SketchDoc, cand: Candidate): Vec2 | null => {
+    const at = cand.anchor.map(id => getPoint(doc, resolveIn(alias, id))).filter((p): p is NonNullable<typeof p> => !!p)
+    return at.length ? meanPoint(at) : null
+  }
   for (const pass of PASSES) {
     const ctx = buildContext(work, env0)
     const cands = pass.flatMap(detect => detect(ctx)).sort((a, b) => b.score - a.score || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
@@ -130,9 +166,10 @@ export function runCleanup(input: SketchDoc, o: CleanupOptions): CleanupResult {
     for (const cand of cands) {
       if (seen.has(cand.id)) continue
       seen.add(cand.id)
-      if (off.has(cand.id)) { tried.push({ cand, on: false }); continue }
+      const spot = spotIn(work, cand)
+      if (off.has(cand.id)) { tried.push({ cand, on: false, spot }); continue }
       const snap = cloneDoc(work), snapAlias = new Map(alias), snapGuides = new Map(guides)
-      if (tryApply(work, cand, { held, base, alias, guides, openOnly: !!o.openOnly })) { tried.push({ cand, on: true }); continue }
+      if (tryApply(work, cand, { held, base, alias, guides, openOnly: !!o.openOnly })) { tried.push({ cand, on: true, spot }); continue }
       work = snap
       alias.clear()
       for (const [k, v] of snapAlias) alias.set(k, v)
@@ -140,9 +177,10 @@ export function runCleanup(input: SketchDoc, o: CleanupOptions): CleanupResult {
     }
   }
   const fixes: CleanupFix[] = []
-  for (const { cand, on } of tried) {
-    const at = cand.anchor.map(id => getPoint(work, resolveIn(alias, id))).filter((p): p is NonNullable<typeof p> => !!p)
-    if (at.length) fixes.push({ id: cand.id, kind: cand.kind, label: cand.label, on, at: meanPoint(at) })
+  for (const { cand, on, spot } of tried) {
+    // where its points are now; where they were when it was tried if a later fix took them all away
+    const at = spotIn(work, cand) ?? spot
+    if (at) fixes.push({ id: cand.id, kind: cand.kind, label: cand.label, on, at })
   }
   return { doc: work, fixes }
 }
