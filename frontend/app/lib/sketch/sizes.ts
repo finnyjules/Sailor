@@ -22,7 +22,10 @@ export type SizeTarget =
   | { kind: 'arc'; pathId: EntityId; segIndex: number; c: EntityId; s: EntityId; e: EntityId }
   | { kind: 'circle'; id: EntityId; c: EntityId }
 
-export interface Sizes { x?: number; y?: number; length?: number; angle?: number; radius?: number; sweep?: number; locked?: boolean; fixed?: boolean }
+/** `fixed`: a point that is fixed, or a line whose two ends are (its sizes
+ *  can't change); `endFixed`: an arc whose end is fixed (its sweep and length
+ *  can't change). */
+export interface Sizes { x?: number; y?: number; length?: number; angle?: number; radius?: number; sweep?: number; locked?: boolean; fixed?: boolean; endFixed?: boolean }
 
 export function sizeTargetFor(doc: SketchDoc, sel: readonly EntityId[], segs: readonly SegPick[]): SizeTarget | null {
   let seg: SegPick | null = null
@@ -90,7 +93,7 @@ export function measureSizes(doc: SketchDoc, t: SizeTarget, view: ViewMatrix): S
     const g = curveGeom(doc, { kind: 'seg', pathId: t.pathId, segIndex: t.segIndex })
     if (!g || g.kind !== 'arc') return {}
     const sweep = Math.abs(g.sweepAngle!)
-    return { radius: g.r!, length: g.r! * sweep, sweep: sweep * 180 / Math.PI, locked: !!radiusPinOf(doc, t.c, t.s) }
+    return { radius: g.r!, length: g.r! * sweep, sweep: sweep * 180 / Math.PI, locked: !!radiusPinOf(doc, t.c, t.s), endFixed: !!getPoint(doc, t.e)?.fixed }
   }
   const e = getEntity(doc, t.id)
   return e?.kind === 'circle' ? { radius: e.r, locked: !!circleRadiusRuleOf(doc, t.id) } : {}

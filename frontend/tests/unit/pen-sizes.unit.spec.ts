@@ -243,3 +243,85 @@ describe('never refuse on a guess', () => {
     expect(pen.canUndo()).toBe(false)
   })
 })
+
+describe('fix round 1', () => {
+  it('a refused or rolled-back size signals nothing; a kept one settles once', () => {
+    const doc = ref<SketchDoc>({ entities: [], constraints: [] })
+    const d = doc.value
+    const a = addPoint(d, 0, 0, { fixed: true }), b = addPoint(d, 4, 0), q = addPoint(d, 9, 9)
+    addLine(d, a, b)
+    addConstraint(d, 'distance', [a, b], 4)
+    let live = 0, settled = 0
+    const pen = usePen({ doc, view: ref(DEV), onChange: () => settled++, onLiveChange: () => live++ })
+    expect(pen.setLineLength(a, b, 7)).toBe(false)          // refused by the check
+    expect([live, settled]).toEqual([0, 0])
+    const strip = rigidStrip(40)                                // refused only after the normal solve
+    const doc2 = ref<SketchDoc>(strip.d)
+    let live2 = 0, settled2 = 0
+    const pen2 = usePen({ doc: doc2, view: ref(DEV), onChange: () => settled2++, onLiveChange: () => live2++ })
+    expect(pen2.setLineLength(strip.pts[20]!, strip.pts[21]!, 9)).toBe(false)
+    expect([live2, settled2]).toEqual([0, 0])
+    expect(pen.setPointXY(q, 1, 2)).toBe(true)
+    expect([live, settled]).toEqual([0, 1])
+  })
+  it('keeps the other end and moves what the rules let move (a pinned triangle)', () => {
+    let a = '', b = '', c = ''
+    const { doc, pen } = mk(d => {
+      a = addPoint(d, 0, 0); b = addPoint(d, 4, 0); c = addPoint(d, 2, 2)
+      addPath(d, [a, b, c], [{ kind: 'line' }, { kind: 'line' }, { kind: 'line' }], true)
+      addConstraint(d, 'distance', [a, c], Math.hypot(2, 2))
+      addConstraint(d, 'distance', [b, c], Math.hypot(2, 2))
+    })
+    expect(pen.setLineLength(a, b, 3.5)).toBe(true)
+    expect(P(doc.value, a)).toMatchObject({ x: 0, y: 0 })
+    expect(dist(doc.value, a, b)).toBeCloseTo(3.5, 5)
+    expect(dist(doc.value, a, c)).toBeCloseTo(Math.hypot(2, 2), 5)
+    expect(dist(doc.value, b, c)).toBeCloseTo(Math.hypot(2, 2), 5)
+  })
+  it('says why: a fixed arc end, a line with no direction; measureSizes flags a fixed arc end', () => {
+    let arc = '', a = '', b = ''
+    const { doc, pen } = mk(d => {
+      const s = addPoint(d, 10, 0), e = addPoint(d, 12, 2, { fixed: true }), c = addPoint(d, 12, 0)
+      arc = addPath(d, [s, e], [{ kind: 'arc', center: c, sweep: 0 }])
+      a = addPoint(d, 5, 5); b = addPoint(d, 5, 5); addLine(d, a, b)
+    })
+    expect(measureSizes(doc.value, sizeTargetFor(doc.value, [arc], [])!, DEV).endFixed).toBe(true)
+    expect(pen.setArcSweep(arc, 0, 120)).toBe(false)
+    expect(pen.status.value).toBe('Fixed points stay where they are')
+    expect(pen.setArcLength(arc, 0, 5)).toBe(false)
+    expect(pen.status.value).toBe('Fixed points stay where they are')
+    expect(pen.setLineAngle(a, b, 30)).toBe(false)
+    expect(pen.status.value).toBe('That line has no direction')
+  })
+  it('the highlight clears when the selection is replaced, the session finishes, or on undo / redo', () => {
+    let l = '', p = ''
+    const { pen } = mk(d => { p = addPoint(d, 5, 5); l = addLine(d, addPoint(d, 0, 0), addPoint(d, 1, 0)) })
+    const lit = () => pen.setHighlight([{ kind: 'line', id: l }])
+    lit(); pen.pick(p); expect(pen.highlight.value).toEqual([])
+    lit(); pen.clearSel(); expect(pen.highlight.value).toEqual([])
+    lit(); pen.finishSession(); expect(pen.highlight.value).toEqual([])
+    pen.setPointXY(p, 6, 6)
+    lit(); pen.undo(); expect(pen.highlight.value).toEqual([])
+    lit(); pen.redo(); expect(pen.highlight.value).toEqual([])
+  })
+  it('each lock toggle is exactly one undo step', () => {
+    let arc = '', circle = ''
+    const { pen } = mk(d => {
+      const s = addPoint(d, 10, 0), e = addPoint(d, 12, 2), c = addPoint(d, 12, 0)
+      arc = addPath(d, [s, e], [{ kind: 'arc', center: c, sweep: 0 }])
+      circle = addCircle(d, addPoint(d, 20, 0), 1.5)
+    })
+    const oneStep = (f: () => void) => {
+      f(); expect(pen.canUndo()).toBe(true)
+      pen.undo(); expect(pen.canUndo()).toBe(false)
+      pen.redo(); pen.undo(); expect(pen.canUndo()).toBe(false)   // redo re-does just that one
+      f()
+    }
+    oneStep(() => pen.toggleArcRadiusLock(arc, 0))   // lock on
+    pen.toggleArcRadiusLock(arc, 0)                  // lock off: one more step over the lock
+    pen.undo(); pen.undo(); expect(pen.canUndo()).toBe(false)
+    oneStep(() => pen.toggleCircleRadiusLock(circle))
+    pen.toggleCircleRadiusLock(circle)
+    pen.undo(); pen.undo(); expect(pen.canUndo()).toBe(false)
+  })
+})

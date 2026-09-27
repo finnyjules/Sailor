@@ -324,6 +324,7 @@ export function usePen(opts: {
   // (additive here; pickSegment is always an Option-click). A plain click
   // replaces everything; any other mix clears the segment selection.
   function pick(id: EntityId, additive = false) {
+    highlight.value = []   // the Properties hover belongs to the old selection
     if (!additive) { clearSegSel(); selection.value = [id]; return }
     const i = selection.value.indexOf(id)
     if (i >= 0) selection.value.splice(i, 1)
@@ -332,7 +333,11 @@ export function usePen(opts: {
     const pairs = selectedSegments.value.length === 1 && (sel.length === 0 || (sel.length === 1 && (isPointId(sel[0]!) || isLineOrCircleId(sel[0]!))))
     if (!pairs) clearSegSel()
   }
-  function clearSel() { selection.value = [] }
+  function clearSel() { selection.value = []; highlight.value = [] }
+  // what the Properties panel lights while a rule row is hovered (pen stage
+  // 6) — view state, no history; replaced, never mutated, so the overlay's
+  // computeds follow; cleared whenever the selection is replaced
+  const highlight = shallowRef<PieceRef[]>([])
 
   // --- segment selection: individual { pathId, segIndex } picks, distinct from
   // (and mutually exclusive with) whole-entity `selection` above. additive=false
@@ -2019,10 +2024,11 @@ export function usePen(opts: {
   // --- Properties: typed sizes and the hover highlight (pen stage 6) ---
   // A typed size is checked first on a copy — only the window round it
   // (checkSizeEdit, the stage-5 window solve; never a big drawing whole). A
-  // certain "no" refuses it and changes nothing. Else the same edit runs on
-  // the drawing through the pen's normal solve (runSolve); if that solve
-  // fails the drawing is put back and it is refused (an uncertain check is
-  // never a refusal on a guess). Any temporary rule goes again; one step.
+  // certain "no" refuses it and changes nothing. Else the pen's normal solve
+  // runs on a plain copy (the dragged and stay points held, any temporary
+  // rule on the copy only); only when it settles are its positions copied
+  // into the drawing, as one step (an uncertain check is never a refusal on
+  // a guess). No live-change signal: a refused size never reaches a host.
   // `seeds` are what the edit touches when it neither drags nor adds a rule
   // (a rule's value changed). `stay` are the points a drag must leave where
   // they are for the typed size to be kept (a line's other end, an arc's
@@ -2033,28 +2039,36 @@ export function usePen(opts: {
     const plan = edit(cloneDoc(doc.value))
     if (!plan) return false
     const seeds = plan.drag ? [plan.drag.point] : plan.temp ? plan.temp.refs : plan.seeds ?? []
+    const stay = plan.stay ?? []
     const unitsPerPx = pxToUnits(1, opts.view.value)
+    // a plain copy with the edit made: the dragged point at its target, any
+    // temporary rule added, a rule's value changed
+    const trialOf = (): SketchDoc => {
+      const t = cloneDoc(doc.value)
+      const p = edit(t)!
+      if (p.drag) { const q = ptOf(t, p.drag.point); if (q) { q.x = p.drag.x; q.y = p.drag.y } }
+      if (p.temp) t.constraints.push({ id: '__size', kind: p.temp.kind, refs: [...p.temp.refs], value: p.temp.value })
+      return t
+    }
     const verdict = checkSizeEdit(doc.value, {
-      fresh: () => {
-        const t = cloneDoc(doc.value)
-        const p = edit(t)!
-        if (p.drag) { const q = ptOf(t, p.drag.point); if (q) { q.x = p.drag.x; q.y = p.drag.y } }
-        if (p.temp) t.constraints.push({ id: '__size', kind: p.temp.kind, refs: [...p.temp.refs], value: p.temp.value })
-        return t
-      },
-      seeds, held: new Set(plan.drag ? [plan.drag.point] : []), unitsPerPx, own, stay: plan.stay,
+      fresh: trialOf, seeds, held: new Set([...(plan.drag ? [plan.drag.point] : []), ...stay]), unitsPerPx, own, stay,
     })
     if (verdict === 'refuse') { status.value = SIZE_REFUSED; return false }
-    const before = cloneDoc(doc.value)
-    const real = edit(doc.value)!
-    const tempId = real.temp ? addConstraint(doc.value, real.temp.kind, real.temp.refs, real.temp.value) : null
-    const res = runSolve(real.drag)
-    if (!res.converged || !stayed(before, doc.value, real.stay ?? [], STAY_PX * unitsPerPx)) {
-      doc.value = before
-      status.value = SIZE_REFUSED
-      return false
+    // the pen's normal solve, on a plain copy with the dragged and the stay
+    // points held — never the live path (onLiveChange would hand a host a
+    // drawing that may yet be refused); the drawing changes only on success
+    const trial = trialOf()
+    for (const e of trial.entities) if (e.kind === 'point' && (e.id === plan.drag?.point || stay.includes(e.id))) e.fixed = true
+    const res = solve(trial, { maxIter: 120 })
+    if (!res.converged || !stayed(doc.value, trial, stay, STAY_PX * unitsPerPx)) { status.value = SIZE_REFUSED; return false }
+    edit(doc.value)   // a rule's value, a circle's radius
+    const solved = new Map(trial.entities.map(e => [e.id, e]))
+    for (const e of doc.value.entities) {
+      const t = solved.get(e.id)
+      if (e.kind === 'point' && t?.kind === 'point') { e.x = t.x; e.y = t.y }
+      else if (e.kind === 'circle' && t?.kind === 'circle') e.r = t.r
     }
-    if (tempId) removeConstraint(doc.value, tempId)
+    status.value = `solved · ${doc.value.entities.length} ent · ${doc.value.constraints.length} con`
     commitHistory()
     return true
   }
@@ -2067,6 +2081,11 @@ export function usePen(opts: {
   }
   // move the free end of a–b so it runs `len` along `dir` from the other end
   function moveLineEnd(a: EntityId, b: EntityId, dirOf: (A: Vec2, B: Vec2) => Vec2 | null, lenOf: (A: Vec2, B: Vec2) => number): boolean {
+    const A0 = ptOf(doc.value, a), B0 = ptOf(doc.value, b)
+    if (!A0 || !B0) return false
+    if (A0.fixed && B0.fixed) { status.value = 'Fixed points stay where they are'; return false }
+    // a zero-length line: no direction to lengthen along, no length to turn
+    if (!dirOf(A0, B0) || !(lenOf(A0, B0) > 0)) { status.value = 'That line has no direction'; return false }
     return tryEdit(d => {
       const A = ptOf(d, a), B = ptOf(d, b)
       if (!A || !B || (A.fixed && B.fixed)) return null
@@ -2106,6 +2125,8 @@ export function usePen(opts: {
   function setArcSweep(pathId: EntityId, segIndex: number, deg: number): boolean {
     if (!Number.isFinite(deg)) return false
     const sweepDeg = Math.min(359.5, Math.max(0.5, deg))
+    const a0 = arcParts(doc.value, pathId, segIndex)
+    if (a0 && ptOf(doc.value, a0.e)?.fixed) { status.value = 'Fixed points stay where they are'; return false }
     return tryEdit(d => {
       const a = arcParts(d, pathId, segIndex)
       const C = a && ptOf(d, a.c), S = a && ptOf(d, a.s), E = a && ptOf(d, a.e)
@@ -2149,9 +2170,7 @@ export function usePen(opts: {
     runSolve()
     commitHistory()
   }
-  // what the Properties panel lights while a rule row is hovered — view state
-  // (no history); replaced, never mutated, so the overlay's computeds follow
-  const highlight = shallowRef<PieceRef[]>([])
+  // the Properties hover highlight (`highlight`) is declared by the selection
   function setHighlight(p: PieceRef[]): void { highlight.value = p }
 
   // --- Clean up (pen stage 5, lib/sketch/cleanup) ---
@@ -2574,6 +2593,7 @@ export function usePen(opts: {
     deletePendingOwnPoint()
     const sel = selection.value.slice(), segs = selectedSegments.value.slice()
     clearTransient()
+    highlight.value = []
     // keep the user's selection — settling is not deselecting (but drop ids
     // the cleanup just deleted)
     selection.value = sel.filter(id => doc.value.entities.some(e => e.id === id))
