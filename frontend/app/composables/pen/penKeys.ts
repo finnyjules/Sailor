@@ -29,6 +29,11 @@ export function screenDeltaToDrawing(m: ViewMatrix, sx: number, sy: number): { x
   return { x: (m.d * sx - m.c * sy) / det, y: (m.a * sy - m.b * sx) / det }
 }
 
+/** ⌥⇧C, Clean up. Matched by the key's position: on a Mac ⌥⇧C types "Ç". */
+export function isCleanupKey(ev: KeyboardEvent): boolean {
+  return ev.altKey && ev.shiftKey && !ev.metaKey && !ev.ctrlKey && ev.code === 'KeyC'
+}
+
 export interface PenKeyContext {
   tool: Ref<PenTool>
   pendingPath: Ref<PendingPath>
@@ -55,6 +60,9 @@ export interface PenKeyContext {
   isToolAllowed: (t: PenTool) => boolean
   // Escape in Trim: clears the removed pieces' ghosts; true if there were any
   clearTrimGhosts: () => boolean
+  // Clean up (pen stage 5): whether the host offers it, and the toggle
+  cleanupAllowed: boolean
+  toggleCleanup: () => void
 }
 
 // single-letter tool keys — only with no modifier, and only for a tool the
@@ -82,6 +90,12 @@ export function handlePenKey(ev: KeyboardEvent, ctx: PenKeyContext, local?: { ca
     if (key === 'z' && !ev.shiftKey) { ctx.undo(); return true }
     if ((key === 'z' && ev.shiftKey) || key === 'y') { ctx.redo(); return true }
     return false
+  }
+  // ⌥⇧C: Clean up — only in a host that offers it
+  if (isCleanupKey(ev)) {
+    if (!ctx.cleanupAllowed) return false
+    ctx.toggleCleanup()
+    return true
   }
   // (viewport keys — ⌘0 fit, Space pan — are the host's; it handles them
   // before delegating here)

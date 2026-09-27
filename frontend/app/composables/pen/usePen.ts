@@ -58,10 +58,12 @@ import {
   type RuleOption,
 } from './penRules'
 import { createPenHistory } from './penHistory'
-import { handlePenKey, type PenKeyContext, NUDGE_PX, NUDGE_PX_SHIFT, screenDeltaToDrawing } from './penKeys'
+import { handlePenKey, isCleanupKey, type PenKeyContext, NUDGE_PX, NUDGE_PX_SHIFT, screenDeltaToDrawing } from './penKeys'
 import { createPenCopies, type PendingOp } from './penCopies'
 import { nearestCurve, spanAt, curveGeom, paramOf, pointAt, type Span, type CurveGeom } from '~/lib/sketch/crossings'
 import { removeSpan, removeSegment, cutAt, canDissolve, dissolveAt, mergePoints, sameKey } from '~/lib/sketch/trim'
+import { cloneDoc } from '~/lib/sketch/clone'
+import { runCleanup, type CleanupResult, type CleanupScope, type CleanupStrength, type FixKind } from '~/lib/sketch/cleanup'
 
 // NUDGE_PX / NUDGE_PX_SHIFT / screenDeltaToDrawing now live in penKeys.ts
 // (they exist only for the arrow-key nudge in the key handler); re-exported
@@ -73,7 +75,8 @@ export { NUDGE_PX, NUDGE_PX_SHIFT, screenDeltaToDrawing }
 // a curve between crossings, 'cut' adds a point on a line or arc, 'dissolve'
 // merges the two pieces at a point back into one (see the Trim section).
 export type PenTool = 'select' | 'point' | 'line' | 'circle' | 'path' | 'curve' | 'trim' | 'cut' | 'dissolve'
-export interface PenOptions { openOnly?: boolean; tools?: PenTool[] }
+// cleanup: Clean up (pen stage 5) is offered unless a host sets it false
+export interface PenOptions { openOnly?: boolean; tools?: PenTool[]; cleanup?: boolean }
 
 export const SPARKLE_LIFETIME_MS = 380
 
@@ -265,6 +268,7 @@ export function usePen(opts: {
   // the toolbar's own buttons.
   const ALL_PEN_TOOLS: PenTool[] = ['select', 'point', 'line', 'circle', 'path', 'curve', 'trim', 'cut', 'dissolve']
   const openOnly = !!opts.options?.openOnly
+  const cleanupAllowed = opts.options?.cleanup !== false
   const resolvedTools: PenTool[] = (() => {
     let list = opts.options?.tools ? opts.options.tools.filter(t => ALL_PEN_TOOLS.includes(t)) : [...ALL_PEN_TOOLS]
     if (!list.includes('select')) list = ['select', ...list]
@@ -272,7 +276,7 @@ export function usePen(opts: {
     return list
   })()
   // frozen: fixed for the pen's lifetime, same as resolvedTools/openOnly above
-  const options = Object.freeze({ openOnly, tools: Object.freeze(resolvedTools) })
+  const options = Object.freeze({ openOnly, tools: Object.freeze(resolvedTools), cleanup: cleanupAllowed })
   function isToolAllowed(t: Tool): boolean { return resolvedTools.includes(t) }
 
   const tool = ref<Tool>('select')
@@ -408,6 +412,7 @@ export function usePen(opts: {
   const penHistory = createPenHistory({ doc, onChange: opts.onChange, onLiveChange: opts.onLiveChange })
   const { commitHistory, initHistory, canUndo, canRedo } = penHistory
   function undo() {
+    closeCleanup()   // a Clean up preview is dropped, never applied
     if (trimPress) trimUp()   // a live Trim press settles before stepping back over it
     if (arcDrag) arcDragEnd()   // so does a live arc drag
     if (!penHistory.undo()) return
@@ -424,6 +429,7 @@ export function usePen(opts: {
     opts.onChange?.()
   }
   function redo() {
+    closeCleanup()
     if (trimPress) trimUp()
     if (arcDrag) arcDragEnd()
     if (!penHistory.redo()) return
@@ -456,12 +462,18 @@ export function usePen(opts: {
   function onKeydown(ev: KeyboardEvent, local?: { cancelGesture?: () => boolean }): boolean {
     // any real key mid arc drag settles it first (its own step), so no verb
     // (nudge, delete, a rule, a tool) ever snapshots the transient point
+    // a Clean up preview owns the keys (cleanupKey)
+    if (cleanup.value) {
+      const handled = cleanupKey(ev)
+      if (handled) { ev.preventDefault(); ev.stopPropagation() }
+      return handled
+    }
     if (arcDrag && !MODIFIER_KEYS.has(ev.key)) arcDragEnd()
     const ctx: PenKeyContext = {
       tool, pendingPath, dimBuffer, pendingOp, status, selection, selectedSegments, view: opts.view,
       cancelGesture: opts.cancelGesture,
       cancelPendingOp, undo, redo, cancelPath, commitDimension, finishPath, removeLastAnchor, del, nudge,
-      selectTool, isToolAllowed, clearTrimGhosts,
+      selectTool, isToolAllowed, clearTrimGhosts, cleanupAllowed, toggleCleanup,
     }
     const handled = handlePenKey(ev, ctx, local)
     if (handled) { ev.preventDefault(); ev.stopPropagation() }
@@ -1922,6 +1934,111 @@ export function usePen(opts: {
     clearSel(); runSolve(); commitHistory()
   }
 
+  // --- Clean up (pen stage 5, lib/sketch/cleanup) ---
+  // A preview: the drawing stays exactly as it is while `cleanup` holds the
+  // cleaned copy, re-solved from the drawing as it was when Clean up opened
+  // on every switch or strength change (so the same switches always give the
+  // same answer). Apply writes it as ONE history step; Cancel, Escape, ⌥⇧C
+  // again, or anything that ends the session (a tool change, undo / redo,
+  // reset, revert, finishSession, parking, dispose) drops it untouched.
+  // Tolerances use the zoom Clean up opened at, so zooming mid-preview does
+  // not reshuffle the fixes. The object is replaced on every change, never
+  // mutated, so the overlay's and toolbar's computeds follow it.
+  // `memo` keeps every answer of this session keyed by strength + the sorted
+  // switched-off ids, so switching a badge back and forth is instant; it is
+  // carried from object to object and dies with the session.
+  interface CleanupSession {
+    strength: CleanupStrength
+    off: ReadonlySet<string>
+    scope: CleanupScope | null
+    unitsPerPx: number
+    original: SketchDoc
+    result: CleanupResult
+    memo: Map<string, CleanupResult>
+  }
+  const cleanup = shallowRef<CleanupSession | null>(null)
+  function solveCleanup(s: Omit<CleanupSession, 'result'>): CleanupSession {
+    const k = `${s.strength}|${[...s.off].sort().join(',')}`
+    let result = s.memo.get(k)
+    if (!result) {
+      result = runCleanup(s.original, { unitsPerPx: s.unitsPerPx, strength: s.strength, scope: s.scope, off: s.off, openOnly })
+      s.memo.set(k, result)
+    }
+    return { ...s, result }
+  }
+  function startCleanup(): void {
+    if (!cleanupAllowed || cleanup.value) return
+    finishSession()   // every live gesture settles first (its own step, if it changed anything); the selection is kept
+    const picked = selection.value.length > 0 || selectedSegments.value.length > 0
+    const scope: CleanupScope | null = picked
+      ? { entities: [...selection.value], segments: selectedSegments.value.map(s => ({ ...s })) }
+      : null
+    cleanup.value = solveCleanup({
+      strength: 'normal', off: new Set(), scope, unitsPerPx: pxToUnits(1, opts.view.value),
+      original: cloneDoc(doc.value), memo: new Map(),
+    })
+  }
+  function closeCleanup(): void { cleanup.value = null }
+  function cancelCleanup(): void {
+    if (!cleanup.value) return
+    cleanup.value = null
+    status.value = 'Clean up cancelled'
+  }
+  function toggleCleanup(): void {
+    if (cleanup.value) cancelCleanup()
+    else startCleanup()
+  }
+  function setCleanupStrength(strength: CleanupStrength): void {
+    const s = cleanup.value
+    if (!s || s.strength === strength) return
+    cleanup.value = solveCleanup({ ...s, strength })
+  }
+  function toggleCleanupFix(id: string): void {
+    const s = cleanup.value
+    if (!s) return
+    const off = new Set(s.off)
+    if (off.has(id)) off.delete(id)
+    else off.add(id)
+    cleanup.value = solveCleanup({ ...s, off })
+  }
+  // a collapsed badge: every fix of that kind off when all are on, else all on
+  function toggleCleanupKind(kind: FixKind): void {
+    const s = cleanup.value
+    if (!s) return
+    const mine = s.result.fixes.filter(f => f.kind === kind)
+    if (!mine.length) return
+    const allOn = mine.every(f => f.on)
+    const off = new Set(s.off)
+    for (const f of mine) { if (allOn) off.add(f.id); else off.delete(f.id) }
+    cleanup.value = solveCleanup({ ...s, off })
+  }
+  function applyCleanup(): void {
+    const s = cleanup.value
+    if (!s) return
+    cleanup.value = null
+    const on = s.result.fixes.filter(f => f.on)
+    if (!on.length) return
+    doc.value = cloneDoc(s.result.doc)
+    clearSel()
+    clearSegSel()
+    commitHistory()
+    for (const f of on.slice(0, 12)) sparkle(f.at.x, f.at.y)
+    status.value = `Cleaned up · ${on.length} ${on.length === 1 ? 'change' : 'changes'}`
+  }
+  // keys while a preview is open: Enter applies, Escape / ⌥⇧C cancel, ⌘Z / ⌘Y
+  // only close it; every other plain key is swallowed so nothing edits the
+  // drawing under the preview; other ⌘ combos and bare modifiers are not the pen's
+  function cleanupKey(ev: KeyboardEvent): boolean {
+    if (ev.metaKey || ev.ctrlKey) {
+      const k = ev.key.toLowerCase()
+      if (k === 'z' || k === 'y') { cancelCleanup(); return true }
+      return false
+    }
+    if (ev.key === 'Enter') { applyCleanup(); return true }
+    if (ev.key === 'Escape' || isCleanupKey(ev)) { cancelCleanup(); return true }
+    return !MODIFIER_KEYS.has(ev.key)
+  }
+
   // select every entity with ANY point-closure point (pointClosure — same
   // expansion nudge()/flip() use) inside the world rect [x0,y0]–[x1,y1] — a
   // forgiving "any point touches" test rather than requiring the whole entity
@@ -2086,6 +2203,7 @@ export function usePen(opts: {
 
   function selectTool(t: Tool) {
     if (!isToolAllowed(t)) return   // PenOptions.tools / openOnly: not a tool this host offers — no-op
+    closeCleanup()   // a tool change drops a Clean up preview
     if (arcDrag) arcDragEnd()   // a live arc drag settles as its own step
     // Pen ↔ Curve mid-path keeps drawing the same path: the next segment's kind
     // follows whichever of the two is active when its end point is placed
@@ -2132,6 +2250,7 @@ export function usePen(opts: {
   }
 
   function reset() {
+    closeCleanup()
     setArcDrag(null)   // dropped, never settled — the drawing is thrown away
     resetEditTools()
     cleanupPendingPath()
@@ -2174,6 +2293,7 @@ export function usePen(opts: {
   // A half-armed Repeat/Mirror is dropped. Commits one history step iff the
   // doc changed.
   function finishSession(): void {
+    closeCleanup()   // a Clean up preview is dropped, never applied
     if (arcDrag) arcDragEnd()   // a live arc drag settles as its own step
     pendingOp.value = null
     if (pendingPath.value && pendingPath.value.anchors.length >= 2) {
@@ -2196,6 +2316,7 @@ export function usePen(opts: {
   // called by the overlay or toolbar — a host calls it on `cancel` if its
   // cancel means "discard".
   function revert(): void {
+    closeCleanup()
     trimPress = null   // discarded with everything else — never settled onto the reverted drawing
     setArcDrag(null)   // likewise a live arc drag
     penHistory.revert()   // doc.value = cloneDoc(opening); initHistory()
@@ -2220,6 +2341,7 @@ export function usePen(opts: {
   // doesn't resume mid-air once the overlay reactivates. Mirrors what the
   // overlay's own watcher already does for its point-drag/marquee state.
   function endGesture(): void {
+    closeCleanup()   // parking the pen drops a Clean up preview
     cancelPointDrop()
     setPathDrag(null)
     curveDrag.value = null
@@ -2230,6 +2352,7 @@ export function usePen(opts: {
 
   // stop the sparkle loop — the host calls this when it unmounts
   function dispose() {
+    closeCleanup()
     cancelValue()   // a pending value request never outlives the pen
     if (sparkleRaf && typeof cancelAnimationFrame !== 'undefined') cancelAnimationFrame(sparkleRaf)
     sparkleRaf = 0
@@ -2263,6 +2386,8 @@ export function usePen(opts: {
     repeatPrompt, armRepeat, doRepeat, applyRepeat, doMirror, applyMirror, cancelPendingOp,
     setArcRadius, setConstraintValue, removeConstraintById, onArcDimClick, onConstraintMarkClick,
     commitDimension,
+    // Clean up (pen stage 5)
+    cleanup, toggleCleanup, startCleanup, applyCleanup, cancelCleanup, toggleCleanupFix, toggleCleanupKind, setCleanupStrength,
     // history
     undo, redo, canUndo, canRedo, reset, revert, commitHistory, initHistory,
     // session
