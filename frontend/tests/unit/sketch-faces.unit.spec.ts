@@ -132,6 +132,138 @@ describe('faces', () => {
   })
 })
 
+describe('faces — fix round 1 (tangents with solver residuals, cache keys, nesting, bridges, outlines)', () => {
+  const RES = [1e-8, -1e-8, 1e-6, -1e-6]
+  for (const s of [1, 100]) {
+    for (const r of RES) {
+      it(`a circle tangent inside a D, centre off by ${r}·${s}: three faces, exact areas`, () => {
+        const e = doc()
+        const p = addPoint(e, -2 * s, 0), q = addPoint(e, 2 * s, 0)
+        addPath(e, [p, q], [{ kind: 'arc', center: addPoint(e, 0, 0), sweep: 0 }])
+        addLine(e, p, q)
+        addCircle(e, addPoint(e, 0, s + r * s), s)
+        const fs = findFaces(e)
+        expect(fs.faces).toHaveLength(3)
+        expect(fs.faces.reduce((a, f) => a + f.area, 0) / (s * s)).toBeCloseTo(2 * Math.PI, 4)
+        expect(fs.faces[faceAt(fs, { x: 0, y: s })!]!.area / (s * s)).toBeCloseTo(Math.PI, 4)
+      })
+      it(`a circle inscribed in a square, radius off by ${r}·${s}: five faces`, () => {
+        const d = doc(); square(d, -s, -s, 2 * s); addCircle(d, addPoint(d, 0, 0), s + r * s)
+        const fs = findFaces(d)
+        expect(fs.faces).toHaveLength(5)
+        expect(fs.faces.reduce((a, f) => a + f.area, 0) / (s * s)).toBeCloseTo(4, 4)
+        expect(fs.faces[faceAt(fs, { x: 0, y: 0 })!]!.area / (s * s)).toBeCloseTo(Math.PI, 4)
+        const corner = fs.faces[faceAt(fs, { x: 0.95 * s, y: 0.95 * s })!]!.area / (s * s)
+        expect(corner).toBeCloseTo((4 - Math.PI) / 4, 4)
+      })
+      it(`two circles touching outside and a box round them, off by ${r}·${s}: eight faces`, () => {
+        const d = doc()
+        const ids = [[-2 * s, -s], [2 * s, -s], [2 * s, s], [-2 * s, s]].map(([x, y]) => addPoint(d, x!, y!))
+        addPath(d, ids, ids.map(() => ({ kind: 'line' as const })), true)
+        addCircle(d, addPoint(d, -s, 0), s)
+        addCircle(d, addPoint(d, s + r * s, 0), s)
+        const fs = findFaces(d)
+        expect(fs.faces).toHaveLength(8)
+        expect(fs.faces.reduce((a, f) => a + f.area, 0) / (s * s)).toBeCloseTo(8, 4)
+        expect(fs.faces[faceAt(fs, { x: -s, y: 0 })!]!.area / (s * s)).toBeCloseTo(Math.PI, 4)
+      })
+      it(`a circle tangent inside a bigger one, off by ${r}·${s}: a disc and a crescent`, () => {
+        const d = doc(); addCircle(d, addPoint(d, 0, 0), 2 * s); addCircle(d, addPoint(d, s + r * s, 0), s)
+        const fs = findFaces(d)
+        expect(fs.faces).toHaveLength(2)
+        expect(fs.faces[faceAt(fs, { x: -s, y: 0 })!]!.area / (s * s)).toBeCloseTo(3 * Math.PI, 4)
+        expect(fs.faces[faceAt(fs, { x: s, y: 0 })!]!.area / (s * s)).toBeCloseTo(Math.PI, 4)
+      })
+    }
+  }
+  it('a rotated or mirrored drawing never hits the cache of the original', () => {
+    const d = doc(); square(d, 0, 0, 4)
+    const a = facesFor(d)
+    const rot = JSON.parse(JSON.stringify(d)) as SketchDoc
+    for (const e of rot.entities) if (e.kind === 'point') { e.x = -e.x; e.y = -e.y }
+    expect(geometryKey(rot)).not.toBe(geometryKey(d))
+    const b = facesFor(rot)
+    expect(b).not.toBe(a)
+    expect(faceAt(b, { x: -1, y: -1 })).toBe(0)
+    const mir = JSON.parse(JSON.stringify(d)) as SketchDoc
+    for (const e of mir.entities) if (e.kind === 'point') e.x = -e.x
+    expect(geometryKey(mir)).not.toBe(geometryKey(d))
+    expect(faceAt(facesFor(mir), { x: -1, y: 1 })).toBe(0)
+  })
+  it('three drawings nested: each face has exactly one hole, the one directly inside it', () => {
+    const d = doc(); square(d, 0, 0, 10); square(d, 0.5, 0.5, 9); addCircle(d, addPoint(d, 5, 5), 1)
+    const fs = findFaces(d)
+    expect(fs.faces).toHaveLength(3)
+    const outer = fs.faces[faceAt(fs, { x: 0.2, y: 0.2 })!]!, mid = fs.faces[faceAt(fs, { x: 1, y: 1 })!]!, disc = fs.faces[faceAt(fs, { x: 5, y: 5 })!]!
+    expect(outer.holes).toHaveLength(1)
+    expect(mid.holes).toHaveLength(1)
+    expect(disc.holes).toHaveLength(0)
+    expect(outer.area).toBeCloseTo(19, 9)
+    expect(mid.area).toBeCloseTo(81 - Math.PI, 9)
+    expect(disc.area).toBeCloseTo(Math.PI, 9)
+  })
+  it('a lone arc nearly closed into a C bridges across its own gap', () => {
+    const d = doc()
+    const s = addPoint(d, Math.cos(0.025), Math.sin(0.025)), e = addPoint(d, Math.cos(-0.025), Math.sin(-0.025))
+    addPath(d, [s, e], [{ kind: 'arc', center: addPoint(d, 0, 0), sweep: 1 }])
+    expect(findFaces(d).faces).toHaveLength(0)
+    const fs = findFaces(d, { gap: 0.2 })
+    expect(fs.faces).toHaveLength(1)
+    expect(fs.faces[0]!.area).toBeCloseTo(Math.PI, 2)
+  })
+  it('a bridge never crosses a piece', () => {
+    const d = doc()
+    addLine(d, addPoint(d, -5, 0), addPoint(d, 0, 0))
+    addLine(d, addPoint(d, 0.15, 0), addPoint(d, 5, 0))
+    addLine(d, addPoint(d, 0.075, -1), addPoint(d, 0.075, 1))
+    const fs = findFaces(d, { gap: 0.2 })
+    expect(fs.bridges.length).toBeGreaterThan(0)
+    for (const b of fs.bridges) expect(Math.hypot(b.to.x - b.from.x, b.to.y - b.from.y)).toBeLessThan(0.1)
+  })
+  it('outlines land on the drawing’s own points, free of trig noise', () => {
+    const d = doc(); addCircle(d, addPoint(d, 0, 0), 2)
+    expect(facesD(findFaces(d), [0])).toBe('M 2 0 A 2 2 0 0 1 -2 0 A 2 2 0 0 1 2 0 Z')
+    const e = doc()
+    const a = addPoint(e, 0, 0), b = addPoint(e, 4, 0)
+    addPath(e, [a, b], [{ kind: 'arc', center: addPoint(e, 2, -1), sweep: 1 }, { kind: 'arc', center: addPoint(e, 2, 1), sweep: 1 }], true)
+    const out = facesD(findFaces(e), [0])
+    expect(out).not.toMatch(/e-/)
+    expect(out).toMatch(/^M (0 0|4 0) /)
+  })
+  it('the gappy flower drawn round its square fills petal by petal', () => {
+    const d = doc(); gappyFlower(d); square(d, 6, 2, 6)
+    // unbridged, only the petals whose overshooting end crosses the next arc close
+    expect(findFaces(d).faces.length).toBeLessThan(5)
+    const fs = findFaces(d, { gap: 6 / 34 })
+    expect(fs.faces).toHaveLength(5)
+    expect(fs.faces[faceAt(fs, { x: 9, y: 5 })!]!.area).toBeCloseTo(36, 3)   // the fourth petal's end pokes a sliver into the square
+    const petals = [{ x: 9, y: 0.5 }, { x: 13.5, y: 5 }, { x: 9, y: 9.5 }, { x: 4.5, y: 5 }].map(p => faceAt(fs, p))
+    expect(new Set(petals).size).toBe(4)
+    for (const f of petals) expect(fs.faces[f!]!.area).toBeGreaterThan(12)
+  })
+  it('a circle crossed once is one disc; the line through it is left out of its outline', () => {
+    const d = doc(); addCircle(d, addPoint(d, 0, 0), 2); addLine(d, addPoint(d, 0.5, 0.3), addPoint(d, 4, 0.3))
+    const fs = findFaces(d)
+    expect(fs.faces).toHaveLength(1)
+    expect(fs.faces[0]!.area).toBeCloseTo(4 * Math.PI, 9)
+    const out = facesD(fs, [0])
+    expect((out.match(/ A /g) ?? []).length).toBe(2)
+    expect(out).not.toMatch(/ L /)
+  })
+  it('a line and an arc leaving a point in the same direction bound the area between them', () => {
+    for (const flip of [1, -1]) {
+      const d = doc()
+      const o = addPoint(d, 0, 0), x = addPoint(d, 2, 0), top = addPoint(d, 2, 2 * flip)
+      addLine(d, o, x); addLine(d, x, top)
+      addPath(d, [o, top], [{ kind: 'arc', center: addPoint(d, 0, 2 * flip), sweep: flip === 1 ? 1 : 0 }])
+      const fs = findFaces(d)
+      expect(fs.faces).toHaveLength(1)
+      expect(fs.faces[0]!.area).toBeCloseTo(4 - Math.PI, 9)
+      expect(faceAt(fs, { x: 1.8, y: 0.2 * flip })).toBe(0)
+    }
+  })
+})
+
 describe('faces — speed (one connected drawing, a symmetric grid)', () => {
   it('161 pieces round a ring and a 21 × 21 grid stay well inside a frame', () => {
     // 64 two-arc petals round a circle, a spoke to every other one: one connected drawing

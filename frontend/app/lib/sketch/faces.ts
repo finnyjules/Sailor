@@ -99,8 +99,24 @@ function boxOf(pts: Vec2[]): Box {
 const boxHit = (b: Box, p: Vec2, pad = 0) => p.x >= b.x0 - pad && p.x <= b.x1 + pad && p.y >= b.y0 - pad && p.y <= b.y1 + pad
 const boxesMeet = (a: Box, b: Box, pad: number) => a.x0 - pad <= b.x1 && b.x0 - pad <= a.x1 && a.y0 - pad <= b.y1 && b.y0 - pad <= a.y1
 
-// the piece's point at its own parameter (circle: u = angle / 2π)
-function at(g: CurveGeom, u: number): Vec2 { return pointAt(g, g.kind === 'circle' ? u * TAU : u) }
+// the piece's point at its own parameter (circle: u = angle / 2π); a line's
+// or arc's own ends are its anchors exactly, never a trig round trip
+function at(g: CurveGeom, u: number): Vec2 {
+  if (g.kind !== 'circle') { if (u === 0) return g.a!; if (u === 1) return g.b! }
+  return pointAt(g, g.kind === 'circle' ? u * TAU : u)
+}
+const dst = (a: Vec2, b: Vec2) => Math.hypot(a.x - b.x, a.y - b.y)
+
+/** Two leaving directions closer than this (radians) count as equal, and the
+ *  turn order falls back to curvature. Solver residuals at a tangent touch
+ *  leave the directions ~1e-12 apart; a real corner is far wider. */
+const ANG_EPS = 1e-6
+// a leaving direction in [0, 2π), with a hair under 2π read as 0 so the
+// comparison has no wrap-around seam
+function canonAngle(a: number): number {
+  const n = norm(a)
+  return n >= TAU - ANG_EPS ? 0 : n
+}
 // the piece's own parameter nearest p (circle: angle / 2π)
 function paramNear(g: CurveGeom, p: Vec2): number { const t = paramOf(g, p); return g.kind === 'circle' ? t / TAU : t }
 function geomBox(g: CurveGeom): Box {
@@ -210,30 +226,49 @@ function buildGraph(srcs: Src[], params: number[][], bridges: { from: Vec2; to: 
     }
     const h = halfEdges.length
     for (const [e, f, t] of [[fwd, from, to], [back, to, from]] as const) {
-      const ang = e.kind === 'line' ? norm(Math.atan2(e.p1.y - e.p0.y, e.p1.x - e.p0.x)) : norm(e.a0! + (e.sweep! > 0 ? Math.PI / 2 : -Math.PI / 2))
+      const ang = canonAngle(e.kind === 'line' ? Math.atan2(e.p1.y - e.p0.y, e.p1.x - e.p0.x) : e.a0! + (e.sweep! > 0 ? Math.PI / 2 : -Math.PI / 2))
       const k = e.kind === 'line' ? 0 : Math.sign(e.sweep!) / e.r!
       halfEdges.push({ ...e, from: f, to: t, ang, k, len: 0 })
     }
     halfEdges[h]!.len = halfEdges[h + 1]!.len = edgeLen(halfEdges[h]!)
     return h
   }
+  // the drawing's own anchors are the vertices' positions wherever a
+  // computed point (a crossing, a touch) lands within tol of one
+  for (const s of srcs) if (s.g.kind !== 'circle') { vid(s.g.a!); vid(s.g.b!) }
   srcs.forEach((s, i) => {
     const g = s.g
     const list: number[] = []
-    // parameters sorted, points closer than tol collapsed into one
+    // parameters sorted; a run of points closer than tol is one point — the
+    // piece's own end if the run holds it, else the run's middle (two
+    // near-tangent crossings stand for the one touch between them)
     const ps = [...params[i]!].sort((x, y) => x - y)
     const uniq: number[] = []
-    for (const u of ps) {
-      const prev = uniq[uniq.length - 1]
-      if (prev == null) { uniq.push(u); continue }
-      const d = Math.hypot(at(g, u).x - at(g, prev).x, at(g, u).y - at(g, prev).y)
-      if (d > tol) uniq.push(u)
-      else if (u === 1 && g.kind !== 'circle') uniq[uniq.length - 1] = 1   // a piece's own end wins
+    let run: number[] = []
+    let runPt: Vec2 | null = null
+    const flush = () => {
+      if (!run.length) return
+      const own = g.kind !== 'circle' ? run.find(u => u === 0 || u === 1) : undefined
+      uniq.push(own ?? (run.length === 1 ? run[0]! : (run[0]! + run[run.length - 1]!) / 2))
+      run = []
     }
+    for (const u of ps) {
+      const q = at(g, u)
+      if (runPt && dst(q, runPt) > tol) flush()
+      run.push(u)
+      runPt = q
+    }
+    flush()
     if (g.kind === 'circle') {
       if (uniq.length > 1) {
         const first = uniq[0]!, last = uniq[uniq.length - 1]!
-        if (Math.hypot(at(g, first).x - at(g, last).x, at(g, first).y - at(g, last).y) <= tol) uniq.pop()
+        if (dst(at(g, first), at(g, last)) <= tol) {
+          // the run wraps past angle 0: one point, midway
+          let mid = (last + first + 1) / 2
+          if (mid >= 1) mid -= 1
+          uniq.pop(); uniq[0] = mid
+          uniq.sort((x, y) => x - y)
+        }
       }
       const cuts = uniq.length ? uniq : [0]
       for (let j = 0; j < cuts.length; j++) {
@@ -256,16 +291,18 @@ function buildGraph(srcs: Src[], params: number[][], bridges: { from: Vec2; to: 
     const h = addPair(pi, null, 0, 1, b.from, b.to)
     if (h != null) pieceEdges[pi]!.push(h)
   }
+  // every half-edge ends exactly on its vertices (the outline and the polygon
+  // close on the drawing's own points, not on trig noise)
+  for (const h of halfEdges) { h.p0 = vertices[h.from]!; h.p1 = vertices[h.to]! }
   // outgoing half-edges round each vertex, counter-clockwise; at an equal
-  // leaving direction the one turning right comes first
+  // leaving direction (within ANG_EPS) the one turning right comes first
   const out: number[][] = vertices.map(() => [])
   halfEdges.forEach((h, i) => out[h.from]!.push(i))
   for (const list of out) {
     list.sort((i, j) => {
       const a = halfEdges[i]!, b = halfEdges[j]!
-      let d = a.ang - b.ang
-      if (Math.abs(d) < 1e-9 || Math.abs(Math.abs(d) - TAU) < 1e-9) d = 0
-      return d !== 0 ? d : a.k - b.k || i - j
+      const d = a.ang - b.ang
+      return Math.abs(d) >= ANG_EPS ? d : a.k - b.k || i - j
     })
   }
   return { vertices, halfEdges, pieceEdges, out }
@@ -273,12 +310,57 @@ function buildGraph(srcs: Src[], params: number[][], bridges: { from: Vec2; to: 
 
 // ── crossings and touches ───────────────────────────────────────────────────
 
+/** The one point where two pieces touch tangentially, within tol — a line on a
+ *  circle or arc (|distance from the centre to the line − r| ≤ tol), two
+ *  circles or arcs touching outside (|d − (r1 + r2)| ≤ tol) or inside
+ *  (|d − |r1 − r2|| ≤ tol) — placed midway across the solver's residual, and
+ *  only where both pieces actually reach it. null when they don't touch like
+ *  that. (crossings.ts' own thresholds are absolute, so a touch a solve left
+ *  1e-8 apart reads there as a miss or as two crossings a hair apart.) */
+function tangentPoint(g1: CurveGeom, g2: CurveGeom, tol: number): Vec2 | null {
+  if (g1.kind === 'line' && g2.kind === 'line') return null
+  let q: Vec2 | null = null
+  if (g1.kind === 'line' || g2.kind === 'line') {
+    const L = g1.kind === 'line' ? g1 : g2, C = g1.kind === 'line' ? g2 : g1
+    const a = L.a!, b = L.b!, c = C.c!, r = C.r!
+    const dx = b.x - a.x, dy = b.y - a.y, L2 = dx * dx + dy * dy
+    if (L2 < 1e-24) return null
+    const t = ((c.x - a.x) * dx + (c.y - a.y) * dy) / L2
+    const foot = { x: a.x + t * dx, y: a.y + t * dy }
+    const dc = dst(foot, c)
+    if (dc < 1e-12 || Math.abs(dc - r) > tol) return null
+    const m = (r + dc) / 2 / dc
+    q = { x: c.x + (foot.x - c.x) * m, y: c.y + (foot.y - c.y) * m }
+  } else {
+    const c1 = g1.c!, r1 = g1.r!, c2 = g2.c!, r2 = g2.r!
+    const d = dst(c1, c2)
+    if (d <= tol) return null   // concentric: no single touch
+    const ux = (c2.x - c1.x) / d, uy = (c2.y - c1.y) / d
+    let s: number
+    if (Math.abs(d - (r1 + r2)) <= tol) s = (r1 + d - r2) / 2              // outside: between c1 + r1·u and c2 − r2·u
+    else if (Math.abs(d - Math.abs(r1 - r2)) <= tol) s = r1 >= r2 ? (r1 + d + r2) / 2 : (-r1 + d - r2) / 2   // inside
+    else return null
+    q = { x: c1.x + ux * s, y: c1.y + uy * s }
+  }
+  // both pieces must reach the touch (an arc's sweep, a line's extent)
+  for (const g of [g1, g2]) if (dst(at(g, paramNear(g, q)), q) > 2 * tol) return null
+  return q
+}
+
 function splitParams(srcs: Src[], tol: number): number[][] {
   const params = srcs.map(s => (s.g.kind === 'circle' ? [] : [0, 1]))
   for (let i = 0; i < srcs.length; i++) {
     for (let j = i + 1; j < srcs.length; j++) {
       const A = srcs[i]!, B = srcs[j]!
       if (!boxesMeet(A.box, B.box, tol)) continue
+      const tp = tangentPoint(A.g, B.g, tol)
+      if (tp) {
+        // a tangent touch is ONE split point on each piece, whatever the
+        // float maths made of it (a miss, or two crossings a hair apart)
+        params[i]!.push(paramNear(A.g, tp))
+        params[j]!.push(paramNear(B.g, tp))
+        continue
+      }
       for (const ip of intersectCurves(A.g, B.g)) {
         params[i]!.push(A.g.kind === 'circle' ? norm(ip.tSelf) / TAU : ip.tSelf)
         params[j]!.push(B.g.kind === 'circle' ? norm(ip.tOther) / TAU : ip.tOther)
@@ -317,7 +399,9 @@ function findBridges(srcs: Src[], gr: Graph, gap: number, tol: number): { params
       if (w === v || deg[w] === 0) return
       const d = Math.hypot(Q.x - P.x, Q.y - P.y)
       if (d > gap || d <= tol) return
-      if (w === own.to && deg[w] === 1) return   // the other end of one short piece
+      // the other end of a piece no longer than the gap (a bridge would only
+      // double it back); a longer piece — a C nearly closed — does bridge
+      if (w === own.to && deg[w] === 1 && own.len <= gap) return
       cands.push({ v, d, to: Q, ...(deg[w] === 1 ? { end: w } : {}) })
     })
     // or the nearest point on a piece (not the edge it ends)
@@ -338,8 +422,24 @@ function findBridges(srcs: Src[], gr: Graph, gap: number, tol: number): { params
   const used = new Set<number>()
   const params: { piece: number; u: number }[] = []
   const bridges: { from: Vec2; to: Vec2 }[] = []
+  const crosses = (A: Vec2, B: Vec2): boolean => {
+    const seg: CurveGeom = { ref: { kind: 'line', id: '' }, kind: 'line', a: A, b: B }
+    const box = boxOf([A, B])
+    const inside = (p: Vec2) => dst(p, A) > tol && dst(p, B) > tol
+    for (const s of srcs) {
+      if (!boxesMeet(box, s.box, tol)) continue
+      if (intersectCurves(seg, s.g).some(ip => inside(ip.p))) return true
+    }
+    for (const b of bridges) {
+      const other: CurveGeom = { ref: { kind: 'line', id: '' }, kind: 'line', a: b.from, b: b.to }
+      if (intersectCurves(seg, other).some(ip => inside(ip.p))) return true
+    }
+    return false
+  }
   for (const c of cands) {
     if (used.has(c.v) || (c.end != null && used.has(c.end))) continue
+    // a bridge never crosses a piece or another bridge
+    if (crosses(V[c.v]!, c.to)) continue
     used.add(c.v)
     if (c.end != null) used.add(c.end)
     if (c.piece != null) params.push({ piece: c.piece, u: c.u! })
@@ -434,7 +534,10 @@ export function findFaces(doc: SketchDoc, opts: { gap?: number } = {}): FaceSet 
     faceOfCycle[i] = faces.length
     faces.push({ outer: i, holes: [], area: c.area, box: c.box })
   })
-  // a component inside another's face is a hole of the smallest such face
+  // a component inside another's face is a hole of the smallest such face —
+  // smallest by its GROSS outer area (a face's net area shrinks as holes are
+  // assigned, so comparing net areas would pick an outer ring over the face
+  // directly round the drawing); holes are subtracted once all are placed
   for (const [comp, oi] of outerOfComp) {
     const oc = cycles[oi]!
     const e0 = halfEdges[oc.edges[0]!]!
@@ -443,14 +546,14 @@ export function findFaces(doc: SketchDoc, opts: { gap?: number } = {}): FaceSet 
     faces.forEach((f, fi) => {
       if (cycles[f.outer]!.comp === comp || !boxHit(f.box, probe)) return
       if (winding(cycles[f.outer]!.poly, probe) === 0) return
-      if (best == null || f.area < faces[best]!.area) best = fi
+      if (best == null || cycles[f.outer]!.area < cycles[faces[best]!.outer]!.area) best = fi
     })
     if (best != null) {
       faces[best]!.holes.push(oi)
-      faces[best]!.area += Math.min(0, oc.area)
       faceOfCycle[oi] = best
     }
   }
+  for (const f of faces) for (const h of f.holes) f.area += Math.min(0, cycles[h]!.area)
   const dangling = vertices.map((_, v) => v).filter(v => out[v]!.length === 1)
   return { tol, pieces, byKey, pieceEdges, vertices, halfEdges, cycles, cycleOf, faceOfCycle, faces, dangling, vertexComp, pieceComp, bridges }
 }
@@ -462,7 +565,8 @@ export function faceAt(fs: FaceSet, p: Vec2): number | null {
     if (!boxHit(f.box, p)) return
     if (winding(fs.cycles[f.outer]!.poly, p) === 0) return
     for (const h of f.holes) if (Math.abs(fs.cycles[h]!.area) > fs.tol * fs.tol && winding(fs.cycles[h]!.poly, p) !== 0) return
-    if (best == null || f.area < fs.faces[best]!.area) best = i
+    // smallest by gross outer area (see the hole nesting in findFaces)
+    if (best == null || fs.cycles[f.outer]!.area < fs.cycles[fs.faces[best]!.outer]!.area) best = i
   })
   return best
 }
@@ -474,7 +578,6 @@ export function faceOfHalfEdge(fs: FaceSet, h: number): number | null {
 
 // ── outlines ────────────────────────────────────────────────────────────────
 
-const num = (n: number) => (Object.is(n, -0) ? 0 : n)
 
 // a cycle's half-edges with the out-and-back spurs (a line poking into the
 // face and ending there) taken out — they bound nothing
@@ -491,17 +594,22 @@ function withoutSpurs(edges: number[]): number[] {
 function cycleD(fs: FaceSet, ci: number, s: number): string {
   const edges = withoutSpurs(fs.cycles[ci]!.edges)
   if (!edges.length) return ''
+  // a coordinate within a millionth of the weld tolerance of zero is zero
+  // (cos π/2 and friends); -0 prints as 0
+  const zero = fs.tol * 1e-6 * Math.abs(s)
+  const num = (n: number) => (Math.abs(n) <= zero ? 0 : n)
   const P = (p: Vec2) => `${num(p.x * s)} ${num(p.y * s)}`
   let d = `M ${P(fs.halfEdges[edges[0]!]!.p0)}`
   for (const e of edges) {
     const h = fs.halfEdges[e]!
     if (h.kind === 'line') { d += ` L ${P(h.p1)}`; continue }
     const r = num(h.r! * s), sw = h.sweep! > 0 ? 1 : 0
-    const arc = (a: number, sweep: number) => {
-      const end = { x: h.c!.x + h.r! * Math.cos(a + sweep), y: h.c!.y + h.r! * Math.sin(a + sweep) }
-      d += ` A ${r} ${r} 0 ${Math.abs(sweep) > Math.PI ? 1 : 0} ${sw} ${P(end)}`
+    if (Math.abs(h.sweep!) >= TAU - 1e-9) {
+      // a full turn is two halves: to the far side, then back onto the vertex
+      const a = h.a0! + h.sweep! / 2
+      const mid = { x: h.c!.x + h.r! * Math.cos(a), y: h.c!.y + h.r! * Math.sin(a) }
+      d += ` A ${r} ${r} 0 0 ${sw} ${P(mid)} A ${r} ${r} 0 0 ${sw} ${P(h.p1)}`
     }
-    if (Math.abs(h.sweep!) >= TAU - 1e-9) { arc(h.a0!, h.sweep! / 2); arc(h.a0! + h.sweep! / 2, h.sweep! / 2) }
     else d += ` A ${r} ${r} 0 ${Math.abs(h.sweep!) > Math.PI ? 1 : 0} ${sw} ${P(h.p1)}`
   }
   return d + ' Z'
@@ -526,27 +634,25 @@ export function facesD(fs: FaceSet, faceIds: number[], scale = 1): string {
 
 // ── the cache ───────────────────────────────────────────────────────────────
 
-// a fingerprint of everything faces depend on (pieces, their points, radii,
-// guide flags) — never the fills — so a frame where nothing moved is a hit
-const f64 = new Float64Array(1)
-const u32 = new Uint32Array(f64.buffer)
+// everything faces depend on (pieces, their points, radii, guide flags) —
+// never the fills — written out exactly (a JS number prints back to the same
+// number), so two drawings share a key only when their geometry is equal: a
+// rotated or mirrored copy can never be served the original's faces. A frame
+// where nothing moved is a hit.
 export function geometryKey(doc: SketchDoc): string {
-  let h1 = 0x811c9dc5, h2 = 5381, n = 0
-  const mix = (x: number) => { h1 = Math.imul(h1 ^ x, 16777619); h2 = (Math.imul(h2, 33) ^ x) | 0; n++ }
-  const str = (s: string) => { for (let i = 0; i < s.length; i++) mix(s.charCodeAt(i)); mix(0) }
-  const numb = (v: number) => { f64[0] = v; mix(u32[0]!); mix(u32[1]!) }
+  const parts: string[] = []
   for (const e of doc.entities) {
-    str(e.kind); str(e.id); mix(e.construction ? 1 : 0)
-    if (e.kind === 'point') { numb(e.x); numb(e.y) }
-    else if (e.kind === 'line') { str(e.p1); str(e.p2) }
-    else if (e.kind === 'circle') { str(e.center); numb(e.r) }
+    const g = e.construction ? 'g' : ''
+    if (e.kind === 'point') parts.push(`p${g}|${e.id}|${e.x}|${e.y}`)
+    else if (e.kind === 'line') parts.push(`l${g}|${e.id}|${e.p1}|${e.p2}`)
+    else if (e.kind === 'circle') parts.push(`c${g}|${e.id}|${e.center}|${e.r}`)
     else {
-      mix(e.closed ? 1 : 0)
-      for (const a of e.anchors) str(a)
-      for (const s of e.segments) { str(s.kind); if (s.kind === 'arc') { str(s.center); mix(s.sweep) } }
+      let t = `w${g}|${e.id}|${e.closed ? 1 : 0}|${e.anchors.join(',')}|`
+      for (const s of e.segments) t += s.kind === 'arc' ? `a${s.center}:${s.sweep},` : s.kind === 'line' ? 'l,' : 'b,'
+      parts.push(t)
     }
   }
-  return `${h1 >>> 0}:${h2 >>> 0}:${n}`
+  return parts.join(';')
 }
 
 const CACHE_SIZE = 6
