@@ -43,7 +43,7 @@ import { framePresentKeys, finalizeWiredSentinels, reconcileWiredContent, syncWi
 import { createWiredMaskCache } from '~/lib/compositor/wiredMaskCache'
 import { readWiredTreatments, setWiredMask, setWiredMaskShowSource, setWiredMaskUrl, maskCandidateKeys } from '~/composables/useWiredTreatments'
 import { maskBreakFromEdge, type MaskBreak, type MaskBreakEdge } from '~/lib/compositor/maskBreak'
-import { useLocalLayerEditor, resizableKind, cornerResizableKind, aspectLockedResizeKind, textBoxResizable, canSpanColumns, canSpanRows, boxHandles as editorBoxHandles } from '~/composables/useLocalLayerEditor'
+import { useLocalLayerEditor, resizableKind, cornerResizableKind, aspectLockedResizeKind, textBoxResizable, canSpanColumns, canSpanRows, spanReasons, boxHandles as editorBoxHandles } from '~/composables/useLocalLayerEditor'
 import { useLayoutVary, faceTargets } from '~/composables/useLayoutVary'
 import LayoutVaryPanel from '~/components/vue-canvas/compositor/LayoutVaryPanel.vue'
 import KeepClearOverlay from '~/components/vue-canvas/compositor/KeepClearOverlay.vue'
@@ -917,7 +917,7 @@ const {
   editingLayerNameId, layerNameDraft, startLayerRename, commitLayerRename,
   snapGuides, marquee, startMarquee, moveMarquee, endMarquee,
   hud,
-  resnapSelected, layerGridBox, layerSpan, setLayerSpan, selectedTextMarks,
+  resnapSelected, layerGridBox, layerSpan, setLayerSpan, selectedTextMarks, selectedGridBox, selectedSpan,
 } = editor
 
 // ── Layout grid (spec 2026-09-26-frame-layout-grid-design) ──────────────────
@@ -930,6 +930,8 @@ const movingBox = computed(() => {
   // A move drags the whole selection (or just the pressed layer when it isn't selected).
   const moving = selectedLayers.value.length ? selectedLayers.value : (selectedLocal.value ? [selectedLocal.value] : [])
   if (!moving.length) return null
+  // One selected layer: the editor's shared measurement (measured once per change).
+  if (moving.length === 1 && moving[0]!.id === selectedLocal.value?.id && selectedGridBox.value) return selectedGridBox.value
   // Each layer's box in grid px, as the Layer section counts it — text from its capitals.
   let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity
   for (const l of moving) {
@@ -12650,11 +12652,13 @@ defineExpose({ editor, layoutGridResolved, layoutGrid })
             </div>
 
             <!-- Where the layer sits on the layout grid (spec "The editor"): its first column/row and how many. -->
-            <div v-if="layoutGrid.show" :title="selectedLocal.rotation ? 'Straighten the layer to place it on the grid' : undefined">
+            <div v-if="layoutGrid.show">
               <div class="panel-label mb-1.5">Grid</div>
-              <LayerGridFields :span="layerSpan(selectedLocal)" :col-count="layoutGridResolved.cols.length" :row-count="layoutGridResolved.rows.length"
+              <LayerGridFields :span="selectedSpan ?? layerSpan(selectedLocal)" :col-count="layoutGridResolved.cols.length" :row-count="layoutGridResolved.rows.length"
                 :can-span-cols="canSpanColumns(selectedLocal)" :can-span-rows="canSpanRows(selectedLocal)"
+                :cols-reason="spanReasons(selectedLocal).cols" :rows-reason="spanReasons(selectedLocal).rows"
                 :disabled="!!selectedLocal.rotation || penLocksSelected"
+                :disabled-reason="penLocksSelected ? 'Finish the pen first' : selectedLocal.rotation ? 'Straighten the layer to place it on the grid' : undefined"
                 @update="(p) => setLayerSpan(selectedLocal!.id, p)" />
             </div>
             <!-- Common: align the layer to the frame (edges + centres) -->

@@ -13,7 +13,7 @@ import {
   type PostEffect,
   createTextLayer, createRectLayer, createEllipseLayer, createLineLayer, createImageLayer,
   createPolygonLayer, createStarLayer,
-  localLayerBox, textVAlignCenterOffset, shapeToPathLayer, withWiredContent,
+  localLayerBox, textVAlignCenterOffset, shapeToPathLayer, withWiredContent, cornerPinActive,
   type WiredContentProvider, type WiredLayer,
 } from '~/composables/useCompositorLayers'
 import { svgToPathLayers, pathLayerBoolean, type BooleanOp } from '~/composables/useVectorSvg'
@@ -32,7 +32,7 @@ import { syncAllWiredWidgets, wiredLayerHeight, type ContentDims } from '~/lib/c
 import { inject, type Ref } from 'vue'
 import type { BrandKit } from '~~/shared/brand/types'
 import { readLayoutGrid, resolveLayoutGrid, layoutGridProperty, spanOf, placeOnSpan, type LayoutGrid, type LayoutSpan, type ResolvedLayoutGrid } from '~/lib/frame/layoutGrid'
-import { textMetrics } from '~/lib/frame/textMetrics'
+import { textMetrics, textMetricsGeneration } from '~/lib/frame/textMetrics'
 import { textSnapY, baselineRoundDy, resnapReach, type TextMarks } from '~/lib/frame/gridSnap'
 import { formatFor } from '~/lib/frame/formats'
 import { readFrameSizeState, writeFrameSizeState, type FrameSizeState } from '~/lib/frame/frameSize'
@@ -150,6 +150,17 @@ export function canSpanColumns(l: { kind: string; runs?: unknown[]; path?: unkno
 /** A layer whose HEIGHT can be set to a span of rows: boxes only (text and wired follow their content). */
 export function canSpanRows(l: { kind: string }): boolean {
   return resizableKind(l.kind)
+}
+/** Why a layer can't take a column / row span — the disabled Span field's tooltip. Undefined where it can. */
+export function spanReasons(l: { kind: string; runs?: unknown[]; path?: unknown }): { cols?: string; rows?: string } {
+  const cols = canSpanColumns(l) ? undefined
+    : l.kind === 'text' ? (l.path ? 'Text on a path follows its path' : 'Placed lines keep their own layout')
+      : "This layer's size can't follow columns"
+  const rows = canSpanRows(l) ? undefined
+    : l.kind === 'text' ? 'Text height follows its lines'
+      : l.kind === 'wired' ? 'Its height follows its content'
+        : "This layer's size can't follow rows"
+  return { cols, rows }
 }
 
 /** Compute handle positions (corners, edges, rotation, center) from box geometry
@@ -894,9 +905,10 @@ export function useLocalLayerEditor(opts: EditorOpts) {
   }
 
   /** A flowing text layer's capitals and baselines in grid (design) px, for a stored y — what text
-   *  snaps by (spec "Snapping"). Null for anything else, and for rotated text (it snaps as a box). */
+   *  snaps by (spec "Snapping"). Null for anything else, and for rotated or corner-pinned text (it
+   *  snaps as a box). */
   function gridTextMarks(l: LocalLayer, y: number): TextMarks | null {
-    if (l.kind !== 'text' || l.rotation) return null
+    if (l.kind !== 'text' || l.rotation || cornerPinActive(l.cornerPin)) return null
     const { w: Wd, h: Hd } = gridDims()
     const m = textMetrics(l as TextLayer, Wd)
     if (!m || !m.baselines.length) return null
@@ -1171,21 +1183,36 @@ export function useLocalLayerEditor(opts: EditorOpts) {
   // ── Where a layer sits on the grid (the Layer section's Column / Span, Row / Span) ─────────
   /** The layer's box in grid (design) px. Text runs from its capitals to its last baseline, so its
    *  rows are counted from the capitals (spec "The editor"). */
-  function layerGridBox(l: LocalLayer): { x: number; y: number; w: number; h: number } {
-    const W = dims().w, H = dims().h
+  function layerGridMeasure(l: LocalLayer): { box: { x: number; y: number; w: number; h: number }; marks: TextMarks | null } {
     const { w: Wd, h: Hd } = gridDims()
-    const b = boxPx(l)
-    const kx = Wd / W, ky = Hd / H
-    const w = b.w * kx, h = b.h * ky
-    const x = l.x * Wd - w / 2
+    // Measured at the design size (not the display box scaled per axis), so a rounded display
+    // size can't put a typed Row a fraction off the row.
+    const b = withWiredContent(opts.wiredContent, () => localLayerBox(scratchCtx(), l, Wd, Hd))
+    const x = l.x * Wd - b.w / 2
     const marks = gridTextMarks(l, l.y)
-    if (marks) return { x, y: marks.capTop, w, h: Math.max(1, marks.baselines[marks.baselines.length - 1]! - marks.capTop) }
-    const cy = (l.y * H + textVAlignCenterOffset(l, b.h)) * ky
-    return { x, y: cy - h / 2, w, h }
+    if (marks) return { box: { x, y: marks.capTop, w: b.w, h: Math.max(1, marks.baselines[marks.baselines.length - 1]! - marks.capTop) }, marks }
+    const cy = l.y * Hd + textVAlignCenterOffset(l, b.h)
+    return { box: { x, y: cy - b.h / 2, w: b.w, h: b.h }, marks: null }
+  }
+  function layerGridBox(l: LocalLayer): { x: number; y: number; w: number; h: number } {
+    return layerGridMeasure(l).box
   }
   function layerSpan(l: LocalLayer): LayoutSpan {
     return spanOf(layerGridBox(l), layoutGridResolved.value)
   }
+  /** The single selected layer's grid box, measured once per change and shared by the marks, the
+   *  Layer section's fields and the drag's covered cells. Re-measures when a web font loads. */
+  const selectedGridMeasure = computed(() => {
+    if (selectedIds.value.size > 1) return null
+    const l = selected.value; if (!l) return null
+    void textMetricsGeneration.value
+    return layerGridMeasure(l)
+  })
+  const selectedGridBox = computed(() => selectedGridMeasure.value?.box ?? null)
+  const selectedSpan = computed<LayoutSpan | null>(() => {
+    const b = selectedGridBox.value
+    return b ? spanOf(b, layoutGridResolved.value) : null
+  })
   /** Move (Column, Row) or resize (Span) a layer onto the grid, in one undo step. A span the layer
    *  can't take (text rows, a line's columns) changes nothing and records nothing. */
   function setLayerSpan(id: string, p: Partial<LayoutSpan>) {
@@ -1193,7 +1220,17 @@ export function useLocalLayerEditor(opts: EditorOpts) {
     const g = layoutGridResolved.value
     const { w: Wd, h: Hd } = gridDims()
     const box = layerGridBox(l)
-    const place = placeOnSpan({ ...spanOf(box, g), ...p }, g)
+    const cur = spanOf(box, g)
+    const want = { ...cur, ...p }
+    // A first column/row is clamped so the span still fits: typing Column never pushes a
+    // multi-column box off the grid.
+    const cols = p.cols != null && canSpanColumns(l) ? Math.max(1, Math.round(p.cols)) : cur.cols
+    want.col = Math.min(Math.max(1, Math.round(want.col)), Math.max(1, g.cols.length - cols + 1))
+    if (want.row != null && g.rows.length) {
+      const rows = p.rows != null && canSpanRows(l) ? Math.max(1, Math.round(p.rows)) : (cur.rows ?? 1)
+      want.row = Math.min(Math.max(1, Math.round(want.row)), Math.max(1, g.rows.length - rows + 1))
+    }
+    const place = placeOnSpan(want, g)
     const patch: Record<string, number> = {}
     if (p.col != null || (p.cols != null && canSpanColumns(l))) {
       const spanCols = p.cols != null && canSpanColumns(l)
@@ -1217,11 +1254,9 @@ export function useLocalLayerEditor(opts: EditorOpts) {
   /** The single selected text's capitals and baselines (grid px) with its box's x and width — the
    *  overlay's accent marks. Null unless the grid is shown and exactly one flowing text is selected. */
   const selectedTextMarks = computed(() => {
-    if (!layoutGrid.value.show || selectedIds.value.size > 1) return null
-    const l = selected.value; if (!l) return null
-    const m = gridTextMarks(l, l.y); if (!m) return null
-    const b = layerGridBox(l)
-    return { capTop: m.capTop, baselines: m.baselines, x: b.x, w: b.w }
+    if (!layoutGrid.value.show) return null
+    const g = selectedGridMeasure.value; if (!g?.marks) return null
+    return { capTop: g.marks.capTop, baselines: g.marks.baselines, x: g.box.x, w: g.box.w }
   })
 
   // Consumer binds these to the artboard element (capture phase recommended so
@@ -1368,6 +1403,6 @@ export function useLocalLayerEditor(opts: EditorOpts) {
     localGroups, commitBoth, writeGroups, setLayerGroup, setGroupParent, selectGroupById,
     snapGuides, marquee, startMarquee, moveMarquee, endMarquee,
     resnapSelected,
-    layerGridBox, layerSpan, setLayerSpan, selectedTextMarks,
+    layerGridBox, layerSpan, setLayerSpan, selectedTextMarks, selectedGridBox, selectedSpan,
   }
 }

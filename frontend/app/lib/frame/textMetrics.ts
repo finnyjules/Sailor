@@ -5,6 +5,7 @@
 // mode reaches `up` above the middle and `down` below it, to its baseline — the same reading
 // `kit/measure.ts` uses. Offsets are px at width W, measured down from the top of the editor's box
 // (`localLayerBox`, centred at y·H + textVAlignCenterOffset), which is the box snapping moves.
+import { shallowRef } from 'vue'
 import {
   applyFont, fillFontSize, localLayerBox, textVAlignCenterOffset, wrappedTextLinesMeta,
   type TextLayer,
@@ -37,9 +38,13 @@ function scratch(): CanvasRenderingContext2D | null {
 // "no canvas". A font finishing loading changes every reading, so the generation goes into the key.
 const _byCtx = new WeakMap<object, Map<string, TextMetrics>>()
 const _noCtx = new Map<string, TextMetrics>()
-let _gen = 0
+/** Bumped when a web font finishes loading. Reactive, so a computed that measures text and reads
+ *  it (`textMetricsGeneration.value`) re-measures when the font arrives. */
+export const textMetricsGeneration = shallowRef(0)
+/** A font finished loading: every reading may change. */
+export function bumpTextMetricsGeneration(): void { _noCtx.clear(); textMetricsGeneration.value++ }
 if (typeof document !== 'undefined' && (document as any).fonts?.addEventListener) {
-  ;(document as any).fonts.addEventListener('loadingdone', () => { _gen++; _noCtx.clear() })
+  ;(document as any).fonts.addEventListener('loadingdone', bumpTextMetricsGeneration)
 }
 function cacheFor(ctx: CanvasRenderingContext2D | null): Map<string, TextMetrics> {
   if (!ctx) return _noCtx
@@ -48,7 +53,7 @@ function cacheFor(ctx: CanvasRenderingContext2D | null): Map<string, TextMetrics
   return m
 }
 function keyOf(l: TextLayer, W: number): string {
-  return JSON.stringify([_gen, l.text, l.fontFamily, l.fontWeight, l.axes ?? null, l.fontSize, l.lineHeight,
+  return JSON.stringify([textMetricsGeneration.value, l.text, l.fontFamily, l.fontWeight, l.axes ?? null, l.fontSize, l.lineHeight,
     l.letterSpacing ?? 0, l.textTransform ?? null, l.boxW ?? 0, l.boxH ?? 0, l.boxFit ?? null, l.valign ?? null, W])
 }
 

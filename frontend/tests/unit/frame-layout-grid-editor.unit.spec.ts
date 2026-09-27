@@ -1,11 +1,11 @@
 // @vitest-environment happy-dom
 // frontend/tests/unit/frame-layout-grid-editor.unit.spec.ts
 import { describe, it, expect } from 'vitest'
-import { reactive } from 'vue'
-import { useLocalLayerEditor, canSpanColumns, canSpanRows } from '~/composables/useLocalLayerEditor'
+import { reactive, watch } from 'vue'
+import { useLocalLayerEditor, canSpanColumns, canSpanRows, spanReasons } from '~/composables/useLocalLayerEditor'
 import { createRectLayer, createTextLayer, textVAlignCenterOffset } from '~/composables/useCompositorLayers'
 import { patchLayoutGrid } from '~/lib/frame/layoutGrid'
-import { textMetrics } from '~/lib/frame/textMetrics'
+import { textMetrics, bumpTextMetricsGeneration } from '~/lib/frame/textMetrics'
 
 function editor(properties: Record<string, any> = {}) {
   const node = reactive({ id: 'f', data: { properties } }) as any
@@ -391,6 +391,13 @@ describe('spans in the editor', () => {
     expect(canSpanRows({ kind: 'wired', w: 0.3 } as any)).toBe(false)
     expect(canSpanColumns({ kind: 'line', w: 0.3 } as any)).toBe(false)
   })
+  it('why a layer can\'t span: a short reason exactly where it can\'t', () => {
+    expect(spanReasons(createRectLayer({}))).toEqual({ cols: undefined, rows: undefined })
+    expect(spanReasons(createTextLayer({}))).toEqual({ cols: undefined, rows: 'Text height follows its lines' })
+    expect(spanReasons({ kind: 'line' })).toEqual({ cols: "This layer's size can't follow columns", rows: "This layer's size can't follow rows" })
+    expect(spanReasons({ kind: 'wired' }).rows).toBe('Its height follows its content')
+    expect(spanReasons(createTextLayer({ runs: [{ text: 'a', x: 0, y: 0 }] } as any)).cols).toBe('Placed lines keep their own layout')
+  })
   it('selectedTextMarks: the selected text\'s capitals and baselines while the grid is shown', () => {
     const rect = createRectLayer({ x: 0.5, y: 0.7, w: 0.2, h: 0.1 })
     const text = createTextLayer({ text: 'One\nTwo', fontSize: 0.04, boxW: 0.4, valign: 'top', x: 0.5, y: 0.3 } as any)
@@ -406,5 +413,94 @@ describe('spans in the editor', () => {
     expect(s.w).toBeCloseTo(0.4 * WD, 6)
     ed.setLayoutGrid({ ...ed.layoutGrid.value, show: false }, false)
     expect(ed.selectedTextMarks.value).toBeNull()
+  })
+})
+
+// Stage 2 final-review fixes.
+describe('spans and marks — final-review fixes', () => {
+  it('typing a Column never pushes a multi-column box off the grid', () => {
+    const rect = createRectLayer({ x: 0.5, y: 0.5, w: 0.2, h: 0.1 })
+    const { ed } = rowsEditor({ sailor_localLayers: [rect] })
+    const g = ed.layoutGridResolved.value, n = g.cols.length
+    ed.setLayerSpan(rect.id, { col: 1, cols: 3 })
+    ed.setLayerSpan(rect.id, { cols: 3 })
+    ed.setLayerSpan(rect.id, { col: n })                          // the last column: the span can't fit there
+    const l = ed.localLayers.value[0] as any
+    expect((l.x + l.w / 2) * WD).toBeCloseTo(g.cols[n - 1]!.a + g.cols[n - 1]!.w, 6)   // right edge on the grid's
+    expect(ed.layerSpan(l)).toEqual(expect.objectContaining({ col: n - 2, cols: 3 }))
+  })
+  it('typing a Row never pushes a multi-row box off the grid', () => {
+    const rect = createRectLayer({ x: 0.5, y: 0.5, w: 0.2, h: 0.1 })
+    const { ed } = rowsEditor({ sailor_localLayers: [rect] })
+    const g = ed.layoutGridResolved.value, n = g.rows.length
+    ed.setLayerSpan(rect.id, { row: 1 })
+    ed.setLayerSpan(rect.id, { rows: 2 })
+    ed.setLayerSpan(rect.id, { row: n })
+    const l = ed.localLayers.value[0] as any
+    expect(ed.layerSpan(l)).toEqual(expect.objectContaining({ row: n - 1, rows: 2 }))
+  })
+  it('corner-pinned text snaps as a box: no marks, its box is the drawn box', () => {
+    const pin = { tl: { x: 0.1, y: 0 }, tr: { x: 0, y: 0 }, br: { x: 0, y: 0 }, bl: { x: 0, y: 0 } }
+    const text = createTextLayer({ text: 'Pinned', fontSize: 0.04, boxW: 0.4, valign: 'top', x: 0.5, y: 0.3, cornerPin: pin } as any)
+    const { ed } = rowsEditor({ sailor_localLayers: [text] })
+    ed.selectLocal(text.id)
+    expect(ed.selectedTextMarks.value).toBeNull()
+    const b = ed.layerGridBox(text)
+    const m = marksAt(text, 0.3)
+    expect(b.y).not.toBeCloseTo(m.capTop, 3)
+  })
+  it('rotated text snaps as a box: its top rounds to the baseline grid', () => {
+    const base = createTextLayer({ text: 'Tilt', fontSize: 0.04, boxW: 0.4, valign: 'top', x: 0.5, rotation: 3 } as any)
+    const unit = zoomedEditor({}).ed.layoutGridResolved.value.unit
+    const m = textMetrics(base as any, WD)!
+    const boxTop = (y: number) => y * HD + textVAlignCenterOffset(base as any, m.boxH) - m.boxH / 2
+    // A start whose dropped box top is off the baseline grid, and whose dropped first baseline is too.
+    const o = [1, 2, 3, 5, 7, 9].find(k => {
+      const y = 0.3 + (k + 14) / HD
+      return !onUnit(boxTop(y), unit) && !onUnit(boxTop(y) + m.baselines[0]!, unit)
+    })!
+    const layer = { ...base, y: 0.3 + o / HD }                     // clear of the margins and the middle
+    const { ed } = zoomedEditor({ sailor_localLayers: [layer] })
+    expect(ed.layerGridBox(layer).h).toBeCloseTo(m.boxH, 6)       // the box, not capitals-to-baseline
+    drag(ed, layer.id, 7)
+    const l = ed.localLayers.value[0] as any
+    expect(onUnit(boxTop(l.y), unit)).toBe(true)
+  })
+  it('a Row lands exactly on the row when the display size is rounded off the design aspect', () => {
+    const node = reactive({ id: 'f', data: { properties: { sailor_localLayers: [createRectLayer({ x: 0.5, y: 0.5, w: 0.2, h: 0.1 })] } } }) as any
+    const rect = { left: 0, top: 0, width: 540, height: 674, right: 540, bottom: 674, x: 0, y: 0 } as DOMRect
+    const ed = useLocalLayerEditor({ node: () => node, dims: () => ({ w: 540, h: 674 }), designDims: () => ({ w: 1080, h: 1350 }), getRect: () => rect })
+    ed.ensureLayoutGrid()
+    ed.setLayoutGrid({ ...patchLayoutGrid(ed.layoutGrid.value, { rows: 'square' }), show: true }, false)
+    const g = ed.layoutGridResolved.value
+    const id = ed.localLayers.value[0]!.id
+    ed.setLayerSpan(id, { row: 3 })
+    const l = ed.localLayers.value[0] as any
+    expect(l.y * HD - (l.h * WD) / 2).toBeCloseTo(g.rows[2]!.a, 6)
+    expect(ed.layerGridBox(l).h).toBeCloseTo(l.h * WD, 6)
+  })
+  it('the selected layer is measured once: selectedGridBox / selectedSpan follow it', () => {
+    const rect = createRectLayer({ x: 0.5, y: 0.7, w: 0.2, h: 0.1 })
+    const text = createTextLayer({ text: 'One\nTwo', fontSize: 0.04, boxW: 0.4, valign: 'top', x: 0.5, y: 0.3 } as any)
+    const { ed } = rowsEditor({ sailor_localLayers: [rect, text] })
+    expect(ed.selectedGridBox.value).toBeNull()
+    ed.selectLocal(text.id)
+    expect(ed.selectedGridBox.value).toEqual(ed.layerGridBox(text))
+    expect(ed.selectedSpan.value).toEqual(ed.layerSpan(text))
+    ed.selectLocal(rect.id)
+    expect(ed.selectedGridBox.value).toEqual(ed.layerGridBox(rect))
+  })
+  it('a web font finishing loading re-measures the selected text', () => {
+    const text = createTextLayer({ text: 'Font', fontSize: 0.04, boxW: 0.4, valign: 'top', x: 0.5, y: 0.3 } as any)
+    const { ed } = rowsEditor({ sailor_localLayers: [text] })
+    ed.selectLocal(text.id)
+    let marks = 0, spans = 0
+    watch(ed.selectedTextMarks, () => { marks++ }, { flush: 'sync' })
+    watch(ed.selectedSpan, () => { spans++ }, { flush: 'sync' })
+    void ed.selectedTextMarks.value; void ed.selectedSpan.value
+    bumpTextMetricsGeneration()
+    void ed.selectedTextMarks.value; void ed.selectedSpan.value
+    expect(marks).toBe(1)
+    expect(spans).toBe(1)
   })
 })

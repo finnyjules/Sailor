@@ -60,6 +60,12 @@ describe('spanOf / placeOnSpan', () => {
     // and track 1 (310-500) — not the gutter-only case above.
     expect(spanOf({ x: 150, y: 100, w: 300, h: 190 }, R)).toEqual({ col: 1, cols: 2, row: 1, rows: 1 })
   })
+  it('a box straddling a column edge covers the track it overlaps more', () => {
+    // Tracks 0 (100-290) and 1 (310-500). [250, 330] overlaps track 0 by 40 and track 1 by 20.
+    expect(spanOf({ x: 250, y: 400, w: 80, h: 10 }, R)).toEqual({ col: 1, cols: 1, row: 2, rows: 1 })
+    // [270, 360] overlaps track 0 by 20 and track 1 by 50.
+    expect(spanOf({ x: 270, y: 400, w: 90, h: 10 }, R)).toEqual({ col: 2, cols: 1, row: 2, rows: 1 })
+  })
   it('places a span on the grid and clamps it inside', () => {
     expect(placeOnSpan({ col: 2, cols: 2, row: 3, rows: 2 }, R)).toEqual({ x: 310, w: 400, y: 520, h: 400 })
     expect(placeOnSpan({ col: 9, cols: 5, row: null, rows: null }, R)).toEqual({ x: 730, w: 190, y: null, h: null })

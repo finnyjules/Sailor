@@ -168,4 +168,27 @@ describe('LayerGridFields', () => {
     for (const id of ['layer-grid-col', 'layer-grid-cols', 'layer-grid-row', 'layer-grid-rows'])
       expect(d.get(`[data-testid="${id}"]`).attributes('disabled')).toBeDefined()
   })
+  it('the Column field stops where the span still fits; so does Row', async () => {
+    const w = fields()                                                  // span 3 columns, 2 rows
+    expect(w.get('[data-testid="layer-grid-col"]').attributes('max')).toBe('10')   // 12 − 3 + 1
+    expect(w.get('[data-testid="layer-grid-row"]').attributes('max')).toBe('5')    // 6 − 2 + 1
+    await commit(w, 'layer-grid-col', '12')
+    await commit(w, 'layer-grid-row', '6')
+    expect(w.emitted('update')).toEqual([[{ col: 10 }], [{ row: 5 }]])
+  })
+  it('a disabled field says why in its label\'s tooltip', () => {
+    const label = (w: ReturnType<typeof fields>, id: string) => w.get(`[data-testid="${id}"]`).element.closest('label')!.getAttribute('title')
+    const d = fields({ disabled: true, disabledReason: 'Finish the pen first' })
+    for (const id of ['layer-grid-col', 'layer-grid-cols', 'layer-grid-row', 'layer-grid-rows'])
+      expect(label(d, id)).toBe('Finish the pen first')
+    const s = fields({ canSpanCols: false, canSpanRows: false, colsReason: 'A line can\'t follow columns', rowsReason: 'Text height follows its lines' })
+    expect(label(s, 'layer-grid-cols')).toBe('A line can\'t follow columns')
+    expect(label(s, 'layer-grid-rows')).toBe('Text height follows its lines')
+    expect(label(s, 'layer-grid-col')).toBe('The first column the layer covers')   // enabled: its own hint
+    // No reason given: a disabled span still says something.
+    const n = fields({ canSpanCols: false, canSpanRows: false })
+    expect(label(n, 'layer-grid-cols')).toBeTruthy()
+    expect(label(n, 'layer-grid-cols')).not.toBe('How many columns the layer covers')
+    expect(label(n, 'layer-grid-rows')).not.toBe('How many rows the layer covers')
+  })
 })
