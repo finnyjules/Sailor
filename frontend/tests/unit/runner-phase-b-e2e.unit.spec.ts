@@ -25,6 +25,7 @@ import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createApp, eventHandler, toWebHandler } from 'h3'
+import { BufferTarget, EncodedPacket, EncodedVideoPacketSource, Mp4OutputFormat, Output } from 'mediabunny'
 import { __setEngineForTests } from '~~/server/runner/index'
 import { runnerFamilies } from '~~/server/runner/config'
 import { nodeCredits } from '~~/server/runner/metering'
@@ -83,6 +84,30 @@ const imageCard = (file: string) => ({ class_type: 'Image', inputs: { image: fil
 const outImage = (from: string) => ({ class_type: 'Image', inputs: { image: '', export: false, images: [from, 0], batch_index: -1 } })
 const outVideo = (from: string) => ({ class_type: 'Video', inputs: { file: '', export: false, filename_prefix: 'video/ComfyUI', source: [from, 0] } })
 
+/**
+ * A real, mediabunny-readable MP4 whose video track lasts `seconds` at
+ * `fps`, `width` × `height`, muxed without an encoder (the same recipe as
+ * runner-topaz-video.unit.spec.ts and runner-person-swap-video.unit.spec.ts).
+ * A video-measured family's FLOWS entry (person-swap-video) needs its file
+ * to be genuinely parseable, since the engine's own media check reads it
+ * for real (no mock): the synthetic filler bytes `writeCards` writes for
+ * every other card would fail that check.
+ */
+async function realMp4(seconds: number, width = 1280, height = 720, fps = 24): Promise<Buffer> {
+  const out = new Output({ format: new Mp4OutputFormat(), target: new BufferTarget() })
+  const src = new EncodedVideoPacketSource('avc')
+  out.addVideoTrack(src, { frameRate: fps })
+  await out.start()
+  const description = new Uint8Array([1, 0x42, 0xC0, 0x1E, 0xFF, 0xE1, 0, 0x0A, 0x67, 0x42, 0xC0, 0x1E, 0xDA, 0x02, 0x80, 0xBF, 0xE5, 0x84, 1, 0, 4, 0x68, 0xCE, 0x3C, 0x80])
+  const frames = Math.round(seconds * fps)
+  for (let i = 0; i < frames; i++) {
+    await src.add(new EncodedPacket(new Uint8Array([0, 0, 0, 1, 0x65]), i === 0 ? 'key' : 'delta', i / fps, 1 / fps),
+      i === 0 ? { decoderConfig: { codec: 'avc1.42c01e', codedWidth: width, codedHeight: height, description } } : undefined)
+  }
+  await out.finalize()
+  return Buffer.from((out.target as BufferTarget).buffer!)
+}
+
 interface FamilyFlow {
   family: RunnerFamily
   label: string
@@ -101,6 +126,13 @@ interface FamilyFlow {
    * the picture's size, and hosted refuses one it can't size (Task G1).
    */
   measured?: true
+  /**
+   * A real video file this flow needs read and measured before the hold
+   * (person-swap-video): its name (among `files`) and its length in
+   * seconds, so the price can be checked against the same figure the
+   * engine actually measured.
+   */
+  realVideoFile?: { name: string, seconds: number }
 }
 
 /**
@@ -495,6 +527,80 @@ const FLOWS: FamilyFlow[] = [
     endpoint: 'luma/ray-3.2',
     body: { prompt: 'a fox runs through snow', duration: 5, resolution: '720p', aspect_ratio: '16:9', loop: false },
   },
+  // Face swap on Easel's advanced face swap (family face-swap), no backup: the
+  // whole FaceSwap node runs only in the runner (there is no ComfyUI path any
+  // more — InsightFace / inswapper was removed, non-commercial licence). The
+  // body is written from its saved schema (runner-face-swap.unit.spec.ts).
+  {
+    family: 'face-swap',
+    label: 'FaceSwap on Easel',
+    prompt: {
+      11: imageCard('face.png'),
+      12: imageCard('target.png'),
+      1: { class_type: 'FaceSwap', inputs: { source_face: ['11', 0], target_frames: ['12', 0], gender: 'Female', keep_hair_from: 'The picture' } },
+      2: outImage('1'),
+    },
+    files: ['face.png', 'target.png'],
+    provider: 'fal',
+    endpoint: 'easel-ai/advanced-face-swap',
+    body: {
+      face_image_0: { url: storageUrl('face') },
+      gender_0: 'female',
+      target_image: { url: storageUrl('target') },
+      workflow_type: 'target_hair',
+      upscale: true,
+    },
+  },
+  // Fix faces on fal's Topaz image upscale with face enhancement (family
+  // fix-faces), no backup: the whole FixFacesNode runs only in the runner
+  // (CodeFormer was removed, non-commercial licence; there is no ComfyUI
+  // path any more). The body is written from its saved schema
+  // (runner-fix-faces.unit.spec.ts).
+  {
+    family: 'fix-faces',
+    label: 'FixFacesNode on fal\'s Topaz',
+    prompt: {
+      11: imageCard('image.png'),
+      1: { class_type: 'FixFacesNode', inputs: { image: ['11', 0] } },
+      2: outImage('1'),
+    },
+    files: ['image.png'],
+    provider: 'fal',
+    endpoint: 'fal-ai/topaz/upscale/image',
+    // Fix faces is priced by the picture's measured size (editSettings.ts pricedInputPixels): a
+    // 1 × 1 real PNG so the runner can size it, exactly like the other size-priced flows above.
+    measured: true,
+    body: {
+      image_url: storageUrl('image'), model: 'Standard V2', upscale_factor: 2,
+      face_enhancement: true, face_enhancement_strength: 0.8, face_enhancement_creativity: 0, output_format: 'png',
+    },
+  },
+  // Person swap (video) on fal's Pixverse Swap (family person-swap-video), no
+  // backup (Replicate has no Pixverse Swap): the whole PersonSwapVideo node
+  // runs only in the runner; there is no ComfyUI path at all (its Python
+  // definition always raises). The video is read and measured before the
+  // hold (personSwapMedia.ts), so `realVideoFile` gives it a genuine,
+  // mediabunny-readable clip rather than the synthetic filler `writeCards`
+  // writes for a plain picture. Its saved schema is
+  // runner-person-swap-video.unit.spec.ts's.
+  {
+    family: 'person-swap-video',
+    label: 'PersonSwapVideo on Pixverse Swap',
+    prompt: {
+      11: imageCard('person.png'),
+      1: { class_type: 'PersonSwapVideo', inputs: { image: ['11', 0], video_url: '/view?filename=clip.mp4&type=input', resolution: '720p' } },
+      2: outVideo('1'),
+    },
+    files: ['person.png', 'clip.mp4'],
+    realVideoFile: { name: 'clip.mp4', seconds: 3 },
+    provider: 'fal',
+    endpoint: 'fal-ai/pixverse/swap',
+    body: {
+      video_url: 'https://fal.storage/clip.mp4',
+      image_url: storageUrl('person'),
+      mode: 'person', resolution: '720p', original_sound_switch: true,
+    },
+  },
 ]
 
 // ── The routes ───────────────────────────────────────────────────────────
@@ -604,13 +710,13 @@ describe('B10 · one workflow per family, POST /api/runs to the last event', () 
     // `frame` makes no provider call (the runner renders it): its end-to-end is runner-compositor-engine.unit.spec.ts.
     // `sync-3` needs real media files, measured before the hold, and charges the clip it measures (below the
     // unmeasured price this loop checks): its end-to-end is runner-sync-3.unit.spec.ts. `topaz-video` the same
-    // (Task F23): a real video, measured before the hold: runner-topaz-video.unit.spec.ts. `person-swap-video` the
-    // same (Task 3, non-commercial face models replacement): a real video, measured before the hold:
-    // runner-person-swap-video.unit.spec.ts. `cards` (step 3, R0.3)
+    // (Task F23): a real video, measured before the hold: runner-topaz-video.unit.spec.ts. `cards` (step 3, R0.3)
     // makes no provider call either (the runner computes the cards): runner-value-wires.unit.spec.ts and the R1 card specs.
     // Nor do the picture effects, the Shader effect's bake and the live previews (step 3, R2): runner-effects-*.unit.spec.ts.
+    // `face-swap`, `fix-faces` and `person-swap-video` (Tasks 1–3, non-commercial face models
+    // replacement) are provider families like any other: each has its own FLOWS entry below.
     const local: readonly string[] = [
-      'frame', 'sync-3', 'topaz-video', 'person-swap-video', 'cards',
+      'frame', 'sync-3', 'topaz-video', 'cards',
       'effects-tone', 'effects-blur', 'effects-cells', 'effects-warp', 'effects-mask', 'effects-noise', 'shader-bake', 'live-previews',
     ]
     expect(FLOWS.map(f => f.family).sort()).toEqual(RUNNER_FAMILIES.filter(f => !local.includes(f)).sort())
@@ -619,6 +725,9 @@ describe('B10 · one workflow per family, POST /api/runs to the last event', () 
   it.each(FLOWS.map(f => [`${f.family}: ${f.label} → ${f.endpoint}`, f] as const))('%s', async (_l, f) => {
     const k = kit()
     writeCards(k, f.files, f.png, f.measured)
+    // A video-measured family (person-swap-video): replace the synthetic filler with a real,
+    // mediabunny-readable clip, since the engine's own media check reads it for real.
+    if (f.realVideoFile) writeFileSync(join(k.root, 'input', f.realVideoFile.name), await realMp4(f.realVideoFile.seconds))
     const events = await openEvents()
     try {
       const { runId, promptIds } = await started([f.prompt])
@@ -636,10 +745,14 @@ describe('B10 · one workflow per family, POST /api/runs to the last event', () 
 
       // The charge is priceGraph for the nodes that ran (all of them), held and settled once,
       // with the server's switches (Rotate camera prices its 2511 call while that one is on).
-      // A card whose size is read (`measured`: a 1 × 1 picture) is charged on that size.
+      // A card whose size is read (`measured`: a 1 × 1 picture) is charged on that size; a
+      // video-measured family (person-swap-video) is charged on its real clip's length.
       const px = f.measured ? 1 : undefined
-      const price = priceGraph(f.prompt, { families: runnerFamilies(), ...(px ? { inputPixels: { 1: px } } : {}) }).credits
-      expect(price).toBe(nodeCredits(f.prompt['1']!, px, runnerFamilies()) + BASE_RENDER_CREDITS)
+      const inputSeconds = f.realVideoFile ? { video: f.realVideoFile.seconds } : undefined
+      const price = priceGraph(f.prompt, {
+        families: runnerFamilies(), ...(px ? { inputPixels: { 1: px } } : {}), ...(inputSeconds ? { inputSeconds: { 1: inputSeconds } } : {}),
+      }).credits
+      expect(price).toBe(nodeCredits(f.prompt['1']!, px, runnerFamilies(), inputSeconds) + BASE_RENDER_CREDITS)
       expect(k.ledger.hold).toHaveBeenCalledTimes(1)
       expect(k.ledger.settle).toHaveBeenCalledTimes(1)
       expect(holds(k.ledger)).toEqual([['settled', price]])
