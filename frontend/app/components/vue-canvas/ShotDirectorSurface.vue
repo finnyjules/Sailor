@@ -11,8 +11,9 @@ import {
   type RefKind, type RefRole, type CastMember,
 } from '~/lib/shotdirector/types'
 import { formatShotUSD } from '~/lib/shotdirector/price'
-import { buildKeyframePrompt, KEYFRAME_COST_USD } from '~/lib/shotdirector/keyframe'
-import { uploadRefFile } from '~/lib/shotdirector/refUpload'
+import { buildKeyframePrompt, startFrameImages, KEYFRAME_COST_USD } from '~/lib/shotdirector/keyframe'
+import { uploadRefFile, viewRefUrl } from '~/lib/shotdirector/refUpload'
+import { pickState } from '#shared/characters/types'
 import { castMemberPictures } from '~/lib/shotdirector/cast'
 import { SHOT_MODEL_CHOICES } from '~/lib/shotdirector/profiles'
 import StudioSection from '~/components/vue-canvas/StudioSection.vue'
@@ -225,9 +226,26 @@ const previewBusy = ref(false)
 const previewError = ref<string | null>(null)
 const previewKey = ref<string | null>(null)
 
+// With a cast, the frame is made from each member's clean pictures (front,
+// full-body front, their look's clothes) with a line naming who is which image
+// — never the combined sheet grid. Without a cast: the subject image, as before.
+const castStartFrame = computed(() => {
+  if (!sheet.value.cast.length) return null
+  const sets = resolveCastSets(sheet.value.cast.map(m => ({ slug: m.slug, stateId: m.stateId })))
+  const members = sheet.value.cast.flatMap((m) => {
+    const set = sets[m.slug]
+    if (!set) return []
+    const c = characters.value.find(x => x.slug === m.slug)
+    const clothes = c ? (pickState(c, m.stateId)?.clothes ?? []).map(g => viewRefUrl(g.filename)) : []
+    return [{ name: m.name, set, clothes }]
+  })
+  const made = startFrameImages(members, environmentImage.value)
+  return made.urls.length ? made : null
+})
+
 // What the keyframe depends on — when this drifts from previewKey, it's stale.
 const previewSignature = computed(() =>
-  JSON.stringify([result.value.prompt, subjectImage.value, environmentImage.value, sheet.value.format.aspectRatio]))
+  JSON.stringify([result.value.prompt, subjectImage.value, environmentImage.value, sheet.value.format.aspectRatio, castStartFrame.value]))
 const keyframeStale = computed(() => !!previewFrame.value && previewKey.value !== previewSignature.value)
 const canPreview = computed(() => !!(subjectImage.value || environmentImage.value || sheet.value.subject.trim()))
 
@@ -246,12 +264,16 @@ async function generatePreview() {
   previewError.value = null
   const sig = previewSignature.value
   try {
-    const person = subjectImage.value
     const location = environmentImage.value
-    const images: string[] = []
-    if (person) images.push(await fetchImageAsDataUrl(person))
-    if (location) images.push(await fetchImageAsDataUrl(location))
-    const prompt = buildKeyframePrompt(sheet.value, { hasPerson: !!person, hasLocation: !!location })
+    const made = castStartFrame.value
+    const person = made ? null : subjectImage.value
+    const urls = made ? made.urls : [person, location].filter((u): u is string => !!u)
+    const images = await Promise.all(urls.map(fetchImageAsDataUrl))
+    const prompt = buildKeyframePrompt(sheet.value, {
+      hasPerson: made ? true : !!person,
+      hasLocation: !!location,
+      castLine: made?.castLine,
+    })
     const res = await $fetch<{ images?: string[] }>('/api/inpaint/nano-gen', {
       method: 'POST',
       body: { prompt, images, aspect_ratio: sheet.value.format.aspectRatio },
@@ -264,6 +286,24 @@ async function generatePreview() {
     previewError.value = err instanceof Error ? err.message : 'Preview failed'
   } finally {
     previewBusy.value = false
+  }
+}
+
+// ── Use the preview as the first frame ────────────────────────────────────────
+const firstFrameBusy = ref(false)
+async function useAsFirstFrame() {
+  const frame = previewFrame.value
+  if (!frame || firstFrameBusy.value) return
+  firstFrameBusy.value = true
+  previewError.value = null
+  try {
+    const blob = await fetch(frame).then(r => r.blob())
+    const url = await uploadRefFile(new File([blob], 'first-frame.png', { type: blob.type || 'image/png' }))
+    update(s => ({ ...s, firstFrame: url, mode: 'firstLastFrame' }))
+  } catch (err) {
+    previewError.value = err instanceof Error ? err.message : 'Upload failed'
+  } finally {
+    firstFrameBusy.value = false
   }
 }
 
@@ -478,8 +518,10 @@ function patchDialogue(i: number, patch: { speaker?: string; line?: string }) {
             <div class="flex items-center gap-0 border-b border-white/[0.08] p-1">
               <button
                 type="button"
-                class="flex-1 rounded py-1.5 text-[11px] font-medium transition-colors"
+                class="flex-1 rounded py-1.5 text-[11px] font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:text-white/40"
                 :class="sheet.mode === 'reference' ? 'bg-white/10 text-white' : 'text-white/40 hover:text-white/70'"
+                :disabled="profile.requiresFirstFrame"
+                :title="profile.requiresFirstFrame ? `${profile.label} starts from a first frame.` : undefined"
                 @click="update(s => ({ ...s, mode: 'reference' }))"
               >Reference</button>
               <button
@@ -490,8 +532,8 @@ function patchDialogue(i: number, patch: { speaker?: string; line?: string }) {
               >First / Last frame</button>
             </div>
 
-            <!-- Reference mode -->
-            <div v-if="sheet.mode === 'reference'" class="space-y-4 p-3">
+            <!-- Cast (every mode), then the mode's own references -->
+            <div class="space-y-4 p-3">
 
               <!-- Hidden file inputs -->
               <input ref="fileInputImage" type="file" accept="image/*" class="hidden" @change="onFileAdd('image', $event)" />
@@ -547,6 +589,9 @@ function patchDialogue(i: number, patch: { speaker?: string; line?: string }) {
                 @pick="(slug, name, stateId) => { addCastMember(slug, name, 'picker', stateId); castPickerOpen = false }"
                 @close="castPickerOpen = false"
               />
+
+            <!-- Reference mode -->
+            <template v-if="sheet.mode === 'reference'">
 
               <!-- Images (≤9) -->
               <div>
@@ -671,10 +716,10 @@ function patchDialogue(i: number, patch: { speaker?: string; line?: string }) {
                   </div>
                 </div>
               </div>
-            </div>
+            </template>
 
             <!-- First / Last frame mode -->
-            <div v-else class="space-y-3 p-3">
+            <div v-else class="space-y-3">
               <input ref="fileInputFirst" type="file" accept="image/*" class="hidden" @change="onFrameFile('firstFrame', $event)" />
               <input ref="fileInputLast" type="file" accept="image/*" class="hidden" @change="onFrameFile('lastFrame', $event)" />
               <div class="flex gap-3">
@@ -701,6 +746,7 @@ function patchDialogue(i: number, patch: { speaker?: string; line?: string }) {
                   <button v-if="sheet.lastFrame" type="button" class="mt-1 text-[10px] text-white/30 hover:text-white/60" @click="update(s => ({ ...s, lastFrame: undefined }))">Remove</button>
                 </div>
               </div>
+            </div>
             </div>
           </div>
 
@@ -1053,7 +1099,7 @@ function patchDialogue(i: number, patch: { speaker?: string; line?: string }) {
           />
 
           <!-- Keyframe preview: a photoreal still from the same refs Seedance uses -->
-          <div v-if="sheet.mode === 'reference'" class="flex flex-col gap-1">
+          <div class="flex flex-col gap-1">
             <button
               type="button"
               class="gen-pastel flex items-center justify-center gap-1.5 rounded px-3 py-1.5 text-[11px] font-medium text-neutral-900 transition disabled:opacity-40 disabled:cursor-not-allowed"
@@ -1072,6 +1118,14 @@ function patchDialogue(i: number, patch: { speaker?: string; line?: string }) {
             <p v-if="previewError" class="text-[10px] text-red-400/80">{{ previewError }}</p>
             <p v-else class="text-[10px] leading-relaxed text-white/30">A quick photoreal still from your references — a real look before the slow full run.</p>
           </div>
+
+          <button
+            v-if="previewFrame && !previewBusy"
+            type="button"
+            class="-mt-2 flex items-center justify-center gap-1.5 rounded border border-white/10 px-3 py-1.5 text-[11px] text-white/70 transition hover:bg-white/10 hover:text-white/90 disabled:opacity-40 disabled:cursor-not-allowed"
+            :disabled="firstFrameBusy"
+            @click="useAsFirstFrame"
+          >{{ firstFrameBusy ? 'Saving…' : 'Use as first frame' }}</button>
 
           <!-- Issues (errors block generate) -->
           <div v-if="result.issues.length > 0" class="space-y-1">
