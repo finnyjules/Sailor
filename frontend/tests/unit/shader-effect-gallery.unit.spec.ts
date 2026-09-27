@@ -20,7 +20,7 @@ describe('ShaderEffectGallery (spec §7.3)', () => {
     expect(body().querySelector('[data-testid="effect-gallery"]')).not.toBeNull()
     const make = body().querySelector('[data-testid="effect-gallery-make"]')!
     expect(make.textContent).toContain('Make one')
-    expect(make.textContent).toContain('48–88 credits')
+    expect(make.textContent).toContain('30–63 credits')
     expect(make.querySelector('[data-part="star"]')).not.toBeNull() // the pastel AI mark
     // Make one is the first thing in the first section (My effects)
     const first = body().querySelector('section')!

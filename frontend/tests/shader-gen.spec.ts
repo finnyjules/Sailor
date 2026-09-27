@@ -79,9 +79,9 @@ void main(){
 })
 const TELEPORT_BEAMS = beamsTake('0.04 * loopPhase()')
 const LOOPING_BEAMS = beamsTake('loopCircle(0.02).x')
-const PRICE = '48–88 credits'
+const PRICE = '30–63 credits'
 /** One more picture on every call (a reference, ≤ 512 px: 350 input tokens). */
-const PRICE_WITH_REFERENCE = '51–88 credits'
+const PRICE_WITH_REFERENCE = '30–66 credits'
 
 /** Non-GET calls to a route that spends model money, queues an engine run, or writes My effects. */
 const GUARDED = /^\/(prompt|api\/(prompt-route|vibe|vibe-review|vibe-recipes|vibe-pick|agent-plan|agent-review|shader-gen|my-effects|pipeline-suggest|font-suggest|copy-assist|image-search|style-profile|frame\/animate|scene3d\/(gen-[a-z0-9-]+|restyle)|inpaint|krea|vector|depth|lipsync|cloud-train|voice-clone|runs)(\/.*)?)$/

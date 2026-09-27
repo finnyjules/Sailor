@@ -21,7 +21,7 @@ export { creditsForUsd }
 /**
  * A price in credits, the way the AI actions say it (spec: prices are credits, local and hosted
  * alike — the same numbers the server holds and settles with, 1 credit = $0.01 plus markup).
- * "1 credit", "2 credits"; a range is already an estimate, so it is just "48–88 credits";
+ * "1 credit", "2 credits"; a range is already an estimate, so it is just "30–63 credits";
  * `approximate` says "about 24 credits", `from` says "from 240 credits". Words, never a "~",
  * which reads like a minus sign in the UI font.
  */
