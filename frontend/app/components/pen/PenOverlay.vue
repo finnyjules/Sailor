@@ -524,6 +524,13 @@ let dragLast: { x: number; y: number } | null = null
 // centre drag) once it moves past the marquee threshold; `live` once the pen
 // has started the drag
 let arcPress: { pathId: EntityId; segIndex: number; x: number; y: number; wx: number; wy: number; centre: boolean; live: boolean } | null = null
+// settle a leftover press (its pointerup was lost): a live drag is its own step
+function settleArcPress(): void {
+  if (!arcPress) return
+  const live = arcPress.live
+  arcPress = null
+  if (live) arcDragEnd()
+}
 function isArcSegment(pathId: EntityId, segIndex: number): boolean {
   const p = doc.value.entities.find(e => e.id === pathId) as any
   return p?.kind === 'path' && p.segments[segIndex]?.kind === 'arc'
@@ -606,6 +613,7 @@ function onEntityPointerDown(id: EntityId, ev: PointerEvent) {
   if (tool.value === 'select') { pick(id, ev.shiftKey); ev.stopPropagation() }
 }
 function onPointerDownPoint(id: EntityId, ev: PointerEvent) {
+  settleArcPress()
   if (!props.active || ev.button !== 0 || isCtrlContextClick(ev) || tool.value !== 'select') return
   // guided Repeat: this point is the ring center
   if (pendingOp.value?.kind === 'repeat') {
@@ -628,6 +636,7 @@ function onPointerUpPoint(id: EntityId, ev: PointerEvent) {
   if (!moved) { dragId = null; dragHandleIds = []; dragLast = null }
 }
 function onSegmentPointerDown(pathId: EntityId, segIndex: number, ev: PointerEvent) {
+  settleArcPress()
   if (!props.active || ev.button !== 0 || isCtrlContextClick(ev) || tool.value !== 'select') return
   // guided ops treat a path-body click as picking the whole path (the unit)
   if (pendingOp.value) { pick(pathId, ev.shiftKey); ev.stopPropagation(); return }
@@ -645,6 +654,7 @@ function onSegmentPointerDown(pathId: EntityId, segIndex: number, ev: PointerEve
   ev.stopPropagation()
 }
 function onPointerDownSvg(ev: PointerEvent) {
+  settleArcPress()
   if (!props.active || ev.button !== 0 || isCtrlContextClick(ev)) return
   if (tool.value === 'select') {
     // guided Repeat with an empty-canvas click: drop a fresh FIXED center
@@ -754,9 +764,7 @@ function onPointerUp(ev: PointerEvent) {
   // press already settled the pen's side): a live bow/centre drag is one
   // step; a still press was only the path pick
   if (arcPress) {
-    const live = arcPress.live
-    arcPress = null
-    if (live) arcDragEnd()
+    settleArcPress()
     if (tool.value === 'select') return
   }
   if (tool.value === 'trim') {
@@ -792,7 +800,7 @@ function onPointerUp(ev: PointerEvent) {
   // onto what it was dropped on — release can land off the point circle
   // (onPointerUpPoint never fires then), so this is the single reliable place
   // to settle. Leaving the canvas mid-drag settles as a plain move.
-  if (tool.value === 'select' && moved && dragId) dropPoint(dragId, noJoinKey(ev) || ev.type === 'pointerleave')
+  if (tool.value === 'select' && moved && dragId) dropPoint(dragId, noJoinKey(ev) || ev.type === 'pointerleave' || ev.type === 'pointercancel')
   else if (tool.value === 'select' && moved) commitHistory()
   dragId = null; dragHandleIds = []; dragLast = null
   moved = false
@@ -824,7 +832,7 @@ watch(() => props.active, (on) => {
 // the overlay's own live gesture, settled: a marquee is dropped (no selection
 // change); a moved point drag commits as its own step with no join
 function settleOverlayGesture(): void {
-  if (arcPress) { if (arcPress.live) arcDragEnd(); arcPress = null }
+  settleArcPress()
   cancelMarquee()
   if (moved && tool.value === 'select') { if (dragId) dropPoint(dragId, true); else commitHistory() }
   dragId = null; dragHandleIds = []; dragLast = null; moved = false
@@ -918,7 +926,7 @@ defineExpose({
 <template>
   <svg ref="svgEl" :width="width" :height="height"
        :style="{ position: 'absolute', left: 0, top: 0, display: 'block', touchAction: 'none', cursor, pointerEvents: active ? undefined : 'none' }"
-       @pointerdown="onPointerDownSvg" @pointermove="onPointerMove" @pointerup="onPointerUp" @pointerleave="onPointerLeave"
+       @pointerdown="onPointerDownSvg" @pointermove="onPointerMove" @pointerup="onPointerUp" @pointerleave="onPointerLeave" @pointercancel="onPointerLeave"
        @contextmenu.prevent>
     <!-- drawing space: the view matrix does scale, rotation and mirroring -->
     <g :transform="svgTransform">

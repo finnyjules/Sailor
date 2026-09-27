@@ -21,6 +21,7 @@ function mkArc(extra?: (d: SketchDoc, ids: { A: string; B: string; C: string }) 
   const pen = usePen({ doc, view: ref(DEV) })
   return { doc, pen, A, B, C, path }
 }
+const key = (k: string) => ({ key: k, metaKey: false, ctrlKey: false, shiftKey: false, altKey: false, preventDefault() {}, stopPropagation() {} }) as unknown as KeyboardEvent
 const BOTTOM = { x: 7, y: 9 - Math.hypot(3, 3) }
 
 describe('dragging an arc’s bow', () => {
@@ -96,6 +97,60 @@ describe('dragging an arc’s bow', () => {
     const path = addPath(doc.value, [addPoint(doc.value, 0, 0), addPoint(doc.value, 5, 0)], [{ kind: 'line' }])
     const pen = usePen({ doc, view: ref(DEV) })
     expect(pen.arcDragStart(path, 0, 2, 0)).toBe(false)
+  })
+})
+
+describe('an arc drag interrupted or stuck', () => {
+  it('a key verb mid-drag settles the drag first; undo never brings the transient point back', () => {
+    const { doc, pen, C, path } = mkArc()
+    const ents = doc.value.entities.length, cons = doc.value.constraints.length
+    pen.arcDragStart(path, 0, BOTTOM.x, BOTTOM.y)
+    pen.arcDragMove(7, 3.5)
+    pen.selection.value = [C]
+    pen.onKeydown(key('ArrowRight'))
+    expect(pen.arcDragTransient()).toBeNull()
+    pen.arcDragEnd()
+    for (let i = 0; i < 3; i++) {
+      pen.undo()
+      expect(doc.value.entities.filter(e => (e as any).construction)).toHaveLength(0)
+      expect(doc.value.entities.length).toBe(ents)
+      expect(doc.value.constraints.length).toBe(cons)
+    }
+    expect(P(doc.value, C)).toMatchObject({ x: 7, y: 9 })
+  })
+  it('a bare modifier key leaves the drag live', () => {
+    const { pen, path } = mkArc()
+    pen.arcDragStart(path, 0, BOTTOM.x, BOTTOM.y)
+    pen.arcDragMove(7, 4.2)
+    pen.onKeydown(key('Shift'))
+    expect(pen.arcDragTransient()).not.toBeNull()
+    pen.arcDragEnd()
+  })
+  it('a move no solve can meet leaves the arc as it was — no flip, centre back', () => {
+    // ends fixed, radius typed: only centres (7,9) and (7,3) fit, and neither
+    // puts the arc through (7,7)
+    const { doc, pen, C, path } = mkArc((d, { A, B, C }) => {
+      ;(d.entities.find(e => e.id === A) as any).fixed = true
+      ;(d.entities.find(e => e.id === B) as any).fixed = true
+      addConstraint(d, 'distance', [C, A], Math.hypot(3, 3))
+    })
+    pen.arcDragStart(path, 0, BOTTOM.x, BOTTOM.y)
+    pen.arcDragMove(7, 7)
+    expect(P(doc.value, path).segments[0].sweep).toBe(1)
+    expect(P(doc.value, C).x).toBeCloseTo(7, 9); expect(P(doc.value, C).y).toBeCloseTo(9, 9)
+    pen.arcDragEnd()
+    expect(P(doc.value, path).segments[0].sweep).toBe(1)
+  })
+  it('a flip reports a live change', () => {
+    const doc = ref<SketchDoc>({ entities: [], constraints: [] })
+    const A = addPoint(doc.value, 4, 6), B = addPoint(doc.value, 10, 6), C = addPoint(doc.value, 7, 9)
+    const path = addPath(doc.value, [A, B], [{ kind: 'arc', center: C, sweep: 1 }])
+    const sweeps: number[] = []
+    const pen = usePen({ doc, view: ref(DEV), onLiveChange: () => sweeps.push((P(doc.value, path).segments[0]).sweep) })
+    pen.arcDragStart(path, 0, BOTTOM.x, BOTTOM.y)
+    pen.arcDragMove(7, 7)
+    expect(sweeps.at(-1)).toBe(0)
+    pen.arcDragEnd()
   })
 })
 

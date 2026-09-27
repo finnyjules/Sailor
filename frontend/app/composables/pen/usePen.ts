@@ -454,6 +454,9 @@ export function usePen(opts: {
   // every call — cheap, and avoids keeping a second copy of these refs/funcs
   // alive that could drift from the pen's own.
   function onKeydown(ev: KeyboardEvent, local?: { cancelGesture?: () => boolean }): boolean {
+    // any real key mid arc drag settles it first (its own step), so no verb
+    // (nudge, delete, a rule, a tool) ever snapshots the transient point
+    if (arcDrag && !MODIFIER_KEYS.has(ev.key)) arcDragEnd()
     const ctx: PenKeyContext = {
       tool, pendingPath, dimBuffer, pendingOp, status, selection, selectedSegments, view: opts.view,
       cancelGesture: opts.cancelGesture,
@@ -1560,6 +1563,7 @@ export function usePen(opts: {
   function cancelPointDrop(): void { dropSnap.value = null }
 
   // --- Select: drag an arc's bow (or, with ⌘, its centre) ---
+  const MODIFIER_KEYS = new Set(['Shift', 'Meta', 'Control', 'Alt'])
   // A press on an arc segment that moves (PenOverlay) starts arcDragStart. Bow
   // mode adds a transient guide point on the arc at the grab spot, pinned on
   // it (equalDist [C, T, C, S]); each move solves with that point held at the
@@ -1598,16 +1602,19 @@ export function usePen(opts: {
   }
 
   // the transient point left the drawn arc (the pointer crossed the chord):
-  // flip the segment so the drawn arc runs under it again
-  function keepTransientOnArc(d: NonNullable<ArcDrag>) {
+  // flip the segment so the drawn arc runs under it again. Only called after
+  // a converged solve (a failed one leaves T wherever it was). True if flipped.
+  function keepTransientOnArc(d: NonNullable<ArcDrag>): boolean {
     const t = doc.value.entities.find(e => e.id === d.transient)
     const g = curveGeom(doc.value, { kind: 'seg', pathId: d.pathId, segIndex: d.segIndex })
-    if (!t || t.kind !== 'point' || !g || g.kind !== 'arc') return
+    if (!t || t.kind !== 'point' || !g || g.kind !== 'arc') return false
     const on = pointAt(g, paramOf(g, t))
-    if (dist(on, t) <= 1e-6 * Math.max(1, g.r!)) return
+    if (dist(on, t) <= 1e-6 * Math.max(1, g.r!)) return false
     const path = doc.value.entities.find(e => e.id === d.pathId) as PathEntity
     const seg = path.segments[d.segIndex]!
-    if (seg.kind === 'arc') path.segments[d.segIndex] = { ...seg, sweep: seg.sweep === 1 ? 0 : 1 }
+    if (seg.kind !== 'arc') return false
+    path.segments[d.segIndex] = { ...seg, sweep: seg.sweep === 1 ? 0 : 1 }
+    return true
   }
 
   function arcDragMove(x: number, y: number): void {
@@ -1628,10 +1635,13 @@ export function usePen(opts: {
       const cc = circumcenter({ x: pa.x, y: pa.y }, { x: pb.x, y: pb.y }, { x, y })
       if (!cc || Math.hypot(cc.x - pa.x, cc.y - pa.y) > 1e4) return   // pointer on the chord line: no circle through it yet
       d.moved = true
-      pc.x = cc.x; pc.y = cc.y
-      const res = runSolve({ point: d.transient, x, y }, d.ends)
-      if (!res.converged) runSolve({ point: d.transient, x, y })
-      keepTransientOnArc(d)
+      // a fixed centre is never warm-started (the solver may not move it)
+      const was = { x: pc.x, y: pc.y }
+      if (!pc.fixed) { pc.x = cc.x; pc.y = cc.y }
+      let res = runSolve({ point: d.transient, x, y }, d.ends)
+      if (!res.converged) res = runSolve({ point: d.transient, x, y })
+      if (!res.converged) { pc.x = was.x; pc.y = was.y }   // no answer: the arc stays as it was
+      else if (keepTransientOnArc(d)) opts.onLiveChange?.()   // the live layer sees the flipped sweep
     }
     pathDragTick.value++
   }
