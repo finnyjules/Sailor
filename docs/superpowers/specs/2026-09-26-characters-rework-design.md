@@ -196,14 +196,21 @@ Conditions attached:
 - **Characters from a description need no consent step.** They are AI-made faces only.
 - **Delete what we keep.** Scores are stored; face data is not. Deleting a character deletes its photos.
 
-**Thresholds** are placeholders until re-measured on AWS's 0–100 scale. Our ArcFace numbers don't carry over. Re-measure on Jene, who must flag, and Reva, who must pass (a few cents), before any flag is shown:
+**Thresholds**, calibrated 2026-09-27 on AWS's 0–100 scale (14 pairs, `frontend/scripts/face-check-calibrate.ts`):
 
-| Score (ArcFace, as measured) | Verdict | What you see |
+| Score (AWS) | Verdict | What you see |
 |---|---|---|
-| ≥ 0.80 | match | nothing |
-| 0.60–0.80 | unsure | amber: "May not be Reva", with Redo |
-| < 0.60 | different | amber: "Different person", with Redo |
+| ≥ 90 | match | nothing |
+| 65–90 | unsure | amber: "May not be Reva", with Redo |
+| < 65 | different | amber: "Different person", with Redo |
 | no face found | no-face | nothing for body panels; a flag for close-ups |
+
+What the run found:
+- **The same face scored 94.4–100**: Reva's photos against each other, Jene's cover against her portrait panel.
+- **Different women scored 2.1–39.1**: Jene, Reva, Millie and Vera against each other.
+- **Jene did not flag.** Her blonde close-ups and blonde photo scored 99.7–100, and her dark profile 94.4. Side by side they are her face with other hair and makeup. The "three different women" read came from ArcFace (0.55–0.66), which the hair swayed. So the face check catches a changed face, not a changed look. A blonde panel on a brunette look is the **look fit** check's job (below).
+
+The ArcFace numbers from the design pass, kept as history: match ≥ 0.80, unsure 0.60–0.80, different < 0.60.
 
 - **Look fit** is a second, separate check: does the outfit or hair match the look's description and clothes photos? It needs a vision-model judgement, not a face score, and gives "Doesn't fit this look" or "Doesn't match the raincoat".
 - **When a body change moves the face:** a look with a body override gets one confirm step, "Is this still Reva?", showing the new portrait. Once approved, that portrait becomes `look.face`. Checks for that look compare against it, so heavier Reva isn't flagged forever.
@@ -302,7 +309,7 @@ Tests at every stage:
 1. **The face checker: AWS Compare faces proposed** (see Checks). Still to confirm:
    - the exact consent wording, and whether a lawyer should read it before hosting;
    - whether a paid InsightFace licence is worth asking about as an alternative that runs on our own server.
-2. **Thresholds.** 0.80 and 0.60 come from two characters. Log every score with its verdict and your decision (Redo or keep), then tune.
+2. **Thresholds.** 90 and 65 come from 14 pairs across four characters. Log every score with its verdict and your decision (Redo or keep), then tune.
 3. **Does the 3D body figure stay** as a preview in the Body editor, or go? It can't be a generation input unless its shape range is rebuilt.
 4. **A shared wardrobe library** for clothes and props across characters. Deferred until outfits actually get reused.
 5. **GPT likeness refusals in the photo route.** Measure how often they happen. If it's often, Nano Banana Pro may be the better default for photo-origin characters.

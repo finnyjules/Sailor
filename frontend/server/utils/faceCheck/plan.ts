@@ -6,8 +6,8 @@
  */
 import type { CharacterRecord, Check, CheckVerdict, PanelSlot } from '#shared/characters/types'
 
-/** AWS Rekognition similarity, 0–100. PROVISIONAL until the calibration run (plan Task 10). */
-export const FACE_THRESHOLDS = { match: 90, unsure: 70 }
+/** AWS Rekognition similarity, 0–100. Calibrated 2026-09-27 on Jene/Reva/Millie/Vera: same ≥ 94.4, different ≤ 39.1. */
+export const FACE_THRESHOLDS = { match: 90, unsure: 65 }
 
 const HEADLESS: ReadonlySet<PanelSlot> = new Set(['body-front', 'body-back'])
 
