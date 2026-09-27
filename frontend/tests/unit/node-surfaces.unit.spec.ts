@@ -10,7 +10,7 @@ import NodeWell from '~/components/vue-canvas/surfaces/NodeWell.vue'
 import NodeOpenBar from '~/components/vue-canvas/surfaces/NodeOpenBar.vue'
 import ContentCard from '~/components/vue-canvas/surfaces/ContentCard.vue'
 import PrintSurface from '~/components/vue-canvas/surfaces/PrintSurface.vue'
-import { CANVAS_GLASS_KEY } from '~/composables/useCanvasGlass'
+import { CANVAS_GLASS_KEY, createCanvasGlass } from '~/composables/useCanvasGlass'
 import { NodeIdInjection } from '@vue-flow/core'
 
 let CSS = ''
@@ -70,6 +70,20 @@ describe('NodeShell', () => {
   it('falls back to the Vue Flow node id when no nodeId is passed', () => {
     const blurIds = ref(new Set(['n1']))
     const w = mount(NodeShell, { props: { title: 't' }, global: { provide: { [CANVAS_GLASS_KEY as symbol]: { blurIds }, [NodeIdInjection as symbol]: 'n1' } } })
+    expect(w.find('.node-shell').attributes('data-glass-blur')).toBeDefined()
+  })
+  // Fix round 1: a freshly mounted node must blur immediately in 'always' mode — no
+  // waiting for the 150ms settle to enumerate ids. Uses the real composable end to end
+  // (createCanvasGlass → provideCanvasGlass → NodeShell → useNodeGlass), with no
+  // recompute() call and no timer advanced, i.e. exactly the real startup path.
+  it("blurs a freshly mounted node immediately in 'always' mode, before any settle timer runs", () => {
+    const glass = createCanvasGlass({
+      viewport: ref({ x: 0, y: 0, zoom: 1 }),
+      boxes: () => [{ id: 'n1', x: 0, y: 0, w: 100, h: 100 }],
+      wires: () => [],
+      size: () => ({ width: 800, height: 600 }),
+    }) // default mode: 'always' — no explicit recompute(), no vi.advanceTimersByTime
+    const w = mount(NodeShell, { props: { title: 't', nodeId: 'n1' }, global: { provide: { [CANVAS_GLASS_KEY as symbol]: glass } } })
     expect(w.find('.node-shell').attributes('data-glass-blur')).toBeDefined()
   })
   it('keeps the Open bar up while the shell is selected', () => {

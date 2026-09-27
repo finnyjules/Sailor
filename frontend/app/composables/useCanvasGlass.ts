@@ -43,13 +43,14 @@ export function createCanvasGlass(flow: GlassFlow, opts: { mode?: Ref<GlassMode>
     const { width, height } = flow.size()
     visible.value = countVisible(boxes, { ...vp, width, height })
     const allowedNow = blurAllowed({ mode: mode.value, moving: moving.value, zoom: vp.zoom, visibleNodes: visible.value })
-    if (!allowedNow) {
-      if (blurIds.value.size) blurIds.value = new Set()
-    } else if (mode.value === 'always') {
-      // 'always' means every glass shell blurs — skip the "something behind it" test.
-      blurIds.value = new Set(boxes.map(b => b.id))
-    } else {
+    // 'always' means every glass shell blurs — that's carried by `all` below, published
+    // synchronously from `mode`, never from this settle-only recompute. So a freshly
+    // mounted node (or one added mid-session) blurs the instant it exists, with no
+    // wait for the first settle and no need to enumerate every node id here.
+    if (allowedNow && mode.value === 'smart') {
       blurIds.value = nodesWithSomethingBehind(boxes, flow.wires())
+    } else if (blurIds.value.size) {
+      blurIds.value = new Set()
     }
   }
 
@@ -92,10 +93,18 @@ export function createCanvasGlass(flow: GlassFlow, opts: { mode?: Ref<GlassMode>
     return allowed.value ? 'canvas-glass canvas-glass--blur' : 'canvas-glass'
   })
   const rootStyle = computed(() => ({ '--canvas-zoom': String(zoomAtRest.value) }))
-  return { rootClass, rootStyle, blurIds, recompute, invalidate, pause, resume, moving }
+  // 'always' mode blurs every node, by id, with no enumeration and no wait for a settle —
+  // so a node that mounts (or is added) between settles still blurs immediately. The root
+  // class above is still the actual gate (it drops for the zoom floor, same as any mode).
+  const all = computed(() => mode.value === 'always')
+  return { rootClass, rootStyle, blurIds, all, recompute, invalidate, pause, resume, moving }
 }
 
-export interface CanvasGlassContext { blurIds: Readonly<Ref<ReadonlySet<string>>> }
+export interface CanvasGlassContext {
+  blurIds: Readonly<Ref<ReadonlySet<string>>>
+  /** Optional. When true, every node id counts as blurred — no need to enumerate ids. */
+  all?: Readonly<Ref<boolean>>
+}
 
 export const CANVAS_GLASS_KEY: InjectionKey<CanvasGlassContext> = Symbol('canvas-glass')
 
@@ -108,6 +117,6 @@ export function useNodeGlass(nodeId: MaybeRefOrGetter<string | undefined>): Comp
   const g = inject(CANVAS_GLASS_KEY, null)
   return computed(() => {
     const id = toValue(nodeId)
-    return !!g && !!id && g.blurIds.value.has(id)
+    return !!g && !!id && (!!g.all?.value || g.blurIds.value.has(id))
   })
 }

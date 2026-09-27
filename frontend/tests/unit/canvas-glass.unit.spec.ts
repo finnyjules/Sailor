@@ -131,10 +131,11 @@ describe('createCanvasGlass', () => {
   it('default mode (always) marks a node with nothing behind it — what useNodeGlass reads', () => {
     const f = fakeFlow()
     const g = createCanvasGlass(f.flow) // default: 'always'
-    g.recompute()
-    // 'c' does not overlap a/b and has no wire behind it, yet 'always' blurs every node,
-    // so useNodeGlass('c') (which reads exactly this set) would resolve to true.
-    expect(g.blurIds.value.has('c')).toBe(true)
+    // No recompute() at all: 'all' is derived straight from mode, not from a settle-only
+    // recompute, so it is already true — 'c' (which doesn't overlap a/b and has no wire
+    // behind it) still counts as blurred via useNodeGlass's `all.value || blurIds.has(id)`.
+    expect(g.all.value).toBe(true)
+    expect(g.blurIds.value.has('c')).toBe(false) // always mode never enumerates ids
   })
 
   it('default mode (always) drops blur after settling at zoom 0.4 and restores it at 0.6', () => {
@@ -145,10 +146,12 @@ describe('createCanvasGlass', () => {
     vi.advanceTimersByTime(150)
     expect(g.rootClass.value).not.toContain('canvas-glass--blur')
     expect(g.blurIds.value.size).toBe(0)
+    expect(g.all.value).toBe(true) // 'all' stays true — the root class (zoom floor) is the real gate
     f.viewport.value = { x: 0, y: 0, zoom: 0.6 }
     vi.advanceTimersByTime(150)
     expect(g.rootClass.value).toContain('canvas-glass--blur')
-    expect(g.blurIds.value).toEqual(new Set(['a', 'b', 'c']))
+    expect(g.blurIds.value.size).toBe(0)
+    expect(g.all.value).toBe(true)
   })
 
   it('pause() does not turn off blur in always mode', () => {
