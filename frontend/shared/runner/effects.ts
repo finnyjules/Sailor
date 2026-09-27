@@ -19,13 +19,14 @@ import { ASCII_DEFAULT, ASCII_GLYPH_CHARACTERS, ASCII_PRESETS } from './asciiGly
 import type { RunnerFamily } from './families'
 import type { InputCheckName, RunnerNodeRule, RunnerWidgetSpec } from './eligibility'
 import type { ValueKind } from './values'
+import { isLink } from './graph'
 
 export type EffectFamily = EffectSchemaFamily
 
 /** Every effect family. */
 export const EFFECT_FAMILIES: readonly EffectFamily[] = ['effects-tone', 'effects-blur', 'effects-cells', 'effects-warp', 'effects-mask', 'effects-noise']
 
-/** The effects ported so far (R2.1: the three pilots; R2.4: the rest of effects-tone; R2.5: effects-blur; R2.6: effects-cells; R2.7: effects-warp). Each task adds its classes. */
+/** The effects ported so far (R2.1: the three pilots; R2.4: the rest of effects-tone; R2.5: effects-blur; R2.6: effects-cells; R2.7: effects-warp; R2.8: effects-mask). Each task adds its classes. */
 export const EFFECT_CLASSES_PORTED: readonly string[] = [
   'AdjustExposure', 'AdjustInvert', 'AdjustThreshold',
   'AdjustBrightnessContrast', 'AdjustColor', 'AdjustCurves', 'AdjustLevels',
@@ -35,6 +36,7 @@ export const EFFECT_CLASSES_PORTED: readonly string[] = [
   'Sharpen', 'Denoise', 'AdjustGlow', 'HighPass', 'Emboss', 'FindEdges', 'Blur', 'Bokeh', 'TiltShift', 'FrequencySeparation', 'HeightmapRelief', 'Outline', 'Sparkle',
   'Pixelate', 'Halftone', 'Kuwahara', 'Ascii',
   'CropImage', 'ResizeImage', 'RotateImage', 'FlipImage', 'Pinch', 'Twirl', 'Wave', 'LensCorrection', 'Kaleidoscope', 'PolarCoords', 'Fisheye', 'ChromaticAberration', 'CRT', 'Mirror', 'GodRays',
+  'Blend', 'ApplyMask', 'ThresholdMask', 'ColorRangeMask', 'MatteGrowShrink', 'MergeAlpha', 'Painter',
 ]
 
 /** Each effect class's family (every generated class, ported or not). */
@@ -210,12 +212,61 @@ export function asciiGlyphsArePortable(inputs: Record<string, unknown>): boolean
   return !!ramp && ramp.every(ch => GLYPHS.has(ch))
 }
 
-/** The input checks a class carries beyond every effect's own (R2.4's colour text, R2.6's characters). */
+// ── Painter (R2.8) ───────────────────────────────────────────────────────────
+
+/**
+ * Painter's bg_color as its own hex_to_rgb reads it (nodes_painter.py:16-23):
+ * every leading '#' stripped; not six characters (code points) → black; six
+ * hex digits → each pair / 255. Null for six characters Python's int(…, 16)
+ * would read otherwise or refuse (a sign, a space, a letter past f): left to
+ * the engine. Not text at all: null too.
+ */
+export function painterColourOf(text: unknown): [number, number, number] | null {
+  if (typeof text !== 'string') return null
+  let i = 0
+  while (text[i] === '#') i++
+  const hex = text.slice(i)
+  if ([...hex].length !== 6) return [0, 0, 0]
+  if (!/^[0-9a-fA-F]{6}$/.test(hex)) return null
+  return [parseInt(hex.slice(0, 2), 16) / 255, parseInt(hex.slice(2, 4), 16) / 255, parseInt(hex.slice(4, 6), 16) / 255]
+}
+
+/**
+ * Whether the runner reads Painter's painter file name as Python does
+ * (`mask and mask.strip()`, then folder_paths.get_annotated_filepath): none
+ * (empty or blank), or a plain relative name, optionally with one space and
+ * `[input]`, `[output]` or `[temp]` after it; no surrounding spaces, no
+ * blank but the space, no control character, no backslash, no empty, '.' or
+ * '..' part (so no absolute path). Anything else is left to the engine.
+ */
+export function painterFileIsPortable(text: unknown): boolean {
+  if (typeof text !== 'string') return false
+  // Python's strip() and JavaScript's trim() agree on the plain space alone: any other blank or control character is Python's to read.
+  if (/[^\S ]|[\x00-\x1f\x7f-\x9f]/.test(text)) return false
+  if (!text.trim()) return true
+  if (text !== text.trim() || text.includes('\\')) return false
+  const m = /^(.*) \[(?:input|output|temp)\]$/.exec(text)
+  const name = m ? m[1]! : text
+  if (/\[(?:input|output|temp)\]$/.test(name) || name !== name.trim()) return false
+  return name.split('/').every(p => p !== '' && p !== '.' && p !== '..')
+}
+
+/** Painter's inputs the runner reads as Python does: its file name, and (with no picture wired in) its colour. */
+export function painterInputsArePortable(inputs: Record<string, unknown>): boolean {
+  if (!painterFileIsPortable(inputs.mask)) return false
+  return isLink(inputs.image) || painterColourOf(inputs.bg_color) !== null
+}
+
+/** The input checks a class carries beyond every effect's own (R2.4's colour text, R2.6's characters, R2.8's Painter). */
 function extraChecks(cls: string): InputCheckName[] {
   if (Object.prototype.hasOwnProperty.call(EFFECT_TEXT_WIDGETS, cls)) return ['effect-text']
   if (cls === 'Ascii') return ['ascii-glyphs']
+  if (cls === 'Painter') return ['painter']
   return []
 }
+
+/** Painter writes no live preview (its ui is a PreviewImage of its own name): no preview-name check. */
+const ownChecks = (cls: string): InputCheckName[] => (cls === 'Painter' ? ['effect-output-size'] : ['effect-preview-name', 'effect-output-size'])
 
 // ── Rows (rule 1) ────────────────────────────────────────────────────────────
 
@@ -252,7 +303,7 @@ export function effectRows(): Record<string, RunnerNodeRule> {
       ...(s.images.length ? { imageInputs: s.images.map(i => i.name) } : {}),
       ...(s.masks.length ? { valueInputs: Object.fromEntries(s.masks.map(m => [m.name, ['mask'] as const])) } : {}),
       widgets: Object.fromEntries(Object.entries(s.widgets).map(([k, w]) => [k, widgetSpec(w)])),
-      inputCheck: ['effect-preview-name', 'effect-output-size', ...extraChecks(cls)],
+      inputCheck: [...ownChecks(cls), ...extraChecks(cls)],
     }
   }
   return rows

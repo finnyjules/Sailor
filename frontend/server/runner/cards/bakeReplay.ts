@@ -113,8 +113,12 @@ export function cardPictureFiles(prompt: ApiPrompt, families: ReadonlySet<Runner
       // An effect that changes the picture's size (R2.7: Resize, Crop), or has a size cap of its own
       // (Kaleidoscope): its output is sized from this file's header too.
       const resized = EFFECT_START_SIZED_CLASSES.includes(n.class_type) ? { nodeId, classType: n.class_type, inputs } : undefined
-      if (loader) out.push({ ...loader, oneFrame: true, animated: EFFECT_PICTURE_ANIMATED, ...(resized ? { resized } : {}) })
+      // Painter (R2.8) takes image[:1], the first frame alone: an animation is no batch to it.
+      const frames = n.class_type === 'Painter' ? {} : { oneFrame: true as const, animated: EFFECT_PICTURE_ANIMATED }
+      if (loader) out.push({ ...loader, ...frames, ...(resized ? { resized } : {}) })
     }
+    // Painter's painter file (R2.8), read as a card reads its file (16-bit, CMYK… refused before the hold).
+    if (fx && n.class_type === 'Painter' && !isLink(inputs.mask)) add(inputs.mask)
     // Smart Layout (R1.6) decodes each image layer's first frame as Python's tensor.
     if (n.class_type === 'SmartLayout') {
       for (const key of IMAGE_LAYERS) {

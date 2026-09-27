@@ -123,6 +123,7 @@ version, the thread count and the platform. Running a group again gives
 identical bytes. The network is blocked before any node module is imported.
 """
 import argparse
+import atexit
 import base64
 import hashlib
 import io
@@ -130,6 +131,7 @@ import json
 import math
 import os
 import platform
+import shutil
 import socket
 import sys
 import tempfile
@@ -164,6 +166,8 @@ import utils.install_util  # noqa: E402,F401
 import folder_paths  # noqa: E402
 
 WORK = tempfile.mkdtemp(prefix="runner-effects-fixtures-")
+# The temp directory goes with the script, however it ends (R2.7 review: one was left behind).
+atexit.register(shutil.rmtree, WORK, True)
 for _sub in ("input", "temp", "output"):
     os.makedirs(os.path.join(WORK, _sub), exist_ok=True)
 folder_paths.set_input_directory(os.path.join(WORK, "input"))
@@ -2559,7 +2563,483 @@ def warp_sweep_run() -> int:
     return code
 
 
-GROUPS = {"machinery": machinery, "kernels": kernels, "rng": rng, "tone": tone, "blur": blur, "cells": cells, "warp": warp}
+# ── Group `mask` (R2.8): masks, blends and Painter ───────────────────────────
+
+MASK_CLASSES = [
+    ("nodes_composite", "Blend"), ("nodes_composite", "ApplyMask"), ("nodes_composite", "ThresholdMask"),
+    ("nodes_composite", "ColorRangeMask"), ("nodes_matte", "MatteGrowShrink"), ("nodes_matte", "MergeAlpha"),
+    ("nodes_painter", "Painter"),
+]
+# MatteGrowShrink's feather (torchvision gaussian_blur) is LIBRARY; every other step of the group is exact.
+# A case that feathers keeps its float (byte-shuffled, zlib) so the spec can measure it.
+BLEND_MODES = ["normal", "multiply", "screen", "overlay", "soft_light", "hard_light", "difference", "lighten", "darken", "add", "subtract"]
+
+
+def quantise16(m: torch.Tensor) -> np.ndarray:
+    """A float mask (H × W) as the runner keeps it (pixels/core.ts mask16Of): floor(clip(v, 0, 1) · 65535 + 0.5)
+    in double, 16 bits."""
+    v = np.clip(m.contiguous().cpu().numpy().astype(np.float64), 0.0, 1.0)
+    return np.floor(v * 65535.0 + 0.5).astype(np.uint16)
+
+
+def mask_png(q: np.ndarray) -> bytes:
+    """A 16-bit greyscale PNG of these values (the kept mask a runner node hands on)."""
+    buf = io.BytesIO()
+    PILImage.fromarray(np.ascontiguousarray(q.astype(np.uint16))).save(buf, format="PNG")
+    return buf.getvalue()
+
+
+def synth_mask(w: int, h: int, seed: int, kind: str) -> np.ndarray:
+    """A 16-bit mask from `synth`'s bytes: 'soft' every level (with exact 0 and 65535 spots), 'hard' 0 / 65535 blocks."""
+    v = np.frombuffer(synth(w, h, 1, seed), dtype=np.uint8).reshape(h, w).astype(np.uint32)
+    y, x = np.meshgrid(np.arange(h, dtype=np.uint32), np.arange(w, dtype=np.uint32), indexing="ij")
+    if kind == "hard":
+        return np.where(((x // 4 + y // 3 + np.uint32(seed)) % 3 == 0) | (v < 40), 65535, 0).astype(np.uint16)
+    q = np.minimum(v * 257 + ((x * y * 31 + np.uint32(seed)) & 255), 65535)
+    q = np.where((x + y) % 7 == 0, 0, q)
+    q = np.where((x * 3 + y) % 11 == 0, 65535, q)
+    return q.astype(np.uint16)
+
+
+def record_mask_output(t: torch.Tensor, hashed: bool, library: bool) -> dict:
+    """A MASK output, frame by frame: the sha256 of its float32 and of the 16 bits the runner keeps
+    (little-endian uint16, H × W); a library case its float too (byte-shuffled, zlib)."""
+    items = []
+    for i in range(t.shape[0]):
+        x = t[i].contiguous()
+        f32 = x.cpu().numpy().astype("<f4").tobytes()
+        item = {"w": int(x.shape[1]), "h": int(x.shape[0]), "c": 1, "f32_sha256": sha(f32),
+                "u16_sha256": sha(quantise16(x).astype("<u2").tobytes())}
+        if library:
+            item["f32s"] = shuffled_f32(x)
+        items.append(item)
+    return {"kind": "mask", "items": items}
+
+
+class MaskGroup(Group):
+    """The mask group's cases. Inputs by source, as the other groups, plus 'mask' (a kept 16-bit mask,
+    u / 65535). An exact output keeps its sha256s (float32, and round8 / trunc8 or the kept 16 bits);
+    a library one (a feathered MatteGrowShrink) its float too, byte-shuffled and zlib'd (`f32s`). A
+    Painter case names its painter file in its widgets (`mask`), an asset written into the input folder."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.masks: dict[str, tuple[int, int]] = {}
+
+    def mask(self, w: int, h: int, seed: int, kind: str) -> str:
+        name = f"mask_{w}x{h}_{kind}_{seed}.png"
+        if name not in self.assets:
+            self.assets[name] = mask_png(synth_mask(w, h, seed, kind))
+        return name
+
+    def mask_of(self, name: str, q: np.ndarray) -> str:
+        """A kept mask of these 16 bits (a producer's output as the runner keeps it)."""
+        self.assets.setdefault(name, mask_png(q))
+        return name
+
+    def painter_file(self, name: str, im: PILImage.Image, **save) -> str:
+        buf = io.BytesIO()
+        im.save(buf, format="PNG", **save)
+        self.assets.setdefault(name, buf.getvalue())
+        with open(os.path.join(WORK, "input", name), "wb") as f:
+            f.write(self.assets[name])
+        return name
+
+    def tensors_of(self, inputs: dict) -> dict:
+        out = {}
+        for key, (source, files) in inputs.items():
+            out[key] = load("blank", None, None) if source == "blank" else torch.cat([load(source, f, self.assets[f]) for f in files], dim=0)
+        return out
+
+    def case(self, name: str, cls, class_type: str, widgets: dict, inputs: dict, hashed: bool = False) -> None:
+        self.seq += 1
+        node_id = f"fx{self.seq}"
+        tensors = self.tensors_of(inputs)
+        row: dict = {"name": name, "class_type": class_type, "node_id": node_id, "widgets": widgets,
+                     "inputs": {k: {"source": s, "files": list(f)} for k, (s, f) in inputs.items()}}
+        if hashed:
+            row["hashed"] = True
+        library = class_type == "MatteGrowShrink" and float(widgets.get("feather", 0)) > 0
+        if library:
+            row["library"] = True
+        import random
+        random.seed(self.seq)  # Painter's preview name (UI.PreviewImage's five random letters)
+        try:
+            outs, ui = run_node(cls, node_id, **tensors, **widgets)
+        except Exception as e:  # Python raises: the runner's plain message is checked against it
+            # (this run's temp folder, named at random, kept out of the file: Painter's missing file names it)
+            row["error"] = {"type": type(e).__name__, "message": str(e).replace(WORK, "<work>")}
+            self.cases.append(row)
+            return
+        if hasattr(ui, "as_dict"):  # Painter's UI.PreviewImage
+            ui = ui.as_dict()
+        row["outputs"] = [record_mask_output(t, hashed, library) if t.dim() == 3 else record_tone_output(t, hashed, None) for t in outs]
+        row["ui"] = {"images": ui["images"], "animated": list(ui["animated"])}
+        row["preview"] = read_preview(ui, True)
+        self.cases.append(row)
+
+
+def mask_standard_pictures(g: MaskGroup) -> list:
+    return [
+        ("rgb 37×23", "rgb", g.picture(37, 23, 3, 1)),
+        ("provider 29×31", "provider", g.picture(29, 31, 4, 2)),
+        ("card 23×19 see-through", "card", g.picture(23, 19, 4, 3)),
+        ("card 23×19 opaque", "card", g.picture(23, 19, 3, 4)),
+    ]
+
+
+def mask_cases(g: MaskGroup, classes: dict) -> None:
+    pics = mask_standard_pictures(g)
+    defaults = {node_id: widget_settings(cls)[0] for node_id, cls in classes.items()}
+    rgb, rgb_b, big = g.picture(37, 23, 3, 1), g.picture(37, 23, 3, 5), g.picture(320, 200, 3, 6)
+    prov, card4, card3 = g.picture(29, 31, 4, 2), g.picture(23, 19, 4, 3), g.picture(23, 19, 3, 4)
+    # A second picture of each standard picture's size and kind (Blend's top).
+    tops = {rgb: ("rgb", rgb_b), prov: ("provider", g.picture(29, 31, 4, 12)), card4: ("card", g.picture(23, 19, 4, 13)), card3: ("card", g.picture(23, 19, 3, 14))}
+    # A mask of each standard picture's size.
+    masks = {rgb: g.mask(37, 23, 1, "soft"), prov: g.mask(29, 31, 2, "hard"), card4: g.mask(23, 19, 3, "soft"), card3: g.mask(23, 19, 4, "hard")}
+
+    # ── The standard set, each class with its own inputs ──
+    for node_id in ("Blend", "ApplyMask", "ThresholdMask", "ColorRangeMask", "MergeAlpha"):
+        cls = classes[node_id]
+        _d, settings = widget_settings(cls)
+
+        def ins(source, file):
+            if node_id == "Blend":
+                ts, tf = tops[file]
+                return {"base": (source, [file]), "top": (ts, [tf])}
+            if node_id in ("ApplyMask", "MergeAlpha"):
+                return {"image": (source, [file]), "mask": ("mask", [masks[file]])}
+            return {"image": (source, [file])}
+        for label, over in settings:
+            for pname, source, file in pics:
+                g.case(f"{node_id}: {label}, {pname}", cls, node_id, {**defaults[node_id], **over}, ins(source, file))
+        # A batch of two different files and a repeat; the 1×1 blank; one 320×200 (hashed).
+        if node_id == "Blend":
+            g.case("Blend: a batch of two files and a repeat", cls, node_id, dict(defaults[node_id], mode="overlay", opacity=0.37),
+                   {"base": ("rgb", [rgb, rgb_b, rgb]), "top": ("rgb", [rgb_b, rgb, rgb_b])})
+            g.case("Blend: the 1×1 blank", cls, node_id, dict(defaults[node_id], mode="screen"), {"base": ("blank", []), "top": ("rgb", [rgb])})
+            g.case("Blend: the 1×1 blank on top", cls, node_id, dict(defaults[node_id], mode="multiply", opacity=0.37), {"base": ("rgb", [rgb]), "top": ("blank", [])})
+            g.case("Blend: rgb 320×200", cls, node_id, dict(defaults[node_id], mode="soft_light", opacity=0.6),
+                   {"base": ("rgb", [big]), "top": ("card", [g.picture(160, 100, 3, 19)])}, hashed=True)
+        elif node_id in ("ApplyMask", "MergeAlpha"):
+            ma, mb = g.mask(37, 23, 5, "soft"), g.mask(37, 23, 6, "hard")
+            g.case(f"{node_id}: a batch of two files and a repeat", cls, node_id, dict(defaults[node_id]), {"image": ("rgb", [rgb, rgb_b, rgb]), "mask": ("mask", [ma, mb, ma])})
+            g.case(f"{node_id}: the 1×1 blank", cls, node_id, dict(defaults[node_id]), {"image": ("blank", []), "mask": ("mask", [ma])})
+            g.case(f"{node_id}: rgb 320×200", cls, node_id, dict(defaults[node_id]), {"image": ("rgb", [big]), "mask": ("mask", [g.mask(320, 200, 7, "soft")])}, hashed=True)
+            g.case(f"{node_id}: rgb 320×200, a mask of another size", cls, node_id, dict(defaults[node_id]),
+                   {"image": ("rgb", [big]), "mask": ("mask", [g.mask(97, 61, 8, "soft")])}, hashed=True)
+        else:
+            g.case(f"{node_id}: a batch of two files and a repeat", cls, node_id, dict(defaults[node_id]), {"image": ("rgb", [rgb, rgb_b, rgb])})
+            g.case(f"{node_id}: the 1×1 blank", cls, node_id, dict(defaults[node_id]), {"image": ("blank", [])})
+            over = {"softness": 0.2, "threshold": 0.45} if node_id == "ThresholdMask" else {"target_r": 0.3, "target_g": 0.5, "target_b": 0.2, "tolerance": 0.4}
+            g.case(f"{node_id}: rgb 320×200", cls, node_id, dict(defaults[node_id], **over), {"image": ("rgb", [big])}, hashed=True)
+
+    # ── Blend: every mode × opacity 0, 0.37, 1, a top of another size; batches 1:2, 2:1, 2:2, 2:3 ──
+    blend = classes["Blend"]
+    other = g.picture(29, 17, 3, 15)
+    for mode in BLEND_MODES:
+        for op in (0.0, 0.37, 1.0):
+            g.case(f"Blend: {mode}, opacity {op}, a top of another size", blend, "Blend", {"mode": mode, "opacity": op}, {"base": ("rgb", [rgb]), "top": ("card", [other])})
+            g.case(f"Blend: {mode}, opacity {op}, see-through base and top", blend, "Blend", {"mode": mode, "opacity": op},
+                   {"base": ("card", [card4]), "top": ("provider", [g.picture(41, 27, 4, 16)])})
+    g.case("Blend: batches 1:2", blend, "Blend", {"mode": "difference", "opacity": 0.8}, {"base": ("rgb", [rgb]), "top": ("card", [other, g.picture(29, 17, 3, 17)])})
+    g.case("Blend: batches 2:1", blend, "Blend", {"mode": "hard_light", "opacity": 0.8}, {"base": ("rgb", [rgb, rgb_b]), "top": ("card", [other])})
+    g.case("Blend: batches 2:2", blend, "Blend", {"mode": "add", "opacity": 0.5}, {"base": ("rgb", [rgb, rgb_b]), "top": ("rgb", [rgb_b, rgb])})
+    g.case("Blend: batches 2:3", blend, "Blend", {"mode": "add", "opacity": 0.5}, {"base": ("rgb", [rgb, rgb_b]), "top": ("rgb", [rgb_b, rgb, rgb])})
+    g.case("Blend: an RGB base under a see-through top", blend, "Blend", {"mode": "normal", "opacity": 1.0}, {"base": ("rgb", [rgb]), "top": ("provider", [prov])})
+    g.case("Blend: a see-through base under an RGB top", blend, "Blend", {"mode": "lighten", "opacity": 0.5}, {"base": ("card", [card4]), "top": ("rgb", [rgb])})
+    g.case("Blend: the blank under a see-through top", blend, "Blend", {"mode": "normal", "opacity": 1.0}, {"base": ("blank", []), "top": ("provider", [prov])})
+
+    # ── ApplyMask / MergeAlpha: masks of another size, mask batches ──
+    for node_id in ("ApplyMask", "MergeAlpha"):
+        cls = classes[node_id]
+        inv = "invert" if node_id == "ApplyMask" else "invert_mask"
+        for label, m in (("a larger mask", g.mask(61, 40, 9, "soft")), ("a smaller mask", g.mask(11, 7, 10, "hard")), ("a 1×1 mask", g.mask(1, 1, 11, "soft"))):
+            for iv in (False, True):
+                for pname, source, file in (("rgb 37×23", "rgb", rgb), ("card 23×19 see-through", "card", card4)):
+                    g.case(f"{node_id}: {label}, {inv} {iv}, {pname}", cls, node_id, {inv: iv}, {"image": (source, [file]), "mask": ("mask", [m])})
+        ma, mb, mc = g.mask(37, 23, 5, "soft"), g.mask(37, 23, 6, "hard"), g.mask(37, 23, 12, "soft")
+        g.case(f"{node_id}: one picture, two masks", cls, node_id, {inv: False}, {"image": ("rgb", [rgb]), "mask": ("mask", [ma, mb])})
+        g.case(f"{node_id}: two pictures, one mask", cls, node_id, {inv: False}, {"image": ("rgb", [rgb, rgb_b]), "mask": ("mask", [ma])})
+        g.case(f"{node_id}: two pictures, three masks", cls, node_id, {inv: False}, {"image": ("rgb", [rgb, rgb_b]), "mask": ("mask", [ma, mb, mc])})
+
+    # ── MatteGrowShrink: the standard set over four masks, then amounts × feathers ──
+    matte = classes["MatteGrowShrink"]
+    _d, settings = widget_settings(matte)
+    mpics = [("mask 37×23 soft", masks[rgb]), ("mask 29×31 hard", masks[prov]), ("mask 23×19 soft", masks[card4]), ("mask 23×19 hard", masks[card3])]
+    for label, over in settings:
+        for pname, m in mpics:
+            g.case(f"MatteGrowShrink: {label}, {pname}", matte, "MatteGrowShrink", {**defaults["MatteGrowShrink"], **over}, {"mask": ("mask", [m])})
+    ma, mb = g.mask(37, 23, 5, "soft"), g.mask(37, 23, 6, "hard")
+    g.case("MatteGrowShrink: a batch of two files and a repeat", matte, "MatteGrowShrink", {"amount": 3.0, "feather": 1.5}, {"mask": ("mask", [ma, mb, ma])})
+    g.case("MatteGrowShrink: a 1×1 mask", matte, "MatteGrowShrink", {"amount": 2.0, "feather": 0.0}, {"mask": ("mask", [g.mask(1, 1, 11, "soft")])})
+    g.case("MatteGrowShrink: 320×200", matte, "MatteGrowShrink", {"amount": 4.0, "feather": 2.5}, {"mask": ("mask", [g.mask(320, 200, 7, "soft")])}, hashed=True)
+    g.case("MatteGrowShrink: 320×200 hard, shrink", matte, "MatteGrowShrink", {"amount": -6.0, "feather": 0.0}, {"mask": ("mask", [g.mask(320, 200, 13, "hard")])}, hashed=True)
+    wide = g.mask(200, 190, 14, "hard")
+    for amount in (-50.0, -1.0, 0.0, 1.0, 50.0, 0.4, -0.4, 2.5, -2.5):
+        for feather in (0.0, 0.5, 30.0):
+            for pname, m in (("mask 37×23 soft", ma), ("mask 29×31 hard", masks[prov]), ("mask 200×190 hard", wide)):
+                if pname.startswith("mask 200") and feather == 0.5 and amount not in (-50.0, 50.0, 1.0):
+                    continue
+                g.case(f"MatteGrowShrink: amount {amount}, feather {feather}, {pname}", matte, "MatteGrowShrink", {"amount": amount, "feather": feather}, {"mask": ("mask", [m])})
+
+    # ── Painter ──
+    painter_cases(g, classes["Painter"])
+
+
+def painter_image(w: int, h: int, seed: int, mode: str) -> PILImage.Image:
+    px = np.frombuffer(synth(w, h, 4, seed), dtype=np.uint8).reshape(h, w, 4)
+    im = PILImage.fromarray(px, "RGBA")
+    if mode == "RGBA":
+        return im
+    if mode == "RGB":
+        return im.convert("RGB")
+    if mode == "LA":
+        return im.convert("LA")
+    if mode == "P":
+        p = im.convert("RGB").quantize(colors=16)
+        p.info["transparency"] = 3
+        return p
+    raise ValueError(mode)
+
+
+def painter_cases(g: MaskGroup, painter) -> None:
+    pics = mask_standard_pictures(g)
+    rgb, card3 = g.picture(37, 23, 3, 1), g.picture(23, 19, 3, 4)
+    d = {"mask": "", "width": 512, "height": 512, "bg_color": "#000000"}
+    f64 = g.painter_file("painter_64x64_rgba.png", painter_image(64, 64, 32, "RGBA"))
+    f37 = g.painter_file("painter_37x23_rgba.png", painter_image(37, 23, 31, "RGBA"))
+    f5070 = g.painter_file("painter_50x70_rgba.png", painter_image(50, 70, 33, "RGBA"))
+    frgb = g.painter_file("painter_40x30_rgb.png", painter_image(40, 30, 34, "RGB"))
+    fla = g.painter_file("painter_30x20_la.png", painter_image(30, 20, 35, "LA"))
+    p = painter_image(24, 24, 36, "P")
+    fp = g.painter_file("painter_24x24_p_trns.png", p, transparency=3)
+    ex = PILImage.Exif()
+    ex[0x0112] = 6
+    fexif = g.painter_file("painter_64x128_exif6.png", painter_image(64, 128, 37, "RGBA"), exif=ex.tobytes())
+    # Every widget at its default (no picture, no file: the canvas filled with bg_color).
+    g.case("Painter: defaults", painter, "Painter", dict(d), {}, hashed=True)
+    for name, lo, hi in (("width", 64, 4096), ("height", 64, 4096)):
+        mid = int(round(lo + (hi - lo) * 0.37))
+        for label, v in (("min", lo), ("max", hi), ("between", mid)):
+            g.case(f"Painter: {name} {label} ({v})", painter, "Painter", {**d, name: v, "bg_color": "#3c5a78"}, {}, hashed=v * 512 > 64 * 64 * 4)
+    for colour in ("#ff8000", "FF8000", "##c0ffee", "#abc", "", "#1234567", " #102030", "#A1b2C3", "#12345G", "+f-f0f", "zzzzzz", "#ff 00 0"):
+        g.case(f"Painter: bg_color {colour!r}, 64×64", painter, "Painter", {**d, "width": 64, "height": 64, "bg_color": colour}, {})
+    # A picture wired in, no file: the picture (its first) handed on, the mask all zero.
+    for pname, source, file in pics:
+        g.case(f"Painter: no file, {pname}", painter, "Painter", dict(d), {"image": (source, [file])})
+    g.case("Painter: no file, a batch of two: the first", painter, "Painter", dict(d), {"image": ("rgb", [g.picture(37, 23, 3, 5), rgb])})
+    g.case("Painter: no file, the 1×1 blank", painter, "Painter", dict(d), {"image": ("blank", [])})
+    # A painter file, no picture.
+    g.case("Painter: a file the canvas size", painter, "Painter", {**d, "mask": f64, "width": 64, "height": 64, "bg_color": "#2040ff"}, {})
+    g.case("Painter: a file of another size (Lanczos)", painter, "Painter", {**d, "mask": f5070, "width": 64, "height": 64, "bg_color": "#ffffff"}, {})
+    g.case("Painter: a file of another size, larger canvas", painter, "Painter", {**d, "mask": f37, "width": 128, "height": 64, "bg_color": "#808000"}, {})
+    for label, f in (("RGB", frgb), ("grey and alpha", fla), ("palette with a see-through colour", fp), ("EXIF orientation 6, not turned", fexif)):
+        g.case(f"Painter: a {label} file, the canvas its size", painter, "Painter", {**d, "mask": f, "width": 64, "height": 64, "bg_color": "#102030"}, {})
+    g.case("Painter: an EXIF orientation 6 file of the canvas size, not turned", painter, "Painter", {**d, "mask": fexif, "width": 64, "height": 128}, {})
+    # A painter file over a picture.
+    g.case("Painter: a file over an rgb picture its size", painter, "Painter", {**d, "mask": f37}, {"image": ("rgb", [rgb])})
+    g.case("Painter: a file over an rgb picture of another size", painter, "Painter", {**d, "mask": f64}, {"image": ("rgb", [rgb])})
+    g.case("Painter: a file over an opaque card picture", painter, "Painter", {**d, "mask": f5070}, {"image": ("card", [card3])})
+    g.case("Painter: a file over a see-through card picture", painter, "Painter", {**d, "mask": f5070}, {"image": ("card", [g.picture(23, 19, 4, 3)])})
+    g.case("Painter: a file over a provider picture", painter, "Painter", {**d, "mask": f37}, {"image": ("provider", [g.picture(29, 31, 4, 2)])})
+    g.case("Painter: a file over a batch of two: the first", painter, "Painter", {**d, "mask": f37}, {"image": ("rgb", [rgb, g.picture(37, 23, 3, 5)])})
+    g.case("Painter: a file over the 1×1 blank", painter, "Painter", {**d, "mask": f37}, {"image": ("blank", [])})
+    g.case("Painter: a file that isn't there", painter, "Painter", {**d, "mask": "not_there.png", "width": 64, "height": 64}, {})
+    g.case("Painter: rgb 320×200 under a file (Lanczos up)", painter, "Painter", {**d, "mask": f64}, {"image": ("rgb", [g.picture(320, 200, 3, 6)])}, hashed=True)
+
+
+def mask_negzero(classes: dict) -> list:
+    """−0 through each node's last clamp (as a Dither upstream leaves it), for the classes whose picture is
+    handed on as a float: every third input value −0, the mask from hashed_values."""
+    rows = []
+    seed = 8000
+    probes = [("Blend", {"mode": "multiply", "opacity": 0.37}), ("Blend", {"mode": "normal", "opacity": 1.0}), ("Blend", {"mode": "subtract", "opacity": 0.5}),
+              ("ApplyMask", {"invert": False}), ("ApplyMask", {"invert": True}), ("MergeAlpha", {"invert_mask": False})]
+    for class_type, widgets in probes:
+        for shape in ((1, 23, 37, 3), (2, 23, 37, 3), (1, 120, 110, 3), (2, 61, 90, 4), (1, 61, 90, 4)):
+            seed += 1
+            spec = {"shape": list(shape), "seed": seed, "neg_zero_every": 3}
+            x = warp_negzero_input(spec)
+            b, h, w, _c = shape
+            if class_type == "Blend":
+                other = {"shape": list(shape), "seed": seed + 5000, "neg_zero_every": 3}
+                inputs = {"base": x, "top": warp_negzero_input(other)}
+                spec["top"] = other
+            else:
+                m = torch.from_numpy(hashed_values(b * h * w, seed + 7000).reshape(b, h, w).copy())
+                inputs = {"image": x, "mask": m}
+                spec["mask_seed"] = seed + 7000
+            outs, _ui = run_node(classes[class_type], f"nz{seed}", **inputs, **widgets)
+            t = outs[0]
+            items = []
+            for i in range(t.shape[0]):
+                y = t[i].contiguous()
+                items.append({"w": int(y.shape[1]), "h": int(y.shape[0]), "c": int(y.shape[2]), "f32_sha256": sha(y.cpu().numpy().astype("<f4").tobytes()),
+                              "neg_zeros": int((torch.signbit(y) & (y == 0)).sum())})
+            rows.append({"name": f"{class_type} {widgets}, {'×'.join(map(str, shape))}", "class_type": class_type, "widgets": widgets, "input": spec, "items": items})
+    return rows
+
+
+def mask_chains(g: MaskGroup, classes: dict) -> list:
+    """A mask from each producer the runner has (LoadImage's MASK, Image to mask, Threshold mask, Text
+    mask), into Apply mask and Merge alpha, at the picture's size and at another. The runner hands a mask
+    on as its kept 16 bits (u / 65535), so Python's consumer is fed exactly that (`fed`); `drift` counts
+    how far Python's own float chain (the producer's float mask fed straight in) lands from it."""
+    from nodes import LoadImage
+    from comfy_extras.nodes_mask import ImageToMask
+    from comfy_extras.nodes_text_mask import TextMaskNode
+    rows = []
+    same, other = g.picture(37, 23, 3, 1), g.picture(29, 17, 3, 15)
+    see = g.picture(37, 23, 4, 21)
+    # A 4-channel picture file for LoadImage (its MASK is 1 − alpha).
+    load_file = synth_name(37, 23, 4, 21)
+    with open(os.path.join(WORK, "input", load_file), "wb") as f:
+        f.write(g.assets[see])
+    render = g.picture(37, 23, 3, 22)
+    with open(os.path.join(WORK, "input", render), "wb") as f:
+        f.write(g.assets[render])
+    card_file = g.picture(37, 23, 4, 3)
+    producers = [
+        ("LoadImage", {"class_type": "LoadImage", "file": load_file}, lambda: LoadImage().load_image(load_file)[1]),
+        ("Image to mask (alpha)", {"class_type": "ImageToMask", "channel": "alpha", "image": {"source": "card", "files": [card_file]}},
+         lambda: ImageToMask.execute(load("card", card_file, g.assets[card_file]), "alpha").args[0]),
+        ("Image to mask (red)", {"class_type": "ImageToMask", "channel": "red", "image": {"source": "card", "files": [card_file]}},
+         lambda: ImageToMask.execute(load("card", card_file, g.assets[card_file]), "red").args[0]),
+        ("Threshold mask (soft)", {"class_type": "ThresholdMask", "widgets": {"threshold": 0.45, "softness": 0.15, "invert": False}, "image": {"source": "card", "files": [card_file]}},
+         lambda: run_node(classes["ThresholdMask"], "producer", image=load("card", card_file, g.assets[card_file]), threshold=0.45, softness=0.15, invert=False)[0][0]),
+        ("Text mask", {"class_type": "TextMask", "rendered": render}, lambda: TextMaskNode.execute(params=json.dumps({"rendered": render})).args[1]),
+    ]
+    consumers = [("ApplyMask", {"invert": False}), ("MergeAlpha", {"invert_mask": True})]
+    for label, producer, make in producers:
+        m = make()
+        q = quantise16(m[0])
+        name = g.mask_of(f"kept_{producer['class_type']}_{len(rows)}.png", q)
+        fed = load("mask", name, g.assets[name])
+        for consumer, widgets in consumers:
+            for size, pic in (("same size", same), ("another size", other)):
+                if consumer == "MergeAlpha" and size == "another size" and label != "Text mask":
+                    continue
+                img = load("rgb", pic, g.assets[pic])
+                g.seq += 1
+                node_id = f"fx{g.seq}"
+                outs, ui = run_node(classes[consumer], node_id, image=img, mask=fed, **widgets)
+                flt, _ = run_node(classes[consumer], f"{node_id}f", image=img, mask=m, **widgets)
+                a, b = outs[0][0], flt[0][0]
+                drift = {"values": int(a.numel()), "f32": int((a != b).sum()),
+                         "round8": int((round8(a) != round8(b)).sum()), "trunc8": int((trunc8(a) != trunc8(b)).sum())}
+                rows.append({"name": f"{label} → {consumer}, {size}", "producer": producer, "kept": {"file": name, "u16_sha256": sha(q.astype("<u2").tobytes()), "w": int(q.shape[1]), "h": int(q.shape[0])},
+                             "class_type": consumer, "node_id": node_id, "widgets": widgets, "inputs": {"image": {"source": "rgb", "files": [pic]}, "mask": {"source": "mask", "files": [name]}},
+                             "outputs": [record_tone_output(outs[0], False, None)], "ui": {"images": ui["images"], "animated": list(ui["animated"])},
+                             "preview": read_preview(ui, True), "drift": drift})
+    # Threshold mask → Apply mask, the brief's chain, on the 320×200 picture too (hashed).
+    big = g.picture(320, 200, 3, 6)
+    x = load("rgb", big, g.assets[big])
+    for soft in (0.0, 0.2):
+        (m,), _ = run_node(classes["ThresholdMask"], "producer", image=x, threshold=0.5, softness=soft, invert=False)
+        q = quantise16(m[0])
+        name = g.mask_of(f"kept_threshold_{soft}.png", q)
+        fed = load("mask", name, g.assets[name])
+        g.seq += 1
+        node_id = f"fx{g.seq}"
+        outs, ui = run_node(classes["ApplyMask"], node_id, image=x, mask=fed, invert=False)
+        flt, _ = run_node(classes["ApplyMask"], f"{node_id}f", image=x, mask=m, invert=False)
+        a, b = outs[0][0], flt[0][0]
+        rows.append({"name": f"Threshold mask (softness {soft}) → ApplyMask, rgb 320×200", "producer": {"class_type": "ThresholdMask", "widgets": {"threshold": 0.5, "softness": soft, "invert": False}, "image": {"source": "rgb", "files": [big]}},
+                     "kept": {"file": name, "u16_sha256": sha(q.astype("<u2").tobytes()), "w": int(q.shape[1]), "h": int(q.shape[0])},
+                     "class_type": "ApplyMask", "node_id": node_id, "widgets": {"invert": False}, "inputs": {"image": {"source": "rgb", "files": [big]}, "mask": {"source": "mask", "files": [name]}},
+                     "outputs": [record_tone_output(outs[0], True, None)], "ui": {"images": ui["images"], "animated": list(ui["animated"])}, "preview": read_preview(ui, True),
+                     "drift": {"values": int(a.numel()), "f32": int((a != b).sum()), "round8": int((round8(a) != round8(b)).sum()), "trunc8": int((trunc8(a) != trunc8(b)).sum())}})
+    return rows
+
+
+def mask_classes() -> dict:
+    return {node_id: node_class(module, node_id) for module, node_id in MASK_CLASSES}
+
+
+def mask() -> dict:
+    g = MaskGroup()
+    classes = mask_classes()
+    mask_cases(g, classes)
+    chains = mask_chains(g, classes)
+    # An effect into a Frame: Blend's float tensor on the Frame's layer 1.
+    frame = mask_frame_chain(g, classes["Blend"])
+    return {"cases": g.cases, "chains": chains, "negzero": mask_negzero(classes), "frame": frame,
+            "assets": {k: b64(v) for k, v in sorted(g.assets.items())}}
+
+
+def mask_frame_chain(g: MaskGroup, blend) -> dict:
+    """Blend (overlay 0.6, see-through card base, a see-through card top of another size) into a Frame's layer 1: the Frame
+    gets the float tensor; its 8-bit result as save_live_preview writes it."""
+    from unittest import mock
+    from comfy_api.latest._io import HiddenHolder
+    import comfy_extras.nodes_compositor as nc
+    base, top = g.picture(23, 19, 4, 3), g.picture(41, 27, 4, 16)
+    widgets = {"mode": "overlay", "opacity": 0.6}
+    g.seq += 1
+    node_id = f"fx{g.seq}"
+    outs, _ui = run_node(blend, node_id, base=load("card", base, g.assets[base]), top=load("card", top, g.assets[top]), **widgets)
+    fw = {"layer1_x": 0.0, "layer1_y": 0.0, "layer1_rotation": 10.0, "layer1_scale": 0.8, "layer1_opacity": 1.0,
+          "layer1_blend": "normal", "layer1_z": 1.0, "layer1_protect": False, "layer1_cloner": "", "width": 0, "height": 0, "motion_params": ""}
+    previews = []
+    with mock.patch.object(nc.CompositorNode, "hidden", HiddenHolder.from_dict({"UNIQUE_ID": "frame"})), \
+            mock.patch.object(nc, "save_live_preview", lambda t, *_a, **_k: previews.append(t) or {}):
+        res = nc.CompositorNode.execute(layer1=outs[0], **fw)
+    image = res.result[0]
+    return {"name": "Blend overlay 0.6 → Frame, card", "inputs": {"base": {"source": "card", "files": [base]}, "top": {"source": "card", "files": [top]}},
+            "effect": {"class_type": "Blend", "node_id": node_id, "widgets": widgets},
+            "frame": {"widgets": fw, "w": int(image.shape[2]), "h": int(image.shape[1]), "image8": b64(trunc8(image[0]).tobytes())}}
+
+
+# `--group mask --sweep`: MatteGrowShrink's feather (the group's one library step) over fresh masks,
+# measured by the spec against the TypeScript port (the file handed over lives in this run's temp
+# directory). Writes nothing into the repo.
+MASK_SWEEP_SEEDS = 60
+
+
+def mask_sweep_run() -> int:
+    import subprocess
+    matte = mask_classes()["MatteGrowShrink"]
+    rs = np.random.default_rng(2808)
+    cases = []
+    sizes = [(41, 29), (64, 48), (97, 61), (160, 100), (200, 190), (320, 200), (400, 380)]
+    for i in range(MASK_SWEEP_SEEDS):
+        w, h = sizes[int(rs.integers(0, len(sizes)))]
+        seed = int(rs.integers(1, 2 ** 31))
+        kind = "hard" if rs.integers(0, 2) else "soft"
+        feather = float(round(rs.uniform(0.5, min(30.0, (min(w, h) - 1) / 3.0 - 0.34)), 2))
+        amount = float(round(rs.uniform(-50, 50), 1)) if rs.integers(0, 3) else 0.0
+        q = synth_mask(w, h, seed, kind)
+        m = torch.from_numpy(q.astype(np.float32) / np.float32(65535.0))[None]
+        row = {"w": w, "h": h, "seed": seed, "kind": kind, "widgets": {"amount": amount, "feather": feather}}
+        try:
+            (out,), _ui = run_node(matte, f"sw{i}", mask=m, amount=amount, feather=feather)
+            row["f32s"] = shuffled_f32(out[0])
+        except Exception as e:  # noqa: BLE001
+            row["error"] = str(e)
+        cases.append(row)
+    # The widest feather (σ 30, a 181-tap kernel) on large masks, hard and soft: torch's conv2d sums 181² taps a value.
+    for i, (w, h, kind, amount) in enumerate(((640, 640, "hard", 0.0), (800, 600, "soft", -7.0), (1024, 1024, "hard", 12.0))):
+        seed = int(rs.integers(1, 2 ** 31))
+        q = synth_mask(w, h, seed, kind)
+        m = torch.from_numpy(q.astype(np.float32) / np.float32(65535.0))[None]
+        (out,), _ui = run_node(matte, f"swl{i}", mask=m, amount=amount, feather=30.0)
+        cases.append({"w": w, "h": h, "seed": seed, "kind": kind, "widgets": {"amount": amount, "feather": 30.0}, "f32s": shuffled_f32(out[0])})
+    path = os.path.join(WORK, "mask-sweep.json")
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump({"cases": cases}, f)
+    print(f"mask ε sweep: {len(cases)} cases, {sum(1 for c in cases if 'error' in c)} Python raises")
+    env = {k: v for k, v in os.environ.items() if k not in PROVIDER_KEYS}
+    env["MASK_SWEEP_FILE"] = path
+    r = subprocess.run(["npx", "vitest", "run", "tests/unit/runner-effects-mask.unit.spec.ts", "-t", "the mask ε sweep", "--testTimeout=600000", "--reporter=verbose"],
+                       cwd=os.path.join(ROOT, "frontend"), env=env, capture_output=True, text=True)
+    for line in (r.stdout + r.stderr).splitlines():
+        if "mask ε" in line or "Tests " in line or "FAIL" in line or "Error" in line:
+            print(line)
+    return r.returncode
+
+
+GROUPS = {"machinery": machinery, "kernels": kernels, "rng": rng, "tone": tone, "blur": blur, "cells": cells, "warp": warp, "mask": mask}
 
 
 def blur_sweep_run() -> int:
@@ -2588,13 +3068,13 @@ def blur_sweep_run() -> int:
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--group", required=True, choices=sorted(GROUPS))
-    ap.add_argument("--sweep", action="store_true", help="blur and warp only: run the whole ε sweep, print each class's worst |Δ|; writes nothing")
+    ap.add_argument("--sweep", action="store_true", help="blur, warp and mask only: run the whole ε sweep, print each class's worst |Δ|; writes nothing")
     args = ap.parse_args()
     check_threads()
     if args.sweep:
-        if args.group not in ("blur", "warp"):
-            ap.error("--sweep is the blur and warp groups'")
-        sys.exit(blur_sweep_run() if args.group == "blur" else warp_sweep_run())
+        if args.group not in ("blur", "warp", "mask"):
+            ap.error("--sweep is the blur, warp and mask groups'")
+        sys.exit(blur_sweep_run() if args.group == "blur" else warp_sweep_run() if args.group == "warp" else mask_sweep_run())
     body = GROUPS[args.group]()
     doc = {
         "note": f"Written by scripts/runner_effects_fixtures.py --group {args.group} from the real nodes. Do not edit.",

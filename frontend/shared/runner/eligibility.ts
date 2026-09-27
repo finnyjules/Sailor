@@ -12,7 +12,7 @@ import { moodboardReadingIsPlain } from '../taste/moodboardStyle'
 import { IMAGE_LAYERS, TEXT_LAYERS, smartLayoutPixels } from './smartLayout'
 import {
   EFFECT_FAMILY_OF, EFFECT_OUTPUT_KINDS, EFFECT_PICTURE_OUTPUTS,
-  asciiGlyphsArePortable, effectFamilyOn, effectOutputSizeFits, effectPreviewName, effectRows, effectSwitchedClasses, effectTextIsPortable,
+  asciiGlyphsArePortable, effectFamilyOn, effectOutputSizeFits, effectPreviewName, effectRows, effectSwitchedClasses, effectTextIsPortable, painterInputsArePortable,
 } from './effects'
 
 export const RUNNER_NODE_TYPES: ReadonlySet<string> = new Set([
@@ -168,10 +168,13 @@ export const INPUT_CHECKS: Readonly<Record<string, (inputs: Record<string, unkno
   // Ascii's characters (R2.6): every character of the ramp it draws is in the
   // runner's glyph atlas (./asciiGlyphSet.generated.ts); any other is left to the engine.
   'ascii-glyphs': inputs => asciiGlyphsArePortable(inputs),
+  // Painter (R2.8): its painter file's name and its colour read as Python reads
+  // them (./effects.ts painterInputsArePortable); anything else is left to the engine.
+  'painter': inputs => painterInputsArePortable(inputs),
 }
 
 /** The name of an input check (INPUT_CHECKS). */
-export type InputCheckName = 'moodboard-reading' | 'bake-params' | 'empty-image-caps' | 'smart-layout' | 'effect-preview-name' | 'effect-output-size' | 'effect-text' | 'ascii-glyphs'
+export type InputCheckName = 'moodboard-reading' | 'bake-params' | 'empty-image-caps' | 'smart-layout' | 'effect-preview-name' | 'effect-output-size' | 'effect-text' | 'ascii-glyphs' | 'painter'
 
 /** nodes.py MAX_RESOLUTION: the most ComfyUI allows for a width or height widget. */
 export const COMFY_MAX_RESOLUTION = 16384

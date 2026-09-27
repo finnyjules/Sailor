@@ -36,6 +36,11 @@ export interface EffectSpec {
    * import). Everything else keeps its value.
    */
   prepare?(widgets: Record<string, unknown>): Record<string, unknown>
+  /**
+   * The inputs' batches must be equal (R2.8: Merge alpha's torch.cat doesn't
+   * broadcast a batch of one against more); otherwise rule 5's equal-or-one.
+   */
+  equalBatches?: true
 }
 
 const tone = (name: string, prepare?: EffectSpec['prepare']): EffectSpec => ({ family: 'effects-tone', op: `tone.${name}`, batch: 'pure', ...(prepare ? { prepare } : {}) })
@@ -190,6 +195,34 @@ function resizeWork(w: Record<string, unknown>, s: Size): number {
   return out * WORK_CHANNELS * RESIZE_VALUE[mode]! + (mode === 'area' ? px(s) * WORK_CHANNELS * AREA_IN : 0)
 }
 
+// ── effects-mask (R2.8): the work each asks for (rule 7) ──
+//
+// In the same units (0.37 × 10⁹ a second), every picture counted at 4
+// channels. Measured on the development Mac (R2.8 report: each op at 1024²
+// × 4 in this thread, the constants set so every op's time at the unit's
+// rate is at or above its measured time): a per-value step (a blend mode, a
+// product, a clamp) MASK_VALUE a value; a bilinear resize of the top or the
+// mask RESIZE_VALUE.bilinear a value, counted whether or not the sizes differ
+// (the header of the second input isn't read for it); a luma or a colour
+// distance MASK_PIXEL a pixel; Matte grow / shrink's max pool, taken one side
+// at a time, POOL_STEP a step (2k a pixel), and its feather the gaussian's
+// 2·ksize taps a pixel on one channel.
+
+const MASK_VALUE = 4
+const MASK_PIXEL = 12
+const POOL_STEP = 2
+
+const mask = (name: string, work: NonNullable<EffectSpec['work']>, extra: Partial<EffectSpec> = {}): EffectSpec =>
+  ({ family: 'effects-mask', op: `mask.${name}`, batch: 'pure', work, ...extra })
+
+/** Matte grow / shrink's work: its max pool one side at a time, and its feather on one channel. */
+function matteWork(w: Record<string, unknown>, s: Size): number {
+  const amount = num(w, 'amount')
+  const feather = num(w, 'feather')
+  const kk = amount !== 0 ? Math.abs(pyRound(amount)) * 2 + 1 : 1
+  return px(s) * ((kk > 1 ? 2 * kk * POOL_STEP : 0) + (feather > 0 ? 2 * ksizeOf(feather) : 0) + 3 * MASK_VALUE)
+}
+
 /** The output size of a class that changes it (effectOutSize), else the input's. */
 const sizedBy = (cls: string): EffectSpec['outSize'] => (w, s) => (s ? effectOutSize(cls, w, s) ?? s : { w: 0, h: 0 })
 
@@ -272,6 +305,34 @@ export const EFFECTS: Readonly<Record<string, EffectSpec>> = {
   // `samples` grid_samples of every channel, each with its grid and the running sum.
   GodRays: warp('GodRays', (w, s) => Math.max(1, Math.trunc(num(w, 'samples'))) * px(s) * (WORK_CHANNELS * GRID_VALUE + GODRAYS_PIXEL) + copyWork(s)),
   Mirror: warp('Mirror', (_w, s) => copyWork(s)),
+  // ── effects-mask (R2.8): exact, but Matte grow / shrink's feather (library) ──
+  // Blend carries nothing across its batch, but its base and top are paired by index (the brief: coupled).
+  Blend: mask('Blend', (_w, s) => px(s) * WORK_CHANNELS * (3 * MASK_VALUE + RESIZE_VALUE.bilinear!), { batch: 'coupled' }),
+  ApplyMask: mask('ApplyMask', (_w, s) => px(s) * (WORK_CHANNELS * 2 * MASK_VALUE + RESIZE_VALUE.bilinear!)),
+  ThresholdMask: mask('ThresholdMask', (_w, s) => px(s) * (MASK_PIXEL + WORK_CHANNELS * 2 * MASK_VALUE)),
+  ColorRangeMask: mask('ColorRangeMask', (_w, s) => px(s) * (MASK_PIXEL + WORK_CHANNELS * 2 * MASK_VALUE)),
+  MatteGrowShrink: mask('MatteGrowShrink', matteWork),
+  MergeAlpha: mask('MergeAlpha', (_w, s) => px(s) * (WORK_CHANNELS * 2 * MASK_VALUE + RESIZE_VALUE.bilinear!), { equalBatches: true }),
+  // Painter has a plan of its own (effects/painter.ts): the base's first picture and a painter file.
+  Painter: mask('Painter', (w, s) => painterWork(w, s, null), { batch: 'coupled' }),
+}
+
+/**
+ * Painter's work: the canvas's composite, and Pillow's Lanczos of the painter
+ * file when its size differs (each pass's taps, 2·ceil(3·scale) + 1 a value,
+ * 4 bands). `size`: the picture wired in (the canvas), else width × height;
+ * `file`: the painter file's size.
+ */
+export function painterWork(w: Record<string, unknown>, size: Size, file: Size): number {
+  const canvas = size ?? { w: Math.trunc(num(w, 'width')), h: Math.trunc(num(w, 'height')) }
+  let work = px(canvas) * WORK_CHANNELS * 3 * MASK_VALUE
+  if (file && (file.w !== canvas.w || file.h !== canvas.h)) {
+    const taps = (inSize: number, out: number) => 2 * Math.ceil(3 * Math.max(1, inSize / out)) + 1
+    if (file.w !== canvas.w) work += canvas.w * file.h * 4 * taps(file.w, canvas.w)
+    if (file.h !== canvas.h) work += canvas.w * canvas.h * 4 * taps(file.h, canvas.h)
+    work += px(file) * 4 * 2
+  }
+  return work
 }
 
 /** The runner's spec for an effect class, or undefined when the class is not an effect it ports. */

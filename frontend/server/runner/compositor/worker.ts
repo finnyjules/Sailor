@@ -122,9 +122,11 @@ parentPort.on('message', (m) => {
       const inputs = {}
       for (const name of Object.keys(m.inputs)) {
         const v = m.inputs[name]
+        // A painter file (R2.8) is handed on as its 8-bit RGBA: Painter resizes it before any float.
         inputs[name] = v && v.mask16 ? tk.fromMask16(v.mask16, v.w, v.h)
           : v && v.tensorFile ? tk.fromTensorFile(v.tensorFile)
-            : tk.fromPicture(v, isStopped)
+            : v && v.rgba8 ? v
+              : tk.fromPicture(v, isStopped)
       }
       // The batch's size too (R2.4): how torch split a long sum, and where its clamp kept a −0, depend on it.
       const r = fx.op(inputs, fx.params, isStopped, fx.state, m.index, fx.count)
@@ -378,10 +380,12 @@ export interface PixelsWorker {
 export interface EffectMaskIn { mask16: Uint8Array; w: number; h: number }
 /** A picture another effect made, as the float32 tensor it kept (effects/core/tensor.ts tensorFileOf). */
 export interface EffectTensorIn { tensorFile: Uint8Array }
+/** A painter file (R2.8), RGBA8 as decoded, handed to the op as it is (effects/core/mask.ts PainterFile). */
+export interface EffectRawIn { rgba8: Uint8Array; w: number; h: number }
 
 export interface EffectRunJob {
   index: number
-  inputs: Record<string, PixelsPicture | EffectMaskIn | EffectTensorIn>
+  inputs: Record<string, PixelsPicture | EffectMaskIn | EffectTensorIn | EffectRawIn>
   first: boolean
   masks: boolean[]
   /** Which forms of each picture output: 8-bit round, 8-bit trunc, and the float32 tensor file (read by effects or Frames). */
@@ -438,6 +442,12 @@ export function pixelsInWorker<T>(signal: AbortSignal | undefined, job: (w: Pixe
             const b = v.tensorFile
             const own = b.byteOffset === 0 && b.byteLength === b.buffer.byteLength && !(b.buffer instanceof SharedArrayBuffer) ? b : b.slice()
             inputs[name] = { tensorFile: own }
+            buffers.push(own.buffer as ArrayBuffer)
+          }
+          else if ('rgba8' in v) {
+            const b = v.rgba8
+            const own = b.byteOffset === 0 && b.byteLength === b.buffer.byteLength && !(b.buffer instanceof SharedArrayBuffer) ? b : b.slice()
+            inputs[name] = { rgba8: own, w: v.w, h: v.h }
             buffers.push(own.buffer as ArrayBuffer)
           }
           else {

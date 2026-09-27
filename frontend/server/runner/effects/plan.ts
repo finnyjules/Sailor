@@ -87,7 +87,7 @@ export function effectOutRefusal(
 }
 
 /** A plain message for a key a core throws (rule 6); anything else as it is. */
-function plain(e: unknown): Error {
+export function plain(e: unknown): Error {
   if (e instanceof Error && Object.prototype.hasOwnProperty.call(EFFECT_ERROR_MESSAGES, e.message)) return new Error(EFFECT_ERROR_MESSAGES[e.message])
   return e instanceof Error ? e : new Error(String(e))
 }
@@ -112,7 +112,7 @@ function maskSize(bytes: Uint8Array): { w: number; h: number } {
 }
 
 /** The 8-bit pixels of an output (or the preview) as a PNG, with its own channels. */
-async function png8(px: Uint8Array, w: number, h: number, channels: number, level: number): Promise<Uint8Array> {
+export async function png8(px: Uint8Array, w: number, h: number, channels: number, level: number): Promise<Uint8Array> {
   const out = await sharp(px, { raw: { width: w, height: h, channels: channels as 1 | 2 | 3 | 4 }, limitInputPixels: false })
     .png({ compressionLevel: level }).toBuffer()
   return new Uint8Array(out)
@@ -292,7 +292,9 @@ async function planJobs(io: DeriveIO, cls: string, spec: EffectSpec, ins: In[], 
   const lists = ins.map(batchFiles)
   const n = spec.batch === 'generator' && !lists.length ? 1 : Math.max(1, ...lists.map(l => l.length))
   if (lists.some(l => l.length !== 1 && l.length !== n)) throw new Error(EFFECT_ERROR_MESSAGES.EFFECT_BATCHES_DIFFER)
-  const firstPicture = ins.find(i => i.kind === 'image')
+  if (spec.equalBatches && lists.some(l => l.length !== n)) throw new Error(EFFECT_ERROR_MESSAGES.EFFECT_BATCHES_DIFFER)
+  // The output's size: the first picture's, or with no picture input the first mask's (R2.8: Matte grow / shrink).
+  const firstPicture = ins.find(i => i.kind === 'image') ?? ins[0]
   const firstFile = firstPicture ? batchFiles(firstPicture)[0] : undefined
   const firstSize = firstFile !== undefined ? size.get(firstFile ? keyOf(firstFile) : 'blank') ?? null : null
   const first = firstSize ? { w: firstSize.w, h: firstSize.h } : null
@@ -371,16 +373,17 @@ async function planJobs(io: DeriveIO, cls: string, spec: EffectSpec, ins: In[], 
  * LoadImage), from its header (sharp, no pixel limit, so a picture over the
  * cap is refused in the effect's own words); refused as a card would refuse
  * it (16-bit, CMYK…), and a loader's animation refused (Python makes a batch
- * of its frames).
+ * of its frames) unless the node reads only the first (`firstOnly`: Painter,
+ * R2.8, takes image[:1]).
  */
-async function pictureHeader(b: Uint8Array, source: Wired['source'], maxOne: number, tooLarge: string): Promise<{ w: number; h: number; c: number }> {
+export async function pictureHeader(b: Uint8Array, source: Wired['source'], maxOne: number, tooLarge: string, firstOnly = false): Promise<{ w: number; h: number; c: number }> {
   const meta = await sharp(b, { limitInputPixels: false }).metadata().catch(() => { throw new Error(PICTURE_UNREADABLE) })
   if (!meta.width || !meta.height) throw new Error(PICTURE_UNREAD)
   if (meta.width * meta.height > maxOne) throw new Error(tooLarge)
   const why = pictureRefusalOf(meta, b)
   if (why) throw new Error(why)
   const loader = source === 'card' || source === 'load'
-  if (loader && pictureHasFrames(meta, b)) throw new Error(EFFECT_PICTURE_ANIMATED)
+  if (loader && !firstOnly && pictureHasFrames(meta, b)) throw new Error(EFFECT_PICTURE_ANIMATED)
   const turned = loader && (meta.orientation ?? 1) >= 5
   return turned ? { w: meta.height, h: meta.width, c: 4 } : { w: meta.width, h: meta.height, c: 4 }
 }

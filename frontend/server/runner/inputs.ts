@@ -1,9 +1,10 @@
 /**
  * Files a workflow reads before it makes anything: moodboard reference
  * pictures (GenerateImageNode.style_refs, RestyleFromImageNode.style_refs), pictures/clips/sounds loaded into an
- * unwired Image, Video or Audio card, a LoadImage's picture, and the files the
+ * unwired Image, Video or Audio card, a LoadImage's picture, the files the
  * bake-replay cards hand on (3D Studio's passes, Text on path's and Text
- * mask's render). In hosted, every one must be the user's own.
+ * mask's render), and Painter's painter file. In hosted, every one must be
+ * the user's own.
  */
 import { isLink, type ApiPrompt } from '#shared/runner/graph'
 import { MeterRefusalError } from '../utils/requestMeter'
@@ -88,6 +89,11 @@ export function collectInputFiles(prompt: ApiPrompt): OutputFile[] {
     if (node.class_type === 'GenerateImageNode' || node.class_type === 'RestyleFromImageNode') out.push(...moodboardFiles(inputs.style_refs))
     if (node.class_type === 'Image' && !isLink(inputs.images)) {
       const f = parseInputFileRef(inputs.image)
+      if (f) out.push(f)
+    }
+    // Painter's painter file (R2.8), named by its `mask` widget.
+    if (node.class_type === 'Painter' && !isLink(inputs.mask)) {
+      const f = parseInputFileRef(inputs.mask)
       if (f) out.push(f)
     }
     // The Frame editor's injected LoadImage (baked layers and masks).

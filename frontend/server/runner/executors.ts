@@ -107,6 +107,7 @@ import { imageCardShowingKept, planPreviewImage, planSaveImage } from './cards/s
 import { planSmartLayout } from './cards/smartLayout'
 import { effectSpec } from './effects/table'
 import { planEffect } from './effects/plan'
+import { planPainter } from './effects/painter'
 import type { KeptExt } from './keptBytes'
 import { filesOf } from './values'
 import { OUTPUT_KINDS } from '#shared/runner/values'
@@ -941,7 +942,8 @@ async function planNodeRequest(ctx: PlanContext): Promise<NodePlan> {
     default: {
       // ── effects-* (step 3, R2): the still-picture effects, computed here ──
       const fx = effectSpec(node.class_type)
-      if (fx) return planEffect(ctx)
+      // Painter (R2.8) has a plan of its own: a canvas or the first picture, and a painter file.
+      if (fx) return node.class_type === 'Painter' ? planPainter(ctx) : planEffect(ctx)
       throw new Error(`The runner cannot run a ${node.class_type} node`)
     }
   }

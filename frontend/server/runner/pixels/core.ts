@@ -359,6 +359,33 @@ export function pixelsCore() {
   }
 
   /**
+   * Pillow's Image.resize(size, LANCZOS) of an RGBA picture (interleaved 8-bit):
+   * resized premultiplied (RGBa, MULDIV255), then divided back (255·c / a,
+   * truncated; alpha 0 and 255 kept as they are). Save image's resize (R1.5)
+   * and Painter's file (R2.8).
+   */
+  function pilResizeRgba(px: Uint8Array, w: number, h: number, ow: number, oh: number, stop?: () => boolean): Uint8Array {
+    const pre = new Uint8Array(px.length)
+    for (let i = 0; i < px.length; i += 4) {
+      const a = px[i + 3]!
+      pre[i] = mulDiv255(px[i]!, a)
+      pre[i + 1] = mulDiv255(px[i + 1]!, a)
+      pre[i + 2] = mulDiv255(px[i + 2]!, a)
+      pre[i + 3] = a
+    }
+    const out = pilResize(pre, w, h, 4, ow, oh, stop)
+    for (let i = 0; i < out.length; i += 4) {
+      const a = out[i + 3]!
+      if (a === 0 || a === 255) continue
+      for (let b = 0; b < 3; b++) {
+        const v = Math.trunc((255 * out[i + b]!) / a)
+        out[i + b] = v > 255 ? 255 : v
+      }
+    }
+    return out
+  }
+
+  /**
    * Everything save_images does to a picture before encoding it: the tensor's
    * bytes (saveBytes); Image.resize(LANCZOS) to ow × oh when that differs;
    * for JPEG (`flatten`), an RGBA picture pasted onto white with its alpha as
@@ -368,28 +395,7 @@ export function pixelsCore() {
     const t = saveBytes(p)
     let px = t.px
     const c = t.channels
-    if (ow !== t.w || oh !== t.h) {
-      if (c === 4) {
-        const pre = new Uint8Array(px.length)
-        for (let i = 0; i < px.length; i += 4) {
-          const a = px[i + 3]!
-          pre[i] = mulDiv255(px[i]!, a)
-          pre[i + 1] = mulDiv255(px[i + 1]!, a)
-          pre[i + 2] = mulDiv255(px[i + 2]!, a)
-          pre[i + 3] = a
-        }
-        px = pilResize(pre, t.w, t.h, 4, ow, oh, stop)
-        for (let i = 0; i < px.length; i += 4) {
-          const a = px[i + 3]!
-          if (a === 0 || a === 255) continue
-          for (let b = 0; b < 3; b++) {
-            const v = Math.trunc((255 * px[i + b]!) / a)
-            px[i + b] = v > 255 ? 255 : v
-          }
-        }
-      }
-      else px = pilResize(px, t.w, t.h, 3, ow, oh, stop)
-    }
+    if (ow !== t.w || oh !== t.h) px = c === 4 ? pilResizeRgba(px, t.w, t.h, ow, oh, stop) : pilResize(px, t.w, t.h, 3, ow, oh, stop)
     if (!flatten || c === 3) return { w: ow, h: oh, channels: c, px }
     const n = ow * oh
     const rgb = new Uint8Array(n * 3)
@@ -403,7 +409,7 @@ export function pixelsCore() {
     return { w: ow, h: oh, channels: 3, px: rgb }
   }
 
-  return { roundHalfEven, bilinearKind, bilinear, tensorChannels, channelTable, mask16Of, channelMask16, clipBegin, clip, saveBytes, pilResize, savePixels }
+  return { roundHalfEven, bilinearKind, bilinear, tensorChannels, channelTable, mask16Of, channelMask16, clipBegin, clip, saveBytes, pilResize, pilResizeRgba, savePixels }
 }
 
 export type PixelsCore = ReturnType<typeof pixelsCore>
