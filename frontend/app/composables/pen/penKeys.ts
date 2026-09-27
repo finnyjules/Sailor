@@ -34,6 +34,13 @@ export function isCleanupKey(ev: KeyboardEvent): boolean {
   return ev.altKey && ev.shiftKey && !ev.metaKey && !ev.ctrlKey && ev.code === 'KeyC'
 }
 
+/** X (Make guide), ⇧H / ⇧V (flip) — the pen stage 6 action letters. */
+export function isActionKey(ev: KeyboardEvent): boolean {
+  if (ev.metaKey || ev.ctrlKey || ev.altKey || ev.key.length !== 1) return false
+  const k = ev.key.toLowerCase()
+  return (!ev.shiftKey && k === 'x') || (ev.shiftKey && (k === 'h' || k === 'v'))
+}
+
 export interface PenKeyContext {
   tool: Ref<PenTool>
   pendingPath: Ref<PendingPath>
@@ -63,6 +70,10 @@ export interface PenKeyContext {
   // Clean up (pen stage 5): whether the host offers it, and the toggle
   cleanupAllowed: boolean
   toggleCleanup: () => void
+  // pen stage 6: X / ⇧H / ⇧V / ⌘C / ⌘V / ⌘A run a registry action when it can
+  // act now (penActions.ts ACTIONS; the pen settles its live gestures first);
+  // false leaves the key to the host
+  runKeyAction: (id: string) => boolean
 }
 
 // single-letter tool keys — only with no modifier, and only for a tool the
@@ -89,6 +100,11 @@ export function handlePenKey(ev: KeyboardEvent, ctx: PenKeyContext, local?: { ca
     const key = ev.key.toLowerCase()
     if (key === 'z' && !ev.shiftKey) { ctx.undo(); return true }
     if ((key === 'z' && ev.shiftKey) || key === 'y') { ctx.redo(); return true }
+    // pen stage 6: ⌘C copies a selection, ⌘V pastes the pen's own clipboard,
+    // ⌘A selects every piece — each only when it can act
+    if (!ev.shiftKey && !ev.altKey && (key === 'c' || key === 'v' || key === 'a')) {
+      return ctx.runKeyAction(key === 'c' ? 'copy' : key === 'v' ? 'paste' : 'select-all')
+    }
     return false
   }
   // ⌥⇧C: Clean up — only in a host that offers it
@@ -109,6 +125,12 @@ export function handlePenKey(ev: KeyboardEvent, ctx: PenKeyContext, local?: { ca
   const gestureActive = ctx.tool.value === 'path' && !!ctx.pendingPath.value
   if (gestureActive && /^[0-9]$/.test(ev.key)) { ctx.dimBuffer.value += ev.key; return true }
   if (gestureActive && ev.key === '.' && !ctx.dimBuffer.value.includes('.')) { ctx.dimBuffer.value += '.'; return true }
+
+  // pen stage 6: X makes the selection a guide, ⇧H / ⇧V flip it
+  if (isActionKey(ev)) {
+    const k = ev.key.toLowerCase()
+    return ctx.runKeyAction(k === 'x' ? 'construction' : k === 'h' ? 'flip-h' : 'flip-v')
+  }
 
   if (!ev.shiftKey && !ev.altKey && ev.key.length === 1) {
     const t = TOOL_KEYS[ev.key.toLowerCase()]

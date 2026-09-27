@@ -69,6 +69,10 @@ import { selectionLabel, topLevelIds, type PieceRef } from '~/lib/sketch/pieces'
 import { SIZE_REFUSED, STAY_PX, drawingDirForScreenAngle, arcEndForSweep, radiusPinOf, circleRadiusRuleOf, checkSizeEdit, stayed } from '~/lib/sketch/sizes'
 import { penClipboard, setPenClipboard, nextPasteStep, PASTE_STEP_PX } from './penClipboard'
 import { OK, no, REASON, type ActionState } from './penReasons'
+import {
+  ACTIONS, menuFor, runItem, wheelFor, wheelDirAt, ruleState, ruleItemId, ruleItems as registryRuleItems,
+  type PenActionHost, type PenMenuItem, type WheelSlice, type WheelDir,
+} from './penActions'
 
 // NUDGE_PX / NUDGE_PX_SHIFT / screenDeltaToDrawing now live in penKeys.ts
 // (they exist only for the arrow-key nudge in the key handler); re-exported
@@ -82,6 +86,12 @@ export { NUDGE_PX, NUDGE_PX_SHIFT, screenDeltaToDrawing }
 export type PenTool = 'select' | 'point' | 'line' | 'circle' | 'path' | 'curve' | 'trim' | 'cut' | 'dissolve'
 // cleanup: Clean up (pen stage 5) is offered unless a host sets it false
 export interface PenOptions { openOnly?: boolean; tools?: PenTool[]; cleanup?: boolean }
+
+// pen stage 6: the right-click list menu and the action wheel, as pen state
+// (replaced on every change). `at` is the host's client px (where to draw);
+// `drawingAt` is where the menu's Paste lands.
+export interface PenMenu { at: Vec2; drawingAt: Vec2 | null; header: string | null; groups: PenMenuItem[][]; active: string | null }
+export interface PenWheel { at: Vec2; layout: 'point' | 'segment'; slices: WheelSlice[]; hover: WheelDir | null }
 
 export const SPARKLE_LIFETIME_MS = 380
 
@@ -422,6 +432,7 @@ export function usePen(opts: {
   const penHistory = createPenHistory({ doc, onChange: opts.onChange, onLiveChange: opts.onLiveChange })
   const { commitHistory, initHistory, canUndo, canRedo } = penHistory
   function undo() {
+    closeMenus()
     // with a Clean up preview open, undo only closes it (as ⌘Z does) — it
     // never also steps back over the drawing under the preview
     if (cleanup.value) { cancelCleanup(); return }
@@ -441,6 +452,7 @@ export function usePen(opts: {
     opts.onChange?.()
   }
   function redo() {
+    closeMenus()
     if (cleanup.value) { cancelCleanup(); return }   // likewise: only closes the preview
     if (trimPress) trimUp()
     if (arcDrag) arcDragEnd()
@@ -480,12 +492,27 @@ export function usePen(opts: {
       if (handled) { ev.preventDefault(); ev.stopPropagation() }
       return handled
     }
+    // pen stage 6: an open menu owns the keys (a ⌘ combo closes it and then
+    // goes on as usual), so does an open wheel
+    if (menu.value) {
+      if ((ev.metaKey || ev.ctrlKey) && !MODIFIER_KEYS.has(ev.key)) closeMenu()
+      else {
+        const handled = menuKey(ev)
+        if (handled) { ev.preventDefault(); ev.stopPropagation() }
+        return handled
+      }
+    }
+    if (wheel.value) {
+      const handled = wheelKey(ev)
+      if (handled) { ev.preventDefault(); ev.stopPropagation() }
+      return handled
+    }
     if (arcDrag && !MODIFIER_KEYS.has(ev.key)) arcDragEnd()
     const ctx: PenKeyContext = {
       tool, pendingPath, dimBuffer, pendingOp, status, selection, selectedSegments, view: opts.view,
       cancelGesture: opts.cancelGesture,
       cancelPendingOp, undo, redo, cancelPath, commitDimension, finishPath, removeLastAnchor, del, nudge,
-      selectTool, isToolAllowed, clearTrimGhosts, cleanupAllowed, toggleCleanup,
+      selectTool, isToolAllowed, clearTrimGhosts, cleanupAllowed, toggleCleanup, runKeyAction,
     }
     const handled = handlePenKey(ev, ctx, local)
     if (handled) { ev.preventDefault(); ev.stopPropagation() }
@@ -2173,6 +2200,147 @@ export function usePen(opts: {
   // the Properties hover highlight (`highlight`) is declared by the selection
   function setHighlight(p: PieceRef[]): void { highlight.value = p }
 
+  // --- the right-click menu and the action wheel (pen stage 6) ---
+  // Both read penActions.ts through `actionHost` (built below, just before
+  // the return — only called after setup). Opening either runs the cheap
+  // checks only (controller ruling C1: no solve); a picked rule gets the full
+  // check (penActions runItem) and a refusal leaves the drawing untouched.
+  // While one is open the pen owns the keys (menuKey / wheelKey); anything
+  // that ends the session closes them. Neither opens during a Clean up
+  // preview, and opening, moving over or closing writes no history step.
+  const menu = shallowRef<PenMenu | null>(null)
+  const wheel = shallowRef<PenWheel | null>(null)
+  function openMenu(at: Vec2, drawingAt: Vec2 | null): void {
+    if (cleanup.value) return
+    wheel.value = null
+    menu.value = { at, drawingAt, ...menuFor(actionHost), active: null }
+  }
+  function closeMenu(): void { menu.value = null }
+  function closeWheel(): void { wheel.value = null }
+  function closeMenus(): void { menu.value = null; wheel.value = null }
+  function setMenuActive(id: string | null): void {
+    const m = menu.value
+    if (m && m.active !== id) menu.value = { ...m, active: id }
+  }
+  // every live gesture settles before a menu item, wheel slice or action key
+  // runs (each its own step, if it changed anything) — the helpers a tool
+  // change and finishSession use: a live arc drag or Trim press settles; a
+  // half-armed Repeat / Mirror and a pending value request are dropped; a
+  // pending path of two or more points is finished (a lone point dropped); a
+  // Line / Circle's own start point is removed. The selection is kept. (The
+  // overlay's own gestures — marquee, point drag, arc press — are the
+  // overlay's to settle before it calls in.)
+  function settleLive(): void {
+    if (arcDrag) arcDragEnd()
+    if (trimPress) trimUp()
+    cancelPointDrop()
+    cancelPendingOp()
+    cancelValue()
+    if (pendingPath.value && pendingPath.value.anchors.length >= 2) finishPath(false)
+    const before = doc.value.entities.length
+    cleanupPendingPath()
+    deletePendingOwnPoint()
+    if (doc.value.entities.length !== before) commitHistory()
+    pending.value = null
+    pendingPath.value = null
+    setPathDrag(null)
+    resetCurveState()
+    dimBuffer.value = ''
+  }
+  // the cheap state of a registry id (no solve): an action's own state, a
+  // rule's quick check — what decides whether anything settles or runs
+  function quickState(id: string): ActionState {
+    if (id.startsWith('rule:')) {
+      const o = availableConstraints().find(x => ruleItemId(x) === id)
+      return o ? ruleState(doc.value, selection.value, selectedSegments.value, o) : no(REASON.notHere)
+    }
+    const d = ACTIONS[id]
+    return d ? d.state(actionHost) : no(REASON.notHere)
+  }
+  // settle, then run (a rule gets its full check here); the refusal, or OK
+  function settleAndRun(id: string, at: Vec2 | null): ActionState {
+    settleLive()
+    const r = runItem(actionHost, id, at)
+    if (!r.ok) status.value = r.reason
+    return r
+  }
+  function runMenuItem(id: string): void {
+    const m = menu.value
+    const it = m?.groups.flat().find(i => i.id === id)
+    if (!m || !it || !it.state.ok || cleanup.value) return   // a greyed item does nothing; the menu stays
+    menu.value = null
+    const r = settleAndRun(id, m.drawingAt)
+    // the full check refused a rule: the menu stays, that item now greyed
+    // with its reason
+    if (!r.ok && !menu.value && !cleanup.value) {
+      menu.value = {
+        ...m,
+        groups: m.groups.map(g => g.map(i => (i.id === id ? { ...i, state: r } : i))),
+        active: m.active === id ? null : m.active,
+      }
+    }
+  }
+  function menuKey(ev: KeyboardEvent): boolean {
+    const m = menu.value!
+    if (MODIFIER_KEYS.has(ev.key)) return false
+    const order = m.groups.flat().filter(i => i.state.ok).map(i => i.id)
+    const step = (d: number) => {
+      if (!order.length) return
+      const i = m.active ? order.indexOf(m.active) : -1
+      setMenuActive(order[i < 0 ? (d > 0 ? 0 : order.length - 1) : (i + d + order.length) % order.length]!)
+    }
+    if (ev.key === 'Escape') { closeMenu(); return true }
+    if (ev.key === 'ArrowDown' || (ev.key === 'Tab' && !ev.shiftKey)) { step(1); return true }
+    if (ev.key === 'ArrowUp' || (ev.key === 'Tab' && ev.shiftKey)) { step(-1); return true }
+    if (ev.key === 'Home') { if (order.length) setMenuActive(order[0]!); return true }
+    if (ev.key === 'End') { if (order.length) setMenuActive(order.at(-1)!); return true }
+    if (ev.key === 'Enter') { if (m.active) runMenuItem(m.active); return true }
+    return true   // every other plain key is swallowed while the menu is open
+  }
+  function openWheel(at: Vec2): boolean {
+    if (cleanup.value) return false
+    const w = wheelFor(actionHost)
+    if (!w) return false
+    menu.value = null
+    wheel.value = { at, ...w, hover: null }
+    return true
+  }
+  function wheelPointer(at: Vec2): void {
+    const w = wheel.value
+    if (!w) return
+    const hover = wheelDirAt(at.x - w.at.x, at.y - w.at.y)
+    if (hover !== w.hover) wheel.value = { ...w, hover }
+  }
+  function releaseWheel(): void {
+    const w = wheel.value
+    wheel.value = null
+    const s = w?.hover ? w.slices.find(x => x.dir === w.hover) : null
+    if (!s || cleanup.value) return
+    if (!s.state.ok) { status.value = s.state.reason; return }
+    settleAndRun(s.id, null)
+  }
+  function wheelKey(ev: KeyboardEvent): boolean {
+    if (MODIFIER_KEYS.has(ev.key)) return false
+    if (ev.key === 'Escape') closeWheel()
+    return true   // every other plain key is swallowed while the wheel is open
+  }
+  // X / ⇧H / ⇧V / ⌘C / ⌘V / ⌘A (penKeys.ts): the pen's only when the action
+  // can act now — else false, and the key is left to the host
+  function runKeyAction(id: string): boolean {
+    if (cleanup.value || !ACTIONS[id] || !quickState(id).ok) return false
+    settleAndRun(id, null)
+    return true
+  }
+  // Properties' + list and any other caller: run a registry id now. A greyed
+  // one (or anything during a Clean up preview) does nothing and says why.
+  function runAction(id: string, at: Vec2 | null = null): boolean {
+    if (cleanup.value) return false
+    const q = quickState(id)
+    if (!q.ok) { status.value = q.reason; return false }
+    closeMenus()
+    return settleAndRun(id, at).ok
+  }
+
   // --- Clean up (pen stage 5, lib/sketch/cleanup) ---
   // A preview: the drawing stays exactly as it is while `cleanup` holds the
   // cleaned copy, re-solved from the drawing as it was when Clean up opened
@@ -2208,6 +2376,7 @@ export function usePen(opts: {
     return { ...s, result }
   }
   function startCleanup(): void {
+    closeMenus()
     if (!cleanupAllowed || cleanup.value) return
     finishSession()   // every live gesture settles first (its own step, if it changed anything); the selection is kept
     const picked = selection.value.length > 0 || selectedSegments.value.length > 0
@@ -2492,6 +2661,7 @@ export function usePen(opts: {
 
   function selectTool(t: Tool) {
     if (!isToolAllowed(t)) return   // PenOptions.tools / openOnly: not a tool this host offers — no-op
+    closeMenus()
     closeCleanup()   // a tool change drops a Clean up preview
     if (arcDrag) arcDragEnd()   // a live arc drag settles as its own step
     // Pen ↔ Curve mid-path keeps drawing the same path: the next segment's kind
@@ -2539,6 +2709,7 @@ export function usePen(opts: {
   }
 
   function reset() {
+    closeMenus()
     closeCleanup()
     setArcDrag(null)   // dropped, never settled — the drawing is thrown away
     resetEditTools()
@@ -2582,6 +2753,7 @@ export function usePen(opts: {
   // A half-armed Repeat/Mirror is dropped. Commits one history step iff the
   // doc changed.
   function finishSession(): void {
+    closeMenus()
     closeCleanup()   // a Clean up preview is dropped, never applied
     if (arcDrag) arcDragEnd()   // a live arc drag settles as its own step
     pendingOp.value = null
@@ -2606,6 +2778,7 @@ export function usePen(opts: {
   // called by the overlay or toolbar — a host calls it on `cancel` if its
   // cancel means "discard".
   function revert(): void {
+    closeMenus()
     closeCleanup()
     trimPress = null   // discarded with everything else — never settled onto the reverted drawing
     setArcDrag(null)   // likewise a live arc drag
@@ -2631,6 +2804,7 @@ export function usePen(opts: {
   // doesn't resume mid-air once the overlay reactivates. Mirrors what the
   // overlay's own watcher already does for its point-drag/marquee state.
   function endGesture(): void {
+    closeMenus()
     closeCleanup()   // parking the pen drops a Clean up preview
     cancelPointDrop()
     setPathDrag(null)
@@ -2642,12 +2816,23 @@ export function usePen(opts: {
 
   // stop the sparkle loop — the host calls this when it unmounts
   function dispose() {
+    closeMenus()
     closeCleanup()
     cancelValue()   // a pending value request never outlives the pen
     highlight.value = []
     if (sparkleRaf && typeof cancelAnimationFrame !== 'undefined') cancelAnimationFrame(sparkleRaf)
     sparkleRaf = 0
   }
+
+  // what penActions.ts runs against (pen stage 6)
+  const actionHost: PenActionHost = {
+    doc, selection, selectedSegments,
+    unitsPerPx: () => pxToUnits(1, opts.view.value),
+    availableConstraints, applyWithValue, fixSelected, dissolveState, dissolvePoint,
+    makeConstruction, flip, doMirror, repeatPrompt,
+    copySelection, copySvg, pasteState, paste, del, selectAll,
+  }
+  function ruleItems(): PenMenuItem[] { return registryRuleItems(actionHost) }
 
   initHistory()
 
@@ -2684,6 +2869,9 @@ export function usePen(opts: {
     // Properties: typed sizes, the radius lock, the hover highlight (pen stage 6)
     highlight, setHighlight, setPointXY, setLineLength, setLineAngle, setArcRadiusValue, setArcSweep, setArcLength,
     toggleArcRadiusLock, setCircleRadius, toggleCircleRadiusLock,
+    // right-click menu and action wheel (pen stage 6)
+    menu, wheel, openMenu, closeMenu, closeMenus, setMenuActive, runMenuItem,
+    openWheel, wheelPointer, releaseWheel, closeWheel, ruleItems, runAction,
     // Clean up (pen stage 5)
     cleanup, toggleCleanup, startCleanup, applyCleanup, cancelCleanup, toggleCleanupFix, toggleCleanupKind, setCleanupStrength,
     // history
