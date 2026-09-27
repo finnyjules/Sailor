@@ -94,6 +94,8 @@ CharacterRecord {
   voice: VoiceRef | null          // NEW: a trained voice, a picked stock voice, or none
   origin: 'described' | 'photos' | 'canvas'
   likenessConfirmed: boolean      // required for 'photos' / 'canvas' origins
+  style: 'photo' | 'anime'        // set at creation, never changes; more styles later
+  linkedFrom: string | null       // slug of the character this one was made from ("Make an anime version")
   loraName, trigger               // kept: an optional upgrade
   looks: Look[]                   // was `states`
 }
@@ -129,6 +131,17 @@ Check { verdict: 'match' | 'unsure' | 'different' | 'no-face', score?, lookFit?:
 
 ---
 
+## Style: Photo and Anime (added 2026-09-26)
+
+A character has **one style, chosen at creation**: **Photo** (the default) or **Anime**. More styles (3D animated, Illustrated, Comic) come later, once these two work well.
+
+- **Style belongs to the character, not to a look.** An anime character's design *is* her identity; looks still change hair and clothes, not the rendering.
+- **The same person in two styles is two characters.** "Make an anime version" on a Photo character creates a new Anime character linked to it (`linkedFrom`), built from her face. It never adds a second style to one character.
+- **Creation:** Describe → a style choice (Photo · Anime) before "Show faces", and the casting call draws in that style. Start from photos → Photo, or turn her into an anime character (the likeness checkbox still applies).
+- **Checking:** face matching only works on real faces, so Anime characters are checked by a vision model instead (see Checks).
+- **The sheet:** Anime characters get an animation-style turnaround. The head stays on every body panel, and the side profile is standard, not optional (see Sheet panels).
+- **Video:** the start-frame route (stage 3) matters most here, because video models drift towards realism and a drawn first frame holds the style.
+
 ## Making pictures of her
 
 ### Sheet panels
@@ -147,7 +160,9 @@ Check { verdict: 'match' | 'unsure' | 'different' | 'no-face', score?, lookFit?:
 - Body presets become explicit visual wording, for example Muscular: *"broad strong shoulders, defined arms, visible abdominal muscles and powerful thighs"*.
 - `bodyPhrase.ts` bands get rewritten in that style. Today's strongest muscle phrase, *"a strongly muscular physique"*, is too weak.
 
-**Side profile:** an optional sixth panel. It is only built and only sent for models that ask for it (Kling, Vidu). For Seedance and Gemini it adds risk.
+**Side profile:** an optional sixth panel for Photo characters. It is only built and only sent for models that ask for it (Kling, Vidu). For Seedance and Gemini it adds risk.
+
+**Anime sheet:** full-body front, three-quarter, side profile and back, **all with the head** (the headless panels were a workaround for photoreal video models), plus a face row: neutral and smiling. The wording is written and tested in stage 4, on GPT Image 2.5 and Nano Banana Pro. For heavy use of one anime character, a trained LoRA is the community standard, and Sailor already has the trainer.
 
 ### Casting-call faces
 - **GPT Image 2.5 Flare**, text-to-image, medium quality: six faces for about $0.09.
@@ -197,7 +212,11 @@ Conditions attached:
   - Someone else: left out, with "Use anyway".
   - If several flagged photos are the same other person: "Make a new character from these".
 - **Face detection:** pad each image about 40% before detecting. The detector misses faces that fill the frame, as in the close-up panels.
-- **Stylised characters** (illustration, 3D): face scores don't work on them, so checks are off, and the page shows no scores rather than wrong ones.
+- **Anime characters are checked by a vision model**, not AWS. Face matching is trained on real faces and gives no score, or a meaningless one, on drawn characters. So Claude compares the picture with her approved face against a checklist: face shape, eye style and colour, hair style and colour, distinctive marks, body proportions. Pose, expression, angle, lighting and clothing are ignored.
+  - It answers with a verdict and a short note, such as "hair is shorter", and no score.
+  - It costs about $0.01 a comparison and goes through the same assist metering as other Claude calls.
+  - The usage limits that rule vision models out for real people (identifying people, biometrics) don't apply to fictional drawn characters.
+  - To you, the flags and Redo look the same for both styles.
 
 ---
 

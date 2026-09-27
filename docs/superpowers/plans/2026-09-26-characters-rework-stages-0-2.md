@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Stop sending the combined sheet grid to Seedance (stage 0). Give the character record the rework's data: face, character-level photos, clothes, checks and made-from stamps (stage 1). Add an AWS Rekognition face checker that scores a character's photos and sheet panels against her approved face (stage 2).
+**Goal:** Stop sending the combined sheet grid to Seedance (stage 0). Give the character record the rework's data: face, character-level photos, clothes, checks and made-from stamps (stage 1). Add a face checker that scores a character's photos and sheet panels against her approved face: AWS Rekognition for Photo characters, a Claude vision judgement for Anime characters (stage 2).
 
 **Architecture:**
 - **Stage 0** changes one shared helper and the Shot Director's cast step.
@@ -37,7 +37,7 @@
 - **Stored field names stay as they are:** `states`, `descriptor`, `refImages`, `bodyShape`. The UI already says "looks" and "description". Renaming the stored keys would ripple through ~20 files for no user-visible gain. This is a deliberate deviation from the spec's `looks`/`description` names.
 - **Old records are converted when read** (`parseCharacterRecord`). No script rewrites `models/characters/*.json`.
 - **Paid calls need the user's explicit go-ahead in chat:** AWS Rekognition at $0.001/image, and any fal call. Tests use fakes and spend nothing.
-- **Face-check thresholds** live in one constant, `FACE_THRESHOLDS`, and Task 9 calibrates them. Scores are stored on AWS's 0–100 scale.
+- **Face-check thresholds** live in one constant, `FACE_THRESHOLDS`, and Task 10 calibrates them. Scores are stored on AWS's 0–100 scale.
 - **Changing AWS account settings is the user's action:** the Organizations AI-services opt-out and creating keys. Tasks never do it, only document it.
 - **UI copy rules** (for any message a user can see): sentence case, no internal identifiers, plain words.
 
@@ -57,7 +57,8 @@
 | `frontend/app/components/vue-canvas/ShotDirectorSurface.vue` | Cast preview shows what is actually sent |
 | `frontend/server/utils/faceCheck/plan.ts` (new) | Pure: which pictures need a check, against which face; score → verdict; applying results |
 | `frontend/server/utils/faceCheck/rekognition.ts` (new) | Image prep (pad, JPEG, size cap) and `compareFaces()` over an injectable client |
-| `frontend/server/api/characters-local/check.post.ts` (new) | Route: gate, rate-limit, run checks, write the record |
+| `frontend/server/utils/faceCheck/vision.ts` (new) | Anime characters: Claude judges "same character design?" |
+| `frontend/server/api/characters-local/check.post.ts` (new) | Route: gate, rate-limit, pick the checker by style, run checks, write the record |
 | `frontend/scripts/face-check-calibrate.ts` (new) | One-off paid calibration run on Jene and Reva |
 
 ---
@@ -321,11 +322,12 @@ export interface Garment { id: string; filename: string; name: string }
 export interface MadeFrom { face: string; clothesKey: string; bodyKey: string; model: string }
 export interface VoiceRef { kind: 'stock' | 'trained'; id: string; label: string }
 export type CharacterOrigin = 'described' | 'photos' | 'canvas'
+export type CharacterStyle = 'photo' | 'anime'
 ```
 
 - `CharacterPanel` becomes `{ slot: PanelSlot; filename: string; check?: Check | null; madeFrom?: MadeFrom | null }`.
 - `CharacterState` gains `clothes: Garment[]` and `face: FaceRef | null`. `emptyState` sets `clothes: []` and `face: null`.
-- `CharacterRecord` gains `face: FaceRef | null`, `photos: Photo[]`, `voice: VoiceRef | null`, `origin: CharacterOrigin` and `likenessConfirmed: boolean`.
+- `CharacterRecord` gains `face: FaceRef | null`, `photos: Photo[]`, `voice: VoiceRef | null`, `origin: CharacterOrigin`, `likenessConfirmed: boolean`, `style: CharacterStyle` and `linkedFrom: string | null`.
 - In `characterRegistry.ts`, exported: `checkHygiene(v: unknown): Check | null`, `faceRefHygiene(v: unknown): FaceRef | null`, `photoHygiene(v: unknown): Photo | null`, `garmentHygiene(v: unknown): Garment | null`, `voiceHygiene(v: unknown): VoiceRef | null`.
 
 - [ ] **Step 1: Write the failing tests.** Append to `tests/unit/character-registry.unit.spec.ts`, adding the five helpers to its import from `'~~/server/utils/characterRegistry'` (match the file's existing import path style):
@@ -407,6 +409,10 @@ describe('rework field hygiene', () => {
   origin: CharacterOrigin
   /** The creator confirmed the right to use this person's likeness (photo/canvas origins). */
   likenessConfirmed: boolean
+  /** Set at creation, never changes. Photo is checked by AWS, Anime by a vision model. */
+  style: CharacterStyle
+  /** Slug of the character this one was made from ("Make an anime version"), else null. */
+  linkedFrom: string | null
 ```
 
   - In `emptyState`, add `clothes: [], face: null,` to the returned object.
@@ -501,7 +507,7 @@ function madeFromHygiene(v: unknown): MadeFrom | null {
   - Run: `npx vitest run tests/unit/character-registry.unit.spec.ts tests/unit/character-model.unit.spec.ts tests/unit/character-state-patch.unit.spec.ts`
   - Expected: PASS. If an older test builds a `CharacterState` literal and compares it with `toEqual`, add `clothes: [], face: null` to that literal. This is expected churn from the new required fields.
 
-- [ ] **Step 7: Typecheck.** Run the baseline command from Global Constraints. Fix every *new* error that names `CharacterState`, `CharacterRecord` or `CharacterPanel`: add `clothes: [], face: null` to state literals, and the five record fields to record literals such as test fixtures and `characters-local.post.ts`. Task 5 finishes the POST route properly, so for now give it `face: null, photos: [], voice: null, origin: 'photos', likenessConfirmed: false`.
+- [ ] **Step 7: Typecheck.** Run the baseline command from Global Constraints. Fix every *new* error that names `CharacterState`, `CharacterRecord` or `CharacterPanel`: add `clothes: [], face: null` to state literals, and the five record fields to record literals such as test fixtures and `characters-local.post.ts`. Task 5 finishes the POST route properly, so for now give it `face: null, photos: [], voice: null, origin: 'photos', likenessConfirmed: false, style: 'photo', linkedFrom: null`.
 
 - [ ] **Step 8: Commit** the touched files: `feat(characters): record types for face, photos, clothes, checks and made-from stamps`.
 
@@ -519,6 +525,8 @@ function madeFromHygiene(v: unknown): MadeFrom | null {
   - `origin` = the stored value if valid, else `'photos'`. Every existing character was made from photos.
   - `likenessConfirmed` = `r.likenessConfirmed === true`.
   - `voice` = `voiceHygiene(r.voice)`.
+  - `style` = `'anime'` if stored as that, else `'photo'`. Every existing character is photoreal.
+  - `linkedFrom` = the stored value if it is a non-empty string passing `slugifyCharacterName(v) === v`, else `null`.
 - `healRefImages` also drops vanished `photos`, vanished `clothes`, and a vanished record or look `face`, setting it to `null`. All of these count toward `dropped`.
 
 - [ ] **Step 1: Write the failing tests** (append):
@@ -540,11 +548,21 @@ describe('read-time conversion for the rework', () => {
   it('takes the face from the default look\'s cover', () => {
     expect(parseCharacterRecord(era2, 'jene')!.face).toEqual({ filename: 'b.png', approvedAt: '' })
   })
-  it('defaults origin to photos, likeness unconfirmed, no voice', () => {
+  it('defaults origin to photos, likeness unconfirmed, no voice, photo style, not linked', () => {
     const r = parseCharacterRecord(era2, 'jene')!
     expect(r.origin).toBe('photos')
     expect(r.likenessConfirmed).toBe(false)
     expect(r.voice).toBeNull()
+    expect(r.style).toBe('photo')
+    expect(r.linkedFrom).toBeNull()
+  })
+  it('keeps an anime style and a valid link, drops a junk link', () => {
+    const anime = parseCharacterRecord(JSON.stringify({ name: 'Aiko', style: 'anime', linkedFrom: 'reva', states: [] }), 'aiko')!
+    expect(anime.style).toBe('anime')
+    expect(anime.linkedFrom).toBe('reva')
+    const junk = parseCharacterRecord(JSON.stringify({ name: 'X', style: 'watercolour', linkedFrom: '../evil', states: [] }), 'x')!
+    expect(junk.style).toBe('photo')
+    expect(junk.linkedFrom).toBeNull()
   })
   it('keeps stored rework fields as they are', () => {
     const r = parseCharacterRecord(JSON.stringify({
@@ -609,7 +627,7 @@ describe('healRefImages for rework fields', () => {
   const ORIGINS = new Set(['described', 'photos', 'canvas'])
 ```
 
-  **3b.** Add to the returned object: `face, photos, voice: voiceHygiene(r.voice), origin: ORIGINS.has(r.origin as string) ? r.origin as CharacterRecord['origin'] : 'photos', likenessConfirmed: r.likenessConfirmed === true,`.
+  **3b.** Add to the returned object: `face, photos, voice: voiceHygiene(r.voice), origin: ORIGINS.has(r.origin as string) ? r.origin as CharacterRecord['origin'] : 'photos', likenessConfirmed: r.likenessConfirmed === true, style: r.style === 'anime' ? 'anime' : 'photo', linkedFrom: typeof r.linkedFrom === 'string' && r.linkedFrom && slugifyCharacterName(r.linkedFrom) === r.linkedFrom ? r.linkedFrom : null,`.
 
   **3c.** Import `coverFirstRefs` from `'#shared/characters/types'`.
 
@@ -664,7 +682,7 @@ describe('healRefImages for rework fields', () => {
     - `photos: Photo[]`, cleaned by `photoHygiene`.
     - `voice: VoiceRef | null`.
     - `likenessConfirmed: boolean`.
-  - The POST body may carry `origin: CharacterOrigin` (default `'photos'`) and `likenessConfirmed: boolean`.
+  - The POST body may carry `origin: CharacterOrigin` (default `'photos'`), `likenessConfirmed: boolean`, `style: CharacterStyle` (default `'photo'`) and `linkedFrom: string` (kept only if a character with that slug exists).
 
 - [ ] **Step 1: Write the failing tests** (append to `tests/unit/character-state-patch.unit.spec.ts`; reuse the file's existing record-builder helper — check with `sed -n 1,40p`):
 
@@ -735,7 +753,7 @@ If the file has no `makeRecord`-style helper, build the record inline with `pars
 
 - [ ] **Step 6: Implement the POST route.**
 
-  **6a.** Change the body type to `{ name?: string, origin?: string, likenessConfirmed?: boolean }`.
+  **6a.** Change the body type to `{ name?: string, origin?: string, likenessConfirmed?: boolean, style?: string, linkedFrom?: string }`.
 
   **6b.** Build the record with:
 
@@ -743,7 +761,12 @@ If the file has no `makeRecord`-style helper, build the record inline with `pars
     face: null, photos: [], voice: null,
     origin: body?.origin === 'described' || body?.origin === 'canvas' ? body.origin : 'photos',
     likenessConfirmed: body?.likenessConfirmed === true,
+    style: body?.style === 'anime' ? 'anime' : 'photo',
+    linkedFrom: typeof body?.linkedFrom === 'string' && slugifyCharacterName(body.linkedFrom) === body.linkedFrom
+      && await fs.access(path.join(dir, `${body.linkedFrom}.json`)).then(() => true, () => false) ? body.linkedFrom : null,
 ```
+
+  `style` and `linkedFrom` are deliberately not patchable: a character's style never changes.
 
 - [ ] **Step 7: Run the whole character test group and typecheck.**
   - Run: `npx vitest run tests/unit/character-*.unit.spec.ts tests/unit/characters-composable.unit.spec.ts tests/unit/shotdirector-cast.unit.spec.ts`
@@ -767,15 +790,18 @@ If the file has no `makeRecord`-style helper, build the record inline with `pars
 - Produces:
 
 ```ts
-export const FACE_THRESHOLDS = { match: 90, unsure: 70 }   // AWS 0–100 scale; PROVISIONAL — Task 9 calibrates
+export const FACE_THRESHOLDS = { match: 90, unsure: 70 }   // AWS 0–100 scale; PROVISIONAL — Task 10 calibrates
 export type CheckTarget =
   | { kind: 'photo'; filename: string; against: string }
   | { kind: 'panel'; stateId: string; slot: PanelSlot; filename: string; against: string }
 export function faceFor(record: CharacterRecord, stateId: string | null): string | null
 export function planChecks(record: CharacterRecord): CheckTarget[]
 export function verdictFor(score: number | null, t?: { match: number; unsure: number }): CheckVerdict
-export function applyChecks(record: CharacterRecord, results: { target: CheckTarget; score: number | null }[], now: string): CharacterRecord
+export interface CheckResult { target: CheckTarget; score: number | null; verdict?: CheckVerdict; note?: string }
+export function applyChecks(record: CharacterRecord, results: CheckResult[], now: string): CharacterRecord
 ```
+
+A result may carry its own `verdict` and `note`. The vision checker for Anime characters (Task 9) answers with a verdict rather than a score, and `applyChecks` uses it as is.
 
 `planChecks` rules:
 - Body panels (`body-front`, `body-back`) are never face-checked. They are headless by design.
@@ -874,6 +900,12 @@ describe('applyChecks', () => {
     const heavy = out.states.find(s => s.id === 'heavy')!
     expect(heavy.panels[0]!.check).toEqual({ verdict: 'no-face', against: 'heavy-face.png', at: 'now' })
   })
+  it('uses a verdict and note given by the checker instead of a score', () => {
+    const r = rec()
+    const plan = planChecks(r)
+    const out = applyChecks(r, [{ target: plan[0]!, score: null, verdict: 'unsure', note: 'hair is shorter' }], 'now')
+    expect(out.photos.find(p => p.filename === 'blonde.png')!.check).toEqual({ verdict: 'unsure', against: 'face.png', at: 'now', note: 'hair is shorter' })
+  })
 })
 ```
 
@@ -890,9 +922,9 @@ describe('applyChecks', () => {
  * a verdict, and writes results back. No IO — the route and the AWS wrapper
  * live elsewhere, so this unit-tests without a network.
  */
-import type { CharacterRecord, CheckVerdict, PanelSlot } from '#shared/characters/types'
+import type { CharacterRecord, Check, CheckVerdict, PanelSlot } from '#shared/characters/types'
 
-/** AWS Rekognition similarity, 0–100. PROVISIONAL until the calibration run (plan Task 9). */
+/** AWS Rekognition similarity, 0–100. PROVISIONAL until the calibration run (plan Task 10). */
 export const FACE_THRESHOLDS = { match: 90, unsure: 70 }
 
 const HEADLESS: ReadonlySet<PanelSlot> = new Set(['body-front', 'body-back'])
@@ -933,35 +965,37 @@ export function verdictFor(score: number | null, t = FACE_THRESHOLDS): CheckVerd
   return 'different'
 }
 
-export function applyChecks(
-  record: CharacterRecord,
-  results: { target: CheckTarget; score: number | null }[],
-  now: string,
-): CharacterRecord {
-  const mk = (score: number | null, against: string) => {
-    const verdict = verdictFor(score)
-    return score === null ? { verdict, against, at: now } : { verdict, score, against, at: now }
+export interface CheckResult { target: CheckTarget; score: number | null; verdict?: CheckVerdict; note?: string }
+
+export function applyChecks(record: CharacterRecord, results: CheckResult[], now: string): CharacterRecord {
+  type R = { score: number | null; against: string; verdict?: CheckVerdict; note?: string }
+  const mk = (r: R) => {
+    const out: Check = { verdict: r.verdict ?? verdictFor(r.score), against: r.against, at: now }
+    if (r.score !== null) out.score = r.score
+    if (r.note) out.note = r.note
+    return out
   }
-  const photoRes = new Map<string, { score: number | null; against: string }>()
-  const panelRes = new Map<string, { score: number | null; against: string }>()
-  for (const { target, score } of results) {
-    if (target.kind === 'photo') photoRes.set(target.filename, { score, against: target.against })
-    else panelRes.set(`${target.stateId}\u0000${target.slot}`, { score, against: target.against })
+  const photoRes = new Map<string, R>()
+  const panelRes = new Map<string, R>()
+  for (const { target, score, verdict, note } of results) {
+    const r: R = { score, against: target.against, verdict, note }
+    if (target.kind === 'photo') photoRes.set(target.filename, r)
+    else panelRes.set(`${target.stateId}\u0000${target.slot}`, r)
   }
   const recordFace = faceFor(record, null)
   const photos = record.photos.map((p) => {
-    if (recordFace && p.filename === recordFace) return { ...p, check: mk(100, recordFace) }
+    if (recordFace && p.filename === recordFace) return { ...p, check: mk({ score: 100, against: recordFace }) }
     const r = photoRes.get(p.filename)
-    return r ? { ...p, check: mk(r.score, r.against) } : p
+    return r ? { ...p, check: mk(r) } : p
   })
   const states = record.states.map((s) => {
     const face = faceFor(record, s.id)
     return {
       ...s,
       panels: s.panels.map((p) => {
-        if (face && p.filename === face) return { ...p, check: mk(100, face) }
+        if (face && p.filename === face) return { ...p, check: mk({ score: 100, against: face }) }
         const r = panelRes.get(`${s.id}\u0000${p.slot}`)
-        return r ? { ...p, check: mk(r.score, r.against) } : p
+        return r ? { ...p, check: mk(r) } : p
       }),
     }
   })
@@ -1152,7 +1186,8 @@ export async function compareFaces(client: CompareClient, source: Buffer, target
 export const MAX_COMPARES_PER_CALL = 40
 export interface RunDeps {
   readImage(filename: string): Promise<Buffer | null>   // null → file missing
-  compare(source: Buffer, target: Buffer): Promise<number | null>
+  /** A score (Photo/AWS), null for no face, or a verdict + note (Anime/vision). */
+  compare(source: Buffer, target: Buffer): Promise<number | null | { verdict: CheckVerdict; note?: string }>
   now(): string
 }
 export async function runChecks(record: CharacterRecord, deps: RunDeps): Promise<{ record: CharacterRecord; compared: number; skipped: number }>
@@ -1213,6 +1248,10 @@ describe('runChecks', () => {
     expect(compare).toHaveBeenCalledTimes(1)
     expect(out.record.photos.filter(p => p.filename !== 'face.png').every(p => p.check?.verdict === 'no-face' && p.check.note)).toBe(true)
   })
+  it('passes a verdict from the checker straight through', async () => {
+    const out = await runChecks(rec(['a.png']), { readImage: async f => Buffer.from(f), compare: async () => ({ verdict: 'different', note: 'different hair colour' }), now: () => 'n' })
+    expect(out.record.photos.find(p => p.filename === 'a.png')!.check).toEqual({ verdict: 'different', against: 'face.png', at: 'n', note: 'different hair colour' })
+  })
 })
 ```
 
@@ -1224,15 +1263,15 @@ describe('runChecks', () => {
 
 ```ts
 /** Orchestrates one face-check pass over a character, IO injected (route builds the real deps). */
-import type { CharacterRecord } from '#shared/characters/types'
-import { applyChecks, planChecks, type CheckTarget } from './plan'
+import type { CharacterRecord, CheckVerdict } from '#shared/characters/types'
+import { applyChecks, planChecks, type CheckResult, type CheckTarget } from './plan'
 import { FaceCheckError } from './rekognition'
 
 export const MAX_COMPARES_PER_CALL = 40
 
 export interface RunDeps {
   readImage(filename: string): Promise<Buffer | null>
-  compare(source: Buffer, target: Buffer): Promise<number | null>
+  compare(source: Buffer, target: Buffer): Promise<number | null | { verdict: CheckVerdict; note?: string }>
   now(): string
 }
 
@@ -1243,7 +1282,7 @@ export async function runChecks(record: CharacterRecord, deps: RunDeps) {
   const batch = plan.slice(0, MAX_COMPARES_PER_CALL)
   const skipped = plan.length - batch.length
   const faces = new Map<string, Buffer | null | 'no-face'>()
-  const results: { target: CheckTarget; score: number | null }[] = []
+  const results: CheckResult[] = []
   const noSource: CheckTarget[] = []
   let compared = 0
 
@@ -1255,7 +1294,8 @@ export async function runChecks(record: CharacterRecord, deps: RunDeps) {
     const img = await deps.readImage(target.filename)
     if (!img) continue
     try {
-      results.push({ target, score: await deps.compare(face, img) })
+      const r = await deps.compare(face, img)
+      results.push(typeof r === 'object' && r !== null ? { target, score: null, verdict: r.verdict, note: r.note } : { target, score: r })
       compared++
     } catch (e) {
       if (e instanceof FaceCheckError && e.code === 'no-source-face') {
@@ -1303,6 +1343,9 @@ import { deployMode } from '~~/server/utils/deployMode'
 import { assertRateLimit } from '~~/server/lib/rateLimit'
 import { compareFaces, prepareForCompare, rekognitionClient } from '~~/server/utils/faceCheck/rekognition'
 import { runChecks } from '~~/server/utils/faceCheck/run'
+import { judgeSameCharacter } from '~~/server/utils/faceCheck/vision'
+import { resolveAnthropicKey } from '~~/server/lib/agentRequest'
+import { meterAssist } from '~~/server/utils/anthropicMeter'
 
 export default defineEventHandler(async (event) => {
   assertRateLimit(event, 'character-face-check', 10)
@@ -1325,14 +1368,24 @@ export default defineEventHandler(async (event) => {
   }
 
   const cfg = useRuntimeConfig(event)
-  const client = rekognitionClient({ region: cfg.awsRegion as string, accessKeyId: cfg.awsAccessKeyId as string, secretAccessKey: cfg.awsSecretAccessKey as string })
+  // Photo characters: AWS face matching. Anime: face matching doesn't work on
+  // drawn faces, so the vision checker (Task 9) judges the design instead.
+  let compare: (s: Buffer, t: Buffer) => ReturnType<typeof compareFaces> | ReturnType<typeof judgeSameCharacter>
+  if (record.style === 'anime') {
+    const apiKey = resolveAnthropicKey(cfg.anthropicApiKey as string, undefined)
+    compare = async (s, t) => { await meterAssist(event); return judgeSameCharacter(fetch, apiKey, s, t) }
+  }
+  else {
+    const client = rekognitionClient({ region: cfg.awsRegion as string, accessKeyId: cfg.awsAccessKeyId as string, secretAccessKey: cfg.awsSecretAccessKey as string })
+    compare = (s, t) => compareFaces(client, s, t)
+  }
   const result = await runChecks(record, {
     async readImage(filename) {
       if (!validRefFilename(filename)) return null
       try { return await prepareForCompare(await fs.readFile(path.join(inputDir, filename))) }
       catch { return null }
     },
-    compare: (s, t) => compareFaces(client, s, t),
+    compare,
     now: () => new Date().toISOString(),
   })
   const next = { ...result.record, updatedAt: new Date().toISOString() }
@@ -1341,13 +1394,172 @@ export default defineEventHandler(async (event) => {
 })
 ```
 
-  Nitro routes in this repo have no route-level test harness; it's an established pattern, noted in `characters-local.patch.ts`. The logic is covered by `runChecks`. Do not call this route yourself: it costs money. Task 9 runs it with the user's go-ahead.
+  The route imports `judgeSameCharacter` from Task 9. **Do Task 9 before this step,** or add the anime branch in Task 9 Step 6: build the Photo branch here, and leave `record.style === 'anime'` answering `throw createError({ statusCode: 501, message: 'Anime checks come next' })` until then.
+
+  Nitro routes in this repo have no route-level test harness; it's an established pattern, noted in `characters-local.patch.ts`. The logic is covered by `runChecks`. Do not call this route yourself: it costs money. Task 10 runs it with the user's go-ahead.
 
 - [ ] **Step 6: Typecheck.** No new errors naming `faceCheck/*` or `check.post.ts`.
 
 - [ ] **Step 7: Commit** `run.ts`, `check.post.ts` and the test: `feat(characters): face-check route — checks unchecked pictures against the right face`.
 
-### Task 9: Calibrate on Jene and Reva (paid, needs the user)
+### Task 9: The vision checker for Anime characters
+
+Face matching is trained on real faces, so it can't judge a drawn character. For Anime characters, Claude compares the picture with her approved face against a design checklist and answers with a verdict and a short note. The transport copies `server/api/wardrobe/describe.post.ts` exactly: raw `fetch`, model `claude-fable-5`, no `thinking` field (an explicit disable returns 400), `output_config.effort`, a refusal check and `extractModelText`.
+
+**Files:**
+- Create: `frontend/server/utils/faceCheck/vision.ts`
+- Test: `frontend/tests/unit/face-check-vision.unit.spec.ts`
+- Modify: `frontend/server/api/characters-local/check.post.ts` (the anime branch, if Task 8 left the 501)
+
+**Interfaces:**
+- Consumes: `FaceCheckError` (Task 7), the `CheckVerdict` type (Task 3), `extractModelText` from `frontend/server/lib/modelText`.
+- Produces:
+
+```ts
+export const SAME_CHARACTER_PROMPT: string
+export function parseJudgement(text: string): { verdict: CheckVerdict; note?: string }
+export async function judgeSameCharacter(fetchImpl: typeof fetch, apiKey: string, source: Buffer, target: Buffer): Promise<{ verdict: CheckVerdict; note?: string }>
+```
+
+`parseJudgement`:
+- reads the first `{…}` JSON object in the text;
+- maps `verdict` `match` / `unsure` / `different` straight through, and `no-character` → `'no-face'`;
+- keeps `note` trimmed to 80 characters, dropping it when empty;
+- returns `{ verdict: 'unsure', note: 'Could not read the check' }` for anything unparseable. A broken answer must never pass as a match.
+
+`judgeSameCharacter` sends image 1 (the approved face) and image 2 (the picture) as base64 JPEG. Both are already prepared by `prepareForCompare`, so they're JPEG and under 5 MB. It throws `FaceCheckError('aws', …)` on a non-200 or a refusal, reusing the `'aws'` code for "the checker failed", and then parses.
+
+- [ ] **Step 1: Write the failing tests** in `tests/unit/face-check-vision.unit.spec.ts`:
+
+```ts
+import { describe, expect, it } from 'vitest'
+import { judgeSameCharacter, parseJudgement } from '~~/server/utils/faceCheck/vision'
+
+describe('parseJudgement', () => {
+  it('reads a verdict and note', () => {
+    expect(parseJudgement('{"verdict":"different","note":"hair is blue, not black"}'))
+      .toEqual({ verdict: 'different', note: 'hair is blue, not black' })
+  })
+  it('finds the JSON inside extra text and drops an empty note', () => {
+    expect(parseJudgement('Here you go: {"verdict":"match","note":""} done')).toEqual({ verdict: 'match' })
+  })
+  it('maps no-character to no-face', () => {
+    expect(parseJudgement('{"verdict":"no-character"}')).toEqual({ verdict: 'no-face' })
+  })
+  it('never lets a broken answer pass', () => {
+    expect(parseJudgement('I think they look alike')).toEqual({ verdict: 'unsure', note: 'Could not read the check' })
+    expect(parseJudgement('{"verdict":"yes"}')).toEqual({ verdict: 'unsure', note: 'Could not read the check' })
+  })
+})
+
+function fakeFetch(status: number, body: unknown) {
+  const calls: any[] = []
+  const f = (async (url: string, init: any) => {
+    calls.push({ url, body: JSON.parse(init.body) })
+    return new Response(JSON.stringify(body), { status })
+  }) as unknown as typeof fetch
+  return { f, calls }
+}
+
+describe('judgeSameCharacter', () => {
+  const img = Buffer.from('jpeg-bytes')
+  it('sends both images and the prompt to claude-fable-5 without a thinking field', async () => {
+    const { f, calls } = fakeFetch(200, { content: [{ type: 'text', text: '{"verdict":"match"}' }] })
+    expect(await judgeSameCharacter(f, 'k', img, img)).toEqual({ verdict: 'match' })
+    const body = calls[0].body
+    expect(body.model).toBe('claude-fable-5')
+    expect(body.thinking).toBeUndefined()
+    expect(body.messages[0].content.filter((c: any) => c.type === 'image')).toHaveLength(2)
+    expect(body.messages[0].content[0].source.media_type).toBe('image/jpeg')
+  })
+  it('throws a FaceCheckError on an API error or a refusal', async () => {
+    await expect(judgeSameCharacter(fakeFetch(500, { error: { message: 'x' } }).f, 'k', img, img)).rejects.toMatchObject({ code: 'aws' })
+    await expect(judgeSameCharacter(fakeFetch(200, { stop_reason: 'refusal', content: [] }).f, 'k', img, img)).rejects.toMatchObject({ code: 'aws' })
+  })
+})
+```
+
+Before relying on `extractModelText`, check what it reads: `sed -n 1,40p frontend/server/lib/modelText.ts`. If it expects a different response shape, adjust the fake body, not the code.
+
+- [ ] **Step 2: Run the tests to check they fail.**
+  - Run: `cd frontend && npx vitest run tests/unit/face-check-vision.unit.spec.ts`
+  - Expected: FAIL (module not found).
+
+- [ ] **Step 3: Implement** `server/utils/faceCheck/vision.ts`:
+
+```ts
+/**
+ * The Anime character checker (spec: Checks). Face matching is trained on
+ * real faces, so for drawn characters Claude judges "same character design?"
+ * against a checklist. Fictional drawn characters only — never used for
+ * Photo characters (identifying real people is outside the usage policy).
+ * Transport copies server/api/wardrobe/describe.post.ts.
+ */
+import type { CheckVerdict } from '#shared/characters/types'
+import { extractModelText } from '../../lib/modelText'
+import { FaceCheckError } from './rekognition'
+
+export const SAME_CHARACTER_PROMPT = [
+  'Image 1 is the approved design of a fictional drawn (anime-style) character. Image 2 is a new picture.',
+  'Is the character in image 2 the same character design as image 1?',
+  'Compare only: face shape, eye style and colour, hair style and colour, distinctive marks, body proportions.',
+  'Ignore pose, expression, camera angle, lighting, background and clothing.',
+  'Reply with JSON only: {"verdict":"match"|"unsure"|"different"|"no-character","note":"<the main difference in under 10 words, or empty>"}',
+].join('\n')
+
+const VERDICTS: Record<string, CheckVerdict> = { match: 'match', unsure: 'unsure', different: 'different', 'no-character': 'no-face' }
+const UNREADABLE = { verdict: 'unsure' as const, note: 'Could not read the check' }
+
+export function parseJudgement(text: string): { verdict: CheckVerdict; note?: string } {
+  const m = /\{[\s\S]*?\}/.exec(text)
+  if (!m) return UNREADABLE
+  let o: any
+  try { o = JSON.parse(m[0]) } catch { return UNREADABLE }
+  const verdict = VERDICTS[o?.verdict]
+  if (!verdict) return UNREADABLE
+  const note = typeof o.note === 'string' ? o.note.trim().slice(0, 80) : ''
+  return note ? { verdict, note } : { verdict }
+}
+
+export async function judgeSameCharacter(fetchImpl: typeof fetch, apiKey: string, source: Buffer, target: Buffer) {
+  const img = (b: Buffer) => ({ type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: b.toString('base64') } })
+  let res: Response
+  try {
+    res = await fetchImpl('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
+      body: JSON.stringify({
+        model: 'claude-fable-5', // thinking is always on for Fable — do NOT send a `thinking` field
+        max_tokens: 256,
+        output_config: { effort: 'low' },
+        messages: [{ role: 'user', content: [img(source), img(target), { type: 'text', text: SAME_CHARACTER_PROMPT }] }],
+      }),
+    })
+  } catch (e: any) {
+    throw new FaceCheckError('aws', `Character check failed: ${e?.message ?? 'network error'}`)
+  }
+  if (!res.ok) throw new FaceCheckError('aws', `Character check failed (${res.status})`)
+  const data = await res.json() as { stop_reason?: string }
+  if (data.stop_reason === 'refusal') throw new FaceCheckError('aws', 'Character check was declined')
+  return parseJudgement(extractModelText(data))
+}
+```
+
+- [ ] **Step 4: Run the tests to check they pass.**
+  - Run: `npx vitest run tests/unit/face-check-vision.unit.spec.ts tests/unit/face-check-run.unit.spec.ts`
+  - Expected: PASS.
+
+- [ ] **Step 5: Check the route's anime branch.** It should match Task 8 Step 5. If Task 8 left the 501 placeholder, replace it now with the `record.style === 'anime'` branch shown there, which builds `compare` from `judgeSameCharacter`. Confirm the import paths exist:
+  - `grep -n "export function resolveAnthropicKey" frontend/server/lib/agentRequest.ts`
+  - `grep -n "export async function meterAssist" frontend/server/utils/anthropicMeter.ts`
+
+  Typecheck: no new errors naming `faceCheck/*` or `check.post.ts`.
+
+- [ ] **Step 6: Record what's owed.** No anime character exists yet, so there's nothing real to check. Add to the report: "Anime checker live check owed: after stage 6 (creation) makes the first anime character, run one check on a matching picture and on a different anime character, about $0.02."
+
+- [ ] **Step 7: Commit** `vision.ts`, its test and the route: `feat(characters): vision checker for anime characters`.
+
+### Task 10: Calibrate on Jene and Reva (paid, needs the user)
 
 This task runs the real checker once, costing about $0.02, and sets `FACE_THRESHOLDS` from real scores. **Stop and ask the user before Step 3.**
 
@@ -1366,7 +1578,7 @@ This task runs the real checker once, costing about $0.02, and sets `FACE_THRESH
 
 ```ts
 /**
- * One-off calibration for the character face checker (plan Task 9). Compares
+ * One-off calibration for the character face checker (plan Task 10). Compares
  * known same-person and different-person pairs from the real input dir and
  * prints AWS similarity scores. Costs one CompareFaces call per pair
  * ($0.001 each). Reads NUXT_AWS_* from the environment.
@@ -1419,7 +1631,7 @@ for (const [label, expect, a, b] of PAIRS) {
 
 - [ ] **Step 6: Commit** the script, `plan.ts` and the spec: `feat(characters): calibrate face-check thresholds on Jene and Reva`.
 
-### Task 10: Record the state
+### Task 11: Record the state
 
 **Files:**
 - Modify: `docs/superpowers/specs/2026-09-26-characters-rework-design.md` (only if the build deviated from its stages)
@@ -1428,7 +1640,7 @@ for (const [label, expect, a, b] of PAIRS) {
 
 - [ ] **Step 1: Check the spec's build stages still match what was built.** Veo references and per-model sending are now stage 3 (moved up on 2026-09-26); stage 0 is the Seedance fix only. Adjust only if the build deviated.
 
-- [ ] **Step 2: Add a STATE.md entry.** Write one short plain-language paragraph under the character-system section: stages 0–2 built; what changed for Seedance; the new record fields; the face checker; the calibration numbers, or "owed" if Task 9 hasn't run.
+- [ ] **Step 2: Add a STATE.md entry.** Write one short plain-language paragraph under the character-system section: stages 0–2 built; what changed for Seedance; the new record fields; the face checker; the calibration numbers, or "owed" if Task 10 hasn't run.
 
 - [ ] **Step 3: Commit** both docs through the private index: `docs(characters): stages 0–2 state`.
 
@@ -1443,13 +1655,14 @@ for (const [label, expect, a, b] of PAIRS) {
 - **Spec coverage:**
   - The spec's stages 0 (Seedance), 1 and 2 are all covered. Veo and per-model sending are stage 3 (moved up on the user's call), which gets its own plan next.
   - The consent step is enforced server-side in hosted mode (Task 8). The consent *UI* belongs to stage 5, creation.
-  - The AWS opt-out is the user's action (Task 9, Step 1).
+  - The AWS opt-out is the user's action (Task 10, Step 1).
   - Body presets and the voice picker UI are stage 4. The `voice` field is stored now.
 - **Types used across tasks:**
   - `Check.against` (Task 3) is read by `planChecks`/`applyChecks` (Task 6) and `runChecks` (Task 8).
   - `CheckTarget` (Task 6) is used by `runChecks` (Task 8).
   - `FaceCheckError('no-source-face')` (Task 7) is caught in Task 8.
   - `videoIdentityRefs` (Task 1) is used in Task 2.
+- **Style:** Photo/Anime is stored from stage 1 (Task 3–5) and picks the checker in stage 2 (Tasks 8–9). The anime sheet wording is stage 4 and the style choice at creation is stage 6.
 - **Known judgement calls:**
   - The stored key stays `states`.
   - `origin` isn't patchable.
