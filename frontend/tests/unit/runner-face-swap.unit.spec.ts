@@ -17,7 +17,10 @@ import { NO_FAMILIES, RUNNER_FAMILIES, type RunnerFamily } from '#shared/runner/
 import { RUNNER_NODE_RULES, classUpgradeOn, runnerTakesNode } from '#shared/runner/eligibility'
 import { EDIT_RATES, editMaxUsd } from '#shared/pricing/editRates'
 import { editCalls } from '#shared/pricing/editSettings'
-import { FACE_SWAP_NEEDS_GENDER, faceSwapGender, faceSwapWorkflow, EASEL_FACE_SWAP_APP } from '#shared/runner/faceSwap'
+import {
+  FACE_SWAP_NEEDS_GENDER, faceSwapGender, faceSwapWorkflow, EASEL_FACE_SWAP_APP,
+  FACE_SWAP_GENDER_OPTIONS, FACE_SWAP_GENDER_DEFAULT, FACE_SWAP_HAIR_OPTIONS, FACE_SWAP_HAIR_DEFAULT,
+} from '#shared/runner/faceSwap'
 import { easelFaceSwap } from '~~/server/runner/generators/easelFaceSwap'
 import { RUNNER_ROUTES } from '~~/server/runner/generators/twins'
 import { requestProblems } from '~~/server/runner/requestRules'
@@ -40,7 +43,7 @@ describe('Face swap on Easel (face-swap)', () => {
   })
 
   it('sends face, target, gender and hair choice, fitting the schema', () => {
-    const call = easelFaceSwap({ face: 'https://x/f.png', target: 'https://x/t.png', inputs: { gender: 'female', keep_hair_from: 'target' } })
+    const call = easelFaceSwap({ face: 'https://x/f.png', target: 'https://x/t.png', inputs: { gender: 'Female', keep_hair_from: 'The picture' } })
     expect(call).toEqual({
       provider: 'fal',
       endpoint: 'easel-ai/advanced-face-swap',
@@ -56,19 +59,25 @@ describe('Face swap on Easel (face-swap)', () => {
   })
 
   it('maps "keep hair from face photo" to user_hair', () => {
-    expect(faceSwapWorkflow({ keep_hair_from: 'face' })).toBe('user_hair')
+    expect(FACE_SWAP_HAIR_OPTIONS).toEqual(['The picture', 'The face photo'])
+    expect(FACE_SWAP_HAIR_DEFAULT).toBe('The picture')
+    expect(faceSwapWorkflow({ keep_hair_from: 'The face photo' })).toBe('user_hair')
+    expect(faceSwapWorkflow({ keep_hair_from: FACE_SWAP_HAIR_DEFAULT })).toBe('target_hair')
     expect(faceSwapWorkflow({})).toBe('target_hair')
   })
 
   it('has no gender until one is picked', () => {
+    expect(FACE_SWAP_GENDER_OPTIONS).toEqual(['Not chosen', 'Male', 'Female', 'Non-binary'])
+    expect(FACE_SWAP_GENDER_DEFAULT).toBe('Not chosen')
+    expect(faceSwapGender({ gender: FACE_SWAP_GENDER_DEFAULT })).toBeNull()
     expect(faceSwapGender({ gender: '' })).toBeNull()
     expect(faceSwapGender({ gender: 'robot' })).toBeNull()
-    expect(faceSwapGender({ gender: 'non-binary' })).toBe('non-binary')
+    expect(faceSwapGender({ gender: 'Non-binary' })).toBe('non-binary')
     expect(() => easelFaceSwap({ face: 'a', target: 'b', inputs: {} })).toThrow(FACE_SWAP_NEEDS_GENDER)
   })
 
   it('is priced flat at $0.05 at cost', () => {
-    const c = editCalls('FaceSwap', { gender: 'male' })
+    const c = editCalls('FaceSwap', { gender: 'Male' })
     if ('refused' in c) throw new Error(c.refused)
     expect(c.calls[0]!.endpoint).toBe(EASEL_FACE_SWAP_APP)
     expect(EDIT_RATES[EASEL_FACE_SWAP_APP]).toMatchObject({ unit: 'per_image', usd: 0.05, service: 'fal' })
@@ -83,7 +92,7 @@ describe('Face swap on Easel (face-swap)', () => {
     const prompt = {
       1: { class_type: 'LoadImage', inputs: { image: 'a.png' } },
       2: { class_type: 'LoadImage', inputs: { image: 'b.png' } },
-      3: { class_type: 'FaceSwap', inputs: { source_face: ['1', 0], target_frames: ['2', 0], gender: 'female', keep_hair_from: 'target' } },
+      3: { class_type: 'FaceSwap', inputs: { source_face: ['1', 0], target_frames: ['2', 0], gender: 'Female', keep_hair_from: 'The picture' } },
     }
     expect(runnerTakesNode(prompt, '3', new Set(['cards', 'face-swap']))).toBe(true)
     expect(runnerTakesNode(prompt, '3', new Set(['cards']))).toBe(false)
@@ -93,13 +102,13 @@ describe('Face swap on Easel (face-swap)', () => {
     const prompt = {
       1: { class_type: 'LoadImage', inputs: { image: 'a.png' } },
       2: { class_type: 'LoadImage', inputs: { image: 'b.png' } },
-      3: { class_type: 'FaceSwap', inputs: { source_face: ['1', 0], target_frames: ['2', 0], gender: '', keep_hair_from: 'target' } },
+      3: { class_type: 'FaceSwap', inputs: { source_face: ['1', 0], target_frames: ['2', 0], gender: FACE_SWAP_GENDER_DEFAULT, keep_hair_from: 'The picture' } },
     }
     const problems = requestProblems(prompt, { runner: true })
     expect(problems).toContainEqual({ nodeId: '3', classType: 'FaceSwap', input: 'gender', message: FACE_SWAP_NEEDS_GENDER })
     const linked = {
       ...prompt,
-      3: { class_type: 'FaceSwap', inputs: { source_face: ['1', 0], target_frames: ['2', 0], gender: ['1', 0], keep_hair_from: 'target' } },
+      3: { class_type: 'FaceSwap', inputs: { source_face: ['1', 0], target_frames: ['2', 0], gender: ['1', 0], keep_hair_from: 'The picture' } },
     }
     expect(requestProblems(linked, { runner: true })).toEqual([])
   })
@@ -114,7 +123,7 @@ describe('the runner engine', () => {
   const take: ApiPrompt = {
     11: { class_type: 'Image', inputs: { image: 'face.png' } },
     12: { class_type: 'Image', inputs: { image: 'target.png' } },
-    1: { class_type: 'FaceSwap', inputs: { source_face: ['11', 0], target_frames: ['12', 0], gender: 'female', keep_hair_from: 'face' } },
+    1: { class_type: 'FaceSwap', inputs: { source_face: ['11', 0], target_frames: ['12', 0], gender: 'Female', keep_hair_from: 'The face photo' } },
     2: { class_type: 'Image', inputs: { image: '', export: false, images: ['1', 0], batch_index: -1 } },
   }
   const kit = (families: ReadonlySet<RunnerFamily>) => {

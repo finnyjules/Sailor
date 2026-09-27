@@ -2,24 +2,49 @@
  * Face swap (FaceSwap) on Easel's advanced face swap, fal (family face-swap).
  * Replaces InsightFace inswapper (non-commercial). The node's settings as the
  * request sends them; one reading for the builder and the pre-hold check.
+ *
+ * Fix round 1 (controller ruling, sentence-case / no-identifiers): the
+ * node's own combo values are human-readable sentence case, the same as
+ * this repo's Python combos commonly are ('Square', 'Portrait') — a canvas
+ * combo renders its stored value raw, with no per-option label mechanism
+ * (see the report). Easel's own lowercase enums are read off these.
+ *
  * Pure; relative imports only.
  */
 type Inputs = Record<string, unknown>
 
 export const EASEL_FACE_SWAP_APP = 'easel-ai/advanced-face-swap'
-export const FACE_SWAP_GENDERS = ['male', 'female', 'non-binary'] as const
-export type FaceSwapGender = typeof FACE_SWAP_GENDERS[number]
-/** The node's "Keep hair from" → Easel's workflow_type. */
+
+/** The node's Gender combo, sentence case. */
+export const FACE_SWAP_GENDER_OPTIONS = ['Not chosen', 'Male', 'Female', 'Non-binary'] as const
+export type FaceSwapGenderOption = typeof FACE_SWAP_GENDER_OPTIONS[number]
+export const FACE_SWAP_GENDER_DEFAULT: FaceSwapGenderOption = 'Not chosen'
+
+export type FaceSwapGender = 'male' | 'female' | 'non-binary'
+/** The node's Gender → Easel's gender_0. */
+const FACE_SWAP_GENDER_TO_EASEL: Readonly<Record<string, FaceSwapGender>> = {
+  Male: 'male', Female: 'female', 'Non-binary': 'non-binary',
+}
+
+/** The node's Keep hair from combo, sentence case. */
+export const FACE_SWAP_HAIR_OPTIONS = ['The picture', 'The face photo'] as const
+export type FaceSwapHairOption = typeof FACE_SWAP_HAIR_OPTIONS[number]
+export const FACE_SWAP_HAIR_DEFAULT: FaceSwapHairOption = 'The picture'
+
+/** The node's Keep hair from → Easel's workflow_type. */
 export const FACE_SWAP_HAIR = { target: 'target_hair', face: 'user_hair' } as const
 
 export const FACE_SWAP_NEEDS_GENDER = 'Pick the face’s gender on the node.'
 export const FACE_SWAP_ONE_PICTURE = 'Face swap takes one picture. For video, use Person swap (video).'
 
+/** Easel's gender_0, or null: nothing picked yet ("Not chosen"), or anything unreadable. */
 export function faceSwapGender(inputs: Inputs): FaceSwapGender | null {
   const g = inputs.gender
-  return typeof g === 'string' && (FACE_SWAP_GENDERS as readonly string[]).includes(g) ? g as FaceSwapGender : null
+  return typeof g === 'string' && Object.prototype.hasOwnProperty.call(FACE_SWAP_GENDER_TO_EASEL, g)
+    ? FACE_SWAP_GENDER_TO_EASEL[g]!
+    : null
 }
 
 export function faceSwapWorkflow(inputs: Inputs): 'target_hair' | 'user_hair' {
-  return inputs.keep_hair_from === 'face' ? FACE_SWAP_HAIR.face : FACE_SWAP_HAIR.target
+  return inputs.keep_hair_from === 'The face photo' ? FACE_SWAP_HAIR.face : FACE_SWAP_HAIR.target
 }

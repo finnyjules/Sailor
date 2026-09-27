@@ -24,9 +24,9 @@ class FaceSwapNode(IO.ComfyNode):
             inputs=[
                 IO.Image.Input("source_face", tooltip="A photo of the face to use. A clear, well-lit face works best."),
                 IO.Image.Input("target_frames", tooltip="The picture to put the face in."),
-                IO.Combo.Input("gender", options=["", "male", "female", "non-binary"], default="",
+                IO.Combo.Input("gender", options=["Not chosen", "Male", "Female", "Non-binary"], default="Not chosen",
                                tooltip="The face's gender. Easel needs it to fit the face well."),
-                IO.Combo.Input("keep_hair_from", options=["target", "face"], default="target",
+                IO.Combo.Input("keep_hair_from", options=["The picture", "The face photo"], default="The picture",
                                tooltip="Whose hair to keep: the picture's or the face photo's."),
             ],
             outputs=[IO.Image.Output(display_name="image")],
