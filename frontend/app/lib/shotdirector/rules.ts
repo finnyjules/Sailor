@@ -19,6 +19,16 @@ export interface RefCaps {
   maxRefVideos: number
   maxRefAudios: number
   supportsFirstLastFrame: boolean
+  /** the model's display name, for plain-words issue copy (never an id). */
+  label: string
+  /** how cast references reach the model — needed to tell whether a first frame silently drops the cast. */
+  castMode: 'images' | 'elements'
+  /** must a first frame always be supplied. */
+  requiresFirstFrame: boolean
+  /** can this model take a last/end frame at all. */
+  supportsLastFrame: boolean
+  /** can cast references and a first frame be sent together. */
+  refsWithFirstFrame: boolean
 }
 
 function countKind(sheet: ShotSheet, kind: RefKind): number {
@@ -42,6 +52,22 @@ export function validateShotSheet(sheet: ShotSheet, caps: RefCaps): ValidationIs
   }
   if (sheet.mode === 'firstLastFrame' && !caps.supportsFirstLastFrame) {
     err('firstlast-unsupported', 'This model does not support first/last-frame input.')
+  }
+  if (caps.requiresFirstFrame && !sheet.firstFrame) {
+    err('first-frame-required', `${caps.label} needs a first frame. Make one from the cast or upload one.`)
+  }
+  if (sheet.lastFrame && !caps.supportsLastFrame) {
+    err('last-frame-unsupported', `${caps.label} can't use a last frame.`)
+  }
+  if (sheet.firstFrame && !caps.refsWithFirstFrame) {
+    const hasImageRefs = sheet.references.some(r => r.kind === 'image')
+    const hasCastInImagesMode = sheet.cast.length > 0 && caps.castMode === 'images'
+    if (hasImageRefs || hasCastInImagesMode) {
+      issues.push({
+        level: 'warning', code: 'first-frame-drops-refs',
+        message: `${caps.label} uses either the first frame or reference pictures, not both. Characters are left out while a first frame is set.`,
+      })
+    }
   }
 
   // Audio references need at least one visual reference.

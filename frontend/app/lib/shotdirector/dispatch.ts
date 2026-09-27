@@ -6,6 +6,7 @@
  * rides in the model_options JSON, which reaches the Python builder as `adv`.
  */
 import type { CompileResult } from '~/lib/shotdirector/compile'
+import { clampDuration, SEEDANCE_PROFILE, type ModelProfile } from '~/lib/shotdirector/profiles'
 import type { ShotSheet } from '~/lib/shotdirector/types'
 
 export interface FilmShotWidgetPatch {
@@ -21,7 +22,7 @@ export interface FilmShotWidgetPatch {
  *  everything else goes into model_options. */
 const WIDGET_NATIVE = new Set(['prompt', 'duration', 'aspect_ratio', 'seed'])
 
-export function buildFilmShotPatch(sheet: ShotSheet, result: CompileResult): FilmShotWidgetPatch {
+export function buildFilmShotPatch(sheet: ShotSheet, result: CompileResult, profile: ModelProfile = SEEDANCE_PROFILE): FilmShotWidgetPatch {
   const extras: Record<string, unknown> = {}
   for (const [key, value] of Object.entries(result.input)) {
     if (!WIDGET_NATIVE.has(key)) extras[key] = value
@@ -39,17 +40,18 @@ export function buildFilmShotPatch(sheet: ShotSheet, result: CompileResult): Fil
   // non-member value to the default "5", so a raw number here (e.g. 10)
   // never matches and always regresses to 5s clips. durationS === -1 also
   // means "Auto" in the surface, a legal sheet state with no numeric
-  // meaning — map it to the profile default (5) until intelligent duration
-  // selection is supported. Same String()-of-combo-value pattern as
-  // snapWidgetsToModel in lib/videoModelAdapt.ts.
-  const durationS = sheet.format.durationS
+  // meaning. clampDuration maps it (and any length the model doesn't accept)
+  // to the profile's nearest allowed length — Seedance's is unclamped and
+  // still falls back to 5, same as before. Same String()-of-combo-value
+  // pattern as snapWidgetsToModel in lib/videoModelAdapt.ts.
+  const durationS = clampDuration(profile, sheet.format.durationS)
   return {
     prompt: result.prompt,
-    model: 'seedance-2.0',
+    model: profile.id,
     // In firstLastFrame mode the compiled input has no aspect_ratio (image
     // dims win); send the sheet's anyway — the builder ignores it then.
     aspect_ratio: sheet.format.aspectRatio,
-    duration: String(durationS <= 0 ? 5 : durationS),
+    duration: String(durationS),
     seed: sheet.format.seed && sheet.format.seed > 0 ? sheet.format.seed : 0,
     model_options: JSON.stringify(extras),
   }

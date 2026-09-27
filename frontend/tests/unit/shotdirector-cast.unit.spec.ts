@@ -2,8 +2,13 @@ import { describe, expect, it } from 'vitest'
 import { CAST_MAX, castClause, materializeCast } from '~/lib/shotdirector/cast'
 import { compileShot } from '~/lib/shotdirector/compile'
 import { hydrateShotSheet } from '~/lib/shotdirector/hydrate'
-import { SEEDANCE_PROFILE } from '~/lib/shotdirector/profiles'
+import { KLING_V3_PROFILE, SEEDANCE_PROFILE, VEO_31_PROFILE } from '~/lib/shotdirector/profiles'
 import { createDefaultShotSheet } from '~/lib/shotdirector/types'
+import type { IdentityRefSet } from '#shared/characters/types'
+
+const refSet = (over: Partial<IdentityRefSet> = {}): IdentityRefSet => ({
+  name: 'x', front: null, portrait: null, bodyFront: null, bodyBack: null, ...over,
+})
 
 const U = (n: string) => `/view?filename=${n}&type=input`
 
@@ -259,5 +264,110 @@ describe('compiled prompt noise suppression', () => {
     s.action = 'stands in fog'
     s.audio.dialogue = [{ speaker: '', line: '' }, { speaker: 'Vera', line: '' }]
     expect(compileShot(s, SEEDANCE_PROFILE).prompt).not.toContain('""')
+  })
+})
+
+describe('materializeCast — elements mode (Kling)', () => {
+  it('builds bundles in cast order and adds NO references to the sheet', () => {
+    const s = sheetWithCast()
+    s.references = [{ kind: 'image', slot: 1, src: U('manual.png'), role: 'style-transfer' }]
+    const resolved = {
+      reva: refSet({ front: U('reva-front'), portrait: U('reva-portrait'), bodyFront: U('reva-body-front'), bodyBack: U('reva-body-back') }),
+      marcus: refSet({ front: U('marcus-front'), portrait: U('marcus-portrait') }),
+    }
+    const { sheet, bundles, issues } = materializeCast(s, resolved, KLING_V3_PROFILE)
+    expect(bundles).toEqual([
+      { slug: 'reva', front: U('reva-front'), refs: [U('reva-portrait'), U('reva-body-front'), U('reva-body-back')] },
+      { slug: 'marcus', front: U('marcus-front'), refs: [U('marcus-portrait')] },
+    ])
+    // Only the manual ref survives in sheet.references — no cast images added.
+    expect(sheet.references).toEqual([{ kind: 'image', slot: 1, src: U('manual.png'), role: 'style-transfer' }])
+    expect(issues).toEqual([])
+  })
+
+  it('caps a bundle\'s refs at castRefCap - 1 and never duplicates the front picture', () => {
+    const s = createDefaultShotSheet()
+    s.cast = [{ slug: 'reva', name: 'Reva', via: 'picker', stateId: null }]
+    const resolved = { reva: refSet({ front: U('f'), portrait: U('f'), bodyFront: U('bf'), bodyBack: U('bb') }) }
+    const { bundles } = materializeCast(s, resolved, KLING_V3_PROFILE)
+    // portrait === front is filtered out; castRefCap 4 -> at most 3 other refs, here 2 remain (bodyFront, bodyBack)
+    expect(bundles).toEqual([{ slug: 'reva', front: U('f'), refs: [U('bf'), U('bb')] }])
+  })
+
+  it('raises cast-member-no-refs for a member with no front, and still bundles the rest', () => {
+    const s = sheetWithCast()
+    const resolved = {
+      reva: refSet(),
+      marcus: refSet({ front: U('marcus-front') }),
+    }
+    const { bundles, issues } = materializeCast(s, resolved, KLING_V3_PROFILE)
+    expect(bundles).toEqual([{ slug: 'marcus', front: U('marcus-front'), refs: [] }])
+    const err = issues.find(i => i.code === 'cast-member-no-refs')
+    expect(err).toBeDefined()
+    expect(err!.message).toContain('Reva')
+  })
+
+  it('an empty cast yields no bundles and preserves manual references', () => {
+    const s = createDefaultShotSheet()
+    s.references = [{ kind: 'image', slot: 1, src: U('manual.png'), role: 'style-transfer' }]
+    const { sheet, bundles, issues } = materializeCast(s, {}, KLING_V3_PROFILE)
+    expect(bundles).toEqual([])
+    expect(issues).toEqual([])
+    expect(sheet.references).toEqual([{ kind: 'image', slot: 1, src: U('manual.png'), role: 'style-transfer' }])
+  })
+})
+
+describe('castClause — elements mode (Kling)', () => {
+  it('tags members @Element1, @Element2… in bundle order', () => {
+    const s = sheetWithCast()
+    const { bundles } = materializeCast(s, {
+      reva: refSet({ front: U('reva-front') }),
+      marcus: refSet({ front: U('marcus-front') }),
+    }, KLING_V3_PROFILE)
+    expect(castClause(s, KLING_V3_PROFILE, undefined, bundles)).toBe('Characters: Reva @Element1; Marcus @Element2.')
+  })
+
+  it('splices the descriptor in, matching the images-mode clause style', () => {
+    const s = sheetWithCast()
+    const { bundles } = materializeCast(s, {
+      reva: refSet({ front: U('reva-front') }),
+      marcus: refSet({ front: U('marcus-front') }),
+    }, KLING_V3_PROFILE)
+    expect(castClause(s, KLING_V3_PROFILE, { reva: 'soaked navy jacket' }, bundles))
+      .toBe('Characters: Reva (soaked navy jacket) @Element1; Marcus @Element2.')
+  })
+
+  it('is empty with no bundles', () => {
+    expect(castClause(createDefaultShotSheet(), KLING_V3_PROFILE)).toBe('')
+    expect(castClause(sheetWithCast(), KLING_V3_PROFILE, undefined, [])).toBe('')
+  })
+})
+
+describe('materializeCast — images mode with IdentityRefSet (Veo, castRefCap 3)', () => {
+  it('sends up to 3 pictures per member (front, portrait, bodyFront)', () => {
+    const s = sheetWithCast()
+    const resolved = {
+      reva: refSet({ front: U('reva-front'), portrait: U('reva-portrait'), bodyFront: U('reva-body-front'), bodyBack: U('reva-body-back') }),
+      marcus: refSet({ front: U('marcus-front') }),
+    }
+    const { sheet } = materializeCast(s, resolved, VEO_31_PROFILE)
+    const imgs = sheet.references.filter(r => r.kind === 'image')
+    expect(imgs.map(r => [r.slot, r.src, r.castSlug])).toEqual([
+      [1, U('reva-front'), 'reva'], [2, U('reva-portrait'), 'reva'], [3, U('reva-body-front'), 'reva'],
+      [4, U('marcus-front'), 'marcus'],
+    ])
+  })
+
+  it('warns "remove some manual references" when 2 members at 3 refs each squeeze past maxRefImages (3)', () => {
+    const s = sheetWithCast()
+    const resolved = {
+      reva: refSet({ front: U('rf'), portrait: U('rp'), bodyFront: U('rb') }),
+      marcus: refSet({ front: U('mf'), portrait: U('mp'), bodyFront: U('mb') }),
+    }
+    const { issues } = materializeCast(s, resolved, VEO_31_PROFILE)
+    const warning = issues.find(i => i.level === 'warning' && i.code === 'cast-refs-squeezed')
+    expect(warning).toBeDefined()
+    expect(warning!.message).toContain('remove some manual references')
+    expect(warning!.message).toContain('3-image budget')
   })
 })

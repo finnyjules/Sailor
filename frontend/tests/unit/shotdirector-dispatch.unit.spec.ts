@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { compileShot } from '~/lib/shotdirector/compile'
 import { buildFilmShotPatch, findShotTarget } from '~/lib/shotdirector/dispatch'
-import { SEEDANCE_PROFILE } from '~/lib/shotdirector/profiles'
+import { KLING_V3_PROFILE, SEEDANCE_PROFILE, VEO_31_PROFILE } from '~/lib/shotdirector/profiles'
 import { createDefaultShotSheet } from '~/lib/shotdirector/types'
 
 const DATA_URL = 'data:image/png;base64,x'
@@ -71,6 +71,46 @@ describe('buildFilmShotPatch', () => {
     const patch = buildFilmShotPatch(sheet, compileShot(sheet, SEEDANCE_PROFILE))
     expect(patch.seed).toBe(0)
     expect(JSON.parse(patch.model_options)).not.toHaveProperty('seed')
+  })
+
+  it('defaults to Seedance when no profile is passed (back-compat for existing callers)', () => {
+    const sheet = referenceSheet()
+    const patch = buildFilmShotPatch(sheet, compileShot(sheet, SEEDANCE_PROFILE))
+    expect(patch.model).toBe('seedance-2.0')
+  })
+
+  it('sets the model id from the chosen profile', () => {
+    const sheet = createDefaultShotSheet()
+    sheet.subject = 's'
+    sheet.action = 'a'
+    sheet.mode = 'firstLastFrame'
+    sheet.firstFrame = DATA_URL
+    sheet.format.durationS = 8
+    const patch = buildFilmShotPatch(sheet, compileShot(sheet, VEO_31_PROFILE), VEO_31_PROFILE)
+    expect(patch.model).toBe('veo-3.1')
+  })
+
+  it('clamps the duration widget to the profile\'s allowed lengths (Kling: 5/10/15)', () => {
+    const sheet = createDefaultShotSheet()
+    sheet.subject = 's'
+    sheet.action = 'a'
+    sheet.mode = 'firstLastFrame'
+    sheet.firstFrame = DATA_URL
+    sheet.format.durationS = 7
+    const patch = buildFilmShotPatch(sheet, compileShot(sheet, KLING_V3_PROFILE), KLING_V3_PROFILE)
+    expect(patch.model).toBe('kling-v3')
+    expect(patch.duration).toBe('5')
+  })
+
+  it('maps "Auto" (-1) to the profile\'s first allowed length for a clamped model', () => {
+    const sheet = createDefaultShotSheet()
+    sheet.subject = 's'
+    sheet.action = 'a'
+    sheet.mode = 'firstLastFrame'
+    sheet.firstFrame = DATA_URL
+    sheet.format.durationS = -1
+    const patch = buildFilmShotPatch(sheet, compileShot(sheet, KLING_V3_PROFILE), KLING_V3_PROFILE)
+    expect(patch.duration).toBe('5')
   })
 })
 

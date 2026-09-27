@@ -9,7 +9,7 @@ import {
   type Beat, type ShotSheet,
 } from './types'
 import { validateShotSheet, type RefCaps, type ValidationIssue } from './rules'
-import type { ModelInput, ModelProfile } from './profiles'
+import type { CastBundle, ModelInput, ModelProfile } from './profiles'
 import { castClause } from './cast'
 
 export interface CompileResult {
@@ -110,15 +110,24 @@ export function buildPrompt(sheet: ShotSheet, profile: ModelProfile): string {
   return segments.join(' ')
 }
 
-export function compileShot(sheet: ShotSheet, profile: ModelProfile, opts?: { castDescriptors?: Record<string, string> }): CompileResult {
+export function compileShot(
+  sheet: ShotSheet,
+  profile: ModelProfile,
+  opts?: { castDescriptors?: Record<string, string>, castBundles?: CastBundle[] },
+): CompileResult {
   const caps: RefCaps = {
     maxRefImages: profile.maxRefImages,
     maxRefVideos: profile.maxRefVideos,
     maxRefAudios: profile.maxRefAudios,
     supportsFirstLastFrame: profile.supportsFirstLastFrame,
+    label: profile.label,
+    castMode: profile.castMode,
+    requiresFirstFrame: profile.requiresFirstFrame,
+    supportsLastFrame: profile.supportsLastFrame,
+    refsWithFirstFrame: profile.refsWithFirstFrame,
   }
   const issues = validateShotSheet(sheet, caps)
-  const clause = castClause(sheet, profile, opts?.castDescriptors)
+  const clause = castClause(sheet, profile, opts?.castDescriptors, opts?.castBundles)
   const base = buildPrompt(sheet, profile)
   const prompt = clause ? `${clause} ${base}` : base
   const wordCount = countWords(prompt)
@@ -129,6 +138,13 @@ export function compileShot(sheet: ShotSheet, profile: ModelProfile, opts?: { ca
     issues.push({ level: 'warning', code: 'word-budget-warning', message: `Prompt is ${wordCount} words; best practice is under ${profile.wordBudgetWarn}.` })
   }
 
-  const input = profile.buildInput(sheet, prompt)
+  // Kling (requiresFirstFrame) always builds its request as firstLastFrame,
+  // whatever the stored sheet's mode is — buildInput reads sheet.firstFrame/
+  // lastFrame directly and ignores `mode` for elements-mode models, but this
+  // keeps the contract explicit without mutating the sheet the caller holds.
+  const effectiveSheet = (profile.requiresFirstFrame && sheet.mode !== 'firstLastFrame')
+    ? { ...sheet, mode: 'firstLastFrame' as const }
+    : sheet
+  const input = profile.buildInput(effectiveSheet, prompt, opts?.castBundles)
   return { prompt, input, wordCount, issues }
 }
