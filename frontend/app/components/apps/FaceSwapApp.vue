@@ -3,11 +3,22 @@
  * Face Swap app page — the first single-purpose surface built on the node engine.
  *
  * This is intentionally a *page* design (hero, copy, generous spacing), not a
- * canvas. The same FaceSwap node powers it under the hood — we just construct
- * the prompt graph in code and submit it directly to /prompt.
+ * canvas. The same FaceSwap node powers it under the hood, but the run itself
+ * goes through the Sailor runner (family face-swap + cards), not /prompt —
+ * the first mini app to run there.
  */
 import { ArrowRight, Download, Image as ImageIcon, Loader2, RefreshCcw, Upload, X } from 'lucide-vue-next'
 import TakesStrip from '~/components/vue-canvas/TakesStrip.vue'
+import StudioSelect from '~/components/vue-canvas/studio/StudioSelect.vue'
+import StudioSegmented from '~/components/vue-canvas/studio/StudioSegmented.vue'
+import { awaitRunnerImage, buildFaceSwapPrompt } from '~/lib/runner/awaitRunnerResult'
+import { isRunnerDeclined, startRunnerRun } from '~/lib/runner/client'
+import {
+  FACE_SWAP_GENDER_DEFAULT,
+  FACE_SWAP_GENDER_OPTIONS,
+  FACE_SWAP_HAIR_DEFAULT,
+  FACE_SWAP_HAIR_OPTIONS,
+} from '#shared/runner/faceSwap'
 
 interface UploadedFile {
   file: File
@@ -63,69 +74,49 @@ function clearSlot(role: 'source' | 'target') {
   status.value = 'idle'
 }
 
-// ----- Prompt construction + submission ----------------------------------
+// ----- Face's gender + hair choice ----------------------------------------
 
-function buildPrompt(srcFilename: string, tgtFilename: string) {
-  // Hand-built graph: two LoadImage → FaceSwap → SaveImage. Hardcoded node ids
-  // because there's only one shape this template ever runs.
-  return {
-    '1': { class_type: 'LoadImage', inputs: { image: srcFilename } },
-    '2': { class_type: 'LoadImage', inputs: { image: tgtFilename } },
-    '3': {
-      class_type: 'FaceSwap',
-      inputs: {
-        source_face: ['1', 0],
-        target_frames: ['2', 0],
-        face_index: 0,
-        threshold: 0.5,
-      },
-    },
-    '4': {
-      class_type: 'SaveImage',
-      // Sailor's SaveImage requires the full export-param set, not just
-      // images + filename_prefix like stock ComfyUI.
-      inputs: {
-        images: ['3', 0],
-        filename_prefix: 'faceswap_template',
-        format: 'png',
-        quality: 90,
-        lossless_webp: false,
-        png_compression: 4,
-        scale: 1.0,
-        max_dimension: 0,
-        embed_metadata: true,
-      },
-    },
-  }
+const GENDER_STORAGE_KEY = 'sailor.faceSwap.gender'
+
+function readSavedGender(): typeof FACE_SWAP_GENDER_OPTIONS[number] {
+  try {
+    const saved = localStorage.getItem(GENDER_STORAGE_KEY)
+    if (saved && (FACE_SWAP_GENDER_OPTIONS as readonly string[]).includes(saved)) return saved as typeof FACE_SWAP_GENDER_OPTIONS[number]
+  } catch { /* localStorage unavailable — fall back to the default */ }
+  return FACE_SWAP_GENDER_DEFAULT
 }
 
+const gender = ref<typeof FACE_SWAP_GENDER_OPTIONS[number]>(readSavedGender())
+const keepHairFrom = ref<typeof FACE_SWAP_HAIR_OPTIONS[number]>(FACE_SWAP_HAIR_DEFAULT)
+
+watch(gender, (v) => {
+  try { localStorage.setItem(GENDER_STORAGE_KEY, v) } catch { /* best effort only */ }
+})
+
+// ----- Prompt construction + submission (Sailor runner) -------------------
+
 const canRun = computed(() =>
-  !!sourceFace.value && !!targetImage.value && status.value !== 'running' && status.value !== 'uploading',
+  !!sourceFace.value && !!targetImage.value && gender.value !== FACE_SWAP_GENDER_DEFAULT
+  && status.value !== 'running' && status.value !== 'uploading',
 )
 
 async function run() {
-  if (!canRun.value || !sourceFace.value || !targetImage.value) return
+  if (!canRun.value || !sourceFace.value || !targetImage.value || !gender.value) return
   errorMessage.value = null
   status.value = 'running'
-  progressLabel.value = 'Submitting…'
-
+  progressLabel.value = 'Swapping the face…'
   try {
-    const res = await fetch('/prompt', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ prompt: buildPrompt(sourceFace.value.filename, targetImage.value.filename) }),
+    await ensureRunnerEvents()
+    const prompt = buildFaceSwapPrompt({
+      face: sourceFace.value.filename,
+      target: targetImage.value.filename,
+      gender: gender.value,
+      keepHairFrom: keepHairFrom.value,
     })
-    if (!res.ok) {
-      const text = await res.text()
-      throw new Error(text || `Comfy returned ${res.status}`)
-    }
-    const data = await res.json()
-    const promptId: string | undefined = data?.prompt_id
-    if (!promptId) throw new Error('No prompt_id in response — is ComfyUI running?')
-
-    progressLabel.value = 'Running face swap…'
-    const output = await pollForOutput(promptId)
-    if (!output) throw new Error('Run finished but produced no output.')
+    const leg = await startRunnerRun({ takes: [prompt], workflow: null, canvasId: null, projectUuid: null, projectName: null })
+    const promptId = leg.promptIds[0]
+    if (!promptId) throw new Error('The swap didn’t start. Try again.')
+    const output = await awaitRunnerImage(promptId)
     const url = `/view?${new URLSearchParams({
       filename: output.filename,
       type: output.type,
@@ -135,57 +126,9 @@ async function run() {
     addTake({ images: [url], promptId, sig: `${output.subfolder || ''}/${output.filename}` })
     status.value = 'done'
   } catch (e: any) {
-    errorMessage.value = humanizeError(e?.message ?? String(e))
+    errorMessage.value = isRunnerDeclined(e) ? 'Face swap is switched off in Sailor right now.' : (e?.data?.message ?? e?.message ?? String(e))
     status.value = 'error'
   }
-}
-
-async function pollForOutput(promptId: string): Promise<{ filename: string; subfolder: string; type: string } | null> {
-  // Poll /history/<id> every 600ms. Comfy returns {} until execution finishes,
-  // then a single key matching our id with `outputs` populated.
-  const deadline = Date.now() + 5 * 60 * 1000  // 5 min timeout
-  while (Date.now() < deadline) {
-    await new Promise((r) => setTimeout(r, 600))
-    try {
-      const r = await fetch(`/history/${promptId}`)
-      if (!r.ok) continue
-      const data = await r.json()
-      const entry = data?.[promptId]
-      if (!entry) continue
-      if (entry?.status?.status_str === 'error') {
-        throw new Error(extractComfyError(entry))
-      }
-      const outputs = entry?.outputs
-      if (!outputs) continue
-      for (const node of Object.values(outputs) as any[]) {
-        if (Array.isArray(node?.images) && node.images.length > 0) return node.images[0]
-      }
-    } catch (e) {
-      // Polling errors are transient unless they came from our own throw above.
-      if (e instanceof Error && e.message.startsWith('Comfy:')) throw e
-    }
-  }
-  return null
-}
-
-function extractComfyError(entry: any): string {
-  const messages: any[] = entry?.status?.messages ?? []
-  const errMsg = messages.find((m) => m[0] === 'execution_error')?.[1]
-  if (errMsg?.exception_message) return `Comfy: ${errMsg.exception_message}`
-  return 'Comfy: execution failed.'
-}
-
-function humanizeError(msg: string): string {
-  if (msg.includes('No face found in source_face')) {
-    return "Couldn't detect a face in your reference photo. Try a clearer, well-lit close-up."
-  }
-  if (msg.includes('inswapper_128.onnx not found')) {
-    return 'Face Swap model is missing. Open the Toolbox panel and click Face Swap to download it (~530 MB).'
-  }
-  if (msg.includes('No prompt_id')) {
-    return "Couldn't reach the engine. Is ComfyUI running on port 8188?"
-  }
-  return msg
 }
 
 // ----- File-slot interactions -------------------------------------------
@@ -329,6 +272,22 @@ function download() {
               <div class="text-[11px] text-white/80 truncate">{{ targetImage.file.name }}</div>
             </div>
           </div>
+        </div>
+      </div>
+
+      <!-- Face's gender + hair choice -->
+      <div class="grid grid-cols-2 gap-5 mb-8">
+        <div>
+          <label class="text-[12px] font-medium text-white/85 tracking-[0.01em] mb-2 block">Face's gender</label>
+          <StudioSelect
+            v-model="gender"
+            :options="[...FACE_SWAP_GENDER_OPTIONS]"
+            :option-labels="['Choose…', 'Male', 'Female', 'Non-binary']"
+          />
+        </div>
+        <div>
+          <label class="text-[12px] font-medium text-white/85 tracking-[0.01em] mb-2 block" title="Whose hair shows in the result">Keep hair from</label>
+          <StudioSegmented v-model="keepHairFrom" :options="[...FACE_SWAP_HAIR_OPTIONS]" />
         </div>
       </div>
 
