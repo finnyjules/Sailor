@@ -52,9 +52,8 @@ import { pxToUnits, SNAP_PX, BOW_PX, MIN_RADIUS_PX } from '~/lib/sketch/toleranc
 import {
   availableConstraints as availableConstraintsFor,
   orderRefs as orderRefsFor,
-  segmentConstraintRefs,
-  pointSegmentRefs,
   tangentRuleForSelection,
+  ruleSpecFor,
   type RuleOption,
 } from './penRules'
 import { createPenHistory } from './penHistory'
@@ -489,24 +488,12 @@ export function usePen(opts: {
   function onBlur() {}
 
   function apply(kind: ConstraintKind, value?: number) {
-    // one point + one segment: On curve / Midpoint (pointSegmentRefs)
-    if (selectedSegments.value.length && selection.value.length) {
-      const p = selection.value[0]!
-      const refs = selection.value.length === 1 && selectedSegments.value.length === 1
-        ? pointSegmentRefs(doc.value, kind, p, selectedSegments.value[0]!)
-        : null
-      if (refs) { const id = addConstraint(doc.value, kind, refs, value); sparkleAtConstraint(id) }
-      clearSel()
-      clearSegSel()
-      runSolve()
-      commitHistory()
-      return
-    }
+    const spec = ruleSpecFor(doc.value, selection.value, selectedSegments.value, { kind, label: '' }, value)
     // two points: Coincident makes them ONE point — the second picked merges
     // into the first, which stays where it is (a `coincident` rule is only
     // ever read back from older drawings)
-    if (kind === 'coincident' && selection.value.length === 2 && selection.value.every(isPointId)) {
-      const [keep, gone] = selection.value as [EntityId, EntityId]
+    if (spec && 'merge' in spec) {
+      const [keep, gone] = spec.merge
       const refusal = joinRefusal(gone, keep)
       if (refusal) { status.value = refusal; return }
       clearSel()
@@ -520,18 +507,11 @@ export function usePen(opts: {
       commitHistory()
       return
     }
-    if (selectedSegments.value.length) {
-      const refs = segmentConstraintRefs(doc.value, kind, selectedSegments.value)
-      if (refs) { const id = addConstraint(doc.value, kind, refs, value); sparkleAtConstraint(id) }
-      clearSegSel()
-      runSolve()
-      commitHistory()
-      return
-    }
-    const refs = orderRefsFor(doc.value, kind, selection.value)
-    const id = addConstraint(doc.value, kind, refs, value)
-    sparkleAtConstraint(id)
+    // every other rule: written from ruleSpecFor (penRules.ts) — one point +
+    // one segment (On curve / Midpoint), segments, or entities
+    if (spec) { const id = addConstraint(doc.value, spec.kind, spec.refs, spec.value); sparkleAtConstraint(id) }
     clearSel()
+    clearSegSel()
     runSolve()
     commitHistory()
   }

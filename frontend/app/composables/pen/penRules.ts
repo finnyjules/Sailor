@@ -6,6 +6,8 @@
 import type { SketchDoc, EntityId, ConstraintKind } from '~/lib/sketch/model'
 import type { CurveRef } from '~/lib/sketch/crossings'
 import { pieceOf, tangentRuleFor, type RuleSpec } from '~/lib/sketch/tangency'
+import type { MergeSpec } from '~/lib/sketch/ruleCheck'
+export type { MergeSpec }
 
 // `tip`: the button's id in the rules row (its hover card, penTips.ts) when the
 // rule kind alone would name the wrong card — "On curve" is written as a
@@ -71,7 +73,10 @@ export function availableConstraints(doc: SketchDoc, selection: EntityId[], segm
     return out
   }
   if (ids.length === 2 && count('point') === 2) {
-    out.push({ kind: 'coincident', label: 'Coincident' }, { kind: 'distance', label: 'Distance…', value: true })
+    // pen stage 6 (Ruling 15): two points can also be lined up level or upright
+    // (horizontal / vertical take a point pair — residuals.ts)
+    out.push({ kind: 'coincident', label: 'Coincident' }, { kind: 'distance', label: 'Distance…', value: true },
+      { kind: 'horizontal', label: 'Horizontal' }, { kind: 'vertical', label: 'Vertical' })
   }
   if (ids.length === 2 && count('circle') === 2) {
     out.push({ kind: 'concentric', label: 'Concentric' }, { kind: 'tangentCircleCircle', label: 'Tangent' }, { kind: 'equalRadius', label: 'Equal' })
@@ -294,4 +299,29 @@ export function orderRefs(doc: SketchDoc, kind: ConstraintKind, ids: EntityId[])
     return ids.slice()
   }
   return ids.slice()
+}
+
+/** The rule `apply` writes for this selection (pen stage 6) — the same
+ *  branches, in the same order: Tangent → the tangent rule for the two
+ *  pieces; one point + one segment → pointSegmentRefs; Coincident on two
+ *  points → a merge (the first picked stays); segments →
+ *  segmentConstraintRefs; entities → orderRefs. Null when the selection
+ *  can't make it. */
+export function ruleSpecFor(doc: SketchDoc, selection: EntityId[], segments: SegRef[], option: RuleOption, value?: number): RuleSpec | MergeSpec | null {
+  if (option.tangent) return tangentRuleForSelection(doc, selection, segments)
+  const kind = option.kind
+  const v = value != null ? { value } : {}
+  if (segments.length && selection.length) {
+    const refs = selection.length === 1 && segments.length === 1 ? pointSegmentRefs(doc, kind, selection[0]!, segments[0]!) : null
+    return refs ? { kind, refs, ...v } : null
+  }
+  if (kind === 'coincident' && selection.length === 2 && selection.every(id => doc.entities.find(e => e.id === id)?.kind === 'point')) {
+    return { merge: [selection[0]!, selection[1]!] }
+  }
+  if (segments.length) {
+    const refs = segmentConstraintRefs(doc, kind, segments)
+    return refs ? { kind, refs, ...v } : null
+  }
+  if (!selection.length) return null
+  return { kind, refs: orderRefs(doc, kind, selection), ...v }
 }

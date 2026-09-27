@@ -187,7 +187,7 @@ describe('rules row: Coincident merges, point + segment rules', () => {
       c = addPoint(d, 1, 1); e = addPoint(d, 5, 5); addLine(d, c, e)
     })
     pen.pick(a); pen.pick(c, true)
-    expect(pen.availableConstraints().map(r => r.label)).toEqual(['Coincident', 'Distance…'])
+    expect(pen.availableConstraints().map(r => r.label)).toEqual(['Coincident', 'Distance…', 'Horizontal', 'Vertical'])
     pen.apply('coincident')
     expect(P(doc.value, c)).toBeUndefined()
     expect(P(doc.value, a)).toMatchObject({ x: 0, y: 0 })
