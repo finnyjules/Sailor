@@ -167,6 +167,7 @@ import { SYNC_3_APP, sync3NodeProblem } from './generators/sync3'
 import { TOPAZ_VIDEO_APP, topazVideoNodeProblem } from './generators/topazVideo'
 import { TOPAZ_VIDEO_MAX_FACTOR, TOPAZ_VIDEO_MIN_FACTOR, TOPAZ_VIDEO_UNKNOWN_SETTING } from '#shared/runner/topazVideo'
 import { isSync3LipSync, sync3ModeRefusal } from '#shared/runner/lipSync'
+import { FACE_SWAP_NEEDS_GENDER, faceSwapGender } from '#shared/runner/faceSwap'
 
 export { FIRST_FRAME_AND_REFERENCES }
 
@@ -775,6 +776,11 @@ export function requestProblems(prompt: ApiPrompt, opts: { runner?: boolean } = 
     else if (ct === 'EnhanceVideoNode' && opts.runner) {
       const p = topazVideoNodeProblem(prompt, nodeId)
       if (p) out.push({ nodeId, classType: ct, input: p.input, message: p.message })
+    }
+    // Face swap on Easel (family face-swap), on a runner run: Easel requires a
+    // gender (no default), read before anything is held.
+    else if (ct === 'FaceSwap' && opts.runner) {
+      if (!isLink(inputs.gender) && faceSwapGender(inputs) == null) out.push({ nodeId, classType: ct, input: 'gender', message: FACE_SWAP_NEEDS_GENDER })
     }
     // Film a shot on Seedance 2.0 (ComfyUI path only): a first frame beside references is refused,
     // never sent with the references dropped; the counts too (the same check as Generate a video's).

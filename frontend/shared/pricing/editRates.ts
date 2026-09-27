@@ -219,6 +219,8 @@ export const EDIT_RATES: Record<string, EditRate> = {
     beyondPerPixel: 1.36 / 512e6,
     ...verified('fal', fal('fal-ai/topaz/upscale/image')),
   },
+  // Face swap on Easel (family face-swap): "$0.05 per generations" (llms.txt, read 2026-09-26).
+  'easel-ai/advanced-face-swap': { unit: 'per_image', usd: 0.05, ...verified('fal', fal('easel-ai/advanced-face-swap')) },
   // ── Restyle with a style LoRA (RestyleWithLoRANode, ComfyUI path) ───────
   // Moondream 2, billed by GPU time (L40S, $0.000975/s): "costs approximately
   // $0.0020 to run". The node captions once and classifies up to four times.

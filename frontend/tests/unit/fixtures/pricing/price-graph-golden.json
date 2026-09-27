@@ -438,6 +438,7 @@
     "EditImageNode": 23,
     "EnhanceVideoNode": 150,
     "ExtractTextNode": 1,
+    "FaceSwap": 5,
     "FindObjectsNode": 1,
     "FixFacesNode": 1,
     "FluxKontextRemoteNode": 8,

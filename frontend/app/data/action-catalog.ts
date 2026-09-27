@@ -52,6 +52,7 @@ export const ACTION_CATALOG: Record<string, ActionEntry> = {
   RemoveObjectNode:      { useCase: 'Remove an object',               model: 'Nano Banana 2',                            intent: 'edit', source: 'image' },
   TextEditNode:          { useCase: 'Edit text in an image',          model: 'Nano Banana 2',                            intent: 'edit', source: 'image' },
   RecolorObjectNode:     { useCase: 'Recolor an object',              model: 'Nano Banana 2',                            intent: 'edit', source: 'image' },
+  FaceSwap:              { useCase: 'Swap a face',                    model: 'Easel',                                    intent: 'edit' },
   // -- Image · enhance --------------------------------------------------------
   UpscaleImageNode:      { useCase: 'Upscale an image',               model: 'Clarity',                                  intent: 'enhance' },
   RestorePhotoNode:      { useCase: 'Restore an old photo',           model: 'Flux Kontext · Restore',                   intent: 'enhance' },

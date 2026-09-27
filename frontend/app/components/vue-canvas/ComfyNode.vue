@@ -192,7 +192,7 @@ const isBypassed = computed(() => props.data.mode === 4)
 // Skipped on purpose: live-preview nodes (they auto-run), Load nodes (no
 // execution), Note / Subgraph IO (no execution).
 const HEAVY_LOCAL_COMPUTE = new Set<string>([
-  'FaceSwap', 'FaceRestore', 'LipSync', 'ObjectRemove',
+  'FaceRestore', 'LipSync', 'ObjectRemove',
   'SubjectMask', 'MaskExtractor',
 ])
 

@@ -305,7 +305,7 @@ export const IMAGE_OUTPUT_CLASSES: ReadonlySet<string> = new Set([
   'GenerateImageNode', 'Image', 'Compositor', 'LoadImage',
   'EditImageNode', 'DevelopImageNode', 'RelightNode', 'BlendSceneNode',
   'RemoveObjectNode', 'TextEditNode', 'RecolorObjectNode', 'SwapBackgroundNode', 'SwapProductNode', 'PersonSwap',
-  'GenerateFromReferencesNode', 'RotateCameraNode', 'ProductShotNode', 'RestyleFromImageNode', 'FixFacesNode',
+  'GenerateFromReferencesNode', 'RotateCameraNode', 'ProductShotNode', 'RestyleFromImageNode', 'FixFacesNode', 'FaceSwap',
 ])
 
 /**
@@ -435,6 +435,13 @@ export const RUNNER_NODE_RULES: Readonly<Record<string, RunnerNodeRule>> = {
     mustLink: ['image'],
     imageInputs: ['image'],
     mustNotLink: ['strength', 'creativity', 'upscale'],
+  },
+  // ── face-swap: Face swap on Easel (replaces InsightFace inswapper) ──
+  FaceSwap: {
+    upgrade: { family: 'face-swap', label: 'Face swap' },
+    mustLink: ['source_face', 'target_frames'],
+    imageInputs: ['source_face', 'target_frames'],
+    mustNotLink: ['gender', 'keep_hair_from'],
   },
   // ── restyle (Task B8): Nano Banana 2 / Pro on fal, Nano Banana on
   // Replicate. The prompt and the taste wire (style_in, a Moodboard card's

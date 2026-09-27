@@ -10,7 +10,7 @@ import type { ModelBundleKey } from '~/data/toolbox-items'
 // Every downloadable model bundle. Single source of truth shared by the Toolbox
 // cards and the Settings → Models manager.
 export const ALL_MODEL_BUNDLES: ModelBundleKey[] = [
-  'faceswap', 'bgremove', 'upscale',
+  'bgremove', 'upscale',
   'frameinterp', 'subjecttrack',
   'facerestore', 'lipsync', 'objectremove',
   'whisper', 'demucs', 'depth',

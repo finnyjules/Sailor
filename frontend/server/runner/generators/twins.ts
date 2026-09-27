@@ -163,6 +163,10 @@
  *                                                  Replicate has no Bria Product Shot; bria/generate-background is
  *                                                  another model, with no placement or shot size (briaProductShot.ts)
  *
+ * Face swap, Easel advanced face swap
+ *                           fal        —           runner-only (family face-swap, moves the whole node): Replicate
+ *                                                  has no Easel face swap (easelFaceSwap.ts)
+ *
  * ── Lip-sync ───────────────────────────────────────────────────────────────
  * Lip-sync a character, sync-3
  *                           fal        —           runner-only (F22, family sync-3): Replicate has no sync-3 (its
@@ -318,6 +322,7 @@ export const RUNNER_ROUTES: Readonly<Record<string, Route>> = {
   'LipSyncNode:sync-3': r('fal', null, 'Replicate has no sync-3 (its sync.so models are lipsync-2, lipsync-2-pro and react-1)'),
   'EnhanceVideoNode+topaz-video': r('fal', null, 'Replicate\'s Topaz video upscale bills an unspecified unit: its price can\'t be verified'),
   'FixFacesNode+fix-faces': r('fal', null, 'Replicate\'s Topaz is another app with its own settings and no face-enhancement strength'),
+  'FaceSwap+face-swap': r('fal', null, 'Replicate has no Easel face swap'),
 }
 
 // ── Generate video: the two models moved to fal first ──────────────────────

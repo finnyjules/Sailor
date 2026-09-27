@@ -135,6 +135,7 @@ export const NODE_DESCRIPTIONS: Record<string, string> = {
   'Epsilon Scaling': 'Adjusts the noise prediction scaling factor of the model during generation.',
   'ExponentialScheduler': 'Creates an exponentially decreasing step schedule for image generation.',
   'ExtendIntermediateSigmas': 'Adds extra refinement steps at a specific point in the generation schedule.',
+  'FaceSwap': 'Puts the face from one photo into another picture.',
   'FeatherMask': 'Softens the edges of a mask with a gradual fade on each side.',
   'FlipSigmas': 'Reverses the order of the generation step schedule.',
   'Flux2MaxImageNode': 'Generates a high-quality image using the Flux.2 Max cloud API.',

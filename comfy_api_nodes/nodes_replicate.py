@@ -5194,11 +5194,10 @@ class ExtractTextNode(IO.ComfyNode):
 # =============================================================================
 
 
-# Removed: Replicate FaceSwapNode. Sailor ships a faster local face-swap
-# node (`FaceSwap` in comfy_extras/nodes_face.py) backed by InsightFace +
-# inswapper_128.onnx. It runs on the user's GPU, handles video batches with
-# identity tracking, and is free after the one-time model download. The
-# Replicate cloud version was redundant and slower.
+# Removed: Replicate FaceSwapNode. `FaceSwap` (comfy_extras/nodes_face.py) is
+# now definition-only: it runs on Sailor's runner (family face-swap), Easel's
+# advanced face swap on fal. The local InsightFace / inswapper_128.onnx
+# pipeline it replaces was licensed for non-commercial research only.
 
 
 # =============================================================================

@@ -47,6 +47,7 @@
 import { pyFloatOf } from '../runner/pyText'
 import { NO_FAMILIES, type RunnerFamily } from '../runner/families'
 import { classUpgradeOn } from '../runner/eligibility'
+import { EASEL_FACE_SWAP_APP } from '../runner/faceSwap'
 import type { EditCall, EditStep } from './editRates'
 import { effectiveImageSettings } from './imageSettings'
 
@@ -80,7 +81,7 @@ export const SETTING_PRICED_NODE_CLASSES: readonly string[] = [
   'EditImageNode', 'DevelopImageNode', 'RelightNode', 'BlendSceneNode',
   'RemoveObjectNode', 'TextEditNode', 'RecolorObjectNode', 'SwapBackgroundNode', 'SwapProductNode', 'PersonSwap', 'LensReframe',
   'GenerateFromReferencesNode', 'RotateCameraNode', 'ProductShotNode',
-  'RestyleFromImageNode', 'RestyleWithLoRANode', 'FixFacesNode',
+  'RestyleFromImageNode', 'RestyleWithLoRANode', 'FixFacesNode', 'FaceSwap',
 ]
 
 const isLinked = (v: unknown) => Array.isArray(v)
@@ -291,6 +292,8 @@ const FIXED: Record<string, (inputs: NodeInputs) => EditCall> = {
   LensReframe: () => call(REP_NB2, '1K'),
   RotateCameraNode: () => call('qwen/qwen-image-edit-plus'),
   ProductShotNode: () => call('catacolabs/sdxl-ad-inpaint'),
+  // Face swap on Easel (family face-swap): one flat price a picture.
+  FaceSwap: () => call(EASEL_FACE_SWAP_APP),
 }
 
 // ── Upscale and Enhance detail (ComfyUI path, nodes_replicate.py) ─────────

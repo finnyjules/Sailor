@@ -47,6 +47,7 @@ import {
   Replace,
   ImagePlus,
   Rotate3d,
+  UserRoundCog,
 } from 'lucide-vue-next'
 
 export const GENERATOR_NODE_ICONS: Record<string, Component> = {
@@ -70,6 +71,7 @@ export const GENERATOR_NODE_ICONS: Record<string, Component> = {
   RemoveBackgroundNode: Scissors,
   RestorePhotoNode:     Wand2,
   FixFacesNode:         Smile,
+  FaceSwap:             UserRoundCog,
   LayerizeGraphicNode:  Layers,
   SeedreamLayerizeNode: Layers3,
   SplitPhotoLayersNode: SquareStack,
@@ -140,6 +142,7 @@ export const NODE_MODEL_BRAND: Record<string, string | null> = {
   RemoveBackgroundNode: null,                 // 851-labs/bg-remover
   RestorePhotoNode:     'BFL',                // Flux Kontext · Restore
   FixFacesNode:         null,                 // Topaz — no brand
+  FaceSwap:             null,                 // Easel — no brand
   LayerizeGraphicNode:  'Ideogram',           // Ideogram Layerize
   SeedreamLayerizeNode: 'ByteDance',          // Seedream 5 Pro Layerize
   SplitPhotoLayersNode: null,                 // pipeline: bg-remover + LaMa/Bria Eraser

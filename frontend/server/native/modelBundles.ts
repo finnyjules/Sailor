@@ -82,7 +82,6 @@ export function modelBundles(e: BundleEnv): ModelBundle[] {
     one('frameinterp', 'AI Slow Motion', 'rife_v4.6.onnx', m('rife', 'rife_v4.6.onnx'), 0),
     { key: 'whisper', label: 'Speech Transcribe', files: [], readyCheck: whisperReady },
     { key: 'demucs', label: 'Vocal Separator', files: [], readyCheck: demucsReady },
-    one('faceswap', 'Face Swap', 'inswapper_128.onnx', m('insightface', 'inswapper_128.onnx'), 554_253_681),
     // nodes_bg_remove.py — rembg's own default home, so a manual rembg install finds it too.
     one('bgremove', 'Background Remove', 'isnet-general-use.onnx', path.join(e.home, '.u2net', 'isnet-general-use.onnx'), 178_648_008),
     { key: 'depth', label: 'Depth (Lens)', files: [], readyCheck: depthReady },

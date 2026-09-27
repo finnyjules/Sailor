@@ -69,7 +69,7 @@ export type Domain = 'image' | 'text' | 'audio' | 'video' | '3d'
 // Toolbox-visible id for a model bundle (declared server-side via
 // _model_downloads.register_bundle). Add new keys here as we ship new ML nodes.
 export type ModelBundleKey =
-  | 'faceswap' | 'bgremove' | 'upscale'
+  | 'bgremove' | 'upscale'
   | 'frameinterp' | 'subjecttrack'
   | 'facerestore' | 'lipsync' | 'objectremove'
   | 'whisper' | 'demucs'
@@ -281,7 +281,6 @@ export const TOOLBOX_SECTIONS: ToolboxSection[] = [
   {
     title: 'Local AI',
     items: [
-      { nodeType: 'FaceSwap', label: 'Face Swap', description: 'Replace a face in the target with the face from a reference photo. Downloads ~530 MB on first use.', icon: UserRoundCog, requiresModels: 'faceswap' },
       { nodeType: 'FaceRestore', label: 'Face Restore', description: 'CodeFormer face restoration — sharpens facial detail and fixes muddy AI-generated or low-res faces. Pairs perfectly with Face Swap. Downloads ~360 MB on first use.', icon: Sparkles, requiresModels: 'facerestore' },
       { nodeType: 'BackgroundRemove', label: 'Remove BG', description: 'Knock out the background and emit a clean alpha mask. Downloads ~179 MB on first use.', icon: PhSelectionForeground, requiresModels: 'bgremove' },
       { nodeType: 'SubjectMask', label: 'Subject Mask', description: 'Click a point on the subject — MobileSAM segments it into a mask. Works on every frame of a video. Downloads ~55 MB on first use.', icon: MousePointerClick, requiresModels: 'subjecttrack' },
@@ -294,6 +293,7 @@ export const TOOLBOX_SECTIONS: ToolboxSection[] = [
     items: [
       { nodeType: 'RotateCameraNode', label: 'Rotate Camera',   description: 'Re-render an image from a new viewpoint with a 3-axis camera gimbal. Powered by Qwen-Image-Edit. Cloud, ~$0.04.', icon: Camera },
       { nodeType: 'RelightNode', label: 'Relight', description: 'Re-light an image — aim the light with a gimbal, set intensity, pick a preset or match a reference photo. Powered by Nano Banana 2. Cloud, ~$0.05.', icon: Lightbulb },
+      { nodeType: 'FaceSwap', label: 'Face Swap', description: 'Put the face from one photo into another picture. Powered by Easel. Cloud, ~$0.05.', icon: UserRoundCog },
     ],
   },
 

@@ -42,7 +42,9 @@
  * EnhanceVideoNode on fal's Topaz video upscale, family topaz-video, which
  * moves the whole node while it is on;
  * FixFacesNode on fal's Topaz image upscale with face enhancement, family
- * fix-faces, which moves the whole node while it is on)
+ * fix-faces, which moves the whole node while it is on;
+ * FaceSwap on Easel's advanced face swap, family face-swap, which moves the
+ * whole node while it is on)
  * closely enough that the same workflow gives the same result.
  */
 import { GATE_CLASS, isLink, type ApiPrompt } from '#shared/runner/graph'
@@ -95,6 +97,7 @@ import { isSeedream5ProEdit, seedream5ProEdit } from './generators/seedream5ProE
 import { qwen2511Angles } from './generators/qwen2511Angles'
 import { briaProductShot } from './generators/briaProductShot'
 import { topazFixFaces } from './generators/topazImage'
+import { easelFaceSwap } from './generators/easelFaceSwap'
 import { sync3Lipsync, sync3NodeProblem, sync3Sources } from './generators/sync3'
 import { topazVideoNodeProblem, topazVideoSource, topazVideoUpscale } from './generators/topazVideo'
 import { TOPAZ_VIDEO_UNMEASURED, topazVideoPlan } from '#shared/runner/topazVideo'
@@ -776,6 +779,14 @@ async function planNodeRequest(ctx: PlanContext): Promise<NodePlan> {
     case 'FixFacesNode': {
       const image = await pictureUrl('image', 'There is no picture to fix')
       return stillCall(topazFixFaces({ image, inputs }), 'fix_faces')
+    }
+
+    // ── face-swap: Face swap on Easel, no backup (easelFaceSwap.ts). Python sends
+    // only an IMAGE batch's first frame; so does the runner (linkedFirstFile). ──
+    case 'FaceSwap': {
+      const face = await pictureUrl('source_face', 'There is no face picture')
+      const target = await pictureUrl('target_frames', 'There is no picture to put the face in')
+      return stillCall(easelFaceSwap({ face, target, inputs }), 'face_swap')
     }
 
     // ── restyle family (nodes_replicate.py RestyleFromImageNode :3070) ──

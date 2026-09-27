@@ -68,6 +68,7 @@ export function capabilityNodeTypes(caps: AgentCapability[] = AGENT_CAPABILITIES
  *  an explicit decision either way. */
 export const AGENT_EXCLUDED: Record<string, string> = {
   PersonSwap: 'Needs two required images — the scene AND a reference photo of the replacement person — the agent has no way to source a specific person-identity photo from a phrase alone.',
+  FaceSwap: 'Needs two required images — the target picture AND a reference photo of the face to use — the agent has no way to source a specific face-identity photo from a phrase alone.',
   PoseMannequin: "Its primary workflow poses a 3D mannequin in a dedicated on-canvas editor (baked conditioning image); the agent can't drive that editor from text.",
   SwapProductNode: 'Needs two required images — a finished packshot scene AND the product cutout to place into it — the agent cannot source or pair both from a phrase alone.',
   LipSyncNode: "Driven by the Lip-Sync Studio's staged face/voice inputs (JSON model_options with face_image/face_video/audio URLs, branching between two engines) rather than ports the agent can wire directly.",
