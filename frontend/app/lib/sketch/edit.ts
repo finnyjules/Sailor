@@ -138,6 +138,20 @@ export function deleteEntity(doc: SketchDoc, id: EntityId): void {
     doc.constraints = doc.constraints.filter(c => !(c.kind === 'tangentLineArc' &&
       ((c.refs[0] === e.p1 && c.refs[1] === e.p2) || (c.refs[0] === e.p2 && c.refs[1] === e.p1))))
   }
+  if (e.kind === 'line' && e.construction) {
+    // a guide line's own guide ends go with it when nothing else uses them — a
+    // rule tying only its two ends (a Clean up axis's Vertical / Horizontal)
+    // goes too; an end another piece or rule still uses stays
+    const ends = new Set([e.p1, e.p2])
+    const onlyEnds = (c: { refs: EntityId[] }) => c.refs.every(r => ends.has(r))
+    for (const pid of ends) {
+      const p = getPoint(doc, pid)
+      if (!p || !p.construction || p.fixed || isPointReferenced(doc, pid)) continue
+      if (doc.constraints.some(c => c.refs.includes(pid) && !onlyEnds(c))) continue
+      doc.constraints = doc.constraints.filter(c => !(c.refs.includes(pid) && onlyEnds(c)))
+      deleteEntity(doc, pid)
+    }
+  }
   if (e.kind === 'path') {
     // drop this path's auto equalDist rules (their refs don't include the path's own id)
     doc.constraints = doc.constraints.filter(c => !(c.kind === 'equalDist' && arcEqualDistRefs.some(refs => refsEqual(refs, c.refs))))
