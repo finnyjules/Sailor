@@ -4,6 +4,7 @@ import { fitShapePath } from '~/lib/shapes/geometry'
 import type { SketchDoc } from '~/lib/sketch/model'
 import { sketchPathData } from '~/lib/sketch/sketchPath'
 import { flattenPath } from '~/lib/compositor/pathFlatten'
+import { fillPathData } from '~/lib/sketch/fills'
 
 export type BaseShapeKind =
   | 'circle' | 'square' | 'triangle' | 'diamond' | 'pentagon' | 'hexagon'
@@ -73,14 +74,19 @@ export function sketchOutlineBounds(sketch: SketchDoc | undefined):
  * and its bbox centre sits on the origin. `''` for a missing or empty drawing.
  * A straight line (zero width or height) scales by its non-zero side; never throws.
  *
+ * Pen stage 7: a drawing with filled areas IS those areas — the path is their
+ * outline (`fillPathData`), fitted by the WHOLE drawing's box, so filling an
+ * area never moves or resizes the shape. No area filled → the outline as before.
+ *
  * The transform is exact on the drawing's own path data (absolute M/L/C/A/Z from
- * `sketchPathData`): points map through scale-about-centre, and an `A` arc keeps
- * its rotation and flags while its radii scale by `k`.
+ * `sketchPathData` / `fillPathData`): points map through scale-about-centre, and
+ * an `A` arc keeps its rotation and flags while its radii scale by `k`.
  */
 export function drawnPath(sketch: SketchDoc | undefined, size: number): string {
   const ob = sketchOutlineBounds(sketch)
   if (!ob) return ''
-  const { d: d0, minX, minY, maxX, maxY } = ob
+  const { minX, minY, maxX, maxY } = ob
+  const d0 = fillPathData(sketch!) || ob.d
   const ext = Math.max(maxX - minX, maxY - minY)
   if (!(ext > 0) || !(size > 0)) return ''
   const k = size / ext, cx = (minX + maxX) / 2, cy = (minY + maxY) / 2
