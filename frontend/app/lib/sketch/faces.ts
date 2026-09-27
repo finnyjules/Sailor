@@ -185,10 +185,30 @@ function edgeLen(h: Pick<HalfEdge, 'kind' | 'p0' | 'p1' | 'r' | 'sweep'>): numbe
   return h.kind === 'line' ? Math.hypot(h.p1.x - h.p0.x, h.p1.y - h.p0.y) : Math.abs(h.sweep!) * h.r!
 }
 
-function buildGraph(srcs: Src[], params: number[][], bridges: { from: Vec2; to: Vec2 }[], tol: number): Graph {
+/** A tangent touch between pieces i and j at q, and each piece's parameter there. */
+interface Touch { q: Vec2; i: number; j: number; ui: number; uj: number }
+interface Splits { params: number[][]; touches: Touch[] }
+
+function buildGraph(srcs: Src[], splits: Splits, bridges: { from: Vec2; to: Vec2 }[], tol: number): Graph {
+  const { params, touches } = splits
+  // each piece's touch parameters (they win a run over a plain crossing)
+  const touchU: Set<number>[] = srcs.map(() => new Set())
+  for (const t of touches) { touchU[t.i]!.add(t.ui); touchU[t.j]!.add(t.uj) }
   const vertices: Vec2[] = []
   const grid = new Map<string, number[]>()
   const cell = (x: number) => Math.floor(x / tol)
+  // the vertex within rad of p (nearest), or -1; never adds one
+  function nearVertex(p: Vec2, rad: number): number {
+    const cx = cell(p.x), cy = cell(p.y), n = Math.ceil(rad / tol)
+    let best = -1, bd = rad
+    for (let dx = -n; dx <= n; dx++) for (let dy = -n; dy <= n; dy++) {
+      for (const i of grid.get(`${cx + dx},${cy + dy}`) ?? []) {
+        const d = dst(vertices[i]!, p)
+        if (d <= bd) { bd = d; best = i }
+      }
+    }
+    return best
+  }
   function vid(p: Vec2): number {
     const cx = cell(p.x), cy = cell(p.y)
     let best = -1, bd = Infinity
@@ -248,8 +268,11 @@ function buildGraph(srcs: Src[], params: number[][], bridges: { from: Vec2; to: 
     let runPt: Vec2 | null = null
     const flush = () => {
       if (!run.length) return
+      // the piece's own end, else a tangent touch (so the piece leaves the
+      // vertex in its true tangent direction), else the run's middle
       const own = g.kind !== 'circle' ? run.find(u => u === 0 || u === 1) : undefined
-      uniq.push(own ?? (run.length === 1 ? run[0]! : (run[0]! + run[run.length - 1]!) / 2))
+      const touch = run.find(u => touchU[i]!.has(u))
+      uniq.push(own ?? touch ?? (run.length === 1 ? run[0]! : (run[0]! + run[run.length - 1]!) / 2))
       run = []
     }
     for (const u of ps) {
@@ -263,8 +286,8 @@ function buildGraph(srcs: Src[], params: number[][], bridges: { from: Vec2; to: 
       if (uniq.length > 1) {
         const first = uniq[0]!, last = uniq[uniq.length - 1]!
         if (dst(at(g, first), at(g, last)) <= tol) {
-          // the run wraps past angle 0: one point, midway
-          let mid = (last + first + 1) / 2
+          // the run wraps past angle 0: one point — a touch if it holds one, else midway
+          let mid = touchU[i]!.has(first) ? first : touchU[i]!.has(last) ? last : (last + first + 1) / 2
           if (mid >= 1) mid -= 1
           uniq.pop(); uniq[0] = mid
           uniq.sort((x, y) => x - y)
@@ -294,6 +317,33 @@ function buildGraph(srcs: Src[], params: number[][], bridges: { from: Vec2; to: 
   // every half-edge ends exactly on its vertices (the outline and the polygon
   // close on the drawing's own points, not on trig noise)
   for (const h of halfEdges) { h.p0 = vertices[h.from]!; h.p1 = vertices[h.to]! }
+  // at a tangent touch the two pieces leave in the same direction, but a
+  // piece that ENDS there does so a slide s along from the true touch point
+  // (tangency is second order: a residual ε leaves s ≈ √(2rε)), so its own
+  // direction is off by up to s / r. Pieces detected tangent at this vertex
+  // take one shared direction wherever theirs agree within that bound, and
+  // the turn order below falls back to curvature — the true order.
+  for (const t of touches) {
+    const v = nearVertex(t.q, 2 * tol)
+    if (v < 0) continue
+    const rMin = Math.min(srcs[t.i]!.g.r ?? Infinity, srcs[t.j]!.g.r ?? Infinity)
+    const lim = Math.min(0.5, (4 * tol) / rMin + ANG_EPS)
+    const at_v = halfEdges.map((_, h) => h).filter(h => halfEdges[h]!.from === v)
+    const A = at_v.filter(h => halfEdges[h]!.piece === t.i), B = at_v.filter(h => halfEdges[h]!.piece === t.j)
+    for (const b of B) {
+      const hb = halfEdges[b]!
+      let best = -1, bd = lim
+      for (const a of A) {
+        const dd = Math.abs(halfEdges[a]!.ang - hb.ang), w = Math.min(dd, TAU - dd)
+        if (w < bd) { bd = w; best = a }
+      }
+      if (best < 0) continue
+      const ha = halfEdges[best]!
+      // keep a line's direction (exact); otherwise the first piece's
+      if (hb.kind === 'line' && ha.kind !== 'line') ha.ang = hb.ang
+      else hb.ang = ha.ang
+    }
+  }
   // outgoing half-edges round each vertex, counter-clockwise; at an equal
   // leaving direction (within ANG_EPS) the one turning right comes first
   const out: number[][] = vertices.map(() => [])
@@ -310,16 +360,19 @@ function buildGraph(srcs: Src[], params: number[][], bridges: { from: Vec2; to: 
 
 // ── crossings and touches ───────────────────────────────────────────────────
 
-/** The one point where two pieces touch tangentially, within tol — a line on a
- *  circle or arc (|distance from the centre to the line − r| ≤ tol), two
- *  circles or arcs touching outside (|d − (r1 + r2)| ≤ tol) or inside
- *  (|d − |r1 − r2|| ≤ tol) — placed midway across the solver's residual, and
- *  only where both pieces actually reach it. null when they don't touch like
- *  that. (crossings.ts' own thresholds are absolute, so a touch a solve left
- *  1e-8 apart reads there as a miss or as two crossings a hair apart.) */
-function tangentPoint(g1: CurveGeom, g2: CurveGeom, tol: number): Vec2 | null {
+/** Two pieces within the weld tolerance of tangency — a line and a circle or
+ *  arc (|distance from the centre to the line − r| ≤ tol), two circles or arcs
+ *  touching outside (|d − (r1 + r2)| ≤ tol) or inside (|d − |r1 − r2|| ≤ tol).
+ *  If they miss, or cross at two points no more than tol from their middle,
+ *  that is ONE touch, placed midway across the solver's residual (`touch`).
+ *  If they overlap by a hair yet cross further apart than tol (a line end slid
+ *  along a circle — tangency is second order in the slide), it is two real
+ *  crossings, computed here (`cross`) because crossings.ts' absolute
+ *  thresholds read such a pair as one tangent point, or as a miss. Only
+ *  points both pieces actually reach count. null when not near tangency. */
+function nearTangent(g1: CurveGeom, g2: CurveGeom, tol: number): { touch: Vec2 } | { cross: Vec2[] } | null {
   if (g1.kind === 'line' && g2.kind === 'line') return null
-  let q: Vec2 | null = null
+  let q: Vec2, h2: number, mid: Vec2, dir: Vec2
   if (g1.kind === 'line' || g2.kind === 'line') {
     const L = g1.kind === 'line' ? g1 : g2, C = g1.kind === 'line' ? g2 : g1
     const a = L.a!, b = L.b!, c = C.c!, r = C.r!
@@ -331,6 +384,10 @@ function tangentPoint(g1: CurveGeom, g2: CurveGeom, tol: number): Vec2 | null {
     if (dc < 1e-12 || Math.abs(dc - r) > tol) return null
     const m = (r + dc) / 2 / dc
     q = { x: c.x + (foot.x - c.x) * m, y: c.y + (foot.y - c.y) * m }
+    h2 = r * r - dc * dc
+    mid = foot
+    const len = Math.sqrt(L2)
+    dir = { x: dx / len, y: dy / len }
   } else {
     const c1 = g1.c!, r1 = g1.r!, c2 = g2.c!, r2 = g2.r!
     const d = dst(c1, c2)
@@ -341,24 +398,37 @@ function tangentPoint(g1: CurveGeom, g2: CurveGeom, tol: number): Vec2 | null {
     else if (Math.abs(d - Math.abs(r1 - r2)) <= tol) s = r1 >= r2 ? (r1 + d + r2) / 2 : (-r1 + d - r2) / 2   // inside
     else return null
     q = { x: c1.x + ux * s, y: c1.y + uy * s }
+    const a = (d * d + r1 * r1 - r2 * r2) / (2 * d)
+    h2 = r1 * r1 - a * a
+    mid = { x: c1.x + ux * a, y: c1.y + uy * a }
+    dir = { x: -uy, y: ux }
   }
-  // both pieces must reach the touch (an arc's sweep, a line's extent)
-  for (const g of [g1, g2]) if (dst(at(g, paramNear(g, q)), q) > 2 * tol) return null
-  return q
+  const reaches = (p: Vec2, lim: number) => dst(at(g1, paramNear(g1, p)), p) <= lim && dst(at(g2, paramNear(g2, p)), p) <= lim
+  if (h2 <= tol * tol) return reaches(q, tol) ? { touch: q } : null   // reached within the weld distance, so the touch and the piece's end weld into one vertex
+  const h = Math.sqrt(h2)
+  const cross = [{ x: mid.x - dir.x * h, y: mid.y - dir.y * h }, { x: mid.x + dir.x * h, y: mid.y + dir.y * h }].filter(p => reaches(p, tol))
+  return { cross }
 }
 
-function splitParams(srcs: Src[], tol: number): number[][] {
+function splitParams(srcs: Src[], tol: number): Splits {
   const params = srcs.map(s => (s.g.kind === 'circle' ? [] : [0, 1]))
+  const touches: Touch[] = []
   for (let i = 0; i < srcs.length; i++) {
     for (let j = i + 1; j < srcs.length; j++) {
       const A = srcs[i]!, B = srcs[j]!
       if (!boxesMeet(A.box, B.box, tol)) continue
-      const tp = tangentPoint(A.g, B.g, tol)
-      if (tp) {
+      const nt = nearTangent(A.g, B.g, tol)
+      if (nt && 'touch' in nt) {
         // a tangent touch is ONE split point on each piece, whatever the
         // float maths made of it (a miss, or two crossings a hair apart)
-        params[i]!.push(paramNear(A.g, tp))
-        params[j]!.push(paramNear(B.g, tp))
+        const tp = nt.touch, ui = paramNear(A.g, tp), uj = paramNear(B.g, tp)
+        params[i]!.push(ui)
+        params[j]!.push(uj)
+        touches.push({ q: tp, i, j, ui, uj })
+        continue
+      }
+      if (nt) {
+        for (const p of nt.cross) { params[i]!.push(paramNear(A.g, p)); params[j]!.push(paramNear(B.g, p)) }
         continue
       }
       for (const ip of intersectCurves(A.g, B.g)) {
@@ -369,18 +439,29 @@ function splitParams(srcs: Src[], tol: number): number[][] {
   }
   // an end that touches another piece (a trimmed end pinned onto it, a
   // T-junction the float maths just missed) splits that piece there
-  const ends: Vec2[] = []
-  for (const s of srcs) if (s.g.kind !== 'circle') ends.push(s.g.a!, s.g.b!)
+  // — except an end that is only near a piece because the two converge on a
+  // tangent touch elsewhere (an arc or line running on past the touch and
+  // ending just off the curve): the touch is their one contact
+  const ends: { p: Vec2; of: number }[] = []
+  srcs.forEach((s, k) => { if (s.g.kind !== 'circle') ends.push({ p: s.g.a!, of: k }, { p: s.g.b!, of: k }) })
+  const touchAt = new Map<string, Vec2[]>()
+  for (const t of touches) {
+    const key = t.i < t.j ? `${t.i}|${t.j}` : `${t.j}|${t.i}`
+    const list = touchAt.get(key)
+    if (list) list.push(t.q); else touchAt.set(key, [t.q])
+  }
   for (let i = 0; i < srcs.length; i++) {
     const s = srcs[i]!
-    for (const e of ends) {
+    for (const { p: e, of } of ends) {
       if (!boxHit(s.box, e, tol)) continue
+      const qs = touchAt.get(i < of ? `${i}|${of}` : `${of}|${i}`)
+      if (qs && qs.every(q => dst(q, e) > tol)) continue
       const u = paramNear(s.g, e)
       const q = at(s.g, u)
       if (Math.hypot(q.x - e.x, q.y - e.y) <= tol) params[i]!.push(u)
     }
   }
-  return params
+  return { params, touches }
 }
 
 // ── gap bridges ─────────────────────────────────────────────────────────────
@@ -453,17 +534,23 @@ function findBridges(srcs: Src[], gr: Graph, gap: number, tol: number): { params
 function flatten(h: HalfEdge, pts: Vec2[]): void {
   if (h.kind === 'line') { pts.push(h.p1); return }
   const n = Math.max(1, Math.ceil(Math.abs(h.sweep!) / (Math.PI / 32)))
-  for (let i = 1; i <= n; i++) {
+  for (let i = 1; i < n; i++) {
     const a = h.a0! + (h.sweep! * i) / n
     pts.push({ x: h.c!.x + h.r! * Math.cos(a), y: h.c!.y + h.r! * Math.sin(a) })
   }
+  pts.push(h.p1)
 }
 
-// ½∮(x dy − y dx) along one half-edge, exact for arcs
+// ½∮(x dy − y dx) along one half-edge, exact for arcs. An arc's own ends can
+// sit up to the weld tolerance off its vertices (a touch parameter, a
+// clustered crossing), so the stretch from each vertex to the arc is counted
+// as a straight hair: the cycle's area is then that of one closed outline.
 function areaPart(h: HalfEdge): number {
-  if (h.kind === 'line') return 0.5 * (h.p0.x * h.p1.y - h.p0.y * h.p1.x)
+  const cr = (a: Vec2, b: Vec2) => a.x * b.y - a.y * b.x
+  if (h.kind === 'line') return 0.5 * cr(h.p0, h.p1)
   const { x: cx, y: cy } = h.c!, r = h.r!, f0 = h.a0!, f1 = h.a0! + h.sweep!
-  return 0.5 * (r * r * h.sweep! + r * (cx * (Math.sin(f1) - Math.sin(f0)) - cy * (Math.cos(f1) - Math.cos(f0))))
+  const s0 = { x: cx + r * Math.cos(f0), y: cy + r * Math.sin(f0) }, s1 = { x: cx + r * Math.cos(f1), y: cy + r * Math.sin(f1) }
+  return 0.5 * (r * r * h.sweep! + r * (cx * (Math.sin(f1) - Math.sin(f0)) - cy * (Math.cos(f1) - Math.cos(f0))) + cr(h.p0, s0) + cr(s1, h.p1))
 }
 
 /** Every area the drawing encloses. `gap`: bridge ends that stop at most this
@@ -471,8 +558,9 @@ function areaPart(h: HalfEdge): number {
 export function findFaces(doc: SketchDoc, opts: { gap?: number } = {}): FaceSet {
   const srcs = collectPieces(doc)
   const tol = weldTol(srcs)
-  const params = splitParams(srcs, tol)
-  let gr = buildGraph(srcs, params, [], tol)
+  const splits = splitParams(srcs, tol)
+  const { params } = splits
+  let gr = buildGraph(srcs, splits, [], tol)
   let bridges: { from: Vec2; to: Vec2 }[] = []
   const gap = opts.gap ?? 0
   if (gap > tol) {
@@ -480,7 +568,7 @@ export function findFaces(doc: SketchDoc, opts: { gap?: number } = {}): FaceSet 
     if (found.bridges.length) {
       for (const p of found.params) params[p.piece]!.push(p.u)
       bridges = found.bridges
-      gr = buildGraph(srcs, params, bridges, tol)
+      gr = buildGraph(srcs, splits, bridges, tol)
     }
   }
   const { vertices, halfEdges, pieceEdges, out } = gr

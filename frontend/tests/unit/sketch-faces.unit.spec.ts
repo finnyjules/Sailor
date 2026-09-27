@@ -264,6 +264,85 @@ describe('faces — fix round 1 (tangents with solver residuals, cache keys, nes
   })
 })
 
+describe('faces — fix round 2 (a piece ending at a tangent touch)', () => {
+  // tangency is second-order in the slide: a solve that leaves 1e-8 between a
+  // line and a circle can leave the line's END ~1e-4 along from the true touch
+  /** Two circles and the two lines of a belt round them; the lines' ends sit on
+   *  the circles, slid `sl` (radians) along from the true touch points. */
+  function belt(sc: number, sl: number): SketchDoc {
+    const d = doc()
+    addCircle(d, addPoint(d, 0, 0), sc); addCircle(d, addPoint(d, 5 * sc, 0), sc)
+    for (const up of [1, -1]) addLine(d, addPoint(d, sc * Math.sin(sl), up * sc * Math.cos(sl)), addPoint(d, sc * (5 + Math.sin(sl)), up * sc * Math.cos(sl)))
+    return d
+  }
+  /** A circle and a line ending on it at the touch, closed by two lines. */
+  function dShape(sc: number, sl: number): SketchDoc {
+    const d = doc()
+    addCircle(d, addPoint(d, 0, 0), sc)
+    const p = addPoint(d, sc * Math.sin(sl), sc * Math.cos(sl)), q = addPoint(d, 3 * sc, sc * Math.cos(sl))
+    const r = addPoint(d, 3 * sc, 0), e = addPoint(d, sc, 0)
+    addLine(d, p, q); addLine(d, q, r); addLine(d, r, e)
+    return d
+  }
+  /** A circle and an arc touching it from outside, the arc ENDING at the touch
+   *  (slid `sl` along its own circle), closed by three lines. */
+  function arcShape(sc: number, sl: number): SketchDoc {
+    const d = doc()
+    addCircle(d, addPoint(d, 0, 0), sc)
+    const p = addPoint(d, sc * Math.sin(sl), sc * (2 - Math.cos(sl))), a = addPoint(d, sc, 2 * sc)
+    addPath(d, [p, a], [{ kind: 'arc', center: addPoint(d, 0, 2 * sc), sweep: 1 }])
+    const b = addPoint(d, 2 * sc, 2 * sc), c = addPoint(d, 2 * sc, 0), e = addPoint(d, sc, 0)
+    addLine(d, a, b); addLine(d, b, c); addLine(d, c, e)
+    return d
+  }
+  it('lines tangent to two circles and running a hair past the touches: two discs and the belt', () => {
+    for (const sc of [1, 100]) for (const o of [1e-4, 1e-3]) {
+      const d = doc()
+      addCircle(d, addPoint(d, 0, 0), sc); addCircle(d, addPoint(d, 5 * sc, 0), sc)
+      for (const up of [1, -1]) addLine(d, addPoint(d, -o * sc, up * sc), addPoint(d, (5 + o) * sc, up * sc))
+      const fs = findFaces(d)
+      expect(fs.faces).toHaveLength(3)
+      expect(fs.faces[faceAt(fs, { x: 2.5 * sc, y: 0 })!]!.area / (sc * sc)).toBeCloseTo(10 - Math.PI, 6)
+    }
+  })
+  const SLIDES = [1e-5, -1e-5, 1e-4, -1e-4]
+  for (const sc of [1, 100]) {
+    // slid further than the weld tolerance: the pieces overlap by a hair but
+    // cross at two points too far apart to be one touch — two real crossings
+    for (const sl of [1e-3, -1e-3]) {
+      it(`a belt and a D slid ${sl} (past the weld tolerance, scale ${sc}) keep their faces`, () => {
+        const fs = findFaces(belt(sc, sl))
+        expect(fs.faces).toHaveLength(3)
+        expect(fs.faces[faceAt(fs, { x: 2.5 * sc, y: 0 })!]!.area / (sc * sc)).toBeCloseTo(10 - Math.PI, 3)
+        expect(findFaces(dShape(sc, sl)).faces).toHaveLength(2)
+        expect(findFaces(arcShape(sc, sl)).faces).toHaveLength(2)
+      })
+    }
+    const arcRef = findFaces(arcShape(sc, 0))
+    for (const sl of SLIDES) {
+      it(`a belt whose ends are slid ${sl} along the circles (scale ${sc}): two discs and the belt`, () => {
+        const fs = findFaces(belt(sc, sl))
+        expect(fs.faces).toHaveLength(3)
+        expect(fs.faces[faceAt(fs, { x: 2.5 * sc, y: 0 })!]!.area / (sc * sc)).toBeCloseTo(10 - Math.PI, 4)
+        expect(fs.faces[faceAt(fs, { x: 0, y: 0 })!]!.area / (sc * sc)).toBeCloseTo(Math.PI, 6)
+      })
+      it(`a D whose top line ends slid ${sl} along the circle (scale ${sc}): the disc and the D`, () => {
+        const fs = findFaces(dShape(sc, sl))
+        expect(fs.faces).toHaveLength(2)
+        expect(fs.faces[faceAt(fs, { x: 2 * sc, y: 0.5 * sc })!]!.area / (sc * sc)).toBeCloseTo(3 - Math.PI / 4, 4)
+      })
+      it(`an arc ending at its touch on a circle, slid ${sl} (scale ${sc}): the disc and the area beside them`, () => {
+        const fs = findFaces(arcShape(sc, sl))
+        expect(fs.faces).toHaveLength(2)
+        expect(arcRef.faces).toHaveLength(2)
+        const probe = { x: 1.5 * sc, y: 1 * sc }
+        expect(fs.faces[faceAt(fs, probe)!]!.area / (sc * sc)).toBeCloseTo(arcRef.faces[faceAt(arcRef, probe)!]!.area / (sc * sc), 4)
+        expect(fs.faces[faceAt(fs, { x: 0, y: 0 })!]!.area / (sc * sc)).toBeCloseTo(Math.PI, 6)
+      })
+    }
+  }
+})
+
 describe('faces — speed (one connected drawing, a symmetric grid)', () => {
   it('161 pieces round a ring and a 21 × 21 grid stay well inside a frame', () => {
     // 64 two-arc petals round a circle, a spoke to every other one: one connected drawing
