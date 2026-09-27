@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto'
 import { RUNNER_TIMEOUTS, createEngine, type Engine } from './engine'
 import { getRunStore } from './store'
 import { downloadResult, realFalClient } from './falQueue'
+import { safeAnswerFetch } from './answerDownload'
 import { realReplicateClient } from './replicateQueue'
 import { createEngineResultStore } from './results'
 import { createHandoff } from './handoff'
@@ -72,7 +73,12 @@ export function getEngine(): Engine {
       },
     }),
     // Network errors and 5xx are tried again (1s, 2s): fal has already billed the result.
-    download: (url, o) => downloadResult(url, o?.maxBytes !== undefined ? { maxBytes: o.maxBytes } : {}),
+    // Every try goes through the safe-fetch policy with its kind's cap and time limit (answerDownload.ts).
+    download: (url, o) => downloadResult(url, {
+      fetchOnce: safeAnswerFetch({ hosted: isHosted(), kind: o?.kind ?? 'image' }),
+      ...(o?.maxBytes !== undefined ? { maxBytes: o.maxBytes } : {}),
+      ...(o?.signal ? { signal: o.signal } : {}),
+    }),
     hosted: isHosted,
     families: runnerFamilies,
     backup: runnerBackup,

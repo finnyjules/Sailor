@@ -6,7 +6,7 @@
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { PY_STR_UNREADABLE, parsePyJson, pyFloatRepr, pyJsonDumps, pyStr } from '#shared/runner/pyJson'
+import { PY_JSON_MAX_DEPTH, PY_JSON_TOO_DEEP, PY_STR_UNREADABLE, parsePyJson, pyFloatRepr, pyJsonDumps, pyStr, type PyJson } from '#shared/runner/pyJson'
 
 interface Machinery {
   bodies: ({ text: string; dumps: string } | { text: string; error: string })[]
@@ -63,5 +63,22 @@ describe('what the parse keeps', () => {
   it('keeps ints as their digits, floats as floats, and a repeated key in its first place', () => {
     expect(parsePyJson('{"a": 1, "b": 1.0, "a": 18446744073709551617}')).toEqual({ obj: [['a', { int: '18446744073709551617' }], ['b', { float: 1 }]] })
     expect(parsePyJson('-0')).toEqual({ int: '0' })
+  })
+})
+
+describe('nesting past 1,000 levels', () => {
+  const lists = (n: number) => `${'['.repeat(n)}${']'.repeat(n)}`
+  const dicts = (n: number) => `${'{"a": '.repeat(n)}1${'}'.repeat(n)}`
+  it('reads and writes 1,000 levels as Python does', () => {
+    expect(PY_JSON_MAX_DEPTH).toBe(1000)
+    expect(pyJsonDumps(parsePyJson(lists(1000)))).toBe(lists(1000))
+    expect(pyJsonDumps(parsePyJson(dicts(1000)))).toBe(dicts(1000))
+  })
+  it('refuses more in plain words, never a stack overflow (even 200,000 levels)', () => {
+    for (const text of [lists(1001), dicts(1001), lists(200_000), dicts(200_000)]) expect(() => parsePyJson(text)).toThrow(PY_JSON_TOO_DEEP)
+    let deep: PyJson = []
+    for (let i = 0; i < 200_000; i++) deep = [deep]
+    expect(() => pyJsonDumps(deep)).toThrow(PY_JSON_TOO_DEEP)
+    expect(PY_JSON_TOO_DEEP).toMatch(/^[A-Z][^A-Z]*$/)
   })
 })

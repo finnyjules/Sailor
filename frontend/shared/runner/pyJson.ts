@@ -20,6 +20,14 @@ export type PyJson = null | boolean | string | { int: string } | { float: number
 /** What `pyStr` throws on a list or a dict: the answer isn't the text the node expects. */
 export const PY_STR_UNREADABLE = 'The model answered in a form Sailor can’t read'
 
+/**
+ * The deepest nesting read or written (R3.1 fix round 1): past it, a plain
+ * refusal instead of the JS stack running out (Python itself reads about
+ * 10,000 levels; no answer a node reads comes close).
+ */
+export const PY_JSON_MAX_DEPTH = 1000
+export const PY_JSON_TOO_DEEP = 'The model’s answer is nested too deeply to read'
+
 /** CPython's int() refuses a number written with more digits than this (sys.get_int_max_str_digits()). */
 const PY_INT_MAX_STR_DIGITS = 4300
 
@@ -108,17 +116,21 @@ export function parsePyJson(text: string): PyJson {
     return { int: digits === '0' ? '0' : lexeme }
   }
 
+  let depth = 0
+  const enter = () => { if (++depth > PY_JSON_MAX_DEPTH) throw new Error(PY_JSON_TOO_DEEP) }
+
   function value(): PyJson {
     skip()
     if (i >= n) throw new PyJsonError('Expecting value', i)
     const c = text.charCodeAt(i)
     if (c === 0x22) return str()
     if (c === 0x7b) {
+      enter()
       i++
       const entries: [string, PyJson][] = []
       const place = new Map<string, number>()
       skip()
-      if (text.charCodeAt(i) === 0x7d) { i++; return { obj: entries } }
+      if (text.charCodeAt(i) === 0x7d) { i++; depth--; return { obj: entries } }
       for (;;) {
         skip()
         if (text.charCodeAt(i) !== 0x22) throw new PyJsonError('Expecting property name enclosed in double quotes', i)
@@ -132,21 +144,22 @@ export function parsePyJson(text: string): PyJson {
         else entries[at] = [key, v]
         skip()
         const d = text.charCodeAt(i)
-        if (d === 0x7d) { i++; return { obj: entries } }
+        if (d === 0x7d) { i++; depth--; return { obj: entries } }
         if (d !== 0x2c) throw new PyJsonError('Expecting \',\' delimiter', i)
         i++
       }
     }
     if (c === 0x5b) {
+      enter()
       i++
       const items: PyJson[] = []
       skip()
-      if (text.charCodeAt(i) === 0x5d) { i++; return items }
+      if (text.charCodeAt(i) === 0x5d) { i++; depth--; return items }
       for (;;) {
         items.push(value())
         skip()
         const d = text.charCodeAt(i)
-        if (d === 0x5d) { i++; return items }
+        if (d === 0x5d) { i++; depth--; return items }
         if (d !== 0x2c) throw new PyJsonError('Expecting \',\' delimiter', i)
         i++
       }
@@ -198,21 +211,27 @@ export function pyFloatRepr(x: number): string {
 
 const SHORT_ESCAPES: Record<number, string> = { 0x22: '\\"', 0x5c: '\\\\', 0x08: '\\b', 0x0c: '\\f', 0x0a: '\\n', 0x0d: '\\r', 0x09: '\\t' }
 
-/** json.dumps of a string with ensure_ascii: every UTF-16 unit outside ' '…'~' as \uxxxx (lower-case hex). */
-function dumpString(s: string): string {
+/**
+ * json.dumps of a string: the short escapes, every other control character as
+ * \uxxxx (lower-case hex), and with ensure_ascii (the default) every UTF-16
+ * unit past '~' too (an astral character as its surrogate pair). The one
+ * escaper Sailor's Python-exact JSON writers share (server/native/pyJson.ts too).
+ */
+export function pyJsonString(s: string, ensureAscii = true): string {
   let out = '"'
   let start = 0
   for (let i = 0; i < s.length; i++) {
     const c = s.charCodeAt(i)
     const short = SHORT_ESCAPES[c]
-    if (short === undefined && c >= 0x20 && c <= 0x7e) continue
+    if (short === undefined && c >= 0x20 && (c <= 0x7e || !ensureAscii)) continue
     out += s.slice(start, i) + (short ?? `\\u${c.toString(16).padStart(4, '0')}`)
     start = i + 1
   }
   return `${out}${s.slice(start)}"`
 }
 
-function dumpFloat(x: number): string {
+/** A float as json.dumps writes it: its repr, or NaN / Infinity / -Infinity (the one float writer, server/native/pyJson.ts too). */
+export function pyJsonFloat(x: number): string {
   if (Number.isNaN(x)) return 'NaN'
   if (x === Number.POSITIVE_INFINITY) return 'Infinity'
   if (x === Number.NEGATIVE_INFINITY) return '-Infinity'
@@ -221,14 +240,19 @@ function dumpFloat(x: number): string {
 
 /** Python's json.dumps defaults: ensure_ascii, separators ', ' and ': ', float repr, NaN / Infinity / -Infinity. */
 export function pyJsonDumps(v: PyJson): string {
+  return dump(v, 0)
+}
+
+function dump(v: PyJson, depth: number): string {
   if (v === null) return 'null'
   if (v === true) return 'true'
   if (v === false) return 'false'
-  if (typeof v === 'string') return dumpString(v)
-  if (Array.isArray(v)) return `[${v.map(pyJsonDumps).join(', ')}]`
-  if ('int' in v) return v.int
-  if ('float' in v) return dumpFloat(v.float)
-  return `{${v.obj.map(([k, x]) => `${dumpString(k)}: ${pyJsonDumps(x)}`).join(', ')}}`
+  if (typeof v === 'string') return pyJsonString(v)
+  if ('int' in v && !Array.isArray(v)) return v.int
+  if ('float' in v && !Array.isArray(v)) return pyJsonFloat(v.float)
+  if (depth >= PY_JSON_MAX_DEPTH) throw new Error(PY_JSON_TOO_DEEP)
+  if (Array.isArray(v)) return `[${v.map(x => dump(x, depth + 1)).join(', ')}]`
+  return `{${v.obj.map(([k, x]) => `${pyJsonString(k)}: ${dump(x, depth + 1)}`).join(', ')}}`
 }
 
 /** Python's str() of a JSON scalar: strings as they are, int digits, float repr, 'True' / 'False' / 'None'. Throws PY_STR_UNREADABLE on a list or dict. */

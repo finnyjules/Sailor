@@ -56,6 +56,7 @@
 import { IMAGE_MODELS } from '../../app/data/image-models'
 import { LEGACY_VIDEO_MODEL_IDS } from '../../app/data/video-prices'
 import { creditsForUsd } from './markup'
+import { callsCredits, pipelineCallsOf } from './pipelinePrice'
 import { editMaxUsd, editStepsUsd } from './editRates'
 import { SETTING_PRICED_NODE_CLASSES, editCalls, editSteps } from './editSettings'
 import { imagePriceMaxUsd, imagePriceUsd, imageRate } from './imageRates'
@@ -221,6 +222,9 @@ export type NodePrice =
  * UnpricedGraphError; the badge and estimate treat it as "no price".
  */
 export function priceNode(classType: string, inputs: NodeInputs | null | undefined, opts: PriceOptions = {}): NodePrice {
+  // A node that makes several calls (a runner pipeline, R3.1): the sum of each call's credits.
+  const planned = pipelineCallsOf(classType, inputs ?? {})
+  if (planned) return { usd: planned.reduce((s, c) => s + c.usd, 0), credits: callsCredits(planned) }
   if (SETTING_PRICED_CLASS_SET.has(classType)) {
     const usd = editNodeUsd(classType, inputs ?? {}, opts)
     return typeof usd === 'number' ? { usd, credits: creditsForUsd(usd) } : usd

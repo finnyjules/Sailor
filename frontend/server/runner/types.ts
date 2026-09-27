@@ -122,6 +122,12 @@ export interface CallRecord {
   fingerprint?: string
   /** Set once this call was moved to its backup service (as NodeRecord.switchedFrom). */
   switchedFrom?: NodeRecord['switchedFrom']
+  /**
+   * The call finished but a file of its answer could not be downloaded or
+   * kept (R3.1 fix round 1): not delivered, so not charged (Sailor absorbs
+   * it; reported as runner.download.lost).
+   */
+  lost?: true
 }
 
 export type NodeStatus = 'waiting' | 'running' | 'done' | 'error' | 'skipped' | 'paused' | 'dropped' | 'stopped'

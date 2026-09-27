@@ -25,8 +25,8 @@ import { ReplicateError } from './replicateQueue'
 import { cancelAndConfirm, type CancelCheck } from './cancelCheck'
 import { planNode, type DeriveIO, type PipelineCall, type ProviderBackup } from './executors'
 import { rawTextOf } from './rawJson'
-import { creditsForUsd } from '#shared/pricing/markup'
-import { MAX_MEDIA_BYTES } from '../utils/graphInputSeconds'
+import { callsCredits } from '#shared/pricing/pipelinePrice'
+import { ANSWER_MAX_BYTES, answerCap, answerExt, checkAnswerBytes, type AnswerKind } from './answerDownload'
 import { answerRgbPng } from './pictures/pythonView'
 import type { KeepStep } from './compositor/keep'
 import { createMemoryHeldBytes, type HeldBytes } from './heldBytes'
@@ -48,7 +48,7 @@ import { switchedSinceHold } from './switches'
 import { measuredMediaChanged } from './mediaInputs'
 import type { InputSeconds } from '#shared/pricing/clipSettings'
 import type { Handoff } from './handoff'
-import { extFor, type ResultStore } from './results'
+import type { ResultStore } from './results'
 import { runIdOf, userKeyOf, type RunStore } from './store'
 import {
   emptyNodeRecord, stageKeyOf,
@@ -147,8 +147,12 @@ export interface EngineDeps {
   events: RunEvents
   ownership: OwnershipCheck
   records: { write(s: StageRecordSummary): Promise<void> }
-  /** Downloads an answer's file; over `maxBytes` it fails plainly (falQueue.ts downloadResult). */
-  download(url: string, o?: { maxBytes?: number }): Promise<{ bytes: Uint8Array; contentType: string | null }>
+  /**
+   * Downloads an answer's file under the safe-fetch policy for its kind
+   * (answerDownload.ts, through falQueue.ts downloadResult): over `maxBytes`
+   * it fails plainly; `signal` (the run's Stop) ends it.
+   */
+  download(url: string, o?: { maxBytes?: number; signal?: AbortSignal; kind?: AnswerKind }): Promise<{ bytes: Uint8Array; contentType: string | null }>
   hosted(): boolean
   /** The runner families switched on, server side (the authority). None when absent. */
   families?(): ReadonlySet<RunnerFamily>
@@ -711,15 +715,29 @@ export function createEngine(deps: EngineDeps) {
   }
 
   /**
+   * A pipeline's download that failed or couldn't be kept (fix round 1): the
+   * call whose answer named the file is not delivered, so not charged (Sailor
+   * absorbs it), and it is reported.
+   */
+  async function lostDownload(run: RunRecord, rec: NodeRecord, url: string, e: unknown, stageKey: string, nodeId: string): Promise<void> {
+    const call = rec.calls?.find(c => c.status === 'done' && !!c.answer
+      && (c.answer.urls.includes(url) || JSON.stringify(c.answer.result ?? null).includes(JSON.stringify(url).slice(1, -1))))
+    if (call) call.lost = true
+    deps.reportError(e, { site: 'runner.download.lost', stageKey, node: nodeId, url, call: call?.key ?? null })
+    await persist(run).catch(err => deps.reportError(err, { site: 'runner.call.save', stageKey, node: nodeId }))
+  }
+
+  /**
    * What one node is charged in its stage: a finished node's credits (a
    * reused one: nothing); a pipeline's (R3.1, ruling (f)), whether it ended
-   * done, failed or stopped, the credits of the dollars its finished calls
-   * cost, never above its hold (reported when it would be).
+   * done, failed or stopped, the sum of each finished and delivered call's
+   * credits (shared/pricing/pipelinePrice.ts, the hold's calculation), never
+   * above its hold (reported when it would be).
    */
   function chargeableCredits(rec: NodeRecord, stageKey: string, nodeId: string): number {
     if (rec.calls) {
-      const usd = rec.calls.filter(c => c.status === 'done').reduce((sum, c) => sum + c.usd, 0)
-      const credits = creditsForUsd(usd)
+      // Each call's credits from the one per-call calculation (the hold's), summed: never a marked-up sum of dollars.
+      const credits = callsCredits(rec.calls.filter(c => c.status === 'done' && !c.lost))
       if (credits > rec.credits) {
         deps.reportError(new Error(`A charge of ${credits} credits is above this step’s hold of ${rec.credits}; charged the hold`), {
           site: 'runner.charge.above-hold', stageKey, node: nodeId, charge: credits, hold: rec.credits,
@@ -989,6 +1007,13 @@ export function createEngine(deps: EngineDeps) {
     // This node turn's own held bytes (heldBytes.ts), let go when it finishes.
     const holder = `t${take.index}_${id.replace(/[^A-Za-z0-9_-]/g, '_')}`
     let heldUsed = false
+    // Each job is cancelled once in this turn, however many paths reach it.
+    const cancelledHere = new Set<string>()
+    const cancelOnce = async (req: PendingRequest) => {
+      if (cancelledHere.has(req.requestId)) return
+      cancelledHere.add(req.requestId)
+      await confirmCancel(run, req, { tries: 1 })
+    }
     const hold = {
       put: (b: Uint8Array) => { heldUsed = true; return held.put(run.id, holder, b) },
       get: (sha: string) => held.get(run.id, holder, sha),
@@ -1178,17 +1203,54 @@ export function createEngine(deps: EngineDeps) {
         if (!resuming) rec.credits = nodeCredits(take.prompt[id]!, inputPixels, families, inputSeconds)
         rec.calls ??= []
         await persist(run)
-        const made = await plan.run({
-          ...deriveIO(),
-          call: c => pipelineCall(run, rec, c, { stageKey, nodeId: id, userKey, signal, backupSettings, noBackup: resumedWithoutBackup }),
-          download: (url, o) => deps.download(url, { maxBytes: o?.maxBytes ?? MAX_MEDIA_BYTES }),
-          handOff: async (bytes, name) => {
-            const f = await kept.put(run.id, bytes, keptExtOf(name))
-            // Uploaded under the node's own name (its type goes by it); remembered by the bytes.
-            return deps.handoff.toUrlBytes({ ...f, filename: name }, bytes)
-          },
-          toUrl: handOff,
-        })
+        // The node's own signal (fix round 1): a failed or finished pipeline
+        // ends every call of it still waiting, sending or in flight.
+        const nodeCtl = new AbortController()
+        const nodeSignal = AbortSignal.any([signal, nodeCtl.signal])
+        const inflight = new Set<Promise<unknown>>()
+        const settleCalls = async () => {
+          if (!inflight.size) return
+          nodeCtl.abort()
+          for (const req of sentRequests(rec)) await cancelOnce(req)
+          await Promise.allSettled([...inflight])
+          // A send that was under way when the node ended got its request after the first round.
+          for (const req of sentRequests(rec)) await cancelOnce(req)
+        }
+        let made: Awaited<ReturnType<typeof plan.run>>
+        try {
+          made = await plan.run({
+            ...deriveIO(),
+            signal: nodeSignal,
+            call: (c) => {
+              const p = pipelineCall(run, rec, c, { stageKey, nodeId: id, userKey, signal: nodeSignal, backupSettings, noBackup: resumedWithoutBackup })
+              inflight.add(p)
+              void p.catch(() => {}).finally(() => inflight.delete(p))
+              return p
+            },
+            download: async (url, o) => {
+              const kind = o?.kind ?? 'image'
+              try {
+                const got = await deps.download(url, { maxBytes: answerCap(kind, o?.maxBytes), signal: nodeSignal, kind })
+                checkAnswerBytes(kind, got.bytes)
+                return got
+              }
+              catch (e) {
+                if (!nodeSignal.aborted) await lostDownload(run, rec, url, e, stageKey, id)
+                throw e
+              }
+            },
+            handOff: async (bytes, name) => {
+              const f = await kept.put(run.id, bytes, keptExtOf(name))
+              // Uploaded under the node's own name (its type goes by it); remembered by the bytes.
+              return deps.handoff.toUrlBytes({ ...f, filename: name }, bytes)
+            },
+            toUrl: handOff,
+          })
+        }
+        finally {
+          // No call record is written after the node's final save: every call has settled first.
+          await settleCalls()
+        }
         if (signal.aborted) throw new RunStopped()
         for (const v of Object.values(made.values)) checkValue(v)
         rec.values = made.values
@@ -1310,13 +1372,23 @@ export function createEngine(deps: EngineDeps) {
       // A token-priced node is charged what its answer says it used, never above its hold.
       if (plan.chargeOf) {
         const used = plan.chargeOf(result)
+        // Only a finite count of zero or more is believed, rounded up to whole
+        // credits; anything else (NaN, negative, infinite, not a number) charges the hold.
         if (used != null) {
-          if (used > rec.credits) {
-            deps.reportError(new Error(`A charge of ${used} credits is above this step’s hold of ${rec.credits}; charged the hold`), {
-              site: 'runner.charge.above-hold', stageKey, node: id, charge: used, hold: rec.credits,
+          if (typeof used !== 'number' || !Number.isFinite(used) || used < 0) {
+            deps.reportError(new Error(`This step’s answer gave a charge Sailor can’t read (${String(used)}); charged the hold`), {
+              site: 'runner.charge.unreadable', stageKey, node: id, charge: String(used), hold: rec.credits,
             })
           }
-          rec.credits = Math.max(0, Math.min(rec.credits, used))
+          else {
+            const credits = Math.ceil(used)
+            if (credits > rec.credits) {
+              deps.reportError(new Error(`A charge of ${credits} credits is above this step’s hold of ${rec.credits}; charged the hold`), {
+                site: 'runner.charge.above-hold', stageKey, node: id, charge: credits, hold: rec.credits,
+              })
+            }
+            rec.credits = Math.min(rec.credits, credits)
+          }
         }
       }
 
@@ -1350,17 +1422,32 @@ export function createEngine(deps: EngineDeps) {
       // Python reads `_first_output_url`: only the first is downloaded.
       if (plan.take === 'first') urls = urls.slice(0, 1)
       if (!urls.length) throw new Error(NO_FILE[plan.media])
-      // Every file is capped (a file over it fails the node after the call).
-      const download = (url: string) => deps.download(url, { maxBytes: MAX_MEDIA_BYTES })
+      // Every file goes through the safe-fetch policy, capped by its kind; a
+      // sound or a 3D file is checked by its bytes, and every extension comes
+      // from its kind's list (answerDownload.ts). A file lost here fails the
+      // node after its call: not charged (Sailor absorbs it), reported.
+      const kind: AnswerKind = plan.media
+      const fetchAnswer = async (url: string, keep: (bytes: Uint8Array, contentType: string | null) => Promise<OutputFile>): Promise<OutputFile> => {
+        try {
+          // Stop ends a download under way; a file already downloaded is kept (made and billed), as before.
+          const { bytes, contentType } = await deps.download(url, { maxBytes: ANSWER_MAX_BYTES[kind], signal, kind })
+          return await keep(bytes, contentType)
+        }
+        catch (e) {
+          if (!(e instanceof RunStopped) && !signal.aborted) {
+            deps.reportError(e, { site: 'runner.download.lost', stageKey, node: id, provider: providerOf(rec.request!), requestId: rec.request!.requestId, url })
+          }
+          throw e
+        }
+      }
       const saved: OutputFile[] = []
       if (plan.media === 'glb') {
         // A 3D file (spec ruling 1, R3 ruling (k)): Sailor's own copy, saved in
         // the user's output folder as an asset, handed on as a `glb` value
         // naming it. Python hands on the provider's link, which expires.
         const url = urls[0]!
-        const { bytes } = await download(url)
-        if (signal.aborted) throw new RunStopped()
-        const file = await deps.results.save(bytes, { userId: run.userId, prefix: plan.prefix, ext: 'glb' })
+        const file = await fetchAnswer(url, (bytes, contentType) =>
+          deps.results.save(bytes, { userId: run.userId, prefix: plan.prefix, ext: answerExt('glb', bytes, contentType, url) }))
         await deps.metering.addOutput(run.userId, stageKey, file)
         const values: Record<number, RunnerValue> = { 0: { kind: 'glb', url: viewUrlOf(file), file } }
         for (const v of Object.values(values)) checkValue(v)
@@ -1378,22 +1465,21 @@ export function createEngine(deps: EngineDeps) {
       if (plan.keep) {
         // Blend scene's kept subject (Task F11b): Python reads the first
         // answer only, lays it under the kept region, and saves that as a PNG.
-        const { bytes } = await download(urls[0]!)
-        const png = await plan.keep.apply(bytes, signal)
-        if (signal.aborted) throw new RunStopped()
-        const file = await deps.results.save(png, { userId: run.userId, prefix: plan.prefix, ext: 'png' })
+        const keepStep = plan.keep
+        const file = await fetchAnswer(urls[0]!, async (bytes) => {
+          const png = await keepStep.apply(bytes, signal)
+          if (signal.aborted) throw new RunStopped()
+          return deps.results.save(png, { userId: run.userId, prefix: plan.prefix, ext: 'png' })
+        })
         await deps.metering.addOutput(run.userId, stageKey, file)
         saved.push(file)
       }
       else {
         for (const url of urls) {
-          const { bytes, contentType } = await download(url)
-          // Python drops alpha before it saves (rule 3): the RGB PNG of the decoded pixels.
-          const file = plan.rgb
-            ? await deps.results.save(await answerRgbPng(bytes), { userId: run.userId, prefix: plan.prefix, ext: 'png' })
-            : await deps.results.save(bytes, {
-              userId: run.userId, prefix: plan.prefix, ext: extFor(contentType, url, plan.media === 'image' ? 'png' : plan.media === 'audio' ? 'wav' : 'mp4'),
-            })
+          const file = await fetchAnswer(url, async (bytes, contentType) => plan.rgb
+            // Python drops alpha before it saves (rule 3): the RGB PNG of the decoded pixels.
+            ? deps.results.save(await answerRgbPng(bytes), { userId: run.userId, prefix: plan.prefix, ext: 'png' })
+            : deps.results.save(bytes, { userId: run.userId, prefix: plan.prefix, ext: answerExt(kind, bytes, contentType, url) }))
           await deps.metering.addOutput(run.userId, stageKey, file)
           saved.push(file)
         }
@@ -1416,13 +1502,11 @@ export function createEngine(deps: EngineDeps) {
         // Stop may have landed while this request was being sent, before
         // Stop could see its id: cancel it here so nothing is left running.
         // A pipeline's call in flight too (R3.1).
-        for (const req of sentRequests(rec)) await confirmCancel(run, req, { tries: 1 })
+        for (const req of sentRequests(rec)) await cancelOnce(req)
       }
       else {
         rec.status = 'error'
         rec.error = plainError(e)
-        // A pipeline that failed with a call still out (calls made side by side): nothing is left running.
-        for (const c of rec.calls ?? []) if (c.status === 'sent' && c.request) await confirmCancel(run, c.request, { tries: 1 })
       }
       rec.endedAt = deps.now()
       await persist(run).catch(() => {})

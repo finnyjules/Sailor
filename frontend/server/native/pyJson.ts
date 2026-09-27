@@ -17,54 +17,11 @@
  * module assumes int, matching Sailor's own records (ids, timestamps — never
  * huge floats). Only >=1e21 falls through to float notation.
  */
+import { pyJsonFloat, pyJsonString } from '../../shared/runner/pyJson'
 
-const SHORT_ESCAPES: Record<string, string> = {
-  '"': '\\"',
-  '\\': '\\\\',
-  '\b': '\\b',
-  '\f': '\\f',
-  '\n': '\\n',
-  '\r': '\\r',
-  '\t': '\\t',
-}
-
-function pyString(s: string, ensureAscii: boolean): string {
-  let out = '"'
-  for (let i = 0; i < s.length; i++) {
-    const ch = s[i]!
-    const code = s.charCodeAt(i)
-    const short = SHORT_ESCAPES[ch]
-    if (short) out += short
-    else if (code < 0x20 || (ensureAscii && code > 0x7E)) out += `\\u${code.toString(16).padStart(4, '0')}`
-    else out += ch
-  }
-  return `${out}"`
-}
-
-/** Python's float repr: shortest digits, exponent form outside 1e-4 <= |x| < 1e16. */
-function pyFloat(n: number): string {
-  if (Number.isNaN(n)) return 'NaN'
-  if (n === Infinity) return 'Infinity'
-  if (n === -Infinity) return '-Infinity'
-  const [mantissa, expText] = n.toExponential().split('e') as [string, string]
-  const exp = Number(expText)
-  if (exp < -4 || exp >= 16) {
-    const sign = exp < 0 ? '-' : '+'
-    return `${mantissa}e${sign}${String(Math.abs(exp)).padStart(2, '0')}`
-  }
-  const neg = mantissa.startsWith('-')
-  const digits = mantissa.replace('-', '').replace('.', '')
-  let fixed: string
-  if (exp >= 0) {
-    const intPart = digits.slice(0, exp + 1).padEnd(exp + 1, '0')
-    const frac = digits.slice(exp + 1)
-    fixed = `${intPart}.${frac || '0'}`
-  }
-  else {
-    fixed = `0.${'0'.repeat(-exp - 1)}${digits}`
-  }
-  return neg ? `-${fixed}` : fixed
-}
+// The string escaper and the float writer are the runner's (one of each, R3.1 fix round 1).
+const pyString = pyJsonString
+const pyFloat = pyJsonFloat
 
 function pyNumber(n: number): string {
   // JSON.parse cannot tell Python's int from float; a safe integer was an int.

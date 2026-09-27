@@ -11,7 +11,7 @@ import { createEngineResultStore } from '~~/server/runner/results'
 import { createHandoff } from '~~/server/runner/handoff'
 import { createMetering, type LedgerPort } from '~~/server/runner/metering'
 import { createRunEvents } from '~~/server/runner/events'
-import { rememberRaw } from '~~/server/runner/rawJson'
+import { parseRemembered as remembered } from '~~/server/runner/rawJson'
 import type { RunnerMessage } from '#shared/runner/messages'
 import type { ApiPrompt } from '#shared/runner/graph'
 
@@ -38,13 +38,6 @@ export interface FakeFalAnswers {
 export interface FakeReplicateAnswers {
   answer?(req: { model: string; input: Record<string, unknown> }): unknown
   bodyText?(req: { model: string; input: Record<string, unknown> }): string
-}
-
-/** The body parsed from `text`, remembered as its raw text (rawJson.ts), as the queue clients do. */
-function remembered(text: string): unknown {
-  const v = JSON.parse(text) as unknown
-  if (v !== null && typeof v === 'object') rememberRaw(v, text)
-  return v
 }
 
 export function createFakeFal(o: FakeFalAnswers = {}) {

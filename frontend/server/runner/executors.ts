@@ -112,6 +112,7 @@ import { effectSpec } from './effects/table'
 import { planEffect } from './effects/plan'
 import { planPainter } from './effects/painter'
 import type { KeptExt } from './keptBytes'
+import type { AnswerKind } from './answerDownload'
 import { filesOf } from './values'
 import { OUTPUT_KINDS } from '#shared/runner/values'
 import { STATIC_VALUES, staticValueOf } from '#shared/runner/staticValues'
@@ -178,8 +179,13 @@ export interface PipelineIO extends DeriveIO {
    * recorded request) and gives back the answer, its body text and its file URLs.
    */
   call(c: PipelineCall): Promise<{ result: unknown; raw: string | null; urls: string[] }>
-  /** Downloads an answer's file, capped at `maxBytes` (default MAX_MEDIA_BYTES, 512 MiB). */
-  download(url: string, o?: { maxBytes?: number }): Promise<{ bytes: Uint8Array; contentType: string | null }>
+  /**
+   * Downloads an answer's file under the safe-fetch policy (answerDownload.ts),
+   * capped at `maxBytes`, never above its kind's cap (default 'image': 512 MiB;
+   * a video 2 GiB); a sound or a 3D file is checked by its header. A file that
+   * can't be downloaded or kept makes its call undelivered (not charged).
+   */
+  download(url: string, o?: { maxBytes?: number; kind?: AnswerKind }): Promise<{ bytes: Uint8Array; contentType: string | null }>
   /** Hands off bytes the node made itself (a mask, an RGB copy): kept by sha256, then uploaded. */
   handOff(bytes: Uint8Array, name: string): Promise<string>
   toUrl(file: OutputFile): Promise<string>

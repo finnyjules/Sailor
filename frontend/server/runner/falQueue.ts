@@ -9,6 +9,8 @@
  */
 import { getFalToken } from '../utils/falStorage'
 import { parseRemembered } from './rawJson'
+import { FetchRefused, TooManyRedirects } from '../templates/safeFetch'
+import type { AnswerFetchOnce } from './answerDownload'
 
 export const FAL_QUEUE_BASE = 'https://queue.fal.run'
 
@@ -137,76 +139,48 @@ export async function falResult<T = unknown>(responseUrl: string): Promise<T> {
   return parseRemembered<T>(await r.text())
 }
 
-/** A result file over the download cap (R3 rule 3): the call was made, so the node fails after it. */
-export const RESULT_TOO_LARGE = (maxBytes: number) => `The result is too large to keep (over ${Math.floor(maxBytes / (1024 * 1024))} MB)`
-
 /**
  * Fetch a finished result file (a fal.media URL). A network error or a 5xx is
  * tried again, three tries in all, waiting 1s then 2s; a 4xx fails at once.
- * `maxBytes`: a file larger than this (by its Content-Length, or as it
- * arrives) fails at once, plainly (RESULT_TOO_LARGE), and is not tried again.
+ * `fetchOnce` (the runner's, server/runner/answerDownload.ts): each try goes
+ * through the safe-fetch policy with the kind's byte cap and time limit; a
+ * refusal by that policy (a private address, too large, too slow, too many
+ * redirects) fails at once, as does Stop (`signal`). Without it (the unit
+ * tests of the retries), a plain fetch.
  */
 export async function downloadResult(
   url: string,
-  opts: { sleep?: (ms: number) => Promise<void>; maxBytes?: number } = {},
+  opts: { sleep?: (ms: number) => Promise<void>; maxBytes?: number; signal?: AbortSignal; fetchOnce?: AnswerFetchOnce } = {},
 ): Promise<{ bytes: Uint8Array; contentType: string | null }> {
   const sleep = opts.sleep ?? (ms => new Promise<void>(r => setTimeout(r, ms)))
   const waits = [1000, 2000]
   for (let attempt = 0; ; attempt++) {
+    if (opts.signal?.aborted) throw new Error('Stopped')
     let failure: Error
     let final = false
     try {
-      const r = await fetch(url)
-      if (r.ok) {
-        const contentType = r.headers.get('content-type')
-        if (opts.maxBytes === undefined) return { bytes: new Uint8Array(await r.arrayBuffer()), contentType }
-        return { bytes: await cappedBody(r, opts.maxBytes), contentType }
+      if (opts.fetchOnce) {
+        const r = await opts.fetchOnce(url, { ...(opts.maxBytes !== undefined ? { maxBytes: opts.maxBytes } : {}), ...(opts.signal ? { signal: opts.signal } : {}) })
+        if (r.status >= 200 && r.status < 300) return { bytes: r.bytes, contentType: r.contentType }
+        failure = new Error(`Could not download the result (${r.status})`)
+        final = r.status < 500
       }
-      failure = new Error(`Could not download the result (${r.status})`)
-      final = r.status < 500
+      else {
+        const r = await fetch(url)
+        if (r.ok) return { bytes: new Uint8Array(await r.arrayBuffer()), contentType: r.headers.get('content-type') }
+        failure = new Error(`Could not download the result (${r.status})`)
+        final = r.status < 500
+      }
     }
     catch (e) {
-      if (e instanceof ResultTooLargeError) throw e
+      if (e instanceof FetchRefused) throw e
+      if (e instanceof TooManyRedirects) throw new Error('Could not download the result (it was redirected too many times)')
+      if (opts.signal?.aborted) throw new Error('Stopped')
       failure = e instanceof Error ? e : new Error(String(e)) // no answer, or the body broke off
     }
     if (final || attempt >= waits.length) throw failure
     await sleep(waits[attempt]!)
   }
-}
-
-class ResultTooLargeError extends Error {
-  constructor(maxBytes: number) { super(RESULT_TOO_LARGE(maxBytes)); this.name = 'ResultTooLargeError' }
-}
-
-/** The body, read no further than `maxBytes`. */
-async function cappedBody(r: Response, maxBytes: number): Promise<Uint8Array> {
-  const declared = Number(r.headers.get('content-length'))
-  if (Number.isFinite(declared) && declared > maxBytes) {
-    await r.body?.cancel().catch(() => {})
-    throw new ResultTooLargeError(maxBytes)
-  }
-  if (!r.body) {
-    const bytes = new Uint8Array(await r.arrayBuffer())
-    if (bytes.byteLength > maxBytes) throw new ResultTooLargeError(maxBytes)
-    return bytes
-  }
-  const reader = r.body.getReader()
-  const parts: Uint8Array[] = []
-  let total = 0
-  for (;;) {
-    const { done, value } = await reader.read()
-    if (done) break
-    total += value.byteLength
-    if (total > maxBytes) {
-      await reader.cancel().catch(() => {})
-      throw new ResultTooLargeError(maxBytes)
-    }
-    parts.push(value)
-  }
-  const out = new Uint8Array(total)
-  let at = 0
-  for (const p of parts) { out.set(p, at); at += p.byteLength }
-  return out
 }
 
 /**
