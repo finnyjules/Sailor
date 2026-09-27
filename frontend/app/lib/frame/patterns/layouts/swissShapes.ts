@@ -120,7 +120,7 @@ export const scatter: LayoutDef = {
   // Each arrangement is its own seeded deal of the letters into the cells.
   arrLabels: ['Deal 1', 'Deal 2', 'Deal 3'],
   fn(S, { c, ph, r }) {
-    const { X, SPAN, L, M, RH, GAP, CAP, fitSize, disp, infoRow, photoIn, FOOT3 } = S
+    const { X, SPAN, L, LB, M, RH, GAP, CAP, fitSize, disp, infoRow, photoIn, FOOT3 } = S
     const letters = [...c.title.replace(/\s+/g, '')]
     const cells: { i: number; j: number }[] = []
     for (let j = 0; j < 7; j++) for (let i = 0; i < 4; i++) {
@@ -132,7 +132,7 @@ export const scatter: LayoutDef = {
     const size = Math.min(fitSize(['W'], SPAN(1, 3) * 0.95), 2 * RH * 0.82 / CAP)
     const els: El[] = chosen.map((cc, n) => disp(letters[n]!, { size, x: X(cc.i * 3 + 1), top: L(cc.j * 2), role: 'title' + n }))
     els.push(...infoRow(c, FOOT3, 'foot').els)
-    if (ph) els.push(photoIn({ c1: 7, c2: 12, top: M, bottom: L(8) - GAP }))
+    if (ph) els.push(photoIn({ c1: 7, c2: 12, top: M, bottom: LB(8) - GAP }))
     return { els, did: 'Letters dealt into a 4 × 7 module grid, still in reading order.' }
   },
 }
