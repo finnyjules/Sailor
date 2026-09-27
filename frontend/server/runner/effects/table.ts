@@ -5,7 +5,7 @@
  * (rule 7). Its classes are exactly shared/runner/effects.ts
  * EFFECT_CLASSES_PORTED (a test holds them equal).
  */
-import type { EffectFamily } from '#shared/runner/effects'
+import { effectOutSize, type EffectFamily } from '#shared/runner/effects'
 import { hexToRgb, parseDuotone, parseStops } from '#shared/runner/gradientStops'
 import { asciiPrepare } from './asciiGlyphs'
 
@@ -148,6 +148,51 @@ const px1 = (s: Size) => (s ? (s.w + 1) * (s.h + 1) : 0)
 /** Kuwahara's radius as its execute reads it. */
 const kuwaharaR = (w: Record<string, unknown>) => Math.max(1, Math.trunc(num(w, 'radius')))
 
+// ── effects-warp (R2.7): the work each asks for (rule 7) ──
+//
+// In the same units (0.37 × 10⁹ a second), every picture counted at 4
+// channels. Measured on the development Mac (R2.7 report: each op at 1024²
+// × 4 in this thread, the constants set so every op's time at the unit's
+// rate is at or above its measured time): a grid_sample reads 4 taps a value
+// (GRID_VALUE a value) and each warp's grid (linspace, the transcendental
+// functions, the products) costs GRID_PIXEL a pixel (Rotate's affine_grid
+// alike); Chromatic aberration (and CRT's chroma step) samples one channel
+// at each of three grids (CHROMA_GRID a pixel each); God rays a simpler grid
+// and the running sum each sample (GODRAYS_PIXEL). Crop, Flip, Mirror and
+// Resize at 1 copy (COPY_VALUE a value). Resize works over its output: a
+// bilinear, bicubic or nearest value costs RESIZE_VALUE of its mode; area
+// reads every input value once (AREA_IN) and writes the output.
+
+const GRID_VALUE = 6
+const GRID_PIXEL = 28
+const CHROMA_GRID = 14
+const GODRAYS_PIXEL = 6
+const COPY_VALUE = 4
+const RESIZE_VALUE: Readonly<Record<string, number>> = { bilinear: 6, bicubic: 40, nearest: 4, area: 4 }
+const AREA_IN = 6
+
+const warp = (name: string, work: NonNullable<EffectSpec['work']>, extra: Partial<EffectSpec> = {}): EffectSpec =>
+  ({ family: 'effects-warp', op: `warp.${name}`, batch: 'pure', work, ...extra })
+
+/** One grid warp over the picture: its grid, and the grid_sample of every channel. */
+const gridWork = (s: Size) => px(s) * (WORK_CHANNELS * GRID_VALUE + GRID_PIXEL)
+/** The chroma step: three channels, each sampled at its own grid. */
+const chromaWork = (s: Size) => px(s) * 3 * (GRID_VALUE + CHROMA_GRID)
+/** A copy of every value. */
+const copyWork = (s: Size) => px(s) * WORK_CHANNELS * COPY_VALUE
+
+/** Resize's work: its mode's cost a value over the output (area: every input value once, too). */
+function resizeWork(w: Record<string, unknown>, s: Size): number {
+  const scale = num(w, 'scale')
+  if (!s || scale === 1) return copyWork(s)
+  const out = Math.floor(s.w * scale) * Math.floor(s.h * scale)
+  const mode = typeof w.mode === 'string' && Object.prototype.hasOwnProperty.call(RESIZE_VALUE, w.mode) ? w.mode : 'bicubic'
+  return out * WORK_CHANNELS * RESIZE_VALUE[mode]! + (mode === 'area' ? px(s) * WORK_CHANNELS * AREA_IN : 0)
+}
+
+/** The output size of a class that changes it (effectOutSize), else the input's. */
+const sizedBy = (cls: string): EffectSpec['outSize'] => (w, s) => (s ? effectOutSize(cls, w, s) ?? s : { w: 0, h: 0 })
+
 export const EFFECTS: Readonly<Record<string, EffectSpec>> = {
   // ── effects-tone (R2.1 pilots): per pixel, exact ──
   AdjustExposure: { family: 'effects-tone', op: 'tone.AdjustExposure', batch: 'pure' },
@@ -209,6 +254,24 @@ export const EFFECTS: Readonly<Record<string, EffectSpec>> = {
     outSize: (w, s) => (s && kuwaharaR(w) % 2 === 1 ? { w: s.w + 1, h: s.h + 1 } : s ?? { w: 0, h: 0 }),
   }),
   Ascii: cells('Ascii', (_w, s) => px(s) * WORK_CHANNELS * ASCII_PIXEL, { prepare: asciiPrepare }),
+  // ── effects-warp (R2.7) ──
+  CropImage: warp('CropImage', (_w, s) => copyWork(s), { outSize: sizedBy('CropImage') }),
+  ResizeImage: warp('ResizeImage', resizeWork, { outSize: sizedBy('ResizeImage') }),
+  RotateImage: warp('RotateImage', (_w, s) => gridWork(s)),
+  FlipImage: warp('FlipImage', (_w, s) => copyWork(s)),
+  Pinch: warp('Pinch', (_w, s) => gridWork(s)),
+  Twirl: warp('Twirl', (_w, s) => gridWork(s)),
+  Wave: warp('Wave', (_w, s) => gridWork(s)),
+  LensCorrection: warp('LensCorrection', (_w, s) => gridWork(s)),
+  Kaleidoscope: warp('Kaleidoscope', (_w, s) => gridWork(s)),
+  PolarCoords: warp('PolarCoords', (_w, s) => gridWork(s)),
+  Fisheye: warp('Fisheye', (_w, s) => gridWork(s)),
+  ChromaticAberration: warp('ChromaticAberration', (_w, s) => chromaWork(s)),
+  // A barrel, the chroma step, then the scanlines and stripes (a pass each).
+  CRT: warp('CRT', (_w, s) => gridWork(s) + chromaWork(s) + 2 * copyWork(s)),
+  // `samples` grid_samples of every channel, each with its grid and the running sum.
+  GodRays: warp('GodRays', (w, s) => Math.max(1, Math.trunc(num(w, 'samples'))) * px(s) * (WORK_CHANNELS * GRID_VALUE + GODRAYS_PIXEL) + copyWork(s)),
+  Mirror: warp('Mirror', (_w, s) => copyWork(s)),
 }
 
 /** The runner's spec for an effect class, or undefined when the class is not an effect it ports. */

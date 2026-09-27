@@ -44,12 +44,18 @@ export function pixelsCore() {
     return r - x === 0.5 && r % 2 !== 0 ? r - 1 : r
   }
 
-  function taps(inSize: number, outSize: number) {
+  /**
+   * The bilinear taps along one side. `scaleFactor` is torch's `scales`
+   * argument (F.interpolate(scale_factor=s) with recompute_scale_factor
+   * unset, R2.7): the source step is then compute_scales_value's f32(1 / s),
+   * not f32(in / out). Without it, the size-mode step, as before.
+   */
+  function taps(inSize: number, outSize: number, scaleFactor?: number) {
     const i0 = new Int32Array(outSize)
     const i1 = new Int32Array(outSize)
     const l0 = new Float32Array(outSize)
     const l1 = new Float32Array(outSize)
-    const scale = f(inSize / outSize)
+    const scale = scaleFactor !== undefined && scaleFactor > 0 ? f(1 / scaleFactor) : f(inSize / outSize)
     for (let d = 0; d < outSize; d++) {
       let real = fma(scale, f(d + 0.5), -0.5)
       if (real < 0) real = 0
@@ -73,13 +79,14 @@ export function pixelsCore() {
    * `F.interpolate(t, size=(dh, dw), mode='bilinear', align_corners=False)` on
    * a (C, H, W) channel-first plane; `channelsLast` says the tensor's memory
    * format (a movedim'd ComfyUI picture), which changes torch's sum for 4 channels.
+   * `scales` ([height, width]): F.interpolate's scale_factor path (see `taps`).
    */
-  function bilinear(src: Float32Array, c: number, sh: number, sw: number, dh: number, dw: number, channelsLast: boolean): Float32Array {
+  function bilinear(src: Float32Array, c: number, sh: number, sw: number, dh: number, dw: number, channelsLast: boolean, scales?: readonly [number, number]): Float32Array {
     if (!Number.isInteger(c) || c < 1 || c > 4) throw new Error(`A picture of ${c} channels can’t be resized here`)
     if (src.length !== c * sh * sw) throw new Error('The picture to resize is the wrong size')
     const out = new Float32Array(c * dh * dw)
-    const ty = taps(sh, dh)
-    const tx = taps(sw, dw)
+    const ty = taps(sh, dh, scales?.[0])
+    const tx = taps(sw, dw, scales?.[1])
     const kind = bilinearKind(c, dw, dh, channelsLast)
     const inN = sh * sw
     const outN = dh * dw

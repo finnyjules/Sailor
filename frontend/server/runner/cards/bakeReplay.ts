@@ -35,7 +35,7 @@ import { encodeMask, loadImageMask, type Mask } from '../pictures/mask'
 import { MAX_INPUT_PIXELS } from '../compositor/decode'
 import { pyTruthy } from '#shared/runner/pyText'
 import { IMAGE_LAYERS } from '#shared/runner/smartLayout'
-import { EFFECT_PICTURE_ANIMATED, effectFamilyOn, effectSchemaOf } from '#shared/runner/effects'
+import { EFFECT_PICTURE_ANIMATED, EFFECT_START_SIZED_CLASSES, effectFamilyOn, effectSchemaOf } from '#shared/runner/effects'
 
 export const TEXT_ON_PATH_UNLOADABLE = 'Text on path couldn’t load its picture. Change a setting to bake it again.'
 export const TEXT_MASK_UNLOADABLE = 'Text mask couldn’t load its picture. Change a setting to bake it again.'
@@ -110,7 +110,10 @@ export function cardPictureFiles(prompt: ApiPrompt, families: ReadonlySet<Runner
       const behind = cardFileBehind(prompt, v)
       if (behind) out.push({ ...behind, classType: 'Image' })
       const loader = loaderFileBehind(prompt, v)
-      if (loader) out.push({ ...loader, oneFrame: true, animated: EFFECT_PICTURE_ANIMATED })
+      // An effect that changes the picture's size (R2.7: Resize, Crop), or has a size cap of its own
+      // (Kaleidoscope): its output is sized from this file's header too.
+      const resized = EFFECT_START_SIZED_CLASSES.includes(n.class_type) ? { nodeId, classType: n.class_type, inputs } : undefined
+      if (loader) out.push({ ...loader, oneFrame: true, animated: EFFECT_PICTURE_ANIMATED, ...(resized ? { resized } : {}) })
     }
     // Smart Layout (R1.6) decodes each image layer's first frame as Python's tensor.
     if (n.class_type === 'SmartLayout') {
@@ -135,7 +138,11 @@ export function cardPictureFiles(prompt: ApiPrompt, families: ReadonlySet<Runner
  * A file cardPictureFiles names; `oneFrame`: one with several frames is
  * refused too, in `animated`'s words (PICTURE_ANIMATED when absent).
  */
-export interface CardPictureFile { nodeId: string; classType: string; file: OutputFile; oneFrame?: true; animated?: string }
+export interface CardPictureFile {
+  nodeId: string; classType: string; file: OutputFile; oneFrame?: true; animated?: string
+  /** The effect reading this file that changes its size (R2.7): its output is checked against the caps from the file's header (effects/plan.ts effectOutRefusal). */
+  resized?: { nodeId: string; classType: string; inputs: Record<string, unknown> }
+}
 
 /** The picture input of each picture utility (R1.4). */
 const PICTURE_READS: Readonly<Record<string, string>> = { GetImageSize: 'image', ImageToMask: 'image', TextMask: 'source' }

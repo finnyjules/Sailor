@@ -33,6 +33,7 @@ import { linkedFileCheck, measuredInputProblem, requestProblems, unreadableInput
 import { isReusable, requestFingerprint } from './fingerprint'
 import { assertFilesOwned, collectInputFiles, parseInputFileRef, type OwnershipCheck } from './inputs'
 import { cardPictureFiles, cardPictureRefusal } from './cards/bakeReplay'
+import { effectOutRefusal } from './effects/plan'
 import { PICTURE_ANIMATED, pictureHasFrames, pictureMeta, pictureRefusal } from './pictures/pythonView'
 import { extraPromptText, hasOutputNode, measuredInput, nodeCredits, stageEstimate, unpricedProviderNode, type Metering } from './metering'
 import { ev, type RunEvents, type SwitchReason } from './events'
@@ -1561,6 +1562,11 @@ export function createEngine(deps: EngineDeps) {
         // Save image / Preview image behind a loader (R1.5): Python saves every frame of an animation.
         if (c.oneFrame && pictureHasFrames(await pictureMeta(bytes), bytes)) {
           throw refuse(c.animated ?? PICTURE_ANIMATED, 400, { nodeId: c.nodeId, classType: c.classType, file: c.file.filename })
+        }
+        // An effect that changes the picture's size (R2.7): its output within the caps, from the header.
+        if (c.resized) {
+          const tooLarge = effectOutRefusal(c.resized, c.classType, await pictureMeta(bytes), deps.hosted())
+          if (tooLarge) throw refuse(tooLarge, 400, { nodeId: c.resized.nodeId, classType: c.resized.classType, file: c.file.filename })
         }
       }
     }

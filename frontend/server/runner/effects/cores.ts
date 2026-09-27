@@ -15,6 +15,7 @@ import { tensorCore } from './core/tensor'
 import { toneCore } from './core/tone'
 import { blurCore } from './core/blur'
 import { cellsCore } from './core/cells'
+import { warpCore } from './core/warp'
 import { kernelsCore } from './core/kernels'
 import { rngCore } from './core/rng'
 
@@ -36,14 +37,16 @@ export const EFFECT_CORES: readonly EffectCoreEntry[] = [
   { name: 'blur', fn: blurCore as EffectCoreEntry['fn'], args: ['tk', 'kn'] },
   // R2.6: cells and glyphs (area / nearest resizes, avg pooling, remainder).
   { name: 'cells', fn: cellsCore as EffectCoreEntry['fn'], args: ['tk', 'kn'] },
+  // R2.7: geometry and coordinate warps (linspace, grid_sample, affine_grid, the resizes, remainder).
+  { name: 'warp', fn: warpCore as EffectCoreEntry['fn'], args: ['tk', 'kn'] },
 ]
 
 /** The cores whose functions are effect ops (not helpers). */
-export const EFFECT_OP_CORES: readonly string[] = ['tone', 'blur', 'cells']
+export const EFFECT_OP_CORES: readonly string[] = ['tone', 'blur', 'cells', 'warp']
 
 /** The cores in this thread (tests), built as the worker builds them. */
 export const effectCores = (() => {
   const tk = tensorCore(pixels)
   const kn = kernelsCore(tk, pixels)
-  return { px: pixels, tk, kn, tone: toneCore(tk, kn), rng: rngCore(), blur: blurCore(tk, kn), cells: cellsCore(tk, kn) }
+  return { px: pixels, tk, kn, tone: toneCore(tk, kn), rng: rngCore(), blur: blurCore(tk, kn), cells: cellsCore(tk, kn), warp: warpCore(tk, kn) }
 })()

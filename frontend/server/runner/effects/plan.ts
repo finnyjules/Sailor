@@ -18,9 +18,8 @@ import type { OutputFile, RunnerValue } from '../types'
 import { isLink } from '#shared/runner/graph'
 import { CARD_MAX_PIXELS } from '#shared/runner/eligibility'
 import {
-  EFFECT_ERROR_MESSAGES, EFFECT_HOSTED_MAX_PICTURE_PIXELS, EFFECT_MAX_PICTURE_PIXELS, EFFECT_MAX_WORK,
-  EFFECT_PICTURES_TOO_LARGE, EFFECT_PICTURE_ANIMATED, EFFECT_PICTURE_TOO_LARGE, EFFECT_PICTURE_TOO_LARGE_HOSTED, EFFECT_TOO_MUCH_WORK,
-  effectPreviewName, effectSchemaOf,
+  EFFECT_ERROR_MESSAGES, EFFECT_MAX_WORK, EFFECT_PICTURES_TOO_LARGE, EFFECT_PICTURE_ANIMATED, EFFECT_TOO_MUCH_WORK,
+  EFFECT_PICTURE_TOO_LARGE_FOR_CLASS, EFFECT_START_SIZED_CLASSES, effectOutSize, effectPictureCap, effectPreviewName, effectSchemaOf,
 } from '#shared/runner/effects'
 import type { EffectSchema } from '#shared/runner/effectSchemas.generated'
 import { pyFloatOf, pyIntOf, pyTruthy } from '#shared/runner/pyText'
@@ -61,6 +60,30 @@ export function effectParams(schema: EffectSchema, inputs: Record<string, unknow
     if (v !== undefined) out[name] = v
   }
   return out
+}
+
+/**
+ * At the start of the take (R2.7, engine.ts beside cardPictureFiles): an
+ * effect that changes the picture's size (Resize, Crop), or has a cap of its
+ * own (Kaleidoscope, EFFECT_CLASS_MAX_PIXELS), reading an Image card's or a
+ * LoadImage's own file, its output measured from the file's header (EXIF
+ * turned, as both loaders turn it) against the class's one-picture cap.
+ * The refusal, or null. What can't be known yet is checked at the node's
+ * turn (planJobs).
+ */
+export function effectOutRefusal(
+  effect: { classType: string; inputs: Record<string, unknown> }, loader: string,
+  meta: { width?: number; height?: number; orientation?: number }, hosted: boolean,
+): string | null {
+  const schema = effectSchemaOf(effect.classType)
+  if (!schema || !meta.width || !meta.height || !EFFECT_START_SIZED_CLASSES.includes(effect.classType)) return null
+  const turned = (loader === 'Image' || loader === 'LoadImage') && (meta.orientation ?? 1) >= 5
+  const size = turned ? { w: meta.height, h: meta.width } : { w: meta.width, h: meta.height }
+  const out = effectOutSize(effect.classType, effectParams(schema, effect.inputs), size) ?? size
+  const cap = effectPictureCap(effect.classType, hosted)
+  // A class with a cap of its own (Kaleidoscope) is refused on its input too.
+  if (size.w * size.h > cap.max && cap.message === EFFECT_PICTURE_TOO_LARGE_FOR_CLASS) return cap.message
+  return out.w * out.h > cap.max ? cap.message : null
 }
 
 /** A plain message for a key a core throws (rule 6); anything else as it is. */
@@ -127,7 +150,7 @@ export function planEffect(ctx: PlanContext): NodePlan {
   return {
     kind: 'derive',
     async derive(io) {
-      const jobs = await planJobs(io, spec, ins, params, schema.outputs.length)
+      const jobs = await planJobs(io, cls, spec, ins, params, schema.outputs.length)
       const want = {
         round: trunc.map((t, i) => !masks[i] && !t),
         trunc: trunc.map((t, i) => !masks[i] && t),
@@ -228,10 +251,9 @@ export const EFFECT_IO_WORK_PER_VALUE = 6
  * effect made is read as the float tensor kept beside it (its PNG only for
  * the caps).
  */
-async function planJobs(io: DeriveIO, spec: EffectSpec, ins: In[], params: Record<string, unknown>, outputs: number) {
-  // Caps, from the headers, before any pixel is decoded.
-  const maxOne = io.hosted ? EFFECT_HOSTED_MAX_PICTURE_PIXELS : EFFECT_MAX_PICTURE_PIXELS
-  const tooLarge = io.hosted ? EFFECT_PICTURE_TOO_LARGE_HOSTED : EFFECT_PICTURE_TOO_LARGE
+async function planJobs(io: DeriveIO, cls: string, spec: EffectSpec, ins: In[], params: Record<string, unknown>, outputs: number) {
+  // Caps, from the headers, before any pixel is decoded (a class may have a smaller one of its own, R2.7).
+  const { max: maxOne, message: tooLarge } = effectPictureCap(cls, io.hosted)
   const size = new Map<string, { w: number; h: number; c: number }>()
   const bytes = new Map<string, Uint8Array>()
   let total = 0

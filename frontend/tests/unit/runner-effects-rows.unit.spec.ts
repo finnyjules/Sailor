@@ -17,7 +17,7 @@ import { FAMILY_REQUIRES, RUNNER_FAMILIES, type RunnerFamily } from '#shared/run
 import { EFFECTS } from '~~/server/runner/effects/table'
 import { effectCores } from '~~/server/runner/effects/cores'
 
-/** The classes ported so far: the pilots (R2.1), the rest of effects-tone (R2.4), effects-blur (R2.5) and effects-cells (R2.6). */
+/** The classes ported so far: the pilots (R2.1), the rest of effects-tone (R2.4), effects-blur (R2.5), effects-cells (R2.6) and effects-warp (R2.7). */
 const PORTED = [
   'AdjustExposure', 'AdjustInvert', 'AdjustThreshold',
   'AdjustBrightnessContrast', 'AdjustColor', 'AdjustCurves', 'AdjustLevels',
@@ -26,6 +26,7 @@ const PORTED = [
   'GradientMap', 'Posterize', 'Hologram', 'TwoDLight', 'LightLeak', 'LensFlare', 'Caustics', 'Blinds', 'CrossHatch', 'Dither',
   'Sharpen', 'Denoise', 'AdjustGlow', 'HighPass', 'Emboss', 'FindEdges', 'Blur', 'Bokeh', 'TiltShift', 'FrequencySeparation', 'HeightmapRelief', 'Outline', 'Sparkle',
   'Pixelate', 'Halftone', 'Kuwahara', 'Ascii',
+  'CropImage', 'ResizeImage', 'RotateImage', 'FlipImage', 'Pinch', 'Twirl', 'Wave', 'LensCorrection', 'Kaleidoscope', 'PolarCoords', 'Fisheye', 'ChromaticAberration', 'CRT', 'Mirror', 'GodRays',
 ]
 /** Picture outputs: one, except FrequencySeparation's two (low, high). */
 const pictureSlots = (cls: string) => (cls === 'FrequencySeparation' ? [0, 1] : [0])

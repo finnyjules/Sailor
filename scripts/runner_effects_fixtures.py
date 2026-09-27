@@ -71,6 +71,23 @@ Groups:
               DejaVu Sans Mono from matplotlib in this .venv (controller
               ruling (d): Menlo can't be shipped), for the atlas and every
               Ascii case alike.
+  warp      — (R2.7) the 15 geometry and coordinate warps over the standard
+              case set, plus: Resize at 0.1, 0.33, 0.5, 1, 1.5 and 4 (and
+              scales whose side·scale isn't whole) in each mode, a 1-pixel
+              result and the blank resized to nothing (Python raises); Rotate
+              at ±180, ±90, 45 and 1; Crop at 0.49 on each side; Mirror in
+              every mode at seams 0, 0.5 and 1 on odd and even pictures (and
+              one row, one column); GodRays from each corner at 4 and 80
+              samples; Kaleidoscope at 2 and 20 segments; CRT's steps alone
+              and together; ten seeded random settings per class; one
+              Resize into a Frame. `kernels`: the resizes' scale_factor path
+              (R2.7 ruling (a)) against kernels.ts `scales`. `negzero`: −0
+              through each node's last clamp. An exact class keeps its
+              sha256s; CRT (library, WARP_LIBRARY_EPS) a small output's float
+              (byte-shuffled, zlib, in `floats`) and a hashed one's band; the
+              "warp" parity class (WARP_BAND_CLASSES) a small output's float
+              and a hashed one's 8-bit bytes and float windows. `--sweep` runs
+              the broad sweep, small pictures and up to 8192² (writes nothing).
 
 Every picture reaches a node as it does in a real run, through the real
 Python loader of its source (as scripts/compositor_fixtures.py):
@@ -2120,7 +2137,429 @@ def cells() -> dict:
             "atlas": atlas, "frame": frame, "font": {"path": os.path.relpath(CELLS_FONT, ROOT), "sha256": atlas["index"]["font_sha256"]}}
 
 
-GROUPS = {"machinery": machinery, "kernels": kernels, "rng": rng, "tone": tone, "blur": blur, "cells": cells}
+# ── Group `warp` (R2.7): geometry and coordinate warps ──────────────────────
+
+# (module, node_id) of the 15 classes R2.7 ports.
+WARP_CLASSES = [
+    ("nodes_geometry", "CropImage"), ("nodes_geometry", "ResizeImage"), ("nodes_geometry", "RotateImage"), ("nodes_geometry", "FlipImage"),
+    ("nodes_distortion", "Pinch"), ("nodes_distortion", "Twirl"), ("nodes_distortion", "Wave"), ("nodes_distortion", "LensCorrection"),
+    ("nodes_glsl_distortion", "Kaleidoscope"), ("nodes_glsl_distortion", "PolarCoords"), ("nodes_glsl_distortion", "Fisheye"),
+    ("nodes_glsl_lens", "ChromaticAberration"), ("nodes_glsl_lens", "CRT"),
+    ("nodes_glsl_unicorn", "Mirror"), ("nodes_glsl_atmosphere", "GodRays"),
+]
+# CRT, a library class: its ε (255-scale); its one transcendental (sin of arange·3.14159) matched
+# Python's float on every case measured, fixture and sweep (to 8192²). tests/unit/runner-effects-warp
+# .unit.spec.ts holds the same table.
+WARP_LIBRARY_EPS = {"CRT": 2.0 ** -12}
+# The "warp" parity class (controller ruling, R2.7 round 2): grids built from torch's float sin, cos,
+# tan, atan2 or pow (SLEEF u10 on this Mac, not correctly rounded), whose ulp differences move the
+# sample by ulp · side / 2 pixels, so the error grows with the picture. Each 8-bit value within ±1 of
+# Python's, the share of ±1 values and the float |Δ|·255 within bounds pinned per class in the spec.
+# A small case keeps its float (`f32s`); a hashed one Python's round8 bytes (`round8z`, zlib), where
+# trunc8 is one lower (`trunc8_off`, packed bits, zlib) and its float over three windows (`windows`).
+WARP_BAND_CLASSES = ("Pinch", "Twirl", "Wave", "Kaleidoscope", "PolarCoords", "Fisheye")
+WARP_WINDOW = 32
+WARP_RESIZE_SCALES = [0.1, 0.33, 0.5, 1.0, 1.5, 4.0]
+WARP_RANDOM = 10
+
+
+class WarpGroup(Group):
+    """The warp group's cases: each output its sha256s (float32, round8, trunc8); a small output of a
+    library class its float32 too, byte-shuffled and zlib'd (`f32s`, kept once per distinct float in
+    `floats`), a hashed one its band at the class's ε. An exact class is checked by its hashes."""
+
+    def case(self, name: str, cls, class_type: str, widgets: dict, inputs: dict, hashed: bool = False) -> None:
+        self.seq += 1
+        node_id = f"fx{self.seq}"
+        tensors = {}
+        for key, (source, files) in inputs.items():
+            tensors[key] = load("blank", None, None) if source == "blank" else torch.cat([load(source, f, self.assets[f]) for f in files], dim=0)
+        row: dict = {"name": name, "class_type": class_type, "node_id": node_id, "widgets": widgets,
+                     "inputs": {k: {"source": s, "files": list(f)} for k, (s, f) in inputs.items()}}
+        if hashed:
+            row["hashed"] = True
+        try:
+            outs, ui = run_node(cls, node_id, **tensors, **widgets)
+        except Exception as e:  # Python raises: the runner's plain message is checked against it
+            row["error"] = {"type": type(e).__name__, "message": str(e)}
+            self.cases.append(row)
+            return
+        # A warp-class node left at its no-op setting hands on its input clamped: kept by its hashes alone.
+        img = next(iter(tensors.values()))
+        same = [t.shape == img.shape and torch.equal(t, img.clamp(0, 1)) for t in outs]
+        row["outputs"] = [warp_output(t, hashed, class_type, sm) for t, sm in zip(outs, same)]
+        if any(same) and class_type in WARP_BAND_CLASSES:
+            row["unchanged"] = True
+        row["ui"] = {"images": ui["images"], "animated": list(ui["animated"])}
+        row["preview"] = read_preview(ui, True)
+        self.cases.append(row)
+
+
+def warp_windows(x: torch.Tensor) -> list:
+    """A hashed output's float over three WARP_WINDOW² windows: the top-left corner, the middle, the
+    bottom-right corner ([x0, y0, w, h, f32s])."""
+    h, w = int(x.shape[0]), int(x.shape[1])
+    ww, wh = min(WARP_WINDOW, w), min(WARP_WINDOW, h)
+    out = []
+    for x0, y0 in ((0, 0), ((w - ww) // 2, (h - wh) // 2), (w - ww, h - wh)):
+        out.append([x0, y0, ww, wh, shuffled_f32(x[y0:y0 + wh, x0:x0 + ww])])
+    return out
+
+
+def warp_output(t: torch.Tensor, hashed: bool, class_type: str, unchanged: bool = False) -> dict:
+    eps = WARP_LIBRARY_EPS.get(class_type)
+    band = class_type in WARP_BAND_CLASSES and not unchanged
+    items = []
+    for i in range(t.shape[0]):
+        x = t[i].contiguous()
+        f32 = x.cpu().numpy().astype("<f4").tobytes()
+        item = {"w": int(x.shape[1]), "h": int(x.shape[0]), "c": int(x.shape[2]), "f32_sha256": sha(f32),
+                "round8_sha256": sha(round8(x).tobytes()), "trunc8_sha256": sha(trunc8(x).tobytes())}
+        if band and hashed:
+            r8, t8 = round8(x), trunc8(x)
+            off = (r8.astype(np.int16) - t8.astype(np.int16)).reshape(-1)
+            assert off.min() >= 0 and off.max() <= 1
+            item["round8z"] = b64(zlib.compress(r8.tobytes(), 9))
+            # trunc8 = round8 − 1 where this bit is set (the two never differ by more).
+            item["trunc8_off"] = b64(zlib.compress(np.packbits(off.astype(np.uint8)).tobytes(), 9))
+            item["windows"] = warp_windows(x)
+        elif band:
+            item["f32s"] = shuffled_f32(x)
+        elif eps is not None:
+            # CRT: its band at ε, small or hashed (its float matched Python's on every case measured).
+            item["band"] = band_list(x, eps)
+        items.append(item)
+    return {"kind": "image", "items": items}
+
+
+def warp_negzero_input(spec: dict) -> torch.Tensor:
+    """A (B, H, W, C) picture from `hashed_values` in memory order, every `neg_zero_every`-th value −0
+    (as a Dither upstream leaves them): the spec rebuilds it."""
+    b, h, w, c = spec["shape"]
+    v = hashed_values(b * h * w * c, spec["seed"])
+    v[:: spec["neg_zero_every"]] = -0.0
+    return torch.from_numpy(v.reshape(b, h, w, c).copy())
+
+
+def warp_kernels() -> list:
+    """The resizes' scale_factor path (R2.7 ruling (a)): F.interpolate(scale_factor=s) of a
+    channels-last (movedim'd) picture, as ResizeImage calls it, against kernels.ts with `scales`:
+    the brief's scales, scales whose in·s is not whole, 1, 3 and 4 channels, and a batch of two."""
+    import torch.nn.functional as F
+    g = KernelCases()
+    g.seed = 5000
+    sizes = [(37, 23), (29, 31), (7, 5), (10, 12), (320, 200), (64, 1), (1, 1)]
+    # 1.004 and 1.02 keep one side (or both) its size: torch's bilinear leaves that side alone.
+    scales = [0.1, 0.33, 0.5, 1.5, 4.0, 0.37, 1.05, 2.3, 0.15, 0.999, 1.004, 1.02]
+    for mode in ("bilinear", "bicubic", "nearest", "area"):
+        kw = {"align_corners": False} if mode in ("bilinear", "bicubic") else {}
+        for (w, h) in sizes:
+            for s in scales:
+                if (w, h) == (320, 200) and s > 1.5:
+                    continue
+                for c, memory in ((3, "channels-last"), (4, "channels-last"), (1, "contiguous")):
+                    if (w, h) == (320, 200) and c != 4:
+                        continue
+                    g.add(f"{mode} scale_factor {s}, {w}×{h} {c} ch {memory}", f"resize-{mode}", "exact", [g.inp(c, h, w, memory=memory)],
+                          {"scale": s}, lambda t, s=s, mode=mode, kw=kw: F.interpolate(t, scale_factor=s, mode=mode, **kw)[0])
+        # A batch of two (channels-last, as ResizeImage's permuted batch): each picture its own output.
+        for (w, h), s in (((37, 23), 0.33), ((29, 31), 1.5), ((320, 200), 0.37)):
+            for c in (3, 4):
+                a, b = g.inp(c, h, w), g.inp(c, h, w)
+                g.add(f"{mode} scale_factor {s}, a batch of two {w}×{h} {c} ch channels-last", f"resize-{mode}", "exact", [a, b], {"scale": s, "batch": 2},
+                      lambda t, u, s=s, mode=mode, kw=kw: tuple(F.interpolate(torch.cat([t, u]).contiguous(memory_format=torch.channels_last), scale_factor=s, mode=mode, **kw)[i] for i in (0, 1)))
+    # Exact: each output's sha256 alone (its float is 928 cases' worth of fixture; a miss names the case).
+    for c in g.cases:
+        for o in c.get("outputs") or []:
+            o.pop("f32", None)
+    return g.cases
+
+
+def warp_cases(g: WarpGroup, classes: dict) -> None:
+    rgb, card4, card3, prov = g.picture(37, 23, 3, 1), g.picture(23, 19, 4, 3), g.picture(23, 19, 3, 4), g.picture(29, 31, 4, 2)
+    four = (("rgb 37×23", "rgb", rgb), ("provider 29×31", "provider", prov), ("card 23×19 see-through", "card", card4), ("card 23×19 opaque", "card", card3))
+    two = (("rgb 37×23", "rgb", rgb), ("card 23×19 see-through", "card", card4))
+    defaults = {node_id: widget_settings(cls)[0] for node_id, cls in classes.items()}
+
+    def run(cls_name: str, label: str, over: dict, pics, hashed: bool = False) -> None:
+        for pname, source, file in pics:
+            g.case(f"{cls_name}: {label}, {pname}", classes[cls_name], cls_name, {**defaults[cls_name], **over}, {"image": (source, [file])}, hashed=hashed)
+
+    # Every numeric widget "between" at once.
+    for node_id, cls in classes.items():
+        _d, settings = widget_settings(cls)
+        mixed = dict(defaults[node_id])
+        for label, over in settings:
+            if " between (" in label:
+                mixed.update(over)
+        run(node_id, "every setting between", {k: v for k, v in mixed.items() if v != defaults[node_id].get(k)}, two)
+    # Resize: the brief's scales in each mode, a 1-pixel result, and nothing left (Python raises).
+    tiny = g.picture(10, 12, 3, 18)
+    for mode in ("bilinear", "bicubic", "nearest", "area"):
+        for s in WARP_RESIZE_SCALES:
+            run("ResizeImage", f"{mode} × {s}", {"mode": mode, "scale": s}, four)
+        run("ResizeImage", f"{mode} × 0.1 to one pixel", {"mode": mode, "scale": 0.1}, (("rgb 10×12", "rgb", tiny),))
+        for s in (0.37, 1.05, 2.3):
+            run("ResizeImage", f"{mode} × {s}", {"mode": mode, "scale": s}, two)
+        g.case(f"ResizeImage: {mode} × 0.5, the 1×1 blank", classes["ResizeImage"], "ResizeImage", {"mode": mode, "scale": 0.5}, {"image": ("blank", [])})
+        g.case(f"ResizeImage: {mode} × 1.5, a batch of two files and a repeat", classes["ResizeImage"], "ResizeImage", {"mode": mode, "scale": 1.5},
+               {"image": ("rgb", [rgb, g.picture(37, 23, 3, 5), rgb])})
+        run("ResizeImage", f"{mode} × 0.37, hashed", {"mode": mode, "scale": 0.37}, (("rgb 320×200", "rgb", g.picture(320, 200, 3, 6)),), hashed=True)
+        run("ResizeImage", f"{mode} × 1.3, hashed", {"mode": mode, "scale": 1.3}, (("card 160×100 see-through", "card", g.picture(160, 100, 4, 19)),), hashed=True)
+    # Rotate: ±180, ±90, 45 and 1.
+    for a in (180.0, -180.0, 90.0, -90.0, 45.0, 1.0, -33.3):
+        run("RotateImage", f"angle {a}", {"angle": a}, four)
+    # Crop: 0.49 on each side (the max(x0 + 1, …) guard), all four, and the full-width and full slices.
+    for side in ("left", "right", "top", "bottom"):
+        run("CropImage", f"{side} 0.49", {side: 0.49}, four)
+    run("CropImage", "0.49 on every side", {"left": 0.49, "right": 0.49, "top": 0.49, "bottom": 0.49}, four)
+    run("CropImage", "top 0.2, bottom 0.1", {"top": 0.2, "bottom": 0.1}, two)
+    g.case("CropImage: left 0.1, top 0.3, the 1×1 blank", classes["CropImage"], "CropImage", {**defaults["CropImage"], "left": 0.1, "top": 0.3}, {"image": ("blank", [])})
+    # Flip: every combination.
+    for hz in (False, True):
+        for vt in (False, True):
+            run("FlipImage", f"horizontal {hz}, vertical {vt}", {"horizontal": hz, "vertical": vt}, two)
+    # Mirror: every mode, seam 0, 0.5 and 1, an odd and an even picture.
+    even = g.picture(40, 30, 3, 20)
+    for mode in ("left_to_right", "right_to_left", "top_to_bottom", "bottom_to_top", "quadrant_tl", "quadrant_tr"):
+        for seam in (0.0, 0.5, 1.0, 0.33, 0.77):
+            run("Mirror", f"{mode}, seam {seam}", {"mode": mode, "seam": seam},
+                (("rgb 37×23", "rgb", rgb), ("rgb 40×30", "rgb", even), ("card 23×19 see-through", "card", card4)))
+    one_col, one_row = g.picture(1, 9, 3, 21), g.picture(9, 1, 3, 22)
+    for mode in ("left_to_right", "right_to_left", "top_to_bottom", "bottom_to_top", "quadrant_tl", "quadrant_tr"):
+        run("Mirror", f"{mode}, seam 0.5, one column and one row", {"mode": mode, "seam": 0.5}, (("rgb 1×9", "rgb", one_col), ("rgb 9×1", "rgb", one_row)))
+    # GodRays: centres at the corners, samples 4 and 80.
+    for cx, cy in ((0.0, 0.0), (1.0, 0.0), (0.0, 1.0), (1.0, 1.0)):
+        for n in (4, 80):
+            run("GodRays", f"centre {cx}, {cy}, samples {n}", {"center_x": cx, "center_y": cy, "samples": n, "threshold": 0.4}, two)
+    # Kaleidoscope: 2 and 20 segments.
+    for n in (2, 20):
+        for rot in (0.0, 45.0, 359.0):
+            run("Kaleidoscope", f"segments {n}, rotation {rot}", {"segments": n, "rotation": rot}, four)
+    # Pinch at torch's special exponents (1 + amount: 0, 0.5, 2) and others.
+    for amt in (-1.0, -0.5, 1.0, 0.25, -0.73):
+        run("Pinch", f"amount {amt}", {"amount": amt}, two)
+    # CRT: each step alone and together, on 3 and 4 channels (a 4-channel picture meets the stripes).
+    crt_steps = [{"scanlines": 0.0, "rgb_mask": 0.0, "chroma": 0.0, "curvature": 0.0}, {"scanlines": 0.7, "rgb_mask": 0.0, "chroma": 0.0, "curvature": 0.0},
+                 {"scanlines": 0.0, "rgb_mask": 0.6, "chroma": 0.0, "curvature": 0.0}, {"scanlines": 0.0, "rgb_mask": 0.0, "chroma": 0.013, "curvature": 0.0},
+                 {"scanlines": 0.0, "rgb_mask": 0.0, "chroma": 0.0, "curvature": 0.15}, {"scanlines": 0.4, "rgb_mask": 0.5, "chroma": 0.0, "curvature": 0.1},
+                 {"scanlines": 0.4, "rgb_mask": 0.5, "chroma": 0.02, "curvature": 0.1}]
+    for i, over in enumerate(crt_steps):
+        run("CRT", f"steps {i}", over, four)
+    # Settings drawn at random (seeded), every class.
+    rs = np.random.default_rng(2607)
+    for node_id, cls in classes.items():
+        types = cls.INPUT_TYPES()["required"]
+        for i in range(WARP_RANDOM):
+            over = {}
+            for name, spec in types.items():
+                kind, info = spec[0], (spec[1] if len(spec) > 1 else {})
+                if kind == "FLOAT":
+                    over[name] = float(round(rs.uniform(info["min"], info["max"]), 3))
+                elif kind == "INT":
+                    over[name] = int(rs.integers(info["min"], info["max"] + 1))
+                elif kind == "BOOLEAN":
+                    over[name] = bool(rs.integers(0, 2))
+                elif kind == "COMBO":
+                    opts = info.get("options") or spec[0]
+                    over[name] = opts[int(rs.integers(0, len(opts)))]
+                elif isinstance(kind, list):
+                    over[name] = kind[int(rs.integers(0, len(kind)))]
+            pname, source, file = (("rgb 41×29", "rgb", g.picture(41, 29, 3, 23)), ("rgb 37×23", "rgb", rgb), ("card 23×19 opaque", "card", card3))[i % 3]
+            g.case(f"{node_id}: random {i}, {pname}", cls, node_id, {**defaults[node_id], **over}, {"image": (source, [file])})
+    # The large cases (hashed): settings that do something.
+    big = (("rgb 320×200", "rgb", g.picture(320, 200, 3, 6)),)
+    big4 = (("card 160×100 see-through", "card", g.picture(160, 100, 4, 19)),)
+    heavy = {
+        "CropImage": {"left": 0.13, "right": 0.21, "top": 0.05, "bottom": 0.3}, "RotateImage": {"angle": 33.0}, "FlipImage": {"horizontal": True, "vertical": True},
+        "Pinch": {"amount": 0.45}, "Twirl": {"angle": 170.0}, "Wave": {"amplitude": 0.07, "wavelength": 0.13, "axis": "both"}, "LensCorrection": {"distortion": -0.3},
+        "Kaleidoscope": {"segments": 7, "rotation": 20.0}, "PolarCoords": {"direction": "polar_to_rect"}, "Fisheye": {"amount": 1.1},
+        "ChromaticAberration": {"amount": 0.03}, "CRT": {"scanlines": 0.5, "rgb_mask": 0.4, "chroma": 0.01, "curvature": 0.12},
+        "Mirror": {"mode": "quadrant_tr", "seam": 0.5}, "GodRays": {"threshold": 0.5, "intensity": 1.3, "center_x": 0.2, "center_y": 0.8, "samples": 40},
+    }
+    for node_id, over in heavy.items():
+        run(node_id, "heavy", over, big, hashed=True)
+        if node_id not in ("CRT",):
+            run(node_id, "heavy", over, big4, hashed=True)
+    run("PolarCoords", "rect_to_polar", {"direction": "rect_to_polar"}, big, hashed=True)
+
+
+# −0 through the last clamp (as a Dither upstream leaves it): torch keeps it only in its loop's scalar
+# tails, which depend on how the clamped tensor sits in memory.
+WARP_NEGZERO = [
+    ("CropImage", {"left": 0.1, "right": 0.2, "top": 0.05, "bottom": 0.1}), ("CropImage", {"left": 0.0, "right": 0.0, "top": 0.1, "bottom": 0.2}),
+    ("CropImage", {"left": 0.0, "right": 0.0, "top": 0.0, "bottom": 0.0}), ("CropImage", {"left": 0.3, "right": 0.0, "top": 0.0, "bottom": 0.0}),
+    ("ResizeImage", {"scale": 1.0, "mode": "bilinear"}), ("ResizeImage", {"scale": 2.0, "mode": "nearest"}), ("ResizeImage", {"scale": 1.5, "mode": "bilinear"}),
+    ("FlipImage", {"horizontal": True, "vertical": False}), ("Mirror", {"mode": "left_to_right", "seam": 0.4}), ("Mirror", {"mode": "quadrant_tl", "seam": 0.5}),
+    ("RotateImage", {"angle": 0.0}), ("RotateImage", {"angle": 90.0}), ("LensCorrection", {"distortion": 0.2}), ("ChromaticAberration", {"amount": 0.01}),
+    ("CRT", {"scanlines": 0.3, "rgb_mask": 0.0, "chroma": 0.0, "curvature": 0.0}), ("CRT", {"scanlines": 0.3, "rgb_mask": 0.2, "chroma": 0.005, "curvature": 0.05}),
+    ("GodRays", {"threshold": 0.75, "intensity": 0.0, "center_x": 0.5, "center_y": 0.3, "samples": 24}),
+]
+
+
+def warp_negzero(classes: dict) -> list:
+    rows = []
+    seed = 7000
+    for class_type, widgets in WARP_NEGZERO:
+        for shape in ((1, 23, 37, 3), (2, 23, 37, 3), (1, 120, 110, 3), (2, 61, 90, 4), (1, 61, 90, 4)):
+            seed += 1
+            spec = {"shape": list(shape), "seed": seed, "neg_zero_every": 3}
+            x = warp_negzero_input(spec)
+            outs, _ui = run_node(classes[class_type], f"nz{seed}", image=x, **widgets)
+            t = outs[0]
+            items = []
+            for i in range(t.shape[0]):
+                y = t[i].contiguous()
+                f32 = y.cpu().numpy().astype("<f4").tobytes()
+                neg = int((torch.signbit(y) & (y == 0)).sum())
+                items.append({"w": int(y.shape[1]), "h": int(y.shape[0]), "c": int(y.shape[2]), "f32_sha256": sha(f32), "neg_zeros": neg})
+            rows.append({"name": f"{class_type} {widgets}, {'×'.join(map(str, shape))}", "class_type": class_type, "widgets": widgets, "input": spec, "items": items})
+    return rows
+
+
+def warp_classes() -> dict:
+    return {node_id: node_class(module, node_id) for module, node_id in WARP_CLASSES}
+
+
+def warp() -> dict:
+    g = WarpGroup()
+    classes = warp_classes()
+    for node_id, cls in classes.items():
+        standard_cases(g, cls, node_id)
+    warp_cases(g, classes)
+    # Resize into a Frame: the Frame sizes its canvas from the resized picture (its first layer).
+    frame = tone_frame_chain(g, classes["ResizeImage"], "ResizeImage", {"scale": 1.5, "mode": "bicubic"}, g.picture(23, 19, 4, 3))
+    floats: dict = {}
+    for c in g.cases:
+        for o in c.get("outputs") or []:
+            for it in o["items"]:
+                if "f32s" in it:
+                    floats[it["f32_sha256"]] = it.pop("f32s")
+    return {"cases": g.cases, "floats": floats, "assets": {k: b64(v) for k, v in sorted(g.assets.items())},
+            "library_eps": WARP_LIBRARY_EPS, "band_classes": list(WARP_BAND_CLASSES), "kernels": warp_kernels(), "negzero": warp_negzero(classes), "frame": frame}
+
+
+# `--group warp --sweep`: writes nothing into the repo. Two parts, each measured by the spec against
+# the TypeScript port (files handed over in this run's temp directory):
+#  1. small — each library and warp-class class (and Rotate, exact) over WARP_SWEEP_SEEDS fresh
+#     pictures (synth, sizes 29–511 drawn) with every widget drawn over its range;
+#  2. large — each warp-class class (and CRT, and Rotate) at WARP_SWEEP_LARGE sizes up to 8192², the
+#     largest the runner takes: every widget at its max, then drawn. The picture is `big_pixels`
+#     (numpy here, the same integer arithmetic in the spec); Python's float is handed over raw, one
+#     class at a time, and deleted after.
+# The spec prints each case's worst |Δ|·255, its share of ±1 values and its largest 8-bit difference.
+WARP_SWEEP_SEEDS = 40
+WARP_SWEEP_SIZES = [(41, 29), (37, 31), (29, 37), (64, 48), (97, 61), (160, 100), (320, 200), (511, 257)]
+# (side, seeds): the first seed of each size has every widget at its max. A class the runner caps below
+# 8192² (shared/runner/effects.ts EFFECT_CLASS_MAX_PIXELS: Kaleidoscope, 4096²) is swept up to its cap,
+# with more seeds there.
+WARP_SWEEP_LARGE = [(2048, 3), (4096, 2), (8192, 1)]
+WARP_SWEEP_CAPPED = {"Kaleidoscope": [(2048, 3), (4096, 4)]}
+
+
+def big_pixels(w: int, h: int, c: int, seed: int) -> np.ndarray:
+    """An 8-bit H × W × C picture from integer arithmetic (the spec rebuilds it): a diagonal gradient
+    per channel, xor'd with 5 bits of a multiplicative hash of the value's index, brighter past a
+    vertical edge at 40% of the width."""
+    y, x, k = np.meshgrid(np.arange(h, dtype=np.uint64), np.arange(w, dtype=np.uint64), np.arange(c, dtype=np.uint64), indexing="ij")
+    i = (y * np.uint64(w) + x) * np.uint64(c) + k
+    hsh = ((i * np.uint64(2654435761) + np.uint64(seed * 40503)) & np.uint64(0xFFFFFFFF)) >> np.uint64(27)
+    v = ((x * np.uint64(37) + y * np.uint64(11) + k * np.uint64(71) + np.uint64(seed)) & np.uint64(255)) ^ hsh
+    edge = x > np.uint64(w * 4 // 10)
+    v = np.where(edge, np.minimum(v + np.uint64(60), np.uint64(255)), v)
+    return v.astype(np.uint8)
+
+
+def sweep_widgets(rs: np.random.Generator, types: dict, at_max: bool = False) -> dict:
+    widgets = {}
+    for name, spec in types.items():
+        kind, info = spec[0], (spec[1] if len(spec) > 1 else {})
+        if kind == "FLOAT":
+            r = rs.uniform(0, 1)
+            widgets[name] = float(info["max"] if at_max or r < 0.15 else info["min"] if r < 0.25 else round(rs.uniform(info["min"], info["max"]), 3))
+        elif kind == "INT":
+            widgets[name] = int(info["max"] if at_max else rs.integers(info["min"], info["max"] + 1))
+        elif kind == "COMBO":
+            opts = info.get("options") or []
+            widgets[name] = opts[int(rs.integers(0, len(opts)))]
+        elif isinstance(kind, list):
+            widgets[name] = kind[int(rs.integers(0, len(kind)))]
+    return widgets
+
+
+def warp_spec_run(env_key: str, path: str, title: str, extra_env: dict | None = None) -> tuple[int, list]:
+    import subprocess
+    env = {k: v for k, v in os.environ.items() if k not in PROVIDER_KEYS}
+    env[env_key] = path
+    env.update(extra_env or {})
+    r = subprocess.run(["npx", "vitest", "run", "tests/unit/runner-effects-warp.unit.spec.ts", "-t", title, "--testTimeout=1800000", "--reporter=verbose"],
+                       cwd=os.path.join(ROOT, "frontend"), env=env, capture_output=True, text=True)
+    lines = [ln for ln in (r.stdout + r.stderr).splitlines() if "warp ε" in ln or "warp large" in ln or "Tests " in ln or "FAIL" in ln or "Error" in ln]
+    return r.returncode, lines
+
+
+def warp_sweep_run() -> int:
+    classes = warp_classes()
+    rs = np.random.default_rng(9127)
+    cases = []
+    for node_id, cls in classes.items():
+        if node_id not in WARP_LIBRARY_EPS and node_id not in WARP_BAND_CLASSES and node_id != "RotateImage":
+            continue
+        types = cls.INPUT_TYPES()["required"]
+        for i in range(WARP_SWEEP_SEEDS):
+            w, h = WARP_SWEEP_SIZES[int(rs.integers(0, len(WARP_SWEEP_SIZES)))]
+            c = 3 if node_id == "CRT" or rs.integers(0, 3) else 4
+            seed = int(rs.integers(1, 2 ** 31))
+            widgets = sweep_widgets(rs, types)
+            px = np.frombuffer(synth(w, h, c, seed), dtype=np.uint8).reshape(1, h, w, c)
+            x = torch.from_numpy(px.astype(np.float32) / 255.0)
+            row = {"class_type": node_id, "widgets": widgets, "w": w, "h": h, "c": c, "seed": seed}
+            try:
+                outs, _ui = run_node(cls, f"sw{len(cases)}", image=x, **widgets)
+                t = outs[0][0]
+                row.update({"ow": int(t.shape[1]), "oh": int(t.shape[0]), "oc": int(t.shape[2]), "f32s": shuffled_f32(t)})
+            except Exception as e:  # noqa: BLE001
+                row["error"] = str(e)
+            cases.append(row)
+    path = os.path.join(WORK, "warp-sweep.json")
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump({"cases": cases}, f)
+    print(f"warp ε sweep, small: {len(cases)} cases, {sum(1 for c in cases if 'error' in c)} Python raises")
+    code, lines = warp_spec_run("WARP_SWEEP_FILE", path, "the warp ε sweep")
+    print("\n".join(lines))
+    # Large: one class at a time (its raw floats run to 1.4 GB), deleted after.
+    rs = np.random.default_rng(9128)
+    for node_id, cls in classes.items():
+        if node_id not in WARP_BAND_CLASSES and node_id not in ("CRT", "RotateImage"):
+            continue
+        types = cls.INPUT_TYPES()["required"]
+        rows = []
+        files = []
+        for side, seeds in WARP_SWEEP_CAPPED.get(node_id, WARP_SWEEP_LARGE):
+            for j in range(seeds):
+                seed = int(rs.integers(1, 2 ** 31))
+                widgets = sweep_widgets(rs, types, at_max=(j == 0))
+                x = torch.from_numpy(big_pixels(side, side, 3, seed).astype(np.float32)[None] / np.float32(255.0))
+                outs, _ui = run_node(cls, f"big{len(files)}", image=x, **widgets)
+                t = outs[0][0].contiguous()
+                fpath = os.path.join(WORK, f"warp-large-{node_id}-{len(files)}.f32")
+                t.cpu().numpy().astype("<f4").tofile(fpath)
+                files.append(fpath)
+                rows.append({"class_type": node_id, "widgets": widgets, "w": side, "h": side, "c": 3, "seed": seed, "file": fpath,
+                             "ow": int(t.shape[1]), "oh": int(t.shape[0]), "oc": int(t.shape[2])})
+                del outs, t, x
+        lpath = os.path.join(WORK, f"warp-large-{node_id}.json")
+        with open(lpath, "w", encoding="utf-8") as f:
+            json.dump({"cases": rows}, f)
+        c2, lines = warp_spec_run("WARP_SWEEP_LARGE_FILE", lpath, "the warp large sweep")
+        print("\n".join(lines))
+        code = code or c2
+        for fp in files:
+            os.remove(fp)
+    return code
+
+
+GROUPS = {"machinery": machinery, "kernels": kernels, "rng": rng, "tone": tone, "blur": blur, "cells": cells, "warp": warp}
 
 
 def blur_sweep_run() -> int:
@@ -2149,13 +2588,13 @@ def blur_sweep_run() -> int:
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--group", required=True, choices=sorted(GROUPS))
-    ap.add_argument("--sweep", action="store_true", help="blur only: run the whole ε sweep, print each class's worst |Δ|; writes nothing")
+    ap.add_argument("--sweep", action="store_true", help="blur and warp only: run the whole ε sweep, print each class's worst |Δ|; writes nothing")
     args = ap.parse_args()
     check_threads()
     if args.sweep:
-        if args.group != "blur":
-            ap.error("--sweep is the blur group's")
-        sys.exit(blur_sweep_run())
+        if args.group not in ("blur", "warp"):
+            ap.error("--sweep is the blur and warp groups'")
+        sys.exit(blur_sweep_run() if args.group == "blur" else warp_sweep_run())
     body = GROUPS[args.group]()
     doc = {
         "note": f"Written by scripts/runner_effects_fixtures.py --group {args.group} from the real nodes. Do not edit.",

@@ -383,18 +383,26 @@ export function kernelsCore(k: TensorCore, px: PixelsCore) {
     return out
   }
 
-  /** mode='nearest' source index: min(⌊dst · f32(in/out)⌋, in − 1), with torch's equal-size and 2× shortcuts. */
+  /**
+   * The source step along one side: F.interpolate(scale_factor=s)'s (torch's
+   * `scales`, recompute_scale_factor unset; R2.7) is compute_scales_value's
+   * f32(1 / s); without one, the size mode's f32(in / out).
+   */
+  const stepOf = (inSize: number, outSize: number, scaleFactor?: number) =>
+    (scaleFactor !== undefined && scaleFactor > 0 ? f(1 / scaleFactor) : f(inSize / outSize))
+
+  /** mode='nearest' source index: min(⌊dst · step⌋, in − 1), with torch's equal-size and 2× shortcuts (which hold with a scale factor too). */
   function nearestIndex(dst: number, inSize: number, outSize: number, scale: number): number {
     if (outSize === inSize) return dst
     if (outSize === 2 * inSize) return dst >> 1
     return Math.min(Math.floor(f(dst * scale)), inSize - 1)
   }
 
-  /** F.interpolate(mode='nearest', size=(oh, ow)). EXACT. */
-  function resizeNearest(t: Tensor, oh: number, ow: number): Tensor {
+  /** F.interpolate(mode='nearest', size=(oh, ow)); with `scales` ([h, w]), its scale_factor path at that output size. EXACT. */
+  function resizeNearest(t: Tensor, oh: number, ow: number, scales?: readonly [number, number]): Tensor {
     const out = k.tensor(t.c, oh, ow)
-    const sy = f(t.h / oh)
-    const sx = f(t.w / ow)
+    const sy = stepOf(t.h, oh, scales?.[0])
+    const sx = stepOf(t.w, ow, scales?.[1])
     const xs = new Int32Array(ow)
     for (let x = 0; x < ow; x++) xs[x] = nearestIndex(x, t.w, ow, sx)
     const inN = t.h * t.w
@@ -410,23 +418,33 @@ export function kernelsCore(k: TensorCore, px: PixelsCore) {
     return out
   }
 
-  /** F.interpolate(mode='bilinear', align_corners=False): the pixels core's torch-exact bilinear (R1.4). EXACT. */
-  function resizeBilinear(t: Tensor, oh: number, ow: number, cl = false): Tensor {
-    return { c: t.c, h: oh, w: ow, data: px.bilinear(t.data, t.c, t.h, t.w, oh, ow, cl) }
+  /**
+   * F.interpolate(mode='bilinear', align_corners=False): the pixels core's
+   * torch-exact bilinear (R1.4). With `scales` ([h, w]), its scale_factor
+   * path (R2.7), where torch leaves a side whose size doesn't change alone
+   * (its step is 1, whatever the scale; measured) and, when neither changes,
+   * copies the picture. EXACT.
+   */
+  function resizeBilinear(t: Tensor, oh: number, ow: number, cl = false, scales?: readonly [number, number]): Tensor {
+    if (!scales) return { c: t.c, h: oh, w: ow, data: px.bilinear(t.data, t.c, t.h, t.w, oh, ow, cl) }
+    if (oh === t.h && ow === t.w) return { c: t.c, h: oh, w: ow, data: new Float32Array(t.data) }
+    const kept: [number, number] = [oh === t.h ? 0 : scales[0], ow === t.w ? 0 : scales[1]]
+    return { c: t.c, h: oh, w: ow, data: px.bilinear(t.data, t.c, t.h, t.w, oh, ow, cl, kept) }
   }
 
   /**
    * Bicubic taps (UpSampleKernel.cpp HelperInterpCubic, align_corners=False):
    * source fma(scale, d + 0.5, −0.5) unclamped, i0 = min(⌊src⌋, in − 1),
    * t = clamp(src − i0, 0, 1), A = −0.75, the four taps clamped to the edge.
+   * `scaleFactor`: the scale_factor path's step (stepOf).
    */
-  function cubicTaps(inSize: number, outSize: number): { idx: Int32Array; w: Float32Array } {
+  function cubicTaps(inSize: number, outSize: number, scaleFactor?: number): { idx: Int32Array; w: Float32Array } {
     const A = -0.75
     const cc1 = (x: number) => fmaf(f(fmaf(A + 2, x, -(A + 3)) * x), x, 1)
     const cc2 = (x: number) => fmaf(fmaf(fmaf(A, x, -5 * A), x, 8 * A), x, -4 * A)
     const idx = new Int32Array(outSize * 4)
     const w = new Float32Array(outSize * 4)
-    const scale = f(inSize / outSize)
+    const scale = stepOf(inSize, outSize, scaleFactor)
     for (let d = 0; d < outSize; d++) {
       const real = fmaf(scale, f(d + 0.5), -0.5)
       const i0 = Math.min(Math.floor(real), inSize - 1)
@@ -444,12 +462,13 @@ export function kernelsCore(k: TensorCore, px: PixelsCore) {
   /**
    * F.interpolate(mode='bicubic', align_corners=False) (the generic N-d
    * kernel): for each of the four source rows, a fused chain over the four
-   * columns; then a fused chain over the rows. EXACT.
+   * columns; then a fused chain over the rows. With `scales` ([h, w]), its
+   * scale_factor path. EXACT.
    */
-  function resizeBicubic(t: Tensor, oh: number, ow: number, stop?: () => boolean): Tensor {
+  function resizeBicubic(t: Tensor, oh: number, ow: number, stop?: () => boolean, scales?: readonly [number, number]): Tensor {
     const out = k.tensor(t.c, oh, ow)
-    const ty = cubicTaps(t.h, oh)
-    const tx = cubicTaps(t.w, ow)
+    const ty = cubicTaps(t.h, oh, scales?.[0])
+    const tx = cubicTaps(t.w, ow, scales?.[1])
     const inN = t.h * t.w
     const outN = oh * ow
     for (let c = 0; c < t.c; c++) {

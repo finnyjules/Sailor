@@ -25,7 +25,7 @@ export type EffectFamily = EffectSchemaFamily
 /** Every effect family. */
 export const EFFECT_FAMILIES: readonly EffectFamily[] = ['effects-tone', 'effects-blur', 'effects-cells', 'effects-warp', 'effects-mask', 'effects-noise']
 
-/** The effects ported so far (R2.1: the three pilots; R2.4: the rest of effects-tone; R2.5: effects-blur; R2.6: effects-cells). Each task adds its classes. */
+/** The effects ported so far (R2.1: the three pilots; R2.4: the rest of effects-tone; R2.5: effects-blur; R2.6: effects-cells; R2.7: effects-warp). Each task adds its classes. */
 export const EFFECT_CLASSES_PORTED: readonly string[] = [
   'AdjustExposure', 'AdjustInvert', 'AdjustThreshold',
   'AdjustBrightnessContrast', 'AdjustColor', 'AdjustCurves', 'AdjustLevels',
@@ -34,6 +34,7 @@ export const EFFECT_CLASSES_PORTED: readonly string[] = [
   'GradientMap', 'Posterize', 'Hologram', 'TwoDLight', 'LightLeak', 'LensFlare', 'Caustics', 'Blinds', 'CrossHatch', 'Dither',
   'Sharpen', 'Denoise', 'AdjustGlow', 'HighPass', 'Emboss', 'FindEdges', 'Blur', 'Bokeh', 'TiltShift', 'FrequencySeparation', 'HeightmapRelief', 'Outline', 'Sparkle',
   'Pixelate', 'Halftone', 'Kuwahara', 'Ascii',
+  'CropImage', 'ResizeImage', 'RotateImage', 'FlipImage', 'Pinch', 'Twirl', 'Wave', 'LensCorrection', 'Kaleidoscope', 'PolarCoords', 'Fisheye', 'ChromaticAberration', 'CRT', 'Mirror', 'GodRays',
 ]
 
 /** Each effect class's family (every generated class, ported or not). */
@@ -74,6 +75,25 @@ export const EFFECT_PICTURE_TOO_LARGE = 'This picture is too large for this effe
 export const EFFECT_PICTURE_TOO_LARGE_HOSTED = 'This picture is too large for this effect (more than 4096 × 4096 pixels). Use a smaller picture.'
 export const EFFECT_PICTURES_TOO_LARGE = 'The pictures this effect reads are too large to work on together (more than 268 million pixels). Use fewer or smaller pictures.'
 export const EFFECT_PICTURE_ANIMATED = 'This picture is animated, and effects here take single pictures only. Save it as a PNG and load it again.'
+/**
+ * Classes the runner takes only up to a smaller picture than the effects'
+ * cap (R2.7, the "warp" parity class): Kaleidoscope's grid (atan2, cos, sin
+ * of torch's SLEEF, not correctly rounded) drifts from Python's by up to
+ * 0.52 of a level at 4096² and 1.13 (an 8-bit ±2) at 8192², so it is taken
+ * up to 4096² (R2.7 report, round 2). Checked before any pixel is decoded.
+ */
+export const EFFECT_CLASS_MAX_PIXELS: Readonly<Record<string, number>> = { Kaleidoscope: 4096 * 4096 }
+export const EFFECT_PICTURE_TOO_LARGE_FOR_CLASS = 'This effect works on pictures up to 4096 × 4096 pixels. Use a smaller picture.'
+
+/** The largest picture this class reads or makes, and the words for one past it. */
+export function effectPictureCap(classType: string, hosted: boolean): { max: number; message: string } {
+  const base = hosted
+    ? { max: EFFECT_HOSTED_MAX_PICTURE_PIXELS, message: EFFECT_PICTURE_TOO_LARGE_HOSTED }
+    : { max: EFFECT_MAX_PICTURE_PIXELS, message: EFFECT_PICTURE_TOO_LARGE }
+  const own = Object.prototype.hasOwnProperty.call(EFFECT_CLASS_MAX_PIXELS, classType) ? EFFECT_CLASS_MAX_PIXELS[classType]! : Infinity
+  return own < base.max ? { max: own, message: EFFECT_PICTURE_TOO_LARGE_FOR_CLASS } : base
+}
+
 export const EFFECT_TOO_MUCH_WORK = 'This effect would take too long on a picture this size. Use a smaller picture or a lighter setting.'
 
 /** Where Python raises, the runner fails the node with these words (rule 6), keyed as the cores throw them. */
@@ -108,6 +128,38 @@ export function effectOutputSizeFits(classType: string, inputs: Record<string, u
   if (!size) return true
   return size.w * size.h <= (hosted ? EFFECT_HOSTED_MAX_PICTURE_PIXELS : EFFECT_MAX_PICTURE_PIXELS)
 }
+
+/**
+ * The output size of an effect that changes the picture's size, from its
+ * widgets (as its execute() receives them) and its input's size (R2.7), or
+ * null when it keeps the input's size. Resize: floor(side · scale) each side
+ * (F.interpolate's scale_factor; scale 1 is a plain clamp). Crop: x0 =
+ * int(left·w), x1 = max(x0 + 1, int(w − right·w)), the same down the side
+ * (nodes_geometry.py:34-41, in doubles). Used before any pixel is decoded:
+ * at the start of the take when the picture's header can be read (an Image
+ * card's or LoadImage's file), else at the node's turn (effects/plan.ts).
+ */
+export function effectOutSize(classType: string, widgets: Record<string, unknown>, size: { w: number; h: number }): { w: number; h: number } | null {
+  const num = (k: string) => (typeof widgets[k] === 'number' ? widgets[k] as number : 0)
+  if (classType === 'ResizeImage') {
+    const s = num('scale')
+    return s === 1 ? null : { w: Math.floor(size.w * s), h: Math.floor(size.h * s) }
+  }
+  if (classType === 'CropImage') {
+    const x0 = Math.trunc(num('left') * size.w)
+    const x1 = Math.max(x0 + 1, Math.trunc(size.w - num('right') * size.w))
+    const y0 = Math.trunc(num('top') * size.h)
+    const y1 = Math.max(y0 + 1, Math.trunc(size.h - num('bottom') * size.h))
+    return { w: Math.min(x1, size.w) - x0, h: Math.min(y1, size.h) - y0 }
+  }
+  return null
+}
+
+/** The classes whose output size effectOutSize knows (they change the picture's size). */
+export const EFFECT_RESIZING_CLASSES: readonly string[] = ['ResizeImage', 'CropImage']
+
+/** The classes whose picture is sized at the start of the take from a loader's header: those that resize it, and those with a cap of their own. */
+export const EFFECT_START_SIZED_CLASSES: readonly string[] = [...EFFECT_RESIZING_CLASSES, ...Object.keys(EFFECT_CLASS_MAX_PIXELS)]
 
 // ── Colour text (R2.4) ───────────────────────────────────────────────────────
 
