@@ -43,7 +43,17 @@ function spawnSpark(gxMin: number, gxMax: number, gyMin: number, gyMax: number):
   }
 }
 
+// Draws only when something changed: a pan/zoom, a resize, or while the run sweep or the
+// thinking sparks are moving. At rest the grid is a still picture, so nothing repaints and
+// the glass nodes above it don't have to re-blur it every frame.
+function schedule() {
+  if (!animFrame) animFrame = requestAnimationFrame(draw)
+}
+
 function draw() {
+  animFrame = 0
+  const running = !!props.running
+  const thinking = !!props.thinking
   const canvas = canvasRef.value
   if (!canvas) return
   const ctx = canvas.getContext('2d')
@@ -77,7 +87,7 @@ function draw() {
   const r = Math.max(0.5, dotRadius.value * Math.min(scale, 1.5))
 
   // Update sweep position when running
-  if (props.running) {
+  if (running) {
     sweepX += 0.007
     if (sweepX > 1.3) {
       sweepX = -0.3
@@ -88,14 +98,18 @@ function draw() {
     sweepX = -0.5
   }
 
+  const glow: number[] = []
   const sweepScreenX = sweepX * w
   const sweepWidth = w * 0.25 // width of the glow band
 
+  // Every resting dot goes into ONE path and one fill; only the glowing ones in the
+  // sweep band are filled one by one, since each takes its own colour.
+  ctx.beginPath()
   for (let x = startX; x < w; x += g) {
     for (let y = startY; y < h; y += g) {
       let alpha = baseAlpha
 
-      if (props.running) {
+      if (running) {
         // Distance from sweep center, normalized to sweep width
         const dist = Math.abs(x - sweepScreenX) / sweepWidth
         if (dist < 1) {
@@ -105,18 +119,24 @@ function draw() {
         }
       }
 
-      ctx.beginPath()
-      ctx.arc(x, y, r, 0, Math.PI * 2)
       if (alpha > baseAlpha) {
         // Rainbow tint based on horizontal position + scrolling offset
         const t = (alpha - baseAlpha) / (glowAlpha - baseAlpha)
         const hue = ((x / w) + rainbowOffset) * 360 % 360
-        ctx.fillStyle = `hsla(${hue}, 80%, 75%, ${alpha * t + baseAlpha * (1 - t)})`
+        glow.push(x, y, hue, alpha * t + baseAlpha * (1 - t))
       } else {
-        ctx.fillStyle = `rgba(255, 255, 255, ${alpha})`
+        ctx.moveTo(x + r, y)
+        ctx.arc(x, y, r, 0, Math.PI * 2)
       }
-      ctx.fill()
     }
+  }
+  ctx.fillStyle = `rgba(255, 255, 255, ${baseAlpha})`
+  ctx.fill()
+  for (let i = 0; i < glow.length; i += 4) {
+    ctx.beginPath()
+    ctx.arc(glow[i]!, glow[i + 1]!, r, 0, Math.PI * 2)
+    ctx.fillStyle = `hsla(${glow[i + 2]}, 80%, 75%, ${glow[i + 3]})`
+    ctx.fill()
   }
 
   // Thinking sparks — little segments firing dot-to-dot like synapses. Each spark
@@ -125,7 +145,7 @@ function draw() {
   const gxMax = Math.ceil((w - offsetX) / g) + 1
   const gyMin = Math.floor((0 - offsetY) / g) - 1
   const gyMax = Math.ceil((h - offsetY) / g) + 1
-  if (props.thinking && !sparks.length) {
+  if (thinking && !sparks.length) {
     // Toned down: roughly half the old population.
     const n = Math.min(12, Math.max(5, Math.round((gxMax - gxMin) / 8)))
     sparks = Array.from({ length: n }, () => spawnSpark(gxMin, gxMax, gyMin, gyMax))
@@ -136,13 +156,13 @@ function draw() {
     ctx.lineJoin = 'round'
     for (const s of sparks) {
       // Per-spark fade: in fast while thinking, out at its own (faster) rate after.
-      s.fade += ((props.thinking ? 1 : 0) - s.fade) * (props.thinking ? 0.18 : s.fadeRate)
+      s.fade += ((thinking ? 1 : 0) - s.fade) * (thinking ? 0.18 : s.fadeRate)
       s.p += s.speed
       if (s.p >= 1) {
         // Keep going straight in the same direction (no swerving). Step to the
         // next dot; respawn only once we've travelled off-screen.
         s.gx += s.dx; s.gy += s.dy; s.p = 0
-        if (props.thinking && (s.gx < gxMin - 3 || s.gx > gxMax + 3 || s.gy < gyMin - 3 || s.gy > gyMax + 3)) {
+        if (thinking && (s.gx < gxMin - 3 || s.gx > gxMax + 3 || s.gy < gyMin - 3 || s.gy > gyMax + 3)) {
           Object.assign(s, spawnSpark(gxMin, gxMax, gyMin, gyMax)) // teleport → fresh (empty) trail
         }
       }
@@ -174,41 +194,41 @@ function draw() {
       ctx.fill()
     }
     // Release sparks that have individually faded out (only once thinking stops).
-    if (!props.thinking) sparks = sparks.filter(s => s.fade > 0.02)
+    if (!thinking) sparks = sparks.filter(s => s.fade > 0.02)
   }
 
   // Reset transform for next frame
   ctx.setTransform(1, 0, 0, 1, 0, 0)
 
-  animFrame = requestAnimationFrame(draw)
+  // Keep animating only while something on the grid moves by itself.
+  if (running || thinking || sparks.length) schedule()
 }
 
+let resizeObserver: ResizeObserver | null = null
 onMounted(() => {
-  animFrame = requestAnimationFrame(draw)
+  schedule()
+  if (canvasRef.value && typeof ResizeObserver !== 'undefined') {
+    resizeObserver = new ResizeObserver(() => schedule())
+    resizeObserver.observe(canvasRef.value)
+  }
 })
 
 onUnmounted(() => {
   cancelAnimationFrame(animFrame)
+  animFrame = 0
+  resizeObserver?.disconnect()
 })
 
-// Redraw when viewport changes (pan/zoom)
-watch(viewport, () => {
-  // Animation loop handles redraw continuously when running;
-  // when idle, trigger a single redraw
-  if (!props.running) {
-    cancelAnimationFrame(animFrame)
-    animFrame = requestAnimationFrame(draw)
-  }
-}, { deep: true })
+// Redraw when viewport changes (pan/zoom) — at most once a frame.
+watch(viewport, () => schedule(), { deep: true })
 
-// Start/stop animation loop when running state changes
+// Start the loop when the run sweep or the thinking sparks begin (and one last
+// frame when they stop, so the sweep clears).
 watch(() => props.running, (running) => {
-  if (running) {
-    sweepX = -0.3
-    cancelAnimationFrame(animFrame)
-    animFrame = requestAnimationFrame(draw)
-  }
+  if (running) sweepX = -0.3
+  schedule()
 })
+watch(() => props.thinking, () => schedule())
 </script>
 
 <template>
