@@ -393,8 +393,11 @@ describe('R1.7 · each card workflow, `cards` on, POST /api/runs to the last eve
   })
 
   it('LoadImage → Image to mask: Python\'s mask; the LoadImage\'s Save image written; charged priceGraph (the render credit)', async () => {
+    // The mask is read by Apply mask (effects-mask): only what an output reads runs (R3.8 fix round 1).
+    process.env.NUXT_RUNNER_FAMILIES = `${ON},effects-mask`
     const k = kit()
-    const f = maskFlow()
+    const base = maskFlow()
+    const f: CardFlow = { ...base, prompt: { ...base.prompt, a: { class_type: 'ApplyMask', inputs: { image: ['l', 0], mask: ['u', 0], invert: false } } } }
     const r = await runFlow(k, f)
     const mask = r.nodes.u!.values![0] as Extract<RunnerValue, { kind: 'mask' }>
     expect(mask.kind).toBe('mask')

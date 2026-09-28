@@ -12,7 +12,7 @@ import { join, resolve } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import sharp from 'sharp'
 import { createFakeReplicate, makeKit, ofType } from './__runner__/kit'
-import { normalizeSent, runPaidCase, wireText, type PaidCase } from './__runner__/paidParity'
+import { normalizeSent, readerFor, runPaidCase, wireText, type PaidCase } from './__runner__/paidParity'
 import { checkPayload, loadProviderSchema, type ProviderSchemaFixture } from './helpers/providerSchema'
 import type { ApiPrompt } from '#shared/runner/graph'
 import { RUNNER_FAMILIES, type RunnerFamily } from '#shared/runner/families'
@@ -29,7 +29,7 @@ import { ENHANCE_ENGINE_SLUGS, LARGEST_INPUT_PIXELS, UPSCALE_ENGINE_SLUGS } from
 import { PAID_NODE_CLASSES, paidNoCall } from '#shared/pricing/paidSettings'
 import { MODEL_PRICED_NODE_CLASSES, priceNode } from '#shared/pricing/nodePrice'
 import { creditsForUsd } from '#shared/pricing/markup'
-import { GRAPH_NODE_CREDITS, PRICE_BOOK_VERSION, priceGraph } from '~~/server/utils/priceBook'
+import { BASE_RENDER_CREDITS, GRAPH_NODE_CREDITS, PRICE_BOOK_VERSION, priceGraph } from '~~/server/utils/priceBook'
 import { graphInputSizes } from '~~/server/utils/graphInputPixels'
 import { PAID_TEXT_INPUTS, extraPromptTexts, stageEstimate } from '~~/server/runner/metering'
 import { planNode, type NodePlan } from '~~/server/runner/executors'
@@ -65,6 +65,8 @@ function withPicture(c: PaidCase): ApiPrompt {
   return {
     p_image: { class_type: 'LoadImage', inputs: { image: 'image.png', upload: 'image' } },
     n: { class_type: c.class_type, inputs: { ...c.widgets, image: ['p_image', 0] } },
+    // A card shows the result: only what an output reads runs (R3.8 fix round 1).
+    ...readerFor(c.class_type, 'n'),
   }
 }
 
@@ -293,6 +295,7 @@ describe('the picture kept', () => {
       p_image: { class_type: 'LoadImage', inputs: { image: 'image.png', upload: 'image' } },
       u: { class_type: 'UpscaleImageNode', inputs: { ...CASES.find(c => c.name === 'upscale · Real-ESRGAN default')!.widgets, image: ['p_image', 0] } },
       r: { class_type: 'RemoveBackgroundRemoteNode', inputs: { image: ['u', 0] } },
+      ...readerFor('RemoveBackgroundRemoteNode', 'r'),
     }
     expect(isRunnerEligible(p, ON)).toBe(true)
     const { runId } = await k.engine.startRun({ userId: k.userId, takes: [p], ...START })
@@ -399,7 +402,7 @@ describe('the picture\'s size, before the hold (hosted: the G1 walk)', () => {
     const k = makeKit({ hosted: true, deps: { families: () => ON } })
     writeFileSync(join(k.root, 'input', 'big.png'), await png(4400, 4400))
     expect(4400 * 4400).toBeGreaterThan(LARGEST_INPUT_PIXELS)
-    const p: ApiPrompt = { l: { class_type: 'LoadImage', inputs: { image: 'big.png', upload: 'image' } }, n: node('UpscaleImageNode', topaz6, 'l') }
+    const p: ApiPrompt = { l: { class_type: 'LoadImage', inputs: { image: 'big.png', upload: 'image' } }, n: node('UpscaleImageNode', topaz6, 'l'), ...readerFor('UpscaleImageNode', 'n') }
     await expect(k.engine.startRun({ userId: k.userId, takes: [p], ...START })).rejects.toThrow(UPSCALE_TOO_LARGE)
     expect(k.ledger.hold).not.toHaveBeenCalled()
     expect(k.replicate.client.submit).not.toHaveBeenCalled()
@@ -413,6 +416,7 @@ describe('the picture\'s size, before the hold (hosted: the G1 walk)', () => {
       l: { class_type: 'LoadImage', inputs: { image: '4k.png', upload: 'image' } },
       u: node('UpscaleImageNode', topaz6, 'l'),
       e: node('EnhanceDetailNode', faithful, 'u'),
+      ...readerFor('EnhanceDetailNode', 'e'),
     }
     await expect(k.engine.startRun({ userId: k.userId, takes: [p], ...START })).rejects.toThrow(ENHANCE_DETAIL_TOO_LARGE)
     expect(k.ledger.hold).not.toHaveBeenCalled()
@@ -432,7 +436,7 @@ describe('the picture\'s size, before the hold (hosted: the G1 walk)', () => {
     }
     const sized = await startPictureSizes(unsized, async () => new Uint8Array(await png(8, 6)))
     expect(sized.problem?.message).toBe(unsizedInputWords('UpscaleImageNode'))
-    const broken = await startPictureSizes({ l: { class_type: 'LoadImage', inputs: { image: 'a.png' } }, n: node('UpscaleImageNode', crystal, 'l') }, async () => new TextEncoder().encode('not a picture'))
+    const broken = await startPictureSizes({ l: { class_type: 'LoadImage', inputs: { image: 'a.png' } }, n: node('UpscaleImageNode', crystal, 'l'), ...readerFor('UpscaleImageNode', 'n') }, async () => new TextEncoder().encode('not a picture'))
     expect(broken.problem?.message).toMatch(/can.t read the size of this picture/)
     expect(k.ledger.hold).not.toHaveBeenCalled()
   })
@@ -441,7 +445,7 @@ describe('the picture\'s size, before the hold (hosted: the G1 walk)', () => {
     const replicate = createFakeReplicate({ bodyText: () => JSON.stringify({ id: 'p', status: 'succeeded', output: [OUT] }) })
     const k = makeKit({ hosted: true, replicate, deps: { families: () => ON, download: async () => ({ bytes: new Uint8Array(await png(16, 12)), contentType: 'image/png' }) } })
     writeFileSync(join(k.root, 'input', 'a.png'), await png(2000, 1500))
-    const p: ApiPrompt = { l: { class_type: 'LoadImage', inputs: { image: 'a.png', upload: 'image' } }, n: node('UpscaleImageNode', crystal, 'l') }
+    const p: ApiPrompt = { l: { class_type: 'LoadImage', inputs: { image: 'a.png', upload: 'image' } }, n: node('UpscaleImageNode', crystal, 'l'), ...readerFor('UpscaleImageNode', 'n') }
     const { runId } = await k.engine.startRun({ userId: k.userId, takes: [p], ...START })
     await k.engine.settled(runId)
     const rec = (await k.store.get(runId))!.takes[0]!.nodes.n!
@@ -452,7 +456,8 @@ describe('the picture\'s size, before the hold (hosted: the G1 walk)', () => {
     expect(measured).toBe(creditsForUsd(0.80))
     expect(atCap).toBeGreaterThan(measured)
     expect(rec.credits).toBe(measured)
-    expect([...k.ledger.holds.values()].map(h => [h.credits, h.actual])).toEqual([[measured, measured]])
+    // + the render credit: the Image card that shows the result is an output (R3.8 fix round 1), as on the Python path.
+    expect([...k.ledger.holds.values()].map(h => [h.credits, h.actual])).toEqual([[measured + BASE_RENDER_CREDITS, measured + BASE_RENDER_CREDITS]])
     const run = (await k.store.get(runId))!
     expect(run.takes[0]!.measured).toEqual({ n: { seconds: {}, sha: {}, pixels: 2000 * 1500 } })
   })
@@ -460,7 +465,7 @@ describe('the picture\'s size, before the hold (hosted: the G1 walk)', () => {
   it('local: nothing is sized before the run (nothing is held); the turn measures and charges as before', async () => {
     const k = makeKit({ deps: { families: () => ON } })
     writeFileSync(join(k.root, 'input', 'a.png'), await png(8, 6))
-    const p: ApiPrompt = { l: { class_type: 'LoadImage', inputs: { image: 'a.png', upload: 'image' } }, n: node('UpscaleImageNode', crystal, 'l') }
+    const p: ApiPrompt = { l: { class_type: 'LoadImage', inputs: { image: 'a.png', upload: 'image' } }, n: node('UpscaleImageNode', crystal, 'l'), ...readerFor('UpscaleImageNode', 'n') }
     const { runId } = await k.engine.startRun({ userId: k.userId, takes: [p], ...START })
     await k.engine.settled(runId)
     const run = (await k.store.get(runId))!
@@ -472,7 +477,7 @@ describe('the picture\'s size, before the hold (hosted: the G1 walk)', () => {
     const replicate = createFakeReplicate({ bodyText: () => JSON.stringify({ id: 'p', status: 'succeeded', output: [OUT] }) })
     const k = makeKit({ hosted: true, replicate, deps: { families: () => ON } })
     writeFileSync(join(k.root, 'input', 'a.png'), await png(800, 600))
-    const p: ApiPrompt = { l: { class_type: 'LoadImage', inputs: { image: 'a.png', upload: 'image' } }, n: node('UpscaleImageNode', crystal, 'l') }
+    const p: ApiPrompt = { l: { class_type: 'LoadImage', inputs: { image: 'a.png', upload: 'image' } }, n: node('UpscaleImageNode', crystal, 'l'), ...readerFor('UpscaleImageNode', 'n') }
     // The picture is replaced by a larger one between the start (sized) and the node's turn.
     const larger = await png(3000, 3000)
     const { runId } = await k.engine.startRun({ userId: k.userId, takes: [p], ...START })
@@ -493,6 +498,7 @@ describe('the picture\'s size, before the hold (hosted: the G1 walk)', () => {
         l: { class_type: 'LoadImage', inputs: { image: 'a.png', upload: 'image' } },
         u: node('UpscaleImageNode', { ...esrgan, scale_factor: 2 }, 'l'),
         c: node('UpscaleImageNode', { ...crystal, scale_factor: 2 }, 'u'),
+        ...readerFor('UpscaleImageNode', 'c'),
       } as ApiPrompt,
       answerSide,
     }
@@ -524,7 +530,7 @@ describe('the picture\'s size, before the hold (hosted: the G1 walk)', () => {
     expect(nodes.c!.credits).toBe(real)
     expect(real).toBeLessThanOrEqual(heldAt)
     const esrgan = (priceNode('UpscaleImageNode', prompt.u!.inputs, { inputPixels: 524 * 524 }) as { credits: number }).credits
-    expect([...k.ledger.holds.values()].map(h => [h.credits, h.actual])).toEqual([[esrgan + heldAt, esrgan + real]])
+    expect([...k.ledger.holds.values()].map(h => [h.credits, h.actual])).toEqual([[esrgan + heldAt + BASE_RENDER_CREDITS, esrgan + real + BASE_RENDER_CREDITS]])
   })
 
   it('a predicted picture past its margin is refused at its turn (1200² where 1048² was predicted)', async () => {

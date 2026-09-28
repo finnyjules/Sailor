@@ -338,7 +338,8 @@ describe('eligibility', () => {
   })
 
   it('its list may be read only by Save image and Preview image: an Edit image reading it is left to the engine', () => {
-    const p: ApiPrompt = { l: smartLayout(), e: edit(['l', 0]) }
+    // The edit's picture shown by a card: only what an output reads runs (R3.8 fix round 1).
+    const p: ApiPrompt = { l: smartLayout(), e: edit(['l', 0]), i: { class_type: 'Image', inputs: { image: '', export: false, images: ['e', 0], batch_index: -1 } } }
     expect(isRunnerEligible(p, EDIT_CARDS)).toBe(false)
     expect(nodesNeedingEngine(p, { runnerOn: true, families: EDIT_CARDS, titleOf: id => id })).toEqual(['l'])
     const frame = { class_type: 'Compositor', inputs: { layer1: ['l', 0] } }

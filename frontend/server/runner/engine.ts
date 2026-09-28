@@ -9,7 +9,8 @@
 import { FRAME_RENDER_TYPES, LOCAL_RENDER_TYPES, PROVIDER_TYPES, isRunnerEligible } from '#shared/runner/eligibility'
 import { NO_FAMILIES, type RunnerFamily } from '#shared/runner/families'
 import { staticWiredTexts } from '#shared/runner/staticValues'
-import { NO_VALID_OUTPUTS_MESSAGE, pruneInvalidOutputs, type ComfyNodeError } from '#shared/runner/validate'
+import { withStaticSpeechText } from '#shared/runner/audioGen'
+import { NO_OUTPUTS_MESSAGE, NO_VALID_OUTPUTS_MESSAGE, prunedAny, pruneInvalidOutputs, type ComfyNodeError } from '#shared/runner/validate'
 import { blockedModelUses, blockedModelsResponse } from '#shared/runner/blockedModels'
 import {
   GATE_CLASS, dependenciesOf, downstreamNodes, isLink, legNodes, upstreamStage,
@@ -1425,7 +1426,8 @@ export function createEngine(deps: EngineDeps) {
       // (FLUX.2 edit; Rotate camera on 2511), and on the measured media where
       // it depends on them (sync-3 lip-sync; Topaz video upscale), measured
       // before planning.
-      if (!resuming) rec.credits = nodeCredits(take.prompt[id]!, inputPixels, families, inputSeconds)
+      // A speech text a card decides before the run is priced at its length (R3.8 fix round 1), as the hold was.
+      if (!resuming) rec.credits = nodeCredits(withStaticSpeechText(take.prompt)[id]!, inputPixels, families, inputSeconds)
       // A predicted size (fix round 1): the real size's price, never above what was held for it.
       if (!resuming && held?.predicted && held.pixels !== undefined) rec.credits = Math.min(rec.credits, nodeCredits(take.prompt[id]!, held.pixels, families))
       const fp = resuming
@@ -1899,9 +1901,11 @@ export function createEngine(deps: EngineDeps) {
     for (const p of takes) {
       if (!p || typeof p !== 'object') throw refuse('This workflow can’t run on the Sailor runner', 400, { reason: RUNNER_NOT_ELIGIBLE })
       const pruned = pruneInvalidOutputs(p as ApiPrompt, families)
-      // ComfyUI: "Prompt outputs failed validation". No marker: ComfyUI would refuse it too.
+      // ComfyUI: "Prompt has no outputs" (R3.8 fix round 1) or "Prompt outputs failed
+      // validation". No marker: ComfyUI would refuse it too. Nothing is held.
+      if (pruned.noOutputs) throw refuse(NO_OUTPUTS_MESSAGE, 400)
       if (pruned.failed) throw refuse(NO_VALID_OUTPUTS_MESSAGE, 400, { node_errors: pruned.nodeErrors })
-      if (!isRunnerEligible(pruned.prompt, families, { hosted: deps.hosted(), afterPruning: pruned.dropped.length > 0 })) {
+      if (!isRunnerEligible(pruned.prompt, families, { hosted: deps.hosted(), afterPruning: prunedAny(pruned) })) {
         throw refuse('This workflow can’t run on the Sailor runner', 400, { reason: RUNNER_NOT_ELIGIBLE })
       }
       if (pruned.dropped.length) nodeErrors ??= pruned.nodeErrors
@@ -1930,7 +1934,7 @@ export function createEngine(deps: EngineDeps) {
     if (deps.hosted()) {
       for (const p of prompts) {
         let unpriced: string | null
-        try { unpriced = unpricedProviderNode(p, undefined, n => nodeCredits(n, undefined, families)) }
+        try { unpriced = unpricedProviderNode(withStaticSpeechText(p), undefined, n => nodeCredits(n, undefined, families)) }
         catch (e) {
           if (e instanceof UnpricedGraphError) throw refuse('A model in this workflow has no price yet', 500)
           throw e

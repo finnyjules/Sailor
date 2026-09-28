@@ -15,7 +15,7 @@ import { makeKit } from './__runner__/kit'
 import type { ApiPrompt } from '#shared/runner/graph'
 import type { RunnerFamily } from '#shared/runner/families'
 import { isRunnerEligible, runnerTakesNode } from '#shared/runner/eligibility'
-import { runnerTakesWorkflow } from '#shared/runner/validate'
+import { pruneInvalidOutputs, runnerTakesWorkflow } from '#shared/runner/validate'
 import { nodesNeedingEngine } from '#shared/runner/needsEngine'
 import { planNode, type DeriveIO, type Derived, type NodePlan } from '~~/server/runner/executors'
 import { IMAGE_NO_ALPHA, PICTURES_TOO_LARGE, tensorChannels } from '~~/server/runner/cards/utilities'
@@ -376,27 +376,35 @@ describe('the engine (cards on)', () => {
 
   it('a card picture a utility reads is refused at the start when the runner can\'t read it exactly', async () => {
     const VALUES = JSON.parse(readFileSync(resolve(__dirname, 'fixtures/runner-values.json'), 'utf8')) as { refused: { name: string; file: string }[] }
-    const k = makeKit({ hosted: true, deps: { families: () => EDIT_CARDS } })
+    const families = new Set<RunnerFamily>([...EDIT_CARDS, 'effects-mask'])
+    const k = makeKit({ hosted: true, deps: { families: () => families } })
     put(k.root, 'deep.png', b64(VALUES.refused.find(c => c.name === 'a 16-bit greyscale PNG')!.file))
-    for (const u of [
-      { class_type: 'GetImageSize', inputs: { image: ['0', 0] } },
-      { class_type: 'ImageToMask', inputs: { image: ['0', 0], channel: 'red' } },
-      { class_type: 'TextMask', inputs: { params: JSON.stringify({ rendered: 'r.png' }), source: ['0', 0] } },
-    ]) {
-      const p: ApiPrompt = { 0: card('deep.png'), u, 2: edit(['0', 0]), 3: outCard('2') }
+    // Each utility read by something that shows its result: only what an output reads runs (R3.8 fix
+    // round 1). Image to mask's mask by Apply mask; Text mask's picture by Preview image.
+    for (const [u, reader] of [
+      [{ class_type: 'ImageToMask', inputs: { image: ['0', 0], channel: 'red' } }, { class_type: 'ApplyMask', inputs: { image: ['0', 0], mask: ['u', 0], invert: false } }],
+      [{ class_type: 'TextMask', inputs: { params: JSON.stringify({ rendered: 'r.png' }), source: ['0', 0] } }, { class_type: 'PreviewImage', inputs: { images: ['u', 0] } }],
+    ] as const) {
+      const p: ApiPrompt = { 0: card('deep.png'), u, r: reader, 2: edit(['0', 0]), 3: outCard('2') }
       await expect(k.engine.startRun({ userId: k.userId, takes: [p], ...START }), u.class_type)
         .rejects.toMatchObject({ statusCode: 400, message: 'This picture is 16-bit. Save it as an 8-bit picture and load it again.' })
     }
+    // Get image size's numbers are read by nothing the runner takes: nothing reads it here, so it
+    // doesn't run (ComfyUI never runs it either) and its picture isn't judged.
+    const unread: ApiPrompt = { 0: card('deep.png'), u: { class_type: 'GetImageSize', inputs: { image: ['0', 0] } }, 2: edit(['0', 0]), 3: outCard('2') }
+    expect(pruneInvalidOutputs(unread, families).unread).toEqual(['u'])
     expect(k.ledger.hold).not.toHaveBeenCalled()
     expect(k.fal.client.submit).not.toHaveBeenCalled()
   })
 
   it('Image to mask on a picture with no alpha fails the node in plain words', async () => {
     const c = FX.image_to_mask.find(x => x.error)!
-    const k = makeKit({ hosted: false, deps: { families: () => EDIT_CARDS } })
+    const k = makeKit({ hosted: false, deps: { families: () => new Set<RunnerFamily>([...EDIT_CARDS, 'effects-mask']) } })
     put(k.root, c.names[0]!, b64(c.files[c.names[0]!]!))
     const p: ApiPrompt = {
       0: loadImage(c.names[0]!), u: { class_type: 'ImageToMask', inputs: { image: ['0', 0], channel: 'alpha' } },
+      // Its mask read by Apply mask: only what an output reads runs (R3.8 fix round 1).
+      r: { class_type: 'ApplyMask', inputs: { image: ['0', 0], mask: ['u', 0], invert: false } },
       2: edit(['0', 0]), 3: outCard('2'),
     }
     const { runId } = await k.engine.startRun({ userId: null, takes: [p], ...START })

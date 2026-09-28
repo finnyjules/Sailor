@@ -10,6 +10,7 @@ import { createFakeFal, makeKit, until } from './__runner__/kit'
 import type { ApiPrompt } from '#shared/runner/graph'
 import { isRunnerEligible, runnerTakesNode } from '#shared/runner/eligibility'
 import { withWiredValues, WIRED_VALUE_MISSING } from '~~/server/runner/values'
+import { planNode } from '~~/server/runner/executors'
 import type { RunnerFamily } from '#shared/runner/families'
 import { REVE_21_LONG_PROMPT } from '~~/server/runner/generators/reve21'
 
@@ -101,12 +102,19 @@ describe('the engine', () => {
       f: { class_type: 'PrimitiveFloat', inputs: { value: 1.5 } },
       b: { class_type: 'PrimitiveBoolean', inputs: { value: true } },
     }
+    // A Primitive nothing reads doesn't run (ComfyUI's pruning, R3.8 fix round 1): the run leaves them out,
+    // and each card's own plan (the one the engine runs when something reads it) makes its value.
     const { runId } = await k.engine.startRun({ userId: null, takes: [p], ...START })
     await k.engine.settled(runId)
-    const nodes = (await k.store.get(runId))!.takes[0]!.nodes
-    expect(nodes.i!.values).toEqual({ 0: { kind: 'number', value: 42, int: true } })
-    expect(nodes.f!.values).toEqual({ 0: { kind: 'number', value: 1.5, int: false } })
-    expect(nodes.b!.values).toEqual({ 0: { kind: 'boolean', value: true } })
+    expect(Object.keys((await k.store.get(runId))!.takes[0]!.nodes).sort()).toEqual(['1', '2', 'p'])
+    const valueOf = async (id: string) => {
+      const plan = await planNode({ prompt: p, nodeId: id, gateOpen: false, filesFrom: () => [], toUrl: async () => '' })
+      if (plan.kind !== 'derive') throw new Error(`${id} is not a card`)
+      return (await plan.derive({} as never)).values
+    }
+    expect(await valueOf('i')).toEqual({ 0: { kind: 'number', value: 42, int: true } })
+    expect(await valueOf('f')).toEqual({ 0: { kind: 'number', value: 1.5, int: false } })
+    expect(await valueOf('b')).toEqual({ 0: { kind: 'boolean', value: true } })
   })
   it('refuses a workflow with a Primitive when cards is off, as before', async () => {
     const k = makeKit({ hosted: false })

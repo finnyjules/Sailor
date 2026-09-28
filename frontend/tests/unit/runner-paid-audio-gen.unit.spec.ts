@@ -39,6 +39,9 @@ import { firstOutputUrl } from '~~/server/runner/generators/repair'
 import { RUNNER_ROUTES } from '~~/server/runner/generators/twins'
 import { SYNC_3_APP, sync3NodeProblem, sync3Sources } from '~~/server/runner/generators/sync3'
 import { hostedRequestProblems, requestProblems } from '~~/server/runner/requestRules'
+import { meterGraphSubmit } from '~~/server/utils/meterGraphRun'
+import { ANSWER_NOT_SOUND } from '~~/server/runner/answerDownload'
+import { NO_OUTPUTS_MESSAGE, pruneInvalidOutputs, runnerTakesWorkflow } from '#shared/runner/validate'
 import { nodeMediaCheck } from '~~/server/runner/nodeMedia'
 import { createFakeFal } from './__runner__/kit'
 
@@ -307,9 +310,9 @@ describe('refusals before the hold, in plain words', () => {
   it('the engine refuses them before the hold (a cloned voice in hosted only)', async () => {
     const cloned = CASES.find(c => c.name === 'speech · cloned voice')!
     for (const [p, hosted, want] of [
-      [{ n: node(speech, { text: '' }) }, false, SPEECH_NEEDS_TEXT],
-      [{ n: node(speech, { text: 'x'.repeat(SPEECH_MAX_CHARS + 1) }) }, true, SPEECH_TOO_LONG],
-      [{ n: node(cloned) }, true, SPEECH_VOICE_NOT_OFFERED],
+      [{ n: node(speech, { text: '' }), a: card('n') }, false, SPEECH_NEEDS_TEXT],
+      [{ n: node(speech, { text: 'x'.repeat(SPEECH_MAX_CHARS + 1) }), a: card('n') }, true, SPEECH_TOO_LONG],
+      [{ n: node(cloned), a: card('n') }, true, SPEECH_VOICE_NOT_OFFERED],
     ] as const) {
       const k = makeKit({ hosted, deps: { families: () => ON } })
       await expect(k.engine.startRun({ userId: k.userId, takes: [p as ApiPrompt], ...START })).rejects.toThrow(want)
@@ -319,15 +322,35 @@ describe('refusals before the hold, in plain words', () => {
     // Locally the cloned voice runs, as Python sends it.
     const replicate = createFakeReplicate({ bodyText: () => JSON.stringify({ id: 'p', status: 'succeeded', output: SPEECH_URL }) })
     const k = makeKit({ replicate, deps: { families: () => ON, download: async () => ({ bytes: new Uint8Array(wav(0.2)), contentType: 'audio/wav' }) } })
-    const { runId } = await k.engine.startRun({ userId: k.userId, takes: [{ n: node(cloned) }], ...START })
+    const { runId } = await k.engine.startRun({ userId: k.userId, takes: [{ n: node(cloned), a: card('n') }], ...START })
     await k.engine.settled(runId)
     expect((await k.store.get(runId))!.takes[0]!.nodes.n!.status).toBe('done')
     expect(replicate.submitted()[0]!.payload.voice_id).toBe('sailor_clone_7f3a')
   })
 
-  it('the hosted /prompt meter refuses a cloned voice too (meterGraphRun → hostedRequestProblems)', () => {
-    const src = readFileSync(resolve(__dirname, '../../server/utils/meterGraphRun.ts'), 'utf8')
-    expect(src).toMatch(/nodeProblemsBody\(hostedRequestProblems\(/)
+  it('the hosted /prompt meter (the ComfyUI path) refuses a cloned voice, a wired voice and a twin\'s cloned voice before pricing or any hold', async () => {
+    const cloned = CASES.find(c => c.name === 'speech · cloned voice')!
+    const twin = sample('MiniMaxSpeechRemoteNode')
+    const prompts: ApiPrompt[] = [
+      { n: node(cloned), a: card('n') },
+      { v: { class_type: 'PrimitiveString', inputs: { value: 'Wise_Woman' } }, n: node(speech, { voice_id: ['v', 0] }), a: card('n') },
+      { n: node(twin, { voice_id: 'sailor_clone_7f3a' }), a: card('n') },
+    ]
+    for (const prompt of prompts) {
+      const d = meterDeps()
+      const r = await meterGraphSubmit('u1', { prompt }, d as any)
+      expect(r.status).toBe(400)
+      expect((r.body as any).error.message).toBe(SPEECH_VOICE_NOT_OFFERED)
+      expect(Object.values((r.body as any).node_errors).map((e: any) => e.class_type)).toEqual([prompt.n!.class_type])
+      expect(d.priceGraph).not.toHaveBeenCalled()
+      expect(d.hold).not.toHaveBeenCalled()
+      expect(d.forward).not.toHaveBeenCalled()
+    }
+    // A preset voice goes through to pricing and ComfyUI.
+    const d = meterDeps()
+    const ok = await meterGraphSubmit('u1', { prompt: { n: node(twin), a: card('n') } }, d as any)
+    expect(ok.status).toBe(200)
+    expect(d.forward).toHaveBeenCalled()
   })
 })
 
@@ -345,18 +368,26 @@ describe('moderation (every text sent)', () => {
     for (const c of [sample('GenerateSpeechNode'), sample('MusicGenRemoteNode')]) {
       const k = makeKit({ hosted: true, moderate, deps: { families: () => ON } })
       const key = c.class_type.includes('Speech') ? 'text' : 'prompt'
-      await expect(k.engine.startRun({ userId: k.userId, takes: [{ n: node(c, { [key]: 'a forbidden thing' }) }], ...START })).rejects.toThrow()
+      await expect(k.engine.startRun({ userId: k.userId, takes: [{ n: node(c, { [key]: 'a forbidden thing' }), a: card('n') }], ...START })).rejects.toThrow()
       expect(moderate.mock.calls.map(x => x[0])).toContain('a forbidden thing')
       expect(k.ledger.hold).not.toHaveBeenCalled()
     }
   })
 })
 
-describe('a wired text (hosted): held at the ceiling, charged the characters sent, moderated at its turn', () => {
-  const speechOf = (text: string) => {
-    const replicate = createFakeReplicate({ bodyText: () => JSON.stringify({ id: 'p', status: 'succeeded', output: SPEECH_URL }) })
+describe('a wired text (hosted): a card\'s text priced at its length; a text made in the run held at the ceiling, charged the characters sent', () => {
+  const kitOf = () => {
+    const replicate = createFakeReplicate({
+      bodyText: ({ model }) => JSON.stringify(model === MINIMAX_SPEECH_SLUG
+        ? { id: 'p', status: 'succeeded', output: SPEECH_URL }
+        : { id: 'p', status: 'succeeded', output: ['y'.repeat(300)], metrics: { input_token_count: 10, output_token_count: 300 } }),
+    })
     const moderate = vi.fn(async () => ({ ok: true as const }))
-    const k = makeKit({ hosted: true, available: 5000, replicate, moderate, deps: { families: () => ON, download: async () => ({ bytes: new Uint8Array(wav(0.2)), contentType: 'audio/wav' }) } })
+    const k = makeKit({ hosted: true, available: 5000, replicate, moderate, deps: { families: () => new Set<RunnerFamily>([...ON, 'llm-text']), download: async () => ({ bytes: new Uint8Array(wav(0.2)), contentType: 'audio/wav' }) } })
+    return { k, replicate, moderate }
+  }
+  const speechOf = (text: string) => {
+    const { k, replicate, moderate } = kitOf()
     const p: ApiPrompt = {
       t: { class_type: 'PrimitiveStringMultiline', inputs: { value: text } },
       n: node(sample('GenerateSpeechNode'), { text: ['t', 0] }),
@@ -365,10 +396,14 @@ describe('a wired text (hosted): held at the ceiling, charged the characters sen
     return { k, p, replicate, moderate }
   }
 
-  it('300 characters: held 150 (+1 render), charged 6 (+1)', async () => {
+  it('a card\'s 300 characters: held 6 (+1 render) and charged 6 on the runner; the ComfyUI path the same', async () => {
     const { k, p, replicate, moderate } = speechOf('y'.repeat(300))
     expect(isRunnerEligible(p, ON)).toBe(true)
-    expect(stageEstimate(p, ['n'], false, ON)).toBe(150)
+    expect(stageEstimate(p, ['n'], false, ON)).toBe(6)
+    expect(priceGraph(p).nodes!.n).toBe(6)
+    // Through a Gate too (its value is still known at the start).
+    const gated: ApiPrompt = { ...p, g: { class_type: 'ComfyGateNode', inputs: { data_in: ['t', 0], bypass: true } }, n: node(sample('GenerateSpeechNode'), { text: ['g', 0] }) }
+    expect(priceGraph(gated).nodes!.n).toBe(6)
     const { runId } = await k.engine.startRun({ userId: k.userId, takes: [p], ...START })
     await k.engine.settled(runId)
     const rec = (await k.store.get(runId))!.takes[0]!.nodes.n!
@@ -376,7 +411,28 @@ describe('a wired text (hosted): held at the ceiling, charged the characters sen
     expect(replicate.submitted()[0]!.payload.text).toBe('y'.repeat(300))
     expect(moderate.mock.calls.map(x => (x as unknown[])[0])).toContain('y'.repeat(300))
     expect(rec.credits).toBe(6)
-    expect([...k.ledger.holds.values()].map(h => [h.credits, h.actual])).toEqual([[151, 7]])
+    expect([...k.ledger.holds.values()].map(h => [h.credits, h.actual])).toEqual([[7, 7]])
+  })
+
+  it('a text made in the run (an LLM\'s answer): held at 10,000 characters (150), charged the 300 sent', async () => {
+    const { k, replicate } = kitOf()
+    const chat = { class_type: 'ChatLLMNode', inputs: { model: 'GPT-5', prompt: 'say y', system_prompt: '', temperature: 1, max_tokens: 1024 } }
+    const p: ApiPrompt = { c: chat, n: node(sample('GenerateSpeechNode'), { text: ['c', 0] }), a: card('n') }
+    expect(isRunnerEligible(p, new Set<RunnerFamily>([...ON, 'llm-text']))).toBe(true)
+    expect(priceGraph(p).nodes!.n).toBe(150)
+    const { runId } = await k.engine.startRun({ userId: k.userId, takes: [p], ...START })
+    await k.engine.settled(runId)
+    const nodes = (await k.store.get(runId))!.takes[0]!.nodes
+    expect(nodes.n!.status, nodes.n!.error ?? '').toBe('done')
+    expect(replicate.submitted().map(r => r.endpoint)).toEqual(['openai/gpt-5', MINIMAX_SPEECH_SLUG])
+    expect(replicate.submitted()[1]!.payload.text).toBe('y'.repeat(300))
+    expect(nodes.n!.credits).toBe(6)
+    // Held: the LLM's ceiling + the speech's 10,000 characters + the render credit; charged what each used.
+    const fams = new Set<RunnerFamily>([...ON, 'llm-text'])
+    const chatCeiling = stageEstimate(p, ['c'], false, fams)
+    expect(stageEstimate(p, ['c', 'n', 'a'], true, fams)).toBe(chatCeiling + 150 + 1)
+    const [hold] = [...k.ledger.holds.values()]
+    expect([hold!.credits, hold!.actual]).toEqual([chatCeiling + 150 + 1, nodes.c!.credits + 6 + 1])
   })
 
   it('a card\'s text over 10,000 characters is refused before the hold (its value is known at the start)', async () => {
@@ -535,9 +591,8 @@ describe('with audio-gen off (rule 15)', () => {
       expect(isRunnerEligible(p, families), `${label}, ${name}`).toBe(isRunnerEligible(old, families))
       for (const id of Object.keys(p)) {
         expect(runnerTakesNode(p, id, families), `${label} ${id}, ${name}`).toBe(runnerTakesNode(old, id, families))
-        if (!isAudioGen(p[id]!.class_type)) {
-          expect(valueWiresAllowed(p, id, outputKindsFor(families)), `${label} ${id}, ${name}`).toBe(valueWiresAllowed(old, id, outputKindsFor(families)))
-        }
+        // Every node, the four classes too (fix round 1): as runnerTakesNode asks it, with the families.
+        expect(valueWiresAllowed(p, id, outputKindsFor(families), families), `${label} ${id}, ${name}`).toBe(valueWiresAllowed(old, id, outputKindsFor(families), families))
       }
     }
   }
@@ -599,4 +654,107 @@ describe('with audio-gen off (rule 15)', () => {
     expect(graphs).toBeGreaterThanOrEqual(800)
     console.info(`audio-gen families-off invariant: ${graphs} saved graphs`)
   }, 600_000)
+})
+
+/** The hosted meter's ports (as request-refusals.unit.spec.ts's). */
+function meterDeps() {
+  return {
+    priceGraph: vi.fn(() => ({ credits: 5, version: 'test', breakdown: [] })),
+    spendGuard: vi.fn(async () => {}),
+    validateFileRefs: vi.fn(async () => {}),
+    moderatePrompt: vi.fn(async () => ({ ok: true as const })),
+    hold: vi.fn(async () => ({ ok: true as const, holdId: 7 })),
+    getAvailable: vi.fn(async () => 3),
+    forward: vi.fn(async () => ({ status: 200, body: { prompt_id: 'p1', number: 1, node_errors: {} } })),
+    registerRun: vi.fn(async () => {}),
+    startSettle: vi.fn(),
+    releaseHold: vi.fn(async () => {}),
+  }
+}
+
+describe('fix round 1: the runner runs only what an output needs (ComfyUI\'s pruning, runner-wide)', () => {
+  const music = sample('GenerateMusicNode')
+
+  it('a music or speech node nothing reads is not taken (it is not an output node)', () => {
+    for (const ct of AUDIO_GEN_CLASSES) {
+      const p: ApiPrompt = { n: node(sample(ct)) }
+      expect(runnerTakesNode(p, 'n', ON), ct).toBe(false)
+      expect(runnerTakesWorkflow(p, ON), ct).toBe(false)
+      expect(RUNNER_NODE_RULES[ct]!.needsReader).toBe(true)
+    }
+  })
+
+  it('a prompt with no output node is refused plainly before the hold; nothing is sent', async () => {
+    const lone: ApiPrompt = { 1: { class_type: 'GenerateImageNode', inputs: { model: 'flux-schnell', prompt: 'a fox', aspect_ratio: '1:1', seed: 0, model_options: '{}' } } }
+    expect(pruneInvalidOutputs(lone, ON)).toMatchObject({ failed: true, noOutputs: true, prompt: {} })
+    // The browser sends it where it went before; the runner refuses it in plain words.
+    expect(runnerTakesWorkflow(lone, ON)).toBe(true)
+    const k = makeKit({ hosted: true, deps: { families: () => ON } })
+    await expect(k.engine.startRun({ userId: k.userId, takes: [lone], ...START })).rejects.toThrow(NO_OUTPUTS_MESSAGE)
+    expect(k.ledger.hold).not.toHaveBeenCalled()
+    expect(k.fal.client.submit).not.toHaveBeenCalled()
+    expect(k.replicate.client.submit).not.toHaveBeenCalled()
+    expect(NO_OUTPUTS_MESSAGE).not.toMatch(/[A-Z][a-z]+Node|_|\bid\b|prompt/)
+  })
+
+  it('a generator nothing reads, beside one an Image card shows, is neither run nor held nor charged', async () => {
+    const gen = (seed: number) => ({ class_type: 'GenerateImageNode', inputs: { model: 'flux-schnell', prompt: 'a fox', aspect_ratio: '1:1', seed, model_options: '{}' } })
+    const p: ApiPrompt = { 1: gen(1), 2: { class_type: 'Image', inputs: { image: '', export: false, images: ['1', 0], batch_index: -1 } }, 3: gen(2) }
+    const pruned = pruneInvalidOutputs(p, ON)
+    expect(Object.keys(pruned.prompt).sort()).toEqual(['1', '2'])
+    expect(pruned.unread).toEqual(['3'])
+    const k = makeKit({ hosted: true, deps: { families: () => ON } })
+    const { runId } = await k.engine.startRun({ userId: k.userId, takes: [p], ...START })
+    await k.engine.settled(runId)
+    const run = (await k.store.get(runId))!
+    expect(Object.keys(run.takes[0]!.nodes).sort()).toEqual(['1', '2'])
+    expect(k.fal.client.submit).toHaveBeenCalledTimes(1)
+    const one = stageEstimate({ 1: p[1]!, 2: p[2]! }, ['1', '2'], true, ON)
+    expect([...k.ledger.holds.values()].map(h => h.credits)).toEqual([one])
+  })
+
+  it('the Audio card counts in ComfyUI\'s validation pass while audio-gen is on (fix 6)', () => {
+    const bad: ApiPrompt = { m: node(music, { duration: 99 }), a: card('m') }
+    // audio-gen on, sync-3 off: the card's output fails (the music's duration), so ComfyUI refuses the prompt.
+    const on = pruneInvalidOutputs(bad, ON)
+    expect(on.failed).toBe(true)
+    expect(on.noOutputs).toBeUndefined()
+    expect(Object.keys(on.nodeErrors)).toEqual(['m'])
+    // Beside a valid one, only the failing card and what it needs are dropped.
+    const both: ApiPrompt = { ...bad, m2: node(music), a2: card('m2') }
+    const r = pruneInvalidOutputs(both, ON)
+    expect(r.dropped).toEqual(['a'])
+    expect(Object.keys(r.prompt).sort()).toEqual(['a2', 'm2'])
+    // Neither family on: the card is unknown, the prompt is left whole, as before.
+    expect(pruneInvalidOutputs(bad, new Set(['cards']))).toMatchObject({ failed: false, prompt: bad })
+  })
+})
+
+describe('the sound kept, whatever the service answers (finding 6)', () => {
+  const MP3 = new Uint8Array([0x49, 0x44, 0x33, 3, 0, 0, 0, 0, 0, 0, 0xff, 0xfb, 0x90, 0x64, ...new Array(64).fill(0)])
+
+  it('an MP3 answer (MiniMax\'s own default) is saved .mp3 by its header, and the card shows it', async () => {
+    const replicate = createFakeReplicate({ bodyText: () => JSON.stringify({ id: 'p', status: 'succeeded', output: 'https://r.test/speech/out' }) })
+    const k = makeKit({ replicate, deps: { families: () => ON, download: async () => ({ bytes: MP3, contentType: 'application/octet-stream' }) } })
+    const { runId } = await k.engine.startRun({ userId: k.userId, takes: [{ n: node(sample('GenerateSpeechNode')), a: card('n') }], ...START })
+    await k.engine.settled(runId)
+    const nodes = (await k.store.get(runId))!.takes[0]!.nodes
+    expect(nodes.a!.status, nodes.a!.error ?? '').toBe('done')
+    const made = nodes.n!.outputs[0]!
+    expect(made.filename).toMatch(/^speech.*\.mp3$/)
+    expect(Buffer.compare(readFileSync(join(k.root, 'output', made.subfolder, made.filename)), Buffer.from(MP3))).toBe(0)
+    const executed = ofType(k.seen, 'executed').map(m => (m as any).data)
+    expect(executed.find((d: any) => d.node === 'a')?.output).toEqual({ audio: [made] })
+  })
+
+  it('an answer that isn\'t a sound fails plainly; hosted, the hold is released and nothing charged', async () => {
+    const replicate = createFakeReplicate({ bodyText: () => JSON.stringify({ id: 'p', status: 'succeeded', output: MUSIC_URL }) })
+    const k = makeKit({ hosted: true, replicate, deps: { families: () => ON, download: async () => ({ bytes: new TextEncoder().encode('<html>oops</html>'), contentType: 'text/html' }) } })
+    const { runId } = await k.engine.startRun({ userId: k.userId, takes: [{ m: node(sample('GenerateMusicNode')), a: card('m') }], ...START })
+    await k.engine.settled(runId)
+    const rec = (await k.store.get(runId))!.takes[0]!.nodes.m!
+    expect(rec.status).toBe('error')
+    expect(rec.error).toContain(ANSWER_NOT_SOUND)
+    expect([...k.ledger.holds.values()].map(h => h.state)).toEqual(['released'])
+  })
 })

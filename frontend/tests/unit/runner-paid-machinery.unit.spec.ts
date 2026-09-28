@@ -122,6 +122,20 @@ vi.mock('#shared/pricing/pipelinePrice', async (importOriginal) => {
   }
 })
 
+// The stand-ins (Generate image / a video with a test plan) play paid nodes that are ComfyUI output
+// nodes (a 3D model, a sound, a value shown on the node): a stand-in nothing reads is run, as those
+// are. Everything else is ComfyUI's pruning as it is (R3.8 fix round 1: only what an output reads runs).
+vi.mock('#shared/runner/validate', async (importOriginal) => {
+  const real = await importOriginal<typeof import('#shared/runner/validate')>()
+  const standIn = (n: { class_type: string, inputs?: Record<string, unknown> }) =>
+    (n.class_type === 'GenerateImageNode' || n.class_type === 'GenerateVideoNode') && typeof n.inputs?.test_plan === 'string'
+  return {
+    ...real,
+    pruneInvalidOutputs: (p: ApiPrompt, f?: ReadonlySet<RunnerFamily>) =>
+      (Object.values(p).some(standIn) ? { prompt: p, dropped: [], nodeErrors: {}, failed: false, unread: [] } : real.pruneInvalidOutputs(p, f)),
+  }
+})
+
 const START = { workflow: null, canvasId: null, projectUuid: null, projectName: null }
 const CARDS: ReadonlySet<RunnerFamily> = new Set(['cards'])
 const image = (test: string, seed = 0) => ({ class_type: 'GenerateImageNode', inputs: { model: 'flux-schnell', prompt: 'p', aspect_ratio: '1:1', seed, model_options: '{}', test_plan: test } })
@@ -625,7 +639,8 @@ describe('answer downloads go through the safe-fetch policy', () => {
   it('a video plan downloads under the video cap', async () => {
     const download = byExt()
     const k = makeKit({ deps: { download } })
-    await run(k, { 1: video(null) })
+    // The real video plan ('video' is no stand-in plan: planNode's own), run alone as a stand-in.
+    await run(k, { 1: video('video') })
     expect(download).toHaveBeenCalledWith('https://fal.media/req1.mp4', opts('video', 2048 * MIB))
   })
   it('an extension comes from its kind’s list, never from the address alone', () => {

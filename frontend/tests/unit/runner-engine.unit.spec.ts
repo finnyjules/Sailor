@@ -7,6 +7,7 @@ import { createFileRunStore, type RunStore } from '~~/server/runner/store'
 import type { RunRecord } from '~~/server/runner/types'
 import { createFakeFal, makeKit, gatedFlow, ofType, types, until } from './__runner__/kit'
 import type { ApiPrompt } from '#shared/runner/graph'
+import { showing } from './__runner__/paidParity'
 
 describe('limiter', () => {
   it('lets four through per user and queues the rest in order', async () => {
@@ -137,10 +138,11 @@ describe('money (hosted)', () => {
 })
 
 describe('parallel work', () => {
-  const twoBranches: ApiPrompt = {
+  // Each shown by an Image card: only what an output reads runs (R3.8 fix round 1).
+  const twoBranches: ApiPrompt = showing({
     '1': { class_type: 'GenerateImageNode', inputs: { model: 'flux-schnell', prompt: 'a', aspect_ratio: '1:1', seed: 0, model_options: '{}' } },
     '2': { class_type: 'GenerateImageNode', inputs: { model: 'flux-schnell', prompt: 'b', aspect_ratio: '1:1', seed: 0, model_options: '{}' } },
-  }
+  })
   it('two independent branches go out at the same time', async () => {
     const k = makeKit()
     k.fal.holdNext(2)
@@ -155,7 +157,7 @@ describe('parallel work', () => {
     const five: ApiPrompt = {}
     for (let i = 1; i <= 5; i++) five[String(i)] = { class_type: 'GenerateImageNode', inputs: { model: 'flux-schnell', prompt: `p${i}`, aspect_ratio: '1:1', seed: 0, model_options: '{}' } }
     k.fal.holdNext(5)
-    const { runId } = await k.engine.startRun({ userId: null, takes: [five], workflow: null, canvasId: null, projectUuid: null, projectName: null })
+    const { runId } = await k.engine.startRun({ userId: null, takes: [showing(five)], workflow: null, canvasId: null, projectUuid: null, projectName: null })
     await until(() => k.fal.submitted().length === 4)
     await new Promise(r => setTimeout(r, 20))
     expect(k.fal.submitted()).toHaveLength(4)
@@ -280,7 +282,7 @@ describe('too many runs waiting', () => {
   const fiveImages = (tag: string): ApiPrompt => {
     const p: ApiPrompt = {}
     for (let i = 1; i <= 5; i++) p[String(i)] = { class_type: 'GenerateImageNode', inputs: { model: 'flux-schnell', prompt: `${tag}${i}`, aspect_ratio: '1:1', seed: 0, model_options: '{}' } }
-    return p
+    return showing(p)
   }
   const start = (k: ReturnType<typeof makeKit>, n: number, tag: string, userId: string | null = k.userId) =>
     k.engine.startRun({ userId, takes: Array.from({ length: n }, (_, t) => fiveImages(`${tag}${t}-`)), workflow: null, canvasId: null, projectUuid: null, projectName: null })

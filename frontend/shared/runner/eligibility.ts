@@ -240,9 +240,10 @@ export interface RunnerEligibilityOptions {
   /** Hosted: the Frame's artboard is capped lower. */
   hosted?: boolean
   /**
-   * The prompt is what is left after ComfyUI's pruning dropped some outputs
-   * (shared/runner/validate.ts). What is left may be only cards (a blank
-   * project: an Image card beside an empty Frame): it runs, with nothing to
+   * The prompt is what is left after ComfyUI's pruning dropped some outputs,
+   * or nodes no output reads (shared/runner/validate.ts, R3.8 fix round 1).
+   * What is left may be only cards (a blank project: an Image card beside an
+   * empty Frame, or beside an edit nothing reads): it runs, with nothing to
    * call or charge, as ComfyUI runs it.
    */
   afterPruning?: boolean
@@ -1038,12 +1039,14 @@ export const RUNNER_NODE_RULES: Readonly<Record<string, RunnerNodeRule>> = {
   // validates it (define_schema's options and bounds; a voice may be a cloned
   // one, so it is any text: hosted refuses anything but the 17 presets before
   // the hold, ruling (j)). Their sound goes to an Audio card only (ruling (t),
-  // AUDIO_CARD_AUDIO_GEN_RULE); any other reader leaves them to the engine.
+  // AUDIO_CARD_AUDIO_GEN_RULE); any other reader, or none (they are not output
+  // nodes: ComfyUI never runs one nothing reads), leaves them to the engine.
   ...Object.fromEntries((['GenerateMusicNode', 'MusicGenRemoteNode'] as const).map(c => [c, {
     family: 'audio-gen',
     valueInputs: { prompt: ['text'] },
     required: ['prompt'],
     feedsOnly: ['Audio'],
+    needsReader: true,
     widgets: {
       ...(c === 'GenerateMusicNode' ? { model: { type: 'COMBO', required: true, options: MUSIC_MODELS } } : {}),
       duration: { type: 'INT', required: true, min: MUSIC_MIN_SECONDS, max: MUSIC_MAX_SECONDS },
@@ -1058,6 +1061,7 @@ export const RUNNER_NODE_RULES: Readonly<Record<string, RunnerNodeRule>> = {
     valueInputs: { text: ['text'] },
     required: ['text'],
     feedsOnly: ['Audio'],
+    needsReader: true,
     widgets: {
       ...(c === 'GenerateSpeechNode' ? { model: { type: 'COMBO', required: true, options: SPEECH_MODELS } } : {}),
       voice_id: { type: 'STRING', required: true },
@@ -1577,8 +1581,15 @@ export function outputKindsFor(families: ReadonlySet<RunnerFamily>): OutputKinds
   return kinds
 }
 
-/** The inputs of a class that take a value wire: its rule row's, else the base table's (the Gate). */
-export function valueInputsOf(classType: string): Readonly<Record<string, readonly ValueKind[]>> {
+/**
+ * The inputs of a class that take a value wire: its rule row's, else the
+ * base table's (the Gate). `families`: a class switched by a family that is
+ * off takes none (as before it had a row).
+ */
+export function valueInputsOf(classType: string, families?: ReadonlySet<RunnerFamily>): Readonly<Record<string, readonly ValueKind[]>> {
+  // With `families` given, a class that exists for one family only takes no value while it is off (rule 15, R3.8 fix round 1).
+  const only = families && Object.prototype.hasOwnProperty.call(SWITCHED_CLASSES, classType) ? SWITCHED_CLASSES[classType] : undefined
+  if (only && !familyOn(only, families!)) return {}
   const rule = Object.prototype.hasOwnProperty.call(RUNNER_NODE_RULES, classType) ? RUNNER_NODE_RULES[classType] : undefined
   return rule?.valueInputs ?? (Object.prototype.hasOwnProperty.call(BASE_VALUE_INPUTS, classType) ? BASE_VALUE_INPUTS[classType]! : {})
 }
@@ -1592,10 +1603,11 @@ export function valueInputsOf(classType: string): Readonly<Record<string, readon
 export function valueWiresAllowed(
   prompt: ApiPrompt, id: string,
   kinds: Readonly<Record<string, Readonly<Record<number, ValueKind>>>> = OUTPUT_KINDS,
+  families?: ReadonlySet<RunnerFamily>,
 ): boolean {
   const node = prompt[id]
   if (!node) return false
-  const takes = valueInputsOf(node.class_type)
+  const takes = valueInputsOf(node.class_type, families)
   for (const l of linksOf(node)) {
     const kind = outputKind(prompt, [l.from, l.slot], kinds)
     const allowed = Object.prototype.hasOwnProperty.call(takes, l.input) ? takes[l.input] : undefined
@@ -1672,7 +1684,7 @@ export function runnerTakesNode(prompt: ApiPrompt, id: string, families: Readonl
   for (const v of Object.values(inputs)) {
     if (isLink(v) && !(v[0] in prompt)) return false
   }
-  if (!valueWiresAllowed(prompt, id, outputKindsFor(families))) return false
+  if (!valueWiresAllowed(prompt, id, outputKindsFor(families), families)) return false
   return true
 }
 

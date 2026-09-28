@@ -62,6 +62,7 @@ import { RUNNER_FAMILIES, parseFamilies, type RunnerFamily } from '#shared/runne
 import { EFFECT_CLASSES_PORTED, EFFECT_FAMILIES, EFFECT_FAMILY_OF, effectSchemaOf } from '#shared/runner/effects'
 import { IMAGE_OUTPUT_CLASSES, PICTURE_OUTPUTS, runnerTakesNode } from '#shared/runner/eligibility'
 import { nodesNeedingEngine } from '#shared/runner/needsEngine'
+import { pruneInvalidOutputs } from '#shared/runner/validate'
 import { SHADER_CATALOG_VERSION, shaderBakeKeySync, shaderBakedText } from '#shared/runner/shaderBakeKey'
 import { isRunnerDeclined } from '~~/app/lib/runner/client'
 import type { OutputFile, RunnerValue } from '~~/server/runner/types'
@@ -594,6 +595,15 @@ async function savedGraphs(): Promise<SavedGraph[]> {
   return out
 }
 
+/**
+ * The prompt without the nodes no output reads (R3.8 fix round 1): ComfyUI never runs them, and
+ * the runner now leaves them out too, so the code before that change is asked about what runs.
+ */
+function withoutUnread(p: ApiPrompt, families: ReadonlySet<RunnerFamily>): ApiPrompt {
+  const r = pruneInvalidOutputs(p, families)
+  return r.unread.length ? Object.fromEntries(Object.entries(p).filter(([id]) => !r.unread.includes(id))) : p
+}
+
 describe('R2.12 · every effects family off: the needs-engine list over every saved project', () => {
   const projectsIt = existsSync(PROJECTS) ? it : it.skip
   /** Frame and cards only; and every family that existed before R2.1 (set in the test from the old code). */
@@ -615,13 +625,18 @@ describe('R2.12 · every effects family off: the needs-engine list over every sa
       const titleOf = (id: string) => id
       for (const [label, families] of sets) {
         const now = nodesNeedingEngine(g.prompt, { runnerOn: true, families, titleOf })
-        const before = oldNeeds.nodesNeedingEngine(g.prompt as never, { runnerOn: true, families: families as never, titleOf })
+        const before = oldNeeds.nodesNeedingEngine(withoutUnread(g.prompt, families) as never, { runnerOn: true, families: families as never, titleOf })
         if (JSON.stringify(now) !== JSON.stringify(before)) {
           const moved = [...now.filter(x => !before.includes(x)), ...before.filter(x => !now.includes(x))]
           const classes = [...new Set(moved.map(id => g.prompt[id]?.class_type ?? '?'))]
           const line = `${g.key} (${label}): now ${JSON.stringify(now)} before ${JSON.stringify(before)}; classes ${classes.join(', ')}`
           // Shot Director's Film a shot became the runner's in 729060504 (another stream, after 564d47185, not R2).
           if (classes.every(c => OUTSIDE_R2.has(c))) outside.push(line)
+          // R3.8 fix round 1: with a node no output reads left out, what is left may be only cards; the
+          // runner runs that (free, as it runs what is left after a failing output is dropped), where the
+          // code before named every node for having nothing to do.
+          else if (now.length === 0 && pruneInvalidOutputs(g.prompt, families).unread.length
+            && JSON.stringify(before) === JSON.stringify(Object.keys(withoutUnread(g.prompt, families)))) outside.push(`${line} (R3.8: cards left after unread nodes)`)
           else diffs.push(line)
         }
         for (const [id, n] of Object.entries(g.prompt)) {
@@ -728,13 +743,19 @@ describe('R2.12 · every effects family off: the needs-engine list over every sa
     let changed = 0
     let unpinned = 0
     const differ: string[] = []
+    // Graphs with a node no output reads (R3.8 fix round 1: left out, as ComfyUI leaves it out): their
+    // list is the one of what runs, which the code before that change (the pin) didn't prune.
+    const unreadKeys = new Set((await savedGraphs()).filter(g => Object.values(sets).some(f => pruneInvalidOutputs(g.prompt, f).unread.length)).map(g => g.key))
+    const unreadChanged: string[] = []
     for (const [key, row] of Object.entries(now)) {
       const p = pinned.graphs[key]
       if (!p) { unpinned++; continue }
       if (p.prompt !== row.prompt) { changed++; continue }
       same++
-      if (p.frameCards !== row.frameCards || p.allButEffects !== row.allButEffects) differ.push(key)
+      if (p.frameCards !== row.frameCards || p.allButEffects !== row.allButEffects) (unreadKeys.has(key) ? unreadChanged : differ).push(key)
     }
+    console.info(`R2.12 pinned: ${unreadChanged.length} graphs differ only where a node no output reads is now left out: ${unreadChanged.join(', ')}`)
+    expect(unreadChanged.length).toBeLessThanOrEqual(10)
     console.info(`R2.12 pinned needs-engine: ${same} graphs as pinned, ${changed} edited since, ${unpinned} new, ${Object.keys(pinned.graphs).length - same - changed} gone`)
     expect(same).toBeGreaterThan(0)
     expect(differ).toEqual([])

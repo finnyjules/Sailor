@@ -15,6 +15,8 @@ import { VIDEO_RATES } from '../../shared/pricing/videoRates'
 import { pipelineCallsOf } from '../../shared/pricing/pipelinePrice'
 import type { InputSeconds } from '../../shared/pricing/clipSettings'
 import type { RunnerFamily } from '../../shared/runner/families'
+import type { ApiPrompt } from '../../shared/runner/graph'
+import { withStaticSpeechText } from '../../shared/runner/audioGen'
 export { VIDEO_RATES, MODEL_PRICED_NODE_CLASSES, SETTING_PRICED_NODE_CLASSES, REMOTE_VIDEO_NODE_CLASSES }
 // lineup-p2 (model line-up Task P2): video priced per second of the clip
 // actually sent (shared/pricing/videoRates.ts), replacing one flat figure per model.
@@ -191,7 +193,9 @@ export { VIDEO_RATES, MODEL_PRICED_NODE_CLASSES, SETTING_PRICED_NODE_CLASSES, RE
 // from their badges) for their calls, read from Replicate's pages. Speech on
 // MiniMax Speech-02 HD at $0.10 per thousand characters of its text (the
 // page's billing table; "every character is 1 token"): 20 characters 1
-// credit, 1,000 characters 20; a wired text is held (and on the ComfyUI path
+// credit, 1,000 characters 20; a text a card decides before the run (a Text
+// card, a Primitive, through Gates) is priced at its length on both paths
+// (R3.8 fix round 1); one made in the run is held (and on the ComfyUI path
 // charged) at the most the model reads, 10,000 characters: 150 credits; the
 // runner charges the characters it sent. Music on MusicGen by GPU time, an
 // estimate from the page's one recorded run: $0.012 a second asked for, at
@@ -494,7 +498,9 @@ export interface GraphPrice {
  * Enhance a video its Topaz call on fal, from `inputSeconds`' measured video;
  * the ComfyUI path never passes them: it refuses that node then).
  */
-export function priceGraph(prompt: Record<string, { class_type: string; inputs?: unknown }>, opts: { inputPixels?: Record<string, number>, inputSeconds?: Record<string, InputSeconds>, families?: ReadonlySet<RunnerFamily> } = {}): GraphPrice {
+export function priceGraph(sent: Record<string, { class_type: string; inputs?: unknown }>, opts: { inputPixels?: Record<string, number>, inputSeconds?: Record<string, InputSeconds>, families?: ReadonlySet<RunnerFamily> } = {}): GraphPrice {
+  // A speech text a card decides before the run is priced at its length (R3.8 fix round 1).
+  const prompt = withStaticSpeechText(sent as ApiPrompt) as typeof sent
   const breakdown: { action: string; credits: number }[] = []
   const nodes: Record<string, number> = {}
   let hasOutput = false

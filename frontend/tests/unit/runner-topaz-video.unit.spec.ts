@@ -339,7 +339,7 @@ describe('eligibility', () => {
 
   it('switched: off, a workflow with it is left whole by the pruning (exactly as before); on, pruned as ComfyUI would', () => {
     const bad: ApiPrompt = { 1: enhance({ fps: '24' }), 2: videoCard(), 3: { class_type: 'Image', inputs: { image: 'a.png' } } }
-    expect(pruneInvalidOutputs(bad, NO_FAMILIES)).toEqual({ prompt: bad, dropped: [], nodeErrors: {}, failed: false })
+    expect(pruneInvalidOutputs(bad, NO_FAMILIES)).toEqual({ prompt: bad, dropped: [], nodeErrors: {}, failed: false, unread: [] })
     expect(pruneInvalidOutputs(bad, ALL_BUT).dropped).toEqual([])
     const on = pruneInvalidOutputs(bad, ON)
     expect(on.dropped).toEqual(['2'])

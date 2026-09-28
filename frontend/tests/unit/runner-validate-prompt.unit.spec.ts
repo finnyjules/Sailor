@@ -125,7 +125,11 @@ describe('the engine runs only what ComfyUI would', () => {
   it('a prompt whose outputs all validate starts exactly as before (no node_errors)', async () => {
     const k = makeKit({ hosted: true, deps: { families: () => ALL } })
     writeFileSync(join(k.root, 'input', 'land.png'), new Uint8Array([1]))
-    const p: ApiPrompt = { 1: { class_type: 'GenerateImageNode', inputs: { model: 'flux-schnell', prompt: 'x', aspect_ratio: '1:1', seed: 0, model_options: '{}' } } }
+    const p: ApiPrompt = {
+      1: { class_type: 'GenerateImageNode', inputs: { model: 'flux-schnell', prompt: 'x', aspect_ratio: '1:1', seed: 0, model_options: '{}' } },
+      // Shown by a card: only what an output reads runs (R3.8 fix round 1).
+      2: { class_type: 'Image', inputs: { image: '', export: false, images: ['1', 0], batch_index: -1 } },
+    }
     const started = await k.engine.startRun({ userId: k.userId, takes: [p], ...START })
     expect(started.nodeErrors).toBeUndefined()
     await k.engine.settled(started.runId)

@@ -20,6 +20,7 @@ import { actionPassThrough } from './generators/actions'
 import type { OutputFile, StageCharge } from './types'
 import { sizePricedInput } from '#shared/pricing/editSettings'
 import { paidNoCall } from '#shared/pricing/paidSettings'
+import { withStaticSpeechText } from '#shared/runner/audioGen'
 import { isLink } from '#shared/runner/graph'
 import { picturePixels } from '../utils/graphInputPixels'
 import { NO_FAMILIES, type RunnerFamily } from '#shared/runner/families'
@@ -202,8 +203,10 @@ export function stageEstimate(
 ): number {
   let total = 0
   let renders = false
+  // A speech text a card decides before the run is priced at its length (R3.8 fix round 1).
+  const priced = withStaticSpeechText(prompt)
   for (const id of nodeIds) {
-    const n = prompt[id]
+    const n = priced[id]
     if (!n) continue
     if (LOCAL_RENDER_TYPES.has(n.class_type)) renders = true
     else if (!actionPassThrough(n.class_type, n.inputs ?? {}) && !paidNoCall(n.class_type, n.inputs ?? {})) {

@@ -9,7 +9,7 @@
  */
 import type { ApiPrompt } from './graph'
 import { isRunnerEligible, runnerTakesNode } from './eligibility'
-import { pruneInvalidOutputs } from './validate'
+import { prunedAny, pruneInvalidOutputs } from './validate'
 import { NO_FAMILIES, type RunnerFamily } from './families'
 import { blockedModelRefusal, blockedModelUses, blockedModelsResponse, promptNodeTitle } from './blockedModels'
 import { shaderEngineReason } from './shaderBakeKey'
@@ -41,11 +41,19 @@ function blockedNodes(prompt: ApiPrompt, families: ReadonlySet<RunnerFamily>): {
   // (shared/runner/validate.ts). When every output fails, the runner itself
   // refuses the workflow with ComfyUI's message: nothing needs the engine.
   const pruned = pruneInvalidOutputs(prompt, families)
+  // No output node (R3.8 fix round 1): judged whole, as before; the runner
+  // refuses a prompt it would take with ComfyUI's "no outputs", in plain words.
+  if (pruned.noOutputs) {
+    const whole = Object.keys(prompt)
+    const refused = whole.filter(id => !runnerTakesNode(prompt, id, families))
+    if (!refused.length && !isRunnerEligible(prompt, families)) return { run: prompt, ids: whole }
+    return { run: prompt, ids: refused }
+  }
   if (pruned.failed) return { run: {}, ids: [] }
   const run = pruned.prompt
   const ids = Object.keys(run)
   const blocked = ids.filter(id => !runnerTakesNode(run, id, families))
-  if (!blocked.length && !isRunnerEligible(run, families, { afterPruning: pruned.dropped.length > 0 })) return { run, ids }
+  if (!blocked.length && !isRunnerEligible(run, families, { afterPruning: prunedAny(pruned) })) return { run, ids }
   return { run, ids: blocked }
 }
 

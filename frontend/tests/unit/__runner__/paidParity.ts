@@ -17,6 +17,8 @@ import type { ApiPrompt } from '#shared/runner/graph'
 import type { RunnerFamily } from '#shared/runner/families'
 import type { OutputFile, RunnerValue } from '~~/server/runner/types'
 import { parsePyJson, pyJsonDumps, type PyJson } from '#shared/runner/pyJson'
+import { RUNNER_OUTPUT_CLASSES } from '#shared/runner/validate'
+import { isAudioGenClass } from '#shared/runner/audioGen'
 import { createFakeFal, createFakeReplicate, makeKit, type FakeRequest } from './kit'
 
 /**
@@ -138,7 +140,7 @@ export async function runPaidCase(c: PaidCase, o: { families: ReadonlySet<Runner
   }
   const k = makeKit({ hosted: o.hosted, fal, replicate, deps: { download, families: () => o.families } })
 
-  const prompt: ApiPrompt = { [NODE]: { class_type: c.class_type, inputs: { ...c.widgets } } }
+  const prompt: ApiPrompt = { [NODE]: { class_type: c.class_type, inputs: { ...c.widgets } }, ...readerFor(c.class_type) }
   for (const name of c.pictures ?? []) {
     const file = `${name}.png`
     mkdirSync(join(k.root, 'input'), { recursive: true })
@@ -152,6 +154,37 @@ export async function runPaidCase(c: PaidCase, o: { families: ReadonlySet<Runner
   const rec = (await k.store.get(runId))!.takes[0]!.nodes[NODE]!
   return { sent, values: rec.values, files: rec.outputs, credits: rec.credits, status: rec.status, error: rec.error }
 }
+
+/**
+ * A card that shows the node's result, for a class that is not an output
+ * node itself: ComfyUI (and the runner, R3.8 fix round 1) never runs a node
+ * no output reads. A sound goes to an Audio card, a picture to an Image card.
+ */
+export function readerFor(classType: string, id = NODE): ApiPrompt {
+  if (RUNNER_OUTPUT_CLASSES.has(classType)) return {}
+  if (isAudioGenClass(classType)) {
+    return { [`${id}_card`]: { class_type: 'Audio', inputs: { audio: '', export: false, filename_prefix: 'audio/ComfyUI', format: 'flac', quality: 'V0', source: [id, 0] } } }
+  }
+  if (VIDEO_CLASSES.has(classType)) {
+    return { [`${id}_card`]: { class_type: 'Video', inputs: { file: '', export: false, filename_prefix: 'video/ComfyUI', source: [id, 0] } } }
+  }
+  return { [`${id}_card`]: { class_type: 'Image', inputs: { image: '', export: false, images: [id, 0], batch_index: -1 } } }
+}
+
+/**
+ * The prompt with a card after each node nothing reads that is not an output
+ * node itself (readerFor), so each one runs, as it would on a canvas (the
+ * canvas adds such a card at Run: VueNodeCanvas's auto-sink).
+ */
+export function showing(prompt: ApiPrompt): ApiPrompt {
+  const read = new Set(Object.values(prompt).flatMap(n => Object.values(n.inputs ?? {}).filter(v => Array.isArray(v) && v.length === 2).map(v => String((v as unknown[])[0]))))
+  let out: ApiPrompt = { ...prompt }
+  for (const [id, n] of Object.entries(prompt)) if (!read.has(id)) out = { ...out, ...readerFor(n.class_type, id) }
+  return out
+}
+
+/** The classes whose slot 0 is a video (a Video card shows it). */
+const VIDEO_CLASSES: ReadonlySet<string> = new Set(['GenerateVideoNode', 'FilmShotNode', 'LipSyncNode', 'EnhanceVideoNode'])
 
 /** The calls as Python writes them: a handed-off picture as `IMG:<input>`, a sound as `WAV:<input>`. */
 export function normalizeSent(sent: readonly SentCall[], pictures: readonly string[] = [], sounds: readonly string[] = []): SentCall[] {

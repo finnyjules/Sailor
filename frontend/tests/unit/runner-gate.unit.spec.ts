@@ -343,6 +343,8 @@ describe('restart recovery', () => {
       '1': { class_type: 'GenerateImageNode', inputs: { model: 'flux-schnell', prompt: 'first', aspect_ratio: '1:1', seed: 0, model_options: '{}' } },
       '2': { class_type: 'GenerateImageNode', inputs: { model: 'flux-schnell', prompt: 'second', aspect_ratio: '1:1', seed: 0, model_options: '{}' } },
       '3': { class_type: 'Image', inputs: { image: '', export: false, images: ['1', 0], batch_index: -1 } },
+      // The second shown too: only what an output reads runs (R3.8 fix round 1).
+      '4': { class_type: 'Image', inputs: { image: '', export: false, images: ['2', 0], batch_index: -1 } },
     }
     fal.holdNext(2)
     const { runId, promptIds } = await k1.engine.startRun({ userId: 'user_1', takes: [twoGenerators], workflow: null, canvasId: null, projectUuid: null, projectName: null })
@@ -359,7 +361,7 @@ describe('restart recovery', () => {
     await new Promise(r => setTimeout(r, 20))
     if (legacy) {
       const old = (await k1.store.get(runId))!
-      expect(old.charges[0]!.nodeIds).toEqual(['1', '2', '3'])
+      expect(old.charges[0]!.nodeIds).toEqual(['1', '2', '3', '4'])
       delete old.charges[0]!.nodeIds
       await k1.store.save(old)
     }
@@ -389,6 +391,8 @@ describe('restart recovery', () => {
     const flow: ApiPrompt = {
       ...gatedFlow(),
       '6': { class_type: 'GenerateImageNode', inputs: { model: 'flux-schnell', prompt: 'the other one', aspect_ratio: '1:1', seed: 0, model_options: '{}' } },
+      // Shown by a card: only what an output reads runs (R3.8 fix round 1).
+      '7': { class_type: 'Image', inputs: { image: '', export: false, images: ['6', 0], batch_index: -1 } },
     }
     fal.holdNext(2)
     const { runId } = await k1.engine.startRun({ userId: 'user_1', takes: [flow], workflow: null, canvasId: null, projectUuid: null, projectName: null })

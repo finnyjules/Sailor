@@ -13,8 +13,9 @@
  *
  * Each answers one sound file (`_first_output_url`). Pure; relative imports only.
  */
-import { isLink } from './graph'
+import { isLink, type ApiPrompt } from './graph'
 import { pyStrip } from './pyText'
+import { withStaticWiredValues } from './staticValues'
 
 export const MUSICGEN_SLUG = 'meta/musicgen'
 export const MINIMAX_SPEECH_SLUG = 'minimax/speech-02-hd'
@@ -113,4 +114,26 @@ export function hostedVoiceProblem(classType: unknown, inputs: Record<string, un
   // Missing: the node's default (Wise_Woman), a preset.
   if (v === undefined) return null
   return typeof v === 'string' && (MINIMAX_VOICES as readonly string[]).includes(v) ? null : { input: 'voice_id', message: SPEECH_VOICE_NOT_OFFERED }
+}
+
+/**
+ * The workflow as a speech node's price reads it (R3.8 fix round 1): a text
+ * wired from a card whose value is known before the run (a Text card, a
+ * Primitive, through any Gates: ./staticValues.ts) is priced at its real
+ * length on both paths, as if typed. Only a text made in the run stays a
+ * wire, held at SPEECH_MAX_CHARS. Every other node, and every other input,
+ * is as sent. Returns the same prompt when nothing is known.
+ */
+export function withStaticSpeechText(prompt: ApiPrompt): ApiPrompt {
+  let known: ApiPrompt | null = null
+  let out = prompt
+  for (const [id, n] of Object.entries(prompt)) {
+    if (!isSpeechClass(n?.class_type) || !isLink(n.inputs?.text)) continue
+    known ??= withStaticWiredValues(prompt)
+    const v = known[id]?.inputs?.text
+    if (typeof v !== 'string') continue
+    if (out === prompt) out = { ...prompt }
+    out[id] = { ...n, inputs: { ...n.inputs, text: v } }
+  }
+  return out
 }

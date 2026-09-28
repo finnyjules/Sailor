@@ -11,7 +11,7 @@ import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import sharp from 'sharp'
 import { createFakeFal, createFakeReplicate, makeKit } from './__runner__/kit'
-import { wireText } from './__runner__/paidParity'
+import { readerFor, wireText } from './__runner__/paidParity'
 import type { ApiLink, ApiPrompt } from '#shared/runner/graph'
 import { RUNNER_FAMILIES, type RunnerFamily } from '#shared/runner/families'
 import { handoffView, orientOps, plainPngChunks, PICTURE_ANIMATED_SEE_THROUGH } from '~~/server/runner/pictures/handoffView'
@@ -175,7 +175,8 @@ function promptOf(c: HandoffCase): ApiPrompt {
   const loader = c.loader === 'LoadImage'
     ? { class_type: 'LoadImage', inputs: { image: c.filename, upload: 'image' } }
     : { class_type: 'Image', inputs: { image: c.filename, export: false, filename_prefix: 'ComfyUI', batch_index: -1 } }
-  return { 11: loader, 1: { class_type: c.class_type, inputs: { ...c.widgets, [c.input]: ['11', 0] } } }
+  // A card shows the node's picture: ComfyUI (and the runner, R3.8 fix round 1) runs only what an output reads.
+  return { 11: loader, 1: { class_type: c.class_type, inputs: { ...c.widgets, [c.input]: ['11', 0] } }, ...readerFor(c.class_type, '1') }
 }
 
 /** A case through the engine: the upload that carried the picture, the call sent, the charge. */
@@ -490,6 +491,7 @@ const productShot = (file: string): ApiPrompt => ({
 const happyHorse = (file: string): ApiPrompt => ({
   11: { class_type: 'Image', inputs: { image: file, export: false, filename_prefix: 'ComfyUI', batch_index: -1 } },
   1: { class_type: 'GenerateVideoNode', inputs: { model: HAPPYHORSE_11_ID, prompt: 'the sea moves', aspect_ratio: '16:9', duration: '5', seed: 3, model_options: '{}', image: ['11', 0] } },
+  ...readerFor('GenerateVideoNode', '1'),
 })
 
 describe('R3.H fix — JPEG over caps', () => {
@@ -669,6 +671,7 @@ describe('R3.H fix round 2 — phone photos into Seedance 2.0 and Kling 3.0', ()
   const video = (file: string, model: string): ApiPrompt => ({
     11: { class_type: 'Image', inputs: { image: file, export: false, filename_prefix: 'ComfyUI', batch_index: -1 } },
     1: { class_type: 'GenerateVideoNode', inputs: { model, prompt: 'the sea moves', aspect_ratio: '16:9', duration: '5', seed: 3, model_options: '{}', image: ['11', 0] } },
+    ...readerFor('GenerateVideoNode', '1'),
   })
   const cases = [
     { label: 'a 24 MP phone JPEG into Seedance 2.0 image-to-video', w: 6000, h: 4000, model: 'seedance-2.0', families: ['cards'] as RunnerFamily[], cap: 30_000_000, endpoint: 'bytedance/seedance-2.0/image-to-video' },

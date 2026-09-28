@@ -307,8 +307,9 @@ function splitPlanner(inputs: NodeInputs): PaidCalls {
 
 /**
  * Generate music (and its twin): one MusicGen call billed by the seconds it
- * asks for (`duration`, 1–30 as ComfyUI validates it); a wired or unreadable
- * one at the longest (30 s). Generate speech (and its twin): one MiniMax call
+ * asks for (`duration`, 1–30 as ComfyUI validates it); a wired one at the
+ * longest (30 s), an unreadable one at the node's default (8 s: ComfyUI's
+ * validation and the runner's INT widget both refuse it before a run). Generate speech (and its twin): one MiniMax call
  * by the characters of its text (Python's `len`); a wired text at the most
  * the model reads (SPEECH_MAX_CHARS: a longer one is refused before it is
  * sent), or, with `opts.inputChars`, the characters it sent (the charge;

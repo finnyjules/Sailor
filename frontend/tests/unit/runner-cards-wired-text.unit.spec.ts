@@ -11,6 +11,7 @@ import { readFileSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import { createFakeFal, createFakeReplicate, makeKit, ofType, rgbPng1x1 } from './__runner__/kit'
+import { readerFor } from './__runner__/paidParity'
 import { planNode } from '~~/server/runner/executors'
 import { withWiredValues } from '~~/server/runner/values'
 import { NANO_BANANA_SHORT_PROMPT } from '~~/server/runner/requestRules'
@@ -267,7 +268,8 @@ describe('the refusals that stay', () => {
     for (const name of need) inputs[name] = ['img', 0]
     return { img, n: { class_type: ct, inputs } }
   }
-  const wire = (p: ApiPrompt, name: string): ApiPrompt => ({ ...p, t: text, n: { ...p.n!, inputs: { ...p.n!.inputs, [name]: ['t', 0] } } })
+  // The node's result shown by a card: only what an output reads runs (R3.8 fix round 1; the Text card is an output).
+  const wire = (p: ApiPrompt, name: string): ApiPrompt => ({ ...p, t: text, n: { ...p.n!, inputs: { ...p.n!.inputs, [name]: ['t', 0] } }, ...readerFor(p.n!.class_type, 'n') })
 
   it('Generate an image: model_options and style_refs (how many pictures, which files are read before the hold)', () => {
     const p: ApiPrompt = { n: { class_type: 'GenerateImageNode', inputs: { model: 'flux-schnell', prompt: 'a red fox', aspect_ratio: '1:1', seed: 7, model_options: '{}' } } }

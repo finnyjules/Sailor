@@ -319,7 +319,7 @@ describe('PAID_TEXT_INPUTS', () => {
     table.GenerateImageNode = ['prompt', 'test_text']
     const moderate = vi.fn(async (_t: string) => ({ ok: true as const }))
     const k = makeKit({ hosted: true, moderate })
-    const p: ApiPrompt = { 1: { class_type: 'GenerateImageNode', inputs: { model: 'flux-schnell', prompt: 'a red fox', aspect_ratio: '1:1', seed: 0, model_options: '{}', test_text: 'the paid text' } } }
+    const p: ApiPrompt = { 1: { class_type: 'GenerateImageNode', inputs: { model: 'flux-schnell', prompt: 'a red fox', aspect_ratio: '1:1', seed: 0, model_options: '{}', test_text: 'the paid text' } }, 2: { class_type: 'Image', inputs: { image: '', export: false, images: ['1', 0], batch_index: -1 } } }
     const { runId } = await k.engine.startRun({ userId: k.userId, takes: [p], ...START })
     // Checked before anything was held.
     expect(moderate.mock.calls.map(c => c[0]).sort()).toEqual(['a red fox', 'the paid text'])
@@ -331,7 +331,7 @@ describe('PAID_TEXT_INPUTS', () => {
     table.GenerateImageNode = ['test_text']
     const moderate = vi.fn(async (t: string) => (t === 'bad words' ? { ok: false as const, categories: ['harassment'] } : { ok: true as const }))
     const k = makeKit({ hosted: true, moderate })
-    const p: ApiPrompt = { 1: { class_type: 'GenerateImageNode', inputs: { model: 'flux-schnell', prompt: 'a red fox', aspect_ratio: '1:1', seed: 0, model_options: '{}', test_text: 'bad words' } } }
+    const p: ApiPrompt = { 1: { class_type: 'GenerateImageNode', inputs: { model: 'flux-schnell', prompt: 'a red fox', aspect_ratio: '1:1', seed: 0, model_options: '{}', test_text: 'bad words' } }, 2: { class_type: 'Image', inputs: { image: '', export: false, images: ['1', 0], batch_index: -1 } } }
     await expect(k.engine.startRun({ userId: k.userId, takes: [p], ...START })).rejects.toThrow()
     expect(k.ledger.hold).not.toHaveBeenCalled()
   })

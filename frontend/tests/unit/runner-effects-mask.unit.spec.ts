@@ -698,6 +698,8 @@ describe('an effect\'s picture into Image to mask and Text mask\'s source: read 
           last = 'tm'
         }
         if (save) p.s = saveImage([last, 0])
+        // Unsaved, a Preview image shows it: only what an output reads runs (R3.8 fix round 1).
+        else if (last === 'tm') p.pv = { class_type: 'PreviewImage', inputs: { images: [last, 0] } }
         expect(isRunnerEligible(p, MASK)).toBe(true)
         const { runId } = await k.engine.startRun({ userId: k.userId, takes: [p], ...START })
         await k.engine.settled(runId)
@@ -713,7 +715,9 @@ describe('an effect\'s picture into Image to mask and Text mask\'s source: read 
         }
         else {
           const v = run.takes[0]!.nodes[last]!.values![0] as Extract<RunnerValue, { kind: 'files' }>
-          expect(sha256((await pngPixels(w.bytes(v.files[0]!))).px), 'kept').toBe(item.round8_sha256)
+          // Text mask's picture is kept as the Preview image reading it saves it (truncated, as Python's
+          // Preview does); Image to mask's consumer reads the round-8 PNG.
+          expect(sha256((await pngPixels(w.bytes(v.files[0]!))).px), 'kept').toBe(last === 'tm' ? item.trunc8_sha256 : item.round8_sha256)
           if (ch.reader.class_type === 'TextMask') {
             const mv = run.takes[0]!.nodes.tm!.values![1] as Extract<RunnerValue, { kind: 'mask' }>
             expect(shaU16((await keptU16(w.bytes(mv.files[0]!))).q)).toBe(ch.outputs[1]!.items[0]!.u16_sha256)
@@ -989,7 +993,8 @@ describe('the engine (cards and effects-mask on)', () => {
     const cc = CARD_BLEND
     const k = makeKit({ hosted: false, deps: { families: () => MASK_EDIT } })
     for (const f of [...cc.inputs.base!.files, ...cc.inputs.top!.files]) put(k.root, f, assetOf(f))
-    const p = blendPrompt(cc, { e: editNode([cc.node_id, 0]) })
+    // The edit's picture shown by a card: only what an output reads runs (R3.8 fix round 1).
+    const p = blendPrompt(cc, { e: editNode([cc.node_id, 0]), o: { class_type: 'Image', inputs: { image: '', export: false, images: ['e', 0], batch_index: -1 } } })
     expect(isRunnerEligible(p, MASK_EDIT)).toBe(true)
     const { runId } = await k.engine.startRun({ userId: k.userId, takes: [p], ...START })
     await k.engine.settled(runId)

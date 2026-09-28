@@ -3,7 +3,8 @@
  * of validation the runner ports: an output node whose own subgraph fails
  * validation is dropped ("Output will be ignored"), every other output is
  * kept, and only what the kept outputs need runs. With no output left the
- * prompt is refused ("Prompt outputs failed validation").
+ * prompt is refused ("Prompt outputs failed validation"); with no output
+ * node at all, too ("Prompt has no outputs": R3.8 fix round 1, runner-wide).
  *
  * So a blank project's empty Frame (no layer 1) no longer blocks the rest of
  * the canvas: ComfyUI drops it and runs the rest (history c7690393: only the
@@ -13,8 +14,10 @@
  * share this file, so they agree on what runs.
  *
  * Kept deliberately narrow:
- *   - it prunes only when some output fails; a prompt whose outputs all
- *     validate is left exactly as it is (the runner's existing rule);
+ *   - only what an output node reads runs (R3.8 fix round 1, runner-wide:
+ *     ComfyUI never executes a node no output needs, so a generator nothing
+ *     reads is neither run nor charged); a prompt whose outputs all validate
+ *     and read everything is left exactly as it is;
  *   - it prunes only a prompt whose every class the runner knows: with any
  *     other class present, which outputs ComfyUI has is not knowable here,
  *     so the prompt is left whole (and goes to ComfyUI, as before);
@@ -78,9 +81,24 @@ export interface PrunedPrompt {
   dropped: string[]
   /** ComfyUI's node_errors: the nodes with errors of their own, and the outputs they took down. */
   nodeErrors: Record<string, ComfyNodeError>
-  /** Every output failed: ComfyUI refuses the prompt ("Prompt outputs failed validation"). */
+  /** Every output failed: ComfyUI refuses the prompt ("Prompt outputs failed validation"), or there is none (`noOutputs`). */
   failed: boolean
+  /** No output node at all: ComfyUI refuses the prompt ("Prompt has no outputs"). */
+  noOutputs?: true
+  /** Nodes no kept output reads (R3.8 fix round 1): left out, as ComfyUI never runs them. */
+  unread: string[]
 }
+
+/** Whether pruning left anything out (a failed output, or a node no output reads): the rest runs even with no call to make. */
+export function prunedAny(r: PrunedPrompt): boolean {
+  return r.dropped.length > 0 || r.unread.length > 0
+}
+
+/**
+ * A class known under a second family as well as its SWITCHED_CLASSES one:
+ * the Audio card showing a music or speech node's sound (R3.8, audio-gen).
+ */
+const ALSO_SWITCHED: Readonly<Record<string, RunnerFamily>> = { Audio: 'audio-gen' }
 
 /**
  * A class the port knows: a runner type, or a family row's class. A class
@@ -92,16 +110,17 @@ const knows = (classType: string, families: ReadonlySet<RunnerFamily>) => {
   if (RUNNER_NODE_TYPES.has(classType)) return true
   if (!Object.prototype.hasOwnProperty.call(RUNNER_NODE_RULES, classType)) return false
   const only = Object.prototype.hasOwnProperty.call(SWITCHED_CLASSES, classType) ? SWITCHED_CLASSES[classType] : undefined
-  return !only || familyOn(only, families)
+  const also = Object.prototype.hasOwnProperty.call(ALSO_SWITCHED, classType) ? ALSO_SWITCHED[classType] : undefined
+  return !only || familyOn(only, families) || (!!also && familyOn(also, families))
 }
 
 /** The prompt as ComfyUI's validate_prompt leaves it to run. `families`: the runner families on. */
 export function pruneInvalidOutputs(prompt: ApiPrompt, families: ReadonlySet<RunnerFamily> = NO_FAMILIES): PrunedPrompt {
-  const whole: PrunedPrompt = { prompt, dropped: [], nodeErrors: {}, failed: false }
+  const whole: PrunedPrompt = { prompt, dropped: [], nodeErrors: {}, failed: false, unread: [] }
   const ids = Object.keys(prompt)
   if (!ids.length || ids.some(id => !knows(prompt[id]!.class_type, families))) return whole
   const outputs = ids.filter(id => RUNNER_OUTPUT_CLASSES.has(prompt[id]!.class_type))
-  if (!outputs.length) return whole
+  if (!outputs.length) return { prompt: {}, dropped: [], nodeErrors: {}, failed: true, noOutputs: true, unread: [] }
 
   // validate_inputs, cached: a node fails on its own errors or any upstream failure.
   const own = new Map<string, ComfyValidationError[]>()
@@ -134,14 +153,25 @@ export function pruneInvalidOutputs(prompt: ApiPrompt, families: ReadonlySet<Run
       e.dependent_outputs.push(o)
     }
   }
-  if (!dropped.length) return whole
-  if (!good.length) return { prompt: {}, dropped, nodeErrors, failed: true }
+  if (!good.length) return { prompt: {}, dropped, nodeErrors, failed: true, unread: [] }
 
   const keep = new Set<string>()
   for (const o of good) for (const id of upstreamOf(prompt, o)) keep.add(id)
+  // Every node an output needs: the prompt itself.
+  if (!dropped.length && keep.size === ids.length) return whole
   const pruned: ApiPrompt = {}
-  for (const id of ids) if (keep.has(id)) pruned[id] = prompt[id]!
-  return { prompt: pruned, dropped, nodeErrors, failed: false }
+  const unread: string[] = []
+  for (const id of ids) {
+    if (keep.has(id)) pruned[id] = prompt[id]!
+    // Dropped outputs and what only they need are not "unread": ComfyUI reports them (node_errors).
+    else if (!dropped.includes(id) && !isUpstreamOfAny(prompt, dropped, id)) unread.push(id)
+  }
+  return { prompt: pruned, dropped, nodeErrors, failed: false, unread }
+}
+
+/** Whether `id` is something one of `outputs` reads (directly or not). */
+function isUpstreamOfAny(prompt: ApiPrompt, outputs: readonly string[], id: string): boolean {
+  return outputs.some(o => upstreamOf(prompt, o).has(id))
 }
 
 /** The node and everything it reads from, inside the prompt. */
@@ -160,10 +190,15 @@ function upstreamOf(prompt: ApiPrompt, id: string): Set<string> {
 /** ComfyUI's refusal when every output fails, in plain words. */
 export const NO_VALID_OUTPUTS_MESSAGE = 'Nothing in this workflow can run: every result has a missing or invalid setting'
 
+/** ComfyUI's refusal when no node shows or saves a result ("Prompt has no outputs"), in plain words. */
+export const NO_OUTPUTS_MESSAGE = 'Nothing here shows or saves a result. Add a card that shows it, or a node that saves it.'
+
 /**
  * Whether the runner takes this workflow, after ComfyUI's pruning. A
  * workflow whose every output fails validation is taken too: the runner
- * refuses it with ComfyUI's message in plain words, as ComfyUI would.
+ * refuses it with ComfyUI's message in plain words, as ComfyUI would. So is
+ * one with no output node that the runner would otherwise take (R3.8 fix
+ * round 1: it used to run, and charge, nodes nothing reads).
  */
 export function runnerTakesWorkflow(
   prompt: ApiPrompt | null | undefined,
@@ -172,6 +207,9 @@ export function runnerTakesWorkflow(
 ): boolean {
   if (!prompt) return false
   const r = pruneInvalidOutputs(prompt, families)
+  // No output node at all: where the runner would take the prompt, it refuses it
+  // plainly (as ComfyUI does); otherwise it goes where it went before R3.8.
+  if (r.noOutputs) return isRunnerEligible(prompt, families, opts)
   if (r.failed) return true
-  return isRunnerEligible(r.prompt, families, { ...opts, afterPruning: r.dropped.length > 0 })
+  return isRunnerEligible(r.prompt, families, { ...opts, afterPruning: prunedAny(r) })
 }

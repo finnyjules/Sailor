@@ -12,7 +12,7 @@ import { join, resolve } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import sharp from 'sharp'
 import { createFakeFal, createFakeReplicate, makeKit, ofType } from './__runner__/kit'
-import { normalizeSent, runPaidCase, wireText, type PaidCase } from './__runner__/paidParity'
+import { normalizeSent, readerFor, runPaidCase, wireText, type PaidCase } from './__runner__/paidParity'
 import { checkPayload, type ProviderSchemaFixture } from './helpers/providerSchema'
 import type { ApiPrompt } from '#shared/runner/graph'
 import { RUNNER_FAMILIES, type RunnerFamily } from '#shared/runner/families'
@@ -61,6 +61,8 @@ function withPicture(c: PaidCase): ApiPrompt {
   return {
     p_image: { class_type: 'LoadImage', inputs: { image: 'image.png', upload: 'image' } },
     n: { class_type: c.class_type, inputs: { ...c.widgets, image: ['p_image', 0] } },
+    // A card shows the result: only what an output reads runs (R3.8 fix round 1).
+    ...readerFor(c.class_type, 'n'),
   }
 }
 
