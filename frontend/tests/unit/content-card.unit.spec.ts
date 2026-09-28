@@ -61,3 +61,28 @@ describe('the canvas selection outline sits on the media box', () => {
     expect(canvas).toMatch(/\.vue-node-canvas \.vue-flow__node\.selected \.content-card__media \{\s*outline: 2px solid var\(--action\);\s*outline-offset: 3px;\s*\}/)
   })
 })
+
+describe('Image card is a content card', () => {
+  const s = src('ArtifactImageNode.vue')
+  const t = tpl(s)
+  it('wraps its media in ContentCard inside a port wrapper', () => {
+    expect(t).toMatch(/^<template>\s*<div class="relative w-fit">/)
+    expect(t).toMatch(/<ContentCard[\s\S]{0,200}class="artifact-image relative z-10 w-\[240px\] select-none"/)
+    expect(t).toMatch(/:name="filenameLabel \|\| 'Image'"/)
+    expect(t).toMatch(/:data-error="data\.error \|\| undefined"/)
+  })
+  it('uses the shared ports with unchanged ids, including the mask', () => {
+    expect(t).not.toMatch(/<Handle\b/)
+    expect(t).toMatch(/:id="`output-\$\{imageOutIdx\}`"/)
+    expect(t).toMatch(/:id="`output-\$\{maskOutIdx\}`"/)
+  })
+  it('the hover strip became Download + More; no frame border', () => {
+    expect(t).toMatch(/#actions[\s\S]*title="Download"[\s\S]*<NodeMoreMenu :items="moreItems" \/>/)
+    expect(s).toMatch(/label: 'Save as character', onSelect: saveAsCharacter/)
+    expect(t).not.toMatch(/artifact-frame/)
+    expect(t).not.toMatch(/ring-2 ring-red-500/)
+  })
+  it('takes strip still below the card', () => {
+    expect(t).toMatch(/#below[\s\S]*<TakesStrip/)
+  })
+})

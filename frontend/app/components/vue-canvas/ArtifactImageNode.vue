@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { Handle, Position } from '@vue-flow/core'
 import { Upload, Loader2, Image as ImageIcon, ImagePlus, Play, Download, RefreshCw, Lock, LockOpen, Brush, Drama } from 'lucide-vue-next'
 import { onClickOutside } from '@vueuse/core'
 import { getTypeColor } from '~/composables/useVueNodes'
 import NodeRunRow from '~/components/vue-canvas/NodeRunRow.vue'
 import NodeFixesBadge from '~/components/vue-canvas/NodeFixesBadge.vue'
+import ContentCard from '~/components/vue-canvas/surfaces/ContentCard.vue'
+import NodeMoreMenu, { type MoreItem } from '~/components/vue-canvas/surfaces/NodeMoreMenu.vue'
 import { runRowStatus } from '~/lib/canvas/runRowStatus'
 import { useRunRowClock } from '~/composables/useRunRowClock'
 import { useAgentActivity } from '~/composables/useAgentActivity'
@@ -30,6 +31,7 @@ import { toast } from 'vue-sonner'
 // depending on what the user wires and toggles.
 const props = defineProps<{
   id: string
+  selected?: boolean
   data: {
     nodeType: string
     title: string
@@ -507,7 +509,7 @@ const textReplace = ref('')
 onClickOutside(textEditPanelRef, () => { textEditOpen.value = false })
 
 function openTextEdit() {
-  textEditStyle.value = menuStyleFor(rootEl.value)
+  textEditStyle.value = menuStyleFor((rootEl.value as any)?.$el ?? null)
   textFind.value = ''
   textReplace.value = ''
   textEditOpen.value = true
@@ -707,52 +709,78 @@ const promoteUsdLabel = computed(() => {
   const cost = parseBadgeUsd((props.data as any)?.priceBadge?.expr)
   return cost ? ` ${formatCostBadge(cost.usd, true, hostedPricing)}` : null
 })
+
+// The old hover strip's buttons, now Download (floating, see template) plus
+// this More menu — same functions, same guards as the removed buttons.
+const moreItems = computed<MoreItem[]>(() => [
+  ...(canReplace.value ? [{ label: 'Replace image', onSelect: triggerUpload, disabled: uploading.value }] : []),
+  { label: isLocked.value ? 'Unlock' : 'Lock', onSelect: () => (isLocked.value ? unlockArtifact() : lockArtifact()), disabled: locking.value },
+  { label: props.data.running ? 'Running…' : 'Re-render', onSelect: runThisNode, disabled: !!props.data.running || isMuted.value || isBypassed.value },
+  { label: 'Save as character', onSelect: saveAsCharacter, disabled: savingAsCharacter.value },
+  { label: 'Name as reference', onSelect: openRefDialog, disabled: creatingRef.value },
+])
 </script>
 
 <template>
-  <div
-    ref="rootEl"
-    class="artifact-image relative w-[240px] select-none"
-    :class="{
-      'artifact-image--muted': isMuted,
-      'artifact-image--bypassed': isBypassed,
-      'artifact-image--locked': isLocked,
-    }"
-    :data-running="data.running || undefined"
-    :style="{ '--port-color': imageColor } as any"
-    @mouseenter="hovered = true"
-    @mouseleave="hovered = false"
-    @dragover="onDragOver"
-    @drop="onDrop"
-  >
-    <VueCanvasNodeReadyBadge :node-id="id" />
+  <div class="relative w-fit">
     <!-- Primary IMAGE input — vertically centered on the image frame.
          Conditionally rendered so empty Image nodes don't dangle a port. -->
-    <Handle
+    <VueCanvasNodePort
       v-if="imagesInIdx >= 0"
       :id="`input-${imagesInIdx}`"
       type="target"
-      :position="Position.Left"
-      class="!w-3 !h-3 !rounded-full !border-2 !bg-[#1a1a1a]"
-      :style="{ borderColor: imageColor, top: '50%' }"
+      side="left"
+      :data-type="data.inputs?.[imagesInIdx]?.type ?? 'IMAGE'"
+      label="Image"
+      :index="0"
     />
     <!-- Primary IMAGE output -->
-    <Handle
-      v-if="imageOutIdx >= 0"
+    <VueCanvasNodePort
       :id="`output-${imageOutIdx}`"
       type="source"
-      :position="Position.Right"
-      class="!w-3 !h-3 !rounded-full !border-2 !bg-[#1a1a1a]"
-      :style="{ borderColor: imageColor, top: '50%' }"
+      side="right"
+      :data-type="data.outputs?.[imageOutIdx]?.type ?? 'IMAGE'"
+      label="Image"
+      :index="0"
+    />
+    <!-- Secondary MASK output — was a small port + label row below the frame;
+         now the third shared port so the image stays the dominant visual. -->
+    <VueCanvasNodePort
+      v-if="maskOutIdx >= 0"
+      :id="`output-${maskOutIdx}`"
+      type="source"
+      side="right"
+      :data-type="data.outputs?.[maskOutIdx]?.type ?? 'MASK'"
+      label="Mask"
+      :index="1"
     />
 
-    <div
-      class="artifact-frame relative rounded-lg overflow-hidden bg-black/40 border border-white/10"
-      :class="{ 'ring-2 ring-red-500': data.error }"
+    <ContentCard
+      ref="rootEl"
+      class="artifact-image relative z-10 w-[240px] select-none"
+      :class="{
+        'artifact-image--muted': isMuted,
+        'artifact-image--bypassed': isBypassed,
+        'artifact-image--locked': isLocked,
+      }"
+      :name="filenameLabel || 'Image'"
+      :selected="selected"
+      :data-running="data.running || undefined"
+      :data-error="data.error || undefined"
+      :style="{ '--port-color': imageColor } as any"
+      @mouseenter="hovered = true"
+      @mouseleave="hovered = false"
+      @dragover="onDragOver"
+      @drop="onDrop"
     >
+      <template #meta>
+        <span v-if="dims" class="shrink-0 tabular-nums text-white/30">{{ dims }}</span>
+      </template>
+
       <!-- Media stage — the image/placeholder region only. The fx + sweep
            overlays live in here and size to it, so the churn/reveal covers just
            the image and never the footer toolbar below. -->
+      <VueCanvasNodeReadyBadge :node-id="id" />
       <div ref="stageRef" class="relative">
       <!-- img-fx "image generation" effect — the churning pixel-cell field and
            per-cell image reveal, layered UNDER the glimm sweep. Existing image
@@ -804,80 +832,10 @@ const promoteUsdLabel = computed(() => {
 
       <!-- IMAGE PRESENT -->
       <template v-if="displayedUrl">
-        <!-- Chrome toolbar, overlaid on the top of the image and revealed
-             on hover. Kept off the resting card so the image itself is the
-             only thing competing for attention. Lock state is NOT hidden
-             here — it changes what Run does, so it also shows as a badge. -->
-        <div
-          class="nopan nodrag absolute inset-x-0 top-0 z-30 flex items-center gap-1.5 px-2 py-1.5 bg-gradient-to-b from-black/70 to-transparent transition-opacity duration-150"
-          :class="hovered ? 'opacity-100' : 'opacity-0 pointer-events-none'"
-        >
-          <span class="truncate flex-1 text-[10px] tabular-nums text-white/80 drop-shadow-[0_1px_2px_rgba(0,0,0,0.9)]">
-            {{ dims || (hasUpstream ? 'Preview' : 'Image') }}
-          </span>
-          <button
-            v-if="canReplace"
-            class="nopan nodrag shrink-0 size-5 rounded flex items-center justify-center text-white/45 hover:text-white/85 hover:bg-white/[0.08] transition-colors cursor-pointer disabled:opacity-50"
-            :disabled="uploading"
-            title="Replace image"
-            @click.stop="triggerUpload"
-          >
-            <Loader2 v-if="uploading" class="size-3 animate-spin" />
-            <Upload v-else class="size-2.5" />
-          </button>
-          <button
-            class="nopan nodrag shrink-0 size-5 rounded flex items-center justify-center text-white/45 hover:text-white/85 hover:bg-white/[0.08] transition-colors cursor-pointer"
-            title="Download"
-            @click.stop="downloadImage"
-          >
-            <Download class="size-2.5" />
-          </button>
-          <button
-            class="nopan nodrag shrink-0 size-5 rounded flex items-center justify-center transition-colors cursor-pointer disabled:opacity-50"
-            :class="isLocked
-              ? 'text-amber-300 bg-amber-500/15 hover:bg-amber-500/25'
-              : 'text-white/45 hover:text-white/85 hover:bg-white/[0.08]'"
-            :disabled="locking"
-            :title="isLocked ? 'Locked — pinned, upstream will be skipped on next Run. Click to unlock.' : 'Lock — pin this image so upstream generators don\'t re-run.'"
-            @click.stop="isLocked ? unlockArtifact() : lockArtifact()"
-          >
-            <Loader2 v-if="locking" class="size-3 animate-spin" />
-            <Lock v-else-if="isLocked" class="size-2.5" />
-            <LockOpen v-else class="size-2.5" />
-          </button>
-          <button
-            class="nopan nodrag shrink-0 size-5 rounded flex items-center justify-center text-white/45 hover:text-white/85 hover:bg-white/[0.08] transition-colors cursor-pointer disabled:opacity-50"
-            :disabled="data.running || isMuted || isBypassed"
-            :title="data.running ? 'Running…' : 'Re-render'"
-            @click.stop="runThisNode"
-          >
-            <Loader2 v-if="data.running" class="size-3 animate-spin" />
-            <RefreshCw v-else class="size-3" />
-          </button>
-          <button
-            class="nopan nodrag shrink-0 size-5 rounded flex items-center justify-center text-white/45 hover:text-white/85 hover:bg-white/[0.08] transition-colors cursor-pointer disabled:opacity-50"
-            :disabled="savingAsCharacter"
-            title="Save as character"
-            @click.stop="saveAsCharacter"
-          >
-            <Loader2 v-if="savingAsCharacter" class="size-3 animate-spin" />
-            <Drama v-else class="size-3" />
-          </button>
-          <button
-            v-if="displayedUrl"
-            class="nopan nodrag shrink-0 size-5 rounded flex items-center justify-center text-white/45 hover:text-white/85 hover:bg-white/[0.08] transition-colors cursor-pointer disabled:opacity-50"
-            :disabled="creatingRef"
-            title="Name as reusable reference (@)"
-            @click.stop="openRefDialog"
-          >
-            <Loader2 v-if="creatingRef" class="size-3 animate-spin" />
-            <span v-else class="text-xs font-bold leading-none" style="color: var(--var-accent-text)">@</span>
-          </button>
-        </div>
-        <!-- Persistent badges, top-left: Locked (the toggle lives in the hover
-             toolbar, but a pinned card must read as pinned without hovering)
-             and "N fixes" (always visible; opens Edit ▾). They step down below
-             the hover toolbar while it shows. -->
+        <!-- Persistent badges, top-left: Locked (the toggle now lives in the
+             card's More menu, but a pinned card must read as pinned without
+             hovering) and "N fixes" (always visible; opens Edit ▾). The
+             hover-step class is unchanged from the old hover-toolbar layout. -->
         <div
           class="pointer-events-none absolute left-1.5 z-40 flex items-center gap-1 transition-[top] duration-150"
           :class="hovered ? 'top-8' : 'top-1.5'"
@@ -945,18 +903,40 @@ const promoteUsdLabel = computed(() => {
       </template>
       </div><!-- /media stage -->
 
-      <!-- Run row — where the Edit…/Develop… footer was (Task 8 moved those
-           to the node toolbar). Outside the media stage, so the churn/reveal
-           never covers it. -->
-      <NodeRunRow
-        v-if="displayedUrl && hasUpstream"
-        :status="runStatus"
-        :can-run="!isMuted && !isBypassed"
-        :running="!!data.running"
-        run-label="Re-render this node"
-        @run="runThisNode"
-      />
-    </div>
+      <template #actions>
+        <button v-if="displayedUrl" type="button" title="Download" @click.stop="downloadImage">
+          <Download class="size-3.5" />
+        </button>
+        <NodeMoreMenu :items="moreItems" />
+      </template>
+
+      <template #below>
+        <!-- Run row — where the Edit…/Develop… footer was (Task 8 moved those
+             to the node toolbar). Outside the media stage, so the churn/reveal
+             never covers it. -->
+        <NodeRunRow
+          v-if="displayedUrl && hasUpstream"
+          :status="runStatus"
+          :can-run="!isMuted && !isBypassed"
+          :running="!!data.running"
+          run-label="Re-render this node"
+          @run="runThisNode"
+        />
+
+        <!-- Takes strip (flag-gated): switch / pin / discard this node's results -->
+        <TakesStrip
+          v-if="(data.takes?.length ?? 0) >= 1"
+          :takes="data.takes!"
+          :active-take-id="data.activeTakeId"
+          class="mt-1.5"
+          @select="selectTake"
+          @pin="pinTake"
+          @discard="discardTake"
+          @expand="lightTableOpen = true"
+          @promote="promoteTake"
+        />
+      </template>
+    </ContentCard>
 
     <!-- Edit text… find/replace panel, opened from the node toolbar. -->
     <Teleport to="body">
@@ -980,19 +960,6 @@ const promoteUsdLabel = computed(() => {
     <!-- Name-as-reference dialog (self-teleports to <body>). -->
     <RefNameDialog :open="refDialogOpen" @confirm="onRefConfirm" @cancel="refDialogOpen = false" />
 
-    <!-- Takes strip (flag-gated): switch / pin / discard this node's results -->
-    <TakesStrip
-      v-if="(data.takes?.length ?? 0) >= 1"
-      :takes="data.takes!"
-      :active-take-id="data.activeTakeId"
-      class="mt-1 rounded-lg bg-black/40 border border-white/10"
-      @select="selectTake"
-      @pin="pinTake"
-      @discard="discardTake"
-      @expand="lightTableOpen = true"
-      @promote="promoteTake"
-    />
-
     <LightTableModal
       v-if="lightTableOpen"
       :takes="data.takes ?? []"
@@ -1007,48 +974,19 @@ const promoteUsdLabel = computed(() => {
       @discard-others="onDiscardOthers"
       @close="lightTableOpen = false"
     />
-
-    <!-- Secondary MASK output — small port + label below the frame so the
-         image stays the dominant visual but downstream MASK consumers stay
-         wireable. -->
-    <div
-      v-if="maskOutIdx >= 0"
-      class="mt-1 flex items-center gap-1 justify-end pr-1"
-    >
-      <span class="text-[9px] uppercase tracking-[0.04em] text-white/35">mask</span>
-      <Handle
-        :id="`output-${maskOutIdx}`"
-        type="source"
-        :position="Position.Right"
-        class="!w-2 !h-2 !rounded-full !border !bg-[#1a1a1a] !relative !top-auto !right-auto !transform-none"
-        :style="{ borderColor: maskColor }"
-      />
-    </div>
   </div>
 </template>
 
 <style scoped>
-.artifact-image[data-running] .artifact-frame {
-  box-shadow:
-    0 0 0 2px var(--port-color, #fff),
-    0 4px 16px rgba(0, 0, 0, 0.4);
-}
-.artifact-frame {
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4), 0 1px 4px rgba(0, 0, 0, 0.2);
-}
 .artifact-image--muted { opacity: 0.45; filter: grayscale(0.8); }
 .artifact-image--bypassed { opacity: 0.85; }
-.artifact-image--bypassed .artifact-frame {
-  border-style: dashed;
-  border-color: rgba(251, 191, 36, 0.35);
+.artifact-image--bypassed :deep(.content-card__media) {
+  outline: 1px dashed rgba(251, 191, 36, 0.35);
+  outline-offset: -1px;
 }
-.artifact-image--locked .artifact-frame {
+.artifact-image--locked :deep(.content-card__media) {
   /* Amber tint to match the seed-lock toggle's visual language — same
      "frozen / pinned" signal across the canvas. */
-  box-shadow:
-    0 0 0 1px rgba(251, 191, 36, 0.4),
-    0 4px 16px rgba(0, 0, 0, 0.4);
-  border-color: rgba(251, 191, 36, 0.25);
+  box-shadow: 0 0 0 1px rgba(251, 191, 36, 0.45), var(--node-shadow);
 }
-
 </style>
