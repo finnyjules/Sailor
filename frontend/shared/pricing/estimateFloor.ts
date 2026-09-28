@@ -67,6 +67,8 @@ export const PRE_R3_FLAT: Readonly<Record<string, { credits: number, badgeUsd: n
   // R3.13, Flux Dev + LoRA and Flux Dev + LoRAs (LORA_RENDER_CREDITS, the LoRA category's ~$0.04).
   FluxLoRARemoteNode: { credits: 8, badgeUsd: 0.04, family: 'lora' },
   FluxMultiLoRARemoteNode: { credits: 8, badgeUsd: 0.04, family: 'lora' },
+  // R3.16, Turntable (badge $0.50). Its cards (Luma Ray 2, Seedance 2.0) are verified: no floor applies; kept as the record.
+  TurntableNode: { credits: 75, badgeUsd: 0.50, family: 'turntable' },
 }
 
 const own = <T>(o: Readonly<Record<string, T>>, k: string): T | undefined =>

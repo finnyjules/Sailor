@@ -55,6 +55,11 @@ import { FACE_SLUG, SKETCH_SLUG, textEffectSlug } from '../runner/imageExtras'
 import { FLUX_DEV_LORA_SLUG, FLUX_LORA_STEPS, FLUX_MULTI_LORA_SLUG, RESTYLE_LORA_CLASS, multiLoraCount } from '../runner/lora'
 import { editSteps } from './editSettings'
 import { POSE_MANNEQUIN_CLASS, poseNoCall, type PoseKnown } from '../runner/nanoExtras'
+import {
+  TURNTABLE_ASPECT_RATIO, TURNTABLE_CLASS, TURNTABLE_DEFAULT_DIRECTION, TURNTABLE_FRONT_MODEL, TURNTABLE_SECONDS, TURNTABLE_VIEWS_MODEL,
+  planSegments, turntableViews,
+} from '../runner/turntable'
+import { effectiveVideoSettings } from './videoSettings'
 import type { EditCall } from './editRates'
 
 /**
@@ -433,6 +438,35 @@ function restyleLoraPlanner(inputs: NodeInputs): PaidCalls {
   return { steps: [c.moondream, c.stylize, c.nanoBanana] }
 }
 
+// ── R3.16: Turntable (#shared/runner/turntable) ──
+
+/**
+ * A Turntable video call: the model's rate card (videoRates.ts, the line-up's
+ * Luma Ray 2 and Seedance 2.0 cards) at the settings its request carries
+ * (videoSettings.ts, as for Generate a video): 5 s, the ratio 1:1, and the
+ * options Python adds (Luma's `loop`; Seedance's last frame, which leaves its
+ * sound at fal's default).
+ */
+function turntableCall(model: string, adv: Record<string, unknown>): PaidCall {
+  const s = effectiveVideoSettings(model, TURNTABLE_SECONDS, TURNTABLE_ASPECT_RATIO, adv, true)!
+  return { endpoint: model, tier: s.resolution, outputSeconds: s.seconds, audio: s.audio }
+}
+
+/**
+ * Turntable (ruling (b), on both paths): front only, one Luma Ray 2 720p
+ * spin (5 s × $0.18); with right, back or left views wired, one Seedance 2.0
+ * 720p arc per segment planSegments plans (2 to 4), each priced on its own.
+ * A wired view counts (the dearest plan); a wired or unknown direction plans
+ * as many arcs as either direction does.
+ */
+function turntablePlanner(inputs: NodeInputs): PaidCalls {
+  const views = turntableViews(inputs)
+  if (!views.length) return { steps: [{ call: turntableCall(TURNTABLE_FRONT_MODEL, { loop: true }), times: 1 }] }
+  const direction = typeof inputs.direction === 'string' ? inputs.direction : TURNTABLE_DEFAULT_DIRECTION
+  const arcs = planSegments(views, direction).length
+  return { steps: [{ call: turntableCall(TURNTABLE_VIEWS_MODEL, { end_image_url: 'end' }), times: arcs }] }
+}
+
 /** Python returns "" before calling anyone when the text is blank (typed; a wired one is priced as a call). */
 function llmNoCall(classType: LlmTextClass): ((inputs: NodeInputs) => boolean) | null {
   const name = LLM_NO_CALL_INPUT[classType]
@@ -453,6 +487,7 @@ const PAID_PLANNERS: Readonly<Record<string, PaidPlanner>> = {
   ...IMAGE_EXTRAS_PLANNERS,
   ...LORA_PLANNERS,
   [RESTYLE_LORA_CLASS]: restyleLoraPlanner,
+  [TURNTABLE_CLASS]: turntablePlanner,
 }
 
 /** Each paid class's no-call rule (rule 8), where Python has one. Filled by each R3 task. */

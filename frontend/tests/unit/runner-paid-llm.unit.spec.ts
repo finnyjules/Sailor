@@ -336,7 +336,7 @@ describe('prices: Replicate\'s per-token cards, the hold and the charge (rulings
       expect(PAID_NODE_CLASSES).toContain(c)
       expect(Object.prototype.hasOwnProperty.call(GRAPH_NODE_CREDITS, c), c).toBe(false)
     }
-    expect(PRICE_BOOK_VERSION).toBe('r3-nano-extras')
+    expect(PRICE_BOOK_VERSION).toBe('r3-turntable')
   })
 
   it('the hold for Chat on GPT-5 at 8192 max tokens is the card\'s ceiling', () => {

@@ -217,11 +217,20 @@ export type RunnerFamily =
    * prompts take text wires. Off: they go to ComfyUI, as before.
    */
   | 'nano-extras'
+  /**
+   * Turntable's front-only spin on Replicate's Luma Ray 2 720p (step 3,
+   * R3.16), no backup: a product's front picture turned 360° into a seamless
+   * loop. A Turntable with right, back or left views wired (Seedance arcs
+   * stitched together) stays with ComfyUI until R3.17. Needs `cards`: its
+   * picture comes from Image cards and LoadImage, its extra direction takes a
+   * text wire. Off: it goes to ComfyUI, as before.
+   */
+  | 'turntable'
 
 export const RUNNER_FAMILIES: readonly RunnerFamily[] = [
   'fal-edit', 'replicate-image', 'replicate-video', 'nano-actions', 'ref-edits', 'restyle', 'frame', 'wan-3', 'gpt-image-2.5', 'h3-max-turbo', 'gemini-omni-flash', 'veo-3.1-lite', 'qwen-image-3', 'grok-imagine-2', 'ideogram-4', 'seedream-5-pro-edit', 'qwen-2511-angles', 'nano-banana-2-blend', 'bria-product-shot', 'muse-image', 'nano-banana-2-lite', 'reve-2.1', 'recraft-v4.1', 'krea-2', 'happyhorse-1.1', 'grok-imagine-video-1.5', 'ltx-2.5-fast', 'luma-ray-3.2', 'sync-3', 'topaz-video', 'fix-faces', 'face-swap', 'person-swap-video', 'cards',
   'effects-tone', 'effects-blur', 'effects-cells', 'effects-warp', 'effects-mask', 'effects-noise', 'shader-bake', 'live-previews',
-  'llm-text', 'describe', 'image-repair', 'layers', 'audio-gen', 'gen-3d', 'film-shot', 'image-extras', 'lora', 'nano-extras',
+  'llm-text', 'describe', 'image-repair', 'layers', 'audio-gen', 'gen-3d', 'film-shot', 'image-extras', 'lora', 'nano-extras', 'turntable',
 ]
 
 /**
@@ -247,6 +256,7 @@ export const FAMILY_REQUIRES: Partial<Record<RunnerFamily, RunnerFamily>> = {
   'image-extras': 'cards',
   'lora': 'cards',
   'nano-extras': 'cards',
+  'turntable': 'cards',
 }
 
 const KNOWN: ReadonlySet<string> = new Set(RUNNER_FAMILIES)

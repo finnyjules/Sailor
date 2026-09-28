@@ -261,7 +261,13 @@ export { VIDEO_RATES, MODEL_PRICED_NODE_CLASSES, SETTING_PRICED_NODE_CLASSES, RE
 // (shared/pricing/paidSettings.ts paidNoCall) is charged nothing on the
 // ComfyUI path too: Pose Mannequin's no-call branches, and the LLM text
 // nodes' blank typed text (R3.3's no-call rule, 1–2 credits before).
-export const PRICE_BOOK_VERSION = 'r3-nano-extras'
+// r3-turntable (step 3, R3.16, ruling (b)): Turntable leaves its flat row
+// (75 credits, badge $0.50) for the calls it makes, on both paths: front
+// only, Luma Ray 2 720p, 5 s × $0.18 = $0.90 (verified): 135 credits; with
+// right, back or left views wired, one Seedance 2.0 720p arc per segment
+// (5 s × $0.3034 = $1.517, 228 credits each, verified), 2 to 4 arcs: 456,
+// 684 or 912 credits.
+export const PRICE_BOOK_VERSION = 'r3-turntable'
 
 export const BASE_RENDER_CREDITS = 1
 
@@ -446,7 +452,8 @@ export const GRAPH_NODE_CREDITS: Record<string, number> = {
   // — comfy_extras wrappers that dispatch through nodes_replicate —
   // Pose Mannequin is priced by its call since R3.15 (shared/pricing/editSettings.ts, the nano
   // actions' call; nothing for a branch that makes none, paidSettings.ts paidNoCall), on both paths.
-  TurntableNode: 75,               // badge $0.50
+  // Turntable is priced by its calls since R3.16 (shared/pricing/paidSettings.ts: Luma Ray 2 front only,
+  // Seedance 2.0 per arc with views), on both paths.
 }
 
 // MODEL_PRICED_NODE_CLASSES — the classes whose price depends on a

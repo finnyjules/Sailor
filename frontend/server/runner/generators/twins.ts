@@ -370,6 +370,8 @@ export const RUNNER_ROUTES: Readonly<Record<string, Route>> = {
   // first as Python, fal's Nano Banana 2 edit the backup at cost (their price covers it).
   'LensReframe': r('replicate', 'fal'),
   'PoseMannequin': r('replicate', 'fal'),
+  // R3.16, Turntable's front-only spin (family turntable): Luma Ray 2 720p on Replicate, as Python.
+  'TurntableNode': r('replicate', null, 'Luma Ray 2 is hidden: it runs for saved projects only, and has no carded twin'),
 }
 
 // ── Generate video: the two models moved to fal first ──────────────────────

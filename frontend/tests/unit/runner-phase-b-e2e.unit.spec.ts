@@ -773,6 +773,8 @@ describe('B10 · one workflow per family, POST /api/runs to the last event', () 
       'lora',
       // Lens · 3D Reframe and Pose Mannequin (R3.15) make a picture on Replicate: runner-paid-nano-extras.unit.spec.ts.
       'nano-extras',
+      // Turntable (R3.16) makes a video on Replicate: runner-paid-turntable.unit.spec.ts.
+      'turntable',
     ]
     expect(FLOWS.map(f => f.family).sort()).toEqual(RUNNER_FAMILIES.filter(f => !local.includes(f)).sort())
   })

@@ -125,6 +125,14 @@ describe('graph price book coverage', () => {
     // PoseMannequin (R3.15, ruling (p)): the same call, 14; nothing when it makes none (here: no character wired).
     expect(priceGraph({ 1: { class_type: 'PoseMannequin', inputs: { character: ['0', 0], pose_source: 'image', pose_image: ['0', 0] } } }).credits).toBe(14)
     expect(priceGraph({ 1: { class_type: 'PoseMannequin', inputs: {} } }).credits).toBe(0)
+    // TurntableNode (R3.16, ruling (b)): by what it sends, on both paths (was a flat 75). Front only: Luma Ray 2
+    // 720p, 5 s × $0.18 = $0.90 → 135. With views: one Seedance 2.0 720p arc per segment, 5 s × $0.3034 → 228 each.
+    const front = { image: ['0', 0], direction: 'left', instructions: '' }
+    expect(priceGraph({ 1: { class_type: 'TurntableNode', inputs: front } }).credits).toBe(135)
+    expect(priceGraph({ 1: { class_type: 'TurntableNode', inputs: front } }, { families: new Set(['cards', 'turntable']) }).credits).toBe(135)
+    expect(priceGraph({ 1: { class_type: 'TurntableNode', inputs: { ...front, back_reference: ['0', 0] } } }).credits).toBe(456)
+    expect(priceGraph({ 1: { class_type: 'TurntableNode', inputs: { ...front, right_reference: ['0', 0], left_reference: ['0', 0] } } }).credits).toBe(684)
+    expect(priceGraph({ 1: { class_type: 'TurntableNode', inputs: { ...front, right_reference: ['0', 0], back_reference: ['0', 0], left_reference: ['0', 0] } } }).credits).toBe(912)
     expect(priceGraph({ 1: { class_type: 'IdeogramV3TurboRemoteNode', inputs: {} } }).credits).toBe(6)
   })
 

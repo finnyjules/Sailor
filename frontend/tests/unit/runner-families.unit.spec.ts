@@ -58,6 +58,8 @@ describe('parseFamilies', () => {
       'lora',
       // Step 3, R3.15: Lens · 3D Reframe and Pose Mannequin (needs `cards`).
       'nano-extras',
+      // Step 3, R3.16: Turntable, front view only (needs `cards`).
+      'turntable',
     ].sort())
   })
 })

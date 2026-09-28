@@ -111,6 +111,12 @@ Groups:
              EXIF orientation 6, missing files, the conditioning render Python
              raises on), for frontend/server/runner/generators/nanoExtras.ts
              (tests/unit/runner-paid-nano-extras.unit.spec.ts)
+  turntable  (R3.16) Turntable, front view only (Luma Ray 2 720p, both
+             directions, blank, spaced, non-ASCII and missing instructions,
+             each answer shape) and _turntable_plan.py's plan_segments for
+             every subset of views and both directions (for R3.17), for
+             frontend/server/runner/generators/turntable.ts
+             (tests/unit/runner-paid-turntable.unit.spec.ts)
   handoff   (R3.H) the PNG `_image_tensor_to_data_url` sends for a loader's
              tensor: every file kind (EXIF 2–8, RGBA, grey + alpha, palette and
              colour-key transparency, CMYK, 16-bit, WebP, GIF…) through the real
@@ -2571,6 +2577,72 @@ def nano_extras_group() -> dict:
         shutil.rmtree(tmp, ignore_errors=True)
 
 
+# ── turntable (R3.16): Turntable, front view only ────────────────────────────
+
+TURNTABLE_VIDEO = "https://r.test/turntable/spin.mp4"
+TURNTABLE_VIDEO_2 = "https://r.test/turntable/second.mp4"
+TURNTABLE_TEXTS = {
+    "blank": "",
+    "spaces": "   \t ",
+    "padded": "  slow and steady \n",
+    "non-ASCII": "Café 日本 \U0001f98a — naïve",
+    "unicode blanks": "\u3000 matte finish \x1c\x85",
+    "braces": "{direction} stays {0}",
+}
+
+
+def turntable_group() -> dict:
+    """R3.16: Turntable (TurntableNode), front view only: Luma Ray 2 720p on
+    Replicate through the video table, for
+    frontend/server/runner/generators/turntable.ts
+    (tests/unit/runner-paid-turntable.unit.spec.ts):
+      catalogue — _turntable_prompts.py's two instructions (both directions,
+                  every instruction text, None, the arcs' degrees) and
+                  _turntable_plan.py's plan_segments for every subset of the
+                  three extra views and both directions (for R3.17)
+      cases     — paid_case of the front-only path: both directions × every
+                  instruction text, the instructions missing and None; each
+                  answer shape (a string, a list of two: the first is kept)."""
+    import io
+    import runner_builder_fixtures as rbf
+    from itertools import combinations
+    from comfy_extras import _turntable_plan as tplan
+    from comfy_extras import _turntable_prompts as tp
+    _nr, _fal, _extras = rbf._node_modules()
+    from comfy_extras.nodes_turntable import TurntableNode
+
+    video = _b64(b"\x00\x00\x00\x18ftypmp42turntable-fixture")
+    files = {TURNTABLE_VIDEO: video, TURNTABLE_VIDEO_2: video}
+    cases: list = []
+
+    def add(name, widgets, answer=None):
+        with contextlib.redirect_stdout(io.StringIO()):
+            case = paid_case(name, TurntableNode, widgets, [answer or {"output": TURNTABLE_VIDEO}], pictures=["image"], files=files)
+        cases.append(case)
+
+    for direction in ("left", "right"):
+        for key, text in TURNTABLE_TEXTS.items():
+            add(f"{direction} · instructions {key}", {"direction": direction, "instructions": text})
+        add(f"{direction} · instructions missing", {"direction": direction})
+        add(f"{direction} · instructions None", {"direction": direction, "instructions": None})
+    add("answer list · the first is kept", {"direction": "left", "instructions": ""}, {"output": [TURNTABLE_VIDEO, TURNTABLE_VIDEO_2]})
+    add("answer list of one", {"direction": "right", "instructions": "gloss"}, {"output": [TURNTABLE_VIDEO]})
+
+    texts = [*TURNTABLE_TEXTS.values(), None]
+    subsets = [list(c) for n in range(4) for c in combinations(["right", "back", "left"], n)]
+    catalogue = {
+        "spin": tp._SPIN,
+        "seg": tp._SEG,
+        "simple_spin_instruction": [{"direction": d, "instructions": t, "out": tp.simple_spin_instruction(d, t)}
+                                    for d in ("left", "right") for t in texts],
+        "segment_instruction": [{"degrees": g, "direction": d, "instructions": t, "out": tp.segment_instruction(g, d, t)}
+                                for g in (90, 180, 270, 360) for d in ("left", "right") for t in texts],
+        "plan_segments": [{"extra": sub, "direction": d, "out": [list(s) for s in tplan.plan_segments(sub, d)]}
+                          for sub in subsets for d in ("left", "right")],
+    }
+    return {"cases": cases, "catalogue": catalogue}
+
+
 GROUPS = {
     "handoff": handoff_group,
     "machinery": machinery_group,
@@ -2586,6 +2658,7 @@ GROUPS = {
     "lora": lora_group,
     "restyle-lora": restyle_lora_group,
     "nano-extras": nano_extras_group,
+    "turntable": turntable_group,
 }
 
 

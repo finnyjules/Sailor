@@ -106,6 +106,8 @@ const EDIT_BASE: Record<string, Record<string, unknown>> = {
   // Lens · 3D Reframe and Pose Mannequin (R3.15): the picture; Pose re-posed from a pose picture.
   LensReframe: { image: LINK, source_lens: 'Normal 50mm Planar', target_lens: 'Portrait 85mm GM', reframe_strength: 1, custom_focal: 50 },
   PoseMannequin: { character: LINK, pose_image: LINK, pose_source: 'image', prompt: '' },
+  // Turntable (R3.16): the front picture alone (its front-only spin).
+  TurntableNode: { image: LINK, direction: 'left', instructions: '' },
   FluxLoRARemoteNode: { prompt: 'a portrait', lora_name: '[None]', lora_url: 'https://huggingface.co/alice/lora', lora_scale: 1, aspect_ratio: '1:1', megapixels: '1', num_inference_steps: 28, guidance: 3.5, seed: 0, prompt_strength: 0.8 },
   FluxMultiLoRARemoteNode: {
     prompt: 'a portrait', lora_a: '[None]', lora_a_url: 'https://huggingface.co/alice/one', scale_a: 0.9, lora_b: '[None]', lora_b_url: 'https://civitai.com/api/download/models/1', scale_b: 0.8,

@@ -177,6 +177,8 @@ export const PAID_TEXT_INPUTS: Readonly<Record<string, readonly string[]>> = {
   // R3.15, Pose Mannequin: the extra direction and the pose prompt, inside Sailor's pose instruction
   // (Lens · 3D Reframe sends only Sailor's own text).
   PoseMannequin: ['prompt', 'pose_prompt'],
+  // R3.16, Turntable: the extra direction, inside Sailor's spin instruction.
+  TurntableNode: ['instructions'],
 }
 
 /** The non-blank values of RUNNER_EXTRA_TEXT_INPUTS (a typed-in taste, a paid class's PAID_TEXT_INPUTS) across the prompt, each on its own. */

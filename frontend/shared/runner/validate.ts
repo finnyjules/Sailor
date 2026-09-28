@@ -71,6 +71,8 @@ export const RUNNER_OUTPUT_CLASSES: ReadonlySet<string> = new Set([
   'RestyleWithLoRANode',
   // R3.15: Lens · 3D Reframe and Pose Mannequin are output nodes (is_output_node=True).
   'LensReframe', 'PoseMannequin',
+  // R3.16: Turntable is one too (is_output_node=True).
+  'TurntableNode',
 ])
 
 /** ComfyUI's node_errors entry for a node that failed validation. */

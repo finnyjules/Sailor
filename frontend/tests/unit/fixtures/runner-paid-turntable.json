@@ -1,0 +1,1675 @@
+{
+ "cases": [
+  {
+   "answers": [
+    {
+     "output": "https://r.test/turntable/spin.mp4"
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "luma/ray-2-720p",
+     "payload": {
+      "aspect_ratio": "1:1",
+      "duration": 5,
+      "loop": true,
+      "prompt": "The product makes a smooth, continuous full 360\u00b0 turntable spin to the left; camera fixed; consistent lighting and background; seamless loop.",
+      "start_image_url": "IMG:image"
+     },
+     "payload_json": "{\"aspect_ratio\": \"1:1\", \"duration\": 5, \"loop\": true, \"prompt\": \"The product makes a smooth, continuous full 360\\u00b0 turntable spin to the left; camera fixed; consistent lighting and background; seamless loop.\", \"start_image_url\": \"IMG:image\"}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "TurntableNode",
+   "files": {
+    "https://r.test/turntable/second.mp4": "AAAAGGZ0eXBtcDQydHVybnRhYmxlLWZpeHR1cmU=",
+    "https://r.test/turntable/spin.mp4": "AAAAGGZ0eXBtcDQydHVybnRhYmxlLWZpeHR1cmU="
+   },
+   "gets": [
+    {
+     "status": 200,
+     "url": "https://r.test/turntable/spin.mp4"
+    }
+   ],
+   "name": "left \u00b7 instructions blank",
+   "output": [
+    {
+     "video": "https://r.test/turntable/spin.mp4"
+    }
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "direction": "left",
+    "instructions": ""
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": "https://r.test/turntable/spin.mp4"
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "luma/ray-2-720p",
+     "payload": {
+      "aspect_ratio": "1:1",
+      "duration": 5,
+      "loop": true,
+      "prompt": "The product makes a smooth, continuous full 360\u00b0 turntable spin to the left; camera fixed; consistent lighting and background; seamless loop.",
+      "start_image_url": "IMG:image"
+     },
+     "payload_json": "{\"aspect_ratio\": \"1:1\", \"duration\": 5, \"loop\": true, \"prompt\": \"The product makes a smooth, continuous full 360\\u00b0 turntable spin to the left; camera fixed; consistent lighting and background; seamless loop.\", \"start_image_url\": \"IMG:image\"}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "TurntableNode",
+   "files": {
+    "https://r.test/turntable/second.mp4": "AAAAGGZ0eXBtcDQydHVybnRhYmxlLWZpeHR1cmU=",
+    "https://r.test/turntable/spin.mp4": "AAAAGGZ0eXBtcDQydHVybnRhYmxlLWZpeHR1cmU="
+   },
+   "gets": [
+    {
+     "status": 200,
+     "url": "https://r.test/turntable/spin.mp4"
+    }
+   ],
+   "name": "left \u00b7 instructions spaces",
+   "output": [
+    {
+     "video": "https://r.test/turntable/spin.mp4"
+    }
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "direction": "left",
+    "instructions": "   \t "
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": "https://r.test/turntable/spin.mp4"
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "luma/ray-2-720p",
+     "payload": {
+      "aspect_ratio": "1:1",
+      "duration": 5,
+      "loop": true,
+      "prompt": "The product makes a smooth, continuous full 360\u00b0 turntable spin to the left; camera fixed; consistent lighting and background; seamless loop. Additional direction: slow and steady.",
+      "start_image_url": "IMG:image"
+     },
+     "payload_json": "{\"aspect_ratio\": \"1:1\", \"duration\": 5, \"loop\": true, \"prompt\": \"The product makes a smooth, continuous full 360\\u00b0 turntable spin to the left; camera fixed; consistent lighting and background; seamless loop. Additional direction: slow and steady.\", \"start_image_url\": \"IMG:image\"}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "TurntableNode",
+   "files": {
+    "https://r.test/turntable/second.mp4": "AAAAGGZ0eXBtcDQydHVybnRhYmxlLWZpeHR1cmU=",
+    "https://r.test/turntable/spin.mp4": "AAAAGGZ0eXBtcDQydHVybnRhYmxlLWZpeHR1cmU="
+   },
+   "gets": [
+    {
+     "status": 200,
+     "url": "https://r.test/turntable/spin.mp4"
+    }
+   ],
+   "name": "left \u00b7 instructions padded",
+   "output": [
+    {
+     "video": "https://r.test/turntable/spin.mp4"
+    }
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "direction": "left",
+    "instructions": "  slow and steady \n"
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": "https://r.test/turntable/spin.mp4"
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "luma/ray-2-720p",
+     "payload": {
+      "aspect_ratio": "1:1",
+      "duration": 5,
+      "loop": true,
+      "prompt": "The product makes a smooth, continuous full 360\u00b0 turntable spin to the left; camera fixed; consistent lighting and background; seamless loop. Additional direction: Caf\u00e9 \u65e5\u672c \ud83e\udd8a \u2014 na\u00efve.",
+      "start_image_url": "IMG:image"
+     },
+     "payload_json": "{\"aspect_ratio\": \"1:1\", \"duration\": 5, \"loop\": true, \"prompt\": \"The product makes a smooth, continuous full 360\\u00b0 turntable spin to the left; camera fixed; consistent lighting and background; seamless loop. Additional direction: Caf\\u00e9 \\u65e5\\u672c \\ud83e\\udd8a \\u2014 na\\u00efve.\", \"start_image_url\": \"IMG:image\"}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "TurntableNode",
+   "files": {
+    "https://r.test/turntable/second.mp4": "AAAAGGZ0eXBtcDQydHVybnRhYmxlLWZpeHR1cmU=",
+    "https://r.test/turntable/spin.mp4": "AAAAGGZ0eXBtcDQydHVybnRhYmxlLWZpeHR1cmU="
+   },
+   "gets": [
+    {
+     "status": 200,
+     "url": "https://r.test/turntable/spin.mp4"
+    }
+   ],
+   "name": "left \u00b7 instructions non-ASCII",
+   "output": [
+    {
+     "video": "https://r.test/turntable/spin.mp4"
+    }
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "direction": "left",
+    "instructions": "Caf\u00e9 \u65e5\u672c \ud83e\udd8a \u2014 na\u00efve"
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": "https://r.test/turntable/spin.mp4"
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "luma/ray-2-720p",
+     "payload": {
+      "aspect_ratio": "1:1",
+      "duration": 5,
+      "loop": true,
+      "prompt": "The product makes a smooth, continuous full 360\u00b0 turntable spin to the left; camera fixed; consistent lighting and background; seamless loop. Additional direction: matte finish.",
+      "start_image_url": "IMG:image"
+     },
+     "payload_json": "{\"aspect_ratio\": \"1:1\", \"duration\": 5, \"loop\": true, \"prompt\": \"The product makes a smooth, continuous full 360\\u00b0 turntable spin to the left; camera fixed; consistent lighting and background; seamless loop. Additional direction: matte finish.\", \"start_image_url\": \"IMG:image\"}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "TurntableNode",
+   "files": {
+    "https://r.test/turntable/second.mp4": "AAAAGGZ0eXBtcDQydHVybnRhYmxlLWZpeHR1cmU=",
+    "https://r.test/turntable/spin.mp4": "AAAAGGZ0eXBtcDQydHVybnRhYmxlLWZpeHR1cmU="
+   },
+   "gets": [
+    {
+     "status": 200,
+     "url": "https://r.test/turntable/spin.mp4"
+    }
+   ],
+   "name": "left \u00b7 instructions unicode blanks",
+   "output": [
+    {
+     "video": "https://r.test/turntable/spin.mp4"
+    }
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "direction": "left",
+    "instructions": "\u3000 matte finish \u001c\u0085"
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": "https://r.test/turntable/spin.mp4"
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "luma/ray-2-720p",
+     "payload": {
+      "aspect_ratio": "1:1",
+      "duration": 5,
+      "loop": true,
+      "prompt": "The product makes a smooth, continuous full 360\u00b0 turntable spin to the left; camera fixed; consistent lighting and background; seamless loop. Additional direction: {direction} stays {0}.",
+      "start_image_url": "IMG:image"
+     },
+     "payload_json": "{\"aspect_ratio\": \"1:1\", \"duration\": 5, \"loop\": true, \"prompt\": \"The product makes a smooth, continuous full 360\\u00b0 turntable spin to the left; camera fixed; consistent lighting and background; seamless loop. Additional direction: {direction} stays {0}.\", \"start_image_url\": \"IMG:image\"}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "TurntableNode",
+   "files": {
+    "https://r.test/turntable/second.mp4": "AAAAGGZ0eXBtcDQydHVybnRhYmxlLWZpeHR1cmU=",
+    "https://r.test/turntable/spin.mp4": "AAAAGGZ0eXBtcDQydHVybnRhYmxlLWZpeHR1cmU="
+   },
+   "gets": [
+    {
+     "status": 200,
+     "url": "https://r.test/turntable/spin.mp4"
+    }
+   ],
+   "name": "left \u00b7 instructions braces",
+   "output": [
+    {
+     "video": "https://r.test/turntable/spin.mp4"
+    }
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "direction": "left",
+    "instructions": "{direction} stays {0}"
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": "https://r.test/turntable/spin.mp4"
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "luma/ray-2-720p",
+     "payload": {
+      "aspect_ratio": "1:1",
+      "duration": 5,
+      "loop": true,
+      "prompt": "The product makes a smooth, continuous full 360\u00b0 turntable spin to the left; camera fixed; consistent lighting and background; seamless loop.",
+      "start_image_url": "IMG:image"
+     },
+     "payload_json": "{\"aspect_ratio\": \"1:1\", \"duration\": 5, \"loop\": true, \"prompt\": \"The product makes a smooth, continuous full 360\\u00b0 turntable spin to the left; camera fixed; consistent lighting and background; seamless loop.\", \"start_image_url\": \"IMG:image\"}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "TurntableNode",
+   "files": {
+    "https://r.test/turntable/second.mp4": "AAAAGGZ0eXBtcDQydHVybnRhYmxlLWZpeHR1cmU=",
+    "https://r.test/turntable/spin.mp4": "AAAAGGZ0eXBtcDQydHVybnRhYmxlLWZpeHR1cmU="
+   },
+   "gets": [
+    {
+     "status": 200,
+     "url": "https://r.test/turntable/spin.mp4"
+    }
+   ],
+   "name": "left \u00b7 instructions missing",
+   "output": [
+    {
+     "video": "https://r.test/turntable/spin.mp4"
+    }
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "direction": "left"
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": "https://r.test/turntable/spin.mp4"
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "luma/ray-2-720p",
+     "payload": {
+      "aspect_ratio": "1:1",
+      "duration": 5,
+      "loop": true,
+      "prompt": "The product makes a smooth, continuous full 360\u00b0 turntable spin to the left; camera fixed; consistent lighting and background; seamless loop.",
+      "start_image_url": "IMG:image"
+     },
+     "payload_json": "{\"aspect_ratio\": \"1:1\", \"duration\": 5, \"loop\": true, \"prompt\": \"The product makes a smooth, continuous full 360\\u00b0 turntable spin to the left; camera fixed; consistent lighting and background; seamless loop.\", \"start_image_url\": \"IMG:image\"}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "TurntableNode",
+   "files": {
+    "https://r.test/turntable/second.mp4": "AAAAGGZ0eXBtcDQydHVybnRhYmxlLWZpeHR1cmU=",
+    "https://r.test/turntable/spin.mp4": "AAAAGGZ0eXBtcDQydHVybnRhYmxlLWZpeHR1cmU="
+   },
+   "gets": [
+    {
+     "status": 200,
+     "url": "https://r.test/turntable/spin.mp4"
+    }
+   ],
+   "name": "left \u00b7 instructions None",
+   "output": [
+    {
+     "video": "https://r.test/turntable/spin.mp4"
+    }
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "direction": "left",
+    "instructions": null
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": "https://r.test/turntable/spin.mp4"
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "luma/ray-2-720p",
+     "payload": {
+      "aspect_ratio": "1:1",
+      "duration": 5,
+      "loop": true,
+      "prompt": "The product makes a smooth, continuous full 360\u00b0 turntable spin to the right; camera fixed; consistent lighting and background; seamless loop.",
+      "start_image_url": "IMG:image"
+     },
+     "payload_json": "{\"aspect_ratio\": \"1:1\", \"duration\": 5, \"loop\": true, \"prompt\": \"The product makes a smooth, continuous full 360\\u00b0 turntable spin to the right; camera fixed; consistent lighting and background; seamless loop.\", \"start_image_url\": \"IMG:image\"}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "TurntableNode",
+   "files": {
+    "https://r.test/turntable/second.mp4": "AAAAGGZ0eXBtcDQydHVybnRhYmxlLWZpeHR1cmU=",
+    "https://r.test/turntable/spin.mp4": "AAAAGGZ0eXBtcDQydHVybnRhYmxlLWZpeHR1cmU="
+   },
+   "gets": [
+    {
+     "status": 200,
+     "url": "https://r.test/turntable/spin.mp4"
+    }
+   ],
+   "name": "right \u00b7 instructions blank",
+   "output": [
+    {
+     "video": "https://r.test/turntable/spin.mp4"
+    }
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "direction": "right",
+    "instructions": ""
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": "https://r.test/turntable/spin.mp4"
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "luma/ray-2-720p",
+     "payload": {
+      "aspect_ratio": "1:1",
+      "duration": 5,
+      "loop": true,
+      "prompt": "The product makes a smooth, continuous full 360\u00b0 turntable spin to the right; camera fixed; consistent lighting and background; seamless loop.",
+      "start_image_url": "IMG:image"
+     },
+     "payload_json": "{\"aspect_ratio\": \"1:1\", \"duration\": 5, \"loop\": true, \"prompt\": \"The product makes a smooth, continuous full 360\\u00b0 turntable spin to the right; camera fixed; consistent lighting and background; seamless loop.\", \"start_image_url\": \"IMG:image\"}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "TurntableNode",
+   "files": {
+    "https://r.test/turntable/second.mp4": "AAAAGGZ0eXBtcDQydHVybnRhYmxlLWZpeHR1cmU=",
+    "https://r.test/turntable/spin.mp4": "AAAAGGZ0eXBtcDQydHVybnRhYmxlLWZpeHR1cmU="
+   },
+   "gets": [
+    {
+     "status": 200,
+     "url": "https://r.test/turntable/spin.mp4"
+    }
+   ],
+   "name": "right \u00b7 instructions spaces",
+   "output": [
+    {
+     "video": "https://r.test/turntable/spin.mp4"
+    }
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "direction": "right",
+    "instructions": "   \t "
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": "https://r.test/turntable/spin.mp4"
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "luma/ray-2-720p",
+     "payload": {
+      "aspect_ratio": "1:1",
+      "duration": 5,
+      "loop": true,
+      "prompt": "The product makes a smooth, continuous full 360\u00b0 turntable spin to the right; camera fixed; consistent lighting and background; seamless loop. Additional direction: slow and steady.",
+      "start_image_url": "IMG:image"
+     },
+     "payload_json": "{\"aspect_ratio\": \"1:1\", \"duration\": 5, \"loop\": true, \"prompt\": \"The product makes a smooth, continuous full 360\\u00b0 turntable spin to the right; camera fixed; consistent lighting and background; seamless loop. Additional direction: slow and steady.\", \"start_image_url\": \"IMG:image\"}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "TurntableNode",
+   "files": {
+    "https://r.test/turntable/second.mp4": "AAAAGGZ0eXBtcDQydHVybnRhYmxlLWZpeHR1cmU=",
+    "https://r.test/turntable/spin.mp4": "AAAAGGZ0eXBtcDQydHVybnRhYmxlLWZpeHR1cmU="
+   },
+   "gets": [
+    {
+     "status": 200,
+     "url": "https://r.test/turntable/spin.mp4"
+    }
+   ],
+   "name": "right \u00b7 instructions padded",
+   "output": [
+    {
+     "video": "https://r.test/turntable/spin.mp4"
+    }
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "direction": "right",
+    "instructions": "  slow and steady \n"
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": "https://r.test/turntable/spin.mp4"
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "luma/ray-2-720p",
+     "payload": {
+      "aspect_ratio": "1:1",
+      "duration": 5,
+      "loop": true,
+      "prompt": "The product makes a smooth, continuous full 360\u00b0 turntable spin to the right; camera fixed; consistent lighting and background; seamless loop. Additional direction: Caf\u00e9 \u65e5\u672c \ud83e\udd8a \u2014 na\u00efve.",
+      "start_image_url": "IMG:image"
+     },
+     "payload_json": "{\"aspect_ratio\": \"1:1\", \"duration\": 5, \"loop\": true, \"prompt\": \"The product makes a smooth, continuous full 360\\u00b0 turntable spin to the right; camera fixed; consistent lighting and background; seamless loop. Additional direction: Caf\\u00e9 \\u65e5\\u672c \\ud83e\\udd8a \\u2014 na\\u00efve.\", \"start_image_url\": \"IMG:image\"}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "TurntableNode",
+   "files": {
+    "https://r.test/turntable/second.mp4": "AAAAGGZ0eXBtcDQydHVybnRhYmxlLWZpeHR1cmU=",
+    "https://r.test/turntable/spin.mp4": "AAAAGGZ0eXBtcDQydHVybnRhYmxlLWZpeHR1cmU="
+   },
+   "gets": [
+    {
+     "status": 200,
+     "url": "https://r.test/turntable/spin.mp4"
+    }
+   ],
+   "name": "right \u00b7 instructions non-ASCII",
+   "output": [
+    {
+     "video": "https://r.test/turntable/spin.mp4"
+    }
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "direction": "right",
+    "instructions": "Caf\u00e9 \u65e5\u672c \ud83e\udd8a \u2014 na\u00efve"
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": "https://r.test/turntable/spin.mp4"
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "luma/ray-2-720p",
+     "payload": {
+      "aspect_ratio": "1:1",
+      "duration": 5,
+      "loop": true,
+      "prompt": "The product makes a smooth, continuous full 360\u00b0 turntable spin to the right; camera fixed; consistent lighting and background; seamless loop. Additional direction: matte finish.",
+      "start_image_url": "IMG:image"
+     },
+     "payload_json": "{\"aspect_ratio\": \"1:1\", \"duration\": 5, \"loop\": true, \"prompt\": \"The product makes a smooth, continuous full 360\\u00b0 turntable spin to the right; camera fixed; consistent lighting and background; seamless loop. Additional direction: matte finish.\", \"start_image_url\": \"IMG:image\"}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "TurntableNode",
+   "files": {
+    "https://r.test/turntable/second.mp4": "AAAAGGZ0eXBtcDQydHVybnRhYmxlLWZpeHR1cmU=",
+    "https://r.test/turntable/spin.mp4": "AAAAGGZ0eXBtcDQydHVybnRhYmxlLWZpeHR1cmU="
+   },
+   "gets": [
+    {
+     "status": 200,
+     "url": "https://r.test/turntable/spin.mp4"
+    }
+   ],
+   "name": "right \u00b7 instructions unicode blanks",
+   "output": [
+    {
+     "video": "https://r.test/turntable/spin.mp4"
+    }
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "direction": "right",
+    "instructions": "\u3000 matte finish \u001c\u0085"
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": "https://r.test/turntable/spin.mp4"
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "luma/ray-2-720p",
+     "payload": {
+      "aspect_ratio": "1:1",
+      "duration": 5,
+      "loop": true,
+      "prompt": "The product makes a smooth, continuous full 360\u00b0 turntable spin to the right; camera fixed; consistent lighting and background; seamless loop. Additional direction: {direction} stays {0}.",
+      "start_image_url": "IMG:image"
+     },
+     "payload_json": "{\"aspect_ratio\": \"1:1\", \"duration\": 5, \"loop\": true, \"prompt\": \"The product makes a smooth, continuous full 360\\u00b0 turntable spin to the right; camera fixed; consistent lighting and background; seamless loop. Additional direction: {direction} stays {0}.\", \"start_image_url\": \"IMG:image\"}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "TurntableNode",
+   "files": {
+    "https://r.test/turntable/second.mp4": "AAAAGGZ0eXBtcDQydHVybnRhYmxlLWZpeHR1cmU=",
+    "https://r.test/turntable/spin.mp4": "AAAAGGZ0eXBtcDQydHVybnRhYmxlLWZpeHR1cmU="
+   },
+   "gets": [
+    {
+     "status": 200,
+     "url": "https://r.test/turntable/spin.mp4"
+    }
+   ],
+   "name": "right \u00b7 instructions braces",
+   "output": [
+    {
+     "video": "https://r.test/turntable/spin.mp4"
+    }
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "direction": "right",
+    "instructions": "{direction} stays {0}"
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": "https://r.test/turntable/spin.mp4"
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "luma/ray-2-720p",
+     "payload": {
+      "aspect_ratio": "1:1",
+      "duration": 5,
+      "loop": true,
+      "prompt": "The product makes a smooth, continuous full 360\u00b0 turntable spin to the right; camera fixed; consistent lighting and background; seamless loop.",
+      "start_image_url": "IMG:image"
+     },
+     "payload_json": "{\"aspect_ratio\": \"1:1\", \"duration\": 5, \"loop\": true, \"prompt\": \"The product makes a smooth, continuous full 360\\u00b0 turntable spin to the right; camera fixed; consistent lighting and background; seamless loop.\", \"start_image_url\": \"IMG:image\"}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "TurntableNode",
+   "files": {
+    "https://r.test/turntable/second.mp4": "AAAAGGZ0eXBtcDQydHVybnRhYmxlLWZpeHR1cmU=",
+    "https://r.test/turntable/spin.mp4": "AAAAGGZ0eXBtcDQydHVybnRhYmxlLWZpeHR1cmU="
+   },
+   "gets": [
+    {
+     "status": 200,
+     "url": "https://r.test/turntable/spin.mp4"
+    }
+   ],
+   "name": "right \u00b7 instructions missing",
+   "output": [
+    {
+     "video": "https://r.test/turntable/spin.mp4"
+    }
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "direction": "right"
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": "https://r.test/turntable/spin.mp4"
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "luma/ray-2-720p",
+     "payload": {
+      "aspect_ratio": "1:1",
+      "duration": 5,
+      "loop": true,
+      "prompt": "The product makes a smooth, continuous full 360\u00b0 turntable spin to the right; camera fixed; consistent lighting and background; seamless loop.",
+      "start_image_url": "IMG:image"
+     },
+     "payload_json": "{\"aspect_ratio\": \"1:1\", \"duration\": 5, \"loop\": true, \"prompt\": \"The product makes a smooth, continuous full 360\\u00b0 turntable spin to the right; camera fixed; consistent lighting and background; seamless loop.\", \"start_image_url\": \"IMG:image\"}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "TurntableNode",
+   "files": {
+    "https://r.test/turntable/second.mp4": "AAAAGGZ0eXBtcDQydHVybnRhYmxlLWZpeHR1cmU=",
+    "https://r.test/turntable/spin.mp4": "AAAAGGZ0eXBtcDQydHVybnRhYmxlLWZpeHR1cmU="
+   },
+   "gets": [
+    {
+     "status": 200,
+     "url": "https://r.test/turntable/spin.mp4"
+    }
+   ],
+   "name": "right \u00b7 instructions None",
+   "output": [
+    {
+     "video": "https://r.test/turntable/spin.mp4"
+    }
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "direction": "right",
+    "instructions": null
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": [
+      "https://r.test/turntable/spin.mp4",
+      "https://r.test/turntable/second.mp4"
+     ]
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "luma/ray-2-720p",
+     "payload": {
+      "aspect_ratio": "1:1",
+      "duration": 5,
+      "loop": true,
+      "prompt": "The product makes a smooth, continuous full 360\u00b0 turntable spin to the left; camera fixed; consistent lighting and background; seamless loop.",
+      "start_image_url": "IMG:image"
+     },
+     "payload_json": "{\"aspect_ratio\": \"1:1\", \"duration\": 5, \"loop\": true, \"prompt\": \"The product makes a smooth, continuous full 360\\u00b0 turntable spin to the left; camera fixed; consistent lighting and background; seamless loop.\", \"start_image_url\": \"IMG:image\"}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "TurntableNode",
+   "files": {
+    "https://r.test/turntable/second.mp4": "AAAAGGZ0eXBtcDQydHVybnRhYmxlLWZpeHR1cmU=",
+    "https://r.test/turntable/spin.mp4": "AAAAGGZ0eXBtcDQydHVybnRhYmxlLWZpeHR1cmU="
+   },
+   "gets": [
+    {
+     "status": 200,
+     "url": "https://r.test/turntable/spin.mp4"
+    }
+   ],
+   "name": "answer list \u00b7 the first is kept",
+   "output": [
+    {
+     "video": "https://r.test/turntable/spin.mp4"
+    }
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "direction": "left",
+    "instructions": ""
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": [
+      "https://r.test/turntable/spin.mp4"
+     ]
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "luma/ray-2-720p",
+     "payload": {
+      "aspect_ratio": "1:1",
+      "duration": 5,
+      "loop": true,
+      "prompt": "The product makes a smooth, continuous full 360\u00b0 turntable spin to the right; camera fixed; consistent lighting and background; seamless loop. Additional direction: gloss.",
+      "start_image_url": "IMG:image"
+     },
+     "payload_json": "{\"aspect_ratio\": \"1:1\", \"duration\": 5, \"loop\": true, \"prompt\": \"The product makes a smooth, continuous full 360\\u00b0 turntable spin to the right; camera fixed; consistent lighting and background; seamless loop. Additional direction: gloss.\", \"start_image_url\": \"IMG:image\"}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "TurntableNode",
+   "files": {
+    "https://r.test/turntable/second.mp4": "AAAAGGZ0eXBtcDQydHVybnRhYmxlLWZpeHR1cmU=",
+    "https://r.test/turntable/spin.mp4": "AAAAGGZ0eXBtcDQydHVybnRhYmxlLWZpeHR1cmU="
+   },
+   "gets": [
+    {
+     "status": 200,
+     "url": "https://r.test/turntable/spin.mp4"
+    }
+   ],
+   "name": "answer list of one",
+   "output": [
+    {
+     "video": "https://r.test/turntable/spin.mp4"
+    }
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "direction": "right",
+    "instructions": "gloss"
+   }
+  }
+ ],
+ "catalogue": {
+  "plan_segments": [
+   {
+    "direction": "left",
+    "extra": [],
+    "out": [
+     [
+      "front",
+      "front",
+      360
+     ]
+    ]
+   },
+   {
+    "direction": "right",
+    "extra": [],
+    "out": [
+     [
+      "front",
+      "front",
+      360
+     ]
+    ]
+   },
+   {
+    "direction": "left",
+    "extra": [
+     "right"
+    ],
+    "out": [
+     [
+      "front",
+      "right",
+      90
+     ],
+     [
+      "right",
+      "front",
+      270
+     ]
+    ]
+   },
+   {
+    "direction": "right",
+    "extra": [
+     "right"
+    ],
+    "out": [
+     [
+      "front",
+      "right",
+      270
+     ],
+     [
+      "right",
+      "front",
+      90
+     ]
+    ]
+   },
+   {
+    "direction": "left",
+    "extra": [
+     "back"
+    ],
+    "out": [
+     [
+      "front",
+      "back",
+      180
+     ],
+     [
+      "back",
+      "front",
+      180
+     ]
+    ]
+   },
+   {
+    "direction": "right",
+    "extra": [
+     "back"
+    ],
+    "out": [
+     [
+      "front",
+      "back",
+      180
+     ],
+     [
+      "back",
+      "front",
+      180
+     ]
+    ]
+   },
+   {
+    "direction": "left",
+    "extra": [
+     "left"
+    ],
+    "out": [
+     [
+      "front",
+      "left",
+      270
+     ],
+     [
+      "left",
+      "front",
+      90
+     ]
+    ]
+   },
+   {
+    "direction": "right",
+    "extra": [
+     "left"
+    ],
+    "out": [
+     [
+      "front",
+      "left",
+      90
+     ],
+     [
+      "left",
+      "front",
+      270
+     ]
+    ]
+   },
+   {
+    "direction": "left",
+    "extra": [
+     "right",
+     "back"
+    ],
+    "out": [
+     [
+      "front",
+      "right",
+      90
+     ],
+     [
+      "right",
+      "back",
+      90
+     ],
+     [
+      "back",
+      "front",
+      180
+     ]
+    ]
+   },
+   {
+    "direction": "right",
+    "extra": [
+     "right",
+     "back"
+    ],
+    "out": [
+     [
+      "front",
+      "back",
+      180
+     ],
+     [
+      "back",
+      "right",
+      90
+     ],
+     [
+      "right",
+      "front",
+      90
+     ]
+    ]
+   },
+   {
+    "direction": "left",
+    "extra": [
+     "right",
+     "left"
+    ],
+    "out": [
+     [
+      "front",
+      "right",
+      90
+     ],
+     [
+      "right",
+      "left",
+      180
+     ],
+     [
+      "left",
+      "front",
+      90
+     ]
+    ]
+   },
+   {
+    "direction": "right",
+    "extra": [
+     "right",
+     "left"
+    ],
+    "out": [
+     [
+      "front",
+      "left",
+      90
+     ],
+     [
+      "left",
+      "right",
+      180
+     ],
+     [
+      "right",
+      "front",
+      90
+     ]
+    ]
+   },
+   {
+    "direction": "left",
+    "extra": [
+     "back",
+     "left"
+    ],
+    "out": [
+     [
+      "front",
+      "back",
+      180
+     ],
+     [
+      "back",
+      "left",
+      90
+     ],
+     [
+      "left",
+      "front",
+      90
+     ]
+    ]
+   },
+   {
+    "direction": "right",
+    "extra": [
+     "back",
+     "left"
+    ],
+    "out": [
+     [
+      "front",
+      "left",
+      90
+     ],
+     [
+      "left",
+      "back",
+      90
+     ],
+     [
+      "back",
+      "front",
+      180
+     ]
+    ]
+   },
+   {
+    "direction": "left",
+    "extra": [
+     "right",
+     "back",
+     "left"
+    ],
+    "out": [
+     [
+      "front",
+      "right",
+      90
+     ],
+     [
+      "right",
+      "back",
+      90
+     ],
+     [
+      "back",
+      "left",
+      90
+     ],
+     [
+      "left",
+      "front",
+      90
+     ]
+    ]
+   },
+   {
+    "direction": "right",
+    "extra": [
+     "right",
+     "back",
+     "left"
+    ],
+    "out": [
+     [
+      "front",
+      "left",
+      90
+     ],
+     [
+      "left",
+      "back",
+      90
+     ],
+     [
+      "back",
+      "right",
+      90
+     ],
+     [
+      "right",
+      "front",
+      90
+     ]
+    ]
+   }
+  ],
+  "seg": "Smooth turntable rotation {degrees}\u00b0 to the {direction}: the product turns cleanly with no morphing or warping; camera fixed; consistent lighting and background.",
+  "segment_instruction": [
+   {
+    "degrees": 90,
+    "direction": "left",
+    "instructions": "",
+    "out": "Smooth turntable rotation 90\u00b0 to the left: the product turns cleanly with no morphing or warping; camera fixed; consistent lighting and background."
+   },
+   {
+    "degrees": 90,
+    "direction": "left",
+    "instructions": "   \t ",
+    "out": "Smooth turntable rotation 90\u00b0 to the left: the product turns cleanly with no morphing or warping; camera fixed; consistent lighting and background."
+   },
+   {
+    "degrees": 90,
+    "direction": "left",
+    "instructions": "  slow and steady \n",
+    "out": "Smooth turntable rotation 90\u00b0 to the left: the product turns cleanly with no morphing or warping; camera fixed; consistent lighting and background. Additional direction: slow and steady."
+   },
+   {
+    "degrees": 90,
+    "direction": "left",
+    "instructions": "Caf\u00e9 \u65e5\u672c \ud83e\udd8a \u2014 na\u00efve",
+    "out": "Smooth turntable rotation 90\u00b0 to the left: the product turns cleanly with no morphing or warping; camera fixed; consistent lighting and background. Additional direction: Caf\u00e9 \u65e5\u672c \ud83e\udd8a \u2014 na\u00efve."
+   },
+   {
+    "degrees": 90,
+    "direction": "left",
+    "instructions": "\u3000 matte finish \u001c\u0085",
+    "out": "Smooth turntable rotation 90\u00b0 to the left: the product turns cleanly with no morphing or warping; camera fixed; consistent lighting and background. Additional direction: matte finish."
+   },
+   {
+    "degrees": 90,
+    "direction": "left",
+    "instructions": "{direction} stays {0}",
+    "out": "Smooth turntable rotation 90\u00b0 to the left: the product turns cleanly with no morphing or warping; camera fixed; consistent lighting and background. Additional direction: {direction} stays {0}."
+   },
+   {
+    "degrees": 90,
+    "direction": "left",
+    "instructions": null,
+    "out": "Smooth turntable rotation 90\u00b0 to the left: the product turns cleanly with no morphing or warping; camera fixed; consistent lighting and background."
+   },
+   {
+    "degrees": 90,
+    "direction": "right",
+    "instructions": "",
+    "out": "Smooth turntable rotation 90\u00b0 to the right: the product turns cleanly with no morphing or warping; camera fixed; consistent lighting and background."
+   },
+   {
+    "degrees": 90,
+    "direction": "right",
+    "instructions": "   \t ",
+    "out": "Smooth turntable rotation 90\u00b0 to the right: the product turns cleanly with no morphing or warping; camera fixed; consistent lighting and background."
+   },
+   {
+    "degrees": 90,
+    "direction": "right",
+    "instructions": "  slow and steady \n",
+    "out": "Smooth turntable rotation 90\u00b0 to the right: the product turns cleanly with no morphing or warping; camera fixed; consistent lighting and background. Additional direction: slow and steady."
+   },
+   {
+    "degrees": 90,
+    "direction": "right",
+    "instructions": "Caf\u00e9 \u65e5\u672c \ud83e\udd8a \u2014 na\u00efve",
+    "out": "Smooth turntable rotation 90\u00b0 to the right: the product turns cleanly with no morphing or warping; camera fixed; consistent lighting and background. Additional direction: Caf\u00e9 \u65e5\u672c \ud83e\udd8a \u2014 na\u00efve."
+   },
+   {
+    "degrees": 90,
+    "direction": "right",
+    "instructions": "\u3000 matte finish \u001c\u0085",
+    "out": "Smooth turntable rotation 90\u00b0 to the right: the product turns cleanly with no morphing or warping; camera fixed; consistent lighting and background. Additional direction: matte finish."
+   },
+   {
+    "degrees": 90,
+    "direction": "right",
+    "instructions": "{direction} stays {0}",
+    "out": "Smooth turntable rotation 90\u00b0 to the right: the product turns cleanly with no morphing or warping; camera fixed; consistent lighting and background. Additional direction: {direction} stays {0}."
+   },
+   {
+    "degrees": 90,
+    "direction": "right",
+    "instructions": null,
+    "out": "Smooth turntable rotation 90\u00b0 to the right: the product turns cleanly with no morphing or warping; camera fixed; consistent lighting and background."
+   },
+   {
+    "degrees": 180,
+    "direction": "left",
+    "instructions": "",
+    "out": "Smooth turntable rotation 180\u00b0 to the left: the product turns cleanly with no morphing or warping; camera fixed; consistent lighting and background."
+   },
+   {
+    "degrees": 180,
+    "direction": "left",
+    "instructions": "   \t ",
+    "out": "Smooth turntable rotation 180\u00b0 to the left: the product turns cleanly with no morphing or warping; camera fixed; consistent lighting and background."
+   },
+   {
+    "degrees": 180,
+    "direction": "left",
+    "instructions": "  slow and steady \n",
+    "out": "Smooth turntable rotation 180\u00b0 to the left: the product turns cleanly with no morphing or warping; camera fixed; consistent lighting and background. Additional direction: slow and steady."
+   },
+   {
+    "degrees": 180,
+    "direction": "left",
+    "instructions": "Caf\u00e9 \u65e5\u672c \ud83e\udd8a \u2014 na\u00efve",
+    "out": "Smooth turntable rotation 180\u00b0 to the left: the product turns cleanly with no morphing or warping; camera fixed; consistent lighting and background. Additional direction: Caf\u00e9 \u65e5\u672c \ud83e\udd8a \u2014 na\u00efve."
+   },
+   {
+    "degrees": 180,
+    "direction": "left",
+    "instructions": "\u3000 matte finish \u001c\u0085",
+    "out": "Smooth turntable rotation 180\u00b0 to the left: the product turns cleanly with no morphing or warping; camera fixed; consistent lighting and background. Additional direction: matte finish."
+   },
+   {
+    "degrees": 180,
+    "direction": "left",
+    "instructions": "{direction} stays {0}",
+    "out": "Smooth turntable rotation 180\u00b0 to the left: the product turns cleanly with no morphing or warping; camera fixed; consistent lighting and background. Additional direction: {direction} stays {0}."
+   },
+   {
+    "degrees": 180,
+    "direction": "left",
+    "instructions": null,
+    "out": "Smooth turntable rotation 180\u00b0 to the left: the product turns cleanly with no morphing or warping; camera fixed; consistent lighting and background."
+   },
+   {
+    "degrees": 180,
+    "direction": "right",
+    "instructions": "",
+    "out": "Smooth turntable rotation 180\u00b0 to the right: the product turns cleanly with no morphing or warping; camera fixed; consistent lighting and background."
+   },
+   {
+    "degrees": 180,
+    "direction": "right",
+    "instructions": "   \t ",
+    "out": "Smooth turntable rotation 180\u00b0 to the right: the product turns cleanly with no morphing or warping; camera fixed; consistent lighting and background."
+   },
+   {
+    "degrees": 180,
+    "direction": "right",
+    "instructions": "  slow and steady \n",
+    "out": "Smooth turntable rotation 180\u00b0 to the right: the product turns cleanly with no morphing or warping; camera fixed; consistent lighting and background. Additional direction: slow and steady."
+   },
+   {
+    "degrees": 180,
+    "direction": "right",
+    "instructions": "Caf\u00e9 \u65e5\u672c \ud83e\udd8a \u2014 na\u00efve",
+    "out": "Smooth turntable rotation 180\u00b0 to the right: the product turns cleanly with no morphing or warping; camera fixed; consistent lighting and background. Additional direction: Caf\u00e9 \u65e5\u672c \ud83e\udd8a \u2014 na\u00efve."
+   },
+   {
+    "degrees": 180,
+    "direction": "right",
+    "instructions": "\u3000 matte finish \u001c\u0085",
+    "out": "Smooth turntable rotation 180\u00b0 to the right: the product turns cleanly with no morphing or warping; camera fixed; consistent lighting and background. Additional direction: matte finish."
+   },
+   {
+    "degrees": 180,
+    "direction": "right",
+    "instructions": "{direction} stays {0}",
+    "out": "Smooth turntable rotation 180\u00b0 to the right: the product turns cleanly with no morphing or warping; camera fixed; consistent lighting and background. Additional direction: {direction} stays {0}."
+   },
+   {
+    "degrees": 180,
+    "direction": "right",
+    "instructions": null,
+    "out": "Smooth turntable rotation 180\u00b0 to the right: the product turns cleanly with no morphing or warping; camera fixed; consistent lighting and background."
+   },
+   {
+    "degrees": 270,
+    "direction": "left",
+    "instructions": "",
+    "out": "Smooth turntable rotation 270\u00b0 to the left: the product turns cleanly with no morphing or warping; camera fixed; consistent lighting and background."
+   },
+   {
+    "degrees": 270,
+    "direction": "left",
+    "instructions": "   \t ",
+    "out": "Smooth turntable rotation 270\u00b0 to the left: the product turns cleanly with no morphing or warping; camera fixed; consistent lighting and background."
+   },
+   {
+    "degrees": 270,
+    "direction": "left",
+    "instructions": "  slow and steady \n",
+    "out": "Smooth turntable rotation 270\u00b0 to the left: the product turns cleanly with no morphing or warping; camera fixed; consistent lighting and background. Additional direction: slow and steady."
+   },
+   {
+    "degrees": 270,
+    "direction": "left",
+    "instructions": "Caf\u00e9 \u65e5\u672c \ud83e\udd8a \u2014 na\u00efve",
+    "out": "Smooth turntable rotation 270\u00b0 to the left: the product turns cleanly with no morphing or warping; camera fixed; consistent lighting and background. Additional direction: Caf\u00e9 \u65e5\u672c \ud83e\udd8a \u2014 na\u00efve."
+   },
+   {
+    "degrees": 270,
+    "direction": "left",
+    "instructions": "\u3000 matte finish \u001c\u0085",
+    "out": "Smooth turntable rotation 270\u00b0 to the left: the product turns cleanly with no morphing or warping; camera fixed; consistent lighting and background. Additional direction: matte finish."
+   },
+   {
+    "degrees": 270,
+    "direction": "left",
+    "instructions": "{direction} stays {0}",
+    "out": "Smooth turntable rotation 270\u00b0 to the left: the product turns cleanly with no morphing or warping; camera fixed; consistent lighting and background. Additional direction: {direction} stays {0}."
+   },
+   {
+    "degrees": 270,
+    "direction": "left",
+    "instructions": null,
+    "out": "Smooth turntable rotation 270\u00b0 to the left: the product turns cleanly with no morphing or warping; camera fixed; consistent lighting and background."
+   },
+   {
+    "degrees": 270,
+    "direction": "right",
+    "instructions": "",
+    "out": "Smooth turntable rotation 270\u00b0 to the right: the product turns cleanly with no morphing or warping; camera fixed; consistent lighting and background."
+   },
+   {
+    "degrees": 270,
+    "direction": "right",
+    "instructions": "   \t ",
+    "out": "Smooth turntable rotation 270\u00b0 to the right: the product turns cleanly with no morphing or warping; camera fixed; consistent lighting and background."
+   },
+   {
+    "degrees": 270,
+    "direction": "right",
+    "instructions": "  slow and steady \n",
+    "out": "Smooth turntable rotation 270\u00b0 to the right: the product turns cleanly with no morphing or warping; camera fixed; consistent lighting and background. Additional direction: slow and steady."
+   },
+   {
+    "degrees": 270,
+    "direction": "right",
+    "instructions": "Caf\u00e9 \u65e5\u672c \ud83e\udd8a \u2014 na\u00efve",
+    "out": "Smooth turntable rotation 270\u00b0 to the right: the product turns cleanly with no morphing or warping; camera fixed; consistent lighting and background. Additional direction: Caf\u00e9 \u65e5\u672c \ud83e\udd8a \u2014 na\u00efve."
+   },
+   {
+    "degrees": 270,
+    "direction": "right",
+    "instructions": "\u3000 matte finish \u001c\u0085",
+    "out": "Smooth turntable rotation 270\u00b0 to the right: the product turns cleanly with no morphing or warping; camera fixed; consistent lighting and background. Additional direction: matte finish."
+   },
+   {
+    "degrees": 270,
+    "direction": "right",
+    "instructions": "{direction} stays {0}",
+    "out": "Smooth turntable rotation 270\u00b0 to the right: the product turns cleanly with no morphing or warping; camera fixed; consistent lighting and background. Additional direction: {direction} stays {0}."
+   },
+   {
+    "degrees": 270,
+    "direction": "right",
+    "instructions": null,
+    "out": "Smooth turntable rotation 270\u00b0 to the right: the product turns cleanly with no morphing or warping; camera fixed; consistent lighting and background."
+   },
+   {
+    "degrees": 360,
+    "direction": "left",
+    "instructions": "",
+    "out": "Smooth turntable rotation 360\u00b0 to the left: the product turns cleanly with no morphing or warping; camera fixed; consistent lighting and background."
+   },
+   {
+    "degrees": 360,
+    "direction": "left",
+    "instructions": "   \t ",
+    "out": "Smooth turntable rotation 360\u00b0 to the left: the product turns cleanly with no morphing or warping; camera fixed; consistent lighting and background."
+   },
+   {
+    "degrees": 360,
+    "direction": "left",
+    "instructions": "  slow and steady \n",
+    "out": "Smooth turntable rotation 360\u00b0 to the left: the product turns cleanly with no morphing or warping; camera fixed; consistent lighting and background. Additional direction: slow and steady."
+   },
+   {
+    "degrees": 360,
+    "direction": "left",
+    "instructions": "Caf\u00e9 \u65e5\u672c \ud83e\udd8a \u2014 na\u00efve",
+    "out": "Smooth turntable rotation 360\u00b0 to the left: the product turns cleanly with no morphing or warping; camera fixed; consistent lighting and background. Additional direction: Caf\u00e9 \u65e5\u672c \ud83e\udd8a \u2014 na\u00efve."
+   },
+   {
+    "degrees": 360,
+    "direction": "left",
+    "instructions": "\u3000 matte finish \u001c\u0085",
+    "out": "Smooth turntable rotation 360\u00b0 to the left: the product turns cleanly with no morphing or warping; camera fixed; consistent lighting and background. Additional direction: matte finish."
+   },
+   {
+    "degrees": 360,
+    "direction": "left",
+    "instructions": "{direction} stays {0}",
+    "out": "Smooth turntable rotation 360\u00b0 to the left: the product turns cleanly with no morphing or warping; camera fixed; consistent lighting and background. Additional direction: {direction} stays {0}."
+   },
+   {
+    "degrees": 360,
+    "direction": "left",
+    "instructions": null,
+    "out": "Smooth turntable rotation 360\u00b0 to the left: the product turns cleanly with no morphing or warping; camera fixed; consistent lighting and background."
+   },
+   {
+    "degrees": 360,
+    "direction": "right",
+    "instructions": "",
+    "out": "Smooth turntable rotation 360\u00b0 to the right: the product turns cleanly with no morphing or warping; camera fixed; consistent lighting and background."
+   },
+   {
+    "degrees": 360,
+    "direction": "right",
+    "instructions": "   \t ",
+    "out": "Smooth turntable rotation 360\u00b0 to the right: the product turns cleanly with no morphing or warping; camera fixed; consistent lighting and background."
+   },
+   {
+    "degrees": 360,
+    "direction": "right",
+    "instructions": "  slow and steady \n",
+    "out": "Smooth turntable rotation 360\u00b0 to the right: the product turns cleanly with no morphing or warping; camera fixed; consistent lighting and background. Additional direction: slow and steady."
+   },
+   {
+    "degrees": 360,
+    "direction": "right",
+    "instructions": "Caf\u00e9 \u65e5\u672c \ud83e\udd8a \u2014 na\u00efve",
+    "out": "Smooth turntable rotation 360\u00b0 to the right: the product turns cleanly with no morphing or warping; camera fixed; consistent lighting and background. Additional direction: Caf\u00e9 \u65e5\u672c \ud83e\udd8a \u2014 na\u00efve."
+   },
+   {
+    "degrees": 360,
+    "direction": "right",
+    "instructions": "\u3000 matte finish \u001c\u0085",
+    "out": "Smooth turntable rotation 360\u00b0 to the right: the product turns cleanly with no morphing or warping; camera fixed; consistent lighting and background. Additional direction: matte finish."
+   },
+   {
+    "degrees": 360,
+    "direction": "right",
+    "instructions": "{direction} stays {0}",
+    "out": "Smooth turntable rotation 360\u00b0 to the right: the product turns cleanly with no morphing or warping; camera fixed; consistent lighting and background. Additional direction: {direction} stays {0}."
+   },
+   {
+    "degrees": 360,
+    "direction": "right",
+    "instructions": null,
+    "out": "Smooth turntable rotation 360\u00b0 to the right: the product turns cleanly with no morphing or warping; camera fixed; consistent lighting and background."
+   }
+  ],
+  "simple_spin_instruction": [
+   {
+    "direction": "left",
+    "instructions": "",
+    "out": "The product makes a smooth, continuous full 360\u00b0 turntable spin to the left; camera fixed; consistent lighting and background; seamless loop."
+   },
+   {
+    "direction": "left",
+    "instructions": "   \t ",
+    "out": "The product makes a smooth, continuous full 360\u00b0 turntable spin to the left; camera fixed; consistent lighting and background; seamless loop."
+   },
+   {
+    "direction": "left",
+    "instructions": "  slow and steady \n",
+    "out": "The product makes a smooth, continuous full 360\u00b0 turntable spin to the left; camera fixed; consistent lighting and background; seamless loop. Additional direction: slow and steady."
+   },
+   {
+    "direction": "left",
+    "instructions": "Caf\u00e9 \u65e5\u672c \ud83e\udd8a \u2014 na\u00efve",
+    "out": "The product makes a smooth, continuous full 360\u00b0 turntable spin to the left; camera fixed; consistent lighting and background; seamless loop. Additional direction: Caf\u00e9 \u65e5\u672c \ud83e\udd8a \u2014 na\u00efve."
+   },
+   {
+    "direction": "left",
+    "instructions": "\u3000 matte finish \u001c\u0085",
+    "out": "The product makes a smooth, continuous full 360\u00b0 turntable spin to the left; camera fixed; consistent lighting and background; seamless loop. Additional direction: matte finish."
+   },
+   {
+    "direction": "left",
+    "instructions": "{direction} stays {0}",
+    "out": "The product makes a smooth, continuous full 360\u00b0 turntable spin to the left; camera fixed; consistent lighting and background; seamless loop. Additional direction: {direction} stays {0}."
+   },
+   {
+    "direction": "left",
+    "instructions": null,
+    "out": "The product makes a smooth, continuous full 360\u00b0 turntable spin to the left; camera fixed; consistent lighting and background; seamless loop."
+   },
+   {
+    "direction": "right",
+    "instructions": "",
+    "out": "The product makes a smooth, continuous full 360\u00b0 turntable spin to the right; camera fixed; consistent lighting and background; seamless loop."
+   },
+   {
+    "direction": "right",
+    "instructions": "   \t ",
+    "out": "The product makes a smooth, continuous full 360\u00b0 turntable spin to the right; camera fixed; consistent lighting and background; seamless loop."
+   },
+   {
+    "direction": "right",
+    "instructions": "  slow and steady \n",
+    "out": "The product makes a smooth, continuous full 360\u00b0 turntable spin to the right; camera fixed; consistent lighting and background; seamless loop. Additional direction: slow and steady."
+   },
+   {
+    "direction": "right",
+    "instructions": "Caf\u00e9 \u65e5\u672c \ud83e\udd8a \u2014 na\u00efve",
+    "out": "The product makes a smooth, continuous full 360\u00b0 turntable spin to the right; camera fixed; consistent lighting and background; seamless loop. Additional direction: Caf\u00e9 \u65e5\u672c \ud83e\udd8a \u2014 na\u00efve."
+   },
+   {
+    "direction": "right",
+    "instructions": "\u3000 matte finish \u001c\u0085",
+    "out": "The product makes a smooth, continuous full 360\u00b0 turntable spin to the right; camera fixed; consistent lighting and background; seamless loop. Additional direction: matte finish."
+   },
+   {
+    "direction": "right",
+    "instructions": "{direction} stays {0}",
+    "out": "The product makes a smooth, continuous full 360\u00b0 turntable spin to the right; camera fixed; consistent lighting and background; seamless loop. Additional direction: {direction} stays {0}."
+   },
+   {
+    "direction": "right",
+    "instructions": null,
+    "out": "The product makes a smooth, continuous full 360\u00b0 turntable spin to the right; camera fixed; consistent lighting and background; seamless loop."
+   }
+  ],
+  "spin": "The product makes a smooth, continuous full 360\u00b0 turntable spin to the {direction}; camera fixed; consistent lighting and background; seamless loop."
+ }
+}

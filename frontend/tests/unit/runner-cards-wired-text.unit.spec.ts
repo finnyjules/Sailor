@@ -266,6 +266,8 @@ describe('the refusals that stay', () => {
       if (typeof m !== 'string') need = [...need, ...(m.mustLink ?? [])]
     }
     for (const name of need) inputs[name] = ['img', 0]
+    // Turntable's direction is a required widget (R3.16): its default.
+    if (ct === 'TurntableNode') inputs.direction = 'left'
     return { img, n: { class_type: ct, inputs } }
   }
   // The node's result shown by a card: only what an output reads runs (R3.8 fix round 1; the Text card is an output).
