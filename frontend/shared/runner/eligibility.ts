@@ -8,6 +8,7 @@ import { pyFloatOf, pyIntOf, pyTruthy } from './pyText'
 import { SYNC_3_ENGINE, isSync3LipSync, lipSyncEngine } from './lipSync'
 import { TOPAZ_VIDEO_FPS, TOPAZ_VIDEO_TARGETS } from './topazVideo'
 import { PERSON_SWAP_RESOLUTIONS } from './personSwapVideo'
+import { SHOT_OVERRIDE_WIDGETS, SHOT_PRESET_IDS } from './shotPresets'
 import { outputKind, BASE_VALUE_INPUTS, OUTPUT_KINDS, type ValueKind } from './values'
 import { moodboardReadingIsPlain } from '../taste/moodboardStyle'
 import { IMAGE_LAYERS, TEXT_LAYERS, smartLayoutPixels } from './smartLayout'
@@ -1667,7 +1668,8 @@ export function valueWiresAllowed(
 /**
  * A Film a shot Shot Director drives (dispatch.ts buildFilmShotPatch): its
  * `model_options` are typed (not wired) JSON with `__shot_directed: true`.
- * Any other Film a shot (presets, overrides) stays on ComfyUI.
+ * Any other Film a shot (presets, overrides) stays on ComfyUI unless
+ * `film-shot` is on (R3.11, presetShotTaken).
  */
 export function isShotDirected(inputs: Record<string, unknown>): boolean {
   const raw = inputs.model_options
@@ -1687,9 +1689,54 @@ const FILM_SHOT_RUNNER_MODELS: Readonly<Record<string, RunnerFamily | null>> = {
   'seedance-2.0': null, 'veo-3.1': null, 'veo-3.1-fast': null, 'kling-v3': 'replicate-video',
 }
 
-/** Whether the runner takes this Film a shot: shot-directed, no sound or words wired in, on one of its models. */
+/**
+ * Film a shot's `model` options (comfy_api_nodes/video_models.py MODELS): the
+ * video models the runner films for Generate a video with no family, those
+ * of `replicate-video`, and VEED Fabric (a lip-sync model Film a shot refuses).
+ */
+export const FILM_SHOT_MODEL_IDS: readonly string[] = [...RUNNER_VIDEO_MODEL_IDS, ...RUNNER_REPLICATE_VIDEO_MODEL_IDS, 'fabric-1.0']
+const FILM_SHOT_MODELS: ReadonlySet<string> = new Set(FILM_SHOT_MODEL_IDS)
+
+/** The Film a shot models with no text-to-video mode (video_models.py `modes`): Python refuses them without a picture. */
+export const FILM_SHOT_IMAGE_ONLY_MODELS: readonly string[] = ['wan-2.5-i2v-fast', 'fabric-1.0']
+
+/** The Film a shot model Python refuses outright: a lip-sync model (FilmShotNode.execute). */
+export const FILM_SHOT_LIP_SYNC_MODEL = 'fabric-1.0'
+
+/**
+ * Whether the runner takes a Film a shot on the preset path (R3.11): `film-shot`
+ * on; the words, options, model and sound not wired; the preset and each
+ * override one of Python's options (ComfyUI's own validation refuses any
+ * other); and a model the runner films for Generate a video under that
+ * model's own family. Fabric, and a picture-only model with no picture, are
+ * taken too, and refused before the hold (requestRules.ts), as Python refuses
+ * them.
+ */
+function presetShotTaken(inputs: Record<string, unknown>, families: ReadonlySet<RunnerFamily>): boolean {
+  if (!familyOn('film-shot', families)) return false
+  if (['prompt', 'model_options', 'model', 'audio'].some(k => isLink(inputs[k]))) return false
+  if (!widgetValid(inputs, 'preset', { type: 'COMBO', required: true, options: SHOT_PRESET_IDS })) return false
+  for (const o of SHOT_OVERRIDE_WIDGETS) {
+    if (!widgetValid(inputs, o.widget, { type: 'COMBO', options: o.options })) return false
+  }
+  // Python reads the model as given (no legacy remap): only its own ids.
+  const model = typeof inputs.model === 'string' ? inputs.model : ''
+  if (!FILM_SHOT_MODELS.has(model)) return false
+  if (model === FILM_SHOT_LIP_SYNC_MODEL || VIDEO_IDS.has(model)) return true
+  // Generate a video's row for this model: its family (replicate-video). A picture it
+  // needs (Wan 2.5 I2V Fast) is not asked for here: Film a shot refuses its absence plainly.
+  const m = RUNNER_NODE_RULES.GenerateVideoNode!.models![model]
+  const family = typeof m === 'string' ? m : m?.family
+  return !!family && familyOn(family, families)
+}
+
+/**
+ * Whether the runner takes this Film a shot: shot-directed (no sound or words
+ * wired in, on one of its models), or on the preset path (presetShotTaken).
+ */
 function filmShotTaken(inputs: Record<string, unknown>, families: ReadonlySet<RunnerFamily>): boolean {
-  if (!isShotDirected(inputs) || isLink(inputs.audio) || isLink(inputs.prompt)) return false
+  if (!isShotDirected(inputs)) return presetShotTaken(inputs, families)
+  if (isLink(inputs.audio) || isLink(inputs.prompt)) return false
   const model = resolveVideoModelId(inputs.model)
   if (!Object.prototype.hasOwnProperty.call(FILM_SHOT_RUNNER_MODELS, model)) return false
   const family = FILM_SHOT_RUNNER_MODELS[model]

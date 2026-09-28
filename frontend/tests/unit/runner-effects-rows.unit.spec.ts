@@ -148,8 +148,8 @@ describe('the rows', () => {
       expect(RUNNER_FAMILIES).toContain(f)
       expect(FAMILY_REQUIRES[f as RunnerFamily]).toBe('cards')
     }
-    // + R3.3's llm-text, R3.4's describe, R3.5's image-repair, R3.6's layers, R3.8's audio-gen and R3.9's gen-3d, which need cards too.
-    expect(Object.keys(FAMILY_REQUIRES).sort()).toEqual([...added, 'llm-text', 'describe', 'image-repair', 'layers', 'audio-gen', 'gen-3d'].sort())
+    // + R3.3's llm-text, R3.4's describe, R3.5's image-repair, R3.6's layers, R3.8's audio-gen, R3.9's gen-3d and R3.11's film-shot, which need cards too.
+    expect(Object.keys(FAMILY_REQUIRES).sort()).toEqual([...added, 'llm-text', 'describe', 'image-repair', 'layers', 'audio-gen', 'gen-3d', 'film-shot'].sort())
     expect(EFFECT_MAX_PICTURE_PIXELS).toBe(8192 * 8192)
     expect(EFFECT_HOSTED_MAX_PICTURE_PIXELS).toBe(HOSTED_MAX_FRAME_ARTBOARD_PIXELS)
   })

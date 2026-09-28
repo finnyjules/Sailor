@@ -122,7 +122,8 @@
  */
 import { isLink, type ApiNode, type ApiPrompt } from '#shared/runner/graph'
 import { withStaticWiredValues } from '#shared/runner/staticValues'
-import { RUNNER_VIDEO_MODEL_IDS, classUpgradeOn, isShotDirected, resolveVideoModelId } from '#shared/runner/eligibility'
+import { FILM_SHOT_IMAGE_ONLY_MODELS, FILM_SHOT_LIP_SYNC_MODEL, RUNNER_VIDEO_MODEL_IDS, classUpgradeOn, isShotDirected, resolveVideoModelId } from '#shared/runner/eligibility'
+import { filmShotPrompt } from '#shared/runner/shotPresets'
 import { NO_FAMILIES, familyOn, type RunnerFamily } from '#shared/runner/families'
 import { LARGEST_INPUT_PIXELS, sizePricedInput } from '#shared/pricing/editSettings'
 import { nodeImagePrompt } from './generators/image'
@@ -801,7 +802,22 @@ const H3_VIDEO_APPS: Readonly<Record<string, string>> = Object.fromEntries([
 export function requestProblems(prompt: ApiPrompt, opts: { runner?: boolean } = {}): RequestProblem[] {
   const out: RequestProblem[] = []
   const view = opts.runner && prompt ? withStaticWiredValues(prompt) : prompt
-  for (const [nodeId, node] of Object.entries(view ?? {})) {
+  const presetShots = new Set<string>()
+  for (const [nodeId, given] of Object.entries(view ?? {})) {
+    // A preset Film a shot on a runner run (R3.11, family film-shot): what Python refuses
+    // before its call (a lip-sync model, a picture-only model with no picture) and a reference
+    // link the runner can't resolve; then it is Generate a video's request for that model with
+    // Python's full prompt (executors.ts), so it is judged as that Generate a video.
+    const presetShot = !!opts.runner && given?.class_type === 'FilmShotNode' && !isShotDirected(given.inputs ?? {})
+    if (presetShot) {
+      const p = presetShotProblem(given!.inputs ?? {})
+      if (p) {
+        out.push({ nodeId, classType: 'FilmShotNode', input: p.input, message: p.message })
+        continue
+      }
+      presetShots.add(nodeId)
+    }
+    const node = presetShot ? { class_type: 'GenerateVideoNode', inputs: { ...given!.inputs, prompt: filmShotPrompt(given!.inputs ?? {}) } } : given
     const inputs = node?.inputs ?? {}
     const ct = node?.class_type
     /** The prompt `text` against the rules of `<provider> <endpoint>` (fal unless named): its minimum, its maximum, or both. */
@@ -1082,7 +1098,27 @@ export function requestProblems(prompt: ApiPrompt, opts: { runner?: boolean } = 
     const g3 = opts.runner ? gen3dRequestProblem(ct, inputs) : gen3dComfyPathProblem(ct)
     if (g3) out.push({ nodeId, classType: ct, input: g3.input, message: g3.message })
   }
-  return out
+  // A preset shot's problems are its own, judged as Generate a video's.
+  return presetShots.size ? out.map(p => presetShots.has(p.nodeId) ? { ...p, classType: 'FilmShotNode' } : p) : out
+}
+
+/** FilmShotNode.execute refuses a lip-sync model (R3.11): plain words, before the hold. */
+export const FILM_SHOT_LIP_SYNC_WORDS = 'Film a shot can\'t use a lip-sync model. Pick a camera model.'
+/** FilmShotNode.execute refuses a picture-only model with no picture (R3.11): plain words, before the hold. */
+export const FILM_SHOT_NEEDS_FRAME_WORDS = 'This model needs a first frame. Connect a picture to Film a shot.'
+
+/**
+ * What a preset Film a shot on the runner is refused before the hold, or
+ * null: the two refusals FilmShotNode.execute raises before any call, in its
+ * order (Fabric, then a picture-only model with no picture), and a reference
+ * link in its options the runner can't resolve (shotRefs.ts).
+ */
+export function presetShotProblem(inputs: Record<string, unknown>): { input: string, message: string } | null {
+  const model = typeof inputs.model === 'string' ? inputs.model : ''
+  if (model === FILM_SHOT_LIP_SYNC_MODEL) return { input: 'model', message: FILM_SHOT_LIP_SYNC_WORDS }
+  if (FILM_SHOT_IMAGE_ONLY_MODELS.includes(model) && !isLink(inputs.image)) return { input: 'image', message: FILM_SHOT_NEEDS_FRAME_WORDS }
+  const bad = isLink(inputs.model_options) ? null : shotRefProblem(parseJsonObject(inputs.model_options))
+  return bad ? { input: 'model_options', message: bad } : null
 }
 
 /**

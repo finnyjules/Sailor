@@ -36,7 +36,7 @@ import {
 import { createGateReads, type GateReads } from './graphInputPixels'
 import { readModelOptions } from '../../shared/pricing/videoSettings'
 import { readViewRef } from '../../shared/pricing/clipSettings'
-import { isShotDirected, resolveVideoModelId } from '../../shared/runner/eligibility'
+import { resolveVideoModelId } from '../../shared/runner/eligibility'
 import { SEEDANCE_REFERENCE_MAX_SECONDS, SEEDANCE_TOO_MANY_REFERENCES, SEEDANCE_TOO_MUCH_SOUND, SEEDANCE_TOO_MUCH_VIDEO, SEEDANCE_UNMEASURED_REFERENCE, type RequestProblem } from '../runner/requestRules'
 
 type Prompt = Record<string, { class_type?: unknown; inputs?: unknown } | undefined>
@@ -278,9 +278,10 @@ export async function seedanceReferenceSeconds(
  * Each Seedance 2.0 node's reference videos and sounds that would be sent
  * (no first frame, options not wired): per list, each element's `/view` input
  * name, or null where it isn't one (an external link, a refused path).
- * `filmShots` (the runner's own check only, Task 4 Ruling D): a shot-directed
- * Film a shot too, which the runner plans exactly as Generate a video. The
- * ComfyUI gate leaves it out, as before.
+ * `filmShots` (the runner's own check only, Task 4 Ruling D): a Film a shot
+ * too — shot-directed, or on the preset path (R3.11), the only two the runner
+ * takes — which the runner plans exactly as Generate a video. The ComfyUI
+ * gate leaves it out, as before.
  */
 function seedanceReferenceLists(prompt: Prompt, filmShots = false): { nodeId: string, classType: string, kind: MediaKind, tooMuch: string, names: (string | null)[] }[] {
   const out: { nodeId: string, classType: string, kind: MediaKind, tooMuch: string, names: (string | null)[] }[] = []
@@ -288,7 +289,7 @@ function seedanceReferenceLists(prompt: Prompt, filmShots = false): { nodeId: st
   for (const [nodeId, node] of Object.entries(prompt)) {
     const classType = node?.class_type
     const inputs = inputsOf(node)
-    if (classType !== 'GenerateVideoNode' && !(filmShots && classType === 'FilmShotNode' && isShotDirected(inputs))) continue
+    if (classType !== 'GenerateVideoNode' && !(filmShots && classType === 'FilmShotNode')) continue
     if (resolveVideoModelId(inputs.model) !== 'seedance-2.0' || Array.isArray(inputs.model_options) || Array.isArray(inputs.image)) continue
     const options = readModelOptions(inputs.model_options)
     if (typeof options.image_url === 'string' && options.image_url) continue

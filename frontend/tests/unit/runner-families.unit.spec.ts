@@ -50,6 +50,8 @@ describe('parseFamilies', () => {
       'audio-gen',
       // Step 3, R3.9: 3D models (needs `cards`).
       'gen-3d',
+      // Step 3, R3.11: Film a shot's preset path (needs `cards`).
+      'film-shot',
     ].sort())
   })
 })

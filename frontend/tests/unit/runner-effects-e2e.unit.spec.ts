@@ -724,8 +724,9 @@ describe('R2.12 · every effects family off: the needs-engine list over every sa
     // card after them) are left off too: with them off the list is exactly as before them
     // (runner-paid-repair / runner-paid-layers / runner-paid-audio-gen.unit.spec.ts, rule 15), so the pin
     // keeps measuring the effects alone.
-    // (R3.9's gen-3d too: runner-paid-3d.unit.spec.ts.)
-    const LATER: readonly string[] = ['image-repair', 'layers', 'audio-gen', 'gen-3d']
+    // (R3.9's gen-3d too: runner-paid-3d.unit.spec.ts; and R3.11's film-shot, which takes saved preset
+    // Film a shot nodes: runner-paid-film-shot.unit.spec.ts.)
+    const LATER: readonly string[] = ['image-repair', 'layers', 'audio-gen', 'gen-3d', 'film-shot']
     const effectsOff: ReadonlySet<RunnerFamily> = new Set(RUNNER_FAMILIES.filter(x => !(EFFECT_FAMILIES as readonly string[]).includes(x) && !LATER.includes(x)))
     const sets: Record<string, ReadonlySet<RunnerFamily>> = { frameCards: FRAME_CARDS, allButEffects: effectsOff }
     const now: Record<string, { prompt: string } & Record<string, string>> = {}

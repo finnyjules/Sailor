@@ -61,6 +61,23 @@ Groups:
              (a list, a string, a dict with or without `model_file`, Hunyuan3D
              2's `{mesh}`), for frontend/server/runner/generators/gen3d.ts
              (tests/unit/runner-paid-3d.unit.spec.ts)
+  film-shot  (R3.11) Film a shot's preset path, for
+             frontend/shared/runner/shotPresets.ts and the FilmShotNode case
+             of frontend/server/runner/executors.ts
+             (tests/unit/runner-paid-film-shot.unit.spec.ts):
+               phrases — shot_presets.py itself: every preset in every
+                         dialect, each override option on its own and all
+                         five at once, an unknown preset, dialect_for_model
+               cases   — capture_first_call on FilmShotNode: every preset ×
+                         a Veo, a Hailuo and a standard model × a blank and a
+                         spaced prompt; each override option on its own and
+                         all five at once on the three; an unknown preset;
+                         model_options bad JSON, a list, `__shot_directed:
+                         false`; every model in the node's list with and
+                         without `image` (the phrase Python built is kept
+                         with each call)
+               runs    — paid_case (capture_calls) of a few preset shots with
+                         the provider's answer, for the engine run
   handoff    (R3.H) the PNG `_image_tensor_to_data_url` sends for a loader's
              tensor: every file kind (EXIF 2–8, RGBA, grey + alpha, palette and
              colour-key transparency, CMYK, 16-bit, WebP, GIF…) through the real
@@ -1610,6 +1627,124 @@ def gen_3d_group() -> dict:
     return {"cases": cases}
 
 
+# ── film-shot (R3.11): Film a shot's preset path ────────────────────────────
+
+FILM_SHOT_DIALECT_MODELS = {"veo": "veo-3.1", "hailuo": "hailuo-h3", "standard": "seedance-2.0"}
+FILM_SHOT_PROMPTS = {"blank": "", "spaced": "  \t a lone rider crosses the salt flats at dusk \n "}
+FILM_SHOT_OVERRIDES = ("shot_size", "camera_angle", "camera_movement", "lens_look", "composition")
+FILM_SHOT_VIDEO = "https://r.test/shot.mp4"
+
+
+def film_shot_group() -> dict:
+    """R3.11: Film a shot's preset path. `phrases` are shot_presets.py's own
+    functions; `cases` are FilmShotNode.execute's first provider call
+    (capture_first_call), each with the phrase `_build_shot_phrase` returned
+    on that run; `runs` are a few whole runs (capture_calls) with the
+    provider's answer, for the engine."""
+    import io
+    import runner_builder_fixtures as rbf
+    from comfy_api_nodes import shot_presets as sp
+    nr, _fal, _extras = rbf._node_modules()
+
+    phrases: list = []
+    override_lists = {"shot_size": sp.SIZE_OPTIONS, "camera_angle": sp.ANGLE_OPTIONS, "camera_movement": sp.MOVEMENT_OPTIONS,
+                      "lens_look": sp.LENS_OPTIONS, "composition": sp.COMPOSITION_OPTIONS}
+
+    def phrase(name, preset, overrides=None):
+        o = {k: sp.AUTO for k in FILM_SHOT_OVERRIDES}
+        o.update(overrides or {})
+        recipe = sp.resolve_recipe(preset, o["shot_size"], o["camera_angle"], o["camera_movement"], o["lens_look"], o["composition"])
+        for dialect in ("standard", "veo", "hailuo"):
+            phrases.append({"name": name, "preset": preset, "overrides": overrides or {}, "dialect": dialect,
+                            "recipe_id": recipe.id, "phrase": sp.build_shot_phrase(recipe, dialect)})
+
+    for pid in sp.PRESET_IDS:
+        phrase(f"preset {pid}", pid)
+    for widget, options in override_lists.items():
+        for opt in options:
+            phrase(f"{widget} {opt}", sp.DEFAULT_PRESET_ID, {widget: opt})
+            phrase(f"{widget} {opt} on orbit", "orbit", {widget: opt})
+    every = {w: override_lists[w][-1] for w in FILM_SHOT_OVERRIDES}
+    phrase("all five overrides", "tilt-reveal", every)
+    phrase("unknown preset", "slow_push_in")
+    phrase("empty override keeps the preset", "dutch", {"camera_movement": ""})
+    dialects = {m: sp.dialect_for_model(m) for m in [*nr._VIDEO_GEN_MODEL_IDS, "VEO-3", "Hailuo-X", "", "veo", "seedance-veo"]}
+
+    built: list = []
+    real_build = nr._build_shot_phrase
+
+    def record(recipe, dialect="standard"):
+        out = real_build(recipe, dialect)
+        built.append({"recipe_id": recipe.id, "dialect": dialect, "phrase": out})
+        return out
+
+    defaults = {"prompt": "", "aspect_ratio": "16:9", "duration": "5", "seed": 7, "model_options": "{}",
+                **{k: sp.AUTO for k in FILM_SHOT_OVERRIDES}}
+    cases: list = []
+
+    def case(name, image=False, **w):
+        widgets = {**defaults, **w}
+        kwargs = dict(widgets)
+        if image:
+            kwargs["image"] = "image"
+        built.clear()
+        with mock.patch.object(nr, "_build_shot_phrase", record), contextlib.redirect_stdout(io.StringIO()):
+            try:
+                call = rbf.capture_first_call(nr.FilmShotNode, **kwargs)
+                err = None
+            except Exception as e:  # noqa: BLE001 — FilmShotNode's own refusal is part of the fixture
+                call, err = None, {"type": type(e).__name__, "message": str(e)}
+        c = {"name": name, "class_type": "FilmShotNode", "widgets": widgets, "pictures": ["image"] if image else [],
+             "phrase": built[0] if built else None}
+        if err:
+            c["error"] = err
+        else:
+            c["call"] = call
+        cases.append(c)
+
+    for pid in sp.PRESET_IDS:
+        for dialect, model in FILM_SHOT_DIALECT_MODELS.items():
+            for label, text in FILM_SHOT_PROMPTS.items():
+                case(f"{pid} \u00b7 {dialect} \u00b7 {label} prompt", preset=pid, model=model, prompt=text)
+    for widget, options in override_lists.items():
+        for opt in options[1:]:
+            for dialect, model in FILM_SHOT_DIALECT_MODELS.items():
+                case(f"{widget} {opt} \u00b7 {dialect}", preset="push-in", model=model, prompt="a heron lifts off", **{widget: opt})
+    for dialect, model in FILM_SHOT_DIALECT_MODELS.items():
+        case(f"all five overrides \u00b7 {dialect}", preset="tilt-reveal", model=model, prompt="a heron lifts off", **every)
+        case(f"unknown preset \u00b7 {dialect}", preset="slow_push_in", model=model, prompt="a heron lifts off")
+    for label, raw in (("bad JSON", "{not json"), ("a list", "[1, 2]"), ("shot_directed false", '{"__shot_directed": false}'),
+                       ("empty", ""), ("spaces", "   ")):
+        case(f"model_options {label}", preset="orbit", model="seedance-2.0", prompt="a heron lifts off", model_options=raw)
+    case("model_options with settings", preset="orbit", model="seedance-2.0", prompt="a heron lifts off",
+         model_options='{"__shot_directed": false, "resolution": "720p", "generate_audio": false}')
+    case("model_options Seedance first frame by link", preset="orbit", model="seedance-2.0", prompt="a heron lifts off",
+         model_options='{"image_url": "https://r.test/first.png"}')
+    for model in nr._VIDEO_GEN_MODEL_IDS:
+        for image in (False, True):
+            case(f"model {model} \u00b7 {'with' if image else 'without'} image", image=image, preset="crane-reveal", model=model,
+                 prompt="a lighthouse in a storm")
+
+    runs: list = []
+    with contextlib.redirect_stdout(io.StringIO()):
+        for name, w, answer, pics in (
+            ("veo text", {"preset": "push-in", "model": "veo-3.1", "prompt": "a red fox"}, {"video": {"url": FILM_SHOT_VIDEO}}, []),
+            ("seedance picture", {"preset": "orbit", "model": "seedance-2.0", "prompt": " a heron "}, {"video": {"url": FILM_SHOT_VIDEO}}, ["image"]),
+            ("hailuo overrides", {"preset": "handheld", "model": "hailuo-h3", "prompt": "rain", "camera_movement": "the camera pans slowly left to right"},
+             {"video": {"url": FILM_SHOT_VIDEO}}, []),
+            ("kling 2.5 text", {"preset": "god-shot", "model": "kling-v2.5-turbo-pro", "prompt": "a maze"}, {"output": FILM_SHOT_VIDEO}, []),
+            ("pixverse picture", {"preset": "dutch", "model": "pixverse-v6", "prompt": "a maze"}, {"output": FILM_SHOT_VIDEO}, ["image"]),
+        ):
+            runs.append(paid_case(name, nr.FilmShotNode, {**defaults, **w}, [answer], pictures=pics,
+                                  files={FILM_SHOT_VIDEO: _b64(b"\x00\x00\x00\x18ftypmp42fixture-video")}))
+    lists = {"preset_ids": list(sp.PRESET_IDS), "auto": sp.AUTO, "default_preset": sp.DEFAULT_PRESET_ID,
+             "overrides": {w: list(o) for w, o in override_lists.items()},
+             "presets": [{"id": r.id, "label": r.label, "category": r.category, "size": r.size, "angle": r.angle, "movement": r.movement,
+                          "lens": r.lens, "composition": r.composition, "note": r.note} for r in sp.PRESETS]}
+    return {"phrases": phrases, "dialects": dialects, "model_ids": list(nr._VIDEO_GEN_MODEL_IDS), "lists": lists,
+            "cases": cases, "runs": runs}
+
+
 GROUPS = {
     "handoff": handoff_group,
     "machinery": machinery_group,
@@ -1620,6 +1755,7 @@ GROUPS = {
     "split": split_group,
     "audio-gen": audio_gen_group,
     "gen-3d": gen_3d_group,
+    "film-shot": film_shot_group,
 }
 
 

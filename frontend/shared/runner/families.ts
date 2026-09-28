@@ -179,11 +179,20 @@ export type RunnerFamily =
    * LoadImage. Off: they go to ComfyUI, as before.
    */
   | 'gen-3d'
+  /**
+   * Film a shot's preset path (step 3, R3.11): the node writes the camera
+   * phrase from its preset and overrides (shared/runner/shotPresets.ts) and
+   * films it exactly as Generate a video films that model, on every model the
+   * runner films for Generate a video (each under its own family too). The
+   * shot-directed path is taken without it. Needs `cards`, as the other R3
+   * families. Off: a preset shot goes to ComfyUI, as before.
+   */
+  | 'film-shot'
 
 export const RUNNER_FAMILIES: readonly RunnerFamily[] = [
   'fal-edit', 'replicate-image', 'replicate-video', 'nano-actions', 'ref-edits', 'restyle', 'frame', 'wan-3', 'gpt-image-2.5', 'h3-max-turbo', 'gemini-omni-flash', 'veo-3.1-lite', 'qwen-image-3', 'grok-imagine-2', 'ideogram-4', 'seedream-5-pro-edit', 'qwen-2511-angles', 'nano-banana-2-blend', 'bria-product-shot', 'muse-image', 'nano-banana-2-lite', 'reve-2.1', 'recraft-v4.1', 'krea-2', 'happyhorse-1.1', 'grok-imagine-video-1.5', 'ltx-2.5-fast', 'luma-ray-3.2', 'sync-3', 'topaz-video', 'fix-faces', 'face-swap', 'person-swap-video', 'cards',
   'effects-tone', 'effects-blur', 'effects-cells', 'effects-warp', 'effects-mask', 'effects-noise', 'shader-bake', 'live-previews',
-  'llm-text', 'describe', 'image-repair', 'layers', 'audio-gen', 'gen-3d',
+  'llm-text', 'describe', 'image-repair', 'layers', 'audio-gen', 'gen-3d', 'film-shot',
 ]
 
 /**
@@ -205,6 +214,7 @@ export const FAMILY_REQUIRES: Partial<Record<RunnerFamily, RunnerFamily>> = {
   'layers': 'cards',
   'audio-gen': 'cards',
   'gen-3d': 'cards',
+  'film-shot': 'cards',
 }
 
 const KNOWN: ReadonlySet<string> = new Set(RUNNER_FAMILIES)

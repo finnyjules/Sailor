@@ -1953,9 +1953,10 @@ export function createEngine(deps: EngineDeps) {
     await deps.metering.spendGuard(i.userId)
     const inputFiles = new Map<string, OutputFile>()
     for (const p of prompts) for (const f of collectInputFiles(p)) inputFiles.set(`${f.type}:${f.subfolder}:${f.filename}`, f)
-    // A shot-directed Film a shot's reference links (`/view?…&type=input` in
-    // its options, Task 4): the runner resolves them into provider links, so
-    // they must be the caller's own files too. Generate a video resolves none.
+    // A Film a shot's reference links (`/view?…&type=input` in its options,
+    // Task 4; a preset shot's too, R3.11): the runner resolves them into
+    // provider links, so they must be the caller's own files too. Generate a
+    // video resolves none.
     for (const p of prompts) {
       for (const n of Object.values(p)) {
         if (n.class_type !== 'FilmShotNode' || isLink(n.inputs?.model_options)) continue

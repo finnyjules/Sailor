@@ -51,7 +51,8 @@
  * closely enough that the same workflow gives the same result.
  */
 import { GATE_CLASS, isLink, type ApiLink, type ApiPrompt } from '#shared/runner/graph'
-import { classUpgradeOn, resolveVideoModelId } from '#shared/runner/eligibility'
+import { classUpgradeOn, isShotDirected, resolveVideoModelId } from '#shared/runner/eligibility'
+import { filmShotPrompt } from '#shared/runner/shotPresets'
 import { NO_FAMILIES, type RunnerFamily } from '#shared/runner/families'
 import { RUNNER_IMAGE_MODELS, RUNNER_REPLICATE_IMAGE_MODELS, imageAppFor, nodeImagePrompt } from './generators/image'
 import { RUNNER_REPLICATE_VIDEO_MODELS, RUNNER_VIDEO_MODELS, falVideoFn } from './generators/video'
@@ -719,20 +720,30 @@ async function planNodeRequest(ctx: PlanContext): Promise<NodePlan> {
       return planVideoGeneration(inputs, f ? () => imageUrlOf(ctx, f, inputs.image) : null)
     }
 
-    // A shot-directed Film a shot (Task 4, characters stage 3; runnerTakesNode
-    // takes no other): its `/view` reference links become provider links
-    // (shotRefs.ts), `image_url` is the first frame unless a picture is
-    // linked, and the rest is planned exactly as Generate a video. Its
-    // prompt is Shot Director's own, sent as typed (Python's shot_directed
-    // path adds no preset phrase).
+    // A shot-directed Film a shot (Task 4, characters stage 3): its `/view`
+    // reference links become provider links (shotRefs.ts), `image_url` is the
+    // first frame unless a picture is linked, and the rest is planned exactly
+    // as Generate a video. Its prompt is Shot Director's own, sent as typed
+    // (Python's shot_directed path adds no preset phrase).
+    // A preset shot (R3.11, family film-shot): the prompt is Python's
+    // full_prompt, the camera phrase then the words (shotPresets.ts); its
+    // `/view` links resolved the same way, but `image_url` stays in the
+    // options as Python's builders read it (Seedance's only); the first frame
+    // is the linked picture alone, as Python's `image`.
     case 'FilmShotNode': {
       // A linked picture that brought no file fails the node, as pictureUrl does; never a silent fallback.
       const f = linkedFirstFile('image')
       if (isLink(inputs.image) && !f) throw new Error('There is no picture for the first frame')
-      const resolved = await resolveShotRefs(parseJsonObject(inputs.model_options), ctx.toUrl)
+      const given = parseJsonObject(inputs.model_options)
+      const resolved = await resolveShotRefs(given, ctx.toUrl)
       const firstFrame = resolved.firstFrame
-      const first = f ? () => imageUrlOf(ctx, f, inputs.image) : firstFrame ? async () => firstFrame : null
-      const plan = await planVideoGeneration({ ...inputs, model_options: JSON.stringify(resolved.adv) }, first)
+      const linked = f ? () => imageUrlOf(ctx, f, inputs.image) : null
+      const directed = isShotDirected(inputs)
+      const first = linked ?? (directed && firstFrame ? async () => firstFrame : null)
+      const keepsImageUrl = !directed && Object.prototype.hasOwnProperty.call(given, 'image_url')
+      const adv = keepsImageUrl ? { ...resolved.adv, image_url: firstFrame ?? given.image_url } : resolved.adv
+      const prompt = directed ? inputs.prompt : filmShotPrompt(inputs)
+      const plan = await planVideoGeneration({ ...inputs, prompt, model_options: JSON.stringify(adv) }, first)
       if (plan.kind !== 'provider') return plan
       // Python's FilmShotNode is not an output node: the take lands on the Video card after it (Ruling C).
       return { ...plan, prefix: 'film_shot', uiFor: () => null }

@@ -763,6 +763,9 @@ describe('B10 · one workflow per family, POST /api/runs to the last event', () 
       'audio-gen',
       // 3D models (R3.9) hand on a 3D file's address: runner-paid-3d.unit.spec.ts.
       'gen-3d',
+      // Film a shot's preset path (R3.11) films as Generate a video does (replicate-video's and the
+      // no-family models' flows): its engine runs are runner-paid-film-shot.unit.spec.ts.
+      'film-shot',
     ]
     expect(FLOWS.map(f => f.family).sort()).toEqual(RUNNER_FAMILIES.filter(f => !local.includes(f)).sort())
   })
