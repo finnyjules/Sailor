@@ -120,6 +120,7 @@ import { prepareShotDispatch } from '~/lib/shotdirector/prepare'
 import { uploadRefFile } from '~/lib/shotdirector/refUpload'
 import { useCharacters } from '~/composables/useCharacters'
 import { defaultState, identityRefs, normalizeStateId } from '#shared/characters/types'
+import { rerolledSeed } from '#shared/runner/seedLimits'
 import { upstreamSeedScope } from '~/lib/artifact/nextSteps'
 import { runStudioCascade, planStudiosToBakeForRun, hasStudioBaker, isStudioNode, isArtifactNode, type CascadeDeps } from '~/lib/studio/cascade'
 import { emitCanvasOcclusion } from '~/lib/studio/occlusion'
@@ -7726,8 +7727,8 @@ function randomizeSeedsOnLiveState(onlyNodeIds?: Set<string>) {
         ? values[i + 1] === 'fixed'
         : !!node.data?.properties?.seedLocks?.[def.name]
       if (fixed) continue
-      const max = Math.min(Number(def.max) || 2 ** 53 - 1, 2 ** 53 - 1)
-      values[i] = Math.floor(Math.random() * max)
+      // Within min(widget max, the provider's): Ideogram takes seeds only up to 2^31 − 1 (R3.12).
+      values[i] = rerolledSeed(String(node.data?.nodeType ?? ''), String(def.name || ''), def.max)
     }
   }
 }

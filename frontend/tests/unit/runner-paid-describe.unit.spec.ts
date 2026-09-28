@@ -290,7 +290,7 @@ describe('prices (rulings (a), (c), (s))', () => {
       expect(PAID_NODE_CLASSES).toContain(c)
       expect(Object.prototype.hasOwnProperty.call(GRAPH_NODE_CREDITS, c), c).toBe(false)
     }
-    expect(PRICE_BOOK_VERSION).toBe('r3-image-extras')
+    expect(PRICE_BOOK_VERSION).toBe('r3-image-extras-2')
   })
 
   it('per call: Describe an image 1, Extract text 2, Find objects 1, on both paths', () => {

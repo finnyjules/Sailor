@@ -376,7 +376,7 @@ const selectedFamily = computed<'sdxl_sd15' | 'flux'>(() => {
 // averages — rough but in the right ballpark.
 const REPLICATE_H100_PER_SEC = 0.001525
 
-const IDEOGRAM_PER_IMAGE = 0.08 // ideogram-character, per generated shot
+const IDEOGRAM_PER_IMAGE = 0.15 // ideogram-character, per generated shot (Replicate, default speed; priceBook MODEL_COSTS)
 
 const costEstimate = computed(() => {
   const steps = Math.max(1, form.steps || 1000)
@@ -1699,7 +1699,7 @@ onBeforeUnmount(() => {
           <p class="text-[11px] text-white/55 leading-relaxed mb-3">
             Drop a few photos — at least one clear face close-up and one full-length shot.
             We generate <span class="text-white/75">{{ expectedShots }}</span> more to fill out the set,
-            then add them below to curate &amp; train. ~${{ (expectedShots * 0.08).toFixed(2) }}.
+            then add them below to curate &amp; train. ~${{ (expectedShots * IDEOGRAM_PER_IMAGE).toFixed(2) }}.
           </p>
 
           <div class="flex gap-3">

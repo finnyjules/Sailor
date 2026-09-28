@@ -16,7 +16,7 @@
  * card, editRates.ts). Pure; relative imports only.
  */
 import { isLink } from './graph'
-import { pyStrip } from './pyText'
+import { pyIntOf, pyStrip } from './pyText'
 
 export const TEXT_GENERATE_SLUG = 'ideogram-ai/ideogram-v3-turbo'
 export const TEXT_RESTYLE_SLUG = 'black-forest-labs/flux-kontext-pro'
@@ -65,10 +65,14 @@ export function textEffectSlug(inputs: Record<string, unknown>): string {
   return textEffectRestyles(inputs) ? TEXT_RESTYLE_SLUG : TEXT_GENERATE_SLUG
 }
 
-/** int() of a typed INT widget, or null when it isn't a plain number (the rule row leaves that to the engine). */
+/**
+ * int() of a typed INT widget as the builder reads it (Python's `int()`,
+ * `pyIntOf`: underscores between digits, as in "2_147_483_648"), or null when
+ * it isn't a number (the rule row leaves that to the engine).
+ */
 function intOf(v: unknown): number | null {
   if (typeof v === 'number' && Number.isFinite(v)) return Math.trunc(v)
-  if (typeof v === 'string' && /^\s*[+-]?\d+\s*$/.test(v)) return Number.parseInt(v, 10)
+  if (typeof v === 'string') return pyIntOf(v)
   return null
 }
 

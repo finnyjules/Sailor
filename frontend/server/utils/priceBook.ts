@@ -229,7 +229,10 @@ export { VIDEO_RATES, MODEL_PRICED_NODE_CLASSES, SETTING_PRICED_NODE_CLASSES, RE
 // edit card, $0.039 (8, unchanged); Generate face references on Ideogram
 // Character at its default speed, $0.15 a picture (16 → 23; the badge said
 // $0.08). All verified: no estimate floor.
-export const PRICE_BOOK_VERSION = 'r3-image-extras'
+// r3-image-extras-2 (R3.12 fix round 1): the direct character-shot route
+// (server/api/cloud-train/character-shot.post.ts, MODEL_COSTS) charges the same
+// Ideogram Character card: $0.15 a shot at its default speed, 16 → 23 credits.
+export const PRICE_BOOK_VERSION = 'r3-image-extras-2'
 
 export const BASE_RENDER_CREDITS = 1
 
@@ -609,7 +612,7 @@ export const MODEL_COSTS: Record<string, ModelCost> = {
   'krea/krea-2-medium': { usd: 0.035, credits: 7, confidence: 'estimate' },
   'fal-ai/nano-banana-pro': { usd: 0.15, credits: 23, confidence: 'verified', note: '1.5× markup — premium tier' },
   'fal-ai/nano-banana-pro/edit': { usd: 0.15, credits: 23, confidence: 'estimate', note: 'assumed same as generate' },
-  'ideogram-ai/ideogram-character': { usd: 0.08, credits: 16, confidence: 'estimate', note: 'identity-preserving shot from a reference photo; 2x markup — re-verify against a live invoice' },
+  'ideogram-ai/ideogram-character': { usd: 0.15, credits: 23, confidence: 'verified', note: 'identity-preserving shot from a reference photo; the page\'s billing table at the default rendering speed ("Default" $0.15 per output image; Turbo $0.10, Quality $0.20), read 2026-09-27 — the route sends no rendering_speed' },
   // — inpaint / edit —
   'black-forest-labs/flux-kontext-dev': { usd: 0.025, credits: 5, confidence: 'estimate', note: 'assumed flux-dev rate' },
   'black-forest-labs/flux-fill-dev': { usd: 0.04, credits: 8, confidence: 'estimate' },

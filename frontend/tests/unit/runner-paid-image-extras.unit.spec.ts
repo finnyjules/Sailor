@@ -36,6 +36,9 @@ import { firstOutputUrl } from '~~/server/runner/generators/repair'
 import { TEXT_EFFECTS, aspectOk, buildEditPrompt, buildPrompt, editAspect } from '~~/server/runner/generators/textEffects'
 import { RUNNER_ROUTES } from '~~/server/runner/generators/twins'
 import { requestProblems } from '~~/server/runner/requestRules'
+import { PROVIDER_SEED_MAX, rerolledSeed, seedRerollMax } from '#shared/runner/seedLimits'
+import { MODEL_COSTS, costForModel } from '~~/server/utils/priceBook'
+import { resolveCredits } from '~~/server/utils/requestMeter'
 
 interface PyEffect { id: string; label: string; prompt_template: string; edit_template: string; model_slug: string; medium: string; default_freedom: number }
 interface Catalogue {
@@ -319,7 +322,7 @@ describe('prices (ruling (a))', () => {
     for (const i of [generate, restyle]) expect(readsEstimateCard('TextEffectNode', i)).toBe(false)
     expect(readsEstimateCard('SketchToImageNode', sketch)).toBe(false)
     expect(readsEstimateCard('ConsistentFaceNode', face)).toBe(false)
-    expect(PRICE_BOOK_VERSION).toBe('r3-image-extras')
+    expect(PRICE_BOOK_VERSION).toBe('r3-image-extras-2')
   })
 
   it('per call, on both paths: Text effect 6 generating (was 8), 8 restyling; Sketch 8; Face references 23 (was 16)', async () => {
@@ -572,4 +575,86 @@ describe('with image-extras off (rule 15)', () => {
     expect(graphs).toBeGreaterThanOrEqual(800)
     console.info(`image-extras families-off invariant: ${graphs} saved graphs`)
   }, 600_000)
+})
+
+// ── Fix round 1 ──────────────────────────────────────────────────────────────
+
+describe('the canvas seed reroll stays within the provider\'s seed (fix round 1, ruling 1)', () => {
+  const widgetMax = async (ct: string) => {
+    const { gunzipSync } = await import('node:zlib')
+    const catalog = JSON.parse(gunzipSync(readFileSync(resolve(__dirname, '../../server/native/objectInfo.baseline.json.gz'))).toString('utf8'))
+    return (catalog[ct].input.required.seed[1] as { max: number }).max
+  }
+
+  it('the table: Text effect and Generate face references at Ideogram\'s 2147483647', () => {
+    expect(PROVIDER_SEED_MAX).toEqual({ TextEffectNode: { seed: 2147483647 }, ConsistentFaceNode: { seed: 2147483647 } })
+  })
+
+  it('min(widget max, provider max): the two classes\' widgets offer 0xFFFFFFFF, the reroll draws below 2^31 − 1', async () => {
+    for (const ct of ['TextEffectNode', 'ConsistentFaceNode']) {
+      const max = await widgetMax(ct)
+      expect(max, ct).toBe(0xFFFFFFFF)
+      expect(seedRerollMax(ct, 'seed', max), ct).toBe(IDEOGRAM_SEED_MAX)
+      // The top of the draw: the largest value random() can give.
+      expect(rerolledSeed(ct, 'seed', max, () => 1 - 2 ** -53), ct).toBe(IDEOGRAM_SEED_MAX - 1)
+      expect(rerolledSeed(ct, 'seed', max, () => 0), ct).toBe(0)
+      let top = 0
+      for (let i = 0; i < 20_000; i++) top = Math.max(top, rerolledSeed(ct, 'seed', max))
+      expect(top, ct).toBeLessThan(IDEOGRAM_SEED_MAX)
+      expect(top, ct).toBeGreaterThan(IDEOGRAM_SEED_MAX * 0.99)
+      // Every draw is a seed the runner takes (no refusal).
+      expect(imageExtrasRequestProblemFor(ct, top)).toBeNull()
+    }
+  })
+
+  it('a smaller widget max still wins; other classes and other widgets draw to their widget max, as before', () => {
+    expect(seedRerollMax('TextEffectNode', 'seed', 1000)).toBe(1000)
+    expect(seedRerollMax('TextEffectNode', 'noise_seed', 0xFFFFFFFF)).toBe(0xFFFFFFFF)
+    expect(seedRerollMax('KSampler', 'seed', 0xFFFFFFFFFFFFFFFF)).toBe(2 ** 53 - 1)
+    expect(seedRerollMax('GenerateImageNode', 'seed', 0xFFFFFFFF)).toBe(0xFFFFFFFF)
+    expect(seedRerollMax('OutpaintImageNode', 'seed', undefined)).toBe(2 ** 53 - 1)
+    expect(rerolledSeed('GenerateImageNode', 'seed', 0xFFFFFFFF, () => 0.5)).toBe(Math.floor(0.5 * 0xFFFFFFFF))
+  })
+
+  it('the canvas rerolls through it, by the node\'s class', () => {
+    const src = readFileSync(resolve(__dirname, '../../app/components/vue-canvas/VueNodeCanvas.vue'), 'utf8')
+    const body = src.slice(src.indexOf('function randomizeSeedsOnLiveState'), src.indexOf('function randomizeSeedsOnLiveState') + 2500)
+    expect(body).toContain("values[i] = rerolledSeed(String(node.data?.nodeType ?? ''), String(def.name || ''), def.max)")
+    expect(body).not.toContain('Math.random()')
+    expect(src).toContain("import { rerolledSeed } from '#shared/runner/seedLimits'")
+  })
+})
+
+function imageExtrasRequestProblemFor(ct: string, seed: number) {
+  const c = ct === 'TextEffectNode' ? caseNamed('text effect · generate · seed 42') : caseNamed('face · seed 42')
+  const p = requestProblems(withPictures({ ...c, widgets: { ...c.widgets, seed } }), { runner: true })
+  return p.length ? p : null
+}
+
+describe('a seed written with underscores is read as Python\'s int() reads it (fix round 1, ruling 3)', () => {
+  it('"2_147_483_648" is refused; "2_147_483_647" is taken', () => {
+    const gen = caseNamed('text effect · generate · seed 42')
+    const face = caseNamed('face · seed 42')
+    const at = (c: PaidCase, seed: unknown) => requestProblems(withPictures({ ...c, widgets: { ...c.widgets, seed } }), { runner: true }).map(p => p.message)
+    expect(at(gen, '2_147_483_648')).toEqual([TEXT_EFFECT_SEED_TOO_LARGE])
+    expect(at(face, '2_147_483_648')).toEqual([FACE_SEED_TOO_LARGE])
+    expect(at(gen, ' 4_294_967_295 ')).toEqual([TEXT_EFFECT_SEED_TOO_LARGE])
+    expect(at(gen, '2_147_483_647')).toEqual([])
+    expect(at(face, '2_147_483_647')).toEqual([])
+  })
+})
+
+describe('the direct character-shot route\'s price (fix round 1, ruling 2)', () => {
+  it('MODEL_COSTS charges Ideogram Character\'s default-speed card: $0.15, 23 credits', () => {
+    expect(MODEL_COSTS[FACE_SLUG]).toMatchObject({ usd: 0.15, credits: 23, confidence: 'verified' })
+    expect(costForModel(FACE_SLUG)!.credits).toBe(creditsForUsd((PAID_RATES[FACE_SLUG] as { usd: number }).usd))
+    expect(resolveCredits(FACE_SLUG)).toBe(23)
+    expect(PRICE_BOOK_VERSION).toBe('r3-image-extras-2')
+  })
+
+  it('the trainer shows the same dollars a shot', () => {
+    const src = readFileSync(resolve(__dirname, '../../app/components/LoraTrainerSurface.vue'), 'utf8')
+    expect(src).toMatch(/const IDEOGRAM_PER_IMAGE = 0\.15\b/)
+    expect(src).not.toContain('expectedShots * 0.08')
+  })
 })
