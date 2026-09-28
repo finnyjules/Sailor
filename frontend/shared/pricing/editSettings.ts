@@ -76,12 +76,16 @@ export function pricedInputPixels(measured: number | null | undefined): number {
   return typeof measured === 'number' && measured > 0 ? Math.min(measured, LARGEST_INPUT_PIXELS) : LARGEST_INPUT_PIXELS
 }
 
-/** The edit classes priced by their settings (the upscalers are in nodePrice's model-priced list). */
+/**
+ * The edit classes priced by their settings (the upscalers are in nodePrice's
+ * model-priced list). RestyleWithLoRANode left for the paid classes in R3.14
+ * (paidSettings.ts restyleLoraCalls: its editSteps priced call by call).
+ */
 export const SETTING_PRICED_NODE_CLASSES: readonly string[] = [
   'EditImageNode', 'DevelopImageNode', 'RelightNode', 'BlendSceneNode',
   'RemoveObjectNode', 'TextEditNode', 'RecolorObjectNode', 'SwapBackgroundNode', 'SwapProductNode', 'PersonSwap', 'LensReframe',
   'GenerateFromReferencesNode', 'RotateCameraNode', 'ProductShotNode',
-  'RestyleFromImageNode', 'RestyleWithLoRANode', 'FixFacesNode', 'FaceSwap',
+  'RestyleFromImageNode', 'FixFacesNode', 'FaceSwap',
 ]
 
 const isLinked = (v: unknown) => Array.isArray(v)
@@ -588,7 +592,9 @@ export const RESTYLE_LORA_NB_RETRIES = 2
  * user's trained model); Moondream classifies that reference; then up to
  * 1 + RESTYLE_LORA_NB_RETRIES Nano Banana 2 passes (_run_nano_banana_edit,
  * with its fallback chain, at the node's resolution), each classified by
- * Moondream. The price is every call, the worst case.
+ * Moondream. The price is every call, the worst case: each call priced on
+ * its own and summed (R3.14, paidSettings.ts restyleLoraCalls; the runner
+ * charges the calls it made).
  */
 export function editSteps(classType: string, inputs: NodeInputs): EditStep[] | null {
   if (classType !== 'RestyleWithLoRANode') return null

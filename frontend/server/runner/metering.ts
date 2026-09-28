@@ -168,6 +168,10 @@ export const PAID_TEXT_INPUTS: Readonly<Record<string, readonly string[]>> = {
   // LoRAs' idea and taste (prompt_in, style_in) are sockets, moderated as every wired text is.
   FluxLoRARemoteNode: ['prompt', 'lora_url'],
   FluxMultiLoRARemoteNode: ['prompt', 'prompt_in', 'style_in', 'lora_a_url', 'lora_b_url', 'lora_c_url', 'lora_d_url'],
+  // R3.14, Restyle an Image · Style LoRA: the describe prompt (sent to Moondream), the extra direction (inside
+  // Sailor's restyle instruction) and the LoRA link. The caption Moondream answers is sent on in the Flux
+  // prompt: the node moderates it at its turn (PipelineIO.moderateText).
+  RestyleWithLoRANode: ['describe_prompt', 'extra_style_direction', 'lora_url'],
 }
 
 /** The non-blank values of RUNNER_EXTRA_TEXT_INPUTS (a typed-in taste, a paid class's PAID_TEXT_INPUTS) across the prompt, each on its own. */

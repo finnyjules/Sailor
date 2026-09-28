@@ -65,8 +65,8 @@ import { creditsForUsd } from './markup'
 import { callCredits, callsCredits, pipelineCallsOf } from './pipelinePrice'
 import { paidCallUsd } from './paidRates'
 import { PAID_NODE_CLASSES, paidCalls, type PaidCalls } from './paidSettings'
-import { editMaxUsd, editStepsUsd } from './editRates'
-import { SETTING_PRICED_NODE_CLASSES, editCalls, editSteps } from './editSettings'
+import { editMaxUsd } from './editRates'
+import { SETTING_PRICED_NODE_CLASSES, editCalls } from './editSettings'
 import { imagePriceMaxUsd, imagePriceUsd, imageRate } from './imageRates'
 import { LARGEST_RATIO, effectiveImageSettings } from './imageSettings'
 import { videoPriceMaxUsd, videoPriceUsd, videoRate } from './videoRates'
@@ -184,9 +184,6 @@ function imageNodeUsd(model: string, inputs: NodeInputs): number {
  * missing), or the refusal.
  */
 function editNodeUsd(classType: string, inputs: NodeInputs, opts: PriceOptions): number | { refused: string } {
-  // A node that runs several calls (RestyleWithLoRANode): all of them.
-  const steps = editSteps(classType, inputs)
-  if (steps) return editStepsUsd(steps) ?? { refused: `${classType} has a call with no listed price` }
   const c = editCalls(classType, inputs, { inputPixels: opts.inputPixels, families: opts.families })
   if ('refused' in c) return c
   let usd = 0
@@ -281,7 +278,7 @@ function paidNodePrice(classType: string, inputs: NodeInputs, opts: PriceOptions
  * `usd` is the PRICE BASIS in dollars — always `credits = creditsForUsd(usd)`.
  * For one plain call it is what the first service charges. It is NOT the
  * provider's cost when the node covers a fallback chain at cost or runs
- * several calls (editRates.ts editMaxUsd / editStepsUsd): there it can sit
+ * several calls (editRates.ts editMaxUsd, paidStepsPrice): there it can sit
  * above or below the first service's price. Never show it as "cost". Where
  * it reaches a screen today: the hosted run-confirm dialog's rows
  * (default.vue, `formatCostBadge(item.usd, …)`), which turn it back into

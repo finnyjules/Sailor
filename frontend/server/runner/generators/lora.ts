@@ -166,16 +166,16 @@ export async function resolveFluxLoraPlan(
   return { trainedModel: null, loraWeights: await autodetectHuggingface(sidecarText(ref ?? undefined), o, cache) }
 }
 
-// ── A widget as ComfyUI hands it to execute ──
+// ── A widget as ComfyUI hands it to execute (Restyle's builder reads its widgets the same way, R3.14) ──
 
-function text(inputs: Record<string, unknown>, name: string, def: string): string {
+export function text(inputs: Record<string, unknown>, name: string, def: string): string {
   const v = inputs[name]
   if (v === undefined || v === null) return def
   if (typeof v !== 'string') throw new Error('This setting must be text')
   return v
 }
 
-function int(inputs: Record<string, unknown>, name: string, def: number): number {
+export function int(inputs: Record<string, unknown>, name: string, def: number): number {
   const v = inputs[name]
   if (v === undefined || v === null) return def
   if (typeof v === 'number' && Number.isFinite(v)) return Math.trunc(v)
@@ -187,7 +187,7 @@ function int(inputs: Record<string, unknown>, name: string, def: number): number
   throw new Error('This number setting must be a whole number')
 }
 
-function float(inputs: Record<string, unknown>, name: string, def: number): number {
+export function float(inputs: Record<string, unknown>, name: string, def: number): number {
   const v = inputs[name]
   if (v === undefined || v === null) return def
   if (typeof v === 'number' && Number.isFinite(v)) return v

@@ -358,15 +358,16 @@ const MP1 = 1000 * 1000
  * covering that fallback's cost without marking it up.
  */
 const EXAMPLES: [string, Record<string, unknown>, number, number, number?][] = [
-  // RestyleWithLoRANode: 5 Moondream calls ($0.002) + the LoRA render ($0.04) + 3 Nano Banana 2 passes.
-  // 1K: marked $0.29 (44 cr) < every pass on NB Pro at cost $0.50 (50 cr) → 50.
-  ['RestyleWithLoRANode', {}, 0.33333333, 50],
-  ['RestyleWithLoRANode', { resolution: '1K' }, 0.33333333, 50],
-  // 2K: marked $0.41 → 62 beats $0.50 at cost.
-  ['RestyleWithLoRANode', { resolution: '2K' }, 0.41, 62],
-  // 4K: marked $0.53 (80) < every pass on NB Pro 4K at cost $0.95 → 95.
-  ['RestyleWithLoRANode', { resolution: '4K' }, 0.63333333, 95],
-  ['RestyleWithLoRANode', { resolution: LINK }, 0.63333333, 95],
+  // RestyleWithLoRANode: 5 Moondream calls ($0.002) + the LoRA render ($0.04) + 3 Nano Banana 2 passes,
+  // each call's own credits summed since R3.14 (runner-paid-restyle-lora.unit.spec.ts): 5 × 1 + 8 + 3 × a pass.
+  // 1K: a pass $0.08 (NB Pro at cost $0.075 is below it) → 16; 5 + 8 + 48 = 61.
+  ['RestyleWithLoRANode', {}, 0.29, 61],
+  ['RestyleWithLoRANode', { resolution: '1K' }, 0.29, 61],
+  // 2K: a pass $0.12 → 18; 5 + 8 + 54 = 67.
+  ['RestyleWithLoRANode', { resolution: '2K' }, 0.41, 67],
+  // 4K: a pass on NB Pro 4K at cost $0.20 beats the first call's $0.16 → 30; 5 + 8 + 90 = 103.
+  ['RestyleWithLoRANode', { resolution: '4K' }, 0.65, 103],
+  ['RestyleWithLoRANode', { resolution: LINK }, 0.65, 103],
   // Nano Banana 2 1K/2K: the first call's usual-markup price already covers every fallback's cost.
   ['EditImageNode', { model: 'Nano Banana 2', resolution: '1K' }, 0.08, 16],
   ['EditImageNode', { model: 'Nano Banana 2', resolution: '2K' }, 0.12, 18],

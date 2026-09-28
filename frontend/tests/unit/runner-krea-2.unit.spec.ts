@@ -393,7 +393,7 @@ describe('the price', () => {
       })
     }
     // Adding the backup cards moves no price, so the book's version stays F16's.
-    expect(PRICE_BOOK_VERSION).toBe('r3-lora')
+    expect(PRICE_BOOK_VERSION).toBe('r3-restyle-lora')
   })
 
   it('the basis: fal\'s price, since the backup covered at cost is less; one price covers either service and either path', () => {

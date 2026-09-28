@@ -34,11 +34,12 @@ describe('price book: graph pricer (unchanged spike behavior)', () => {
       3: { class_type: 'FluxLoRARemoteNode' },
       4: { class_type: 'FluxMultiLoRARemoteNode' },
     })
-    // RestyleWithLoRANode is priced by its calls since P4 fix round 2: at its
-    // default 1K, 50 (edit-pricing.unit.spec.ts pins the figures). Flux Dev +
-    // LoRA and Flux Dev + LoRAs by their calls since R3.13: 8, and 10 for one
-    // multi-LoRA call (no LoRA set: no retry; runner-paid-lora.unit.spec.ts).
-    expect(p.credits).toBe(1 + 50 + 8 + 10)
+    // RestyleWithLoRANode is priced by its calls since P4 fix round 2, each
+    // call's own credits summed since R3.14: at its default 1K, 61
+    // (edit-pricing.unit.spec.ts pins the figures). Flux Dev + LoRA and Flux
+    // Dev + LoRAs by their calls since R3.13: 8, and 10 for one multi-LoRA
+    // call (no LoRA set: no retry; runner-paid-lora.unit.spec.ts).
+    expect(p.credits).toBe(1 + 61 + 8 + 10)
   })
 
   // spike-v3: the two below-policy prices from the pricing analysis.

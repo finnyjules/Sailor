@@ -736,7 +736,8 @@ describe('an estimate never lowers the ComfyUI path (R3.9 fix round 2)', () => {
   it('the table: every R3.3–R3.9 class priced by its calls, at its flat row before R3', async () => {
     const { PRE_R3_FLAT } = await import('#shared/pricing/estimateFloor')
     const { creditsForUsd: credits } = await import('#shared/pricing/markup')
-    expect(Object.keys(PRE_R3_FLAT).sort()).toEqual([...PAID_NODE_CLASSES].sort())
+    // (RestyleWithLoRANode, R3.14, had no flat row before R3: priced by its calls since lineup-p4c.)
+    expect(Object.keys(PRE_R3_FLAT).sort()).toEqual([...PAID_NODE_CLASSES].filter(c => c !== 'RestyleWithLoRANode').sort())
     for (const [ct, row] of Object.entries(PRE_R3_FLAT)) expect(credits(row.badgeUsd), ct).toBe(row.credits)
   })
   it('the estimate-priced classes, each at max(estimate, old flat)', () => {

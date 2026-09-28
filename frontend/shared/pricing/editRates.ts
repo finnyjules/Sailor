@@ -292,30 +292,6 @@ export function editUsd(call: EditCall): number | null {
 export interface EditStep { call: EditCall, times: number }
 
 /**
- * The price of a node that makes several calls in one run, by the same rule
- * as one call's chain: the calls as first sent, with the usual markup, or the
- * run's worst case (every call on its dearest fallback) covered at cost —
- * whichever is higher. Null when any call has no card.
- */
-export function editStepsUsd(steps: readonly EditStep[]): number | null {
-  let marked = 0
-  let worst = 0
-  for (const { call, times } of steps) {
-    const first = editUsd(call)
-    if (first == null) return null
-    let dearest = first
-    for (const one of call.fallbacks ?? []) {
-      const p = editUsd(one)
-      if (p == null) return null
-      dearest = Math.max(dearest, p)
-    }
-    marked += first * times
-    worst += dearest * times
-  }
-  return Math.max(tidy(marked), usdChargedAtCost(tidy(worst)))
-}
-
-/**
  * The price that covers this call and every call the ComfyUI path falls back
  * to after it (controller ruling, P4): the first call carries the usual
  * markup, a fallback is only covered at cost — it is rarely taken, so it must

@@ -50,7 +50,9 @@ import {
 } from '../runner/audioGen'
 import { GEN_3D_CLASSES, GEN_3D_STEPS, HUNYUAN3D_MV_SLUG, HUNYUAN3D_SLUG, MULTI_VIEW_CLASS, multiViewSlugsOf } from '../runner/gen3d'
 import { FACE_SLUG, SKETCH_SLUG, textEffectSlug } from '../runner/imageExtras'
-import { FLUX_DEV_LORA_SLUG, FLUX_LORA_STEPS, FLUX_MULTI_LORA_SLUG, multiLoraCount } from '../runner/lora'
+import { FLUX_DEV_LORA_SLUG, FLUX_LORA_STEPS, FLUX_MULTI_LORA_SLUG, RESTYLE_LORA_CLASS, multiLoraCount } from '../runner/lora'
+import { editSteps } from './editSettings'
+import type { EditCall } from './editRates'
 
 /**
  * The most bytes of one moderated text in hosted (server/utils/moderation.ts
@@ -392,6 +394,42 @@ const LORA_PLANNERS: Readonly<Record<string, PaidPlanner>> = {
   },
 }
 
+// ── R3.14: Restyle an Image · Style LoRA (#shared/runner/lora) ──
+
+/** An edit card's call as a paid call (the same endpoint, tier, pixels and fallbacks: paidCallUsd prices it by its edit card). */
+function paidCallOf(c: EditCall): PaidCall {
+  return {
+    endpoint: c.endpoint, tier: c.tier, inputPixels: c.inputPixels, outputPixels: c.outputPixels,
+    ...(c.fallbacks ? { fallbacks: c.fallbacks.map(paidCallOf) } : {}),
+  }
+}
+
+/**
+ * Restyle an Image · Style LoRA's three kinds of call, as editSteps
+ * (editSettings.ts) lists them: Moondream (the caption and every verdict),
+ * the LoRA's Flux call (flux-dev-lora's edit card, $0.04, which covers the
+ * user's trained model the sidecar may name), and a Nano Banana 2 pass on
+ * fal at the node's resolution (a linked one at the dearest), with the
+ * ComfyUI path's fallbacks (fal Nano Banana Pro, then Replicate) covered at
+ * cost. The runner prices each call it sends from these (one calculation).
+ */
+export function restyleLoraCalls(inputs: NodeInputs): { moondream: { call: PaidCall, times: number }, stylize: { call: PaidCall, times: number }, nanoBanana: { call: PaidCall, times: number } } {
+  const [moondream, stylize, nanoBanana] = editSteps(RESTYLE_LORA_CLASS, inputs)!.map(s => ({ call: paidCallOf(s.call), times: s.times }))
+  return { moondream: moondream!, stylize: stylize!, nanoBanana: nanoBanana! }
+}
+
+/**
+ * Every call a run may make, each priced on its own and summed (R3.1's rule;
+ * before R3.14 the ComfyUI path marked up the summed dollars, editStepsUsd):
+ * Moondream five times (the caption, the verdict on the LoRA's picture, one
+ * verdict per pass), the Flux call once, 1 + RESTYLE_LORA_NB_RETRIES passes.
+ * The runner charges the calls that finished (ruling (f)).
+ */
+function restyleLoraPlanner(inputs: NodeInputs): PaidCalls {
+  const c = restyleLoraCalls(inputs)
+  return { steps: [c.moondream, c.stylize, c.nanoBanana] }
+}
+
 /** Python returns "" before calling anyone when the text is blank (typed; a wired one is priced as a call). */
 function llmNoCall(classType: LlmTextClass): ((inputs: NodeInputs) => boolean) | null {
   const name = LLM_NO_CALL_INPUT[classType]
@@ -411,6 +449,7 @@ const PAID_PLANNERS: Readonly<Record<string, PaidPlanner>> = {
   ...Object.fromEntries(GEN_3D_CLASSES.map(c => [c, gen3dPlanner(c)])),
   ...IMAGE_EXTRAS_PLANNERS,
   ...LORA_PLANNERS,
+  [RESTYLE_LORA_CLASS]: restyleLoraPlanner,
 }
 
 /** Each paid class's no-call rule (rule 8), where Python has one. Filled by each R3 task. */

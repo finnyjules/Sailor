@@ -10,7 +10,11 @@
  *    `lora_weights` (replicate_refs.py resolve_flux_lora_plan, :233-249);
  *  - FluxMultiLoRARemoteNode (:678-977): lucataco/flux-dev-multi-lora, with the
  *    reload retry (a second call, the order flipped, when the answer's logs
- *    lack "Downloading LoRA weights", :955-968).
+ *    lack "Downloading LoRA weights", :955-968);
+ *  - RestyleWithLoRANode (:3180-3432, R3.14): its Flux call is Flux Dev +
+ *    LoRA's plan with the same `lora_name` and `lora_url` widgets, but it
+ *    reads the picked LoRA's sidecar (its trigger and aesthetic) even when a
+ *    link is pasted, and its guidance widget is `flux_guidance`.
  *
  * The pure parts of replicate_refs.py that decide what a LoRA reference is
  * are ported here, line for line (`_is_replicate_model_ref`,
@@ -71,6 +75,14 @@ export const LORA_URL_INPUTS: Readonly<Record<LoraClass, readonly string[]>> = {
   FluxLoRARemoteNode: ['lora_url'],
   FluxMultiLoRARemoteNode: MULTI_LORA_SLOTS.map(s => s.url),
 }
+
+/** Restyle an Image · Style LoRA (R3.14): a pipeline whose Flux call is Flux Dev + LoRA's plan. */
+export const RESTYLE_LORA_CLASS = 'RestyleWithLoRANode'
+/** Its Nano Banana resolutions and output formats (define_schema's options). */
+export const RESTYLE_LORA_RESOLUTIONS = ['1K', '2K', '4K'] as const
+export const RESTYLE_LORA_FORMATS = ['png', 'jpg'] as const
+/** Restyle's Flux guidance over flux-dev-lora's schema maximum (FLUX_DEV_LORA_GUIDANCE_MAX): its own words. */
+export const RESTYLE_GUIDANCE_TOO_HIGH = 'Restyle an image takes a Flux guidance up to 10 with this LoRA. Pick a smaller one.'
 
 export function isLoraClass(classType: unknown): classType is LoraClass {
   return classType === FLUX_LORA_CLASS || classType === FLUX_MULTI_LORA_CLASS
@@ -204,6 +216,8 @@ export function namesLora(name: unknown): name is string {
  * link is left out (the rule row sends a wired widget to the engine).
  */
 export function loraNamesUsed(classType: string, inputs: Record<string, unknown>): { input: string, name: string }[] {
+  // Restyle reads its picked LoRA's sidecar whatever the link (the trigger and aesthetic go into its prompt).
+  if (classType === RESTYLE_LORA_CLASS) return !isLink(inputs.lora_name) && namesLora(inputs.lora_name) ? [{ input: 'lora_name', name: inputs.lora_name }] : []
   if (!isLoraClass(classType)) return []
   const pairs = classType === FLUX_LORA_CLASS ? [{ name: 'lora_name', url: 'lora_url' }] : MULTI_LORA_SLOTS
   const out: { input: string, name: string }[] = []
@@ -222,6 +236,8 @@ export const LORA_BY_NAME_HOSTED = 'Your own LoRAs can’t be used here yet. Pas
 export const LORA_TRAINED_MODEL_HOSTED = 'A trained model’s address can’t be used here yet. Paste a public LoRA link from HuggingFace or CivitAI, or a .safetensors link.'
 export const LORA_LINK_NOT_PUBLIC = 'This LoRA link isn’t one Sailor can use here. Paste a public LoRA link from HuggingFace or CivitAI, or a .safetensors link.'
 export const LORA_WIRED_HOSTED = 'A LoRA can’t come from a wire here. Paste a public LoRA link from HuggingFace or CivitAI, or a .safetensors link.'
+/** Restyle reads a picked LoRA's settings file even beside a pasted link: hosted asks for none picked. */
+export const RESTYLE_LORA_BY_NAME_HOSTED = 'Your own LoRAs can’t be used here yet. Set the LoRA to none, and paste a public LoRA link from HuggingFace or CivitAI, or a .safetensors link.'
 /** Python raises "No LoRAs resolved…" (:909-914) before any call: the runner's plain words for it. */
 export const MULTI_LORA_NEEDS_LORA = 'Flux Dev + LoRAs needs at least one LoRA. Pick one, or paste a HuggingFace, CivitAI or .safetensors link.'
 
@@ -265,6 +281,7 @@ export function isHttpsSafetensors(value: string): boolean {
  * can't be judged before the run: refused too, as a wired voice is.
  */
 export function hostedLoraProblem(classType: unknown, inputs: Record<string, unknown>): { input: string, message: string } | null {
+  if (classType === RESTYLE_LORA_CLASS) return hostedRestyleLoraProblem(inputs)
   if (!isLoraClass(classType)) return null
   const pairs = classType === FLUX_LORA_CLASS ? [{ name: 'lora_name', url: 'lora_url' }] : MULTI_LORA_SLOTS
   for (const s of pairs) {
@@ -283,6 +300,21 @@ export function hostedLoraProblem(classType: unknown, inputs: Record<string, unk
 }
 
 /**
+ * Restyle an Image · Style LoRA in hosted (ruling (i), R3.14): its link is
+ * read as Flux Dev + LoRA's (a trained model's address and a link that isn't
+ * public refused); a picked LoRA is refused even beside a link, since the
+ * node reads its settings file either way; a wired picker or link too.
+ */
+function hostedRestyleLoraProblem(inputs: Record<string, unknown>): { input: string, message: string } | null {
+  if (isLink(inputs.lora_url)) return { input: 'lora_url', message: LORA_WIRED_HOSTED }
+  if (isLink(inputs.lora_name)) return { input: 'lora_name', message: LORA_WIRED_HOSTED }
+  const link = pyStrip(str(inputs.lora_url))
+  if (link && isReplicateModelRef(link)) return { input: 'lora_url', message: LORA_TRAINED_MODEL_HOSTED }
+  if (link && !isPublicLoraLink(FLUX_LORA_CLASS, link)) return { input: 'lora_url', message: LORA_LINK_NOT_PUBLIC }
+  return namesLora(inputs.lora_name) ? { input: 'lora_name', message: RESTYLE_LORA_BY_NAME_HOSTED } : null
+}
+
+/**
  * What the runner refuses before the hold, from the prompt as sent: Flux Dev
  * + LoRAs with no LoRA in any slot (every link blank and every picker
  * '[None]'), where Python raises before its call. A wired slot is judged at
@@ -290,6 +322,8 @@ export function hostedLoraProblem(classType: unknown, inputs: Record<string, unk
  */
 export function loraRequestProblem(classType: string, inputs: Record<string, unknown>): { input: string, message: string } | null {
   if (classType === FLUX_LORA_CLASS) return fluxDevLoraSure(inputs) ? fluxLoraGuidanceProblem(inputs) : null
+  // Restyle's Flux call is Flux Dev + LoRA's plan (R3.14): its `flux_guidance`, when the prompt shows flux-dev-lora.
+  if (classType === RESTYLE_LORA_CLASS) return fluxDevLoraSure(inputs) ? fluxLoraGuidanceProblem(inputs, RESTYLE_GUIDANCE) : null
   if (classType !== FLUX_MULTI_LORA_CLASS) return null
   for (const s of MULTI_LORA_SLOTS) {
     if (isLink(inputs[s.name]) || isLink(inputs[s.url])) return null
@@ -298,11 +332,20 @@ export function loraRequestProblem(classType: string, inputs: Record<string, unk
   return { input: MULTI_LORA_SLOTS[0].name, message: MULTI_LORA_NEEDS_LORA }
 }
 
-/** A guidance flux-dev-lora refuses (over FLUX_DEV_LORA_GUIDANCE_MAX), typed; a wired one is left to the engine. */
-export function fluxLoraGuidanceProblem(inputs: Record<string, unknown>): { input: string, message: string } | null {
-  const g = inputs.guidance
+/** Restyle's guidance widget and its words (R3.14). */
+export const RESTYLE_GUIDANCE = { input: 'flux_guidance', message: RESTYLE_GUIDANCE_TOO_HIGH } as const
+
+/**
+ * A guidance flux-dev-lora refuses (over FLUX_DEV_LORA_GUIDANCE_MAX), typed;
+ * a wired one is left to the engine. `o`: the widget and the words (Flux Dev
+ * + LoRA's `guidance` by default; Restyle's `flux_guidance`, RESTYLE_GUIDANCE).
+ */
+export function fluxLoraGuidanceProblem(
+  inputs: Record<string, unknown>, o: { input: string, message: string } = { input: 'guidance', message: FLUX_LORA_GUIDANCE_TOO_HIGH },
+): { input: string, message: string } | null {
+  const g = inputs[o.input]
   const n = typeof g === 'number' ? g : typeof g === 'string' ? Number(pyStrip(g)) : Number.NaN
-  return Number.isFinite(n) && n > FLUX_DEV_LORA_GUIDANCE_MAX ? { input: 'guidance', message: FLUX_LORA_GUIDANCE_TOO_HIGH } : null
+  return Number.isFinite(n) && n > FLUX_DEV_LORA_GUIDANCE_MAX ? { input: o.input, message: o.message } : null
 }
 
 /**

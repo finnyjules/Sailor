@@ -363,6 +363,9 @@ export const RUNNER_ROUTES: Readonly<Record<string, Route>> = {
   // R3.13, Flux Dev + LoRA and Flux Dev + LoRAs (family lora): Replicate, as Python.
   'FluxLoRARemoteNode': r('replicate', null, 'fal\'s flux-lora is another service\'s LoRA loader, priced per megapixel, and can\'t run a trained model'),
   'FluxMultiLoRARemoteNode': r('replicate', null, 'fal\'s flux-lora is another service\'s LoRA loader, priced per megapixel'),
+  // R3.14, Restyle an Image · Style LoRA (family lora): its first call, the caption, on Replicate as Python; its Nano
+  // Banana passes on fal (as Python's first choice), no backup.
+  'RestyleWithLoRANode': r('replicate', null, 'Moondream isn\'t carded on fal; Replicate\'s Nano Banana 2 takes no seed, and this node\'s seeds make its passes repeatable'),
 }
 
 // ── Generate video: the two models moved to fal first ──────────────────────

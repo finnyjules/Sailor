@@ -1362,6 +1362,8 @@ export function createEngine(deps: EngineDeps) {
               const cr = rec.calls?.find(c => c.key === key && c.status !== 'error')
               return cr ? cr.payload : null
             },
+            // A text the node made in the run and sends on (R3.14), moderated as a wired text is at its turn (hosted only).
+            moderateText: text => deps.metering.moderateText(text),
             handOff: async (bytes, name) => {
               const f = await kept.put(run.id, bytes, keptExtOf(name))
               // Uploaded under the node's own name (its type goes by it); remembered by the bytes.

@@ -67,6 +67,8 @@ export const RUNNER_OUTPUT_CLASSES: ReadonlySet<string> = new Set([
   'SplitPhotoLayersNode',
   // R3.9: the three 3D nodes are output nodes (is_output_node=True; the twin too).
   'Generate3DNode', 'Hunyuan3DRemoteNode', 'Hunyuan3DMultiViewNode',
+  // R3.14: Restyle an Image · Style LoRA is one too (is_output_node=True; Flux Dev + LoRA(s), R3.13, are not).
+  'RestyleWithLoRANode',
 ])
 
 /** ComfyUI's node_errors entry for a node that failed validation. */

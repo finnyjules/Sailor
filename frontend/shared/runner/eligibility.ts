@@ -34,7 +34,7 @@ import {
 import {
   FACE_ASPECT_RATIOS, FACE_MODELS, IMAGE_EXTRAS_CLASSES, SKETCH_MODELS, TEXT_EFFECT_ASPECT_RATIOS, TEXT_EFFECT_IDS,
 } from './imageExtras'
-import { FLUX_LORA_ASPECT_RATIOS, FLUX_LORA_MEGAPIXELS, FLUX_LORA_STEPS, LORA_CLASSES, MULTI_LORA_SLOTS } from './lora'
+import { FLUX_LORA_ASPECT_RATIOS, FLUX_LORA_MEGAPIXELS, FLUX_LORA_STEPS, LORA_CLASSES, MULTI_LORA_SLOTS, RESTYLE_LORA_CLASS, RESTYLE_LORA_FORMATS, RESTYLE_LORA_RESOLUTIONS } from './lora'
 import {
   BRAINSTORM_ANGLES, CHAT_LLM_MODELS, IMPROVE_PROMPT_MODELS, IMPROVE_PROMPT_TARGETS, REASON_MODELS, REWRITE_MODELS, REWRITE_TONES,
   SUMMARIZE_LENGTHS, SUMMARIZE_MODELS, TRANSLATE_LANGUAGES,
@@ -357,6 +357,8 @@ export const PAID_PICTURE_FAMILY: Readonly<Record<string, RunnerFamily>> = {
   ...Object.fromEntries(IMAGE_EXTRAS_CLASSES.map(c => [c, 'image-extras' as const])),
   // R3.13: Flux Dev + LoRA's and Flux Dev + LoRAs' picture.
   ...Object.fromEntries(LORA_CLASSES.map(c => [c, 'lora' as const])),
+  // R3.14: Restyle an Image · Style LoRA's picture.
+  [RESTYLE_LORA_CLASS]: 'lora',
 }
 
 /**
@@ -1204,6 +1206,32 @@ export const RUNNER_NODE_RULES: Readonly<Record<string, RunnerNodeRule>> = {
       prompt_strength: { type: 'FLOAT', required: true, min: 0, max: 1 },
     },
   },
+  // ── lora (step 3, R3.14): Restyle an Image · Style LoRA, a pipeline on
+  // Replicate and fal. The picture is a linked picture (the handed-off
+  // file); the describe prompt and the extra direction take a text wire (R0:
+  // the value arrives as typed); every other setting is a widget as ComfyUI
+  // validates it (define_schema's options and bounds), the LoRA picker as
+  // Flux Dev + LoRA's (its name checked by the server at the start). A wired
+  // widget leaves the node to the engine.
+  [RESTYLE_LORA_CLASS]: {
+    family: 'lora',
+    mustLink: ['content_image'],
+    imageInputs: ['content_image'],
+    valueInputs: { describe_prompt: ['text'], extra_style_direction: ['text'] },
+    required: ['describe_prompt', 'extra_style_direction'],
+    widgets: {
+      lora_name: { type: 'STRING', required: true },
+      style_strength: { type: 'FLOAT', required: true, min: 0, max: 1 },
+      resolution: { type: 'COMBO', required: true, options: RESTYLE_LORA_RESOLUTIONS },
+      seed: { type: 'INT', required: true, min: 0, max: 0xFFFFFFFF },
+      lora_url: { type: 'STRING', required: true },
+      lora_scale: { type: 'FLOAT', required: true, min: 0, max: 1.5 },
+      flux_prompt_strength: { type: 'FLOAT', required: true, min: 0, max: 1 },
+      flux_steps: { type: 'INT', required: true, min: FLUX_LORA_STEPS.min, max: FLUX_LORA_STEPS.max },
+      flux_guidance: { type: 'FLOAT', required: true, min: 0, max: 20 },
+      output_format: { type: 'COMBO', required: true, options: RESTYLE_LORA_FORMATS },
+    },
+  },
   // ── effects-* (step 3, R2): the still-picture effects (./effects.ts, server/runner/effects/) ──
   // Rows built from the real node schemas (./effectSchemas.generated.ts), one
   // per ported class; each needs its family and `cards`.
@@ -1270,6 +1298,8 @@ export const SWITCHED_CLASSES: Readonly<Record<string, RunnerFamily>> = {
   ...Object.fromEntries(IMAGE_EXTRAS_CLASSES.map(c => [c, 'image-extras' as const])),
   // R3.13: Flux Dev + LoRA and Flux Dev + LoRAs.
   ...Object.fromEntries(LORA_CLASSES.map(c => [c, 'lora' as const])),
+  // R3.14: Restyle an Image · Style LoRA.
+  [RESTYLE_LORA_CLASS]: 'lora',
 }
 
 /**

@@ -296,7 +296,7 @@ describe('prices (ruling (a))', () => {
       expect(Object.prototype.hasOwnProperty.call(GRAPH_NODE_CREDITS, c), c).toBe(false)
       expect(PROVIDER_TYPES.has(c)).toBe(true)
     }
-    expect(PRICE_BOOK_VERSION).toBe('r3-lora')
+    expect(PRICE_BOOK_VERSION).toBe('r3-restyle-lora')
   })
 
   it('the runner pays the card: Hunyuan3D 2 20; Multi-View by its engine — TRELLIS 12, Hunyuan3D-2mv by its steps (20 at 20–30, 26 at 50, 51 at 100), Rodin 60; a wired engine at the dearest', () => {

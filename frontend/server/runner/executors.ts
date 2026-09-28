@@ -131,6 +131,7 @@ import { planAudioGen } from './generators/audioGen'
 import { planGen3d } from './generators/gen3d'
 import { planImageExtras } from './generators/imageExtras'
 import { planLora } from './generators/lora'
+import { planRestyleLora } from './generators/restyleLora'
 import type { KeptExt } from './keptBytes'
 import type { AnswerKind } from './answerDownload'
 import { filesOf } from './values'
@@ -233,6 +234,12 @@ export interface PipelineIO extends DeriveIO {
    * turns the runner's order toggle again and sends a different request).
    */
   recorded?(key: string): Record<string, unknown> | null
+  /**
+   * Hosted: moderates a text the node is about to send that it made in the
+   * run (R3.14: Restyle's caption, Moondream's answer, sent on in the Flux
+   * prompt); throws the moderation refusal. Locally nothing.
+   */
+  moderateText?(text: string): Promise<void>
   /** Hands off bytes the node made itself (a mask, an RGB copy): kept by sha256, then uploaded. */
   handOff(bytes: Uint8Array, name: string): Promise<string>
   toUrl(file: OutputFile): Promise<string>
@@ -1154,6 +1161,9 @@ async function planNodeRequest(ctx: PlanContext): Promise<NodePlan> {
     case 'FluxLoRARemoteNode':
     case 'FluxMultiLoRARemoteNode':
       return planLora(ctx)
+    // ── lora (step 3, R3.14): Restyle an Image · Style LoRA, a pipeline of up to nine calls (Replicate and fal) ──
+    case 'RestyleWithLoRANode':
+      return planRestyleLora(ctx)
     case 'Text': return staticDerive(ctx, textCardUi)
     case 'Moodboard': return staticDerive(ctx)
     case 'Model3D': return staticDerive(ctx, textCardUi)

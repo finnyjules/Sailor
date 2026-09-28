@@ -94,7 +94,18 @@ Groups:
              reload retry, the order toggle), for
              frontend/server/runner/generators/lora.ts
              (tests/unit/runner-paid-lora.unit.spec.ts)
-  handoff    (R3.H) the PNG `_image_tensor_to_data_url` sends for a loader's
+  restyle-lora (R3.14) Restyle an Image · Style LoRA (Moondream caption, the
+             LoRA's Flux Dev restyle, Moondream's photo-or-illustration
+             verdicts and up to three Nano Banana 2 passes on fal): style
+             strength 0, 0.5 and 1 with the Flux strength derived and set;
+             a trained model, sidecars with a trigger and an aesthetic, links
+             and a bare ref looked up; a photo target, an illustration target
+             that holds on the first pass, on the third and never; classifiers
+             that fail; an empty caption; the seeds (0xFFFFFFFF: the mask on
+             Nano Banana's seed); every resolution and format, for
+             frontend/server/runner/generators/restyleLora.ts
+             (tests/unit/runner-paid-restyle-lora.unit.spec.ts)
+  handoff   (R3.H) the PNG `_image_tensor_to_data_url` sends for a loader's
              tensor: every file kind (EXIF 2–8, RGBA, grey + alpha, palette and
              colour-key transparency, CMYK, 16-bit, WebP, GIF…) through the real
              LoadImage and the real Image card, sent by Edit an image (fal) and
@@ -387,6 +398,9 @@ def capture_calls(node_cls, answers: list, links: dict | None = None, files: dic
         if not queue:
             raise RuntimeError(f"no answer programmed for call {len(calls)} ({endpoint})")
         a = queue.pop(0)
+        # A call that fails at the provider ({"__raise__": message}, R3.14): the call raises RuntimeError(message).
+        if isinstance(a, dict) and set(a) == {"__raise__"}:
+            raise RuntimeError(a["__raise__"])
         # A body text given as it is ({"__body__": text}, paidParity.ts RawBody): what json.loads reads of it.
         return json.loads(a["__body__"]) if isinstance(a, dict) and set(a) == {"__body__"} else a
 
@@ -2142,6 +2156,189 @@ def lora_group() -> dict:
         shutil.rmtree(tmp, ignore_errors=True)
 
 
+# ── restyle-lora (R3.14): Restyle an Image · Style LoRA ────────────────────────
+
+RESTYLE_FLUX = "https://r.test/restyle/flux.png"
+RESTYLE_FLUX_RGBA = "https://r.test/restyle/flux-rgba.png"
+RESTYLE_NB = ("https://f.test/restyle/nb-1.png", "https://f.test/restyle/nb-2.png", "https://f.test/restyle/nb-3.png")
+RESTYLE_NB_RGBA = "https://f.test/restyle/nb-rgba.png"
+RESTYLE_LORA_URL = "https://huggingface.co/alice/style-lora"
+# Restyle's own sidecars, beside the lora group's (LORA_FILES): a trigger with an aesthetic whose keyword
+# tail follows a blank line, prose with no tail under taste_profile, a trigger that isn't text.
+RESTYLE_FILES = {
+    **LORA_FILES,
+    "collage.safetensors": json.dumps({"replicate_url": "https://replicate.delivery/c/collage.tar", "trigger": " RCR ",
+                                       "aesthetic": "A rough, cut-paper collage look.\n\n torn paper, halftone, muted palette "}),
+    "prose.safetensors": json.dumps({"replicate_url": "https://replicate.delivery/p/prose.tar", "trigger": "",
+                                     "aesthetic": "   ", "taste_profile": "  bold ink lines only  "}),
+    "bad_trigger.safetensors": json.dumps({"replicate_url": "https://replicate.delivery/b/bad.tar", "trigger": 5}),
+    "falsy_trigger.safetensors": json.dumps({"replicate_url": "https://replicate.delivery/f/falsy.tar", "trigger": 0, "aesthetic": 7}),
+}
+RESTYLE_HF = {"https://huggingface.co/api/models/alice/hf-lora": {"status": 200, "text": "{\"id\": \"alice/hf-lora\"}"}}
+
+
+def restyle_lora_group() -> dict:
+    """R3.14: Restyle an Image · Style LoRA (RestyleWithLoRANode), for
+    frontend/server/runner/generators/restyleLora.ts
+    (tests/unit/runner-paid-restyle-lora.unit.spec.ts):
+      loras     — the temporary models/loras/ the cases read (file → sidecar
+                  text, null for a LoRA with no sidecar)
+      cases     — paid_case of every branch, with the answers scripted: the
+                  caption, the LoRA's picture, the verdict on it (photo,
+                  illustration, a failure), each Nano Banana pass and its
+                  verdict; the final picture is downloaded as Python does
+      catalogue — restyle_style_strength_to_knobs, sidecar_aesthetic,
+                  aesthetic_to_keywords, build_flux_style_prompt,
+                  classify_style_answer and build_restyle_instruction on their
+                  own, over awkward values"""
+    import shutil
+    import tempfile
+    import folder_paths
+    import runner_builder_fixtures as rbf
+    nr, _fal, _extras = rbf._node_modules()
+    from comfy_api_nodes import replicate_refs as rr
+
+    node = nr.RestyleWithLoRANode
+    defaults = {"lora_name": "[None]", "style_strength": 0.5, "resolution": "1K", "seed": 0, "lora_url": RESTYLE_LORA_URL,
+                "lora_scale": 1.0, "flux_prompt_strength": 0.0, "flux_steps": 28, "flux_guidance": 3.5,
+                "describe_prompt": nr._RESTYLE_DESCRIBE_PROMPT, "extra_style_direction": "", "output_format": "png"}
+    files = {RESTYLE_FLUX: _b64(png_bytes(8, 6, 41)), RESTYLE_FLUX_RGBA: _b64(png_bytes(8, 6, 42, "RGBA")),
+             RESTYLE_NB[0]: _b64(png_bytes(8, 6, 43)), RESTYLE_NB[1]: _b64(png_bytes(8, 6, 44)), RESTYLE_NB[2]: _b64(png_bytes(8, 6, 45)),
+             RESTYLE_NB_RGBA: _b64(png_bytes(8, 6, 46, "RGBA"))}
+    caption = {"output": ["A woman", " in a red coat", " walks a dog in a park."]}
+
+    def verdict(v):
+        return v if isinstance(v, dict) else {"output": v}
+
+    def script(ref, passes=(), flux=RESTYLE_FLUX, cap=None):
+        """The answers in call order: the caption, the LoRA's picture, the verdict on it, then each pass
+        (its picture, and for an illustration target the verdict on it)."""
+        out = [cap or caption, {"output": [flux]}, verdict(ref)]
+        for pic, v in passes:
+            out.append({"images": [{"url": pic, "width": 8, "height": 6}]})
+            if v is not None:
+                out.append(verdict(v))
+        return out
+
+    photo = script("photograph", [(RESTYLE_NB[0], None)])
+    ill_first = script(["illus", "tration"], [(RESTYLE_NB[0], "illustration")])
+    ill_third = script("illustration", [(RESTYLE_NB[0], "photograph"), (RESTYLE_NB[1], "a photo"), (RESTYLE_NB[2], "Illustration.")])
+    ill_never = script("illustration", [(RESTYLE_NB[0], "photograph"), (RESTYLE_NB[1], "photograph"), (RESTYLE_NB[2], "real-life photo")])
+
+    cases: list = []
+    tmp = tempfile.mkdtemp(prefix="sailor-restyle-loras-")
+    try:
+        for name, sidecar in RESTYLE_FILES.items():
+            path = os.path.join(tmp, name)
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "wb") as f:
+                f.write(b"")
+            if sidecar is not None:
+                with open(os.path.splitext(path)[0] + ".json", "w", encoding="utf-8") as f:
+                    f.write(sidecar)
+        exts = folder_paths.folder_names_and_paths["loras"][1]
+
+        def add(name, widgets, answers, links=None):
+            case = paid_case(name, node, {**defaults, **widgets}, answers, pictures=["content_image"], files=files, links=links)
+            cases.append(case)
+
+        with mock.patch.dict(folder_paths.folder_names_and_paths, {"loras": ([tmp], exts)}):
+            # Style strength 0, 0.5 and 1, with the Flux strength derived (0) and set (0.7).
+            for s in (0.0, 0.5, 1.0):
+                for fps in (0.0, 0.7):
+                    add(f"strength {s} · flux strength {fps}", {"style_strength": s, "flux_prompt_strength": fps}, photo)
+            add("strength 0.34 · flux strength 1.0", {"style_strength": 0.34, "flux_prompt_strength": 1.0}, photo)
+            add("strength 0.66", {"style_strength": 0.66}, photo)
+            # The describe prompt: the old default (migrated, padded too), a custom one, a blank one.
+            add("describe prompt · old default", {"describe_prompt": "Describe this image in detail."}, photo)
+            add("describe prompt · old default padded", {"describe_prompt": "  Describe this image in detail.\n"}, photo)
+            add("describe prompt · custom", {"describe_prompt": "  Who is in the picture? Café — naïve  "}, photo)
+            add("describe prompt · blank", {"describe_prompt": ""}, photo)
+            # The extra direction: set, padded, spaces only.
+            add("extra direction · set", {"extra_style_direction": "  watercolor, cyberpunk neon  "}, photo)
+            add("extra direction · spaces", {"extra_style_direction": " \n "}, photo)
+            add("extra direction · set · illustration third", {"extra_style_direction": "gouache", "style_strength": 0.9}, ill_third)
+            # The LoRA: picked by name (a trained model; sidecars with a trigger and an aesthetic), linked, looked up, none.
+            add("lora · trained by name", {"lora_name": "trained.safetensors", "lora_url": ""}, photo)
+            add("lora · trained by name · guidance 20", {"lora_name": "trained.safetensors", "lora_url": "", "flux_guidance": 20.0}, photo)
+            add("lora · collage by name", {"lora_name": "collage.safetensors", "lora_url": ""}, photo)
+            add("lora · prose by name · link", {"lora_name": "prose.safetensors"}, photo)
+            add("lora · trained by name · link wins", {"lora_name": "trained.safetensors"}, photo)
+            add("lora · falsy trigger by name", {"lora_name": "falsy_trigger.safetensors", "lora_url": ""}, photo)
+            add("lora · no sidecar by name", {"lora_name": "nosidecar.safetensors", "lora_url": ""}, photo)
+            add("lora · broken sidecar by name", {"lora_name": "broken.safetensors", "lora_url": ""}, photo)
+            add("lora · null sidecar by name", {"lora_name": "null.safetensors", "lora_url": ""}, photo)
+            add("lora · trained ref link", {"lora_url": "finnyjules/my-style:abc123"}, photo)
+            add("lora · bare ref found", {"lora_url": "alice/hf-lora/sub/file.bin"}, photo, links=RESTYLE_HF)
+            add("lora · hf.co link", {"lora_url": " hf.co/alice/style-lora "}, photo)
+            add("lora · none", {"lora_url": ""}, photo)
+            # Python fails after the caption (paid): a sidecar it can't read, a trigger that isn't text, a number for a model.
+            add("lora · list sidecar by name", {"lora_name": "list.safetensors", "lora_url": ""}, [caption])
+            add("lora · bad trigger by name", {"lora_name": "bad_trigger.safetensors", "lora_url": ""}, [caption])
+            add("lora · numeric model by name", {"lora_name": "numeric.safetensors", "lora_url": ""}, [caption])
+            # The Flux settings; a guidance flux-dev-lora refuses (the runner refuses it first).
+            add("flux settings", {"lora_scale": 0.25, "flux_steps": 50, "flux_guidance": 0.0, "style_strength": 0.8}, photo)
+            add("flux guidance 20", {"flux_guidance": 20.0}, photo)
+            # The target: a photo (trusted at once), an illustration held on the first, the third and no pass.
+            add("target · photo", {}, photo)
+            add("target · illustration · first", {}, ill_first)
+            add("target · illustration · third", {}, ill_third)
+            add("target · illustration · never", {}, ill_never)
+            add("target · illustration · never · reference with alpha", {}, script("illustration", [(RESTYLE_NB[0], "photo"), (RESTYLE_NB[1], "photo"),
+                                                                                               (RESTYLE_NB[2], "photo")], flux=RESTYLE_FLUX_RGBA))
+            # The classifier failing (any failure reads as a photo): on the reference, and on a pass.
+            add("classifier fails · reference", {}, script({"__raise__": "Replicate: prediction failed"}, [(RESTYLE_NB[0], None)]))
+            add("classifier fails · first pass", {}, script("illustration", [(RESTYLE_NB[0], {"__raise__": "Replicate: prediction failed"}),
+                                                                             (RESTYLE_NB[1], "illustration")]))
+            # Verdicts in other shapes: nothing, blank, a word with neither hint, a dict (its repr is read).
+            add("verdict · none", {}, script({"output": None}, [(RESTYLE_NB[0], None)]))
+            add("verdict · blank tokens", {}, script(["", " "], [(RESTYLE_NB[0], None)]))
+            add("verdict · neither", {}, script("a picture", [(RESTYLE_NB[0], None)]))
+            add("verdict · dict", {}, script({"output": {"medium": "illustration", "sure": True}}, [(RESTYLE_NB[0], {"output": {"medium": "photo"}}),
+                                                                                                   (RESTYLE_NB[1], {"output": ["3D ", "render"]})]))
+            add("verdict · number", {}, script({"output": 3}, [(RESTYLE_NB[0], None)]))
+            # The caption: empty (the stand-in), a string, spaces only.
+            add("caption · empty", {}, script("photograph", [(RESTYLE_NB[0], None)], cap={"output": []}))
+            add("caption · string", {}, script("photograph", [(RESTYLE_NB[0], None)], cap={"output": "  A lighthouse at dusk.  "}))
+            add("caption · spaces", {"lora_name": "collage.safetensors", "lora_url": ""}, script("photograph", [(RESTYLE_NB[0], None)], cap={"output": ["  ", "\n"]}))
+            add("caption · none", {}, script("photograph", [(RESTYLE_NB[0], None)], cap={"output": None}))
+            # The seeds (the Nano Banana seed is (seed + pass) & 0xFFFFFFFF, sent only when above 0).
+            for seed in (0, 1, 42, 0xFFFFFFFE, 0xFFFFFFFF):
+                add(f"seed {seed}", {"seed": seed}, ill_never)
+            # Each resolution and format.
+            for res in ("1K", "2K", "4K"):
+                for fmt in ("png", "jpg"):
+                    add(f"resolution {res} · format {fmt}", {"resolution": res, "output_format": fmt}, photo)
+            # A pass with alpha (dropped).
+            add("pass with alpha", {}, script("photograph", [(RESTYLE_NB_RGBA, None)]))
+
+        values = [-0.5, 0.0, 0.05, 0.33, 0.34, 0.5, 0.65, 0.66, 0.67, 0.9, 1.0, 1.5]
+        catalogue = {
+            "knobs": [{"style": s, "override": o, "out": list(rr.restyle_style_strength_to_knobs(s, o))}
+                      for s in values for o in (0.0, -0.3, 0.05, 0.7, 1.0, 1.4)],
+            "aesthetic": [{"sidecar": sc, "out": rr.sidecar_aesthetic(sc)} for sc in (
+                None, {}, {"aesthetic": ""}, {"aesthetic": "  a  "}, {"aesthetic": "  ", "taste_profile": " b "}, {"aesthetic": 5, "taste_profile": "c"},
+                {"taste_profile": ["x"]}, {"aesthetic": "x", "taste_profile": "y"})],
+            "keywords": [{"aesthetic": a, "out": rr.aesthetic_to_keywords(a)} for a in (
+                "", "   ", "prose only", "a, b", "prose.\n\nk1, k2", "prose.\n\n\n\nk1, k2\n\n", "prose, with comma\n\nno tail here",
+                "one\n\ntwo\n\nthree, four", "\n\n", " x \n\n , ", "tabs\t\n\nk　a, b")],
+            "prompt": [{"trigger": t, "aesthetic": a, "caption": c, "out": rr.build_flux_style_prompt(t, a, c)}
+                       for t in ("", " TOK ", "　") for a in ("", "prose.\n\nk1, k2") for c in ("", " a dog ", "a café")],
+            "classify": {a: rr.classify_style_answer(a) for a in (
+                "", "   ", "photograph", "Photo.", "illustration", "An ILLUSTRATED photo", "real life", "real-life", "3D", "CGI",
+                "stylised", "stylized", "graphic", "painting", "comic", "anime", "cel", "sketch", "unknown", "a picture",
+                "{'medium': 'illustration'}", "Real life", "PHOTOGRAPH\n")},
+            "instruction": [{"structure": s, "extra": e, "out": rr.build_restyle_instruction(s, e)}
+                            for s in (0.0, 0.33, 0.34, 0.65, 0.66, 1.0) for e in ("", "  gouache  ", "　")],
+            "retry": rr.RESTYLE_ANTIPHOTO_RETRY,
+            "describe_prompt": nr._RESTYLE_DESCRIBE_PROMPT,
+            "max_retries": nr._RESTYLE_MAX_NB_RETRIES,
+        }
+        return {"cases": cases, "loras": RESTYLE_FILES, "catalogue": catalogue}
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
 GROUPS = {
     "handoff": handoff_group,
     "machinery": machinery_group,
@@ -2155,6 +2352,7 @@ GROUPS = {
     "film-shot": film_shot_group,
     "image-extras": image_extras_group,
     "lora": lora_group,
+    "restyle-lora": restyle_lora_group,
 }
 
 

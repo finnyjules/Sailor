@@ -242,7 +242,15 @@ export { VIDEO_RATES, MODEL_PRICED_NODE_CLASSES, SETTING_PRICED_NODE_CLASSES, RE
 // calls when two or more LoRAs are stacked (the reload retry, ruling (g)):
 // 8 → 20 at the default 28 steps (one LoRA: 10); the runner charges the
 // calls made.
-export const PRICE_BOOK_VERSION = 'r3-lora'
+// r3-restyle-lora (step 3, R3.14, ruling (a)): Restyle an Image · Style LoRA
+// keeps its calls (lineup-p4c: Moondream five times, the LoRA's Flux call on
+// flux-dev-lora's edit card, three Nano Banana 2 passes on fal with the
+// ComfyUI path's fallbacks covered at cost) but is now priced call by call
+// and summed (R3.1's rule for a node of several calls, the runner's hold and
+// charge), not as a marked-up total: 1K 50 → 61, 2K 62 → 67, 4K 95 → 103
+// (Moondream's per-call minimum of 1 credit and each pass marked up on its
+// own). The runner charges the calls it made.
+export const PRICE_BOOK_VERSION = 'r3-restyle-lora'
 
 export const BASE_RENDER_CREDITS = 1
 

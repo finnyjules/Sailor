@@ -108,6 +108,11 @@ const EDIT_BASE: Record<string, Record<string, unknown>> = {
     prompt: 'a portrait', lora_a: '[None]', lora_a_url: 'https://huggingface.co/alice/one', scale_a: 0.9, lora_b: '[None]', lora_b_url: 'https://civitai.com/api/download/models/1', scale_b: 0.8,
     aspect_ratio: '1:1', num_inference_steps: 28, guidance: 3.5, seed: 0, prompt_strength: 0.8, lora_c: '[None]', lora_c_url: '', scale_c: 0.7, lora_d: '[None]', lora_d_url: '', scale_d: 0.6,
   },
+  // Restyle an Image · Style LoRA (R3.14): a public HuggingFace LoRA link (no sidecar read); its first call is the caption.
+  RestyleWithLoRANode: {
+    content_image: LINK, lora_name: '[None]', style_strength: 0.5, resolution: '1K', seed: 0, lora_url: 'https://huggingface.co/alice/lora', lora_scale: 1,
+    flux_prompt_strength: 0, flux_steps: 28, flux_guidance: 3.5, describe_prompt: 'Who is in it?', extra_style_direction: '', output_format: 'png',
+  },
   // sync-3 lip-sync (Task F22): the studio's face video and sound.
   LipSyncNode: {
     engine: 'sync-3',

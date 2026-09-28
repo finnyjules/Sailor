@@ -26,7 +26,7 @@
  */
 import fs from 'node:fs/promises'
 import { isLink, type ApiPrompt } from '#shared/runner/graph'
-import { FLUX_LORA_CLASS, LORA_BY_NAME_HOSTED, LORA_NAME_INPUTS, LORA_NONE, fluxLoraGuidanceProblem, isLoraClass, loraNamesUsed } from '#shared/runner/lora'
+import { FLUX_LORA_CLASS, LORA_BY_NAME_HOSTED, LORA_NAME_INPUTS, LORA_NONE, RESTYLE_GUIDANCE, RESTYLE_LORA_BY_NAME_HOSTED, RESTYLE_LORA_CLASS, fluxLoraGuidanceProblem, isLoraClass, loraNamesUsed } from '#shared/runner/lora'
 import { pyStrip } from '#shared/runner/pyText'
 import { parsePyJson, type PyJson } from '#shared/runner/pyJson'
 import { resolveEngineRoot } from '../utils/inputUploads'
@@ -141,16 +141,19 @@ export function resolveTrainedModel(meta: LoraSidecar | null): string | null {
 /**
  * What the start of a run refuses about the LoRAs its nodes name, before the
  * hold: a picker whose name ComfyUI doesn't list (its validation would refuse
- * the node), and a sidecar the node would read that is over its cap. A
- * wired picker is left to the engine.
+ * the node), and a sidecar the node would read that is over its cap (Flux
+ * Dev + LoRA, Flux Dev + LoRAs and, R3.14, Restyle an Image · Style LoRA).
+ * A wired picker is left to the engine.
  */
 export async function loraStartProblem(prompt: ApiPrompt, o: { hosted?: boolean } = {}): Promise<{ nodeId: string, classType: string, message: string } | null> {
   let options: Set<string> | null = null
   for (const [nodeId, node] of Object.entries(prompt ?? {})) {
     const ct = node?.class_type
-    if (!isLoraClass(ct)) continue
+    // Restyle an Image · Style LoRA (R3.14) picks its LoRA as Flux Dev + LoRA does.
+    const restyle = ct === RESTYLE_LORA_CLASS
+    if (!isLoraClass(ct) && !restyle) continue
     const inputs = node.inputs ?? {}
-    for (const input of LORA_NAME_INPUTS[ct]) {
+    for (const input of restyle ? ['lora_name'] : LORA_NAME_INPUTS[ct as keyof typeof LORA_NAME_INPUTS]) {
       const v = inputs[input]
       if (v === undefined || isLink(v)) continue
       options ??= new Set(loraOptions())
@@ -158,15 +161,16 @@ export async function loraStartProblem(prompt: ApiPrompt, o: { hosted?: boolean 
     }
     for (const { name } of loraNamesUsed(ct, inputs)) {
       // Hosted never reads (or even looks for) a LoRA's files (ruling (i)).
-      if (o.hosted) return { nodeId, classType: ct, message: LORA_BY_NAME_HOSTED }
+      if (o.hosted) return { nodeId, classType: ct, message: restyle ? RESTYLE_LORA_BY_NAME_HOSTED : LORA_BY_NAME_HOSTED }
       let found: { size: number } | null
       try { found = await findSidecar(name) }
       catch (e) { return { nodeId, classType: ct, message: e instanceof Error ? e.message : LORA_NOT_LISTED } }
       if (found && found.size > LORA_SIDECAR_MAX_BYTES) return { nodeId, classType: ct, message: LORA_SIDECAR_TOO_LARGE }
       // Flux Dev + LoRA picked by name runs flux-dev-lora unless the sidecar names a trained model:
       // then a guidance flux-dev-lora refuses is refused now (a sidecar that can't be read fails at the node's turn).
-      if (ct === FLUX_LORA_CLASS) {
-        const tooHigh = fluxLoraGuidanceProblem(inputs)
+      // Restyle the same, when no link is pasted (a link decides without the sidecar: the request rules judged it).
+      if (ct === FLUX_LORA_CLASS || (restyle && !pyStrip(typeof inputs.lora_url === 'string' ? inputs.lora_url : ''))) {
+        const tooHigh = restyle ? fluxLoraGuidanceProblem(inputs, RESTYLE_GUIDANCE) : fluxLoraGuidanceProblem(inputs)
         let trained: string | null = null
         try { trained = resolveTrainedModel(await readLoraSidecar(name, o)) }
         catch { continue }
