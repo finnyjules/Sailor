@@ -98,6 +98,7 @@ import { myEffectsLoaded } from '~/lib/myEffects/library'
 import { MATERIAL_IDS, MATERIALS, type MaterialId } from '~/lib/brushTips/materials'
 import { toWidthNorm, brushBoxFromStrokes, strokeRadiusPx, maskStrokeToLocal, type PaintStroke } from '~/lib/compositor/brushStamp'
 import BrushToolbar from '~/components/vue-canvas/compositor/BrushToolbar.vue'
+import ViewSizeToolbar from '~/components/vue-canvas/compositor/ViewSizeToolbar.vue'
 import BrushTipSettings from '~/components/vue-canvas/compositor/BrushTipSettings.vue'
 import BrushSnapFeedback from '~/components/vue-canvas/compositor/BrushSnapFeedback.vue'
 import { setLiveTipStroke } from '~/composables/useCompositorLayers'
@@ -7841,6 +7842,9 @@ const smartHasScribble = ref(false)
 const designOnlyToolActive = computed(() => !!(brush.active.value || !!penSession.value || nodeEdit.active.value
   || genActive.value || smartActive.value || regionSelectActive.value || distortTool.value
   || editImage.value))
+// A responsive Frame seen at another size gets its own bar in place of the tool row and
+// the prompt, like the pen's; "Back to design size" is its Done.
+const viewingOffDesign = computed(() => frameIsResponsive.value && !atDesign.value && !designOnlyToolActive.value)
 
 const smartTarget = computed<any | null>(() =>
   smartTargetId.value
@@ -9769,7 +9773,7 @@ defineExpose({ editor, layoutGridResolved, layoutGrid, overlayGrid, viewLayoutGr
       <!-- The one prompt (StudioPromptHost): always here, Motion included. What it
            brings back (changes, answers) shows above it, never in the inspector.
            Hidden while the edit-image prompt or the pen's own bar takes its place. -->
-      <div v-show="editMode === 'none' && !penSession && !brush.active.value" data-testid="compositor-prompt-dock" class="pointer-events-auto w-full" :class="inspectorTab === 'motion' ? 'mx-auto max-w-[720px]' : ''"><StudioPromptHost :prompt="framePrompt" /></div>
+      <div v-show="editMode === 'none' && !penSession && !brush.active.value && !viewingOffDesign" data-testid="compositor-prompt-dock" class="pointer-events-auto w-full" :class="inspectorTab === 'motion' ? 'mx-auto max-w-[720px]' : ''"><StudioPromptHost :prompt="framePrompt" /></div>
       <div v-if="inspectorTab !== 'motion'" data-testid="compositor-toolbar" class="flex flex-col items-stretch gap-2">
       <!-- The pen's own toolbar takes the prompt's and the tool row's place while a
            session is open (both stay mounted — v-show — so a prompt draft survives). -->
@@ -9785,6 +9789,9 @@ defineExpose({ editor, layoutGridResolved, layoutGrid, overlayGrid, viewLayoutGr
            same place while the brush is active, like the pen's. -->
       <BrushToolbar v-if="brush.active.value && !penSession" :brush="brush" class="pointer-events-auto" @done="toggleBrush"
         @more-paint="openBrushGallery('paint')" @more-effect="openBrushGallery('effect')" />
+      <ViewSizeToolbar v-if="viewingOffDesign" class="pointer-events-auto"
+        :w="viewSize.w" :h="viewSize.h" :shapes="viewShapes" :dragging="!!viewDrag"
+        @set-dim="setViewDim" @pick-shape="pickViewShape" @done="backToDesignSize" />
       <!-- The brush galleries (teleported): More… in Paint / Effect mode and a painted-effect
            layer's Change effect…. -->
       <ShaderEffectGallery
@@ -9800,7 +9807,7 @@ defineExpose({ editor, layoutGridResolved, layoutGrid, overlayGrid, viewLayoutGr
         @confirm="confirmBrushGallery"
       />
       <!-- Toolbar -->
-      <div v-show="!penSession && !brush.active.value" :inert="framePrompt.editLocked.value" :aria-busy="framePrompt.editLocked.value" class="pointer-events-auto flex items-center gap-1 bg-[#1a1a1a]/95 rounded-[12px] p-1.5 border border-[#2a2a2a] shadow-lg">
+      <div v-show="!penSession && !brush.active.value && !viewingOffDesign" :inert="framePrompt.editLocked.value" :aria-busy="framePrompt.editLocked.value" class="pointer-events-auto flex items-center gap-1 bg-[#1a1a1a]/95 rounded-[12px] p-1.5 border border-[#2a2a2a] shadow-lg">
         <!-- Zoom cluster: −, the % (opens the menu), +. The menu carries the
              navigation shortcuts, which had no home when the pill floated. -->
         <!-- .stop: the toolbar lives INSIDE the full-bleed stage, whose click
@@ -9844,11 +9851,11 @@ defineExpose({ editor, layoutGridResolved, layoutGrid, overlayGrid, viewLayoutGr
             </div>
           </Transition>
         </div>
-        <!-- Responsive Frames: the viewing-size readout. Fixed frames show nothing.
-             Grey at the design size, accent (#3b82f6) once you are viewing another
-             size; "Back to design size" only appears while off design. Invisible during a
-             view drag (keeps its space so the toolbar does not reflow; blocks pointer events). -->
-        <div v-if="frameIsResponsive && !designOnlyToolActive"
+        <!-- Responsive Frames: the size readout at the design size — type a size or pick a
+             shape to view another, and ViewSizeToolbar takes this row's place. Fixed frames
+             show nothing. Invisible during a view drag (keeps its space so the toolbar does
+             not reflow; blocks pointer events). -->
+        <div v-if="frameIsResponsive && !designOnlyToolActive && atDesign"
           class="flex items-center gap-1.5 pl-2 ml-1 border-l border-white/10 text-[11px]"
           :class="[atDesign ? 'text-white/60' : 'text-[#3b82f6]', { invisible: !!viewDrag }]"
           @click.stop>

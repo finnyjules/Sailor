@@ -306,6 +306,21 @@ test.describe('Frame layout grid — a responsive Frame at a viewing size', () =
     expect(Math.abs((l.x - l.w / 2) * before.design.W - before.design.cols[want - 1].a)).toBeLessThan(0.5)
   })
 
+  test('at a viewing size its own bar replaces the tool row; Back to design size brings the row back', async ({ page }) => {
+    const toolRow = page.locator('[data-testid="zoom-in"]')
+    await expect(toolRow).toBeVisible()
+    await expect(page.locator('[data-testid="view-size-toolbar"]')).toHaveCount(0)
+    const d = (await grids(page)).design
+    const h = page.locator('[data-testid="frame-view-h"]')
+    await h.fill(String(d.W)); await h.press('Tab')
+    await expect(page.locator('[data-testid="view-size-toolbar"]')).toBeVisible()
+    await expect(toolRow).toBeHidden()
+    await expect(page.locator('[data-testid="compositor-prompt-dock"]')).toBeHidden()
+    await page.locator('[data-testid="frame-view-done"]').click()
+    await expect(page.locator('[data-testid="view-size-toolbar"]')).toHaveCount(0)
+    await expect(toolRow).toBeVisible()
+  })
+
   test('text marks are a design-size tool: hidden at a viewing size', async ({ page }) => {
     const id = await page.evaluate(() => (window as any).__frameLab.node.data.properties.sailor_localLayers
       .find((x: any) => x.kind === 'text' && !x.rotation && !x.path && !(x.runs?.length))?.id)
