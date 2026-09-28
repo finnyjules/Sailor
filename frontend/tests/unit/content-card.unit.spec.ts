@@ -224,3 +224,51 @@ describe('Reference card is its picture', () => {
     expect(t).not.toMatch(/border-white\/10 bg-neutral-900 text-white shadow-lg/)
   })
 })
+
+describe('Collection card is a grid of its rows', () => {
+  const s = src('CollectionNode.vue')
+  const t = tpl(s)
+  it('wraps the grid in ContentCard inside a port wrapper, both ports visible', () => {
+    expect(t).toMatch(/^<template>\s*<div class="relative w-fit">/)
+    expect(t).not.toMatch(/<Handle\b/)
+    expect(t).toMatch(/<VueCanvasNodePort[\s\S]{0,150}id="input-0"[\s\S]{0,150}type="target"/)
+    expect(t).toMatch(/<VueCanvasNodePort[\s\S]{0,150}id="output-0"[\s\S]{0,150}type="source"/)
+    expect(t).toMatch(/:data-type="data\.inputs\?\.\[0\]\?\.type \?\? 'VARS'"/)
+    expect(t).toMatch(/:data-type="data\.outputs\?\.\[0\]\?\.type \?\? 'VARS'"/)
+    expect(t).toMatch(/<ContentCard[\s\S]{0,200}class="collection-card relative z-10 w-\[240px\]"/)
+    expect(t).toMatch(/:name="collection\.name"/)
+    expect(t).toMatch(/:selected="selected"/)
+  })
+  it('meta shows the row count', () => {
+    expect(t).toMatch(/#meta[\s\S]*\{\{ rows \}\} rows/)
+  })
+  it('has a tiles computed reading the first six rows, image over colour over label', () => {
+    expect(s).toMatch(/const tiles = computed\(\(\) => \{/)
+    expect(s).toMatch(/c\.rows\.slice\(0, 6\)/)
+    expect(s).toMatch(/col\.type === 'image'/)
+    expect(s).toMatch(/col\.type === 'color'/)
+  })
+  it('the media grid is a 3-column grid with the previewed row outlined', () => {
+    expect(t).toMatch(/grid grid-cols-3 gap-px bg-white\/\[0\.04\]/)
+    expect(t).toMatch(/aspect-square/)
+    expect(t).toMatch(/outline outline-2 outline-white\/60 -outline-offset-2/)
+    expect(t).toMatch(/tile\.index === collection\.previewRow/)
+  })
+  it('empty collection reads as "No rows" in the media', () => {
+    expect(t).toMatch(/No rows/)
+  })
+  it('double-clicking the grid opens the table', () => {
+    expect(t).toMatch(/<div[^>]*@dblclick\.stop="openTable"/)
+  })
+  it('keeps the scrub row calling the same step function, restyled below the box', () => {
+    expect(t).toMatch(/#below[\s\S]*step\(-1\)[\s\S]*previewLabel[\s\S]*step\(1\)/)
+    expect(t).toMatch(/nopan nodrag mt-1\.5 flex items-center gap-1 text-\[12px\] text-white\/55/)
+  })
+  it('actions hold an Open table button wired to the same handler', () => {
+    expect(t).toMatch(/#actions[\s\S]*title="Open table"[\s\S]*openTable/)
+  })
+  it('dropped the raw Handle imports and the bordered frame div', () => {
+    expect(s).not.toMatch(/import \{ Handle, Position \}/)
+    expect(t).not.toMatch(/border bg-\[#141414\]/)
+  })
+})
