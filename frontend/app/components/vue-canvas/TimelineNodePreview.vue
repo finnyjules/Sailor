@@ -16,6 +16,7 @@ import type { Keyframe } from '~~/shared/timeline/types'
 import { migrateEditState } from '~~/shared/timeline/types'
 
 const props = defineProps<{ nodeId: string }>()
+const emit = defineEmits<{ still: [canvas: HTMLCanvasElement] }>()
 
 const injectedNodes = inject<any>('vueFlowNodes', null)
 const injectedEdges = inject<any>('vueFlowEdges', null)
@@ -362,6 +363,9 @@ function paint(still = false) {
     try { ctx.drawImage(media as CanvasImageSource, -fitW / 2, -fitH / 2, fitW, fitH) } catch {}
     ctx.restore()
   }
+
+  // The card tints its glass from the poster frame; the playing loop never emits.
+  if (still) emit('still', canvas)
 }
 
 /** Pause every pooled video — the loop is stopping, so nothing should keep decoding. */
@@ -422,7 +426,7 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div ref="rootEl" class="w-full bg-black rounded-lg overflow-hidden ring-1 ring-white/5">
+  <div ref="rootEl" class="relative w-full bg-black">
     <canvas
       ref="canvasRef"
       class="w-full block"

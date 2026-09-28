@@ -120,7 +120,7 @@ test.describe('Timeline → SaveVideo end to end', () => {
     const videoB = nodes.nth(1)
     const timeline = nodes.nth(2)
     const saveVideo = nodes.nth(3)
-    await expect(timeline.locator('text=Open timeline')).toBeVisible()
+    await expect(timeline.getByRole('button', { name: 'Open', exact: true })).toHaveCount(1)
 
     // Unique filename prefix per run: keeps the prompt out of ComfyUI's
     // result cache (identical prompts re-serve old outputs and no fresh file

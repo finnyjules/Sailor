@@ -1,8 +1,10 @@
 <script setup lang="ts">
-import { Loader2, RefreshCw, Pencil, Clapperboard } from 'lucide-vue-next'
+import { Loader2 } from 'lucide-vue-next'
 import { getTypeColor } from '~/composables/useVueNodes'
 import { useNodePortSync } from '~/composables/useNodePortSync'
 import { migrateEditState } from '~~/shared/timeline/types'
+import PrintSurface from '~/components/vue-canvas/surfaces/PrintSurface.vue'
+import NodeOpenBar from '~/components/vue-canvas/surfaces/NodeOpenBar.vue'
 
 // This card grows when clips connect, which moves its handles. Vue Flow caches
 // handle geometry at mount, so without this refresh its edges stay pinned to
@@ -29,7 +31,10 @@ const props = defineProps<{
     running?: boolean
     error?: boolean
   }
+  selected?: boolean
 }>()
+
+const printRef = ref<{ capture: (src: HTMLCanvasElement) => void } | null>(null)
 
 const MAX_CLIPS = 16
 const isMuted = computed(() => props.data.mode === 2)
@@ -100,7 +105,7 @@ let resize: { startW: number; sx: number; zoom: number } | null = null
 function onResizeDown(e: PointerEvent) {
   e.preventDefault(); e.stopPropagation()
   const r = shellRef.value?.getBoundingClientRect()
-  const zoom = r && nodeW.value ? r.width / nodeW.value : 1
+  const zoom = r && nodeW.value ? r.width / (nodeW.value - 12) : 1
   resize = { startW: nodeW.value, sx: e.clientX, zoom: zoom || 1 }
   window.addEventListener('pointermove', onResizeMove)
   window.addEventListener('pointerup', onResizeUp, { once: true })
@@ -128,93 +133,67 @@ function runThisNode() {
     class="artifact-timeline relative select-none"
     :class="{ 'artifact-timeline--muted': isMuted, 'artifact-timeline--bypassed': isBypassed }"
     :style="{ width: nodeW + 'px', '--port-color': imageColor } as any"
-    :data-running="data.running || undefined"
   >
-    <VueCanvasNodeReadyBadge :node-id="id" />
-    <!-- Clip inputs (left, grow-on-connect) -->
-    <VueCanvasNodePort
-      v-for="(slot, i) in clipSlots" :id="`input-${slot}`" :key="slot"
-      type="target" side="left" :index="i" data-type="IMAGE" label="clip"
-    />
-    <!-- Outputs (right): frames (IMAGE) + video (VIDEO). -->
-    <VueCanvasNodePort
-      :id="`output-${framesOutIdx}`" type="source" side="right"
-      :index="0" data-type="IMAGE" label="frames"
-    />
-    <VueCanvasNodePort
-      v-if="videoOutIdx >= 0"
-      :id="`output-${videoOutIdx}`" type="source" side="right"
-      :index="1" data-type="VIDEO" label="video"
-    />
-
-    <div
-      ref="shellRef"
-      class="artifact-frame relative rounded-lg overflow-hidden bg-[#0e0e0e] border"
-      :class="data.error ? 'border-red-500 ring-2 ring-red-500' : 'border-white/10'"
+    <PrintSurface
+      ref="printRef"
+      name="Timeline"
+      :size="summary || undefined"
+      :selected="selected"
+      :data-running="data.running || undefined"
+      :data-error="data.error ? '' : undefined"
+      :data-bypassed="isBypassed ? '' : undefined"
     >
-      <!-- Header -->
-      <div class="flex items-center gap-1.5 px-2 py-1.5 border-b border-white/5">
-        <Clapperboard class="size-3 text-white/45 shrink-0" />
-        <span class="text-[10.5px] text-white/70">Timeline</span>
-        <span class="flex-1" />
-        <span v-if="summary" class="text-[10px] text-white/35 tabular-nums">{{ summary }}</span>
+      <div ref="shellRef">
+        <VueCanvasTimelineNodePreview :node-id="id" @still="(c: HTMLCanvasElement) => printRef?.capture(c)" />
       </div>
 
-      <!-- Live preview (main content, fills the card width) -->
-      <div class="bg-black">
-        <VueCanvasTimelineNodePreview :node-id="id" />
-      </div>
+      <template #openbar>
+        <NodeOpenBar>
+          <button type="button" class="node-btn nopan nodrag" title="Open the timeline editor" @click.stop="openEditor">Open</button>
+          <button
+            type="button" class="node-btn node-btn--primary nopan nodrag"
+            :disabled="data.running || isMuted || isBypassed"
+            :title="data.running ? 'Running…' : 'Render frames'"
+            @click.stop="runThisNode"
+          ><Loader2 v-if="data.running" class="size-3.5 animate-spin" />Render</button>
+        </NodeOpenBar>
+      </template>
 
-      <!-- Footer: open editor + run -->
-      <div class="flex items-center gap-1.5 px-2 py-1.5 border-t border-white/5">
-        <button
-          class="nopan nodrag flex-1 h-6 rounded bg-white/[0.06] hover:bg-white/[0.12] text-white/70 hover:text-white/90 text-[11px] flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
-          title="Open the full multi-track editor"
-          @click.stop="openEditor"
+      <template #overlay>
+        <VueCanvasNodeReadyBadge :node-id="id" />
+        <VueCanvasNodePort
+          v-for="(slot, i) in clipSlots" :id="`input-${slot}`" :key="slot"
+          type="target" side="left" :index="i" data-type="IMAGE" label="clip"
+        />
+        <VueCanvasNodePort
+          :id="`output-${framesOutIdx}`" type="source" side="right"
+          :index="0" data-type="IMAGE" label="frames"
+        />
+        <VueCanvasNodePort
+          v-if="videoOutIdx >= 0"
+          :id="`output-${videoOutIdx}`" type="source" side="right"
+          :index="1" data-type="VIDEO" label="video"
+        />
+        <!-- Mode badge -->
+        <div
+          v-if="isMuted || isBypassed"
+          class="pointer-events-none absolute top-1.5 right-1.5 z-[6] text-[9px] font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded-full"
+          :class="isBypassed ? 'bg-amber-500/25 text-amber-200 border border-amber-400/30' : 'bg-white/15 text-white/70 border border-white/15'"
+        >{{ isBypassed ? 'Bypass' : 'Mute' }}</div>
+        <!-- Corner resize grip — on-canvas display size -->
+        <div
+          class="nopan nodrag absolute -bottom-1.5 -right-1.5 size-4 cursor-nwse-resize group/resize z-[7]"
+          title="Resize timeline card"
+          @pointerdown="onResizeDown"
         >
-          <Pencil class="size-3" /> Open timeline
-        </button>
-        <button
-          class="nopan nodrag shrink-0 size-6 rounded flex items-center justify-center text-white/45 hover:text-white/85 hover:bg-white/[0.08] transition-colors cursor-pointer disabled:opacity-40"
-          :disabled="data.running || isMuted || isBypassed"
-          :title="data.running ? 'Running…' : 'Render frames'"
-          @click.stop="runThisNode"
-        >
-          <Loader2 v-if="data.running" class="size-3 animate-spin" />
-          <RefreshCw v-else class="size-3" />
-        </button>
-      </div>
-    </div>
-
-    <!-- Mode badge -->
-    <div
-      v-if="isMuted || isBypassed"
-      class="pointer-events-none absolute top-1.5 right-1.5 z-[6] text-[9px] font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded-full"
-      :class="isBypassed ? 'bg-amber-500/25 text-amber-200 border border-amber-400/30' : 'bg-white/15 text-white/70 border border-white/15'"
-    >{{ isBypassed ? 'Bypass' : 'Mute' }}</div>
-
-    <!-- Corner resize grip — on-canvas display size -->
-    <div
-      class="nopan nodrag absolute -bottom-1.5 -right-1.5 size-4 cursor-nwse-resize group/resize z-[7]"
-      title="Resize timeline card"
-      @pointerdown="onResizeDown"
-    >
-      <div class="absolute bottom-1 right-1 size-2 border-b-2 border-r-2 border-white/30 group-hover/resize:border-white/70 rounded-[1px]" />
-    </div>
+          <div class="absolute bottom-1 right-1 size-2 border-b-2 border-r-2 border-white/30 group-hover/resize:border-white/70 rounded-[1px]" />
+        </div>
+      </template>
+    </PrintSurface>
   </div>
 </template>
 
 <style scoped>
-.artifact-timeline[data-running] .artifact-frame {
-  box-shadow: 0 0 0 2px var(--port-color, #fff), 0 4px 16px rgba(0, 0, 0, 0.4);
-}
-.artifact-frame {
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4), 0 1px 4px rgba(0, 0, 0, 0.2);
-}
 .artifact-timeline--muted { opacity: 0.45; filter: grayscale(0.8); }
 .artifact-timeline--bypassed { opacity: 0.85; }
-.artifact-timeline--bypassed .artifact-frame {
-  border-style: dashed;
-  border-color: rgba(251, 191, 36, 0.35);
-}
 </style>
