@@ -86,3 +86,22 @@ describe('Image card is a content card', () => {
     expect(t).toMatch(/#below[\s\S]*<TakesStrip/)
   })
 })
+
+describe.each([
+  ['ArtifactVideoNode.vue', 'artifact-video', 'w-\\[280px\\]', 'downloadVideo'],
+  ['ArtifactAudioNode.vue', 'artifact-audio', 'w-\\[280px\\]', 'downloadAudio'],
+])('%s is a content card', (file, cls, width, dl) => {
+  const t = tpl(src(file))
+  it('ContentCard in a port wrapper, shared ports, no frame', () => {
+    expect(t).toMatch(/^<template>\s*<div class="relative w-fit">/)
+    expect(t).toMatch(new RegExp(`<ContentCard[\\s\\S]{0,200}class="${cls} relative z-10 ${width} select-none"`))
+    expect(t).not.toMatch(/<Handle\b/)
+    expect(t).not.toMatch(/artifact-frame/)
+  })
+  it('Download + More on hover', () => {
+    expect(t).toMatch(new RegExp(`#actions[\\s\\S]*${dl}[\\s\\S]*<NodeMoreMenu`))
+  })
+})
+it('Audio keeps its seconds line', () => {
+  expect(src('ArtifactAudioNode.vue')).toContain('(props.data as any).audioSeconds = { file: widgetFilename.value, seconds }')
+})

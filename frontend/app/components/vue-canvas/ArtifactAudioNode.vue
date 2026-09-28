@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { Handle, Position } from '@vue-flow/core'
-import { Upload, Loader2, AudioWaveform, Play, Download } from 'lucide-vue-next'
+import { Loader2, AudioWaveform, Play, Download } from 'lucide-vue-next'
 import { getTypeColor } from '~/composables/useVueNodes'
 import NodeRunRow from '~/components/vue-canvas/NodeRunRow.vue'
+import ContentCard from '~/components/vue-canvas/surfaces/ContentCard.vue'
+import NodeMoreMenu, { type MoreItem } from '~/components/vue-canvas/surfaces/NodeMoreMenu.vue'
 import { runRowStatus } from '~/lib/canvas/runRowStatus'
 import { useRunRowClock } from '~/composables/useRunRowClock'
 
@@ -197,42 +198,54 @@ async function downloadAudio() {
     console.error('[ArtifactAudio] download failed:', err)
   }
 }
+
+// The old footer row's Replace button, now the More menu — same function,
+// same guard as the removed button.
+const moreItems = computed<MoreItem[]>(() => [
+  ...(canReplace.value ? [{ label: 'Replace audio', onSelect: triggerUpload, disabled: uploading.value }] : []),
+])
 </script>
 
 <template>
-  <div
-    class="artifact-audio relative w-[280px] select-none"
-    :class="{
-      'artifact-audio--muted': isMuted,
-      'artifact-audio--bypassed': isBypassed,
-    }"
-    :data-running="data.running || undefined"
-    :style="{ '--port-color': audioColor } as any"
-    @dragover="onDragOver"
-    @drop="onDrop"
-  >
-    <VueCanvasNodeReadyBadge :node-id="id" />
-    <Handle
+  <div class="relative w-fit">
+    <VueCanvasNodePort
       v-if="sourceInputIdx >= 0"
       :id="`input-${sourceInputIdx}`"
       type="target"
-      :position="Position.Left"
-      class="!w-3 !h-3 !rounded-full !border-2 !bg-[#1a1a1a]"
-      :style="{ borderColor: audioColor, top: '50%' }"
+      side="left"
+      :data-type="data.inputs?.[sourceInputIdx]?.type ?? 'AUDIO'"
+      label="Audio"
+      :index="0"
     />
-    <Handle
+    <VueCanvasNodePort
       v-if="audioOutputIdx >= 0"
       :id="`output-${audioOutputIdx}`"
       type="source"
-      :position="Position.Right"
-      class="!w-3 !h-3 !rounded-full !border-2 !bg-[#1a1a1a]"
-      :style="{ borderColor: audioColor, top: '50%' }"
+      side="right"
+      :data-type="data.outputs?.[audioOutputIdx]?.type ?? 'AUDIO'"
+      label="Audio"
+      :index="0"
     />
 
-    <div
-      class="artifact-frame relative rounded-lg overflow-hidden bg-black/40 border border-white/10"
-      :class="{ 'ring-2 ring-red-500': data.error }"
+    <ContentCard
+      class="artifact-audio relative z-10 w-[280px] select-none"
+      :class="{
+        'artifact-audio--muted': isMuted,
+        'artifact-audio--bypassed': isBypassed,
+      }"
+      :name="filenameLabel || 'Audio'"
+      :selected="selected"
+      :data-running="data.running || undefined"
+      :data-error="data.error || undefined"
+      :style="{ '--port-color': audioColor } as any"
+      @dragover="onDragOver"
+      @drop="onDrop"
     >
+      <template #meta>
+        <span v-if="meta" class="shrink-0 tabular-nums text-white/30">{{ meta }}</span>
+      </template>
+
+      <VueCanvasNodeReadyBadge :node-id="id" />
       <!-- File picker — always mounted so Replace works in any state. -->
       <input
         ref="fileInputRef"
@@ -253,37 +266,6 @@ async function downloadAudio() {
             @loadedmetadata="onAudioMeta"
           />
         </div>
-        <div class="flex items-center gap-1.5 px-2 py-1.5 border-t border-white/5">
-          <span class="truncate flex-1 text-[10px] tabular-nums text-white/55">
-            {{ meta || (hasUpstream ? 'Audio (upstream)' : 'Audio') }}
-          </span>
-          <button
-            v-if="canReplace"
-            class="nopan nodrag shrink-0 size-5 rounded flex items-center justify-center text-white/45 hover:text-white/85 hover:bg-white/[0.08] transition-colors cursor-pointer disabled:opacity-50"
-            :disabled="uploading"
-            title="Replace audio"
-            @click.stop="triggerUpload"
-          >
-            <Loader2 v-if="uploading" class="size-3 animate-spin" />
-            <Upload v-else class="size-2.5" />
-          </button>
-          <button
-            class="nopan nodrag shrink-0 size-5 rounded flex items-center justify-center text-white/45 hover:text-white/85 hover:bg-white/[0.08] transition-colors cursor-pointer"
-            title="Download"
-            @click.stop="downloadAudio"
-          >
-            <Download class="size-2.5" />
-          </button>
-        </div>
-        <!-- Run row — re-render lives here now (it replaced the inline icon). -->
-        <NodeRunRow
-          v-if="audioUrl && hasUpstream"
-          :status="runStatus"
-          :can-run="!isMuted && !isBypassed"
-          :running="!!data.running"
-          run-label="Re-render this node"
-          @run="runThisNode"
-        />
       </template>
 
       <template v-else-if="showUpload">
@@ -321,24 +303,35 @@ async function downloadAudio() {
           </template>
         </div>
       </template>
-    </div>
+
+      <template #actions>
+        <button v-if="audioUrl" type="button" title="Download" @click.stop="downloadAudio">
+          <Download class="size-3.5" />
+        </button>
+        <NodeMoreMenu :items="moreItems" />
+      </template>
+
+      <template #below>
+        <!-- Run row — re-render lives here now (it replaced the inline icon). -->
+        <NodeRunRow
+          v-if="audioUrl && hasUpstream"
+          :status="runStatus"
+          :can-run="!isMuted && !isBypassed"
+          :running="!!data.running"
+          run-label="Re-render this node"
+          @run="runThisNode"
+        />
+      </template>
+    </ContentCard>
   </div>
 </template>
 
 <style scoped>
-.artifact-audio[data-running] .artifact-frame {
-  box-shadow:
-    0 0 0 2px var(--port-color, #fff),
-    0 4px 16px rgba(0, 0, 0, 0.4);
-}
-.artifact-frame {
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4), 0 1px 4px rgba(0, 0, 0, 0.2);
-}
 .artifact-audio--muted { opacity: 0.45; filter: grayscale(0.8); }
 .artifact-audio--bypassed { opacity: 0.85; }
-.artifact-audio--bypassed .artifact-frame {
-  border-style: dashed;
-  border-color: rgba(251, 191, 36, 0.35);
+.artifact-audio--bypassed :deep(.content-card__media) {
+  outline: 1px dashed rgba(251, 191, 36, 0.35);
+  outline-offset: -1px;
 }
 audio::-webkit-media-controls-panel {
   background: rgba(0, 0, 0, 0.3);
