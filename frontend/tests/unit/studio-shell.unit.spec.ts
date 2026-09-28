@@ -105,6 +105,22 @@ it('Lip-sync keeps Generate disabled while it has issues', () => {
   expect(tpl(src('LipSyncStudioNode.vue'))).toMatch(/node-btn--primary[^>]*:disabled="hasError"|:disabled="hasError"[^>]*node-btn--primary/)
 })
 
+describe('Smart Layout body', () => {
+  const s = src('SmartLayoutNodeBody.vue')
+  const t = tpl(s)
+  it('sits on the generator card inset (10px), not its own', () => {
+    expect(t).toMatch(/^<template>\s*<div class="px-2\.5 pb-2\.5 pt-1 nopan nodrag flex flex-col gap-\[5px\]">/)
+  })
+  it('a designed layout shows a well with an Open bar that edits', () => {
+    expect(t).toMatch(/v-if="elementCount"[\s\S]*class="node-well node-openbar-host[^"]*"[\s\S]*<NodeOpenBar :meta="summary">[\s\S]*@click\.stop="emit\('edit'\)"[\s\S]*>Open<\/button>/)
+  })
+  it('Batch export is the white node button; an empty layout keeps Design layout', () => {
+    expect(t).toMatch(/node-btn node-btn--primary[^"]*"[\s\S]{0,200}Batch export/)
+    expect(t).toMatch(/node-btn node-btn--primary[^"]*"[\s\S]{0,200}Design layout/)
+    expect(t).not.toMatch(/Edit layout/)
+  })
+})
+
 describe('Pose Mannequin wears the studio shell', () => {
   const s = src('PoseMannequinNode.vue')
   const t = tpl(s)

@@ -13,6 +13,7 @@ import { VAR_PREVIEW_PROP, BINDINGS_PROP } from '~/lib/collection/types'
 import { readTemplateFromNode } from '~/lib/collection/bindables'
 import { wiredLayerProps } from '~/lib/collection/wiredProps'
 import { autopopulateV2 } from '~~/shared/template-grid/autopopulate'
+import NodeOpenBar from '~/components/vue-canvas/surfaces/NodeOpenBar.vue'
 
 const props = defineProps<{ data: any }>()
 const emit = defineEmits<{ edit: []; batch: [] }>()
@@ -116,54 +117,31 @@ onBeforeUnmount(() => {
   if (debounceHandle) clearTimeout(debounceHandle)
   if (previewUrl.value) URL.revokeObjectURL(previewUrl.value)
 })
+
+const summary = computed(() =>
+  `${elementCount.value} element${elementCount.value === 1 ? '' : 's'} · ${outputCount.value} output${outputCount.value === 1 ? '' : 's'}`
+  + (varCount.value ? ` · ${varCount.value} vars` : ''),
+)
 </script>
 
 <template>
-  <div class="px-2 pb-2 pt-1 nopan nodrag flex flex-col gap-2">
-    <div v-if="varCount" class="flex justify-end">
-      <span class="text-[9px] px-1.5 py-0.5 rounded-full bg-white/10 text-white/50">{{ varCount }} vars</span>
-    </div>
-    <!-- Scrub preview — only until the node has real run results below;
-         after that it would just duplicate (and previously contradict) them. -->
-    <img
-      v-if="previewUrl && !hasRunResults"
-      :src="previewUrl"
-      class="w-full rounded-md border border-white/10 mb-1"
-    />
-    <!-- Layout actions. Designed: Edit (secondary) + Batch export (white
-         primary — the produce-deliverables action). Empty: one hero to start
-         designing; there's nothing to batch yet. Both buttons share h-8 so
-         they read as a matched pair. -->
+  <div class="px-2.5 pb-2.5 pt-1 nopan nodrag flex flex-col gap-[5px]">
     <template v-if="elementCount">
-      <button
-        class="flex items-center justify-center gap-1.5 w-full h-8 rounded bg-white/[0.06] hover:bg-white/[0.1] text-white/70 hover:text-white text-xs transition-colors cursor-pointer border border-white/10"
-        @click="emit('edit')"
-      >
-        <LayoutTemplate class="size-3.5" />
-        Edit layout
-      </button>
+      <div class="node-well node-openbar-host min-h-[56px]">
+        <img v-if="previewUrl && !hasRunResults" :src="previewUrl" class="block w-full" />
+        <NodeOpenBar :meta="summary">
+          <button type="button" class="node-btn nopan nodrag" @click.stop="emit('edit')">Open</button>
+        </NodeOpenBar>
+      </div>
       <!-- Batch export — cartesian render across formats × bound variables. -->
-      <button
-        class="flex items-center justify-center gap-1.5 w-full h-8 rounded bg-white/90 hover:bg-white text-neutral-900 text-xs font-medium transition-[transform,background-color] active:scale-[0.98] cursor-pointer"
-        @click="emit('batch')"
-      >
+      <button type="button" class="node-btn node-btn--primary w-full justify-center" @click="emit('batch')">
         <Grid3X3 class="size-3.5" />
         Batch export
       </button>
     </template>
-    <button
-      v-else
-      class="flex items-center justify-center gap-1.5 w-full h-8 rounded bg-white/90 hover:bg-white text-neutral-900 text-xs font-medium transition-[transform,background-color] active:scale-[0.98] cursor-pointer"
-      @click="emit('edit')"
-    >
+    <button v-else type="button" class="node-btn node-btn--primary w-full justify-center" title="Wire layers, then design the layout" @click="emit('edit')">
       <LayoutTemplate class="size-3.5" />
       Design layout
     </button>
-    <div class="text-[10px] text-white/35 text-center leading-snug">
-      <template v-if="elementCount">
-        {{ elementCount }} element{{ elementCount === 1 ? '' : 's' }} · {{ outputCount }} output{{ outputCount === 1 ? '' : 's' }}
-      </template>
-      <template v-else>Empty — wire layers, then design the layout</template>
-    </div>
   </div>
 </template>
