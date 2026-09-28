@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { Handle, Position } from '@vue-flow/core'
 import { Loader2, Download, RefreshCw, Plus, X, Layers } from 'lucide-vue-next'
 import { getTypeColor } from '~/composables/useVueNodes'
+import ContentCard from '~/components/vue-canvas/surfaces/ContentCard.vue'
 
 // Visual half of the unified `Text` artifact node. Holds one or more entries
 // (strings). The active entry's value mirrors into widgets_values[textWidget]
@@ -10,6 +10,7 @@ import { getTypeColor } from '~/composables/useVueNodes'
 // it round-trips through ComfyUI's properties bag without bridge changes.
 const props = defineProps<{
   id: string
+  selected?: boolean
   data: {
     nodeType: string
     title: string
@@ -188,45 +189,53 @@ const charCount = computed(() => activeText.value.length)
 const entryCount = computed(() => entries.value.length)
 const showIterator = computed(() => entryCount.value >= 2)
 
+/** The card's own words: the first line of what it shows, or "Text" when empty. */
+const cardName = computed(() => (activeText.value || '').split('\n').find(l => l.trim())?.trim().slice(0, 60) || 'Text')
+
 // First mount: make sure the widget value reflects the active entry so the
 // next "Run All" picks up our seeded entries instead of stale widget data.
 onMounted(() => { syncWidgetToActive() })
 </script>
 
 <template>
-  <div
-    class="artifact-text relative w-[300px] select-none"
-    :class="{
-      'artifact-text--muted': isMuted,
-      'artifact-text--bypassed': isBypassed,
-    }"
-    :data-running="data.running || undefined"
-    :data-node-id="id"
-    :style="{ '--port-color': stringColor } as any"
-  >
-    <!-- Upstream STRING input -->
-    <Handle
+  <div class="relative w-fit">
+    <VueCanvasNodePort
       v-if="sourceInputIdx >= 0"
       :id="`input-${sourceInputIdx}`"
       type="target"
-      :position="Position.Left"
-      class="!w-3 !h-3 !rounded-full !border-2 !bg-[#1a1a1a]"
-      :style="{ borderColor: stringColor, top: '50%' }"
+      side="left"
+      :data-type="data.inputs?.[sourceInputIdx]?.type ?? 'STRING'"
+      label="Text"
+      :index="0"
     />
-    <!-- STRING output -->
-    <Handle
+    <VueCanvasNodePort
       v-if="textOutputIdx >= 0"
       :id="`output-${textOutputIdx}`"
       type="source"
-      :position="Position.Right"
-      class="!w-3 !h-3 !rounded-full !border-2 !bg-[#1a1a1a]"
-      :style="{ borderColor: stringColor, top: '50%' }"
+      side="right"
+      :data-type="data.outputs?.[textOutputIdx]?.type ?? 'STRING'"
+      label="Text"
+      :index="0"
     />
 
-    <div
-      class="artifact-frame relative rounded-lg overflow-hidden bg-black/40 border border-white/10"
-      :class="{ 'ring-2 ring-red-500': data.error }"
+    <ContentCard
+      class="artifact-text relative z-10 w-[300px] select-none"
+      :class="{
+        'artifact-text--muted': isMuted,
+        'artifact-text--bypassed': isBypassed,
+      }"
+      :name="cardName"
+      :selected="selected"
+      :data-running="data.running || undefined"
+      :data-error="data.error || undefined"
+      :data-node-id="id"
+      :style="{ '--port-color': stringColor } as any"
     >
+      <template #meta>
+        <span class="shrink-0 tabular-nums text-white/30">{{ charCount }} {{ charCount === 1 ? 'char' : 'chars' }}</span>
+        <span v-if="showIterator" class="shrink-0 tabular-nums text-white/30">· {{ entryCount }} entries</span>
+      </template>
+
       <!-- Entry list. Each row is its own editable textarea, plus a small
            index pill (click to make active) and a delete button. The active
            entry has a highlighted pill and a subtle accent on the left edge. -->
@@ -251,7 +260,7 @@ onMounted(() => { syncWidgetToActive() })
           >{{ i + 1 }}</button>
 
           <textarea
-            class="nopan nodrag flex-1 min-h-[44px] max-h-[180px] resize-none bg-transparent text-[12px] leading-snug text-white/85 py-1.5 pr-1 pl-0.5 outline-none placeholder:text-white/30"
+            class="nopan nodrag flex-1 min-h-[44px] max-h-[180px] resize-none bg-transparent text-[12px] leading-snug font-normal text-white/85 py-1.5 pr-1 pl-0.5 outline-none placeholder:text-white/30"
             :value="entry"
             :placeholder="hasUpstream && i === 0 ? 'Wired to upstream. Type to override.' : 'Type text…'"
             @focus="makeActive(i)"
@@ -277,24 +286,8 @@ onMounted(() => { syncWidgetToActive() })
         <Plus class="size-3" /> Add entry
       </button>
 
-      <!-- Footer: counts + actions. -->
-      <div class="flex items-center gap-1.5 px-2 py-1.5 border-t border-white/5">
-        <span class="text-[10px] text-white/55 tabular-nums">
-          {{ charCount }} {{ charCount === 1 ? 'char' : 'chars' }}
-        </span>
-        <span v-if="showIterator" class="text-white/15 text-[10px]">·</span>
-        <span v-if="showIterator" class="text-[10px] text-white/55 tabular-nums">
-          {{ entryCount }} entries
-        </span>
-        <span class="flex-1" />
-        <button
-          class="nopan nodrag shrink-0 size-5 rounded flex items-center justify-center text-white/45 hover:text-white/85 hover:bg-white/[0.08] transition-colors cursor-pointer disabled:opacity-50"
-          :disabled="!charCount"
-          title="Download active entry as .txt"
-          @click.stop="downloadText"
-        >
-          <Download class="size-2.5" />
-        </button>
+      <!-- Run controls — a quiet row at the bottom of the media box. -->
+      <div class="flex items-center justify-end gap-1 px-2 pb-2">
         <button
           v-if="showIterator"
           class="nopan nodrag shrink-0 h-5 px-1.5 rounded flex items-center gap-1 text-[10px] text-white/55 hover:text-white/90 hover:bg-white/[0.08] transition-colors cursor-pointer disabled:opacity-50"
@@ -315,24 +308,27 @@ onMounted(() => { syncWidgetToActive() })
           <RefreshCw v-else class="size-3" />
         </button>
       </div>
-    </div>
+
+      <template #actions>
+        <button
+          type="button"
+          :disabled="!charCount"
+          title="Download active entry as .txt"
+          @click.stop="downloadText"
+        >
+          <Download class="size-3.5" />
+        </button>
+      </template>
+    </ContentCard>
   </div>
 </template>
 
 <style scoped>
-.artifact-text[data-running] .artifact-frame {
-  box-shadow:
-    0 0 0 2px var(--port-color, #fff),
-    0 4px 16px rgba(0, 0, 0, 0.4);
-}
-.artifact-frame {
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4), 0 1px 4px rgba(0, 0, 0, 0.2);
-}
 .artifact-text--muted { opacity: 0.45; filter: grayscale(0.8); }
 .artifact-text--bypassed { opacity: 0.85; }
-.artifact-text--bypassed .artifact-frame {
-  border-style: dashed;
-  border-color: rgba(251, 191, 36, 0.35);
+.artifact-text--bypassed :deep(.content-card__media) {
+  outline: 1px dashed rgba(251, 191, 36, 0.35);
+  outline-offset: -1px;
 }
 
 /* Slim, dark scrollbar on the entry list — match the rest of the canvas. */

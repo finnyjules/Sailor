@@ -105,3 +105,24 @@ describe.each([
 it('Audio keeps its seconds line', () => {
   expect(src('ArtifactAudioNode.vue')).toContain('(props.data as any).audioSeconds = { file: widgetFilename.value, seconds }')
 })
+
+it('Image keeps its main output port guard', () => {
+  expect(tpl(src('ArtifactImageNode.vue'))).toMatch(/<VueCanvasNodePort\s+v-if="imageOutIdx >= 0"/)
+})
+
+describe('Text card is a content card', () => {
+  const s = src('ArtifactTextNode.vue'); const t = tpl(s)
+  it('named by its own words, content card, shared ports', () => {
+    expect(s).toMatch(/const cardName = computed\(/)
+    expect(t).toMatch(/:name="cardName"/)
+    expect(t).toMatch(/<ContentCard[\s\S]{0,200}class="artifact-text relative z-10 w-\[300px\] select-none"/)
+    expect(t).not.toMatch(/<Handle\b/)
+    expect(t).not.toMatch(/artifact-frame/)
+    expect(t).toMatch(/:data-error="data\.error \|\| undefined"/)
+  })
+  it('keeps run controls and the user text weight', () => {
+    expect(t).toMatch(/runAllEntries/)
+    expect(t).toMatch(/runThisNode/)
+    expect(t).toMatch(/textarea[\s\S]{0,300}font-normal/)
+  })
+})
