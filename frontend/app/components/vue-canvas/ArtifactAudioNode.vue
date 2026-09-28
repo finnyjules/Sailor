@@ -207,131 +207,141 @@ const moreItems = computed<MoreItem[]>(() => [
 </script>
 
 <template>
-  <div class="relative w-fit">
-    <VueCanvasNodePort
-      v-if="sourceInputIdx >= 0"
-      :id="`input-${sourceInputIdx}`"
-      type="target"
-      side="left"
-      :data-type="data.inputs?.[sourceInputIdx]?.type ?? 'AUDIO'"
-      label="Audio"
-      :index="0"
-    />
-    <VueCanvasNodePort
-      v-if="audioOutputIdx >= 0"
-      :id="`output-${audioOutputIdx}`"
-      type="source"
-      side="right"
-      :data-type="data.outputs?.[audioOutputIdx]?.type ?? 'AUDIO'"
-      label="Audio"
-      :index="0"
-    />
+  <ContentCard
+    class="artifact-audio relative z-10 w-[280px] select-none"
+    :class="{
+      'artifact-audio--muted': isMuted,
+      'artifact-audio--bypassed': isBypassed,
+    }"
+    :name="filenameLabel || 'Audio'"
+    :selected="selected"
+    :data-running="data.running || undefined"
+    :data-error="data.error || undefined"
+    :style="{ '--port-color': audioColor } as any"
+    @dragover="onDragOver"
+    @drop="onDrop"
+  >
+    <template #meta>
+      <span v-if="meta" class="shrink-0 tabular-nums text-white/30">{{ meta }}</span>
+    </template>
 
-    <ContentCard
-      class="artifact-audio relative z-10 w-[280px] select-none"
-      :class="{
-        'artifact-audio--muted': isMuted,
-        'artifact-audio--bypassed': isBypassed,
-      }"
-      :name="filenameLabel || 'Audio'"
-      :selected="selected"
-      :data-running="data.running || undefined"
-      :data-error="data.error || undefined"
-      :style="{ '--port-color': audioColor } as any"
-      @dragover="onDragOver"
-      @drop="onDrop"
-    >
-      <template #meta>
-        <span v-if="meta" class="shrink-0 tabular-nums text-white/30">{{ meta }}</span>
-      </template>
-
-      <VueCanvasNodeReadyBadge :node-id="id" />
-      <!-- File picker — always mounted so Replace works in any state. -->
-      <input
-        ref="fileInputRef"
-        type="file"
-        accept="audio/*"
-        class="hidden"
-        @change="onFileChange"
+    <template #ports>
+      <VueCanvasNodePort
+        v-if="sourceInputIdx >= 0"
+        :id="`input-${sourceInputIdx}`"
+        type="target"
+        side="left"
+        :data-type="data.inputs?.[sourceInputIdx]?.type ?? 'AUDIO'"
+        label="Audio"
+        :index="0"
       />
-      <template v-if="audioUrl">
-        <div class="px-3 pt-3 pb-2 flex items-center gap-2">
-          <AudioWaveform :size="18" class="text-white/55 shrink-0" :stroke-width="1.5" />
-          <audio
-            :src="audioUrl"
-            class="nopan nodrag flex-1 h-8"
-            controls
-            preload="metadata"
-            style="min-width: 0;"
-            @loadedmetadata="onAudioMeta"
-          />
-        </div>
-      </template>
+      <VueCanvasNodePort
+        v-if="audioOutputIdx >= 0"
+        :id="`output-${audioOutputIdx}`"
+        type="source"
+        side="right"
+        :data-type="data.outputs?.[audioOutputIdx]?.type ?? 'AUDIO'"
+        label="Audio"
+        :index="0"
+      />
+    </template>
 
-      <template v-else-if="showUpload">
-        <!-- Upload affordance — no nopan/nodrag so a click-and-drag moves
-             the card, while a click-in-place opens the file picker. Vue
-             Flow distinguishes drag from click by a small movement
-             threshold, which is exactly the gesture split we want. -->
-        <button
-          class="w-full h-[120px] flex flex-col items-center justify-center gap-2 text-white/45 hover:text-white/85 hover:bg-white/[0.04] transition-colors cursor-pointer disabled:opacity-50"
-          :disabled="uploading"
-          @click="triggerUpload"
-        >
-          <Loader2 v-if="uploading" class="size-6 animate-spin" />
-          <AudioWaveform v-else class="size-6" :stroke-width="1.5" />
-          <span class="text-[11px]">{{ uploading ? 'Uploading…' : 'Drop or click an audio file' }}</span>
-        </button>
-      </template>
+    <template #overlay>
+      <VueCanvasNodeReadyBadge :node-id="id" />
+    </template>
 
-      <template v-else>
-        <div class="h-[120px] flex flex-col items-center justify-center gap-2 text-white/35 px-4">
-          <AudioWaveform class="size-6" :stroke-width="1.5" />
-          <template v-if="data.running">
-            <Loader2 class="size-4 animate-spin text-white/55" />
-            <span class="text-[11px] text-white/55">Rendering…</span>
-          </template>
-          <template v-else>
-            <button
-              class="nopan nodrag mt-1 flex items-center gap-1.5 px-3 h-7 rounded bg-white/[0.08] hover:bg-white/[0.15] text-white/75 hover:text-white text-[11px] transition-colors cursor-pointer disabled:opacity-50"
-              :disabled="isMuted || isBypassed"
-              @click.stop="runThisNode"
-            >
-              <Play class="size-2.5" fill="currentColor" />
-              Render
-            </button>
-          </template>
-        </div>
-      </template>
-
-      <template #actions>
-        <button v-if="audioUrl" type="button" title="Download" @click.stop="downloadAudio">
-          <Download class="size-3.5" />
-        </button>
-        <NodeMoreMenu :items="moreItems" />
-      </template>
-
-      <template #below>
-        <!-- Run row — re-render lives here now (it replaced the inline icon). -->
-        <NodeRunRow
-          v-if="audioUrl && hasUpstream"
-          :status="runStatus"
-          :can-run="!isMuted && !isBypassed"
-          :running="!!data.running"
-          run-label="Re-render this node"
-          @run="runThisNode"
+    <!-- File picker — always mounted so Replace works in any state. -->
+    <input
+      ref="fileInputRef"
+      type="file"
+      accept="audio/*"
+      class="hidden"
+      @change="onFileChange"
+    />
+    <template v-if="audioUrl">
+      <div class="pl-3 pr-[72px] pt-3 pb-2 flex items-center gap-2">
+        <AudioWaveform :size="18" class="text-white/55 shrink-0" :stroke-width="1.5" />
+        <audio
+          :src="audioUrl"
+          class="nopan nodrag flex-1 h-8"
+          controls
+          preload="metadata"
+          style="min-width: 0;"
+          @loadedmetadata="onAudioMeta"
         />
-      </template>
-    </ContentCard>
-  </div>
+      </div>
+    </template>
+
+    <template v-else-if="showUpload">
+      <!-- Upload affordance — no nopan/nodrag so a click-and-drag moves
+           the card, while a click-in-place opens the file picker. Vue
+           Flow distinguishes drag from click by a small movement
+           threshold, which is exactly the gesture split we want. -->
+      <button
+        class="w-full h-[120px] flex flex-col items-center justify-center gap-2 text-white/45 hover:text-white/85 hover:bg-white/[0.04] transition-colors cursor-pointer disabled:opacity-50"
+        :disabled="uploading"
+        @click="triggerUpload"
+      >
+        <Loader2 v-if="uploading" class="size-6 animate-spin" />
+        <AudioWaveform v-else class="size-6" :stroke-width="1.5" />
+        <span class="text-[11px]">{{ uploading ? 'Uploading…' : 'Drop or click an audio file' }}</span>
+      </button>
+    </template>
+
+    <template v-else>
+      <div class="h-[120px] flex flex-col items-center justify-center gap-2 text-white/35 px-4">
+        <AudioWaveform class="size-6" :stroke-width="1.5" />
+        <template v-if="data.running">
+          <Loader2 class="size-4 animate-spin text-white/55" />
+          <span class="text-[11px] text-white/55">Rendering…</span>
+        </template>
+        <template v-else>
+          <button
+            class="nopan nodrag mt-1 flex items-center gap-1.5 px-3 h-7 rounded bg-white/[0.08] hover:bg-white/[0.15] text-white/75 hover:text-white text-[11px] transition-colors cursor-pointer disabled:opacity-50"
+            :disabled="isMuted || isBypassed"
+            @click.stop="runThisNode"
+          >
+            <Play class="size-2.5" fill="currentColor" />
+            Render
+          </button>
+        </template>
+      </div>
+    </template>
+
+    <template #actions>
+      <button v-if="audioUrl" type="button" title="Download" @click.stop="downloadAudio">
+        <Download class="size-3.5" />
+      </button>
+      <NodeMoreMenu :items="moreItems" />
+    </template>
+
+    <template #below>
+      <!-- Run row — re-render lives here now (it replaced the inline icon). -->
+      <NodeRunRow
+        v-if="audioUrl && hasUpstream"
+        :status="runStatus"
+        :can-run="!isMuted && !isBypassed"
+        :running="!!data.running"
+        run-label="Re-render this node"
+        @run="runThisNode"
+      />
+    </template>
+  </ContentCard>
 </template>
 
 <style scoped>
 .artifact-audio--muted { opacity: 0.45; filter: grayscale(0.8); }
 .artifact-audio--bypassed { opacity: 0.85; }
-.artifact-audio--bypassed :deep(.content-card__media) {
-  outline: 1px dashed rgba(251, 191, 36, 0.35);
-  outline-offset: -1px;
+/* Drawn by a ::before inside the media box, so the selection outline and the shared
+   running/failed rings still show on top. */
+.artifact-audio--bypassed :deep(.content-card__media)::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  z-index: 4;
+  border: 1px dashed rgba(251, 191, 36, 0.35);
 }
 audio::-webkit-media-controls-panel {
   background: rgba(0, 0, 0, 0.3);

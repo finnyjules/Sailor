@@ -16,6 +16,7 @@ import { planBatch, runBatch, type BatchItem, type BatchStatus } from '~/lib/col
 import { buildRenderItem, buildStudioRenderItem, estimateBatch, sanitize } from '~/lib/collection/generate'
 import { getStudioParamBaker } from '~/lib/studio/cascade'
 import { linkedColumns, resolveLinkedCell, makeLookupResolver } from '~/lib/collection/lookup'
+import { isImageUrl } from '~/lib/collection/isImageUrl'
 
 const props = defineProps<{
   nodeId: string
@@ -353,10 +354,6 @@ async function onFile(e: Event) {
   if (!f || !collection.value) return
   importTable(collection.value, await f.text())
   if (fileInput.value) fileInput.value.value = ''
-}
-function isImageUrl(v: unknown): boolean {
-  const s = String(v ?? '')
-  return /(\.(png|jpe?g|webp|gif|svg)(\?|#|$))|(^\/view\?)/i.test(s) || /^https?:\/\//i.test(s)
 }
 
 // --- Image cell upload -----------------------------------------------------

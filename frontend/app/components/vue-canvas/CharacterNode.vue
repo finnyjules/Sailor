@@ -81,15 +81,6 @@ function onLookChange(e: Event) {
 
 <template>
   <div class="relative w-fit">
-    <VueCanvasNodePort
-      id="output-0"
-      type="source"
-      side="right"
-      :data-type="data.outputs?.[0]?.type ?? 'CHARACTER'"
-      label="Character"
-      :index="0"
-    />
-
     <ContentCard
       class="character-card relative z-10 w-[220px]"
       :name="character?.name || 'Character'"
@@ -97,6 +88,17 @@ function onLookChange(e: Event) {
     >
       <template #meta>
         <span v-if="character" class="shrink-0 text-white/30">{{ identityCount }} source{{ identityCount === 1 ? '' : 's' }}</span>
+      </template>
+
+      <template #ports>
+        <VueCanvasNodePort
+          id="output-0"
+          type="source"
+          side="right"
+          :data-type="data.outputs?.[0]?.type ?? 'CHARACTER'"
+          label="Character"
+          :index="0"
+        />
       </template>
 
       <div class="aspect-[3/4] flex items-center justify-center">

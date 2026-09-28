@@ -87,7 +87,8 @@ test.describe('Content cards', () => {
     // 4. The More menu (open on the selected — hence visible — card) lists the
     // items that apply to a card with an uploaded, unlocked, unwired picture.
     await node.getByRole('button', { name: 'More' }).click()
-    const menu = node.getByRole('menu')
+    // The menu is teleported to <body> (fixed, unclipped), so it is found on the page.
+    const menu = page.getByRole('menu')
     await expect(menu).toBeVisible()
     for (const label of ['Replace image', 'Lock', 'Re-render', 'Save as character', 'Name as reference']) {
       await expect(menu.getByRole('menuitem', { name: label, exact: true })).toBeVisible()

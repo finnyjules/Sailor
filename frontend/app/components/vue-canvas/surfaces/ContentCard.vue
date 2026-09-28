@@ -9,11 +9,16 @@ defineProps<{ name: string; selected?: boolean }>()
       <span class="truncate flex-1 min-w-0">{{ name }}</span>
       <slot name="meta" />
     </div>
-    <div class="content-card__media">
-      <slot />
+    <!-- The stage is the media box's unclipped twin: ports centre on it, and the
+         overlay (ready mark) and floating actions sit on it without being clipped. -->
+    <div class="content-card__stage relative">
+      <slot name="ports" />
+      <div class="content-card__media">
+        <slot />
+      </div>
+      <slot name="overlay" />
+      <div v-if="$slots.actions" class="node-float-actions nopan nodrag"><slot name="actions" /></div>
     </div>
-    <!-- Outside the media box: it clips, and the More menu must open past it. -->
-    <div v-if="$slots.actions" class="node-float-actions nopan nodrag"><slot name="actions" /></div>
     <slot name="below" />
   </div>
 </template>

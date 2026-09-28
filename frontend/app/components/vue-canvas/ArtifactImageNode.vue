@@ -494,7 +494,6 @@ async function onRefConfirm(name: string, text: string) {
 }
 
 // Hover reveals the chrome strip over the image.
-const hovered = ref(false)
 const rootEl = ref<HTMLElement | null>(null)
 
 // ── Edit text popover — find/replace fields, spawns a TextEditNode ───────────
@@ -722,39 +721,6 @@ const moreItems = computed<MoreItem[]>(() => [
 
 <template>
   <div class="relative w-fit">
-    <!-- Primary IMAGE input — vertically centered on the image frame.
-         Conditionally rendered so empty Image nodes don't dangle a port. -->
-    <VueCanvasNodePort
-      v-if="imagesInIdx >= 0"
-      :id="`input-${imagesInIdx}`"
-      type="target"
-      side="left"
-      :data-type="data.inputs?.[imagesInIdx]?.type ?? 'IMAGE'"
-      label="Image"
-      :index="0"
-    />
-    <!-- Primary IMAGE output -->
-    <VueCanvasNodePort
-      v-if="imageOutIdx >= 0"
-      :id="`output-${imageOutIdx}`"
-      type="source"
-      side="right"
-      :data-type="data.outputs?.[imageOutIdx]?.type ?? 'IMAGE'"
-      label="Image"
-      :index="0"
-    />
-    <!-- Secondary MASK output — was a small port + label row below the frame;
-         now the third shared port so the image stays the dominant visual. -->
-    <VueCanvasNodePort
-      v-if="maskOutIdx >= 0"
-      :id="`output-${maskOutIdx}`"
-      type="source"
-      side="right"
-      :data-type="data.outputs?.[maskOutIdx]?.type ?? 'MASK'"
-      label="Mask"
-      :index="1"
-    />
-
     <ContentCard
       ref="rootEl"
       class="artifact-image relative z-10 w-[240px] select-none"
@@ -768,8 +734,6 @@ const moreItems = computed<MoreItem[]>(() => [
       :data-running="data.running || undefined"
       :data-error="data.error || undefined"
       :style="{ '--port-color': imageColor } as any"
-      @mouseenter="hovered = true"
-      @mouseleave="hovered = false"
       @dragover="onDragOver"
       @drop="onDrop"
     >
@@ -777,10 +741,48 @@ const moreItems = computed<MoreItem[]>(() => [
         <span v-if="dims" class="shrink-0 tabular-nums text-white/30">{{ dims }}</span>
       </template>
 
+      <template #ports>
+        <!-- Primary IMAGE input — vertically centered on the image frame.
+             Conditionally rendered so empty Image nodes don't dangle a port. -->
+        <VueCanvasNodePort
+          v-if="imagesInIdx >= 0"
+          :id="`input-${imagesInIdx}`"
+          type="target"
+          side="left"
+          :data-type="data.inputs?.[imagesInIdx]?.type ?? 'IMAGE'"
+          label="Image"
+          :index="0"
+        />
+        <!-- Primary IMAGE output -->
+        <VueCanvasNodePort
+          v-if="imageOutIdx >= 0"
+          :id="`output-${imageOutIdx}`"
+          type="source"
+          side="right"
+          :data-type="data.outputs?.[imageOutIdx]?.type ?? 'IMAGE'"
+          label="Image"
+          :index="0"
+        />
+        <!-- Secondary MASK output — was a small port + label row below the frame;
+             now the third shared port so the image stays the dominant visual. -->
+        <VueCanvasNodePort
+          v-if="maskOutIdx >= 0"
+          :id="`output-${maskOutIdx}`"
+          type="source"
+          side="right"
+          :data-type="data.outputs?.[maskOutIdx]?.type ?? 'MASK'"
+          label="Mask"
+          :index="1"
+        />
+      </template>
+
+      <template #overlay>
+        <VueCanvasNodeReadyBadge :node-id="id" />
+      </template>
+
       <!-- Media stage — the image/placeholder region only. The fx + sweep
            overlays live in here and size to it, so the churn/reveal covers just
            the image and never the footer toolbar below. -->
-      <VueCanvasNodeReadyBadge :node-id="id" />
       <div ref="stageRef" class="relative">
       <!-- img-fx "image generation" effect — the churning pixel-cell field and
            per-cell image reveal, layered UNDER the glimm sweep. Existing image
@@ -980,13 +982,23 @@ const moreItems = computed<MoreItem[]>(() => [
 <style scoped>
 .artifact-image--muted { opacity: 0.45; filter: grayscale(0.8); }
 .artifact-image--bypassed { opacity: 0.85; }
-.artifact-image--bypassed :deep(.content-card__media) {
-  outline: 1px dashed rgba(251, 191, 36, 0.35);
-  outline-offset: -1px;
+/* Bypassed and locked edges are drawn by a ::before inside the media box, so the
+   selection outline and the shared running/failed rings still show on top. */
+.artifact-image--bypassed :deep(.content-card__media)::before,
+.artifact-image--locked :deep(.content-card__media)::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  z-index: 4;
 }
-.artifact-image--locked :deep(.content-card__media) {
+.artifact-image--bypassed :deep(.content-card__media)::before {
+  border: 1px dashed rgba(251, 191, 36, 0.35);
+}
+.artifact-image--locked :deep(.content-card__media)::before {
   /* Amber tint to match the seed-lock toggle's visual language — same
      "frozen / pinned" signal across the canvas. */
-  box-shadow: 0 0 0 1px rgba(251, 191, 36, 0.45), var(--node-shadow);
+  box-shadow: inset 0 0 0 1px rgba(251, 191, 36, 0.45);
 }
 </style>

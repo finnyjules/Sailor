@@ -64,6 +64,18 @@ const glbUrl = computed<string>(() => {
   return ''
 })
 
+// The card's name: the .glb file's own name when the link carries one (a `?filename=`
+// param, else the last path segment), the way the other cards name themselves.
+const glbName = computed<string | null>(() => {
+  const url = glbUrl.value
+  if (!url) return null
+  const m = url.match(/[?&]filename=([^&#]+)/)
+  let raw = m?.[1]
+  if (!raw) { try { raw = new URL(url, 'http://local').pathname.split('/').filter(Boolean).pop() } catch { raw = undefined } }
+  if (!raw) return null
+  try { return decodeURIComponent(raw) } catch { return raw }
+})
+
 // ── Three.js viewer (non-reactive closures) ─────────────────────────────────
 const W = 300, H = 300
 const stageRef = ref<HTMLDivElement | null>(null)
@@ -195,54 +207,57 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="relative w-fit">
-    <VueCanvasNodePort
-      :id="`input-${glbInIdx}`"
-      type="target"
-      side="left"
-      :data-type="data.inputs?.[glbInIdx]?.type ?? 'STRING'"
-      label="Model"
-      :index="0"
-    />
-    <VueCanvasNodePort
-      :id="`output-${glbOutIdx}`"
-      type="source"
-      side="right"
-      :data-type="data.outputs?.[glbOutIdx]?.type ?? 'STRING'"
-      label="Model"
-      :index="0"
-    />
+  <ContentCard
+    class="artifact-3d relative z-10 w-[300px] select-none"
+    :class="{ 'opacity-45 grayscale': isMuted, 'opacity-85': isBypassed }"
+    :name="glbName || data.title || '3D model'"
+    :selected="selected"
+    :data-running="data.running || undefined"
+    :data-error="data.error || undefined"
+    :style="{ '--port-color': stringColor } as any"
+    @pointerenter="on3DHoverEnter" @pointerleave="on3DHoverLeave"
+  >
+    <template #ports>
+      <VueCanvasNodePort
+        :id="`input-${glbInIdx}`"
+        type="target"
+        side="left"
+        :data-type="data.inputs?.[glbInIdx]?.type ?? 'STRING'"
+        label="Model"
+        :index="0"
+      />
+      <VueCanvasNodePort
+        :id="`output-${glbOutIdx}`"
+        type="source"
+        side="right"
+        :data-type="data.outputs?.[glbOutIdx]?.type ?? 'STRING'"
+        label="Model"
+        :index="0"
+      />
+    </template>
 
-    <ContentCard
-      class="artifact-3d relative z-10 w-[300px] select-none"
-      :class="{ 'opacity-45 grayscale': isMuted, 'opacity-85': isBypassed }"
-      :name="data.title || '3D model'"
-      :selected="selected"
-      :data-running="data.running || undefined"
-      :data-error="data.error || undefined"
-      :style="{ '--port-color': stringColor } as any"
-      @pointerenter="on3DHoverEnter" @pointerleave="on3DHoverLeave"
-    >
+    <template #overlay>
       <VueCanvasNodeReadyBadge :node-id="id" />
+    </template>
 
-      <!-- Viewer -->
-      <div class="relative" :style="{ width: W + 'px', height: H + 'px' }">
-        <div ref="stageRef" class="nopan nodrag absolute inset-0 cursor-grab active:cursor-grabbing" />
-        <div v-if="!glbUrl" class="absolute inset-0 flex flex-col items-center justify-center gap-1.5 text-white/30 pointer-events-none">
-          <Box class="size-8" :stroke-width="1.5" /><span class="text-[10px]">Wire a glb_url · then Run</span>
-        </div>
-        <div v-if="loading" class="absolute inset-0 flex items-center justify-center bg-black/30 pointer-events-none">
-          <Loader2 class="size-6 animate-spin text-white/70" />
-        </div>
-        <div v-if="loadError" class="absolute inset-x-2 bottom-2 flex items-center gap-1 text-[10px] text-rose-300 bg-black/60 rounded px-1.5 py-1 pointer-events-none">
-          <AlertTriangle class="size-3 shrink-0" /> {{ loadError }}
-        </div>
+
+    <!-- Viewer -->
+    <div class="relative" :style="{ width: W + 'px', height: H + 'px' }">
+      <div ref="stageRef" class="nopan nodrag absolute inset-0 cursor-grab active:cursor-grabbing" />
+      <div v-if="!glbUrl" class="absolute inset-0 flex flex-col items-center justify-center gap-1.5 text-white/30 pointer-events-none">
+        <Box class="size-8" :stroke-width="1.5" /><span class="text-[10px]">Connect a 3D model link, then run</span>
       </div>
+      <div v-if="loading" class="absolute inset-0 flex items-center justify-center bg-black/30 pointer-events-none">
+        <Loader2 class="size-6 animate-spin text-white/70" />
+      </div>
+      <div v-if="loadError" class="absolute inset-x-2 bottom-2 flex items-center gap-1 text-[10px] text-rose-300 bg-black/60 rounded px-1.5 py-1 pointer-events-none">
+        <AlertTriangle class="size-3 shrink-0" /> {{ loadError }}
+      </div>
+    </div>
 
-      <template #actions>
-        <button type="button" title="Reset view" :disabled="!glbUrl" @click.stop="resetView"><RotateCcw class="size-3.5" /></button>
-        <button type="button" title="Download .glb" :disabled="!glbUrl" @click.stop="downloadGlb"><Download class="size-3.5" /></button>
-      </template>
-    </ContentCard>
-  </div>
+    <template #actions>
+      <button type="button" title="Reset view" :disabled="!glbUrl" @click.stop="resetView"><RotateCcw class="size-3.5" /></button>
+      <button type="button" title="Download .glb" :disabled="!glbUrl" @click.stop="downloadGlb"><Download class="size-3.5" /></button>
+    </template>
+  </ContentCard>
 </template>

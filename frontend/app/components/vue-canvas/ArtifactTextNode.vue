@@ -198,137 +198,144 @@ onMounted(() => { syncWidgetToActive() })
 </script>
 
 <template>
-  <div class="relative w-fit">
-    <VueCanvasNodePort
-      v-if="sourceInputIdx >= 0"
-      :id="`input-${sourceInputIdx}`"
-      type="target"
-      side="left"
-      :data-type="data.inputs?.[sourceInputIdx]?.type ?? 'STRING'"
-      label="Text"
-      :index="0"
-    />
-    <VueCanvasNodePort
-      v-if="textOutputIdx >= 0"
-      :id="`output-${textOutputIdx}`"
-      type="source"
-      side="right"
-      :data-type="data.outputs?.[textOutputIdx]?.type ?? 'STRING'"
-      label="Text"
-      :index="0"
-    />
+  <ContentCard
+    class="artifact-text relative z-10 w-[300px] select-none"
+    :class="{
+      'artifact-text--muted': isMuted,
+      'artifact-text--bypassed': isBypassed,
+    }"
+    :name="cardName"
+    :selected="selected"
+    :data-running="data.running || undefined"
+    :data-error="data.error || undefined"
+    :data-node-id="id"
+    :style="{ '--port-color': stringColor } as any"
+  >
+    <template #meta>
+      <span class="shrink-0 tabular-nums text-white/30">{{ charCount }} {{ charCount === 1 ? 'char' : 'chars' }}</span>
+      <span v-if="showIterator" class="shrink-0 tabular-nums text-white/30">· {{ entryCount }} entries</span>
+    </template>
 
-    <ContentCard
-      class="artifact-text relative z-10 w-[300px] select-none"
-      :class="{
-        'artifact-text--muted': isMuted,
-        'artifact-text--bypassed': isBypassed,
-      }"
-      :name="cardName"
-      :selected="selected"
-      :data-running="data.running || undefined"
-      :data-error="data.error || undefined"
-      :data-node-id="id"
-      :style="{ '--port-color': stringColor } as any"
-    >
-      <template #meta>
-        <span class="shrink-0 tabular-nums text-white/30">{{ charCount }} {{ charCount === 1 ? 'char' : 'chars' }}</span>
-        <span v-if="showIterator" class="shrink-0 tabular-nums text-white/30">· {{ entryCount }} entries</span>
-      </template>
+    <template #ports>
+      <VueCanvasNodePort
+        v-if="sourceInputIdx >= 0"
+        :id="`input-${sourceInputIdx}`"
+        type="target"
+        side="left"
+        :data-type="data.inputs?.[sourceInputIdx]?.type ?? 'STRING'"
+        label="Text"
+        :index="0"
+      />
+      <VueCanvasNodePort
+        v-if="textOutputIdx >= 0"
+        :id="`output-${textOutputIdx}`"
+        type="source"
+        side="right"
+        :data-type="data.outputs?.[textOutputIdx]?.type ?? 'STRING'"
+        label="Text"
+        :index="0"
+      />
+    </template>
 
-      <!-- Entry list. Each row is its own editable textarea, plus a small
-           index pill (click to make active) and a delete button. The active
-           entry has a highlighted pill and a subtle accent on the left edge. -->
-      <ul class="text-entry-list flex flex-col gap-1 p-2 max-h-[360px] overflow-y-auto">
-        <li
-          v-for="(entry, i) in entries"
-          :key="i"
-          class="text-entry group/entry relative flex items-start gap-1.5 rounded-md border bg-white/[0.02] hover:bg-white/[0.04] transition-colors"
-          :class="i === activeIndex
-            ? 'border-white/15'
-            : 'border-transparent'"
-        >
-          <!-- Index pill (also: click to activate) -->
-          <button
-            type="button"
-            class="nopan nodrag shrink-0 mt-1.5 ml-1.5 size-5 rounded-full text-[10px] font-medium tabular-nums flex items-center justify-center transition-colors cursor-pointer"
-            :class="i === activeIndex
-              ? 'bg-white/15 text-white/90'
-              : 'bg-white/[0.04] text-white/45 hover:bg-white/10 hover:text-white/70'"
-            :title="i === activeIndex ? 'Active entry' : 'Make active'"
-            @click.stop="makeActive(i)"
-          >{{ i + 1 }}</button>
-
-          <textarea
-            class="nopan nodrag flex-1 min-h-[44px] max-h-[180px] resize-none bg-transparent text-[12px] leading-snug font-normal text-white/85 py-1.5 pr-1 pl-0.5 outline-none placeholder:text-white/30"
-            :value="entry"
-            :placeholder="hasUpstream && i === 0 ? 'Wired to upstream. Type to override.' : 'Type text…'"
-            @focus="makeActive(i)"
-            @input="onEntryInput(i, $event)"
-          />
-
-          <button
-            class="nopan nodrag shrink-0 mt-1.5 mr-1 size-5 rounded flex items-center justify-center text-white/30 opacity-0 group-hover/entry:opacity-100 hover:!opacity-100 hover:text-rose-300 hover:bg-rose-500/10 transition-all cursor-pointer"
-            :title="entries.length > 1 ? 'Remove entry' : 'Clear entry'"
-            @click.stop="removeEntry(i)"
-          >
-            <X class="size-3" />
-          </button>
-        </li>
-      </ul>
-
-      <!-- Add entry -->
-      <button
-        class="nopan nodrag w-full px-3 py-1.5 flex items-center justify-center gap-1 text-[10.5px] uppercase tracking-wide text-white/40 hover:text-white/80 hover:bg-white/[0.04] border-t border-white/5 transition-colors cursor-pointer"
-        title="Add another entry"
-        @click.stop="addEntry"
+    <!-- Entry list. Each row is its own editable textarea, plus a small
+         index pill (click to make active) and a delete button. The active
+         entry has a highlighted pill and a subtle accent on the left edge. -->
+    <ul class="text-entry-list flex flex-col gap-1 p-2 max-h-[360px] overflow-y-auto">
+      <li
+        v-for="(entry, i) in entries"
+        :key="i"
+        class="text-entry group/entry relative flex items-start gap-1.5 rounded-md border bg-white/[0.02] hover:bg-white/[0.04] transition-colors"
+        :class="i === activeIndex
+          ? 'border-white/15'
+          : 'border-transparent'"
       >
-        <Plus class="size-3" /> Add entry
-      </button>
-
-      <!-- Run controls — a quiet row at the bottom of the media box. -->
-      <div class="flex items-center justify-end gap-1 px-2 pb-2">
-        <button
-          v-if="showIterator"
-          class="nopan nodrag shrink-0 h-5 px-1.5 rounded flex items-center gap-1 text-[10px] text-white/55 hover:text-white/90 hover:bg-white/[0.08] transition-colors cursor-pointer disabled:opacity-50"
-          :disabled="data.running || isMuted || isBypassed"
-          :title="`Run workflow once per entry (${entryCount}×)`"
-          @click.stop="runAllEntries"
-        >
-          <Layers class="size-2.5" />
-          <span class="tabular-nums">×{{ entryCount }}</span>
-        </button>
-        <button
-          class="nopan nodrag shrink-0 size-5 rounded flex items-center justify-center text-white/45 hover:text-white/85 hover:bg-white/[0.08] transition-colors cursor-pointer disabled:opacity-50"
-          :disabled="data.running || isMuted || isBypassed"
-          :title="data.running ? 'Running…' : 'Run with active entry'"
-          @click.stop="runThisNode"
-        >
-          <Loader2 v-if="data.running" class="size-3 animate-spin" />
-          <RefreshCw v-else class="size-3" />
-        </button>
-      </div>
-
-      <template #actions>
+        <!-- Index pill (also: click to activate) -->
         <button
           type="button"
-          :disabled="!charCount"
-          title="Download active entry as .txt"
-          @click.stop="downloadText"
+          class="nopan nodrag shrink-0 mt-1.5 ml-1.5 size-5 rounded-full text-[10px] font-medium tabular-nums flex items-center justify-center transition-colors cursor-pointer"
+          :class="i === activeIndex
+            ? 'bg-white/15 text-white/90'
+            : 'bg-white/[0.04] text-white/45 hover:bg-white/10 hover:text-white/70'"
+          :title="i === activeIndex ? 'Active entry' : 'Make active'"
+          @click.stop="makeActive(i)"
+        >{{ i + 1 }}</button>
+
+        <textarea
+          class="nopan nodrag flex-1 min-h-[44px] max-h-[180px] resize-none bg-transparent text-[12px] leading-snug font-normal text-white/85 py-1.5 pr-1 pl-0.5 outline-none placeholder:text-white/30"
+          :value="entry"
+          :placeholder="hasUpstream && i === 0 ? 'Wired to upstream. Type to override.' : 'Type text…'"
+          @focus="makeActive(i)"
+          @input="onEntryInput(i, $event)"
+        />
+
+        <button
+          class="nopan nodrag shrink-0 mt-1.5 mr-1 size-5 rounded flex items-center justify-center text-white/30 opacity-0 group-hover/entry:opacity-100 hover:!opacity-100 hover:text-rose-300 hover:bg-rose-500/10 transition-all cursor-pointer"
+          :title="entries.length > 1 ? 'Remove entry' : 'Clear entry'"
+          @click.stop="removeEntry(i)"
         >
-          <Download class="size-3.5" />
+          <X class="size-3" />
         </button>
-      </template>
-    </ContentCard>
-  </div>
+      </li>
+    </ul>
+
+    <!-- Add entry -->
+    <button
+      class="nopan nodrag w-full px-3 py-1.5 flex items-center justify-center gap-1 text-[12px] text-white/40 hover:text-white/80 hover:bg-white/[0.04] border-t border-white/5 transition-colors cursor-pointer"
+      title="Add another entry"
+      @click.stop="addEntry"
+    >
+      <Plus class="size-3" /> Add entry
+    </button>
+
+    <!-- Run controls — a quiet row at the bottom of the media box. -->
+    <div class="flex items-center justify-end gap-1 px-2 pb-2">
+      <button
+        v-if="showIterator"
+        class="nopan nodrag shrink-0 h-5 px-1.5 rounded flex items-center gap-1 text-[10px] text-white/55 hover:text-white/90 hover:bg-white/[0.08] transition-colors cursor-pointer disabled:opacity-50"
+        :disabled="data.running || isMuted || isBypassed"
+        :title="`Run workflow once per entry (${entryCount}×)`"
+        @click.stop="runAllEntries"
+      >
+        <Layers class="size-2.5" />
+        <span class="tabular-nums">×{{ entryCount }}</span>
+      </button>
+      <button
+        class="nopan nodrag shrink-0 size-5 rounded flex items-center justify-center text-white/45 hover:text-white/85 hover:bg-white/[0.08] transition-colors cursor-pointer disabled:opacity-50"
+        :disabled="data.running || isMuted || isBypassed"
+        :title="data.running ? 'Running…' : 'Run with active entry'"
+        @click.stop="runThisNode"
+      >
+        <Loader2 v-if="data.running" class="size-3 animate-spin" />
+        <RefreshCw v-else class="size-3" />
+      </button>
+    </div>
+
+    <template #actions>
+      <button
+        type="button"
+        :disabled="!charCount"
+        title="Download active entry as .txt"
+        @click.stop="downloadText"
+      >
+        <Download class="size-3.5" />
+      </button>
+    </template>
+  </ContentCard>
 </template>
 
 <style scoped>
 .artifact-text--muted { opacity: 0.45; filter: grayscale(0.8); }
 .artifact-text--bypassed { opacity: 0.85; }
-.artifact-text--bypassed :deep(.content-card__media) {
-  outline: 1px dashed rgba(251, 191, 36, 0.35);
-  outline-offset: -1px;
+/* Drawn by a ::before inside the media box, so the selection outline and the shared
+   running/failed rings still show on top. */
+.artifact-text--bypassed :deep(.content-card__media)::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  z-index: 4;
+  border: 1px dashed rgba(251, 191, 36, 0.35);
 }
 
 /* Slim, dark scrollbar on the entry list — match the rest of the canvas. */
