@@ -11,7 +11,7 @@ defineEmits<{ 'update:modelValue': [value: string] }>()
   <textarea
     v-if="multiline"
     class="nopan nodrag pastel-hairline w-full rounded-[6px] px-3 py-3 text-[13px] leading-relaxed text-foreground placeholder:text-white/30 resize-y min-h-[88px] outline-none"
-    style="--pastel-hairline-bg: rgba(0,0,0,0.35);"
+    style="--pastel-hairline-bg: #111113;"
     :placeholder="placeholder"
     :value="modelValue"
     @input="$emit('update:modelValue', ($event.target as HTMLTextAreaElement).value)"
