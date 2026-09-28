@@ -132,3 +132,34 @@ test('the toolbar offers Delete for an Option-selected segment', async ({ page }
   })
   expect(segs).toEqual([1])
 })
+
+// Trim auto-join: two overlapping circles, both outer halves trimmed with real
+// clicks — the lens left behind is ONE closed path (not two open arcs)
+test('trimming both outer halves of two circles leaves one closed lens', async ({ page }) => {
+  await page.goto('/dev/sketch-draw')
+  await page.waitForSelector('[data-ready]')
+  await page.waitForFunction(() => !!(window as any).__sketchDraw)
+  // circles on (6, 5) and (10, 5), radius 3: they cross at x = 8
+  await page.evaluate(() => {
+    const D = (window as any).__sketchDraw
+    D.reset()
+    D.setTool('circle'); D.place(6, 5); D.place(9, 5)
+    D.setTool('circle'); D.place(10, 5); D.place(13, 5)
+    D.setTool('select')
+  })
+  await page.keyboard.press('t')
+  expect(await page.evaluate(() => (window as any).__sketchDraw.tool)).toBe('trim')
+  for (const x of [3, 13]) {
+    await moveTo(page, x, 5, 4)
+    await expect(page.locator('[data-trim-hover]')).toHaveCount(1)
+    await page.mouse.down(); await page.mouse.up()
+  }
+  const shape = await page.evaluate(() => {
+    const d = (window as any).__sketchDraw.doc
+    return {
+      circles: d.entities.filter((e: any) => e.kind === 'circle').length,
+      paths: d.entities.filter((e: any) => e.kind === 'path').map((p: any) => ({ closed: p.closed, segs: p.segments.map((s: any) => s.kind) })),
+    }
+  })
+  expect(shape).toEqual({ circles: 0, paths: [{ closed: true, segs: ['arc', 'arc'] }] })
+})

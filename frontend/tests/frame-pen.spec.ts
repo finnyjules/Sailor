@@ -119,6 +119,33 @@ test.describe('Frame pen (shared pen)', () => {
     await expect(penToolbar(page)).toBeVisible()   // still drawing; the modal did not react
   })
 
+  // Trim auto-join in the Frame: two circles drawn with the Circle tool, both
+  // outer halves trimmed, Enter — the layer's outline is ONE closed subpath
+  test('two overlapping circles trimmed to a lens commit as one closed outline', async ({ page }) => {
+    const before = await layers(page)
+    const box = await openPen(page)
+    const cx = box.x + box.width / 2, cy = box.y + box.height / 2
+    const click = async (x: number, y: number) => { await page.mouse.move(x, y, { steps: 3 }); await page.mouse.down(); await page.mouse.up() }
+    const circleBtn = (await page.locator('[data-tool="circle"]').boundingBox())!
+    await page.mouse.click(circleBtn.x + circleBtn.width / 2, circleBtn.y + circleBtn.height / 2)
+    await click(cx - 40, cy); await click(cx + 20, cy)       // centre, then a point on the edge (radius 60)
+    await page.mouse.click(circleBtn.x + circleBtn.width / 2, circleBtn.y + circleBtn.height / 2)
+    await click(cx + 40, cy); await click(cx + 100, cy)
+    await page.keyboard.press('t')
+    await expect(page.locator('[data-tool="trim"]')).toHaveAttribute('aria-pressed', 'true')
+    await click(cx - 100, cy)
+    await click(cx + 100, cy)
+    await page.keyboard.press('Enter')
+    await expect(penToolbar(page)).toBeHidden()
+    const after = await layers(page)
+    const added = after.find((l: any) => !before.some((b: any) => b.id === l.id))
+    expect(added?.kind).toBe('path')
+    const ps = added.sketch.entities.filter((e: any) => e.kind === 'path')
+    expect(ps.map((p: any) => p.closed)).toEqual([true])
+    expect((added.d.match(/[Mm]/g) ?? []).length).toBe(1)
+    expect((added.d.match(/[Zz]/g) ?? []).length).toBe(1)
+  })
+
   test('the pen toolbar takes real clicks (its bar sits in a click-through column)', async ({ page }) => {
     await openPen(page)
     for (const tool of ['line', 'circle', 'trim', 'select']) {

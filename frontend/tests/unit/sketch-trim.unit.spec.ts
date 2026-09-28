@@ -677,7 +677,10 @@ describe('#4 reused anchors drop their pins to the trimmed curve', () => {
     addConstraint(d, 'collinear', [A, B, T])
     const res = removeSpan(d, spanAt(d, { kind: 'seg', pathId: P, segIndex: 0 }, 0.2)!)
     expect(res).toEqual({ ok: true, droppedRules: 0 })
-    expect(pathOf(d, P).anchors[0]).toBe(T)
+    // T is now the trimmed path's end, and the stroke ending at T joins it
+    // (Trim auto-join): one path B → T → (4, 8), keeping P's id
+    expect(pathOf(d, P).anchors).toEqual([B, T, expect.any(String)])
+    expect(paths(d)).toHaveLength(1)
     expect(ruleCount(d, 'collinear')).toBe(0)
   })
 

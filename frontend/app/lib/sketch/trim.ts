@@ -18,6 +18,11 @@ export interface TrimResult { ok: boolean; droppedRules: number }
 
 const FAIL: TrimResult = { ok: false, droppedRules: 0 }
 
+// a removal's result plus the points that are now the removed piece's ends
+// (the trim's own ends, where auto-join looks — see joinAtTrimEnds)
+interface Removed extends TrimResult { ends: EntityId[] }
+const NOT_REMOVED: Removed = { ...FAIL, ends: [] }
+
 // ── helpers ──────────────────────────────────────────────────────────────────
 
 function segCount(p: PathEntity): number {
@@ -566,27 +571,31 @@ export function removeSegment(doc: SketchDoc, pathId: EntityId, segIndex: number
   return { ok: true, droppedRules: tr.count() }
 }
 
-function removeLineSpan(doc: SketchDoc, span: Span & { ref: { kind: 'line' } }): TrimResult {
+function removeLineSpan(doc: SketchDoc, span: Span & { ref: { kind: 'line' } }): Removed {
   const line = getEntity(doc, span.ref.id)
-  if (!line || line.kind !== 'line') return FAIL
+  if (!line || line.kind !== 'line') return NOT_REMOVED
   const tr = ruleTracker(doc)
   const { p1, p2 } = line
   const cons = !!line.construction
   const self = span.ref
+  let ends: EntityId[]
   if (!span.start.cutter && !span.end.cutter) {
     followPair(doc, p1, p2, { kind: 'removed' })
     deleteEntity(doc, line.id)
     cleanOrphans(doc, [p1, p2])
+    ends = [p1, p2]
   } else if (!span.start.cutter) {
     const x = endPoint(doc, tr, span.end, self, cons)
     followPair(doc, p1, p2, { kind: 'moved', from: p1, to: x })
     line.p1 = x
     cleanOrphans(doc, [p1])
+    ends = [p1, x]
   } else if (!span.end.cutter) {
     const x = endPoint(doc, tr, span.start, self, cons)
     followPair(doc, p1, p2, { kind: 'moved', from: p2, to: x })
     line.p2 = x
     cleanOrphans(doc, [p2])
+    ends = [x, p2]
   } else {
     const x0 = endPoint(doc, tr, span.start, self, cons)
     const x1 = endPoint(doc, tr, span.end, self, cons)
@@ -594,16 +603,17 @@ function removeLineSpan(doc: SketchDoc, span: Span & { ref: { kind: 'line' } }):
     line.p2 = x0
     const L2 = addLine(doc, x1, p2, cons ? { construction: true } : {})
     copyLineDirection(doc, line.id, L2)
+    ends = [x0, x1]
   }
-  return { ok: true, droppedRules: tr.count() }
+  return { ok: true, droppedRules: tr.count(), ends }
 }
 
-function removeSegSpan(doc: SketchDoc, span: Span & { ref: { kind: 'seg' } }): TrimResult {
+function removeSegSpan(doc: SketchDoc, span: Span & { ref: { kind: 'seg' } }): Removed {
   const path = getEntity(doc, span.ref.pathId)
   const i = span.ref.segIndex
-  if (!path || path.kind !== 'path' || i < 0 || i >= segCount(path)) return FAIL
+  if (!path || path.kind !== 'path' || i < 0 || i >= segCount(path)) return NOT_REMOVED
   const seg = path.segments[i]!
-  if (seg.kind === 'cubic') return FAIL
+  if (seg.kind === 'cubic') return NOT_REMOVED
   const tr = ruleTracker(doc)
   const cons = !!path.construction
   const [A, B] = segEnds(path, i)
@@ -626,12 +636,12 @@ function removeSegSpan(doc: SketchDoc, span: Span & { ref: { kind: 'seg' } }): T
   }
   followArcOperands(doc, arcsBefore, hints)
   cleanOrphans(doc, loose)
-  return { ok: true, droppedRules: tr.count() }
+  return { ok: true, droppedRules: tr.count(), ends: [x0 ?? A, x1 ?? B] }
 }
 
-function removeCircleSpan(doc: SketchDoc, span: Span & { ref: { kind: 'circle' } }): TrimResult {
+function removeCircleSpan(doc: SketchDoc, span: Span & { ref: { kind: 'circle' } }): Removed {
   const circ = getEntity(doc, span.ref.id)
-  if (!circ || circ.kind !== 'circle') return FAIL
+  if (!circ || circ.kind !== 'circle') return NOT_REMOVED
   const tr = ruleTracker(doc)
   const C = circ.center
   const cons = !!circ.construction
@@ -643,7 +653,7 @@ function removeCircleSpan(doc: SketchDoc, span: Span & { ref: { kind: 'circle' }
     for (const c of doc.constraints) if (c.kind === 'pointOnCircle' && c.refs[1] === circ.id && held.has(c.refs[0]!)) tr.excuse(c.id)
     deleteEntity(doc, circ.id)
     cleanOrphans(doc, [C, ...held])
-    return { ok: true, droppedRules: tr.count() }
+    return { ok: true, droppedRules: tr.count(), ends: [] }
   }
   // points held only by their pin to this circle that lie on the removed piece
   // go with it (strictly inside: an end of the piece is a crossing, not theirs)
@@ -660,7 +670,7 @@ function removeCircleSpan(doc: SketchDoc, span: Span & { ref: { kind: 'circle' }
   }
   const x0 = endPoint(doc, tr, span.start, span.ref, cons)   // a reused end's pointOnCircle goes here
   const x1 = endPoint(doc, tr, span.end, span.ref, cons)
-  if (x0 === x1) return { ok: false, droppedRules: tr.count() }
+  if (x0 === x1) return { ok: false, droppedRules: tr.count(), ends: [] }
   // the rest runs CCW from the far crossing back round to the near one
   pushPath(doc, [x1, x0], [{ kind: 'arc', center: C, sweep: 1 }], false, cons)
   addConstraint(doc, 'equalDist', [C, x1, C, x0])
@@ -686,7 +696,7 @@ function removeCircleSpan(doc: SketchDoc, span: Span & { ref: { kind: 'circle' }
   doc.entities = doc.entities.filter(e => e.id !== circ.id)
   cleanOrphans(doc, inPiece)
   if (shareWith && shareWith !== C) mergePoints(doc, C, shareWith)   // the arc takes that circle's centre
-  return { ok: true, droppedRules: tr.count() }
+  return { ok: true, droppedRules: tr.count(), ends: [x0, x1] }
 }
 
 // points whose only tie to the drawing is a pointOnCircle onto circle `circId`:
@@ -730,14 +740,53 @@ function concentricCentre(doc: SketchDoc, c: SketchConstraint, circId: EntityId,
 }
 
 /** Remove the piece of a curve described by a span (see spanAt). A crossing that
- *  sits on a line's or segment's own end counts as that end. */
+ *  sits on a line's or segment's own end counts as that end. Afterwards, where
+ *  the removed piece's ends are now the ends of exactly two open paths, those
+ *  join into one (and close when their ends meet) — see joinAtTrimEnds. */
 export function removeSpan(doc: SketchDoc, span: Span): TrimResult {
+  const pathsBefore = new Set(doc.entities.filter(e => e.kind === 'path').map(e => e.id))
+  const res = removePiece(doc, span)
+  if (res.ok) joinAtTrimEnds(doc, res.ends, pathsBefore)
+  return { ok: res.ok, droppedRules: res.droppedRules }
+}
+
+function removePiece(doc: SketchDoc, span: Span): Removed {
   if (span.ref.kind === 'circle') return removeCircleSpan(doc, span as Span & { ref: { kind: 'circle' } })
   const s = normaliseSpan(doc, span)
-  if (!s) return FAIL
-  if ((s.start.cutter || s.end.cutter) && dist(s.start.point, s.end.point) <= drawingTol(doc)) return FAIL   // zero-length piece
+  if (!s) return NOT_REMOVED
+  if ((s.start.cutter || s.end.cutter) && dist(s.start.point, s.end.point) <= drawingTol(doc)) return NOT_REMOVED   // zero-length piece
   if (s.ref.kind === 'line') return removeLineSpan(doc, s as Span & { ref: { kind: 'line' } })
   return removeSegSpan(doc, s as Span & { ref: { kind: 'seg' } })
+}
+
+// Trim auto-join. Trim leaves each remaining piece its own open path, even
+// where two now end at the same point (a flower's petals, trimmed, are a ring
+// of open arcs the Frame can't fill). At each of the trim's own ends — and
+// nowhere else in the drawing — two open paths ending there become one
+// (joinOpenEnds), and a path whose two ends have met closes (collapsePath).
+// A join at one end can let the other end join too (a lens closes), so this
+// repeats until nothing more joins. Only open paths join: openEndPair refuses
+// line-tool line entities (rules name those by id, so they are never turned
+// into paths), circles, closed paths, a point used as a centre or handle, a
+// three-way meeting and a guide meeting a drawn piece. Nothing moves and no
+// rule is removed (a join only folds one path's anchors into the other's).
+// Of the two paths, one that existed before this trim keeps its id; when both
+// did, the first in the drawing (the older one) keeps it.
+function joinAtTrimEnds(doc: SketchDoc, ends: EntityId[], keepIds: Set<EntityId>): void {
+  const at = [...new Set(ends)]
+  for (let joined = true; joined;) {
+    joined = false
+    for (const x of at) {
+      if (!getPoint(doc, x)) continue
+      const id = joinOpenEnds(doc, x, keepIds)
+      if (!id) continue
+      joined = true
+      const path = getEntity(doc, id)
+      const loose: EntityId[] = []
+      if (path?.kind === 'path') collapsePath(doc, path, loose)
+      cleanOrphans(doc, loose)
+    }
+  }
 }
 
 // ── cut ──────────────────────────────────────────────────────────────────────
