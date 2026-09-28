@@ -57,7 +57,8 @@ import sharp from 'sharp'
 import { answerExt } from '../answerDownload'
 import { pixelsInWorker } from '../compositor/worker'
 import { answerRgbPng, isPlainRgbPng, pictureMeta, pilRaw } from '../pictures/pythonView'
-import { handoffView, plainPngChunks, type LoaderKind } from '../pictures/handoffView'
+import { handoffView, madeHandoffView, plainPngChunks, type LoaderKind, type MadeView } from '../pictures/handoffView'
+import { madeSourceOf } from '../pictureHandoff'
 import { loaderFileBehind } from '../cards/bakeReplay'
 import type { NodePlan, PipelineIO, PlanContext } from '../executors'
 import type { OutputFile, RunnerValue } from '../types'
@@ -129,13 +130,17 @@ export async function splitMask(cutout: Uint8Array, grow: number, signal: AbortS
  * the loader's picture as Python hands its tensor on (R3.H,
  * ../pictures/handoffView.ts: EXIF turned, RGB; an Image card's RGBA when its
  * file has see-through pixels, and then the fill gets its RGB); `picture`
- * and `fill` null: the file itself already is it. Otherwise the file as it is
- * (`picture` null), its fill copy the RGB PIL reads (`fill` null: the file
- * itself, an 8-bit RGB PNG already), made on the Frame's worker.
+ * and `fill` null: the file itself already is it. Made in the run (`made`,
+ * R3.H2, ../pictureHandoff.ts madeSourceOf): the tensor its node hands on the
+ * same way (a provider's answer as PIL's RGBA, the fill its RGB). Otherwise
+ * the file as it is (`picture` null), its fill copy the RGB PIL reads (`fill`
+ * null: the file itself, an 8-bit RGB PNG already), made on the Frame's worker.
  */
-export async function splitPictures(bytes: Uint8Array, loader: LoaderKind | null, signal: AbortSignal): Promise<{ picture: Uint8Array | null; fill: Uint8Array | null; w: number; h: number }> {
-  if (loader) {
-    const view = await handoffView(bytes, loader, raw => pixelsInWorker(signal, worker => worker.rgbOf(raw), SPLIT_MASK_TIMEOUT))
+export async function splitPictures(bytes: Uint8Array, loader: LoaderKind | null, signal: AbortSignal, made?: MadeView | null): Promise<{ picture: Uint8Array | null; fill: Uint8Array | null; w: number; h: number }> {
+  if (loader || made) {
+    const view = loader
+      ? await handoffView(bytes, loader, raw => pixelsInWorker(signal, worker => worker.rgbOf(raw), SPLIT_MASK_TIMEOUT))
+      : await madeHandoffView(bytes, made!)
     if (view.channels === 3) return { picture: view.png, fill: view.png, w: view.w, h: view.h }
     // `image[..., :3]` of the card's RGBA: its RGB, as the PNG Python sends.
     const rgb = await sharp(view.png ?? bytes).removeAlpha().png({ compressionLevel: 6 }).toBuffer()
@@ -177,13 +182,15 @@ export async function planSplitLayers(ctx: PlanContext): Promise<NodePlan> {
   // Behind a LoadImage or an Image card: Python's picture is the loader's (EXIF turned; RGB, or an Image card's RGBA).
   const behind = isLink(link) ? loaderFileBehind(ctx.prompt, link) : null
   const loader: LoaderKind | null = behind ? { keepsAlpha: behind.classType === 'Image' } : null
+  // Made in the run (R3.H2): the tensor its node hands on (a provider's answer: PIL's RGBA of it).
+  const made = !behind && ctx.families ? madeSourceOf(ctx.prompt, link, ctx.families)?.view ?? null : null
   const cutoutUsd = callUsd(SPLIT_CUTOUT_SLUG)
   const fillUsd = callUsd(fillSlug)
   return {
     kind: 'pipeline', prefix: 'split_subject',
     run: async (io: PipelineIO) => {
       // The pictures, read before any call: a file that can't be read fails the node uncharged.
-      const pics = await splitPictures(await io.read(source), loader, io.signal)
+      const pics = await splitPictures(await io.read(source), loader, io.signal, made)
       const picture = pics.picture ? await io.handOff(pics.picture, 'split_image.png') : image
       const fillImage = pics.fill === pics.picture ? picture : pics.fill ? await io.handOff(pics.fill, 'split_image.png') : image
       const cut = await io.call({ key: 'cutout', provider: 'replicate', endpoint: SPLIT_CUTOUT_SLUG, payload: cutoutInput(picture), media: 'image', usd: cutoutUsd })

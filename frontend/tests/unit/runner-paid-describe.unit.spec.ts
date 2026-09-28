@@ -10,7 +10,8 @@ import { existsSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import { BufferTarget, EncodedPacket, EncodedVideoPacketSource, Mp4OutputFormat, Output } from 'mediabunny'
-import { createFakeReplicate, makeKit, ofType } from './__runner__/kit'
+import sharp from 'sharp'
+import { createFakeReplicate, makeKit, ofType, rgbPng1x1 } from './__runner__/kit'
 import { normalizeSent, runPaidCase, wireText, type PaidCase } from './__runner__/paidParity'
 import { checkPayload, loadProviderSchema, type ProviderSchemaFixture } from './helpers/providerSchema'
 import type { ApiPrompt } from '#shared/runner/graph'
@@ -469,9 +470,11 @@ describe('chains through the cards', () => {
     expect(executed.find((d: any) => d.node === 'n')).toBeUndefined()
   })
 
-  it('a picture from Generate an image is handed off as its own file, as the line-up\'s builders do', async () => {
+  it('a picture from Generate an image is handed off as the RGBA tensor Python downloads (R3.H2), under its own name', async () => {
     const replicate = createFakeReplicate({ bodyText: ({ model }) => (model === 'lucataco/moondream2' ? '{"id": "p", "status": "succeeded", "output": "A cat."}' : JSON.stringify({ id: 'q', status: 'succeeded', output: ['https://replicate.delivery/gen.png'] })) })
-    const k = makeKit({ replicate, deps: { families: () => new Set<RunnerFamily>([...ON, 'replicate-image']) } })
+    // A real picture (R3.H2: a provider's answer is decoded as Python's bytesio_to_image_tensor before it is handed on).
+    const download = async () => ({ bytes: rgbPng1x1(200, 100, 50), contentType: 'image/png' })
+    const k = makeKit({ replicate, deps: { families: () => new Set<RunnerFamily>([...ON, 'replicate-image']), download } })
     const p: ApiPrompt = {
       1: { class_type: 'GenerateImageNode', inputs: { model: 'flux-schnell', prompt: 'a cat', aspect_ratio: '1:1', seed: 3, model_options: '{}' } },
       n: { class_type: 'DescribeImageNode', inputs: { model: 'Moondream 2', prompt: 'What is it?', image: ['1', 0] } },
@@ -483,6 +486,10 @@ describe('chains through the cards', () => {
     const made = nodes['1']!.outputs[0]!
     const describeCall = replicate.submitted().find(r => r.endpoint === 'lucataco/moondream2')!
     expect(describeCall.payload).toEqual({ image: `https://fal.storage/${made.filename}`, prompt: 'What is it?' })
+    // PIL's convert("RGBA") of the answer: its RGB and an opaque alpha.
+    const [[sentBytes]] = k.upload.mock.calls as unknown as [Uint8Array, string][]
+    const { data, info } = await sharp(sentBytes).raw().toBuffer({ resolveWithObject: true })
+    expect([info.width, info.height, info.channels, [...data]]).toEqual([1, 1, 4, [200, 100, 50, 255]])
     expect(nodes.n!.values).toEqual({ 0: { kind: 'text', text: 'A cat.' } })
   })
 

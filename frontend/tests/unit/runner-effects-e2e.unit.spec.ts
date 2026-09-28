@@ -464,10 +464,19 @@ describe('R2.12 · each effects workflow, POST /api/runs to the last event (host
     const kept = k.keptBytes(gv.files[0]!)
     await expectPixels(kept, grain.outputs[0]!.items[0]!, 'round', epsOf('FilmGrain'), `Film grain kept (${TO_PROVIDER})`)
     await expectPreview(k, r.msgs, grain, epsOf('FilmGrain'), 'Film grain')
-    // The bytes handed to the edit are the kept round8 picture.
+    // The picture handed to the edit is the kept round8 picture: its pixels and channels, as the
+    // plain PNG `_image_tensor_to_data_url` writes (R3.H2: no chunk but IHDR, IDAT and IEND).
     const up = (k.upload.mock.calls as unknown as [Uint8Array, string][]).filter(([, name]) => name === gv.files[0]!.filename)
     expect(up).toHaveLength(1)
-    expect(Buffer.compare(Buffer.from(up[0]![0]), Buffer.from(kept))).toBe(0)
+    const raw = async (b: Uint8Array) => {
+      const r = await sharp(b).raw().toBuffer({ resolveWithObject: true })
+      return [r.info.width, r.info.height, r.info.channels, createHash('sha256').update(r.data).digest('hex')]
+    }
+    expect(await raw(up[0]![0])).toEqual(await raw(kept))
+    const handed = Buffer.from(up[0]![0])
+    const chunks: string[] = []
+    for (let o = 8; o < handed.length; o += 12 + handed.readUInt32BE(o)) chunks.push(handed.toString('latin1', o + 4, o + 8))
+    expect(chunks.filter(t => t !== 'IDAT')).toEqual(['IHDR', 'IEND'])
     // fal: the generate, then the edit with Python's request and the kept picture's URL.
     const sent = k.fal.submitted()
     expect(sent).toHaveLength(2)

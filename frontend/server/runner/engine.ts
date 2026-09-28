@@ -43,7 +43,7 @@ import { shotRefFilenames, shotRefSizeProblem } from './shotRefs'
 import { parseJsonObject } from './generators/opts'
 import { cardPictureFiles, cardPictureRefusal } from './cards/bakeReplay'
 import { loraStartProblem } from './loraFiles'
-import { handoffKey, handoffPngName, loaderHandoffBytes, loaderHandoffs, loaderSourceOf, type HandoffCaps, type LoaderHandoff, type LoaderSource } from './pictureHandoff'
+import { handoffKey, handoffPngName, loaderHandoffBytes, loaderHandoffs, loaderSourceOf, madeHandoffBytes, madeSourceOf, type HandoffCaps, type LoaderHandoff, type LoaderSource, type MadeSource } from './pictureHandoff'
 import { sha256Hex } from './handoff'
 import { handoffRefusal } from './pictures/handoffView'
 import { effectOutRefusal } from './effects/plan'
@@ -1156,9 +1156,25 @@ export function createEngine(deps: EngineDeps) {
         return p
       }
       const loaderAt = (link: unknown) => loaderSourceOf(take.prompt, link, families)
+      // A picture made in the run (R3.H2): the tensor the node that made it
+      // hands on (./pictureHandoff.ts madeSourceOf), made once for this turn
+      // from the file the wire brings; judged, fingerprinted and sent as those bytes.
+      const madeAt = (link: unknown) => loaderAt(link) ? null : madeSourceOf(take.prompt, link, families, n => !!take.nodes[n]?.request)
+      const handedOffMade = (file: OutputFile, src: MadeSource, caps: HandoffCaps | null) => {
+        const key = `made:${file.type}:${file.subfolder}:${file.filename}:${src.view}:${caps ? `${caps.cap}/${caps.backupCap ?? ''}` : ''}`
+        let p = views.get(key)
+        if (!p) {
+          p = readOnce(file).then(b => madeHandoffBytes(b, src.view, caps))
+          views.set(key, p)
+        }
+        return p
+      }
       const fileCheck = resuming ? { problem: null } as Awaited<ReturnType<typeof linkedFileCheck>> : await linkedFileCheck(take.prompt[id]!, filesAt(take), readOnce, families, f => files.size(f), (link) => {
         const src = loaderAt(link)
-        return src ? handedOffPicture(src, capsOf(link)) : null
+        if (src) return handedOffPicture(src, capsOf(link))
+        const made = madeAt(link)
+        const file = made ? filesAt(take)(link)[0] : undefined
+        return made && file ? handedOffMade(file, made, capsOf(link)) : null
       })
       if (fileCheck.problem) throw new Error(fileCheck.problem)
       // A media node (./nodeMedia.ts: sync-3 lip-sync, F22; Topaz video
@@ -1231,7 +1247,13 @@ export function createEngine(deps: EngineDeps) {
       // A picture wired into an IMAGE input: from a loader, the PNG of its tensor (R3.H).
       const imageHandOff = async (f: OutputFile, link: ApiLink) => {
         const src = loaderAt(link)
-        if (!src) return handOff(f)
+        if (!src) {
+          // Made in the run (R3.H2): the file the builder picked, as its node's tensor.
+          const made = madeAt(link)
+          if (!made) return handOff(f)
+          const sent = await handedOffMade(f, made, capsOf(link))
+          return deps.handoff.toUrlBytes(sent.made ? handoffPngName(f, sent.format) : f, sent.bytes)
+        }
         const sent = await handedOffPicture(src, capsOf(link))
         return deps.handoff.toUrlBytes(sent.made ? handoffPngName(src.file, sent.format) : src.file, sent.bytes)
       }

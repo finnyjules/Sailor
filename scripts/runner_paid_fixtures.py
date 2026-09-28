@@ -117,6 +117,13 @@ Groups:
              every subset of views and both directions (for R3.17), for
              frontend/server/runner/generators/turntable.ts
              (tests/unit/runner-paid-turntable.unit.spec.ts)
+  handoff2  (R3.H2) the PNG `_image_tensor_to_data_url` sends for a picture
+             made in the run: a provider's answer of every file kind (PIL's
+             RGBA), Expand / outpaint's answer with its alpha dropped, and an
+             effect's float32 tensor (from LoadImage, an Image card with
+             see-through pixels, and a provider's answer), each sent on by
+             Edit an image (fal), for frontend/server/runner/pictureHandoff.ts
+             (tests/unit/runner-handoff2-parity.unit.spec.ts)
   handoff   (R3.H) the PNG `_image_tensor_to_data_url` sends for a loader's
              tensor: every file kind (EXIF 2–8, RGBA, grey + alpha, palette and
              colour-key transparency, CMYK, 16-bit, WebP, GIF…) through the real
@@ -124,6 +131,12 @@ Groups:
              Remove object (Replicate), for
              frontend/server/runner/pictures/handoffView.ts
              (tests/unit/runner-handoff-parity.unit.spec.ts)
+  e2e       (R3.18) the controller check's chained workflows no single-node
+             case covers, node by node (Summarize → Generate an image;
+             Separate background and foreground → Frame; Upscale → Remove
+             background → Save image; Restyle held on the second pass; Flux
+             Dev + LoRAs with a picture), for
+             frontend/tests/unit/runner-paid-e2e.unit.spec.ts
 
 The network is blocked (as in compositor_fixtures.py): every outbound connect
 and DNS lookup raises and the provider keys are removed before any node module
@@ -1487,6 +1500,117 @@ def handoff_group() -> dict:
     return {"cases": cases, "files": {n: _b64(b) for n, b in files.items()}}
 
 
+# ── handoff2 (R3.H2): pictures made in the run, handed to a provider ─────────
+
+H2_GENERATED = "https://f.test/handoff2/generated"
+H2_OUTPAINTED = "https://r.test/handoff2/outpainted.png"
+H2_EDIT = {"model": "Flux 2 Pro", "prompt": "make it dusk", "aspect_ratio": "match_input_image", "resolution": "1K",
+           "seed": 7, "safety_tolerance": 2, "prompt_upsampling": False, "output_format": "png"}
+H2_GENERATE = {"model": "flux-schnell", "prompt": "a red fox", "aspect_ratio": "1:1", "seed": 7, "model_options": "{}"}
+H2_OUTPAINT = {"model": "Flux Fill", "prompt": "", "direction": "Zoom out 1.5x", "aspect_ratio": "16:9", "seed": 0}
+H2_EFFECTS = {"AdjustInvert": {"amount": 0.37}, "AdjustExposure": {"exposure": 0.3}}
+
+
+def _h2_step(node_cls, answers: list, **kw) -> tuple:
+    """capture_calls, and the tensor the node hands on (its first output):
+    `execute` is wrapped for the one run, nothing else changes."""
+    kept: dict = {}
+    real = node_cls.execute
+
+    async def keep(**kwargs):
+        out = await real(**kwargs)
+        kept["out"] = out
+        return out
+
+    with mock.patch.object(node_cls, "execute", keep):
+        got = capture_calls(node_cls, answers, **kw)
+    assert "error" not in got, (node_cls.__name__, got.get("error"))
+    return got, kept["out"].args[0]
+
+
+def _h2_effect(class_type: str, tensor):
+    """A real effect's picture (its float32 tensor), its live preview left out."""
+    from comfy_api.latest._io import HiddenHolder
+    import comfy_extras.nodes_adjust_exposure as ne
+    import comfy_extras.nodes_color_filters as ncf
+    cls = {"AdjustInvert": ncf.InvertNode, "AdjustExposure": ne.AdjustExposureNode}[class_type]
+    none = lambda *_a, **_k: {"images": []}  # noqa: E731 — the preview is not part of the fixture
+    with mock.patch.object(cls, "hidden", HiddenHolder.from_dict({"UNIQUE_ID": "h2"})), \
+            mock.patch.object(sys.modules[cls.__module__], "save_live_preview", none):
+        return cls.execute(image=tensor, **H2_EFFECTS[class_type]).args[0]
+
+
+def handoff2_group() -> dict:
+    """R3.H2: the bytes Python hands a provider for a picture made in the run.
+    Each case runs a real producer, and its real output tensor goes to Edit an
+    image on FLUX.2 [pro] (fal), whose `_image_tensor_to_data_url` makes the
+    PNG (`made`: its decoded pixels):
+      answer  — Generate an image (flux-schnell, fal) whose answer is each
+                file kind (bytesio_to_image_tensor: PIL's RGBA, no EXIF
+                turn), and one to Remove object (Replicate);
+      dropped — Expand / outpaint (Flux Fill), whose RGBA answer Python cuts
+                to RGB (`tensor[..., :3]`);
+      effect  — an effect's float32 tensor (Invert 0.37, Exposure 0.3) from a
+                LoadImage, an Image card with see-through pixels (4 channels)
+                and a provider's answer: `round(255·x)`."""
+    import io
+    from PIL import Image
+    import runner_builder_fixtures as rbf
+    nr, _fal, extras = rbf._node_modules()
+    edit_actions = next(m for m in extras if hasattr(m, "RemoveObjectNode"))
+    files = {k: v for k, v in handoff_files().items() if not (k.startswith("a JPEG, EXIF ") and k != "a JPEG, EXIF 6")}
+    edited = _b64(png_bytes(8, 6, 9200, "RGBA"))
+    edit_answer = [{"images": [{"url": HANDOFF_EDITED}]}]
+    cases: list = []
+
+    def to_edit(name: str, kind: str, source: dict, producer: list, tensor, *, cls=None, input_name="input_image",
+                widgets=None, answers=None) -> None:
+        cls = cls or nr.EditImageNode
+        widgets = widgets if widgets is not None else H2_EDIT
+        answers = answers if answers is not None else edit_answer
+        got = capture_calls(cls, answers, files={HANDOFF_EDITED: edited}, made_pixels=True, tensors={input_name: tensor}, **widgets)
+        assert "error" not in got, (name, got.get("error"))
+        cases.append({"name": name, "kind": kind, **source, "producer": producer, "class_type": cls.define_schema().node_id,
+                      "input": input_name, "widgets": widgets, "answers": answers, "calls": got["calls"],
+                      "made": got["made"], "tensor_shape": list(tensor.shape)})
+
+    def generated(fname: str):
+        url = f"{H2_GENERATED}.{HANDOFF_EXT[Image.open(io.BytesIO(files[fname])).format]}"
+        answers = [{"images": [{"url": url, "width": 8, "height": 8, "content_type": "image/png"}]}]
+        got, t = _h2_step(nr.GenerateImageNode, answers, files={url: _b64(files[fname])}, **H2_GENERATE)
+        step = {"class_type": "GenerateImageNode", "widgets": H2_GENERATE, "answers": answers, "calls": got["calls"], "url": url}
+        return step, t
+
+    for fname in files:
+        step, t = generated(fname)
+        to_edit(f"answer · {fname} → Edit an image", "answer", {"file": fname}, [step], t)
+    step, t = generated("an RGBA PNG, partly see-through")
+    to_edit("answer · an RGBA PNG, partly see-through → Remove object", "answer", {"file": "an RGBA PNG, partly see-through"}, [step], t,
+            cls=edit_actions.RemoveObjectNode, input_name="image", widgets={"target": "the lamp", "instructions": ""},
+            answers=[{"output": HANDOFF_EDITED}])
+
+    # Alpha dropped by the producer: Expand / outpaint's RGBA answer as RGB.
+    src = files["a plain RGB PNG"]
+    for fname in ("an RGBA PNG, partly see-through", "a plain RGB JPEG"):
+        answers = [{"output": [H2_OUTPAINTED]}]
+        got, t = _h2_step(nr.OutpaintImageNode, answers, files={H2_OUTPAINTED: _b64(files[fname])}, pictures={"image": src}, **H2_OUTPAINT)
+        step = {"class_type": "OutpaintImageNode", "widgets": H2_OUTPAINT, "answers": answers, "calls": got["calls"], "url": H2_OUTPAINTED}
+        to_edit(f"dropped · Expand / outpaint answering {fname} → Edit an image", "dropped",
+                {"file": fname, "source_file": "a plain RGB PNG"}, [step], t)
+
+    # An effect's float32 tensor.
+    for class_type in H2_EFFECTS:
+        for loader, fname in (("LoadImage", "a plain RGB JPEG"), ("Image", "an RGBA PNG, partly see-through")):
+            filename = f"handoff2.{HANDOFF_EXT[Image.open(io.BytesIO(files[fname])).format]}"
+            t = _h2_effect(class_type, _loader_tensor(loader, files[fname], filename))
+            to_edit(f"effect · {loader} {fname} → {class_type} → Edit an image", "effect",
+                    {"file": fname, "filename": filename, "loader": loader, "effect": class_type}, [], t)
+        step, g = generated("an RGBA PNG, partly see-through")
+        to_edit(f"effect · Generate an image (RGBA answer) → {class_type} → Edit an image", "effect",
+                {"file": "an RGBA PNG, partly see-through", "effect": class_type}, [step], _h2_effect(class_type, g))
+    return {"cases": cases, "files": {n: _b64(b) for n, b in files.items()}, "edited": edited}
+
+
 MUSIC_OUT = "https://r.test/music/out.wav"
 MUSIC_OUT_2 = "https://r.test/music/second.wav"
 SPEECH_OUT = "https://r.test/speech/out.wav"
@@ -2643,8 +2767,177 @@ def turntable_group() -> dict:
     return {"cases": cases, "catalogue": catalogue}
 
 
+# ── e2e (R3.18): the controller check's chained workflows, node by node ──────
+
+E2E_GENERATED = "https://f.test/e2e/generated.png"
+E2E_UPSCALED = "https://r.test/e2e/upscaled.png"
+E2E_CUTOUT = "https://r.test/e2e/cutout.png"
+E2E_SUMMARY_TEXT = ("The lighthouse keeper climbs the spiral stairs each evening at dusk. He lights the lamp, "
+                    "watches the fishing boats come home through the fog, and writes the weather in his log.")
+E2E_FRAME_LAYERS = {
+    "layer1_x": 0.0, "layer1_y": 0.0, "layer1_rotation": 0.0, "layer1_scale": 1.0, "layer1_opacity": 1.0,
+    "layer1_blend": "normal", "layer1_z": 1.0, "layer1_protect": False, "layer1_cloner": "",
+    "layer2_x": 0.1, "layer2_y": -0.05, "layer2_rotation": 10.0, "layer2_scale": 0.8, "layer2_opacity": 1.0,
+    "layer2_blend": "normal", "layer2_z": 2.0, "layer2_protect": False, "layer2_cloner": "",
+    "width": 0, "height": 0, "motion_params": "",
+}
+
+
+def _capture_chain_step(node_cls, answers: list, **kw) -> tuple:
+    """capture_calls, and the node's own NodeOutput (the tensors a chain hands
+    on to the next node, as ComfyUI hands them): `execute` is wrapped for the
+    one run, nothing else changes."""
+    kept: dict = {}
+    real = node_cls.execute
+
+    async def keep(**kwargs):
+        out = await real(**kwargs)
+        kept["out"] = out
+        return out
+
+    with mock.patch.object(node_cls, "execute", keep):
+        got = capture_calls(node_cls, answers, **kw)
+    return got, kept.get("out")
+
+
+def _trunc8(t) -> dict:
+    """A picture tensor as save_images writes it (np.clip(255·x).astype(uint8)): its shape, sha256 and bytes."""
+    import hashlib
+    import numpy as np
+    arr = np.clip(255.0 * t.detach().cpu().float().numpy(), 0, 255).astype(np.uint8)
+    return {"shape": list(arr.shape), "sha256": hashlib.sha256(arr.tobytes()).hexdigest(), "px": _b64(arr.tobytes())}
+
+
+def _step(name: str, node_cls, widgets: dict, got: dict, answers: list, files: dict | None = None,
+          pictures: dict | None = None) -> dict:
+    """One node of a chain, in paid_case's shape (paidParity.ts PaidCase), plus what it handed on."""
+    row = {"name": name, "class_type": node_cls.define_schema().node_id, "widgets": widgets, "answers": answers,
+           "calls": got["calls"], "gets": got["gets"], "output": got.get("output"), "ui": got.get("ui"),
+           "pictures": list(pictures or {}), "picture_files": {n: _b64(b) for n, b in (pictures or {}).items()},
+           "sounds": [], "sound_files": {}}
+    if files:
+        row["files"] = files
+    for key in ("error", "made", "loaded"):
+        if key in got:
+            row[key] = got[key]
+    return row
+
+
+def e2e_group() -> dict:
+    """R3.18: the workflows of the controller check that no single-node case
+    covers, run node by node as ComfyUI runs them (each node's real execute
+    through capture_calls, its output handed to the next), for
+    frontend/tests/unit/runner-paid-e2e.unit.spec.ts:
+      summarize_generate — Text → Summarize text → Generate an image's
+                           `prompt_in` (flux-schnell, fal) → Image card
+      split_frame        — LoadImage → Separate background and foreground
+                           (LaMa) → Frame (background on layer 1, the subject
+                           turned and scaled on layer 2): the Frame's 8-bit
+                           render as save_live_preview writes it
+      upscale_remove_save — Image card → Upscale (Real-ESRGAN, ×2) → Remove
+                           background → Save image: the picture Python hands
+                           the remover (`made`) and Save image's pixels
+      restyle_second     — Restyle an Image · Style LoRA, an illustration
+                           target that holds on the second pass
+      multi_lora_image   — Flux Dev + LoRAs with a picture, two public links
+                           with no scheme (hosted takes them), the weights
+                           loaded (one call)
+    The other workflows are single-node cases of their own groups."""
+    import runner_builder_fixtures as rbf
+    nr, _fal, _extras = rbf._node_modules()
+    import comfy_extras.nodes_compositor as nc
+    from comfy_api.latest._io import HiddenHolder
+    out: dict = {}
+
+    # 1. Text → Summarize → Generate an image (prompt_in) → Image card.
+    s_w = {"text": E2E_SUMMARY_TEXT, "length": "1 sentence", "model": "Gemini 3 Flash"}
+    s_ans = [_llm_body(["The keeper", " lights the lamp", " at dusk", " and logs the weather."])]
+    s_got = capture_calls(nr.SummarizeTextNode, s_ans, **s_w)
+    assert "error" not in s_got, s_got
+    summary = s_got["output"][0]
+    g_w = {"model": "flux-schnell", "prompt": "", "aspect_ratio": "1:1", "seed": 7, "model_options": "{}", "prompt_in": summary}
+    g_files = {E2E_GENERATED: _b64(png_bytes(8, 8, 601))}
+    g_ans = [{"images": [{"url": E2E_GENERATED, "width": 8, "height": 8, "content_type": "image/png"}]}]
+    g_got = capture_calls(nr.GenerateImageNode, g_ans, files=g_files, **g_w)
+    assert "error" not in g_got, g_got
+    assert [c["endpoint"] for c in g_got["calls"]] == ["fal-ai/flux/schnell"], g_got["calls"]
+    out["summarize_generate"] = {"steps": [_step("summarize", nr.SummarizeTextNode, s_w, s_got, s_ans),
+                                           _step("generate", nr.GenerateImageNode, g_w, g_got, g_ans, g_files)]}
+
+    # 2. LoadImage → Separate background and foreground → Frame (both layers).
+    W, H = 24, 18
+    picture = png_bytes(W, H, 610)
+    sp_files = {SPLIT_CUTOUT: _b64(_split_cutout(W, H, 611)), SPLIT_BACKGROUND: _b64(png_bytes(W, H, 612, "RGBA"))}
+    sp_w = {"background_fill": "LaMa (fast)", "mask_grow": 12}
+    sp_ans = [{"output": SPLIT_CUTOUT}, {"output": [SPLIT_BACKGROUND]}]
+    sp_got, sp_out = _capture_chain_step(nr.SplitPhotoLayersNode, sp_ans, files=sp_files, pictures={"image": picture},
+                                         made_pixels=True, **sp_w)
+    assert "error" not in sp_got, sp_got
+    subject, background = sp_out.args[0], sp_out.args[1]
+    previews: list = []
+    with mock.patch.object(nc.CompositorNode, "hidden", HiddenHolder.from_dict({"UNIQUE_ID": "frame"})), \
+            mock.patch.object(nc, "save_live_preview", lambda t, *_a, **_k: previews.append(t) or {}):
+        res = nc.CompositorNode.execute(layer1=background, layer2=subject, **E2E_FRAME_LAYERS)
+    image = res.result[0]
+    assert previews and previews[0] is image
+    out["split_frame"] = {
+        "steps": [_step("split", nr.SplitPhotoLayersNode, sp_w, sp_got, sp_ans, sp_files, {"image": picture})],
+        "handed_on": {"subject": _trunc8(subject[0]), "background": _trunc8(background[0])},
+        "frame": {"widgets": E2E_FRAME_LAYERS, **_trunc8(image[0])},
+    }
+
+    # 3. Image card → Upscale (Real-ESRGAN) → Remove background → Save image.
+    card = png_bytes(8, 6, 620)
+    up_w = {**UPSCALE_DEFAULTS, "model": "Real-ESRGAN", "scale_factor": 2.0}
+    up_files = {E2E_UPSCALED: _b64(png_bytes(16, 12, 621))}
+    up_ans = [{"output": [E2E_UPSCALED]}]
+    up_got, up_out = _capture_chain_step(nr.UpscaleImageNode, up_ans, files=up_files, pictures={"image": card}, **up_w)
+    assert "error" not in up_got, up_got
+    upscaled = up_out.args[0]
+    rb_w = {"model": "851-labs/bg-remover"}
+    rb_files = {E2E_CUTOUT: _b64(png_bytes(16, 12, 622, "RGBA"))}
+    rb_ans = [{"output": [E2E_CUTOUT]}]
+    rb_got, rb_out = _capture_chain_step(nr.RemoveBackgroundNode, rb_ans, files=rb_files, tensors={"image": upscaled},
+                                         made_pixels=True, **rb_w)
+    assert "error" not in rb_got, rb_got
+    out["upscale_remove_save"] = {
+        "steps": [_step("upscale", nr.UpscaleImageNode, up_w, up_got, up_ans, up_files, {"image": card}),
+                  _step("remove", nr.RemoveBackgroundNode, rb_w, rb_got, rb_ans, rb_files)],
+        "handed_on": {"upscaled": _trunc8(upscaled[0])},
+        "saved": _trunc8(rb_out.args[0][0]),
+    }
+
+    # 4. Restyle an Image · Style LoRA: an illustration target held on the second pass.
+    rs_w = {"lora_name": "[None]", "style_strength": 0.5, "resolution": "1K", "seed": 0, "lora_url": RESTYLE_LORA_URL,
+            "lora_scale": 1.0, "flux_prompt_strength": 0.0, "flux_steps": 28, "flux_guidance": 3.5,
+            "describe_prompt": nr._RESTYLE_DESCRIBE_PROMPT, "extra_style_direction": "", "output_format": "png"}
+    rs_files = {RESTYLE_FLUX: _b64(png_bytes(8, 6, 41)), RESTYLE_NB[0]: _b64(png_bytes(8, 6, 43)), RESTYLE_NB[1]: _b64(png_bytes(8, 6, 44))}
+    rs_ans = [{"output": ["A woman", " in a red coat", " walks a dog in a park."]}, {"output": [RESTYLE_FLUX]}, {"output": "illustration"},
+              {"images": [{"url": RESTYLE_NB[0], "width": 8, "height": 6}]}, {"output": "photograph"},
+              {"images": [{"url": RESTYLE_NB[1], "width": 8, "height": 6}]}, {"output": ["An ", "illustration."]}]
+    rs = paid_case("restyle · illustration · second", nr.RestyleWithLoRANode, rs_w, rs_ans, pictures=["content_image"], files=rs_files)
+    assert "error" not in rs, rs.get("error")
+    assert len(rs["calls"]) == 7, [c["endpoint"] for c in rs["calls"]]
+    out["restyle_second"] = rs
+
+    # 5. Image card → Flux Dev + LoRAs → Image card: two public links (no scheme), the weights loaded.
+    nr._MULTILORA_ROTATE["n"] = 0
+    ml_w = {**LORA_MULTI, "lora_b_url": "huggingface.co/alice/one", "lora_d_url": "hf.co/alice/d", "prompt_strength": 0.2}
+    ml = paid_case("multi-lora · image · two links · loaded", nr.FluxMultiLoRARemoteNode, ml_w,
+                   [{"output": [LORA_OUT], "logs": LORA_MARKER_LOGS}], pictures=["image"],
+                   files={LORA_OUT: _b64(png_bytes(8, 6, 31))})
+    assert "error" not in ml, ml.get("error")
+    assert len(ml["calls"]) == 1 and not ml["gets"][1:], ml["calls"]
+    ml["rotate"] = 0
+    ml["rotate_after"] = nr._MULTILORA_ROTATE["n"]
+    nr._MULTILORA_ROTATE["n"] = 0
+    out["multi_lora_image"] = ml
+    return out
+
+
 GROUPS = {
     "handoff": handoff_group,
+    "handoff2": handoff2_group,
     "machinery": machinery_group,
     "llm": llm_group,
     "describe": describe_group,
@@ -2659,6 +2952,7 @@ GROUPS = {
     "restyle-lora": restyle_lora_group,
     "nano-extras": nano_extras_group,
     "turntable": turntable_group,
+    "e2e": e2e_group,
 }
 
 

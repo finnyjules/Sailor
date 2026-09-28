@@ -849,7 +849,10 @@ describe('B10 · a Replicate image feeds a Gate, which feeds a Replicate video',
   })
 
   it('Re-roll ×4, pick 2, Continue, pay for 2', async () => {
-    const k = kit()
+    // R3.H2: with `cards` on, a provider's picture is decoded (Python's bytesio_to_image_tensor)
+    // before it is handed on, so each answer is a real 1 × 1 picture, its own colour per link.
+    const colourOf = (url: string) => [...url].reduce((n, c) => (Math.imul(n, 31) + c.charCodeAt(0)) >>> 0, 7)
+    const k = kit({ deps: { download: async (url: string) => { const h = colourOf(url); return { bytes: rgbPng1x1(h & 255, (h >>> 8) & 255, (h >>> 16) & 255), contentType: 'image/png' } } } })
     const seeds = [42, 43, 44, 45]
     const takes = seeds.map(gated)
     const events = await openEvents()

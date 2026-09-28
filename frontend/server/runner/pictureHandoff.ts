@@ -9,18 +9,24 @@
  * linkedFileCheck) and fingerprinted (handoff.ts keys a link by the sha256 of
  * the bytes uploaded), so what is checked, charged and sent is one picture.
  *
- * Any other picture (made in the run: a provider's answer, an effect, the
- * Frame) is handed off as before; so is everything with `cards` off, and
- * every file Python sends as it is (moodboard pictures, shot references,
- * videos, sounds).
+ * A picture made in the run (R3.H2) is handed off as the tensor the node
+ * that made it hands on (madeSourceOf): a provider's answer as PIL's RGBA of
+ * the download, a picture the runner wrote of Python's own tensor (an
+ * alpha-dropped answer, an effect, a card) as its pixels. The Frame and Blend
+ * scene's kept subject (8-bit files truncated from Python's float, where the
+ * hand-off rounds it) and anything unlisted are handed off as before; so is
+ * everything with `cards` off, and every file Python sends as it is
+ * (moodboard pictures, shot references, videos, sounds).
  */
-import { isLink, type ApiLink, type ApiPrompt } from '#shared/runner/graph'
+import { GATE_CLASS, isLink, type ApiLink, type ApiPrompt } from '#shared/runner/graph'
 import { PROVIDER_TYPES } from '#shared/runner/eligibility'
+import { EFFECT_PICTURE_OUTPUTS } from '#shared/runner/effects'
+import { FLUX_LORA_CLASS, FLUX_MULTI_LORA_CLASS, RESTYLE_LORA_CLASS } from '#shared/runner/lora'
 import type { RunnerFamily } from '#shared/runner/families'
 import { loaderFileBehind } from './cards/bakeReplay'
 import { actionPassThrough } from './generators/actions'
 import { pixelsInWorker } from './compositor/worker'
-import { handoffView, type LoaderKind } from './pictures/handoffView'
+import { handoffView, madeHandoffView, type LoaderKind, type MadeView } from './pictures/handoffView'
 import sharp from 'sharp'
 import { checkedInputFile } from './requestRules'
 import type { OutputFile } from './types'
@@ -68,12 +74,24 @@ export const OVER_CAP_JPEG_QUALITY = 95
  */
 export async function loaderHandoffBytes(bytes: Uint8Array, kind: LoaderKind, signal?: AbortSignal, caps?: HandoffCaps | null): Promise<LoaderHandoff> {
   const view = await handoffView(bytes, kind, raw => pixelsInWorker(signal, w => w.rgbOf(raw), HANDOFF_TIMEOUT))
-  const alpha = view.channels === 4
-  const png: LoaderHandoff = view.png ? { bytes: view.png, made: true, format: 'png', alpha } : { bytes, made: false, format: 'png', alpha }
-  if (!caps || view.channels === 4) return png
+  // The Image card hands on RGBA only when a pixel is see-through (./pictures/handoffView.ts).
+  return chosenHandoff(bytes, view.png, view.channels === 4, caps)
+}
+
+/**
+ * What is sent of a picture's PNG (`png`; null: `bytes` already is it), by
+ * the caps (loaderHandoffBytes): a picture with see-through pixels always as
+ * its PNG; otherwise the PNG, or over a cap the quality-95 JPEG of the same
+ * picture. A 4-channel picture with no see-through pixel (R3.H2: a
+ * provider's opaque answer, which Python holds as RGBA) may go as that JPEG
+ * too: it has no alpha a JPEG would lose.
+ */
+async function chosenHandoff(bytes: Uint8Array, made: Uint8Array | null, seeThrough: boolean, caps?: HandoffCaps | null): Promise<LoaderHandoff> {
+  const png: LoaderHandoff = made ? { bytes: made, made: true, format: 'png', alpha: seeThrough } : { bytes, made: false, format: 'png', alpha: seeThrough }
+  if (!caps || seeThrough) return png
   const tightest = Math.min(caps.cap, caps.backupCap ?? Number.POSITIVE_INFINITY)
   if (png.bytes.byteLength <= tightest) return png
-  const jpg = await sharp(png.bytes).jpeg({ quality: OVER_CAP_JPEG_QUALITY }).toBuffer()
+  const jpg = await sharp(png.bytes).removeAlpha().jpeg({ quality: OVER_CAP_JPEG_QUALITY }).toBuffer()
   const jpeg: LoaderHandoff = { bytes: new Uint8Array(jpg.buffer, jpg.byteOffset, jpg.byteLength), made: true, format: 'jpeg', alpha: false }
   if (jpeg.bytes.byteLength <= tightest) return jpeg
   return png.bytes.byteLength <= caps.cap ? png : jpeg
@@ -116,4 +134,91 @@ export function loaderHandoffs(prompt: ApiPrompt, families: ReadonlySet<RunnerFa
     }
   }
   return out
+}
+
+// ── Pictures made in the run (R3.H2) ─────────────────────────────────────────
+
+/** The node that made a picture a wire brings, which slot, and how Python holds it (./pictures/handoffView.ts MadeView). */
+export interface MadeSource { nodeId: string; slot: number; classType: string; view: MadeView }
+
+/** Provider classes whose picture is a PNG the runner wrote of Python's RGB tensor (`tensor[..., :3]`, R3 rule 3), by slot. */
+const PROVIDER_KEPT_SLOTS: Readonly<Record<string, readonly number[]>> = {
+  [FLUX_LORA_CLASS]: [0],
+  [FLUX_MULTI_LORA_CLASS]: [0],
+  [RESTYLE_LORA_CLASS]: [0],
+  OutpaintImageNode: [0],
+  // The background (its fill, alpha dropped); the subject (slot 0) is the remover's file.
+  SplitPhotoLayersNode: [1],
+}
+
+/** Provider classes whose later slot is a provider's file too (Separate background and foreground's subject is slot 0). */
+const PROVIDER_ANSWER_SLOTS: Readonly<Record<string, readonly number[]>> = {
+  SplitPhotoLayersNode: [0],
+}
+
+/**
+ * Cards whose picture is a PNG the runner wrote of Python's own tensor, by
+ * slot (compositor/plan.ts pictureSourceOf): Empty image, Smart Layout and
+ * the Shader effect (RGB, exact); Text mask's image (round(255·x) whenever a
+ * provider reads it, cards/utilities.ts onlySavesRead); the bake-replay
+ * cards (the loader's PNG, cards/bakeReplay.ts). Every effect's picture
+ * (effects/plan.ts, rounded whenever a provider reads it) is kept too.
+ */
+const CARD_KEPT_SLOTS: Readonly<Record<string, readonly number[] | 'all'>> = {
+  EmptyImage: [0],
+  SmartLayout: [0],
+  ShaderEffect: [0],
+  TextMask: [0],
+  TextOnPath: [0],
+  Scene3DStudio: 'all',
+}
+
+/**
+ * The node that made the picture a paid node's wire brings, followed back
+ * through what hands a picture on unchanged (an Image card fed by a wire, a
+ * Gate, an action with nothing to do: cards/bakeReplay.ts loaderFileBehind's
+ * walk), and how Python holds it; null when the picture comes from a loader
+ * (loaderSourceOf), or from a node whose tensor isn't the file the runner kept
+ * (the Frame, Blend scene's kept subject: Python rounds a float the runner
+ * kept truncated; a Pose Mannequin or Lens that made no call; Seedream's
+ * preview, which may be its input): those are handed off as before. Only
+ * with `cards` on. `called`: whether a node made a provider call (its record),
+ * where that decides what it handed on.
+ */
+export function madeSourceOf(prompt: ApiPrompt, link: unknown, families: ReadonlySet<RunnerFamily>, called?: (nodeId: string) => boolean, depth = 0): MadeSource | null {
+  if (!families.has('cards') || !isLink(link) || depth > 64) return null
+  const [nodeId, slot] = link as ApiLink
+  const node = prompt[nodeId]
+  if (!node) return null
+  const inputs = node.inputs ?? {}
+  const made = (view: MadeView): MadeSource => ({ nodeId, slot, classType: node.class_type, view })
+  if (node.class_type === 'Image') return isLink(inputs.images) && slot === 0 ? madeSourceOf(prompt, inputs.images, families, called, depth + 1) : null
+  if (node.class_type === GATE_CLASS) return madeSourceOf(prompt, inputs.data_in, families, called, depth + 1)
+  if (Object.prototype.hasOwnProperty.call(EFFECT_PICTURE_OUTPUTS, node.class_type)) return EFFECT_PICTURE_OUTPUTS[node.class_type]!.includes(slot) ? made('kept') : null
+  const card = Object.prototype.hasOwnProperty.call(CARD_KEPT_SLOTS, node.class_type) ? CARD_KEPT_SLOTS[node.class_type]! : null
+  if (card) return card === 'all' || card.includes(slot) ? made('kept') : null
+  if (!PROVIDER_TYPES.has(node.class_type)) return null
+  const pass = actionPassThrough(node.class_type, inputs)
+  if (pass) return madeSourceOf(prompt, inputs[pass], families, called, depth + 1)
+  if (PROVIDER_KEPT_SLOTS[node.class_type]?.includes(slot)) return made('kept')
+  if (PROVIDER_ANSWER_SLOTS[node.class_type]?.includes(slot)) return made('answer')
+  if (slot !== 0) return null
+  switch (node.class_type) {
+    case 'BlendSceneNode': return isLink(inputs.keep_subject) ? null : made('answer')
+    case 'PoseMannequin':
+    case 'LensReframe': return called?.(nodeId) ? made('answer') : null
+    case 'SeedreamLayerizeNode': return null
+    default: return made('answer')
+  }
+}
+
+/**
+ * The bytes a picture made in the run is handed off as: the PNG of the
+ * tensor its node hands on (./pictures/handoffView.ts madeHandoffView), or
+ * the file itself when it already is that PNG; over a cap, the JPEG of the
+ * same picture as loaderHandoffBytes chooses it.
+ */
+export async function madeHandoffBytes(bytes: Uint8Array, view: MadeView, caps?: HandoffCaps | null): Promise<LoaderHandoff> {
+  const v = await madeHandoffView(bytes, view)
+  return chosenHandoff(bytes, v.png, v.seeThrough, caps)
 }

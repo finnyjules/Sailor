@@ -38,7 +38,7 @@ import { pilPixels, type PilRaw } from '../pixels/pilPixels'
 import { hasAlphaAsPil } from './mask'
 import {
   PICTURE_16_BIT, PICTURE_32_BIT, PICTURE_CMYK, PICTURE_GIF_SEE_THROUGH, PICTURE_UNREADABLE,
-  gifFirstFrameSeeThrough, pictureHasFrames, pictureMeta, pilRaw,
+  gifFirstFrameSeeThrough, pictureHasFrames, pictureMeta, pilRaw, pilRgba,
 } from './pythonView'
 
 export const PICTURE_ANIMATED_SEE_THROUGH = 'This picture is animated and has see-through parts. Save it as a PNG and load it again.'
@@ -190,6 +190,56 @@ export async function handoffView(
   if (info.channels !== 3) throw new Error(PICTURE_UNREADABLE)
   const png = await encodePlain(new Uint8Array(data.buffer, data.byteOffset, data.byteLength), info.width, info.height, 3)
   return { png, w: info.width, h: info.height, channels: 3 }
+}
+
+// ── Pictures made in the run (R3.H2) ─────────────────────────────────────────
+
+/**
+ * How Python holds a picture a runner node made, which the hand-off sends
+ * (./pictureHandoff.ts madeSourceOf decides it by the node that made it):
+ *   answer — a provider's file, kept as it was downloaded: Python's tensor is
+ *            `bytesio_to_image_tensor`, PIL's `.convert("RGBA")` (first
+ *            frame, no EXIF turn, no ICC conversion), so 4 channels, `/255`,
+ *            which `round(255·x)` gives back exactly;
+ *   kept   — a PNG the runner wrote of Python's own tensor, 8-bit, with the
+ *            tensor's channels (an alpha-dropped answer, an effect's
+ *            `round(255·x)`, a card's picture): its pixels and channels as
+ *            they are.
+ */
+export type MadeView = 'answer' | 'kept'
+
+/** Whether 8-bit RGBA pixels have a see-through pixel (an alpha below 255). */
+function seeThroughIn(rgba: Uint8Array): boolean {
+  for (let i = 3; i < rgba.length; i += 4) if (rgba[i]! < 255) return true
+  return false
+}
+
+/**
+ * The PNG `_image_tensor_to_data_url` sends for a picture made in the run
+ * (see MadeView), or `png: null` when the file already is exactly that PNG.
+ * `seeThrough`: a 4-channel picture with an alpha below 255 somewhere. A
+ * provider's file PIL would read its own way (32-bit, signed, CMYK that isn't
+ * a JPEG, 16-bit grey with alpha, a GIF whose first frame has see-through
+ * parts) is refused in the loader's words; so is a file sharp can't read.
+ */
+export async function madeHandoffView(bytes: Uint8Array, view: MadeView): Promise<HandoffView & { seeThrough: boolean }> {
+  const meta = await pictureMeta(bytes)
+  if (view === 'answer') {
+    const refused = handoffRefusalOf(meta, bytes, { keepsAlpha: false })
+    if (refused) throw new Error(refused)
+    const { data, info } = await pilRgba(bytes)
+    const seeThrough = seeThroughIn(data)
+    if (isPlainPng(bytes, 6)) return { png: null, w: info.width, h: info.height, channels: 4, seeThrough }
+    return { png: await encodePlain(data, info.width, info.height, 4), w: info.width, h: info.height, channels: 4, seeThrough }
+  }
+  const channels: 3 | 4 = meta.hasAlpha ? 4 : 3
+  const open = () => sharp(bytes, { pages: 1, page: 0, ignoreIcc: true, limitInputPixels: MAX_INPUT_PIXELS }).toColourspace('srgb')
+  const { data, info } = await (channels === 4 ? open().ensureAlpha() : open().removeAlpha()).raw({ depth: 'uchar' }).toBuffer({ resolveWithObject: true })
+  if (info.channels !== channels) throw new Error(PICTURE_UNREADABLE)
+  const px = new Uint8Array(data.buffer, data.byteOffset, data.byteLength)
+  const seeThrough = channels === 4 && seeThroughIn(px)
+  if (isPlainPng(bytes, channels === 4 ? 6 : 2)) return { png: null, w: info.width, h: info.height, channels, seeThrough }
+  return { png: await encodePlain(px, info.width, info.height, channels), w: info.width, h: info.height, channels, seeThrough }
 }
 
 /** Whether a plain 8-bit RGBA PNG has a pixel whose alpha is below 255. */
