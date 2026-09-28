@@ -3,12 +3,13 @@
 // capability it needs. The gallery component renders these; clicking one calls
 // addBehaviour(kind, params). Pure — zero Vue/compositor coupling.
 import { SETTLE_EFFECTS } from './reveal/settle'
+import { PIXEL_REVEAL_LOOKS } from './reveal/pixelReveal'
 
 export type MoveGroup = 'Letters' | 'In' | 'Loop' | 'Out' | 'Copies' | 'Gradient'
 export type PreviewKind =
   | 'fade' | 'slide-up' | 'slide-down' | 'slide-left' | 'slide-right'
   | 'grow' | 'shrink' | 'spin' | 'pulse' | 'sway' | 'float'
-  | 'scroll' | 'morph' | 'shape-morph' | 'dither' | 'assemble' | 'settle'
+  | 'scroll' | 'morph' | 'shape-morph' | 'dither' | 'assemble' | 'settle' | 'pixelreveal'
   | 'letters-cascade' | 'letters-typewriter' | 'letters-mask' | 'letters-scramble'
   | 'letters-decode' | 'letters-slot' | 'letters-wave' | 'letters-bounce' | 'letters-jitter'
   | 'copies-build' | 'copies-spread' | 'copies-spin' | 'copies-fan' | 'copies-fade'
@@ -75,6 +76,22 @@ function settleTile(effect: { id: string; label: string }, dir: 'in' | 'out'): G
 const SETTLE_IN_TILES: GalleryMove[] = SETTLE_EFFECTS.map((e) => settleTile(e, 'in'))
 const SETTLE_OUT_TILES: GalleryMove[] = SETTLE_EFFECTS.map((e) => settleTile(e, 'out'))
 
+// ── Pixel reveal tiles (2026-09-28 addendum, Task 2): EACH of the 9 `PIXEL_REVEAL_LOOKS` rows is
+// its own pair of gallery tiles (In / Out), same generated-from-the-table discipline as Settle —
+// no ease override, the look's own timing (decision 3) already fills the bar.
+function pixelRevealTile(look: { id: string; label: string }, dir: 'in' | 'out'): GalleryMove {
+  return {
+    id: `pixelreveal-${look.id}-${dir}`,
+    kind: 'pixelreveal',
+    label: `${look.label} ${dir}`,
+    group: dir === 'in' ? 'In' : 'Out',
+    preview: 'pixelreveal',
+    params: { dir, look: look.id },
+  }
+}
+const PIXEL_REVEAL_IN_TILES: GalleryMove[] = PIXEL_REVEAL_LOOKS.map((l) => pixelRevealTile(l, 'in'))
+const PIXEL_REVEAL_OUT_TILES: GalleryMove[] = PIXEL_REVEAL_LOOKS.map((l) => pixelRevealTile(l, 'out'))
+
 export const GALLERY_MOVES: GalleryMove[] = [
   // Letters — text-only, evaluated per-letter at draw time (no compiled tracks)
   { id: 'letters-cascade-in', kind: 'text.cascade', label: 'Cascade in', group: 'Letters', preview: 'letters-cascade', needs: 'text', params: { dir: 'in', style: 'rise' } },
@@ -102,6 +119,7 @@ export const GALLERY_MOVES: GalleryMove[] = [
   { id: 'dither-in', kind: 'dither', label: 'Dither in', group: 'In', preview: 'dither', params: { dir: 'in' } },
   { id: 'assemble-in', kind: 'dither', label: 'Assemble in', group: 'In', preview: 'assemble', params: { dir: 'in', style: 'assemble' } },
   ...SETTLE_IN_TILES,
+  ...PIXEL_REVEAL_IN_TILES,
   // Loop
   { id: 'spin', kind: 'spin', label: 'Spin', group: 'Loop', preview: 'spin', cycle: 2 },
   { id: 'pulse', kind: 'pulse', label: 'Pulse', group: 'Loop', preview: 'pulse', cycle: 1.2 },
@@ -114,6 +132,7 @@ export const GALLERY_MOVES: GalleryMove[] = [
   { id: 'dither-out', kind: 'dither', label: 'Dither out', group: 'Out', preview: 'dither', params: { dir: 'out' } },
   { id: 'assemble-out', kind: 'dither', label: 'Assemble out', group: 'Out', preview: 'assemble', params: { dir: 'out', style: 'assemble' } },
   ...SETTLE_OUT_TILES,
+  ...PIXEL_REVEAL_OUT_TILES,
   // Morph (2026-09-23): A turns into another element over its out bar. Two styles, two tiles
   // (Julien: whole-shape morph is its own transition style). No target yet — the inspector asks.
   { id: 'morph-letters', kind: 'morph', label: 'Morph into', group: 'Out', preview: 'shape-morph', params: { style: 'letters' } },

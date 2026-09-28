@@ -5,6 +5,7 @@
 import { PIXEL_CHARS } from './pixels'
 import { DITHER_PATTERNS } from './assemble'
 import { settleParams } from './settle'
+import type { PixelRevealResolvedParams } from './pixelReveal'
 
 export type RevealStyle = 'pixels' | 'assemble' | 'dissolve' | 'wipe' | 'dots'
 /** `pixels` and `assemble` TRANSFORM the element — they run a shader over it; the other three
@@ -51,18 +52,23 @@ export interface RevealParams {
 }
 /** What the fold parks on a layer clone for one frame. Transient — never persisted.
  *
- *  `style` widens to include `'settle'` — a settle bar's note — without widening `RevealStyle`
- *  itself (the Dither inspector's Style menu must never offer it): `RevealParams.style` stays
- *  exactly `RevealStyle`, and only this transient shape gains the extra member. When
- *  `style === 'settle'` the dither fields (`cell`, `angle`, …) are inert filler — kept so the
- *  note stays ONE shape for every reveal bar — and the look lives in `settle`. */
+ *  `style` widens to include `'settle'` and `'pixelreveal'` — a settle/pixel-reveal bar's note —
+ *  without widening `RevealStyle` itself (the Dither inspector's Style menu must never offer
+ *  either): `RevealParams.style` stays exactly `RevealStyle`, and only this transient shape gains
+ *  the extra members. When `style === 'settle'` the dither fields (`cell`, `angle`, …) are inert
+ *  filler — kept so the note stays ONE shape for every reveal bar — and the look lives in
+ *  `settle`. Same for `style === 'pixelreveal'`: the dither fields are inert filler and the look
+ *  lives in `pixel`. */
 export interface MotionReveal extends Omit<RevealParams, 'style'> {
-  style: RevealStyle | 'settle'
+  style: RevealStyle | 'settle' | 'pixelreveal'
   amount: number
   elapsed: number
   /** Only meaningful when `style === 'settle'`: `effect` is the gallery tile id (`SettleEffect.id`),
    *  `strength` 0–1, `fade` the switch — as `settleParams` reads them. */
   settle?: { effect: string; strength: number; fade: boolean }
+  /** Only meaningful when `style === 'pixelreveal'`: the bar's params already resolved through
+   *  `pixelRevealParams` — the ONE reader — so the painter (Task 3) never re-reads raw params. */
+  pixel?: PixelRevealResolvedParams
 }
 
 /** Defaults in STORED units (what `behaviour.params` holds and the inspector shows). `band`
@@ -121,13 +127,14 @@ const patternOf = (v: unknown): number => {
   return DITHER_PATTERNS.some((p) => p.value === rounded) ? rounded : REVEAL_DEFAULTS.pattern
 }
 
-/** Does this style TRANSFORM the element (Pixels, Assemble, Settle — the side-canvas route, a
- *  shader run over the layer's own pixels) rather than merely MASK it? The compositor asks
- *  before it decides which route a bar takes, so this lives here, in the DOM-free half of the
- *  folder, and not beside the canvas code it steers. Accepts `MotionReveal`'s widened style
- *  (`RevealStyle | 'settle'`) as well as a bare `RevealStyle`, since both are asked here. */
-export function isShaderRevealStyle(style: RevealStyle | 'settle'): boolean {
-  return style === 'pixels' || style === 'assemble' || style === 'settle'
+/** Does this style TRANSFORM the element (Pixels, Assemble, Settle, Pixel reveal — a side-canvas
+ *  route, a shader/GL pass run over the layer's own pixels) rather than merely MASK it? The
+ *  compositor asks before it decides which route a bar takes, so this lives here, in the
+ *  DOM-free half of the folder, and not beside the canvas code it steers. Accepts
+ *  `MotionReveal`'s widened style (`RevealStyle | 'settle' | 'pixelreveal'`) as well as a bare
+ *  `RevealStyle`, since both are asked here. */
+export function isShaderRevealStyle(style: RevealStyle | 'settle' | 'pixelreveal'): boolean {
+  return style === 'pixels' || style === 'assemble' || style === 'settle' || style === 'pixelreveal'
 }
 
 /**
@@ -135,6 +142,10 @@ export function isShaderRevealStyle(style: RevealStyle | 'settle'): boolean {
  * (always shader-driven) — i.e. will painting it need a Shader Studio effect? Asked by every
  * EXPORT before its first frame, so the effect (or glyph atlas) can be awaited rather than
  * landing half way through a bake and changing the look mid-sequence.
+ *
+ * A `pixelreveal` bar is deliberately NOT reported here: it is `isShaderRevealStyle` true (it
+ * routes the bar to the transform painter), but its GL program compiles synchronously and needs
+ * no Shader Studio catalogue effect (decision 8) — an export must never wait on it.
  *
  * Pure, and read through `revealParams` / `settleParams` like everything else: a dither bar
  * with no style stored is a Pixels bar, because Pixels is the default.
@@ -156,8 +167,9 @@ export const motionUsesPixels = motionUsesShaderStyle
 /** Every catalogue effect id the given bars will need at paint time, de-duplicated: the ASCII
  *  effect for a Pixels bar or an Assemble bar in the Characters look, `bayer_dither` for
  *  Assemble·Dither, and a settle bar's own `effectId`. Non-dither/settle bars, and dither bars
- *  in a MASK style, need nothing. Used to pre-warm the catalogue and, on export, to wait for
- *  every effect a bake's frames will actually call for. */
+ *  in a MASK style, need nothing — a `pixelreveal` bar needs no catalogue effect either, same
+ *  reason as `motionUsesShaderStyle` above. Used to pre-warm the catalogue and, on export, to
+ *  wait for every effect a bake's frames will actually call for. */
 export function revealEffectIdsFor(
   behaviours: { kind: string; params?: Record<string, unknown> }[] | undefined,
 ): string[] {

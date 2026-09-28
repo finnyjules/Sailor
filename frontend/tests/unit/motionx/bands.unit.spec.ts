@@ -154,6 +154,15 @@ describe('behaviourLabel — letter behaviours', () => {
     expect(behaviourLabel({ kind: 'settle', params: { effect: 'zoomblur' } })).toBe('Zoom blur in')
     expect(behaviourLabel({ kind: 'settle', params: { effect: 'not-real', dir: 'out' } })).toBe('Slice out')   // unknown → default
   })
+
+  it('labels a pixel-reveal bar "<Look label> in" / "<Look label> out", read through pixelRevealParams', () => {
+    expect(behaviourLabel({ kind: 'pixelreveal', params: {} })).toBe('Materialize in')   // default look + dir
+    expect(behaviourLabel({ kind: 'pixelreveal', params: { look: 'materialize' } })).toBe('Materialize in')
+    expect(behaviourLabel({ kind: 'pixelreveal', params: { look: 'materialize', dir: 'out' } })).toBe('Materialize out')
+    expect(behaviourLabel({ kind: 'pixelreveal', params: { look: 'signal', dir: 'out' } })).toBe('Signal out')
+    expect(behaviourLabel({ kind: 'pixelreveal', params: { look: 'bitmap' } })).toBe('Bitmap in')
+    expect(behaviourLabel({ kind: 'pixelreveal', params: { look: 'not-real', dir: 'out' } })).toBe('Materialize out')   // unknown → default
+  })
 })
 
 describe('behaviourLabel — Copies (Cloner dials as motion, Task 7)', () => {

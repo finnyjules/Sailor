@@ -4,6 +4,7 @@
 import type { Track, PropertyType, Keyframe, StoredBehaviour } from '~/lib/motionx'
 import { revealParams } from './reveal/params'
 import { settleParams } from './reveal/settle'
+import { pixelRevealParams } from './reveal/pixelReveal'
 import { evaluateTrack } from '~/lib/motionx'
 import { isStepsEase, stepsCount } from './ease'
 
@@ -119,6 +120,10 @@ export function behaviourLabel(b: { kind: string; params?: Record<string, unknow
   else if (b.kind === 'settle') {
     const sp = settleParams(b.params)   // the ONE reader of a settle bar's params
     withDir = `${sp.effect.label} ${sp.out ? 'out' : 'in'}`
+  }
+  else if (b.kind === 'pixelreveal') {
+    const pp = pixelRevealParams(b.params)   // the ONE reader of a pixel-reveal bar's params
+    withDir = `${pp.look.label} ${pp.out ? 'out' : 'in'}`
   }
   else if (b.kind === 'copies.build') withDir = `${base} ${dir ?? 'in'}`
   else if (b.kind === 'copies.spread') withDir = dir === 'in' ? 'Gather in' : 'Spread out'   // the tile's own words

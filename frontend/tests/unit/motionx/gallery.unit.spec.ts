@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { GALLERY_MOVES, movesForLayer, groupedMoves, type GalleryMove } from '~/lib/motionx/gallery'
-import { SETTLE_EFFECTS } from '~/lib/motionx/reveal'
+import { SETTLE_EFFECTS, PIXEL_REVEAL_LOOKS } from '~/lib/motionx/reveal'
 
 describe('GALLERY_MOVES catalog', () => {
   it('every move has a stable id, a registered-kind, a group and a preview', () => {
@@ -10,7 +10,7 @@ describe('GALLERY_MOVES catalog', () => {
       expect(ids.has(m.id)).toBe(false)   // ids unique
       ids.add(m.id)
       expect([
-        'fade', 'slide', 'scale', 'spin', 'pulse', 'sway', 'float', 'gradientScroll', 'gradientMorph', 'dither', 'settle', 'morph',
+        'fade', 'slide', 'scale', 'spin', 'pulse', 'sway', 'float', 'gradientScroll', 'gradientMorph', 'dither', 'settle', 'pixelreveal', 'morph',
         'text.cascade', 'text.typewriter', 'text.maskSlide', 'text.scramble',
         'text.decode', 'text.slot', 'text.wave', 'text.bounce', 'text.jitter',
         'copies.build', 'copies.spread', 'copies.spin', 'copies.fan', 'copies.fade',
@@ -109,6 +109,56 @@ describe('settle moves (Addendum 3, Part 4): each of the ten SETTLE_EFFECTS is i
     expect(settleMoves.find((m) => m.id === 'settle-slice-in')?.params?.ease).toEqual({ type: 'steps', count: 6 })
     expect(settleMoves.find((m) => m.id === 'settle-slice-out')?.params?.ease).toEqual({ type: 'steps', count: 6 })
     expect(settleMoves.find((m) => m.id === 'settle-blur-in')?.params?.ease).toBeUndefined()
+  })
+})
+
+describe('pixel reveal moves (2026-09-28 addendum): each of the nine PIXEL_REVEAL_LOOKS is its own pair of tiles', () => {
+  const moves = movesForLayer({ gradient: false, text: false, cloner: null })
+  const pixelMoves = moves.filter((m) => m.kind === 'pixelreveal')
+
+  it('is eighteen tiles — nine looks × In/Out', () => {
+    expect(pixelMoves).toHaveLength(18)
+  })
+
+  it('is GENERATED from PIXEL_REVEAL_LOOKS, in table order — every In tile before any Out tile', () => {
+    const inTiles = pixelMoves.filter((m) => m.group === 'In')
+    const outTiles = pixelMoves.filter((m) => m.group === 'Out')
+    PIXEL_REVEAL_LOOKS.forEach((look, i) => {
+      const tin = inTiles[i]!, tout = outTiles[i]!
+      expect([tin.id, tin.kind, tin.label, tin.group, tin.preview]).toEqual(
+        [`pixelreveal-${look.id}-in`, 'pixelreveal', `${look.label} in`, 'In', 'pixelreveal'])
+      expect(tin.params).toEqual({ dir: 'in', look: look.id })
+      expect([tout.id, tout.kind, tout.label, tout.group, tout.preview]).toEqual(
+        [`pixelreveal-${look.id}-out`, 'pixelreveal', `${look.label} out`, 'Out', 'pixelreveal'])
+      expect(tout.params).toEqual({ dir: 'out', look: look.id })
+    })
+  })
+
+  it('sits right after the Settle tiles in each of the In and Out groups', () => {
+    const inIds = moves.filter((m) => m.group === 'In').map((m) => m.id)
+    const outIds = moves.filter((m) => m.group === 'Out').map((m) => m.id)
+    const settleInAt = inIds.indexOf(`settle-${SETTLE_EFFECTS[SETTLE_EFFECTS.length - 1]!.id}-in`)
+    const settleOutAt = outIds.indexOf(`settle-${SETTLE_EFFECTS[SETTLE_EFFECTS.length - 1]!.id}-out`)
+    expect(settleInAt).toBeGreaterThan(-1)
+    expect(settleOutAt).toBeGreaterThan(-1)
+    expect(inIds[settleInAt + 1]).toBe(`pixelreveal-${PIXEL_REVEAL_LOOKS[0]!.id}-in`)
+    expect(outIds[settleOutAt + 1]).toBe(`pixelreveal-${PIXEL_REVEAL_LOOKS[0]!.id}-out`)
+  })
+
+  it("every tile's look exists in PIXEL_REVEAL_LOOKS", () => {
+    const ids = new Set(PIXEL_REVEAL_LOOKS.map((l) => l.id))
+    for (const m of pixelMoves) expect(ids.has(m.params?.look as string)).toBe(true)
+  })
+
+  it('every tile has a unique id and no recipe (a single behaviour, not a composite), and no stepped ease', () => {
+    const ids = new Set(pixelMoves.map((m) => m.id))
+    expect(ids.size).toBe(18)
+    expect(pixelMoves.every((m) => m.recipe === undefined)).toBe(true)
+    expect(pixelMoves.every((m) => m.params?.ease === undefined)).toBe(true)
+  })
+
+  it('are offered on every layer (no `needs` capability)', () => {
+    expect(pixelMoves.every((m) => m.needs === undefined)).toBe(true)
   })
 })
 

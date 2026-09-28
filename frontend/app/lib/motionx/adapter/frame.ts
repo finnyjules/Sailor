@@ -5,7 +5,7 @@ import { compileBehaviour, evaluateTracks, pickTrack, startOf, evaluateTrack, ty
 // The index, not `./evaluate` — importing it is what REGISTERS the four letter behaviour
 // kinds, and this file is on the only path the painter reaches them by.
 import { isTextBehaviour, textCanMove } from '~/lib/motionx/text'
-import { revealParams, settleParams, type MotionReveal } from '~/lib/motionx/reveal'
+import { revealParams, settleParams, pixelRevealParams, type MotionReveal } from '~/lib/motionx/reveal'
 import type { GradientStop as ColorStop } from '~/lib/color/harmony'
 import type { LocalLayer } from '~/composables/useCompositorLayers'
 import type { Cloner } from '~/composables/useCloner'
@@ -147,10 +147,12 @@ export const isMotionOnlyPath = (path: string): boolean => (path.split('.').pop(
  *   amount ≤ 0 → a note with amount 0 (the painter skips the layer);
  *   between    → the note the painter draws through.
  * Same-reference return whenever nothing is attached. An UNTAGGED `reveal` band has no bar
- * and therefore no look: ignored. The winning bar can be either kind — `dither` or `settle` —
- * whichever's track wins at `t`; a settle bar's note carries `style: 'settle'` and a `settle`
- * dial block, with the dither fields (`cell`, `angle`, …) as inert filler so every note stays
- * one shape.
+ * and therefore no look: ignored. The winning bar can be any of three kinds — `dither`,
+ * `settle` or `pixelreveal` — whichever's track wins at `t`; a settle bar's note carries
+ * `style: 'settle'` and a `settle` dial block, a pixel-reveal bar's note carries
+ * `style: 'pixelreveal'` and a `pixel` dial block (already resolved through
+ * `pixelRevealParams`), with the dither fields (`cell`, `angle`, …) as inert filler so every
+ * note stays one shape.
  */
 export function applyRevealBehaviours(
   layers: LocalLayer[], tracks: Track[] | undefined, behaviours: StoredBehaviour[] | undefined, t: number | undefined,
@@ -170,7 +172,7 @@ export function applyRevealBehaviours(
     const list = byLayer.get(layer.id)
     if (!list) return layer
     const pick = pickTrack(list, t)
-    const bar = pick && behaviours.find((b) => b.id === pick.behaviourId && (b.kind === 'dither' || b.kind === 'settle'))
+    const bar = pick && behaviours.find((b) => b.id === pick.behaviourId && (b.kind === 'dither' || b.kind === 'settle' || b.kind === 'pixelreveal'))
     if (!pick || !bar) return layer
     const v = evaluateTrack(pick, t)
     const amount = typeof v === 'number' && Number.isFinite(v) ? v : 1
@@ -183,6 +185,13 @@ export function applyRevealBehaviours(
       const note: MotionReveal = {
         ...revealParams({}), style: 'settle', out: sp.out, amount: clamped, elapsed,
         settle: { effect: sp.effect.id, strength: sp.strength, fade: sp.fade },
+      }
+      return { ...layer, motionReveal: note } as unknown as LocalLayer
+    }
+    if (bar.kind === 'pixelreveal') {
+      const pp = pixelRevealParams(bar.params)
+      const note: MotionReveal = {
+        ...revealParams({}), style: 'pixelreveal', out: pp.out, amount: clamped, elapsed, pixel: pp,
       }
       return { ...layer, motionReveal: note } as unknown as LocalLayer
     }

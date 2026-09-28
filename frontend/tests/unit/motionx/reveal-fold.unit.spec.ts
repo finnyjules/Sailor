@@ -10,6 +10,8 @@ const beh = (params: Record<string, unknown> = {}, start = 1, duration = 2, id =
   ({ id, layerId, kind: 'dither', params, timing: { start, duration } }) as StoredBehaviour
 const settleBeh = (params: Record<string, unknown> = {}, start = 1, duration = 2, id = 'b1', layerId = 'L'): StoredBehaviour =>
   ({ id, layerId, kind: 'settle', params, timing: { start, duration } }) as StoredBehaviour
+const pixelBeh = (params: Record<string, unknown> = {}, start = 1, duration = 2, id = 'b1', layerId = 'L'): StoredBehaviour =>
+  ({ id, layerId, kind: 'pixelreveal', params, timing: { start, duration } }) as StoredBehaviour
 const tracksOf = (b: StoredBehaviour, l = layer(b.layerId)): Track[] =>
   compileBehaviourForLayer(l, b as unknown as Behaviour).map((t) => ({ ...t, behaviourId: b.id }))
 const noteOf = (l: LocalLayer) => (l as unknown as { motionReveal?: MotionReveal }).motionReveal
@@ -197,6 +199,68 @@ describe('applyRevealBehaviours — settle bars', () => {
 
   it('a tagged reveal track owned by a settle bar with a different kind stored is ignored, same as dither', () => {
     const b = settleBeh(); const impostor = { ...b, kind: 'fade' } as StoredBehaviour; const ls = [layer()]
+    expect(applyRevealBehaviours(ls, tracksOf(b), [impostor], 2)).toBe(ls)
+  })
+})
+
+describe('applyRevealBehaviours — pixel-reveal bars (2026-09-28 addendum)', () => {
+  it('mid-bar: the note is style "pixelreveal" with the resolved `pixel` block, dither fields inert filler', () => {
+    const b = pixelBeh({ look: 'signal' })
+    const ls = [layer()]
+    const out = applyRevealBehaviours(ls, tracksOf(b), [b], 2)
+    const n = noteOf(out[0]!)!
+    expect(n.style).toBe('pixelreveal')
+    expect(n.amount).toBeCloseTo(0.5, 9); expect(n.elapsed).toBeCloseTo(1, 9)
+    expect(n.out).toBe(false)
+    expect(n.pixel).toBeDefined()
+    expect(n.pixel!.look.id).toBe('signal')
+    expect(n.pixel!.out).toBe(false)
+    // the dither fields are still present — the note stays ONE shape — just inert.
+    expect(typeof n.cell).toBe('number'); expect(typeof n.angle).toBe('number')
+  })
+
+  it('dir out flows through to both `out` and the resolved params read from the SAME params', () => {
+    const b = pixelBeh({ dir: 'out', look: 'bitmap' })
+    const n = noteOf(applyRevealBehaviours([layer()], tracksOf(b), [b], 2)[0]!)!
+    expect(n.out).toBe(true)
+    expect(n.pixel!.out).toBe(true)
+    expect(n.pixel!.look.id).toBe('bitmap')
+  })
+
+  it('an unknown look id falls back to materialize, exactly as pixelRevealParams does', () => {
+    const b = pixelBeh({ look: 'not-a-real-one' })
+    const n = noteOf(applyRevealBehaviours([layer()], tracksOf(b), [b], 2)[0]!)!
+    expect(n.pixel!.look.id).toBe('materialize')
+  })
+
+  it('amount >= 1 → no note, layer BY IDENTITY (same reference); amount <= 0 → a note with amount 0', () => {
+    const b = pixelBeh()
+    const ls = [layer()]
+    const finished = applyRevealBehaviours(ls, tracksOf(b), [b], 3.5)
+    expect(finished).toBe(ls)
+    expect(finished[0]).toBe(ls[0])
+    expect(noteOf(applyRevealBehaviours(ls, tracksOf(b), [b], 0.2)[0]!)!.amount).toBe(0)
+  })
+
+  it('an Out bar\'s note has out: true', () => {
+    const o = pixelBeh({ dir: 'out' })
+    const n = noteOf(applyRevealBehaviours([layer()], tracksOf(o), [o], 2)[0]!)!
+    expect(n.out).toBe(true)
+  })
+
+  it('winning-bar rule: a dither bar then a later pixel-reveal bar on the same layer — the note follows whichever wins', () => {
+    const first = beh({ style: 'wipe' }, 0, 1, 'first')
+    const second = pixelBeh({ look: 'rain', dir: 'out' }, 2, 1, 'second')
+    const tracks = [...tracksOf(first), ...tracksOf(second)]
+    const early = noteOf(applyRevealBehaviours([layer()], tracks, [first, second], 0.5)[0]!)!
+    expect(early.style).toBe('wipe')
+    const late = noteOf(applyRevealBehaviours([layer()], tracks, [first, second], 2.5)[0]!)!
+    expect(late.style).toBe('pixelreveal'); expect(late.out).toBe(true); expect(late.pixel!.look.id).toBe('rain')
+    expect(late.elapsed).toBeCloseTo(0.5, 9)
+  })
+
+  it('a tagged reveal track owned by a pixel-reveal bar with a different kind stored is ignored, same as dither/settle', () => {
+    const b = pixelBeh(); const impostor = { ...b, kind: 'fade' } as StoredBehaviour; const ls = [layer()]
     expect(applyRevealBehaviours(ls, tracksOf(b), [impostor], 2)).toBe(ls)
   })
 })
