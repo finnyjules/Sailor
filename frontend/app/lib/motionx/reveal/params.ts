@@ -67,7 +67,7 @@ export interface MotionReveal extends Omit<RevealParams, 'style'> {
    *  `strength` 0–1, `fade` the switch — as `settleParams` reads them. */
   settle?: { effect: string; strength: number; fade: boolean }
   /** Only meaningful when `style === 'pixelreveal'`: the bar's params already resolved through
-   *  `pixelRevealParams` — the ONE reader — so the painter (Task 3) never re-reads raw params. */
+   *  `pixelRevealParams` — the ONE reader — so the WebGL painter never re-reads raw params. */
   pixel?: PixelRevealResolvedParams
 }
 

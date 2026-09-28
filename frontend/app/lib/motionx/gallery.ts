@@ -76,7 +76,7 @@ function settleTile(effect: { id: string; label: string }, dir: 'in' | 'out'): G
 const SETTLE_IN_TILES: GalleryMove[] = SETTLE_EFFECTS.map((e) => settleTile(e, 'in'))
 const SETTLE_OUT_TILES: GalleryMove[] = SETTLE_EFFECTS.map((e) => settleTile(e, 'out'))
 
-// ── Pixel reveal tiles (2026-09-28 addendum, Task 2): EACH of the 9 `PIXEL_REVEAL_LOOKS` rows is
+// ── Pixel reveal tiles (2026-09-28 addendum): EACH of the 9 `PIXEL_REVEAL_LOOKS` rows is
 // its own pair of gallery tiles (In / Out), same generated-from-the-table discipline as Settle —
 // no ease override, the look's own timing (decision 3) already fills the bar.
 function pixelRevealTile(look: { id: string; label: string }, dir: 'in' | 'out'): GalleryMove {

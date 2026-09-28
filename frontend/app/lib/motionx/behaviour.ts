@@ -79,8 +79,8 @@ registerBehaviour('settle', (b) => {
 // A PIXEL REVEAL transition (2026-09-28 addendum): the same `reveal` band as `dither`/`settle` —
 // the layer arrives as coarse, hot blocks that halve toward sharp pixels. The look and its dials
 // live on the bar's params, read through `pixelRevealParams` by the fold (adapter/frame.ts
-// `applyRevealBehaviours`) and the WebGL painter (Task 3). Same LINEAR default, same body as
-// `settle` — only the fold's note shape differs.
+// `applyRevealBehaviours`) and the WebGL painter that draws the look. Same LINEAR default, same
+// body as `settle` — only the fold's note shape differs.
 registerBehaviour('pixelreveal', (b) => {
   const w = window(b.timing)
   return [b.params?.dir === 'out' ? numTrack('reveal', 1, 0, w, 'linear') : numTrack('reveal', 0, 1, w, 'linear')]

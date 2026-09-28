@@ -75,9 +75,9 @@ const SLOT_FILLERS: Record<number, [string, string]> = { 0: ['K', 'Q'], 1: ['9',
             <MotionSettlePreview v-else-if="m.preview === 'settle'" :effect="(m.params?.effect as string) ?? 'slice'" :out="m.params?.dir === 'out'" class="absolute inset-0 h-full w-full" />
             <!-- copies previews: a ring of copies playing the one cloner dial this tile animates -->
             <MotionCopiesPreview v-else-if="isCopiesPreview(m.preview)" :mode="copiesMode(m.preview)" :dir="previewDir(m)" class="absolute inset-0 h-full w-full" />
-            <!-- pixel reveal preview: no preview component yet (Task 3/4 build the painter and the
-                 tile), so this renders a blank well rather than falling into the generic
-                 transform mark below, which has no matching CSS and would sit still/misleading -->
+            <!-- pixel reveal preview: no preview component built yet, so this renders a blank
+                 well rather than falling into the generic transform mark below, which has no
+                 matching CSS and would sit still/misleading -->
             <span v-else-if="m.preview === 'pixelreveal'" class="absolute inset-0" />
             <!-- transform/opacity previews: a small mark that plays the move on loop -->
             <span v-else-if="m.preview !== 'scroll' && m.preview !== 'morph'"
