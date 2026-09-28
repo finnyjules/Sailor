@@ -26,7 +26,7 @@
  */
 import fs from 'node:fs/promises'
 import { isLink, type ApiPrompt } from '#shared/runner/graph'
-import { FLUX_LORA_CLASS, LORA_NAME_INPUTS, LORA_NONE, fluxLoraGuidanceProblem, isLoraClass, loraNamesUsed } from '#shared/runner/lora'
+import { FLUX_LORA_CLASS, LORA_BY_NAME_HOSTED, LORA_NAME_INPUTS, LORA_NONE, fluxLoraGuidanceProblem, isLoraClass, loraNamesUsed } from '#shared/runner/lora'
 import { pyStrip } from '#shared/runner/pyText'
 import { parsePyJson, type PyJson } from '#shared/runner/pyJson'
 import { resolveEngineRoot } from '../utils/inputUploads'
@@ -85,14 +85,36 @@ async function findSidecar(name: string): Promise<{ file: string, size: number }
   return null
 }
 
-/** `_read_lora_sidecar(name)`: the sidecar as a dict, null when there is none (or it isn't JSON). */
-export async function readLoraSidecar(name: string): Promise<LoraSidecar | null> {
+/** At most `max + 1` bytes of a file (a file that grew past its size check can't be read whole). */
+async function readBounded(file: string, max: number): Promise<Uint8Array> {
+  const fh = await fs.open(file, 'r')
+  try {
+    const buf = new Uint8Array(max + 1)
+    let got = 0
+    while (got < buf.length) {
+      const { bytesRead } = await fh.read(buf, got, buf.length - got, got)
+      if (!bytesRead) break
+      got += bytesRead
+    }
+    return buf.subarray(0, got)
+  }
+  finally { await fh.close() }
+}
+
+/**
+ * `_read_lora_sidecar(name)`: the sidecar as a dict, null when there is none
+ * (or it isn't JSON). Hosted (fix round 1): a LoRA named by name is refused
+ * here too, whatever the caller checked (ruling (i)); `[None]` and a blank
+ * name read nothing either way. The read is bounded by the cap.
+ */
+export async function readLoraSidecar(name: string, o: { hosted?: boolean } = {}): Promise<LoraSidecar | null> {
   if (!name || name === LORA_NONE) return null
+  if (o.hosted) throw new Error(LORA_BY_NAME_HOSTED)
   const found = await findSidecar(name)
   if (!found) return null
   if (found.size > LORA_SIDECAR_MAX_BYTES) throw new Error(LORA_SIDECAR_TOO_LARGE)
   let bytes: Uint8Array
-  try { bytes = await fs.readFile(found.file) }
+  try { bytes = await readBounded(found.file, LORA_SIDECAR_MAX_BYTES) }
   catch { return null } // OSError
   if (bytes.byteLength > LORA_SIDECAR_MAX_BYTES) throw new Error(LORA_SIDECAR_TOO_LARGE)
   let text: string
@@ -122,7 +144,7 @@ export function resolveTrainedModel(meta: LoraSidecar | null): string | null {
  * the node), and a sidecar the node would read that is over its cap. A
  * wired picker is left to the engine.
  */
-export async function loraStartProblem(prompt: ApiPrompt): Promise<{ nodeId: string, classType: string, message: string } | null> {
+export async function loraStartProblem(prompt: ApiPrompt, o: { hosted?: boolean } = {}): Promise<{ nodeId: string, classType: string, message: string } | null> {
   let options: Set<string> | null = null
   for (const [nodeId, node] of Object.entries(prompt ?? {})) {
     const ct = node?.class_type
@@ -135,6 +157,8 @@ export async function loraStartProblem(prompt: ApiPrompt): Promise<{ nodeId: str
       if (typeof v !== 'string' || !options.has(v)) return { nodeId, classType: ct, message: LORA_NOT_LISTED }
     }
     for (const { name } of loraNamesUsed(ct, inputs)) {
+      // Hosted never reads (or even looks for) a LoRA's files (ruling (i)).
+      if (o.hosted) return { nodeId, classType: ct, message: LORA_BY_NAME_HOSTED }
       let found: { size: number } | null
       try { found = await findSidecar(name) }
       catch (e) { return { nodeId, classType: ct, message: e instanceof Error ? e.message : LORA_NOT_LISTED } }
@@ -144,7 +168,7 @@ export async function loraStartProblem(prompt: ApiPrompt): Promise<{ nodeId: str
       if (ct === FLUX_LORA_CLASS) {
         const tooHigh = fluxLoraGuidanceProblem(inputs)
         let trained: string | null = null
-        try { trained = resolveTrainedModel(await readLoraSidecar(name)) }
+        try { trained = resolveTrainedModel(await readLoraSidecar(name, o)) }
         catch { continue }
         if (tooHigh && !trained) return { nodeId, classType: ct, message: tooHigh.message }
       }

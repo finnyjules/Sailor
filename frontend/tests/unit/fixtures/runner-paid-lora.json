@@ -2238,6 +2238,36 @@
    ],
    "picture_files": {},
    "pictures": [],
+   "runner": {
+    "calls": [
+     {
+      "endpoint": "black-forest-labs/flux-dev-lora",
+      "payload": {
+       "aspect_ratio": "1:1",
+       "disable_safety_checker": false,
+       "guidance": 3.5,
+       "lora_scale": 1.0,
+       "lora_weights": "https://example.com/files/w.safetensors",
+       "megapixels": "1",
+       "num_inference_steps": 28,
+       "num_outputs": 1,
+       "output_format": "png",
+       "prompt": "a portrait of TOK, film grain"
+      },
+      "payload_json": "{\"aspect_ratio\": \"1:1\", \"disable_safety_checker\": false, \"guidance\": 3.5, \"lora_scale\": 1.0, \"lora_weights\": \"https://example.com/files/w.safetensors\", \"megapixels\": \"1\", \"num_inference_steps\": 28, \"num_outputs\": 1, \"output_format\": \"png\", \"prompt\": \"a portrait of TOK, film grain\"}",
+      "provider": "replicate"
+     }
+    ],
+    "error": null,
+    "gets": [
+     {
+      "status": 200,
+      "url": "https://r.test/lora/out.png"
+     }
+    ],
+    "reason": "runner only (R3.13 fix round 1): a pasted http(s) link keeps its scheme, on flux-dev-lora unless the host is huggingface.co, hf.co or civitai.com, on flux-dev-multi-lora always; Python strips it from every link",
+    "rotate_after": 0
+   },
    "sound_files": {},
    "sounds": [],
    "ui": {
@@ -2339,6 +2369,36 @@
    ],
    "picture_files": {},
    "pictures": [],
+   "runner": {
+    "calls": [
+     {
+      "endpoint": "black-forest-labs/flux-dev-lora",
+      "payload": {
+       "aspect_ratio": "1:1",
+       "disable_safety_checker": false,
+       "guidance": 3.5,
+       "lora_scale": 1.0,
+       "lora_weights": "http://example.com/x.SAFETENSORS",
+       "megapixels": "1",
+       "num_inference_steps": 28,
+       "num_outputs": 1,
+       "output_format": "png",
+       "prompt": "a portrait of TOK, film grain"
+      },
+      "payload_json": "{\"aspect_ratio\": \"1:1\", \"disable_safety_checker\": false, \"guidance\": 3.5, \"lora_scale\": 1.0, \"lora_weights\": \"http://example.com/x.SAFETENSORS\", \"megapixels\": \"1\", \"num_inference_steps\": 28, \"num_outputs\": 1, \"output_format\": \"png\", \"prompt\": \"a portrait of TOK, film grain\"}",
+      "provider": "replicate"
+     }
+    ],
+    "error": null,
+    "gets": [
+     {
+      "status": 200,
+      "url": "https://r.test/lora/out.png"
+     }
+    ],
+    "reason": "runner only (R3.13 fix round 1): a pasted http(s) link keeps its scheme, on flux-dev-lora unless the host is huggingface.co, hf.co or civitai.com, on flux-dev-multi-lora always; Python strips it from every link",
+    "rotate_after": 0
+   },
    "sound_files": {},
    "sounds": [],
    "ui": {
@@ -2430,6 +2490,36 @@
    ],
    "picture_files": {},
    "pictures": [],
+   "runner": {
+    "calls": [
+     {
+      "endpoint": "black-forest-labs/flux-dev-lora",
+      "payload": {
+       "aspect_ratio": "1:1",
+       "disable_safety_checker": false,
+       "guidance": 3.5,
+       "lora_scale": 1.0,
+       "lora_weights": "https://replicate.com/alice/model",
+       "megapixels": "1",
+       "num_inference_steps": 28,
+       "num_outputs": 1,
+       "output_format": "png",
+       "prompt": "a portrait of TOK, film grain"
+      },
+      "payload_json": "{\"aspect_ratio\": \"1:1\", \"disable_safety_checker\": false, \"guidance\": 3.5, \"lora_scale\": 1.0, \"lora_weights\": \"https://replicate.com/alice/model\", \"megapixels\": \"1\", \"num_inference_steps\": 28, \"num_outputs\": 1, \"output_format\": \"png\", \"prompt\": \"a portrait of TOK, film grain\"}",
+      "provider": "replicate"
+     }
+    ],
+    "error": null,
+    "gets": [
+     {
+      "status": 200,
+      "url": "https://r.test/lora/out.png"
+     }
+    ],
+    "reason": "runner only (R3.13 fix round 1): a pasted http(s) link keeps its scheme, on flux-dev-lora unless the host is huggingface.co, hf.co or civitai.com, on flux-dev-multi-lora always; Python strips it from every link",
+    "rotate_after": 0
+   },
    "sound_files": {},
    "sounds": [],
    "ui": {
@@ -5212,6 +5302,39 @@
    "picture_files": {},
    "pictures": [],
    "rotate": 0,
+   "runner": {
+    "calls": [
+     {
+      "endpoint": "lucataco/flux-dev-multi-lora",
+      "payload": {
+       "aspect_ratio": "1:1",
+       "disable_safety_checker": false,
+       "guidance_scale": 3.5,
+       "hf_loras": [
+        "https://huggingface.co/alice/one"
+       ],
+       "lora_scales": [
+        0.8
+       ],
+       "num_inference_steps": 28,
+       "num_outputs": 1,
+       "output_format": "png",
+       "prompt": "TOK in the park"
+      },
+      "payload_json": "{\"aspect_ratio\": \"1:1\", \"disable_safety_checker\": false, \"guidance_scale\": 3.5, \"hf_loras\": [\"https://huggingface.co/alice/one\"], \"lora_scales\": [0.8], \"num_inference_steps\": 28, \"num_outputs\": 1, \"output_format\": \"png\", \"prompt\": \"TOK in the park\"}",
+      "provider": "replicate"
+     }
+    ],
+    "error": null,
+    "gets": [
+     {
+      "status": 200,
+      "url": "https://r.test/lora/out.png"
+     }
+    ],
+    "reason": "runner only (R3.13 fix round 1): a pasted http(s) link keeps its scheme, on flux-dev-lora unless the host is huggingface.co, hf.co or civitai.com, on flux-dev-multi-lora always; Python strips it from every link",
+    "rotate_after": 0
+   },
    "sound_files": {},
    "sounds": [],
    "ui": {
@@ -5316,6 +5439,39 @@
    "picture_files": {},
    "pictures": [],
    "rotate": 0,
+   "runner": {
+    "calls": [
+     {
+      "endpoint": "lucataco/flux-dev-multi-lora",
+      "payload": {
+       "aspect_ratio": "1:1",
+       "disable_safety_checker": false,
+       "guidance_scale": 3.5,
+       "hf_loras": [
+        "https://huggingface.co/alice/one"
+       ],
+       "lora_scales": [
+        0.8
+       ],
+       "num_inference_steps": 28,
+       "num_outputs": 1,
+       "output_format": "png",
+       "prompt": "TOK in the park"
+      },
+      "payload_json": "{\"aspect_ratio\": \"1:1\", \"disable_safety_checker\": false, \"guidance_scale\": 3.5, \"hf_loras\": [\"https://huggingface.co/alice/one\"], \"lora_scales\": [0.8], \"num_inference_steps\": 28, \"num_outputs\": 1, \"output_format\": \"png\", \"prompt\": \"TOK in the park\"}",
+      "provider": "replicate"
+     }
+    ],
+    "error": null,
+    "gets": [
+     {
+      "status": 200,
+      "url": "https://r.test/lora/out.png"
+     }
+    ],
+    "reason": "runner only (R3.13 fix round 1): a pasted http(s) link keeps its scheme, on flux-dev-lora unless the host is huggingface.co, hf.co or civitai.com, on flux-dev-multi-lora always; Python strips it from every link",
+    "rotate_after": 0
+   },
    "sound_files": {},
    "sounds": [],
    "ui": {
@@ -5630,6 +5786,41 @@
    "picture_files": {},
    "pictures": [],
    "rotate": 0,
+   "runner": {
+    "calls": [
+     {
+      "endpoint": "lucataco/flux-dev-multi-lora",
+      "payload": {
+       "aspect_ratio": "1:1",
+       "disable_safety_checker": false,
+       "guidance_scale": 3.5,
+       "hf_loras": [
+        "https://huggingface.co/alice/one",
+        "https://replicate.delivery/x/trained.tar"
+       ],
+       "lora_scales": [
+        0.8,
+        0.9
+       ],
+       "num_inference_steps": 28,
+       "num_outputs": 1,
+       "output_format": "png",
+       "prompt": "TOK in the park"
+      },
+      "payload_json": "{\"aspect_ratio\": \"1:1\", \"disable_safety_checker\": false, \"guidance_scale\": 3.5, \"hf_loras\": [\"https://huggingface.co/alice/one\", \"https://replicate.delivery/x/trained.tar\"], \"lora_scales\": [0.8, 0.9], \"num_inference_steps\": 28, \"num_outputs\": 1, \"output_format\": \"png\", \"prompt\": \"TOK in the park\"}",
+      "provider": "replicate"
+     }
+    ],
+    "error": null,
+    "gets": [
+     {
+      "status": 200,
+      "url": "https://r.test/lora/out.png"
+     }
+    ],
+    "reason": "runner only (R3.13 fix round 1): a pasted http(s) link keeps its scheme, on flux-dev-lora unless the host is huggingface.co, hf.co or civitai.com, on flux-dev-multi-lora always; Python strips it from every link",
+    "rotate_after": 1
+   },
    "sound_files": {},
    "sounds": [],
    "ui": {
@@ -5764,6 +5955,63 @@
    "picture_files": {},
    "pictures": [],
    "rotate": 0,
+   "runner": {
+    "calls": [
+     {
+      "endpoint": "lucataco/flux-dev-multi-lora",
+      "payload": {
+       "aspect_ratio": "1:1",
+       "disable_safety_checker": false,
+       "guidance_scale": 3.5,
+       "hf_loras": [
+        "https://huggingface.co/alice/one",
+        "https://replicate.delivery/x/trained.tar"
+       ],
+       "lora_scales": [
+        0.8,
+        0.9
+       ],
+       "num_inference_steps": 28,
+       "num_outputs": 1,
+       "output_format": "png",
+       "prompt": "TOK in the park"
+      },
+      "payload_json": "{\"aspect_ratio\": \"1:1\", \"disable_safety_checker\": false, \"guidance_scale\": 3.5, \"hf_loras\": [\"https://huggingface.co/alice/one\", \"https://replicate.delivery/x/trained.tar\"], \"lora_scales\": [0.8, 0.9], \"num_inference_steps\": 28, \"num_outputs\": 1, \"output_format\": \"png\", \"prompt\": \"TOK in the park\"}",
+      "provider": "replicate"
+     },
+     {
+      "endpoint": "lucataco/flux-dev-multi-lora",
+      "payload": {
+       "aspect_ratio": "1:1",
+       "disable_safety_checker": false,
+       "guidance_scale": 3.5,
+       "hf_loras": [
+        "https://replicate.delivery/x/trained.tar",
+        "https://huggingface.co/alice/one"
+       ],
+       "lora_scales": [
+        0.9,
+        0.8
+       ],
+       "num_inference_steps": 28,
+       "num_outputs": 1,
+       "output_format": "png",
+       "prompt": "TOK in the park"
+      },
+      "payload_json": "{\"aspect_ratio\": \"1:1\", \"disable_safety_checker\": false, \"guidance_scale\": 3.5, \"hf_loras\": [\"https://replicate.delivery/x/trained.tar\", \"https://huggingface.co/alice/one\"], \"lora_scales\": [0.9, 0.8], \"num_inference_steps\": 28, \"num_outputs\": 1, \"output_format\": \"png\", \"prompt\": \"TOK in the park\"}",
+      "provider": "replicate"
+     }
+    ],
+    "error": null,
+    "gets": [
+     {
+      "status": 200,
+      "url": "https://r.test/lora/out.png"
+     }
+    ],
+    "reason": "runner only (R3.13 fix round 1): a pasted http(s) link keeps its scheme, on flux-dev-lora unless the host is huggingface.co, hf.co or civitai.com, on flux-dev-multi-lora always; Python strips it from every link",
+    "rotate_after": 1
+   },
    "sound_files": {},
    "sounds": [],
    "ui": {
@@ -5870,6 +6118,41 @@
    "picture_files": {},
    "pictures": [],
    "rotate": 1,
+   "runner": {
+    "calls": [
+     {
+      "endpoint": "lucataco/flux-dev-multi-lora",
+      "payload": {
+       "aspect_ratio": "1:1",
+       "disable_safety_checker": false,
+       "guidance_scale": 3.5,
+       "hf_loras": [
+        "https://replicate.delivery/x/trained.tar",
+        "https://huggingface.co/alice/one"
+       ],
+       "lora_scales": [
+        0.9,
+        0.8
+       ],
+       "num_inference_steps": 28,
+       "num_outputs": 1,
+       "output_format": "png",
+       "prompt": "TOK in the park"
+      },
+      "payload_json": "{\"aspect_ratio\": \"1:1\", \"disable_safety_checker\": false, \"guidance_scale\": 3.5, \"hf_loras\": [\"https://replicate.delivery/x/trained.tar\", \"https://huggingface.co/alice/one\"], \"lora_scales\": [0.9, 0.8], \"num_inference_steps\": 28, \"num_outputs\": 1, \"output_format\": \"png\", \"prompt\": \"TOK in the park\"}",
+      "provider": "replicate"
+     }
+    ],
+    "error": null,
+    "gets": [
+     {
+      "status": 200,
+      "url": "https://r.test/lora/out.png"
+     }
+    ],
+    "reason": "runner only (R3.13 fix round 1): a pasted http(s) link keeps its scheme, on flux-dev-lora unless the host is huggingface.co, hf.co or civitai.com, on flux-dev-multi-lora always; Python strips it from every link",
+    "rotate_after": 0
+   },
    "sound_files": {},
    "sounds": [],
    "ui": {
@@ -6004,6 +6287,63 @@
    "picture_files": {},
    "pictures": [],
    "rotate": 1,
+   "runner": {
+    "calls": [
+     {
+      "endpoint": "lucataco/flux-dev-multi-lora",
+      "payload": {
+       "aspect_ratio": "1:1",
+       "disable_safety_checker": false,
+       "guidance_scale": 3.5,
+       "hf_loras": [
+        "https://replicate.delivery/x/trained.tar",
+        "https://huggingface.co/alice/one"
+       ],
+       "lora_scales": [
+        0.9,
+        0.8
+       ],
+       "num_inference_steps": 28,
+       "num_outputs": 1,
+       "output_format": "png",
+       "prompt": "TOK in the park"
+      },
+      "payload_json": "{\"aspect_ratio\": \"1:1\", \"disable_safety_checker\": false, \"guidance_scale\": 3.5, \"hf_loras\": [\"https://replicate.delivery/x/trained.tar\", \"https://huggingface.co/alice/one\"], \"lora_scales\": [0.9, 0.8], \"num_inference_steps\": 28, \"num_outputs\": 1, \"output_format\": \"png\", \"prompt\": \"TOK in the park\"}",
+      "provider": "replicate"
+     },
+     {
+      "endpoint": "lucataco/flux-dev-multi-lora",
+      "payload": {
+       "aspect_ratio": "1:1",
+       "disable_safety_checker": false,
+       "guidance_scale": 3.5,
+       "hf_loras": [
+        "https://huggingface.co/alice/one",
+        "https://replicate.delivery/x/trained.tar"
+       ],
+       "lora_scales": [
+        0.8,
+        0.9
+       ],
+       "num_inference_steps": 28,
+       "num_outputs": 1,
+       "output_format": "png",
+       "prompt": "TOK in the park"
+      },
+      "payload_json": "{\"aspect_ratio\": \"1:1\", \"disable_safety_checker\": false, \"guidance_scale\": 3.5, \"hf_loras\": [\"https://huggingface.co/alice/one\", \"https://replicate.delivery/x/trained.tar\"], \"lora_scales\": [0.8, 0.9], \"num_inference_steps\": 28, \"num_outputs\": 1, \"output_format\": \"png\", \"prompt\": \"TOK in the park\"}",
+      "provider": "replicate"
+     }
+    ],
+    "error": null,
+    "gets": [
+     {
+      "status": 200,
+      "url": "https://r.test/lora/out.png"
+     }
+    ],
+    "reason": "runner only (R3.13 fix round 1): a pasted http(s) link keeps its scheme, on flux-dev-lora unless the host is huggingface.co, hf.co or civitai.com, on flux-dev-multi-lora always; Python strips it from every link",
+    "rotate_after": 0
+   },
    "sound_files": {},
    "sounds": [],
    "ui": {
@@ -6124,6 +6464,45 @@
    "picture_files": {},
    "pictures": [],
    "rotate": 0,
+   "runner": {
+    "calls": [
+     {
+      "endpoint": "lucataco/flux-dev-multi-lora",
+      "payload": {
+       "aspect_ratio": "1:1",
+       "disable_safety_checker": false,
+       "guidance_scale": 3.5,
+       "hf_loras": [
+        "https://example.com/three.safetensors",
+        "https://civitai.com/api/download/models/456",
+        "https://huggingface.co/alice/one",
+        "https://replicate.delivery/y/legacy.tar"
+       ],
+       "lora_scales": [
+        0.6,
+        0.7,
+        0.8,
+        0.9
+       ],
+       "num_inference_steps": 28,
+       "num_outputs": 1,
+       "output_format": "png",
+       "prompt": "TOK in the park"
+      },
+      "payload_json": "{\"aspect_ratio\": \"1:1\", \"disable_safety_checker\": false, \"guidance_scale\": 3.5, \"hf_loras\": [\"https://example.com/three.safetensors\", \"https://civitai.com/api/download/models/456\", \"https://huggingface.co/alice/one\", \"https://replicate.delivery/y/legacy.tar\"], \"lora_scales\": [0.6, 0.7, 0.8, 0.9], \"num_inference_steps\": 28, \"num_outputs\": 1, \"output_format\": \"png\", \"prompt\": \"TOK in the park\"}",
+      "provider": "replicate"
+     }
+    ],
+    "error": null,
+    "gets": [
+     {
+      "status": 200,
+      "url": "https://r.test/lora/out.png"
+     }
+    ],
+    "reason": "runner only (R3.13 fix round 1): a pasted http(s) link keeps its scheme, on flux-dev-lora unless the host is huggingface.co, hf.co or civitai.com, on flux-dev-multi-lora always; Python strips it from every link",
+    "rotate_after": 1
+   },
    "sound_files": {},
    "sounds": [],
    "ui": {
@@ -6276,6 +6655,71 @@
    "picture_files": {},
    "pictures": [],
    "rotate": 0,
+   "runner": {
+    "calls": [
+     {
+      "endpoint": "lucataco/flux-dev-multi-lora",
+      "payload": {
+       "aspect_ratio": "1:1",
+       "disable_safety_checker": false,
+       "guidance_scale": 3.5,
+       "hf_loras": [
+        "https://example.com/three.safetensors",
+        "https://civitai.com/api/download/models/456",
+        "https://huggingface.co/alice/one",
+        "https://replicate.delivery/y/legacy.tar"
+       ],
+       "lora_scales": [
+        0.6,
+        0.7,
+        0.8,
+        0.9
+       ],
+       "num_inference_steps": 28,
+       "num_outputs": 1,
+       "output_format": "png",
+       "prompt": "TOK in the park"
+      },
+      "payload_json": "{\"aspect_ratio\": \"1:1\", \"disable_safety_checker\": false, \"guidance_scale\": 3.5, \"hf_loras\": [\"https://example.com/three.safetensors\", \"https://civitai.com/api/download/models/456\", \"https://huggingface.co/alice/one\", \"https://replicate.delivery/y/legacy.tar\"], \"lora_scales\": [0.6, 0.7, 0.8, 0.9], \"num_inference_steps\": 28, \"num_outputs\": 1, \"output_format\": \"png\", \"prompt\": \"TOK in the park\"}",
+      "provider": "replicate"
+     },
+     {
+      "endpoint": "lucataco/flux-dev-multi-lora",
+      "payload": {
+       "aspect_ratio": "1:1",
+       "disable_safety_checker": false,
+       "guidance_scale": 3.5,
+       "hf_loras": [
+        "https://replicate.delivery/y/legacy.tar",
+        "https://huggingface.co/alice/one",
+        "https://civitai.com/api/download/models/456",
+        "https://example.com/three.safetensors"
+       ],
+       "lora_scales": [
+        0.9,
+        0.8,
+        0.7,
+        0.6
+       ],
+       "num_inference_steps": 28,
+       "num_outputs": 1,
+       "output_format": "png",
+       "prompt": "TOK in the park"
+      },
+      "payload_json": "{\"aspect_ratio\": \"1:1\", \"disable_safety_checker\": false, \"guidance_scale\": 3.5, \"hf_loras\": [\"https://replicate.delivery/y/legacy.tar\", \"https://huggingface.co/alice/one\", \"https://civitai.com/api/download/models/456\", \"https://example.com/three.safetensors\"], \"lora_scales\": [0.9, 0.8, 0.7, 0.6], \"num_inference_steps\": 28, \"num_outputs\": 1, \"output_format\": \"png\", \"prompt\": \"TOK in the park\"}",
+      "provider": "replicate"
+     }
+    ],
+    "error": null,
+    "gets": [
+     {
+      "status": 200,
+      "url": "https://r.test/lora/out.png"
+     }
+    ],
+    "reason": "runner only (R3.13 fix round 1): a pasted http(s) link keeps its scheme, on flux-dev-lora unless the host is huggingface.co, hf.co or civitai.com, on flux-dev-multi-lora always; Python strips it from every link",
+    "rotate_after": 1
+   },
    "sound_files": {},
    "sounds": [],
    "ui": {
@@ -6396,6 +6840,45 @@
    "picture_files": {},
    "pictures": [],
    "rotate": 1,
+   "runner": {
+    "calls": [
+     {
+      "endpoint": "lucataco/flux-dev-multi-lora",
+      "payload": {
+       "aspect_ratio": "1:1",
+       "disable_safety_checker": false,
+       "guidance_scale": 3.5,
+       "hf_loras": [
+        "https://replicate.delivery/y/legacy.tar",
+        "https://huggingface.co/alice/one",
+        "https://civitai.com/api/download/models/456",
+        "https://example.com/three.safetensors"
+       ],
+       "lora_scales": [
+        0.9,
+        0.8,
+        0.7,
+        0.6
+       ],
+       "num_inference_steps": 28,
+       "num_outputs": 1,
+       "output_format": "png",
+       "prompt": "TOK in the park"
+      },
+      "payload_json": "{\"aspect_ratio\": \"1:1\", \"disable_safety_checker\": false, \"guidance_scale\": 3.5, \"hf_loras\": [\"https://replicate.delivery/y/legacy.tar\", \"https://huggingface.co/alice/one\", \"https://civitai.com/api/download/models/456\", \"https://example.com/three.safetensors\"], \"lora_scales\": [0.9, 0.8, 0.7, 0.6], \"num_inference_steps\": 28, \"num_outputs\": 1, \"output_format\": \"png\", \"prompt\": \"TOK in the park\"}",
+      "provider": "replicate"
+     }
+    ],
+    "error": null,
+    "gets": [
+     {
+      "status": 200,
+      "url": "https://r.test/lora/out.png"
+     }
+    ],
+    "reason": "runner only (R3.13 fix round 1): a pasted http(s) link keeps its scheme, on flux-dev-lora unless the host is huggingface.co, hf.co or civitai.com, on flux-dev-multi-lora always; Python strips it from every link",
+    "rotate_after": 0
+   },
    "sound_files": {},
    "sounds": [],
    "ui": {
@@ -6548,6 +7031,71 @@
    "picture_files": {},
    "pictures": [],
    "rotate": 1,
+   "runner": {
+    "calls": [
+     {
+      "endpoint": "lucataco/flux-dev-multi-lora",
+      "payload": {
+       "aspect_ratio": "1:1",
+       "disable_safety_checker": false,
+       "guidance_scale": 3.5,
+       "hf_loras": [
+        "https://replicate.delivery/y/legacy.tar",
+        "https://huggingface.co/alice/one",
+        "https://civitai.com/api/download/models/456",
+        "https://example.com/three.safetensors"
+       ],
+       "lora_scales": [
+        0.9,
+        0.8,
+        0.7,
+        0.6
+       ],
+       "num_inference_steps": 28,
+       "num_outputs": 1,
+       "output_format": "png",
+       "prompt": "TOK in the park"
+      },
+      "payload_json": "{\"aspect_ratio\": \"1:1\", \"disable_safety_checker\": false, \"guidance_scale\": 3.5, \"hf_loras\": [\"https://replicate.delivery/y/legacy.tar\", \"https://huggingface.co/alice/one\", \"https://civitai.com/api/download/models/456\", \"https://example.com/three.safetensors\"], \"lora_scales\": [0.9, 0.8, 0.7, 0.6], \"num_inference_steps\": 28, \"num_outputs\": 1, \"output_format\": \"png\", \"prompt\": \"TOK in the park\"}",
+      "provider": "replicate"
+     },
+     {
+      "endpoint": "lucataco/flux-dev-multi-lora",
+      "payload": {
+       "aspect_ratio": "1:1",
+       "disable_safety_checker": false,
+       "guidance_scale": 3.5,
+       "hf_loras": [
+        "https://example.com/three.safetensors",
+        "https://civitai.com/api/download/models/456",
+        "https://huggingface.co/alice/one",
+        "https://replicate.delivery/y/legacy.tar"
+       ],
+       "lora_scales": [
+        0.6,
+        0.7,
+        0.8,
+        0.9
+       ],
+       "num_inference_steps": 28,
+       "num_outputs": 1,
+       "output_format": "png",
+       "prompt": "TOK in the park"
+      },
+      "payload_json": "{\"aspect_ratio\": \"1:1\", \"disable_safety_checker\": false, \"guidance_scale\": 3.5, \"hf_loras\": [\"https://example.com/three.safetensors\", \"https://civitai.com/api/download/models/456\", \"https://huggingface.co/alice/one\", \"https://replicate.delivery/y/legacy.tar\"], \"lora_scales\": [0.6, 0.7, 0.8, 0.9], \"num_inference_steps\": 28, \"num_outputs\": 1, \"output_format\": \"png\", \"prompt\": \"TOK in the park\"}",
+      "provider": "replicate"
+     }
+    ],
+    "error": null,
+    "gets": [
+     {
+      "status": 200,
+      "url": "https://r.test/lora/out.png"
+     }
+    ],
+    "reason": "runner only (R3.13 fix round 1): a pasted http(s) link keeps its scheme, on flux-dev-lora unless the host is huggingface.co, hf.co or civitai.com, on flux-dev-multi-lora always; Python strips it from every link",
+    "rotate_after": 0
+   },
    "sound_files": {},
    "sounds": [],
    "ui": {
@@ -6681,6 +7229,63 @@
    "picture_files": {},
    "pictures": [],
    "rotate": 0,
+   "runner": {
+    "calls": [
+     {
+      "endpoint": "lucataco/flux-dev-multi-lora",
+      "payload": {
+       "aspect_ratio": "1:1",
+       "disable_safety_checker": false,
+       "guidance_scale": 3.5,
+       "hf_loras": [
+        "https://huggingface.co/alice/one",
+        "https://replicate.delivery/x/trained.tar"
+       ],
+       "lora_scales": [
+        0.8,
+        0.9
+       ],
+       "num_inference_steps": 28,
+       "num_outputs": 1,
+       "output_format": "png",
+       "prompt": "TOK in the park"
+      },
+      "payload_json": "{\"aspect_ratio\": \"1:1\", \"disable_safety_checker\": false, \"guidance_scale\": 3.5, \"hf_loras\": [\"https://huggingface.co/alice/one\", \"https://replicate.delivery/x/trained.tar\"], \"lora_scales\": [0.8, 0.9], \"num_inference_steps\": 28, \"num_outputs\": 1, \"output_format\": \"png\", \"prompt\": \"TOK in the park\"}",
+      "provider": "replicate"
+     },
+     {
+      "endpoint": "lucataco/flux-dev-multi-lora",
+      "payload": {
+       "aspect_ratio": "1:1",
+       "disable_safety_checker": false,
+       "guidance_scale": 3.5,
+       "hf_loras": [
+        "https://replicate.delivery/x/trained.tar",
+        "https://huggingface.co/alice/one"
+       ],
+       "lora_scales": [
+        0.9,
+        0.8
+       ],
+       "num_inference_steps": 28,
+       "num_outputs": 1,
+       "output_format": "png",
+       "prompt": "TOK in the park"
+      },
+      "payload_json": "{\"aspect_ratio\": \"1:1\", \"disable_safety_checker\": false, \"guidance_scale\": 3.5, \"hf_loras\": [\"https://replicate.delivery/x/trained.tar\", \"https://huggingface.co/alice/one\"], \"lora_scales\": [0.9, 0.8], \"num_inference_steps\": 28, \"num_outputs\": 1, \"output_format\": \"png\", \"prompt\": \"TOK in the park\"}",
+      "provider": "replicate"
+     }
+    ],
+    "error": null,
+    "gets": [
+     {
+      "status": 200,
+      "url": "https://r.test/lora/out.png"
+     }
+    ],
+    "reason": "runner only (R3.13 fix round 1): a pasted http(s) link keeps its scheme, on flux-dev-lora unless the host is huggingface.co, hf.co or civitai.com, on flux-dev-multi-lora always; Python strips it from every link",
+    "rotate_after": 1
+   },
    "sound_files": {},
    "sounds": [],
    "ui": {
@@ -6815,6 +7420,63 @@
    "picture_files": {},
    "pictures": [],
    "rotate": 0,
+   "runner": {
+    "calls": [
+     {
+      "endpoint": "lucataco/flux-dev-multi-lora",
+      "payload": {
+       "aspect_ratio": "1:1",
+       "disable_safety_checker": false,
+       "guidance_scale": 3.5,
+       "hf_loras": [
+        "https://huggingface.co/alice/one",
+        "https://replicate.delivery/x/trained.tar"
+       ],
+       "lora_scales": [
+        0.8,
+        0.9
+       ],
+       "num_inference_steps": 28,
+       "num_outputs": 1,
+       "output_format": "png",
+       "prompt": "TOK in the park"
+      },
+      "payload_json": "{\"aspect_ratio\": \"1:1\", \"disable_safety_checker\": false, \"guidance_scale\": 3.5, \"hf_loras\": [\"https://huggingface.co/alice/one\", \"https://replicate.delivery/x/trained.tar\"], \"lora_scales\": [0.8, 0.9], \"num_inference_steps\": 28, \"num_outputs\": 1, \"output_format\": \"png\", \"prompt\": \"TOK in the park\"}",
+      "provider": "replicate"
+     },
+     {
+      "endpoint": "lucataco/flux-dev-multi-lora",
+      "payload": {
+       "aspect_ratio": "1:1",
+       "disable_safety_checker": false,
+       "guidance_scale": 3.5,
+       "hf_loras": [
+        "https://replicate.delivery/x/trained.tar",
+        "https://huggingface.co/alice/one"
+       ],
+       "lora_scales": [
+        0.9,
+        0.8
+       ],
+       "num_inference_steps": 28,
+       "num_outputs": 1,
+       "output_format": "png",
+       "prompt": "TOK in the park"
+      },
+      "payload_json": "{\"aspect_ratio\": \"1:1\", \"disable_safety_checker\": false, \"guidance_scale\": 3.5, \"hf_loras\": [\"https://replicate.delivery/x/trained.tar\", \"https://huggingface.co/alice/one\"], \"lora_scales\": [0.9, 0.8], \"num_inference_steps\": 28, \"num_outputs\": 1, \"output_format\": \"png\", \"prompt\": \"TOK in the park\"}",
+      "provider": "replicate"
+     }
+    ],
+    "error": null,
+    "gets": [
+     {
+      "status": 200,
+      "url": "https://r.test/lora/rgba.png"
+     }
+    ],
+    "reason": "runner only (R3.13 fix round 1): a pasted http(s) link keeps its scheme, on flux-dev-lora unless the host is huggingface.co, hf.co or civitai.com, on flux-dev-multi-lora always; Python strips it from every link",
+    "rotate_after": 1
+   },
    "sound_files": {},
    "sounds": [],
    "ui": {
@@ -7027,6 +7689,39 @@
    "picture_files": {},
    "pictures": [],
    "rotate": 0,
+   "runner": {
+    "calls": [
+     {
+      "endpoint": "lucataco/flux-dev-multi-lora",
+      "payload": {
+       "aspect_ratio": "1:1",
+       "disable_safety_checker": false,
+       "guidance_scale": 3.5,
+       "hf_loras": [
+        "https://huggingface.co/alice/one"
+       ],
+       "lora_scales": [
+        1.2
+       ],
+       "num_inference_steps": 28,
+       "num_outputs": 1,
+       "output_format": "png",
+       "prompt": "TOK in the park"
+      },
+      "payload_json": "{\"aspect_ratio\": \"1:1\", \"disable_safety_checker\": false, \"guidance_scale\": 3.5, \"hf_loras\": [\"https://huggingface.co/alice/one\"], \"lora_scales\": [1.2], \"num_inference_steps\": 28, \"num_outputs\": 1, \"output_format\": \"png\", \"prompt\": \"TOK in the park\"}",
+      "provider": "replicate"
+     }
+    ],
+    "error": null,
+    "gets": [
+     {
+      "status": 200,
+      "url": "https://r.test/lora/out.png"
+     }
+    ],
+    "reason": "runner only (R3.13 fix round 1): a pasted http(s) link keeps its scheme, on flux-dev-lora unless the host is huggingface.co, hf.co or civitai.com, on flux-dev-multi-lora always; Python strips it from every link",
+    "rotate_after": 0
+   },
    "sound_files": {},
    "sounds": [],
    "ui": {
@@ -7165,6 +7860,71 @@
    "picture_files": {},
    "pictures": [],
    "rotate": 0,
+   "runner": {
+    "calls": [
+     {
+      "endpoint": "lucataco/flux-dev-multi-lora",
+      "payload": {
+       "aspect_ratio": "1:1",
+       "disable_safety_checker": false,
+       "guidance_scale": 3.5,
+       "hf_loras": [
+        "https://replicate.delivery/y/legacy.tar",
+        "huggingface.co/alice/one",
+        "https://civitai.com/api/download/models/456",
+        "https://huggingface.co/alice/one"
+       ],
+       "lora_scales": [
+        0.6,
+        1.1,
+        0.8,
+        0.4
+       ],
+       "num_inference_steps": 28,
+       "num_outputs": 1,
+       "output_format": "png",
+       "prompt": "TOK in the park"
+      },
+      "payload_json": "{\"aspect_ratio\": \"1:1\", \"disable_safety_checker\": false, \"guidance_scale\": 3.5, \"hf_loras\": [\"https://replicate.delivery/y/legacy.tar\", \"huggingface.co/alice/one\", \"https://civitai.com/api/download/models/456\", \"https://huggingface.co/alice/one\"], \"lora_scales\": [0.6, 1.1, 0.8, 0.4], \"num_inference_steps\": 28, \"num_outputs\": 1, \"output_format\": \"png\", \"prompt\": \"TOK in the park\"}",
+      "provider": "replicate"
+     },
+     {
+      "endpoint": "lucataco/flux-dev-multi-lora",
+      "payload": {
+       "aspect_ratio": "1:1",
+       "disable_safety_checker": false,
+       "guidance_scale": 3.5,
+       "hf_loras": [
+        "https://huggingface.co/alice/one",
+        "https://civitai.com/api/download/models/456",
+        "huggingface.co/alice/one",
+        "https://replicate.delivery/y/legacy.tar"
+       ],
+       "lora_scales": [
+        0.4,
+        0.8,
+        1.1,
+        0.6
+       ],
+       "num_inference_steps": 28,
+       "num_outputs": 1,
+       "output_format": "png",
+       "prompt": "TOK in the park"
+      },
+      "payload_json": "{\"aspect_ratio\": \"1:1\", \"disable_safety_checker\": false, \"guidance_scale\": 3.5, \"hf_loras\": [\"https://huggingface.co/alice/one\", \"https://civitai.com/api/download/models/456\", \"huggingface.co/alice/one\", \"https://replicate.delivery/y/legacy.tar\"], \"lora_scales\": [0.4, 0.8, 1.1, 0.6], \"num_inference_steps\": 28, \"num_outputs\": 1, \"output_format\": \"png\", \"prompt\": \"TOK in the park\"}",
+      "provider": "replicate"
+     }
+    ],
+    "error": null,
+    "gets": [
+     {
+      "status": 200,
+      "url": "https://r.test/lora/out.png"
+     }
+    ],
+    "reason": "runner only (R3.13 fix round 1): a pasted http(s) link keeps its scheme, on flux-dev-lora unless the host is huggingface.co, hf.co or civitai.com, on flux-dev-multi-lora always; Python strips it from every link",
+    "rotate_after": 1
+   },
    "sound_files": {},
    "sounds": [],
    "ui": {
@@ -7281,6 +8041,39 @@
    "picture_files": {},
    "pictures": [],
    "rotate": 1,
+   "runner": {
+    "calls": [
+     {
+      "endpoint": "lucataco/flux-dev-multi-lora",
+      "payload": {
+       "aspect_ratio": "1:1",
+       "disable_safety_checker": false,
+       "guidance_scale": 3.5,
+       "hf_loras": [
+        "https://replicate.delivery/y/legacy.tar"
+       ],
+       "lora_scales": [
+        0.95
+       ],
+       "num_inference_steps": 28,
+       "num_outputs": 1,
+       "output_format": "png",
+       "prompt": "TOK in the park"
+      },
+      "payload_json": "{\"aspect_ratio\": \"1:1\", \"disable_safety_checker\": false, \"guidance_scale\": 3.5, \"hf_loras\": [\"https://replicate.delivery/y/legacy.tar\"], \"lora_scales\": [0.95], \"num_inference_steps\": 28, \"num_outputs\": 1, \"output_format\": \"png\", \"prompt\": \"TOK in the park\"}",
+      "provider": "replicate"
+     }
+    ],
+    "error": null,
+    "gets": [
+     {
+      "status": 200,
+      "url": "https://r.test/lora/out.png"
+     }
+    ],
+    "reason": "runner only (R3.13 fix round 1): a pasted http(s) link keeps its scheme, on flux-dev-lora unless the host is huggingface.co, hf.co or civitai.com, on flux-dev-multi-lora always; Python strips it from every link",
+    "rotate_after": 1
+   },
    "sound_files": {},
    "sounds": [],
    "ui": {
@@ -7520,6 +8313,41 @@
    "picture_files": {},
    "pictures": [],
    "rotate": 0,
+   "runner": {
+    "calls": [
+     {
+      "endpoint": "lucataco/flux-dev-multi-lora",
+      "payload": {
+       "aspect_ratio": "1:1",
+       "disable_safety_checker": false,
+       "guidance_scale": 3.5,
+       "hf_loras": [
+        "https://huggingface.co/alice/one",
+        "https://replicate.delivery/x/trained.tar"
+       ],
+       "lora_scales": [
+        0.8,
+        0.9
+       ],
+       "num_inference_steps": 28,
+       "num_outputs": 1,
+       "output_format": "png",
+       "prompt": "TOK in the park"
+      },
+      "payload_json": "{\"aspect_ratio\": \"1:1\", \"disable_safety_checker\": false, \"guidance_scale\": 3.5, \"hf_loras\": [\"https://huggingface.co/alice/one\", \"https://replicate.delivery/x/trained.tar\"], \"lora_scales\": [0.8, 0.9], \"num_inference_steps\": 28, \"num_outputs\": 1, \"output_format\": \"png\", \"prompt\": \"TOK in the park\"}",
+      "provider": "replicate"
+     }
+    ],
+    "error": null,
+    "gets": [
+     {
+      "status": 200,
+      "url": "https://r.test/lora/out.png"
+     }
+    ],
+    "reason": "runner only (R3.13 fix round 1): a pasted http(s) link keeps its scheme, on flux-dev-lora unless the host is huggingface.co, hf.co or civitai.com, on flux-dev-multi-lora always; Python strips it from every link",
+    "rotate_after": 1
+   },
    "sound_files": {},
    "sounds": [],
    "ui": {
@@ -7628,6 +8456,41 @@
    "picture_files": {},
    "pictures": [],
    "rotate": 0,
+   "runner": {
+    "calls": [
+     {
+      "endpoint": "lucataco/flux-dev-multi-lora",
+      "payload": {
+       "aspect_ratio": "1:1",
+       "disable_safety_checker": false,
+       "guidance_scale": 3.5,
+       "hf_loras": [
+        "https://huggingface.co/alice/one",
+        "https://replicate.delivery/x/trained.tar"
+       ],
+       "lora_scales": [
+        0.8,
+        0.9
+       ],
+       "num_inference_steps": 28,
+       "num_outputs": 1,
+       "output_format": "png",
+       "prompt": ""
+      },
+      "payload_json": "{\"aspect_ratio\": \"1:1\", \"disable_safety_checker\": false, \"guidance_scale\": 3.5, \"hf_loras\": [\"https://huggingface.co/alice/one\", \"https://replicate.delivery/x/trained.tar\"], \"lora_scales\": [0.8, 0.9], \"num_inference_steps\": 28, \"num_outputs\": 1, \"output_format\": \"png\", \"prompt\": \"\"}",
+      "provider": "replicate"
+     }
+    ],
+    "error": null,
+    "gets": [
+     {
+      "status": 200,
+      "url": "https://r.test/lora/out.png"
+     }
+    ],
+    "reason": "runner only (R3.13 fix round 1): a pasted http(s) link keeps its scheme, on flux-dev-lora unless the host is huggingface.co, hf.co or civitai.com, on flux-dev-multi-lora always; Python strips it from every link",
+    "rotate_after": 1
+   },
    "sound_files": {},
    "sounds": [],
    "ui": {
@@ -7736,6 +8599,41 @@
    "picture_files": {},
    "pictures": [],
    "rotate": 0,
+   "runner": {
+    "calls": [
+     {
+      "endpoint": "lucataco/flux-dev-multi-lora",
+      "payload": {
+       "aspect_ratio": "1:1",
+       "disable_safety_checker": false,
+       "guidance_scale": 3.5,
+       "hf_loras": [
+        "https://huggingface.co/alice/one",
+        "https://replicate.delivery/x/trained.tar"
+       ],
+       "lora_scales": [
+        0.8,
+        0.9
+       ],
+       "num_inference_steps": 28,
+       "num_outputs": 1,
+       "output_format": "png",
+       "prompt": "moody film look TOK in the park"
+      },
+      "payload_json": "{\"aspect_ratio\": \"1:1\", \"disable_safety_checker\": false, \"guidance_scale\": 3.5, \"hf_loras\": [\"https://huggingface.co/alice/one\", \"https://replicate.delivery/x/trained.tar\"], \"lora_scales\": [0.8, 0.9], \"num_inference_steps\": 28, \"num_outputs\": 1, \"output_format\": \"png\", \"prompt\": \"moody film look TOK in the park\"}",
+      "provider": "replicate"
+     }
+    ],
+    "error": null,
+    "gets": [
+     {
+      "status": 200,
+      "url": "https://r.test/lora/out.png"
+     }
+    ],
+    "reason": "runner only (R3.13 fix round 1): a pasted http(s) link keeps its scheme, on flux-dev-lora unless the host is huggingface.co, hf.co or civitai.com, on flux-dev-multi-lora always; Python strips it from every link",
+    "rotate_after": 1
+   },
    "sound_files": {},
    "sounds": [],
    "ui": {
@@ -7844,6 +8742,41 @@
    "picture_files": {},
    "pictures": [],
    "rotate": 0,
+   "runner": {
+    "calls": [
+     {
+      "endpoint": "lucataco/flux-dev-multi-lora",
+      "payload": {
+       "aspect_ratio": "1:1",
+       "disable_safety_checker": false,
+       "guidance_scale": 3.5,
+       "hf_loras": [
+        "https://huggingface.co/alice/one",
+        "https://replicate.delivery/x/trained.tar"
+       ],
+       "lora_scales": [
+        0.8,
+        0.9
+       ],
+       "num_inference_steps": 28,
+       "num_outputs": 1,
+       "output_format": "png",
+       "prompt": "moody film look"
+      },
+      "payload_json": "{\"aspect_ratio\": \"1:1\", \"disable_safety_checker\": false, \"guidance_scale\": 3.5, \"hf_loras\": [\"https://huggingface.co/alice/one\", \"https://replicate.delivery/x/trained.tar\"], \"lora_scales\": [0.8, 0.9], \"num_inference_steps\": 28, \"num_outputs\": 1, \"output_format\": \"png\", \"prompt\": \"moody film look\"}",
+      "provider": "replicate"
+     }
+    ],
+    "error": null,
+    "gets": [
+     {
+      "status": 200,
+      "url": "https://r.test/lora/out.png"
+     }
+    ],
+    "reason": "runner only (R3.13 fix round 1): a pasted http(s) link keeps its scheme, on flux-dev-lora unless the host is huggingface.co, hf.co or civitai.com, on flux-dev-multi-lora always; Python strips it from every link",
+    "rotate_after": 1
+   },
    "sound_files": {},
    "sounds": [],
    "ui": {
@@ -7952,6 +8885,41 @@
    "picture_files": {},
    "pictures": [],
    "rotate": 0,
+   "runner": {
+    "calls": [
+     {
+      "endpoint": "lucataco/flux-dev-multi-lora",
+      "payload": {
+       "aspect_ratio": "1:1",
+       "disable_safety_checker": false,
+       "guidance_scale": 3.5,
+       "hf_loras": [
+        "https://huggingface.co/alice/one",
+        "https://replicate.delivery/x/trained.tar"
+       ],
+       "lora_scales": [
+        0.8,
+        0.9
+       ],
+       "num_inference_steps": 28,
+       "num_outputs": 1,
+       "output_format": "png",
+       "prompt": "TOK in the park"
+      },
+      "payload_json": "{\"aspect_ratio\": \"1:1\", \"disable_safety_checker\": false, \"guidance_scale\": 3.5, \"hf_loras\": [\"https://huggingface.co/alice/one\", \"https://replicate.delivery/x/trained.tar\"], \"lora_scales\": [0.8, 0.9], \"num_inference_steps\": 28, \"num_outputs\": 1, \"output_format\": \"png\", \"prompt\": \"TOK in the park\"}",
+      "provider": "replicate"
+     }
+    ],
+    "error": null,
+    "gets": [
+     {
+      "status": 200,
+      "url": "https://r.test/lora/out.png"
+     }
+    ],
+    "reason": "runner only (R3.13 fix round 1): a pasted http(s) link keeps its scheme, on flux-dev-lora unless the host is huggingface.co, hf.co or civitai.com, on flux-dev-multi-lora always; Python strips it from every link",
+    "rotate_after": 1
+   },
    "sound_files": {},
    "sounds": [],
    "ui": {
@@ -8060,6 +9028,41 @@
    "picture_files": {},
    "pictures": [],
    "rotate": 0,
+   "runner": {
+    "calls": [
+     {
+      "endpoint": "lucataco/flux-dev-multi-lora",
+      "payload": {
+       "aspect_ratio": "1:1",
+       "disable_safety_checker": false,
+       "guidance_scale": 3.5,
+       "hf_loras": [
+        "https://huggingface.co/alice/one",
+        "https://replicate.delivery/x/trained.tar"
+       ],
+       "lora_scales": [
+        0.8,
+        0.9
+       ],
+       "num_inference_steps": 28,
+       "num_outputs": 1,
+       "output_format": "png",
+       "prompt": ""
+      },
+      "payload_json": "{\"aspect_ratio\": \"1:1\", \"disable_safety_checker\": false, \"guidance_scale\": 3.5, \"hf_loras\": [\"https://huggingface.co/alice/one\", \"https://replicate.delivery/x/trained.tar\"], \"lora_scales\": [0.8, 0.9], \"num_inference_steps\": 28, \"num_outputs\": 1, \"output_format\": \"png\", \"prompt\": \"\"}",
+      "provider": "replicate"
+     }
+    ],
+    "error": null,
+    "gets": [
+     {
+      "status": 200,
+      "url": "https://r.test/lora/out.png"
+     }
+    ],
+    "reason": "runner only (R3.13 fix round 1): a pasted http(s) link keeps its scheme, on flux-dev-lora unless the host is huggingface.co, hf.co or civitai.com, on flux-dev-multi-lora always; Python strips it from every link",
+    "rotate_after": 1
+   },
    "sound_files": {},
    "sounds": [],
    "ui": {
@@ -8168,6 +9171,41 @@
    "picture_files": {},
    "pictures": [],
    "rotate": 0,
+   "runner": {
+    "calls": [
+     {
+      "endpoint": "lucataco/flux-dev-multi-lora",
+      "payload": {
+       "aspect_ratio": "1:1",
+       "disable_safety_checker": false,
+       "guidance_scale": 3.5,
+       "hf_loras": [
+        "https://huggingface.co/alice/one",
+        "https://replicate.delivery/x/trained.tar"
+       ],
+       "lora_scales": [
+        0.8,
+        0.9
+       ],
+       "num_inference_steps": 28,
+       "num_outputs": 1,
+       "output_format": "png",
+       "prompt": "moody film look TOK in the park"
+      },
+      "payload_json": "{\"aspect_ratio\": \"1:1\", \"disable_safety_checker\": false, \"guidance_scale\": 3.5, \"hf_loras\": [\"https://huggingface.co/alice/one\", \"https://replicate.delivery/x/trained.tar\"], \"lora_scales\": [0.8, 0.9], \"num_inference_steps\": 28, \"num_outputs\": 1, \"output_format\": \"png\", \"prompt\": \"moody film look TOK in the park\"}",
+      "provider": "replicate"
+     }
+    ],
+    "error": null,
+    "gets": [
+     {
+      "status": 200,
+      "url": "https://r.test/lora/out.png"
+     }
+    ],
+    "reason": "runner only (R3.13 fix round 1): a pasted http(s) link keeps its scheme, on flux-dev-lora unless the host is huggingface.co, hf.co or civitai.com, on flux-dev-multi-lora always; Python strips it from every link",
+    "rotate_after": 1
+   },
    "sound_files": {},
    "sounds": [],
    "ui": {
@@ -8276,6 +9314,41 @@
    "picture_files": {},
    "pictures": [],
    "rotate": 0,
+   "runner": {
+    "calls": [
+     {
+      "endpoint": "lucataco/flux-dev-multi-lora",
+      "payload": {
+       "aspect_ratio": "1:1",
+       "disable_safety_checker": false,
+       "guidance_scale": 3.5,
+       "hf_loras": [
+        "https://huggingface.co/alice/one",
+        "https://replicate.delivery/x/trained.tar"
+       ],
+       "lora_scales": [
+        0.8,
+        0.9
+       ],
+       "num_inference_steps": 28,
+       "num_outputs": 1,
+       "output_format": "png",
+       "prompt": "moody film look"
+      },
+      "payload_json": "{\"aspect_ratio\": \"1:1\", \"disable_safety_checker\": false, \"guidance_scale\": 3.5, \"hf_loras\": [\"https://huggingface.co/alice/one\", \"https://replicate.delivery/x/trained.tar\"], \"lora_scales\": [0.8, 0.9], \"num_inference_steps\": 28, \"num_outputs\": 1, \"output_format\": \"png\", \"prompt\": \"moody film look\"}",
+      "provider": "replicate"
+     }
+    ],
+    "error": null,
+    "gets": [
+     {
+      "status": 200,
+      "url": "https://r.test/lora/out.png"
+     }
+    ],
+    "reason": "runner only (R3.13 fix round 1): a pasted http(s) link keeps its scheme, on flux-dev-lora unless the host is huggingface.co, hf.co or civitai.com, on flux-dev-multi-lora always; Python strips it from every link",
+    "rotate_after": 1
+   },
    "sound_files": {},
    "sounds": [],
    "ui": {
@@ -8384,6 +9457,41 @@
    "picture_files": {},
    "pictures": [],
    "rotate": 0,
+   "runner": {
+    "calls": [
+     {
+      "endpoint": "lucataco/flux-dev-multi-lora",
+      "payload": {
+       "aspect_ratio": "1:1",
+       "disable_safety_checker": false,
+       "guidance_scale": 3.5,
+       "hf_loras": [
+        "https://huggingface.co/alice/one",
+        "https://replicate.delivery/x/trained.tar"
+       ],
+       "lora_scales": [
+        0.8,
+        0.9
+       ],
+       "num_inference_steps": 28,
+       "num_outputs": 1,
+       "output_format": "png",
+       "prompt": "an idea from upstream TOK in the park"
+      },
+      "payload_json": "{\"aspect_ratio\": \"1:1\", \"disable_safety_checker\": false, \"guidance_scale\": 3.5, \"hf_loras\": [\"https://huggingface.co/alice/one\", \"https://replicate.delivery/x/trained.tar\"], \"lora_scales\": [0.8, 0.9], \"num_inference_steps\": 28, \"num_outputs\": 1, \"output_format\": \"png\", \"prompt\": \"an idea from upstream TOK in the park\"}",
+      "provider": "replicate"
+     }
+    ],
+    "error": null,
+    "gets": [
+     {
+      "status": 200,
+      "url": "https://r.test/lora/out.png"
+     }
+    ],
+    "reason": "runner only (R3.13 fix round 1): a pasted http(s) link keeps its scheme, on flux-dev-lora unless the host is huggingface.co, hf.co or civitai.com, on flux-dev-multi-lora always; Python strips it from every link",
+    "rotate_after": 1
+   },
    "sound_files": {},
    "sounds": [],
    "ui": {
@@ -8492,6 +9600,41 @@
    "picture_files": {},
    "pictures": [],
    "rotate": 0,
+   "runner": {
+    "calls": [
+     {
+      "endpoint": "lucataco/flux-dev-multi-lora",
+      "payload": {
+       "aspect_ratio": "1:1",
+       "disable_safety_checker": false,
+       "guidance_scale": 3.5,
+       "hf_loras": [
+        "https://huggingface.co/alice/one",
+        "https://replicate.delivery/x/trained.tar"
+       ],
+       "lora_scales": [
+        0.8,
+        0.9
+       ],
+       "num_inference_steps": 28,
+       "num_outputs": 1,
+       "output_format": "png",
+       "prompt": "an idea from upstream"
+      },
+      "payload_json": "{\"aspect_ratio\": \"1:1\", \"disable_safety_checker\": false, \"guidance_scale\": 3.5, \"hf_loras\": [\"https://huggingface.co/alice/one\", \"https://replicate.delivery/x/trained.tar\"], \"lora_scales\": [0.8, 0.9], \"num_inference_steps\": 28, \"num_outputs\": 1, \"output_format\": \"png\", \"prompt\": \"an idea from upstream\"}",
+      "provider": "replicate"
+     }
+    ],
+    "error": null,
+    "gets": [
+     {
+      "status": 200,
+      "url": "https://r.test/lora/out.png"
+     }
+    ],
+    "reason": "runner only (R3.13 fix round 1): a pasted http(s) link keeps its scheme, on flux-dev-lora unless the host is huggingface.co, hf.co or civitai.com, on flux-dev-multi-lora always; Python strips it from every link",
+    "rotate_after": 1
+   },
    "sound_files": {},
    "sounds": [],
    "ui": {
@@ -8600,6 +9743,41 @@
    "picture_files": {},
    "pictures": [],
    "rotate": 0,
+   "runner": {
+    "calls": [
+     {
+      "endpoint": "lucataco/flux-dev-multi-lora",
+      "payload": {
+       "aspect_ratio": "1:1",
+       "disable_safety_checker": false,
+       "guidance_scale": 3.5,
+       "hf_loras": [
+        "https://huggingface.co/alice/one",
+        "https://replicate.delivery/x/trained.tar"
+       ],
+       "lora_scales": [
+        0.8,
+        0.9
+       ],
+       "num_inference_steps": 28,
+       "num_outputs": 1,
+       "output_format": "png",
+       "prompt": "moody film look an idea from upstream TOK in the park"
+      },
+      "payload_json": "{\"aspect_ratio\": \"1:1\", \"disable_safety_checker\": false, \"guidance_scale\": 3.5, \"hf_loras\": [\"https://huggingface.co/alice/one\", \"https://replicate.delivery/x/trained.tar\"], \"lora_scales\": [0.8, 0.9], \"num_inference_steps\": 28, \"num_outputs\": 1, \"output_format\": \"png\", \"prompt\": \"moody film look an idea from upstream TOK in the park\"}",
+      "provider": "replicate"
+     }
+    ],
+    "error": null,
+    "gets": [
+     {
+      "status": 200,
+      "url": "https://r.test/lora/out.png"
+     }
+    ],
+    "reason": "runner only (R3.13 fix round 1): a pasted http(s) link keeps its scheme, on flux-dev-lora unless the host is huggingface.co, hf.co or civitai.com, on flux-dev-multi-lora always; Python strips it from every link",
+    "rotate_after": 1
+   },
    "sound_files": {},
    "sounds": [],
    "ui": {
@@ -8708,6 +9886,41 @@
    "picture_files": {},
    "pictures": [],
    "rotate": 0,
+   "runner": {
+    "calls": [
+     {
+      "endpoint": "lucataco/flux-dev-multi-lora",
+      "payload": {
+       "aspect_ratio": "1:1",
+       "disable_safety_checker": false,
+       "guidance_scale": 3.5,
+       "hf_loras": [
+        "https://huggingface.co/alice/one",
+        "https://replicate.delivery/x/trained.tar"
+       ],
+       "lora_scales": [
+        0.8,
+        0.9
+       ],
+       "num_inference_steps": 28,
+       "num_outputs": 1,
+       "output_format": "png",
+       "prompt": "moody film look an idea from upstream"
+      },
+      "payload_json": "{\"aspect_ratio\": \"1:1\", \"disable_safety_checker\": false, \"guidance_scale\": 3.5, \"hf_loras\": [\"https://huggingface.co/alice/one\", \"https://replicate.delivery/x/trained.tar\"], \"lora_scales\": [0.8, 0.9], \"num_inference_steps\": 28, \"num_outputs\": 1, \"output_format\": \"png\", \"prompt\": \"moody film look an idea from upstream\"}",
+      "provider": "replicate"
+     }
+    ],
+    "error": null,
+    "gets": [
+     {
+      "status": 200,
+      "url": "https://r.test/lora/out.png"
+     }
+    ],
+    "reason": "runner only (R3.13 fix round 1): a pasted http(s) link keeps its scheme, on flux-dev-lora unless the host is huggingface.co, hf.co or civitai.com, on flux-dev-multi-lora always; Python strips it from every link",
+    "rotate_after": 1
+   },
    "sound_files": {},
    "sounds": [],
    "ui": {
@@ -8822,6 +10035,43 @@
     "image"
    ],
    "rotate": 0,
+   "runner": {
+    "calls": [
+     {
+      "endpoint": "lucataco/flux-dev-multi-lora",
+      "payload": {
+       "aspect_ratio": "1:1",
+       "disable_safety_checker": false,
+       "guidance_scale": 3.5,
+       "hf_loras": [
+        "https://huggingface.co/alice/one",
+        "https://replicate.delivery/x/trained.tar"
+       ],
+       "image": "IMG:image",
+       "lora_scales": [
+        0.8,
+        0.9
+       ],
+       "num_inference_steps": 28,
+       "num_outputs": 1,
+       "output_format": "png",
+       "prompt": "TOK in the park",
+       "prompt_strength": 0.2
+      },
+      "payload_json": "{\"aspect_ratio\": \"1:1\", \"disable_safety_checker\": false, \"guidance_scale\": 3.5, \"hf_loras\": [\"https://huggingface.co/alice/one\", \"https://replicate.delivery/x/trained.tar\"], \"image\": \"IMG:image\", \"lora_scales\": [0.8, 0.9], \"num_inference_steps\": 28, \"num_outputs\": 1, \"output_format\": \"png\", \"prompt\": \"TOK in the park\", \"prompt_strength\": 0.2}",
+      "provider": "replicate"
+     }
+    ],
+    "error": null,
+    "gets": [
+     {
+      "status": 200,
+      "url": "https://r.test/lora/out.png"
+     }
+    ],
+    "reason": "runner only (R3.13 fix round 1): a pasted http(s) link keeps its scheme, on flux-dev-lora unless the host is huggingface.co, hf.co or civitai.com, on flux-dev-multi-lora always; Python strips it from every link",
+    "rotate_after": 1
+   },
    "sound_files": {},
    "sounds": [],
    "ui": {
@@ -8928,6 +10178,41 @@
    "picture_files": {},
    "pictures": [],
    "rotate": 0,
+   "runner": {
+    "calls": [
+     {
+      "endpoint": "lucataco/flux-dev-multi-lora",
+      "payload": {
+       "aspect_ratio": "1:1",
+       "disable_safety_checker": false,
+       "guidance_scale": 3.5,
+       "hf_loras": [
+        "https://huggingface.co/alice/one",
+        "https://replicate.delivery/x/trained.tar"
+       ],
+       "lora_scales": [
+        0.8,
+        0.9
+       ],
+       "num_inference_steps": 28,
+       "num_outputs": 1,
+       "output_format": "png",
+       "prompt": "TOK in the park"
+      },
+      "payload_json": "{\"aspect_ratio\": \"1:1\", \"disable_safety_checker\": false, \"guidance_scale\": 3.5, \"hf_loras\": [\"https://huggingface.co/alice/one\", \"https://replicate.delivery/x/trained.tar\"], \"lora_scales\": [0.8, 0.9], \"num_inference_steps\": 28, \"num_outputs\": 1, \"output_format\": \"png\", \"prompt\": \"TOK in the park\"}",
+      "provider": "replicate"
+     }
+    ],
+    "error": null,
+    "gets": [
+     {
+      "status": 200,
+      "url": "https://r.test/lora/out.png"
+     }
+    ],
+    "reason": "runner only (R3.13 fix round 1): a pasted http(s) link keeps its scheme, on flux-dev-lora unless the host is huggingface.co, hf.co or civitai.com, on flux-dev-multi-lora always; Python strips it from every link",
+    "rotate_after": 1
+   },
    "sound_files": {},
    "sounds": [],
    "ui": {
@@ -9035,6 +10320,42 @@
    "picture_files": {},
    "pictures": [],
    "rotate": 0,
+   "runner": {
+    "calls": [
+     {
+      "endpoint": "lucataco/flux-dev-multi-lora",
+      "payload": {
+       "aspect_ratio": "1:1",
+       "disable_safety_checker": false,
+       "guidance_scale": 3.5,
+       "hf_loras": [
+        "https://huggingface.co/alice/one",
+        "https://replicate.delivery/x/trained.tar"
+       ],
+       "lora_scales": [
+        0.8,
+        0.9
+       ],
+       "num_inference_steps": 28,
+       "num_outputs": 1,
+       "output_format": "png",
+       "prompt": "TOK in the park",
+       "seed": 42
+      },
+      "payload_json": "{\"aspect_ratio\": \"1:1\", \"disable_safety_checker\": false, \"guidance_scale\": 3.5, \"hf_loras\": [\"https://huggingface.co/alice/one\", \"https://replicate.delivery/x/trained.tar\"], \"lora_scales\": [0.8, 0.9], \"num_inference_steps\": 28, \"num_outputs\": 1, \"output_format\": \"png\", \"prompt\": \"TOK in the park\", \"seed\": 42}",
+      "provider": "replicate"
+     }
+    ],
+    "error": null,
+    "gets": [
+     {
+      "status": 200,
+      "url": "https://r.test/lora/out.png"
+     }
+    ],
+    "reason": "runner only (R3.13 fix round 1): a pasted http(s) link keeps its scheme, on flux-dev-lora unless the host is huggingface.co, hf.co or civitai.com, on flux-dev-multi-lora always; Python strips it from every link",
+    "rotate_after": 1
+   },
    "sound_files": {},
    "sounds": [],
    "ui": {
@@ -9142,6 +10463,42 @@
    "picture_files": {},
    "pictures": [],
    "rotate": 0,
+   "runner": {
+    "calls": [
+     {
+      "endpoint": "lucataco/flux-dev-multi-lora",
+      "payload": {
+       "aspect_ratio": "1:1",
+       "disable_safety_checker": false,
+       "guidance_scale": 3.5,
+       "hf_loras": [
+        "https://huggingface.co/alice/one",
+        "https://replicate.delivery/x/trained.tar"
+       ],
+       "lora_scales": [
+        0.8,
+        0.9
+       ],
+       "num_inference_steps": 28,
+       "num_outputs": 1,
+       "output_format": "png",
+       "prompt": "TOK in the park",
+       "seed": 4294967295
+      },
+      "payload_json": "{\"aspect_ratio\": \"1:1\", \"disable_safety_checker\": false, \"guidance_scale\": 3.5, \"hf_loras\": [\"https://huggingface.co/alice/one\", \"https://replicate.delivery/x/trained.tar\"], \"lora_scales\": [0.8, 0.9], \"num_inference_steps\": 28, \"num_outputs\": 1, \"output_format\": \"png\", \"prompt\": \"TOK in the park\", \"seed\": 4294967295}",
+      "provider": "replicate"
+     }
+    ],
+    "error": null,
+    "gets": [
+     {
+      "status": 200,
+      "url": "https://r.test/lora/out.png"
+     }
+    ],
+    "reason": "runner only (R3.13 fix round 1): a pasted http(s) link keeps its scheme, on flux-dev-lora unless the host is huggingface.co, hf.co or civitai.com, on flux-dev-multi-lora always; Python strips it from every link",
+    "rotate_after": 1
+   },
    "sound_files": {},
    "sounds": [],
    "ui": {
@@ -9262,6 +10619,45 @@
    "picture_files": {},
    "pictures": [],
    "rotate": 0,
+   "runner": {
+    "calls": [
+     {
+      "endpoint": "lucataco/flux-dev-multi-lora",
+      "payload": {
+       "aspect_ratio": "21:9",
+       "disable_safety_checker": false,
+       "guidance_scale": 10.0,
+       "hf_loras": [
+        "https://example.com/three.safetensors",
+        "https://civitai.com/api/download/models/456",
+        "https://huggingface.co/alice/one",
+        "https://replicate.delivery/y/legacy.tar"
+       ],
+       "lora_scales": [
+        0.05,
+        1.0,
+        1.5,
+        0.0
+       ],
+       "num_inference_steps": 50,
+       "num_outputs": 1,
+       "output_format": "png",
+       "prompt": "TOK in the park"
+      },
+      "payload_json": "{\"aspect_ratio\": \"21:9\", \"disable_safety_checker\": false, \"guidance_scale\": 10.0, \"hf_loras\": [\"https://example.com/three.safetensors\", \"https://civitai.com/api/download/models/456\", \"https://huggingface.co/alice/one\", \"https://replicate.delivery/y/legacy.tar\"], \"lora_scales\": [0.05, 1.0, 1.5, 0.0], \"num_inference_steps\": 50, \"num_outputs\": 1, \"output_format\": \"png\", \"prompt\": \"TOK in the park\"}",
+      "provider": "replicate"
+     }
+    ],
+    "error": null,
+    "gets": [
+     {
+      "status": 200,
+      "url": "https://r.test/lora/out.png"
+     }
+    ],
+    "reason": "runner only (R3.13 fix round 1): a pasted http(s) link keeps its scheme, on flux-dev-lora unless the host is huggingface.co, hf.co or civitai.com, on flux-dev-multi-lora always; Python strips it from every link",
+    "rotate_after": 1
+   },
    "sound_files": {},
    "sounds": [],
    "ui": {
@@ -9366,6 +10762,41 @@
    "picture_files": {},
    "pictures": [],
    "rotate": 0,
+   "runner": {
+    "calls": [
+     {
+      "endpoint": "lucataco/flux-dev-multi-lora",
+      "payload": {
+       "aspect_ratio": "1:1",
+       "disable_safety_checker": false,
+       "guidance_scale": 3.5,
+       "hf_loras": [
+        "https://huggingface.co/alice/one",
+        "https://replicate.delivery/x/trained.tar"
+       ],
+       "lora_scales": [
+        0.8,
+        0.9
+       ],
+       "num_inference_steps": 28,
+       "num_outputs": 1,
+       "output_format": "png",
+       "prompt": "TOK in the park"
+      },
+      "payload_json": "{\"aspect_ratio\": \"1:1\", \"disable_safety_checker\": false, \"guidance_scale\": 3.5, \"hf_loras\": [\"https://huggingface.co/alice/one\", \"https://replicate.delivery/x/trained.tar\"], \"lora_scales\": [0.8, 0.9], \"num_inference_steps\": 28, \"num_outputs\": 1, \"output_format\": \"png\", \"prompt\": \"TOK in the park\"}",
+      "provider": "replicate"
+     }
+    ],
+    "error": null,
+    "gets": [
+     {
+      "status": 200,
+      "url": "https://r.test/lora/out.png"
+     }
+    ],
+    "reason": "runner only (R3.13 fix round 1): a pasted http(s) link keeps its scheme, on flux-dev-lora unless the host is huggingface.co, hf.co or civitai.com, on flux-dev-multi-lora always; Python strips it from every link",
+    "rotate_after": 1
+   },
    "sound_files": {},
    "sounds": [],
    "ui": {
@@ -9472,6 +10903,41 @@
    "picture_files": {},
    "pictures": [],
    "rotate": 0,
+   "runner": {
+    "calls": [
+     {
+      "endpoint": "lucataco/flux-dev-multi-lora",
+      "payload": {
+       "aspect_ratio": "1:1",
+       "disable_safety_checker": false,
+       "guidance_scale": 3.5,
+       "hf_loras": [
+        "https://huggingface.co/alice/one",
+        "https://replicate.delivery/x/trained.tar"
+       ],
+       "lora_scales": [
+        0.8,
+        0.9
+       ],
+       "num_inference_steps": 28,
+       "num_outputs": 1,
+       "output_format": "png",
+       "prompt": "TOK in the park"
+      },
+      "payload_json": "{\"aspect_ratio\": \"1:1\", \"disable_safety_checker\": false, \"guidance_scale\": 3.5, \"hf_loras\": [\"https://huggingface.co/alice/one\", \"https://replicate.delivery/x/trained.tar\"], \"lora_scales\": [0.8, 0.9], \"num_inference_steps\": 28, \"num_outputs\": 1, \"output_format\": \"png\", \"prompt\": \"TOK in the park\"}",
+      "provider": "replicate"
+     }
+    ],
+    "error": null,
+    "gets": [
+     {
+      "status": 200,
+      "url": "https://r.test/lora/rgba.png"
+     }
+    ],
+    "reason": "runner only (R3.13 fix round 1): a pasted http(s) link keeps its scheme, on flux-dev-lora unless the host is huggingface.co, hf.co or civitai.com, on flux-dev-multi-lora always; Python strips it from every link",
+    "rotate_after": 1
+   },
    "sound_files": {},
    "sounds": [],
    "ui": {
@@ -9592,6 +11058,45 @@
    "picture_files": {},
    "pictures": [],
    "rotate": 0,
+   "runner": {
+    "calls": [
+     {
+      "endpoint": "lucataco/flux-dev-multi-lora",
+      "payload": {
+       "aspect_ratio": "1:1",
+       "disable_safety_checker": false,
+       "guidance_scale": 3.5,
+       "hf_loras": [
+        "https://example.com/three.safetensors",
+        "https://civitai.com/api/download/models/456",
+        "https://huggingface.co/alice/one",
+        "https://replicate.delivery/y/legacy.tar"
+       ],
+       "lora_scales": [
+        0.6,
+        0.7,
+        0.8,
+        0.9
+       ],
+       "num_inference_steps": 28,
+       "num_outputs": 1,
+       "output_format": "png",
+       "prompt": "TOK in the park"
+      },
+      "payload_json": "{\"aspect_ratio\": \"1:1\", \"disable_safety_checker\": false, \"guidance_scale\": 3.5, \"hf_loras\": [\"https://example.com/three.safetensors\", \"https://civitai.com/api/download/models/456\", \"https://huggingface.co/alice/one\", \"https://replicate.delivery/y/legacy.tar\"], \"lora_scales\": [0.6, 0.7, 0.8, 0.9], \"num_inference_steps\": 28, \"num_outputs\": 1, \"output_format\": \"png\", \"prompt\": \"TOK in the park\"}",
+      "provider": "replicate"
+     }
+    ],
+    "error": null,
+    "gets": [
+     {
+      "status": 200,
+      "url": "https://r.test/lora/out.png"
+     }
+    ],
+    "reason": "runner only (R3.13 fix round 1): a pasted http(s) link keeps its scheme, on flux-dev-lora unless the host is huggingface.co, hf.co or civitai.com, on flux-dev-multi-lora always; Python strips it from every link",
+    "rotate_after": 1
+   },
    "sound_files": {},
    "sounds": [],
    "ui": {
@@ -9712,6 +11217,45 @@
    "picture_files": {},
    "pictures": [],
    "rotate": 1,
+   "runner": {
+    "calls": [
+     {
+      "endpoint": "lucataco/flux-dev-multi-lora",
+      "payload": {
+       "aspect_ratio": "1:1",
+       "disable_safety_checker": false,
+       "guidance_scale": 3.5,
+       "hf_loras": [
+        "https://replicate.delivery/y/legacy.tar",
+        "https://huggingface.co/alice/one",
+        "https://civitai.com/api/download/models/456",
+        "https://example.com/three.safetensors"
+       ],
+       "lora_scales": [
+        0.9,
+        0.8,
+        0.7,
+        0.6
+       ],
+       "num_inference_steps": 28,
+       "num_outputs": 1,
+       "output_format": "png",
+       "prompt": "TOK in the park"
+      },
+      "payload_json": "{\"aspect_ratio\": \"1:1\", \"disable_safety_checker\": false, \"guidance_scale\": 3.5, \"hf_loras\": [\"https://replicate.delivery/y/legacy.tar\", \"https://huggingface.co/alice/one\", \"https://civitai.com/api/download/models/456\", \"https://example.com/three.safetensors\"], \"lora_scales\": [0.9, 0.8, 0.7, 0.6], \"num_inference_steps\": 28, \"num_outputs\": 1, \"output_format\": \"png\", \"prompt\": \"TOK in the park\"}",
+      "provider": "replicate"
+     }
+    ],
+    "error": null,
+    "gets": [
+     {
+      "status": 200,
+      "url": "https://r.test/lora/out.png"
+     }
+    ],
+    "reason": "runner only (R3.13 fix round 1): a pasted http(s) link keeps its scheme, on flux-dev-lora unless the host is huggingface.co, hf.co or civitai.com, on flux-dev-multi-lora always; Python strips it from every link",
+    "rotate_after": 0
+   },
    "sound_files": {},
    "sounds": [],
    "ui": {

@@ -16,7 +16,9 @@
  * are ported here, line for line (`_is_replicate_model_ref`,
  * `_bare_owner_model`, `_replicate_model_to_lora_ref`, `_normalize_lora_ref`,
  * `_multilora_collect`, and nodes_replicate.py `_fold_prompt_in`), so the
- * hosted rule (ruling (i)) reads a reference exactly as the node does. What
+ * hosted rule (ruling (i)) reads a reference exactly as the node does (the
+ * runner's own reading of a pasted link, `runnerLoraLink`, is fix round 1's
+ * deliberate deviation). What
  * reads a sidecar file lives on the server (server/runner/loraFiles.ts).
  *
  * Pure; relative imports only.
@@ -121,6 +123,38 @@ export function normalizeLoraRef(value: string): string {
   return ref
 }
 
+/** The hosts whose pasted links flux-dev-lora reads without their scheme (its `lora_weights` forms). */
+const SCHEMELESS_HOSTS = ['huggingface.co/', 'hf.co/', 'civitai.com/']
+const SCHEME_RE = /^https?:\/\//i
+
+/**
+ * A pasted LoRA link as the RUNNER sends it (R3.13 fix round 1, a deliberate
+ * deviation from Python, runner only; the ComfyUI path keeps Python's).
+ * Python's `_normalize_lora_ref` strips the scheme from ANY link, although
+ * its own docstring says "for known hosts": `https://cdn.x/w.safetensors`
+ * goes out as `cdn.x/w.safetensors`, which flux-dev-lora reads as a
+ * Replicate model address and flux-dev-multi-lora (a "Huggingface path, or
+ * URL") as neither. So:
+ *  - Flux Dev + LoRA (flux-dev-lora): the scheme is stripped only for
+ *    huggingface.co, hf.co and civitai.com (then hf.co → huggingface.co, as
+ *    Python); a link to any other host keeps its `https://`.
+ *  - Flux Dev + LoRAs (flux-dev-multi-lora): a pasted http(s) link is sent as
+ *    pasted (stripped of blanks only).
+ *  - A link with no scheme is read exactly as Python reads it.
+ * A link that keeps its scheme is never looked up on HuggingFace (the look-up
+ * leaves full URLs alone). The fixture records Python's own requests and,
+ * beside them, Python's with this rule (`runner`), so the spec shows each
+ * case where the two differ.
+ */
+export function runnerLoraLink(classType: LoraClass, value: string): string {
+  const s = pyStrip(value ?? '')
+  const m = SCHEME_RE.exec(s)
+  if (!m) return normalizeLoraRef(s)
+  if (classType === FLUX_MULTI_LORA_CLASS) return s
+  const rest = s.slice(m[0].length).toLowerCase()
+  return SCHEMELESS_HOSTS.some(h => rest.startsWith(h)) ? normalizeLoraRef(s) : s
+}
+
 /** Where `_autodetect_huggingface` (nodes_replicate.py:162-192) leaves a reference alone: blank, no '/', or a full URL / explicit host. */
 export function huggingfaceLookupRepo(value: string): string | null {
   const ref = pyStrip(value ?? '')
@@ -203,13 +237,24 @@ export function isPublicLoraLink(classType: LoraClass, value: string): boolean {
   const ref = normalizeLoraRef(value)
   const low = ref.toLowerCase()
   if (low.startsWith('huggingface.co/') || low.startsWith('civitai.com/')) return true
-  const path = low.split(/[?#]/)[0]!
-  if (path.endsWith('.safetensors') && path.includes('/')) return true
+  // A .safetensors file only as a real https link with a host (fix round 1): a string with no scheme
+  // shaped like `owner/model/x.safetensors` is a Replicate model address to flux-dev-lora.
+  if (isHttpsSafetensors(value)) return true
   if (classType === FLUX_MULTI_LORA_CLASS) {
     const parts = ref.split('/')
     return parts.length === 2 && parts.every(p => p && !p.includes('.') && !p.includes(':'))
   }
   return false
+}
+
+/** An `https://<host>/…` link whose path ends in `.safetensors` (the host has a dot; no user info). */
+export function isHttpsSafetensors(value: string): boolean {
+  const s = pyStrip(value ?? '')
+  if (!/^https:\/\//i.test(s)) return false
+  let u: URL
+  try { u = new URL(s) }
+  catch { return false }
+  return u.protocol === 'https:' && u.hostname.includes('.') && !u.username && !u.password && u.pathname.toLowerCase().endsWith('.safetensors')
 }
 
 /**
@@ -276,7 +321,7 @@ export function fluxDevLoraSure(inputs: Record<string, unknown>): boolean {
 /**
  * How many distinct LoRAs Flux Dev + LoRAs may stack, for its price: a slot
  * counts when its link or picker is set (a wired one too); two slots with the
- * same link (as the node reads it) or the same picker count once. With two
+ * same link (as the runner sends it) or the same picker count once. With two
  * or more, the node may call twice (the reload retry, ruling (g)).
  */
 export function multiLoraCount(inputs: Record<string, unknown>): number {
@@ -285,7 +330,9 @@ export function multiLoraCount(inputs: Record<string, unknown>): number {
     const url = inputs[s.url]
     const name = inputs[s.name]
     if (isLink(url) || isLink(name)) seen.add(`wired:${i}`)
-    else if (pyStrip(str(url))) seen.add(`url:${normalizeLoraRef(str(url))}`)
+    // Keyed by the link as the runner sends it (before the look-up, which is cached per node run):
+    // two slots that count once here are always one LoRA at run time.
+    else if (pyStrip(str(url))) seen.add(`url:${runnerLoraLink(FLUX_MULTI_LORA_CLASS, str(url))}`)
     else if (namesLora(name)) seen.add(`name:${name}`)
   }
   return seen.size

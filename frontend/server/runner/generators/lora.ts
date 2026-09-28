@@ -33,7 +33,7 @@ import { isLink } from '#shared/runner/graph'
 import { pyFloatOf, pyIntOf, pyStrip } from '#shared/runner/pyText'
 import {
   FLUX_DEV_LORA_SLUG, FLUX_LORA_CLASS, fluxLoraGuidanceProblem, FLUX_LORA_STEPS, FLUX_MULTI_LORA_SLUG, LORA_LOADED_MARKER, MULTI_LORA_NEEDS_LORA, MULTI_LORA_SLOTS,
-  bareOwnerModel, foldPromptIn, huggingfaceLookupRepo, isReplicateModelRef, multiloraCollect, normalizeLoraRef, replicateModelToLoraRef,
+  FLUX_MULTI_LORA_CLASS, bareOwnerModel, foldPromptIn, huggingfaceLookupRepo, isReplicateModelRef, multiloraCollect, replicateModelToLoraRef, runnerLoraLink,
 } from '#shared/runner/lora'
 import type { PyJson } from '#shared/runner/pyJson'
 import { paidCallUsd } from '#shared/pricing/paidRates'
@@ -47,7 +47,7 @@ import { firstOutputUrl } from './repair'
 
 export { resolveTrainedModel } from '../loraFiles'
 export {
-  bareOwnerModel, foldPromptIn, isReplicateModelRef, multiloraCollect, normalizeLoraRef, replicateModelToLoraRef,
+  bareOwnerModel, foldPromptIn, isReplicateModelRef, multiloraCollect, normalizeLoraRef, replicateModelToLoraRef, runnerLoraLink,
 } from '#shared/runner/lora'
 
 /** Python raises "Replicate returned no output" after the call: plain words. */
@@ -81,20 +81,28 @@ export function __setHuggingFaceLookupForTests(fn: HuggingFaceLookup | null): vo
   huggingFaceLookup = fn ?? safeHuggingFaceLookup
 }
 
+/** The look-ups of one node run, by `owner/model` (fix round 1): each asked once, so every slot naming it reads the same answer. */
+export type HuggingFaceLookups = Map<string, Promise<boolean>>
+
 /**
  * `_autodetect_huggingface` (nodes_replicate.py:162-192): a bare reference
  * whose `owner/model` huggingface.co knows is sent as `huggingface.co/<ref>`;
- * anything else (and any failure of the look-up) as it is, stripped.
+ * anything else (and any failure of the look-up) as it is, stripped. With
+ * `cache` (one node run's), each `owner/model` is asked once: a look-up that
+ * would flake between two slots naming the same LoRA can't split it in two,
+ * so the node stacks the LoRAs its price counted (Python asks per slot).
  */
-export async function autodetectHuggingface(ref: string, o: { hosted: boolean }): Promise<string> {
+export async function autodetectHuggingface(ref: string, o: { hosted: boolean }, cache?: HuggingFaceLookups): Promise<string> {
   const stripped = pyStrip(ref ?? '')
   const repo = huggingfaceLookupRepo(stripped)
   if (!repo) return stripped
-  try {
-    if (await huggingFaceLookup(repo, o)) return `huggingface.co/${stripped}`
+  const ask = () => huggingFaceLookup(repo, o).catch(() => false) // Python: `except Exception: pass`
+  let found = cache?.get(repo)
+  if (!found) {
+    found = ask()
+    cache?.set(repo, found)
   }
-  catch { /* Python: `except Exception: pass` */ }
-  return stripped
+  return (await found) ? `huggingface.co/${stripped}` : stripped
 }
 
 // ── The order toggle (ruling (g)): the runner's own, process-wide ──
@@ -143,7 +151,7 @@ export type SidecarReader = (name: string) => Promise<LoraSidecar | null>
  * flux-dev-lora (null: none). The sidecar is read only where Python reads it.
  */
 export async function resolveFluxLoraPlan(
-  name: unknown, url: unknown, read: SidecarReader, o: { hosted: boolean },
+  name: unknown, url: unknown, read: SidecarReader, o: { hosted: boolean }, cache: HuggingFaceLookups = new Map(),
 ): Promise<{ trainedModel: string, loraWeights: null } | { trainedModel: null, loraWeights: string | null }> {
   const link = pyStrip(typeof url === 'string' ? url : '')
   if (link && isReplicateModelRef(link)) return { trainedModel: bareOwnerModel(link), loraWeights: null }
@@ -152,9 +160,10 @@ export async function resolveFluxLoraPlan(
   const sidecar = async () => (meta === undefined ? (meta = await read(picked)) : meta)
   const trained = link ? null : resolveTrainedModel(await sidecar())
   if (trained) return { trainedModel: trained, loraWeights: null }
-  const ref: PyJson | null = normalizeLoraRef(link) || resolveLoraUrl(await sidecar())
+  // The link as the runner sends it (runnerLoraLink: fix round 1's deviation; Python: `_normalize_lora_ref`).
+  const ref: PyJson | null = runnerLoraLink(FLUX_LORA_CLASS, link) || resolveLoraUrl(await sidecar())
   if (!pyJsonTruthy(ref ?? null)) return { trainedModel: null, loraWeights: null }
-  return { trainedModel: null, loraWeights: await autodetectHuggingface(sidecarText(ref ?? undefined), o) }
+  return { trainedModel: null, loraWeights: await autodetectHuggingface(sidecarText(ref ?? undefined), o, cache) }
 }
 
 // ── A widget as ComfyUI hands it to execute ──
@@ -239,13 +248,20 @@ export function multiLoraPrompt(inputs: Record<string, unknown>): string {
   return style ? pyStrip(`${style} ${prompt}`) : prompt
 }
 
-/** Each slot's LoRA as Python resolves it (:895-907): its link (normalised, looked up), else its picked LoRA's weights. */
-export async function multiLoraSlots(inputs: Record<string, unknown>, read: SidecarReader, o: { hosted: boolean }): Promise<{ loras: string[], scales: number[] }> {
+/**
+ * Each slot's LoRA as Python resolves it (:895-907): its link (as the runner
+ * sends it, `runnerLoraLink`: a pasted http(s) link unstripped, fix round 1;
+ * otherwise normalised and looked up, each `owner/model` once per run), else
+ * its picked LoRA's weights.
+ */
+export async function multiLoraSlots(
+  inputs: Record<string, unknown>, read: SidecarReader, o: { hosted: boolean }, cache: HuggingFaceLookups = new Map(),
+): Promise<{ loras: string[], scales: number[] }> {
   const resolved: (readonly [string | null, number])[] = []
   for (const s of MULTI_LORA_SLOTS) {
     const link = pyStrip(text(inputs, s.url, ''))
     const ref = link
-      ? await autodetectHuggingface(normalizeLoraRef(link), o)
+      ? await autodetectHuggingface(runnerLoraLink(FLUX_MULTI_LORA_CLASS, link), o, cache)
       : resolveLoraWeightsUrl(await read(text(inputs, s.name, '[None]')))
     resolved.push([ref, float(inputs, s.scale, s.def)] as const)
   }
@@ -311,12 +327,16 @@ function multiCallUsd(inputs: Record<string, unknown>): number {
 const sameList = (a: unknown, b: readonly unknown[]) => Array.isArray(a) && a.length === b.length && a.every((x, i) => x === b[i])
 
 /** The node's plan. `read`: the sidecar reader (tests pass their own). */
-export async function planLora(ctx: PlanContext, read: SidecarReader = readLoraSidecar): Promise<NodePlan> {
+export async function planLora(ctx: PlanContext, reader?: SidecarReader): Promise<NodePlan> {
   const node = ctx.prompt[ctx.nodeId]!
   const inputs = node.inputs ?? {}
   const o = { hosted: !!ctx.hosted }
+  // Hosted never reads a sidecar (ruling (i)): the reader refuses there itself, whatever the caller checked.
+  const read: SidecarReader = reader ?? (name => readLoraSidecar(name, o))
+  // One node run's HuggingFace look-ups, each `owner/model` asked once.
+  const lookups: HuggingFaceLookups = new Map()
   if (node.class_type === FLUX_LORA_CLASS) {
-    const plan = await resolveFluxLoraPlan(inputs.lora_name, inputs.lora_url, read, o)
+    const plan = await resolveFluxLoraPlan(inputs.lora_name, inputs.lora_url, read, o, lookups)
     const { endpoint, payload } = fluxLoraInput(inputs, plan, await imageOf(ctx, inputs))
     // A guidance flux-dev-lora's schema refuses (Python sends it; Replicate refuses the request): before the call.
     const tooHigh = endpoint === FLUX_DEV_LORA_SLUG ? fluxLoraGuidanceProblem(inputs) : null
@@ -329,7 +349,7 @@ export async function planLora(ctx: PlanContext, read: SidecarReader = readLoraS
       uiFor: files => ({ images: files, animated: [false] }),
     }
   }
-  const { loras, scales } = await multiLoraSlots(inputs, read, o)
+  const { loras, scales } = await multiLoraSlots(inputs, read, o, lookups)
   if (!loras.length) throw new Error(MULTI_LORA_NEEDS_LORA)
   const image = await imageOf(ctx, inputs)
   const usd = multiCallUsd(inputs)

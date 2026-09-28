@@ -36,7 +36,7 @@ import { __setInputUploadsEngineRootForTests } from '~~/server/utils/inputUpload
 import { PAID_TEXT_INPUTS, extraPromptTexts, stageEstimate } from '~~/server/runner/metering'
 import { planNode, type NodePlan, type PipelineIO } from '~~/server/runner/executors'
 import {
-  LORA_NO_PICTURE, __setHuggingFaceLookupForTests, __setMultiLoraRotationForTests, autodetectHuggingface, loraWeightsLoaded, multiLoraRotation,
+  LORA_NO_PICTURE, __setHuggingFaceLookupForTests, multiLoraSlots, runnerLoraLink, __setMultiLoraRotationForTests, autodetectHuggingface, loraWeightsLoaded, multiLoraRotation,
 } from '~~/server/runner/generators/lora'
 import { LORA_NOT_LISTED, LORA_SIDECAR_MAX_BYTES, LORA_SIDECAR_TOO_LARGE, LORA_SIDECAR_UNREADABLE, loraStartProblem, readLoraSidecar } from '~~/server/runner/loraFiles'
 import { RUNNER_ROUTES } from '~~/server/runner/generators/twins'
@@ -57,7 +57,16 @@ interface Catalogue {
   collect: { resolved: [string | null, number][]; out: [string[], number[]] }[]
   fold: { prompt: string; prompt_in: string; out: string }[]
 }
-type LoraCase = PaidCase & { rotate?: number }
+/**
+ * `runner` (fix round 1): the same execute with the runner's pasted-link rule
+ * (#shared/runner/lora runnerLoraLink) in place of `_normalize_lora_ref`,
+ * written by the fixture script only where it changes what is sent or looked
+ * up — the runner's deliberate deviation from Python, case by case.
+ */
+interface RunnerDeviation { calls: PaidCase['calls']; gets: NonNullable<PaidCase['gets']>; error: PaidCase['error'] | null; rotate_after: number; reason: string }
+type LoraCase = PaidCase & { rotate?: number; runner?: RunnerDeviation }
+/** What the runner is held to: Python's case, or its deviation where the fixture records one. */
+const ran = (c: LoraCase): LoraCase => (c.runner ? { ...c, calls: c.runner.calls, gets: c.runner.gets, error: c.runner.error ?? undefined } : c)
 const FIXTURE = JSON.parse(readFileSync(join(__dirname, 'fixtures', 'runner-paid-lora.json'), 'utf8')) as { cases: LoraCase[]; loras: Record<string, string | null>; catalogue: Catalogue }
 const CASES = FIXTURE.cases
 const START = { workflow: null, canvasId: null, projectUuid: null, projectName: null }
@@ -266,7 +275,8 @@ describe('replicate_refs.py, ported line for line', () => {
 })
 
 describe('every fixture case: what Python sends and returns', () => {
-  it.each(CASES.map(c => [c.name, c] as const))('%s', async (_n, c) => {
+  it.each(CASES.map(c => [c.name, c] as const))('%s', async (_n, py) => {
+    const c = ran(py)
     const seen: string[] = []
     __setHuggingFaceLookupForTests(hfFrom(c, seen))
     if (c.rotate !== undefined) __setMultiLoraRotationForTests(c.rotate as 0 | 1)
@@ -351,6 +361,57 @@ describe('every fixture case: what Python sends and returns', () => {
   })
 })
 
+describe('the runner\'s deliberate deviation: pasted links keep their scheme (fix round 1)', () => {
+  const deviating = CASES.filter(c => c.runner)
+
+  it('runnerLoraLink: the scheme kept but for huggingface.co, hf.co and civitai.com on flux-dev-lora; always on the multi node; no scheme, as Python', () => {
+    const one = 'FluxLoRARemoteNode' as const
+    const many = 'FluxMultiLoRARemoteNode' as const
+    expect(runnerLoraLink(one, ' https://cdn.x.test/w.safetensors ')).toBe('https://cdn.x.test/w.safetensors')
+    expect(runnerLoraLink(one, 'HTTP://x.test/a')).toBe('HTTP://x.test/a')
+    expect(runnerLoraLink(one, 'https://replicate.com/a/b')).toBe('https://replicate.com/a/b')
+    expect(runnerLoraLink(one, 'https://huggingface.co.evil.test/a/b')).toBe('https://huggingface.co.evil.test/a/b')
+    expect(runnerLoraLink(one, 'https://HuggingFace.co/a/b')).toBe('HuggingFace.co/a/b')
+    expect(runnerLoraLink(one, 'HTTPS://hf.co/a/b')).toBe('huggingface.co/a/b')
+    expect(runnerLoraLink(one, 'https://civitai.com/api/download/models/1')).toBe('civitai.com/api/download/models/1')
+    expect(runnerLoraLink(many, ' https://huggingface.co/a/b ')).toBe('https://huggingface.co/a/b')
+    expect(runnerLoraLink(many, 'https://hf.co/a/b')).toBe('https://hf.co/a/b')
+    for (const cls of [one, many]) {
+      for (const r of ['hf.co/a/b', 'a/b', ' owner/model/x ', 'huggingface.co/a/b', 'ftp://a/b', '']) expect(runnerLoraLink(cls, r), r).toBe(normalizeLoraRef(r))
+    }
+  })
+
+  it('differs from Python only where a pasted http(s) link would lose its scheme, and only in the LoRA list and the look-ups', () => {
+    expect(deviating.length).toBe(39)
+    for (const c of deviating) {
+      expect(c.runner!.reason, c.name).toMatch(/runner only \(R3\.13 fix round 1\)/)
+      const links = Object.entries(c.widgets).filter(([k, v]) => /url$/.test(k) && typeof v === 'string' && /^\s*https?:\/\//i.test(v)).map(([, v]) => (v as string).trim())
+      expect(links.length, c.name).toBeGreaterThan(0)
+      // The same calls (a repeat that collapses differently may change the count of LoRAs, never the calls' other settings).
+      expect(c.runner!.calls.length, c.name).toBe(c.calls.length)
+      for (const [i, call] of c.runner!.calls.entries()) {
+        const strip = (p: Record<string, unknown>) => Object.fromEntries(Object.entries(p).filter(([k]) => !['lora_weights', 'hf_loras', 'lora_scales'].includes(k)))
+        expect(strip(call.payload), c.name).toEqual(strip(c.calls[i]!.payload))
+        // Every pasted link the runner sends keeps its scheme, as pasted.
+        const sent = ([] as unknown[]).concat(call.payload.lora_weights ?? call.payload.hf_loras ?? []) as string[]
+        for (const l of sent) if (/^https?:\/\//i.test(l) && !l.includes('replicate.delivery')) expect(links, `${c.name}: ${l}`).toContain(l)
+      }
+      // The look-ups the runner skips are those of links it keeps whole; it makes none Python doesn't.
+      for (const g of c.runner!.gets) expect(c.gets!.map(x => x.url), c.name).toContain(g.url)
+    }
+    // The single node: only hosts other than HuggingFace and CivitAI.
+    expect(deviating.filter(c => c.class_type === 'FluxLoRARemoteNode').map(c => c.name).sort())
+      .toEqual(['single · url http safetensors', 'single · url replicate.com url', 'single · url safetensors url'])
+    // Pricing is unchanged by it: each case is held as Python's LoRA count would have it (one call, or two with 2+ LoRAs).
+    for (const c of deviating) {
+      const credits = (priceNode(c.class_type, c.widgets) as { credits: number }).credits
+      if (c.class_type === 'FluxLoRARemoteNode') { expect(credits, c.name).toBe(8); continue }
+      const per = creditsForUsd(paidCallUsd({ endpoint: FLUX_MULTI_LORA_SLUG, steps: c.widgets.num_inference_steps as number })!)
+      expect(credits, c.name).toBe(per * ((c.calls[0]!.payload.hf_loras as string[]).length >= 2 ? 2 : 1))
+    }
+  })
+})
+
 describe('the reload retry and the order toggle (ruling (g))', () => {
   const two = caseNamed('multi · two slots · rotate 0 · loaded')
 
@@ -362,8 +423,8 @@ describe('the reload retry and the order toggle (ruling (g))', () => {
     __setMultiLoraRotationForTests(0)
     const a = await runPipeline(await planOf(first) as Extract<NodePlan, { kind: 'pipeline' }>, first)
     const b = await runPipeline(await planOf(second) as Extract<NodePlan, { kind: 'pipeline' }>, second)
-    expect(a.sent[0]!.payload.hf_loras).toEqual(first.calls[0]!.payload.hf_loras)
-    expect(b.sent[0]!.payload.hf_loras).toEqual(second.calls[0]!.payload.hf_loras)
+    expect(a.sent[0]!.payload.hf_loras).toEqual(ran(first).calls[0]!.payload.hf_loras)
+    expect(b.sent[0]!.payload.hf_loras).toEqual(ran(second).calls[0]!.payload.hf_loras)
     expect(b.sent[0]!.payload.hf_loras).toEqual([...(a.sent[0]!.payload.hf_loras as string[])].reverse())
   })
 
@@ -446,7 +507,8 @@ describe('the reload retry and the order toggle (ruling (g))', () => {
 
 describe('every calling case through the engine (cards and lora on)', () => {
   const calling = CASES.filter(c => c.calls.length && !c.error && !guidanceRefused(c))
-  it.each(calling.map(c => [c.name, c] as const))('%s — sent, saved and charged', async (_n, c) => {
+  it.each(calling.map(c => [c.name, c] as const))('%s — sent, saved and charged', async (_n, py) => {
+    const c = ran(py)
     const root = loraRoot()
     __setInputUploadsEngineRootForTests(root)
     __setHuggingFaceLookupForTests(hfFrom(c))
@@ -512,8 +574,12 @@ describe('prices (ruling (a))', () => {
       ['FluxMultiLoRARemoteNode', multi({ lora_a: '[None]' }), 10],
       ['FluxMultiLoRARemoteNode', multi({ num_inference_steps: 50 }), 32],
       ['FluxMultiLoRARemoteNode', multi({ num_inference_steps: ['x', 0] }), 32],
-      // The same link twice (as the node reads it) is one LoRA: no retry.
-      ['FluxMultiLoRARemoteNode', multi({ lora_a: '[None]', lora_a_url: 'hf.co/alice/one', lora_b_url: 'https://huggingface.co/alice/one' }), 10],
+      // The same link twice (as the runner sends it) is one LoRA: no retry.
+      ['FluxMultiLoRARemoteNode', multi({ lora_a: '[None]', lora_a_url: 'https://huggingface.co/alice/one', lora_b_url: ' https://huggingface.co/alice/one ' }), 10],
+      ['FluxMultiLoRARemoteNode', multi({ lora_a: '[None]', lora_a_url: 'hf.co/alice/one', lora_b_url: 'huggingface.co/alice/one' }), 10],
+      // Fix round 1: a pasted https link keeps its scheme on this node, so it and its scheme-less twin are two LoRAs at run time,
+      // and priced so (was 10 when the key stripped the scheme as Python does).
+      ['FluxMultiLoRARemoteNode', multi({ lora_a: '[None]', lora_a_url: 'hf.co/alice/one', lora_b_url: 'https://huggingface.co/alice/one' }), 20],
       ['FluxMultiLoRARemoteNode', multi({ lora_c_url: ['x', 0] }), 20],
     ]
     for (const [ct, inputs, credits] of want) {
@@ -550,6 +616,24 @@ describe('prices (ruling (a))', () => {
 })
 
 describe('the HuggingFace look-up (ruling (h))', () => {
+  it('is asked once per owner/model in one node run (fix round 1): a flaky look-up can\'t split one LoRA in two', async () => {
+    let asked = 0
+    __setHuggingFaceLookupForTests(async () => {
+      asked++
+      if (asked > 1) throw new Error('flaked')
+      return true
+    })
+    const inputs = { ...caseNamed('multi · bare refs').widgets, lora_a_url: 'alice/hf-lora', lora_b_url: ' alice/hf-lora ', lora_c_url: '', lora_d_url: 'alice/hf-lora/other' }
+    const got = await multiLoraSlots(inputs, async () => null, { hosted: false })
+    expect(asked).toBe(1)
+    expect(got.loras).toEqual(['huggingface.co/alice/hf-lora', 'huggingface.co/alice/hf-lora/other'])
+    // Priced as the run stacks it: the two identical links are one LoRA.
+    expect(multiLoraCount(inputs)).toBe(2)
+    // A new node run asks again.
+    await multiLoraSlots(inputs, async () => null, { hosted: false })
+    expect(asked).toBe(2)
+  })
+
   it('goes through the safe fetcher, 8 seconds, to huggingface.co\'s model API', async () => {
     const sf = vi.mocked(safeFetchModule.safeFetch)
     sf.mockResolvedValueOnce({ status: 200, contentType: 'application/json', data: new ArrayBuffer(2) })
@@ -602,6 +686,13 @@ describe('refusals before the hold, in plain words', () => {
       expect(hostedLoraProblem('FluxMultiLoRARemoteNode', { lora_a_url: url, lora_b: '[None]', lora_c: '[None]', lora_d: '[None]', lora_a: '[None]' }), url).toBeNull()
     }
     expect(hostedLoraProblem('FluxMultiLoRARemoteNode', { lora_a_url: 'alice/hf-lora', lora_a: '[None]' })).toBeNull()
+    // Fix round 1: a .safetensors file only as an https link with a host; scheme-less strings shaped like a model
+    // address (flux-dev-lora reads `owner/model[/version]` as a Replicate model), http, user info, no host: refused.
+    for (const url of ['owner/model/x.safetensors', 'owner/model.safetensors', 'owner/model:.safetensors', 'x.test/w.safetensors',
+      'http://x.test/w.safetensors', 'https://user@x.test/w.safetensors', 'https://localhost/w.safetensors', 'file:///w.safetensors', 'data:,w.safetensors']) {
+      expect(hostedLoraProblem('FluxLoRARemoteNode', { lora_name: '[None]', lora_url: url })?.message, url).toBe(LORA_LINK_NOT_PUBLIC)
+      expect(hostedLoraProblem('FluxMultiLoRARemoteNode', { lora_a: '[None]', lora_a_url: url })?.message, url).toBe(LORA_LINK_NOT_PUBLIC)
+    }
     expect(hostedLoraProblem('FluxLoRARemoteNode', { lora_url: 'alice/hf-lora/x/y', lora_name: '[None]' })?.message).toBe(LORA_LINK_NOT_PUBLIC)
   })
 
@@ -629,6 +720,27 @@ describe('refusals before the hold, in plain words', () => {
     // A name that isn't read (a link wins) must still be one ComfyUI lists, but its sidecar isn't measured.
     expect(await loraStartProblem(single({ lora_name: 'huge.safetensors', lora_url: 'hf.co/a/b' }))).toBeNull()
     await expect(readLoraSidecar('huge.safetensors')).rejects.toThrow(LORA_SIDECAR_TOO_LARGE)
+  })
+
+  it('hosted: the sidecar reader refuses a picked LoRA itself (fix round 1), and the start check never looks for its files', async () => {
+    await expect(readLoraSidecar('trained.safetensors', { hosted: true })).rejects.toThrow(LORA_BY_NAME_HOSTED)
+    expect(await readLoraSidecar('[None]', { hosted: true })).toBeNull()
+    expect((await loraStartProblem(single({ lora_name: 'trained.safetensors' }), { hosted: true }))?.message).toBe(LORA_BY_NAME_HOSTED)
+    // Hosted planning reads with the guard too, whatever the caller checked.
+    const c = caseNamed('single · name trained.safetensors')
+    await expect(planOf(c, true)).rejects.toThrow(LORA_BY_NAME_HOSTED)
+  })
+
+  it('the read is bounded by the cap (never the whole file)', async () => {
+    const root = loraRoot()
+    const big = join(root, 'models', 'loras', 'big.json')
+    writeFileSync(join(root, 'models', 'loras', 'big.safetensors'), '')
+    writeFileSync(big, `{"replicate_url": "x"}${' '.repeat(LORA_SIDECAR_MAX_BYTES)}`)
+    __setInputUploadsEngineRootForTests(root)
+    await expect(readLoraSidecar('big.safetensors')).rejects.toThrow(LORA_SIDECAR_TOO_LARGE)
+    const src = readFileSync(join(__dirname, '../../server/runner/loraFiles.ts'), 'utf8')
+    expect(src).not.toMatch(/fs\.readFile\(/)
+    expect(src).toMatch(/new Uint8Array\(max \+ 1\)/)
   })
 
   it('the refusals are plain words', () => {

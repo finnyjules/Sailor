@@ -1939,7 +1939,7 @@ export function createEngine(deps: EngineDeps) {
       const problem = requestProblems(p, { runner: true })[0] ?? (deps.hosted() ? hostedRequestProblems(p)[0] : undefined)
       if (problem) throw refuse(problem.message, 400, { nodeId: problem.nodeId, classType: problem.classType })
       // A LoRA picked by name (R3.13): one ComfyUI lists, its sidecar within its cap.
-      const lora = await loraStartProblem(p)
+      const lora = await loraStartProblem(p, { hosted: deps.hosted() })
       if (lora) throw refuse(lora.message, 400, { nodeId: lora.nodeId, classType: lora.classType })
     }
     // Fail closed on price, before anything is held: a provider node that
