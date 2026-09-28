@@ -40,3 +40,35 @@ describe.each(['ComfyGateNode.vue', 'ShaderEffectNode.vue', 'SubgraphIONode.vue'
     expect(t).not.toMatch(/rounded-xl border/)
   })
 })
+
+describe('the collapsed capsule wears the same glass as the card', () => {
+  const capsuleSrc = src('NodeCapsule.vue')
+  const capsuleStyle = capsuleSrc.slice(capsuleSrc.indexOf('<style'), capsuleSrc.lastIndexOf('</style>'))
+  const comfyNodeSrc = src('ComfyNode.vue')
+  const comfyNodeTpl = tpl(comfyNodeSrc)
+
+  it('the root rule has no opaque #1f1f1f background and no 13% border', () => {
+    expect(capsuleStyle).not.toMatch(/#1f1f1f/)
+    expect(capsuleStyle).not.toMatch(/rgba\(255,\s*255,\s*255,\s*0\.13\)/)
+  })
+
+  it('the root rule uses the shared glass tokens and a zoom-divided border', () => {
+    const rootRule = capsuleStyle.slice(capsuleStyle.indexOf('.node-capsule {'), capsuleStyle.indexOf('.node-capsule {') + 2000)
+    expect(rootRule).toMatch(/background:\s*var\(--node-glass-tint\)/)
+    expect(rootRule).toMatch(/border:\s*calc\(1px \/ var\(--canvas-zoom,\s*1\)\)\s*solid\s*var\(--node-edge\)/)
+    expect(rootRule).toMatch(/box-shadow:\s*var\(--node-shadow\)/)
+  })
+
+  it('the title is weight 600, matching the card header', () => {
+    expect(capsuleStyle).toMatch(/\.node-capsule__title\s*\{[\s\S]{0,300}font-weight:\s*600/)
+  })
+
+  it('hover lightens the glass instead of switching to an opaque grey', () => {
+    expect(capsuleStyle).not.toMatch(/\.node-capsule:hover\s*\{[\s\S]{0,200}background:\s*#262626/)
+  })
+
+  it('the capsule element in ComfyNode carries node-shell and the glass-blur binding', () => {
+    expect(comfyNodeTpl).toMatch(/<NodeCapsule[\s\S]{0,400}class="comfy-node node-shell"/)
+    expect(comfyNodeTpl).toMatch(/<NodeCapsule[\s\S]{0,600}:data-glass-blur="glass \|\| undefined"/)
+  })
+})

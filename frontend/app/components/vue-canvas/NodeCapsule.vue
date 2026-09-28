@@ -101,7 +101,14 @@ function onKeydown(e: KeyboardEvent) {
   width: var(--capsule-w, 260px);
   gap: 8px;
   padding: 10px;
-  border: 1px solid rgba(255, 255, 255, 0.13);
+  /* Same glass as the expanded card (.node-shell, node-surfaces.css): one even
+     border divided by the canvas zoom, the shared tint and shadow. Expanding
+     used to swap a flat opaque chip for translucent glass mid-animation — two
+     different surfaces pretending to be one object. The capsule also carries
+     node-shell itself (ComfyNode.vue's <NodeCapsule> element) so real blur
+     (data-glass-blur) applies collapsed too; this rule only needs the tokens
+     the shell would otherwise set, since scoped styles here win on specificity. */
+  border: calc(1px / var(--canvas-zoom, 1)) solid var(--node-edge);
   /* 16, to sit 10px of padding outside the 6px tile/action inside it. 6px is the
      app-wide radius for every input and button, and this shell was set to suit it.
      (History: 13 = 7 + 6, then 16/8, then 12/4 which read too sharp, then 14/6, now
@@ -110,17 +117,18 @@ function onKeydown(e: KeyboardEvent) {
      through the expand. */
   border-radius: 16px;
   text-align: left;
-  background: #1f1f1f;
-  box-shadow: 0 3px 12px rgba(0, 0, 0, 0.4);
+  background: var(--node-glass-tint);
+  box-shadow: var(--node-shadow);
   cursor: pointer;
   transition-property: background-color, border-color, box-shadow;
   transition-duration: 0.16s;
   transition-timing-function: cubic-bezier(0.2, 0, 0, 1);
 }
 /* The whole capsule is the click target, so the whole capsule has to look
-   live — the surface lifts and the hint appears. */
+   live — the surface lifts and the hint appears. Lightens the glass rather
+   than switching to an opaque grey, so hover never breaks the translucency. */
 .node-capsule:hover {
-  background: #262626;
+  background: color-mix(in srgb, #ffffff 4%, var(--node-glass-tint));
   border-color: rgba(255, 255, 255, 0.22);
   box-shadow: 0 6px 18px rgba(0, 0, 0, 0.5);
 }
@@ -160,6 +168,7 @@ function onKeydown(e: KeyboardEvent) {
 .node-capsule__title {
   grid-row: 1;
   font-size: 12.5px;
+  font-weight: 600;
   /* 26px so the text centres in the same band as the tile beside it and the
      card header's title above it. */
   line-height: 26px;

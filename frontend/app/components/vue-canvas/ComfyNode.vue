@@ -1692,7 +1692,8 @@ watch(previewImages, (urls) => {
   <NodeCapsule
     v-if="isCapsule"
     key="capsule"
-    class="comfy-node"
+    class="comfy-node node-shell"
+    :data-glass-blur="glass || undefined"
     :title="displayTitle"
     :readout="capsuleReadout"
     :icon="capsuleIcon"
