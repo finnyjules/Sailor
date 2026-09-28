@@ -908,7 +908,11 @@ export function requestProblems(prompt: ApiPrompt, opts: { runner?: boolean } = 
       // elements (Python doesn't know about them), so this is opts.runner-only.
       if (opts.runner && id === 'kling-v3' && !isLink(inputs.model_options)) {
         const adv = parseJsonObject(inputs.model_options)
-        const p = klingElementsProblem(adv, isLink(inputs.image) || !!firstFrame(null, adv))
+        // The first frame Kling 3's builder uses: the linked picture alone (its `image`; an `image_url`
+        // in the options is not read), so a last frame or elements beside only an `image_url` are
+        // refused here, before the hold, as the builder refuses them (KLING_LAST_FRAME_NEEDS_FIRST,
+        // R3.11 fix round 1). A shot-directed shot's `image_url` is its first frame: its own branch.
+        const p = klingElementsProblem(adv, isLink(inputs.image))
         if (p) out.push({ nodeId, classType: ct, input: 'model_options', message: p })
       }
       // Veo 3.1 and Veo 3.1 Fast, headed for the runner (always taken by it when the runner is

@@ -39,7 +39,7 @@ import { predictedHoldPixels, startPictureSizes } from './repairSizes'
 import { isReusable, requestFingerprint } from './fingerprint'
 import { gen3dTextSent } from '#shared/runner/gen3d'
 import { assertFilesOwned, collectInputFiles, parseInputFileRef, type OwnershipCheck } from './inputs'
-import { shotRefFilenames } from './shotRefs'
+import { shotRefFilenames, shotRefSizeProblem } from './shotRefs'
 import { parseJsonObject } from './generators/opts'
 import { cardPictureFiles, cardPictureRefusal } from './cards/bakeReplay'
 import { handoffKey, handoffPngName, loaderHandoffBytes, loaderHandoffs, loaderSourceOf, type HandoffCaps, type LoaderHandoff, type LoaderSource } from './pictureHandoff'
@@ -1975,6 +1975,12 @@ export function createEngine(deps: EngineDeps) {
       assertOwned: fs => assertFilesOwned(fs, i.userId, deps.hosted(), deps.ownership),
     })
     if (tooLong) throw refuse(tooLong.message, 400, { nodeId: tooLong.nodeId, classType: tooLong.classType })
+    // A Film a shot's reference files go as their raw bytes (as Python sends them): one over its
+    // service's stated cap is refused now, before the hold (R3.11 fix round 1).
+    for (const p of prompts) {
+      const big = await shotRefSizeProblem(p, !!deps.backup?.().enabled, f => files.size(f))
+      if (big) throw refuse(big.message, 400, { nodeId: big.nodeId, classType: big.classType })
+    }
     // Media nodes (./nodeMedia.ts: sync-3 lip-sync, F22; Topaz video upscale,
     // F23): their files must be the caller's own (hosted), and the model must
     // be able to take them: read and measured now, before anything is held.

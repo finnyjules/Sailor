@@ -186,7 +186,7 @@ import { FLUX_2_RESOLUTIONS } from '#shared/pricing/imageSettings'
 import { falNanoBananaEdit } from './edit'
 import { HAPPYHORSE_11_ID, happyHorse11OnReplicate } from './happyHorse11'
 import { GROK_IMAGINE_VIDEO_15_ID, grokImagineVideo15OnReplicate } from './grokImagineVideo15'
-import { arOr, maybeSetSeed, optBool, optEnum, optStr } from './opts'
+import { arOr, maybeSetSeed, optBool, optEnum, optStr, optText } from './opts'
 import { ENHANCE_ENGINES, UPSCALE_ENGINES } from '#shared/runner/repair'
 import type { VideoBuildArgs } from './types'
 import { KLING_LAST_FRAME_NEEDS_FIRST } from './video'
@@ -418,7 +418,7 @@ export function klingV3Fal({ prompt, aspectRatio, duration, image, adv }: VideoB
     duration: String(durOr([5, 10, 15], duration)),
     generate_audio: optBool(adv, 'generate_audio', true),
     // Always sent: fal's own default is not empty (see above).
-    negative_prompt: optStr(adv, 'negative_prompt', ''),
+    negative_prompt: optText(adv, 'negative_prompt'),
   }
   if (image) {
     inp.start_image_url = image
@@ -452,7 +452,7 @@ export function pixverseV6Fal({ prompt, aspectRatio, duration, seed, image, adv 
     resolution: optEnum({ resolution: optStr(adv, 'resolution', '720p').toLowerCase() }, 'resolution', PIXVERSE_QUALITIES, '720p'),
     generate_audio_switch: optBool(adv, 'generate_audio', true),
   }
-  const neg = optStr(adv, 'negative_prompt', '')
+  const neg = optText(adv, 'negative_prompt')
   if (neg) inp.negative_prompt = neg
   if (image) inp.image_url = image
   else inp.aspect_ratio = arOr(PIXVERSE_AR, aspectRatio, '16:9')

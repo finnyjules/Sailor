@@ -1,4 +1,5 @@
 import { gen3dTextSent } from '../../shared/runner/gen3d'
+import { videoOptionTexts } from '../../shared/runner/videoOptionTexts'
 
 /**
  * Pull the human-authored prompt text out of a ComfyUI API-format graph for
@@ -19,6 +20,8 @@ export function extractGraphPromptTexts(prompt: Record<string, { class_type: str
       // Multi-View's prompt is sent only on Rodin, or a wired engine (R3.9 fix round 2): judged only then.
       if (PROMPT_INPUT_NAMES.has(name) && typeof value === 'string' && value.trim() && gen3dTextSent(node.class_type, name, inputs)) parts.push(value)
     }
+    // A video node's own words inside its options (a negative prompt), which its builder sends (R3.11 fix round 1).
+    parts.push(...videoOptionTexts(node.class_type, inputs))
   }
   return parts
 }

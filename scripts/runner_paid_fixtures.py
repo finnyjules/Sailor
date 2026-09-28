@@ -68,7 +68,9 @@ Groups:
                phrases — shot_presets.py itself: every preset in every
                          dialect, each override option on its own and all
                          five at once, an unknown preset, dialect_for_model
-               cases   — capture_first_call on FilmShotNode: every preset ×
+               cases   — capture_first_call on FilmShotNode (fix round 1: every
+                         `__shot_directed` value Python's bool() reads, and a
+                         negative prompt in the options): every preset ×
                          a Veo, a Hailuo and a standard model × a blank and a
                          spaced prompt; each override option on its own and
                          all five at once on the three; an unknown preset;
@@ -1724,6 +1726,17 @@ def film_shot_group() -> dict:
         for image in (False, True):
             case(f"model {model} \u00b7 {'with' if image else 'without'} image", image=image, preset="crane-reveal", model=model,
                  prompt="a lighthouse in a storm")
+    # R3.11 fix round 1: `__shot_directed` as Python's bool() reads it — truthy values other than
+    # true send the words alone (the runner leaves those to the engine), falsy ones the phrase.
+    for value in (True, 1, 2.5, "false", "no", [0], {"a": 1}, False, 0, 0.0, "", None, [], {}):
+        for model in ("veo-3.1", "hailuo-h3", "seedance-2.0", "kling-v3"):
+            for image in (False, True):
+                case(f"shot_directed {json.dumps(value)} \u00b7 {model} \u00b7 {'with' if image else 'without'} image", image=image,
+                     preset="orbit", model=model, prompt="  a heron  ", model_options=json.dumps({"__shot_directed": value}))
+    # A negative prompt in the options, on every model whose builder sends one.
+    for model in ("veo-3.1", "veo-3.1-fast", "kling-v3", "kling-v2.5-turbo-pro", "wan-2.7-t2v", "ltx-video", "pixverse-v6", "seedance-2.0"):
+        case(f"negative prompt \u00b7 {model}", preset="orbit", model=model, prompt="a heron",
+             model_options=json.dumps({"negative_prompt": "blurry, caf\u00e9 \u732b"}))
 
     runs: list = []
     with contextlib.redirect_stdout(io.StringIO()):

@@ -10,7 +10,7 @@
  * in the builder below; the Python path is legacy and unchanged.
  */
 import { RUNNER_REPLICATE_VIDEO_MODEL_IDS, RUNNER_VIDEO_MODEL_IDS } from '#shared/runner/eligibility'
-import { arOr, hasMediaExtras, maybeSetSeed, optBool, optEnum, optFloatIn, optIntIn, optStr, pyTruthy } from './opts'
+import { arOr, hasMediaExtras, maybeSetSeed, optBool, optEnum, optFloatIn, optIntIn, optStr, optText, pyTruthy } from './opts'
 import type { ReplicateVideoModelDesc, VideoBuildArgs, VideoModelDesc } from './types'
 
 /** video_models._dur_or: the value if supported, else the closest (first on a tie). */
@@ -110,7 +110,7 @@ function veo31({ prompt, aspectRatio, duration, seed, image, adv }: VideoBuildAr
     generate_audio: optBool(adv, 'generate_audio', true),
     auto_fix: optBool(adv, 'enhance_prompt', true),
   }
-  const neg = optStr(adv, 'negative_prompt', '')
+  const neg = optText(adv, 'negative_prompt')
   if (neg) inp.negative_prompt = neg
   if (image) inp.image_url = image
   else inp.aspect_ratio = arOr(VEO_AR, aspectRatio, '16:9')
@@ -207,7 +207,7 @@ function lowerEnum(adv: Record<string, unknown>, key: string, allowed: readonly 
 
 /** Python's `if neg := _opt_str(adv, "negative_prompt", ""): inp["negative_prompt"] = neg`. */
 function setNegative(inp: Record<string, unknown>, adv: Record<string, unknown>): void {
-  const neg = optStr(adv, 'negative_prompt', '')
+  const neg = optText(adv, 'negative_prompt')
   if (neg) inp.negative_prompt = neg
 }
 

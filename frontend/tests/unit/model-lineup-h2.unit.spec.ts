@@ -337,6 +337,8 @@ describe('grep guard: no node is created with a hard-coded model outside dev/', 
     // The inpaint route's own tiers, not a node's model widget.
     'server/api/inpaint/text2img.post.ts': ['flux-schnell'],
     'server/utils/inpaintFalInputs.ts': ['nano-banana-pro'],
+    // Film a shot's model list and its lip-sync model, named only to refuse it before the hold (R3.11).
+    'shared/runner/eligibility.ts': ['fabric-1.0'],
   }
 
   it('every model literal outside dev/ is on the list, and none of them is hidden or discontinued', () => {

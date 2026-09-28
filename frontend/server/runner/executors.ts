@@ -728,8 +728,9 @@ async function planNodeRequest(ctx: PlanContext): Promise<NodePlan> {
     // A preset shot (R3.11, family film-shot): the prompt is Python's
     // full_prompt, the camera phrase then the words (shotPresets.ts); its
     // `/view` links resolved the same way, but `image_url` stays in the
-    // options as Python's builders read it (Seedance's only); the first frame
-    // is the linked picture alone, as Python's `image`.
+    // options, where Python's builders read it (Seedance 2.0's and the Hailuo
+    // H3 builders' own fallback; the others ignore it); the first frame is the
+    // linked picture alone, as Python's `image`.
     case 'FilmShotNode': {
       // A linked picture that brought no file fails the node, as pictureUrl does; never a silent fallback.
       const f = linkedFirstFile('image')

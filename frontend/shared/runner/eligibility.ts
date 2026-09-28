@@ -1704,6 +1704,23 @@ export const FILM_SHOT_IMAGE_ONLY_MODELS: readonly string[] = ['wan-2.5-i2v-fast
 export const FILM_SHOT_LIP_SYNC_MODEL = 'fabric-1.0'
 
 /**
+ * A `__shot_directed` Python reads as shot-directed (`bool(advanced.pop(...))`:
+ * 1, "false", [0] …) that isn't exactly `true`, which isShotDirected asks for.
+ * Python sends the words alone; the runner takes neither path, so the shot
+ * stays with the engine (R3.11 fix round 1). Shot Director writes `true`.
+ */
+function shotDirectedOtherwise(inputs: Record<string, unknown>): boolean {
+  const raw = inputs.model_options
+  // Text Python's json reads and JSON.parse refuses (NaN, Infinity) naming the marker: left to the engine.
+  if (typeof raw === 'string' && raw.includes('__shot_directed')) {
+    try { JSON.parse(raw) }
+    catch { return true }
+  }
+  const o = modelOptions(raw)
+  return Object.prototype.hasOwnProperty.call(o, '__shot_directed') && o.__shot_directed !== true && pyTruthy(o.__shot_directed)
+}
+
+/**
  * Whether the runner takes a Film a shot on the preset path (R3.11): `film-shot`
  * on; the words, options, model and sound not wired; the preset and each
  * override one of Python's options (ComfyUI's own validation refuses any
@@ -1715,6 +1732,7 @@ export const FILM_SHOT_LIP_SYNC_MODEL = 'fabric-1.0'
 function presetShotTaken(inputs: Record<string, unknown>, families: ReadonlySet<RunnerFamily>): boolean {
   if (!familyOn('film-shot', families)) return false
   if (['prompt', 'model_options', 'model', 'audio'].some(k => isLink(inputs[k]))) return false
+  if (shotDirectedOtherwise(inputs)) return false
   if (!widgetValid(inputs, 'preset', { type: 'COMBO', required: true, options: SHOT_PRESET_IDS })) return false
   for (const o of SHOT_OVERRIDE_WIDGETS) {
     if (!widgetValid(inputs, o.widget, { type: 'COMBO', options: o.options })) return false

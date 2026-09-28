@@ -27,6 +27,7 @@ import {
   resolveShotRecipe, shotDialectForModel, type ShotDialect,
 } from '#shared/runner/shotPresets'
 import { priceNode } from '#shared/pricing/nodePrice'
+import { pyTruthy } from '#shared/runner/pyText'
 import { planNode, type NodePlan } from '~~/server/runner/executors'
 import { FILM_SHOT_LIP_SYNC_WORDS, FILM_SHOT_NEEDS_FRAME_WORDS, SEEDANCE_TOO_MUCH_VIDEO, SEEDANCE_UNMEASURED_REFERENCE, presetShotProblem, requestProblems } from '~~/server/runner/requestRules'
 import { nodeCredits, stageEstimate } from '~~/server/runner/metering'
@@ -34,6 +35,8 @@ import { BASE_RENDER_CREDITS } from '~~/server/utils/priceBook'
 import { extractGraphPromptTexts } from '~~/server/utils/graphPromptText'
 import { runnerReferenceProblems } from '~~/server/utils/graphInputSeconds'
 import type { OutputFile } from '~~/server/runner/types'
+import { SHOT_REF_CAPS, shotRefSizeProblem, shotRefTooLargeWords } from '~~/server/runner/shotRefs'
+import { KLING_LAST_FRAME_NEEDS_FIRST } from '~~/server/runner/generators/twins'
 
 interface PhraseCase { name: string; preset: string; overrides: Record<string, string>; dialect: ShotDialect; recipe_id: string; phrase: string }
 interface CallCase {
@@ -106,6 +109,14 @@ function pythonOptions(raw: unknown): Record<string, unknown> {
   return o
 }
 
+/** Whether Python's `bool(advanced.pop("__shot_directed", False))` reads this case as shot-directed. */
+function pythonDirected(c: { widgets: Record<string, unknown> }): boolean {
+  let raw: unknown
+  try { raw = JSON.parse(String(c.widgets.model_options)) }
+  catch { return false }
+  return !!raw && typeof raw === 'object' && !Array.isArray(raw) && pyTruthy((raw as Record<string, unknown>).__shot_directed)
+}
+
 /** The call of the plan that goes where Python's went: its first service, else its backup (Kling 3 and PixVerse v6 go to fal first). */
 function matchingCall(plan: ProviderPlan, py: NonNullable<CallCase['call']>) {
   if (plan.provider === py.provider && plan.endpoint === py.endpoint) return { provider: plan.provider, endpoint: plan.endpoint, payload: plan.payload }
@@ -165,7 +176,7 @@ describe('the phrase (shot_presets.py)', () => {
 })
 
 describe('every fixture case: the phrase and the request Python makes', () => {
-  const called = CASES.filter(c => c.call)
+  const called = CASES.filter(c => c.call && !pythonDirected(c))
 
   it.each(called.map(c => [c.name, c] as const))('%s', async (_n, c) => {
     const py = c.call!
@@ -200,6 +211,45 @@ describe('every fixture case: the phrase and the request Python makes', () => {
     const g = await planOf(video)
     expect({ provider: plan.provider, endpoint: plan.endpoint, payload: plan.payload, backup: plan.backup })
       .toEqual({ provider: g.provider, endpoint: g.endpoint, payload: g.payload, backup: g.backup })
+  })
+
+  it('`__shot_directed` as Python\'s bool() reads it (fix round 1): a truthy value other than true sends the words alone in Python, so the runner leaves it to the engine; a falsy one is a preset shot', () => {
+    const cases = CASES.filter(c => c.name.startsWith('shot_directed '))
+    expect(cases.length).toBe(14 * 4 * 2)
+    for (const c of cases) {
+      const directed = pythonDirected(c)
+      const exactlyTrue = JSON.parse(String(c.widgets.model_options)).__shot_directed === true
+      const p = promptOf(c)
+      if (directed) {
+        // Python: the words alone, stripped; no phrase.
+        expect(c.call!.payload.prompt ?? c.call!.payload.prompt_text, c.name).toBe('a heron')
+        if (!exactlyTrue) {
+          expect(runnerTakesNode(p, 'n', ON), c.name).toBe(false)
+          expect(runnerTakesNode(p, 'n', new Set<RunnerFamily>(RUNNER_FAMILIES)), c.name).toBe(false)
+          expect(nodesNeedingEngine(shown(c), { runnerOn: true, families: ON, titleOf: id => id }), c.name).toContain('n')
+        }
+        else {
+          // Exactly true: the shot-directed path (Task 4), on its own models only.
+          expect(runnerTakesNode(p, 'n', ON), c.name).toBe(['seedance-2.0', 'veo-3.1', 'kling-v3'].includes(String(c.widgets.model)))
+        }
+      }
+      else {
+        expect(runnerTakesNode(p, 'n', ON), c.name).toBe(true)
+        expect(String(c.call!.payload.prompt)).toContain(c.phrase!.phrase)
+      }
+    }
+    // The 32-case probe of the review: 1 and "false", 8 models, with and without a picture.
+    for (const model of ['seedance-2.0', 'veo-3.1', 'veo-3.1-fast', 'kling-v3', 'hailuo-h3', 'pixverse-v6', 'wan-2.7-t2v', 'kling-v2.5-turbo-pro']) {
+      for (const value of [1, 'false']) {
+        for (const pictures of [[], ['image']]) {
+          const w = { ...caseNamed('orbit · standard · blank prompt').widgets, model, prompt: 'a heron', model_options: JSON.stringify({ __shot_directed: value }) }
+          expect(runnerTakesNode(promptOf({ widgets: w, pictures }), 'n', ON), `${model} ${value}`).toBe(false)
+        }
+      }
+    }
+    // Text Python's json reads and JSON.parse doesn't, naming the marker: left to the engine.
+    const nan = { ...caseNamed('orbit · standard · blank prompt').widgets, model_options: '{"__shot_directed": NaN}' }
+    expect(runnerTakesNode(promptOf({ widgets: nan }), 'n', ON)).toBe(false)
   })
 
   it('the three Python refusals are refused before the hold, in plain words', () => {
@@ -480,4 +530,60 @@ describe('with film-shot off (rule 15)', () => {
     expect(graphs).toBeGreaterThanOrEqual(800)
     console.info(`film-shot families-off invariant: ${graphs} saved graphs, ${shots} Film a shot nodes`)
   }, 600_000)
+})
+
+describe('fix round 1: reference sizes and Kling 3\'s last frame, before the hold', () => {
+  const view = (n: string) => `/view?filename=${n}&type=input`
+  const shot = (model: string, adv: Record<string, unknown>, extra: Record<string, unknown> = {}) =>
+    ({ widgets: { ...caseNamed('orbit · standard · blank prompt').widgets, model, prompt: 'a heron', model_options: JSON.stringify(adv), ...extra } })
+  const sizes = (m: Record<string, number>) => async (f: OutputFile) => m[f.filename] ?? null
+
+  it('a `/view` reference over its service\'s stated cap is refused in plain words (raw bytes, no JPEG fallback)', async () => {
+    const MB = 1_000_000
+    const check = (model: string, adv: Record<string, unknown>, m: Record<string, number>, backups = false) =>
+      shotRefSizeProblem(promptOf(shot(model, adv)), backups, sizes(m))
+    // Seedance 2.0: 30 MB a picture, 15 MB a sound, 50 MB of video in all.
+    expect(await check('seedance-2.0', { image_urls: [view('a.png')] }, { 'a.png': 30 * MB })).toBeNull()
+    expect(await check('seedance-2.0', { image_urls: [view('a.png')] }, { 'a.png': 30 * MB + 1 }))
+      .toEqual({ nodeId: 'n', classType: 'FilmShotNode', input: 'model_options', message: 'This picture is too large for Seedance 2.0. Use a smaller picture.' })
+    expect((await check('seedance-2.0', { image_url: view('a.png') }, { 'a.png': 31 * MB }))?.message).toBe(shotRefTooLargeWords('picture', 'Seedance 2.0'))
+    expect((await check('seedance-2.0', { audio_urls: [view('s.wav')] }, { 's.wav': 16 * MB }))?.message).toBe('This reference sound is too large for Seedance 2.0. Use a smaller sound.')
+    expect(await check('seedance-2.0', { video_urls: [view('a.mp4'), view('b.mp4')] }, { 'a.mp4': 25 * MB, 'b.mp4': 25 * MB })).toBeNull()
+    expect((await check('seedance-2.0', { video_urls: [view('a.mp4'), view('b.mp4')] }, { 'a.mp4': 25 * MB, 'b.mp4': 25 * MB + 1 }))?.message)
+      .toBe('These reference videos are too large together for Seedance 2.0. Use shorter or smaller videos.')
+    // Kling 3.0: 50 MiB on fal (frames and characters' pictures); 10 MB for its Replicate backup's frames while backups run, with no characters.
+    const el = { frontal_image_url: view('face.png'), reference_image_urls: [view('body.png')] }
+    expect(await check('kling-v3', { image_url: view('a.png'), elements: [el] }, { 'a.png': 11 * MB, 'body.png': 52_428_800 }, true)).toBeNull()
+    expect((await check('kling-v3', { image_url: view('a.png'), elements: [el] }, { 'body.png': 52_428_801 }))?.message).toBe('This picture is too large for Kling 3.0. Use a smaller picture.')
+    expect(await check('kling-v3', { end_image_url: view('a.png') }, { 'a.png': 11 * MB })).toBeNull()
+    expect(await check('kling-v3', { end_image_url: view('a.png') }, { 'a.png': 11 * MB }, true)).not.toBeNull()
+    // A web link, a size the store can't tell, a model with no stated cap: left to the service.
+    expect(await check('seedance-2.0', { image_urls: ['https://x.test/a.png', view('b.png')] }, {})).toBeNull()
+    expect(await check('veo-3.1', { image_urls: [view('a.png')] }, { 'a.png': 90 * MB })).toBeNull()
+    // Every cap cites its saved schema.
+    for (const c of Object.values(SHOT_REF_CAPS)) for (const f of Object.values(c.fields)) expect(f.source).toMatch(/schema/)
+  })
+
+  it('the engine refuses an oversized reference at the start, before the hold, nothing sent', async () => {
+    const k = makeKit({ hosted: true, available: 50_000, deps: { families: () => ON } })
+    writeFileSync(join(k.root, 'input', 'big.png'), Buffer.alloc(30_000_001))
+    const c = shot('seedance-2.0', { image_urls: [view('big.png')] })
+    await expect(k.engine.startRun({ userId: k.userId, takes: [shown(c)], ...START })).rejects.toThrow('This picture is too large for Seedance 2.0. Use a smaller picture.')
+    expect(k.ledger.hold).not.toHaveBeenCalled()
+    expect(k.fal.client.submit).not.toHaveBeenCalled()
+  })
+
+  it('Kling 3: a last frame beside only an `image_url` (its builder reads the linked picture alone) is refused before the hold', async () => {
+    const adv = { image_url: 'https://x.test/a.png', end_image_url: 'https://x.test/b.png' }
+    const video = { n: { class_type: 'GenerateVideoNode', inputs: { ...shot('kling-v3', adv).widgets } }, v: shown(shot('kling-v3', adv)).v! }
+    for (const [label, p] of [['a preset shot', shown(shot('kling-v3', adv))], ['Generate a video', video]] as const) {
+      expect(requestProblems(p, { runner: true }).map(x => x.message), label).toEqual([KLING_LAST_FRAME_NEEDS_FIRST])
+      const k = makeKit({ hosted: true, available: 50_000, deps: { families: () => ON } })
+      await expect(k.engine.startRun({ userId: k.userId, takes: [p], ...START }), label).rejects.toThrow(KLING_LAST_FRAME_NEEDS_FIRST)
+      expect(k.ledger.hold, label).not.toHaveBeenCalled()
+    }
+    // With the picture linked, taken; a shot-directed shot's `image_url` is its first frame.
+    expect(requestProblems(promptOf({ ...shot('kling-v3', adv), pictures: ['image'] }), { runner: true })).toEqual([])
+    expect(requestProblems(promptOf(shot('kling-v3', { ...adv, __shot_directed: true })), { runner: true })).toEqual([])
+  })
 })
