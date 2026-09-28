@@ -13,7 +13,10 @@ const shellTag = (t: string) => {
   return t.slice(start, t.indexOf('>', i) + 1)
 }
 
-const FAMILY_A = ['GradientStudioNode.vue', 'ShaderStudioNode.vue', 'TextureStudioNode.vue']
+const FAMILY_A = [
+  'GradientStudioNode.vue', 'ShaderStudioNode.vue', 'TextureStudioNode.vue',
+  'ShapeStudioNode.vue', 'VectorTypeNode.vue', 'SpaceTypeNode.vue',
+]
 
 describe.each(FAMILY_A)('%s wears the studio shell', (file) => {
   const s = src(file)
@@ -45,5 +48,12 @@ describe.each(FAMILY_A)('%s wears the studio shell', (file) => {
     expect(t).toMatch(/class="node-shell__foot justify-end"[\s\S]{0,200}<StudioRenderButton :node-id="id" :busy="!!data\?\.studioBusy" \/>/)
     expect(t).not.toMatch(/Pencil/)
     expect(t).not.toMatch(/>\s*Edit\s*</)
+  })
+})
+
+describe('Kinetic keeps its hover-to-play and render-error badge', () => {
+  const t = tpl(src('SpaceTypeNode.vue'))
+  it('the wrapper still owns the hover handlers', () => {
+    expect(t).toMatch(/class="studio-node relative w-fit" @pointerenter="onNodeHoverEnter" @pointerleave="onNodeHoverLeave"/)
   })
 })

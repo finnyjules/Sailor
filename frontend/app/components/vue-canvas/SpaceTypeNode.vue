@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, onMounted, onBeforeUnmount, watch } from 'vue'
-import { Pencil, Sparkles } from 'lucide-vue-next'
+import { Sparkles } from 'lucide-vue-next'
 import { SpaceTypeEngine } from '~/lib/spacetype/engine'
 import { detectWebGL } from '~/lib/spacetype/webgl'
 import { getEffect } from '~/lib/spacetype/effects'
@@ -22,7 +22,9 @@ import { spaceTypeWiredEmbed } from '~/lib/spacetype/embedConfig'
 import { syncImageTextures } from '~/lib/spacetype/imageTextures'
 import { fetchShaderFxCatalog } from '~/lib/shaderfx/catalog'
 import { loadGoogleCatalog } from '~/data/google-fonts'
+import { useNodeGlass } from '~/composables/useCanvasGlass'
 import StudioRenderButton from '~/components/vue-canvas/StudioRenderButton.vue'
+import NodeOpenBar from '~/components/vue-canvas/surfaces/NodeOpenBar.vue'
 
 // Space Type — a frontend-only config node for the client-side Three.js ribbon
 // typography editor. No inputs/outputs (no backend class_type), so it never
@@ -31,6 +33,7 @@ import StudioRenderButton from '~/components/vue-canvas/StudioRenderButton.vue'
 // bound to this node, which writes its config back to node.data.properties.
 const props = defineProps<{
   id: string
+  selected?: boolean
   data: {
     nodeType: string
     title?: string
@@ -40,6 +43,8 @@ const props = defineProps<{
     inputs?: { name?: string }[]
   }
 }>()
+
+const glass = useNodeGlass(() => props.id)
 
 const PREVIEW_W = 204
 const MIN_H = 80
@@ -319,36 +324,36 @@ function openEditor() {
     />
 
     <div
-      class="relative w-[220px] overflow-hidden rounded-xl border border-white/10 bg-neutral-900 text-white shadow-lg"
+      class="space-type-card node-shell relative z-10 w-[240px]"
+      :data-glass-blur="glass || undefined"
+      :data-selected="selected || undefined"
       @dblclick.stop="openEditor"
     >
-    <!-- Header -->
-    <div class="flex items-center gap-2 border-b border-white/10 px-3 py-2">
-      <Sparkles class="h-3.5 w-3.5 text-white/70" />
-      <span class="text-xs font-medium text-white/80">Kinetic Studio</span>
-      <span class="ml-auto max-w-[110px] truncate text-[10px] uppercase tracking-wide text-white/40">{{ text }}</span>
+    <div class="node-shell__head">
+      <Sparkles class="node-shell__icon" />
+      <span class="node-shell__title">Kinetic Studio</span>
     </div>
 
     <!-- Live animated preview -->
-    <div class="relative flex items-center justify-center bg-neutral-950">
-      <canvas v-if="webglOk" ref="canvasEl" class="block w-full" :style="{ height: previewH + 'px' }" />
-      <div v-else class="flex w-full items-center justify-center px-3 text-center text-[10px] text-white/40"
-           :style="{ height: previewH + 'px' }">3D preview unavailable</div>
-      <div v-if="renderError"
-           class="absolute inset-x-2 bottom-2 rounded border border-amber-400/30 bg-black/70 px-2 py-1 text-[9px] text-amber-200/90">
-        Render error
+    <div class="node-shell__body">
+      <div class="node-well node-openbar-host">
+        <div class="relative flex items-center justify-center">
+          <canvas v-if="webglOk" ref="canvasEl" class="block w-full" :style="{ height: previewH + 'px' }" />
+          <div v-else class="flex w-full items-center justify-center px-3 text-center text-[10px] text-white/40"
+               :style="{ height: previewH + 'px' }">3D preview unavailable</div>
+          <div v-if="renderError"
+               class="absolute inset-x-2 bottom-2 rounded border border-amber-400/30 bg-black/70 px-2 py-1 text-[9px] text-amber-200/90">
+            Render error
+          </div>
+        </div>
+        <NodeOpenBar :meta="text">
+          <button type="button" class="node-btn nopan nodrag" @click.stop="openEditor">Open</button>
+        </NodeOpenBar>
       </div>
     </div>
 
-    <!-- Render + Edit (bottom) -->
-    <div class="border-t border-white/10 p-2 flex items-center gap-1.5">
-      <button
-        class="flex flex-1 items-center justify-center gap-1.5 rounded bg-white/10 px-2.5 py-1.5 text-[11px] text-white/80 transition hover:bg-white/20"
-        @click.stop="openEditor"
-      >
-        <Pencil class="h-3 w-3" /> Edit
-      </button>
-      <StudioRenderButton class="flex-1" :node-id="id" :busy="!!data?.studioBusy" />
+    <div class="node-shell__foot justify-end">
+      <StudioRenderButton :node-id="id" :busy="!!data?.studioBusy" />
     </div>
     </div>
   </div>
