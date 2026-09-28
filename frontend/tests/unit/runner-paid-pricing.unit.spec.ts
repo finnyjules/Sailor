@@ -247,8 +247,11 @@ describe('priceNode for a paid class', () => {
     const p = priceNode('TestPipelineNode', {}) as { usd: number; credits: number }
     expect(p.credits).toBe(2 * a + b)
     expect(p.credits).toBe(40)
-    expect(p.usd).toBeCloseTo(0.1 + usdChargedAtCost(0.2), 9)
-    expect(p.credits).not.toBe(creditsForUsd(p.usd))
+    // The credits are not the markup of the summed dollars (0.1 + usdChargedAtCost(0.2) would mark up to 27)…
+    expect(creditsForUsd(0.1 + usdChargedAtCost(0.2))).not.toBe(p.credits)
+    // …and the dollars shown are the basis those credits came from (R3.14 fix round 1: credits = creditsForUsd(usd)).
+    expect(p.usd).toBe(usdChargedAtCost(0.40))
+    expect(creditsForUsd(p.usd)).toBe(p.credits)
     // A partial charge (the first step's calls only) is never above the whole.
     const first = callsCredits([{ usd: paidCallUsd({ endpoint: 'test/a' })! }, { usd: paidCallUsd({ endpoint: 'test/a' })! }])
     expect(first).toBe(20)
@@ -266,7 +269,8 @@ describe('priceNode for a paid class', () => {
       const p = priceNode('TestBadTimesNode', { times })
       expect(p, String(times)).toEqual({ refused: `test/a is planned to run ${times} times; a call runs a whole number of times, at least once` })
     }
-    expect(priceNode('TestBadTimesNode', { times: 3 })).toEqual({ usd: 0.15, credits: 30 })
+    // 3 × 10 credits; the dollars shown mark up to them (R3.14 fix round 1), not the summed $0.15 (23).
+    expect(priceNode('TestBadTimesNode', { times: 3 })).toEqual({ usd: 0.2, credits: 30 })
   })
 
   it('the real paidCalls refuses a class no task has planned, and paidNoCall is false for it', () => {

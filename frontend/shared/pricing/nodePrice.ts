@@ -61,7 +61,7 @@
  */
 import { IMAGE_MODELS } from '../../app/data/image-models'
 import { LEGACY_VIDEO_MODEL_IDS } from '../../app/data/video-prices'
-import { creditsForUsd } from './markup'
+import { creditsForUsd, usdChargedAtCost } from './markup'
 import { callCredits, callsCredits, pipelineCallsOf } from './pipelinePrice'
 import { paidCallUsd } from './paidRates'
 import { PAID_NODE_CLASSES, paidCalls, type PaidCalls } from './paidSettings'
@@ -242,7 +242,11 @@ export interface PriceOptions {
  * A paid node's price from its calls: each call's price basis
  * (paidRates.ts paidCallUsd, fallbacks at cost) turned into credits on its
  * own and summed, `times` over (pipelinePrice.ts callCredits, the R3.1
- * ruling), never the markup of the summed dollars. `usd` is the summed basis.
+ * ruling), never the markup of the summed dollars. `usd` is the price basis
+ * those credits came from (`shownUsd`: the summed basis when it marks up to
+ * them, as for one call, else the basis that does), so every reader that
+ * marks `usd` up — the hosted run-confirm dialog's row (costEstimate.ts →
+ * default.vue formatCostBadge) — shows the credits held (R3.14 fix round 1).
  * `times` must be a whole number ≥ 1 (a planner bug is refused, never priced).
  */
 export function paidStepsPrice(p: PaidCalls): NodePrice {
@@ -256,7 +260,19 @@ export function paidStepsPrice(p: PaidCalls): NodePrice {
     usd += basis * times
     credits += callCredits({ usd: basis }) * times
   }
-  return { usd: Math.round(usd * 1e8) / 1e8, credits }
+  return { usd: shownUsd(Math.round(usd * 1e8) / 1e8, credits), credits }
+}
+
+/**
+ * The dollars a node of several calls shows for `credits` (R3.14 fix round 1,
+ * `credits = creditsForUsd(usd)` kept): the summed basis where its markup is
+ * those credits (one call, or calls that mark up alike), else the basis whose
+ * markup is exactly those credits (usdChargedAtCost of their dollars: half up
+ * to 20 credits, two thirds above, rounded down to 1e-8, so it never rounds
+ * a credit up).
+ */
+export function shownUsd(summedBasis: number, credits: number): number {
+  return creditsForUsd(summedBasis) === credits ? summedBasis : usdChargedAtCost(credits / 100)
 }
 
 /**
@@ -295,7 +311,10 @@ export type NodePrice =
 export function priceNode(classType: string, inputs: NodeInputs | null | undefined, opts: PriceOptions = {}): NodePrice {
   // A node that makes several calls (a runner pipeline, R3.1): the sum of each call's credits.
   const planned = pipelineCallsOf(classType, inputs ?? {})
-  if (planned) return { usd: planned.reduce((s, c) => s + c.usd, 0), credits: callsCredits(planned) }
+  if (planned) {
+    const credits = callsCredits(planned)
+    return { usd: shownUsd(planned.reduce((s, c) => s + c.usd, 0), credits), credits }
+  }
   // A paid-model class (step 3, R3): the calls its settings can make.
   if (PAID_CLASS_SET.has(classType)) return paidNodePrice(classType, inputs ?? {}, opts)
   if (SETTING_PRICED_CLASS_SET.has(classType)) {

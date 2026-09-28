@@ -584,7 +584,7 @@ describe('the LLM text nodes on the ComfyUI path (R3.3)', () => {
 // ───────────────────────────────────────────────────────────────────────────
 // Step 3, R3.4 (ruling (a), user-approved): Describe an image (+ its twin),
 // Describe a video, Extract text and Find objects leave their flat rows for
-// their calls. moondream2 keeps its edit card ($0.002: 1 credit, as before);
+// their calls. moondream2 keeps its edit card ($0.002, $0.001 since R3.14 fix round 1: 1 credit, as before);
 // Dolphin and YOLO-World are priced from their GPU-time pages (estimates:
 // 2 credits, was 1; 1 credit); Describe a video by the token on Gemini 2.5
 // Flash, which on the ComfyUI path (no usage, no video length) is its

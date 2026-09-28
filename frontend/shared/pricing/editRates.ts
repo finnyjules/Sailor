@@ -223,8 +223,10 @@ export const EDIT_RATES: Record<string, EditRate> = {
   'easel-ai/advanced-face-swap': { unit: 'per_image', usd: 0.05, ...verified('fal', fal('easel-ai/advanced-face-swap')) },
   // ── Restyle with a style LoRA (RestyleWithLoRANode, ComfyUI path) ───────
   // Moondream 2, billed by GPU time (L40S, $0.000975/s): "costs approximately
-  // $0.0020 to run". The node captions once and classifies up to four times.
-  'lucataco/moondream2': { unit: 'per_image', usd: 0.002, ...estimate(rep('lucataco/moondream2')) },
+  // $0.0010 to run" (read 2026-09-28; was $0.0020 on 2026-09-24). Still an
+  // estimate until a live call measures it. The node captions once and
+  // classifies up to four times; each call is 1 credit either way (the minimum).
+  'lucataco/moondream2': { unit: 'per_image', usd: 0.001, ...estimate(rep('lucataco/moondream2')), read: '2026-09-28' },
   // "$0.032 per output image" — but the node runs the user's own trained
   // model instead when the LoRA has one (billed by GPU time; the LoRA
   // category's observed median is ~$0.04, priceBook.ts LORA_RENDER_CREDITS),

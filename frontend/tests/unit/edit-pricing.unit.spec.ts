@@ -133,7 +133,8 @@ describe('edit rate cards', () => {
         ? /^https:\/\/(fal\.ai\/models\/.+|replicate\.com\/.+)$/
         : /^https:\/\/(fal\.ai\/models\/.+\/llms\.txt|replicate\.com\/.+)$/)
       expect(r.source, endpoint).toContain(endpoint)
-      expect(r.read, endpoint).toBe('2026-09-24')
+      // Moondream re-read with R3.14 fix round 1 (its page's price had halved).
+      expect(r.read, endpoint).toBe(endpoint === 'lucataco/moondream2' ? '2026-09-28' : '2026-09-24')
       expect(r.service, endpoint).toBe(r.source.includes('fal.ai') ? 'fal' : 'replicate')
     }
     const est = Object.entries(EDIT_RATES).filter(([, r]) => r.confidence === 'estimate').map(([k]) => k).sort()
@@ -358,16 +359,18 @@ const MP1 = 1000 * 1000
  * covering that fallback's cost without marking it up.
  */
 const EXAMPLES: [string, Record<string, unknown>, number, number, number?][] = [
-  // RestyleWithLoRANode: 5 Moondream calls ($0.002) + the LoRA render ($0.04) + 3 Nano Banana 2 passes,
+  // RestyleWithLoRANode: 5 Moondream calls ($0.001, 1 credit each) + the LoRA render ($0.04) + 3 Nano Banana 2 passes,
   // each call's own credits summed since R3.14 (runner-paid-restyle-lora.unit.spec.ts): 5 × 1 + 8 + 3 × a pass.
+  // The dollars are the basis those credits came from (R3.14 fix round 1: credits = creditsForUsd(usd)): 2/3 of the credits' dollars above 20,
+  // rounded down to 1e-8.
   // 1K: a pass $0.08 (NB Pro at cost $0.075 is below it) → 16; 5 + 8 + 48 = 61.
-  ['RestyleWithLoRANode', {}, 0.29, 61],
-  ['RestyleWithLoRANode', { resolution: '1K' }, 0.29, 61],
+  ['RestyleWithLoRANode', {}, 0.40666666, 61],
+  ['RestyleWithLoRANode', { resolution: '1K' }, 0.40666666, 61],
   // 2K: a pass $0.12 → 18; 5 + 8 + 54 = 67.
-  ['RestyleWithLoRANode', { resolution: '2K' }, 0.41, 67],
+  ['RestyleWithLoRANode', { resolution: '2K' }, 0.44666666, 67],
   // 4K: a pass on NB Pro 4K at cost $0.20 beats the first call's $0.16 → 30; 5 + 8 + 90 = 103.
-  ['RestyleWithLoRANode', { resolution: '4K' }, 0.65, 103],
-  ['RestyleWithLoRANode', { resolution: LINK }, 0.65, 103],
+  ['RestyleWithLoRANode', { resolution: '4K' }, 0.68666666, 103],
+  ['RestyleWithLoRANode', { resolution: LINK }, 0.68666666, 103],
   // Nano Banana 2 1K/2K: the first call's usual-markup price already covers every fallback's cost.
   ['EditImageNode', { model: 'Nano Banana 2', resolution: '1K' }, 0.08, 16],
   ['EditImageNode', { model: 'Nano Banana 2', resolution: '2K' }, 0.12, 18],

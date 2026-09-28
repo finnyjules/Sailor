@@ -26,7 +26,8 @@
  *     format, seed `(seed + pass) & 0xFFFFFFFF` sent when above 0. No backup:
  *     Replicate's Nano Banana 2 takes no seed, and this node's seeds are its
  *     promise of repeatable results; Python's fal Nano Banana Pro and
- *     Replicate fallbacks are not sent (the price still covers them).
+ *     Replicate fallbacks are not sent (the hold still covers them; each
+ *     pass is charged fal's own price, the route that served it).
  *  5. `classify-1` … — for an illustration target only, the verdict on each
  *     pass (handed on as Sailor's own copy too): the first pass still an
  *     illustration is the result; none, the LoRA's picture is.
@@ -244,11 +245,13 @@ export async function planRestyleLora(ctx: PlanContext, reader?: SidecarReader):
     if (tooHigh) throw new Error(tooHigh.message)
   }
 
-  // Each call's price basis, from the node's priced calls (the hold's calculation).
+  // Each call's price basis, from the node's priced calls (the hold's calculation), at the route that serves it
+  // (R3.14 fix round 1 ruling): a pass goes to fal's Nano Banana 2 only, so it is charged that price; the node's hold
+  // (priceNode) still covers the ComfyUI path's fallbacks (fal Nano Banana Pro, Replicate) at cost.
   const calls = restyleLoraCalls(ctx.priceInputs ?? inputs)
   const moondreamUsd = usdOf(calls.moondream.call)
   const fluxUsd = usdOf(calls.stylize.call)
-  const passUsd = usdOf(calls.nanoBanana.call)
+  const passUsd = usdOf({ ...calls.nanoBanana.call, fallbacks: [] })
   const content = await imageUrlOf(ctx, file, link)
 
   return {

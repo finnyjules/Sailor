@@ -321,10 +321,11 @@ describe('every fixture case: what Python sends and returns', () => {
       const schema = SCHEMAS[s.endpoint]
       if (schema) for (const e of checkPayload(schema, s.payload)) offSchema.push(`${c.name} ${s.key}: ${e}`)
     }
-    // Each call priced by the node's priced calls (the hold's calculation).
+    // Each call priced by the node's priced calls (the hold's calculation), at the route that serves it (fix round 1:
+    // a pass is fal's Nano Banana 2 alone, its fallbacks only in the hold).
     const calls = restyleLoraCalls(c.widgets)
     for (const s of run.sent) {
-      const want = s.provider === 'fal' ? calls.nanoBanana.call : s.key === 'stylize' ? calls.stylize.call : calls.moondream.call
+      const want = s.provider === 'fal' ? { ...calls.nanoBanana.call, fallbacks: [] } : s.key === 'stylize' ? calls.stylize.call : calls.moondream.call
       expect(s.usd, s.key).toBe(paidCallUsd(want))
     }
     // The caption is moderated before it is sent on (hosted; locally the engine's moderateText does nothing).
@@ -452,7 +453,7 @@ async function kitDone(c: PaidCase, o: KitOpts = {}) {
 const charged = (k: ReturnType<typeof makeKit>) => [...k.ledger.holds.values()].map(h => [h.credits, h.actual])
 const credits = (c: PaidCase, key: string) => {
   const calls = restyleLoraCalls(c.widgets)
-  const call = key.startsWith('nb-') ? calls.nanoBanana.call : key === 'stylize' ? calls.stylize.call : calls.moondream.call
+  const call = key.startsWith('nb-') ? { ...calls.nanoBanana.call, fallbacks: [] } : key === 'stylize' ? calls.stylize.call : calls.moondream.call
   return callCredits({ usd: paidCallUsd(call)! })
 }
 
@@ -510,6 +511,27 @@ describe('charges: the calls that finished, never above the hold (ruling (f))', 
     // Photo: one pass, no verdict on it.
     expect(sent.map(s => s.endpoint)).toEqual([MOONDREAM_SLUG, FLUX_DEV_LORA_SLUG, MOONDREAM_SLUG, NANO_BANANA_2_FAL_EDIT])
     expect(charged(k)).toEqual([[61, 1 + 8 + 16]])
+  })
+
+  it('each pass is charged at the route that served it, fal\'s Nano Banana 2 (fix round 1 ruling): at 4K 24 a pass, not 30; the hold still covers the fallbacks', async () => {
+    const photo = caseNamed('resolution 4K · format png')
+    const calls = restyleLoraCalls(photo.widgets)
+    expect(callCredits({ usd: paidCallUsd({ ...calls.nanoBanana.call, fallbacks: [] })! })).toBe(24)
+    expect(callCredits({ usd: paidCallUsd(calls.nanoBanana.call)! })).toBe(30)
+    const a = await kitDone(photo, { hosted: true })
+    expect(a.rec.status, a.rec.error ?? '').toBe('done')
+    expect(a.rec.calls!.find(x => x.key === 'nb-1')!.usd).toBe(0.16)
+    expect(charged(a.k)).toEqual([[103, 1 + 8 + 1 + 24]])
+    // Every pass at 4K, the LoRA's picture the result: 5 + 8 + 3 × 24 = 85 of the 103 held.
+    const never = caseNamed('target · illustration · never')
+    const b = await kitDone({ ...never, widgets: { ...never.widgets, resolution: '4K' } }, { hosted: true })
+    expect(b.rec.status, b.rec.error ?? '').toBe('done')
+    expect(charged(b.k)).toEqual([[103, 85]])
+    // At 1K and 2K fal's own price is the pass's whole price: no difference.
+    for (const r of ['1K', '2K']) {
+      const x = restyleLoraCalls({ resolution: r }).nanoBanana.call
+      expect(paidCallUsd({ ...x, fallbacks: [] }), r).toBe(paidCallUsd(x))
+    }
   })
 
   it('a lost download of the LoRA\'s picture isn\'t charged for that call (Sailor absorbs it)', async () => {
@@ -591,7 +613,7 @@ describe('prices (ruling (a))', () => {
   const at = (resolution: unknown) => ({ ...caseNamed('target · photo').widgets, resolution })
 
   it('the cards, re-read 2026-09-28: Moondream and flux-dev-lora on their edit cards; Nano Banana 2 on fal\'s, its fallbacks covered at cost', () => {
-    expect(EDIT_RATES[MOONDREAM_SLUG]).toMatchObject({ unit: 'per_image', usd: 0.002, confidence: 'estimate' })
+    expect(EDIT_RATES[MOONDREAM_SLUG]).toMatchObject({ unit: 'per_image', usd: 0.001, read: '2026-09-28', source: 'https://replicate.com/lucataco/moondream2', confidence: 'estimate' })
     expect(EDIT_RATES[FLUX_DEV_LORA_SLUG]).toMatchObject({ unit: 'per_image', usd: 0.04, confidence: 'estimate' })
     expect(EDIT_RATES[NANO_BANANA_2_FAL_EDIT]).toMatchObject({ unit: 'by_resolution', byTier: { '0.5K': 0.06, '1K': 0.08, '2K': 0.12, '4K': 0.16 }, confidence: 'verified' })
     const c = restyleLoraCalls(at('1K'))
@@ -599,7 +621,7 @@ describe('prices (ruling (a))', () => {
     expect(c.nanoBanana.call.fallbacks!.map(f => f.endpoint)).toEqual(['fal-ai/nano-banana-pro/edit', 'google/nano-banana-2'])
     // The steps are editSteps' (one list of calls).
     expect(editSteps(RESTYLE_LORA_CLASS, at('2K'))!.map(s => [s.call.endpoint, s.times])).toEqual([[MOONDREAM_SLUG, 5], [FLUX_DEV_LORA_SLUG, 1], [NANO_BANANA_2_FAL_EDIT, 3]])
-    expect([paidCallUsd(c.moondream.call), paidCallUsd(c.stylize.call), paidCallUsd(c.nanoBanana.call)]).toEqual([0.002, 0.04, 0.08])
+    expect([paidCallUsd(c.moondream.call), paidCallUsd(c.stylize.call), paidCallUsd(c.nanoBanana.call)]).toEqual([0.001, 0.04, 0.08])
     expect(paidCallUsd(restyleLoraCalls(at('4K')).nanoBanana.call)).toBe(0.2)
   })
 
@@ -629,9 +651,77 @@ describe('prices (ruling (a))', () => {
     expect(paidNoCall(RESTYLE_LORA_CLASS, {})).toBe(false)
   })
 
+  it('Moondream at $0.001 (was $0.002) moves no credits: 1 a call either way (fix round 1 sweep)', () => {
+    const card = EDIT_RATES[MOONDREAM_SLUG] as { usd: number }
+    const sweep = () => [
+      ...['1K', '2K', '4K', ['x', 0]].map(r => priceNode(RESTYLE_LORA_CLASS, at(r))),
+      ...['DescribeImageNode', 'DescribeImageRemoteNode'].map(ct => priceNode(ct, { model: 'Moondream 2', image: ['x', 0], prompt: 'hi' })),
+    ].map(p => (p as { credits: number }).credits)
+    const now = sweep()
+    try {
+      card.usd = 0.002
+      expect(sweep()).toEqual(now)
+    }
+    finally { card.usd = 0.001 }
+    expect(now).toEqual([61, 67, 103, 103, 1, 1])
+  })
+
+  it('the hosted run-confirm dialog\'s row shows the credits held (fix round 1): 61, not 44', async () => {
+    const { estimateUsdForNodes } = await import('~/lib/costEstimate')
+    const { formatCostBadge } = await import('~/lib/pricing')
+    const { creditsForUsd } = await import('#shared/pricing/markup')
+    for (const [r, credits] of [['1K', 61], ['2K', 67], ['4K', 103]] as const) {
+      const w = at(r)
+      const names = Object.keys(w)
+      const est = estimateUsdForNodes([{ id: '1', type: RESTYLE_LORA_CLASS, widgetDefs: names.map(name => ({ name })), widgetsValues: names.map(k => w[k as keyof typeof w]) }], { hosted: true })!
+      expect(creditsForUsd(est.breakdown[0]!.usd), r).toBe(credits)
+      expect(formatCostBadge(est.breakdown[0]!.usd, false, true), r).toBe(`~${credits} cr`)
+      expect(est.hostedCredits, r).toBe(credits + BASE_RENDER_CREDITS)
+    }
+  })
+
   it('the stage hold is the node\'s price', () => {
     const p = promptOf(caseNamed('target · photo'))
     expect(stageEstimate(p, Object.keys(p), false, ON)).toBe(61)
+  })
+})
+
+describe('every paid class shows the dollars its credits came from (fix round 1: credits = creditsForUsd(usd))', () => {
+  const L = ['x', 0]
+  const golden = JSON.parse(readFileSync(join(__dirname, 'fixtures', 'pricing', 'price-graph-golden.json'), 'utf8')) as { modelPriced: Record<string, Record<string, unknown>> }
+  const variants = (ct: string): Record<string, unknown>[] => [
+    {},
+    { model: L, resolution: L, prompt: L, image: L, text: L, duration: L, steps: L, engine: L, num_inference_steps: L },
+    ...Object.keys(golden.modelPriced[ct] ?? {}).map(model => ({ model })),
+    ...['0.5K', '1K', '2K', '4K'].map(resolution => ({ resolution })),
+    ...['Moondream 2', 'ByteDance Dolphin', 'YOLO-World', 'Gemini 2.5 Flash', 'GPT-5', 'Claude 4.5 Haiku', 'DeepSeek R1', 'MusicGen', 'Rodin (textured \u00b7 quad mesh)'].map(model => ({ model, image: L, prompt: 'hi', text: 'hello', engine: model })),
+    ...['LaMa (fast)', 'Bria Eraser (quality)'].map(background_fill => ({ background_fill, image: L })),
+    { lora_a_url: 'hf.co/a/b', lora_b_url: 'hf.co/c/d', num_inference_steps: 50 },
+    { duration: 30, text: 'x'.repeat(5000), image_size: 'auto', steps: 100 },
+  ]
+
+  it('for every paid class and setting, the charge path too; Restyle and Separate background and foreground included', async () => {
+    const { creditsForUsd } = await import('#shared/pricing/markup')
+    const { shownUsd } = await import('#shared/pricing/nodePrice')
+    let checked = 0
+    for (const ct of PAID_NODE_CLASSES) {
+      for (const v of variants(ct)) {
+        for (const opts of [{}, { answerUsage: { inputTokens: 1234, outputTokens: 567 } }, { inputChars: 42 }, { hosted: true }]) {
+          const p = priceNode(ct, v, opts)
+          if ('refused' in p) continue
+          checked++
+          expect(creditsForUsd(p.usd), `${ct} ${JSON.stringify(v)} ${JSON.stringify(opts)}: $${p.usd}`).toBe(p.credits)
+        }
+      }
+    }
+    expect(checked).toBeGreaterThan(1000)
+    // The two classes whose calls mark up apart: the dialog row now reads their hold.
+    expect(priceNode('SplitPhotoLayersNode', { image: L, background_fill: 'LaMa (fast)' })).toEqual({ usd: 0.01, credits: 2 })
+    expect(creditsForUsd((priceNode(RESTYLE_LORA_CLASS, { resolution: '1K' }) as { usd: number }).usd)).toBe(61)
+    // One call, or calls that mark up alike: the summed basis, as before.
+    expect(priceNode('DescribeImageNode', { model: 'Moondream 2', image: L, prompt: 'hi' })).toEqual({ usd: 0.001, credits: 1 })
+    // The inverse holds for every credit figure.
+    for (let c = 1; c <= 20_000; c++) if (creditsForUsd(shownUsd(1e9, c)) !== c) throw new Error(`shownUsd breaks at ${c}`)
   })
 })
 

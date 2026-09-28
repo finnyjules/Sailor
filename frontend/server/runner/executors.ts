@@ -194,7 +194,13 @@ export interface PipelineCall {
   provider: RunnerProvider; endpoint: string; payload: Record<string, unknown>
   media: 'image' | 'video' | 'value'
   backup?: ProviderBackup
-  /** This call's price basis in dollars (the price module's figure for it). */
+  /**
+   * This call's price basis in dollars (the price module's figure for it),
+   * at the route it is sent to: a delivered call is charged the price of the
+   * route that served it (R3.14 fix round 1 ruling), while the node's hold
+   * (priceNode) may also cover the ComfyUI path's fallbacks at cost. No
+   * pipeline call has a backup service today.
+   */
   usd: number
   /**
    * A call priced by what it makes (R3.6, Layerize an image: the pictures

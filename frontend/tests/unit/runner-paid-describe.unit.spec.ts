@@ -281,7 +281,7 @@ describe('prices (rulings (a), (c), (s))', () => {
     expect(PAID_RATES['bytedance/dolphin']).toMatchObject({ unit: 'gpu_ceiling', usd: 0.006, confidence: 'estimate', read: '2026-09-27', source: 'https://replicate.com/bytedance/dolphin' })
     expect(PAID_RATES['zsxkib/yolo-world']).toMatchObject({ unit: 'gpu_ceiling', usd: 0.001, confidence: 'estimate', read: '2026-09-27', source: 'https://replicate.com/zsxkib/yolo-world' })
     expect(PAID_RATES['lucataco/moondream2']).toBeUndefined()
-    expect(EDIT_RATES['lucataco/moondream2']).toMatchObject({ unit: 'per_image', usd: 0.002, confidence: 'estimate' })
+    expect(EDIT_RATES['lucataco/moondream2']).toMatchObject({ unit: 'per_image', usd: 0.001, read: '2026-09-28', confidence: 'estimate' })
     for (const slug of ['google/gemini-2.5-flash', 'bytedance/dolphin', 'zsxkib/yolo-world']) expect(otherCardFor(slug), slug).toBeNull()
   })
 
@@ -295,7 +295,7 @@ describe('prices (rulings (a), (c), (s))', () => {
 
   it('per call: Describe an image 1, Extract text 2, Find objects 1, on both paths', () => {
     const want: Record<string, { usd: number; credits: number }> = {
-      DescribeImageNode: { usd: 0.002, credits: 1 }, DescribeImageRemoteNode: { usd: 0.002, credits: 1 },
+      DescribeImageNode: { usd: 0.001, credits: 1 }, DescribeImageRemoteNode: { usd: 0.001, credits: 1 },
       ExtractTextNode: { usd: 0.006, credits: 2 }, FindObjectsNode: { usd: 0.001, credits: 1 },
     }
     for (const [c, p] of Object.entries(want)) {
