@@ -20,7 +20,7 @@ import { paidCalls } from './paidSettings'
 import type { NodeInputs, NodePrice } from './nodePrice'
 
 /**
- * Each class ported in R3.3–R3.9 and priced by its calls: its flat credits in
+ * Each class ported in R3.3–R3.12 and priced by its calls: its flat credits in
  * GRAPH_NODE_CREDITS before R3 (server/utils/priceBook.ts at 38b4a0672, the
  * commit before R3.3 d97d76152 moved the first rows), the badge dollars that
  * row came from, and the family that moves it onto the runner.
@@ -59,6 +59,11 @@ export const PRE_R3_FLAT: Readonly<Record<string, { credits: number, badgeUsd: n
   Generate3DNode: { credits: 45, badgeUsd: 0.30, family: 'gen-3d' },
   Hunyuan3DRemoteNode: { credits: 45, badgeUsd: 0.30, family: 'gen-3d' },
   Hunyuan3DMultiViewNode: { credits: 45, badgeUsd: 0.30, family: 'gen-3d' },
+  // R3.12, text effect, sketch to image and face references. Their cards are all verified, so no
+  // floor applies (Text effect generating is charged 6, below its old 8); kept as the record.
+  TextEffectNode: { credits: 8, badgeUsd: 0.04, family: 'image-extras' },
+  SketchToImageNode: { credits: 8, badgeUsd: 0.04, family: 'image-extras' },
+  ConsistentFaceNode: { credits: 16, badgeUsd: 0.08, family: 'image-extras' },
 }
 
 const own = <T>(o: Readonly<Record<string, T>>, k: string): T | undefined =>

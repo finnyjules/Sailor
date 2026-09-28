@@ -52,6 +52,8 @@ describe('parseFamilies', () => {
       'gen-3d',
       // Step 3, R3.11: Film a shot's preset path (needs `cards`).
       'film-shot',
+      // Step 3, R3.12: text effect, sketch to image and face references (needs `cards`).
+      'image-extras',
     ].sort())
   })
 })

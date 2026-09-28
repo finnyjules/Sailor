@@ -181,6 +181,7 @@ import { describeComfyPathProblem, describeRequestProblem } from '#shared/runner
 import { repairRequestProblem } from '#shared/runner/repair'
 import { hostedVoiceProblem, speechTextProblem } from '#shared/runner/audioGen'
 import { gen3dComfyPathProblem, gen3dRequestProblem } from '#shared/runner/gen3d'
+import { imageExtrasRequestProblem } from '#shared/runner/imageExtras'
 import { isLlmTextClass } from './generators/llm'
 import { FACE_SWAP_NEEDS_GENDER, faceSwapGender } from '#shared/runner/faceSwap'
 import { pixverseSwapNodeProblem } from './generators/pixverseSwap'
@@ -1101,6 +1102,11 @@ export function requestProblems(prompt: ApiPrompt, opts: { runner?: boolean } = 
     // the node itself, whose answer Python can't read (gen3dComfyPathProblem).
     const g3 = opts.runner ? gen3dRequestProblem(ct, inputs) : gen3dComfyPathProblem(ct)
     if (g3) out.push({ nodeId, classType: ct, input: g3.input, message: g3.message })
+    // Text effect and Generate face references (R3.12), on a runner run: a
+    // generate-mode Text effect with no text (Python raises before its call), or
+    // a seed Replicate's Ideogram refuses (#shared/runner/imageExtras).
+    const ix = opts.runner ? imageExtrasRequestProblem(ct, inputs) : null
+    if (ix) out.push({ nodeId, classType: ct, input: ix.input, message: ix.message })
   }
   // A preset shot's problems are its own, judged as Generate a video's.
   return presetShots.size ? out.map(p => presetShots.has(p.nodeId) ? { ...p, classType: 'FilmShotNode' } : p) : out

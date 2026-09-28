@@ -32,6 +32,9 @@ import {
   GENERATE_3D_MODELS, GEN_3D_CLASSES, GEN_3D_GUIDANCE, GEN_3D_OCTREE, GEN_3D_SEED_MAX, GEN_3D_STEPS, MULTI_VIEW_ENGINES, RODIN_POLY_MAX, RODIN_QUALITIES,
 } from './gen3d'
 import {
+  FACE_ASPECT_RATIOS, FACE_MODELS, IMAGE_EXTRAS_CLASSES, SKETCH_MODELS, TEXT_EFFECT_ASPECT_RATIOS, TEXT_EFFECT_IDS,
+} from './imageExtras'
+import {
   BRAINSTORM_ANGLES, CHAT_LLM_MODELS, IMPROVE_PROMPT_MODELS, IMPROVE_PROMPT_TARGETS, REASON_MODELS, REWRITE_MODELS, REWRITE_TONES,
   SUMMARIZE_LENGTHS, SUMMARIZE_MODELS, TRANSLATE_LANGUAGES,
 } from './llm'
@@ -349,6 +352,8 @@ export const PAID_PICTURE_FAMILY: Readonly<Record<string, RunnerFamily>> = {
   ...Object.fromEntries(LAYERS_CLASSES.map(c => [c, 'layers' as const])),
   // R3.7: Separate background and foreground's subject and background (slots 0 and 1, PAID_PICTURE_SLOTS).
   [SPLIT_CLASS]: 'layers',
+  // R3.12: Text effect's, Sketch to image's and Generate face references' picture.
+  ...Object.fromEntries(IMAGE_EXTRAS_CLASSES.map(c => [c, 'image-extras' as const])),
 }
 
 /**
@@ -1114,6 +1119,44 @@ export const RUNNER_NODE_RULES: Readonly<Record<string, RunnerNodeRule>> = {
       rodin_poly_count: { type: 'INT', min: 0, max: RODIN_POLY_MAX },
     },
   },
+  // ── image-extras (step 3, R3.12): Text effect, Sketch to image and Generate
+  // face references, on Replicate. The pictures are linked pictures (the
+  // handed-off files; Text effect's is optional: wired, it restyles); the word
+  // and the prompts take a text wire (R0: the value arrives as typed); every
+  // other setting is a widget as ComfyUI validates it (define_schema's options
+  // and bounds). A wired widget leaves the node to the engine.
+  TextEffectNode: {
+    family: 'image-extras',
+    imageInputs: ['image'],
+    valueInputs: { text: ['text'] },
+    required: ['text'],
+    widgets: {
+      effect: { type: 'COMBO', required: true, options: TEXT_EFFECT_IDS },
+      aspect_ratio: { type: 'COMBO', required: true, options: TEXT_EFFECT_ASPECT_RATIOS },
+      seed: { type: 'INT', required: true, min: 0, max: 0xFFFFFFFF },
+      freedom: { type: 'FLOAT', required: true, min: 0, max: 1 },
+    },
+  },
+  SketchToImageNode: {
+    family: 'image-extras',
+    mustLink: ['image'],
+    imageInputs: ['image'],
+    valueInputs: { prompt: ['text'] },
+    required: ['prompt'],
+    widgets: { model: { type: 'COMBO', required: true, options: SKETCH_MODELS } },
+  },
+  ConsistentFaceNode: {
+    family: 'image-extras',
+    mustLink: ['reference_image'],
+    imageInputs: ['reference_image'],
+    valueInputs: { prompt: ['text'] },
+    required: ['prompt'],
+    widgets: {
+      model: { type: 'COMBO', required: true, options: FACE_MODELS },
+      aspect_ratio: { type: 'COMBO', required: true, options: FACE_ASPECT_RATIOS },
+      seed: { type: 'INT', required: true, min: 0, max: 0xFFFFFFFF },
+    },
+  },
   // ── effects-* (step 3, R2): the still-picture effects (./effects.ts, server/runner/effects/) ──
   // Rows built from the real node schemas (./effectSchemas.generated.ts), one
   // per ported class; each needs its family and `cards`.
@@ -1176,6 +1219,8 @@ export const SWITCHED_CLASSES: Readonly<Record<string, RunnerFamily>> = {
   ...Object.fromEntries(AUDIO_GEN_CLASSES.map(c => [c, 'audio-gen' as const])),
   // R3.9: 3D models.
   ...Object.fromEntries(GEN_3D_CLASSES.map(c => [c, 'gen-3d' as const])),
+  // R3.12: text effect, sketch to image and face references.
+  ...Object.fromEntries(IMAGE_EXTRAS_CLASSES.map(c => [c, 'image-extras' as const])),
 }
 
 /**

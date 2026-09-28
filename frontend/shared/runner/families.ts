@@ -188,11 +188,20 @@ export type RunnerFamily =
    * families. Off: a preset shot goes to ComfyUI, as before.
    */
   | 'film-shot'
+  /**
+   * Text effect, sketch to image and face references on Replicate (step 3,
+   * R3.12): Text effect (Ideogram V3 Turbo, or Flux Kontext Pro restyling a
+   * wired picture of the word), Sketch to image (Nano Banana) and Generate
+   * face references (Ideogram Character). Needs `cards`: their pictures come
+   * from Image cards and LoadImage, their prompts take text wires. Off: they
+   * go to ComfyUI, as before.
+   */
+  | 'image-extras'
 
 export const RUNNER_FAMILIES: readonly RunnerFamily[] = [
   'fal-edit', 'replicate-image', 'replicate-video', 'nano-actions', 'ref-edits', 'restyle', 'frame', 'wan-3', 'gpt-image-2.5', 'h3-max-turbo', 'gemini-omni-flash', 'veo-3.1-lite', 'qwen-image-3', 'grok-imagine-2', 'ideogram-4', 'seedream-5-pro-edit', 'qwen-2511-angles', 'nano-banana-2-blend', 'bria-product-shot', 'muse-image', 'nano-banana-2-lite', 'reve-2.1', 'recraft-v4.1', 'krea-2', 'happyhorse-1.1', 'grok-imagine-video-1.5', 'ltx-2.5-fast', 'luma-ray-3.2', 'sync-3', 'topaz-video', 'fix-faces', 'face-swap', 'person-swap-video', 'cards',
   'effects-tone', 'effects-blur', 'effects-cells', 'effects-warp', 'effects-mask', 'effects-noise', 'shader-bake', 'live-previews',
-  'llm-text', 'describe', 'image-repair', 'layers', 'audio-gen', 'gen-3d', 'film-shot',
+  'llm-text', 'describe', 'image-repair', 'layers', 'audio-gen', 'gen-3d', 'film-shot', 'image-extras',
 ]
 
 /**
@@ -215,6 +224,7 @@ export const FAMILY_REQUIRES: Partial<Record<RunnerFamily, RunnerFamily>> = {
   'audio-gen': 'cards',
   'gen-3d': 'cards',
   'film-shot': 'cards',
+  'image-extras': 'cards',
 }
 
 const KNOWN: ReadonlySet<string> = new Set(RUNNER_FAMILIES)

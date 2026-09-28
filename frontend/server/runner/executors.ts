@@ -129,6 +129,7 @@ import { planLayers } from './generators/layers'
 import { planSplitLayers } from './generators/splitLayers'
 import { planAudioGen } from './generators/audioGen'
 import { planGen3d } from './generators/gen3d'
+import { planImageExtras } from './generators/imageExtras'
 import type { KeptExt } from './keptBytes'
 import type { AnswerKind } from './answerDownload'
 import { filesOf } from './values'
@@ -1136,6 +1137,11 @@ async function planNodeRequest(ctx: PlanContext): Promise<NodePlan> {
     case 'Hunyuan3DRemoteNode':
     case 'Hunyuan3DMultiViewNode':
       return planGen3d(ctx)
+    // ── image-extras (step 3, R3.12): Text effect, Sketch to image, Generate face references, one Replicate call each ──
+    case 'TextEffectNode':
+    case 'SketchToImageNode':
+    case 'ConsistentFaceNode':
+      return planImageExtras(ctx)
     case 'Text': return staticDerive(ctx, textCardUi)
     case 'Moodboard': return staticDerive(ctx)
     case 'Model3D': return staticDerive(ctx, textCardUi)

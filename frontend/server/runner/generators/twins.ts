@@ -355,6 +355,11 @@ export const RUNNER_ROUTES: Readonly<Record<string, Route>> = {
   ...Object.fromEntries([
     'Generate3DNode', 'Hunyuan3DRemoteNode', 'Hunyuan3DMultiViewNode',
   ].map(ct => [ct, r('replicate', null, 'fal\'s 3D models have no saved schema, so their settings aren\'t known to match')])),
+  // R3.12, text effect, sketch to image and face references (family image-extras): Replicate, as Python.
+  // fal's Ideogram V3 and Kontext Pro are the same models, but the backup rule isn't checked yet (a later task).
+  'TextEffectNode': r('replicate', null, 'fal runs the same models, but the backup\'s price isn\'t checked against Replicate\'s yet'),
+  'SketchToImageNode': r('replicate', null, 'no same-model twin on fal with the same settings is carded'),
+  'ConsistentFaceNode': r('replicate', null, 'Ideogram Character isn\'t carded on fal'),
 }
 
 // ── Generate video: the two models moved to fal first ──────────────────────

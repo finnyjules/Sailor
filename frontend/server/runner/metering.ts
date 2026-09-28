@@ -160,6 +160,10 @@ export const PAID_TEXT_INPUTS: Readonly<Record<string, readonly string[]>> = {
   MiniMaxSpeechRemoteNode: ['text'],
   // R3.9, Multi-View → 3D: its description of the subject (moderated only where it is sent: Rodin, or a wired engine; gen3dTextSent).
   Hunyuan3DMultiViewNode: ['prompt'],
+  // R3.12, text effect (its word, inside Sailor's template), sketch to image and face references (their prompts).
+  TextEffectNode: ['text'],
+  SketchToImageNode: ['prompt'],
+  ConsistentFaceNode: ['prompt'],
 }
 
 /** The non-blank values of RUNNER_EXTRA_TEXT_INPUTS (a typed-in taste, a paid class's PAID_TEXT_INPUTS) across the prompt, each on its own. */

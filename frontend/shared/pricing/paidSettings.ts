@@ -49,6 +49,7 @@ import {
   isSpeechClass, speechChars, type AudioGenClass,
 } from '../runner/audioGen'
 import { GEN_3D_CLASSES, GEN_3D_STEPS, HUNYUAN3D_MV_SLUG, HUNYUAN3D_SLUG, MULTI_VIEW_CLASS, multiViewSlugsOf } from '../runner/gen3d'
+import { FACE_SLUG, SKETCH_SLUG, textEffectSlug } from '../runner/imageExtras'
 
 /**
  * The most bytes of one moderated text in hosted (server/utils/moderation.ts
@@ -354,6 +355,22 @@ function gen3dPlanner(classType: string): PaidPlanner {
   }
 }
 
+// ── R3.12: text effect, sketch to image and face references (#shared/runner/imageExtras) ──
+
+/**
+ * One call each, whatever the settings: Text effect on the model its path
+ * calls (a picture wired in: Flux Kontext Pro restyles it; none: Ideogram V3
+ * Turbo generates the word), Sketch to image on Nano Banana (its edit card),
+ * Generate face references on Ideogram Character. A generate-mode Text effect
+ * with no text makes no call (Python raises first): the runner refuses it
+ * before the hold, so it is priced as a call, never held for nothing.
+ */
+const IMAGE_EXTRAS_PLANNERS: Readonly<Record<string, PaidPlanner>> = {
+  TextEffectNode: inputs => ({ steps: [{ call: { endpoint: textEffectSlug(inputs) }, times: 1 }] }),
+  SketchToImageNode: () => ({ steps: [{ call: { endpoint: SKETCH_SLUG }, times: 1 }] }),
+  ConsistentFaceNode: () => ({ steps: [{ call: { endpoint: FACE_SLUG }, times: 1 }] }),
+}
+
 /** Python returns "" before calling anyone when the text is blank (typed; a wired one is priced as a call). */
 function llmNoCall(classType: LlmTextClass): ((inputs: NodeInputs) => boolean) | null {
   const name = LLM_NO_CALL_INPUT[classType]
@@ -371,6 +388,7 @@ const PAID_PLANNERS: Readonly<Record<string, PaidPlanner>> = {
   [SPLIT_CLASS]: splitPlanner,
   ...Object.fromEntries(AUDIO_GEN_CLASSES.map(c => [c, audioGenPlanner(c)])),
   ...Object.fromEntries(GEN_3D_CLASSES.map(c => [c, gen3dPlanner(c)])),
+  ...IMAGE_EXTRAS_PLANNERS,
 }
 
 /** Each paid class's no-call rule (rule 8), where Python has one. Filled by each R3 task. */

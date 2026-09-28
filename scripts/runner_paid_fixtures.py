@@ -80,6 +80,12 @@ Groups:
                          with each call)
                runs    — paid_case (capture_calls) of a few preset shots with
                          the provider's answer, for the engine run
+  image-extras (R3.12) Text effect (every effect on both paths at every
+             freedom, every ratio, the seeds, the texts, text_effects.py's own
+             catalogue and functions), Sketch to image and Generate face
+             references (blank and non-ASCII prompts, every ratio, the seeds),
+             for frontend/server/runner/generators/textEffects.ts and
+             imageExtras.ts (tests/unit/runner-paid-image-extras.unit.spec.ts)
   handoff    (R3.H) the PNG `_image_tensor_to_data_url` sends for a loader's
              tensor: every file kind (EXIF 2–8, RGBA, grey + alpha, palette and
              colour-key transparency, CMYK, 16-bit, WebP, GIF…) through the real
@@ -1764,6 +1770,117 @@ def film_shot_group() -> dict:
             "cases": cases, "runs": runs}
 
 
+# ── image-extras (R3.12): Text effect, Sketch to image, Generate face references ──
+
+IMAGE_EXTRAS_OUT = "https://r.test/extras/out.png"
+IMAGE_EXTRAS_OUT_2 = "https://r.test/extras/second.png"
+TEXT_EFFECT_DEFAULTS = {"text": "HELLO", "effect": "liquid-chrome", "aspect_ratio": "1:1", "seed": 0, "freedom": 0.0}
+TEXT_EFFECT_FREEDOMS = (0.0, 0.12, 0.45, 0.78, 1.0, None)  # None: the widget missing (execute's default, 0.0)
+IMAGE_EXTRAS_SEEDS = (0, 42, 2 ** 31 - 1, 2 ** 31, 0xFFFFFFFF)
+IMAGE_EXTRAS_TEXTS = {
+    "blank": "",
+    "spaces": "   \t ",
+    "padded": "  Hi there \n",
+    "non-ASCII": "Café 日本 \U0001f98a — naïve",
+    "unicode blanks": "　 SALE \x1c\x85",
+}
+
+
+def image_extras_group() -> dict:
+    """R3.12: Text effect (TextEffectNode: Ideogram V3 Turbo to generate, Flux
+    Kontext Pro to restyle a wired picture), Sketch to image (Nano Banana) and
+    Generate face references (Ideogram Character), for
+    frontend/server/runner/generators/textEffects.ts and imageExtras.ts
+    (tests/unit/runner-paid-image-extras.unit.spec.ts):
+      catalogue — text_effects.py itself: the 16 effects, build_prompt,
+                  build_edit_prompt (every freedom band edge, None, out of
+                  range), aspect_ok, edit_aspect, build_text_effect_request
+      cases     — paid_case of every effect × both paths × every freedom; every
+                  ratio on both paths; the seeds; the texts; each answer shape;
+                  Sketch and Face with blank and non-ASCII prompts, every ratio
+                  and the seeds."""
+    import io
+    import runner_builder_fixtures as rbf
+    from comfy_api_nodes import text_effects as te
+    nr, _fal, _extras = rbf._node_modules()
+    files = {IMAGE_EXTRAS_OUT: _b64(png_bytes(8, 6, 21)), IMAGE_EXTRAS_OUT_2: _b64(png_bytes(8, 6, 22))}
+    cases: list = []
+
+    def add(name, cls, widgets, pictures=(), answer=None):
+        with contextlib.redirect_stdout(io.StringIO()):
+            cases.append(paid_case(name, cls, widgets, [answer or {"output": [IMAGE_EXTRAS_OUT]}], pictures=list(pictures), files=files))
+
+    def fx(name, restyle=False, answer=None, drop=(), **w):
+        widgets = {**TEXT_EFFECT_DEFAULTS, **w}
+        for k in drop:
+            widgets.pop(k)
+        add(f"text effect · {'restyle' if restyle else 'generate'} · {name}", nr.TextEffectNode, widgets,
+            ["image"] if restyle else [], answer)
+
+    # Every effect × both paths × every freedom (and the widget missing).
+    for eff in te.EFFECTS:
+        for restyle in (False, True):
+            for f in TEXT_EFFECT_FREEDOMS:
+                if f is None:
+                    fx(f"{eff.id} · freedom missing", restyle, effect=eff.id, drop=("freedom",))
+                else:
+                    fx(f"{eff.id} · freedom {f}", restyle, effect=eff.id, freedom=f)
+    # Every ratio on both paths.
+    for ar in nr._TEXT_EFFECT_AR:
+        for restyle in (False, True):
+            fx(f"ratio {ar}", restyle, aspect_ratio=ar)
+    # The seeds (Replicate's Ideogram stops at 2**31 - 1), the texts, the band edges.
+    for seed in IMAGE_EXTRAS_SEEDS:
+        for restyle in (False, True):
+            fx(f"seed {seed}", restyle, seed=seed)
+    for label, text in IMAGE_EXTRAS_TEXTS.items():
+        for restyle in (False, True):
+            fx(f"text {label}", restyle, text=text)
+    for f in (0.1199, 0.4499, 0.7799, 0.05, 0.6, 0.95):
+        fx(f"ink-in-water · freedom {f}", True, effect="ink-in-water", freedom=f)
+    # Each answer shape: a list, a string, two URLs (the first is the picture).
+    for restyle in (False, True):
+        fx("answer string", restyle, answer={"output": IMAGE_EXTRAS_OUT})
+        fx("answer two", restyle, answer={"output": [IMAGE_EXTRAS_OUT, IMAGE_EXTRAS_OUT_2]})
+
+    # Sketch to image: the prompts, each answer shape.
+    for label, text in IMAGE_EXTRAS_TEXTS.items():
+        add(f"sketch · prompt {label}", nr.SketchToImageNode, {"model": "Nano Banana", "prompt": text}, ["image"])
+    add("sketch · a castle", nr.SketchToImageNode, {"model": "Nano Banana", "prompt": "a castle at dusk, watercolour"}, ["image"])
+    add("sketch · answer string", nr.SketchToImageNode, {"model": "Nano Banana", "prompt": "a castle"}, ["image"], {"output": IMAGE_EXTRAS_OUT})
+    add("sketch · answer two", nr.SketchToImageNode, {"model": "Nano Banana", "prompt": "a castle"}, ["image"],
+        {"output": [IMAGE_EXTRAS_OUT, IMAGE_EXTRAS_OUT_2]})
+
+    # Generate face references: the prompts, every ratio, the seeds, each answer shape.
+    face = {"model": "Ideogram Character", "prompt": "in a sunny park, holding a coffee", "aspect_ratio": "1:1", "seed": 0}
+    for label, text in IMAGE_EXTRAS_TEXTS.items():
+        add(f"face · prompt {label}", nr.ConsistentFaceNode, {**face, "prompt": text}, ["reference_image"])
+    for ar in ("1:1", "16:9", "9:16", "4:3", "3:4", "16:10", "10:16"):
+        add(f"face · ratio {ar}", nr.ConsistentFaceNode, {**face, "aspect_ratio": ar}, ["reference_image"])
+    for seed in IMAGE_EXTRAS_SEEDS:
+        add(f"face · seed {seed}", nr.ConsistentFaceNode, {**face, "seed": seed}, ["reference_image"])
+    add("face · answer string", nr.ConsistentFaceNode, face, ["reference_image"], {"output": IMAGE_EXTRAS_OUT})
+    add("face · answer two", nr.ConsistentFaceNode, face, ["reference_image"], {"output": [IMAGE_EXTRAS_OUT, IMAGE_EXTRAS_OUT_2]})
+
+    # The catalogue, from text_effects.py itself (the TypeScript port is held to it).
+    texts = [*IMAGE_EXTRAS_TEXTS.values(), "HELLO", "a {TEXT} inside"]
+    ids = [e.id for e in te.EFFECTS] + ["no-such-effect", ""]
+    freedoms = [None, -0.5, 0.0, 0.05, 0.1199, 0.12, 0.3, 0.4499, 0.45, 0.6, 0.7799, 0.78, 0.9, 1.0, 1.5, 0, 1]
+    ratios = [*nr._TEXT_EFFECT_AR, "4:5", "21:9", "", "match_input_image", "1:1 "]
+    catalogue = {
+        "effects": [{"id": e.id, "label": e.label, "prompt_template": e.prompt_template, "edit_template": e.edit_template,
+                     "model_slug": e.model_slug, "medium": e.medium, "default_freedom": e.default_freedom} for e in te.EFFECTS],
+        "default_effect": te.DEFAULT_EFFECT_ID,
+        "match_input": te.MATCH_INPUT_AR,
+        "node_ratios": list(nr._TEXT_EFFECT_AR),
+        "prompts": [{"effect": i, "text": t, "prompt": te.build_prompt(i, t)} for i in ids for t in texts],
+        "edit_prompts": [{"effect": i, "freedom": f, "prompt": te.build_edit_prompt(i, "", f)} for i in ids for f in freedoms],
+        "aspect_ok": {r: te.aspect_ok(r) for r in ratios},
+        "edit_aspect": {r: te.edit_aspect(r) for r in ratios},
+    }
+    return {"catalogue": catalogue, "cases": cases}
+
+
 GROUPS = {
     "handoff": handoff_group,
     "machinery": machinery_group,
@@ -1775,6 +1892,7 @@ GROUPS = {
     "audio-gen": audio_gen_group,
     "gen-3d": gen_3d_group,
     "film-shot": film_shot_group,
+    "image-extras": image_extras_group,
 }
 
 

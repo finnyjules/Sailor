@@ -766,6 +766,9 @@ describe('B10 · one workflow per family, POST /api/runs to the last event', () 
       // Film a shot's preset path (R3.11) films as Generate a video does (replicate-video's and the
       // no-family models' flows): its engine runs are runner-paid-film-shot.unit.spec.ts.
       'film-shot',
+      // Text effect, sketch to image and face references (R3.12) make a picture on Replicate:
+      // runner-paid-image-extras.unit.spec.ts.
+      'image-extras',
     ]
     expect(FLOWS.map(f => f.family).sort()).toEqual(RUNNER_FAMILIES.filter(f => !local.includes(f)).sort())
   })

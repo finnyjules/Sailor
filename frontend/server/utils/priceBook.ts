@@ -221,7 +221,15 @@ export { VIDEO_RATES, MODEL_PRICED_NODE_CLASSES, SETTING_PRICED_NODE_CLASSES, RE
 // 2 and Hunyuan3D-2mv by GPU time (estimates: $0.10, 20 credits), TRELLIS by
 // GPU time (an estimate: $0.04, 8 credits) and Rodin at $0.40 an output (60
 // credits). Multi-View is priced by its engine (a wired engine at Rodin's).
-export const PRICE_BOOK_VERSION = 'r3-estimate-floor'
+// r3-image-extras (step 3, R3.12, ruling (a)): Text effect, Sketch to image and
+// Generate face references leave their flat rows for their calls, read from
+// Replicate's billing tables: Text effect by its path, generating on Ideogram
+// V3 Turbo at $0.03 a picture (8 → 6 credits) or restyling a wired picture on
+// Flux Kontext Pro at $0.04 (8, unchanged); Sketch to image on Nano Banana's
+// edit card, $0.039 (8, unchanged); Generate face references on Ideogram
+// Character at its default speed, $0.15 a picture (16 → 23; the badge said
+// $0.08). All verified: no estimate floor.
+export const PRICE_BOOK_VERSION = 'r3-image-extras'
 
 export const BASE_RENDER_CREDITS = 1
 
@@ -357,9 +365,8 @@ export const GRAPH_NODE_CREDITS: Record<string, number> = {
   FluxProRemoteNode: 8,            // badge $0.04
   FluxKontextRemoteNode: 8,        // badge $0.04
   IdeogramV3TurboRemoteNode: 6,    // badge $0.03 (Python class IdeogramV3TurboNode; node_id below)
-  TextEffectNode: 8,               // badge $0.04
-  SketchToImageNode: 8,            // badge $0.04
-  ConsistentFaceNode: 16,          // badge $0.08
+  // (Text effect, Sketch to image and Generate face references are priced by
+  // their calls since R3.12: shared/pricing/paidSettings.ts, on both paths.)
   // (Separate text from image, Layerize an image and Expand / outpaint are
   // priced by their calls since R3.6, and Separate background and foreground
   // since R3.7: shared/pricing/paidSettings.ts, on both paths.)

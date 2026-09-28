@@ -236,6 +236,26 @@ export const PAID_RATES: Record<string, PaidRate> = {
     unit: 'per_call', usd: 0.40,
     service: 'replicate', source: 'https://replicate.com/hyper3d/rodin', read: '2026-09-27', confidence: 'verified',
   },
+  // R3.12, text effect and face references (read 2026-09-27, plain GETs of the public pages; each
+  // page's billing table, `image_output_count`; each call makes one picture). Sketch to image's
+  // google/nano-banana is priced by its edit card (editRates.ts, $0.039).
+  // Text effect, generate: "$0.03 per output image" ("or around 33 images for $1").
+  'ideogram-ai/ideogram-v3-turbo': {
+    unit: 'per_call', usd: 0.03,
+    service: 'replicate', source: 'https://replicate.com/ideogram-ai/ideogram-v3-turbo', read: '2026-09-27', confidence: 'verified',
+  },
+  // Text effect, restyle: "$0.04 per output image" ("or 25 images for $1").
+  'black-forest-labs/flux-kontext-pro': {
+    unit: 'per_call', usd: 0.04,
+    service: 'replicate', source: 'https://replicate.com/black-forest-labs/flux-kontext-pro', read: '2026-09-27', confidence: 'verified',
+  },
+  // Generate face references: priced by the "model variant" (the input `rendering_speed`: Turbo $0.10,
+  // Default $0.15, Quality $0.20 per output image). Python sends no rendering_speed, so the schema's
+  // default, "Default": "$0.15 per output image" ("or around 66 images for $10").
+  'ideogram-ai/ideogram-character': {
+    unit: 'per_call', usd: 0.15,
+    service: 'replicate', source: 'https://replicate.com/ideogram-ai/ideogram-character', read: '2026-09-27', confidence: 'verified',
+  },
 }
 
 const own = <T>(o: Record<string, T>, k: string): T | undefined =>

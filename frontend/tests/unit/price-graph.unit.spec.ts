@@ -777,6 +777,25 @@ describe('an estimate never lowers the ComfyUI path (R3.9 fix round 2)', () => {
   })
 })
 
+// ───────────────────────────────────────────────────────────────────────────
+// R3.12 (ruling (a)): Text effect, Sketch to image and Generate face references
+// leave their flat rows (8, 8 and 16, from their badges) for their calls
+// (Replicate's billing tables): Text effect by its path, Ideogram V3 Turbo
+// $0.03 generating (6) or Flux Kontext Pro $0.04 restyling a wired picture (8);
+// Sketch on Nano Banana's edit card, $0.039 (8); Face references on Ideogram
+// Character at its default speed, $0.15 (23).
+// ───────────────────────────────────────────────────────────────────────────
+describe('text effect, sketch and face references on the ComfyUI path (R3.12)', () => {
+  const at = (ct: string, inputs: Record<string, unknown>) => priceGraph({ 1: { class_type: ct, inputs } }).nodes!['1']
+  it('each class, by its call', () => {
+    const fx = { text: 'HELLO', effect: 'liquid-chrome', aspect_ratio: '1:1', seed: 0, freedom: 0 }
+    expect(at('TextEffectNode', fx)).toBe(6)
+    expect(at('TextEffectNode', { ...fx, image: ['2', 0] })).toBe(8)
+    expect(at('SketchToImageNode', { model: 'Nano Banana', image: ['2', 0], prompt: 'a castle' })).toBe(8)
+    expect(at('ConsistentFaceNode', { model: 'Ideogram Character', reference_image: ['2', 0], prompt: '', aspect_ratio: '1:1', seed: 0 })).toBe(23)
+  })
+})
+
 // R3.8 fix round 2: a node no output node reads is never run by ComfyUI (nor the runner), so the
 // hosted ComfyUI meter prices only what runs — the runner's own closure (validate.ts executedPart).
 describe('only what an output reads is priced (R3.8 fix round 2)', () => {

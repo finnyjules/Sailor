@@ -98,6 +98,10 @@ const EDIT_BASE: Record<string, Record<string, unknown>> = {
   Generate3DNode: { model: 'Hunyuan3D 2', image: LINK },
   Hunyuan3DRemoteNode: { image: LINK },
   Hunyuan3DMultiViewNode: { front_image: LINK, engine: 'TRELLIS (textured)' },
+  // Text effect, sketch to image and face references (R3.12): Text effect generating (no picture), the others' picture.
+  TextEffectNode: { text: 'HELLO', effect: 'liquid-chrome', aspect_ratio: '1:1', seed: 0, freedom: 0 },
+  SketchToImageNode: { model: 'Nano Banana', image: LINK, prompt: 'a castle' },
+  ConsistentFaceNode: { model: 'Ideogram Character', reference_image: LINK, prompt: 'in a park', aspect_ratio: '1:1', seed: 0 },
   // sync-3 lip-sync (Task F22): the studio's face video and sound.
   LipSyncNode: {
     engine: 'sync-3',
