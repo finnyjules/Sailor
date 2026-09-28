@@ -172,6 +172,7 @@
   color: rgba(255, 255, 255, 0.6);
 }
 .node-btn:hover { background: rgba(255, 255, 255, 0.08); color: rgba(255, 255, 255, 0.92); }
+.node-btn--icon { width: 28px; padding: 0; justify-content: center; }
 .node-btn--primary { background: #f2f2f2; color: #111; }
 .node-btn--primary:hover { background: #fff; color: #111; }
 .node-btn__price { font-weight: 500; color: rgba(0, 0, 0, 0.45); }

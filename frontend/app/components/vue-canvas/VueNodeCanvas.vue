@@ -9155,12 +9155,11 @@ defineExpose({
 
 /* Artifact cards use their own root classes (not .comfy-node), so the rule
    above never reached them — they got selected on click but showed no ring,
-   which read as "can't select". Mirror the highlight on every artifact root. */
-.vue-node-canvas .vue-flow__node.selected .artifact-frame-node,
-.vue-node-canvas .vue-flow__node.selected .artifact-timeline {
+   which read as "can't select". The Frame and Timeline roots now carry the
+   name row above the card, so the outline sits on the glass, not the name above it. */
+.vue-node-canvas .vue-flow__node.selected .print-surface__glass {
   outline: 2px solid var(--action);
   outline-offset: 3px;
-  border-radius: 12px;
 }
 
 /* Content cards (stage 4): the outline sits on the content itself, not on the name above it. */

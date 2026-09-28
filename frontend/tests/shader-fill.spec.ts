@@ -322,7 +322,9 @@ test.describe('Shader as fill — golden coverage per surface', () => {
       },
     })
 
-    await page.getByRole('button', { name: 'Edit', exact: true }).first().click()
+    const frameCard = page.locator('.vue-flow__node-artifact-frame').first()
+    await frameCard.hover()
+    await frameCard.getByRole('button', { name: 'Open', exact: true }).click()
     const canvas = '[data-testid="compositor-stack-canvas"]'
     await expect(page.locator(canvas)).toBeVisible({ timeout: 10_000 })
 
@@ -386,7 +388,9 @@ test.describe('Shader as fill — golden coverage per surface', () => {
         }],
       },
     })
-    await page.getByRole('button', { name: 'Edit', exact: true }).first().click()
+    const frameCard = page.locator('.vue-flow__node-artifact-frame').first()
+    await frameCard.hover()
+    await frameCard.getByRole('button', { name: 'Open', exact: true }).click()
     const canvas = '[data-testid="compositor-stack-canvas"]'
     await expect(page.locator(canvas)).toBeVisible({ timeout: 10_000 })
     await page.waitForTimeout(1_500)

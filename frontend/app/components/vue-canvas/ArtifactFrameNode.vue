@@ -1,7 +1,6 @@
 <script setup lang="ts">
-import { Handle, Position } from '@vue-flow/core'
 import {
-  Download, Pencil, Frame as FrameIcon, ImagePlus,
+  Download, ImagePlus,
   MousePointer2, Check, Type, Square, Circle, Minus, Trash2, X,
 } from 'lucide-vue-next'
 import { getTypeColor } from '~/composables/useVueNodes'
@@ -29,7 +28,6 @@ import { downloadBlobAsFile } from '~/lib/studio/downloadBlob'
 import { resolveWiredSourceKind } from '~/lib/studio/frameResolve'
 import { frameSourceEpoch, type StudioFrameSource } from '~/lib/studio/frameSource'
 import { deriveMasterClock, slotPhase01, masterFrameIndex } from '~/lib/compositor/masterClock'
-import { portOffset } from '~/lib/canvas/portLayout'
 import { onFieldCatalogReady } from '~/lib/shaderfill/field'
 import { readLayoutGrid, resolveLayoutGrid } from '~/lib/frame/layoutGrid'
 import { formatFor } from '~/lib/frame/formats'
@@ -37,6 +35,9 @@ import LayoutGridOverlay from './LayoutGridOverlay.vue'
 import { FRAME_SIZE_PRESET_GROUPS, FRAME_SIZE_PRESETS, applyFramePreset, framePresetId, readFrameSize, setFrameDim, setFrameResponsive } from '~/lib/frame/frameSize'
 import { isResponsiveFrame } from '~/lib/frame/responsive/fromNode'
 import { toast } from 'vue-sonner'
+import PrintSurface from '~/components/vue-canvas/surfaces/PrintSurface.vue'
+import NodeOpenBar from '~/components/vue-canvas/surfaces/NodeOpenBar.vue'
+import { formatPrintSize } from '~/lib/canvas/printSize'
 
 // The "Frame" — the Compositor as a first-class artboard artifact. Shows its
 // live composite (wired layers from `data.images` + a live local-layer overlay),
@@ -58,6 +59,7 @@ const props = defineProps<{
     images?: string[]
     studioBusy?: boolean
   }
+  selected?: boolean
 }>()
 
 const isMuted = computed(() => props.data.mode === 2)
@@ -128,7 +130,7 @@ const aspect = computed(() => {
 // On-canvas display size (the frame's longest edge in logical px) — the size
 // you *work* at on the canvas, distinct from the output resolution (the W×H
 // widgets / presets). Drag the corner grip to change it; persisted on the node.
-const displayEdge = computed(() => Number((props.data.properties as any)?.sailor_frame?.displayEdge) || 300)
+const displayEdge = computed(() => Number((props.data.properties as any)?.sailor_frame?.displayEdge) || 308)
 function setDisplayEdge(v: number) {
   if (!props.data.properties) (props.data as any).properties = {}
   ;(props.data.properties as any).sailor_frame = {
@@ -186,15 +188,6 @@ const layerSlots = computed<number[]>(() => {
   if (next < 16) slots.push(next)
   return slots
 })
-// Inputs stack from the node's vertical centre DOWNWARD — the shared port rule
-// (portOffset / PORT_PITCH), so the Frame matches every other node and surface.
-// idx 0 sits dead centre; each later slot is one pitch below. (The old formula
-// spread ports across the full node height, so two slots landed at the very top
-// and bottom instead of near the middle.)
-function handleTop(idx: number): string {
-  return `calc(50% + ${portOffset(idx)}px)`
-}
-
 function wiredOpacity(slot: number): number {
   const i = widgetIdx(`layer${slot + 1}_opacity`)
   if (i < 0) return 1
@@ -568,6 +561,9 @@ function renderStack(t?: number, live = false) {
   withWiredContent(wiredContentForSlot, () =>
     paintLayerStack(ctx, W, H, buildStackItems(), editor.localLayers.value, l => l.id === editor.editingId.value,
       t, undefined, wiredTreatments.value, editor.background.value, editor.localGroups.value, editor.postEffects.value, false, editor.frameLight.value))
+  // The glass takes its tint from the artwork at rest. Live (hover-play) paints are skipped: a
+  // tint that followed every frame would be a copy per frame for a colour nobody sees change.
+  if (!live) printRef.value?.capture(cv)
 }
 
 // ── Live animation loop ──────────────────────────────────────────────────────
@@ -583,6 +579,25 @@ const masterClock = computed(() => deriveMasterClock(
     ...clipClocks(editor.localLayers.value),
   ],
   (props.data.properties as any)?.sailor_frame?.clock ?? null))
+const printRef = ref<{ capture: (src: HTMLCanvasElement) => void } | null>(null)
+const sizeOpen = ref(false)
+const sizeLabel = computed(() => formatPrintSize(frameW.value, frameH.value, {
+  responsive: isResponsive.value,
+  loopSec: masterClock.value?.duration,
+}))
+const loopTitle = computed(() => masterClock.value && masterClock.value.duration > 0
+  ? `Loops every ${Math.round(masterClock.value.duration)}s${masterClock.value.capped ? ' (capped)' : ''}`
+  : undefined)
+const sizePanelEl = ref<HTMLElement | null>(null)
+function onSizeOutside(e: PointerEvent) {
+  if (sizePanelEl.value && !sizePanelEl.value.contains(e.target as Node)) sizeOpen.value = false
+}
+function onSizeKey(e: KeyboardEvent) { if (e.key === 'Escape') sizeOpen.value = false }
+watch(sizeOpen, (open) => {
+  if (open) { window.addEventListener('pointerdown', onSizeOutside, true); window.addEventListener('keydown', onSizeKey) }
+  else { window.removeEventListener('pointerdown', onSizeOutside, true); window.removeEventListener('keydown', onSizeKey) }
+})
+onBeforeUnmount(() => { window.removeEventListener('pointerdown', onSizeOutside, true); window.removeEventListener('keydown', onSizeKey) })
 const hasAnimatedSlot = computed(() =>
   wiredLayers.value.some(l => l.live && l.live.duration > 0)
   || clipClocks(editor.localLayers.value).length > 0)
@@ -1166,67 +1181,58 @@ onUnmounted(() => {
     ref="rootEl"
     class="artifact-frame-node relative select-none"
     :class="{ 'opacity-45 grayscale': isMuted, 'opacity-85': isBypassed }"
-    :style="{ width: box.w + 'px', '--port-color': imageColor } as any"
-    :data-running="data.running || undefined"
+    :style="{ width: (box.w + 12) + 'px', '--port-color': imageColor } as any"
     @dragover="onDragOver" @dragleave="onDragLeave" @drop="onDrop"
     @pointerenter="onFrameHoverEnter" @pointerleave="onFrameHoverLeave"
   >
-    <VueCanvasNodeReadyBadge :node-id="id" />
-    <Handle
-      v-for="(slot, i) in layerSlots" :key="slot" :id="`input-${slot}`"
-      type="target" :position="Position.Left"
-      class="!w-3 !h-3 !rounded-full !border-2 !bg-[#1a1a1a]"
-      :style="{ borderColor: imageColor, top: handleTop(i) }"
-    />
-    <Handle
-      :id="`output-${imageOutIdx}`" type="source" :position="Position.Right"
-      class="!w-3 !h-3 !rounded-full !border-2 !bg-[#1a1a1a]"
-      :style="{ borderColor: imageColor, top: '50%' }"
-    />
-
-    <div
-      class="frame-shell rounded-lg overflow-hidden bg-[#0e0e0e] border"
-      :class="data.error ? 'border-red-500 ring-2 ring-red-500' : editMode ? 'border-cyan-400/70 ring-2 ring-cyan-400/40' : 'border-white/10'"
+    <PrintSurface
+      ref="printRef"
+      name="Frame"
+      :selected="selected || exportingVideo"
+      :data-running="data.running || undefined"
+      :data-error="data.error ? '' : undefined"
+      :data-editing="editMode ? '' : undefined"
+      :data-bypassed="isBypassed ? '' : undefined"
     >
-      <!-- Header: title + dimensions -->
-      <div class="flex items-center gap-1.5 px-2 py-1.5 border-b border-white/5">
-        <FrameIcon class="size-3 text-white/45 shrink-0" />
-        <select
-          class="nopan nodrag bg-transparent text-[10.5px] text-white/70 outline-none cursor-pointer hover:text-white/90 max-w-[120px]"
-          :value="activePresetId" @change="onPresetChange"
-        >
-          <option value="" disabled hidden>Size…</option>
-          <optgroup v-for="g in PRESET_GROUPS" :key="g.heading" :label="g.heading">
-            <option v-for="p in g.items" :key="p.id" :value="p.id">{{ p.label }}</option>
-          </optgroup>
-          <option value="responsive">Responsive</option>
-          <option value="custom" disabled hidden>Custom</option>
-        </select>
-        <span class="flex-1" />
-        <span
-          v-if="masterClock && masterClock.duration > 0"
-          class="flex items-center gap-0.5 text-[10px] text-white/40 tabular-nums whitespace-nowrap shrink-0"
-          :title="`Loops every ${Math.round(masterClock.duration)}s${masterClock.capped ? ' (capped)' : ''}`"
-        >⟲ {{ Math.round(masterClock.duration) }}s<span v-if="masterClock.capped" class="text-amber-400">!</span></span>
-        <span class="text-[10px] uppercase tracking-wide text-white/40 shrink-0">{{ isResponsive ? 'Designed at' : 'Size' }}</span>
-        <div class="flex items-center gap-1 text-[10px] text-white/40 tabular-nums">
-          <input type="number" min="0" :value="frameW || ''" placeholder="W"
-            class="nopan nodrag w-14 bg-white/[0.04] rounded px-1.5 py-0.5 text-right text-white/70 outline-none focus:bg-white/[0.08] [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
-            @change="setDim('width', $event)" />
-          <span>×</span>
-          <input type="number" min="0" :value="frameH || ''" placeholder="H"
-            class="nopan nodrag w-14 bg-white/[0.04] rounded px-1.5 py-0.5 text-right text-white/70 outline-none focus:bg-white/[0.08] [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
-            @change="setDim('height', $event)" />
-        </div>
-        <span v-if="videoStatus" class="shrink min-w-0 truncate text-[10px] text-white/45 tabular-nums" :title="videoStatus">{{ videoStatus }}</span>
-        <button v-if="exportingVideo" class="nopan nodrag shrink-0 size-5 rounded flex items-center justify-center text-white/60 hover:text-white hover:bg-white/[0.08] cursor-pointer" title="Stop" @click.stop="stopVideoExport"><X class="size-3" /></button>
-        <button v-else class="nopan nodrag shrink-0 size-5 rounded flex items-center justify-center text-white/40 hover:text-white/85 hover:bg-white/[0.08] cursor-pointer disabled:opacity-40" :disabled="!hasAnyLayer && !compositeUrl" title="Download" @click.stop="downloadImage"><Download class="size-3" /></button>
-      </div>
+      <template #size>
+        <span ref="sizePanelEl" class="relative">
+          <button
+            type="button"
+            class="print-surface__size nopan nodrag cursor-pointer hover:text-white/70"
+            :title="loopTitle"
+            @click.stop="sizeOpen = !sizeOpen"
+          >{{ sizeLabel }}</button>
+          <div
+            v-if="sizeOpen"
+            class="frame-size-panel nopan nodrag absolute left-0 top-full z-50 mt-1 flex items-center gap-1.5 rounded-md px-2 py-1.5 text-[11px] text-white/60 tabular-nums"
+          >
+            <select
+              class="bg-transparent text-white/80 outline-none cursor-pointer max-w-[140px]"
+              :value="activePresetId" @change="onPresetChange"
+            >
+              <option value="" disabled hidden>Size…</option>
+              <optgroup v-for="g in PRESET_GROUPS" :key="g.heading" :label="g.heading">
+                <option v-for="p in g.items" :key="p.id" :value="p.id">{{ p.label }}</option>
+              </optgroup>
+              <option value="responsive">Responsive</option>
+              <option value="custom" disabled hidden>Custom</option>
+            </select>
+            <span class="text-white/40">{{ isResponsive ? 'Designed at' : 'Size' }}</span>
+            <input type="number" min="0" :value="frameW || ''" placeholder="W" aria-label="Width"
+              class="w-14 bg-white/[0.06] rounded px-1.5 py-0.5 text-right text-white/80 outline-none focus:bg-white/[0.1] [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+              @change="setDim('width', $event)" />
+            <span>×</span>
+            <input type="number" min="0" :value="frameH || ''" placeholder="H" aria-label="Height"
+              class="w-14 bg-white/[0.06] rounded px-1.5 py-0.5 text-right text-white/80 outline-none focus:bg-white/[0.1] [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+              @change="setDim('height', $event)" />
+          </div>
+        </span>
+      </template>
 
       <!-- Artboard -->
       <div
         ref="artboardRef"
-        class="artboard group relative bg-checker overflow-hidden"
+        class="artboard relative bg-checker overflow-hidden"
         :class="editMode ? 'nopan nodrag cursor-default' : 'cursor-pointer'"
         :style="{ width: box.w + 'px', height: box.h + 'px' }"
         @dblclick.capture="onArtboardDblClick"
@@ -1236,12 +1242,6 @@ onUnmounted(() => {
 
         <!-- Layout grid — editor guide only, gated on edit mode; outside the paint/export/bake path. -->
         <LayoutGridOverlay v-if="showGridOverlay" data-testid="frame-card-grid-overlay" :grid="cardGridResolved" :show="true" :moving="false" :covered="null" :w="box.w" :h="box.h" />
-
-        <!-- Quick inline edit — appears over the preview on hover -->
-        <button v-if="!editMode" class="nopan nodrag absolute left-2 top-2 z-10 h-6 px-2 rounded flex items-center gap-1 text-[10px] bg-black/55 backdrop-blur-sm text-white/85 opacity-0 group-hover:opacity-100 transition-opacity hover:bg-black/75 cursor-pointer"
-          title="Edit directly on the canvas" @pointerdown.stop @click.stop="toggleEdit">
-          <MousePointer2 class="size-2.5" /> Edit here
-        </button>
 
         <div v-if="!hasAnyLayer" class="absolute inset-0 flex flex-col items-center justify-center gap-2 text-white/35 pointer-events-none">
           <ImagePlus class="size-7" :stroke-width="1.5" />
@@ -1284,41 +1284,56 @@ onUnmounted(() => {
           @blur="editor.endEdit()" @keydown.escape.prevent="editor.endEdit()" @pointerdown.stop />
       </div>
 
-      <!-- Inline edit toolbar -->
-      <div v-if="editMode" class="flex items-center gap-0.5 px-1.5 py-1 border-t border-white/5 bg-cyan-400/[0.04]">
-        <button class="nopan nodrag size-6 rounded flex items-center justify-center text-white/60 hover:text-white hover:bg-white/10" title="Add text" @click="editor.addText()"><Type class="size-3" /></button>
-        <button class="nopan nodrag size-6 rounded flex items-center justify-center text-white/60 hover:text-white hover:bg-white/10" title="Add rectangle" @click="editor.addRect()"><Square class="size-3" /></button>
-        <button class="nopan nodrag size-6 rounded flex items-center justify-center text-white/60 hover:text-white hover:bg-white/10" title="Add ellipse" @click="editor.addEllipse()"><Circle class="size-3" /></button>
-        <button class="nopan nodrag size-6 rounded flex items-center justify-center text-white/60 hover:text-white hover:bg-white/10" title="Add line" @click="editor.addLine()"><Minus class="size-3" /></button>
-        <div class="relative inline-flex">
-          <button class="nopan nodrag size-6 rounded flex items-center justify-center text-white/60 hover:text-white hover:bg-white/10" title="Add image" @click="addMenuOpen = !addMenuOpen"><ImagePlus class="size-3" /></button>
-          <AddImageSourcePopover :open="addMenuOpen" @upload="onUploadChoice" @pick="onPickCanvasImage" @close="addMenuOpen = false" />
+      <template v-if="!editMode" #openbar>
+        <NodeOpenBar :meta="videoStatus || ''">
+          <button v-if="exportingVideo" type="button" class="node-btn node-btn--icon nopan nodrag" title="Stop" aria-label="Stop" @click.stop="stopVideoExport"><X class="size-3.5" /></button>
+          <button v-else type="button" class="node-btn node-btn--icon nopan nodrag" :disabled="!hasAnyLayer && !compositeUrl" title="Download" aria-label="Download" @click.stop="downloadImage"><Download class="size-3.5" /></button>
+          <button type="button" class="node-btn node-btn--icon nopan nodrag" title="Edit here" aria-label="Edit here" @pointerdown.stop @click.stop="toggleEdit"><MousePointer2 class="size-3.5" /></button>
+          <button type="button" class="node-btn nopan nodrag" title="Open the full editor" @click.stop="openEditor">Open</button>
+          <StudioRenderButton class="shrink-0" :node-id="id" :busy="!!data?.studioBusy || !!data?.running" />
+        </NodeOpenBar>
+      </template>
+
+      <template #overlay>
+        <VueCanvasNodeReadyBadge :node-id="id" />
+        <VueCanvasNodePort
+          v-for="(slot, i) in layerSlots" :id="`input-${slot}`" :key="slot"
+          type="target" side="left" :index="i" data-type="IMAGE" label="layer"
+        />
+        <VueCanvasNodePort
+          :id="`output-${imageOutIdx}`" type="source" side="right"
+          :index="0" data-type="IMAGE" label="image"
+        />
+        <!-- Corner resize grip — sets the on-canvas display size (not output res) -->
+        <div
+          class="nopan nodrag absolute -bottom-1.5 -right-1.5 z-[7] size-4 cursor-nwse-resize group/resize"
+          title="Resize frame (display size)"
+          @pointerdown="onResizeDown"
+        >
+          <div class="absolute bottom-1 right-1 size-2 border-b-2 border-r-2 border-white/30 group-hover/resize:border-cyan-400 rounded-[1px]" />
         </div>
-        <input ref="imageInputRef" type="file" accept="image/*" class="hidden" @change="onAddImageFile" />
-        <BrandImagePicker @add="(name, aspect) => editor.addImageFromName(name, aspect)" />
-        <span class="w-px h-4 bg-white/10 mx-0.5" />
-        <button v-if="editor.selectedId.value" class="nopan nodrag size-6 rounded flex items-center justify-center text-white/50 hover:text-rose-300 hover:bg-rose-500/10" title="Delete layer" @click="editor.deleteLocal(editor.selectedId.value)"><Trash2 class="size-3" /></button>
-        <span class="flex-1" />
-        <button class="nopan nodrag h-6 px-2 rounded flex items-center gap-1 text-[10px] text-cyan-300 hover:bg-cyan-400/10" title="Done editing" @click="exitEdit"><Check class="size-3" /> Done</button>
-      </div>
+      </template>
 
-      <!-- Footer: Edit (opens the modal) + Render, like the studios -->
-      <div v-else class="flex items-center gap-1.5 px-2 py-2 border-t border-white/5">
-        <button class="nopan nodrag flex flex-1 items-center justify-center gap-1.5 rounded bg-white/10 px-2.5 py-1.5 text-[11px] text-white/80 transition hover:bg-white/20 cursor-pointer" title="Open the full editor" @click.stop="openEditor">
-          <Pencil class="h-3 w-3" /> Edit
-        </button>
-        <StudioRenderButton class="shrink-0" :node-id="id" :busy="!!data?.studioBusy || !!data?.running" />
-      </div>
-    </div>
-
-    <!-- Corner resize grip — sets the on-canvas display size (not output res) -->
-    <div
-      class="nopan nodrag absolute -bottom-1.5 -right-1.5 size-4 cursor-nwse-resize group/resize"
-      title="Resize frame (display size)"
-      @pointerdown="onResizeDown"
-    >
-      <div class="absolute bottom-1 right-1 size-2 border-b-2 border-r-2 border-white/30 group-hover/resize:border-cyan-400 rounded-[1px]" />
-    </div>
+      <template v-if="editMode" #below>
+        <!-- Inline edit toolbar -->
+        <div class="frame-edit-bar mt-1.5 flex items-center gap-0.5 rounded-lg px-1.5 py-1">
+          <button class="nopan nodrag size-6 rounded flex items-center justify-center text-white/60 hover:text-white hover:bg-white/10" title="Add text" @click="editor.addText()"><Type class="size-3" /></button>
+          <button class="nopan nodrag size-6 rounded flex items-center justify-center text-white/60 hover:text-white hover:bg-white/10" title="Add rectangle" @click="editor.addRect()"><Square class="size-3" /></button>
+          <button class="nopan nodrag size-6 rounded flex items-center justify-center text-white/60 hover:text-white hover:bg-white/10" title="Add ellipse" @click="editor.addEllipse()"><Circle class="size-3" /></button>
+          <button class="nopan nodrag size-6 rounded flex items-center justify-center text-white/60 hover:text-white hover:bg-white/10" title="Add line" @click="editor.addLine()"><Minus class="size-3" /></button>
+          <div class="relative inline-flex">
+            <button class="nopan nodrag size-6 rounded flex items-center justify-center text-white/60 hover:text-white hover:bg-white/10" title="Add image" @click="addMenuOpen = !addMenuOpen"><ImagePlus class="size-3" /></button>
+            <AddImageSourcePopover :open="addMenuOpen" @upload="onUploadChoice" @pick="onPickCanvasImage" @close="addMenuOpen = false" />
+          </div>
+          <input ref="imageInputRef" type="file" accept="image/*" class="hidden" @change="onAddImageFile" />
+          <BrandImagePicker @add="(name, aspect) => editor.addImageFromName(name, aspect)" />
+          <span class="w-px h-4 bg-white/10 mx-0.5" />
+          <button v-if="editor.selectedId.value" class="nopan nodrag size-6 rounded flex items-center justify-center text-white/50 hover:text-rose-300 hover:bg-rose-500/10" title="Delete layer" @click="editor.deleteLocal(editor.selectedId.value)"><Trash2 class="size-3" /></button>
+          <span class="flex-1" />
+          <button class="nopan nodrag h-6 px-2 rounded flex items-center gap-1 text-[10px] text-cyan-300 hover:bg-cyan-400/10" title="Done editing" @click="exitEdit"><Check class="size-3" /> Done</button>
+        </div>
+      </template>
+    </PrintSurface>
 
     <!-- Floating contextual toolbar (screen-space, above the selected layer) -->
     <Teleport to="body">
@@ -1336,8 +1351,6 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
-.frame-shell { box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4), 0 1px 4px rgba(0, 0, 0, 0.2); }
-.artifact-frame-node[data-running] .frame-shell { box-shadow: 0 0 0 2px var(--port-color, #fff), 0 4px 16px rgba(0, 0, 0, 0.4); }
 .bg-checker {
   background-color: #141414;
   background-image:
@@ -1347,5 +1360,10 @@ onUnmounted(() => {
     linear-gradient(-45deg, transparent 75%, #1c1c1c 75%);
   background-size: 16px 16px;
   background-position: 0 0, 0 8px, 8px -8px, -8px 0;
+}
+.frame-size-panel,
+.frame-edit-bar {
+  background: rgba(22, 22, 22, 0.92);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08), 0 8px 24px rgba(0, 0, 0, 0.45);
 }
 </style>
