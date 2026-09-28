@@ -23,7 +23,7 @@ import { IMAGE_OUTPUT_CLASSES, PAID_PICTURE_FAMILY, PROVIDER_TYPES, RUNNER_NODE_
 import { nodesNeedingEngine } from '#shared/runner/needsEngine'
 import { RUNNER_OUTPUT_CLASSES } from '#shared/runner/validate'
 import {
-  LENS_CUSTOM, LENS_NAMES, NANO_EXTRAS_CLASSES, NANO_EXTRAS_SLUG, POSE_COND_RAISES, POSE_RESULT_MISSING, bakedFileName, poseNoCall,
+  LENS_CUSTOM, LENS_NAMES, NANO_EXTRAS_CLASSES, NANO_EXTRAS_SLUG, POSE_RESULT_MISSING, bakedFileName, poseNoCall, savedPoseRefs,
 } from '#shared/runner/nanoExtras'
 import { EDIT_RATES } from '#shared/pricing/editRates'
 import { SETTING_PRICED_NODE_CLASSES, editCalls } from '#shared/pricing/editSettings'
@@ -54,7 +54,11 @@ interface Catalogue {
   pose_instruction: { source: string; extra: string; pose: string; out: string }[]
 }
 type Pixels = { shape: number[]; sha256: string }
-type NanoCase = PaidCase & { made?: Record<string, Pixels>; loaded?: Record<string, Pixels>; input_files?: Record<string, string> }
+/** The runner's deliberate deviation (R3.15 fix round 1): the conditioning render makes the call Python's `or` never reaches. */
+interface RunnerDeviation { calls: PaidCase['calls']; error: PaidCase['error'] | null; output: unknown; ui: unknown; made: Record<string, Pixels>; reason: string }
+type NanoCase = PaidCase & { made?: Record<string, Pixels>; loaded?: Record<string, Pixels>; input_files?: Record<string, string>; runner?: RunnerDeviation }
+/** What the runner is held to: Python's case, or its deviation where the fixture records one. */
+const heldTo = (c: NanoCase) => (c.runner ? { calls: c.runner.calls, made: c.runner.made, ui: c.runner.ui, output: c.runner.output } : { calls: c.calls, made: c.made ?? {}, ui: c.ui, output: c.output })
 const FIXTURE = JSON.parse(readFileSync(join(__dirname, 'fixtures', 'runner-paid-nano-extras.json'), 'utf8')) as { cases: NanoCase[]; baked: Record<string, string>; catalogue: Catalogue }
 const CASES = FIXTURE.cases
 const CAT = FIXTURE.catalogue
@@ -159,7 +163,9 @@ describe('the fixture', () => {
     for (const f of ['pose_result_exif6.png', 'pose_result_exif6.jpg']) expect(names.has(`pose · mannequin · baked result ${f}`), f).toBe(true)
     expect(pose.filter(c => (c.output as { tensor?: unknown }[] | null)?.[0]?.tensor).length).toBeGreaterThanOrEqual(6)
     expect(pose.filter(c => JSON.stringify(c.output) === '[{"image":"IMG:character"}]').length).toBeGreaterThanOrEqual(8)
-    expect(pose.filter(c => c.error).map(c => c.name).sort()).toEqual(['pose · mannequin · conditioning and mannequin renders', 'pose · mannequin · conditioning render'])
+    // Python raises on every loading conditioning render (the runner's deviation, fix round 1).
+    expect(pose.filter(c => c.error).map(c => c.name).sort()).toEqual(CASES.filter(c => c.runner).map(c => c.name).sort())
+    expect(pose.filter(c => c.error).length).toBe(5)
     for (const t of ['blank', 'spaces', 'unicode blanks']) expect(names.has(`pose · prompt · pose prompt ${t}`)).toBe(true)
     expect(names.has('pose · mannequin · missing result, the mannequin render')).toBe(true)
     // One call at most, always Nano Banana 2 on Replicate.
@@ -186,41 +192,47 @@ describe('the catalogue: _lenses.py and _pose_prompts.py, ported line for line',
   })
 })
 
-/** The cases that make no call although priced as one (a named file that isn't there, or no call in the end). */
+/** The cases that make no call although priced as one: a named render that isn't there. */
 const PRICED_AS_CALL_NO_CALL = [
-  'pose · mannequin · conditioning and mannequin renders',
-  'pose · mannequin · conditioning render',
   'pose · mannequin · missing mannequin render (passes the character)',
 ]
-/** Priced as no call, yet Python calls: the saved pose is gone (hosted refuses it before the hold). */
-const PRICED_FREE_BUT_CALLS = [
+/** A saved pose named but gone, the call Python falls to: priced as a call (fix round 1), refused in hosted. */
+const SAVED_POSE_GONE_CALLS = [
   'pose · mannequin · missing result, the mannequin render',
+  'pose · mannequin · missing result, the conditioning render',
 ]
+/** Whether Python loaded the case's saved pose (it is the output): what a caller that read the file knows. */
+const savedPoseLoaded = (c: NanoCase) => !!(heldTo(c).output as { tensor?: unknown }[] | null)?.[0]?.tensor
 
 describe('every fixture case: what Python sends and returns', () => {
   const offSchema: string[] = []
 
   it.each(CASES.map(c => [c.name, c] as const))('%s', async (_n, c) => {
     const inputs = withPictures(c).n!.inputs
-    // What the price says (paidNoCall, rule 8) matches the branch, bar the named-file cases.
-    const free = paidNoCall(c.class_type, inputs)
-    if (PRICED_FREE_BUT_CALLS.includes(c.name)) expect(free).toBe(true)
-    else if (PRICED_AS_CALL_NO_CALL.includes(c.name)) expect(free).toBe(false)
-    else expect(free, 'paidNoCall').toBe(!c.calls.length && !c.error)
-    // Python raises: the runner refuses in plain words, before any call.
+    const held = heldTo(c)
+    // Python raises only where the runner deviates (the conditioning render), and the deviation calls.
     if (c.error) {
       expect(c.error.message).toMatch(/Boolean value of Tensor/)
-      await expect(planOf(c)).rejects.toThrow(POSE_COND_RAISES)
-      return
+      expect(c.runner?.error ?? null).toBeNull()
+      expect(c.runner!.calls.length).toBe(1)
+    }
+    else expect(c.runner).toBeUndefined()
+    // What the price says (paidNoCall, rule 8) matches the branch, given what reading the saved pose found.
+    const free = paidNoCall(c.class_type, inputs, { savedPoseLoads: savedPoseLoaded(c) })
+    if (PRICED_AS_CALL_NO_CALL.includes(c.name)) expect(free).toBe(false)
+    else expect(free, 'paidNoCall').toBe(!held.calls.length)
+    // Not read, a named saved pose is never free where a render would make the call Python falls to (fix round 1).
+    if (isPose(c) && savedPoseRefs(withPictures(c))['n'] && (bakedFileName(inputs.pose_cond_image) || bakedFileName(inputs.mannequin_image))) {
+      expect(paidNoCall(c.class_type, inputs), 'unread saved pose').toBe(false)
     }
     const { plan, made } = await planOf(c)
-    if (c.calls.length) {
+    if (held.calls.length) {
       if (plan.kind !== 'provider') throw new Error(`${c.name}: planned ${plan.kind}`)
       expect(plan.provider).toBe('replicate')
       expect(plan.endpoint).toBe(NANO_EXTRAS_SLUG)
       expect(plan.media).toBe('image')
       expect(plan.take).toBe('first')
-      const py = c.calls[0]!
+      const py = held.calls[0]!
       // A mannequin render goes as `_load_input_image`'s RGB PNG: the same pixels as Python's PNG:<sha>.
       const payload = asPython(c, plan.payload)
       const images = payload.image_input as string[]
@@ -230,7 +242,7 @@ describe('every fixture case: what Python sends and returns', () => {
         const bytes = u.startsWith('https://made/') ? made.get(u.slice('https://made/'.length))!
           : u.startsWith('https://fal.storage/pose_') ? inputFile(u.slice('https://fal.storage/'.length))! : null
         if (!bytes) continue
-        expect(await pixelsOf(bytes), `${c.name} picture ${i}`).toEqual(c.made![pyImages[i]!])
+        expect(await pixelsOf(bytes), `${c.name} picture ${i}`).toEqual(held.made[pyImages[i]!])
         images[i] = pyImages[i]!
       }
       expect(payload).toEqual(py.payload)
@@ -244,7 +256,7 @@ describe('every fixture case: what Python sends and returns', () => {
       expect(checkPayload(FAL_NB2_EDIT, plan.backup!.payload)).toEqual([])
       // Python's ui: save_generation_output(result, "reframe" | "pose").
       const prefix = c.class_type === 'LensReframe' ? 'reframe' : 'pose'
-      expect((c.ui as { images: { prefix: string }[] }).images[0]!.prefix).toBe(prefix)
+      expect((held.ui as { images: { prefix: string }[] }).images[0]!.prefix).toBe(prefix)
       expect(plan.prefix).toBe(prefix)
       const files = [{ filename: 'x.png', subfolder: '', type: 'output' as const }]
       expect(plan.uiFor(files)).toEqual({ images: files, animated: [false] })
@@ -291,8 +303,10 @@ describe('Pose Mannequin\'s branch, as execute takes it', () => {
     expect((await at({ character: L, pose_source: 'prompt', pose_prompt: ' x ' })).kind).toBe('call')
     expect((await at({ character: L, pose_source: 'prompt', pose_prompt: '　' })).kind).toBe('pass')
     expect((await at({ character: L }, ['result_image'])).kind).toBe('baked')
-    expect((await at({ character: L }, ['pose_cond_image', 'mannequin_image'])).kind).toBe('raise')
-    expect((await at({ character: L }, ['mannequin_image'])).kind).toBe('call')
+    // RUNNER DEVIATION (fix round 1): the conditioning render calls (Python raises); else the mannequin render.
+    expect(await at({ character: L }, ['pose_cond_image', 'mannequin_image'])).toMatchObject({ kind: 'call', pictures: ['character', 'pose_cond_image'] })
+    expect(await at({ character: L }, ['pose_cond_image'])).toMatchObject({ kind: 'call', pictures: ['character', 'pose_cond_image'] })
+    expect(await at({ character: L }, ['mannequin_image'])).toMatchObject({ kind: 'call', pictures: ['character', 'mannequin_image'] })
     expect((await at({ character: L })).kind).toBe('pass')
     // No character (the engine's blank): a saved pose still wins; nothing else calls.
     expect((await at({}, ['result_image'])).kind).toBe('baked')
@@ -339,35 +353,25 @@ describe('every fixture case through the engine (cards and nano-extras on)', () 
   })
 
   it.each(taken.map(c => [c.name, c] as const))('%s', async (_n, c) => {
-    if (c.error) {
-      // Python raises: refused at the start, before anything is held or sent.
-      const k = await kitFor(c)
-      await expect(k.engine.startRun({ userId: k.userId, takes: [withPictures(c)], ...START })).rejects.toThrow(POSE_COND_RAISES)
-      expect(k.replicate.client.submit).not.toHaveBeenCalled()
-      return
-    }
+    const held = heldTo(c)
     const { k, rec } = await run(c)
     expect(rec.status, rec.error ?? '').toBe('done')
     const sent = [...k.replicate.reqs.values()]
-    expect(sent.length).toBe(c.calls.length)
-    if (c.calls.length) {
+    expect(sent.length).toBe(held.calls.length)
+    if (held.calls.length) {
+      const pyImages = held.calls[0]!.payload.image_input as string[]
       const payload = asPython(c, sent[0]!.payload)
       const images = payload.image_input as string[]
       for (const [i, u] of images.entries()) {
         if (!u.startsWith('https://fal.storage/pose_')) continue
         const call = k.upload.mock.calls.find(x => `https://fal.storage/${x[1]}` === u)!
-        expect(await pixelsOf(call[0] as Uint8Array)).toEqual(c.made![(c.calls[0]!.payload.image_input as string[])[i]!])
-        images[i] = (c.calls[0]!.payload.image_input as string[])[i]!
+        expect(await pixelsOf(call[0] as Uint8Array)).toEqual(held.made[pyImages[i]!])
+        images[i] = pyImages[i]!
       }
-      expect(payload).toEqual(c.calls[0]!.payload)
+      expect(payload).toEqual(held.calls[0]!.payload)
       expect(rec.outputs.length).toBe(1)
       expect(rec.outputs[0]!.filename).toMatch(c.class_type === 'LensReframe' ? /^reframe/ : /^pose/)
-      // A saved pose gone since: priced free, and locally Python's fallback call runs (free: local work is free;
-      // hosted refuses it before the hold, below).
-      if (PRICED_FREE_BUT_CALLS.includes(c.name)) {
-        expect(rec.credits).toBe(0)
-        return
-      }
+      // Every call is priced as one (a saved pose gone included, fix round 1: locally Python's fallback runs).
       expect(rec.credits).toBe(14)
       const price = priceNode(c.class_type, withPictures(c).n!.inputs)
       if ('refused' in price) throw new Error(price.refused)
@@ -376,7 +380,7 @@ describe('every fixture case through the engine (cards and nano-extras on)', () 
     }
     // No call: nothing charged; the saved pose's pixels, or the character's own file (a plain RGB PNG: the loader's view).
     expect(rec.credits).toBe(0)
-    const out = (c.output as { tensor?: Pixels; image?: string }[])[0]!
+    const out = (held.output as { tensor?: Pixels; image?: string }[])[0]!
     const file = rec.outputs[0]!
     if (out.tensor) {
       const bytes = file.type === 'kept' ? await k.kept.read(file) : new Uint8Array(readFileSync(join(k.root, 'input', file.filename)))
@@ -413,11 +417,21 @@ describe('prices', () => {
       expect(priceGraph({ 1: { class_type: ct, inputs } }, { families: ON }).nodes!['1'], ct).toBe(14)
       expect(nodeCreditEstimate(ct, inputs), ct).toBe(14 + BASE_RENDER_CREDITS)
     }
-    // A saved pose: no call, nothing on either path (the ComfyUI meter's priceGraph; the runner's nodeCredits and hold).
-    expect(paidNoCall('PoseMannequin', baked)).toBe(true)
-    expect(priceGraph({ 1: { class_type: 'PoseMannequin', inputs: baked } }).nodes!['1']).toBe(0)
-    expect(nodeCredits({ class_type: 'PoseMannequin', inputs: baked }, undefined, ON)).toBe(0)
-    expect(stageEstimate({ n: { class_type: 'PoseMannequin', inputs: baked } }, ['n'], true, ON)).toBe(0)
+    // A saved pose: nothing on either path once read and found loading (the hosted ComfyUI gate's
+    // `savedPoses`, the runner's start of the take); named but not read (or gone, or unreadable), the
+    // call Python falls to: 14 (fix round 1, never free).
+    expect(paidNoCall('PoseMannequin', baked, { savedPoseLoads: true })).toBe(true)
+    expect(paidNoCall('PoseMannequin', baked)).toBe(false)
+    expect(priceGraph({ 1: { class_type: 'PoseMannequin', inputs: baked } }, { savedPoses: { 1: true } }).nodes!['1']).toBe(0)
+    expect(priceGraph({ 1: { class_type: 'PoseMannequin', inputs: baked } }, { savedPoses: { 1: false } }).nodes!['1']).toBe(14)
+    expect(priceGraph({ 1: { class_type: 'PoseMannequin', inputs: baked } }, { savedPoses: { 2: true } }).nodes!['1']).toBe(14)
+    expect(priceGraph({ 1: { class_type: 'PoseMannequin', inputs: baked } }).nodes!['1']).toBe(14)
+    expect(nodeCredits({ class_type: 'PoseMannequin', inputs: baked }, undefined, ON)).toBe(14)
+    expect(stageEstimate({ n: { class_type: 'PoseMannequin', inputs: baked } }, ['n'], true, ON, { n: { seconds: {}, savedPose: true } })).toBe(0)
+    expect(stageEstimate({ n: { class_type: 'PoseMannequin', inputs: baked } }, ['n'], false, ON)).toBe(14)
+    // Nothing named at all: free without reading anything.
+    const nothing = withPictures(caseNamed('pose · mannequin · nothing to pose with (passes the character)')).n!.inputs
+    expect(priceGraph({ 1: { class_type: 'PoseMannequin', inputs: nothing } }).nodes!['1']).toBe(0)
     // The price is the ceiling a call makes: the badge shows it (a bare badge can't see which branch runs).
     expect(priceNode('PoseMannequin', baked)).toEqual({ usd: 0.067, credits: 14 })
   })
@@ -431,8 +445,12 @@ describe('prices', () => {
     expect(free({ pose_source: 'prompt', pose_prompt: '  ' })).toBe(true)
     expect(free({ pose_source: 'prompt', pose_prompt: 'a' })).toBe(false)
     expect(free({ pose_source: 'prompt', pose_prompt: L })).toBe(false)
+    // A saved pose: free only once read and loading; not read, the renders decide.
+    expect(poseNoCall({ character: L, result_image: 'a.png' }, { savedPoseLoads: true })).toBe(true)
+    expect(poseNoCall({ character: L, result_image: 'a.png [input]', mannequin_image: 'b.png' }, { savedPoseLoads: true })).toBe(true)
+    expect(free({ result_image: 'a.png', mannequin_image: 'b.png' })).toBe(false)
+    expect(poseNoCall({ character: L, result_image: 'a.png', mannequin_image: 'b.png' }, { savedPoseLoads: false })).toBe(false)
     expect(free({ result_image: 'a.png' })).toBe(true)
-    expect(free({ result_image: 'a.png [input]', mannequin_image: 'b.png' })).toBe(true)
     expect(free({ result_image: '   ', mannequin_image: 'b.png' })).toBe(false)
     expect(free({ result_image: '../a.png', mannequin_image: 'b.png' })).toBe(false)
     expect(free({ pose_cond_image: 'c.png' })).toBe(false)
@@ -447,6 +465,9 @@ describe('prices', () => {
   it('a no-call node is not "unpriced": hosted doesn\'t refuse it', () => {
     const p: ApiPrompt = { n: { class_type: 'PoseMannequin', inputs: baked } }
     expect(PROVIDER_TYPES.has('PoseMannequin')).toBe(true)
+    const nothing = withPictures(caseNamed('pose · mannequin · nothing to pose with (passes the character)')).n!.inputs
+    expect(unpricedProviderNode({ n: { class_type: 'PoseMannequin', inputs: nothing } }, undefined, n => nodeCredits(n, undefined, ON))).toBeNull()
+    // A named saved pose is priced as a call until read (14): not unpriced either.
     expect(unpricedProviderNode(p, undefined, n => nodeCredits(n, undefined, ON))).toBeNull()
     // A provider priced at 0 for any other reason still is.
     expect(unpricedProviderNode({ n: { class_type: 'PoseMannequin', inputs: call } }, undefined, () => 0)).toBe('n')
@@ -499,22 +520,24 @@ describe('refusals before the hold, in plain words', () => {
     expect(k.fal.client.submit).not.toHaveBeenCalled()
   }
 
-  it('the conditioning render Python raises on: refused, hosted and local', async () => {
-    await refusedAtStart(caseNamed('pose · mannequin · conditioning render'), POSE_COND_RAISES, { hosted: true })
-    await refusedAtStart(caseNamed('pose · mannequin · conditioning and mannequin renders'), POSE_COND_RAISES)
+  it('hosted: a saved pose named but gone (Python falls through to a call) is refused; locally Python\'s fallback runs, priced as a call', async () => {
+    for (const name of SAVED_POSE_GONE_CALLS) {
+      const c = caseNamed(name)
+      await refusedAtStart(c, POSE_RESULT_MISSING, { hosted: true })
+      const local = await run(c)
+      expect(local.rec.status, local.rec.error ?? '').toBe('done')
+      expect(local.k.replicate.reqs.size).toBe(1)
+      expect(local.rec.credits).toBe(14)
+      // Priced as a call on both paths (fix round 1): the ComfyUI path's charge for it, with nothing read.
+      expect(priceGraph(withPictures(c)).nodes!.n).toBe(14)
+    }
   })
 
-  it('hosted: a saved pose that is gone (Python would call where the price said "no call") is refused; locally Python\'s fallback runs', async () => {
-    const c = caseNamed('pose · mannequin · missing result, the mannequin render')
-    await refusedAtStart(c, POSE_RESULT_MISSING, { hosted: true })
-    const local = await run(c)
-    expect(local.rec.status, local.rec.error ?? '').toBe('done')
-    expect(local.k.replicate.reqs.size).toBe(1)
-  })
-
-  it('the backstop: a call priced free is never sent in hosted', async () => {
-    const c = caseNamed('pose · mannequin · missing result, the mannequin render')
-    await expect(planOf(c, { hosted: true, priceInputs: withPictures(c).n!.inputs })).rejects.toThrow(POSE_RESULT_MISSING)
+  it('the backstop: a call with a saved pose named is never sent in hosted', async () => {
+    for (const name of SAVED_POSE_GONE_CALLS) {
+      const c = caseNamed(name)
+      await expect(planOf(c, { hosted: true, priceInputs: withPictures(c).n!.inputs })).rejects.toThrow(POSE_RESULT_MISSING)
+    }
   })
 
   it('a saved picture Python reads its own way (CMYK) is refused, only when Python would open it', async () => {
@@ -546,7 +569,7 @@ describe('refusals before the hold, in plain words', () => {
   })
 
   it('the refusals are plain words', () => {
-    for (const w of [POSE_COND_RAISES, POSE_RESULT_MISSING, poseBakedRefusal(PICTURE_CMYK)]) expect(w).not.toMatch(/Node|_|\bid\b/)
+    for (const w of [POSE_RESULT_MISSING, poseBakedRefusal(PICTURE_CMYK)]) expect(w).not.toMatch(/Node|_|\bid\b/)
   })
 })
 
@@ -697,4 +720,88 @@ describe('with nano-extras off (rule 15)', () => {
     expect(graphs).toBeGreaterThanOrEqual(800)
     console.info(`nano-extras families-off invariant: ${graphs} saved graphs`)
   }, 600_000)
+})
+
+// ── Fix round 1 ──────────────────────────────────────────────────────────────
+
+describe('the runner\'s deliberate deviation: the conditioning render makes the call (fix round 1)', () => {
+  const deviations = CASES.filter(c => c.runner)
+  it('exactly the cases where Python raises on the conditioning render, each with its reason', () => {
+    expect(deviations.map(c => c.name).sort()).toEqual([
+      'pose · mannequin · conditioning and mannequin renders', 'pose · mannequin · conditioning render',
+      'pose · mannequin · conditioning render EXIF 6', 'pose · mannequin · conditioning render RGBA',
+      'pose · mannequin · missing result, the conditioning render',
+    ])
+    for (const c of deviations) {
+      expect(c.error!.message, c.name).toMatch(/Boolean value of Tensor/)
+      expect(c.calls, c.name).toEqual([])
+      expect(c.runner!.reason).toMatch(/runner only \(R3\.15 fix round 1\)/)
+      expect(c.runner!.calls[0]!.payload.prompt, c.name).toBe(poseInstruction('mannequin', String(c.widgets.prompt ?? ''), ''))
+    }
+  })
+
+  it('hosted: held and charged as a call (14), sent with the conditioning render as `_load_input_image` loads it', async () => {
+    const c = caseNamed('pose · mannequin · conditioning render EXIF 6')
+    const { k, rec } = await run(c, { hosted: true })
+    expect(rec.status, rec.error ?? '').toBe('done')
+    expect([...k.ledger.holds.values()].map(h => [h.credits, h.actual])).toEqual([[14, 14]])
+    expect(paidNoCall('PoseMannequin', withPictures(c).n!.inputs)).toBe(false)
+  })
+
+  it('the ComfyUI path is unchanged: Python still raises there (priced as a call, charged only if it finished, which it never does)', () => {
+    const c = caseNamed('pose · mannequin · conditioning render')
+    expect(priceGraph(withPictures(c)).nodes!.n).toBe(14)
+    const src = readFileSync(resolve(__dirname, '../../../comfy_extras/nodes_pose_mannequin.py'), 'utf8')
+    expect(src).toContain('cond = _load_input_image(pose_cond_image) or _load_input_image(mannequin_image)')
+  })
+})
+
+describe('the hosted ComfyUI gate reads a saved pose before pricing it free (fix round 1)', () => {
+  it('savedPoseRefs: the saved poses whose branch they decide', () => {
+    const L = ['c', 0]
+    expect(savedPoseRefs({
+      a: { class_type: 'PoseMannequin', inputs: { character: L, result_image: 'r.png' } },
+      b: { class_type: 'PoseMannequin', inputs: { character: L, pose_source: 'image', pose_image: L, result_image: 'r.png' } },
+      c: { class_type: 'PoseMannequin', inputs: { result_image: 'r.png' } },
+      d: { class_type: 'PoseMannequin', inputs: { character: L, result_image: '  ' } },
+      e: { class_type: 'PoseMannequin', inputs: { character: L, pose_source: L, result_image: 'r.png' } },
+      f: { class_type: 'LoadImage', inputs: { image: 'r.png' } },
+    })).toEqual({ a: 'r.png' })
+  })
+
+  const baked = (): ApiPrompt => ({ p: { class_type: 'LoadImage', inputs: { image: 'c.png' } }, n: { class_type: 'PoseMannequin', inputs: { character: ['p', 0], result_image: 'pose_result.png', pose_source: 'mannequin', prompt: '', pose_prompt: '', pose_state: '', mannequin_image: 'pose_mannequin.png', pose_cond_image: '' } } })
+  const deps = (savedPoses?: Record<string, boolean>) => ({
+    priceGraph: vi.fn(priceGraph),
+    spendGuard: vi.fn(async () => {}),
+    validateFileRefs: vi.fn(async () => {}),
+    moderatePrompt: vi.fn(async () => ({ ok: true as const })),
+    hold: vi.fn(async () => ({ ok: true as const, holdId: 7 })),
+    getAvailable: vi.fn(async () => 100),
+    forward: vi.fn(async () => ({ status: 200, body: { prompt_id: 'p1', number: 1, node_errors: {} } })),
+    registerRun: vi.fn(async () => {}),
+    startSettle: vi.fn(),
+    releaseHold: vi.fn(async () => {}),
+    ...(savedPoses ? { measureSavedPoses: vi.fn(async () => savedPoses) } : {}),
+  })
+
+  it('a saved pose the gate found loading: nothing held; one it didn\'t (gone, unreadable, not read): held as the call', async () => {
+    const { meterGraphSubmit } = await import('~~/server/utils/meterGraphRun')
+    const free = deps({ n: true })
+    expect((await meterGraphSubmit('u1', { prompt: baked() }, free as any)).status).toBe(200)
+    expect(free.measureSavedPoses).toHaveBeenCalled()
+    expect(free.hold).not.toHaveBeenCalled()
+    for (const d of [deps({ n: false }), deps({}), deps()]) {
+      expect((await meterGraphSubmit('u1', { prompt: baked() }, d as any)).status).toBe(200)
+      expect(d.hold).toHaveBeenCalledWith('u1', 14)
+    }
+  })
+
+  it('ComfyUI reads the very copy the gate read: the saved pose is renamed to it in the forwarded prompt', async () => {
+    const { rewriteMeasuredInputs } = await import('~~/server/utils/gateSnapshots')
+    const out = rewriteMeasuredInputs(baked(), { nameFor: s => (s.value === 'pose_result.png' ? 'gate_copy_1.png' : null) })
+    if ('problems' in out) throw new Error('refused')
+    expect(out.prompt.n.inputs.result_image).toBe('gate_copy_1.png')
+    // The renders it doesn't read are left as they are.
+    expect(out.prompt.n.inputs.mannequin_image).toBe('pose_mannequin.png')
+  })
 })

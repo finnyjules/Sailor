@@ -21,20 +21,25 @@
  *   image     both pictures wired → a call with [character, pose picture];
  *   prompt    a pose prompt that isn't blank → a call with [character];
  *   mannequin the saved result loads → it is the result (no call);
- *             else the conditioning render loads → Python raises (a
- *             tensor's truth value): refused, before the hold (the start of
- *             the run, poseStartProblem; this plan is the backstop);
+ *             else the conditioning render loads → a call with [character, it]
+ *             (RUNNER DEVIATION, R3.15 fix round 1, controller ruling:
+ *             Python's `_load_input_image(pose_cond_image) or …` asks the
+ *             loaded tensor for its truth value and raises, so this render
+ *             never reached a call there; the runner does what the code
+ *             means, priced as a call. The ComfyUI path still fails, free);
  *             else the mannequin render loads → a call with [character, it];
  *   otherwise the character passes through (no call).
  * A no-call branch is free on both paths (ruling (p)): #shared/runner/nanoExtras
- * poseNoCall prices it from the inputs as sent, and a call it didn't hold
- * for is never sent in hosted.
+ * poseNoCall prices it from the inputs as sent; a saved pose counts as no
+ * call only once read and found loading (the start of the run). In hosted a
+ * saved pose named but not loading is refused before the hold (Python would
+ * fall through to a call).
  */
 import { isLink, type ApiLink, type ApiPrompt } from '#shared/runner/graph'
 import { pyFloatOf, pyStrip } from '#shared/runner/pyText'
 import {
-  LENS_REFRAME_CLASS, NANO_EXTRAS_SLUG, POSE_COND_RAISES, POSE_MANNEQUIN_CLASS, POSE_RESULT_MISSING,
-  bakedFileName, poseNoCall, poseSourceOf, type PoseBakedInput,
+  LENS_REFRAME_CLASS, NANO_EXTRAS_SLUG, POSE_MANNEQUIN_CLASS, POSE_RESULT_MISSING,
+  bakedFileName, poseSourceOf, type PoseBakedInput,
 } from '#shared/runner/nanoExtras'
 import type { NodePlan, PlanContext } from '../executors'
 import type { OutputFile } from '../types'
@@ -221,9 +226,8 @@ export function nanoExtrasInput(prompt: string, imageInput: string[]): Record<st
  * Python's order, so a file Python never opens is never read.
  */
 export type PoseBranch =
-  | { kind: 'call'; instruction: string; pictures: ('character' | 'pose_image' | 'mannequin_image')[] }
+  | { kind: 'call'; instruction: string; pictures: ('character' | 'pose_image' | 'pose_cond_image' | 'mannequin_image')[] }
   | { kind: 'baked' }
-  | { kind: 'raise' }
   | { kind: 'pass' }
 
 export async function posePlanBranch(inputs: Record<string, unknown>, loads: (name: PoseBakedInput) => Promise<boolean>): Promise<PoseBranch> {
@@ -239,9 +243,10 @@ export async function posePlanBranch(inputs: Record<string, unknown>, loads: (na
   }
   else {
     if (await loads('result_image')) return { kind: 'baked' }
-    // `_load_input_image(pose_cond_image) or …`: a loaded tensor's truth value raises.
-    if (await loads('pose_cond_image')) return { kind: 'raise' }
-    if (hasCharacter && await loads('mannequin_image')) return { kind: 'call', instruction: poseInstruction('mannequin', extra, ''), pictures: ['character', 'mannequin_image'] }
+    // RUNNER DEVIATION (fix round 1): Python's `_load_input_image(pose_cond_image) or _load_input_image(mannequin_image)`
+    // raises on a loaded tensor's truth value; the conditioning render when it loads, else the mannequin render.
+    const cond: 'pose_cond_image' | 'mannequin_image' | null = await loads('pose_cond_image') ? 'pose_cond_image' : await loads('mannequin_image') ? 'mannequin_image' : null
+    if (hasCharacter && cond) return { kind: 'call', instruction: poseInstruction('mannequin', extra, ''), pictures: ['character', cond] }
   }
   return { kind: 'pass' }
 }
@@ -269,13 +274,14 @@ function bakedFile(inputs: Record<string, unknown>, name: PoseBakedInput): Outpu
 /**
  * The start of a run (engine.ts, before anything is held), for each Pose
  * Mannequin in mannequin mode: its baked files read in Python's order (only
- * the ones Python would open), a file Python reads its own way refused in
- * plain words (the cards' rule, R1.3); the conditioning render that loads
- * refused (Python raises); and, in hosted, a saved pose that is gone when
- * its price said "no call" (the call would run unheld).
+ * the ones it would open), a file Python reads its own way refused in plain
+ * words (the cards' rule, R1.3); in hosted, a saved pose named but not
+ * loading refused (Python would fall through to a call). `savedPoses` gets
+ * each node whose saved pose loads: it makes no call, and is held at nothing
+ * (TakeRecord.measured `savedPose`, fix round 1).
  */
 export async function poseStartProblem(
-  prompt: ApiPrompt, read: (f: OutputFile) => Promise<Uint8Array>, hosted: boolean,
+  prompt: ApiPrompt, read: (f: OutputFile) => Promise<Uint8Array>, hosted: boolean, savedPoses?: Set<string>,
 ): Promise<{ nodeId: string; classType: string; message: string } | null> {
   for (const [nodeId, n] of Object.entries(prompt)) {
     if (n.class_type !== POSE_MANNEQUIN_CLASS) continue
@@ -293,10 +299,9 @@ export async function poseStartProblem(
       return !why
     }
     const branch = await posePlanBranch(inputs, loads)
-    const problem = refusal
-      ?? (branch.kind === 'raise' ? POSE_COND_RAISES : null)
-      ?? (hosted && branch.kind === 'call' && poseNoCall(inputs) ? POSE_RESULT_MISSING : null)
+    const problem = refusal ?? (hosted && branch.kind === 'call' && bakedFileName(inputs.result_image) ? POSE_RESULT_MISSING : null)
     if (problem) return { nodeId, classType: n.class_type, message: problem }
+    if (branch.kind === 'baked') savedPoses?.add(nodeId)
   }
   return null
 }
@@ -346,19 +351,17 @@ async function planPose(ctx: PlanContext, inputs: Record<string, unknown>): Prom
     if (got && f) loaded.set(name, { file: f, ...got })
     return !!got
   })
-  if (branch.kind === 'raise') throw new Error(POSE_COND_RAISES)
-
   if (branch.kind === 'call') {
-    // Priced (and held) as no call from the inputs as sent, yet a call now (a saved pose gone since):
-    // in hosted it is never sent unheld (the start of the run refused it; this is the backstop).
-    if (ctx.hosted && poseNoCall(ctx.priceInputs ?? inputs)) throw new Error(POSE_RESULT_MISSING)
+    // A saved pose named but not loading (gone since the start of the run): in hosted never
+    // sent (its hold may be nothing; the start of the run refused it; this is the backstop).
+    if (ctx.hosted && bakedFileName((ctx.priceInputs ?? inputs).result_image)) throw new Error(POSE_RESULT_MISSING)
     const urls: string[] = []
     for (const p of branch.pictures) {
-      if (p === 'mannequin_image') {
-        const m = loaded.get('mannequin_image')!
+      if (p === 'mannequin_image' || p === 'pose_cond_image') {
+        const m = loaded.get(p)!
         if (!m.png) urls.push(await ctx.toUrl(m.file))
         else if (ctx.bytesToUrl) urls.push(await ctx.bytesToUrl(pngNameOf(m.file), m.png))
-        else throw new Error('The runner cannot hand off Pose Mannequin’s mannequin render here')
+        else throw new Error('The runner cannot hand off Pose Mannequin’s pose render here')
         continue
       }
       const link = inputs[p]

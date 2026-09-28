@@ -246,6 +246,12 @@ export interface MeasuredMedia {
    * node's turn the picture is refused only when larger than `pixels`.
    */
   predicted?: true
+  /**
+   * Pose Mannequin (R3.15 fix round 1): the saved pose it names was read at
+   * the start of the run and loads, so it makes no call: held at nothing
+   * (paidNoCall's `savedPoseLoads`). Its `seconds` and `sha` are empty.
+   */
+  savedPose?: true
 }
 
 export type LegAction = 'run' | 'continue' | 'again' | 'redo' | 'restart'

@@ -2043,12 +2043,15 @@ export function createEngine(deps: EngineDeps) {
       }
     }
     // Pose Mannequin (R3.15): its saved pictures read as Python would open them,
-    // before anything is held: one Python reads its own way refused, the
-    // conditioning render Python raises on refused, and (hosted) a saved pose
-    // that is gone when its price said "no call" refused.
-    for (const p of prompts) {
-      const pose = await poseStartProblem(p, f => files.read(f), deps.hosted())
+    // before anything is held: one Python reads its own way refused, and
+    // (hosted) a saved pose named but not loading refused (Python would fall
+    // through to a call). A saved pose that loads makes no call: recorded on
+    // the take, so it is held at nothing (fix round 1).
+    for (const [index, p] of prompts.entries()) {
+      const savedPoses = new Set<string>()
+      const pose = await poseStartProblem(p, f => files.read(f), deps.hosted(), savedPoses)
       if (pose) throw refuse(pose.message, 400, { nodeId: pose.nodeId, classType: pose.classType })
+      for (const nodeId of savedPoses) measured[index]![nodeId] = { seconds: {}, sha: {}, savedPose: true }
     }
     // A loader's picture a paid node hands off (R3.H, ./pictureHandoff.ts): one
     // that can't be made into the loader's tensor is refused now, and a model's

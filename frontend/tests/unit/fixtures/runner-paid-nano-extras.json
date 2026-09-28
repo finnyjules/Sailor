@@ -12214,6 +12214,54 @@
    "pictures": [
     "character"
    ],
+   "runner": {
+    "calls": [
+     {
+      "endpoint": "google/nano-banana-2",
+      "payload": {
+       "image_input": [
+        "IMG:character",
+        "PNG:30a0a11adb0354b3bf31a4938349ff64bc768dcc3259c7b1548f090acafb4d58"
+       ],
+       "output_format": "png",
+       "prompt": "The first image is a character. The second image is a SURFACE-NORMAL render of a posed 3D mannequin: its colours encode the target body pose AND the exact 3D orientation \u2014 which way the body and each limb face. Redraw the EXACT SAME character from the first image \u2014 keep their face, hair, skin tone, body type, clothing and art style identical \u2014 but pose them to match the second image: limb positions, stance, head angle, AND the whole-body orientation/facing direction (front, three-quarter, side, or back). If the body is turned or facing away, turn the character the same way; do NOT default to a front-facing view. Full body, head to toe, plain neutral studio background, natural and photographic. Output only the character in that pose, never the normal-map render itself.",
+       "resolution": "1K"
+      },
+      "payload_json": "{\"image_input\": [\"IMG:character\", \"PNG:30a0a11adb0354b3bf31a4938349ff64bc768dcc3259c7b1548f090acafb4d58\"], \"output_format\": \"png\", \"prompt\": \"The first image is a character. The second image is a SURFACE-NORMAL render of a posed 3D mannequin: its colours encode the target body pose AND the exact 3D orientation \\u2014 which way the body and each limb face. Redraw the EXACT SAME character from the first image \\u2014 keep their face, hair, skin tone, body type, clothing and art style identical \\u2014 but pose them to match the second image: limb positions, stance, head angle, AND the whole-body orientation/facing direction (front, three-quarter, side, or back). If the body is turned or facing away, turn the character the same way; do NOT default to a front-facing view. Full body, head to toe, plain neutral studio background, natural and photographic. Output only the character in that pose, never the normal-map render itself.\", \"resolution\": \"1K\"}",
+      "provider": "replicate"
+     }
+    ],
+    "error": null,
+    "made": {
+     "PNG:30a0a11adb0354b3bf31a4938349ff64bc768dcc3259c7b1548f090acafb4d58": {
+      "sha256": "e937f9f9c6f5cd7010b083b42f57ff6e19f4a4cd9bcd2a9aedf0984637eb3a0f",
+      "shape": [
+       9,
+       12,
+       3
+      ]
+     }
+    },
+    "output": [
+     {
+      "image": "https://r.test/nano/out.png"
+     }
+    ],
+    "reason": "runner only (R3.15 fix round 1): Python's `_load_input_image(pose_cond_image) or \u2026` asks a picture tensor for its truth value and raises, so the conditioning render never reaches a call; the runner does what the code means: the conditioning render when it loads, else the mannequin render, then the call",
+    "ui": {
+     "animated": [
+      false
+     ],
+     "images": [
+      {
+       "image": {
+        "image": "https://r.test/nano/out.png"
+       },
+       "prefix": "pose"
+      }
+     ]
+    }
+   },
    "sound_files": {},
    "sounds": [],
    "ui": null,
@@ -12269,6 +12317,54 @@
    "pictures": [
     "character"
    ],
+   "runner": {
+    "calls": [
+     {
+      "endpoint": "google/nano-banana-2",
+      "payload": {
+       "image_input": [
+        "IMG:character",
+        "PNG:30a0a11adb0354b3bf31a4938349ff64bc768dcc3259c7b1548f090acafb4d58"
+       ],
+       "output_format": "png",
+       "prompt": "The first image is a character. The second image is a SURFACE-NORMAL render of a posed 3D mannequin: its colours encode the target body pose AND the exact 3D orientation \u2014 which way the body and each limb face. Redraw the EXACT SAME character from the first image \u2014 keep their face, hair, skin tone, body type, clothing and art style identical \u2014 but pose them to match the second image: limb positions, stance, head angle, AND the whole-body orientation/facing direction (front, three-quarter, side, or back). If the body is turned or facing away, turn the character the same way; do NOT default to a front-facing view. Full body, head to toe, plain neutral studio background, natural and photographic. Output only the character in that pose, never the normal-map render itself.",
+       "resolution": "1K"
+      },
+      "payload_json": "{\"image_input\": [\"IMG:character\", \"PNG:30a0a11adb0354b3bf31a4938349ff64bc768dcc3259c7b1548f090acafb4d58\"], \"output_format\": \"png\", \"prompt\": \"The first image is a character. The second image is a SURFACE-NORMAL render of a posed 3D mannequin: its colours encode the target body pose AND the exact 3D orientation \\u2014 which way the body and each limb face. Redraw the EXACT SAME character from the first image \\u2014 keep their face, hair, skin tone, body type, clothing and art style identical \\u2014 but pose them to match the second image: limb positions, stance, head angle, AND the whole-body orientation/facing direction (front, three-quarter, side, or back). If the body is turned or facing away, turn the character the same way; do NOT default to a front-facing view. Full body, head to toe, plain neutral studio background, natural and photographic. Output only the character in that pose, never the normal-map render itself.\", \"resolution\": \"1K\"}",
+      "provider": "replicate"
+     }
+    ],
+    "error": null,
+    "made": {
+     "PNG:30a0a11adb0354b3bf31a4938349ff64bc768dcc3259c7b1548f090acafb4d58": {
+      "sha256": "e937f9f9c6f5cd7010b083b42f57ff6e19f4a4cd9bcd2a9aedf0984637eb3a0f",
+      "shape": [
+       9,
+       12,
+       3
+      ]
+     }
+    },
+    "output": [
+     {
+      "image": "https://r.test/nano/out.png"
+     }
+    ],
+    "reason": "runner only (R3.15 fix round 1): Python's `_load_input_image(pose_cond_image) or \u2026` asks a picture tensor for its truth value and raises, so the conditioning render never reaches a call; the runner does what the code means: the conditioning render when it loads, else the mannequin render, then the call",
+    "ui": {
+     "animated": [
+      false
+     ],
+     "images": [
+      {
+       "image": {
+        "image": "https://r.test/nano/out.png"
+       },
+       "prefix": "pose"
+      }
+     ]
+    }
+   },
    "sound_files": {},
    "sounds": [],
    "ui": null,
@@ -12280,6 +12376,312 @@
     "pose_state": "",
     "prompt": "",
     "result_image": ""
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": [
+      "https://r.test/nano/out.png"
+     ]
+    }
+   ],
+   "calls": [],
+   "class_type": "PoseMannequin",
+   "error": {
+    "message": "Boolean value of Tensor with more than one value is ambiguous",
+    "type": "RuntimeError"
+   },
+   "files": {
+    "https://r.test/nano/out.png": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/AcOqdpIbGzj/c/JF3NBDwwY3e+iNv1NeSAC480AJPzJJWxuIonMNXd4dmsxKNi/QC/wAynULK0Un6s3Zjw4H7aRaRyEUN0HTK9YyArH71I6mq/xdtN1xhtQCaE/AFTYTmuSdKgJ1C0HAZCrCFOdYvVehWAcgqYyiB+E/53YBJBW0SbfpJIHnMSm6zV9dPybfY/VnRgd8wS9C5P5HtF0AAAAASUVORK5CYII=",
+    "https://r.test/nano/second.png": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ADkMjH1yRzQs2BAPL293DWXWcOWOA1HYrgRVQ+IewuhFBd/ueOc7uLQ9H/h9lacjBnoE6eRUALVMp9X7GMsOpz6SxCw3hIMFAWp5AlZWX965sqwNNd7/IycJiOD35tZWEqMorQFR2CB068+7QksIqf8OMBdSIzZzNRIKGCcEASiFNQlK9JhBZM2uDkrqqkCjFEblEd/HDq9ANXtYogkAAAAASUVORK5CYII="
+   },
+   "gets": [],
+   "input_files": {
+    "pose_mannequin_exif6.png": "iVBORw0KGgoAAAANSUhEUgAAAAsAAAAICAIAAACgWpLfAAAAGmVYSWZNTQAqAAAACAABARIAAwAAAAEABgAAAAAAANZnS2kAAAEbSURBVHicARAB7/4A19s0IbvtvxZXsKeIqJ3yzXIr+kjffgXCvwxK8zSAOkHqAlVhlXWiySnAo+Pg0zXqYfG2T4VTL83VuPsWxb7e8YcJ+AAhUhfiA0rAR4dkEK6BDSvsapCFRNZeCpl6wRUwJ+LFkgMCsDO6D95YnydH05Xh1f5RgDST1fjlus9RogzdRT+Q7/gzBH0A3uY2epCQZfrnXoHK/Y0Q/HkbidKuPKLuUK/AQYM2FgBQmAETAn6rhj9J/BWUECLVeNQdWVdSvtZrPleW3B3kEuoCMrAEfPqDsYJJPh/wDxsEBUt3xeM/D6mIJz1yli0Hq53bAtAKj/ahDlGGHvUZIWeDGnBZW9fRsewB6IVOuuD58l3TFALrhTnGn9Y7AAAAAElFTkSuQmCC"
+   },
+   "loaded": {
+    "character": {
+     "sha256": "e8763f1cf3ae06f66d9c9124b829c3259bfbaa1c6452d706319c4796002c9a34",
+     "shape": [
+      6,
+      8,
+      3
+     ]
+    }
+   },
+   "made": {},
+   "name": "pose \u00b7 mannequin \u00b7 conditioning render EXIF 6",
+   "output": null,
+   "picture_files": {
+    "character": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "character"
+   ],
+   "runner": {
+    "calls": [
+     {
+      "endpoint": "google/nano-banana-2",
+      "payload": {
+       "image_input": [
+        "IMG:character",
+        "PNG:44220f360d20b25c3dac8615bf358652344b428dc6aab2a53aa7425a0543144a"
+       ],
+       "output_format": "png",
+       "prompt": "The first image is a character. The second image is a SURFACE-NORMAL render of a posed 3D mannequin: its colours encode the target body pose AND the exact 3D orientation \u2014 which way the body and each limb face. Redraw the EXACT SAME character from the first image \u2014 keep their face, hair, skin tone, body type, clothing and art style identical \u2014 but pose them to match the second image: limb positions, stance, head angle, AND the whole-body orientation/facing direction (front, three-quarter, side, or back). If the body is turned or facing away, turn the character the same way; do NOT default to a front-facing view. Full body, head to toe, plain neutral studio background, natural and photographic. Output only the character in that pose, never the normal-map render itself.",
+       "resolution": "1K"
+      },
+      "payload_json": "{\"image_input\": [\"IMG:character\", \"PNG:44220f360d20b25c3dac8615bf358652344b428dc6aab2a53aa7425a0543144a\"], \"output_format\": \"png\", \"prompt\": \"The first image is a character. The second image is a SURFACE-NORMAL render of a posed 3D mannequin: its colours encode the target body pose AND the exact 3D orientation \\u2014 which way the body and each limb face. Redraw the EXACT SAME character from the first image \\u2014 keep their face, hair, skin tone, body type, clothing and art style identical \\u2014 but pose them to match the second image: limb positions, stance, head angle, AND the whole-body orientation/facing direction (front, three-quarter, side, or back). If the body is turned or facing away, turn the character the same way; do NOT default to a front-facing view. Full body, head to toe, plain neutral studio background, natural and photographic. Output only the character in that pose, never the normal-map render itself.\", \"resolution\": \"1K\"}",
+      "provider": "replicate"
+     }
+    ],
+    "error": null,
+    "made": {
+     "PNG:44220f360d20b25c3dac8615bf358652344b428dc6aab2a53aa7425a0543144a": {
+      "sha256": "6f18af186be95b3f49e1866aace12c7e3ba6ea108dc09bafa6e57e03e000fa58",
+      "shape": [
+       11,
+       8,
+       3
+      ]
+     }
+    },
+    "output": [
+     {
+      "image": "https://r.test/nano/out.png"
+     }
+    ],
+    "reason": "runner only (R3.15 fix round 1): Python's `_load_input_image(pose_cond_image) or \u2026` asks a picture tensor for its truth value and raises, so the conditioning render never reaches a call; the runner does what the code means: the conditioning render when it loads, else the mannequin render, then the call",
+    "ui": {
+     "animated": [
+      false
+     ],
+     "images": [
+      {
+       "image": {
+        "image": "https://r.test/nano/out.png"
+       },
+       "prefix": "pose"
+      }
+     ]
+    }
+   },
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "mannequin_image": "",
+    "pose_cond_image": "pose_mannequin_exif6.png",
+    "pose_prompt": "",
+    "pose_source": "mannequin",
+    "pose_state": "",
+    "prompt": "",
+    "result_image": ""
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": [
+      "https://r.test/nano/out.png"
+     ]
+    }
+   ],
+   "calls": [],
+   "class_type": "PoseMannequin",
+   "error": {
+    "message": "Boolean value of Tensor with more than one value is ambiguous",
+    "type": "RuntimeError"
+   },
+   "files": {
+    "https://r.test/nano/out.png": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/AcOqdpIbGzj/c/JF3NBDwwY3e+iNv1NeSAC480AJPzJJWxuIonMNXd4dmsxKNi/QC/wAynULK0Un6s3Zjw4H7aRaRyEUN0HTK9YyArH71I6mq/xdtN1xhtQCaE/AFTYTmuSdKgJ1C0HAZCrCFOdYvVehWAcgqYyiB+E/53YBJBW0SbfpJIHnMSm6zV9dPybfY/VnRgd8wS9C5P5HtF0AAAAASUVORK5CYII=",
+    "https://r.test/nano/second.png": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ADkMjH1yRzQs2BAPL293DWXWcOWOA1HYrgRVQ+IewuhFBd/ueOc7uLQ9H/h9lacjBnoE6eRUALVMp9X7GMsOpz6SxCw3hIMFAWp5AlZWX965sqwNNd7/IycJiOD35tZWEqMorQFR2CB068+7QksIqf8OMBdSIzZzNRIKGCcEASiFNQlK9JhBZM2uDkrqqkCjFEblEd/HDq9ANXtYogkAAAAASUVORK5CYII="
+   },
+   "gets": [],
+   "input_files": {
+    "pose_mannequin_rgba.png": "iVBORw0KGgoAAAANSUhEUgAAAAsAAAAICAYAAAAvOAWIAAABc0lEQVR4nAFoAZf+AS4SveAJ19Phofq5WFbw3XqKCpV+tfhl85bjA28J7ZHe/2G7TmmUpvEXzuG5AG2IGODlNQGIei3iQq6zDzJMIFB9k/INXJZFbDlU2wS2jSIbclfN5KEiYy6eABdveOD+sY8UZJkCiA6F43Cqtmi5Or75I+RVLJGjEvtJFqDpLPpZSr1lVFF3AKMnVjaM9HAyCTm4AVCp9CYjl3TJfx3V/olUD+toIE5//ejmvX1TOU8Eg/WrAFFNRfETKA5HF3+BgXx1+pG3y/r7zCBypv63O9kjVv7dz7mUSet/c97jSJUwAcAfdDptfqbaX9z66/dHnSDLah4zU8OXXkjHG7YLIzZQLXERQhoOO2MdsHMNBDMHHhS9YD7GbPFO50RiiyJ41BNv+2DruZG8vDUxI/B/cjMx9mkxTfrz1q4VBCgBSURvGipFl20UyMaUtkPD2Eklyxq1Jk7OqHZIVW9oGTOhGCs6tQAD8BlomTioptmNE9IAAAAASUVORK5CYII="
+   },
+   "loaded": {
+    "character": {
+     "sha256": "e8763f1cf3ae06f66d9c9124b829c3259bfbaa1c6452d706319c4796002c9a34",
+     "shape": [
+      6,
+      8,
+      3
+     ]
+    }
+   },
+   "made": {},
+   "name": "pose \u00b7 mannequin \u00b7 conditioning render RGBA",
+   "output": null,
+   "picture_files": {
+    "character": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "character"
+   ],
+   "runner": {
+    "calls": [
+     {
+      "endpoint": "google/nano-banana-2",
+      "payload": {
+       "image_input": [
+        "IMG:character",
+        "PNG:7b47bfad2dcdda1784aaa93c3bbe0a6449dd52747950d1c8b30efe962a9bce26"
+       ],
+       "output_format": "png",
+       "prompt": "The first image is a character. The second image is a SURFACE-NORMAL render of a posed 3D mannequin: its colours encode the target body pose AND the exact 3D orientation \u2014 which way the body and each limb face. Redraw the EXACT SAME character from the first image \u2014 keep their face, hair, skin tone, body type, clothing and art style identical \u2014 but pose them to match the second image: limb positions, stance, head angle, AND the whole-body orientation/facing direction (front, three-quarter, side, or back). If the body is turned or facing away, turn the character the same way; do NOT default to a front-facing view. Full body, head to toe, plain neutral studio background, natural and photographic. Output only the character in that pose, never the normal-map render itself. Additional direction: soft light.",
+       "resolution": "1K"
+      },
+      "payload_json": "{\"image_input\": [\"IMG:character\", \"PNG:7b47bfad2dcdda1784aaa93c3bbe0a6449dd52747950d1c8b30efe962a9bce26\"], \"output_format\": \"png\", \"prompt\": \"The first image is a character. The second image is a SURFACE-NORMAL render of a posed 3D mannequin: its colours encode the target body pose AND the exact 3D orientation \\u2014 which way the body and each limb face. Redraw the EXACT SAME character from the first image \\u2014 keep their face, hair, skin tone, body type, clothing and art style identical \\u2014 but pose them to match the second image: limb positions, stance, head angle, AND the whole-body orientation/facing direction (front, three-quarter, side, or back). If the body is turned or facing away, turn the character the same way; do NOT default to a front-facing view. Full body, head to toe, plain neutral studio background, natural and photographic. Output only the character in that pose, never the normal-map render itself. Additional direction: soft light.\", \"resolution\": \"1K\"}",
+      "provider": "replicate"
+     }
+    ],
+    "error": null,
+    "made": {
+     "PNG:7b47bfad2dcdda1784aaa93c3bbe0a6449dd52747950d1c8b30efe962a9bce26": {
+      "sha256": "5e8e345ce688427e628b251893d4870bae58be0bda51006baa37c690cd0b21d0",
+      "shape": [
+       8,
+       11,
+       3
+      ]
+     }
+    },
+    "output": [
+     {
+      "image": "https://r.test/nano/out.png"
+     }
+    ],
+    "reason": "runner only (R3.15 fix round 1): Python's `_load_input_image(pose_cond_image) or \u2026` asks a picture tensor for its truth value and raises, so the conditioning render never reaches a call; the runner does what the code means: the conditioning render when it loads, else the mannequin render, then the call",
+    "ui": {
+     "animated": [
+      false
+     ],
+     "images": [
+      {
+       "image": {
+        "image": "https://r.test/nano/out.png"
+       },
+       "prefix": "pose"
+      }
+     ]
+    }
+   },
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "mannequin_image": "",
+    "pose_cond_image": "pose_mannequin_rgba.png",
+    "pose_prompt": "",
+    "pose_source": "mannequin",
+    "pose_state": "",
+    "prompt": "  soft light  ",
+    "result_image": ""
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": [
+      "https://r.test/nano/out.png"
+     ]
+    }
+   ],
+   "calls": [],
+   "class_type": "PoseMannequin",
+   "error": {
+    "message": "Boolean value of Tensor with more than one value is ambiguous",
+    "type": "RuntimeError"
+   },
+   "files": {
+    "https://r.test/nano/out.png": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/AcOqdpIbGzj/c/JF3NBDwwY3e+iNv1NeSAC480AJPzJJWxuIonMNXd4dmsxKNi/QC/wAynULK0Un6s3Zjw4H7aRaRyEUN0HTK9YyArH71I6mq/xdtN1xhtQCaE/AFTYTmuSdKgJ1C0HAZCrCFOdYvVehWAcgqYyiB+E/53YBJBW0SbfpJIHnMSm6zV9dPybfY/VnRgd8wS9C5P5HtF0AAAAASUVORK5CYII=",
+    "https://r.test/nano/second.png": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ADkMjH1yRzQs2BAPL293DWXWcOWOA1HYrgRVQ+IewuhFBd/ueOc7uLQ9H/h9lacjBnoE6eRUALVMp9X7GMsOpz6SxCw3hIMFAWp5AlZWX965sqwNNd7/IycJiOD35tZWEqMorQFR2CB068+7QksIqf8OMBdSIzZzNRIKGCcEASiFNQlK9JhBZM2uDkrqqkCjFEblEd/HDq9ANXtYogkAAAAASUVORK5CYII="
+   },
+   "gets": [],
+   "input_files": {
+    "pose_cond.png": "iVBORw0KGgoAAAANSUhEUgAAAAwAAAAJCAIAAACJ2loDAAABWElEQVR4nAFNAbL+AKtDrk6S3YEfjLsxugQFMf2/DK7+Ggt4pihQrlQl9LgqllInQgDh/aXKxxKH6Rc6rPIyJcHPZeLGA4RwflgJKDA7WQxB+AXuVJUCAc12/cZEKA59xIa++Y4q85wFJTHzTtSRLVRsAibN3duu/7nGAlIyiWvxjc1T18441EoY/J5K+keu9EJl7VH0yoA8PjhHNriG4gApx/IaHMHbC7KGBURG7vo+najqzDkOLU2ykxRtq+WyxtkkHz0BuSIXrbZfx+gj+fUKJ9JYQMxoV45aQBGd2Fhg2gUgm8eRCnILAkc8/jAW6GTjZPEd/Fv7BDA1+na0iqN7Ej3g/ooLfdd5kWy+OQJnp95XqHalVNUtGA/rmkU+8ELLixeBTjLRPW4EJexv8kdlvPcEhX1fL1ensLHL8NyBUt6k+YnqpA0SzPZC5DvC/SjHVDMbXMGimlSh7To867EAAAAASUVORK5CYII="
+   },
+   "loaded": {
+    "character": {
+     "sha256": "e8763f1cf3ae06f66d9c9124b829c3259bfbaa1c6452d706319c4796002c9a34",
+     "shape": [
+      6,
+      8,
+      3
+     ]
+    }
+   },
+   "made": {},
+   "name": "pose \u00b7 mannequin \u00b7 missing result, the conditioning render",
+   "output": null,
+   "picture_files": {
+    "character": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "character"
+   ],
+   "runner": {
+    "calls": [
+     {
+      "endpoint": "google/nano-banana-2",
+      "payload": {
+       "image_input": [
+        "IMG:character",
+        "PNG:30a0a11adb0354b3bf31a4938349ff64bc768dcc3259c7b1548f090acafb4d58"
+       ],
+       "output_format": "png",
+       "prompt": "The first image is a character. The second image is a SURFACE-NORMAL render of a posed 3D mannequin: its colours encode the target body pose AND the exact 3D orientation \u2014 which way the body and each limb face. Redraw the EXACT SAME character from the first image \u2014 keep their face, hair, skin tone, body type, clothing and art style identical \u2014 but pose them to match the second image: limb positions, stance, head angle, AND the whole-body orientation/facing direction (front, three-quarter, side, or back). If the body is turned or facing away, turn the character the same way; do NOT default to a front-facing view. Full body, head to toe, plain neutral studio background, natural and photographic. Output only the character in that pose, never the normal-map render itself.",
+       "resolution": "1K"
+      },
+      "payload_json": "{\"image_input\": [\"IMG:character\", \"PNG:30a0a11adb0354b3bf31a4938349ff64bc768dcc3259c7b1548f090acafb4d58\"], \"output_format\": \"png\", \"prompt\": \"The first image is a character. The second image is a SURFACE-NORMAL render of a posed 3D mannequin: its colours encode the target body pose AND the exact 3D orientation \\u2014 which way the body and each limb face. Redraw the EXACT SAME character from the first image \\u2014 keep their face, hair, skin tone, body type, clothing and art style identical \\u2014 but pose them to match the second image: limb positions, stance, head angle, AND the whole-body orientation/facing direction (front, three-quarter, side, or back). If the body is turned or facing away, turn the character the same way; do NOT default to a front-facing view. Full body, head to toe, plain neutral studio background, natural and photographic. Output only the character in that pose, never the normal-map render itself.\", \"resolution\": \"1K\"}",
+      "provider": "replicate"
+     }
+    ],
+    "error": null,
+    "made": {
+     "PNG:30a0a11adb0354b3bf31a4938349ff64bc768dcc3259c7b1548f090acafb4d58": {
+      "sha256": "e937f9f9c6f5cd7010b083b42f57ff6e19f4a4cd9bcd2a9aedf0984637eb3a0f",
+      "shape": [
+       9,
+       12,
+       3
+      ]
+     }
+    },
+    "output": [
+     {
+      "image": "https://r.test/nano/out.png"
+     }
+    ],
+    "reason": "runner only (R3.15 fix round 1): Python's `_load_input_image(pose_cond_image) or \u2026` asks a picture tensor for its truth value and raises, so the conditioning render never reaches a call; the runner does what the code means: the conditioning render when it loads, else the mannequin render, then the call",
+    "ui": {
+     "animated": [
+      false
+     ],
+     "images": [
+      {
+       "image": {
+        "image": "https://r.test/nano/out.png"
+       },
+       "prefix": "pose"
+      }
+     ]
+    }
+   },
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "mannequin_image": "",
+    "pose_cond_image": "pose_cond.png",
+    "pose_prompt": "",
+    "pose_source": "mannequin",
+    "pose_state": "",
+    "prompt": "",
+    "result_image": "gone.png"
    }
   },
   {

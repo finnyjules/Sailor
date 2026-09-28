@@ -221,7 +221,7 @@ export function hasOutputNode(prompt: ApiPrompt): boolean {
  */
 export function stageEstimate(
   prompt: ApiPrompt, nodeIds: Iterable<string>, includeBase: boolean, families: ReadonlySet<RunnerFamily> = NO_FAMILIES,
-  measured?: Readonly<Record<string, { seconds: InputSeconds; pixels?: number }>>,
+  measured?: Readonly<Record<string, { seconds: InputSeconds; pixels?: number; savedPose?: true }>>,
 ): number {
   let total = 0
   let renders = false
@@ -231,8 +231,10 @@ export function stageEstimate(
     const n = priced[id]
     if (!n) continue
     if (LOCAL_RENDER_TYPES.has(n.class_type)) renders = true
-    else if (!actionPassThrough(n.class_type, n.inputs ?? {}) && !paidNoCall(n.class_type, n.inputs ?? {})) {
+    else {
       const m = measured && Object.prototype.hasOwnProperty.call(measured, id) ? measured[id] : undefined
+      // A Pose Mannequin whose saved pose the start of the run read and found loading makes no call (R3.15 fix round 1).
+      if (actionPassThrough(n.class_type, n.inputs ?? {}) || paidNoCall(n.class_type, n.inputs ?? {}, { savedPoseLoads: m?.savedPose === true })) continue
       // An Upscale or Enhance detail sized at the start (R3.5): priced on that picture, else the cap.
       total += nodeCredits(n, m?.pixels, families, m?.seconds)
     }

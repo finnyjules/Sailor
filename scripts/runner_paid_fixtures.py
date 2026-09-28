@@ -2366,6 +2366,12 @@ POSE_TEXTS = {
 }
 
 
+POSE_DEVIATION_REASON = ("runner only (R3.15 fix round 1): Python's `_load_input_image(pose_cond_image) or …` asks a "
+                         "picture tensor for its truth value and raises, so the conditioning render never reaches a call; "
+                         "the runner does what the code means: the conditioning render when it loads, else the mannequin "
+                         "render, then the call")
+
+
 def nano_extras_group() -> dict:
     """R3.15: Lens · 3D Reframe (LensReframe) and Pose Mannequin
     (PoseMannequin), both Nano Banana 2 on Replicate at 1K, for
@@ -2408,9 +2414,32 @@ def nano_extras_group() -> dict:
                 f.write(data)
         folder_paths.set_input_directory(tmp)
 
+        import torch
+        import comfy_extras.nodes_pose_mannequin as npm
+
+        class _Truthy(torch.Tensor):
+            """A loaded picture whose truth value is True: `cond or …` then reads as the code means."""
+            def __bool__(self):
+                return True
+
+        real_load = npm._load_input_image
+
+        def truthy_load(filename):
+            t = real_load(filename)
+            return None if t is None else t.as_subclass(_Truthy)
+
         def add(name, cls, widgets, pictures=(), answer=None, uses=()):
+            answers = [answer or {"output": [NANO_EXTRAS_OUT]}]
             with contextlib.redirect_stdout(io.StringIO()):
-                case = paid_case(name, cls, widgets, [answer or {"output": [NANO_EXTRAS_OUT]}], pictures=list(pictures), files=files, made_pixels=True)
+                case = paid_case(name, cls, widgets, answers, pictures=list(pictures), files=files, made_pixels=True)
+            # The runner's deliberate deviation (fix round 1): the same execute, a loaded picture's truth value
+            # True. Recorded as `runner` only where it changes what happens.
+            if cls is PoseMannequinNode:
+                with contextlib.redirect_stdout(io.StringIO()), mock.patch.object(npm, "_load_input_image", truthy_load):
+                    dev = paid_case(name, cls, widgets, answers, pictures=list(pictures), files=files, made_pixels=True)
+                if (dev["calls"], dev.get("error")) != (case["calls"], case.get("error")):
+                    case["runner"] = {"calls": dev["calls"], "error": dev.get("error"), "output": dev.get("output"), "ui": dev.get("ui"),
+                                      "made": dev.get("made", {}), "reason": POSE_DEVIATION_REASON}
             if uses:
                 case["input_files"] = {u: _b64(baked[u]) for u in uses if u in baked}
             cases.append(case)
@@ -2472,6 +2501,9 @@ def nano_extras_group() -> dict:
         # The conditioning render: Python raises (`tensor or …` asks a tensor's truth value).
         p("mannequin · conditioning render", pose_cond_image="pose_cond.png")
         p("mannequin · conditioning and mannequin renders", pose_cond_image="pose_cond.png", mannequin_image="pose_mannequin.png")
+        p("mannequin · conditioning render EXIF 6", pose_cond_image="pose_mannequin_exif6.png")
+        p("mannequin · conditioning render RGBA", pose_cond_image="pose_mannequin_rgba.png", prompt="  soft light  ")
+        p("mannequin · missing result, the conditioning render", result_image="gone.png", pose_cond_image="pose_cond.png")
         # A conditioning render that can't be loaded: the mannequin render instead.
         p("mannequin · missing conditioning, the mannequin render", pose_cond_image="gone.png", mannequin_image="pose_mannequin.png")
         for f in ("pose_mannequin.png", "pose_mannequin_rgba.png", "pose_mannequin_exif6.png"):

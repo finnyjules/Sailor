@@ -208,6 +208,8 @@ const ENGINE_FILE_SLOTS: Readonly<Record<string, readonly string[]>> = {
   Image: ['image'],
   LoadAudio: ['audio'],
   Audio: ['audio'],
+  // Pose Mannequin's saved pose (R3.15 fix round 1): read to price it free; ComfyUI reads that same copy.
+  PoseMannequin: ['result_image'],
 }
 
 /**

@@ -54,7 +54,7 @@ import { GEN_3D_CLASSES, GEN_3D_STEPS, HUNYUAN3D_MV_SLUG, HUNYUAN3D_SLUG, MULTI_
 import { FACE_SLUG, SKETCH_SLUG, textEffectSlug } from '../runner/imageExtras'
 import { FLUX_DEV_LORA_SLUG, FLUX_LORA_STEPS, FLUX_MULTI_LORA_SLUG, RESTYLE_LORA_CLASS, multiLoraCount } from '../runner/lora'
 import { editSteps } from './editSettings'
-import { POSE_MANNEQUIN_CLASS, poseNoCall } from '../runner/nanoExtras'
+import { POSE_MANNEQUIN_CLASS, poseNoCall, type PoseKnown } from '../runner/nanoExtras'
 import type { EditCall } from './editRates'
 
 /**
@@ -456,7 +456,7 @@ const PAID_PLANNERS: Readonly<Record<string, PaidPlanner>> = {
 }
 
 /** Each paid class's no-call rule (rule 8), where Python has one. Filled by each R3 task. */
-const PAID_NO_CALL: Readonly<Record<string, (inputs: NodeInputs) => boolean>> = {
+const PAID_NO_CALL: Readonly<Record<string, (inputs: NodeInputs, known: PoseKnown) => boolean>> = {
   ...Object.fromEntries(LLM_CLASSES.flatMap(c => { const r = llmNoCall(c); return r ? [[c, r]] : [] })),
   // R3.15: Pose Mannequin with a saved pose, or nothing to pose with (priced by its call, editSettings.ts, otherwise).
   [POSE_MANNEQUIN_CLASS]: poseNoCall,
@@ -478,8 +478,13 @@ export function paidCalls(classType: string, inputs: NodeInputs, opts: PriceOpti
   return plan ? plan(inputs, opts) : { refused: `${classType} is not priced by its calls` }
 }
 
-/** True when Python returns before calling anyone, decided from the inputs as sent (rule 8). */
-export function paidNoCall(classType: string, inputs: NodeInputs): boolean {
+/**
+ * True when Python returns before calling anyone, decided from the inputs as
+ * sent (rule 8). `known`: what the caller read of the node's files (Pose
+ * Mannequin's saved pose, R3.15 fix round 1); none, a file is priced as if it
+ * may not load.
+ */
+export function paidNoCall(classType: string, inputs: NodeInputs, known: PoseKnown = {}): boolean {
   const rule = own(PAID_NO_CALL, classType)
-  return !!rule && rule(inputs)
+  return !!rule && rule(inputs, known)
 }

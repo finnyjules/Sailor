@@ -39,6 +39,7 @@ import { assertSpendAllowed } from './systemControls'
 import { blockedPromptRefusal, nodeProblemsBody, retiredEngineRefusal } from './blockedModels'
 import { hostedRequestProblems, measuredInputProblems } from '../runner/requestRules'
 import { executedPart } from '#shared/runner/validate'
+import { savedPoseRefs } from '#shared/runner/nanoExtras'
 
 export function isPromptPath(path: string): boolean {
   return path === '/prompt' || path.startsWith('/prompt?')
@@ -390,6 +391,16 @@ export interface GraphRunDeps {
    */
   measureInputSeconds?(prompt: any): Promise<Record<string, import('../../shared/pricing/clipSettings').InputSeconds>>
   /**
+   * R3.15 fix round 1: node id → true for each Pose Mannequin whose saved
+   * pose (`result_image`, #shared/runner/nanoExtras savedPoseRefs) the gate
+   * read from the run's own copy and found to be a picture: that node makes
+   * no call and is priced at nothing (ruling (p)). Every other named saved
+   * pose (gone, unreadable, not read) is priced as the call Python falls
+   * to, so the engine never makes a call nothing was held for. Absent (the
+   * unit tests), every named saved pose is priced as a call.
+   */
+  measureSavedPoses?(prompt: any): Promise<Record<string, boolean>>
+  /**
    * Seedance 2.0 references longer than the model takes (15 s of video, 15 s
    * of sound, in all) — seedanceReferenceSeconds. Runs after the
    * file-ownership check, before pricing and any hold. Absent (the unit
@@ -564,6 +575,8 @@ async function submitMetered(userId: string | null, body: any, deps: GraphRunDep
   // The length of each lip-sync node's sound (and Kling's source video), where
   // it can read it; the rest price at the 60 s cap.
   const inputSeconds = deps.measureInputSeconds ? await deps.measureInputSeconds(body.prompt).catch(() => ({})) : undefined
+  // Pose Mannequin's saved poses, read from the run's copy (R3.15 fix round 1); a read that fails prices them as calls.
+  const savedPoses = deps.measureSavedPoses ? await deps.measureSavedPoses(body.prompt).catch(() => ({})) : undefined
   const mediaOver = overBudget()
   if (mediaOver) return mediaOver
 
@@ -583,7 +596,7 @@ async function submitMetered(userId: string | null, body: any, deps: GraphRunDep
   const priced = executed(body.prompt)
   let price
   try {
-    price = deps.priceGraph(priced, inputPixels || inputSeconds ? { inputPixels, inputSeconds } : undefined)
+    price = deps.priceGraph(priced, inputPixels || inputSeconds || savedPoses ? { inputPixels, inputSeconds, ...(savedPoses ? { savedPoses } : {}) } : undefined)
   } catch (e) {
     if (e instanceof UnpricedGraphError) throw new MeterRefusalError(e.message, 500)
     throw e
@@ -692,6 +705,15 @@ export async function handleMeteredPrompt(event: H3Event): Promise<any> {
     // One walk: the sizes the price reads and the refusals (G1 fix round 1, R7).
     measureInputSizes: prompt => graphInputSizes(prompt, pictureOfCopy, reads),
     measureInputSeconds: prompt => graphInputSeconds(prompt, mediaOfCopy, reads),
+    // A saved pose is free only when its copy is a picture (R3.15 fix round 1).
+    measureSavedPoses: async (prompt) => {
+      const out: Record<string, boolean> = {}
+      for (const [id, value] of Object.entries(savedPoseRefs(prompt))) {
+        const size = await pictureOfCopy(value).catch(() => null)
+        out[id] = !!size && size.pixels > 0
+      }
+      return out
+    },
     // Hosted: a Seedance reference whose length can't be read is refused, not counted as 0 (S1b fix round 2).
     referenceSecondsProblems: prompt => seedanceReferenceSeconds(prompt, mediaOfCopy, { strict: true, reads }),
     finalizePrompt: prompt => rewriteMeasuredInputs(prompt, snaps),

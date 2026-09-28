@@ -558,8 +558,13 @@ export interface GraphPrice {
  * the runner (Rotate camera prices its 2511 call while that switch is on,
  * Enhance a video its Topaz call on fal, from `inputSeconds`' measured video;
  * the ComfyUI path never passes them: it refuses that node then).
+ *
+ * `opts.savedPoses`: node id → true for each Pose Mannequin whose saved pose
+ * the caller read and found loading (the runner's start of the take, the
+ * hosted ComfyUI gate: R3.15 fix round 1). Only then is a saved pose free;
+ * one not read, gone or unreadable is priced as the call Python falls to.
  */
-export function priceGraph(sent: Record<string, { class_type: string; inputs?: unknown }>, opts: { inputPixels?: Record<string, number>, inputSeconds?: Record<string, InputSeconds>, families?: ReadonlySet<RunnerFamily> } = {}): GraphPrice {
+export function priceGraph(sent: Record<string, { class_type: string; inputs?: unknown }>, opts: { inputPixels?: Record<string, number>, inputSeconds?: Record<string, InputSeconds>, families?: ReadonlySet<RunnerFamily>, savedPoses?: Record<string, boolean> } = {}): GraphPrice {
   // A speech text a card decides before the run is priced at its length (R3.8 fix round 1).
   const prompt = withStaticSpeechText(sent as ApiPrompt) as typeof sent
   const breakdown: { action: string; credits: number }[] = []
@@ -579,7 +584,9 @@ export function priceGraph(sent: Record<string, { class_type: string; inputs?: u
       const px = opts.inputPixels && Object.prototype.hasOwnProperty.call(opts.inputPixels, id) ? opts.inputPixels[id] : undefined
       const secs = opts.inputSeconds && Object.prototype.hasOwnProperty.call(opts.inputSeconds, id) ? opts.inputSeconds[id] : undefined
       // A node whose inputs as sent make Python return before calling anyone (R3 rule 8): nothing (R3.15, ruling (p)).
-      const credits = paidNoCall(ct, (inputs ?? {}) as Record<string, unknown>) ? 0 : graphNodeModelCredits(ct, inputs, px, secs, opts.families)
+      // A Pose Mannequin's saved pose counts only where the caller read it and it loads (`savedPoses`, fix round 1).
+      const known = { savedPoseLoads: opts.savedPoses !== undefined && Object.prototype.hasOwnProperty.call(opts.savedPoses, id) && opts.savedPoses[id] === true }
+      const credits = paidNoCall(ct, (inputs ?? {}) as Record<string, unknown>, known) ? 0 : graphNodeModelCredits(ct, inputs, px, secs, opts.families)
       const model = (inputs as { model?: unknown } | undefined)?.model
       // A class with no model widget (Develop, Relight…) is named alone, as its flat row was.
       breakdown.push({ action: model === undefined ? ct : `${ct}:${String(model)}`, credits })
