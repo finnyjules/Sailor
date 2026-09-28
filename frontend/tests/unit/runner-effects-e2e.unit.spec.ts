@@ -635,6 +635,9 @@ describe('R2.12 · every effects family off: the needs-engine list over every sa
           // R3.8 fix round 1: with a node no output reads left out, what is left may be only cards; the
           // runner runs that (free, as it runs what is left after a failing output is dropped), where the
           // code before named every node for having nothing to do.
+          // R3.8 fix round 2: a prompt with no output node (every class known) is refused by the runner in
+          // plain words ("Nothing here shows or saves a result"); nothing of it needs the engine.
+          else if (now.length === 0 && pruneInvalidOutputs(g.prompt, families).noOutputs) outside.push(`${line} (R3.8: no output node)`)
           else if (now.length === 0 && pruneInvalidOutputs(g.prompt, families).unread.length
             && JSON.stringify(before) === JSON.stringify(Object.keys(withoutUnread(g.prompt, families)))) outside.push(`${line} (R3.8: cards left after unread nodes)`)
           else diffs.push(line)
@@ -745,7 +748,11 @@ describe('R2.12 · every effects family off: the needs-engine list over every sa
     const differ: string[] = []
     // Graphs with a node no output reads (R3.8 fix round 1: left out, as ComfyUI leaves it out): their
     // list is the one of what runs, which the code before that change (the pin) didn't prune.
-    const unreadKeys = new Set((await savedGraphs()).filter(g => Object.values(sets).some(f => pruneInvalidOutputs(g.prompt, f).unread.length)).map(g => g.key))
+    // Fix round 2: and graphs with no output node at all, which the runner refuses in plain words.
+    const unreadKeys = new Set((await savedGraphs()).filter(g => Object.values(sets).some((f) => {
+      const r = pruneInvalidOutputs(g.prompt, f)
+      return r.unread.length > 0 || !!r.noOutputs
+    })).map(g => g.key))
     const unreadChanged: string[] = []
     for (const [key, row] of Object.entries(now)) {
       const p = pinned.graphs[key]
@@ -754,8 +761,8 @@ describe('R2.12 · every effects family off: the needs-engine list over every sa
       same++
       if (p.frameCards !== row.frameCards || p.allButEffects !== row.allButEffects) (unreadKeys.has(key) ? unreadChanged : differ).push(key)
     }
-    console.info(`R2.12 pinned: ${unreadChanged.length} graphs differ only where a node no output reads is now left out: ${unreadChanged.join(', ')}`)
-    expect(unreadChanged.length).toBeLessThanOrEqual(10)
+    console.info(`R2.12 pinned: ${unreadChanged.length} graphs differ only where a node no output reads is now left out, or there is no output node: ${unreadChanged.join(', ')}`)
+    expect(unreadChanged.length).toBeLessThanOrEqual(130)
     console.info(`R2.12 pinned needs-engine: ${same} graphs as pinned, ${changed} edited since, ${unpinned} new, ${Object.keys(pinned.graphs).length - same - changed} gone`)
     expect(same).toBeGreaterThan(0)
     expect(differ).toEqual([])

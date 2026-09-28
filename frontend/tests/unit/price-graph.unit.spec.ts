@@ -12,6 +12,10 @@
  * rather than in production.
  */
 import { readFileSync, readdirSync } from 'node:fs'
+import { gunzipSync } from 'node:zlib'
+import { executedPart, pruneInvalidOutputs } from '#shared/runner/validate'
+import { outputClassesOf } from '../../server/utils/meterGraphRun'
+import { stageEstimate } from '../../server/runner/metering'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
@@ -680,5 +684,38 @@ describe('Separate background and foreground on the ComfyUI path (R3.7)', () => 
     expect(at({ background_fill: 'Bria Eraser (quality)', image: ['2', 0], mask_grow: 0 })).toBe(9)
     expect(at({ background_fill: ['9', 0], image: ['2', 0], mask_grow: 12 })).toBe(9)
     expect(at({ image: ['2', 0] })).toBe(9)
+  })
+})
+
+// R3.8 fix round 2: a node no output node reads is never run by ComfyUI (nor the runner), so the
+// hosted ComfyUI meter prices only what runs — the runner's own closure (validate.ts executedPart).
+describe('only what an output reads is priced (R3.8 fix round 2)', () => {
+  const CATALOG = JSON.parse(gunzipSync(readFileSync(join(process.cwd(), 'server/native/objectInfo.baseline.json.gz'))).toString('utf8')) as Record<string, { output_node?: boolean }>
+  const isOutput = outputClassesOf(CATALOG)!
+  const gen = { class_type: 'GenerateImageNode', inputs: { model: 'flux-schnell', prompt: 'a fox', aspect_ratio: '1:1', seed: 0, model_options: '{}' } }
+  const card = { class_type: 'Image', inputs: { image: '', export: false, images: ['g', 0], batch_index: -1 } }
+  const dangling = { class_type: 'EditImageNode', inputs: { model: 'Nano Banana 2', input_image: ['g', 0], prompt: 'warmer', output_format: 'png', seed: 0, resolution: '1K' } }
+
+  it('an output plus a dangling Edit: priced as the output alone, on both paths', () => {
+    const p = { g: gen, i: card, e: dangling }
+    const whole = priceGraph(p).credits
+    const alone = priceGraph({ g: gen, i: card }).credits
+    expect(whole).toBeGreaterThan(alone)
+    // The ComfyUI path's price (the part ComfyUI executes) and the runner's (what it runs) are the same.
+    expect(Object.keys(executedPart(p, isOutput)).sort()).toEqual(['g', 'i'])
+    expect(priceGraph(executedPart(p, isOutput)).credits).toBe(alone)
+    const pruned = pruneInvalidOutputs(p, new Set(['fal-edit', 'cards'] as const))
+    expect(Object.keys(pruned.prompt).sort()).toEqual(['g', 'i'])
+    expect(stageEstimate(pruned.prompt, Object.keys(pruned.prompt), true, new Set(['fal-edit', 'cards'] as const))).toBe(alone)
+  })
+
+  it('a prompt whose every node is read, or with no output node, is priced whole (as before)', () => {
+    const p = { g: gen, i: card }
+    expect(executedPart(p, isOutput)).toBe(p)
+    const lone = { g: gen }
+    expect(executedPart(lone, isOutput)).toBe(lone)
+    // A class the catalog doesn't know counts as an output: what it reads is priced.
+    expect(outputClassesOf(CATALOG)!('NoSuchNodeClass')).toBe(true)
+    expect(outputClassesOf(null)).toBeUndefined()
   })
 })

@@ -38,17 +38,12 @@ export function nodesNeedingEngine(
 /** The ids (in the prompt ComfyUI would run) the runner refuses, with that prompt. */
 function blockedNodes(prompt: ApiPrompt, families: ReadonlySet<RunnerFamily>): { run: ApiPrompt; ids: string[] } {
   // What ComfyUI would run: outputs that fail validation are dropped first
-  // (shared/runner/validate.ts). When every output fails, the runner itself
-  // refuses the workflow with ComfyUI's message: nothing needs the engine.
+  // (shared/runner/validate.ts). When every output fails, or there is none,
+  // the runner itself refuses the workflow in plain words: nothing needs the engine.
   const pruned = pruneInvalidOutputs(prompt, families)
-  // No output node (R3.8 fix round 1): judged whole, as before; the runner
-  // refuses a prompt it would take with ComfyUI's "no outputs", in plain words.
-  if (pruned.noOutputs) {
-    const whole = Object.keys(prompt)
-    const refused = whole.filter(id => !runnerTakesNode(prompt, id, families))
-    if (!refused.length && !isRunnerEligible(prompt, families)) return { run: prompt, ids: whole }
-    return { run: prompt, ids: refused }
-  }
+  // No output node (R3.8 fix round 2), like every output failing: the runner
+  // itself refuses it in plain words ("Nothing here shows or saves a result"),
+  // so nothing needs the engine, which would only refuse it too.
   if (pruned.failed) return { run: {}, ids: [] }
   const run = pruned.prompt
   const ids = Object.keys(run)

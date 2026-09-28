@@ -20,7 +20,7 @@ import { RUNNER_FAMILIES, type RunnerFamily } from '#shared/runner/families'
 import {
   AUDIO_CARD_AUDIO_GEN_RULE, PROVIDER_TYPES, RUNNER_NODE_RULES, SWITCHED_CLASSES, isRunnerEligible, outputKindsFor, runnerTakesNode, valueWiresAllowed,
 } from '#shared/runner/eligibility'
-import { nodesNeedingEngine } from '#shared/runner/needsEngine'
+import { needsEngineReasons, nodesNeedingEngine } from '#shared/runner/needsEngine'
 import { RUNNER_OUTPUT_CLASSES } from '#shared/runner/validate'
 import {
   AUDIO_GEN_CLASSES, MINIMAX_EMOTIONS, MINIMAX_LANGUAGES, MINIMAX_SPEECH_SLUG, MINIMAX_VOICES, MUSICGEN_SLUG, MUSIC_MODEL_VERSIONS,
@@ -675,13 +675,24 @@ function meterDeps() {
 describe('fix round 1: the runner runs only what an output needs (ComfyUI\'s pruning, runner-wide)', () => {
   const music = sample('GenerateMusicNode')
 
-  it('a music or speech node nothing reads is not taken (it is not an output node)', () => {
+  it('a lone music or speech node: not run (not an output node); the runner refuses it in plain words, nothing names the engine', async () => {
     for (const ct of AUDIO_GEN_CLASSES) {
       const p: ApiPrompt = { n: node(sample(ct)) }
       expect(runnerTakesNode(p, 'n', ON), ct).toBe(false)
-      expect(runnerTakesWorkflow(p, ON), ct).toBe(false)
       expect(RUNNER_NODE_RULES[ct]!.needsReader).toBe(true)
+      // Fix round 2: sent to the runner (engine on or off), which says why; never "needs the local engine".
+      expect(runnerTakesWorkflow(p, ON), ct).toBe(true)
+      expect(nodesNeedingEngine(p, { runnerOn: true, families: ON, titleOf: id => id }), ct).toEqual([])
+      expect(needsEngineReasons(p, { runnerOn: true, families: ON }), ct).toEqual([])
+      for (const hosted of [false, true]) {
+        const k = makeKit({ hosted, deps: { families: () => ON } })
+        await expect(k.engine.startRun({ userId: k.userId, takes: [p], ...START }), ct).rejects.toThrow(NO_OUTPUTS_MESSAGE)
+        expect(k.replicate.client.submit).not.toHaveBeenCalled()
+        expect(k.ledger.hold).not.toHaveBeenCalled()
+      }
     }
+    // With audio-gen off the classes are unknown to the runner: left to the engine, exactly as before.
+    expect(runnerTakesWorkflow({ n: node(music) }, new Set(['cards']))).toBe(false)
   })
 
   it('a prompt with no output node is refused plainly before the hold; nothing is sent', async () => {

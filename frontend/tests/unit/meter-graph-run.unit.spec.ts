@@ -2,9 +2,9 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { gunzipSync } from 'node:zlib'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { meterGraphSubmit, isPromptPath, holdWithRefusal, validateGraphFileRefs } from '../../server/utils/meterGraphRun'
+import { meterGraphSubmit, isPromptPath, holdWithRefusal, outputClassesOf, validateGraphFileRefs } from '../../server/utils/meterGraphRun'
 import { MeterRefusalError } from '../../server/utils/requestMeter'
-import { UnpricedGraphError } from '../../server/utils/priceBook'
+import { UnpricedGraphError, priceGraph as realPriceGraph } from '../../server/utils/priceBook'
 import { normalizeHostedPrompt } from '../../server/utils/hostedPrompt'
 import { moderatePrompt, __setModerationFetchForTests, __setModerationTimingForTests, MODERATION_UNAVAILABLE_MESSAGE, MODERATION_TOO_LONG_MESSAGE } from '../../server/utils/moderation'
 
@@ -482,5 +482,30 @@ describe('meterGraphSubmit — moderation fails closed (hosted)', () => {
     expect(res.status).toBe(200)
     expect(d.moderatePrompt).not.toHaveBeenCalled()
     expect(f).not.toHaveBeenCalled()
+  })
+})
+
+// R3.8 fix round 2: the hosted ComfyUI path prices and holds only what ComfyUI executes.
+describe('meterGraphSubmit — only what an output reads is priced and held', () => {
+  const gen = { class_type: 'GenerateImageNode', inputs: { model: 'flux-schnell', prompt: 'a fox', aspect_ratio: '1:1', seed: 0, model_options: '{}' } }
+  const card = { class_type: 'Image', inputs: { image: '', export: false, images: ['g', 0], batch_index: -1 } }
+  const dangling = { class_type: 'EditImageNode', inputs: { model: 'Nano Banana 2', input_image: ['g', 0], prompt: 'warmer', output_format: 'png', seed: 0, resolution: '1K' } }
+
+  it('an output plus a dangling Edit is held at the output\'s price; the whole prompt is still forwarded', async () => {
+    const d = deps({ priceGraph: realPriceGraph, isOutputClass: outputClassesOf(CATALOG) })
+    const prompt = { g: gen, i: card, e: dangling }
+    const r = await meterGraphSubmit('u1', { prompt, client_id: 'c1' }, d)
+    expect(r.status).toBe(200)
+    const alone = realPriceGraph({ g: gen, i: card }).credits
+    expect(realPriceGraph(prompt).credits).toBeGreaterThan(alone)
+    expect(d.hold).toHaveBeenCalledWith('u1', alone)
+    expect(d.startSettle.mock.calls[0]![0]).toMatchObject({ credits: alone, plan: { nodes: { g: alone - 1 } } })
+    expect(Object.keys(d.forward.mock.calls[0]![0].prompt).sort()).toEqual(['e', 'g', 'i'])
+  })
+
+  it('without the catalog the whole prompt is priced, as before', async () => {
+    const d = deps({ priceGraph: realPriceGraph })
+    await meterGraphSubmit('u1', { prompt: { g: gen, i: card, e: dangling }, client_id: 'c1' }, d)
+    expect(d.hold).toHaveBeenCalledWith('u1', realPriceGraph({ g: gen, i: card, e: dangling }).credits)
   })
 })

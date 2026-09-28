@@ -464,13 +464,15 @@ describe('the start of a run refuses a card\'s picture it can\'t read, before an
 describe('with cards off, the needs-the-engine list is exactly as before R1.3', () => {
   // Each list was checked against the pre-R1.3 eligibility (8ea718fd7~1).
   const e = (from: [string, number]) => ({ class_type: 'EditImageNode', inputs: { model: 'Nano Banana 2', input_image: from, prompt: 'x' } })
+  // An Image card showing the edit (R3.8 fix round 2: a prompt with no output node is the runner's to refuse).
+  const shown = (from: string) => ({ class_type: 'Image', inputs: { image: '', export: false, images: [from, 0], batch_index: -1 } })
   const cases: [string, ApiPrompt, string[]][] = [
     ['3D Studio → Edit image', { c: scene3d(), e: e(['c', 0]) }, ['c']],
     ['3D Studio depth → Frame', { c: scene3d(), f: { class_type: 'Compositor', inputs: frameWidgets({ layer1: ['c', 1] }) } }, ['c', 'f']],
     ['Text on path mask → Edit image', { c: { class_type: 'TextOnPath', inputs: { params: '{}' } }, e: e(['c', 1]) }, ['c']],
     ['Text mask → Edit image', { c: { class_type: 'TextMask', inputs: { params: '{}' } }, e: e(['c', 0]) }, ['c']],
-    ['LoadImage mask → Edit image', { l: loadImage('a.png'), e: e(['l', 1]) }, ['l']],
-    ['LoadImage → Edit image', { l: loadImage('a.png'), e: e(['l', 0]) }, ['l']],
+    ['LoadImage mask → Edit image', { l: loadImage('a.png'), e: e(['l', 1]) , o: shown('e') }, ['l']],
+    ['LoadImage → Edit image', { l: loadImage('a.png'), e: e(['l', 0]) , o: shown('e') }, ['l']],
     ['Text on path mask → a Frame mask', {
       c: { class_type: 'TextOnPath', inputs: { params: '{}' } }, i: card('x.png'),
       f: { class_type: 'Compositor', inputs: frameWidgets({ layer1: ['i', 0], layer1_mask: ['c', 1] }) },

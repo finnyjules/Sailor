@@ -38,14 +38,15 @@ vi.mock('~~/server/runner/executors', async (importOriginal) => {
   }
 })
 
-// The stand-in plays a paid node that is a ComfyUI output node (its value shown on the node): run
-// alone, as such a node is. Everything else is ComfyUI's pruning as it is (R3.8 fix round 1).
+// The stand-in plays a paid node that is a ComfyUI output node (its value shown on the node): it
+// counts as an output, and everything else is pruned as ComfyUI prunes it (R3.8 fix round 1).
 vi.mock('#shared/runner/validate', async (importOriginal) => {
   const real = await importOriginal<typeof import('#shared/runner/validate')>()
+  const { pruneWithStandIns } = await import('./__runner__/standIns')
   return {
     ...real,
     pruneInvalidOutputs: (p: ApiPrompt, f?: Parameters<typeof real.pruneInvalidOutputs>[1]) =>
-      (Object.values(p).some(n => n.inputs?.test_value !== undefined) ? { prompt: p, dropped: [], nodeErrors: {}, failed: false, unread: [] } : real.pruneInvalidOutputs(p, f)),
+      pruneWithStandIns(real.pruneInvalidOutputs, p, f, n => n.inputs?.test_value !== undefined),
   }
 })
 

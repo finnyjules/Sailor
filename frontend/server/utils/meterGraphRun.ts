@@ -38,6 +38,7 @@ import { moderatePrompt, moderateTexts, moderationRefusal, type ModerationResult
 import { assertSpendAllowed } from './systemControls'
 import { blockedPromptRefusal, nodeProblemsBody, retiredEngineRefusal } from './blockedModels'
 import { hostedRequestProblems, measuredInputProblems } from '../runner/requestRules'
+import { executedPart } from '#shared/runner/validate'
 
 export function isPromptPath(path: string): boolean {
   return path === '/prompt' || path.startsWith('/prompt?')
@@ -325,6 +326,15 @@ export async function holdWithRefusal(
 export interface GraphRunDeps {
   priceGraph: typeof priceGraph
   /**
+   * Whether a class is an output node (the node catalog's `output_node`; a
+   * class the catalog doesn't know counts as one, so nothing it reads goes
+   * unpriced). Given, the price and the hold cover only what ComfyUI
+   * executes: the nodes an output node reads (shared/runner/validate.ts
+   * executedPart, the runner's own closure; R3.8 fix round 2). Absent, the
+   * whole prompt.
+   */
+  isOutputClass?: (classType: string) => boolean
+  /**
    * Node id → the measured size of the picture each size-priced node
    * (Upscale, Enhance detail, FLUX.2 edit) is sent — graphInputPixels. Runs
    * after the file-ownership check, so it only reads the caller's own files.
@@ -438,6 +448,7 @@ export async function meterGraphSubmit(userId: string | null, body: any, deps: G
 }
 
 async function submitMetered(userId: string | null, body: any, deps: GraphRunDeps, run: { handedOff: boolean }): Promise<{ status: number; body: any }> {
+  const executed = (prompt: any) => (deps.isOutputClass && prompt && typeof prompt === 'object' && !Array.isArray(prompt) ? executedPart(prompt as ApiPrompt, deps.isOutputClass) : prompt)
   if (!userId) throw new MeterRefusalError('Sign in to run graphs', 401)
   if (!body || typeof body.prompt !== 'object' || body.prompt === null) {
     throw new MeterRefusalError('Missing prompt graph', 400)
@@ -514,7 +525,7 @@ async function submitMetered(userId: string | null, body: any, deps: GraphRunDep
   // (every size at its cap); only "costs anything" is read from it.
   if (deps.availableBeforeMeasuring) {
     let unmeasured: { credits: number } | null = null
-    try { unmeasured = deps.priceGraph(body.prompt) }
+    try { unmeasured = deps.priceGraph(executed(body.prompt)) }
     catch { unmeasured = null } // refused with its own words below
     if (unmeasured && unmeasured.credits > 0) {
       const available = await deps.availableBeforeMeasuring(userId)
@@ -568,9 +579,11 @@ async function submitMetered(userId: string | null, body: any, deps: GraphRunDep
     else body = { ...body, prompt: f.prompt }
   }
 
+  // What ComfyUI executes: a node no output reads is never run, so never priced or held (R3.8 fix round 2).
+  const priced = executed(body.prompt)
   let price
   try {
-    price = deps.priceGraph(body.prompt, inputPixels || inputSeconds ? { inputPixels, inputSeconds } : undefined)
+    price = deps.priceGraph(priced, inputPixels || inputSeconds ? { inputPixels, inputSeconds } : undefined)
   } catch (e) {
     if (e instanceof UnpricedGraphError) throw new MeterRefusalError(e.message, 500)
     throw e
@@ -623,9 +636,22 @@ async function submitMetered(userId: string | null, body: any, deps: GraphRunDep
   }
   run.handedOff = true
   // Task G2: the per-node figures the hold is the sum of, kept for an error settle.
-  const plan = price.nodes ? chargePlanOf(body.prompt, price.nodes, price.base ?? 0) : undefined
+  const plan = price.nodes ? chargePlanOf(priced, price.nodes, price.base ?? 0) : undefined
   deps.startSettle({ promptId, holdId, credits: price.credits, ...(plan ? { plan } : {}) })
   return fwd
+}
+
+/**
+ * Whether a class is an output node, by the node catalog (`output_node`); a
+ * class the catalog doesn't list counts as one (its whole upstream is priced:
+ * never less than what runs). No catalog: undefined (the whole prompt is priced).
+ */
+export function outputClassesOf(catalog: Readonly<Record<string, { output_node?: unknown } | undefined>> | null): ((classType: string) => boolean) | undefined {
+  if (!catalog) return undefined
+  return (ct) => {
+    const def = Object.prototype.hasOwnProperty.call(catalog, ct) ? catalog[ct] : undefined
+    return !def || def.output_node === true
+  }
 }
 
 /**
@@ -659,6 +685,8 @@ export async function handleMeteredPrompt(event: H3Event): Promise<any> {
   }
   const result = await meterGraphSubmit(userId, body, {
     priceGraph,
+    // Only what ComfyUI executes is priced: output nodes from the stored node catalog (R3.8 fix round 2).
+    isOutputClass: outputClassesOf(storedNodeCatalog()),
     // Hosted: the prompt ComfyUI will run, from the stored node catalog (G1 fix round 1).
     normalizePrompt: prompt => normalizeHostedPrompt(prompt, storedNodeCatalog()),
     // One walk: the sizes the price reads and the refusals (G1 fix round 1, R7).

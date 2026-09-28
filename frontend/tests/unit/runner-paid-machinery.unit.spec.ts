@@ -104,11 +104,11 @@ vi.mock('~~/server/runner/executors', async (importOriginal) => {
 // The glb stand-in's slot 0 carries a 3D file, as a paid 3D node's row will (R3.9).
 vi.mock('#shared/runner/values', async (importOriginal) => {
   const real = await importOriginal<typeof import('#shared/runner/values')>()
-  const OUTPUT_KINDS = { ...real.OUTPUT_KINDS, GenerateVideoNode: { 0: 'glb' as const } }
+  // Only the glb stand-in (a Generate video carrying test_plan 'glb'), so a real video (a Video card reads it) stays files.
   return {
     ...real,
-    OUTPUT_KINDS,
-    outputKind: (p: Parameters<typeof real.outputKind>[0], l: Parameters<typeof real.outputKind>[1], kinds = OUTPUT_KINDS, depth = 0) => real.outputKind(p, l, kinds, depth),
+    outputKind: (p: Parameters<typeof real.outputKind>[0], l: Parameters<typeof real.outputKind>[1], kinds = real.OUTPUT_KINDS, depth = 0) =>
+      (p[l[0]]?.inputs?.test_plan === 'glb' && l[1] === 0 ? 'glb' as const : real.outputKind(p, l, kinds, depth)),
   }
 })
 
@@ -123,17 +123,14 @@ vi.mock('#shared/pricing/pipelinePrice', async (importOriginal) => {
 })
 
 // The stand-ins (Generate image / a video with a test plan) play paid nodes that are ComfyUI output
-// nodes (a 3D model, a sound, a value shown on the node): a stand-in nothing reads is run, as those
-// are. Everything else is ComfyUI's pruning as it is (R3.8 fix round 1: only what an output reads runs).
+// nodes (a 3D model, a sound, a value shown on the node): each counts as an output, and everything
+// else is pruned as ComfyUI prunes it (R3.8 fix round 1: only what an output reads runs).
 vi.mock('#shared/runner/validate', async (importOriginal) => {
   const real = await importOriginal<typeof import('#shared/runner/validate')>()
   const standIn = (n: { class_type: string, inputs?: Record<string, unknown> }) =>
     (n.class_type === 'GenerateImageNode' || n.class_type === 'GenerateVideoNode') && typeof n.inputs?.test_plan === 'string'
-  return {
-    ...real,
-    pruneInvalidOutputs: (p: ApiPrompt, f?: ReadonlySet<RunnerFamily>) =>
-      (Object.values(p).some(standIn) ? { prompt: p, dropped: [], nodeErrors: {}, failed: false, unread: [] } : real.pruneInvalidOutputs(p, f)),
-  }
+  const { pruneWithStandIns } = await import('./__runner__/standIns')
+  return { ...real, pruneInvalidOutputs: (p: ApiPrompt, f?: ReadonlySet<RunnerFamily>) => pruneWithStandIns(real.pruneInvalidOutputs, p, f, standIn) }
 })
 
 const START = { workflow: null, canvasId: null, projectUuid: null, projectName: null }
@@ -168,7 +165,8 @@ describe('a sound plan', () => {
     const replicate = createFakeReplicate({ answer: ({ model }) => `https://replicate.delivery/${model.split('/')[1]}.wav` })
     const download = byExt()
     const k = makeKit({ replicate, deps: { download } })
-    const r = await run(k, { 1: image('audio'), 2: video(null, 0, ['1', 0]) })
+    // A Video card shows node 2: only what an output reads runs.
+    const r = await run(k, { 1: image('audio'), 2: video(null, 0, ['1', 0]), 3: { class_type: 'Video', inputs: { file: '', export: false, filename_prefix: 'video/ComfyUI', source: ['2', 0] } } })
     const rec = r.takes[0]!.nodes['1']!
     expect(rec.status).toBe('done')
     expect(rec.outputs).toEqual([{ filename: 'music_00001_.wav', subfolder: '', type: 'output' }])
