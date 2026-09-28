@@ -1,5 +1,11 @@
 # syntax=docker/dockerfile:1
 
+# ONE base for the runtime and the video-tools build stage, pinned by digest so
+# the tools are compiled against the same glibc they run on (Task R5.1a). Both
+# stages read only this ARG: bumping it bumps both (docs/deploy/media-tools.md).
+# python:3.12-slim's multi-arch index digest, read from Docker Hub on 2026-09-28.
+ARG PYTHON_BASE=python:3.12-slim@sha256:f77ac9e44ae96ef2c90b8053ea08c31f8be030f824196b0ae4db6d462c84e51f
+
 ###############################################################################
 # Stage 1 — build the Nuxt frontend
 ###############################################################################
@@ -21,9 +27,26 @@ COPY frontend/ ./
 RUN NODE_OPTIONS=--max-old-space-size=4096 pnpm build
 
 ###############################################################################
-# Stage 2 — runtime: ComfyUI (Python, CPU-only) + Nuxt server (Node)
+# Stage 2 — the video tools: ffmpeg + ffprobe, LGPL-only FFmpeg 8.0.3 with
+# OpenH264, LAME, Opus, dav1d and zlib, built from pinned, sha256-checked sources by
+# the same script a Mac uses (scripts/media-tools/, docs/deploy/media-tools.md).
+# meson and ninja come from a pinned venv the script makes itself.
 ###############################################################################
-FROM python:3.12-slim AS runtime
+FROM ${PYTHON_BASE} AS media-tools
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends \
+      build-essential pkg-config nasm \
+      curl ca-certificates xz-utils gnupg \
+ && rm -rf /var/lib/apt/lists/*
+WORKDIR /src
+COPY scripts/media-tools/ scripts/media-tools/
+RUN MEDIA_TOOLS_WORK=/tmp/media-tools-work scripts/media-tools/build.sh /opt/media-tools \
+ && rm -rf /tmp/media-tools-work
+
+###############################################################################
+# Stage 3 — runtime: ComfyUI (Python, CPU-only) + Nuxt server (Node)
+###############################################################################
+FROM ${PYTHON_BASE} AS runtime
 ENV PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
     NODE_ENV=production \
@@ -51,6 +74,10 @@ RUN pip install --index-url https://download.pytorch.org/whl/cpu torch torchvisi
 # declared in requirements.txt. The headless
 # build avoids GUI deps. Separate layer so the heavy torch layer stays cached.
 RUN pip install opencv-python-headless
+
+# The video tools, with their licences and sources (licenses/SOURCES.md) beside them.
+COPY --from=media-tools /opt/media-tools /opt/media-tools
+ENV NUXT_MEDIA_TOOLS_DIR=/opt/media-tools/bin
 
 # ComfyUI source + the sailor bridge custom node + LoRA sidecars/covers.
 # .dockerignore keeps models/loras/*.json + *.cover.* but drops the heavy

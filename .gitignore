@@ -37,3 +37,6 @@ frontend/server/moodboards/
 # Licensed font library source (served at runtime, never committed — see
 # frontend/app/data/library-fonts.manifest.json for the committed catalog)
 Assets/Fonts/
+
+# Sailor's video tools, built locally by scripts/media-tools/build.sh
+frontend/.media-tools/

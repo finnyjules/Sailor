@@ -16,6 +16,7 @@
 **/node_modules
 frontend/.nuxt
 frontend/.output
+frontend/.media-tools
 frontend/dist
 **/test-results
 

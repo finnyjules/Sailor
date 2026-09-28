@@ -1,0 +1,12 @@
+# Build-only tools for dav1d, installed by build.sh into a throwaway venv in
+# its work folder (frontend/.media-tools/.work/buildtools-venv on a Mac).
+# Never installed into Homebrew or the system. Hashes from PyPI's JSON API
+# (https://pypi.org/pypi/<name>/<version>/json), read 2026-09-28; ninja lists
+# the three wheels Sailor builds on (macOS universal2, manylinux x86_64 and aarch64).
+# Installed with: pip install --require-hashes --only-binary=:all: --no-deps -r buildtools.txt
+meson==1.12.1 \
+    --hash=sha256:930bc7542cbd9f57009e182fd014eba48cf1a0180a7b9006d2d32d8f168d8b02
+ninja==1.13.2 \
+    --hash=sha256:fd82e26c0706ad4ab88e5fdd26f3fab0a987a90f810160f6c322e752c6af298b \
+    --hash=sha256:65a24341b5ac09fcadcc37082660be40a94174e51a937fabf6e2cae26225fa2c \
+    --hash=sha256:d775a5e43e9088f507a6250d57fcf5678eb31268c545feb5064ffeee33735622

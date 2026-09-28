@@ -1,0 +1,55 @@
+# FFmpeg 8.0.3's configure switches for Sailor's video tools (Task R5.1a).
+# One switch per line; lines starting with '#' and blank lines are ignored.
+# LGPL only: never --enable-gpl, --enable-version3 or --enable-nonfree.
+# build.sh adds only the machine's own paths (--pkg-config-flags,
+# --extra-cflags, --extra-ldflags) and records the full line in SOURCES.md.
+#
+# The demuxer, muxer and protocol lines are ALLOW-lists: server/media/tools.ts
+# and build.sh's self-check refuse a binary that lists anything else, and
+# tests/unit/media-tools.unit.spec.ts ties their lists to this file.
+#
+# Decoders, parsers and bitstream filters are left at FFmpeg's defaults (all
+# native ones on). Filters are too, except those that read or write files.
+--disable-autodetect
+--disable-iconv
+--disable-debug
+--disable-doc
+--disable-ffplay
+--disable-devices
+--disable-hwaccels
+--disable-network
+--disable-protocols
+--enable-protocol=file,pipe
+# Demuxers: single-file formats only (ruling on rule 6). Nothing that follows
+# references, playlists, patterns or sidecars (concat, hls, dash, imf, image2,
+# vobsub, sdp, rtsp…) is ever enabled.
+#  - the formats Python's LoadVideo/LoadAudio accept through PyAV: mov (mp4, m4a,
+#    3gp), matroska (webm), wav, mp3, ogg, flac, aac, avi, aiff, caf, gif, mpegts,
+#    mpegps (listed as "mpeg"), flv, raw h264/hevc, asf (wma, wmv), raw ac3,
+#    eac3, dts, amr, au, w64, dv, mxf, ivf, yuv4mpegpipe (y4m), nut, rm;
+#  - the media module's own inputs: rawvideo and pcm_f32le (frames and samples
+#    piped in), ffmetadata (tags too large for an argument).
+# Names here are configure's component names (`./configure --list-demuxers`),
+# which can differ from what `ffmpeg -demuxers` lists: mpegps is listed as
+# "mpeg", pcm_f32le as "f32le". build.sh checks config_components.h right after
+# configure, so a name that enables nothing stops the build before compiling.
+--disable-demuxers
+--enable-demuxer=mov,matroska,wav,mp3,ogg,flac,aac,avi,aiff,caf,gif,mpegts,mpegps,flv,h264,hevc,asf,ac3,eac3,dts,amr,au,w64,dv,mxf,ivf,yuv4mpegpipe,nut,rm,rawvideo,pcm_f32le,ffmetadata
+--disable-muxers
+--enable-muxer=mp4,mov,matroska,wav,flac,mp3,ogg,opus,rawvideo,pcm_f32le,null
+--disable-encoders
+--enable-encoder=libopenh264,aac,libmp3lame,flac,libopus,ffv1,pcm_f32le,pcm_s16le,rawvideo
+# Filters that open, read or write files by name (movie sources, command
+# files, LUT/curve/mask/model files, stats and metadata files). Names this
+# FFmpeg doesn't have are only warned about by configure.
+--disable-filter=movie,amovie,sendcmd,asendcmd,lut1d,lut3d,curves,metadata,ametadata,psnr,ssim,ssim360,vmafmotion,signature,fieldhint,find_rect,cover_rect,removelogo,dnn_processing,dnn_classify,dnn_detect,sr,derain,drawtext,subtitles,ass,zmq,azmq,whisper
+--enable-libopenh264
+--enable-libmp3lame
+--enable-libopus
+--enable-libdav1d
+# zlib (Task R5.1a ruling 5): PyAV's FFmpeg decodes PNG-in-MOV and the other
+# deflate-based codecs with it. Built from pinned source by build.sh, static.
+--enable-zlib
+--enable-static
+--disable-shared
+--extra-version=sailor1
