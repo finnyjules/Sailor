@@ -28,19 +28,30 @@ const previewLabel = computed(() => {
   return `${c.previewRow + 1}/${c.rows.length} · ${rowLabel(c, c.previewRow)}`
 })
 
-/** First six rows as tiles: a picture if the row has one, else a colour, else its label.
- *  The image value is used exactly as the Collection table view uses it (`isImageUrl`
- *  gate, raw value as `src`) — cells store an already-usable URL, not a bare filename. */
+/** Same image gate CollectionDrawer.vue uses at line 357 (`isImageUrl`) — that function
+ *  is a private, unexported helper on that component, so it can't be imported; this is
+ *  a byte-for-byte copy of its regex, not an invented rule. */
+function isImageUrl(v: unknown): boolean {
+  const s = String(v ?? '')
+  return /(\.(png|jpe?g|webp|gif|svg)(\?|#|$))|(^\/view\?)/i.test(s) || /^https?:\/\//i.test(s)
+}
+
+/** A six-tile window that always includes the previewed row (so scrubbing past tile 6
+ *  still highlights something), each tile a picture if the row has one, else a colour,
+ *  else its label. The image value is used exactly as the Collection table view uses it
+ *  (`isImageUrl` gate, raw value as `src`) — cells store an already-usable URL, not a
+ *  bare filename. */
 const tiles = computed(() => {
   const c = collection.value
   const img = c.columns.find(col => col.type === 'image')
   const color = c.columns.find(col => col.type === 'color')
-  return c.rows.slice(0, 6).map((row, i) => ({
+  const start = Math.max(0, Math.min(c.previewRow - 5, c.rows.length - 6))
+  return c.rows.slice(start, start + 6).map((row, i) => ({
     key: row.id,
-    index: i,
-    image: img && row.values[img.key] ? String(row.values[img.key]) : null,
+    index: start + i,
+    image: img && isImageUrl(row.values[img.key]) ? String(row.values[img.key]) : null,
     color: color && row.values[color.key] ? String(row.values[color.key]) : null,
-    label: rowLabel(c, i),
+    label: rowLabel(c, start + i),
   }))
 })
 
