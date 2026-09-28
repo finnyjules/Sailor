@@ -9168,12 +9168,12 @@ defineExpose({
 }
 
 /* Studio cards (Type/Gradient/Shader/Shape/Texture/3D/Lip-Sync/Shot Director)
-   share the .studio-node root class for the same reason: without it they
-   selected on click but showed no ring. */
+   (16px, the glass card's corner) share the .studio-node root class for the
+   same reason: without it they selected on click but showed no ring. */
 .vue-node-canvas .vue-flow__node.selected .studio-node {
   outline: 2px solid var(--action);
   outline-offset: 3px;
-  border-radius: 12px;
+  border-radius: 16px;
 }
 
 /* A capsule that has just expanded must sit above its neighbours, or the card
