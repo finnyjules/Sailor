@@ -8,7 +8,7 @@
  *  segmented strip, the labelled select, the switch, the button — so this panel reads like
  *  the Cloner / Feather / Fill panels it sits beside instead of like a form. */
 import type { Track, Ease, PropertyValue, StoredBehaviour, Timing } from '~/lib/motionx'
-import { REVEAL_DEFAULTS, REVEAL_RANGES, REVEAL_STYLES, REVEAL_LOOKS, revealParams, revealCellDefault, PIXEL_CHARS, DITHER_PATTERNS, DEFAULT_CUSTOM_CHARS, SETTLE_EFFECTS, settleParams } from '~/lib/motionx/reveal'
+import { REVEAL_DEFAULTS, REVEAL_RANGES, REVEAL_STYLES, REVEAL_LOOKS, revealParams, revealCellDefault, PIXEL_CHARS, DITHER_PATTERNS, DEFAULT_CUSTOM_CHARS, SETTLE_EFFECTS, settleParams, PIXEL_REVEAL_LOOKS, PIXEL_REVEAL_PATTERNS, PIXEL_REVEAL_DIRECTIONS, pixelRevealParams } from '~/lib/motionx/reveal'
 
 export type BehaviourPatch = { params?: Record<string, unknown>; timing?: Partial<Timing>; kind?: string; replaceParams?: boolean }
 import { trackSpan, behaviourLabel } from '~/lib/motionx/bands'
@@ -143,6 +143,23 @@ const ditherDriftHint = computed(() => (
 // Settle (Addendum 3, Part 4): the ONE reader of a settle bar's stored params, same idiom as
 // `reveal` above — every settle-only computed reads off this rather than re-guessing a default.
 const settle = computed(() => settleParams(behaviour.value?.params))
+// Pixel reveal (task 4 of the addendum): the ONE reader of a pixel-reveal bar's stored
+// params, same idiom as `reveal`/`settle` above.
+const pixelReveal = computed(() => pixelRevealParams(behaviour.value?.params))
+// A text layer is the only one the inspector actually measures piece counts for — `pieceCounts`
+// arrives from CompositorModal only when the selected layer is text, so its presence IS the
+// layer-kind check the Pieces control needs (no separate "is this a text layer" prop exists).
+const pixelRevealTextLayer = computed(() => props.pieceCounts != null)
+/** Swapping the Look keeps `dir` and drops every per-setting override (pieces, pattern,
+ *  direction, pixel, levels, spread, heat) so the new look shows exactly as designed —
+ *  `replaceParams` throws the old params away instead of merging over them. */
+function setPixelRevealLook(id: string) {
+  const b = behaviour.value
+  if (!b) return
+  undoRun = closeRun()
+  const dir = (b.params?.dir as string | undefined) ?? 'in'
+  emit('behaviour-change', b.id, { params: { dir, look: id }, replaceParams: true })
+}
 /** A discrete edit — an option, a switch, a shuffle. Always its own undo step. */
 function setBehParams(patch: Record<string, unknown>) {
   undoRun = closeRun()
@@ -242,6 +259,27 @@ const DITHER_PATTERN_LABELS = DITHER_PATTERNS.map((p) => p.label)
 // Settle's Effect select — the ten `SETTLE_EFFECTS` rows, same id/label pairing idiom.
 const SETTLE_EFFECT_OPTIONS = SETTLE_EFFECTS.map((e) => e.id)
 const SETTLE_EFFECT_LABELS = SETTLE_EFFECTS.map((e) => e.label)
+// Pixel reveal's Look select, Pattern/Direction selects and Pieces segmented row — every list
+// comes straight off the core tables, never hand-typed, so a new look/pattern/direction can't
+// silently go missing from the panel.
+const PIXEL_REVEAL_LOOK_OPTIONS = PIXEL_REVEAL_LOOKS.map((l) => l.id)
+const PIXEL_REVEAL_LOOK_LABELS = PIXEL_REVEAL_LOOKS.map((l) => l.label)
+const PIXEL_REVEAL_PATTERN_OPTIONS = PIXEL_REVEAL_PATTERNS.map((p) => p.value)
+const PIXEL_REVEAL_PATTERN_LABELS = PIXEL_REVEAL_PATTERNS.map((p) => p.label)
+const PIXEL_REVEAL_DIRECTION_OPTIONS = PIXEL_REVEAL_DIRECTIONS.map((d) => d.value)
+const PIXEL_REVEAL_DIRECTION_LABELS = PIXEL_REVEAL_DIRECTIONS.map((d) => d.label)
+const PIXEL_REVEAL_PIECES_OPTIONS = ['words', 'letters', 'lines', 'whole']
+const PIXEL_REVEAL_PIECES_LABELS = ['Words', 'Letters', 'Lines', 'Whole']
+// Heat: "Look colour" clears the override (heat resolves to the look's own colours again),
+// four fixed swatches set a hex override, "No heat" stores `heat: null`. Kept as a plain array
+// (not a Studio select) so each swatch can show its own colour as a fill, the way a palette
+// grid does elsewhere in the studios.
+const PIXEL_REVEAL_HEAT_SWATCHES: readonly { hex: string; name: string }[] = [
+  { hex: '#1700c7', name: 'Ultramarine' },
+  { hex: '#aeff00', name: 'Acid' },
+  { hex: '#ff3d00', name: 'Signal orange' },
+  { hex: '#00d1ff', name: 'Cyan' },
+]
 
 // ── Copies bars (cloner motion, Task 8) ──────────────────────────────────────
 // Four of the five Copies behaviours run either way round, so they show ONE Direction row —
@@ -625,6 +663,60 @@ function onGradient(g: Gradient) {
           @update:model-value="(v) => setBehNum('settle-strength', { strength: v })" />
         <StudioSwitch data-testid="settle-fade" label="Fade while it settles"
           :model-value="settle.fade" @update:model-value="(v) => setBehParams({ fade: v })" />
+      </template>
+      <template v-else-if="behaviour.kind === 'pixelreveal'">
+        <StudioSelect data-testid="pixelreveal-look" label="Look"
+          hint="Swap this bar for another look. Its own dial set replaces every override."
+          :model-value="pixelReveal.look.id" :options="PIXEL_REVEAL_LOOK_OPTIONS" :option-labels="PIXEL_REVEAL_LOOK_LABELS"
+          @update:model-value="setPixelRevealLook" />
+        <StudioSegmentedRow data-testid="pixelreveal-dir" label="Direction"
+          :model-value="enumParam('dir', 'in')" :options="IN_OUT" :option-labels="IN_OUT_LABELS"
+          @update:model-value="(v) => setBehParams({ dir: v })" />
+        <div :class="{ 'pointer-events-none opacity-40': !pixelRevealTextLayer }"
+          :title="pixelRevealTextLayer ? undefined : 'Only a text layer can be split into pieces'">
+          <StudioSegmentedRow data-testid="pixelreveal-pieces" label="Pieces"
+            :model-value="pixelReveal.pieces" :options="PIXEL_REVEAL_PIECES_OPTIONS" :option-labels="PIXEL_REVEAL_PIECES_LABELS"
+            @update:model-value="(v) => setBehParams({ pieces: v })" />
+        </div>
+        <StudioSelect data-testid="pixelreveal-pattern" label="Pattern"
+          :model-value="pixelReveal.pattern" :options="PIXEL_REVEAL_PATTERN_OPTIONS" :option-labels="PIXEL_REVEAL_PATTERN_LABELS"
+          @update:model-value="(v) => setBehParams({ pattern: v })" />
+        <StudioSelect data-testid="pixelreveal-direction" label="Sweep direction"
+          :model-value="pixelReveal.direction" :options="PIXEL_REVEAL_DIRECTION_OPTIONS" :option-labels="PIXEL_REVEAL_DIRECTION_LABELS"
+          @update:model-value="(v) => setBehParams({ direction: v })" />
+        <StudioSlider data-testid="pixelreveal-pixel" v-bind="gesture('pixelreveal-pixel')"
+          label="Pixel size" hint="Frame pixels, at 1080px wide, before the front sweeps over a block"
+          :model-value="pixelReveal.pixel" :min="4" :max="64" :step="1" :default="pixelReveal.look.settings.pixel"
+          @update:model-value="(v) => setBehNum('pixelreveal-pixel', { pixel: v })" />
+        <StudioSlider data-testid="pixelreveal-levels" v-bind="gesture('pixelreveal-levels')"
+          label="Levels" hint="How many times a block halves as it sharpens"
+          :model-value="pixelReveal.levels" :min="0" :max="5" :step="1" :default="pixelReveal.look.settings.levels"
+          @update:model-value="(v) => setBehNum('pixelreveal-levels', { levels: v })" />
+        <StudioSlider data-testid="pixelreveal-spread" v-bind="gesture('pixelreveal-spread')"
+          label="Front width" hint="How wide the sweeping front is, as a fraction of the layer"
+          :model-value="pixelReveal.spread" :min="0.05" :max="1" :step="0.01" :default="pixelReveal.look.settings.spread"
+          @update:model-value="(v) => setBehNum('pixelreveal-spread', { spread: v })" />
+        <div data-testid="pixelreveal-heat" class="flex h-7 items-center justify-between gap-2 rounded-[6px] bg-white/[0.03] px-2.5">
+          <span class="min-w-0 truncate text-[11px] text-white/55">Heat</span>
+          <div class="flex shrink-0 items-center gap-1">
+            <button type="button" title="Look colour" aria-label="Look colour"
+              :aria-pressed="behParam('heat') === undefined"
+              class="h-[18px] rounded-full border border-white/20 px-2 text-[9px] leading-none text-white/70"
+              :class="behParam('heat') === undefined ? 'bg-white/25 text-white' : 'hover:bg-white/10'"
+              @click="setBehParams({ heat: undefined })">Look</button>
+            <button v-for="s in PIXEL_REVEAL_HEAT_SWATCHES" :key="s.hex" type="button" :title="s.name" :aria-label="s.name"
+              :aria-pressed="behParam('heat') === s.hex"
+              class="h-[18px] w-[18px] shrink-0 rounded-full border"
+              :class="behParam('heat') === s.hex ? 'border-white' : 'border-white/20'"
+              :style="{ background: s.hex }"
+              @click="setBehParams({ heat: s.hex })" />
+            <button type="button" title="No heat" aria-label="No heat"
+              :aria-pressed="behParam('heat') === null"
+              class="h-[18px] w-[18px] shrink-0 rounded-full border border-white/20 bg-transparent text-white/50"
+              :class="behParam('heat') === null ? 'border-white text-white' : 'hover:text-white/80'"
+              @click="setBehParams({ heat: null })">×</button>
+          </div>
+        </div>
       </template>
       <template v-else-if="behaviour.kind === 'morph'">
         <StudioSelect data-testid="morph-target" label="Morph into"

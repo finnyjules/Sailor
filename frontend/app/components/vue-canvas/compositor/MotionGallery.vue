@@ -7,6 +7,7 @@ import { movesForLayer, groupedMoves, type GalleryMove, type LayerCaps, type Pre
 import MotionDitherPreview from '~/components/vue-canvas/compositor/MotionDitherPreview.vue'
 import MotionSettlePreview from '~/components/vue-canvas/compositor/MotionSettlePreview.vue'
 import MotionCopiesPreview from '~/components/vue-canvas/compositor/MotionCopiesPreview.vue'
+import MotionPixelRevealPreview from '~/components/vue-canvas/compositor/MotionPixelRevealPreview.vue'
 
 const props = defineProps<{ caps: LayerCaps }>()
 defineEmits<{ add: [move: GalleryMove]; close: [] }>()
@@ -75,10 +76,8 @@ const SLOT_FILLERS: Record<number, [string, string]> = { 0: ['K', 'Q'], 1: ['9',
             <MotionSettlePreview v-else-if="m.preview === 'settle'" :effect="(m.params?.effect as string) ?? 'slice'" :out="m.params?.dir === 'out'" class="absolute inset-0 h-full w-full" />
             <!-- copies previews: a ring of copies playing the one cloner dial this tile animates -->
             <MotionCopiesPreview v-else-if="isCopiesPreview(m.preview)" :mode="copiesMode(m.preview)" :dir="previewDir(m)" class="absolute inset-0 h-full w-full" />
-            <!-- pixel reveal preview: no preview component built yet, so this renders a blank
-                 well rather than falling into the generic transform mark below, which has no
-                 matching CSS and would sit still/misleading -->
-            <span v-else-if="m.preview === 'pixelreveal'" class="absolute inset-0" />
+            <!-- pixel reveal preview: the CPU block-fill mirror on a tiny live canvas -->
+            <MotionPixelRevealPreview v-else-if="m.preview === 'pixelreveal'" :look="(m.params?.look as string) ?? 'materialize'" :out="m.params?.dir === 'out'" class="absolute inset-0 h-full w-full" />
             <!-- transform/opacity previews: a small mark that plays the move on loop -->
             <span v-else-if="m.preview !== 'scroll' && m.preview !== 'morph'"
               class="prev-mark absolute left-1/2 top-1/2 w-3 h-3 -ml-1.5 -mt-1.5 rounded-sm bg-[#7c9cff]"
