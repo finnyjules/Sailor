@@ -6,6 +6,8 @@ import StudioRow from '~/components/vue-canvas/studio/StudioRow.vue'
 import StudioSlider from '~/components/vue-canvas/studio/StudioSlider.vue'
 import StudioSelect from '~/components/vue-canvas/studio/StudioSelect.vue'
 import StudioSwitch from '~/components/vue-canvas/studio/StudioSwitch.vue'
+import StudioSegmentedRow from '~/components/vue-canvas/studio/StudioSegmentedRow.vue'
+import StudioSegmented from '~/components/vue-canvas/studio/StudioSegmented.vue'
 
 const spec = { key: 'strength', label: 'Reference strength', kind: 'slider', min: 0, max: 100, step: 1, default: 70 } as any
 const row = (w: ReturnType<typeof mount>) => w.find('[data-studio-row]')
@@ -51,5 +53,27 @@ describe('size reaches StudioRow through the row family', () => {
   it('defaults stay compact', () => {
     const w = mount(StudioSlider, { props: { label: 'Strength', min: 0, max: 100, modelValue: 50 } })
     expect(w.find('[data-studio-row]').classes()).toContain('h-7')
+  })
+})
+
+describe('StudioSegmentedRow quieter fills', () => {
+  it('rests at 3% and answers hover at 6.5%', () => {
+    const w = mount(StudioSegmentedRow, { props: { modelValue: 'a', label: 'Test', options: ['a', 'b'] } })
+    const row = w.find('div[class*="bg-white"]')
+    expect(row.classes()).toContain('bg-white/[0.03]')
+    expect(row.classes()).toContain('hover:bg-white/[0.065]')
+  })
+  it('label text is 55% opacity', () => {
+    const w = mount(StudioSegmentedRow, { props: { modelValue: 'a', label: 'Test', options: ['a', 'b'] } })
+    const label = w.find('span')
+    expect(label.classes()).toContain('text-white/55')
+  })
+})
+
+describe('StudioSegmented quieter track', () => {
+  it('track rests at 3%', () => {
+    const w = mount(StudioSegmented, { props: { modelValue: 'a', options: ['a', 'b'] } })
+    const track = w.find('div[class*="bg-white"]')
+    expect(track.classes()).toContain('bg-white/[0.03]')
   })
 })

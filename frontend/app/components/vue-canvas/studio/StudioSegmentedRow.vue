@@ -10,8 +10,8 @@ defineProps<{ label: string; options: string[]; optionLabels?: string[] }>()
 </script>
 
 <template>
-  <div class="flex h-7 select-none items-center justify-between gap-2 overflow-hidden rounded-[6px] bg-white/[0.05] pl-2.5 pr-[3px]">
-    <span class="min-w-0 truncate text-[11px] text-white/72">{{ label }}</span>
+  <div class="flex h-7 select-none items-center justify-between gap-2 overflow-hidden rounded-[6px] bg-white/[0.03] hover:bg-white/[0.065] pl-2.5 pr-[3px]">
+    <span class="min-w-0 truncate text-[11px] text-white/55">{{ label }}</span>
     <div role="radiogroup" :aria-label="label" class="flex shrink-0 items-center gap-0.5">
       <button v-for="(o, i) in options" :key="o" type="button" role="radio" :aria-checked="model === o"
               :data-value="o" @click="model = o"
