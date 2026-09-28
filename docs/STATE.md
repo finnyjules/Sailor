@@ -82,6 +82,10 @@ The brush toolbar gains a **Paint** row: Colour (as before) or six live material
 
 **Next.** Part 3: "More shaders" from the full library and painted effects.
 
+### The pen — Trim joins the pieces it leaves (auto-join) — LANDED 2026-09-27
+
+Commit 6e5d0d519. On the owner's flower ("why doesn't the shape close inside"): Trim left every remaining piece as its own open path even where two now ended at the same point, so the Frame closed each piece with a chord instead of filling the centre. Now, at the trim's own end points only, two open paths of the same kind ending at one point are joined, and a chain whose ends meet closes — a trimmed lens or flower is one closed outline (the Frame layer's `d` is one closed subpath). Nothing moves; rules and fills carry; Cut and Dissolve unchanged; three-way meetings, guide/drawn mixes and line-tool line entities are not joined. 9 unit tests (8 fail without it), real-mouse checks on the pen page and in the Frame.
+
 ### The pen — round corners, chamfer, offset, repeat modes (stage 8) — LANDED 2026-09-27
 
 Spec `docs/superpowers/specs/2026-09-26-pen-stages-4-8-design.md` (Stage 8), plan `docs/superpowers/plans/2026-09-27-pen-stage-8-corners-offset-repeat.md`; commits 9a63522eb … 08dfd2c98, final fixes aeb334470 + f2e98eaa6 + f84af46f6. On the pen page, in the Frame and in Shape Studio:
