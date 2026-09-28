@@ -26,7 +26,7 @@
  * read 2026-09-24). Alibaba lists the two as separate models ("qwen-image-3.0:
  * Balances quality and speed"). S3 allows a backup only for the same model.
  */
-import { arOr, optBool, optStr } from './opts'
+import { arOr, optBool, optText } from './opts'
 import type { ServiceCall } from './twins'
 
 export const QWEN_IMAGE_3_ID = 'qwen-image-3'
@@ -62,7 +62,7 @@ export function qwenImage3Generate({ prompt, aspectRatio, seed, adv }: QwenImage
     aspect_ratio: arOr(RATIOS, aspectRatio, '1:1'),
     enable_prompt_expansion: optBool(adv, 'enable_prompt_expansion', true),
   }
-  const negative = optStr(adv, 'negative_prompt', '')
+  const negative = optText(adv, 'negative_prompt')
   if (negative) payload.negative_prompt = negative
   if (Number.isFinite(seed) && seed > 0) payload.seed = qwenImage3Seed(Math.floor(seed))
   return { provider: 'replicate', endpoint: QWEN_IMAGE_3_SLUG, payload }

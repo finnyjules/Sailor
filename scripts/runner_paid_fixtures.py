@@ -1733,6 +1733,12 @@ def film_shot_group() -> dict:
             for image in (False, True):
                 case(f"shot_directed {json.dumps(value)} \u00b7 {model} \u00b7 {'with' if image else 'without'} image", image=image,
                      preset="orbit", model=model, prompt="  a heron  ", model_options=json.dumps({"__shot_directed": value}))
+    # Shot Director's words, stripped by Python (fix round 2): Unicode blanks around them.
+    for model in ("veo-3.1", "seedance-2.0", "kling-v3"):
+        for image in (False, True):
+            case(f"shot_directed true \u00b7 unicode blanks \u00b7 {model} \u00b7 {'with' if image else 'without'} image", image=image,
+                 preset="orbit", model=model, prompt="\u3000\u00a0\t a heron \u2014 caf\u00e9\x1c\x85\u2028\n",
+                 model_options=json.dumps({"__shot_directed": True}))
     # A negative prompt in the options, on every model whose builder sends one.
     for model in ("veo-3.1", "veo-3.1-fast", "kling-v3", "kling-v2.5-turbo-pro", "wan-2.7-t2v", "ltx-video", "pixverse-v6", "seedance-2.0"):
         case(f"negative prompt \u00b7 {model}", preset="orbit", model=model, prompt="a heron",

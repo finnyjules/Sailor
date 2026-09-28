@@ -346,3 +346,20 @@ describe('final fix: frames and ratios on a shot-directed Film a shot', () => {
     }
   })
 })
+
+describe('Shot Director\'s words are stripped as Python strips them (R3.11 fix round 2)', () => {
+  it('surrounding spaces', async () => {
+    const node = shot('seedance-2.0')
+    node.inputs.prompt = '   Reva walks through the rain \n\t'
+    const p = await plan(node)
+    if (p.kind !== 'provider') throw new Error('not a provider plan')
+    expect(p.payload.prompt).toBe('Reva walks through the rain')
+  })
+  it('Unicode blanks (Python str.strip: U+3000, U+00A0, U+001C, U+0085, U+2028), inner ones kept', async () => {
+    const node = shot('veo-3.1')
+    node.inputs.prompt = '　  Reva walks — café\u001c\u0085 '
+    const p = await plan(node)
+    if (p.kind !== 'provider') throw new Error('not a provider plan')
+    expect(p.payload.prompt).toBe('Reva walks — café')
+  })
+})

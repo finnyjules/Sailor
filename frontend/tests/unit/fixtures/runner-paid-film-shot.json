@@ -16216,6 +16216,227 @@
      "auto_fix": true,
      "duration": "4s",
      "generate_audio": true,
+     "prompt": "a heron \u2014 caf\u00e9",
+     "resolution": "720p",
+     "seed": 7
+    },
+    "provider": "fal"
+   },
+   "class_type": "FilmShotNode",
+   "name": "shot_directed true \u00b7 unicode blanks \u00b7 veo-3.1 \u00b7 without image",
+   "phrase": {
+    "dialect": "veo",
+    "phrase": "35mm lens with shallow depth of field, medium shot from eye level. The camera arcs in a slow 180-degree orbit around the subject; subject locked at frame center. The hero moment. Cinematic.",
+    "recipe_id": "orbit"
+   },
+   "pictures": [],
+   "widgets": {
+    "aspect_ratio": "16:9",
+    "camera_angle": "auto (preset)",
+    "camera_movement": "auto (preset)",
+    "composition": "auto (preset)",
+    "duration": "5",
+    "lens_look": "auto (preset)",
+    "model": "veo-3.1",
+    "model_options": "{\"__shot_directed\": true}",
+    "preset": "orbit",
+    "prompt": "\u3000\u00a0\t a heron \u2014 caf\u00e9\u001c\u0085\u2028\n",
+    "seed": 7,
+    "shot_size": "auto (preset)"
+   }
+  },
+  {
+   "call": {
+    "endpoint": "fal-ai/veo3.1/image-to-video",
+    "payload": {
+     "auto_fix": true,
+     "duration": "4s",
+     "generate_audio": true,
+     "image_url": "IMG:image",
+     "prompt": "a heron \u2014 caf\u00e9",
+     "resolution": "720p",
+     "seed": 7
+    },
+    "provider": "fal"
+   },
+   "class_type": "FilmShotNode",
+   "name": "shot_directed true \u00b7 unicode blanks \u00b7 veo-3.1 \u00b7 with image",
+   "phrase": {
+    "dialect": "veo",
+    "phrase": "35mm lens with shallow depth of field, medium shot from eye level. The camera arcs in a slow 180-degree orbit around the subject; subject locked at frame center. The hero moment. Cinematic.",
+    "recipe_id": "orbit"
+   },
+   "pictures": [
+    "image"
+   ],
+   "widgets": {
+    "aspect_ratio": "16:9",
+    "camera_angle": "auto (preset)",
+    "camera_movement": "auto (preset)",
+    "composition": "auto (preset)",
+    "duration": "5",
+    "lens_look": "auto (preset)",
+    "model": "veo-3.1",
+    "model_options": "{\"__shot_directed\": true}",
+    "preset": "orbit",
+    "prompt": "\u3000\u00a0\t a heron \u2014 caf\u00e9\u001c\u0085\u2028\n",
+    "seed": 7,
+    "shot_size": "auto (preset)"
+   }
+  },
+  {
+   "call": {
+    "endpoint": "bytedance/seedance-2.0/text-to-video",
+    "payload": {
+     "aspect_ratio": "16:9",
+     "duration": "5",
+     "prompt": "a heron \u2014 caf\u00e9",
+     "resolution": "720p"
+    },
+    "provider": "fal"
+   },
+   "class_type": "FilmShotNode",
+   "name": "shot_directed true \u00b7 unicode blanks \u00b7 seedance-2.0 \u00b7 without image",
+   "phrase": {
+    "dialect": "standard",
+    "phrase": "Cinematic medium shot from eye level. The camera arcs in a slow 180-degree orbit around the subject. 35mm lens with shallow depth of field; subject locked at frame center \u2014 the hero moment.",
+    "recipe_id": "orbit"
+   },
+   "pictures": [],
+   "widgets": {
+    "aspect_ratio": "16:9",
+    "camera_angle": "auto (preset)",
+    "camera_movement": "auto (preset)",
+    "composition": "auto (preset)",
+    "duration": "5",
+    "lens_look": "auto (preset)",
+    "model": "seedance-2.0",
+    "model_options": "{\"__shot_directed\": true}",
+    "preset": "orbit",
+    "prompt": "\u3000\u00a0\t a heron \u2014 caf\u00e9\u001c\u0085\u2028\n",
+    "seed": 7,
+    "shot_size": "auto (preset)"
+   }
+  },
+  {
+   "call": {
+    "endpoint": "bytedance/seedance-2.0/image-to-video",
+    "payload": {
+     "duration": "5",
+     "image_url": "IMG:image",
+     "prompt": "a heron \u2014 caf\u00e9",
+     "resolution": "720p"
+    },
+    "provider": "fal"
+   },
+   "class_type": "FilmShotNode",
+   "name": "shot_directed true \u00b7 unicode blanks \u00b7 seedance-2.0 \u00b7 with image",
+   "phrase": {
+    "dialect": "standard",
+    "phrase": "Cinematic medium shot from eye level. The camera arcs in a slow 180-degree orbit around the subject. 35mm lens with shallow depth of field; subject locked at frame center \u2014 the hero moment.",
+    "recipe_id": "orbit"
+   },
+   "pictures": [
+    "image"
+   ],
+   "widgets": {
+    "aspect_ratio": "16:9",
+    "camera_angle": "auto (preset)",
+    "camera_movement": "auto (preset)",
+    "composition": "auto (preset)",
+    "duration": "5",
+    "lens_look": "auto (preset)",
+    "model": "seedance-2.0",
+    "model_options": "{\"__shot_directed\": true}",
+    "preset": "orbit",
+    "prompt": "\u3000\u00a0\t a heron \u2014 caf\u00e9\u001c\u0085\u2028\n",
+    "seed": 7,
+    "shot_size": "auto (preset)"
+   }
+  },
+  {
+   "call": {
+    "endpoint": "kwaivgi/kling-v3-video",
+    "payload": {
+     "aspect_ratio": "16:9",
+     "cfg_scale": 0.5,
+     "duration": 5,
+     "generate_audio": true,
+     "prompt": "a heron \u2014 caf\u00e9",
+     "seed": 7
+    },
+    "provider": "replicate"
+   },
+   "class_type": "FilmShotNode",
+   "name": "shot_directed true \u00b7 unicode blanks \u00b7 kling-v3 \u00b7 without image",
+   "phrase": {
+    "dialect": "standard",
+    "phrase": "Cinematic medium shot from eye level. The camera arcs in a slow 180-degree orbit around the subject. 35mm lens with shallow depth of field; subject locked at frame center \u2014 the hero moment.",
+    "recipe_id": "orbit"
+   },
+   "pictures": [],
+   "widgets": {
+    "aspect_ratio": "16:9",
+    "camera_angle": "auto (preset)",
+    "camera_movement": "auto (preset)",
+    "composition": "auto (preset)",
+    "duration": "5",
+    "lens_look": "auto (preset)",
+    "model": "kling-v3",
+    "model_options": "{\"__shot_directed\": true}",
+    "preset": "orbit",
+    "prompt": "\u3000\u00a0\t a heron \u2014 caf\u00e9\u001c\u0085\u2028\n",
+    "seed": 7,
+    "shot_size": "auto (preset)"
+   }
+  },
+  {
+   "call": {
+    "endpoint": "kwaivgi/kling-v3-video",
+    "payload": {
+     "aspect_ratio": "16:9",
+     "cfg_scale": 0.5,
+     "duration": 5,
+     "generate_audio": true,
+     "prompt": "a heron \u2014 caf\u00e9",
+     "seed": 7,
+     "start_image": "IMG:image"
+    },
+    "provider": "replicate"
+   },
+   "class_type": "FilmShotNode",
+   "name": "shot_directed true \u00b7 unicode blanks \u00b7 kling-v3 \u00b7 with image",
+   "phrase": {
+    "dialect": "standard",
+    "phrase": "Cinematic medium shot from eye level. The camera arcs in a slow 180-degree orbit around the subject. 35mm lens with shallow depth of field; subject locked at frame center \u2014 the hero moment.",
+    "recipe_id": "orbit"
+   },
+   "pictures": [
+    "image"
+   ],
+   "widgets": {
+    "aspect_ratio": "16:9",
+    "camera_angle": "auto (preset)",
+    "camera_movement": "auto (preset)",
+    "composition": "auto (preset)",
+    "duration": "5",
+    "lens_look": "auto (preset)",
+    "model": "kling-v3",
+    "model_options": "{\"__shot_directed\": true}",
+    "preset": "orbit",
+    "prompt": "\u3000\u00a0\t a heron \u2014 caf\u00e9\u001c\u0085\u2028\n",
+    "seed": 7,
+    "shot_size": "auto (preset)"
+   }
+  },
+  {
+   "call": {
+    "endpoint": "fal-ai/veo3.1",
+    "payload": {
+     "aspect_ratio": "16:9",
+     "auto_fix": true,
+     "duration": "4s",
+     "generate_audio": true,
      "negative_prompt": "blurry, caf\u00e9 \u732b",
      "prompt": "35mm lens with shallow depth of field, medium shot from eye level. The camera arcs in a slow 180-degree orbit around the subject; subject locked at frame center. The hero moment. Cinematic. a heron",
      "resolution": "720p",

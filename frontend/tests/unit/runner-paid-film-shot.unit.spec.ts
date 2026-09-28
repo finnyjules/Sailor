@@ -214,7 +214,7 @@ describe('every fixture case: the phrase and the request Python makes', () => {
   })
 
   it('`__shot_directed` as Python\'s bool() reads it (fix round 1): a truthy value other than true sends the words alone in Python, so the runner leaves it to the engine; a falsy one is a preset shot', () => {
-    const cases = CASES.filter(c => c.name.startsWith('shot_directed '))
+    const cases = CASES.filter(c => c.name.startsWith('shot_directed ') && !c.name.includes('unicode blanks'))
     expect(cases.length).toBe(14 * 4 * 2)
     for (const c of cases) {
       const directed = pythonDirected(c)
@@ -251,6 +251,15 @@ describe('every fixture case: the phrase and the request Python makes', () => {
     const nan = { ...caseNamed('orbit · standard · blank prompt').widgets, model_options: '{"__shot_directed": NaN}' }
     expect(runnerTakesNode(promptOf({ widgets: nan }), 'n', ON)).toBe(false)
   })
+
+  it.each(CASES.filter(c => c.call && /^shot_directed true /.test(c.name) && ['seedance-2.0', 'veo-3.1', 'kling-v3'].includes(String(c.widgets.model))).map(c => [c.name, c] as const))(
+    'shot-directed %s: Python\'s stripped words and request (fix round 2)', async (_n, c) => {
+      const plan = await planOf(promptOf(c))
+      const py = c.call!
+      const [sent] = normalizeSent([matchingCall(plan, py) as { provider: 'fal' | 'replicate'; endpoint: string; payload: Record<string, unknown> }], c.pictures)
+      expect(sent!.payload.prompt).toBe(py.payload.prompt)
+      expectPythonParity(py.provider, py.endpoint, sent!.payload, py.payload, c.name)
+    })
 
   it('the three Python refusals are refused before the hold, in plain words', () => {
     const refused = CASES.filter(c => c.error)

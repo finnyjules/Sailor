@@ -723,8 +723,8 @@ async function planNodeRequest(ctx: PlanContext): Promise<NodePlan> {
     // A shot-directed Film a shot (Task 4, characters stage 3): its `/view`
     // reference links become provider links (shotRefs.ts), `image_url` is the
     // first frame unless a picture is linked, and the rest is planned exactly
-    // as Generate a video. Its prompt is Shot Director's own, sent as typed
-    // (Python's shot_directed path adds no preset phrase).
+    // as Generate a video. Its prompt is Shot Director's own, stripped as
+    // Python strips it (Python's shot_directed path adds no preset phrase).
     // A preset shot (R3.11, family film-shot): the prompt is Python's
     // full_prompt, the camera phrase then the words (shotPresets.ts); its
     // `/view` links resolved the same way, but `image_url` stays in the
@@ -743,7 +743,8 @@ async function planNodeRequest(ctx: PlanContext): Promise<NodePlan> {
       const first = linked ?? (directed && firstFrame ? async () => firstFrame : null)
       const keepsImageUrl = !directed && Object.prototype.hasOwnProperty.call(given, 'image_url')
       const adv = keepsImageUrl ? { ...resolved.adv, image_url: firstFrame ?? given.image_url } : resolved.adv
-      const prompt = directed ? inputs.prompt : filmShotPrompt(inputs)
+      // Shot-directed: Python's `(prompt or "").strip()`, Shot Director's words alone (R3.11 fix round 2).
+      const prompt = directed ? pyStrip(asText(inputs.prompt)) : filmShotPrompt(inputs)
       const plan = await planVideoGeneration({ ...inputs, prompt, model_options: JSON.stringify(adv) }, first)
       if (plan.kind !== 'provider') return plan
       // Python's FilmShotNode is not an output node: the take lands on the Video card after it (Ruling C).

@@ -6,7 +6,7 @@
  * which is why each reader checks own-property first.
  */
 import { pyFloatOf, pyIntOf, pyStrip } from '#shared/runner/pyText'
-import { videoOptionText, type VideoOptionTextKey } from '#shared/runner/videoOptionTexts'
+import { modelOptionText, type ModelOptionTextKey } from '#shared/runner/modelOptionTexts'
 
 const has = (adv: Record<string, unknown>, key: string) => Object.prototype.hasOwnProperty.call(adv, key)
 
@@ -56,12 +56,12 @@ export function optBool(adv: Record<string, unknown>, key: string, def: boolean)
 }
 
 /**
- * A video option the builder sends as the user's own words: only a key of
- * VIDEO_OPTION_TEXT_KEYS, so moderation reads every such field
- * (#shared/runner/videoOptionTexts). Blank when absent.
+ * An option the builder sends as the user's own words: only a key of
+ * MODEL_OPTION_TEXT_KEYS, so moderation reads every such field
+ * (#shared/runner/modelOptionTexts). Blank when absent.
  */
-export function optText(adv: Record<string, unknown>, key: VideoOptionTextKey): string {
-  return videoOptionText(adv, key)
+export function optText(adv: Record<string, unknown>, key: ModelOptionTextKey): string {
+  return modelOptionText(adv, key)
 }
 
 export function optStr(adv: Record<string, unknown>, key: string, def: string): string {

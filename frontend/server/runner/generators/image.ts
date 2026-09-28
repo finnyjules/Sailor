@@ -15,7 +15,7 @@
  */
 import { RUNNER_IMAGE_MODEL_IDS, RUNNER_REPLICATE_IMAGE_MODEL_IDS } from '#shared/runner/eligibility'
 import { FLUX_2_RESOLUTIONS, FLUX_KLEIN_MEGAPIXELS, flux2DevSize } from '#shared/pricing/imageSettings'
-import { arOr, asText, maybeSetSeed, optBool, optEnum, optFloat, optFloatIn, optInt, optIntIn, optStr, outputFormatIn } from './opts'
+import { arOr, asText, maybeSetSeed, optBool, optEnum, optFloat, optFloatIn, optInt, optIntIn, optStr, optText, outputFormatIn } from './opts'
 import type { ImageBuildArgs, ImageModelDesc, ReplicateImageModelDesc } from './types'
 
 const NANO_BANANA_AR = new Set(['1:1', '1:4', '1:8', '2:3', '3:2', '3:4', '4:1', '4:3', '4:5', '5:4', '8:1', '9:16', '16:9', '21:9'])
@@ -234,7 +234,7 @@ const JPG_PNG = ['jpg', 'png']
 
 /** `negp = _opt_str(adv, "negative_prompt", ""); if negp: inp["negative_prompt"] = negp` */
 function withNegative(inp: Record<string, unknown>, adv: Record<string, unknown>): Record<string, unknown> {
-  const negp = optStr(adv, 'negative_prompt', '')
+  const negp = optText(adv, 'negative_prompt')
   if (negp) inp.negative_prompt = negp
   return inp
 }
