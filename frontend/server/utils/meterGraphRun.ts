@@ -37,10 +37,9 @@ import { extraPromptTexts } from '../runner/metering'
 import type { ApiPrompt } from '#shared/runner/graph'
 import { moderatePrompt, moderateTexts, moderationRefusal, type ModerationResult } from './moderation'
 import { assertSpendAllowed } from './systemControls'
-import { blockedPromptRefusal, nodeProblemsBody, retiredEngineRefusal } from './blockedModels'
-import { retiredNodesResponse } from '#shared/runner/retired'
+import { blockedPromptRefusal, nodeProblemsBody, retiredEngineRefusal, retiredPromptRefusal } from './blockedModels'
 import { hostedRequestProblems, measuredInputProblems } from '../runner/requestRules'
-import { executedPart } from '#shared/runner/validate'
+import { executedPart, outputClassesOf } from '#shared/runner/validate'
 import { savedPoseRefs } from '#shared/runner/nanoExtras'
 import { decodesStrictly } from '../runner/pictures/pythonView'
 
@@ -476,9 +475,10 @@ async function submitMetered(userId: string | null, body: any, deps: GraphRunDep
   // through preflightForUser). Fails CLOSED.
   await deps.spendGuard(userId)
 
-  // A retired partner node (shared/runner/retired.ts, Task R4.1) is refused
-  // next, in ComfyUI's 400 shape: nothing is read, moderated, priced or held.
-  const retiredNodes = retiredNodesResponse(body.prompt)
+  // A retired partner node an output reads (shared/runner/retired.ts, Task
+  // R4.1; one nothing reads is pruned, as ComfyUI prunes it) is refused next,
+  // in ComfyUI's 400 shape: nothing is read, moderated, priced or held.
+  const retiredNodes = retiredPromptRefusal(body.prompt, deps.isOutputClass)
   if (retiredNodes) return { status: 400, body: retiredNodes }
 
   // G1 fix round 1 (R2/R4): the prompt ComfyUI will run — `__value__`
@@ -528,7 +528,7 @@ async function submitMetered(userId: string | null, body: any, deps: GraphRunDep
 
   // A discontinued or runner-only model can't run on ComfyUI: refused in
   // ComfyUI's own 400 shape before pricing and any hold (blockedModels.ts).
-  const blocked = blockedPromptRefusal(body.prompt)
+  const blocked = blockedPromptRefusal(body.prompt, { isOutputClass: deps.isOutputClass })
   if (blocked) return { status: 400, body: blocked }
   // Hosted, until F12: the two estimate-priced edit engines are refused too.
   const retired = retiredEngineRefusal(body.prompt)
@@ -690,14 +690,9 @@ export async function savedPosesLoading(prompt: unknown, copyOf: (value: string)
  * Whether a class is an output node, by the node catalog (`output_node`); a
  * class the catalog doesn't list counts as one (its whole upstream is priced:
  * never less than what runs). No catalog: undefined (the whole prompt is priced).
+ * Shared with the retired-node gate since R4.1 fix round 1 (#shared/runner/validate).
  */
-export function outputClassesOf(catalog: Readonly<Record<string, { output_node?: unknown } | undefined>> | null): ((classType: string) => boolean) | undefined {
-  if (!catalog) return undefined
-  return (ct) => {
-    const def = Object.prototype.hasOwnProperty.call(catalog, ct) ? catalog[ct] : undefined
-    return !def || def.output_node === true
-  }
-}
+export { outputClassesOf }
 
 /**
  * settleOnCompletion's default (120 polls @ 1s = 2min) is too short for

@@ -204,6 +204,19 @@ export function executedPart(prompt: ApiPrompt, isOutput: (classType: string) =>
   return Object.fromEntries(ids.filter(id => keep.has(id)).map(id => [id, prompt[id]!]))
 }
 
+/**
+ * A node catalogue's (/object_info's) output-node test, for executedPart: a
+ * class it doesn't list counts as an output (the safe side: its node and
+ * what it reads are kept). Undefined without a catalogue.
+ */
+export function outputClassesOf(catalog: Readonly<Record<string, { output_node?: unknown } | undefined>> | null | undefined): ((classType: string) => boolean) | undefined {
+  if (!catalog) return undefined
+  return (ct) => {
+    const def = Object.prototype.hasOwnProperty.call(catalog, ct) ? catalog[ct] : undefined
+    return !def || def.output_node === true
+  }
+}
+
 /** Whether `id` is something one of `outputs` reads (directly or not). */
 function isUpstreamOfAny(prompt: ApiPrompt, outputs: readonly string[], id: string): boolean {
   return outputs.some(o => upstreamOf(prompt, o).has(id))

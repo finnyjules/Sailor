@@ -6,22 +6,25 @@
  * (api.comfy.org, comfy_api_nodes/util/_helpers.py `default_base_url`),
  * 182 of them in the committed catalogue
  * (server/native/objectInfo.baseline.json.gz; guarded by
- * tests/unit/retired-nodes.unit.spec.ts). The Python files stay; Sailor
+ * tests/unit/runner-retired-nodes.unit.spec.ts). The Python files stay; Sailor
  * stops offering and running them:
  *   - hidden from the Actions panel (app/data/action-catalog.ts
  *     `offeredInActionsPanel`), node search (useNodeSearch.ts) and the
  *     agent's and port-intent catalogue (portIntentCatalog.ts `buildCatalog`);
- *   - refused before anything is priced or held, in ComfyUI's own 400 shape
- *     (`retiredNodesResponse`), on both paths: the runner (`startRun`) and
+ *   - refused before anything is priced or held when it would run (an
+ *     output reads it; one nothing reads is pruned, as ComfyUI prunes it),
+ *     in ComfyUI's own 400 shape (`retiredNodesResponse`), on both paths: the runner (`startRun`) and
  *     every `/prompt` bound for ComfyUI (server/utils/blockedModels.ts
  *     `blockedPromptRefusal`: the hosted meter and the local proxy); the
  *     browser says so before sending anything (needsEngine.ts `blockedRunRefusal`);
- *   - a saved workflow that holds one still opens; the node card shows it
- *     as retired (ComfyNode.vue) and can't be run.
+ *   - a saved workflow that holds one still opens; the node card (or the
+ *     subgraph card holding it) shows it as retired (ComfyNode.vue) and
+ *     can't be run.
  *
  * Pure; relative imports only.
  */
 import type { ApiPrompt } from './graph'
+import { readByOutputs } from './validate'
 
 /** What to do instead, the second sentence of RETIRED_NODE_MESSAGE. */
 export const RETIRED_NODE_ADVICE = 'Pick another way to make this.'
@@ -129,20 +132,51 @@ export const RETIRED_CLASSES: ReadonlySet<string> = new Set([
   'WavespeedFlashVSRNode', 'WavespeedImageUpscaleNode',
 ])
 
+/**
+ * The retired classes that are ComfyUI output nodes (OUTPUT_NODE /
+ * is_output_node, from the committed catalogue; guarded by the spec): the 3D
+ * makers. An output always runs, so one of these is always refused.
+ */
+export const RETIRED_OUTPUT_CLASSES: ReadonlySet<string> = new Set([
+  'MeshyAnimateModelNode', 'MeshyImageToModelNode', 'MeshyMultiImageToModelNode', 'MeshyRefineNode',
+  'MeshyRigModelNode', 'MeshyTextToModelNode', 'MeshyTextureNode',
+  'TencentImageToModelNode', 'TencentTextToModelNode',
+  'TripoConversionNode', 'TripoImageToModelNode', 'TripoMultiviewToModelNode', 'TripoRefineNode',
+  'TripoRetargetNode', 'TripoRigNode', 'TripoTextToModelNode', 'TripoTextureNode',
+])
+
 /** Whether `classType` names a retired node. */
 export function isRetiredClass(classType: unknown): boolean {
   return typeof classType === 'string' && RETIRED_CLASSES.has(classType)
 }
 
-/** The ids of the retired nodes in `prompt`, in prompt order. */
-export function retiredNodeIds(prompt: unknown): string[] {
+/** Whether a class is an output node (from a node catalogue: ./validate.ts `outputClassesOf`). */
+export type IsOutputClass = (classType: string) => boolean
+
+/**
+ * The ids of the retired nodes in `prompt` that run, in prompt order: those an
+ * output node reads (R3.8 pruning, ./validate.ts `readByOutputs`). One no
+ * output reads is left out silently, as ComfyUI never runs it; a retired
+ * output node always runs. A prompt with no output runs nothing (ComfyUI
+ * refuses it with its own words). Without `isOutputClass`, every retired
+ * node counts (the safe side).
+ */
+export function retiredNodeIds(prompt: unknown, isOutputClass?: IsOutputClass): string[] {
   if (!prompt || typeof prompt !== 'object' || Array.isArray(prompt)) return []
-  const out: string[] = []
-  for (const [id, node] of Object.entries(prompt as Record<string, unknown>)) {
-    const classType = node && typeof node === 'object' ? (node as { class_type?: unknown }).class_type : undefined
-    if (isRetiredClass(classType)) out.push(id)
+  const nodes = prompt as Record<string, unknown>
+  const classOf = (id: string): unknown => {
+    const node = nodes[id]
+    return node && typeof node === 'object' ? (node as { class_type?: unknown }).class_type : undefined
   }
-  return out
+  const ids = Object.keys(nodes)
+  const retired = ids.filter(id => isRetiredClass(classOf(id)))
+  if (!retired.length || !isOutputClass) return retired
+  const outputs = ids.filter((id) => {
+    const ct = classOf(id)
+    return typeof ct === 'string' && (isOutputClass(ct) || RETIRED_OUTPUT_CLASSES.has(ct))
+  })
+  const read = readByOutputs(nodes as ApiPrompt, outputs)
+  return retired.filter(id => read.has(id))
 }
 
 /** A 400 body in ComfyUI's shape: `{ error, node_errors }`. */
@@ -152,11 +186,12 @@ export interface RetiredNodesBody {
 }
 
 /**
- * The refusal for a prompt that holds a retired node, in ComfyUI's own 400
- * shape so the existing error display marks each such node; null when it holds none.
+ * The refusal for a prompt in which a retired node runs (retiredNodeIds), in
+ * ComfyUI's own 400 shape so the existing error display marks each such node;
+ * null when none runs.
  */
-export function retiredNodesResponse(prompt: unknown): RetiredNodesBody | null {
-  const ids = retiredNodeIds(prompt)
+export function retiredNodesResponse(prompt: unknown, isOutputClass?: IsOutputClass): RetiredNodesBody | null {
+  const ids = retiredNodeIds(prompt, isOutputClass)
   if (!ids.length) return null
   const node_errors: RetiredNodesBody['node_errors'] = {}
   for (const id of ids) {
@@ -179,6 +214,8 @@ const CLASS_TYPE_IN_JSON = /"class_type"\s*:\s*"([^"\\]*)"/g
 /**
  * Whether a prompt's JSON text names a retired class as a node's class: for a
  * prompt too large to parse (the local /prompt proxy's cap), read as text.
+ * Without the graph, whether an output reads the node isn't knowable, so any
+ * such node counts (the safe side; no pruning here).
  */
 export function jsonNamesRetiredClass(text: string): boolean {
   for (const m of text.matchAll(CLASS_TYPE_IN_JSON)) if (RETIRED_CLASSES.has(m[1]!)) return true

@@ -6,6 +6,7 @@ import { stashTakesIntoProperties, restoreTakesFromProperties } from '~/lib/canv
 import { stashCapsuleIntoProperties, restoreCapsuleFromProperties } from '~/lib/canvas/persistCapsule'
 import { migrateKineticWorkflow } from '~/lib/vectortype/migrateKinetic'
 import { migrateFaceNodesWorkflow } from '~/lib/graph/migrateFaceNodes'
+import { isRetiredClass } from '#shared/runner/retired'
 
 // LiteGraph workflow format
 export interface LiteGraphNode {
@@ -383,6 +384,13 @@ export function useVueNodes(opts: { groupsBridge?: GroupsBridge; annotationsBrid
         if (sg.id) subgraphDefs.set(sg.id, sg)
       }
     }
+    // Whether a subgraph holds a retired partner node, nested subgraphs too
+    // (R4.1 fix round 1): its card shows it as retired.
+    const holdsRetired = (sg: any, seen = new Set<string>()): boolean => {
+      if (!sg || seen.has(sg.id)) return false
+      seen.add(sg.id)
+      return (sg.nodes ?? []).some((n: any) => isRetiredClass(n?.type) || holdsRetired(subgraphDefs.get(n?.type), seen))
+    }
 
     // Detect corrupted/missing positions: when every node shares the same
     // coordinates (or pos is missing entirely), workflows persisted with
@@ -546,6 +554,7 @@ export function useVueNodes(opts: { groupsBridge?: GroupsBridge; annotationsBrid
           subgraphName: sgDef?.name || null,
           subgraphId: sgDef?.id || null,
           innerNodeCount: sgDef?.nodes?.length || 0,
+          ...(sgDef && holdsRetired(sgDef) ? { containsRetired: true } : {}),
         },
       }
     }) as VueFlowNode[]

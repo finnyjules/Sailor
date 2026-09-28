@@ -12,7 +12,7 @@ import { staticWiredTexts } from '#shared/runner/staticValues'
 import { withStaticSpeechText } from '#shared/runner/audioGen'
 import { NO_OUTPUTS_MESSAGE, NO_VALID_OUTPUTS_MESSAGE, prunedAny, pruneInvalidOutputs, type ComfyNodeError } from '#shared/runner/validate'
 import { blockedModelUses, blockedModelsResponse } from '#shared/runner/blockedModels'
-import { retiredNodesResponse } from '#shared/runner/retired'
+import { retiredPromptRefusal } from '../utils/blockedModels'
 import {
   GATE_CLASS, dependenciesOf, downstreamNodes, isLink, legNodes, upstreamStage,
   type ApiLink, type ApiPrompt, type TakeGateState,
@@ -1940,11 +1940,14 @@ export function createEngine(deps: EngineDeps) {
     // The server's families decide; a browser that disagrees is refused, with
     // a marker it reads as "run this on ComfyUI instead" (isRunnerDeclined).
     const families = deps.families?.() ?? NO_FAMILIES
-    // A retired partner node (Task R4.1) is refused first, before anything is
-    // checked, priced or held, in ComfyUI's 400 shape and with no marker: it
-    // can't run on ComfyUI either (shared/runner/retired.ts).
+    // A retired partner node an output reads (Task R4.1) is refused first,
+    // before anything is checked, priced or held, in ComfyUI's 400 shape and
+    // with no marker: it can't run on ComfyUI either (shared/runner/retired.ts).
+    // One no output reads is left to pruning, as ComfyUI leaves it: the
+    // eligibility below declines the workflow (a class the runner doesn't
+    // know), and the ComfyUI path prunes the node and runs the rest.
     for (const p of takes) {
-      const retired = retiredNodesResponse(p)
+      const retired = retiredPromptRefusal(p)
       if (retired) throw refuse(retired.error.message, 400, { node_errors: retired.node_errors })
     }
     // ComfyUI's validate_prompt first: outputs that fail validation are

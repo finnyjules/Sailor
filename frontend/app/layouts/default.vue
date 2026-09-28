@@ -69,6 +69,7 @@ import { shouldUseRunner, startRunnerRun, runnerGateAction, stopRunnerRuns, fetc
 import { useRunnerEvents, ensureRunnerEvents } from '~/composables/useRunnerEvents'
 import { createRunnerEventBuffer, ownerTabForCanvas, runnerRunIdsForTab } from '~/lib/runner/routing'
 import { nodesNeedingEngine, workflowNodeTitles, needsEngineDescription, needsEngineReasons, blockedRunRefusal } from '~/lib/runner/needsEngine'
+import { outputClassesOf } from '#shared/runner/validate'
 import { bakeShaderEffectsForRun } from '~/lib/runner/shaderBake'
 import { deliverEnvelope, livePreviewsOn, runLivePreview, type LivePreviewEnv } from '~/lib/runner/livePreview'
 import { RUNNER_WORKER, isRunnerPromptId } from '#shared/runner/messages'
@@ -976,7 +977,7 @@ async function runVueWorkflow(
       // naming the node, before any /prompt (shared/runner/blockedModels.ts).
       const blocked = sentToRunner ? null : blockedRunRefusal(
         [firstTake, ...extraTakes].map(tk => ({ prompt: tk.directPrompt, titleOf: workflowNodeTitles(tk.plainWorkflow, objectInfo.value) })),
-        { runnerOn: runnerEnabled, families: runnerFamilies },
+        { runnerOn: runnerEnabled, families: runnerFamilies, isOutputClass: outputClassesOf(objectInfo.value) },
       )
       if (blocked) {
         toast.error(blocked.title, { description: blocked.description })

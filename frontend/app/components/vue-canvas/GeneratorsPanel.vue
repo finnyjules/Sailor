@@ -336,7 +336,8 @@ function comfyBrandIconClass(provider: string): string {
 // (e.g. ElevenLabs). Falls back to the domain icon if the provider is
 // unknown.
 const PROVIDER_ICONS: Record<string, any> = {
-  // BYOK direct providers (modern, non-legacy)
+  // Replicate: the transport chip. The partner-brand entries below stay for
+  // getModelBrand chips on Replicate and fal actions (Luma, PixVerse, …).
   Replicate: Cloud,
   // Image generators
   BFL: Wand2,                    // Black Forest Labs / Flux

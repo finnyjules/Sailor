@@ -17,12 +17,12 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { gunzipSync } from 'node:zlib'
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
-import { defineComponent, h } from 'vue'
-import { mount } from '@vue/test-utils'
-import { RETIRED_CLASSES, RETIRED_NODE_MESSAGE, isRetiredClass, retiredNodesResponse } from '#shared/runner/retired'
+import { RETIRED_CLASSES, RETIRED_NODE_MESSAGE, RETIRED_OUTPUT_CLASSES, isRetiredClass, retiredNodeIds, retiredNodesResponse } from '#shared/runner/retired'
 import { PROVIDER_TYPES, RUNNER_NODE_RULES, RUNNER_NODE_TYPES } from '#shared/runner/eligibility'
 import { modelMenus } from '#shared/runner/modelMenus'
-import { blockedRunRefusal } from '#shared/runner/needsEngine'
+import { blockedRunRefusal, workflowNodeTitles } from '#shared/runner/needsEngine'
+import { outputClassesOf } from '#shared/runner/validate'
+import { graphToPrompt } from '~/lib/graph/graphToPrompt'
 import type { ApiPrompt } from '#shared/runner/graph'
 import { ACTION_CATALOG, CHIPS_BY_DOMAIN, DEPRECATED_NODES, HERO_BY_DOMAIN, offeredInActionsPanel } from '~/data/action-catalog'
 import { AGENT_CAPABILITIES } from '~/lib/agent/capabilities'
@@ -32,6 +32,7 @@ import { planStart } from '~/lib/startModal/plan'
 import { START_AI, startHandTiles } from '~/data/start-modal'
 import { TOOLBOX_SECTIONS } from '~/data/toolbox-items'
 import { blockedPromptRefusal } from '~~/server/utils/blockedModels'
+import { RUNNER_NOT_ELIGIBLE } from '#shared/runner/messages'
 import { meterGraphSubmit } from '~~/server/utils/meterGraphRun'
 import { createFakeLedger, makeKit } from './__runner__/kit'
 
@@ -41,6 +42,24 @@ const moduleOf = (name: string) => String(CATALOG[name]?.python_module ?? '')
 const comfyBilled = (name: string) => /^comfy_api_nodes\.nodes_/.test(moduleOf(name)) && moduleOf(name) !== 'comfy_api_nodes.nodes_replicate'
 
 const KLING = 'KlingImage2VideoNode'
+const IS_OUTPUT = outputClassesOf(CATALOG)!
+const kling = (start: string) => ({ class_type: KLING, inputs: { start_frame: [start, 0], prompt: 'a fox runs', negative_prompt: '', model_name: 'kling-v2-master', cfg_scale: 0.8, mode: 'std', aspect_ratio: '16:9', duration: '5' } })
+/** A picture graph (LoadImage → Save image) with a retired node beside it that no output reads. */
+const unreadGraph = (): ApiPrompt => ({
+  1: { class_type: 'LoadImage', inputs: { image: 'a.png' } },
+  2: kling('1'),
+  3: { class_type: 'SaveImage', inputs: { images: ['1', 0], filename_prefix: 'ComfyUI' } },
+})
+/** The same picture graph with a lone retired helper (a Recraft colour) nothing reads. */
+const unreadHelperGraph = (): ApiPrompt => ({
+  1: { class_type: 'LoadImage', inputs: { image: 'a.png' } },
+  2: { class_type: 'RecraftColorRGB', inputs: { r: 0, g: 0, b: 0 } },
+  3: { class_type: 'SaveImage', inputs: { images: ['1', 0], filename_prefix: 'ComfyUI' } },
+})
+/** A retired output node (Meshy makes a 3D model): it always runs. */
+const outputGraph = (): ApiPrompt => ({
+  1: { class_type: 'MeshyTextToModelNode', inputs: { prompt: 'a fox', model: 'latest', seed: 0 } },
+})
 const retiredGraph = (): ApiPrompt => ({
   1: { class_type: 'LoadImage', inputs: { image: 'a.png' } },
   2: { class_type: KLING, inputs: { start_frame: ['1', 0], prompt: 'a fox runs', negative_prompt: '', model_name: 'kling-v2-master', cfg_scale: 0.8, mode: 'std', aspect_ratio: '16:9', duration: '5' } },
@@ -53,6 +72,12 @@ describe('the retired list (guard)', () => {
     expect(billed.length).toBe(182)
     expect([...RETIRED_CLASSES].sort()).toEqual(billed)
     for (const name of billed) expect(isRetiredClass(name), name).toBe(true)
+  })
+
+  it('the retired output nodes are exactly the catalogue\'s: 17', () => {
+    const outputs = [...RETIRED_CLASSES].filter(n => CATALOG[n]?.output_node === true).sort()
+    expect(outputs.length).toBe(17)
+    expect([...RETIRED_OUTPUT_CLASSES].sort()).toEqual(outputs)
   })
 
   it('retires no Replicate or fal class, nothing the runner or the line-up takes', () => {
@@ -80,11 +105,6 @@ describe('no surface offers a retired node', () => {
     expect(offeredInActionsPanel('SomeNewPartnerNode', 'api node/image/Kling')).toBe(false)
     expect(offeredInActionsPanel('GenerateImageNode', 'api node/image/Replicate')).toBe(true)
     expect(offeredInActionsPanel('FluxProRemoteNode', 'api node/image/Replicate')).toBe(false) // DEPRECATED_NODES, as before
-  })
-
-  it('the panel has no Legacy toggle any more', () => {
-    const src = readFileSync(join(process.cwd(), 'app/components/vue-canvas/GeneratorsPanel.vue'), 'utf8')
-    expect(src).not.toMatch(/showLegacy|legacy partners/i)
   })
 
   it('the Actions catalogue, heroes, chips, deprecated list, agent capabilities, toolbox and start modal name none', () => {
@@ -180,9 +200,9 @@ describe('refused before any charge, in ComfyUI\'s 400 shape', () => {
   })
 
   it('the browser refuses it before sending anything, naming the node by its title', () => {
-    const r = blockedRunRefusal([{ prompt: retiredGraph(), titleOf: id => (id === '2' ? 'Fox clip' : 'Other') }], { runnerOn: true })
+    const r = blockedRunRefusal([{ prompt: retiredGraph(), titleOf: id => (id === '2' ? 'Fox clip' : 'Other') }], { runnerOn: true, isOutputClass: IS_OUTPUT })
     expect(r).toEqual({ title: '“Fox clip” was retired', description: 'Pick another way to make this.' })
-    expect(blockedRunRefusal([{ prompt: retiredGraph(), titleOf: () => 'Fox clip' }], { runnerOn: false })).toEqual(r)
+    expect(blockedRunRefusal([{ prompt: retiredGraph(), titleOf: () => 'Fox clip' }], { runnerOn: false, isOutputClass: IS_OUTPUT })).toEqual(r)
   })
 })
 
@@ -216,37 +236,120 @@ describe('local /prompt proxy', () => {
   })
 })
 
-describe('a saved workflow holding one', () => {
-  it('opens, and its card shows it retired and can\'t be run', async () => {
-    const { useVueNodes } = await import('~/composables/useVueNodes')
-    const vn = useVueNodes()
-    vn.objectInfo.value = CATALOG
-    vn.convertFromLiteGraph({
-      last_node_id: 1, last_link_id: 0, links: [], groups: [], config: {}, extra: {}, version: 0.4,
-      nodes: [{ id: 1, type: KLING, pos: [0, 0], size: [280, 400], inputs: [], outputs: [], widgets_values: ['a fox runs', '', 'kling-v2-master', 0.8, 'std', '16:9', '5'], properties: {} }],
-    } as any)
-    const node = vn.nodes.value.find((n: any) => String(n.id) === '1') as any
-    expect(node?.data?.nodeType).toBe(KLING)
+/** The hosted meter's deps, every step a spy (nothing real is priced, held or sent). */
+const meterDeps = (overrides: Record<string, unknown> = {}) => ({
+  priceGraph: vi.fn(() => ({ credits: 5, version: 'test', breakdown: [] })),
+  spendGuard: vi.fn(async () => {}),
+  validateFileRefs: vi.fn(async () => {}),
+  moderatePrompt: vi.fn(async () => ({ ok: true as const })),
+  hold: vi.fn(async () => ({ ok: true as const, holdId: 7 })),
+  getAvailable: vi.fn(async () => 3),
+  forward: vi.fn(async () => ({ status: 200, body: { prompt_id: 'p1', number: 1, node_errors: {} } })),
+  registerRun: vi.fn(async () => {}),
+  startSettle: vi.fn(),
+  releaseHold: vi.fn(async () => {}),
+  isOutputClass: IS_OUTPUT,
+  ...overrides,
+})
 
-    const g = globalThis as any
-    const saved = g.useRuntimeConfig
-    g.useRuntimeConfig = () => ({ public: { runnerEnabled: true, runnerFamilies: '' } })
-    try {
-      const { default: ComfyNode } = await import('~/components/vue-canvas/ComfyNode.vue')
-      const WidgetStub = defineComponent({ props: { widgetDef: { type: Object, required: true } }, setup: () => () => h('div') })
-      const w = mount(ComfyNode as any, { props: { id: '1', data: node.data, selected: false }, shallow: true, global: { stubs: { VueCanvasComfyNodeWidget: WidgetStub } } })
-      const badge = w.find('[data-retired]')
-      expect(badge.exists()).toBe(true)
-      expect(badge.text()).toBe('Retired')
-      expect(badge.attributes('title')).toBe(RETIRED_NODE_MESSAGE)
-      const row = w.findComponent({ name: 'NodeRunRow' })
-      expect(row.exists()).toBe(true)
-      expect(row.props('canRun')).toBe(false)
-
-      // Any other partner-free card: no badge.
-      const other = mount(ComfyNode as any, { props: { id: '2', data: { ...node.data, nodeType: 'GenerateVideoNode' }, selected: false }, shallow: true, global: { stubs: { VueCanvasComfyNodeWidget: WidgetStub } } })
-      expect(other.find('[data-retired]').exists()).toBe(false)
+describe('only a retired node that runs is refused (R4.1 fix round 1: pruned as ComfyUI prunes it)', () => {
+  it('the shared rule: a node no output reads, or a lone helper, is left out; a retired output node always counts', () => {
+    expect(retiredNodeIds(unreadGraph(), IS_OUTPUT)).toEqual([])
+    expect(retiredNodeIds(unreadHelperGraph(), IS_OUTPUT)).toEqual([])
+    expect(retiredNodeIds(outputGraph(), IS_OUTPUT)).toEqual(['1'])
+    expect(retiredNodeIds(retiredGraph(), IS_OUTPUT)).toEqual(['2'])
+    // Read through a helper chain: Recraft colour → Recraft text-to-image → Save image.
+    const chain: ApiPrompt = {
+      1: { class_type: 'RecraftColorRGB', inputs: { r: 0, g: 0, b: 0 } },
+      2: { class_type: 'RecraftTextToImageNode', inputs: { prompt: 'x', recraft_color: ['1', 0] } },
+      3: { class_type: 'SaveImage', inputs: { images: ['2', 0], filename_prefix: 'ComfyUI' } },
     }
-    finally { g.useRuntimeConfig = saved }
+    expect(retiredNodeIds(chain, IS_OUTPUT)).toEqual(['1', '2'])
+    // Without an output test, every retired node counts (the safe side).
+    expect(retiredNodeIds(unreadGraph())).toEqual(['2'])
+  })
+
+  it('a retired node feeding only an output ComfyUI would drop is still refused (its validity is ComfyUI\'s to judge, after this gate)', () => {
+    const g: ApiPrompt = { ...unreadGraph(), 4: { class_type: 'SaveVideo', inputs: { video: ['2', 0], filename_prefix: '', format: 'bogus', codec: 'auto' } } }
+    expect(retiredNodeIds(g, IS_OUTPUT)).toEqual(['2'])
+    expect(blockedPromptRefusal(g)!.error.message).toBe(RETIRED_NODE_MESSAGE)
+  })
+
+  it('the shared gate (hosted meter and local proxy): not refused unread, refused as an output', () => {
+    expect(blockedPromptRefusal(unreadGraph())).toBeNull()
+    expect(blockedPromptRefusal(unreadHelperGraph())).toBeNull()
+    expect(blockedPromptRefusal(outputGraph())).toEqual(retiredNodesResponse(outputGraph()))
+  })
+
+  it('hosted meter: the unread node is priced out and the rest is held and sent; a retired output node is refused before anything', async () => {
+    for (const graph of [unreadGraph(), unreadHelperGraph()]) {
+      const d = meterDeps()
+      const r = await meterGraphSubmit('u1', { prompt: graph, client_id: 'c1' }, d as any)
+      expect(r.status).toBe(200)
+      expect(d.hold).toHaveBeenCalled()
+      expect(d.forward).toHaveBeenCalled()
+      // Priced on the part that runs: the retired node is not in it.
+      const priced = (d.priceGraph.mock.calls as unknown as [ApiPrompt][]).map(c => Object.keys(c[0]))
+      expect(priced.every(ids => !ids.includes('2'))).toBe(true)
+    }
+    const d = meterDeps()
+    const r = await meterGraphSubmit('u1', { prompt: outputGraph(), client_id: 'c1' }, d as any)
+    expect([r.status, r.body]).toEqual([400, retiredNodesResponse(outputGraph())])
+    for (const f of [d.moderatePrompt, d.priceGraph, d.hold, d.forward]) expect(f).not.toHaveBeenCalled()
+  })
+
+  it('the runner: an unread one is declined with the marker (the ComfyUI path prunes it and runs the rest); a retired output node is refused, no hold', async () => {
+    for (const graph of [unreadGraph(), unreadHelperGraph()]) {
+      const ledger = createFakeLedger()
+      const k = makeKit({ hosted: true, ledger })
+      const err = await k.engine.startRun({ userId: k.userId, takes: [graph], workflow: null, canvasId: null, projectUuid: null, projectName: null }).catch(e => e)
+      expect(err.message).not.toBe(RETIRED_NODE_MESSAGE)
+      expect(err.data?.reason).toBe(RUNNER_NOT_ELIGIBLE)
+      expect(ledger.hold).not.toHaveBeenCalled()
+    }
+    const ledger = createFakeLedger()
+    const k = makeKit({ hosted: true, ledger })
+    const err = await k.engine.startRun({ userId: k.userId, takes: [outputGraph()], workflow: null, canvasId: null, projectUuid: null, projectName: null }).catch(e => e)
+    expect(err).toMatchObject({ statusCode: 400, message: RETIRED_NODE_MESSAGE })
+    expect(err.data?.reason).toBeUndefined()
+    expect(ledger.hold).not.toHaveBeenCalled()
+  })
+
+  it('the browser: not refused unread; refused as an output, by its title', () => {
+    const titleOf = () => 'Fox model'
+    expect(blockedRunRefusal([{ prompt: unreadGraph(), titleOf }], { runnerOn: true, isOutputClass: IS_OUTPUT })).toBeNull()
+    expect(blockedRunRefusal([{ prompt: unreadHelperGraph(), titleOf }], { runnerOn: false, isOutputClass: IS_OUTPUT })).toBeNull()
+    expect(blockedRunRefusal([{ prompt: outputGraph(), titleOf }], { runnerOn: true, isOutputClass: IS_OUTPUT }))
+      .toEqual({ title: '“Fox model” was retired', description: 'Pick another way to make this.' })
+  })
+})
+
+describe('a retired node inside a subgraph', () => {
+  const SG = '5f0c1a2b-0000-4000-8000-00000000abcd'
+  const workflow = (title?: string) => ({
+    last_node_id: 8, last_link_id: 1, groups: [], config: {}, extra: {}, version: 0.4,
+    nodes: [
+      { id: 7, type: SG, ...(title ? { title } : {}), pos: [0, 0], size: [200, 100], mode: 0, inputs: [], outputs: [{ name: 'VIDEO', type: 'VIDEO', links: [1] }], widgets_values: [], properties: {} },
+      { id: 8, type: 'SaveVideo', pos: [300, 0], size: [200, 100], mode: 0, inputs: [{ name: 'video', type: 'VIDEO', link: 1 }], outputs: [], widgets_values: ['video/ComfyUI', 'auto', 'auto'], properties: {} },
+    ],
+    links: [[1, 7, 0, 8, 0, 'VIDEO']],
+    definitions: { subgraphs: [{
+      id: SG, version: 1, name: 'Fox clip maker',
+      inputNode: { id: -10 }, outputNode: { id: -20 },
+      inputs: [], outputs: [{ id: 'o1', name: 'VIDEO', type: 'VIDEO', linkIds: [1] }],
+      nodes: [{ id: 1, type: KLING, pos: [0, 0], size: [200, 100], mode: 0, inputs: [], outputs: [{ name: 'VIDEO', type: 'VIDEO', links: [1] }], widgets_values: ['a fox runs', '', 'kling-v2-master', 0.8, 'std', '16:9', '5'], properties: {} }],
+      links: [{ id: 1, origin_id: 1, origin_slot: 0, target_id: -20, target_slot: 0, type: 'VIDEO' }],
+    }] },
+  })
+
+  it('the refusal names the subgraph card as the user sees it: its title, else its subgraph\'s name', () => {
+    for (const [title, shown] of [['My clip', 'My clip'], [undefined, 'Fox clip maker']] as const) {
+      const wf = workflow(title)
+      const prompt = graphToPrompt(wf as any, CATALOG)
+      const inner = Object.keys(prompt).find(id => prompt[id]!.class_type === KLING)
+      expect(inner).toBe('70001')
+      const r = blockedRunRefusal([{ prompt, titleOf: workflowNodeTitles(wf as any, CATALOG) }], { runnerOn: true, isOutputClass: IS_OUTPUT })
+      expect(r).toEqual({ title: `“${shown}” was retired`, description: 'Pick another way to make this.' })
+    }
   })
 })

@@ -2,6 +2,7 @@
 // The slim Run row (spec §2.3): one 28px line in the node's own DOM, so it
 // zooms with the node. Status dot + text on the left; ▶ and an optional caret
 // menu (slot `menu`) on the right. The status comes from runRowStatus().
+import { useId } from 'vue'
 import { Play, Loader2 } from 'lucide-vue-next'
 import type { RunTone } from '~/lib/canvas/runRowStatus'
 
@@ -13,7 +14,15 @@ const props = withDefaults(defineProps<{
   variant?: 'slim' | 'instrument'
   price?: string | null
   buttonText?: string
-}>(), { runLabel: 'Run this node', variant: 'slim', price: null, buttonText: 'Run' })
+  /**
+   * Why the node can't run at all (a retired node, R4.1 fix round 1): the
+   * button stays focusable but inert (aria-disabled), with the reason as its
+   * tooltip and its accessible description.
+   */
+  blockedReason?: string | null
+}>(), { runLabel: 'Run this node', variant: 'slim', price: null, buttonText: 'Run', blockedReason: null })
+
+const reasonId = `run-blocked-${useId().replace(/[^a-zA-Z0-9_-]/g, '')}`
 
 const emit = defineEmits<{ run: [] }>()
 
@@ -43,13 +52,17 @@ function onRun() {
       type="button"
       class="nopan nodrag shrink-0 size-5 rounded-[5px] flex items-center justify-center text-white/70 hover:text-white hover:bg-white/[0.08] transition-colors cursor-pointer disabled:opacity-35 disabled:cursor-not-allowed disabled:hover:bg-transparent"
       :aria-label="runLabel"
-      :title="runLabel"
-      :disabled="running || !canRun"
+      :title="blockedReason || runLabel"
+      :disabled="(running || !canRun) && !blockedReason"
+      :aria-disabled="blockedReason ? 'true' : undefined"
+      :aria-describedby="blockedReason ? reasonId : undefined"
+      :class="{ 'opacity-40 cursor-not-allowed': blockedReason }"
       @click.stop="onRun"
     >
       <Loader2 v-if="running" class="size-3 animate-spin" />
       <Play v-else class="size-3" fill="currentColor" />
     </button>
+    <span v-if="blockedReason" :id="reasonId" class="sr-only">{{ blockedReason }}</span>
     <slot name="menu" />
   </div>
   <div
@@ -63,8 +76,11 @@ function onRun() {
       type="button"
       class="nopan nodrag node-btn node-btn--primary disabled:opacity-40 disabled:cursor-not-allowed"
       :aria-label="runLabel"
-      :title="runLabel"
-      :disabled="running || !canRun"
+      :title="blockedReason || runLabel"
+      :disabled="(running || !canRun) && !blockedReason"
+      :aria-disabled="blockedReason ? 'true' : undefined"
+      :aria-describedby="blockedReason ? reasonId : undefined"
+      :class="{ 'opacity-40 cursor-not-allowed': blockedReason }"
       @click.stop="onRun"
     >
       <Loader2 v-if="running" class="size-3 animate-spin" />
@@ -72,6 +88,7 @@ function onRun() {
       <span>{{ buttonText }}</span>
       <span v-if="price && !running" class="node-btn__price">{{ price }}</span>
     </button>
+    <span v-if="blockedReason" :id="reasonId" class="sr-only">{{ blockedReason }}</span>
     <slot name="menu" />
   </div>
 </template>

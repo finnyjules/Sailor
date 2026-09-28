@@ -12,16 +12,33 @@ import type { ApiPrompt } from '../../shared/runner/graph'
 import { menuDefault, modelMenu } from '../../shared/runner/modelMenus'
 import { classUpgradeOn } from '../../shared/runner/eligibility'
 import { requestProblems, type RequestProblem } from '../runner/requestRules'
-import { retiredNodesResponse } from '../../shared/runner/retired'
+import { retiredNodesResponse, type IsOutputClass } from '../../shared/runner/retired'
+import { outputClassesOf } from '../../shared/runner/validate'
+import { storedNodeCatalog } from '../native/objectInfo'
+
+/** The stored node catalogue's output-node test (server/native/objectInfo.ts); every class counts as one without a catalogue. */
+function storedOutputClass(): IsOutputClass {
+  return outputClassesOf(storedNodeCatalog()) ?? (() => true)
+}
 
 /**
- * The 400 body for `prompt`, or null when it holds no retired partner node
- * (shared/runner/retired.ts, Task R4.1), every model in it can run on
- * ComfyUI and every request is one its provider takes (requestRefusal).
+ * The 400 body for a prompt in which a retired partner node runs (an output
+ * reads it: shared/runner/retired.ts, Task R4.1 fix round 1), or null. One
+ * no output reads is pruned by ComfyUI and isn't refused. `isOutputClass`:
+ * the catalogue's output test (the stored node catalogue by default).
  */
-export function blockedPromptRefusal(prompt: unknown): ReturnType<typeof blockedPromptBody> {
+export function retiredPromptRefusal(prompt: unknown, isOutputClass?: IsOutputClass): RefusalBody | null {
+  return retiredNodesResponse(prompt, isOutputClass ?? storedOutputClass())
+}
+
+/**
+ * The 400 body for `prompt`, or null when no retired partner node in it runs
+ * (retiredPromptRefusal), every model in it can run on ComfyUI and every
+ * request is one its provider takes (requestRefusal).
+ */
+export function blockedPromptRefusal(prompt: unknown, opts: { isOutputClass?: IsOutputClass } = {}): ReturnType<typeof blockedPromptBody> {
   if (!prompt || typeof prompt !== 'object' || Array.isArray(prompt)) return null
-  return retiredNodesResponse(prompt) ?? blockedPromptBody(prompt as Parameters<typeof blockedPromptBody>[0], { families: runnerFamilies() })
+  return retiredPromptRefusal(prompt, opts.isOutputClass) ?? blockedPromptBody(prompt as Parameters<typeof blockedPromptBody>[0], { families: runnerFamilies() })
     ?? requestRefusal(prompt)
 }
 

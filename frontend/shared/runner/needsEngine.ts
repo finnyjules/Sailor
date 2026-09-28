@@ -13,7 +13,7 @@ import { prunedAny, pruneInvalidOutputs } from './validate'
 import { NO_FAMILIES, type RunnerFamily } from './families'
 import { blockedModelRefusal, blockedModelUses, blockedModelsResponse, promptNodeTitle } from './blockedModels'
 import { shaderEngineReason } from './shaderBakeKey'
-import { RETIRED_NODE_ADVICE, retiredNodeIds } from './retired'
+import { RETIRED_NODE_ADVICE, retiredNodeIds, type IsOutputClass } from './retired'
 
 /** The fallback title for a node with neither a title nor a known display name. */
 export const UNNAMED_NODE = 'Unnamed node'
@@ -75,18 +75,33 @@ interface WorkflowNodeLike { id: string | number; type?: string; title?: string 
  * Title lookup over the run's own workflow (prompt keys are `String(node.id)`,
  * app/lib/graph/graphToPrompt.ts): the node's title, else its type's display
  * name from /object_info, else a plain "Unnamed node" — never a class name.
+ * A node inside a subgraph (its prompt id is the instance's id followed by
+ * its own, padded to 4 digits: app/lib/graph/flattenSubgraphs.ts, nested
+ * likewise) is named by the subgraph card the user sees, the outermost one:
+ * its title, else its subgraph's name (R4.1 fix round 1).
  */
 export function workflowNodeTitles(
-  workflow: { nodes?: WorkflowNodeLike[] } | null | undefined,
+  workflow: { nodes?: WorkflowNodeLike[], definitions?: { subgraphs?: { id?: string, name?: string }[] } } | null | undefined,
   objectInfo: Record<string, { display_name?: string } | undefined> | null | undefined,
 ): (id: string) => string {
   const byId = new Map<string, WorkflowNodeLike>()
   for (const n of workflow?.nodes ?? []) byId.set(String(n.id), n)
+  const subgraphNames = new Map<string, string>()
+  for (const sg of workflow?.definitions?.subgraphs ?? []) if (sg?.id && sg.name?.trim()) subgraphNames.set(sg.id, sg.name.trim())
+  const visible = (id: string): WorkflowNodeLike | undefined => {
+    const exact = byId.get(id)
+    if (exact || !/^\d{5,}$/.test(id)) return exact
+    for (let k = Math.floor((id.length - 1) / 4); k >= 1; k--) {
+      const card = byId.get(id.slice(0, id.length - 4 * k))
+      if (card) return card
+    }
+    return undefined
+  }
   return (id: string) => {
-    const n = byId.get(id)
+    const n = visible(id)
     const title = n?.title?.trim()
     if (title) return title
-    const display = n?.type ? objectInfo?.[n.type]?.display_name?.trim() : undefined
+    const display = n?.type ? (objectInfo?.[n.type]?.display_name?.trim() || subgraphNames.get(n.type)) : undefined
     return display || UNNAMED_NODE
   }
 }
@@ -120,12 +135,15 @@ export function needsEngineDescription(titles: string[], reasons: readonly strin
  */
 export function blockedRunRefusal(
   takes: { prompt: ApiPrompt | null | undefined; titleOf: (id: string) => string }[],
-  opts: { runnerOn: boolean; families?: ReadonlySet<RunnerFamily> },
+  opts: { runnerOn: boolean; families?: ReadonlySet<RunnerFamily>; isOutputClass?: IsOutputClass },
 ): { title: string; description: string } | null {
   const families = opts.runnerOn ? (opts.families ?? NO_FAMILIES) : NO_FAMILIES
-  // A retired partner node runs nowhere (Task R4.1): refused first, by its title.
+  // A retired partner node runs nowhere (Task R4.1): refused first, by its
+  // title, when an output reads it. One nothing reads is pruned, as ComfyUI
+  // prunes it (`isOutputClass`: /object_info's output test, ./validate.ts
+  // outputClassesOf; without it every retired node counts).
   for (const take of takes) {
-    const id = retiredNodeIds(take.prompt)[0]
+    const id = retiredNodeIds(take.prompt, opts.isOutputClass)[0]
     if (id !== undefined) return { title: `“${take.titleOf(id)}” was retired`, description: RETIRED_NODE_ADVICE }
   }
   for (const take of takes) {

@@ -150,6 +150,7 @@ export default defineEventHandler(async (event) => {
       // Over the cap, Generate a 3D model is still refused (R3.9 fix round 2): ComfyUI would pay for its
       // call and then fail on the answer. Its class is looked for in the text, without parsing it.
       // A retired partner node too (Task R4.1): ComfyUI would bill it through Comfy's account.
+      // Unparsed, whether an output reads it isn't knowable, so it is refused anyway (the safe side).
       else if (raw) {
         const text = raw.toString('utf8')
         if (jsonNamesGenerate3d(text)) oversized = generate3dRefusal()

@@ -36,6 +36,7 @@ import { linkedInputNames, upstreamInputPixels, upstreamInputSeconds, widgetValu
 import { NO_FAMILIES, parseFamilies } from '#shared/runner/families'
 import { upgradeHidesWidget } from '#shared/runner/eligibility'
 import { RETIRED_NODE_MESSAGE, isRetiredClass } from '#shared/runner/retired'
+import { TooltipContent, TooltipPortal, TooltipProvider, TooltipRoot, TooltipTrigger } from 'reka-ui'
 import TakesStrip from '~/components/vue-canvas/TakesStrip.vue'
 import LightTableModal from '~/components/vue-canvas/LightTableModal.vue'
 import { projectTake, discardOthers, type Take } from '~/composables/useTakes'
@@ -85,6 +86,8 @@ const props = defineProps<{
     subgraphName?: string | null
     subgraphId?: string | null
     innerNodeCount?: number
+    /** A subgraph holding a retired partner node (useVueNodes, R4.1 fix round 1). */
+    containsRetired?: boolean
   }
 }>()
 
@@ -150,6 +153,8 @@ const pricedInputs = computed(() => {
 
 // Extract the minimum USD price from the price badge expression
 const priceLabel = computed(() => {
+  // A retired partner node can't run, so it quotes no price (R4.1 fix round 1).
+  if (isRetired.value) return null
   // Model-priced pickers: the static badge is a fiction — GenerateVideoNode
   // ships ONE badge figure while its model widget spans an 8× price range. In
   // hosted mode quote what the server will actually charge for the node as it
@@ -192,8 +197,14 @@ const HEAVY_LOCAL_COMPUTE = new Set<string>([
   'SubjectMask', 'MaskExtractor',
 ])
 
-// A retired partner node (Task R4.1): a saved one still opens, marked, and can't be run.
-const isRetired = computed(() => isRetiredClass(props.data.nodeType))
+// A retired partner node (Task R4.1), or a subgraph holding one: a saved one
+// still opens, marked, and can't be run.
+const isRetired = computed(() => isRetiredClass(props.data.nodeType) || !!props.data.containsRetired)
+// Its Run row: no price, no scope menu, "Retired" as the status.
+const RETIRED_STATUS = { tone: 'idle' as const, text: 'Retired' }
+// The badge's tooltip: hover and keyboard focus open it (reka-ui); a tap opens it too.
+const retiredTipOpen = ref(false)
+const retiredDescId = computed(() => `retired-${String(props.id).replace(/[^a-zA-Z0-9_-]/g, '')}`)
 
 const showRunButton = computed(() => {
   const t = props.data.nodeType
@@ -1813,13 +1824,28 @@ watch(previewImages, (urls) => {
       </button>
       <!-- "N fixes" — the reviewer's fixes for this node; opens Edit ▾. -->
       <NodeFixesBadge :node-id="id" />
-      <!-- Retired partner node: a state on the card, its words in the tooltip. -->
-      <span
-        v-if="isRetired"
-        data-retired
-        class="shrink-0 text-[9px] font-semibold px-1.5 py-0.5 rounded-full bg-white/10 text-white/60 border border-white/15"
-        :title="RETIRED_NODE_MESSAGE"
-      >Retired</span>
+      <!-- Retired partner node: a state on the card, its words in an accessible
+           tooltip (hover, focus, tap) and as the badge's description. -->
+      <TooltipProvider v-if="isRetired" :delay-duration="200">
+        <TooltipRoot v-model:open="retiredTipOpen" disable-closing-trigger>
+          <TooltipTrigger as-child>
+            <button
+              type="button"
+              data-retired
+              class="nopan nodrag shrink-0 text-[9px] font-semibold px-1.5 py-0.5 rounded-full bg-white/10 text-white/60 border border-white/15 cursor-help"
+              :aria-describedby="retiredDescId"
+              @click.stop="retiredTipOpen = true"
+            >Retired</button>
+          </TooltipTrigger>
+          <TooltipPortal>
+            <TooltipContent
+              side="top" :side-offset="6" :collision-padding="8"
+              class="z-[200] max-w-[220px] rounded-md border border-white/10 bg-[#1b1b1f] px-2 py-1 text-[11px] leading-snug text-white/85 shadow-lg shadow-black/40"
+            >{{ RETIRED_NODE_MESSAGE }}</TooltipContent>
+          </TooltipPortal>
+        </TooltipRoot>
+      </TooltipProvider>
+      <span v-if="isRetired" :id="retiredDescId" class="sr-only">{{ RETIRED_NODE_MESSAGE }}</span>
       <!-- Subgraph node count badge -->
       <span
         v-if="data.isSubgraph && data.innerNodeCount"
@@ -2306,18 +2332,19 @@ watch(previewImages, (urls) => {
       variant="instrument"
       :price="priceLabel"
       :button-text="hasRun ? 'Run again' : 'Run'"
-      :status="runStatus"
+      :status="isRetired ? RETIRED_STATUS : runStatus"
       :can-run="showRunButton && !isMuted && !isBypassed && !isRetired"
+      :blocked-reason="isRetired ? RETIRED_NODE_MESSAGE : null"
       :running="!!data.running"
       :run-label="hasRun ? 'Re-render this node' : 'Run this node'"
       @run="playThisNode"
     >
-      <template v-if="showRunButton" #menu>
+      <template v-if="showRunButton && !isRetired" #menu>
         <div ref="runMenuRoot" class="contents">
           <button
             aria-label="Run scope options"
             class="nopan nodrag shrink-0 size-5 -mr-1 rounded-[5px] flex items-center justify-center text-white/60 hover:text-white hover:bg-white/[0.08] transition-colors cursor-pointer disabled:opacity-35 disabled:cursor-not-allowed disabled:hover:bg-transparent"
-            :disabled="isMuted || isBypassed || data.running || isRetired"
+            :disabled="isMuted || isBypassed || data.running"
             @click.stop="runMenuOpen = !runMenuOpen"
           >
             <ChevronDown class="size-3 transition-transform" :class="runMenuOpen ? 'rotate-180' : ''" />
