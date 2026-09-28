@@ -73,8 +73,36 @@ export interface SketchDoc {
   fillGap?: number
 }
 
+// the id → entity map of each view made by indexedDoc (keyed by the view
+// object itself, so a doc nobody indexed keeps the plain scan)
+const INDEXES = new WeakMap<SketchDoc, Map<EntityId, SketchEntity>>()
+
+/** A read-only view of `doc` — the same entity, constraint and fill lists —
+ *  whose getEntity is one Map lookup instead of a scan of every entity. Build
+ *  it once per read pass (a render, a computed) over a large drawing: a pass
+ *  that looks up every piece's points is then O(E), not O(E²). The map holds
+ *  the very entity objects in the list (a reactive doc's proxies stay proxies,
+ *  so reading a point's x/y through it is still tracked); it goes stale if an
+ *  entity is added, removed or replaced, so make a fresh view after any such
+ *  change — in Vue, from a computed that iterates `doc.entities`. Never edit
+ *  the drawing through the view. */
+export function indexedDoc(doc: SketchDoc): SketchDoc {
+  const view: SketchDoc = { ...doc }
+  const index = new Map<EntityId, SketchEntity>()
+  // the first entity with an id wins, as with the scan
+  for (const e of doc.entities) if (!index.has(e.id)) index.set(e.id, e)
+  INDEXES.set(view, index)
+  return view
+}
+
+/** The id → entity map of a view made by indexedDoc; undefined for any other doc. */
+export function entityIndexOf(doc: SketchDoc): ReadonlyMap<EntityId, SketchEntity> | undefined {
+  return INDEXES.get(doc)
+}
+
 export function getEntity(doc: SketchDoc, id: EntityId): SketchEntity | undefined {
-  return doc.entities.find(e => e.id === id)
+  const index = INDEXES.get(doc)
+  return index ? index.get(id) : doc.entities.find(e => e.id === id)
 }
 
 export function getPoint(doc: SketchDoc, id: EntityId): PointEntity | undefined {

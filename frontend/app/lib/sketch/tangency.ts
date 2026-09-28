@@ -7,7 +7,7 @@
 // point pair [C, S] (centre, and any point on it — a path arc's centre and its
 // start anchor) or a circle entity's id (its centre point and its r).
 import type { SketchDoc, SketchEntity, SketchConstraint, PointEntity, CircleEntity, EntityId, ConstraintKind } from './model'
-import { getEntity, getPoint } from './model'
+import { getEntity, getPoint, entityIndexOf } from './model'
 import { dist, type Vec2 } from './geom'
 import { curveGeom, allCurves, paramOf, pointAt, type CurveRef } from './crossings'
 
@@ -45,7 +45,10 @@ export function operandRadius(o: CircleOperand): number {
   return o.kind === 'circle' ? o.circle.r : Math.hypot(o.s.x - o.c.x, o.s.y - o.c.y)
 }
 
-function entityMap(doc: SketchDoc): Map<EntityId, SketchEntity> {
+function entityMap(doc: SketchDoc): ReadonlyMap<EntityId, SketchEntity> {
+  // an indexed view (the overlay's badges) already has one — no rebuild per rule
+  const indexed = entityIndexOf(doc)
+  if (indexed) return indexed
   const m = new Map<EntityId, SketchEntity>()
   for (const e of doc.entities) m.set(e.id, e)
   return m

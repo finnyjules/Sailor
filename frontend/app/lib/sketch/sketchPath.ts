@@ -38,6 +38,19 @@ function pathD(doc: SketchDoc, p: Extract<SketchEntity, { kind: 'path' }>): stri
   return d
 }
 
+/** Path data for ONE segment of a path entity, from its start anchor to its
+ *  end — drawn exactly as that segment is in the whole path. '' when the
+ *  path, the segment or a point it needs is missing. */
+export function segmentPath(doc: SketchDoc, pathId: EntityId, segIndex: number): string {
+  const p = getEntity(doc, pathId)
+  if (!p || p.kind !== 'path') return ''
+  const seg = p.segments[segIndex]
+  const fromId = p.anchors[segIndex]
+  const toId = p.anchors[(segIndex + 1) % p.anchors.length]
+  if (!seg || !fromId || !toId) return ''
+  return pathD(doc, { id: p.id, kind: 'path', anchors: [fromId, toId], segments: [seg], closed: false })
+}
+
 export function entityPath(doc: SketchDoc, id: EntityId): string {
   const e = getEntity(doc, id)
   if (!e || e.kind === 'point') return ''

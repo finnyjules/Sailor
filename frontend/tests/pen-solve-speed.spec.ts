@@ -2,9 +2,11 @@
 // A drag on a large connected drawing with the REAL mouse keeps up: on the
 // fills suites' 161-piece petal ring and on a 160-piece filleted star (every
 // line tangent to the arcs it joins, every arc true), 30 pointer moves take
-// well under a few seconds and no frame stalls (was ~14 s for 30 moves with
-// frames up to 6 s, nearly all of it in the dense solve), the point follows
-// the pointer and every rule still holds.
+// well under a second and a half and no frame stalls, the point follows the
+// pointer and every rule still holds. Was ~14 s for 30 moves with frames up
+// to 6 s (the dense solve); then ~2.2 s, frames ~70 ms (the overlay looked
+// every piece up by scanning the whole drawing, O(E²) a frame); now ~0.5–0.7 s,
+// frames ~16–25 ms, about 6 ms of it the overlay and 1–6 ms the solve.
 // __sketchDraw only sets the drawing up and reads it back.
 import { test, expect, type Page } from '@playwright/test'
 
@@ -140,8 +142,8 @@ for (const [name, make, grab, pieces] of [
     await page.keyboard.up(META)
     // eslint-disable-next-line no-console
     console.log(`[pen solve speed] ${name}: 30 moves ${ms} ms, longest frame ${gap.toFixed(0)} ms`)
-    expect(ms).toBeLessThan(3000)     // was ~14 s
-    expect(gap).toBeLessThan(250)     // was up to 6 s
+    expect(ms).toBeLessThan(1500)     // was ~14 s, then ~2.2 s
+    expect(gap).toBeLessThan(60)      // was up to 6 s, then ~70 ms
     const d = await doc(page)
     // the press takes the point under it (on the petal ring s0 sits on e62):
     // that point ends under the pointer

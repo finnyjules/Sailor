@@ -43,9 +43,10 @@
 //   focused-control rule before touching the pen, and returns whether it
 //   consumed the key.
 import { ref, computed, watch, onMounted, onUnmounted, useId } from 'vue'
-import type { SketchDoc, EntityId, ConstraintKind, SegmentSpec } from '~/lib/sketch/model'
+import type { EntityId, ConstraintKind, SegmentSpec } from '~/lib/sketch/model'
+import { indexedDoc, getEntity } from '~/lib/sketch/model'
 import { addPoint } from '~/lib/sketch/edit'
-import { sketchPathData, entityPath } from '~/lib/sketch/sketchPath'
+import { sketchPathData, entityPath, segmentPath } from '~/lib/sketch/sketchPath'
 import { constraintMarks, arcDimensionMarks } from '~/lib/sketch/annotate'
 import { applyView, invertView, viewToSvg, type ViewMatrix } from '~/lib/sketch/view'
 import { spanPathD, SPARKLE_LIFETIME_MS, isTypingInField, type Pen } from '~/composables/pen/usePen'
@@ -122,10 +123,17 @@ function clamp(v: number, lo: number, hi: number) { return Math.min(hi, Math.max
 
 // ---------- rendering ----------
 
+// the drawing with an id → piece map, for every read below: a render of a
+// large drawing looks every piece's points up, and a scan per lookup made a
+// drag frame O(E²). Remade only when the entity list itself changes — a drag
+// moves points in place, so it is kept across the frames of a drag, and a
+// point's x/y read through it is still tracked.
+const idoc = computed(() => indexedDoc(doc.value))
+
 // drawing-space path data (rendered under svgTransform)
-const pathDrawing = computed(() => sketchPathData(doc.value))
+const pathDrawing = computed(() => sketchPathData(idoc.value))
 const constructionDrawing = computed(() => {
-  const d = doc.value
+  const d = idoc.value
   const parts: string[] = []
   for (const e of d.entities) {
     if (e.kind === 'point' || !e.construction) continue
@@ -135,26 +143,11 @@ const constructionDrawing = computed(() => {
   return parts.join(' ')
 })
 function entityPathDrawing(id: EntityId): string {
-  return entityPath(doc.value, id)
+  return entityPath(idoc.value, id)
 }
-// drawing-space path data for ONE segment of a path entity — reuses
-// entityPath's own line/arc emission by building a throwaway 2-anchor
-// sub-path (this segment's from/to anchors plus its single SegmentSpec)
-// inside a local copy of the entity list. Never touches the real doc.
+// drawing-space path data for ONE segment of a path entity
 function segmentPathDrawing(pathId: EntityId, segIndex: number): string {
-  const d = doc.value
-  const path = d.entities.find(e => e.id === pathId) as any
-  if (!path || path.kind !== 'path') return ''
-  const n = path.anchors.length
-  const seg = path.segments[segIndex]
-  const fromId = path.anchors[segIndex]
-  const toId = path.anchors[(segIndex + 1) % n]
-  if (!seg || !fromId || !toId) return ''
-  const subDoc: SketchDoc = {
-    entities: [...d.entities, { id: '__seg_hit__', kind: 'path', anchors: [fromId, toId], segments: [seg], closed: false } as any],
-    constraints: [],
-  }
-  return entityPath(subDoc, '__seg_hit__')
+  return segmentPath(idoc.value, pathId, segIndex)
 }
 
 // Bézier handles are only worth drawing while their path is being worked on —
@@ -220,7 +213,7 @@ const handleArms = computed(() => {
   }
   return out
 })
-const marks = computed(() => constraintMarks(doc.value))
+const marks = computed(() => constraintMarks(idoc.value))
 // STRUCTURAL/auto constraint kinds — internal copy-rule bookkeeping (Repeat's
 // rotatedFrom, Mirror's mirroredFrom) and arc-integrity plumbing (equalDist,
 // which also backs the user-facing "Equal" verb on two lines, so it can't be
@@ -260,7 +253,7 @@ const visibleMarks = computed(() => (cleanupSession.value || repeatSession.value
   }))
 // persistent "R n.n" radius chips on every finished arc segment — pure read
 // of the doc, never solves; distinct from pathBowChip's live during-drag chip
-const arcDims = computed(() => (cleanupSession.value || repeatSession.value ? [] : arcDimensionMarks(doc.value)).map(m => {
+const arcDims = computed(() => (cleanupSession.value || repeatSession.value ? [] : arcDimensionMarks(idoc.value)).map(m => {
   const s = toScreen(m)
   const w = 34
   const o = chipOrigin(s, w)
@@ -306,7 +299,7 @@ function roleGlyphColor(p: { fixed?: boolean }): string {
 }
 
 function worldPt(id: EntityId): { x: number; y: number } | null {
-  const p = doc.value.entities.find(e => e.id === id) as any
+  const p = getEntity(idoc.value, id)
   if (!p || p.kind !== 'point') return null
   return { x: p.x, y: p.y }
 }
@@ -670,7 +663,7 @@ function settleArcPress(): void {
   if (live) arcDragEnd()
 }
 function isArcSegment(pathId: EntityId, segIndex: number): boolean {
-  const p = doc.value.entities.find(e => e.id === pathId) as any
+  const p = getEntity(idoc.value, pathId)
   return p?.kind === 'path' && p.segments[segIndex]?.kind === 'arc'
 }
 
