@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import {
   Download, ImagePlus,
-  MousePointer2, Check, Type, Square, Circle, Minus, Trash2, X,
+  MousePointer2, Check, Type, Square, Circle, Minus, Trash2, X, Maximize2,
 } from 'lucide-vue-next'
 import { getTypeColor } from '~/composables/useVueNodes'
 import { useLocalLayerEditor, aspectLockedResizeKind } from '~/composables/useLocalLayerEditor'
@@ -142,6 +142,10 @@ const box = computed(() => {
   const E = displayEdge.value
   return a >= 1 ? { w: E, h: Math.round(E / a) } : { w: Math.round(E * a), h: E }
 })
+// A portrait Frame's Open bar is only as wide as the glass (box.w + 12). Below ~260px there
+// isn't room for every control — drop "Edit here" (double-click still enters edit mode) and
+// shrink "Open" to an icon, so Download and Render (with its scope chevron) stay reachable.
+const narrowBar = computed(() => box.value.w + 12 < 260)
 
 // ── Layout grid overlay (editor-only guide, read-only here; the modal owns edits) ──
 // Resolved at the Frame's DESIGN size (its px values and its format are there), falling back to the
@@ -1188,7 +1192,7 @@ onUnmounted(() => {
     <PrintSurface
       ref="printRef"
       name="Frame"
-      :selected="selected || exportingVideo"
+      :selected="selected"
       :data-running="data.running || undefined"
       :data-error="data.error ? '' : undefined"
       :data-editing="editMode ? '' : undefined"
@@ -1227,6 +1231,12 @@ onUnmounted(() => {
               @change="setDim('height', $event)" />
           </div>
         </span>
+        <span v-if="videoStatus" class="print-surface__size min-w-0 truncate" :title="videoStatus">{{ videoStatus }}</span>
+        <button
+          v-if="exportingVideo" type="button"
+          class="nopan nodrag shrink-0 text-white/50 hover:text-white"
+          title="Stop" aria-label="Stop" @click.stop="stopVideoExport"
+        ><X class="size-3" /></button>
       </template>
 
       <!-- Artboard -->
@@ -1285,17 +1295,16 @@ onUnmounted(() => {
       </div>
 
       <template v-if="!editMode" #openbar>
-        <NodeOpenBar :meta="videoStatus || ''">
-          <button v-if="exportingVideo" type="button" class="node-btn node-btn--icon nopan nodrag" title="Stop" aria-label="Stop" @click.stop="stopVideoExport"><X class="size-3.5" /></button>
-          <button v-else type="button" class="node-btn node-btn--icon nopan nodrag" :disabled="!hasAnyLayer && !compositeUrl" title="Download" aria-label="Download" @click.stop="downloadImage"><Download class="size-3.5" /></button>
-          <button type="button" class="node-btn node-btn--icon nopan nodrag" title="Edit here" aria-label="Edit here" @pointerdown.stop @click.stop="toggleEdit"><MousePointer2 class="size-3.5" /></button>
-          <button type="button" class="node-btn nopan nodrag" title="Open the full editor" @click.stop="openEditor">Open</button>
+        <NodeOpenBar>
+          <button type="button" class="node-btn node-btn--icon nopan nodrag" :disabled="!hasAnyLayer && !compositeUrl" title="Download" aria-label="Download" @click.stop="downloadImage"><Download class="size-3.5" /></button>
+          <button v-if="!narrowBar" type="button" class="node-btn node-btn--icon nopan nodrag" title="Edit here" aria-label="Edit here" @pointerdown.stop @click.stop="toggleEdit"><MousePointer2 class="size-3.5" /></button>
+          <button v-if="!narrowBar" type="button" class="node-btn nopan nodrag" title="Open the full editor" @click.stop="openEditor">Open</button>
+          <button v-else type="button" class="node-btn node-btn--icon nopan nodrag" aria-label="Open" title="Open the full editor" @click.stop="openEditor"><Maximize2 class="size-3.5" /></button>
           <StudioRenderButton class="shrink-0" :node-id="id" :busy="!!data?.studioBusy || !!data?.running" />
         </NodeOpenBar>
       </template>
 
-      <template #overlay>
-        <VueCanvasNodeReadyBadge :node-id="id" />
+      <template #ports>
         <VueCanvasNodePort
           v-for="(slot, i) in layerSlots" :id="`input-${slot}`" :key="slot"
           type="target" side="left" :index="i" data-type="IMAGE" label="layer"
@@ -1304,6 +1313,10 @@ onUnmounted(() => {
           :id="`output-${imageOutIdx}`" type="source" side="right"
           :index="0" data-type="IMAGE" label="image"
         />
+      </template>
+
+      <template #overlay>
+        <VueCanvasNodeReadyBadge :node-id="id" />
         <!-- Corner resize grip — sets the on-canvas display size (not output res) -->
         <div
           class="nopan nodrag absolute -bottom-1.5 -right-1.5 z-[7] size-4 cursor-nwse-resize group/resize"

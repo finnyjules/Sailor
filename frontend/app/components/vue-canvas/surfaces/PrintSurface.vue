@@ -69,6 +69,7 @@ defineExpose({ capture })
       <slot name="size"><span v-if="size" class="print-surface__size">{{ size }}</span></slot>
     </div>
     <div class="print-surface__frame">
+      <slot name="ports" />
       <div class="print-surface__glass node-openbar-host" :data-selected="selected || undefined">
         <div class="print-surface__glow" :class="{ 'print-surface__glow--css': cssBlur }" aria-hidden="true"><canvas ref="tintEl" /></div>
         <div class="print-surface__art"><slot><img v-if="artwork" :src="artwork" alt="" class="block w-full"></slot></div>

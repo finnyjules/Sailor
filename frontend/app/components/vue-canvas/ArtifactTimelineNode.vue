@@ -15,7 +15,7 @@ useNodePortSync(portSyncRoot)
 // The "Timeline" as a first-class artifact card — same visual language as the
 // Frame / Image / Video artifacts. Edge-mounted round handles, a tight dark
 // shell, and a live animated preview as the main content. The full multi-track
-// editor still opens in its modal ("Open timeline"); this card is the on-canvas
+// editor still opens in its modal ("Open"); this card is the on-canvas
 // face of it. Mirrors ArtifactFrameNode's chrome + resize.
 const props = defineProps<{
   id: string
@@ -159,8 +159,7 @@ function runThisNode() {
         </NodeOpenBar>
       </template>
 
-      <template #overlay>
-        <VueCanvasNodeReadyBadge :node-id="id" />
+      <template #ports>
         <VueCanvasNodePort
           v-for="(slot, i) in clipSlots" :id="`input-${slot}`" :key="slot"
           type="target" side="left" :index="i" data-type="IMAGE" label="clip"
@@ -174,6 +173,10 @@ function runThisNode() {
           :id="`output-${videoOutIdx}`" type="source" side="right"
           :index="1" data-type="VIDEO" label="video"
         />
+      </template>
+
+      <template #overlay>
+        <VueCanvasNodeReadyBadge :node-id="id" />
         <!-- Mode badge -->
         <div
           v-if="isMuted || isBypassed"

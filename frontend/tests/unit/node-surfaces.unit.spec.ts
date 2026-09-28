@@ -150,6 +150,19 @@ describe('PrintSurface', () => {
     expect(w.find('.print-surface__label .sz').text()).toBe('Set size')
   })
 
+  it('puts ports inside the frame, before the glass — so the glass paints over their inner half', () => {
+    const w = mount(PrintSurface, {
+      props: { name: 'Frame' },
+      slots: { ports: '<i class="pt" />' },
+    })
+    const frame = w.find('.print-surface__frame').element
+    const port = w.find('.print-surface__frame .pt').element
+    const glass = w.find('.print-surface__frame .print-surface__glass').element
+    expect(port.parentElement).toBe(frame)
+    const children = Array.from(frame.children)
+    expect(children.indexOf(port)).toBeLessThan(children.indexOf(glass))
+  })
+
   it('passes state attributes to the root', () => {
     const w = mount(PrintSurface, { props: { name: 'Frame' }, attrs: { 'data-running': '' } })
     expect(w.find('.print-surface').attributes('data-running')).toBe('')

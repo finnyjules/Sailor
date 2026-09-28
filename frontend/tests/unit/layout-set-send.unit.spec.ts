@@ -199,7 +199,9 @@ describe('placeRightOf — right of the source, never overlapping', () => {
     expect(xs[2]!).toBeGreaterThan(xs[1]! + frameCardSize(300, 1080, 1920).w)
   })
   it('the card size follows the format’s aspect and the display edge', () => {
-    expect(frameCardSize(300, 1080, 1920).w).toBe(169)
-    expect(frameCardSize(undefined, 1920, 1080).w).toBe(300)
+    // Portrait 1080×1920 at edge 300: box.w = round(300×1080/1920) = 169, plus the glass's 12px.
+    expect(frameCardSize(300, 1080, 1920).w).toBe(181)
+    // No stored displayEdge: the default is now 308 (the card's own default), plus the glass.
+    expect(frameCardSize(undefined, 1920, 1080).w).toBe(320)
   })
 })

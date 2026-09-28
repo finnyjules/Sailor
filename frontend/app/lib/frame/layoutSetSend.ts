@@ -111,12 +111,13 @@ function boxOf(n: NodeLike): { x: number; y: number; w: number; h: number } {
 }
 
 /** The Frame card's size for a `w`×`h` Frame (`ArtifactFrameNode`: the longest side is the card's
- *  `displayEdge`, 300 by default), plus room for its header. */
+ *  `displayEdge`, 308 by default), plus the print's own glass (6px each side) and its name row
+ *  (26px) above the glass. */
 export function frameCardSize(displayEdge: unknown, w: number, h: number): { w: number; h: number } {
-  const E = Number(displayEdge) || 300
+  const E = Number(displayEdge) || 308
   const a = w > 0 && h > 0 ? w / h : 1
   const box = a >= 1 ? { w: E, h: Math.round(E / a) } : { w: Math.round(E * a), h: E }
-  return { w: box.w, h: box.h + 60 }
+  return { w: box.w + 12, h: box.h + 12 + 26 }
 }
 
 /** Where a new card of `size` goes: level with `source`, right of it, and right of any card that
