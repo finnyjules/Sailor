@@ -244,9 +244,12 @@ describe('Collection card is a grid of its rows', () => {
   })
   it('has a tiles computed reading the first six rows, image over colour over label', () => {
     expect(s).toMatch(/const tiles = computed\(\(\) => \{/)
-    expect(s).toMatch(/c\.rows\.slice\(0, 6\)/)
+    expect(s).toMatch(/c\.rows\.slice\(start, start \+ 6\)/)
+    expect(s).toMatch(/const start = Math\.max\(0, Math\.min\(c\.previewRow - 5, c\.rows\.length - 6\)\)/)
+    expect(s).toMatch(/index: start \+ i/)
     expect(s).toMatch(/col\.type === 'image'/)
     expect(s).toMatch(/col\.type === 'color'/)
+    expect(s).toMatch(/img && isImageUrl\(row\.values\[img\.key\]\)/)
   })
   it('the media grid is a 3-column grid with the previewed row outlined', () => {
     expect(t).toMatch(/grid grid-cols-3 gap-px bg-white\/\[0\.04\]/)
@@ -270,5 +273,54 @@ describe('Collection card is a grid of its rows', () => {
   it('dropped the raw Handle imports and the bordered frame div', () => {
     expect(s).not.toMatch(/import \{ Handle, Position \}/)
     expect(t).not.toMatch(/border bg-\[#141414\]/)
+  })
+})
+
+describe('Batch pile carries its name above the stack', () => {
+  const s = src('BatchGridNode.vue')
+  const t = tpl(s)
+  it('root is a content-card with the name row before PileStack, root width unchanged', () => {
+    expect(t).toMatch(/^<template>\s*<div class="content-card w-\[220px\] select-none" :data-selected="selected \|\| undefined">/)
+    expect(t).toMatch(/content-card__name[\s\S]{0,80}Batch[\s\S]{0,300}<PileStack/)
+  })
+  it('meta is the item count, tabular and dim, inside the name row', () => {
+    expect(t).toMatch(/content-card__name[\s\S]{0,200}shrink-0 tabular-nums text-white\/30[\s\S]{0,20}\{\{ items\.length \}\}/)
+  })
+  it('PileStack keeps its images/seed-key/selected props and the rail buttons', () => {
+    expect(t).toMatch(/<PileStack :images="items\.map\(i => i\.url\)" :seed-key="String\(props\.id\)" :selected="selected">/)
+    expect(t).toMatch(/#rail[\s\S]*openGallery[\s\S]*downloadZip/)
+  })
+})
+
+describe('Sketch pile carries its name above the stack', () => {
+  const s = src('SketchPileNode.vue')
+  const t = tpl(s)
+  it('root is a content-card with the name row before PileStack, pointerdown/click kept', () => {
+    expect(t).toMatch(/^<template>\s*<div class="content-card w-\[220px\] select-none" :data-selected="selected \|\| undefined" @pointerdown="onPointerDown" @click="onClick">/)
+    expect(t).toMatch(/content-card__name[\s\S]{0,40}Sketches[\s\S]{0,300}<PileStack/)
+  })
+  it('PileStack keeps its images/seed-key/selected/dashed/loading props', () => {
+    expect(t).toMatch(/<PileStack[\s\S]{0,40}:images="images"[\s\S]{0,60}:seed-key="String\(props\.id\)"[\s\S]{0,40}:selected="selected"[\s\S]{0,20}dashed[\s\S]{0,40}:loading="loading"/)
+  })
+})
+
+describe('Moodboard pile carries its name above the stack', () => {
+  const s = src('MoodboardNode.vue')
+  const t = tpl(s)
+  it('wrapper and NodePort stay exactly as they are', () => {
+    expect(t).toMatch(/^<template>\s*<div class="relative w-fit">/)
+    expect(t).toMatch(/<VueCanvasNodePort\s*\n\s*id="output-0" type="source" side="right" :index="0"/)
+  })
+  it('the inner box is a content-card, name row carries the entry name above the pile', () => {
+    expect(t).toMatch(/class="content-card relative z-10 w-\[220px\] select-none cursor-pointer"[\s\S]{0,60}:data-selected="selected \|\| undefined"/)
+    expect(t).toMatch(/content-card__name[\s\S]{0,60}\{\{ entry\?\.name \|\| 'Moodboard' \}\}[\s\S]{0,300}<PileStack/)
+  })
+  it('the reading summary is now a title tooltip on the pile, not a line below it', () => {
+    expect(t).toMatch(/<PileStack[\s\S]{0,200}:title="entry\?\.reading\?\.summary \|\| undefined"/)
+    expect(t).not.toMatch(/text-\[11px\] text-white\/45 truncate">\{\{ entry\.reading\.summary \}\}/)
+  })
+  it('keeps the empty "drop inspiration" state and the overflow rail badge', () => {
+    expect(t).toMatch(/drop inspiration/)
+    expect(t).toMatch(/#rail[\s\S]*overflow[\s\S]*\+\{\{ overflow \}\}/)
   })
 })

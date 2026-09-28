@@ -77,8 +77,18 @@ function onClick(e: MouseEvent) {
       data-type="TASTE" label="style"
       tooltip="Compiled style block — wire into a generator's style_in"
     />
-  <div class="relative z-10 w-[220px] select-none cursor-pointer" @pointerdown="onPointerDown" @click="onClick">
-    <PileStack v-if="images.length" :images="images" :seed-key="entryId || String(props.id)" :selected="selected">
+  <div
+    class="content-card relative z-10 w-[220px] select-none cursor-pointer"
+    :data-selected="selected || undefined"
+    @pointerdown="onPointerDown"
+    @click="onClick"
+  >
+    <div class="content-card__name"><span class="truncate flex-1 min-w-0">{{ entry?.name || 'Moodboard' }}</span></div>
+    <PileStack
+      v-if="images.length"
+      :images="images" :seed-key="entryId || String(props.id)" :selected="selected"
+      :title="entry?.reading?.summary || undefined"
+    >
       <template #rail>
         <span
           v-if="overflow"
@@ -96,10 +106,6 @@ function onClick(e: MouseEvent) {
       >
         drop inspiration
       </div>
-    </div>
-    <div class="mt-2 px-1 text-center">
-      <div class="text-[13px] font-medium text-white/90 truncate">{{ entry?.name || 'Moodboard' }}</div>
-      <div v-if="entry?.reading?.summary" class="text-[11px] text-white/45 truncate">{{ entry.reading.summary }}</div>
     </div>
   </div>
   </div>

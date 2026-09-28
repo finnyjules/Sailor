@@ -38,7 +38,11 @@ const btnCls = 'size-7 rounded-md bg-black/55 hover:bg-black/75 backdrop-blur-sm
 </script>
 
 <template>
-  <div class="w-[220px] select-none">
+  <div class="content-card w-[220px] select-none" :data-selected="selected || undefined">
+    <div class="content-card__name">
+      <span class="truncate flex-1 min-w-0">Batch</span>
+      <span class="shrink-0 tabular-nums text-white/30">{{ items.length }}</span>
+    </div>
     <!-- The pile: clicking selects the node, dragging moves it (no handlers
          here on purpose). -->
     <PileStack :images="items.map(i => i.url)" :seed-key="String(props.id)" :selected="selected">

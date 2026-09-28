@@ -139,6 +139,66 @@ async function fitCanvas(page: Page): Promise<void> {
   await page.waitForTimeout(300)
 }
 
+/**
+ * fitView() picks a single pan/zoom for the whole graph, and any card's
+ * rendered height can nudge that transform enough to leave a port sitting
+ * under fixed-position chrome (the bottom-centre prompt bar + toolbar stack,
+ * `[data-testid="canvas-bottom-bar-stack"]` in app/layouts/default.vue) — the
+ * port still has a real bounding box, but a synthetic mouse click at its
+ * centre hits that stack instead. Ground truth is `elementFromPoint`, not the
+ * bounding box: this checks the element actually on top at a point is (or is
+ * inside) the handle with the given id.
+ */
+async function isHandleTopmostAt(page: Page, x: number, y: number, handleId: string): Promise<boolean> {
+  return await page.evaluate(({ x, y, handleId }) => {
+    const el = document.elementFromPoint(x, y)
+    return !!el?.closest(`[data-handleid="${handleId}"]`)
+  }, { x, y, handleId })
+}
+
+/** A point inside the pane that clears every current node's box by a margin
+ *  — used only as the wheel gesture's cursor position, never as a drag start
+ *  (the default tool mode is Select, where a pointer-drag on the pane draws a
+ *  selection box instead of panning; wheel is the pan gesture that works
+ *  without switching tools). */
+async function findClearPanePoint(page: Page): Promise<{ x: number, y: number }> {
+  return await page.evaluate(() => {
+    const pane = document.querySelector('.vue-flow__pane') as HTMLElement
+    const paneBox = pane.getBoundingClientRect()
+    const nodeBoxes = Array.from(document.querySelectorAll('.vue-flow__node')).map(el => el.getBoundingClientRect())
+    const margin = 60
+    for (let y = paneBox.top + margin; y < paneBox.bottom - margin; y += 40) {
+      for (let x = paneBox.left + margin; x < paneBox.right - margin; x += 40) {
+        const clear = nodeBoxes.every(b => x < b.left - 10 || x > b.right + 10 || y < b.top - 10 || y > b.bottom + 10)
+        if (clear) return { x, y }
+      }
+    }
+    return { x: paneBox.left + paneBox.width / 2, y: paneBox.top + paneBox.height / 2 }
+  })
+}
+
+/** Pan the canvas UP by `dy` with a plain wheel gesture (see findClearPanePoint
+ *  for why wheel, not a drag). Vertical-only: the bottom-bar-stack is
+ *  horizontally centred and full-height-band, so the only reliable clearance
+ *  is moving above its top edge, not sideways past it. */
+async function panPaneUpBy(page: Page, dy: number): Promise<void> {
+  const { x, y } = await findClearPanePoint(page)
+  await page.mouse.move(x, y)
+  await page.mouse.wheel(0, dy)
+  await page.waitForTimeout(150)
+}
+
+/** How far (in screen px) a point at `y` sits below the bottom-bar-stack's
+ *  top edge, plus a safety margin — 0 (or negative) once it's clear. Returns
+ *  0 when the stack isn't present (e.g. a non-project tab). */
+async function overlapWithBottomStack(page: Page, y: number): Promise<number> {
+  const stack = page.getByTestId('canvas-bottom-bar-stack')
+  const box = await stack.boundingBox().catch(() => null)
+  if (!box) return 0
+  const margin = 24
+  return y - (box.y - margin)
+}
+
 async function pullSerializedWorkflow(page: Page): Promise<any> {
   return await page.evaluate(() => {
     let c: any = (document.querySelector('.vue-flow') as any)?.__vueParentComponent
@@ -497,13 +557,41 @@ test('moodboard wires: chip apply auto-switch + refs payload → revert → manu
       `.vue-flow__node[data-id="${mbWireNodeId}"] .vue-flow__handle[data-handleid="output-0"]`)
     const tgtHandle = page.locator(
       `.vue-flow__node[data-id="${genNodeId}"] .vue-flow__handle[data-handleid="input-${styleInIdx}"]`)
-    const src = await srcHandle.boundingBox()
-    const tgt = await tgtHandle.boundingBox()
+    let src = await srcHandle.boundingBox()
+    let tgt = await tgtHandle.boundingBox()
     expect(src, 'moodboard style handle must be on screen').toBeTruthy()
     expect(tgt, 'generator style_in handle must be on screen').toBeTruthy()
 
+    // fitView() can leave a port sitting under the bottom-centre prompt-bar +
+    // toolbar stack (see overlapWithBottomStack above) — the port still has a
+    // real bounding box, but a synthetic click at its centre would hit that
+    // stack instead. The stack is anchored to the viewport bottom and doesn't
+    // move when the canvas pans, so panning UP by however much either
+    // endpoint overlaps it reliably clears both; verify with elementFromPoint
+    // (the ground truth for "what's actually clickable there"), not just the
+    // bounding box, before dragging.
+    for (let attempt = 0; attempt < 8; attempt++) {
+      const sy0 = src!.y + src!.height / 2
+      const ty0 = tgt!.y + tgt!.height / 2
+      const overlap = Math.max(await overlapWithBottomStack(page, sy0), await overlapWithBottomStack(page, ty0))
+      if (overlap <= 0) break
+      // The canvas is zoomed out well below 1x here, so a wheel delta of N
+      // moves the viewport by less than N screen px — over-ask so this
+      // converges in a couple of iterations instead of creeping.
+      await panPaneUpBy(page, overlap * 3)
+      src = await srcHandle.boundingBox()
+      tgt = await tgtHandle.boundingBox()
+      expect(src, 'moodboard style handle must be on screen after pan').toBeTruthy()
+      expect(tgt, 'generator style_in handle must be on screen after pan').toBeTruthy()
+    }
+
     const sx = src!.x + src!.width / 2, sy = src!.y + src!.height / 2
     const tx = tgt!.x + tgt!.width / 2, ty = tgt!.y + tgt!.height / 2
+    expect(await isHandleTopmostAt(page, sx, sy, 'output-0'),
+      'moodboard style handle must be the topmost element at its centre').toBe(true)
+    expect(await isHandleTopmostAt(page, tx, ty, `input-${styleInIdx}`),
+      'generator style_in handle must be the topmost element at its centre').toBe(true)
+
     await page.mouse.move(sx, sy)
     await page.mouse.down()
     await page.mouse.move((sx + tx) / 2, (sy + ty) / 2, { steps: 6 })
