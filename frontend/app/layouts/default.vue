@@ -4400,7 +4400,7 @@ function dismissRunResult() {
                    unified artifact node onto the canvas. -->
               <div
                 v-if="item.submenu === 'load' && openSubmenu === 'load'"
-                class="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 flex flex-col gap-0.5 min-w-[160px] bg-[#1a1a1a]/95 border border-[#2a2a2a] rounded-[12px] p-1.5 shadow-xl whitespace-nowrap"
+                class="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 z-10 flex flex-col gap-0.5 min-w-[160px] bg-[#1a1a1a] border border-[#2a2a2a] rounded-[12px] p-1.5 shadow-xl whitespace-nowrap"
                 @click.stop
               >
                 <template v-for="(section, si) in loadSections" :key="section.label">
@@ -4425,7 +4425,7 @@ function dismissRunResult() {
               <!-- Studios door: craft places. Same popup shell as the Add menu. -->
               <div
                 v-if="item.submenu === 'studios' && openSubmenu === 'studios'"
-                class="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 flex flex-col gap-0.5 min-w-[160px] bg-[#1a1a1a]/95 border border-[#2a2a2a] rounded-[12px] p-1.5 shadow-xl whitespace-nowrap"
+                class="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 z-10 flex flex-col gap-0.5 min-w-[160px] bg-[#1a1a1a] border border-[#2a2a2a] rounded-[12px] p-1.5 shadow-xl whitespace-nowrap"
                 @click.stop
               >
                 <button
@@ -4447,7 +4447,7 @@ function dismissRunResult() {
               <!-- Generate door: curated zero-input AI verbs. Full catalog = Actions panel. -->
               <div
                 v-if="item.submenu === 'generate' && openSubmenu === 'generate'"
-                class="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 flex flex-col gap-0.5 min-w-[160px] bg-[#1a1a1a]/95 border border-[#2a2a2a] rounded-[12px] p-1.5 shadow-xl whitespace-nowrap"
+                class="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 z-10 flex flex-col gap-0.5 min-w-[160px] bg-[#1a1a1a] border border-[#2a2a2a] rounded-[12px] p-1.5 shadow-xl whitespace-nowrap"
                 @click.stop
               >
                 <button
@@ -4483,7 +4483,7 @@ function dismissRunResult() {
                    the annotate options, folded behind one toolbar item. -->
               <div
                 v-if="item.submenu === 'more' && openSubmenu === 'more'"
-                class="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 flex flex-col gap-0.5 min-w-[180px] bg-[#1a1a1a]/95 border border-[#2a2a2a] rounded-[12px] p-1.5 shadow-xl whitespace-nowrap"
+                class="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 z-10 flex flex-col gap-0.5 min-w-[180px] bg-[#1a1a1a] border border-[#2a2a2a] rounded-[12px] p-1.5 shadow-xl whitespace-nowrap"
                 @click.stop
               >
                 <button
