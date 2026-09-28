@@ -25,6 +25,7 @@ import { isLink } from '#shared/runner/graph'
 import { picturePixels } from '../utils/graphInputPixels'
 import { NO_FAMILIES, type RunnerFamily } from '#shared/runner/families'
 import type { InputSeconds } from '#shared/pricing/clipSettings'
+import { gen3dTextSent } from '#shared/runner/gen3d'
 
 /**
  * Credits for one provider node. `inputPixels`: the measured size of the
@@ -157,7 +158,7 @@ export const PAID_TEXT_INPUTS: Readonly<Record<string, readonly string[]>> = {
   MusicGenRemoteNode: ['prompt'],
   GenerateSpeechNode: ['text'],
   MiniMaxSpeechRemoteNode: ['text'],
-  // R3.9, Multi-View → 3D: its description of the subject (Rodin sends it; moderated whatever the engine).
+  // R3.9, Multi-View → 3D: its description of the subject (moderated only where it is sent: Rodin, or a wired engine; gen3dTextSent).
   Hunyuan3DMultiViewNode: ['prompt'],
 }
 
@@ -171,6 +172,8 @@ export function extraPromptTexts(prompt: ApiPrompt): string[] {
     const names = new Set([...RUNNER_EXTRA_TEXT_INPUTS, ...(TASTE_TEXT_CLASSES.has(node.class_type) ? TASTE_TEXT_INPUTS : []), ...paid])
     for (const name of names) {
       const v = inputs[name]
+      // Multi-View's prompt is sent (and so moderated) only on Rodin, or a wired engine (R3.9 fix round 2).
+      if (!gen3dTextSent(node.class_type, name, inputs)) continue
       if (typeof v === 'string' && v.trim()) parts.push(v)
     }
   }

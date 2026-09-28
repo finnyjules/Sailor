@@ -61,6 +61,30 @@ describe('local /prompt proxy', () => {
     expect(proxyRequest).not.toHaveBeenCalled()
   })
 
+  it('Generate a 3D model is refused at any size, over the 8 MB cap too (R3.9 fix round 2); Multi-View over the cap is forwarded', async () => {
+    const { PROMPT_CHECK_MAX_BYTES } = await import('../../server/middleware/comfyui-proxy')
+    const { GENERATE_3D_RUNNER_ONLY } = await import('../../shared/runner/gen3d')
+    const body = (class_type: string, bytes: number) => {
+      const p = { prompt: { 1: { class_type, inputs: { image: ['2', 0] } }, 2: { class_type: 'LoadImage', inputs: { image: 'a.png' } } } }
+      const base = JSON.stringify({ ...p, pad: '' })
+      return Buffer.from(JSON.stringify({ ...p, pad: 'x'.repeat(Math.max(0, bytes - base.length)) }))
+    }
+    for (const ct of ['Generate3DNode', 'Hunyuan3DRemoteNode']) {
+      for (const bytes of [0, PROMPT_CHECK_MAX_BYTES + 1]) {
+        const e = ev('/prompt', body(ct, bytes))
+        const res = await middleware(e)
+        expect(e.node.res, `${ct} ${bytes}`).toMatchObject({ statusCode: 400 })
+        expect(res.error.message, `${ct} ${bytes}`).toBe(GENERATE_3D_RUNNER_ONLY)
+      }
+    }
+    expect(proxyRequest).not.toHaveBeenCalled()
+    // A prompt text that merely mentions the class isn't a node of it.
+    const mention = Buffer.from(JSON.stringify({ prompt: { 1: { class_type: 'GenerateImageNode', inputs: { prompt: '"class_type": "Generate3DNode"' } } }, pad: 'x'.repeat(PROMPT_CHECK_MAX_BYTES) }))
+    expect(await middleware(ev('/prompt', mention))).toEqual({ proxiedTo: 'http://127.0.0.1:8188/prompt' })
+    const mv = ev('/prompt', body('Hunyuan3DMultiViewNode', PROMPT_CHECK_MAX_BYTES + 1))
+    expect(await middleware(mv)).toEqual({ proxiedTo: 'http://127.0.0.1:8188/prompt' })
+  })
+
   it('a body over the 8 MB cap is forwarded unchecked (the browser checked first); at the cap it is checked', async () => {
     sora.discontinued = '2026-09-24'
     __resetModelMenusForTests()

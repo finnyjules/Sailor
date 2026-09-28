@@ -27,6 +27,7 @@
 import { BASE_RENDER_CREDITS } from '~/lib/nodeCreditEstimate'
 import { creditsForUsd } from '~/lib/pricing'
 import { FAMILY_PRICED_CLASSES, priceNode } from '#shared/pricing/nodePrice'
+import { estimateFloored } from '#shared/pricing/estimateFloor'
 import { sizePricedInput, sourceOutputPixels } from '#shared/pricing/editSettings'
 import { NO_FAMILIES, type RunnerFamily } from '#shared/runner/families'
 import { allotMediaFiles, gateNodeOrder, mediaFileKey, secondsPricedMedia, sourceAudioSeconds, type InputSeconds, type MediaFileRef, type MediaSource } from '#shared/pricing/clipSettings'
@@ -178,7 +179,9 @@ export function estimateUsdForNodes(
     // Hosted: a model-priced picker is charged by the server whatever its
     // billing class, so price it even if the badge/category filter misses it.
     // Priced from the WHOLE widget map, the same way the server charges it.
-    const shared = hosted ? priceNode(n.type, widgetValueMap(n.widgetDefs, n.widgetsValues, n.linkedInputs), { inputPixels: n.inputPixels, inputSeconds: n.inputSeconds, families: opts.families }) : null
+    // An estimate-priced R3 class off the runner at its flat price before R3, as priceGraph charges it (R3.9 fix round 2).
+    const values = hosted ? widgetValueMap(n.widgetDefs, n.widgetsValues, n.linkedInputs) : null
+    const shared = values ? estimateFloored(n.type, values, priceNode(n.type, values, { inputPixels: n.inputPixels, inputSeconds: n.inputSeconds, families: opts.families }), opts.families) : null
     const modelPrice = shared && !('refused' in shared) ? shared : null
     if (modelPrice == null && !isReplicateBilled(n) && !creditBilled) continue
     // The selected model's real price beats the static badge when we have it.

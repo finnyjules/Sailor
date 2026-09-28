@@ -277,13 +277,17 @@ describe('prices (ruling (a))', () => {
     expect(PAID_RATES[RODIN_SLUG]).toEqual({
       unit: 'per_call', usd: 0.40, service: 'replicate', source: 'https://replicate.com/hyper3d/rodin', read: '2026-09-27', confidence: 'verified',
     })
-    for (const [slug, usd] of [[HUNYUAN3D_SLUG, 0.10], [HUNYUAN3D_MV_SLUG, 0.10], [TRELLIS_SLUG, 0.04]] as const) {
+    for (const [slug, usd] of [[HUNYUAN3D_SLUG, 0.10], [HUNYUAN3D_MV_SLUG, 0.10], [TRELLIS_SLUG, 0.06]] as const) {
       expect(PAID_RATES[slug], slug).toMatchObject({ unit: 'gpu_ceiling', usd, confidence: 'estimate', read: '2026-09-27', source: `https://replicate.com/${slug}` })
     }
-    for (const slug of [HUNYUAN3D_SLUG, HUNYUAN3D_MV_SLUG, RODIN_SLUG, TRELLIS_SLUG]) {
-      expect(otherCardFor(slug), slug).toBeNull()
-      expect(paidCallUsd({ endpoint: slug })).toBe(PAID_RATES[slug]!.unit === 'per_call' || PAID_RATES[slug]!.unit === 'gpu_ceiling' ? (PAID_RATES[slug] as { usd: number }).usd : null)
-    }
+    for (const slug of [HUNYUAN3D_SLUG, HUNYUAN3D_MV_SLUG, RODIN_SLUG, TRELLIS_SLUG]) expect(otherCardFor(slug), slug).toBeNull()
+    expect(paidCallUsd({ endpoint: HUNYUAN3D_SLUG })).toBe(0.1)
+    expect(paidCallUsd({ endpoint: RODIN_SLUG })).toBe(0.4)
+    expect(paidCallUsd({ endpoint: TRELLIS_SLUG })).toBe(0.06)
+    // Fix round 2: Hunyuan3D-2mv's figure is at the page's 30 steps, scaled up with more, never down; no count, no price.
+    expect(PAID_RATES[HUNYUAN3D_MV_SLUG]).toMatchObject({ perSteps: 30 })
+    expect(paidCallUsd({ endpoint: HUNYUAN3D_MV_SLUG })).toBeNull()
+    for (const [steps, usd] of [[20, 0.1], [30, 0.1], [31, 0.11], [50, 0.17], [100, 0.34]] as const) expect(paidCallUsd({ endpoint: HUNYUAN3D_MV_SLUG, steps }), String(steps)).toBe(usd)
   })
 
   it('priced by their calls with no flat row; the price book moved on', () => {
@@ -292,26 +296,48 @@ describe('prices (ruling (a))', () => {
       expect(Object.prototype.hasOwnProperty.call(GRAPH_NODE_CREDITS, c), c).toBe(false)
       expect(PROVIDER_TYPES.has(c)).toBe(true)
     }
-    expect(PRICE_BOOK_VERSION).toBe('r3-gen-3d')
+    expect(PRICE_BOOK_VERSION).toBe('r3-estimate-floor')
   })
 
-  it('on both paths: Hunyuan3D 2 20 credits (was 45); Multi-View by its engine: TRELLIS 8, Hunyuan3D-2mv 20, Rodin 60; a wired engine at Rodin\'s', () => {
-    const graph = (ct: string, inputs: Record<string, unknown>) => priceGraph({ 1: { class_type: ct, inputs } }).nodes!['1']
-    for (const ct of ['Generate3DNode', 'Hunyuan3DRemoteNode']) {
-      expect(priceNode(ct, sample(ct as Gen3dClass).widgets)).toEqual({ usd: 0.1, credits: 20 })
-      expect(graph(ct, sample(ct as Gen3dClass).widgets)).toBe(20)
-    }
+  it('the runner pays the card: Hunyuan3D 2 20; Multi-View by its engine — TRELLIS 12, Hunyuan3D-2mv by its steps (20 at 20–30, 26 at 50, 51 at 100), Rodin 60; a wired engine at the dearest', () => {
+    for (const ct of ['Generate3DNode', 'Hunyuan3DRemoteNode']) expect(priceNode(ct, sample(ct as Gen3dClass).widgets)).toEqual({ usd: 0.1, credits: 20 })
     const mv = sample('Hunyuan3DMultiViewNode').widgets
-    const want: [unknown, number, number][] = [
-      ['TRELLIS (textured)', 0.04, 8], ['Rodin (textured · quad mesh)', 0.4, 60], ['Hunyuan3D-2mv (geometry only)', 0.1, 20], [['e', 0], 0.4, 60],
+    const want: [unknown, unknown, number][] = [
+      ['TRELLIS (textured)', 50, 12], ['Rodin (textured · quad mesh)', 50, 60],
+      ['Hunyuan3D-2mv (geometry only)', 20, 20], ['Hunyuan3D-2mv (geometry only)', 30, 20], ['Hunyuan3D-2mv (geometry only)', 50, 26],
+      ['Hunyuan3D-2mv (geometry only)', 100, 51], ['Hunyuan3D-2mv (geometry only)', ['s', 0], 51],
+      [['e', 0], 50, 60], [['e', 0], 100, 60],
     ]
-    for (const [engine, usd, credits] of want) {
-      expect(priceNode('Hunyuan3DMultiViewNode', { ...mv, engine }), String(engine)).toEqual({ usd, credits })
-      expect(graph('Hunyuan3DMultiViewNode', { ...mv, engine })).toBe(credits)
+    for (const [engine, steps, credits] of want) {
+      const p = priceNode('Hunyuan3DMultiViewNode', { ...mv, engine, steps }, { families: ON })
+      expect('refused' in p ? p : p.credits, `${String(engine)} ${String(steps)}`).toBe(credits)
+      // The runner's hold (nodeCredits, the server's families) is the same figure.
+      expect(stageEstimate({ n: { class_type: 'Hunyuan3DMultiViewNode', inputs: { ...mv, engine, steps } } }, ['n'], false, ON), `${String(engine)} ${String(steps)}`).toBe(credits)
     }
     expect(creditsForUsd(0.4)).toBe(60)
-    // A bare node: Python's default engine, TRELLIS.
-    expect(priceNode('Hunyuan3DMultiViewNode', {})).toEqual({ usd: 0.04, credits: 8 })
+    // A bare node: Python's default engine (TRELLIS).
+    expect(priceNode('Hunyuan3DMultiViewNode', {})).toEqual({ usd: 0.06, credits: 12 })
+  })
+
+  it('the ComfyUI path (priceGraph, the hosted meter) and the badge: an estimate never below the flat 45 before R3 (fix round 2); Rodin (verified) 60', async () => {
+    const { nodeCreditEstimate } = await import('~/lib/nodeCreditEstimate')
+    const graph = (ct: string, inputs: Record<string, unknown>) => priceGraph({ 1: { class_type: ct, inputs } }).nodes!['1']
+    for (const ct of ['Generate3DNode', 'Hunyuan3DRemoteNode']) {
+      expect(graph(ct, sample(ct as Gen3dClass).widgets), ct).toBe(45)
+      expect(nodeCreditEstimate(ct, sample(ct as Gen3dClass).widgets), ct).toBe(45 + BASE_RENDER_CREDITS)
+    }
+    const mv = sample('Hunyuan3DMultiViewNode').widgets
+    const want: [unknown, unknown, number][] = [
+      ['TRELLIS (textured)', 50, 45], ['Rodin (textured · quad mesh)', 50, 60], ['Hunyuan3D-2mv (geometry only)', 50, 45],
+      ['Hunyuan3D-2mv (geometry only)', 100, 51], [['e', 0], 50, 60],
+    ]
+    for (const [engine, steps, credits] of want) {
+      expect(graph('Hunyuan3DMultiViewNode', { ...mv, engine, steps }), `${String(engine)} ${String(steps)}`).toBe(credits)
+      expect(nodeCreditEstimate('Hunyuan3DMultiViewNode', { ...mv, engine, steps }), `${String(engine)} ${String(steps)}`).toBe(credits + BASE_RENDER_CREDITS)
+    }
+    // On the runner (the family on), the card: the badge too, when told the families.
+    expect(nodeCreditEstimate('Hunyuan3DMultiViewNode', { ...mv, engine: 'TRELLIS (textured)' }, { families: ON })).toBe(12 + BASE_RENDER_CREDITS)
+    expect(priceGraph({ 1: { class_type: 'Hunyuan3DMultiViewNode', inputs: mv } }, { families: ON }).nodes!['1']).toBe(12)
   })
 
   it('nothing is free: every class makes its call (no no-call branch in Python)', () => {
@@ -532,10 +558,31 @@ describe('refusals and moderation', () => {
     for (const w of [HUNYUAN3D_TOO_MANY_STEPS, HUNYUAN3D_OCTREE_REFUSED]) expect(w).not.toMatch(/Node|_|\bid\b/)
   })
 
-  it('Multi-View\'s prompt is moderated (whatever the engine); the others send no text', async () => {
+  it('Multi-View\'s prompt is moderated only where it is sent: Rodin, or a wired engine (fix round 2); the others send no text', async () => {
     expect(PAID_TEXT_INPUTS.Hunyuan3DMultiViewNode).toEqual(['prompt'])
     expect(PAID_TEXT_INPUTS.Generate3DNode).toBeUndefined()
-    expect(extraPromptTexts({ n: node(sample('Hunyuan3DMultiViewNode'), { prompt: 'a knight' }) })).toEqual(['a knight'])
+    const mv = sample('Hunyuan3DMultiViewNode')
+    const { extractGraphPromptTexts } = await import('~~/server/utils/graphPromptText')
+    for (const [engine, sent] of [['Rodin (textured · quad mesh)', true], [['e', 0], true], ['TRELLIS (textured)', false], ['Hunyuan3D-2mv (geometry only)', false]] as const) {
+      const p = { n: node(mv, { prompt: 'a knight', engine }) }
+      expect(extraPromptTexts(p), String(engine)).toEqual(sent ? ['a knight'] : [])
+      expect(extractGraphPromptTexts(p), String(engine)).toEqual(sent ? ['a knight'] : [])
+    }
+    // A flagged leftover prompt on TRELLIS never reaches moderation, and the run goes on.
+    {
+      const moderate = vi.fn(async (t: string) => (t.includes('forbidden') ? { ok: false as const, categories: ['violence'] } : { ok: true as const }))
+      const c = caseNamed('multi-view · TRELLIS · front · defaults')
+      const replicate = createFakeReplicate({ bodyText: () => JSON.stringify({ id: 'p', status: 'succeeded', output: { model_file: GLB_URL } }) })
+      const k = makeKit({ hosted: true, available: 5000, moderate, replicate, deps: { families: () => ON, download: async () => ({ bytes: glb(), contentType: null }) } })
+      await writePictures(k.root, c)
+      const p = withPictures(c)
+      p.n!.inputs.prompt = 'a forbidden thing'
+      const { runId } = await k.engine.startRun({ userId: k.userId, takes: [p], ...START })
+      await k.engine.settled(runId)
+      expect(moderate.mock.calls.map(x => x[0])).not.toContain('a forbidden thing')
+      expect((await k.store.get(runId))!.takes[0]!.nodes.n!.status).toBe('done')
+      expect(replicate.submitted()[0]!.payload.prompt).toBeUndefined()
+    }
     const moderate = vi.fn(async (t: string) => (t.includes('forbidden') ? { ok: false as const, categories: ['violence'] } : { ok: true as const }))
     const c = caseNamed('multi-view · Rodin · front · defaults')
     const k = makeKit({ hosted: true, moderate, deps: { families: () => ON } })

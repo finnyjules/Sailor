@@ -14,6 +14,12 @@ import { ENGINE_MAIN_PORT, engineHealth } from '../native/engineHealth'
 import { readRawBody, setResponseStatus } from 'h3'
 import { blockedPromptRefusal, nodeProblemsBody } from '../utils/blockedModels'
 import { seedanceReferenceSeconds } from '../utils/graphInputSeconds'
+import { GENERATE_3D_RUNNER_ONLY, jsonNamesGenerate3d } from '../../shared/runner/gen3d'
+
+/** Generate a 3D model found in a prompt too large to read: ComfyUI's 400 shape, no node named (R3.9 fix round 2). */
+function generate3dRefusal(): ReturnType<typeof blockedPromptRefusal> {
+  return { error: { type: 'value_not_valid', message: GENERATE_3D_RUNNER_ONLY, details: '', extra_info: {} }, node_errors: {} } as unknown as ReturnType<typeof blockedPromptRefusal>
+}
 
 // Paths under PROXY_PREFIXES that should be handled by Nitro routes, not proxied
 // — the lists live in their own module so the reachability guard can import the
@@ -136,12 +142,16 @@ export default defineEventHandler(async (event) => {
     // skipped: the browser has already checked, and ComfyUI's own "Value not
     // in list" is still the last net.
     let prompt: unknown
+    let oversized: ReturnType<typeof blockedPromptRefusal> = null
     try {
       const raw = await readRawBody(event, false)
       if (raw && raw.length <= PROMPT_CHECK_MAX_BYTES) prompt = JSON.parse(raw.toString('utf8'))?.prompt
+      // Over the cap, Generate a 3D model is still refused (R3.9 fix round 2): ComfyUI would pay for its
+      // call and then fail on the answer. Its class is looked for in the text, without parsing it.
+      else if (raw && jsonNamesGenerate3d(raw.toString('utf8'))) oversized = generate3dRefusal()
     }
     catch { prompt = undefined }
-    const blocked = blockedPromptRefusal(prompt)
+    const blocked = oversized ?? blockedPromptRefusal(prompt)
       ?? nodeProblemsBody(prompt && typeof prompt === 'object' ? await seedanceReferenceSeconds(prompt as Parameters<typeof seedanceReferenceSeconds>[0]) : [])
     if (blocked) {
       setResponseStatus(event, 400)

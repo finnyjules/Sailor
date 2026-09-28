@@ -11,6 +11,7 @@
  */
 import { creditsForUsd } from '../../shared/pricing/markup'
 import { MODEL_PRICED_NODE_CLASSES, REMOTE_VIDEO_NODE_CLASSES, SETTING_PRICED_NODE_CLASSES, SHARED_PRICED_CLASS_SET, familyPricedClass, priceNode } from '../../shared/pricing/nodePrice'
+import { estimateFloored } from '../../shared/pricing/estimateFloor'
 import { VIDEO_RATES } from '../../shared/pricing/videoRates'
 import { pipelineCallsOf } from '../../shared/pricing/pipelinePrice'
 import type { InputSeconds } from '../../shared/pricing/clipSettings'
@@ -201,13 +202,26 @@ export { VIDEO_RATES, MODEL_PRICED_NODE_CLASSES, SETTING_PRICED_NODE_CLASSES, RE
 // estimate from the page's one recorded run: $0.012 a second asked for, at
 // least $0.042 (the page's typical run): 1–3 s 9 credits, 8 s (the default)
 // 20, 30 s 54; a wired length is held at 30 s.
+// r3-estimate-floor (R3.9 fix round 2, controller ruling): an estimate
+// never lowers the ComfyUI path's charge before the live check: a class
+// ported in R3.3–R3.9 whose price reads a paid card still marked `estimate`
+// is charged there (and badged) at least its flat price before R3
+// (shared/pricing/estimateFloor.ts PRE_R3_FLAT, from 38b4a0672); the runner
+// pays the card. Today that moves only the 3D nodes back up: Generate a 3D
+// model and its twin 20 → 45; Multi-View on TRELLIS 8 → 45 (its card now
+// $0.06 with the GLB it makes: 12 on the runner), on Hunyuan3D-2mv 20 → 45
+// at its default 50 steps (its card now scales with the steps, rounded up
+// to the cent: 26 on the runner at 50, 51 at 100, which the ComfyUI path
+// charges too). Rodin
+// (verified) stays 60. Every other estimate-priced class already sat at or
+// above its old flat price.
 // r3-gen-3d (step 3, R3.9, ruling (a)): Generate a 3D model, its hidden twin
 // Hunyuan3D 2, and Multi-View → 3D leave their flat rows (45 credits, from
 // their $0.30 badges) for their calls, read from Replicate's pages: Hunyuan3D
 // 2 and Hunyuan3D-2mv by GPU time (estimates: $0.10, 20 credits), TRELLIS by
 // GPU time (an estimate: $0.04, 8 credits) and Rodin at $0.40 an output (60
 // credits). Multi-View is priced by its engine (a wired engine at Rodin's).
-export const PRICE_BOOK_VERSION = 'r3-gen-3d'
+export const PRICE_BOOK_VERSION = 'r3-estimate-floor'
 
 export const BASE_RENDER_CREDITS = 1
 
@@ -468,7 +482,9 @@ function isProviderClass(ct: string): boolean {
  */
 function graphNodeModelCredits(ct: string, inputs: unknown, inputPixels: number | undefined, inputSeconds: InputSeconds | undefined, families: ReadonlySet<RunnerFamily> | undefined): number {
   const map = inputs && typeof inputs === 'object' ? inputs as Record<string, unknown> : {}
-  const price = priceNode(ct, map, { inputPixels, inputSeconds, families })
+  // An estimate never lowers the ComfyUI path's charge below the class's flat price before R3
+  // (R3.9 fix round 2, shared/pricing/estimateFloor.ts); the runner, with the class's family on, pays the card.
+  const price = estimateFloored(ct, map, priceNode(ct, map, { inputPixels, inputSeconds, families }), families)
   if ('refused' in price) throw new UnpricedGraphError(ct, price.refused)
   return price.credits
 }

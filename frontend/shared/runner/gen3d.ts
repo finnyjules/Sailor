@@ -95,7 +95,28 @@ export const HUNYUAN3D_OCTREE_REFUSED = 'Making a 3D model from one picture take
  * `_first_output_url` can't read, so every ComfyUI run was paid for and then
  * failed. Refused before the hold, hosted and local; the runner reads `mesh`.
  */
-export const GENERATE_3D_RUNNER_ONLY = 'Generate a 3D model runs through Sailor’s runner. Turn the runner on for 3D models to use this node.'
+export const GENERATE_3D_RUNNER_ONLY = 'Generate a 3D model only works through Sailor’s runner, which this run can’t use.'
+
+/**
+ * Whether Multi-View sends its `prompt` (R3.9 fix round 2): only Rodin does
+ * (Python's other branches never read it). A wired engine could be Rodin, so
+ * its prompt counts as sent. Other classes and inputs: true (this rule
+ * doesn't judge them).
+ */
+export function gen3dTextSent(classType: string, name: string, inputs: Record<string, unknown>): boolean {
+  if (classType !== MULTI_VIEW_CLASS || name !== 'prompt') return true
+  const engine = inputs.engine
+  if (isLink(engine)) return true
+  return multiViewSlug(typeof engine === 'string' ? engine : MULTI_VIEW_DEFAULT_ENGINE) === RODIN_SLUG
+}
+
+/** The words for a Generate a 3D model inside a prompt too large to read (the local /prompt proxy, fix round 2). */
+const GENERATE_3D_CLASS_IN_JSON = /"class_type"\s*:\s*"(?:Generate3DNode|Hunyuan3DRemoteNode)"/
+
+/** Whether a prompt's JSON text names Generate a 3D model or its twin as a node's class (read without parsing). */
+export function jsonNamesGenerate3d(text: string): boolean {
+  return GENERATE_3D_CLASS_IN_JSON.test(text)
+}
 
 /** The ComfyUI path's rule for Generate a 3D model and its twin: always refused (GENERATE_3D_RUNNER_ONLY). */
 export function gen3dComfyPathProblem(classType: string): { input: string, message: string } | null {

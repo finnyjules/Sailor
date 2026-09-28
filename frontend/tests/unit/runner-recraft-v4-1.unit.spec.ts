@@ -408,7 +408,7 @@ describe('the price', () => {
     expect(IMAGE_BACKUP_RATES[ID]).toEqual({
       unit: 'per_image', usd: BACKUP_PRICE, service: 'replicate', source: 'https://replicate.com/recraft-ai/recraft-v4.1', read: '2026-09-24', confidence: 'verified',
     })
-    expect(PRICE_BOOK_VERSION).toBe('r3-gen-3d')
+    expect(PRICE_BOOK_VERSION).toBe('r3-estimate-floor')
   })
 
   it('the basis: fal\'s price, since the backup covered at cost is less ($0.02)', () => {

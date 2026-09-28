@@ -697,14 +697,17 @@ describe('Separate background and foreground on the ComfyUI path (R3.7)', () => 
 // ───────────────────────────────────────────────────────────────────────────
 describe('3D models on the ComfyUI path (R3.9)', () => {
   const at = (ct: string, inputs: Record<string, unknown>) => priceGraph({ 1: { class_type: ct, inputs } }).nodes!['1']
-  it('each class, by its engine', () => {
-    expect(at('Generate3DNode', { model: 'Hunyuan3D 2', image: ['2', 0], steps: 50, guidance_scale: 5.5, octree_resolution: 256, remove_background: true, texture: true, seed: 0 })).toBe(20)
-    expect(at('Hunyuan3DRemoteNode', { image: ['2', 0], steps: 20 })).toBe(20)
-    expect(at('Hunyuan3DMultiViewNode', { front_image: ['2', 0], engine: 'TRELLIS (textured)' })).toBe(8)
+  // Fix round 2 (estimate floor): an estimate card never lowers the ComfyUI path below the flat 45 before R3.
+  it('each class, by its engine: the estimates at the flat 45 before R3, Rodin (verified) at its card', () => {
+    expect(at('Generate3DNode', { model: 'Hunyuan3D 2', image: ['2', 0], steps: 50, guidance_scale: 5.5, octree_resolution: 256, remove_background: true, texture: true, seed: 0 })).toBe(45)
+    expect(at('Hunyuan3DRemoteNode', { image: ['2', 0], steps: 20 })).toBe(45)
+    expect(at('Hunyuan3DMultiViewNode', { front_image: ['2', 0], engine: 'TRELLIS (textured)' })).toBe(45)
     expect(at('Hunyuan3DMultiViewNode', { front_image: ['2', 0], engine: 'Rodin (textured · quad mesh)', rodin_quality: 'high' })).toBe(60)
-    expect(at('Hunyuan3DMultiViewNode', { front_image: ['2', 0], engine: 'Hunyuan3D-2mv (geometry only)' })).toBe(20)
+    expect(at('Hunyuan3DMultiViewNode', { front_image: ['2', 0], engine: 'Hunyuan3D-2mv (geometry only)' })).toBe(45)
+    expect(at('Hunyuan3DMultiViewNode', { front_image: ['2', 0], engine: 'Hunyuan3D-2mv (geometry only)', steps: 100 })).toBe(51)
+    expect(at('Hunyuan3DMultiViewNode', { front_image: ['2', 0], engine: 'Hunyuan3D-2mv (geometry only)', steps: ['9', 0] })).toBe(51)
     expect(at('Hunyuan3DMultiViewNode', { front_image: ['2', 0], engine: ['9', 0] })).toBe(60)
-    expect(at('Hunyuan3DMultiViewNode', { front_image: ['2', 0] })).toBe(8)
+    expect(at('Hunyuan3DMultiViewNode', { front_image: ['2', 0] })).toBe(45)
   })
 
   // R3.9 fix round 1: Hunyuan3D 2 answers `{mesh}`, which Python can't read, so the ComfyUI path's
@@ -716,6 +719,61 @@ describe('3D models on the ComfyUI path (R3.9)', () => {
     expect(blockedPromptRefusal({ 1: { class_type: 'Generate3DNode', inputs: { model: 'Hunyuan3D 2', image: ['2', 0] } } })?.error.message).toBe(GENERATE_3D_RUNNER_ONLY)
     expect(blockedPromptRefusal({ 1: { class_type: 'Hunyuan3DRemoteNode', inputs: { image: ['2', 0] } } })?.error.message).toBe(GENERATE_3D_RUNNER_ONLY)
     expect(blockedPromptRefusal({ 1: { class_type: 'Hunyuan3DMultiViewNode', inputs: { front_image: ['2', 0], engine: 'Rodin (textured · quad mesh)' } } })).toBeNull()
+  })
+})
+
+// ───────────────────────────────────────────────────────────────────────────
+// R3.9 fix round 2 (controller ruling): an estimate never lowers the ComfyUI
+// path's charge. Every class ported in R3.3–R3.9 is pinned here at its
+// defaults and at its estimate-card settings: priced at the greater of its
+// calls and its flat row before R3 (38b4a0672) wherever an estimate card is
+// read; only the 3D nodes sat below it (the other estimates never did).
+// ───────────────────────────────────────────────────────────────────────────
+describe('an estimate never lowers the ComfyUI path (R3.9 fix round 2)', () => {
+  const at = (ct: string, inputs: Record<string, unknown>) => priceGraph({ 1: { class_type: ct, inputs } }).nodes!['1']
+  const L = ['2', 0]
+  it('the table: every R3.3–R3.9 class priced by its calls, at its flat row before R3', async () => {
+    const { PRE_R3_FLAT } = await import('#shared/pricing/estimateFloor')
+    const { creditsForUsd: credits } = await import('#shared/pricing/markup')
+    expect(Object.keys(PRE_R3_FLAT).sort()).toEqual([...PAID_NODE_CLASSES].sort())
+    for (const [ct, row] of Object.entries(PRE_R3_FLAT)) expect(credits(row.badgeUsd), ct).toBe(row.credits)
+  })
+  it('the estimate-priced classes, each at max(estimate, old flat)', () => {
+    const want: [string, Record<string, unknown>, number][] = [
+      // Extract text (Dolphin, estimate $0.006: 2; flat 1), Find objects (YOLO-World: 1; flat 1).
+      ['ExtractTextNode', { model: 'ByteDance Dolphin', image: L }, 2],
+      ['FindObjectsNode', { model: 'YOLO-World', image: L, query: 'cat', confidence: 0.25 }, 1],
+      // Remove background and its twin (estimate: 1; flat 1).
+      ['RemoveBackgroundNode', { model: '851-labs/bg-remover', image: L }, 1],
+      ['RemoveBackgroundRemoteNode', { image: L }, 1],
+      // Layerize (estimate: 18; flat 16), Seedream layerize (estimate: 87 / 173; flat 51).
+      ['LayerizeGraphicNode', { model: 'Ideogram Layerize', image: L, prompt: '', seed: 0 }, 18],
+      ['SeedreamLayerizeNode', { image: L, prompt: '', image_size: 'auto_1K' }, 87],
+      ['SeedreamLayerizeNode', { image: L, prompt: '', image_size: 'auto' }, 173],
+      // Separate background and foreground (cut-out estimate + LaMa estimate: 2, or Bria: 9; flat 2).
+      ['SplitPhotoLayersNode', { image: L, background_fill: 'LaMa (fast)', mask_grow: 12 }, 2],
+      ['SplitPhotoLayersNode', { image: L, background_fill: 'Bria Eraser (quality)', mask_grow: 12 }, 9],
+      // Music and its twin (estimate: 9–54; flat 4).
+      ['GenerateMusicNode', { model: 'MusicGen', prompt: 'x', duration: 1 }, 9],
+      ['MusicGenRemoteNode', { prompt: 'x', duration: 30 }, 54],
+      // 3D: below the flat 45, raised to it (Rodin, verified, stays 60).
+      ['Generate3DNode', { model: 'Hunyuan3D 2', image: L }, 45],
+      ['Hunyuan3DRemoteNode', { image: L }, 45],
+      ['Hunyuan3DMultiViewNode', { front_image: L, engine: 'TRELLIS (textured)' }, 45],
+      ['Hunyuan3DMultiViewNode', { front_image: L, engine: 'Hunyuan3D-2mv (geometry only)', steps: 50 }, 45],
+      ['Hunyuan3DMultiViewNode', { front_image: L, engine: 'Rodin (textured · quad mesh)' }, 60],
+    ]
+    for (const [ct, inputs, credits] of want) expect(at(ct, inputs), `${ct} ${JSON.stringify(inputs)}`).toBe(credits)
+  })
+  it('a class whose cards are all verified is never floored (a short speech text stays 1, under its flat 45)', () => {
+    expect(at('GenerateSpeechNode', { model: 'MiniMax Speech-02 HD', text: 'x'.repeat(20) })).toBe(1)
+    expect(at('ChatLLMNode', { model: 'GPT-5 nano', prompt: 'hi', system_prompt: '', temperature: 1, max_tokens: 16 })).toBeLessThanOrEqual(1)
+    expect(at('RestorePhotoNode', { model: 'Flux Kontext · Restore', image: L, safety_tolerance: 2, output_format: 'png' })).toBe(8)
+  })
+  it('the runner (its family on) pays the card', () => {
+    const on = new Set(['cards', 'gen-3d'] as const)
+    expect(priceGraph({ 1: { class_type: 'Generate3DNode', inputs: { model: 'Hunyuan3D 2', image: L } } }, { families: on as never }).nodes!['1']).toBe(20)
+    expect(priceGraph({ 1: { class_type: 'Hunyuan3DMultiViewNode', inputs: { front_image: L, engine: 'TRELLIS (textured)' } } }, { families: on as never }).nodes!['1']).toBe(12)
   })
 })
 

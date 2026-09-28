@@ -37,6 +37,7 @@ import type { BackupSettings } from './config'
 import { checkedInputFile, handedOffPictureProblem, inputFileCaps, linkedFileCheck, measuredInputProblem, pictureChangedWords, pictureOverMarginWords, hostedRequestProblems, requestProblems, unreadableInputWords } from './requestRules'
 import { predictedHoldPixels, startPictureSizes } from './repairSizes'
 import { isReusable, requestFingerprint } from './fingerprint'
+import { gen3dTextSent } from '#shared/runner/gen3d'
 import { assertFilesOwned, collectInputFiles, parseInputFileRef, type OwnershipCheck } from './inputs'
 import { shotRefFilenames } from './shotRefs'
 import { parseJsonObject } from './generators/opts'
@@ -1192,7 +1193,11 @@ export function createEngine(deps: EngineDeps) {
         const wired = withWiredValues(take.prompt, id, valueAt(take))
         if (wired.injected.length) {
           const known = new Set(staticWiredTexts(take.prompt))
-          for (const { text } of wired.injected) if (!known.has(text)) await deps.metering.moderateText(text)
+          const node = take.prompt[id]!
+          for (const { input, text } of wired.injected) {
+            // Multi-View's prompt only where it is sent (Rodin), R3.9 fix round 2.
+            if (!known.has(text) && gen3dTextSent(node.class_type, input, node.inputs ?? {})) await deps.metering.moderateText(text)
+          }
         }
       }
 

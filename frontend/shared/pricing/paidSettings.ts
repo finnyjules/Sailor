@@ -48,7 +48,7 @@ import {
   AUDIO_GEN_CLASSES, AUDIO_GEN_ENDPOINTS, MUSIC_DEFAULT_SECONDS, MUSIC_MAX_SECONDS, MUSIC_MIN_SECONDS, SPEECH_MAX_CHARS,
   isSpeechClass, speechChars, type AudioGenClass,
 } from '../runner/audioGen'
-import { GEN_3D_CLASSES, HUNYUAN3D_SLUG, MULTI_VIEW_CLASS, multiViewSlugsOf } from '../runner/gen3d'
+import { GEN_3D_CLASSES, GEN_3D_STEPS, HUNYUAN3D_MV_SLUG, HUNYUAN3D_SLUG, MULTI_VIEW_CLASS, multiViewSlugsOf } from '../runner/gen3d'
 
 /**
  * The most bytes of one moderated text in hosted (server/utils/moderation.ts
@@ -339,14 +339,18 @@ function audioGenPlanner(classType: AudioGenClass): PaidPlanner {
 /**
  * Generate a 3D model (and its twin): one Hunyuan3D 2 call, whatever its
  * settings. Multi-View → 3D: one call on its engine's card (a wired engine
- * at the dearest; a missing one at Python's default, TRELLIS).
+ * at the dearest; a missing one at Python's default, TRELLIS); Hunyuan3D-2mv
+ * by the steps it sends (R3.9 fix round 2: a wired count at the node's most,
+ * 100; missing, its default, 50).
  */
 function gen3dPlanner(classType: string): PaidPlanner {
   if (classType !== MULTI_VIEW_CLASS) return () => ({ steps: [{ call: { endpoint: HUNYUAN3D_SLUG }, times: 1 }] })
   return (inputs) => {
-    const usd = (e: string) => paidCallUsd({ endpoint: e }) ?? Number.POSITIVE_INFINITY
-    const endpoint = multiViewSlugsOf(inputs.engine).reduce((a, b) => (usd(b) > usd(a) ? b : a))
-    return { steps: [{ call: { endpoint }, times: 1 }] }
+    const steps = isLink(inputs.steps) ? GEN_3D_STEPS.max : intIn(inputs.steps, 50, GEN_3D_STEPS.min, GEN_3D_STEPS.max)
+    const callOf = (endpoint: string): PaidCall => (endpoint === HUNYUAN3D_MV_SLUG ? { endpoint, steps } : { endpoint })
+    const usd = (c: PaidCall) => paidCallUsd(c) ?? Number.POSITIVE_INFINITY
+    const call = multiViewSlugsOf(inputs.engine).map(callOf).reduce((a, b) => (usd(b) > usd(a) ? b : a))
+    return { steps: [{ call, times: 1 }] }
   }
 }
 

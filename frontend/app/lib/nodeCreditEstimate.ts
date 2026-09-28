@@ -27,6 +27,7 @@ import {
   type NodeInputs,
   type PriceOptions,
 } from '#shared/pricing/nodePrice'
+import { estimateFloored } from '#shared/pricing/estimateFloor'
 
 /** Flat credits the graph pricer adds once for producing a deliverable. */
 export const BASE_RENDER_CREDITS = 1
@@ -70,7 +71,9 @@ export function modelPricedUsd(nodeType: string, inputs: NodeInputs | null | und
  * can't be derived — the caller keeps its static badge.
  */
 export function nodeCreditEstimate(nodeType: string, inputs: NodeInputs | null | undefined, opts: PriceOptions = {}): number | null {
-  const price = priceNode(nodeType, inputs, opts)
+  // The badge is never below the charge: an estimate-priced R3 class at its flat price before R3
+  // off the runner (R3.9 fix round 2, estimateFloor.ts), as priceGraph charges it.
+  const price = estimateFloored(nodeType, inputs, priceNode(nodeType, inputs, opts), opts.families)
   if ('refused' in price || !(price.usd > 0)) return null
   return price.credits + BASE_RENDER_CREDITS
 }

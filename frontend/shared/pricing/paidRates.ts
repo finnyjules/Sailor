@@ -15,7 +15,10 @@
  *    (speech), in proportion;
  *  - `gpu_ceiling`: a model billed by GPU time, priced at a stated ceiling
  *    (`note` says how it was reached). Its confidence is `estimate` until a
- *    live call measures it, and an estimate blocks the family's switch-on;
+ *    live call measures it, and an estimate blocks the family's switch-on.
+ *    With `perSteps` (R3.9 fix round 2, Hunyuan3D-2mv), the ceiling is the
+ *    page's figure at that many steps, scaled up in proportion for more
+ *    (`call.steps`), never down;
  *  - `gpu_per_output_second`: a model billed by GPU time whose run grows
  *    with the length it makes (R3.8, MusicGen): dollars per second asked
  *    for, at least `minUsd` a call (`note` says how both were reached).
@@ -60,7 +63,7 @@ export type PaidRate =
   | (RateMeta & { unit: 'per_input_second', perSecond: number, minSeconds?: number })
   | (RateMeta & { unit: 'per_output_second', perSecond: number })
   | (RateMeta & { unit: 'per_thousand_chars', perThousand: number })
-  | (RateMeta & { unit: 'gpu_ceiling', usd: number, note: string })
+  | (RateMeta & { unit: 'gpu_ceiling', usd: number, note: string, perSteps?: number })
   | (RateMeta & { unit: 'gpu_per_output_second', perSecond: number, minUsd: number, note: string })
   | (RateMeta & { unit: 'per_output_image', perImage: number, large?: { fromPixels: number, perImage: number } })
 
@@ -76,6 +79,8 @@ export interface PaidCall {
   inputSeconds?: number; outputSeconds?: number
   /** Characters of text sent (per_thousand_chars cards). */
   chars?: number
+  /** Inference steps sent (a `gpu_ceiling` card with `perSteps`, R3.9 fix round 2). */
+  steps?: number
   /** Pictures the call makes (per_output_image cards): the most it can make for a hold, what came back for a charge. */
   outputImages?: number
   /** Pixels of the picture sent in and of the picture that comes back (the edit cards). */
@@ -208,16 +213,21 @@ export const PAID_RATES: Record<string, PaidRate> = {
     service: 'replicate', source: 'https://replicate.com/tencent/hunyuan3d-2', read: '2026-09-27', confidence: 'estimate',
   },
   // Multi-View on Hunyuan3D-2mv, billed by GPU time (Nvidia L40S, $0.000975/s): "approximately $0.099 to
-  // run", "typically complete within 102 seconds" ($0.0995), rounded up to $0.10. An estimate (the page's
-  // default is 30 steps; the node sends 20–100).
+  // run", "typically complete within 102 seconds" ($0.0995), rounded up to $0.10, at the page's own default
+  // of 30 steps (its example run: 30 steps, octree 256). The node sends 20–100 (default 50): the ceiling is
+  // scaled with the steps as if the whole run grew with them (R3.9 fix round 2) — an upper bound, since the
+  // page's example spent only 14 s of GPU at 30 steps. An estimate.
   'tencent/hunyuan3d-2mv': {
-    unit: 'gpu_ceiling', usd: 0.10, note: 'L40S at $0.000975/s; page: approximately $0.099 to run, typically within 102 s ($0.0995) (read 2026-09-27), rounded up to $0.10',
+    unit: 'gpu_ceiling', usd: 0.10, perSteps: 30, note: 'L40S at $0.000975/s; page: approximately $0.099 to run, typically within 102 s ($0.0995), at its default 30 steps (read 2026-09-27), rounded up to $0.10; × steps/30 above 30 steps, rounded up to the cent',
     service: 'replicate', source: 'https://replicate.com/tencent/hunyuan3d-2mv', read: '2026-09-27', confidence: 'estimate',
   },
-  // Multi-View on TRELLIS, billed by GPU time (Nvidia A100 80GB, $0.0014/s): "approximately $0.037 to
-  // run", "typically complete within 27 seconds" ($0.0378), rounded up to $0.04. An estimate.
+  // Multi-View on TRELLIS, billed by GPU time (Nvidia A100 80GB, $0.0014/s). The page's "approximately
+  // $0.037 to run" is at its schema defaults, which make no GLB (`generate_model: false`); Sailor sends
+  // `generate_model: true` (R3.9 fix round 2). The page's example run makes a GLB, with heavier settings than
+  // Sailor's (texture 2048, 38 sampling steps, a Gaussian PLY and the colour video): 36.77 s, $0.0515,
+  // rounded up to $0.06. An estimate.
   'firtoz/trellis': {
-    unit: 'gpu_ceiling', usd: 0.04, note: 'A100 (80GB) at $0.0014/s; page: approximately $0.037 to run, typically within 27 s ($0.0378) (read 2026-09-27), rounded up to $0.04',
+    unit: 'gpu_ceiling', usd: 0.06, note: 'A100 (80GB) at $0.0014/s; page example with generate_model true (texture 2048, 38 steps, PLY, colour video): 36.77 s = $0.0515 (read 2026-09-27), rounded up to $0.06',
     service: 'replicate', source: 'https://replicate.com/firtoz/trellis', read: '2026-09-27', confidence: 'estimate',
   },
   // Multi-View on Rodin: the page's billing table, "$0.40 per output" (`generic_output_count`; "or 25
@@ -241,8 +251,13 @@ const count = (n: number | undefined): number | undefined => (typeof n === 'numb
 function paidCardUsd(rate: PaidRate, call: PaidCall): number | null {
   switch (rate.unit) {
     case 'per_call':
-    case 'gpu_ceiling':
       return rate.usd
+    case 'gpu_ceiling': {
+      if (rate.perSteps === undefined) return rate.usd
+      // Scaled with the steps sent, rounded up to the cent; no count, no price (the planner always gives one).
+      const s = count(call.steps)
+      return s === undefined ? null : Math.ceil(tidy(rate.usd * Math.max(1, s / rate.perSteps) * 100)) / 100
+    }
     case 'per_token': {
       const i = count(call.inputTokens)
       const o = count(call.outputTokens)
