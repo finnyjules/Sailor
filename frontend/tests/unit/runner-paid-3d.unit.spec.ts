@@ -21,7 +21,7 @@ import { PROVIDER_TYPES, SWITCHED_CLASSES, isRunnerEligible, outputKindsFor, run
 import { nodesNeedingEngine } from '#shared/runner/needsEngine'
 import { RUNNER_OUTPUT_CLASSES } from '#shared/runner/validate'
 import {
-  GEN_3D_CLASSES, HUNYUAN3D_MV_SLUG, HUNYUAN3D_OCTREE_REFUSED, HUNYUAN3D_SLUG, HUNYUAN3D_TOO_MANY_STEPS, MULTI_VIEW_ENGINES, RODIN_QUALITIES, RODIN_SLUG,
+  GENERATE_3D_RUNNER_ONLY, GEN_3D_CLASSES, HUNYUAN3D_MV_SLUG, HUNYUAN3D_OCTREE_REFUSED, HUNYUAN3D_SLUG, HUNYUAN3D_TOO_MANY_STEPS, MULTI_VIEW_ENGINES, RODIN_QUALITIES, RODIN_SLUG,
   TRELLIS_SLUG, type Gen3dClass,
 } from '#shared/runner/gen3d'
 import { PAID_RATES, otherCardFor, paidCallUsd } from '#shared/pricing/paidRates'
@@ -31,7 +31,9 @@ import { creditsForUsd } from '#shared/pricing/markup'
 import { BASE_RENDER_CREDITS, GRAPH_NODE_CREDITS, PRICE_BOOK_VERSION, priceGraph } from '~~/server/utils/priceBook'
 import { PAID_TEXT_INPUTS, extraPromptTexts, stageEstimate } from '~~/server/runner/metering'
 import { planNode, type NodePlan } from '~~/server/runner/executors'
-import { hunyuan3dInput, multiViewInput, trellisGlbUrl } from '~~/server/runner/generators/gen3d'
+import { hunyuan3dGlbUrl, hunyuan3dInput, multiViewInput, trellisGlbUrl } from '~~/server/runner/generators/gen3d'
+import { blockedPromptRefusal } from '~~/server/utils/blockedModels'
+import { meterGraphSubmit } from '~~/server/utils/meterGraphRun'
 import { RUNNER_ROUTES } from '~~/server/runner/generators/twins'
 import { requestProblems } from '~~/server/runner/requestRules'
 import { ANSWER_MAX_BYTES, ANSWER_NOT_GLB, answerTooLarge } from '~~/server/runner/answerDownload'
@@ -52,6 +54,11 @@ function pythonWire(payloadJson: string): string {
 
 /** The settings Hunyuan3D 2's schema refuses (the runner refuses them before the hold; Python sends them). */
 const refusedByRunner = (c: PaidCase) => requestProblems({ n: node(c) }, { runner: true }).length > 0
+/** Hunyuan3D 2's published answer, `{ output: { mesh } }`: Python raises; the runner reads it (R3.9 fix round 1). */
+const isMeshAnswer = (c: PaidCase) => {
+  const out = (c.answers[0] as { output?: unknown }).output
+  return !!out && typeof out === 'object' && !Array.isArray(out) && 'mesh' in out
+}
 const caseNamed = (name: string) => {
   const c = CASES.find(x => x.name === name)
   if (!c) throw new Error(`no case ${name}`)
@@ -181,9 +188,14 @@ describe('every fixture case: what Python sends and returns', () => {
     else {
       expect(hunyuan3dInput(c.widgets, url('image'))).toEqual(py.payload)
     }
-    // The 3D file: the URL Python hands on; none where Python raises.
+    // The 3D file: the URL Python hands on; none where Python raises, but Hunyuan3D 2's
+    // `{mesh}`, which the runner reads (the deliberate deviation, R3.9 fix round 1).
     const got = plan.urlsOf!(c.answers[0])
-    if (c.error) {
+    if (isMeshAnswer(c)) {
+      expect(c.error!.message).toMatch(/Replicate returned no output/)
+      expect(got).toEqual([GLB_URL])
+    }
+    else if (c.error) {
       expect(c.error.message).toMatch(/Replicate returned no output/)
       expect(got).toEqual([])
     }
@@ -234,7 +246,7 @@ describe('every fixture case through the engine (cards and gen-3d on)', () => {
     const price = priceNode(c.class_type, c.widgets)
     if ('refused' in price) throw new Error(price.refused)
     expect(run.credits).toBe(price.credits)
-    if (c.error) {
+    if (c.error && !isMeshAnswer(c)) {
       // Python's `_first_output_url` raises: the node fails plainly (not charged, rule: an answer with no file).
       expect(run.status).toBe('error')
       expect(run.error).toBe('The provider returned no 3D model')
@@ -255,8 +267,8 @@ describe('every fixture case through the engine (cards and gen-3d on)', () => {
     await expect(k.engine.startRun({ userId: k.userId, takes: [withPictures(c)], ...START })).rejects.toThrow(want)
     expect(k.ledger.hold).not.toHaveBeenCalled()
     expect(k.replicate.client.submit).not.toHaveBeenCalled()
-    // The ComfyUI path sends as Python.
-    expect(requestProblems({ n: node(c) })).toEqual([])
+    // The ComfyUI path refuses the node itself (R3.9 fix round 1).
+    expect(requestProblems({ n: node(c) }).map(p => p.message)).toEqual([GENERATE_3D_RUNNER_ONLY])
   })
 })
 
@@ -320,15 +332,25 @@ describe('prices (ruling (a))', () => {
     await k.engine.settled(runId)
     expect((await k.store.get(runId))!.takes[0]!.nodes.n!.status).toBe('done')
     expect([...k.ledger.holds.values()].map(h => [h.credits, h.actual])).toEqual([[hold, hold]])
-    // Hunyuan3D 2's `{mesh}` answer (no URL Python can read): fails plainly, the hold released.
+    // Hunyuan3D 2's `{mesh}` answer (Python can't read it; the runner reads `mesh`, R3.9 fix round 1): done, charged as normal.
     const bad = caseNamed('generate 3d · answer mesh dict')
     const r2 = createFakeReplicate({ bodyText: () => JSON.stringify({ id: 'p', status: 'succeeded', output: { mesh: GLB_URL } }) })
     const k2 = makeKit({ hosted: true, available: 5000, replicate: r2, deps: { families: () => ON, download: async () => ({ bytes: glb(), contentType: null }) } })
     await writePictures(k2.root, bad)
     const run2 = await k2.engine.startRun({ userId: k2.userId, takes: [withPictures(bad)], ...START })
     await k2.engine.settled(run2.runId)
-    expect((await k2.store.get(run2.runId))!.takes[0]!.nodes.n!.error).toBe('The provider returned no 3D model')
-    expect([...k2.ledger.holds.values()].map(h => h.state)).toEqual(['released'])
+    const rec2 = (await k2.store.get(run2.runId))!.takes[0]!.nodes.n!
+    expect(rec2.status, rec2.error ?? '').toBe('done')
+    expect((rec2.values![0] as { kind: string }).kind).toBe('glb')
+    expect([...k2.ledger.holds.values()].map(h => [h.state, h.credits, h.actual])).toEqual([['settled', 20, 20]])
+    // A `mesh` that isn't text is no file: fails plainly, the hold released.
+    const r3 = createFakeReplicate({ bodyText: () => JSON.stringify({ id: 'p', status: 'succeeded', output: { mesh: [GLB_URL] } }) })
+    const k3 = makeKit({ hosted: true, available: 5000, replicate: r3, deps: { families: () => ON, download: async () => ({ bytes: glb(), contentType: null }) } })
+    await writePictures(k3.root, bad)
+    const run3 = await k3.engine.startRun({ userId: k3.userId, takes: [withPictures(bad)], ...START })
+    await k3.engine.settled(run3.runId)
+    expect((await k3.store.get(run3.runId))!.takes[0]!.nodes.n!.error).toBe('The provider returned no 3D model')
+    expect([...k3.ledger.holds.values()].map(h => h.state)).toEqual(['released'])
   })
 })
 
@@ -438,6 +460,63 @@ describe('Multi-View\'s pictures', () => {
     await expect(k.engine.startRun({ userId: k.userId, takes: [withPictures(c)], ...START })).rejects.toThrow('isn’t one of yours')
     expect(k.ledger.hold).not.toHaveBeenCalled()
     expect(k.replicate.client.submit).not.toHaveBeenCalled()
+  })
+})
+
+describe('Hunyuan3D 2\'s `{mesh}` answer (R3.9 fix round 1, controller ruling)', () => {
+  it('the runner reads `mesh` (a deliberate deviation); a list or a string as before; anything else no file', () => {
+    expect(hunyuan3dGlbUrl({ output: { mesh: GLB_URL } })).toEqual([GLB_URL])
+    expect(hunyuan3dGlbUrl({ output: [GLB_URL, 'x'] })).toEqual([GLB_URL])
+    expect(hunyuan3dGlbUrl({ output: GLB_URL })).toEqual([GLB_URL])
+    for (const mesh of ['', null, [GLB_URL], 7]) expect(hunyuan3dGlbUrl({ output: { mesh } }), String(mesh)).toEqual([])
+    expect(hunyuan3dGlbUrl({ output: { glb: GLB_URL } })).toEqual([])
+  })
+
+  it('the ComfyUI path (the /prompt gate, hosted and local) refuses Generate a 3D model and its twin; Multi-View is unaffected', () => {
+    for (const ct of ['Generate3DNode', 'Hunyuan3DRemoteNode'] as const) {
+      const p = withPictures(sample(ct))
+      expect(requestProblems(p).map(x => x.message), ct).toEqual([GENERATE_3D_RUNNER_ONLY])
+      expect(blockedPromptRefusal(p)?.error.message, ct).toBe(GENERATE_3D_RUNNER_ONLY)
+      // The runner takes it.
+      expect(requestProblems(p, { runner: true }), ct).toEqual([])
+    }
+    // Multi-View's three engines answer a plain URL (Hunyuan3D-2mv, Rodin) or `{model_file}`, which Python reads.
+    for (const engine of MULTI_VIEW_ENGINES) {
+      const p = withPictures(sample('Hunyuan3DMultiViewNode'))
+      p.n!.inputs.engine = engine
+      expect(requestProblems(p), engine).toEqual([])
+      expect(blockedPromptRefusal(p), engine).toBeNull()
+    }
+    expect(GENERATE_3D_RUNNER_ONLY).not.toMatch(/Node|_|\bid\b|Hunyuan|gen-3d/)
+  })
+
+  it('the hosted /prompt meter refuses it before pricing or any hold; Multi-View goes through', async () => {
+    const meterDeps = () => ({
+      priceGraph: vi.fn(() => ({ credits: 5, version: 'test', breakdown: [] })),
+      spendGuard: vi.fn(async () => {}),
+      validateFileRefs: vi.fn(async () => {}),
+      moderatePrompt: vi.fn(async () => ({ ok: true as const })),
+      hold: vi.fn(async () => ({ ok: true as const, holdId: 7 })),
+      getAvailable: vi.fn(async () => 3),
+      forward: vi.fn(async () => ({ status: 200, body: { prompt_id: 'p1', number: 1, node_errors: {} } })),
+      registerRun: vi.fn(async () => {}),
+      startSettle: vi.fn(),
+      releaseHold: vi.fn(async () => {}),
+    })
+    for (const ct of ['Generate3DNode', 'Hunyuan3DRemoteNode'] as const) {
+      const d = meterDeps()
+      const r = await meterGraphSubmit('u1', { prompt: withPictures(sample(ct)) }, d as any)
+      expect(r.status, ct).toBe(400)
+      expect((r.body as any).error.message).toBe(GENERATE_3D_RUNNER_ONLY)
+      expect(Object.values((r.body as any).node_errors).map((e: any) => e.class_type)).toEqual([ct])
+      expect(d.priceGraph).not.toHaveBeenCalled()
+      expect(d.hold).not.toHaveBeenCalled()
+      expect(d.forward).not.toHaveBeenCalled()
+    }
+    const d = meterDeps()
+    const ok = await meterGraphSubmit('u1', { prompt: withPictures(sample('Hunyuan3DMultiViewNode')) }, d as any)
+    expect(ok.status).toBe(200)
+    expect(d.forward).toHaveBeenCalled()
   })
 })
 

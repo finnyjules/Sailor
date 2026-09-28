@@ -170,11 +170,21 @@ export function trellisGlbUrl(result: unknown): string[] {
 }
 
 /**
- * Hunyuan3D 2's GLB: `_first_output_url`, as Python reads it. (The model's
- * published output is `{ mesh }`, a dict `_first_output_url` refuses: see
- * the R3.9 report; the node then fails plainly, not charged.)
+ * Hunyuan3D 2's GLB. DELIBERATE DEVIATION FROM PYTHON (R3.9 fix round 1,
+ * controller ruling): the model's published output is `{ mesh: url }`, a dict
+ * Python's `_first_output_url` refuses (the ComfyUI path's call is paid for,
+ * then fails; that path now refuses the node before the hold). The runner
+ * reads `output.mesh` when it is text, else `_first_output_url` as Python
+ * (a list's first item, or a plain string). A `mesh` that isn't text is no file.
  */
-export const hunyuan3dGlbUrl = firstOutputUrl
+export function hunyuan3dGlbUrl(result: unknown): string[] {
+  const out = result && typeof result === 'object' ? (result as Record<string, unknown>).output : undefined
+  if (out && typeof out === 'object' && !Array.isArray(out) && Object.prototype.hasOwnProperty.call(out, 'mesh')) {
+    const mesh = (out as Record<string, unknown>).mesh
+    return typeof mesh === 'string' && mesh ? [mesh] : []
+  }
+  return firstOutputUrl(result)
+}
 
 // ── The plan ──
 

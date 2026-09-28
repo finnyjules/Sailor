@@ -89,6 +89,19 @@ export const HUNYUAN3D_OCTREES = [256, 384, 512] as const
 export const HUNYUAN3D_TOO_MANY_STEPS = `Making a 3D model from one picture takes at most ${HUNYUAN3D_MAX_STEPS} steps. Lower the steps.`
 export const HUNYUAN3D_OCTREE_REFUSED = 'Making a 3D model from one picture takes a mesh resolution of 256, 384 or 512.'
 
+/**
+ * Generate a 3D model and its twin on the ComfyUI path (R3.9 fix round 1,
+ * controller ruling): Hunyuan3D 2 now answers `{ mesh: url }`, which Python's
+ * `_first_output_url` can't read, so every ComfyUI run was paid for and then
+ * failed. Refused before the hold, hosted and local; the runner reads `mesh`.
+ */
+export const GENERATE_3D_RUNNER_ONLY = 'Generate a 3D model runs through Sailor’s runner. Turn the runner on for 3D models to use this node.'
+
+/** The ComfyUI path's rule for Generate a 3D model and its twin: always refused (GENERATE_3D_RUNNER_ONLY). */
+export function gen3dComfyPathProblem(classType: string): { input: string, message: string } | null {
+  return (HUNYUAN3D_CLASSES as readonly string[]).includes(classType) ? { input: 'image', message: GENERATE_3D_RUNNER_ONLY } : null
+}
+
 /** int() of a typed INT widget, or null when it isn't a plain number (the rule row leaves that to the engine). */
 function intOf(v: unknown): number | null {
   if (typeof v === 'number' && Number.isFinite(v)) return Math.trunc(v)

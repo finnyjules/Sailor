@@ -706,6 +706,17 @@ describe('3D models on the ComfyUI path (R3.9)', () => {
     expect(at('Hunyuan3DMultiViewNode', { front_image: ['2', 0], engine: ['9', 0] })).toBe(60)
     expect(at('Hunyuan3DMultiViewNode', { front_image: ['2', 0] })).toBe(8)
   })
+
+  // R3.9 fix round 1: Hunyuan3D 2 answers `{mesh}`, which Python can't read, so the ComfyUI path's
+  // /prompt gate refuses Generate a 3D model and its twin before the hold (the price above is the
+  // runner's, and the badge's). Multi-View is priced and forwarded as before.
+  it('Generate a 3D model and its twin are refused on the ComfyUI path before pricing; Multi-View is not', async () => {
+    const { blockedPromptRefusal } = await import('../../server/utils/blockedModels')
+    const { GENERATE_3D_RUNNER_ONLY } = await import('#shared/runner/gen3d')
+    expect(blockedPromptRefusal({ 1: { class_type: 'Generate3DNode', inputs: { model: 'Hunyuan3D 2', image: ['2', 0] } } })?.error.message).toBe(GENERATE_3D_RUNNER_ONLY)
+    expect(blockedPromptRefusal({ 1: { class_type: 'Hunyuan3DRemoteNode', inputs: { image: ['2', 0] } } })?.error.message).toBe(GENERATE_3D_RUNNER_ONLY)
+    expect(blockedPromptRefusal({ 1: { class_type: 'Hunyuan3DMultiViewNode', inputs: { front_image: ['2', 0], engine: 'Rodin (textured · quad mesh)' } } })).toBeNull()
+  })
 })
 
 // R3.8 fix round 2: a node no output node reads is never run by ComfyUI (nor the runner), so the

@@ -274,6 +274,29 @@ describe('meterGraphSubmit', () => {
     expect(d.validateFileRefs).not.toHaveBeenCalled()
   })
 
+  // R3.9 fix round 1: Generate a 3D model (and its twin) runs only in the runner: Hunyuan3D 2 answers
+  // `{mesh}`, which the ComfyUI path's Python can't read, so it is refused before pricing and any hold.
+  it('refuses Generate a 3D model and its twin (400) before pricing, the hold or forwarding; Multi-View goes through', async () => {
+    const { GENERATE_3D_RUNNER_ONLY } = await import('#shared/runner/gen3d')
+    for (const node of [
+      { class_type: 'Generate3DNode', inputs: { model: 'Hunyuan3D 2', image: ['2', 0], steps: 50, guidance_scale: 5.5, octree_resolution: 256, remove_background: true, texture: true, seed: 0 } },
+      { class_type: 'Hunyuan3DRemoteNode', inputs: { image: ['2', 0], steps: 50, guidance_scale: 5.5, octree_resolution: 256, remove_background: true, texture: true, seed: 0 } },
+    ]) {
+      const d = deps()
+      const res = await meterGraphSubmit('u1', { prompt: { 1: node, 2: { class_type: 'LoadImage', inputs: { image: 'a.png' } } }, client_id: 'c1' }, d)
+      expect(res.status, node.class_type).toBe(400)
+      expect((res.body as any).error.message).toBe(GENERATE_3D_RUNNER_ONLY)
+      expect(d.priceGraph).not.toHaveBeenCalled()
+      expect(d.hold).not.toHaveBeenCalled()
+      expect(d.forward).not.toHaveBeenCalled()
+    }
+    const d = deps()
+    const mv = { class_type: 'Hunyuan3DMultiViewNode', inputs: { front_image: ['2', 0], engine: 'TRELLIS (textured)' } }
+    const ok = await meterGraphSubmit('u1', { prompt: { 1: mv, 2: { class_type: 'LoadImage', inputs: { image: 'a.png' } } }, client_id: 'c1' }, d)
+    expect(ok.status).toBe(200)
+    expect(d.forward).toHaveBeenCalled()
+  })
+
   it('holds before forwarding and returns ComfyUI body verbatim', async () => {
     const d = deps()
     const res = await meterGraphSubmit('u1', BODY, d)
