@@ -72,3 +72,9 @@ const glass = useNodeGlass(() => props.id)
   </div>
 </template>
 
+
+<style scoped>
+/* Its own visible border marks the subgraph boundary; the resting gradient ring
+   (.node-shell::after, node-surfaces.css) steps aside. */
+.subgraph-io::after { display: none; }
+</style>

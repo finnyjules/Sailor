@@ -2501,6 +2501,12 @@ watch(previewImages, (urls) => {
    the running and bypassed rules so their borders still win. */
 .comfy-node--subgraph { border-color: rgba(255, 255, 255, 0.3); }
 
+/* These states draw their own edge, exactly as before; the resting gradient ring
+   (node-surfaces.css, .node-shell::after) steps aside for them. */
+.comfy-node--subgraph::after,
+.comfy-node[data-running]::after,
+.comfy-node--bypassed::after { display: none; }
+
 /* Sweeping glow border when running */
 .comfy-node[data-running] {
   --border-left: var(--border-color-left, #fff);

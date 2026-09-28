@@ -4,7 +4,8 @@
  * Spec: docs/superpowers/specs/2026-09-27-node-design-design.md
  *
  * Rules that cost a real bug to learn (see the spec):
- * - one even border, nothing else on the edge: no inner highlight, no gradient fill;
+ * - one edge, nothing else on it: no inner highlight, no gradient FILL (the edge itself
+ *   fades slightly from top to bottom — Julien, 09-27 — drawn as one ring, see below);
  * - border thickness divided by the canvas zoom, published only at rest;
  * - real blur is optional and only switched on under .canvas-glass--blur;
  * - never force a GPU layer here (it crashed the tab on 09-04).
@@ -13,7 +14,10 @@
 :root {
   --node-glass-tint: rgba(26, 26, 28, 0.58);
   --node-edge: rgba(255, 255, 255, 0.10);
-  --node-shadow: 0 10px 30px rgba(0, 0, 0, 0.4);
+  /* The edge fades slightly from top to bottom; its average is --node-edge. */
+  --node-edge-top: rgba(255, 255, 255, 0.15);
+  --node-edge-bottom: rgba(255, 255, 255, 0.06);
+  --node-shadow: 0 2px 8px rgba(0, 0, 0, 0.35), 0 18px 48px rgba(0, 0, 0, 0.55);
   --node-radius: 16px;
   --node-inset: 10px;
   --node-control-radius: 6px;
@@ -23,11 +27,30 @@
 .node-shell {
   position: relative;
   border-radius: var(--node-radius);
-  border: calc(1px / var(--canvas-zoom, 1)) solid var(--node-edge);
+  /* The border stays (states — running, bypassed, failed — still colour it), but is
+     transparent at rest: the resting edge is the ::after ring below. */
+  border: calc(1px / var(--canvas-zoom, 1)) solid transparent;
   background: var(--node-glass-tint);
   box-shadow: var(--node-shadow);
   color: rgba(255, 255, 255, 0.92);
   font-weight: 500;
+}
+/* The resting edge: one ring, one screen pixel at any zoom, fading slightly from top to
+   bottom. A border can't take a gradient and keep its corners, so it is a masked ring.
+   It sits just inside the (transparent) border, not over it, because the card is
+   overflow:hidden while it expands and that would clip a ring drawn over the border.
+   A node state that draws its own border hides this ring in its own stylesheet. */
+.node-shell::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: calc(var(--node-radius) - 1px / var(--canvas-zoom, 1));
+  padding: calc(1px / var(--canvas-zoom, 1));
+  background: linear-gradient(to bottom, var(--node-edge-top), var(--node-edge-bottom));
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0);
+  pointer-events: none;
 }
 /* The only place real blur exists. Same tint as without blur, so over empty canvas
    (a flat colour, which blurs to itself) switching it on or off changes nothing. */

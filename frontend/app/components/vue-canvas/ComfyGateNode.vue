@@ -258,6 +258,9 @@ async function resumeGate(action: 'continue' | 'redo' | 'restart') {
   border-color: transparent;
 }
 
+/* Running draws its own edge; the resting gradient ring (.node-shell::after) steps aside. */
+.gate-node[data-running]::after { display: none; }
+
 .gate-node[data-running]::before {
   content: '';
   position: absolute;

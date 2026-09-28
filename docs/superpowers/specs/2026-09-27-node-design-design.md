@@ -37,8 +37,8 @@ Julien likes these; the build must not change them:
 
 **One surface, one edge.**
 - One fill per node. No boxes inside boxes: zones are separated by space or a hairline, never by a different grey.
-- One even 1px border all the way round, and nothing else along the edge: no inner highlight line, no gradient fill
-  inside a shell. (Both were tried. A top highlight doubles the top edge; a fill that is lighter at the top makes the
+- One 1px edge all the way round, fading slightly from top (white 15%) to bottom (white 6%) — Julien, 09-27 —
+  drawn as a single ring, and nothing else along the edge: no inner highlight line, no gradient fill inside a shell. (Both were tried. A top highlight doubles the top edge; a fill that is lighter at the top makes the
   same border read as a dark seam there and a light line on the sides.)
 - Borders stay one *screen* pixel at every zoom (thickness divided by the canvas zoom), and stay low-contrast, so the
   unavoidable half-pixel rounding at odd zoom levels is hard to see.
@@ -62,8 +62,8 @@ Medium. Text that is the user's own content (a Text card's words) keeps its own 
 
 ## Instrument
 
-- **Dark glass shell:** 16px corners, border white 10%, fill `rgba(26,26,28,.58)` with a background blur (18px, saturation 1.4),
-  soft drop shadow.
+- **Dark glass shell:** 16px corners, edge white 15% → 6% top to bottom, fill `rgba(26,26,28,.58)` with a background blur (18px, saturation 1.4),
+  a deeper two-part drop shadow (`0 2px 8px /35%`, `0 18px 48px /55%`, raised 09-27).
 - **Blur on every glass shell, always.** Real blur is added by one class on the canvas root, on every node, at all
   times — while the canvas pans, zooms or a node drags — with one exception: below 0.5 zoom the glass is too small to
   read, so it turns off, decided at rest like everything else here. There is no crowding limit and no "something

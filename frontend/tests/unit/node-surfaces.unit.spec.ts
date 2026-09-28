@@ -33,6 +33,15 @@ describe('node-surfaces.css guards', () => {
   it('shell has no inner highlight line (it doubles the top edge)', () => {
     expect(rule('.node-shell')).not.toMatch(/inset\s+0\s+1px/)
   })
+  it('the edge is one ring that fades slightly from top to bottom, one screen pixel at any zoom', () => {
+    expect(rule('.node-shell')).toMatch(/border: calc\(1px \/ var\(--canvas-zoom, 1\)\) solid transparent/)
+    const ring = rule('.node-shell::after')
+    expect(ring).toMatch(/linear-gradient\(to bottom, var\(--node-edge-top\), var\(--node-edge-bottom\)\)/)
+    expect(ring).toMatch(/padding: calc\(1px \/ var\(--canvas-zoom, 1\)\)/)
+    // Inside the border, so the card's overflow:hidden during expand never clips it.
+    expect(ring).toMatch(/inset: 0;/)
+    expect(ring).toMatch(/pointer-events: none/)
+  })
   it('borders stay one screen pixel at every zoom', () => {
     expect(rule('.node-shell')).toMatch(/calc\(1px \/ var\(--canvas-zoom, 1\)\)/)
   })

@@ -108,7 +108,8 @@ function onKeydown(e: KeyboardEvent) {
      node-shell itself (ComfyNode.vue's <NodeCapsule> element) so real blur
      (data-glass-blur) applies collapsed too; this rule only needs the tokens
      the shell would otherwise set, since scoped styles here win on specificity. */
-  border: calc(1px / var(--canvas-zoom, 1)) solid var(--node-edge);
+  /* Transparent at rest: the edge is the shell's ::after ring (node-surfaces.css). */
+  border: calc(1px / var(--canvas-zoom, 1)) solid transparent;
   /* 16, to sit 10px of padding outside the 6px tile/action inside it. 6px is the
      app-wide radius for every input and button, and this shell was set to suit it.
      (History: 13 = 7 + 6, then 16/8, then 12/4 which read too sharp, then 14/6, now
@@ -129,7 +130,9 @@ function onKeydown(e: KeyboardEvent) {
    than switching to an opaque grey, so hover never breaks the translucency. */
 .node-capsule:hover {
   background: color-mix(in srgb, #ffffff 4%, var(--node-glass-tint));
-  border-color: rgba(255, 255, 255, 0.22);
+  /* Brighten the ring, not the border (a border colour here would draw a second line). */
+  --node-edge-top: rgba(255, 255, 255, 0.28);
+  --node-edge-bottom: rgba(255, 255, 255, 0.14);
   box-shadow: 0 6px 18px rgba(0, 0, 0, 0.5);
 }
 .node-capsule:focus-visible {
@@ -325,6 +328,9 @@ function onKeydown(e: KeyboardEvent) {
   z-index: -1;
 }
 
+/* Running and failed draw their own edge, as before; the resting ring steps aside. */
+.node-capsule--running::after,
+.node-capsule--failed::after { display: none; }
 .node-capsule--failed {
   border-color: color-mix(in oklab, var(--palette-coral) 45%, transparent);
 }

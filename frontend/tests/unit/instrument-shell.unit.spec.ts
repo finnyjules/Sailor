@@ -76,7 +76,8 @@ describe('the collapsed capsule wears the same glass as the card', () => {
   it('the root rule uses the shared glass tokens and a zoom-divided border', () => {
     const rootRule = capsuleStyle.slice(capsuleStyle.indexOf('.node-capsule {'), capsuleStyle.indexOf('.node-capsule {') + 2000)
     expect(rootRule).toMatch(/background:\s*var\(--node-glass-tint\)/)
-    expect(rootRule).toMatch(/border:\s*calc\(1px \/ var\(--canvas-zoom,\s*1\)\)\s*solid\s*var\(--node-edge\)/)
+    // Transparent at rest: the visible edge is the shared .node-shell::after gradient ring.
+    expect(rootRule).toMatch(/border:\s*calc\(1px \/ var\(--canvas-zoom,\s*1\)\)\s*solid\s*transparent/)
     expect(rootRule).toMatch(/box-shadow:\s*var\(--node-shadow\)/)
   })
 
@@ -99,5 +100,20 @@ describe('ShaderEffectNode keeps its red edge when it fails', () => {
   it('marks the failed state and colours the edge in scoped CSS', () => {
     expect(s).toMatch(/:data-error="data\.error \|\| undefined"/)
     expect(s).toMatch(/\.shader-effect-node\[data-error\] \{ border-color: #ef4444; \}/)
+  })
+})
+
+describe('states that draw their own edge hide the resting gradient ring', () => {
+  it.each([
+    ['ComfyNode.vue', /\.comfy-node\[data-running\]::after/],
+    ['ComfyNode.vue', /\.comfy-node--bypassed::after/],
+    ['ComfyNode.vue', /\.comfy-node--subgraph::after/],
+    ['ComfyGateNode.vue', /\.gate-node\[data-running\]::after \{ display: none; \}/],
+    ['ShaderEffectNode.vue', /\.shader-effect-node\[data-error\]::after \{ display: none; \}/],
+    ['SubgraphIONode.vue', /\.subgraph-io::after \{ display: none; \}/],
+    ['NodeCapsule.vue', /\.node-capsule--running::after/],
+    ['NodeCapsule.vue', /\.node-capsule--failed::after \{ display: none; \}/],
+  ])('%s: %s', (file, re) => {
+    expect(src(file)).toMatch(re)
   })
 })
