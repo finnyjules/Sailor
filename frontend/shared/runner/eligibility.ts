@@ -34,6 +34,7 @@ import {
 import {
   FACE_ASPECT_RATIOS, FACE_MODELS, IMAGE_EXTRAS_CLASSES, SKETCH_MODELS, TEXT_EFFECT_ASPECT_RATIOS, TEXT_EFFECT_IDS,
 } from './imageExtras'
+import { LENS_FOCAL, LENS_NAMES, LENS_STRENGTH, NANO_EXTRAS_CLASSES, POSE_SOURCES } from './nanoExtras'
 import { FLUX_LORA_ASPECT_RATIOS, FLUX_LORA_MEGAPIXELS, FLUX_LORA_STEPS, LORA_CLASSES, MULTI_LORA_SLOTS, RESTYLE_LORA_CLASS, RESTYLE_LORA_FORMATS, RESTYLE_LORA_RESOLUTIONS } from './lora'
 import {
   BRAINSTORM_ANGLES, CHAT_LLM_MODELS, IMPROVE_PROMPT_MODELS, IMPROVE_PROMPT_TARGETS, REASON_MODELS, REWRITE_MODELS, REWRITE_TONES,
@@ -359,6 +360,8 @@ export const PAID_PICTURE_FAMILY: Readonly<Record<string, RunnerFamily>> = {
   ...Object.fromEntries(LORA_CLASSES.map(c => [c, 'lora' as const])),
   // R3.14: Restyle an Image · Style LoRA's picture.
   [RESTYLE_LORA_CLASS]: 'lora',
+  // R3.15: Lens · 3D Reframe's and Pose Mannequin's picture.
+  ...Object.fromEntries(NANO_EXTRAS_CLASSES.map(c => [c, 'nano-extras' as const])),
 }
 
 /**
@@ -1232,6 +1235,38 @@ export const RUNNER_NODE_RULES: Readonly<Record<string, RunnerNodeRule>> = {
       output_format: { type: 'COMBO', required: true, options: RESTYLE_LORA_FORMATS },
     },
   },
+  // ── nano-extras (step 3, R3.15): Lens · 3D Reframe and Pose Mannequin,
+  // Nano Banana 2 on Replicate. Lens reframe is taken only with its picture
+  // linked (Python's blank 16×16 stays with the engine), Pose Mannequin only
+  // with its character linked (a required input). The pose picture is an
+  // optional linked picture; the extra direction and the pose prompt take a
+  // text wire (R0: the value arrives as typed); the pose source and the
+  // editor's baked file names are widgets as ComfyUI validates them (a wired
+  // one leaves the node to the engine).
+  LensReframe: {
+    family: 'nano-extras',
+    mustLink: ['image'],
+    imageInputs: ['image'],
+    widgets: {
+      source_lens: { type: 'COMBO', required: true, options: LENS_NAMES },
+      target_lens: { type: 'COMBO', required: true, options: LENS_NAMES },
+      reframe_strength: { type: 'FLOAT', required: true, min: LENS_STRENGTH.min, max: LENS_STRENGTH.max },
+      custom_focal: { type: 'FLOAT', required: true, min: LENS_FOCAL.min, max: LENS_FOCAL.max },
+    },
+  },
+  PoseMannequin: {
+    family: 'nano-extras',
+    mustLink: ['character'],
+    imageInputs: ['character', 'pose_image'],
+    valueInputs: { prompt: ['text'], pose_prompt: ['text'] },
+    widgets: {
+      pose_state: { type: 'STRING' },
+      mannequin_image: { type: 'STRING' },
+      pose_cond_image: { type: 'STRING' },
+      result_image: { type: 'STRING' },
+      pose_source: { type: 'COMBO', options: POSE_SOURCES },
+    },
+  },
   // ── effects-* (step 3, R2): the still-picture effects (./effects.ts, server/runner/effects/) ──
   // Rows built from the real node schemas (./effectSchemas.generated.ts), one
   // per ported class; each needs its family and `cards`.
@@ -1300,6 +1335,8 @@ export const SWITCHED_CLASSES: Readonly<Record<string, RunnerFamily>> = {
   ...Object.fromEntries(LORA_CLASSES.map(c => [c, 'lora' as const])),
   // R3.14: Restyle an Image · Style LoRA.
   [RESTYLE_LORA_CLASS]: 'lora',
+  // R3.15: Lens · 3D Reframe and Pose Mannequin.
+  ...Object.fromEntries(NANO_EXTRAS_CLASSES.map(c => [c, 'nano-extras' as const])),
 }
 
 /**

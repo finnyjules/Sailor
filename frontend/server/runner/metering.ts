@@ -94,7 +94,9 @@ export async function measuredInputPixels(
  * copy of UnpricedGraphError: a class the price book misses by name prices at
  * 0 (priceGraph only refuses the names it knows are providers), and such a
  * node must be refused in hosted, never run free. An unpriced MODEL throws
- * UnpricedGraphError from nodeCredits, as before.
+ * UnpricedGraphError from nodeCredits, as before. A node whose inputs as sent
+ * make no call (paidNoCall, R3 rule 8: Pose Mannequin's saved pose) is priced
+ * at 0 by design and is not refused (R3.15).
  */
 export function unpricedProviderNode(
   prompt: ApiPrompt,
@@ -102,7 +104,7 @@ export function unpricedProviderNode(
   price: (node: ApiNode) => number = nodeCredits,
 ): string | null {
   for (const [id, n] of Object.entries(prompt)) {
-    if (providers.has(n.class_type) && !(price(n) > 0)) return id
+    if (providers.has(n.class_type) && !paidNoCall(n.class_type, n.inputs ?? {}) && !(price(n) > 0)) return id
   }
   return null
 }
@@ -172,6 +174,9 @@ export const PAID_TEXT_INPUTS: Readonly<Record<string, readonly string[]>> = {
   // Sailor's restyle instruction) and the LoRA link. The caption Moondream answers is sent on in the Flux
   // prompt: the node moderates it at its turn (PipelineIO.moderateText).
   RestyleWithLoRANode: ['describe_prompt', 'extra_style_direction', 'lora_url'],
+  // R3.15, Pose Mannequin: the extra direction and the pose prompt, inside Sailor's pose instruction
+  // (Lens · 3D Reframe sends only Sailor's own text).
+  PoseMannequin: ['prompt', 'pose_prompt'],
 }
 
 /** The non-blank values of RUNNER_EXTRA_TEXT_INPUTS (a typed-in taste, a paid class's PAID_TEXT_INPUTS) across the prompt, each on its own. */

@@ -56,6 +56,8 @@ describe('parseFamilies', () => {
       'image-extras',
       // Step 3, R3.13: Flux Dev + LoRA and Flux Dev + LoRAs (needs `cards`).
       'lora',
+      // Step 3, R3.15: Lens · 3D Reframe and Pose Mannequin (needs `cards`).
+      'nano-extras',
     ].sort())
   })
 })

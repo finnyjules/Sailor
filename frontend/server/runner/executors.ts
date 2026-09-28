@@ -132,6 +132,7 @@ import { planGen3d } from './generators/gen3d'
 import { planImageExtras } from './generators/imageExtras'
 import { planLora } from './generators/lora'
 import { planRestyleLora } from './generators/restyleLora'
+import { planNanoExtras } from './generators/nanoExtras'
 import type { KeptExt } from './keptBytes'
 import type { AnswerKind } from './answerDownload'
 import { filesOf } from './values'
@@ -329,6 +330,13 @@ export interface PlanContext {
    * Absent: `toUrl`.
    */
   imageToUrl?(file: OutputFile, link: ApiLink): Promise<string>
+  /**
+   * Bytes the node made from one of its files (R3.15: Pose Mannequin's
+   * mannequin render as `_load_input_image`'s RGB PNG) → a link the provider
+   * can fetch, uploaded under `file`'s name (handoff.ts toUrlBytes: keyed by
+   * the bytes). Absent: such a node fails plainly.
+   */
+  bytesToUrl?(file: OutputFile, bytes: Uint8Array): Promise<string>
   /** For a Gate: this take was let through it. */
   gateOpen: boolean
   /** The bytes of one of our files (a local render reads its pictures). Absent: local renders fail plainly. */
@@ -1170,6 +1178,10 @@ async function planNodeRequest(ctx: PlanContext): Promise<NodePlan> {
     // ── lora (step 3, R3.14): Restyle an Image · Style LoRA, a pipeline of up to nine calls (Replicate and fal) ──
     case 'RestyleWithLoRANode':
       return planRestyleLora(ctx)
+    // ── nano-extras (step 3, R3.15): Lens · 3D Reframe and Pose Mannequin, Nano Banana 2 on Replicate (or no call) ──
+    case 'LensReframe':
+    case 'PoseMannequin':
+      return planNanoExtras(ctx)
     case 'Text': return staticDerive(ctx, textCardUi)
     case 'Moodboard': return staticDerive(ctx)
     case 'Model3D': return staticDerive(ctx, textCardUi)

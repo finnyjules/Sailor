@@ -122,7 +122,9 @@ describe('graph price book coverage', () => {
     expect(priceGraph({ 1: { class_type: 'PersonSwap', inputs: {} } }).credits).toBe(14)
     expect(priceGraph({ 1: { class_type: 'PersonSwap', inputs: {} }, 2: { class_type: 'SaveImage', inputs: {} } }).credits).toBe(14 + base)
     expect(priceGraph({ 1: { class_type: 'LensReframe', inputs: {} } }).credits).toBe(14)
-    expect(priceGraph({ 1: { class_type: 'PoseMannequin', inputs: {} } }).credits).toBe(10)
+    // PoseMannequin (R3.15, ruling (p)): the same call, 14; nothing when it makes none (here: no character wired).
+    expect(priceGraph({ 1: { class_type: 'PoseMannequin', inputs: { character: ['0', 0], pose_source: 'image', pose_image: ['0', 0] } } }).credits).toBe(14)
+    expect(priceGraph({ 1: { class_type: 'PoseMannequin', inputs: {} } }).credits).toBe(0)
     expect(priceGraph({ 1: { class_type: 'IdeogramV3TurboRemoteNode', inputs: {} } }).credits).toBe(6)
   })
 

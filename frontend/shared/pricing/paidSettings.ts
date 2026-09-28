@@ -20,7 +20,9 @@
  * `paidNoCall` says, from the inputs as sent, when Python returns before
  * calling anyone (rule 8): the stage hold skips such a node
  * (server/runner/metering.ts stageEstimate), as it skips a nano action that
- * hands its picture on.
+ * hands its picture on, and priceGraph charges it nothing on both paths
+ * (R3.15). It covers a class priced elsewhere too (Pose Mannequin, by the
+ * nano actions' call in editSettings.ts).
  *
  * Pure; relative imports only (Nitro, the app and vitest all load it).
  */
@@ -52,6 +54,7 @@ import { GEN_3D_CLASSES, GEN_3D_STEPS, HUNYUAN3D_MV_SLUG, HUNYUAN3D_SLUG, MULTI_
 import { FACE_SLUG, SKETCH_SLUG, textEffectSlug } from '../runner/imageExtras'
 import { FLUX_DEV_LORA_SLUG, FLUX_LORA_STEPS, FLUX_MULTI_LORA_SLUG, RESTYLE_LORA_CLASS, multiLoraCount } from '../runner/lora'
 import { editSteps } from './editSettings'
+import { POSE_MANNEQUIN_CLASS, poseNoCall } from '../runner/nanoExtras'
 import type { EditCall } from './editRates'
 
 /**
@@ -455,6 +458,8 @@ const PAID_PLANNERS: Readonly<Record<string, PaidPlanner>> = {
 /** Each paid class's no-call rule (rule 8), where Python has one. Filled by each R3 task. */
 const PAID_NO_CALL: Readonly<Record<string, (inputs: NodeInputs) => boolean>> = {
   ...Object.fromEntries(LLM_CLASSES.flatMap(c => { const r = llmNoCall(c); return r ? [[c, r]] : [] })),
+  // R3.15: Pose Mannequin with a saved pose, or nothing to pose with (priced by its call, editSettings.ts, otherwise).
+  [POSE_MANNEQUIN_CLASS]: poseNoCall,
 }
 
 /** The classes priced by their calls (paidCalls). */

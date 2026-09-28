@@ -366,6 +366,10 @@ export const RUNNER_ROUTES: Readonly<Record<string, Route>> = {
   // R3.14, Restyle an Image · Style LoRA (family lora): its first call, the caption, on Replicate as Python; its Nano
   // Banana passes on fal (as Python's first choice), no backup.
   'RestyleWithLoRANode': r('replicate', null, 'Moondream isn\'t carded on fal; Replicate\'s Nano Banana 2 takes no seed, and this node\'s seeds make its passes repeatable'),
+  // R3.15, Lens · 3D Reframe and Pose Mannequin (family nano-extras): the nano actions' call, Replicate
+  // first as Python, fal's Nano Banana 2 edit the backup at cost (their price covers it).
+  'LensReframe': r('replicate', 'fal'),
+  'PoseMannequin': r('replicate', 'fal'),
 }
 
 // ── Generate video: the two models moved to fal first ──────────────────────

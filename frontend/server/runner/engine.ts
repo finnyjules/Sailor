@@ -49,6 +49,7 @@ import { handoffRefusal } from './pictures/handoffView'
 import { effectOutRefusal } from './effects/plan'
 import { PICTURE_ANIMATED, pictureHasFrames, pictureMeta, pictureRefusal } from './pictures/pythonView'
 import { extraPromptText, hasOutputNode, measuredInput, nodeCredits, stageEstimate, unpricedProviderNode, type Metering } from './metering'
+import { poseStartProblem } from './generators/nanoExtras'
 import { ev, type RunEvents, type SwitchReason } from './events'
 import { mediaNodeKind, nodeMediaChangedWords, nodeMediaCheck, nodeMediaFiles } from './nodeMedia'
 import { switchedSinceHold } from './switches'
@@ -1208,13 +1209,14 @@ export function createEngine(deps: EngineDeps) {
       // priced at its most expensive, as the badge shows it). Worked out
       // inside planWith, so a value missing while resuming takes the
       // cancel-the-sent-job-first path below.
-      const planWith = async (toUrl: (f: OutputFile) => Promise<string>, imageToUrl?: (f: OutputFile, link: ApiLink) => Promise<string>) => planNode({
+      const planWith = async (toUrl: (f: OutputFile) => Promise<string>, imageToUrl?: (f: OutputFile, link: ApiLink) => Promise<string>, bytesToUrl?: (f: OutputFile, b: Uint8Array) => Promise<string>) => planNode({
         prompt: withWiredValues(take.prompt, id, valueAt(take)).prompt,
         nodeId: id,
         filesFrom: filesAt(take),
         valueFrom: valueAt(take),
         toUrl,
         ...(imageToUrl ? { imageToUrl } : {}),
+        ...(bytesToUrl ? { bytesToUrl } : {}),
         gateOpen: take.openGates.includes(id),
         readFile: readOnce,
         hosted: deps.hosted(),
@@ -1237,13 +1239,15 @@ export function createEngine(deps: EngineDeps) {
       // rebuilt only for its backup. If it can't be rebuilt now (a file gone),
       // the node carries on waiting for its job, with no backup.
       let resumedWithoutBackup = false
+      // Bytes a node made from one of its files (R3.15, Pose Mannequin's mannequin render).
+      const bytesHandOff = (f: OutputFile, b: Uint8Array) => deps.handoff.toUrlBytes(f, b)
       let plan: Awaited<ReturnType<typeof planNode>>
-      if (!resuming) plan = await planWith(handOff, imageHandOff)
+      if (!resuming) plan = await planWith(handOff, imageHandOff, bytesHandOff)
       else {
-        try { plan = await planWith(handOff, imageHandOff) }
+        try { plan = await planWith(handOff, imageHandOff, bytesHandOff) }
         catch {
           resumedWithoutBackup = true
-          try { plan = await planWith(async () => '', async () => '') }
+          try { plan = await planWith(async () => '', async () => '', async () => '') }
           catch (e) {
             // The plan can't be rebuilt at all now (its rules changed since
             // the request was sent, or what it was planned from is gone): the
@@ -2037,6 +2041,14 @@ export function createEngine(deps: EngineDeps) {
           if (tooLarge) throw refuse(tooLarge, 400, { nodeId: c.resized.nodeId, classType: c.resized.classType, file: c.file.filename })
         }
       }
+    }
+    // Pose Mannequin (R3.15): its saved pictures read as Python would open them,
+    // before anything is held: one Python reads its own way refused, the
+    // conditioning render Python raises on refused, and (hosted) a saved pose
+    // that is gone when its price said "no call" refused.
+    for (const p of prompts) {
+      const pose = await poseStartProblem(p, f => files.read(f), deps.hosted())
+      if (pose) throw refuse(pose.message, 400, { nodeId: pose.nodeId, classType: pose.classType })
     }
     // A loader's picture a paid node hands off (R3.H, ./pictureHandoff.ts): one
     // that can't be made into the loader's tensor is refused now, and a model's

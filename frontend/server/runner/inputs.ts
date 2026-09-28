@@ -3,11 +3,12 @@
  * pictures (GenerateImageNode.style_refs, RestyleFromImageNode.style_refs), pictures/clips/sounds loaded into an
  * unwired Image, Video or Audio card, a LoadImage's picture, the files the
  * bake-replay cards hand on (3D Studio's passes, Text on path's and Text
- * mask's render), Painter's painter file, and the Shader effect's bake. In hosted, every one must be
- * the user's own.
+ * mask's render), Painter's painter file, the Shader effect's bake, and Pose Mannequin's
+ * saved pictures (R3.15). In hosted, every one must be the user's own.
  */
 import { isLink, type ApiPrompt } from '#shared/runner/graph'
 import { parseShaderBaked } from '#shared/runner/shaderBakeKey'
+import { POSE_BAKED_INPUTS, POSE_MANNEQUIN_CLASS, bakedFileName } from '#shared/runner/nanoExtras'
 import { MeterRefusalError } from '../utils/requestMeter'
 import { savedInputKey } from '../utils/graphRuns'
 import { userSubfolder } from './results'
@@ -103,6 +104,13 @@ export function collectInputFiles(prompt: ApiPrompt): OutputFile[] {
     if (node.class_type === 'ShaderEffect') {
       for (const name of parseShaderBaked(inputs.sailor_baked)?.files ?? []) {
         const f = parseInputFileRef(name)
+        if (f) out.push(f)
+      }
+    }
+    // Pose Mannequin's saved pictures (R3.15): the result, the conditioning and mannequin renders.
+    if (node.class_type === POSE_MANNEQUIN_CLASS) {
+      for (const name of POSE_BAKED_INPUTS) {
+        const f = isLink(inputs[name]) || !bakedFileName(inputs[name]) ? null : parseInputFileRef(inputs[name])
         if (f) out.push(f)
       }
     }

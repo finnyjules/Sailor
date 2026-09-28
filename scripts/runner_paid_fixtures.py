@@ -105,6 +105,12 @@ Groups:
              Nano Banana's seed); every resolution and format, for
              frontend/server/runner/generators/restyleLora.ts
              (tests/unit/runner-paid-restyle-lora.unit.spec.ts)
+  nano-extras (R3.15) Lens · 3D Reframe (every lens pair, Custom at focal 10
+             and 300, the strengths) and Pose Mannequin (every branch of
+             execute: image, prompt and mannequin modes, baked results with
+             EXIF orientation 6, missing files, the conditioning render Python
+             raises on), for frontend/server/runner/generators/nanoExtras.ts
+             (tests/unit/runner-paid-nano-extras.unit.spec.ts)
   handoff   (R3.H) the PNG `_image_tensor_to_data_url` sends for a loader's
              tensor: every file kind (EXIF 2–8, RGBA, grey + alpha, palette and
              colour-key transparency, CMYK, 16-bit, WebP, GIF…) through the real
@@ -2339,6 +2345,165 @@ def restyle_lora_group() -> dict:
         shutil.rmtree(tmp, ignore_errors=True)
 
 
+# ── nano-extras (R3.15): Lens · 3D Reframe, Pose Mannequin ──────────────────
+
+NANO_EXTRAS_OUT = "https://r.test/nano/out.png"
+NANO_EXTRAS_OUT_2 = "https://r.test/nano/second.png"
+# Pose Mannequin's editor-baked files, as the editor uploads them into ComfyUI's input folder.
+POSE_BAKED = {
+    "pose_result.png": lambda: png_bytes(10, 7, 31),
+    "pose_result_exif6.png": lambda: _exif_picture(10, 7, 32, 6, "PNG"),
+    "pose_result_exif6.jpg": lambda: _exif_picture(16, 8, 33, 6, "JPEG"),
+    "pose_result_rgba.png": lambda: png_bytes(9, 5, 34, "RGBA"),
+    "pose_cond.png": lambda: png_bytes(12, 9, 35),
+    "pose_mannequin.png": lambda: png_bytes(11, 8, 36),
+    "pose_mannequin_rgba.png": lambda: png_bytes(11, 8, 37, "RGBA"),
+    "pose_mannequin_exif6.png": lambda: _exif_picture(11, 8, 38, 6, "PNG"),
+}
+POSE_TEXTS = {
+    "blank": "", "spaces": "   ", "padded": "  arms raised overhead  ", "non-ASCII": "bras levés, tête penchée — 腕を上げる",
+    "unicode blanks": "　 ", "unicode blanks around a word": "　crouching ",
+}
+
+
+def nano_extras_group() -> dict:
+    """R3.15: Lens · 3D Reframe (LensReframe) and Pose Mannequin
+    (PoseMannequin), both Nano Banana 2 on Replicate at 1K, for
+    frontend/server/runner/generators/nanoExtras.ts
+    (tests/unit/runner-paid-nano-extras.unit.spec.ts):
+      catalogue — _lenses.py's LENSES and NAMES, _intensity at its band edges,
+                  focal_for, and _pose_prompts.py's three prompts
+      cases     — paid_case of Lens reframe: every lens pair; Custom on either
+                  side with focal 10 and 300 (and one between whole numbers);
+                  strength 0, 1, 1.5 and the band edges; each answer shape.
+                  Pose Mannequin: every branch of execute — image mode with and
+                  without a pose picture; prompt mode with blank, spaced,
+                  padded, non-ASCII and Unicode-blank pose prompts; mannequin
+                  mode with a baked result (plain, EXIF 6 PNG and JPEG, RGBA),
+                  a missing result, the conditioning render (Python raises:
+                  a tensor's truth value), the mannequin render (plain, RGBA,
+                  EXIF 6), nothing to pose with; an unknown pose source; the
+                  extra direction blank, spaced and non-ASCII. The baked files
+                  sit in a temporary input folder and are written into each
+                  case (`input_files`, base64)."""
+    import io
+    import shutil
+    import tempfile
+    import folder_paths
+    import runner_builder_fixtures as rbf
+    from comfy_extras import _lenses
+    from comfy_extras import _pose_prompts as pp
+    _nr, _fal, _extras = rbf._node_modules()
+    from comfy_extras.nodes_lens_reframe import LensReframeNode
+    from comfy_extras.nodes_pose_mannequin import PoseMannequinNode
+
+    files = {NANO_EXTRAS_OUT: _b64(png_bytes(8, 6, 41)), NANO_EXTRAS_OUT_2: _b64(png_bytes(8, 6, 42))}
+    baked = {name: make() for name, make in POSE_BAKED.items()}
+    tmp = tempfile.mkdtemp(prefix="nano_extras_input_")
+    old_input = folder_paths.get_input_directory()
+    cases: list = []
+    try:
+        for name, data in baked.items():
+            with open(os.path.join(tmp, name), "wb") as f:
+                f.write(data)
+        folder_paths.set_input_directory(tmp)
+
+        def add(name, cls, widgets, pictures=(), answer=None, uses=()):
+            with contextlib.redirect_stdout(io.StringIO()):
+                case = paid_case(name, cls, widgets, [answer or {"output": [NANO_EXTRAS_OUT]}], pictures=list(pictures), files=files, made_pixels=True)
+            if uses:
+                case["input_files"] = {u: _b64(baked[u]) for u in uses if u in baked}
+            cases.append(case)
+
+        # ── Lens · 3D Reframe ──
+        lens = {"source_lens": "Normal 50mm Planar", "target_lens": "Portrait 85mm GM", "reframe_strength": 1.0, "custom_focal": 50.0}
+        for src in _lenses.NAMES:
+            for tgt in _lenses.NAMES:
+                add(f"lens · {src} → {tgt}", LensReframeNode, {**lens, "source_lens": src, "target_lens": tgt}, ["image"])
+        for focal in (10.0, 300.0):
+            for other in _lenses.NAMES:
+                add(f"lens · Custom {focal:g} → {other}", LensReframeNode,
+                    {**lens, "source_lens": _lenses.CUSTOM, "target_lens": other, "custom_focal": focal}, ["image"])
+                add(f"lens · {other} → Custom {focal:g}", LensReframeNode,
+                    {**lens, "source_lens": other, "target_lens": _lenses.CUSTOM, "custom_focal": focal}, ["image"])
+        add("lens · Custom 85.7 → Custom 85.7", LensReframeNode,
+            {**lens, "source_lens": _lenses.CUSTOM, "target_lens": _lenses.CUSTOM, "custom_focal": 85.7}, ["image"])
+        add("lens · Wide 24mm Art → Custom 49.9", LensReframeNode,
+            {**lens, "source_lens": "Wide 24mm Art", "target_lens": _lenses.CUSTOM, "custom_focal": 49.9}, ["image"])
+        for strength in (0.0, 1.0, 1.5, 0.35, 0.4, 0.75, 0.8, 1.1, 1.15, 0.3999, 0.7999, 1.1499):
+            add(f"lens · strength {strength!r}", LensReframeNode, {**lens, "reframe_strength": strength}, ["image"])
+        add("lens · answer string", LensReframeNode, lens, ["image"], {"output": NANO_EXTRAS_OUT})
+        add("lens · answer two", LensReframeNode, lens, ["image"], {"output": [NANO_EXTRAS_OUT, NANO_EXTRAS_OUT_2]})
+
+        # ── Pose Mannequin ──
+        pose = {"prompt": "", "pose_state": "", "mannequin_image": "", "pose_cond_image": "", "result_image": "",
+                "pose_source": "mannequin", "pose_prompt": ""}
+
+        def p(name, pictures=("character",), answer=None, **w):
+            widgets = {**pose, **w}
+            uses = [widgets[k] for k in ("result_image", "pose_cond_image", "mannequin_image") if widgets[k]]
+            add(f"pose · {name}", PoseMannequinNode, widgets, pictures, answer, uses)
+
+        # Image mode.
+        p("image · with a pose picture", ("character", "pose_image"), pose_source="image")
+        p("image · no pose picture (passes the character)", pose_source="image")
+        p("image · a baked result is ignored", ("character", "pose_image"), pose_source="image", result_image="pose_result.png")
+        p("image · no pose picture, a baked result is ignored", pose_source="image", result_image="pose_result.png")
+        # Prompt mode.
+        for label, text in POSE_TEXTS.items():
+            p(f"prompt · pose prompt {label}", pose_source="prompt", pose_prompt=text)
+        p("prompt · a pose picture is ignored", ("character", "pose_image"), pose_source="prompt", pose_prompt="sitting cross-legged")
+        p("prompt · a baked result is ignored", pose_source="prompt", pose_prompt="sitting cross-legged", result_image="pose_result.png")
+        p("prompt · blank, a baked result is ignored", pose_source="prompt", pose_prompt="", result_image="pose_result.png")
+        # The extra direction, on each mode that calls.
+        for label, text in POSE_TEXTS.items():
+            p(f"extra {label} · image", ("character", "pose_image"), pose_source="image", prompt=text)
+            p(f"extra {label} · prompt", pose_source="prompt", pose_prompt="a heroic stance", prompt=text)
+            p(f"extra {label} · mannequin", pose_source="mannequin", mannequin_image="pose_mannequin.png", prompt=text)
+        # Mannequin mode: the baked result wins.
+        for f in ("pose_result.png", "pose_result_exif6.png", "pose_result_exif6.jpg", "pose_result_rgba.png"):
+            p(f"mannequin · baked result {f}", result_image=f, pose_cond_image="pose_cond.png", mannequin_image="pose_mannequin.png")
+        p("mannequin · baked result, no other render", result_image="pose_result.png")
+        p("mannequin · baked result [input] annotated", result_image="pose_result.png [input]")
+        # A result that can't be loaded falls through.
+        p("mannequin · missing result, nothing else (passes the character)", result_image="gone.png")
+        p("mannequin · missing result, the mannequin render", result_image="gone.png", mannequin_image="pose_mannequin.png")
+        p("mannequin · spaces for a result, the mannequin render", result_image="   ", mannequin_image="pose_mannequin.png")
+        # The conditioning render: Python raises (`tensor or …` asks a tensor's truth value).
+        p("mannequin · conditioning render", pose_cond_image="pose_cond.png")
+        p("mannequin · conditioning and mannequin renders", pose_cond_image="pose_cond.png", mannequin_image="pose_mannequin.png")
+        # A conditioning render that can't be loaded: the mannequin render instead.
+        p("mannequin · missing conditioning, the mannequin render", pose_cond_image="gone.png", mannequin_image="pose_mannequin.png")
+        for f in ("pose_mannequin.png", "pose_mannequin_rgba.png", "pose_mannequin_exif6.png"):
+            p(f"mannequin · mannequin render {f}", mannequin_image=f)
+        p("mannequin · missing mannequin render (passes the character)", mannequin_image="gone.png")
+        p("mannequin · nothing to pose with (passes the character)")
+        p("mannequin · pose state alone (passes the character)", pose_state='{"joints": {}}')
+        p("mannequin · a pose picture is ignored", ("character", "pose_image"), mannequin_image="pose_mannequin.png")
+        p("unknown source · reads as mannequin", pose_source="sideways", mannequin_image="pose_mannequin.png")
+        p("unknown source · baked result", pose_source="sideways", result_image="pose_result.png")
+        # Each answer shape.
+        p("answer string", ("character", "pose_image"), {"output": NANO_EXTRAS_OUT}, pose_source="image")
+        p("answer two", ("character", "pose_image"), {"output": [NANO_EXTRAS_OUT, NANO_EXTRAS_OUT_2]}, pose_source="image")
+
+        catalogue = {
+            "lenses": _lenses.LENSES,
+            "names": _lenses.NAMES,
+            "custom": _lenses.CUSTOM,
+            "intensity": [{"strength": s, "out": _lenses._intensity(s)} for s in
+                          (-1.0, 0.0, 0.3999, 0.4, 0.7999, 0.8, 1.1499, 1.15, 1.5, 2.0)],
+            "focal_for": [{"name": n, "custom": c, "out": _lenses.focal_for(n, c)} for n in [*_lenses.NAMES, "nope"] for c in (10.0, 85.7)],
+            "pose_prompts": {"mannequin": pp.MANNEQUIN_PROMPT, "image": pp.IMAGE_PROMPT, "text": pp.TEXT_PROMPT, "default_pose": pp._DEFAULT_POSE},
+            "pose_instruction": [{"source": s, "extra": e, "pose": q, "out": pp.pose_instruction(s, e, q)}
+                                 for s in ("mannequin", "image", "prompt", "other") for e in POSE_TEXTS.values()
+                                 for q in ("", " a heroic {stance} ")],
+        }
+        return {"cases": cases, "baked": {n: _b64(b) for n, b in baked.items()}, "catalogue": catalogue}
+    finally:
+        folder_paths.set_input_directory(old_input)
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
 GROUPS = {
     "handoff": handoff_group,
     "machinery": machinery_group,
@@ -2353,6 +2518,7 @@ GROUPS = {
     "image-extras": image_extras_group,
     "lora": lora_group,
     "restyle-lora": restyle_lora_group,
+    "nano-extras": nano_extras_group,
 }
 
 

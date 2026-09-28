@@ -69,6 +69,8 @@ export const RUNNER_OUTPUT_CLASSES: ReadonlySet<string> = new Set([
   'Generate3DNode', 'Hunyuan3DRemoteNode', 'Hunyuan3DMultiViewNode',
   // R3.14: Restyle an Image · Style LoRA is one too (is_output_node=True; Flux Dev + LoRA(s), R3.13, are not).
   'RestyleWithLoRANode',
+  // R3.15: Lens · 3D Reframe and Pose Mannequin are output nodes (is_output_node=True).
+  'LensReframe', 'PoseMannequin',
 ])
 
 /** ComfyUI's node_errors entry for a node that failed validation. */

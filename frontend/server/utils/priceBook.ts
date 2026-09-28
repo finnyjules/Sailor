@@ -18,6 +18,7 @@ import type { InputSeconds } from '../../shared/pricing/clipSettings'
 import type { RunnerFamily } from '../../shared/runner/families'
 import type { ApiPrompt } from '../../shared/runner/graph'
 import { withStaticSpeechText } from '../../shared/runner/audioGen'
+import { paidNoCall } from '../../shared/pricing/paidSettings'
 export { VIDEO_RATES, MODEL_PRICED_NODE_CLASSES, SETTING_PRICED_NODE_CLASSES, REMOTE_VIDEO_NODE_CLASSES }
 // lineup-p2 (model line-up Task P2): video priced per second of the clip
 // actually sent (shared/pricing/videoRates.ts), replacing one flat figure per model.
@@ -250,7 +251,17 @@ export { VIDEO_RATES, MODEL_PRICED_NODE_CLASSES, SETTING_PRICED_NODE_CLASSES, RE
 // charge), not as a marked-up total: 1K 50 → 61, 2K 62 → 67, 4K 95 → 103
 // (Moondream's per-call minimum of 1 credit and each pass marked up on its
 // own). The runner charges the calls it made.
-export const PRICE_BOOK_VERSION = 'r3-restyle-lora'
+// r3-nano-extras (step 3, R3.15, rulings (a) and (p)): Pose Mannequin leaves
+// its flat row (10 credits, badge $0.05) for Lens · 3D Reframe's call: Nano
+// Banana 2 on Replicate at 1K, $0.067 (verified), fal's Nano Banana 2 edit
+// covered at cost (the nano actions' call): 14 credits for a call; nothing
+// for a branch that makes none (a saved pose, nothing to pose with), on both
+// paths. Lens reframe stays 14 (now with the same fal backup covered). A
+// node whose inputs as sent make Python return before calling anyone
+// (shared/pricing/paidSettings.ts paidNoCall) is charged nothing on the
+// ComfyUI path too: Pose Mannequin's no-call branches, and the LLM text
+// nodes' blank typed text (R3.3's no-call rule, 1–2 credits before).
+export const PRICE_BOOK_VERSION = 'r3-nano-extras'
 
 export const BASE_RENDER_CREDITS = 1
 
@@ -433,7 +444,8 @@ export const GRAPH_NODE_CREDITS: Record<string, number> = {
   // since R3.3 (shared/pricing/paidSettings.ts), on both paths.
 
   // — comfy_extras wrappers that dispatch through nodes_replicate —
-  PoseMannequin: 10,               // badge $0.05 (Python class PoseMannequinNode)
+  // Pose Mannequin is priced by its call since R3.15 (shared/pricing/editSettings.ts, the nano
+  // actions' call; nothing for a branch that makes none, paidSettings.ts paidNoCall), on both paths.
   TurntableNode: 75,               // badge $0.50
 }
 
@@ -566,7 +578,8 @@ export function priceGraph(sent: Record<string, { class_type: string; inputs?: u
       const inputs = prompt[id]?.inputs
       const px = opts.inputPixels && Object.prototype.hasOwnProperty.call(opts.inputPixels, id) ? opts.inputPixels[id] : undefined
       const secs = opts.inputSeconds && Object.prototype.hasOwnProperty.call(opts.inputSeconds, id) ? opts.inputSeconds[id] : undefined
-      const credits = graphNodeModelCredits(ct, inputs, px, secs, opts.families)
+      // A node whose inputs as sent make Python return before calling anyone (R3 rule 8): nothing (R3.15, ruling (p)).
+      const credits = paidNoCall(ct, (inputs ?? {}) as Record<string, unknown>) ? 0 : graphNodeModelCredits(ct, inputs, px, secs, opts.families)
       const model = (inputs as { model?: unknown } | undefined)?.model
       // A class with no model widget (Develop, Relight…) is named alone, as its flat row was.
       breakdown.push({ action: model === undefined ? ct : `${ct}:${String(model)}`, credits })

@@ -316,10 +316,11 @@ describe('PAID_TEXT_INPUTS', () => {
   const table = PAID_TEXT_INPUTS as Record<string, readonly string[]>
   afterEach(() => { delete table.GenerateImageNode; delete table.TestTokenNode })
 
-  it('lists only the tasks\' classes (R3.3: the LLM text nodes; R3.4: describe; R3.5: Upscale and Enhance detail; R3.6: layers; R3.8: audio-gen; R3.9: Multi-View; R3.12: image-extras; R3.13 and R3.14: lora)', () => {
+  it('lists only the tasks\' classes (R3.3: the LLM text nodes; R3.4: describe; R3.5: Upscale and Enhance detail; R3.6: layers; R3.8: audio-gen; R3.9: Multi-View; R3.12: image-extras; R3.13 and R3.14: lora; R3.15: Pose Mannequin)', () => {
     // (R3.4: every describe class but Extract text, which sends no text. R3.5: the two with prompts. R3.6: all three. R3.8: all four.
-    // R3.9: Multi-View's prompt; Generate a 3D model and its twin send no text. R3.12: all three. R3.13: both. R3.14: Restyle.)
-    expect(Object.keys(PAID_TEXT_INPUTS)).toEqual([...LLM_TEXT_CLASSES, ...DESCRIBE_CLASSES.filter(c => c !== 'ExtractTextNode'), 'UpscaleImageNode', 'EnhanceDetailNode', ...LAYERS_CLASSES, ...AUDIO_GEN_CLASSES, 'Hunyuan3DMultiViewNode', ...IMAGE_EXTRAS_CLASSES, ...LORA_CLASSES, RESTYLE_LORA_CLASS])
+    // R3.9: Multi-View's prompt; Generate a 3D model and its twin send no text. R3.12: all three. R3.13: both. R3.14: Restyle.
+    // R3.15: Pose Mannequin; Lens · 3D Reframe sends only Sailor's own text.)
+    expect(Object.keys(PAID_TEXT_INPUTS)).toEqual([...LLM_TEXT_CLASSES, ...DESCRIBE_CLASSES.filter(c => c !== 'ExtractTextNode'), 'UpscaleImageNode', 'EnhanceDetailNode', ...LAYERS_CLASSES, ...AUDIO_GEN_CLASSES, 'Hunyuan3DMultiViewNode', ...IMAGE_EXTRAS_CLASSES, ...LORA_CLASSES, RESTYLE_LORA_CLASS, 'PoseMannequin'])
   })
 
   it('extraPromptTexts reads a paid class’s listed inputs (typed text only)', () => {

@@ -83,7 +83,7 @@ export function pricedInputPixels(measured: number | null | undefined): number {
  */
 export const SETTING_PRICED_NODE_CLASSES: readonly string[] = [
   'EditImageNode', 'DevelopImageNode', 'RelightNode', 'BlendSceneNode',
-  'RemoveObjectNode', 'TextEditNode', 'RecolorObjectNode', 'SwapBackgroundNode', 'SwapProductNode', 'PersonSwap', 'LensReframe',
+  'RemoveObjectNode', 'TextEditNode', 'RecolorObjectNode', 'SwapBackgroundNode', 'SwapProductNode', 'PersonSwap', 'LensReframe', 'PoseMannequin',
   'GenerateFromReferencesNode', 'RotateCameraNode', 'ProductShotNode',
   'RestyleFromImageNode', 'FixFacesNode', 'FaceSwap',
 ]
@@ -292,8 +292,11 @@ const FIXED: Record<string, (inputs: NodeInputs) => EditCall> = {
   SwapBackgroundNode: nanoAction,
   SwapProductNode: nanoAction,
   PersonSwap: nanoAction,
-  // comfy_extras/nodes_lens_reframe.py: the same Replicate call, 1K (ComfyUI path only).
-  LensReframe: () => call(REP_NB2, '1K'),
+  // comfy_extras/nodes_lens_reframe.py and nodes_pose_mannequin.py: the same Replicate
+  // call, 1K; fal the runner's backup (family nano-extras, R3.15). A Pose Mannequin
+  // that makes no call is priced at nothing (paidSettings.ts paidNoCall, ruling (p)).
+  LensReframe: nanoAction,
+  PoseMannequin: nanoAction,
   RotateCameraNode: () => call('qwen/qwen-image-edit-plus'),
   ProductShotNode: () => call('catacolabs/sdxl-ad-inpaint'),
   // Face swap on Easel (family face-swap): one flat price a picture.

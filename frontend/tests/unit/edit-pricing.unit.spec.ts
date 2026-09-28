@@ -91,6 +91,8 @@ function settingsGrid(ct: string): Record<string, unknown>[] {
     case 'BlendSceneNode': return BLEND_MODELS.map(model => ({ model }))
     case 'GenerateFromReferencesNode': return REFERENCE_MODEL_IDS.flatMap(model => withTier('size', { model }))
     case 'RestyleFromImageNode': return RESTYLE_MODELS.flatMap(model => withTier('resolution', { model }))
+    // Pose Mannequin: a call (character and pose picture wired); with none it is free (paidNoCall), which a bare badge can't see.
+    case 'PoseMannequin': return withTier('resolution', { character: LINK, pose_source: 'image', pose_image: LINK })
     // The classes with no priced widget: resolution is not a widget of theirs, and must not move the price.
     default: return withTier('resolution', {})
   }
@@ -329,13 +331,15 @@ describe('settings parity: the price reads what each runner builder sends', () =
     expect(upscale).toMatch(/"upscale_factor": topaz_upscale_factor/)
   })
 
-  it('Lens reframe makes the Nano Banana actions\' call: google/nano-banana-2 at 1K (ComfyUI path)', () => {
-    const src = readFileSync(`${REPO}comfy_extras/nodes_lens_reframe.py`, 'utf8')
-    expect(src).toContain('_run_prediction("google/nano-banana-2", {')
-    expect(src).toContain('"resolution": "1K"')
-    // The same call as the actions, with no backup: Lens reframe runs only on the ComfyUI path.
-    const { fallbacks: _backup, ...action } = only('RemoveObjectNode', {})
-    expect(only('LensReframe', {})).toEqual(action)
+  it('Lens reframe and Pose Mannequin make the Nano Banana actions\' call: google/nano-banana-2 at 1K', () => {
+    for (const file of ['nodes_lens_reframe.py', 'nodes_pose_mannequin.py']) {
+      const src = readFileSync(`${REPO}comfy_extras/${file}`, 'utf8')
+      expect(src, file).toMatch(/_run_prediction\("google\/nano-banana-2", (\{|input_dict)/)
+      expect(src, file).toContain('"resolution": "1K"')
+    }
+    // The same call as the actions, fal's edit their runner backup (family nano-extras, R3.15).
+    expect(only('LensReframe', {})).toEqual(only('RemoveObjectNode', {}))
+    expect(only('PoseMannequin', {})).toEqual(only('RemoveObjectNode', {}))
   })
 })
 
