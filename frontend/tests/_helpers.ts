@@ -109,6 +109,13 @@ export async function dropNode(page: Page, nodeType: string) {
   await page.waitForTimeout(300)
 }
 
+/** Opens the first studio card's studio through its Open bar: hover the preview, click Open. */
+export async function openFirstStudioCard(page: Page) {
+  const host = page.locator('.vue-flow__node .node-openbar-host').first()
+  await host.hover()
+  await host.getByRole('button', { name: 'Open', exact: true }).click()
+}
+
 /** Wait for ComfyUI's /object_info to respond — proves the backend is ready. */
 export async function waitForBackend(page: Page) {
   await expect.poll(async () => {

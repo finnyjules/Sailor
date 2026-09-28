@@ -16,6 +16,7 @@ const shellTag = (t: string) => {
 const FAMILY_A = [
   'GradientStudioNode.vue', 'ShaderStudioNode.vue', 'TextureStudioNode.vue',
   'ShapeStudioNode.vue', 'VectorTypeNode.vue', 'SpaceTypeNode.vue',
+  'Scene3DStudioNode.vue',
 ]
 
 describe.each(FAMILY_A)('%s wears the studio shell', (file) => {
@@ -41,7 +42,7 @@ describe.each(FAMILY_A)('%s wears the studio shell', (file) => {
     expect(t).toMatch(/class="node-shell__title"/)
   })
   it('the preview sits in a well with an Open bar', () => {
-    expect(t).toMatch(/class="node-well node-openbar-host"[\s\S]*<NodeOpenBar[\s\S]*>Open<\/button>/)
+    expect(t).toMatch(/class="node-well node-openbar-host[^"]*"[\s\S]*<NodeOpenBar[\s\S]*>Open<\/button>/)
     expect(s).toMatch(/import NodeOpenBar from '~\/components\/vue-canvas\/surfaces\/NodeOpenBar\.vue'/)
   })
   it('the footer is only the Render control', () => {
@@ -55,5 +56,19 @@ describe('Kinetic keeps its hover-to-play and render-error badge', () => {
   const t = tpl(src('SpaceTypeNode.vue'))
   it('the wrapper still owns the hover handlers', () => {
     expect(t).toMatch(/class="studio-node relative w-fit" @pointerenter="onNodeHoverEnter" @pointerleave="onNodeHoverLeave"/)
+  })
+})
+
+describe('3D Studio keeps its own states', () => {
+  const t = tpl(src('Scene3DStudioNode.vue'))
+  const tag = shellTag(t)
+  it('mute and bypass still dim the card', () => {
+    expect(tag).toMatch(/:class="\{ 'opacity-45 grayscale': isMuted, 'opacity-85': isBypassed \}"/)
+  })
+  it('the ports still set the card height', () => {
+    expect(tag).toMatch(/minHeight: `\$\{portsMinHeight\}px`/)
+  })
+  it('an empty scene still offers its Edit scene button inside the well', () => {
+    expect(t).toMatch(/class="node-well node-openbar-host aspect-square"[\s\S]*Edit scene/)
   })
 })

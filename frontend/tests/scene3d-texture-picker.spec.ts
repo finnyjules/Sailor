@@ -1,5 +1,5 @@
 import { test, expect, type Page } from '@playwright/test'
-import { dropNode, waitForBackend, dismissStartModal } from './_helpers'
+import { dropNode, waitForBackend, dismissStartModal, openFirstStudioCard } from './_helpers'
 
 /**
  * The ambientCG texture picker row — end-to-end.
@@ -58,7 +58,7 @@ async function openScene3DStudioWithBox(page: Page) {
 
   await dropNode(page, 'Scene3DStudio')
   // The node's own Edit button dispatches `sailor:openScene3DStudio`.
-  await page.getByRole('button', { name: 'Edit', exact: true }).first().click()
+  await openFirstStudioCard(page)
   const dialog = page.getByRole('dialog')
   await expect(dialog.getByText('3D Studio', { exact: true })).toBeVisible({ timeout: 15_000 })
 

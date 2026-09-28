@@ -1,6 +1,6 @@
 import { test, expect, type Page } from '@playwright/test'
 import { PNG } from 'pngjs'
-import { waitForBackend, dismissStartModal } from './_helpers'
+import { waitForBackend, dismissStartModal, openFirstStudioCard } from './_helpers'
 
 /**
  * Shader as Fill — end-to-end coverage (Task 10).
@@ -168,7 +168,7 @@ test.describe('Shader as fill — Space Type (E2E)', () => {
     await addNode(page, 'SpaceType')
 
     // Open the node's editor.
-    await page.getByRole('button', { name: 'Edit', exact: true }).first().click()
+    await openFirstStudioCard(page)
     await expect(page.getByText('Type studio', { exact: true })).toBeVisible({ timeout: 10_000 })
 
     // Switch the default Ribbon effect's fill to 'shader' — FILL_TYPES is the single
@@ -209,8 +209,8 @@ test.describe('Shader as fill — Space Type (E2E)', () => {
 
     await page.reload()
     await waitForBackend(page)
-    await expect(page.getByRole('button', { name: 'Edit', exact: true }).first()).toBeVisible({ timeout: 20_000 })
-    await page.getByRole('button', { name: 'Edit', exact: true }).first().click()
+    await expect(page.locator('.vue-flow__node .node-openbar-host').first()).toBeVisible({ timeout: 20_000 })
+    await openFirstStudioCard(page)
     await expect(page.getByText('Type studio', { exact: true })).toBeVisible({ timeout: 10_000 })
 
     // Fill type and anchor both round-tripped — not silently reset to a default.
@@ -269,7 +269,7 @@ test.describe('Shader as fill — golden coverage per surface', () => {
       },
     })
 
-    await page.getByRole('button', { name: 'Edit', exact: true }).first().click()
+    await openFirstStudioCard(page)
     await expect(page.getByText('Shape studio', { exact: true })).toBeVisible({ timeout: 10_000 })
 
     const canvas = 'canvas.max-h-full.max-w-full.rounded-lg'
@@ -448,7 +448,7 @@ test.describe('Shader as fill — golden coverage per surface', () => {
     }
     await addNode(page, 'Scene3DStudio', { widgetOverrides: { scene_state: JSON.stringify(sceneDoc) } })
 
-    await page.getByRole('button', { name: 'Edit', exact: true }).first().click()
+    await openFirstStudioCard(page)
     await expect(page.getByRole('dialog').getByText('3D Studio', { exact: true })).toBeVisible({ timeout: 10_000 })
 
     const canvas = '[role="dialog"] canvas.h-full.w-full'

@@ -5,7 +5,7 @@
 // and "Edit" opens Scene3DStudioSurface, which writes the bakes back into the
 // widgets that execute() replays on Run.
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { Box, Pencil } from 'lucide-vue-next'
+import { Box } from 'lucide-vue-next'
 import { minHeightForPorts } from '~/lib/canvas/portLayout'
 import { parseDoc } from '~/lib/scene3d/config'
 import { SceneEngine } from '~/lib/scene3d/engine'
@@ -17,10 +17,13 @@ import { registerStudioFrameSource, unregisterStudioFrameSource } from '~/lib/st
 import { registerScene3DRebaker, unregisterScene3DRebaker } from '~/lib/scene3d/rebake'
 import { onFieldCatalogReady } from '~/lib/shaderfill/field'
 import { fetchShaderFxCatalog } from '~/lib/shaderfx/catalog'
+import { useNodeGlass } from '~/composables/useCanvasGlass'
 import StudioRenderButton from '~/components/vue-canvas/StudioRenderButton.vue'
+import NodeOpenBar from '~/components/vue-canvas/surfaces/NodeOpenBar.vue'
 
 const props = defineProps<{
   id: string
+  selected?: boolean
   data: {
     nodeType: string
     title?: string
@@ -34,6 +37,7 @@ const props = defineProps<{
 }>()
 
 const inpaint = useInpaint()
+const glass = useNodeGlass(() => props.id)
 
 const isMuted = computed(() => props.data.mode === 2)
 const isBypassed = computed(() => props.data.mode === 4)
@@ -317,41 +321,39 @@ onBeforeUnmount(() => {
     />
 
     <div
-      class="relative z-10 w-[240px] rounded-xl border border-white/10 bg-neutral-900/95 text-white shadow-lg"
+      class="scene3d-studio-card node-shell relative z-10 w-[240px]"
       :class="{ 'opacity-45 grayscale': isMuted, 'opacity-85': isBypassed }"
+      :data-glass-blur="glass || undefined"
+      :data-selected="selected || undefined"
       :style="{ minHeight: `${portsMinHeight}px` }"
       @dblclick.stop="openEditor"
     >
-      <!-- Header -->
-      <div class="flex items-center gap-2 border-b border-white/10 px-3 py-2">
-        <Box class="h-4 w-4 shrink-0 text-sky-400" />
-        <span class="flex-1 truncate text-xs font-medium text-white/90">{{ data.title || '3D Studio' }}</span>
+      <div class="node-shell__head">
+        <Box class="node-shell__icon" />
+        <span class="node-shell__title">{{ data.title || '3D Studio' }}</span>
       </div>
-
-      <!-- Live client-side preview of the current scene (WYSIWYG, incl. post FX);
-           falls back to the last baked beauty_image, then the empty-scene prompt. -->
-      <div class="mx-2 my-2 aspect-square overflow-hidden rounded-lg bg-black/40">
-        <img v-if="livePreviewUrl || thumbUrl" :src="livePreviewUrl || thumbUrl || undefined" class="h-full w-full object-cover" alt="" />
-        <button
-          v-else type="button"
-          class="nopan nodrag flex h-full w-full flex-col items-center justify-center gap-1 text-white/35 hover:text-white/60"
-          @click.stop="openEditor"
-        >
-          <Box class="h-6 w-6" />
-          <span class="text-[10px]">Edit scene</span>
-        </button>
+      <div class="node-shell__body">
+        <!-- Live client-side preview of the current scene (WYSIWYG, incl. post FX);
+             falls back to the last baked beauty_image, then the empty-scene prompt. -->
+        <div class="node-well node-openbar-host aspect-square">
+          <img v-if="livePreviewUrl || thumbUrl" :src="livePreviewUrl || thumbUrl || undefined" class="h-full w-full object-cover" alt="" />
+          <button
+            v-else type="button"
+            class="nopan nodrag flex h-full w-full flex-col items-center justify-center gap-1 text-white/35 hover:text-white/60"
+            @click.stop="openEditor"
+          >
+            <Box class="h-6 w-6" />
+            <span class="text-[10px]">Edit scene</span>
+          </button>
+          <NodeOpenBar>
+            <button type="button" class="node-btn nopan nodrag" @click.stop="openEditor">Open</button>
+          </NodeOpenBar>
+        </div>
       </div>
-
-      <!-- Edit + Render. Render re-bakes the three passes headlessly (no server
-           renderer) then runs the backend downstream — see rebakePasses. -->
-      <div class="mx-2 mb-2 flex items-center gap-1.5">
-        <button
-          class="nopan nodrag flex flex-1 items-center justify-center gap-1.5 rounded bg-white/10 px-2.5 py-1.5 text-[11px] text-white/80 transition hover:bg-white/20"
-          @click.stop="openEditor"
-        >
-          <Pencil class="h-3 w-3" /> Edit
-        </button>
-        <StudioRenderButton class="flex-1" :node-id="id" :busy="!!data?.studioBusy" />
+      <!-- Render re-bakes the three passes headlessly (no server renderer) then runs
+           the backend downstream — see rebakePasses. -->
+      <div class="node-shell__foot justify-end">
+        <StudioRenderButton :node-id="id" :busy="!!data?.studioBusy" />
       </div>
     </div>
   </div>

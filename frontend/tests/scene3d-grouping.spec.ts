@@ -1,5 +1,5 @@
 import { test, expect, type Page } from '@playwright/test'
-import { dropNode, waitForBackend, dismissStartModal } from './_helpers'
+import { dropNode, waitForBackend, dismissStartModal, openFirstStudioCard } from './_helpers'
 
 /**
  * Grouping — end-to-end.
@@ -187,7 +187,7 @@ test.describe('3D Studio — object grouping (E2E)', () => {
     // `window.dispatchEvent(new CustomEvent('sailor:openScene3DStudio', …))`
     // (Scene3DStudioNode.vue:79), so this is the brief's entry recipe driven
     // through the real UI, and it needs no scraping of the vue-flow node id.
-    await page.getByRole('button', { name: 'Edit', exact: true }).first().click()
+    await openFirstStudioCard(page)
     const dialog = page.getByRole('dialog')
     await expect(dialog.getByText('3D Studio', { exact: true })).toBeVisible({ timeout: 15_000 })
 
@@ -311,7 +311,7 @@ test.describe('3D Studio — object grouping (E2E)', () => {
     await openBlankWorkflow(page)
     await page.setViewportSize({ width: 1600, height: 1300 })
     await dropNode(page, 'Scene3DStudio')
-    await page.getByRole('button', { name: 'Edit', exact: true }).first().click()
+    await openFirstStudioCard(page)
     const dialog = page.getByRole('dialog')
     await expect(dialog.getByText('3D Studio', { exact: true })).toBeVisible({ timeout: 15_000 })
 
