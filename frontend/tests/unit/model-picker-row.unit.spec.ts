@@ -10,6 +10,7 @@ import WidgetModelPicker from '~/components/vue-canvas/widgets/WidgetModelPicker
 const IMAGE_MODEL_ID = 'flux-1.1-pro'       // brand BFL, kind 'image'
 const SHOT_PRESET_ID = 'push-in'             // kind 'shot_preset'
 const TEXT_EFFECT_ID = 'liquid-chrome'       // kind 'text_effect'
+const LONG_LABEL_MODEL_ID = 'stable-diffusion-3.5-large-turbo' // label: 'Stable Diffusion 3.5 Large Turbo'
 
 describe('WidgetModelPicker — row', () => {
   it('is a 32px row with the node-row background, not its own boxed button', () => {
@@ -51,6 +52,33 @@ describe('WidgetModelPicker — row', () => {
     const w = mount(WidgetModelPicker, { props: { modelValue: IMAGE_MODEL_ID, kind: 'image' } })
     // lucide-vue-next renders an <svg>; look for the chevron wrapper class instead.
     expect(w.html()).toContain('size-3.5')
+  })
+
+  it('a long model label ellipsizes instead of crowding out the chevron (fix round 1)', () => {
+    const w = mount(WidgetModelPicker, { props: { modelValue: LONG_LABEL_MODEL_ID, kind: 'image' } })
+    expect(w.text()).toContain('Stable Diffusion 3.5 Large Turbo')
+
+    // The value span must be able to shrink below its content width (min-w-0)
+    // and take the remaining flex space (flex-1) for `truncate` to actually
+    // ellipsize instead of being sized to its full text by flexbox's default
+    // automatic min-width. Select it by its `truncate` class directly — it's
+    // the only element that carries it — rather than by text, since the
+    // wrapping flex span's aggregated text content is identical.
+    const valueSpan = w.find('.truncate')
+    expect(valueSpan.exists()).toBe(true)
+    expect(valueSpan.text()).toBe('Stable Diffusion 3.5 Large Turbo')
+    expect(valueSpan.classes()).toContain('min-w-0')
+    expect(valueSpan.classes()).toContain('flex-1')
+
+    // The brand frame and the chevron must stay shrink-0 so they never give
+    // up space to the value span. The chevron is the lucide <svg> itself —
+    // Vue forwards the class prop straight onto its root element.
+    const chevron = w.find('svg')
+    expect(chevron.classes()).toContain('shrink-0')
+
+    const brandFrame = w.find('.size-4')
+    expect(brandFrame.exists()).toBe(true)
+    expect(brandFrame.classes()).toContain('shrink-0')
   })
 
   it('still dispatches sailor:openModelGallery on click, with kind in the detail', async () => {

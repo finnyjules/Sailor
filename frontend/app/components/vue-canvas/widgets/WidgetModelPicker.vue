@@ -126,7 +126,7 @@ function openGallery() {
         />
         <span v-else>{{ model?.brand?.[0] ?? '?' }}</span>
       </span>
-      <span class="text-[11px] text-white/90 truncate leading-tight">
+      <span class="text-[11px] text-white/90 truncate leading-tight min-w-0 flex-1">
         {{ model?.label ?? modelValue ?? (kind === 'text_effect' ? 'Pick an effect' : kind === 'shot_preset' ? 'Pick a shot' : 'Pick a model') }}
       </span>
     </span>
