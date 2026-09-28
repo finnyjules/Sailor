@@ -150,9 +150,18 @@ describe('watchGraphRun settles by what ran', () => {
   })
 
   it('a cached node listed as executed too is still not charged', async () => {
-    const x = io([failed(['1', '10', '20'], '30', { cached: ['10'] })])
+    const x = io([failed(['1', '10', '20', '21'], '30', { cached: ['10'] })])
     await watchGraphRun(RUN(), x)
     expect(x.ledger.settle.mock.calls[0]![1]).toBe(LORA_RENDER_CREDITS + BASE_RENDER_CREDITS)
+  })
+
+  it('CHANGED (R3.18 ruling): a paid node that finished with no output reading it that ran is charged, the render credit is not (was + the render credit)', async () => {
+    // 20 finished but its Save (21) never ran; 30 failed.
+    const x = io([failed(['1', '10', '20'], '30', { cached: ['10'] })])
+    await watchGraphRun(RUN(), x)
+    const [, actual, reason] = x.ledger.settle.mock.calls[0]!
+    expect(actual).toBe(LORA_RENDER_CREDITS)
+    expect(reason).not.toContain('render')
   })
 
   it('every paid node cached, the failure elsewhere: nothing charged', async () => {
@@ -208,6 +217,8 @@ describe('watchGraphRun settles by what ran', () => {
     const x = io([failed(['10'], '30')])
     x.ledger.settle.mockRejectedValueOnce(new Error('db down'))
     await watchGraphRun(RUN(), x)
+    // R3.18 ruling: node 10 finished but its Save never ran: the node only, no render credit (was + 1).
+    expect(x.ledger.settle.mock.calls[0]![1]).toBe(LORA_RENDER_CREDITS)
     expect(x.ledger.release).toHaveBeenCalledWith(7)
     expect(x.resolve).toHaveBeenCalledWith('p1', 'voided')
   })
@@ -220,21 +231,55 @@ describe('partialCharge', () => {
   })
 
   it('never charges the failing node, even if it were listed as executed', () => {
-    const owed = partialCharge(failed(['10', '30'], '30'), plan(), HOLD)
+    const owed = partialCharge(failed(['10', '11', '30'], '30'), plan(), HOLD)
     expect(owed).toMatchObject({ credits: LORA_RENDER_CREDITS + BASE_RENDER_CREDITS, nodeIds: ['10'] })
   })
 
-  it('the render credit rides on a finished Frame render with no paid node, as in the runner', () => {
+  it('CHANGED (R3.18 ruling): the failing node listed as executed, the one finished paid node never saved: no render credit (was + the render credit)', () => {
+    const owed = partialCharge(failed(['10', '30'], '30'), plan(), HOLD)
+    expect(owed).toMatchObject({ credits: LORA_RENDER_CREDITS, nodeIds: ['10'], base: 0 })
+  })
+
+  it('the render credit rides on a finished Frame render with no paid node when an output that ran shows it, as in the runner', () => {
     const frame = 'Compositor'
     expect(FRAME_RENDER_TYPES.has(frame)).toBe(true)
-    const g = { '5': { class_type: frame, inputs: {} }, '6': { class_type: 'SaveImage', inputs: {} }, '10': { class_type: PAID, inputs: {} } }
+    const g = { '5': { class_type: frame, inputs: {} }, '6': { class_type: 'SaveImage', inputs: { images: ['5', 0] } }, '10': { class_type: PAID, inputs: {} } }
     const p = chargePlanOf(g, { '10': LORA_RENDER_CREDITS }, BASE_RENDER_CREDITS)
     expect(p.renderNodes).toEqual(['5'])
-    expect(partialCharge(failed(['5'], '10'), p, LORA_RENDER_CREDITS + BASE_RENDER_CREDITS)).toMatchObject({ credits: BASE_RENDER_CREDITS, nodeIds: [] })
+    expect(p.outputReads).toEqual({ '5': ['5'], '6': ['5', '6'] })
+    expect(partialCharge(failed(['5', '6'], '10'), p, LORA_RENDER_CREDITS + BASE_RENDER_CREDITS)).toMatchObject({ credits: BASE_RENDER_CREDITS, nodeIds: [] })
+  })
+
+  it('a finished Frame render shows its render on the canvas: the render credit rides even when its Save never ran (R1.5 ruling, unchanged)', () => {
+    const g = { '5': { class_type: 'Compositor', inputs: {} }, '6': { class_type: 'SaveImage', inputs: { images: ['5', 0] } }, '10': { class_type: PAID, inputs: {} } }
+    const p = chargePlanOf(g, { '10': LORA_RENDER_CREDITS }, BASE_RENDER_CREDITS)
+    expect(partialCharge(failed(['5'], '10'), p, LORA_RENDER_CREDITS + BASE_RENDER_CREDITS)).toMatchObject({ credits: BASE_RENDER_CREDITS, nodeIds: [], base: BASE_RENDER_CREDITS })
+  })
+
+  it('CHANGED (R3.18 ruling): a source card that ran shows nothing made; a paid node before the failed one is charged alone (was + the render credit)', () => {
+    // An Image card showing an upload, a paid node that finished, a paid node reading it that failed (the e2e failed-Restyle shape).
+    const g = {
+      c: { class_type: 'Image', inputs: { image: 'in.png' } },
+      a: { class_type: PAID, inputs: { image: ['c', 0] } },
+      b: { class_type: PAID, inputs: { image: ['a', 0] } },
+    }
+    const p = chargePlanOf(g, { a: LORA_RENDER_CREDITS, b: LORA_RENDER_CREDITS }, BASE_RENDER_CREDITS)
+    expect(p.outputReads).toEqual({ c: ['c'] })
+    expect(partialCharge(failed(['c', 'a'], 'b'), p, 2 * LORA_RENDER_CREDITS + BASE_RENDER_CREDITS)).toMatchObject({ credits: LORA_RENDER_CREDITS, nodeIds: ['a'], base: 0 })
+  })
+
+  it('an Image card that ran showing a paid node\'s picture delivers it: the render credit rides, as before', () => {
+    const g = {
+      a: { class_type: PAID, inputs: {} },
+      s: { class_type: 'Image', inputs: { image: '', images: ['a', 0] } },
+      b: { class_type: PAID, inputs: {} },
+    }
+    const p = chargePlanOf(g, { a: LORA_RENDER_CREDITS, b: LORA_RENDER_CREDITS }, BASE_RENDER_CREDITS)
+    expect(partialCharge(failed(['a', 's'], 'b'), p, 2 * LORA_RENDER_CREDITS + BASE_RENDER_CREDITS)).toMatchObject({ credits: LORA_RENDER_CREDITS + BASE_RENDER_CREDITS, base: BASE_RENDER_CREDITS })
   })
 
   it('no render credit when the graph has no output node', () => {
-    const p: RunChargePlan = { nodes: { '10': LORA_RENDER_CREDITS, '20': LORA_RENDER_CREDITS }, base: 0, renderNodes: [] }
+    const p: RunChargePlan = { nodes: { '10': LORA_RENDER_CREDITS, '20': LORA_RENDER_CREDITS }, base: 0, renderNodes: [], outputReads: {} }
     expect(partialCharge(failed(['10'], '20'), p, 2 * LORA_RENDER_CREDITS)).toMatchObject({ credits: LORA_RENDER_CREDITS, base: 0 })
   })
 })

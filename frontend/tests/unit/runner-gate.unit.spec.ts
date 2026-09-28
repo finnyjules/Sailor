@@ -259,6 +259,8 @@ describe('Stop', () => {
     const run = (await k.store.get(runId))!
     expect(run.takes.map(t => t.nodes['1']!.status).sort()).toEqual(['done', 'stopped'])
     expect(run.status).toBe('stopped')
+    // R3.18 ruling: the image was made but its card was stopped before showing it: no render credit (local, so no money moves; was set).
+    expect(run.baseCharged).toBe(false)
     // The slot came back: a new run is not left waiting behind the stopped one.
     const again = await k.engine.startRun({ userId: null, takes: [gatedFlow()], workflow: null, canvasId: null, projectUuid: null, projectName: null })
     await k.engine.settled(again.runId)

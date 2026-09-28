@@ -545,6 +545,11 @@ describe('chains through the cards', () => {
     expect(moderate.mock.calls.map(x => x[0])).toContain('A short summary.')
     expect(nodes['1']!.status).toBe('error')
     expect(k.fal.client.submit).not.toHaveBeenCalled()
+    // R3.18 ruling: the Summarize is charged; the refused Generate delivered nothing to its card: no render credit (was + 1).
+    const run = (await k.store.get(runId))!
+    expect(nodes.s!.credits).toBe(1)
+    expect(run.charges.map(c => [c.state, c.actual])).toEqual([['settled', 1]])
+    expect(run.baseCharged).toBe(false)
   })
 
   it('a blank wired text makes no call and lets its hold go', async () => {

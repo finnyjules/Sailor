@@ -493,7 +493,8 @@ describe('the reload retry and the order toggle (ruling (g))', () => {
     const r = await multiRun([{ output: [OUT], logs: 'no marker' }, { output: [OUT], logs: MARKER_LOGS }], { failSecond: true })
     expect(r.sent.length).toBe(2)
     expect(r.rec.status).toBe('error')
-    expect(r.charged).toEqual([[20 + BASE_RENDER_CREDITS, 10 + BASE_RENDER_CREDITS]])
+    // R3.18 ruling: the node failed and delivered nothing to an output: its finished call only, no render credit (was + 1).
+    expect(r.charged).toEqual([[20 + BASE_RENDER_CREDITS, 10]])
   })
 
   it('a second answer with no picture fails plainly: both calls were made, both charged', async () => {
@@ -501,7 +502,8 @@ describe('the reload retry and the order toggle (ruling (g))', () => {
     expect(r.sent.length).toBe(2)
     expect(r.rec.status).toBe('error')
     expect(r.rec.error).toContain(LORA_NO_PICTURE)
-    expect(r.charged).toEqual([[20 + BASE_RENDER_CREDITS, 20 + BASE_RENDER_CREDITS]])
+    // R3.18 ruling: the node failed and delivered nothing to an output: its two calls only, no render credit (was + 1).
+    expect(r.charged).toEqual([[20 + BASE_RENDER_CREDITS, 20]])
   })
 })
 

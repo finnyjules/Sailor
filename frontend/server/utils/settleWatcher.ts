@@ -7,6 +7,7 @@
  * history entry (Task G2: the caller may charge the paid nodes that finished,
  * see partialCharge); a timeout calls onError with no entry (never charged).
  */
+import { deliveredToOutput } from './renderCredit'
 export interface HistoryEntry {
   status?: { status_str?: 'success' | 'error'; completed?: boolean; messages?: unknown }
   outputs?: unknown
@@ -59,6 +60,8 @@ export interface RunChargePlan {
   nodes: Record<string, number>
   base: number
   renderNodes: string[]
+  /** Each output node → itself and every node it reads (renderCredit.ts outputReadsOf): what a failed run delivered. */
+  outputReads: Record<string, string[]>
 }
 
 export type PartialCharge =
@@ -81,9 +84,11 @@ const isIdList = (v: unknown): v is string[] => Array.isArray(v) && v.every(x =>
  * (it never reached `executed.add`), nor is a node skipped after it, nor an
  * async node still waiting on its provider.
  *
- * The render credit follows the runner (engine.ts runTakeLeg): it rides on
- * something made — a paid node finished, or a Frame render finished — and only
- * when the graph had an output node (plan.base > 0).
+ * The render credit follows the runner (engine.ts runTakeLeg), by the one
+ * rule in renderCredit.ts: it rides only on something made and shown — an
+ * output node that ran reads a paid node or a Frame render that ran — and only
+ * when the graph had an output node (plan.base > 0). A paid node that ran with
+ * no output reading it that ran, or a failed node, earns no render credit.
  *
  * Anything that stops us telling which nodes ran returns `{ unknown }`: the
  * caller charges nothing, as before G2. The sum is never more than `hold`.
@@ -118,8 +123,8 @@ export function partialCharge(entry: HistoryEntry | null | undefined, plan: RunC
 
   const nodeIds = Object.keys(plan.nodes).filter(id => plan.nodes[id]! > 0 && ran.has(id)).sort()
   const paid = nodeIds.reduce((s, id) => s + plan.nodes[id]!, 0)
-  const rendered = plan.renderNodes.some(id => ran.has(id))
-  const base = plan.base > 0 && (paid > 0 || rendered) ? plan.base : 0
+  const made = new Set([...nodeIds, ...plan.renderNodes.filter(id => ran.has(id))])
+  const base = plan.base > 0 && deliveredToOutput(plan.outputReads, ran, made) ? plan.base : 0
   const credits = Math.max(0, Math.min(paid + base, hold))
   return { credits, nodeIds, base, failedNode: failure.nodeId, interrupted: failure.interrupted }
 }

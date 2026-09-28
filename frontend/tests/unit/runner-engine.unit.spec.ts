@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import { createLimiter } from '~~/server/runner/engine'
 import { createFileRunStore, type RunStore } from '~~/server/runner/store'
+import { deliveredToOutput, outputReadsOf } from '~~/server/utils/renderCredit'
 import type { RunRecord } from '~~/server/runner/types'
 import { createFakeFal, makeKit, gatedFlow, ofType, types, until } from './__runner__/kit'
 import type { ApiPrompt } from '#shared/runner/graph'
@@ -137,6 +138,85 @@ describe('money (hosted)', () => {
   })
 })
 
+describe('the render credit on a stage that did not finish (R3.18 ruling: only on something made and shown)', () => {
+  const g = (prompt: string): ApiPrompt[string] => ({ class_type: 'GenerateImageNode', inputs: { model: 'flux-schnell', prompt, aspect_ratio: '1:1', seed: 0, model_options: '{}' } })
+  const card = (from: string): ApiPrompt[string] => ({ class_type: 'Image', inputs: { image: '', export: false, images: [from, 0], batch_index: -1 } })
+  const upload = (): ApiPrompt[string] => ({ class_type: 'Image', inputs: { image: 'in.png', export: false, filename_prefix: 'ComfyUI', batch_index: -1 } })
+
+  describe('outputReadsOf and deliveredToOutput (renderCredit.ts, shared with the ComfyUI path)', () => {
+    it('an output reads itself and every node upstream of it, through a Gate; a node no output reads is in none', () => {
+      const p: ApiPrompt = { ...gatedFlow(), '9': g('dangling') }
+      expect(outputReadsOf(p)).toEqual({ '4': ['1', '2', '3', '4'], '5': ['1', '5'] })
+    })
+    it('delivered only when an output that ran is, or reads, a node that made something', () => {
+      const reads = outputReadsOf(gatedFlow())
+      expect(deliveredToOutput(reads, new Set(['1', '5']), new Set(['1']))).toBe(true)
+      expect(deliveredToOutput(reads, new Set(['1']), new Set(['1'])), 'the image made, its card never ran').toBe(false)
+      expect(deliveredToOutput(reads, new Set(['1', '2', '4']), new Set(['1'])), 'the Video card ran, reading the image through the Gate').toBe(true)
+      expect(deliveredToOutput(reads, new Set(['5']), new Set()), 'an output ran, but nothing it reads was made').toBe(false)
+    })
+    it('a Frame render shows its render on the canvas: it is an output, and a finished one delivers itself (R1.5 ruling)', () => {
+      const p: ApiPrompt = { f: { class_type: 'Compositor', inputs: {} }, n: g('x'), s: { class_type: 'SaveImage', inputs: { images: ['f', 0] } } }
+      const reads = outputReadsOf(p)
+      expect(reads).toEqual({ f: ['f'], s: ['f', 's'] })
+      expect(deliveredToOutput(reads, new Set(['f']), new Set(['f']))).toBe(true)
+    })
+    it('a source card (an Image card showing an upload) is an output, but shows nothing the run made', () => {
+      const p: ApiPrompt = { c: upload(), n: g('x') }
+      const reads = outputReadsOf(p)
+      expect(reads).toEqual({ c: ['c'] })
+      expect(deliveredToOutput(reads, new Set(['c', 'n']), new Set(['n']))).toBe(false)
+    })
+  })
+
+  // The image goes out held; the video, sent once it is released, fails at the provider.
+  async function imageThenFailedVideo(prompt: ApiPrompt) {
+    const k = makeKit({ hosted: true })
+    k.fal.holdNext(1)
+    const { runId, promptIds } = await k.engine.startRun({ userId: 'user_1', takes: [prompt], workflow: null, canvasId: null, projectUuid: null, projectName: null })
+    await until(() => k.fal.submitted().length === 1)
+    k.fal.failNext(1)
+    k.fal.release()
+    await k.engine.settled(runId)
+    const run = (await k.store.get(runId))!
+    expect(run.status).toBe('error')
+    expect(k.fal.submitted().map(r => [r.endpoint, r.failWith !== null])).toEqual([['fal-ai/flux/schnell', false], ['minimax/h3/image-to-video', true]])
+    const hold = (k.ledger.hold as any).mock.calls[0]![1] as number
+    return { k, run, hold, promptIds, credits: ofType(k.seen, 'execution_error')[0]!.data.credits }
+  }
+
+  it('UNCHANGED: a paid picture made and shown by its Image card, another branch failing: the picture and the render credit', async () => {
+    const { k, run, credits } = await imageThenFailedVideo(gatedFlow({ bypass: true }))
+    expect(run.takes[0]!.nodes['5']!.status).toBe('done')
+    // flux-schnell 1:1 is 2 credits; the video failed and is not charged.
+    expect(k.ledger.settle).toHaveBeenCalledWith(1, 3, expect.any(String))
+    expect(credits).toBe(3)
+    expect(run.baseCharged).toBe(true)
+  })
+
+  it('CHANGED: a paid picture made but read only by the failed video, nothing shown: the picture only, no render credit (was the picture + 1)', async () => {
+    const p: ApiPrompt = {
+      '1': g('a red fox'),
+      '3': { class_type: 'GenerateVideoNode', inputs: { model: 'hailuo-h3', prompt: 'the fox runs', image: ['1', 0], aspect_ratio: '16:9', duration: '5', seed: 0, model_options: '{}' } },
+      '4': { class_type: 'Video', inputs: { file: '', export: false, filename_prefix: 'video/ComfyUI', source: ['3', 0] } },
+    }
+    const { k, run, hold, credits } = await imageThenFailedVideo(p)
+    expect(run.takes[0]!.nodes['1']!.status).toBe('done')
+    expect(run.takes[0]!.nodes['4']!.status).toBe('skipped')
+    expect(hold, 'the hold still covers the render credit').toBeGreaterThan(3)
+    expect(k.ledger.settle).toHaveBeenCalledWith(1, 2, expect.any(String))
+    expect(credits).toBe(2)
+    expect(run.baseCharged).toBe(false)
+  })
+
+  it('UNCHANGED: a stage that finishes earns the render credit on its charge, as before', async () => {
+    const k = makeKit({ hosted: true })
+    const { runId } = await k.engine.startRun({ userId: 'user_1', takes: [{ '1': g('a'), '5': card('1') }], workflow: null, canvasId: null, projectUuid: null, projectName: null })
+    await k.engine.settled(runId)
+    expect(k.ledger.settle).toHaveBeenCalledWith(1, 3, expect.any(String))
+  })
+})
+
 describe('parallel work', () => {
   // Each shown by an Image card: only what an output reads runs (R3.8 fix round 1).
   const twoBranches: ApiPrompt = showing({
@@ -231,6 +311,9 @@ describe('when things go wrong', () => {
     expect(last!.legs[0]!.status).toBe('done')
     expect(last!.status).not.toBe('running')
     expect(k.deps.reportError).toHaveBeenCalled()
+    // R3.18 ruling: the Image card showing the picture failed, so nothing reached an output: no render credit (local, so no money moves; was set).
+    expect(last!.takes[0]!.nodes['5']!.status).toBe('error')
+    expect(last!.baseCharged).toBe(false)
   })
   it('a failed save right after the result is kept does not turn the finished node into an error', async () => {
     const inner = createFileRunStore(mkdtempSync(join(tmpdir(), 'runner-engine-failing-once-')))

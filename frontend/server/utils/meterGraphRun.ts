@@ -23,6 +23,7 @@ import { MeterRefusalError } from './requestMeter'
 import { createGraphRun, resolveGraphRun, outputKey, ownedOutputKeys, RUNNER_SAVED_INPUT } from './graphRuns'
 import { partialCharge, settleOnCompletion, type HistoryEntry, type RunChargePlan } from './settleWatcher'
 import { FRAME_RENDER_TYPES } from '#shared/runner/eligibility'
+import { outputReadsOf } from './renderCredit'
 import { stripForeignComfyOrgCreds } from './spikeAuth'
 import { resolveWorkerTarget } from './workerRoute'
 import { getLiveLedger } from './ledgerLive'
@@ -802,12 +803,14 @@ export async function handleMeteredPrompt(event: H3Event): Promise<any> {
 
 /**
  * Task G2: the charge plan for a graph — priceGraph's per-node credits and
- * render credit (the figures the hold is the sum of), plus the nodes that are
- * local renders (the Frame), which earn the render credit when they finish.
+ * render credit (the figures the hold is the sum of), the nodes that are
+ * local renders (the Frame), and what each output node reads: on a failure
+ * the render credit rides only on an output that ran and reads a paid node
+ * or a Frame render that ran (renderCredit.ts, the runner's rule).
  */
 export function chargePlanOf(prompt: Record<string, any>, nodes: Record<string, number>, base: number): RunChargePlan {
   const renderNodes = Object.keys(prompt).filter(id => FRAME_RENDER_TYPES.has(prompt[id]?.class_type)).sort()
-  return { nodes: { ...nodes }, base, renderNodes }
+  return { nodes: { ...nodes }, base, renderNodes, outputReads: outputReadsOf(prompt) }
 }
 
 export interface WatchGraphRunIO {
@@ -829,8 +832,11 @@ export interface WatchGraphRunIO {
  * - error (Task G2, user decision 09-25): charge the paid nodes that
  *   finished — partialCharge reads which from the history entry — never
  *   more than the hold; the ledger's settle releases the rest. The render
- *   credit rides on something made, as in the runner. Nothing finished, no
- *   plan, or a history entry that doesn't say what ran: release, as before G2;
+ *   credit rides only on something made and shown, as in the runner: an
+ *   output node that ran reads a paid node or Frame render that ran
+ *   (renderCredit.ts); a failed node that delivered nothing earns none.
+ *   Nothing finished, no plan, or a history entry that doesn't say what
+ *   ran: release, as before G2;
  * - timeout: release (we can't confirm anything ran).
  * Resolves once the ledger work is done.
  */

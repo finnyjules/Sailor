@@ -2,7 +2,8 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { gunzipSync } from 'node:zlib'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { meterGraphSubmit, isPromptPath, holdWithRefusal, outputClassesOf, validateGraphFileRefs } from '../../server/utils/meterGraphRun'
+import { meterGraphSubmit, isPromptPath, holdWithRefusal, outputClassesOf, validateGraphFileRefs, watchGraphRun } from '../../server/utils/meterGraphRun'
+import type { RunChargePlan } from '../../server/utils/settleWatcher'
 import { MeterRefusalError } from '../../server/utils/requestMeter'
 import { UnpricedGraphError, priceGraph as realPriceGraph } from '../../server/utils/priceBook'
 import { normalizeHostedPrompt } from '../../server/utils/hostedPrompt'
@@ -530,5 +531,63 @@ describe('meterGraphSubmit — only what an output reads is priced and held', ()
     const d = deps({ priceGraph: realPriceGraph })
     await meterGraphSubmit('u1', { prompt: { g: gen, i: card, e: dangling }, client_id: 'c1' }, d)
     expect(d.hold).toHaveBeenCalledWith('u1', realPriceGraph({ g: gen, i: card, e: dangling }).credits)
+  })
+})
+
+// R3.18 ruling: on a failed run the render credit rides only on something made and shown
+// (renderCredit.ts, the runner's rule too): an output that ran reads a paid node or Frame render that ran.
+describe('watchGraphRun — a failed run earns the render credit only when it delivered something to an output', () => {
+  const upload = { class_type: 'Image', inputs: { image: 'in.png', export: false, filename_prefix: 'ComfyUI', batch_index: -1 } }
+  const gen = { class_type: 'GenerateImageNode', inputs: { model: 'flux-schnell', prompt: 'a fox', aspect_ratio: '1:1', seed: 0, model_options: '{}' } }
+  const edit = { class_type: 'EditImageNode', inputs: { model: 'Nano Banana 2', input_image: ['g', 0], prompt: 'warmer', output_format: 'png', seed: 0, resolution: '1K' } }
+  const shows = (from: string) => ({ class_type: 'Image', inputs: { image: '', export: false, images: [from, 0], batch_index: -1 } })
+  const failedAt = (executed: string[], nodeId: string) => ({
+    status: { status_str: 'error' as const, completed: false, messages: [['execution_cached', { nodes: [] }], ['execution_error', { node_id: nodeId, executed }]] },
+    outputs: {},
+  })
+  async function submitted(prompt: Record<string, any>) {
+    const d = deps({ priceGraph: realPriceGraph })
+    await meterGraphSubmit('u1', { prompt, client_id: 'c1' }, d)
+    return d.startSettle.mock.calls[0]![0] as { promptId: string; holdId: number; credits: number; plan: RunChargePlan }
+  }
+  function io(entry: unknown) {
+    return {
+      pollHistory: vi.fn(async () => entry as any),
+      settleSuccess: vi.fn(async () => {}),
+      ledger: { settle: vi.fn(async () => ({ settled: true })), release: vi.fn(async () => {}) },
+      resolve: vi.fn(async () => {}),
+      sleep: async () => {}, intervalMs: 0, maxPolls: 2,
+    }
+  }
+
+  it('the plan records what each output reads, from the prompt as priced', async () => {
+    const r = await submitted({ c: upload, g: gen, e: edit, i: shows('e') })
+    expect(r.plan.outputReads).toEqual({ c: ['c'], i: ['e', 'g', 'i'] })
+    expect(r.plan.base).toBe(1)
+  })
+
+  it('CHANGED: the picture made, the edit reading it failed, only the upload\'s card ran: the picture only, no render credit (was + 1)', async () => {
+    const r = await submitted({ c: upload, g: gen, e: edit, i: shows('e') })
+    const x = io(failedAt(['c', 'g'], 'e'))
+    expect(await watchGraphRun(r, x)).toBe('error')
+    expect(x.ledger.settle).toHaveBeenCalledTimes(1)
+    expect(x.ledger.settle.mock.calls[0]![1]).toBe(r.plan.nodes.g)
+    expect(x.ledger.settle.mock.calls[0]![2]).not.toContain('render')
+  })
+
+  it('UNCHANGED: the picture made and shown by its card, the edit failing: the picture and the render credit', async () => {
+    const r = await submitted({ c: upload, g: gen, s: shows('g'), e: edit, i: shows('e') })
+    const x = io(failedAt(['c', 'g', 's'], 'e'))
+    await watchGraphRun(r, x)
+    expect(x.ledger.settle.mock.calls[0]![1]).toBe(r.plan.nodes.g! + 1)
+    expect(x.ledger.settle.mock.calls[0]![2]).toContain('+ 1 render')
+  })
+
+  it('UNCHANGED: a run that succeeds settles the whole hold', async () => {
+    const r = await submitted({ c: upload, g: gen, e: edit, i: shows('e') })
+    const x = io({ status: { status_str: 'success', completed: true, messages: [] } })
+    expect(await watchGraphRun(r, x)).toBe('success')
+    expect(x.settleSuccess).toHaveBeenCalledTimes(1)
+    expect(x.ledger.settle).not.toHaveBeenCalled()
   })
 })

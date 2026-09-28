@@ -20,6 +20,7 @@ import { RUNNER_NOT_ELIGIBLE, type GateChoice, type RunnerMessage } from '#share
 import { RUNNER_TIMEOUTS, type RunnerTimeouts } from '#shared/runner/timeouts'
 import { MeterRefusalError } from '../utils/requestMeter'
 import { BASE_RENDER_CREDITS, UnpricedGraphError } from '../utils/priceBook'
+import { deliveredToOutput, outputReadsOf } from '../utils/renderCredit'
 import { extractGraphPromptText } from '../utils/graphPromptText'
 import { FalError, isProviderNetworkError, percentFromLogs, type FalStatus, type OutputMedia, type ProviderClient } from './falQueue'
 import { ReplicateError } from './replicateQueue'
@@ -989,15 +990,22 @@ export function createEngine(deps: EngineDeps) {
     // Everything this take ran in this leg counts, including nodes that
     // finished before a restart (legNodes above no longer lists those).
     const legIds = stageNodeIds(take, charge, leg.index)
-    let actual = legIds.reduce((s, id) => s + chargeableCredits(take.nodes[id]!, stageKey, id), 0)
-    // A take that failed or was stopped counts only a finished Frame as a
-    // render, as the ComfyUI path's partial charge does (meterGraphRun.ts
-    // chargePlanOf): a Save image or Preview image earns the render credit
-    // only when the take finishes, as on the ComfyUI path's successful settle.
+    const charged = new Map(legIds.map(id => [id, chargeableCredits(take.nodes[id]!, stageKey, id)]))
+    let actual = legIds.reduce((s, id) => s + charged.get(id)!, 0)
+    // A take that failed or was stopped earns the render credit only when it
+    // delivered something to an output (renderCredit.ts, the same rule as the
+    // ComfyUI path's partial charge): the finished calls of a node that failed
+    // are charged, the render credit is not. A take that finished earns it on
+    // any charge or any finished local render, as before.
     const ended = takeOutcome(take, leg.index)
-    const renders = ended === 'error' || ended === 'stopped' ? FRAME_RENDER_TYPES : LOCAL_RENDER_TYPES
-    const rendered = legIds.some(id => take.nodes[id]!.status === 'done' && renders.has(take.nodes[id]!.classType))
-    if (charge.includesBase && (actual > 0 || rendered) && !run.baseCharged) {
+    let earnsBase: boolean
+    if (ended === 'error' || ended === 'stopped') {
+      const ran = new Set(legIds.filter(id => take.nodes[id]!.status === 'done' && !take.nodes[id]!.reused))
+      const made = new Set([...ran].filter(id => charged.get(id)! > 0 || FRAME_RENDER_TYPES.has(take.nodes[id]!.classType)))
+      earnsBase = deliveredToOutput(outputReadsOf(take.prompt), ran, made)
+    }
+    else earnsBase = actual > 0 || legIds.some(id => take.nodes[id]!.status === 'done' && LOCAL_RENDER_TYPES.has(take.nodes[id]!.classType))
+    if (charge.includesBase && earnsBase && !run.baseCharged) {
       actual += BASE_RENDER_CREDITS
       run.baseCharged = true
     }

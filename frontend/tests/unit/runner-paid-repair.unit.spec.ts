@@ -540,6 +540,10 @@ describe('the picture\'s size, before the hold (hosted: the G1 walk)', () => {
     expect(nodes.c!.status).toBe('error')
     expect(nodes.c!.error).toBe(pictureOverMarginWords('UpscaleImageNode'))
     expect(replicate.submitted().map(r => r.endpoint)).toEqual(['nightmareai/real-esrgan'])
+    // R3.18 ruling: the first Upscale is charged; the refused one delivered nothing to its card: no render credit (was + 1).
+    expect(nodes.u!.credits).toBe(1)
+    expect(run.charges.map(c => [c.state, c.actual])).toEqual([['settled', 1]])
+    expect(run.baseCharged).toBe(false)
   })
 
   it('the margin never passes the input cap', () => {
