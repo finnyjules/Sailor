@@ -39,14 +39,17 @@ type Canvas = HTMLCanvasElement
 export interface PixelRevealBox { x: number; y: number; w: number; h: number }
 
 /** One piece of the layer, in FRAME px (before `base`): `box` is the area of the layer's pixels
- *  this piece owns (pieces never overlap, so every pixel is drawn once); `line` is its text
- *  line's vertical band (what a rising piece is clipped to); `lineIdx` / `lineX` place it along
- *  its line for the Typewriter pattern. */
+ *  this piece owns (pieces never overlap, so every pixel is drawn once); `line` is the vertical
+ *  band a rising piece is clipped to — never tighter than `box`, so nothing the piece owns is
+ *  clipped at rest; `lineIdx` / `lineX` place it along its line for the Typewriter pattern;
+ *  `lineH` is how far it starts below rest per unit of rise (its line's pitch), defaulting to
+ *  the band's height. */
 export interface PixelRevealPiece {
   box: PixelRevealBox
   line: { top: number; bottom: number }
   lineIdx: number
   lineX: { l: number; w: number }
+  lineH?: number
 }
 
 // ── shaders ─────────────────────────────────────────────────────────────────────────────────
@@ -269,9 +272,13 @@ export function pixelRevealTextPieces(
       const right = next ? (m.g.r + next.l) / 2 : m.g.r + reach
       out[m.i] = {
         box: { x: fx(left), y: fy(v.top), w: (right - left) * s, h: (v.bottom - v.top) * s },
-        line: { top: fy(li.y - li.band / 2), bottom: fy(li.y + li.band / 2) },
+        // The clip band is the piece's own vertical tile: everything it owns stays visible at
+        // rest (accents, tall ascenders, outline strokes that leave the pitch band), and a
+        // rising piece still emerges from its own slot rather than over its neighbours.
+        line: { top: fy(v.top), bottom: fy(v.bottom) },
         lineIdx: rankOf.get(k)!,
         lineX: { l: fx(li.l), w: (li.r - li.l) * s },
+        lineH: li.band * s,
       }
     })
   }
@@ -346,12 +353,19 @@ const unionBox = (boxes: readonly PixelRevealBox[]): PixelRevealBox => {
 
 /** A frame-px piece in device px: `base` is scale + translate only (the solo pass rejects
  *  anything else), and the solo canvas's origin is the frame's own top-left, so the translate
- *  drops out and only the scale applies. */
+ *  drops out and only the scale applies. The clip band is widened to cover the piece's box, so
+ *  no pixel the piece owns is ever clipped at rest, whatever band it was handed. */
 export function pieceToDevice(p: PixelRevealPiece, base: { a: number; d: number }): Omit<PixelRevealSlot, 'copy' | 'cell' | 'at'> {
   const sx = base.a, sy = base.d
   const rect = { x: p.box.x * sx, y: p.box.y * sy, w: p.box.w * sx, h: p.box.h * sy }
-  const line = { top: p.line.top * sy, bottom: p.line.bottom * sy }
-  return { rect, line, lineIdx: p.lineIdx, lineX: { l: p.lineX.l * sx, w: p.lineX.w * sx }, lineH: line.bottom - line.top }
+  const line = {
+    top: Math.min(p.line.top, p.box.y) * sy,
+    bottom: Math.max(p.line.bottom, p.box.y + p.box.h) * sy,
+  }
+  const lineH = typeof p.lineH === 'number' && Number.isFinite(p.lineH) && p.lineH > 0
+    ? p.lineH * sy
+    : (p.line.bottom - p.line.top) * sy
+  return { rect, line, lineIdx: p.lineIdx, lineX: { l: p.lineX.l * sx, w: p.lineX.w * sx }, lineH }
 }
 
 /**

@@ -318,8 +318,9 @@ describe('pixelRevealTextPieces', () => {
     expect(p[0]!.box.y + p[0]!.box.h).toBeCloseTo(300)
     expect(p[2]!.box.y).toBeCloseTo(300)
     expect(p[0]!.box.y).toBeCloseTo(300 + (-12 - 24) * 2)
-    // The band itself is the line's pitch around its centre.
-    expect(p[0]!.line).toEqual({ top: 300 + (-24) * 2, bottom: 300 })
+    // The clip band is the piece's own vertical tile; the rise distance is the line's pitch.
+    expect(p[0]!.line).toEqual({ top: p[0]!.box.y, bottom: p[0]!.box.y + p[0]!.box.h })
+    expect(p[0]!.lineH).toBeCloseTo(24 * 2)
     expect(p[2]!.lineIdx).toBe(1)
     expect(p[0]!.lineX).toEqual({ l: 500 - 60, w: 100 })
   })
@@ -331,6 +332,25 @@ describe('pixelRevealTextPieces', () => {
     for (let i = 1; i < line0.length; i++) {
       expect(line0[i]!.box.x).toBeCloseTo(line0[i - 1]!.box.x + line0[i - 1]!.box.w)
     }
+  })
+
+  it('a piece taller than its line pitch keeps its full vertical extent in the clip band the painter passes', () => {
+    // One line, font px 20 at line height 0.8: the pitch (16) is shorter than the glyph box.
+    const one = [cell('A', 0, 12, 0, 0, 0)]
+    const [piece] = pixelRevealTextPieces(one, 'letters', 0.8, { x: 0, y: 0, scale: 1 })
+    expect(piece!.box.h).toBeGreaterThan(16)
+    const dev = pieceToDevice(piece!, { a: 2, d: 2 })
+    expect(dev.line.top).toBeLessThanOrEqual(dev.rect.y)
+    expect(dev.line.bottom).toBeGreaterThanOrEqual(dev.rect.y + dev.rect.h)
+    // Even a piece handed a band tighter than its box is widened to the box.
+    const tight = pieceToDevice({ box: { x: 0, y: -20, w: 10, h: 40 }, line: { top: -8, bottom: 8 }, lineIdx: 0, lineX: { l: 0, w: 10 } }, { a: 1, d: 1 })
+    expect(tight.line).toEqual({ top: -20, bottom: 20 })
+    expect(tight.lineH).toBe(16)
+    // And through the plan: the band a slot carries (the shader's uLine) spans its copy rect.
+    const plan = planPixelReveal({ pieces: [dev], fw: 400, fh: 400, pixel: 24, levels: 3, maxTexture: 4096 })!
+    const slot = plan.slots[0]!
+    expect(slot.line.top).toBeLessThanOrEqual(dev.rect.y)
+    expect(slot.line.bottom).toBeGreaterThanOrEqual(dev.rect.y + dev.rect.h)
   })
 
   it('lines: one piece per line', () => {
