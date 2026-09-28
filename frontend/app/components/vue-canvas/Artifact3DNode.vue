@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import { Handle, Position } from '@vue-flow/core'
 import { Box, Loader2, Download, RotateCcw, AlertTriangle } from 'lucide-vue-next'
 import { getTypeColor } from '~/composables/useVueNodes'
 import { registerWebGLContext, type WebGLContextHandle } from '~/lib/webgl/contextRegistry'
+import ContentCard from '~/components/vue-canvas/surfaces/ContentCard.vue'
 
 // 3D Model viewer artifact (Model3D node). Loads a GLB from a URL and renders it
 // in an interactive Three.js viewer (orbit/zoom). The URL is resolved from this
@@ -10,6 +10,7 @@ import { registerWebGLContext, type WebGLContextHandle } from '~/lib/webgl/conte
 // works both after a graph Run and when you simply wire an existing URL in.
 const props = defineProps<{
   id: string
+  selected?: boolean
   data: {
     nodeType: string
     title: string
@@ -194,35 +195,38 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div
-    class="artifact-3d relative w-[300px] select-none"
-    :class="{ 'opacity-45 grayscale': isMuted, 'opacity-85': isBypassed }"
-    :style="{ '--port-color': stringColor } as any"
-    :data-running="data.running || undefined"
-    @pointerenter="on3DHoverEnter" @pointerleave="on3DHoverLeave"
-  >
-    <VueCanvasNodeReadyBadge :node-id="id" />
-    <Handle :id="`input-${glbInIdx}`" type="target" :position="Position.Left"
-      class="!w-3 !h-3 !rounded-full !border-2 !bg-[#1a1a1a]" :style="{ borderColor: stringColor, top: '50%' }" />
-    <Handle :id="`output-${glbOutIdx}`" type="source" :position="Position.Right"
-      class="!w-3 !h-3 !rounded-full !border-2 !bg-[#1a1a1a]" :style="{ borderColor: stringColor, top: '50%' }" />
+  <div class="relative w-fit">
+    <VueCanvasNodePort
+      :id="`input-${glbInIdx}`"
+      type="target"
+      side="left"
+      :data-type="data.inputs?.[glbInIdx]?.type ?? 'STRING'"
+      label="Model"
+      :index="0"
+    />
+    <VueCanvasNodePort
+      :id="`output-${glbOutIdx}`"
+      type="source"
+      side="right"
+      :data-type="data.outputs?.[glbOutIdx]?.type ?? 'STRING'"
+      label="Model"
+      :index="0"
+    />
 
-    <div class="rounded-lg overflow-hidden bg-[#0e0e0e] border"
-      :class="data.error ? 'border-red-500 ring-2 ring-red-500' : 'border-white/10'"
-      style="box-shadow: 0 4px 16px rgba(0,0,0,0.4)">
-      <!-- Header -->
-      <div class="flex items-center gap-1.5 px-2 py-1.5 border-b border-white/5">
-        <Box class="size-3.5 text-white/70 shrink-0" />
-        <span class="text-[11px] text-white/70 font-medium truncate">3D Model</span>
-        <span class="flex-1" />
-        <button class="nopan nodrag size-5 rounded flex items-center justify-center text-white/45 hover:text-white/85 hover:bg-white/[0.08] cursor-pointer disabled:opacity-40"
-          :disabled="!glbUrl" title="Reset view" @click.stop="resetView"><RotateCcw class="size-2.5" /></button>
-        <button class="nopan nodrag size-5 rounded flex items-center justify-center text-white/45 hover:text-white/85 hover:bg-white/[0.08] cursor-pointer disabled:opacity-40"
-          :disabled="!glbUrl" title="Download .glb" @click.stop="downloadGlb"><Download class="size-2.5" /></button>
-      </div>
+    <ContentCard
+      class="artifact-3d relative z-10 w-[300px] select-none"
+      :class="{ 'opacity-45 grayscale': isMuted, 'opacity-85': isBypassed }"
+      :name="data.title || '3D model'"
+      :selected="selected"
+      :data-running="data.running || undefined"
+      :data-error="data.error || undefined"
+      :style="{ '--port-color': stringColor } as any"
+      @pointerenter="on3DHoverEnter" @pointerleave="on3DHoverLeave"
+    >
+      <VueCanvasNodeReadyBadge :node-id="id" />
 
       <!-- Viewer -->
-      <div class="relative bg-[#141414]" :style="{ width: W + 'px', height: H + 'px' }">
+      <div class="relative" :style="{ width: W + 'px', height: H + 'px' }">
         <div ref="stageRef" class="nopan nodrag absolute inset-0 cursor-grab active:cursor-grabbing" />
         <div v-if="!glbUrl" class="absolute inset-0 flex flex-col items-center justify-center gap-1.5 text-white/30 pointer-events-none">
           <Box class="size-8" :stroke-width="1.5" /><span class="text-[10px]">Wire a glb_url · then Run</span>
@@ -234,10 +238,11 @@ onBeforeUnmount(() => {
           <AlertTriangle class="size-3 shrink-0" /> {{ loadError }}
         </div>
       </div>
-    </div>
+
+      <template #actions>
+        <button type="button" title="Reset view" :disabled="!glbUrl" @click.stop="resetView"><RotateCcw class="size-3.5" /></button>
+        <button type="button" title="Download .glb" :disabled="!glbUrl" @click.stop="downloadGlb"><Download class="size-3.5" /></button>
+      </template>
+    </ContentCard>
   </div>
 </template>
-
-<style scoped>
-.artifact-3d[data-running] > div { box-shadow: 0 0 0 2px var(--port-color, #fff), 0 4px 16px rgba(0, 0, 0, 0.4) !important; }
-</style>

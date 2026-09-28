@@ -126,3 +126,35 @@ describe('Text card is a content card', () => {
     expect(t).toMatch(/textarea[\s\S]{0,300}font-normal/)
   })
 })
+
+describe('3D model card is a content card, still orbitable', () => {
+  const s = src('Artifact3DNode.vue')
+  const t = tpl(s)
+  it('wraps its viewer in ContentCard inside a port wrapper', () => {
+    expect(t).toMatch(/^<template>\s*<div class="relative w-fit">/)
+    expect(t).toMatch(/<ContentCard[\s\S]{0,200}class="artifact-3d relative z-10 w-\[300px\] select-none"/)
+    expect(t).toMatch(/:name="data\.title \|\| '3D model'"/)
+    expect(t).toMatch(/:selected="selected"/)
+    expect(t).toMatch(/:data-running="data\.running \|\| undefined"/)
+    expect(t).toMatch(/:data-error="data\.error \|\| undefined"/)
+  })
+  it('no raw Handles; the shared ports use the always-rendered fallback index', () => {
+    expect(t).not.toMatch(/<Handle\b/)
+    expect(t).toMatch(/:id="`input-\$\{glbInIdx\}`"/)
+    expect(t).toMatch(/:id="`output-\$\{glbOutIdx\}`"/)
+  })
+  it('actions hold Reset view and Download .glb', () => {
+    expect(t).toMatch(/#actions[\s\S]*resetView[\s\S]*downloadGlb/)
+  })
+  it('the viewer stage keeps nopan nodrag', () => {
+    expect(t).toMatch(/ref="stageRef" class="nopan nodrag/)
+  })
+  it('dropped the bordered card div, its error ring, and the header row', () => {
+    expect(t).not.toMatch(/border-red-500 ring-2 ring-red-500/)
+    expect(t).not.toMatch(/3D Model<\/span>/)
+    expect(t).not.toMatch(/bg-\[#141414\]/)
+  })
+  it('dropped the scoped [data-running] > div rule (shared CSS draws the ring)', () => {
+    expect(s).not.toMatch(/\[data-running\]\s*>\s*div/)
+  })
+})
