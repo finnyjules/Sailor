@@ -17,6 +17,7 @@ import { hydrateConfig, outputDims, type ShaderStudioConfig } from '~/lib/shader
 import { registerStudioBaker, unregisterStudioBaker } from '~/lib/studio/cascade'
 import { useCanvasCardPreviewLoop } from '~/composables/useCanvasCardPreviewLoop'
 import { useNodeGlass } from '~/composables/useCanvasGlass'
+import { isStudioControl } from '~/lib/canvas/studioDblclick'
 import StudioRenderButton from '~/components/vue-canvas/StudioRenderButton.vue'
 import NodeOpenBar from '~/components/vue-canvas/surfaces/NodeOpenBar.vue'
 
@@ -295,9 +296,8 @@ const varsInputIndex = computed(() =>
 </script>
 
 <template>
-  <!-- Ports live outside the card: the card clips its own content
-       (overflow-hidden), which would otherwise cut the dots and their hit
-       areas in half. As siblings they also tuck in behind it. -->
+  <!-- Ports live outside the card, as its siblings, so they tuck in behind
+       the glass shell instead of sitting inside its body. -->
   <div ref="rootEl" class="studio-node relative w-fit">
     <!-- Input handle (image in) -->
     <VueCanvasNodePort
@@ -323,7 +323,7 @@ const varsInputIndex = computed(() =>
     class="shader-studio-card node-shell relative z-10 w-[240px]"
     :data-glass-blur="glass || undefined"
     :data-selected="selected || undefined"
-    @dblclick.stop="openEditor"
+    @dblclick.stop="(e) => { if (!isStudioControl(e)) openEditor() }"
   >
     <div class="node-shell__head">
       <Sparkles class="node-shell__icon" />

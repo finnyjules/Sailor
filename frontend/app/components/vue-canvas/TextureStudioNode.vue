@@ -9,6 +9,7 @@ import { bakeSheetBlob, renderSheetCanvas } from '~/lib/texturefx/bake'
 import { drawSheet, fitLetterbox, isSheetFramed, sheetFromParams } from '~/lib/texturefx/sheet'
 import type { Params } from '~/lib/spacetype/effect'
 import { registerStudioBaker, unregisterStudioBaker } from '~/lib/studio/cascade'
+import { isStudioControl } from '~/lib/canvas/studioDblclick'
 import { registerStudioFrameSource, unregisterStudioFrameSource } from '~/lib/studio/frameSource'
 import { makeTextureFrameSource } from '~/lib/texturefx/frameSource'
 import { useNodeGlass } from '~/composables/useCanvasGlass'
@@ -139,11 +140,10 @@ const varsInputIndex = computed(() =>
 </script>
 
 <template>
-  <!-- Ports live OUTSIDE the card, exactly as GradientStudioNode does. The card is
-       `overflow-hidden`, so ports rendered inside it get clipped in half — which is why
-       this node's dots looked like they were sitting inside the body while every other
-       node's tuck against the edge. As siblings they also share the shared NodePort
-       treatment (hit area, hover label, type colour) instead of a bare vue-flow Handle. -->
+  <!-- Ports live OUTSIDE the card, exactly as GradientStudioNode does, as its
+       siblings, so they tuck in behind the glass shell instead of sitting inside
+       its body. They also share the shared NodePort treatment (hit area, hover
+       label, type colour) instead of a bare vue-flow Handle. -->
   <div class="studio-node relative w-fit">
     <!-- Variables input: a Collection's VARS output wires here. Rendering this port
          lets the VARS edge anchor so it survives reload (fixes edge-lost-on-restart). -->
@@ -163,7 +163,7 @@ const varsInputIndex = computed(() =>
     class="texture-studio-card node-shell relative z-10 w-[240px]"
     :data-glass-blur="glass || undefined"
     :data-selected="selected || undefined"
-    @dblclick.stop="openEditor"
+    @dblclick.stop="(e) => { if (!isStudioControl(e)) openEditor() }"
   >
 
     <div class="node-shell__head">

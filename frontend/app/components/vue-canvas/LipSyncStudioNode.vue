@@ -6,6 +6,7 @@ import { AudioLines, Play } from 'lucide-vue-next'
 import { hydrateLipSyncSheet } from '~/lib/lipsync/hydrate'
 import { compileLipSync, engineLabel as labelOf, resolveEngine } from '~/lib/lipsync/compile'
 import { useNodeGlass } from '~/composables/useCanvasGlass'
+import { isStudioControl } from '~/lib/canvas/studioDblclick'
 import NodeOpenBar from '~/components/vue-canvas/surfaces/NodeOpenBar.vue'
 
 const props = defineProps<{
@@ -68,7 +69,7 @@ function generate() {
       class="lip-sync-card node-shell relative z-10 w-[240px]"
       :data-glass-blur="glass || undefined"
       :data-selected="selected || undefined"
-      @dblclick.stop="openEditor"
+      @dblclick.stop="(e) => { if (!isStudioControl(e)) openEditor() }"
     >
       <div class="node-shell__head">
         <AudioLines class="node-shell__icon" />

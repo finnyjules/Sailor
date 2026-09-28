@@ -18,6 +18,7 @@ import { registerScene3DRebaker, unregisterScene3DRebaker } from '~/lib/scene3d/
 import { onFieldCatalogReady } from '~/lib/shaderfill/field'
 import { fetchShaderFxCatalog } from '~/lib/shaderfx/catalog'
 import { useNodeGlass } from '~/composables/useCanvasGlass'
+import { isStudioControl } from '~/lib/canvas/studioDblclick'
 import StudioRenderButton from '~/components/vue-canvas/StudioRenderButton.vue'
 import NodeOpenBar from '~/components/vue-canvas/surfaces/NodeOpenBar.vue'
 
@@ -326,7 +327,7 @@ onBeforeUnmount(() => {
       :data-glass-blur="glass || undefined"
       :data-selected="selected || undefined"
       :style="{ minHeight: `${portsMinHeight}px` }"
-      @dblclick.stop="openEditor"
+      @dblclick.stop="(e) => { if (!isStudioControl(e)) openEditor() }"
     >
       <div class="node-shell__head">
         <Box class="node-shell__icon" />
@@ -337,14 +338,10 @@ onBeforeUnmount(() => {
              falls back to the last baked beauty_image, then the empty-scene prompt. -->
         <div class="node-well node-openbar-host aspect-square">
           <img v-if="livePreviewUrl || thumbUrl" :src="livePreviewUrl || thumbUrl || undefined" class="h-full w-full object-cover" alt="" />
-          <button
-            v-else type="button"
-            class="nopan nodrag flex h-full w-full flex-col items-center justify-center gap-1 text-white/35 hover:text-white/60"
-            @click.stop="openEditor"
-          >
-            <Box class="h-6 w-6" />
-            <span class="text-[10px]">Edit scene</span>
-          </button>
+          <div v-else class="absolute inset-0 flex flex-col items-center justify-center gap-1.5 text-white/35 pointer-events-none">
+            <Box class="size-6" :stroke-width="1.5" />
+            <span class="text-[11px]">No scene yet</span>
+          </div>
           <NodeOpenBar>
             <button type="button" class="node-btn nopan nodrag" @click.stop="openEditor">Open</button>
           </NodeOpenBar>

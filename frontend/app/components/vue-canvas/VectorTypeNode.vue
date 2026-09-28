@@ -31,6 +31,7 @@ import { registerStudioBaker, unregisterStudioBaker } from '~/lib/studio/cascade
 import { registerStudioFrameSource, unregisterStudioFrameSource } from '~/lib/studio/frameSource'
 import { useCanvasCardPreviewLoop } from '~/composables/useCanvasCardPreviewLoop'
 import { useNodeGlass } from '~/composables/useCanvasGlass'
+import { isStudioControl } from '~/lib/canvas/studioDblclick'
 import StudioRenderButton from '~/components/vue-canvas/StudioRenderButton.vue'
 import NodeOpenBar from '~/components/vue-canvas/surfaces/NodeOpenBar.vue'
 
@@ -206,8 +207,8 @@ const varsInputIndex = computed(() =>
 </script>
 
 <template>
-  <!-- Ports live outside the card: the card clips its own content
-       (overflow-hidden), which would otherwise cut the dots in half. -->
+  <!-- Ports live outside the card, as its siblings, so they tuck in behind
+       the glass shell instead of sitting inside its body. -->
   <div ref="rootEl" class="studio-node relative w-fit">
     <VueCanvasNodePort
       v-if="varsInputIndex >= 0"
@@ -223,7 +224,7 @@ const varsInputIndex = computed(() =>
       class="vector-type-card node-shell relative z-10 w-[240px]"
       :data-glass-blur="glass || undefined"
       :data-selected="selected || undefined"
-      @dblclick.stop="openEditor"
+      @dblclick.stop="(e) => { if (!isStudioControl(e)) openEditor() }"
     >
       <div class="node-shell__head">
         <Type class="node-shell__icon" />

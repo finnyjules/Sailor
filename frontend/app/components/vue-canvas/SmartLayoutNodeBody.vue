@@ -127,7 +127,7 @@ const summary = computed(() =>
 <template>
   <div class="px-2.5 pb-2.5 pt-1 nopan nodrag flex flex-col gap-[5px]">
     <template v-if="elementCount">
-      <div class="node-well node-openbar-host min-h-[56px]">
+      <div class="node-well node-openbar-host" :class="previewUrl && !hasRunResults ? 'min-h-[56px]' : 'min-h-[38px]'" :data-selected="!(previewUrl && !hasRunResults) || undefined">
         <img v-if="previewUrl && !hasRunResults" :src="previewUrl" class="block w-full" />
         <NodeOpenBar :meta="summary">
           <button type="button" class="node-btn nopan nodrag" @click.stop="emit('edit')">Open</button>

@@ -9,6 +9,7 @@ import { sheetProfile } from '~/lib/shotdirector/prepare'
 import { registerStudioBaker, unregisterStudioBaker } from '~/lib/studio/cascade'
 import { useCharacters } from '~/composables/useCharacters'
 import { useNodeGlass } from '~/composables/useCanvasGlass'
+import { isStudioControl } from '~/lib/canvas/studioDblclick'
 import NodeOpenBar from '~/components/vue-canvas/surfaces/NodeOpenBar.vue'
 
 const props = defineProps<{
@@ -91,7 +92,7 @@ function generate() {
       class="shot-director-card node-shell relative z-10 w-[240px]"
       :data-glass-blur="glass || undefined"
       :data-selected="selected || undefined"
-      @dblclick.stop="openEditor"
+      @dblclick.stop="(e) => { if (!isStudioControl(e)) openEditor() }"
     >
       <div class="node-shell__head">
         <Clapperboard class="node-shell__icon" />

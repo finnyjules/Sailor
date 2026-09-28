@@ -6,11 +6,17 @@ const src = (f: string) => readFileSync(resolve(__dirname, '../../app/components
 const tpl = (s: string) => s.slice(s.indexOf('<template>'))
 /** The class attribute of the element that carries `node-shell`. */
 const shellClass = (t: string) => (t.match(/class="([^"]*\bnode-shell\b[^"]*)"/) ?? [])[1] ?? ''
-/** The opening tag of the element that carries `node-shell`. */
+/** The opening tag of the element that carries `node-shell`. Scans quote-aware
+ * so a `>` inside an attribute value (e.g. an arrow function) doesn't end the tag early. */
 const shellTag = (t: string) => {
   const i = t.search(/class="[^"]*\bnode-shell\b/)
   const start = t.lastIndexOf('<', i)
-  return t.slice(start, t.indexOf('>', i) + 1)
+  let inQuote = false
+  for (let j = start; j < t.length; j++) {
+    if (t[j] === '"') inQuote = !inQuote
+    else if (t[j] === '>' && !inQuote) return t.slice(start, j + 1)
+  }
+  return t.slice(start)
 }
 
 const FAMILY_A = [
@@ -33,7 +39,7 @@ describe.each(FAMILY_A)('%s wears the studio shell', (file) => {
     const tag = shellTag(t)
     expect(tag).toMatch(/:data-glass-blur="glass \|\| undefined"/)
     expect(tag).toMatch(/:data-selected="selected \|\| undefined"/)
-    expect(tag).toMatch(/@dblclick\.stop="openEditor"/)
+    expect(tag).toMatch(/@dblclick\.stop="\(e\) => \{ if \(!isStudioControl\(e\)\) openEditor\(\) \}"/)
     expect(s).toMatch(/selected\?: boolean/)
     expect(s).toMatch(/const glass = useNodeGlass\(\(\) => props\.id\)/)
   })
@@ -68,8 +74,8 @@ describe('3D Studio keeps its own states', () => {
   it('the ports still set the card height', () => {
     expect(tag).toMatch(/minHeight: `\$\{portsMinHeight\}px`/)
   })
-  it('an empty scene still offers its Edit scene button inside the well', () => {
-    expect(t).toMatch(/class="node-well node-openbar-host aspect-square"[\s\S]*Edit scene/)
+  it('an empty scene still offers a non-interactive placeholder inside the well', () => {
+    expect(t).toMatch(/class="node-well node-openbar-host aspect-square"[\s\S]*No scene yet/)
   })
 })
 
@@ -88,7 +94,7 @@ describe.each(['ShotDirectorNode.vue', 'LipSyncStudioNode.vue'])('%s wears the s
   })
   it('opens on double-click, has glass and selection', () => {
     const tag = shellTag(t)
-    expect(tag).toMatch(/@dblclick\.stop="openEditor"/)
+    expect(tag).toMatch(/@dblclick\.stop="\(e\) => \{ if \(!isStudioControl\(e\)\) openEditor\(\) \}"/)
     expect(tag).toMatch(/:data-glass-blur="glass \|\| undefined"/)
     expect(tag).toMatch(/:data-selected="selected \|\| undefined"/)
   })
@@ -147,7 +153,7 @@ describe('Pose Mannequin wears the studio shell', () => {
   it('double-click anywhere opens, except inside a form control', () => {
     expect(tag).toMatch(/@dblclick\.stop="onCardDblclick"/)
     expect(s).toMatch(/function onCardDblclick\(e: MouseEvent\)/)
-    expect(s).toMatch(/closest\('input, textarea, select, button'\)/)
+    expect(s).toMatch(/isStudioControl\(e\)/)
   })
   it('mode switch is the shared segmented control; the mannequin preview has an Open bar; Generate is the footer', () => {
     expect(t).toMatch(/<StudioSegmented/)

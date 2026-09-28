@@ -23,6 +23,7 @@ import { syncImageTextures } from '~/lib/spacetype/imageTextures'
 import { fetchShaderFxCatalog } from '~/lib/shaderfx/catalog'
 import { loadGoogleCatalog } from '~/data/google-fonts'
 import { useNodeGlass } from '~/composables/useCanvasGlass'
+import { isStudioControl } from '~/lib/canvas/studioDblclick'
 import StudioRenderButton from '~/components/vue-canvas/StudioRenderButton.vue'
 import NodeOpenBar from '~/components/vue-canvas/surfaces/NodeOpenBar.vue'
 
@@ -304,10 +305,9 @@ function openEditor() {
 </script>
 
 <template>
-  <!-- Ports live OUTSIDE the card: the card clips its own content (overflow-hidden),
-       which would otherwise cut the port dots and their hit areas in half — the bug
-       that stopped Type Studio connecting. As siblings they tuck in behind it.
-       Mirrors GradientStudioNode / the shared port migration. -->
+  <!-- Ports live OUTSIDE the card, as its siblings, so they tuck in behind the
+       glass shell instead of sitting inside its body. Mirrors GradientStudioNode /
+       the shared port migration. -->
   <div class="studio-node relative w-fit" @pointerenter="onNodeHoverEnter" @pointerleave="onNodeHoverLeave">
     <!-- Variables input: a Collection's VARS output wires here. Rendering this port
          lets the VARS edge anchor so it survives reload (fixes edge-lost-on-restart). -->
@@ -327,7 +327,7 @@ function openEditor() {
       class="space-type-card node-shell relative z-10 w-[240px]"
       :data-glass-blur="glass || undefined"
       :data-selected="selected || undefined"
-      @dblclick.stop="openEditor"
+      @dblclick.stop="(e) => { if (!isStudioControl(e)) openEditor() }"
     >
     <div class="node-shell__head">
       <Sparkles class="node-shell__icon" />
@@ -341,15 +341,12 @@ function openEditor() {
           <canvas v-if="webglOk" ref="canvasEl" class="block w-full" :style="{ height: previewH + 'px' }" />
           <div v-else class="flex w-full items-center justify-center px-3 text-center text-[10px] text-white/40"
                :style="{ height: previewH + 'px' }">3D preview unavailable</div>
-          <div v-if="renderError"
-               class="absolute inset-x-2 bottom-2 rounded border border-amber-400/30 bg-black/70 px-2 py-1 text-[9px] text-amber-200/90">
-            Render error
-          </div>
         </div>
         <NodeOpenBar :meta="text">
           <button type="button" class="node-btn nopan nodrag" @click.stop="openEditor">Open</button>
         </NodeOpenBar>
       </div>
+      <div v-if="renderError" class="truncate px-3 py-1 text-[10px] text-amber-200/90">Render error</div>
     </div>
 
     <div class="node-shell__foot justify-end">

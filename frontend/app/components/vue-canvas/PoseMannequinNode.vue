@@ -5,6 +5,7 @@ import { getTypeColor } from '~/composables/useVueNodes'
 import { useNodeGlass } from '~/composables/useCanvasGlass'
 import NodeOpenBar from '~/components/vue-canvas/surfaces/NodeOpenBar.vue'
 import StudioSegmented from '~/components/vue-canvas/studio/StudioSegmented.vue'
+import { isStudioControl } from '~/lib/canvas/studioDblclick'
 
 // Pose Mannequin artifact node. Shows ONLY the posed mannequin render (the gray
 // figure). The wired character + the generated result live elsewhere: the
@@ -108,7 +109,8 @@ function openEditor() {
 
 /** Double-click anywhere opens the pose editor — but not while editing the prompt. */
 function onCardDblclick(e: MouseEvent) {
-  if ((e.target as HTMLElement | null)?.closest('input, textarea, select, button')) return
+  if (poseSource.value !== 'mannequin') return
+  if (isStudioControl(e)) return
   openEditor()
 }
 </script>
