@@ -6,7 +6,7 @@
  * dispatch `sailor:studioRender` which VueNodeCanvas turns into a cascade.
  */
 import { ref, onMounted, onBeforeUnmount } from 'vue'
-import { Play, ChevronUp, Loader2 } from 'lucide-vue-next'
+import { Play, ChevronDown, Loader2 } from 'lucide-vue-next'
 
 const props = defineProps<{ nodeId: string; busy?: boolean }>()
 const open = ref(false)
@@ -29,32 +29,36 @@ const OPTS = [
 </script>
 
 <template>
-  <div class="relative flex items-stretch gap-px nopan nodrag" data-studio-render>
+  <div class="relative flex items-center gap-0.5 nopan nodrag" data-studio-render>
     <button
-      class="flex flex-1 items-center justify-center gap-1.5 rounded-l bg-white/90 px-2 py-1.5 text-[11px] font-medium text-neutral-900 transition hover:bg-white disabled:opacity-60"
+      type="button"
+      class="node-btn node-btn--primary disabled:opacity-40 disabled:cursor-not-allowed"
       :disabled="busy"
       @click.stop="fire('downstream')"
     >
-      <Loader2 v-if="busy" class="h-3 w-3 animate-spin" />
-      <Play v-else class="h-3 w-3" />
-      {{ busy ? 'Rendering…' : 'Render' }}
+      <Loader2 v-if="busy" class="size-3 animate-spin" />
+      <Play v-else class="size-2.5" fill="currentColor" />
+      <span>{{ busy ? 'Rendering…' : 'Render' }}</span>
     </button>
     <button
-      class="flex items-center justify-center rounded-r bg-white/90 px-1.5 text-neutral-900 transition hover:bg-white disabled:opacity-60"
+      type="button"
+      class="shrink-0 size-5 -mr-1 rounded-[5px] flex items-center justify-center text-white/60 hover:text-white hover:bg-white/[0.08] transition-colors cursor-pointer disabled:opacity-35 disabled:cursor-not-allowed"
       :disabled="busy"
+      aria-label="Render scope"
       title="Render scope"
       @click.stop="open = !open"
     >
-      <ChevronUp class="h-3 w-3 transition-transform" :class="open ? '' : 'rotate-180'" />
+      <ChevronDown class="size-3 transition-transform" :class="open ? 'rotate-180' : ''" />
     </button>
 
     <div
       v-if="open"
-      class="absolute bottom-full right-0 z-50 mb-1 w-48 overflow-hidden rounded-md border border-white/10 bg-neutral-800 shadow-xl"
+      class="absolute bottom-full right-0 z-50 mb-1 w-52 rounded-lg border border-white/10 bg-neutral-900/95 p-1 shadow-xl"
     >
       <button
         v-for="o in OPTS" :key="o.scope"
-        class="block w-full px-3 py-2 text-left text-[11px] text-white/85 transition hover:bg-white/10"
+        type="button"
+        class="block w-full rounded-md px-2.5 py-1.5 text-left text-[12px] text-white/80 transition-colors hover:bg-white/[0.08] hover:text-white"
         @click.stop="fire(o.scope)"
       >{{ o.label }}</button>
     </div>

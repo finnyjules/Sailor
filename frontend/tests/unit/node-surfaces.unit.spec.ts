@@ -63,6 +63,10 @@ describe('node-surfaces.css guards', () => {
     expect(rule('.node-shell')).toMatch(/font-weight: 500/)
     expect(rule('.node-shell__title')).toMatch(/font-weight: 600/)
   })
+  it('the Open bar blurs only while it is up (a hidden blur still costs every frame)', () => {
+    expect(CSS).not.toMatch(/\.canvas-glass--blur \.node-openbar \{/)
+    expect(CSS).toMatch(/\.canvas-glass--blur \.node-openbar-host:hover \.node-openbar,[\s\S]{0,300}backdrop-filter: blur\(14px\) saturate\(1\.3\)/)
+  })
 })
 
 describe('NodeShell', () => {

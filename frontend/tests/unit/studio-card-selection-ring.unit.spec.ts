@@ -22,4 +22,10 @@ describe('studio cards show a selection ring', () => {
     const root = /<div\b[^>]*>/.exec(template)?.[0] ?? ''
     expect(root).toMatch(/class="[^"]*\bstudio-node\b/)
   })
+
+  it('the studio outline follows the 16px glass card', () => {
+    const canvas = readFileSync(resolve(__dirname, '../../app/components/vue-canvas/VueNodeCanvas.vue'), 'utf8')
+    const i = canvas.indexOf('.vue-node-canvas .vue-flow__node.selected .studio-node {')
+    expect(canvas.slice(i, canvas.indexOf('}', i))).toMatch(/outline: 2px solid var\(--action\);\s*outline-offset: 3px;\s*border-radius: 16px;/)
+  })
 })
