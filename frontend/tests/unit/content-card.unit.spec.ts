@@ -158,3 +158,69 @@ describe('3D model card is a content card, still orbitable', () => {
     expect(s).not.toMatch(/\[data-running\]\s*>\s*div/)
   })
 })
+
+describe('Character card is its portrait', () => {
+  const s = src('CharacterNode.vue')
+  const t = tpl(s)
+  it('wraps the portrait in ContentCard inside a port wrapper, shared port', () => {
+    expect(t).toMatch(/^<template>\s*<div class="relative w-fit">/)
+    expect(t).not.toMatch(/<Handle\b/)
+    expect(t).toMatch(/<VueCanvasNodePort[\s\S]{0,150}id="output-0"/)
+    expect(t).toMatch(/<ContentCard[\s\S]{0,200}class="character-card relative z-10 w-\[220px\]"/)
+    expect(t).toMatch(/:name="character\?\.name \|\| 'Character'"/)
+    expect(t).toMatch(/:selected="selected"/)
+  })
+  it('media is a 3:4 portrait box showing the portrait, falling back to the cover', () => {
+    expect(t).toMatch(/aspect-\[3\/4\][\s\S]{0,400}portraitUrl\(character, stateId \?\? undefined\) \?\? coverUrl\(character, stateId \?\? undefined\)/)
+  })
+  it('no character picks in the media box, deleted reads as today\'s message', () => {
+    expect(t).toMatch(/node-btn[\s\S]{0,80}@click\.stop="pickerOpen = true"[\s\S]{0,40}Pick character/)
+    expect(t).toMatch(/was deleted\./)
+  })
+  it('meta is the shortened source count', () => {
+    expect(t).toMatch(/#meta[\s\S]*\{\{ identityCount \}\} source/)
+  })
+  it('actions hold a Change character button, wired to the same picker flag', () => {
+    expect(t).toMatch(/#actions[\s\S]*title="Change character"[\s\S]*pickerOpen = true/)
+  })
+  it('keeps the look select and the missing-refs warning below the box', () => {
+    expect(t).toMatch(/#below[\s\S]*@change="onLookChange"/)
+    expect(t).toMatch(/No reference photos — add some in the Characters panel\./)
+  })
+  it('the picker modal stays wired to the same handlers', () => {
+    expect(t).toMatch(/<CharacterPickerModal[\s\S]*@pick="pick"[\s\S]*@close="pickerOpen = false"/)
+  })
+  it('dropped the AtSign-less header row and the bordered frame div', () => {
+    expect(t).not.toMatch(/border-white\/10 bg-neutral-900 text-white shadow-lg/)
+    expect(t).not.toMatch(/Character<\/span>/)
+  })
+})
+
+describe('Reference card is its picture', () => {
+  const s = src('ReferenceNode.vue')
+  const t = tpl(s)
+  it('wraps the thumbnail in ContentCard inside a port wrapper, shared port', () => {
+    expect(t).toMatch(/^<template>\s*<div class="relative w-fit">/)
+    expect(t).not.toMatch(/<Handle\b/)
+    expect(t).toMatch(/<VueCanvasNodePort[\s\S]{0,150}id="output-0"/)
+    expect(t).toMatch(/<ContentCard[\s\S]{0,200}class="reference-card relative z-10 w-\[200px\]"/)
+    expect(t).toMatch(/:name="refName \? '@' \+ refName : 'Reference'"/)
+    expect(t).toMatch(/:selected="selected"/)
+  })
+  it('keeps the pinned picker button text and the thumbnail src expression', () => {
+    expect(t).toMatch(/Pick a reference…/)
+    expect(t).toMatch(/:src="thumbUrl"/)
+    expect(t).toMatch(/aspect-square object-cover/)
+  })
+  it('keeps the pinned @<name> list and the empty-state text', () => {
+    expect(t).toMatch(/@\{\{ n \}\}/)
+    expect(t).toMatch(/No references yet/)
+  })
+  it('actions hold a Change reference button toggling the same picking flag', () => {
+    expect(t).toMatch(/#actions[\s\S]*title="Change reference"[\s\S]*picking = !picking/)
+  })
+  it('dropped the AtSign import and the bordered frame div', () => {
+    expect(s).not.toMatch(/AtSign/)
+    expect(t).not.toMatch(/border-white\/10 bg-neutral-900 text-white shadow-lg/)
+  })
+})

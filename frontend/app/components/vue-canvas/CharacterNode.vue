@@ -2,19 +2,21 @@
 // Character — canvas card. A castable person from the registry (Task 5);
 // wires its CHARACTER output into a Shot Director's cast_1/2/3 inputs.
 import { computed, ref } from 'vue'
-import { Handle, Position } from '@vue-flow/core'
-import { Drama } from 'lucide-vue-next'
+import { Drama, Replace } from 'lucide-vue-next'
 import { useCharacters } from '~/composables/useCharacters'
 import CharacterPickerModal from '~/components/vue-canvas/CharacterPickerModal.vue'
+import ContentCard from '~/components/vue-canvas/surfaces/ContentCard.vue'
 import { emitCharacterEvent } from '~/lib/characters/bus'
 import { normalizeStateId, pickState, identityRefs, sortStatesLockedFirst, type CharacterState } from '#shared/characters/types'
 import { readiness } from '~/lib/characters/readiness'
 
 const props = defineProps<{
   id: string
+  selected?: boolean
   data: {
     nodeType: string
     title?: string
+    outputs?: { name: string; type: string; links: number[] | null }[]
     properties?: Record<string, any>
   }
 }>()
@@ -78,62 +80,63 @@ function onLookChange(e: Event) {
 </script>
 
 <template>
-  <div class="relative w-[220px] overflow-hidden rounded-xl border border-white/10 bg-neutral-900 text-white shadow-lg">
-    <!-- Output handle -->
-    <Handle
-      id="output-0" type="source" :position="Position.Right"
-      class="!h-3 !w-3 !rounded-full !border-2 !border-white/30 !bg-[#1a1a1a]"
-      :style="{ top: '50%' }"
+  <div class="relative w-fit">
+    <VueCanvasNodePort
+      id="output-0"
+      type="source"
+      side="right"
+      :data-type="data.outputs?.[0]?.type ?? 'CHARACTER'"
+      label="Character"
+      :index="0"
     />
 
-    <!-- Header -->
-    <div class="flex items-center gap-2 border-b border-white/10 px-3 py-2">
-      <Drama class="h-3.5 w-3.5 text-white/70" />
-      <span class="text-xs font-medium text-white/80">Character</span>
-    </div>
+    <ContentCard
+      class="character-card relative z-10 w-[220px]"
+      :name="character?.name || 'Character'"
+      :selected="selected"
+    >
+      <template #meta>
+        <span v-if="character" class="shrink-0 text-white/30">{{ identityCount }} source{{ identityCount === 1 ? '' : 's' }}</span>
+      </template>
 
-    <!-- Body -->
-    <div class="px-3 py-2.5">
-      <template v-if="character">
-        <div class="flex items-center gap-2">
-          <img
-            v-if="portraitUrl(character, stateId ?? undefined) ?? coverUrl(character, stateId ?? undefined)"
-            :src="portraitUrl(character, stateId ?? undefined) ?? coverUrl(character, stateId ?? undefined)!" :alt="character.name"
-            class="h-10 w-10 shrink-0 rounded object-cover"
-          >
-          <div v-else class="flex h-10 w-10 shrink-0 items-center justify-center rounded bg-white/[0.06]">
-            <Drama class="h-4 w-4 text-white/30" />
-          </div>
-          <div class="min-w-0">
-            <p class="truncate text-[12px] text-white/90" :title="character.name">{{ character.name }}</p>
-            <p class="text-[10px] text-white/40">{{ identityCount }} identity source{{ identityCount === 1 ? '' : 's' }}</p>
-          </div>
+      <div class="aspect-[3/4] flex items-center justify-center">
+        <img
+          v-if="character && (portraitUrl(character, stateId ?? undefined) ?? coverUrl(character, stateId ?? undefined))"
+          :src="portraitUrl(character, stateId ?? undefined) ?? coverUrl(character, stateId ?? undefined)!" :alt="character.name"
+          class="w-full h-full object-cover"
+        >
+        <div v-else-if="character" class="flex h-10 w-10 items-center justify-center rounded bg-white/[0.06]">
+          <Drama class="h-4 w-4 text-white/30" />
         </div>
+        <p v-else-if="slug" class="px-3 text-center text-[11px] leading-tight text-red-400/80">
+          Character "{{ binding?.name || slug }}" was deleted.
+        </p>
+        <button v-else type="button" class="node-btn nopan nodrag" @click.stop="pickerOpen = true">
+          Pick character
+        </button>
+      </div>
+
+      <template #actions>
+        <button v-if="character" type="button" title="Change character" @click.stop="pickerOpen = true">
+          <Replace class="size-3.5" />
+        </button>
+      </template>
+
+      <template #below>
         <!-- Look select: only when the character has more than one look -->
         <select
-          v-if="character.states.length > 1"
+          v-if="character && character.states.length > 1"
           :value="stateId ?? character.states.find(v => v.id === 'default')?.id ?? ''"
-          class="mt-2 w-full rounded border border-white/10 bg-[#0e0e10] px-1.5 py-1 text-[11px] text-white/70 outline-none focus:border-white/25"
+          class="nopan nodrag mt-1.5 w-full h-8 rounded-md bg-white/[0.03] px-2 text-[12px] text-white/80"
           @change="onLookChange"
         >
-          <option v-for="v in sortedLookStates" :key="v.id" :value="v.id" class="bg-neutral-900">{{ lookOptionLabel(v) }}</option>
+          <option v-for="v in sortedLookStates" :key="v.id" :value="v.id">{{ lookOptionLabel(v) }}</option>
         </select>
-        <p v-if="!identityCount" class="mt-1.5 text-[10px] leading-tight text-amber-400/80">
+        <p v-if="character && !identityCount" class="mt-1.5 text-[10px] leading-tight text-amber-400/80">
           No reference photos — add some in the Characters panel.
         </p>
       </template>
-      <p v-else-if="slug" class="text-[11px] leading-tight text-red-400/80">
-        Character "{{ binding?.name || slug }}" was deleted.
-      </p>
-      <p v-else class="text-[11px] text-white/40">No character picked.</p>
-
-      <button
-        class="mt-2 w-full rounded bg-white/10 px-2.5 py-1.5 text-[11px] text-white/80 transition hover:bg-white/20"
-        @click.stop="pickerOpen = true"
-      >
-        {{ character ? 'Change' : 'Pick character' }}
-      </button>
-    </div>
+    </ContentCard>
 
     <CharacterPickerModal v-if="pickerOpen" :exclude-slugs="[]" @pick="pick" @close="pickerOpen = false" />
   </div>
