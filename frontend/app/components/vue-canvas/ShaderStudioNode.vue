@@ -1,7 +1,7 @@
 <!-- frontend/app/components/vue-canvas/ShaderStudioNode.vue -->
 <script setup lang="ts">
 import { computed, inject, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { Pencil, Sparkles } from 'lucide-vue-next'
+import { Sparkles } from 'lucide-vue-next'
 import { fetchShaderFxCatalog, resolveEffectId, useShaderCatalog } from '~/lib/shaderfx/catalog'
 import { shaderFx } from '~/lib/shaderfx/renderer'
 import type { EffectDef } from '~/lib/shaderfx/types'
@@ -16,12 +16,17 @@ import { loadImage } from '~/lib/shaderstudio/source'
 import { hydrateConfig, outputDims, type ShaderStudioConfig } from '~/lib/shaderstudio/types'
 import { registerStudioBaker, unregisterStudioBaker } from '~/lib/studio/cascade'
 import { useCanvasCardPreviewLoop } from '~/composables/useCanvasCardPreviewLoop'
+import { useNodeGlass } from '~/composables/useCanvasGlass'
 import StudioRenderButton from '~/components/vue-canvas/StudioRenderButton.vue'
+import NodeOpenBar from '~/components/vue-canvas/surfaces/NodeOpenBar.vue'
 
 const props = defineProps<{
   id: string
+  selected?: boolean
   data: { nodeType: string; title?: string; mode?: number; properties?: Record<string, any>; studioBusy?: boolean; inputs?: { name?: string }[] }
 }>()
+
+const glass = useNodeGlass(() => props.id)
 
 const PREVIEW_W = 220
 const injectedEdges = inject<any>('vueFlowEdges', null)
@@ -315,29 +320,29 @@ const varsInputIndex = computed(() =>
     />
 
   <div
-    class="relative z-10 w-[220px] overflow-hidden rounded-xl border border-white/10 bg-neutral-900 text-white shadow-lg"
+    class="shader-studio-card node-shell relative z-10 w-[240px]"
+    :data-glass-blur="glass || undefined"
+    :data-selected="selected || undefined"
     @dblclick.stop="openEditor"
   >
-    <div class="flex items-center gap-2 border-b border-white/10 px-3 py-2">
-      <Sparkles class="h-3.5 w-3.5 text-white/70" />
-      <span class="text-xs font-medium text-white/80">Shader studio</span>
-      <span class="ml-auto truncate text-[10px] tracking-wide text-white/40">{{ headerEffectName }}</span>
+    <div class="node-shell__head">
+      <Sparkles class="node-shell__icon" />
+      <span class="node-shell__title">Shader studio</span>
     </div>
-
-    <div class="flex items-center justify-center bg-neutral-950 aspect-video">
-      <canvas ref="canvasEl" class="block max-h-full max-w-full" />
-      <span v-if="!baseImage" class="absolute text-[10px] text-white/30">Connect or add an image</span>
+    <div class="node-shell__body">
+      <div class="node-well node-openbar-host">
+        <div class="relative flex items-center justify-center aspect-video">
+          <canvas ref="canvasEl" class="block max-h-full max-w-full" />
+          <span v-if="!baseImage" class="absolute text-[10px] text-white/30">Connect or add an image</span>
+        </div>
+        <NodeOpenBar :meta="headerEffectName">
+          <button type="button" class="node-btn nopan nodrag" @click.stop="openEditor">Open</button>
+        </NodeOpenBar>
+      </div>
+      <div v-if="glError" class="px-3 py-1 text-[10px] text-red-300/90 truncate" :title="glError">{{ glError }}</div>
     </div>
-    <div v-if="glError" class="px-3 py-1 text-[10px] text-red-300/90 truncate" :title="glError">{{ glError }}</div>
-
-    <div class="border-t border-white/10 p-2 flex items-center gap-1.5">
-      <button
-        class="flex flex-1 items-center justify-center gap-1.5 rounded bg-white/10 px-2.5 py-1.5 text-[11px] text-white/80 transition hover:bg-white/20"
-        @click.stop="openEditor"
-      >
-        <Pencil class="h-3 w-3" /> Edit
-      </button>
-      <StudioRenderButton class="flex-1" :node-id="id" :busy="!!data?.studioBusy" />
+    <div class="node-shell__foot justify-end">
+      <StudioRenderButton :node-id="id" :busy="!!data?.studioBusy" />
     </div>
   </div>
   </div>

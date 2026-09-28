@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { Pencil, Sparkles } from 'lucide-vue-next'
+import { Sparkles } from 'lucide-vue-next'
 import { gradientFx } from '~/lib/gradientfx/renderer'
 import { defaultConfig } from '~/lib/gradientfx/randomize'
 import { aspectRatio, LAYOUT_LABELS, type GradientConfig } from '~/lib/gradientfx/types'
@@ -8,7 +8,9 @@ import { registerStudioBaker, unregisterStudioBaker } from '~/lib/studio/cascade
 import { registerStudioFrameSource, unregisterStudioFrameSource } from '~/lib/studio/frameSource'
 import { makeGradientFrameSource } from '~/lib/gradientfx/frameSource'
 import { useCanvasCardPreviewLoop } from '~/composables/useCanvasCardPreviewLoop'
+import { useNodeGlass } from '~/composables/useCanvasGlass'
 import StudioRenderButton from '~/components/vue-canvas/StudioRenderButton.vue'
+import NodeOpenBar from '~/components/vue-canvas/surfaces/NodeOpenBar.vue'
 
 // Gradient Studio — a frontend-only config node (no backend class_type, never
 // executes). The card shows a live preview from the saved config; "Edit" opens
@@ -16,6 +18,7 @@ import StudioRenderButton from '~/components/vue-canvas/StudioRenderButton.vue'
 // back to node.data.properties.sailor_gradientStudio.
 const props = defineProps<{
   id: string
+  selected?: boolean
   data: {
     nodeType: string
     title?: string
@@ -25,6 +28,8 @@ const props = defineProps<{
     inputs?: { name?: string }[]
   }
 }>()
+
+const glass = useNodeGlass(() => props.id)
 
 const PREVIEW_W = 220
 // Backing-store ceiling. The card animates via rAF when flow speed > 0, so the
@@ -148,31 +153,26 @@ const varsInputIndex = computed(() =>
     />
 
   <div
-    class="relative z-10 w-[220px] overflow-hidden rounded-xl border border-white/10 bg-neutral-900 text-white shadow-lg"
+    class="gradient-studio-card node-shell relative z-10 w-[240px]"
+    :data-glass-blur="glass || undefined"
+    :data-selected="selected || undefined"
     @dblclick.stop="openEditor"
   >
-    <!-- Header -->
-    <div class="flex items-center gap-2 border-b border-white/10 px-3 py-2">
-      <Sparkles class="h-3.5 w-3.5 text-white/70" />
-      <span class="text-xs font-medium text-white/80">Gradient Studio</span>
-      <span class="ml-auto truncate text-[10px] tracking-wide text-white/40">{{ LAYOUT_LABELS[config.canvas.layout] ?? config.canvas.layout }}</span>
+    <div class="node-shell__head">
+      <Sparkles class="node-shell__icon" />
+      <span class="node-shell__title">Gradient Studio</span>
     </div>
-
-    <!-- Live preview -->
-    <div class="flex items-center justify-center bg-neutral-950">
-      <canvas ref="canvasEl" class="block w-full" :style="{ height: previewH + 'px' }" />
+    <div class="node-shell__body">
+      <div class="node-well node-openbar-host">
+        <canvas ref="canvasEl" class="block w-full" :style="{ height: previewH + 'px' }" />
+        <NodeOpenBar :meta="LAYOUT_LABELS[config.canvas.layout] ?? config.canvas.layout">
+          <button type="button" class="node-btn nopan nodrag" @click.stop="openEditor">Open</button>
+        </NodeOpenBar>
+      </div>
+      <div v-if="glError" class="px-3 py-1 text-[10px] text-red-300/90 truncate" :title="glError">{{ glError }}</div>
     </div>
-    <div v-if="glError" class="px-3 py-1 text-[10px] text-red-300/90 truncate" :title="glError">{{ glError }}</div>
-
-    <!-- Edit -->
-    <div class="border-t border-white/10 p-2 flex items-center gap-1.5">
-      <button
-        class="flex flex-1 items-center justify-center gap-1.5 rounded bg-white/10 px-2.5 py-1.5 text-[11px] text-white/80 transition hover:bg-white/20"
-        @click.stop="openEditor"
-      >
-        <Pencil class="h-3 w-3" /> Edit
-      </button>
-      <StudioRenderButton class="flex-1" :node-id="id" :busy="!!data?.studioBusy" />
+    <div class="node-shell__foot justify-end">
+      <StudioRenderButton :node-id="id" :busy="!!data?.studioBusy" />
     </div>
   </div>
   </div>

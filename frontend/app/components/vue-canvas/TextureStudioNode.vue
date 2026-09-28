@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { Layers, Pencil } from 'lucide-vue-next'
+import { Layers } from 'lucide-vue-next'
 import { textureFx } from '~/lib/texturefx/renderer'
 import { preloadStylize, stylizeTile } from '~/lib/texturefx/stylize'
 import { textureDefaults } from '~/lib/texturefx/controls'
@@ -11,7 +11,9 @@ import type { Params } from '~/lib/spacetype/effect'
 import { registerStudioBaker, unregisterStudioBaker } from '~/lib/studio/cascade'
 import { registerStudioFrameSource, unregisterStudioFrameSource } from '~/lib/studio/frameSource'
 import { makeTextureFrameSource } from '~/lib/texturefx/frameSource'
+import { useNodeGlass } from '~/composables/useCanvasGlass'
 import StudioRenderButton from '~/components/vue-canvas/StudioRenderButton.vue'
+import NodeOpenBar from '~/components/vue-canvas/surfaces/NodeOpenBar.vue'
 
 // Texture Studio — a frontend-only config node (no backend class_type, never
 // executes). The card shows a live seamless-tile preview from the saved params;
@@ -19,6 +21,7 @@ import StudioRenderButton from '~/components/vue-canvas/StudioRenderButton.vue'
 // its params back to node.data.properties.sailor_textureStudio.
 const props = defineProps<{
   id: string
+  selected?: boolean
   data: {
     nodeType: string
     title?: string
@@ -28,6 +31,8 @@ const props = defineProps<{
     inputs?: { name?: string }[]
   }
 }>()
+
+const glass = useNodeGlass(() => props.id)
 
 const PREVIEW_W = 220
 const PREVIEW_H = 148 // ~3:2
@@ -155,31 +160,28 @@ const varsInputIndex = computed(() =>
     />
 
   <div
-    class="relative z-10 w-[220px] overflow-hidden rounded-xl border border-white/10 bg-neutral-900 text-white shadow-lg"
+    class="texture-studio-card node-shell relative z-10 w-[240px]"
+    :data-glass-blur="glass || undefined"
+    :data-selected="selected || undefined"
     @dblclick.stop="openEditor"
   >
 
-    <!-- Header -->
-    <div class="flex items-center gap-2 border-b border-white/10 px-3 py-2">
-      <Layers class="h-3.5 w-3.5 text-white/70" />
-      <span class="text-xs font-medium text-white/80">Pattern Studio</span>
+    <div class="node-shell__head">
+      <Layers class="node-shell__icon" />
+      <span class="node-shell__title">Pattern Studio</span>
     </div>
 
-    <!-- Live seamless preview -->
-    <div class="flex items-center justify-center bg-neutral-950">
-      <canvas ref="canvasEl" class="block w-full" :style="{ height: PREVIEW_H + 'px' }" />
+    <div class="node-shell__body">
+      <div class="node-well node-openbar-host">
+        <canvas ref="canvasEl" class="block w-full" :style="{ height: PREVIEW_H + 'px' }" />
+        <NodeOpenBar>
+          <button type="button" class="node-btn nopan nodrag" @click.stop="openEditor">Open</button>
+        </NodeOpenBar>
+      </div>
+      <div v-if="glError" class="truncate px-3 py-1 text-[10px] text-red-300/90" :title="glError">{{ glError }}</div>
     </div>
-    <div v-if="glError" class="truncate px-3 py-1 text-[10px] text-red-300/90" :title="glError">{{ glError }}</div>
-
-    <!-- Edit -->
-    <div class="border-t border-white/10 p-2 flex items-center gap-1.5">
-      <button
-        class="flex flex-1 items-center justify-center gap-1.5 rounded bg-white/10 px-2.5 py-1.5 text-[11px] text-white/80 transition hover:bg-white/20"
-        @click.stop="openEditor"
-      >
-        <Pencil class="h-3 w-3" /> Edit
-      </button>
-      <StudioRenderButton class="flex-1" :node-id="id" :busy="!!data?.studioBusy" />
+    <div class="node-shell__foot justify-end">
+      <StudioRenderButton :node-id="id" :busy="!!data?.studioBusy" />
     </div>
   </div>
   </div>
