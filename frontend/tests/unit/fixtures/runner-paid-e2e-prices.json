@@ -1,0 +1,210 @@
+{
+ "note": "Written by tests/unit/runner-paid-e2e.unit.spec.ts with R318_PIN=1: every class whose ComfyUI-path price (priceGraph, no families) differs between 38b4a0672 (before stage R3) and now, per node in the saved projects and per class alone at its catalogue defaults. null: not priced.",
+ "baseline": "38b4a0672",
+ "table": [
+  {
+   "class": "BrainstormIdeasNode",
+   "old": 1,
+   "new": 0,
+   "source": "defaults",
+   "nodes": 1
+  },
+  {
+   "class": "ConsistentFaceNode",
+   "old": 16,
+   "new": 23,
+   "source": "defaults",
+   "nodes": 1
+  },
+  {
+   "class": "ConsistentFaceNode",
+   "old": 16,
+   "new": 23,
+   "source": "saved projects",
+   "nodes": 3
+  },
+  {
+   "class": "DescribeVideoNode",
+   "old": 2,
+   "new": 62,
+   "source": "defaults",
+   "nodes": 1
+  },
+  {
+   "class": "ExtractTextNode",
+   "old": 1,
+   "new": 2,
+   "source": "defaults",
+   "nodes": 1
+  },
+  {
+   "class": "FluxMultiLoRARemoteNode",
+   "old": 8,
+   "new": 10,
+   "source": "defaults",
+   "nodes": 1
+  },
+  {
+   "class": "FluxMultiLoRARemoteNode",
+   "old": 8,
+   "new": 10,
+   "source": "saved projects",
+   "nodes": 7
+  },
+  {
+   "class": "FluxMultiLoRARemoteNode",
+   "old": 8,
+   "new": 20,
+   "source": "saved projects",
+   "nodes": 12
+  },
+  {
+   "class": "GenerateMusicNode",
+   "old": 4,
+   "new": 20,
+   "source": "defaults",
+   "nodes": 1
+  },
+  {
+   "class": "GenerateMusicNode",
+   "old": 4,
+   "new": 20,
+   "source": "saved projects",
+   "nodes": 6
+  },
+  {
+   "class": "GenerateSpeechNode",
+   "old": 45,
+   "new": 0,
+   "source": "defaults",
+   "nodes": 1
+  },
+  {
+   "class": "Hunyuan3DMultiViewNode",
+   "old": 45,
+   "new": 60,
+   "source": "saved projects",
+   "nodes": 1
+  },
+  {
+   "class": "LayerizeGraphicNode",
+   "old": 16,
+   "new": 18,
+   "source": "defaults",
+   "nodes": 1
+  },
+  {
+   "class": "MiniMaxSpeechRemoteNode",
+   "old": 45,
+   "new": 0,
+   "source": "defaults",
+   "nodes": 1
+  },
+  {
+   "class": "MusicGenRemoteNode",
+   "old": 4,
+   "new": 20,
+   "source": "defaults",
+   "nodes": 1
+  },
+  {
+   "class": "PoseMannequin",
+   "old": 10,
+   "new": 0,
+   "source": "defaults",
+   "nodes": 1
+  },
+  {
+   "class": "PoseMannequin",
+   "old": 10,
+   "new": 0,
+   "source": "saved projects",
+   "nodes": 1
+  },
+  {
+   "class": "PoseMannequin",
+   "old": 10,
+   "new": 14,
+   "source": "saved projects",
+   "nodes": 5
+  },
+  {
+   "class": "ReasonStepByStepNode",
+   "old": 2,
+   "new": 0,
+   "source": "defaults",
+   "nodes": 1
+  },
+  {
+   "class": "RestyleWithLoRANode",
+   "old": 50,
+   "new": 61,
+   "source": "defaults",
+   "nodes": 1
+  },
+  {
+   "class": "RestyleWithLoRANode",
+   "old": 50,
+   "new": 61,
+   "source": "saved projects",
+   "nodes": 5
+  },
+  {
+   "class": "RestyleWithLoRANode",
+   "old": 62,
+   "new": 67,
+   "source": "saved projects",
+   "nodes": 1
+  },
+  {
+   "class": "RewriteToneNode",
+   "old": 1,
+   "new": 0,
+   "source": "defaults",
+   "nodes": 1
+  },
+  {
+   "class": "SeedreamLayerizeNode",
+   "old": 51,
+   "new": 173,
+   "source": "defaults",
+   "nodes": 1
+  },
+  {
+   "class": "SplitPhotoLayersNode",
+   "old": 2,
+   "new": 9,
+   "source": "saved projects",
+   "nodes": 2
+  },
+  {
+   "class": "SummarizeTextNode",
+   "old": 1,
+   "new": 0,
+   "source": "defaults",
+   "nodes": 1
+  },
+  {
+   "class": "TextEffectNode",
+   "old": 8,
+   "new": 6,
+   "source": "defaults",
+   "nodes": 1
+  },
+  {
+   "class": "TranslateTextNode",
+   "old": 1,
+   "new": 0,
+   "source": "defaults",
+   "nodes": 1
+  },
+  {
+   "class": "TurntableNode",
+   "old": 75,
+   "new": 135,
+   "source": "defaults",
+   "nodes": 1
+  }
+ ],
+ "refusals": []
+}

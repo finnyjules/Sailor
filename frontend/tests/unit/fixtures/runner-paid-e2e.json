@@ -1,0 +1,771 @@
+{
+ "multi_lora_image": {
+  "answers": [
+   {
+    "logs": "Loading LoRA 1\nDownloading LoRA weights from https://x\nDownloading LoRA weights from https://y\n",
+    "output": [
+     "https://r.test/lora/out.png"
+    ]
+   }
+  ],
+  "calls": [
+   {
+    "endpoint": "lucataco/flux-dev-multi-lora",
+    "payload": {
+     "aspect_ratio": "1:1",
+     "disable_safety_checker": false,
+     "guidance_scale": 3.5,
+     "hf_loras": [
+      "huggingface.co/alice/d",
+      "huggingface.co/alice/one"
+     ],
+     "image": "IMG:image",
+     "lora_scales": [
+      0.6,
+      0.8
+     ],
+     "num_inference_steps": 28,
+     "num_outputs": 1,
+     "output_format": "png",
+     "prompt": "TOK in the park",
+     "prompt_strength": 0.2
+    },
+    "payload_json": "{\"aspect_ratio\": \"1:1\", \"disable_safety_checker\": false, \"guidance_scale\": 3.5, \"hf_loras\": [\"huggingface.co/alice/d\", \"huggingface.co/alice/one\"], \"image\": \"IMG:image\", \"lora_scales\": [0.6, 0.8], \"num_inference_steps\": 28, \"num_outputs\": 1, \"output_format\": \"png\", \"prompt\": \"TOK in the park\", \"prompt_strength\": 0.2}",
+    "provider": "replicate"
+   }
+  ],
+  "class_type": "FluxMultiLoRARemoteNode",
+  "files": {
+   "https://r.test/lora/out.png": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/AAbwOclIFkc5dkdLEB9FduXTaC88Cs6uZQJjuY/xNlUonKjTEaYlI9XbPMSxM2APDv4CQMcuWwhBJ9as3EW37DQP1yAsgp9VUxAuAvP0RNPh/k0jTkboxQ3HDBQk9ZEPQF7yagATOfhG/gyC+vCyeQUxwJDkWhdDPxlpYpgCS6/VLmXgG/W2kkU6gKIF3vv++ZpR3xsqrURCxkQK6MQAAAAASUVORK5CYII="
+  },
+  "gets": [
+   {
+    "status": 200,
+    "url": "https://r.test/lora/out.png"
+   }
+  ],
+  "name": "multi-lora \u00b7 image \u00b7 two links \u00b7 loaded",
+  "output": [
+   {
+    "tensor": {
+     "sha256": "93410b93bfa20f26bf0f9fa7e4296e977b6b39d7140e2830f09799210945a69e",
+     "shape": [
+      1,
+      6,
+      8,
+      3
+     ]
+    }
+   }
+  ],
+  "picture_files": {
+   "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+  },
+  "pictures": [
+   "image"
+  ],
+  "rotate": 0,
+  "rotate_after": 1,
+  "sound_files": {},
+  "sounds": [],
+  "ui": {
+   "animated": [
+    false
+   ],
+   "images": [
+    {
+     "image": {
+      "tensor": {
+       "sha256": "93410b93bfa20f26bf0f9fa7e4296e977b6b39d7140e2830f09799210945a69e",
+       "shape": [
+        1,
+        6,
+        8,
+        3
+       ]
+      }
+     },
+     "prefix": "flux_multilora"
+    }
+   ]
+  },
+  "widgets": {
+   "aspect_ratio": "1:1",
+   "guidance": 3.5,
+   "lora_a": "[None]",
+   "lora_a_url": "",
+   "lora_b": "[None]",
+   "lora_b_url": "huggingface.co/alice/one",
+   "lora_c": "[None]",
+   "lora_c_url": "",
+   "lora_d": "[None]",
+   "lora_d_url": "hf.co/alice/d",
+   "num_inference_steps": 28,
+   "prompt": "TOK in the park",
+   "prompt_strength": 0.2,
+   "scale_a": 0.9,
+   "scale_b": 0.8,
+   "scale_c": 0.7,
+   "scale_d": 0.6,
+   "seed": 0
+  }
+ },
+ "restyle_second": {
+  "answers": [
+   {
+    "output": [
+     "A woman",
+     " in a red coat",
+     " walks a dog in a park."
+    ]
+   },
+   {
+    "output": [
+     "https://r.test/restyle/flux.png"
+    ]
+   },
+   {
+    "output": "illustration"
+   },
+   {
+    "images": [
+     {
+      "height": 6,
+      "url": "https://f.test/restyle/nb-1.png",
+      "width": 8
+     }
+    ]
+   },
+   {
+    "output": "photograph"
+   },
+   {
+    "images": [
+     {
+      "height": 6,
+      "url": "https://f.test/restyle/nb-2.png",
+      "width": 8
+     }
+    ]
+   },
+   {
+    "output": [
+     "An ",
+     "illustration."
+    ]
+   }
+  ],
+  "calls": [
+   {
+    "endpoint": "lucataco/moondream2",
+    "payload": {
+     "image": "IMG:content_image",
+     "prompt": "In one short sentence, describe only the main subject, their clothing, pose and setting. Do not mention photography, the camera, lighting, colours, image quality, the sky or the weather."
+    },
+    "payload_json": "{\"image\": \"IMG:content_image\", \"prompt\": \"In one short sentence, describe only the main subject, their clothing, pose and setting. Do not mention photography, the camera, lighting, colours, image quality, the sky or the weather.\"}",
+    "provider": "replicate"
+   },
+   {
+    "endpoint": "black-forest-labs/flux-dev-lora",
+    "payload": {
+     "disable_safety_checker": false,
+     "guidance": 3.5,
+     "image": "IMG:content_image",
+     "lora_scale": 1.0,
+     "lora_weights": "huggingface.co/alice/style-lora",
+     "num_inference_steps": 28,
+     "num_outputs": 1,
+     "output_format": "png",
+     "prompt": "A woman in a red coat walks a dog in a park.",
+     "prompt_strength": 0.7,
+     "seed": 0
+    },
+    "payload_json": "{\"disable_safety_checker\": false, \"guidance\": 3.5, \"image\": \"IMG:content_image\", \"lora_scale\": 1.0, \"lora_weights\": \"huggingface.co/alice/style-lora\", \"num_inference_steps\": 28, \"num_outputs\": 1, \"output_format\": \"png\", \"prompt\": \"A woman in a red coat walks a dog in a park.\", \"prompt_strength\": 0.7, \"seed\": 0}",
+    "provider": "replicate"
+   },
+   {
+    "endpoint": "lucataco/moondream2",
+    "payload": {
+     "image": "https://r.test/restyle/flux.png",
+     "prompt": "Classify the medium. If it is a real-life photo answer 'photograph'. If it is any kind of drawn, painted, cartoon, comic, anime, cel-shaded or CGI/3D artwork answer 'illustration'. One word."
+    },
+    "payload_json": "{\"image\": \"https://r.test/restyle/flux.png\", \"prompt\": \"Classify the medium. If it is a real-life photo answer 'photograph'. If it is any kind of drawn, painted, cartoon, comic, anime, cel-shaded or CGI/3D artwork answer 'illustration'. One word.\"}",
+    "provider": "replicate"
+   },
+   {
+    "endpoint": "fal-ai/nano-banana-2/edit",
+    "payload": {
+     "image_urls": [
+      "IMG:content_image",
+      "https://r.test/restyle/flux.png"
+     ],
+     "num_images": 1,
+     "output_format": "png",
+     "prompt": "Redraw the first image in the visual art style of the second image. Preserve the first image's composition, subject, pose and layout \u2014 change only the rendering style, colors, texture, lighting and finish. The second image is ONLY a style reference: apply its art style \u2014 its colors, texture, brushwork, lighting and finish \u2014 to the first image strongly and unmistakably, so the restyling is clearly visible. Take none of the second image's subject or content. Do not return the first image unchanged or only lightly altered.",
+     "resolution": "1K"
+    },
+    "payload_json": "{\"image_urls\": [\"IMG:content_image\", \"https://r.test/restyle/flux.png\"], \"num_images\": 1, \"output_format\": \"png\", \"prompt\": \"Redraw the first image in the visual art style of the second image. Preserve the first image's composition, subject, pose and layout \\u2014 change only the rendering style, colors, texture, lighting and finish. The second image is ONLY a style reference: apply its art style \\u2014 its colors, texture, brushwork, lighting and finish \\u2014 to the first image strongly and unmistakably, so the restyling is clearly visible. Take none of the second image's subject or content. Do not return the first image unchanged or only lightly altered.\", \"resolution\": \"1K\"}",
+    "provider": "fal"
+   },
+   {
+    "endpoint": "lucataco/moondream2",
+    "payload": {
+     "image": "https://f.test/restyle/nb-1.png",
+     "prompt": "Classify the medium. If it is a real-life photo answer 'photograph'. If it is any kind of drawn, painted, cartoon, comic, anime, cel-shaded or CGI/3D artwork answer 'illustration'. One word."
+    },
+    "payload_json": "{\"image\": \"https://f.test/restyle/nb-1.png\", \"prompt\": \"Classify the medium. If it is a real-life photo answer 'photograph'. If it is any kind of drawn, painted, cartoon, comic, anime, cel-shaded or CGI/3D artwork answer 'illustration'. One word.\"}",
+    "provider": "replicate"
+   },
+   {
+    "endpoint": "fal-ai/nano-banana-2/edit",
+    "payload": {
+     "image_urls": [
+      "IMG:content_image",
+      "https://r.test/restyle/flux.png"
+     ],
+     "num_images": 1,
+     "output_format": "png",
+     "prompt": "Redraw the first image in the visual art style of the second image. Preserve the first image's composition, subject, pose and layout \u2014 change only the rendering style, colors, texture, lighting and finish. The second image is ONLY a style reference: apply its art style \u2014 its colors, texture, brushwork, lighting and finish \u2014 to the first image strongly and unmistakably, so the restyling is clearly visible. Take none of the second image's subject or content. Do not return the first image unchanged or only lightly altered. IMPORTANT: a previous attempt failed by returning a realistic photograph. The output MUST be a non-photographic illustration in the second image's medium \u2014 illustrated, drawn, painted or 3D-rendered \u2014 and must NOT look like a photo.",
+     "resolution": "1K",
+     "seed": 1
+    },
+    "payload_json": "{\"image_urls\": [\"IMG:content_image\", \"https://r.test/restyle/flux.png\"], \"num_images\": 1, \"output_format\": \"png\", \"prompt\": \"Redraw the first image in the visual art style of the second image. Preserve the first image's composition, subject, pose and layout \\u2014 change only the rendering style, colors, texture, lighting and finish. The second image is ONLY a style reference: apply its art style \\u2014 its colors, texture, brushwork, lighting and finish \\u2014 to the first image strongly and unmistakably, so the restyling is clearly visible. Take none of the second image's subject or content. Do not return the first image unchanged or only lightly altered. IMPORTANT: a previous attempt failed by returning a realistic photograph. The output MUST be a non-photographic illustration in the second image's medium \\u2014 illustrated, drawn, painted or 3D-rendered \\u2014 and must NOT look like a photo.\", \"resolution\": \"1K\", \"seed\": 1}",
+    "provider": "fal"
+   },
+   {
+    "endpoint": "lucataco/moondream2",
+    "payload": {
+     "image": "https://f.test/restyle/nb-2.png",
+     "prompt": "Classify the medium. If it is a real-life photo answer 'photograph'. If it is any kind of drawn, painted, cartoon, comic, anime, cel-shaded or CGI/3D artwork answer 'illustration'. One word."
+    },
+    "payload_json": "{\"image\": \"https://f.test/restyle/nb-2.png\", \"prompt\": \"Classify the medium. If it is a real-life photo answer 'photograph'. If it is any kind of drawn, painted, cartoon, comic, anime, cel-shaded or CGI/3D artwork answer 'illustration'. One word.\"}",
+    "provider": "replicate"
+   }
+  ],
+  "class_type": "RestyleWithLoRANode",
+  "files": {
+   "https://f.test/restyle/nb-1.png": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ABOSSey9Mej/Cd2+3slaHTY/wE4xUv1BxgCLXcAgGR9fH1SXjCc0HzDqqangVUApoxkAibxfJDqY/bneFfLUKrdBLE6dN9niE0sBADY/QAisPP+E6a7FLBEvac9jzoXRp8uxGgQpHCDkyzlyOXf9/5ti8CNQziPtaKMBNygB5chPmjvo8Tyd9oEF0EeGijRJ4Eqcrfci7H9FeHjHpkMAAAAASUVORK5CYII=",
+   "https://f.test/restyle/nb-2.png": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/AdE7WvE4OkwAp/bAFZeOfwv2VgfZLIyT3wCKoTeUEbDFMfTzYWBChH4ZFt8TqL3x6E0Ad/fpsRaOUARyB5C2Zc85uK45ch7dGPI+AElbApYgiyYD3oxbYh+P94YhqPkhkfuZzQDOmuYlooFDQ0Mm4sqw4yuMRI65fBF3+SUCvTlhwt7CM3j2fcQ0mh/9Q4o1LPRf2VLdm/5HwlurZQkAAAAASUVORK5CYII=",
+   "https://r.test/restyle/flux.png": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/AcOqdpIbGzj/c/JF3NBDwwY3e+iNv1NeSAC480AJPzJJWxuIonMNXd4dmsxKNi/QC/wAynULK0Un6s3Zjw4H7aRaRyEUN0HTK9YyArH71I6mq/xdtN1xhtQCaE/AFTYTmuSdKgJ1C0HAZCrCFOdYvVehWAcgqYyiB+E/53YBJBW0SbfpJIHnMSm6zV9dPybfY/VnRgd8wS9C5P5HtF0AAAAASUVORK5CYII="
+  },
+  "gets": [
+   {
+    "status": 200,
+    "url": "https://f.test/restyle/nb-2.png"
+   }
+  ],
+  "name": "restyle \u00b7 illustration \u00b7 second",
+  "output": [
+   {
+    "tensor": {
+     "sha256": "75e7622e03d5babd316020505493d2aae7cd3e07fa868c9d5e90950f03f983e7",
+     "shape": [
+      1,
+      6,
+      8,
+      3
+     ]
+    }
+   }
+  ],
+  "picture_files": {
+   "content_image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+  },
+  "pictures": [
+   "content_image"
+  ],
+  "sound_files": {},
+  "sounds": [],
+  "ui": {
+   "animated": [
+    false
+   ],
+   "images": [
+    {
+     "image": {
+      "tensor": {
+       "sha256": "75e7622e03d5babd316020505493d2aae7cd3e07fa868c9d5e90950f03f983e7",
+       "shape": [
+        1,
+        6,
+        8,
+        3
+       ]
+      }
+     },
+     "prefix": "restyle_lora"
+    }
+   ]
+  },
+  "widgets": {
+   "describe_prompt": "In one short sentence, describe only the main subject, their clothing, pose and setting. Do not mention photography, the camera, lighting, colours, image quality, the sky or the weather.",
+   "extra_style_direction": "",
+   "flux_guidance": 3.5,
+   "flux_prompt_strength": 0.0,
+   "flux_steps": 28,
+   "lora_name": "[None]",
+   "lora_scale": 1.0,
+   "lora_url": "https://huggingface.co/alice/style-lora",
+   "output_format": "png",
+   "resolution": "1K",
+   "seed": 0,
+   "style_strength": 0.5
+  }
+ },
+ "split_frame": {
+  "frame": {
+   "px": "c21vtp9WIdf6x/IodGHf/Da0c6pzuZCjm6W/j6jQNpQf4488figqLkUpQXzMUxA3UCv6lSryK49EFp359K2SxfFnKPUCp20SEP5JEm9BLPtNyOmPDmOrgx1asxYvgclCdA50y2NIMyIToyso6qbXftHLT7IxWQk/QgyFHndYdxy2YmefFP0m5+BusNuyJxw75d11QREJTJs4zhy4S/PWu7RexE8umQYuuowVErhGZPn7aUfICSbcL+ptYEno/Id1IOJJv8SX1TOpHb7O6GqX7jNU/AhUIRugumTs1i8nlIogXlJC3nYpglVhb9irZ3wErw1pIxfM2upZPLs286UeQl9xZXZ3fJwpfkS+cXFHsK3Dz1uBE+5cG3ZaKo4TemumSAULgjdMsGBw90esqpNW4wg86bPZUl+8GeW2TGes0KTeZBqWR/fKyNJwB5+InJhSDyTG/zUlTEOkUE0kHUBa0BCWhflt5yZ5+3pAzmz5SDhvIwDSZyj12GjnOmGm7/l9VNIplkvyHmPWu9+cHDnvsCSMbwRaSoIJ/2xXPNaE7K7Lk3z7Pdp9+tXfs+6jROdfEqklTCu4Y5+N4XEc0Oxu2r2LoVeTM+0Rb5T5EhZMZkaUlc5PLiaOz/jknz288CWju+BxM5nMIzmU440hXGaqp5BmNGNPg0SL2/AnY75YHXfuDdMsdverutNdnSGoLoP6WcVGChVfCxRgCxRgDBNhDQ11vEwU2U1CUV3W9zKrQus3ZrNK4bQkAHfFNCwzEsvwumYiXSZhZtXL1nbQ6b7twVrrkBWeDFhhh2anDhFjDxBkDxBkEA9lVWqeqTqBwhZsno7kLXMgwLVCGKh8m1OhS63G/tQv0wEbEm3Xoyb2dkm+4HOx7VCxjIbcntKqY3rrG6O8JTxNGh1lEwxoFAtpKEFZ5aDh1WI6wqPzJRS3LcAVeFBcCI351cUQv3Hlcorj133viwnKYkRSNcKiC4ua70FKxYiHDyarSn8yLK9uFmciMb8dwKmOtihcwjoZAqN5ZmWqOvNeRulrQyVdQa5sHkfRqmQ4xLvO/DufdKnLZ7vVzefgIBZY5qT00yEQXB2StWUE+ZWQrDwkbwsBr88mzSiHxdAX8ooGu68pzNs/InUh6jnuZwhZttkgvZhZP7LqWLunVyJpO1X4mTjPoC7A3Jwd9ereBifKHsxseD9ydVojKiCMW+mXIVyQjhaHbCIKbE9b18Ke+kefuhoYJ83JliZCxZc16ePDHHOZ4gEPl7uG1KKD1H5PuFWai4HOHY6QXIDFOn823ROXAIYFc4BSA8QOBEI469XtOAN2jmalbSoqEl6xjWvfxbGrYaec6ZF0cY28TH/AS+5x1ZpHnGob0dm0+Gs88kK/Y75rnMhxRJQZ1tbMEjZiLlTYH/Lk4WMk8j+kTaQzGVpKM7vNm17psz3I7bKrFvDs4XIOgI0A03mWlEFA+xfc3wxC2JYCkrMxGQVgvgjyn1Daqspq2TuZhXjYeUFhFCoAQih+1whVntvoAZ4wv4GibkB4gDBgdOnWpCplFLGG86qcg8xHN1CFi7JOLTFJoes4WTjhicOK+7h4n0A/5fEeQX1K1j3xRfm/qK/cViPc0IINo9AUpRQHBnp8A27MaCErnSCN3aF9oWr1uKNTxmwjWxctAW9tPEW/6SFt3ZfPIxh5iE5zvldU2tGpmyEv+lMx4TNY2+9gouD7EsVDoEt6ntajC3Y2dXNh",
+   "sha256": "1b417775027fc1df9ee474944c2073b798bb5a9e0ce38f1d0147dce8f4c2e8dc",
+   "shape": [
+    18,
+    24,
+    3
+   ],
+   "widgets": {
+    "height": 0,
+    "layer1_blend": "normal",
+    "layer1_cloner": "",
+    "layer1_opacity": 1.0,
+    "layer1_protect": false,
+    "layer1_rotation": 0.0,
+    "layer1_scale": 1.0,
+    "layer1_x": 0.0,
+    "layer1_y": 0.0,
+    "layer1_z": 1.0,
+    "layer2_blend": "normal",
+    "layer2_cloner": "",
+    "layer2_opacity": 1.0,
+    "layer2_protect": false,
+    "layer2_rotation": 10.0,
+    "layer2_scale": 0.8,
+    "layer2_x": 0.1,
+    "layer2_y": -0.05,
+    "layer2_z": 2.0,
+    "motion_params": "",
+    "width": 0
+   }
+  },
+  "handed_on": {
+   "background": {
+    "px": "c21wt59XIdj7yPModGLg/Te1Zrd5uZGkhsPeh7PdMZge87c/fSorLUgqQn3NUxE3USz7lirzK5BEFp369a2TxfFnKPYCqG4SEP9JEnBCLPxOyeqPDmSshB5bsBUugcpDdA51zGNIMyIToyso6bXoceXbT7IxWQk/HAeVHHlZdx3AY2efFf4n5+FusNyzKB075t52QREJTJw5zxy4S/TXwLthwFMsmQYuuowVErhGZPn7N1P0AyfgL+ptYUnp/Id1IOJJv8WY0zSvHb7O6WuY9IZY/AhUIRugumXt1i8nlIsgXlJD33cpglhkZuWyZ3wErw1pIxfM2upZPLs286UeQl9xZnd4fJwpfkS+cXFHsK3Dz1uBE+5cG3ZaKo4TemumSAULgjdMsWFx+EetqpRX5Ag86bTaUl+8GeW2TGes0KTeZBqWR/fKyNJwB5+JnJhSDyTG/zUlTEOkUE0kHUBa0BCWhflt5yZ5/HtAzmz5SDhvIwDSZyj17W/2OmGm7/l9VNIplkvyHmPWu9+cHDnvsCSMbwRaSoIJ/2xXPNaE7K7Lk3z7Pdp9+tXfs+6jSfdfEqolTCu4ZKCN4nEc0O1u48SNoVeUM+0Rb5T5IxI2oGK3sPFNLiaOz/jknz288CWju+BxM5nMIzmU440hXGaqp5BmNGNPoVGV3PEnY79YHXfvDdQsd/isvtdenSGpL4T7Y9tDvQamJ0T6G3WGsD/IDgClvU0U2k5CUV3W+DKsQuw3Z7RK4rUkAHfFNCw0E9//u2ciXSZhZtbM1nbQ6r/uwVrrkBWeDFhhwo/IBcjitJ4IN9l2+vWloM7cqjqBwhZsno7kLXMgwLVCGKh8m1OhS63G/tQv0wEbEm7Xoyb2dkq+4HSx9lO2j4nfn9OqY3rrH9rcVrMOffw9gcqdwPNhMVlS5qHi1WI6wqPzJRS3LcAVeFBcCI351cUQv3Hlcorj2H7wiwnKYkVSNsOjC4yb70FKxYmIDyarSn8yLK9uFmciMb8d2sKUuypcwjsZAqN5ZmWqOvNeRulrQyVdQa5sHkfRqmQ4xLvO/TufdKnLZ7vVzujhNjsl5qT00yEQXB2StWUE+ZWQrDwkbwsBr88mzSiHxdEX8ooGu68pzNs/InUh6jnuZwhZttkgvZhZP7LqWLyoVyJpO1b5mjnQoy/C3Jwd9uvfBifKHsxseD9ydVojKiCMW+mXIVyQjxaHbCIKbE9b18Ke+kefuhoYJ83JliZC1o0u7eXGHHSa4gEPl7yH1qSE7Y9PuFWai4LPGXiseG7rPHcy3ROXAIYFc4BSA8QOBUI569XtOAN2jmalbSoqEl6xjWvfxbGre4Or7JN2co28TH/AS+9x1ppInGob0dm0+Ws89UPCbMlyostzRJQZ1tbMEBxfL0/cH/Pk4WMk8j+kTaQzGVpKM7vNm17psz3I8rGsFvDs4nIPgI0A1HmXlEJA/Bjd3wxC2JcCkrMxGQVgvgjyn1Daqspq2TuZhnnZeUFhFCoAQih+1whVntvoAZ4wv4GicD14gDBgdOnWpSplFLGG9KqchM1HN1CGi7JOLTFJoes4WTjhicOK+7h4n0A/5fEeQX1K1z3yRfm/qK/cViPc0IINo9AUpRQHAHGDAGnbaCErnSCN3aF9oWr2uKRUx20jWxctAXBuPEW/6SFt3ZfPIxh5iE5zvldU2tGpmyEv+lMx4TNY2+9gouD7EsVDoEt6ntajC3Y2dXNh",
+    "sha256": "b21f2e15bc2caf42edad526ff0ac18fb1294823e536a693aa90fb248d6817f5b",
+    "shape": [
+     18,
+     24,
+     3
+    ]
+   },
+   "subject": {
+    "px": "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",
+    "sha256": "c33d28cff56c1d8b0e041aaab306f746ed5eacb990b7ecb27dc554538f76e1db",
+    "shape": [
+     18,
+     24,
+     4
+    ]
+   }
+  },
+  "steps": [
+   {
+    "answers": [
+     {
+      "output": "https://r.test/split/cutout.png"
+     },
+     {
+      "output": [
+       "https://r.test/split/background.png"
+      ]
+     }
+    ],
+    "calls": [
+     {
+      "endpoint": "851-labs/background-remover",
+      "payload": {
+       "background_type": "rgba",
+       "format": "png",
+       "image": "IMG:image"
+      },
+      "payload_json": "{\"background_type\": \"rgba\", \"format\": \"png\", \"image\": \"IMG:image\"}",
+      "provider": "replicate"
+     },
+     {
+      "endpoint": "zylim0702/remove-object",
+      "payload": {
+       "image": "IMG:image",
+       "mask": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABgAAAASCAAAAABkh0FCAAAAHUlEQVR4nGP8z4AVPGfCLs7AMCqBAXAFyQN6hBUAuZgC6qn8DtcAAAAASUVORK5CYII="
+      },
+      "payload_json": "{\"image\": \"IMG:image\", \"mask\": \"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABgAAAASCAAAAABkh0FCAAAAHUlEQVR4nGP8z4AVPGfCLs7AMCqBAXAFyQN6hBUAuZgC6qn8DtcAAAAASUVORK5CYII=\"}",
+      "provider": "replicate"
+     }
+    ],
+    "class_type": "SplitPhotoLayersNode",
+    "files": {
+     "https://r.test/split/background.png": "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",
+     "https://r.test/split/cutout.png": "iVBORw0KGgoAAAANSUhEUgAAABgAAAASCAYAAABB7B6eAAABDElEQVR4nLWTsUoDQRRF5/iCjR8QYqFdKisxCFYBC7ExtQiCf6BlPsDGxi6dCBJIKYKNP6BY2lqJiAqCNlbCcGVklWFlzcbdKQ7svp13z7wZlpdO9xqxjJhB7CN2EQ5xjNhBnCIOEFdZPbCJGCF6iLOsNo24Q8xG6454XVz9fknClHlrmjdXQP+Pb6XgfWE95QSDhnk7QWyXbbLJBOd8tHspJ7gME9SxU1fAShDMIe5rDHUxQfAVnkMFDfxHEH6Mx1T30DBvycLJBC61oI24rXrWxPif5/kgyIdXDXURw2pH5Meu2QiCJ0SrxlAX8RYE48MnC/11yXuIw6h4g3jA00Qs5RrWEBclw7cQz59EG89LiEVauwAAAABJRU5ErkJggg=="
+    },
+    "gets": [
+     {
+      "status": 200,
+      "url": "https://r.test/split/cutout.png"
+     },
+     {
+      "status": 200,
+      "url": "https://r.test/split/background.png"
+     }
+    ],
+    "loaded": {
+     "image": {
+      "sha256": "7e5c7cc5ff02abcca13e1c7a6209f84a2cc66498e6a32f1edf82a593b5b9f857",
+      "shape": [
+       18,
+       24,
+       3
+      ]
+     }
+    },
+    "made": {},
+    "name": "split",
+    "output": [
+     {
+      "image": "https://r.test/split/cutout.png"
+     },
+     {
+      "tensor": {
+       "sha256": "b21f2e15bc2caf42edad526ff0ac18fb1294823e536a693aa90fb248d6817f5b",
+       "shape": [
+        1,
+        18,
+        24,
+        3
+       ]
+      }
+     }
+    ],
+    "picture_files": {
+     "image": "iVBORw0KGgoAAAANSUhEUgAAABgAAAASCAIAAADOjonJAAAFLUlEQVR4nAEiBd36AePQna/oBNECeulJVkJ91gKf7A2KSOVlrVx9BOstME0pHwVZ3i0rIpeUuN28mvvYNhL2oUcNV2pvN8ZF9e/1jtO5Ig0gQl010wA4f6UWotEiyPqHVKMGQ7UJ8dbt4ou7dLZnz0kv+iTmLvXxKkTwPC0wNjDswA0zfmc/FY/tNTK8LMblD1XV3MUCY1bbjRMrod4AswWYwcjR7PKT1WULQaFOEO0is/zisOhjMuBsSdHrurGZGkVIvl9bTh6imnjssfal2CDTL3fRNSAi9BrPnYJvh1Ck+3EQ6RsWAu35v3uF4cBhghFnWUeG4+/wuXY9Be3hDh/KxMRi+h4D1lcCD/jxuX3QhFYxx5Fz+Dj8bSNBzLh9tl+cBgTBKEiboys6R4b+egDA9iRdqbIBGWuNxgbjBD5H9e+dqiKHD5yxm3/I2ULIGkz86hqJnmVFVRHgVVCeR3fBJyg5W58p8+bfNAmlau9KvXovKlzKY/UAj/izpfMSX9zG9/7inLhcuevqcBz5piRcLb/AeWRV4opN+s8PT1HikJXQE7wWBf2i0Tkc3hFlyk9P/ZwXC+iMZyMGM6AGuJ7OBFVfDUIfC7lIqjTkjEd6JzjJbaLuHfWE/zcnEwWwzkw41BOuQWBi5zmaXgTlAE1BnUjeWTeJFOLrBOAw9B81jv/nECPhp4cfoAFPYAT3+KVLLEaP+9I5Cj87Sx5gHRmajhYa8JYlvskZEAEkX+5rmx/VNCbg3iSh/hRF/F1CIWizi5wMFz3aI2wL6Hla4hjkUekBqQ6Bs1RaFg3iklvKXvb3FdUVS3G3oW5tHVr9uWxp/iFTP9ov+WavcDVv94R0aZJXNuE2jVqrlXED/IeqwrOiEdTa3edw2tfbAd2z39gGsCz+dqOxBvSbGB9WjGA3JIVNhkN9eNqySjmzCQbB+EPeHsRLWs8U9hYOZwntehVsInqGoNtrfqBKD/AtRFMCrUHidwI4h4wzD7z5ffBNTg+mFij7V+3rmwUXZ2O5otBF30KdhCmsOpHvAW/16AJa7cxUP7b9wM+nuEEHFx3gw6GPhetOQYYZ9psLblECTOAv8It0ISLaDFFiAlh99YnaFc5LR4vXqMy/TRVWvUXNPJVLI6doWQwTgRAINNTS7jmVflL9SaCKeMCaOCbo29sD+aqH8oIrAKibEWfGrGljep1VnMKMA3lHg0Pt0+xVk4Ebx+P4PqY4E5KWotIMZ8LIdioHNVfz1UzlOcKubOBn6APsdcGRRh3dBrBbeuhMRQD5DWaqrE+76wt9hzQoVvTBCJUOn5Xc7VJXAgXJnAA3y3sxRtVQ/O1laz7yTxKXaWkQoRLZAjE+3+Gztoklyvmj7Is6pBwrE9IBY+4hqdpS3iSasO+X1R7ikBlUQLkk7F51yvSAzT+MkBEDrjEEgCwNH3kKJRV6JjQVreIzDZXw8o0S1muDYQpmogvvO7dLMZVLBHomC9PAv4K6SjfdeskVWfosZDwKHDx8ZYDjOMUB2Cka1AhPkQ/2W3i3wSOx2i1oLR3JCb3xgFPoJkuD524SVWTcoG04L+N3mQFHE5d3PKc+6iNGJM1Jr5LuOx0F/kByixbHCTSKLOMF5clWF9rIjkfx5sHLz0cZLvK5Z3YeAkzAVNUIe0u1sc/WQQWcEcawA0QESssv+DVSO7dZG4raGeHoigKXINYil9X0xN5swvEVd7wqwjJX1qZcvO8l6ATEr1vW1nqrPseo0xEKkozmTiaR09oRduKPakbgMw551s6uO74AAAAASUVORK5CYII="
+    },
+    "pictures": [
+     "image"
+    ],
+    "sound_files": {},
+    "sounds": [],
+    "ui": {
+     "animated": [
+      false
+     ],
+     "images": [
+      {
+       "image": {
+        "image": "https://r.test/split/cutout.png"
+       },
+       "prefix": "split_subject"
+      },
+      {
+       "image": {
+        "tensor": {
+         "sha256": "b21f2e15bc2caf42edad526ff0ac18fb1294823e536a693aa90fb248d6817f5b",
+         "shape": [
+          1,
+          18,
+          24,
+          3
+         ]
+        }
+       },
+       "prefix": "split_background"
+      }
+     ]
+    },
+    "widgets": {
+     "background_fill": "LaMa (fast)",
+     "mask_grow": 12
+    }
+   }
+  ]
+ },
+ "summarize_generate": {
+  "steps": [
+   {
+    "answers": [
+     {
+      "__body__": "{\"id\": \"p1\", \"status\": \"succeeded\", \"output\": [\"The keeper\", \" lights the lamp\", \" at dusk\", \" and logs the weather.\"], \"metrics\": {\"input_token_count\": 37, \"output_token_count\": 12, \"predict_time\": 0.5}}"
+     }
+    ],
+    "calls": [
+     {
+      "endpoint": "google/gemini-3-flash",
+      "payload": {
+       "max_output_tokens": 400,
+       "prompt": "The lighthouse keeper climbs the spiral stairs each evening at dusk. He lights the lamp, watches the fishing boats come home through the fog, and writes the weather in his log.",
+       "system_instruction": "You are a precise summarizer. Reply with a single sentence. No preamble. Preserve key facts, names, numbers, and intent. Strip filler. Output the summary directly \u2014 no headers like 'Summary:'.",
+       "temperature": 0.3
+      },
+      "payload_json": "{\"max_output_tokens\": 400, \"prompt\": \"The lighthouse keeper climbs the spiral stairs each evening at dusk. He lights the lamp, watches the fishing boats come home through the fog, and writes the weather in his log.\", \"system_instruction\": \"You are a precise summarizer. Reply with a single sentence. No preamble. Preserve key facts, names, numbers, and intent. Strip filler. Output the summary directly \\u2014 no headers like 'Summary:'.\", \"temperature\": 0.3}",
+      "provider": "replicate"
+     }
+    ],
+    "class_type": "SummarizeTextNode",
+    "gets": [],
+    "name": "summarize",
+    "output": [
+     "The keeper lights the lamp at dusk and logs the weather."
+    ],
+    "picture_files": {},
+    "pictures": [],
+    "sound_files": {},
+    "sounds": [],
+    "ui": {
+     "text": [
+      "The keeper lights the lamp at dusk and logs the weather."
+     ]
+    },
+    "widgets": {
+     "length": "1 sentence",
+     "model": "Gemini 3 Flash",
+     "text": "The lighthouse keeper climbs the spiral stairs each evening at dusk. He lights the lamp, watches the fishing boats come home through the fog, and writes the weather in his log."
+    }
+   },
+   {
+    "answers": [
+     {
+      "images": [
+       {
+        "content_type": "image/png",
+        "height": 8,
+        "url": "https://f.test/e2e/generated.png",
+        "width": 8
+       }
+      ]
+     }
+    ],
+    "calls": [
+     {
+      "endpoint": "fal-ai/flux/schnell",
+      "payload": {
+       "image_size": "square_hd",
+       "num_images": 1,
+       "num_inference_steps": 4,
+       "output_format": "png",
+       "prompt": "The keeper lights the lamp at dusk and logs the weather.",
+       "seed": 7
+      },
+      "payload_json": "{\"image_size\": \"square_hd\", \"num_images\": 1, \"num_inference_steps\": 4, \"output_format\": \"png\", \"prompt\": \"The keeper lights the lamp at dusk and logs the weather.\", \"seed\": 7}",
+      "provider": "fal"
+     }
+    ],
+    "class_type": "GenerateImageNode",
+    "files": {
+     "https://f.test/e2e/generated.png": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAIAAABLbSncAAAA00lEQVR4nAHIADf/AGISN+7B/wIWt+uya3vypYrIcnrjF8d+AQATIMi6YYP5IS9/NImm5m0MGL9+qB3eJxMCmwvFYgYfnmqQx00fVQCR6eqP7M1OktQTBGU8C08CiieaVPYk937Xa0S6M/04pvS/DwG6Tdd5G+cWDid7bSWragYblz0jgCC7tTIC+YlnyhwKOvRN9p+BCSs0DiM3x2lbEU5hAM+nsrLSxHMgvhSeT+ffNOMq6s0XNhXCUwKHDPsdtQjmBlNCDeNmBOj7umQXR3lK86LuJ1h3OXdccwAAAABJRU5ErkJggg=="
+    },
+    "gets": [
+     {
+      "status": 200,
+      "url": "https://f.test/e2e/generated.png"
+     }
+    ],
+    "name": "generate",
+    "output": [
+     {
+      "tensor": {
+       "sha256": "d44916227035e2fe2d94bdf68485249362178e9987d3501975c21ed1fb0bdf5a",
+       "shape": [
+        1,
+        8,
+        8,
+        4
+       ]
+      }
+     }
+    ],
+    "picture_files": {},
+    "pictures": [],
+    "sound_files": {},
+    "sounds": [],
+    "ui": {
+     "animated": [
+      false
+     ],
+     "images": [
+      {
+       "image": {
+        "tensor": {
+         "sha256": "d44916227035e2fe2d94bdf68485249362178e9987d3501975c21ed1fb0bdf5a",
+         "shape": [
+          1,
+          8,
+          8,
+          4
+         ]
+        }
+       },
+       "prefix": "generate_image"
+      }
+     ]
+    },
+    "widgets": {
+     "aspect_ratio": "1:1",
+     "model": "flux-schnell",
+     "model_options": "{}",
+     "prompt": "",
+     "prompt_in": "The keeper lights the lamp at dusk and logs the weather.",
+     "seed": 7
+    }
+   }
+  ]
+ },
+ "upscale_remove_save": {
+  "handed_on": {
+   "upscaled": {
+    "px": "oLew/8ifXv/55K//0aYD/2Nidv8ZfLj/S4bM/8wvOP/Evjz/Qbfl/xpoof9/uvP/gcym//+FFP9yazT/YsBE/+kQSv/jTIP/5C+g/4Ec2/+Z3g3/V+mA/yniPf+Nz1T/FZ5J/+BboP+WYwr/pTaF/8CT9/8CZ1z/j85F/6TgwP9Hto7/UEmF/6oHPv8WlXr/9Zuv/2DExf82JkD/EmIr//iSBf9r6Lj/K5qr/4fD0v/Lx5D/an12/9IOkv/5ARL/casH/3LZ8v8lNrP/xtAe/9+LOf8rfXf/Hspe//M9j/8RgSL/5qAT/yKptv8OcQn/hAfA/3aOEf9jKTX/VR7w/7hECv+pCDj/DaoF/9FoCf/hAA3/fz8j/wu6Vv8K2h7/8Hx2/2aFGP88T13/oWcW/3K1BP/CBt3/cGjm/3BuzP/4KkX/OpXa/6vFQ/9WJfj/vZkk/5puQv8c2xb/euTQ/+1v1/9Xyx//whw0/8+9if+Iuzf/2GMr/8TAvf83mvP/rzuy/zDMb/+VLTT/H1JC/0wBDv8xCZ//qfqA/5Lapf+YtGf/zmam/4n7X/+vLJ//MhVf//ybMP8YU0v/04kn/wHqz/9s0In/QUc0/8ybwP88IP3/li14/86wzv9hTrD/JLkL/81TL/+eFmX/WxgL/2mB7P//xOn/oFU2/1Dpq/+UrRv/v9xx/56mwv/uQx7/dY/S/54oCv96Csv/g+gy/zfzT/9SxML/LpA3/9h1aP/csVP/dEMi/8Fi3f8wGHz/ImgB/4Cho/8Fsyj/xmgW/+3RG//KgZX/Lg5K/5YWuf/PLFr/fXJv/1Po9v8vKUz/2Yap/x/O9/946ov/rcUs/2Iscv9Wy8D/BmbS/+cZ0f/DKfv/xAhq/yCfof8sknf/34E2/0sSzf8nKvP/Hmkg/8RU0P9AzlH/se1A/zS+pf8LrUz/UtvI/zedBv+1x2L/Mhh6/1b/FP/dcu7/5T4q/+yqmv9s433/wBIG/z7jNv/PjPr/bY1q/9dnRf+6ybb/",
+    "sha256": "af0fdb4a3986b892da218e3eef430d13e8867ae8415cca81c218e54d0b2abbb0",
+    "shape": [
+     12,
+     16,
+     4
+    ]
+   }
+  },
+  "saved": {
+   "px": "lx79nwfaA8+hT1EaBP9eXxBsCI0eNqJggT2CsJSVkDog/uepUU94pCMd8cFMESww41vWQzkPvR04vwQngNz420RUXJ6pgkyFblAgqI6LTOj8fIjAD8BRmWcmiYaOuXR+feaIv3kJyUJyVMse4u2zK0CU8Or29GeEt2nT2ThsWNIZuvAd0L/5+gA5Ir+EpmfzV6vZ9kHfrU9i2OOXVM+bB8fV8ckrnixZYHC5x37lxxzNfTqjkxVgCDblfFJ2UoW1XUhauuX5WHg66bykiSAm0puyipbcOLVsrQ2xz7cQgOjIUQ/IL9+9OFkoGp4ji0X5v7rFy8LG6QkGMAO9/NskbP9JQ3ZsaM5F+zG/WGnxd6vA8BlsDzAO9lxzigadncBuijB+4u47YJGtXWhv/Ld/5dIKw+A72+WodicKMQhysOEMShHNAo6/8S9HVn5ChLgF5s8YkGN3leYm4YwNFT+o7JLq0jG4ersSENuMoVEN416MCJZ7mr8sTCHPqzagpLJXcjhZ4ciO9MGu3Rx5FSeH19Vz7ahZKU7blDHZahk5uK5EWr+KVPjsrROptvGzS30bdP/oGY7Ip+97+VwhL1W4yZXgKuUuvNDRBFbNYjFam5c3kjv4B7SUVq8jZyY4vCeYLs4O/KLc9HEnEEzWdJeHz2rMZinIB943+RmTvrEl1pxT053Xtp1UHQiOLBbfaS/SHBidwokpJDSo2BlCm7YXXnUZg0QuODjojEkJUYy95PLBU4fFFx1xDjkIgXeriZj+1z8yW048DZd5S3riSdjCdV2e+FENSJrD7k4lwCwI4QwsJn+/reCdqkEfhQquD4iLnvYydmaZNKzIz9XtQ3dwA9mLxTndp1dX1ZD2sSDg6LcwcjroWISqQOEx36KTLNG1VrvR3/2AQuGnxns2poABP/C0c6nkAK9tTrjeFi5IDtS7w7JFv4V0RJ4hxhxE840pvJ8u5tiNwb5RHYQIVJB7bK/Rry4+33eqh6bxNGAe+epYDxfa095RvpteMFrd1dDK",
+   "sha256": "4d17cb6413e2bc1d9b53ce3ec0e47d7baa2150749de63f35ab5101d246bc6ab6",
+   "shape": [
+    12,
+    16,
+    4
+   ]
+  },
+  "steps": [
+   {
+    "answers": [
+     {
+      "output": [
+       "https://r.test/e2e/upscaled.png"
+      ]
+     }
+    ],
+    "calls": [
+     {
+      "endpoint": "nightmareai/real-esrgan",
+      "payload": {
+       "face_enhance": false,
+       "image": "IMG:image",
+       "scale": 2.0
+      },
+      "payload_json": "{\"face_enhance\": false, \"image\": \"IMG:image\", \"scale\": 2.0}",
+      "provider": "replicate"
+     }
+    ],
+    "class_type": "UpscaleImageNode",
+    "files": {
+     "https://r.test/e2e/upscaled.png": "iVBORw0KGgoAAAANSUhEUgAAABAAAAAMCAIAAADkharWAAACV0lEQVR4nAFMArP9AaC3sCjorjFFUdjCVJK8c7YaQjIKFIGpbPiPBH35qdmxvGVSUgISs365bnPmIPBVEARJWZr6PDnrkPGw7dg2wjL0CwrS+b3BSRyIz/XLvbu2CGoPfOQbXXID4raNZ+kyEnsBR7aOCZP3Wr65bI483wY1aykW1mJ73Dzr5jDac1azwLLzXCknRAS+n7bmaJEcJ/OAAXGrBwEu67NdwaGaaxm7G0zyPvNN59VzMR5Ek9Uf8TwJo+zIU3aWt/KHUe2bJPL1uwG4RArxxC5kos3EvgQQmASePxaMezP/IMjmolh2CaLWykVlGLnRTu5QUdmuYgkABuYCQOY7kY2inhs+hb3v3JkXGy8fESHAcAqy/fNh8UYHhs3XLlZzFgYzFl1OVFjXxywnAa87soGRvWVhxYolDi2vzOUIkXjx4engJQbawjayP7uVuSYxQIPpwMqG0Ry4G7s23AJSrx08BBqsGgCtSX7wH+9lJNkltk7PdAuMBaT/7YkVGwas7Gw3bI0DKbmIAut9YIQBlK0bKy9W38pRUJ1ch0y0KZk43OLBCd5ntAsdG9Fz3Mx1quUxBDzrmJLPTR+7b7afACJoAYChowWzKMZoFu3RG8qBlS4OSpYWuc8sWn1yb1Po9i8pTNmGqR/O93jqi63FLARAxHHWYx0Bm6ohs//WwSoB32/yl1eW875J79zOkXPcuP33QNTrzichSFo5A++D+XkCqYHa/BAIMTc0zq6Rb+9/kveqvdNNuayzDSlkIdGwmegTIHoWCzgqLb8ZJnoFhgsR4+0bJA4h0S8AAAAASUVORK5CYII="
+    },
+    "gets": [
+     {
+      "status": 200,
+      "url": "https://r.test/e2e/upscaled.png"
+     }
+    ],
+    "name": "upscale",
+    "output": [
+     {
+      "image": "https://r.test/e2e/upscaled.png"
+     }
+    ],
+    "picture_files": {
+     "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/AXLe8LkZd2sk4+T67klqfVWt1vQrbDPNqQDqJfg5St+4ySYI9QiEDnGJFdcBiuNEiWUEY3CetTAoh5yb65D1dlc9V8Gle8j/SP//AX7kaVcPBG6yVwtnGfhHkvcf7ypfpvzvngJorlrV9Mr3yshBHzQ3KXjgUCXvo8rldYIC8QESm8TdqdHCF4cs5hpq2FreUtCvMlJjo/VM+PzYNdkAAAAASUVORK5CYII="
+    },
+    "pictures": [
+     "image"
+    ],
+    "sound_files": {},
+    "sounds": [],
+    "ui": null,
+    "widgets": {
+     "creativity": 0.35,
+     "crystal_creativity": 0.0,
+     "crystal_output_format": "png",
+     "face_enhance": false,
+     "model": "Real-ESRGAN",
+     "negative_prompt": "(worst quality, low quality, normal quality:2)",
+     "num_inference_steps": 18,
+     "prompt": "masterpiece, best quality, highres",
+     "resemblance": 0.6,
+     "scale_factor": 2.0,
+     "seed": 0,
+     "topaz_enhance_model": "Standard V2",
+     "topaz_face_creativity": 0.0,
+     "topaz_face_strength": 0.8,
+     "topaz_output_format": "png",
+     "topaz_subject_detection": "None",
+     "topaz_upscale_factor": "2x"
+    }
+   },
+   {
+    "answers": [
+     {
+      "output": [
+       "https://r.test/e2e/cutout.png"
+      ]
+     }
+    ],
+    "calls": [
+     {
+      "endpoint": "851-labs/background-remover",
+      "payload": {
+       "image": "PNG:f68ca4454439ac8a4978df703664bf578fb7963894f82ad227a933e47a9101e5"
+      },
+      "payload_json": "{\"image\": \"PNG:f68ca4454439ac8a4978df703664bf578fb7963894f82ad227a933e47a9101e5\"}",
+      "provider": "replicate"
+     }
+    ],
+    "class_type": "RemoveBackgroundNode",
+    "files": {
+     "https://r.test/e2e/cutout.png": "iVBORw0KGgoAAAANSUhEUgAAABAAAAAMCAYAAABr5z2BAAADF0lEQVR4nAEMA/P8AJce/Z8H2gPPoU9RGgT/Xl8QbAiNHjaiYIE9grCUlZA6IP7nqVFPeKQjHfHBTBEsMONb1kM5D70dOL8EJ4Dc+NsBRFRcnmUu8OfFztQjIDssQG7xPNgTRMnZWGY47SeT6/jvLRRB/CNBg/lLAtxwmegNXqc9v7Zgd5rBdWxVgQOF+QLVZpR/Jz2tdZLpAhf2GxsLWy9RNjIfXLb7sloRxhYniUrvaQqylWMX7hzuqZz4FPGN6Uq5nSH5hH98qXk+5i3jBESOap0Vsf5+OrCaLAU3ahNEkiPEQVkrHdHVzjgKA+XhAUEe4ASOrt/5il3XpRsr3UE9i9IvSSQBc0saa8arIa8CogHpvIdvds3BSAO04NFR2SU+j9Yz+FmKr2bZN+aNQIbC328av1yjWVQ1TtHZLDrsE1D+FXkV/J9w9wd0DJeMdQAMShHNAo6/8S9HVn5ChLgF5s8YkGN3leYm4YwNFT+o7JLq0jG4ersSENuMoVEN416MCJZ7mr8sTCHPqzagpLJXAmbuSBTGADXQf5bG+9Ojz9LvpNUY9rK59W5QTV0E+hDCsnDtWZx+MZsDzipQYj6avej3Up70CXujWiqx64+xBnIAleAq5S680NEEVs1iMVqblzeSO/gHtJRWryNnJji8J5guzg78otz0cScQTNZ0l4fPasxmKcgH3jf5GZO+sSXWnAFT053XY8q3RlLx2PnX2wO8Pa9u8G0Rh3Ifr/UO897+HNpjbOa5H7WkXhHRaQB026E1lqPTVsrqSSLrEGlygReHAdc/Mlt3/ds8Kw9tS9CNSJMUxjbcsKqicuEGi/0+urxMAB6es4G6HuuUP+hgbfADgfDnquvIowI2YjahQXuomxYB2YvFOQQckh746Z9aS1DyBhCSUjEoEnBYia01YrL78hPDjwAqp8VxAqpGOVX/uoYJSjRyavRMPMRquC+p4JAwvgTiOO0MBMId7d+c0GskY8cNeC30vRzuF35w7KVKA3P3ZFsWNHlBXzV8Scd2/tmefquyjx7we97eFU2A3+1CjcL2oq15TXFEFnUAAAAASUVORK5CYII="
+    },
+    "gets": [
+     {
+      "status": 200,
+      "url": "https://r.test/e2e/cutout.png"
+     }
+    ],
+    "loaded": {},
+    "made": {
+     "PNG:f68ca4454439ac8a4978df703664bf578fb7963894f82ad227a933e47a9101e5": {
+      "sha256": "af0fdb4a3986b892da218e3eef430d13e8867ae8415cca81c218e54d0b2abbb0",
+      "shape": [
+       12,
+       16,
+       4
+      ]
+     }
+    },
+    "name": "remove",
+    "output": [
+     {
+      "image": "https://r.test/e2e/cutout.png"
+     }
+    ],
+    "picture_files": {},
+    "pictures": [],
+    "sound_files": {},
+    "sounds": [],
+    "ui": {
+     "animated": [
+      false
+     ],
+     "images": [
+      {
+       "image": {
+        "image": "https://r.test/e2e/cutout.png"
+       },
+       "prefix": "remove_bg"
+      }
+     ]
+    },
+    "widgets": {
+     "model": "851-labs/bg-remover"
+    }
+   }
+  ]
+ }
+}

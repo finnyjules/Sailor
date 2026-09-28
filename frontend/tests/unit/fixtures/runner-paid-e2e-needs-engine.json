@@ -1,0 +1,1596 @@
+{
+ "note": "Written by tests/unit/runner-paid-e2e.unit.spec.ts with R318_PIN=1: each saved project canvas whose needs-engine list (every R3 family off) differs from 38b4a0672, with the nodes that moved: all of them nodes no output reads (R3.8's pruning, a ruled difference).",
+ "baseline": "38b4a0672",
+ "differing": [
+  {
+   "key": "014af19a-fa2c-4ae8-b631-38bcd608fa07#0",
+   "families": "every family but R3's",
+   "moved": [
+    "1785105967724"
+   ]
+  },
+  {
+   "key": "014af19a-fa2c-4ae8-b631-38bcd608fa07#0",
+   "families": "frame + cards",
+   "moved": [
+    "1785105967724"
+   ]
+  },
+  {
+   "key": "026c286c-a051-404a-b3ab-1ec889758b5d#0",
+   "families": "every family but R3's",
+   "moved": [
+    "1785103251341"
+   ]
+  },
+  {
+   "key": "026c286c-a051-404a-b3ab-1ec889758b5d#0",
+   "families": "frame + cards",
+   "moved": [
+    "1785103251341"
+   ]
+  },
+  {
+   "key": "02cad40c-b0c3-4dfb-93f3-34b9a336fb76#0",
+   "families": "every family but R3's",
+   "moved": [
+    "1785885656457"
+   ]
+  },
+  {
+   "key": "02cad40c-b0c3-4dfb-93f3-34b9a336fb76#0",
+   "families": "frame + cards",
+   "moved": [
+    "1785885656457"
+   ]
+  },
+  {
+   "key": "02fc8d3c-6076-49fd-a732-92dec758c5d5#0",
+   "families": "every family but R3's",
+   "moved": [
+    "1790319256839"
+   ]
+  },
+  {
+   "key": "02fc8d3c-6076-49fd-a732-92dec758c5d5#0",
+   "families": "frame + cards",
+   "moved": [
+    "1790319256839"
+   ]
+  },
+  {
+   "key": "03bf05a3-7984-4a66-b30d-e5879c3fb7ec#0",
+   "families": "every family but R3's",
+   "moved": [
+    "1787945591384"
+   ]
+  },
+  {
+   "key": "03bf05a3-7984-4a66-b30d-e5879c3fb7ec#0",
+   "families": "frame + cards",
+   "moved": [
+    "1787945591384"
+   ]
+  },
+  {
+   "key": "05fca450-8c92-4bcd-80fa-80a7508dd80f#0",
+   "families": "frame + cards",
+   "moved": [
+    "1785215028792"
+   ]
+  },
+  {
+   "key": "096270f1-e432-4e9b-81ee-fc4857dd56f0#0",
+   "families": "every family but R3's",
+   "moved": [
+    "1785924126794"
+   ]
+  },
+  {
+   "key": "096270f1-e432-4e9b-81ee-fc4857dd56f0#0",
+   "families": "frame + cards",
+   "moved": [
+    "1785924126794"
+   ]
+  },
+  {
+   "key": "0ca331e1-b090-4de8-9465-317d8b75f769#0",
+   "families": "every family but R3's",
+   "moved": [
+    "1788622460541",
+    "1788622467062"
+   ]
+  },
+  {
+   "key": "0ca331e1-b090-4de8-9465-317d8b75f769#0",
+   "families": "frame + cards",
+   "moved": [
+    "1788622460541",
+    "1788622467062"
+   ]
+  },
+  {
+   "key": "0de37680-efcd-43f0-b133-b4d21856b44e#0",
+   "families": "frame + cards",
+   "moved": [
+    "1785205502698"
+   ]
+  },
+  {
+   "key": "156f8b8c-2316-4e04-a350-12568f7bf536#0",
+   "families": "frame + cards",
+   "moved": [
+    "1786091179379"
+   ]
+  },
+  {
+   "key": "16252a2e-6214-49f7-87be-1af51e480064#0",
+   "families": "every family but R3's",
+   "moved": [
+    "1790319341555"
+   ]
+  },
+  {
+   "key": "16252a2e-6214-49f7-87be-1af51e480064#0",
+   "families": "frame + cards",
+   "moved": [
+    "1790319341555"
+   ]
+  },
+  {
+   "key": "162a14e5-acac-40b6-a964-603df751a5c6#0",
+   "families": "every family but R3's",
+   "moved": [
+    "1785905275884"
+   ]
+  },
+  {
+   "key": "162a14e5-acac-40b6-a964-603df751a5c6#0",
+   "families": "frame + cards",
+   "moved": [
+    "1785905275884"
+   ]
+  },
+  {
+   "key": "17a82d68-a64c-4b80-8e8f-1e3a5ae5a6b9#0",
+   "families": "every family but R3's",
+   "moved": [
+    "1787944764153"
+   ]
+  },
+  {
+   "key": "17a82d68-a64c-4b80-8e8f-1e3a5ae5a6b9#0",
+   "families": "frame + cards",
+   "moved": [
+    "1787944764153"
+   ]
+  },
+  {
+   "key": "17cbef72-8e99-4a2c-accb-edda50212814#0",
+   "families": "every family but R3's",
+   "moved": [
+    "1790583216908"
+   ]
+  },
+  {
+   "key": "17cbef72-8e99-4a2c-accb-edda50212814#0",
+   "families": "frame + cards",
+   "moved": [
+    "1790583216908"
+   ]
+  },
+  {
+   "key": "188bac46-2df0-4e04-b279-dd7dfc545891#0",
+   "families": "every family but R3's",
+   "moved": [
+    "1785102764352"
+   ]
+  },
+  {
+   "key": "188bac46-2df0-4e04-b279-dd7dfc545891#0",
+   "families": "frame + cards",
+   "moved": [
+    "1785102764352"
+   ]
+  },
+  {
+   "key": "1af3659f-6ee6-4d46-8d80-c884a78b54bd#0",
+   "families": "every family but R3's",
+   "moved": [
+    "1785323613850"
+   ]
+  },
+  {
+   "key": "1af3659f-6ee6-4d46-8d80-c884a78b54bd#0",
+   "families": "frame + cards",
+   "moved": [
+    "1785323613850"
+   ]
+  },
+  {
+   "key": "1cd4c4b4-f849-4e51-8581-0ee5dd38f82f#0",
+   "families": "frame + cards",
+   "moved": [
+    "1784755675193",
+    "1784755724039"
+   ]
+  },
+  {
+   "key": "1d26754a-1681-4287-a780-4450ec6a47d5#0",
+   "families": "every family but R3's",
+   "moved": [
+    "1785916232912"
+   ]
+  },
+  {
+   "key": "1d26754a-1681-4287-a780-4450ec6a47d5#0",
+   "families": "frame + cards",
+   "moved": [
+    "1785916232912"
+   ]
+  },
+  {
+   "key": "204aa666-a90c-4a0f-ad3e-484ba4c97e08#0",
+   "families": "every family but R3's",
+   "moved": [
+    "1785102529442"
+   ]
+  },
+  {
+   "key": "204aa666-a90c-4a0f-ad3e-484ba4c97e08#0",
+   "families": "frame + cards",
+   "moved": [
+    "1785102529442"
+   ]
+  },
+  {
+   "key": "22fd9bfd-e0c9-4675-b2e7-57e5426ff470#0",
+   "families": "every family but R3's",
+   "moved": [
+    "1785323648031"
+   ]
+  },
+  {
+   "key": "22fd9bfd-e0c9-4675-b2e7-57e5426ff470#0",
+   "families": "frame + cards",
+   "moved": [
+    "1785323648031"
+   ]
+  },
+  {
+   "key": "24329191-39c8-4584-91d0-9479219d35b0#0",
+   "families": "every family but R3's",
+   "moved": [
+    "1784671777805"
+   ]
+  },
+  {
+   "key": "24329191-39c8-4584-91d0-9479219d35b0#0",
+   "families": "frame + cards",
+   "moved": [
+    "1784671777805"
+   ]
+  },
+  {
+   "key": "244a2c22-9ff1-4bd3-928a-f67c01c47294#0",
+   "families": "every family but R3's",
+   "moved": [
+    "1790319627007"
+   ]
+  },
+  {
+   "key": "244a2c22-9ff1-4bd3-928a-f67c01c47294#0",
+   "families": "frame + cards",
+   "moved": [
+    "1790319627007"
+   ]
+  },
+  {
+   "key": "24728778-d911-4700-aa86-49ad91f69a1b#0",
+   "families": "every family but R3's",
+   "moved": [
+    "1785107214458"
+   ]
+  },
+  {
+   "key": "24728778-d911-4700-aa86-49ad91f69a1b#0",
+   "families": "frame + cards",
+   "moved": [
+    "1785107214458"
+   ]
+  },
+  {
+   "key": "268d983d-0acf-4979-9b5e-9b0021557176#0",
+   "families": "every family but R3's",
+   "moved": [
+    "1785113788292"
+   ]
+  },
+  {
+   "key": "268d983d-0acf-4979-9b5e-9b0021557176#0",
+   "families": "frame + cards",
+   "moved": [
+    "1785113788292"
+   ]
+  },
+  {
+   "key": "2bc7e275-1eff-4537-83cf-fd2f8627a0f7#0",
+   "families": "every family but R3's",
+   "moved": [
+    "1785569637421"
+   ]
+  },
+  {
+   "key": "2bc7e275-1eff-4537-83cf-fd2f8627a0f7#0",
+   "families": "frame + cards",
+   "moved": [
+    "1785569637421"
+   ]
+  },
+  {
+   "key": "2cc91b76-ec94-41ea-a0b6-42458c188ff2#0",
+   "families": "every family but R3's",
+   "moved": [
+    "1784667837445"
+   ]
+  },
+  {
+   "key": "2cc91b76-ec94-41ea-a0b6-42458c188ff2#0",
+   "families": "frame + cards",
+   "moved": [
+    "1784667837445"
+   ]
+  },
+  {
+   "key": "2d0730cc-8a5a-4904-85b7-1a19964b7c9f#0",
+   "families": "every family but R3's",
+   "moved": [
+    "1785102434410"
+   ]
+  },
+  {
+   "key": "2d0730cc-8a5a-4904-85b7-1a19964b7c9f#0",
+   "families": "frame + cards",
+   "moved": [
+    "1785102434410"
+   ]
+  },
+  {
+   "key": "2f58e8d0-8d4c-4c70-af1f-24a5c11b2eec#0",
+   "families": "every family but R3's",
+   "moved": [
+    "1789145970267"
+   ]
+  },
+  {
+   "key": "2f58e8d0-8d4c-4c70-af1f-24a5c11b2eec#0",
+   "families": "frame + cards",
+   "moved": [
+    "1789145970267"
+   ]
+  },
+  {
+   "key": "3164ad10-0cf1-49a8-b562-2884f2cd043e#0",
+   "families": "every family but R3's",
+   "moved": [
+    "1788764872488"
+   ]
+  },
+  {
+   "key": "3164ad10-0cf1-49a8-b562-2884f2cd043e#0",
+   "families": "frame + cards",
+   "moved": [
+    "1788764872488"
+   ]
+  },
+  {
+   "key": "31d862f5-d032-4341-985d-bf07e49b18eb#0",
+   "families": "every family but R3's",
+   "moved": [
+    "1785299895020"
+   ]
+  },
+  {
+   "key": "31d862f5-d032-4341-985d-bf07e49b18eb#0",
+   "families": "frame + cards",
+   "moved": [
+    "1785299895020"
+   ]
+  },
+  {
+   "key": "32e3da34-b5d7-41bd-b6fc-b9df7ebbe2ca#0",
+   "families": "frame + cards",
+   "moved": [
+    "1784755875302"
+   ]
+  },
+  {
+   "key": "3ad4f932-1c11-472f-b5f1-20f7676e9f67#0",
+   "families": "every family but R3's",
+   "moved": [
+    "1786166202154"
+   ]
+  },
+  {
+   "key": "3ad4f932-1c11-472f-b5f1-20f7676e9f67#0",
+   "families": "frame + cards",
+   "moved": [
+    "1786166202154"
+   ]
+  },
+  {
+   "key": "3ba2db53-84ae-4325-b4dd-01e6f2a876e9#0",
+   "families": "every family but R3's",
+   "moved": [
+    "1785899297005"
+   ]
+  },
+  {
+   "key": "3ba2db53-84ae-4325-b4dd-01e6f2a876e9#0",
+   "families": "frame + cards",
+   "moved": [
+    "1785899297005"
+   ]
+  },
+  {
+   "key": "44522ec3-600a-4154-b338-a6e21ed57635#0",
+   "families": "every family but R3's",
+   "moved": [
+    "1785569600290"
+   ]
+  },
+  {
+   "key": "44522ec3-600a-4154-b338-a6e21ed57635#0",
+   "families": "frame + cards",
+   "moved": [
+    "1785569600290"
+   ]
+  },
+  {
+   "key": "475f848b-3682-4d5a-afe2-e8d6c0ed22b4#0",
+   "families": "every family but R3's",
+   "moved": [
+    "1790319852408"
+   ]
+  },
+  {
+   "key": "475f848b-3682-4d5a-afe2-e8d6c0ed22b4#0",
+   "families": "frame + cards",
+   "moved": [
+    "1790319852408"
+   ]
+  },
+  {
+   "key": "47f665fe-ffb4-4d29-991b-47f690aad3c9#0",
+   "families": "every family but R3's",
+   "moved": [
+    "1785323275938"
+   ]
+  },
+  {
+   "key": "47f665fe-ffb4-4d29-991b-47f690aad3c9#0",
+   "families": "frame + cards",
+   "moved": [
+    "1785323275938"
+   ]
+  },
+  {
+   "key": "4d4b8c4f-240c-48bd-baba-2bdcedf610bd#0",
+   "families": "every family but R3's",
+   "moved": [
+    "1789144889982"
+   ]
+  },
+  {
+   "key": "4d4b8c4f-240c-48bd-baba-2bdcedf610bd#0",
+   "families": "frame + cards",
+   "moved": [
+    "1789144889982"
+   ]
+  },
+  {
+   "key": "4e954521-faba-4754-81c5-b3deebf61a96#0",
+   "families": "every family but R3's",
+   "moved": [
+    "1785620631266"
+   ]
+  },
+  {
+   "key": "4e954521-faba-4754-81c5-b3deebf61a96#0",
+   "families": "frame + cards",
+   "moved": [
+    "1785620631266"
+   ]
+  },
+  {
+   "key": "58534659-b54a-4a64-9088-9b37541ef2d3#0",
+   "families": "every family but R3's",
+   "moved": [
+    "1785223253809"
+   ]
+  },
+  {
+   "key": "58534659-b54a-4a64-9088-9b37541ef2d3#0",
+   "families": "frame + cards",
+   "moved": [
+    "1785223253809"
+   ]
+  },
+  {
+   "key": "58cb40ba-02a4-44d9-bcc4-d15807c3f652#0",
+   "families": "every family but R3's",
+   "moved": [
+    "1785090108852"
+   ]
+  },
+  {
+   "key": "58cb40ba-02a4-44d9-bcc4-d15807c3f652#0",
+   "families": "frame + cards",
+   "moved": [
+    "1785090108852"
+   ]
+  },
+  {
+   "key": "5a23a80c-0120-4975-88bd-02825a1f5d9a#0",
+   "families": "every family but R3's",
+   "moved": [
+    "1785875095344"
+   ]
+  },
+  {
+   "key": "5a23a80c-0120-4975-88bd-02825a1f5d9a#0",
+   "families": "frame + cards",
+   "moved": [
+    "1785875095344"
+   ]
+  },
+  {
+   "key": "5cf0fa8c-0f0b-4178-9efe-05897baf4361#0",
+   "families": "every family but R3's",
+   "moved": [
+    "1785105884485"
+   ]
+  },
+  {
+   "key": "5cf0fa8c-0f0b-4178-9efe-05897baf4361#0",
+   "families": "frame + cards",
+   "moved": [
+    "1785105884485"
+   ]
+  },
+  {
+   "key": "6216f50a-bb40-4a03-9794-e3e4f6c7cd6f#0",
+   "families": "every family but R3's",
+   "moved": [
+    "1788764822672"
+   ]
+  },
+  {
+   "key": "6216f50a-bb40-4a03-9794-e3e4f6c7cd6f#0",
+   "families": "frame + cards",
+   "moved": [
+    "1788764822672"
+   ]
+  },
+  {
+   "key": "62a7558f-dbd7-4fca-984a-3f2656e6419d#0",
+   "families": "every family but R3's",
+   "moved": [
+    "1785903299396"
+   ]
+  },
+  {
+   "key": "62a7558f-dbd7-4fca-984a-3f2656e6419d#0",
+   "families": "frame + cards",
+   "moved": [
+    "1785903299396"
+   ]
+  },
+  {
+   "key": "63b1018c-e833-4b53-890d-31e0dbca6a51#0",
+   "families": "every family but R3's",
+   "moved": [
+    "1785907525132"
+   ]
+  },
+  {
+   "key": "63b1018c-e833-4b53-890d-31e0dbca6a51#0",
+   "families": "frame + cards",
+   "moved": [
+    "1785907525132"
+   ]
+  },
+  {
+   "key": "6496df2a-66f1-465d-9373-b5becb6a75df#0",
+   "families": "every family but R3's",
+   "moved": [
+    "1787942718963"
+   ]
+  },
+  {
+   "key": "6496df2a-66f1-465d-9373-b5becb6a75df#0",
+   "families": "frame + cards",
+   "moved": [
+    "1787942718963"
+   ]
+  },
+  {
+   "key": "6837a3e7-2fac-4713-9a7b-47cbb29668d9#0",
+   "families": "every family but R3's",
+   "moved": [
+    "1786080171306"
+   ]
+  },
+  {
+   "key": "6837a3e7-2fac-4713-9a7b-47cbb29668d9#0",
+   "families": "frame + cards",
+   "moved": [
+    "1786080171306"
+   ]
+  },
+  {
+   "key": "69e0c762-6eb3-4c7b-a9f1-a9478f929382#0",
+   "families": "every family but R3's",
+   "moved": [
+    "1790582336423"
+   ]
+  },
+  {
+   "key": "69e0c762-6eb3-4c7b-a9f1-a9478f929382#0",
+   "families": "frame + cards",
+   "moved": [
+    "1790582336423"
+   ]
+  },
+  {
+   "key": "6bd2dc01-c633-4dd0-aa34-0a342e4253c9#0",
+   "families": "frame + cards",
+   "moved": [
+    "1788416354505"
+   ]
+  },
+  {
+   "key": "6bef013b-8174-413e-b82b-5ee7fea86ee7#0",
+   "families": "every family but R3's",
+   "moved": [
+    "1785218596794"
+   ]
+  },
+  {
+   "key": "6bef013b-8174-413e-b82b-5ee7fea86ee7#0",
+   "families": "frame + cards",
+   "moved": [
+    "1785218596794"
+   ]
+  },
+  {
+   "key": "705b64a0-6766-49c1-9a63-0c0ed9a5a1ac#0",
+   "families": "every family but R3's",
+   "moved": [
+    "1788590588591",
+    "1788590589571",
+    "1788590590572",
+    "1788590591572"
+   ]
+  },
+  {
+   "key": "705b64a0-6766-49c1-9a63-0c0ed9a5a1ac#0",
+   "families": "frame + cards",
+   "moved": [
+    "1788590588591",
+    "1788590589571",
+    "1788590590572",
+    "1788590591572"
+   ]
+  },
+  {
+   "key": "718c2d04-068d-4382-a0fa-fe061e4c64e0#0",
+   "families": "every family but R3's",
+   "moved": [
+    "1785914862910"
+   ]
+  },
+  {
+   "key": "718c2d04-068d-4382-a0fa-fe061e4c64e0#0",
+   "families": "frame + cards",
+   "moved": [
+    "1785914862910"
+   ]
+  },
+  {
+   "key": "74e812eb-21b2-412a-8f55-ee5027c554b4#0",
+   "families": "every family but R3's",
+   "moved": [
+    "1785221820813"
+   ]
+  },
+  {
+   "key": "74e812eb-21b2-412a-8f55-ee5027c554b4#0",
+   "families": "frame + cards",
+   "moved": [
+    "1785221820813"
+   ]
+  },
+  {
+   "key": "75aa2c84-e930-4349-867e-240957800d4e#0",
+   "families": "every family but R3's",
+   "moved": [
+    "1784672950329"
+   ]
+  },
+  {
+   "key": "75aa2c84-e930-4349-867e-240957800d4e#0",
+   "families": "frame + cards",
+   "moved": [
+    "1784672950329"
+   ]
+  },
+  {
+   "key": "76298720-3833-47b1-ab8a-7143d176279b#0",
+   "families": "every family but R3's",
+   "moved": [
+    "1788322664782"
+   ]
+  },
+  {
+   "key": "76298720-3833-47b1-ab8a-7143d176279b#0",
+   "families": "frame + cards",
+   "moved": [
+    "1788322664782"
+   ]
+  },
+  {
+   "key": "7be33e03-d7c5-41be-b7e8-bd5ed9edfcad#0",
+   "families": "every family but R3's",
+   "moved": [
+    "1788765561165"
+   ]
+  },
+  {
+   "key": "7be33e03-d7c5-41be-b7e8-bd5ed9edfcad#0",
+   "families": "frame + cards",
+   "moved": [
+    "1788765561165"
+   ]
+  },
+  {
+   "key": "7f061e6a-52e7-47d4-89f7-48a5f64c8476#0",
+   "families": "every family but R3's",
+   "moved": [
+    "1785568568432"
+   ]
+  },
+  {
+   "key": "7f061e6a-52e7-47d4-89f7-48a5f64c8476#0",
+   "families": "frame + cards",
+   "moved": [
+    "1785568568432"
+   ]
+  },
+  {
+   "key": "7f146ee6-bfeb-4a1a-a9dc-8eb0e24c0c8a#0",
+   "families": "every family but R3's",
+   "moved": [
+    "1787942543000"
+   ]
+  },
+  {
+   "key": "7f146ee6-bfeb-4a1a-a9dc-8eb0e24c0c8a#0",
+   "families": "frame + cards",
+   "moved": [
+    "1787942543000"
+   ]
+  },
+  {
+   "key": "80466069-beac-4684-a2c0-fb7b86d0c0e2#0",
+   "families": "every family but R3's",
+   "moved": [
+    "1784277920904",
+    "1784278183182"
+   ]
+  },
+  {
+   "key": "80466069-beac-4684-a2c0-fb7b86d0c0e2#0",
+   "families": "frame + cards",
+   "moved": [
+    "1784277920904",
+    "1784278183182"
+   ]
+  },
+  {
+   "key": "81b98a02-0a41-41ad-a091-b241924dfe60#0",
+   "families": "every family but R3's",
+   "moved": [
+    "1785569118813"
+   ]
+  },
+  {
+   "key": "81b98a02-0a41-41ad-a091-b241924dfe60#0",
+   "families": "frame + cards",
+   "moved": [
+    "1785569118813"
+   ]
+  },
+  {
+   "key": "832a3c77-2760-415b-9723-5623369a3cfa#0",
+   "families": "every family but R3's",
+   "moved": [
+    "1786168847478"
+   ]
+  },
+  {
+   "key": "832a3c77-2760-415b-9723-5623369a3cfa#0",
+   "families": "frame + cards",
+   "moved": [
+    "1786168847478"
+   ]
+  },
+  {
+   "key": "8887b8c5-f146-4a9a-80e1-b232b7fdfe7b#0",
+   "families": "every family but R3's",
+   "moved": [
+    "1784363675852"
+   ]
+  },
+  {
+   "key": "8887b8c5-f146-4a9a-80e1-b232b7fdfe7b#0",
+   "families": "frame + cards",
+   "moved": [
+    "1784363675852"
+   ]
+  },
+  {
+   "key": "89826d77-eefd-4efd-aae1-9b8f2bc9dd4a#0",
+   "families": "every family but R3's",
+   "moved": [
+    "1785102380473"
+   ]
+  },
+  {
+   "key": "89826d77-eefd-4efd-aae1-9b8f2bc9dd4a#0",
+   "families": "frame + cards",
+   "moved": [
+    "1785102380473"
+   ]
+  },
+  {
+   "key": "8cdf5ac4-9d84-4e5f-96d6-08af7fe5147d#0",
+   "families": "every family but R3's",
+   "moved": [
+    "1788646132312"
+   ]
+  },
+  {
+   "key": "8cdf5ac4-9d84-4e5f-96d6-08af7fe5147d#0",
+   "families": "frame + cards",
+   "moved": [
+    "1788646132312"
+   ]
+  },
+  {
+   "key": "8fe42181-c7f1-45c6-8d38-883c49331edc#0",
+   "families": "frame + cards",
+   "moved": [
+    "1788222357133"
+   ]
+  },
+  {
+   "key": "976c8c17-b1d7-413e-8142-2fbef2355512#0",
+   "families": "every family but R3's",
+   "moved": [
+    "1785102681702"
+   ]
+  },
+  {
+   "key": "976c8c17-b1d7-413e-8142-2fbef2355512#0",
+   "families": "frame + cards",
+   "moved": [
+    "1785102681702"
+   ]
+  },
+  {
+   "key": "9a81e090-decd-41cc-ad08-bc4c5b5939af#0",
+   "families": "every family but R3's",
+   "moved": [
+    "1787606249071"
+   ]
+  },
+  {
+   "key": "9a81e090-decd-41cc-ad08-bc4c5b5939af#0",
+   "families": "frame + cards",
+   "moved": [
+    "1787606249071"
+   ]
+  },
+  {
+   "key": "9e038f39-c867-42b5-876e-7030e3f2ed0c#0",
+   "families": "every family but R3's",
+   "moved": [
+    "1785568522279"
+   ]
+  },
+  {
+   "key": "9e038f39-c867-42b5-876e-7030e3f2ed0c#0",
+   "families": "frame + cards",
+   "moved": [
+    "1785568522279"
+   ]
+  },
+  {
+   "key": "a07bcee0-177e-4739-b705-725c23b7718f#0",
+   "families": "every family but R3's",
+   "moved": [
+    "1785323353269"
+   ]
+  },
+  {
+   "key": "a07bcee0-177e-4739-b705-725c23b7718f#0",
+   "families": "frame + cards",
+   "moved": [
+    "1785323353269"
+   ]
+  },
+  {
+   "key": "a3a6e8aa-edeb-4854-b583-55546a123800#0",
+   "families": "frame + cards",
+   "moved": [
+    "1785205415696"
+   ]
+  },
+  {
+   "key": "a7f4ec57-5dd1-405e-bfb1-c98d8cb920ea#0",
+   "families": "every family but R3's",
+   "moved": [
+    "1788322657462",
+    "1788322658401"
+   ]
+  },
+  {
+   "key": "a7f4ec57-5dd1-405e-bfb1-c98d8cb920ea#0",
+   "families": "frame + cards",
+   "moved": [
+    "1788322657462",
+    "1788322658401"
+   ]
+  },
+  {
+   "key": "a9e241a4-2a69-4456-8f25-60c4656f3fb9#0",
+   "families": "every family but R3's",
+   "moved": [
+    "1786604660664"
+   ]
+  },
+  {
+   "key": "a9e241a4-2a69-4456-8f25-60c4656f3fb9#0",
+   "families": "frame + cards",
+   "moved": [
+    "1786604660664"
+   ]
+  },
+  {
+   "key": "aebdeb84-07b2-40d2-aeff-acadc9dcccc8#0",
+   "families": "every family but R3's",
+   "moved": [
+    "1787942640518"
+   ]
+  },
+  {
+   "key": "aebdeb84-07b2-40d2-aeff-acadc9dcccc8#0",
+   "families": "frame + cards",
+   "moved": [
+    "1787942640518"
+   ]
+  },
+  {
+   "key": "b24b62a5-a073-4afe-b791-0534602a334e#0",
+   "families": "every family but R3's",
+   "moved": [
+    "1785103018357"
+   ]
+  },
+  {
+   "key": "b24b62a5-a073-4afe-b791-0534602a334e#0",
+   "families": "frame + cards",
+   "moved": [
+    "1785103018357"
+   ]
+  },
+  {
+   "key": "b9b9c9a2-0ec1-431a-ac84-4d0011f294c1#0",
+   "families": "every family but R3's",
+   "moved": [
+    "1790319708498"
+   ]
+  },
+  {
+   "key": "b9b9c9a2-0ec1-431a-ac84-4d0011f294c1#0",
+   "families": "frame + cards",
+   "moved": [
+    "1790319708498"
+   ]
+  },
+  {
+   "key": "ba241fff-9ba0-4d59-81bc-1a80ab8001f0#0",
+   "families": "every family but R3's",
+   "moved": [
+    "1785217806814"
+   ]
+  },
+  {
+   "key": "ba241fff-9ba0-4d59-81bc-1a80ab8001f0#0",
+   "families": "frame + cards",
+   "moved": [
+    "1785217806814"
+   ]
+  },
+  {
+   "key": "c0bc66f9-8ba6-4bd2-88b9-39729a0cf14e#0",
+   "families": "every family but R3's",
+   "moved": [
+    "1790582274439"
+   ]
+  },
+  {
+   "key": "c0bc66f9-8ba6-4bd2-88b9-39729a0cf14e#0",
+   "families": "frame + cards",
+   "moved": [
+    "1790582274439"
+   ]
+  },
+  {
+   "key": "cba0388b-cba3-49b1-a4a6-8ca0ec7f5fc8#0",
+   "families": "every family but R3's",
+   "moved": [
+    "1785206050710"
+   ]
+  },
+  {
+   "key": "cba0388b-cba3-49b1-a4a6-8ca0ec7f5fc8#0",
+   "families": "frame + cards",
+   "moved": [
+    "1785206050710"
+   ]
+  },
+  {
+   "key": "cbaf9927-2133-4123-a0ff-21f69d0959d8#0",
+   "families": "every family but R3's",
+   "moved": [
+    "1786087235937",
+    "1786087856496"
+   ]
+  },
+  {
+   "key": "cbaf9927-2133-4123-a0ff-21f69d0959d8#0",
+   "families": "frame + cards",
+   "moved": [
+    "1786087235937",
+    "1786087856496"
+   ]
+  },
+  {
+   "key": "cc8e8df6-f68e-45f8-b118-0a2aeaa2d0e0#0",
+   "families": "every family but R3's",
+   "moved": [
+    "1788630480858"
+   ]
+  },
+  {
+   "key": "cc8e8df6-f68e-45f8-b118-0a2aeaa2d0e0#0",
+   "families": "frame + cards",
+   "moved": [
+    "1788630480858"
+   ]
+  },
+  {
+   "key": "cd5c5bd9-7f78-4ef6-a882-8b1845d40cbc#0",
+   "families": "every family but R3's",
+   "moved": [
+    "1786165684770"
+   ]
+  },
+  {
+   "key": "cd5c5bd9-7f78-4ef6-a882-8b1845d40cbc#0",
+   "families": "frame + cards",
+   "moved": [
+    "1786165684770"
+   ]
+  },
+  {
+   "key": "ce3a8619-c67a-458c-8b7c-6f633e69500c#0",
+   "families": "every family but R3's",
+   "moved": [
+    "1785568475826"
+   ]
+  },
+  {
+   "key": "ce3a8619-c67a-458c-8b7c-6f633e69500c#0",
+   "families": "frame + cards",
+   "moved": [
+    "1785568475826"
+   ]
+  },
+  {
+   "key": "ceeb569b-18b7-4778-924d-9b4d93f995cb#0",
+   "families": "every family but R3's",
+   "moved": [
+    "1785897429767"
+   ]
+  },
+  {
+   "key": "ceeb569b-18b7-4778-924d-9b4d93f995cb#0",
+   "families": "frame + cards",
+   "moved": [
+    "1785897429767"
+   ]
+  },
+  {
+   "key": "cf04b9b5-697c-4bb0-8ae8-74456e51f815#0",
+   "families": "every family but R3's",
+   "moved": [
+    "1785113818914"
+   ]
+  },
+  {
+   "key": "cf04b9b5-697c-4bb0-8ae8-74456e51f815#0",
+   "families": "frame + cards",
+   "moved": [
+    "1785113818914"
+   ]
+  },
+  {
+   "key": "cf5f810d-0297-4fd8-b4d8-30d48b962d4e#0",
+   "families": "every family but R3's",
+   "moved": [
+    "1788765479782"
+   ]
+  },
+  {
+   "key": "cf5f810d-0297-4fd8-b4d8-30d48b962d4e#0",
+   "families": "frame + cards",
+   "moved": [
+    "1788765479782"
+   ]
+  },
+  {
+   "key": "d00b177c-f85f-41af-8112-d059e2f637e1#0",
+   "families": "every family but R3's",
+   "moved": [
+    "1784276122028"
+   ]
+  },
+  {
+   "key": "d00b177c-f85f-41af-8112-d059e2f637e1#0",
+   "families": "frame + cards",
+   "moved": [
+    "1784276122028"
+   ]
+  },
+  {
+   "key": "d123c389-c5fd-482b-bdbb-c6511179fe11#0",
+   "families": "every family but R3's",
+   "moved": [
+    "1789750917198"
+   ]
+  },
+  {
+   "key": "d123c389-c5fd-482b-bdbb-c6511179fe11#0",
+   "families": "frame + cards",
+   "moved": [
+    "1789750917198"
+   ]
+  },
+  {
+   "key": "d319d952-b45b-4ca2-b765-bc69e10f571c#0",
+   "families": "every family but R3's",
+   "moved": [
+    "1785568860473"
+   ]
+  },
+  {
+   "key": "d319d952-b45b-4ca2-b765-bc69e10f571c#0",
+   "families": "frame + cards",
+   "moved": [
+    "1785568860473"
+   ]
+  },
+  {
+   "key": "d41eff5c-6748-4e71-a6cc-2c9ae2456070#0",
+   "families": "every family but R3's",
+   "moved": [
+    "1785206914494"
+   ]
+  },
+  {
+   "key": "d41eff5c-6748-4e71-a6cc-2c9ae2456070#0",
+   "families": "frame + cards",
+   "moved": [
+    "1785206914494"
+   ]
+  },
+  {
+   "key": "d726095d-d0f5-4f93-a256-a5ec068c9a8d#0",
+   "families": "every family but R3's",
+   "moved": [
+    "1790210575404"
+   ]
+  },
+  {
+   "key": "d726095d-d0f5-4f93-a256-a5ec068c9a8d#0",
+   "families": "frame + cards",
+   "moved": [
+    "1790210575404"
+   ]
+  },
+  {
+   "key": "d73f492d-ccd4-426f-b7e8-d509d3f0f922#0",
+   "families": "every family but R3's",
+   "moved": [
+    "1788764790009"
+   ]
+  },
+  {
+   "key": "d73f492d-ccd4-426f-b7e8-d509d3f0f922#0",
+   "families": "frame + cards",
+   "moved": [
+    "1788764790009"
+   ]
+  },
+  {
+   "key": "d7471cf2-eeb6-4b69-b320-23bab900ab45#0",
+   "families": "every family but R3's",
+   "moved": [
+    "1785259040058"
+   ]
+  },
+  {
+   "key": "d7471cf2-eeb6-4b69-b320-23bab900ab45#0",
+   "families": "frame + cards",
+   "moved": [
+    "1785259040058"
+   ]
+  },
+  {
+   "key": "d778b522-7fbb-4150-9c45-1bdb720fdf30#0",
+   "families": "every family but R3's",
+   "moved": [
+    "1790582827566"
+   ]
+  },
+  {
+   "key": "d778b522-7fbb-4150-9c45-1bdb720fdf30#0",
+   "families": "frame + cards",
+   "moved": [
+    "1790582827566"
+   ]
+  },
+  {
+   "key": "da76bff9-4195-4d4b-aeff-a169104f53a3#0",
+   "families": "every family but R3's",
+   "moved": [
+    "1788765532135"
+   ]
+  },
+  {
+   "key": "da76bff9-4195-4d4b-aeff-a169104f53a3#0",
+   "families": "frame + cards",
+   "moved": [
+    "1788765532135"
+   ]
+  },
+  {
+   "key": "dc568fde-3ec1-4c3f-b069-4eb406435a37#0",
+   "families": "every family but R3's",
+   "moved": [
+    "1786081656942"
+   ]
+  },
+  {
+   "key": "dc568fde-3ec1-4c3f-b069-4eb406435a37#0",
+   "families": "frame + cards",
+   "moved": [
+    "1786081656942"
+   ]
+  },
+  {
+   "key": "dc9c6564-1a27-45d1-9e7b-a2805145c1c3#0",
+   "families": "every family but R3's",
+   "moved": [
+    "1785321919328"
+   ]
+  },
+  {
+   "key": "dc9c6564-1a27-45d1-9e7b-a2805145c1c3#0",
+   "families": "frame + cards",
+   "moved": [
+    "1785321919328"
+   ]
+  },
+  {
+   "key": "dd55f275-b465-4e51-8c0f-c364a03984e8#0",
+   "families": "every family but R3's",
+   "moved": [
+    "1785568429953"
+   ]
+  },
+  {
+   "key": "dd55f275-b465-4e51-8c0f-c364a03984e8#0",
+   "families": "frame + cards",
+   "moved": [
+    "1785568429953"
+   ]
+  },
+  {
+   "key": "de421196-dce8-401d-b5c0-626521895c0d#0",
+   "families": "every family but R3's",
+   "moved": [
+    "1785222605803"
+   ]
+  },
+  {
+   "key": "de421196-dce8-401d-b5c0-626521895c0d#0",
+   "families": "frame + cards",
+   "moved": [
+    "1785222605803"
+   ]
+  },
+  {
+   "key": "e02b9685-6373-4c05-b9d2-5eb85a891a96#0",
+   "families": "every family but R3's",
+   "moved": [
+    "1786123187402"
+   ]
+  },
+  {
+   "key": "e02b9685-6373-4c05-b9d2-5eb85a891a96#0",
+   "families": "frame + cards",
+   "moved": [
+    "1786123187402"
+   ]
+  },
+  {
+   "key": "e052874b-b9ce-45fd-91a6-48c753c013b5#0",
+   "families": "every family but R3's",
+   "moved": [
+    "1785102832553"
+   ]
+  },
+  {
+   "key": "e052874b-b9ce-45fd-91a6-48c753c013b5#0",
+   "families": "frame + cards",
+   "moved": [
+    "1785102832553"
+   ]
+  },
+  {
+   "key": "e1897f3a-e116-4812-9739-4205df628cf5#0",
+   "families": "frame + cards",
+   "moved": [
+    "1785207011706"
+   ]
+  },
+  {
+   "key": "e41cefc9-0ac7-497e-9f8f-eee8a6fe0f61#0",
+   "families": "every family but R3's",
+   "moved": [
+    "1785919920712"
+   ]
+  },
+  {
+   "key": "e41cefc9-0ac7-497e-9f8f-eee8a6fe0f61#0",
+   "families": "frame + cards",
+   "moved": [
+    "1785919920712"
+   ]
+  },
+  {
+   "key": "e44bccc9-3ef1-4759-9551-1d24c3297aa3#0",
+   "families": "every family but R3's",
+   "moved": [
+    "1786098598908"
+   ]
+  },
+  {
+   "key": "e44bccc9-3ef1-4759-9551-1d24c3297aa3#0",
+   "families": "frame + cards",
+   "moved": [
+    "1786098598908"
+   ]
+  },
+  {
+   "key": "e8c67d82-1e6f-4e27-b31c-095a14aea59c#0",
+   "families": "every family but R3's",
+   "moved": [
+    "1787947422523"
+   ]
+  },
+  {
+   "key": "e8c67d82-1e6f-4e27-b31c-095a14aea59c#0",
+   "families": "frame + cards",
+   "moved": [
+    "1787947422523"
+   ]
+  },
+  {
+   "key": "e9dbfd54-ffb9-4dab-846c-183879796fde#0",
+   "families": "frame + cards",
+   "moved": [
+    "1785213858781"
+   ]
+  },
+  {
+   "key": "ecfecfef-d710-4c73-ac3e-e21fae050b9f#0",
+   "families": "every family but R3's",
+   "moved": [
+    "1787947560379"
+   ]
+  },
+  {
+   "key": "ecfecfef-d710-4c73-ac3e-e21fae050b9f#0",
+   "families": "frame + cards",
+   "moved": [
+    "1787947560379"
+   ]
+  },
+  {
+   "key": "eee24a50-4ae7-4aff-ab34-17a961d7d061#0",
+   "families": "frame + cards",
+   "moved": [
+    "1784771848398"
+   ]
+  },
+  {
+   "key": "ef1f37e1-e5a5-4d7e-a691-970b7ea40072#0",
+   "families": "every family but R3's",
+   "moved": [
+    "1785571115680"
+   ]
+  },
+  {
+   "key": "ef1f37e1-e5a5-4d7e-a691-970b7ea40072#0",
+   "families": "frame + cards",
+   "moved": [
+    "1785571115680"
+   ]
+  },
+  {
+   "key": "f094f649-3a21-4353-b1ae-fc990b238dbf#0",
+   "families": "every family but R3's",
+   "moved": [
+    "1785877097616"
+   ]
+  },
+  {
+   "key": "f094f649-3a21-4353-b1ae-fc990b238dbf#0",
+   "families": "frame + cards",
+   "moved": [
+    "1785877097616"
+   ]
+  },
+  {
+   "key": "f0eafaad-6cf5-4614-bbc9-fe8aee157c8f#0",
+   "families": "every family but R3's",
+   "moved": [
+    "1785321959638"
+   ]
+  },
+  {
+   "key": "f0eafaad-6cf5-4614-bbc9-fe8aee157c8f#0",
+   "families": "frame + cards",
+   "moved": [
+    "1785321959638"
+   ]
+  },
+  {
+   "key": "f1c682c7-abf3-431d-9f21-c410646f78f6#0",
+   "families": "every family but R3's",
+   "moved": [
+    "1786734450391"
+   ]
+  },
+  {
+   "key": "f1c682c7-abf3-431d-9f21-c410646f78f6#0",
+   "families": "frame + cards",
+   "moved": [
+    "1786734450391"
+   ]
+  },
+  {
+   "key": "f35ac28b-6129-490e-aab3-c75ada196f1d#0",
+   "families": "every family but R3's",
+   "moved": [
+    "1785914815733"
+   ]
+  },
+  {
+   "key": "f35ac28b-6129-490e-aab3-c75ada196f1d#0",
+   "families": "frame + cards",
+   "moved": [
+    "1785914815733"
+   ]
+  },
+  {
+   "key": "f4b56cb1-0f94-4b99-990b-b6b9b4852064#0",
+   "families": "every family but R3's",
+   "moved": [
+    "1785102889406"
+   ]
+  },
+  {
+   "key": "f4b56cb1-0f94-4b99-990b-b6b9b4852064#0",
+   "families": "frame + cards",
+   "moved": [
+    "1785102889406"
+   ]
+  },
+  {
+   "key": "f66c745a-6583-4f78-8c4c-693ffba1c366#0",
+   "families": "every family but R3's",
+   "moved": [
+    "1788418147774"
+   ]
+  },
+  {
+   "key": "f66c745a-6583-4f78-8c4c-693ffba1c366#0",
+   "families": "frame + cards",
+   "moved": [
+    "1788418147774"
+   ]
+  },
+  {
+   "key": "f66e658b-9135-41da-a055-58ff45330188#0",
+   "families": "every family but R3's",
+   "moved": [
+    "1786098354858"
+   ]
+  },
+  {
+   "key": "f66e658b-9135-41da-a055-58ff45330188#0",
+   "families": "frame + cards",
+   "moved": [
+    "1786098354858"
+   ]
+  },
+  {
+   "key": "f78da596-feff-4f39-954f-33a05c09c6d0#0",
+   "families": "every family but R3's",
+   "moved": [
+    "1788323205615"
+   ]
+  },
+  {
+   "key": "f78da596-feff-4f39-954f-33a05c09c6d0#0",
+   "families": "frame + cards",
+   "moved": [
+    "1788323205615"
+   ]
+  },
+  {
+   "key": "fb3fa1da-d50e-4a85-aada-4b8e2277a89e#0",
+   "families": "every family but R3's",
+   "moved": [
+    "1785102974249"
+   ]
+  },
+  {
+   "key": "fb3fa1da-d50e-4a85-aada-4b8e2277a89e#0",
+   "families": "frame + cards",
+   "moved": [
+    "1785102974249"
+   ]
+  },
+  {
+   "key": "fb460e00-62df-4a14-8058-ffe1655ffdff#0",
+   "families": "every family but R3's",
+   "moved": [
+    "1785207167823"
+   ]
+  },
+  {
+   "key": "fb460e00-62df-4a14-8058-ffe1655ffdff#0",
+   "families": "frame + cards",
+   "moved": [
+    "1785207167823"
+   ]
+  }
+ ]
+}
