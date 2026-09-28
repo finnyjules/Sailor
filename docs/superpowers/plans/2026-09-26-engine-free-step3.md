@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** everything Sailor offers runs without ComfyUI (except the stock local-diffusion nodes and blueprints, which stay local-only); this plan builds the first three slices in full — R0, results that aren't files passed between runner nodes; R1, the text and data cards; and R2, the picture effects (expanded 2026-09-26); and R3, the paid-model nodes (expanded 2026-09-27) — and outlines R4–R11.
+**Goal:** everything Sailor offers runs without ComfyUI (except the stock local-diffusion nodes and blueprints, which stay local-only); this plan builds the first three slices in full — R0, results that aren't files passed between runner nodes; R1, the text and data cards; and R2, the picture effects (expanded 2026-09-26); and R3, the paid-model nodes (expanded 2026-09-27); and R5, the server video and sound tools (expanded 2026-09-28) — and outlines R6–R11 (R4.1 is built).
 
 **Architecture:** a runner node's results become per-slot *values* (`NodeRecord.values`): files as today, plus masks, text, numbers, true/false, JSON text and 3D model addresses. At a node's turn, every wire that brings a value is replaced by that value before the node's request is built, so every existing builder, check and prompt sees a plain value, as ComfyUI's `execute()` does. Prices keep reading the workflow as sent (a wired input is priced at its most expensive, as today). Bytes the runner makes itself are kept by sha256 in a run-scoped folder beside the run store. Which wires may carry values is one shared table (`shared/runner/`), read by the browser and the server. New cards run as a new `derive` plan kind: computed on the server, no provider, no charge.
 
@@ -64,6 +64,11 @@ New files:
 | `frontend/server/runner/generators/{llm,describe,repair,layers,splitLayers,audioGen,gen3d,soundIn,textEffects,imageExtras,lora,restyleLora,nanoExtras,turntable}.ts` | R3.3–R3.17: each paid node's request builder and answer reader, ported from the Python. |
 | `frontend/shared/runner/shotPresets.ts` | R3.11: Film a shot's presets and shot phrases, shared by the browser and the runner. |
 | `scripts/runner_paid_fixtures.py` | Python fixtures for R3 (every call a node makes, and its output from recorded answers), one file per group (`runner-paid-<group>.json`). |
+| `scripts/media-tools/build.sh`, `versions.env`, `configure.args` | R5.1a: the LGPL ffmpeg/ffprobe build (FFmpeg 8.0.3 + OpenH264 2.5.1, LAME, Opus, dav1d), pinned by version and sha256, for this Mac and the Fly image. |
+| `frontend/server/media/{tools,run,probe,decode,encode,h264Quality,values,resample,thumbnails}.ts` | R5.1a–R5.6: finding and checking the tools; running them (limits, time, Stop); probe, decode and encode as PyAV does; values between nodes; torchaudio's resampler; Timeline thumbnails and waveforms. |
+| `frontend/shared/runner/media.ts` | R5.1b: media caps (local and hosted) and plain messages. |
+| `frontend/server/runner/media/{soundNodes,videoNodes,frameNodes}.ts` | R5.3–R5.5: the codec classes and the Audio and Video cards. |
+| `scripts/runner_media_fixtures.py` | Python (PyAV) fixtures for R5, one file per group (`runner-media-<group>.json`), and the standard clips in `frontend/tests/unit/fixtures/media/`. |
 
 Modified: `server/runner/types.ts`, `engine.ts`, `executors.ts`, `metering.ts`, `store.ts`, `results.ts`, `inputs.ts`, `index.ts`, `compositor/plan.ts`; `shared/runner/eligibility.ts`, `families.ts`, `validate.ts`; `app/lib/taste/styleBlock.ts`; `server/api/render-template.post.ts`.
 
@@ -3544,7 +3549,732 @@ Eighteen tasks: two of machinery (R3.1, R3.2), fifteen porting tasks (R3.3–R3.
 
 ---
 
-# R4–R11 — outline tasks (to be expanded before they are built)
+# R5 — Server video and sound tools
+
+R5 gives Sailor's own server a way to read and write video and sound: an ffmpeg program built without any GPL parts (decision 7; ledger ruling "ffmpeg = an LGPL build with OpenH264 for H.264"). It then moves the video and sound reading and writing nodes, and the Timeline's video thumbnails and sound waveforms, off the engine. The outline's three tasks are replaced by the eight below (expanded 2026-09-28). `.superpowers/sdd/2026-09-26-engine-free-step3/r5-expansion-report.md` lists the corrections to the outline and why. In short:
+
+- The outline's "13 codec classes" are 11 here, plus the Audio and Video cards. Timeline is the thirteenth; decision 5 makes it a browser export (R9.1). Audio waveform (`nodes_video_pro.py:632-802`) moves to R6.1: it decodes a sound, but the hard part is PIL's line and ellipse drawing and a numpy FFT, which are effect work, not codec work.
+- R5.6 also covers `POST /sailor/asset_import`'s video and sound probe (`nodes_timeline.py:2077-2120`), which the outline left out. Without it, an imported clip has no length or size.
+- The waveform route is at `nodes_timeline.py:2354`, not `:2332` (the header of `server/native/media.ts` is stale too).
+- The server needs `ffprobe` as well as `ffmpeg`. Python reads frame counts and rates from libavformat's fields (`video_types.py:140-233`), which only ffprobe reports the same way. mediabunny keeps measuring for prices, as today.
+- Python's H.264 comes from **libx264** (PyAV 17.0.0's wheel picks `libx264` for `'h264'`, measured 2026-09-28). An LGPL build can't make the same bytes, so the H.264 comparison needs its own rule (ruling (c)).
+- Python decodes a sound in two different ways. A loaded sound goes through `load()`, divided by 32768. A sound a paid node downloaded goes through `_download_url_to_audio_dict`, which is scaled to its peak and leaves stereo WAV samples interleaved. The runner must know which way applies to each sound (R5.2).
+
+**Order.** R5.1a (the program: which build, where it lives, its licence) comes first. Then R5.1b (the server's media module: run, probe, decode, encode, all proven against PyAV), then R5.2 (how videos, frame batches and sounds travel between runner nodes). After R5.2, R5.3 (sound nodes) and R5.4 (video nodes) are independent, but both edit `eligibility.ts`, `values.ts` and `executors.ts`, so the controller runs them one after the other or merges them. R5.5 (frame batches to and from files) comes after R5.4. R5.6 (thumbnails, waveforms, the asset probe) needs only R5.1b. R5.7 is the controller's check.
+
+R3.10 and R3.17, which waited on "R5.1", can start once R5.1b has landed. R3.10's "any runner sound" part needs R5.3.
+
+**Families** (each off by default; each needs `cards` on, `FAMILY_REQUIRES`; each also answers as off while the tools are missing or refused, R5.1a):
+
+| Family | Task | Classes |
+|---|---|---|
+| `media-sound` | R5.3 | LoadAudio, RecordAudio, SaveAudio, SaveAudioMP3, PreviewAudio, and the Audio card beyond its sync-3 and audio-gen rows |
+| `media-video` | R5.4, R5.5 | LoadVideo, GetVideoComponents, CreateVideo, SaveVideo, LoadVideoFrames, SaveVideoFrames, and the Video card's export and made videos |
+| (no family; on when the tools are ready) | R5.6 | `/sailor/input_thumbnail` and `/sailor/asset_thumbnails` for videos, `/sailor/asset_waveform`, `/sailor/asset_import`'s probe. See ruling (l). |
+
+**What R3.10 and R3.17 need from R5** (both are expanded in R3 and wait on R5.1):
+
+| R3 task | Needs | Provided by |
+|---|---|---|
+| R3.10 `soundWav.ts` `pythonWav(file)` | The float32 samples Python's AUDIO holds for the source sound, bit for bit. That is `load()` (`nodes_audio.py:376-400`) for an Audio card's file, LoadAudio and RecordAudio. It is `_download_url_to_audio_dict` (`nodes_replicate.py:425-465`) for a sound a paid node made (Generate music, Generate speech, Clone a singing voice). R3.10 names only `load`: that is correct for its first source (the Audio card), and wrong for sounds made in the run. | R5.1b `decodeAudio(path, { decoder: 'load' \| 'download' })`; R5.2 `soundNoteOf` / `readSound` pick the decoder for a wired sound |
+| R3.10 `nodeMedia.ts` `'sound-in'` | A sound's length before the hold. Python cuts at `int(60 · rate)` samples, so the price reads `min(60, samples / rate)`. | R5.1b `probeMedia` (stream duration, rate); mediabunny's measure stays for the price as today |
+| R3.10 later sources | Any runner sound (LoadAudio, an Audio card with `source`, Get video components' sound) | R5.2 (the sound value and its note), R5.3 (the classes) |
+| R3.17 `turntableStitch.ts` `stitchClips(files)` | `_turntable_stitch.py:15-61`: decode each clip's frames as YUV; drop the first frame of every clip after the first; scale to the first clip's size with swscale bilinear only if the size differs; H.264 `yuv420p` at the first clip's `average_rate` (a fraction), frames numbered 0, 1, 2… in 1/fps; the libx264 settings `crf 20`, `preset veryfast`; no sound. | R5.1b `encodeVideo({ input: { kind: 'clips', paths, dropFirstAfterFirst: true }, fps, size, quality: { crf: 20, preset: 'veryfast' } })`, and `probeMedia` for the first clip's rate and size |
+| R3.17 parity | Frame count Σ − (k − 1), the rate and the duration exact; decoded frames within the H.264 rule | R5 rule 3 and ruling (c) (the ledger's "≤ 2/255 mean, ≤ 8/255 max" can't hold between two different H.264 encoders) |
+
+## Rules every media task follows (binding for R5.1b–R5.6)
+
+1. **One way to the tools.** Every probe, decode and encode goes through `frontend/server/media/` (R5.1b). No other file starts ffmpeg or ffprobe. PyAV is never called from the server. mediabunny keeps only its existing job: measuring lengths for prices (`server/utils/graphInputSeconds.ts`).
+   - When `mediaTools()` (R5.1a) is null, the media families answer as off: eligibility leaves the class to the engine, and `nodesNeedingEngine` names it.
+   - If the tools disappear during a run, a node fails with `MEDIA_TOOLS_MISSING` = "This needs the video tools, which aren’t installed on this server".
+   - Nothing crashes.
+2. **Values between runner nodes (R5.2).**
+   - A video file (LoadVideo, the Video card, a paid video) stays a `files` value, as today. Python's `VideoFromFile` is the file itself.
+   - A video a node assembles (CreateVideo) is a new `video` value: its frames, its sound and its rate, kept losslessly and encoded only when saved or shown (Python's `VideoFromComponents`).
+   - An IMAGE batch from a video is a new `frames` value: one kept FFV1 file of exact 8-bit RGB frames.
+   - A sound is a `files` value with a `sound` note that says how Python decodes it (`'load'`, `'download'`, or `'exact'` for a float WAV the runner wrote itself).
+3. **Parity**, always against fixtures from the real PyAV:
+   - **Probe numbers:** frame count, frame rate (as a fraction), durations, width, height, sample rate and channel count. Each must equal what the named Python function returns for the same file (`video_types.py:94-233`, `nodes_timeline.py:2077-2120`).
+   - **Decoded pictures:** byte-equal to PyAV's `frame.to_ndarray(format='rgb24')`. The build is FFmpeg 8.0.3, the same 8.0 branch as PyAV 17.0.0's own libraries (libavcodec 62.11.100, libswscale 9.1.100). The swscale settings are PyAV's defaults (`av/video/reformatter.py`: `SWS_BILINEAR`, the frame's own colour space, colour range *unspecified*). A fixture case that can't be made byte-equal is named in the task's report; the controller rules on it case by case.
+   - **Decoded samples:** bit-equal float32 to Python's (`load`, `download`, or `get_components`' `fltp`).
+   - **Lossless outputs** (FLAC, WAV, FFV1): decoded, equal to Python's decoded output exactly.
+   - **MP3 and AAC:** the build uses the same LAME (3.100) and FFmpeg's own AAC encoder from the same branch. So the decoded samples are expected to equal Python's decoded samples exactly. Where they don't, the audio tolerance of ruling (c) applies, and the report says which case.
+   - **H.264:** OpenH264 here, libx264 in Python. Frame count, rate, duration and size must be exact. The decoded frames are judged by ruling (c). They must also equal, after decoding, a Python run of the same pipeline with PyAV switched to `libopenh264` (its wheel includes it, and the fixture script records that run too). That run proves the runner feeds the encoder the same frames with the same settings.
+   - **Around the files:** names, subfolders, counters and ui equal Python's. Metadata tags (`prompt`, workflow) are JSON-value-equal.
+4. **Fixtures.** `scripts/runner_media_fixtures.py --group <g>` writes `frontend/tests/unit/fixtures/runner-media-<g>.json`. The clips themselves go in `frontend/tests/unit/fixtures/media/`, made by the script with PyAV: synthetic frames from R2.1's `synth`, and tones from a fixed formula.
+   - The script blocks the network before any node module is imported. It records `av.__version__`, `av.library_versions` and the platform.
+   - Encoders run with `threads=1` so the clips come out byte-identical. Running the script twice gives identical bytes, and the other groups' files are untouched.
+   - All clips together stay under 3 MB.
+   - **The standard clips:**
+     - H.264 `yuv420p` untagged (read as BT.601), BT.709-tagged, and `yuvj420p` full range;
+     - HEVC 10-bit;
+     - VP9 in WebM at an odd size (63×47);
+     - ProRes in MOV;
+     - an MP4 with an edit list (leading B-frames with negative time stamps);
+     - a variable-frame-rate MP4;
+     - a video with no sound, one with stereo AAC, and one with two sound streams (Python takes the last);
+     - mono MP3; stereo WAV at s16, s24 and s32; FLAC at 16 and 24 bits; Ogg Vorbis;
+     - Opus in WebM, which is what a browser recording makes;
+     - M4A AAC with encoder delay;
+     - a 75-second 8 kHz mono WAV;
+     - a WAV with samples at −32768.
+5. **Child processes, time and Stop.** `runMedia` (R5.1b) is the only thing that starts a tool.
+   - It spawns with an argument list, never a shell, with `-nostdin -hide_banner -loglevel error`.
+   - Each job has a time limit: `MEDIA_JOB_TIMEOUT_MS` (10 minutes hosted, 30 local; 30 s for the thumbnail and waveform routes).
+   - Stop (the run's `AbortSignal`) kills the process (SIGKILL) within one second and removes its partial output.
+   - stderr is capped at 64 KiB, logged, and never shown to a person. A failure is mapped to plain words.
+   - Jobs wait in order behind a limiter: `MEDIA_JOBS_PER_USER` (1 hosted, 2 local) and `MEDIA_JOBS_MAX` = max(1, ⌊cpus / 2⌋). The routes have their own two slots, so a long render never blocks a thumbnail.
+   - Hosted runs pass `-threads 2` and `-filter_threads 1`.
+6. **Hosted safety.**
+   - **Owned files only.** Every widget that names a file is listed by `collectInputFiles` (`server/runner/inputs.ts:75`): LoadVideo, LoadAudio, RecordAudio, LoadVideoFrames' `file`, SaveVideoFrames' `audio_file`, and the cards. Value files are the run's own.
+   - **Size, length and dimensions are checked before any decode.** The order is `stat`, then a header probe capped at `-probesize 5000000 -analyzeduration 5000000` with a 10 s limit. The caps are in `frontend/shared/runner/media.ts` (ruling (f)). A file whose length can't be read is refused in hosted.
+   - **No network.** The build has no network protocols (`--disable-network`, protocols `file,pipe` only). At run time, every input is passed as `file:<absolute path>` after `-protocol_whitelist file,pipe`, with the demuxer named explicitly (`-f`) from the file's first bytes (`mediaFormat`, `server/runner/mediaInputs.ts`, extended with Matroska and AVI). The demuxers that open other files or addresses (`hls`, `dash`, `concat`, `image2`, `tee` and the rest) are not built. A playlist uploaded as a "video" therefore can't make ffmpeg read other files.
+   - Every job runs with `-max_alloc 536870912`.
+   - A decode that goes past its frame or sample cap fails plainly as it streams, and never grows memory past one frame or one block.
+   - Outputs are written into a temporary folder of the run's own, then moved into the store.
+7. **Files out.**
+   - Saved files use Python's names and counters (`folder_paths.py:428-473`, R1.5's `saveImagePrefix`), in the user's subfolder in hosted, and are recorded with `metering.addOutput`.
+   - Previews go to temp under Python's names.
+   - Kept files use `KeptBytes.putPath` (R5.2), by sha256, and are never assets.
+   - A saved file is written from a path, never read whole into memory.
+8. **Families off, and cards-off parity.** Two things must hold with both media families off, and also with them on but the tools missing:
+   - `runnerTakesNode`, `nodesNeedingEngine`, `outputKindsFor`, `PICTURE_OUTPUTS` and `valueWiresAllowed` answer exactly as before R5.2 over every saved project graph (`user/sailor/projects/*`);
+   - every existing `runner-*.unit.spec.ts` stays green, unchanged.
+
+   With `cards` off, `parseFamilies` drops both media families.
+9. **Free.** Media work has no price, no hold and no charge. Savers and every node that decodes or encodes are `local: 'render'`, so they count as work. LoadVideo, LoadAudio and a card that only hands a file on are `local: 'source'`.
+10. **Tests.**
+    - Tests go in `frontend/tests/unit/runner-media-<g>.unit.spec.ts`, with shared helpers in `tests/unit/__runner__/mediaParity.ts`.
+    - A spec that needs the real tools calls `requireMediaTools()`, which **fails** with "The video tools aren’t built on this machine: run scripts/media-tools/build.sh" when they are missing. It never skips: a skipped parity test reads as a pass.
+    - Machinery tests use a fake tools folder and need nothing.
+11. **Every task's run line:**
+    - Run `cd /Users/julien/Documents/GitHub/Sailor && .venv/bin/python scripts/runner_media_fixtures.py --group <g>` twice. The second time, `git diff --stat` must show the group's files unchanged.
+    - Then run `cd frontend && env -u FAL_KEY -u FAL_API_KEY -u NUXT_REPLICATE_TOKEN -u REPLICATE_API_TOKEN npx vitest run tests/unit/runner-media-<g>.unit.spec.ts tests/unit/runner-`.
+    - Run the typecheck from the Global Constraints, with `server/media` added to its grep.
+    - Report (no commit).
+
+---
+
+### Task R5.1a: The video tools — which build, where it lives, and its licence
+
+No family. This task writes the build and the finder. **The build itself is the controller's step**: it downloads about 25 MB of pinned sources and compiles for about 10 minutes, so it needs the user's go. Implementers don't download.
+
+**The build (ledger ruling: LGPL, OpenH264 for H.264).** It is built from source everywhere, by one script, with the same versions and switches on the Mac and in the Fly image:
+
+| Part | Version | Licence | Why this one |
+|---|---|---|---|
+| FFmpeg | **8.0.3** (released 2026-06-18, 8.0 branch) | LGPL 2.1 or later (no `--enable-gpl`, no `--enable-version3`, no `--enable-nonfree`) | Same branch as PyAV 17.0.0's own FFmpeg (8.0.1), so the decoders and swscale are Python's. Later branches (8.1.3, 9.0.2) move swscale. |
+| OpenH264 | **2.5.1** (built from Cisco's source on GitHub) | BSD 2-clause | H.264 without GPL. It is the same ABI generation (`.so.7`) as the `libopenh264.7` inside PyAV's wheel, so the fixture script can make the "Python with OpenH264" comparison of rule 3. |
+| LAME | **3.100** | LGPL 2 | MP3, the same version PyAV bundles (`libmp3lame.0`) |
+| Opus | **1.5.2** | BSD 3-clause | The Audio card's Opus export |
+| dav1d | **1.5.1** | BSD 2-clause | AV1 decoding, as PyAV's wheel does |
+
+- **Nothing else is linked.** `--disable-autodetect` keeps configure from picking up libraries on the build machine, such as a Homebrew x264.
+- **Switches** (the exact line lives in `scripts/media-tools/configure.args`, one per line, so a test can read it):
+  - `--disable-autodetect --disable-debug --disable-doc --disable-ffplay --disable-devices --disable-hwaccels`
+  - `--disable-network --disable-protocols --enable-protocol=file,pipe`
+  - `--disable-demuxers --enable-demuxer=mov,matroska,wav,mp3,ogg,flac,aac,avi`
+  - `--disable-muxers --enable-muxer=mp4,mov,matroska,wav,flac,mp3,ogg,opus,rawvideo,f32le,null`
+  - `--disable-encoders --enable-encoder=libopenh264,aac,libmp3lame,flac,libopus,ffv1,pcm_f32le,pcm_s16le,rawvideo`
+  - `--enable-libopenh264 --enable-libmp3lame --enable-libopus --enable-libdav1d`
+  - `--enable-static --disable-shared --extra-version=sailor1`
+  - The implementer adds only the decoders, parsers, filters and bitstream filters the tasks prove they need. All native FFmpeg decoders stay on (they are LGPL). The list and each addition are reported.
+- **Reproducible.**
+  - `scripts/media-tools/versions.env` pins, for every part, its version, source URL and sha256 (the implementer fills each sha256 from the upstream tarball and says where they read it). For FFmpeg it also pins the signing key's fingerprint.
+  - The script refuses a tarball whose sha256 differs. When `gpg` is present, it checks FFmpeg's `.asc` signature.
+  - It sets `SOURCE_DATE_EPOCH` and builds in a fixed order.
+  - The Docker stage builds on `python:3.12-slim` pinned by digest, the runtime's own base, so glibc matches.
+  - The same sources and switches give the same program. The binary's bytes are not promised identical across compilers. `manifest.json` records its sha256 per build.
+- **Where it lives.**
+  - Local: `frontend/.media-tools/<platform>-<arch>/`, which is ignored by git. `bin/ffmpeg`, `bin/ffprobe`, `licenses/`, `manifest.json`.
+  - Fly: `/opt/media-tools/`, the same layout, copied from a build stage, with `ENV NUXT_MEDIA_TOOLS_DIR=/opt/media-tools/bin`.
+  - The Mac build needs Xcode's command-line tools, `pkg-config`, `meson` and `ninja`. The script checks for them and says which is missing.
+- **The licence honoured.**
+  - `licenses/` holds FFmpeg's `COPYING.LGPLv2.1` and `LICENSE.md`, and the licence files of OpenH264, LAME, Opus and dav1d, copied from their own tarballs.
+  - It also holds `SOURCES.md`, which lists each exact source (URL and sha256), and the configure line.
+  - FFmpeg's legal checklist is followed: LGPL switches only, FFmpeg itself unmodified, a separate program called by its path (Sailor doesn't link it), and its notices kept beside it.
+  - OpenH264 built from source is covered by its BSD licence. Cisco's patent grant covers only Cisco's own binaries downloaded by an end user; see ruling (b).
+  - Distributing the image to anyone would add the source tarballs themselves (ruling (n)).
+
+**Files:**
+- Create `scripts/media-tools/build.sh`, `scripts/media-tools/versions.env`, `scripts/media-tools/configure.args`, `scripts/media-tools/README.md` (how to build locally, where the output goes, how to bump a version).
+- Create `frontend/server/media/tools.ts`.
+- Modify `Dockerfile`:
+  - a new stage `media-tools` before `runtime`, running `scripts/media-tools/build.sh /opt/media-tools`;
+  - in `runtime`, `COPY --from=media-tools /opt/media-tools /opt/media-tools` and the `ENV`.
+- Modify `.gitignore` (`frontend/.media-tools/`) and `.dockerignore` (`frontend/.media-tools`).
+- Create `docs/deploy/media-tools.md` for deploy notes: the size added to the image as measured, how to bump a version, how to check the licence folder on a running machine.
+- Test: `frontend/tests/unit/media-tools.unit.spec.ts`.
+
+**Interfaces (`server/media/tools.ts`):**
+```ts
+export interface MediaTools {
+  ffmpeg: string; ffprobe: string
+  /** `ffmpeg -version`'s first line, e.g. 'ffmpeg version 8.0.3-sailor1'. */
+  version: string
+  /** `ffmpeg -buildconf`, one switch per entry. */
+  buildconf: readonly string[]
+  encoders: ReadonlySet<string>
+  protocols: { input: readonly string[]; output: readonly string[] }
+}
+export const MEDIA_TOOLS_VERSION = '8.0.3'
+export const MEDIA_TOOLS_MISSING = 'This needs the video tools, which aren’t installed on this server'
+/** Switches whose presence refuses a build (the ledger's no-GPL ruling). */
+export const FORBIDDEN_BUILDCONF: readonly string[] // '--enable-gpl', '--enable-nonfree', '--enable-version3', '--enable-libx264', '--enable-libx265'
+export const REQUIRED_ENCODERS: readonly string[]   // libopenh264, aac, libmp3lame, flac, libopus, ffv1, pcm_f32le, pcm_s16le, rawvideo
+/** NUXT_MEDIA_TOOLS_DIR, else frontend/.media-tools/<platform>-<arch>/bin when it exists, else null. Never PATH. */
+export function mediaToolsDir(): string | null
+/** The tools, checked once and remembered (null when missing or refused; a `media.tools.refused` log line says why). */
+export function mediaTools(): Promise<MediaTools | null>
+/** The remembered answer, for eligibility (false until the first check has finished; the server warms it at start). */
+export function mediaToolsReady(): boolean
+/** Tests only. */
+export function resetMediaTools(): void
+```
+- `NUXT_MEDIA_TOOLS=off` makes `mediaTools()` null.
+- A tool that answers slower than 5 s, a version that isn't 8.0.3, a forbidden switch, a missing encoder, or any input protocol other than `file` and `pipe` makes it null.
+- `server/runner/index.ts` (or the plugin that builds the runner) calls `mediaTools()` at start, so `mediaToolsReady()` is right before the first run.
+
+**Tests:**
+- Take a fake tools folder of small shell scripts that print canned `-version`, `-buildconf`, `-encoders` and `-protocols` answers:
+  - a good build is ready;
+  - `--enable-gpl`, `--enable-libx264` or `--enable-nonfree` in its build line refuses it;
+  - a missing `libopenh264` refuses it;
+  - an `http` protocol refuses it;
+  - a wrong version refuses it;
+  - a script that hangs refuses it after 5 s;
+  - an `ffmpeg` put on PATH is never used;
+  - `NUXT_MEDIA_TOOLS_DIR` wins;
+  - `off` wins over everything.
+- `versions.env` is well formed: every part has a version, an https URL and a 64-hex sha256.
+- `configure.args` holds `--disable-network` and none of `FORBIDDEN_BUILDCONF`.
+- The Dockerfile has the `media-tools` stage, the `COPY` and the `ENV`.
+
+**Acceptance (the controller's build step):**
+- `scripts/media-tools/build.sh` builds on this Mac (arm64) and in `docker build --target media-tools`.
+- `ffmpeg -version` says 8.0.3, and `-buildconf` has no GPL switch.
+- `ffmpeg -protocols` lists only `file` and `pipe`.
+- `mediaTools()` is ready with the real build.
+- The image grows by the measured amount, reported; expected under 80 MB.
+- The licence folder is present in both places.
+
+---
+
+### Task R5.1b: The media module — run, probe, decode, encode
+
+No family: a library the node tasks call, proven against PyAV one piece at a time before any node uses it.
+
+**Files:**
+- Create `frontend/server/media/run.ts`, `probe.ts`, `decode.ts`, `encode.ts`, `h264Quality.ts`, and `frontend/shared/runner/media.ts`.
+- Modify `frontend/server/runner/mediaInputs.ts`: `mediaFormat` also tells Matroska (non-WebM) and AVI (RIFF…AVI); `MediaFormat` gains `'mkv' | 'avi'`.
+- Create `scripts/runner_media_fixtures.py` (the shared helpers, the standard clips, groups `probe`, `decode`, `encode`).
+- Create `frontend/tests/unit/__runner__/mediaParity.ts`.
+- Tests: `runner-media-probe.unit.spec.ts`, `runner-media-decode.unit.spec.ts`, `runner-media-encode.unit.spec.ts`, `runner-media-run.unit.spec.ts`.
+
+**Port:**
+
+| Piece | Python | The runner |
+|---|---|---|
+| Duration | `VideoFromFile._get_raw_duration`, `video_types.py:110-138`: `container.duration / AV_TIME_BASE`; else `frames / average_rate`; else count the packets | `pyRawDuration(p)` from the probe; the packet count by `ffprobe -count_packets` only when both are missing |
+| Frame count | `get_frame_count`, `:140-210`: the stream's `frames` when > 0; else `round(duration · average_rate)`; else decode and count | `pyFrameCount(p, path)` |
+| Frame rate | `get_frame_rate`, `:212-233`: `average_rate`, else `frames / duration` (`limit_denominator()`), else 1 | `pyFrameRate(p): { num, den }` (exact fraction; `limit_denominator` ported with BigInt) |
+| Dimensions | `get_dimensions`, `:78-92`: first video stream | `probe.video[0]` |
+| Pictures | `get_components_internal`, `:247-267`: every decoded frame of the first video stream whose `pts ≥ 0` (start 0), `to_ndarray('rgb24')` | `decodeFrames` |
+| Sound in a video | `:272-307`: the **last** sound stream, `AudioResampler(format='fltp')`, samples before t = 0 skipped (`to_skip = max(0, int((0 − pts·tb) · rate))`), float32 | `decodeAudio(path, { decoder: 'fltp', stream: 'last' })` |
+| A loaded sound | `load`, `nodes_audio.py:376-400`, with `f32_pcm` `:366-374`: the first sound stream, the codec's own sample format; packed → `view(-1, C).t()`; int16 / 32768, int32 / 2³¹, float as is | `decodeAudio(path, { decoder: 'load' })` |
+| A downloaded sound | `_download_url_to_audio_dict`, `nodes_replicate.py:425-465`: the first stream, `to_ndarray()` **not** de-interleaved (a packed stereo file stays one row, interleaved), `astype(float32)`, divided by the peak when the peak > 1.5 | `decodeAudio(path, { decoder: 'download' })`, quirk kept, ruling (k) |
+| H.264 out | `VideoFromComponents.save_to`, `video_types.py:409-470` (`(x·255).clamp(0,255).byte()`, rgb24 → `reformat('yuv420p')`, `add_stream('h264', rate=Fraction(round(fps·1000), 1000))`, libx264 defaults, AAC in one frame with layout by channel count); `SaveVideoFramesNode`, `nodes_video_effects.py:676-714`; `stitch_clips`, `_turntable_stitch.py:15-61` | `encodeVideo` |
+| Sound out | `AudioSaveHelper.save_audio`, `comfy_api/latest/_ui.py:265-370` | `encodeAudio` |
+
+**Interfaces:**
+```ts
+// shared/runner/media.ts: caps and words (numbers per ruling (f))
+export const MEDIA_CAPS: { local: MediaCaps; hosted: MediaCaps }
+export interface MediaCaps {
+  videoBytes: number; soundBytes: number
+  videoSeconds: number; soundSeconds: number
+  framePixels: number          // one frame, w·h
+  batchFrames: number; batchPixels: number   // a frame batch: count, and count·w·h
+  soundSamples: number         // channels·samples decoded at once
+  keptBytesPerRun: number
+}
+export const MEDIA_WORDS: Record<'tooBig' | 'tooLong' | 'tooManyFrames' | 'unreadable' | 'noVideo' | 'noSound' | 'oddSize' | 'stopped' | 'timedOut' | 'failed' | 'sizeChanged', string>
+
+// run.ts
+export interface MediaJob {
+  tool: 'ffmpeg' | 'ffprobe'; args: string[]
+  userId: string | null; route?: boolean       // route: the thumbnail and waveform slots
+  signal?: AbortSignal; timeoutMs?: number
+  stdin?: AsyncIterable<Uint8Array>             // piped frames or samples
+  onStdout?(chunk: Uint8Array): Promise<void> | void  // back-pressure: the process is paused while this runs
+  cleanup?: string[]                            // paths removed when the job fails or is stopped
+}
+export function runMedia(job: MediaJob): Promise<{ stdout: Uint8Array | null; stderrTail: string }>
+/** ['-protocol_whitelist', 'file,pipe', '-f', <demuxer for fmt>, '-i', 'file:' + absolute path]; throws for a relative path or an unknown format. */
+export function inputArgs(path: string, fmt: MediaFormat): string[]
+export function mediaLimiter(): { pending(userId: string | null): number } // for tests
+
+// probe.ts
+export interface Rational { num: number; den: number }
+export interface VideoStreamProbe {
+  index: number; w: number; h: number; codec: string; pixFmt: string
+  averageRate: Rational | null; frames: number | null
+  duration: number | null; timeBase: Rational          // stream duration in its time base
+  colorRange: string | null; colorSpace: string | null
+}
+export interface SoundStreamProbe {
+  index: number; rate: number; channels: number; layout: string | null; codec: string; sampleFmt: string
+  duration: number | null; timeBase: Rational
+}
+export interface MediaProbe {
+  format: MediaFormat; formatName: string       // libavformat's own, e.g. 'mov,mp4,m4a,3gp,3g2,mj2'
+  containerDuration: number | null              // AV_TIME_BASE units, as PyAV's container.duration
+  video: VideoStreamProbe[]; sound: SoundStreamProbe[]
+  bytes: number
+}
+export function probeMedia(path: string, o: { userId: string | null; signal?: AbortSignal; route?: boolean }): Promise<MediaProbe>
+export function pyRawDuration(p: MediaProbe): number | null
+export function pyFrameCount(p: MediaProbe, path: string, o: { userId: string | null; signal?: AbortSignal }): Promise<number>
+export function pyFrameRate(p: MediaProbe): Rational
+export function checkMediaCaps(p: MediaProbe, kind: 'video' | 'sound', hosted: boolean): string | null  // a MEDIA_WORDS entry, or null
+
+// decode.ts
+export function decodeFrames(path: string, o: {
+  userId: string | null; signal?: AbortSignal
+  maxFrames: number                              // past it: MEDIA_WORDS.tooManyFrames
+  onFrame(rgb: Uint8Array, index: number, pts: number): Promise<void>
+}): Promise<{ count: number; w: number; h: number }>
+export type SoundDecoder = 'load' | 'download' | 'fltp'
+export interface DecodedSound { rate: number; channels: Float32Array[] }   // [C][N]; 'download' of a packed file: one row, interleaved
+export function decodeAudio(path: string, o: {
+  decoder: SoundDecoder; stream?: 'first' | 'last'
+  userId: string | null; signal?: AbortSignal; maxSamples: number
+}): Promise<DecodedSound>
+
+// encode.ts
+export interface H264Quality { crf: number; preset: 'veryfast' | 'fast' | 'medium' | 'slow' }
+export const PYAV_H264_DEFAULT: H264Quality      // { crf: 23, preset: 'medium' }: libx264 with no options
+export type VideoSource =
+  | { kind: 'rgb'; w: number; h: number; frames: AsyncIterable<Uint8Array> }          // rgb24, already 8-bit
+  | { kind: 'ffv1'; path: string; w: number; h: number }                             // a kept frame batch
+  | { kind: 'clips'; paths: string[]; dropFirstAfterFirst: true }                     // Turntable
+export type SoundSource = { sound: DecodedSound } | { path: string; stream: 'first'; cutSeconds?: number }
+export function encodeVideo(o: {
+  input: VideoSource; out: string
+  fps: Rational                                  // the stream rate as Python sets it
+  size?: { w: number; h: number }                // clips: the first clip's; else the input's
+  quality: H264Quality
+  sound?: { source: SoundSource; layout: 'mono' | 'stereo' | '5.1'; rate: number; cutSamples?: number } | null
+  metadata?: Record<string, string>              // written with -movflags use_metadata_tags
+  userId: string | null; signal?: AbortSignal
+}): Promise<{ frames: number }>
+export function encodeAudio(o: {
+  sound: DecodedSound; format: 'flac' | 'mp3' | 'opus'
+  quality: 'V0' | '64k' | '96k' | '128k' | '192k' | '320k'
+  sampleFmt: string                              // the encoder input format PyAV picks, from the fixtures
+  out: string; metadata?: Record<string, string>
+  userId: string | null; signal?: AbortSignal
+}): Promise<void>
+/** WAV, IEEE float32, interleaved: the runner's exact sound (no tools needed). */
+export function floatWav(s: DecodedSound): Uint8Array
+/** An FFV1 Matroska of rgb24 frames (stored as bgr0, lossless). */
+export function writeFfv1(o: { frames: AsyncIterable<Uint8Array>; w: number; h: number; out: string; userId: string | null; signal?: AbortSignal }): Promise<{ count: number }>
+
+// h264Quality.ts
+/** OpenH264 settings for Python's libx264 settings, measured (ruling (d)). */
+export const OPENH264_FOR: Readonly<Record<string, readonly string[]>>  // key `${crf}`; the preset is not used
+export function h264Args(q: H264Quality): string[]  // ['-c:v', 'libopenh264', ...OPENH264_FOR[crf], '-pix_fmt', 'yuv420p']
+```
+
+**Behaviour:**
+- **The probe** is `ffprobe -of json -show_format -show_streams`, read into the fields PyAV reads:
+  - `avg_frame_rate` for `average_rate`, where `0/0` is null;
+  - `nb_frames` for `frames`;
+  - `duration_ts` with `time_base`;
+  - `format.duration` × 1e6 for `container.duration`.
+
+  The probe is under the route or job limits of rule 5 and the probe caps of rule 6.
+- **Pictures:**
+  - ffmpeg runs `-map 0:v:0 -fps_mode passthrough -vf scale=flags=bilinear:<source colour matrix and range as PyAV passes them>,format=rgb24 -f rawvideo pipe:1`, read one frame (w·h·3 bytes) at a time.
+  - Frames whose pts < 0 are dropped, as Python's `pts < start_pts` does.
+  - A frame whose size differs from the first fails with `MEDIA_WORDS.sizeChanged`. Python's `torch.stack` fails there too.
+  - The implementer finds the exact scale options that make every standard clip byte-equal to PyAV. PyAV sets the source range to *unspecified* (read as limited), so a full-range clip reads washed out in Python; that is kept, ruling (t). The final options are written down in the report.
+- **Sound:** `-map 0:a:<first|last> -f f32le -c:a pcm_f32le`, then de-interleaved. `load` needs the codec's native sample format first (from the probe), for its integer scale:
+  - `s16`/`s16p` go out as `pcm_s16le`, divided by 32768;
+  - `s32` goes out as `pcm_s32le`, divided by 2³¹, rounded to float32 once;
+  - float and double formats go out as `pcm_f32le`. A `dbl` source rounds to float32; Python keeps float64 there, which is noted as a deviation.
+
+  The `fltp` decoder applies Python's skip rule, using the first packet's pts (`ffprobe -show_packets -read_intervals %+#1`).
+- **H.264:**
+  - Frames arrive as rgb24 and are converted to `yuv420p` by the scale filter with `flags=bilinear` (PyAV's `reformat` default) and colour space and range unspecified. This is proven against Python's own `reformat('yuv420p')` planes.
+  - `-r <num>/<den>`, `-fps_mode passthrough`, frame i stamped i/fps.
+  - The encoder arguments come from `h264Args(quality)`, and the output is `-movflags +faststart+use_metadata_tags`.
+  - An odd width or height fails with `MEDIA_WORDS.oddSize` before any work: libx264 `yuv420p` refuses it in Python.
+  - `clips` builds one filter graph: `[i:v]trim=start_frame=1` for every clip after the first; `scale=W:H:flags=bilinear` only for a clip whose size differs; `concat=n=k:v=1:a=0`; then `setpts=N/(FR*TB)` at the first clip's rate.
+- **Sound out:**
+  - FLAC, MP3 and Opus as `save_audio` does. Every setting is given explicitly, never left to ffmpeg's negotiation: the input format `-f f32le` interleaved, the layout (`mono` for 1 channel, `stereo` otherwise, as Python), `-sample_fmt` as PyAV picked it (`flac` → `s16`, `libmp3lame` → `s32p`, `libopus` → `flt`; each confirmed by the fixture script, which records `stream.codec_context.format.name`), the MP3 quality (`V0` → `-q:a 0`; `128k`/`320k` → `-b:a`) and the Opus bit rate.
+  - More than 2 channels fails plainly, as PyAV does with a stereo layout of 6 rows.
+- **`OPENH264_FOR`** is measured by the implementer. For each CRF 10–32, and the default 23, it is the OpenH264 setting (a constant quantiser pair `-qmin/-qmax`, or `-rc_mode quality` with a bit rate) whose decoded result is **no further from the source** than libx264 at that CRF (PSNR over the standard clips, within 0.5 dB). The file size ratio is reported. `preset` changes only libx264's speed, not what the picture should look like, so it is ignored.
+
+**Fixtures (`probe`, `decode`, `encode`):**
+- **`probe`:** over every standard clip, each Python function above.
+- **`decode`:**
+  - over every clip: the rgb24 frames (sha256 per frame, base64 for clips ≤ 64×48), `load`, `download` and `get_components`' sound (float32 base64, or sha256 over 64 KiB);
+  - Python's own `reformat('yuv420p')` planes of three rgb24 inputs.
+- **`encode`:**
+  - `VideoFromComponents.save_to` of `synth` frames at 24, 29.97 and 30 fps, with and without a mono or stereo sound, recorded as the output's probe, its decoded frames and its decoded sound;
+  - the same with PyAV's codec switched to `libopenh264`, at every row of `OPENH264_FOR`;
+  - `save_audio` for FLAC, for MP3 at `V0`/`128k`/`320k` and for Opus at `128k`, from mono and stereo float input (decoded samples, the encoder's sample format, and the file's tags);
+  - `stitch_clips` of three synthetic clips (one at a different size).
+
+**Tests (each a separate `it`):**
+- **Parity:**
+  - the probe helpers equal Python on every clip;
+  - `decodeFrames` is byte-equal to PyAV on every clip; the edit-list clip drops the negative-pts frames;
+  - each `decodeAudio` decoder is bit-equal to Python;
+  - the RGB → YUV planes equal Python's;
+  - `encodeVideo` equals the OpenH264 Python run after decoding, and meets ruling (c) against the libx264 run;
+  - FLAC decodes equal; MP3 and AAC decode equal (or within ruling (c)'s audio rule, named case by case);
+  - a stitch of three clips has Σ − 2 frames, the first clip's rate and size, and the frames in order.
+- **Safety:**
+  - a path that is relative or has a `:` scheme is refused before any process starts;
+  - an M3U8 playlist renamed `.mp4` is refused by `mediaFormat`, and ffmpeg is never started for it;
+  - `-protocols` of the real build lists only `file` and `pipe`.
+- **Process:**
+  - Stop kills a 10-second decode within 1 s and leaves no partial file;
+  - a timeout does the same with `MEDIA_WORDS.timedOut`;
+  - two jobs of one hosted user run one after the other, while two users run side by side;
+  - a thumbnail job isn't held up behind a long job;
+  - stderr never reaches the error message.
+- **Caps:** a 4097×4097 video in hosted, a video over the length cap and a sound over the sample cap are each refused from the probe alone (a spy shows no decode).
+
+**Acceptance:** every parity test passes on this Mac with the real build; `OPENH264_FOR` is filled in and measured; the report lists the scale options used and any fixture case that isn't exact.
+
+---
+
+### Task R5.2: Video, frame batches and sound between runner nodes
+
+No family: engine machinery, proven with stand-in classes (the `vi.mock` pattern of `runner-value-results.unit.spec.ts`).
+
+**Files:**
+- Modify `frontend/shared/runner/values.ts`: `ValueKind` gains `'frames' | 'video'`; `VALUE_KINDS_ALL` gains both, so a Gate hands them on (spec ruling 2: a Gate stopped on one shows nothing to pick).
+- Modify `frontend/server/runner/types.ts`: `RunnerValue`, `SoundNote`.
+- Modify `frontend/server/runner/values.ts`:
+  - `filesOf` covers the new kinds;
+  - `withWiredValues` leaves `frames` and `video` wires alone, as it leaves `files` and `mask`. Today it would throw `WIRED_VALUE_MISSING` for them.
+- Modify `frontend/server/runner/keptBytes.ts`: `KeptExt` gains `'mkv' | 'wav'`, plus `putPath`, `pathOf` and `workDir`.
+- Modify `frontend/server/runner/results.ts`: `ResultStore.pathOf`, `ResultStore.saveFromPath`.
+- Modify `frontend/server/runner/fileAccess.ts`: `pathOf`.
+- Modify `frontend/server/runner/engine.ts`: a run's kept-bytes total is capped at `MEDIA_CAPS.keptBytesPerRun`, and the kept folder is swept as today.
+- Create `frontend/server/media/values.ts`.
+- Test: `frontend/tests/unit/runner-media-values.unit.spec.ts`.
+
+**Interfaces:**
+```ts
+// types.ts
+export interface SoundNote {
+  /** How Python turns this file into its AUDIO: 'load' (nodes_audio.py load()), 'download' (nodes_replicate.py _download_url_to_audio_dict), 'exact' (a float WAV the runner wrote: the samples as they are). */
+  decode: 'load' | 'download' | 'exact'
+}
+export type RunnerValue =
+  | { kind: 'files'; files: OutputFile[]; list?: true; tensors?: OutputFile[]; sound?: SoundNote }
+  // …the R0–R3 kinds unchanged…
+  /** An IMAGE batch from a video: one kept FFV1 file of exact 8-bit RGB frames. */
+  | { kind: 'frames'; file: OutputFile; count: number; w: number; h: number }
+  /** CreateVideo's VIDEO (Python's VideoFromComponents): encoded only when saved or shown. */
+  | { kind: 'video'; frames: { file: OutputFile; count: number; w: number; h: number }; fps: number; sound: { file: OutputFile; note: SoundNote } | null }
+
+// keptBytes.ts
+putPath(runId: string, tmpPath: string, ext: KeptExt): Promise<OutputFile>   // sha256 streamed, then renamed into place
+pathOf(file: OutputFile): string                                           // for a tool to read; throws KEPT_GONE when missing
+workDir(runId: string): Promise<string>                                    // a temp folder inside the run's kept folder
+// results.ts
+pathOf?(file: OutputFile): string
+saveFromPath?(tmpPath: string, o: SaveOptions): Promise<OutputFile>         // moved (or copied across disks), never read into memory
+
+// server/media/values.ts
+/** Classes whose sound Python decodes with _download_url_to_audio_dict (nodes_replicate.py:1735, :1834, :5463). */
+export const SOUND_DOWNLOAD_CLASSES: ReadonlySet<string>   // GenerateMusicNode, MusicGenRemoteNode, GenerateSpeechNode, MiniMaxSpeechRemoteNode, CloneSingingVoiceNode
+/** The note a sound value carries, or the maker's default for a value kept before R5 (no note). */
+export function soundNoteOf(v: RunnerValue, makerClass: string): SoundNote
+export function readSound(v: RunnerValue, makerClass: string, io: { access: FileAccess; userId: string | null; signal?: AbortSignal; hosted: boolean }): Promise<DecodedSound>
+export function keepSound(runId: string, s: DecodedSound, kept: KeptBytes): Promise<RunnerValue>          // floatWav → 'exact'
+export function readFrames(v: Extract<RunnerValue, { kind: 'frames' }>, io, onFrame: (rgb: Uint8Array, i: number) => Promise<void>): Promise<void>
+export function keepFrames(runId: string, frames: AsyncIterable<Uint8Array>, w: number, h: number, io): Promise<Extract<RunnerValue, { kind: 'frames' }>>
+/** An encoded MP4 of a made video, as VideoFromComponents.save_to writes it; a file video is returned as it is. */
+export function videoFileFor(v: RunnerValue, io, o: { metadata?: Record<string, string> }): Promise<{ path: string; temporary: boolean }>
+```
+
+**Behaviour:**
+- `frames` and `video` values are read only by inputs whose rule lists them in `valueInputs`. R5.4 and R5.5 add CreateVideo `images`, SaveVideoFrames `frames`, SaveVideo, GetVideoComponents and the Video card's `video`/`source` (`['files', 'video']`); R6 adds the video effects. Anything else wired from such a slot leaves the workflow to the engine: Save image, Preview image, a Frame, the picture effects, any paid node. See ruling (e).
+- A sound slot stays `files`, with its readers kept in check by `linkSources`, as today. So Generate a video, the Frame and the rest can't be handed a sound they don't expect.
+- The sound note is set by the node that makes the value: LoadAudio and the cards `'load'`, the paid sound nodes `'download'`, everything the runner writes `'exact'`. A value kept before R5 has no note and reads by its maker (`soundNoteOf`).
+- A kept `.mkv` or `.wav` is written by the tools into `workDir`, then `putPath`. Kept bytes are never read whole into memory by media code.
+- **Caps before work:** a frame batch or made video over `batchFrames` / `batchPixels`, a sound over `soundSamples`, or a run's kept total over `keptBytesPerRun` fails the node plainly, before the work where it can be told from the probe.
+
+**Tests:**
+- A stand-in class making each new kind:
+  - a Gate hands each on;
+  - `withWiredValues` leaves each alone;
+  - a Save image reading a `frames` slot leaves the workflow to the engine (and `nodesNeedingEngine` names it);
+  - a restart mid-run reads the kept `.mkv` back by path;
+  - a changed kept file gives `KEPT_GONE`.
+- Sound notes:
+  - `soundNoteOf` of an R3.8-era value (no note) from Generate music is `'download'`, and from an Audio card `'load'`;
+  - `readSound` gives each decoder's samples;
+  - `keepSound` → `readSound` is bit-identical.
+- `videoFileFor` of a made video equals `encodeVideo` of its parts; of a file video it is the file itself.
+- The families-off invariant (rule 8) over every saved project graph.
+
+**Acceptance:** the families-off invariant holds; every existing runner spec is green unchanged; the new kinds survive a restart.
+
+---
+
+### Task R5.3: Sound nodes (family `media-sound`)
+
+**Port:**
+
+| Class | Python | Behaviour | Outputs / ui |
+|---|---|---|---|
+| LoadAudio | `nodes_audio.py:402-440` (`execute` :420-424, `validate_inputs` :435-438) | The file as it is, note `'load'`; a missing file refused before the run (`Invalid audio file: …`, mapped to plain words) | slot 0 sound |
+| RecordAudio | `:443-465` | The same, reading the browser's recording (WebM/Opus) from input | slot 0 sound |
+| Audio (card) | `:260-363` (`execute` :318-350) | `source` wins, then the `audio` file (`'load'`), else Python's 1 s of silence at 44.1 kHz (kept `'exact'`, ui `{ audio: [] }`). The preview is always a FLAC made from the samples (`UI.PreviewAudio`), into temp with the prefix `ComfyUI_temp_` + 5 letters from `abcdefghijklmnopqrstuvwxyz`. With `export` on, `get_save_audio_ui` in `format`/`quality` into output, and the card's ui points at that copy. | slot 0 the sound as it came in; ui `{ audio: [{ filename, subfolder, type }] }` |
+| SaveAudio | `:155-178` → `AudioSaveHelper.get_save_audio_ui` (`comfy_api/latest/_ui.py:373-387`) → `save_audio` (`:265-370`) | FLAC per batch item; `%batch_num%` replaced; counter from `get_save_image_path`, moved on per item; tags `prompt` and the workflow keys as JSON | ui `{ audio: [...] }` |
+| SaveAudioMP3 | `:181-207` | MP3; quality `V0` / `128k` / `320k` | same |
+| PreviewAudio | `:238-257` → `UI.PreviewAudio` (`_ui.py:413-425`) | FLAC into temp (prefix as above) | ui `{ audio: [...] }` |
+| (Opus export) | `_ui.py:286-303` and torchaudio `resample` (`.venv/…/torchaudio/functional/functional.py:1303-1432`: `_get_sinc_resample_kernel`, `_apply_sinc_resample_kernel`; defaults `lowpass_filter_width=6`, `rolloff=0.99`, `sinc_interp_hann`) | A rate above 48 kHz becomes 48 kHz; a rate not in `[8000, 12000, 16000, 24000, 48000]` becomes the next one up; the samples are resampled with a port of torchaudio's kernel (the gcd-reduced rates, the Hann-windowed sinc and a float32 `conv1d`), then encoded | — |
+
+- **Rows:**
+  - `local: 'source'` for LoadAudio and RecordAudio; `local: 'render'` for the card, the savers and PreviewAudio (they write files).
+  - Widgets with ComfyUI's options (the card's `format`: `flac`/`mp3`/`opus`; `quality`: `V0`/`128k`/`192k`/`320k`).
+  - Every AUDIO input's `linkSources` lists the sound makers taken while their family is on: `SOUND_OUTPUTS` = LoadAudio 0, RecordAudio 0, Audio 0, GetVideoComponents 1 (with `media-video`), the four audio-gen classes 0 (with `audio-gen`), CloneSingingVoiceNode 0 (with `sound-in`).
+  - Added to `SWITCHED_CLASSES` and `RUNNER_OUTPUT_CLASSES` (the savers, PreviewAudio and the card are output nodes).
+- **The Audio card's rows.** `runnerRuleFor('Audio', …)` picks, in this order:
+  1. the audio-gen row (`AUDIO_CARD_AUDIO_GEN_RULE`) while `audio-gen` is on and `media-sound` is off, as today;
+  2. the new `AUDIO_CARD_MEDIA_RULE` while `media-sound` is on;
+  3. the sync-3 row.
+
+  With `media-sound` on, the card does what Python does, including export. R3's ruling (t), "shows the provider's own file until R5", ends here: the preview becomes Python's FLAC of the `'download'` decode.
+- **Kept quirks** (spec: kept unless they lose data):
+  - MP3 `V0` is `qscale` on, which is LAME's VBR quality 0 (`-q:a 0`); the Audio card's `192k` for MP3 falls through Python's `if` chain with no rate set, and the runner does the same.
+  - A 3-to-8-channel sound fails plainly where PyAV raises.
+  - A `'download'` sound from a stereo WAV answer is one interleaved row of double length. That loses data: ruling (k).
+- **Hosted:**
+  - the `audio` widget's file must be the user's own (rule 6);
+  - saved files go under the user's subfolder;
+  - previews go to temp in the user's subfolder, and are not assets.
+
+**Files:**
+- Create `frontend/server/runner/media/soundNodes.ts` (`planLoadAudio`, `planAudioCard`, `planSaveAudio`, `planPreviewAudio`, `saveAudioFiles`) and `frontend/server/media/resample.ts` (`torchResample(s: DecodedSound, to: number): DecodedSound`).
+- Modify `executors.ts`, `eligibility.ts` (rows, `SOUND_OUTPUTS`, `AUDIO_CARD_MEDIA_RULE`, `runnerRuleFor`), `values.ts` (`OUTPUT_KINDS` needs no row: sounds are `files`), `families.ts` (`media-sound`, `FAMILY_REQUIRES`), `validate.ts` (`RUNNER_OUTPUT_CLASSES`, `ALSO_SWITCHED`), `inputs.ts` (LoadAudio and RecordAudio `audio`), and the script (group `sound`).
+- Test: `runner-media-sound.unit.spec.ts`.
+
+**Fixtures (`sound`):**
+- each class's `execute` over the sound clips of rule 4;
+- the card with and without `source`, with nothing (silence), and with `export` in each format and quality;
+- SaveAudio with `%batch_num%` and a two-item batch;
+- `resample` from 44.1, 22.05, 96 and 8 kHz (samples recorded);
+- a Generate music answer (WAV mono and stereo) through the card.
+
+Each case records the saved names, subfolders, the decoded samples, the tags and the ui.
+
+**Test:** rule 10 (parity per rule 3), plus:
+- with `media-sound` off, the Audio card rows are exactly as before;
+- LipSync on sync-3 still reads the card's file as it is;
+- a card fed by Generate music shows Python's FLAC preview;
+- the resample is within 1e-6 of torch (a *library* kernel, as R2 rule 10: the ε is measured and written in the test);
+- hosted: an unowned `audio` file is refused before the hold, and a saved sound is in the user's folder and counted as an output.
+
+**Acceptance:** every fixture case passes; the families-off invariant holds; R3.8's tests stay green unchanged with `media-sound` off.
+
+---
+
+### Task R5.4: Video nodes (family `media-video`)
+
+**Port:**
+
+| Class | Python | Behaviour | Outputs / ui |
+|---|---|---|---|
+| LoadVideo | `nodes_video.py:167-204` (`execute` :188-190; `validate_inputs` :201-204) | The file as it is (`VideoFromFile`); no work | slot 0 video (`files`) |
+| GetVideoComponents | `:142-164` → `get_components_internal` (`video_types.py:247-310`) | Of a file: one job decodes the frames into a kept FFV1 file (`keepFrames`) and the last sound stream into a kept float WAV (`fltp` skip rule); no sound stream gives slot 1 an empty sound. Of a made video: its own parts, no work. | slot 0 `frames`; slot 1 sound (`'exact'`) or none; slot 2 number `float(average_rate or 1)` (`int: false`) |
+| CreateVideo | `:117-139` | `VideoFromComponents(images, audio, Fraction(fps))`: a `video` value naming the frame batch and the sound; no work | slot 0 `video` |
+| SaveVideo | `:68-114` → `VideoFromFile.save_to` (`video_types.py:319-374`) or `VideoFromComponents.save_to` (`:409-470`) | A file with `format` auto/mp4 and `codec` auto or its own codec: a stream copy (`-map 0:v -map 0:a? -map 0:s? -c copy`, the source's tags kept, `prompt` and workflow added, `movflags use_metadata_tags`) into `<prefix>_<nnnnn>_.mp4`. Otherwise (a different codec was asked for) the file is decoded into parts first, as Python does. A made video: `encodeVideo` at `Fraction(round(fps·1000), 1000)` with `PYAV_H264_DEFAULT`, the sound cut to `ceil(rate / fps · frames)` samples, AAC with layout `{1: mono, 2: stereo, 6: 5.1}` else stereo. | ui `{ images: [{ filename, subfolder, type: 'output' }], animated: [true] }` |
+| Video (card) | `:296-395` (`execute` :345-385) | `source` wins, then `file`, else ui `{ images: [] }`. A file video is shown as the file itself, as the runner does today (Python writes a stream-copied temp preview; same pictures, same sound). A made video is encoded to a temp preview `preview_video_<nnnnn>_.mp4`. With `export` on: a copy into output under `filename_prefix` (stream copy of a file, encode of a made video), and the ui points at it. | slot 0 the video as it came in; ui as Python |
+
+- `fps` of CreateVideo is the Python float. `round(Fraction(fps) · 1000)` is computed exactly (BigInt over the double's exact fraction, half to even) before it becomes `-r`.
+- An odd width or height of a made video fails with `MEDIA_WORDS.oddSize` at eligibility when known, else at the node's turn before any work. This is a known Python quirk: libx264 refuses it.
+- A frame batch of 0 frames (Python's `zeros(0, 3, 0, 0)`) fails plainly at save, as Python does.
+- **Rows:**
+  - `local: 'source'` for LoadVideo and CreateVideo; `local: 'render'` for GetVideoComponents, SaveVideo and the card;
+  - `valueInputs` of `images` `['frames']`, of `video` `['files', 'video']`, of `audio` by `SOUND_OUTPUTS`;
+  - `OUTPUT_KINDS` `GetVideoComponents: { 0: 'frames', 2: 'number' }` and `CreateVideo: { 0: 'video' }`, applied only while `media-video` is on;
+  - the card's existing row (runner-owned `Video`) is unchanged with `media-video` off; with it on, `export` and `video` sources are taken.
+- **Hosted:** the `file` widget is owned (rule 6); caps from the probe before any decode; saved videos are in the user's subfolder.
+
+**Files:**
+- Create `frontend/server/runner/media/videoNodes.ts` (`planLoadVideo`, `planGetVideoComponents`, `planCreateVideo`, `planSaveVideo`, `planVideoCard`, `saveVideoFile`).
+- Modify `executors.ts` (the `Video` case keeps today's branch with `media-video` off), `eligibility.ts`, `shared/runner/values.ts` (the two rows), `families.ts`, `validate.ts`, `inputs.ts` (LoadVideo `file`), and the script (group `video`).
+- Test: `runner-media-video.unit.spec.ts`.
+
+**Fixtures (`video`):**
+- LoadVideo → GetVideoComponents over every standard clip (frames, sound, fps);
+- CreateVideo → SaveVideo at 24, 29.97 and 30 fps, with none, mono and stereo sound;
+- SaveVideo of an MP4, a WebM, a MOV and a file with a subtitle stream, with `format` and `codec` each `auto` and set;
+- the card with `source`, `file`, nothing, and `export` on for a file and for a made video.
+
+Each case records names, ui, the output's probe, decoded frames and sound, and tags (also with PyAV on `libopenh264`, rule 3).
+
+**Test:** rule 10, plus:
+- LoadVideo → GetVideoComponents → CreateVideo → SaveVideo runs in the runner with ComfyUI off;
+- GetVideoComponents of a made video does no work (a spy on `runMedia`);
+- a stream-copied save keeps the source's packets (the probe's codecs and the decoded frames equal the source's);
+- a 4-channel sound into CreateVideo is encoded as Python does, and 3 channels fail plainly;
+- with `media-video` off, the Video card and every existing video family are unchanged.
+
+**Acceptance:** every fixture case passes by rule 3; the families-off invariant holds.
+
+---
+
+### Task R5.5: Frame batches from and to files (family `media-video`)
+
+**Port:**
+
+| Class | Python | Behaviour |
+|---|---|---|
+| LoadVideoFrames | `nodes_video_effects.py:516-613` (`execute` :554-599) | `scale = min(1, max_size / max(w, h))`; `tw, th = max(1, round(w·scale))`, `max(1, round(h·scale))` (Python's `round`, half to even); `fps = float(average_rate) or 30.0`; `time_cap = int(max_seconds · fps / stride)` when `max_seconds > 0`; `cap = min(time_cap, max_frames)`; skip to `start_frame`, keep every `stride`-th decoded frame; each kept frame, when resized, goes through **PIL's `resize(BILINEAR)`** on 8-bit RGB; nothing kept gives one 64×64 black frame. Outputs: slot 0 `frames`, slot 1 number `fps / stride`. |
+| SaveVideoFrames | `:621-740` (`execute` :661-740) | T = 0 returns nothing. The name is `<(prefix or 'video').rstrip('_')>_<YYYYmmdd_HHMMSS>.mp4` in output's top folder, the user's subfolder in hosted; see ruling (h). Frames are `(clamp(0,1)·255).astype(uint8)` (truncation), padded to even sizes with black at the right and bottom. The rate is `Fraction(round(fps·1000), 1000)`. H.264 uses `{ crf, preset }` through `h264Args`. With an `audio_file` (not `(none)`), the file's first sound stream is decoded frame by frame, stopping at the first frame whose `time > T / fps` (so up to one sound frame more than the video), and encoded to AAC stereo at the stream's rate. A sound that won't open is skipped, as Python does (logged, the video saved without it). ui `{ images: [{ filename, subfolder, type: 'output' }], animated: [true] }`; no outputs. |
+
+- **PIL bilinear:** `pixels/core.ts` `pilCoeffs` gains a filter parameter (`'lanczos' | 'bilinear'`; bilinear is PIL's triangle filter, support 1). `pilResize(px, w, h, c, ow, oh, stop, filter)` then serves both. It is proven against Pillow's `resize(BILINEAR)` on the R2 fixture pictures (exact: Pillow's fixed-point path).
+- **Streaming:** decoded frames pass one at a time from `decodeFrames`, through the resize on the Frame's worker (`pixelsInWorker`, its watchdog and Stop), into `keepFrames`. Memory holds a few frames at most.
+- **Caps:** `max_frames` (≤ 10,000, ComfyUI's max) and the hosted caps of ruling (f), checked from the probe before any decode where the count is known, and as frames arrive otherwise.
+
+**Files:**
+- Create `frontend/server/runner/media/frameNodes.ts` (`planLoadVideoFrames`, `planSaveVideoFrames`).
+- Modify `pixels/core.ts` (the filter), `executors.ts`, `eligibility.ts`, `shared/runner/values.ts` (`LoadVideoFrames: { 0: 'frames', 1: 'number' }`), `families.ts`, `validate.ts`, `inputs.ts` (`file`, `audio_file`), and the script (group `frames`).
+- Test: `runner-media-frames.unit.spec.ts`.
+
+**Fixtures (`frames`):**
+- LoadVideoFrames over the standard clips with `max_size` 720 / 64 / 4096, `stride` 1 / 3, `start_frame` 0 / 5 / past the end, and `max_seconds` 0 / 0.5;
+- Pillow `resize(BILINEAR)` on the R2 pictures;
+- SaveVideoFrames at odd and even sizes, `fps` 24 / 29.97, CRF 10 / 20 / 32, with and without each sound clip (and with a broken one).
+
+**Test:** rule 10, plus:
+- the frame count and fps equal Python's in every case;
+- the 64×64 black fallback;
+- the resize is byte-equal to Pillow;
+- the padding is black;
+- the sound overruns by at most one sound frame, exactly as Python's;
+- two saves in the same second don't overwrite each other (ruling (h));
+- Stop mid-decode leaves no kept file.
+
+**Acceptance:** every fixture case passes; LoadVideoFrames → SaveVideoFrames runs with ComfyUI off.
+
+---
+
+### Task R5.6: Thumbnails, waveforms and the asset probe without the engine
+
+No family (ruling (l)). With the tools ready, the four media routes answer from Sailor. Without them, they forward to the engine as today, and answer 503 when it's down. The hosted gate (`server/utils/engineGate.ts:749-940`: ownership of `asset_id` and `filename`) is unchanged and still runs first.
+
+**Port:**
+
+| Route / helper | Python | The runner |
+|---|---|---|
+| `_probe_media` (for `POST /sailor/asset_import`) | `nodes_timeline.py:2077-2120`: video (`.mp4 .webm .mov .avi .mkv .m4v`), the first stream's `width`/`height` and `duration · time_base` when both are set; audio (`.mp3 .wav .flac .ogg .m4a .aac`), the first sound stream's `duration · time_base`; any error gives nulls; kind by extension, unknown → `'video'` | `probeMediaNative` in `server/native/media.ts` gains video and audio through `probeMedia` |
+| `_gen_thumbnails` (video) | `:2184-2245`: `dur_sec` = stream `duration · time_base`, else `container.duration / 1e6`; ≤ 0 → `[]`; for i < count, `t = step · (i + 0.5)`, seek backward to the keyframe before `int(t / tb)`, decode until `pts ≥ target`, `to_ndarray('rgb24')`, PIL `resize((max(1, round(w·48/h)), 48), BILINEAR)`, PNG `optimize=True` as a data URL | `videoThumbnails(path, count)`: one ffmpeg job per thumbnail (`-ss` before `-i` with `-noaccurate_seek` matches "keyframe before"; the implementer proves which frame comes out on the fixture clips), then `pilResize(…, 'bilinear')` and a PNG from sharp |
+| `/sailor/input_thumbnail` | `:2247-2279` | `inputThumbnailRoute`: the `engine()` branch for a non-image becomes `videoThumbnails(p, 1)` when the tools are ready. Audio files still give `[]` → 404, as Python does. |
+| `/sailor/asset_thumbnails` | `:2281-2311` | `assetThumbnailsRoute`: the same |
+| `_gen_waveform_peaks` | `:2319-2352`: every decoded frame's `to_ndarray()`; if 2-D and ≤ 8 rows, the mean over rows (a packed file is one row, so interleaved samples are **not** mixed); `abs` as float32; concatenated; divided by the peak (or 1); `chunk = max(1, len // n)`; each bucket is the max of `[i·chunk, (i+1)·chunk)`, the last to the end, and 0.0 past the end | `waveformPeaks(path, buckets)` over R5.1b's native-format decode (the `load` path before its integer scale, which the peak normalisation makes irrelevant except for float32 rounding), numpy's float32 row mean ported as `(a + b) / 2` in float32 |
+| `/sailor/asset_waveform` | `:2354-2388` | `assetWaveformRoute`: native peaks when ready; the JSON written by `pyDumps` (float repr) under the same cache name |
+
+- Cache names, folders and response shapes are unchanged (they are already Python's, in `media.ts`).
+- The PNG bytes differ from PIL's `optimize=True`. They are compared decoded, and must be byte-equal in pixels.
+- Jobs use the routes' two slots with a 30 s limit (rule 5). A timed-out thumbnail answers what Python answers for a failure (`[]`, so 404 or an empty list), is not cached, and is logged.
+- The client (`app/composables/useClipPreview.ts`, `TimelineEditor.vue:1969`) needs no change: the 503 path simply stops being hit. Its retry suppression stays for machines without the tools.
+
+**Files:**
+- Modify `frontend/server/native/media.ts` (the header's line numbers corrected; `probeMediaNative`, `inputThumbnailRoute`, `assetThumbnailsRoute`, `assetWaveformRoute`, `runMediaRoute`).
+- Create `frontend/server/media/thumbnails.ts` (`videoThumbnails`, `waveformPeaks`).
+- Modify the script (group `timeline-media`, which runs the handlers lifted with `ast`, as Phase A's parity tests do).
+- Test: `frontend/tests/unit/native-media-video.unit.spec.ts`.
+
+**Fixtures (`timeline-media`):**
+- `_probe_media` over every standard clip and an unreadable file;
+- `_gen_thumbnails` with count 1, 5 and 20 (decoded PNG pixels);
+- `_gen_waveform_peaks` with 16, 256 and 2048 buckets (including the packed stereo WAV and the −32768 WAV).
+
+**Test:**
+- the three routes answer Python's shapes and cache names with ComfyUI down (the `forwardToEngine` spy never called);
+- decoded thumbnails and the peaks' JSON equal the fixtures;
+- with the tools missing, the routes forward (or answer 503) exactly as today;
+- a hosted request for another user's asset is refused by the gate before any job;
+- a hanging decode answers within 30 s.
+
+**Acceptance:** the fixtures pass; `useClipPreview.ts`'s 503 path isn't hit with ComfyUI off on a machine with the tools.
+
+---
+
+### Task R5.7: Controller check, fixture-level and in the browser (not delegated)
+
+- [ ] The build (R5.1a) on this Mac and in `docker build --target media-tools`, with the user's go for the source downloads. Record the versions, the sha256s, the binaries' sha256 and the size added to the image in the ledger.
+- [ ] Real routes and engine, hosted mode, `NUXT_RUNNER_FAMILIES=cards,media-sound,media-video`, ComfyUI stopped:
+  - LoadAudio (MP3) → Save audio (MP3, V0);
+  - Audio card (WAV) with `export` on (FLAC, then Opus from 44.1 kHz);
+  - LoadVideo (MP4 with sound) → Get video components → Create video → Save video;
+  - Load video frames (stride 2, max size 256) → Save video frames with a sound file;
+  - Video card showing a made video.
+
+  For each: the saved files by rule 3, nothing charged, and Stop mid-job kills the process (no `ffmpeg` left in `ps`).
+- [ ] Hosted safety by hand:
+  - an HLS playlist uploaded as `clip.mp4` is refused;
+  - a 4097-pixel-wide video is refused before decoding;
+  - another user's file is refused before the run.
+- [ ] With both media families off, the needs-engine list over every saved project is identical to before R5.2; every `runner-*.unit.spec.ts` is green unchanged.
+- [ ] The browser check on the shared :3002 server (the controller's), tools built:
+  - open the Timeline editor with ComfyUI stopped: video clips show their filmstrips, sounds their waveforms, and an imported clip its length;
+  - run a saved project with a LoadVideo → Save video.
+- [ ] R3.10 and R3.17 are unblocked: their tasks can be dispatched.
+
+Record the results in `.superpowers/sdd/2026-09-26-engine-free-step3/progress.md` and `docs/STATE.md`. The media families stay off in hosted until the user answers ruling (b).
+
+### Controller rulings needed before R5 is built
+
+- **(a) Which ffmpeg build.** The ledger says "an LGPL build with OpenH264". *Recommend:* build FFmpeg 8.0.3 ourselves, from its signed source, with only LGPL parts: OpenH264 2.5.1 for H.264, LAME for MP3, Opus, dav1d. Use one script for this Mac and for the Fly image, with every version and checksum pinned in the repository. FFmpeg 8.0 is the same branch Python uses, so pictures and sounds come out the same. *Cost:* a one-time 10-minute build on each machine (and in each image build), plus a script to keep up to date. The alternative, ready-made downloads, either includes GPL parts or has no Mac build we can check, and is a different FFmpeg from Python's.
+- **(b) H.264 patents on a server.** OpenH264's code is free to use (BSD), but Cisco's promise to cover the H.264 patent fees applies only to Cisco's own program, downloaded by a person onto their own device. It doesn't cover a server encoding video for customers. Whether Sailor needs its own patent licence (from Via LA) is a legal question, and the same question applies to Python's encoder today. *Recommend:* build it, switch the two media families on locally, and keep them off in hosted until you've checked this (most exports already happen in the browser, whose maker holds the licence). *Cost:* hosted users can't save or stitch video on the server until then; Turntable with views (R3.17) waits with it in hosted. The alternative is saving server videos as WebM (VP9, royalty-free), which some players and editors don't open.
+- **(c) What "the same video" means across two different H.264 encoders.** The ledger's rule for lossy files ("average within 2/255, nowhere more than 8/255") can't hold between Python's encoder (x264) and ours (OpenH264). Each gets edges slightly differently, and single pixels move by more than 8 levels. *Recommend:*
+  - frame count, rate, length and size exactly equal;
+  - the average difference from Python's decoded frames within 2/255;
+  - our result no further from the original frames than Python's (within 0.5 dB);
+  - an exact match with Python's own pipeline switched to OpenH264, which proves we feed the encoder the same frames.
+
+  For MP3 and AAC, same library versions, so exact decoded samples are expected; where not, a signal-to-noise ratio of at least 60 dB against Python's decoded sound. *Cost:* a looser rule for H.264 only. The alternative is a rule no build without x264 can pass.
+- **(d) Python's quality numbers on a different encoder.** Save video frames asks for x264's "CRF" and "preset", and Turntable uses CRF 20. OpenH264 has neither. *Recommend:* a measured table, one OpenH264 setting per CRF, chosen so our video is never worse than Python's at that CRF. The preset is ignored (it only changes x264's speed). *Cost:* files may come out somewhat larger than Python's.
+- **(e) A video's frames travel as exact 8-bit pictures.** Python holds a video's frames as floats. Frames decoded from a file are exactly 8-bit anyway, so nothing is lost. *Recommend:* keep them as one lossless FFV1 file per batch. Until R6, only the video nodes may read them; a frame batch wired into Save image, a Frame or a picture effect leaves the workflow to the engine. *Cost:* those mixed workflows still need ComfyUI until a later task teaches the picture nodes to read a batch.
+- **(f) Hosted limits.** *Recommend:* hosted, a video up to 2 GiB and 10 minutes, frames up to 4096×4096, a frame batch up to 600 frames and 600 × 1920 × 1080 pixels, a sound up to 512 MiB and 30 minutes, 4 GiB of kept files per run; one media job per person at a time. Local: Python's own limits (10,000 frames, 8192²), 60 minutes, two jobs. *Cost:* hosted users can't load a 20-minute 4K clip frame by frame; the numbers can rise once measured on the Fly machine.
+- **(g) Audio waveform moves to the video effects (R6.1).** It reads a sound, but its work is drawing bars and circles exactly as Python's drawing library does, plus a numpy FFT. *Recommend:* move it. *Cost:* it keeps needing ComfyUI until R6.1.
+- **(h) Save video frames overwrites files.** Python names the file by the second it was saved, with no counter, so two saves in one second overwrite each other, and hosted users would share the top output folder. *Recommend:* keep Python's name, add a counter only on a clash (the runner never overwrites), and in hosted put it in the user's own folder. *Cost:* a rare name differs from Python's.
+- **(i) Workflow details written into saved videos and sounds.** Python writes the workflow into each file's tags. *Recommend:* do the same, as Save image does (R1.5). *Cost:* none beyond Python's own behaviour.
+- **(j) Opus exports at 44.1 kHz.** Opus needs 48 kHz, so Python converts the sound with torchaudio's resampler, and most sounds are 44.1 kHz. *Recommend:* port torchaudio's resampler (a fixed, well-defined filter), proven within a millionth of Python's samples. *Cost:* a moderate port. The alternative is refusing Opus export for most sounds.
+- **(k) Stereo sounds from paid nodes come out scrambled in Python.** When a paid node answers with a stereo WAV (MusicGen's stereo models), Python reads its left and right samples as one long mono track of double length, then scales it to full volume. *Recommend:* keep the full-volume scaling (that's how Python's results sound), and read stereo properly (the scramble loses the sound). *Cost:* those results differ from Python's, on purpose; the report lists it.
+- **(l) Thumbnails and waveforms switch themselves on.** *Recommend:* no switch. When the video tools are installed, the Timeline's filmstrips, waveforms and clip lengths come from Sailor; without them, it's as today. *Cost:* installing the tools changes those routes at once (they're read-only and free).
+- **(m) Where the tools live on this Mac.** *Recommend:* `frontend/.media-tools/`, ignored by git, built by the script. A Homebrew ffmpeg is never used, even if installed: it contains GPL parts, and it would make different files from the Fly machine. *Cost:* each developer machine runs the build once.
+- **(n) The source-code duty of the LGPL.** The licence asks for the source when the program is *given* to someone. Sailor only runs it on its own server. *Recommend:* ship the licence texts, the exact source addresses and checksums, and the build line beside the program. Add the source archives themselves only if the image is ever handed to anyone. *Cost:* none now.
+- **(o) The Fly image already contains GPL video code.** Python's video library (PyAV) inside today's image bundles x264 and x265, which are GPL. So "no GPL" holds for what Sailor's new tools use, not for the whole image, until ComfyUI leaves it. *Recommend:* note it, and remove PyAV from the image when the engine goes. *Cost:* none now; worth knowing for the legal check in (b).
+- **(p) Two switches, not one.** *Recommend:* `media-sound` and `media-video`, so sound can be switched on in hosted while (b) is open. *Cost:* one more switch.
+- **(q) Full-range videos read slightly washed out.** Python's video reader ignores a video's "full range" tag (phone videos often have it), so dark and bright parts are slightly squeezed. *Recommend:* keep Python's reading, so the pictures match what ComfyUI gives today. *Cost:* those videos look slightly flatter than in a video player, as they do in ComfyUI today; fixing it is a one-line change later if you prefer the true colours.
+
+### R5 size
+
+Eight tasks: two for the tools (R5.1a the build and licence, R5.1b the media module), one of machinery (R5.2), three porting tasks (R5.3 sound, R5.4 video, R5.5 frame batches), one for the Timeline's thumbnails, waveforms and asset probe (R5.6), and the controller's check (R5.7).
+
+They cover 11 classes (LoadAudio, RecordAudio, SaveAudio, SaveAudioMP3, PreviewAudio, LoadVideo, GetVideoComponents, CreateVideo, SaveVideo, LoadVideoFrames, SaveVideoFrames), the Audio and Video cards in full, four routes, and two families (`media-sound`, `media-video`). Audio waveform moves to R6.1 and the Timeline node to R9.1.
+
+There are no paid calls and no live checks: R5 costs nothing to run. The one outside step is the build's download of about 25 MB of pinned sources (the controller's, with the user's go). R3.10 and R3.17 are unblocked when R5.1b lands, and their live checks (about $3.20) follow then. The largest tasks are R5.1b (the parity of every probe, decode and encode) and R5.4. Each of those is one reviewable unit, because the module's pieces are proven one at a time before any node uses them.
+
+---
+
+# R6–R11 — outline tasks (to be expanded before they are built)
+
+(R4.1 stays below for the record: it was built on 2026-09-28. R5 is expanded above.)
 
 Each outline task becomes a full task (tests and code) when its slice starts. Every paid family: its own switch, off by default; priced in `frontend/shared/pricing/` before switch-on; the backup rule; a live paid check with the user's go.
 
@@ -3552,21 +4282,9 @@ Each outline task becomes a full task (tests and code) when its slice starts. Ev
 
 Add every class billed through api.comfy.org (the inventory's list; mechanically, every `comfy_api_nodes/nodes_*.py` class except `nodes_replicate.py`) to a shared `RETIRED_CLASSES` (`frontend/shared/runner/retired.ts`). They leave the Actions panel and the Legacy toggle (`app/data/action-catalog.ts`, `GeneratorsPanel.vue:41-46`), node search (`useNodeSearch.ts:87-140`), the agent and start-modal catalogues, and are refused on both paths before any charge (`blockedModels.ts`' shape: a 400 like ComfyUI's `node_errors`, "This node was retired. Pick another way to make this."). The Python files stay (not edited by this programme). Acceptance: a guard test that every `api.comfy.org`-billed class in `objectInfo.baseline.json.gz` is retired; a saved workflow with one opens, shows the node as retired, and is refused before the hold.
 
-### Task R5.1: ffmpeg in the server (decision 7)
-
-Bundle an ffmpeg binary (build per Open question 4), found by `server/media/ffmpeg.ts` (`ffmpegPath()`, a clear error when missing), with `probe(file)`, `decodeFrames(file, { fps?, max })`, `encodeVideo(frames, { fps, codec, alpha })`, `decodeAudio(file) → Float32Array per channel + rate`, `encodeAudio(samples, { format })`, run as child processes with timeouts and a per-user limit. The Fly image and `docs/` deploy notes updated. Acceptance: round trips on fixture clips (frame count, fps, duration; decoded pixels within Open question 3's tolerance for H.264); no ffmpeg → the media nodes say "This needs the video tools" instead of crashing.
-
-### Task R5.2: Frame batches and sound between runner nodes
-
-A video between runner nodes is a file (mp4 or lossless intermediate) plus its measured frame count, size and rate; a frame batch is decoded lazily through R5.1. A sound is a file plus its rate and channels. Values: `files` with a `media` note. Port the 13 codec classes (LoadVideo, LoadVideoFrames, GetVideoComponents, CreateVideo, SaveVideo, SaveVideoFrames, LoadAudio, RecordAudio, SaveAudio, SaveAudioMP3, PreviewAudio, AudioWaveform) as derive plans. Family `media`. Acceptance: fixtures from the Python nodes on short clips — frame counts, rates, durations equal; decoded pixels and samples within tolerance.
-
-### Task R5.3: Video thumbnails and waveforms natively
-
-`GET /sailor/input_thumbnail` (video), `/sailor/asset_thumbnails` (video), `/sailor/asset_waveform` served by `server/native/media.ts` through R5.1, with the same cache names as the Python (`nodes_timeline.py:2247`, :2281, the waveform route). Acceptance: parity of response shapes and cache names; the 503 fallbacks in `useClipPreview.ts` and `TimelineEditor.vue` no longer hit with ComfyUI off.
-
 ### Task R6.1: Video frame-batch effects
 
-The 20 classes of `nodes_video_effects.py` / `nodes_video_pro.py` / `nodes_frame_interp.py` (Farneback optical flow for FrameInterpolate: port OpenCV's Farneback with fixtures, or refuse with a plain message and point to Slow motion (AI), R7.3) / `nodes_audio_effects.py` VideoSilenceCut. CaptionTrack and TextClip rasterise text as PIL does: ship Python's glyph rasterisation as fixtures and match with a Node text renderer, or render in the browser at submit when the text is static. Transition's glitch style is "visually equal". Family `video-effects`. Acceptance: per-class fixtures on 8-frame clips, per the parity rules.
+The 20 classes of `nodes_video_effects.py` / `nodes_video_pro.py` / `nodes_frame_interp.py` (Farneback optical flow for FrameInterpolate: port OpenCV's Farneback with fixtures, or refuse with a plain message and point to Slow motion (AI), R7.3) / `nodes_audio_effects.py` VideoSilenceCut. CaptionTrack and TextClip rasterise text as PIL does: ship Python's glyph rasterisation as fixtures and match with a Node text renderer, or render in the browser at submit when the text is static. Transition's glitch style is "visually equal". AudioWaveform (`nodes_video_pro.py:632-802`) moves here from the codec group (R5 ruling (g)): PIL line/ellipse drawing and a numpy FFT over R5.1b's sound decode. Frame batches in and out are R5.2's `frames` value. Family `video-effects`. Acceptance: per-class fixtures on 8-frame clips, per the parity rules.
 
 ### Task R6.2: Sound effects
 
@@ -3624,4 +4342,5 @@ Lip-sync a character's Fabric and auto engines, and `sync` below sync-3 (measure
 - **Types used across tasks.** `RunnerValue` (R0.1) with `mask.files` everywhere; `slotValue`, `filesOf`, `filesOfValues`, `literalOf`, `checkValue`, `withWiredValues` (values.ts); `KeptBytes.put(runId, bytes, ext)`; `DeriveIO` / `Derived` / `staticDerive` (R0.4) — `saveAsset` gains `subfolder?`/`folder?` in R1.5 by name; `ResultEntry` (R0.6); `outputKind`, `valueInputsOf`, `valueWiresAllowed`, `STATIC_VALUES`, `staticValueOf`, `staticWiredTexts` (R0.3).
 - **R2 (expanded 2026-09-26).** Decision 8 → R2 rule 10 (exact / library classes) and R2.9 (Add noise); decision 9 → R2.10; the ledger's rulings → R2 rules 7–9 (worker, one file at a time, per-node cap, start-of-take refusals), 11 (fixtures from real Python, byte-identical, multi-threaded torch) and 12 (families-off invariant); the 78 inventory classes → R2.1 (3) + R2.4 (26) + R2.5 (13) + R2.6 (4) + R2.7 (15) + R2.8 (6) + R2.9 (11); Painter (spec ruling 4) → R2.8; the ~45 live-preview classes' engine runs → R2.11. Rulings the controller still owes: R2 (a)–(f).
 - **R3 (expanded 2026-09-27).** Spec money rules 1–5 → R3 rules 7, 9, 13, 14; parity ("paid nodes: the request is identical") → rules 4–5; spec ruling 1 (3D address) → R3.9; the 38 classes → R3.3 (7) + R3.4 (4) + R3.5 (5) + R3.6 (3) + R3.7 (1) + R3.8 (2) + R3.9 (2) + R3.10 (4) + R3.11 (1, the preset path) + R3.12 (3) + R3.13 (2) + R3.14 (1) + R3.15 (2) + R3.16/R3.17 (1), with nine hidden twins. Rulings the controller still owes: R3 (a)–(t).
+- **R5 (expanded 2026-09-28).** Decision 7 and the ledger's LGPL ruling → R5.1a (build, licence, finder) and R5.1b (the module); the lossy-tolerance ruling → R5 rule 3, with the H.264 exception put to the controller (ruling (c)); the 11 codec classes → R5.3 (5) + R5.4 (4) + R5.5 (2), plus the Audio and Video cards; AudioWaveform → R6.1; Timeline → R9.1; thumbnails, waveforms and the asset probe → R5.6; R3.10 / R3.17's needs → the table at the top of R5. Rulings the controller still owes: R5 (a)–(q).
 - **Known gaps, deliberate:** JPEG/WebP EXIF metadata not written (R1.5); Get image size's progress text not shown (R1.4); Gate choices on a text value (spec ruling 2).
