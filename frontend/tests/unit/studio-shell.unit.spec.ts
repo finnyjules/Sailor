@@ -104,3 +104,39 @@ it('Shot Director keeps three cast ports', () => {
 it('Lip-sync keeps Generate disabled while it has issues', () => {
   expect(tpl(src('LipSyncStudioNode.vue'))).toMatch(/node-btn--primary[^>]*:disabled="hasError"|:disabled="hasError"[^>]*node-btn--primary/)
 })
+
+describe('Pose Mannequin wears the studio shell', () => {
+  const s = src('PoseMannequinNode.vue')
+  const t = tpl(s)
+  const tag = shellTag(t)
+  it('a 260px shell card inside the studio-node wrapper, no gradient fill', () => {
+    expect(t).toMatch(/^<template>\s*<div[^>]*class="studio-node relative w-fit"/)
+    expect(shellClass(t)).toMatch(/\bpose-node\b[\s\S]*\bw-\[260px\]|\bw-\[260px\][\s\S]*\bpose-node\b/)
+    expect(tag).not.toMatch(/linear-gradient/)
+    expect(tag).not.toMatch(/ring-2|border-red-500/)
+  })
+  it('running and failed stay as they were, in scoped CSS', () => {
+    expect(tag).toMatch(/:data-running="data\.running \|\| undefined"/)
+    expect(tag).toMatch(/:data-error="data\.error \|\| undefined"/)
+    expect(s).toMatch(/\.pose-node\[data-running\] \{ box-shadow: 0 0 0 2px var\(--port-color, #fff\), 0 4px 16px rgba\(0, 0, 0, 0\.4\); \}/)
+    expect(s).toMatch(/\.pose-node\[data-error\] \{ border-color: #ef4444; box-shadow: 0 0 0 2px #ef4444, var\(--node-shadow\); \}/)
+    expect(s).toMatch(/\.pose-node\[data-error\]::after \{ display: none; \}/)
+  })
+  it('shared ports with unchanged ids', () => {
+    expect(t).not.toMatch(/<Handle\b/)
+    expect(t).toMatch(/:id="`input-\$\{characterInIdx\}`"/)
+    expect(t).toMatch(/:id="`input-\$\{poseImageInIdx\}`"/)
+    expect(t).toMatch(/:id="`output-\$\{imageOutIdx\}`"/)
+  })
+  it('double-click anywhere opens, except inside a form control', () => {
+    expect(tag).toMatch(/@dblclick\.stop="onCardDblclick"/)
+    expect(s).toMatch(/function onCardDblclick\(e: MouseEvent\)/)
+    expect(s).toMatch(/closest\('input, textarea, select, button'\)/)
+  })
+  it('mode switch is the shared segmented control; the mannequin preview has an Open bar; Generate is the footer', () => {
+    expect(t).toMatch(/<StudioSegmented/)
+    expect(t).toMatch(/class="node-well node-openbar-host[^"]*"[\s\S]*<NodeOpenBar[\s\S]*>Open<\/button>/)
+    expect(t).toMatch(/class="node-shell__foot justify-end"[\s\S]*RefreshCw[\s\S]*node-btn--primary[\s\S]*Generate/)
+    expect(t).not.toMatch(/Pose & Generate|Edit pose/)
+  })
+})

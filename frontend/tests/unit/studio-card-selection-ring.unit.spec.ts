@@ -9,6 +9,7 @@ const dir = resolve(__dirname, '../../app/components/vue-canvas')
 const STUDIO_CARDS = [
   'GradientStudioNode', 'ShaderStudioNode', 'TextureStudioNode', 'ShapeStudioNode',
   'Scene3DStudioNode', 'LipSyncStudioNode', 'ShotDirectorNode', 'SpaceTypeNode', 'VectorTypeNode',
+  'PoseMannequinNode',
 ]
 
 describe('studio cards show a selection ring', () => {
