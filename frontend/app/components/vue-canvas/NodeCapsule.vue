@@ -167,7 +167,7 @@ function onKeydown(e: KeyboardEvent) {
 }
 .node-capsule__title {
   grid-row: 1;
-  font-size: 12.5px;
+  font-size: 13px;
   font-weight: 600;
   /* 26px so the text centres in the same band as the tile beside it and the
      card header's title above it. */

@@ -25,6 +25,23 @@ describe('ComfyNode wears the instrument shell', () => {
   it('settings live in the hover-only actions', () => {
     expect(t).toMatch(/class="node-shell__actions[^"]*"[\s\S]{0,600}SlidersHorizontal/)
   })
+  it('card and capsule both carry Vue Flow selection as data-selected', () => {
+    expect(s).toMatch(/selected\?: boolean/)
+    expect(t).toMatch(/key="card"[\s\S]{0,1600}:data-selected="selected \|\| undefined"/)
+    expect(t).toMatch(/<NodeCapsule[\s\S]{0,400}:data-selected="selected \|\| undefined"/)
+  })
+  it('card title is 13px, like the other nodes and the capsule', () => {
+    expect(s).toMatch(/\.node-head__title \{[^}]*font-size: 13px/)
+    expect(t).not.toMatch(/node-head__title text-xs/)
+    expect(src('NodeCapsule.vue')).toMatch(/\.node-capsule__title \{[^}]*font-size: 13px/)
+  })
+  it('only one surface shows during the capsule swap', () => {
+    // Expanding: the leaving capsule is hidden at once, the card never fades in.
+    expect(s).toMatch(/\.node-capsule\.capsule-swap-leave-active \{ opacity: 0; transition-property: none; \}/)
+    expect(s).not.toMatch(/\.capsule-swap-enter-from:not\(\.node-capsule\)/)
+    // Collapsing: the entering capsule stays hidden while the leaving card is still there.
+    expect(s).toMatch(/\.capsule-swap-leave-active:not\(\.node-capsule\) ~ \.node-capsule,[^{]*\{ opacity: 0; \}/)
+  })
   it('rows sit 5px apart', () => {
     expect(t).toMatch(/flex flex-col gap-\[5px\]/)
   })
@@ -35,6 +52,10 @@ describe.each(['ComfyGateNode.vue', 'ShaderEffectNode.vue', 'SubgraphIONode.vue'
   it('root carries node-shell and asks for glass', () => {
     expect(t).toMatch(/class="[^"]*\bnode-shell\b/)
     expect(s).toMatch(/useNodeGlass\(/)
+  })
+  it('binds Vue Flow selection as data-selected on the shell', () => {
+    expect(s).toMatch(/selected\?: boolean/)
+    expect(t).toMatch(/class="[^"]*\bnode-shell\b[\s\S]{0,400}:data-selected="selected \|\| undefined"/)
   })
   it('no rounded-xl border card of its own', () => {
     expect(t).not.toMatch(/rounded-xl border/)
@@ -70,5 +91,13 @@ describe('the collapsed capsule wears the same glass as the card', () => {
   it('the capsule element in ComfyNode carries node-shell and the glass-blur binding', () => {
     expect(comfyNodeTpl).toMatch(/<NodeCapsule[\s\S]{0,400}class="comfy-node node-shell"/)
     expect(comfyNodeTpl).toMatch(/<NodeCapsule[\s\S]{0,600}:data-glass-blur="glass \|\| undefined"/)
+  })
+})
+
+describe('ShaderEffectNode keeps its red edge when it fails', () => {
+  const s = src('ShaderEffectNode.vue')
+  it('marks the failed state and colours the edge in scoped CSS', () => {
+    expect(s).toMatch(/:data-error="data\.error \|\| undefined"/)
+    expect(s).toMatch(/\.shader-effect-node\[data-error\] \{ border-color: #ef4444; \}/)
   })
 })

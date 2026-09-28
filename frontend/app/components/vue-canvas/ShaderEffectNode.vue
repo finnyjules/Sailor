@@ -398,6 +398,8 @@ onBeforeUnmount(() => {
     ]"
     :style="{ '--port-color': imageColor } as any"
     :data-running="data.running || undefined"
+    :data-error="data.error || undefined"
+    :data-selected="selected || undefined"
     :data-glass-blur="glass || undefined"
     @mouseenter="hovered = true"
     @mouseleave="hovered = false"
@@ -528,6 +530,8 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .shader-effect-node[data-running] { box-shadow: 0 0 0 2px var(--port-color, #fff), 0 4px 16px rgba(0, 0, 0, 0.4); }
+/* Failed: a red edge. Tailwind border/ring utilities lose to the unlayered shell. */
+.shader-effect-node[data-error] { border-color: #ef4444; }
 .bg-checker {
   background-color: #141414;
   background-image:

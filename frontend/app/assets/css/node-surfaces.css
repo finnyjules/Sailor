@@ -52,10 +52,17 @@
   font-size: 13px;
   font-weight: 600;
 }
-.node-shell__actions { display: flex; gap: 2px; opacity: 0; transition: opacity 0.15s; }
+/* Hover-only. At rest the actions take no room and no clicks, so the title gets the
+   full width; on reveal they fade in (@starting-style gives display:none a start). */
+.node-shell__actions { display: none; gap: 2px; opacity: 0; transition: opacity 0.15s; }
 .node-shell:hover .node-shell__actions,
 .node-shell:focus-within .node-shell__actions,
-.node-shell[data-selected] .node-shell__actions { opacity: 1; }
+.node-shell[data-selected] .node-shell__actions { display: flex; opacity: 1; }
+@starting-style {
+  .node-shell:hover .node-shell__actions,
+  .node-shell:focus-within .node-shell__actions,
+  .node-shell[data-selected] .node-shell__actions { opacity: 0; }
+}
 .node-shell__body {
   display: flex;
   flex-direction: column;

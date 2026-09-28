@@ -30,6 +30,10 @@ describe('NodeRunRow', () => {
     expect(btn.find('.node-btn__price').exists()).toBe(false)
     expect(btn.find('.animate-spin').exists()).toBe(true)
   })
+  it('instrument root is a positioning context, so the Run scope menu opens right above the footer', () => {
+    const w = mount(NodeRunRow, { props: { status: idle, canRun: true, running: false, variant: 'instrument' } })
+    expect(w.find('.node-run-row--instrument').classes()).toContain('relative')
+  })
   it('emits run on click when allowed', async () => {
     const w = mount(NodeRunRow, { props: { status: idle, canRun: true, running: false, variant: 'instrument' } })
     await w.find('.node-btn--primary').trigger('click')

@@ -5,6 +5,7 @@ import { useNodeGlass } from '~/composables/useCanvasGlass'
 
 const props = defineProps<{
   id: string
+  selected?: boolean
   data: {
     nodeType: string
     title: string
@@ -41,6 +42,7 @@ const glass = useNodeGlass(() => props.id)
 
   <div
     class="subgraph-io node-shell relative z-10 select-none min-w-[180px]"
+    :data-selected="selected || undefined"
     :data-glass-blur="glass || undefined"
     :style="{
       // Absolutely positioned ports can't hold the node open themselves.

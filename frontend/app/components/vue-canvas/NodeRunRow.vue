@@ -54,7 +54,7 @@ function onRun() {
   </div>
   <div
     v-else
-    class="node-shell__foot node-run-row node-run-row--instrument"
+    class="node-shell__foot node-run-row node-run-row--instrument relative"
     :data-tone="status.tone"
   >
     <span class="shrink-0 size-1.5 rounded-full" :class="DOT[status.tone]" aria-hidden="true" />

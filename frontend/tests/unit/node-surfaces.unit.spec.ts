@@ -43,6 +43,13 @@ describe('node-surfaces.css guards', () => {
   it('never promotes layers', () => {
     expect(CSS).not.toMatch(/will-change|translateZ/)
   })
+  it('header actions take no room and no clicks at rest, and show on hover, focus or selection', () => {
+    expect(rule('.node-shell__actions')).toMatch(/display: none/)
+    for (const sel of ['.node-shell:hover', '.node-shell:focus-within', '.node-shell[data-selected]']) {
+      expect(CSS).toContain(`${sel} .node-shell__actions`)
+    }
+    expect(CSS).toMatch(/\.node-shell\[data-selected\] \.node-shell__actions \{ display: flex; opacity: 1; \}/)
+  })
   it('node text is 500, titles 600', () => {
     expect(rule('.node-shell')).toMatch(/font-weight: 500/)
     expect(rule('.node-shell__title')).toMatch(/font-weight: 600/)

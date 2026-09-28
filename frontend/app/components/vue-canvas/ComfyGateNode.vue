@@ -7,6 +7,7 @@ import { useNodeGlass } from '~/composables/useCanvasGlass'
 
 const props = defineProps<{
   id: string
+  selected?: boolean
   data: {
     nodeType: string
     title: string
@@ -143,6 +144,7 @@ async function resumeGate(action: 'continue' | 'redo' | 'restart') {
       'opacity-60': isBypassed,
     }"
     :data-running="data.running || data.paused || undefined"
+    :data-selected="selected || undefined"
     :data-glass-blur="glass || undefined"
     :style="{
       '--border-color-left': borderColorLeft,

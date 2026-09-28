@@ -43,6 +43,8 @@ import { toast } from 'vue-sonner'
 
 const props = defineProps<{
   id: string
+  /** Vue Flow's own selection flag; reveals the header actions (data-selected). */
+  selected?: boolean
   data: {
     nodeType: string
     title: string
@@ -95,14 +97,6 @@ const isVideo = computed(() => {
   const src = props.data.images?.[0] || displayedImages.value[0]
   if (!src) return false
   return /\.(mp4|webm|mov|avi|mkv)/i.test(src)
-})
-
-const accentColor = computed(() => {
-  const firstOutput = props.data.outputs?.[0]
-  if (firstOutput) return getTypeColor(firstOutput.type)
-  const firstInput = props.data.inputs?.[0]
-  if (firstInput) return getTypeColor(firstInput.type)
-  return '#6b7280'
 })
 
 // Border glow colors for running animation — reflects input/output type colors
@@ -1694,6 +1688,7 @@ watch(previewImages, (urls) => {
     key="capsule"
     class="comfy-node node-shell"
     :data-glass-blur="glass || undefined"
+    :data-selected="selected || undefined"
     :title="displayTitle"
     :readout="capsuleReadout"
     :icon="capsuleIcon"
@@ -1725,6 +1720,7 @@ watch(previewImages, (urls) => {
     :data-running="data.running || undefined"
     :data-mode="data.mode || 0"
     :data-glass-blur="glass || undefined"
+    :data-selected="selected || undefined"
     :style="{
       // The shell (node-surfaces.css) draws the glass tint, border and shadow. A
       // user-set bgcolor still tints, mixed into the same glass so blur shows through.
@@ -1742,7 +1738,7 @@ watch(previewImages, (urls) => {
     <!-- Mode overlay: bypass shows diagonal stripes; mute shows soft scrim -->
     <div
       v-if="isMuted || isBypassed"
-      class="pointer-events-none absolute inset-0 rounded-xl z-[5]"
+      class="pointer-events-none absolute inset-0 rounded-[inherit] z-[5]"
       :class="isBypassed ? 'comfy-node-stripes' : 'bg-black/30'"
     />
     <!-- Mode badge (top-right) -->
@@ -1773,7 +1769,7 @@ watch(previewImages, (urls) => {
       <img v-else-if="partnerIconUrl" :src="partnerIconUrl" class="rounded-sm" />
       <component v-else-if="toolboxIcon" :is="toolboxIcon" class="text-white/70" :stroke-width="1.75" />
       </span>
-      <span ref="titleClipEl" class="node-head__title text-xs font-semibold text-white/90">
+      <span ref="titleClipEl" class="node-head__title font-semibold text-white/90">
         <span>{{ data.subgraphName || displayTitle }}</span>
       </span>
       <!-- Hover-only actions: node settings (opens the right-hand inspector for this
@@ -2140,7 +2136,7 @@ watch(previewImages, (urls) => {
         />
         <!-- Download current -->
         <button
-          class="absolute top-1.5 right-1.5 size-7 rounded-[6px] bg-black/55 hover:bg-black/75 backdrop-blur-sm text-white/85 hover:text-white flex items-center justify-center transition-colors cursor-pointer"
+          class="absolute top-1.5 right-1.5 size-7 rounded-[6px] bg-black/55 hover:bg-black/75 text-white/85 hover:text-white flex items-center justify-center transition-colors cursor-pointer"
           title="Download this image"
           @click.stop="downloadCarouselImage(
             displayedImages[Math.min(carouselIndex, displayedImages.length - 1)]!,
@@ -2152,14 +2148,14 @@ watch(previewImages, (urls) => {
         <!-- Prev / Next — only when >1 image -->
         <template v-if="displayedImages.length > 1">
           <button
-            class="absolute top-1/2 -translate-y-1/2 left-1.5 size-7 rounded-full bg-black/55 hover:bg-black/75 backdrop-blur-sm text-white/85 hover:text-white flex items-center justify-center transition-colors cursor-pointer"
+            class="absolute top-1/2 -translate-y-1/2 left-1.5 size-7 rounded-full bg-black/55 hover:bg-black/75 text-white/85 hover:text-white flex items-center justify-center transition-colors cursor-pointer"
             title="Previous"
             @click.stop="carouselIndex = (carouselIndex - 1 + displayedImages.length) % displayedImages.length"
           >
             <ChevronLeft class="size-4" />
           </button>
           <button
-            class="absolute top-1/2 -translate-y-1/2 right-1.5 size-7 rounded-full bg-black/55 hover:bg-black/75 backdrop-blur-sm text-white/85 hover:text-white flex items-center justify-center transition-colors cursor-pointer"
+            class="absolute top-1/2 -translate-y-1/2 right-1.5 size-7 rounded-full bg-black/55 hover:bg-black/75 text-white/85 hover:text-white flex items-center justify-center transition-colors cursor-pointer"
             title="Next"
             @click.stop="carouselIndex = (carouselIndex + 1) % displayedImages.length"
           >
@@ -2209,7 +2205,7 @@ watch(previewImages, (urls) => {
           v-for="(src, i) in displayedImages"
           :key="i"
           :src="src"
-          class="w-full rounded-lg object-contain max-h-[200px] ring-1 ring-inset ring-white/10"
+          class="w-full rounded-lg object-contain max-h-[200px] bg-black/35 ring-1 ring-inset ring-white/10"
           controls
           autoplay
           muted
@@ -2220,7 +2216,7 @@ watch(previewImages, (urls) => {
         <div v-for="(src, i) in displayedImages" :key="i" class="relative">
           <img
             :src="src"
-            class="w-full rounded-lg object-contain max-h-[200px] ring-1 ring-inset ring-white/10"
+            class="w-full rounded-lg object-contain max-h-[200px] bg-black/35 ring-1 ring-inset ring-white/10"
             :class="{ 'cursor-crosshair': data.nodeType === 'MaskExtractor' || data.nodeType === 'LensBlur' }"
             loading="lazy"
             @load="onPreviewImgLoad"
@@ -2319,7 +2315,7 @@ watch(previewImages, (urls) => {
           <!-- Scope menu — opens upward so it isn't clipped at the node's bottom. -->
           <div
             v-if="runMenuOpen"
-            class="absolute left-2.5 right-2.5 bottom-full mb-1 z-50 rounded-lg border border-white/10 bg-neutral-900/95 backdrop-blur-md p-1 shadow-xl"
+            class="absolute left-2.5 right-2.5 bottom-full mb-1 z-50 rounded-lg border border-white/10 bg-neutral-900/95 p-1 shadow-xl"
           >
             <button class="nopan nodrag w-full text-left rounded-[6px] px-2 py-1.5 flex gap-2 items-start hover:bg-white/[0.06] cursor-pointer" @click.stop="playThisNode">
               <RefreshCw class="size-3.5 mt-0.5 text-white/80 shrink-0" />
@@ -2404,6 +2400,10 @@ watch(previewImages, (urls) => {
   flex: 1;
   min-width: 0;
   overflow: hidden;
+  /* 13px like every other node title and the capsule's; line-height stays 16px
+     (what text-xs gave it) so the header keeps its height and the title its y. */
+  font-size: 13px;
+  line-height: 16px;
 }
 .node-head__title > span {
   display: inline-block;
@@ -2452,18 +2452,22 @@ watch(previewImages, (urls) => {
   top: 0;
   left: 0;
 }
-/* The CARD fades, the capsule does not. Both elements pass through these
-   classes, so the opacity is scoped with :not(.node-capsule) — the capsule
-   carries `comfy-node` too, for the selection outline, so the capsule class is
-   what actually tells them apart. Holding the capsule at full opacity is what
-   keeps the header looking continuous: it is pixel-identical to the card's, so
-   fading it would draw attention to a swap that is otherwise invisible.
+/* ONE surface at a time. Both are translucent glass, so any overlap shows two
+   headers stacked. The card never fades: expanding, the capsule vanishes at once
+   and the card, fully opaque, grows from the capsule's height; collapsing, the
+   card shrinks to the capsule's height and the capsule appears only once the card
+   has gone — keyed off the leaving card itself (a sibling in the DOM), not a second
+   timer, so there is no blank frame between them. The headers are pixel-identical,
+   so the hand-over is invisible. The capsule carries `comfy-node` too, so
+   `.node-capsule` is what tells the two apart.
 
    Still no scale. Once the capsule and the card share a width, ANY scale
    reintroduces horizontal movement — 0.97 started the card ~8px narrower than
    the capsule it replaced, which reads as growing out of something smaller. */
-.capsule-swap-enter-from:not(.node-capsule),
-.capsule-swap-leave-to:not(.node-capsule) { opacity: 0; }
+.node-capsule.capsule-swap-leave-active { opacity: 0; transition-property: none; }
+.node-capsule.capsule-swap-enter-active { transition-property: none; }
+.capsule-swap-leave-active:not(.node-capsule) ~ .node-capsule,
+.node-capsule:has(~ .capsule-swap-leave-active:not(.node-capsule)) { opacity: 0; }
 
 @media (prefers-reduced-motion: reduce) {
   .capsule-swap-enter-active,
