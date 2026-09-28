@@ -1307,7 +1307,7 @@ onUnmounted(() => {
         <button class="nopan nodrag flex flex-1 items-center justify-center gap-1.5 rounded bg-white/10 px-2.5 py-1.5 text-[11px] text-white/80 transition hover:bg-white/20 cursor-pointer" title="Open the full editor" @click.stop="openEditor">
           <Pencil class="h-3 w-3" /> Edit
         </button>
-        <StudioRenderButton class="flex-1" :node-id="id" :busy="!!data?.studioBusy || !!data?.running" />
+        <StudioRenderButton class="shrink-0" :node-id="id" :busy="!!data?.studioBusy || !!data?.running" />
       </div>
     </div>
 

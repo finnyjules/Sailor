@@ -1,6 +1,8 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { mount, enableAutoUnmount } from '@vue/test-utils'
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import StudioRenderButton from '~/components/vue-canvas/StudioRenderButton.vue'
 
 enableAutoUnmount(afterEach)
@@ -31,5 +33,9 @@ describe('StudioRenderButton', () => {
     const w = mount(StudioRenderButton, { props: { nodeId: '7', busy: true } })
     expect(w.text()).toContain('Rendering…')
     for (const b of w.findAll('button')) expect(b.attributes('disabled')).toBeDefined()
+  })
+  it('in ArtifactFrameNode, Render sits at its natural size and Edit fills the row', () => {
+    const src = readFileSync(resolve(__dirname, '../../app/components/vue-canvas/ArtifactFrameNode.vue'), 'utf8')
+    expect(src).toMatch(/<StudioRenderButton class="shrink-0"/)
   })
 })
