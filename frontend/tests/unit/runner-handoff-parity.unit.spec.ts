@@ -8,7 +8,7 @@
 import { createHash } from 'node:crypto'
 import { readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import sharp from 'sharp'
 import { createFakeFal, createFakeReplicate, makeKit } from './__runner__/kit'
 import { wireText } from './__runner__/paidParity'
@@ -20,7 +20,7 @@ import { OVER_CAP_JPEG_QUALITY, loaderHandoffBytes, loaderHandoffs, loaderSource
 import { planNode, type NodePlan } from '~~/server/runner/executors'
 import { splitPictures } from '~~/server/runner/generators/splitLayers'
 import { isReusable, requestFingerprint } from '~~/server/runner/fingerprint'
-import { PRODUCT_SHOT_MAX_BYTES, PRODUCT_SHOT_TOO_LARGE, backupInputProblem, inputFileCaps, linkedFileCheck } from '~~/server/runner/requestRules'
+import { PICTURE_UPLOAD_CAPS, PRODUCT_SHOT_MAX_BYTES, PRODUCT_SHOT_TOO_LARGE, backupInputProblem, checkedInputFile, inputFileCaps, linkedFileCheck, pictureTooLargeWords } from '~~/server/runner/requestRules'
 import { nodeCredits } from '~~/server/runner/metering'
 import { RUNNER_REPLICATE_VIDEO_MODELS, RUNNER_VIDEO_MODELS } from '~~/server/runner/generators/video'
 import { RUNNER_WAN3_MODELS } from '~~/server/runner/generators/wan3'
@@ -35,6 +35,14 @@ import { LUMA_RAY_32_ID } from '~~/server/runner/generators/lumaRay32'
 import { GPT_IMAGE_25_EDIT_OPTION } from '~~/server/runner/generators/gptImage25'
 import { SEEDREAM_5_PRO_EDIT_OPTION } from '~~/server/runner/generators/seedream5ProEdit'
 import type { OutputFile } from '~~/server/runner/types'
+import { rgbTurnedPng } from '~~/server/runner/pictures/pythonView'
+
+/** How many times the loader view is made (fix round 2: a capped picture is encoded once a run). */
+const viewCalls = vi.hoisted(() => ({ n: 0 }))
+vi.mock('~~/server/runner/pictures/handoffView', async (orig) => {
+  const m = await orig<typeof import('~~/server/runner/pictures/handoffView')>()
+  return { ...m, handoffView: (...a: Parameters<typeof m.handoffView>) => { viewCalls.n++; return m.handoffView(...a) } }
+})
 
 interface HandoffCase {
   name: string; file: string; filename: string; loader: 'LoadImage' | 'Image'; class_type: string; input: string
@@ -384,11 +392,12 @@ describe('R3.H — refused before the hold, and caps judged on the PNG that is s
     const file: OutputFile = { filename: 'photo.jpg', subfolder: '', type: 'input' }
     const small = new Uint8Array(100)
     const big = new Uint8Array(12_000_001)
-    // The file on disk is small; what is sent is over the cap.
-    const over = await linkedFileCheck(node as never, () => [file], async () => small, families, async () => small.byteLength, () => Promise.resolve(big))
-    expect(over).toEqual({ problem: PRODUCT_SHOT_TOO_LARGE, bytes: big.byteLength })
+    // The file on disk is small; what is sent is over the cap (in words about the user's picture, fix round 2).
+    const over = await linkedFileCheck(node as never, () => [file], async () => small, families, async () => small.byteLength, () => Promise.resolve({ bytes: big, alpha: true }))
+    expect(over).toEqual({ problem: pictureTooLargeWords('Product shot', true), bytes: big.byteLength })
+    expect(over.problem).toBe('This picture has see-through parts and is too large for Product shot. Use a smaller picture, or one without see-through parts.')
     // The file on disk is over the cap; what is sent is under it.
-    const under = await linkedFileCheck(node as never, () => [file], async () => big, families, async () => big.byteLength, () => Promise.resolve(rgbPng()))
+    const under = await linkedFileCheck(node as never, () => [file], async () => big, families, async () => big.byteLength, () => Promise.resolve({ bytes: rgbPng(), alpha: false }))
     expect(under.problem).toBeNull()
     // Not a loader's picture: judged on the file, as before.
     const raw = await linkedFileCheck(node as never, () => [file], async () => big, families, async () => big.byteLength, () => null)
@@ -447,13 +456,15 @@ describe('R3.H — Separate background and foreground takes the same view', () =
  * JPEG of photo-like detail whose PNG (about 36 MB) is over every cap and
  * whose quality-95 JPEG (about 5 MB) is under all of them.
  */
-async function phonePhoto(): Promise<Uint8Array> {
+async function phonePhoto(w = 4032, h = 3024): Promise<Uint8Array> {
   let x = 99
   const rnd = () => ((x = (Math.imul(x, 1103515245) + 12345) >>> 0) >>> 16) / 65536
-  const small = new Uint8Array(504 * 378 * 3).map(() => Math.floor(rnd() * 256))
-  const base = await sharp(small, { raw: { width: 504, height: 378, channels: 3 } }).resize(4032, 3024, { kernel: 'cubic' }).raw().toBuffer()
+  const sw = Math.round(w / 8)
+  const sh = Math.round(h / 8)
+  const small = new Uint8Array(sw * sh * 3).map(() => Math.floor(rnd() * 256))
+  const base = await sharp(small, { raw: { width: sw, height: sh, channels: 3 } }).resize(w, h, { kernel: 'cubic' }).raw().toBuffer()
   for (let i = 0; i < base.length; i++) base[i] = Math.max(0, Math.min(255, base[i]! + Math.round((rnd() - 0.5) * 10)))
-  const jpg = await sharp(base, { raw: { width: 4032, height: 3024, channels: 3 } }).jpeg({ quality: 92 }).withMetadata({ orientation: 6 }).toBuffer()
+  const jpg = await sharp(base, { raw: { width: w, height: h, channels: 3 } }).jpeg({ quality: 92 }).withMetadata({ orientation: 6 }).toBuffer()
   return new Uint8Array(jpg)
 }
 let PHONE: Promise<Uint8Array> | null = null
@@ -462,7 +473,8 @@ const phone = () => (PHONE ??= phonePhoto())
 /** The sent JPEG is the loader's picture: upright, RGB, sRGB, no EXIF, close to the PNG's pixels (q95). */
 async function expectSameUprightPicture(sent: Uint8Array, source: Uint8Array): Promise<void> {
   const meta = await sharp(sent).metadata()
-  expect([meta.format, meta.width, meta.height, meta.channels, meta.space, meta.orientation, meta.exif]).toEqual(['jpeg', 3024, 4032, 3, 'srgb', undefined, undefined])
+  const stored = await sharp(source).metadata()
+  expect([meta.format, meta.width, meta.height, meta.channels, meta.space, meta.orientation, meta.exif]).toEqual(['jpeg', stored.height, stored.width, 3, 'srgb', undefined, undefined])
   const view = await handoffView(source, { keepsAlpha: true })
   const a = await sharp(view.png!).raw().toBuffer()
   const b = await sharp(sent).raw().toBuffer()
@@ -556,12 +568,24 @@ describe('R3.H fix — JPEG over caps', () => {
     }, 120_000)
   }
 
-  it('caps: Bria 12 MB; HappyHorse 20 MB with its backup at 10 MB; nothing else is capped', () => {
-    const on = new Set<RunnerFamily>(['cards', 'bria-product-shot', 'happyhorse-1.1'])
-    expect(inputFileCaps('ProductShotNode', on)).toEqual({ cap: PRODUCT_SHOT_MAX_BYTES })
-    expect(inputFileCaps('GenerateVideoNode', on, HAPPYHORSE_11_ID)).toEqual({ cap: HAPPYHORSE_11_MAX_PICTURE_BYTES, backupCap: HAPPYHORSE_11_BACKUP_MAX_PICTURE_BYTES })
-    expect(inputFileCaps('GenerateVideoNode', on, 'veo-3.1')).toBeNull()
-    expect(inputFileCaps('EditImageNode', on, 'Flux 2 Pro')).toBeNull()
+  it('caps: Bria 12 MB; HappyHorse 20 MB (backup 10 MB); Seedance 2.0 30 MB; Kling 3.0 50 MiB (backup 10 MB, none with elements); a wired model the smallest', () => {
+    const on = new Set<RunnerFamily>(['cards', 'bria-product-shot', 'happyhorse-1.1', 'replicate-video'])
+    expect(inputFileCaps('ProductShotNode', {}, on, true)).toEqual({ cap: PRODUCT_SHOT_MAX_BYTES, name: 'Product shot' })
+    expect(inputFileCaps('GenerateVideoNode', { model: HAPPYHORSE_11_ID }, on, true)).toEqual({ cap: HAPPYHORSE_11_MAX_PICTURE_BYTES, backupCap: HAPPYHORSE_11_BACKUP_MAX_PICTURE_BYTES, name: 'HappyHorse 1.1' })
+    // The backup's cap only while backups run (fix round 2: and only where the route has a backup).
+    expect(inputFileCaps('GenerateVideoNode', { model: HAPPYHORSE_11_ID }, on, false)).toEqual({ cap: HAPPYHORSE_11_MAX_PICTURE_BYTES, name: 'HappyHorse 1.1' })
+    expect(inputFileCaps('GenerateVideoNode', { model: 'seedance-2.0' }, on, true)).toEqual({ cap: 30_000_000, name: 'Seedance 2.0' })
+    expect(inputFileCaps('FilmShotNode', { model: 'seedance-2.0' }, on, true)).toEqual({ cap: 30_000_000, name: 'Seedance 2.0' })
+    expect(inputFileCaps('GenerateVideoNode', { model: 'kling-v3' }, on, true)).toEqual({ cap: 52_428_800, backupCap: 10_000_000, name: 'Kling 3.0' })
+    expect(inputFileCaps('GenerateVideoNode', { model: 'kling-v3', model_options: JSON.stringify({ elements: [{ frontal_image_url: 'x' }] }) }, on, true)).toEqual({ cap: 52_428_800, name: 'Kling 3.0' })
+    expect(inputFileCaps('GenerateVideoNode', { model: 'kling-v3' }, new Set<RunnerFamily>(['cards']), true)).toBeNull()
+    expect(inputFileCaps('FilmShotNode', { model: HAPPYHORSE_11_ID }, on, true)).toBeNull()
+    // A wired model: the smallest cap among the models it could pick (priced at its dearest).
+    expect(inputFileCaps('GenerateVideoNode', { model: ['m', 0] }, on, true)).toEqual({ cap: HAPPYHORSE_11_MAX_PICTURE_BYTES, backupCap: 10_000_000, name: null })
+    expect(inputFileCaps('GenerateVideoNode', { model: ['m', 0] }, new Set<RunnerFamily>(['cards']), false)).toEqual({ cap: 30_000_000, name: 'Seedance 2.0' })
+    expect(checkedInputFile('GenerateVideoNode', on, ['m', 0])).toBe('image')
+    expect(inputFileCaps('GenerateVideoNode', { model: 'veo-3.1' }, on, true)).toBeNull()
+    expect(inputFileCaps('EditImageNode', { model: 'Flux 2 Pro' }, on, true)).toBeNull()
   })
 
   it('an Image card with see-through pixels over Bria\'s cap is refused plainly before the hold (a JPEG would lose its alpha)', async () => {
@@ -572,7 +596,7 @@ describe('R3.H fix — JPEG over caps', () => {
     expect(png.byteLength).toBeGreaterThan(PRODUCT_SHOT_MAX_BYTES)
     const k = makeKit({ deps: { families: () => new Set<RunnerFamily>(['cards', 'bria-product-shot']) } })
     writeFileSync(join(k.root, 'input', 'cutout.png'), png)
-    await expect(k.engine.startRun({ userId: k.userId, takes: [productShot('cutout.png')], ...START })).rejects.toThrow(PRODUCT_SHOT_TOO_LARGE)
+    await expect(k.engine.startRun({ userId: k.userId, takes: [productShot('cutout.png')], ...START })).rejects.toThrow(pictureTooLargeWords('Product shot', true))
     expect(k.ledger.hold).not.toHaveBeenCalled()
     expect(k.fal.client.submit).not.toHaveBeenCalled()
   }, 120_000)
@@ -584,7 +608,116 @@ describe('R3.H fix — JPEG over caps', () => {
     expect(asJpeg.bytes.byteLength).toBeGreaterThan(PRODUCT_SHOT_MAX_BYTES)
     const k = makeKit({ deps: { families: () => new Set<RunnerFamily>(['cards', 'bria-product-shot']) } })
     writeFileSync(join(k.root, 'input', 'noise.jpg'), jpeg)
-    await expect(k.engine.startRun({ userId: k.userId, takes: [productShot('noise.jpg')], ...START })).rejects.toThrow(PRODUCT_SHOT_TOO_LARGE)
+    await expect(k.engine.startRun({ userId: k.userId, takes: [productShot('noise.jpg')], ...START })).rejects.toThrow('This picture is too large for Product shot. Use a smaller picture.')
     expect(k.ledger.hold).not.toHaveBeenCalled()
   }, 120_000)
+})
+
+// ── Fix round 2: every stated cap, one encoder, encoded once ─────────────────
+
+/** Where each cap is stated: the saved schema file and the words (or number) in it. */
+const CAP_SOURCES: Record<string, { file: string; says: string }> = {
+  'fal fal-ai/bria/product-shot': { file: 'fal/fal-ai__bria__product-shot.json', says: 'Maximum file size 12MB' },
+  'fal alibaba/happy-horse/v1.1/image-to-video': { file: 'fal/alibaba__happy-horse__v1.1__image-to-video.json', says: 'Max 20 MB' },
+  'replicate alibaba/happyhorse-1.1': { file: 'replicate/alibaba__happyhorse-1.1.json', says: '<=10MB each' },
+  'fal bytedance/seedance-2.0/image-to-video': { file: 'fal/bytedance__seedance-2.0__image-to-video.json', says: 'Max 30 MB' },
+  'fal fal-ai/kling-video/v3/pro/image-to-video': { file: 'fal/fal-ai__kling-video__v3__pro__image-to-video.json', says: '"max_file_size": 52428800' },
+  'replicate kwaivgi/kling-v3-video': { file: 'replicate/kwaivgi__kling-v3-video.json', says: 'max 10MB' },
+}
+
+describe('R3.H fix round 2 — every stated picture cap', () => {
+  it('each cap in PICTURE_UPLOAD_CAPS is stated in its saved schema, with the same number', () => {
+    expect(Object.keys(PICTURE_UPLOAD_CAPS).sort()).toEqual(Object.keys(CAP_SOURCES).sort())
+    for (const [route, { file, says }] of Object.entries(CAP_SOURCES)) {
+      const text = readFileSync(join(__dirname, 'fixtures', 'provider-schemas', file), 'utf8')
+      expect(text, route).toContain(says)
+      const n = Number(says.match(/\d+/)![0])
+      expect(PICTURE_UPLOAD_CAPS[route]!.bytes, route).toBe(n < 1000 ? n * 1_000_000 : n)
+    }
+  })
+
+  it('inputFileCaps knows the route each plan takes: for every planned request with a linked picture, its caps are the table\'s for the endpoint and backup the plan sends to', async () => {
+    const families = new Set(RUNNER_FAMILIES) as ReadonlySet<RunnerFamily>
+    const cases: FamilyCase[] = [
+      ...FAMILY_CASES, ...LINE_UP,
+      ...VIDEO_IDS.flatMap(model => ['21:9', '9:16', '1:1'].map(aspect_ratio => ({ class_type: 'GenerateVideoNode', links: ['image'], widgets: { model, prompt: 'the sea moves', aspect_ratio, duration: '5', seed: 3, model_options: '{}' } }))),
+      { class_type: 'ProductShotNode', links: ['image'], widgets: { scene_prompt: 'on a table', aspect: 'Square', product_size: 'Original', keep_product_exact: true, seed: 0 } },
+    ]
+    let capped = 0
+    for (const c of cases) {
+      const { now } = await oldAndNew(c, families)
+      if (now instanceof Error || now.kind !== 'provider') continue
+      const sendsImage = JSON.stringify(now.payload).includes('https://NEW.storage/image.png')
+      const caps = inputFileCaps(c.class_type, probeGraph(c).n!.inputs, families, true)
+      const primary = PICTURE_UPLOAD_CAPS[`${now.provider} ${now.endpoint}`]
+      const backup = now.backup ? PICTURE_UPLOAD_CAPS[`${now.backup.provider} ${now.backup.endpoint}`] : undefined
+      if (!sendsImage || !primary) {
+        // A route no service caps is not checked (and its backup has no cap either).
+        expect(caps, `${c.class_type} ${String(c.widgets.model)}`).toBeNull()
+        expect(backup).toBeUndefined()
+        continue
+      }
+      capped++
+      expect(caps?.cap, `${c.class_type} ${String(c.widgets.model)}`).toBe(primary.bytes)
+      expect(caps?.backupCap, `${c.class_type} ${String(c.widgets.model)} backup`).toBe(backup?.bytes)
+    }
+    expect(capped).toBeGreaterThan(10)
+  })
+})
+
+describe('R3.H fix round 2 — phone photos into Seedance 2.0 and Kling 3.0', () => {
+  const video = (file: string, model: string): ApiPrompt => ({
+    11: { class_type: 'Image', inputs: { image: file, export: false, filename_prefix: 'ComfyUI', batch_index: -1 } },
+    1: { class_type: 'GenerateVideoNode', inputs: { model, prompt: 'the sea moves', aspect_ratio: '16:9', duration: '5', seed: 3, model_options: '{}', image: ['11', 0] } },
+  })
+  const cases = [
+    { label: 'a 24 MP phone JPEG into Seedance 2.0 image-to-video', w: 6000, h: 4000, model: 'seedance-2.0', families: ['cards'] as RunnerFamily[], cap: 30_000_000, endpoint: 'bytedance/seedance-2.0/image-to-video' },
+    { label: 'a 48 MP phone JPEG into Kling 3.0 (backups on)', w: 8064, h: 6048, model: 'kling-v3', families: ['cards', 'replicate-video'] as RunnerFamily[], cap: 52_428_800, endpoint: 'fal-ai/kling-video/v3/pro/image-to-video' },
+  ]
+  for (const t of cases) {
+    it(`${t.label}: handed off as a JPEG under the cap, not refused; encoded once; charged as before`, async () => {
+      const jpeg = await phonePhoto(t.w, t.h)
+      const view = await handoffView(jpeg, { keepsAlpha: true })
+      expect(view.png!.byteLength).toBeGreaterThan(t.cap)
+      const families = new Set<RunnerFamily>(t.families)
+      const fal = createFakeFal({ answer: () => ({ video: { url: 'https://f.test/clip.mp4' } }) })
+      const k = makeKit({ fal, deps: { families: () => families, backup: () => ({ enabled: true, stallMs: 0 }) } })
+      writeFileSync(join(k.root, 'input', 'phone.jpg'), jpeg)
+      const prompt = video('phone.jpg', t.model)
+      viewCalls.n = 0
+      const { runId } = await k.engine.startRun({ userId: k.userId, takes: [prompt], ...START })
+      await k.engine.settled(runId)
+      const run = (await k.store.get(runId))!
+      expect(run.status).toBe('done')
+      expect(fal.submitted().map(r => r.endpoint)).toEqual([t.endpoint])
+      const [[bytes, name]] = k.upload.mock.calls as unknown as [Uint8Array, string][]
+      expect(name).toBe('phone.jpg')
+      expect(bytes.byteLength).toBeLessThanOrEqual(t.cap)
+      // Encoded once, at the start of the run; the node's turn sends the kept bytes.
+      expect(viewCalls.n).toBe(1)
+      await expectSameUprightPicture(bytes, jpeg)
+      const kept = Object.values(run.takes[0]!.handoffs ?? {})
+      expect(kept).toHaveLength(1)
+      expect(kept[0]!.format).toBe('jpeg')
+      expect(kept[0]!.file.filename).toBe(`${sha(bytes)}.bin`)
+      expect(k.deps.handoff.hashOf('https://fal.storage/phone.jpg')).toBe(sha(bytes))
+      expect(run.takes[0]!.nodes['1']!.credits).toBe(nodeCredits(prompt['1']!, undefined, families))
+    }, 180_000)
+  }
+})
+
+describe('R3.H fix round 2 — one encoder of the loader view', () => {
+  it('rgbTurnedPng (the LoadImage card) is handoffView without alpha, byte for byte, on every fixture file it takes', async () => {
+    let n = 0
+    for (const [name, b] of Object.entries(FIXTURE.files)) {
+      if (LOAD_IMAGE_REFUSES[name]) continue
+      const bytes = b64(b)
+      const a = await rgbTurnedPng(bytes)
+      const v = await handoffView(bytes, { keepsAlpha: false })
+      expect(a.png === null ? null : sha(a.png), name).toBe(v.png === null ? null : sha(v.png))
+      expect([a.w, a.h], name).toEqual([v.w, v.h])
+      n++
+    }
+    expect(n).toBeGreaterThan(20)
+  })
 })

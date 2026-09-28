@@ -213,6 +213,13 @@ export interface TakeRecord {
    * measured): the hold is the price's ceiling (the 60 s cap).
    */
   measured?: Record<string, MeasuredMedia>
+  /**
+   * The capped pictures chosen at the start of the run (R3.H fix round 2),
+   * by pictureHandoff.ts handoffKey: the bytes kept for the run (a JPEG is
+   * kept as `.bin`), their format, and whether they keep see-through parts.
+   * The node's turn sends them as they are.
+   */
+  handoffs?: Record<string, { file: OutputFile; format: 'png' | 'jpeg'; alpha: boolean }>
 }
 
 /** One media node's files as measured at the start of the run. */

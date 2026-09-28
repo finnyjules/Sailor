@@ -46,8 +46,8 @@ export function loaderSourceOf(prompt: ApiPrompt, link: unknown, families: Reado
 /** A model's upload caps for the picture (requestRules.ts inputFileCaps); `backupCap` only while backups can run. */
 export interface HandoffCaps { cap: number; backupCap?: number }
 
-/** What is handed off: the bytes, whether they were made here, and their kind. */
-export interface LoaderHandoff { bytes: Uint8Array; made: boolean; format: 'png' | 'jpeg' }
+/** What is handed off: the bytes, whether they were made here, their kind, and whether they keep see-through parts. */
+export interface LoaderHandoff { bytes: Uint8Array; made: boolean; format: 'png' | 'jpeg'; alpha: boolean }
 
 /** The quality of the JPEG handed off in place of a PNG over a cap (the controller's ruling). */
 export const OVER_CAP_JPEG_QUALITY = 95
@@ -68,14 +68,25 @@ export const OVER_CAP_JPEG_QUALITY = 95
  */
 export async function loaderHandoffBytes(bytes: Uint8Array, kind: LoaderKind, signal?: AbortSignal, caps?: HandoffCaps | null): Promise<LoaderHandoff> {
   const view = await handoffView(bytes, kind, raw => pixelsInWorker(signal, w => w.rgbOf(raw), HANDOFF_TIMEOUT))
-  const png: LoaderHandoff = view.png ? { bytes: view.png, made: true, format: 'png' } : { bytes, made: false, format: 'png' }
+  const alpha = view.channels === 4
+  const png: LoaderHandoff = view.png ? { bytes: view.png, made: true, format: 'png', alpha } : { bytes, made: false, format: 'png', alpha }
   if (!caps || view.channels === 4) return png
   const tightest = Math.min(caps.cap, caps.backupCap ?? Number.POSITIVE_INFINITY)
   if (png.bytes.byteLength <= tightest) return png
   const jpg = await sharp(png.bytes).jpeg({ quality: OVER_CAP_JPEG_QUALITY }).toBuffer()
-  const jpeg: LoaderHandoff = { bytes: new Uint8Array(jpg.buffer, jpg.byteOffset, jpg.byteLength), made: true, format: 'jpeg' }
+  const jpeg: LoaderHandoff = { bytes: new Uint8Array(jpg.buffer, jpg.byteOffset, jpg.byteLength), made: true, format: 'jpeg', alpha: false }
   if (jpeg.bytes.byteLength <= tightest) return jpeg
   return png.bytes.byteLength <= caps.cap ? png : jpeg
+}
+
+/**
+ * The key a capped picture chosen at the start of a run is kept under
+ * (R3.H fix round 2, TakeRecord.handoffs): the loader file's sha256, how
+ * the loader hands it on, and the caps it was chosen against, which decide
+ * its format (so the node's turn finds it only when it would choose the same).
+ */
+export function handoffKey(sourceSha: string, kind: LoaderKind, caps: HandoffCaps): string {
+  return `${sourceSha}:${kind.keepsAlpha ? 'rgba' : 'rgb'}:${caps.cap}:${caps.backupCap ?? ''}`
 }
 
 /** The upload name of made bytes: the loader file's own name, as a .png (or a .jpg, over a cap). */
@@ -98,7 +109,7 @@ export function loaderHandoffs(prompt: ApiPrompt, families: ReadonlySet<RunnerFa
     if (!PROVIDER_TYPES.has(n.class_type)) continue
     const inputs = n.inputs ?? {}
     if (actionPassThrough(n.class_type, inputs)) continue
-    const checked = checkedInputFile(n.class_type, families, inputs.model)
+    const checked = checkedInputFile(n.class_type, families, inputs.model, inputs)
     for (const [input, v] of Object.entries(inputs)) {
       const src = loaderSourceOf(prompt, v, families)
       if (src) out.push({ ...src, at, classType: n.class_type, input, checked: checked === input })

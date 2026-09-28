@@ -114,17 +114,21 @@ export function isPlainRgbPng(meta: Metadata, bytes: Uint8Array): boolean {
     && !meta.hasProfile && !pngChunksBeforePixels(bytes)?.includes('acTL')
 }
 
+/**
+ * LoadImage's picture (R3.H fix round 2: one encoder of the loader's view):
+ * ./handoffView.ts handoffView with no alpha kept — the PNG a paid node is
+ * handed too, or `png: null` when the file already is exactly that PNG. The
+ * cards' own refusals come first (pictureRefusalOf: CMYK and 16-bit files
+ * are refused here, though the hand-off can read them).
+ */
 export async function rgbTurnedPng(bytes: Uint8Array): Promise<{ png: Uint8Array | null; w: number; h: number }> {
   const meta = await pictureMeta(bytes)
   const refused = pictureRefusalOf(meta, bytes)
   if (refused) throw new Error(refused)
-  const turned = (meta.orientation ?? 1) >= 5
-  const w = turned ? meta.height! : meta.width!
-  const h = turned ? meta.width! : meta.height!
-  if (isPlainRgbPng(meta, bytes)) return { png: null, w, h }
-  const png = await sharp(bytes, { pages: 1, page: 0, autoOrient: true, ignoreIcc: true, limitInputPixels: MAX_INPUT_PIXELS })
-    .toColourspace('srgb').removeAlpha().png({ compressionLevel: 6 }).toBuffer()
-  return { png: new Uint8Array(png), w, h }
+  // Loaded when first used: handoffView.ts imports this module.
+  const { handoffView } = await import('./handoffView')
+  const view = await handoffView(bytes, { keepsAlpha: false })
+  return { png: view.png, w: view.w, h: view.h }
 }
 
 /**

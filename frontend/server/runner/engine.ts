@@ -33,14 +33,15 @@ import { createMemoryHeldBytes, type HeldBytes } from './heldBytes'
 import { createMemoryKeptBytes, type KeptBytes, type KeptExt } from './keptBytes'
 import { createFileAccess } from './fileAccess'
 import type { BackupSettings } from './config'
-import { checkedInputFile, inputFileCaps, inputFileProblem, linkedFileCheck, measuredInputProblem, pictureChangedWords, pictureOverMarginWords, requestProblems, unreadableInputWords } from './requestRules'
+import { checkedInputFile, handedOffPictureProblem, inputFileCaps, linkedFileCheck, measuredInputProblem, pictureChangedWords, pictureOverMarginWords, requestProblems, unreadableInputWords } from './requestRules'
 import { predictedHoldPixels, startPictureSizes } from './repairSizes'
 import { isReusable, requestFingerprint } from './fingerprint'
 import { assertFilesOwned, collectInputFiles, parseInputFileRef, type OwnershipCheck } from './inputs'
 import { shotRefFilenames } from './shotRefs'
 import { parseJsonObject } from './generators/opts'
 import { cardPictureFiles, cardPictureRefusal } from './cards/bakeReplay'
-import { handoffPngName, loaderHandoffBytes, loaderHandoffs, loaderSourceOf, type HandoffCaps, type LoaderHandoff, type LoaderSource } from './pictureHandoff'
+import { handoffKey, handoffPngName, loaderHandoffBytes, loaderHandoffs, loaderSourceOf, type HandoffCaps, type LoaderHandoff, type LoaderSource } from './pictureHandoff'
+import { sha256Hex } from './handoff'
 import { handoffRefusal } from './pictures/handoffView'
 import { effectOutRefusal } from './effects/plan'
 import { PICTURE_ANIMATED, pictureHasFrames, pictureMeta, pictureRefusal } from './pictures/pythonView'
@@ -465,6 +466,14 @@ export function applyGateAction(
 export function createEngine(deps: EngineDeps) {
   const held = deps.held ?? createMemoryHeldBytes()
   const kept = deps.kept ?? createMemoryKeptBytes()
+  /**
+   * A capped input's caps for the hand-off (R3.H fix round 2): the model's,
+   * and a backup's only while backups run and its route has one.
+   */
+  const handoffCapsOf = (classType: string, inputs: Record<string, unknown>, families: ReadonlySet<RunnerFamily>): HandoffCaps | null => {
+    const caps = inputFileCaps(classType, inputs, families, !!deps.backup?.().enabled)
+    return caps ? { cap: caps.cap, ...(caps.backupCap !== undefined ? { backupCap: caps.backupCap } : {}) } : null
+  }
   const files = createFileAccess(deps.results, kept)
   const live = new Map<string, LiveRun>()
   const locks = new Map<string, Promise<unknown>>()
@@ -1114,28 +1123,38 @@ export function createEngine(deps: EngineDeps) {
       // A loader's picture (R3.H, ./pictureHandoff.ts) is handed off as the PNG
       // of the loader's tensor, made once for this turn from the loader's own
       // file: the file cap is judged on it, and it is what is sent.
-      // The capped input (Bria, HappyHorse 1.1): over a cap, a JPEG of the same
-      // picture is sent instead (R3.H fix), the backup's cap counted while backups run.
+      // The capped input (Bria, HappyHorse 1.1, Seedance 2.0, Kling 3.0): over a
+      // cap, a JPEG of the same picture is sent instead (R3.H fix), a backup's
+      // cap counted while backups run and the route has one (fix round 2).
       const nodeInputs = take.prompt[id]!.inputs ?? {}
-      const cappedName = checkedInputFile(take.prompt[id]!.class_type, families, nodeInputs.model)
+      const cappedName = checkedInputFile(take.prompt[id]!.class_type, families, nodeInputs.model, nodeInputs)
       const capsOf = (link: unknown): HandoffCaps | null => {
         const capped = cappedName ? nodeInputs[cappedName] : undefined
         if (!isLink(capped) || !isLink(link) || capped[0] !== link[0] || capped[1] !== link[1]) return null
-        const caps = inputFileCaps(take.prompt[id]!.class_type, families, nodeInputs.model)
-        if (!caps) return null
-        return deps.backup?.().enabled ? caps : { cap: caps.cap }
+        return handoffCapsOf(take.prompt[id]!.class_type, nodeInputs, families)
       }
       const views = new Map<string, Promise<LoaderHandoff>>()
       const handedOffPicture = (src: LoaderSource, caps: HandoffCaps | null) => {
         const key = `${src.file.type}:${src.file.subfolder}:${src.file.filename}:${src.kind.keepsAlpha ? 'a' : ''}:${caps ? `${caps.cap}/${caps.backupCap ?? ''}` : ''}`
         let p = views.get(key)
-        if (!p) { p = readOnce(src.file).then(b => loaderHandoffBytes(b, src.kind, signal, caps)); views.set(key, p) }
+        if (!p) {
+          p = readOnce(src.file).then(async (b) => {
+            // Chosen at the start of the run (fix round 2): the same bytes, not encoded again.
+            const chosen = caps ? take.handoffs?.[handoffKey(sha256Hex(b), src.kind, caps)] : undefined
+            if (chosen) {
+              try { return { bytes: await kept.read(chosen.file), made: true, format: chosen.format, alpha: chosen.alpha } }
+              catch { /* gone: made again below, the same bytes */ }
+            }
+            return loaderHandoffBytes(b, src.kind, signal, caps)
+          })
+          views.set(key, p)
+        }
         return p
       }
       const loaderAt = (link: unknown) => loaderSourceOf(take.prompt, link, families)
       const fileCheck = resuming ? { problem: null } as Awaited<ReturnType<typeof linkedFileCheck>> : await linkedFileCheck(take.prompt[id]!, filesAt(take), readOnce, families, f => files.size(f), (link) => {
         const src = loaderAt(link)
-        return src ? handedOffPicture(src, capsOf(link)).then(v => v.bytes) : null
+        return src ? handedOffPicture(src, capsOf(link)) : null
       })
       if (fileCheck.problem) throw new Error(fileCheck.problem)
       // A media node (./nodeMedia.ts: sync-3 lip-sync, F22; Topaz video
@@ -1997,19 +2016,23 @@ export function createEngine(deps: EngineDeps) {
     // file cap (Product shot on Bria, HappyHorse 1.1) is judged on the PNG it
     // will be sent, before anything is held. A file that isn't there is left
     // to the node's turn.
-    for (const p of prompts) {
+    // A capped picture's chosen bytes are kept for the run (fix round 2), so its
+    // node's turn sends them without encoding the picture again.
+    const chosenAtStart: Array<{ index: number; key: string; sent: LoaderHandoff }> = []
+    for (const [index, p] of prompts.entries()) {
       for (const h of loaderHandoffs(p, families)) {
         let bytes: Uint8Array
         try { bytes = await files.read(h.file) }
         catch { continue }
         const why = await handoffRefusal(bytes, h.kind)
         if (why) throw refuse(why, 400, { nodeId: h.nodeId, classType: p[h.nodeId]?.class_type, file: h.file.filename })
-        if (h.checked) {
+        const caps = h.checked ? handoffCapsOf(h.classType, p[h.at]?.inputs ?? {}, families) : null
+        if (caps) {
           // Over the cap, the JPEG of the same picture (R3.H fix): refused only if even that is over.
-          const caps = inputFileCaps(h.classType, families, p[h.at]?.inputs?.model)
-          const sent = await loaderHandoffBytes(bytes, h.kind, undefined, caps && (deps.backup?.().enabled ? caps : { cap: caps.cap }))
-          const problem = inputFileProblem(h.classType, sent.bytes, families, p[h.at]?.inputs?.model)
+          const sent = await loaderHandoffBytes(bytes, h.kind, undefined, caps)
+          const problem = handedOffPictureProblem(h.classType, p[h.at]?.inputs ?? {}, families, sent)
           if (problem) throw refuse(problem, 400, { nodeId: h.at, classType: h.classType })
+          if (sent.made) chosenAtStart.push({ index, key: handoffKey(sha256Hex(bytes), h.kind, caps), sent })
         }
       }
     }
@@ -2056,6 +2079,11 @@ export function createEngine(deps: EngineDeps) {
       stopRequested: false,
     }
     const leg = await openLeg(run, 'run', null, run.takes.map(t => t.index))
+    for (const c of chosenAtStart) {
+      const file = await kept.put(run.id, c.sent.bytes, c.sent.format === 'png' ? 'png' : 'bin')
+      const take = run.takes[c.index]!
+      take.handoffs = { ...take.handoffs, [c.key]: { file, format: c.sent.format, alpha: c.sent.alpha } }
+    }
     await persist(run)
     launch(run, leg)
     return { runId: run.id, legId: leg.id, promptIds: leg.takes.map(t => stageKeyOf(leg.id, t)), ...(nodeErrors ? { nodeErrors } : {}) }

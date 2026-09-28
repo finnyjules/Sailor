@@ -123,11 +123,11 @@
 import { isLink, type ApiNode, type ApiPrompt } from '#shared/runner/graph'
 import { withStaticWiredValues } from '#shared/runner/staticValues'
 import { RUNNER_VIDEO_MODEL_IDS, classUpgradeOn, isShotDirected, resolveVideoModelId } from '#shared/runner/eligibility'
-import { NO_FAMILIES, type RunnerFamily } from '#shared/runner/families'
+import { NO_FAMILIES, familyOn, type RunnerFamily } from '#shared/runner/families'
 import { LARGEST_INPUT_PIXELS, sizePricedInput } from '#shared/pricing/editSettings'
 import { nodeImagePrompt } from './generators/image'
 import { RUNNER_VIDEO_MODELS, VEO_31_ONE_PICTURE, veo31HasExtras, veo31RefsProblem, veo31RefsRatioProblem } from './generators/video'
-import { klingElementsProblem } from './generators/twins'
+import { KLING_V3_FAL_APP, klingElementsProblem } from './generators/twins'
 import { shotRefProblem } from './shotRefs'
 import { H3_MAX_TURBO_APP, H3_MAX_TURBO_ENDPOINTS, H3_MAX_TURBO_ID, H3_MAX_TURBO_NEEDS_PROMPT } from './generators/h3MaxTurbo'
 import {
@@ -552,20 +552,109 @@ export function pictureFormat(bytes: Uint8Array): 'jpeg' | 'png' | 'webp' | null
   return null
 }
 
+// ── Picture upload caps (R3.H fix rounds 1 and 2) ────────────────────────────
+
+/** A service's cap on one uploaded picture, in bytes (MB read as 10⁶, the stricter reading), and where it is stated. */
+export interface PictureUploadCap { bytes: number; source: string }
+
 /**
- * The input whose file must be checked before it is handed off, or null (no
- * file is read): Product shot's `image` while Bria Product Shot's switch is
- * on (F12 fix round 1). Every other node, and Product shot with the switch
- * off, reads nothing.
+ * Every picture upload cap a runner service states (the saved schemas,
+ * frontend/tests/unit/fixtures/provider-schemas, read 2026-09-27), by
+ * `<provider> <endpoint>`. Every other endpoint the runner sends a picture to
+ * states none in its saved schema (task R3.H report, fix round 2 inventory).
  */
-export function checkedInputFile(classType: string, families: ReadonlySet<RunnerFamily>, model?: unknown): string | null {
-  if (classType === 'ProductShotNode') return classUpgradeOn(classType, families) ? 'image' : null
-  return isHappyHorse11Picture(classType, families, model) ? 'image' : null
+export const PICTURE_UPLOAD_CAPS: Readonly<Record<string, PictureUploadCap>> = {
+  'fal fal-ai/bria/product-shot': { bytes: 12_000_000, source: 'fal schema, image_url: "Maximum file size 12MB."' },
+  [`fal ${HAPPYHORSE_11_IMAGE_TO_VIDEO}`]: { bytes: 20_000_000, source: 'fal schema, image_url: "Max 20 MB."' },
+  [`replicate ${HAPPYHORSE_11_REPLICATE_SLUG}`]: { bytes: 10_000_000, source: 'Replicate schema, images: "<=10MB each"' },
+  'fal bytedance/seedance-2.0/image-to-video': { bytes: 30_000_000, source: 'fal schema, image_url and end_image_url: "Max 30 MB."' },
+  [`fal ${KLING_V3_FAL_APP}/image-to-video`]: { bytes: 52_428_800, source: 'fal schema, start_image_url and end_image_url: x-fal max_file_size 52428800 ("Max file size: 50.0MB")' },
+  'replicate kwaivgi/kling-v3-video': { bytes: 10_000_000, source: 'Replicate schema, start_image and end_image: "max 10MB"' },
 }
 
-/** Generate a video on HappyHorse 1.1 with its switch on: its linked first frame is read (F18 fix round 1). */
-function isHappyHorse11Picture(classType: string, families: ReadonlySet<RunnerFamily>, model: unknown): boolean {
-  return classType === 'GenerateVideoNode' && resolveVideoModelId(model) === HAPPYHORSE_11_ID && families.has('happyhorse-1.1')
+/** One way a capped picture may go: its model's name, its first service, and its backup's, if its route has one. */
+interface CapRoute { name: string; primary: string; backup: string | null }
+
+/** The video models whose first frame a service caps (a wired model may pick any of them). */
+const CAPPED_VIDEO_IDS: readonly string[] = [HAPPYHORSE_11_ID, 'seedance-2.0', 'kling-v3']
+
+/**
+ * The capped routes the picture on a node's `image` may take: Product shot
+ * on Bria (its switch on); Generate a video and Film a shot on HappyHorse 1.1
+ * (its switch on; Generate a video only, Film a shot never films on it),
+ * Seedance 2.0 (no switch) or Kling 3.0 (replicate-video; its Replicate
+ * backup unless the options carry elements, which the backup can't take). A
+ * wired model may pick any of them (the ruling: judged against the smallest).
+ */
+function capRoutes(classType: string, inputs: Record<string, unknown>, families: ReadonlySet<RunnerFamily>): CapRoute[] {
+  if (classType === 'ProductShotNode') {
+    return classUpgradeOn(classType, families) ? [{ name: 'Product shot', primary: 'fal fal-ai/bria/product-shot', backup: null }] : []
+  }
+  if (classType !== 'GenerateVideoNode' && classType !== 'FilmShotNode') return []
+  const ids = isLink(inputs.model) ? CAPPED_VIDEO_IDS : [resolveVideoModelId(inputs.model)]
+  const options = inputs.model_options
+  const elements = !isLink(options) && Array.isArray(parseJsonObject(options).elements) && (parseJsonObject(options).elements as unknown[]).length > 0
+  const out: CapRoute[] = []
+  for (const id of ids) {
+    if (id === HAPPYHORSE_11_ID && classType === 'GenerateVideoNode' && families.has('happyhorse-1.1')) {
+      out.push({ name: 'HappyHorse 1.1', primary: `fal ${HAPPYHORSE_11_IMAGE_TO_VIDEO}`, backup: `replicate ${HAPPYHORSE_11_REPLICATE_SLUG}` })
+    }
+    if (id === 'seedance-2.0') out.push({ name: 'Seedance 2.0', primary: 'fal bytedance/seedance-2.0/image-to-video', backup: null })
+    if (id === 'kling-v3' && familyOn('replicate-video', families)) {
+      out.push({ name: 'Kling 3.0', primary: `fal ${KLING_V3_FAL_APP}/image-to-video`, backup: elements ? null : 'replicate kwaivgi/kling-v3-video' })
+    }
+  }
+  return out
+}
+
+/**
+ * The input whose file must be checked before it is handed off, or null (no
+ * file is read): the linked `image` of a node whose picture a service caps
+ * (capRoutes: Product shot on Bria, F12; HappyHorse 1.1, F18; Seedance 2.0
+ * and Kling 3.0, R3.H fix round 2). Every other node reads nothing.
+ */
+export function checkedInputFile(classType: string, families: ReadonlySet<RunnerFamily>, model?: unknown, inputs?: Record<string, unknown>): string | null {
+  return capRoutes(classType, inputs ?? { model }, families).length ? 'image' : null
+}
+
+/**
+ * The upload caps of the input checkedInputFile names (R3.H fix, "JPEG over
+ * caps"): the smallest first-service cap among its routes (a wired model's
+ * candidates, as it is priced at its dearest), and — while backups can run
+ * (`backupsOn`) and only when a route has a backup — the smallest backup cap.
+ * The model's name when there is one route (for plain words). Null for every
+ * other input. A loader's picture whose PNG is over a cap is handed off as a
+ * JPEG instead (../pictureHandoff.ts).
+ */
+export function inputFileCaps(
+  classType: string, inputs: Record<string, unknown>, families: ReadonlySet<RunnerFamily>, backupsOn = false,
+): { cap: number; backupCap?: number; name: string | null } | null {
+  const routes = capRoutes(classType, inputs, families)
+  if (!routes.length) return null
+  const cap = Math.min(...routes.map(r => PICTURE_UPLOAD_CAPS[r.primary]!.bytes))
+  const backups = backupsOn ? routes.filter(r => r.backup).map(r => PICTURE_UPLOAD_CAPS[r.backup!]!.bytes) : []
+  const names = [...new Set(routes.map(r => r.name))]
+  return { cap, ...(backups.length ? { backupCap: Math.min(...backups) } : {}), name: names.length === 1 ? names[0]! : null }
+}
+
+/**
+ * A loader's picture too large to send (R3.H fix round 2): in words about the
+ * user's picture, never the file the runner makes of it. `alpha`: it keeps
+ * see-through parts (so it can't go as a JPEG).
+ */
+export function pictureTooLargeWords(name: string | null, alpha: boolean): string {
+  const model = name ?? 'this model'
+  return alpha
+    ? `This picture has see-through parts and is too large for ${model}. Use a smaller picture, or one without see-through parts.`
+    : `This picture is too large for ${model}. Use a smaller picture.`
+}
+
+/** A loader's handed-off picture over its model's cap, or null (the bytes chosen by pictureHandoff.ts). */
+export function handedOffPictureProblem(
+  classType: string, inputs: Record<string, unknown>, families: ReadonlySet<RunnerFamily>, sent: { bytes: Uint8Array; alpha: boolean },
+): string | null {
+  const caps = inputFileCaps(classType, inputs, families)
+  return caps && sent.bytes.byteLength > caps.cap ? pictureTooLargeWords(caps.name, sent.alpha) : null
 }
 
 /**
@@ -577,33 +666,25 @@ function isHappyHorse11Picture(classType: string, families: ReadonlySet<RunnerFa
  */
 export function inputFileProblem(classType: string, bytes: Uint8Array, families: ReadonlySet<RunnerFamily>, model?: unknown): string | null {
   if (!checkedInputFile(classType, families, model)) return null
-  const tooLarge = inputFileSizeProblem(classType, bytes.byteLength)
+  const tooLarge = inputFileSizeProblem(classType, bytes.byteLength, families, model)
   if (tooLarge) return tooLarge
-  // HappyHorse 1.1's format is left to fal, which takes BMP too.
-  if (classType === 'GenerateVideoNode') return null
+  // The video models' formats are left to fal (HappyHorse takes BMP too).
+  if (classType !== 'ProductShotNode') return null
   return pictureFormat(bytes) ? null : PRODUCT_SHOT_WRONG_FORMAT
 }
 
 /**
- * The upload caps of the input checkedInputFile names (R3.H fix, "JPEG over
- * caps"): its model's, and its backup's where one has a lower cap (HappyHorse
- * 1.1's Replicate backup). Null for every other input. A loader's picture
- * whose PNG is over one is handed off as a JPEG instead (../pictureHandoff.ts).
+ * A checked file over its model's limit, from its size alone: Product shot
+ * on Bria (12 MB) and HappyHorse 1.1 (fal, "Max 20 MB") in their own words,
+ * Seedance 2.0 and Kling 3.0 in pictureTooLargeWords'. Only for a class
+ * checkedInputFile names.
  */
-export function inputFileCaps(classType: string, families: ReadonlySet<RunnerFamily>, model?: unknown): { cap: number; backupCap?: number } | null {
-  if (!checkedInputFile(classType, families, model)) return null
-  if (classType === 'GenerateVideoNode') return { cap: HAPPYHORSE_11_MAX_PICTURE_BYTES, backupCap: HAPPYHORSE_11_BACKUP_MAX_PICTURE_BYTES }
-  return { cap: PRODUCT_SHOT_MAX_BYTES }
-}
-
-/**
- * A checked file over its model's limit, from its size alone: HappyHorse 1.1
- * (fal image-to-video, "Max 20 MB"), else Bria Product Shot's 12 MB. Only
- * for a class checkedInputFile names.
- */
-function inputFileSizeProblem(classType: string, size: number): string | null {
-  if (classType === 'GenerateVideoNode') return size > HAPPYHORSE_11_MAX_PICTURE_BYTES ? HAPPYHORSE_11_PICTURE_TOO_LARGE : null
-  return size > PRODUCT_SHOT_MAX_BYTES ? PRODUCT_SHOT_TOO_LARGE : null
+function inputFileSizeProblem(classType: string, size: number, families: ReadonlySet<RunnerFamily> = NO_FAMILIES, model?: unknown): string | null {
+  if (classType === 'ProductShotNode') return size > PRODUCT_SHOT_MAX_BYTES ? PRODUCT_SHOT_TOO_LARGE : null
+  if (classType === 'GenerateVideoNode' && resolveVideoModelId(model) === HAPPYHORSE_11_ID) return size > HAPPYHORSE_11_MAX_PICTURE_BYTES ? HAPPYHORSE_11_PICTURE_TOO_LARGE : null
+  // Seedance 2.0 and Kling 3.0 (R3.H fix round 2): a file made in the run, sent as it is.
+  const caps = inputFileCaps(classType, { model }, families)
+  return caps && size > caps.cap ? pictureTooLargeWords(caps.name, false) : null
 }
 
 /**
@@ -624,27 +705,28 @@ export async function linkedFileCheck<F>(
   read: (f: F) => Promise<Uint8Array>,
   families: ReadonlySet<RunnerFamily>,
   size?: (f: F) => Promise<number | null>,
-  handedOff?: (link: [string, number]) => Promise<Uint8Array> | null,
+  handedOff?: (link: [string, number]) => Promise<{ bytes: Uint8Array; alpha: boolean }> | null,
 ): Promise<{ problem: string | null, bytes?: number }> {
-  const name = checkedInputFile(node.class_type, families, node.inputs?.model)
+  const name = checkedInputFile(node.class_type, families, node.inputs?.model, node.inputs)
   const link = name ? node.inputs?.[name] : undefined
   if (!isLink(link)) return { problem: null }
   const f = filesFrom(link as [string, number])[0]
   if (f === undefined) return { problem: null }
-  // A loader's picture (R3.H): judged on the PNG it is handed off as, never
-  // on the loader's file. One that can't be made is left to the hand-off,
-  // which fails the node in the same words.
+  // A loader's picture (R3.H): judged on the bytes it is handed off as (the
+  // PNG, or over a cap the JPEG), never on the loader's file, in words about
+  // the user's picture (fix round 2). One that can't be made is left to the
+  // hand-off, which fails the node in the same words.
   const sent = handedOff?.(link as [string, number])
   if (sent) {
-    let bytes: Uint8Array
-    try { bytes = await sent }
+    let got: { bytes: Uint8Array; alpha: boolean }
+    try { got = await sent }
     catch { return { problem: null } }
-    return { problem: inputFileProblem(node.class_type, bytes, families, node.inputs?.model), bytes: bytes.byteLength }
+    return { problem: handedOffPictureProblem(node.class_type, node.inputs ?? {}, families, got), bytes: got.bytes.byteLength }
   }
   let onDisk: number | null = null
   try { onDisk = size ? await size(f) : null }
   catch { onDisk = null }
-  const tooLarge = onDisk !== null ? inputFileSizeProblem(node.class_type, onDisk) : null
+  const tooLarge = onDisk !== null ? inputFileSizeProblem(node.class_type, onDisk, families, node.inputs?.model) : null
   if (tooLarge) return { problem: tooLarge, bytes: onDisk! }
   let bytes: Uint8Array
   try { bytes = await read(f) }
@@ -655,13 +737,19 @@ export async function linkedFileCheck<F>(
 /**
  * Why a planned backup can't take the measured input file, or null. HappyHorse
  * 1.1's Replicate backup takes pictures up to 10 MB (fal up to 20 MB): a larger
- * first frame runs on fal alone (F18 fix round 1).
+ * first frame runs on fal alone (F18 fix round 1). So does Kling 3.0's
+ * Replicate backup, whose first frame is capped at 10 MB (R3.H fix round 2).
  */
 export function backupInputProblem(backup: { provider: string, endpoint: string, payload: Record<string, unknown> }, inputBytes: number | undefined): string | null {
   if (inputBytes === undefined) return null
   if (backup.provider === 'replicate' && backup.endpoint === HAPPYHORSE_11_REPLICATE_SLUG && Array.isArray(backup.payload.images)
     && inputBytes > HAPPYHORSE_11_BACKUP_MAX_PICTURE_BYTES) {
     return 'Replicate\'s HappyHorse 1.1 takes pictures up to 10 MB'
+  }
+  const kling = PICTURE_UPLOAD_CAPS['replicate kwaivgi/kling-v3-video']!
+  if (backup.provider === 'replicate' && backup.endpoint === 'kwaivgi/kling-v3-video' && typeof backup.payload.start_image === 'string'
+    && inputBytes > kling.bytes) {
+    return 'Replicate\'s Kling 3.0 takes pictures up to 10 MB'
   }
   return null
 }
