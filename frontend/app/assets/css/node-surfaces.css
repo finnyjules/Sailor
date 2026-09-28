@@ -205,20 +205,27 @@
   pointer-events: none;
   z-index: 4;
 }
+/* Running and failed: the rings the old frames had, drawn on the media box. */
+.content-card[data-running] .content-card__media { box-shadow: 0 0 0 2px var(--port-color, #fff), var(--node-shadow); }
+.content-card[data-error] .content-card__media { box-shadow: 0 0 0 2px #ef4444, var(--node-shadow); }
+/* The name row is 22px, so the actions sit 8px inside the media box's top-right corner.
+   They live outside the (clipping) media box so the More menu can open past it; above
+   every media overlay (Image's badges are z-40), below the ready badge (z-50). */
 .node-float-actions {
   position: absolute;
-  top: 8px;
+  top: 30px;
   right: 8px;
-  z-index: 3;
+  z-index: 45;
   display: flex;
   gap: 4px;
   opacity: 0;
+  pointer-events: none;
   transition: opacity 0.15s;
 }
 .content-card:hover .node-float-actions,
 .content-card:focus-within .node-float-actions,
-.content-card[data-selected] .node-float-actions { opacity: 1; }
-.node-float-actions > button {
+.content-card[data-selected] .node-float-actions { opacity: 1; pointer-events: auto; }
+.node-float-actions > button, .node-float-btn {
   display: grid;
   place-items: center;
   width: 26px;

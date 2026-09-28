@@ -9167,6 +9167,12 @@ defineExpose({
   border-radius: 12px;
 }
 
+/* Content cards (stage 4): the outline sits on the content itself, not on the name above it. */
+.vue-node-canvas .vue-flow__node.selected .content-card__media {
+  outline: 2px solid var(--action);
+  outline-offset: 3px;
+}
+
 /* Studio cards (Type/Gradient/Shader/Shape/Texture/3D/Lip-Sync/Shot Director)
    (16px, the glass card's corner) share the .studio-node root class for the
    same reason: without it they selected on click but showed no ring. */
