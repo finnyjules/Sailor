@@ -40,6 +40,7 @@ import { blockedPromptRefusal, nodeProblemsBody, retiredEngineRefusal } from './
 import { hostedRequestProblems, measuredInputProblems } from '../runner/requestRules'
 import { executedPart } from '#shared/runner/validate'
 import { savedPoseRefs } from '#shared/runner/nanoExtras'
+import { decodesStrictly } from '../runner/pictures/pythonView'
 
 export function isPromptPath(path: string): boolean {
   return path === '/prompt' || path.startsWith('/prompt?')
@@ -655,6 +656,30 @@ async function submitMetered(userId: string | null, body: any, deps: GraphRunDep
 }
 
 /**
+ * R3.15 fix rounds 1 and 2: node id → whether each Pose Mannequin's saved
+ * pose (#shared/runner/nanoExtras savedPoseRefs) loads as Python's
+ * `_load_input_image` needs it to: the gate's own copy of it (`copyOf`, the
+ * file ComfyUI then reads) is a picture by its header AND decodes fully and
+ * strictly (pictures/pythonView.ts decodesStrictly: a corrupt or cut-short
+ * PNG is PIL's failure, then Python's None and a call). Anything else, a copy
+ * that can't be taken or read included, is false: priced as the call.
+ */
+export async function savedPosesLoading(prompt: unknown, copyOf: (value: string) => Promise<string | null>): Promise<Record<string, boolean>> {
+  const out: Record<string, boolean> = {}
+  for (const [id, value] of Object.entries(savedPoseRefs(prompt as ApiPrompt))) {
+    let loads = false
+    try {
+      const path = await copyOf(value)
+      const size = path ? await pictureSize(path) : null
+      loads = !!path && !!size && size.pixels > 0 && await decodesStrictly(path)
+    }
+    catch { loads = false }
+    out[id] = loads
+  }
+  return out
+}
+
+/**
  * Whether a class is an output node, by the node catalog (`output_node`); a
  * class the catalog doesn't list counts as one (its whole upstream is priced:
  * never less than what runs). No catalog: undefined (the whole prompt is priced).
@@ -705,15 +730,8 @@ export async function handleMeteredPrompt(event: H3Event): Promise<any> {
     // One walk: the sizes the price reads and the refusals (G1 fix round 1, R7).
     measureInputSizes: prompt => graphInputSizes(prompt, pictureOfCopy, reads),
     measureInputSeconds: prompt => graphInputSeconds(prompt, mediaOfCopy, reads),
-    // A saved pose is free only when its copy is a picture (R3.15 fix round 1).
-    measureSavedPoses: async (prompt) => {
-      const out: Record<string, boolean> = {}
-      for (const [id, value] of Object.entries(savedPoseRefs(prompt))) {
-        const size = await pictureOfCopy(value).catch(() => null)
-        out[id] = !!size && size.pixels > 0
-      }
-      return out
-    },
+    // A saved pose is free only when its copy decodes fully (R3.15 fix rounds 1 and 2).
+    measureSavedPoses: prompt => savedPosesLoading(prompt, async value => (await snaps.take({ value, literalInput: false }))?.path ?? null),
     // Hosted: a Seedance reference whose length can't be read is refused, not counted as 0 (S1b fix round 2).
     referenceSecondsProblems: prompt => seedanceReferenceSeconds(prompt, mediaOfCopy, { strict: true, reads }),
     finalizePrompt: prompt => rewriteMeasuredInputs(prompt, snaps),

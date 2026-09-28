@@ -2359,7 +2359,32 @@ POSE_BAKED = {
     "pose_mannequin.png": lambda: png_bytes(11, 8, 36),
     "pose_mannequin_rgba.png": lambda: png_bytes(11, 8, 37, "RGBA"),
     "pose_mannequin_exif6.png": lambda: _exif_picture(11, 8, 38, 6, "PNG"),
+    # R3.15 fix round 2: saved poses whose header is a picture but whose pixels aren't (PIL fails: None).
+    "pose_result_corrupt.png": lambda: _broken_png(png_bytes(10, 7, 39), "corrupt"),
+    "pose_result_truncated.png": lambda: _broken_png(png_bytes(10, 7, 40), "truncated"),
+    "sub/pose_sub.png": lambda: png_bytes(11, 8, 43),
 }
+
+
+def _broken_png(png: bytes, how: str) -> bytes:
+    """A PNG with a valid header whose pixel data can't be decoded (R3.15 fix round 2): its IDAT data
+    overwritten mid-stream with the chunk's CRC recomputed ("corrupt"), or the file cut mid-IDAT ("truncated")."""
+    import zlib
+    o = 8
+    while o < len(png):
+        n = struct.unpack(">I", png[o:o + 4])[0]
+        kind = png[o + 4:o + 8]
+        if kind == b"IDAT":
+            start, end = o + 8, o + 8 + n
+            if how == "truncated":
+                return png[:start + n // 2]
+            data = bytearray(png[start:end])
+            for i in range(2, len(data) - 4):
+                data[i] ^= 0x5A
+            crc = struct.pack(">I", zlib.crc32(kind + bytes(data)) & 0xFFFFFFFF)
+            return png[:start] + bytes(data) + crc + png[end + 4:]
+        o += 12 + n
+    raise ValueError("no IDAT")
 POSE_TEXTS = {
     "blank": "", "spaces": "   ", "padded": "  arms raised overhead  ", "non-ASCII": "bras levés, tête penchée — 腕を上げる",
     "unicode blanks": "　 ", "unicode blanks around a word": "　crouching ",
@@ -2410,6 +2435,7 @@ def nano_extras_group() -> dict:
     cases: list = []
     try:
         for name, data in baked.items():
+            os.makedirs(os.path.dirname(os.path.join(tmp, name)), exist_ok=True)
             with open(os.path.join(tmp, name), "wb") as f:
                 f.write(data)
         folder_paths.set_input_directory(tmp)
@@ -2504,6 +2530,15 @@ def nano_extras_group() -> dict:
         p("mannequin · conditioning render EXIF 6", pose_cond_image="pose_mannequin_exif6.png")
         p("mannequin · conditioning render RGBA", pose_cond_image="pose_mannequin_rgba.png", prompt="  soft light  ")
         p("mannequin · missing result, the conditioning render", result_image="gone.png", pose_cond_image="pose_cond.png")
+        # Fix round 2: a saved pose that doesn't decode is Python's None (it falls through to the call).
+        for f in ("pose_result_corrupt.png", "pose_result_truncated.png"):
+            p(f"mannequin · saved pose {f}, the mannequin render", result_image=f, mannequin_image="pose_mannequin.png")
+            p(f"mannequin · saved pose {f}, nothing else", result_image=f)
+        # Fix round 2: names Python opens though the runner's plain reader wouldn't (`if not filename` is its only early None).
+        for name in ("./pose_mannequin.png", "sub/../pose_mannequin.png", "sub//pose_sub.png", "sub/./pose_sub.png", "./sub/pose_sub.png [input]"):
+            p(f"mannequin · render named {name}", mannequin_image=name)
+        p("mannequin · saved pose named ./pose_result.png", result_image="./pose_result.png", mannequin_image="pose_mannequin.png")
+        p("mannequin · saved pose named x.png[input] (Python strips g[input])", result_image="pose_result.png[input]", mannequin_image="pose_mannequin.png")
         # A conditioning render that can't be loaded: the mannequin render instead.
         p("mannequin · missing conditioning, the mannequin render", pose_cond_image="gone.png", mannequin_image="pose_mannequin.png")
         for f in ("pose_mannequin.png", "pose_mannequin_rgba.png", "pose_mannequin_exif6.png"):

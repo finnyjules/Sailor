@@ -8,7 +8,8 @@
  */
 import { isLink, type ApiPrompt } from '#shared/runner/graph'
 import { parseShaderBaked } from '#shared/runner/shaderBakeKey'
-import { POSE_BAKED_INPUTS, POSE_MANNEQUIN_CLASS, bakedFileName } from '#shared/runner/nanoExtras'
+import { POSE_BAKED_INPUTS, POSE_MANNEQUIN_CLASS, bakedNamePresent } from '#shared/runner/nanoExtras'
+import { posix } from 'node:path'
 import { MeterRefusalError } from '../utils/requestMeter'
 import { savedInputKey } from '../utils/graphRuns'
 import { userSubfolder } from './results'
@@ -54,6 +55,34 @@ export function parseInputFileRef(raw: unknown): OutputFile | null {
   if (parts.some(p => !p || p === '.' || p === '..')) return null
   const filename = parts.pop()!
   return { filename, subfolder: parts.join('/'), type }
+}
+
+/**
+ * A file name as Python's `folder_paths.get_annotated_filepath` opens it
+ * (R3.15 fix round 2, Pose Mannequin's baked files): a trailing `[output]`,
+ * `[input]` or `[temp]` picks the folder and cuts exactly 9, 8 or 7
+ * characters (so `x.png [input]` is `x.png`, and `x.png[input]` is `x.pn`);
+ * else the input folder. `os.path.join` with the name, read lexically:
+ * `./x`, `sub//x`, `sub/./x` and `sub/../x` are the files they name.
+ * `outside`: an absolute name, or one that climbs above its folder (hosted
+ * refuses it: not the user's). Null: blank (Python's `if not filename`), or
+ * a name that is a folder, not a file.
+ */
+export function pythonInputRef(raw: unknown): { file: OutputFile } | { outside: true } | null {
+  if (typeof raw !== 'string' || !raw) return null
+  let name = raw
+  let type: OutputFile['type'] = 'input'
+  if (name.endsWith('[output]')) { type = 'output'; name = name.slice(0, -9) }
+  else if (name.endsWith('[input]')) name = name.slice(0, -8)
+  else if (name.endsWith('[temp]')) { type = 'temp'; name = name.slice(0, -7) }
+  if (!name) return null
+  if (name.startsWith('/')) return { outside: true }
+  const norm = posix.normalize(name)
+  if (norm === '..' || norm.startsWith('../')) return { outside: true }
+  if (norm === '.' || norm.endsWith('/')) return null
+  const parts = norm.split('/')
+  const filename = parts.pop()!
+  return { file: { filename, subfolder: parts.join('/'), type } }
 }
 
 /**
@@ -110,8 +139,9 @@ export function collectInputFiles(prompt: ApiPrompt): OutputFile[] {
     // Pose Mannequin's saved pictures (R3.15): the result, the conditioning and mannequin renders.
     if (node.class_type === POSE_MANNEQUIN_CLASS) {
       for (const name of POSE_BAKED_INPUTS) {
-        const f = isLink(inputs[name]) || !bakedFileName(inputs[name]) ? null : parseInputFileRef(inputs[name])
-        if (f) out.push(f)
+        // Read as Python opens it (fix round 2); a name outside the folders is refused at the start (poseStartProblem).
+        const ref = bakedNamePresent(inputs[name]) ? pythonInputRef(inputs[name]) : null
+        if (ref && 'file' in ref) out.push(ref.file)
       }
     }
     // The Frame editor's injected LoadImage (baked layers and masks).

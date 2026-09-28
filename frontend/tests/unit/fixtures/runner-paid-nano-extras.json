@@ -5,9 +5,12 @@
   "pose_mannequin_exif6.png": "iVBORw0KGgoAAAANSUhEUgAAAAsAAAAICAIAAACgWpLfAAAAGmVYSWZNTQAqAAAACAABARIAAwAAAAEABgAAAAAAANZnS2kAAAEbSURBVHicARAB7/4A19s0IbvtvxZXsKeIqJ3yzXIr+kjffgXCvwxK8zSAOkHqAlVhlXWiySnAo+Pg0zXqYfG2T4VTL83VuPsWxb7e8YcJ+AAhUhfiA0rAR4dkEK6BDSvsapCFRNZeCpl6wRUwJ+LFkgMCsDO6D95YnydH05Xh1f5RgDST1fjlus9RogzdRT+Q7/gzBH0A3uY2epCQZfrnXoHK/Y0Q/HkbidKuPKLuUK/AQYM2FgBQmAETAn6rhj9J/BWUECLVeNQdWVdSvtZrPleW3B3kEuoCMrAEfPqDsYJJPh/wDxsEBUt3xeM/D6mIJz1yli0Hq53bAtAKj/ahDlGGHvUZIWeDGnBZW9fRsewB6IVOuuD58l3TFALrhTnGn9Y7AAAAAElFTkSuQmCC",
   "pose_mannequin_rgba.png": "iVBORw0KGgoAAAANSUhEUgAAAAsAAAAICAYAAAAvOAWIAAABc0lEQVR4nAFoAZf+AS4SveAJ19Phofq5WFbw3XqKCpV+tfhl85bjA28J7ZHe/2G7TmmUpvEXzuG5AG2IGODlNQGIei3iQq6zDzJMIFB9k/INXJZFbDlU2wS2jSIbclfN5KEiYy6eABdveOD+sY8UZJkCiA6F43Cqtmi5Or75I+RVLJGjEvtJFqDpLPpZSr1lVFF3AKMnVjaM9HAyCTm4AVCp9CYjl3TJfx3V/olUD+toIE5//ejmvX1TOU8Eg/WrAFFNRfETKA5HF3+BgXx1+pG3y/r7zCBypv63O9kjVv7dz7mUSet/c97jSJUwAcAfdDptfqbaX9z66/dHnSDLah4zU8OXXkjHG7YLIzZQLXERQhoOO2MdsHMNBDMHHhS9YD7GbPFO50RiiyJ41BNv+2DruZG8vDUxI/B/cjMx9mkxTfrz1q4VBCgBSURvGipFl20UyMaUtkPD2Eklyxq1Jk7OqHZIVW9oGTOhGCs6tQAD8BlomTioptmNE9IAAAAASUVORK5CYII=",
   "pose_result.png": "iVBORw0KGgoAAAANSUhEUgAAAAoAAAAHCAIAAAC+zks0AAAA5ElEQVR4nAHZACb/AAbwOclIFkc5dkdLEB9FduXTaC88Cs6uZWmpyLp+awJp5eVRFKD9L9V5xBzBKvT46ft6NOxH2EctAgI8IwIBMJxaZ5P+y99nzr7SbJipTANw+2duWbsaAdo0bvDnAPMd/46++xM5+Eb+DIL68LJ5BTHAkORaF0M/GWlimAJry87mpfGKtq7+wDMvaKUQ3BALGdpkI6taKcA0GvECtSgkGCF7QcvFiVOkEwPlq0+bXOPPJqS9WJcO8eBMAv4SBsIUiyRGIvV6rtUYI2HTyrDn+PLpQAedCfZC8aT7aIVPECIgAAAAAElFTkSuQmCC",
+  "pose_result_corrupt.png": "iVBORw0KGgoAAAANSUhEUgAAAAoAAAAHCAIAAAC+zks0AAAA5ElEQVR4nFuDWnylWjHen1c5KpBY2OwBV8x/4V5tg+iCa5LD0nixhtn+WlpNOqyZ+sqc6a8fh34CwskiaJGrd49LUoxYmxorZrtYCk7f2tcwuYYgQTFtpXtLQHMTF2UROkoEYy/xLSD9XluWfUEwctkPWjIkVZF4PeD+dioRdm8VZpAkiW5Kq1q29FOcfdQ1W+9U5okud69EHk7Q1XG4RGUY/iTH/2xY97i3LX7e4vXoPcDtF4lJsQu4hXV9UnI/Lpw8eFGqWqbcUl+Eq+SHVKyzMKCCWBPpdOfRO7fv3Wd0DdE+q52xYgNmkxLUAAAAAElFTkSuQmCC",
   "pose_result_exif6.jpg": "/9j/4AAQSkZJRgABAQAAAQABAAD/4QAiRXhpZgAATU0AKgAAAAgAAQESAAMAAAABAAYAAAAAAAD/2wBDAAIBAQEBAQIBAQECAgICAgQDAgICAgUEBAMEBgUGBgYFBgYGBwkIBgcJBwYGCAsICQoKCgoKBggLDAsKDAkKCgr/2wBDAQICAgICAgUDAwUKBwYHCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgr/wAARCAAIABADASIAAhEBAxEB/8QAHwAAAQUBAQEBAQEAAAAAAAAAAAECAwQFBgcICQoL/8QAtRAAAgEDAwIEAwUFBAQAAAF9AQIDAAQRBRIhMUEGE1FhByJxFDKBkaEII0KxwRVS0fAkM2JyggkKFhcYGRolJicoKSo0NTY3ODk6Q0RFRkdISUpTVFVWV1hZWmNkZWZnaGlqc3R1dnd4eXqDhIWGh4iJipKTlJWWl5iZmqKjpKWmp6ipqrKztLW2t7i5usLDxMXGx8jJytLT1NXW19jZ2uHi4+Tl5ufo6erx8vP09fb3+Pn6/8QAHwEAAwEBAQEBAQEBAQAAAAAAAAECAwQFBgcICQoL/8QAtREAAgECBAQDBAcFBAQAAQJ3AAECAxEEBSExBhJBUQdhcRMiMoEIFEKRobHBCSMzUvAVYnLRChYkNOEl8RcYGRomJygpKjU2Nzg5OkNERUZHSElKU1RVVldYWVpjZGVmZ2hpanN0dXZ3eHl6goOEhYaHiImKkpOUlZaXmJmaoqOkpaanqKmqsrO0tba3uLm6wsPExcbHyMnK0tPU1dbX2Nna4uPk5ebn6Onq8vP09fb3+Pn6/9oADAMBAAIRAxEAPwC/428earqWrCDW/iTa+HNHFvqEHw78PnT4dQ0mG+j1p72HSdRuI5IY725tWMqLHbTmS3MCrl1ne21Dj/E9paeOPBWj6v4oGk+L7O61Wd9TgjtNKVIrXU5bS6hvYZba2to/tCR6fLZC1k3BZLdY1aWMKHKK+rzPLMFl+EniqUffbpwbbbcoxhXqK8m+dP2lNTbjKLk9J80VFR48dmWLwuVSzOk7VfbVoJr7KVGpK8fOTjHmUrwklyuPK2n/AP/Z",
   "pose_result_exif6.png": "iVBORw0KGgoAAAANSUhEUgAAAAoAAAAHCAIAAAC+zks0AAAAGmVYSWZNTQAqAAAACAABARIAAwAAAAEABgAAAAAAANZnS2kAAADkSURBVHicAdkAJv8AJ21Km3n+DBMzpqkd8L0AQAT4Z5Nn5CmrPRI5UeAKArWsyRn7VeOLya/wDSDXdVOkMBU6Lfb6ScdKqwJOFQRnbAVXxXEt7xbeoJW++E7HqgL39yzjQE2vWgXLQ+AEy7LoEmoRV0i7MEARK8Cm1cbLXFJEBGvQqp4HCKTCAXA6zDIng9OBznEr5Qd0BjbBqgj7v4LpK69Qhdfo6AKYRNcYUQ+P2OglAFlKq2udsGkWqBu8Pv/RUk/gRtsEgdDKOBzhCSPeOXW2UfdoJVxL1yhLO8cr+SxBhzAWMCxjjgQ1LNYAAAAASUVORK5CYII=",
-  "pose_result_rgba.png": "iVBORw0KGgoAAAANSUhEUgAAAAkAAAAFCAYAAACXU8ZrAAAAxElEQVR4nAG5AEb/AbYOdQ8RrKzK1fQPdpXegbEeoG69M/KnmBx3/UvO1CS711/yHQLJK7HUyBoat8mrn2C1okHXnY0kJgopsfv5CmD5yS/pGY3W3HEEouvzybDQMs9FVicqqFKPRsTR+WnZo9IwIwU5I4tcaFTWDQqbAefsC9AFEL2GXioDd1IuHSDTfrf2GWvZahX7F7Wgrmn9XZe9OACvrpi0EqScV8PtEgQgMsoxhd4SVeTIMeyaXxZ60LFuoDjrwF/TUlvK9hn/SAAAAABJRU5ErkJggg=="
+  "pose_result_rgba.png": "iVBORw0KGgoAAAANSUhEUgAAAAkAAAAFCAYAAACXU8ZrAAAAxElEQVR4nAG5AEb/AbYOdQ8RrKzK1fQPdpXegbEeoG69M/KnmBx3/UvO1CS711/yHQLJK7HUyBoat8mrn2C1okHXnY0kJgopsfv5CmD5yS/pGY3W3HEEouvzybDQMs9FVicqqFKPRsTR+WnZo9IwIwU5I4tcaFTWDQqbAefsC9AFEL2GXioDd1IuHSDTfrf2GWvZahX7F7Wgrmn9XZe9OACvrpi0EqScV8PtEgQgMsoxhd4SVeTIMeyaXxZ60LFuoDjrwF/TUlvK9hn/SAAAAABJRU5ErkJggg==",
+  "pose_result_truncated.png": "iVBORw0KGgoAAAANSUhEUgAAAAoAAAAHCAIAAAC+zks0AAAA5ElEQVR4nAHZACb/AeoQfaZZxCIkoFy1PVmp/fO1HyYGELEqz3DbW63z3wCelexQa/vdIFdoBC3vmzlhe+zoMvGp6JF+IxNMxV8B5DfUfdIClHKb7OjmcDkq3bwrJSdxKOD//Q66ZIbJAJ5/EMwVUFOfDpu5ydo=",
+  "sub/pose_sub.png": "iVBORw0KGgoAAAANSUhEUgAAAAsAAAAICAIAAACgWpLfAAABG0lEQVR4nAEQAe/+ABOSSey9Mej/Cd2+3slaHTY/wE4xUv1BxotdwCAZH18fVACXjCc0HzDqqangVUApoxmJvF8kOpj9ud4V8tQqt0EsTp0CoE273yzRTJaXKFf81uHQJQnN7fXR0qrwcN/TofrZMw3DARp3mVc5x/0UZwVbI6wSI+0Io3o3kl9YDZo76PE8nfaBBQE2B1+KNEngSpyt9yIsmsgQ312cASIjrcW9x4FHKPBNZAACZ/J8HunFrofz4Pr67AhVzQNhsaJzZ0dwg5VU7hLUEcRQAcblp9iG0k/yRq2Bu/w64gUq89IFDPQ+pGXag3Bawv4mWQCCME7JGsDg6/E2BPn2J5M3aeUs2vVLX7cDKoepFS2kXgsWcIT86bRKYAAAAABJRU5ErkJggg=="
  },
  "cases": [
   {
@@ -12682,6 +12685,960 @@
     "pose_state": "",
     "prompt": "",
     "result_image": "gone.png"
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": [
+      "https://r.test/nano/out.png"
+     ]
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "google/nano-banana-2",
+     "payload": {
+      "image_input": [
+       "IMG:character",
+       "PNG:f656a01a9558e5a499fbfc203bf9e5cd0848df2316440d425e7771f5c19a3f68"
+      ],
+      "output_format": "png",
+      "prompt": "The first image is a character. The second image is a SURFACE-NORMAL render of a posed 3D mannequin: its colours encode the target body pose AND the exact 3D orientation \u2014 which way the body and each limb face. Redraw the EXACT SAME character from the first image \u2014 keep their face, hair, skin tone, body type, clothing and art style identical \u2014 but pose them to match the second image: limb positions, stance, head angle, AND the whole-body orientation/facing direction (front, three-quarter, side, or back). If the body is turned or facing away, turn the character the same way; do NOT default to a front-facing view. Full body, head to toe, plain neutral studio background, natural and photographic. Output only the character in that pose, never the normal-map render itself.",
+      "resolution": "1K"
+     },
+     "payload_json": "{\"image_input\": [\"IMG:character\", \"PNG:f656a01a9558e5a499fbfc203bf9e5cd0848df2316440d425e7771f5c19a3f68\"], \"output_format\": \"png\", \"prompt\": \"The first image is a character. The second image is a SURFACE-NORMAL render of a posed 3D mannequin: its colours encode the target body pose AND the exact 3D orientation \\u2014 which way the body and each limb face. Redraw the EXACT SAME character from the first image \\u2014 keep their face, hair, skin tone, body type, clothing and art style identical \\u2014 but pose them to match the second image: limb positions, stance, head angle, AND the whole-body orientation/facing direction (front, three-quarter, side, or back). If the body is turned or facing away, turn the character the same way; do NOT default to a front-facing view. Full body, head to toe, plain neutral studio background, natural and photographic. Output only the character in that pose, never the normal-map render itself.\", \"resolution\": \"1K\"}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "PoseMannequin",
+   "files": {
+    "https://r.test/nano/out.png": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/AcOqdpIbGzj/c/JF3NBDwwY3e+iNv1NeSAC480AJPzJJWxuIonMNXd4dmsxKNi/QC/wAynULK0Un6s3Zjw4H7aRaRyEUN0HTK9YyArH71I6mq/xdtN1xhtQCaE/AFTYTmuSdKgJ1C0HAZCrCFOdYvVehWAcgqYyiB+E/53YBJBW0SbfpJIHnMSm6zV9dPybfY/VnRgd8wS9C5P5HtF0AAAAASUVORK5CYII=",
+    "https://r.test/nano/second.png": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ADkMjH1yRzQs2BAPL293DWXWcOWOA1HYrgRVQ+IewuhFBd/ueOc7uLQ9H/h9lacjBnoE6eRUALVMp9X7GMsOpz6SxCw3hIMFAWp5AlZWX965sqwNNd7/IycJiOD35tZWEqMorQFR2CB068+7QksIqf8OMBdSIzZzNRIKGCcEASiFNQlK9JhBZM2uDkrqqkCjFEblEd/HDq9ANXtYogkAAAAASUVORK5CYII="
+   },
+   "gets": [
+    {
+     "status": 200,
+     "url": "https://r.test/nano/out.png"
+    }
+   ],
+   "input_files": {
+    "pose_mannequin.png": "iVBORw0KGgoAAAANSUhEUgAAAAsAAAAICAIAAACgWpLfAAABG0lEQVR4nAEQAe/+AagdCukL9slWiYM8AEoWcaDg0LUYi8M2E1dgkxD4Bh+nRQTHuLT7KMW4e2M9LT9Rs9+OwLglZb7JxNS7+YYx3OdAdc0AS0dcK/KNj5cBmR6ZEf4owDyZ0sBfiqVmRpDm2zZZOUDtAZ6b5nK83hjE41Xi1Tk0XAMX4P5VgDc6nej1WXrpJr9xLAAkSjvkMvsKCtgg2s9Xxzf9eNQCeA1aWMHgy49IKdC+BtkCNbhnwRJmLPRTopxbQYTSc9rMlTa7Lqzc6S1KBZtbJxjNAQ5bVtyRFsNetKEltFpcXhjkKRzV3Aj9Zdm+Iljla1HVygCuszeQlbe7cBzhGv9fVD7Sf+898vlFkxV5CrGAAWfPv51Eu4TvP2WLrAAAAABJRU5ErkJggg==",
+    "pose_result_corrupt.png": "iVBORw0KGgoAAAANSUhEUgAAAAoAAAAHCAIAAAC+zks0AAAA5ElEQVR4nFuDWnylWjHen1c5KpBY2OwBV8x/4V5tg+iCa5LD0nixhtn+WlpNOqyZ+sqc6a8fh34CwskiaJGrd49LUoxYmxorZrtYCk7f2tcwuYYgQTFtpXtLQHMTF2UROkoEYy/xLSD9XluWfUEwctkPWjIkVZF4PeD+dioRdm8VZpAkiW5Kq1q29FOcfdQ1W+9U5okud69EHk7Q1XG4RGUY/iTH/2xY97i3LX7e4vXoPcDtF4lJsQu4hXV9UnI/Lpw8eFGqWqbcUl+Eq+SHVKyzMKCCWBPpdOfRO7fv3Wd0DdE+q52xYgNmkxLUAAAAAElFTkSuQmCC"
+   },
+   "loaded": {
+    "character": {
+     "sha256": "e8763f1cf3ae06f66d9c9124b829c3259bfbaa1c6452d706319c4796002c9a34",
+     "shape": [
+      6,
+      8,
+      3
+     ]
+    }
+   },
+   "made": {
+    "PNG:f656a01a9558e5a499fbfc203bf9e5cd0848df2316440d425e7771f5c19a3f68": {
+     "sha256": "f0fd42d0ffcfc95b2bf7523e1f9e1352025458ecf6d5c800575be1bad0ac7cbb",
+     "shape": [
+      8,
+      11,
+      3
+     ]
+    }
+   },
+   "name": "pose \u00b7 mannequin \u00b7 saved pose pose_result_corrupt.png, the mannequin render",
+   "output": [
+    {
+     "image": "https://r.test/nano/out.png"
+    }
+   ],
+   "picture_files": {
+    "character": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "character"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": {
+    "animated": [
+     false
+    ],
+    "images": [
+     {
+      "image": {
+       "image": "https://r.test/nano/out.png"
+      },
+      "prefix": "pose"
+     }
+    ]
+   },
+   "widgets": {
+    "mannequin_image": "pose_mannequin.png",
+    "pose_cond_image": "",
+    "pose_prompt": "",
+    "pose_source": "mannequin",
+    "pose_state": "",
+    "prompt": "",
+    "result_image": "pose_result_corrupt.png"
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": [
+      "https://r.test/nano/out.png"
+     ]
+    }
+   ],
+   "calls": [],
+   "class_type": "PoseMannequin",
+   "files": {
+    "https://r.test/nano/out.png": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/AcOqdpIbGzj/c/JF3NBDwwY3e+iNv1NeSAC480AJPzJJWxuIonMNXd4dmsxKNi/QC/wAynULK0Un6s3Zjw4H7aRaRyEUN0HTK9YyArH71I6mq/xdtN1xhtQCaE/AFTYTmuSdKgJ1C0HAZCrCFOdYvVehWAcgqYyiB+E/53YBJBW0SbfpJIHnMSm6zV9dPybfY/VnRgd8wS9C5P5HtF0AAAAASUVORK5CYII=",
+    "https://r.test/nano/second.png": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ADkMjH1yRzQs2BAPL293DWXWcOWOA1HYrgRVQ+IewuhFBd/ueOc7uLQ9H/h9lacjBnoE6eRUALVMp9X7GMsOpz6SxCw3hIMFAWp5AlZWX965sqwNNd7/IycJiOD35tZWEqMorQFR2CB068+7QksIqf8OMBdSIzZzNRIKGCcEASiFNQlK9JhBZM2uDkrqqkCjFEblEd/HDq9ANXtYogkAAAAASUVORK5CYII="
+   },
+   "gets": [],
+   "input_files": {
+    "pose_result_corrupt.png": "iVBORw0KGgoAAAANSUhEUgAAAAoAAAAHCAIAAAC+zks0AAAA5ElEQVR4nFuDWnylWjHen1c5KpBY2OwBV8x/4V5tg+iCa5LD0nixhtn+WlpNOqyZ+sqc6a8fh34CwskiaJGrd49LUoxYmxorZrtYCk7f2tcwuYYgQTFtpXtLQHMTF2UROkoEYy/xLSD9XluWfUEwctkPWjIkVZF4PeD+dioRdm8VZpAkiW5Kq1q29FOcfdQ1W+9U5okud69EHk7Q1XG4RGUY/iTH/2xY97i3LX7e4vXoPcDtF4lJsQu4hXV9UnI/Lpw8eFGqWqbcUl+Eq+SHVKyzMKCCWBPpdOfRO7fv3Wd0DdE+q52xYgNmkxLUAAAAAElFTkSuQmCC"
+   },
+   "loaded": {
+    "character": {
+     "sha256": "e8763f1cf3ae06f66d9c9124b829c3259bfbaa1c6452d706319c4796002c9a34",
+     "shape": [
+      6,
+      8,
+      3
+     ]
+    }
+   },
+   "made": {},
+   "name": "pose \u00b7 mannequin \u00b7 saved pose pose_result_corrupt.png, nothing else",
+   "output": [
+    {
+     "image": "IMG:character"
+    }
+   ],
+   "picture_files": {
+    "character": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "character"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": {
+    "images": [
+     {
+      "live_preview": {
+       "image": "IMG:character"
+      }
+     }
+    ]
+   },
+   "widgets": {
+    "mannequin_image": "",
+    "pose_cond_image": "",
+    "pose_prompt": "",
+    "pose_source": "mannequin",
+    "pose_state": "",
+    "prompt": "",
+    "result_image": "pose_result_corrupt.png"
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": [
+      "https://r.test/nano/out.png"
+     ]
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "google/nano-banana-2",
+     "payload": {
+      "image_input": [
+       "IMG:character",
+       "PNG:f656a01a9558e5a499fbfc203bf9e5cd0848df2316440d425e7771f5c19a3f68"
+      ],
+      "output_format": "png",
+      "prompt": "The first image is a character. The second image is a SURFACE-NORMAL render of a posed 3D mannequin: its colours encode the target body pose AND the exact 3D orientation \u2014 which way the body and each limb face. Redraw the EXACT SAME character from the first image \u2014 keep their face, hair, skin tone, body type, clothing and art style identical \u2014 but pose them to match the second image: limb positions, stance, head angle, AND the whole-body orientation/facing direction (front, three-quarter, side, or back). If the body is turned or facing away, turn the character the same way; do NOT default to a front-facing view. Full body, head to toe, plain neutral studio background, natural and photographic. Output only the character in that pose, never the normal-map render itself.",
+      "resolution": "1K"
+     },
+     "payload_json": "{\"image_input\": [\"IMG:character\", \"PNG:f656a01a9558e5a499fbfc203bf9e5cd0848df2316440d425e7771f5c19a3f68\"], \"output_format\": \"png\", \"prompt\": \"The first image is a character. The second image is a SURFACE-NORMAL render of a posed 3D mannequin: its colours encode the target body pose AND the exact 3D orientation \\u2014 which way the body and each limb face. Redraw the EXACT SAME character from the first image \\u2014 keep their face, hair, skin tone, body type, clothing and art style identical \\u2014 but pose them to match the second image: limb positions, stance, head angle, AND the whole-body orientation/facing direction (front, three-quarter, side, or back). If the body is turned or facing away, turn the character the same way; do NOT default to a front-facing view. Full body, head to toe, plain neutral studio background, natural and photographic. Output only the character in that pose, never the normal-map render itself.\", \"resolution\": \"1K\"}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "PoseMannequin",
+   "files": {
+    "https://r.test/nano/out.png": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/AcOqdpIbGzj/c/JF3NBDwwY3e+iNv1NeSAC480AJPzJJWxuIonMNXd4dmsxKNi/QC/wAynULK0Un6s3Zjw4H7aRaRyEUN0HTK9YyArH71I6mq/xdtN1xhtQCaE/AFTYTmuSdKgJ1C0HAZCrCFOdYvVehWAcgqYyiB+E/53YBJBW0SbfpJIHnMSm6zV9dPybfY/VnRgd8wS9C5P5HtF0AAAAASUVORK5CYII=",
+    "https://r.test/nano/second.png": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ADkMjH1yRzQs2BAPL293DWXWcOWOA1HYrgRVQ+IewuhFBd/ueOc7uLQ9H/h9lacjBnoE6eRUALVMp9X7GMsOpz6SxCw3hIMFAWp5AlZWX965sqwNNd7/IycJiOD35tZWEqMorQFR2CB068+7QksIqf8OMBdSIzZzNRIKGCcEASiFNQlK9JhBZM2uDkrqqkCjFEblEd/HDq9ANXtYogkAAAAASUVORK5CYII="
+   },
+   "gets": [
+    {
+     "status": 200,
+     "url": "https://r.test/nano/out.png"
+    }
+   ],
+   "input_files": {
+    "pose_mannequin.png": "iVBORw0KGgoAAAANSUhEUgAAAAsAAAAICAIAAACgWpLfAAABG0lEQVR4nAEQAe/+AagdCukL9slWiYM8AEoWcaDg0LUYi8M2E1dgkxD4Bh+nRQTHuLT7KMW4e2M9LT9Rs9+OwLglZb7JxNS7+YYx3OdAdc0AS0dcK/KNj5cBmR6ZEf4owDyZ0sBfiqVmRpDm2zZZOUDtAZ6b5nK83hjE41Xi1Tk0XAMX4P5VgDc6nej1WXrpJr9xLAAkSjvkMvsKCtgg2s9Xxzf9eNQCeA1aWMHgy49IKdC+BtkCNbhnwRJmLPRTopxbQYTSc9rMlTa7Lqzc6S1KBZtbJxjNAQ5bVtyRFsNetKEltFpcXhjkKRzV3Aj9Zdm+Iljla1HVygCuszeQlbe7cBzhGv9fVD7Sf+898vlFkxV5CrGAAWfPv51Eu4TvP2WLrAAAAABJRU5ErkJggg==",
+    "pose_result_truncated.png": "iVBORw0KGgoAAAANSUhEUgAAAAoAAAAHCAIAAAC+zks0AAAA5ElEQVR4nAHZACb/AeoQfaZZxCIkoFy1PVmp/fO1HyYGELEqz3DbW63z3wCelexQa/vdIFdoBC3vmzlhe+zoMvGp6JF+IxNMxV8B5DfUfdIClHKb7OjmcDkq3bwrJSdxKOD//Q66ZIbJAJ5/EMwVUFOfDpu5ydo="
+   },
+   "loaded": {
+    "character": {
+     "sha256": "e8763f1cf3ae06f66d9c9124b829c3259bfbaa1c6452d706319c4796002c9a34",
+     "shape": [
+      6,
+      8,
+      3
+     ]
+    }
+   },
+   "made": {
+    "PNG:f656a01a9558e5a499fbfc203bf9e5cd0848df2316440d425e7771f5c19a3f68": {
+     "sha256": "f0fd42d0ffcfc95b2bf7523e1f9e1352025458ecf6d5c800575be1bad0ac7cbb",
+     "shape": [
+      8,
+      11,
+      3
+     ]
+    }
+   },
+   "name": "pose \u00b7 mannequin \u00b7 saved pose pose_result_truncated.png, the mannequin render",
+   "output": [
+    {
+     "image": "https://r.test/nano/out.png"
+    }
+   ],
+   "picture_files": {
+    "character": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "character"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": {
+    "animated": [
+     false
+    ],
+    "images": [
+     {
+      "image": {
+       "image": "https://r.test/nano/out.png"
+      },
+      "prefix": "pose"
+     }
+    ]
+   },
+   "widgets": {
+    "mannequin_image": "pose_mannequin.png",
+    "pose_cond_image": "",
+    "pose_prompt": "",
+    "pose_source": "mannequin",
+    "pose_state": "",
+    "prompt": "",
+    "result_image": "pose_result_truncated.png"
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": [
+      "https://r.test/nano/out.png"
+     ]
+    }
+   ],
+   "calls": [],
+   "class_type": "PoseMannequin",
+   "files": {
+    "https://r.test/nano/out.png": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/AcOqdpIbGzj/c/JF3NBDwwY3e+iNv1NeSAC480AJPzJJWxuIonMNXd4dmsxKNi/QC/wAynULK0Un6s3Zjw4H7aRaRyEUN0HTK9YyArH71I6mq/xdtN1xhtQCaE/AFTYTmuSdKgJ1C0HAZCrCFOdYvVehWAcgqYyiB+E/53YBJBW0SbfpJIHnMSm6zV9dPybfY/VnRgd8wS9C5P5HtF0AAAAASUVORK5CYII=",
+    "https://r.test/nano/second.png": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ADkMjH1yRzQs2BAPL293DWXWcOWOA1HYrgRVQ+IewuhFBd/ueOc7uLQ9H/h9lacjBnoE6eRUALVMp9X7GMsOpz6SxCw3hIMFAWp5AlZWX965sqwNNd7/IycJiOD35tZWEqMorQFR2CB068+7QksIqf8OMBdSIzZzNRIKGCcEASiFNQlK9JhBZM2uDkrqqkCjFEblEd/HDq9ANXtYogkAAAAASUVORK5CYII="
+   },
+   "gets": [],
+   "input_files": {
+    "pose_result_truncated.png": "iVBORw0KGgoAAAANSUhEUgAAAAoAAAAHCAIAAAC+zks0AAAA5ElEQVR4nAHZACb/AeoQfaZZxCIkoFy1PVmp/fO1HyYGELEqz3DbW63z3wCelexQa/vdIFdoBC3vmzlhe+zoMvGp6JF+IxNMxV8B5DfUfdIClHKb7OjmcDkq3bwrJSdxKOD//Q66ZIbJAJ5/EMwVUFOfDpu5ydo="
+   },
+   "loaded": {
+    "character": {
+     "sha256": "e8763f1cf3ae06f66d9c9124b829c3259bfbaa1c6452d706319c4796002c9a34",
+     "shape": [
+      6,
+      8,
+      3
+     ]
+    }
+   },
+   "made": {},
+   "name": "pose \u00b7 mannequin \u00b7 saved pose pose_result_truncated.png, nothing else",
+   "output": [
+    {
+     "image": "IMG:character"
+    }
+   ],
+   "picture_files": {
+    "character": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "character"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": {
+    "images": [
+     {
+      "live_preview": {
+       "image": "IMG:character"
+      }
+     }
+    ]
+   },
+   "widgets": {
+    "mannequin_image": "",
+    "pose_cond_image": "",
+    "pose_prompt": "",
+    "pose_source": "mannequin",
+    "pose_state": "",
+    "prompt": "",
+    "result_image": "pose_result_truncated.png"
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": [
+      "https://r.test/nano/out.png"
+     ]
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "google/nano-banana-2",
+     "payload": {
+      "image_input": [
+       "IMG:character",
+       "PNG:f656a01a9558e5a499fbfc203bf9e5cd0848df2316440d425e7771f5c19a3f68"
+      ],
+      "output_format": "png",
+      "prompt": "The first image is a character. The second image is a SURFACE-NORMAL render of a posed 3D mannequin: its colours encode the target body pose AND the exact 3D orientation \u2014 which way the body and each limb face. Redraw the EXACT SAME character from the first image \u2014 keep their face, hair, skin tone, body type, clothing and art style identical \u2014 but pose them to match the second image: limb positions, stance, head angle, AND the whole-body orientation/facing direction (front, three-quarter, side, or back). If the body is turned or facing away, turn the character the same way; do NOT default to a front-facing view. Full body, head to toe, plain neutral studio background, natural and photographic. Output only the character in that pose, never the normal-map render itself.",
+      "resolution": "1K"
+     },
+     "payload_json": "{\"image_input\": [\"IMG:character\", \"PNG:f656a01a9558e5a499fbfc203bf9e5cd0848df2316440d425e7771f5c19a3f68\"], \"output_format\": \"png\", \"prompt\": \"The first image is a character. The second image is a SURFACE-NORMAL render of a posed 3D mannequin: its colours encode the target body pose AND the exact 3D orientation \\u2014 which way the body and each limb face. Redraw the EXACT SAME character from the first image \\u2014 keep their face, hair, skin tone, body type, clothing and art style identical \\u2014 but pose them to match the second image: limb positions, stance, head angle, AND the whole-body orientation/facing direction (front, three-quarter, side, or back). If the body is turned or facing away, turn the character the same way; do NOT default to a front-facing view. Full body, head to toe, plain neutral studio background, natural and photographic. Output only the character in that pose, never the normal-map render itself.\", \"resolution\": \"1K\"}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "PoseMannequin",
+   "files": {
+    "https://r.test/nano/out.png": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/AcOqdpIbGzj/c/JF3NBDwwY3e+iNv1NeSAC480AJPzJJWxuIonMNXd4dmsxKNi/QC/wAynULK0Un6s3Zjw4H7aRaRyEUN0HTK9YyArH71I6mq/xdtN1xhtQCaE/AFTYTmuSdKgJ1C0HAZCrCFOdYvVehWAcgqYyiB+E/53YBJBW0SbfpJIHnMSm6zV9dPybfY/VnRgd8wS9C5P5HtF0AAAAASUVORK5CYII=",
+    "https://r.test/nano/second.png": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ADkMjH1yRzQs2BAPL293DWXWcOWOA1HYrgRVQ+IewuhFBd/ueOc7uLQ9H/h9lacjBnoE6eRUALVMp9X7GMsOpz6SxCw3hIMFAWp5AlZWX965sqwNNd7/IycJiOD35tZWEqMorQFR2CB068+7QksIqf8OMBdSIzZzNRIKGCcEASiFNQlK9JhBZM2uDkrqqkCjFEblEd/HDq9ANXtYogkAAAAASUVORK5CYII="
+   },
+   "gets": [
+    {
+     "status": 200,
+     "url": "https://r.test/nano/out.png"
+    }
+   ],
+   "input_files": {},
+   "loaded": {
+    "character": {
+     "sha256": "e8763f1cf3ae06f66d9c9124b829c3259bfbaa1c6452d706319c4796002c9a34",
+     "shape": [
+      6,
+      8,
+      3
+     ]
+    }
+   },
+   "made": {
+    "PNG:f656a01a9558e5a499fbfc203bf9e5cd0848df2316440d425e7771f5c19a3f68": {
+     "sha256": "f0fd42d0ffcfc95b2bf7523e1f9e1352025458ecf6d5c800575be1bad0ac7cbb",
+     "shape": [
+      8,
+      11,
+      3
+     ]
+    }
+   },
+   "name": "pose \u00b7 mannequin \u00b7 render named ./pose_mannequin.png",
+   "output": [
+    {
+     "image": "https://r.test/nano/out.png"
+    }
+   ],
+   "picture_files": {
+    "character": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "character"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": {
+    "animated": [
+     false
+    ],
+    "images": [
+     {
+      "image": {
+       "image": "https://r.test/nano/out.png"
+      },
+      "prefix": "pose"
+     }
+    ]
+   },
+   "widgets": {
+    "mannequin_image": "./pose_mannequin.png",
+    "pose_cond_image": "",
+    "pose_prompt": "",
+    "pose_source": "mannequin",
+    "pose_state": "",
+    "prompt": "",
+    "result_image": ""
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": [
+      "https://r.test/nano/out.png"
+     ]
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "google/nano-banana-2",
+     "payload": {
+      "image_input": [
+       "IMG:character",
+       "PNG:f656a01a9558e5a499fbfc203bf9e5cd0848df2316440d425e7771f5c19a3f68"
+      ],
+      "output_format": "png",
+      "prompt": "The first image is a character. The second image is a SURFACE-NORMAL render of a posed 3D mannequin: its colours encode the target body pose AND the exact 3D orientation \u2014 which way the body and each limb face. Redraw the EXACT SAME character from the first image \u2014 keep their face, hair, skin tone, body type, clothing and art style identical \u2014 but pose them to match the second image: limb positions, stance, head angle, AND the whole-body orientation/facing direction (front, three-quarter, side, or back). If the body is turned or facing away, turn the character the same way; do NOT default to a front-facing view. Full body, head to toe, plain neutral studio background, natural and photographic. Output only the character in that pose, never the normal-map render itself.",
+      "resolution": "1K"
+     },
+     "payload_json": "{\"image_input\": [\"IMG:character\", \"PNG:f656a01a9558e5a499fbfc203bf9e5cd0848df2316440d425e7771f5c19a3f68\"], \"output_format\": \"png\", \"prompt\": \"The first image is a character. The second image is a SURFACE-NORMAL render of a posed 3D mannequin: its colours encode the target body pose AND the exact 3D orientation \\u2014 which way the body and each limb face. Redraw the EXACT SAME character from the first image \\u2014 keep their face, hair, skin tone, body type, clothing and art style identical \\u2014 but pose them to match the second image: limb positions, stance, head angle, AND the whole-body orientation/facing direction (front, three-quarter, side, or back). If the body is turned or facing away, turn the character the same way; do NOT default to a front-facing view. Full body, head to toe, plain neutral studio background, natural and photographic. Output only the character in that pose, never the normal-map render itself.\", \"resolution\": \"1K\"}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "PoseMannequin",
+   "files": {
+    "https://r.test/nano/out.png": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/AcOqdpIbGzj/c/JF3NBDwwY3e+iNv1NeSAC480AJPzJJWxuIonMNXd4dmsxKNi/QC/wAynULK0Un6s3Zjw4H7aRaRyEUN0HTK9YyArH71I6mq/xdtN1xhtQCaE/AFTYTmuSdKgJ1C0HAZCrCFOdYvVehWAcgqYyiB+E/53YBJBW0SbfpJIHnMSm6zV9dPybfY/VnRgd8wS9C5P5HtF0AAAAASUVORK5CYII=",
+    "https://r.test/nano/second.png": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ADkMjH1yRzQs2BAPL293DWXWcOWOA1HYrgRVQ+IewuhFBd/ueOc7uLQ9H/h9lacjBnoE6eRUALVMp9X7GMsOpz6SxCw3hIMFAWp5AlZWX965sqwNNd7/IycJiOD35tZWEqMorQFR2CB068+7QksIqf8OMBdSIzZzNRIKGCcEASiFNQlK9JhBZM2uDkrqqkCjFEblEd/HDq9ANXtYogkAAAAASUVORK5CYII="
+   },
+   "gets": [
+    {
+     "status": 200,
+     "url": "https://r.test/nano/out.png"
+    }
+   ],
+   "input_files": {},
+   "loaded": {
+    "character": {
+     "sha256": "e8763f1cf3ae06f66d9c9124b829c3259bfbaa1c6452d706319c4796002c9a34",
+     "shape": [
+      6,
+      8,
+      3
+     ]
+    }
+   },
+   "made": {
+    "PNG:f656a01a9558e5a499fbfc203bf9e5cd0848df2316440d425e7771f5c19a3f68": {
+     "sha256": "f0fd42d0ffcfc95b2bf7523e1f9e1352025458ecf6d5c800575be1bad0ac7cbb",
+     "shape": [
+      8,
+      11,
+      3
+     ]
+    }
+   },
+   "name": "pose \u00b7 mannequin \u00b7 render named sub/../pose_mannequin.png",
+   "output": [
+    {
+     "image": "https://r.test/nano/out.png"
+    }
+   ],
+   "picture_files": {
+    "character": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "character"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": {
+    "animated": [
+     false
+    ],
+    "images": [
+     {
+      "image": {
+       "image": "https://r.test/nano/out.png"
+      },
+      "prefix": "pose"
+     }
+    ]
+   },
+   "widgets": {
+    "mannequin_image": "sub/../pose_mannequin.png",
+    "pose_cond_image": "",
+    "pose_prompt": "",
+    "pose_source": "mannequin",
+    "pose_state": "",
+    "prompt": "",
+    "result_image": ""
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": [
+      "https://r.test/nano/out.png"
+     ]
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "google/nano-banana-2",
+     "payload": {
+      "image_input": [
+       "IMG:character",
+       "PNG:2364c23ce1dca0ef518fa2592eec0765c745caa03fe225611095d19805a2f806"
+      ],
+      "output_format": "png",
+      "prompt": "The first image is a character. The second image is a SURFACE-NORMAL render of a posed 3D mannequin: its colours encode the target body pose AND the exact 3D orientation \u2014 which way the body and each limb face. Redraw the EXACT SAME character from the first image \u2014 keep their face, hair, skin tone, body type, clothing and art style identical \u2014 but pose them to match the second image: limb positions, stance, head angle, AND the whole-body orientation/facing direction (front, three-quarter, side, or back). If the body is turned or facing away, turn the character the same way; do NOT default to a front-facing view. Full body, head to toe, plain neutral studio background, natural and photographic. Output only the character in that pose, never the normal-map render itself.",
+      "resolution": "1K"
+     },
+     "payload_json": "{\"image_input\": [\"IMG:character\", \"PNG:2364c23ce1dca0ef518fa2592eec0765c745caa03fe225611095d19805a2f806\"], \"output_format\": \"png\", \"prompt\": \"The first image is a character. The second image is a SURFACE-NORMAL render of a posed 3D mannequin: its colours encode the target body pose AND the exact 3D orientation \\u2014 which way the body and each limb face. Redraw the EXACT SAME character from the first image \\u2014 keep their face, hair, skin tone, body type, clothing and art style identical \\u2014 but pose them to match the second image: limb positions, stance, head angle, AND the whole-body orientation/facing direction (front, three-quarter, side, or back). If the body is turned or facing away, turn the character the same way; do NOT default to a front-facing view. Full body, head to toe, plain neutral studio background, natural and photographic. Output only the character in that pose, never the normal-map render itself.\", \"resolution\": \"1K\"}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "PoseMannequin",
+   "files": {
+    "https://r.test/nano/out.png": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/AcOqdpIbGzj/c/JF3NBDwwY3e+iNv1NeSAC480AJPzJJWxuIonMNXd4dmsxKNi/QC/wAynULK0Un6s3Zjw4H7aRaRyEUN0HTK9YyArH71I6mq/xdtN1xhtQCaE/AFTYTmuSdKgJ1C0HAZCrCFOdYvVehWAcgqYyiB+E/53YBJBW0SbfpJIHnMSm6zV9dPybfY/VnRgd8wS9C5P5HtF0AAAAASUVORK5CYII=",
+    "https://r.test/nano/second.png": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ADkMjH1yRzQs2BAPL293DWXWcOWOA1HYrgRVQ+IewuhFBd/ueOc7uLQ9H/h9lacjBnoE6eRUALVMp9X7GMsOpz6SxCw3hIMFAWp5AlZWX965sqwNNd7/IycJiOD35tZWEqMorQFR2CB068+7QksIqf8OMBdSIzZzNRIKGCcEASiFNQlK9JhBZM2uDkrqqkCjFEblEd/HDq9ANXtYogkAAAAASUVORK5CYII="
+   },
+   "gets": [
+    {
+     "status": 200,
+     "url": "https://r.test/nano/out.png"
+    }
+   ],
+   "input_files": {},
+   "loaded": {
+    "character": {
+     "sha256": "e8763f1cf3ae06f66d9c9124b829c3259bfbaa1c6452d706319c4796002c9a34",
+     "shape": [
+      6,
+      8,
+      3
+     ]
+    }
+   },
+   "made": {
+    "PNG:2364c23ce1dca0ef518fa2592eec0765c745caa03fe225611095d19805a2f806": {
+     "sha256": "e33af5c0625fb256da04526b5cfaee52d2671c15ab1adff6ffaa5d6db8eedb0b",
+     "shape": [
+      8,
+      11,
+      3
+     ]
+    }
+   },
+   "name": "pose \u00b7 mannequin \u00b7 render named sub//pose_sub.png",
+   "output": [
+    {
+     "image": "https://r.test/nano/out.png"
+    }
+   ],
+   "picture_files": {
+    "character": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "character"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": {
+    "animated": [
+     false
+    ],
+    "images": [
+     {
+      "image": {
+       "image": "https://r.test/nano/out.png"
+      },
+      "prefix": "pose"
+     }
+    ]
+   },
+   "widgets": {
+    "mannequin_image": "sub//pose_sub.png",
+    "pose_cond_image": "",
+    "pose_prompt": "",
+    "pose_source": "mannequin",
+    "pose_state": "",
+    "prompt": "",
+    "result_image": ""
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": [
+      "https://r.test/nano/out.png"
+     ]
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "google/nano-banana-2",
+     "payload": {
+      "image_input": [
+       "IMG:character",
+       "PNG:2364c23ce1dca0ef518fa2592eec0765c745caa03fe225611095d19805a2f806"
+      ],
+      "output_format": "png",
+      "prompt": "The first image is a character. The second image is a SURFACE-NORMAL render of a posed 3D mannequin: its colours encode the target body pose AND the exact 3D orientation \u2014 which way the body and each limb face. Redraw the EXACT SAME character from the first image \u2014 keep their face, hair, skin tone, body type, clothing and art style identical \u2014 but pose them to match the second image: limb positions, stance, head angle, AND the whole-body orientation/facing direction (front, three-quarter, side, or back). If the body is turned or facing away, turn the character the same way; do NOT default to a front-facing view. Full body, head to toe, plain neutral studio background, natural and photographic. Output only the character in that pose, never the normal-map render itself.",
+      "resolution": "1K"
+     },
+     "payload_json": "{\"image_input\": [\"IMG:character\", \"PNG:2364c23ce1dca0ef518fa2592eec0765c745caa03fe225611095d19805a2f806\"], \"output_format\": \"png\", \"prompt\": \"The first image is a character. The second image is a SURFACE-NORMAL render of a posed 3D mannequin: its colours encode the target body pose AND the exact 3D orientation \\u2014 which way the body and each limb face. Redraw the EXACT SAME character from the first image \\u2014 keep their face, hair, skin tone, body type, clothing and art style identical \\u2014 but pose them to match the second image: limb positions, stance, head angle, AND the whole-body orientation/facing direction (front, three-quarter, side, or back). If the body is turned or facing away, turn the character the same way; do NOT default to a front-facing view. Full body, head to toe, plain neutral studio background, natural and photographic. Output only the character in that pose, never the normal-map render itself.\", \"resolution\": \"1K\"}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "PoseMannequin",
+   "files": {
+    "https://r.test/nano/out.png": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/AcOqdpIbGzj/c/JF3NBDwwY3e+iNv1NeSAC480AJPzJJWxuIonMNXd4dmsxKNi/QC/wAynULK0Un6s3Zjw4H7aRaRyEUN0HTK9YyArH71I6mq/xdtN1xhtQCaE/AFTYTmuSdKgJ1C0HAZCrCFOdYvVehWAcgqYyiB+E/53YBJBW0SbfpJIHnMSm6zV9dPybfY/VnRgd8wS9C5P5HtF0AAAAASUVORK5CYII=",
+    "https://r.test/nano/second.png": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ADkMjH1yRzQs2BAPL293DWXWcOWOA1HYrgRVQ+IewuhFBd/ueOc7uLQ9H/h9lacjBnoE6eRUALVMp9X7GMsOpz6SxCw3hIMFAWp5AlZWX965sqwNNd7/IycJiOD35tZWEqMorQFR2CB068+7QksIqf8OMBdSIzZzNRIKGCcEASiFNQlK9JhBZM2uDkrqqkCjFEblEd/HDq9ANXtYogkAAAAASUVORK5CYII="
+   },
+   "gets": [
+    {
+     "status": 200,
+     "url": "https://r.test/nano/out.png"
+    }
+   ],
+   "input_files": {},
+   "loaded": {
+    "character": {
+     "sha256": "e8763f1cf3ae06f66d9c9124b829c3259bfbaa1c6452d706319c4796002c9a34",
+     "shape": [
+      6,
+      8,
+      3
+     ]
+    }
+   },
+   "made": {
+    "PNG:2364c23ce1dca0ef518fa2592eec0765c745caa03fe225611095d19805a2f806": {
+     "sha256": "e33af5c0625fb256da04526b5cfaee52d2671c15ab1adff6ffaa5d6db8eedb0b",
+     "shape": [
+      8,
+      11,
+      3
+     ]
+    }
+   },
+   "name": "pose \u00b7 mannequin \u00b7 render named sub/./pose_sub.png",
+   "output": [
+    {
+     "image": "https://r.test/nano/out.png"
+    }
+   ],
+   "picture_files": {
+    "character": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "character"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": {
+    "animated": [
+     false
+    ],
+    "images": [
+     {
+      "image": {
+       "image": "https://r.test/nano/out.png"
+      },
+      "prefix": "pose"
+     }
+    ]
+   },
+   "widgets": {
+    "mannequin_image": "sub/./pose_sub.png",
+    "pose_cond_image": "",
+    "pose_prompt": "",
+    "pose_source": "mannequin",
+    "pose_state": "",
+    "prompt": "",
+    "result_image": ""
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": [
+      "https://r.test/nano/out.png"
+     ]
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "google/nano-banana-2",
+     "payload": {
+      "image_input": [
+       "IMG:character",
+       "PNG:2364c23ce1dca0ef518fa2592eec0765c745caa03fe225611095d19805a2f806"
+      ],
+      "output_format": "png",
+      "prompt": "The first image is a character. The second image is a SURFACE-NORMAL render of a posed 3D mannequin: its colours encode the target body pose AND the exact 3D orientation \u2014 which way the body and each limb face. Redraw the EXACT SAME character from the first image \u2014 keep their face, hair, skin tone, body type, clothing and art style identical \u2014 but pose them to match the second image: limb positions, stance, head angle, AND the whole-body orientation/facing direction (front, three-quarter, side, or back). If the body is turned or facing away, turn the character the same way; do NOT default to a front-facing view. Full body, head to toe, plain neutral studio background, natural and photographic. Output only the character in that pose, never the normal-map render itself.",
+      "resolution": "1K"
+     },
+     "payload_json": "{\"image_input\": [\"IMG:character\", \"PNG:2364c23ce1dca0ef518fa2592eec0765c745caa03fe225611095d19805a2f806\"], \"output_format\": \"png\", \"prompt\": \"The first image is a character. The second image is a SURFACE-NORMAL render of a posed 3D mannequin: its colours encode the target body pose AND the exact 3D orientation \\u2014 which way the body and each limb face. Redraw the EXACT SAME character from the first image \\u2014 keep their face, hair, skin tone, body type, clothing and art style identical \\u2014 but pose them to match the second image: limb positions, stance, head angle, AND the whole-body orientation/facing direction (front, three-quarter, side, or back). If the body is turned or facing away, turn the character the same way; do NOT default to a front-facing view. Full body, head to toe, plain neutral studio background, natural and photographic. Output only the character in that pose, never the normal-map render itself.\", \"resolution\": \"1K\"}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "PoseMannequin",
+   "files": {
+    "https://r.test/nano/out.png": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/AcOqdpIbGzj/c/JF3NBDwwY3e+iNv1NeSAC480AJPzJJWxuIonMNXd4dmsxKNi/QC/wAynULK0Un6s3Zjw4H7aRaRyEUN0HTK9YyArH71I6mq/xdtN1xhtQCaE/AFTYTmuSdKgJ1C0HAZCrCFOdYvVehWAcgqYyiB+E/53YBJBW0SbfpJIHnMSm6zV9dPybfY/VnRgd8wS9C5P5HtF0AAAAASUVORK5CYII=",
+    "https://r.test/nano/second.png": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ADkMjH1yRzQs2BAPL293DWXWcOWOA1HYrgRVQ+IewuhFBd/ueOc7uLQ9H/h9lacjBnoE6eRUALVMp9X7GMsOpz6SxCw3hIMFAWp5AlZWX965sqwNNd7/IycJiOD35tZWEqMorQFR2CB068+7QksIqf8OMBdSIzZzNRIKGCcEASiFNQlK9JhBZM2uDkrqqkCjFEblEd/HDq9ANXtYogkAAAAASUVORK5CYII="
+   },
+   "gets": [
+    {
+     "status": 200,
+     "url": "https://r.test/nano/out.png"
+    }
+   ],
+   "input_files": {},
+   "loaded": {
+    "character": {
+     "sha256": "e8763f1cf3ae06f66d9c9124b829c3259bfbaa1c6452d706319c4796002c9a34",
+     "shape": [
+      6,
+      8,
+      3
+     ]
+    }
+   },
+   "made": {
+    "PNG:2364c23ce1dca0ef518fa2592eec0765c745caa03fe225611095d19805a2f806": {
+     "sha256": "e33af5c0625fb256da04526b5cfaee52d2671c15ab1adff6ffaa5d6db8eedb0b",
+     "shape": [
+      8,
+      11,
+      3
+     ]
+    }
+   },
+   "name": "pose \u00b7 mannequin \u00b7 render named ./sub/pose_sub.png [input]",
+   "output": [
+    {
+     "image": "https://r.test/nano/out.png"
+    }
+   ],
+   "picture_files": {
+    "character": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "character"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": {
+    "animated": [
+     false
+    ],
+    "images": [
+     {
+      "image": {
+       "image": "https://r.test/nano/out.png"
+      },
+      "prefix": "pose"
+     }
+    ]
+   },
+   "widgets": {
+    "mannequin_image": "./sub/pose_sub.png [input]",
+    "pose_cond_image": "",
+    "pose_prompt": "",
+    "pose_source": "mannequin",
+    "pose_state": "",
+    "prompt": "",
+    "result_image": ""
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": [
+      "https://r.test/nano/out.png"
+     ]
+    }
+   ],
+   "calls": [],
+   "class_type": "PoseMannequin",
+   "files": {
+    "https://r.test/nano/out.png": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/AcOqdpIbGzj/c/JF3NBDwwY3e+iNv1NeSAC480AJPzJJWxuIonMNXd4dmsxKNi/QC/wAynULK0Un6s3Zjw4H7aRaRyEUN0HTK9YyArH71I6mq/xdtN1xhtQCaE/AFTYTmuSdKgJ1C0HAZCrCFOdYvVehWAcgqYyiB+E/53YBJBW0SbfpJIHnMSm6zV9dPybfY/VnRgd8wS9C5P5HtF0AAAAASUVORK5CYII=",
+    "https://r.test/nano/second.png": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ADkMjH1yRzQs2BAPL293DWXWcOWOA1HYrgRVQ+IewuhFBd/ueOc7uLQ9H/h9lacjBnoE6eRUALVMp9X7GMsOpz6SxCw3hIMFAWp5AlZWX965sqwNNd7/IycJiOD35tZWEqMorQFR2CB068+7QksIqf8OMBdSIzZzNRIKGCcEASiFNQlK9JhBZM2uDkrqqkCjFEblEd/HDq9ANXtYogkAAAAASUVORK5CYII="
+   },
+   "gets": [],
+   "input_files": {
+    "pose_mannequin.png": "iVBORw0KGgoAAAANSUhEUgAAAAsAAAAICAIAAACgWpLfAAABG0lEQVR4nAEQAe/+AagdCukL9slWiYM8AEoWcaDg0LUYi8M2E1dgkxD4Bh+nRQTHuLT7KMW4e2M9LT9Rs9+OwLglZb7JxNS7+YYx3OdAdc0AS0dcK/KNj5cBmR6ZEf4owDyZ0sBfiqVmRpDm2zZZOUDtAZ6b5nK83hjE41Xi1Tk0XAMX4P5VgDc6nej1WXrpJr9xLAAkSjvkMvsKCtgg2s9Xxzf9eNQCeA1aWMHgy49IKdC+BtkCNbhnwRJmLPRTopxbQYTSc9rMlTa7Lqzc6S1KBZtbJxjNAQ5bVtyRFsNetKEltFpcXhjkKRzV3Aj9Zdm+Iljla1HVygCuszeQlbe7cBzhGv9fVD7Sf+898vlFkxV5CrGAAWfPv51Eu4TvP2WLrAAAAABJRU5ErkJggg=="
+   },
+   "loaded": {
+    "character": {
+     "sha256": "e8763f1cf3ae06f66d9c9124b829c3259bfbaa1c6452d706319c4796002c9a34",
+     "shape": [
+      6,
+      8,
+      3
+     ]
+    }
+   },
+   "made": {},
+   "name": "pose \u00b7 mannequin \u00b7 saved pose named ./pose_result.png",
+   "output": [
+    {
+     "tensor": {
+      "sha256": "7449c7d63b783ed363398eb0ff6ea47bdb1c0abb0cb179e1de6f0ee443659130",
+      "shape": [
+       1,
+       7,
+       10,
+       3
+      ]
+     }
+    }
+   ],
+   "picture_files": {
+    "character": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "character"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": {
+    "images": [
+     {
+      "live_preview": {
+       "tensor": {
+        "sha256": "7449c7d63b783ed363398eb0ff6ea47bdb1c0abb0cb179e1de6f0ee443659130",
+        "shape": [
+         1,
+         7,
+         10,
+         3
+        ]
+       }
+      }
+     }
+    ]
+   },
+   "widgets": {
+    "mannequin_image": "pose_mannequin.png",
+    "pose_cond_image": "",
+    "pose_prompt": "",
+    "pose_source": "mannequin",
+    "pose_state": "",
+    "prompt": "",
+    "result_image": "./pose_result.png"
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": [
+      "https://r.test/nano/out.png"
+     ]
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "google/nano-banana-2",
+     "payload": {
+      "image_input": [
+       "IMG:character",
+       "PNG:f656a01a9558e5a499fbfc203bf9e5cd0848df2316440d425e7771f5c19a3f68"
+      ],
+      "output_format": "png",
+      "prompt": "The first image is a character. The second image is a SURFACE-NORMAL render of a posed 3D mannequin: its colours encode the target body pose AND the exact 3D orientation \u2014 which way the body and each limb face. Redraw the EXACT SAME character from the first image \u2014 keep their face, hair, skin tone, body type, clothing and art style identical \u2014 but pose them to match the second image: limb positions, stance, head angle, AND the whole-body orientation/facing direction (front, three-quarter, side, or back). If the body is turned or facing away, turn the character the same way; do NOT default to a front-facing view. Full body, head to toe, plain neutral studio background, natural and photographic. Output only the character in that pose, never the normal-map render itself.",
+      "resolution": "1K"
+     },
+     "payload_json": "{\"image_input\": [\"IMG:character\", \"PNG:f656a01a9558e5a499fbfc203bf9e5cd0848df2316440d425e7771f5c19a3f68\"], \"output_format\": \"png\", \"prompt\": \"The first image is a character. The second image is a SURFACE-NORMAL render of a posed 3D mannequin: its colours encode the target body pose AND the exact 3D orientation \\u2014 which way the body and each limb face. Redraw the EXACT SAME character from the first image \\u2014 keep their face, hair, skin tone, body type, clothing and art style identical \\u2014 but pose them to match the second image: limb positions, stance, head angle, AND the whole-body orientation/facing direction (front, three-quarter, side, or back). If the body is turned or facing away, turn the character the same way; do NOT default to a front-facing view. Full body, head to toe, plain neutral studio background, natural and photographic. Output only the character in that pose, never the normal-map render itself.\", \"resolution\": \"1K\"}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "PoseMannequin",
+   "files": {
+    "https://r.test/nano/out.png": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/AcOqdpIbGzj/c/JF3NBDwwY3e+iNv1NeSAC480AJPzJJWxuIonMNXd4dmsxKNi/QC/wAynULK0Un6s3Zjw4H7aRaRyEUN0HTK9YyArH71I6mq/xdtN1xhtQCaE/AFTYTmuSdKgJ1C0HAZCrCFOdYvVehWAcgqYyiB+E/53YBJBW0SbfpJIHnMSm6zV9dPybfY/VnRgd8wS9C5P5HtF0AAAAASUVORK5CYII=",
+    "https://r.test/nano/second.png": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ADkMjH1yRzQs2BAPL293DWXWcOWOA1HYrgRVQ+IewuhFBd/ueOc7uLQ9H/h9lacjBnoE6eRUALVMp9X7GMsOpz6SxCw3hIMFAWp5AlZWX965sqwNNd7/IycJiOD35tZWEqMorQFR2CB068+7QksIqf8OMBdSIzZzNRIKGCcEASiFNQlK9JhBZM2uDkrqqkCjFEblEd/HDq9ANXtYogkAAAAASUVORK5CYII="
+   },
+   "gets": [
+    {
+     "status": 200,
+     "url": "https://r.test/nano/out.png"
+    }
+   ],
+   "input_files": {
+    "pose_mannequin.png": "iVBORw0KGgoAAAANSUhEUgAAAAsAAAAICAIAAACgWpLfAAABG0lEQVR4nAEQAe/+AagdCukL9slWiYM8AEoWcaDg0LUYi8M2E1dgkxD4Bh+nRQTHuLT7KMW4e2M9LT9Rs9+OwLglZb7JxNS7+YYx3OdAdc0AS0dcK/KNj5cBmR6ZEf4owDyZ0sBfiqVmRpDm2zZZOUDtAZ6b5nK83hjE41Xi1Tk0XAMX4P5VgDc6nej1WXrpJr9xLAAkSjvkMvsKCtgg2s9Xxzf9eNQCeA1aWMHgy49IKdC+BtkCNbhnwRJmLPRTopxbQYTSc9rMlTa7Lqzc6S1KBZtbJxjNAQ5bVtyRFsNetKEltFpcXhjkKRzV3Aj9Zdm+Iljla1HVygCuszeQlbe7cBzhGv9fVD7Sf+898vlFkxV5CrGAAWfPv51Eu4TvP2WLrAAAAABJRU5ErkJggg=="
+   },
+   "loaded": {
+    "character": {
+     "sha256": "e8763f1cf3ae06f66d9c9124b829c3259bfbaa1c6452d706319c4796002c9a34",
+     "shape": [
+      6,
+      8,
+      3
+     ]
+    }
+   },
+   "made": {
+    "PNG:f656a01a9558e5a499fbfc203bf9e5cd0848df2316440d425e7771f5c19a3f68": {
+     "sha256": "f0fd42d0ffcfc95b2bf7523e1f9e1352025458ecf6d5c800575be1bad0ac7cbb",
+     "shape": [
+      8,
+      11,
+      3
+     ]
+    }
+   },
+   "name": "pose \u00b7 mannequin \u00b7 saved pose named x.png[input] (Python strips g[input])",
+   "output": [
+    {
+     "image": "https://r.test/nano/out.png"
+    }
+   ],
+   "picture_files": {
+    "character": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "character"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": {
+    "animated": [
+     false
+    ],
+    "images": [
+     {
+      "image": {
+       "image": "https://r.test/nano/out.png"
+      },
+      "prefix": "pose"
+     }
+    ]
+   },
+   "widgets": {
+    "mannequin_image": "pose_mannequin.png",
+    "pose_cond_image": "",
+    "pose_prompt": "",
+    "pose_source": "mannequin",
+    "pose_state": "",
+    "prompt": "",
+    "result_image": "pose_result.png[input]"
    }
   },
   {

@@ -97,6 +97,22 @@ export function pictureRefusalOf(meta: Metadata, bytes: Uint8Array): string | nu
   return null
 }
 
+/**
+ * Whether a picture decodes FULLY (R3.15 fix round 2): every pixel read,
+ * with sharp failing on a truncated or corrupt stream (`failOn:
+ * 'truncated'`) rather than filling the rest in. A header alone isn't
+ * enough: PIL's `.convert("RGB")` decodes the whole file, and a PNG whose
+ * IDAT is corrupt or cut short fails there (Pose Mannequin's
+ * `_load_input_image` then gives None). A file, by its path or its bytes.
+ */
+export async function decodesStrictly(input: Uint8Array | string): Promise<boolean> {
+  try {
+    await sharp(input, { failOn: 'truncated', limitInputPixels: MAX_INPUT_PIXELS }).raw().toBuffer()
+    return true
+  }
+  catch { return false }
+}
+
 /** pictureRefusalOf for a file's bytes; a file sharp cannot read is PICTURE_UNREADABLE. */
 export async function pictureRefusal(bytes: Uint8Array): Promise<string | null> {
   try { return pictureRefusalOf(await pictureMeta(bytes), bytes) }

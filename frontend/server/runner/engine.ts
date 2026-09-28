@@ -2050,7 +2050,7 @@ export function createEngine(deps: EngineDeps) {
     for (const [index, p] of prompts.entries()) {
       const savedPoses = new Set<string>()
       const pose = await poseStartProblem(p, f => files.read(f), deps.hosted(), savedPoses)
-      if (pose) throw refuse(pose.message, 400, { nodeId: pose.nodeId, classType: pose.classType })
+      if (pose) throw refuse(pose.message, pose.status ?? 400, { nodeId: pose.nodeId, classType: pose.classType })
       for (const nodeId of savedPoses) measured[index]![nodeId] = { seconds: {}, sha: {}, savedPose: true }
     }
     // A loader's picture a paid node hands off (R3.H, ./pictureHandoff.ts): one

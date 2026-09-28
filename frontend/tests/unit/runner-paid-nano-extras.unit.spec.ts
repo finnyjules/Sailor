@@ -11,7 +11,7 @@
 import { createHash } from 'node:crypto'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join, resolve } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import sharp from 'sharp'
 import { createFakeFal, createFakeReplicate, makeKit, ofType } from './__runner__/kit'
@@ -23,7 +23,7 @@ import { IMAGE_OUTPUT_CLASSES, PAID_PICTURE_FAMILY, PROVIDER_TYPES, RUNNER_NODE_
 import { nodesNeedingEngine } from '#shared/runner/needsEngine'
 import { RUNNER_OUTPUT_CLASSES } from '#shared/runner/validate'
 import {
-  LENS_CUSTOM, LENS_NAMES, NANO_EXTRAS_CLASSES, NANO_EXTRAS_SLUG, POSE_RESULT_MISSING, bakedFileName, poseNoCall, savedPoseRefs,
+  LENS_CUSTOM, LENS_NAMES, NANO_EXTRAS_CLASSES, NANO_EXTRAS_SLUG, POSE_RESULT_MISSING, bakedNamePresent, poseNoCall, savedPoseRefs,
 } from '#shared/runner/nanoExtras'
 import { EDIT_RATES } from '#shared/pricing/editRates'
 import { SETTING_PRICED_NODE_CLASSES, editCalls } from '#shared/pricing/editSettings'
@@ -91,13 +91,10 @@ async function pixelsOf(png: Uint8Array, batch = false): Promise<Pixels> {
   return { shape: [...(batch ? [1] : []), info.height, info.width, info.channels], sha256: sha(new Uint8Array(data)) }
 }
 
-/** The Python cases' baked-file names a case uses (or none). */
-const inputFile = (name: string): Uint8Array | null => {
-  const f = bakedFileName(name)
-  if (!f) return null
-  const bare = f.replace(/\s*\[input\]$/, '')
-  return BAKED[bare] ?? null
-}
+/** A file of the fixture's input folder, as the runner names it (subfolder and file name), or null (not there). */
+const fileAt = (f: Pick<OutputFile, 'filename' | 'subfolder'>): Uint8Array | null => BAKED[f.subfolder ? `${f.subfolder}/${f.filename}` : f.filename] ?? null
+/** The Python cases' baked files by a hand-off link's file name (top-level or in a subfolder), or null. */
+const inputFile = (name: string): Uint8Array | null => BAKED[name] ?? Object.entries(BAKED).find(([k]) => k.endsWith(`/${name}`))?.[1] ?? null
 
 /** planNode as the engine calls it, over the fixture's files; `made`: the bytes handed off by name. */
 async function planOf(c: NanoCase, o: { hosted?: boolean; priceInputs?: Record<string, unknown> } = {}) {
@@ -109,7 +106,7 @@ async function planOf(c: NanoCase, o: { hosted?: boolean; priceInputs?: Record<s
     toUrl: async f => `https://fal.storage/${f.filename}`,
     bytesToUrl: async (f, b) => { made.set(f.filename, b); return `https://made/${f.filename}` },
     readFile: async (f) => {
-      const b = inputFile(f.filename)
+      const b = fileAt(f)
       if (!b) throw new Error('ENOENT')
       return b
     },
@@ -124,7 +121,7 @@ async function deriveOf(plan: Extract<NodePlan, { kind: 'derive' }>): Promise<{ 
   const kept = new Map<string, Uint8Array>()
   const shown: Uint8Array[] = []
   const io = {
-    read: async (f: OutputFile) => inputFile(f.filename) ?? (() => { throw new Error('ENOENT') })(),
+    read: async (f: OutputFile) => fileAt(f) ?? (() => { throw new Error('ENOENT') })(),
     keep: async (b: Uint8Array) => { const k = sha(b); kept.set(k, b); return { filename: k, subfolder: 'run', type: 'kept' as const } },
     savePreview: async (b: Uint8Array) => { shown.push(b); return { filename: `live_preview_n_${shown.length}.png`, subfolder: '', type: 'temp' as const } },
     nodeId: 'n', hosted: false, signal: new AbortController().signal,
@@ -222,7 +219,7 @@ describe('every fixture case: what Python sends and returns', () => {
     if (PRICED_AS_CALL_NO_CALL.includes(c.name)) expect(free).toBe(false)
     else expect(free, 'paidNoCall').toBe(!held.calls.length)
     // Not read, a named saved pose is never free where a render would make the call Python falls to (fix round 1).
-    if (isPose(c) && savedPoseRefs(withPictures(c))['n'] && (bakedFileName(inputs.pose_cond_image) || bakedFileName(inputs.mannequin_image))) {
+    if (isPose(c) && savedPoseRefs(withPictures(c))['n'] && (bakedNamePresent(inputs.pose_cond_image) || bakedNamePresent(inputs.mannequin_image))) {
       expect(paidNoCall(c.class_type, inputs), 'unread saved pose').toBe(false)
     }
     const { plan, made } = await planOf(c)
@@ -269,7 +266,7 @@ describe('every fixture case: what Python sends and returns', () => {
       const { made: d, kept, shown } = await deriveOf(plan)
       const v = d.values[0]!
       if (v.kind !== 'files') throw new Error('not files')
-      const bytes = v.files[0]!.type === 'kept' ? kept.get(v.files[0]!.filename)! : inputFile(v.files[0]!.filename)!
+      const bytes = v.files[0]!.type === 'kept' ? kept.get(v.files[0]!.filename)! : fileAt(v.files[0]!)!
       expect(await pixelsOf(bytes, true)).toEqual(out.tensor)
       expect(shown.length).toBe(1)
       expect(await pixelsOf(shown[0]!, true)).toEqual(out.tensor)
@@ -320,7 +317,10 @@ describe('Pose Mannequin\'s branch, as execute takes it', () => {
 async function kitFor(c: NanoCase, o: { hosted?: boolean; families?: ReadonlySet<RunnerFamily>; backup?: boolean; moderate?: NonNullable<Parameters<typeof makeKit>[0]>['moderate']; fal?: ReturnType<typeof createFakeFal> } = {}) {
   const root = mkdtempSync(join(tmpdir(), 'nano-extras-root-'))
   mkdirSync(join(root, 'input'), { recursive: true })
-  for (const [n, b] of Object.entries(BAKED)) writeFileSync(join(root, 'input', n), b)
+  for (const [n, b] of Object.entries(BAKED)) {
+    mkdirSync(dirname(join(root, 'input', n)), { recursive: true })
+    writeFileSync(join(root, 'input', n), b)
+  }
   for (const name of c.pictures ?? []) writeFileSync(join(root, 'input', `${name}.png`), new Uint8Array(Buffer.from(c.picture_files![name]!, 'base64')))
   const answer = c.answers[0] as { output: unknown } | undefined
   const replicate = createFakeReplicate({ bodyText: () => JSON.stringify({ id: 'p', status: 'succeeded', output: answer?.output ?? [OUT] }) })
@@ -766,7 +766,7 @@ describe('the hosted ComfyUI gate reads a saved pose before pricing it free (fix
       d: { class_type: 'PoseMannequin', inputs: { character: L, result_image: '  ' } },
       e: { class_type: 'PoseMannequin', inputs: { character: L, pose_source: L, result_image: 'r.png' } },
       f: { class_type: 'LoadImage', inputs: { image: 'r.png' } },
-    })).toEqual({ a: 'r.png' })
+    })).toEqual({ a: 'r.png', d: '  ' }) // spaces: a name Python tries (fix round 2), read like any other
   })
 
   const baked = (): ApiPrompt => ({ p: { class_type: 'LoadImage', inputs: { image: 'c.png' } }, n: { class_type: 'PoseMannequin', inputs: { character: ['p', 0], result_image: 'pose_result.png', pose_source: 'mannequin', prompt: '', pose_prompt: '', pose_state: '', mannequin_image: 'pose_mannequin.png', pose_cond_image: '' } } })
@@ -803,5 +803,152 @@ describe('the hosted ComfyUI gate reads a saved pose before pricing it free (fix
     expect(out.prompt.n.inputs.result_image).toBe('gate_copy_1.png')
     // The renders it doesn't read are left as they are.
     expect(out.prompt.n.inputs.mannequin_image).toBe('pose_mannequin.png')
+  })
+})
+
+// ── Fix round 2 ──────────────────────────────────────────────────────────────
+
+const TMP = mkdtempSync(join(tmpdir(), 'nano-extras-r2-'))
+const tmpFile = (name: string, bytes: Uint8Array): string => { const p = join(TMP, name); writeFileSync(p, bytes); return p }
+const CORRUPT = BAKED['pose_result_corrupt.png']!
+const TRUNCATED = BAKED['pose_result_truncated.png']!
+
+describe('ruling 1: a saved pose "loads" only if it decodes fully and strictly (fix round 2)', () => {
+  it('decodesStrictly: the corrupt-IDAT and cut-short PNGs fail; good PNG, JPEG, 16-bit PNG and AVIF decode', async () => {
+    const { decodesStrictly, pictureRefusal } = await import('~~/server/runner/pictures/pythonView')
+    // Both broken files still pass a header read (what the gate used to trust).
+    for (const b of [CORRUPT, TRUNCATED]) {
+      expect(await pictureRefusal(b)).toBeNull()
+      expect(await decodesStrictly(b)).toBe(false)
+    }
+    const rgb = await sharp({ create: { width: 9, height: 7, channels: 3, background: { r: 200, g: 10, b: 60 } } })
+    const good = [
+      new Uint8Array(await rgb.clone().png().toBuffer()),
+      new Uint8Array(await rgb.clone().jpeg().toBuffer()),
+      new Uint8Array(await rgb.clone().toColourspace('rgb16').png().toBuffer()),
+      new Uint8Array(await rgb.clone().avif().toBuffer()),
+      BAKED['pose_result_exif6.jpg']!,
+    ]
+    for (const [i, b] of good.entries()) {
+      expect(await decodesStrictly(b), `good ${i}`).toBe(true)
+      expect(await decodesStrictly(tmpFile(`good_${i}`, b)), `good ${i} by path`).toBe(true)
+    }
+    expect(await decodesStrictly(tmpFile('corrupt.png', CORRUPT))).toBe(false)
+    expect(await decodesStrictly(tmpFile('truncated.png', TRUNCATED))).toBe(false)
+  })
+
+  it('the hosted ComfyUI gate: both broken saved poses priced 14 (Python falls through to the call); a good one 0', async () => {
+    const { savedPosesLoading } = await import('~~/server/utils/meterGraphRun')
+    const L = ['p', 0]
+    const prompt = (result: string): ApiPrompt => ({ n: { class_type: 'PoseMannequin', inputs: { character: L, result_image: result, mannequin_image: 'pose_mannequin.png', pose_source: 'mannequin' } } })
+    const copies: Record<string, string> = {
+      'corrupt.png': tmpFile('gate_corrupt.png', CORRUPT),
+      'truncated.png': tmpFile('gate_truncated.png', TRUNCATED),
+      'good.png': tmpFile('gate_good.png', BAKED['pose_result.png']!),
+    }
+    for (const [name, want] of [['corrupt.png', 14], ['truncated.png', 14], ['good.png', 0], ['gone.png', 14]] as const) {
+      const p = prompt(name)
+      const savedPoses = await savedPosesLoading(p, async v => copies[v] ?? null)
+      expect(savedPoses, name).toEqual({ n: want === 0 })
+      expect(priceGraph(p, { savedPoses }).nodes!.n, name).toBe(want)
+    }
+    // A copy that can't be read is a call too.
+    expect(await savedPosesLoading(prompt('x.png'), async () => { throw new Error('gone') })).toEqual({ n: false })
+    // Python itself: both broken files fall through to the call (the fixture).
+    for (const f of ['pose_result_corrupt.png', 'pose_result_truncated.png']) {
+      expect(caseNamed(`pose · mannequin · saved pose ${f}, the mannequin render`).calls.length, f).toBe(1)
+      expect(caseNamed(`pose · mannequin · saved pose ${f}, nothing else`).calls.length, f).toBe(0)
+    }
+  })
+
+  it('the runner: never hands a broken saved pose on; hosted refuses the call it would make; with nothing else, the character passes', async () => {
+    for (const f of ['pose_result_corrupt.png', 'pose_result_truncated.png']) {
+      const withRender = caseNamed(`pose · mannequin · saved pose ${f}, the mannequin render`)
+      const k = await kitFor(withRender, { hosted: true })
+      await expect(k.engine.startRun({ userId: k.userId, takes: [withPictures(withRender)], ...START })).rejects.toThrow(POSE_RESULT_MISSING)
+      expect(k.ledger.hold).not.toHaveBeenCalled()
+      const alone = await run(caseNamed(`pose · mannequin · saved pose ${f}, nothing else`), { hosted: true })
+      expect(alone.rec.status, alone.rec.error ?? '').toBe('done')
+      expect(alone.rec.outputs[0]!.filename).toBe('character.png')
+      expect(alone.k.replicate.client.submit).not.toHaveBeenCalled()
+      // At the node's turn too (the file broken after the start): no saved pose, the fallback.
+      const { plan } = await planOf(withRender)
+      expect(plan.kind).toBe('provider')
+    }
+  })
+})
+
+describe('ruling 2: any non-empty render name is present for the price, as Python\'s `if not filename` (fix round 2)', () => {
+  const L = ['p', 0]
+  const NAMES = ['./x.png', 'sub/./x.png', 'sub//x.png', 'sub/../x.png', '/abs/x.png', '   ', 'x.png[input]', '../x.png']
+  it('a named render is a call; a named saved pose is free only once proven to load', () => {
+    for (const name of NAMES) {
+      expect(bakedNamePresent(name), name).toBe(true)
+      expect(poseNoCall({ character: L, mannequin_image: name }), name).toBe(false)
+      expect(poseNoCall({ character: L, pose_cond_image: name }), name).toBe(false)
+      expect(priceGraph({ n: { class_type: 'PoseMannequin', inputs: { character: L, mannequin_image: name } } }).nodes!.n, name).toBe(14)
+      expect(poseNoCall({ character: L, result_image: name, mannequin_image: 'm.png' }), name).toBe(false)
+      expect(poseNoCall({ character: L, result_image: name, mannequin_image: 'm.png' }, { savedPoseLoads: true }), name).toBe(true)
+    }
+    expect(bakedNamePresent('')).toBe(false)
+    expect(poseNoCall({ character: L, mannequin_image: '' })).toBe(true)
+  })
+
+  it('pythonInputRef: the file Python opens (get_annotated_filepath, os.path.join), or outside', async () => {
+    const { pythonInputRef } = await import('~~/server/runner/inputs')
+    const f = (filename: string, subfolder = '', type = 'input') => ({ file: { filename, subfolder, type } })
+    expect(pythonInputRef('./x.png')).toEqual(f('x.png'))
+    expect(pythonInputRef('sub/./x.png')).toEqual(f('x.png', 'sub'))
+    expect(pythonInputRef('sub//x.png')).toEqual(f('x.png', 'sub'))
+    expect(pythonInputRef('sub/../x.png')).toEqual(f('x.png'))
+    expect(pythonInputRef('x.png [input]')).toEqual(f('x.png'))
+    expect(pythonInputRef('x.png[input]')).toEqual(f('x.pn'))
+    expect(pythonInputRef('x.png [output]')).toEqual(f('x.png', '', 'output'))
+    expect(pythonInputRef('   ')).toEqual(f('   '))
+    expect(pythonInputRef('/abs/x.png')).toEqual({ outside: true })
+    expect(pythonInputRef('../x.png')).toEqual({ outside: true })
+    expect(pythonInputRef('sub/../../x.png')).toEqual({ outside: true })
+    expect(pythonInputRef('')).toBeNull()
+    expect(pythonInputRef('sub/')).toBeNull()
+  })
+
+  it('every such name reaches the same file Python opened, and the same call (the fixture)', () => {
+    for (const name of ['./pose_mannequin.png', 'sub/../pose_mannequin.png', 'sub//pose_sub.png', 'sub/./pose_sub.png', './sub/pose_sub.png [input]']) {
+      const c = caseNamed(`pose · mannequin · render named ${name}`)
+      expect(c.calls.length, name).toBe(1)
+      expect(paidNoCall('PoseMannequin', withPictures(c).n!.inputs), name).toBe(false)
+    }
+  })
+
+  it('hosted ownership: a saved picture named outside the user\'s folders is refused before the hold, in any mode', async () => {
+    for (const [base, name] of [['pose · mannequin · render named ./pose_mannequin.png', '/etc/passwd'], ['pose · image · with a pose picture', '../other_user/x.png']] as const) {
+      const c = caseNamed(base)
+      for (const key of ['mannequin_image', 'result_image']) {
+        const k = await kitFor(c, { hosted: true })
+        const p = withPictures({ ...c, widgets: { ...c.widgets, [key]: name } })
+        await expect(k.engine.startRun({ userId: k.userId, takes: [p], ...START })).rejects.toThrow(/isn’t one of yours/)
+        expect(k.ledger.hold).not.toHaveBeenCalled()
+        expect(k.replicate.client.submit).not.toHaveBeenCalled()
+      }
+    }
+    // A `./` name is the user's own file: listed for the ownership check as that file.
+    const c = caseNamed('pose · mannequin · render named ./pose_mannequin.png')
+    expect(collectInputFiles(withPictures(c)).map(f => `${f.subfolder}|${f.filename}`).sort()).toEqual(['|character.png', '|pose_mannequin.png'])
+  })
+})
+
+describe('ruling 3: the hosted backstop only where a saved pose decides the branch (fix round 2)', () => {
+  it('image and prompt modes carrying a leftover saved pose run normally in hosted, held and charged as their call', async () => {
+    for (const name of ['pose · image · a baked result is ignored', 'pose · prompt · a baked result is ignored']) {
+      const c = caseNamed(name)
+      expect(c.widgets.result_image).toBe('pose_result.png')
+      const { k, rec } = await run(c, { hosted: true })
+      expect(rec.status, rec.error ?? '').toBe('done')
+      expect(k.replicate.reqs.size).toBe(1)
+      expect([...k.ledger.holds.values()].map(h => [h.credits, h.actual])).toEqual([[14, 14]])
+      // And the planNode backstop itself lets them through.
+      const { plan } = await planOf(c, { hosted: true, priceInputs: withPictures(c).n!.inputs })
+      expect(plan.kind).toBe('provider')
+    }
   })
 })

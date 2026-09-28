@@ -26,7 +26,7 @@
  * Pure; relative imports only.
  */
 import { isLink } from './graph'
-import { pyStrip } from './pyText'
+import { pyStrip, pyTruthy } from './pyText'
 
 export const LENS_REFRAME_CLASS = 'LensReframe'
 export const POSE_MANNEQUIN_CLASS = 'PoseMannequin'
@@ -67,19 +67,14 @@ export function poseSourceOf(inputs: Record<string, unknown>): PoseSource {
 }
 
 /**
- * A baked file's name as the runner reads it (server/runner/inputs.ts
- * parseInputFileRef: `name`, `sub/name` or `name [input]`), or null for none:
- * blank, not text, or a name no file can have (`..`, an empty part). Python's
- * `_load_input_image` gives None for each of those too (`if not filename`,
- * or a path that can't be opened).
+ * Whether a baked file is named, as Python's `_load_input_image` reads it:
+ * `if not filename: return None` is its only early None (R3.15 fix round 2).
+ * Any other name (`./x.png`, `sub//x.png`, `sub/../x.png`, an absolute path,
+ * spaces) is tried, so the price counts it as present; whether it loads is
+ * only known by reading it (poseNoCall's `known`). A wired one is not a name.
  */
-export function bakedFileName(v: unknown): string | null {
-  if (typeof v !== 'string' || !v.trim()) return null
-  let name = v.trim()
-  const m = /^(.*?)\s*\[(input|output|temp)\]$/.exec(name)
-  if (m) name = m[1]!
-  const parts = name.replace(/\\/g, '/').split('/')
-  return parts.some(p => !p || p === '.' || p === '..') ? null : v.trim()
+export function bakedNamePresent(v: unknown): boolean {
+  return !isLink(v) && pyTruthy(v)
 }
 
 /**
@@ -95,7 +90,7 @@ export function savedPoseRefs(prompt: Readonly<Record<string, { class_type: stri
     const inputs = n.inputs ?? {}
     if (isLink(inputs.pose_source) || poseSourceOf(inputs) !== 'mannequin' || !isLink(inputs.character)) continue
     const v = inputs.result_image
-    if (typeof v === 'string' && bakedFileName(v)) out[id] = v
+    if (typeof v === 'string' && bakedNamePresent(v)) out[id] = v
   }
   return out
 }
@@ -107,7 +102,11 @@ function blankText(v: unknown): boolean {
 
 /** What a caller that read the node's saved pose knows of it (R3.15 fix round 1). */
 export interface PoseKnown {
-  /** The saved pose `result_image` names was read and loads (a picture): it is the result, no call. */
+  /**
+   * The saved pose `result_image` names was read and loads: the whole file
+   * decodes, strictly (server/runner/pictures/pythonView.ts decodesStrictly;
+   * R3.15 fix round 2: a header alone isn't PIL loading it). It is the result, no call.
+   */
   savedPoseLoads?: boolean
 }
 
@@ -132,6 +131,6 @@ export function poseNoCall(inputs: Record<string, unknown>, known: PoseKnown = {
   if (source === 'image') return !isLink(inputs.pose_image)
   if (source === 'prompt') return !isLink(inputs.pose_prompt) && blankText(inputs.pose_prompt)
   if (POSE_BAKED_INPUTS.some(n => isLink(inputs[n]))) return false
-  if (bakedFileName(inputs.result_image) && known.savedPoseLoads === true) return true
-  return !bakedFileName(inputs.pose_cond_image) && !bakedFileName(inputs.mannequin_image)
+  if (bakedNamePresent(inputs.result_image) && known.savedPoseLoads === true) return true
+  return !bakedNamePresent(inputs.pose_cond_image) && !bakedNamePresent(inputs.mannequin_image)
 }

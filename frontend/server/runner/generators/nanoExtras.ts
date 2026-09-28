@@ -39,14 +39,14 @@ import { isLink, type ApiLink, type ApiPrompt } from '#shared/runner/graph'
 import { pyFloatOf, pyStrip } from '#shared/runner/pyText'
 import {
   LENS_REFRAME_CLASS, NANO_EXTRAS_SLUG, POSE_MANNEQUIN_CLASS, POSE_RESULT_MISSING,
-  bakedFileName, poseSourceOf, type PoseBakedInput,
+  bakedNamePresent, poseSourceOf, type PoseBakedInput,
 } from '#shared/runner/nanoExtras'
 import type { NodePlan, PlanContext } from '../executors'
 import type { OutputFile } from '../types'
 import { imageUrlOf } from '../imageUrl'
-import { parseInputFileRef } from '../inputs'
+import { pythonInputRef } from '../inputs'
 import {
-  PICTURE_16_BIT, PICTURE_32_BIT, PICTURE_CMYK, PICTURE_GIF_SEE_THROUGH, PICTURE_UNREADABLE, pictureRefusal, rgbTurnedPng,
+  PICTURE_16_BIT, PICTURE_32_BIT, PICTURE_CMYK, PICTURE_GIF_SEE_THROUGH, PICTURE_UNREADABLE, decodesStrictly, pictureRefusal, rgbTurnedPng,
 } from '../pictures/pythonView'
 import { loaderHandoffBytes, loaderSourceOf } from '../pictureHandoff'
 import { NANO_BANANA_2_REPLICATE, nanoBananaOnFal } from './twins'
@@ -266,10 +266,19 @@ export function poseBakedRefusal(why: string): string {
   return `A picture Pose Mannequin saved ${WHY[why] ?? WHY[PICTURE_UNREADABLE]}. Open the pose editor and pose it again.`
 }
 
-/** The baked file a widget names, or null (a blank name, or one no file can have: Python's None). */
+/**
+ * The baked file a widget names, read as Python opens it (../inputs.ts
+ * pythonInputRef, fix round 2: `./x.png`, `sub//x.png`, `sub/../x.png` are
+ * the files they name), or null: blank, a folder, or outside the folders
+ * (hosted refuses that at the start; locally it can't be read here).
+ */
 function bakedFile(inputs: Record<string, unknown>, name: PoseBakedInput): OutputFile | null {
-  return bakedFileName(inputs[name]) ? parseInputFileRef(inputs[name]) : null
+  const ref = bakedNamePresent(inputs[name]) ? pythonInputRef(inputs[name]) : null
+  return ref && 'file' in ref ? ref.file : null
 }
+
+/** The ownership refusal (inputs.ts assertFilesOwned's words): a saved picture named outside the user's folders. */
+export const POSE_FILE_NOT_YOURS = 'This workflow uses a file that isn’t one of yours'
 
 /**
  * The start of a run (engine.ts, before anything is held), for each Pose
@@ -282,10 +291,18 @@ function bakedFile(inputs: Record<string, unknown>, name: PoseBakedInput): Outpu
  */
 export async function poseStartProblem(
   prompt: ApiPrompt, read: (f: OutputFile) => Promise<Uint8Array>, hosted: boolean, savedPoses?: Set<string>,
-): Promise<{ nodeId: string; classType: string; message: string } | null> {
+): Promise<{ nodeId: string; classType: string; message: string; status?: number } | null> {
   for (const [nodeId, n] of Object.entries(prompt)) {
     if (n.class_type !== POSE_MANNEQUIN_CLASS) continue
     const inputs = n.inputs ?? {}
+    // Hosted ownership (fix round 2): a saved picture named outside the user's folders (an absolute
+    // path, `../x`) can't be theirs, whatever the mode (collectInputFiles lists every name it can).
+    if (hosted) {
+      for (const name of ['result_image', 'pose_cond_image', 'mannequin_image'] as const) {
+        const ref = bakedNamePresent(inputs[name]) ? pythonInputRef(inputs[name]) : null
+        if (ref && 'outside' in ref) return { nodeId, classType: n.class_type, message: POSE_FILE_NOT_YOURS, status: 403 }
+      }
+    }
     if (poseSourceOf(inputs) !== 'mannequin' || isLink(inputs.pose_source)) continue
     let refusal: string | null = null
     const loads = async (name: PoseBakedInput): Promise<boolean> => {
@@ -296,10 +313,11 @@ export async function poseStartProblem(
       catch { return false }
       const why = await pictureRefusal(bytes)
       if (why) refusal = poseBakedRefusal(why)
-      return !why
+      // Loads only if it decodes fully (fix round 2): a corrupt or cut-short file is Python's None.
+      return !why && await decodesStrictly(bytes)
     }
     const branch = await posePlanBranch(inputs, loads)
-    const problem = refusal ?? (hosted && branch.kind === 'call' && bakedFileName(inputs.result_image) ? POSE_RESULT_MISSING : null)
+    const problem = refusal ?? (hosted && branch.kind === 'call' && bakedNamePresent(inputs.result_image) ? POSE_RESULT_MISSING : null)
     if (problem) return { nodeId, classType: n.class_type, message: problem }
     if (branch.kind === 'baked') savedPoses?.add(nodeId)
   }
@@ -334,6 +352,8 @@ async function loadBaked(ctx: PlanContext, f: OutputFile): Promise<{ bytes: Uint
   let bytes: Uint8Array
   try { bytes = await ctx.readFile(f) }
   catch { return null }
+  // A file that doesn't decode fully is Python's None (fix round 2): never handed on garbled.
+  if (!(await decodesStrictly(bytes))) return null
   try { return { bytes, png: (await rgbTurnedPng(bytes)).png } }
   catch (e) {
     throw new Error(poseBakedRefusal(e instanceof Error ? e.message : PICTURE_UNREADABLE))
@@ -354,7 +374,10 @@ async function planPose(ctx: PlanContext, inputs: Record<string, unknown>): Prom
   if (branch.kind === 'call') {
     // A saved pose named but not loading (gone since the start of the run): in hosted never
     // sent (its hold may be nothing; the start of the run refused it; this is the backstop).
-    if (ctx.hosted && bakedFileName((ctx.priceInputs ?? inputs).result_image)) throw new Error(POSE_RESULT_MISSING)
+    // Only where it decides the branch: a typed mannequin-mode source (fix round 2); image and
+    // prompt modes ignore a leftover saved pose, as Python does.
+    const priced = ctx.priceInputs ?? inputs
+    if (ctx.hosted && !isLink(priced.pose_source) && poseSourceOf(priced) === 'mannequin' && bakedNamePresent(priced.result_image)) throw new Error(POSE_RESULT_MISSING)
     const urls: string[] = []
     for (const p of branch.pictures) {
       if (p === 'mannequin_image' || p === 'pose_cond_image') {
