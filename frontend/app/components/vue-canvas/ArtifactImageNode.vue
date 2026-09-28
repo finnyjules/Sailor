@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Upload, Loader2, Image as ImageIcon, ImagePlus, Play, Download, RefreshCw, Lock, LockOpen, Brush, Drama } from 'lucide-vue-next'
+import { Loader2, Image as ImageIcon, ImagePlus, Play, Download, Lock, Brush, Drama } from 'lucide-vue-next'
 import { onClickOutside } from '@vueuse/core'
 import { getTypeColor } from '~/composables/useVueNodes'
 import NodeRunRow from '~/components/vue-canvas/NodeRunRow.vue'
@@ -56,7 +56,6 @@ const isMuted = computed(() => props.data.mode === 2)
 const isBypassed = computed(() => props.data.mode === 4)
 
 const imageColor = computed(() => getTypeColor('IMAGE'))
-const maskColor = computed(() => getTypeColor('MASK'))
 
 // The agent is reviewing THIS node → show the white scanning overlay.
 const { analyzingNodeIds } = useAgentActivity()
@@ -736,6 +735,7 @@ const moreItems = computed<MoreItem[]>(() => [
     />
     <!-- Primary IMAGE output -->
     <VueCanvasNodePort
+      v-if="imageOutIdx >= 0"
       :id="`output-${imageOutIdx}`"
       type="source"
       side="right"
@@ -834,11 +834,11 @@ const moreItems = computed<MoreItem[]>(() => [
       <template v-if="displayedUrl">
         <!-- Persistent badges, top-left: Locked (the toggle now lives in the
              card's More menu, but a pinned card must read as pinned without
-             hovering) and "N fixes" (always visible; opens Edit ▾). The
-             hover-step class is unchanged from the old hover-toolbar layout. -->
+             hovering) and "N fixes" (always visible; opens Edit ▾). Static
+             top-1.5 — the hover toolbar they used to step down for is gone,
+             so there's nothing left to dodge. -->
         <div
-          class="pointer-events-none absolute left-1.5 z-40 flex items-center gap-1 transition-[top] duration-150"
-          :class="hovered ? 'top-8' : 'top-1.5'"
+          class="pointer-events-none absolute left-1.5 top-1.5 z-40 flex items-center gap-1"
         >
           <div
             v-if="isLocked"
