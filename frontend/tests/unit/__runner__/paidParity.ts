@@ -102,7 +102,7 @@ const PICTURE = /\.(png|jpe?g|webp|gif)(\?|$)/i
  * answers' files downloaded from the case (a JSON link's text, else a small
  * picture or the URL's own bytes).
  */
-export async function runPaidCase(c: PaidCase, o: { families: ReadonlySet<RunnerFamily>; hosted?: boolean }): Promise<PaidRun> {
+export async function runPaidCase(c: PaidCase, o: { families: ReadonlySet<RunnerFamily>; hosted?: boolean; root?: string }): Promise<PaidRun> {
   // Each request gets the next answer when it is sent (keyed by its payload,
   // which the fakes hand back as `input`), however often its body is read.
   const queue = [...c.answers]
@@ -138,7 +138,8 @@ export async function runPaidCase(c: PaidCase, o: { families: ReadonlySet<Runner
     }
     throw new Error(`${c.name}: GET ${url} is not served by the case`)
   }
-  const k = makeKit({ hosted: o.hosted, fal, replicate, deps: { download, families: () => o.families } })
+  // `root` (R3.13): the engine folder the kit works in, set up by the caller (a models/loras/ of its own).
+  const k = makeKit({ hosted: o.hosted, root: o.root, fal, replicate, deps: { download, families: () => o.families } })
 
   const prompt: ApiPrompt = { [NODE]: { class_type: c.class_type, inputs: { ...c.widgets } }, ...readerFor(c.class_type) }
   for (const name of c.pictures ?? []) {

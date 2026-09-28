@@ -34,6 +34,7 @@ import {
 import {
   FACE_ASPECT_RATIOS, FACE_MODELS, IMAGE_EXTRAS_CLASSES, SKETCH_MODELS, TEXT_EFFECT_ASPECT_RATIOS, TEXT_EFFECT_IDS,
 } from './imageExtras'
+import { FLUX_LORA_ASPECT_RATIOS, FLUX_LORA_MEGAPIXELS, FLUX_LORA_STEPS, LORA_CLASSES, MULTI_LORA_SLOTS } from './lora'
 import {
   BRAINSTORM_ANGLES, CHAT_LLM_MODELS, IMPROVE_PROMPT_MODELS, IMPROVE_PROMPT_TARGETS, REASON_MODELS, REWRITE_MODELS, REWRITE_TONES,
   SUMMARIZE_LENGTHS, SUMMARIZE_MODELS, TRANSLATE_LANGUAGES,
@@ -354,6 +355,8 @@ export const PAID_PICTURE_FAMILY: Readonly<Record<string, RunnerFamily>> = {
   [SPLIT_CLASS]: 'layers',
   // R3.12: Text effect's, Sketch to image's and Generate face references' picture.
   ...Object.fromEntries(IMAGE_EXTRAS_CLASSES.map(c => [c, 'image-extras' as const])),
+  // R3.13: Flux Dev + LoRA's and Flux Dev + LoRAs' picture.
+  ...Object.fromEntries(LORA_CLASSES.map(c => [c, 'lora' as const])),
 }
 
 /**
@@ -1157,6 +1160,50 @@ export const RUNNER_NODE_RULES: Readonly<Record<string, RunnerNodeRule>> = {
       seed: { type: 'INT', required: true, min: 0, max: 0xFFFFFFFF },
     },
   },
+  // ── lora (step 3, R3.13): Flux Dev + LoRA and Flux Dev + LoRAs, on
+  // Replicate. The picture is an optional linked picture (image-to-image);
+  // the prompt takes a text wire, and Flux Dev + LoRAs' `prompt_in` and
+  // `style_in` sockets take text (R1.2's pattern; R0: the value arrives as
+  // typed); every other setting is a widget as ComfyUI validates it. A LoRA
+  // picker is a COMBO of the models/loras/ listing, which only the server
+  // knows: the row checks its type, the start of the run its name
+  // (server/runner/loraFiles.ts loraStartProblem). A wired widget leaves the
+  // node to the engine.
+  FluxLoRARemoteNode: {
+    family: 'lora',
+    imageInputs: ['image'],
+    valueInputs: { prompt: ['text'] },
+    required: ['prompt'],
+    widgets: {
+      lora_name: { type: 'STRING', required: true },
+      lora_url: { type: 'STRING', required: true },
+      lora_scale: { type: 'FLOAT', required: true, min: 0, max: 1.5 },
+      aspect_ratio: { type: 'COMBO', required: true, options: FLUX_LORA_ASPECT_RATIOS },
+      megapixels: { type: 'COMBO', required: true, options: FLUX_LORA_MEGAPIXELS },
+      num_inference_steps: { type: 'INT', required: true, min: FLUX_LORA_STEPS.min, max: FLUX_LORA_STEPS.max },
+      guidance: { type: 'FLOAT', required: true, min: 0, max: 20 },
+      seed: { type: 'INT', required: true, min: 0, max: 0xFFFFFFFF },
+      prompt_strength: { type: 'FLOAT', required: true, min: 0, max: 1 },
+    },
+  },
+  FluxMultiLoRARemoteNode: {
+    family: 'lora',
+    imageInputs: ['image'],
+    valueInputs: { prompt: ['text'], prompt_in: ['text'], style_in: ['text'] },
+    required: ['prompt'],
+    widgets: {
+      ...Object.fromEntries(MULTI_LORA_SLOTS.flatMap(s => [
+        [s.name, { type: 'STRING', required: true }],
+        [s.url, { type: 'STRING', required: true }],
+        [s.scale, { type: 'FLOAT', required: true, min: 0, max: 1.5 }],
+      ])) as Record<string, RunnerWidgetSpec>,
+      aspect_ratio: { type: 'COMBO', required: true, options: FLUX_LORA_ASPECT_RATIOS },
+      num_inference_steps: { type: 'INT', required: true, min: FLUX_LORA_STEPS.min, max: FLUX_LORA_STEPS.max },
+      guidance: { type: 'FLOAT', required: true, min: 0, max: 10 },
+      seed: { type: 'INT', required: true, min: 0, max: 0xFFFFFFFF },
+      prompt_strength: { type: 'FLOAT', required: true, min: 0, max: 1 },
+    },
+  },
   // ── effects-* (step 3, R2): the still-picture effects (./effects.ts, server/runner/effects/) ──
   // Rows built from the real node schemas (./effectSchemas.generated.ts), one
   // per ported class; each needs its family and `cards`.
@@ -1221,6 +1268,8 @@ export const SWITCHED_CLASSES: Readonly<Record<string, RunnerFamily>> = {
   ...Object.fromEntries(GEN_3D_CLASSES.map(c => [c, 'gen-3d' as const])),
   // R3.12: text effect, sketch to image and face references.
   ...Object.fromEntries(IMAGE_EXTRAS_CLASSES.map(c => [c, 'image-extras' as const])),
+  // R3.13: Flux Dev + LoRA and Flux Dev + LoRAs.
+  ...Object.fromEntries(LORA_CLASSES.map(c => [c, 'lora' as const])),
 }
 
 /**

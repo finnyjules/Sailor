@@ -726,8 +726,9 @@ describe('R2.12 · every effects family off: the needs-engine list over every sa
     // keeps measuring the effects alone.
     // (R3.9's gen-3d too: runner-paid-3d.unit.spec.ts; and R3.11's film-shot, which takes saved preset
     // Film a shot nodes: runner-paid-film-shot.unit.spec.ts; and R3.12's image-extras, which takes saved
-    // Text effect, Sketch to image and face reference nodes: runner-paid-image-extras.unit.spec.ts.)
-    const LATER: readonly string[] = ['image-repair', 'layers', 'audio-gen', 'gen-3d', 'film-shot', 'image-extras']
+    // Text effect, Sketch to image and face reference nodes: runner-paid-image-extras.unit.spec.ts; and R3.13's
+    // lora, which takes saved Flux Dev + LoRA(s) nodes: runner-paid-lora.unit.spec.ts.)
+    const LATER: readonly string[] = ['image-repair', 'layers', 'audio-gen', 'gen-3d', 'film-shot', 'image-extras', 'lora']
     const effectsOff: ReadonlySet<RunnerFamily> = new Set(RUNNER_FAMILIES.filter(x => !(EFFECT_FAMILIES as readonly string[]).includes(x) && !LATER.includes(x)))
     const sets: Record<string, ReadonlySet<RunnerFamily>> = { frameCards: FRAME_CARDS, allButEffects: effectsOff }
     const now: Record<string, { prompt: string } & Record<string, string>> = {}

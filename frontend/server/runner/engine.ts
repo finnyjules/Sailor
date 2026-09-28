@@ -42,6 +42,7 @@ import { assertFilesOwned, collectInputFiles, parseInputFileRef, type OwnershipC
 import { shotRefFilenames, shotRefSizeProblem } from './shotRefs'
 import { parseJsonObject } from './generators/opts'
 import { cardPictureFiles, cardPictureRefusal } from './cards/bakeReplay'
+import { loraStartProblem } from './loraFiles'
 import { handoffKey, handoffPngName, loaderHandoffBytes, loaderHandoffs, loaderSourceOf, type HandoffCaps, type LoaderHandoff, type LoaderSource } from './pictureHandoff'
 import { sha256Hex } from './handoff'
 import { handoffRefusal } from './pictures/handoffView'
@@ -1357,6 +1358,10 @@ export function createEngine(deps: EngineDeps) {
               }
               return f
             },
+            recorded: (key) => {
+              const cr = rec.calls?.find(c => c.key === key && c.status !== 'error')
+              return cr ? cr.payload : null
+            },
             handOff: async (bytes, name) => {
               const f = await kept.put(run.id, bytes, keptExtOf(name))
               // Uploaded under the node's own name (its type goes by it); remembered by the bytes.
@@ -1933,6 +1938,9 @@ export function createEngine(deps: EngineDeps) {
       // Hosted: a cloned voice (R3.8, ruling (j)) too.
       const problem = requestProblems(p, { runner: true })[0] ?? (deps.hosted() ? hostedRequestProblems(p)[0] : undefined)
       if (problem) throw refuse(problem.message, 400, { nodeId: problem.nodeId, classType: problem.classType })
+      // A LoRA picked by name (R3.13): one ComfyUI lists, its sidecar within its cap.
+      const lora = await loraStartProblem(p)
+      if (lora) throw refuse(lora.message, 400, { nodeId: lora.nodeId, classType: lora.classType })
     }
     // Fail closed on price, before anything is held: a provider node that
     // prices at 0 (a class the price book misses by name) never runs free.

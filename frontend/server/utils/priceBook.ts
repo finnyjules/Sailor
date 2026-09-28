@@ -232,7 +232,17 @@ export { VIDEO_RATES, MODEL_PRICED_NODE_CLASSES, SETTING_PRICED_NODE_CLASSES, RE
 // r3-image-extras-2 (R3.12 fix round 1): the direct character-shot route
 // (server/api/cloud-train/character-shot.post.ts, MODEL_COSTS) charges the same
 // Ideogram Character card: $0.15 a shot at its default speed, 16 → 23 credits.
-export const PRICE_BOOK_VERSION = 'r3-image-extras-2'
+// r3-lora (step 3, R3.13, ruling (a)): Flux Dev + LoRA and Flux Dev + LoRAs
+// leave their flat rows (LORA_RENDER_CREDITS, 8) for their calls. Flux Dev +
+// LoRA on flux-dev-lora's edit card, $0.04 (8, unchanged: the card covers the
+// user's trained model, billed by GPU time, which the price can't tell from
+// flux-dev-lora's $0.032). Flux Dev + LoRAs on flux-dev-multi-lora by GPU
+// time (an estimate from its page: $0.05 a call at up to 28 steps, 10
+// credits; 50 steps $0.08, 16), held and on the ComfyUI path charged for two
+// calls when two or more LoRAs are stacked (the reload retry, ruling (g)):
+// 8 → 20 at the default 28 steps (one LoRA: 10); the runner charges the
+// calls made.
+export const PRICE_BOOK_VERSION = 'r3-lora'
 
 export const BASE_RENDER_CREDITS = 1
 
@@ -353,8 +363,8 @@ export const GRAPH_NODE_CREDITS: Record<string, number> = {
   // SETTING_PRICED_NODE_CLASSES below.)
   LoraTrainingNode: 600,
   // (RestyleWithLoRANode, 18 flat, is priced by its calls and resolution since lineup-p4c.)
-  FluxLoRARemoteNode: LORA_RENDER_CREDITS,
-  FluxMultiLoRARemoteNode: LORA_RENDER_CREDITS,
+  // (Flux Dev + LoRA and Flux Dev + LoRAs are priced by their calls since
+  // R3.13: shared/pricing/paidSettings.ts, on both paths.)
   // (GenerateVideoNode 60 and FilmShotNode 160 moved to MODEL_PRICED — their
   // model widget spans $0.04 to $3.20 per clip, which no flat price can cover.
   // FilmShot repriced 160 → 75 (default model) on badge+catalog evidence —

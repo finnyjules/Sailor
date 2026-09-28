@@ -50,6 +50,7 @@ import {
 } from '../runner/audioGen'
 import { GEN_3D_CLASSES, GEN_3D_STEPS, HUNYUAN3D_MV_SLUG, HUNYUAN3D_SLUG, MULTI_VIEW_CLASS, multiViewSlugsOf } from '../runner/gen3d'
 import { FACE_SLUG, SKETCH_SLUG, textEffectSlug } from '../runner/imageExtras'
+import { FLUX_DEV_LORA_SLUG, FLUX_LORA_STEPS, FLUX_MULTI_LORA_SLUG, multiLoraCount } from '../runner/lora'
 
 /**
  * The most bytes of one moderated text in hosted (server/utils/moderation.ts
@@ -371,6 +372,26 @@ const IMAGE_EXTRAS_PLANNERS: Readonly<Record<string, PaidPlanner>> = {
   ConsistentFaceNode: () => ({ steps: [{ call: { endpoint: FACE_SLUG }, times: 1 }] }),
 }
 
+// ── R3.13: Flux Dev + LoRA and Flux Dev + LoRAs (#shared/runner/lora) ──
+
+/**
+ * Flux Dev + LoRA: one call, on flux-dev-lora's edit card whatever the LoRA
+ * (editRates.ts: $0.04, which covers the user's trained model run directly,
+ * billed by GPU time; the price can't read the sidecar that decides which).
+ * Flux Dev + LoRAs: flux-dev-multi-lora at the steps sent (a wired number at
+ * the most, 50), twice when two or more distinct LoRAs may be stacked (the
+ * reload retry, ruling (g)), else once.
+ */
+const LORA_PLANNERS: Readonly<Record<string, PaidPlanner>> = {
+  FluxLoRARemoteNode: () => ({ steps: [{ call: { endpoint: FLUX_DEV_LORA_SLUG }, times: 1 }] }),
+  FluxMultiLoRARemoteNode: (inputs) => {
+    const steps = isLink(inputs.num_inference_steps)
+      ? FLUX_LORA_STEPS.max
+      : intIn(inputs.num_inference_steps, FLUX_LORA_STEPS.default, FLUX_LORA_STEPS.min, FLUX_LORA_STEPS.max)
+    return { steps: [{ call: { endpoint: FLUX_MULTI_LORA_SLUG, steps }, times: multiLoraCount(inputs) >= 2 ? 2 : 1 }] }
+  },
+}
+
 /** Python returns "" before calling anyone when the text is blank (typed; a wired one is priced as a call). */
 function llmNoCall(classType: LlmTextClass): ((inputs: NodeInputs) => boolean) | null {
   const name = LLM_NO_CALL_INPUT[classType]
@@ -389,6 +410,7 @@ const PAID_PLANNERS: Readonly<Record<string, PaidPlanner>> = {
   ...Object.fromEntries(AUDIO_GEN_CLASSES.map(c => [c, audioGenPlanner(c)])),
   ...Object.fromEntries(GEN_3D_CLASSES.map(c => [c, gen3dPlanner(c)])),
   ...IMAGE_EXTRAS_PLANNERS,
+  ...LORA_PLANNERS,
 }
 
 /** Each paid class's no-call rule (rule 8), where Python has one. Filled by each R3 task. */

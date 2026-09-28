@@ -102,6 +102,12 @@ const EDIT_BASE: Record<string, Record<string, unknown>> = {
   TextEffectNode: { text: 'HELLO', effect: 'liquid-chrome', aspect_ratio: '1:1', seed: 0, freedom: 0 },
   SketchToImageNode: { model: 'Nano Banana', image: LINK, prompt: 'a castle' },
   ConsistentFaceNode: { model: 'Ideogram Character', reference_image: LINK, prompt: 'in a park', aspect_ratio: '1:1', seed: 0 },
+  // Flux Dev + LoRA and Flux Dev + LoRAs (R3.13): a public HuggingFace LoRA link each (no sidecar read).
+  FluxLoRARemoteNode: { prompt: 'a portrait', lora_name: '[None]', lora_url: 'https://huggingface.co/alice/lora', lora_scale: 1, aspect_ratio: '1:1', megapixels: '1', num_inference_steps: 28, guidance: 3.5, seed: 0, prompt_strength: 0.8 },
+  FluxMultiLoRARemoteNode: {
+    prompt: 'a portrait', lora_a: '[None]', lora_a_url: 'https://huggingface.co/alice/one', scale_a: 0.9, lora_b: '[None]', lora_b_url: 'https://civitai.com/api/download/models/1', scale_b: 0.8,
+    aspect_ratio: '1:1', num_inference_steps: 28, guidance: 3.5, seed: 0, prompt_strength: 0.8, lora_c: '[None]', lora_c_url: '', scale_c: 0.7, lora_d: '[None]', lora_d_url: '', scale_d: 0.6,
+  },
   // sync-3 lip-sync (Task F22): the studio's face video and sound.
   LipSyncNode: {
     engine: 'sync-3',

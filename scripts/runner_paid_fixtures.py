@@ -86,6 +86,14 @@ Groups:
              references (blank and non-ASCII prompts, every ratio, the seeds),
              for frontend/server/runner/generators/textEffects.ts and
              imageExtras.ts (tests/unit/runner-paid-image-extras.unit.spec.ts)
+  lora       (R3.13) Flux Dev + LoRA (every kind of sidecar in a temporary
+             models/loras/, every form of lora_url, the HuggingFace look-up
+             found / not found / offline, image-to-image, the seeds) and Flux
+             Dev + LoRAs (0, 1, 2 and 4 slots, repeated LoRAs, prompt_in and
+             style_in, logs with and without "Downloading LoRA weights": the
+             reload retry, the order toggle), for
+             frontend/server/runner/generators/lora.ts
+             (tests/unit/runner-paid-lora.unit.spec.ts)
   handoff    (R3.H) the PNG `_image_tensor_to_data_url` sends for a loader's
              tensor: every file kind (EXIF 2–8, RGBA, grey + alpha, palette and
              colour-key transparency, CMYK, 16-bit, WebP, GIF…) through the real
@@ -1881,6 +1889,222 @@ def image_extras_group() -> dict:
     return {"catalogue": catalogue, "cases": cases}
 
 
+# ── lora (R3.13): Flux Dev + LoRA, Flux Dev + LoRAs ─────────────────────────
+
+LORA_OUT = "https://r.test/lora/out.png"
+LORA_OUT_RGBA = "https://r.test/lora/rgba.png"
+LORA_OUT_2 = "https://r.test/lora/second.png"
+LORA_MARKER_LOGS = "Loading LoRA 1\nDownloading LoRA weights from https://x\nDownloading LoRA weights from https://y\n"
+LORA_NO_MARKER_LOGS = "Using seed: 42\nRunning inference\n"
+# The files of a temporary models/loras/: each LoRA's weights file (empty; ComfyUI lists it) and its
+# sidecar text (None: no sidecar), as the cloud trainer writes them (and a few it never would).
+LORA_FILES = {
+    "trained.safetensors": json.dumps({"replicate_model": "finnyjules/my-style:abc123def", "replicate_url": "https://replicate.delivery/x/trained.tar",
+                                       "trigger": "TOK", "taste_profile": "soft, grainy"}),
+    "trained_nover.safetensors": json.dumps({"replicate_model": " finnyjules/other-style "}),
+    "legacy.safetensors": json.dumps({"replicate_url": "https://replicate.delivery/y/legacy.tar"}),
+    "legacy_spaces.safetensors": json.dumps({"replicate_url": "  https://replicate.delivery/z/spaced.tar  "}),
+    "legacy_bare.safetensors": json.dumps({"replicate_url": "alice/bare-lora"}),
+    "urlmodel.safetensors": json.dumps({"replicate_model": "https://example.com/w.safetensors"}),
+    "numeric.safetensors": json.dumps({"replicate_model": 5}),
+    "empty_model.safetensors": json.dumps({"replicate_model": "", "replicate_url": "https://replicate.delivery/e/e.tar"}),
+    "blank_url.safetensors": json.dumps({"replicate_url": "   "}),
+    "null.safetensors": "null",
+    "list.safetensors": "[1, 2]",
+    "broken.safetensors": "{not json",
+    "nosidecar.safetensors": None,
+    "sub/nested.safetensors": json.dumps({"replicate_url": "https://replicate.delivery/n/nested.tar"}),
+}
+LORA_SINGLE = {"prompt": "a portrait of TOK, film grain", "lora_name": "[None]", "lora_url": "", "lora_scale": 1.0, "aspect_ratio": "1:1",
+               "megapixels": "1", "num_inference_steps": 28, "guidance": 3.5, "seed": 0, "prompt_strength": 0.8}
+LORA_MULTI = {"prompt": "TOK in the park", "lora_a": "[None]", "lora_a_url": "", "scale_a": 0.9, "lora_b": "[None]", "lora_b_url": "",
+              "scale_b": 0.8, "aspect_ratio": "1:1", "num_inference_steps": 28, "guidance": 3.5, "seed": 0, "prompt_strength": 0.8,
+              "lora_c": "[None]", "lora_c_url": "", "scale_c": 0.7, "lora_d": "[None]", "lora_d_url": "", "scale_d": 0.6}
+# What huggingface.co's model API answers for the bare refs the cases look up (the look-up's three branches).
+LORA_HF = {
+    "https://huggingface.co/api/models/alice/hf-lora": {"status": 200, "text": "{\"id\": \"alice/hf-lora\"}"},
+    "https://huggingface.co/api/models/bob/missing": {"status": 404, "text": "{\"error\": \"Repository not found\"}"},
+    "https://huggingface.co/api/models/carol/offline": {"raise": "Cannot connect to host huggingface.co:443"},
+    "https://huggingface.co/api/models/alice/bare-lora": {"status": 200, "text": "{}"},
+    "https://huggingface.co/api/models/owner/model": {"status": 404, "text": "{}"},
+    # Python strips the scheme of ANY pasted URL (_normalize_lora_ref), so a .safetensors link on another host
+    # reaches the look-up as a bare "<host>/<first path part>".
+    "https://huggingface.co/api/models/example.com/files": {"status": 404, "text": "{}"},
+    "https://huggingface.co/api/models/example.com/x.SAFETENSORS": {"status": 404, "text": "{}"},
+    "https://huggingface.co/api/models/example.com/three.safetensors": {"status": 404, "text": "{}"},
+    "https://huggingface.co/api/models/replicate.delivery/y": {"status": 404, "text": "{}"},
+}
+
+
+def lora_group() -> dict:
+    """R3.13: Flux Dev + LoRA (FluxLoRARemoteNode: the user's trained model run
+    directly, else black-forest-labs/flux-dev-lora) and Flux Dev + LoRAs
+    (FluxMultiLoRARemoteNode: lucataco/flux-dev-multi-lora, with its reload
+    retry), for frontend/server/runner/generators/lora.ts
+    (tests/unit/runner-paid-lora.unit.spec.ts):
+      loras — the temporary models/loras/ the cases read (file → sidecar text,
+              null for a LoRA with no sidecar)
+      cases — paid_case of Flux Dev + LoRA picked by every kind of sidecar and
+              by every kind of lora_url (a trained ref with and without its
+              version, HuggingFace URLs, hf.co, CivitAI, .safetensors, bare
+              refs looked up on HuggingFace: found, not found, offline),
+              image-to-image on and off, the seeds and settings; Flux Dev +
+              LoRAs with 0, 1, 2 and 4 slots, repeated LoRAs, prompt_in and
+              style_in blank and set, answers whose logs have and lack
+              "Downloading LoRA weights". Each multi case records `rotate`,
+              the process-wide order toggle before it (reset to 0, except the
+              two back-to-back runs of `rotation`)."""
+    import tempfile
+    import folder_paths
+    import runner_builder_fixtures as rbf
+    nr, _fal, _extras = rbf._node_modules()
+    files = {LORA_OUT: _b64(png_bytes(8, 6, 31)), LORA_OUT_RGBA: _b64(png_bytes(8, 6, 32, "RGBA")), LORA_OUT_2: _b64(png_bytes(8, 6, 33))}
+    cases: list = []
+    tmp = tempfile.mkdtemp(prefix="sailor-loras-")
+    for name, sidecar in LORA_FILES.items():
+        path = os.path.join(tmp, name)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "wb") as f:
+            f.write(b"")
+        if sidecar is not None:
+            with open(os.path.splitext(path)[0] + ".json", "w", encoding="utf-8") as f:
+                f.write(sidecar)
+    exts = folder_paths.folder_names_and_paths["loras"][1]
+
+    def add(name, cls, widgets, pictures=(), answers=None, rotate=None):
+        if rotate is not None:
+            nr._MULTILORA_ROTATE["n"] = rotate
+        before = nr._MULTILORA_ROTATE["n"]
+        case = paid_case(name, cls, widgets, answers or [{"output": [LORA_OUT]}], pictures=list(pictures), files=files, links=LORA_HF)
+        if cls is nr.FluxMultiLoRARemoteNode:
+            case["rotate"] = before
+        # Only the look-ups this case made: the rest of LORA_HF is not part of it.
+        used = {g["url"] for g in case["gets"]}
+        case["links"] = {u: v for u, v in LORA_HF.items() if u in used}
+        if not case["links"]:
+            del case["links"]
+        cases.append(case)
+
+    with mock.patch.dict(folder_paths.folder_names_and_paths, {"loras": ([tmp], exts)}):
+        one = nr.FluxLoRARemoteNode
+        # Picked by name: every kind of sidecar.
+        for name in LORA_FILES:
+            add(f"single · name {name}", one, {**LORA_SINGLE, "lora_name": name})
+        add("single · name [None]", one, LORA_SINGLE)
+        add("single · name [None] · image", one, LORA_SINGLE, ["image"])
+        # lora_url: every form (it wins over the name).
+        urls = {
+            "trained ref": "finnyjules/my-style",
+            "trained ref with version": "finnyjules/my-style:abc123",
+            "trained ref three parts": "finnyjules/my-style/abc123",
+            "trained ref padded": "  finnyjules/my-style  ",
+            "huggingface https": "https://huggingface.co/alice/lora",
+            "huggingface file": "huggingface.co/alice/lora/weights.safetensors",
+            "hf.co": "hf.co/alice/lora",
+            "HF.CO upper": "HTTPS://HF.co/alice/lora",
+            "civitai": "https://civitai.com/api/download/models/123?type=Model",
+            "safetensors url": "https://example.com/files/w.safetensors",
+            "http safetensors": "http://example.com/x.SAFETENSORS",
+            "replicate.com url": "https://replicate.com/alice/model",
+            "bare four parts found": "alice/hf-lora/sub/file.bin",
+            "bare four parts missing": "bob/missing/sub/file.bin",
+            "bare four parts offline": "carol/offline/a/b",
+            "bare safetensors": "owner/model/lora.safetensors",
+        }
+        for label, url in urls.items():
+            add(f"single · url {label}", one, {**LORA_SINGLE, "lora_url": url, "lora_name": "trained.safetensors"})
+        add("single · url huggingface · lora scale 0.75", one, {**LORA_SINGLE, "lora_url": urls["huggingface https"], "lora_scale": 0.75})
+        # Image-to-image, both paths; the seeds; the settings.
+        for label, w in (("trained", {"lora_name": "trained.safetensors"}), ("flux-dev-lora", {"lora_url": urls["huggingface https"]})):
+            add(f"single · {label} · image", one, {**LORA_SINGLE, **w, "prompt_strength": 0.35}, ["image"])
+            for seed in (0, 42, 0xFFFFFFFF):
+                add(f"single · {label} · seed {seed}", one, {**LORA_SINGLE, **w, "seed": seed})
+            add(f"single · {label} · settings", one, {**LORA_SINGLE, **w, "aspect_ratio": "9:21", "megapixels": "0.25",
+                                                       "num_inference_steps": 4, "guidance": 0.0, "lora_scale": 1.5})
+            add(f"single · {label} · steps 50", one, {**LORA_SINGLE, **w, "num_inference_steps": 50, "guidance": 20.0})
+        for ar in ("16:9", "21:9", "4:5"):
+            add(f"single · ratio {ar}", one, {**LORA_SINGLE, "lora_url": urls["hf.co"], "aspect_ratio": ar})
+        add("single · prompt non-ASCII", one, {**LORA_SINGLE, "prompt": "Café 日本 \U0001f98a — naïve", "lora_url": urls["hf.co"]})
+        add("single · prompt blank", one, {**LORA_SINGLE, "prompt": "", "lora_url": urls["hf.co"]})
+        # Each answer shape: a string, two URLs (the first is the picture), a picture with alpha (dropped).
+        add("single · answer string", one, {**LORA_SINGLE, "lora_url": urls["hf.co"]}, answers=[{"output": LORA_OUT}])
+        add("single · answer two", one, {**LORA_SINGLE, "lora_url": urls["hf.co"]}, answers=[{"output": [LORA_OUT, LORA_OUT_2]}])
+        add("single · answer rgba", one, {**LORA_SINGLE, "lora_url": urls["hf.co"]}, answers=[{"output": [LORA_OUT_RGBA]}])
+        add("single · answer none", one, {**LORA_SINGLE, "lora_url": urls["hf.co"]}, answers=[{"output": None, "status": "succeeded"}])
+
+        many = nr.FluxMultiLoRARemoteNode
+        hf = "https://huggingface.co/alice/one"
+        civ = "https://civitai.com/api/download/models/456"
+        st = "https://example.com/three.safetensors"
+        loaded = [{"output": [LORA_OUT], "logs": LORA_MARKER_LOGS}]
+        skipped = [{"output": [LORA_OUT_2], "logs": LORA_NO_MARKER_LOGS}, {"output": [LORA_OUT], "logs": LORA_MARKER_LOGS}]
+        two = {"lora_a": "trained.safetensors", "lora_b_url": hf}
+        four = {"lora_a": "legacy.safetensors", "lora_b_url": hf, "lora_c_url": civ, "lora_d_url": st}
+        # 0 slots (Python raises before any call), and slots that resolve to nothing.
+        add("multi · no slots", many, LORA_MULTI, answers=[], rotate=0)
+        add("multi · names without weights", many, {**LORA_MULTI, "lora_a": "trained_nover.safetensors", "lora_b": "nosidecar.safetensors",
+                                                    "lora_c": "broken.safetensors", "lora_d": "blank_url.safetensors"}, answers=[], rotate=0)
+        # 1 slot: never retried, never rotated.
+        for label, w in (("name", {"lora_a": "trained.safetensors"}), ("url", {"lora_b_url": hf}), ("slot d", {"lora_d_url": "hf.co/alice/d"})):
+            add(f"multi · one slot {label} · loaded", many, {**LORA_MULTI, **w}, answers=loaded, rotate=0)
+            add(f"multi · one slot {label} · no marker", many, {**LORA_MULTI, **w}, answers=[{"output": [LORA_OUT], "logs": LORA_NO_MARKER_LOGS}], rotate=0)
+        # 2 and 4 slots, with the toggle at 0 and at 1, logs with and without the marker.
+        for label, w in (("two", two), ("four", four)):
+            for rot in (0, 1):
+                add(f"multi · {label} slots · rotate {rot} · loaded", many, {**LORA_MULTI, **w}, answers=loaded, rotate=rot)
+                add(f"multi · {label} slots · rotate {rot} · retried", many, {**LORA_MULTI, **w}, answers=skipped, rotate=rot)
+        add("multi · two slots · no logs", many, {**LORA_MULTI, **two}, answers=[{"output": [LORA_OUT_2]}, {"output": [LORA_OUT], "logs": None}], rotate=0)
+        add("multi · two slots · retried, still no marker", many, {**LORA_MULTI, **two},
+            answers=[{"output": [LORA_OUT_2], "logs": ""}, {"output": [LORA_OUT_RGBA], "logs": LORA_NO_MARKER_LOGS}], rotate=0)
+        add("multi · two slots · every name kind", many, {**LORA_MULTI, "lora_a": "legacy_spaces.safetensors", "lora_b": "sub/nested.safetensors",
+                                                          "lora_c": "legacy_bare.safetensors"}, answers=loaded, rotate=0)
+        # Repeated LoRAs collapse onto their highest scale (one left: no retry; two left: retried).
+        add("multi · repeated · one left", many, {**LORA_MULTI, "lora_a_url": hf, "scale_a": 0.4, "lora_b_url": f"  {hf}  ", "scale_b": 1.2},
+            answers=[{"output": [LORA_OUT], "logs": LORA_NO_MARKER_LOGS}], rotate=0)
+        add("multi · repeated · two left", many, {**LORA_MULTI, "lora_a_url": hf, "scale_a": 0.4, "lora_b_url": civ, "lora_c_url": "hf.co/alice/one",
+                                                  "scale_c": 1.1, "lora_d": "legacy.safetensors"}, answers=skipped, rotate=0)
+        add("multi · repeated name and url", many, {**LORA_MULTI, "lora_a": "legacy.safetensors", "lora_b_url": "https://replicate.delivery/y/legacy.tar",
+                                                    "scale_b": 0.95}, answers=loaded, rotate=1)
+        # Bare refs, looked up on HuggingFace (found, not found, offline).
+        add("multi · bare refs", many, {**LORA_MULTI, "lora_a_url": "alice/hf-lora", "lora_b_url": "bob/missing", "lora_c_url": "carol/offline"},
+            answers=loaded, rotate=0)
+        # prompt_in and style_in, blank and set (wired text).
+        for pi_label, pi in (("blank", ""), ("spaces", "  "), ("set", "  an idea from upstream ")):
+            for st_label, sty in (("blank", ""), ("set", " moody film look ")):
+                for pr_label, pr in (("prompt", "TOK in the park"), ("prompt blank", "")):
+                    add(f"multi · prompt_in {pi_label} · style_in {st_label} · {pr_label}", many,
+                        {**LORA_MULTI, **two, "prompt": pr, "prompt_in": pi, "style_in": sty}, answers=loaded, rotate=0)
+        # Image-to-image, the seeds, the settings.
+        add("multi · image", many, {**LORA_MULTI, **two, "prompt_strength": 0.2}, ["image"], answers=loaded, rotate=0)
+        for seed in (0, 42, 0xFFFFFFFF):
+            add(f"multi · seed {seed}", many, {**LORA_MULTI, **two, "seed": seed}, answers=loaded, rotate=0)
+        add("multi · settings", many, {**LORA_MULTI, **four, "aspect_ratio": "21:9", "num_inference_steps": 50, "guidance": 10.0,
+                                       "scale_a": 0.0, "scale_b": 1.5, "scale_c": 1.0, "scale_d": 0.05}, answers=loaded, rotate=0)
+        add("multi · answer string", many, {**LORA_MULTI, **two}, answers=[{"output": LORA_OUT, "logs": LORA_MARKER_LOGS}], rotate=0)
+        add("multi · answer rgba", many, {**LORA_MULTI, **two}, answers=[{"output": [LORA_OUT_RGBA], "logs": LORA_MARKER_LOGS}], rotate=0)
+        # The toggle is process-wide: two runs back to back take the two orders.
+        add("multi · rotation · first run", many, {**LORA_MULTI, **four}, answers=loaded, rotate=0)
+        add("multi · rotation · second run", many, {**LORA_MULTI, **four}, answers=loaded)
+    # replicate_refs.py's reference readers and _fold_prompt_in on their own, over awkward strings.
+    from comfy_api_nodes import replicate_refs as rr
+    refs = ["", "   ", "a", "a/b", " a/b ", "a/b/c", "a/b/c/d", "a//b", "/a/b", "a/b:ver", "a/b:v1:v2", "a:b/c", "A/B.SAFETENSORS",
+            "https://huggingface.co/a/b", "HTTP://x.y/z", "hf.co/a/b", "HF.CO/a/b", "https://hf.co/a/b", "civitai.com/models/1",
+            "x/HuggingFace.co", "a/b.safetensors?x=1", "ftp://a/b", "a/b/", "  https://a.b/c.safetensors  ", "replicate.com/a/b",
+            "café/naïve", "a\u3000/b", "\x1ca/b\x1f"]
+    catalogue = {
+        "is_model_ref": {r: rr._is_replicate_model_ref(r) for r in refs},
+        "bare_owner_model": {r: rr._bare_owner_model(r) for r in refs},
+        "normalize": {r: rr._normalize_lora_ref(r) for r in refs},
+        "to_lora_ref": {r: rr._replicate_model_to_lora_ref(r) for r in refs},
+        "collect": [{"resolved": res, "out": list(map(list, rr._multilora_collect([tuple(x) for x in res])))} for res in (
+            [], [[None, 1.0]], [["a", 0.5], ["a", 0.7]], [["a", 0.9], ["b", 0.1], ["a", 0.3]], [["", 1.0], ["b", 0.2], [None, 0.4], ["b", 0.25]],
+            [["x", 1.5], ["y", 0.0], ["z", 0.6], ["y", 0.05]])],
+        "fold": [{"prompt": p, "prompt_in": i, "out": nr._fold_prompt_in(p, i)} for p in ("", "  ", "a prompt", " padded ")
+                 for i in ("", "  ", "idea", " idea ", "\u3000idea\x1c")],
+    }
+    return {"cases": cases, "loras": LORA_FILES, "catalogue": catalogue}
+
+
 GROUPS = {
     "handoff": handoff_group,
     "machinery": machinery_group,
@@ -1893,6 +2117,7 @@ GROUPS = {
     "gen-3d": gen_3d_group,
     "film-shot": film_shot_group,
     "image-extras": image_extras_group,
+    "lora": lora_group,
 }
 
 

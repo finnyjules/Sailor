@@ -360,6 +360,9 @@ export const RUNNER_ROUTES: Readonly<Record<string, Route>> = {
   'TextEffectNode': r('replicate', null, 'fal runs the same models, but the backup\'s price isn\'t checked against Replicate\'s yet'),
   'SketchToImageNode': r('replicate', null, 'no same-model twin on fal with the same settings is carded'),
   'ConsistentFaceNode': r('replicate', null, 'Ideogram Character isn\'t carded on fal'),
+  // R3.13, Flux Dev + LoRA and Flux Dev + LoRAs (family lora): Replicate, as Python.
+  'FluxLoRARemoteNode': r('replicate', null, 'fal\'s flux-lora is another service\'s LoRA loader, priced per megapixel, and can\'t run a trained model'),
+  'FluxMultiLoRARemoteNode': r('replicate', null, 'fal\'s flux-lora is another service\'s LoRA loader, priced per megapixel'),
 }
 
 // ── Generate video: the two models moved to fal first ──────────────────────

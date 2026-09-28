@@ -54,6 +54,8 @@ describe('parseFamilies', () => {
       'film-shot',
       // Step 3, R3.12: text effect, sketch to image and face references (needs `cards`).
       'image-extras',
+      // Step 3, R3.13: Flux Dev + LoRA and Flux Dev + LoRAs (needs `cards`).
+      'lora',
     ].sort())
   })
 })

@@ -256,6 +256,17 @@ export const PAID_RATES: Record<string, PaidRate> = {
     unit: 'per_call', usd: 0.15,
     service: 'replicate', source: 'https://replicate.com/ideogram-ai/ideogram-character', read: '2026-09-27', confidence: 'verified',
   },
+  // R3.13, Flux Dev + LoRAs: lucataco/flux-dev-multi-lora has no billing table (`billingConfig` null): it is
+  // billed by GPU time, Nvidia H100 at $0.001525/s. Its page (read 2026-09-27, a plain GET): "costs
+  // approximately $0.041 to run" (`p50price`), "typically complete within 28 seconds": 28 s × $0.001525 =
+  // $0.0427 at the node's default 28 steps, the ceiling here $0.043 (rounded up to the cent by the steps
+  // rule: $0.05 a call); more steps scale it up (50 steps: $0.08), never down. An estimate until the live
+  // check measures it. Flux Dev + LoRA's flux-dev-lora is priced by its edit card (editRates.ts).
+  'lucataco/flux-dev-multi-lora': {
+    unit: 'gpu_ceiling', usd: 0.043, perSteps: 28,
+    note: 'H100 at $0.001525/s; the page\'s typical run, 28 s at the default 28 steps = $0.0427 (p50 $0.041), rounded up; scaled with the steps above 28',
+    service: 'replicate', source: 'https://replicate.com/lucataco/flux-dev-multi-lora', read: '2026-09-27', confidence: 'estimate',
+  },
 }
 
 const own = <T>(o: Record<string, T>, k: string): T | undefined =>

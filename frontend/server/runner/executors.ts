@@ -130,6 +130,7 @@ import { planSplitLayers } from './generators/splitLayers'
 import { planAudioGen } from './generators/audioGen'
 import { planGen3d } from './generators/gen3d'
 import { planImageExtras } from './generators/imageExtras'
+import { planLora } from './generators/lora'
 import type { KeptExt } from './keptBytes'
 import type { AnswerKind } from './answerDownload'
 import { filesOf } from './values'
@@ -225,6 +226,13 @@ export interface PipelineIO extends DeriveIO {
    * the file still there), else `make()`'s, written down on that call.
    */
   savedOnce(callKey: string, key: string, make: () => Promise<OutputFile>): Promise<OutputFile>
+  /**
+   * The payload of the call written down under `key` on the node's record (a
+   * resumed node), or null when there is none or it failed (R3.13: Flux Dev +
+   * LoRAs keeps the LoRA order its first call was sent in, so a restart never
+   * turns the runner's order toggle again and sends a different request).
+   */
+  recorded?(key: string): Record<string, unknown> | null
   /** Hands off bytes the node made itself (a mask, an RGB copy): kept by sha256, then uploaded. */
   handOff(bytes: Uint8Array, name: string): Promise<string>
   toUrl(file: OutputFile): Promise<string>
@@ -1142,6 +1150,10 @@ async function planNodeRequest(ctx: PlanContext): Promise<NodePlan> {
     case 'SketchToImageNode':
     case 'ConsistentFaceNode':
       return planImageExtras(ctx)
+    // ── lora (step 3, R3.13): Flux Dev + LoRA (one Replicate call) and Flux Dev + LoRAs (one or two) ──
+    case 'FluxLoRARemoteNode':
+    case 'FluxMultiLoRARemoteNode':
+      return planLora(ctx)
     case 'Text': return staticDerive(ctx, textCardUi)
     case 'Moodboard': return staticDerive(ctx)
     case 'Model3D': return staticDerive(ctx, textCardUi)

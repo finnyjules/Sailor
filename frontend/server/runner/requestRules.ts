@@ -182,6 +182,7 @@ import { repairRequestProblem } from '#shared/runner/repair'
 import { hostedVoiceProblem, speechTextProblem } from '#shared/runner/audioGen'
 import { gen3dComfyPathProblem, gen3dRequestProblem } from '#shared/runner/gen3d'
 import { imageExtrasRequestProblem } from '#shared/runner/imageExtras'
+import { hostedLoraProblem, loraRequestProblem } from '#shared/runner/lora'
 import { isLlmTextClass } from './generators/llm'
 import { FACE_SWAP_NEEDS_GENDER, faceSwapGender } from '#shared/runner/faceSwap'
 import { pixverseSwapNodeProblem } from './generators/pixverseSwap'
@@ -1107,6 +1108,9 @@ export function requestProblems(prompt: ApiPrompt, opts: { runner?: boolean } = 
     // a seed Replicate's Ideogram refuses (#shared/runner/imageExtras).
     const ix = opts.runner ? imageExtrasRequestProblem(ct, inputs) : null
     if (ix) out.push({ nodeId, classType: ct, input: ix.input, message: ix.message })
+    // Flux Dev + LoRAs with no LoRA in any slot (R3.13), on a runner run: Python raises before its call.
+    const lr = opts.runner ? loraRequestProblem(ct, inputs) : null
+    if (lr) out.push({ nodeId, classType: ct, input: lr.input, message: lr.message })
   }
   // A preset shot's problems are its own, judged as Generate a video's.
   return presetShots.size ? out.map(p => presetShots.has(p.nodeId) ? { ...p, classType: 'FilmShotNode' } : p) : out
@@ -1142,6 +1146,9 @@ export function hostedRequestProblems(prompt: ApiPrompt): RequestProblem[] {
   for (const [nodeId, node] of Object.entries(prompt ?? {})) {
     const p = hostedVoiceProblem(node?.class_type, node?.inputs ?? {})
     if (p) out.push({ nodeId, classType: node!.class_type, input: p.input, message: p.message })
+    // A LoRA picked by name or a trained model's address (R3.13, ruling (i)): public links only.
+    const l = hostedLoraProblem(node?.class_type, node?.inputs ?? {})
+    if (l) out.push({ nodeId, classType: node!.class_type, input: l.input, message: l.message })
   }
   return out
 }

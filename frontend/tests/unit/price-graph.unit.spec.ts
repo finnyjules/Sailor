@@ -188,8 +188,9 @@ describe('graph price book coverage', () => {
     expect(GRAPH_NODE_CREDITS.LoraTrainingNode).toBe(600)
     // RestyleWithLoRANode (18 flat) is priced by its calls since P4 fix round 2.
     expect(GRAPH_NODE_CREDITS.RestyleWithLoRANode).toBeUndefined()
-    expect(GRAPH_NODE_CREDITS.FluxLoRARemoteNode).toBe(8)
-    expect(GRAPH_NODE_CREDITS.FluxMultiLoRARemoteNode).toBe(8)
+    // FluxLoRARemoteNode and FluxMultiLoRARemoteNode (8 flat) are priced by their calls since R3.13 (below).
+    expect(GRAPH_NODE_CREDITS.FluxLoRARemoteNode).toBeUndefined()
+    expect(GRAPH_NODE_CREDITS.FluxMultiLoRARemoteNode).toBeUndefined()
   })
 
   // Review fix (Stage 5 Task 3): the original badge sweep grepped for the
@@ -793,6 +794,24 @@ describe('text effect, sketch and face references on the ComfyUI path (R3.12)', 
     expect(at('TextEffectNode', { ...fx, image: ['2', 0] })).toBe(8)
     expect(at('SketchToImageNode', { model: 'Nano Banana', image: ['2', 0], prompt: 'a castle' })).toBe(8)
     expect(at('ConsistentFaceNode', { model: 'Ideogram Character', reference_image: ['2', 0], prompt: '', aspect_ratio: '1:1', seed: 0 })).toBe(23)
+  })
+})
+
+// ───────────────────────────────────────────────────────────────────────────
+// R3.13 (ruling (a)): Flux Dev + LoRA and Flux Dev + LoRAs leave their flat
+// rows (LORA_RENDER_CREDITS, 8) for their calls: Flux Dev + LoRA on
+// flux-dev-lora's edit card, $0.04 (8, unchanged); Flux Dev + LoRAs on
+// flux-dev-multi-lora by GPU time ($0.05 a call up to 28 steps, 10 credits;
+// 50 steps 16), two calls with two or more LoRAs (the reload retry, ruling (g)).
+// ───────────────────────────────────────────────────────────────────────────
+describe('Flux Dev + LoRA and Flux Dev + LoRAs on the ComfyUI path (R3.13)', () => {
+  const at = (ct: string, inputs: Record<string, unknown>) => priceGraph({ 1: { class_type: ct, inputs } }).nodes!['1']
+  const multi = { prompt: 'x', lora_a: 'a.safetensors', lora_a_url: '', scale_a: 0.9, lora_b: '[None]', lora_b_url: 'hf.co/a/b', scale_b: 0.8, aspect_ratio: '1:1', num_inference_steps: 28, guidance: 3.5, seed: 0, prompt_strength: 0.8, lora_c: '[None]', lora_c_url: '', scale_c: 0.7, lora_d: '[None]', lora_d_url: '', scale_d: 0.6 }
+  it('each class, by its calls', () => {
+    expect(at('FluxLoRARemoteNode', { prompt: 'x', lora_name: '[None]', lora_url: 'hf.co/a/b', lora_scale: 1, aspect_ratio: '1:1', megapixels: '1', num_inference_steps: 28, guidance: 3.5, seed: 0, prompt_strength: 0.8 })).toBe(8)
+    expect(at('FluxMultiLoRARemoteNode', multi)).toBe(20)
+    expect(at('FluxMultiLoRARemoteNode', { ...multi, lora_a: '[None]' })).toBe(10)
+    expect(at('FluxMultiLoRARemoteNode', { ...multi, num_inference_steps: 50 })).toBe(32)
   })
 })
 

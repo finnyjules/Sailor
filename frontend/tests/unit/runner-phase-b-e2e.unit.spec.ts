@@ -769,6 +769,8 @@ describe('B10 · one workflow per family, POST /api/runs to the last event', () 
       // Text effect, sketch to image and face references (R3.12) make a picture on Replicate:
       // runner-paid-image-extras.unit.spec.ts.
       'image-extras',
+      // Flux Dev + LoRA and Flux Dev + LoRAs (R3.13) make a picture on Replicate: runner-paid-lora.unit.spec.ts.
+      'lora',
     ]
     expect(FLOWS.map(f => f.family).sort()).toEqual(RUNNER_FAMILIES.filter(f => !local.includes(f)).sort())
   })

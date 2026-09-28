@@ -164,6 +164,10 @@ export const PAID_TEXT_INPUTS: Readonly<Record<string, readonly string[]>> = {
   TextEffectNode: ['text'],
   SketchToImageNode: ['prompt'],
   ConsistentFaceNode: ['prompt'],
+  // R3.13, Flux Dev + LoRA and Flux Dev + LoRAs: the prompt, and the LoRA links sent with it; Flux Dev +
+  // LoRAs' idea and taste (prompt_in, style_in) are sockets, moderated as every wired text is.
+  FluxLoRARemoteNode: ['prompt', 'lora_url'],
+  FluxMultiLoRARemoteNode: ['prompt', 'prompt_in', 'style_in', 'lora_a_url', 'lora_b_url', 'lora_c_url', 'lora_d_url'],
 }
 
 /** The non-blank values of RUNNER_EXTRA_TEXT_INPUTS (a typed-in taste, a paid class's PAID_TEXT_INPUTS) across the prompt, each on its own. */

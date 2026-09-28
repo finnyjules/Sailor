@@ -197,11 +197,21 @@ export type RunnerFamily =
    * go to ComfyUI, as before.
    */
   | 'image-extras'
+  /**
+   * Flux Dev + LoRA and Flux Dev + LoRAs on Replicate (step 3, R3.13; R3.14
+   * adds Restyle with a style LoRA): the user's trained model or
+   * flux-dev-lora, and flux-dev-multi-lora with its reload retry. A LoRA
+   * picked by name is read from models/loras/ (its sidecar only); hosted
+   * takes public LoRA links only (ruling (i)). Needs `cards`: their pictures
+   * come from Image cards and LoadImage, their prompts take text wires. Off:
+   * they go to ComfyUI, as before.
+   */
+  | 'lora'
 
 export const RUNNER_FAMILIES: readonly RunnerFamily[] = [
   'fal-edit', 'replicate-image', 'replicate-video', 'nano-actions', 'ref-edits', 'restyle', 'frame', 'wan-3', 'gpt-image-2.5', 'h3-max-turbo', 'gemini-omni-flash', 'veo-3.1-lite', 'qwen-image-3', 'grok-imagine-2', 'ideogram-4', 'seedream-5-pro-edit', 'qwen-2511-angles', 'nano-banana-2-blend', 'bria-product-shot', 'muse-image', 'nano-banana-2-lite', 'reve-2.1', 'recraft-v4.1', 'krea-2', 'happyhorse-1.1', 'grok-imagine-video-1.5', 'ltx-2.5-fast', 'luma-ray-3.2', 'sync-3', 'topaz-video', 'fix-faces', 'face-swap', 'person-swap-video', 'cards',
   'effects-tone', 'effects-blur', 'effects-cells', 'effects-warp', 'effects-mask', 'effects-noise', 'shader-bake', 'live-previews',
-  'llm-text', 'describe', 'image-repair', 'layers', 'audio-gen', 'gen-3d', 'film-shot', 'image-extras',
+  'llm-text', 'describe', 'image-repair', 'layers', 'audio-gen', 'gen-3d', 'film-shot', 'image-extras', 'lora',
 ]
 
 /**
@@ -225,6 +235,7 @@ export const FAMILY_REQUIRES: Partial<Record<RunnerFamily, RunnerFamily>> = {
   'gen-3d': 'cards',
   'film-shot': 'cards',
   'image-extras': 'cards',
+  'lora': 'cards',
 }
 
 const KNOWN: ReadonlySet<string> = new Set(RUNNER_FAMILIES)
