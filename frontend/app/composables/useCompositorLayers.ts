@@ -33,6 +33,7 @@ import type { TextCell } from '~/lib/motionx/text/units'
 import type { StoredBehaviour, Track as MotionxTrack } from '~/lib/motionx'
 import { beginReveal, finishReveal, type RevealPass } from '~/lib/motionx/reveal/paint'
 import { drawRevealShaderStyle, revealShaderReady } from '~/lib/motionx/reveal/paintPixels'
+import { pixelRevealTextPieces, type PixelRevealPiece } from '~/lib/motionx/reveal/paintPixelReveal'
 import { isShaderRevealStyle } from '~/lib/motionx/reveal'
 import type { MotionReveal } from '~/lib/motionx/reveal'
 // Letter behaviours (unified motion, text slice): the per-glyph draw seam. Pure — canvas
@@ -5799,6 +5800,29 @@ export function textMotionCells(layer: TextLayer, W: number): TextCell[] | null 
   return collect.out.length && collect.cells!.length ? collect.cells! : null
 }
 
+/** Pixel reveal: a text layer's pieces in FRAME px (the painter maps them to device px), placed
+ *  exactly as `paintLayer` draws the text — translate to the layer's centre, then its uniform
+ *  scale (cloner copy × responsive layout × a Pulse's draw-time `motionScale`, all about that
+ *  centre). `undefined` → ONE piece for the whole layer: not a text layer, `pieces: 'whole'`,
+ *  rotated, skewed, on a path, placed runs, expressive, moving letters, a cloner array, or no
+ *  cells (system / loading font). */
+function pixelRevealPiecesFor(layer: LocalLayer, rv: MotionReveal, W: number, H: number): PixelRevealPiece[] | undefined {
+  if (rv.style !== 'pixelreveal' || layer.kind !== 'text') return undefined
+  const by = rv.pixel?.pieces
+  if (!by || by === 'whole') return undefined
+  const t = layer as TextLayer
+  if (Math.abs(t.rotation || 0) > 0.01 || t.skewX || t.skewY || t.path || t.runs?.length || t.expressive) return undefined
+  if ((layer as unknown as { textMotion?: unknown }).textMotion) return undefined
+  const copies = expandClones(layer.cloner, W / H, (layer as { motionCopy?: number }).motionCopy)
+  const c = copies.length === 1 ? copies[0]! : null
+  if (!c || Math.abs(c.drot) > 0.01) return undefined
+  const cells = textMotionCells(t, W)
+  if (!cells) return undefined
+  const ms = (layer as unknown as { motionScale?: number }).motionScale
+  const k = c.dscale * layoutScaleOf(layer) * (typeof ms === 'number' && Math.abs(ms - 1) > 1e-4 ? Math.max(0.001, ms) : 1)
+  return pixelRevealTextPieces(cells, by, t.lineHeight, { x: (t.x + c.dx) * W, y: (t.y + c.dy) * H, scale: k })
+}
+
 export function textLayerOutline(
   layer: TextLayer, W: number, ctxOverride?: CanvasRenderingContext2D | null,
 ): string | null {
@@ -6926,7 +6950,8 @@ export function paintLayerStack(
           if (maskItem && maskItem.type !== 'local') drawItemMasked(target, { ...item, layer: solo }, maskItem, W, H, 'source-over', 1)
           else drawLocalLayer(target, solo, W, H, maskItem?.type === 'local' ? maskItem.layer : null, 1)
         }
-        if (drawRevealShaderStyle(ctx, rv, W, H, pixelsBase, drawSolo, { alpha: (layer.opacity ?? 1) * opacityMul, blend: localBlendOp(layer) })) continue
+        const pieces = rv.style === 'pixelreveal' ? pixelRevealPiecesFor(layer, rv, W, H) : undefined
+        if (drawRevealShaderStyle(ctx, rv, W, H, pixelsBase, drawSolo, { alpha: (layer.opacity ?? 1) * opacityMul, blend: localBlendOp(layer) }, pieces)) continue
         if (rv.style !== 'settle') revealOpen = beginReveal(ctx, { ...rv, style: 'dissolve' }, W, H, pixelsBase)
       }
       const motionActive = t !== undefined && motion && _motionPainterImpl

@@ -9,9 +9,9 @@
 // free): only `useCompositorLayers.ts`, the export/bake entries (`~/lib/motion/bake.ts`,
 // `CompositorModal.vue`), `./paintAssemble.ts` and this file's own spec may import it directly.
 //
-// It is also the SHADER-STYLE front door for all THREE of them: `drawRevealShaderStyle` routes a
-// bar to Pixels, to Assemble or to Settle, `revealShaderReady` / `ensureRevealShadersReady`
-// answer for the effect THAT bar needs, and `soloPass` (steps 1–2) plus the scratch pools below
+// It is also the SHADER-STYLE front door for all of them: `drawRevealShaderStyle` routes a bar
+// to Pixels, to Assemble, to Settle or to Pixel reveal (`paintPixelReveal.ts`, its own WebGL2
+// program), `revealShaderReady` / `ensureRevealShadersReady` answer for what THAT bar needs, and `soloPass` (steps 1–2) plus the scratch pools below
 // are shared, so the styles can never disagree about what "the frame's own pixels" are.
 import { fieldEffectReady, whenFieldEffectReady, renderFieldWithBase } from '~/lib/shaderfill/field'
 import { shaderFx } from '~/lib/shaderfx/renderer'
@@ -23,6 +23,8 @@ import { revealEffectIdsFor } from './params'
 import type { MotionReveal } from './params'
 import { drawRevealAssemble } from './paintAssemble'
 import { drawRevealSettle } from './paintSettle'
+import { drawRevealPixelReveal, pixelRevealAvailable } from './paintPixelReveal'
+import type { PixelRevealPiece } from './paintPixelReveal'
 import { buildCustomAtlas } from '~/lib/shaderfx/customGlyphs'
 
 type Canvas = HTMLCanvasElement
@@ -248,6 +250,8 @@ function revealShaderEffect(reveal: MotionReveal): 'ascii_dither' | 'bayer_dithe
  *  frame. */
 export function revealShaderReady(reveal: MotionReveal): boolean {
   if (reveal.style === 'settle') return true
+  // A pixel-reveal bar needs no catalogue effect — only a WebGL2 context of its own.
+  if (reveal.style === 'pixelreveal') return pixelRevealAvailable()
   const effectId = revealShaderEffect(reveal)
   return effectId ? readyFx(effectId) : false
 }
@@ -385,8 +389,10 @@ export function drawRevealPixels(
 /**
  * The ONE entry point the compositor calls for a shader-style bar: Assemble draws constant
  * blocks wiped in by two scattered fronts, Pixels the refining character ladder, Settle the
- * layer broken by one of ten effects whose strength runs out. Same contract as any of them:
- * `false` leaves `ctx` untouched, so the caller falls through to the Dissolve mask.
+ * layer broken by one of ten effects whose strength runs out, Pixel reveal hot blocks halving
+ * into sharp pixels (`pieces`: a text layer's own pieces in frame px, only Pixel reveal reads
+ * them). Same contract as any of them: `false` leaves `ctx` untouched, so the caller falls
+ * through to the Dissolve mask.
  */
 export function drawRevealShaderStyle(
   ctx: CanvasRenderingContext2D,
@@ -396,8 +402,10 @@ export function drawRevealShaderStyle(
   base: DOMMatrix,
   drawLayer: (target: CanvasRenderingContext2D) => void,
   stamp: { alpha: number; blend: GlobalCompositeOperation },
+  pieces?: PixelRevealPiece[],
 ): boolean {
   if (reveal.style === 'settle') return drawRevealSettle(ctx, reveal, W, H, base, drawLayer, stamp)
+  if (reveal.style === 'pixelreveal') return drawRevealPixelReveal(ctx, reveal, W, H, base, drawLayer, stamp, pieces)
   return reveal.style === 'assemble'
     ? drawRevealAssemble(ctx, reveal, W, H, base, drawLayer, stamp)
     : drawRevealPixels(ctx, reveal, W, H, base, drawLayer, stamp)
