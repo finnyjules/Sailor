@@ -1,6 +1,6 @@
-// Pure block-fill maths for the Pixel reveal gallery tile (task 4 of the addendum): turns a
-// look's settings and a bar's `amount` into filled RGBA blocks on the shared 48×30 preview
-// card, using the CPU mirrors from `pixelReveal.ts` (`pickGrid`, `revealWhen`, `levelAt`,
+// Pure block-fill maths for the Pixel reveal gallery tile: turns a look's settings and a bar's
+// `amount` into filled RGBA blocks on the shared 48×30 preview card, using the CPU mirrors
+// from `pixelReveal.ts` (`pickGrid`, `revealWhen`, `levelAt`,
 // `pieceStates`) so the tile's SHAPE agrees with the real transition, even though its blocks
 // are box-averaged here rather than sampled from a GPU mipmap atlas. No Vue, no DOM — only
 // `MotionPixelRevealPreview.vue` calls this.

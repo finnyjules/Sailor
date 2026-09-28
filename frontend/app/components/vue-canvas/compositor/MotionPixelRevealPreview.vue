@@ -1,7 +1,7 @@
 <script setup lang="ts">
-/** The gallery tile's tiny live preview for the nine Pixel reveal looks (task 4 of the 2026-09-28
- *  addendum) — each its own pair of tiles (In / Out), told apart by the `out` prop, same as
- *  `MotionSettlePreview`. Runs on the same 48×30 canvas as `MotionDitherPreview`/
+/** The gallery tile's tiny live preview for the nine Pixel reveal looks — each its own pair of
+ *  tiles (In / Out), told apart by the `out` prop, same as `MotionSettlePreview`. Runs on the
+ *  same 48×30 canvas as `MotionDitherPreview`/
  *  `MotionSettlePreview`, drawing the SAME synthetic card (`previewCard.ts`) so every tile
  *  agrees on what "the layer" looks like.
  *

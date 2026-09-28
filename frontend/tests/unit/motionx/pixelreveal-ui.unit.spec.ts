@@ -1,5 +1,5 @@
 /**
- * PIXEL REVEAL — THE UI (task 4 of the 2026-09-28 addendum).
+ * PIXEL REVEAL — THE UI.
  *
  * Source-level guards over the pixel-reveal inspector block and its gallery preview, in the
  * same idiom `settle-ui.unit.spec.ts` uses for the Settle block: no rendering, just pinning
@@ -47,6 +47,15 @@ describe('the pixel-reveal inspector block', () => {
 
   it('lives in its own v-else-if sibling of the settle/morph blocks', () => {
     expect(src).toMatch(/v-else-if="behaviour\.kind === 'pixelreveal'"/)
+  })
+
+  it('the Open into keyframes button\'s v-if excludes pixelreveal as well as dither and settle — a pixel-reveal bar is motion-only and cannot be baked', () => {
+    const tag = (src.match(/<StudioButton\b[\s\S]*?<\/StudioButton>/g) ?? [])
+      .find((t) => t.includes('data-testid="beh-open"'))
+    expect(tag, 'no StudioButton carries data-testid="beh-open"').toBeTruthy()
+    expect(tag).toMatch(/v-if="[^"]*behaviour\.kind !== 'dither'[^"]*"/)
+    expect(tag).toMatch(/v-if="[^"]*behaviour\.kind !== 'settle'[^"]*"/)
+    expect(tag).toMatch(/v-if="[^"]*behaviour\.kind !== 'pixelreveal'[^"]*"/)
   })
 
   it('reads pixel-reveal params through the ONE `pixelRevealParams` reader, like `reveal`/`settle` do', () => {

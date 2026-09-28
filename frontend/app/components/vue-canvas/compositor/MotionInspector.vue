@@ -143,8 +143,8 @@ const ditherDriftHint = computed(() => (
 // Settle (Addendum 3, Part 4): the ONE reader of a settle bar's stored params, same idiom as
 // `reveal` above — every settle-only computed reads off this rather than re-guessing a default.
 const settle = computed(() => settleParams(behaviour.value?.params))
-// Pixel reveal (task 4 of the addendum): the ONE reader of a pixel-reveal bar's stored
-// params, same idiom as `reveal`/`settle` above.
+// Pixel reveal: the ONE reader of a pixel-reveal bar's stored params, same idiom as
+// `reveal`/`settle` above.
 const pixelReveal = computed(() => pixelRevealParams(behaviour.value?.params))
 // A text layer is the only one the inspector actually measures piece counts for — `pieceCounts`
 // arrives from CompositorModal only when the selected layer is text, so its presence IS the
@@ -917,7 +917,7 @@ function onGradient(g: Gradient) {
     <div class="mt-2 flex items-center justify-between border-t border-white/10 pt-2">
       <StudioButton data-testid="beh-delete" title="Remove this behaviour (Delete)"
         @click="emit('behaviour-delete', behaviour.id)">Delete</StudioButton>
-      <StudioButton v-if="!isTextBeh && behaviour.kind !== 'dither' && behaviour.kind !== 'settle'" data-testid="beh-open" title="Bake into editable control-point bands"
+      <StudioButton v-if="!isTextBeh && behaviour.kind !== 'dither' && behaviour.kind !== 'settle' && behaviour.kind !== 'pixelreveal'" data-testid="beh-open" title="Bake into editable control-point bands"
         @click="emit('behaviour-open', behaviour.id)">Open into keyframes</StudioButton>
     </div>
   </div>
