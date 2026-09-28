@@ -10,6 +10,7 @@ import { collectFillImageSrcs, textDrawsFromOutlines, transformCase } from '~/co
 import { effectStackOf, isGeometryKind } from '~/lib/compositor/effectStack'
 import { depthSourceFromViewUrl, type DepthRef } from '~/lib/compositor/depthRegistry'
 import { revealEffectIdsFor } from '~/lib/motionx/reveal/params'
+import { pixelRevealSplitLayerIds } from '~/lib/motionx/reveal/pixelReveal'
 import { resolveEffectId } from '~/lib/shaderfx/catalogStore'
 import { clipPlayedSeconds, type ImageClip } from '~/lib/compositor/clip'
 import { deriveMasterClock } from '~/lib/compositor/masterClock'
@@ -98,7 +99,9 @@ export function geometryPartnerIds(layers: readonly LocalLayer[]): Set<string> {
 /** Every layer the painter outlines on another's behalf: the geometry-effect partners above
  *  PLUS both ends of every Motion "Morph into" transition (the behaviour's own layer and its
  *  `params.target`) — `resolveMorphs` outlines both, and a text end without its outline font
- *  falls back to a cross-fade. The ONE statement of that set: `planFrameExport` (per-font
+ *  falls back to a cross-fade — PLUS every layer a Pixel reveal bar splits into pieces
+ *  (`pixelRevealSplitLayerIds`): the pieces are the text's outline cells, and without the font
+ *  the bar plays as one whole piece. The ONE statement of that set: `planFrameExport` (per-font
  *  `outline`) and gather.ts's `computeNeedsOutlines` (which bundle) both read it. Muted
  *  behaviours count too, for the same reason `visible` is ignored above. */
 export function outlinePartnerIds(
@@ -112,6 +115,7 @@ export function outlinePartnerIds(
     const target = b.params?.target
     if (typeof target === 'string' && target.startsWith('l:')) out.add(target.slice(2))
   }
+  for (const id of pixelRevealSplitLayerIds(behaviours)) out.add(id)
   return out
 }
 

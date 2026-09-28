@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest'
 import {
   PIXEL_REVEAL_LOOKS, PIXEL_REVEAL_PATTERNS, PIXEL_REVEAL_DIRECTIONS,
   pixelRevealParams, pickGrid, pieceOrder, pieceStates, lookTotal,
-  revealWhen, levelAt, pixelRevealLookOf,
+  revealWhen, levelAt, pixelRevealLookOf, pixelRevealSplitLayerIds,
 } from '~/lib/motionx/reveal/pixelReveal'
 
 describe('PIXEL_REVEAL_LOOKS — the 9 gallery presets', () => {
@@ -398,5 +398,22 @@ describe('levelAt — CPU mirror of the level thresholds', () => {
 
   it('reaches the full level count at life 1 with levels = 1', () => {
     expect(levelAt(1, { x: 0, y: 0 }, 1)).toBe(1)
+  })
+})
+
+describe('pixelRevealSplitLayerIds', () => {
+  const bar = (layerId: string, params: Record<string, unknown> = {}, kind = 'pixelreveal') => ({ kind, layerId, params })
+
+  it('names each layer a bar splits into words, letters or lines — stored or the look\'s own', () => {
+    expect([...pixelRevealSplitLayerIds([
+      bar('a', { pieces: 'words' }), bar('b', { pieces: 'letters' }), bar('c', { pieces: 'lines' }), bar('d', { look: 'materialize' }),
+    ])]).toEqual(['a', 'b', 'c', 'd'])
+  })
+
+  it('leaves out whole-piece bars, other behaviours, and bars with no layer', () => {
+    expect(pixelRevealSplitLayerIds([
+      bar('a', { pieces: 'whole' }), bar('b', { pieces: 'words' }, 'settle'), bar('', { pieces: 'words' }),
+    ]).size).toBe(0)
+    expect(pixelRevealSplitLayerIds(undefined).size).toBe(0)
   })
 })

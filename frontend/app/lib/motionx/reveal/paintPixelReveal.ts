@@ -455,58 +455,99 @@ interface GlState {
 }
 
 let glState: GlState | null = null
+/** Set only when the program will not compile or link on a live context — the same source would
+ *  fail again, so the style stays off for the session. */
 let glFailed = false
+/** Every other failure (no context handed out, a lost context, a null GL object) is treated as
+ *  passing: no new context is tried before this time, and the wait doubles on each failure in a
+ *  row, so a refusing browser is asked a few times a minute, not on every frame. */
+let glRetryAt = 0
+let glMisses = 0
+const GL_RETRY_FIRST_MS = 500
+const GL_RETRY_MAX_MS = 30_000
 
-function dropGl(): void { glState = null }
+const makeGlCanvas = (): Canvas | null => (typeof document === 'undefined' ? null : document.createElement('canvas'))
+const clockNow = (): number => (typeof performance !== 'undefined' ? performance.now() : Date.now())
+let createGlCanvas: () => Canvas | null = makeGlCanvas
+let glNow: () => number = clockNow
 
-function logGlFailure(message: string): void {
-  glFailed = true
-  console.error('[pixelReveal]', message)
+/** Tests only: swap how the GL canvas is made and the clock the retry wait reads, and forget
+ *  the current context and every failure. Passing nothing restores the real ones. */
+export function setPixelRevealGlDeps(deps: { createCanvas?: () => Canvas | null; now?: () => number } = {}): void {
+  createGlCanvas = deps.createCanvas ?? makeGlCanvas
+  glNow = deps.now ?? clockNow
+  glState = null
+  glFailed = false
+  glRetryAt = 0
+  glMisses = 0
 }
 
-/** The ONE WebGL2 context this painter owns, built on first use. A lost context is dropped and
- *  rebuilt on the next call; a context that cannot compile or link the program is a permanent
- *  failure for the session (logged once). */
+/** Drop the context and wait before building another one — at the earliest on a later frame. */
+function glMiss(): null {
+  glState = null
+  glRetryAt = glNow() + Math.min(GL_RETRY_MAX_MS, GL_RETRY_FIRST_MS * 2 ** glMisses)
+  glMisses++
+  return null
+}
+
+function dropGl(): void { glMiss() }
+
+function logGlFailure(message: string): null {
+  glState = null
+  glFailed = true
+  console.error('[pixelReveal]', message)
+  return null
+}
+
+/** The ONE WebGL2 context this painter owns, built on first use. A compile or link failure on a
+ *  live context turns the style off for the session (logged once). Anything else — no context,
+ *  a lost one, a GL object that could not be made — drops the context and tries again after a
+ *  growing wait, never on every frame. */
 function glInit(): GlState | null {
   if (glState && glState.gl.isContextLost()) dropGl()
   if (glState || glFailed) return glState
-  if (typeof document === 'undefined') return null
-  const canvas = document.createElement('canvas')
+  if (glNow() < glRetryAt) return null
+  const canvas = createGlCanvas()
+  if (!canvas) return glMiss()
   const gl = canvas.getContext('webgl2', {
     premultipliedAlpha: true, alpha: true, antialias: false, preserveDrawingBuffer: true, depth: false, stencil: false,
-  })
-  if (!gl) { logGlFailure('WebGL2 is not available in this browser'); return null }
+  }) as WebGL2RenderingContext | null
+  if (!gl) return glMiss()
   canvas.addEventListener('webglcontextlost', () => { if (glState?.canvas === canvas) dropGl() })
 
-  const compile = (type: number, src: string): WebGLShader | null => {
+  const compile = (type: number, src: string): WebGLShader | null | 'failed' => {
     const sh = gl.createShader(type)
     if (!sh) return null
     gl.shaderSource(sh, src)
     gl.compileShader(sh)
     if (!gl.getShaderParameter(sh, gl.COMPILE_STATUS)) {
-      if (!gl.isContextLost()) logGlFailure(`shader compile failed: ${gl.getShaderInfoLog(sh)}`)
-      return null
+      if (gl.isContextLost()) return null
+      logGlFailure(`shader compile failed: ${gl.getShaderInfoLog(sh)}`)
+      return 'failed'
     }
     return sh
   }
   const vs = compile(gl.VERTEX_SHADER, PIXEL_REVEAL_VS)
-  const fs = vs && compile(gl.FRAGMENT_SHADER, PIXEL_REVEAL_FS)
-  if (!vs || !fs) return null
+  if (vs === 'failed') return null
+  if (!vs) return glMiss()
+  const fs = compile(gl.FRAGMENT_SHADER, PIXEL_REVEAL_FS)
+  if (fs === 'failed') return null
+  if (!fs) return glMiss()
   const program = gl.createProgram()
-  if (!program) return null
+  if (!program) return glMiss()
   gl.attachShader(program, vs)
   gl.attachShader(program, fs)
   gl.linkProgram(program)
   if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
-    if (!gl.isContextLost()) logGlFailure(`program link failed: ${gl.getProgramInfoLog(program)}`)
-    return null
+    if (gl.isContextLost()) return glMiss()
+    return logGlFailure(`program link failed: ${gl.getProgramInfoLog(program)}`)
   }
 
   // One unit quad, drawn as a strip; the vertex shader places it on the piece's cell.
   const vao = gl.createVertexArray()
   const vbo = gl.createBuffer()
   const texture = gl.createTexture()
-  if (!vao || !vbo || !texture) return null
+  if (!vao || !vbo || !texture) return glMiss()
   gl.bindVertexArray(vao)
   gl.bindBuffer(gl.ARRAY_BUFFER, vbo)
   gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([0, 0, 1, 0, 0, 1, 1, 1]), gl.STATIC_DRAW)
@@ -518,11 +559,13 @@ function glInit(): GlState | null {
   gl.bindTexture(gl.TEXTURE_2D, texture)
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE)
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE)
+  if (gl.isContextLost()) return glMiss()
 
   glState = {
     canvas, gl, program, vao, texture, uniforms: new Map(),
     maxTexture: Number(gl.getParameter(gl.MAX_TEXTURE_SIZE)) || 4096,
   }
+  glMisses = 0
   return glState
 }
 
@@ -565,6 +608,9 @@ function renderWithGl(job: PixelRevealGlJob): Canvas | null {
   }
   if (canvas.width !== fw) canvas.width = fw
   if (canvas.height !== fh) canvas.height = fh
+  // A browser may hand back a smaller drawing buffer than asked for (large sizes near its cap);
+  // the viewport and the read-back would then be wrong, so this frame is not drawn here.
+  if (gl.drawingBufferWidth !== fw || gl.drawingBufferHeight !== fh) return null
 
   gl.viewport(0, 0, fw, fh)
   gl.useProgram(program)

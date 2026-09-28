@@ -12,10 +12,11 @@ import {
   paintLayerStack, ensureLayerFonts, ensureLayerImages,
 } from '~/composables/useCompositorLayers'
 import './paint' // ensure the motion painter is registered
-import { motionUsesShaderStyle } from '~/lib/motionx/reveal'
+import { motionUsesShaderStyle, pixelRevealSplitLayerIds } from '~/lib/motionx/reveal'
 import { ensureRevealShadersReady } from '~/lib/motionx/reveal/paintPixels'
 import { uploadFrameBatch } from '~/lib/studio/frameUpload'
 import { useLibraryFonts } from '~/composables/useLibraryFonts'
+import { compositorFontToken, warmCompositorFont } from '~/lib/compositor/textOutline'
 import type { FrameMotion } from './types'
 
 /**
@@ -75,7 +76,7 @@ export async function prepareMotionFramePainter(
   H: number,
   motion: FrameMotion,
   prepareFrame?: (t: number) => Promise<void>,
-  deps: { paint?: typeof paintLayerStack; ensure?: () => Promise<void> } = {},
+  deps: { paint?: typeof paintLayerStack; ensure?: () => Promise<void>; warmFont?: (token: string) => Promise<boolean> } = {},
   doc?: FrameDocPaint,
 ): Promise<MotionFramePainter> {
   if (deps.ensure) {
@@ -93,6 +94,19 @@ export async function prepareMotionFramePainter(
     // consistently, which is what a cold live frame already does.
     if (motionUsesShaderStyle(motion.behaviours)) await ensureRevealShadersReady(motion.behaviours)
   }
+  // A Pixel reveal bar that splits text into words, letters or lines takes its pieces from the
+  // text's OUTLINE font, which loads on its own, lazily — a cold load landing mid-bake would
+  // draw the early frames as one whole piece and the later ones per word. Wait for each such
+  // font first; one that fails leaves every frame whole, consistently.
+  const warmFont = deps.warmFont ?? warmCompositorFont
+  const outlineTokens = new Set<string>()
+  for (const id of pixelRevealSplitLayerIds(motion.behaviours)) {
+    const l = localLayers.find(x => x.id === id)
+    if (l?.kind !== 'text') continue
+    const token = compositorFontToken(l as TextLayer)
+    if (token) outlineTokens.add(token)
+  }
+  await Promise.all([...outlineTokens].map(token => warmFont(token)))
   const paint = deps.paint ?? paintLayerStack
   // Snapshot the stack and layer list ONCE — buildItems() and localLayers
   // close over live reactive state, and the bake loop yields to the event

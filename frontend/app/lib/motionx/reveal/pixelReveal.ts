@@ -274,6 +274,21 @@ export function pixelRevealParams(params: Record<string, unknown> | undefined): 
   }
 }
 
+/** The ids of every layer a Pixel reveal bar splits into pieces (words, letters or lines — any
+ *  resolved `pieces` but `whole`). A text layer's pieces come from its glyph outlines, so these
+ *  are the layers whose outline font an export must carry and a bake must have loaded before its
+ *  first frame. Muted bars count too; a layer that is not text is the caller's to skip. */
+export function pixelRevealSplitLayerIds(
+  behaviours: ReadonlyArray<{ kind?: unknown; layerId?: unknown; params?: Record<string, unknown> }> | null | undefined,
+): Set<string> {
+  const out = new Set<string>()
+  for (const b of behaviours ?? []) {
+    if (b?.kind !== 'pixelreveal' || typeof b.layerId !== 'string' || !b.layerId) continue
+    if (pixelRevealParams(b.params).pieces !== 'whole') out.add(b.layerId)
+  }
+  return out
+}
+
 // ── grid size ────────────────────────────────────────────────────────────────────────────────
 
 export interface PixelRevealGrid { s: number; m: number; k: number; levels: number }

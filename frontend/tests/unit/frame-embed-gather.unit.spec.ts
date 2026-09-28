@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest'
 import { buildFrameSnapshot, computeNeedsOutlines, formatBytes, isBlocked, type FrameExportIO } from '~/lib/embed/frame/gather'
-import { planFrameExport } from '~/lib/embed/frame/plan'
+import { outlinePartnerIds, planFrameExport } from '~/lib/embed/frame/plan'
 import { assetKey, type FrameVariant } from '~/lib/embed/frame/types'
 import { createAppFrameExportIO, makeFontSource } from '~/lib/embed/frame/appIO'
 import { createTextLayer, createImageLayer, createRectLayer } from '~/composables/useCompositorLayers'
@@ -302,6 +302,45 @@ describe('computeNeedsOutlines', () => {
       expect(computeNeedsOutlines(planOf(shapes), shapes)).toBe(false)
       const none = morphVariant([t, a], [])
       expect(computeNeedsOutlines(planOf(none), none)).toBe(false)
+    })
+  })
+
+  // Pixel reveal: a bar that splits text into words, letters or lines takes its pieces from the
+  // text's outline font, so that font must ship (and the full bundle with it) — the lean
+  // bundle's stand-in has no font and would play every bar as one whole piece.
+  describe('a Motion Pixel reveal bar', () => {
+    const revealVariant = (layers: any[], behaviours: any[]): FrameVariant => ({
+      ...v(layers), motion: { fps: 30, duration: 3, behaviours } as any,
+    })
+    const planOf = (variant: FrameVariant) => planFrameExport({
+      variant, fit: 'fit', wiredSlots: [], catalogIds: new Set(), hasMotion: true, animatedFill: false,
+    })
+    const bar = (layerId: string, params: Record<string, unknown>) => ({
+      id: 'b1', kind: 'pixelreveal', layerId, timing: { start: 0, duration: 1 }, params: { dir: 'in', ...params },
+    })
+
+    it('ships the outline font for a text layer it splits into words', () => {
+      const t = createTextLayer({ text: 'Two words', fontFamily: 'Inter', fontWeight: 400 })
+      const variant = revealVariant([t], [bar(t.id, { look: 'materialize', pieces: 'words' })])
+      expect(outlinePartnerIds(variant.layers, variant.motion!.behaviours as any).has(t.id)).toBe(true)
+      expect(planOf(variant).fonts.find(f => f.family === 'Inter')?.outline).toBe(true)
+      expect(computeNeedsOutlines({ fonts: [] }, variant)).toBe(true)
+    })
+
+    it('counts a look whose own default splits the text, with no pieces stored', () => {
+      const t = createTextLayer({ text: 'Hi', fontFamily: 'Inter', fontWeight: 400 })
+      const variant = revealVariant([t], [bar(t.id, { look: 'materialize' })])
+      expect(outlinePartnerIds(variant.layers, variant.motion!.behaviours as any).has(t.id)).toBe(true)
+    })
+
+    it('does not ask for outlines when the bar keeps the text whole, or sits on a shape', () => {
+      const t = createTextLayer({ text: 'Hi', fontFamily: 'Inter', fontWeight: 400 })
+      const r = createRectLayer({})
+      const whole = revealVariant([t], [bar(t.id, { look: 'materialize', pieces: 'whole' })])
+      expect(outlinePartnerIds(whole.layers, whole.motion!.behaviours as any).has(t.id)).toBe(false)
+      expect(computeNeedsOutlines(planOf(whole), whole)).toBe(false)
+      const shape = revealVariant([t, r], [bar(r.id, { look: 'materialize', pieces: 'words' })])
+      expect(computeNeedsOutlines(planOf(shape), shape)).toBe(false)
     })
   })
 

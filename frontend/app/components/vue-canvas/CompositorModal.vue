@@ -148,7 +148,7 @@ import { mergeAgentBands } from '~/lib/motionx/adapter/agentBands'
 import { migrateLayerAnimations } from '~/lib/motionx/adapter/migrateLayerAnimation'
 import { legacyBandForLayer } from '~/lib/motionx/bands'
 import { isTextBehaviour, canAnimateLetters } from '~/lib/motionx/text'
-import { motionUsesShaderStyle } from '~/lib/motionx/reveal'
+import { motionUsesShaderStyle, pixelRevealSplitLayerIds } from '~/lib/motionx/reveal'
 import { ensureRevealShadersReady } from '~/lib/motionx/reveal/paintPixels'
 import type { AnimatableProperty } from '~/lib/motionx/adapter/frame'
 import MotionPropertyPicker from '~/components/vue-canvas/compositor/MotionPropertyPicker.vue'
@@ -6034,6 +6034,17 @@ watch(motionBehaviours, (list) => {
       const token = compositorFontToken(layer)
       if (token) void warmCompositorFont(token)
     }
+  }
+}, { immediate: true, deep: true })
+// A Pixel reveal bar that splits text into words, letters or lines takes its pieces from the
+// text's outline font; warm it as soon as such a bar exists, so the first play splits from its
+// first frame. `onCompositorFontReady` above repaints once it lands.
+watch(motionBehaviours, (list) => {
+  for (const id of pixelRevealSplitLayerIds(list)) {
+    const layer = localLayers.value.find(l => l.id === id) as any
+    if (!layer || layer.kind !== 'text') continue
+    const token = compositorFontToken(layer)
+    if (token) void warmCompositorFont(token)
   }
 }, { immediate: true, deep: true })
 // A Combine-shapes (boolean) effect no-ops on its cold first frame while paper.js loads (it is

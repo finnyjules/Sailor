@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from 'vitest'
 import { prepareMotionFramePainter } from '../../app/lib/motion/bake'
+import { compositorFontToken } from '../../app/lib/compositor/textOutline'
 
 const motion = { fps: 25, duration: 0.2 } as any   // 5 frames
 
@@ -98,5 +99,50 @@ describe('prepareMotionFramePainter', () => {
     const p = await prepareMotionFramePainter(() => [], [], 10, 10, motion, undefined, { paint, ensure: async () => {} })
     await p.paint(0, fakeCtx(10, 10).ctx)
     expect(paint.mock.calls[0]![13]).toBeUndefined()
+  })
+})
+
+// A Pixel reveal bar that splits text takes its pieces from the text's outline font; a bake must
+// have that font before its first frame, or one video plays whole pieces, then per word.
+describe('prepareMotionFramePainter — outline fonts for Pixel reveal pieces', () => {
+  const text = (id: string, fontFamily: string, fontWeight = 400) =>
+    ({ id, kind: 'text', text: 'Two words', fontFamily, fontWeight }) as any
+  const bar = (layerId: string, params: Record<string, unknown>) =>
+    ({ id: `b-${layerId}`, kind: 'pixelreveal', layerId, timing: { start: 0, duration: 0.2 }, params: { dir: 'in', ...params } })
+
+  it('awaits the font of every text layer a bar splits, before handing back the painter', async () => {
+    const t = text('t1', 'Inter', 700)
+    let settle!: (ok: boolean) => void
+    const warmFont = vi.fn((_token: string) => new Promise<boolean>(r => { settle = r }))
+    const m = { ...motion, behaviours: [bar(t.id, { look: 'materialize', pieces: 'words' })] }
+    let ready = false
+    const pending = prepareMotionFramePainter(() => [], [t], 10, 10, m, undefined, { paint: vi.fn(), ensure: async () => {}, warmFont })
+      .then(p => { ready = true; return p })
+    await new Promise(r => setTimeout(r, 0))
+    expect(warmFont).toHaveBeenCalledTimes(1)
+    expect(warmFont).toHaveBeenCalledWith(compositorFontToken(t))
+    expect(ready).toBe(false)
+    settle(true)
+    await pending
+    expect(ready).toBe(true)
+  })
+
+  it('warms each token once, and nothing for a whole-piece bar, a shape, or a system font', async () => {
+    const a = text('a', 'Inter'), b = text('b', 'Inter'), whole = text('w', 'Roboto'), sys = text('s', 'system-ui')
+    const rect = { id: 'r', kind: 'rect' } as any
+    const warmFont = vi.fn(async () => true)
+    const m = { ...motion, behaviours: [
+      bar(a.id, { pieces: 'words' }), bar(b.id, { pieces: 'letters' }), bar(whole.id, { pieces: 'whole' }),
+      bar(rect.id, { pieces: 'words' }), bar(sys.id, { pieces: 'words' }),
+    ] }
+    await prepareMotionFramePainter(() => [], [a, b, whole, rect, sys], 10, 10, m, undefined, { paint: vi.fn(), ensure: async () => {}, warmFont })
+    expect(warmFont.mock.calls.map(c => c[0])).toEqual([compositorFontToken(a)])
+  })
+
+  it('a font that fails to load still hands back a painter (every frame then draws one whole piece)', async () => {
+    const t = text('t1', 'Inter')
+    const m = { ...motion, behaviours: [bar(t.id, { pieces: 'words' })] }
+    const p = await prepareMotionFramePainter(() => [], [t], 10, 10, m, undefined, { paint: vi.fn(), ensure: async () => {}, warmFont: async () => false })
+    expect(p.total).toBe(5)
   })
 })

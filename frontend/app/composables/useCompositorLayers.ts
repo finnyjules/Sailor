@@ -5800,19 +5800,29 @@ export function textMotionCells(layer: TextLayer, W: number): TextCell[] | null 
   return collect.out.length && collect.cells!.length ? collect.cells! : null
 }
 
+/** Can Pixel reveal split this layer into pieces at all? Only text that is not rotated, skewed,
+ *  on a path, placed runs, expressive or moving its letters, and that has no visible layer
+ *  effect: each piece copies only its own tile, so a shadow, glow, blur or wide stroke reaching
+ *  past it would be cut for the whole bar and pop back in at its end. */
+export function pixelRevealCanSplit(layer: LocalLayer): boolean {
+  if (layer.kind !== 'text') return false
+  const t = layer as TextLayer
+  if (Math.abs(t.rotation || 0) > 0.01 || t.skewX || t.skewY || t.path || t.runs?.length || t.expressive) return false
+  if ((layer as unknown as { textMotion?: unknown }).textMotion) return false
+  return !effectStackOf(layer as Parameters<typeof effectStackOf>[0]).some(e => e.visible !== false)
+}
+
 /** Pixel reveal: a text layer's pieces in FRAME px (the painter maps them to device px), placed
  *  exactly as `paintLayer` draws the text — translate to the layer's centre, then its uniform
  *  scale (cloner copy × responsive layout × a Pulse's draw-time `motionScale`, all about that
- *  centre). `undefined` → ONE piece for the whole layer: not a text layer, `pieces: 'whole'`,
- *  rotated, skewed, on a path, placed runs, expressive, moving letters, a cloner array, or no
- *  cells (system / loading font). */
+ *  centre). `undefined` → ONE piece for the whole layer: `pieces: 'whole'`, a layer
+ *  `pixelRevealCanSplit` refuses, a cloner array, or no cells (system / loading font). */
 function pixelRevealPiecesFor(layer: LocalLayer, rv: MotionReveal, W: number, H: number): PixelRevealPiece[] | undefined {
   if (rv.style !== 'pixelreveal' || layer.kind !== 'text') return undefined
   const by = rv.pixel?.pieces
   if (!by || by === 'whole') return undefined
+  if (!pixelRevealCanSplit(layer)) return undefined
   const t = layer as TextLayer
-  if (Math.abs(t.rotation || 0) > 0.01 || t.skewX || t.skewY || t.path || t.runs?.length || t.expressive) return undefined
-  if ((layer as unknown as { textMotion?: unknown }).textMotion) return undefined
   const copies = expandClones(layer.cloner, W / H, (layer as { motionCopy?: number }).motionCopy)
   const c = copies.length === 1 ? copies[0]! : null
   if (!c || Math.abs(c.drot) > 0.01) return undefined

@@ -8,16 +8,20 @@
  * draw; `setRevealPixelsDeps({ makeCanvas })` swaps the scratch canvases for recording fakes
  * (the `Proxy` idiom of `reveal-paint-settle.unit.spec.ts`).
  */
-import { describe, it, expect, beforeAll, afterAll, afterEach } from 'vitest'
+import { describe, it, expect, beforeAll, afterAll, afterEach, vi } from 'vitest'
 import {
   drawRevealPixelReveal, inkBoxOf, packPixelRevealAtlas, pieceToDevice, pixelRevealAvailable, pixelRevealTextPieces,
-  planPixelReveal, setPixelRevealDeps, PIXEL_REVEAL_FS, PIXEL_REVEAL_VS,
+  planPixelReveal, setPixelRevealDeps, setPixelRevealGlDeps, PIXEL_REVEAL_FS, PIXEL_REVEAL_VS,
 } from '~/lib/motionx/reveal/paintPixelReveal'
 import type { PixelRevealGlJob, PixelRevealPiece } from '~/lib/motionx/reveal/paintPixelReveal'
 import { drawRevealShaderStyle, revealShaderReady, setRevealPixelsDeps } from '~/lib/motionx/reveal/paintPixels'
 import { revealParams, pixelRevealParams, pickGrid } from '~/lib/motionx/reveal'
 import type { MotionReveal } from '~/lib/motionx/reveal'
 import type { TextCell } from '~/lib/motionx/text/units'
+import { readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
+import { createRectLayer, createTextLayer, pixelRevealCanSplit } from '~/composables/useCompositorLayers'
+import { createEffect } from '~/lib/compositor/effectStack'
 
 // ── minimal DOMMatrix stand-in (this file only) ────────────────────────────────────────────
 
@@ -454,5 +458,208 @@ describe('the shaders', () => {
       'uG', 'uM', 'uK', 'uLevels', 'uDir', 'uPat', 'uHot', 'uHot2', 'uTear', 'uTime']) {
       expect(PIXEL_REVEAL_FS).toContain(u)
     }
+  })
+})
+
+// ── the WebGL2 context's lifecycle ──────────────────────────────────────────────────────────
+// A fake WebGL2 context: every GL call is a no-op that hands back an object, except the ones a
+// test pins. `buffer` is the drawing buffer the browser hands out (default: the canvas size).
+
+interface FakeGlOpts {
+  compileOk?: boolean
+  linkOk?: boolean
+  lost?: () => boolean
+  nullTexture?: boolean
+  buffer?: { w: number; h: number }
+}
+
+function makeGlCanvas(opts: FakeGlOpts = {}) {
+  const canvas = { width: 300, height: 150, __scratchId: 'glc', addEventListener: vi.fn() } as Record<string, unknown>
+  const gl = new Proxy({}, {
+    get(_t, key: string) {
+      if (key === 'canvas') return canvas
+      if (key === 'drawingBufferWidth') return opts.buffer?.w ?? canvas.width
+      if (key === 'drawingBufferHeight') return opts.buffer?.h ?? canvas.height
+      if (key === 'isContextLost') return () => opts.lost?.() ?? false
+      if (key === 'getShaderParameter') return () => opts.compileOk ?? true
+      if (key === 'getProgramParameter') return () => opts.linkOk ?? true
+      if (key === 'getParameter') return () => 4096
+      if (key === 'getAttribLocation') return () => 0
+      if (key === 'getShaderInfoLog' || key === 'getProgramInfoLog') return () => 'bad'
+      if (key === 'createTexture') return () => (opts.nullTexture ? null : {})
+      if (/^[A-Z_0-9]+$/.test(key)) return 1
+      return () => ({})
+    },
+  })
+  canvas.getContext = vi.fn((type: string) => (type === 'webgl2' ? gl : null))
+  return canvas
+}
+
+describe('the WebGL2 context', () => {
+  let clock = 0
+  afterEach(() => { setPixelRevealGlDeps(); vi.restoreAllMocks() })
+  const useGl = (make: () => unknown) => {
+    clock = 1000
+    const createCanvas = vi.fn(make as () => HTMLCanvasElement | null)
+    setPixelRevealGlDeps({ createCanvas, now: () => clock })
+    setPixelRevealDeps()
+    return createCanvas
+  }
+
+  it('a context the browser refuses once is asked for again later — and the painter then works', () => {
+    const refusing = { ...makeGlCanvas(), getContext: () => null }
+    let n = 0
+    const createCanvas = useGl(() => (n++ === 0 ? refusing : makeGlCanvas()))
+    expect(pixelRevealAvailable()).toBe(false)
+    // Not on every frame: the next asks inside the wait make no new canvas.
+    clock += 16
+    expect(pixelRevealAvailable()).toBe(false)
+    expect(createCanvas).toHaveBeenCalledTimes(1)
+    clock += 60_000
+    expect(pixelRevealAvailable()).toBe(true)
+    expect(createCanvas).toHaveBeenCalledTimes(2)
+    // …and it is kept: no third canvas.
+    expect(pixelRevealAvailable()).toBe(true)
+    expect(createCanvas).toHaveBeenCalledTimes(2)
+  })
+
+  it('the wait grows with each refusal in a row, so a browser that keeps refusing is rarely asked', () => {
+    const createCanvas = useGl(() => ({ ...makeGlCanvas(), getContext: () => null }))
+    const attemptsOver = (ms: number) => {
+      const before = createCanvas.mock.calls.length
+      for (let t = 0; t < ms; t += 16) { clock += 16; pixelRevealAvailable() }
+      return createCanvas.mock.calls.length - before
+    }
+    pixelRevealAvailable()
+    const firstMinute = attemptsOver(60_000)
+    const secondMinute = attemptsOver(60_000)
+    expect(firstMinute).toBeLessThan(10)
+    expect(secondMinute).toBeLessThanOrEqual(2)
+    expect(secondMinute).toBeGreaterThanOrEqual(1)
+  })
+
+  it('a shader that will not compile is latched: no second context, however long it waits', () => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const createCanvas = useGl(() => makeGlCanvas({ compileOk: false }))
+    expect(pixelRevealAvailable()).toBe(false)
+    clock += 3_600_000
+    expect(pixelRevealAvailable()).toBe(false)
+    expect(createCanvas).toHaveBeenCalledTimes(1)
+    expect(error).toHaveBeenCalledTimes(1)
+  })
+
+  it('a program that will not link is latched the same way', () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    const createCanvas = useGl(() => makeGlCanvas({ linkOk: false }))
+    expect(pixelRevealAvailable()).toBe(false)
+    clock += 3_600_000
+    expect(pixelRevealAvailable()).toBe(false)
+    expect(createCanvas).toHaveBeenCalledTimes(1)
+  })
+
+  it('a compile failure on a LOST context is not latched — it is retried after the wait', () => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {})
+    let n = 0
+    const createCanvas = useGl(() => (n++ === 0 ? makeGlCanvas({ compileOk: false, lost: () => true }) : makeGlCanvas()))
+    expect(pixelRevealAvailable()).toBe(false)
+    clock += 16
+    expect(pixelRevealAvailable()).toBe(false)
+    expect(createCanvas).toHaveBeenCalledTimes(1)
+    clock += 60_000
+    expect(pixelRevealAvailable()).toBe(true)
+    expect(error).not.toHaveBeenCalled()
+  })
+
+  it('a GL object that cannot be made does not build a new context on every frame', () => {
+    let n = 0
+    const createCanvas = useGl(() => (n++ === 0 ? makeGlCanvas({ nullTexture: true }) : makeGlCanvas()))
+    expect(pixelRevealAvailable()).toBe(false)
+    for (let i = 0; i < 10; i++) { clock += 16; pixelRevealAvailable() }
+    expect(createCanvas).toHaveBeenCalledTimes(1)
+    clock += 60_000
+    expect(pixelRevealAvailable()).toBe(true)
+  })
+
+  it('a context lost after it was built is dropped, and rebuilt only on a later frame', () => {
+    const first = { lost: false }
+    let n = 0
+    const createCanvas = useGl(() => (n++ === 0 ? makeGlCanvas({ lost: () => first.lost }) : makeGlCanvas()))
+    expect(pixelRevealAvailable()).toBe(true)
+    first.lost = true
+    expect(pixelRevealAvailable()).toBe(false)
+    expect(createCanvas).toHaveBeenCalledTimes(1)
+    clock += 60_000
+    expect(pixelRevealAvailable()).toBe(true)
+    expect(createCanvas).toHaveBeenCalledTimes(2)
+  })
+
+  it('a drawing buffer smaller than the frame is not drawn: false, ctx untouched', () => {
+    const { calls, ctx } = harness()
+    setPixelRevealDeps({ available: () => true, maxTexture: () => 4096 })
+    setPixelRevealGlDeps({ createCanvas: () => makeGlCanvas({ buffer: { w: FW / 2, h: FH / 2 } }) as unknown as HTMLCanvasElement })
+    setCurrentTransform(ctx)
+    calls.length = 0
+    expect(drawRevealPixelReveal(ctx, pr(), W, H, base(), () => {}, stamp, PIECES)).toBe(false)
+    expect(calls.filter(c => c.target === 'ctx' && c.name !== 'getTransform')).toHaveLength(0)
+  })
+
+  it('…and with the full drawing buffer the same frame is drawn and stamped', () => {
+    const { calls, ctx } = harness()
+    setPixelRevealDeps({ available: () => true, maxTexture: () => 4096 })
+    setPixelRevealGlDeps({ createCanvas: () => makeGlCanvas() as unknown as HTMLCanvasElement })
+    setCurrentTransform(ctx)
+    calls.length = 0
+    expect(drawRevealPixelReveal(ctx, pr(), W, H, base(), () => {}, stamp, PIECES)).toBe(true)
+    expect(calls.some(c => c.target === 'ctx' && c.name === 'drawImage')).toBe(true)
+  })
+})
+
+// ── which layers split into pieces ─────────────────────────────────────────────────────────
+// Each piece copies only its own tile, so a layer effect reaching past it (a shadow, glow, blur,
+// wide stroke) would be cut for the whole bar and pop back in at its end: such text stays whole.
+
+describe('pixelRevealCanSplit', () => {
+  const text = (over: Record<string, unknown> = {}) => ({ ...createTextLayer({ text: 'Two words' }), ...over }) as any
+
+  it('plain text splits; a shape never does', () => {
+    expect(pixelRevealCanSplit(text())).toBe(true)
+    expect(pixelRevealCanSplit(createRectLayer({}) as any)).toBe(false)
+  })
+
+  it('text with a visible layer effect stays whole', () => {
+    expect(pixelRevealCanSplit(text({ effects: [{ ...createEffect('drop_shadow'), visible: true }] }))).toBe(false)
+    // an entry with no `visible` field reads as visible
+    const { visible: _v, ...noFlag } = createEffect('drop_shadow') as Record<string, unknown>
+    expect(pixelRevealCanSplit(text({ effects: [noFlag] }))).toBe(false)
+  })
+
+  it('a hidden effect does not stop the split', () => {
+    expect(pixelRevealCanSplit(text({ effects: [{ ...createEffect('drop_shadow'), visible: false }] }))).toBe(true)
+  })
+
+  it('rotated text stays whole, as before', () => {
+    expect(pixelRevealCanSplit(text({ rotation: 12 }))).toBe(false)
+  })
+
+  it('the pieces builder asks it before reading any text cells', () => {
+    const SRC = readFileSync(fileURLToPath(new URL('../../../app/composables/useCompositorLayers.ts', import.meta.url)), 'utf8')
+    const at = SRC.indexOf('function pixelRevealPiecesFor(')
+    expect(at).toBeGreaterThan(-1)
+    const body = SRC.slice(at, SRC.indexOf('\n}\n', at))
+    const gate = body.indexOf('if (!pixelRevealCanSplit(layer)) return undefined')
+    expect(gate).toBeGreaterThan(-1)
+    expect(gate).toBeLessThan(body.indexOf('textMotionCells('))
+  })
+})
+
+describe('the modal warms the outline font of text a bar splits', () => {
+  it('watches motionBehaviours immediately and warms each split text layer\'s token', () => {
+    const MODAL = readFileSync(fileURLToPath(new URL('../../../app/components/vue-canvas/CompositorModal.vue', import.meta.url)), 'utf8')
+    const at = MODAL.indexOf('pixelRevealSplitLayerIds(list)')
+    expect(at).toBeGreaterThan(-1)
+    const block = MODAL.slice(Math.max(0, at - 200), at + 400)
+    expect(block).toMatch(/watch\(motionBehaviours/)
+    expect(block).toMatch(/immediate:\s*true/)
+    expect(block).toMatch(/warmCompositorFont\(token\)/)
   })
 })
