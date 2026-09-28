@@ -72,3 +72,35 @@ describe('3D Studio keeps its own states', () => {
     expect(t).toMatch(/class="node-well node-openbar-host aspect-square"[\s\S]*Edit scene/)
   })
 })
+
+describe.each(['ShotDirectorNode.vue', 'LipSyncStudioNode.vue'])('%s wears the studio shell', (file) => {
+  const s = src(file)
+  const t = tpl(s)
+  it('keeps the studio-node wrapper first, and a 240px shell card inside it', () => {
+    expect(t).toMatch(/^<template>\s*<div[^>]*class="studio-node relative w-fit"/)
+    expect(shellClass(t)).toMatch(/\bw-\[240px\]/)
+    expect(shellClass(t)).not.toMatch(/rounded-xl|\bborder\b|bg-neutral-900|shadow-lg|overflow-hidden/)
+  })
+  it('uses the shared ports, not raw handles', () => {
+    expect(t).not.toMatch(/<Handle\b/)
+    expect(t).toMatch(/<VueCanvasNodePort[\s\S]*?id="output-0"/)
+    expect(s).not.toMatch(/import \{ Handle/)
+  })
+  it('opens on double-click, has glass and selection', () => {
+    const tag = shellTag(t)
+    expect(tag).toMatch(/@dblclick\.stop="openEditor"/)
+    expect(tag).toMatch(/:data-glass-blur="glass \|\| undefined"/)
+    expect(tag).toMatch(/:data-selected="selected \|\| undefined"/)
+  })
+  it('the summary sits in a well with an Open bar; Generate is the white footer button', () => {
+    expect(t).toMatch(/class="node-well node-openbar-host[^"]*"[\s\S]*<NodeOpenBar[\s\S]*>Open<\/button>/)
+    expect(t).toMatch(/class="node-shell__foot"[\s\S]*node-btn node-btn--primary[\s\S]*Generate/)
+    expect(t).not.toMatch(/Pencil/)
+  })
+})
+it('Shot Director keeps three cast ports', () => {
+  expect(tpl(src('ShotDirectorNode.vue'))).toMatch(/v-for="i in 3"[\s\S]{0,200}:id="`input-\$\{i - 1\}`"/)
+})
+it('Lip-sync keeps Generate disabled while it has issues', () => {
+  expect(tpl(src('LipSyncStudioNode.vue'))).toMatch(/node-btn--primary[^>]*:disabled="hasError"|:disabled="hasError"[^>]*node-btn--primary/)
+})

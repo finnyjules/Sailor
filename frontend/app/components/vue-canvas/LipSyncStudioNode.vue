@@ -1,22 +1,27 @@
 <script setup lang="ts">
 // Lip-Sync Studio — canvas card. Mirrors ShotDirectorNode: compact summary
-// card + an Open button that dispatches the surface-open event. No baker
-// (nothing renders on this card) and no Generate button yet (Task 6).
+// card + an Open button that dispatches the surface-open event.
 import { computed } from 'vue'
-import { Handle, Position } from '@vue-flow/core'
-import { AudioLines, Pencil } from 'lucide-vue-next'
+import { AudioLines, Play } from 'lucide-vue-next'
 import { hydrateLipSyncSheet } from '~/lib/lipsync/hydrate'
 import { compileLipSync, engineLabel as labelOf, resolveEngine } from '~/lib/lipsync/compile'
+import { useNodeGlass } from '~/composables/useCanvasGlass'
+import NodeOpenBar from '~/components/vue-canvas/surfaces/NodeOpenBar.vue'
 
 const props = defineProps<{
   id: string
+  selected?: boolean
   data: {
     nodeType: string
     title?: string
     properties?: Record<string, any>
     lipSyncError?: string | null
+    inputs?: { type: string }[]
+    outputs?: { type: string }[]
   }
 }>()
+
+const glass = useNodeGlass(() => props.id)
 
 const sheet = computed(() => hydrateLipSyncSheet(props.data?.properties?.sailor_lipSync))
 const compiled = computed(() => compileLipSync(sheet.value))
@@ -54,70 +59,48 @@ function generate() {
 </script>
 
 <template>
-  <div
-    class="studio-node relative w-[220px] overflow-hidden rounded-xl border border-white/10 bg-neutral-900 text-white shadow-lg"
-    @dblclick.stop="openEditor"
-  >
-    <!-- Output handle -->
-    <Handle
-      id="output-0" type="source" :position="Position.Right"
-      class="!h-3 !w-3 !rounded-full !border-2 !border-white/30 !bg-[#1a1a1a]"
-      :style="{ top: '50%' }"
+  <div class="studio-node relative w-fit">
+    <VueCanvasNodePort
+      id="output-0" type="source" side="right"
+      :data-type="data.outputs?.[0]?.type ?? '*'" label="Lip-sync" :index="0"
     />
-
-    <!-- Header -->
-    <div class="flex items-center gap-2 border-b border-white/10 px-3 py-2">
-      <AudioLines class="h-3.5 w-3.5 text-white/70" />
-      <span class="text-xs font-medium text-white/80">Lip-Sync Studio</span>
-    </div>
-
-    <!-- Summary body -->
-    <div class="space-y-2 px-3 py-2.5">
-      <!-- Engine chip -->
-      <div class="flex items-center gap-1.5">
-        <span class="rounded border border-white/10 bg-white/5 px-1.5 py-0.5 text-[10px] text-white/50 tracking-tight">
-          {{ engineLabel }}
-        </span>
-        <span class="rounded border border-white/10 bg-white/5 px-1.5 py-0.5 text-[10px] text-white/50 tracking-tight">
-          {{ sheet.resolution }}
-        </span>
+    <div
+      class="lip-sync-card node-shell relative z-10 w-[240px]"
+      :data-glass-blur="glass || undefined"
+      :data-selected="selected || undefined"
+      @dblclick.stop="openEditor"
+    >
+      <div class="node-shell__head">
+        <AudioLines class="node-shell__icon" />
+        <span class="node-shell__title">Lip-Sync Studio</span>
       </div>
-
-      <!-- Face / voice summary -->
-      <div class="flex items-center gap-1.5">
-        <span class="rounded bg-white/[0.06] px-1.5 py-0.5 text-[10px] text-white/45">{{ faceLabel }}</span>
-        <span class="text-[10px] text-white/25">·</span>
-        <span class="rounded bg-white/[0.06] px-1.5 py-0.5 text-[10px] text-white/45">{{ voiceLabel }}</span>
+      <div class="node-shell__body">
+        <div class="node-well node-openbar-host min-h-[92px] px-3 py-2.5 flex flex-col gap-1.5">
+          <div class="flex items-center gap-1.5">
+            <span class="text-[12px] text-white/75">{{ faceLabel }}</span>
+            <span class="text-[10px] text-white/25">·</span>
+            <span class="text-[12px] text-white/75">{{ voiceLabel }}</span>
+          </div>
+          <NodeOpenBar :meta="`${engineLabel} · ${sheet.resolution}`">
+            <button type="button" class="node-btn nopan nodrag" @click.stop="openEditor">Open</button>
+          </NodeOpenBar>
+        </div>
       </div>
-
-      <!-- Status dot -->
-      <div class="flex items-center gap-1.5">
-        <span class="h-1.5 w-1.5 shrink-0 rounded-full" :class="statusDotClass" />
-        <span class="text-[10px] text-white/40">{{ compiled.issues.length ? `${compiled.issues.length} issue${compiled.issues.length > 1 ? 's' : ''}` : 'Ready' }}</span>
+      <p v-if="data?.lipSyncError" class="px-3.5 pb-2 text-[11px] leading-tight text-red-400/90">{{ data.lipSyncError }}</p>
+      <div class="node-shell__foot">
+        <span class="shrink-0 size-1.5 rounded-full" :class="statusDotClass" aria-hidden="true" />
+        <span class="flex-1 min-w-0 truncate text-[12px] text-white/55">{{ compiled.issues.length ? `${compiled.issues.length} issue${compiled.issues.length > 1 ? 's' : ''}` : 'Ready' }}</span>
+        <button
+          type="button"
+          class="nopan nodrag node-btn node-btn--primary disabled:opacity-40 disabled:cursor-not-allowed"
+          :disabled="hasError"
+          title="Generate the lip-synced clip"
+          @click.stop="generate"
+        >
+          <Play class="size-2.5" fill="currentColor" />
+          <span>Generate</span>
+        </button>
       </div>
-    </div>
-
-    <!-- Generate error (silent failures otherwise: bad voice, missing widget) -->
-    <div v-if="data?.lipSyncError" class="border-t border-white/10 px-2 pt-1.5 text-[10px] leading-tight text-red-400/90">
-      {{ data.lipSyncError }}
-    </div>
-
-    <!-- Edit + Generate buttons -->
-    <div class="flex gap-1.5 border-t border-white/10 p-2">
-      <button
-        class="flex flex-1 items-center justify-center gap-1.5 rounded bg-white/10 px-2.5 py-1.5 text-[11px] text-white/80 transition hover:bg-white/20"
-        @click.stop="openEditor"
-      >
-        <Pencil class="h-3 w-3" /> Open
-      </button>
-      <button
-        class="flex flex-1 items-center justify-center gap-1.5 rounded bg-action px-2.5 py-1.5 text-[11px] font-medium text-white transition enabled:hover:bg-action/85 disabled:cursor-not-allowed disabled:opacity-40"
-        :disabled="hasError"
-        title="Generate the lip-synced clip"
-        @click.stop="generate"
-      >
-        Generate
-      </button>
     </div>
   </div>
 </template>
