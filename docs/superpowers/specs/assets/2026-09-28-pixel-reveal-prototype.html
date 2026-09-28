@@ -1,0 +1,665 @@
+<meta charset="utf-8">
+<title>Pixel Reveal</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@800&family=Instrument+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+:root {
+  --ground: #ecebe7;
+  --panel: #fbfaf8;
+  --ink: #16161a;
+  --muted: #6b6a73;
+  --line: #dcdad4;
+  --accent: #1700c7;
+  --chip: #f0efeb;
+  --shadow: 0 1px 2px rgba(22,22,26,.05), 0 10px 30px rgba(22,22,26,.07);
+  --body: "Instrument Sans", system-ui, -apple-system, sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --ground: #111113; --panel: #1a1a1d; --ink: #ededf0; --muted: #9a99a3; --line: #2e2e33;
+    --accent: #aeff00; --chip: #242428;
+    --shadow: 0 1px 2px rgba(0,0,0,.3), 0 10px 30px rgba(0,0,0,.35);
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --ground: #111113; --panel: #1a1a1d; --ink: #ededf0; --muted: #9a99a3; --line: #2e2e33;
+  --accent: #aeff00; --chip: #242428;
+  --shadow: 0 1px 2px rgba(0,0,0,.3), 0 10px 30px rgba(0,0,0,.35);
+}
+* { box-sizing: border-box; }
+body { background: var(--ground); color: var(--ink); font-family: var(--body); font-size: 14px; line-height: 1.45; }
+.wrap { max-width: 1280px; margin: 0 auto; padding-inline: 20px; padding-block: 24px 40px; }
+header { display: flex; align-items: baseline; gap: 14px; margin-bottom: 18px; flex-wrap: wrap; }
+h1 { margin: 0; font: 800 28px/1 "Archivo", var(--body); letter-spacing: -.02em; text-transform: uppercase; }
+header span { font: 500 11px var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+.layout { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 18px; align-items: start; }
+@media (max-width: 900px) { .layout { grid-template-columns: 1fr; } }
+
+.stage { background: var(--panel); border-radius: 12px; box-shadow: var(--shadow); padding: 10px; }
+.screen { position: relative; width: 100%; aspect-ratio: 2 / 1; max-width: 100%; border-radius: 6px; overflow: hidden; background: #f2f2f0; transition: background .2s; }
+.screen.dark { background: #0b0b0c; }
+.screen canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+.transport { display: grid; grid-template-columns: auto auto auto minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 10px 4px 2px; }
+.btn { border: 1px solid var(--line); background: var(--panel); color: var(--ink); font: 500 12px var(--mono); letter-spacing: .04em; text-transform: uppercase; padding: 7px 11px; border-radius: 7px; cursor: pointer; white-space: nowrap; }
+.btn:hover { border-color: var(--ink); }
+.time { font: 400 12px var(--mono); color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+input[type=range] { width: 100%; accent-color: var(--ink); }
+
+.presets { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 14px; }
+.preset { text-align: left; border: 1px solid var(--line); background: var(--panel); color: var(--ink); border-radius: 9px; padding: 10px 12px 12px; cursor: pointer; display: grid; gap: 2px; }
+.preset:hover { border-color: var(--ink); }
+.preset[aria-pressed="true"] { border-color: var(--ink); box-shadow: inset 0 0 0 1px var(--ink); }
+.preset .n { font: 400 10px var(--mono); color: var(--muted); letter-spacing: .06em; }
+.preset .t { font: 600 14px var(--body); }
+
+.panel { background: var(--panel); border-radius: 12px; box-shadow: var(--shadow); padding: 16px; display: grid; gap: 16px; }
+.group { display: grid; gap: 7px; }
+.row { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.label { font: 500 11px var(--mono); letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+.val { font: 400 12px var(--mono); color: var(--ink); font-variant-numeric: tabular-nums; }
+.seg { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; background: var(--chip); border-radius: 8px; padding: 3px; gap: 3px; }
+.seg button { border: 0; background: transparent; color: var(--ink); font: 500 12px var(--body); padding: 6px 0; border-radius: 6px; cursor: pointer; }
+.seg button[aria-pressed="true"] { background: var(--panel); box-shadow: 0 1px 3px rgba(0,0,0,.14); }
+.seg button:disabled { opacity: .35; cursor: default; }
+select { width: 100%; font: 500 13px var(--body); color: var(--ink); background: var(--chip); border: 1px solid transparent; border-radius: 8px; padding: 7px 8px; }
+.swatches { display: flex; gap: 7px; flex-wrap: wrap; }
+.sw { width: 26px; height: 26px; border-radius: 50%; border: 1px solid var(--line); cursor: pointer; padding: 0; }
+.sw[aria-pressed="true"] { outline: 2px solid var(--ink); outline-offset: 2px; }
+.sw.none { background: linear-gradient(135deg, transparent 45%, #d33 45%, #d33 55%, transparent 55%), var(--panel); }
+.sw.preset { background: conic-gradient(#1700c7, #aeff00, #ff3d00, #00d1ff, #1700c7); }
+.recipe { font: 400 11.5px/1.6 var(--mono); color: var(--muted); background: var(--chip); border-radius: 8px; padding: 9px 11px; margin: 0; white-space: pre-wrap; }
+button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.nogl { position: absolute; inset: 0; display: grid; place-items: center; font: 500 13px var(--mono); color: #666; }
+</style>
+
+<div class="wrap">
+  <header>
+    <h1>Pixel reveal</h1>
+    <span>A Motion tab transition · any layer · prototype</span>
+  </header>
+
+  <div class="layout">
+    <section>
+      <div class="stage">
+        <div class="screen" id="screen">
+          <canvas id="gl" aria-label="Preview of the pixel reveal on the chosen layer"></canvas>
+        </div>
+        <div class="transport">
+          <button class="btn" id="play">Pause</button>
+          <button class="btn" id="replay">Replay</button>
+          <div class="seg" role="group" aria-label="In or out" style="min-width:110px">
+            <button id="dirIn" aria-pressed="true">In</button>
+            <button id="dirOut" aria-pressed="false">Out</button>
+          </div>
+          <input type="range" id="scrub" min="0" max="1" step="0.001" value="0" aria-label="Scrub">
+          <span class="time" id="time"></span>
+        </div>
+      </div>
+      <div class="presets" id="presets"></div>
+    </section>
+
+    <aside class="panel">
+      <div class="group">
+        <span class="label">Layer</span>
+        <div class="seg" role="group" aria-label="Layer">
+          <button data-kind="text" aria-pressed="true">Text</button>
+          <button data-kind="image" aria-pressed="false">Image</button>
+          <button data-kind="shape" aria-pressed="false">Shape</button>
+        </div>
+      </div>
+      <div class="group">
+        <span class="label" title="What moves as one piece. Images and shapes are always one piece.">Pieces</span>
+        <div class="seg" role="group" aria-label="Pieces" id="splitSeg">
+          <button data-split="words">Words</button>
+          <button data-split="chars">Letters</button>
+          <button data-split="lines">Lines</button>
+          <button data-split="none">Whole</button>
+        </div>
+      </div>
+      <div class="group">
+        <label class="label" for="pattern">Pattern</label>
+        <select id="pattern"></select>
+      </div>
+      <div class="group">
+        <label class="label" for="direction">Direction</label>
+        <select id="direction"></select>
+      </div>
+      <div class="group">
+        <div class="row"><label class="label" for="pixel" title="Size of the coarsest block">Pixel</label><span class="val" id="pixelVal"></span></div>
+        <input type="range" id="pixel" min="4" max="64" step="1">
+      </div>
+      <div class="group">
+        <div class="row"><label class="label" for="levels" title="How many times a block splits in four before the layer turns sharp">Levels</label><span class="val" id="levelsVal"></span></div>
+        <input type="range" id="levels" min="0" max="5" step="1">
+      </div>
+      <div class="group">
+        <div class="row"><label class="label" for="spread" title="How wide the moving front is">Front width</label><span class="val" id="spreadVal"></span></div>
+        <input type="range" id="spread" min="0.05" max="1" step="0.01">
+      </div>
+      <div class="group">
+        <span class="label" title="The colour fresh blocks arrive in before they cool">Heat</span>
+        <div class="swatches" id="accents"></div>
+      </div>
+      <div class="group">
+        <span class="label">Ground</span>
+        <div class="seg" role="group" aria-label="Ground">
+          <button id="gLight" aria-pressed="true">Light</button>
+          <button id="gDark" aria-pressed="false">Dark</button>
+        </div>
+      </div>
+      <button class="btn" id="reset">Reset to preset</button>
+      <pre class="recipe" id="recipe"></pre>
+    </aside>
+  </div>
+</div>
+
+<script>
+(() => {
+  // ── presets (their published numbers) ──────────────────────────────────────
+  const PATTERNS = ['random', 'clusters', 'scanlines', 'rain', 'typewriter', 'zigzag', 'cascade', 'bayer', 'flow', 'none'];
+  const PATTERN_LABELS = ['Random', 'Clusters', 'Scanlines', 'Rain', 'Typewriter', 'Zigzag', 'Cascade', 'Ordered dither', 'Flow', 'None'];
+  const DIRS = ['up', 'down', 'left', 'right', 'center', 'edges', 'diagonal', 'none'];
+  const DIR_LABELS = ['Up', 'Down', 'Left', 'Right', 'Centre out', 'Edges in', 'Diagonal', 'None'];
+  const DEFAULTS = { split: 'words', sweep: 'each', from: 'start', stagger: .06, duration: 1.5, ease: 'power1.inOut', revealDelay: .05,
+    rise: .45, riseDuration: 1.1, riseEase: 'expo.out', direction: 'up', pattern: 'clusters', noise: .5, scatter: .08, spread: .8,
+    pixel: 24, levels: 3, solid: .9, accent: 'ground', accent2: null, accentMix: .35, accentStrength: 1, accentWidth: .45,
+    colorNoise: .03, sparkle: .03, flicker: .08, glitch: 0 };
+  const PRESETS = [
+    ['materialize', 'Materialize', 'Words lift out of their line as hot, coarse blocks, then cool into sharp type.', {}],
+    ['signal', 'Signal', 'Scanlines tear and flicker into focus, left to right.', { rise: 0, stagger: .07, duration: 1.25, ease: 'power2.out', direction: 'right', pattern: 'scanlines', noise: .6, scatter: .04, spread: .5, pixel: 16, levels: 3, solid: .9, accentWidth: .6, colorNoise: .04, sparkle: .18, flicker: .3, glitch: .35 }],
+    ['typewriter', 'Typewriter', 'Letters print one after another, a hot block at the cursor.', { split: 'chars', stagger: .024, duration: .45, ease: 'power1.out', revealDelay: 0, rise: 0, direction: 'right', pattern: 'none', spread: .35, pixel: 12, levels: 2, solid: 1, accentWidth: .7, sparkle: 0, flicker: .2 }],
+    ['dissolve', 'Dissolve', 'A quiet grey mosaic that resolves. No colour, no motion.', { split: 'lines', sweep: 'whole', duration: 1.8, ease: 'sine.inOut', rise: 0, direction: 'none', pattern: 'random', spread: .6, pixel: 12, levels: 2, solid: 0, accent: null, colorNoise: 0, sparkle: 0, flicker: 0 }],
+    ['rain', 'Rain', 'Letters drop in, in random order, while columns of blocks rain down.', { split: 'chars', from: 'random', stagger: .018, duration: .95, rise: -.6, riseDuration: 1.1, direction: 'down', pattern: 'rain', noise: .55, spread: .5, pixel: 16, levels: 3, sparkle: .2 }],
+    ['radiate', 'Radiate', 'One dithered front blooms out from the centre.', { split: 'lines', sweep: 'whole', duration: 2.2, ease: 'sine.inOut', rise: 0, direction: 'center', pattern: 'bayer', noise: .35, spread: .4, pixel: 32, levels: 4, solid: .85, accentWidth: .5 }],
+    ['bitmap', 'Bitmap', 'Ordered dither and hard blocks, one bit per pixel.', { split: 'lines', sweep: 'whole', stagger: .1, duration: 1.6, ease: 'power1.out', rise: .35, riseDuration: 1.4, direction: 'up', pattern: 'bayer', noise: .5, spread: .35, pixel: 8, levels: 2, solid: 1, accent: null, colorNoise: 0, sparkle: 0, flicker: 0 }],
+    ['glitch', 'Glitch', 'Torn rows, two-tone blocks, heavy flicker.', { rise: 0, stagger: .04, duration: 1, ease: 'power2.out', direction: 'none', pattern: 'scanlines', noise: 1, pixel: 24, levels: 3, solid: .9, accent: '#ff3d00', accent2: '#00d1ff', accentMix: .5, accentWidth: .7, colorNoise: .2, sparkle: .25, flicker: .45, glitch: .85 }],
+    ['flow', 'Flow', 'A liquid, warped front drifting diagonally across.', { sweep: 'whole', duration: 2.4, ease: 'none', rise: .6, direction: 'diagonal', pattern: 'flow', noise: .55, spread: .5, pixel: 24, levels: 4 }],
+  ];
+  const EASE = {
+    none: t => t,
+    'power1.inOut': t => t < .5 ? 2 * t * t : 1 - 2 * (1 - t) * (1 - t),
+    'power1.out': t => 1 - (1 - t) * (1 - t),
+    'power2.out': t => 1 - (1 - t) ** 3,
+    'sine.inOut': t => -(Math.cos(Math.PI * t) - 1) / 2,
+    'expo.out': t => t >= 1 ? 1 : 1 - Math.pow(2, -10 * t),
+  };
+  const ACCENTS = [['preset', 'Preset colour'], ['#1700c7', 'Ultramarine'], ['#aeff00', 'Acid'], ['#ff3d00', 'Signal orange'], ['#00d1ff', 'Cyan'], [null, 'No heat']];
+
+  const $ = id => document.getElementById(id);
+  const state = { preset: 'materialize', over: {}, kind: 'text', dark: false, out: false, t: 0, playing: true, accent: 'preset' };
+  const opts = () => ({ ...DEFAULTS, ...PRESETS.find(p => p[0] === state.preset)[3], ...state.over });
+
+  // ── WebGL ──────────────────────────────────────────────────────────────────
+  const canvas = $('gl');
+  const gl = canvas.getContext('webgl2', { premultipliedAlpha: true, alpha: true, antialias: false, preserveDrawingBuffer: true });
+  if (!gl) { $('screen').insertAdjacentHTML('beforeend', '<div class="nogl">This prototype needs WebGL 2.</div>'); return; }
+
+  const VS = `#version 300 es
+  in vec2 aPos;
+  uniform vec2 uView;
+  uniform vec4 uCell;      // the piece's grid-aligned box at rest (device px)
+  uniform float uRise;     // vertical offset while rising (+ = below rest)
+  out vec2 vRest;
+  out float vY;
+  void main() {
+    vec2 rest = uCell.xy + aPos * uCell.zw;
+    vec2 now = rest + vec2(0.0, uRise);
+    vRest = rest; vY = now.y;
+    gl_Position = vec4(now.x / uView.x * 2.0 - 1.0, 1.0 - now.y / uView.y * 2.0, 0.0, 1.0);
+  }`;
+
+  // Our own take on the technique: a per-cell "when" field; each coarse block halves as its own
+  // life passes a jittered threshold; a block shows the exact mean of the layer under it (a mip
+  // level of the atlas); fresh blocks are hot and cool into the layer's colour.
+  const FS = `#version 300 es
+  precision highp float; precision highp int;
+  uniform sampler2D uAtlas;
+  uniform vec4 uCell; uniform vec2 uAtlasAt;
+  uniform float uProgress; uniform vec4 uRect; uniform vec2 uLine; uniform float uClip;
+  uniform float uLineIdx, uLines; uniform vec2 uLineX; uniform float uWhole;
+  uniform float uG; uniform int uM, uK; uniform float uLevels;
+  uniform int uDir, uPat; uniform float uNoise, uScatter, uSpread, uSolid;
+  uniform vec3 uHot, uHot2; uniform float uHotMix, uHotOn, uHotW, uTint, uSpark, uBlink, uTear, uTime;
+  in vec2 vRest; in float vY; out vec4 outColor;
+
+  uint scramble(uint x) { x ^= x >> 16; x *= 0x7feb352du; x ^= x >> 15; x *= 0x846ca68bu; x ^= x >> 16; return x; }
+  float rnd(vec2 c, float salt) {
+    ivec2 i = ivec2(floor(c)) + 100000;
+    return float(scramble(uint(i.x) * 1664525u ^ scramble(uint(i.y) + scramble(uint(salt * 131.0) + 977u)))) / 4294967295.0;
+  }
+  float smoothNoise(vec2 p, float salt) {
+    vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
+    return mix(mix(rnd(i, salt), rnd(i + vec2(1, 0), salt), f.x), mix(rnd(i + vec2(0, 1), salt), rnd(i + vec2(1, 1), salt), f.x), f.y);
+  }
+  float ordered(vec2 c) {                         // 8×8 ordered-dither threshold
+    ivec2 p = ivec2(mod(c, 8.0)); int v = 0;
+    for (int b = 0; b < 3; b++) {
+      int xb = (p.x >> b) & 1, yb = (p.y >> b) & 1;
+      v |= ((xb ^ yb) << (5 - 2 * b)) | (yb << (4 - 2 * b));
+    }
+    return (float(v) + 0.5) / 64.0;
+  }
+  float sweep(vec2 n, vec2 size) {
+    if (uDir == 0) return 1.0 - n.y;
+    if (uDir == 1) return n.y;
+    if (uDir == 2) return 1.0 - n.x;
+    if (uDir == 3) return n.x;
+    float r = length((n - 0.5) * size) / max(0.5 * length(size), 1.0);
+    if (uDir == 4) return r;
+    if (uDir == 5) return 1.0 - r;
+    if (uDir == 6) return 0.5 * (n.x + 1.0 - n.y);
+    return 0.5;
+  }
+  float texture_(vec2 cell, vec2 at, vec2 n) {
+    if (uPat == 0) return rnd(cell, 1.0);
+    if (uPat == 1) return smoothstep(0.2, 0.8, 0.65 * smoothNoise(cell * 0.34, 2.0) + 0.35 * smoothNoise(cell * 0.83 + 7.0, 3.0));
+    if (uPat == 2) return 0.84 * rnd(vec2(0.0, cell.y), 4.0) + 0.16 * rnd(cell, 5.0);
+    if (uPat == 3) return 0.84 * rnd(vec2(cell.x, 0.0), 6.0) + 0.16 * rnd(cell, 7.0);
+    if (uPat == 4) {
+      if (uWhole > 0.5) return (uLineIdx + clamp((at.x - uLineX.x) / max(uLineX.y, 1.0), 0.0, 1.0)) / max(uLines, 1.0);
+      return n.x;
+    }
+    if (uPat == 5) {
+      float top = floor(uRect.y / uG), rows = max(1.0, ceil((uRect.y + uRect.w) / uG) - top);
+      float row = clamp(cell.y - top, 0.0, rows - 1.0);
+      return (row + (mod(row, 2.0) < 0.5 ? n.x : 1.0 - n.x)) / rows;
+    }
+    if (uPat == 6) return fract((cell.x + cell.y) * 0.2);
+    if (uPat == 7) return ordered(cell);
+    if (uPat == 8) {
+      vec2 p = cell * 0.16;
+      vec2 w = vec2(smoothNoise(p + 3.7, 8.0), smoothNoise(p + 11.3, 9.0));
+      return smoothstep(0.22, 0.78, 0.7 * smoothNoise(p * 1.3 + w * 2.4, 10.0) + 0.3 * smoothNoise(p * 2.7 + w, 11.0));
+    }
+    return 0.5;
+  }
+  float when(vec2 cell, vec2 at) {                  // 0 = first to reveal
+    vec2 n = clamp((at - uRect.xy) / max(uRect.zw, vec2(1.0)), 0.0, 1.0);
+    float f = uDir == 7 ? texture_(cell, at, n) : uPat == 9 ? sweep(n, uRect.zw) : mix(sweep(n, uRect.zw), texture_(cell, at, n), uNoise);
+    return clamp(f + (rnd(cell, 12.0) - 0.5) * uScatter, 0.0, 1.0);
+  }
+  void main() {
+    if (uClip > 0.5 && (vY < uLine.x || vY > uLine.y)) discard;
+    vec2 T = vRest;
+    vec2 cell = floor(T / uG);
+    float life = clamp((uProgress - when(cell, (cell + 0.5) * uG) * (1.0 - uSpread)) / uSpread, 0.0, 1.0);
+    if (life <= 0.0) discard;
+
+    float B = uG; vec2 blk = cell; float lvl = 0.0;
+    for (int L = 1; L <= 6; L++) {
+      if (float(L) > uLevels) break;
+      float th = mix(0.12, 0.84, (float(L) - 0.5 + (rnd(blk, 20.0 + float(L)) - 0.5) * 0.9) / uLevels);
+      if (life < th) break;
+      lvl = float(L); B *= 0.5; blk = floor(T / B);
+    }
+    bool sharp = lvl >= uLevels;
+
+    vec4 px;
+    if (sharp) {
+      px = texelFetch(uAtlas, ivec2(uAtlasAt + T - uCell.xy), 0);
+    } else {
+      if (uTear > 0.0 && life < 0.55) {
+        float tick = floor(uTime * 14.0), row = floor(T.y / B);
+        if (rnd(vec2(row, tick), 30.0 + lvl) < uTear * (1.0 - life / 0.55)) {
+          float first = uCell.x / B;
+          blk.x = clamp(blk.x + floor((rnd(vec2(row, tick), 31.0) - 0.5) * 7.0), first, first + uCell.z / B - 1.0);
+        }
+      }
+      int mip = uK - int(lvl);
+      ivec2 base = ivec2(floor((uAtlasAt + blk * B - uCell.xy) / exp2(float(mip)) + 0.5));
+      vec4 sum = vec4(0.0);
+      for (int y = 0; y < 3; y++) for (int x = 0; x < 3; x++) if (x < uM && y < uM) sum += texelFetch(uAtlas, base + ivec2(x, y), mip);
+      px = sum / float(uM * uM);
+    }
+
+    float cover = px.a;
+    vec3 ink = cover > 0.0005 ? px.rgb / cover : vec3(0.0);
+    float a = cover;
+    vec3 hot = mix(uHot, uHot2, step(rnd(blk, 40.0 + lvl), uHotMix));
+    float heat = uHotOn * (1.0 - smoothstep(0.0, uHotW, life + (rnd(blk, 41.0 + lvl) - 0.5) * 0.18));
+    if (!sharp) {
+      float fine = lvl / max(uLevels - 1.0, 1.0);
+      a = mix(cover, smoothstep(mix(0.04, 0.16, fine), mix(0.3, 0.5, fine), cover), uSolid);
+      a = max(a, step(0.06, cover) * heat);
+      if (cover < 0.004 && uSpark > 0.0) {
+        float s = 1.0 - life / 0.32;
+        if (s > 0.0 && rnd(blk, 42.0 + lvl) < uSpark) { a = s * 0.85; ink = hot; }
+      }
+      if (uBlink > 0.0 && life < 0.42) {
+        float tick = floor(uTime * 20.0 + rnd(blk, 43.0) * 7.0);
+        if (rnd(blk + tick * 13.0, 44.0) < uBlink * (1.0 - life / 0.42)) a *= 0.15;
+      }
+      ink = clamp(ink + (vec3(rnd(blk, 45.0), rnd(blk, 46.0), rnd(blk, 47.0)) - 0.5) * uTint * 2.0 * (1.0 - life), 0.0, 1.0);
+    }
+    if (a <= 0.002) discard;
+    outColor = vec4(mix(ink, hot, heat) * a, a);
+  }`;
+
+  function compile(type, src) {
+    const s = gl.createShader(type); gl.shaderSource(s, src); gl.compileShader(s);
+    if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s));
+    return s;
+  }
+  const prog = gl.createProgram();
+  gl.attachShader(prog, compile(gl.VERTEX_SHADER, VS));
+  gl.attachShader(prog, compile(gl.FRAGMENT_SHADER, FS));
+  gl.linkProgram(prog);
+  if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(prog));
+  gl.useProgram(prog);
+  const U = new Proxy({}, { get: (c, k) => c[k] ?? (c[k] = gl.getUniformLocation(prog, k)) });
+  const vbo = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, vbo);
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([0, 0, 1, 0, 0, 1, 1, 1]), gl.STATIC_DRAW);
+  const aPos = gl.getAttribLocation(prog, 'aPos');
+  gl.enableVertexAttribArray(aPos);
+  gl.vertexAttribPointer(aPos, 2, gl.FLOAT, false, 0, 0);
+  gl.enable(gl.BLEND);
+  gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+  const tex = gl.createTexture();
+
+  // ── layers (drawn at device resolution) ────────────────────────────────────
+  let W = 0, H = 0, DPR = 1;
+  const mk = (w, h) => { const c = document.createElement('canvas'); c.width = w; c.height = h; return c; };
+
+  function inkBox(c) {
+    const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data;
+    let x0 = c.width, y0 = c.height, x1 = -1, y1 = -1;
+    for (let y = 0; y < c.height; y += 2) for (let x = 0; x < c.width; x += 2) if (d[(y * c.width + x) * 4 + 3] > 8) { if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; y1 = y; }
+    return x1 < 0 ? { x: 0, y: 0, w: 1, h: 1 } : { x: x0 - 2, y: y0 - 2, w: x1 - x0 + 4, h: y1 - y0 + 4 };
+  }
+
+  function textPieces(split, inkColor) {
+    const lines = ['Pixels settle', 'into clean type'];
+    const c = mk(8, 8).getContext('2d');
+    let fs = H * 0.3;
+    c.font = `800 ${fs}px Archivo`;
+    const widest = Math.max(...lines.map(l => c.measureText(l).width));
+    fs = Math.min(fs, fs * (W * 0.84) / widest);
+    const font = `800 ${fs}px Archivo`;
+    c.font = font;
+    const m0 = c.measureText('Hg');
+    const asc = m0.fontBoundingBoxAscent ?? fs * .9, desc = m0.fontBoundingBoxDescent ?? fs * .25;
+    const lineH = (asc + desc) * 0.92;
+    const top = (H - lineH * lines.length) / 2;
+    const pieces = [];
+    lines.forEach((text, li) => {
+      const lw = c.measureText(text).width;
+      const x0 = (W - lw) / 2, base = top + li * lineH + asc * 0.95;
+      const band = { top: base - asc, bottom: base + desc };
+      const lineX = { l: x0, w: lw };
+      const add = (str, x) => {
+        const m = c.measureText(str);
+        pieces.push({
+          text: str, x, base, line: band, lineIdx: li, lineX, lineH,
+          ink: { x: x - m.actualBoundingBoxLeft - 2, y: base - m.actualBoundingBoxAscent - 2, w: m.actualBoundingBoxLeft + m.actualBoundingBoxRight + 4, h: m.actualBoundingBoxAscent + m.actualBoundingBoxDescent + 4 },
+          draw(ctx) { ctx.font = font; ctx.fillStyle = inkColor; ctx.textBaseline = 'alphabetic'; ctx.fillText(str, x, base); },
+        });
+      };
+      if (split === 'lines') add(text, x0);
+      else if (split === 'chars') { for (let i = 0; i < text.length; i++) if (text[i] !== ' ') add(text[i], x0 + c.measureText(text.slice(0, i)).width); }
+      else if (split === 'words') { let i = 0; for (const w of text.split(' ')) { add(w, x0 + c.measureText(text.slice(0, i)).width); i += w.length + 1; } }
+      else add(text, x0);
+    });
+    if (split === 'none') {
+      // One piece: both lines together.
+      const all = pieces.splice(0);
+      const u = all.reduce((r, p) => ({ x: Math.min(r.x, p.ink.x), y: Math.min(r.y, p.ink.y), r: Math.max(r.r, p.ink.x + p.ink.w), b: Math.max(r.b, p.ink.y + p.ink.h) }), { x: 1e9, y: 1e9, r: -1e9, b: -1e9 });
+      pieces.push({ lineIdx: 0, lineX: { l: u.x, w: u.r - u.x }, lineH, line: { top: all[0].line.top, bottom: all[all.length - 1].line.bottom },
+        ink: { x: u.x, y: u.y, w: u.r - u.x, h: u.b - u.y }, draw(ctx) { all.forEach(p => p.draw(ctx)); } });
+    }
+    return { pieces, lines: lines.length };
+  }
+
+  function drawApple(ctx, cx, cy, s) {
+    const p = new Path2D();
+    p.moveTo(cx, cy - .3 * s);
+    p.bezierCurveTo(cx + .15 * s, cy - .47 * s, cx + .56 * s, cy - .43 * s, cx + .56 * s, cy - .02 * s);
+    p.bezierCurveTo(cx + .56 * s, cy + .36 * s, cx + .3 * s, cy + .56 * s, cx + .12 * s, cy + .5 * s);
+    p.bezierCurveTo(cx + .05 * s, cy + .47 * s, cx - .05 * s, cy + .47 * s, cx - .12 * s, cy + .5 * s);
+    p.bezierCurveTo(cx - .3 * s, cy + .56 * s, cx - .56 * s, cy + .36 * s, cx - .56 * s, cy - .02 * s);
+    p.bezierCurveTo(cx - .56 * s, cy - .43 * s, cx - .15 * s, cy - .47 * s, cx, cy - .3 * s);
+    const g = ctx.createRadialGradient(cx - .18 * s, cy - .12 * s, .02 * s, cx, cy + .05 * s, .62 * s);
+    g.addColorStop(0, '#ff6a55'); g.addColorStop(.45, '#e3222c'); g.addColorStop(1, '#8e0c17');
+    ctx.fillStyle = g; ctx.fill(p);
+    const hl = ctx.createRadialGradient(cx - .24 * s, cy - .16 * s, 0, cx - .24 * s, cy - .16 * s, .16 * s);
+    hl.addColorStop(0, 'rgba(255,255,255,.55)'); hl.addColorStop(1, 'rgba(255,255,255,0)');
+    ctx.save(); ctx.clip(p); ctx.fillStyle = hl; ctx.fillRect(cx - s, cy - s, 2 * s, 2 * s); ctx.restore();
+    ctx.lineCap = 'round'; ctx.strokeStyle = '#5a6b22'; ctx.lineWidth = .04 * s;
+    ctx.beginPath(); ctx.moveTo(cx, cy - .27 * s); ctx.quadraticCurveTo(cx - .01 * s, cy - .45 * s, cx + .06 * s, cy - .58 * s); ctx.stroke();
+    ctx.save(); ctx.translate(cx + .16 * s, cy - .47 * s); ctx.rotate(-.45);
+    ctx.fillStyle = '#4f9a36'; ctx.beginPath(); ctx.ellipse(0, 0, .15 * s, .065 * s, 0, 0, Math.PI * 2); ctx.fill(); ctx.restore();
+  }
+  function drawLemon(ctx, cx, cy, s) {
+    ctx.save(); ctx.translate(cx, cy); ctx.rotate(-.35);
+    const p = new Path2D();
+    p.moveTo(-.56 * s, 0);
+    p.bezierCurveTo(-.5 * s, -.06 * s, -.46 * s, -.34 * s, 0, -.35 * s);
+    p.bezierCurveTo(.46 * s, -.34 * s, .5 * s, -.06 * s, .56 * s, 0);
+    p.bezierCurveTo(.5 * s, .06 * s, .46 * s, .34 * s, 0, .35 * s);
+    p.bezierCurveTo(-.46 * s, .34 * s, -.5 * s, .06 * s, -.56 * s, 0);
+    const g = ctx.createRadialGradient(-.12 * s, -.12 * s, .02 * s, 0, 0, .55 * s);
+    g.addColorStop(0, '#fff59a'); g.addColorStop(.5, '#f6d313'); g.addColorStop(1, '#c79a06');
+    ctx.fillStyle = g; ctx.fill(p); ctx.restore();
+  }
+  function drawShape(ctx) {
+    const cx = W / 2, cy = H / 2, R = H * .42, r = R * .46, n = 7;
+    const p = new Path2D();
+    for (let i = 0; i < n * 2; i++) { const a = -Math.PI / 2 + i * Math.PI / n, rr = i % 2 ? r : R; i ? p.lineTo(cx + Math.cos(a) * rr, cy + Math.sin(a) * rr) : p.moveTo(cx + Math.cos(a) * rr, cy + Math.sin(a) * rr); }
+    p.closePath();
+    const g = ctx.createLinearGradient(cx - R, cy - R, cx + R, cy + R);
+    g.addColorStop(0, '#ff5bb0'); g.addColorStop(.5, '#7b4dff'); g.addColorStop(1, '#00c2ff');
+    ctx.fillStyle = g; ctx.fill(p);
+    ctx.lineWidth = H * .012; ctx.strokeStyle = 'rgba(255,255,255,.7)'; ctx.stroke(p);
+  }
+
+  function wholePiece(draw) {
+    const c = mk(W, H); draw(c.getContext('2d'));
+    const ink = inkBox(c);
+    return { pieces: [{ lineIdx: 0, lineX: { l: ink.x, w: ink.w }, lineH: ink.h, line: { top: ink.y, bottom: ink.y + ink.h }, ink, draw(ctx) { ctx.drawImage(c, 0, 0); } }], lines: 1 };
+  }
+
+  // ── the block grid + the atlas every piece is packed into ─────────────────
+  function pickGrid(pxCss, levels) {
+    const target = Math.max(2, pxCss * DPR);
+    let best = null;
+    for (let k = 0; k <= 8; k++) for (const m of [1, 3]) {
+      const s = m * 2 ** k; if (s < 2) continue;
+      const err = Math.abs(Math.log2(s / target));
+      if (!best || err < best.err - 1e-9) best = { s, m, k, err };
+    }
+    return { ...best, levels: Math.min(levels, best.m === 3 ? best.k + 1 : best.k) };
+  }
+
+  let built = null;   // { key, pieces, lines, grid, whole }
+  function build() {
+    const o = opts();
+    const split = state.kind === 'text' ? o.split : 'none';
+    const inkColor = state.dark ? '#f4f4f2' : '#111113';
+    const grid = pickGrid(o.pixel, o.levels);
+    const key = [state.kind, split, grid.s, W, H, state.dark].join('|');
+    if (built && built.key === key) { built.grid = grid; return; }
+    const layer = state.kind === 'text' ? textPieces(split, inkColor)
+      : state.kind === 'image' ? wholePiece(ctx => { drawApple(ctx, W * .34, H * .52, H * .78); drawLemon(ctx, W * .68, H * .5, H * .7); })
+      : wholePiece(drawShape);
+    const G = grid.s;
+    // Pack each piece into the atlas at a G-aligned slot, so its blocks line up with the stage grid.
+    const AW = 4096;
+    let x = 0, y = 0, rowH = 0;
+    for (const p of layer.pieces) {
+      const cx0 = Math.floor(p.ink.x / G) * G, cy0 = Math.floor(Math.min(p.ink.y, p.line.top) / G) * G;
+      const cx1 = Math.ceil((p.ink.x + p.ink.w) / G) * G, cy1 = Math.ceil(Math.max(p.ink.y + p.ink.h, p.line.bottom) / G) * G;
+      p.cell = { x: cx0, y: cy0, w: cx1 - cx0, h: cy1 - cy0 };
+      if (x + p.cell.w > AW) { x = 0; y += rowH; rowH = 0; }
+      p.at = { x, y };
+      x += p.cell.w; rowH = Math.max(rowH, p.cell.h);
+    }
+    const AH = 2 ** Math.ceil(Math.log2(Math.max(64, y + rowH)));
+    const atlas = mk(AW, AH), actx = atlas.getContext('2d');
+    for (const p of layer.pieces) {
+      actx.save();
+      actx.beginPath(); actx.rect(p.at.x, p.at.y, p.cell.w, p.cell.h); actx.clip();
+      actx.translate(p.at.x - p.cell.x, p.at.y - p.cell.y);
+      p.draw(actx);
+      actx.restore();
+    }
+    gl.bindTexture(gl.TEXTURE_2D, tex);
+    gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, true);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, atlas);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST_MIPMAP_NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+    gl.generateMipmap(gl.TEXTURE_2D);
+    const u = layer.pieces.reduce((r, p) => ({ x: Math.min(r.x, p.ink.x), y: Math.min(r.y, p.ink.y), r: Math.max(r.r, p.ink.x + p.ink.w), b: Math.max(r.b, p.ink.y + p.ink.h) }), { x: 1e9, y: 1e9, r: -1e9, b: -1e9 });
+    built = { key, pieces: layer.pieces, lines: layer.lines, grid, whole: { x: u.x, y: u.y, w: u.r - u.x, h: u.b - u.y } };
+  }
+
+  // ── timeline ───────────────────────────────────────────────────────────────
+  function rng(seed) { return () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+  function orderOf(n, from) {
+    const idx = [...Array(n).keys()];
+    if (from === 'end') return idx.map(i => n - 1 - i);
+    if (from === 'center' || from === 'edges') {
+      const byDist = idx.slice().sort((a, b) => Math.abs(a - (n - 1) / 2) - Math.abs(b - (n - 1) / 2));
+      const rank = []; byDist.forEach((p, r) => { rank[p] = from === 'center' ? r : n - 1 - r; }); return rank;
+    }
+    if (from === 'random') { const r = rng(7), s = idx.slice(); for (let i = n - 1; i > 0; i--) { const j = Math.floor(r() * (i + 1)); [s[i], s[j]] = [s[j], s[i]]; } const rank = []; s.forEach((p, k) => { rank[p] = k; }); return rank; }
+    return idx;
+  }
+  function timeline() {
+    const o = opts(), n = built.pieces.length, order = orderOf(n, o.from);
+    const whole = o.sweep === 'whole';
+    const last = (n - 1) * o.stagger;
+    const total = whole ? Math.max(o.duration, last + (o.rise ? o.riseDuration : 0)) : last + Math.max(o.rise ? o.riseDuration : 0, o.revealDelay + o.duration);
+    return { o, order, whole, total: Math.max(total, .05) };
+  }
+
+  // ── draw ───────────────────────────────────────────────────────────────────
+  function hex3(h) { const n = parseInt(h.slice(1), 16); return [(n >> 16 & 255) / 255, (n >> 8 & 255) / 255, (n & 255) / 255]; }
+  function heatColours(o) {
+    if (state.accent !== 'preset') return state.accent ? [state.accent, state.accent, 0] : null;
+    if (o.accent === null) return null;
+    if (o.accent2) return [o.accent, o.accent2, o.accentMix];
+    const g = state.dark ? '#aeff00' : '#1700c7';
+    return [g, g, 0];
+  }
+  let clock = 0;
+  function draw() {
+    const tl = timeline(), o = tl.o, g = built.grid;
+    const t = state.out ? tl.total - state.t : state.t;
+    gl.viewport(0, 0, W, H);
+    gl.clearColor(0, 0, 0, 0); gl.clear(gl.COLOR_BUFFER_BIT);
+    gl.uniform2f(U.uView, W, H);
+    gl.uniform1f(U.uG, g.s); gl.uniform1i(U.uM, g.m); gl.uniform1i(U.uK, g.k); gl.uniform1f(U.uLevels, g.levels);
+    gl.uniform1i(U.uDir, DIRS.indexOf(o.direction)); gl.uniform1i(U.uPat, PATTERNS.indexOf(o.pattern));
+    gl.uniform1f(U.uNoise, o.noise); gl.uniform1f(U.uScatter, o.scatter); gl.uniform1f(U.uSpread, o.spread); gl.uniform1f(U.uSolid, o.solid);
+    const heat = heatColours(o);
+    gl.uniform3fv(U.uHot, hex3(heat ? heat[0] : '#000000')); gl.uniform3fv(U.uHot2, hex3(heat ? heat[1] : '#000000'));
+    gl.uniform1f(U.uHotMix, heat ? heat[2] : 0); gl.uniform1f(U.uHotOn, heat ? o.accentStrength : 0); gl.uniform1f(U.uHotW, o.accentWidth);
+    gl.uniform1f(U.uTint, o.colorNoise); gl.uniform1f(U.uSpark, o.sparkle); gl.uniform1f(U.uBlink, o.flicker); gl.uniform1f(U.uTear, o.glitch);
+    gl.uniform1f(U.uTime, clock); gl.uniform1f(U.uWhole, tl.whole ? 1 : 0); gl.uniform1f(U.uLines, built.lines);
+    gl.uniform1f(U.uClip, o.rise ? 1 : 0);
+    const wholeP = EASE[o.ease](Math.min(1, Math.max(0, t / o.duration)));
+    built.pieces.forEach((p, i) => {
+      const start = tl.order[i] * o.stagger;
+      const prog = tl.whole ? wholeP : EASE[o.ease](Math.min(1, Math.max(0, (t - start - o.revealDelay) / o.duration)));
+      if (prog <= 0) return;
+      const rt = o.rise ? Math.min(1, Math.max(0, (t - start) / o.riseDuration)) : 1;
+      const rise = o.rise * p.lineH * (1 - EASE[o.riseEase](rt));
+      const r = tl.whole ? built.whole : p.ink;
+      gl.uniform4f(U.uCell, p.cell.x, p.cell.y, p.cell.w, p.cell.h);
+      gl.uniform2f(U.uAtlasAt, p.at.x, p.at.y);
+      gl.uniform1f(U.uRise, rise);
+      gl.uniform1f(U.uProgress, prog);
+      gl.uniform4f(U.uRect, r.x, r.y, r.w, r.h);
+      gl.uniform2f(U.uLine, p.line.top, p.line.bottom);
+      gl.uniform1f(U.uLineIdx, p.lineIdx); gl.uniform2f(U.uLineX, p.lineX.l, p.lineX.w);
+      gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+    });
+    $('scrub').value = String(state.t / tl.total);
+    $('time').textContent = `${state.t.toFixed(2)} / ${tl.total.toFixed(2)} s`;
+  }
+
+  // ── sizing + loop ──────────────────────────────────────────────────────────
+  function resize() {
+    DPR = Math.min(2, window.devicePixelRatio || 1);
+    const w = Math.round(canvas.clientWidth * DPR), h = Math.round(canvas.clientHeight * DPR);
+    if (w === W && h === H) return;
+    W = canvas.width = w; H = canvas.height = h;
+    built = null; build(); draw();
+  }
+  let last = performance.now();
+  function frame(now) {
+    const dt = Math.min(.05, (now - last) / 1000); last = now; clock += dt;
+    if (state.playing) {
+      const total = timeline().total;
+      state.t = Math.min(total + .6, state.t + dt);
+      if (state.t >= total + .6) { state.t = total; state.playing = false; syncPlay(); }
+    }
+    draw();
+    requestAnimationFrame(frame);
+  }
+
+  // ── controls ───────────────────────────────────────────────────────────────
+  const syncPlay = () => { $('play').textContent = state.playing ? 'Pause' : 'Play'; };
+  const replay = () => { state.t = 0; state.playing = true; syncPlay(); };
+  $('play').onclick = () => { const total = timeline().total; if (!state.playing && state.t >= total) state.t = 0; state.playing = !state.playing; syncPlay(); };
+  $('replay').onclick = replay;
+  $('scrub').oninput = e => { state.playing = false; syncPlay(); state.t = +e.target.value * timeline().total; draw(); };
+  const setPressed = (sel, on) => document.querySelectorAll(sel).forEach(b => b.setAttribute('aria-pressed', String(on(b))));
+  $('dirIn').onclick = () => { state.out = false; setPressed('#dirIn,#dirOut', b => b.id === 'dirIn'); replay(); };
+  $('dirOut').onclick = () => { state.out = true; setPressed('#dirIn,#dirOut', b => b.id === 'dirOut'); replay(); };
+  $('gLight').onclick = () => { state.dark = false; setPressed('#gLight,#gDark', b => b.id === 'gLight'); $('screen').classList.remove('dark'); build(); replay(); };
+  $('gDark').onclick = () => { state.dark = true; setPressed('#gLight,#gDark', b => b.id === 'gDark'); $('screen').classList.add('dark'); build(); replay(); };
+  document.querySelectorAll('[data-kind]').forEach(b => b.onclick = () => { state.kind = b.dataset.kind; setPressed('[data-kind]', x => x === b); build(); syncUi(); replay(); });
+  document.querySelectorAll('[data-split]').forEach(b => b.onclick = () => { state.over.split = b.dataset.split; build(); syncUi(); replay(); });
+
+  $('pattern').innerHTML = PATTERNS.map((p, i) => `<option value="${p}">${PATTERN_LABELS[i]}</option>`).join('');
+  $('direction').innerHTML = DIRS.map((d, i) => `<option value="${d}">${DIR_LABELS[i]}</option>`).join('');
+  $('pattern').onchange = e => { state.over.pattern = e.target.value; syncUi(); replay(); };
+  $('direction').onchange = e => { state.over.direction = e.target.value; syncUi(); replay(); };
+  $('pixel').oninput = e => { state.over.pixel = +e.target.value; build(); syncUi(); draw(); };
+  $('pixel').onchange = replay;
+  $('levels').oninput = e => { state.over.levels = +e.target.value; build(); syncUi(); draw(); };
+  $('levels').onchange = replay;
+  $('spread').oninput = e => { state.over.spread = +e.target.value; syncUi(); draw(); };
+  $('spread').onchange = replay;
+  $('reset').onclick = () => { state.over = {}; state.accent = 'preset'; build(); syncUi(); replay(); };
+
+  $('accents').innerHTML = ACCENTS.map(([v, name], i) =>
+    `<button class="sw ${v === 'preset' ? 'preset' : v === null ? 'none' : ''}" data-i="${i}" title="${name}" aria-label="${name}" ${v && v !== 'preset' ? `style="background:${v}"` : ''}></button>`).join('');
+  document.querySelectorAll('#accents .sw').forEach(b => b.onclick = () => { state.accent = ACCENTS[+b.dataset.i][0]; syncUi(); replay(); });
+
+  $('presets').innerHTML = PRESETS.map(([id, name, desc], i) =>
+    `<button class="preset" data-p="${id}" title="${desc}"><span class="n">${String(i + 1).padStart(2, '0')}</span><span class="t">${name}</span></button>`).join('');
+  document.querySelectorAll('.preset').forEach(b => b.onclick = () => { state.preset = b.dataset.p; state.over = {}; state.accent = 'preset'; build(); syncUi(); replay(); });
+
+  function syncUi() {
+    const o = opts(), g = built ? built.grid : pickGrid(o.pixel, o.levels);
+    setPressed('.preset', b => b.dataset.p === state.preset);
+    const isText = state.kind === 'text';
+    document.querySelectorAll('[data-split]').forEach(b => { b.disabled = !isText; b.setAttribute('aria-pressed', String(isText && b.dataset.split === o.split)); });
+    $('pattern').value = o.pattern; $('direction').value = o.direction;
+    $('pixel').value = o.pixel; $('pixelVal').textContent = `${o.pixel} px`;
+    $('levels').value = o.levels; $('levelsVal').textContent = g.levels === o.levels ? String(o.levels) : `${g.levels} (max at this size)`;
+    $('spread').value = o.spread; $('spreadVal').textContent = o.spread.toFixed(2);
+    setPressed('#accents .sw', b => ACCENTS[+b.dataset.i][0] === state.accent);
+    const heat = heatColours(o);
+    $('recipe').textContent = `preset    ${state.preset}\npieces    ${isText ? o.split : 'whole layer'}${o.sweep === 'whole' ? ' · one front' : ''}\npattern   ${o.pattern}\ndirection ${o.direction}\npixel     ${o.pixel}\nlevels    ${g.levels}\nfront     ${o.spread}\nrise      ${o.rise}\nheat      ${heat ? heat.slice(0, heat[2] ? 2 : 1).join(' + ') : 'none'}\nduration  ${o.duration}s · stagger ${o.stagger}s`;
+  }
+
+  // A seek hook for checking frames without the animation loop.
+  window.__pixelReveal = { seek(f) { state.playing = false; state.t = f * timeline().total; draw(); }, pick(id, kind) { if (id) state.preset = id; if (kind) state.kind = kind; state.over = {}; build(); syncUi(); } };
+
+  // Start on a finished frame (so a still capture shows the layer), then play Materialize.
+  const start = () => {
+    resize(); built = null; build(); syncUi();
+    state.t = timeline().total; state.playing = false; draw();
+    setTimeout(() => { replay(); last = performance.now(); requestAnimationFrame(frame); }, 350);
+  };
+  new ResizeObserver(() => resize()).observe(canvas);
+  (document.fonts ? document.fonts.load('800 40px Archivo').then(() => document.fonts.ready) : Promise.resolve()).then(start, start);
+})();
+</script>
