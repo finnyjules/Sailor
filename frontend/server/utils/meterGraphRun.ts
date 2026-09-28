@@ -37,7 +37,7 @@ import type { ApiPrompt } from '#shared/runner/graph'
 import { moderatePrompt, moderateTexts, moderationRefusal, type ModerationResult } from './moderation'
 import { assertSpendAllowed } from './systemControls'
 import { blockedPromptRefusal, nodeProblemsBody, retiredEngineRefusal } from './blockedModels'
-import { measuredInputProblems } from '../runner/requestRules'
+import { hostedRequestProblems, measuredInputProblems } from '../runner/requestRules'
 
 export function isPromptPath(path: string): boolean {
   return path === '/prompt' || path.startsWith('/prompt?')
@@ -503,6 +503,11 @@ async function submitMetered(userId: string | null, body: any, deps: GraphRunDep
   // Hosted, until F12: the two estimate-priced edit engines are refused too.
   const retired = retiredEngineRefusal(body.prompt)
   if (retired) return { status: 400, body: retired }
+  // Hosted: Generate speech takes the 17 preset voices only (R3.8, ruling (j)).
+  const voice = body.prompt && typeof body.prompt === 'object' && !Array.isArray(body.prompt)
+    ? nodeProblemsBody(hostedRequestProblems(body.prompt as ApiPrompt))
+    : null
+  if (voice) return { status: 400, body: voice }
   // G1 follow-up: measuring copies files (below), before the hold. A caller
   // with no credit at all can't pay for a prompt that costs anything, so it
   // is refused before a byte is copied. The price here is the unmeasured one

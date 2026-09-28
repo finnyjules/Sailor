@@ -126,6 +126,7 @@ import { planDescribe } from './generators/describe'
 import { planRepair } from './generators/repair'
 import { planLayers } from './generators/layers'
 import { planSplitLayers } from './generators/splitLayers'
+import { planAudioGen } from './generators/audioGen'
 import type { KeptExt } from './keptBytes'
 import type { AnswerKind } from './answerDownload'
 import { filesOf } from './values'
@@ -985,9 +986,13 @@ async function planNodeRequest(ctx: PlanContext): Promise<NodePlan> {
       const problem = sync3NodeProblem(ctx.prompt, ctx.nodeId)
       if (problem) throw new Error(problem.message)
       const sources = sync3Sources(ctx.prompt, ctx.nodeId)
-      if (!('file' in sources.video) || !('file' in sources.audio)) throw new Error('This lip-sync has no face video or sound')
-      // A linked Audio card hands its file on; the file the link brought is the one sent.
-      const audio = sources.audio.link ? (linkedFirstFile('audio') ?? sources.audio.file) : sources.audio.file
+      if (!('file' in sources.video) || 'problem' in sources.audio) throw new Error('This lip-sync has no face video or sound')
+      // A linked Audio card hands its file on; the file the link brought is the one sent
+      // (a sound made in the run, R3.8: only that).
+      const audio = 'produced' in sources.audio
+        ? linkedFirstFile('audio')
+        : sources.audio.link ? (linkedFirstFile('audio') ?? sources.audio.file) : sources.audio.file
+      if (!audio) throw new Error('This lip-sync has no face video or sound')
       const call = sync3Lipsync({
         videoUrl: await ctx.toUrl(sources.video.file),
         audioUrl: await ctx.toUrl(audio),
@@ -1041,7 +1046,15 @@ async function planNodeRequest(ctx: PlanContext): Promise<NodePlan> {
 
     // The Audio card a sync-3 lip-sync reads (family sync-3): its own file, handed on.
     // The card plays its file itself; nothing to show.
+    // With a music or speech node wired into `source` (audio-gen, R3.8, ruling (t)):
+    // that node's sound, handed on and shown (the provider's own file; Python
+    // shows a FLAC copy it encodes, which waits for R5).
     case 'Audio': {
+      if (isLink(inputs.source)) {
+        const made = ctx.filesFrom(inputs.source)
+        if (!made.length) throw new Error('There is no sound to show')
+        return { kind: 'pass', files: [made[0]!], ui: { audio: [made[0]!] } }
+      }
       const f = parseInputFileRef(inputs.audio)
       return { kind: 'pass', files: f ? [f] : [], ui: null }
     }
@@ -1098,6 +1111,12 @@ async function planNodeRequest(ctx: PlanContext): Promise<NodePlan> {
     // ── layers (step 3, R3.7): Separate background and foreground, a pipeline of two Replicate calls ──
     case 'SplitPhotoLayersNode':
       return planSplitLayers(ctx)
+    // ── audio-gen (step 3, R3.8): Generate music and Generate speech (+ the twins), one Replicate call each ──
+    case 'GenerateMusicNode':
+    case 'MusicGenRemoteNode':
+    case 'GenerateSpeechNode':
+    case 'MiniMaxSpeechRemoteNode':
+      return planAudioGen(ctx)
     case 'Text': return staticDerive(ctx, textCardUi)
     case 'Moodboard': return staticDerive(ctx)
     case 'Model3D': return staticDerive(ctx, textCardUi)

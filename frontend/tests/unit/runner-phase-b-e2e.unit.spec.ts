@@ -759,6 +759,8 @@ describe('B10 · one workflow per family, POST /api/runs to the last event', () 
       'llm-text',
       // Describe, read and find (R3.4) hand on text and JSON: runner-paid-describe.unit.spec.ts.
       'describe',
+      // Music and speech (R3.8) make a sound an Audio card shows: runner-paid-audio-gen.unit.spec.ts.
+      'audio-gen',
     ]
     expect(FLOWS.map(f => f.family).sort()).toEqual(RUNNER_FAMILIES.filter(f => !local.includes(f)).sort())
   })

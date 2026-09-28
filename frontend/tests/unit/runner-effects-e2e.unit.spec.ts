@@ -702,10 +702,11 @@ describe('R2.12 · every effects family off: the needs-engine list over every sa
 
   projectsIt('equals the pinned per-graph hashes (fixtures/runner-effects-e2e-needs-engine.json; R212_PIN=1 writes it)', async () => {
     // Families added after the pin that take saved graphs' own nodes (R3.5's image-repair: Upscale, Restore,
-    // Remove background; R3.6's layers: Layerize, Outpaint) are left off too: with them off the list is
-    // exactly as before them (runner-paid-repair / runner-paid-layers.unit.spec.ts, rule 15), so the pin
+    // Remove background; R3.6's layers: Layerize, Outpaint; R3.8's audio-gen: music, speech and the Audio
+    // card after them) are left off too: with them off the list is exactly as before them
+    // (runner-paid-repair / runner-paid-layers / runner-paid-audio-gen.unit.spec.ts, rule 15), so the pin
     // keeps measuring the effects alone.
-    const LATER: readonly string[] = ['image-repair', 'layers']
+    const LATER: readonly string[] = ['image-repair', 'layers', 'audio-gen']
     const effectsOff: ReadonlySet<RunnerFamily> = new Set(RUNNER_FAMILIES.filter(x => !(EFFECT_FAMILIES as readonly string[]).includes(x) && !LATER.includes(x)))
     const sets: Record<string, ReadonlySet<RunnerFamily>> = { frameCards: FRAME_CARDS, allButEffects: effectsOff }
     const now: Record<string, { prompt: string } & Record<string, string>> = {}

@@ -16,6 +16,10 @@
  *  - `gpu_ceiling`: a model billed by GPU time, priced at a stated ceiling
  *    (`note` says how it was reached). Its confidence is `estimate` until a
  *    live call measures it, and an estimate blocks the family's switch-on;
+ *  - `gpu_per_output_second`: a model billed by GPU time whose run grows
+ *    with the length it makes (R3.8, MusicGen): dollars per second asked
+ *    for, at least `minUsd` a call (`note` says how both were reached).
+ *    An `estimate` until a live call measures it, as `gpu_ceiling`;
  *  - `per_output_image`: dollars per picture the call makes (R3.6, fal's
  *    Seedream layerize, `billing_unit: images`), at a dearer rate for
  *    pictures of a larger area where the page has one (`large`: over
@@ -57,6 +61,7 @@ export type PaidRate =
   | (RateMeta & { unit: 'per_output_second', perSecond: number })
   | (RateMeta & { unit: 'per_thousand_chars', perThousand: number })
   | (RateMeta & { unit: 'gpu_ceiling', usd: number, note: string })
+  | (RateMeta & { unit: 'gpu_per_output_second', perSecond: number, minUsd: number, note: string })
   | (RateMeta & { unit: 'per_output_image', perImage: number, large?: { fromPixels: number, perImage: number } })
 
 /** One priced provider call: the endpoint and what it is billed by. */
@@ -175,6 +180,24 @@ export const PAID_RATES: Record<string, PaidRate> = {
     unit: 'per_call', usd: 0.04,
     service: 'replicate', source: 'https://replicate.com/bria/eraser', read: '2026-09-27', confidence: 'verified',
   },
+  // R3.8, music and speech (read 2026-09-27, plain GETs of the public pages).
+  // Generate music (and its twin) on MusicGen, billed by GPU time (Nvidia A100 80GB, "$0.0014 per
+  // second", no billing table). The page's one recorded run (stereo-large, 8 s asked, `predict_time`
+  // 66.37 s, a model download included) is $0.0929, $0.0116 a second of music: written here rounded
+  // up to $0.012 a second, and never below the page's "approximately $0.042 to run" (its p50). An
+  // estimate until the live check measures it (the page gives one run, at one length and one version).
+  'meta/musicgen': {
+    unit: 'gpu_per_output_second', perSecond: 0.012, minUsd: 0.042,
+    note: 'A100 (80GB) at $0.0014/s; page run: 8 s of stereo-large in 66.37 s ($0.0929, $0.0116/s), rounded up to $0.012/s; at least the page\'s approximately $0.042 to run (read 2026-09-27)',
+    service: 'replicate', source: 'https://replicate.com/meta/musicgen', read: '2026-09-27', confidence: 'estimate',
+  },
+  // Generate speech (and its twin) on MiniMax Speech-02 HD: the page's billing table, "$0.10 per
+  // thousand input tokens" (`token_input_count`; "or 10,000 tokens for $1"), and its schema's "Every
+  // character is 1 token": $0.10 per thousand characters of the text sent.
+  'minimax/speech-02-hd': {
+    unit: 'per_thousand_chars', perThousand: 0.10,
+    service: 'replicate', source: 'https://replicate.com/minimax/speech-02-hd', read: '2026-09-27', confidence: 'verified',
+  },
 }
 
 const own = <T>(o: Record<string, T>, k: string): T | undefined =>
@@ -204,6 +227,10 @@ function paidCardUsd(rate: PaidRate, call: PaidCall): number | null {
     case 'per_output_second': {
       const s = count(call.outputSeconds)
       return s === undefined ? null : tidy(rate.perSecond * s)
+    }
+    case 'gpu_per_output_second': {
+      const s = count(call.outputSeconds)
+      return s === undefined ? null : tidy(Math.max(rate.minUsd, rate.perSecond * s))
     }
     case 'per_thousand_chars': {
       const c = count(call.chars)

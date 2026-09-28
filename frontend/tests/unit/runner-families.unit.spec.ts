@@ -46,6 +46,8 @@ describe('parseFamilies', () => {
       'image-repair',
       // Step 3, R3.6: layers from one call, and outpaint (needs `cards`).
       'layers',
+      // Step 3, R3.8: music and speech (needs `cards`).
+      'audio-gen',
     ].sort())
   })
 })

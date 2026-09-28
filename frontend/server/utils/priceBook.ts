@@ -186,7 +186,18 @@ export { VIDEO_RATES, MODEL_PRICED_NODE_CLASSES, SETTING_PRICED_NODE_CLASSES, RE
 // the dearer. The remover's matte call Python keeps for a cut-out without
 // alpha never runs (a downloaded picture is always read as RGBA) and is not
 // held. The runner charges the calls that finished.
-export const PRICE_BOOK_VERSION = 'r3-split'
+// r3-audio-gen (step 3, R3.8, ruling (a)): Generate music and Generate
+// speech (and their hidden twins) leave their flat rows (4 and 45 credits,
+// from their badges) for their calls, read from Replicate's pages. Speech on
+// MiniMax Speech-02 HD at $0.10 per thousand characters of its text (the
+// page's billing table; "every character is 1 token"): 20 characters 1
+// credit, 1,000 characters 20; a wired text is held (and on the ComfyUI path
+// charged) at the most the model reads, 10,000 characters: 150 credits; the
+// runner charges the characters it sent. Music on MusicGen by GPU time, an
+// estimate from the page's one recorded run: $0.012 a second asked for, at
+// least $0.042 (the page's typical run): 1–3 s 9 credits, 8 s (the default)
+// 20, 30 s 54; a wired length is held at 30 s.
+export const PRICE_BOOK_VERSION = 'r3-audio-gen'
 
 export const BASE_RENDER_CREDITS = 1
 
@@ -355,10 +366,6 @@ export const GRAPH_NODE_CREDITS: Record<string, number> = {
   // — audio / speech —
   WhisperRemoteNode: 1,            // badge $0.001 / min
   TranscribeAudioNode: 1,          // badge $0.005 / min
-  MusicGenRemoteNode: 4,           // badge $0.02
-  GenerateMusicNode: 4,            // badge $0.02
-  MiniMaxSpeechRemoteNode: 45,     // badge $0.30 / 1K chars
-  GenerateSpeechNode: 45,          // badge $0.30 / 1K chars
   CloneSingingVoiceNode: 4,        // badge $0.02 / min
   IdentifySpeakersNode: 10,        // badge $0.05 / min
 

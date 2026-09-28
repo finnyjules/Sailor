@@ -33,7 +33,7 @@ import { createMemoryHeldBytes, type HeldBytes } from './heldBytes'
 import { createMemoryKeptBytes, type KeptBytes, type KeptExt } from './keptBytes'
 import { createFileAccess } from './fileAccess'
 import type { BackupSettings } from './config'
-import { checkedInputFile, handedOffPictureProblem, inputFileCaps, linkedFileCheck, measuredInputProblem, pictureChangedWords, pictureOverMarginWords, requestProblems, unreadableInputWords } from './requestRules'
+import { checkedInputFile, handedOffPictureProblem, inputFileCaps, linkedFileCheck, measuredInputProblem, pictureChangedWords, pictureOverMarginWords, hostedRequestProblems, requestProblems, unreadableInputWords } from './requestRules'
 import { predictedHoldPixels, startPictureSizes } from './repairSizes'
 import { isReusable, requestFingerprint } from './fingerprint'
 import { assertFilesOwned, collectInputFiles, parseInputFileRef, type OwnershipCheck } from './inputs'
@@ -1921,7 +1921,8 @@ export function createEngine(deps: EngineDeps) {
     // (requestRules.ts; planNode checks the built request again). `runner`
     // adds the rules only a runner run has (Krea 2's prompt, F17).
     for (const p of prompts) {
-      const problem = requestProblems(p, { runner: true })[0]
+      // Hosted: a cloned voice (R3.8, ruling (j)) too.
+      const problem = requestProblems(p, { runner: true })[0] ?? (deps.hosted() ? hostedRequestProblems(p)[0] : undefined)
       if (problem) throw refuse(problem.message, 400, { nodeId: problem.nodeId, classType: problem.classType })
     }
     // Fail closed on price, before anything is held: a provider node that

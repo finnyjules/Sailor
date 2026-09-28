@@ -39,7 +39,10 @@ export async function nodeMediaCheck(prompt: ApiPrompt, nodeId: string, reads: S
   switch (mediaNodeKind(prompt[nodeId])) {
     case 'sync-3': {
       const c = await sync3MediaCheck(prompt, nodeId, reads)
-      return c.problem !== null ? { problem: c.problem } : { problem: null, measured: measuredOf(c) }
+      if (c.problem !== null) return { problem: c.problem }
+      // A sound made in the run (R3.8), not read yet at the start: nothing recorded, so the
+      // hold is the 60 s cap and the node's turn measures (and charges) the sound it gets.
+      return c.audio ? { problem: null, measured: measuredOf(c) } : null
     }
     case 'topaz-video': {
       const c = await topazMediaCheck(prompt, nodeId, reads)

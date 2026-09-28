@@ -162,11 +162,19 @@ export type RunnerFamily =
    * as before.
    */
   | 'layers'
+  /**
+   * Music and speech on Replicate (step 3, R3.8): Generate music (MusicGen)
+   * and Generate speech (MiniMax Speech-02 HD), and their hidden twins. Their
+   * sound is shown by an Audio card wired after them (the provider's own
+   * file, ruling (t)), which a Lip-sync on sync-3 may read. Needs `cards`:
+   * their prompts take text wires. Off: they go to ComfyUI, as before.
+   */
+  | 'audio-gen'
 
 export const RUNNER_FAMILIES: readonly RunnerFamily[] = [
   'fal-edit', 'replicate-image', 'replicate-video', 'nano-actions', 'ref-edits', 'restyle', 'frame', 'wan-3', 'gpt-image-2.5', 'h3-max-turbo', 'gemini-omni-flash', 'veo-3.1-lite', 'qwen-image-3', 'grok-imagine-2', 'ideogram-4', 'seedream-5-pro-edit', 'qwen-2511-angles', 'nano-banana-2-blend', 'bria-product-shot', 'muse-image', 'nano-banana-2-lite', 'reve-2.1', 'recraft-v4.1', 'krea-2', 'happyhorse-1.1', 'grok-imagine-video-1.5', 'ltx-2.5-fast', 'luma-ray-3.2', 'sync-3', 'topaz-video', 'fix-faces', 'face-swap', 'person-swap-video', 'cards',
   'effects-tone', 'effects-blur', 'effects-cells', 'effects-warp', 'effects-mask', 'effects-noise', 'shader-bake', 'live-previews',
-  'llm-text', 'describe', 'image-repair', 'layers',
+  'llm-text', 'describe', 'image-repair', 'layers', 'audio-gen',
 ]
 
 /**
@@ -186,6 +194,7 @@ export const FAMILY_REQUIRES: Partial<Record<RunnerFamily, RunnerFamily>> = {
   'describe': 'cards',
   'image-repair': 'cards',
   'layers': 'cards',
+  'audio-gen': 'cards',
 }
 
 const KNOWN: ReadonlySet<string> = new Set(RUNNER_FAMILIES)

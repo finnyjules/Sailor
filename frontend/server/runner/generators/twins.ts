@@ -347,6 +347,10 @@ export const RUNNER_ROUTES: Readonly<Record<string, Route>> = {
   'OutpaintImageNode:Bria Expand': r('replicate', null, 'no same-model twin on fal with the same settings is carded'),
   // R3.7, Separate background and foreground: its cut-out and fill on Replicate, as Python.
   'SplitPhotoLayersNode': r('replicate', null, 'no same-model twin on fal with the same settings is carded'),
+  // R3.8, music and speech (family audio-gen): Replicate, as Python.
+  ...Object.fromEntries([
+    'GenerateMusicNode', 'MusicGenRemoteNode', 'GenerateSpeechNode', 'MiniMaxSpeechRemoteNode',
+  ].map(ct => [ct, r('replicate', null, 'MiniMax Speech and MusicGen aren\'t carded on fal')])),
 }
 
 // ── Generate video: the two models moved to fal first ──────────────────────

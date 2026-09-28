@@ -460,7 +460,9 @@ describe('server health: caps, sources, Stop', () => {
     // The LLM text nodes (R3.3) hand on text.
     const texts = new Set(['ChatLLMNode', 'ImprovePromptNode', 'SummarizeTextNode', 'TranslateTextNode', 'RewriteToneNode', 'BrainstormIdeasNode', 'ReasonStepByStepNode',
       // Describe, read and find (R3.4) hand on text and JSON.
-      'DescribeImageNode', 'DescribeImageRemoteNode', 'DescribeVideoNode', 'ExtractTextNode', 'FindObjectsNode'])
+      'DescribeImageNode', 'DescribeImageRemoteNode', 'DescribeVideoNode', 'ExtractTextNode', 'FindObjectsNode',
+      // Music and speech (R3.8) hand on a sound.
+      'GenerateMusicNode', 'MusicGenRemoteNode', 'GenerateSpeechNode', 'MiniMaxSpeechRemoteNode'])
     // A paid family's picture classes (R3.5's image-repair) are pictures only while their family is on (PAID_PICTURE_FAMILY).
     for (const c of PROVIDER_TYPES) expect(IMAGE_OUTPUT_CLASSES.has(c) || Object.prototype.hasOwnProperty.call(PAID_PICTURE_FAMILY, c), c).toBe(!videos.has(c) && !texts.has(c))
     for (const c of Object.keys(PAID_PICTURE_FAMILY)) expect(IMAGE_OUTPUT_CLASSES.has(c), c).toBe(false)

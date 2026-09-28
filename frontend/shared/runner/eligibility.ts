@@ -25,6 +25,9 @@ import {
   PHOTO_FILLS, SPLIT_CLASS, SPLIT_MASK_GROW,
 } from './layers'
 import {
+  AUDIO_GEN_CLASSES, MINIMAX_EMOTIONS, MINIMAX_LANGUAGES, MUSIC_MAX_SECONDS, MUSIC_MIN_SECONDS, MUSIC_MODEL_VERSIONS, MUSIC_MODELS, SPEECH_MODELS,
+} from './audioGen'
+import {
   BRAINSTORM_ANGLES, CHAT_LLM_MODELS, IMPROVE_PROMPT_MODELS, IMPROVE_PROMPT_TARGETS, REASON_MODELS, REWRITE_MODELS, REWRITE_TONES,
   SUMMARIZE_LENGTHS, SUMMARIZE_MODELS, TRANSLATE_LANGUAGES,
 } from './llm'
@@ -1029,6 +1032,42 @@ export const RUNNER_NODE_RULES: Readonly<Record<string, RunnerNodeRule>> = {
       mask_grow: { type: 'INT', required: true, min: SPLIT_MASK_GROW.min, max: SPLIT_MASK_GROW.max },
     },
   },
+  // ── audio-gen (step 3, R3.8): Generate music and Generate speech (and their
+  // hidden twins) on Replicate. The prompt and the text take a text wire (R0:
+  // the value arrives as typed); every other setting is a widget as ComfyUI
+  // validates it (define_schema's options and bounds; a voice may be a cloned
+  // one, so it is any text: hosted refuses anything but the 17 presets before
+  // the hold, ruling (j)). Their sound goes to an Audio card only (ruling (t),
+  // AUDIO_CARD_AUDIO_GEN_RULE); any other reader leaves them to the engine.
+  ...Object.fromEntries((['GenerateMusicNode', 'MusicGenRemoteNode'] as const).map(c => [c, {
+    family: 'audio-gen',
+    valueInputs: { prompt: ['text'] },
+    required: ['prompt'],
+    feedsOnly: ['Audio'],
+    widgets: {
+      ...(c === 'GenerateMusicNode' ? { model: { type: 'COMBO', required: true, options: MUSIC_MODELS } } : {}),
+      duration: { type: 'INT', required: true, min: MUSIC_MIN_SECONDS, max: MUSIC_MAX_SECONDS },
+      model_version: { type: 'COMBO', required: true, options: MUSIC_MODEL_VERSIONS },
+      temperature: { type: 'FLOAT', required: true, min: 0, max: 2 },
+      top_p: { type: 'FLOAT', required: true, min: 0, max: 1 },
+      seed: { type: 'INT', required: true, min: 0, max: 0xFFFFFFFF },
+    },
+  } satisfies RunnerNodeRule])),
+  ...Object.fromEntries((['GenerateSpeechNode', 'MiniMaxSpeechRemoteNode'] as const).map(c => [c, {
+    family: 'audio-gen',
+    valueInputs: { text: ['text'] },
+    required: ['text'],
+    feedsOnly: ['Audio'],
+    widgets: {
+      ...(c === 'GenerateSpeechNode' ? { model: { type: 'COMBO', required: true, options: SPEECH_MODELS } } : {}),
+      voice_id: { type: 'STRING', required: true },
+      emotion: { type: 'COMBO', required: true, options: MINIMAX_EMOTIONS },
+      speed: { type: 'FLOAT', required: true, min: 0.5, max: 2 },
+      volume: { type: 'FLOAT', required: true, min: 0.1, max: 10 },
+      pitch: { type: 'INT', required: true, min: -12, max: 12 },
+      language_boost: { type: 'COMBO', required: true, options: MINIMAX_LANGUAGES },
+    },
+  } satisfies RunnerNodeRule])),
   // ── effects-* (step 3, R2): the still-picture effects (./effects.ts, server/runner/effects/) ──
   // Rows built from the real node schemas (./effectSchemas.generated.ts), one
   // per ported class; each needs its family and `cards`.
@@ -1087,6 +1126,32 @@ export const SWITCHED_CLASSES: Readonly<Record<string, RunnerFamily>> = {
   ...Object.fromEntries(LAYERS_CLASSES.map(c => [c, 'layers' as const])),
   // R3.7: Separate background and foreground.
   [SPLIT_CLASS]: 'layers',
+  // R3.8: music and speech.
+  ...Object.fromEntries(AUDIO_GEN_CLASSES.map(c => [c, 'audio-gen' as const])),
+}
+
+/**
+ * The Audio card showing a music or speech node's sound (R3.8, ruling (t)):
+ * with `audio-gen` on and `source` wired from one of them, the card hands
+ * that file on and shows it (the provider's own file, not Python's FLAC copy)
+ * instead of its own file (the `sync-3` row, RUNNER_NODE_RULES.Audio). Its
+ * `export` must be off (the runner saves no copy); it may feed Lip-sync on
+ * sync-3 only (any other reader leaves it to the engine) or nothing (it is an
+ * output node). A card wired from anything else keeps its own row.
+ */
+export const AUDIO_CARD_AUDIO_GEN_RULE: RunnerNodeRule = {
+  family: 'audio-gen',
+  local: 'source',
+  mustNotLink: ['audio'],
+  linkSources: { source: AUDIO_GEN_CLASSES.map(c => [c, 0] as const) },
+  feedsOnly: ['LipSyncNode'],
+  offWidgets: ['export'],
+}
+
+/** The row a node is judged by: RUNNER_NODE_RULES', but for an Audio card showing a music or speech node's sound (R3.8). */
+export function runnerRuleFor(classType: string, inputs: Record<string, unknown>, families: ReadonlySet<RunnerFamily>): RunnerNodeRule | undefined {
+  if (classType === 'Audio' && isLink(inputs.source) && familyOn('audio-gen', families)) return AUDIO_CARD_AUDIO_GEN_RULE
+  return Object.prototype.hasOwnProperty.call(RUNNER_NODE_RULES, classType) ? RUNNER_NODE_RULES[classType] : undefined
 }
 
 /**
@@ -1590,7 +1655,7 @@ export function runnerTakesNode(prompt: ApiPrompt, id: string, families: Readonl
   const n = prompt[id]
   if (!n) return false
   const inputs = n.inputs ?? {}
-  const rule = families.size ? RUNNER_NODE_RULES[n.class_type] : undefined
+  const rule = families.size ? runnerRuleFor(n.class_type, inputs, families) : undefined
   const byRule = !!rule && nodeRuleAllows(n.class_type, rule, inputs, families, opts, id, prompt) && graphRuleAllows(prompt, id, rule, families)
   if (n.class_type === 'FilmShotNode') {
     if (!filmShotTaken(inputs, families)) return false

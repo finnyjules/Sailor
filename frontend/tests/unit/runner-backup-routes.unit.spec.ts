@@ -89,6 +89,11 @@ const EDIT_BASE: Record<string, Record<string, unknown>> = {
   OutpaintImageNode: { image: LINK, prompt: '', direction: 'Zoom out 1.5x', aspect_ratio: '16:9', seed: 0 },
   // Separate background and foreground (R3.7): its first call is the cut-out.
   SplitPhotoLayersNode: { image: LINK, background_fill: 'LaMa (fast)', mask_grow: 12 },
+  // Music and speech (R3.8): the text; the rest at the node's defaults.
+  GenerateMusicNode: { model: 'MusicGen', prompt: 'lo-fi piano' },
+  MusicGenRemoteNode: { prompt: 'lo-fi piano' },
+  GenerateSpeechNode: { model: 'MiniMax Speech-02 HD', text: 'Hello.' },
+  MiniMaxSpeechRemoteNode: { text: 'Hello.' },
   // sync-3 lip-sync (Task F22): the studio's face video and sound.
   LipSyncNode: {
     engine: 'sync-3',

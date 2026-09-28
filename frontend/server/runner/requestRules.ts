@@ -178,6 +178,7 @@ import { isSync3LipSync, sync3ModeRefusal } from '#shared/runner/lipSync'
 import { llmRequestProblem } from '#shared/runner/llm'
 import { describeComfyPathProblem, describeRequestProblem } from '#shared/runner/describe'
 import { repairRequestProblem } from '#shared/runner/repair'
+import { hostedVoiceProblem, speechTextProblem } from '#shared/runner/audioGen'
 import { isLlmTextClass } from './generators/llm'
 import { FACE_SWAP_NEEDS_GENDER, faceSwapGender } from '#shared/runner/faceSwap'
 import { pixverseSwapNodeProblem } from './generators/pixverseSwap'
@@ -1068,6 +1069,26 @@ export function requestProblems(prompt: ApiPrompt, opts: { runner?: boolean } = 
     // runner can't send as Python would (#shared/runner/repair restoreTwinSafety).
     const r = opts.runner ? repairRequestProblem(ct, inputs) : null
     if (r) out.push({ nodeId, classType: ct, input: r.input, message: r.message })
+    // Generate speech (R3.8), on a runner run: a blank text, or one longer than
+    // MiniMax reads (#shared/runner/audioGen speechTextProblem; planAudioGen
+    // refuses the same for a wired text at the node's turn).
+    const sp = opts.runner ? speechTextProblem(ct, inputs) : null
+    if (sp) out.push({ nodeId, classType: ct, input: sp.input, message: sp.message })
+  }
+  return out
+}
+
+/**
+ * What hosted Sailor refuses on both paths before the hold, besides
+ * requestProblems (the engine's start and the hosted /prompt meter ask):
+ * Generate speech with a voice other than the 17 presets (ruling (j): cloned
+ * voices live in one shared folder with no owner), or a wired one.
+ */
+export function hostedRequestProblems(prompt: ApiPrompt): RequestProblem[] {
+  const out: RequestProblem[] = []
+  for (const [nodeId, node] of Object.entries(prompt ?? {})) {
+    const p = hostedVoiceProblem(node?.class_type, node?.inputs ?? {})
+    if (p) out.push({ nodeId, classType: node!.class_type, input: p.input, message: p.message })
   }
   return out
 }

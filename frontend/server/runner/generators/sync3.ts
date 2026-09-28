@@ -32,6 +32,7 @@
 import { isLink, type ApiLink, type ApiPrompt } from '#shared/runner/graph'
 import { SYNC_3_ENDPOINT, VIEW_REF_REFUSED, readViewRef } from '#shared/pricing/clipSettings'
 import { lipSyncOptions, lipSyncSyncMode, sync3ModeRefusal } from '#shared/runner/lipSync'
+import { isAudioGenClass } from '#shared/runner/audioGen'
 import { parseInputFileRef } from '../inputs'
 import type { OutputFile } from '../types'
 import type { ServiceCall } from './twins'
@@ -46,6 +47,12 @@ export const SYNC_3_SOUND_NOT_A_FILE = 'sync-3 takes a sound uploaded to Sailor,
 /** Where one of the node's media files comes from, or why it can't be sent. */
 export type Sync3Source =
   | { file: OutputFile, link?: ApiLink }
+  /**
+   * A sound made in the run (R3.8): an Audio card showing a music or speech
+   * node's sound. Nothing to read before the run (held at the 60 s cap); the
+   * node's turn reads what the link brought.
+   */
+  | { produced: ApiLink }
   | { problem: string }
 
 /** The node's face video and sound, as the runner reads them before anything is sent. */
@@ -66,7 +73,8 @@ function viewSource(v: unknown, missing: string, notAFile: string): Sync3Source 
 /**
  * The node's media files. The sound: a linked Audio card's own file (the
  * link wins, as `execute` reads a wired `audio` first), else the options'
- * `audio`. The video: the options' `face_video`. Read from the prompt alone
+ * `audio`, or, for a card showing a music or speech node's sound (R3.8), that
+ * sound, made in the run. The video: the options' `face_video`. Read from the prompt alone
  * (the Audio card's file widget), so the start of a run and the node's own
  * turn agree.
  */
@@ -77,8 +85,11 @@ export function sync3Sources(prompt: ApiPrompt, nodeId: string): Sync3Sources {
   let audio: Sync3Source
   if (isLink(inputs.audio)) {
     const card = prompt[inputs.audio[0]]
-    const file = card?.class_type === 'Audio' && !isLink(card.inputs?.source) ? parseInputFileRef(card.inputs?.audio) : null
-    audio = file ? { file, link: inputs.audio } : { problem: SYNC_3_NEEDS_SOUND }
+    const source = card?.class_type === 'Audio' ? card.inputs?.source : undefined
+    const file = card?.class_type === 'Audio' && !isLink(source) ? parseInputFileRef(card.inputs?.audio) : null
+    // A card showing a music or speech node's sound (R3.8): made in the run.
+    const made = isLink(source) && isAudioGenClass(prompt[source[0]]?.class_type)
+    audio = file ? { file, link: inputs.audio } : made ? { produced: inputs.audio } : { problem: SYNC_3_NEEDS_SOUND }
   }
   else {
     audio = viewSource(opts.audio, SYNC_3_NEEDS_SOUND, SYNC_3_SOUND_NOT_A_FILE)

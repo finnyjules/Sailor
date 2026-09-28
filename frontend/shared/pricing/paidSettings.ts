@@ -44,6 +44,10 @@ import {
   LAYERIZE_SLUG, OUTPAINT_SLUGS, PHOTO_FILL_SLUGS, SEEDREAM_1K_AREA, SEEDREAM_LAYERIZE_APP, SEEDREAM_MAX_IMAGES, SPLIT_CLASS, SPLIT_CUTOUT_SLUG,
   type OutpaintModel, type PhotoFill,
 } from '../runner/layers'
+import {
+  AUDIO_GEN_CLASSES, AUDIO_GEN_ENDPOINTS, MUSIC_DEFAULT_SECONDS, MUSIC_MAX_SECONDS, MUSIC_MIN_SECONDS, SPEECH_MAX_CHARS,
+  isSpeechClass, speechChars, type AudioGenClass,
+} from '../runner/audioGen'
 
 /**
  * The most bytes of one moderated text in hosted (server/utils/moderation.ts
@@ -299,6 +303,35 @@ function splitPlanner(inputs: NodeInputs): PaidCalls {
   return { steps: [{ call: { endpoint: SPLIT_CUTOUT_SLUG }, times: 1 }, { call: { endpoint: fill }, times: 1 }] }
 }
 
+// ── R3.8: music and speech (#shared/runner/audioGen) ──
+
+/**
+ * Generate music (and its twin): one MusicGen call billed by the seconds it
+ * asks for (`duration`, 1–30 as ComfyUI validates it); a wired or unreadable
+ * one at the longest (30 s). Generate speech (and its twin): one MiniMax call
+ * by the characters of its text (Python's `len`); a wired text at the most
+ * the model reads (SPEECH_MAX_CHARS: a longer one is refused before it is
+ * sent), or, with `opts.inputChars`, the characters it sent (the charge;
+ * priceNode caps it at the hold).
+ */
+function audioGenPlanner(classType: AudioGenClass): PaidPlanner {
+  const endpoint = AUDIO_GEN_ENDPOINTS[classType]
+  if (!isSpeechClass(classType)) {
+    return (inputs) => {
+      const d = inputs.duration
+      const seconds = isLink(d) ? MUSIC_MAX_SECONDS : intIn(d, MUSIC_DEFAULT_SECONDS, MUSIC_MIN_SECONDS, MUSIC_MAX_SECONDS)
+      return { steps: [{ call: { endpoint, outputSeconds: seconds }, times: 1 }] }
+    }
+  }
+  return (inputs, opts) => {
+    const sent = opts.inputChars
+    const chars = typeof sent === 'number' && Number.isFinite(sent) && sent >= 0
+      ? sent
+      : isLink(inputs.text) ? SPEECH_MAX_CHARS : speechChars(text(inputs.text))
+    return { steps: [{ call: { endpoint, chars }, times: 1 }] }
+  }
+}
+
 /** Python returns "" before calling anyone when the text is blank (typed; a wired one is priced as a call). */
 function llmNoCall(classType: LlmTextClass): ((inputs: NodeInputs) => boolean) | null {
   const name = LLM_NO_CALL_INPUT[classType]
@@ -314,6 +347,7 @@ const PAID_PLANNERS: Readonly<Record<string, PaidPlanner>> = {
   ...Object.fromEntries(REPAIR_PER_CALL_CLASSES.map(c => [c, repairPlanner(c)])),
   ...LAYERS_PLANNERS,
   [SPLIT_CLASS]: splitPlanner,
+  ...Object.fromEntries(AUDIO_GEN_CLASSES.map(c => [c, audioGenPlanner(c)])),
 }
 
 /** Each paid class's no-call rule (rule 8), where Python has one. Filled by each R3 task. */

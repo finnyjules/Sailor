@@ -233,6 +233,12 @@ export interface PriceOptions {
    * (ruling (c)); priceNode never prices it above the node's hold.
    */
   answerUsage?: { inputTokens: number; outputTokens: number }
+  /**
+   * The characters a speech node's text sent (Python's `len`, R3.8), for the
+   * charge: a wired text is held at its ceiling and charged what it sent;
+   * priceNode never prices it above the hold.
+   */
+  inputChars?: number
 }
 
 /**
@@ -258,13 +264,13 @@ export function paidStepsPrice(p: PaidCalls): NodePrice {
 
 /**
  * A paid node: the hold is the ceiling its settings can reach; with
- * `answerUsage` the calls as used, never above that ceiling (and the
- * ceiling when the used calls can't be priced).
+ * `answerUsage` (or a speech node's `inputChars`) the calls as used, never
+ * above that ceiling (and the ceiling when the used calls can't be priced).
  */
 function paidNodePrice(classType: string, inputs: NodeInputs, opts: PriceOptions): NodePrice {
-  const { answerUsage, ...rest } = opts
+  const { answerUsage, inputChars, ...rest } = opts
   const ceiling = paidStepsPrice(paidCalls(classType, inputs, rest))
-  if ('refused' in ceiling || !answerUsage) return ceiling
+  if ('refused' in ceiling || (!answerUsage && inputChars === undefined)) return ceiling
   const used = paidStepsPrice(paidCalls(classType, inputs, opts))
   return 'refused' in used || used.credits > ceiling.credits ? ceiling : used
 }

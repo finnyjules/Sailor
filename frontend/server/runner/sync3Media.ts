@@ -30,7 +30,7 @@ import type { ApiLink, ApiPrompt } from '#shared/runner/graph'
 import { LIPSYNC_MAX_SECONDS, type InputSeconds } from '#shared/pricing/clipSettings'
 import { lipSyncSyncMode, sync3OutputSeconds } from '#shared/runner/lipSync'
 import { measureMediaFile, type MediaReads, type MediaRule } from './mediaInputs'
-import { sync3Sources, type Sync3Source } from './generators/sync3'
+import { SYNC_3_NEEDS_SOUND, SYNC_3_NEEDS_VIDEO, sync3Sources, type Sync3Source } from './generators/sync3'
 import type { MeasuredMedia, OutputFile } from './types'
 
 export const SYNC_3_MAX_VIDEO_BYTES = 100_000_000
@@ -68,7 +68,12 @@ export const SYNC_3_CHANGED = 'The sound or face video changed after you pressed
 /** What the check found: a refusal, or the files to hand off and their measured lengths. */
 export type Sync3MediaCheck =
   | { problem: string }
-  | { problem: null, video: OutputFile, audio: OutputFile, seconds: InputSeconds, sha: MeasuredMedia['sha'] }
+  /**
+   * `audio` null: a sound made in the run (R3.8, an Audio card showing a music
+   * or speech node's sound), not read yet at the start of the run: the video
+   * alone was judged, and the sound is held at the 60 s cap until its turn.
+   */
+  | { problem: null, video: OutputFile, audio: OutputFile | null, seconds: InputSeconds, sha: MeasuredMedia['sha'] }
 
 export interface Sync3MediaReads extends MediaReads {
   /** At the node's turn: the files a link brought (the Audio card's). Absent: the card's own file, from the prompt. */
@@ -81,21 +86,27 @@ const tidy = (s: number) => Math.round(s * 1e6) / 1e6
 /** The node's two files, read and judged; the first problem, or the files and their lengths. */
 export async function sync3MediaCheck(prompt: ApiPrompt, nodeId: string, o: Sync3MediaReads): Promise<Sync3MediaCheck> {
   const sources = sync3Sources(prompt, nodeId)
-  if ('problem' in sources.video) return { problem: sources.video.problem }
+  if (!('file' in sources.video)) return { problem: 'problem' in sources.video ? sources.video.problem : SYNC_3_NEEDS_VIDEO }
   if ('problem' in sources.audio) return { problem: sources.audio.problem }
   const video = sources.video.file
-  const audio = fileOf(sources.audio, o)
+  const produced = 'produced' in sources.audio
+  // A sound made in the run: at the node's turn, what its link brought; at the start, nothing yet.
+  const audio = 'produced' in sources.audio
+    ? (o.filesFrom ? o.filesFrom(sources.audio.produced)[0] ?? null : null)
+    : fileOf(sources.audio, o)
+  if (produced && o.filesFrom && !audio) return { problem: SYNC_3_NEEDS_SOUND }
   const measure = (file: OutputFile, rule: MediaRule) => measureMediaFile(file, rule, o, SYNC_3_FILE_MISSING)
-  const [v, a] = await Promise.all([measure(video, SYNC_3_VIDEO_RULE), measure(audio, SYNC_3_SOUND_RULE)])
+  const [v, a] = await Promise.all([measure(video, SYNC_3_VIDEO_RULE), audio ? measure(audio, SYNC_3_SOUND_RULE) : null])
   if (v.problem !== null) return { problem: v.problem }
-  if (a.problem !== null) return { problem: a.problem }
+  if (a && a.problem !== null) return { problem: a.problem }
+  const audioSeconds = a ? a.facts.seconds : null
   // The clip it makes, as far as it was measured (an unmeasured length can't shorten it).
-  const made = sync3OutputSeconds(lipSyncSyncMode(prompt[nodeId]?.inputs ?? {}), a.facts.seconds ?? Infinity, v.facts.seconds ?? Infinity)
+  const made = sync3OutputSeconds(lipSyncSyncMode(prompt[nodeId]?.inputs ?? {}), audioSeconds ?? Infinity, v.facts.seconds ?? Infinity)
   if (made != null && Number.isFinite(made) && tidy(made) > LIPSYNC_MAX_SECONDS) return { problem: SYNC_3_TOO_LONG }
   const seconds: InputSeconds = {}
-  if (a.facts.seconds != null) seconds.audio = a.facts.seconds
+  if (audioSeconds != null) seconds.audio = audioSeconds
   if (v.facts.seconds != null) seconds.video = v.facts.seconds
-  return { problem: null, video, audio, seconds, sha: { video: v.sha, audio: a.sha } }
+  return { problem: null, video, audio, seconds, sha: { video: v.sha, ...(a ? { audio: a.sha } : {}) } }
 }
 
 /**

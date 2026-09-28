@@ -151,6 +151,11 @@ export const PAID_TEXT_INPUTS: Readonly<Record<string, readonly string[]>> = {
   LayerizeGraphicNode: ['prompt'],
   SeedreamLayerizeNode: ['prompt'],
   OutpaintImageNode: ['prompt'],
+  // R3.8, music and speech (the twins too): the music's description, the words spoken.
+  GenerateMusicNode: ['prompt'],
+  MusicGenRemoteNode: ['prompt'],
+  GenerateSpeechNode: ['text'],
+  MiniMaxSpeechRemoteNode: ['text'],
 }
 
 /** The non-blank values of RUNNER_EXTRA_TEXT_INPUTS (a typed-in taste, a paid class's PAID_TEXT_INPUTS) across the prompt, each on its own. */

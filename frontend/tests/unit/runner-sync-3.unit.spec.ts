@@ -388,7 +388,7 @@ describe('the price', () => {
       byResolution: { '*': 8 / 60 },
     })
     expect(CLIP_RATES[SYNC_3_ENDPOINT]).toBe(rate)
-    expect(PRICE_BOOK_VERSION).toBe('r3-split')
+    expect(PRICE_BOOK_VERSION).toBe('r3-audio-gen')
   })
 
   // Final fix F8: the Lip-Sync Studio's hint reads the card, in credits in hosted mode (what 30 s is charged).

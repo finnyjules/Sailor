@@ -48,6 +48,12 @@ Groups:
              MaxFilter alone on masks touching every edge and corner, for
              frontend/server/runner/pixels/maxFilter.ts
              (tests/unit/runner-paid-split.unit.spec.ts)
+  audio-gen  (R3.8) Generate music and Generate speech, and their hidden twins
+             (MusicGen, MiniMax Speech-02 HD): every music version at 1 s and
+             30 s, top_p and seeds, every emotion and language boost, the
+             speed, pitch and volume bounds, a non-ASCII text, a cloned
+             voice, for frontend/server/runner/generators/audioGen.ts
+             (tests/unit/runner-paid-audio-gen.unit.spec.ts)
   handoff    (R3.H) the PNG `_image_tensor_to_data_url` sends for a loader's
              tensor: every file kind (EXIF 2–8, RGBA, grey + alpha, palette and
              colour-key transparency, CMYK, 16-bit, WebP, GIF…) through the real
@@ -1415,6 +1421,85 @@ def handoff_group() -> dict:
     return {"cases": cases, "files": {n: _b64(b) for n, b in files.items()}}
 
 
+MUSIC_OUT = "https://r.test/music/out.wav"
+MUSIC_OUT_2 = "https://r.test/music/second.wav"
+SPEECH_OUT = "https://r.test/speech/out.wav"
+MUSIC_DEFAULTS = {"prompt": "lo-fi hip-hop, mellow piano, 80 bpm", "duration": 8, "model_version": "stereo-melody-large",
+                  "temperature": 1.0, "top_p": 0.0, "seed": 0}
+SPEECH_DEFAULTS = {"text": "Hello from Sailor.", "voice_id": "Wise_Woman", "emotion": "auto", "speed": 1.0, "volume": 1.0,
+                   "pitch": 0, "language_boost": "auto"}
+
+
+def audio_gen_group() -> dict:
+    """R3.8: Generate music and Generate speech, and their hidden twins
+    (MusicGen, MiniMax Speech-02 HD). Each answers one sound URL; the first
+    of a list is the one downloaded (`_first_output_url`), decoded by the real
+    `_download_url_to_audio_dict`."""
+    import runner_builder_fixtures as rbf
+    nr, _fal, _extras = rbf._node_modules()
+    wav = _b64(wav_bytes(0.1, 8000, 21))
+    wav2 = _b64(wav_bytes(0.1, 8000, 22, channels=2))
+    cases: list = []
+
+    def add(name, cls, widgets, answer, files=None):
+        cases.append(paid_case(name, cls, widgets, [answer], files=files or {MUSIC_OUT: wav, SPEECH_OUT: wav}))
+
+    def music(name, twin=False, answer=None, files=None, **w):
+        cls = nr.MusicGenRemoteNode if twin else nr.GenerateMusicNode
+        widgets = {**MUSIC_DEFAULTS, **w} if twin else {"model": "MusicGen", **MUSIC_DEFAULTS, **w}
+        add(f"{'music twin' if twin else 'music'} · {name}", cls, widgets, answer or {"output": MUSIC_OUT}, files)
+
+    def speech(name, twin=False, answer=None, **w):
+        cls = nr.MiniMaxSpeechRemoteNode if twin else nr.GenerateSpeechNode
+        widgets = {**SPEECH_DEFAULTS, **w} if twin else {"model": "MiniMax Speech-02 HD", **SPEECH_DEFAULTS, **w}
+        add(f"{'speech twin' if twin else 'speech'} · {name}", cls, widgets, answer or {"output": SPEECH_OUT})
+        # Python's len() of the text sent: what the price counts (characters, code points).
+        cases[-1]["text_len"] = len(widgets["text"])
+
+    # Music: every version at 1 s and 30 s; top_p 0 and 0.5; seeds 0 and 7; the other settings.
+    for version in ("stereo-melody-large", "stereo-large", "melody-large", "large"):
+        for seconds in (1, 30):
+            music(f"{version} {seconds} s", model_version=version, duration=seconds)
+    for top_p in (0.0, 0.5, 1.0):
+        for seed in (0, 7):
+            music(f"top_p {top_p} seed {seed}", top_p=top_p, seed=seed)
+    music("seed 4294967295", seed=4294967295)
+    music("temperature 0", temperature=0.0)
+    music("temperature 1.35", temperature=1.35)
+    music("temperature 2", temperature=2.0)
+    music("empty prompt", prompt="")
+    music("non-ASCII prompt", prompt="caf\u00e9 jazz, \u732b, \U0001f3b8 \u2014 slow")
+    music("defaults", twin=True)
+    music("large 30 s top_p 0.5 seed 7", twin=True, model_version="large", duration=30, top_p=0.5, seed=7)
+    # The answer as a list (the first is the sound) and a stereo sound.
+    music("answer list", answer={"output": [MUSIC_OUT, MUSIC_OUT_2]}, files={MUSIC_OUT: wav2, MUSIC_OUT_2: wav})
+
+    # Speech: every emotion, every language boost, the bounds, a non-ASCII text, a cloned voice.
+    for emotion in ("auto", "happy", "sad", "angry", "fearful", "disgusted", "surprised", "neutral"):
+        speech(f"emotion {emotion}", emotion=emotion)
+    for lang in ("auto", "English", "Spanish", "French", "German", "Italian", "Portuguese", "Japanese", "Korean", "Chinese", "Arabic"):
+        speech(f"language {lang}", language_boost=lang)
+    for speed in (0.5, 2.0, 1.25):
+        speech(f"speed {speed}", speed=speed)
+    for pitch in (-12, 12):
+        speech(f"pitch {pitch}", pitch=pitch)
+    for volume in (0.1, 10.0):
+        speech(f"volume {volume}", volume=volume)
+    for voice in ("Friendly_Person", "Exuberant_Girl", "Sweet_Girl_2"):
+        speech(f"voice {voice}", voice_id=voice)
+    speech("cloned voice", voice_id="sailor_clone_7f3a")
+    speech("non-ASCII text", text="Caf\u00e9 \u2014 na\u00efve \u732b \U0001f600 \u65e5\u672c\u8a9e\u306e\u30c6\u30ad\u30b9\u30c8")
+    speech("every setting", emotion="sad", language_boost="Japanese", speed=0.75, volume=2.5, pitch=-3, voice_id="Calm_Woman")
+    speech("defaults", twin=True)
+    speech("every setting", twin=True, emotion="happy", language_boost="Korean", speed=1.5, pitch=5, voice_id="Young_Knight")
+    speech("answer list", answer={"output": [SPEECH_OUT, MUSIC_OUT_2]})
+    # len() of texts the price counts: ASCII, accents (composed and combining), CJK, emoji (astral,
+    # with a skin tone, a ZWJ family), a flag, CRLF, a lone surrogate, and a long one.
+    texts = ["", " ", "Hello", "caf\u00e9", "cafe\u0301", "\u65e5\u672c\u8a9e", "\U0001f600", "\U0001f44b\U0001f3fd",
+             "\U0001f468\u200d\U0001f469\u200d\U0001f467", "\U0001f1eb\U0001f1f7", "a\r\nb", "x\ud800y", "ab" * 5001]
+    return {"cases": cases, "text_lengths": [{"text": t, "len": len(t)} for t in texts]}
+
+
 GROUPS = {
     "handoff": handoff_group,
     "machinery": machinery_group,
@@ -1423,6 +1508,7 @@ GROUPS = {
     "repair": repair_group,
     "layers": layers_group,
     "split": split_group,
+    "audio-gen": audio_gen_group,
 }
 
 
