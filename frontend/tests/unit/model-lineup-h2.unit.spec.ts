@@ -339,6 +339,8 @@ describe('grep guard: no node is created with a hard-coded model outside dev/', 
     'server/utils/inpaintFalInputs.ts': ['nano-banana-pro'],
     // Film a shot's model list and its lip-sync model, named only to refuse it before the hold (R3.11).
     'shared/runner/eligibility.ts': ['fabric-1.0'],
+    // Turntable's fixed models, as Python's node hard-codes them: Luma Ray 2 for the front spin, Seedance 2.0 per arc (R3.16).
+    'shared/runner/turntable.ts': ['luma-ray-2-720p', 'seedance-2.0'],
   }
 
   it('every model literal outside dev/ is on the list, and none of them is hidden or discontinued', () => {
@@ -367,7 +369,8 @@ describe('grep guard: no node is created with a hard-coded model outside dev/', 
     ])
     expect(flagged.has('Flux Kontext Pro')).toBe(true)
     /** A flagged literal allowed on purpose, with its reason above. */
-    const FLAGGED_ON_PURPOSE = new Set(['app/components/apps/ProductShotApp.vue Flux Kontext Pro'])
+    // Turntable's front spin is Luma Ray 2 because Python's node hard-codes it, though Ray 2 is hidden from the video menu (R3.16).
+    const FLAGGED_ON_PURPOSE = new Set(['app/components/apps/ProductShotApp.vue Flux Kontext Pro', 'shared/runner/turntable.ts luma-ray-2-720p'])
     for (const [file, values] of Object.entries(ALLOWED)) {
       if (file === 'app/data/action-catalog.ts') continue // display text; 'Nano Banana' there is Sketch to image's engine
       for (const v of values) expect(flagged.has(v) && !FLAGGED_ON_PURPOSE.has(`${file} ${v}`), `${file} ${v}`).toBe(false)
