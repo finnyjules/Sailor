@@ -25,6 +25,7 @@ import { DESCRIBE_CLASSES } from '#shared/runner/describe'
 import { REPAIR_PER_CALL_CLASSES } from '#shared/runner/repair'
 import { LAYERS_CLASSES, SPLIT_CLASS } from '#shared/runner/layers'
 import { AUDIO_GEN_CLASSES } from '#shared/runner/audioGen'
+import { GEN_3D_CLASSES } from '#shared/runner/gen3d'
 import { PAID_NODE_CLASSES, TOKEN_TEXT_CAP_BYTES, paidCalls, paidNoCall, tokenCeiling, utf8Bytes } from '#shared/pricing/paidSettings'
 import { MODERATION_MAX_INPUT_BYTES } from '~~/server/utils/moderation'
 import { editUsd } from '#shared/pricing/editRates'
@@ -142,18 +143,20 @@ describe('paidCallUsd', () => {
     expect(paidCallUsd({ endpoint: 'gpu', fallbacks: [{ endpoint: 'call' }] }, T)).toBe(0.35)
     expect(paidCallUsd({ endpoint: 'call', fallbacks: [{ endpoint: 'nobody/knows' }] }, T)).toBeNull()
   })
-  it('the real table holds only the cards the tasks added (R3.3: the LLM text nodes; R3.4: describe; R3.5: image-repair; R3.6 and R3.7: layers; R3.8: audio-gen)', () => {
+  it('the real table holds only the cards the tasks added (R3.3: the LLM text nodes; R3.4: describe; R3.5: image-repair; R3.6 and R3.7: layers; R3.8: audio-gen; R3.9: gen-3d)', () => {
     // (R3.4: Gemini 2.5 Flash, Dolphin, YOLO-World; moondream2 keeps its edit card.
     // R3.5: Restore and Remove background; the upscalers keep their edit cards.
     // R3.6: Ideogram Layerize, Seedream Layerize, Flux Fill Pro and Bria Expand.
     // R3.7: the two fill engines, LaMa and Bria Eraser; the cut-out is Remove background's card.
-    // R3.8: MusicGen and MiniMax Speech-02 HD.)
+    // R3.8: MusicGen and MiniMax Speech-02 HD.
+    // R3.9: Hunyuan3D 2, Hunyuan3D-2mv, Rodin and TRELLIS.)
     expect(Object.keys(PAID_RATES).sort()).toEqual([
       ...LLM_ENDPOINTS, 'google/gemini-2.5-flash', 'bytedance/dolphin', 'zsxkib/yolo-world',
       'flux-kontext-apps/restore-image', '851-labs/background-remover',
       'ideogram-ai/layerize', 'bytedance/seedream/v5/pro/layerize', 'black-forest-labs/flux-fill-pro', 'bria/expand-image',
       'zylim0702/remove-object', 'bria/eraser',
       'meta/musicgen', 'minimax/speech-02-hd',
+      'tencent/hunyuan3d-2', 'tencent/hunyuan3d-2mv', 'hyper3d/rodin', 'firtoz/trellis',
     ].sort())
   })
   it('no paid card duplicates an edit, clip or video card (each rate lives in one place)', () => {
@@ -205,9 +208,9 @@ describe('tokenCeiling', () => {
 // ── priceNode ────────────────────────────────────────────────────────────────
 
 describe('priceNode for a paid class', () => {
-  it('stand-ins are shared-priced classes; the real list is the tasks\' classes (R3.3: the LLM text nodes; R3.4: describe; R3.5: image-repair; R3.6 and R3.7: layers; R3.8: audio-gen)', () => {
+  it('stand-ins are shared-priced classes; the real list is the tasks\' classes (R3.3: the LLM text nodes; R3.4: describe; R3.5: image-repair; R3.6 and R3.7: layers; R3.8: audio-gen; R3.9: gen-3d)', () => {
     for (const ct of Object.keys(STAND_IN)) expect(SHARED_PRICED_CLASS_SET.has(ct)).toBe(true)
-    expect(PAID_NODE_CLASSES).toEqual([...LLM_TEXT_CLASSES, ...DESCRIBE_CLASSES, ...REPAIR_PER_CALL_CLASSES, ...LAYERS_CLASSES, SPLIT_CLASS, ...AUDIO_GEN_CLASSES, ...Object.keys(STAND_IN)])
+    expect(PAID_NODE_CLASSES).toEqual([...LLM_TEXT_CLASSES, ...DESCRIBE_CLASSES, ...REPAIR_PER_CALL_CLASSES, ...LAYERS_CLASSES, SPLIT_CLASS, ...AUDIO_GEN_CLASSES, ...GEN_3D_CLASSES, ...Object.keys(STAND_IN)])
   })
 
   it('a token node: the hold is creditsForUsd of the ceiling (rule (c), tokenCeiling)', () => {
@@ -270,8 +273,9 @@ describe('GRAPH_NODE_CREDITS', () => {
   it('still prices every class no task has moved, at its flat figure', () => {
     const rows = Object.entries(GRAPH_NODE_CREDITS)
     // (R3.3 moved the seven LLM text nodes out, R3.4 five describe nodes, R3.5 Restore and Remove background with their twins,
-    // R3.6 Layerize, Seedream Layerize and Outpaint, R3.7 Separate background and foreground, R3.8 music and speech with their twins.)
-    expect(rows.length).toBeGreaterThan(18)
+    // R3.6 Layerize, Seedream Layerize and Outpaint, R3.7 Separate background and foreground, R3.8 music and speech with their twins,
+    // R3.9 the three 3D nodes.)
+    expect(rows.length).toBeGreaterThan(15)
     for (const [ct, flat] of rows) {
       expect(PAID_NODE_CLASSES.includes(ct), ct).toBe(false)
       expect(priceGraph({ n: { class_type: ct, inputs: {} } }).nodes!.n, ct).toBe(flat)
@@ -301,9 +305,10 @@ describe('PAID_TEXT_INPUTS', () => {
   const table = PAID_TEXT_INPUTS as Record<string, readonly string[]>
   afterEach(() => { delete table.GenerateImageNode; delete table.TestTokenNode })
 
-  it('lists only the tasks\' classes (R3.3: the LLM text nodes; R3.4: describe; R3.5: Upscale and Enhance detail; R3.6: layers; R3.8: audio-gen)', () => {
-    // (R3.4: every describe class but Extract text, which sends no text. R3.5: the two with prompts. R3.6: all three. R3.8: all four.)
-    expect(Object.keys(PAID_TEXT_INPUTS)).toEqual([...LLM_TEXT_CLASSES, ...DESCRIBE_CLASSES.filter(c => c !== 'ExtractTextNode'), 'UpscaleImageNode', 'EnhanceDetailNode', ...LAYERS_CLASSES, ...AUDIO_GEN_CLASSES])
+  it('lists only the tasks\' classes (R3.3: the LLM text nodes; R3.4: describe; R3.5: Upscale and Enhance detail; R3.6: layers; R3.8: audio-gen; R3.9: Multi-View)', () => {
+    // (R3.4: every describe class but Extract text, which sends no text. R3.5: the two with prompts. R3.6: all three. R3.8: all four.
+    // R3.9: Multi-View's prompt; Generate a 3D model and its twin send no text.)
+    expect(Object.keys(PAID_TEXT_INPUTS)).toEqual([...LLM_TEXT_CLASSES, ...DESCRIBE_CLASSES.filter(c => c !== 'ExtractTextNode'), 'UpscaleImageNode', 'EnhanceDetailNode', ...LAYERS_CLASSES, ...AUDIO_GEN_CLASSES, 'Hunyuan3DMultiViewNode'])
   })
 
   it('extraPromptTexts reads a paid class’s listed inputs (typed text only)', () => {

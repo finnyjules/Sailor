@@ -198,6 +198,34 @@ export const PAID_RATES: Record<string, PaidRate> = {
     unit: 'per_thousand_chars', perThousand: 0.10,
     service: 'replicate', source: 'https://replicate.com/minimax/speech-02-hd', read: '2026-09-27', confidence: 'verified',
   },
+  // R3.9, 3D models (read 2026-09-27, plain GETs of the public pages).
+  // Generate a 3D model (and its twin) on Hunyuan3D 2, billed by GPU time (Nvidia L40S, "$0.000975 per
+  // second", no billing table): the page says "approximately $0.092 to run" and "typically complete within
+  // 95 seconds" ($0.0926), written here rounded up to $0.10. An estimate until the live check measures it
+  // (the page's figure is for one run at its defaults; a 512 mesh may take longer).
+  'tencent/hunyuan3d-2': {
+    unit: 'gpu_ceiling', usd: 0.10, note: 'L40S at $0.000975/s; page: approximately $0.092 to run, typically within 95 s ($0.0926) (read 2026-09-27), rounded up to $0.10',
+    service: 'replicate', source: 'https://replicate.com/tencent/hunyuan3d-2', read: '2026-09-27', confidence: 'estimate',
+  },
+  // Multi-View on Hunyuan3D-2mv, billed by GPU time (Nvidia L40S, $0.000975/s): "approximately $0.099 to
+  // run", "typically complete within 102 seconds" ($0.0995), rounded up to $0.10. An estimate (the page's
+  // default is 30 steps; the node sends 20–100).
+  'tencent/hunyuan3d-2mv': {
+    unit: 'gpu_ceiling', usd: 0.10, note: 'L40S at $0.000975/s; page: approximately $0.099 to run, typically within 102 s ($0.0995) (read 2026-09-27), rounded up to $0.10',
+    service: 'replicate', source: 'https://replicate.com/tencent/hunyuan3d-2mv', read: '2026-09-27', confidence: 'estimate',
+  },
+  // Multi-View on TRELLIS, billed by GPU time (Nvidia A100 80GB, $0.0014/s): "approximately $0.037 to
+  // run", "typically complete within 27 seconds" ($0.0378), rounded up to $0.04. An estimate.
+  'firtoz/trellis': {
+    unit: 'gpu_ceiling', usd: 0.04, note: 'A100 (80GB) at $0.0014/s; page: approximately $0.037 to run, typically within 27 s ($0.0378) (read 2026-09-27), rounded up to $0.04',
+    service: 'replicate', source: 'https://replicate.com/firtoz/trellis', read: '2026-09-27', confidence: 'estimate',
+  },
+  // Multi-View on Rodin: the page's billing table, "$0.40 per output" (`generic_output_count`; "or 25
+  // outputs for $10"), one tier whatever the quality.
+  'hyper3d/rodin': {
+    unit: 'per_call', usd: 0.40,
+    service: 'replicate', source: 'https://replicate.com/hyper3d/rodin', read: '2026-09-27', confidence: 'verified',
+  },
 }
 
 const own = <T>(o: Record<string, T>, k: string): T | undefined =>

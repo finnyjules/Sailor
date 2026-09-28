@@ -687,6 +687,27 @@ describe('Separate background and foreground on the ComfyUI path (R3.7)', () => 
   })
 })
 
+// ───────────────────────────────────────────────────────────────────────────
+// R3.9 (ruling (a)): Generate a 3D model, its twin Hunyuan3D 2 and Multi-View
+// → 3D leave their flat rows (45, badge $0.30) for their calls (Replicate's
+// pages): Hunyuan3D 2 and Hunyuan3D-2mv by GPU time (estimates, $0.10: 20),
+// TRELLIS by GPU time (an estimate, $0.04: 8), Rodin at $0.40 an output (60).
+// Multi-View by its engine; a wired engine at Rodin's, a missing one at
+// Python's default (TRELLIS).
+// ───────────────────────────────────────────────────────────────────────────
+describe('3D models on the ComfyUI path (R3.9)', () => {
+  const at = (ct: string, inputs: Record<string, unknown>) => priceGraph({ 1: { class_type: ct, inputs } }).nodes!['1']
+  it('each class, by its engine', () => {
+    expect(at('Generate3DNode', { model: 'Hunyuan3D 2', image: ['2', 0], steps: 50, guidance_scale: 5.5, octree_resolution: 256, remove_background: true, texture: true, seed: 0 })).toBe(20)
+    expect(at('Hunyuan3DRemoteNode', { image: ['2', 0], steps: 20 })).toBe(20)
+    expect(at('Hunyuan3DMultiViewNode', { front_image: ['2', 0], engine: 'TRELLIS (textured)' })).toBe(8)
+    expect(at('Hunyuan3DMultiViewNode', { front_image: ['2', 0], engine: 'Rodin (textured · quad mesh)', rodin_quality: 'high' })).toBe(60)
+    expect(at('Hunyuan3DMultiViewNode', { front_image: ['2', 0], engine: 'Hunyuan3D-2mv (geometry only)' })).toBe(20)
+    expect(at('Hunyuan3DMultiViewNode', { front_image: ['2', 0], engine: ['9', 0] })).toBe(60)
+    expect(at('Hunyuan3DMultiViewNode', { front_image: ['2', 0] })).toBe(8)
+  })
+})
+
 // R3.8 fix round 2: a node no output node reads is never run by ComfyUI (nor the runner), so the
 // hosted ComfyUI meter prices only what runs — the runner's own closure (validate.ts executedPart).
 describe('only what an output reads is priced (R3.8 fix round 2)', () => {

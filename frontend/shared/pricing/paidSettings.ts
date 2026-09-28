@@ -48,6 +48,7 @@ import {
   AUDIO_GEN_CLASSES, AUDIO_GEN_ENDPOINTS, MUSIC_DEFAULT_SECONDS, MUSIC_MAX_SECONDS, MUSIC_MIN_SECONDS, SPEECH_MAX_CHARS,
   isSpeechClass, speechChars, type AudioGenClass,
 } from '../runner/audioGen'
+import { GEN_3D_CLASSES, HUNYUAN3D_SLUG, MULTI_VIEW_CLASS, multiViewSlugsOf } from '../runner/gen3d'
 
 /**
  * The most bytes of one moderated text in hosted (server/utils/moderation.ts
@@ -333,6 +334,22 @@ function audioGenPlanner(classType: AudioGenClass): PaidPlanner {
   }
 }
 
+// ── R3.9: 3D models (#shared/runner/gen3d) ──
+
+/**
+ * Generate a 3D model (and its twin): one Hunyuan3D 2 call, whatever its
+ * settings. Multi-View → 3D: one call on its engine's card (a wired engine
+ * at the dearest; a missing one at Python's default, TRELLIS).
+ */
+function gen3dPlanner(classType: string): PaidPlanner {
+  if (classType !== MULTI_VIEW_CLASS) return () => ({ steps: [{ call: { endpoint: HUNYUAN3D_SLUG }, times: 1 }] })
+  return (inputs) => {
+    const usd = (e: string) => paidCallUsd({ endpoint: e }) ?? Number.POSITIVE_INFINITY
+    const endpoint = multiViewSlugsOf(inputs.engine).reduce((a, b) => (usd(b) > usd(a) ? b : a))
+    return { steps: [{ call: { endpoint }, times: 1 }] }
+  }
+}
+
 /** Python returns "" before calling anyone when the text is blank (typed; a wired one is priced as a call). */
 function llmNoCall(classType: LlmTextClass): ((inputs: NodeInputs) => boolean) | null {
   const name = LLM_NO_CALL_INPUT[classType]
@@ -349,6 +366,7 @@ const PAID_PLANNERS: Readonly<Record<string, PaidPlanner>> = {
   ...LAYERS_PLANNERS,
   [SPLIT_CLASS]: splitPlanner,
   ...Object.fromEntries(AUDIO_GEN_CLASSES.map(c => [c, audioGenPlanner(c)])),
+  ...Object.fromEntries(GEN_3D_CLASSES.map(c => [c, gen3dPlanner(c)])),
 }
 
 /** Each paid class's no-call rule (rule 8), where Python has one. Filled by each R3 task. */

@@ -1,0 +1,4105 @@
+{
+ "cases": [
+  {
+   "answers": [
+    {
+     "output": "https://r.test/3d/model.glb"
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "tencent/hunyuan3d-2",
+     "payload": {
+      "guidance_scale": 5.5,
+      "image": "IMG:image",
+      "octree_resolution": 256,
+      "remove_background": true,
+      "steps": 50,
+      "texture": true
+     },
+     "payload_json": "{\"guidance_scale\": 5.5, \"image\": \"IMG:image\", \"octree_resolution\": 256, \"remove_background\": true, \"steps\": 50, \"texture\": true}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "Generate3DNode",
+   "files": {
+    "https://r.test/3d/model.glb": "Z2xURgIAAABIAAAANAAAAEpTT057ImFzc2V0IjogeyJ2ZXJzaW9uIjogIjIuMCJ9LCAiZXh0cmFzIjogeyJzZWVkIjogMX19",
+    "https://r.test/3d/preview.glb": "Z2xURgIAAABIAAAANAAAAEpTT057ImFzc2V0IjogeyJ2ZXJzaW9uIjogIjIuMCJ9LCAiZXh0cmFzIjogeyJzZWVkIjogMn19"
+   },
+   "gets": [],
+   "name": "generate 3d \u00b7 defaults",
+   "output": [
+    "https://r.test/3d/model.glb"
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "guidance_scale": 5.5,
+    "model": "Hunyuan3D 2",
+    "octree_resolution": 256,
+    "remove_background": true,
+    "seed": 0,
+    "steps": 50,
+    "texture": true
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": "https://r.test/3d/model.glb"
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "tencent/hunyuan3d-2",
+     "payload": {
+      "guidance_scale": 5.5,
+      "image": "IMG:image",
+      "octree_resolution": 256,
+      "remove_background": true,
+      "steps": 50,
+      "texture": true
+     },
+     "payload_json": "{\"guidance_scale\": 5.5, \"image\": \"IMG:image\", \"octree_resolution\": 256, \"remove_background\": true, \"steps\": 50, \"texture\": true}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "Generate3DNode",
+   "files": {
+    "https://r.test/3d/model.glb": "Z2xURgIAAABIAAAANAAAAEpTT057ImFzc2V0IjogeyJ2ZXJzaW9uIjogIjIuMCJ9LCAiZXh0cmFzIjogeyJzZWVkIjogMX19",
+    "https://r.test/3d/preview.glb": "Z2xURgIAAABIAAAANAAAAEpTT057ImFzc2V0IjogeyJ2ZXJzaW9uIjogIjIuMCJ9LCAiZXh0cmFzIjogeyJzZWVkIjogMn19"
+   },
+   "gets": [],
+   "name": "generate 3d \u00b7 seed 0",
+   "output": [
+    "https://r.test/3d/model.glb"
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "guidance_scale": 5.5,
+    "model": "Hunyuan3D 2",
+    "octree_resolution": 256,
+    "remove_background": true,
+    "seed": 0,
+    "steps": 50,
+    "texture": true
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": "https://r.test/3d/model.glb"
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "tencent/hunyuan3d-2",
+     "payload": {
+      "guidance_scale": 5.5,
+      "image": "IMG:image",
+      "octree_resolution": 256,
+      "remove_background": true,
+      "seed": 1,
+      "steps": 50,
+      "texture": true
+     },
+     "payload_json": "{\"guidance_scale\": 5.5, \"image\": \"IMG:image\", \"octree_resolution\": 256, \"remove_background\": true, \"seed\": 1, \"steps\": 50, \"texture\": true}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "Generate3DNode",
+   "files": {
+    "https://r.test/3d/model.glb": "Z2xURgIAAABIAAAANAAAAEpTT057ImFzc2V0IjogeyJ2ZXJzaW9uIjogIjIuMCJ9LCAiZXh0cmFzIjogeyJzZWVkIjogMX19",
+    "https://r.test/3d/preview.glb": "Z2xURgIAAABIAAAANAAAAEpTT057ImFzc2V0IjogeyJ2ZXJzaW9uIjogIjIuMCJ9LCAiZXh0cmFzIjogeyJzZWVkIjogMn19"
+   },
+   "gets": [],
+   "name": "generate 3d \u00b7 seed 1",
+   "output": [
+    "https://r.test/3d/model.glb"
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "guidance_scale": 5.5,
+    "model": "Hunyuan3D 2",
+    "octree_resolution": 256,
+    "remove_background": true,
+    "seed": 1,
+    "steps": 50,
+    "texture": true
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": "https://r.test/3d/model.glb"
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "tencent/hunyuan3d-2",
+     "payload": {
+      "guidance_scale": 5.5,
+      "image": "IMG:image",
+      "octree_resolution": 256,
+      "remove_background": true,
+      "seed": 65536,
+      "steps": 50,
+      "texture": true
+     },
+     "payload_json": "{\"guidance_scale\": 5.5, \"image\": \"IMG:image\", \"octree_resolution\": 256, \"remove_background\": true, \"seed\": 65536, \"steps\": 50, \"texture\": true}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "Generate3DNode",
+   "files": {
+    "https://r.test/3d/model.glb": "Z2xURgIAAABIAAAANAAAAEpTT057ImFzc2V0IjogeyJ2ZXJzaW9uIjogIjIuMCJ9LCAiZXh0cmFzIjogeyJzZWVkIjogMX19",
+    "https://r.test/3d/preview.glb": "Z2xURgIAAABIAAAANAAAAEpTT057ImFzc2V0IjogeyJ2ZXJzaW9uIjogIjIuMCJ9LCAiZXh0cmFzIjogeyJzZWVkIjogMn19"
+   },
+   "gets": [],
+   "name": "generate 3d \u00b7 seed 65536",
+   "output": [
+    "https://r.test/3d/model.glb"
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "guidance_scale": 5.5,
+    "model": "Hunyuan3D 2",
+    "octree_resolution": 256,
+    "remove_background": true,
+    "seed": 65536,
+    "steps": 50,
+    "texture": true
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": "https://r.test/3d/model.glb"
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "tencent/hunyuan3d-2",
+     "payload": {
+      "guidance_scale": 5.5,
+      "image": "IMG:image",
+      "octree_resolution": 256,
+      "remove_background": true,
+      "seed": 4294967295,
+      "steps": 50,
+      "texture": true
+     },
+     "payload_json": "{\"guidance_scale\": 5.5, \"image\": \"IMG:image\", \"octree_resolution\": 256, \"remove_background\": true, \"seed\": 4294967295, \"steps\": 50, \"texture\": true}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "Generate3DNode",
+   "files": {
+    "https://r.test/3d/model.glb": "Z2xURgIAAABIAAAANAAAAEpTT057ImFzc2V0IjogeyJ2ZXJzaW9uIjogIjIuMCJ9LCAiZXh0cmFzIjogeyJzZWVkIjogMX19",
+    "https://r.test/3d/preview.glb": "Z2xURgIAAABIAAAANAAAAEpTT057ImFzc2V0IjogeyJ2ZXJzaW9uIjogIjIuMCJ9LCAiZXh0cmFzIjogeyJzZWVkIjogMn19"
+   },
+   "gets": [],
+   "name": "generate 3d \u00b7 seed 4294967295",
+   "output": [
+    "https://r.test/3d/model.glb"
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "guidance_scale": 5.5,
+    "model": "Hunyuan3D 2",
+    "octree_resolution": 256,
+    "remove_background": true,
+    "seed": 4294967295,
+    "steps": 50,
+    "texture": true
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": "https://r.test/3d/model.glb"
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "tencent/hunyuan3d-2",
+     "payload": {
+      "guidance_scale": 5.5,
+      "image": "IMG:image",
+      "octree_resolution": 256,
+      "remove_background": true,
+      "steps": 20,
+      "texture": true
+     },
+     "payload_json": "{\"guidance_scale\": 5.5, \"image\": \"IMG:image\", \"octree_resolution\": 256, \"remove_background\": true, \"steps\": 20, \"texture\": true}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "Generate3DNode",
+   "files": {
+    "https://r.test/3d/model.glb": "Z2xURgIAAABIAAAANAAAAEpTT057ImFzc2V0IjogeyJ2ZXJzaW9uIjogIjIuMCJ9LCAiZXh0cmFzIjogeyJzZWVkIjogMX19",
+    "https://r.test/3d/preview.glb": "Z2xURgIAAABIAAAANAAAAEpTT057ImFzc2V0IjogeyJ2ZXJzaW9uIjogIjIuMCJ9LCAiZXh0cmFzIjogeyJzZWVkIjogMn19"
+   },
+   "gets": [],
+   "name": "generate 3d \u00b7 steps 20",
+   "output": [
+    "https://r.test/3d/model.glb"
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "guidance_scale": 5.5,
+    "model": "Hunyuan3D 2",
+    "octree_resolution": 256,
+    "remove_background": true,
+    "seed": 0,
+    "steps": 20,
+    "texture": true
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": "https://r.test/3d/model.glb"
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "tencent/hunyuan3d-2",
+     "payload": {
+      "guidance_scale": 5.5,
+      "image": "IMG:image",
+      "octree_resolution": 256,
+      "remove_background": true,
+      "steps": 35,
+      "texture": true
+     },
+     "payload_json": "{\"guidance_scale\": 5.5, \"image\": \"IMG:image\", \"octree_resolution\": 256, \"remove_background\": true, \"steps\": 35, \"texture\": true}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "Generate3DNode",
+   "files": {
+    "https://r.test/3d/model.glb": "Z2xURgIAAABIAAAANAAAAEpTT057ImFzc2V0IjogeyJ2ZXJzaW9uIjogIjIuMCJ9LCAiZXh0cmFzIjogeyJzZWVkIjogMX19",
+    "https://r.test/3d/preview.glb": "Z2xURgIAAABIAAAANAAAAEpTT057ImFzc2V0IjogeyJ2ZXJzaW9uIjogIjIuMCJ9LCAiZXh0cmFzIjogeyJzZWVkIjogMn19"
+   },
+   "gets": [],
+   "name": "generate 3d \u00b7 steps 35",
+   "output": [
+    "https://r.test/3d/model.glb"
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "guidance_scale": 5.5,
+    "model": "Hunyuan3D 2",
+    "octree_resolution": 256,
+    "remove_background": true,
+    "seed": 0,
+    "steps": 35,
+    "texture": true
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": "https://r.test/3d/model.glb"
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "tencent/hunyuan3d-2",
+     "payload": {
+      "guidance_scale": 5.5,
+      "image": "IMG:image",
+      "octree_resolution": 256,
+      "remove_background": true,
+      "steps": 50,
+      "texture": true
+     },
+     "payload_json": "{\"guidance_scale\": 5.5, \"image\": \"IMG:image\", \"octree_resolution\": 256, \"remove_background\": true, \"steps\": 50, \"texture\": true}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "Generate3DNode",
+   "files": {
+    "https://r.test/3d/model.glb": "Z2xURgIAAABIAAAANAAAAEpTT057ImFzc2V0IjogeyJ2ZXJzaW9uIjogIjIuMCJ9LCAiZXh0cmFzIjogeyJzZWVkIjogMX19",
+    "https://r.test/3d/preview.glb": "Z2xURgIAAABIAAAANAAAAEpTT057ImFzc2V0IjogeyJ2ZXJzaW9uIjogIjIuMCJ9LCAiZXh0cmFzIjogeyJzZWVkIjogMn19"
+   },
+   "gets": [],
+   "name": "generate 3d \u00b7 steps 50",
+   "output": [
+    "https://r.test/3d/model.glb"
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "guidance_scale": 5.5,
+    "model": "Hunyuan3D 2",
+    "octree_resolution": 256,
+    "remove_background": true,
+    "seed": 0,
+    "steps": 50,
+    "texture": true
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": "https://r.test/3d/model.glb"
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "tencent/hunyuan3d-2",
+     "payload": {
+      "guidance_scale": 5.5,
+      "image": "IMG:image",
+      "octree_resolution": 256,
+      "remove_background": true,
+      "steps": 100,
+      "texture": true
+     },
+     "payload_json": "{\"guidance_scale\": 5.5, \"image\": \"IMG:image\", \"octree_resolution\": 256, \"remove_background\": true, \"steps\": 100, \"texture\": true}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "Generate3DNode",
+   "files": {
+    "https://r.test/3d/model.glb": "Z2xURgIAAABIAAAANAAAAEpTT057ImFzc2V0IjogeyJ2ZXJzaW9uIjogIjIuMCJ9LCAiZXh0cmFzIjogeyJzZWVkIjogMX19",
+    "https://r.test/3d/preview.glb": "Z2xURgIAAABIAAAANAAAAEpTT057ImFzc2V0IjogeyJ2ZXJzaW9uIjogIjIuMCJ9LCAiZXh0cmFzIjogeyJzZWVkIjogMn19"
+   },
+   "gets": [],
+   "name": "generate 3d \u00b7 steps 100",
+   "output": [
+    "https://r.test/3d/model.glb"
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "guidance_scale": 5.5,
+    "model": "Hunyuan3D 2",
+    "octree_resolution": 256,
+    "remove_background": true,
+    "seed": 0,
+    "steps": 100,
+    "texture": true
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": "https://r.test/3d/model.glb"
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "tencent/hunyuan3d-2",
+     "payload": {
+      "guidance_scale": 5.5,
+      "image": "IMG:image",
+      "octree_resolution": 128,
+      "remove_background": true,
+      "steps": 50,
+      "texture": true
+     },
+     "payload_json": "{\"guidance_scale\": 5.5, \"image\": \"IMG:image\", \"octree_resolution\": 128, \"remove_background\": true, \"steps\": 50, \"texture\": true}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "Generate3DNode",
+   "files": {
+    "https://r.test/3d/model.glb": "Z2xURgIAAABIAAAANAAAAEpTT057ImFzc2V0IjogeyJ2ZXJzaW9uIjogIjIuMCJ9LCAiZXh0cmFzIjogeyJzZWVkIjogMX19",
+    "https://r.test/3d/preview.glb": "Z2xURgIAAABIAAAANAAAAEpTT057ImFzc2V0IjogeyJ2ZXJzaW9uIjogIjIuMCJ9LCAiZXh0cmFzIjogeyJzZWVkIjogMn19"
+   },
+   "gets": [],
+   "name": "generate 3d \u00b7 octree 128",
+   "output": [
+    "https://r.test/3d/model.glb"
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "guidance_scale": 5.5,
+    "model": "Hunyuan3D 2",
+    "octree_resolution": 128,
+    "remove_background": true,
+    "seed": 0,
+    "steps": 50,
+    "texture": true
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": "https://r.test/3d/model.glb"
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "tencent/hunyuan3d-2",
+     "payload": {
+      "guidance_scale": 5.5,
+      "image": "IMG:image",
+      "octree_resolution": 256,
+      "remove_background": true,
+      "steps": 50,
+      "texture": true
+     },
+     "payload_json": "{\"guidance_scale\": 5.5, \"image\": \"IMG:image\", \"octree_resolution\": 256, \"remove_background\": true, \"steps\": 50, \"texture\": true}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "Generate3DNode",
+   "files": {
+    "https://r.test/3d/model.glb": "Z2xURgIAAABIAAAANAAAAEpTT057ImFzc2V0IjogeyJ2ZXJzaW9uIjogIjIuMCJ9LCAiZXh0cmFzIjogeyJzZWVkIjogMX19",
+    "https://r.test/3d/preview.glb": "Z2xURgIAAABIAAAANAAAAEpTT057ImFzc2V0IjogeyJ2ZXJzaW9uIjogIjIuMCJ9LCAiZXh0cmFzIjogeyJzZWVkIjogMn19"
+   },
+   "gets": [],
+   "name": "generate 3d \u00b7 octree 256",
+   "output": [
+    "https://r.test/3d/model.glb"
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "guidance_scale": 5.5,
+    "model": "Hunyuan3D 2",
+    "octree_resolution": 256,
+    "remove_background": true,
+    "seed": 0,
+    "steps": 50,
+    "texture": true
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": "https://r.test/3d/model.glb"
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "tencent/hunyuan3d-2",
+     "payload": {
+      "guidance_scale": 5.5,
+      "image": "IMG:image",
+      "octree_resolution": 384,
+      "remove_background": true,
+      "steps": 50,
+      "texture": true
+     },
+     "payload_json": "{\"guidance_scale\": 5.5, \"image\": \"IMG:image\", \"octree_resolution\": 384, \"remove_background\": true, \"steps\": 50, \"texture\": true}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "Generate3DNode",
+   "files": {
+    "https://r.test/3d/model.glb": "Z2xURgIAAABIAAAANAAAAEpTT057ImFzc2V0IjogeyJ2ZXJzaW9uIjogIjIuMCJ9LCAiZXh0cmFzIjogeyJzZWVkIjogMX19",
+    "https://r.test/3d/preview.glb": "Z2xURgIAAABIAAAANAAAAEpTT057ImFzc2V0IjogeyJ2ZXJzaW9uIjogIjIuMCJ9LCAiZXh0cmFzIjogeyJzZWVkIjogMn19"
+   },
+   "gets": [],
+   "name": "generate 3d \u00b7 octree 384",
+   "output": [
+    "https://r.test/3d/model.glb"
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "guidance_scale": 5.5,
+    "model": "Hunyuan3D 2",
+    "octree_resolution": 384,
+    "remove_background": true,
+    "seed": 0,
+    "steps": 50,
+    "texture": true
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": "https://r.test/3d/model.glb"
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "tencent/hunyuan3d-2",
+     "payload": {
+      "guidance_scale": 5.5,
+      "image": "IMG:image",
+      "octree_resolution": 512,
+      "remove_background": true,
+      "steps": 50,
+      "texture": true
+     },
+     "payload_json": "{\"guidance_scale\": 5.5, \"image\": \"IMG:image\", \"octree_resolution\": 512, \"remove_background\": true, \"steps\": 50, \"texture\": true}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "Generate3DNode",
+   "files": {
+    "https://r.test/3d/model.glb": "Z2xURgIAAABIAAAANAAAAEpTT057ImFzc2V0IjogeyJ2ZXJzaW9uIjogIjIuMCJ9LCAiZXh0cmFzIjogeyJzZWVkIjogMX19",
+    "https://r.test/3d/preview.glb": "Z2xURgIAAABIAAAANAAAAEpTT057ImFzc2V0IjogeyJ2ZXJzaW9uIjogIjIuMCJ9LCAiZXh0cmFzIjogeyJzZWVkIjogMn19"
+   },
+   "gets": [],
+   "name": "generate 3d \u00b7 octree 512",
+   "output": [
+    "https://r.test/3d/model.glb"
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "guidance_scale": 5.5,
+    "model": "Hunyuan3D 2",
+    "octree_resolution": 512,
+    "remove_background": true,
+    "seed": 0,
+    "steps": 50,
+    "texture": true
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": "https://r.test/3d/model.glb"
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "tencent/hunyuan3d-2",
+     "payload": {
+      "guidance_scale": 1.0,
+      "image": "IMG:image",
+      "octree_resolution": 256,
+      "remove_background": true,
+      "steps": 50,
+      "texture": true
+     },
+     "payload_json": "{\"guidance_scale\": 1.0, \"image\": \"IMG:image\", \"octree_resolution\": 256, \"remove_background\": true, \"steps\": 50, \"texture\": true}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "Generate3DNode",
+   "files": {
+    "https://r.test/3d/model.glb": "Z2xURgIAAABIAAAANAAAAEpTT057ImFzc2V0IjogeyJ2ZXJzaW9uIjogIjIuMCJ9LCAiZXh0cmFzIjogeyJzZWVkIjogMX19",
+    "https://r.test/3d/preview.glb": "Z2xURgIAAABIAAAANAAAAEpTT057ImFzc2V0IjogeyJ2ZXJzaW9uIjogIjIuMCJ9LCAiZXh0cmFzIjogeyJzZWVkIjogMn19"
+   },
+   "gets": [],
+   "name": "generate 3d \u00b7 guidance 1.0",
+   "output": [
+    "https://r.test/3d/model.glb"
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "guidance_scale": 1.0,
+    "model": "Hunyuan3D 2",
+    "octree_resolution": 256,
+    "remove_background": true,
+    "seed": 0,
+    "steps": 50,
+    "texture": true
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": "https://r.test/3d/model.glb"
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "tencent/hunyuan3d-2",
+     "payload": {
+      "guidance_scale": 7.5,
+      "image": "IMG:image",
+      "octree_resolution": 256,
+      "remove_background": true,
+      "steps": 50,
+      "texture": true
+     },
+     "payload_json": "{\"guidance_scale\": 7.5, \"image\": \"IMG:image\", \"octree_resolution\": 256, \"remove_background\": true, \"steps\": 50, \"texture\": true}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "Generate3DNode",
+   "files": {
+    "https://r.test/3d/model.glb": "Z2xURgIAAABIAAAANAAAAEpTT057ImFzc2V0IjogeyJ2ZXJzaW9uIjogIjIuMCJ9LCAiZXh0cmFzIjogeyJzZWVkIjogMX19",
+    "https://r.test/3d/preview.glb": "Z2xURgIAAABIAAAANAAAAEpTT057ImFzc2V0IjogeyJ2ZXJzaW9uIjogIjIuMCJ9LCAiZXh0cmFzIjogeyJzZWVkIjogMn19"
+   },
+   "gets": [],
+   "name": "generate 3d \u00b7 guidance 7.5",
+   "output": [
+    "https://r.test/3d/model.glb"
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "guidance_scale": 7.5,
+    "model": "Hunyuan3D 2",
+    "octree_resolution": 256,
+    "remove_background": true,
+    "seed": 0,
+    "steps": 50,
+    "texture": true
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": "https://r.test/3d/model.glb"
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "tencent/hunyuan3d-2",
+     "payload": {
+      "guidance_scale": 20.0,
+      "image": "IMG:image",
+      "octree_resolution": 256,
+      "remove_background": true,
+      "steps": 50,
+      "texture": true
+     },
+     "payload_json": "{\"guidance_scale\": 20.0, \"image\": \"IMG:image\", \"octree_resolution\": 256, \"remove_background\": true, \"steps\": 50, \"texture\": true}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "Generate3DNode",
+   "files": {
+    "https://r.test/3d/model.glb": "Z2xURgIAAABIAAAANAAAAEpTT057ImFzc2V0IjogeyJ2ZXJzaW9uIjogIjIuMCJ9LCAiZXh0cmFzIjogeyJzZWVkIjogMX19",
+    "https://r.test/3d/preview.glb": "Z2xURgIAAABIAAAANAAAAEpTT057ImFzc2V0IjogeyJ2ZXJzaW9uIjogIjIuMCJ9LCAiZXh0cmFzIjogeyJzZWVkIjogMn19"
+   },
+   "gets": [],
+   "name": "generate 3d \u00b7 guidance 20.0",
+   "output": [
+    "https://r.test/3d/model.glb"
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "guidance_scale": 20.0,
+    "model": "Hunyuan3D 2",
+    "octree_resolution": 256,
+    "remove_background": true,
+    "seed": 0,
+    "steps": 50,
+    "texture": true
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": "https://r.test/3d/model.glb"
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "tencent/hunyuan3d-2",
+     "payload": {
+      "guidance_scale": 5.5,
+      "image": "IMG:image",
+      "octree_resolution": 256,
+      "remove_background": false,
+      "steps": 50,
+      "texture": false
+     },
+     "payload_json": "{\"guidance_scale\": 5.5, \"image\": \"IMG:image\", \"octree_resolution\": 256, \"remove_background\": false, \"steps\": 50, \"texture\": false}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "Generate3DNode",
+   "files": {
+    "https://r.test/3d/model.glb": "Z2xURgIAAABIAAAANAAAAEpTT057ImFzc2V0IjogeyJ2ZXJzaW9uIjogIjIuMCJ9LCAiZXh0cmFzIjogeyJzZWVkIjogMX19",
+    "https://r.test/3d/preview.glb": "Z2xURgIAAABIAAAANAAAAEpTT057ImFzc2V0IjogeyJ2ZXJzaW9uIjogIjIuMCJ9LCAiZXh0cmFzIjogeyJzZWVkIjogMn19"
+   },
+   "gets": [],
+   "name": "generate 3d \u00b7 no background removal, no texture",
+   "output": [
+    "https://r.test/3d/model.glb"
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "guidance_scale": 5.5,
+    "model": "Hunyuan3D 2",
+    "octree_resolution": 256,
+    "remove_background": false,
+    "seed": 0,
+    "steps": 50,
+    "texture": false
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": "https://r.test/3d/model.glb"
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "tencent/hunyuan3d-2",
+     "payload": {
+      "guidance_scale": 5.5,
+      "image": "IMG:image",
+      "octree_resolution": 128,
+      "remove_background": true,
+      "steps": 20,
+      "texture": false
+     },
+     "payload_json": "{\"guidance_scale\": 5.5, \"image\": \"IMG:image\", \"octree_resolution\": 128, \"remove_background\": true, \"steps\": 20, \"texture\": false}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "Generate3DNode",
+   "files": {
+    "https://r.test/3d/model.glb": "Z2xURgIAAABIAAAANAAAAEpTT057ImFzc2V0IjogeyJ2ZXJzaW9uIjogIjIuMCJ9LCAiZXh0cmFzIjogeyJzZWVkIjogMX19",
+    "https://r.test/3d/preview.glb": "Z2xURgIAAABIAAAANAAAAEpTT057ImFzc2V0IjogeyJ2ZXJzaW9uIjogIjIuMCJ9LCAiZXh0cmFzIjogeyJzZWVkIjogMn19"
+   },
+   "gets": [],
+   "name": "generate 3d \u00b7 the live check's settings",
+   "output": [
+    "https://r.test/3d/model.glb"
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "guidance_scale": 5.5,
+    "model": "Hunyuan3D 2",
+    "octree_resolution": 128,
+    "remove_background": true,
+    "seed": 0,
+    "steps": 20,
+    "texture": false
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": [
+      "https://r.test/3d/model.glb",
+      "https://r.test/3d/preview.glb"
+     ]
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "tencent/hunyuan3d-2",
+     "payload": {
+      "guidance_scale": 5.5,
+      "image": "IMG:image",
+      "octree_resolution": 256,
+      "remove_background": true,
+      "steps": 50,
+      "texture": true
+     },
+     "payload_json": "{\"guidance_scale\": 5.5, \"image\": \"IMG:image\", \"octree_resolution\": 256, \"remove_background\": true, \"steps\": 50, \"texture\": true}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "Generate3DNode",
+   "files": {
+    "https://r.test/3d/model.glb": "Z2xURgIAAABIAAAANAAAAEpTT057ImFzc2V0IjogeyJ2ZXJzaW9uIjogIjIuMCJ9LCAiZXh0cmFzIjogeyJzZWVkIjogMX19",
+    "https://r.test/3d/preview.glb": "Z2xURgIAAABIAAAANAAAAEpTT057ImFzc2V0IjogeyJ2ZXJzaW9uIjogIjIuMCJ9LCAiZXh0cmFzIjogeyJzZWVkIjogMn19"
+   },
+   "gets": [],
+   "name": "generate 3d \u00b7 answer list",
+   "output": [
+    "https://r.test/3d/model.glb"
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "guidance_scale": 5.5,
+    "model": "Hunyuan3D 2",
+    "octree_resolution": 256,
+    "remove_background": true,
+    "seed": 0,
+    "steps": 50,
+    "texture": true
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": "https://r.test/3d/model.glb"
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "tencent/hunyuan3d-2",
+     "payload": {
+      "guidance_scale": 5.5,
+      "image": "IMG:image",
+      "octree_resolution": 256,
+      "remove_background": true,
+      "steps": 50,
+      "texture": true
+     },
+     "payload_json": "{\"guidance_scale\": 5.5, \"image\": \"IMG:image\", \"octree_resolution\": 256, \"remove_background\": true, \"steps\": 50, \"texture\": true}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "Generate3DNode",
+   "files": {
+    "https://r.test/3d/model.glb": "Z2xURgIAAABIAAAANAAAAEpTT057ImFzc2V0IjogeyJ2ZXJzaW9uIjogIjIuMCJ9LCAiZXh0cmFzIjogeyJzZWVkIjogMX19",
+    "https://r.test/3d/preview.glb": "Z2xURgIAAABIAAAANAAAAEpTT057ImFzc2V0IjogeyJ2ZXJzaW9uIjogIjIuMCJ9LCAiZXh0cmFzIjogeyJzZWVkIjogMn19"
+   },
+   "gets": [],
+   "name": "generate 3d \u00b7 answer string",
+   "output": [
+    "https://r.test/3d/model.glb"
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "guidance_scale": 5.5,
+    "model": "Hunyuan3D 2",
+    "octree_resolution": 256,
+    "remove_background": true,
+    "seed": 0,
+    "steps": 50,
+    "texture": true
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": {
+      "mesh": "https://r.test/3d/model.glb"
+     }
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "tencent/hunyuan3d-2",
+     "payload": {
+      "guidance_scale": 5.5,
+      "image": "IMG:image",
+      "octree_resolution": 256,
+      "remove_background": true,
+      "steps": 50,
+      "texture": true
+     },
+     "payload_json": "{\"guidance_scale\": 5.5, \"image\": \"IMG:image\", \"octree_resolution\": 256, \"remove_background\": true, \"steps\": 50, \"texture\": true}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "Generate3DNode",
+   "error": {
+    "message": "Replicate returned no output (status=None)",
+    "type": "RuntimeError"
+   },
+   "files": {
+    "https://r.test/3d/model.glb": "Z2xURgIAAABIAAAANAAAAEpTT057ImFzc2V0IjogeyJ2ZXJzaW9uIjogIjIuMCJ9LCAiZXh0cmFzIjogeyJzZWVkIjogMX19",
+    "https://r.test/3d/preview.glb": "Z2xURgIAAABIAAAANAAAAEpTT057ImFzc2V0IjogeyJ2ZXJzaW9uIjogIjIuMCJ9LCAiZXh0cmFzIjogeyJzZWVkIjogMn19"
+   },
+   "gets": [],
+   "name": "generate 3d \u00b7 answer mesh dict",
+   "output": null,
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "guidance_scale": 5.5,
+    "model": "Hunyuan3D 2",
+    "octree_resolution": 256,
+    "remove_background": true,
+    "seed": 0,
+    "steps": 50,
+    "texture": true
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": "https://r.test/3d/model.glb"
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "tencent/hunyuan3d-2",
+     "payload": {
+      "guidance_scale": 5.5,
+      "image": "IMG:image",
+      "octree_resolution": 256,
+      "remove_background": true,
+      "steps": 50,
+      "texture": true
+     },
+     "payload_json": "{\"guidance_scale\": 5.5, \"image\": \"IMG:image\", \"octree_resolution\": 256, \"remove_background\": true, \"steps\": 50, \"texture\": true}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "Hunyuan3DRemoteNode",
+   "files": {
+    "https://r.test/3d/model.glb": "Z2xURgIAAABIAAAANAAAAEpTT057ImFzc2V0IjogeyJ2ZXJzaW9uIjogIjIuMCJ9LCAiZXh0cmFzIjogeyJzZWVkIjogMX19",
+    "https://r.test/3d/preview.glb": "Z2xURgIAAABIAAAANAAAAEpTT057ImFzc2V0IjogeyJ2ZXJzaW9uIjogIjIuMCJ9LCAiZXh0cmFzIjogeyJzZWVkIjogMn19"
+   },
+   "gets": [],
+   "name": "hunyuan twin \u00b7 defaults",
+   "output": [
+    "https://r.test/3d/model.glb"
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "guidance_scale": 5.5,
+    "octree_resolution": 256,
+    "remove_background": true,
+    "seed": 0,
+    "steps": 50,
+    "texture": true
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": "https://r.test/3d/model.glb"
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "tencent/hunyuan3d-2",
+     "payload": {
+      "guidance_scale": 7.5,
+      "image": "IMG:image",
+      "octree_resolution": 384,
+      "remove_background": false,
+      "seed": 65536,
+      "steps": 35,
+      "texture": false
+     },
+     "payload_json": "{\"guidance_scale\": 7.5, \"image\": \"IMG:image\", \"octree_resolution\": 384, \"remove_background\": false, \"seed\": 65536, \"steps\": 35, \"texture\": false}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "Hunyuan3DRemoteNode",
+   "files": {
+    "https://r.test/3d/model.glb": "Z2xURgIAAABIAAAANAAAAEpTT057ImFzc2V0IjogeyJ2ZXJzaW9uIjogIjIuMCJ9LCAiZXh0cmFzIjogeyJzZWVkIjogMX19",
+    "https://r.test/3d/preview.glb": "Z2xURgIAAABIAAAANAAAAEpTT057ImFzc2V0IjogeyJ2ZXJzaW9uIjogIjIuMCJ9LCAiZXh0cmFzIjogeyJzZWVkIjogMn19"
+   },
+   "gets": [],
+   "name": "hunyuan twin \u00b7 every setting",
+   "output": [
+    "https://r.test/3d/model.glb"
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "guidance_scale": 7.5,
+    "octree_resolution": 384,
+    "remove_background": false,
+    "seed": 65536,
+    "steps": 35,
+    "texture": false
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": "https://r.test/3d/model.glb"
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "tencent/hunyuan3d-2",
+     "payload": {
+      "guidance_scale": 5.5,
+      "image": "IMG:image",
+      "octree_resolution": 256,
+      "remove_background": true,
+      "seed": 4294967295,
+      "steps": 50,
+      "texture": true
+     },
+     "payload_json": "{\"guidance_scale\": 5.5, \"image\": \"IMG:image\", \"octree_resolution\": 256, \"remove_background\": true, \"seed\": 4294967295, \"steps\": 50, \"texture\": true}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "Hunyuan3DRemoteNode",
+   "files": {
+    "https://r.test/3d/model.glb": "Z2xURgIAAABIAAAANAAAAEpTT057ImFzc2V0IjogeyJ2ZXJzaW9uIjogIjIuMCJ9LCAiZXh0cmFzIjogeyJzZWVkIjogMX19",
+    "https://r.test/3d/preview.glb": "Z2xURgIAAABIAAAANAAAAEpTT057ImFzc2V0IjogeyJ2ZXJzaW9uIjogIjIuMCJ9LCAiZXh0cmFzIjogeyJzZWVkIjogMn19"
+   },
+   "gets": [],
+   "name": "hunyuan twin \u00b7 seed 4294967295",
+   "output": [
+    "https://r.test/3d/model.glb"
+   ],
+   "picture_files": {
+    "image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "guidance_scale": 5.5,
+    "octree_resolution": 256,
+    "remove_background": true,
+    "seed": 4294967295,
+    "steps": 50,
+    "texture": true
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": {
+      "model_file": "https://r.test/3d/model.glb"
+     }
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "firtoz/trellis",
+     "payload": {
+      "generate_color": false,
+      "generate_model": true,
+      "images": [
+       "IMG:front_image"
+      ],
+      "mesh_simplify": 0.95,
+      "texture_size": 1024
+     },
+     "payload_json": "{\"generate_color\": false, \"generate_model\": true, \"images\": [\"IMG:front_image\"], \"mesh_simplify\": 0.95, \"texture_size\": 1024}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "Hunyuan3DMultiViewNode",
+   "files": {
+    "https://r.test/3d/model.glb": "Z2xURgIAAABIAAAANAAAAEpTT057ImFzc2V0IjogeyJ2ZXJzaW9uIjogIjIuMCJ9LCAiZXh0cmFzIjogeyJzZWVkIjogMX19",
+    "https://r.test/3d/preview.glb": "Z2xURgIAAABIAAAANAAAAEpTT057ImFzc2V0IjogeyJ2ZXJzaW9uIjogIjIuMCJ9LCAiZXh0cmFzIjogeyJzZWVkIjogMn19"
+   },
+   "gets": [],
+   "name": "multi-view \u00b7 TRELLIS \u00b7 front \u00b7 defaults",
+   "output": [
+    "https://r.test/3d/model.glb"
+   ],
+   "picture_files": {
+    "front_image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "front_image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "engine": "TRELLIS (textured)",
+    "guidance_scale": 5.5,
+    "octree_resolution": 256,
+    "prompt": "a full-body character",
+    "remove_background": true,
+    "rodin_poly_count": 0,
+    "rodin_quality": "medium",
+    "rodin_tapose": false,
+    "seed": 0,
+    "steps": 50
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": {
+      "model_file": "https://r.test/3d/model.glb"
+     }
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "firtoz/trellis",
+     "payload": {
+      "generate_color": false,
+      "generate_model": true,
+      "images": [
+       "IMG:front_image",
+       "IMG:back_image"
+      ],
+      "mesh_simplify": 0.95,
+      "texture_size": 1024
+     },
+     "payload_json": "{\"generate_color\": false, \"generate_model\": true, \"images\": [\"IMG:front_image\", \"IMG:back_image\"], \"mesh_simplify\": 0.95, \"texture_size\": 1024}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "Hunyuan3DMultiViewNode",
+   "files": {
+    "https://r.test/3d/model.glb": "Z2xURgIAAABIAAAANAAAAEpTT057ImFzc2V0IjogeyJ2ZXJzaW9uIjogIjIuMCJ9LCAiZXh0cmFzIjogeyJzZWVkIjogMX19",
+    "https://r.test/3d/preview.glb": "Z2xURgIAAABIAAAANAAAAEpTT057ImFzc2V0IjogeyJ2ZXJzaW9uIjogIjIuMCJ9LCAiZXh0cmFzIjogeyJzZWVkIjogMn19"
+   },
+   "gets": [],
+   "name": "multi-view \u00b7 TRELLIS \u00b7 front and back \u00b7 defaults",
+   "output": [
+    "https://r.test/3d/model.glb"
+   ],
+   "picture_files": {
+    "back_image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/AB5lLsFS0L/NZRkP/GBMCTPQQjOB3ibILQCcslXMEkwwbALdrGZG428THr3eXTq0bxUALXe48ArnHEFLPvOHhDEPcjv4Z743IqigBMaXNo6fDKzxX6c/9LwtFi0jo7l6AxDz3gAgZu/OPusea6oSISDne2fiTEcgqo+Z5SYC19aUxZQD8es1LtBphrZUFaQOMLm+9iNhDO5DFWopGVUAAAAASUVORK5CYII=",
+    "front_image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "front_image",
+    "back_image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "engine": "TRELLIS (textured)",
+    "guidance_scale": 5.5,
+    "octree_resolution": 256,
+    "prompt": "a full-body character",
+    "remove_background": true,
+    "rodin_poly_count": 0,
+    "rodin_quality": "medium",
+    "rodin_tapose": false,
+    "seed": 0,
+    "steps": 50
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": {
+      "model_file": "https://r.test/3d/model.glb"
+     }
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "firtoz/trellis",
+     "payload": {
+      "generate_color": false,
+      "generate_model": true,
+      "images": [
+       "IMG:front_image",
+       "IMG:right_image"
+      ],
+      "mesh_simplify": 0.95,
+      "texture_size": 1024
+     },
+     "payload_json": "{\"generate_color\": false, \"generate_model\": true, \"images\": [\"IMG:front_image\", \"IMG:right_image\"], \"mesh_simplify\": 0.95, \"texture_size\": 1024}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "Hunyuan3DMultiViewNode",
+   "files": {
+    "https://r.test/3d/model.glb": "Z2xURgIAAABIAAAANAAAAEpTT057ImFzc2V0IjogeyJ2ZXJzaW9uIjogIjIuMCJ9LCAiZXh0cmFzIjogeyJzZWVkIjogMX19",
+    "https://r.test/3d/preview.glb": "Z2xURgIAAABIAAAANAAAAEpTT057ImFzc2V0IjogeyJ2ZXJzaW9uIjogIjIuMCJ9LCAiZXh0cmFzIjogeyJzZWVkIjogMn19"
+   },
+   "gets": [],
+   "name": "multi-view \u00b7 TRELLIS \u00b7 front and right \u00b7 defaults",
+   "output": [
+    "https://r.test/3d/model.glb"
+   ],
+   "picture_files": {
+    "front_image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII=",
+    "right_image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/AB5lLsFS0L/NZRkP/GBMCTPQQjOB3ibILQCcslXMEkwwbALdrGZG428THr3eXTq0bxUALXe48ArnHEFLPvOHhDEPcjv4Z743IqigBMaXNo6fDKzxX6c/9LwtFi0jo7l6AxDz3gAgZu/OPusea6oSISDne2fiTEcgqo+Z5SYC19aUxZQD8es1LtBphrZUFaQOMLm+9iNhDO5DFWopGVUAAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "front_image",
+    "right_image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "engine": "TRELLIS (textured)",
+    "guidance_scale": 5.5,
+    "octree_resolution": 256,
+    "prompt": "a full-body character",
+    "remove_background": true,
+    "rodin_poly_count": 0,
+    "rodin_quality": "medium",
+    "rodin_tapose": false,
+    "seed": 0,
+    "steps": 50
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": {
+      "model_file": "https://r.test/3d/model.glb"
+     }
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "firtoz/trellis",
+     "payload": {
+      "generate_color": false,
+      "generate_model": true,
+      "images": [
+       "IMG:front_image",
+       "IMG:back_image",
+       "IMG:left_image",
+       "IMG:right_image"
+      ],
+      "mesh_simplify": 0.95,
+      "texture_size": 1024
+     },
+     "payload_json": "{\"generate_color\": false, \"generate_model\": true, \"images\": [\"IMG:front_image\", \"IMG:back_image\", \"IMG:left_image\", \"IMG:right_image\"], \"mesh_simplify\": 0.95, \"texture_size\": 1024}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "Hunyuan3DMultiViewNode",
+   "files": {
+    "https://r.test/3d/model.glb": "Z2xURgIAAABIAAAANAAAAEpTT057ImFzc2V0IjogeyJ2ZXJzaW9uIjogIjIuMCJ9LCAiZXh0cmFzIjogeyJzZWVkIjogMX19",
+    "https://r.test/3d/preview.glb": "Z2xURgIAAABIAAAANAAAAEpTT057ImFzc2V0IjogeyJ2ZXJzaW9uIjogIjIuMCJ9LCAiZXh0cmFzIjogeyJzZWVkIjogMn19"
+   },
+   "gets": [],
+   "name": "multi-view \u00b7 TRELLIS \u00b7 four views \u00b7 defaults",
+   "output": [
+    "https://r.test/3d/model.glb"
+   ],
+   "picture_files": {
+    "back_image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/AB5lLsFS0L/NZRkP/GBMCTPQQjOB3ibILQCcslXMEkwwbALdrGZG428THr3eXTq0bxUALXe48ArnHEFLPvOHhDEPcjv4Z743IqigBMaXNo6fDKzxX6c/9LwtFi0jo7l6AxDz3gAgZu/OPusea6oSISDne2fiTEcgqo+Z5SYC19aUxZQD8es1LtBphrZUFaQOMLm+9iNhDO5DFWopGVUAAAAASUVORK5CYII=",
+    "front_image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII=",
+    "left_image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANdxSUKO90Ev3hh7cxTXDkJTn+6PKOGUJAAz2y0jyKBP1SP9K1sVMSvaIfcY/IkNH2oAXDgvKnkFeRl2/6fL8VCQZckN3EwULIysAdQXwNb7ewfG8CdrCMLs3cmTzDHEv1X42ASwMElJPiLTxpcMzO0LZETF3jkU0AhyXJcCBD5OQFoR9s9qLSST1DDXYDVQZ5fNVO6zoRBEJNKp+hwAAAAASUVORK5CYII=",
+    "right_image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/AP64ce3k6M4NqyHz5yyXrRB0H6N1AEfIrwEQe8UPDgok+fKX4qSphADBXRsYx0ILoiIAukzexjFlHtxcinog593ZpcpBAewGGK5QAHjEzvUDauS10t/VX5sjqaEdELoD+xs2XwLd/VWkMIfF08g0WnD1hqImT7jlKF3Y/WUBH6aCVgKdndXTm/VfsSfcIeFMp0F76a8aj4FKPOMEYxgAAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "front_image",
+    "back_image",
+    "left_image",
+    "right_image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "engine": "TRELLIS (textured)",
+    "guidance_scale": 5.5,
+    "octree_resolution": 256,
+    "prompt": "a full-body character",
+    "remove_background": true,
+    "rodin_poly_count": 0,
+    "rodin_quality": "medium",
+    "rodin_tapose": false,
+    "seed": 0,
+    "steps": 50
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": {
+      "model_file": "https://r.test/3d/model.glb"
+     }
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "firtoz/trellis",
+     "payload": {
+      "generate_color": false,
+      "generate_model": true,
+      "images": [
+       "IMG:front_image",
+       "IMG:back_image",
+       "IMG:left_image",
+       "IMG:right_image"
+      ],
+      "mesh_simplify": 0.95,
+      "texture_size": 1024
+     },
+     "payload_json": "{\"generate_color\": false, \"generate_model\": true, \"images\": [\"IMG:front_image\", \"IMG:back_image\", \"IMG:left_image\", \"IMG:right_image\"], \"mesh_simplify\": 0.95, \"texture_size\": 1024}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "Hunyuan3DMultiViewNode",
+   "files": {
+    "https://r.test/3d/model.glb": "Z2xURgIAAABIAAAANAAAAEpTT057ImFzc2V0IjogeyJ2ZXJzaW9uIjogIjIuMCJ9LCAiZXh0cmFzIjogeyJzZWVkIjogMX19",
+    "https://r.test/3d/preview.glb": "Z2xURgIAAABIAAAANAAAAEpTT057ImFzc2V0IjogeyJ2ZXJzaW9uIjogIjIuMCJ9LCAiZXh0cmFzIjogeyJzZWVkIjogMn19"
+   },
+   "gets": [],
+   "name": "multi-view \u00b7 TRELLIS \u00b7 four views \u00b7 seed 0",
+   "output": [
+    "https://r.test/3d/model.glb"
+   ],
+   "picture_files": {
+    "back_image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/AB5lLsFS0L/NZRkP/GBMCTPQQjOB3ibILQCcslXMEkwwbALdrGZG428THr3eXTq0bxUALXe48ArnHEFLPvOHhDEPcjv4Z743IqigBMaXNo6fDKzxX6c/9LwtFi0jo7l6AxDz3gAgZu/OPusea6oSISDne2fiTEcgqo+Z5SYC19aUxZQD8es1LtBphrZUFaQOMLm+9iNhDO5DFWopGVUAAAAASUVORK5CYII=",
+    "front_image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII=",
+    "left_image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANdxSUKO90Ev3hh7cxTXDkJTn+6PKOGUJAAz2y0jyKBP1SP9K1sVMSvaIfcY/IkNH2oAXDgvKnkFeRl2/6fL8VCQZckN3EwULIysAdQXwNb7ewfG8CdrCMLs3cmTzDHEv1X42ASwMElJPiLTxpcMzO0LZETF3jkU0AhyXJcCBD5OQFoR9s9qLSST1DDXYDVQZ5fNVO6zoRBEJNKp+hwAAAAASUVORK5CYII=",
+    "right_image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/AP64ce3k6M4NqyHz5yyXrRB0H6N1AEfIrwEQe8UPDgok+fKX4qSphADBXRsYx0ILoiIAukzexjFlHtxcinog593ZpcpBAewGGK5QAHjEzvUDauS10t/VX5sjqaEdELoD+xs2XwLd/VWkMIfF08g0WnD1hqImT7jlKF3Y/WUBH6aCVgKdndXTm/VfsSfcIeFMp0F76a8aj4FKPOMEYxgAAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "front_image",
+    "back_image",
+    "left_image",
+    "right_image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "engine": "TRELLIS (textured)",
+    "guidance_scale": 5.5,
+    "octree_resolution": 256,
+    "prompt": "a full-body character",
+    "remove_background": true,
+    "rodin_poly_count": 0,
+    "rodin_quality": "medium",
+    "rodin_tapose": false,
+    "seed": 0,
+    "steps": 50
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": {
+      "model_file": "https://r.test/3d/model.glb"
+     }
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "firtoz/trellis",
+     "payload": {
+      "generate_color": false,
+      "generate_model": true,
+      "images": [
+       "IMG:front_image",
+       "IMG:back_image",
+       "IMG:left_image",
+       "IMG:right_image"
+      ],
+      "mesh_simplify": 0.95,
+      "randomize_seed": false,
+      "seed": 1,
+      "texture_size": 1024
+     },
+     "payload_json": "{\"generate_color\": false, \"generate_model\": true, \"images\": [\"IMG:front_image\", \"IMG:back_image\", \"IMG:left_image\", \"IMG:right_image\"], \"mesh_simplify\": 0.95, \"randomize_seed\": false, \"seed\": 1, \"texture_size\": 1024}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "Hunyuan3DMultiViewNode",
+   "files": {
+    "https://r.test/3d/model.glb": "Z2xURgIAAABIAAAANAAAAEpTT057ImFzc2V0IjogeyJ2ZXJzaW9uIjogIjIuMCJ9LCAiZXh0cmFzIjogeyJzZWVkIjogMX19",
+    "https://r.test/3d/preview.glb": "Z2xURgIAAABIAAAANAAAAEpTT057ImFzc2V0IjogeyJ2ZXJzaW9uIjogIjIuMCJ9LCAiZXh0cmFzIjogeyJzZWVkIjogMn19"
+   },
+   "gets": [],
+   "name": "multi-view \u00b7 TRELLIS \u00b7 four views \u00b7 seed 1",
+   "output": [
+    "https://r.test/3d/model.glb"
+   ],
+   "picture_files": {
+    "back_image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/AB5lLsFS0L/NZRkP/GBMCTPQQjOB3ibILQCcslXMEkwwbALdrGZG428THr3eXTq0bxUALXe48ArnHEFLPvOHhDEPcjv4Z743IqigBMaXNo6fDKzxX6c/9LwtFi0jo7l6AxDz3gAgZu/OPusea6oSISDne2fiTEcgqo+Z5SYC19aUxZQD8es1LtBphrZUFaQOMLm+9iNhDO5DFWopGVUAAAAASUVORK5CYII=",
+    "front_image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII=",
+    "left_image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANdxSUKO90Ev3hh7cxTXDkJTn+6PKOGUJAAz2y0jyKBP1SP9K1sVMSvaIfcY/IkNH2oAXDgvKnkFeRl2/6fL8VCQZckN3EwULIysAdQXwNb7ewfG8CdrCMLs3cmTzDHEv1X42ASwMElJPiLTxpcMzO0LZETF3jkU0AhyXJcCBD5OQFoR9s9qLSST1DDXYDVQZ5fNVO6zoRBEJNKp+hwAAAAASUVORK5CYII=",
+    "right_image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/AP64ce3k6M4NqyHz5yyXrRB0H6N1AEfIrwEQe8UPDgok+fKX4qSphADBXRsYx0ILoiIAukzexjFlHtxcinog593ZpcpBAewGGK5QAHjEzvUDauS10t/VX5sjqaEdELoD+xs2XwLd/VWkMIfF08g0WnD1hqImT7jlKF3Y/WUBH6aCVgKdndXTm/VfsSfcIeFMp0F76a8aj4FKPOMEYxgAAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "front_image",
+    "back_image",
+    "left_image",
+    "right_image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "engine": "TRELLIS (textured)",
+    "guidance_scale": 5.5,
+    "octree_resolution": 256,
+    "prompt": "a full-body character",
+    "remove_background": true,
+    "rodin_poly_count": 0,
+    "rodin_quality": "medium",
+    "rodin_tapose": false,
+    "seed": 1,
+    "steps": 50
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": {
+      "model_file": "https://r.test/3d/model.glb"
+     }
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "firtoz/trellis",
+     "payload": {
+      "generate_color": false,
+      "generate_model": true,
+      "images": [
+       "IMG:front_image",
+       "IMG:back_image",
+       "IMG:left_image",
+       "IMG:right_image"
+      ],
+      "mesh_simplify": 0.95,
+      "randomize_seed": false,
+      "seed": 65536,
+      "texture_size": 1024
+     },
+     "payload_json": "{\"generate_color\": false, \"generate_model\": true, \"images\": [\"IMG:front_image\", \"IMG:back_image\", \"IMG:left_image\", \"IMG:right_image\"], \"mesh_simplify\": 0.95, \"randomize_seed\": false, \"seed\": 65536, \"texture_size\": 1024}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "Hunyuan3DMultiViewNode",
+   "files": {
+    "https://r.test/3d/model.glb": "Z2xURgIAAABIAAAANAAAAEpTT057ImFzc2V0IjogeyJ2ZXJzaW9uIjogIjIuMCJ9LCAiZXh0cmFzIjogeyJzZWVkIjogMX19",
+    "https://r.test/3d/preview.glb": "Z2xURgIAAABIAAAANAAAAEpTT057ImFzc2V0IjogeyJ2ZXJzaW9uIjogIjIuMCJ9LCAiZXh0cmFzIjogeyJzZWVkIjogMn19"
+   },
+   "gets": [],
+   "name": "multi-view \u00b7 TRELLIS \u00b7 four views \u00b7 seed 65536",
+   "output": [
+    "https://r.test/3d/model.glb"
+   ],
+   "picture_files": {
+    "back_image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/AB5lLsFS0L/NZRkP/GBMCTPQQjOB3ibILQCcslXMEkwwbALdrGZG428THr3eXTq0bxUALXe48ArnHEFLPvOHhDEPcjv4Z743IqigBMaXNo6fDKzxX6c/9LwtFi0jo7l6AxDz3gAgZu/OPusea6oSISDne2fiTEcgqo+Z5SYC19aUxZQD8es1LtBphrZUFaQOMLm+9iNhDO5DFWopGVUAAAAASUVORK5CYII=",
+    "front_image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII=",
+    "left_image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANdxSUKO90Ev3hh7cxTXDkJTn+6PKOGUJAAz2y0jyKBP1SP9K1sVMSvaIfcY/IkNH2oAXDgvKnkFeRl2/6fL8VCQZckN3EwULIysAdQXwNb7ewfG8CdrCMLs3cmTzDHEv1X42ASwMElJPiLTxpcMzO0LZETF3jkU0AhyXJcCBD5OQFoR9s9qLSST1DDXYDVQZ5fNVO6zoRBEJNKp+hwAAAAASUVORK5CYII=",
+    "right_image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/AP64ce3k6M4NqyHz5yyXrRB0H6N1AEfIrwEQe8UPDgok+fKX4qSphADBXRsYx0ILoiIAukzexjFlHtxcinog593ZpcpBAewGGK5QAHjEzvUDauS10t/VX5sjqaEdELoD+xs2XwLd/VWkMIfF08g0WnD1hqImT7jlKF3Y/WUBH6aCVgKdndXTm/VfsSfcIeFMp0F76a8aj4FKPOMEYxgAAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "front_image",
+    "back_image",
+    "left_image",
+    "right_image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "engine": "TRELLIS (textured)",
+    "guidance_scale": 5.5,
+    "octree_resolution": 256,
+    "prompt": "a full-body character",
+    "remove_background": true,
+    "rodin_poly_count": 0,
+    "rodin_quality": "medium",
+    "rodin_tapose": false,
+    "seed": 65536,
+    "steps": 50
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": {
+      "model_file": "https://r.test/3d/model.glb"
+     }
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "firtoz/trellis",
+     "payload": {
+      "generate_color": false,
+      "generate_model": true,
+      "images": [
+       "IMG:front_image",
+       "IMG:back_image",
+       "IMG:left_image",
+       "IMG:right_image"
+      ],
+      "mesh_simplify": 0.95,
+      "randomize_seed": false,
+      "seed": 4294967295,
+      "texture_size": 1024
+     },
+     "payload_json": "{\"generate_color\": false, \"generate_model\": true, \"images\": [\"IMG:front_image\", \"IMG:back_image\", \"IMG:left_image\", \"IMG:right_image\"], \"mesh_simplify\": 0.95, \"randomize_seed\": false, \"seed\": 4294967295, \"texture_size\": 1024}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "Hunyuan3DMultiViewNode",
+   "files": {
+    "https://r.test/3d/model.glb": "Z2xURgIAAABIAAAANAAAAEpTT057ImFzc2V0IjogeyJ2ZXJzaW9uIjogIjIuMCJ9LCAiZXh0cmFzIjogeyJzZWVkIjogMX19",
+    "https://r.test/3d/preview.glb": "Z2xURgIAAABIAAAANAAAAEpTT057ImFzc2V0IjogeyJ2ZXJzaW9uIjogIjIuMCJ9LCAiZXh0cmFzIjogeyJzZWVkIjogMn19"
+   },
+   "gets": [],
+   "name": "multi-view \u00b7 TRELLIS \u00b7 four views \u00b7 seed 4294967295",
+   "output": [
+    "https://r.test/3d/model.glb"
+   ],
+   "picture_files": {
+    "back_image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/AB5lLsFS0L/NZRkP/GBMCTPQQjOB3ibILQCcslXMEkwwbALdrGZG428THr3eXTq0bxUALXe48ArnHEFLPvOHhDEPcjv4Z743IqigBMaXNo6fDKzxX6c/9LwtFi0jo7l6AxDz3gAgZu/OPusea6oSISDne2fiTEcgqo+Z5SYC19aUxZQD8es1LtBphrZUFaQOMLm+9iNhDO5DFWopGVUAAAAASUVORK5CYII=",
+    "front_image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII=",
+    "left_image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANdxSUKO90Ev3hh7cxTXDkJTn+6PKOGUJAAz2y0jyKBP1SP9K1sVMSvaIfcY/IkNH2oAXDgvKnkFeRl2/6fL8VCQZckN3EwULIysAdQXwNb7ewfG8CdrCMLs3cmTzDHEv1X42ASwMElJPiLTxpcMzO0LZETF3jkU0AhyXJcCBD5OQFoR9s9qLSST1DDXYDVQZ5fNVO6zoRBEJNKp+hwAAAAASUVORK5CYII=",
+    "right_image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/AP64ce3k6M4NqyHz5yyXrRB0H6N1AEfIrwEQe8UPDgok+fKX4qSphADBXRsYx0ILoiIAukzexjFlHtxcinog593ZpcpBAewGGK5QAHjEzvUDauS10t/VX5sjqaEdELoD+xs2XwLd/VWkMIfF08g0WnD1hqImT7jlKF3Y/WUBH6aCVgKdndXTm/VfsSfcIeFMp0F76a8aj4FKPOMEYxgAAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "front_image",
+    "back_image",
+    "left_image",
+    "right_image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "engine": "TRELLIS (textured)",
+    "guidance_scale": 5.5,
+    "octree_resolution": 256,
+    "prompt": "a full-body character",
+    "remove_background": true,
+    "rodin_poly_count": 0,
+    "rodin_quality": "medium",
+    "rodin_tapose": false,
+    "seed": 4294967295,
+    "steps": 50
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": "https://r.test/3d/model.glb"
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "hyper3d/rodin",
+     "payload": {
+      "geometry_file_format": "glb",
+      "images": [
+       "IMG:front_image"
+      ],
+      "material": "PBR",
+      "mesh_mode": "Quad",
+      "prompt": "a full-body character",
+      "quality": "medium",
+      "tapose": false
+     },
+     "payload_json": "{\"geometry_file_format\": \"glb\", \"images\": [\"IMG:front_image\"], \"material\": \"PBR\", \"mesh_mode\": \"Quad\", \"prompt\": \"a full-body character\", \"quality\": \"medium\", \"tapose\": false}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "Hunyuan3DMultiViewNode",
+   "files": {
+    "https://r.test/3d/model.glb": "Z2xURgIAAABIAAAANAAAAEpTT057ImFzc2V0IjogeyJ2ZXJzaW9uIjogIjIuMCJ9LCAiZXh0cmFzIjogeyJzZWVkIjogMX19",
+    "https://r.test/3d/preview.glb": "Z2xURgIAAABIAAAANAAAAEpTT057ImFzc2V0IjogeyJ2ZXJzaW9uIjogIjIuMCJ9LCAiZXh0cmFzIjogeyJzZWVkIjogMn19"
+   },
+   "gets": [],
+   "name": "multi-view \u00b7 Rodin \u00b7 front \u00b7 defaults",
+   "output": [
+    "https://r.test/3d/model.glb"
+   ],
+   "picture_files": {
+    "front_image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "front_image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "engine": "Rodin (textured \u00b7 quad mesh)",
+    "guidance_scale": 5.5,
+    "octree_resolution": 256,
+    "prompt": "a full-body character",
+    "remove_background": true,
+    "rodin_poly_count": 0,
+    "rodin_quality": "medium",
+    "rodin_tapose": false,
+    "seed": 0,
+    "steps": 50
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": "https://r.test/3d/model.glb"
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "hyper3d/rodin",
+     "payload": {
+      "geometry_file_format": "glb",
+      "images": [
+       "IMG:front_image",
+       "IMG:back_image"
+      ],
+      "material": "PBR",
+      "mesh_mode": "Quad",
+      "prompt": "a full-body character",
+      "quality": "medium",
+      "tapose": false
+     },
+     "payload_json": "{\"geometry_file_format\": \"glb\", \"images\": [\"IMG:front_image\", \"IMG:back_image\"], \"material\": \"PBR\", \"mesh_mode\": \"Quad\", \"prompt\": \"a full-body character\", \"quality\": \"medium\", \"tapose\": false}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "Hunyuan3DMultiViewNode",
+   "files": {
+    "https://r.test/3d/model.glb": "Z2xURgIAAABIAAAANAAAAEpTT057ImFzc2V0IjogeyJ2ZXJzaW9uIjogIjIuMCJ9LCAiZXh0cmFzIjogeyJzZWVkIjogMX19",
+    "https://r.test/3d/preview.glb": "Z2xURgIAAABIAAAANAAAAEpTT057ImFzc2V0IjogeyJ2ZXJzaW9uIjogIjIuMCJ9LCAiZXh0cmFzIjogeyJzZWVkIjogMn19"
+   },
+   "gets": [],
+   "name": "multi-view \u00b7 Rodin \u00b7 front and back \u00b7 defaults",
+   "output": [
+    "https://r.test/3d/model.glb"
+   ],
+   "picture_files": {
+    "back_image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/AB5lLsFS0L/NZRkP/GBMCTPQQjOB3ibILQCcslXMEkwwbALdrGZG428THr3eXTq0bxUALXe48ArnHEFLPvOHhDEPcjv4Z743IqigBMaXNo6fDKzxX6c/9LwtFi0jo7l6AxDz3gAgZu/OPusea6oSISDne2fiTEcgqo+Z5SYC19aUxZQD8es1LtBphrZUFaQOMLm+9iNhDO5DFWopGVUAAAAASUVORK5CYII=",
+    "front_image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "front_image",
+    "back_image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "engine": "Rodin (textured \u00b7 quad mesh)",
+    "guidance_scale": 5.5,
+    "octree_resolution": 256,
+    "prompt": "a full-body character",
+    "remove_background": true,
+    "rodin_poly_count": 0,
+    "rodin_quality": "medium",
+    "rodin_tapose": false,
+    "seed": 0,
+    "steps": 50
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": "https://r.test/3d/model.glb"
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "hyper3d/rodin",
+     "payload": {
+      "geometry_file_format": "glb",
+      "images": [
+       "IMG:front_image",
+       "IMG:right_image"
+      ],
+      "material": "PBR",
+      "mesh_mode": "Quad",
+      "prompt": "a full-body character",
+      "quality": "medium",
+      "tapose": false
+     },
+     "payload_json": "{\"geometry_file_format\": \"glb\", \"images\": [\"IMG:front_image\", \"IMG:right_image\"], \"material\": \"PBR\", \"mesh_mode\": \"Quad\", \"prompt\": \"a full-body character\", \"quality\": \"medium\", \"tapose\": false}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "Hunyuan3DMultiViewNode",
+   "files": {
+    "https://r.test/3d/model.glb": "Z2xURgIAAABIAAAANAAAAEpTT057ImFzc2V0IjogeyJ2ZXJzaW9uIjogIjIuMCJ9LCAiZXh0cmFzIjogeyJzZWVkIjogMX19",
+    "https://r.test/3d/preview.glb": "Z2xURgIAAABIAAAANAAAAEpTT057ImFzc2V0IjogeyJ2ZXJzaW9uIjogIjIuMCJ9LCAiZXh0cmFzIjogeyJzZWVkIjogMn19"
+   },
+   "gets": [],
+   "name": "multi-view \u00b7 Rodin \u00b7 front and right \u00b7 defaults",
+   "output": [
+    "https://r.test/3d/model.glb"
+   ],
+   "picture_files": {
+    "front_image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII=",
+    "right_image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/AB5lLsFS0L/NZRkP/GBMCTPQQjOB3ibILQCcslXMEkwwbALdrGZG428THr3eXTq0bxUALXe48ArnHEFLPvOHhDEPcjv4Z743IqigBMaXNo6fDKzxX6c/9LwtFi0jo7l6AxDz3gAgZu/OPusea6oSISDne2fiTEcgqo+Z5SYC19aUxZQD8es1LtBphrZUFaQOMLm+9iNhDO5DFWopGVUAAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "front_image",
+    "right_image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "engine": "Rodin (textured \u00b7 quad mesh)",
+    "guidance_scale": 5.5,
+    "octree_resolution": 256,
+    "prompt": "a full-body character",
+    "remove_background": true,
+    "rodin_poly_count": 0,
+    "rodin_quality": "medium",
+    "rodin_tapose": false,
+    "seed": 0,
+    "steps": 50
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": "https://r.test/3d/model.glb"
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "hyper3d/rodin",
+     "payload": {
+      "geometry_file_format": "glb",
+      "images": [
+       "IMG:front_image",
+       "IMG:back_image",
+       "IMG:left_image",
+       "IMG:right_image"
+      ],
+      "material": "PBR",
+      "mesh_mode": "Quad",
+      "prompt": "a full-body character",
+      "quality": "medium",
+      "tapose": false
+     },
+     "payload_json": "{\"geometry_file_format\": \"glb\", \"images\": [\"IMG:front_image\", \"IMG:back_image\", \"IMG:left_image\", \"IMG:right_image\"], \"material\": \"PBR\", \"mesh_mode\": \"Quad\", \"prompt\": \"a full-body character\", \"quality\": \"medium\", \"tapose\": false}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "Hunyuan3DMultiViewNode",
+   "files": {
+    "https://r.test/3d/model.glb": "Z2xURgIAAABIAAAANAAAAEpTT057ImFzc2V0IjogeyJ2ZXJzaW9uIjogIjIuMCJ9LCAiZXh0cmFzIjogeyJzZWVkIjogMX19",
+    "https://r.test/3d/preview.glb": "Z2xURgIAAABIAAAANAAAAEpTT057ImFzc2V0IjogeyJ2ZXJzaW9uIjogIjIuMCJ9LCAiZXh0cmFzIjogeyJzZWVkIjogMn19"
+   },
+   "gets": [],
+   "name": "multi-view \u00b7 Rodin \u00b7 four views \u00b7 defaults",
+   "output": [
+    "https://r.test/3d/model.glb"
+   ],
+   "picture_files": {
+    "back_image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/AB5lLsFS0L/NZRkP/GBMCTPQQjOB3ibILQCcslXMEkwwbALdrGZG428THr3eXTq0bxUALXe48ArnHEFLPvOHhDEPcjv4Z743IqigBMaXNo6fDKzxX6c/9LwtFi0jo7l6AxDz3gAgZu/OPusea6oSISDne2fiTEcgqo+Z5SYC19aUxZQD8es1LtBphrZUFaQOMLm+9iNhDO5DFWopGVUAAAAASUVORK5CYII=",
+    "front_image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII=",
+    "left_image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANdxSUKO90Ev3hh7cxTXDkJTn+6PKOGUJAAz2y0jyKBP1SP9K1sVMSvaIfcY/IkNH2oAXDgvKnkFeRl2/6fL8VCQZckN3EwULIysAdQXwNb7ewfG8CdrCMLs3cmTzDHEv1X42ASwMElJPiLTxpcMzO0LZETF3jkU0AhyXJcCBD5OQFoR9s9qLSST1DDXYDVQZ5fNVO6zoRBEJNKp+hwAAAAASUVORK5CYII=",
+    "right_image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/AP64ce3k6M4NqyHz5yyXrRB0H6N1AEfIrwEQe8UPDgok+fKX4qSphADBXRsYx0ILoiIAukzexjFlHtxcinog593ZpcpBAewGGK5QAHjEzvUDauS10t/VX5sjqaEdELoD+xs2XwLd/VWkMIfF08g0WnD1hqImT7jlKF3Y/WUBH6aCVgKdndXTm/VfsSfcIeFMp0F76a8aj4FKPOMEYxgAAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "front_image",
+    "back_image",
+    "left_image",
+    "right_image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "engine": "Rodin (textured \u00b7 quad mesh)",
+    "guidance_scale": 5.5,
+    "octree_resolution": 256,
+    "prompt": "a full-body character",
+    "remove_background": true,
+    "rodin_poly_count": 0,
+    "rodin_quality": "medium",
+    "rodin_tapose": false,
+    "seed": 0,
+    "steps": 50
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": "https://r.test/3d/model.glb"
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "hyper3d/rodin",
+     "payload": {
+      "geometry_file_format": "glb",
+      "images": [
+       "IMG:front_image",
+       "IMG:back_image",
+       "IMG:left_image",
+       "IMG:right_image"
+      ],
+      "material": "PBR",
+      "mesh_mode": "Quad",
+      "prompt": "a full-body character",
+      "quality": "medium",
+      "tapose": false
+     },
+     "payload_json": "{\"geometry_file_format\": \"glb\", \"images\": [\"IMG:front_image\", \"IMG:back_image\", \"IMG:left_image\", \"IMG:right_image\"], \"material\": \"PBR\", \"mesh_mode\": \"Quad\", \"prompt\": \"a full-body character\", \"quality\": \"medium\", \"tapose\": false}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "Hunyuan3DMultiViewNode",
+   "files": {
+    "https://r.test/3d/model.glb": "Z2xURgIAAABIAAAANAAAAEpTT057ImFzc2V0IjogeyJ2ZXJzaW9uIjogIjIuMCJ9LCAiZXh0cmFzIjogeyJzZWVkIjogMX19",
+    "https://r.test/3d/preview.glb": "Z2xURgIAAABIAAAANAAAAEpTT057ImFzc2V0IjogeyJ2ZXJzaW9uIjogIjIuMCJ9LCAiZXh0cmFzIjogeyJzZWVkIjogMn19"
+   },
+   "gets": [],
+   "name": "multi-view \u00b7 Rodin \u00b7 four views \u00b7 seed 0",
+   "output": [
+    "https://r.test/3d/model.glb"
+   ],
+   "picture_files": {
+    "back_image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/AB5lLsFS0L/NZRkP/GBMCTPQQjOB3ibILQCcslXMEkwwbALdrGZG428THr3eXTq0bxUALXe48ArnHEFLPvOHhDEPcjv4Z743IqigBMaXNo6fDKzxX6c/9LwtFi0jo7l6AxDz3gAgZu/OPusea6oSISDne2fiTEcgqo+Z5SYC19aUxZQD8es1LtBphrZUFaQOMLm+9iNhDO5DFWopGVUAAAAASUVORK5CYII=",
+    "front_image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII=",
+    "left_image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANdxSUKO90Ev3hh7cxTXDkJTn+6PKOGUJAAz2y0jyKBP1SP9K1sVMSvaIfcY/IkNH2oAXDgvKnkFeRl2/6fL8VCQZckN3EwULIysAdQXwNb7ewfG8CdrCMLs3cmTzDHEv1X42ASwMElJPiLTxpcMzO0LZETF3jkU0AhyXJcCBD5OQFoR9s9qLSST1DDXYDVQZ5fNVO6zoRBEJNKp+hwAAAAASUVORK5CYII=",
+    "right_image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/AP64ce3k6M4NqyHz5yyXrRB0H6N1AEfIrwEQe8UPDgok+fKX4qSphADBXRsYx0ILoiIAukzexjFlHtxcinog593ZpcpBAewGGK5QAHjEzvUDauS10t/VX5sjqaEdELoD+xs2XwLd/VWkMIfF08g0WnD1hqImT7jlKF3Y/WUBH6aCVgKdndXTm/VfsSfcIeFMp0F76a8aj4FKPOMEYxgAAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "front_image",
+    "back_image",
+    "left_image",
+    "right_image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "engine": "Rodin (textured \u00b7 quad mesh)",
+    "guidance_scale": 5.5,
+    "octree_resolution": 256,
+    "prompt": "a full-body character",
+    "remove_background": true,
+    "rodin_poly_count": 0,
+    "rodin_quality": "medium",
+    "rodin_tapose": false,
+    "seed": 0,
+    "steps": 50
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": "https://r.test/3d/model.glb"
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "hyper3d/rodin",
+     "payload": {
+      "geometry_file_format": "glb",
+      "images": [
+       "IMG:front_image",
+       "IMG:back_image",
+       "IMG:left_image",
+       "IMG:right_image"
+      ],
+      "material": "PBR",
+      "mesh_mode": "Quad",
+      "prompt": "a full-body character",
+      "quality": "medium",
+      "seed": 1,
+      "tapose": false
+     },
+     "payload_json": "{\"geometry_file_format\": \"glb\", \"images\": [\"IMG:front_image\", \"IMG:back_image\", \"IMG:left_image\", \"IMG:right_image\"], \"material\": \"PBR\", \"mesh_mode\": \"Quad\", \"prompt\": \"a full-body character\", \"quality\": \"medium\", \"seed\": 1, \"tapose\": false}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "Hunyuan3DMultiViewNode",
+   "files": {
+    "https://r.test/3d/model.glb": "Z2xURgIAAABIAAAANAAAAEpTT057ImFzc2V0IjogeyJ2ZXJzaW9uIjogIjIuMCJ9LCAiZXh0cmFzIjogeyJzZWVkIjogMX19",
+    "https://r.test/3d/preview.glb": "Z2xURgIAAABIAAAANAAAAEpTT057ImFzc2V0IjogeyJ2ZXJzaW9uIjogIjIuMCJ9LCAiZXh0cmFzIjogeyJzZWVkIjogMn19"
+   },
+   "gets": [],
+   "name": "multi-view \u00b7 Rodin \u00b7 four views \u00b7 seed 1",
+   "output": [
+    "https://r.test/3d/model.glb"
+   ],
+   "picture_files": {
+    "back_image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/AB5lLsFS0L/NZRkP/GBMCTPQQjOB3ibILQCcslXMEkwwbALdrGZG428THr3eXTq0bxUALXe48ArnHEFLPvOHhDEPcjv4Z743IqigBMaXNo6fDKzxX6c/9LwtFi0jo7l6AxDz3gAgZu/OPusea6oSISDne2fiTEcgqo+Z5SYC19aUxZQD8es1LtBphrZUFaQOMLm+9iNhDO5DFWopGVUAAAAASUVORK5CYII=",
+    "front_image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII=",
+    "left_image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANdxSUKO90Ev3hh7cxTXDkJTn+6PKOGUJAAz2y0jyKBP1SP9K1sVMSvaIfcY/IkNH2oAXDgvKnkFeRl2/6fL8VCQZckN3EwULIysAdQXwNb7ewfG8CdrCMLs3cmTzDHEv1X42ASwMElJPiLTxpcMzO0LZETF3jkU0AhyXJcCBD5OQFoR9s9qLSST1DDXYDVQZ5fNVO6zoRBEJNKp+hwAAAAASUVORK5CYII=",
+    "right_image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/AP64ce3k6M4NqyHz5yyXrRB0H6N1AEfIrwEQe8UPDgok+fKX4qSphADBXRsYx0ILoiIAukzexjFlHtxcinog593ZpcpBAewGGK5QAHjEzvUDauS10t/VX5sjqaEdELoD+xs2XwLd/VWkMIfF08g0WnD1hqImT7jlKF3Y/WUBH6aCVgKdndXTm/VfsSfcIeFMp0F76a8aj4FKPOMEYxgAAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "front_image",
+    "back_image",
+    "left_image",
+    "right_image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "engine": "Rodin (textured \u00b7 quad mesh)",
+    "guidance_scale": 5.5,
+    "octree_resolution": 256,
+    "prompt": "a full-body character",
+    "remove_background": true,
+    "rodin_poly_count": 0,
+    "rodin_quality": "medium",
+    "rodin_tapose": false,
+    "seed": 1,
+    "steps": 50
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": "https://r.test/3d/model.glb"
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "hyper3d/rodin",
+     "payload": {
+      "geometry_file_format": "glb",
+      "images": [
+       "IMG:front_image",
+       "IMG:back_image",
+       "IMG:left_image",
+       "IMG:right_image"
+      ],
+      "material": "PBR",
+      "mesh_mode": "Quad",
+      "prompt": "a full-body character",
+      "quality": "medium",
+      "seed": 0,
+      "tapose": false
+     },
+     "payload_json": "{\"geometry_file_format\": \"glb\", \"images\": [\"IMG:front_image\", \"IMG:back_image\", \"IMG:left_image\", \"IMG:right_image\"], \"material\": \"PBR\", \"mesh_mode\": \"Quad\", \"prompt\": \"a full-body character\", \"quality\": \"medium\", \"seed\": 0, \"tapose\": false}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "Hunyuan3DMultiViewNode",
+   "files": {
+    "https://r.test/3d/model.glb": "Z2xURgIAAABIAAAANAAAAEpTT057ImFzc2V0IjogeyJ2ZXJzaW9uIjogIjIuMCJ9LCAiZXh0cmFzIjogeyJzZWVkIjogMX19",
+    "https://r.test/3d/preview.glb": "Z2xURgIAAABIAAAANAAAAEpTT057ImFzc2V0IjogeyJ2ZXJzaW9uIjogIjIuMCJ9LCAiZXh0cmFzIjogeyJzZWVkIjogMn19"
+   },
+   "gets": [],
+   "name": "multi-view \u00b7 Rodin \u00b7 four views \u00b7 seed 65536",
+   "output": [
+    "https://r.test/3d/model.glb"
+   ],
+   "picture_files": {
+    "back_image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/AB5lLsFS0L/NZRkP/GBMCTPQQjOB3ibILQCcslXMEkwwbALdrGZG428THr3eXTq0bxUALXe48ArnHEFLPvOHhDEPcjv4Z743IqigBMaXNo6fDKzxX6c/9LwtFi0jo7l6AxDz3gAgZu/OPusea6oSISDne2fiTEcgqo+Z5SYC19aUxZQD8es1LtBphrZUFaQOMLm+9iNhDO5DFWopGVUAAAAASUVORK5CYII=",
+    "front_image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII=",
+    "left_image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANdxSUKO90Ev3hh7cxTXDkJTn+6PKOGUJAAz2y0jyKBP1SP9K1sVMSvaIfcY/IkNH2oAXDgvKnkFeRl2/6fL8VCQZckN3EwULIysAdQXwNb7ewfG8CdrCMLs3cmTzDHEv1X42ASwMElJPiLTxpcMzO0LZETF3jkU0AhyXJcCBD5OQFoR9s9qLSST1DDXYDVQZ5fNVO6zoRBEJNKp+hwAAAAASUVORK5CYII=",
+    "right_image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/AP64ce3k6M4NqyHz5yyXrRB0H6N1AEfIrwEQe8UPDgok+fKX4qSphADBXRsYx0ILoiIAukzexjFlHtxcinog593ZpcpBAewGGK5QAHjEzvUDauS10t/VX5sjqaEdELoD+xs2XwLd/VWkMIfF08g0WnD1hqImT7jlKF3Y/WUBH6aCVgKdndXTm/VfsSfcIeFMp0F76a8aj4FKPOMEYxgAAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "front_image",
+    "back_image",
+    "left_image",
+    "right_image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "engine": "Rodin (textured \u00b7 quad mesh)",
+    "guidance_scale": 5.5,
+    "octree_resolution": 256,
+    "prompt": "a full-body character",
+    "remove_background": true,
+    "rodin_poly_count": 0,
+    "rodin_quality": "medium",
+    "rodin_tapose": false,
+    "seed": 65536,
+    "steps": 50
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": "https://r.test/3d/model.glb"
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "hyper3d/rodin",
+     "payload": {
+      "geometry_file_format": "glb",
+      "images": [
+       "IMG:front_image",
+       "IMG:back_image",
+       "IMG:left_image",
+       "IMG:right_image"
+      ],
+      "material": "PBR",
+      "mesh_mode": "Quad",
+      "prompt": "a full-body character",
+      "quality": "medium",
+      "seed": 65535,
+      "tapose": false
+     },
+     "payload_json": "{\"geometry_file_format\": \"glb\", \"images\": [\"IMG:front_image\", \"IMG:back_image\", \"IMG:left_image\", \"IMG:right_image\"], \"material\": \"PBR\", \"mesh_mode\": \"Quad\", \"prompt\": \"a full-body character\", \"quality\": \"medium\", \"seed\": 65535, \"tapose\": false}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "Hunyuan3DMultiViewNode",
+   "files": {
+    "https://r.test/3d/model.glb": "Z2xURgIAAABIAAAANAAAAEpTT057ImFzc2V0IjogeyJ2ZXJzaW9uIjogIjIuMCJ9LCAiZXh0cmFzIjogeyJzZWVkIjogMX19",
+    "https://r.test/3d/preview.glb": "Z2xURgIAAABIAAAANAAAAEpTT057ImFzc2V0IjogeyJ2ZXJzaW9uIjogIjIuMCJ9LCAiZXh0cmFzIjogeyJzZWVkIjogMn19"
+   },
+   "gets": [],
+   "name": "multi-view \u00b7 Rodin \u00b7 four views \u00b7 seed 4294967295",
+   "output": [
+    "https://r.test/3d/model.glb"
+   ],
+   "picture_files": {
+    "back_image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/AB5lLsFS0L/NZRkP/GBMCTPQQjOB3ibILQCcslXMEkwwbALdrGZG428THr3eXTq0bxUALXe48ArnHEFLPvOHhDEPcjv4Z743IqigBMaXNo6fDKzxX6c/9LwtFi0jo7l6AxDz3gAgZu/OPusea6oSISDne2fiTEcgqo+Z5SYC19aUxZQD8es1LtBphrZUFaQOMLm+9iNhDO5DFWopGVUAAAAASUVORK5CYII=",
+    "front_image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII=",
+    "left_image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANdxSUKO90Ev3hh7cxTXDkJTn+6PKOGUJAAz2y0jyKBP1SP9K1sVMSvaIfcY/IkNH2oAXDgvKnkFeRl2/6fL8VCQZckN3EwULIysAdQXwNb7ewfG8CdrCMLs3cmTzDHEv1X42ASwMElJPiLTxpcMzO0LZETF3jkU0AhyXJcCBD5OQFoR9s9qLSST1DDXYDVQZ5fNVO6zoRBEJNKp+hwAAAAASUVORK5CYII=",
+    "right_image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/AP64ce3k6M4NqyHz5yyXrRB0H6N1AEfIrwEQe8UPDgok+fKX4qSphADBXRsYx0ILoiIAukzexjFlHtxcinog593ZpcpBAewGGK5QAHjEzvUDauS10t/VX5sjqaEdELoD+xs2XwLd/VWkMIfF08g0WnD1hqImT7jlKF3Y/WUBH6aCVgKdndXTm/VfsSfcIeFMp0F76a8aj4FKPOMEYxgAAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "front_image",
+    "back_image",
+    "left_image",
+    "right_image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "engine": "Rodin (textured \u00b7 quad mesh)",
+    "guidance_scale": 5.5,
+    "octree_resolution": 256,
+    "prompt": "a full-body character",
+    "remove_background": true,
+    "rodin_poly_count": 0,
+    "rodin_quality": "medium",
+    "rodin_tapose": false,
+    "seed": 4294967295,
+    "steps": 50
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": "https://r.test/3d/model.glb"
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "tencent/hunyuan3d-2mv",
+     "payload": {
+      "file_type": "glb",
+      "front_image": "IMG:front_image",
+      "guidance_scale": 5.5,
+      "octree_resolution": 256,
+      "remove_background": true,
+      "steps": 50
+     },
+     "payload_json": "{\"file_type\": \"glb\", \"front_image\": \"IMG:front_image\", \"guidance_scale\": 5.5, \"octree_resolution\": 256, \"remove_background\": true, \"steps\": 50}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "Hunyuan3DMultiViewNode",
+   "files": {
+    "https://r.test/3d/model.glb": "Z2xURgIAAABIAAAANAAAAEpTT057ImFzc2V0IjogeyJ2ZXJzaW9uIjogIjIuMCJ9LCAiZXh0cmFzIjogeyJzZWVkIjogMX19",
+    "https://r.test/3d/preview.glb": "Z2xURgIAAABIAAAANAAAAEpTT057ImFzc2V0IjogeyJ2ZXJzaW9uIjogIjIuMCJ9LCAiZXh0cmFzIjogeyJzZWVkIjogMn19"
+   },
+   "gets": [],
+   "name": "multi-view \u00b7 Hunyuan3D-2mv \u00b7 front \u00b7 defaults",
+   "output": [
+    "https://r.test/3d/model.glb"
+   ],
+   "picture_files": {
+    "front_image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "front_image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "engine": "Hunyuan3D-2mv (geometry only)",
+    "guidance_scale": 5.5,
+    "octree_resolution": 256,
+    "prompt": "a full-body character",
+    "remove_background": true,
+    "rodin_poly_count": 0,
+    "rodin_quality": "medium",
+    "rodin_tapose": false,
+    "seed": 0,
+    "steps": 50
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": "https://r.test/3d/model.glb"
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "tencent/hunyuan3d-2mv",
+     "payload": {
+      "back_image": "IMG:back_image",
+      "file_type": "glb",
+      "front_image": "IMG:front_image",
+      "guidance_scale": 5.5,
+      "octree_resolution": 256,
+      "remove_background": true,
+      "steps": 50
+     },
+     "payload_json": "{\"back_image\": \"IMG:back_image\", \"file_type\": \"glb\", \"front_image\": \"IMG:front_image\", \"guidance_scale\": 5.5, \"octree_resolution\": 256, \"remove_background\": true, \"steps\": 50}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "Hunyuan3DMultiViewNode",
+   "files": {
+    "https://r.test/3d/model.glb": "Z2xURgIAAABIAAAANAAAAEpTT057ImFzc2V0IjogeyJ2ZXJzaW9uIjogIjIuMCJ9LCAiZXh0cmFzIjogeyJzZWVkIjogMX19",
+    "https://r.test/3d/preview.glb": "Z2xURgIAAABIAAAANAAAAEpTT057ImFzc2V0IjogeyJ2ZXJzaW9uIjogIjIuMCJ9LCAiZXh0cmFzIjogeyJzZWVkIjogMn19"
+   },
+   "gets": [],
+   "name": "multi-view \u00b7 Hunyuan3D-2mv \u00b7 front and back \u00b7 defaults",
+   "output": [
+    "https://r.test/3d/model.glb"
+   ],
+   "picture_files": {
+    "back_image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/AB5lLsFS0L/NZRkP/GBMCTPQQjOB3ibILQCcslXMEkwwbALdrGZG428THr3eXTq0bxUALXe48ArnHEFLPvOHhDEPcjv4Z743IqigBMaXNo6fDKzxX6c/9LwtFi0jo7l6AxDz3gAgZu/OPusea6oSISDne2fiTEcgqo+Z5SYC19aUxZQD8es1LtBphrZUFaQOMLm+9iNhDO5DFWopGVUAAAAASUVORK5CYII=",
+    "front_image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "front_image",
+    "back_image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "engine": "Hunyuan3D-2mv (geometry only)",
+    "guidance_scale": 5.5,
+    "octree_resolution": 256,
+    "prompt": "a full-body character",
+    "remove_background": true,
+    "rodin_poly_count": 0,
+    "rodin_quality": "medium",
+    "rodin_tapose": false,
+    "seed": 0,
+    "steps": 50
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": "https://r.test/3d/model.glb"
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "tencent/hunyuan3d-2mv",
+     "payload": {
+      "file_type": "glb",
+      "front_image": "IMG:front_image",
+      "guidance_scale": 5.5,
+      "octree_resolution": 256,
+      "remove_background": true,
+      "right_image": "IMG:right_image",
+      "steps": 50
+     },
+     "payload_json": "{\"file_type\": \"glb\", \"front_image\": \"IMG:front_image\", \"guidance_scale\": 5.5, \"octree_resolution\": 256, \"remove_background\": true, \"right_image\": \"IMG:right_image\", \"steps\": 50}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "Hunyuan3DMultiViewNode",
+   "files": {
+    "https://r.test/3d/model.glb": "Z2xURgIAAABIAAAANAAAAEpTT057ImFzc2V0IjogeyJ2ZXJzaW9uIjogIjIuMCJ9LCAiZXh0cmFzIjogeyJzZWVkIjogMX19",
+    "https://r.test/3d/preview.glb": "Z2xURgIAAABIAAAANAAAAEpTT057ImFzc2V0IjogeyJ2ZXJzaW9uIjogIjIuMCJ9LCAiZXh0cmFzIjogeyJzZWVkIjogMn19"
+   },
+   "gets": [],
+   "name": "multi-view \u00b7 Hunyuan3D-2mv \u00b7 front and right \u00b7 defaults",
+   "output": [
+    "https://r.test/3d/model.glb"
+   ],
+   "picture_files": {
+    "front_image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII=",
+    "right_image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/AB5lLsFS0L/NZRkP/GBMCTPQQjOB3ibILQCcslXMEkwwbALdrGZG428THr3eXTq0bxUALXe48ArnHEFLPvOHhDEPcjv4Z743IqigBMaXNo6fDKzxX6c/9LwtFi0jo7l6AxDz3gAgZu/OPusea6oSISDne2fiTEcgqo+Z5SYC19aUxZQD8es1LtBphrZUFaQOMLm+9iNhDO5DFWopGVUAAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "front_image",
+    "right_image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "engine": "Hunyuan3D-2mv (geometry only)",
+    "guidance_scale": 5.5,
+    "octree_resolution": 256,
+    "prompt": "a full-body character",
+    "remove_background": true,
+    "rodin_poly_count": 0,
+    "rodin_quality": "medium",
+    "rodin_tapose": false,
+    "seed": 0,
+    "steps": 50
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": "https://r.test/3d/model.glb"
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "tencent/hunyuan3d-2mv",
+     "payload": {
+      "back_image": "IMG:back_image",
+      "file_type": "glb",
+      "front_image": "IMG:front_image",
+      "guidance_scale": 5.5,
+      "left_image": "IMG:left_image",
+      "octree_resolution": 256,
+      "remove_background": true,
+      "right_image": "IMG:right_image",
+      "steps": 50
+     },
+     "payload_json": "{\"back_image\": \"IMG:back_image\", \"file_type\": \"glb\", \"front_image\": \"IMG:front_image\", \"guidance_scale\": 5.5, \"left_image\": \"IMG:left_image\", \"octree_resolution\": 256, \"remove_background\": true, \"right_image\": \"IMG:right_image\", \"steps\": 50}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "Hunyuan3DMultiViewNode",
+   "files": {
+    "https://r.test/3d/model.glb": "Z2xURgIAAABIAAAANAAAAEpTT057ImFzc2V0IjogeyJ2ZXJzaW9uIjogIjIuMCJ9LCAiZXh0cmFzIjogeyJzZWVkIjogMX19",
+    "https://r.test/3d/preview.glb": "Z2xURgIAAABIAAAANAAAAEpTT057ImFzc2V0IjogeyJ2ZXJzaW9uIjogIjIuMCJ9LCAiZXh0cmFzIjogeyJzZWVkIjogMn19"
+   },
+   "gets": [],
+   "name": "multi-view \u00b7 Hunyuan3D-2mv \u00b7 four views \u00b7 defaults",
+   "output": [
+    "https://r.test/3d/model.glb"
+   ],
+   "picture_files": {
+    "back_image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/AB5lLsFS0L/NZRkP/GBMCTPQQjOB3ibILQCcslXMEkwwbALdrGZG428THr3eXTq0bxUALXe48ArnHEFLPvOHhDEPcjv4Z743IqigBMaXNo6fDKzxX6c/9LwtFi0jo7l6AxDz3gAgZu/OPusea6oSISDne2fiTEcgqo+Z5SYC19aUxZQD8es1LtBphrZUFaQOMLm+9iNhDO5DFWopGVUAAAAASUVORK5CYII=",
+    "front_image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII=",
+    "left_image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANdxSUKO90Ev3hh7cxTXDkJTn+6PKOGUJAAz2y0jyKBP1SP9K1sVMSvaIfcY/IkNH2oAXDgvKnkFeRl2/6fL8VCQZckN3EwULIysAdQXwNb7ewfG8CdrCMLs3cmTzDHEv1X42ASwMElJPiLTxpcMzO0LZETF3jkU0AhyXJcCBD5OQFoR9s9qLSST1DDXYDVQZ5fNVO6zoRBEJNKp+hwAAAAASUVORK5CYII=",
+    "right_image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/AP64ce3k6M4NqyHz5yyXrRB0H6N1AEfIrwEQe8UPDgok+fKX4qSphADBXRsYx0ILoiIAukzexjFlHtxcinog593ZpcpBAewGGK5QAHjEzvUDauS10t/VX5sjqaEdELoD+xs2XwLd/VWkMIfF08g0WnD1hqImT7jlKF3Y/WUBH6aCVgKdndXTm/VfsSfcIeFMp0F76a8aj4FKPOMEYxgAAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "front_image",
+    "back_image",
+    "left_image",
+    "right_image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "engine": "Hunyuan3D-2mv (geometry only)",
+    "guidance_scale": 5.5,
+    "octree_resolution": 256,
+    "prompt": "a full-body character",
+    "remove_background": true,
+    "rodin_poly_count": 0,
+    "rodin_quality": "medium",
+    "rodin_tapose": false,
+    "seed": 0,
+    "steps": 50
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": "https://r.test/3d/model.glb"
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "tencent/hunyuan3d-2mv",
+     "payload": {
+      "back_image": "IMG:back_image",
+      "file_type": "glb",
+      "front_image": "IMG:front_image",
+      "guidance_scale": 5.5,
+      "left_image": "IMG:left_image",
+      "octree_resolution": 256,
+      "remove_background": true,
+      "right_image": "IMG:right_image",
+      "steps": 50
+     },
+     "payload_json": "{\"back_image\": \"IMG:back_image\", \"file_type\": \"glb\", \"front_image\": \"IMG:front_image\", \"guidance_scale\": 5.5, \"left_image\": \"IMG:left_image\", \"octree_resolution\": 256, \"remove_background\": true, \"right_image\": \"IMG:right_image\", \"steps\": 50}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "Hunyuan3DMultiViewNode",
+   "files": {
+    "https://r.test/3d/model.glb": "Z2xURgIAAABIAAAANAAAAEpTT057ImFzc2V0IjogeyJ2ZXJzaW9uIjogIjIuMCJ9LCAiZXh0cmFzIjogeyJzZWVkIjogMX19",
+    "https://r.test/3d/preview.glb": "Z2xURgIAAABIAAAANAAAAEpTT057ImFzc2V0IjogeyJ2ZXJzaW9uIjogIjIuMCJ9LCAiZXh0cmFzIjogeyJzZWVkIjogMn19"
+   },
+   "gets": [],
+   "name": "multi-view \u00b7 Hunyuan3D-2mv \u00b7 four views \u00b7 seed 0",
+   "output": [
+    "https://r.test/3d/model.glb"
+   ],
+   "picture_files": {
+    "back_image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/AB5lLsFS0L/NZRkP/GBMCTPQQjOB3ibILQCcslXMEkwwbALdrGZG428THr3eXTq0bxUALXe48ArnHEFLPvOHhDEPcjv4Z743IqigBMaXNo6fDKzxX6c/9LwtFi0jo7l6AxDz3gAgZu/OPusea6oSISDne2fiTEcgqo+Z5SYC19aUxZQD8es1LtBphrZUFaQOMLm+9iNhDO5DFWopGVUAAAAASUVORK5CYII=",
+    "front_image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII=",
+    "left_image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANdxSUKO90Ev3hh7cxTXDkJTn+6PKOGUJAAz2y0jyKBP1SP9K1sVMSvaIfcY/IkNH2oAXDgvKnkFeRl2/6fL8VCQZckN3EwULIysAdQXwNb7ewfG8CdrCMLs3cmTzDHEv1X42ASwMElJPiLTxpcMzO0LZETF3jkU0AhyXJcCBD5OQFoR9s9qLSST1DDXYDVQZ5fNVO6zoRBEJNKp+hwAAAAASUVORK5CYII=",
+    "right_image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/AP64ce3k6M4NqyHz5yyXrRB0H6N1AEfIrwEQe8UPDgok+fKX4qSphADBXRsYx0ILoiIAukzexjFlHtxcinog593ZpcpBAewGGK5QAHjEzvUDauS10t/VX5sjqaEdELoD+xs2XwLd/VWkMIfF08g0WnD1hqImT7jlKF3Y/WUBH6aCVgKdndXTm/VfsSfcIeFMp0F76a8aj4FKPOMEYxgAAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "front_image",
+    "back_image",
+    "left_image",
+    "right_image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "engine": "Hunyuan3D-2mv (geometry only)",
+    "guidance_scale": 5.5,
+    "octree_resolution": 256,
+    "prompt": "a full-body character",
+    "remove_background": true,
+    "rodin_poly_count": 0,
+    "rodin_quality": "medium",
+    "rodin_tapose": false,
+    "seed": 0,
+    "steps": 50
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": "https://r.test/3d/model.glb"
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "tencent/hunyuan3d-2mv",
+     "payload": {
+      "back_image": "IMG:back_image",
+      "file_type": "glb",
+      "front_image": "IMG:front_image",
+      "guidance_scale": 5.5,
+      "left_image": "IMG:left_image",
+      "octree_resolution": 256,
+      "remove_background": true,
+      "right_image": "IMG:right_image",
+      "seed": 1,
+      "steps": 50
+     },
+     "payload_json": "{\"back_image\": \"IMG:back_image\", \"file_type\": \"glb\", \"front_image\": \"IMG:front_image\", \"guidance_scale\": 5.5, \"left_image\": \"IMG:left_image\", \"octree_resolution\": 256, \"remove_background\": true, \"right_image\": \"IMG:right_image\", \"seed\": 1, \"steps\": 50}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "Hunyuan3DMultiViewNode",
+   "files": {
+    "https://r.test/3d/model.glb": "Z2xURgIAAABIAAAANAAAAEpTT057ImFzc2V0IjogeyJ2ZXJzaW9uIjogIjIuMCJ9LCAiZXh0cmFzIjogeyJzZWVkIjogMX19",
+    "https://r.test/3d/preview.glb": "Z2xURgIAAABIAAAANAAAAEpTT057ImFzc2V0IjogeyJ2ZXJzaW9uIjogIjIuMCJ9LCAiZXh0cmFzIjogeyJzZWVkIjogMn19"
+   },
+   "gets": [],
+   "name": "multi-view \u00b7 Hunyuan3D-2mv \u00b7 four views \u00b7 seed 1",
+   "output": [
+    "https://r.test/3d/model.glb"
+   ],
+   "picture_files": {
+    "back_image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/AB5lLsFS0L/NZRkP/GBMCTPQQjOB3ibILQCcslXMEkwwbALdrGZG428THr3eXTq0bxUALXe48ArnHEFLPvOHhDEPcjv4Z743IqigBMaXNo6fDKzxX6c/9LwtFi0jo7l6AxDz3gAgZu/OPusea6oSISDne2fiTEcgqo+Z5SYC19aUxZQD8es1LtBphrZUFaQOMLm+9iNhDO5DFWopGVUAAAAASUVORK5CYII=",
+    "front_image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII=",
+    "left_image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANdxSUKO90Ev3hh7cxTXDkJTn+6PKOGUJAAz2y0jyKBP1SP9K1sVMSvaIfcY/IkNH2oAXDgvKnkFeRl2/6fL8VCQZckN3EwULIysAdQXwNb7ewfG8CdrCMLs3cmTzDHEv1X42ASwMElJPiLTxpcMzO0LZETF3jkU0AhyXJcCBD5OQFoR9s9qLSST1DDXYDVQZ5fNVO6zoRBEJNKp+hwAAAAASUVORK5CYII=",
+    "right_image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/AP64ce3k6M4NqyHz5yyXrRB0H6N1AEfIrwEQe8UPDgok+fKX4qSphADBXRsYx0ILoiIAukzexjFlHtxcinog593ZpcpBAewGGK5QAHjEzvUDauS10t/VX5sjqaEdELoD+xs2XwLd/VWkMIfF08g0WnD1hqImT7jlKF3Y/WUBH6aCVgKdndXTm/VfsSfcIeFMp0F76a8aj4FKPOMEYxgAAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "front_image",
+    "back_image",
+    "left_image",
+    "right_image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "engine": "Hunyuan3D-2mv (geometry only)",
+    "guidance_scale": 5.5,
+    "octree_resolution": 256,
+    "prompt": "a full-body character",
+    "remove_background": true,
+    "rodin_poly_count": 0,
+    "rodin_quality": "medium",
+    "rodin_tapose": false,
+    "seed": 1,
+    "steps": 50
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": "https://r.test/3d/model.glb"
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "tencent/hunyuan3d-2mv",
+     "payload": {
+      "back_image": "IMG:back_image",
+      "file_type": "glb",
+      "front_image": "IMG:front_image",
+      "guidance_scale": 5.5,
+      "left_image": "IMG:left_image",
+      "octree_resolution": 256,
+      "remove_background": true,
+      "right_image": "IMG:right_image",
+      "seed": 65536,
+      "steps": 50
+     },
+     "payload_json": "{\"back_image\": \"IMG:back_image\", \"file_type\": \"glb\", \"front_image\": \"IMG:front_image\", \"guidance_scale\": 5.5, \"left_image\": \"IMG:left_image\", \"octree_resolution\": 256, \"remove_background\": true, \"right_image\": \"IMG:right_image\", \"seed\": 65536, \"steps\": 50}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "Hunyuan3DMultiViewNode",
+   "files": {
+    "https://r.test/3d/model.glb": "Z2xURgIAAABIAAAANAAAAEpTT057ImFzc2V0IjogeyJ2ZXJzaW9uIjogIjIuMCJ9LCAiZXh0cmFzIjogeyJzZWVkIjogMX19",
+    "https://r.test/3d/preview.glb": "Z2xURgIAAABIAAAANAAAAEpTT057ImFzc2V0IjogeyJ2ZXJzaW9uIjogIjIuMCJ9LCAiZXh0cmFzIjogeyJzZWVkIjogMn19"
+   },
+   "gets": [],
+   "name": "multi-view \u00b7 Hunyuan3D-2mv \u00b7 four views \u00b7 seed 65536",
+   "output": [
+    "https://r.test/3d/model.glb"
+   ],
+   "picture_files": {
+    "back_image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/AB5lLsFS0L/NZRkP/GBMCTPQQjOB3ibILQCcslXMEkwwbALdrGZG428THr3eXTq0bxUALXe48ArnHEFLPvOHhDEPcjv4Z743IqigBMaXNo6fDKzxX6c/9LwtFi0jo7l6AxDz3gAgZu/OPusea6oSISDne2fiTEcgqo+Z5SYC19aUxZQD8es1LtBphrZUFaQOMLm+9iNhDO5DFWopGVUAAAAASUVORK5CYII=",
+    "front_image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII=",
+    "left_image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANdxSUKO90Ev3hh7cxTXDkJTn+6PKOGUJAAz2y0jyKBP1SP9K1sVMSvaIfcY/IkNH2oAXDgvKnkFeRl2/6fL8VCQZckN3EwULIysAdQXwNb7ewfG8CdrCMLs3cmTzDHEv1X42ASwMElJPiLTxpcMzO0LZETF3jkU0AhyXJcCBD5OQFoR9s9qLSST1DDXYDVQZ5fNVO6zoRBEJNKp+hwAAAAASUVORK5CYII=",
+    "right_image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/AP64ce3k6M4NqyHz5yyXrRB0H6N1AEfIrwEQe8UPDgok+fKX4qSphADBXRsYx0ILoiIAukzexjFlHtxcinog593ZpcpBAewGGK5QAHjEzvUDauS10t/VX5sjqaEdELoD+xs2XwLd/VWkMIfF08g0WnD1hqImT7jlKF3Y/WUBH6aCVgKdndXTm/VfsSfcIeFMp0F76a8aj4FKPOMEYxgAAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "front_image",
+    "back_image",
+    "left_image",
+    "right_image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "engine": "Hunyuan3D-2mv (geometry only)",
+    "guidance_scale": 5.5,
+    "octree_resolution": 256,
+    "prompt": "a full-body character",
+    "remove_background": true,
+    "rodin_poly_count": 0,
+    "rodin_quality": "medium",
+    "rodin_tapose": false,
+    "seed": 65536,
+    "steps": 50
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": "https://r.test/3d/model.glb"
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "tencent/hunyuan3d-2mv",
+     "payload": {
+      "back_image": "IMG:back_image",
+      "file_type": "glb",
+      "front_image": "IMG:front_image",
+      "guidance_scale": 5.5,
+      "left_image": "IMG:left_image",
+      "octree_resolution": 256,
+      "remove_background": true,
+      "right_image": "IMG:right_image",
+      "seed": 4294967295,
+      "steps": 50
+     },
+     "payload_json": "{\"back_image\": \"IMG:back_image\", \"file_type\": \"glb\", \"front_image\": \"IMG:front_image\", \"guidance_scale\": 5.5, \"left_image\": \"IMG:left_image\", \"octree_resolution\": 256, \"remove_background\": true, \"right_image\": \"IMG:right_image\", \"seed\": 4294967295, \"steps\": 50}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "Hunyuan3DMultiViewNode",
+   "files": {
+    "https://r.test/3d/model.glb": "Z2xURgIAAABIAAAANAAAAEpTT057ImFzc2V0IjogeyJ2ZXJzaW9uIjogIjIuMCJ9LCAiZXh0cmFzIjogeyJzZWVkIjogMX19",
+    "https://r.test/3d/preview.glb": "Z2xURgIAAABIAAAANAAAAEpTT057ImFzc2V0IjogeyJ2ZXJzaW9uIjogIjIuMCJ9LCAiZXh0cmFzIjogeyJzZWVkIjogMn19"
+   },
+   "gets": [],
+   "name": "multi-view \u00b7 Hunyuan3D-2mv \u00b7 four views \u00b7 seed 4294967295",
+   "output": [
+    "https://r.test/3d/model.glb"
+   ],
+   "picture_files": {
+    "back_image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/AB5lLsFS0L/NZRkP/GBMCTPQQjOB3ibILQCcslXMEkwwbALdrGZG428THr3eXTq0bxUALXe48ArnHEFLPvOHhDEPcjv4Z743IqigBMaXNo6fDKzxX6c/9LwtFi0jo7l6AxDz3gAgZu/OPusea6oSISDne2fiTEcgqo+Z5SYC19aUxZQD8es1LtBphrZUFaQOMLm+9iNhDO5DFWopGVUAAAAASUVORK5CYII=",
+    "front_image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII=",
+    "left_image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANdxSUKO90Ev3hh7cxTXDkJTn+6PKOGUJAAz2y0jyKBP1SP9K1sVMSvaIfcY/IkNH2oAXDgvKnkFeRl2/6fL8VCQZckN3EwULIysAdQXwNb7ewfG8CdrCMLs3cmTzDHEv1X42ASwMElJPiLTxpcMzO0LZETF3jkU0AhyXJcCBD5OQFoR9s9qLSST1DDXYDVQZ5fNVO6zoRBEJNKp+hwAAAAASUVORK5CYII=",
+    "right_image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/AP64ce3k6M4NqyHz5yyXrRB0H6N1AEfIrwEQe8UPDgok+fKX4qSphADBXRsYx0ILoiIAukzexjFlHtxcinog593ZpcpBAewGGK5QAHjEzvUDauS10t/VX5sjqaEdELoD+xs2XwLd/VWkMIfF08g0WnD1hqImT7jlKF3Y/WUBH6aCVgKdndXTm/VfsSfcIeFMp0F76a8aj4FKPOMEYxgAAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "front_image",
+    "back_image",
+    "left_image",
+    "right_image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "engine": "Hunyuan3D-2mv (geometry only)",
+    "guidance_scale": 5.5,
+    "octree_resolution": 256,
+    "prompt": "a full-body character",
+    "remove_background": true,
+    "rodin_poly_count": 0,
+    "rodin_quality": "medium",
+    "rodin_tapose": false,
+    "seed": 4294967295,
+    "steps": 50
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": "https://r.test/3d/model.glb"
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "tencent/hunyuan3d-2mv",
+     "payload": {
+      "file_type": "glb",
+      "front_image": "IMG:front_image",
+      "guidance_scale": 20.0,
+      "octree_resolution": 128,
+      "remove_background": false,
+      "right_image": "IMG:right_image",
+      "seed": 7,
+      "steps": 100
+     },
+     "payload_json": "{\"file_type\": \"glb\", \"front_image\": \"IMG:front_image\", \"guidance_scale\": 20.0, \"octree_resolution\": 128, \"remove_background\": false, \"right_image\": \"IMG:right_image\", \"seed\": 7, \"steps\": 100}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "Hunyuan3DMultiViewNode",
+   "files": {
+    "https://r.test/3d/model.glb": "Z2xURgIAAABIAAAANAAAAEpTT057ImFzc2V0IjogeyJ2ZXJzaW9uIjogIjIuMCJ9LCAiZXh0cmFzIjogeyJzZWVkIjogMX19",
+    "https://r.test/3d/preview.glb": "Z2xURgIAAABIAAAANAAAAEpTT057ImFzc2V0IjogeyJ2ZXJzaW9uIjogIjIuMCJ9LCAiZXh0cmFzIjogeyJzZWVkIjogMn19"
+   },
+   "gets": [],
+   "name": "multi-view \u00b7 Hunyuan3D-2mv \u00b7 front and right \u00b7 every setting",
+   "output": [
+    "https://r.test/3d/model.glb"
+   ],
+   "picture_files": {
+    "front_image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII=",
+    "right_image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/AB5lLsFS0L/NZRkP/GBMCTPQQjOB3ibILQCcslXMEkwwbALdrGZG428THr3eXTq0bxUALXe48ArnHEFLPvOHhDEPcjv4Z743IqigBMaXNo6fDKzxX6c/9LwtFi0jo7l6AxDz3gAgZu/OPusea6oSISDne2fiTEcgqo+Z5SYC19aUxZQD8es1LtBphrZUFaQOMLm+9iNhDO5DFWopGVUAAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "front_image",
+    "right_image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "engine": "Hunyuan3D-2mv (geometry only)",
+    "guidance_scale": 20.0,
+    "octree_resolution": 128,
+    "prompt": "a full-body character",
+    "remove_background": false,
+    "rodin_poly_count": 0,
+    "rodin_quality": "medium",
+    "rodin_tapose": false,
+    "seed": 7,
+    "steps": 100
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": "https://r.test/3d/model.glb"
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "tencent/hunyuan3d-2mv",
+     "payload": {
+      "file_type": "glb",
+      "front_image": "IMG:front_image",
+      "guidance_scale": 1.0,
+      "octree_resolution": 512,
+      "remove_background": true,
+      "steps": 20
+     },
+     "payload_json": "{\"file_type\": \"glb\", \"front_image\": \"IMG:front_image\", \"guidance_scale\": 1.0, \"octree_resolution\": 512, \"remove_background\": true, \"steps\": 20}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "Hunyuan3DMultiViewNode",
+   "files": {
+    "https://r.test/3d/model.glb": "Z2xURgIAAABIAAAANAAAAEpTT057ImFzc2V0IjogeyJ2ZXJzaW9uIjogIjIuMCJ9LCAiZXh0cmFzIjogeyJzZWVkIjogMX19",
+    "https://r.test/3d/preview.glb": "Z2xURgIAAABIAAAANAAAAEpTT057ImFzc2V0IjogeyJ2ZXJzaW9uIjogIjIuMCJ9LCAiZXh0cmFzIjogeyJzZWVkIjogMn19"
+   },
+   "gets": [],
+   "name": "multi-view \u00b7 Hunyuan3D-2mv \u00b7 front \u00b7 steps 20 octree 512",
+   "output": [
+    "https://r.test/3d/model.glb"
+   ],
+   "picture_files": {
+    "front_image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "front_image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "engine": "Hunyuan3D-2mv (geometry only)",
+    "guidance_scale": 1.0,
+    "octree_resolution": 512,
+    "prompt": "a full-body character",
+    "remove_background": true,
+    "rodin_poly_count": 0,
+    "rodin_quality": "medium",
+    "rodin_tapose": false,
+    "seed": 0,
+    "steps": 20
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": "https://r.test/3d/model.glb"
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "hyper3d/rodin",
+     "payload": {
+      "geometry_file_format": "glb",
+      "images": [
+       "IMG:front_image"
+      ],
+      "material": "PBR",
+      "mesh_mode": "Quad",
+      "prompt": "a full-body character",
+      "quality": "medium",
+      "tapose": false
+     },
+     "payload_json": "{\"geometry_file_format\": \"glb\", \"images\": [\"IMG:front_image\"], \"material\": \"PBR\", \"mesh_mode\": \"Quad\", \"prompt\": \"a full-body character\", \"quality\": \"medium\", \"tapose\": false}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "Hunyuan3DMultiViewNode",
+   "files": {
+    "https://r.test/3d/model.glb": "Z2xURgIAAABIAAAANAAAAEpTT057ImFzc2V0IjogeyJ2ZXJzaW9uIjogIjIuMCJ9LCAiZXh0cmFzIjogeyJzZWVkIjogMX19",
+    "https://r.test/3d/preview.glb": "Z2xURgIAAABIAAAANAAAAEpTT057ImFzc2V0IjogeyJ2ZXJzaW9uIjogIjIuMCJ9LCAiZXh0cmFzIjogeyJzZWVkIjogMn19"
+   },
+   "gets": [],
+   "name": "multi-view \u00b7 Rodin \u00b7 front \u00b7 blank prompt",
+   "output": [
+    "https://r.test/3d/model.glb"
+   ],
+   "picture_files": {
+    "front_image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "front_image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "engine": "Rodin (textured \u00b7 quad mesh)",
+    "guidance_scale": 5.5,
+    "octree_resolution": 256,
+    "prompt": "",
+    "remove_background": true,
+    "rodin_poly_count": 0,
+    "rodin_quality": "medium",
+    "rodin_tapose": false,
+    "seed": 0,
+    "steps": 50
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": "https://r.test/3d/model.glb"
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "hyper3d/rodin",
+     "payload": {
+      "geometry_file_format": "glb",
+      "images": [
+       "IMG:front_image"
+      ],
+      "material": "PBR",
+      "mesh_mode": "Quad",
+      "prompt": "a full-body character",
+      "quality": "medium",
+      "tapose": false
+     },
+     "payload_json": "{\"geometry_file_format\": \"glb\", \"images\": [\"IMG:front_image\"], \"material\": \"PBR\", \"mesh_mode\": \"Quad\", \"prompt\": \"a full-body character\", \"quality\": \"medium\", \"tapose\": false}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "Hunyuan3DMultiViewNode",
+   "files": {
+    "https://r.test/3d/model.glb": "Z2xURgIAAABIAAAANAAAAEpTT057ImFzc2V0IjogeyJ2ZXJzaW9uIjogIjIuMCJ9LCAiZXh0cmFzIjogeyJzZWVkIjogMX19",
+    "https://r.test/3d/preview.glb": "Z2xURgIAAABIAAAANAAAAEpTT057ImFzc2V0IjogeyJ2ZXJzaW9uIjogIjIuMCJ9LCAiZXh0cmFzIjogeyJzZWVkIjogMn19"
+   },
+   "gets": [],
+   "name": "multi-view \u00b7 Rodin \u00b7 front \u00b7 spaced prompt",
+   "output": [
+    "https://r.test/3d/model.glb"
+   ],
+   "picture_files": {
+    "front_image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "front_image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "engine": "Rodin (textured \u00b7 quad mesh)",
+    "guidance_scale": 5.5,
+    "octree_resolution": 256,
+    "prompt": "   \n\t ",
+    "remove_background": true,
+    "rodin_poly_count": 0,
+    "rodin_quality": "medium",
+    "rodin_tapose": false,
+    "seed": 0,
+    "steps": 50
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": "https://r.test/3d/model.glb"
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "hyper3d/rodin",
+     "payload": {
+      "geometry_file_format": "glb",
+      "images": [
+       "IMG:front_image"
+      ],
+      "material": "PBR",
+      "mesh_mode": "Quad",
+      "prompt": "a red robot",
+      "quality": "medium",
+      "tapose": false
+     },
+     "payload_json": "{\"geometry_file_format\": \"glb\", \"images\": [\"IMG:front_image\"], \"material\": \"PBR\", \"mesh_mode\": \"Quad\", \"prompt\": \"a red robot\", \"quality\": \"medium\", \"tapose\": false}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "Hunyuan3DMultiViewNode",
+   "files": {
+    "https://r.test/3d/model.glb": "Z2xURgIAAABIAAAANAAAAEpTT057ImFzc2V0IjogeyJ2ZXJzaW9uIjogIjIuMCJ9LCAiZXh0cmFzIjogeyJzZWVkIjogMX19",
+    "https://r.test/3d/preview.glb": "Z2xURgIAAABIAAAANAAAAEpTT057ImFzc2V0IjogeyJ2ZXJzaW9uIjogIjIuMCJ9LCAiZXh0cmFzIjogeyJzZWVkIjogMn19"
+   },
+   "gets": [],
+   "name": "multi-view \u00b7 Rodin \u00b7 front \u00b7 padded prompt",
+   "output": [
+    "https://r.test/3d/model.glb"
+   ],
+   "picture_files": {
+    "front_image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "front_image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "engine": "Rodin (textured \u00b7 quad mesh)",
+    "guidance_scale": 5.5,
+    "octree_resolution": 256,
+    "prompt": "  a red robot \n",
+    "remove_background": true,
+    "rodin_poly_count": 0,
+    "rodin_quality": "medium",
+    "rodin_tapose": false,
+    "seed": 0,
+    "steps": 50
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": "https://r.test/3d/model.glb"
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "hyper3d/rodin",
+     "payload": {
+      "geometry_file_format": "glb",
+      "images": [
+       "IMG:front_image"
+      ],
+      "material": "PBR",
+      "mesh_mode": "Quad",
+      "prompt": "caf\u00e9 \u732b \ud83e\udd16 \u2014 low-poly",
+      "quality": "medium",
+      "tapose": false
+     },
+     "payload_json": "{\"geometry_file_format\": \"glb\", \"images\": [\"IMG:front_image\"], \"material\": \"PBR\", \"mesh_mode\": \"Quad\", \"prompt\": \"caf\\u00e9 \\u732b \\ud83e\\udd16 \\u2014 low-poly\", \"quality\": \"medium\", \"tapose\": false}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "Hunyuan3DMultiViewNode",
+   "files": {
+    "https://r.test/3d/model.glb": "Z2xURgIAAABIAAAANAAAAEpTT057ImFzc2V0IjogeyJ2ZXJzaW9uIjogIjIuMCJ9LCAiZXh0cmFzIjogeyJzZWVkIjogMX19",
+    "https://r.test/3d/preview.glb": "Z2xURgIAAABIAAAANAAAAEpTT057ImFzc2V0IjogeyJ2ZXJzaW9uIjogIjIuMCJ9LCAiZXh0cmFzIjogeyJzZWVkIjogMn19"
+   },
+   "gets": [],
+   "name": "multi-view \u00b7 Rodin \u00b7 front \u00b7 non-ASCII prompt",
+   "output": [
+    "https://r.test/3d/model.glb"
+   ],
+   "picture_files": {
+    "front_image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "front_image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "engine": "Rodin (textured \u00b7 quad mesh)",
+    "guidance_scale": 5.5,
+    "octree_resolution": 256,
+    "prompt": "caf\u00e9 \u732b \ud83e\udd16 \u2014 low-poly",
+    "remove_background": true,
+    "rodin_poly_count": 0,
+    "rodin_quality": "medium",
+    "rodin_tapose": false,
+    "seed": 0,
+    "steps": 50
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": "https://r.test/3d/model.glb"
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "hyper3d/rodin",
+     "payload": {
+      "geometry_file_format": "glb",
+      "images": [
+       "IMG:front_image"
+      ],
+      "material": "PBR",
+      "mesh_mode": "Quad",
+      "prompt": "a full-body character",
+      "quality": "medium",
+      "tapose": false
+     },
+     "payload_json": "{\"geometry_file_format\": \"glb\", \"images\": [\"IMG:front_image\"], \"material\": \"PBR\", \"mesh_mode\": \"Quad\", \"prompt\": \"a full-body character\", \"quality\": \"medium\", \"tapose\": false}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "Hunyuan3DMultiViewNode",
+   "files": {
+    "https://r.test/3d/model.glb": "Z2xURgIAAABIAAAANAAAAEpTT057ImFzc2V0IjogeyJ2ZXJzaW9uIjogIjIuMCJ9LCAiZXh0cmFzIjogeyJzZWVkIjogMX19",
+    "https://r.test/3d/preview.glb": "Z2xURgIAAABIAAAANAAAAEpTT057ImFzc2V0IjogeyJ2ZXJzaW9uIjogIjIuMCJ9LCAiZXh0cmFzIjogeyJzZWVkIjogMn19"
+   },
+   "gets": [],
+   "name": "multi-view \u00b7 Rodin \u00b7 front \u00b7 no prompt setting",
+   "output": [
+    "https://r.test/3d/model.glb"
+   ],
+   "picture_files": {
+    "front_image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "front_image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "engine": "Rodin (textured \u00b7 quad mesh)",
+    "guidance_scale": 5.5,
+    "octree_resolution": 256,
+    "remove_background": true,
+    "seed": 0,
+    "steps": 50
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": "https://r.test/3d/model.glb"
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "hyper3d/rodin",
+     "payload": {
+      "geometry_file_format": "glb",
+      "images": [
+       "IMG:front_image"
+      ],
+      "material": "PBR",
+      "mesh_mode": "Quad",
+      "prompt": "a full-body character",
+      "quality": "medium",
+      "tapose": false
+     },
+     "payload_json": "{\"geometry_file_format\": \"glb\", \"images\": [\"IMG:front_image\"], \"material\": \"PBR\", \"mesh_mode\": \"Quad\", \"prompt\": \"a full-body character\", \"quality\": \"medium\", \"tapose\": false}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "Hunyuan3DMultiViewNode",
+   "files": {
+    "https://r.test/3d/model.glb": "Z2xURgIAAABIAAAANAAAAEpTT057ImFzc2V0IjogeyJ2ZXJzaW9uIjogIjIuMCJ9LCAiZXh0cmFzIjogeyJzZWVkIjogMX19",
+    "https://r.test/3d/preview.glb": "Z2xURgIAAABIAAAANAAAAEpTT057ImFzc2V0IjogeyJ2ZXJzaW9uIjogIjIuMCJ9LCAiZXh0cmFzIjogeyJzZWVkIjogMn19"
+   },
+   "gets": [],
+   "name": "multi-view \u00b7 Rodin \u00b7 front \u00b7 poly 0",
+   "output": [
+    "https://r.test/3d/model.glb"
+   ],
+   "picture_files": {
+    "front_image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "front_image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "engine": "Rodin (textured \u00b7 quad mesh)",
+    "guidance_scale": 5.5,
+    "octree_resolution": 256,
+    "prompt": "a full-body character",
+    "remove_background": true,
+    "rodin_poly_count": 0,
+    "rodin_quality": "medium",
+    "rodin_tapose": false,
+    "seed": 0,
+    "steps": 50
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": "https://r.test/3d/model.glb"
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "hyper3d/rodin",
+     "payload": {
+      "geometry_file_format": "glb",
+      "images": [
+       "IMG:front_image"
+      ],
+      "material": "PBR",
+      "mesh_mode": "Quad",
+      "prompt": "a full-body character",
+      "quality": "medium",
+      "quality_override": 1000,
+      "tapose": false
+     },
+     "payload_json": "{\"geometry_file_format\": \"glb\", \"images\": [\"IMG:front_image\"], \"material\": \"PBR\", \"mesh_mode\": \"Quad\", \"prompt\": \"a full-body character\", \"quality\": \"medium\", \"quality_override\": 1000, \"tapose\": false}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "Hunyuan3DMultiViewNode",
+   "files": {
+    "https://r.test/3d/model.glb": "Z2xURgIAAABIAAAANAAAAEpTT057ImFzc2V0IjogeyJ2ZXJzaW9uIjogIjIuMCJ9LCAiZXh0cmFzIjogeyJzZWVkIjogMX19",
+    "https://r.test/3d/preview.glb": "Z2xURgIAAABIAAAANAAAAEpTT057ImFzc2V0IjogeyJ2ZXJzaW9uIjogIjIuMCJ9LCAiZXh0cmFzIjogeyJzZWVkIjogMn19"
+   },
+   "gets": [],
+   "name": "multi-view \u00b7 Rodin \u00b7 front \u00b7 poly 1000",
+   "output": [
+    "https://r.test/3d/model.glb"
+   ],
+   "picture_files": {
+    "front_image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "front_image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "engine": "Rodin (textured \u00b7 quad mesh)",
+    "guidance_scale": 5.5,
+    "octree_resolution": 256,
+    "prompt": "a full-body character",
+    "remove_background": true,
+    "rodin_poly_count": 1000,
+    "rodin_quality": "medium",
+    "rodin_tapose": false,
+    "seed": 0,
+    "steps": 50
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": "https://r.test/3d/model.glb"
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "hyper3d/rodin",
+     "payload": {
+      "geometry_file_format": "glb",
+      "images": [
+       "IMG:front_image"
+      ],
+      "material": "PBR",
+      "mesh_mode": "Quad",
+      "prompt": "a full-body character",
+      "quality": "medium",
+      "quality_override": 300000,
+      "tapose": false
+     },
+     "payload_json": "{\"geometry_file_format\": \"glb\", \"images\": [\"IMG:front_image\"], \"material\": \"PBR\", \"mesh_mode\": \"Quad\", \"prompt\": \"a full-body character\", \"quality\": \"medium\", \"quality_override\": 300000, \"tapose\": false}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "Hunyuan3DMultiViewNode",
+   "files": {
+    "https://r.test/3d/model.glb": "Z2xURgIAAABIAAAANAAAAEpTT057ImFzc2V0IjogeyJ2ZXJzaW9uIjogIjIuMCJ9LCAiZXh0cmFzIjogeyJzZWVkIjogMX19",
+    "https://r.test/3d/preview.glb": "Z2xURgIAAABIAAAANAAAAEpTT057ImFzc2V0IjogeyJ2ZXJzaW9uIjogIjIuMCJ9LCAiZXh0cmFzIjogeyJzZWVkIjogMn19"
+   },
+   "gets": [],
+   "name": "multi-view \u00b7 Rodin \u00b7 front \u00b7 poly 300000",
+   "output": [
+    "https://r.test/3d/model.glb"
+   ],
+   "picture_files": {
+    "front_image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "front_image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "engine": "Rodin (textured \u00b7 quad mesh)",
+    "guidance_scale": 5.5,
+    "octree_resolution": 256,
+    "prompt": "a full-body character",
+    "remove_background": true,
+    "rodin_poly_count": 300000,
+    "rodin_quality": "medium",
+    "rodin_tapose": false,
+    "seed": 0,
+    "steps": 50
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": "https://r.test/3d/model.glb"
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "hyper3d/rodin",
+     "payload": {
+      "geometry_file_format": "glb",
+      "images": [
+       "IMG:front_image"
+      ],
+      "material": "PBR",
+      "mesh_mode": "Quad",
+      "prompt": "a full-body character",
+      "quality": "medium",
+      "tapose": false
+     },
+     "payload_json": "{\"geometry_file_format\": \"glb\", \"images\": [\"IMG:front_image\"], \"material\": \"PBR\", \"mesh_mode\": \"Quad\", \"prompt\": \"a full-body character\", \"quality\": \"medium\", \"tapose\": false}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "Hunyuan3DMultiViewNode",
+   "files": {
+    "https://r.test/3d/model.glb": "Z2xURgIAAABIAAAANAAAAEpTT057ImFzc2V0IjogeyJ2ZXJzaW9uIjogIjIuMCJ9LCAiZXh0cmFzIjogeyJzZWVkIjogMX19",
+    "https://r.test/3d/preview.glb": "Z2xURgIAAABIAAAANAAAAEpTT057ImFzc2V0IjogeyJ2ZXJzaW9uIjogIjIuMCJ9LCAiZXh0cmFzIjogeyJzZWVkIjogMn19"
+   },
+   "gets": [],
+   "name": "multi-view \u00b7 Rodin \u00b7 front \u00b7 quality medium",
+   "output": [
+    "https://r.test/3d/model.glb"
+   ],
+   "picture_files": {
+    "front_image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "front_image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "engine": "Rodin (textured \u00b7 quad mesh)",
+    "guidance_scale": 5.5,
+    "octree_resolution": 256,
+    "prompt": "a full-body character",
+    "remove_background": true,
+    "rodin_poly_count": 0,
+    "rodin_quality": "medium",
+    "rodin_tapose": false,
+    "seed": 0,
+    "steps": 50
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": "https://r.test/3d/model.glb"
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "hyper3d/rodin",
+     "payload": {
+      "geometry_file_format": "glb",
+      "images": [
+       "IMG:front_image"
+      ],
+      "material": "PBR",
+      "mesh_mode": "Quad",
+      "prompt": "a full-body character",
+      "quality": "high",
+      "tapose": false
+     },
+     "payload_json": "{\"geometry_file_format\": \"glb\", \"images\": [\"IMG:front_image\"], \"material\": \"PBR\", \"mesh_mode\": \"Quad\", \"prompt\": \"a full-body character\", \"quality\": \"high\", \"tapose\": false}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "Hunyuan3DMultiViewNode",
+   "files": {
+    "https://r.test/3d/model.glb": "Z2xURgIAAABIAAAANAAAAEpTT057ImFzc2V0IjogeyJ2ZXJzaW9uIjogIjIuMCJ9LCAiZXh0cmFzIjogeyJzZWVkIjogMX19",
+    "https://r.test/3d/preview.glb": "Z2xURgIAAABIAAAANAAAAEpTT057ImFzc2V0IjogeyJ2ZXJzaW9uIjogIjIuMCJ9LCAiZXh0cmFzIjogeyJzZWVkIjogMn19"
+   },
+   "gets": [],
+   "name": "multi-view \u00b7 Rodin \u00b7 front \u00b7 quality high",
+   "output": [
+    "https://r.test/3d/model.glb"
+   ],
+   "picture_files": {
+    "front_image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "front_image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "engine": "Rodin (textured \u00b7 quad mesh)",
+    "guidance_scale": 5.5,
+    "octree_resolution": 256,
+    "prompt": "a full-body character",
+    "remove_background": true,
+    "rodin_poly_count": 0,
+    "rodin_quality": "high",
+    "rodin_tapose": false,
+    "seed": 0,
+    "steps": 50
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": "https://r.test/3d/model.glb"
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "hyper3d/rodin",
+     "payload": {
+      "geometry_file_format": "glb",
+      "images": [
+       "IMG:front_image"
+      ],
+      "material": "PBR",
+      "mesh_mode": "Quad",
+      "prompt": "a full-body character",
+      "quality": "low",
+      "tapose": false
+     },
+     "payload_json": "{\"geometry_file_format\": \"glb\", \"images\": [\"IMG:front_image\"], \"material\": \"PBR\", \"mesh_mode\": \"Quad\", \"prompt\": \"a full-body character\", \"quality\": \"low\", \"tapose\": false}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "Hunyuan3DMultiViewNode",
+   "files": {
+    "https://r.test/3d/model.glb": "Z2xURgIAAABIAAAANAAAAEpTT057ImFzc2V0IjogeyJ2ZXJzaW9uIjogIjIuMCJ9LCAiZXh0cmFzIjogeyJzZWVkIjogMX19",
+    "https://r.test/3d/preview.glb": "Z2xURgIAAABIAAAANAAAAEpTT057ImFzc2V0IjogeyJ2ZXJzaW9uIjogIjIuMCJ9LCAiZXh0cmFzIjogeyJzZWVkIjogMn19"
+   },
+   "gets": [],
+   "name": "multi-view \u00b7 Rodin \u00b7 front \u00b7 quality low",
+   "output": [
+    "https://r.test/3d/model.glb"
+   ],
+   "picture_files": {
+    "front_image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "front_image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "engine": "Rodin (textured \u00b7 quad mesh)",
+    "guidance_scale": 5.5,
+    "octree_resolution": 256,
+    "prompt": "a full-body character",
+    "remove_background": true,
+    "rodin_poly_count": 0,
+    "rodin_quality": "low",
+    "rodin_tapose": false,
+    "seed": 0,
+    "steps": 50
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": "https://r.test/3d/model.glb"
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "hyper3d/rodin",
+     "payload": {
+      "geometry_file_format": "glb",
+      "images": [
+       "IMG:front_image"
+      ],
+      "material": "PBR",
+      "mesh_mode": "Quad",
+      "prompt": "a full-body character",
+      "quality": "extra-low",
+      "tapose": false
+     },
+     "payload_json": "{\"geometry_file_format\": \"glb\", \"images\": [\"IMG:front_image\"], \"material\": \"PBR\", \"mesh_mode\": \"Quad\", \"prompt\": \"a full-body character\", \"quality\": \"extra-low\", \"tapose\": false}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "Hunyuan3DMultiViewNode",
+   "files": {
+    "https://r.test/3d/model.glb": "Z2xURgIAAABIAAAANAAAAEpTT057ImFzc2V0IjogeyJ2ZXJzaW9uIjogIjIuMCJ9LCAiZXh0cmFzIjogeyJzZWVkIjogMX19",
+    "https://r.test/3d/preview.glb": "Z2xURgIAAABIAAAANAAAAEpTT057ImFzc2V0IjogeyJ2ZXJzaW9uIjogIjIuMCJ9LCAiZXh0cmFzIjogeyJzZWVkIjogMn19"
+   },
+   "gets": [],
+   "name": "multi-view \u00b7 Rodin \u00b7 front \u00b7 quality extra-low",
+   "output": [
+    "https://r.test/3d/model.glb"
+   ],
+   "picture_files": {
+    "front_image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "front_image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "engine": "Rodin (textured \u00b7 quad mesh)",
+    "guidance_scale": 5.5,
+    "octree_resolution": 256,
+    "prompt": "a full-body character",
+    "remove_background": true,
+    "rodin_poly_count": 0,
+    "rodin_quality": "extra-low",
+    "rodin_tapose": false,
+    "seed": 0,
+    "steps": 50
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": "https://r.test/3d/model.glb"
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "hyper3d/rodin",
+     "payload": {
+      "geometry_file_format": "glb",
+      "images": [
+       "IMG:front_image",
+       "IMG:back_image",
+       "IMG:left_image",
+       "IMG:right_image"
+      ],
+      "material": "PBR",
+      "mesh_mode": "Quad",
+      "prompt": "a full-body character",
+      "quality": "extra-low",
+      "quality_override": 300000,
+      "seed": 1,
+      "tapose": true
+     },
+     "payload_json": "{\"geometry_file_format\": \"glb\", \"images\": [\"IMG:front_image\", \"IMG:back_image\", \"IMG:left_image\", \"IMG:right_image\"], \"material\": \"PBR\", \"mesh_mode\": \"Quad\", \"prompt\": \"a full-body character\", \"quality\": \"extra-low\", \"quality_override\": 300000, \"seed\": 1, \"tapose\": true}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "Hunyuan3DMultiViewNode",
+   "files": {
+    "https://r.test/3d/model.glb": "Z2xURgIAAABIAAAANAAAAEpTT057ImFzc2V0IjogeyJ2ZXJzaW9uIjogIjIuMCJ9LCAiZXh0cmFzIjogeyJzZWVkIjogMX19",
+    "https://r.test/3d/preview.glb": "Z2xURgIAAABIAAAANAAAAEpTT057ImFzc2V0IjogeyJ2ZXJzaW9uIjogIjIuMCJ9LCAiZXh0cmFzIjogeyJzZWVkIjogMn19"
+   },
+   "gets": [],
+   "name": "multi-view \u00b7 Rodin \u00b7 four views \u00b7 tapose",
+   "output": [
+    "https://r.test/3d/model.glb"
+   ],
+   "picture_files": {
+    "back_image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/AB5lLsFS0L/NZRkP/GBMCTPQQjOB3ibILQCcslXMEkwwbALdrGZG428THr3eXTq0bxUALXe48ArnHEFLPvOHhDEPcjv4Z743IqigBMaXNo6fDKzxX6c/9LwtFi0jo7l6AxDz3gAgZu/OPusea6oSISDne2fiTEcgqo+Z5SYC19aUxZQD8es1LtBphrZUFaQOMLm+9iNhDO5DFWopGVUAAAAASUVORK5CYII=",
+    "front_image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII=",
+    "left_image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANdxSUKO90Ev3hh7cxTXDkJTn+6PKOGUJAAz2y0jyKBP1SP9K1sVMSvaIfcY/IkNH2oAXDgvKnkFeRl2/6fL8VCQZckN3EwULIysAdQXwNb7ewfG8CdrCMLs3cmTzDHEv1X42ASwMElJPiLTxpcMzO0LZETF3jkU0AhyXJcCBD5OQFoR9s9qLSST1DDXYDVQZ5fNVO6zoRBEJNKp+hwAAAAASUVORK5CYII=",
+    "right_image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/AP64ce3k6M4NqyHz5yyXrRB0H6N1AEfIrwEQe8UPDgok+fKX4qSphADBXRsYx0ILoiIAukzexjFlHtxcinog593ZpcpBAewGGK5QAHjEzvUDauS10t/VX5sjqaEdELoD+xs2XwLd/VWkMIfF08g0WnD1hqImT7jlKF3Y/WUBH6aCVgKdndXTm/VfsSfcIeFMp0F76a8aj4FKPOMEYxgAAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "front_image",
+    "back_image",
+    "left_image",
+    "right_image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "engine": "Rodin (textured \u00b7 quad mesh)",
+    "guidance_scale": 5.5,
+    "octree_resolution": 256,
+    "prompt": "a full-body character",
+    "remove_background": true,
+    "rodin_poly_count": 300000,
+    "rodin_quality": "extra-low",
+    "rodin_tapose": true,
+    "seed": 65537,
+    "steps": 50
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": {
+      "model_file": "https://r.test/3d/model.glb"
+     }
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "firtoz/trellis",
+     "payload": {
+      "generate_color": false,
+      "generate_model": true,
+      "images": [
+       "IMG:front_image"
+      ],
+      "mesh_simplify": 0.95,
+      "texture_size": 1024
+     },
+     "payload_json": "{\"generate_color\": false, \"generate_model\": true, \"images\": [\"IMG:front_image\"], \"mesh_simplify\": 0.95, \"texture_size\": 1024}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "Hunyuan3DMultiViewNode",
+   "files": {
+    "https://r.test/3d/model.glb": "Z2xURgIAAABIAAAANAAAAEpTT057ImFzc2V0IjogeyJ2ZXJzaW9uIjogIjIuMCJ9LCAiZXh0cmFzIjogeyJzZWVkIjogMX19",
+    "https://r.test/3d/preview.glb": "Z2xURgIAAABIAAAANAAAAEpTT057ImFzc2V0IjogeyJ2ZXJzaW9uIjogIjIuMCJ9LCAiZXh0cmFzIjogeyJzZWVkIjogMn19"
+   },
+   "gets": [],
+   "name": "multi-view \u00b7 TRELLIS \u00b7 front \u00b7 Rodin settings ignored",
+   "output": [
+    "https://r.test/3d/model.glb"
+   ],
+   "picture_files": {
+    "front_image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "front_image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "engine": "TRELLIS (textured)",
+    "guidance_scale": 5.5,
+    "octree_resolution": 256,
+    "prompt": "ignored",
+    "remove_background": true,
+    "rodin_poly_count": 5000,
+    "rodin_quality": "high",
+    "rodin_tapose": true,
+    "seed": 0,
+    "steps": 50
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": "https://r.test/3d/model.glb"
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "tencent/hunyuan3d-2mv",
+     "payload": {
+      "file_type": "glb",
+      "front_image": "IMG:front_image",
+      "guidance_scale": 5.5,
+      "octree_resolution": 256,
+      "remove_background": true,
+      "steps": 50
+     },
+     "payload_json": "{\"file_type\": \"glb\", \"front_image\": \"IMG:front_image\", \"guidance_scale\": 5.5, \"octree_resolution\": 256, \"remove_background\": true, \"steps\": 50}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "Hunyuan3DMultiViewNode",
+   "files": {
+    "https://r.test/3d/model.glb": "Z2xURgIAAABIAAAANAAAAEpTT057ImFzc2V0IjogeyJ2ZXJzaW9uIjogIjIuMCJ9LCAiZXh0cmFzIjogeyJzZWVkIjogMX19",
+    "https://r.test/3d/preview.glb": "Z2xURgIAAABIAAAANAAAAEpTT057ImFzc2V0IjogeyJ2ZXJzaW9uIjogIjIuMCJ9LCAiZXh0cmFzIjogeyJzZWVkIjogMn19"
+   },
+   "gets": [],
+   "name": "multi-view \u00b7 Hunyuan3D-2mv \u00b7 front \u00b7 Rodin settings ignored",
+   "output": [
+    "https://r.test/3d/model.glb"
+   ],
+   "picture_files": {
+    "front_image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "front_image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "engine": "Hunyuan3D-2mv (geometry only)",
+    "guidance_scale": 5.5,
+    "octree_resolution": 256,
+    "prompt": "ignored",
+    "remove_background": true,
+    "rodin_poly_count": 5000,
+    "rodin_quality": "high",
+    "rodin_tapose": true,
+    "seed": 0,
+    "steps": 50
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": {
+      "model_file": "https://r.test/3d/model.glb"
+     }
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "firtoz/trellis",
+     "payload": {
+      "generate_color": false,
+      "generate_model": true,
+      "images": [
+       "IMG:front_image"
+      ],
+      "mesh_simplify": 0.95,
+      "texture_size": 1024
+     },
+     "payload_json": "{\"generate_color\": false, \"generate_model\": true, \"images\": [\"IMG:front_image\"], \"mesh_simplify\": 0.95, \"texture_size\": 1024}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "Hunyuan3DMultiViewNode",
+   "files": {
+    "https://r.test/3d/model.glb": "Z2xURgIAAABIAAAANAAAAEpTT057ImFzc2V0IjogeyJ2ZXJzaW9uIjogIjIuMCJ9LCAiZXh0cmFzIjogeyJzZWVkIjogMX19",
+    "https://r.test/3d/preview.glb": "Z2xURgIAAABIAAAANAAAAEpTT057ImFzc2V0IjogeyJ2ZXJzaW9uIjogIjIuMCJ9LCAiZXh0cmFzIjogeyJzZWVkIjogMn19"
+   },
+   "gets": [],
+   "name": "multi-view \u00b7 TRELLIS \u00b7 front \u00b7 no optional settings",
+   "output": [
+    "https://r.test/3d/model.glb"
+   ],
+   "picture_files": {
+    "front_image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "front_image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "engine": "TRELLIS (textured)",
+    "guidance_scale": 5.5,
+    "octree_resolution": 256,
+    "remove_background": true,
+    "seed": 0,
+    "steps": 50
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": {
+      "color_video": "https://r.test/3d/color.mp4",
+      "combined_video": null,
+      "model_file": "https://r.test/3d/model.glb"
+     }
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "firtoz/trellis",
+     "payload": {
+      "generate_color": false,
+      "generate_model": true,
+      "images": [
+       "IMG:front_image"
+      ],
+      "mesh_simplify": 0.95,
+      "texture_size": 1024
+     },
+     "payload_json": "{\"generate_color\": false, \"generate_model\": true, \"images\": [\"IMG:front_image\"], \"mesh_simplify\": 0.95, \"texture_size\": 1024}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "Hunyuan3DMultiViewNode",
+   "files": {
+    "https://r.test/3d/model.glb": "Z2xURgIAAABIAAAANAAAAEpTT057ImFzc2V0IjogeyJ2ZXJzaW9uIjogIjIuMCJ9LCAiZXh0cmFzIjogeyJzZWVkIjogMX19",
+    "https://r.test/3d/preview.glb": "Z2xURgIAAABIAAAANAAAAEpTT057ImFzc2V0IjogeyJ2ZXJzaW9uIjogIjIuMCJ9LCAiZXh0cmFzIjogeyJzZWVkIjogMn19"
+   },
+   "gets": [],
+   "name": "multi-view \u00b7 TRELLIS \u00b7 front \u00b7 answer model_file",
+   "output": [
+    "https://r.test/3d/model.glb"
+   ],
+   "picture_files": {
+    "front_image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "front_image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "engine": "TRELLIS (textured)",
+    "guidance_scale": 5.5,
+    "octree_resolution": 256,
+    "prompt": "a full-body character",
+    "remove_background": true,
+    "rodin_poly_count": 0,
+    "rodin_quality": "medium",
+    "rodin_tapose": false,
+    "seed": 0,
+    "steps": 50
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": {
+      "color_video": "https://r.test/3d/color.mp4"
+     }
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "firtoz/trellis",
+     "payload": {
+      "generate_color": false,
+      "generate_model": true,
+      "images": [
+       "IMG:front_image"
+      ],
+      "mesh_simplify": 0.95,
+      "texture_size": 1024
+     },
+     "payload_json": "{\"generate_color\": false, \"generate_model\": true, \"images\": [\"IMG:front_image\"], \"mesh_simplify\": 0.95, \"texture_size\": 1024}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "Hunyuan3DMultiViewNode",
+   "error": {
+    "message": "Replicate returned no output (status=None)",
+    "type": "RuntimeError"
+   },
+   "files": {
+    "https://r.test/3d/model.glb": "Z2xURgIAAABIAAAANAAAAEpTT057ImFzc2V0IjogeyJ2ZXJzaW9uIjogIjIuMCJ9LCAiZXh0cmFzIjogeyJzZWVkIjogMX19",
+    "https://r.test/3d/preview.glb": "Z2xURgIAAABIAAAANAAAAEpTT057ImFzc2V0IjogeyJ2ZXJzaW9uIjogIjIuMCJ9LCAiZXh0cmFzIjogeyJzZWVkIjogMn19"
+   },
+   "gets": [],
+   "name": "multi-view \u00b7 TRELLIS \u00b7 front \u00b7 answer dict without model_file",
+   "output": null,
+   "picture_files": {
+    "front_image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "front_image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "engine": "TRELLIS (textured)",
+    "guidance_scale": 5.5,
+    "octree_resolution": 256,
+    "prompt": "a full-body character",
+    "remove_background": true,
+    "rodin_poly_count": 0,
+    "rodin_quality": "medium",
+    "rodin_tapose": false,
+    "seed": 0,
+    "steps": 50
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": {
+      "model_file": null
+     }
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "firtoz/trellis",
+     "payload": {
+      "generate_color": false,
+      "generate_model": true,
+      "images": [
+       "IMG:front_image"
+      ],
+      "mesh_simplify": 0.95,
+      "texture_size": 1024
+     },
+     "payload_json": "{\"generate_color\": false, \"generate_model\": true, \"images\": [\"IMG:front_image\"], \"mesh_simplify\": 0.95, \"texture_size\": 1024}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "Hunyuan3DMultiViewNode",
+   "error": {
+    "message": "Replicate returned no output (status=None)",
+    "type": "RuntimeError"
+   },
+   "files": {
+    "https://r.test/3d/model.glb": "Z2xURgIAAABIAAAANAAAAEpTT057ImFzc2V0IjogeyJ2ZXJzaW9uIjogIjIuMCJ9LCAiZXh0cmFzIjogeyJzZWVkIjogMX19",
+    "https://r.test/3d/preview.glb": "Z2xURgIAAABIAAAANAAAAEpTT057ImFzc2V0IjogeyJ2ZXJzaW9uIjogIjIuMCJ9LCAiZXh0cmFzIjogeyJzZWVkIjogMn19"
+   },
+   "gets": [],
+   "name": "multi-view \u00b7 TRELLIS \u00b7 front \u00b7 answer empty model_file",
+   "output": null,
+   "picture_files": {
+    "front_image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "front_image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "engine": "TRELLIS (textured)",
+    "guidance_scale": 5.5,
+    "octree_resolution": 256,
+    "prompt": "a full-body character",
+    "remove_background": true,
+    "rodin_poly_count": 0,
+    "rodin_quality": "medium",
+    "rodin_tapose": false,
+    "seed": 0,
+    "steps": 50
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": [
+      "https://r.test/3d/model.glb",
+      "https://r.test/3d/preview.glb"
+     ]
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "firtoz/trellis",
+     "payload": {
+      "generate_color": false,
+      "generate_model": true,
+      "images": [
+       "IMG:front_image"
+      ],
+      "mesh_simplify": 0.95,
+      "texture_size": 1024
+     },
+     "payload_json": "{\"generate_color\": false, \"generate_model\": true, \"images\": [\"IMG:front_image\"], \"mesh_simplify\": 0.95, \"texture_size\": 1024}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "Hunyuan3DMultiViewNode",
+   "files": {
+    "https://r.test/3d/model.glb": "Z2xURgIAAABIAAAANAAAAEpTT057ImFzc2V0IjogeyJ2ZXJzaW9uIjogIjIuMCJ9LCAiZXh0cmFzIjogeyJzZWVkIjogMX19",
+    "https://r.test/3d/preview.glb": "Z2xURgIAAABIAAAANAAAAEpTT057ImFzc2V0IjogeyJ2ZXJzaW9uIjogIjIuMCJ9LCAiZXh0cmFzIjogeyJzZWVkIjogMn19"
+   },
+   "gets": [],
+   "name": "multi-view \u00b7 TRELLIS \u00b7 front \u00b7 answer list",
+   "output": [
+    "https://r.test/3d/model.glb"
+   ],
+   "picture_files": {
+    "front_image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "front_image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "engine": "TRELLIS (textured)",
+    "guidance_scale": 5.5,
+    "octree_resolution": 256,
+    "prompt": "a full-body character",
+    "remove_background": true,
+    "rodin_poly_count": 0,
+    "rodin_quality": "medium",
+    "rodin_tapose": false,
+    "seed": 0,
+    "steps": 50
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": "https://r.test/3d/model.glb"
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "firtoz/trellis",
+     "payload": {
+      "generate_color": false,
+      "generate_model": true,
+      "images": [
+       "IMG:front_image"
+      ],
+      "mesh_simplify": 0.95,
+      "texture_size": 1024
+     },
+     "payload_json": "{\"generate_color\": false, \"generate_model\": true, \"images\": [\"IMG:front_image\"], \"mesh_simplify\": 0.95, \"texture_size\": 1024}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "Hunyuan3DMultiViewNode",
+   "files": {
+    "https://r.test/3d/model.glb": "Z2xURgIAAABIAAAANAAAAEpTT057ImFzc2V0IjogeyJ2ZXJzaW9uIjogIjIuMCJ9LCAiZXh0cmFzIjogeyJzZWVkIjogMX19",
+    "https://r.test/3d/preview.glb": "Z2xURgIAAABIAAAANAAAAEpTT057ImFzc2V0IjogeyJ2ZXJzaW9uIjogIjIuMCJ9LCAiZXh0cmFzIjogeyJzZWVkIjogMn19"
+   },
+   "gets": [],
+   "name": "multi-view \u00b7 TRELLIS \u00b7 front \u00b7 answer string",
+   "output": [
+    "https://r.test/3d/model.glb"
+   ],
+   "picture_files": {
+    "front_image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "front_image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "engine": "TRELLIS (textured)",
+    "guidance_scale": 5.5,
+    "octree_resolution": 256,
+    "prompt": "a full-body character",
+    "remove_background": true,
+    "rodin_poly_count": 0,
+    "rodin_quality": "medium",
+    "rodin_tapose": false,
+    "seed": 0,
+    "steps": 50
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": [
+      "https://r.test/3d/preview.glb",
+      "https://r.test/3d/model.glb"
+     ]
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "hyper3d/rodin",
+     "payload": {
+      "geometry_file_format": "glb",
+      "images": [
+       "IMG:front_image"
+      ],
+      "material": "PBR",
+      "mesh_mode": "Quad",
+      "prompt": "a full-body character",
+      "quality": "medium",
+      "tapose": false
+     },
+     "payload_json": "{\"geometry_file_format\": \"glb\", \"images\": [\"IMG:front_image\"], \"material\": \"PBR\", \"mesh_mode\": \"Quad\", \"prompt\": \"a full-body character\", \"quality\": \"medium\", \"tapose\": false}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "Hunyuan3DMultiViewNode",
+   "files": {
+    "https://r.test/3d/model.glb": "Z2xURgIAAABIAAAANAAAAEpTT057ImFzc2V0IjogeyJ2ZXJzaW9uIjogIjIuMCJ9LCAiZXh0cmFzIjogeyJzZWVkIjogMX19",
+    "https://r.test/3d/preview.glb": "Z2xURgIAAABIAAAANAAAAEpTT057ImFzc2V0IjogeyJ2ZXJzaW9uIjogIjIuMCJ9LCAiZXh0cmFzIjogeyJzZWVkIjogMn19"
+   },
+   "gets": [],
+   "name": "multi-view \u00b7 Rodin \u00b7 front \u00b7 answer list",
+   "output": [
+    "https://r.test/3d/preview.glb"
+   ],
+   "picture_files": {
+    "front_image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "front_image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "engine": "Rodin (textured \u00b7 quad mesh)",
+    "guidance_scale": 5.5,
+    "octree_resolution": 256,
+    "prompt": "a full-body character",
+    "remove_background": true,
+    "rodin_poly_count": 0,
+    "rodin_quality": "medium",
+    "rodin_tapose": false,
+    "seed": 0,
+    "steps": 50
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": [
+      "https://r.test/3d/model.glb"
+     ]
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "tencent/hunyuan3d-2mv",
+     "payload": {
+      "file_type": "glb",
+      "front_image": "IMG:front_image",
+      "guidance_scale": 5.5,
+      "octree_resolution": 256,
+      "remove_background": true,
+      "steps": 50
+     },
+     "payload_json": "{\"file_type\": \"glb\", \"front_image\": \"IMG:front_image\", \"guidance_scale\": 5.5, \"octree_resolution\": 256, \"remove_background\": true, \"steps\": 50}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "Hunyuan3DMultiViewNode",
+   "files": {
+    "https://r.test/3d/model.glb": "Z2xURgIAAABIAAAANAAAAEpTT057ImFzc2V0IjogeyJ2ZXJzaW9uIjogIjIuMCJ9LCAiZXh0cmFzIjogeyJzZWVkIjogMX19",
+    "https://r.test/3d/preview.glb": "Z2xURgIAAABIAAAANAAAAEpTT057ImFzc2V0IjogeyJ2ZXJzaW9uIjogIjIuMCJ9LCAiZXh0cmFzIjogeyJzZWVkIjogMn19"
+   },
+   "gets": [],
+   "name": "multi-view \u00b7 Hunyuan3D-2mv \u00b7 front \u00b7 answer list",
+   "output": [
+    "https://r.test/3d/model.glb"
+   ],
+   "picture_files": {
+    "front_image": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAoUlEQVR4nAGWAGn/ANsyybQg71TfQnF7uvpnu3TqXRT5SezUZgEL729PSBL4W66uDtmD9TTgAIdA37MThMcAlsDqu/iP8agGG0nmJnSVDL1AaUWpsayVAfRnzDEMr3UmWQtqgI31fL3I+x3YTQrPTgE0r2YUg8D8V0VqqwBsHeShBdw/OUh0+5UC1srjmEXOEf5lU9x/BXXUPDhEEknCJ+OgWo5J5Pgsvy0AAAAASUVORK5CYII="
+   },
+   "pictures": [
+    "front_image"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "engine": "Hunyuan3D-2mv (geometry only)",
+    "guidance_scale": 5.5,
+    "octree_resolution": 256,
+    "prompt": "a full-body character",
+    "remove_background": true,
+    "rodin_poly_count": 0,
+    "rodin_quality": "medium",
+    "rodin_tapose": false,
+    "seed": 0,
+    "steps": 50
+   }
+  }
+ ]
+}

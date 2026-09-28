@@ -54,6 +54,13 @@ Groups:
              speed, pitch and volume bounds, a non-ASCII text, a cloned
              voice, for frontend/server/runner/generators/audioGen.ts
              (tests/unit/runner-paid-audio-gen.unit.spec.ts)
+  gen-3d     (R3.9) Generate a 3D model and its hidden twin (Hunyuan3D 2), and
+             Multi-View → 3D on each engine (TRELLIS, Rodin, Hunyuan3D-2mv)
+             with one, two and four views; seeds 0, 1, 65,536 and 2**32 - 1;
+             Rodin's prompts, polygon counts and qualities; each answer shape
+             (a list, a string, a dict with or without `model_file`, Hunyuan3D
+             2's `{mesh}`), for frontend/server/runner/generators/gen3d.ts
+             (tests/unit/runner-paid-3d.unit.spec.ts)
   handoff    (R3.H) the PNG `_image_tensor_to_data_url` sends for a loader's
              tensor: every file kind (EXIF 2–8, RGBA, grey + alpha, palette and
              colour-key transparency, CMYK, 16-bit, WebP, GIF…) through the real
@@ -1500,6 +1507,109 @@ def audio_gen_group() -> dict:
     return {"cases": cases, "text_lengths": [{"text": t, "len": len(t)} for t in texts]}
 
 
+GLB_OUT = "https://r.test/3d/model.glb"
+GLB_OUT_2 = "https://r.test/3d/preview.glb"
+GLB_VIDEO = "https://r.test/3d/color.mp4"
+HUNYUAN_DEFAULTS = {"steps": 50, "guidance_scale": 5.5, "octree_resolution": 256, "remove_background": True,
+                    "texture": True, "seed": 0}
+MULTI_VIEW_DEFAULTS = {"engine": "TRELLIS (textured)", "steps": 50, "guidance_scale": 5.5, "octree_resolution": 256,
+                       "remove_background": True, "seed": 0, "prompt": "a full-body character",
+                       "rodin_quality": "medium", "rodin_tapose": False, "rodin_poly_count": 0}
+MULTI_VIEW_ENGINES = {"TRELLIS": "TRELLIS (textured)", "Rodin": "Rodin (textured \u00b7 quad mesh)",
+                      "Hunyuan3D-2mv": "Hunyuan3D-2mv (geometry only)"}
+VIEW_SETS = {"front": ("front_image",), "front and back": ("front_image", "back_image"),
+             "front and right": ("front_image", "right_image"),
+             "four views": ("front_image", "back_image", "left_image", "right_image")}
+
+
+def glb_bytes(seed: int) -> bytes:
+    """A small binary glTF: the 12-byte header (magic `glTF`, version 2, length) and a JSON chunk."""
+    body = json.dumps({"asset": {"version": "2.0"}, "extras": {"seed": seed}}).encode()
+    body += b" " * (-len(body) % 4)
+    chunk = struct.pack("<II", len(body), 0x4E4F534A) + body
+    return b"glTF" + struct.pack("<II", 2, 12 + len(chunk)) + chunk
+
+
+def gen_3d_group() -> dict:
+    """R3.9: Generate a 3D model and its hidden twin Hunyuan3D 2 (tencent/hunyuan3d-2),
+    and Multi-View → 3D on each engine. Python hands on the answer's link
+    (`_first_output_url`, or TRELLIS's `output.model_file`) and downloads
+    nothing; `files` carries a GLB per answer URL for the runner, which saves
+    its own copy."""
+    import runner_builder_fixtures as rbf
+    nr, _fal, _extras = rbf._node_modules()
+    files = {GLB_OUT: _b64(glb_bytes(1)), GLB_OUT_2: _b64(glb_bytes(2))}
+    cases: list = []
+
+    def add(name, cls, widgets, answer, pictures):
+        cases.append(paid_case(name, cls, widgets, [answer], pictures=list(pictures), files=files))
+
+    def one(name, twin=False, answer=None, **w):
+        cls = nr.Hunyuan3DRemoteNode if twin else nr.Generate3DNode
+        widgets = {**HUNYUAN_DEFAULTS, **w} if twin else {"model": "Hunyuan3D 2", **HUNYUAN_DEFAULTS, **w}
+        add(f"{'hunyuan twin' if twin else 'generate 3d'} \u00b7 {name}", cls, widgets, answer or {"output": GLB_OUT}, ["image"])
+
+    def multi(name, engine, views="front", answer=None, drop=(), **w):
+        widgets = {**MULTI_VIEW_DEFAULTS, "engine": MULTI_VIEW_ENGINES[engine], **w}
+        for k in drop:
+            widgets.pop(k)
+        add(f"multi-view \u00b7 {engine} \u00b7 {views} \u00b7 {name}", nr.Hunyuan3DMultiViewNode, widgets,
+            answer or ({"output": {"model_file": GLB_OUT}} if engine == "TRELLIS" else {"output": GLB_OUT}), VIEW_SETS[views])
+
+    # Generate a 3D model: the defaults, the seeds, every setting at its bounds, each answer shape.
+    one("defaults")
+    for seed in (0, 1, 65536, 0xFFFFFFFF):
+        one(f"seed {seed}", seed=seed)
+    for steps in (20, 35, 50, 100):
+        one(f"steps {steps}", steps=steps)
+    for octree in (128, 256, 384, 512):
+        one(f"octree {octree}", octree_resolution=octree)
+    for g in (1.0, 7.5, 20.0):
+        one(f"guidance {g}", guidance_scale=g)
+    one("no background removal, no texture", remove_background=False, texture=False)
+    one("the live check's settings", steps=20, octree_resolution=128, texture=False)
+    one("answer list", answer={"output": [GLB_OUT, GLB_OUT_2]})
+    one("answer string", answer={"output": GLB_OUT})
+    # Hunyuan3D 2's published output: `{mesh}` — `_first_output_url` refuses a dict.
+    one("answer mesh dict", answer={"output": {"mesh": GLB_OUT}})
+    one("defaults", twin=True)
+    one("every setting", twin=True, steps=35, guidance_scale=7.5, octree_resolution=384, remove_background=False, texture=False, seed=65536)
+    one("seed 4294967295", twin=True, seed=0xFFFFFFFF)
+
+    # Multi-View: each engine with one, two and four views, and the seeds.
+    for engine in MULTI_VIEW_ENGINES:
+        for views in VIEW_SETS:
+            multi("defaults", engine, views)
+        for seed in (0, 1, 65536, 0xFFFFFFFF):
+            multi(f"seed {seed}", engine, "four views", seed=seed)
+    multi("every setting", "Hunyuan3D-2mv", "front and right", steps=100, guidance_scale=20.0, octree_resolution=128,
+          remove_background=False, seed=7)
+    multi("steps 20 octree 512", "Hunyuan3D-2mv", steps=20, octree_resolution=512, guidance_scale=1.0)
+    # Rodin: its prompts, polygon counts, qualities and pose.
+    for label, prompt in (("blank prompt", ""), ("spaced prompt", "   \n\t "), ("padded prompt", "  a red robot \n"),
+                          ("non-ASCII prompt", "caf\u00e9 \u732b \U0001f916 \u2014 low-poly")):
+        multi(label, "Rodin", prompt=prompt)
+    multi("no prompt setting", "Rodin", drop=("prompt", "rodin_quality", "rodin_tapose", "rodin_poly_count"))
+    for poly in (0, 1000, 300000):
+        multi(f"poly {poly}", "Rodin", rodin_poly_count=poly)
+    for quality in ("medium", "high", "low", "extra-low"):
+        multi(f"quality {quality}", "Rodin", rodin_quality=quality)
+    multi("tapose", "Rodin", "four views", rodin_tapose=True, rodin_quality="extra-low", rodin_poly_count=300000, seed=65537)
+    # The settings other engines ignore change nothing there.
+    multi("Rodin settings ignored", "TRELLIS", prompt="ignored", rodin_quality="high", rodin_tapose=True, rodin_poly_count=5000)
+    multi("Rodin settings ignored", "Hunyuan3D-2mv", prompt="ignored", rodin_quality="high", rodin_tapose=True, rodin_poly_count=5000)
+    multi("no optional settings", "TRELLIS", drop=("prompt", "rodin_quality", "rodin_tapose", "rodin_poly_count"))
+    # TRELLIS's answers: a dict with model_file (and videos), a dict without it, model_file empty, a list, a string.
+    multi("answer model_file", "TRELLIS", answer={"output": {"model_file": GLB_OUT, "color_video": GLB_VIDEO, "combined_video": None}})
+    multi("answer dict without model_file", "TRELLIS", answer={"output": {"color_video": GLB_VIDEO}})
+    multi("answer empty model_file", "TRELLIS", answer={"output": {"model_file": None}})
+    multi("answer list", "TRELLIS", answer={"output": [GLB_OUT, GLB_OUT_2]})
+    multi("answer string", "TRELLIS", answer={"output": GLB_OUT})
+    multi("answer list", "Rodin", answer={"output": [GLB_OUT_2, GLB_OUT]})
+    multi("answer list", "Hunyuan3D-2mv", answer={"output": [GLB_OUT]})
+    return {"cases": cases}
+
+
 GROUPS = {
     "handoff": handoff_group,
     "machinery": machinery_group,
@@ -1509,6 +1619,7 @@ GROUPS = {
     "layers": layers_group,
     "split": split_group,
     "audio-gen": audio_gen_group,
+    "gen-3d": gen_3d_group,
 }
 
 

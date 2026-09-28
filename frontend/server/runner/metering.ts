@@ -157,6 +157,8 @@ export const PAID_TEXT_INPUTS: Readonly<Record<string, readonly string[]>> = {
   MusicGenRemoteNode: ['prompt'],
   GenerateSpeechNode: ['text'],
   MiniMaxSpeechRemoteNode: ['text'],
+  // R3.9, Multi-View → 3D: its description of the subject (Rodin sends it; moderated whatever the engine).
+  Hunyuan3DMultiViewNode: ['prompt'],
 }
 
 /** The non-blank values of RUNNER_EXTRA_TEXT_INPUTS (a typed-in taste, a paid class's PAID_TEXT_INPUTS) across the prompt, each on its own. */

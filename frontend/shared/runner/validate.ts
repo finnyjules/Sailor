@@ -65,6 +65,8 @@ export const RUNNER_OUTPUT_CLASSES: ReadonlySet<string> = new Set([
   'LayerizeGraphicNode', 'SeedreamLayerizeNode',
   // R3.7: Separate background and foreground is one too (is_output_node=True).
   'SplitPhotoLayersNode',
+  // R3.9: the three 3D nodes are output nodes (is_output_node=True; the twin too).
+  'Generate3DNode', 'Hunyuan3DRemoteNode', 'Hunyuan3DMultiViewNode',
 ])
 
 /** ComfyUI's node_errors entry for a node that failed validation. */

@@ -94,6 +94,10 @@ const EDIT_BASE: Record<string, Record<string, unknown>> = {
   MusicGenRemoteNode: { prompt: 'lo-fi piano' },
   GenerateSpeechNode: { model: 'MiniMax Speech-02 HD', text: 'Hello.' },
   MiniMaxSpeechRemoteNode: { text: 'Hello.' },
+  // 3D models (R3.9): the picture; the rest at the node's defaults (Multi-View on TRELLIS, its default engine).
+  Generate3DNode: { model: 'Hunyuan3D 2', image: LINK },
+  Hunyuan3DRemoteNode: { image: LINK },
+  Hunyuan3DMultiViewNode: { front_image: LINK, engine: 'TRELLIS (textured)' },
   // sync-3 lip-sync (Task F22): the studio's face video and sound.
   LipSyncNode: {
     engine: 'sync-3',

@@ -28,6 +28,9 @@ import {
   AUDIO_GEN_CLASSES, MINIMAX_EMOTIONS, MINIMAX_LANGUAGES, MUSIC_MAX_SECONDS, MUSIC_MIN_SECONDS, MUSIC_MODEL_VERSIONS, MUSIC_MODELS, SPEECH_MODELS,
 } from './audioGen'
 import {
+  GENERATE_3D_MODELS, GEN_3D_CLASSES, GEN_3D_GUIDANCE, GEN_3D_OCTREE, GEN_3D_SEED_MAX, GEN_3D_STEPS, MULTI_VIEW_ENGINES, RODIN_POLY_MAX, RODIN_QUALITIES,
+} from './gen3d'
+import {
   BRAINSTORM_ANGLES, CHAT_LLM_MODELS, IMPROVE_PROMPT_MODELS, IMPROVE_PROMPT_TARGETS, REASON_MODELS, REWRITE_MODELS, REWRITE_TONES,
   SUMMARIZE_LENGTHS, SUMMARIZE_MODELS, TRANSLATE_LANGUAGES,
 } from './llm'
@@ -1072,6 +1075,44 @@ export const RUNNER_NODE_RULES: Readonly<Record<string, RunnerNodeRule>> = {
       language_boost: { type: 'COMBO', required: true, options: MINIMAX_LANGUAGES },
     },
   } satisfies RunnerNodeRule])),
+  // ── gen-3d (step 3, R3.9): Generate a 3D model (and its hidden twin) and
+  // Multi-View → 3D on Replicate. The pictures are linked pictures (the
+  // handed-off files; Multi-View's front view is required, the other three
+  // optional); Multi-View's prompt takes a text wire (R0: the value arrives
+  // as typed); every other setting is a widget as ComfyUI validates it. Their
+  // 3D file is handed on as a `glb` value (OUTPUT_KINDS), which only the
+  // readers that take one read (the 3D model card, 3D Studio, a Text card).
+  ...Object.fromEntries((['Generate3DNode', 'Hunyuan3DRemoteNode'] as const).map(c => [c, {
+    family: 'gen-3d',
+    mustLink: ['image'],
+    imageInputs: ['image'],
+    widgets: {
+      ...(c === 'Generate3DNode' ? { model: { type: 'COMBO', required: true, options: GENERATE_3D_MODELS } } : {}),
+      steps: { type: 'INT', required: true, min: GEN_3D_STEPS.min, max: GEN_3D_STEPS.max },
+      guidance_scale: { type: 'FLOAT', required: true, min: GEN_3D_GUIDANCE.min, max: GEN_3D_GUIDANCE.max },
+      octree_resolution: { type: 'INT', required: true, min: GEN_3D_OCTREE.min, max: GEN_3D_OCTREE.max },
+      remove_background: { type: 'BOOLEAN', required: true },
+      texture: { type: 'BOOLEAN', required: true },
+      seed: { type: 'INT', required: true, min: 0, max: GEN_3D_SEED_MAX },
+    },
+  } satisfies RunnerNodeRule])),
+  Hunyuan3DMultiViewNode: {
+    family: 'gen-3d',
+    mustLink: ['front_image'],
+    imageInputs: ['front_image', 'back_image', 'left_image', 'right_image'],
+    valueInputs: { prompt: ['text'] },
+    widgets: {
+      engine: { type: 'COMBO', required: true, options: MULTI_VIEW_ENGINES },
+      steps: { type: 'INT', required: true, min: GEN_3D_STEPS.min, max: GEN_3D_STEPS.max },
+      guidance_scale: { type: 'FLOAT', required: true, min: GEN_3D_GUIDANCE.min, max: GEN_3D_GUIDANCE.max },
+      octree_resolution: { type: 'INT', required: true, min: GEN_3D_OCTREE.min, max: GEN_3D_OCTREE.max },
+      remove_background: { type: 'BOOLEAN', required: true },
+      seed: { type: 'INT', required: true, min: 0, max: GEN_3D_SEED_MAX },
+      rodin_quality: { type: 'COMBO', options: RODIN_QUALITIES },
+      rodin_tapose: { type: 'BOOLEAN' },
+      rodin_poly_count: { type: 'INT', min: 0, max: RODIN_POLY_MAX },
+    },
+  },
   // ── effects-* (step 3, R2): the still-picture effects (./effects.ts, server/runner/effects/) ──
   // Rows built from the real node schemas (./effectSchemas.generated.ts), one
   // per ported class; each needs its family and `cards`.
@@ -1132,6 +1173,8 @@ export const SWITCHED_CLASSES: Readonly<Record<string, RunnerFamily>> = {
   [SPLIT_CLASS]: 'layers',
   // R3.8: music and speech.
   ...Object.fromEntries(AUDIO_GEN_CLASSES.map(c => [c, 'audio-gen' as const])),
+  // R3.9: 3D models.
+  ...Object.fromEntries(GEN_3D_CLASSES.map(c => [c, 'gen-3d' as const])),
 }
 
 /**
@@ -1550,6 +1593,7 @@ const PAID_OUTPUT_KIND_FAMILY: Readonly<Record<string, RunnerFamily>> = {
   ExtractTextNode: 'describe',
   FindObjectsNode: 'describe',
   ...Object.fromEntries(LAYERS_JSON_CLASSES.map(c => [c, 'layers' as const])),
+  ...Object.fromEntries(GEN_3D_CLASSES.map(c => [c, 'gen-3d' as const])),
 }
 const withoutPaidRows = (kinds: OutputKinds): OutputKinds =>
   Object.fromEntries(Object.entries(kinds).filter(([cls]) => !Object.prototype.hasOwnProperty.call(PAID_OUTPUT_KIND_FAMILY, cls)))

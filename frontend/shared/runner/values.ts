@@ -50,6 +50,11 @@ export const OUTPUT_KINDS: Readonly<Record<string, Readonly<Record<number, Value
   // value only while `layers` is on); slot 0 is their picture.
   LayerizeGraphicNode: { 1: 'json' },
   SeedreamLayerizeNode: { 1: 'json' },
+  // R3.9: the 3D nodes hand on their 3D file as Sailor's own address (a value
+  // only while `gen-3d` is on; spec ruling 1).
+  Generate3DNode: { 0: 'glb' },
+  Hunyuan3DRemoteNode: { 0: 'glb' },
+  Hunyuan3DMultiViewNode: { 0: 'glb' },
 }
 
 /** What a wire carries: the source's declared kind for that slot (through Gates), files by default. */

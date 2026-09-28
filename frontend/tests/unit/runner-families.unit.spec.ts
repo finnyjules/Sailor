@@ -48,6 +48,8 @@ describe('parseFamilies', () => {
       'layers',
       // Step 3, R3.8: music and speech (needs `cards`).
       'audio-gen',
+      // Step 3, R3.9: 3D models (needs `cards`).
+      'gen-3d',
     ].sort())
   })
 })

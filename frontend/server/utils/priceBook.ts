@@ -201,7 +201,13 @@ export { VIDEO_RATES, MODEL_PRICED_NODE_CLASSES, SETTING_PRICED_NODE_CLASSES, RE
 // estimate from the page's one recorded run: $0.012 a second asked for, at
 // least $0.042 (the page's typical run): 1–3 s 9 credits, 8 s (the default)
 // 20, 30 s 54; a wired length is held at 30 s.
-export const PRICE_BOOK_VERSION = 'r3-audio-gen'
+// r3-gen-3d (step 3, R3.9, ruling (a)): Generate a 3D model, its hidden twin
+// Hunyuan3D 2, and Multi-View → 3D leave their flat rows (45 credits, from
+// their $0.30 badges) for their calls, read from Replicate's pages: Hunyuan3D
+// 2 and Hunyuan3D-2mv by GPU time (estimates: $0.10, 20 credits), TRELLIS by
+// GPU time (an estimate: $0.04, 8 credits) and Rodin at $0.40 an output (60
+// credits). Multi-View is priced by its engine (a wired engine at Rodin's).
+export const PRICE_BOOK_VERSION = 'r3-gen-3d'
 
 export const BASE_RENDER_CREDITS = 1
 
@@ -374,9 +380,8 @@ export const GRAPH_NODE_CREDITS: Record<string, number> = {
   IdentifySpeakersNode: 10,        // badge $0.05 / min
 
   // — 3D —
-  Hunyuan3DRemoteNode: 45,         // badge $0.30
-  Hunyuan3DMultiViewNode: 45,      // badge $0.30
-  Generate3DNode: 45,              // badge $0.30
+  // Generate a 3D model (+ its twin) and Multi-View → 3D are priced by their
+  // calls since R3.9 (shared/pricing/paidSettings.ts), on both paths.
 
   // — vision / text utility —
   // Describe an image (+ its twin), Describe a video, Extract text and Find

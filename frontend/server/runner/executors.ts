@@ -127,6 +127,7 @@ import { planRepair } from './generators/repair'
 import { planLayers } from './generators/layers'
 import { planSplitLayers } from './generators/splitLayers'
 import { planAudioGen } from './generators/audioGen'
+import { planGen3d } from './generators/gen3d'
 import type { KeptExt } from './keptBytes'
 import type { AnswerKind } from './answerDownload'
 import { filesOf } from './values'
@@ -1117,6 +1118,11 @@ async function planNodeRequest(ctx: PlanContext): Promise<NodePlan> {
     case 'GenerateSpeechNode':
     case 'MiniMaxSpeechRemoteNode':
       return planAudioGen(ctx)
+    // ── gen-3d (step 3, R3.9): Generate a 3D model (+ its twin) and Multi-View → 3D, one Replicate call each ──
+    case 'Generate3DNode':
+    case 'Hunyuan3DRemoteNode':
+    case 'Hunyuan3DMultiViewNode':
+      return planGen3d(ctx)
     case 'Text': return staticDerive(ctx, textCardUi)
     case 'Moodboard': return staticDerive(ctx)
     case 'Model3D': return staticDerive(ctx, textCardUi)

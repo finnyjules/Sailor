@@ -179,6 +179,7 @@ import { llmRequestProblem } from '#shared/runner/llm'
 import { describeComfyPathProblem, describeRequestProblem } from '#shared/runner/describe'
 import { repairRequestProblem } from '#shared/runner/repair'
 import { hostedVoiceProblem, speechTextProblem } from '#shared/runner/audioGen'
+import { gen3dRequestProblem } from '#shared/runner/gen3d'
 import { isLlmTextClass } from './generators/llm'
 import { FACE_SWAP_NEEDS_GENDER, faceSwapGender } from '#shared/runner/faceSwap'
 import { pixverseSwapNodeProblem } from './generators/pixverseSwap'
@@ -1074,6 +1075,10 @@ export function requestProblems(prompt: ApiPrompt, opts: { runner?: boolean } = 
     // refuses the same for a wired text at the node's turn).
     const sp = opts.runner ? speechTextProblem(ct, inputs) : null
     if (sp) out.push({ nodeId, classType: ct, input: sp.input, message: sp.message })
+    // Generate a 3D model (R3.9), on a runner run: a setting Hunyuan3D 2's
+    // published schema refuses (#shared/runner/gen3d gen3dRequestProblem).
+    const g3 = opts.runner ? gen3dRequestProblem(ct, inputs) : null
+    if (g3) out.push({ nodeId, classType: ct, input: g3.input, message: g3.message })
   }
   return out
 }

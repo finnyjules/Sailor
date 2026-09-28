@@ -761,6 +761,8 @@ describe('B10 · one workflow per family, POST /api/runs to the last event', () 
       'describe',
       // Music and speech (R3.8) make a sound an Audio card shows: runner-paid-audio-gen.unit.spec.ts.
       'audio-gen',
+      // 3D models (R3.9) hand on a 3D file's address: runner-paid-3d.unit.spec.ts.
+      'gen-3d',
     ]
     expect(FLOWS.map(f => f.family).sort()).toEqual(RUNNER_FAMILIES.filter(f => !local.includes(f)).sort())
   })

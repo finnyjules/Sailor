@@ -351,6 +351,10 @@ export const RUNNER_ROUTES: Readonly<Record<string, Route>> = {
   ...Object.fromEntries([
     'GenerateMusicNode', 'MusicGenRemoteNode', 'GenerateSpeechNode', 'MiniMaxSpeechRemoteNode',
   ].map(ct => [ct, r('replicate', null, 'MiniMax Speech and MusicGen aren\'t carded on fal')])),
+  // R3.9, 3D models (family gen-3d): Replicate, as Python. fal's Hunyuan3D, Rodin and Trellis have no saved schema.
+  ...Object.fromEntries([
+    'Generate3DNode', 'Hunyuan3DRemoteNode', 'Hunyuan3DMultiViewNode',
+  ].map(ct => [ct, r('replicate', null, 'fal\'s 3D models have no saved schema, so their settings aren\'t known to match')])),
 }
 
 // ── Generate video: the two models moved to fal first ──────────────────────
