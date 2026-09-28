@@ -9156,7 +9156,6 @@ defineExpose({
 /* Artifact cards use their own root classes (not .comfy-node), so the rule
    above never reached them — they got selected on click but showed no ring,
    which read as "can't select". Mirror the highlight on every artifact root. */
-.vue-node-canvas .vue-flow__node.selected .artifact-image,
 .vue-node-canvas .vue-flow__node.selected .artifact-video,
 .vue-node-canvas .vue-flow__node.selected .artifact-audio,
 .vue-node-canvas .vue-flow__node.selected .artifact-text,
