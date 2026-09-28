@@ -241,26 +241,38 @@
 .print-surface__label { display: flex; align-items: baseline; gap: 8px; height: 26px; font-size: 13px; }
 .print-surface__name { font-weight: 600; color: rgba(255, 255, 255, 0.92); }
 .print-surface__size { font-size: 12px; color: rgba(255, 255, 255, 0.4); font-variant-numeric: tabular-nums; }
+.print-surface__frame { position: relative; }
 .print-surface__glass {
   position: relative;
   padding: 6px;
   border-radius: 8px;
   overflow: hidden;
-  /* One even ring, nothing along the top: the same rule as the shells. */
-  box-shadow: inset 0 0 0 calc(1px / var(--canvas-zoom, 1)) rgba(255, 255, 255, 0.24), 0 26px 70px rgba(0, 0, 0, 0.55), 0 4px 14px rgba(0, 0, 0, 0.35);
+  box-shadow: 0 26px 70px rgba(0, 0, 0, 0.55), 0 4px 14px rgba(0, 0, 0, 0.35);
 }
-/* The glass takes its colour from the artwork: the picture itself, heavily blurred,
-   under a white veil. Painted once per artwork change; it does not re-blur on pan. */
-.print-surface__glow { position: absolute; inset: 0; overflow: hidden; pointer-events: none; }
-.print-surface__glow > img {
+/* One even ring, nothing along the top: the same rule as the shells. On a pseudo-element so it
+   sits above the tint (an inset shadow on the glass itself would paint under it). */
+.print-surface__glass::after {
+  content: '';
   position: absolute;
-  inset: -30%;
+  inset: 0;
+  border-radius: inherit;
+  box-shadow: inset 0 0 0 calc(1px / var(--canvas-zoom, 1)) rgba(255, 255, 255, 0.24);
+  pointer-events: none;
+  z-index: 2;
+}
+/* The glass takes its colour from the artwork: a tiny copy with the blur baked in (PrintSurface),
+   stretched past the edges, under a white veil. Nothing here blurs on screen. */
+.print-surface__glow { position: absolute; inset: 0; overflow: hidden; pointer-events: none; }
+.print-surface__glow > canvas {
+  position: absolute;
+  left: -30%;
+  top: -30%;
   width: 160%;
   height: 160%;
   object-fit: cover;
-  filter: blur(28px) saturate(1.6) brightness(1.1);
   opacity: 0.75;
 }
+.print-surface__glow--css > canvas { filter: blur(28px) saturate(1.6) brightness(1.1); }
 .print-surface__glow::after {
   content: '';
   position: absolute;
@@ -268,3 +280,16 @@
   background: rgba(255, 255, 255, 0.2);
 }
 .print-surface__art { position: relative; z-index: 1; border-radius: 3px; overflow: hidden; }
+/* States, drawn on the glass edge. Later rules win: running < editing < failed. */
+.print-surface[data-running] .print-surface__glass::after { box-shadow: inset 0 0 0 2px var(--port-color, #fff); }
+.print-surface[data-editing] .print-surface__glass::after { box-shadow: inset 0 0 0 2px rgba(34, 211, 238, 0.7); }
+.print-surface[data-error] .print-surface__glass::after { box-shadow: inset 0 0 0 2px rgb(239, 68, 68); }
+.print-surface[data-bypassed] .print-surface__glass::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  border: 1px dashed rgba(251, 191, 36, 0.35);
+  pointer-events: none;
+  z-index: 2;
+}

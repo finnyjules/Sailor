@@ -55,10 +55,12 @@ export function nodeSnapshotRefs(doc: any, uuid: string | undefined): GenOutput[
 }
 
 /** The largest visible picture-bearing element inside a node. */
-function pickPreviewElement(nodeEl: Element): HTMLCanvasElement | HTMLImageElement | HTMLVideoElement | null {
+export function pickPreviewElement(nodeEl: Element): HTMLCanvasElement | HTMLImageElement | HTMLVideoElement | null {
   let best: HTMLCanvasElement | HTMLImageElement | HTMLVideoElement | null = null
   let bestArea = 0
   for (const el of Array.from(nodeEl.querySelectorAll('canvas, img, video'))) {
+    // A print surface's glass tint is a stretched, blurred copy of the art — never the picture.
+    if (el.closest('.print-surface__glow')) continue
     const r = el.getBoundingClientRect()
     if (r.width < MIN_EDGE || r.height < MIN_EDGE) continue
     if (el instanceof HTMLImageElement && !(el.complete && el.naturalWidth)) continue

@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { ref, h } from 'vue'
 import { readFileSync } from 'node:fs'
@@ -130,11 +130,58 @@ describe('ContentCard', () => {
 })
 
 describe('PrintSurface', () => {
-  it('uses the artwork for both the art and the glass tint', () => {
+  it('shows the name and size, and the artwork once (the glass tint is a canvas, not a second picture)', () => {
     const w = mount(PrintSurface, { props: { name: 'Frame', size: '4:5 · 1080 × 1350', artwork: '/a.jpg' } })
     expect(w.find('.print-surface__name').text()).toBe('Frame')
     expect(w.find('.print-surface__size').text()).toBe('4:5 · 1080 × 1350')
-    expect(w.findAll('img').map(i => i.attributes('src'))).toEqual(['/a.jpg', '/a.jpg'])
-    expect(w.find('.print-surface__glow img').attributes('alt')).toBe('')
+    expect(w.findAll('img').map(i => i.attributes('src'))).toEqual(['/a.jpg'])
+    expect(w.find('.print-surface__glow canvas').exists()).toBe(true)
+    expect(w.find('.print-surface__glow').attributes('aria-hidden')).toBe('true')
+  })
+
+  it('puts the overlay outside the clipping glass and the below slot after it', () => {
+    const w = mount(PrintSurface, {
+      props: { name: 'Frame' },
+      slots: { overlay: '<i class="ov" />', below: '<i class="bl" />', size: '<b class="sz">Set size</b>' },
+    })
+    expect(w.find('.print-surface__glass .ov').exists()).toBe(false)
+    expect(w.find('.print-surface__frame > .ov').exists()).toBe(true)
+    expect(w.find('.print-surface > .bl').exists()).toBe(true)
+    expect(w.find('.print-surface__label .sz').text()).toBe('Set size')
+  })
+
+  it('passes state attributes to the root', () => {
+    const w = mount(PrintSurface, { props: { name: 'Frame' }, attrs: { 'data-running': '' } })
+    expect(w.find('.print-surface').attributes('data-running')).toBe('')
+  })
+
+  it('draws the tint small, with the blur baked in, once per frame however often it is asked', () => {
+    const q: FrameRequestCallback[] = []
+    vi.stubGlobal('requestAnimationFrame', (cb: FrameRequestCallback) => { q.push(cb); return q.length })
+    vi.stubGlobal('cancelAnimationFrame', () => {})
+    const draws: unknown[][] = []
+    const ctx: any = { filter: 'none', clearRect() {}, drawImage: (...a: unknown[]) => { draws.push([ctx.filter, ...a]) } }
+    vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(ctx)
+    const w = mount(PrintSurface, { props: { name: 'Frame' } })
+    const src = document.createElement('canvas'); src.width = 1080; src.height = 1350
+    ;(w.vm as any).capture(src); (w.vm as any).capture(src)
+    expect(q.length).toBe(1)
+    q.shift()!(0)
+    expect(draws.length).toBe(1)
+    expect(draws[0]![0]).toMatch(/blur\(/)
+    const tint = w.find('.print-surface__glow canvas').element as HTMLCanvasElement
+    expect(Math.max(tint.width, tint.height)).toBe(64)
+    vi.unstubAllGlobals(); vi.restoreAllMocks()
+  })
+})
+
+describe('print surface CSS guards', () => {
+  it('draws the ring above the tint, not under it', () => {
+    expect(rule('.print-surface__glass::after')).toMatch(/inset 0 0 0 calc\(1px/)
+    expect(rule('.print-surface__glass')).not.toMatch(/inset/)
+  })
+  it('never blurs the on-screen tint with CSS, except in the fallback', () => {
+    expect(rule('.print-surface__glow > canvas')).not.toMatch(/filter/)
+    expect(rule('.print-surface__glow--css > canvas')).toMatch(/blur\(28px\)/)
   })
 })

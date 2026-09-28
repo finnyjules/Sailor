@@ -1,5 +1,6 @@
+// @vitest-environment happy-dom
 import { describe, it, expect } from 'vitest'
-import { nodeSnapshotRefs, nodeSnapshotRef, isBlankPixels, NODE_SNAPSHOT_SUBFOLDER } from '~/lib/nodeSnapshots'
+import { nodeSnapshotRefs, nodeSnapshotRef, isBlankPixels, NODE_SNAPSHOT_SUBFOLDER, pickPreviewElement } from '~/lib/nodeSnapshots'
 import { extractCoverImages } from '~/lib/projectCover'
 
 const view = (filename: string) => `/view?${new URLSearchParams({ filename, type: 'input' })}`
@@ -49,5 +50,16 @@ describe('isBlankPixels', () => {
   })
   it('keeps frames with real variation', () => {
     expect(isBlankPixels(px([[255, 0, 200, 255], [250, 250, 120, 255], [10, 10, 10, 255]]))).toBe(false)
+  })
+})
+
+describe('pickPreviewElement', () => {
+  it('ignores a print surface tint, however large it is', () => {
+    const node = document.createElement('div')
+    node.innerHTML = '<div class="print-surface__glow"><canvas class="tint"></canvas></div><canvas class="art"></canvas>'
+    const size = (el: Element, s: number) => { (el as any).getBoundingClientRect = () => ({ width: s, height: s }) }
+    size(node.querySelector('.tint')!, 500)
+    size(node.querySelector('.art')!, 300)
+    expect(pickPreviewElement(node)).toBe(node.querySelector('.art'))
   })
 })
