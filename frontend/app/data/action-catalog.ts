@@ -8,6 +8,8 @@
  * but falls into the "More models" section with its raw label.
  */
 
+import { isRetiredClass } from '#shared/runner/retired'
+
 export type ActionDomain = 'image' | 'audio' | 'video' | '3d' | 'text'
 export type ActionIntent = 'create' | 'edit' | 'enhance' | 'analyze'
 export type ActionSource = 'image' | 'video' | 'audio' | 'text'
@@ -109,6 +111,23 @@ export const DEPRECATED_NODES = new Set<string>([
   'MiniMaxSpeechRemoteNode',
   'Hunyuan3DRemoteNode',
 ])
+
+// Providers Sailor pays directly (Replicate; fal, which the runner calls for
+// Fix faces, Face swap and Person swap (video)). Every other `api node/`
+// provider is billed through Comfy's own account; those partner nodes are
+// retired (shared/runner/retired.ts, Task R4.1) and never offered.
+const ACTION_PROVIDERS = new Set<string>(['Replicate', 'fal'])
+
+/**
+ * Whether the Actions panel offers a node, from its /object_info class name
+ * and category (`api node/<domain>/<provider>`): a Replicate or fal action,
+ * not a hidden per-model class, not retired.
+ */
+export function offeredInActionsPanel(nodeType: string, category: string): boolean {
+  if (!category.startsWith('api node/')) return false
+  if (DEPRECATED_NODES.has(nodeType) || isRetiredClass(nodeType)) return false
+  return ACTION_PROVIDERS.has(category.split('/')[2] ?? '')
+}
 
 // Hero tier — the 1–4 highest-frequency actions per domain tab, pinned above
 // the intent sections and excluded from them. Order here = display order.

@@ -13,6 +13,7 @@ import { prunedAny, pruneInvalidOutputs } from './validate'
 import { NO_FAMILIES, type RunnerFamily } from './families'
 import { blockedModelRefusal, blockedModelUses, blockedModelsResponse, promptNodeTitle } from './blockedModels'
 import { shaderEngineReason } from './shaderBakeKey'
+import { RETIRED_NODE_ADVICE, retiredNodeIds } from './retired'
 
 /** The fallback title for a node with neither a title nor a known display name. */
 export const UNNAMED_NODE = 'Unnamed node'
@@ -110,7 +111,8 @@ export function needsEngineDescription(titles: string[], reasons: readonly strin
 
 /**
  * The refusal for a run about to go to ComfyUI (the runner declined or was
- * skipped) that uses a model ComfyUI can't run: a discontinued one, or a
+ * skipped) that holds a retired partner node (shared/runner/retired.ts) or
+ * uses a model ComfyUI can't run: a discontinued one, or a
  * runner-only one. Null when every take is fine. Names the first such node
  * by its title. A runner-only model whose switch is on was left out because
  * other nodes need the engine: the reason names them (needsEngineDescription);
@@ -121,6 +123,11 @@ export function blockedRunRefusal(
   opts: { runnerOn: boolean; families?: ReadonlySet<RunnerFamily> },
 ): { title: string; description: string } | null {
   const families = opts.runnerOn ? (opts.families ?? NO_FAMILIES) : NO_FAMILIES
+  // A retired partner node runs nowhere (Task R4.1): refused first, by its title.
+  for (const take of takes) {
+    const id = retiredNodeIds(take.prompt)[0]
+    if (id !== undefined) return { title: `“${take.titleOf(id)}” was retired`, description: RETIRED_NODE_ADVICE }
+  }
   for (const take of takes) {
     const prompt = take.prompt
     if (!prompt) continue

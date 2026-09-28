@@ -35,6 +35,7 @@ import { MODEL_PRICED_BADGE_CLASSES, nodeCreditEstimate } from '~/lib/nodeCredit
 import { linkedInputNames, upstreamInputPixels, upstreamInputSeconds, widgetValueMap } from '~/lib/costEstimate'
 import { NO_FAMILIES, parseFamilies } from '#shared/runner/families'
 import { upgradeHidesWidget } from '#shared/runner/eligibility'
+import { RETIRED_NODE_MESSAGE, isRetiredClass } from '#shared/runner/retired'
 import TakesStrip from '~/components/vue-canvas/TakesStrip.vue'
 import LightTableModal from '~/components/vue-canvas/LightTableModal.vue'
 import { projectTake, discardOthers, type Take } from '~/composables/useTakes'
@@ -191,6 +192,9 @@ const HEAVY_LOCAL_COMPUTE = new Set<string>([
   'SubjectMask', 'MaskExtractor',
 ])
 
+// A retired partner node (Task R4.1): a saved one still opens, marked, and can't be run.
+const isRetired = computed(() => isRetiredClass(props.data.nodeType))
+
 const showRunButton = computed(() => {
   const t = props.data.nodeType
   if (HEAVY_LOCAL_COMPUTE.has(t)) return true
@@ -220,7 +224,7 @@ const hasRun = computed(() =>
 )
 
 function dispatchRun(detail: Record<string, any>) {
-  if (isMuted.value || isBypassed.value || props.data.running) return
+  if (isMuted.value || isBypassed.value || props.data.running || isRetired.value) return
   playedOnce.value = true
   runMenuOpen.value = false
   window.dispatchEvent(new CustomEvent('sailor:runFiltered', {
@@ -1809,6 +1813,13 @@ watch(previewImages, (urls) => {
       </button>
       <!-- "N fixes" — the reviewer's fixes for this node; opens Edit ▾. -->
       <NodeFixesBadge :node-id="id" />
+      <!-- Retired partner node: a state on the card, its words in the tooltip. -->
+      <span
+        v-if="isRetired"
+        data-retired
+        class="shrink-0 text-[9px] font-semibold px-1.5 py-0.5 rounded-full bg-white/10 text-white/60 border border-white/15"
+        :title="RETIRED_NODE_MESSAGE"
+      >Retired</span>
       <!-- Subgraph node count badge -->
       <span
         v-if="data.isSubgraph && data.innerNodeCount"
@@ -2296,7 +2307,7 @@ watch(previewImages, (urls) => {
       :price="priceLabel"
       :button-text="hasRun ? 'Run again' : 'Run'"
       :status="runStatus"
-      :can-run="showRunButton && !isMuted && !isBypassed"
+      :can-run="showRunButton && !isMuted && !isBypassed && !isRetired"
       :running="!!data.running"
       :run-label="hasRun ? 'Re-render this node' : 'Run this node'"
       @run="playThisNode"
@@ -2306,7 +2317,7 @@ watch(previewImages, (urls) => {
           <button
             aria-label="Run scope options"
             class="nopan nodrag shrink-0 size-5 -mr-1 rounded-[5px] flex items-center justify-center text-white/60 hover:text-white hover:bg-white/[0.08] transition-colors cursor-pointer disabled:opacity-35 disabled:cursor-not-allowed disabled:hover:bg-transparent"
-            :disabled="isMuted || isBypassed || data.running"
+            :disabled="isMuted || isBypassed || data.running || isRetired"
             @click.stop="runMenuOpen = !runMenuOpen"
           >
             <ChevronDown class="size-3 transition-transform" :class="runMenuOpen ? 'rotate-180' : ''" />

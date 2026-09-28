@@ -2,7 +2,8 @@
 /**
  * Actions panel — AI-driven verbs (generate / edit / enhance / analyze),
  * fetched live from /object_info (`api node/<domain>/<provider>` categories)
- * so new partner nodes appear automatically.
+ * so new Replicate and fal actions appear automatically (Comfy-billed partner
+ * nodes are retired, shared/runner/retired.ts).
  *
  * Organization is intent-first (see ~/data/action-catalog.ts): a pinned hero
  * tier of the highest-frequency actions, then Create / Edit / Enhance /
@@ -16,12 +17,12 @@ import {
   MessageSquareText as TextDomainIcon,
   // Provider-flavored icons
   Film, Sparkles, Wand2, Palette, Bot, Mic, Sun, Maximize2, Type as TypeIcon, Atom,
-  PenTool, Music, Cloud, Archive,
+  PenTool, Music, Cloud,
 } from 'lucide-vue-next'
 import { useNodeSearch } from '~/composables/useNodeSearch'
 import { getGeneratorIcon, getModelBrand } from '~/data/generator-icons'
 import {
-  ACTION_CATALOG, DEPRECATED_NODES, HERO_BY_DOMAIN, groupByIntent,
+  ACTION_CATALOG, HERO_BY_DOMAIN, groupByIntent, offeredInActionsPanel,
   type ActionDomain, type ActionSection,
 } from '~/data/action-catalog'
 
@@ -34,18 +35,6 @@ function chipProvider(item: PartnerNode): string {
 }
 
 defineEmits<{ close: [] }>()
-
-// Providers backed by BYOK direct APIs (no Comfy /proxy/ dependency).
-// Everything else routes through Comfy's managed billing and is flagged
-// "legacy" — hidden behind the toggle so users see the modern set first.
-const MODERN_PROVIDERS = new Set<string>([
-  'Replicate',
-  // Sailor's runner calls fal directly (Fix faces, Face swap, Person swap (video)).
-  'fal',
-])
-function isLegacyProvider(provider: string): boolean {
-  return !MODERN_PROVIDERS.has(provider)
-}
 
 type Domain = ActionDomain
 interface PartnerNode {
@@ -154,8 +143,9 @@ async function loadPartnerNodes() {
     const items: PartnerNode[] = []
     for (const [nodeType, node] of Object.entries(info)) {
       const cat = (node?.category || '') as string
-      if (!cat.startsWith('api node/')) continue
-      if (DEPRECATED_NODES.has(nodeType)) continue  // hidden but still loadable in old workflows
+      // Replicate and fal actions only: hidden per-model classes and the
+      // retired Comfy-billed partner nodes stay loadable in old workflows.
+      if (!offeredInActionsPanel(nodeType, cat)) continue
       const parts = cat.split('/')
       // Shape: api node / <domain> / <provider>
       const domain = parts[1] as Domain | undefined
@@ -200,30 +190,10 @@ function domainItemCount(d: Domain): number {
   return allItems.value.filter(it => it.domain === d).length
 }
 
-// Persist the legacy-visibility toggle across sessions. Defaults to hidden —
-// most users care about the BYOK set first.
-const LEGACY_STORAGE_KEY = 'generators.showLegacy'
-const showLegacy = ref(false)
-function loadShowLegacy() {
-  try { showLegacy.value = localStorage.getItem(LEGACY_STORAGE_KEY) === '1' } catch {}
-}
-function saveShowLegacy() {
-  try { localStorage.setItem(LEGACY_STORAGE_KEY, showLegacy.value ? '1' : '0') } catch {}
-}
-onMounted(loadShowLegacy)
-watch(showLegacy, saveShowLegacy)
-
-function legacyCountForDomain(d: Domain): number {
-  return allItems.value
-    .filter(it => it.domain === d && isLegacyProvider(it.provider))
-    .length
-}
-
 const visibleGroups = computed(() => {
   const q = searchQuery.value.trim().toLowerCase()
   const items = allItems.value
     .filter(it => it.domain === activeDomain.value)
-    .filter(it => showLegacy.value || !isLegacyProvider(it.provider))
     .filter(it => !q
       || it.label.toLowerCase().includes(q)
       || it.description.toLowerCase().includes(q)
@@ -463,26 +433,6 @@ function useCaseFor(item: PartnerNode): { useCase: string; model: string } | nul
           <X class="size-3 text-white/50" />
         </button>
       </div>
-    </div>
-
-    <!-- Legacy toggle -->
-    <div class="px-3 pb-2">
-      <button
-        class="w-full flex items-center justify-between gap-2 px-2.5 py-1.5 rounded text-[11px] transition-colors cursor-pointer border"
-        :class="showLegacy
-          ? 'bg-white/[0.06] border-white/10 text-white/80'
-          : 'bg-white/[0.02] border-white/[0.06] text-white/45 hover:text-white/70 hover:bg-white/[0.04]'"
-        title="Legacy = Comfy-billed partner nodes (BFL, Kling, Runway, etc.). Modern = BYOK Replicate nodes."
-        @click="showLegacy = !showLegacy"
-      >
-        <span class="flex items-center gap-1.5">
-          <Archive class="size-3" />
-          <span>{{ showLegacy ? 'Hide legacy partners' : 'Show legacy partners' }}</span>
-        </span>
-        <span class="text-white/35 tabular-nums">
-          {{ legacyCountForDomain(activeDomain) }}
-        </span>
-      </button>
     </div>
 
     <!-- Domain tabs -->

@@ -1,6 +1,7 @@
 import type { NodeTypeLite, PortAnchor } from './portIntent'
 import { matchingPort, linkInputPorts, outputPorts } from './portIntent'
 import { searchNodes } from './nodeMatch'
+import { isRetiredClass } from '#shared/runner/retired'
 
 export interface CatalogWidget {
   name: string
@@ -86,6 +87,8 @@ export function buildCatalog(
   opts: BuildCatalogOpts = {},
 ): CatalogEntry[] {
   const { maxEnum = 20, maxNodes = 150, intent, keywords, boosts, maxIntent = 10, alwaysInclude = [] } = opts
+  // Retired partner nodes are never offered, pinned or matched (shared/runner/retired.ts).
+  nodeTypes = nodeTypes.filter(n => !isRetiredClass(n.name))
   const hop1 = nodeTypes.filter(n => matchingPort(n, anchor))
   const hop1Names = new Set(hop1.map(n => n.name))
 

@@ -15,6 +15,7 @@ import { readRawBody, setResponseStatus } from 'h3'
 import { blockedPromptRefusal, nodeProblemsBody } from '../utils/blockedModels'
 import { seedanceReferenceSeconds } from '../utils/graphInputSeconds'
 import { GENERATE_3D_RUNNER_ONLY, jsonNamesGenerate3d } from '../../shared/runner/gen3d'
+import { jsonNamesRetiredClass, retiredUnparsedResponse } from '../../shared/runner/retired'
 
 /** Generate a 3D model found in a prompt too large to read: ComfyUI's 400 shape, no node named (R3.9 fix round 2). */
 function generate3dRefusal(): ReturnType<typeof blockedPromptRefusal> {
@@ -148,7 +149,12 @@ export default defineEventHandler(async (event) => {
       if (raw && raw.length <= PROMPT_CHECK_MAX_BYTES) prompt = JSON.parse(raw.toString('utf8'))?.prompt
       // Over the cap, Generate a 3D model is still refused (R3.9 fix round 2): ComfyUI would pay for its
       // call and then fail on the answer. Its class is looked for in the text, without parsing it.
-      else if (raw && jsonNamesGenerate3d(raw.toString('utf8'))) oversized = generate3dRefusal()
+      // A retired partner node too (Task R4.1): ComfyUI would bill it through Comfy's account.
+      else if (raw) {
+        const text = raw.toString('utf8')
+        if (jsonNamesGenerate3d(text)) oversized = generate3dRefusal()
+        else if (jsonNamesRetiredClass(text)) oversized = retiredUnparsedResponse()
+      }
     }
     catch { prompt = undefined }
     const blocked = oversized ?? blockedPromptRefusal(prompt)

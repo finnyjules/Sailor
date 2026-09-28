@@ -12,14 +12,16 @@ import type { ApiPrompt } from '../../shared/runner/graph'
 import { menuDefault, modelMenu } from '../../shared/runner/modelMenus'
 import { classUpgradeOn } from '../../shared/runner/eligibility'
 import { requestProblems, type RequestProblem } from '../runner/requestRules'
+import { retiredNodesResponse } from '../../shared/runner/retired'
 
 /**
- * The 400 body for `prompt`, or null when every model in it can run on
+ * The 400 body for `prompt`, or null when it holds no retired partner node
+ * (shared/runner/retired.ts, Task R4.1), every model in it can run on
  * ComfyUI and every request is one its provider takes (requestRefusal).
  */
 export function blockedPromptRefusal(prompt: unknown): ReturnType<typeof blockedPromptBody> {
   if (!prompt || typeof prompt !== 'object' || Array.isArray(prompt)) return null
-  return blockedPromptBody(prompt as Parameters<typeof blockedPromptBody>[0], { families: runnerFamilies() })
+  return retiredNodesResponse(prompt) ?? blockedPromptBody(prompt as Parameters<typeof blockedPromptBody>[0], { families: runnerFamilies() })
     ?? requestRefusal(prompt)
 }
 

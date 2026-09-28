@@ -1,6 +1,7 @@
 import { NODE_DESCRIPTIONS } from '~/lib/nodeDescriptions'
 import { NODE_KEYWORDS, NODE_BOOST } from '~/lib/nodeKeywords'
 import { searchNodes } from '~/lib/nodeMatch'
+import { isRetiredClass } from '#shared/runner/retired'
 
 type NodeSource = 'core' | 'essentials' | 'partner' | 'extensions'
 
@@ -90,6 +91,8 @@ export function useNodeSearch() {
       const data = await $fetch<Record<string, any>>('/object_info')
       const types: NodeType[] = []
       for (const [name, info] of Object.entries(data)) {
+        // Retired partner nodes can't be added any more (a saved one still opens).
+        if (isRetiredClass(name)) continue
         const inputs: { name: string; type: string }[] = []
         if (info.input?.required) {
           for (const [k, v] of Object.entries(info.input.required as Record<string, any>)) {

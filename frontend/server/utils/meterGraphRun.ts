@@ -38,6 +38,7 @@ import type { ApiPrompt } from '#shared/runner/graph'
 import { moderatePrompt, moderateTexts, moderationRefusal, type ModerationResult } from './moderation'
 import { assertSpendAllowed } from './systemControls'
 import { blockedPromptRefusal, nodeProblemsBody, retiredEngineRefusal } from './blockedModels'
+import { retiredNodesResponse } from '#shared/runner/retired'
 import { hostedRequestProblems, measuredInputProblems } from '../runner/requestRules'
 import { executedPart } from '#shared/runner/validate'
 import { savedPoseRefs } from '#shared/runner/nanoExtras'
@@ -474,6 +475,11 @@ async function submitMetered(userId: string | null, body: any, deps: GraphRunDep
   // the only enforcement point on the canvas graph surface (it never passes
   // through preflightForUser). Fails CLOSED.
   await deps.spendGuard(userId)
+
+  // A retired partner node (shared/runner/retired.ts, Task R4.1) is refused
+  // next, in ComfyUI's 400 shape: nothing is read, moderated, priced or held.
+  const retiredNodes = retiredNodesResponse(body.prompt)
+  if (retiredNodes) return { status: 400, body: retiredNodes }
 
   // G1 fix round 1 (R2/R4): the prompt ComfyUI will run — `__value__`
   // unwrapped, numbers coerced by each input's declared type — before
