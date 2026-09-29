@@ -34,6 +34,8 @@ import { formatFor } from '~/lib/frame/formats'
 import LayoutGridOverlay from './LayoutGridOverlay.vue'
 import { FRAME_SIZE_PRESET_GROUPS, FRAME_SIZE_PRESETS, applyFramePreset, framePresetId, readFrameSize, setFrameDim, setFrameResponsive } from '~/lib/frame/frameSize'
 import { isResponsiveFrame } from '~/lib/frame/responsive/fromNode'
+import { resolveLayout, frameDocFromProps, resizeViewFromEdge, atDesignSize, type LayoutResult } from '~/lib/frame/responsive'
+import { cardBox, cardScale, cardViewOf, cardViewStale } from '~/lib/frame/responsive/cardView'
 import { toast } from 'vue-sonner'
 import PrintSurface from '~/components/vue-canvas/surfaces/PrintSurface.vue'
 import NodeOpenBar from '~/components/vue-canvas/surfaces/NodeOpenBar.vue'
@@ -118,14 +120,73 @@ function setDim(which: 'width' | 'height', e: Event) {
   input.value = String((which === 'width' ? frameW.value : frameH.value) || '')
 }
 
-// Aspect: explicit dims win; else the bottom wired image's aspect; else square.
+// Declared up here (not with the rest of the edit-mode state below) because the card's
+// viewing shape reads it, and `box` can be evaluated during setup (TDZ).
+const editMode = ref(false)
+// ── Responsive card: a viewing shape ────────────────────────────────────────
+// A responsive Frame's card is reshaped freely with its corner grip. The shape is a viewing size
+// in Frame px (`sailor_frame.cardView`, absent = the design size); the card reflows to it through
+// the same resolver the Frame editor uses for its viewing sizes, and Render / Download / video
+// export produce that shape. The Frame's design size (its width/height widgets) never changes.
+// Edit mode ("Edit here" / double-click) edits at the DESIGN size: while `editMode` the card shows
+// the design shape, unresolved, so the in-card editing geometry (normalised to the design) keeps
+// working; on Done it returns to its viewing shape. A fixed Frame never has a viewing shape, so
+// every branch below is a no-op for it and the card is byte-identical.
+const designSize = computed(() => ({ w: frameW.value, h: frameH.value }))
+// The card's saved shape, whatever the card is showing right now (edit mode included).
+const storedCardView = computed<{ w: number; h: number } | null>(() => {
+  if (!isResponsive.value || !hasExplicitSize.value) return null
+  return cardViewOf((props.data.properties as any)?.sailor_frame, designSize.value)
+})
+// What the card DISPLAYS: its shape, except in edit mode (the design shape, unresolved).
+const cardViewSize = computed<{ w: number; h: number } | null>(() => editMode.value ? null : storedCardView.value)
+// What Render / Download / video export PRODUCE: the card's shape, never dependent on edit mode
+// (a Run while the card is being edited must publish the same shape). Frozen for the length of a
+// video export (see the `exportingVideo` watch), so a grip nudge or edit mode mid-export cannot
+// change the shape of later frames.
+const frozenExportView = ref<{ w: number; h: number } | null>(null)
+const exportView = computed<{ w: number; h: number } | null>(() =>
+  frozenExportView.value ?? storedCardView.value
+)
+let _measureCanvas: HTMLCanvasElement | null = null
+function measureCtx(): CanvasRenderingContext2D | null {
+  if (typeof document === 'undefined') return null
+  if (!_measureCanvas) _measureCanvas = document.createElement('canvas')
+  return _measureCanvas.getContext('2d')
+}
+// The layout at the card's viewing size, or null (paint the raw layers) at the design size.
+const resolvedCard = computed<LayoutResult | null>(() => {
+  const view = cardViewSize.value
+  if (!view || atDesignSize(view, designSize.value)) return null
+  const d = designSize.value
+  return resolveLayout(frameDocFromProps(props.data.properties, d.w, d.h), view.w, view.h, { measureCtx: measureCtx() })
+})
+// The layout the export paints: null for no view or at the design size; the display's own resolve
+// when the two are the same view (not computed twice).
+const resolvedExport = computed<LayoutResult | null>(() => {
+  const view = exportView.value
+  if (!view || atDesignSize(view, designSize.value)) return null
+  const shown = cardViewSize.value
+  if (shown && shown.w === view.w && shown.h === view.h) return resolvedCard.value
+  const d = designSize.value
+  return resolveLayout(frameDocFromProps(props.data.properties, d.w, d.h), view.w, view.h, { measureCtx: measureCtx() })
+})
+// True while the grip is being dragged on a responsive card (the label shows the live size).
+const resizingView = ref(false)
+
+// Aspect of the DESIGN: explicit dims win; else the bottom wired image's aspect; else square.
 // Matching the composite means the background image fills the artboard exactly,
 // so wired-layer hit-testing/handles line up.
-const aspect = computed(() => {
+const designAspect = computed(() => {
   if (hasExplicitSize.value) return frameW.value / frameH.value
   const base = wiredLayers.value[0]
   if (base) { const d = wiredDims.value[base.url]; if (d && d.h) return d.w / d.h }
   return 1
+})
+// The card's aspect: the viewing shape's when it has one, else the design's.
+const aspect = computed(() => {
+  const v = cardViewSize.value
+  return v && v.h > 0 ? v.w / v.h : designAspect.value
 })
 // On-canvas display size (the frame's longest edge in logical px) — the size
 // you *work* at on the canvas, distinct from the output resolution (the W×H
@@ -137,10 +198,16 @@ function setDisplayEdge(v: number) {
     ...(props.data.properties as any).sailor_frame, displayEdge: clamp(Math.round(v), 180, 1600),
   }
 }
-const box = computed(() => {
-  const a = aspect.value || 1
+// The card box at the DESIGN shape — what the in-card editor and the wired write-through work in
+// (layers are normalised to the design). Equal to `box` whenever there is no viewing shape.
+const designBox = computed(() => {
+  const a = designAspect.value || 1
   const E = displayEdge.value
   return a >= 1 ? { w: E, h: Math.round(E / a) } : { w: Math.round(E * a), h: E }
+})
+const box = computed(() => {
+  const v = cardViewSize.value
+  return v ? cardBox(designSize.value, v, displayEdge.value) : designBox.value
 })
 // A portrait Frame's Open bar is only as wide as the glass (box.w + 12). Below ~260px there
 // isn't room for every control — drop "Edit here" (double-click still enters edit mode) and
@@ -162,21 +229,44 @@ const showGridOverlay = computed(() => editMode.value && cardGrid.value.show)
 
 // Manual node resize — zoom-aware (mirrors StickyAnnotation). zoom is derived
 // from the artboard's on-screen rect vs its logical size, so no Vue Flow dep.
-let resize: { startEdge: number; sx: number; sy: number; zoom: number } | null = null
+// A responsive card (not in edit mode) reshapes its viewing size instead: `startView` is set.
+let resize: { startEdge: number; sx: number; sy: number; zoom: number; startView?: { w: number; h: number } } | null = null
 function onResizeDown(e: PointerEvent) {
   e.preventDefault(); e.stopPropagation()
   const r = artboardRef.value?.getBoundingClientRect()
   const zoom = r && box.value.w ? r.width / box.value.w : 1
-  resize = { startEdge: displayEdge.value, sx: e.clientX, sy: e.clientY, zoom: zoom || 1 }
+  const view = cardViewSize.value
+  resize = { startEdge: displayEdge.value, sx: e.clientX, sy: e.clientY, zoom: zoom || 1, ...(view ? { startView: { ...view } } : {}) }
+  if (view) resizingView.value = true
   window.addEventListener('pointermove', onResizeMove)
   window.addEventListener('pointerup', onResizeUp, { once: true })
 }
+function setCardView(v: { w: number; h: number } | null) {
+  if (!props.data.properties) (props.data as any).properties = {}
+  const { cardView: _old, ...rest } = ((props.data.properties as any).sailor_frame ?? {}) as Record<string, unknown>
+  ;(props.data.properties as any).sailor_frame = v ? { ...rest, cardView: { w: v.w, h: v.h } } : rest
+}
 function onResizeMove(e: PointerEvent) {
   if (!resize) return
+  if (resize.startView) {
+    // Frame px per screen px: the card's scale (constant during the drag) times the canvas zoom.
+    const displayScale = cardScale(designSize.value, displayEdge.value) * resize.zoom
+    setCardView(resizeViewFromEdge(designSize.value, resize.startView, 'se', e.clientX - resize.sx, e.clientY - resize.sy, displayScale))
+    return
+  }
   const d = (aspect.value >= 1 ? e.clientX - resize.sx : e.clientY - resize.sy) / resize.zoom
   setDisplayEdge(resize.startEdge + d)
 }
-function onResizeUp() { resize = null; window.removeEventListener('pointermove', onResizeMove) }
+function onResizeUp() { resize = null; resizingView.value = false; window.removeEventListener('pointermove', onResizeMove) }
+// Double-click the grip (responsive): back to the design shape.
+// Only a responsive card claims the double-click; a fixed Frame's grip lets it through as before.
+function onResizeDblClick(e: MouseEvent) { if (!isResponsive.value) return; e.stopPropagation(); setCardView(null) }
+// A saved card shape belongs to the design it was made against: changing the design size, or
+// turning Responsive off or on, drops it (the Frame editor resets its viewing size the same way).
+watch([frameW, frameH, isResponsive], ([w, h, responsive], [pw, ph, presponsive]) => {
+  if (!cardViewStale({ w: pw, h: ph, responsive: presponsive }, { w, h, responsive })) return
+  if ((props.data.properties as any)?.sailor_frame?.cardView) setCardView(null)
+})
 
 // ── Layer input handles + wired (connected) layers ──────────────────────────
 function slotConnected(slotIdx: number): boolean {
@@ -309,7 +399,9 @@ const compositeUrl = computed<string | null>(() => props.data.images?.[0] ?? nul
 const artboardRef = ref<HTMLDivElement | null>(null)
 const editor = useLocalLayerEditor({
   node: () => ({ data: props.data }),
-  dims: () => ({ w: box.value.w, h: box.value.h }),
+  // The DESIGN-shaped box: layers (and the wired write-through) are normalised to the design, and
+  // the editor only edits at the design size (edit mode drops the card's viewing shape).
+  dims: () => ({ w: designBox.value.w, h: designBox.value.h }),
   designDims: () => cardDesign.value,
   getRect: () => artboardRef.value?.getBoundingClientRect() ?? null,
   // Real decoded content dims, so the `layer{N}_*` write-through fits against the
@@ -382,7 +474,6 @@ const selectedCornerAnchored = computed(() =>
 const selectedUnlinkedWired = computed(() =>
   (editor.selected.value as any)?.kind === 'wired' && !!(editor.selected.value as any)?.unlinked)
 
-const editMode = ref(false)
 function toggleEdit() { editMode.value ? exitEdit() : (editMode.value = true) }
 function exitEdit() { editMode.value = false; editor.endEdit(); editor.selectLocal(null) }
 // Entering edit mode fixes the layout grid the way opening the modal does: a Frame with no stored
@@ -394,7 +485,13 @@ function onArtboardDblClick(e: MouseEvent) {
   // beginning a text edit while the card is still idle used to make the text
   // vanish: nothing painted it and no textarea rendered to hold it. One
   // double-click now both enters edit mode and starts editing the text it hit.
-  if (!editMode.value) editMode.value = true
+  if (!editMode.value) {
+    // A responsive card at a viewing shape snaps back to the design shape to edit, so what was
+    // under the cursor is no longer where it was drawn: just enter edit mode, don't hit-test.
+    const reflowed = !!resolvedCard.value
+    editMode.value = true
+    if (reflowed) return
+  }
   editor.onCanvasDblClick(e)
 }
 
@@ -520,6 +617,21 @@ function buildStackItems(): StackItem[] {
   }).filter((x): x is StackItem => x != null)
 }
 
+// Responsive card at a viewing size: the layers to paint are the resolved ones (as the Frame
+// editor's paintLayers()/paintItems()). `r` is `resolvedCard` (display) or `resolvedExport`; both
+// are null for a fixed Frame and at the design size, so these are then pure pass-throughs and the
+// paint is byte-identical.
+function paintCardLayers(r: LayoutResult | null): LocalLayer[] {
+  return (r?.layers ?? editor.localLayers.value) as LocalLayer[]
+}
+function paintCardItems(r: LayoutResult | null): StackItem[] {
+  const items = buildStackItems()
+  if (!r) return items
+  const byId = new Map(r.layers.map(l => [l.id, l]))
+  return items.map(it => (it.type === 'local' && byId.has(it.layer.id))
+    ? { ...it, layer: byId.get(it.layer.id)! as LocalLayer } : it)
+}
+
 const stackCanvas = ref<HTMLCanvasElement | null>(null)
 // `t` is the Frame's own master-timeline seconds (see `animateFrame` below) — real
 // elapsed time, not the wrapped/bounded master-clock period. Omitted (`undefined`) for
@@ -563,7 +675,7 @@ function renderStack(t?: number, live = false) {
   // Scoped to THIS card's slots: the wired resolver is a module global, and a
   // second live host (the modal, or another Frame) numbers its slots the same way.
   withWiredContent(wiredContentForSlot, () =>
-    paintLayerStack(ctx, W, H, buildStackItems(), editor.localLayers.value, l => l.id === editor.editingId.value,
+    paintLayerStack(ctx, W, H, paintCardItems(resolvedCard.value), paintCardLayers(resolvedCard.value), l => l.id === editor.editingId.value,
       t, undefined, wiredTreatments.value, editor.background.value, editor.localGroups.value, editor.postEffects.value, false, editor.frameLight.value))
   // The glass takes its tint from the artwork at rest. Live (hover-play) paints are skipped: a
   // tint that followed every frame would be a copy per frame for a colour nobody sees change.
@@ -587,6 +699,7 @@ const printRef = ref<{ capture: (src: HTMLCanvasElement) => void } | null>(null)
 const sizeOpen = ref(false)
 const sizeLabel = computed(() => formatPrintSize(frameW.value, frameH.value, {
   responsive: isResponsive.value,
+  viewing: resizingView.value ? cardViewSize.value ?? undefined : undefined,
   loopSec: masterClock.value?.duration,
 }))
 const loopTitle = computed(() => masterClock.value && masterClock.value.duration > 0
@@ -797,11 +910,12 @@ function wiredContentInfo(slot: number) {
 watch(
   () => wiredReconcileKey(
     connectedSlotList.value, wiredContentInfo,
-    { w: box.value.w, h: box.value.h },
+    { w: designBox.value.w, h: designBox.value.h },
     editor.localLayers.value,
   ),
   () => {
-    const canvas = { w: box.value.w, h: box.value.h }
+    // The design-shaped box: sentinels are fitted in the design's normalised space.
+    const canvas = { w: designBox.value.w, h: designBox.value.h }
     const fin = finalizeWiredSentinels(editor.localLayers.value, props.data as any, canvas, wiredDimsForSlot)
     if (fin) editor.commit(fin)
     const rec = reconcileWiredContent(editor.localLayers.value, wiredContentInfo)
@@ -814,6 +928,7 @@ watch(
   () => [
     JSON.stringify(editor.localLayers.value), editor.editingId.value,
     box.value.w, box.value.h,
+    cardViewSize.value?.w, cardViewSize.value?.h, resolvedCard.value,
     JSON.stringify(wiredLayers.value), JSON.stringify(stackKeys.value),
     Object.keys(wiredImages.value).length,
     JSON.stringify([...hiddenWiredSet.value]),
@@ -865,11 +980,15 @@ function openEditor() { window.dispatchEvent(new CustomEvent('sailor:openComposi
 function exportCompositeCanvas(t?: number): HTMLCanvasElement | null {
   const keys = stackKeys.value
   if (!keys.length) return null
-  const W = box.value.w, H = box.value.h
+  // Painted in logical card-box coords: the box of the EXPORT shape, which is the card's box
+  // whenever the card shows it (not in edit mode, which shows the design shape).
+  const view = exportView.value
+  const lb = view ? cardBox(designSize.value, view, displayEdge.value) : designBox.value
+  const W = lb.w, H = lb.h
   if (!(W > 0 && H > 0)) return null
-  // Target resolution: explicit artboard size, else bottom wired image's native
-  // size, else a 4× upscale of the display box.
-  let outW = frameW.value, outH = frameH.value
+  // Target resolution: a responsive card's viewing shape (Frame px), else the explicit artboard
+  // size, else bottom wired image's native size, else a 4× upscale of the display box.
+  let outW = view ? view.w : frameW.value, outH = view ? view.h : frameH.value
   if (!(outW > 0 && outH > 0)) {
     const base = wiredLayers.value[0]
     const d = base ? wiredDims.value[base.url] : undefined
@@ -888,7 +1007,7 @@ function exportCompositeCanvas(t?: number): HTMLCanvasElement | null {
   // bake=true (Task 10): full-res download/publish, not the live preview — shader-fill
   // fields must render unclamped and stay live past LIVE_FIELD_CEILING.
   withWiredContent(wiredContentForSlot, () =>
-    paintLayerStack(ctx, W, H, buildStackItems(), editor.localLayers.value,
+    paintLayerStack(ctx, W, H, paintCardItems(resolvedExport.value), paintCardLayers(resolvedExport.value),
       undefined, t, undefined, wiredTreatments.value, editor.background.value, editor.localGroups.value, editor.postEffects.value, true, editor.frameLight.value))
   return cv
 }
@@ -992,6 +1111,8 @@ let videoAbort: AbortController | null = null
 // after unmount once the abort's rejection propagates) knows not to restart the preview loop.
 let unmounted = false
 const exportingVideo = ref(false)
+// Freeze the export shape for the whole video export (sync, so the first frame already sees it).
+watch(exportingVideo, (on) => { frozenExportView.value = on && exportView.value ? { ...exportView.value } : null }, { flush: 'sync' })
 const videoStatus = ref('')
 function stopVideoExport() { videoAbort?.abort() }
 
@@ -1320,8 +1441,9 @@ onUnmounted(() => {
         <!-- Corner resize grip — sets the on-canvas display size (not output res) -->
         <div
           class="nopan nodrag absolute -bottom-1.5 -right-1.5 z-[7] size-4 cursor-nwse-resize group/resize"
-          title="Resize frame (display size)"
+          :title="isResponsive ? 'Resize — double-click to reset' : 'Resize frame (display size)'"
           @pointerdown="onResizeDown"
+          @dblclick="onResizeDblClick"
         >
           <div class="absolute bottom-1 right-1 size-2 border-b-2 border-r-2 border-white/30 group-hover/resize:border-cyan-400 rounded-[1px]" />
         </div>

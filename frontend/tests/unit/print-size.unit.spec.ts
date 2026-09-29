@@ -16,6 +16,13 @@ describe('formatPrintSize', () => {
     expect(formatPrintSize(1024, 1024, { responsive: true, loopSec: 6 })).toBe('Responsive · loops 6s')
     expect(formatPrintSize(1080, 1350, { loopSec: 6.4 })).toBe('4:5 · 1080 × 1350 · loops 6s')
   })
+  it('shows the live viewing size while a responsive card is being reshaped', () => {
+    expect(formatPrintSize(1024, 1024, { responsive: true, viewing: { w: 1440.4, h: 899.6 } })).toBe('Responsive · 1440 × 900')
+    expect(formatPrintSize(1024, 1024, { responsive: true, viewing: { w: 1440, h: 900 }, loopSec: 6 })).toBe('Responsive · 1440 × 900 · loops 6s')
+    expect(formatPrintSize(1024, 1024, { responsive: true, viewing: undefined })).toBe('Responsive')
+    // A fixed Frame ignores a viewing size.
+    expect(formatPrintSize(1080, 1350, { viewing: { w: 1440, h: 900 } })).toBe('4:5 · 1080 × 1350')
+  })
   it('asks for a size when there is none', () => {
     expect(formatPrintSize(0, 0)).toBe('Set size')
   })
