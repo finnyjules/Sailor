@@ -12,7 +12,8 @@ describe('formatPrintSize', () => {
     expect(formatPrintSize(628, 1200)).toBe('1:1.91 · 628 × 1200')
   })
   it('says when a Frame is responsive, and how long it loops', () => {
-    expect(formatPrintSize(1080, 1350, { responsive: true })).toBe('Responsive · 1080 × 1350')
+    expect(formatPrintSize(1024, 1024, { responsive: true })).toBe('Responsive')
+    expect(formatPrintSize(1024, 1024, { responsive: true, loopSec: 6 })).toBe('Responsive · loops 6s')
     expect(formatPrintSize(1080, 1350, { loopSec: 6.4 })).toBe('4:5 · 1080 × 1350 · loops 6s')
   })
   it('asks for a size when there is none', () => {
