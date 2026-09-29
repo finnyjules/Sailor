@@ -12,13 +12,20 @@
  * video_types.py): `_get_raw_duration` (:110-138), `get_frame_count`
  * (:140-210), `get_frame_rate` (:212-233), with no start time or duration.
  * Where Python counts packets, so does the runner (demux only, never a decode).
+ *
+ * The module checks its own inputs (`resolveMediaInput`): a path must
+ * resolve, symlinks followed, to a regular file inside the roots the caller
+ * passes (the person's own folders), and every tool then reads that real
+ * path. The caller still decides which roots are the person's.
  */
-import { open, stat } from 'node:fs/promises'
-import { isAbsolute } from 'node:path'
+import { open, realpath, stat } from 'node:fs/promises'
+import { isAbsolute, sep } from 'node:path'
 import {
-  MEDIA_ANALYZEDURATION, MEDIA_CAPS, MEDIA_PROBE_TIMEOUT_MS, MEDIA_PROBESIZE, MEDIA_WORDS, type MediaWord,
+  MEDIA_ANALYZEDURATION, MEDIA_CAPS, MEDIA_PROBE_TIMEOUT_MS, MEDIA_PROBESIZE, MEDIA_SCAN_BYTES_PER_MS, MEDIA_WORDS,
+  type MediaCaps, type MediaWord,
 } from '#shared/runner/media'
 import { mediaFormat, type MediaFormat } from '../runner/mediaInputs'
+import { isHosted } from '../utils/deployMode'
 import { MediaError, inputArgs, runMedia } from './run'
 
 export interface Rational { num: number; den: number }
@@ -45,6 +52,8 @@ export interface SoundStreamProbe {
 }
 
 export interface MediaProbe {
+  /** The file's real path (symlinks resolved), checked inside the caller's roots: every tool reads this one. */
+  path: string
   format: MediaFormat
   /** libavformat's own, e.g. 'mov,mp4,m4a,3gp,3g2,mj2'. */
   formatName: string
@@ -107,38 +116,136 @@ function probeInput(path: string, fmt: MediaFormat): string[] {
   return [...probeCaps(), ...inputArgs(path, fmt)]
 }
 
-async function ffprobeJson(path: string, fmt: MediaFormat, extra: string[], o: { userId: string | null; signal?: AbortSignal; route?: boolean }): Promise<Json> {
-  let out: Uint8Array | null
+export interface ProbeJobOptions { userId: string | null; signal?: AbortSignal; route?: boolean; timeoutMs?: number }
+
+/** A tool failure or unparsable answer is "can't be read"; Stop, the time limit and missing tools keep their own words. */
+function unreadableOnFailure(e: unknown): never {
+  if (e instanceof MediaError && e.word === 'failed') throw new MediaError('unreadable')
+  throw e
+}
+
+/** One ffprobe answer as JSON (header-sized: capped by runMedia's collection limit). */
+export async function ffprobeJson(path: string, fmt: MediaFormat, extra: string[], o: ProbeJobOptions): Promise<Json> {
+  let out: Uint8Array | null = null
   try {
     ({ stdout: out } = await runMedia({
       tool: 'ffprobe', args: [...probeInput(path, fmt), '-of', 'json', ...extra],
-      userId: o.userId, signal: o.signal, route: o.route, timeoutMs: MEDIA_PROBE_TIMEOUT_MS,
+      userId: o.userId, signal: o.signal, route: o.route, timeoutMs: o.timeoutMs ?? MEDIA_PROBE_TIMEOUT_MS,
     }))
   }
-  catch (e) {
-    if (e instanceof MediaError && e.word === 'failed') throw new MediaError('unreadable')
-    throw e
+  catch (e) { unreadableOnFailure(e) }
+  try {
+    const j = JSON.parse(Buffer.from(out!).toString('utf8')) as unknown
+    if (!j || typeof j !== 'object' || Array.isArray(j)) throw new Error('not an object')
+    return j as Json
   }
-  try { return JSON.parse(Buffer.from(out!).toString('utf8')) as Json }
   catch { throw new MediaError('unreadable') }
 }
 
 /**
- * The header of one file. Refuses a path that isn't absolute and a file whose
- * first bytes aren't a container Sailor knows (a playlist renamed `.mp4`)
- * before any tool starts.
+ * A whole-file listing (`-of compact`), streamed a line at a time as
+ * `key=value` records, so a long file never piles up in memory.
  */
-export async function probeMedia(path: string, o: { userId: string | null; signal?: AbortSignal; route?: boolean }): Promise<MediaProbe> {
-  if (!isAbsolute(path)) throw new MediaError('unreadable')
-  let bytes: number
+async function ffprobeRecords(path: string, fmt: MediaFormat, extra: string[], o: ProbeJobOptions, onRecord: (r: Record<string, string>) => void): Promise<void> {
+  let rest = ''
+  const take = (line: string) => {
+    if (!line.trim()) return
+    const r: Record<string, string> = {}
+    for (const kv of line.trim().split('|')) {
+      const at = kv.indexOf('=')
+      if (at > 0) r[kv.slice(0, at)] = kv.slice(at + 1)
+    }
+    onRecord(r)
+  }
   try {
-    const st = await stat(path)
-    if (!st.isFile()) throw new MediaError('unreadable')
-    bytes = st.size
+    await runMedia({
+      tool: 'ffprobe', args: [...probeInput(path, fmt), '-of', 'compact=p=0', ...extra],
+      userId: o.userId, signal: o.signal, route: o.route, timeoutMs: o.timeoutMs ?? MEDIA_PROBE_TIMEOUT_MS,
+      onStdout: (chunk) => {
+        rest += Buffer.from(chunk).toString('latin1')
+        let nl: number
+        while ((nl = rest.indexOf('\n')) >= 0) { take(rest.slice(0, nl)); rest = rest.slice(nl + 1) }
+      },
+    })
+  }
+  catch (e) { unreadableOnFailure(e) }
+  take(rest)
+}
+
+/** A whole-file scan's own time limit: the probe's, plus a second per 20 MB (so a large local file isn't refused as unreadable). */
+export function scanTimeoutMs(bytes: number): number {
+  return MEDIA_PROBE_TIMEOUT_MS + Math.ceil(bytes / MEDIA_SCAN_BYTES_PER_MS)
+}
+
+/**
+ * A media input's real path: absolute, a regular file once symlinks are
+ * resolved, and inside one of `roots` (the person's own folders, resolved
+ * too). A link out of the folder, a missing file or a folder is refused as
+ * "can't be read". Every tool then reads the real path, not the name given.
+ */
+export async function resolveMediaInput(path: string, roots: readonly string[]): Promise<string> {
+  if (!isAbsolute(path) || path.includes('\0')) throw new MediaError('unreadable')
+  let real: string
+  try {
+    real = await realpath(path)
+    if (!(await stat(real)).isFile()) throw new Error('not a file')
   }
   catch { throw new MediaError('unreadable') }
-  const format = await sniffMediaFormat(path).catch(() => null)
+  for (const root of roots) {
+    if (!isAbsolute(root)) continue
+    let r: string
+    try { r = await realpath(root) }
+    catch { continue }
+    if (real.startsWith(r.endsWith(sep) ? r : r + sep)) return real
+  }
+  throw new MediaError('unreadable')
+}
+
+export interface ProbeOptions {
+  userId: string | null; signal?: AbortSignal; route?: boolean
+  /** The folders the file must really be in (the person's own). */
+  roots: readonly string[]
+  /**
+   * What the caller will read: its caps are judged from the size and the
+   * header before any whole-file scan. Without it, the looser of the two
+   * kinds' caps.
+   */
+  kind?: 'video' | 'sound'
+}
+
+/** The size, frame and stated-length caps, judged from the header alone (before any whole-file scan). */
+function headerCapsWord(p: MediaProbe, kind: 'video' | 'sound' | undefined, hosted: boolean): MediaWord | null {
+  const caps: MediaCaps = hosted ? MEDIA_CAPS.hosted : MEDIA_CAPS.local
+  const maxBytes = kind === 'video' ? caps.videoBytes : kind === 'sound' ? caps.soundBytes : Math.max(caps.videoBytes, caps.soundBytes)
+  if (p.bytes > maxBytes) return 'tooBig'
+  if (kind === 'video' && p.video[0] && p.video[0].w * p.video[0].h > caps.framePixels) return 'tooBig'
+  const maxSeconds = kind === 'video' ? caps.videoSeconds : kind === 'sound' ? caps.soundSeconds : Math.max(caps.videoSeconds, caps.soundSeconds)
+  if (p.containerDuration !== null && p.containerDuration / 1e6 > maxSeconds) return 'tooLong'
+  if (kind === 'sound') {
+    for (const t of p.sound) {
+      if (t.duration === null) continue
+      const secs = (t.duration * t.timeBase.num) / t.timeBase.den
+      if (secs > caps.soundSeconds || secs * t.rate * t.channels > caps.soundSamples) return 'tooLong'
+    }
+  }
+  return null
+}
+
+/**
+ * The header of one file. Refuses, before any tool starts, a path that
+ * isn't a real file inside `roots` (`resolveMediaInput`) and a file whose
+ * first bytes aren't a container Sailor knows (a playlist renamed `.mp4`).
+ * The size and the header's own lengths are judged against the caps before
+ * any whole-file scan, and a scan has its own time limit, scaled to the size.
+ */
+export async function probeMedia(path: string, o: ProbeOptions): Promise<MediaProbe> {
+  const real = await resolveMediaInput(path, o.roots)
+  let bytes: number
+  try { bytes = (await stat(real)).size }
+  catch { throw new MediaError('unreadable') }
+  const format = await sniffMediaFormat(real).catch(() => null)
   if (!format) throw new MediaError('unreadable')
+  path = real
 
   const j = await ffprobeJson(path, format, ['-show_format', '-show_streams'], o)
   const fmt = (j.format ?? {}) as Json
@@ -171,31 +278,34 @@ export async function probeMedia(path: string, o: { userId: string | null; signa
   }
   const secs = typeof fmt.duration === 'string' ? Number(fmt.duration) : Number.NaN
   const p: MediaProbe = {
+    path,
     format,
     formatName: String(fmt.format_name ?? ''),
     // ffprobe prints container.duration / 1e6 to six places: the microseconds are exact.
     containerDuration: Number.isFinite(secs) ? Math.round(secs * 1e6) : null,
     video, sound, bytes, videoPackets: null,
   }
+  const early = headerCapsWord(p, o.kind, isHosted())
+  if (early) throw new MediaError(early)
+  const scan: ProbeJobOptions = { userId: o.userId, signal: o.signal, route: o.route, timeoutMs: scanTimeoutMs(bytes) }
   const v = video[0]
   if (p.containerDuration === null && v && !(v.frames && v.averageRate) && v.averageRate) {
-    p.videoPackets = await countVideoPackets(path, format, o)
+    p.videoPackets = await countVideoPackets(path, format, scan)
   }
-  if (p.containerDuration === null && sound.some(t => t.duration === null)) await measureSound(path, p, o)
+  if (p.containerDuration === null && sound.some(t => t.duration === null)) await measureSound(path, p, scan)
   return p
 }
 
-/** Each sound stream's span from its packets' pts and durations (demux only). */
-async function measureSound(path: string, p: MediaProbe, o: { userId: string | null; signal?: AbortSignal; route?: boolean }): Promise<void> {
-  const j = await ffprobeJson(path, p.format, ['-select_streams', 'a', '-show_entries', 'packet=stream_index,pts,duration'], o)
+/** Each sound stream's span from its packets' pts and durations (demux only, streamed). */
+async function measureSound(path: string, p: MediaProbe, o: ProbeJobOptions): Promise<void> {
   const span = new Map<number, { start: number; end: number }>()
-  for (const k of (j.packets as Json[] | undefined) ?? []) {
+  await ffprobeRecords(path, p.format, ['-select_streams', 'a', '-show_entries', 'packet=stream_index,pts,duration'], o, (k) => {
     const index = int(k.stream_index); const pts = int(k.pts); const dur = int(k.duration) ?? 0
-    if (index === null || pts === null) continue
+    if (index === null || pts === null) return
     const sp = span.get(index)
     if (!sp) span.set(index, { start: pts, end: pts + dur })
     else { sp.start = Math.min(sp.start, pts); sp.end = Math.max(sp.end, pts + dur) }
-  }
+  })
   for (const t of p.sound) {
     const sp = span.get(t.index)
     if (t.duration === null && sp) t.measuredSeconds = ((sp.end - sp.start) * t.timeBase.num) / t.timeBase.den
@@ -203,7 +313,7 @@ async function measureSound(path: string, p: MediaProbe, o: { userId: string | n
 }
 
 /** The first video stream's packets, by demuxing only. */
-async function countVideoPackets(path: string, fmt: MediaFormat, o: { userId: string | null; signal?: AbortSignal; route?: boolean }): Promise<number> {
+async function countVideoPackets(path: string, fmt: MediaFormat, o: ProbeJobOptions): Promise<number> {
   const j = await ffprobeJson(path, fmt, ['-count_packets', '-select_streams', 'v:0', '-show_entries', 'stream=nb_read_packets'], o)
   const n = int(((j.streams as Json[] | undefined)?.[0] ?? {}).nb_read_packets)
   if (n === null) throw new MediaError('unreadable')
@@ -248,6 +358,8 @@ function roundHalfEven(x: number): number {
  * the loop means. Named in the R5.1b report.
  */
 export async function pyFrameCount(p: MediaProbe, path: string, o: { userId: string | null; signal?: AbortSignal }): Promise<number> {
+  // The probe's own checked real path is what the tool reads; `path` must name the same file.
+  if (path !== p.path && (await realpath(path).catch(() => null)) !== p.path) throw new MediaError('unreadable')
   const v = p.video[0]
   if (!v) throw new MediaError('noVideo')
   if (v.frames && v.frames > 0) return v.frames
@@ -256,11 +368,16 @@ export async function pyFrameCount(p: MediaProbe, path: string, o: { userId: str
     const estimated = roundHalfEven(seconds * (v.averageRate.num / v.averageRate.den))
     if (estimated > 0) return estimated
   }
-  const j = await ffprobeJson(path, p.format, ['-select_streams', 'v:0', '-show_entries', 'packet=pts'], o)
-  const pts = ((j.packets as Json[] | undefined) ?? []).map(k => int(k.pts))
-  const first = pts.findIndex(t => t !== null && t >= 0)
-  if (first < 0) throw new MediaError('unreadable')
-  return pts.length - first
+  // Streamed: every packet from the first stamped at or after 0 counts.
+  let counted = 0
+  let from = false
+  await ffprobeRecords(p.path, p.format, ['-select_streams', 'v:0', '-show_entries', 'packet=pts'], { userId: o.userId, signal: o.signal, timeoutMs: scanTimeoutMs(p.bytes) }, (k) => {
+    const t = int(k.pts)
+    if (!from && t !== null && t >= 0) from = true
+    if (from) counted++
+  })
+  if (!from) throw new MediaError('unreadable')
+  return counted
 }
 
 // ── Fraction(float).limit_denominator(), exactly ─────────────────────────────

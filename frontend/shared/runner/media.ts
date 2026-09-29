@@ -75,6 +75,8 @@ export const MEDIA_WORDS: Readonly<Record<MediaWord, string>> = {
 export const MEDIA_JOB_TIMEOUT_MS = { hosted: 10 * 60_000, local: 30 * 60_000, route: 30_000 } as const
 /** Rule 6: a header probe's own time limit. */
 export const MEDIA_PROBE_TIMEOUT_MS = 10_000
+/** A whole-file packet scan's own time limit grows by a millisecond per this many bytes (20 MB a second) on top of the probe's. */
+export const MEDIA_SCAN_BYTES_PER_MS = 20_000
 /** Rule 6: how much of a file a header probe may read (`-probesize`, bytes; `-analyzeduration`, µs). PyAV's own defaults. */
 export const MEDIA_PROBESIZE = 5_000_000
 export const MEDIA_ANALYZEDURATION = 5_000_000

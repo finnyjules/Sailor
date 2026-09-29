@@ -37,6 +37,7 @@ import os
 import platform
 import socket
 import sys
+import zlib
 from fractions import Fraction
 
 PROVIDER_KEYS = ("FAL_KEY", "FAL_API_KEY", "NUXT_REPLICATE_TOKEN", "REPLICATE_API_TOKEN")
@@ -62,6 +63,12 @@ FIXTURES = os.path.join(ROOT, "frontend", "tests", "unit", "fixtures")
 CLIPS = os.path.join(FIXTURES, "media")
 
 import av  # noqa: E402
+import logging  # noqa: E402
+
+# PyAV hands libav's own log lines to Python's logging. Reading the live Opus clip makes libopus
+# say "Error parsing Opus packet header." (its end-of-stream packet) on every run: silenced here,
+# as it is noise in a determinism check and changes no recorded value.
+logging.getLogger("libav").setLevel(logging.CRITICAL)
 import numpy as np  # noqa: E402
 import torch  # noqa: E402
 
@@ -225,6 +232,23 @@ def clip_h264(name: str, colour: str) -> None:
     c.close()
 
 
+def clip_h264_chroma(name: str, fmt: str, full: bool = False) -> None:
+    """H.264 with chroma that isn't 4:2:0 (libx264 tags its siting 'left'): 4:4:4 at 8 bits,
+    full-range 4:4:4, 4:4:4 at 10 bits and 4:2:2 at 10 bits. PyAV's conversion ignores the
+    siting on an axis that isn't subsampled (R5.1b review, Important 1)."""
+    path, c = open_out(name)
+    s = video_stream(c, "libx264", 32, 24, 24, fmt, X264)
+    if full:
+        s.codec_context.color_range = 2
+    frames = []
+    for i in range(8):
+        f = synth_frame(32, 24, 1000 + i).reformat(format=fmt)
+        f.pts = i
+        frames.append(f)
+    encode_frames(c, s, frames)
+    c.close()
+
+
 def clip_hevc10() -> None:
     path, c = open_out("v_hevc10.mp4")
     s = video_stream(c, "libx265", 32, 24, 24, "yuv420p10le", {"x265-params": "pools=none:frame-threads=1:log-level=error"})
@@ -381,6 +405,10 @@ def make_clips() -> list[str]:
     clip_h264("v_h264_601.mp4", "untagged")
     clip_h264("v_h264_709.mp4", "bt709")
     clip_h264("v_h264_full.mp4", "full")
+    clip_h264_chroma("v_h264_444.mp4", "yuv444p")
+    clip_h264_chroma("v_h264_444_full.mov", "yuvj444p", full=True)
+    clip_h264_chroma("v_h264_444_10.mp4", "yuv444p10le")
+    clip_h264_chroma("v_h264_422_10.mp4", "yuv422p10le")
     clip_hevc10()
     clip_vp9_odd()
     clip_vp9_live()
@@ -413,11 +441,17 @@ def rational(r) -> dict | None:
     return {"num": r.numerator, "den": r.denominator}
 
 
+def err(e: Exception) -> str:
+    """An error as recorded: its type and words, with the clips folder taken out of any path
+    (the fixture must be the same in every checkout, and names no one's home folder)."""
+    return f"{type(e).__name__}: {e}".replace(CLIPS + os.sep, "")
+
+
 def attempt(fn):
     try:
         v = fn()
     except Exception as e:  # noqa: BLE001 - the error itself is the record
-        return {"error": f"{type(e).__name__}: {e}"}
+        return {"error": err(e)}
     if isinstance(v, Fraction):
         return {"value": rational(v)}
     if isinstance(v, tuple):
@@ -487,13 +521,20 @@ def group_probe(names: list[str]) -> dict:
     return {"cases": cases}
 
 
-def sound_record(x: np.ndarray, rate: int) -> dict:
+# Sounds kept whole (zlib, base64) however large: the named not-exact cases, so their bound is
+# checked on every sample (R5.1b review, Minor 5). Opus decodes a few floats a last bit apart.
+SOUND_KEPT_WHOLE = {"a_opus.webm"}
+
+
+def sound_record(x: np.ndarray, rate: int, whole: bool = False) -> dict:
     """x: [C][N] float32 (a 'download' of a packed file is one interleaved row, as Python leaves it)."""
     x = np.ascontiguousarray(x, dtype=np.float32)
     rows = x.shape[0]
     raw = x.tobytes()
     rec = {"rate": rate, "rows": rows, "samples": int(x.shape[1]), "sha256": sha(raw)}
-    if len(raw) <= SOUND_INLINE_BYTES:
+    if whole:
+        rec["f32z"] = b64(zlib.compress(raw, 9))
+    elif len(raw) <= SOUND_INLINE_BYTES:
         rec["f32"] = b64(raw)
     else:
         rec["head"] = b64(np.ascontiguousarray(x[:, :SOUND_HEAD]).tobytes())
@@ -574,16 +615,16 @@ def group_decode(names: list[str]) -> dict:
             else:
                 case["components"] = None
         except Exception as e:  # noqa: BLE001
-            case["frames"] = {"error": f"{type(e).__name__}: {e}"}
+            case["frames"] = {"error": err(e)}
         try:
             wav, sr = load(path)
-            case["load"] = {**sound_record(wav.numpy(), int(sr)), "dtype": str(wav.dtype)}
+            case["load"] = {**sound_record(wav.numpy(), int(sr), name in SOUND_KEPT_WHOLE), "dtype": str(wav.dtype)}
         except Exception as e:  # noqa: BLE001
-            case["load"] = {"error": f"{type(e).__name__}: {e}"}
+            case["load"] = {"error": err(e)}
         try:
             case["download"] = run_download(path)
         except Exception as e:  # noqa: BLE001
-            case["download"] = {"error": f"{type(e).__name__}: {e}"}
+            case["download"] = {"error": err(e)}
         cases.append(case)
     return {"cases": cases}
 

@@ -4,14 +4,14 @@
   {
    "clip": "a_16.flac",
    "dimensions": {
-    "error": "ValueError: No video stream found in file '/Users/julien/Documents/GitHub/Sailor/frontend/tests/unit/fixtures/media/a_16.flac'"
+    "error": "ValueError: No video stream found in file 'a_16.flac'"
    },
    "frameCount": {
-    "error": "ValueError: No video stream found in file '/Users/julien/Documents/GitHub/Sailor/frontend/tests/unit/fixtures/media/a_16.flac'"
+    "error": "ValueError: No video stream found in file 'a_16.flac'"
    },
    "frameCountIntended": null,
    "frameRate": {
-    "error": "ValueError: No video stream found in file '/Users/julien/Documents/GitHub/Sailor/frontend/tests/unit/fixtures/media/a_16.flac'"
+    "error": "ValueError: No video stream found in file 'a_16.flac'"
    },
    "header": {
     "bytes": 43856,
@@ -41,14 +41,14 @@
   {
    "clip": "a_24.flac",
    "dimensions": {
-    "error": "ValueError: No video stream found in file '/Users/julien/Documents/GitHub/Sailor/frontend/tests/unit/fixtures/media/a_24.flac'"
+    "error": "ValueError: No video stream found in file 'a_24.flac'"
    },
    "frameCount": {
-    "error": "ValueError: No video stream found in file '/Users/julien/Documents/GitHub/Sailor/frontend/tests/unit/fixtures/media/a_24.flac'"
+    "error": "ValueError: No video stream found in file 'a_24.flac'"
    },
    "frameCountIntended": null,
    "frameRate": {
-    "error": "ValueError: No video stream found in file '/Users/julien/Documents/GitHub/Sailor/frontend/tests/unit/fixtures/media/a_24.flac'"
+    "error": "ValueError: No video stream found in file 'a_24.flac'"
    },
    "header": {
     "bytes": 114766,
@@ -78,14 +78,14 @@
   {
    "clip": "a_aac.m4a",
    "dimensions": {
-    "error": "ValueError: No video stream found in file '/Users/julien/Documents/GitHub/Sailor/frontend/tests/unit/fixtures/media/a_aac.m4a'"
+    "error": "ValueError: No video stream found in file 'a_aac.m4a'"
    },
    "frameCount": {
-    "error": "ValueError: No video stream found in file '/Users/julien/Documents/GitHub/Sailor/frontend/tests/unit/fixtures/media/a_aac.m4a'"
+    "error": "ValueError: No video stream found in file 'a_aac.m4a'"
    },
    "frameCountIntended": null,
    "frameRate": {
-    "error": "ValueError: No video stream found in file '/Users/julien/Documents/GitHub/Sailor/frontend/tests/unit/fixtures/media/a_aac.m4a'"
+    "error": "ValueError: No video stream found in file 'a_aac.m4a'"
    },
    "header": {
     "bytes": 13067,
@@ -115,14 +115,14 @@
   {
    "clip": "a_long_8k.wav",
    "dimensions": {
-    "error": "ValueError: No video stream found in file '/Users/julien/Documents/GitHub/Sailor/frontend/tests/unit/fixtures/media/a_long_8k.wav'"
+    "error": "ValueError: No video stream found in file 'a_long_8k.wav'"
    },
    "frameCount": {
-    "error": "ValueError: No video stream found in file '/Users/julien/Documents/GitHub/Sailor/frontend/tests/unit/fixtures/media/a_long_8k.wav'"
+    "error": "ValueError: No video stream found in file 'a_long_8k.wav'"
    },
    "frameCountIntended": null,
    "frameRate": {
-    "error": "ValueError: No video stream found in file '/Users/julien/Documents/GitHub/Sailor/frontend/tests/unit/fixtures/media/a_long_8k.wav'"
+    "error": "ValueError: No video stream found in file 'a_long_8k.wav'"
    },
    "header": {
     "bytes": 1200044,
@@ -152,14 +152,14 @@
   {
    "clip": "a_min.wav",
    "dimensions": {
-    "error": "ValueError: No video stream found in file '/Users/julien/Documents/GitHub/Sailor/frontend/tests/unit/fixtures/media/a_min.wav'"
+    "error": "ValueError: No video stream found in file 'a_min.wav'"
    },
    "frameCount": {
-    "error": "ValueError: No video stream found in file '/Users/julien/Documents/GitHub/Sailor/frontend/tests/unit/fixtures/media/a_min.wav'"
+    "error": "ValueError: No video stream found in file 'a_min.wav'"
    },
    "frameCountIntended": null,
    "frameRate": {
-    "error": "ValueError: No video stream found in file '/Users/julien/Documents/GitHub/Sailor/frontend/tests/unit/fixtures/media/a_min.wav'"
+    "error": "ValueError: No video stream found in file 'a_min.wav'"
    },
    "header": {
     "bytes": 22094,
@@ -189,14 +189,14 @@
   {
    "clip": "a_mono.mp3",
    "dimensions": {
-    "error": "ValueError: No video stream found in file '/Users/julien/Documents/GitHub/Sailor/frontend/tests/unit/fixtures/media/a_mono.mp3'"
+    "error": "ValueError: No video stream found in file 'a_mono.mp3'"
    },
    "frameCount": {
-    "error": "ValueError: No video stream found in file '/Users/julien/Documents/GitHub/Sailor/frontend/tests/unit/fixtures/media/a_mono.mp3'"
+    "error": "ValueError: No video stream found in file 'a_mono.mp3'"
    },
    "frameCountIntended": null,
    "frameRate": {
-    "error": "ValueError: No video stream found in file '/Users/julien/Documents/GitHub/Sailor/frontend/tests/unit/fixtures/media/a_mono.mp3'"
+    "error": "ValueError: No video stream found in file 'a_mono.mp3'"
    },
    "header": {
     "bytes": 17155,
@@ -226,14 +226,14 @@
   {
    "clip": "a_opus.webm",
    "dimensions": {
-    "error": "ValueError: No video stream found in file '/Users/julien/Documents/GitHub/Sailor/frontend/tests/unit/fixtures/media/a_opus.webm'"
+    "error": "ValueError: No video stream found in file 'a_opus.webm'"
    },
    "frameCount": {
-    "error": "ValueError: No video stream found in file '/Users/julien/Documents/GitHub/Sailor/frontend/tests/unit/fixtures/media/a_opus.webm'"
+    "error": "ValueError: No video stream found in file 'a_opus.webm'"
    },
    "frameCountIntended": null,
    "frameRate": {
-    "error": "ValueError: No video stream found in file '/Users/julien/Documents/GitHub/Sailor/frontend/tests/unit/fixtures/media/a_opus.webm'"
+    "error": "ValueError: No video stream found in file 'a_opus.webm'"
    },
    "header": {
     "bytes": 20846,
@@ -257,20 +257,20 @@
     "video": []
    },
    "rawDuration": {
-    "error": "ValueError: Could not determine duration for file '/Users/julien/Documents/GitHub/Sailor/frontend/tests/unit/fixtures/media/a_opus.webm'"
+    "error": "ValueError: Could not determine duration for file 'a_opus.webm'"
    }
   },
   {
    "clip": "a_s16.wav",
    "dimensions": {
-    "error": "ValueError: No video stream found in file '/Users/julien/Documents/GitHub/Sailor/frontend/tests/unit/fixtures/media/a_s16.wav'"
+    "error": "ValueError: No video stream found in file 'a_s16.wav'"
    },
    "frameCount": {
-    "error": "ValueError: No video stream found in file '/Users/julien/Documents/GitHub/Sailor/frontend/tests/unit/fixtures/media/a_s16.wav'"
+    "error": "ValueError: No video stream found in file 'a_s16.wav'"
    },
    "frameCountIntended": null,
    "frameRate": {
-    "error": "ValueError: No video stream found in file '/Users/julien/Documents/GitHub/Sailor/frontend/tests/unit/fixtures/media/a_s16.wav'"
+    "error": "ValueError: No video stream found in file 'a_s16.wav'"
    },
    "header": {
     "bytes": 176444,
@@ -300,14 +300,14 @@
   {
    "clip": "a_s24.wav",
    "dimensions": {
-    "error": "ValueError: No video stream found in file '/Users/julien/Documents/GitHub/Sailor/frontend/tests/unit/fixtures/media/a_s24.wav'"
+    "error": "ValueError: No video stream found in file 'a_s24.wav'"
    },
    "frameCount": {
-    "error": "ValueError: No video stream found in file '/Users/julien/Documents/GitHub/Sailor/frontend/tests/unit/fixtures/media/a_s24.wav'"
+    "error": "ValueError: No video stream found in file 'a_s24.wav'"
    },
    "frameCountIntended": null,
    "frameRate": {
-    "error": "ValueError: No video stream found in file '/Users/julien/Documents/GitHub/Sailor/frontend/tests/unit/fixtures/media/a_s24.wav'"
+    "error": "ValueError: No video stream found in file 'a_s24.wav'"
    },
    "header": {
     "bytes": 264668,
@@ -337,14 +337,14 @@
   {
    "clip": "a_s32.wav",
    "dimensions": {
-    "error": "ValueError: No video stream found in file '/Users/julien/Documents/GitHub/Sailor/frontend/tests/unit/fixtures/media/a_s32.wav'"
+    "error": "ValueError: No video stream found in file 'a_s32.wav'"
    },
    "frameCount": {
-    "error": "ValueError: No video stream found in file '/Users/julien/Documents/GitHub/Sailor/frontend/tests/unit/fixtures/media/a_s32.wav'"
+    "error": "ValueError: No video stream found in file 'a_s32.wav'"
    },
    "frameCountIntended": null,
    "frameRate": {
-    "error": "ValueError: No video stream found in file '/Users/julien/Documents/GitHub/Sailor/frontend/tests/unit/fixtures/media/a_s32.wav'"
+    "error": "ValueError: No video stream found in file 'a_s32.wav'"
    },
    "header": {
     "bytes": 352868,
@@ -374,14 +374,14 @@
   {
    "clip": "a_vorbis.ogg",
    "dimensions": {
-    "error": "ValueError: No video stream found in file '/Users/julien/Documents/GitHub/Sailor/frontend/tests/unit/fixtures/media/a_vorbis.ogg'"
+    "error": "ValueError: No video stream found in file 'a_vorbis.ogg'"
    },
    "frameCount": {
-    "error": "ValueError: No video stream found in file '/Users/julien/Documents/GitHub/Sailor/frontend/tests/unit/fixtures/media/a_vorbis.ogg'"
+    "error": "ValueError: No video stream found in file 'a_vorbis.ogg'"
    },
    "frameCountIntended": null,
    "frameRate": {
-    "error": "ValueError: No video stream found in file '/Users/julien/Documents/GitHub/Sailor/frontend/tests/unit/fixtures/media/a_vorbis.ogg'"
+    "error": "ValueError: No video stream found in file 'a_vorbis.ogg'"
    },
    "header": {
     "bytes": 8016,
@@ -455,6 +455,202 @@
    },
    "rawDuration": {
     "value": 0.25
+   }
+  },
+  {
+   "clip": "v_h264_422_10.mp4",
+   "dimensions": {
+    "value": [
+     32,
+     24
+    ]
+   },
+   "frameCount": {
+    "value": 8
+   },
+   "frameCountIntended": 8,
+   "frameRate": {
+    "value": {
+     "den": 1,
+     "num": 24
+    }
+   },
+   "header": {
+    "bytes": 2468,
+    "containerDuration": 333333,
+    "formatName": "mov,mp4,m4a,3gp,3g2,mj2",
+    "sound": [],
+    "video": [
+     {
+      "averageRate": {
+       "den": 1,
+       "num": 24
+      },
+      "codec": "h264",
+      "colorRange": 0,
+      "colorSpace": 2,
+      "duration": 4096,
+      "frames": 8,
+      "h": 24,
+      "index": 0,
+      "pixFmt": "yuv422p10le",
+      "timeBase": {
+       "den": 12288,
+       "num": 1
+      },
+      "w": 32
+     }
+    ]
+   },
+   "rawDuration": {
+    "value": 0.333333
+   }
+  },
+  {
+   "clip": "v_h264_444.mp4",
+   "dimensions": {
+    "value": [
+     32,
+     24
+    ]
+   },
+   "frameCount": {
+    "value": 8
+   },
+   "frameCountIntended": 8,
+   "frameRate": {
+    "value": {
+     "den": 1,
+     "num": 24
+    }
+   },
+   "header": {
+    "bytes": 2529,
+    "containerDuration": 333333,
+    "formatName": "mov,mp4,m4a,3gp,3g2,mj2",
+    "sound": [],
+    "video": [
+     {
+      "averageRate": {
+       "den": 1,
+       "num": 24
+      },
+      "codec": "h264",
+      "colorRange": 0,
+      "colorSpace": 2,
+      "duration": 4096,
+      "frames": 8,
+      "h": 24,
+      "index": 0,
+      "pixFmt": "yuv444p",
+      "timeBase": {
+       "den": 12288,
+       "num": 1
+      },
+      "w": 32
+     }
+    ]
+   },
+   "rawDuration": {
+    "value": 0.333333
+   }
+  },
+  {
+   "clip": "v_h264_444_10.mp4",
+   "dimensions": {
+    "value": [
+     32,
+     24
+    ]
+   },
+   "frameCount": {
+    "value": 8
+   },
+   "frameCountIntended": 8,
+   "frameRate": {
+    "value": {
+     "den": 1,
+     "num": 24
+    }
+   },
+   "header": {
+    "bytes": 2518,
+    "containerDuration": 333333,
+    "formatName": "mov,mp4,m4a,3gp,3g2,mj2",
+    "sound": [],
+    "video": [
+     {
+      "averageRate": {
+       "den": 1,
+       "num": 24
+      },
+      "codec": "h264",
+      "colorRange": 0,
+      "colorSpace": 2,
+      "duration": 4096,
+      "frames": 8,
+      "h": 24,
+      "index": 0,
+      "pixFmt": "yuv444p10le",
+      "timeBase": {
+       "den": 12288,
+       "num": 1
+      },
+      "w": 32
+     }
+    ]
+   },
+   "rawDuration": {
+    "value": 0.333333
+   }
+  },
+  {
+   "clip": "v_h264_444_full.mov",
+   "dimensions": {
+    "value": [
+     32,
+     24
+    ]
+   },
+   "frameCount": {
+    "value": 8
+   },
+   "frameCountIntended": 8,
+   "frameRate": {
+    "value": {
+     "den": 1,
+     "num": 24
+    }
+   },
+   "header": {
+    "bytes": 2610,
+    "containerDuration": 333333,
+    "formatName": "mov,mp4,m4a,3gp,3g2,mj2",
+    "sound": [],
+    "video": [
+     {
+      "averageRate": {
+       "den": 1,
+       "num": 24
+      },
+      "codec": "h264",
+      "colorRange": 2,
+      "colorSpace": 2,
+      "duration": 4096,
+      "frames": 8,
+      "h": 24,
+      "index": 0,
+      "pixFmt": "yuvj444p",
+      "timeBase": {
+       "den": 12288,
+       "num": 1
+      },
+      "w": 32
+     }
+    ]
+   },
+   "rawDuration": {
+    "value": 0.333333
    }
   },
   {
@@ -1051,6 +1247,10 @@
   "a_s32.wav": "76df4a5c25b8a48cbcea20da09c57ce050853cf17db7c9e23ce60b8e900ecc76",
   "a_vorbis.ogg": "9d263b53ec8d5452e0de962d95d2116251cb15949b1a7611f021293608ee7a9e",
   "v_editlist.mp4": "556be520906c281d1f93d6a3ccaf022368be9edb5914ef2b2349a64c9c0efa36",
+  "v_h264_422_10.mp4": "f623cf8ae9d2f92f841d52b6670fbac58fb04fc54d0d3df2557117d6ec2f1842",
+  "v_h264_444.mp4": "e3b8d29f7a0f5102d1d6d0e62bbbf53b63358d6c3674f6c5538c9c705a2cc08a",
+  "v_h264_444_10.mp4": "b9da697643c3720a15323d00267e65715ec0957f7b483328a9dca76c0e9d71a9",
+  "v_h264_444_full.mov": "6eb9067777bee7130a376fd60d40af752a2e1b59f7208ee68fa86daa1682cb33",
   "v_h264_601.mp4": "8cb151469583d71cc5d37aac52eb49f95db4abd1e9fcfacd2eb089993ac6bbb3",
   "v_h264_709.mp4": "716e5f2718e108521113cba161b4151d00afaeb99048ac7802f010ee80adcbba",
   "v_h264_full.mp4": "c53e2fc064db2808fd06b94a102b2740c4ce5472fc3cce131a0f32a91fcc98d3",

@@ -12,11 +12,14 @@
  *   select=gte(pts\,0),scale=w=iw:h=ih:eval=frame:flags=bilinear[:in_h_chr_pos=X:in_v_chr_pos=Y],format=rgb24
  *
  * where X, Y are the stream's chroma location as sws reads it
- * (av_chroma_location_enum_to_pos), given only when the file names one: the
- * filter's own default ignores it, and PyAV's conversion honours it (it
- * matters where sws really scales chroma, e.g. 10-bit HEVC; 8-bit 4:2:0
- * takes sws's unscaled path either way). With `-copyts` the select filter
- * sees the real pts, as Python's `frame.pts < start_pts` does;
+ * (av_chroma_location_enum_to_pos), each given only when the file names a
+ * location AND chroma is subsampled on that axis (X for 4:2:0, 4:2:2, 4:1:1;
+ * Y for 4:2:0, 4:4:0): the filter's own default ignores the siting, and
+ * PyAV's conversion honours it only where chroma is subsampled. It matters
+ * where sws really scales chroma (10-bit, 4:2:2, 4:4:4); 8-bit 4:2:0 takes
+ * sws's unscaled path either way. Every clip in the fixtures, including
+ * tagged 4:4:4 (8-bit, full range, 10-bit) and 10-bit 4:2:2, is byte-equal.
+ * With `-copyts` the select filter sees the real pts, as Python's `frame.pts < start_pts` does;
  * `-reinit_filter 0` and `eval=frame` keep a frame of a new size at its own
  * size, and `-stats_mux_pre pipe:3` reports each frame's size and pts, so a
  * size change fails (MEDIA_WORDS.sizeChanged, as Python's torch.stack does)
@@ -42,17 +45,47 @@
  */
 import { isHosted } from '../utils/deployMode'
 import { MediaError, inputArgs, runMedia } from './run'
-import { mediaCapsWord, probeCaps, probeMedia, type MediaProbe, type SoundStreamProbe, type VideoStreamProbe } from './probe'
+import { ffprobeJson, mediaCapsWord, probeMedia, resolveMediaInput, type MediaProbe, type SoundStreamProbe, type VideoStreamProbe } from './probe'
 
 /** sws's position for a chroma location, in 1/256 of a pixel (av_chroma_location_enum_to_pos). */
 const CHROMA_POS: Readonly<Record<string, [number, number]>> = {
   left: [0, 128], center: [128, 128], topleft: [0, 0], top: [128, 0], bottomleft: [0, 256], bottom: [128, 256],
 }
 
-/** The picture filter, from the probe's numbers and fixed words only. Exported for tests. */
-export function framesFilter(v: Pick<VideoStreamProbe, 'chromaLocation'>): string {
+/**
+ * Whether a pixel format's chroma is subsampled across (w) and down (h):
+ * its log2_chroma_w / log2_chroma_h are above 0. Null for a format with no
+ * chroma planes to site (RGB, grey) or one this table doesn't know.
+ */
+export function chromaSubsampling(pixFmt: string): { w: boolean; h: boolean } | null {
+  const m = /^(?:yuva?j?|yuvj)(420|422|444|440|411|410)/.exec(pixFmt)
+  const kind = m ? m[1]!
+    : /^(?:nv12|nv21|p010|p012|p016)/.test(pixFmt) ? '420'
+    : /^(?:nv16|nv20|p210|p212|p216)/.test(pixFmt) ? '422'
+    : /^(?:nv24|nv42|p410|p412|p416)/.test(pixFmt) ? '444'
+    : null
+  switch (kind) {
+    case '420': case '410': return { w: true, h: true }
+    case '422': case '411': return { w: true, h: false }
+    case '440': return { w: false, h: true }
+    case '444': return { w: false, h: false }
+    default: return null
+  }
+}
+
+/**
+ * The picture filter, from the probe's numbers and fixed words only. The
+ * chroma siting is passed only on an axis where chroma is subsampled, as
+ * PyAV's sws conversion reads it (R5.1b review, Important 1: on 4:4:4 and
+ * 4:2:2 a position on a full-resolution axis moves the picture). Exported
+ * for tests.
+ */
+export function framesFilter(v: Pick<VideoStreamProbe, 'chromaLocation' | 'pixFmt'>): string {
   const pos = v.chromaLocation && Object.hasOwn(CHROMA_POS, v.chromaLocation) ? CHROMA_POS[v.chromaLocation]! : null
-  const chroma = pos ? `:in_h_chr_pos=${pos[0]}:in_v_chr_pos=${pos[1]}` : ''
+  const sub = chromaSubsampling(v.pixFmt)
+  let chroma = ''
+  if (pos && sub?.w) chroma += `:in_h_chr_pos=${pos[0]}`
+  if (pos && sub?.h) chroma += `:in_v_chr_pos=${pos[1]}`
   return `select=gte(pts\\,0),scale=w=iw:h=ih:eval=frame:flags=bilinear${chroma},format=rgb24`
 }
 
@@ -66,6 +99,13 @@ function parseStat(line: string): FrameStat | null {
   return { size: Number(m[1]), pts }
 }
 
+/** The probe of a checked input: the caller's own (for this very file), or a fresh one. */
+async function probeFor(path: string, o: { userId: string | null; signal?: AbortSignal; roots: readonly string[]; probe?: MediaProbe }, kind: 'video' | 'sound'): Promise<MediaProbe> {
+  if (!o.probe) return probeMedia(path, { userId: o.userId, signal: o.signal, roots: o.roots, kind })
+  if ((await resolveMediaInput(path, o.roots)) !== o.probe.path) throw new MediaError('unreadable')
+  return o.probe
+}
+
 /**
  * Every frame of the first video stream with pts ≥ 0, as rgb24, handed to
  * `onFrame` one at a time (memory never holds more than one frame). Past
@@ -76,10 +116,12 @@ export async function decodeFrames(path: string, o: {
   userId: string | null; signal?: AbortSignal
   maxFrames: number
   onFrame(rgb: Uint8Array, index: number, pts: number): Promise<void>
+  /** The folders the file must really be in (the person's own; `resolveMediaInput`). */
+  roots: readonly string[]
   /** A probe already made of this file (saves a second one). */
   probe?: MediaProbe
 }): Promise<{ count: number; w: number; h: number }> {
-  const p = o.probe ?? await probeMedia(path, { userId: o.userId, signal: o.signal })
+  const p = await probeFor(path, o, 'video')
   const refused = mediaCapsWord(p, 'video', isHosted())
   if (refused) throw new MediaError(refused)
   const v = p.video[0]!
@@ -118,7 +160,7 @@ export async function decodeFrames(path: string, o: {
 
   const args = [
     '-copyts', '-reinit_filter', '0', '-noautorotate',
-    ...inputArgs(path, p.format),
+    ...inputArgs(p.path, p.format),
     '-map', '0:v:0', '-fps_mode', 'passthrough',
     '-vf', framesFilter(v),
     '-stats_mux_pre', 'pipe:3', '-stats_mux_pre_fmt', '{size} {ptsi} {tbi}',
@@ -177,28 +219,17 @@ const FLOAT_FORMATS = new Set(['flt', 'fltp', 'dbl', 'dblp'])
  * The leading frames' pts and sizes (ffprobe, the first `packets` packets of
  * the stream), for get_components' skip rule.
  */
-async function leadingFrames(path: string, p: MediaProbe, k: number, packets: number, o: { userId: string | null; signal?: AbortSignal }): Promise<{ pts: number | null; samples: number }[]> {
-  let out: Uint8Array | null
-  try {
-    ({ stdout: out } = await runMedia({
-      tool: 'ffprobe',
-      args: [...probeCaps(), ...inputArgs(path, p.format), '-select_streams', `a:${k}`, '-read_intervals', `%+#${packets}`, '-show_entries', 'frame=pts,nb_samples', '-of', 'json'],
-      userId: o.userId, signal: o.signal,
-    }))
-  }
-  catch (e) {
-    if (e instanceof MediaError && e.word === 'failed') throw new MediaError('unreadable')
-    throw e
-  }
-  const j = JSON.parse(Buffer.from(out!).toString('utf8')) as { frames?: { pts?: number; nb_samples?: number }[] }
-  return (j.frames ?? []).map(f => ({ pts: typeof f.pts === 'number' ? f.pts : null, samples: f.nb_samples ?? 0 }))
+async function leadingFrames(p: MediaProbe, k: number, packets: number, o: { userId: string | null; signal?: AbortSignal }): Promise<{ pts: number | null; samples: number }[]> {
+  const j = await ffprobeJson(p.path, p.format, ['-select_streams', `a:${k}`, '-read_intervals', `%+#${packets}`, '-show_entries', 'frame=pts,nb_samples'], o)
+  const frames = Array.isArray(j.frames) ? (j.frames as { pts?: unknown; nb_samples?: unknown }[]) : []
+  return frames.map(f => ({ pts: typeof f.pts === 'number' ? f.pts : null, samples: typeof f.nb_samples === 'number' ? f.nb_samples : 0 }))
 }
 
 /** How many samples get_components drops before t = 0, frame by frame; null when no frame reaches 0 (Python's sound is then None). */
-async function samplesBeforeZero(path: string, p: MediaProbe, k: number, s: SoundStreamProbe, o: { userId: string | null; signal?: AbortSignal }): Promise<number | null> {
+async function samplesBeforeZero(p: MediaProbe, k: number, s: SoundStreamProbe, o: { userId: string | null; signal?: AbortSignal }): Promise<number | null> {
   const num = BigInt(s.timeBase.num); const den = BigInt(s.timeBase.den); const rate = BigInt(s.rate)
   for (let packets = 64; ; packets *= 4) {
-    const frames = await leadingFrames(path, p, k, packets, o)
+    const frames = await leadingFrames(p, k, packets, o)
     let skipped = 0
     for (const f of frames) {
       if (f.pts === null) throw new MediaError('unreadable')   // Python: None * time_base raises
@@ -219,9 +250,11 @@ async function samplesBeforeZero(path: string, p: MediaProbe, k: number, s: Soun
 export async function decodeAudio(path: string, o: {
   decoder: SoundDecoder; stream?: 'first' | 'last'
   userId: string | null; signal?: AbortSignal; maxSamples: number
+  /** The folders the file must really be in (the person's own; `resolveMediaInput`). */
+  roots: readonly string[]
   probe?: MediaProbe
 }): Promise<DecodedSound> {
-  const p = o.probe ?? await probeMedia(path, { userId: o.userId, signal: o.signal })
+  const p = await probeFor(path, o, 'sound')
   const refused = mediaCapsWord(p, 'sound', isHosted())
   if (refused) throw new MediaError(refused)
   const k = (o.stream ?? (o.decoder === 'fltp' ? 'last' : 'first')) === 'last' ? p.sound.length - 1 : 0
@@ -233,17 +266,30 @@ export async function decodeAudio(path: string, o: {
   if (!known) throw new MediaError('unreadable')
   if (o.decoder === 'load' && (s.sampleFmt === 'u8' || s.sampleFmt === 'u8p')) throw new MediaError('unreadable')
 
-  const skip = o.decoder === 'fltp' ? await samplesBeforeZero(path, p, k, s, o) : 0
+  const skip = o.decoder === 'fltp' ? await samplesBeforeZero(p, k, s, o) : 0
   const rate = o.decoder === 'download' ? (s.rate || 44100) : o.decoder === 'fltp' ? (s.rate || 1) : s.rate
   if (skip === null) return { rate, channels: Array.from({ length: C }, () => new Float32Array(0)) }
 
-  // Interleaved float32, gathered in blocks; the cap is checked as it streams.
-  const blocks: Float32Array[] = []
-  let floats = 0
+  // Straight into the channels, de-interleaved as the samples stream: one buffer per channel, sized
+  // from the header and grown only if the file holds more (peak memory ≈ the sound itself, R5.1b review
+  // Minor 2). The cap is checked as it streams.
+  const perChannelCap = Math.floor(o.maxSamples / C)
+  const stated = s.duration !== null ? (s.duration * s.timeBase.num) / s.timeBase.den
+    : p.containerDuration !== null ? p.containerDuration / 1e6 : (s.measuredSeconds ?? 0)
+  let capacity = Math.min(perChannelCap, Math.ceil(stated * s.rate) + 8192)
+  let channels = Array.from({ length: C }, () => new Float32Array(capacity))
+  const grow = () => {
+    if (capacity >= perChannelCap) throw new MediaError('tooLong')
+    const next = Math.min(perChannelCap, Math.max(capacity + 65536, Math.ceil(capacity * 1.25)))
+    channels = channels.map((ch) => { const g = new Float32Array(next); g.set(ch); return g })
+    capacity = next
+  }
+  let c = 0
+  let n = -skip
   let carry = new Uint8Array(0)
   await runMedia({
     tool: 'ffmpeg',
-    args: [...inputArgs(path, p.format), '-map', `0:a:${k}`, '-c:a', 'pcm_f32le', '-f', 'f32le', 'pipe:1'],
+    args: [...inputArgs(p.path, p.format), '-map', `0:a:${k}`, '-c:a', 'pcm_f32le', '-f', 'f32le', 'pipe:1'],
     userId: o.userId, signal: o.signal,
     onStdout: (chunk) => {
       let bytes = chunk
@@ -256,35 +302,29 @@ export async function decodeAudio(path: string, o: {
       const whole = bytes.length - (bytes.length % 4)
       carry = bytes.slice(whole)
       if (!whole) return
-      floats += whole / 4
-      if (floats > o.maxSamples + skip * C) throw new MediaError('tooLong')
-      const block = new Float32Array(whole / 4)
-      new Uint8Array(block.buffer).set(bytes.subarray(0, whole))
-      blocks.push(block)
+      // An aligned copy of this chunk only (a pipe chunk is 64 KiB at most).
+      const floats = new Float32Array(whole / 4)
+      new Uint8Array(floats.buffer).set(bytes.subarray(0, whole))
+      for (let j = 0; j < floats.length; j++) {
+        if (n >= 0) {
+          if (n >= capacity) grow()
+          channels[c]![n] = floats[j]!
+        }
+        if (++c === C) { c = 0; n++ }
+      }
     },
   })
-  if (carry.length || floats % C !== 0) throw new MediaError('failed')
+  if (carry.length || c !== 0) throw new MediaError('failed')
 
-  const N = floats / C - skip
-  if (N < 0) return { rate, channels: Array.from({ length: C }, () => new Float32Array(0)) }
-  const channels = Array.from({ length: C }, () => new Float32Array(N))
-  let c = 0
-  let n = -skip
-  for (const b of blocks) {
-    for (let j = 0; j < b.length; j++) {
-      if (n >= 0) channels[c]![n] = b[j]!
-      if (++c === C) { c = 0; n++ }
-    }
-  }
-
+  const N = Math.max(0, n)
+  const out = channels.map(ch => ch.subarray(0, N))
   if (o.decoder === 'download') {
     // Back to the samples' own scale (int16 and int32 as float32; u8 as 0…255), then Python's peak rule.
-    if (intScale !== null) for (const ch of channels) for (let n = 0; n < N; n++) ch[n] = ch[n]! * intScale
-    else if (s.sampleFmt === 'u8' || s.sampleFmt === 'u8p') for (const ch of channels) for (let n = 0; n < N; n++) ch[n] = ch[n]! * 128 + 128
+    if (intScale !== null) for (const ch of out) for (let i = 0; i < N; i++) ch[i] = ch[i]! * intScale
+    else if (s.sampleFmt === 'u8' || s.sampleFmt === 'u8p') for (const ch of out) for (let i = 0; i < N; i++) ch[i] = ch[i]! * 128 + 128
     let peak = 0
-    for (const ch of channels) for (let n = 0; n < N; n++) { const a = Math.abs(ch[n]!); if (a > peak) peak = a }
-    if (peak > 1.5) for (const ch of channels) for (let n = 0; n < N; n++) ch[n] = ch[n]! / peak
+    for (const ch of out) for (let i = 0; i < N; i++) { const a = Math.abs(ch[i]!); if (a > peak) peak = a }
+    if (peak > 1.5) for (const ch of out) for (let i = 0; i < N; i++) ch[i] = ch[i]! / peak
   }
-  return { rate, channels }
+  return { rate, channels: out }
 }
-

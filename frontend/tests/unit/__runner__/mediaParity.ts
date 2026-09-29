@@ -12,6 +12,9 @@ import { mediaTools, type MediaTools } from '~~/server/media/tools'
 
 const FIXTURES = fileURLToPath(new URL('../fixtures/', import.meta.url))
 
+/** The folder the standard clips must really be in (the media module's `roots`). */
+export const CLIP_ROOTS: readonly string[] = [resolve(FIXTURES, 'media')]
+
 /** A standard clip's absolute path. */
 export function clipPath(name: string): string {
   return resolve(FIXTURES, 'media', name)
@@ -42,7 +45,7 @@ export interface ProbeCase {
 }
 
 /** A float32 sound: whole (base64) when small, else its sha256 and each channel's first 256 samples. */
-export interface PySound { rate: number; rows: number; samples: number; sha256: string; f32?: string; head?: string; dtype?: string }
+export interface PySound { rate: number; rows: number; samples: number; sha256: string; f32?: string; f32z?: string; head?: string; dtype?: string }
 export interface DecodeCase {
   clip: string
   frames: { w: number; h: number; list: { sha256: string; rgb?: string }[] } | { error: string }

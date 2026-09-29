@@ -5,14 +5,14 @@
  * recorded by scripts/runner_media_fixtures.py --group probe, must come out
  * the same from Sailor's own ffprobe. Needs the real build (R5.1a).
  */
-import { readFileSync } from 'node:fs'
+import { readFileSync, realpathSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import {
   checkMediaCaps, limitDenominator, probeMedia, pyFrameCount, pyFrameRate, pyRawDuration, type MediaProbe,
 } from '~~/server/media/probe'
 import { askTool, parseProtocols } from '~~/server/media/tools'
 import { MEDIA_WORDS } from '#shared/runner/media'
-import { clipPath, mediaFixture, requireMediaTools, sha256Hex, type ProbeCase } from './__runner__/mediaParity'
+import { CLIP_ROOTS, clipPath, mediaFixture, requireMediaTools, sha256Hex, type ProbeCase } from './__runner__/mediaParity'
 
 const FIX = mediaFixture<ProbeCase>('probe')
 const LONG = { timeout: 120_000 }
@@ -24,7 +24,7 @@ const SPACE: Record<number, string | null> = { 0: 'gbr', 1: 'bt709', 2: null, 5:
 const CODEC: Record<string, string> = { mp3float: 'mp3' }
 
 async function probeOf(clip: string): Promise<MediaProbe> {
-  return probeMedia(clipPath(clip), { userId: null })
+  return probeMedia(clipPath(clip), { userId: null, roots: CLIP_ROOTS })
 }
 
 describe('the fixture', () => {
@@ -33,6 +33,8 @@ describe('the fixture', () => {
     expect(FIX.libraries.libavcodec).toEqual([62, 11, 100])
     expect(FIX.libraries.libswscale).toEqual([9, 1, 100])
     for (const [name, sha] of Object.entries(FIX.clips)) expect(sha256Hex(readFileSync(clipPath(name))), name).toBe(sha)
+    // Paths are relative to the fixture folder: the same in every checkout.
+    expect(JSON.stringify(FIX)).not.toMatch(/\/Users\/|\/home\/|fixtures\/media\//)
   })
 })
 
@@ -45,6 +47,7 @@ describe('probeMedia equals PyAV', () => {
       expect(p.formatName, c.clip).toBe(h.formatName)
       expect(p.containerDuration, c.clip).toBe(h.containerDuration)
       expect(p.bytes, c.clip).toBe(h.bytes)
+      expect(p.path, c.clip).toBe(realpathSync(clipPath(c.clip)))
       expect(p.video.map(v => ({ ...v, chromaLocation: undefined })), c.clip).toEqual(h.video.map(v => ({
         index: v.index, w: v.w, h: v.h, codec: CODEC[v.codec] ?? v.codec, pixFmt: v.pixFmt,
         averageRate: v.averageRate, frames: v.frames || null, duration: v.duration, timeBase: v.timeBase,
@@ -103,7 +106,7 @@ describe('probeMedia equals PyAV', () => {
 
 describe('get_frame_rate’s fallback: Fraction(frames / seconds).limit_denominator()', () => {
   const probe = (frames: number, us: number): MediaProbe => ({
-    format: 'mp4', formatName: 'mov', containerDuration: us, bytes: 0, videoPackets: null, sound: [],
+    path: '/x.mp4', format: 'mp4', formatName: 'mov', containerDuration: us, bytes: 0, videoPackets: null, sound: [],
     video: [{ index: 0, w: 2, h: 2, codec: 'h264', pixFmt: 'yuv420p', averageRate: null, frames, duration: null, timeBase: { num: 1, den: 1000 }, colorRange: null, colorSpace: null, chromaLocation: null }],
   })
   it('matches CPython 3.12 (answers printed by .venv/bin/python)', () => {

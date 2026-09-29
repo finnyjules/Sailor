@@ -6,11 +6,12 @@
  * scripts/runner_media_fixtures.py --group decode recorded them. Needs the
  * real build (R5.1a).
  */
+import { inflateSync } from 'node:zlib'
 import { describe, expect, it } from 'vitest'
-import { decodeAudio, decodeFrames, framesFilter, type DecodedSound, type SoundDecoder } from '~~/server/media/decode'
+import { chromaSubsampling, decodeAudio, decodeFrames, framesFilter, type DecodedSound, type SoundDecoder } from '~~/server/media/decode'
 import { MEDIA_WORDS } from '#shared/runner/media'
 import {
-  clipPath, deinterleave, f32, mediaFixture, requireMediaTools, sha256Hex, soundBytes, type DecodeCase, type PySound,
+  CLIP_ROOTS, clipPath, deinterleave, f32, mediaFixture, requireMediaTools, sha256Hex, soundBytes, type DecodeCase, type PySound,
 } from './__runner__/mediaParity'
 
 const FIX = mediaFixture<DecodeCase>('decode')
@@ -19,18 +20,21 @@ const BIG = Number.MAX_SAFE_INTEGER
 
 /**
  * Cases that can't be made bit-equal, each named in the R5.1b report:
- * Opus decodes a float or two a last bit apart (150 of 96,000 samples, at most
+ * Opus decodes some floats a last bit apart (159 of 96,000 samples, at most
  * 2⁻²⁴): FFmpeg's float Opus decoder built by a different compiler from
- * PyAV's wheel. Measured, not guessed: the bound is checked.
+ * PyAV's wheel. Measured, not guessed: the fixture keeps Python's whole
+ * sound, and every sample is checked against the bound.
  */
 const OPUS_ULP = new Set(['a_opus.webm'])
+/** How many of the Opus clip's samples are a last bit off (measured on this build). */
+const OPUS_DIFFER = 159
 
 function isSound(x: PySound | { error: string } | null | undefined): x is PySound {
   return !!x && !('error' in x)
 }
 
 /** Compares a decode with Python's record; `interleaved`: Python's row is one packed stereo row (ruling k). */
-function expectSound(got: DecodedSound, want: PySound, label: string, o: { interleaved?: number; ulp?: boolean } = {}): void {
+function expectSound(got: DecodedSound, want: PySound, label: string, o: { interleaved?: number; ulp?: PySound } = {}): void {
   expect(got.rate, label).toBe(want.rate)
   let wantChannels: Float32Array[] | null = null
   if (want.f32) {
@@ -44,14 +48,19 @@ function expectSound(got: DecodedSound, want: PySound, label: string, o: { inter
   expect(got.channels.length, label).toBe(channels)
   for (const ch of got.channels) expect(ch.length, label).toBe(samples)
   if (o.ulp) {
-    // Only the head is kept for a large sound; compare it within the named bound, and the length exactly.
-    const head = want.head ? f32(want.head) : f32(want.f32!)
-    const n = want.head ? Math.min(256, want.samples) : want.samples
+    // The fixture keeps the whole sound for a named case: every sample within the bound, and the count exact.
+    const all = f32(inflateSync(Buffer.from(o.ulp.f32z!, 'base64')).toString('base64'))
     let worst = 0
-    for (let c = 0; c < want.rows; c++) {
-      for (let i = 0; i < n; i++) worst = Math.max(worst, Math.abs(got.channels[c]![i]! - head[c * n + i]!))
+    let differ = 0
+    for (let c = 0; c < channels; c++) {
+      for (let i = 0; i < samples; i++) {
+        const d = Math.abs(got.channels[c]![i]! - all[c * samples + i]!)
+        if (d) differ++
+        worst = Math.max(worst, d)
+      }
     }
     expect(worst, label).toBeLessThanOrEqual(2 ** -24)
+    expect(differ, label).toBe(OPUS_DIFFER)
     return
   }
   if (o.interleaved) {
@@ -66,14 +75,14 @@ function expectSound(got: DecodedSound, want: PySound, label: string, o: { inter
 }
 
 describe('decodeFrames equals PyAV’s to_ndarray(rgb24)', () => {
-  it('is byte-equal on every clip (H.264 untagged, BT.709 and full range, HEVC 10-bit, VP9 63×47, ProRes, VFR, Matroska, the live WebM)', LONG, async () => {
+  it('is byte-equal on every clip (H.264 untagged, BT.709 and full range, 4:4:4 at 8 bits, full range and 10 bits, 4:2:2 at 10 bits, HEVC 10-bit, VP9 63×47, ProRes, VFR, Matroska, the live WebM)', LONG, async () => {
     await requireMediaTools()
     let clips = 0
     for (const c of FIX.cases) {
       const path = clipPath(c.clip)
       if ('error' in c.frames) {
         if (/No video stream/.test(c.frames.error)) {
-          await expect(decodeFrames(path, { userId: null, maxFrames: BIG, onFrame: async () => {} }), c.clip).rejects.toThrow(MEDIA_WORDS.noVideo)
+          await expect(decodeFrames(path, { userId: null, roots: CLIP_ROOTS, maxFrames: BIG, onFrame: async () => {} }), c.clip).rejects.toThrow(MEDIA_WORDS.noVideo)
         }
         continue
       }
@@ -81,7 +90,7 @@ describe('decodeFrames equals PyAV’s to_ndarray(rgb24)', () => {
       const got: string[] = []
       const inline: (string | undefined)[] = []
       const r = await decodeFrames(path, {
-        userId: null, maxFrames: BIG,
+        userId: null, roots: CLIP_ROOTS, maxFrames: BIG,
         onFrame: async (rgb, i) => {
           expect(i, c.clip).toBe(got.length)
           got.push(sha256Hex(rgb))
@@ -94,13 +103,13 @@ describe('decodeFrames equals PyAV’s to_ndarray(rgb24)', () => {
       expect(got, c.clip).toEqual(want.list.map(f => f.sha256))
       clips++
     }
-    expect(clips).toBe(11)
+    expect(clips).toBe(15)
   })
 
   it('drops the edit-list clip’s frames stamped before zero: 6 of its 8 frames, as Python', LONG, async () => {
     await requireMediaTools()
     const pts: number[] = []
-    const r = await decodeFrames(clipPath('v_editlist.mp4'), { userId: null, maxFrames: BIG, onFrame: async (_rgb, _i, t) => { pts.push(t) } })
+    const r = await decodeFrames(clipPath('v_editlist.mp4'), { userId: null, roots: CLIP_ROOTS, maxFrames: BIG, onFrame: async (_rgb, _i, t) => { pts.push(t) } })
     expect(r.count).toBe(6)
     expect(pts).toEqual([0, 1, 2, 3, 4, 5].map(i => (i * 512) / 12288))
   })
@@ -108,7 +117,7 @@ describe('decodeFrames equals PyAV’s to_ndarray(rgb24)', () => {
   it('hands each frame its pts in seconds (the VFR clip’s own stamps)', LONG, async () => {
     await requireMediaTools()
     const pts: number[] = []
-    await decodeFrames(clipPath('v_vfr.mp4'), { userId: null, maxFrames: BIG, onFrame: async (_rgb, _i, t) => { pts.push(t) } })
+    await decodeFrames(clipPath('v_vfr.mp4'), { userId: null, roots: CLIP_ROOTS, maxFrames: BIG, onFrame: async (_rgb, _i, t) => { pts.push(t) } })
     expect(pts.map(t => Math.round(t * 1000))).toEqual([0, 40, 70, 130, 160, 230, 250, 300])
   })
 
@@ -117,7 +126,7 @@ describe('decodeFrames equals PyAV’s to_ndarray(rgb24)', () => {
     const c = FIX.cases.find(k => k.clip === 'x_vp9_resize.webm')!
     expect('error' in c.frames && c.frames.error).toMatch(/stack expects each tensor to be equal size/)
     const seen: number[] = []
-    await expect(decodeFrames(clipPath(c.clip), { userId: null, maxFrames: BIG, onFrame: async (_rgb, i) => { seen.push(i) } }))
+    await expect(decodeFrames(clipPath(c.clip), { userId: null, roots: CLIP_ROOTS, maxFrames: BIG, onFrame: async (_rgb, i) => { seen.push(i) } }))
       .rejects.toThrow(MEDIA_WORDS.sizeChanged)
     // ffmpeg names the new size before its bytes arrive, so the failure may come before the third frame is handed on.
     expect(seen.length).toBeGreaterThanOrEqual(1)
@@ -127,7 +136,7 @@ describe('decodeFrames equals PyAV’s to_ndarray(rgb24)', () => {
   it('fails with tooManyFrames as it streams, past maxFrames', LONG, async () => {
     await requireMediaTools()
     let n = 0
-    await expect(decodeFrames(clipPath('v_h264_601.mp4'), { userId: null, maxFrames: 3, onFrame: async () => { n++ } }))
+    await expect(decodeFrames(clipPath('v_h264_601.mp4'), { userId: null, roots: CLIP_ROOTS, maxFrames: 3, onFrame: async () => { n++ } }))
       .rejects.toThrow(MEDIA_WORDS.tooManyFrames)
     expect(n).toBe(3)
   })
@@ -138,7 +147,7 @@ describe('decodeFrames equals PyAV’s to_ndarray(rgb24)', () => {
     let t0 = 0
     let seen = 0
     const job = decodeFrames(clipPath('v_stereo_aac.mp4'), {
-      userId: null, signal: stop.signal, maxFrames: BIG,
+      userId: null, roots: CLIP_ROOTS, signal: stop.signal, maxFrames: BIG,
       onFrame: async () => {
         seen++
         if (seen === 2) { t0 = Date.now(); stop.abort(); await new Promise(r => setTimeout(r, 50)) }
@@ -149,17 +158,27 @@ describe('decodeFrames equals PyAV’s to_ndarray(rgb24)', () => {
     expect(seen).toBe(2)
   })
 
-  it('names the chroma siting only when the file does, and builds the filter from fixed words', () => {
-    expect(framesFilter({ chromaLocation: null })).toBe('select=gte(pts\\,0),scale=w=iw:h=ih:eval=frame:flags=bilinear,format=rgb24')
-    expect(framesFilter({ chromaLocation: 'left' })).toBe('select=gte(pts\\,0),scale=w=iw:h=ih:eval=frame:flags=bilinear:in_h_chr_pos=0:in_v_chr_pos=128,format=rgb24')
-    expect(framesFilter({ chromaLocation: 'topleft' })).toContain(':in_h_chr_pos=0:in_v_chr_pos=0,')
-    expect(framesFilter({ chromaLocation: 'x,movie=/etc/passwd' })).not.toContain('movie')
+  it('names the chroma siting only on a subsampled axis, only when the file does, from fixed words', () => {
+    const base = 'select=gte(pts\\,0),scale=w=iw:h=ih:eval=frame:flags=bilinear'
+    expect(framesFilter({ chromaLocation: null, pixFmt: 'yuv420p' })).toBe(`${base},format=rgb24`)
+    expect(framesFilter({ chromaLocation: 'left', pixFmt: 'yuv420p' })).toBe(`${base}:in_h_chr_pos=0:in_v_chr_pos=128,format=rgb24`)
+    expect(framesFilter({ chromaLocation: 'left', pixFmt: 'yuv420p10le' })).toBe(`${base}:in_h_chr_pos=0:in_v_chr_pos=128,format=rgb24`)
+    expect(framesFilter({ chromaLocation: 'topleft', pixFmt: 'nv12' })).toBe(`${base}:in_h_chr_pos=0:in_v_chr_pos=0,format=rgb24`)
+    expect(framesFilter({ chromaLocation: 'left', pixFmt: 'yuv422p10le' })).toBe(`${base}:in_h_chr_pos=0,format=rgb24`)
+    expect(framesFilter({ chromaLocation: 'left', pixFmt: 'yuv444p' })).toBe(`${base},format=rgb24`)
+    expect(framesFilter({ chromaLocation: 'left', pixFmt: 'yuvj444p' })).toBe(`${base},format=rgb24`)
+    expect(framesFilter({ chromaLocation: 'left', pixFmt: 'yuv444p10le' })).toBe(`${base},format=rgb24`)
+    expect(framesFilter({ chromaLocation: 'center', pixFmt: 'yuv440p' })).toBe(`${base}:in_v_chr_pos=128,format=rgb24`)
+    expect(framesFilter({ chromaLocation: 'left', pixFmt: 'gbrp' })).toBe(`${base},format=rgb24`)
+    expect(framesFilter({ chromaLocation: 'x,movie=/etc/passwd', pixFmt: 'yuv420p' })).not.toContain('movie')
+    expect(chromaSubsampling('yuvj422p')).toEqual({ w: true, h: false })
+    expect(chromaSubsampling('rgb24')).toBeNull()
   })
 })
 
 describe('decodeAudio equals Python', () => {
   const run = (clip: string, decoder: SoundDecoder, stream?: 'first' | 'last') =>
-    decodeAudio(clipPath(clip), { decoder, stream, userId: null, maxSamples: BIG })
+    decodeAudio(clipPath(clip), { decoder, stream, userId: null, roots: CLIP_ROOTS, maxSamples: BIG })
 
   it("'load' is bit-equal to nodes_audio.load on every clip with sound (Opus within its named last bit)", LONG, async () => {
     await requireMediaTools()
@@ -170,7 +189,7 @@ describe('decodeAudio equals Python', () => {
         continue
       }
       expect(c.load.dtype).toBe('torch.float32')
-      expectSound(await run(c.clip, 'load'), c.load, c.clip, { ulp: OPUS_ULP.has(c.clip) })
+      expectSound(await run(c.clip, 'load'), c.load, c.clip, { ulp: OPUS_ULP.has(c.clip) ? c.load : undefined })
       n++
     }
     expect(n).toBe(13)
@@ -186,7 +205,13 @@ describe('decodeAudio equals Python', () => {
       // Python leaves a packed file with more than one channel as one interleaved row.
       const interleaved = c.download.rows === 1 && load.rows > 1 ? load.rows : undefined
       if (interleaved) unscrambled.push(c.clip)
-      expectSound(got, c.download, c.clip, { interleaved, ulp: OPUS_ULP.has(c.clip) })
+      if (OPUS_ULP.has(c.clip)) {
+        // Python's download of this float sound is its load, value for value (no integer scale, peak under 1.5).
+        expect(c.download.sha256).toBe(load.sha256)
+        expectSound(got, c.download, c.clip, { ulp: load })
+        continue
+      }
+      expectSound(got, c.download, c.clip, { interleaved })
     }
     expect(unscrambled.sort()).toEqual(['a_16.flac', 'a_24.flac', 'a_s16.wav', 'a_s24.wav', 'a_s32.wav'])
   })
@@ -217,7 +242,7 @@ describe('decodeAudio equals Python', () => {
 
   it('fails with tooLong as it streams, past maxSamples', LONG, async () => {
     await requireMediaTools()
-    await expect(decodeAudio(clipPath('a_long_8k.wav'), { decoder: 'load', userId: null, maxSamples: 100_000 }))
+    await expect(decodeAudio(clipPath('a_long_8k.wav'), { decoder: 'load', userId: null, roots: CLIP_ROOTS, maxSamples: 100_000 }))
       .rejects.toThrow(MEDIA_WORDS.tooLong)
   })
 })

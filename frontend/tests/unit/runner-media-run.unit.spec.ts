@@ -7,7 +7,7 @@
  * ffmpeg / ffprobe bodies.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, truncateSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { MediaTools } from '~~/server/media/tools'
@@ -19,7 +19,7 @@ vi.mock('~~/server/media/tools', async (importOriginal) => {
 })
 
 const { MediaError, checkArgs, inputArgs, mediaLimiter, mediaTempDir, removeMediaTempDir, runMedia } = await import('~~/server/media/run')
-const { probeMedia } = await import('~~/server/media/probe')
+const { probeMedia, scanTimeoutMs } = await import('~~/server/media/probe')
 const { decodeAudio, decodeFrames } = await import('~~/server/media/decode')
 const { mediaFormat } = await import('~~/server/runner/mediaInputs')
 const { MEDIA_TOOLS_MISSING } = await import('~~/server/media/tools')
@@ -87,7 +87,7 @@ describe('refusals before anything starts', () => {
     }
     const before = started()
     for (const p of ['clip.mp4', 'file:/tmp/clip.mp4', 'https://example.com/a.mp4']) {
-      await expect(probeMedia(p, { userId: null }), p).rejects.toThrow(MEDIA_WORDS.unreadable)
+      await expect(probeMedia(p, { userId: null, roots: [dir] }), p).rejects.toThrow(MEDIA_WORDS.unreadable)
     }
     expect(started()).toBe(before)
   })
@@ -106,8 +106,8 @@ describe('refusals before anything starts', () => {
     writeFileSync(f, '#EXTM3U\n#EXT-X-VERSION:3\n#EXTINF:10,\nfile:///etc/passwd\n')
     expect(mediaFormat(readFileSync(f))).toBeNull()
     const before = started()
-    await expect(probeMedia(f, { userId: null })).rejects.toThrow(MEDIA_WORDS.unreadable)
-    await expect(decodeFrames(f, { userId: null, maxFrames: 10, onFrame: async () => {} })).rejects.toThrow(MEDIA_WORDS.unreadable)
+    await expect(probeMedia(f, { userId: null, roots: [dir] })).rejects.toThrow(MEDIA_WORDS.unreadable)
+    await expect(decodeFrames(f, { userId: null, roots: [dir], maxFrames: 10, onFrame: async () => {} })).rejects.toThrow(MEDIA_WORDS.unreadable)
     expect(started()).toBe(before)
     expect(existsSync(join(dir, 'ffmpeg.ran'))).toBe(false)
   })
@@ -119,23 +119,112 @@ describe('refusals before anything starts', () => {
     expect(mediaFormat(Buffer.from('RIFF\0\0\0\0WAVEfmt '))).toBe('wav')
   })
 
-  it('checkArgs refuses options that read or write files the media names, other addresses, and outputs outside a job folder', async () => {
-    const ok = ['-i', 'file:/a/b.mp4', '-f', 'rawvideo', 'pipe:1']
-    expect(() => checkArgs(ok)).not.toThrow()
-    for (const extra of [
-      ['-report'], ['-dump_attachment:t', 'x'], ['-dump_attachment', 'x'], ['-filter_script', '/x'], ['-/filter', '/x'],
-      ['-filter_complex_script', '/x'], ['-use_absolute_path', '1'], ['-enable_drefs', '1'], ['-progress', 'pipe:1'],
-      ['-i', 'http://example.com/a.mp4'], ['-i', 'b.mp4'], ['-i', 'file:rel.mp4'], ['file:/tmp/out.mp4'], ['pipe:3'],
-    ]) {
-      expect(() => checkArgs([...ok.slice(0, 2), ...extra, ...ok.slice(2)]), extra.join(' ')).toThrow(MediaError)
-    }
-    expect(() => checkArgs([...ok, 'pipe:3'], { side: true })).not.toThrow()
-    const out = await mediaTempDir()
+  it('checkArgs allows only listed options; every output is pipe:1 or file: inside the job’s own folder', async () => {
+    const work = await mediaTempDir()
     try {
-      expect(() => checkArgs(['-i', 'file:/a/b.mp4', '-y', `file:${join(out, 'x.flac')}`])).not.toThrow()
-      expect(() => checkArgs(['-i', 'file:/a/b.mp4', '-y', `file:${join(out, '..', 'x.flac')}`])).toThrow(MediaError)
+      const head = ['-protocol_whitelist', 'file,pipe', '-f', 'mov', '-enable_drefs', '0', '-i', 'file:/a/b.mp4']
+      const ok = [...head, '-map', '0:v:0', '-f', 'rawvideo', 'pipe:1']
+      expect(() => checkArgs('ffmpeg', ok)).not.toThrow()
+      expect(() => checkArgs('ffmpeg', [...head, '-c:a', 'pcm_f32le', '-f', 'f32le', 'pipe:1'])).not.toThrow()
+      expect(() => checkArgs('ffmpeg', [...head, '-stats_mux_pre', 'pipe:3', '-f', 'rawvideo', 'pipe:1'], { side: true })).not.toThrow()
+      expect(() => checkArgs('ffmpeg', [...head, '-y', `file:${join(work, 'x.flac')}`], { workDir: work })).not.toThrow()
+      expect(() => checkArgs('ffprobe', ['-probesize', '5000000', ...head, '-of', 'json', '-show_format'])).not.toThrow()
+
+      const refusedFfmpeg: [string, string[], { side?: boolean; workDir?: string }?][] = [
+        // Outputs: bare, relative, outside the folder, escaping it, another pipe, another folder.
+        ['bare absolute output', [...head, '-f', 'matroska', join(dir, 'escaped.mkv')]],
+        ['bare relative output', [...head, '-f', 'matroska', 'escaped.mkv']],
+        ['file: output with no job folder', [...head, '-y', `file:${join(work, 'x.flac')}`]],
+        ['file: output in another folder', [...head, '-y', `file:${join(dir, 'x.flac')}`], { workDir: work }],
+        ['file: output climbing out', [...head, '-y', `file:${work}/../x.flac`], { workDir: work }],
+        ['file: relative output', [...head, '-y', 'file:x.flac'], { workDir: work }],
+        ['stdout as -', [...head, '-f', 'rawvideo', '-']],
+        ['pipe:2', [...head, '-f', 'rawvideo', 'pipe:2']],
+        ['pipe:3 as an output', [...head, '-f', 'rawvideo', 'pipe:3'], { side: true }],
+        // Options that write or read a file by name.
+        ['-print_graphs_file', [...head, '-print_graphs_file', join(dir, 'graphs.txt'), 'pipe:1']],
+        ['-print_graphs', [...head, '-print_graphs', 'pipe:1']],
+        ['-vstats', [...head, '-vstats', 'pipe:1']],
+        ['-vstats_file', [...head, '-vstats_file', join(dir, 'v.log'), 'pipe:1']],
+        ['-stats_enc_pre with a path', [...head, '-stats_enc_pre', join(dir, 's.txt'), 'pipe:1']],
+        ['-stats_enc_post with a path', [...head, '-stats_enc_post', join(dir, 's.txt'), 'pipe:1']],
+        ['-stats_mux_pre with a path', [...head, '-stats_mux_pre', join(dir, 's.txt'), 'pipe:1'], { side: true }],
+        ['-stats_mux_pre pipe:3 with no reader', [...head, '-stats_mux_pre', 'pipe:3', 'pipe:1']],
+        ['-fpre', [...head, '-fpre', join(dir, 'x.ffpreset'), 'pipe:1']],
+        ['-report', [...head, '-report', 'pipe:1']],
+        ['-dump_attachment', [...head, '-dump_attachment', 'x', 'pipe:1']],
+        ['-dump_attachment:t', [...head, '-dump_attachment:t', 'x', 'pipe:1']],
+        ['-attach', [...head, '-attach', '/etc/passwd', 'pipe:1']],
+        ['-filter_script', [...head, '-filter_script', '/x', 'pipe:1']],
+        ['-/filter', [...head, '-/filter', '/x', 'pipe:1']],
+        ['-progress', [...head, '-progress', 'pipe:1', 'pipe:1']],
+        ['-passlogfile', [...head, '-passlogfile', '/x', 'pipe:1']],
+        ['-sdp_file', [...head, '-sdp_file', '/x', 'pipe:1']],
+        ['-use_absolute_path', [...head, '-use_absolute_path', '1', 'pipe:1']],
+        // Inputs and their guards.
+        ['-enable_drefs 1', ['-enable_drefs', '1', '-i', 'file:/a/b.mp4', 'pipe:1']],
+        ['a wider protocol whitelist', ['-protocol_whitelist', 'file,pipe,http', '-i', 'file:/a/b.mp4', 'pipe:1']],
+        ['an http input', ['-i', 'http://example.com/a.mp4', 'pipe:1']],
+        ['a bare input', ['-i', '/a/b.mp4', 'pipe:1']],
+        ['a relative file: input', ['-i', 'file:rel.mp4', 'pipe:1']],
+        ['an option missing its value', [...head, '-map']],
+      ]
+      for (const [label, args, o] of refusedFfmpeg) expect(() => checkArgs('ffmpeg', args, o), label).toThrow(MediaError)
+      // ffprobe: no outputs at all, and not its -o.
+      expect(() => checkArgs('ffprobe', [...head, '-o', join(dir, 'probe.json')])).toThrow(MediaError)
+      expect(() => checkArgs('ffprobe', [...head, 'pipe:1'])).toThrow(MediaError)
+      expect(() => checkArgs('ffprobe', [...head, '-report'])).toThrow(MediaError)
     }
-    finally { await removeMediaTempDir(out) }
+    finally { await removeMediaTempDir(work) }
+  })
+
+  it('the review’s two proven escapes (a bare output path, -print_graphs_file) are refused before any tool starts', async () => {
+    fakeTools({})
+    const before = started()
+    const head = ['-protocol_whitelist', 'file,pipe', '-f', 'mov', '-enable_drefs', '0', '-i', 'file:/a/b.mp4']
+    await expect(runMedia({ tool: 'ffmpeg', args: [...head, '-f', 'matroska', join(dir, 'escaped.mkv')], userId: null })).rejects.toThrow(MEDIA_WORDS.failed)
+    await expect(runMedia({ tool: 'ffmpeg', args: [...head, '-print_graphs_file', join(dir, 'graphs.txt'), '-f', 'rawvideo', 'pipe:1'], userId: null })).rejects.toThrow(MEDIA_WORDS.failed)
+    expect(started()).toBe(before)
+    expect(existsSync(join(dir, 'ffmpeg.ran'))).toBe(false)
+  })
+
+  it('every job runs in its own folder: the given workDir, or a fresh one removed afterwards', async () => {
+    const log = join(dir, 'pwd.txt')
+    fakeTools({ ffmpeg: `/bin/pwd -P >> "${log}"` })
+    await runMedia({ tool: 'ffmpeg', args: [], userId: null })
+    const own = readFileSync(log, 'utf8').trim()
+    expect(own).toMatch(/sailor-media-/)
+    expect(existsSync(own)).toBe(false)
+    const work = await mediaTempDir()
+    try {
+      await runMedia({ tool: 'ffmpeg', args: [], userId: null, workDir: work })
+      expect(readFileSync(log, 'utf8').trim().split('\n')[1]).toBe(realpathSync(work))
+    }
+    finally { await removeMediaTempDir(work) }
+  })
+
+  it('an input must really be inside the caller’s roots: a symlink out of the folder is refused', async () => {
+    fakeTools({ ffprobe: probeAnswer(video(64, 48, 1)) })
+    const inside = mp4File('inside.mp4')
+    const elsewhere = mkdtempSync(join(tmpdir(), 'media-run-outside-'))
+    try {
+      const outside = join(elsewhere, 'outside.mp4')
+      writeFileSync(outside, readFileSync(inside))
+      symlinkSync(outside, join(dir, 'link.mp4'))
+      symlinkSync(inside, join(dir, 'ok-link.mp4'))
+      const before = started()
+      await expect(probeMedia(join(dir, 'link.mp4'), { userId: null, roots: [dir] })).rejects.toThrow(MEDIA_WORDS.unreadable)
+      await expect(probeMedia(outside, { userId: null, roots: [dir] })).rejects.toThrow(MEDIA_WORDS.unreadable)
+      await expect(probeMedia(inside, { userId: null, roots: [] })).rejects.toThrow(MEDIA_WORDS.unreadable)
+      await expect(probeMedia(dir, { userId: null, roots: [dir] })).rejects.toThrow(MEDIA_WORDS.unreadable)
+      expect(started()).toBe(before)
+      // A link that stays inside is read through its real path.
+      const p = await probeMedia(join(dir, 'ok-link.mp4'), { userId: null, roots: [dir] })
+      expect(p.path).toBe(realpathSync(inside))
+      // A probe of one file can't be handed in for another.
+      await expect(decodeFrames(join(dir, 'link.mp4'), { userId: null, roots: [dir], probe: p, maxFrames: 1, onFrame: async () => {} })).rejects.toThrow(MEDIA_WORDS.unreadable)
+    }
+    finally { rmSync(elsewhere, { recursive: true, force: true }) }
   })
 
   it('with the tools missing, a job fails in plain words', async () => {
@@ -202,6 +291,56 @@ describe('every job', () => {
     await first
     expect(started() - before).toBe(1)
     expect(mediaLimiter().pending('u1')).toBe(0)
+  })
+
+  it('a stuck onStdout after the tool has exited still ends by the time limit, and the slot is given back', async () => {
+    process.env[HOSTED_KEY] = 'sk_test_x'
+    fakeTools({ ffmpeg: 'echo some-output' })
+    const t0 = Date.now()
+    const job = runMedia({ tool: 'ffmpeg', args: [], userId: 'hang', timeoutMs: 500, onStdout: () => new Promise<void>(() => {}) })
+    await expect(job).rejects.toThrow(MEDIA_WORDS.timedOut)
+    expect(Date.now() - t0).toBeLessThan(1500)
+    expect(mediaLimiter().pending('hang')).toBe(0)
+  })
+
+  it('a stuck onStdout after the tool has exited still ends by Stop, and the slot is given back', async () => {
+    process.env[HOSTED_KEY] = 'sk_test_x'
+    fakeTools({ ffmpeg: 'echo some-output' })
+    const stop = new AbortController()
+    const job = runMedia({ tool: 'ffmpeg', args: [], userId: 'hang2', signal: stop.signal, onStdout: () => new Promise<void>(() => {}) })
+    await sleep(300)
+    expect(mediaLimiter().pending('hang2')).toBe(1)
+    const t0 = Date.now()
+    stop.abort()
+    await expect(job).rejects.toThrow(MEDIA_WORDS.stopped)
+    expect(Date.now() - t0).toBeLessThan(500)
+    expect(mediaLimiter().pending('hang2')).toBe(0)
+    // The person's next job runs at once.
+    fakeTools({ ffmpeg: 'exit 0' })
+    await expect(runMedia({ tool: 'ffmpeg', args: [], userId: 'hang2', timeoutMs: 2000 })).resolves.toBeTruthy()
+  })
+
+  it('a job’s callback may not start another job: it is refused at once, never left waiting on its own slot', async () => {
+    process.env[HOSTED_KEY] = 'sk_test_x'
+    fakeTools({ ffmpeg: 'echo some-output' })
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      let nested: unknown = null
+      const t0 = Date.now()
+      await runMedia({
+        tool: 'ffmpeg', args: [], userId: 'u1', timeoutMs: 5000,
+        onStdout: async () => {
+          await sleep(1)   // still inside the callback after an await
+          nested = await runMedia({ tool: 'ffmpeg', args: [], userId: 'u1' }).catch((e: unknown) => e)
+        },
+      })
+      expect(nested).toBeInstanceOf(MediaError)
+      expect((nested as Error).message).toBe(MEDIA_WORDS.failed)
+      expect(Date.now() - t0).toBeLessThan(1000)
+      // Outside any callback, the same person's next job runs as usual.
+      await expect(runMedia({ tool: 'ffmpeg', args: [], userId: 'u1' })).resolves.toBeTruthy()
+    }
+    finally { warn.mockRestore() }
   })
 
   it('stderr never reaches the error a person reads', async () => {
@@ -276,7 +415,7 @@ describe('caps, from the probe alone', () => {
     process.env[HOSTED_KEY] = 'sk_test_x'
     fakeTools({ ffprobe: probeAnswer(video(4097, 4097, 1)) })
     const before = started()
-    await expect(decodeFrames(mp4File(), { userId: 'u1', maxFrames: 10, onFrame: async () => {} })).rejects.toThrow(MEDIA_WORDS.tooBig)
+    await expect(decodeFrames(mp4File(), { userId: 'u1', roots: [dir], maxFrames: 10, onFrame: async () => {} })).rejects.toThrow(MEDIA_WORDS.tooBig)
     expect(started() - before).toBe(1)   // the probe only
     expect(existsSync(join(dir, 'ffmpeg.ran'))).toBe(false)
   })
@@ -284,10 +423,10 @@ describe('caps, from the probe alone', () => {
   it('refuses a video over the length cap (hosted: 10 minutes; local: an hour)', async () => {
     process.env[HOSTED_KEY] = 'sk_test_x'
     fakeTools({ ffprobe: probeAnswer(video(64, 48, 601)) })
-    await expect(decodeFrames(mp4File(), { userId: 'u1', maxFrames: 1e9, onFrame: async () => {} })).rejects.toThrow(MEDIA_WORDS.tooLong)
+    await expect(decodeFrames(mp4File(), { userId: 'u1', roots: [dir], maxFrames: 1e9, onFrame: async () => {} })).rejects.toThrow(MEDIA_WORDS.tooLong)
     delete process.env[HOSTED_KEY]
     fakeTools({ ffprobe: probeAnswer(video(64, 48, 3601)) })
-    await expect(decodeFrames(mp4File(), { userId: null, maxFrames: 1e9, onFrame: async () => {} })).rejects.toThrow(MEDIA_WORDS.tooLong)
+    await expect(decodeFrames(mp4File(), { userId: null, roots: [dir], maxFrames: 1e9, onFrame: async () => {} })).rejects.toThrow(MEDIA_WORDS.tooLong)
     expect(existsSync(join(dir, 'ffmpeg.ran'))).toBe(false)
   })
 
@@ -295,16 +434,39 @@ describe('caps, from the probe alone', () => {
     process.env[HOSTED_KEY] = 'sk_test_x'
     fakeTools({ ffprobe: probeAnswer(sound(8, 48000, 1000)) })
     const before = started()
-    await expect(decodeAudio(mp4File(), { decoder: 'load', userId: 'u1', maxSamples: 1e12 })).rejects.toThrow(MEDIA_WORDS.tooLong)
+    await expect(decodeAudio(mp4File(), { decoder: 'load', userId: 'u1', roots: [dir], maxSamples: 1e12 })).rejects.toThrow(MEDIA_WORDS.tooLong)
     expect(started() - before).toBe(1)
     expect(existsSync(join(dir, 'ffmpeg.ran'))).toBe(false)
+  })
+
+  it('judges the size and the header’s own lengths before any whole-file scan', async () => {
+    process.env[HOSTED_KEY] = 'sk_test_x'
+    // A header with a rate but no length and no frame count: Python would count packets.
+    const needsScan = { format: { format_name: 'mov,mp4,m4a,3gp,3g2,mj2' }, streams: [{ ...video(64, 48, 1).streams[0], nb_frames: undefined, duration_ts: undefined }] }
+    const log = join(dir, 'probes.txt')
+    fakeTools({ ffprobe: `echo x >> "${log}"; ${probeAnswer(needsScan)}` })
+    const big = mp4File('big.mp4')
+    truncateSync(big, 3 * 1024 ** 3)   // sparse: 3 GiB on paper, over the hosted video cap
+    await expect(probeMedia(big, { userId: 'u1', roots: [dir], kind: 'video' })).rejects.toThrow(MEDIA_WORDS.tooBig)
+    expect(readFileSync(log, 'utf8').trim().split('\n')).toHaveLength(1)   // the header only, no scan
+    // A sound header stating 2 hours: refused as too long before the scan of its other stream.
+    const twoStreams = { format: { format_name: 'matroska,webm' }, streams: [sound(2, 48000, 7200).streams[0], { ...sound(2, 48000, 1).streams[0], index: 1, duration_ts: undefined }] }
+    writeFileSync(log, '')
+    fakeTools({ ffprobe: `echo x >> "${log}"; ${probeAnswer(twoStreams)}` })
+    await expect(probeMedia(mp4File('long.mp4'), { userId: 'u1', roots: [dir], kind: 'sound' })).rejects.toThrow(MEDIA_WORDS.tooLong)
+    expect(readFileSync(log, 'utf8').trim().split('\n')).toHaveLength(1)
+  })
+
+  it('gives a whole-file scan its own time limit, scaled to the size', () => {
+    expect(scanTimeoutMs(0)).toBe(10_000)
+    expect(scanTimeoutMs(2 * 1024 ** 3)).toBeGreaterThan(100_000)
   })
 
   it('refuses a file whose length can’t be read in hosted, and lets it through locally', async () => {
     const noLength = { format: { format_name: 'mov,mp4,m4a,3gp,3g2,mj2' }, streams: [{ ...video(64, 48, 1).streams[0], avg_frame_rate: '0/0', nb_frames: undefined, duration_ts: undefined }] }
     process.env[HOSTED_KEY] = 'sk_test_x'
     fakeTools({ ffprobe: probeAnswer(noLength) })
-    await expect(decodeFrames(mp4File(), { userId: 'u1', maxFrames: 10, onFrame: async () => {} })).rejects.toThrow(MEDIA_WORDS.unreadable)
+    await expect(decodeFrames(mp4File(), { userId: 'u1', roots: [dir], maxFrames: 10, onFrame: async () => {} })).rejects.toThrow(MEDIA_WORDS.unreadable)
     expect(existsSync(join(dir, 'ffmpeg.ran'))).toBe(false)
   })
 })

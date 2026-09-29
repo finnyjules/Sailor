@@ -12,12 +12,17 @@
  *     `-threads 2` before each input;
  *   - reads its inputs only as `file:<absolute path>` or `pipe:0`, with the
  *     demuxer named from the file's first bytes (`inputArgs`), and writes
- *     files only inside a folder made by `mediaTempDir()`;
- *   - never carries an option that reads or writes files named by the media
- *     itself (`-report`, `-dump_attachment`, `-filter_script`, `-/opt`,
- *     `-use_absolute_path`, `-enable_drefs 1`, …): `checkArgs` refuses them
- *     before anything starts. Filtergraphs are built in this module from
- *     numbers and fixed words, never from a person's text;
+ *     files only as `file:<absolute path>` inside the job's own folder
+ *     (`workDir`), which is also its working directory;
+ *   - carries only options on an allow-list (`checkArgs`), each with its
+ *     number of values, so nothing that reads or writes a file by name
+ *     (`-report`, `-vstats`, `-print_graphs_file`, `-fpre`, `-dump_attachment`,
+ *     `-attach`, ffprobe's `-o`, `-/opt`, …) can get in. Filtergraphs are
+ *     built in this module from numbers and fixed words, never from a
+ *     person's text;
+ *   - can't be started from inside another job's callbacks (`onStdout`,
+ *     `onSide`): with one slot per person in hosted, a job waiting on its own
+ *     child would wait for ever, so it is refused at once instead;
  *   - waits its turn behind the limiter (one job per person hosted, two
  *     local, at most max(1, ⌊cpus / 2⌋) at once; the thumbnail and waveform
  *     routes have two slots of their own);
@@ -26,6 +31,7 @@
  *   - keeps at most 64 KiB of stderr, logged on failure and never shown: a
  *     failure reaches a person only as MEDIA_WORDS.
  */
+import { AsyncLocalStorage } from 'node:async_hooks'
 import { spawn } from 'node:child_process'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { availableParallelism, tmpdir } from 'node:os'
@@ -62,6 +68,13 @@ export interface MediaJob {
   onSide?(chunk: Uint8Array | null): void
   /** Paths removed when the job fails or is stopped. */
   cleanup?: string[]
+  /**
+   * The run's own temporary folder (`mediaTempDir()`): the job's working
+   * directory, and the only place its `file:` outputs may be. Without it the
+   * job gets a fresh empty folder of its own, removed afterwards, and may
+   * write no file.
+   */
+  workDir?: string
 }
 
 /** ffmpeg's demuxer for each container `mediaFormat` tells apart. */
@@ -91,62 +104,86 @@ export function inputArgs(path: string, fmt: MediaFormat): string[] {
 }
 
 const TEMP_PREFIX = 'sailor-media-'
-const tempDirs = new Set<string>()
 
-/** A fresh folder for one job's outputs; the only place a job may write a file. */
+/** A fresh folder for one run's outputs; the only place a job may write a file. */
 export async function mediaTempDir(): Promise<string> {
-  const dir = await mkdtemp(join(tmpdir(), TEMP_PREFIX))
-  tempDirs.add(dir)
-  return dir
+  return mkdtemp(join(tmpdir(), TEMP_PREFIX))
 }
 
-/** Removes a folder made by `mediaTempDir` and forgets it. */
+/** Removes a folder made by `mediaTempDir`. */
 export async function removeMediaTempDir(dir: string): Promise<void> {
-  tempDirs.delete(dir)
   await rm(dir, { recursive: true, force: true })
 }
 
-/** Options that read or write files the media names, or that load a filtergraph from a file (media-tools.md). */
-const FORBIDDEN_OPTIONS = new Set([
-  '-report', '-dump_attachment', '-attach', '-filter_script', '-filter_complex_script', '-use_absolute_path',
-  '-sdp_file', '-vstats_file', '-passlogfile', '-progress',
-])
+/**
+ * The options a job may carry and how many values each takes (by name, a
+ * stream specifier dropped: `-c:a` is `-c`). Everything else is refused.
+ * R5.1c adds the encoders' own.
+ */
+const ALLOWED_OPTIONS: Readonly<Record<'ffmpeg' | 'ffprobe', Readonly<Record<string, number>>>> = {
+  ffmpeg: {
+    '-copyts': 0, '-reinit_filter': 1, '-noautorotate': 0,
+    '-protocol_whitelist': 1, '-f': 1, '-enable_drefs': 1, '-i': 1,
+    '-map': 1, '-fps_mode': 1, '-vf': 1, '-c': 1,
+    '-stats_mux_pre': 1, '-stats_mux_pre_fmt': 1,
+    '-y': 0,
+  },
+  ffprobe: {
+    '-probesize': 1, '-analyzeduration': 1,
+    '-protocol_whitelist': 1, '-f': 1, '-enable_drefs': 1, '-i': 1,
+    '-of': 1, '-show_format': 0, '-show_streams': 0, '-count_packets': 0,
+    '-select_streams': 1, '-show_entries': 1, '-read_intervals': 1,
+  },
+}
 
-function insideTemp(p: string): boolean {
-  const n = normalize(p)
-  if (!isAbsolute(n) || n !== p) return false
-  for (const dir of tempDirs) if (n.startsWith(dir + sep)) return true
-  return false
+/** `file:<absolute, normalised path>` strictly inside `dir`. */
+function fileInside(arg: string, dir: string | undefined): boolean {
+  if (!dir || !arg.startsWith('file:')) return false
+  const p = arg.slice(5)
+  return isAbsolute(p) && normalize(p) === p && p.startsWith(dir.endsWith(sep) ? dir : dir + sep)
 }
 
 /**
- * Refuses an argument list that breaks the module's rules before anything
- * starts: a forbidden option, a `-/option` (its value read from a file),
- * `-enable_drefs` other than 0, an input that isn't `file:<absolute>` or
- * `pipe:0`, a `file:` output outside a `mediaTempDir()` folder, or `pipe:3`
- * without a reader. Exported for tests.
+ * Refuses an argument list that breaks the module's rules, before anything
+ * starts:
+ *   - an option not on the allow-list (with `-/opt`, whose value is read
+ *     from a file), or one missing its value;
+ *   - `-protocol_whitelist` other than `file,pipe`, `-enable_drefs` other
+ *     than 0, `-stats_mux_pre` other than `pipe:3` (and only with a reader);
+ *   - an input other than `file:<absolute path>` or `pipe:0`;
+ *   - an output (any other word) other than `pipe:1` or `file:<absolute
+ *     path>` inside `workDir`; ffprobe has no outputs at all.
+ * Exported for tests.
  */
-export function checkArgs(args: readonly string[], o: { side?: boolean } = {}): void {
+export function checkArgs(tool: 'ffmpeg' | 'ffprobe', args: readonly string[], o: { side?: boolean; workDir?: string } = {}): void {
   const bad = () => { throw new MediaError('failed') }
+  const allowed = ALLOWED_OPTIONS[tool]
+  for (const a of args) if (a.includes('\0')) bad()
   for (let i = 0; i < args.length; i++) {
     const a = args[i]!
-    if (a.includes('\0')) bad()
-    // An option's name without its stream specifier (`-dump_attachment:t` is `-dump_attachment`).
-    const name = a.startsWith('-') ? a.split(':')[0]! : ''
-    if (FORBIDDEN_OPTIONS.has(name) || a.startsWith('-/')) bad()
-    if (name === '-enable_drefs' && args[i + 1] !== '0') bad()
-    if (a === '-i') {
-      const v = args[++i]
-      if (v === 'pipe:0') continue
-      if (!v || !v.startsWith('file:') || !isAbsolute(v.slice(5))) bad()
+    if (a.startsWith('-') && a !== '-') {
+      const name = a.split(':')[0]!
+      const arity = Object.hasOwn(allowed, name) ? allowed[name]! : undefined
+      if (arity === undefined) bad()
+      const v = arity ? args[i + 1] : undefined
+      if (arity && v === undefined) bad()
+      if (name === '-protocol_whitelist' && v !== 'file,pipe') bad()
+      if (name === '-enable_drefs' && v !== '0') bad()
+      if (name === '-stats_mux_pre' && !(v === 'pipe:3' && o.side)) bad()
+      if (name === '-i' && v !== 'pipe:0' && !(v!.startsWith('file:') && isAbsolute(v!.slice(5)) && normalize(v!.slice(5)) === v!.slice(5))) bad()
+      i += arity!
       continue
     }
-    if (a.startsWith('file:') && !insideTemp(a.slice(5))) bad()
-    if (/^pipe:/.test(a) && a !== 'pipe:0' && a !== 'pipe:1' && !(a === 'pipe:3' && o.side)) bad()
-    // Any other address a protocol could read (the build has none, belt and braces).
-    if (/^[a-z][a-z0-9+.-]*:\/\//i.test(a)) bad()
+    // An output.
+    if (tool === 'ffprobe') bad()
+    if (a !== 'pipe:1' && !fileInside(a, o.workDir)) bad()
   }
 }
+
+// ── nested jobs ──────────────────────────────────────────────────────────────
+
+/** Set while a job's own callbacks run (and in everything they await). */
+const insideCallback = new AsyncLocalStorage<true>()
 
 // ── the limiter ──────────────────────────────────────────────────────────────
 
@@ -264,7 +301,13 @@ function fullArgs(tool: 'ffmpeg' | 'ffprobe', args: readonly string[]): string[]
  * removed.
  */
 export async function runMedia(job: MediaJob): Promise<{ stdout: Uint8Array | null; stderrTail: string }> {
-  checkArgs(job.args, { side: !!job.onSide })
+  if (insideCallback.getStore()) {
+    // The safer choice (R5.1b review, Minor 6): a callback may not start a job. Hosted gives a person one
+    // slot, which the parent holds, so the child would wait for ever. Pipelines run as one ffmpeg job.
+    console.warn(`[media] media.job.refused: a ${job.tool} job was started from inside another job's callback`)
+    throw new MediaError('failed')
+  }
+  checkArgs(job.tool, job.args, { side: !!job.onSide, workDir: job.workDir })
   if (job.signal?.aborted) {
     await removeAll(job.cleanup)
     throw new MediaError('stopped')
@@ -277,11 +320,14 @@ export async function runMedia(job: MediaJob): Promise<{ stdout: Uint8Array | nu
     await removeAll(job.cleanup)
     throw e
   }
+  let ownDir: string | null = null
   try {
-    return await spawnJob(tools[job.tool], job)
+    if (!job.workDir) ownDir = await mediaTempDir()
+    return await spawnJob(tools[job.tool], job, job.workDir ?? ownDir!)
   }
   finally {
     release()
+    if (ownDir) await removeMediaTempDir(ownDir).catch(() => {})
   }
 }
 
@@ -289,7 +335,7 @@ async function removeAll(paths?: string[]): Promise<void> {
   for (const p of paths ?? []) await rm(p, { recursive: true, force: true }).catch(() => {})
 }
 
-function spawnJob(file: string, job: MediaJob): Promise<{ stdout: Uint8Array | null; stderrTail: string }> {
+function spawnJob(file: string, job: MediaJob, cwd: string): Promise<{ stdout: Uint8Array | null; stderrTail: string }> {
   const args = fullArgs(job.tool, job.args)
   const timeoutMs = job.timeoutMs ?? defaultTimeout(!!job.route)
   return new Promise((resolve, reject) => {
@@ -297,7 +343,7 @@ function spawnJob(file: string, job: MediaJob): Promise<{ stdout: Uint8Array | n
     if (job.onSide) stdio.push('pipe')
     let child: ReturnType<typeof spawn>
     try {
-      child = spawn(file, args, { stdio, env: { LC_ALL: 'C' }, shell: false })
+      child = spawn(file, args, { stdio, cwd, env: { LC_ALL: 'C' }, shell: false })
     }
     catch {
       reject(new MediaError('failed'))
@@ -317,9 +363,13 @@ function spawnJob(file: string, job: MediaJob): Promise<{ stdout: Uint8Array | n
         try { child.kill('SIGKILL') } catch { /* already gone */ }
       }
     }
+    // Wakes the end of the job when it fails, even while a callback is still stuck.
+    let wakeFailed: () => void = () => {}
+    const failed = new Promise<void>((r) => { wakeFailed = r })
     const fail = (e: unknown) => {
       if (failure === null) failure = e
       kill()
+      wakeFailed()
     }
 
     const timer = setTimeout(() => fail(new MediaError('timedOut')), timeoutMs)
@@ -337,7 +387,7 @@ function spawnJob(file: string, job: MediaJob): Promise<{ stdout: Uint8Array | n
       if (job.onStdout) {
         out.pause()
         inflight = inflight
-          .then(() => (failure === null ? job.onStdout!(new Uint8Array(b.buffer, b.byteOffset, b.byteLength)) : undefined))
+          .then(() => (failure === null ? insideCallback.run(true, () => job.onStdout!(new Uint8Array(b.buffer, b.byteOffset, b.byteLength))) : undefined))
           .then(() => { if (failure === null) out.resume() }, (e) => { fail(e); out.resume() })
         return
       }
@@ -350,12 +400,12 @@ function spawnJob(file: string, job: MediaJob): Promise<{ stdout: Uint8Array | n
       const side = child.stdio[3] as NodeJS.ReadableStream
       side.on('data', (b: Buffer) => {
         if (failure !== null) return
-        try { job.onSide!(new Uint8Array(b.buffer, b.byteOffset, b.byteLength)) }
+        try { insideCallback.run(true, () => job.onSide!(new Uint8Array(b.buffer, b.byteOffset, b.byteLength))) }
         catch (e) { fail(e) }
       })
       // Always told, even after a failure, so a reader waiting on it can't hang.
       side.once('close', () => {
-        try { job.onSide!(null) }
+        try { insideCallback.run(true, () => job.onSide!(null)) }
         catch (e) { fail(e) }
       })
     }
@@ -381,9 +431,13 @@ function spawnJob(file: string, job: MediaJob): Promise<{ stdout: Uint8Array | n
     child.on('exit', () => { exited = true })
     child.on('close', (code, sig) => {
       exited = true
-      clearTimeout(timer)
-      job.signal?.removeEventListener('abort', onAbort)
+      let finished = false
       const finish = async () => {
+        if (finished) return
+        finished = true
+        // The time limit and Stop cover the job until here, a stuck callback included.
+        clearTimeout(timer)
+        job.signal?.removeEventListener('abort', onAbort)
         if (failure === null && code !== 0) failure = new MediaError('failed')
         const tail = stderrTail.toString('utf8')
         if (failure !== null) {
@@ -395,9 +449,9 @@ function spawnJob(file: string, job: MediaJob): Promise<{ stdout: Uint8Array | n
         }
         resolve({ stdout: job.onStdout ? null : new Uint8Array(Buffer.concat(collected)), stderrTail: tail })
       }
-      // A failed job doesn't wait on a reader that may itself be waiting (Stop and time limits end at once).
-      if (failure !== null) void finish()
-      else void inflight.then(finish)
+      // The callbacks' last work, unless the job fails first (Stop, the time limit, an error):
+      // a failed job never waits on a callback that may itself be stuck.
+      void Promise.race([inflight, failed]).then(finish)
     })
   })
 }
