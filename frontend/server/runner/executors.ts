@@ -135,6 +135,7 @@ import { planRestyleLora } from './generators/restyleLora'
 import { planNanoExtras } from './generators/nanoExtras'
 import { turntableVideoRequest } from './generators/turntable'
 import type { KeptExt } from './keptBytes'
+import type { MediaValueIO } from '../media/values'
 import type { AnswerKind } from './answerDownload'
 import { filesOf } from './values'
 import { imageUrlOf } from './imageUrl'
@@ -184,6 +185,12 @@ export interface DeriveIO {
   runWorkflow: unknown
   /** This take's workflow as sent (the hidden PROMPT Save image embeds): wires, not the values they carry. */
   runPrompt: ApiPrompt
+  /**
+   * Video, frame batches and sound between runner nodes (R5.2,
+   * server/media/values.ts): the run's files by path and its kept store.
+   * Absent outside a run (a live preview): a media node fails plainly.
+   */
+  media?: MediaValueIO
 }
 
 /** What a derive plan made: each output slot's value, and what the node shows. */
@@ -1209,10 +1216,11 @@ async function planNodeRequest(ctx: PlanContext): Promise<NodePlan> {
     case GATE_CLASS: {
       // A value (not files) reaching a Gate is handed on when it is open or
       // on pass-through (spec ruling 2); a closed Gate on a value pauses with
-      // no pictures to pick from, keeping the value for Continue.
+      // no pictures to pick from, keeping the value for Continue. A frame
+      // batch or a made video (R5.2) names kept files, never pictures to pick.
       const link = inputs.data_in
       const v = isLink(link) ? ctx.valueFrom?.(link) : undefined
-      const files = v ? filesOf(v) : linked('data_in')
+      const files = v ? (v.kind === 'frames' || v.kind === 'video' ? [] : filesOf(v)) : linked('data_in')
       const open = inputs.bypass === true || ctx.gateOpen
       if (open && v && v.kind !== 'files') return { kind: 'derive', derive: async () => ({ values: { 0: v }, ui: null }) }
       if (open) return { kind: 'pass', files, ui: null }

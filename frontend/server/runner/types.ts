@@ -33,6 +33,11 @@ export interface OutputFile {
  *   boolean  a BOOLEAN
  *   json     a STRING holding JSON, exactly as the Python node prints it
  *   glb      a 3D model address, and Sailor's saved copy when there is one
+ *   frames   an IMAGE batch from a video (R5.2): one kept FFV1 file of exact 8-bit RGB frames
+ *   video    a video a node assembled (R5.2, Python's VideoFromComponents): its
+ *            frames, sound and rate, encoded only when saved or shown. A video
+ *            file (LoadVideo, the Video card, a paid video) stays `files`.
+ * A sound stays `files`, with a `sound` note saying how Python decodes it.
  */
 export type RunnerValue =
   /**
@@ -40,7 +45,11 @@ export type RunnerValue =
    * tensors it made, one kept file per picture beside `files`, which the next
    * effect or Frame reads instead of the 8-bit PNG (as Python hands the float on).
    */
-  | { kind: 'files'; files: OutputFile[]; list?: true; tensors?: OutputFile[] }
+  | {
+    kind: 'files'; files: OutputFile[]; list?: true; tensors?: OutputFile[]
+    /** R5.2: a sound, and how Python turns it into its AUDIO. Absent on a value kept before R5 (read by its maker: server/media/values.ts soundNoteOf). */
+    sound?: SoundNote
+  }
   /**
    * `tensors` (R2.8 fix round 1): the masks also as the float32 tensors their
    * node made, one kept file per mask beside `files` (the 16-bit PNGs), which
@@ -52,6 +61,26 @@ export type RunnerValue =
   | { kind: 'boolean'; value: boolean }
   | { kind: 'json'; text: string }
   | { kind: 'glb'; url: string; file: OutputFile | null }
+  /** An IMAGE batch from a video: one kept FFV1 file of exact 8-bit RGB frames (`count` frames of `w` × `h`). */
+  | { kind: 'frames'; file: OutputFile; count: number; w: number; h: number }
+  /** CreateVideo's VIDEO (Python's VideoFromComponents): encoded only when saved or shown. */
+  | {
+    kind: 'video'
+    frames: { file: OutputFile; count: number; w: number; h: number }
+    /** The rate as the node holds it (a float; saved at Fraction(round(fps · 1000), 1000)). */
+    fps: number
+    sound: { file: OutputFile; note: SoundNote } | null
+  }
+
+/**
+ * How Python turns a sound file into its AUDIO (R5.2), set by the node that
+ * makes the value: 'load' (nodes_audio.py load(): LoadAudio, the cards),
+ * 'download' (nodes_replicate.py _download_url_to_audio_dict: the paid sound
+ * nodes), 'exact' (a float WAV the runner wrote itself: the samples as they are).
+ */
+export interface SoundNote {
+  decode: 'load' | 'download' | 'exact'
+}
 
 /** Who a request went to. */
 export type RunnerProvider = 'fal' | 'replicate'

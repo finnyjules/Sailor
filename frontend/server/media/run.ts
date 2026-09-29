@@ -146,6 +146,8 @@ const ALLOWED_OPTIONS: Readonly<Record<'ffmpeg' | 'ffprobe', Readonly<Record<str
     '-b': 1, '-q': 1, '-rc_mode': 1, '-qmin': 1, '-qmax': 1, '-coder': 1, '-threads': 1,
     '-filter_complex': 1, '-af': 1,
     '-movflags': 1, '-map_metadata': 1, '-fflags': 1, '-enc_time_base': 1, '-bsf': 1,
+    // R5.2: a kept frame batch read at the video's rate (encode.ts, the 'ffv1' input).
+    '-r': 1,
     // get_components' seek (decode.ts pythonSeekArgs) and its leading frames.
     '-ss': 1, '-seek_timestamp': 1, '-noaccurate_seek': 0, '-frames': 1,
   },

@@ -33,7 +33,8 @@ import { ANSWER_MAX_BYTES, answerCap, answerExt, checkAnswerBytes, type AnswerKi
 import { answerRgbPng } from './pictures/pythonView'
 import type { KeepStep } from './compositor/keep'
 import { createMemoryHeldBytes, type HeldBytes } from './heldBytes'
-import { createMemoryKeptBytes, type KeptBytes, type KeptExt } from './keptBytes'
+import { createMemoryKeptBytes, withRunCap, type KeptBytes, type KeptExt } from './keptBytes'
+import { MEDIA_CAPS } from '#shared/runner/media'
 import { createFileAccess } from './fileAccess'
 import type { BackupSettings } from './config'
 import { checkedInputFile, handedOffPictureProblem, inputFileCaps, linkedFileCheck, measuredInputProblem, pictureChangedWords, pictureOverMarginWords, hostedRequestProblems, requestProblems, unreadableInputWords } from './requestRules'
@@ -471,7 +472,8 @@ export function applyGateAction(
 
 export function createEngine(deps: EngineDeps) {
   const held = deps.held ?? createMemoryHeldBytes()
-  const kept = deps.kept ?? createMemoryKeptBytes()
+  // A run's kept files are capped (R5.2, MEDIA_CAPS.keptBytesPerRun: hosted 4 GiB) and swept with it, as before.
+  const kept = withRunCap(deps.kept ?? createMemoryKeptBytes(), () => (deps.hosted() ? MEDIA_CAPS.hosted : MEDIA_CAPS.local).keptBytesPerRun)
   /**
    * A capped input's caps for the hand-off (R3.H fix round 2): the model's,
    * and a backup's only while backups run and its route has one.
@@ -1322,6 +1324,7 @@ export function createEngine(deps: EngineDeps) {
         nodeId: id,
         runWorkflow: run.workflow,
         runPrompt: take.prompt,
+        media: { access: files, kept, runId: run.id, userId: run.userId, hosted: deps.hosted(), signal },
       })
       // Computed here from the node's inputs (the cards, R0/R1): no provider, no charge.
       if (plan.kind === 'derive') {

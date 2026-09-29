@@ -6,10 +6,16 @@
  */
 import { GATE_CLASS, isLink, type ApiLink, type ApiPrompt } from './graph'
 
-export type ValueKind = 'files' | 'mask' | 'text' | 'number' | 'boolean' | 'json' | 'glb'
+/**
+ * R5.2: 'frames' (an IMAGE batch from a video, one kept lossless file) and
+ * 'video' (a video a node assembled, encoded only when saved or shown). Only
+ * an input whose rule lists them in `valueInputs` reads them; wired anywhere
+ * else they leave the workflow to the engine (valueWiresAllowed).
+ */
+export type ValueKind = 'files' | 'mask' | 'text' | 'number' | 'boolean' | 'json' | 'glb' | 'frames' | 'video'
 
-/** Every kind a wire can carry that is not files. */
-export const VALUE_KINDS_ALL: readonly ValueKind[] = ['mask', 'text', 'number', 'boolean', 'json', 'glb']
+/** Every kind a wire can carry that is not files (a Gate hands each on; one stopped on frames or a video shows nothing to pick). */
+export const VALUE_KINDS_ALL: readonly ValueKind[] = ['mask', 'text', 'number', 'boolean', 'json', 'glb', 'frames', 'video']
 
 /** Output slots that carry something other than files, by class. Rows are added by the cards (R0.4, R1). */
 export const OUTPUT_KINDS: Readonly<Record<string, Readonly<Record<number, ValueKind>>>> = {

@@ -323,7 +323,10 @@ export async function encodeVideo(o: EncodeVideoOptions): Promise<{ frames: numb
       const p = await probeVideoInput(input.path, { userId: o.userId, signal: o.signal, roots })
       const v = p.video[0]!
       if (v.w !== W || v.h !== H) throw new MediaError('sizeChanged')
-      args.push('-noautorotate', ...inputArgs(p.path, p.format))
+      // `-r` as an input option: the kept batch's own stamps (FFV1_KEPT_RATE) are replaced by frames at
+      // the video's rate, so each frame lasts 1/fps as a piped frame does (R5.2: without it the last
+      // frame kept the batch file's duration, and the MP4 came out a frame short of Python's length).
+      args.push('-noautorotate', '-r', `${o.fps.num}/${o.fps.den}`, ...inputArgs(p.path, p.format))
       // bgr0 → rgb24 is a lossless shuffle; then exactly the rgb24 path.
       args.push('-filter_complex', `[0:v]format=rgb24,${RGB_TO_YUV420P},${restamp}[v]`)
       videoMap = '[v]'
@@ -502,6 +505,15 @@ export function floatWav(s: DecodedSound): Uint8Array {
 }
 
 /**
+ * The rate a kept frame batch is stamped at (R5.2): a batch's own rate travels
+ * beside it, so the file's only has to keep a long batch's length inside the
+ * video caps its reader checks (`mediaCapsWord`: at 1 fps a local batch of
+ * 10,000 frames would read as 2.8 hours and be refused). One frame per
+ * Matroska millisecond: exact in its 1/1000 time base.
+ */
+export const FFV1_KEPT_RATE = 1000
+
+/**
  * An FFV1 Matroska of rgb24 frames (stored as bgr0, lossless: FFV1's RGB is
  * a reversible transform, and rgb24 ↔ bgr0 only moves bytes). Bit-exact
  * muxing, so the same frames make the same file (kept by sha256).
@@ -513,7 +525,7 @@ export async function writeFfv1(o: { frames: AsyncIterable<Uint8Array>; w: numbe
     const counted = { n: 0 }
     const out = join(work, 'out.mkv')
     const args = [
-      '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-s', `${o.w}x${o.h}`, '-framerate', '1', '-i', 'pipe:0',
+      '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-s', `${o.w}x${o.h}`, '-framerate', String(FFV1_KEPT_RATE), '-i', 'pipe:0',
       '-map', '0:v', '-map_metadata', '-1', '-fps_mode', 'passthrough',
       '-c:v', 'ffv1', '-threads:v', '1', '-pix_fmt', 'bgr0',
       '-fflags', '+bitexact', '-f', 'matroska', '-y', `file:${out}`,

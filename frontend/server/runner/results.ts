@@ -5,7 +5,8 @@
  * later means a second implementation of ResultStore plus a /view change —
  * nothing else in the runner reads or writes files directly.
  */
-import { mkdir, readdir, readFile, rename, stat, writeFile } from 'node:fs/promises'
+import { constants as fsConstants } from 'node:fs'
+import { copyFile, link, mkdir, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
 import { join, resolve, sep } from 'node:path'
 import { pyIntOf } from '#shared/runner/pyText'
 import { shortUserHash } from '../utils/meterGraphRun'
@@ -63,6 +64,16 @@ export interface ResultStore {
   exists(file: OutputFile): Promise<boolean>
   /** The file's size in bytes without reading it, or null when it isn't there (F22 fix round 1). */
   size?(file: OutputFile): Promise<number | null>
+  /** Where the file is on disk, for a video tool to read (R5.2); throws for a path outside the store. */
+  pathOf?(file: OutputFile): string
+  /** The store folder a file of this type lives under (a video tool's `roots`, R5.2). */
+  rootOf?(file: OutputFile): string
+  /**
+   * `save`, from a file a video tool wrote (R5.2): the same names and
+   * counters, the file moved into place (or copied across disks), never over
+   * an existing one and never read into memory. `tmpPath` is gone afterwards.
+   */
+  saveFromPath?(tmpPath: string, o: SaveOptions): Promise<OutputFile>
 }
 
 export function userSubfolder(userId: string | null, hosted: boolean): string {
@@ -142,14 +153,64 @@ export function extFor(contentType: string | null, url: string, fallback: string
   return fallback
 }
 
+/**
+ * Moves `src` to `dest` without ever replacing a file there: linked, then the
+ * old name removed; across disks (or where links aren't allowed), copied
+ * with COPYFILE_EXCL. EEXIST when
+ * `dest` is taken.
+ */
+async function moveNoClobber(src: string, dest: string): Promise<void> {
+  try { await link(src, dest) }
+  catch (e: any) {
+    if (e?.code !== 'EXDEV' && e?.code !== 'EPERM' && e?.code !== 'ENOTSUP') throw e
+    try { await copyFile(src, dest, fsConstants.COPYFILE_EXCL) }
+    catch (c: any) {
+      // A copy that failed partway leaves nothing behind (a name that was taken is someone else's).
+      if (c?.code !== 'EEXIST') await rm(dest, { force: true })
+      throw c
+    }
+  }
+  await rm(src, { force: true })
+}
+
 export function createEngineResultStore(o: { dirForType(type: string): string | null; hosted(): boolean }): ResultStore {
-  function pathOf(file: OutputFile): string {
+  function rootOf(file: OutputFile): string {
     const base = o.dirForType(file.type)
     if (!base) throw new Error('The file store is not available')
-    const root = resolve(base)
+    return resolve(base)
+  }
+  function pathOf(file: OutputFile): string {
+    const root = rootOf(file)
     const p = resolve(root, file.subfolder || '', file.filename)
     if (!p.startsWith(root + sep)) throw new Error('File path is outside the store')
     return p
+  }
+  /**
+   * Writes one saved file under `save`'s names: `write(path)` makes it at
+   * that name or throws EEXIST, and the next counter is tried.
+   */
+  async function saveWith(write: (path: string) => Promise<void>, { userId, prefix, ext, subfolder: sub, folder = 'output', counter: counting }: SaveOptions): Promise<OutputFile> {
+    const base = o.dirForType(folder)
+    if (!base) throw new Error('The file store is not available')
+    if (!prefix || /[/\0]/.test(prefix) || /[/\0]/.test(ext)) throw new Error(SAVE_OUTSIDE)
+    const subfolder = [userSubfolder(userId, o.hosted()), safeSubfolder(sub)].filter(Boolean).join('/')
+    const root = resolve(base)
+    const dir = resolve(root, subfolder)
+    if (dir !== root && !dir.startsWith(root + sep)) throw new Error(SAVE_OUTSIDE)
+    await mkdir(dir, { recursive: true })
+    const names = await readdir(dir).catch(() => [])
+    let counter = counting ? nextCounter(names, counting.prefix) + counting.offset : nextCounter(names, prefix)
+    for (let tries = 0; tries < 1000; tries++, counter++) {
+      const filename = `${prefix}_${counter05(counter)}_.${ext}`
+      try {
+        await write(join(dir, filename))
+        return { filename, subfolder, type: folder }
+      }
+      catch (e: any) {
+        if (e?.code !== 'EEXIST') throw e
+      }
+    }
+    throw new Error('Could not find a free file name')
   }
   return {
     // Where the runner's file names part from Python's: Python never checks
@@ -161,28 +222,10 @@ export function createEngineResultStore(o: { dirForType(type: string): string | 
     // un-normalised basename, finds no match and always writes _00001_); two
     // saves racing for one name; a name differing only in case on a
     // case-insensitive disk. The counter itself (nextCounter) is Python's.
-    async save(bytes, { userId, prefix, ext, subfolder: sub, folder = 'output', counter: counting }) {
-      const base = o.dirForType(folder)
-      if (!base) throw new Error('The file store is not available')
-      if (!prefix || /[/\0]/.test(prefix) || /[/\0]/.test(ext)) throw new Error(SAVE_OUTSIDE)
-      const subfolder = [userSubfolder(userId, o.hosted()), safeSubfolder(sub)].filter(Boolean).join('/')
-      const root = resolve(base)
-      const dir = resolve(root, subfolder)
-      if (dir !== root && !dir.startsWith(root + sep)) throw new Error(SAVE_OUTSIDE)
-      await mkdir(dir, { recursive: true })
-      const names = await readdir(dir).catch(() => [])
-      let counter = counting ? nextCounter(names, counting.prefix) + counting.offset : nextCounter(names, prefix)
-      for (let tries = 0; tries < 1000; tries++, counter++) {
-        const filename = `${prefix}_${counter05(counter)}_.${ext}`
-        try {
-          await writeFile(join(dir, filename), bytes, { flag: 'wx' })
-          return { filename, subfolder, type: folder }
-        }
-        catch (e: any) {
-          if (e?.code !== 'EEXIST') throw e
-        }
-      }
-      throw new Error('Could not find a free file name')
+    save: (bytes, so) => saveWith(p => writeFile(p, bytes, { flag: 'wx' }), so),
+    saveFromPath: async (tmpPath, so) => {
+      try { return await saveWith(p => moveNoClobber(tmpPath, p), so) }
+      finally { await rm(tmpPath, { force: true }) }
     },
     async saveLivePreview(bytes, { nodeId, userId }) {
       const root = o.dirForType('temp')
@@ -221,6 +264,8 @@ export function createEngineResultStore(o: { dirForType(type: string): string | 
     async read(file) {
       return new Uint8Array(await readFile(pathOf(file)))
     },
+    pathOf,
+    rootOf,
     async exists(file) {
       try { return (await stat(pathOf(file))).isFile() } catch { return false }
     },
