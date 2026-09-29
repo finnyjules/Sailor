@@ -42,7 +42,7 @@
 # Filters that open, read or write files by name (movie sources, command
 # files, LUT/curve/mask/model files, stats and metadata files). Names this
 # FFmpeg doesn't have are only warned about by configure.
---disable-filter=movie,amovie,sendcmd,asendcmd,lut1d,lut3d,curves,metadata,ametadata,psnr,ssim,ssim360,vmafmotion,signature,fieldhint,find_rect,cover_rect,removelogo,dnn_processing,dnn_classify,dnn_detect,sr,derain,drawtext,subtitles,ass,zmq,azmq,whisper
+--disable-filter=movie,amovie,sendcmd,asendcmd,lut1d,lut3d,curves,metadata,ametadata,psnr,ssim,ssim360,vmafmotion,signature,fieldhint,find_rect,cover_rect,removelogo,dnn_processing,dnn_classify,dnn_detect,sr,derain,drawtext,subtitles,ass,zmq,azmq,whisper,deshake,xpsnr,fsync,life,cellauto,arnndn,firequalizer,paletteuse,selectivecolor,showcqt
 --enable-libopenh264
 --enable-libmp3lame
 --enable-libopus

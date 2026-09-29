@@ -436,7 +436,7 @@ describe('the pins', () => {
       '--enable-demuxer=mov,matroska,wav,mp3,ogg,flac,aac,avi,aiff,caf,gif,mpegts,mpegps,flv,h264,hevc,asf,ac3,eac3,dts,amr,au,w64,dv,mxf,ivf,yuv4mpegpipe,nut,rm,rawvideo,pcm_f32le,ffmetadata',
       '--disable-muxers', '--enable-muxer=mp4,mov,matroska,wav,flac,mp3,ogg,opus,rawvideo,pcm_f32le,null',
       '--disable-encoders', '--enable-encoder=libopenh264,aac,libmp3lame,flac,libopus,ffv1,pcm_f32le,pcm_s16le,rawvideo',
-      '--disable-filter=movie,amovie,sendcmd,asendcmd,lut1d,lut3d,curves,metadata,ametadata,psnr,ssim,ssim360,vmafmotion,signature,fieldhint,find_rect,cover_rect,removelogo,dnn_processing,dnn_classify,dnn_detect,sr,derain,drawtext,subtitles,ass,zmq,azmq,whisper',
+      '--disable-filter=movie,amovie,sendcmd,asendcmd,lut1d,lut3d,curves,metadata,ametadata,psnr,ssim,ssim360,vmafmotion,signature,fieldhint,find_rect,cover_rect,removelogo,dnn_processing,dnn_classify,dnn_detect,sr,derain,drawtext,subtitles,ass,zmq,azmq,whisper,deshake,xpsnr,fsync,life,cellauto,arnndn,firequalizer,paletteuse,selectivecolor,showcqt',
       '--enable-libopenh264', '--enable-libmp3lame', '--enable-libopus', '--enable-libdav1d',
       '--enable-zlib',
       '--enable-static', '--disable-shared', `--extra-version=${MEDIA_TOOLS_BUILD_TAG}`,
