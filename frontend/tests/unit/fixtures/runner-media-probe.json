@@ -1,0 +1,1105 @@
+{
+ "av": "17.0.0",
+ "cases": [
+  {
+   "clip": "a_16.flac",
+   "dimensions": {
+    "error": "ValueError: No video stream found in file '/Users/julien/Documents/GitHub/Sailor/frontend/tests/unit/fixtures/media/a_16.flac'"
+   },
+   "frameCount": {
+    "error": "ValueError: No video stream found in file '/Users/julien/Documents/GitHub/Sailor/frontend/tests/unit/fixtures/media/a_16.flac'"
+   },
+   "frameCountIntended": null,
+   "frameRate": {
+    "error": "ValueError: No video stream found in file '/Users/julien/Documents/GitHub/Sailor/frontend/tests/unit/fixtures/media/a_16.flac'"
+   },
+   "header": {
+    "bytes": 43856,
+    "containerDuration": 1000000,
+    "formatName": "flac",
+    "sound": [
+     {
+      "channels": 2,
+      "codec": "flac",
+      "duration": 44100,
+      "index": 0,
+      "layout": "stereo",
+      "rate": 44100,
+      "sampleFmt": "s16",
+      "timeBase": {
+       "den": 44100,
+       "num": 1
+      }
+     }
+    ],
+    "video": []
+   },
+   "rawDuration": {
+    "value": 1.0
+   }
+  },
+  {
+   "clip": "a_24.flac",
+   "dimensions": {
+    "error": "ValueError: No video stream found in file '/Users/julien/Documents/GitHub/Sailor/frontend/tests/unit/fixtures/media/a_24.flac'"
+   },
+   "frameCount": {
+    "error": "ValueError: No video stream found in file '/Users/julien/Documents/GitHub/Sailor/frontend/tests/unit/fixtures/media/a_24.flac'"
+   },
+   "frameCountIntended": null,
+   "frameRate": {
+    "error": "ValueError: No video stream found in file '/Users/julien/Documents/GitHub/Sailor/frontend/tests/unit/fixtures/media/a_24.flac'"
+   },
+   "header": {
+    "bytes": 114766,
+    "containerDuration": 1000000,
+    "formatName": "flac",
+    "sound": [
+     {
+      "channels": 2,
+      "codec": "flac",
+      "duration": 44100,
+      "index": 0,
+      "layout": "stereo",
+      "rate": 44100,
+      "sampleFmt": "s32",
+      "timeBase": {
+       "den": 44100,
+       "num": 1
+      }
+     }
+    ],
+    "video": []
+   },
+   "rawDuration": {
+    "value": 1.0
+   }
+  },
+  {
+   "clip": "a_aac.m4a",
+   "dimensions": {
+    "error": "ValueError: No video stream found in file '/Users/julien/Documents/GitHub/Sailor/frontend/tests/unit/fixtures/media/a_aac.m4a'"
+   },
+   "frameCount": {
+    "error": "ValueError: No video stream found in file '/Users/julien/Documents/GitHub/Sailor/frontend/tests/unit/fixtures/media/a_aac.m4a'"
+   },
+   "frameCountIntended": null,
+   "frameRate": {
+    "error": "ValueError: No video stream found in file '/Users/julien/Documents/GitHub/Sailor/frontend/tests/unit/fixtures/media/a_aac.m4a'"
+   },
+   "header": {
+    "bytes": 13067,
+    "containerDuration": 1000000,
+    "formatName": "mov,mp4,m4a,3gp,3g2,mj2",
+    "sound": [
+     {
+      "channels": 2,
+      "codec": "aac",
+      "duration": 44100,
+      "index": 0,
+      "layout": "stereo",
+      "rate": 44100,
+      "sampleFmt": "fltp",
+      "timeBase": {
+       "den": 44100,
+       "num": 1
+      }
+     }
+    ],
+    "video": []
+   },
+   "rawDuration": {
+    "value": 1.0
+   }
+  },
+  {
+   "clip": "a_long_8k.wav",
+   "dimensions": {
+    "error": "ValueError: No video stream found in file '/Users/julien/Documents/GitHub/Sailor/frontend/tests/unit/fixtures/media/a_long_8k.wav'"
+   },
+   "frameCount": {
+    "error": "ValueError: No video stream found in file '/Users/julien/Documents/GitHub/Sailor/frontend/tests/unit/fixtures/media/a_long_8k.wav'"
+   },
+   "frameCountIntended": null,
+   "frameRate": {
+    "error": "ValueError: No video stream found in file '/Users/julien/Documents/GitHub/Sailor/frontend/tests/unit/fixtures/media/a_long_8k.wav'"
+   },
+   "header": {
+    "bytes": 1200044,
+    "containerDuration": 75000000,
+    "formatName": "wav",
+    "sound": [
+     {
+      "channels": 1,
+      "codec": "pcm_s16le",
+      "duration": 600000,
+      "index": 0,
+      "layout": "1 channels",
+      "rate": 8000,
+      "sampleFmt": "s16",
+      "timeBase": {
+       "den": 8000,
+       "num": 1
+      }
+     }
+    ],
+    "video": []
+   },
+   "rawDuration": {
+    "value": 75.0
+   }
+  },
+  {
+   "clip": "a_min.wav",
+   "dimensions": {
+    "error": "ValueError: No video stream found in file '/Users/julien/Documents/GitHub/Sailor/frontend/tests/unit/fixtures/media/a_min.wav'"
+   },
+   "frameCount": {
+    "error": "ValueError: No video stream found in file '/Users/julien/Documents/GitHub/Sailor/frontend/tests/unit/fixtures/media/a_min.wav'"
+   },
+   "frameCountIntended": null,
+   "frameRate": {
+    "error": "ValueError: No video stream found in file '/Users/julien/Documents/GitHub/Sailor/frontend/tests/unit/fixtures/media/a_min.wav'"
+   },
+   "header": {
+    "bytes": 22094,
+    "containerDuration": 250000,
+    "formatName": "wav",
+    "sound": [
+     {
+      "channels": 1,
+      "codec": "pcm_s16le",
+      "duration": 11025,
+      "index": 0,
+      "layout": "1 channels",
+      "rate": 44100,
+      "sampleFmt": "s16",
+      "timeBase": {
+       "den": 44100,
+       "num": 1
+      }
+     }
+    ],
+    "video": []
+   },
+   "rawDuration": {
+    "value": 0.25
+   }
+  },
+  {
+   "clip": "a_mono.mp3",
+   "dimensions": {
+    "error": "ValueError: No video stream found in file '/Users/julien/Documents/GitHub/Sailor/frontend/tests/unit/fixtures/media/a_mono.mp3'"
+   },
+   "frameCount": {
+    "error": "ValueError: No video stream found in file '/Users/julien/Documents/GitHub/Sailor/frontend/tests/unit/fixtures/media/a_mono.mp3'"
+   },
+   "frameCountIntended": null,
+   "frameRate": {
+    "error": "ValueError: No video stream found in file '/Users/julien/Documents/GitHub/Sailor/frontend/tests/unit/fixtures/media/a_mono.mp3'"
+   },
+   "header": {
+    "bytes": 17155,
+    "containerDuration": 1000000,
+    "formatName": "mp3",
+    "sound": [
+     {
+      "channels": 1,
+      "codec": "mp3float",
+      "duration": 14112000,
+      "index": 0,
+      "layout": "mono",
+      "rate": 44100,
+      "sampleFmt": "fltp",
+      "timeBase": {
+       "den": 14112000,
+       "num": 1
+      }
+     }
+    ],
+    "video": []
+   },
+   "rawDuration": {
+    "value": 1.0
+   }
+  },
+  {
+   "clip": "a_opus.webm",
+   "dimensions": {
+    "error": "ValueError: No video stream found in file '/Users/julien/Documents/GitHub/Sailor/frontend/tests/unit/fixtures/media/a_opus.webm'"
+   },
+   "frameCount": {
+    "error": "ValueError: No video stream found in file '/Users/julien/Documents/GitHub/Sailor/frontend/tests/unit/fixtures/media/a_opus.webm'"
+   },
+   "frameCountIntended": null,
+   "frameRate": {
+    "error": "ValueError: No video stream found in file '/Users/julien/Documents/GitHub/Sailor/frontend/tests/unit/fixtures/media/a_opus.webm'"
+   },
+   "header": {
+    "bytes": 20846,
+    "containerDuration": null,
+    "formatName": "matroska,webm",
+    "sound": [
+     {
+      "channels": 2,
+      "codec": "opus",
+      "duration": null,
+      "index": 0,
+      "layout": "stereo",
+      "rate": 48000,
+      "sampleFmt": "fltp",
+      "timeBase": {
+       "den": 1000,
+       "num": 1
+      }
+     }
+    ],
+    "video": []
+   },
+   "rawDuration": {
+    "error": "ValueError: Could not determine duration for file '/Users/julien/Documents/GitHub/Sailor/frontend/tests/unit/fixtures/media/a_opus.webm'"
+   }
+  },
+  {
+   "clip": "a_s16.wav",
+   "dimensions": {
+    "error": "ValueError: No video stream found in file '/Users/julien/Documents/GitHub/Sailor/frontend/tests/unit/fixtures/media/a_s16.wav'"
+   },
+   "frameCount": {
+    "error": "ValueError: No video stream found in file '/Users/julien/Documents/GitHub/Sailor/frontend/tests/unit/fixtures/media/a_s16.wav'"
+   },
+   "frameCountIntended": null,
+   "frameRate": {
+    "error": "ValueError: No video stream found in file '/Users/julien/Documents/GitHub/Sailor/frontend/tests/unit/fixtures/media/a_s16.wav'"
+   },
+   "header": {
+    "bytes": 176444,
+    "containerDuration": 1000000,
+    "formatName": "wav",
+    "sound": [
+     {
+      "channels": 2,
+      "codec": "pcm_s16le",
+      "duration": 44100,
+      "index": 0,
+      "layout": "2 channels",
+      "rate": 44100,
+      "sampleFmt": "s16",
+      "timeBase": {
+       "den": 44100,
+       "num": 1
+      }
+     }
+    ],
+    "video": []
+   },
+   "rawDuration": {
+    "value": 1.0
+   }
+  },
+  {
+   "clip": "a_s24.wav",
+   "dimensions": {
+    "error": "ValueError: No video stream found in file '/Users/julien/Documents/GitHub/Sailor/frontend/tests/unit/fixtures/media/a_s24.wav'"
+   },
+   "frameCount": {
+    "error": "ValueError: No video stream found in file '/Users/julien/Documents/GitHub/Sailor/frontend/tests/unit/fixtures/media/a_s24.wav'"
+   },
+   "frameCountIntended": null,
+   "frameRate": {
+    "error": "ValueError: No video stream found in file '/Users/julien/Documents/GitHub/Sailor/frontend/tests/unit/fixtures/media/a_s24.wav'"
+   },
+   "header": {
+    "bytes": 264668,
+    "containerDuration": 1000000,
+    "formatName": "wav",
+    "sound": [
+     {
+      "channels": 2,
+      "codec": "pcm_s24le",
+      "duration": 44100,
+      "index": 0,
+      "layout": "stereo",
+      "rate": 44100,
+      "sampleFmt": "s32",
+      "timeBase": {
+       "den": 44100,
+       "num": 1
+      }
+     }
+    ],
+    "video": []
+   },
+   "rawDuration": {
+    "value": 1.0
+   }
+  },
+  {
+   "clip": "a_s32.wav",
+   "dimensions": {
+    "error": "ValueError: No video stream found in file '/Users/julien/Documents/GitHub/Sailor/frontend/tests/unit/fixtures/media/a_s32.wav'"
+   },
+   "frameCount": {
+    "error": "ValueError: No video stream found in file '/Users/julien/Documents/GitHub/Sailor/frontend/tests/unit/fixtures/media/a_s32.wav'"
+   },
+   "frameCountIntended": null,
+   "frameRate": {
+    "error": "ValueError: No video stream found in file '/Users/julien/Documents/GitHub/Sailor/frontend/tests/unit/fixtures/media/a_s32.wav'"
+   },
+   "header": {
+    "bytes": 352868,
+    "containerDuration": 1000000,
+    "formatName": "wav",
+    "sound": [
+     {
+      "channels": 2,
+      "codec": "pcm_s32le",
+      "duration": 44100,
+      "index": 0,
+      "layout": "stereo",
+      "rate": 44100,
+      "sampleFmt": "s32",
+      "timeBase": {
+       "den": 44100,
+       "num": 1
+      }
+     }
+    ],
+    "video": []
+   },
+   "rawDuration": {
+    "value": 1.0
+   }
+  },
+  {
+   "clip": "a_vorbis.ogg",
+   "dimensions": {
+    "error": "ValueError: No video stream found in file '/Users/julien/Documents/GitHub/Sailor/frontend/tests/unit/fixtures/media/a_vorbis.ogg'"
+   },
+   "frameCount": {
+    "error": "ValueError: No video stream found in file '/Users/julien/Documents/GitHub/Sailor/frontend/tests/unit/fixtures/media/a_vorbis.ogg'"
+   },
+   "frameCountIntended": null,
+   "frameRate": {
+    "error": "ValueError: No video stream found in file '/Users/julien/Documents/GitHub/Sailor/frontend/tests/unit/fixtures/media/a_vorbis.ogg'"
+   },
+   "header": {
+    "bytes": 8016,
+    "containerDuration": 1000000,
+    "formatName": "ogg",
+    "sound": [
+     {
+      "channels": 2,
+      "codec": "vorbis",
+      "duration": 44100,
+      "index": 0,
+      "layout": "stereo",
+      "rate": 44100,
+      "sampleFmt": "fltp",
+      "timeBase": {
+       "den": 44100,
+       "num": 1
+      }
+     }
+    ],
+    "video": []
+   },
+   "rawDuration": {
+    "value": 1.0
+   }
+  },
+  {
+   "clip": "v_editlist.mp4",
+   "dimensions": {
+    "value": [
+     32,
+     24
+    ]
+   },
+   "frameCount": {
+    "value": 8
+   },
+   "frameCountIntended": 7,
+   "frameRate": {
+    "value": {
+     "den": 1,
+     "num": 24
+    }
+   },
+   "header": {
+    "bytes": 2293,
+    "containerDuration": 250000,
+    "formatName": "mov,mp4,m4a,3gp,3g2,mj2",
+    "sound": [],
+    "video": [
+     {
+      "averageRate": {
+       "den": 1,
+       "num": 24
+      },
+      "codec": "h264",
+      "colorRange": 0,
+      "colorSpace": 2,
+      "duration": 3072,
+      "frames": 8,
+      "h": 24,
+      "index": 0,
+      "pixFmt": "yuv420p",
+      "timeBase": {
+       "den": 12288,
+       "num": 1
+      },
+      "w": 32
+     }
+    ]
+   },
+   "rawDuration": {
+    "value": 0.25
+   }
+  },
+  {
+   "clip": "v_h264_601.mp4",
+   "dimensions": {
+    "value": [
+     32,
+     24
+    ]
+   },
+   "frameCount": {
+    "value": 8
+   },
+   "frameCountIntended": 8,
+   "frameRate": {
+    "value": {
+     "den": 1,
+     "num": 24
+    }
+   },
+   "header": {
+    "bytes": 2305,
+    "containerDuration": 333333,
+    "formatName": "mov,mp4,m4a,3gp,3g2,mj2",
+    "sound": [],
+    "video": [
+     {
+      "averageRate": {
+       "den": 1,
+       "num": 24
+      },
+      "codec": "h264",
+      "colorRange": 0,
+      "colorSpace": 2,
+      "duration": 4096,
+      "frames": 8,
+      "h": 24,
+      "index": 0,
+      "pixFmt": "yuv420p",
+      "timeBase": {
+       "den": 12288,
+       "num": 1
+      },
+      "w": 32
+     }
+    ]
+   },
+   "rawDuration": {
+    "value": 0.333333
+   }
+  },
+  {
+   "clip": "v_h264_709.mp4",
+   "dimensions": {
+    "value": [
+     32,
+     24
+    ]
+   },
+   "frameCount": {
+    "value": 8
+   },
+   "frameCountIntended": 8,
+   "frameRate": {
+    "value": {
+     "den": 1,
+     "num": 24
+    }
+   },
+   "header": {
+    "bytes": 2375,
+    "containerDuration": 333333,
+    "formatName": "mov,mp4,m4a,3gp,3g2,mj2",
+    "sound": [],
+    "video": [
+     {
+      "averageRate": {
+       "den": 1,
+       "num": 24
+      },
+      "codec": "h264",
+      "colorRange": 1,
+      "colorSpace": 1,
+      "duration": 4096,
+      "frames": 8,
+      "h": 24,
+      "index": 0,
+      "pixFmt": "yuv420p",
+      "timeBase": {
+       "den": 12288,
+       "num": 1
+      },
+      "w": 32
+     }
+    ]
+   },
+   "rawDuration": {
+    "value": 0.333333
+   }
+  },
+  {
+   "clip": "v_h264_full.mp4",
+   "dimensions": {
+    "value": [
+     32,
+     24
+    ]
+   },
+   "frameCount": {
+    "value": 8
+   },
+   "frameCountIntended": 8,
+   "frameRate": {
+    "value": {
+     "den": 1,
+     "num": 24
+    }
+   },
+   "header": {
+    "bytes": 2393,
+    "containerDuration": 333333,
+    "formatName": "mov,mp4,m4a,3gp,3g2,mj2",
+    "sound": [],
+    "video": [
+     {
+      "averageRate": {
+       "den": 1,
+       "num": 24
+      },
+      "codec": "h264",
+      "colorRange": 2,
+      "colorSpace": 2,
+      "duration": 4096,
+      "frames": 8,
+      "h": 24,
+      "index": 0,
+      "pixFmt": "yuvj420p",
+      "timeBase": {
+       "den": 12288,
+       "num": 1
+      },
+      "w": 32
+     }
+    ]
+   },
+   "rawDuration": {
+    "value": 0.333333
+   }
+  },
+  {
+   "clip": "v_hevc10.mp4",
+   "dimensions": {
+    "value": [
+     32,
+     24
+    ]
+   },
+   "frameCount": {
+    "value": 8
+   },
+   "frameCountIntended": 8,
+   "frameRate": {
+    "value": {
+     "den": 1,
+     "num": 24
+    }
+   },
+   "header": {
+    "bytes": 3810,
+    "containerDuration": 333333,
+    "formatName": "mov,mp4,m4a,3gp,3g2,mj2",
+    "sound": [],
+    "video": [
+     {
+      "averageRate": {
+       "den": 1,
+       "num": 24
+      },
+      "codec": "hevc",
+      "colorRange": 1,
+      "colorSpace": 2,
+      "duration": 4096,
+      "frames": 8,
+      "h": 24,
+      "index": 0,
+      "pixFmt": "yuv420p10le",
+      "timeBase": {
+       "den": 12288,
+       "num": 1
+      },
+      "w": 32
+     }
+    ]
+   },
+   "rawDuration": {
+    "value": 0.333333
+   }
+  },
+  {
+   "clip": "v_prores.mov",
+   "dimensions": {
+    "value": [
+     32,
+     24
+    ]
+   },
+   "frameCount": {
+    "value": 8
+   },
+   "frameCountIntended": 8,
+   "frameRate": {
+    "value": {
+     "den": 1,
+     "num": 24
+    }
+   },
+   "header": {
+    "bytes": 6308,
+    "containerDuration": 333333,
+    "formatName": "mov,mp4,m4a,3gp,3g2,mj2",
+    "sound": [],
+    "video": [
+     {
+      "averageRate": {
+       "den": 1,
+       "num": 24
+      },
+      "codec": "prores",
+      "colorRange": 0,
+      "colorSpace": 2,
+      "duration": 4096,
+      "frames": 8,
+      "h": 24,
+      "index": 0,
+      "pixFmt": "yuv422p10le",
+      "timeBase": {
+       "den": 12288,
+       "num": 1
+      },
+      "w": 32
+     }
+    ]
+   },
+   "rawDuration": {
+    "value": 0.333333
+   }
+  },
+  {
+   "clip": "v_stereo_aac.mp4",
+   "dimensions": {
+    "value": [
+     32,
+     24
+    ]
+   },
+   "frameCount": {
+    "value": 24
+   },
+   "frameCountIntended": 24,
+   "frameRate": {
+    "value": {
+     "den": 1,
+     "num": 24
+    }
+   },
+   "header": {
+    "bytes": 12366,
+    "containerDuration": 1000000,
+    "formatName": "mov,mp4,m4a,3gp,3g2,mj2",
+    "sound": [
+     {
+      "channels": 2,
+      "codec": "aac",
+      "duration": 44100,
+      "index": 1,
+      "layout": "stereo",
+      "rate": 44100,
+      "sampleFmt": "fltp",
+      "timeBase": {
+       "den": 44100,
+       "num": 1
+      }
+     }
+    ],
+    "video": [
+     {
+      "averageRate": {
+       "den": 1,
+       "num": 24
+      },
+      "codec": "h264",
+      "colorRange": 0,
+      "colorSpace": 2,
+      "duration": 12288,
+      "frames": 24,
+      "h": 24,
+      "index": 0,
+      "pixFmt": "yuv420p",
+      "timeBase": {
+       "den": 12288,
+       "num": 1
+      },
+      "w": 32
+     }
+    ]
+   },
+   "rawDuration": {
+    "value": 1.0
+   }
+  },
+  {
+   "clip": "v_two_sounds.mkv",
+   "dimensions": {
+    "value": [
+     32,
+     24
+    ]
+   },
+   "frameCount": {
+    "error": "TypeError: '>=' not supported between instances of 'NoneType' and 'float'"
+   },
+   "frameCountIntended": 24,
+   "frameRate": {
+    "value": {
+     "den": 1,
+     "num": 24
+    }
+   },
+   "header": {
+    "bytes": 19519,
+    "containerDuration": 1046000,
+    "formatName": "matroska,webm",
+    "sound": [
+     {
+      "channels": 1,
+      "codec": "aac",
+      "duration": null,
+      "index": 1,
+      "layout": "mono",
+      "rate": 22050,
+      "sampleFmt": "fltp",
+      "timeBase": {
+       "den": 1000,
+       "num": 1
+      }
+     },
+     {
+      "channels": 2,
+      "codec": "aac",
+      "duration": null,
+      "index": 2,
+      "layout": "stereo",
+      "rate": 48000,
+      "sampleFmt": "fltp",
+      "timeBase": {
+       "den": 1000,
+       "num": 1
+      }
+     }
+    ],
+    "video": [
+     {
+      "averageRate": {
+       "den": 1,
+       "num": 24
+      },
+      "codec": "h264",
+      "colorRange": 0,
+      "colorSpace": 2,
+      "duration": null,
+      "frames": 0,
+      "h": 24,
+      "index": 0,
+      "pixFmt": "yuv420p",
+      "timeBase": {
+       "den": 1000,
+       "num": 1
+      },
+      "w": 32
+     }
+    ]
+   },
+   "rawDuration": {
+    "value": 1.046
+   }
+  },
+  {
+   "clip": "v_vfr.mp4",
+   "dimensions": {
+    "value": [
+     32,
+     24
+    ]
+   },
+   "frameCount": {
+    "value": 8
+   },
+   "frameCountIntended": 8,
+   "frameRate": {
+    "value": {
+     "den": 17,
+     "num": 400
+    }
+   },
+   "header": {
+    "bytes": 2454,
+    "containerDuration": 340000,
+    "formatName": "mov,mp4,m4a,3gp,3g2,mj2",
+    "sound": [],
+    "video": [
+     {
+      "averageRate": {
+       "den": 17,
+       "num": 400
+      },
+      "codec": "h264",
+      "colorRange": 0,
+      "colorSpace": 2,
+      "duration": 5440,
+      "frames": 8,
+      "h": 24,
+      "index": 0,
+      "pixFmt": "yuv420p",
+      "timeBase": {
+       "den": 16000,
+       "num": 1
+      },
+      "w": 32
+     }
+    ]
+   },
+   "rawDuration": {
+    "value": 0.34
+   }
+  },
+  {
+   "clip": "v_vp9_live.webm",
+   "dimensions": {
+    "value": [
+     32,
+     24
+    ]
+   },
+   "frameCount": {
+    "error": "TypeError: '>=' not supported between instances of 'NoneType' and 'float'"
+   },
+   "frameCountIntended": 8,
+   "frameRate": {
+    "value": {
+     "den": 1,
+     "num": 24
+    }
+   },
+   "header": {
+    "bytes": 1679,
+    "containerDuration": null,
+    "formatName": "matroska,webm",
+    "sound": [],
+    "video": [
+     {
+      "averageRate": {
+       "den": 1,
+       "num": 24
+      },
+      "codec": "vp9",
+      "colorRange": 1,
+      "colorSpace": 2,
+      "duration": null,
+      "frames": 0,
+      "h": 24,
+      "index": 0,
+      "pixFmt": "yuv420p",
+      "timeBase": {
+       "den": 1000,
+       "num": 1
+      },
+      "w": 32
+     }
+    ]
+   },
+   "rawDuration": {
+    "value": 0.375
+   }
+  },
+  {
+   "clip": "v_vp9_odd.webm",
+   "dimensions": {
+    "value": [
+     63,
+     47
+    ]
+   },
+   "frameCount": {
+    "error": "TypeError: '>=' not supported between instances of 'NoneType' and 'float'"
+   },
+   "frameCountIntended": 8,
+   "frameRate": {
+    "value": {
+     "den": 1,
+     "num": 24
+    }
+   },
+   "header": {
+    "bytes": 4734,
+    "containerDuration": 334000,
+    "formatName": "matroska,webm",
+    "sound": [],
+    "video": [
+     {
+      "averageRate": {
+       "den": 1,
+       "num": 24
+      },
+      "codec": "vp9",
+      "colorRange": 1,
+      "colorSpace": 2,
+      "duration": null,
+      "frames": 0,
+      "h": 47,
+      "index": 0,
+      "pixFmt": "yuv420p",
+      "timeBase": {
+       "den": 1000,
+       "num": 1
+      },
+      "w": 63
+     }
+    ]
+   },
+   "rawDuration": {
+    "value": 0.334
+   }
+  },
+  {
+   "clip": "x_vp9_resize.webm",
+   "dimensions": {
+    "value": [
+     32,
+     24
+    ]
+   },
+   "frameCount": {
+    "error": "TypeError: '>=' not supported between instances of 'NoneType' and 'float'"
+   },
+   "frameCountIntended": 6,
+   "frameRate": {
+    "value": {
+     "den": 1,
+     "num": 24
+    }
+   },
+   "header": {
+    "bytes": 3120,
+    "containerDuration": 250000,
+    "formatName": "matroska,webm",
+    "sound": [],
+    "video": [
+     {
+      "averageRate": {
+       "den": 1,
+       "num": 24
+      },
+      "codec": "vp9",
+      "colorRange": 1,
+      "colorSpace": 2,
+      "duration": null,
+      "frames": 0,
+      "h": 24,
+      "index": 0,
+      "pixFmt": "yuv420p",
+      "timeBase": {
+       "den": 1000,
+       "num": 1
+      },
+      "w": 32
+     }
+    ]
+   },
+   "rawDuration": {
+    "value": 0.25
+   }
+  }
+ ],
+ "clips": {
+  "a_16.flac": "faff834290fae6033e57f02cc18b739fe789a596ca58cc743cca25e655293022",
+  "a_24.flac": "e15fb7f2e9f0eee23b15c9ba94f9eb4d821706d669177d6f964a02ec5f7aa930",
+  "a_aac.m4a": "dd02bd05ed8f8e0b125cea59819eac4f646dafb3c06c5d7a0915a2554b68491d",
+  "a_long_8k.wav": "4006af50b8610d0ae9e7ebf1514370ee56a22d9a8febf3c3726d34ce76a2fa66",
+  "a_min.wav": "e88b8a7f6b7fa7ee8342fff15c43ee978a2ef91c930300066b02f211d13d216e",
+  "a_mono.mp3": "5eaab12afcc4ff3ff32f6979234089c0a110a918be09d806b0b446b97d73527f",
+  "a_opus.webm": "038ded41aaa89f698c4ce395e73b630680e7f78bf34ebd0112835d109992c16f",
+  "a_s16.wav": "3fdd2b3532a855528856d0374b795bb16027cb46dd8d1f5f9b1a0f3270d1ab46",
+  "a_s24.wav": "f9703e39a8c1cd54f8269f8dc4158cecdce1fc83ec2298bf3fbb6c2015a99271",
+  "a_s32.wav": "76df4a5c25b8a48cbcea20da09c57ce050853cf17db7c9e23ce60b8e900ecc76",
+  "a_vorbis.ogg": "9d263b53ec8d5452e0de962d95d2116251cb15949b1a7611f021293608ee7a9e",
+  "v_editlist.mp4": "556be520906c281d1f93d6a3ccaf022368be9edb5914ef2b2349a64c9c0efa36",
+  "v_h264_601.mp4": "8cb151469583d71cc5d37aac52eb49f95db4abd1e9fcfacd2eb089993ac6bbb3",
+  "v_h264_709.mp4": "716e5f2718e108521113cba161b4151d00afaeb99048ac7802f010ee80adcbba",
+  "v_h264_full.mp4": "c53e2fc064db2808fd06b94a102b2740c4ce5472fc3cce131a0f32a91fcc98d3",
+  "v_hevc10.mp4": "20b9da9c0311c2d21b07d6a469e22d6804b2c2374f1e056f7957904458995a01",
+  "v_prores.mov": "fb333e704f349cae7fb93c69cb8318205f5ccee0239f19c023879034c5bb5a3a",
+  "v_stereo_aac.mp4": "fb60c083f668721cde10eaab2fa2387dd4b40e104e7cd5510d291d7e7a809978",
+  "v_two_sounds.mkv": "4c15a78b9be89b33639a3988d0b5e7529a9f4c2c593f42fbdb2d89ef287a5bb9",
+  "v_vfr.mp4": "fe569d0337ebd6370c625169d138d25a9941f9d484e9997b669d0ad033678e59",
+  "v_vp9_live.webm": "b1d341e60a5f88e6e43b9fcb3136bfc4bf5bb284976a02b4e868d69cd69035b2",
+  "v_vp9_odd.webm": "79555463bf0805d2a64c7675282dc52c0fc4e2b4438e17444040ff878c9f388d",
+  "x_vp9_resize.webm": "2d2d97826ea00d01bb28658682d22035b05b424cdbc891357ce656fcd0f67194"
+ },
+ "libraries": {
+  "libavcodec": [
+   62,
+   11,
+   100
+  ],
+  "libavdevice": [
+   62,
+   1,
+   100
+  ],
+  "libavfilter": [
+   11,
+   4,
+   100
+  ],
+  "libavformat": [
+   62,
+   3,
+   100
+  ],
+  "libavutil": [
+   60,
+   8,
+   100
+  ],
+  "libswresample": [
+   6,
+   1,
+   100
+  ],
+  "libswscale": [
+   9,
+   1,
+   100
+  ]
+ },
+ "note": "Written by scripts/runner_media_fixtures.py --group probe. Do not edit.",
+ "platform": "Darwin-arm64"
+}

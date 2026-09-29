@@ -18,17 +18,18 @@ import type { MeasuredMedia, OutputFile } from './types'
 export type { MediaKind }
 
 /** The containers the runner can tell apart from a file's first bytes. */
-export type MediaFormat = 'mp4' | 'mov' | 'm4a' | 'webm' | 'wav' | 'mp3' | 'ogg' | 'flac' | 'aac'
+export type MediaFormat = 'mp4' | 'mov' | 'm4a' | 'webm' | 'mkv' | 'wav' | 'avi' | 'mp3' | 'ogg' | 'flac' | 'aac'
 
 const ascii = (bytes: Uint8Array, at: number, text: string) =>
   [...text].every((c, i) => bytes[at + i] === c.charCodeAt(0))
 
 /**
  * A media file's container, from its first bytes: MP4 / MOV / M4A (an ISO
- * `ftyp` box, told apart by its brand), WebM (an EBML header naming "webm"),
- * WAV (RIFF…WAVE), MP3 (an ID3 tag or an MPEG audio frame), Ogg, FLAC, or
- * AAC (an ADTS frame). Null for anything else (Matroska that isn't WebM, AVI,
- * GIF, a picture, text).
+ * `ftyp` box, told apart by its brand), WebM or other Matroska (an EBML header
+ * naming "webm" or "matroska"), WAV (RIFF…WAVE), AVI (RIFF…AVI), MP3 (an ID3
+ * tag or an MPEG audio frame), Ogg, FLAC, or AAC (an ADTS frame). Null for
+ * anything else (GIF, a picture, a playlist, text). The media module names
+ * ffmpeg's demuxer from this answer, never from a file's name (R5 rule 6).
  */
 export function mediaFormat(bytes: Uint8Array): MediaFormat | null {
   if (bytes.byteLength >= 12 && ascii(bytes, 4, 'ftyp')) {
@@ -38,9 +39,10 @@ export function mediaFormat(bytes: Uint8Array): MediaFormat | null {
   }
   if (bytes[0] === 0x1A && bytes[1] === 0x45 && bytes[2] === 0xDF && bytes[3] === 0xA3) {
     const head = String.fromCharCode(...bytes.subarray(0, 64))
-    return head.includes('webm') ? 'webm' : null
+    return head.includes('webm') ? 'webm' : head.includes('matroska') ? 'mkv' : null
   }
   if (ascii(bytes, 0, 'RIFF') && ascii(bytes, 8, 'WAVE')) return 'wav'
+  if (ascii(bytes, 0, 'RIFF') && ascii(bytes, 8, 'AVI ')) return 'avi'
   if (ascii(bytes, 0, 'OggS')) return 'ogg'
   if (ascii(bytes, 0, 'fLaC')) return 'flac'
   if (ascii(bytes, 0, 'ID3')) return 'mp3'

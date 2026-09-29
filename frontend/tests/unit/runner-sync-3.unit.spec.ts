@@ -517,9 +517,10 @@ describe('the media: what the file is, read from its bytes', () => {
     expect(mediaFormat(Buffer.from('\0\0\0\x20ftypqt  \0\0\0\0'))).toBe('mov')
     expect(mediaFormat(Buffer.from('\0\0\0\x20ftypM4A \0\0\0\0'))).toBe('m4a')
     expect(mediaFormat(Uint8Array.from([0x1A, 0x45, 0xDF, 0xA3, 0x42, 0x82, 0x84, ...Buffer.from('webm')]))).toBe('webm')
-    expect(mediaFormat(Uint8Array.from([0x1A, 0x45, 0xDF, 0xA3, 0x42, 0x82, 0x88, ...Buffer.from('matroska')]))).toBeNull()
+    // Matroska and AVI are told apart since R5.1b (the media module names ffmpeg's demuxer from them); sync-3 still refuses them by its formats.
+    expect(mediaFormat(Uint8Array.from([0x1A, 0x45, 0xDF, 0xA3, 0x42, 0x82, 0x88, ...Buffer.from('matroska')]))).toBe('mkv')
     expect(mediaFormat(Uint8Array.from([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]))).toBeNull()
-    expect(mediaFormat(Buffer.from('RIFF\0\0\0\0AVI '))).toBeNull()
+    expect(mediaFormat(Buffer.from('RIFF\0\0\0\0AVI '))).toBe('avi')
   })
 
   it('length and size measured; limits judged in plain words', async () => {
