@@ -39,7 +39,9 @@
  *                the runner reads its channels apart (ruling k, a deliberate
  *                difference).
  *   - 'fltp'     get_components' sound (:272-307): by default the last stream,
- *                and the samples before t = 0 skipped frame by frame
+ *                read after Python's seek to 0 on the video (`pythonSeekArgs`:
+ *                in an ffmpeg-muxed MP4 it skips the AAC priming packet), and
+ *                the samples before t = 0 skipped frame by frame
  *                (to_skip = max(0, int((0 − pts · time_base) · rate))),
  *                from the decoded frames' own pts and sizes.
  */
@@ -216,20 +218,61 @@ const INT_SCALE: Readonly<Record<string, number>> = { s16: 32768, s16p: 32768, s
 const FLOAT_FORMATS = new Set(['flt', 'fltp', 'dbl', 'dblp'])
 
 /**
- * The leading frames' pts and sizes (ffprobe, the first `packets` packets of
- * the stream), for get_components' skip rule.
+ * get_components' seek (video_types.py:274): before it reads the sound, Python
+ * seeks the file to 0 on its first video stream (`container.seek(0, stream=
+ * video)`, backward), which in an MP4 also moves every sound stream to the
+ * sample at or before the video's own first one. Where the video starts at
+ * decode time 0 and the AAC priming packet (pts < 0) comes first (ffmpeg's
+ * muxer, OpenH264, no B-frames), that packet is skipped, and the decoder
+ * starts from the next one. ffmpeg's `-ss 0 -seek_timestamp 1
+ * -noaccurate_seek` makes the same avformat seek (the default stream is the
+ * video; no container start added; backward) and trims nothing, so the
+ * mirror decodes from the very packet Python does (R5.1c review, Important 3).
+ * Only the MP4 family with a video stream is sought: without video,
+ * get_components doesn't get this far, and in Matroska the CLI's seek lands
+ * 16 samples away from PyAV's while no seek at all equals it (measured on
+ * v_two_sounds.mkv), since Matroska's seek to 0 goes back to the file's start.
  */
-async function leadingFrames(p: MediaProbe, k: number, packets: number, o: { userId: string | null; signal?: AbortSignal }): Promise<{ pts: number | null; samples: number }[]> {
-  const j = await ffprobeJson(p.path, p.format, ['-select_streams', `a:${k}`, '-read_intervals', `%+#${packets}`, '-show_entries', 'frame=pts,nb_samples'], o)
-  const frames = Array.isArray(j.frames) ? (j.frames as { pts?: unknown; nb_samples?: unknown }[]) : []
-  return frames.map(f => ({ pts: typeof f.pts === 'number' ? f.pts : null, samples: typeof f.nb_samples === 'number' ? f.nb_samples : 0 }))
+function pythonSeekArgs(p: MediaProbe, decoder: SoundDecoder): string[] {
+  const mov = p.format === 'mp4' || p.format === 'mov' || p.format === 'm4a'
+  return decoder === 'fltp' && mov && p.video.length ? ['-seek_timestamp', '1', '-ss', '0', '-noaccurate_seek'] : []
+}
+
+/**
+ * The leading decoded frames' pts and sizes, read the way the decode itself
+ * reads the file (the same seek): `-stats_mux_pre` of the first `frames`
+ * frames, their sizes as pcm_f32le, for get_components' skip rule.
+ */
+async function leadingFrames(p: MediaProbe, k: number, s: SoundStreamProbe, frames: number, o: { userId: string | null; signal?: AbortSignal }): Promise<{ pts: number | null; samples: number }[]> {
+  let text = ''
+  await runMedia({
+    tool: 'ffmpeg',
+    args: [
+      '-copyts', ...pythonSeekArgs(p, 'fltp'), ...inputArgs(p.path, p.format),
+      '-map', `0:a:${k}`, '-frames:a', String(frames), '-c:a', 'pcm_f32le',
+      '-stats_mux_pre', 'pipe:3', '-stats_mux_pre_fmt', '{size} {ptsi} {tbi}', '-f', 'null', 'pipe:1',
+    ],
+    userId: o.userId, signal: o.signal,
+    onSide: (chunk) => { if (chunk) text += Buffer.from(chunk).toString('latin1') },
+  })
+  const out: { pts: number | null; samples: number }[] = []
+  for (const line of text.split('\n')) {
+    if (!line.trim()) continue
+    const m = /^(\d+) (-?\d+|N\/A) (\d+)\/(\d+)$/.exec(line.trim())
+    if (!m) throw new MediaError('failed')
+    // In the stream's own time base, as PyAV's frame.pts (the input time base is the stream's).
+    const tb = { num: Number(m[3]), den: Number(m[4]) }
+    if (tb.num !== s.timeBase.num || tb.den !== s.timeBase.den) throw new MediaError('failed')
+    out.push({ pts: m[2] === 'N/A' ? null : Number(m[2]), samples: Number(m[1]) / (4 * s.channels) })
+  }
+  return out
 }
 
 /** How many samples get_components drops before t = 0, frame by frame; null when no frame reaches 0 (Python's sound is then None). */
 async function samplesBeforeZero(p: MediaProbe, k: number, s: SoundStreamProbe, o: { userId: string | null; signal?: AbortSignal }): Promise<number | null> {
   const num = BigInt(s.timeBase.num); const den = BigInt(s.timeBase.den); const rate = BigInt(s.rate)
   for (let packets = 64; ; packets *= 4) {
-    const frames = await leadingFrames(p, k, packets, o)
+    const frames = await leadingFrames(p, k, s, packets, o)
     let skipped = 0
     for (const f of frames) {
       if (f.pts === null) throw new MediaError('unreadable')   // Python: None * time_base raises
@@ -289,7 +332,7 @@ export async function decodeAudio(path: string, o: {
   let carry = new Uint8Array(0)
   await runMedia({
     tool: 'ffmpeg',
-    args: [...inputArgs(p.path, p.format), '-map', `0:a:${k}`, '-c:a', 'pcm_f32le', '-f', 'f32le', 'pipe:1'],
+    args: [...pythonSeekArgs(p, o.decoder), ...inputArgs(p.path, p.format), '-map', `0:a:${k}`, '-c:a', 'pcm_f32le', '-f', 'f32le', 'pipe:1'],
     userId: o.userId, signal: o.signal,
     onStdout: (chunk) => {
       let bytes = chunk

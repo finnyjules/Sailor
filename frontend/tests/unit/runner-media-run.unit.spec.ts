@@ -259,13 +259,15 @@ describe('every job', () => {
     const partial = join(dir, 'partial.bin')
     fakeTools({ ffmpeg: `echo half > "${partial}"; exec /bin/sleep 10` })
     const stop = new AbortController()
-    const t0 = Date.now()
     const job = runMedia({ tool: 'ffmpeg', args: [], userId: null, signal: stop.signal, cleanup: [partial] })
-    await sleep(300)
-    expect(existsSync(partial)).toBe(true)
+    job.catch(() => {})
+    // Stop once the tool has really written (R5.1c review, Minor 8: not after a fixed wait, which a loaded
+    // machine can outlast); the second is measured from Stop, not from the start.
+    while (!existsSync(partial)) await sleep(10)
+    const t0 = Date.now()
     stop.abort()
     await expect(job).rejects.toThrow(MEDIA_WORDS.stopped)
-    expect(Date.now() - t0).toBeLessThan(1300)
+    expect(Date.now() - t0).toBeLessThan(1000)
     expect(existsSync(partial)).toBe(false)
   })
 

@@ -414,6 +414,45 @@ def clip_sound(name: str, codec: str, rate: int, layout: str, fmt: str, seconds:
     c.close()
 
 
+def media_tool(name: str) -> str:
+    """Sailor's own build (scripts/media-tools/build.sh), for the clips a real ffmpeg muxes."""
+    arch = {"arm64": "arm64", "aarch64": "arm64", "x86_64": "x64", "amd64": "x64"}[platform.machine().lower()]
+    path = os.path.join(ROOT, "frontend", ".media-tools", f"{sys.platform}-{arch}", "bin", name)
+    if not os.path.isfile(path):
+        raise SystemExit("The video tools aren't built on this machine: run scripts/media-tools/build.sh")
+    return path
+
+
+FFMPEG_FIXED = ["-nostdin", "-hide_banner", "-loglevel", "error", "-threads", "1", "-filter_threads", "1"]
+FFMPEG_EXACT = ["-fflags", "+bitexact", "-flags", "+bitexact", "-map_metadata", "-1"]
+
+
+def clip_ffmpeg_muxed() -> None:
+    """MP4s muxed by ffmpeg's own CLI, not PyAV (R5.1c review: every other clip is PyAV-muxed).
+    ffmpeg interleaves by decode time, so its packet order differs from PyAV's save_to:
+      - v_ffmux_copy.mp4: v_stereo_aac.mp4's packets copied as they are (H.264 with B-frames, so
+        the video's first decode time is below 0, and AAC);
+      - v_ffmux_nob.mp4: H.264 without B-frames (OpenH264) and AAC, both encoded by the CLI: the
+        video starts at decode time 0 and the AAC priming packet (pts -1024) comes first. Python's
+        get_components seeks the video to 0 before reading the sound, so that packet is where a
+        reader can differ."""
+    import subprocess
+    ff = media_tool("ffmpeg")
+    subprocess.run([ff, *FFMPEG_FIXED, "-y", "-i", os.path.join(CLIPS, "v_stereo_aac.mp4"), "-map", "0", "-c", "copy",
+                    *FFMPEG_EXACT, "-f", "mp4", os.path.join(CLIPS, "v_ffmux_copy.mp4")], check=True)
+    frames = b"".join(synth(32, 24, 3, 1100 + i) for i in range(24))
+    raw = os.path.join(CLIPS, ".v_ffmux_nob.f32")
+    with open(raw, "wb") as f:
+        f.write(np.ascontiguousarray(tone(44100, 1.0, 2).astype(np.float32).T).tobytes())
+    try:
+        subprocess.run([ff, *FFMPEG_FIXED, "-y", "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", "32x24", "-framerate", "24", "-i", "pipe:0",
+                        "-f", "f32le", "-ar", "44100", "-ch_layout", "stereo", "-i", raw,
+                        "-map", "0:v", "-map", "1:a", "-c:v", "libopenh264", "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "96000",
+                        *FFMPEG_EXACT, "-f", "mp4", os.path.join(CLIPS, "v_ffmux_nob.mp4")], input=frames, check=True)
+    finally:
+        os.remove(raw)
+
+
 def make_clips() -> list[str]:
     os.makedirs(CLIPS, exist_ok=True)
     clip_h264("v_h264_601.mp4", "untagged")
@@ -432,6 +471,7 @@ def make_clips() -> list[str]:
     clip_vfr()
     clip_with_sound("v_stereo_aac.mp4", [("stereo", 44100)])
     clip_with_sound("v_two_sounds.mkv", [("mono", 22050), ("stereo", 48000)])
+    clip_ffmpeg_muxed()
     clip_sound("a_mono.mp3", "libmp3lame", 44100, "mono", "s16p", 1.0, bit_rate=128000)
     clip_sound("a_s16.wav", "pcm_s16le", 44100, "stereo", "s16", 1.0, bits=16)
     clip_sound("a_s24.wav", "pcm_s24le", 44100, "stereo", "s32", 1.0, bits=24)
@@ -787,12 +827,11 @@ def tone_f32(rate: int, seconds: float, channels: int) -> np.ndarray:
     return tone(rate, seconds, channels).astype(np.float32)
 
 
-def save_to_case(tmp: str, name: str, fps: float, n: int, sound, swap) -> dict:
+def save_to_case(tmp: str, name: str, fps: float, n: int, sound, swap, W: int = 64, H: int = 48, content: str = "smooth") -> dict:
     from comfy_api.latest._input_impl import video_types
     from comfy_api.latest._input_impl.video_types import VideoFromComponents
     from comfy_api.latest._util import VideoComponents
-    W, H = 64, 48
-    src = [smooth_frame(W, H, i) for i in range(n)]
+    src = [smooth_frame(W, H, i) if content == "smooth" else synth(W, H, 3, 4000 + i) for i in range(n)]
     images = torch.from_numpy(np.frombuffer(b"".join(src), np.uint8).reshape(n, H, W, 3).astype(np.float32) / 255.0)
     audio = None
     if sound is not None:
@@ -848,14 +887,26 @@ def save_audio_case(tmp: str, fmt: str, quality: str, channels: int, rate: int) 
 RESAMPLE_PAIRS = [(44100, 48000), (22050, 24000), (32000, 48000), (96000, 48000), (11025, 12000), (8000, 12000), (44100, 16000)]
 
 
+# The lengths each pair is also resampled at, mono (R5.1c review, Minor 7): tiny, odd, around one
+# ratio block (147/148 at 44.1 → 48 kHz), and longer.
+RESAMPLE_LENGTHS = [1, 2, 3, 5, 7, 146, 147, 148, 1001, 4801]
+
+
 def resample_case(orig: int, new: int) -> dict:
     import torchaudio
     x = torch.from_numpy(tone_f32(orig, 0.05, 2))
     y = torchaudio.functional.resample(x, orig, new)
     assert y.dtype == torch.float32
+    lengths = []
+    mono = np.ascontiguousarray(tone_f32(orig, 1.0, 3)[2, :max(RESAMPLE_LENGTHS)])
+    for n in RESAMPLE_LENGTHS:
+        xm = torch.from_numpy(np.ascontiguousarray(mono[:n]))
+        ym = torchaudio.functional.resample(xm, orig, new)
+        lengths.append({"length": n, "samples": int(ym.shape[-1]), "output": b64(zlib.compress(ym.numpy().tobytes(), 9))})
     return {"orig": orig, "new": new,
             "input": b64(zlib.compress(x.numpy().tobytes(), 9)),
-            "output": b64(zlib.compress(np.ascontiguousarray(y.numpy()).tobytes(), 9)), "samples": int(y.shape[-1])}
+            "output": b64(zlib.compress(np.ascontiguousarray(y.numpy()).tobytes(), 9)), "samples": int(y.shape[-1]),
+            "lengths": lengths, "lengthInput": b64(zlib.compress(mono.tobytes(), 9))}
 
 
 def stitch_inputs() -> list[str]:
@@ -907,13 +958,21 @@ def group_encode(names: list[str]) -> dict:
         mono = (tone_f32(44100, 0.3, 1), 44100)
         stereo = (tone_f32(48000, 0.3, 2), 48000)
         videos = []
-        for name, fps, n, snd in [("v24", 24.0, 8, None), ("v2997_mono", 29.97, 8, mono), ("v30_stereo", 30.0, 8, stereo)]:
+        stereo44 = (tone_f32(44100, 0.5, 2), 44100)
+        mono22 = (tone_f32(22050, 0.4, 1), 22050)
+        for name, fps, n, snd, W, H, content in [
+            ("v24", 24.0, 8, None, 64, 48, "smooth"), ("v2997_mono", 29.97, 8, mono, 64, 48, "smooth"),
+            ("v30_stereo", 30.0, 8, stereo, 64, 48, "smooth"),
+            # R5.1c review: 23.976 and 59.94 fps at other sizes, and noise (synth) pictures.
+            ("v23976_stereo", 23.976, 10, stereo44, 128, 72, "smooth"), ("v5994", 59.94, 5, None, 96, 64, "smooth"),
+            ("v25_noise_mono", 25.0, 7, mono22, 80, 60, "synth"),
+        ]:
             videos.append({
-                "name": name, "fps": fps, "frames": n, "w": 64, "h": 48,
+                "name": name, "fps": fps, "frames": n, "w": W, "h": H, "content": content,
                 "sound": None if snd is None else {"rate": snd[1], "channels": int(snd[0].shape[0]),
                                                    "f32z": b64(zlib.compress(np.ascontiguousarray(snd[0]).tobytes(), 9))},
-                "x264": save_to_case(tmp, name + "_x264", fps, n, snd, None),
-                "openh264": save_to_case(tmp, name + "_oh", fps, n, snd, openh264_options(23)),
+                "x264": save_to_case(tmp, name + "_x264", fps, n, snd, None, W, H, content),
+                "openh264": save_to_case(tmp, name + "_oh", fps, n, snd, openh264_options(23), W, H, content),
             })
         cases["saveTo"] = videos
         rows = []

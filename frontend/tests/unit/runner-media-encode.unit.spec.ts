@@ -6,18 +6,25 @@
  *
  * H.264 is judged by ruling (c) as revised by the controller (2026-09-28):
  * Python's libx264 and Sailor's OpenH264 are different encoders, so
- *   - the frame count, rate, length and size equal Python's exactly;
+ *   - the frame count, rate, size and lengths equal Python's own pipeline
+ *     switched to libopenh264 exactly, and libx264's count and rate exactly,
+ *     its lengths within one frame (refined 2026-09-28);
  *   - the decoded frames are no further from the source than libx264's
  *     (PSNR within 0.5 dB);
  *   - the decoded frames equal, byte for byte, Python's own pipeline switched
  *     to libopenh264 with the same settings (so the encoder gets the same
  *     frames with the same settings);
- *   - the average difference from libx264's decoded frames is at most 7/255,
- *     a sanity bound only (the original "within 2/255" was dropped: two
- *     encoders can't meet it, and ours is closer to the source).
+ *   - only where ours are further from the source than libx264's, the average
+ *     difference from libx264's decoded frames is at most 7/255, a sanity
+ *     bound (the original "within 2/255" was dropped: two encoders can't meet
+ *     it, and ours is closer to the source).
+ * The sound in a saved MP4 is read by the 'fltp' mirror, which follows
+ * get_components' seek (decode.ts, proven on ffmpeg-muxed clips): equal to
+ * Python's own file means Python's get_components reads Sailor's file as it
+ * reads its own.
  * MP3 and AAC decode exactly, or within 60 dB SNR (named case by case).
  */
-import { mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync, existsSync } from 'node:fs'
+import { existsSync, linkSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, describe, expect, it } from 'vitest'
@@ -26,9 +33,10 @@ import {
   OPENH264_FOR, PYAV_H264_DEFAULT, RGB_TO_YUV420P, SAVE_AUDIO_SAMPLE_FMT, encodeAudio, encodeVideo, ffmetadataText, floatWav,
   h264Args, pyAudioCutSamples, pyStreamRate, writeFfv1, type SoundLayout,
 } from '~~/server/media/encode'
-import { opusRate, resampleLikeTorchaudio } from '~~/server/media/resample'
+import { RESAMPLE_MAX_TAPS, opusRate, resampleChannel, resampleCore, resampleLikeTorchaudio, resampleTaps } from '~~/server/media/resample'
+import { resampleInWorker } from '~~/server/runner/compositor/worker'
 import { probeMedia, pyFrameCount, pyFrameRate, pyRawDuration } from '~~/server/media/probe'
-import { MediaError, checkArgs, confineOutputs, mediaLimiter, mediaTempDir, removeMediaTempDir, runMedia } from '~~/server/media/run'
+import { MediaError, checkArgs, checkFilterGraph, confineOutputs, mediaLimiter, mediaTempDir, removeMediaTempDir, runMedia } from '~~/server/media/run'
 import { MEDIA_WORDS } from '#shared/runner/media'
 import { synth } from './__runner__/effectsParity'
 import {
@@ -42,9 +50,10 @@ const LONG = { timeout: 120_000 }
 const BIG = Number.MAX_SAFE_INTEGER
 
 /**
- * Ruling (c), revised: the average difference between Sailor's decoded H.264
- * and Python's libx264 one is held to 7/255 as a sanity bound only (measured
- * 5.65–6.02 on the save_to cases, 5.88 on the stitch).
+ * Ruling (c), refined: the average difference between Sailor's decoded H.264
+ * and Python's libx264 one is held to 7/255, and only where Sailor's frames
+ * are further from the source than libx264's (measured 5.65–7.83 levels while
+ * ours were closer).
  */
 const MEAN_DIFF_BOUND = 7
 
@@ -132,12 +141,18 @@ async function headerOf(path: string) {
   }
 }
 
-/** Ruling (c)'s exact half: frame count, rate, length and size equal Python's; the helpers too. */
-async function expectSameNumbers(path: string, py: PyVideoOut, label: string): Promise<void> {
+/**
+ * Ruling (c) as refined (2026-09-28): the frame count, rate, size and every
+ * length equal Python's own pipeline switched to OpenH264 exactly (the same
+ * header, the same helpers); against libx264's file the count and rate are
+ * exact and the lengths within one frame (its B-frames' muxing ticks aren't
+ * ours to match).
+ */
+async function expectSameNumbers(path: string, openh264: PyVideoOut, x264: PyVideoOut, label: string): Promise<void> {
   const { p, header } = await headerOf(path)
-  const want = py.header
+  const want = openh264.header
   expect(header.formatName, label).toBe(want.formatName)
-  expect(header.containerDuration, label).toBe(want.containerDuration)
+  expect(header.containerDuration, `${label}: length equal to the OpenH264 run`).toBe(want.containerDuration)
   expect(header.video.length, label).toBe(want.video.length)
   const v = header.video[0]!
   const wv = want.video[0]!
@@ -149,25 +164,37 @@ async function expectSameNumbers(path: string, py: PyVideoOut, label: string): P
     expect({ rate: s.rate, channels: s.channels, layout: s.layout, codec: s.codec, duration: s.duration, timeBase: s.timeBase }, label)
       .toEqual({ rate: ws.rate, channels: ws.channels, layout: ws.layout, codec: ws.codec, duration: ws.duration, timeBase: ws.timeBase })
   })
-  expect(await pyFrameCount(p, p.path, { userId: null }), label).toBe(py.frameCount)
-  expect(pyFrameRate(p), label).toEqual(py.frameRate)
-  expect(pyRawDuration(p), label).toBe(py.duration)
+  expect(await pyFrameCount(p, p.path, { userId: null }), label).toBe(openh264.frameCount)
+  expect(pyFrameRate(p), label).toEqual(openh264.frameRate)
+  expect(pyRawDuration(p), label).toBe(openh264.duration)
+  // libx264's file: the same count, rate and size; the lengths within one frame.
+  expect(openh264.frameCount, label).toBe(x264.frameCount)
+  expect(openh264.frameRate, label).toEqual(x264.frameRate)
+  const frame = x264.frameRate.den / x264.frameRate.num
+  expect(Math.abs(pyRawDuration(p)! - x264.duration), `${label}: length within a frame of libx264's`).toBeLessThanOrEqual(frame)
+  expect(Math.abs(p.containerDuration! - x264.header.containerDuration!) / 1e6, label).toBeLessThanOrEqual(frame)
 }
 
-/** The rest of ruling (c): equal to Python's OpenH264 run; no further from the source than libx264; the mean difference measured. */
-function expectH264(ours: Uint8Array[], openh264: PyVideoOut, x264: PyVideoOut, source: Uint8Array | null, label: string): { mean: number; psnrOurs: number | null } {
+/**
+ * The rest of ruling (c): equal, byte for byte, to Python's OpenH264 run; no
+ * further from the source than libx264 (within 0.5 dB); and only when our
+ * frames are further from the source than libx264's, the mean difference
+ * from libx264's held to the sanity bound. Without a source (the stitch) the
+ * mean is measured, not held.
+ */
+function expectH264(ours: Uint8Array[], openh264: PyVideoOut, x264: PyVideoOut, source: Uint8Array | null, label: string): { mean: number; psnrOurs: number | null; psnrPython: number | null } {
   expect(ours.map(sha256Hex), `${label}: equal to Python's save_to on libopenh264`).toEqual(openh264.frames)
   const py = unz(x264.rgbz!)
   const all = concat(ours)
   expect(all.length, label).toBe(py.length)
   const mean = meanDiff(all, py)
-  expect(mean, `${label}: mean difference from libx264 within the sanity bound (levels)`).toBeLessThanOrEqual(MEAN_DIFF_BOUND)
   let psnrOurs: number | null = null
   if (source) {
     psnrOurs = psnr(source, all)
     expect(psnrOurs, `${label}: no further from the source than libx264`).toBeGreaterThanOrEqual(x264.psnr! - 0.5)
+    if (psnrOurs < x264.psnr!) expect(mean, `${label}: mean difference from libx264 within the sanity bound (levels)`).toBeLessThanOrEqual(MEAN_DIFF_BOUND)
   }
-  return { mean, psnrOurs }
+  return { mean, psnrOurs, psnrPython: x264.psnr ?? null }
 }
 
 /** The JSON text Python's json.dumps writes for the tags (read back from Python's own file). */
@@ -205,7 +232,7 @@ describe('the OpenH264 table (ruling d)', () => {
     const frames = Array.from({ length: 6 }, (_, i) => smoothFrame(64, 48, i))
     for (const row of C.rows) {
       const out = outPath('mp4')
-      const r = await encodeVideo({ input: { kind: 'rgb', w: 64, h: 48, frames: framesOf(frames) }, out, fps: pyStreamRate(24), quality: { crf: row.crf, preset: 'medium' }, userId: null })
+      const r = await encodeVideo({ input: { kind: 'rgb', w: 64, h: 48, frames: framesOf(frames) }, out, fps: pyStreamRate(24), quality: { crf: row.crf, preset: 'medium' }, userId: null, outRoots: ROOTS() })
       expect(r.frames, `crf ${row.crf}`).toBe(row.frameCount)
       const got = await decodeAll(out)
       expect(got.frames.map(sha256Hex), `crf ${row.crf}`).toEqual(row.frames)
@@ -237,7 +264,7 @@ describe('encodeVideo equals VideoFromComponents.save_to (ruling c)', () => {
   for (const c of C.saveTo) {
     it(`${c.name}: numbers exact, frames equal to the OpenH264 run, no further from the source, sound and tags`, LONG, async () => {
       await requireMediaTools()
-      const source = Array.from({ length: c.frames }, (_, i) => smoothFrame(c.w, c.h, i))
+      const source = Array.from({ length: c.frames }, (_, i) => c.content === 'synth' ? synth(c.w, c.h, 3, 4000 + i) : smoothFrame(c.w, c.h, i))
       const fps = pyStreamRate(c.fps)
       let sound: DecodedSound | null = null
       let layout: SoundLayout = 'stereo'
@@ -250,12 +277,13 @@ describe('encodeVideo equals VideoFromComponents.save_to (ruling c)', () => {
       await encodeVideo({
         input: { kind: 'rgb', w: c.w, h: c.h, frames: framesOf(source) }, out, fps, quality: PYAV_H264_DEFAULT,
         sound: sound ? { source: { sound }, layout, rate: sound.rate, cutSamples: pyAudioCutSamples(sound.rate, c.fps, c.frames) } : null,
-        metadata: tags, userId: null,
+        metadata: tags, userId: null, outRoots: ROOTS(),
       })
-      await expectSameNumbers(out, c.x264, c.name)
+      await expectSameNumbers(out, c.openh264, c.x264, c.name)
       const got = await decodeAll(out)
       measured[c.name] = expectH264(got.frames, c.openh264, c.x264, concat(source), c.name)
-      // The sound: AAC from the same encoder and library, so the same decoded samples.
+      // The sound as Python's get_components reads it (the mirror follows its seek): the same as from Python's
+      // own file, from its first sample (no leading zeros: the AAC priming packet kept, R5.1c review Important 3).
       if (c.x264.sound) {
         const ours = await decodeAudio(out, { decoder: 'fltp', userId: null, maxSamples: BIG, roots: ROOTS() })
         const want = channelsOf(c.x264.sound.f32z!, c.x264.sound.rows)
@@ -291,11 +319,11 @@ describe('encodeVideo equals VideoFromComponents.save_to (ruling c)', () => {
     await requireMediaTools()
     const frames = Array.from({ length: 5 }, (_, i) => smoothFrame(64, 48, i + 20))
     const kept = outPath('mkv')
-    expect((await writeFfv1({ frames: framesOf(frames), w: 64, h: 48, out: kept, userId: null })).count).toBe(5)
+    expect((await writeFfv1({ frames: framesOf(frames), w: 64, h: 48, out: kept, userId: null, outRoots: ROOTS() })).count).toBe(5)
     const a = outPath('mp4')
     const b = outPath('mp4')
-    await encodeVideo({ input: { kind: 'rgb', w: 64, h: 48, frames: framesOf(frames) }, out: a, fps: pyStreamRate(30), quality: { crf: 20, preset: 'veryfast' }, userId: null })
-    await encodeVideo({ input: { kind: 'ffv1', path: kept, w: 64, h: 48 }, out: b, fps: pyStreamRate(30), quality: { crf: 20, preset: 'veryfast' }, userId: null, roots: ROOTS() })
+    await encodeVideo({ input: { kind: 'rgb', w: 64, h: 48, frames: framesOf(frames) }, out: a, fps: pyStreamRate(30), quality: { crf: 20, preset: 'veryfast' }, userId: null, outRoots: ROOTS() })
+    await encodeVideo({ input: { kind: 'ffv1', path: kept, w: 64, h: 48 }, out: b, fps: pyStreamRate(30), quality: { crf: 20, preset: 'veryfast' }, userId: null, outRoots: ROOTS(), roots: ROOTS() })
     const da = await decodeAll(a)
     const db = await decodeAll(b)
     expect(db.frames.map(sha256Hex)).toEqual(da.frames.map(sha256Hex))
@@ -313,7 +341,7 @@ describe('sound from a file (SaveVideoFrames’ audio_file; its Python parity is
       await encodeVideo({
         input: { kind: 'rgb', w: 32, h: 24, frames: framesOf(frames) }, out, fps: pyStreamRate(30), quality: { crf: 20, preset: 'veryfast' },
         sound: { source: { path: clipPath(clip), stream: 'first', cutSeconds: 0.2 }, layout: 'stereo', rate },
-        userId: null, roots: [...CLIP_ROOTS, ...ROOTS()],
+        userId: null, roots: [...CLIP_ROOTS, ...ROOTS()], outRoots: ROOTS(),
       })
       const p = await probeMedia(out, { userId: null, roots: ROOTS() })
       expect(p.sound.map(s => ({ codec: s.codec, rate: s.rate, channels: s.channels })), clip).toEqual([{ codec: 'aac', rate, channels: 2 }])
@@ -328,7 +356,7 @@ describe('sound from a file (SaveVideoFrames’ audio_file; its Python parity is
     await requireMediaTools()
     await expect(encodeVideo({
       input: { kind: 'rgb', w: 16, h: 16, frames: framesOf([smoothFrame(16, 16, 0)]) }, out: outPath('mp4'), fps: { num: 24, den: 1 }, quality: PYAV_H264_DEFAULT,
-      sound: { source: { path: clipPath('a_s16.wav'), stream: 'first' }, layout: 'stereo', rate: 44100 }, userId: null, roots: ROOTS(),
+      sound: { source: { path: clipPath('a_s16.wav'), stream: 'first' }, layout: 'stereo', rate: 44100 }, userId: null, roots: ROOTS(), outRoots: ROOTS(),
     })).rejects.toThrow(MEDIA_WORDS.unreadable)
   })
 })
@@ -340,10 +368,10 @@ describe('Turntable’s stitch_clips (R3.17)', () => {
     const paths = C.stitch.clips.map(clipPath)
     const first = await probeMedia(paths[0]!, { userId: null, roots: CLIP_ROOTS })
     const out = outPath('mp4')
-    const r = await encodeVideo({ input: { kind: 'clips', paths, dropFirstAfterFirst: true }, out, fps: pyFrameRate(first), quality: { crf: 20, preset: 'veryfast' }, userId: null, roots: CLIP_ROOTS })
+    const r = await encodeVideo({ input: { kind: 'clips', paths, dropFirstAfterFirst: true }, out, fps: pyFrameRate(first), quality: { crf: 20, preset: 'veryfast' }, userId: null, outRoots: ROOTS(), roots: CLIP_ROOTS })
     // 5 + 4 + 4.
     expect(r.frames).toBe(13)
-    await expectSameNumbers(out, C.stitch.x264, 'stitch')
+    await expectSameNumbers(out, C.stitch.openh264, C.stitch.x264, 'stitch')
     const got = await decodeAll(out)
     expect(got.frames.length).toBe(13)
     expect(got.pts).toEqual(Array.from({ length: 13 }, (_, i) => i / 24))
@@ -369,7 +397,7 @@ describe('encodeAudio equals AudioSaveHelper.save_audio', () => {
       const sound: DecodedSound = { rate: c.rate, channels: channelsOf(c.input, c.channels) }
       const out = outPath(c.format)
       const tags = { prompt: c.tags.prompt ?? c.tags['stream:prompt']!, workflow: c.tags.workflow ?? c.tags['stream:workflow']! }
-      await encodeAudio({ sound, format: c.format, quality: c.quality, sampleFmt: SAVE_AUDIO_SAMPLE_FMT[c.format], out, metadata: tags, userId: null })
+      await encodeAudio({ sound, format: c.format, quality: c.quality, sampleFmt: SAVE_AUDIO_SAMPLE_FMT[c.format], out, metadata: tags, userId: null, outRoots: ROOTS() })
       const ours = await decodeAudio(out, { decoder: 'load', userId: null, maxSamples: BIG, roots: ROOTS() })
       const want = channelsOf(c.decoded.f32z!, c.decoded.rows)
       expect(ours.rate, label).toBe(c.decoded.rate)
@@ -388,7 +416,7 @@ describe('encodeAudio equals AudioSaveHelper.save_audio', () => {
   it('refuses more than two channels before any work, as PyAV does', async () => {
     const started = mediaLimiter().started()
     const three: DecodedSound = { rate: 44100, channels: [new Float32Array(10), new Float32Array(10), new Float32Array(10)] }
-    await expect(encodeAudio({ sound: three, format: 'flac', quality: '128k', sampleFmt: 's16', out: outPath('flac'), userId: null })).rejects.toThrow(MEDIA_WORDS.failed)
+    await expect(encodeAudio({ sound: three, format: 'flac', quality: '128k', sampleFmt: 's16', out: outPath('flac'), userId: null, outRoots: ROOTS() })).rejects.toThrow(MEDIA_WORDS.failed)
     expect(mediaLimiter().started()).toBe(started)
   })
 })
@@ -408,6 +436,59 @@ describe('torchaudio.functional.resample, ported (ruling j)', () => {
     console.info(`[media-encode] resample worst difference ${worst}`)
     expect(worst).toBeLessThanOrEqual(1e-6)
   })
+
+  it('keeps torchaudio’s length and is within a millionth at every length per pair (1, 2, 3, 5, 7, 146–148, 1001, 4801 samples)', () => {
+    let worst = 0
+    let cases = 0
+    for (const c of C.resample) {
+      const input = unzF32(c.lengthInput)
+      for (const l of c.lengths) {
+        const want = unzF32(l.output)
+        const got = resampleChannel(input.slice(0, l.length), c.orig, c.new)
+        expect(got.length, `${c.orig}→${c.new} × ${l.length}`).toBe(l.samples)
+        for (let i = 0; i < l.samples; i++) worst = Math.max(worst, Math.abs(got[i]! - want[i]!))
+        cases++
+      }
+    }
+    expect(cases).toBe(C.resample.length * 10)
+    expect(worst).toBeLessThanOrEqual(1e-6)
+  })
+
+  it('takes the kept length in float32, as torch.as_tensor does (one sample fewer than a double would at 16,015,838)', () => {
+    const core = resampleCore()
+    // 160 · 16015838 / 147 = 17432204.08…: float32 rounds it to 17432204 (a double's ceil is 17432205).
+    expect(core.outputLength(44100, 48000, 16_015_838)).toBe(17_432_204)
+    expect(core.outputLength(44100, 48000, 4801)).toBe(5226)
+  })
+
+  it('refuses a kernel over the cap before any work, in plain words (torchaudio would exhaust memory too)', async () => {
+    expect(RESAMPLE_MAX_TAPS).toBe(2 ** 24)
+    // 44101 → 48000 Hz: no common factor, a 7.9 GB kernel.
+    expect(resampleTaps(44101, 48000)).toBeGreaterThan(RESAMPLE_MAX_TAPS)
+    expect(resampleTaps(44100, 48000)).toBeLessThan(30_000)
+    const started = mediaLimiter().started()
+    const sound: DecodedSound = { rate: 44101, channels: [new Float32Array(100)] }
+    await expect(encodeAudio({ sound, format: 'opus', quality: '128k', sampleFmt: 's16', out: outPath('opus'), userId: null, outRoots: ROOTS() }))
+      .rejects.toThrow(MEDIA_WORDS.oddRate)
+    expect(mediaLimiter().started()).toBe(started)
+    expect(() => resampleCore().resample(new Float32Array(4), 44101, 48000)).toThrow(RangeError)
+  })
+
+  it('keeps a small, bounded set of kernels', () => {
+    const core = resampleCore()
+    for (const [a, b] of [[44100, 48000], [22050, 24000], [32000, 48000], [96000, 48000], [11025, 12000], [8000, 12000], [44100, 16000]]) core.resample(new Float32Array(10), a!, b!)
+    expect(core.cachedKernels()).toBeLessThanOrEqual(4)
+  })
+
+  it('runs on the compositor worker (a channel at a time, equal to the same core here) and stops when asked', LONG, async () => {
+    const c = C.resample[0]!
+    const input = channelsOf(c.input, 2)
+    const got = await resampleInWorker(input, c.orig, c.new)
+    expect(got).toEqual(resampleLikeTorchaudio(input, c.orig, c.new))
+    const ac = new AbortController()
+    ac.abort()
+    await expect(resampleInWorker(input, c.orig, c.new, ac.signal)).rejects.toThrow('Stopped')
+  })
 })
 
 describe('the runner’s own files', () => {
@@ -426,8 +507,8 @@ describe('the runner’s own files', () => {
     const frames = [synth(33, 25, 3, 7), synth(33, 25, 3, 8), smoothFrame(33, 25, 1)]
     const a = outPath('mkv')
     const b = outPath('mkv')
-    await writeFfv1({ frames: framesOf(frames), w: 33, h: 25, out: a, userId: null })
-    await writeFfv1({ frames: framesOf(frames), w: 33, h: 25, out: b, userId: null })
+    await writeFfv1({ frames: framesOf(frames), w: 33, h: 25, out: a, userId: null, outRoots: ROOTS() })
+    await writeFfv1({ frames: framesOf(frames), w: 33, h: 25, out: b, userId: null, outRoots: ROOTS() })
     expect(sha256Hex(readFileSync(a))).toBe(sha256Hex(readFileSync(b)))
     const back = await decodeAll(a)
     expect(back.frames.map(sha256Hex)).toEqual(frames.map(sha256Hex))
@@ -436,7 +517,7 @@ describe('the runner’s own files', () => {
   it('writeFfv1 refuses a frame of the wrong size', LONG, async () => {
     await requireMediaTools()
     const out = outPath('mkv')
-    await expect(writeFfv1({ frames: framesOf([synth(8, 8, 3, 1), new Uint8Array(5)]), w: 8, h: 8, out, userId: null })).rejects.toThrow(MEDIA_WORDS.sizeChanged)
+    await expect(writeFfv1({ frames: framesOf([synth(8, 8, 3, 1), new Uint8Array(5)]), w: 8, h: 8, out, userId: null, outRoots: ROOTS() })).rejects.toThrow(MEDIA_WORDS.sizeChanged)
     expect(existsSync(out)).toBe(false)
   })
 
@@ -446,6 +527,58 @@ describe('the runner’s own files', () => {
 })
 
 describe('safety', () => {
+  it('a filtergraph may use only the module’s own filters: the build’s file-opening ones are refused before any process', LONG, async () => {
+    await requireMediaTools()
+    const work = await mediaTempDir()
+    const elsewhere = mkdtempSync(join(tmpdir(), 'media-encode-filters-'))
+    try {
+      writeFileSync(join(elsewhere, 'pattern.txt'), 'O\n')
+      const started = mediaLimiter().started()
+      const head = ['-f', 'rawvideo', '-pix_fmt', 'rgb24', '-s', '16x16', '-framerate', '1', '-i', 'pipe:0']
+      for (const graph of [
+        `[0:v]format=yuv420p,deshake=filename=${join(elsewhere, 'deshake.log')}[v]`,
+        `life=f=${join(elsewhere, 'pattern.txt')}`,
+        `[0:v]xpsnr=stats_file=${join(elsewhere, 'x.log')}[v]`,
+        "[0:v]scale=w='16,deshake'[v]",
+        '[0:v]scale=w=16 [v]',
+        '[0:v]scale=filename=x[v]',
+      ]) {
+        await expect(runMedia({ tool: 'ffmpeg', userId: null, workDir: work, args: [...head, '-filter_complex', graph, '-map', '[v]', '-f', 'rawvideo', 'pipe:1'], stdin: framesOf([synth(16, 16, 3, 1)]) }), graph)
+          .rejects.toThrow(MEDIA_WORDS.failed)
+        expect(() => checkArgs('ffmpeg', [...head, '-vf', graph, 'pipe:1'])).toThrow(MediaError)
+      }
+      expect(mediaLimiter().started()).toBe(started)
+      expect(existsSync(join(elsewhere, 'deshake.log'))).toBe(false)
+      expect(checkFilterGraph('[0:v:0]trim=start_frame=1,scale=w=32:h=24:flags=bilinear:in_h_chr_pos=0:out_v_chr_pos=128,format=yuv420p[c1];[c0][c1]concat=n=2:v=1:a=0,settb=expr=100/2997,setpts=N[v]')).toBe(true)
+      expect(checkFilterGraph('select=gte(pts\\,0),scale=w=iw:h=ih:eval=frame:flags=bilinear,format=rgb24')).toBe(true)
+      expect(checkFilterGraph('atrim=end_sample=12,asetpts=N/SR/TB')).toBe(true)
+    }
+    finally {
+      await removeMediaTempDir(work)
+      rmSync(elsewhere, { recursive: true, force: true })
+    }
+  })
+
+  it('a tag value ending in a backslash is refused (ffmetadata would read the next tag into it)', () => {
+    expect(() => ffmetadataText({ prompt: 'ends\\', workflow: 'W' })).toThrow(MediaError)
+    expect(ffmetadataText({ prompt: 'a\\\nb' })).toBe(';FFMETADATA1\nprompt=a\\\\\\\nb\n')
+  })
+
+  it('writes `out` only into the caller’s own folders (its folder, symlinks resolved)', LONG, async () => {
+    await requireMediaTools()
+    const elsewhere = mkdtempSync(join(tmpdir(), 'media-encode-out-'))
+    try {
+      const frames = [smoothFrame(16, 16, 0)]
+      await expect(encodeVideo({ input: { kind: 'rgb', w: 16, h: 16, frames: framesOf(frames) }, out: join(elsewhere, 'x.mp4'), fps: { num: 24, den: 1 }, quality: PYAV_H264_DEFAULT, userId: null, outRoots: ROOTS() }))
+        .rejects.toThrow(MEDIA_WORDS.failed)
+      symlinkSync(elsewhere, join(realpathSync(scratch), 'link-out'))
+      await expect(encodeVideo({ input: { kind: 'rgb', w: 16, h: 16, frames: framesOf(frames) }, out: join(realpathSync(scratch), 'link-out', 'x.mp4'), fps: { num: 24, den: 1 }, quality: PYAV_H264_DEFAULT, userId: null, outRoots: ROOTS() }))
+        .rejects.toThrow(MEDIA_WORDS.failed)
+      expect(existsSync(join(elsewhere, 'x.mp4'))).toBe(false)
+    }
+    finally { rmSync(elsewhere, { recursive: true, force: true }) }
+  })
+
   it('the encoders’ options are allowed only with the values the module writes', () => {
     const head = ['-f', 'rawvideo', '-pix_fmt', 'rgb24', '-s', '8x8', '-framerate', '1', '-i', 'pipe:0']
     const ok = [...head, '-map_metadata', '-1', '-fflags', '+bitexact', '-enc_time_base:v', '100/2997', '-movflags', '+faststart+use_metadata_tags', 'pipe:1']
@@ -457,14 +590,16 @@ describe('safety', () => {
       ['-enc_time_base as a word', ['-enc_time_base:v', 'demux']],
       ['-metadata on the command line', ['-metadata', 'prompt=x']],
       ['-attach', ['-attach', '/etc/passwd']],
+      ['-bsf other than the dts delay', ['-bsf:v', 'noise']],
+      ['-ss other than 0', ['-ss', '5']],
     ] as const) expect(() => checkArgs('ffmpeg', [...head, ...bad, 'pipe:1']), what).toThrow(MediaError)
   })
 
   it('an odd width or height fails before any work', async () => {
     const started = mediaLimiter().started()
-    await expect(encodeVideo({ input: { kind: 'rgb', w: 63, h: 48, frames: framesOf([]) }, out: outPath('mp4'), fps: { num: 24, den: 1 }, quality: PYAV_H264_DEFAULT, userId: null }))
+    await expect(encodeVideo({ input: { kind: 'rgb', w: 63, h: 48, frames: framesOf([]) }, out: outPath('mp4'), fps: { num: 24, den: 1 }, quality: PYAV_H264_DEFAULT, userId: null, outRoots: ROOTS() }))
       .rejects.toThrow(MEDIA_WORDS.oddSize)
-    await expect(encodeVideo({ input: { kind: 'rgb', w: 64, h: 47, frames: framesOf([]) }, out: outPath('mp4'), fps: { num: 24, den: 1 }, quality: PYAV_H264_DEFAULT, userId: null }))
+    await expect(encodeVideo({ input: { kind: 'rgb', w: 64, h: 47, frames: framesOf([]) }, out: outPath('mp4'), fps: { num: 24, den: 1 }, quality: PYAV_H264_DEFAULT, userId: null, outRoots: ROOTS() }))
       .rejects.toThrow(MEDIA_WORDS.oddSize)
     expect(mediaLimiter().started()).toBe(started)
   })
@@ -473,7 +608,7 @@ describe('safety', () => {
     await requireMediaTools()
     const out = outPath('mp4')
     writeFileSync(out, 'mine')
-    await expect(encodeVideo({ input: { kind: 'rgb', w: 16, h: 16, frames: framesOf([smoothFrame(16, 16, 0)]) }, out, fps: { num: 24, den: 1 }, quality: PYAV_H264_DEFAULT, userId: null }))
+    await expect(encodeVideo({ input: { kind: 'rgb', w: 16, h: 16, frames: framesOf([smoothFrame(16, 16, 0)]) }, out, fps: { num: 24, den: 1 }, quality: PYAV_H264_DEFAULT, userId: null, outRoots: ROOTS() }))
       .rejects.toThrow(MEDIA_WORDS.failed)
     expect(readFileSync(out, 'utf8')).toBe('mine')
   })
@@ -501,6 +636,16 @@ describe('safety', () => {
       // A plain new name is made there, as a regular file.
       await confineOutputs(['-f', 'rawvideo', `file:${join(work, 'ok.raw')}`], work)
       expect(existsSync(join(work, 'ok.raw'))).toBe(true)
+      // Any name that already exists is refused: a hard link to a file elsewhere, or a plain file (R5.1c review, Minor 1).
+      linkSync(target, join(work, 'hard.raw'))
+      await expect(confineOutputs(['-f', 'rawvideo', `file:${join(work, 'hard.raw')}`], work)).rejects.toThrow(MediaError)
+      await expect(confineOutputs(['-f', 'rawvideo', `file:${join(work, 'ok.raw')}`], work)).rejects.toThrow(MediaError)
+      await expect(runMedia({
+        tool: 'ffmpeg', userId: null, workDir: work,
+        args: ['-f', 'rawvideo', '-pix_fmt', 'rgb24', '-s', '8x8', '-framerate', '1', '-i', 'pipe:0', '-f', 'rawvideo', '-y', `file:${join(work, 'hard.raw')}`],
+        stdin: framesOf([synth(8, 8, 3, 1)]),
+      })).rejects.toThrow(MEDIA_WORDS.failed)
+      expect(readFileSync(target, 'utf8')).toBe('untouched')
     }
     finally {
       await removeMediaTempDir(work)
@@ -508,19 +653,34 @@ describe('safety', () => {
     }
   })
 
+  it('the job’s time limit ends an encode that takes too long, and leaves nothing behind', LONG, async () => {
+    await requireMediaTools()
+    const out = outPath('mp4')
+    // Frames that never come: the limit, not the input, ends it.
+    let release: () => void = () => {}
+    async function* stuck(): AsyncIterable<Uint8Array> {
+      yield smoothFrame(64, 48, 0)
+      await new Promise<void>((r) => { release = r })
+    }
+    await expect(encodeVideo({ input: { kind: 'rgb', w: 64, h: 48, frames: stuck() }, out, fps: { num: 24, den: 1 }, quality: PYAV_H264_DEFAULT, userId: null, outRoots: ROOTS(), timeoutMs: 300 }))
+      .rejects.toThrow(MEDIA_WORDS.timedOut)
+    release()
+    expect(existsSync(out)).toBe(false)
+  })
+
   it('Stop during an encode ends it and leaves nothing behind', LONG, async () => {
     await requireMediaTools()
     const ac = new AbortController()
     const out = outPath('mp4')
+    // Stop comes from the frames themselves once the tool is reading them: no timers (R5.1c review, Minor 8).
     async function* slow(): AsyncIterable<Uint8Array> {
       for (let i = 0; i < 1000; i++) {
-        if (i === 3) setTimeout(() => ac.abort(), 10)
-        await new Promise(r => setTimeout(r, 20))
+        if (i === 3) ac.abort()
         yield smoothFrame(64, 48, i)
       }
     }
     const t0 = Date.now()
-    await expect(encodeVideo({ input: { kind: 'rgb', w: 64, h: 48, frames: slow() }, out, fps: { num: 24, den: 1 }, quality: PYAV_H264_DEFAULT, userId: null, signal: ac.signal }))
+    await expect(encodeVideo({ input: { kind: 'rgb', w: 64, h: 48, frames: slow() }, out, fps: { num: 24, den: 1 }, quality: PYAV_H264_DEFAULT, userId: null, outRoots: ROOTS(), signal: ac.signal }))
       .rejects.toThrow(MediaError)
     expect(Date.now() - t0).toBeLessThan(3000)
     expect(existsSync(out)).toBe(false)

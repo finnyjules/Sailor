@@ -13,18 +13,22 @@
  *   - reads its inputs only as `file:<absolute path>` or `pipe:0`, with the
  *     demuxer named from the file's first bytes (`inputArgs`), and writes
  *     files only as `file:<absolute path>` inside the job's own folder
- *     (`workDir`), which is also its working directory. Before the tool
- *     starts, each output is checked on disk too (`confineOutputs`): its
- *     folder must really be the job's folder (symlinks resolved), and the
- *     file is made there first as a new regular file without following a
- *     link, so a symlink named like an output can't send the write
- *     elsewhere;
+ *     (`workDir`), which is also its working directory. Once the job has
+ *     its slot, just before the tool starts, each output is checked on disk
+ *     too (`confineOutputs`): its folder must really be the job's folder
+ *     (symlinks resolved), and the file is made there as a new regular file
+ *     without following a link (an existing name is refused), so neither a
+ *     symlink nor a hard link named like an output can send the write
+ *     elsewhere; afterwards it must still be that same file;
  *   - carries only options on an allow-list (`checkArgs`), each with its
  *     number of values, so nothing that reads or writes a file by name
  *     (`-report`, `-vstats`, `-print_graphs_file`, `-fpre`, `-dump_attachment`,
  *     `-attach`, ffprobe's `-o`, `-/opt`, …) can get in. Filtergraphs are
  *     built in this module from numbers and fixed words, never from a
- *     person's text;
+ *     person's text, and `checkFilterGraph` admits only the filters the
+ *     module uses, with their own options (none of which names a file):
+ *     the build's filters that open files by name (deshake, xpsnr, fsync,
+ *     life, …) can't be reached;
  *   - can't be started from inside another job's callbacks (`onStdout`,
  *     `onSide`): with one slot per person in hosted, a job waiting on its own
  *     child would wait for ever, so it is refused at once instead;
@@ -141,7 +145,9 @@ const ALLOWED_OPTIONS: Readonly<Record<'ffmpeg' | 'ffprobe', Readonly<Record<str
     '-ar': 1, '-ch_layout': 1, '-sample_fmt': 1,
     '-b': 1, '-q': 1, '-rc_mode': 1, '-qmin': 1, '-qmax': 1, '-coder': 1, '-threads': 1,
     '-filter_complex': 1, '-af': 1,
-    '-movflags': 1, '-map_metadata': 1, '-fflags': 1, '-enc_time_base': 1,
+    '-movflags': 1, '-map_metadata': 1, '-fflags': 1, '-enc_time_base': 1, '-bsf': 1,
+    // get_components' seek (decode.ts pythonSeekArgs) and its leading frames.
+    '-ss': 1, '-seek_timestamp': 1, '-noaccurate_seek': 0, '-frames': 1,
   },
   ffprobe: {
     '-probesize': 1, '-analyzeduration': 1,
@@ -149,6 +155,52 @@ const ALLOWED_OPTIONS: Readonly<Record<'ffmpeg' | 'ffprobe', Readonly<Record<str
     '-of': 1, '-show_format': 0, '-show_streams': 0, '-count_packets': 0,
     '-select_streams': 1, '-show_entries': 1, '-read_intervals': 1,
   },
+}
+
+/**
+ * The filters the media module uses, and the options each may carry (a key
+ * of '' is a value given without a name). None of them reads or writes a
+ * file.
+ */
+const ALLOWED_FILTERS: Readonly<Record<string, readonly string[]>> = {
+  select: [''],
+  scale: ['w', 'h', 'eval', 'flags', 'in_h_chr_pos', 'in_v_chr_pos', 'out_h_chr_pos', 'out_v_chr_pos'],
+  format: [''],
+  settb: ['expr'],
+  setpts: [''],
+  trim: ['start_frame'],
+  concat: ['n', 'v', 'a'],
+  atrim: ['end_sample'],
+  asetpts: [''],
+}
+
+/**
+ * A filtergraph as the module builds it: no quotes, spaces or other syntax
+ * that could hide a filter from this reading, a backslash only before a comma,
+ * `[label]`s of plain words (an input's may name a stream, `[0:v:0]`), and
+ * every filter and option on ALLOWED_FILTERS.
+ * Exported for tests.
+ */
+export function checkFilterGraph(graph: string): boolean {
+  if (!/^[A-Za-z0-9_=:.,;[\]\\()*/+-]+$/.test(graph)) return false
+  if (/\\(?!,)/.test(graph)) return false
+  for (const chain of graph.split(';')) {
+    // Split on commas that aren't escaped.
+    for (const f of chain.split(/(?<!\\),/)) {
+      const m = /^(?:\[[A-Za-z0-9_:]+\])*([a-z]+)(?:=([^[\]]*))?(?:\[[A-Za-z0-9_]+\])*$/.exec(f)
+      if (!m) return false
+      const keys = Object.hasOwn(ALLOWED_FILTERS, m[1]!) ? ALLOWED_FILTERS[m[1]!]! : null
+      if (!keys) return false
+      if (m[2] === undefined) continue
+      for (const opt of m[2].split(':')) {
+        const eq = opt.indexOf('=')
+        const key = eq < 0 ? '' : opt.slice(0, eq)
+        const value = eq < 0 ? opt : opt.slice(eq + 1)
+        if (!keys.includes(key) || !value || value.includes('=')) return false
+      }
+    }
+  }
+  return true
 }
 
 /** `file:<absolute, normalised path>` strictly inside `dir`. */
@@ -189,6 +241,11 @@ export function checkArgs(tool: 'ffmpeg' | 'ffprobe', args: readonly string[], o
       if (name === '-map_metadata' && !/^(?:-1|\d+)$/.test(v!)) bad()
       if (name === '-fflags' && v !== '+bitexact') bad()
       if (name === '-enc_time_base' && !/^\d+\/\d+$/.test(v!)) bad()
+      if ((name === '-vf' || name === '-af' || name === '-filter_complex') && !checkFilterGraph(v!)) bad()
+      if (name === '-bsf' && !/^setts=dts=DTS-\d+$/.test(v!)) bad()
+      if (name === '-ss' && v !== '0') bad()
+      if (name === '-seek_timestamp' && v !== '1') bad()
+      if (name === '-frames' && !/^\d+$/.test(v!)) bad()
       if (name === '-i' && v !== 'pipe:0' && !(v!.startsWith('file:') && isAbsolute(v!.slice(5)) && normalize(v!.slice(5)) === v!.slice(5))) bad()
       i += arity!
       continue
@@ -218,23 +275,28 @@ function fileOutputs(args: readonly string[]): string[] {
   return out
 }
 
+/** An output made by `confineOutputs`: the file the tool must write, by its identity. */
+export interface ConfinedOutput { path: string; dev: number; ino: number }
+
 /**
  * The physical half of the output rule (R5.1b re-review: the lexical check
- * alone let a symlink inside the job's folder send a write elsewhere). For
- * every `file:` output: its folder, symlinks resolved, must be the job's
- * folder or one inside it; then the file is made there as a new regular
- * file with O_EXCL | O_NOFOLLOW, so the tool writes into that very file. A
- * name that already exists passes only as a regular file (never a link).
- * Exported for tests.
+ * alone let a symlink inside the job's folder send a write elsewhere). Run
+ * after the job has its slot, just before the tool starts (R5.1c review,
+ * Minor 1: not across the wait in the queue). For every `file:` output: its
+ * folder, symlinks resolved, must be the job's folder or one inside it; then
+ * the file is made there as a new regular file with O_EXCL | O_NOFOLLOW. A
+ * name that already exists is refused, whatever it is (a planted symlink or
+ * a hard link to a file elsewhere alike). Exported for tests.
  */
-export async function confineOutputs(args: readonly string[], workDir: string | undefined): Promise<void> {
+export async function confineOutputs(args: readonly string[], workDir: string | undefined): Promise<ConfinedOutput[]> {
   const outs = fileOutputs(args)
-  if (!outs.length) return
+  if (!outs.length) return []
   const bad = () => { throw new MediaError('failed') }
   if (!workDir) bad()
   let root: string
   try { root = await realpath(workDir!) }
   catch { bad() }
+  const made: ConfinedOutput[] = []
   for (const p of outs) {
     let folder: string
     try { folder = await realpath(dirname(p)) }
@@ -242,13 +304,26 @@ export async function confineOutputs(args: readonly string[], workDir: string | 
     if (folder! !== root! && !folder!.startsWith(root! + sep)) bad()
     try {
       const fh = await open(p, fsConstants.O_WRONLY | fsConstants.O_CREAT | fsConstants.O_EXCL | fsConstants.O_NOFOLLOW, 0o600)
-      await fh.close()
+      try {
+        const st = await fh.stat()
+        made.push({ path: p, dev: st.dev, ino: st.ino })
+      }
+      finally { await fh.close() }
     }
-    catch (e) {
-      if ((e as NodeJS.ErrnoException).code !== 'EEXIST') bad()
-      const st = await lstat(p).catch(() => null)
-      if (!st || st.isSymbolicLink() || !st.isFile()) bad()
-    }
+    catch { bad() }
+  }
+  return made
+}
+
+/**
+ * After the tool: each output is still the very file `confineOutputs` made
+ * (the same inode, a regular file with one link), so nothing swapped in while
+ * it ran is ever moved on as the result. Exported for tests.
+ */
+export async function checkConfinedOutputs(made: readonly ConfinedOutput[]): Promise<void> {
+  for (const o of made) {
+    const st = await lstat(o.path).catch(() => null)
+    if (!st || !st.isFile() || st.nlink !== 1 || st.ino !== o.ino || st.dev !== o.dev) throw new MediaError('failed')
   }
 }
 
@@ -380,7 +455,6 @@ export async function runMedia(job: MediaJob): Promise<{ stdout: Uint8Array | nu
     throw new MediaError('failed')
   }
   checkArgs(job.tool, job.args, { side: !!job.onSide, workDir: job.workDir })
-  if (job.tool === 'ffmpeg') await confineOutputs(job.args, job.workDir)
   if (job.signal?.aborted) {
     await removeAll(job.cleanup)
     throw new MediaError('stopped')
@@ -396,7 +470,19 @@ export async function runMedia(job: MediaJob): Promise<{ stdout: Uint8Array | nu
   let ownDir: string | null = null
   try {
     if (!job.workDir) ownDir = await mediaTempDir()
-    return await spawnJob(tools[job.tool], job, job.workDir ?? ownDir!)
+    let made: ConfinedOutput[] = []
+    try { made = job.tool === 'ffmpeg' ? await confineOutputs(job.args, job.workDir) : [] }
+    catch (e) {
+      await removeAll(job.cleanup)
+      throw e
+    }
+    const r = await spawnJob(tools[job.tool], job, job.workDir ?? ownDir!)
+    try { await checkConfinedOutputs(made) }
+    catch (e) {
+      await removeAll(job.cleanup)
+      throw e
+    }
+    return r
   }
   finally {
     release()
@@ -491,7 +577,12 @@ function spawnJob(file: string, job: MediaJob, cwd: string): Promise<{ stdout: U
           for await (const chunk of job.stdin!) {
             if (failure !== null || exited) break
             if (!sink.write(chunk)) {
-              await new Promise<void>(r => { sink.once('drain', r); sink.once('close', r) })
+              await new Promise<void>((r) => {
+                // Whichever comes first; the other listener goes too, so none pile up over a long encode.
+                const done = () => { sink.off('drain', done); sink.off('close', done); r() }
+                sink.once('drain', done)
+                sink.once('close', done)
+              })
             }
           }
         }

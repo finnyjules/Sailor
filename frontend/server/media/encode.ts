@@ -25,6 +25,12 @@
  *   - sound is AAC in one stream: from samples (save_to: `fltp`, the layout by
  *     channel count, cut to `cutSamples`), or from a file (SaveVideoFrames:
  *     its first sound stream, whole frames up to `cutSeconds`, stereo);
+ *   - decode times two frames ahead of presentation (`H264_DTS_DELAY`, the
+ *     `setts` bitstream filter), as libx264's B-frames make them in Python's
+ *     files: pictures are untouched, and Python's own get_components reads
+ *     the sound of a Sailor file exactly as it reads its own (it seeks the
+ *     video to 0 first; with the video's first decode time at 0 that seek
+ *     drops the AAC priming packet);
  *   - `-movflags +faststart+use_metadata_tags`; tags (ruling i) go in as an
  *     ffmetadata file, never on the command line (a workflow can pass Linux's
  *     128 KiB argument limit).
@@ -34,19 +40,24 @@
  * interleaved, `mono` for one channel and `stereo` for two, the encoder's
  * sample format as PyAV picks it, the MP3 quality, the Opus bit rate). Opus
  * at a rate it doesn't take is resampled first with torchaudio's resampler
- * (resample.ts, ruling j). More than two channels fails, as PyAV does.
+ * (resample.ts, ruling j), on the compositor worker; a rate pair whose kernel
+ * passes RESAMPLE_MAX_TAPS is refused (MEDIA_WORDS.oddRate). More than two
+ * channels fails, as PyAV does.
+ *
+ * `out` must be in the caller's own folders (`outRoots`, realpath-checked).
  *
  * `floatWav` writes the runner's exact sound (IEEE float WAV); `writeFfv1`
  * keeps a frame batch losslessly (FFV1 in Matroska, stored as bgr0, ruling e).
  */
 import { constants as fsConstants } from 'node:fs'
-import { copyFile, link, rm, writeFile } from 'node:fs/promises'
-import { isAbsolute, join } from 'node:path'
+import { copyFile, link, realpath, rm, writeFile } from 'node:fs/promises'
+import { basename, dirname, isAbsolute, join, sep } from 'node:path'
 import { isHosted } from '../utils/deployMode'
 import { CHROMA_POS, chromaSubsampling, type DecodedSound } from './decode'
 import { h264Args, type H264Quality } from './h264Quality'
 import { exactFraction, ffprobeJson, mediaCapsWord, probeMedia, type MediaProbe, type Rational, type VideoStreamProbe } from './probe'
-import { opusRate, resampleLikeTorchaudio } from './resample'
+import { resampleInWorker } from '../runner/compositor/worker'
+import { RESAMPLE_MAX_TAPS, opusRate, resampleTaps } from './resample'
 import { MediaError, inputArgs, mediaTempDir, removeMediaTempDir, runMedia } from './run'
 
 export { OPENH264_FOR, PYAV_H264_DEFAULT, h264Args, type H264Quality } from './h264Quality'
@@ -109,8 +120,15 @@ export function pyAudioCutSamples(rate: number, fps: number, frames: number): nu
 /** rgb24 → yuv420p as PyAV's reformat('yuv420p') does it (SWS_BILINEAR, no colour tags). Exported for tests. */
 export const RGB_TO_YUV420P = 'scale=w=iw:h=ih:flags=bilinear,format=yuv420p'
 
-/** Tags as an ffmetadata file: '=', ';', '#', '\' and line ends escaped with '\'. */
+/**
+ * Tags as an ffmetadata file: '=', ';', '#', '\' and line ends escaped with
+ * '\'. A value ending in '\' can't be written: ffmetadata's line reader takes
+ * any line ending after a backslash (even an escaped one) as a continuation,
+ * so it would swallow the next tag (R5.1c review, Minor 3, measured). Such a
+ * value is refused (JSON text, what Python writes, never ends in one).
+ */
 export function ffmetadataText(tags: Record<string, string>): string {
+  if (Object.entries(tags).some(([k, v]) => k.endsWith('\\') || v.endsWith('\\') || !k)) throw new MediaError('failed')
   const esc = (s: string) => s.replace(/[\\=;#\n\r]/g, c => `\\${c}`)
   return `;FFMETADATA1\n${Object.entries(tags).map(([k, v]) => `${esc(k)}=${esc(v)}`).join('\n')}\n`
 }
@@ -123,9 +141,27 @@ async function tagsInput(work: string, tags: Record<string, string> | undefined)
   return ['-protocol_whitelist', 'file,pipe', '-f', 'ffmetadata', '-i', `file:${p}`]
 }
 
-/** Moves a finished file out of the job's folder to `dest`, never over an existing file. */
-async function moveOut(src: string, dest: string): Promise<void> {
+/**
+ * Moves a finished file out of the job's folder to `dest`, never over an
+ * existing file, and only into the caller's own folders: `dest`'s folder,
+ * symlinks resolved, must be one of `roots` or inside one (R5.1c review,
+ * Minor 4), and the name itself is a plain one in it.
+ */
+async function moveOut(src: string, dest: string, roots: readonly string[]): Promise<void> {
   if (!isAbsolute(dest) || dest.includes('\0')) throw new MediaError('failed')
+  const name = basename(dest)
+  if (!name || name === '.' || name === '..') throw new MediaError('failed')
+  let folder: string
+  try { folder = await realpath(dirname(dest)) }
+  catch { throw new MediaError('failed') }
+  let inside = false
+  for (const r of roots) {
+    if (!isAbsolute(r)) continue
+    const real = await realpath(r).catch(() => null)
+    if (real && (folder === real || folder.startsWith(real + sep))) { inside = true; break }
+  }
+  if (!inside) throw new MediaError('failed')
+  dest = join(folder, name)
   try { await link(src, dest) }
   catch (e) {
     if ((e as NodeJS.ErrnoException).code !== 'EXDEV') throw new MediaError('failed')
@@ -143,7 +179,7 @@ function interleave(s: DecodedSound, from: number, to: number): Uint8Array {
   return new Uint8Array(out.buffer)
 }
 
-/** A sound as f32le chunks of about 64 KiB, for a tool's stdin. */
+/** A sound as f32le chunks of about 64 KiB, for a tool's stdin or a file. */
 async function* soundChunks(s: DecodedSound, samples: number): AsyncIterable<Uint8Array> {
   const step = Math.max(1, Math.floor(16384 / Math.max(1, s.channels.length)))
   for (let at = 0; at < samples; at += step) yield interleave(s, at, Math.min(samples, at + step))
@@ -235,7 +271,14 @@ export interface EncodeVideoOptions {
   userId: string | null; signal?: AbortSignal
   /** The folders every input file must really be in (the person's own and the run's kept files). */
   roots?: readonly string[]
+  /** The folders `out` may be written to (its folder, symlinks resolved, must be one of them or inside one). */
+  outRoots: readonly string[]
+  /** The job's own time limit (rule 5's by default). */
+  timeoutMs?: number
 }
+
+/** Frames by which decode times run ahead of presentation, as libx264's defaults (B-frames, pyramid) make them. */
+export const H264_DTS_DELAY = 2
 
 /** H.264 in MP4, as Python saves a video (see the header). Resolves with the frames written. */
 export async function encodeVideo(o: EncodeVideoOptions): Promise<{ frames: number }> {
@@ -314,9 +357,8 @@ export async function encodeVideo(o: EncodeVideoOptions): Promise<{ frames: numb
         if (s.channels.length !== C) throw new MediaError('failed')
         const cut = Math.min(n, sound.cutSamples ?? n)
         const raw = join(work, 'sound.f32')
-        const chunks: Uint8Array[] = []
-        for await (const c of soundChunks(s, cut)) chunks.push(c)
-        await writeFile(raw, Buffer.concat(chunks), { flag: 'wx' })
+        // Streamed to the file a chunk at a time: never a second whole copy (R5.1c review, Minor 5).
+        await writeFile(raw, soundChunks(s, cut), { flag: 'wx' })
         args.push('-f', 'f32le', '-ar', String(sound.rate), '-ch_layout', sound.layout, '-protocol_whitelist', 'file,pipe', '-i', `file:${raw}`)
       }
       else {
@@ -335,7 +377,12 @@ export async function encodeVideo(o: EncodeVideoOptions): Promise<{ frames: numb
     if (tagsArgs) args.push(...tagsArgs)
 
     const out = join(work, 'out.mp4')
-    args.push('-map', videoMap, '-fps_mode', 'passthrough', '-enc_time_base:v', tb, ...h264Args(o.quality))
+    // Decode times two frames early (`setts`), as libx264's B-frames put them in Python's files: the
+    // pictures are untouched (pts), and PyAV's get_components, which seeks the video to 0 before it
+    // reads the sound, then keeps the AAC priming packet as it does in Python's own files (R5.1c
+    // review, Important 3: with the video starting at 0 the seek drops it, and the sound starts
+    // with 448 zeros).
+    args.push('-map', videoMap, '-fps_mode', 'passthrough', '-enc_time_base:v', tb, ...h264Args(o.quality), '-bsf:v', `setts=dts=DTS-${H264_DTS_DELAY}`)
     if (sound && soundIndex !== null) {
       args.push('-map', `${soundIndex}:a:0`, '-c:a', 'aac', '-ar', String(sound.rate), '-ch_layout', sound.layout)
       if (soundFilter) args.push('-af', soundFilter)
@@ -343,11 +390,11 @@ export async function encodeVideo(o: EncodeVideoOptions): Promise<{ frames: numb
     args.push('-map_metadata', tagsIndex === null ? '-1' : String(tagsIndex))
     args.push('-movflags', '+faststart+use_metadata_tags', '-f', 'mp4', '-y', `file:${out}`)
 
-    await runMedia({ tool: 'ffmpeg', args, userId: o.userId, signal: o.signal, stdin, workDir: work, cleanup: [out] })
+    await runMedia({ tool: 'ffmpeg', args, userId: o.userId, signal: o.signal, stdin, workDir: work, cleanup: [out], timeoutMs: o.timeoutMs })
     if (input.kind === 'rgb' && counted.n === 0) throw new MediaError('noVideo')
     const made = await probeMedia(out, { userId: o.userId, signal: o.signal, roots: [work], kind: 'video' })
     const frames = made.video[0]?.frames ?? counted.n
-    await moveOut(out, o.out)
+    await moveOut(out, o.out, o.outRoots)
     return { frames }
   }
   finally {
@@ -386,6 +433,9 @@ export async function encodeAudio(o: {
   sampleFmt: string
   out: string; metadata?: Record<string, string>
   userId: string | null; signal?: AbortSignal
+  /** The folders `out` may be written to. */
+  outRoots: readonly string[]
+  timeoutMs?: number
 }): Promise<void> {
   if (!Object.hasOwn(CODEC, o.format) || !/^[a-z0-9]+$/.test(o.sampleFmt)) throw new MediaError('failed')
   const C = o.sound.channels.length
@@ -396,7 +446,13 @@ export async function encodeAudio(o: {
   const n0 = soundLength(sound)
   if (o.format === 'opus') {
     const rate = opusRate(sound.rate)
-    if (rate !== sound.rate) sound = { rate, channels: resampleLikeTorchaudio(sound.channels, sound.rate, rate) }
+    if (rate !== sound.rate) {
+      // A rate pair whose kernel would pass the cap is refused before any work (torchaudio would exhaust memory too).
+      if (resampleTaps(sound.rate, rate) > RESAMPLE_MAX_TAPS) throw new MediaError('oddRate')
+      // On the compositor worker, a channel at a time, under its Stop and watchdog: never on the server's main thread.
+      try { sound = { rate, channels: await resampleInWorker(sound.channels, sound.rate, rate, o.signal) } }
+      catch { throw new MediaError(o.signal?.aborted ? 'stopped' : 'failed') }
+    }
   }
   const n = sound === o.sound ? n0 : soundLength(sound)
   const layout = C === 1 ? 'mono' : 'stereo'
@@ -412,8 +468,8 @@ export async function encodeAudio(o: {
       ...qualityArgs(o.format, o.quality),
       '-f', o.format, '-y', `file:${out}`,
     )
-    await runMedia({ tool: 'ffmpeg', args, userId: o.userId, signal: o.signal, stdin: soundChunks(sound, n), workDir: work, cleanup: [out] })
-    await moveOut(out, o.out)
+    await runMedia({ tool: 'ffmpeg', args, userId: o.userId, signal: o.signal, stdin: soundChunks(sound, n), workDir: work, cleanup: [out], timeoutMs: o.timeoutMs })
+    await moveOut(out, o.out, o.outRoots)
   }
   finally {
     await removeMediaTempDir(work)
@@ -450,7 +506,7 @@ export function floatWav(s: DecodedSound): Uint8Array {
  * a reversible transform, and rgb24 ↔ bgr0 only moves bytes). Bit-exact
  * muxing, so the same frames make the same file (kept by sha256).
  */
-export async function writeFfv1(o: { frames: AsyncIterable<Uint8Array>; w: number; h: number; out: string; userId: string | null; signal?: AbortSignal }): Promise<{ count: number }> {
+export async function writeFfv1(o: { frames: AsyncIterable<Uint8Array>; w: number; h: number; out: string; outRoots: readonly string[]; userId: string | null; signal?: AbortSignal; timeoutMs?: number }): Promise<{ count: number }> {
   if (!(Number.isInteger(o.w) && Number.isInteger(o.h) && o.w > 0 && o.h > 0)) throw new MediaError('failed')
   const work = await mediaTempDir()
   try {
@@ -462,9 +518,9 @@ export async function writeFfv1(o: { frames: AsyncIterable<Uint8Array>; w: numbe
       '-c:v', 'ffv1', '-threads:v', '1', '-pix_fmt', 'bgr0',
       '-fflags', '+bitexact', '-f', 'matroska', '-y', `file:${out}`,
     ]
-    await runMedia({ tool: 'ffmpeg', args, userId: o.userId, signal: o.signal, stdin: checkedFrames(o.frames, o.w * o.h * 3, counted, o.signal), workDir: work, cleanup: [out] })
+    await runMedia({ tool: 'ffmpeg', args, userId: o.userId, signal: o.signal, stdin: checkedFrames(o.frames, o.w * o.h * 3, counted, o.signal), workDir: work, cleanup: [out], timeoutMs: o.timeoutMs })
     if (counted.n === 0) throw new MediaError('noVideo')
-    await moveOut(out, o.out)
+    await moveOut(out, o.out, o.outRoots)
     return { count: counted.n }
   }
   finally {

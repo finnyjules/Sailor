@@ -105,7 +105,7 @@ describe('decodeFrames equals PyAV’s to_ndarray(rgb24)', () => {
       expect(got, c.clip).toEqual(want.list.map(f => f.sha256))
       clips++
     }
-    expect(clips).toBe(15)
+    expect(clips).toBe(17)
   })
 
   it('drops the edit-list clip’s frames stamped before zero: 6 of its 8 frames, as Python', LONG, async () => {
@@ -194,7 +194,7 @@ describe('decodeAudio equals Python', () => {
       expectSound(await run(c.clip, 'load'), c.load, c.clip, { ulp: OPUS_ULP.has(c.clip) ? c.load : undefined })
       n++
     }
-    expect(n).toBe(13)
+    expect(n).toBe(15)
   })
 
   it("'download' is bit-equal to _download_url_to_audio_dict, with a packed stereo file read into its channels (ruling k)", LONG, async () => {
@@ -228,7 +228,7 @@ describe('decodeAudio equals Python', () => {
     expect(Math.min(...l.channels[0]!)).toBe(-1)
   })
 
-  it("'fltp' is bit-equal to get_components’ sound: the last stream, samples before 0 skipped", LONG, async () => {
+  it("'fltp' is bit-equal to get_components’ sound: the last stream, samples before 0 skipped, after Python's seek (ffmpeg-muxed MP4s too)", LONG, async () => {
     await requireMediaTools()
     let n = 0
     for (const c of FIX.cases) {
@@ -236,7 +236,15 @@ describe('decodeAudio equals Python', () => {
       expectSound(await run(c.clip, 'fltp'), c.components, c.clip)
       n++
     }
-    expect(n).toBe(2)
+    // v_stereo_aac.mp4 and v_two_sounds.mkv (PyAV-muxed), v_ffmux_copy.mp4 and v_ffmux_nob.mp4 (ffmpeg-muxed, R5.1c).
+    expect(n).toBe(4)
+    // v_ffmux_nob.mp4: the video starts at decode time 0 and the AAC priming packet comes first, so Python's
+    // seek skips that packet and the decoder starts cold on the next: without the same seek the mirror
+    // differed on every sample (measured before decode.ts pythonSeekArgs). A remux that keeps the
+    // B-frames' early decode times (v_ffmux_copy.mp4) reads as its source does.
+    const copy = FIX.cases.find(k => k.clip === 'v_ffmux_copy.mp4')!.components as PySound
+    const source = FIX.cases.find(k => k.clip === 'v_stereo_aac.mp4')!.components as PySound
+    expect(copy.sha256).toBe(source.sha256)
     // v_two_sounds.mkv: the last stream is the stereo 48 kHz one, its first 1008 samples (21 ms) skipped.
     const two = FIX.cases.find(k => k.clip === 'v_two_sounds.mkv')!.components as PySound
     expect([two.rows, two.rate]).toEqual([2, 48000])

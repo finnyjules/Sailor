@@ -54,7 +54,7 @@ export const MEDIA_CAPS: { readonly local: Readonly<MediaCaps>; readonly hosted:
 
 export type MediaWord =
   | 'tooBig' | 'tooLong' | 'tooManyFrames' | 'unreadable' | 'noVideo' | 'noSound'
-  | 'oddSize' | 'stopped' | 'timedOut' | 'failed' | 'sizeChanged'
+  | 'oddSize' | 'stopped' | 'timedOut' | 'failed' | 'sizeChanged' | 'oddRate'
 
 /** What a person reads when media work can't go on: sentence case, plain words, short enough for a node. */
 export const MEDIA_WORDS: Readonly<Record<MediaWord, string>> = {
@@ -69,6 +69,7 @@ export const MEDIA_WORDS: Readonly<Record<MediaWord, string>> = {
   timedOut: 'This took too long, so it was stopped',
   failed: 'The video tools couldn’t finish this',
   sizeChanged: 'This video’s frames change size partway through',
+  oddRate: 'This sound’s sample rate is too unusual to convert for Opus',
 }
 
 /** Rule 5: how long one job may run. */

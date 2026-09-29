@@ -458,6 +458,132 @@
    }
   },
   {
+   "clip": "v_ffmux_copy.mp4",
+   "dimensions": {
+    "value": [
+     32,
+     24
+    ]
+   },
+   "frameCount": {
+    "value": 24
+   },
+   "frameCountIntended": 24,
+   "frameRate": {
+    "value": {
+     "den": 1,
+     "num": 24
+    }
+   },
+   "header": {
+    "bytes": 12366,
+    "containerDuration": 1000000,
+    "formatName": "mov,mp4,m4a,3gp,3g2,mj2",
+    "sound": [
+     {
+      "channels": 2,
+      "codec": "aac",
+      "duration": 44100,
+      "index": 1,
+      "layout": "stereo",
+      "rate": 44100,
+      "sampleFmt": "fltp",
+      "timeBase": {
+       "den": 44100,
+       "num": 1
+      }
+     }
+    ],
+    "video": [
+     {
+      "averageRate": {
+       "den": 1,
+       "num": 24
+      },
+      "codec": "h264",
+      "colorRange": 0,
+      "colorSpace": 2,
+      "duration": 12288,
+      "frames": 24,
+      "h": 24,
+      "index": 0,
+      "pixFmt": "yuv420p",
+      "timeBase": {
+       "den": 12288,
+       "num": 1
+      },
+      "w": 32
+     }
+    ]
+   },
+   "rawDuration": {
+    "value": 1.0
+   }
+  },
+  {
+   "clip": "v_ffmux_nob.mp4",
+   "dimensions": {
+    "value": [
+     32,
+     24
+    ]
+   },
+   "frameCount": {
+    "value": 24
+   },
+   "frameCountIntended": 24,
+   "frameRate": {
+    "value": {
+     "den": 1,
+     "num": 24
+    }
+   },
+   "header": {
+    "bytes": 25522,
+    "containerDuration": 1000000,
+    "formatName": "mov,mp4,m4a,3gp,3g2,mj2",
+    "sound": [
+     {
+      "channels": 2,
+      "codec": "aac",
+      "duration": 44100,
+      "index": 1,
+      "layout": "stereo",
+      "rate": 44100,
+      "sampleFmt": "fltp",
+      "timeBase": {
+       "den": 44100,
+       "num": 1
+      }
+     }
+    ],
+    "video": [
+     {
+      "averageRate": {
+       "den": 1,
+       "num": 24
+      },
+      "codec": "h264",
+      "colorRange": 0,
+      "colorSpace": 2,
+      "duration": 12288,
+      "frames": 24,
+      "h": 24,
+      "index": 0,
+      "pixFmt": "yuv420p",
+      "timeBase": {
+       "den": 12288,
+       "num": 1
+      },
+      "w": 32
+     }
+    ]
+   },
+   "rawDuration": {
+    "value": 1.0
+   }
+  },
+  {
    "clip": "v_h264_422_10.mp4",
    "dimensions": {
     "value": [
@@ -1247,6 +1373,8 @@
   "a_s32.wav": "76df4a5c25b8a48cbcea20da09c57ce050853cf17db7c9e23ce60b8e900ecc76",
   "a_vorbis.ogg": "9d263b53ec8d5452e0de962d95d2116251cb15949b1a7611f021293608ee7a9e",
   "v_editlist.mp4": "556be520906c281d1f93d6a3ccaf022368be9edb5914ef2b2349a64c9c0efa36",
+  "v_ffmux_copy.mp4": "f0b3fe029bf51437c0c3cb6c1201a436201903cf85d6e4506f8eaa45f4c5e4f6",
+  "v_ffmux_nob.mp4": "15fd5e72281ff610a4ab557f8467f092c93d663cbd5604b425998fc2d29182da",
   "v_h264_422_10.mp4": "f623cf8ae9d2f92f841d52b6670fbac58fb04fc54d0d3df2557117d6ec2f1842",
   "v_h264_444.mp4": "e3b8d29f7a0f5102d1d6d0e62bbbf53b63358d6c3674f6c5538c9c705a2cc08a",
   "v_h264_444_10.mp4": "b9da697643c3720a15323d00267e65715ec0957f7b483328a9dca76c0e9d71a9",

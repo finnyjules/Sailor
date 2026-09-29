@@ -29,6 +29,7 @@ import { composeFrame, type FrameBackend, type FrameLoaders } from './render'
 import { pixelsCore, type PixelsPicture } from '../pixels/core'
 import { EFFECT_CORES, type EffectCoreEntry } from '../effects/cores'
 import type { PilRaw } from '../pixels/pilPixels'
+import { resampleCore } from '../../media/resample'
 
 /**
  * The worker's script around a core function's source text. `__name` is
@@ -51,6 +52,8 @@ const core = (${coreFn.toString()})()
 const px = (${pixelsFn.toString()})()
 const built = { px }
 ${built}
+// torchaudio's resampler (R5.1c, ../../media/resample.ts), for Opus export.
+const rs = (${resampleCore.toString()})()
 const stop = new Int32Array(workerData.stop)
 const stopped = () => { if (Atomics.load(stop, 0) === 1) throw new Error('Stopped') }
 const isStopped = () => Atomics.load(stop, 0) === 1
@@ -209,6 +212,13 @@ parentPort.on('message', (m) => {
       }
     }
     else if (m.op === 'fx.end') fx = null
+    // One sound channel through torchaudio's resampler (R5.1c): Stop is read between blocks of output.
+    else if (m.op === 'audio.resample') {
+      stopped()
+      value = rs.resample(m.channel, m.orig, m.next, isStopped)
+      if (value === m.channel) value = value.slice()
+      transfer = [value.buffer]
+    }
     else if (m.op === 'drop') { cv = null; clipAlpha = null; fx = null }
     parentPort.postMessage({ id: m.id, value }, transfer)
   }
@@ -558,6 +568,26 @@ export function pixelsInWorker<T>(signal: AbortSignal | undefined, job: (w: Pixe
     }
     try { return await job(w) }
     finally { if (!t.dead) void call(t, { op: 'drop' }, []).catch(() => {}) }
+  })
+}
+
+/** The longest one sound's resampling may take on the worker (the Frame's limit). */
+export const RESAMPLE_TIMEOUT_MESSAGE = 'Converting this sound’s sample rate took longer than 2 minutes, so it was stopped'
+
+/**
+ * torchaudio's resampler (R5.1c, ../../media/resample.ts) on the Frame's
+ * worker, in the same queue, under the same watchdog and Stop: one message
+ * per channel, each channel handed over (a copy is sent, the caller's stays).
+ */
+export function resampleInWorker(channels: readonly Float32Array[], orig: number, next: number, signal?: AbortSignal): Promise<Float32Array[]> {
+  return onWorker(signal, RESAMPLE_TIMEOUT_MESSAGE, async (t, live) => {
+    const out: Float32Array[] = []
+    for (const ch of channels) {
+      if (live.aborted) throw new Error('Stopped')
+      const own = ch.slice()
+      out.push(await call(t, { op: 'audio.resample', channel: own, orig, next }, [own.buffer as ArrayBuffer]) as Float32Array)
+    }
+    return out
   })
 }
 

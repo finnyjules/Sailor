@@ -150,6 +150,8 @@ export interface EncodeCases {
   openh264Qp: Record<string, number>
   saveTo: {
     name: string; fps: number; frames: number; w: number; h: number
+    /** The source pictures: `smoothFrame`, or `synth(w, h, 3, 4000 + i)` (noise). */
+    content: 'smooth' | 'synth'
     sound: { rate: number; channels: number; f32z: string } | null
     x264: PyVideoOut; openh264: PyVideoOut
   }[]
@@ -159,7 +161,11 @@ export interface EncodeCases {
     input: string; encoderSampleFmt: string; encoderRate: number; filename: string
     decoded: PySound; tags: Record<string, string>
   }[]
-  resample: { orig: number; new: number; input: string; output: string; samples: number }[]
+  resample: {
+    orig: number; new: number; input: string; output: string; samples: number
+    /** Mono, at several lengths: each the first `length` samples of `lengthInput`. */
+    lengths: { length: number; samples: number; output: string }[]; lengthInput: string
+  }[]
   stitch: { clips: string[]; x264: PyVideoOut; openh264: PyVideoOut }
   reformat: { name: string; w: number; h: number; yuv: string; sha256: string }[]
 }
