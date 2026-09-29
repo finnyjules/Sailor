@@ -4,17 +4,17 @@
  * scripts/runner_media_fixtures.py --group encode recorded it. Needs the real
  * build (R5.1a).
  *
- * H.264 is judged by ruling (c): Python's libx264 and Sailor's OpenH264 are
- * different encoders, so
+ * H.264 is judged by ruling (c) as revised by the controller (2026-09-28):
+ * Python's libx264 and Sailor's OpenH264 are different encoders, so
  *   - the frame count, rate, length and size equal Python's exactly;
- *   - the decoded frames equal, byte for byte, Python's own save_to switched
- *     to libopenh264 with the same settings (so the encoder gets the same
- *     frames with the same settings);
  *   - the decoded frames are no further from the source than libx264's
  *     (PSNR within 0.5 dB);
- *   - the average difference from libx264's decoded frames is measured and
- *     held to the bound the report proposes (ruling (c)'s 2/255 can't hold
- *     between two encoders: see task-R5.1c-report.md).
+ *   - the decoded frames equal, byte for byte, Python's own pipeline switched
+ *     to libopenh264 with the same settings (so the encoder gets the same
+ *     frames with the same settings);
+ *   - the average difference from libx264's decoded frames is at most 7/255,
+ *     a sanity bound only (the original "within 2/255" was dropped: two
+ *     encoders can't meet it, and ours is closer to the source).
  * MP3 and AAC decode exactly, or within 60 dB SNR (named case by case).
  */
 import { mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync, existsSync } from 'node:fs'
@@ -42,22 +42,22 @@ const LONG = { timeout: 120_000 }
 const BIG = Number.MAX_SAFE_INTEGER
 
 /**
- * The average difference allowed between Sailor's decoded H.264 and Python's
- * libx264 one, in 8-bit levels, per case. Ruling (c) says 2; measured on this
- * build it is 5.6–6.0 on the save_to cases (while Sailor's frames are closer
- * to the source than libx264's), so this bound is the report's proposal, a
- * regression guard pending the controller's ruling.
+ * Ruling (c), revised: the average difference between Sailor's decoded H.264
+ * and Python's libx264 one is held to 7/255 as a sanity bound only (measured
+ * 5.65–6.02 on the save_to cases, 5.88 on the stitch).
  */
 const MEAN_DIFF_BOUND = 7
 
 /**
- * Opus: PyAV's wheel carries libopus 1.6.1, Sailor's build 1.5.2, and Opus's
- * float encoder isn't bit-stable across versions: even fed torchaudio's own
- * resampled samples, the decoded sound differs (up to 0.014). Measured SNR
- * against Python's decoded file: 50.4 dB mono, 42.1 dB stereo. Rule 3 names
- * no bound for Opus; this is the report's proposal.
+ * Opus: the build now carries libopus 1.6.1, PyAV's own. Measured against
+ * Python's decoded file: 63.9 dB mono, 62.0 dB stereo, not exact. Fed
+ * torchaudio's own resampled samples, mono comes out bit-exact and stereo
+ * within 1.45e-5: the mono difference is the ported resampler's last-bit
+ * differences (≤ 1.8e-7) crossing an s16 rounding step, and the stereo one is
+ * the float encoder itself (the same compiler difference as R5.1b's Opus
+ * decode). Held to rule 3's audio bound, 60 dB.
  */
-const OPUS_SNR_DB = 40
+const OPUS_SNR_DB = 60
 
 const scratch = mkdtempSync(join(tmpdir(), 'media-encode-spec-'))
 afterAll(() => rmSync(scratch, { recursive: true, force: true }))
@@ -161,7 +161,7 @@ function expectH264(ours: Uint8Array[], openh264: PyVideoOut, x264: PyVideoOut, 
   const all = concat(ours)
   expect(all.length, label).toBe(py.length)
   const mean = meanDiff(all, py)
-  expect(mean, `${label}: mean difference from libx264 (levels)`).toBeLessThanOrEqual(MEAN_DIFF_BOUND)
+  expect(mean, `${label}: mean difference from libx264 within the sanity bound (levels)`).toBeLessThanOrEqual(MEAN_DIFF_BOUND)
   let psnrOurs: number | null = null
   if (source) {
     psnrOurs = psnr(source, all)
@@ -376,7 +376,7 @@ describe('encodeAudio equals AudioSaveHelper.save_audio', () => {
       expect(ours.channels.map(ch => ch.length), label).toEqual(want.map(ch => ch.length))
       const s = snr(want, ours.channels)
       measured[label] = s === Number.POSITIVE_INFINITY ? 'exact' : Math.round(s * 10) / 10
-      // FLAC is lossless and MP3 the same LAME: exact. Opus: another libopus version (OPUS_SNR_DB).
+      // FLAC is lossless and MP3 the same LAME: exact. Opus: within OPUS_SNR_DB (not bit-stable across builds).
       if (c.format === 'opus') expect(s, label).toBeGreaterThanOrEqual(OPUS_SNR_DB)
       else expect(s, `${label}: decodes exactly`).toBe(Number.POSITIVE_INFINITY)
       const t = await tagsOf(out)

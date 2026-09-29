@@ -14,8 +14,9 @@
  * 128 × 96, and the decoded standard clips), PSNR taken in YUV against the
  * encoder's own yuv420p input; the row is the largest QP within 0.5 dB of
  * libx264 on every set. OpenH264's quality mode never goes below QP 12, so
- * CRF 10–15 all use 12 and fall short on the tiny standard clips (named in
- * the report). `preset` only changes libx264's speed, so it is not used.
+ * CRF 10–15 all use 12: on the 32 × 24 standard clips that falls up to 5.2 dB
+ * short of libx264, while the larger sets meet it. Accepted by the controller
+ * as the best OpenH264 can do (ruling d, 2026-09-28). `preset` only changes libx264's speed, so it is not used.
  *
  * The fixed part:
  *   - `-coder cabac` (High profile): Baseline's CAVLC refuses some detailed

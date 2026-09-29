@@ -5,7 +5,7 @@ built from pinned sources in the Dockerfile's `media-tools` stage by
 `scripts/media-tools/build.sh`, the same script a Mac uses. The runtime stage copies the
 folder in and sets `NUXT_MEDIA_TOOLS_DIR=/opt/media-tools/bin`.
 
-- **What:** FFmpeg 8.0.3 with LGPL parts only, plus OpenH264 2.5.1, LAME 3.100, Opus 1.5.2,
+- **What:** FFmpeg 8.0.3 with LGPL parts only, plus OpenH264 2.5.1, LAME 3.100, Opus 1.6.1,
   dav1d 1.5.1 and zlib 1.3.2, all linked statically. The versions, URLs and sha256 values are
   in `scripts/media-tools/versions.env`. dav1d's build tools (meson, ninja) come from a
   pinned, hash-checked venv the script makes itself (`scripts/media-tools/buildtools.txt`).

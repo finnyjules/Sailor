@@ -401,7 +401,7 @@ function readEnv(): Record<string, string> {
   return out
 }
 
-const PARTS: Record<string, string> = { FFMPEG: '8.0.3', OPENH264: '2.5.1', LAME: '3.100', OPUS: '1.5.2', DAV1D: '1.5.1', ZLIB: '1.3.2' }
+const PARTS: Record<string, string> = { FFMPEG: '8.0.3', OPENH264: '2.5.1', LAME: '3.100', OPUS: '1.6.1', DAV1D: '1.5.1', ZLIB: '1.3.2' }
 
 describe('the pins', () => {
   it('versions.env: every part has its version, an https URL naming it, and a 64-hex sha256', () => {

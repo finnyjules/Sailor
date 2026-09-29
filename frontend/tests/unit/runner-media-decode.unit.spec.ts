@@ -22,8 +22,10 @@ const BIG = Number.MAX_SAFE_INTEGER
  * Cases that can't be made bit-equal, each named in the R5.1b report:
  * Opus decodes some floats a last bit apart (159 of 96,000 samples, at most
  * 2⁻²⁴): FFmpeg's float Opus decoder built by a different compiler from
- * PyAV's wheel. Measured, not guessed: the fixture keeps Python's whole
- * sound, and every sample is checked against the bound.
+ * PyAV's wheel. Re-measured with libopus 1.6.1 (PyAV's own version, R5.1c):
+ * still the same 159 samples, so the version was not the cause. Measured,
+ * not guessed: the fixture keeps Python's whole sound, and every sample is
+ * checked against the bound.
  */
 const OPUS_ULP = new Set(['a_opus.webm'])
 /** How many of the Opus clip's samples are a last bit off (measured on this build). */
