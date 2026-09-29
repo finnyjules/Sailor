@@ -6,6 +6,7 @@
  */
 import { createHash } from 'node:crypto'
 import { readFileSync } from 'node:fs'
+import { inflateSync } from 'node:zlib'
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { mediaTools, type MediaTools } from '~~/server/media/tools'
@@ -61,7 +62,7 @@ export interface MediaFixture<C> {
   cases: C[]
 }
 
-export function mediaFixture<C>(group: 'probe' | 'decode'): MediaFixture<C> {
+export function mediaFixture<C>(group: 'probe' | 'decode' | 'encode'): MediaFixture<C> {
   return JSON.parse(readFileSync(resolve(FIXTURES, `runner-media-${group}.json`), 'utf8')) as MediaFixture<C>
 }
 
@@ -97,4 +98,68 @@ export function deinterleave(row: Float32Array, channels: number): Float32Array[
 export function f32(b64: string): Float32Array {
   const b = Buffer.from(b64, 'base64')
   return new Float32Array(b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength))
+}
+
+// ── the encode group (R5.1c) ─────────────────────────────────────────────────
+
+/** Bytes kept as zlib + base64 in the fixture. */
+export function unz(b64: string): Uint8Array {
+  return new Uint8Array(inflateSync(Buffer.from(b64, 'base64')))
+}
+
+/** zlib'd float32 bytes as a Float32Array. */
+export function unzF32(b64: string): Float32Array {
+  const b = unz(b64)
+  return new Float32Array(b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength))
+}
+
+/**
+ * The fixture script's `smooth_frame` (integer-only, so both make the same
+ * bytes): two wrapping ramps and a disc that moves with i. rgb24.
+ */
+export function smoothFrame(w: number, h: number, i: number): Uint8Array {
+  const out = new Uint8Array(w * h * 3)
+  const cx = Math.floor(w / 2) + ((i * 3) % 16) - 8
+  const cy = Math.floor(h / 2)
+  const r2 = Math.floor(h / 3) ** 2
+  let o = 0
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      out[o++] = (x * 7 + y * 3 + i * 4) % 256
+      out[o++] = (y * 9 + i * 2) % 256
+      out[o++] = (x - cx) ** 2 + (y - cy) ** 2 < r2 ? 220 : (40 + y) & 255
+    }
+  }
+  return out
+}
+
+/** A saved H.264 file as Python recorded it. */
+export interface PyVideoOut {
+  header: ProbeCase['header']
+  frameCount: number; frameRate: PyRational; duration: number
+  /** sha256 of each decoded rgb24 frame (get_components). */
+  frames: string[]
+  /** The decoded frames, zlib'd (the libx264 runs only). */
+  rgbz?: string
+  /** PSNR (dB) of the decoded frames against the source, rgb24. */
+  psnr?: number | null
+  sound: PySound | null
+  tags?: Record<string, string>
+}
+export interface EncodeCases {
+  openh264Qp: Record<string, number>
+  saveTo: {
+    name: string; fps: number; frames: number; w: number; h: number
+    sound: { rate: number; channels: number; f32z: string } | null
+    x264: PyVideoOut; openh264: PyVideoOut
+  }[]
+  rows: { crf: number; frames: string[]; frameCount: number }[]
+  saveAudio: {
+    format: 'flac' | 'mp3' | 'opus'; quality: 'V0' | '128k' | '320k'; channels: number; rate: number
+    input: string; encoderSampleFmt: string; encoderRate: number; filename: string
+    decoded: PySound; tags: Record<string, string>
+  }[]
+  resample: { orig: number; new: number; input: string; output: string; samples: number }[]
+  stitch: { clips: string[]; x264: PyVideoOut; openh264: PyVideoOut }
+  reformat: { name: string; w: number; h: number; yuv: string; sha256: string }[]
 }

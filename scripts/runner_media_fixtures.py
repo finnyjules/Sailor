@@ -24,6 +24,20 @@ Groups:
            sound (float32), nodes_audio.load, and
            nodes_replicate._download_url_to_audio_dict (run for real, with
            its download answered from the file, never the network).
+  encode — (R5.1c) what Python WRITES: VideoFromComponents.save_to of `smooth`
+           frames at 24, 29.97 and 30 fps, without sound and with a mono or
+           stereo one (libx264 as ComfyUI runs it, and the same call switched
+           to libopenh264 at the matching OPENH264_FOR row); save_to switched
+           to libopenh264 at every OPENH264_FOR row; AudioSaveHelper.save_audio
+           for FLAC, MP3 (V0, 128k, 320k) and Opus (128k) from mono and
+           stereo float input, with prompt and workflow tags;
+           torchaudio.functional.resample at the rates Opus export meets;
+           _turntable_stitch.stitch_clips of three small clips (one at another
+           size), with libx264 and with libopenh264; and PyAV's own
+           reformat('yuv420p') planes of three rgb24 pictures. The three
+           stitch clips are written beside the standard clips as e_*.mp4 and
+           are not standard clips (the probe and decode groups skip them).
+           Every encoder runs with one thread.
 """
 from __future__ import annotations
 
@@ -429,7 +443,8 @@ def make_clips() -> list[str]:
     clip_sound("a_aac.m4a", "aac", 44100, "stereo", "fltp", 1.0, bit_rate=96000)
     clip_sound("a_long_8k.wav", "pcm_s16le", 8000, "mono", "s16", 75.0, bits=16)
     clip_sound("a_min.wav", "pcm_s16le", 44100, "mono", "s16", 0.25, bits=16, extreme=True)
-    return sorted(os.listdir(CLIPS))
+    # e_*: the encode group's own inputs (Turntable's stitch), not standard clips.
+    return sorted(n for n in os.listdir(CLIPS) if not n.startswith("e_"))
 
 
 # ── reading ───────────────────────────────────────────────────────────────────
@@ -629,7 +644,304 @@ def group_decode(names: list[str]) -> dict:
     return {"cases": cases}
 
 
-GROUPS = {"probe": group_probe, "decode": group_decode}
+# ── encode (R5.1c) ────────────────────────────────────────────────────────────
+
+# OpenH264 settings for each libx264 CRF, measured (ruling d): the TypeScript
+# table frontend/server/media/h264Quality.ts must list the same rows, and the
+# encode spec checks that it does. Every row runs with h264Args' fixed part.
+OPENH264_QP = {10: 12, 11: 12, 12: 12, 13: 12, 14: 12, 15: 12, 16: 13, 17: 16, 18: 17, 19: 20, 20: 21,
+               21: 22, 22: 23, 23: 24, 24: 25, 25: 25, 26: 26, 27: 28, 28: 28, 29: 29, 30: 30, 31: 31, 32: 32}
+
+
+def openh264_options(crf: int) -> dict:
+    """h264Args' OpenH264 options for a CRF, as PyAV codec options (the ffmpeg CLI's
+    `-coder cabac -rc_mode quality -qmin Q -qmax Q`)."""
+    q = str(OPENH264_QP[crf])
+    return {"coder": "cabac", "rc_mode": "quality", "qmin": q, "qmax": q}
+
+
+def smooth_frame(w: int, h: int, i: int) -> bytes:
+    """A picture an H.264 encoder can keep close (integer-only, so TypeScript makes the same
+    bytes): two wrapping ramps and a disc that moves with i."""
+    y, x = np.mgrid[0:h, 0:w]
+    r = (x * 7 + y * 3 + i * 4) % 256
+    g = (y * 9 + i * 2) % 256
+    cx = w // 2 + (i * 3) % 16 - 8
+    cy = h // 2
+    b = np.where((x - cx) ** 2 + (y - cy) ** 2 < (h // 3) ** 2, 220, 40 + y)
+    return np.stack([r, g, b], -1).astype(np.uint8).tobytes()
+
+
+class _StreamProxy:
+    """A stream whose `options` keep the swapped encoder's own: stitch_clips sets
+    `out_stream.options = {preset, crf}` after add_stream, which would otherwise drop them
+    (libopenh264 has neither option)."""
+
+    def __init__(self, real, keep: dict):
+        object.__setattr__(self, "_real", real)
+        object.__setattr__(self, "_keep", keep)
+
+    def __getattr__(self, k):
+        return getattr(self._real, k)
+
+    def __setattr__(self, k, v):
+        if k == "options":
+            v = {**self._keep}
+        setattr(self._real, k, v)
+
+
+class _Proxy:
+    """Stands in for a PyAV output container: every call goes to the real one, except
+    add_stream, which may change the codec and its options (a Python run switched to
+    libopenh264), and sets one thread on every encoder (rule 4)."""
+
+    def __init__(self, real, swap):
+        self._real = real
+        self._swap = swap
+        self.streams_made = []
+
+    def __getattr__(self, k):
+        return getattr(self._real, k)
+
+    def __enter__(self):
+        self._real.__enter__()
+        return self
+
+    def __exit__(self, *a):
+        return self._real.__exit__(*a)
+
+    def add_stream(self, codec, rate=None, options=None, **kw):
+        opts = dict(options or {})
+        if codec == "h264" and self._swap is not None:
+            codec = "libopenh264"
+            opts.update(self._swap)
+        s = self._real.add_stream(codec, rate=rate, options=opts, **kw)
+        s.codec_context.thread_count = 1
+        self.streams_made.append(s)
+        return _StreamProxy(s, opts) if codec == "libopenh264" else s
+
+
+class _AvShim:
+    """A module that is `av` except for `open`, which hands back a _Proxy."""
+
+    def __init__(self, swap=None):
+        self._swap = swap
+        self.last = None
+
+    def __getattr__(self, k):
+        return getattr(av, k)
+
+    def open(self, *a, **kw):
+        c = av.open(*a, **kw)
+        if kw.get("mode", a[1] if len(a) > 1 else "r") != "w":
+            return c
+        self.last = _Proxy(c, self._swap)
+        return self.last
+
+
+def _patched(module, shim):
+    class Ctx:
+        def __enter__(self):
+            self.real = module.av
+            module.av = shim
+            return shim
+
+        def __exit__(self, *a):
+            module.av = self.real
+            return False
+    return Ctx()
+
+
+def rgb_frames_of(path: str) -> list[bytes]:
+    from comfy_api.latest._input_impl.video_types import VideoFromFile
+    imgs = VideoFromFile(path).get_components().images
+    return [(imgs[i] * 255.0).round().to(torch.uint8).numpy().tobytes() for i in range(imgs.shape[0])]
+
+
+def video_record(path: str, source: list[bytes] | None, keep_frames: bool) -> dict:
+    """What a saved H.264 file is: its header, VideoFromFile's numbers, its decoded frames
+    (sha256 each; zlib'd whole when kept), the PSNR against the source, and its sound."""
+    from comfy_api.latest._input_impl.video_types import VideoFromFile
+    v = VideoFromFile(path)
+    frames = rgb_frames_of(path)
+    rec = {
+        "header": header(path),
+        "frameCount": v.get_frame_count(),
+        "frameRate": rational(v.get_frame_rate()),
+        "duration": v._get_raw_duration(),
+        "frames": [sha(b) for b in frames],
+    }
+    if keep_frames:
+        rec["rgbz"] = b64(zlib.compress(b"".join(frames), 9))
+    if source is not None:
+        a = np.frombuffer(b"".join(source), np.uint8).astype(np.float64)
+        b = np.frombuffer(b"".join(frames), np.uint8).astype(np.float64)
+        mse = float(((a - b) ** 2).mean())
+        rec["psnr"] = 10 * math.log10(255 * 255 / mse) if mse else None
+    comp = v.get_components()
+    rec["sound"] = sound_record(comp.audio["waveform"][0].numpy(), int(comp.audio["sample_rate"]), True) if comp.audio is not None else None
+    return rec
+
+
+def tone_f32(rate: int, seconds: float, channels: int) -> np.ndarray:
+    return tone(rate, seconds, channels).astype(np.float32)
+
+
+def save_to_case(tmp: str, name: str, fps: float, n: int, sound, swap) -> dict:
+    from comfy_api.latest._input_impl import video_types
+    from comfy_api.latest._input_impl.video_types import VideoFromComponents
+    from comfy_api.latest._util import VideoComponents
+    W, H = 64, 48
+    src = [smooth_frame(W, H, i) for i in range(n)]
+    images = torch.from_numpy(np.frombuffer(b"".join(src), np.uint8).reshape(n, H, W, 3).astype(np.float32) / 255.0)
+    audio = None
+    if sound is not None:
+        audio = {"waveform": torch.from_numpy(sound[0])[None], "sample_rate": sound[1]}
+    comp = VideoComponents(images=images, audio=audio, frame_rate=Fraction(fps))
+    path = os.path.join(tmp, name + ".mp4")
+    shim = _AvShim(swap)
+    with _patched(video_types, shim):
+        VideoFromComponents(comp).save_to(path, metadata={"prompt": {"1": {"class_type": "SaveVideo"}}, "workflow": {"nodes": [], "note": "a=b;c#d\\e\nf"}})
+    rec = video_record(path, src, swap is None)
+    with av.open(path) as c:
+        rec["tags"] = dict(c.metadata)
+    return rec
+
+
+class _Hidden:
+    prompt = {"3": {"class_type": "SaveAudio", "inputs": {"filename_prefix": "audio/x"}}}
+    extra_pnginfo = {"workflow": {"nodes": [{"id": 3, "type": "SaveAudio"}], "note": "a=b;c#d\\e\nf \u00e9"}}
+
+
+class _Cls:
+    hidden = _Hidden()
+
+
+def save_audio_case(tmp: str, fmt: str, quality: str, channels: int, rate: int) -> dict:
+    from comfy_api.latest import _ui
+    from comfy_api.latest._io import FolderType
+    from comfy_extras.nodes_audio import load
+    x = tone_f32(rate, 0.1, channels)
+    out = os.path.join(tmp, f"{fmt}_{quality}_{channels}")
+    os.makedirs(out, exist_ok=True)
+    folder_paths.set_output_directory(out)
+    shim = _AvShim()
+    with _patched(_ui, shim):
+        res = _ui.AudioSaveHelper.save_audio({"waveform": torch.from_numpy(x)[None], "sample_rate": rate}, "a", FolderType.output, _Cls, fmt, quality)
+    path = os.path.join(out, res[0]["filename"])
+    s = shim.last.streams_made[0]
+    wav, sr = load(path)
+    with av.open(path) as c:
+        tags = dict(c.metadata)
+        for st in c.streams:
+            tags.update({f"stream:{k}": v for k, v in st.metadata.items()})
+    return {
+        "format": fmt, "quality": quality, "channels": channels, "rate": rate,
+        "input": b64(zlib.compress(np.ascontiguousarray(x).tobytes(), 9)),
+        "encoderSampleFmt": s.codec_context.format.name, "encoderRate": s.codec_context.sample_rate,
+        "filename": res[0]["filename"],
+        "decoded": sound_record(wav.numpy(), int(sr), True),
+        "tags": tags,
+    }
+
+
+RESAMPLE_PAIRS = [(44100, 48000), (22050, 24000), (32000, 48000), (96000, 48000), (11025, 12000), (8000, 12000), (44100, 16000)]
+
+
+def resample_case(orig: int, new: int) -> dict:
+    import torchaudio
+    x = torch.from_numpy(tone_f32(orig, 0.05, 2))
+    y = torchaudio.functional.resample(x, orig, new)
+    assert y.dtype == torch.float32
+    return {"orig": orig, "new": new,
+            "input": b64(zlib.compress(x.numpy().tobytes(), 9)),
+            "output": b64(zlib.compress(np.ascontiguousarray(y.numpy()).tobytes(), 9)), "samples": int(y.shape[-1])}
+
+
+def stitch_inputs() -> list[str]:
+    """Three H.264 clips at 24 fps: 32 × 24, 32 × 24, then 48 × 32 (the size differs)."""
+    names = []
+    for k, (w, h) in enumerate([(32, 24), (32, 24), (48, 32)]):
+        name = f"e_stitch_{k}.mp4"
+        path, c = open_out(name)
+        s = video_stream(c, "libx264", w, h, 24, "yuv420p", X264)
+        frames = []
+        for i in range(5):
+            f = av.VideoFrame.from_ndarray(np.frombuffer(smooth_frame(w, h, 10 * k + i), np.uint8).reshape(h, w, 3), format="rgb24").reformat(format="yuv420p")
+            f.pts = i
+            frames.append(f)
+        encode_frames(c, s, frames)
+        c.close()
+        names.append(name)
+    return names
+
+
+def stitch_case(tmp: str, names: list[str], swap) -> dict:
+    from comfy_extras import _turntable_stitch as ts
+    shim = _AvShim(swap)
+    with _patched(ts, shim):
+        buf = ts.stitch_clips([os.path.join(CLIPS, n) for n in names])
+    path = os.path.join(tmp, "stitch_%s.mp4" % ("x264" if swap is None else "openh264"))
+    with open(path, "wb") as f:
+        f.write(buf.getvalue())
+    return video_record(path, None, swap is None)
+
+
+def plane_bytes(p, w: int, h: int) -> bytes:
+    raw = bytes(p)
+    return b"".join(raw[r * p.line_size: r * p.line_size + w] for r in range(h))
+
+
+def reformat_case(name: str, w: int, h: int, rgb: bytes) -> dict:
+    f = av.VideoFrame.from_ndarray(np.frombuffer(rgb, np.uint8).reshape(h, w, 3), format="rgb24").reformat(format="yuv420p")
+    cw, ch = (w + 1) // 2, (h + 1) // 2
+    planes = plane_bytes(f.planes[0], w, h) + plane_bytes(f.planes[1], cw, ch) + plane_bytes(f.planes[2], cw, ch)
+    return {"name": name, "w": w, "h": h, "yuv": b64(planes), "sha256": sha(planes)}
+
+
+def group_encode(names: list[str]) -> dict:
+    import tempfile
+    stitch_names = stitch_inputs()
+    cases: dict = {"openh264Qp": {str(k): v for k, v in OPENH264_QP.items()}}
+    with tempfile.TemporaryDirectory() as tmp:
+        mono = (tone_f32(44100, 0.3, 1), 44100)
+        stereo = (tone_f32(48000, 0.3, 2), 48000)
+        videos = []
+        for name, fps, n, snd in [("v24", 24.0, 8, None), ("v2997_mono", 29.97, 8, mono), ("v30_stereo", 30.0, 8, stereo)]:
+            videos.append({
+                "name": name, "fps": fps, "frames": n, "w": 64, "h": 48,
+                "sound": None if snd is None else {"rate": snd[1], "channels": int(snd[0].shape[0]),
+                                                   "f32z": b64(zlib.compress(np.ascontiguousarray(snd[0]).tobytes(), 9))},
+                "x264": save_to_case(tmp, name + "_x264", fps, n, snd, None),
+                "openh264": save_to_case(tmp, name + "_oh", fps, n, snd, openh264_options(23)),
+            })
+        cases["saveTo"] = videos
+        rows = []
+        for crf in sorted(OPENH264_QP):
+            rec = save_to_case(tmp, f"row{crf}", 24.0, 6, None, openh264_options(crf))
+            rows.append({"crf": crf, "frames": rec["frames"], "frameCount": rec["frameCount"]})
+        cases["rows"] = rows
+        audio = []
+        for fmt, qualities in [("flac", ["128k"]), ("mp3", ["V0", "128k", "320k"]), ("opus", ["128k"])]:
+            for q in qualities:
+                for chans in (1, 2):
+                    audio.append(save_audio_case(tmp, fmt, q, chans, 44100))
+        cases["saveAudio"] = audio
+        cases["resample"] = [resample_case(a, b) for a, b in RESAMPLE_PAIRS]
+        cases["stitch"] = {
+            "clips": stitch_names,
+            "x264": stitch_case(tmp, stitch_names, None),
+            "openh264": stitch_case(tmp, stitch_names, openh264_options(20)),
+        }
+        cases["reformat"] = [
+            reformat_case("synth 64×48", 64, 48, synth(64, 48, 3, 1)),
+            reformat_case("smooth 64×48", 64, 48, smooth_frame(64, 48, 3)),
+            reformat_case("synth 33×25", 33, 25, synth(33, 25, 3, 2)),
+        ]
+    return {"cases": cases, "encodeClips": {n: sha(open(os.path.join(CLIPS, n), "rb").read()) for n in stitch_names}}
+
+
+GROUPS = {"probe": group_probe, "decode": group_decode, "encode": group_encode}
 
 
 def main() -> None:

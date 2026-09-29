@@ -13,7 +13,12 @@
  *   - reads its inputs only as `file:<absolute path>` or `pipe:0`, with the
  *     demuxer named from the file's first bytes (`inputArgs`), and writes
  *     files only as `file:<absolute path>` inside the job's own folder
- *     (`workDir`), which is also its working directory;
+ *     (`workDir`), which is also its working directory. Before the tool
+ *     starts, each output is checked on disk too (`confineOutputs`): its
+ *     folder must really be the job's folder (symlinks resolved), and the
+ *     file is made there first as a new regular file without following a
+ *     link, so a symlink named like an output can't send the write
+ *     elsewhere;
  *   - carries only options on an allow-list (`checkArgs`), each with its
  *     number of values, so nothing that reads or writes a file by name
  *     (`-report`, `-vstats`, `-print_graphs_file`, `-fpre`, `-dump_attachment`,
@@ -33,9 +38,10 @@
  */
 import { AsyncLocalStorage } from 'node:async_hooks'
 import { spawn } from 'node:child_process'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { constants as fsConstants } from 'node:fs'
+import { lstat, mkdtemp, open, realpath, rm } from 'node:fs/promises'
 import { availableParallelism, tmpdir } from 'node:os'
-import { isAbsolute, join, normalize, sep } from 'node:path'
+import { dirname, isAbsolute, join, normalize, sep } from 'node:path'
 import {
   MEDIA_JOB_TIMEOUT_MS, MEDIA_JOBS_PER_USER, MEDIA_MAX_ALLOC, MEDIA_ROUTE_SLOTS, MEDIA_STDERR_BYTES, MEDIA_WORDS,
   type MediaWord,
@@ -118,7 +124,10 @@ export async function removeMediaTempDir(dir: string): Promise<void> {
 /**
  * The options a job may carry and how many values each takes (by name, a
  * stream specifier dropped: `-c:a` is `-c`). Everything else is refused.
- * R5.1c adds the encoders' own.
+ * The second block is the encoders' own (R5.1c): raw inputs described in
+ * full, the encoder settings encode.ts and h264Quality.ts pass, a filter
+ * graph built in encode.ts from numbers and fixed words, and the
+ * workflow tags as an ffmetadata input mapped in.
  */
 const ALLOWED_OPTIONS: Readonly<Record<'ffmpeg' | 'ffprobe', Readonly<Record<string, number>>>> = {
   ffmpeg: {
@@ -127,6 +136,12 @@ const ALLOWED_OPTIONS: Readonly<Record<'ffmpeg' | 'ffprobe', Readonly<Record<str
     '-map': 1, '-fps_mode': 1, '-vf': 1, '-c': 1,
     '-stats_mux_pre': 1, '-stats_mux_pre_fmt': 1,
     '-y': 0,
+    // R5.1c, the encoders.
+    '-pix_fmt': 1, '-s': 1, '-framerate': 1,
+    '-ar': 1, '-ch_layout': 1, '-sample_fmt': 1,
+    '-b': 1, '-q': 1, '-rc_mode': 1, '-qmin': 1, '-qmax': 1, '-coder': 1, '-threads': 1,
+    '-filter_complex': 1, '-af': 1,
+    '-movflags': 1, '-map_metadata': 1, '-fflags': 1, '-enc_time_base': 1,
   },
   ffprobe: {
     '-probesize': 1, '-analyzeduration': 1,
@@ -170,6 +185,10 @@ export function checkArgs(tool: 'ffmpeg' | 'ffprobe', args: readonly string[], o
       if (name === '-protocol_whitelist' && v !== 'file,pipe') bad()
       if (name === '-enable_drefs' && v !== '0') bad()
       if (name === '-stats_mux_pre' && !(v === 'pipe:3' && o.side)) bad()
+      if (name === '-movflags' && !/^[+a-z_]+$/.test(v!)) bad()
+      if (name === '-map_metadata' && !/^(?:-1|\d+)$/.test(v!)) bad()
+      if (name === '-fflags' && v !== '+bitexact') bad()
+      if (name === '-enc_time_base' && !/^\d+\/\d+$/.test(v!)) bad()
       if (name === '-i' && v !== 'pipe:0' && !(v!.startsWith('file:') && isAbsolute(v!.slice(5)) && normalize(v!.slice(5)) === v!.slice(5))) bad()
       i += arity!
       continue
@@ -177,6 +196,59 @@ export function checkArgs(tool: 'ffmpeg' | 'ffprobe', args: readonly string[], o
     // An output.
     if (tool === 'ffprobe') bad()
     if (a !== 'pipe:1' && !fileInside(a, o.workDir)) bad()
+  }
+}
+
+/**
+ * The `file:` outputs of an argument list (the words `checkArgs` reads as
+ * outputs), as paths.
+ */
+function fileOutputs(args: readonly string[]): string[] {
+  const allowed = ALLOWED_OPTIONS.ffmpeg
+  const out: string[] = []
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i]!
+    if (a.startsWith('-') && a !== '-') {
+      const name = a.split(':')[0]!
+      i += Object.hasOwn(allowed, name) ? allowed[name]! : 0
+      continue
+    }
+    if (a.startsWith('file:')) out.push(a.slice(5))
+  }
+  return out
+}
+
+/**
+ * The physical half of the output rule (R5.1b re-review: the lexical check
+ * alone let a symlink inside the job's folder send a write elsewhere). For
+ * every `file:` output: its folder, symlinks resolved, must be the job's
+ * folder or one inside it; then the file is made there as a new regular
+ * file with O_EXCL | O_NOFOLLOW, so the tool writes into that very file. A
+ * name that already exists passes only as a regular file (never a link).
+ * Exported for tests.
+ */
+export async function confineOutputs(args: readonly string[], workDir: string | undefined): Promise<void> {
+  const outs = fileOutputs(args)
+  if (!outs.length) return
+  const bad = () => { throw new MediaError('failed') }
+  if (!workDir) bad()
+  let root: string
+  try { root = await realpath(workDir!) }
+  catch { bad() }
+  for (const p of outs) {
+    let folder: string
+    try { folder = await realpath(dirname(p)) }
+    catch { bad() }
+    if (folder! !== root! && !folder!.startsWith(root! + sep)) bad()
+    try {
+      const fh = await open(p, fsConstants.O_WRONLY | fsConstants.O_CREAT | fsConstants.O_EXCL | fsConstants.O_NOFOLLOW, 0o600)
+      await fh.close()
+    }
+    catch (e) {
+      if ((e as NodeJS.ErrnoException).code !== 'EEXIST') bad()
+      const st = await lstat(p).catch(() => null)
+      if (!st || st.isSymbolicLink() || !st.isFile()) bad()
+    }
   }
 }
 
@@ -308,6 +380,7 @@ export async function runMedia(job: MediaJob): Promise<{ stdout: Uint8Array | nu
     throw new MediaError('failed')
   }
   checkArgs(job.tool, job.args, { side: !!job.onSide, workDir: job.workDir })
+  if (job.tool === 'ffmpeg') await confineOutputs(job.args, job.workDir)
   if (job.signal?.aborted) {
     await removeAll(job.cleanup)
     throw new MediaError('stopped')

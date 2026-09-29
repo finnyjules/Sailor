@@ -395,7 +395,7 @@ function floorDiv(a: bigint, b: bigint): bigint {
 }
 
 /** A double's exact value as a reduced fraction (Python's Fraction(float)). */
-function exactFraction(x: number): [bigint, bigint] {
+export function exactFraction(x: number): [bigint, bigint] {
   const buf = new DataView(new ArrayBuffer(8))
   buf.setFloat64(0, x)
   const hi = buf.getUint32(0); const lo = buf.getUint32(4)

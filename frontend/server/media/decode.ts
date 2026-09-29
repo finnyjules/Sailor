@@ -48,7 +48,7 @@ import { MediaError, inputArgs, runMedia } from './run'
 import { ffprobeJson, mediaCapsWord, probeMedia, resolveMediaInput, type MediaProbe, type SoundStreamProbe, type VideoStreamProbe } from './probe'
 
 /** sws's position for a chroma location, in 1/256 of a pixel (av_chroma_location_enum_to_pos). */
-const CHROMA_POS: Readonly<Record<string, [number, number]>> = {
+export const CHROMA_POS: Readonly<Record<string, [number, number]>> = {
   left: [0, 128], center: [128, 128], topleft: [0, 0], top: [128, 0], bottomleft: [0, 256], bottom: [128, 256],
 }
 
