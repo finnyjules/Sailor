@@ -10173,8 +10173,10 @@ defineExpose({ editor, layoutGridResolved, layoutGrid, overlayGrid, viewLayoutGr
         :style="(inspectorTab === 'motion' || penSession) ? { left: (gapLeft + 16) + 'px', right: (gapRight + 16) + 'px' } : undefined">
       <!-- The one prompt (StudioPromptHost): always here, Motion included. What it
            brings back (changes, answers) shows above it, never in the inspector.
-           Hidden while the edit-image prompt or the pen's own bar takes its place. -->
-      <div v-show="editMode === 'none' && !penSession && !brush.active.value && !viewingOffDesign" data-testid="compositor-prompt-dock" class="pointer-events-auto w-full" :class="inspectorTab === 'motion' ? 'mx-auto max-w-[720px]' : ''"><StudioPromptHost :prompt="framePrompt" /></div>
+           Hidden while the edit-image prompt or the pen's own bar takes its place, and while
+           an applied edit waits on Undo / Try again / Keep (that bar sits at the canvas's
+           bottom edge for a full-bleed layer, right where this dock would cover it). -->
+      <div v-show="editMode === 'none' && !editResult && !penSession && !brush.active.value && !viewingOffDesign" data-testid="compositor-prompt-dock" class="pointer-events-auto w-full" :class="inspectorTab === 'motion' ? 'mx-auto max-w-[720px]' : ''"><StudioPromptHost :prompt="framePrompt" /></div>
       <div v-if="inspectorTab !== 'motion'" data-testid="compositor-toolbar" class="flex flex-col items-stretch gap-2">
       <!-- The pen's own toolbar takes the prompt's and the tool row's place while a
            session is open (both stay mounted — v-show — so a prompt draft survives). -->
