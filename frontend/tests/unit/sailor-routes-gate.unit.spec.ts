@@ -831,6 +831,70 @@ describe('hosted, with the media tools: the gate first, then Sailor reads only t
     expect(fetchMock).not.toHaveBeenCalled()
   })
 
+  it('an import whose probe is refused for Sailor\'s own reason (the person\'s route share busy) saves a marked record the owner row names; its thumbnails work; a re-import fills it in (fix round 2)', async () => {
+    const { runMedia } = await import('../../server/media/run')
+    const { PROBE_AGAIN } = await import('../../server/native/media')
+    uploads.set('input::clip.mp4', 'u1')
+    clip('v_h264_601.mp4', inDir('clip.mp4'))
+    // Hold u1's whole route share (one running, four waiting): ffmpeg reading a pipe that never brings a byte.
+    const never: AsyncIterable<Uint8Array> = { [Symbol.asyncIterator]: () => ({ next: () => new Promise<IteratorResult<Uint8Array>>(() => {}) }) }
+    const hold = new AbortController()
+    const holders = Array.from({ length: 5 }, () => runMedia({
+      tool: 'ffmpeg', args: ['-f', 'f32le', '-ar', '8000', '-ch_layout', 'mono', '-i', 'pipe:0', '-f', 'null', 'pipe:1'],
+      userId: 'u1', route: true, stdin: never, signal: hold.signal,
+    }).catch(() => 'stopped'))
+    await new Promise(r => setTimeout(r, 200))
+    let r: any
+    try {
+      r = await call('/sailor/asset_import', 'POST', 'u1', { path: 'clip.mp4' })
+    }
+    finally {
+      hold.abort()
+      await Promise.all(holders)
+    }
+    expect(r.body).toMatchObject({ created: true, asset: { kind: 'video', duration_sec: null, width: null, height: null, [PROBE_AGAIN]: true } })
+    const id = r.body.asset.id
+    // The owner row names a saved record.
+    expect(owners.get(okey(SAILOR_ASSET_KIND, id))).toBe('u1')
+    expect(readAssets()).toEqual([r.body.asset])
+    // Its thumbnails come from the file (and the read fills the record in).
+    const t = await call(`/sailor/asset_thumbnails?asset_id=${id}&count=1`, 'GET', 'u1')
+    expect(t.body.thumbnails).toHaveLength(1)
+    expect(readAssets()[0]).toMatchObject({ id, duration_sec: 0.3333333333333333, width: 32, height: 24 })
+    expect(PROBE_AGAIN in readAssets()[0]).toBe(false)
+    // A re-import names the same asset, filled in; no second owner row.
+    const again = await call('/sailor/asset_import', 'POST', 'u1', { path: 'clip.mp4' })
+    expect(again.body).toMatchObject({ created: false, asset: { id, duration_sec: 0.3333333333333333 } })
+    expect([...owners.keys()]).toEqual([okey(SAILOR_ASSET_KIND, id)])
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('a marked record is filled in by a re-import too (no route read in between), same id, same owner', async () => {
+    const { runMedia } = await import('../../server/media/run')
+    const { PROBE_AGAIN } = await import('../../server/native/media')
+    uploads.set('input::clip.mp4', 'u1')
+    clip('v_h264_709.mp4', inDir('clip.mp4'))
+    const never: AsyncIterable<Uint8Array> = { [Symbol.asyncIterator]: () => ({ next: () => new Promise<IteratorResult<Uint8Array>>(() => {}) }) }
+    const hold = new AbortController()
+    const holders = Array.from({ length: 5 }, () => runMedia({
+      tool: 'ffmpeg', args: ['-f', 'f32le', '-ar', '8000', '-ch_layout', 'mono', '-i', 'pipe:0', '-f', 'null', 'pipe:1'],
+      userId: 'u1', route: true, stdin: never, signal: hold.signal,
+    }).catch(() => 'stopped'))
+    await new Promise(r => setTimeout(r, 200))
+    let first: any
+    try { first = await call('/sailor/asset_import', 'POST', 'u1', { path: 'clip.mp4' }) }
+    finally {
+      hold.abort()
+      await Promise.all(holders)
+    }
+    expect(first.body.asset[PROBE_AGAIN]).toBe(true)
+    const again = await call('/sailor/asset_import', 'POST', 'u1', { path: 'clip.mp4' })
+    expect(again.body).toMatchObject({ created: false, asset: { id: first.body.asset.id, duration_sec: 0.3333333333333333, width: 32, height: 24 } })
+    expect(PROBE_AGAIN in again.body.asset).toBe(false)
+    expect(readAssets()).toEqual([again.body.asset])
+    expect(owners.get(okey(SAILOR_ASSET_KIND, first.body.asset.id))).toBe('u1')
+  })
+
   it('another user\'s input_thumbnail and asset_import are refused (404) before any job starts', async () => {
     uploads.set('input::theirs.mp4', 'u2')
     clip('v_h264_601.mp4', inDir('theirs.mp4'))

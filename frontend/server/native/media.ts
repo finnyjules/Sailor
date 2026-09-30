@@ -362,7 +362,7 @@ export async function assetImportRoute(
 
   const assets = loadAssets(userDirectory)
   const existing = records(assets).find((a: Json) => field(a, 'path') === p)
-  if (existing) return { status: 200, body: { asset: existing, created: false } }
+  if (existing) return { status: 200, body: { asset: refilled(userDirectory, existing, native, info, keep), created: false } }
 
   const asset = {
     id: randomUUID(),
@@ -382,12 +382,52 @@ export async function assetImportRoute(
   // read also catches a concurrent import of the same file.
   const latest = loadAssets(userDirectory)
   const latestExisting = records(latest).find((a: Json) => field(a, 'path') === p)
-  if (latestExisting) return { status: 200, body: { asset: latestExisting, created: false } }
-  // The probe failed for Sailor's own reason: answered, not recorded, so the next import probes again.
-  if (!keep) return { status: 200, body: { asset, created: true } }
+  if (latestExisting) return { status: 200, body: { asset: refilled(userDirectory, latestExisting, native, info, keep), created: false } }
+  // The probe failed for Sailor's own reason (R5.6 fix round 2): recorded as Python would with the nulls,
+  // so the id is a real asset, and marked so the next import or route read probes it again.
+  if (!keep) (asset as Json)[PROBE_AGAIN] = true
   latest.push(asset)
   saveAssets(userDirectory, latest)
   return { status: 200, body: { asset, created: true } }
+}
+
+/**
+ * A Sailor-only field on an asset record (R5.6 fix round 2): its probe failed
+ * for Sailor's own reason (a cap, the time limit, busy slots, a tool failure),
+ * so its length and size are nulls for now. The next import of the same file,
+ * or a thumbnail or waveform read of the asset, probes it again; a probe that
+ * succeeds fills them in and removes the field. Python's readers ignore it.
+ * A file Python can't read either is recorded with nulls and no mark.
+ */
+export const PROBE_AGAIN = 'sailor_probe_again'
+
+function marked(a: Json): boolean {
+  return a !== null && typeof a === 'object' && !Array.isArray(a) && a[PROBE_AGAIN] === true
+}
+
+/**
+ * A marked record, filled from a probe that succeeded (re-read fresh and
+ * matched by id, so another writer's records survive): its numbers written,
+ * the mark gone. Anything else comes back as it is.
+ */
+function refilled(userDirectory: string, record: Json, native: NativeMedia | null, info: ProbeInfo, keep: boolean): Json {
+  if (!native || !keep || !marked(record)) return record
+  const latest = loadAssets(userDirectory)
+  const rec = records(latest).find((a: Json) => a !== null && typeof a === 'object' && a.id === record.id)
+  if (!marked(rec)) return rec ?? record
+  rec.duration_sec = info.duration_sec
+  rec.width = info.width
+  rec.height = info.height
+  delete rec[PROBE_AGAIN]
+  saveAssets(userDirectory, latest)
+  return rec
+}
+
+/** A route reading a marked asset probes it again first (R5.6 fix round 2). */
+async function probeMarkedAgain(userDirectory: string, asset: Json, native: NativeMedia | null): Promise<void> {
+  if (!native || !marked(asset)) return
+  const { info, keep } = await probeKept(String(field(asset, 'path')), native)
+  refilled(userDirectory, asset, native, info, keep)
 }
 
 /** `_asset_delete_route` — always rewrites the file, even when nothing matched. */
@@ -518,6 +558,7 @@ export async function assetThumbnailsRoute(
   if (!asset) return { status: 404, body: { error: 'asset not found' } }
 
   const assetPath = String(field(asset, 'path'))
+  await probeMarkedAgain(userDirectory, asset, native)
   let pngs: Buffer[]
   let keep = true
   if (isImageFile(assetPath)) {
@@ -570,6 +611,7 @@ export async function assetWaveformRoute(
   const asset = findAsset(loadAssets(userDirectory), assetId)
   if (!asset) return { status: 404, body: { error: 'asset not found' } }
   if (!native) return (await engine()) ?? NEEDS_ENGINE
+  await probeMarkedAgain(userDirectory, asset, native)
   const r = await native.waveform(String(field(asset, 'path')), buckets)
   const payload = { peaks: r.peaks, asset_id: assetId, buckets }
   if (file && r.cache) {

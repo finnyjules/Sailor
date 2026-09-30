@@ -556,20 +556,46 @@ describe('what is cached: only Python\'s own empties (fix round 1)', () => {
     expect(readFileSync(join(thumbsDir(), 'wave_long.16.json'), 'utf8')).toBe(`{"peaks": [0.5, 1.0, ${Array(14).fill('0.0').join(', ')}], "asset_id": "long", "buckets": 16}`)
   })
 
-  it('an import whose probe stops for Sailor\'s own reason is answered but not recorded, so a re-import probes again (Minor 4)', async () => {
-    fakeTools({ ffprobe: 'exec /bin/sleep 120', ffmpeg: 'exit 1' })
-    fakeMp4('slow.mp4')
-    const ac = new AbortController()
-    setTimeout(() => ac.abort(), 300)
-    const native = T.nativeMedia({ roots: ['/'], userId: null, signal: ac.signal })
-    const r = await M.assetImportRoute(user, input, { path: 'slow.mp4' }, vi.fn(async () => null), native)
-    expect(r.body).toMatchObject({ created: true, asset: { kind: 'video', duration_sec: null, width: null, height: null } })
-    expect(existsSync(join(user, 'timeline_assets.json')) ? JSON.parse(readFileSync(join(user, 'timeline_assets.json'), 'utf8')) : []).toEqual([])
-    // A file that isn't media is Python's own answer: recorded with nulls.
+  it('an import whose probe stops for Sailor\'s own reason is saved with nulls and marked; its thumbnails work; a route read or a re-import fills it in (fix round 2)', async () => {
+    await requireMediaTools()
+    addClip('v_h264_601.mp4', 'clip.mp4')
+    addClip('v_h264_709.mp4', 'other.mp4')
+    const stopped = new AbortController()
+    stopped.abort()
+    const failing = T.nativeMedia({ roots: ['/'], userId: null, signal: stopped.signal })
+    const engine = vi.fn(async () => null)
+    const saved = () => JSON.parse(readFileSync(join(user, 'timeline_assets.json'), 'utf8')) as any[]
+
+    const r = (await M.assetImportRoute(user, input, { path: 'clip.mp4' }, engine, failing)).body as any
+    expect(r).toMatchObject({ created: true, asset: { kind: 'video', duration_sec: null, width: null, height: null, [M.PROBE_AGAIN]: true } })
+    expect(saved()).toEqual([r.asset])
+    // Python's own keys, in Python's order, then the Sailor-only mark.
+    expect(Object.keys(r.asset)).toEqual(['id', 'path', 'kind', 'name', 'duration_sec', 'width', 'height', 'thumbnail_path', 'waveform_path', M.PROBE_AGAIN])
+
+    // The id is a real asset: its thumbnails come from the file, and the read probes it again.
+    const t = await M.assetThumbnailsRoute(user, new URLSearchParams(`asset_id=${r.asset.id}&count=1`), engine, localNative())
+    expect((t.body as any).thumbnails).toHaveLength(1)
+    const unmarked = (a: any) => { const { [M.PROBE_AGAIN]: _mark, ...rest } = a; return { ...rest, duration_sec: 0.3333333333333333, width: 32, height: 24 } }
+    expect(saved()).toEqual([unmarked(r.asset)])
+
+    // A re-import of a marked record fills it in, same id; failing again leaves the mark.
+    const o = (await M.assetImportRoute(user, input, { path: 'other.mp4' }, engine, failing)).body as any
+    const again = (await M.assetImportRoute(user, input, { path: 'other.mp4' }, engine, failing)).body as any
+    expect(again).toMatchObject({ created: false, asset: { id: o.asset.id, duration_sec: null, [M.PROBE_AGAIN]: true } })
+    const filled = (await M.assetImportRoute(user, input, { path: 'other.mp4' }, engine, localNative())).body as any
+    expect(filled).toEqual({ created: false, asset: unmarked(o.asset) })
+    expect(saved().map(a => a.id)).toEqual([r.asset.id, o.asset.id])
+    expect(saved().every(a => !(M.PROBE_AGAIN in a))).toBe(true)
+    expect(engine).not.toHaveBeenCalled()
+  })
+
+  it('a file Python can\'t read either is recorded with nulls and no mark (Python\'s own answer)', async () => {
     fakeTools({ ffprobe: 'exit 1', ffmpeg: 'exit 1' })
     fakeMp4('junk.mp4')
-    await M.assetImportRoute(user, input, { path: 'junk.mp4' }, vi.fn(async () => null), T.nativeMedia({ roots: ['/'], userId: null }))
-    expect(JSON.parse(readFileSync(join(user, 'timeline_assets.json'), 'utf8')).map((a: any) => a.name)).toEqual(['junk.mp4'])
+    const r = (await M.assetImportRoute(user, input, { path: 'junk.mp4' }, vi.fn(async () => null), T.nativeMedia({ roots: ['/'], userId: null }))).body as any
+    expect(r.asset).toMatchObject({ duration_sec: null, width: null, height: null })
+    expect(M.PROBE_AGAIN in r.asset).toBe(false)
+    expect(JSON.parse(readFileSync(join(user, 'timeline_assets.json'), 'utf8'))).toEqual([r.asset])
   })
 })
 
