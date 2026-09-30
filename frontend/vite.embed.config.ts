@@ -188,6 +188,9 @@ const config: UserConfig = {
       // surfaces; surfacesRegistry.ts imports it by exactly this id. An exported file gets
       // the "not available" stand-in instead.
       { find: '~/lib/compositor/surfacesRequest', replacement: fileURLToPath(new URL('./app/lib/embed/frame/surfacesRequest.embed.ts', import.meta.url)) },
+      // ~/composables/useRelightFinish is the one network call behind Relight's "Finish" button
+      // (Nano Banana 2); an exported file gets the "not available" stand-in instead.
+      { find: '~/composables/useRelightFinish', replacement: fileURLToPath(new URL('./app/lib/embed/frame/relightFinish.embed.ts', import.meta.url)) },
       // Task 10: frame-lean drops fontkit (via textOutline.ts's font.ts import) and paper.js
       // entirely — most Frames need neither (see gather.ts's computeNeedsOutlines). These two
       // entries only apply to that one build; every other surface (including the regular 'frame'

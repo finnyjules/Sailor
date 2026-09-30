@@ -3166,14 +3166,9 @@ function paintLayer(
     // Relight first, so a depth-of-field blur on the same layer blurs the relit picture.
     // The field is built from the SOURCE image (never this box-sized render), off the main
     // thread; until it lands (or while the source is still decoding) the layer draws plain.
+    // Shared with `renderRelightPair` (the Finish pair) below — see `relightLitFrom`.
     if (wantRelight) {
-      const rs = relightSourceOf(layer, W, wiredLive)
-      const field = rs ? relightDepthFieldFor(depthKey(dofRef!), depth, rs.src) : null
-      // Surfaces (a normal map read once per photo, see surfacesRegistry.ts) are read
-      // SYNCHRONOUSLY, same as depth — a paint never awaits and never requests them
-      // itself; only the open Frame editor does that (CompositorModal.vue).
-      const normals = dofRef ? surfacesImageFor(dofRef) : null
-      const lit = field ? applyRelight(src, field, relight!, bw, bh, rs!.rect, normals) : null
+      const lit = relightLitFrom(layer, W, wiredLive, dofRef!, depth, relight!, src, bw, bh)
       if (lit) cur = own(lit)
     }
     if (wantDof) {
@@ -7223,6 +7218,89 @@ function relightSourceOf(
     return { src: live.src as CanvasImageSource & { width?: number; height?: number }, rect: relightDepthRect(live.w, live.h, box.w, box.h, layer.crop) }
   }
   return null
+}
+
+/** The Relight pixel pass, factored out of `gpuContent` (`paintLayer`, above) so it has exactly
+ *  ONE implementation: the live paint and the Finish pair (`renderRelightPair` below) must see
+ *  the identical field, crop rect and surfaces normals, or the "guide" the Finish button sends
+ *  would silently drift from what the user is actually looking at. `depth` is the caller's own
+ *  `depthImageFor(dofRef)` result (never re-fetched here — this stays synchronous). Returns
+ *  `null` when the source image isn't decoded yet or the depth field hasn't built. */
+function relightLitFrom(
+  layer: LocalLayer,
+  W: number,
+  wiredLive: WiredLive | null | undefined,
+  dofRef: DepthRef,
+  depth: HTMLImageElement,
+  relight: RelightEffect,
+  src: HTMLCanvasElement,
+  bw: number,
+  bh: number,
+): HTMLCanvasElement | null {
+  const rs = relightSourceOf(layer, W, wiredLive)
+  const field = rs ? relightDepthFieldFor(depthKey(dofRef), depth, rs.src) : null
+  // Surfaces (a normal map read once per photo, see surfacesRegistry.ts) are read
+  // SYNCHRONOUSLY, same as depth — a paint never awaits and never requests them
+  // itself; only the open Frame editor does that (CompositorModal.vue).
+  const normals = surfacesImageFor(dofRef)
+  return field && rs ? applyRelight(src, field, relight, bw, bh, rs.rect, normals) : null
+}
+
+/**
+ * The Finish pair (Relight stage 3, Task 2): renders the SAME box-sized content
+ * `gpuContent` paints with, twice — once without Relight (`original`) and once with it applied
+ * (`guide`) — for the "Finish with Nano Banana 2" button (Task 3). Built from the identical
+ * internals as the live paint (`relightLitFrom`, `relightSourceOf`, `localLayerBox`,
+ * `drawLayerContent`), so the pair is pixel-aligned with what the effect is already showing —
+ * the model must see the SAME lighting the user approved, not a re-derived approximation.
+ *
+ * Both canvases are scaled down so their long edge is at most `maxEdge` (default 1536, the
+ * plan's fixed ceiling) — never up, so a smaller box stays at its own size. Returns `null`
+ * (never throws, never awaits) when Relight can't run yet: no depth source on the layer, no
+ * visible Relight effect, WebGL2 unavailable, the depth map still loading (a fetch is kicked
+ * off, same as `gpuContent`), or the source image not yet decoded — Task 3 is expected to poll
+ * this on every paint until it stops returning `null`, exactly like the live effect does.
+ */
+export async function renderRelightPair(
+  layer: LocalLayer,
+  W: number,
+  H: number,
+  maxEdge = 1536,
+): Promise<{ original: HTMLCanvasElement; guide: HTMLCanvasElement; w: number; h: number } | null> {
+  const dofRef: DepthRef | null | undefined = layer.kind === 'image'
+    ? (layer as ImageLayer).filename
+    : layer.kind === 'wired' ? depthSourceFromViewUrl((layer as WiredLayer).depthKey) : undefined
+  if (!dofRef) return null
+
+  const stack = effectStackOf(layer).filter(e => e.visible)
+  const relightRaw = pinnedEffect(stack, 'relight')
+  const relight = relightRaw && !relightBypassed(layer.id) ? sanitizeRelight(relightRaw) : undefined
+  if (!relight || !relightAvailable()) return null
+
+  const depth = depthImageFor(dofRef)
+  if (!depth) { requestDepth(dofRef); return null }
+
+  const wiredLive: WiredLive | null | undefined = layer.kind === 'wired' ? wiredContent(layer as WiredLayer) : undefined
+  const box = localLayerBox(measureCtx(), layer, W, H, wiredLive)
+  const matPad = brushMaterialPadPx(layer, W)
+  const bw = Math.max(1, Math.round(box.w + matPad * 2)), bh = Math.max(1, Math.round(box.h + matPad * 2))
+  const src = document.createElement('canvas'); src.width = bw; src.height = bh
+  const sctx = src.getContext('2d')
+  if (!sctx) return null
+  sctx.translate(bw / 2, bh / 2)
+  drawLayerContent(sctx, layer, W, wiredLive)
+
+  const lit = relightLitFrom(layer, W, wiredLive, dofRef, depth, relight, src, bw, bh)
+  if (!lit) return null
+
+  const scale = Math.min(1, maxEdge / Math.max(bw, bh))
+  const w = Math.max(1, Math.round(bw * scale))
+  const h = Math.max(1, Math.round(bh * scale))
+  const original = document.createElement('canvas'); original.width = w; original.height = h
+  original.getContext('2d')?.drawImage(src, 0, 0, w, h)
+  const guide = document.createElement('canvas'); guide.width = w; guide.height = h
+  guide.getContext('2d')?.drawImage(lit, 0, 0, w, h)
+  return { original, guide, w, h }
 }
 
 /**
