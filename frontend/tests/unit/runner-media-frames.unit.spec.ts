@@ -880,28 +880,55 @@ describe('fix round 1', () => {
     expect(cases.filter(c => 'error' in c)).toHaveLength(2)
   })
 
-  it('(2) hosted: a named sound that isn’t there is skipped; one that is there but not the user’s is refused before the hold', LONG, async () => {
+  it('(2), fix round 2: hosted judges the sound by its name alone: another user’s is refused there or not, in the same words; the user’s own missing one is skipped', LONG, async () => {
     await requireMediaTools()
     const dir = mkdtempSync(join(scratch, 'runs-'))
+    // The upload records, as the hosted gate reads them (uploadOwner(name) === user): by name, never by the disk.
+    const mine = new Set(['g_frames_big.mp4', 'gone.wav'])
     const k = makeKit({
       hosted: true, dir,
       deps: {
         families: () => ON, kept: createFileKeptBytes(join(dir, 'kept')),
-        ownership: { ownsInput: async (_u, f) => f.filename !== 'someone.wav', ownsOutput: async () => true },
+        ownership: { ownsInput: async (_u, f) => mine.has(f.filename), ownsOutput: async () => true },
       },
     })
-    for (const c of ['g_frames_big.mp4']) copyFileSync(clipPath(c), join(k.root, 'input', c))
+    copyFileSync(clipPath('g_frames_big.mp4'), join(k.root, 'input', 'g_frames_big.mp4'))
     copyFileSync(clipPath('a_s16.wav'), join(k.root, 'input', 'someone.wav'))
-    const gone = await k.engine.startRun({ userId: k.userId, takes: [{ l: loadFrames('g_frames_big.mp4', { max_size: 64, max_frames: 2 }), s: saveFrames(['l', 0], { audio: 'gone.wav' }) }], ...START })
+    const take = (audio: string): ApiPrompt => ({ l: loadFrames('g_frames_big.mp4', { max_size: 64, max_frames: 2 }), s: saveFrames(['l', 0], { audio }) })
+    // The user's own name, not on disk: skipped at its turn, as Python skips it.
+    const gone = await k.engine.startRun({ userId: k.userId, takes: [take('gone.wav')], ...START })
     await k.engine.settled(gone.runId)
     const t = (await k.store.get(gone.runId))!.takes[0]!
     expect(t.nodes.s!.status, t.nodes.s!.error ?? '').toBe('done')
     const out = t.nodes.s!.outputs[0]!
     const path = join(k.root, 'output', out.subfolder, out.filename)
     expect((await probeMedia(path, { userId: null, roots: rootsOf(path) })).sound).toEqual([])
+    // Another user's name: refused before the hold, there (someone.wav) or not (nobody.wav), and so is a name
+    // outside the folders; every refusal has the same words and status, so none tells whether a file exists.
     const held = k.ledger.hold.mock.calls.length
-    await expect(k.engine.startRun({ userId: k.userId, takes: [{ l: loadFrames('g_frames_big.mp4'), s: saveFrames(['l', 0], { audio: 'someone.wav' }) }], ...START })).rejects.toThrow('isn’t one of yours')
+    const refusals: { message: string; statusCode?: number }[] = []
+    for (const audio of ['someone.wav', 'nobody.wav', 'u_0123456789ab/x.wav', '../someone.wav', '/etc/someone.wav']) {
+      const err = await k.engine.startRun({ userId: k.userId, takes: [take(audio)], ...START }).then(() => null, e => e as Error & { statusCode?: number })
+      expect(err, audio).not.toBeNull()
+      refusals.push({ message: err!.message, statusCode: err!.statusCode })
+    }
+    expect(new Set(refusals.map(r => JSON.stringify(r))).size, JSON.stringify(refusals)).toBe(1)
+    expect(refusals[0]!.message).toBe('This workflow uses a file that isn’t one of yours')
+    expect(refusals[0]!.statusCode).toBe(403)
     expect(k.ledger.hold.mock.calls.length).toBe(held)
+  })
+
+  it('(2), fix round 2: locally a missing sound, or a name outside the folders, is skipped as before', LONG, async () => {
+    await requireMediaTools()
+    const dir = mkdtempSync(join(scratch, 'runs-'))
+    const k = makeKit({ dir, deps: { families: () => ON, kept: createFileKeptBytes(join(dir, 'kept')) } })
+    copyFileSync(clipPath('g_frames_big.mp4'), join(k.root, 'input', 'g_frames_big.mp4'))
+    for (const audio of ['nobody.wav', '../nobody.wav']) {
+      const { runId } = await k.engine.startRun({ userId: null, takes: [{ l: loadFrames('g_frames_big.mp4', { max_size: 64, max_frames: 2 }), s: saveFrames(['l', 0], { audio }) }], ...START })
+      await k.engine.settled(runId)
+      const t = (await k.store.get(runId))!.takes[0]!
+      expect(t.nodes.s!.status, `${audio}: ${t.nodes.s!.error ?? ''}`).toBe('done')
+    }
   })
 
   it('Minor 2: a soundtrack longer than the length cap is read as far as the video; what is decoded is held to the sample cap', LONG, async () => {

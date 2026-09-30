@@ -109,22 +109,24 @@ export function bakeParams(raw: unknown): Record<string, unknown> {
 export const SCENE3D_BAKES = ['beauty_image', 'depth_image', 'normal_image'] as const
 
 /**
- * The files a workflow names that Python skips when they aren't there (R5.5
- * fix round 1): Save video frames' `audio_file` (`if os.path.exists(...)`).
- * One that isn't there has nothing to own, so in hosted it isn't refused; one
- * that is there must be the user's own, as every other input file.
+ * R5.5 fix round 2: the names Save video frames' `audio_file` gives that
+ * aren't a plain file in the folders (an absolute path, a `..`, an empty
+ * part). Python opens them as they are; the runner skips them locally, and in
+ * hosted they are never the user's own: refused before the hold with the
+ * same words as another user's file (`NOT_YOURS`), there or not.
  */
-export function optionalInputFiles(prompt: ApiPrompt): OutputFile[] {
-  const out: OutputFile[] = []
+export function unsafeSoundNames(prompt: ApiPrompt): string[] {
+  const out: string[] = []
   for (const node of Object.values(prompt)) {
-    const inputs = node.inputs ?? {}
-    if (node.class_type === 'SaveVideoFrames' && typeof inputs.audio_file === 'string' && inputs.audio_file !== '(none)') {
-      const f = parseInputFileRef(inputs.audio_file)
-      if (f) out.push(f)
-    }
+    const v = node.inputs?.audio_file
+    if (node.class_type !== 'SaveVideoFrames' || typeof v !== 'string' || !v.trim() || v === '(none)') continue
+    if (!parseInputFileRef(v)) out.push(v)
   }
   return out
 }
+
+/** A file the workflow names that isn't the user's own (hosted): the same words whatever the reason. */
+export const NOT_YOURS = 'This workflow uses a file that isn’t one of yours'
 
 /**
  * `families`: the families the run is taken under (R5.4 fix round 1). On
@@ -133,7 +135,7 @@ export function optionalInputFiles(prompt: ApiPrompt): OutputFile[] {
  * card's file is listed whenever it is set, wired source or not: in hosted it
  * must be the user's own, checked before the hold. Off, as before.
  */
-export function collectInputFiles(prompt: ApiPrompt, families: ReadonlySet<RunnerFamily> = NO_FAMILIES, o: { optional?: boolean } = {}): OutputFile[] {
+export function collectInputFiles(prompt: ApiPrompt, families: ReadonlySet<RunnerFamily> = NO_FAMILIES): OutputFile[] {
   const out: OutputFile[] = []
   for (const node of Object.values(prompt)) {
     const inputs = node.inputs ?? {}
@@ -187,9 +189,13 @@ export function collectInputFiles(prompt: ApiPrompt, families: ReadonlySet<Runne
       const f = parseInputFileRef(inputs.file)
       if (f) out.push(f)
     }
-    // Save video frames (R5.5): the sound file it adds, when one is named ('(none)' names none). It is
-    // optional (`optionalInputFiles`): `optional: false` leaves it out, for a caller that checks it apart.
-    if (o.optional !== false) out.push(...optionalInputFiles({ n: node }))
+    // Save video frames (R5.5): the sound file it adds, when one is named ('(none)' names none). Its owner is
+    // judged by the name alone, like every file here, whether or not it is there (fix round 2): Python skips a
+    // missing one, and so does the runner at its turn, but only once the name has passed as the user's own.
+    if (node.class_type === 'SaveVideoFrames' && typeof inputs.audio_file === 'string' && inputs.audio_file !== '(none)') {
+      const f = parseInputFileRef(inputs.audio_file)
+      if (f) out.push(f)
+    }
     // Load audio and Record audio (R5.3, media-sound): the file each loads.
     if ((node.class_type === 'LoadAudio' || node.class_type === 'RecordAudio') && !isLink(inputs.audio)) {
       const f = parseInputFileRef(inputs.audio)
@@ -240,6 +246,6 @@ export async function assertFilesOwned(
     const ok = f.type === 'output' ? await check.ownsOutput(userId, f)
       : f.type === 'input' ? (await check.ownsInput(userId, f)) || (!!check.ownsSaved && await check.ownsSaved(userId, f))
         : false
-    if (!ok) throw new MeterRefusalError('This workflow uses a file that isn’t one of yours', 403, { file: f.filename })
+    if (!ok) throw new MeterRefusalError(NOT_YOURS, 403, { file: f.filename })
   }
 }
