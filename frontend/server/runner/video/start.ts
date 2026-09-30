@@ -32,7 +32,10 @@ import { MEDIA_CAPS, MEDIA_WORDS, type MediaCaps } from '#shared/runner/media'
 import { MEDIA_EFFECT_WORDS } from '#shared/runner/mediaEffects'
 import { MEDIA_EFFECT_SCHEMAS } from '#shared/runner/mediaEffectSchemas.generated'
 import { KEPT_MEDIA_MAKERS } from '../keptRelease'
-import { VIDEO_EFFECTS, mediaEffectParams, type FrameShape, type SoundShape } from './table'
+import { pythonInputRef, takenLuts } from '../inputs'
+import type { OutputFile } from '../types'
+import { parseCubeLut } from './core/look'
+import { LUT_HOSTED_MAX_BYTES, LUT_HOSTED_MAX_SIZE, VIDEO_EFFECTS, mediaEffectParams, type FrameShape, type SoundShape } from './table'
 import { batchesOf, takenVideoEffect, topoOrder } from './shapes'
 
 /** A kept FFV1 batch's size bound, per byte of raw rgb24 (R5.4 measured pure noise at 1.108). */
@@ -229,4 +232,35 @@ export function nearLimit(prompt: ApiPrompt, families: ReadonlySet<RunnerFamily>
   if (sources.every(([, s]) => s.counted)) return false
   const { figures } = figuresOf(prompt, families, MEDIA_CAPS.hosted, o.shapes, { release: o.release ?? true, keptOthers: o.keptOthers ?? 0 })
   return figures.some(f => Number.isFinite(f.limit) && f.value >= NEAR_LIMIT * f.limit)
+}
+
+/**
+ * The LUT's file (R6.4), before the hold. Python loads it at its turn and,
+ * when it won't load, prints the failure and hands the frames on unchanged:
+ * the matching rule fixes that, so here it is refused plainly (a file that
+ * isn't there, or that isn't a .cube LUT), before anything runs or is held.
+ * Left to the engine instead (`engine: true`, never a refusal): locally, a
+ * name outside the input folder (Python opens it; the runner reads only its
+ * folders; hosted refused it by name earlier, inputs.ts unsafeLutNames); in
+ * hosted, a file over 16 MiB or a table over 65 points a side (ruling (p)).
+ * Only LUT nodes the runner takes (`video-look` on).
+ */
+export async function lutStartProblems(prompt: ApiPrompt, families: ReadonlySet<RunnerFamily>, o: {
+  hosted: boolean; exists(f: OutputFile): Promise<boolean>; size(f: OutputFile): Promise<number | null>; read(f: OutputFile): Promise<Uint8Array>
+}): Promise<{ message: string; nodeId: string; classType: string; engine?: true } | null> {
+  for (const { nodeId, name } of takenLuts(prompt, families)) {
+    const at = { nodeId, classType: 'LUT' }
+    const ref = pythonInputRef(name)
+    if (ref && 'outside' in ref) return { message: MEDIA_EFFECT_WORDS.lutMissing, ...at, engine: true }
+    if (!ref || !(await o.exists(ref.file))) return { message: MEDIA_EFFECT_WORDS.lutMissing, ...at }
+    if (o.hosted) {
+      // A size the store can't tell is no bound: left to the engine too.
+      const bytes = await o.size(ref.file)
+      if (bytes === null || bytes > LUT_HOSTED_MAX_BYTES) return { message: MEDIA_EFFECT_WORDS.lutTooBig, ...at, engine: true }
+    }
+    const r = parseCubeLut(await o.read(ref.file))
+    if ('error' in r) return { message: r.error, ...at }
+    if (o.hosted && r.size > LUT_HOSTED_MAX_SIZE) return { message: MEDIA_EFFECT_WORDS.lutTooBig, ...at, engine: true }
+  }
+  return null
 }

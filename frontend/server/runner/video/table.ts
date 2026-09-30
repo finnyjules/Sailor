@@ -29,6 +29,9 @@ import { pyFloatOf, pyIntOf, pyTruthy } from '#shared/runner/pyText'
 import { MEDIA_EFFECT_WORDS } from '#shared/runner/mediaEffects'
 import { videoCores } from './cores'
 import type { JoinLayout } from './core/join'
+import { parseCubeLut } from './core/look'
+import { pythonInputRef } from '../inputs'
+import type { OutputFile } from '../types'
 
 /**
  * A frame batch's count and size; `exact: false` when the count is an upper
@@ -76,6 +79,13 @@ export interface VideoEffectSpec {
   seeded?(widgets: Record<string, unknown>): boolean
   /** Where Python itself raises for these widgets and inputs: its plain words (rule 14), said before any work. */
   pythonRaises?(widgets: Record<string, unknown>, ins: readonly FrameShape[]): string | null
+  /**
+   * What the op carries from its first frame, read at the node's turn before
+   * the lease (the LUT's table, from the file it names): handed to the first
+   * frame as its `state`, and back from each frame. Throws the plain words
+   * where it can't be read (the start pass said so before the hold).
+   */
+  loadState?(widgets: Record<string, unknown>, o: { read(f: OutputFile): Promise<Uint8Array>; hosted: boolean }): Promise<ArrayBuffer>
 }
 
 /** A window effect's reads (VideoEffectSpec.windowOf). */
@@ -285,6 +295,58 @@ export function glitchSeed(schema: MediaEffectSchema | undefined, params: Record
   return h.readBigUInt64BE(0)
 }
 
+// ── R6.4: the frame looks ─────────────────────────────────────────────────────
+
+/** Ken Burns' own steps a pixel: the grid (two products a coordinate) and the bilinear sample's four taps. */
+const WARP_STEPS = 8
+/** Aspect convert's auto_pan a pixel: the luma, its variance and the box average. */
+const PAN_STEPS = 3
+/** Chroma key a pixel: two HSVs' worth, the distance, the ramp, the spill and the blend. */
+const KEY_STEPS = 8
+/** The LUT a pixel: the grid, the eight weights and the eight taps of each channel. */
+const LUT_STEPS = 16
+/** 3-way color a pixel: the gain, the lift, the pow. */
+const GRADE_STEPS = 3
+
+/** Hosted (ruling (p)): a LUT over 65 points a side, or a file over 16 MiB, leaves the workflow to the engine. No limit locally. */
+export const LUT_HOSTED_MAX_SIZE = 65
+export const LUT_HOSTED_MAX_BYTES = 16 * 1024 * 1024
+/** The most a LUT's table can take in hosted (float32, three channels). */
+const LUT_HOSTED_TABLE_BYTES = 4 * 3 * LUT_HOSTED_MAX_SIZE ** 3
+
+/** Whether a LUT hands its frames on (`lut_file` in (None, '', '(none)'), :548). */
+const lutNone = (w: Record<string, unknown>) => w.lut_file === undefined || w.lut_file === '' || w.lut_file === '(none)'
+
+/** One input's shape, the same size out (Ken Burns, Chroma key, LUT, 3-way color). */
+const sameShape = (_w: Record<string, unknown>, ins: readonly FrameShape[]): FrameShape => {
+  const x = oneInput(ins)
+  return { count: x.count, w: x.w, h: x.h, exact: x.exact }
+}
+
+/** Aspect convert's output size (./core/look.ts aspectLayout). */
+function aspectShape(w: Record<string, unknown>, ins: readonly FrameShape[]): FrameShape {
+  const x = oneInput(ins)
+  const L = videoCores.look.aspectLayout(w, x.w, x.h)
+  return { count: x.count, w: L.ow, h: L.oh, exact: x.exact }
+}
+
+/** A per-frame look's work: every frame decoded and moved, plus its own steps a pixel of the larger of in and out. */
+const lookWork = (steps: (w: Record<string, unknown>) => number) => (w: Record<string, unknown>, ins: readonly FrameShape[], out: FrameShape): number => {
+  const x = oneInput(ins)
+  return (x.count * x.w * x.h + out.count * out.w * out.h) * VIDEO_IO_WORK_PER_PIXEL + out.count * Math.max(x.w * x.h, out.w * out.h) * steps(w)
+}
+
+/**
+ * What a per-frame look holds: one frame in hand and the worker's planes
+ * (`state32` float frames), each at the larger of the input's and the
+ * output's size, and any table it carries (`extra`).
+ */
+function lookHeld(ins: readonly FrameShape[], out: FrameShape, state32: number, extra = 0): number {
+  const x = oneInput(ins)
+  const big: FrameShape = { count: 1, w: 1, h: Math.max(x.w * x.h, out.w * out.h), exact: true }
+  return effectHeldBytes(big, { reads: 1, state32, extra })
+}
+
 export const VIDEO_EFFECTS: Readonly<Record<string, VideoEffectSpec>> = {
   VideoTrim: {
     family: 'video-time', op: 'time.select', inputs: ['frames'], reads: 'stream', preview: true,
@@ -440,6 +502,87 @@ export const VIDEO_EFFECTS: Readonly<Record<string, VideoEffectSpec>> = {
     work: joinWork,
     joinOf: joinLayoutOf,
     seeded: w => w.style === 'glitch',
+  },
+  /**
+   * Ken Burns (nodes_video_pro.py:138-185): each frame zoomed and moved
+   * (affine_grid, grid_sample, border) by its eased place along the clip
+   * (./core/look.ts kenBurns). LIBRARY (affine_grid's product; cos).
+   */
+  KenBurns: {
+    family: 'video-look', op: 'look.kenBurns', inputs: ['frames'], reads: 'stream', preview: true,
+    shape: sameShape,
+    // The grid's two planes and the sample: a float frame of state.
+    heldBytes: (w, ins) => lookHeld(ins, sameShape(w, ins), 1),
+    work: lookWork(() => WARP_STEPS),
+  },
+  /**
+   * Aspect convert (:193-271): pad to, or crop to, the target ratio; auto_pan
+   * moves each frame's crop to its busiest columns or rows (./core/look.ts
+   * aspect). EXACT (pad, crop_center); BAND (auto_pan's edge). The same size
+   * out is the frames unchanged, handed on.
+   */
+  AspectConvert: {
+    family: 'video-look', op: 'look.aspect', inputs: ['frames'], reads: 'stream', preview: true,
+    shape: aspectShape,
+    // auto_pan's luma (a float a pixel) and its lines' sums.
+    heldBytes: (w, ins) => lookHeld(ins, aspectShape(w, ins), 1),
+    work: lookWork(w => (w.method === 'auto_pan' ? PAN_STEPS : 0)),
+    passThrough: (w, ins) => {
+      const x = oneInput(ins)
+      const out = aspectShape(w, ins)
+      return out.w === x.w && out.h === x.h
+    },
+  },
+  /**
+   * Chroma key (:279-368): the key colour keyed out to the background colour,
+   * spill pulled out (./core/look.ts chroma). EXACT. Its mask (slot 1) isn't
+   * made: a workflow reading it goes to the engine (ruling (l),
+   * mediaEffects.ts outputsNotLinked).
+   */
+  ChromaKey: {
+    family: 'video-look', op: 'look.chroma', inputs: ['frames'], reads: 'stream', preview: true,
+    shape: sameShape,
+    heldBytes: (w, ins) => lookHeld(ins, sameShape(w, ins), 1),
+    work: lookWork(() => KEY_STEPS),
+  },
+  /**
+   * LUT (:474-579): each frame graded through the .cube table the node names
+   * (./core/look.ts lut, the table read once at the node's turn and carried
+   * as the op's state). '(none)' or empty hands the frames on. A file that
+   * won't load is refused plainly before the hold (the matching rule: Python
+   * silently hands the frames on).
+   */
+  LUT: {
+    family: 'video-look', op: 'look.lut', inputs: ['frames'], reads: 'stream', preview: true,
+    shape: sameShape,
+    // The grid (three floats a pixel), and the table (hosted: at most 65 points a side).
+    heldBytes: (w, ins) => lookHeld(ins, sameShape(w, ins), 1, LUT_HOSTED_TABLE_BYTES),
+    work: lookWork(() => LUT_STEPS),
+    passThrough: w => lutNone(w),
+    loadState: async (w, o) => {
+      const name = typeof w.lut_file === 'string' ? w.lut_file : ''
+      const ref = pythonInputRef(name)
+      if (!ref || !('file' in ref)) throw new Error(MEDIA_EFFECT_WORDS.lutMissing)
+      let bytes: Uint8Array
+      try { bytes = await o.read(ref.file) }
+      catch { throw new Error(MEDIA_EFFECT_WORDS.lutMissing) }
+      if (o.hosted && bytes.length > LUT_HOSTED_MAX_BYTES) throw new Error(MEDIA_EFFECT_WORDS.lutTooBig)
+      const r = parseCubeLut(bytes)
+      if ('error' in r) throw new Error(r.error)
+      if (o.hosted && r.size > LUT_HOSTED_MAX_SIZE) throw new Error(MEDIA_EFFECT_WORDS.lutTooBig)
+      return r.table.buffer as ArrayBuffer
+    },
+  },
+  /**
+   * 3-way color (:587-624): lift, gamma and gain per channel (./core/look.ts
+   * threeWay). Its input is `image`, read as a frame batch only (ruling (k)).
+   * EXACT at gamma 1, else LIBRARY (pow).
+   */
+  ThreeWayCC: {
+    family: 'video-look', op: 'look.threeWay', inputs: ['image'], reads: 'stream', preview: true,
+    shape: sameShape,
+    heldBytes: (w, ins) => lookHeld(ins, sameShape(w, ins), 0),
+    work: lookWork(() => GRADE_STEPS),
   },
 }
 

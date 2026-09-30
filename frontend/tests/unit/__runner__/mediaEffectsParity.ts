@@ -48,6 +48,8 @@ export interface VfxRun {
   ramp?: VfxRamp
   /** R6.3: the second clip, the seed torch was given, the layout, the band and the glitch's decisions. */
   input_b?: string; seed?: string; layout?: VfxJoinLayout; band?: VfxBand; glitch?: VfxGlitch
+  /** R6.4: Aspect convert's auto_pan choice per frame (the edge, and Python's float32 scores and variances, base64); Chroma key's mask (not made by the runner). */
+  autopan?: { edge: number; scores: string; var: string }[]; mask?: { count: number; sha256: string }
 }
 export interface VfxSavedRun { ui: VfxUi; header: { video: { w: number; h: number; codec: string; pixFmt: string; frames: number }[] }; frameCount: number; frameRate: { num: number; den: number }; duration: number; frames: string[] }
 export interface VfxSaved { class_type: string; widgets: Record<string, unknown>; input: string; input_b?: string; seed?: string; fps: number; x264: VfxSavedRun; openh264: VfxSavedRun }
@@ -61,7 +63,11 @@ export interface VfxFixture {
   saved: VfxSaved[]
   /** R6.1's acceptance: a clip through Load video → Get video components → Reverse → Create video → Save video. */
   acceptance?: { clip: string; fps: number; reversed: VfxBatch; x264: VfxSavedRun; openh264: VfxSavedRun }
-  graphs: Record<string, ApiPrompt>
+  graphs?: Record<string, ApiPrompt>
+  /** R6.4: the group's own inputs (u8, T × H × W × 3, base64), its .cube files' text, and Python's parse of each. */
+  extraClips?: Record<string, { frames: number; w: number; h: number; u8: string }>
+  cubes?: Record<string, string>
+  cubeParse?: Record<string, { size?: number; f32_sha256?: string; error?: string }>
 }
 
 const FIXTURES = resolve(__dirname, '../fixtures')
@@ -104,7 +110,7 @@ function concat(list: Uint8Array[]): Uint8Array {
  * frame as the plan makes it (./table.ts: the frames each output frame reads,
  * the state carried): its float32 (T, H, W, 3), round-8 and trunc-8 bytes.
  */
-export function coreBatch(cls: string, widgets: Record<string, unknown>, input: { frames: Uint8Array[]; w: number; h: number }): { count: number; w: number; h: number; f32: Uint8Array; round8: Uint8Array; trunc8: Uint8Array } {
+export function coreBatch(cls: string, widgets: Record<string, unknown>, input: { frames: Uint8Array[]; w: number; h: number }, state0?: ArrayBuffer): { count: number; w: number; h: number; f32: Uint8Array; round8: Uint8Array; trunc8: Uint8Array } {
   const spec = VIDEO_EFFECTS[cls]!
   const params = mediaEffectParams(MEDIA_EFFECT_SCHEMAS[cls], widgets)
   const ins = [{ count: input.frames.length, w: input.w, h: input.h, exact: true }]
@@ -136,7 +142,8 @@ export function coreBatch(cls: string, widgets: Record<string, unknown>, input: 
   const f32: Uint8Array[] = []
   const round8: Uint8Array[] = []
   const trunc8: Uint8Array[] = []
-  let state: ArrayBuffer | undefined
+  // What the op carries from its first frame (R6.4: the LUT's table, as the plan reads it with spec.loadState).
+  let state: ArrayBuffer | undefined = state0
   for (let j = 0; j < reads.length; j++) {
     const x = reads[j]!.frames.map(tensorOf)
     const r = through ? { out: x[0]! } : op(x, reads[j]!.own ? { ...params, ...reads[j]!.own } : params, state, j, reads.length, undefined, held)

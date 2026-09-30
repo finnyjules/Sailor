@@ -92,6 +92,11 @@ Groups:
            Create video → Save video, libx264 and switched to libopenh264; and
            rule 12's synthetic graphs, one per R6 class. R6.1's pilots: Trim,
            Reverse / ping-pong and Frame trail.
+  vfx-join — (R6.3) Crossfade and Transition over pairs of standard clips.
+  vfx-look — (R6.4) Ken Burns, Aspect convert, Chroma key, LUT and 3-way
+           color; this group's own inputs (clip8 turned upright, a green
+           screen) and three .cube files (identity 2³, a warm grade 17³, a
+           broken one) recorded whole.
 """
 from __future__ import annotations
 
@@ -2624,8 +2629,210 @@ def group_vfx_join(names: list[str]) -> dict:
     return {"cases": cases}
 
 
+# ── R6.4: the frame looks ──────────────────────────────────────────────────────
+
+
+def vfx_cube_identity() -> str:
+    """The identity LUT at 2³ points (R changes fastest, as .cube files list them)."""
+    rows = [f"{r} {g} {b}" for b in range(2) for g in range(2) for r in range(2)]
+    return "LUT_3D_SIZE 2\n" + "\n".join(rows) + "\n"
+
+
+def vfx_cube_warm() -> str:
+    """A warm grade at 17³ points with a title, comments, blank lines, the domain lines (read, unused) and CRLF ends."""
+    n = 17
+    lines = ["# A warm grade (Sailor's fixture)", 'TITLE "Warm"', "", "LUT_3D_SIZE 17", "DOMAIN_MIN 0.0 0.0 0.0", "DOMAIN_MAX 1.0 1.0 1.0", "# the table"]
+    for b in range(n):
+        for g in range(n):
+            for r in range(n):
+                x, y, z = r / (n - 1), g / (n - 1), b / (n - 1)
+                lines.append(f"{min(1.0, x ** 0.9 * 1.06):.6f} {y ** 1.02:.6f} {z ** 1.1 * 0.9:.6f}")
+    return "\r\n".join(lines) + "\r\n"
+
+
+def vfx_cube_broken() -> str:
+    """A LUT whose table is one row short of its stated size (Python prints the failure and hands the frames on)."""
+    rows = [f"{r} {g} {b}" for b in range(2) for g in range(2) for r in range(2)][:-1]
+    return "LUT_3D_SIZE 2\n" + "\n".join(rows) + "\n"
+
+
+VFX_CUBES = {"identity.cube": vfx_cube_identity, "warm.cube": vfx_cube_warm, "broken.cube": vfx_cube_broken}
+
+
+def vfx_look_clips() -> dict:
+    """R6.4's own inputs, recorded whole (u8): clip8 turned upright (np.rot90: 16 × 24), and a green screen: `synth` noise
+    in a box over a slightly varied green, 4 frames of 24 × 16."""
+    base = (vfx_clip("clip8") * 255.0).round().to(torch.uint8).numpy()
+    tall = np.ascontiguousarray(np.stack([np.rot90(f) for f in base]))
+    green = []
+    for i in range(4):
+        f = np.zeros((16, 24, 3), np.uint8)
+        yy, xx = np.mgrid[0:16, 0:24]
+        f[..., 0] = (xx * 3 + i) % 40
+        f[..., 1] = 200 + (yy * 5 + xx + i) % 56
+        f[..., 2] = (xx + yy * 2) % 30
+        box = np.frombuffer(synth(10, 8, 3, 7000 + i), np.uint8).reshape(8, 10, 3)
+        f[4 + i % 2:12 + i % 2, 7 + i:17 + i] = box
+        green.append(f)
+    return {"clip8-tall": tall, "clip-green": np.stack(green)}
+
+
+def vfx_look_input(extra: dict, name: str) -> torch.Tensor:
+    if name in extra:
+        return torch.from_numpy(extra[name].copy()) / 255.0
+    return vfx_clip(name)
+
+
+def vfx_autopan(frames: torch.Tensor, target: str) -> list[dict]:
+    """Aspect convert's auto_pan choice per frame (nodes_video_pro.py:228-252, repeated line for line): the crop's edge
+    (argmax) and every score it chose from (float32, b64), so a sum in another order is judged by rule 5's band."""
+    import torch.nn.functional as F
+    T, H, W, _ = frames.shape
+    tw_, th_ = target.split(":")
+    ar = float(tw_) / float(th_)
+    if W / H > ar:
+        ch, cw = H, int(round(H * ar))
+    else:
+        cw, ch = W, int(round(W / ar))
+    lum = (0.2126 * frames[..., 0] + 0.7152 * frames[..., 1] + 0.0722 * frames[..., 2])
+    if W > cw:
+        var, k = lum.var(dim=1), cw
+    else:
+        var, k = lum.var(dim=2), ch
+    kernel = torch.ones(k, dtype=frames.dtype) / k
+    score = F.conv1d(var.unsqueeze(1), kernel.view(1, 1, -1), padding=0).squeeze(1)
+    edge = score.argmax(dim=1)
+    return [{"edge": int(edge[i]), "scores": b64(score[i].numpy().tobytes()), "var": b64(var[i].numpy().tobytes())} for i in range(T)]
+
+
+def vfx_look_library(class_type: str, widgets: dict) -> bool:
+    """The cases a band is recorded for (rule 5): every Ken Burns (its grid and cos) and LUT (its trilinear) case, and
+    3-way color with a gamma other than 1 (pow); the spec decides each case's class and uses the band where it needs it."""
+    if class_type == "KenBurns":
+        return True
+    if class_type == "ThreeWayCC":
+        return any(float(widgets[k]) != 1.0 for k in ("gamma_r", "gamma_g", "gamma_b"))
+    return class_type == "LUT"
+
+
+def vfx_look_cases(tmp: str, cls, class_type: str, grid: list[tuple], extra: dict, input_name: str = "frames") -> list[dict]:
+    """Each (name, widgets, input) through the real node, in a fresh temp folder (3-way color's input is `image`)."""
+    out = []
+    for name, widgets, clip in grid:
+        rec: dict = {"name": name, "class_type": class_type, "node_id": VFX_NODE_ID, "widgets": widgets, "input": clip}
+        _o, temp = fresh_dirs(tmp, f"{class_type}_{len(out)}")
+        try:
+            frames = vfx_look_input(extra, clip)
+            args, ui = vfx_run(cls, VFX_NODE_ID, **{input_name: frames}, **widgets)
+            rec["out"] = vfx_batch(args[0])
+            rec["ui"] = vfx_ui(ui)
+            rec["preview"] = vfx_preview(temp, ui)
+            if "f32" not in rec["out"] and vfx_look_library(class_type, widgets):
+                rec["band"] = vfx_band(args[0], 0, int(args[0].shape[0]))
+            if class_type == "AspectConvert" and widgets["method"] == "auto_pan":
+                rec["autopan"] = vfx_autopan(frames, widgets["target"])
+            if class_type == "ChromaKey":
+                rec["mask"] = {"count": int(args[1].shape[0]), "sha256": sha(np.ascontiguousarray(args[1].numpy()).tobytes())}
+        except Exception as e:  # noqa: BLE001 - the error itself is the record
+            rec["error"] = err(e)
+        out.append(rec)
+    return out
+
+
+def group_vfx_look(names: list[str]) -> dict:
+    """Ken Burns, Aspect convert, Chroma key, LUT and 3-way color (R6.4)."""
+    import tempfile
+    from comfy_extras import nodes_video_pro as nvp
+    extra = vfx_look_clips()
+    kb = {"start_zoom": 1.0, "end_zoom": 1.4, "start_x": 0.0, "start_y": 0.0, "end_x": 0.0, "end_y": 0.0, "easing": "ease_in_out"}
+    ac = {"target": "9:16", "method": "crop_center", "pad_color": "#000000"}
+    ck = {"key_color": "#00ff00", "tolerance": 0.25, "smoothness": 0.1, "spill_suppression": 0.5, "bg_color": "#000000"}
+    lut = {"lut_file": "(none)", "strength": 1.0}
+    tw = {"lift_r": 0.0, "lift_g": 0.0, "lift_b": 0.0, "gamma_r": 1.0, "gamma_g": 1.0, "gamma_b": 1.0, "gain_r": 1.0, "gain_g": 1.0, "gain_b": 1.0}
+    targets = ["9:16", "1:1", "4:5", "16:9", "21:9", "4:3", "3:4"]
+    methods = ["crop_center", "pad", "auto_pan"]
+    grids = {
+        "KenBurns": (nvp.KenBurnsNode, "frames", vfx_grid(
+            kb,
+            {"start_zoom": (1.0, 4.0, 2.35), "end_zoom": (1.0, 4.0, 1.85), "start_x": (-0.5, 0.5, 0.13), "start_y": (-0.5, 0.5, -0.21),
+             "end_x": (-0.5, 0.5, -0.37), "end_y": (-0.5, 0.5, 0.29)},
+            {"easing": ["linear", "ease_in", "ease_out", "ease_in_out"]},
+            [("drift and zoom, clip8-odd", {**kb, "start_zoom": 1.2, "end_zoom": 3.1, "start_x": -0.3, "end_x": 0.25, "start_y": 0.1, "end_y": -0.4, "easing": "linear"}, "clip8-odd"),
+             ("drift and zoom, clip8-big", {**kb, "start_zoom": 2.0, "end_zoom": 1.0, "start_x": 0.4, "end_y": 0.3, "easing": "ease_out"}, "clip8-big")],
+        )),
+        "AspectConvert": (nvp.AspectConvertNode, "frames", vfx_grid(
+            ac, {}, {},
+            [(f"{t}, {m}, {c}", {**ac, "target": t, "method": m, "pad_color": "#3a7fc2" if m == "pad" else ac["pad_color"]}, c)
+             for c in ("clip8", "clip8-tall") for t in targets for m in methods]
+            + [(f"pad colour {p!r}", {**ac, "method": "pad", "target": "1:1", "pad_color": p}, "clip8")
+               for p in ("#fff", "  ##00ff7f ", "zz", "#12345", "-f0000", "#FFCC00")]
+            + [("auto_pan 21:9, clip8-big", {**ac, "target": "21:9", "method": "auto_pan"}, "clip8-big"),
+               ("auto_pan 9:16, clip8-big", {**ac, "target": "9:16", "method": "auto_pan"}, "clip8-big"),
+               ("auto_pan 3:4, clip8-odd", {**ac, "target": "3:4", "method": "auto_pan"}, "clip8-odd"),
+               ("pad 9:16, clip8-odd", {**ac, "target": "9:16", "method": "pad", "pad_color": "#808080"}, "clip8-odd")],
+        )),
+        "ChromaKey": (nvp.ChromaKeyNode, "frames", vfx_grid(
+            ck,
+            {"tolerance": (0.0, 1.0, 0.4), "smoothness": (0.0, 0.5, 0.2), "spill_suppression": (0.0, 1.0, 0.75)},
+            {},
+            [(f"green screen, tolerance {t}, smoothness {s}", {**ck, "tolerance": t, "smoothness": s}, "clip-green")
+             for t, s in ((0.0, 0.0), (0.25, 0.0), (0.25, 0.25), (0.1, 0.5), (1.0, 0.5), (0.3, 0.1))]
+            + [(f"green screen, spill {sp}", {**ck, "spill_suppression": sp}, "clip-green") for sp in (0.0, 0.01, 1.0)]
+            + [(f"green screen, key {k!r}, bg {b!r}", {**ck, "key_color": k, "bg_color": b}, "clip-green")
+               for k, b in (("#0f0", "#123456"), ("#00FF00", "#fff"), ("zz", "nope"), ("#808080", "#000"), ("#0000ff", "#ff00ff"), (" #20c040 ", "-f0000"))],
+        )),
+        "LUT": (nvp.LUTNode, "frames", vfx_grid(
+            lut, {"strength": (0.0, 1.0, 0.5)}, {},
+            [(f"{f}, strength {s}", {"lut_file": f, "strength": s}, "clip8") for f in VFX_CUBES for s in (0.0, 0.5, 1.0)]
+            + [(f"{f}, strength {s}, {c}", {"lut_file": f, "strength": s}, c) for f, s, c in
+               (("warm.cube", 1.0, "clip8-big"), ("warm.cube", 0.5, "clip8-odd"), ("warm.cube", 0.998, "clip8"), ("warm.cube", 0.999, "clip8"),
+                ("identity.cube", 1.0, "clip8-big"), ("broken.cube", 1.0, "clip8-odd"), ("", 1.0, "clip8"))],
+        )),
+        "ThreeWayCC": (nvp.ThreeWayCCNode, "image", vfx_grid(
+            tw,
+            {"lift_r": (-0.5, 0.5, 0.12), "lift_g": (-0.5, 0.5, -0.07), "lift_b": (-0.5, 0.5, 0.2),
+             "gamma_r": (0.1, 4.0, 1.7), "gamma_g": (0.1, 4.0, 0.6), "gamma_b": (0.1, 4.0, 2.2),
+             "gain_r": (0.0, 4.0, 1.3), "gain_g": (0.0, 4.0, 0.8), "gain_b": (0.0, 4.0, 2.5)},
+            {},
+            [("a teal and orange grade, clip8-big", {"lift_r": 0.03, "lift_g": -0.02, "lift_b": 0.08, "gamma_r": 0.9, "gamma_g": 1.05, "gamma_b": 1.2,
+                                                     "gain_r": 1.15, "gain_g": 1.0, "gain_b": 0.85}, "clip8-big"),
+             ("lift only, clip8-odd", {**tw, "lift_r": 0.1, "lift_g": 0.1, "lift_b": -0.1}, "clip8-odd")],
+        )),
+    }
+    cases: dict = {"threads": vfx_threads(), "clips": {k: {"frames": v[0], "w": v[1], "h": v[2], "seed": v[3]} for k, v in VFX_CLIPS.items()},
+                   "inlineValues": VFX_INLINE_VALUES, "band": VFX_BAND,
+                   "extraClips": {k: {"frames": int(v.shape[0]), "w": int(v.shape[2]), "h": int(v.shape[1]), "u8": b64(v.tobytes())} for k, v in extra.items()},
+                   "cubes": {k: fn() for k, fn in VFX_CUBES.items()}}
+    with tempfile.TemporaryDirectory() as tmp:
+        inp = os.path.join(tmp, "input")
+        os.makedirs(inp)
+        for k, text in cases["cubes"].items():
+            with open(os.path.join(inp, k), "w", encoding="ascii", newline="") as f:
+                f.write(text)
+        folder_paths.set_input_directory(inp)
+        runs = []
+        for class_type, (cls, input_name, grid) in grids.items():
+            runs += vfx_look_cases(tmp, cls, class_type, grid, extra, input_name)
+        # The LUT's own parse (nodes_video_pro.py:474-509), and its failures as Python words them.
+        cases["cubeParse"] = {}
+        for k in VFX_CUBES:
+            try:
+                size, arr = nvp._load_cube_lut(os.path.join(inp, k))
+                cases["cubeParse"][k] = {"size": size, "f32_sha256": sha(np.ascontiguousarray(arr).tobytes())}
+            except Exception as e:  # noqa: BLE001
+                cases["cubeParse"][k] = {"error": err(e)}
+        cases["runs"] = runs
+        cases["saved"] = [
+            vfx_saved(tmp, nvp.KenBurnsNode, "KenBurns", kb),
+            vfx_saved(tmp, nvp.AspectConvertNode, "AspectConvert", {**ac, "target": "1:1"}),
+            vfx_saved(tmp, nvp.LUTNode, "LUT", {"lut_file": "warm.cube", "strength": 1.0}),
+        ]
+    return {"cases": cases}
+
+
 GROUPS = {"probe": group_probe, "decode": group_decode, "encode": group_encode, "sound": group_sound, "video": group_video,
-          "frames": group_frames, "timeline-media": group_timeline_media, "vfx-time": group_vfx_time, "vfx-join": group_vfx_join}
+          "frames": group_frames, "timeline-media": group_timeline_media, "vfx-time": group_vfx_time, "vfx-join": group_vfx_join,
+          "vfx-look": group_vfx_look}
 
 
 def main() -> None:

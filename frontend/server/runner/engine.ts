@@ -43,7 +43,7 @@ import { checkedInputFile, handedOffPictureProblem, inputFileCaps, linkedFileChe
 import { predictedHoldPixels, startPictureSizes } from './repairSizes'
 import { isReusable, requestFingerprint } from './fingerprint'
 import { gen3dTextSent } from '#shared/runner/gen3d'
-import { NOT_YOURS, assertFilesOwned, collectInputFiles, parseInputFileRef, unsafeSoundNames, type OwnershipCheck } from './inputs'
+import { NOT_YOURS, assertFilesOwned, collectInputFiles, parseInputFileRef, unsafeLutNames, unsafeSoundNames, type OwnershipCheck } from './inputs'
 import { shotRefFilenames, shotRefSizeProblem } from './shotRefs'
 import { parseJsonObject } from './generators/opts'
 import { cardPictureFiles, cardPictureRefusal } from './cards/bakeReplay'
@@ -58,7 +58,7 @@ import { poseStartProblem } from './generators/nanoExtras'
 import { loadAudioStartProblems, soundStreamProblem } from './media/soundNodes'
 import { loadVideoStartProblems, videoFileVerdict } from './media/videoNodes'
 import { frameStartProblems, framesSoundVerdict } from './media/frameNodes'
-import { hasVideoEffect, keptPeak, mediaEffectRefusals, mediaEffectStartProblems, nearLimit, needsExactCount } from './video/start'
+import { hasVideoEffect, keptPeak, lutStartProblems, mediaEffectRefusals, mediaEffectStartProblems, nearLimit, needsExactCount } from './video/start'
 import { frameShapes, videoSourceShapeOf } from './video/shapes'
 import { markReleased, reviveReleased, spentKeptMedia } from './keptRelease'
 import { MEDIA_EFFECT_FAMILIES } from '#shared/runner/mediaEffects'
@@ -2155,7 +2155,8 @@ export function createEngine(deps: EngineDeps) {
     // the folders is never the user's own: the same refusal as another user's file.
     if (deps.hosted()) {
       for (const p of prompts) {
-        const [bad] = unsafeSoundNames(p)
+        // R6.4: a LUT's .cube file the same way (rule 8): absolute, or climbing out of its folder, is never theirs.
+        const [bad] = [...unsafeSoundNames(p), ...unsafeLutNames(p, families)]
         if (bad !== undefined) throw new MeterRefusalError(NOT_YOURS, 403, { file: bad })
       }
     }
@@ -2247,6 +2248,12 @@ export function createEngine(deps: EngineDeps) {
     // counted where the file's rate varies or a hosted figure lands within 10% of its limit. Several takes run
     // side by side: none lets go of anything for the others, and each counts the others' kept bytes.
     if (prompts.some(p => hasVideoEffect(p, families))) {
+      // The LUT's file (R6.4): one that isn't there or won't load is refused plainly now (Python would hand
+      // the frames on silently); in hosted, one past ruling (p)'s size leaves the workflow to the engine.
+      for (const p of prompts) {
+        const lut = await lutStartProblems(p, families, { hosted: deps.hosted(), exists: f => files.exists(f), size: f => files.size(f), read: f => files.read(f) })
+        if (lut) throw refuse(lut.message, 400, { nodeId: lut.nodeId, classType: lut.classType, ...(lut.engine ? { reason: RUNNER_NOT_ELIGIBLE } : {}) })
+      }
       const shapeAll = async (count: boolean) => Promise.all(prompts.map(p => frameShapes(p, families,
         videoSourceShapeOf({ prompt: p, access: files, userId: i.userId, hosted: deps.hosted(), count }))))
       let shapes = await shapeAll(false)

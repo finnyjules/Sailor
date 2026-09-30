@@ -591,6 +591,71 @@ export function kernelsCore(k: TensorCore, px: PixelsCore) {
     return { gx, gy }
   }
 
+  /**
+   * F.grid_sample of a 5-D volume, mode='bilinear' (trilinear),
+   * align_corners=True, padding_mode='border' (R6.4, the LUT): GridSampler.cpp's
+   * grid_sampler_3d_cpu_impl, the scalar loop torch runs for 3-D. `vol` is
+   * channel-first, c × d × h × w; `gx`, `gy`, `gz` the grid's x (across w),
+   * y (h) and z (d) planes, one value per output point. Each coordinate is
+   * unnormalised as ((g + 1) / 2)·(size − 1) and clipped to [0, size − 1];
+   * the eight corner weights are products of the distances, left to right;
+   * the value is accumulated from 0 corner by corner (tnw, tne, tsw, tse,
+   * bnw, bne, bsw, bse), a corner past the edge skipped, each step one fused
+   * multiply-add (clang fuses `out += v·w`, measured against the fixture).
+   * Returns c planes of `gx.length` values.
+   */
+  function gridSample3d(vol: Float32Array, c: number, d: number, h: number, w: number, gx: Float32Array, gy: Float32Array, gz: Float32Array, stop?: () => boolean): Float32Array[] {
+    const n = gx.length
+    if (gy.length !== n || gz.length !== n) throw new Error('The grid is the wrong size')
+    if (vol.length !== c * d * h * w) throw new Error('The volume is the wrong size')
+    const src = (g: number, size: number) => {
+      const v = f(f(f(g + 1) / 2) * (size - 1))
+      return Math.min(size - 1, Math.max(v, 0))
+    }
+    const out = Array.from({ length: c }, () => new Float32Array(n))
+    const sD = h * w
+    const sC = d * h * w
+    for (let i = 0; i < n; i++) {
+      if ((i & 4095) === 0) stopCheck(stop, i)
+      const ix = src(gx[i]!, w)
+      const iy = src(gy[i]!, h)
+      const iz = src(gz[i]!, d)
+      const x0 = Math.floor(ix)
+      const y0 = Math.floor(iy)
+      const z0 = Math.floor(iz)
+      const x1 = x0 + 1
+      const y1 = y0 + 1
+      const z1 = z0 + 1
+      const tnw = f(f(f(x1 - ix) * f(y1 - iy)) * f(z1 - iz))
+      const tne = f(f(f(ix - x0) * f(y1 - iy)) * f(z1 - iz))
+      const tsw = f(f(f(x1 - ix) * f(iy - y0)) * f(z1 - iz))
+      const tse = f(f(f(ix - x0) * f(iy - y0)) * f(z1 - iz))
+      const bnw = f(f(f(x1 - ix) * f(y1 - iy)) * f(iz - z0))
+      const bne = f(f(f(ix - x0) * f(y1 - iy)) * f(iz - z0))
+      const bsw = f(f(f(x1 - ix) * f(iy - y0)) * f(iz - z0))
+      const bse = f(f(f(ix - x0) * f(iy - y0)) * f(iz - z0))
+      const inX1 = x1 < w
+      const inY1 = y1 < h
+      const inZ1 = z1 < d
+      const a000 = z0 * sD + y0 * w + x0
+      for (let ch = 0; ch < c; ch++) {
+        const b = ch * sC + a000
+        let o = f(vol[b]! * tnw) + 0
+        if (inX1) o = fmaf(vol[b + 1]!, tne, o)
+        if (inY1) o = fmaf(vol[b + w]!, tsw, o)
+        if (inX1 && inY1) o = fmaf(vol[b + w + 1]!, tse, o)
+        if (inZ1) {
+          o = fmaf(vol[b + sD]!, bnw, o)
+          if (inX1) o = fmaf(vol[b + sD + 1]!, bne, o)
+          if (inY1) o = fmaf(vol[b + sD + w]!, bsw, o)
+          if (inX1 && inY1) o = fmaf(vol[b + sD + w + 1]!, bse, o)
+        }
+        out[ch]![i] = o
+      }
+    }
+    return out
+  }
+
   // ── Pools and padding ───────────────────────────────────────────────────
 
   function poolSize(t: Tensor, kk: number, pad: number, stride: number): { oh: number; ow: number } {
@@ -1113,7 +1178,7 @@ export function kernelsCore(k: TensorCore, px: PixelsCore) {
     sumContiguous, sumStrided, sumAll, meanAll,
     linspace, arange, remainder, powScalar, unary,
     areaOutSize, resizeArea, resizeNearest, resizeBilinear, resizeBicubic,
-    gridSample, affineGrid,
+    gridSample, affineGrid, gridSample3d,
     avgPool2d, avgPool2dStrided, maxPool2d, padReflect,
     conv2dDepthwise, conv2dWinograd3x3, conv2dSame, gaussianKernel1d, gaussianBlur,
     rgbToGrayscale, blend, adjustBrightness, adjustSaturation, adjustContrast, adjustHue,

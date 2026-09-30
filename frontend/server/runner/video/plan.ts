@@ -150,8 +150,11 @@ export function planVideoEffect(ctx: PlanContext): NodePlan {
       const through = !!spec.passThrough?.(params, ins)
       // A seeded effect (Transition's glitch, ruling (e)): its seed from its settings and its clips' kept bytes.
       const own = spec.seeded?.(params) ? { ...params, _seed: String(glitchSeed(schema, params, values.map(v => v.file))) } : params
+      // What the op carries from its first frame (the LUT's table), read now, before the lease: the file's
+      // plain failure words, with nothing started (the start pass said so before the hold).
+      const first = !through && spec.loadState ? await spec.loadState(params, { read: f => io.read(f), hosted: media.hosted }) : undefined
       const made = await mediaLease({ userId: media.userId, signal: media.signal }, lease =>
-        through ? passedOn(spec, values[0]!, media, lease) : worked(spec, own, values, ins, out, quant, media, lease))
+        through ? passedOn(spec, values[0]!, media, lease) : worked(spec, own, values, ins, out, quant, media, lease, first))
       if (media.signal?.aborted) throw new MediaError('stopped')
       let ui: Record<string, unknown> | null = null
       if (previewName && made.preview) {
@@ -193,12 +196,12 @@ async function passedOn(spec: VideoEffectSpec, v: FramesValue, media: MediaValue
 /** The effect's frames made one by one and written into a new kept batch (every process under `lease`). */
 async function worked(
   spec: VideoEffectSpec, params: Record<string, unknown>, values: FramesValue[], ins: FrameShape[], out: FrameShape,
-  quant: 'trunc' | 'round', media: MediaValueIO, lease: MediaLease,
+  quant: 'trunc' | 'round', media: MediaValueIO, lease: MediaLease, first?: ArrayBuffer,
 ): Promise<Made> {
   const sink = framesSink(out.w, out.h, media, lease)
   const mid = Math.floor(out.count / 2)
   let preview: Uint8Array | null = null
-  let state: ArrayBuffer | undefined
+  let state: ArrayBuffer | undefined = first
   let made = 0
   let kept = false
   const emit = async (j: number, frames: Frame[], own?: Record<string, unknown>, held?: VideoFrameJob['held']) => {

@@ -38,8 +38,11 @@ export const MEDIA_EFFECT_FAMILIES: readonly MediaEffectFamily[] = [
   'video-time', 'video-join', 'video-look', 'video-stabilize', 'video-flow', 'video-draw', 'video-text', 'sound-effects', 'sound-denoise',
 ]
 
-/** The effects ported so far (R6.1: the three pilots; R6.2: the other time effects; R6.3: the two joins). Each task adds its classes. */
-export const MEDIA_EFFECTS_PORTED: readonly string[] = ['FrameTrail', 'VideoReverse', 'VideoTrim', 'TemporalMotionBlur', 'SlitScan', 'TimeDisplacement', 'SpeedRamp', 'VideoCrossfade', 'Transition']
+/** The effects ported so far (R6.1: the three pilots; R6.2: the other time effects; R6.3: the two joins; R6.4: the five looks). Each task adds its classes. */
+export const MEDIA_EFFECTS_PORTED: readonly string[] = [
+  'FrameTrail', 'VideoReverse', 'VideoTrim', 'TemporalMotionBlur', 'SlitScan', 'TimeDisplacement', 'SpeedRamp', 'VideoCrossfade', 'Transition',
+  'KenBurns', 'AspectConvert', 'ChromaKey', 'LUT', 'ThreeWayCC',
+]
 
 /** Each R6 class's family (every generated class, ported or not; Save audio (Opus) is not an R6 family's). */
 export const MEDIA_EFFECT_FAMILY_OF: Readonly<Record<string, MediaEffectFamily>> = Object.fromEntries(
@@ -65,6 +68,11 @@ export function mediaEffectFamilyOn(classType: string, families: ReadonlySet<Run
 /** The ported video effects' frame-batch output slots. */
 function frameSlotsOf(cls: string): number[] {
   return MEDIA_EFFECT_SCHEMAS[cls]!.outputs.flatMap((o, i) => o === 'image' ? [i] : [])
+}
+
+/** A ported class's mask slots (Chroma key's): the runner doesn't make them, so no node may read one (ruling (l)). */
+function maskSlotsOf(cls: string): number[] {
+  return MEDIA_EFFECT_SCHEMAS[cls]!.outputs.flatMap((o, i) => o === 'mask' ? [i] : [])
 }
 
 /**
@@ -118,8 +126,8 @@ function widgetSpec(w: MediaEffectSchema['widgets'][string]): RunnerWidgetSpec {
  * required frame batches and sounds linked; each frame-batch input a `frames`
  * value from FRAMES_LINK_SOURCES; each sound input from `soundSources`
  * (eligibility.ts SOUND_OUTPUTS, handed in so this file needs no import of
- * it); its widgets as ComfyUI validates them; and an output node's id fit for
- * its live preview's name.
+ * it); its widgets as ComfyUI validates them; an output node's id fit for
+ * its live preview's name; and a mask slot (Chroma key's) read by no node.
  */
 export function mediaEffectRows(soundSources: readonly (readonly [string, number])[] = []): Record<string, RunnerNodeRule> {
   const rows: Record<string, RunnerNodeRule> = {}
@@ -127,6 +135,7 @@ export function mediaEffectRows(soundSources: readonly (readonly [string, number
     const s = MEDIA_EFFECT_SCHEMAS[cls]!
     const required = [...s.frames, ...s.sounds].filter(i => i.required).map(i => i.name)
     const checks: InputCheckName[] = s.outputNode ? ['effect-preview-name'] : []
+    const masks = maskSlotsOf(cls)
     rows[cls] = {
       family: s.family as MediaEffectFamily,
       local: 'render',
@@ -142,6 +151,7 @@ export function mediaEffectRows(soundSources: readonly (readonly [string, number
         : {}),
       widgets: Object.fromEntries(Object.entries(s.widgets).map(([k, w]) => [k, widgetSpec(w)])),
       ...(checks.length ? { inputCheck: checks } : {}),
+      ...(masks.length ? { outputsNotLinked: masks } : {}),
     }
   }
   return rows
@@ -168,4 +178,6 @@ export const MEDIA_EFFECT_WORDS = {
   needsRun: 'Video effects can only be worked on when the workflow runs',
   timedOut: 'This video effect took longer than 2 minutes on one frame, so it was stopped',
   motionBlurFails: 'Motion blur (time) only works on a single frame.',
+  lutMissing: 'The LUT file this workflow names isn’t there',
+  lutTooBig: 'This LUT is too large to use here',
 } as const
