@@ -5,24 +5,37 @@
  *
  * Body:    { filename, subfolder?, type? } — same addressing as /api/depth/estimate.
  * Returns: { normalsFilename, subfolder: 'sailor_depth', cached }
- *          503 { off: true }  — kill switch (NUXT_RELIGHT_SURFACES=off)
+ *          503 { off: true }  — kill switch (NUXT_RELIGHT_SURFACES=off), or a hosted
+ *                               unpriced/unmetered refusal: the client stays on local depth
+ *          402 { message }    — hosted, not enough credits (also quiet on the client)
+ *          503 { retryLater } — fal had not finished within the 600 s poll
  *          4xx/5xx { message } — path/ownership/provider failures
+ *
+ * One read per photo at a time: a second request for a photo already being read
+ * waits for that read and answers `cached: true` (free — it made no call). The
+ * cache file is written to a temp name and renamed, so a reader never sees half
+ * a PNG. The photo is sent at most 1536 px on its long edge (the cache key stays
+ * the ORIGINAL file's content hash).
  *
  * The map is fal's normal PNG as is: red = right, green = UP, blue = toward the
  * camera. Cached by content hash next to the depth maps (`moge_<hash>.png`), so a
  * photo is paid for once (global-constraints.md: $0.0125/call, metered through
  * runFal). A cache hit never calls fal and is never metered.
  *
- * Hosted: rate-limited, and the source file must be owned by the caller
- * (assertInputOwned) — the moodboards/refs.post.ts pattern. runFal takes the
- * ledger hold before dispatch and releases it on any throw.
+ * Hosted: rate-limited, and the source file must be readable by the caller
+ * (assertInputOwned: an input they own, an output of their own run — the /view
+ * gate — or temp, ungated as /view leaves it). runFal takes the ledger hold
+ * before dispatch and releases it on any throw.
  */
-import { readFile, mkdir, writeFile, access } from 'node:fs/promises'
+import { readFile, mkdir, writeFile, access, rename, unlink } from 'node:fs/promises'
 import { join } from 'node:path'
+import { randomBytes } from 'node:crypto'
+import sharp from 'sharp'
 import { depthCacheKey, assetType, safeAssetRelPath } from '../../utils/depthCache'
 import { assertRateLimit } from '../../lib/rateLimit'
 import { assertInputOwned } from '../../utils/inputOwnership'
 import { runFal } from '../../utils/falRun'
+import { MeterRefusalError } from '../../utils/requestMeter'
 import { downloadResult } from '../../runner/falQueue'
 import { SURFACES_APP } from '../../../shared/pricing/relightSurfaces'
 
@@ -93,6 +106,39 @@ const exists = (p: string) => access(p).then(() => true, () => false)
 
 const MIME: Record<string, string> = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', webp: 'image/webp' }
 
+/** Normals drive lighting, not detail — like the depth route's MAX_EDGE, a bound on the
+ *  work: sources run to 4k, and a smaller upload is cheaper and faster on fal. */
+const SEND_MAX_EDGE = 1536
+
+/** Poll for up to 10 minutes (cold starts measured at 203 s). Past that runFal gives up on
+ *  the request without cancelling it (it only throws — no cancel call), so fal may still
+ *  finish and bill it; the hold is released and the answer is 503 { retryLater }. */
+const POLL_DEADLINE_MS = 600_000
+
+/** The photo as a data URI, downscaled to SEND_MAX_EDGE on the long edge when larger.
+ *  Bytes sharp cannot read are sent as they are (fal answers for them). */
+async function photoDataUri(bytes: Uint8Array, ext: string): Promise<string> {
+  let meta: { width?: number; height?: number } | null = null
+  try { meta = await sharp(bytes).metadata() } catch { meta = null }
+  const long = Math.max(meta?.width ?? 0, meta?.height ?? 0)
+  if (long > SEND_MAX_EDGE) {
+    const png = await sharp(bytes)
+      .resize({ width: SEND_MAX_EDGE, height: SEND_MAX_EDGE, fit: 'inside' })
+      .png()
+      .toBuffer()
+    return `data:image/png;base64,${png.toString('base64')}`
+  }
+  return `data:${MIME[ext] ?? 'image/png'};base64,${Buffer.from(bytes).toString('base64')}`
+}
+
+/** A read's non-provider outcome, answered with its own status (not thrown as a 502). */
+class SurfacesAnswer extends Error {
+  constructor(readonly status: number, readonly body: Record<string, unknown>) { super(String(body.message ?? status)) }
+}
+
+/** One in-flight read per cache file: a concurrent request for the same photo awaits it. */
+const inFlight = new Map<string, Promise<void>>()
+
 export default defineEventHandler(async (event) => {
   if (process.env.NUXT_RELIGHT_SURFACES === 'off') {
     setResponseStatus(event, 503)
@@ -123,7 +169,33 @@ export default defineEventHandler(async (event) => {
   if (await exists(outPath)) return { normalsFilename: name, subfolder: CACHE_SUBDIR, cached: true }
 
   const ext = rel.split('.').pop()?.toLowerCase() ?? 'png'
-  const dataUri = `data:${MIME[ext] ?? 'image/png'};base64,${Buffer.from(bytes).toString('base64')}`
+
+  const pending = inFlight.get(name)
+  let job: Promise<void>
+  let joined = false
+  if (pending) {
+    job = pending
+    joined = true
+  } else {
+    job = readSurfaces(bytes, ext, cacheDir, outPath).finally(() => { inFlight.delete(name) })
+    inFlight.set(name, job)
+  }
+
+  try {
+    await job
+  } catch (err) {
+    if (err instanceof SurfacesAnswer) {
+      setResponseStatus(event, err.status)
+      return err.body
+    }
+    throw err
+  }
+  // A joined request made no call of its own: for it the map was already paid for.
+  return { normalsFilename: name, subfolder: CACHE_SUBDIR, cached: joined }
+})
+
+async function readSurfaces(bytes: Uint8Array, ext: string, cacheDir: string, outPath: string): Promise<void> {
+  const dataUri = await photoDataUri(bytes, ext)
 
   let out: { normal_map?: { url?: string } }
   try {
@@ -133,9 +205,19 @@ export default defineEventHandler(async (event) => {
       apply_mask: false,
       export_glb: false,
       export_ply: false,
-    }, { pollDeadlineMs: 300_000 })
+    }, { pollDeadlineMs: POLL_DEADLINE_MS })
   } catch (err) {
-    throw createError({ statusCode: 502, message: `moge-2: ${(err as Error).message}` })
+    // Hosted refusals pass through as themselves: 402 no balance; an unpriced/unmetered
+    // refusal is a server decision the user can't act on, so it is quiet like the kill switch.
+    if (err instanceof MeterRefusalError) {
+      if (err.statusCode === 402) throw new SurfacesAnswer(402, { message: err.message })
+      throw new SurfacesAnswer(503, { off: true, message: err.message })
+    }
+    const message = (err as Error).message
+    if (/^fal request timed out/.test(message)) {
+      throw new SurfacesAnswer(503, { retryLater: true, message: 'moge-2 is still reading this photo' })
+    }
+    throw createError({ statusCode: 502, message: `moge-2: ${message}` })
   }
 
   const url = out.normal_map?.url
@@ -160,6 +242,14 @@ export default defineEventHandler(async (event) => {
   }
 
   await mkdir(cacheDir, { recursive: true })
-  await writeFile(outPath, pngBytes)
-  return { normalsFilename: name, subfolder: CACHE_SUBDIR, cached: false }
-})
+  // Temp name + rename: a concurrent reader (or /view) never sees a half-written map.
+  const tmp = `${outPath}.tmp-${randomBytes(6).toString('hex')}`
+  try {
+    await writeFile(tmp, pngBytes)
+    await rename(tmp, outPath)
+  } catch (err) {
+    await unlink(tmp).catch(() => {})
+    throw err
+  }
+}
+

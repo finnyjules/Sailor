@@ -10,7 +10,8 @@
  * route's own `__setSurfacesRootForTests` seam so the test never touches the
  * real ComfyUI checkout.
  */
-import { mkdtemp, writeFile, rm, mkdir, access } from 'node:fs/promises'
+import { mkdtemp, writeFile, rm, mkdir, access, readdir } from 'node:fs/promises'
+import sharp from 'sharp'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -72,7 +73,7 @@ function fakeHeaders(entries: Record<string, string | null>): { get(name: string
   return { get: (name: string) => lower.get(name.toLowerCase()) ?? null }
 }
 
-type FalScenario = 'ok' | 'no-normal-map' | 'result-fetch-fails' | 'oversized'
+type FalScenario = 'ok' | 'no-normal-map' | 'result-fetch-fails' | 'oversized' | 'never-finishes'
 
 function makeFalFetchMock(scenario: FalScenario): ReturnType<typeof vi.fn> {
   const base = `https://queue.fal.run/${FAL_APP}`
@@ -85,7 +86,7 @@ function makeFalFetchMock(scenario: FalScenario): ReturnType<typeof vi.fn> {
       })
     }
     if (url === `${base}/requests/req1/status`) {
-      return jsonResponse({ status: 'COMPLETED' })
+      return jsonResponse({ status: scenario === 'never-finishes' ? 'IN_PROGRESS' : 'COMPLETED' })
     }
     if (url === `${base}/requests/req1`) {
       if (scenario === 'result-fetch-fails') return jsonResponse({ detail: 'boom' }, false, 500)
@@ -176,6 +177,7 @@ afterEach(async () => {
   __setInputUploadsDbForTests(null)
   __resetMeterContextForTests()
   __setSurfacesRootForTests(undefined)
+  vi.useRealTimers()
   vi.unstubAllGlobals()
   await rm(root, { recursive: true, force: true })
 })
@@ -319,5 +321,129 @@ describe('POST /api/depth/surfaces', () => {
 
   it('price: costForModel(fal-ai/moge-2) is $0.0125 at 3 credits', () => {
     expect(costForModel('fal-ai/moge-2')).toMatchObject({ usd: 0.0125, credits: 3 })
+  })
+})
+
+describe('POST /api/depth/surfaces — final-review fixes', () => {
+  const submits = (f: ReturnType<typeof vi.fn>) =>
+    f.mock.calls.filter(([url]: [string]) => url === `https://queue.fal.run/${FAL_APP}`).length
+  const cacheDir = () => join(root, 'input', 'sailor_depth')
+
+  // Fix 5: a second request for the same uncached photo waits for the first — one fal call.
+  it('two concurrent requests for the same photo make ONE fal submit; the second answers cached:true', async () => {
+    setLocal()
+    await writeFile(join(root, 'input', 'photo.png'), PNG_BYTES)
+    await writeFile(join(root, 'input', 'copy.png'), PNG_BYTES)      // same bytes, other name
+    const fetchMock = makeFalFetchMock('ok')
+    vi.stubGlobal('fetch', fetchMock)
+
+    const [a, b] = await Promise.all([
+      handler(makeEvent({ filename: 'photo.png', type: 'input' })),
+      handler(makeEvent({ filename: 'copy.png', type: 'input' })),
+    ])
+    expect(submits(fetchMock)).toBe(1)
+    expect([a.cached, b.cached].sort()).toEqual([false, true])
+    expect(a.normalsFilename).toBe(b.normalsFilename)
+  })
+
+  it('a failed read clears the in-flight entry: the next request calls fal again', async () => {
+    setLocal()
+    await writeFile(join(root, 'input', 'photo.png'), PNG_BYTES)
+    const failing = makeFalFetchMock('result-fetch-fails')
+    vi.stubGlobal('fetch', failing)
+    await expect(handler(makeEvent({ filename: 'photo.png', type: 'input' }))).rejects.toMatchObject({ statusCode: 502 })
+
+    const ok = makeFalFetchMock('ok')
+    vi.stubGlobal('fetch', ok)
+    const res = await handler(makeEvent({ filename: 'photo.png', type: 'input' }))
+    expect(res.cached).toBe(false)
+    expect(submits(ok)).toBe(1)
+  })
+
+  it('writes the cache atomically: no temp file is left beside the map', async () => {
+    setLocal()
+    await writeFile(join(root, 'input', 'photo.png'), PNG_BYTES)
+    vi.stubGlobal('fetch', makeFalFetchMock('ok'))
+    const res = await handler(makeEvent({ filename: 'photo.png', type: 'input' }))
+    expect(await readdir(cacheDir())).toEqual([res.normalsFilename])
+  })
+
+  // Fix 7: the poll waits up to 600 s; past that the answer is 503 { retryLater }.
+  it('a read that outlasts the 600 s poll answers 503 { retryLater: true } (not before)', async () => {
+    setLocal()
+    await writeFile(join(root, 'input', 'photo.png'), PNG_BYTES)
+    const fetchMock = makeFalFetchMock('never-finishes')
+    vi.stubGlobal('fetch', fetchMock)
+    vi.useFakeTimers({ toFake: ['setTimeout', 'Date'] })
+    try {
+      const event = makeEvent({ filename: 'photo.png', type: 'input' })
+      let settled = false
+      const p = handler(event).then((r: unknown) => { settled = true; return r })
+      // The photo is read and probed (real I/O) before the submit; only then does the poll start.
+      await vi.waitFor(() => expect(submits(fetchMock)).toBe(1))
+      await vi.advanceTimersByTimeAsync(590_000)
+      expect(settled).toBe(false)
+      await vi.advanceTimersByTimeAsync(15_000)
+      const res = await p
+      expect(event.node.res.statusCode).toBe(503)
+      expect(res).toMatchObject({ retryLater: true })
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  // Fix 8: a hosted refusal passes through as itself, not as a provider failure (502).
+  it('hosted, no balance: 402 passes through, fal never called', async () => {
+    setHosted()
+    bindMeterContext({ userId: 'u1' })
+    fakeLedger.setAvailable(0)
+    await writeFile(join(root, 'input', 'photo.png'), PNG_BYTES)
+    const fetchMock = makeFalFetchMock('ok')
+    vi.stubGlobal('fetch', fetchMock)
+    const event = makeEvent({ filename: 'photo.png', type: 'input' }, 'u1')
+    const res = await handler(event)
+    expect(event.node.res.statusCode).toBe(402)
+    expect(res).toMatchObject({ message: expect.any(String) })
+    expect(submits(fetchMock)).toBe(0)
+  })
+
+  it('hosted, unmetered spend refused: 503 { off: true }, fal never called', async () => {
+    setHosted()                                   // no bindMeterContext → no meter context
+    await writeFile(join(root, 'input', 'photo.png'), PNG_BYTES)
+    const fetchMock = makeFalFetchMock('ok')
+    vi.stubGlobal('fetch', fetchMock)
+    const event = makeEvent({ filename: 'photo.png', type: 'input' })
+    const res = await handler(event)
+    expect(event.node.res.statusCode).toBe(503)
+    expect(res).toMatchObject({ off: true })
+    expect(submits(fetchMock)).toBe(0)
+  })
+
+  // Fix 11: at most 1536 px on the long edge is sent, aspect kept; the cache key stays the
+  // ORIGINAL file's content hash.
+  it('downscales a large photo to 1536 px on the long edge before sending', async () => {
+    setLocal()
+    const big = await sharp({ create: { width: 3072, height: 1024, channels: 3, background: { r: 200, g: 100, b: 50 } } }).png().toBuffer()
+    await writeFile(join(root, 'input', 'big.png'), big)
+    const fetchMock = makeFalFetchMock('ok')
+    vi.stubGlobal('fetch', fetchMock)
+    const res = await handler(makeEvent({ filename: 'big.png', type: 'input' }))
+    expect(res.normalsFilename).toBe(`moge_${depthCacheKey(new Uint8Array(big))}.png`)
+    const [, init] = fetchMock.mock.calls.find(([url]: [string]) => url === `https://queue.fal.run/${FAL_APP}`)!
+    const uri: string = JSON.parse(init.body).image_url
+    const sent = Buffer.from(uri.slice(uri.indexOf(',') + 1), 'base64')
+    const meta = await sharp(sent).metadata()
+    expect([meta.width, meta.height]).toEqual([1536, 512])
+  })
+
+  it('a photo already within 1536 px is sent as is', async () => {
+    setLocal()
+    const small = await sharp({ create: { width: 800, height: 600, channels: 3, background: { r: 1, g: 2, b: 3 } } }).png().toBuffer()
+    await writeFile(join(root, 'input', 'small.png'), small)
+    const fetchMock = makeFalFetchMock('ok')
+    vi.stubGlobal('fetch', fetchMock)
+    await handler(makeEvent({ filename: 'small.png', type: 'input' }))
+    const [, init] = fetchMock.mock.calls.find(([url]: [string]) => url === `https://queue.fal.run/${FAL_APP}`)!
+    expect(JSON.parse(init.body).image_url).toBe(`data:image/png;base64,${small.toString('base64')}`)
   })
 })
