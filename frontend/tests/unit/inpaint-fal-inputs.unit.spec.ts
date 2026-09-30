@@ -5,9 +5,11 @@ import {
   kontextInput,
   text2imgInput,
   poseInput,
+  relightFinishInput,
   fluxFillDevInput,
   nanoGenInput,
 } from '../../server/utils/inpaintFalInputs'
+import { RELIGHT_FINISH_PROMPT } from '../../shared/pricing/relightFinish'
 
 describe('removeBgInput', () => {
   it('builds the fal-ai/birefnet/v2 payload', () => {
@@ -100,6 +102,18 @@ describe('poseInput', () => {
     expect(poseInput('redraw the character in the pose', 'data:image/png;base64,CHAR', 'data:image/png;base64,POSE')).toEqual({
       prompt: 'redraw the character in the pose',
       image_urls: ['data:image/png;base64,CHAR', 'data:image/png;base64,POSE'],
+      num_images: 1,
+      resolution: '1K',
+      output_format: 'png',
+    })
+  })
+})
+
+describe('relightFinishInput', () => {
+  it('builds the fal-ai/nano-banana-2/edit payload with the fixed prompt', () => {
+    expect(relightFinishInput('data:image/png;base64,ORIG', 'data:image/png;base64,GUIDE')).toEqual({
+      prompt: RELIGHT_FINISH_PROMPT,
+      image_urls: ['data:image/png;base64,ORIG', 'data:image/png;base64,GUIDE'],
       num_images: 1,
       resolution: '1K',
       output_format: 'png',

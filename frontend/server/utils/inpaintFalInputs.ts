@@ -7,6 +7,7 @@
  */
 import { falImageSize } from './falImageSize'
 import { falFillPrompt } from './falFill'
+import { RELIGHT_FINISH_PROMPT } from '../../shared/pricing/relightFinish'
 
 export interface FalCall {
   app: string
@@ -100,6 +101,17 @@ export function poseInput(prompt: string, character: string, pose: string): Reco
   return {
     prompt,
     image_urls: [character, pose],
+    num_images: 1,
+    resolution: '1K',
+    output_format: 'png',
+  }
+}
+
+/** fal-ai/nano-banana-2/edit — Relight "Finish": realistic photo from (original, guide). Output: `out.images[0].url`. */
+export function relightFinishInput(original: string, guide: string): Record<string, unknown> {
+  return {
+    prompt: RELIGHT_FINISH_PROMPT,
+    image_urls: [original, guide],
     num_images: 1,
     resolution: '1K',
     output_format: 'png',
