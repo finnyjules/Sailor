@@ -7,10 +7,11 @@
  *  - front only (path A, :70-78): one Luma Ray 2 720p call on Replicate
  *    through the video table, `{prompt, aspect_ratio: "1:1", duration: 5,
  *    loop: true, start_image_url}`;
- *  - right, back or left views wired (path B, :80-93): one Seedance 2.0 call
+ *  - right, back or left views wired (path B, :80-97): one Seedance 2.0 call
  *    (fal, first frame → last frame) per arc `planSegments` plans, stitched
- *    with PyAV. The runner leaves this path to the engine until R3.17; its
- *    price (ruling (b)) is already the calls it makes, on both paths.
+ *    with PyAV. The runner takes this path since R3.17 (a pipeline of the
+ *    arcs, stitched with Sailor's own video tools), while `media-video` is on
+ *    too; its price (ruling (b)) is the calls it makes, on both paths.
  *
  * Pure; relative imports only.
  */

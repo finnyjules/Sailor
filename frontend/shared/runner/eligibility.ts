@@ -1521,11 +1521,13 @@ export const RUNNER_NODE_RULES: Readonly<Record<string, RunnerNodeRule>> = {
   },
   // ── turntable (step 3, R3.16): Turntable's front-only spin, Luma Ray 2
   // 720p on Replicate. Taken only with its front picture linked (Python
-  // raises without one) and no right, back or left view wired: the views
-  // path (Seedance arcs stitched together) stays with the engine until
-  // R3.17. The extra direction takes a text wire (R0: the value arrives as
-  // typed); the direction is a widget as ComfyUI validates it (a wired one
-  // leaves the node to the engine).
+  // raises without one) and, on this row, no right, back or left view wired.
+  // The views path (R3.17: Seedance arcs stitched together) needs Sailor's
+  // own video tools, so it is judged by TURNTABLE_VIEWS_RULE while
+  // `media-video` is on (runnerRuleFor); with it off, a Turntable with views
+  // stays with the engine, as before. The extra direction takes a text wire
+  // (R0: the value arrives as typed); the direction is a widget as ComfyUI
+  // validates it (a wired one leaves the node to the engine).
   [TURNTABLE_CLASS]: {
     family: 'turntable',
     mustLink: ['image'],
@@ -1710,15 +1712,35 @@ export const VIDEO_CARD_MEDIA_RULE: RunnerNodeRule = {
 }
 
 /**
+ * Turntable with views taken too (step 3, R3.17, family `turntable`): the
+ * front-only row without its `mustNotLink`, every view a picture as the
+ * front is. The arcs' clips are stitched with Sailor's own video tools, so
+ * this row applies only while `media-video` is on (which the server answers
+ * as off while the tools are missing or refused, server/runner/config.ts):
+ * switching `turntable` on never leaves the runner a stitch it can't make.
+ */
+export const TURNTABLE_VIEWS_RULE: RunnerNodeRule = {
+  family: 'turntable',
+  mustLink: ['image'],
+  imageInputs: ['image', ...Object.keys(TURNTABLE_VIEW_INPUTS)],
+  valueInputs: { instructions: ['text'] },
+  widgets: {
+    direction: { type: 'COMBO', required: true, options: TURNTABLE_DIRECTIONS },
+  },
+}
+
+/**
  * The row a node is judged by: RUNNER_NODE_RULES', but for the Audio card,
  * in this order: the audio-gen row (R3.8) while `audio-gen` is on, `source`
  * is wired and `media-sound` is off, as before R5.3; the media row while
  * `media-sound` is on; the sound-in row (R3.10) for a card playing its own
  * file while `sound-in` is on; else its sync-3 row. The Video card: its media row
- * while `media-video` is on (R5.4), else none, as before.
+ * while `media-video` is on (R5.4), else none, as before. Turntable: its views
+ * row while `media-video` is on (R3.17), else its front-only row.
  */
 export function runnerRuleFor(classType: string, inputs: Record<string, unknown>, families: ReadonlySet<RunnerFamily>): RunnerNodeRule | undefined {
   if (classType === 'Video' && familyOn('media-video', families)) return VIDEO_CARD_MEDIA_RULE
+  if (classType === TURNTABLE_CLASS && familyOn('media-video', families)) return TURNTABLE_VIEWS_RULE
   if (classType === 'Audio') {
     const media = familyOn('media-sound', families)
     if (!media && isLink(inputs.source) && familyOn('audio-gen', families)) return AUDIO_CARD_AUDIO_GEN_RULE

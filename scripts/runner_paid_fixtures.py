@@ -127,6 +127,14 @@ Groups:
              every subset of views and both directions (for R3.17), for
              frontend/server/runner/generators/turntable.ts
              (tests/unit/runner-paid-turntable.unit.spec.ts)
+  turntable-views (R3.17) Turntable with views: every subset of the three
+             views × both directions, Seedance 2.0 first → last frame calls on
+             fal, and stitch_clips of the answers' clips (small H.264 clips,
+             smooth, noisy and of two sizes; a failure at segment 3), each
+             stitched file recorded with libx264 and switched to libopenh264
+             (frame hashes, counts, rates, lengths), for
+             frontend/server/runner/generators/turntable.ts
+             (tests/unit/runner-paid-turntable-views.unit.spec.ts)
   handoff2  (R3.H2) the PNG `_image_tensor_to_data_url` sends for a picture
              made in the run: a provider's answer of every file kind (PIL's
              RGBA), Expand / outpaint's answer with its alpha dropped, and an
@@ -2997,6 +3005,154 @@ def turntable_group() -> dict:
     return {"cases": cases, "catalogue": catalogue}
 
 
+# ── turntable-views (R3.17): Turntable with views, Seedance arcs stitched ─────
+
+TURNTABLE_SEG_URL = "https://f.test/turntable/seg{k}.mp4"
+TURNTABLE_VIEW_NAMES = {"right": "right_reference", "back": "back_reference", "left": "left_reference"}
+
+
+def _segment_clip(k: int, w: int, h: int, frames: int, content: str) -> bytes:
+    """One Seedance answer clip: H.264 yuv420p in MP4 at 24 fps, libx264 with one
+    thread, every muxer and encoder bitexact (a second run writes the same bytes).
+    `content` "smooth" (runner_media_fixtures.smooth_frame) or "noise" (R2.1's synth)."""
+    import io
+    import av
+    import numpy as np
+    import runner_media_fixtures as rmf
+    buf = io.BytesIO()
+    c = av.open(buf, "w", format="mp4", options=dict(rmf.BITEXACT))
+    s = rmf.video_stream(c, "libx264", w, h, 24, "yuv420p", rmf.X264)
+    out = []
+    for i in range(frames):
+        rgb = rmf.smooth_frame(w, h, 10 * k + i) if content == "smooth" else rmf.synth(w, h, 3, 100 * k + i + 1)
+        f = av.VideoFrame.from_ndarray(np.frombuffer(rgb, np.uint8).reshape(h, w, 3), format="rgb24").reformat(format="yuv420p")
+        f.pts = i
+        out.append(f)
+    rmf.encode_frames(c, s, out)
+    c.close()
+    return buf.getvalue()
+
+
+def turntable_views_group() -> dict:
+    """R3.17: Turntable (TurntableNode) with views, path B (nodes_turntable.py:80-97):
+    one Seedance 2.0 first → last frame call on fal per arc plan_segments plans, the
+    answers' clips joined by _turntable_stitch.stitch_clips, for
+    frontend/server/runner/generators/turntable.ts
+    (tests/unit/runner-paid-turntable-views.unit.spec.ts):
+      clips — the Seedance answers (segment k answers clip k): small H.264 clips,
+              base64, with their decoded rgb24 frames (sha256 each)
+      cases — paid_case of every subset of the three views × both directions, a
+              padded and a non-ASCII extra direction, noisy clips (the named
+              case), a second clip of another size, and a failure at segment 3
+              (Python raises: no stitch). Each stitched case records the clips in
+              the order stitch_clips was handed them (sha256 of each source) and
+              the stitched file twice (runner_media_fixtures.video_record): as
+              Python writes it (libx264, one thread) with its PSNR against the
+              kept source frames (every clip's decoded frames, the first frame of
+              each clip after the first dropped), and switched to libopenh264 at
+              OPENH264_FOR[20] (Sailor's encoder, rule 3)."""
+    import hashlib
+    import io
+    import tempfile
+    import runner_builder_fixtures as rbf
+    import runner_media_fixtures as rmf
+    from comfy_extras import _turntable_stitch as ts
+    _nr, _fal, _extras = rbf._node_modules()
+    from comfy_extras import nodes_turntable
+    from comfy_extras.nodes_turntable import TurntableNode
+
+    def clip_set(content: str, sizes: list) -> list:
+        return [_segment_clip(k, w, h, 6, content) for k, (w, h) in enumerate(sizes)]
+
+    sets = {
+        "smooth": clip_set("smooth", [(32, 32)] * 4),
+        "noise": clip_set("noise", [(32, 32)] * 4),
+        "sizes": clip_set("smooth", [(32, 32), (48, 48), (32, 32), (32, 32)]),
+    }
+    clips: dict = {}
+    for set_name, blobs in sets.items():
+        for k, b in enumerate(blobs):
+            with tempfile.NamedTemporaryFile(suffix=".mp4") as f:
+                f.write(b)
+                f.flush()
+                frames = rmf.rgb_frames_of(f.name)
+            clips[f"{set_name}{k}"] = {"b64": _b64(b), "sha256": hashlib.sha256(b).hexdigest(),
+                                      "frames": [rmf.sha(x) for x in frames]}
+
+    cases: list = []
+    real_stitch = ts.stitch_clips
+
+    def add(name, views, direction, instructions="", clip_set_name="smooth", fail_at=None):
+        blobs = sets[clip_set_name]
+        widgets = {"direction": direction, "instructions": instructions}
+        pictures = ["image", *[TURNTABLE_VIEW_NAMES[v] for v in views]]
+        answers = []
+        files = {}
+        for k in range(4):
+            url = TURNTABLE_SEG_URL.format(k=k + 1)
+            answers.append({"__raise__": "The provider refused this prompt"} if fail_at == k + 1 else {"video": {"url": url}})
+            files[url] = _b64(blobs[k])
+        seen: dict = {}
+
+        def recording_stitch(sources):
+            data = []
+            for src in sources:
+                if hasattr(src, "seek"):
+                    src.seek(0)
+                data.append(src.read() if hasattr(src, "read") else open(src, "rb").read())
+                if hasattr(src, "seek"):
+                    src.seek(0)
+            seen["order"] = [hashlib.sha256(d).hexdigest() for d in data]
+            # Source frames: each clip's decoded frames, the first of every clip after the first dropped.
+            source = []
+            with tempfile.TemporaryDirectory() as tmp:
+                paths = []
+                for i, d in enumerate(data):
+                    p = os.path.join(tmp, f"in{i}.mp4")
+                    with open(p, "wb") as f:
+                        f.write(d)
+                    paths.append(p)
+                    fr = rmf.rgb_frames_of(p)
+                    source.extend(fr[1:] if i else fr)
+                recs = {}
+                for label, swap in (("x264", None), ("openh264", rmf.openh264_options(20))):
+                    with rmf._patched(ts, rmf._AvShim(swap)):
+                        buf = real_stitch([io.BytesIO(d) for d in data])
+                    out = os.path.join(tmp, f"stitch_{label}.mp4")
+                    with open(out, "wb") as f:
+                        f.write(buf.getvalue())
+                    # Only the first clip's size is a source's size: PSNR only where every clip already is it.
+                    same = len({(len(x)) for x in source}) == 1
+                    recs[label] = rmf.video_record(out, source if same else None, False)
+                seen["stitch"] = recs
+            with rmf._patched(ts, rmf._AvShim(None)):
+                return real_stitch(sources)
+
+        with mock.patch.object(nodes_turntable, "stitch_clips", recording_stitch), contextlib.redirect_stdout(io.StringIO()):
+            case = paid_case(name, TurntableNode, widgets, answers, pictures=pictures, files=files)
+        # Python stops at the failed call: the answers it never asked for are not the case's.
+        case["answers"] = case["answers"][:len(case["calls"])]
+        case["files"] = {u: b for u, b in case["files"].items() if u in {g["url"] for g in case["gets"]}}
+        case["clip_set"] = clip_set_name
+        if "order" in seen:
+            case["stitch_order"] = seen["order"]
+            case["stitch"] = seen["stitch"]
+        cases.append(case)
+
+    from itertools import combinations
+    subsets = [list(c) for n in range(1, 4) for c in combinations(["right", "back", "left"], n)]
+    for sub in subsets:
+        for d in ("left", "right"):
+            add(f"{'+'.join(sub)} · {d}", sub, d)
+    add("right+back+left · left · instructions padded", ["right", "back", "left"], "left", "  slow and steady \n")
+    add("back · right · instructions non-ASCII", ["back"], "right", "Café 日本 \U0001f98a — naïve")
+    add("right+back+left · left · noisy clips", ["right", "back", "left"], "left", clip_set_name="noise")
+    add("back · left · noisy clips", ["back"], "left", clip_set_name="noise")
+    add("right+back+left · left · a clip of another size", ["right", "back", "left"], "left", clip_set_name="sizes")
+    add("right+back+left · left · segment 3 fails", ["right", "back", "left"], "left", fail_at=3)
+    return {"cases": cases, "clips": clips}
+
+
 # ── e2e (R3.18): the controller check's chained workflows, node by node ──────
 
 E2E_GENERATED = "https://f.test/e2e/generated.png"
@@ -3183,6 +3339,7 @@ GROUPS = {
     "restyle-lora": restyle_lora_group,
     "nano-extras": nano_extras_group,
     "turntable": turntable_group,
+    "turntable-views": turntable_views_group,
     "e2e": e2e_group,
 }
 

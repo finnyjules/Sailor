@@ -23,14 +23,16 @@ import type { OutputFile } from './types'
  * `wav` the runner's exact sound (a float WAV, keepSound). Both are written by
  * the tools into `workDir`, then kept with `putPath`, and read by the tools
  * from `pathOf` / `verifiedPath`: media code never reads them into memory.
+ * R3.17: `mp4` is a Turntable arc's clip as the provider made it, kept the
+ * same way until the arcs are stitched.
  */
-export type KeptExt = 'png' | 'glb' | 'json' | 'bin' | 'mkv' | 'wav'
+export type KeptExt = 'png' | 'glb' | 'json' | 'bin' | 'mkv' | 'wav' | 'mp4'
 
 export const KEPT_GONE = 'A result this step needs is gone. Run the workflow again.'
 /** A run's kept files would pass MEDIA_CAPS.keptBytesPerRun (R5.2; `withRunCap`). */
 export const KEPT_TOO_MUCH = 'This run has made more than the server can keep for it'
 
-const KEPT_NAME_RE = /^([0-9a-f]{64})\.(png|glb|json|bin|mkv|wav)$/
+const KEPT_NAME_RE = /^([0-9a-f]{64})\.(png|glb|json|bin|mkv|wav|mp4)$/
 /** A `workDir` folder's name prefix: never a kept name, so the sweep of a run's files and `runBytes` skip it. */
 const WORK_PREFIX = '.work-'
 

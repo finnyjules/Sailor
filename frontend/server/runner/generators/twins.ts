@@ -378,6 +378,7 @@ export const RUNNER_ROUTES: Readonly<Record<string, Route>> = {
   'LensReframe': r('replicate', 'fal'),
   'PoseMannequin': r('replicate', 'fal'),
   // R3.16, Turntable's front-only spin (family turntable): Luma Ray 2 720p on Replicate, as Python.
+  // R3.17, its arcs with views: Seedance 2.0 on fal, as Python, no backup ('video:seedance-2.0' below).
   'TurntableNode': r('replicate', null, 'Luma Ray 2 is hidden: it runs for saved projects only, and has no carded twin'),
 }
 

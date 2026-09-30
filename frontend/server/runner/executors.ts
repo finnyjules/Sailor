@@ -145,7 +145,8 @@ import { planImageExtras } from './generators/imageExtras'
 import { planLora } from './generators/lora'
 import { planRestyleLora } from './generators/restyleLora'
 import { planNanoExtras } from './generators/nanoExtras'
-import { turntableVideoRequest } from './generators/turntable'
+import { planTurntableViews, turntableVideoRequest } from './generators/turntable'
+import { turntableViews } from '#shared/runner/turntable'
 import type { KeptExt } from './keptBytes'
 import type { MediaValueIO } from '../media/values'
 import type { AnswerKind } from './answerDownload'
@@ -1259,7 +1260,9 @@ async function planNodeRequest(ctx: PlanContext): Promise<NodePlan> {
       return planNanoExtras(ctx)
     // ── turntable (step 3, R3.16): Turntable's front-only spin, Luma Ray 2 720p on Replicate through the video table ──
     // (Generate a video's own Luma builder); the first answer URL is the clip, and Python returns no ui.
+    // With views (R3.17): a pipeline of Seedance 2.0 arcs on fal, stitched with Sailor's own video tools.
     case 'TurntableNode': {
+      if (turntableViews(ctx.prompt[ctx.nodeId]!.inputs ?? {}).length) return planTurntableViews(ctx)
       const t = turntableVideoRequest(ctx)
       const plan = await planVideoGeneration(t.inputs, t.first)
       if (plan.kind !== 'provider') return plan

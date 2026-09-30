@@ -220,10 +220,11 @@ export type RunnerFamily =
   /**
    * Turntable's front-only spin on Replicate's Luma Ray 2 720p (step 3,
    * R3.16), no backup: a product's front picture turned 360° into a seamless
-   * loop. A Turntable with right, back or left views wired (Seedance arcs
-   * stitched together) stays with ComfyUI until R3.17. Needs `cards`: its
-   * picture comes from Image cards and LoadImage, its extra direction takes a
-   * text wire. Off: it goes to ComfyUI, as before.
+   * loop. With right, back or left views wired (R3.17): one Seedance 2.0 arc
+   * per segment on fal, no backup, stitched with Sailor's own video tools, so
+   * only while `media-video` is on too (else ComfyUI, as before). Needs
+   * `cards`: its pictures come from Image cards and LoadImage, its extra
+   * direction takes a text wire. Off: it goes to ComfyUI, as before.
    */
   | 'turntable'
   /**

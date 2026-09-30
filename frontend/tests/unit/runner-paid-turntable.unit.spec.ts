@@ -6,7 +6,9 @@
  * spaced, non-ASCII and missing instructions, each answer shape; the prompts
  * and plan_segments for every subset of views (for R3.17). Priced by what it
  * sends on both paths (ruling (b)): 135 credits front only; with views, one
- * Seedance 2.0 720p arc per segment (456, 684 or 912), left to the engine.
+ * Seedance 2.0 720p arc per segment (456, 684 or 912), left to the engine
+ * here (`media-video` off; R3.17 takes them with it on:
+ * runner-paid-turntable-views.unit.spec.ts).
  */
 import { existsSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
@@ -268,7 +270,7 @@ describe('prices: by what it sends, on both paths (ruling (b))', () => {
   })
 })
 
-// ── Views: the engine's until R3.17 ──────────────────────────────────────────
+// ── Views: the engine's while media-video is off (R3.17 takes them with it on) ─
 
 describe('a Turntable with views is left to the engine, priced by its Seedance arcs', () => {
   it('any wired view, or a wired direction, leaves it to the engine; nodesNeedingEngine names it', () => {
@@ -288,8 +290,9 @@ describe('a Turntable with views is left to the engine, priced by its Seedance a
     expect(runnerTakesNode({ ...base, n: { ...base.n!, inputs: { ...base.n!.inputs, direction: 'up' } } }, 'n', ON)).toBe(false)
   })
 
-  it('the planner never sends a views path (a backstop behind the rule row)', async () => {
-    await expect(planOf({ ...withPicture(caseNamed('left · instructions blank')).n!.inputs, back_reference: ['p_image', 0] })).rejects.toThrow('A Turntable with extra views runs on the engine')
+  it('the planner plans a views path as its arcs, never as the front-only spin (R3.17: runner-paid-turntable-views)', async () => {
+    const plan = await planOf({ ...withPicture(caseNamed('left · instructions blank')).n!.inputs, back_reference: ['p_image', 0] })
+    expect(plan.kind).toBe('pipeline')
   })
 })
 

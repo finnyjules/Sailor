@@ -479,12 +479,22 @@ function turntableCall(model: string, adv: Record<string, unknown>): PaidCall {
  * A wired view counts (the dearest plan); a wired or unknown direction plans
  * as many arcs as either direction does.
  */
+/**
+ * One arc of a Turntable with views (R3.17): Seedance 2.0 first → last frame
+ * at 720p, 5 s. The runner's pipeline prices each segment call with it
+ * (server/runner/generators/turntable.ts), so its hold (every arc) and its
+ * charge (the arcs that finished) come from this one calculation.
+ */
+export function turntableArcCall(): PaidCall {
+  return turntableCall(TURNTABLE_VIEWS_MODEL, { end_image_url: 'end' })
+}
+
 function turntablePlanner(inputs: NodeInputs): PaidCalls {
   const views = turntableViews(inputs)
   if (!views.length) return { steps: [{ call: turntableCall(TURNTABLE_FRONT_MODEL, { loop: true }), times: 1 }] }
   const direction = typeof inputs.direction === 'string' ? inputs.direction : TURNTABLE_DEFAULT_DIRECTION
   const arcs = planSegments(views, direction).length
-  return { steps: [{ call: turntableCall(TURNTABLE_VIEWS_MODEL, { end_image_url: 'end' }), times: arcs }] }
+  return { steps: [{ call: turntableArcCall(), times: arcs }] }
 }
 
 /** Python returns "" before calling anyone when the text is blank (typed; a wired one is priced as a call). */
