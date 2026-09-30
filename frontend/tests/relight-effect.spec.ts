@@ -85,4 +85,122 @@ test.describe('Relight effect', () => {
     await page.mouse.up()
     await expect.poll(() => stackPixels(page)).toBe(lit)
   })
+
+  test('a light near the top lights the top half; moved near the bottom, the bottom half', async ({ page }) => {
+    await openCompositor(page)
+    await seedPhoto(page)
+    await addRelight(page)                                         // Golden key: a single light
+    await expect(page.getByTestId('relight-light-handle')).toHaveCount(1)
+    const h = page.getByTestId('relight-light-handle').first()
+    /** Drag the one light to a layer fraction (0.5, fy), and wait for the GPU pass to re-run. */
+    const dragTo = async (fy: number) => {
+      const runs0 = await runs(page)
+      const hb = (await h.boundingBox())!
+      const L = await layerRect(page)
+      await page.mouse.move(hb.x + hb.width / 2, hb.y + hb.height / 2); await page.mouse.down()
+      await page.mouse.move(L.cx, L.top + L.h * fy, { steps: 10 }); await page.mouse.up()
+      await expect.poll(() => runs(page)).toBeGreaterThan(runs0)
+      return halves(page)
+    }
+    const high = await dragTo(0.06)
+    const low = await dragTo(0.92)
+    // The photo without Relight (Compare held), so the gain per half is independent of the photo.
+    const cb = (await page.getByTestId('relight-compare').boundingBox())!
+    await page.mouse.move(cb.x + cb.width / 2, cb.y + cb.height / 2); await page.mouse.down()
+    const plain = await halves(page)
+    await page.mouse.up()
+    console.log('[relight orientation] plain:', plain, 'light near top:', high, 'light near bottom:', low)
+    expect(high.top).toBeGreaterThan(high.bottom)
+    expect(low.bottom).toBeGreaterThan(low.top)
+    expect(high.top / plain.top).toBeGreaterThan(high.bottom / plain.bottom)
+    expect(low.bottom / plain.bottom).toBeGreaterThan(low.top / plain.top)
+  })
+
+  test('a wheel run over a light raises it as one undo step and does not pan; a click records nothing', async ({ page }) => {
+    await openCompositor(page)
+    await seedPhoto(page)
+    await addRelight(page)
+    const height = () => page.evaluate(() => {
+      const l = (window as any).__compositorLayers()[0]
+      const fx = (l.effects ?? []).find((e: any) => e.type === 'relight')
+      return fx?.lights?.[0]?.height ?? null
+    })
+    const h0 = await height()
+    expect(h0).not.toBeNull()
+    const h = page.getByTestId('relight-light-handle').first()
+    const hb = (await h.boundingBox())!
+    // A click that never moves: no undo step (undo would otherwise pop the effect's own add).
+    await page.mouse.move(hb.x + hb.width / 2, hb.y + hb.height / 2)
+    await page.mouse.down(); await page.mouse.up()
+    for (let i = 0; i < 12; i++) await page.mouse.wheel(0, -40)   // one trackpad-like run
+    await expect.poll(height).toBeGreaterThan(h0 + 0.3)
+    const hb1 = (await h.boundingBox())!
+    // Centres, not corners: a higher light draws a bigger handle.
+    expect(Math.abs(hb1.x + hb1.width / 2 - hb.x - hb.width / 2) + Math.abs(hb1.y + hb1.height / 2 - hb.y - hb.height / 2)).toBeLessThan(1)   // the canvas did not pan
+    await page.keyboard.press('Meta+z')
+    await expect.poll(height).toBeCloseTo(h0, 5)                   // one undo undid the whole run
+    await expect(page.getByTestId('relight-light-handle')).toHaveCount(1)   // …and not the add
+  })
+
+  test('the first Relight add does not stall the main thread on the depth-field build', async ({ page }) => {
+    await openCompositor(page)
+    await seedPhoto(page)
+    await stackPixels(page)                                       // settled: image decoded, depth map loading
+    // A 10 ms heartbeat on the main thread: the longest gap between beats is the longest the
+    // page was blocked (the longtask observer reports nothing in this harness, see the control).
+    const startBeat = () => page.evaluate(() => {
+      const w = window as any
+      clearInterval(w.__beat); w.__maxGap = 0
+      let last = performance.now()
+      w.__beat = setInterval(() => { const n = performance.now(); w.__maxGap = Math.max(w.__maxGap, n - last); last = n }, 10)
+      w.__addAt = last
+    })
+    const maxGap = () => page.evaluate(() => Math.round((window as any).__maxGap))
+    await startBeat()
+    await addRelight(page)                                        // waits until the lit picture painted
+    const litAfter = await page.evaluate(() => Math.round(performance.now() - (window as any).__addAt))
+    const worst = await maxGap()
+    console.log('[relight stall] lit after', litAfter, 'ms; longest main-thread block during first add:', worst, 'ms')
+    expect(worst).toBeLessThan(700)                               // the inline build was 1.4–4.3 s
+    // Control: the heartbeat really sees a block (else the check above passes vacuously).
+    await startBeat()
+    await page.evaluate(() => { const t = performance.now(); while (performance.now() - t < 150) { /* busy */ } })
+    await expect.poll(maxGap).toBeGreaterThanOrEqual(140)
+  })
 })
+
+/** The Relight layer's box in client px, from the dim overlay's hole (rotation 0 in these tests). */
+async function layerRect(page: Page) {
+  return page.evaluate(() => {
+    const svg = document.querySelector('[data-testid="relight-dim"]') as SVGSVGElement
+    const pts = svg.querySelector('polygon')!.getAttribute('points')!.split(' ').map(p => p.split(',').map(Number) as [number, number])
+    const r = svg.getBoundingClientRect()
+    const sx = r.width / Number(svg.getAttribute('width')), sy = r.height / Number(svg.getAttribute('height'))
+    const xs = pts.map(p => r.left + p[0] * sx), ys = pts.map(p => r.top + p[1] * sy)
+    const left = Math.min(...xs), top = Math.min(...ys), w = Math.max(...xs) - left, h = Math.max(...ys) - top
+    return { left, top, w, h, cx: left + w / 2 }
+  })
+}
+
+/** Mean luminance of the layer's top and bottom halves on the stack canvas (inset 5%). */
+async function halves(page: Page): Promise<{ top: number; bottom: number }> {
+  await stackPixels(page)                                         // wait for a settled frame
+  const L = await layerRect(page)
+  return page.evaluate((L) => {
+    const cv = document.querySelector('[data-testid="compositor-stack-canvas"]') as HTMLCanvasElement
+    const cr = cv.getBoundingClientRect()
+    const k = cv.width / cr.width
+    const c = document.createElement('canvas'); c.width = cv.width; c.height = cv.height
+    const x = c.getContext('2d')!; x.drawImage(cv, 0, 0)
+    const x0 = Math.round((L.left - cr.left + L.w * 0.05) * k), x1 = Math.round((L.left - cr.left + L.w * 0.95) * k)
+    const y0 = Math.round((L.top - cr.top + L.h * 0.05) * k), y1 = Math.round((L.top - cr.top + L.h * 0.95) * k)
+    const d = x.getImageData(x0, y0, x1 - x0, y1 - y0).data
+    const W = x1 - x0, H = y1 - y0
+    let t = 0, b = 0, nt = 0, nb = 0
+    for (let y = 0; y < H; y++) for (let i = 0; i < W; i++) {
+      const o = (y * W + i) * 4, lum = 0.2126 * d[o]! + 0.7152 * d[o + 1]! + 0.0722 * d[o + 2]!
+      if (y < H / 2) { t += lum; nt++ } else { b += lum; nb++ }
+    }
+    return { top: t / nt, bottom: b / nb }
+  }, L)
+}
