@@ -11,9 +11,9 @@ import { DEFAULT_FEATHER } from '~/lib/compositor/feather'
 import { canTakeGeometry, canWarpRaster } from '~/composables/useCompositorLayers'
 
 describe('effect kinds', () => {
-  it('has 45 kinds, 5 pinned and 40 orderable, all labelled in sentence case', () => {
-    expect(EFFECT_ORDER).toHaveLength(45)
-    expect(PINNED_KINDS).toEqual(['background_blur', 'backdrop_shader', 'backdrop_luminance_mask', 'dof', 'drop_shadow'])
+  it('has 46 kinds, 6 pinned and 40 orderable, all labelled in sentence case', () => {
+    expect(EFFECT_ORDER).toHaveLength(46)
+    expect(PINNED_KINDS).toEqual(['background_blur', 'backdrop_shader', 'backdrop_luminance_mask', 'dof', 'relight', 'drop_shadow'])
     expect(ORDERABLE_KINDS).toHaveLength(40)
     expect(new Set([...PINNED_KINDS, ...ORDERABLE_KINDS])).toEqual(new Set(EFFECT_ORDER))
     for (const k of EFFECT_ORDER) expect(EFFECT_LABELS[k], k).toMatch(/^[A-Z][a-z]/)
@@ -63,7 +63,7 @@ describe('effect kinds', () => {
     for (let i = 1; i < indices.length; i++) expect(indices[i]).toBe(indices[i - 1]! + 1)
     const lastGeometry = Math.max(...indices)
     for (const k of EFFECT_ORDER) {
-      if (isGeometryKind(k) || k === 'background_blur' || k === 'backdrop_shader' || k === 'backdrop_luminance_mask' || k === 'dof') continue
+      if (isGeometryKind(k) || k === 'background_blur' || k === 'backdrop_shader' || k === 'backdrop_luminance_mask' || k === 'dof' || k === 'relight') continue
       expect(EFFECT_ORDER.indexOf(k), k).toBeGreaterThan(lastGeometry)
     }
     for (const k of GEOMETRY_KINDS) expect(isGeometryKind(k)).toBe(true)
@@ -71,7 +71,7 @@ describe('effect kinds', () => {
   })
   it('regionOf assigns every kind to the right region', () => {
     const expected: Record<EffectKind, string> = {
-      background_blur: 'backdrop', backdrop_shader: 'backdrop', backdrop_luminance_mask: 'backdrop', dof: 'backdrop',
+      background_blur: 'backdrop', backdrop_shader: 'backdrop', backdrop_luminance_mask: 'backdrop', dof: 'backdrop', relight: 'backdrop',
       trim: 'geometry', offset: 'geometry', round_corners: 'geometry', roughen: 'geometry',
       boolean: 'geometry', morph: 'geometry', warp: 'geometry', shatter: 'geometry', long_shadow: 'geometry',
       inner_shadow: 'pixel', inner_glow: 'pixel', diffused_edge: 'pixel', adjust: 'pixel', duotone: 'pixel', gradientMap: 'pixel',
@@ -574,5 +574,24 @@ describe('canWarpRaster (raster warp eligibility, F3 4b)', () => {
       'image', 'wired', 'brush', 'line', 'deal', 'scatter', 'mosaic']) {
       expect(canWarpRaster(vec(k)) && canTakeGeometry(vec(k)), k).toBe(false)
     }
+  })
+})
+
+describe('relight kind', () => {
+  it('is a pinned kind named Relight, placed right after depth of field', () => {
+    expect(EFFECT_LABELS.relight).toBe('Relight')
+    expect(isPinnedKind('relight')).toBe(true)
+    expect(regionOf('relight')).toBe('backdrop')
+    expect(EFFECT_ORDER.indexOf('relight')).toBe(EFFECT_ORDER.indexOf('dof') + 1)
+  })
+  it('creates a fresh Golden key effect each time (lights never shared)', () => {
+    const a = createEffect('relight') as any, b = createEffect('relight') as any
+    expect(a.lights).toHaveLength(1)
+    expect(a.lights).not.toBe(b.lights)
+    expect(a).toMatchObject({ type: 'relight', visible: true, keep: 0.12, depth: 4 })
+  })
+  it('refuses a second Relight on the same layer', () => {
+    const one = addEffect([], 'relight')
+    expect(addEffect(one, 'relight')).toHaveLength(one.length)
   })
 })

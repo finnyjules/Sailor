@@ -310,14 +310,14 @@ import type {
   TornEdgeEffect, FeatherEffect, LayerEffect, EffectInstance, EffectKind, WarpEffect,
   ShaderPixelEffect, BackdropShaderEffect, BackdropLuminanceMaskEffect,
   RisographEffect, PhotocopyEffect, LetterpressEffect,
-  SpotUvEffect,
+  SpotUvEffect, RelightEffect,
 } from '~/lib/compositor/effectStack'
 export type {
   DropShadowEffect, LayerBlurEffect, InnerShadowEffect, BackgroundBlurEffect,
   TornEdgeEffect, FeatherEffect, LayerEffect, EffectInstance, EffectKind,
   ShaderPixelEffect, BackdropShaderEffect, BackdropLuminanceMaskEffect,
   RisographEffect, PhotocopyEffect, LetterpressEffect,
-  SpotUvEffect,
+  SpotUvEffect, RelightEffect,
 }
 export type { AdjustEffect, BloomEffect, DofEffect, DuotoneEffect, GradientMapEffect, GrainEffect, PostEffect, VignetteEffect }
 

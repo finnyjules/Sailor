@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { dofShouldRun } from '~/lib/compositor/dofPass'
 import {
-  defaultPostEffect, isGpuEffect, isChainEffect, chainActive, gpuActive,
+  defaultPostEffect, isGpuEffect, isChainEffect, chainActive, gpuActive, GPU_TYPES,
 } from '~/lib/compositor/postEffects'
 import type { DofEffect } from '~/lib/compositor/postEffects'
 
@@ -31,5 +31,10 @@ describe('dof paint routing contract', () => {
     const both = [defaultPostEffect('dof'), defaultPostEffect('vignette')]
     expect(gpuActive(both)).toBe(true)
     expect(chainActive(both)).toBe(true)
+  })
+
+  it('routes relight to the GPU stage, never the 2D chain', () => {
+    expect(GPU_TYPES.has('relight')).toBe(true)
+    expect(isChainEffect({ type: 'relight' } as any)).toBe(false)
   })
 })

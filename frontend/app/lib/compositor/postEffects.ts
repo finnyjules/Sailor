@@ -373,8 +373,8 @@ export const chainActive = (effects?: { type: string; visible?: boolean }[]): bo
 
 /** GPU-stage effects. Deliberately DISJOINT from CHAIN_TYPES: applyEffectChain must
  *  never see these, or they'd be silently skipped while appearing to be handled. */
-export const GPU_TYPES = new Set<string>(['dof'])
-export const isGpuEffect = (e: { type: string }): e is DofEffect => GPU_TYPES.has(e.type)
+export const GPU_TYPES = new Set<string>(['dof', 'relight'])
+export const isGpuEffect = (e: { type: string }): boolean => GPU_TYPES.has(e.type)
 export const gpuActive = (effects?: { type: string; visible?: boolean }[]): boolean =>
   !!effects?.some(e => e.visible !== false && GPU_TYPES.has(e.type))
 

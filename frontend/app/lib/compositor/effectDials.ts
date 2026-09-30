@@ -63,6 +63,9 @@ export const EFFECT_DIAL_SCHEMA: Record<EffectKind, DialSpec[]> = {
     num('bloomThreshold', 'Bloom threshold', 0, 1),
     num('bloomStrength', 'Bloom strength', 0, 4),
   ],
+  // Light dials are animated in stage 4 (per-light Motion targets); the photo controls
+  // are not dials yet either.
+  relight: [],
   // ── geometry (F2/F3) ───────────────────────────────────────────────────────────
   trim: [num('start', 'Start', 0, 1), num('end', 'End', 0, 1), num('offset', 'Offset', 0, 1)],
   offset: [num('distance', 'Distance', -0.2, 0.2)],

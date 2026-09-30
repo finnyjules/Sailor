@@ -241,6 +241,8 @@ export function planFrameExport(input: FrameExportInput): FramePlan {
       if (ref) depth.push({ ref, layerId: l.id, label: layerLabel(l) })
       else notices.push({ group: 'leftOut', text: `Depth blur on ${layerLabel(l)} · needs a depth map`, layerId: l.id })
     }
+    const hasRelight = effectStackOf(l as any).some(e => e.type === 'relight' && (e as { visible?: boolean }).visible !== false)
+    if (hasRelight) notices.push({ group: 'leftOut', text: `Relight on ${layerLabel(l)} · shown without it in this version`, layerId: l.id })
   }
 
   const strings = new Set<string>()

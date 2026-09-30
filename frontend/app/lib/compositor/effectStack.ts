@@ -17,6 +17,9 @@ import { DEFAULT_TORN_EDGE, tornEdgeActive, type TornEdgeSpec } from './tornEdge
 import { DEFAULT_FEATHER, featherActive, type FeatherSpec } from './feather'
 import { POST_EFFECT_DEFAULTS, type PostEffect } from './postEffects'
 import type { ParamValue } from '~/lib/shaderfx/types'
+import type { RelightEffect } from '~/lib/relight/settings'
+import { defaultRelightSettings } from '~/lib/relight/settings'
+export type { RelightEffect } from '~/lib/relight/settings'
 
 // ── the four layer-local effects (moved verbatim from useCompositorLayers.ts) ──────────
 // All distances normalized to canvas width, like every other dimension in the Compositor,
@@ -183,6 +186,7 @@ export type LayerEffect =
   | ShaderPixelEffect
   | RisographEffect | PhotocopyEffect | LetterpressEffect
   | SpotUvEffect
+  | RelightEffect
   | PostEffect
 
 /** A stored effect, addressed by a stable id. */
@@ -196,7 +200,7 @@ export type EffectKind = LayerEffect['type']
  * the order the add menu lists them, and where a pinned kind sits.
  */
 export const EFFECT_ORDER = [
-  'background_blur', 'backdrop_shader', 'backdrop_luminance_mask', 'dof', 'trim', 'offset', 'round_corners', 'roughen', 'boolean', 'morph', 'warp', 'shatter', 'long_shadow', 'inner_shadow', 'inner_glow', 'diffused_edge',
+  'background_blur', 'backdrop_shader', 'backdrop_luminance_mask', 'dof', 'relight', 'trim', 'offset', 'round_corners', 'roughen', 'boolean', 'morph', 'warp', 'shatter', 'long_shadow', 'inner_shadow', 'inner_glow', 'diffused_edge',
   'adjust', 'levels', 'posterise', 'threshold', 'invert', 'duotone', 'gradientMap', 'color_overlay', 'gradient_overlay', 'stroke_from_alpha', 'shader',
   'bloom', 'halation', 'vignette', 'grain', 'torn_edge', 'feather', 'rough_edge', 'ink_bleed', 'risograph', 'photocopy', 'letterpress',
   'spot_uv',
@@ -210,9 +214,12 @@ export const EFFECT_ORDER = [
  *    scaffolding — coexists with background_blur (both are additive backdrop treatments);
  *  - dof needs its depth map aligned to the layer's own pixels, before the layer is
  *    rotated/scaled into frame space, and runs on the GPU against a box-sized source;
+ *  - relight, like dof, needs its depth field aligned to the layer's own pixels before the
+ *    layer is placed, and runs on the GPU against a box-sized source (before dof, so the
+ *    blur sees the relit picture).
  *  - drop_shadow is derived from the finished silhouette at stamp time.
  *  At most one of each per layer, and they never move. */
-export const PINNED_KINDS = ['background_blur', 'backdrop_shader', 'backdrop_luminance_mask', 'dof', 'drop_shadow'] as const satisfies readonly EffectKind[]
+export const PINNED_KINDS = ['background_blur', 'backdrop_shader', 'backdrop_luminance_mask', 'dof', 'relight', 'drop_shadow'] as const satisfies readonly EffectKind[]
 export const ORDERABLE_KINDS = EFFECT_ORDER.filter(
   (k): k is Exclude<EffectKind, typeof PINNED_KINDS[number]> => !(PINNED_KINDS as readonly string[]).includes(k),
 )
@@ -232,7 +239,7 @@ export const isGeometryKind = (k: EffectKind): boolean =>
  *  Reorder and add both respect regions: an effect only ever moves within its own region. */
 export type EffectRegion = 'backdrop' | 'geometry' | 'pixel' | 'stamp'
 export function regionOf(kind: EffectKind): EffectRegion {
-  if (kind === 'background_blur' || kind === 'backdrop_shader' || kind === 'backdrop_luminance_mask' || kind === 'dof') return 'backdrop'
+  if (kind === 'background_blur' || kind === 'backdrop_shader' || kind === 'backdrop_luminance_mask' || kind === 'dof' || kind === 'relight') return 'backdrop'
   if (kind === 'drop_shadow') return 'stamp'
   if (isGeometryKind(kind)) return 'geometry'
   return 'pixel'
@@ -244,6 +251,7 @@ export const EFFECT_LABELS: Record<EffectKind, string> = {
   backdrop_shader: 'Backdrop shader',
   backdrop_luminance_mask: 'Backdrop luminance mask',
   dof: 'Depth of field',
+  relight: 'Relight',
   trim: 'Trim path',
   offset: 'Offset path',
   round_corners: 'Round corners',
@@ -290,7 +298,7 @@ export const EFFECT_LABELS: Record<EffectKind, string> = {
 /** How the add menu groups the kinds. Menu-only: the pipeline still runs in EFFECT_ORDER.
  *  Every kind sits in exactly one group (unit-tested), so a new kind must be placed here. */
 export const EFFECT_MENU_GROUPS: readonly { label: string; kinds: readonly EffectKind[] }[] = [
-  { label: 'Light & shadow', kinds: ['drop_shadow', 'outer_glow', 'inner_shadow', 'inner_glow', 'bloom', 'halation', 'vignette'] },
+  { label: 'Light & shadow', kinds: ['drop_shadow', 'outer_glow', 'inner_shadow', 'inner_glow', 'bloom', 'halation', 'vignette', 'relight'] },
   { label: 'Colour', kinds: ['adjust', 'levels', 'posterise', 'threshold', 'invert', 'duotone', 'gradientMap', 'color_overlay', 'gradient_overlay'] },
   { label: 'Blur', kinds: ['layer_blur', 'directional_blur', 'radial_blur', 'zoom_blur'] },
   { label: 'Edges', kinds: ['feather', 'diffused_edge', 'torn_edge', 'rough_edge', 'stroke_from_alpha'] },
@@ -362,6 +370,10 @@ const LOCAL_DEFAULTS: Record<string, Omit<LayerEffect, 'type'> & Record<string, 
 }
 
 function defaultsFor(kind: EffectKind): Record<string, unknown> {
+  // A fresh Relight must own its own `lights` array — `createEffect` only spreads what this
+  // returns, so a shared table entry would share its `lights` array between every Relight
+  // in the document. `defaultRelightSettings()` returns a fresh object each call.
+  if (kind === 'relight') return defaultRelightSettings()
   const local = LOCAL_DEFAULTS[kind]
   // Deep clone here too: a shallow spread hands every new `shader` effect the SAME
   // `params: {}` object reference, so tuning one layer's shader params would mutate

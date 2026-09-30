@@ -14,4 +14,7 @@ function expectPartition(all: readonly string[], groups: readonly { label: strin
 describe('add-menu groups', () => {
   it('Frame: every effect kind is in exactly one group', () => expectPartition(EFFECT_ORDER, EFFECT_MENU_GROUPS))
   it('3D: every treatment kind is in exactly one group', () => expectPartition(TREATMENT_KINDS, TREATMENT_MENU_GROUPS))
+  it('lists Relight under Light & shadow', () => {
+    expect(EFFECT_MENU_GROUPS.find(g => g.label === 'Light & shadow')!.kinds).toContain('relight')
+  })
 })
