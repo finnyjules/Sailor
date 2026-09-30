@@ -40,4 +40,9 @@ describe('relightSurfaceRefs', () => {
     const layers = [{ kind: 'image', filename: 'a.png', effects: [] }]
     expect(relightSurfaceRefs(layers)).toEqual([])
   })
+
+  it('excludes a hidden layer even with a visible Relight effect — no paint ever reads it', () => {
+    const layers = [{ kind: 'image', filename: 'a.png', visible: false, effects: relightFx(true) }]
+    expect(relightSurfaceRefs(layers)).toEqual([])
+  })
 })

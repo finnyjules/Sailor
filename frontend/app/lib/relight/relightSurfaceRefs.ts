@@ -15,7 +15,13 @@ export interface RelightLayerLike extends StackHost {
   kind?: string
   filename?: string
   depthKey?: string
+  visible?: boolean
 }
+
+/** Same rule as `layerHidden` (useCompositorLayers.ts): visible === false is hidden,
+ *  undefined means visible. Inlined rather than imported — this file stays a small, pure
+ *  leaf with no edge into the composable's much larger module graph. */
+const layerHidden = (l: { visible?: boolean }): boolean => l.visible === false
 
 function depthSourceOf(l: RelightLayerLike): DepthRef | undefined {
   if (l.kind === 'image') return l.filename || undefined
@@ -23,11 +29,15 @@ function depthSourceOf(l: RelightLayerLike): DepthRef | undefined {
   return undefined
 }
 
-/** The depth refs of every layer carrying a VISIBLE Relight effect and a depth source,
- *  deduped by `depthKey` so two layers of the same photo request surfaces once. */
+/** The depth refs of every VISIBLE layer carrying a VISIBLE Relight effect and a depth
+ *  source, deduped by `depthKey` so two layers of the same photo request surfaces once.
+ *  A hidden layer is excluded even with a visible Relight effect — no paint ever reads
+ *  a hidden layer's content (`layerHidden` in `paintLayerStack`), so reading its surfaces
+ *  would be a paid call nothing ever uses. */
 export function relightSurfaceRefs(layers: readonly RelightLayerLike[] | null | undefined): DepthRef[] {
   const seen = new Map<string, DepthRef>()
   for (const l of layers ?? []) {
+    if (layerHidden(l)) continue
     const relight = effectStackOf(l).find(e => e.type === 'relight')
     if (!relight || relight.visible === false) continue
     const ref = depthSourceOf(l)
