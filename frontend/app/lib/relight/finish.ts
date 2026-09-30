@@ -63,3 +63,20 @@ export function finishApplyPatch(layer: FinishableLayer, filename: string, relig
 export function finishRevertPatch(layer: FinishableLayer): FinishPatch {
   return { filename: layer.filename, crop: layer.crop, ...writeStackToLayer(effectStackOf(layer)) }
 }
+
+/**
+ * The Finish pair's pixel size. `du × dv` is the fraction of the source the layer's box shows
+ * (1 × 1 without a cover crop), so the box covers `du·srcW × dv·srcH` source pixels. The box
+ * keeps its OWN aspect `layerW : layerH` (an uncropped image layer can be stretched to any
+ * shape), sized at the source's pixel density (the denser axis wins), long edge capped at
+ * `maxEdge`, never upscaled. Null for a degenerate box or source.
+ */
+export function finishBoxSize(
+  layerW: number, layerH: number, du: number, dv: number, srcW: number, srcH: number, maxEdge: number,
+): { w: number; h: number } | null {
+  if (!(layerW > 0) || !(layerH > 0) || !(srcW > 0) || !(srcH > 0) || !(du > 0) || !(dv > 0)) return null
+  const density = Math.max((du * srcW) / layerW, (dv * srcH) / layerH)
+  const boxW = layerW * density, boxH = layerH * density
+  const k = Math.min(1, maxEdge / Math.max(boxW, boxH))
+  return { w: Math.max(1, Math.round(boxW * k)), h: Math.max(1, Math.round(boxH * k)) }
+}

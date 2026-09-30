@@ -8,7 +8,7 @@
  * Task 4's browser test (per the brief).
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { finishApplyPatch, finishRevertPatch, canFinishRelight, type FinishableLayer } from '~/lib/relight/finish'
+import { finishApplyPatch, finishRevertPatch, canFinishRelight, finishBoxSize, type FinishableLayer } from '~/lib/relight/finish'
 import { requestRelightFinish } from '~/composables/useRelightFinish'
 import { effectStackOf } from '~/lib/compositor/effectStack'
 import {
@@ -270,5 +270,27 @@ describe('requestRelightFinish', () => {
     vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, status: 200, json: async () => ({}) })))
     const res = await requestRelightFinish(ORIGINAL, GUIDE)
     expect(res.ok).toBe(false)
+  })
+})
+
+describe('finishBoxSize', () => {
+  it('a stretched, uncropped layer keeps its own aspect, not the photo\'s', () => {
+    // tall box (1 × 2 W units), landscape source 2000×1000, whole image shown
+    const s = finishBoxSize(1, 2, 1, 1, 2000, 1000, 1536)!
+    expect(s.h / s.w).toBeCloseTo(2, 2)
+    expect(Math.max(s.w, s.h)).toBe(1536)
+  })
+  it('a cover-cropped box reads at the source\'s own resolution, never upscaled', () => {
+    // 16:9 box showing the middle 9/16 of a 1000×1000 source's height → 1000×562.5 source px
+    const s = finishBoxSize(1, 9 / 16, 1, 9 / 16, 1000, 1000, 1536)!
+    expect(s).toEqual({ w: 1000, h: 563 })
+  })
+  it('caps the long edge at maxEdge for a big photo', () => {
+    const s = finishBoxSize(1, 1, 1, 1, 4000, 4000, 1536)!
+    expect(s).toEqual({ w: 1536, h: 1536 })
+  })
+  it('degenerate inputs → null', () => {
+    expect(finishBoxSize(0, 1, 1, 1, 100, 100, 1536)).toBeNull()
+    expect(finishBoxSize(1, 1, 1, 1, 0, 100, 1536)).toBeNull()
   })
 })

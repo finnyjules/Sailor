@@ -109,7 +109,7 @@ import { surfacesImageFor } from '~/lib/compositor/surfacesRegistry'
 import { sanitizeRelight } from '~/lib/relight/settings'
 import { applyRelight, relightAvailable } from '~/lib/relight/relightPass'
 import { relightDepthFieldFor, FULL_DEPTH_RECT, type DepthRect } from '~/lib/relight/depthField'
-import { canFinishRelight } from '~/lib/relight/finish'
+import { canFinishRelight, finishBoxSize } from '~/lib/relight/finish'
 import { ensureFillBitmaps, getFillBitmap } from '~/lib/paint/imageFillCache'
 import { applyTornEdge, type TornEdgeSpec } from '~/lib/compositor/tornEdge'
 import { applyFeather, type FeatherSpec } from '~/lib/compositor/feather'
@@ -7325,19 +7325,19 @@ export async function renderRelightPair(
   const srcH = srcEl.naturalHeight || srcEl.height || 0
   if (!(srcW > 0) || !(srcH > 0)) return null
 
-  // The box's native pixel size: `rs.rect` is the fraction of the source the box shows (the
-  // whole image, `du=dv=1`, when the layer has no cover crop) — read at the source's OWN
-  // resolution, not the editor's. `coverSourceRect` builds `rect` so this ratio already equals
-  // the box's aspect, so no separate aspect computation is needed here.
-  const nativeW = rs.rect.du * srcW, nativeH = rs.rect.dv * srcH
-  const downscale = Math.min(1, maxEdge / Math.max(nativeW, nativeH))
-  const bw = Math.max(1, Math.round(nativeW * downscale))
-  const bh = Math.max(1, Math.round(nativeH * downscale))
-  // The effective width unit that makes `drawLayerContent`'s own `layer.w * W'` land on exactly
-  // this box: box aspect is independent of W (both `layer.w*W` and `layer.h*W` scale together),
-  // so any `W'` reproduces the identical box — just at THIS resolution instead of the preview's.
-  const layerW = (layer as ImageLayer).w
-  const Weff = layerW > 0 ? bw / layerW : W
+  // The box's native pixel size. `rs.rect` is the fraction of the source the box shows (the
+  // whole image, `du=dv=1`, when the layer has no cover crop), so `nativeW × nativeH` is how
+  // many source pixels the box covers. The box's own aspect is `layer.w : layer.h` (both in
+  // W units) — with a cover crop it equals the rect's, but an uncropped image layer can be
+  // stretched to any shape, so size the box by its OWN aspect at the source's pixel density
+  // (the denser axis wins), then cap the long edge at maxEdge, never upscaling.
+  const layerW = (layer as ImageLayer).w, layerH = (layer as ImageLayer).h
+  const size = finishBoxSize(layerW, layerH, rs.rect.du, rs.rect.dv, srcW, srcH, maxEdge)
+  if (!size) return null
+  const bw = size.w, bh = size.h
+  // The effective width unit that makes `drawLayerContent`'s own `layer.w * W'` and
+  // `layer.h * W'` land on exactly this box, at THIS resolution instead of the preview's.
+  const Weff = bw / layerW
 
   const src = document.createElement('canvas'); src.width = bw; src.height = bh
   const sctx = src.getContext('2d')
