@@ -220,10 +220,10 @@ describe('the rows (rule 1)', () => {
     expect(Object.hasOwn(MEDIA_EFFECT_FAMILY_OF, 'SaveAudioOpus')).toBe(false)
   })
 
-  it('the pilots’ rows: a local render reading frame batches only, their widgets as ComfyUI validates them', () => {
-    expect([...MEDIA_EFFECTS_PORTED].sort()).toEqual(['FrameTrail', 'VideoReverse', 'VideoTrim'])
+  it('the time effects’ rows (R6.1’s pilots, R6.2’s four): a local render reading frame batches only, their widgets as ComfyUI validates them', () => {
+    expect([...MEDIA_EFFECTS_PORTED].sort()).toEqual(['FrameTrail', 'SlitScan', 'SpeedRamp', 'TemporalMotionBlur', 'TimeDisplacement', 'VideoReverse', 'VideoTrim'])
     const rows = mediaEffectRows()
-    expect(Object.keys(rows).sort()).toEqual(['FrameTrail', 'VideoReverse', 'VideoTrim'])
+    expect(Object.keys(rows).sort()).toEqual(['FrameTrail', 'SlitScan', 'SpeedRamp', 'TemporalMotionBlur', 'TimeDisplacement', 'VideoReverse', 'VideoTrim'])
     for (const [cls, row] of Object.entries(rows)) {
       expect(row, cls).toMatchObject({ family: 'video-time', local: 'render', mustLink: ['frames'], required: ['frames'], valueInputs: { frames: ['frames'] } })
       expect(row.linkSources!.frames, cls).toEqual(expect.arrayContaining(FRAMES_OUTPUTS.map(x => [...x])))
@@ -238,15 +238,24 @@ describe('the rows (rule 1)', () => {
   })
 
   it('FRAMES_OUTPUTS: Get video components, Load video frames and each ported effect; FRAME_ENCODERS: Create video, Save video frames', () => {
-    expect(FRAMES_OUTPUTS.map(x => [...x])).toEqual([['GetVideoComponents', 0], ['LoadVideoFrames', 0], ['FrameTrail', 0], ['VideoReverse', 0], ['VideoTrim', 0]])
+    expect(FRAMES_OUTPUTS.map(x => [...x])).toEqual([
+      ['GetVideoComponents', 0], ['LoadVideoFrames', 0], ['FrameTrail', 0], ['VideoReverse', 0], ['VideoTrim', 0],
+      ['TemporalMotionBlur', 0], ['SlitScan', 0], ['TimeDisplacement', 0], ['SpeedRamp', 0],
+    ])
     expect([...FRAME_ENCODERS]).toEqual(['CreateVideo', 'SaveVideoFrames'])
-    expect(MEDIA_EFFECT_OUTPUT_KINDS).toEqual({ FrameTrail: { 0: 'frames' }, VideoReverse: { 0: 'frames' }, VideoTrim: { 0: 'frames' } })
+    expect(MEDIA_EFFECT_OUTPUT_KINDS).toEqual({
+      FrameTrail: { 0: 'frames' }, VideoReverse: { 0: 'frames' }, VideoTrim: { 0: 'frames' },
+      TemporalMotionBlur: { 0: 'frames' }, SlitScan: { 0: 'frames' }, TimeDisplacement: { 0: 'frames' }, SpeedRamp: { 0: 'frames' },
+    })
     for (const [cls, input] of [['CreateVideo', 'images'], ['SaveVideoFrames', 'frames']] as const) {
       expect(RUNNER_NODE_RULES[cls]!.linkSources![input], cls).toEqual(expect.arrayContaining(FRAMES_OUTPUTS.map(x => [...x])))
     }
     expect(VIDEO_EFFECTS.VideoTrim!.reads).toBe('stream')
     expect(VIDEO_EFFECTS.VideoReverse!.reads).toBe('held')
     expect(VIDEO_EFFECTS.FrameTrail!.reads).toBe('stream')
+    expect(VIDEO_EFFECTS.SlitScan!.reads).toBe('held')
+    expect(VIDEO_EFFECTS.TimeDisplacement!.reads).toBe('held')
+    expect(VIDEO_EFFECTS.SpeedRamp!.reads).toBe('window')
   })
 
   it('an effect’s slot carries frames only while its family is on', () => {

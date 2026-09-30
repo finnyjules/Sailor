@@ -1,7 +1,10 @@
 /**
- * Task R6.1's pilots, family `video-time` (server/runner/video/): Trim
- * (read one frame at a time), Reverse / ping-pong (every frame held) and
- * Frame trail (a state carried from frame to frame), against the real
+ * The time effects, family `video-time` (server/runner/video/): R6.1's
+ * pilots Trim (read one frame at a time), Reverse / ping-pong (every frame
+ * held) and Frame trail (a state carried from frame to frame), and R6.2's
+ * Motion blur (time) (Python raises on every clip longer than one frame),
+ * Slit scan and Time displacement (every frame held, each output frame
+ * gathered from many) and Speed ramp (a sliding window), against the real
  * Python (scripts/runner_media_fixtures.py --group vfx-time: each case the
  * node's own execute with its hidden unique_id set, its live preview and its
  * output).
@@ -63,13 +66,26 @@ vi.mock('~~/server/runner/compositor/worker', async (importOriginal) => {
   }
 })
 
+/** Every heldFrames call (a spy): the batch it held and the most it was allowed to. */
+const HELD = vi.hoisted(() => ({ calls: [] as { count: number; w: number; h: number; maxBytes: number }[] }))
+vi.mock('~~/server/media/values', async (importOriginal) => {
+  const real = await importOriginal<typeof import('~~/server/media/values')>()
+  return {
+    ...real,
+    heldFrames: ((v, io, lease, maxBytes) => {
+      HELD.calls.push({ count: v.count, w: v.w, h: v.h, maxBytes })
+      return real.heldFrames(v, io, lease, maxBytes)
+    }) as typeof real.heldFrames,
+  }
+})
+
 import type { ApiPrompt } from '#shared/runner/graph'
 import { ALL_RUNNER_FAMILIES, MEDIA_EFFECT_TOOL_FAMILIES, MEDIA_TOOL_FAMILIES, type RunnerFamily } from '#shared/runner/families'
-import { MEDIA_EFFECTS_PORTED } from '#shared/runner/mediaEffects'
+import { MEDIA_EFFECTS_PORTED, MEDIA_EFFECT_WORDS } from '#shared/runner/mediaEffects'
 import { PICTURE_OUTPUTS } from '#shared/runner/eligibility'
 import { runnerTakesWorkflow } from '#shared/runner/validate'
 import { nodesNeedingEngine } from '#shared/runner/needsEngine'
-import { MEDIA_WORDS } from '#shared/runner/media'
+import { MEDIA_CAPS, MEDIA_WORDS } from '#shared/runner/media'
 import { decodeFrames } from '~~/server/media/decode'
 import { probeMedia, pyFrameCount, pyFrameRate } from '~~/server/media/probe'
 import type { OutputFile, RunnerValue } from '~~/server/runner/types'
@@ -77,6 +93,7 @@ import { LOCAL_LIVE_PREVIEW_SUBFOLDER } from '~~/server/runner/results'
 import { compositorCore } from '~~/server/runner/compositor/plane'
 import { workerScript } from '~~/server/runner/compositor/worker'
 import { videoCores } from '~~/server/runner/video/cores'
+import { VIDEO_EFFECTS, windowSchedule } from '~~/server/runner/video/table'
 import { clipPath, requireMediaTools } from './__runner__/mediaParity'
 import { makeKit } from './__runner__/kit'
 import { createFileKeptBytes } from '~~/server/runner/keptBytes'
@@ -109,7 +126,13 @@ describe('the fixture', () => {
     expect(FX.threads.opencv).toBeGreaterThan(0)
     const classes = new Set(FX.runs.map(r => r.class_type))
     expect([...classes].sort()).toEqual([...MEDIA_EFFECTS_PORTED].sort())
-    expect(FX.runs.filter(r => r.error)).toEqual([])
+    // Python raises only in Motion blur (time), on every clip longer than one frame (its replicate pad of a 4-D tensor).
+    expect(FX.runs.filter(r => r.error).map(r => r.class_type)).toEqual(expect.arrayContaining(['TemporalMotionBlur']))
+    for (const r of FX.runs) {
+      const raises = r.class_type === 'TemporalMotionBlur' && FX.clips[r.input]!.frames > 1
+      expect(!!r.error, r.name).toBe(raises)
+      if (r.error) expect(r.error, r.name).toMatch(/^NotImplementedError: Padding size 2 is not supported for 4D input tensor\./)
+    }
     for (const cls of classes) {
       for (const clip of ['clip8', 'clip8-odd', 'clip2', 'clip1', 'clip8-big']) {
         expect(FX.runs.some(r => r.class_type === cls && r.input === clip), `${cls} over ${clip}`).toBe(true)
@@ -121,12 +144,89 @@ describe('the fixture', () => {
     expect(trim).toContainEqual({ start: 2, end: 50 })
     const pp = FX.runs.filter(r => r.class_type === 'VideoReverse' && r.widgets.mode === 'ping_pong').map(r => FX.clips[r.input]!.frames)
     expect(pp).toEqual(expect.arrayContaining([1, 2, 8]))
+    // R6.2's own cases: Speed ramp at every mode with speed 0.05 / 1 / 10 and start_speed 0.05 / 10; Slit scan with
+    // delay 0 and 4, both axes, wrap on and off; Time displacement at noise_scale 8 and 400 and seeds 0 and 2³¹ − 1.
+    const of = (cls: string) => FX.runs.filter(r => r.class_type === cls).map(r => r.widgets)
+    for (const mode of ['constant', 'ramp_in', 'ramp_out', 'ramp_in_out']) {
+      for (const speed of [0.05, 1, 10]) for (const start of [0.05, 10]) expect(of('SpeedRamp'), `${mode} ${speed} ${start}`).toContainEqual(expect.objectContaining({ mode, speed, start_speed: start }))
+      expect(of('SpeedRamp').some(w => w.mode === mode && w.interpolation === 'nearest'), mode).toBe(true)
+    }
+    for (const delay of [0, 4]) {
+      for (const axis of ['horizontal', 'vertical']) for (const wrap of [false, true]) expect(of('SlitScan')).toContainEqual({ delay, axis, wrap })
+    }
+    for (const noise_scale of [8, 400]) for (const seed of [0, 2 ** 31 - 1]) expect(of('TimeDisplacement')).toContainEqual(expect.objectContaining({ noise_scale, seed }))
+    expect(of('TimeDisplacement')).toContainEqual(expect.objectContaining({ strength: 0 }))
+  })
+})
+
+/**
+ * Speed ramp's ramp_in_out running sum against Python's, relative: measured
+ * worst 8.5 × 10⁻⁷ over the fixture (a few ulps of the sum, from cos values
+ * one ulp apart); the bound is about twice that.
+ */
+const CUM_EPS = 2 ** -19
+
+describe('Speed ramp: the count and every source frame are Python’s', () => {
+  const ramps = FX.runs.filter(r => r.class_type === 'SpeedRamp' && r.ramp)
+  it('covers every case with more than one frame', () => {
+    expect(ramps.length).toBe(FX.runs.filter(r => r.class_type === 'SpeedRamp' && FX.clips[r.input]!.frames > 1).length)
+    expect(ramps.length).toBeGreaterThan(40)
+  })
+  for (const c of ramps) {
+    it(c.name, () => {
+      const T = FX.clips[c.input]!.frames
+      const params = { mode: c.widgets.mode, speed: c.widgets.speed, start_speed: c.widgets.start_speed, interpolation: c.widgets.interpolation }
+      const got = videoCores.time.rampSources(params, T)
+      const want = c.ramp!
+      expect(got.N, 'N').toBe(want.N)
+      expect(VIDEO_EFFECTS.SpeedRamp!.shape(params, [{ count: T, w: 1, h: 1, exact: true }]).count, 'the shape').toBe(want.N)
+      expect([...got.lo], 'idx_lo').toEqual(want.lo)
+      expect([...got.hi], 'idx_hi').toEqual(want.hi)
+      expect([...got.nearest], 'the nearest frame').toEqual(want.nearest)
+      expect(sha256(new Uint8Array(got.src.buffer)), 'src_idx (float32)').toBe(sha256(b64(want.src)))
+      expect(sha256(new Uint8Array(got.frac.buffer)), 'frac (float32)').toBe(sha256(b64(want.frac)))
+      if (want.meanRate !== undefined) {
+        expect(got.meanRate, 'rate.mean()').toBe(want.meanRate)
+        if (!want.cum) expect(sha256(new Uint8Array(got.cum!.buffer)), 'cumsum (float32)').toBe(want.cum_sha256)
+        else {
+          // ramp_in_out: torch's float cos is SLEEF's (about 1 value in 20 one ulp off the correctly rounded one), so
+          // the rate and its running sum are LIBRARY: within CUM_EPS of Python's, relative. N and the frames above are exact.
+          const py = new Float32Array(b64(want.cum).buffer)
+          let worst = 0
+          for (let i = 0; i < py.length; i++) worst = Math.max(worst, Math.abs(got.cum![i]! - py[i]!) / Math.abs(py[i]!))
+          expect(worst, 'cumsum, relative').toBeLessThanOrEqual(CUM_EPS)
+        }
+      }
+    })
+  }
+
+  it('holds at most four frames at once, over the fixture and a sweep of counts and settings', () => {
+    let most = 0
+    for (const mode of ['constant', 'ramp_in', 'ramp_out', 'ramp_in_out']) {
+      for (const speed of [0.05, 0.1, 0.35, 0.5, 0.95, 1, 1.05, 2, 3.3, 7, 10]) {
+        for (const start of [0.05, 0.3, 1, 2.5, 10]) {
+          for (const T of [2, 3, 5, 8, 13, 24, 61, 120, 301]) {
+            for (const interpolation of ['nearest', 'blend']) {
+              const w = { mode, speed, start_speed: start, interpolation }
+              const ins = [{ count: T, w: 1, h: 1, exact: true }]
+              const n = VIDEO_EFFECTS.SpeedRamp!.shape(w, ins).count
+              most = Math.max(most, windowSchedule(VIDEO_EFFECTS.SpeedRamp!.windowOf!(w, ins), n, T).maxHeld)
+            }
+          }
+        }
+      }
+    }
+    expect(most).toBeLessThanOrEqual(4)
   })
 })
 
 describe('the core on this thread gives Python’s float32, bit for bit (exact)', () => {
   for (const c of FX.runs) {
     it(`${c.class_type}: ${c.name}`, () => {
+      if (c.error) {
+        expect(() => coreBatch(c.class_type, c.widgets, clipFrames(FX, c.input))).toThrow(MEDIA_EFFECT_WORDS.motionBlurFails)
+        return
+      }
       const got = coreBatch(c.class_type, c.widgets, clipFrames(FX, c.input))
       const want = c.out!
       expect({ count: got.count, w: got.w, h: got.h }).toEqual({ count: want.count, w: want.w, h: want.h })
@@ -147,6 +247,14 @@ describe('through the node’s plan: the kept batch, the preview and the ui are 
       const input = await keptBatch(h, runId, clipFrames(FX, c.input))
       const values: Record<string, Record<number, RunnerValue>> = { g: { 0: input } }
       const id = c.node_id
+      if (c.error) {
+        // Python's raise, in plain words, before any tool process starts; nothing kept but the input.
+        const before = PROCS.pids.length
+        await expect(runVfxNode(h, { l: loadVideo(), g: getComp(), [id]: effect(c), r: trimOf(id) }, id, values, { runId, families: ON })).rejects.toThrow(MEDIA_EFFECT_WORDS.motionBlurFails)
+        expect(PROCS.pids.length).toBe(before)
+        expect(readdirSync(join(h.root, 'kept', runId))).toEqual([input.file.filename])
+        return
+      }
       for (const [quant, reader, want] of [['round', trimOf(id), c.out!.round8_sha256], ['trunc', saveFrames(id), c.out!.trunc8_sha256]] as const) {
         const prompt: ApiPrompt = { l: loadVideo(), g: getComp(), [id]: effect(c), r: reader }
         const made = await runVfxNode(h, prompt, id, values, { runId, families: ON })
@@ -168,7 +276,12 @@ describe('through the node’s plan: the kept batch, the preview and the ui are 
     await requireMediaTools()
     const h = vfxHarness(scratch)
     const runId = vfxRunId(++runs)
-    for (const [cls, widgets, clip] of [['FrameTrail', { decay: 0.85, blend_mode: 'screen', intensity: 1, threshold: 0 }, 'clip1'], ['VideoTrim', { start: 0, end: -1 }, 'clip8'], ['VideoReverse', { mode: 'reverse' }, 'clip1']] as const) {
+    for (const [cls, widgets, clip] of [
+      ['FrameTrail', { decay: 0.85, blend_mode: 'screen', intensity: 1, threshold: 0 }, 'clip1'], ['VideoTrim', { start: 0, end: -1 }, 'clip8'], ['VideoReverse', { mode: 'reverse' }, 'clip1'],
+      ['TemporalMotionBlur', { radius: 2, falloff: 'gaussian' }, 'clip1'], ['SlitScan', { delay: 1, axis: 'horizontal', wrap: false }, 'clip1'],
+      ['TimeDisplacement', { strength: 0, noise_scale: 120, wrap: true, seed: 0 }, 'clip8'], ['TimeDisplacement', { strength: 4, noise_scale: 120, wrap: true, seed: 0 }, 'clip1'],
+      ['SpeedRamp', { mode: 'constant', speed: 2, start_speed: 1, interpolation: 'blend' }, 'clip1'],
+    ] as const) {
       const input = await keptBatch(h, runId, clipFrames(FX, clip))
       const made = await runVfxNode(h, { l: loadVideo(), g: getComp(), e: effect({ class_type: cls, widgets }) }, 'e', { g: { 0: input } }, { runId, families: ON })
       expect(made.values[0], cls).toEqual(input)
@@ -301,6 +414,70 @@ describe('Stop mid-effect', () => {
   })
 })
 
+describe('Slit scan and Time displacement hold every frame, under the held-bytes limit', () => {
+  for (const [cls, widgets] of [['SlitScan', { delay: 2.5, axis: 'vertical', wrap: true }], ['TimeDisplacement', { strength: 4, noise_scale: 8, wrap: true, seed: 0 }]] as const) {
+    for (const hosted of [false, true]) {
+      it(`${cls}, ${hosted ? 'hosted' : 'local'}: one heldFrames call for the whole batch, within MEDIA_CAPS.heldFrameBytes`, LONG, async () => {
+        await requireMediaTools()
+        const h = vfxHarness(scratch, { hosted })
+        const runId = vfxRunId(++runs)
+        const clip = clipFrames(FX, 'clip8-big')
+        const input = await keptBatch(h, runId, clip)
+        HELD.calls.length = 0
+        await runVfxNode(h, { l: loadVideo(), g: getComp(), e: effect({ class_type: cls, widgets }), r: trimOf('e') }, 'e', { g: { 0: input } }, { runId, families: ON })
+        const limit = (hosted ? MEDIA_CAPS.hosted : MEDIA_CAPS.local).heldFrameBytes
+        expect(HELD.calls).toEqual([{ count: 8, w: clip.w, h: clip.h, maxBytes: limit }])
+        for (const c of HELD.calls) expect(c.count * c.w * c.h * 3).toBeLessThanOrEqual(c.maxBytes)
+        // The start pass's figure covers every frame, the gathered one and the sources.
+        const ins = [{ count: 8, w: clip.w, h: clip.h, exact: true }]
+        expect(VIDEO_EFFECTS[cls]!.heldBytes(widgets, ins)).toBeGreaterThanOrEqual(9 * clip.w * clip.h * 3 + 4 * clip.w * clip.h * 3)
+      })
+    }
+  }
+
+  it('a batch over the hosted limit is left to the engine by the start pass (the same figure)', () => {
+    const big = [{ count: 90, w: 1920, h: 1080, exact: true }]
+    for (const cls of ['SlitScan', 'TimeDisplacement']) {
+      const spec = VIDEO_EFFECTS[cls]!
+      const w = cls === 'SlitScan' ? { delay: 1, axis: 'horizontal', wrap: false } : { strength: 4, noise_scale: 120, wrap: true, seed: 0 }
+      expect(spec.heldBytes(w, big), cls).toBeGreaterThan(MEDIA_CAPS.hosted.heldFrameBytes)
+      expect(spec.heldBytes(w, [{ count: 20, w: 1920, h: 1080, exact: true }]), cls).toBeLessThanOrEqual(MEDIA_CAPS.hosted.heldFrameBytes)
+    }
+  })
+})
+
+describe('Stop mid-effect, held and windowed', () => {
+  for (const [cls, widgets, abortAt] of [
+    ['SlitScan', { delay: 1, axis: 'horizontal', wrap: false }, 3],
+    ['TimeDisplacement', { strength: 4, noise_scale: 120, wrap: true, seed: 0 }, 3],
+    ['SpeedRamp', { mode: 'ramp_in_out', speed: 0.5, start_speed: 2, interpolation: 'blend' }, 5],
+  ] as const) {
+    it(`${cls}: no tool process left, no kept file but its input`, LONG, async () => {
+      await requireMediaTools()
+      const h = vfxHarness(scratch)
+      const runId = vfxRunId(++runs)
+      const W = 320
+      const H = 240
+      const input = await keptBatch(h, runId, { frames: Array.from({ length: 30 }, (_, i) => new Uint8Array(W * H * 3).fill(i * 7)), w: W, h: H })
+      const before = PROCS.pids.length
+      const ctl = new AbortController()
+      HOOK.frames = 0
+      HOOK.abortAt = abortAt
+      HOOK.ctl = ctl
+      try {
+        await expect(runVfxNode(h, { l: loadVideo(), g: getComp(), e: effect({ class_type: cls, widgets }), r: trimOf('e') }, 'e', { g: { 0: input } }, { runId, families: ON, signal: ctl.signal }))
+          .rejects.toThrow(MEDIA_WORDS.stopped)
+        expect(Date.now() - HOOK.abortedAt).toBeLessThan(1000)
+      }
+      finally { HOOK.abortAt = 0; HOOK.ctl = null }
+      const pids = PROCS.pids.slice(before)
+      expect(pids.length).toBeGreaterThanOrEqual(2)
+      for (const pid of pids) expect(() => process.kill(pid, 0), `pid ${pid}`).toThrow()
+      expect(readdirSync(join(h.root, 'kept', runId))).toEqual([input.file.filename])
+    })
+  }
+})
+
 // ── The esbuild guard: the video cores built as Nitro builds server code ─────
 
 describe('esbuild guard: the video cores survive Nitro’s build', () => {
@@ -335,11 +512,15 @@ describe('esbuild guard: the video cores survive Nitro’s build', () => {
         }
         const px = await build('pixels/core.ts', 'pixels')
         const tk = await build('effects/core/tensor.ts', 'tensor')
+        const kn = await build('effects/core/kernels.ts', 'kernels')
+        const rng = await build('effects/core/rng.ts', 'rng')
         const time = await build('video/core/time.ts', 'time')
         const cores = [
           { name: 'tk', fn: tk.tensorCore as never, args: ['px'] },
+          { name: 'kn', fn: kn.kernelsCore as never, args: ['tk', 'px'] },
+          { name: 'rng', fn: rng.rngCore as never, args: [] },
           { name: 'vx', fn: time.framesCore as never, args: ['tk'] },
-          { name: 'time', fn: time.timeCore as never, args: ['tk'] },
+          { name: 'time', fn: time.timeCore as never, args: ['tk', 'kn', 'rng'] },
         ]
         const w = new Worker(workerScript(compositorCore, px.pixelsCore as never, cores), { eval: true, workerData: { stop: new SharedArrayBuffer(4) } })
         try {
@@ -350,6 +531,20 @@ describe('esbuild guard: the video cores survive Nitro’s build', () => {
           expect(r1.error).toBeUndefined()
           expect([...r1.value.rgb]).toEqual(reference)
           expect(r1.value.preview.length).toBe(clip.w * clip.h * 3)
+          // Speed ramp's blend (R6.2) in the built worker: this thread's frame.
+          const rp = { interpolation: 'blend', _frac: Math.fround(0.3719) }
+          const want = videoCores.vx.toRgb(videoCores.time.ramp([videoCores.vx.fromRgb(clip.frames[2]!, clip.w, clip.h), videoCores.vx.fromRgb(clip.frames[3]!, clip.w, clip.h)], rp).out, 'trunc')
+          const r2 = await reply({ id: 3, op: 'vfx.frame', fn: 'time.ramp', params: rp, index: 0, count: 1, inputs: [{ rgb: clip.frames[2]!.slice(), w: clip.w, h: clip.h }, { rgb: clip.frames[3]!.slice(), w: clip.w, h: clip.h }], quant: 'trunc', preview: false })
+          expect(r2.error).toBeUndefined()
+          expect([...r2.value.rgb]).toEqual([...want])
+          // And the built core's own sources (the plan works them out on its thread).
+          const pxc = px.pixelsCore!()
+          const tkc = tk.tensorCore!(pxc)
+          const built = time.timeCore!(tkc, kn.kernelsCore!(tkc, pxc), rng.rngCore!()) as typeof videoCores.time
+          const dp = { strength: 4, noise_scale: 8, wrap: true, seed: 2 ** 31 - 1 }
+          expect([...built.displaceSources(built.displaceOffsets(dp, 24, 16), 3, 8, true)]).toEqual([...videoCores.time.displaceSources(videoCores.time.displaceOffsets(dp, 24, 16), 3, 8, true)])
+          const ramp = { mode: 'ramp_in_out', speed: 0.3, start_speed: 3, interpolation: 'blend' }
+          expect([...built.rampSources(ramp, 90).frac]).toEqual([...videoCores.time.rampSources(ramp, 90).frac])
         }
         finally { await w.terminate() }
       }, 30_000)

@@ -2266,12 +2266,69 @@ def vfx_threads() -> dict:
     return {"torch": torch.get_num_threads(), "opencv": int(got.stdout.strip())}
 
 
+# ── R6.2: the other time effects' own records ──────────────────────────────────
+
+
+def vfx_ramp_sources(T: int, mode: str, speed: float, start_speed: float) -> dict:
+    """Speed ramp's output count and source positions (nodes_video_pro.py:95-122, repeated line for line; the case
+    checks them against the real node's frames): N, src_idx (float32, b64), idx_lo, idx_hi, frac (float32, b64)
+    and the nearest frame; ramps add rate.mean().item()."""
+    from comfy_extras.nodes_video_pro import _ease
+    rec: dict = {}
+    if mode == "constant":
+        r = max(0.05, float(speed))
+        N = max(1, int(round(T / r)))
+        src_idx = torch.linspace(0, T - 1, N, dtype=torch.float32)
+    else:
+        r0 = max(0.05, float(start_speed))
+        r1 = max(0.05, float(speed))
+        K = 4096
+        u = torch.linspace(0.0, 1.0, K, dtype=torch.float32)
+        ease = _ease(u, {"ramp_in": "ease_in", "ramp_out": "ease_out"}.get(mode, "ease_in_out"))
+        rate = r0 + (r1 - r0) * ease
+        mean_rate = rate.mean().item()
+        rec["meanRate"] = mean_rate
+        N = max(1, int(round((T - 1) / max(1e-6, mean_rate))))
+        cum = torch.cumsum(rate, dim=0)
+        rec["cum_sha256"] = sha(cum.numpy().tobytes())
+        if mode == "ramp_in_out":
+            # torch's float cos (SLEEF, not correctly rounded) makes this sum LIBRARY: recorded whole, to measure against.
+            rec["cum"] = b64(cum.numpy().tobytes())
+        cum = cum / cum[-1] * (T - 1)
+        probe_pos = torch.linspace(0.0, K - 1, N, dtype=torch.float32)
+        lo = probe_pos.floor().long().clamp(0, K - 1)
+        hi = (lo + 1).clamp(0, K - 1)
+        f = probe_pos - lo.float()
+        src_idx = (cum[lo] * (1.0 - f) + cum[hi] * f).clamp(0, T - 1)
+    idx_lo = src_idx.floor().long().clamp(0, T - 1)
+    idx_hi = (idx_lo + 1).clamp(0, T - 1)
+    frac = (src_idx - idx_lo.float())
+    nearest = src_idx.round().long().clamp(0, T - 1)
+    rec.update({"N": N, "src": b64(src_idx.numpy().tobytes()), "lo": idx_lo.tolist(), "hi": idx_hi.tolist(),
+                "frac": b64(frac.numpy().tobytes()), "nearest": nearest.tolist()})
+    return rec
+
+
+def vfx_ramp_check(rec: dict, frames: torch.Tensor, out: torch.Tensor, interpolation: str) -> None:
+    """The repeated mapping is the node's: its frames equal the ones the mapping makes."""
+    lo, hi, nearest = (torch.tensor(rec[k]) for k in ("lo", "hi", "nearest"))
+    frac = torch.from_numpy(np.frombuffer(base64.b64decode(rec["frac"]), np.float32).copy()).view(-1, 1, 1, 1)
+    want = frames[nearest] if interpolation == "nearest" else frames[lo] * (1.0 - frac) + frames[hi] * frac
+    assert out.shape[0] == rec["N"] and torch.equal(want.clamp(0.0, 1.0), out), "the repeated Speed ramp mapping is not the node's"
+
+
 def group_vfx_time(names: list[str]) -> dict:
-    """(R6.1) The time effects: the pilots Trim, Reverse / ping-pong and Frame trail (R6.2 adds the rest)."""
+    """The time effects: the pilots Trim, Reverse / ping-pong and Frame trail (R6.1); Motion blur (time), Slit scan,
+    Time displacement and Speed ramp (R6.2)."""
+    from comfy_extras import nodes_video_pro as nvp
     import tempfile
     from comfy_extras import nodes_video_effects as nve
     trail_defaults = {"decay": 0.85, "blend_mode": "screen", "intensity": 1.0, "threshold": 0.0}
     trim_defaults = {"start": 0, "end": -1}
+    blur_defaults = {"radius": 2, "falloff": "gaussian"}
+    slit_defaults = {"delay": 1.0, "axis": "horizontal", "wrap": False}
+    disp_defaults = {"strength": 4.0, "noise_scale": 120.0, "wrap": True, "seed": 0}
+    ramp_defaults = {"mode": "constant", "speed": 2.0, "start_speed": 1.0, "interpolation": "blend"}
     grids = {
         "FrameTrail": (nve.FrameTrailNode, vfx_grid(
             trail_defaults,
@@ -2296,6 +2353,41 @@ def group_vfx_time(names: list[str]) -> dict:
         "VideoReverse": (nve.VideoReverseNode, [
             (f"{mode}, {c}", {"mode": mode}, c) for mode in ("reverse", "ping_pong") for c in VFX_STANDARD
         ]),
+        "TemporalMotionBlur": (nve.TemporalMotionBlurNode, vfx_grid(
+            blur_defaults,
+            {"radius": (1, 12, 5)},
+            {"falloff": ["uniform", "linear", "gaussian"]},
+            [(f"radius {r}, {fo}, {c}", {"radius": r, "falloff": fo}, c)
+             for r, fo, c in ((3, "linear", "clip2"), (12, "gaussian", "clip8-odd"), (7, "uniform", "clip8-big"), (1, "linear", "clip8-odd"))],
+        )),
+        "SlitScan": (nve.SlitScanNode, vfx_grid(
+            slit_defaults,
+            {"delay": (0.0, 4.0, 1.35)},
+            {"axis": ["horizontal", "vertical"], "wrap": [False, True]},
+            [(f"delay {d}, {ax}, wrap {w}, {c}", {"delay": d, "axis": ax, "wrap": w}, c)
+             for d in (0.0, 4.0) for ax in ("horizontal", "vertical") for w in (False, True) for c in ("clip8-odd",)]
+            + [("delay 2.5, vertical, wrap, clip8-big", {"delay": 2.5, "axis": "vertical", "wrap": True}, "clip8-big")],
+        )),
+        "TimeDisplacement": (nve.TimeDisplacementNode, vfx_grid(
+            disp_defaults,
+            {"strength": (0.0, 30.0, 7.5), "noise_scale": (8.0, 400.0, 50.0), "seed": (0, 2**31 - 1, 12345)},
+            {"wrap": [True, False]},
+            [(f"noise_scale {ns}, seed {sd}, clip8-big", {**disp_defaults, "noise_scale": ns, "seed": sd}, "clip8-big")
+             for ns in (8.0, 400.0) for sd in (0, 2**31 - 1)]
+            + [("strength 30, no wrap, clip8-odd", {**disp_defaults, "strength": 30.0, "wrap": False}, "clip8-odd"),
+               ("strength 0.5, noise_scale 8, clip2", {**disp_defaults, "strength": 0.5, "noise_scale": 8.0}, "clip2")],
+        )),
+        "SpeedRamp": (nvp.SpeedRampNode, vfx_grid(
+            ramp_defaults,
+            {"speed": (0.05, 10.0, 1.35), "start_speed": (0.05, 10.0, 0.7)},
+            {"mode": ["constant", "ramp_in", "ramp_out", "ramp_in_out"], "interpolation": ["nearest", "blend"]},
+            [(f"{m}, speed {sp}, start {st}", {**ramp_defaults, "mode": m, "speed": sp, "start_speed": st}, "clip8")
+             for m in ("constant", "ramp_in", "ramp_out", "ramp_in_out") for sp in (0.05, 1.0, 10.0) for st in (0.05, 10.0)]
+            + [(f"{m}, nearest, speed {sp}, start {st}, {c}", {**ramp_defaults, "mode": m, "speed": sp, "start_speed": st, "interpolation": "nearest"}, c)
+               for m, sp, st, c in (("constant", 0.35, 1.0, "clip8-odd"), ("ramp_in", 3.0, 0.4, "clip8-big"), ("ramp_out", 0.3, 2.5, "clip8"),
+                                    ("ramp_in_out", 0.5, 4.0, "clip8-odd"), ("constant", 0.4, 1.0, "clip2"))]
+            + [("ramp_in_out, blend, speed 0.3, start 3, clip8-big", {**ramp_defaults, "mode": "ramp_in_out", "speed": 0.3, "start_speed": 3.0}, "clip8-big")],
+        )),
     }
     cases: dict = {"threads": vfx_threads(), "clips": {k: {"frames": v[0], "w": v[1], "h": v[2], "seed": v[3]} for k, v in VFX_CLIPS.items()},
                    "inlineValues": VFX_INLINE_VALUES}
@@ -2303,11 +2395,23 @@ def group_vfx_time(names: list[str]) -> dict:
         runs = []
         for class_type, (cls, grid) in grids.items():
             runs += vfx_cases(tmp, cls, class_type, grid)
+        # Speed ramp's count and source frames (the brief: N and every index equal Python's), checked against its frames.
+        for rec in runs:
+            if rec["class_type"] == "SpeedRamp" and "out" in rec:
+                w = rec["widgets"]
+                frames = vfx_clip(rec["input"])
+                if frames.shape[0] > 1:
+                    rec["ramp"] = vfx_ramp_sources(int(frames.shape[0]), w["mode"], w["speed"], w["start_speed"])
+                    args, _ui = vfx_run(nvp.SpeedRampNode, VFX_NODE_ID, frames=frames, **w)
+                    vfx_ramp_check(rec["ramp"], frames, args[0], w["interpolation"])
         cases["runs"] = runs
         cases["saved"] = [
             vfx_saved(tmp, nve.FrameTrailNode, "FrameTrail", trail_defaults),
             vfx_saved(tmp, nve.VideoTrimNode, "VideoTrim", {"start": 2, "end": 6}),
             vfx_saved(tmp, nve.VideoReverseNode, "VideoReverse", {"mode": "ping_pong"}),
+            vfx_saved(tmp, nve.SlitScanNode, "SlitScan", slit_defaults),
+            vfx_saved(tmp, nve.TimeDisplacementNode, "TimeDisplacement", {**disp_defaults, "noise_scale": 8.0}),
+            vfx_saved(tmp, nvp.SpeedRampNode, "SpeedRamp", {**ramp_defaults, "mode": "ramp_in_out", "speed": 0.5, "start_speed": 2.0}),
         ]
         cases["acceptance"] = vfx_acceptance(tmp)
     cases["graphs"] = vfx_graphs()

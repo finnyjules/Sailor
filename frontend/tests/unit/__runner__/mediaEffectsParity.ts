@@ -23,7 +23,7 @@ import { createFileAccess, type FileAccess } from '~~/server/runner/fileAccess'
 import { filesOf } from '~~/server/runner/values'
 import type { OutputFile, RunnerValue } from '~~/server/runner/types'
 import { keepFrames, readFrames, type MediaValueIO } from '~~/server/media/values'
-import { VIDEO_EFFECTS, mediaEffectParams } from '~~/server/runner/video/table'
+import { VIDEO_EFFECTS, gatherFrame, mediaEffectParams, windowSchedule } from '~~/server/runner/video/table'
 import { videoCores } from '~~/server/runner/video/cores'
 import type { Tensor } from '~~/server/runner/effects/core/tensor'
 import { synth } from './effectsParity'
@@ -34,9 +34,12 @@ import { synth } from './effectsParity'
 export interface VfxBatch { count: number; w: number; h: number; f32?: string; f32_sha256: string; round8_sha256: string; trunc8_sha256: string }
 export interface VfxPreview { filename: string; mode: string; w: number; h: number; sha256: string; px?: string }
 export interface VfxUi { images: { filename: string; subfolder: string; type: string }[]; animated: boolean[] }
+/** Speed ramp's count and source frames as Python works them out (R6.2; float32 arrays base64). */
+export interface VfxRamp { N: number; src: string; lo: number[]; hi: number[]; frac: string; nearest: number[]; meanRate?: number; cum_sha256?: string; cum?: string }
 export interface VfxRun {
   name: string; class_type: string; node_id: string; widgets: Record<string, unknown>; input: string
   out?: VfxBatch; ui?: VfxUi | null; preview?: VfxPreview | null; error?: string
+  ramp?: VfxRamp
 }
 export interface VfxSavedRun { ui: VfxUi; header: { video: { w: number; h: number; codec: string; pixFmt: string; frames: number }[] }; frameCount: number; frameRate: { num: number; den: number }; duration: number; frames: string[] }
 export interface VfxSaved { class_type: string; widgets: Record<string, unknown>; input: string; fps: number; x264: VfxSavedRun; openh264: VfxSavedRun }
@@ -95,33 +98,45 @@ export function coreBatch(cls: string, widgets: Record<string, unknown>, input: 
   const spec = VIDEO_EFFECTS[cls]!
   const params = mediaEffectParams(MEDIA_EFFECT_SCHEMAS[cls], widgets)
   const ins = [{ count: input.frames.length, w: input.w, h: input.h, exact: true }]
+  const raised = spec.pythonRaises?.(params, ins)
+  if (raised) throw new Error(raised)
   const out = spec.shape(params, ins)
   const [core, fn] = spec.op.split('.') as [string, string]
   const op = (videoCores as unknown as Record<string, Record<string, (...a: unknown[]) => { out: Tensor; state?: ArrayBuffer }>>)[core]![fn]!
   const tensorOf = (f: Uint8Array) => videoCores.vx.fromRgb(f, input.w, input.h)
-  const pick: number[] = []
-  if (spec.passThrough?.(params, ins)) for (let i = 0; i < input.frames.length; i++) pick.push(i)
-  else if (spec.reads === 'held') for (let j = 0; j < out.count; j++) pick.push(spec.heldSource ? spec.heldSource(params, ins, j) : j)
+  const through = !!spec.passThrough?.(params, ins)
+  // Each output frame's inputs (rgb24) and its own params, as the plan hands them to the worker.
+  const reads: { frames: Uint8Array[]; own?: Record<string, unknown> }[] = []
+  if (through) for (const f of input.frames) reads.push({ frames: [f] })
+  else if (spec.reads === 'held' && spec.gatherOf) {
+    const at = spec.gatherOf(params, ins)
+    for (let j = 0; j < out.count; j++) reads.push({ frames: [gatherFrame(input.frames, at(j), input.w, input.h)] })
+  }
+  else if (spec.reads === 'held') for (let j = 0; j < out.count; j++) reads.push({ frames: [input.frames[spec.heldSource ? spec.heldSource(params, ins, j) : j]!] })
+  else if (spec.reads === 'window') {
+    const plan = spec.windowOf!(params, ins)
+    const { wins } = windowSchedule(plan, out.count, input.frames.length)
+    for (let j = 0; j < out.count; j++) reads.push({ frames: wins[j]!.map(i => input.frames[i]!), ...(plan.params ? { own: plan.params(j) } : {}) })
+  }
   else {
     for (let i = 0; i < input.frames.length; i++) {
       const j = spec.streamOut ? spec.streamOut(params, ins, i) : i
-      if (j !== null) pick[j] = i
+      if (j !== null) reads[j] = { frames: [input.frames[i]!] }
     }
   }
-  const through = !!spec.passThrough?.(params, ins)
   const f32: Uint8Array[] = []
   const round8: Uint8Array[] = []
   const trunc8: Uint8Array[] = []
   let state: ArrayBuffer | undefined
-  for (let j = 0; j < pick.length; j++) {
-    const x = tensorOf(input.frames[pick[j]!]!)
-    const r = through ? { out: x } : op([x], params, state, j, pick.length)
+  for (let j = 0; j < reads.length; j++) {
+    const x = reads[j]!.frames.map(tensorOf)
+    const r = through ? { out: x[0]! } : op(x, reads[j]!.own ? { ...params, ...reads[j]!.own } : params, state, j, reads.length)
     state = (r as { state?: ArrayBuffer }).state
     f32.push(bytesOf(hwc(r.out)).slice())
     round8.push(videoCores.vx.toRgb(r.out, 'round'))
     trunc8.push(videoCores.vx.toRgb(r.out, 'trunc'))
   }
-  return { count: pick.length, w: out.w, h: out.h, f32: concat(f32), round8: concat(round8), trunc8: concat(trunc8) }
+  return { count: reads.length, w: out.w, h: out.h, f32: concat(f32), round8: concat(round8), trunc8: concat(trunc8) }
 }
 
 // ── A node through its plan, with the real stores and tools ──────────────────

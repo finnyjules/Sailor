@@ -38,8 +38,8 @@ export const MEDIA_EFFECT_FAMILIES: readonly MediaEffectFamily[] = [
   'video-time', 'video-join', 'video-look', 'video-stabilize', 'video-flow', 'video-draw', 'video-text', 'sound-effects', 'sound-denoise',
 ]
 
-/** The effects ported so far (R6.1: the three pilots). Each task adds its classes. */
-export const MEDIA_EFFECTS_PORTED: readonly string[] = ['FrameTrail', 'VideoReverse', 'VideoTrim']
+/** The effects ported so far (R6.1: the three pilots; R6.2: the other time effects). Each task adds its classes. */
+export const MEDIA_EFFECTS_PORTED: readonly string[] = ['FrameTrail', 'VideoReverse', 'VideoTrim', 'TemporalMotionBlur', 'SlitScan', 'TimeDisplacement', 'SpeedRamp']
 
 /** Each R6 class's family (every generated class, ported or not; Save audio (Opus) is not an R6 family's). */
 export const MEDIA_EFFECT_FAMILY_OF: Readonly<Record<string, MediaEffectFamily>> = Object.fromEntries(
@@ -167,4 +167,5 @@ export const MEDIA_EFFECT_WORDS = {
   noFrames: 'There are no video frames wired in',
   needsRun: 'Video effects can only be worked on when the workflow runs',
   timedOut: 'This video effect took longer than 2 minutes on one frame, so it was stopped',
+  motionBlurFails: 'Motion blur (time) fails on clips longer than one frame, in ComfyUI too',
 } as const

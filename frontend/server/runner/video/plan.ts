@@ -37,7 +37,7 @@ import { VIDEO_FRAME_TIMEOUT_MESSAGE, pixelsInWorker, type VideoFrameJob, type V
 import { png8 } from '../effects/plan'
 import { MediaError, mediaLease, type MediaLease } from '../../media/run'
 import { batchWord, framesOf, framesSink, heldFrames, type MediaValueIO } from '../../media/values'
-import { VIDEO_EFFECTS, mediaEffectParams, type FrameShape, type VideoEffectSpec } from './table'
+import { VIDEO_EFFECTS, gatherFrame, mediaEffectParams, windowSchedule, type FrameShape, type VideoEffectSpec } from './table'
 
 type FramesValue = Extract<RunnerValue, { kind: 'frames' }>
 type Frame = { rgb: Uint8Array; w: number; h: number }
@@ -137,6 +137,9 @@ export function planVideoEffect(ctx: PlanContext): NodePlan {
         return v
       })
       const ins: FrameShape[] = values.map(v => ({ count: v.count, w: v.w, h: v.h, exact: true }))
+      // Where Python itself raises, the same plain words, before any work (rule 14).
+      const raised = spec.pythonRaises?.(params, ins)
+      if (raised) throw new Error(raised)
       const out = spec.shape(params, ins)
       // The caps again, from the values themselves (the start pass bounded them before the run).
       const caps = capsOf(media.hosted)
@@ -195,10 +198,10 @@ async function worked(
   let preview: Uint8Array | null = null
   let state: ArrayBuffer | undefined
   let made = 0
-  const emit = async (j: number, frames: Frame[]) => {
+  const emit = async (j: number, frames: Frame[], own?: Record<string, unknown>) => {
     if (j !== made) throw new MediaError('failed')
     if (media.signal?.aborted) throw new MediaError('stopped')
-    const r = await frameOnWorker(media, { op: spec.op, params, index: j, count: out.count, inputs: frames, ...(state ? { state } : {}), quant, preview: spec.preview && j === mid })
+    const r = await frameOnWorker(media, { op: spec.op, params: own ? { ...params, ...own } : params, index: j, count: out.count, inputs: frames, ...(state ? { state } : {}), quant, preview: spec.preview && j === mid })
     state = r.state
     if (r.w !== out.w || r.h !== out.h) throw new MediaError('sizeChanged')
     if (r.preview) preview = r.preview
@@ -225,18 +228,68 @@ async function worked(
     else if (spec.reads === 'held') {
       const v = values[0]!
       const held: (Uint8Array | null)[] = await heldFrames(v, media, lease, capsOf(media.hosted).heldFrameBytes)
-      const source = (j: number) => spec.heldSource ? spec.heldSource(params, ins, j) : j
-      const uses = new Map<number, number>()
-      for (let j = 0; j < out.count; j++) uses.set(source(j), (uses.get(source(j)) ?? 0) + 1)
-      for (let j = 0; j < out.count; j++) {
-        const src = source(j)
-        const f = held[src]
-        if (!f) throw new MediaError('failed')
-        const left = (uses.get(src) ?? 1) - 1
-        uses.set(src, left)
-        // Each frame is let go after its last use.
-        if (left <= 0) held[src] = null
-        await emit(j, [{ rgb: handOver(f, left > 0), w: v.w, h: v.h }])
+      if (spec.gatherOf) {
+        // Each output frame gathered from many held frames (selection only), on this thread; the op sees it as its one input.
+        const at = spec.gatherOf(params, ins)
+        for (let j = 0; j < out.count; j++) {
+          if (media.signal?.aborted) throw new MediaError('stopped')
+          await emit(j, [{ rgb: gatherFrame(held, at(j), v.w, v.h), w: v.w, h: v.h }])
+        }
+      }
+      else {
+        const source = (j: number) => spec.heldSource ? spec.heldSource(params, ins, j) : j
+        const uses = new Map<number, number>()
+        for (let j = 0; j < out.count; j++) uses.set(source(j), (uses.get(source(j)) ?? 0) + 1)
+        for (let j = 0; j < out.count; j++) {
+          const src = source(j)
+          const f = held[src]
+          if (!f) throw new MediaError('failed')
+          const left = (uses.get(src) ?? 1) - 1
+          uses.set(src, left)
+          // Each frame is let go after its last use.
+          if (left <= 0) held[src] = null
+          await emit(j, [{ rgb: handOver(f, left > 0), w: v.w, h: v.h }])
+        }
+      }
+    }
+    else if (spec.reads === 'window' && spec.windowOf) {
+      // A sliding window: frames decoded as the reads reach them, let go once no later output reads them.
+      const v = values[0]!
+      const plan = spec.windowOf(params, ins)
+      const { wins, keepFrom } = windowSchedule(plan, out.count, v.count)
+      const it = framesOf(v, media, lease)[Symbol.asyncIterator]()
+      const buf = new Map<number, Uint8Array>()
+      let next = 0
+      try {
+        for (let j = 0; j < out.count; j++) {
+          const w = wins[j]!
+          const need = Math.max(...w)
+          while (next <= need) {
+            const g = await it.next()
+            if (g.done) throw new MediaError('failed')
+            if (next >= keepFrom[j]!) buf.set(next, g.value as Uint8Array)
+            next++
+          }
+          const after = keepFrom[j + 1]!
+          // A frame read again later is copied (the worker takes what it is handed); one read twice in this call, handed once.
+          const given = new Map<number, Uint8Array>()
+          const frames = w.map((i) => {
+            let rgb = given.get(i)
+            if (!rgb) {
+              const f = buf.get(i)
+              if (!f) throw new MediaError('failed')
+              rgb = handOver(f, i >= after)
+              given.set(i, rgb)
+            }
+            return { rgb, w: v.w, h: v.h }
+          })
+          for (const i of [...buf.keys()]) if (i < after) buf.delete(i)
+          await emit(j, frames, plan.params?.(j))
+        }
+      }
+      finally {
+        // Frames no output reads (past the last window) end the decode here.
+        await it.return?.().catch(() => undefined)
       }
     }
     else throw new Error('The runner cannot run this video effect yet')

@@ -21,6 +21,8 @@ import { MEDIA_EFFECTS_PORTED, type MediaEffectFamily } from '#shared/runner/med
 import type { MediaEffectSchema } from '#shared/runner/mediaEffectSchemas.generated'
 import { isLink } from '#shared/runner/graph'
 import { pyFloatOf, pyIntOf, pyTruthy } from '#shared/runner/pyText'
+import { MEDIA_EFFECT_WORDS } from '#shared/runner/mediaEffects'
+import { videoCores } from './cores'
 
 /**
  * A frame batch's count and size; `exact: false` when the count is an upper
@@ -52,6 +54,69 @@ export interface VideoEffectSpec {
   heldSource?(widgets: Record<string, unknown>, ins: readonly FrameShape[], j: number): number
   /** The result is the input unchanged (rule 2): the input value is handed on with no work (its preview still written). */
   passThrough?(widgets: Record<string, unknown>, ins: readonly FrameShape[]): boolean
+  /** 'window': the input frames each output frame reads, in the order the op takes them, and each output frame's own params. */
+  windowOf?(widgets: Record<string, unknown>, ins: readonly FrameShape[]): WindowPlan
+  /**
+   * 'held', reading many frames per output frame (Slit scan, Time
+   * displacement): per output frame, the input frame each pixel comes from
+   * (h × w, row by row). The plan gathers that frame from the held frames
+   * (selection only, so exact whatever the thread) and the op sees it as its
+   * one input. The array returned may be reused by the next call.
+   */
+  gatherOf?(widgets: Record<string, unknown>, ins: readonly FrameShape[]): (j: number) => Int32Array
+  /** Where Python itself raises for these widgets and inputs: its plain words (rule 14), said before any work. */
+  pythonRaises?(widgets: Record<string, unknown>, ins: readonly FrameShape[]): string | null
+}
+
+/** A window effect's reads (VideoEffectSpec.windowOf). */
+export interface WindowPlan {
+  /** The input frames output frame `j` reads, in the order its op takes them. */
+  at(j: number): readonly number[]
+  /** Output frame `j`'s own params, added to the node's. */
+  params?(j: number): Record<string, unknown>
+}
+
+/**
+ * How a window effect streams (./plan.ts): every output frame's window, and
+ * for each output frame the lowest input frame any later output still reads
+ * (`keepFrom[j]`: frames below it are let go once frame j is made; the last
+ * is the input's count). `maxHeld`: the most frames held at once (every
+ * frame decoded and not yet let go).
+ */
+export function windowSchedule(plan: WindowPlan, count: number, inputCount: number): { wins: (readonly number[])[]; keepFrom: Int32Array; maxHeld: number } {
+  const wins: (readonly number[])[] = []
+  for (let j = 0; j < count; j++) {
+    const w = plan.at(j)
+    if (!w.length || w.some(i => !Number.isInteger(i) || i < 0 || i >= inputCount)) throw new Error('A video effect read a frame its clip doesn’t have')
+    wins.push(w)
+  }
+  const keepFrom = new Int32Array(count + 1)
+  keepFrom[count] = inputCount
+  for (let j = count - 1; j >= 0; j--) keepFrom[j] = Math.min(keepFrom[j + 1]!, ...wins[j]!)
+  // Frame i is held from its decode (when the reads first reach it) until the output after which keepFrom passes it.
+  let maxHeld = 0
+  let decoded = 0
+  for (let j = 0; j < count; j++) {
+    decoded = Math.max(decoded, Math.max(...wins[j]!) + 1)
+    maxHeld = Math.max(maxHeld, decoded - keepFrom[j]!)
+  }
+  return { wins, keepFrom, maxHeld }
+}
+
+/** A frame gathered from held frames (VideoEffectSpec.gatherOf): pixel p of held frame src[p], rgb24. */
+export function gatherFrame(held: readonly (Uint8Array | null)[], src: Int32Array, w: number, h: number): Uint8Array {
+  const n = w * h
+  if (src.length !== n) throw new Error('A video frame is not the size its batch says')
+  const out = new Uint8Array(n * 3)
+  for (let p = 0; p < n; p++) {
+    const f = held[src[p]!]
+    if (!f) throw new Error('A video frame is missing')
+    const q = 3 * p
+    out[q] = f[q]!
+    out[q + 1] = f[q + 1]!
+    out[q + 2] = f[q + 2]!
+  }
+  return out
 }
 
 /**
@@ -114,6 +179,24 @@ const oneInput = (ins: readonly FrameShape[]): FrameShape => {
 const SELECT_STEPS = 0
 /** Frame trail's own steps a pixel: the decay, the max, the trail, the blend and the clamp (the luma where asked). */
 const TRAIL_STEPS = 2
+/** A pixel gathered on the main thread from the held frames, and its source worked out (Slit scan, Time displacement). */
+const GATHER_STEPS = 2
+/** Speed ramp's blend a pixel: two products, a sum and the clamp. */
+const BLEND_STEPS = 1
+/**
+ * The frames Speed ramp holds at once, at most: a blend reads frames lo and
+ * lo + 1 and lo only grows (float rounding can step it back one), so the
+ * frames between the lowest still read and the highest decoded are never
+ * more than four (checked over every fixture and a sweep in the spec; the
+ * plan measures its own schedule and uses the larger).
+ */
+const RAMP_HELD = 4
+
+/** Speed ramp's mapping for these widgets and T input frames (T > 1). */
+const rampOf = (w: Record<string, unknown>, T: number) => videoCores.time.rampSources(w, T)
+
+/** Time displacement hands its input on (nodes_video_effects.py:257): T ≤ 1, or strength ≤ 0. */
+const displacePassThrough = (w: Record<string, unknown>, T: number) => T <= 1 || !((w.strength as number) > 0)
 
 export const VIDEO_EFFECTS: Readonly<Record<string, VideoEffectSpec>> = {
   VideoTrim: {
@@ -164,6 +247,109 @@ export const VIDEO_EFFECTS: Readonly<Record<string, VideoEffectSpec>> = {
     work: (_w, ins, out) => (oneInput(ins).count + out.count) * out.w * out.h * VIDEO_IO_WORK_PER_PIXEL + out.count * out.w * out.h * TRAIL_STEPS,
     passThrough: (_w, ins) => oneInput(ins).count <= 1,
   },
+  /**
+   * Motion blur (time) (nodes_video_effects.py:125-174). Python hands one
+   * frame (or none) on unchanged, and RAISES on every longer clip: its
+   * F.pad(…, mode='replicate') of a 4-D tensor by (r, r) is not supported
+   * (torch 2.10: "Padding size 2 is not supported for 4D input tensor",
+   * recorded by every fixture case with T ≥ 2). The runner says so in plain
+   * words, before any work (rule 14).
+   */
+  TemporalMotionBlur: {
+    family: 'video-time', op: 'time.select', inputs: ['frames'], reads: 'stream', preview: true,
+    shape: (_w, ins) => {
+      const x = oneInput(ins)
+      return { count: x.count, w: x.w, h: x.h, exact: x.exact }
+    },
+    heldBytes: (_w, ins) => effectHeldBytes(oneInput(ins), { reads: 1 }),
+    work: (_w, ins, out) => (oneInput(ins).count + out.count) * out.w * out.h * (VIDEO_IO_WORK_PER_PIXEL + SELECT_STEPS),
+    passThrough: (_w, ins) => oneInput(ins).count <= 1,
+    pythonRaises: (_w, ins) => oneInput(ins).count > 1 ? MEDIA_EFFECT_WORDS.motionBlurFails : null,
+  },
+  /**
+   * Slit scan (:182-229): each column (or row) read from its own frame
+   * (time/core.ts slitSources). Every frame held: an output frame reads from
+   * up to W (or H) frames anywhere in time. T ≤ 1 handed on. EXACT.
+   */
+  SlitScan: {
+    family: 'video-time', op: 'time.select', inputs: ['frames'], reads: 'held', preview: true,
+    shape: (_w, ins) => {
+      const x = oneInput(ins)
+      return { count: x.count, w: x.w, h: x.h, exact: x.exact }
+    },
+    // Every frame, the gathered frame, and the sources (an int a pixel: under one float frame).
+    heldBytes: (_w, ins) => effectHeldBytes(oneInput(ins), { reads: 1, held8: oneInput(ins).count + 1, state32: 1 }),
+    work: (_w, ins, out) => (oneInput(ins).count + out.count) * out.w * out.h * VIDEO_IO_WORK_PER_PIXEL + out.count * out.w * out.h * GATHER_STEPS,
+    passThrough: (_w, ins) => oneInput(ins).count <= 1,
+    gatherOf: (w, ins) => {
+      const x = oneInput(ins)
+      const src = videoCores.time.slitSources(w, x.count, x.w, x.h)
+      const horizontal = w.axis === 'horizontal'
+      const S = horizontal ? x.w : x.h
+      const map = new Int32Array(x.w * x.h)
+      return (j) => {
+        const row = j * S
+        for (let y = 0; y < x.h; y++) {
+          for (let c = 0; c < x.w; c++) map[y * x.w + c] = src[row + (horizontal ? c : y)]!
+        }
+        return map
+      }
+    },
+  },
+  /**
+   * Time displacement (:237-279): each pixel read from its own frame, offset
+   * by a seeded noise (time/core.ts displaceOffsets, displaceSources). Every
+   * frame held. T ≤ 1 or strength ≤ 0 handed on. EXACT.
+   */
+  TimeDisplacement: {
+    family: 'video-time', op: 'time.select', inputs: ['frames'], reads: 'held', preview: true,
+    shape: (_w, ins) => {
+      const x = oneInput(ins)
+      return { count: x.count, w: x.w, h: x.h, exact: x.exact }
+    },
+    // Every frame, the gathered frame, the offsets (a float a pixel) and the sources (an int a pixel): under one float frame.
+    heldBytes: (_w, ins) => effectHeldBytes(oneInput(ins), { reads: 1, held8: oneInput(ins).count + 1, state32: 1 }),
+    work: (_w, ins, out) => (oneInput(ins).count + out.count) * out.w * out.h * VIDEO_IO_WORK_PER_PIXEL + out.count * out.w * out.h * GATHER_STEPS,
+    passThrough: (w, ins) => displacePassThrough(w, oneInput(ins).count),
+    gatherOf: (w, ins) => {
+      const x = oneInput(ins)
+      const offsets = videoCores.time.displaceOffsets(w, x.w, x.h)
+      const map = new Int32Array(x.w * x.h)
+      return j => videoCores.time.displaceSources(offsets, j, x.count, !!w.wrap, map)
+    },
+  },
+  /**
+   * Speed ramp (nodes_video_pro.py:59-130): N output frames, each from its
+   * source position (time/core.ts rampSources); `nearest` reads one frame,
+   * `blend` two. The source only grows, so frames stream through a small
+   * window. T ≤ 1 handed on. EXACT (`constant`); the ramps through
+   * ease_in_out's cos (LIBRARY).
+   */
+  SpeedRamp: {
+    family: 'video-time', op: 'time.ramp', inputs: ['frames'], reads: 'window', preview: true,
+    shape: (w, ins) => {
+      const x = oneInput(ins)
+      return { count: x.count <= 1 ? x.count : rampOf(w, x.count).N, w: x.w, h: x.h, exact: x.exact }
+    },
+    heldBytes: (w, ins) => {
+      const x = oneInput(ins)
+      const reads = w.interpolation === 'nearest' ? 1 : 2
+      if (x.count <= 1) return effectHeldBytes(x, { reads: 1 })
+      const r = rampOf(w, x.count)
+      const measured = windowSchedule(rampWindow(w, r), r.N, x.count).maxHeld
+      return effectHeldBytes(x, { reads, held8: Math.max(RAMP_HELD, measured) })
+    },
+    work: (w, ins, out) => (oneInput(ins).count + out.count) * out.w * out.h * VIDEO_IO_WORK_PER_PIXEL
+      + (w.interpolation === 'nearest' ? 0 : out.count * out.w * out.h * BLEND_STEPS),
+    passThrough: (_w, ins) => oneInput(ins).count <= 1,
+    windowOf: (w, ins) => rampWindow(w, rampOf(w, oneInput(ins).count)),
+  },
+}
+
+/** Speed ramp's reads: the nearest frame, or lo and hi with this frame's frac. */
+function rampWindow(w: Record<string, unknown>, r: ReturnType<typeof rampOf>): WindowPlan {
+  if (w.interpolation === 'nearest') return { at: j => [r.nearest[j]!] }
+  return { at: j => [r.lo[j]!, r.hi[j]!], params: j => ({ _frac: r.frac[j]! }) }
 }
 
 /** A ported video effect's spec, or undefined. */
