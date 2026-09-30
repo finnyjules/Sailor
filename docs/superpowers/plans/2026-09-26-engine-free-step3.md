@@ -4308,6 +4308,18 @@ R6 moves the video effects (nodes that work on a clip's frames) and the sound ef
 | `sound-denoise` | R6.10 | Audio denoise | `media-sound` |
 | `media-sound` (R5's) | R6.9 | Save audio (Opus) | `cards` |
 
+## Matching rule for R6–R11 (USER, 2026-09-30; overrides "match Python exactly" and any ruling below that conflicts)
+
+1. **Cheap stays exact.** Where matching Python exactly is nearly free (simple maths, pass-through, sums, resizing we already have), keep exact fixture tests. No extra effort beyond that.
+2. **Hard ports only need to look the same.** Where exact matching needs a large port or a new engine, "looks the same side by side" plus loose numbers is enough; no last-bit or sub-pixel chasing. Now:
+   - R6.6 slow motion: any sound optical-flow method, including ffmpeg's own `minterpolate` if it is in our build. The 0.01-pixel rule is dropped.
+   - R6.8 text: captions readable and placed sensibly; the layout need not match Pillow.
+   - R6.10 noise removal: judged by ear and a loose signal-to-noise figure.
+3. **Fix Python's bugs, don't copy them.** Drop quirks nobody wants (the squeezed stereo waveform; a LUT that silently does nothing when it won't load). Copy a quirk only when an existing saved project would visibly change without it.
+4. **Never relaxed:** money rules; hosted safety (ownership, caps, allow-lists); "switching a family on never makes a working graph fail"; "Stop leaves nothing running".
+5. **Reviewers** judge by these rules: a difference from Python is a finding only if someone would notice it, or it breaks point 4.
+6. **Pace:** small tasks, short reviews; anything else is parked.
+
 ## Rules every R6 task follows (binding for R6.1–R6.10)
 
 1. **Rows.**
