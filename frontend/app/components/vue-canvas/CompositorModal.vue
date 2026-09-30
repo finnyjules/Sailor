@@ -135,11 +135,17 @@ import { deriveMasterClock, slotPhase01, masterFrameIndex } from '~/lib/composit
 import {
   onDepthChange, depthImageFor, requestDepth, depthSourceFromViewUrl, depthKey, depthStatusFor,
 } from '~/lib/compositor/depthRegistry'
+import {
+  onSurfacesChange, requestSurfaces, retrySurfaces, surfacesImageFor, surfacesStatusFor, surfacesWasPaidFor,
+} from '~/lib/compositor/surfacesRegistry'
 import RelightControls from '~/components/vue-canvas/compositor/RelightControls.vue'
 import { sanitizeRelight, RELIGHT_MAX_LIGHTS, newLightId } from '~/lib/relight/settings'
 import { relightAvailable, relightUnavailableReason, __relightRuns } from '~/lib/relight/relightPass'
+import { relightSurfaceRefs, type RelightLayerLike } from '~/lib/relight/relightSurfaceRefs'
 import { setRelightBypass } from '~/composables/useCompositorLayers'
 import { onRelightFieldReady } from '~/lib/relight/depthField'
+import { formatUsd } from '~/lib/pricing'
+import { SURFACES_USD, surfacesCredits } from '#shared/pricing/relightSurfaces'
 import { recordOnce, wheelGestureRecorder } from '~/lib/relight/gestureHistory'
 import { DEFAULT_DISPLACE_MAP } from '~/lib/compositor/displace'
 import { imageUrlForNode } from '~/lib/canvas/nodeImage'
@@ -2910,6 +2916,22 @@ const activeEffectDepthStatus = computed<'idle' | 'loading' | 'ready' | 'error'>
   void depthTick.value
   return activeEffectDepth.value ? depthStatusFor(activeEffectDepth.value) : 'error'
 })
+// Surfaces status/price for the selected Relight layer's photo. Price shows EVERY time a
+// photo is read (user decision 2026-09-30) — never on a cache hit, never asked for.
+const activeEffectSurfacesStatus = computed<'idle' | 'loading' | 'ready' | 'error' | 'off'>(() => {
+  void surfacesTick.value
+  return activeEffectDepth.value ? surfacesStatusFor(activeEffectDepth.value) : 'off'
+})
+const activeEffectSurfacesPrice = computed<string | null>(() => {
+  void surfacesTick.value
+  const ref = activeEffectDepth.value
+  if (!ref || !surfacesWasPaidFor(ref)) return null
+  const hosted = hostedModeEnabled(useRuntimeConfig().public)
+  return hosted ? `${surfacesCredits()} credits` : formatUsd(SURFACES_USD)
+})
+function retryActiveEffectSurfaces() {
+  if (activeEffectDepth.value) retrySurfaces(activeEffectDepth.value)
+}
 /** The kinds `PostEffectsControls` draws — read from that component's own section list,
  *  so adding a section there cannot leave an effect row selecting into an empty panel. */
 const isPanelKind = (k: EffectKind) => (PANEL_EFFECT_KINDS as string[]).includes(k)
@@ -4713,6 +4735,7 @@ function drawWiredLayer(ctx: CanvasRenderingContext2D, layer: Layer, W: number, 
     ctx, wiredImageEls.value[layer.slot], layer, W, H,
     wiredMaskEls.value[layer.slot] ?? null, dof, depth,
     relight, depthSrc ? depthKey(depthSrc) : undefined,
+    depthSrc ? surfacesImageFor(depthSrc) : null,
   )
 }
 
@@ -6137,6 +6160,19 @@ let stopDepthWatch: (() => void) | null = null
 // gives its own depthStatus computed.
 const depthTick = ref(0)
 onMounted(() => { stopDepthWatch = onDepthChange(() => { renderStack(); depthTick.value++ }) })
+// Surfaces (MoGe-2 normal maps, stage 2): a separate PAID read from the free depth above,
+// requested ONLY for Relight layers in THIS open Frame — never from a paint, never for a
+// card or export (see global-constraints.md). Same nudge shape as depthTick.
+let stopSurfacesWatch: (() => void) | null = null
+const surfacesTick = ref(0)
+onMounted(() => { stopSurfacesWatch = onSurfacesChange(() => { renderStack(); surfacesTick.value++ }) })
+onBeforeUnmount(() => { stopSurfacesWatch?.(); stopSurfacesWatch = null })
+// Kick off (or dedupe into) a read for every visible Relight layer's photo whenever the
+// layer tree changes — a new Relight, a newly visible one, a photo swap. The registry itself
+// dedupes by depth key, so this can run on every change with no extra cost on a re-render.
+watch(localLayers, (ls) => {
+  for (const ref of relightSurfaceRefs(ls as unknown as RelightLayerLike[])) requestSurfaces(ref)
+}, { immediate: true, deep: true })
 // Relight depth fields build in a worker; paint draws the layer plain until one lands.
 let stopRelightFieldWatch: (() => void) | null = null
 onMounted(() => { stopRelightFieldWatch = onRelightFieldReady(() => renderStack()) })
@@ -11403,9 +11439,12 @@ defineExpose({ editor, layoutGridResolved, layoutGrid, overlayGrid, viewLayoutGr
               :fx="sanitizeRelight(activeEffect)"
               :selected-light="relightLightId"
               :depth-status="activeEffectDepthStatus"
+              :surfaces-status="activeEffectSurfacesStatus"
+              :surfaces-price="activeEffectSurfacesPrice"
               @update="(p) => updateActiveEffect(p)"
               @select-light="(id) => (relightLightId = id)"
-              @compare="(on) => { setRelightBypass(on ? activeEffectLayer?.id ?? null : null); renderStack() }" />
+              @compare="(on) => { setRelightBypass(on ? activeEffectLayer?.id ?? null : null); renderStack() }"
+              @retry-surfaces="retryActiveEffectSurfaces" />
           </div>
 
           <!-- Outer glow / Inner glow: a tinted halo outside (behind) or inside (clipped to) the
