@@ -21,6 +21,7 @@ import { readFile, mkdir, access } from 'node:fs/promises'
 import { join } from 'node:path'
 
 import { depthCacheKey, depthCacheName, assetType, safeAssetRelPath } from '~~/server/utils/depthCache'
+import { assertInputOwned } from '~~/server/utils/inputOwnership'
 
 const MODEL = 'onnx-community/depth-anything-v2-small'
 const COMFY_ROOT = join(process.cwd(), '..')
@@ -55,6 +56,8 @@ export default defineEventHandler(async (event) => {
   if (!root) throw createError({ statusCode: 400, message: `unknown asset type: ${body?.type}` })
   const rel = safeAssetRelPath(body?.filename ?? '', body?.subfolder)
   if (!rel) throw createError({ statusCode: 400, message: 'a safe filename is required' })
+
+  await assertInputOwned(event, root, body?.subfolder ?? '', body?.filename ?? '')
 
   const srcPath = join(COMFY_ROOT, root, rel)
   let bytes: Uint8Array

@@ -19,6 +19,7 @@ import type { RunnerFamily } from '../../shared/runner/families'
 import type { ApiPrompt } from '../../shared/runner/graph'
 import { withStaticSpeechText } from '../../shared/runner/audioGen'
 import { paidNoCall } from '../../shared/pricing/paidSettings'
+import { SURFACES_USD, surfacesCredits } from '../../shared/pricing/relightSurfaces'
 export { VIDEO_RATES, MODEL_PRICED_NODE_CLASSES, SETTING_PRICED_NODE_CLASSES, REMOTE_VIDEO_NODE_CLASSES }
 // lineup-p2 (model line-up Task P2): video priced per second of the clip
 // actually sent (shared/pricing/videoRates.ts), replacing one flat figure per model.
@@ -706,6 +707,7 @@ export const MODEL_COSTS: Record<string, ModelCost> = {
   'fal-ai/sam-3/image': { usd: 0.005, credits: 1, confidence: 'verified', note: 'promptable SAM 3 — $0.005/request flat; click-to-select fires one per refine' },
   'meta/sam-2': { usd: 0.022, credits: 4, confidence: 'verified', note: 'RETIRED from inpaint (segment-everything, ignored points); kept for pricing history' },
   '851-labs/background-remover': { usd: 0.0004, credits: 1, confidence: 'verified' },
+  'fal-ai/moge-2': { usd: SURFACES_USD, credits: surfacesCredits(), confidence: 'estimate', note: 'Relight surfaces — MoGe-2 normals, ~$0.00125/s compute, ~10 s; cold starts ~200 s (billing of the wait unverified)' },
   // — vector —
   'recraft-ai/recraft-v3-svg': { usd: 0.08, credits: 16, confidence: 'verified', note: 'vector = 2× Recraft raster rate' },
   'recraft-ai/recraft-vectorize': { usd: 0.01, credits: 2, confidence: 'estimate', note: 'hardware-billed, cheap CPU-ish job' },
