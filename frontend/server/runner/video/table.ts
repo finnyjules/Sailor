@@ -12,7 +12,12 @@
  *   window    — a sliding window of 8-bit frames (R6.2's motion blur);
  *   held      — every frame held (8-bit, under MEDIA_CAPS.heldFrameBytes),
  *               each output frame reading the one `heldSource` names;
- *   two-pass  — the batch decoded twice (R6.5's Stabilize);
+ *   two-pass  — the batch decoded twice (R6.5's Stabilize): pass 1 runs
+ *               `twoPass.op` on every frame in order (its state carried,
+ *               what it found read back from the state), then pass 2 makes
+ *               each output frame from its input frame with its own params
+ *               (`twoPass.between`); only the op's state is held between
+ *               frames;
  *   join      — two clips read side by side (R6.3's Crossfade and
  *               Transition): each output frame reads A's frame, B's, or one
  *               of each (`joinOf`, joinReads), both only moving forward, so
@@ -30,6 +35,7 @@ import { MEDIA_EFFECT_WORDS } from '#shared/runner/mediaEffects'
 import { videoCores } from './cores'
 import type { JoinLayout } from './core/join'
 import { parseCubeLut } from './core/look'
+import { shiftOf } from './core/stabilize'
 import { pythonInputRef } from '../inputs'
 import type { OutputFile } from '../types'
 
@@ -86,6 +92,17 @@ export interface VideoEffectSpec {
    * where it can't be read (the start pass said so before the hold).
    */
   loadState?(widgets: Record<string, unknown>, o: { read(f: OutputFile): Promise<Uint8Array>; hosted: boolean }): Promise<ArrayBuffer>
+  /**
+   * 'two-pass' (R6.5's Stabilize): pass 1's op ('<core>.<fn>'), called once
+   * a frame in order with its state carried (it makes no frames); what each
+   * call found, read from the state it hands back; and, from everything
+   * pass 1 found, each output frame's own params for pass 2's op (`op`).
+   */
+  twoPass?: {
+    op: string
+    found(state: ArrayBuffer | undefined): readonly number[]
+    between(widgets: Record<string, unknown>, found: readonly (readonly number[])[]): Record<string, unknown>[]
+  }
 }
 
 /** A window effect's reads (VideoEffectSpec.windowOf). */
@@ -347,6 +364,50 @@ function lookHeld(ins: readonly FrameShape[], out: FrameShape, state32: number, 
   return effectHeldBytes(big, { reads: 1, state32, extra })
 }
 
+// ── R6.5: Stabilize ───────────────────────────────────────────────────────────
+
+/**
+ * Stabilize's own steps, calibrated like the other effects' (measured on this
+ * Mac through the real plan, 24 frames of 1080p: crop 6.5 s, border 4.5 s,
+ * about 2 × 10⁸ of the first figures a second, against the slowest pilot's
+ * 2.2 × 10⁷ that sets the budget; these steps give 8 to 10 × 10⁷ a
+ * second, still well inside it). Pass 1 a pooled pixel: the 2-D transform, the cross-power
+ * spectrum and its inverse.
+ */
+const TRACK_STEPS = 40
+/** Pass 1 a full pixel: the luma and its pooling. */
+const LUMA_STEPS = 1
+/** Pass 2 a pixel: the grid and the bilinear sample; `crop` adds the cut and the bilinear resize back up. */
+const STAB_WARP_STEPS = 4
+const STAB_CROP_STEPS = 2
+/** Pass 1's pooled size for a frame of `s` (./core/stabilize.ts trackSize). */
+const stabTrack = (s: FrameShape) => videoCores.stab.trackSize(s.h, s.w)
+
+/**
+ * What Stabilize holds (rule 6): one frame in hand from the decode, the
+ * warp's planes (the grid and the sample, the crop and its resize: three
+ * float frames), and pass 1's own: the luma (a float a pixel), and in
+ * doubles the carried transform, the frame's own, the cross-power spectrum
+ * (real and imaginary each), and Bluestein's scratch (at most two 1024-point
+ * complex buffers and the chirp tables).
+ */
+function stabHeld(ins: readonly FrameShape[]): number {
+  const x = oneInput(ins)
+  const t = stabTrack(x)
+  return effectHeldBytes(x, { reads: 1, state32: 3, extra: 4 * x.w * x.h + 8 * 8 * t.th * t.tw + 1024 * 1024 })
+}
+
+/** Stabilize's work: every frame decoded twice and encoded once, pass 1's luma and transforms, pass 2's warp (and crop). */
+function stabWork(w: Record<string, unknown>, ins: readonly FrameShape[], out: FrameShape): number {
+  const x = oneInput(ins)
+  const t = stabTrack(x)
+  const px = x.w * x.h
+  const warp = STAB_WARP_STEPS + (w.edge_mode === 'border' ? 0 : STAB_CROP_STEPS)
+  return (2 * x.count * px + out.count * out.w * out.h) * VIDEO_IO_WORK_PER_PIXEL
+    + x.count * (px * LUMA_STEPS + t.th * t.tw * TRACK_STEPS)
+    + out.count * out.w * out.h * warp
+}
+
 export const VIDEO_EFFECTS: Readonly<Record<string, VideoEffectSpec>> = {
   VideoTrim: {
     family: 'video-time', op: 'time.select', inputs: ['frames'], reads: 'stream', preview: true,
@@ -583,6 +644,27 @@ export const VIDEO_EFFECTS: Readonly<Record<string, VideoEffectSpec>> = {
     shape: sameShape,
     heldBytes: (w, ins) => lookHeld(ins, sameShape(w, ins), 0),
     work: lookWork(() => GRADE_STEPS),
+  },
+  /**
+   * Stabilize (nodes_video_pro.py:956-1057): the shake found by phase
+   * correlation between neighbouring frames (pass 1, ./core/stabilize.ts
+   * track), the camera path smoothed and each frame moved back onto it
+   * (pass 2, warp), cropped back up where asked. T ≤ 1 handed on. The
+   * shifts are Python's but where its two highest correlation values tie;
+   * the warp is R2.2's kernels.
+   */
+  Stabilize: {
+    family: 'video-stabilize', op: 'stab.warp', inputs: ['frames'], reads: 'two-pass', preview: true,
+    shape: sameShape,
+    heldBytes: (_w, ins) => stabHeld(ins),
+    work: stabWork,
+    passThrough: (_w, ins) => oneInput(ins).count <= 1,
+    twoPass: {
+      op: 'stab.track',
+      found: state => shiftOf(state),
+      between: (w, found) => videoCores.stab.corrections(found.map(s => [s[0]!, s[1]!] as const), w.smoothing as number)
+        .map(([ty, tx]) => ({ _ty: ty, _tx: tx })),
+    },
   },
 }
 

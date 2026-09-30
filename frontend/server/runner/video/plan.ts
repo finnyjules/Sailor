@@ -256,6 +256,30 @@ async function worked(
         await emit(j, [{ rgb: handOver(f, left > 0), w: v.w, h: v.h }])
       }
     }
+    else if (spec.reads === 'two-pass' && spec.twoPass) {
+      // R6.5: the batch decoded twice, one frame in hand each time. Pass 1 runs its op on every frame in order,
+      // carrying only its state (Stabilize: the frame before's transform) and reading back what each call found;
+      // pass 2 makes each output frame from its own input frame, with its own params from everything pass 1 found.
+      // Each pass's decode is ended (by the loop, on every path) before the next starts.
+      const v = values[0]!
+      const tp = spec.twoPass
+      const found: (readonly number[])[] = []
+      let carried: ArrayBuffer | undefined
+      for await (const rgb of framesOf(v, media, lease)) {
+        if (media.signal?.aborted) throw new MediaError('stopped')
+        const r = await frameOnWorker(media, { op: tp.op, params, index: found.length, count: v.count, inputs: [{ rgb, w: v.w, h: v.h }], ...(carried ? { state: carried } : {}), quant: 'round', preview: false })
+        carried = r.state
+        found.push(tp.found(carried))
+      }
+      carried = undefined
+      if (found.length !== v.count) throw new MediaError('failed')
+      const own = tp.between(params, found)
+      let j = 0
+      for await (const rgb of framesOf(v, media, lease)) {
+        await emit(j, [{ rgb, w: v.w, h: v.h }], own[j])
+        j++
+      }
+    }
     else if (spec.reads === 'window' && spec.windowOf) {
       // A sliding window: frames decoded as the reads reach them, let go once no later output reads them.
       const v = values[0]!

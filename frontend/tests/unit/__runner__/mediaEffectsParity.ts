@@ -50,6 +50,8 @@ export interface VfxRun {
   input_b?: string; seed?: string; layout?: VfxJoinLayout; band?: VfxBand; glitch?: VfxGlitch
   /** R6.4: Aspect convert's auto_pan choice per frame (the edge, and Python's float32 scores and variances, base64); Chroma key's mask (not made by the runner). */
   autopan?: { edge: number; scores: string; var: string }[]; mask?: { count: number; sha256: string }
+  /** R6.5: Stabilize's pass 1 as Python finds it: each frame's shift, its correlation's two highest values, and whether they tie. */
+  shifts?: { dy: number; dx: number; top?: [number, number]; tie?: boolean }[]
 }
 export interface VfxSavedRun { ui: VfxUi; header: { video: { w: number; h: number; codec: string; pixFmt: string; frames: number }[] }; frameCount: number; frameRate: { num: number; den: number }; duration: number; frames: string[] }
 export interface VfxSaved { class_type: string; widgets: Record<string, unknown>; input: string; input_b?: string; seed?: string; fps: number; x264: VfxSavedRun; openh264: VfxSavedRun }
@@ -68,6 +70,15 @@ export interface VfxFixture {
   extraClips?: Record<string, { frames: number; w: number; h: number; u8: string }>
   cubes?: Record<string, string>
   cubeParse?: Record<string, { size?: number; f32_sha256?: string; error?: string }>
+  /** R6.5: the shaking patterns (frame i: synth(w + 2m, h + 2m, 3, seed) cut at (m + dy_i, m + dx_i)), the tie bound, and the FFT cases. */
+  shakes?: Record<string, { frames: number; w: number; h: number; margin: number; seed: number; path: [number, number][] }>
+  shiftTie?: number
+  fft?: {
+    numpy: string
+    one: { n: number; fft: string; ifft: string; rfft: string }[]
+    two: { h: number; w: number; fft2: string; ifft2: string; torch_fft2_c64: string }[]
+    rfft32: { n: number; rfft_c64: string }[]
+  }
 }
 
 const FIXTURES = resolve(__dirname, '../fixtures')
@@ -128,6 +139,21 @@ export function coreBatch(cls: string, widgets: Record<string, unknown>, input: 
   if (through) for (const f of input.frames) reads.push({ frames: [f] })
   else if (held) for (let j = 0; j < out.count; j++) reads.push({ frames: [] })
   else if (spec.reads === 'held') for (let j = 0; j < out.count; j++) reads.push({ frames: [input.frames[spec.heldSource ? spec.heldSource(params, ins, j) : j]!] })
+  else if (spec.reads === 'two-pass') {
+    // R6.5: pass 1's op over every frame in order (its state carried, what it found read back), then each
+    // output frame from its own input frame with the params pass 1's findings give it.
+    const tp = spec.twoPass!
+    const [c1, f1] = tp.op.split('.') as [string, string]
+    const track = (videoCores as unknown as Record<string, Record<string, (...a: unknown[]) => { out: Tensor; state?: ArrayBuffer }>>)[c1]![f1]!
+    const found: (readonly number[])[] = []
+    let st: ArrayBuffer | undefined
+    for (let i = 0; i < input.frames.length; i++) {
+      st = track([tensorOf(input.frames[i]!)], params, st, i, input.frames.length).state
+      found.push(tp.found(st))
+    }
+    const own = tp.between(params, found)
+    for (let j = 0; j < out.count; j++) reads.push({ frames: [input.frames[j]!], own: own[j]! })
+  }
   else if (spec.reads === 'window') {
     const plan = spec.windowOf!(params, ins)
     const { wins } = windowSchedule(plan, out.count, input.frames.length)

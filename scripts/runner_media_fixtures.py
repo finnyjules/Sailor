@@ -97,6 +97,14 @@ Groups:
            color; this group's own inputs (clip8 turned upright, a green
            screen) and three .cube files (identity 2³, a warm grade 17³, a
            broken one) recorded whole.
+  vfx-stabilize — (R6.5) Stabilize over the standard inputs and two shaking
+           patterns (a `synth` frame cut at a seeded path of whole pixels:
+           12 frames of 96 × 64, and of 600 × 338 so that pass 1 works at
+           half size), with Python's shifts and each frame's two highest
+           correlation values; and the shared FFT: numpy's fft and rfft of
+           lengths 1–64, 256, 1000, 1024 and 4096 and fft2 of 9 × 16 and
+           144 × 256 (float64), numpy's float32 rfft and torch's complex64
+           fft2 of a few, all over a fixed exact formula.
 """
 from __future__ import annotations
 
@@ -2830,9 +2838,145 @@ def group_vfx_look(names: list[str]) -> dict:
     return {"cases": cases}
 
 
+# ── R6.5: Stabilize and the shared FFT ────────────────────────────────────────
+
+# The shaking patterns: name → (frames, w, h, margin, seed). Frame i is synth(w + 2m, h + 2m, 3, seed) cut at
+# (m + dy_i, m + dx_i), the path drawn by numpy.random.default_rng(seed).integers(−m, m + 1, (frames, 2)).
+VFX_SHAKES = {
+    "shake-96x64": (12, 96, 64, 6, 8100),
+    "shake-600x338": (12, 600, 338, 8, 8200),
+}
+# A frame's two highest correlation values closer than this (relatively) make its shift a tie (rule 5's band).
+VFX_SHIFT_TIE = 1e-4
+
+
+def vfx_shake(name: str) -> tuple[torch.Tensor, list[list[int]]]:
+    n, w, h, m, seed = VFX_SHAKES[name]
+    base = np.frombuffer(synth(w + 2 * m, h + 2 * m, 3, seed), np.uint8).reshape(h + 2 * m, w + 2 * m, 3)
+    path = np.random.default_rng(seed).integers(-m, m + 1, size=(n, 2)).tolist()
+    frames = np.stack([base[m + dy:m + dy + h, m + dx:m + dx + w] for dy, dx in path])
+    return torch.from_numpy(np.ascontiguousarray(frames)) / 255.0, path
+
+
+def vfx_stab_input(name: str) -> torch.Tensor:
+    return vfx_shake(name)[0] if name in VFX_SHAKES else vfx_clip(name)
+
+
+def vfx_stab_shifts(frames: torch.Tensor) -> list[dict]:
+    """Stabilize's pass 1 (nodes_video_pro.py:986-1011, repeated line for line): each frame's (dy, dx), and the two
+    highest values of its correlation (for rule 5's band: a tie within VFX_SHIFT_TIE may pick another place)."""
+    import torch.nn.functional as F
+    T, H, W, _ = frames.shape
+    scale = max(1, max(H, W) // 256)
+    lum = (0.2126 * frames[..., 0] + 0.7152 * frames[..., 1] + 0.0722 * frames[..., 2])
+    small = F.avg_pool2d(lum.unsqueeze(1), kernel_size=scale).squeeze(1)
+    Th, Tw = small.shape[-2], small.shape[-1]
+    wy = torch.hann_window(Th, periodic=False, dtype=frames.dtype).view(-1, 1)
+    wx = torch.hann_window(Tw, periodic=False, dtype=frames.dtype).view(1, -1)
+    win = wy * wx
+    f_prev = torch.fft.fft2(small[0] * win)
+    out = [{"dy": 0, "dx": 0}]
+    for i in range(1, T):
+        f_cur = torch.fft.fft2(small[i] * win)
+        R = f_cur * torch.conj(f_prev)
+        R = R / (R.abs() + 1e-8)
+        r = torch.fft.ifft2(R).real
+        idx = torch.argmax(r)
+        dy = int(idx // Tw)
+        dx = int(idx % Tw)
+        if dy > Th // 2: dy -= Th
+        if dx > Tw // 2: dx -= Tw
+        top = torch.topk(r.reshape(-1), 2).values.tolist() if r.numel() > 1 else [float(r.reshape(-1)[0]), float("-inf")]
+        out.append({"dy": dy * scale, "dx": dx * scale, "top": top,
+                    "tie": bool(r.numel() > 1 and top[0] - top[1] <= VFX_SHIFT_TIE * max(abs(top[0]), 1e-12))})
+        f_prev = f_cur
+    return out
+
+
+def vfx_stab_cases(tmp: str, grid: list[tuple]) -> list[dict]:
+    from comfy_extras import nodes_video_pro as nvp
+    out = []
+    for name, widgets, clip in grid:
+        rec: dict = {"name": name, "class_type": "Stabilize", "node_id": VFX_NODE_ID, "widgets": widgets, "input": clip}
+        _o, temp = fresh_dirs(tmp, f"Stabilize_{len(out)}")
+        try:
+            frames = vfx_stab_input(clip)
+            args, ui = vfx_run(nvp.StabilizeNode, VFX_NODE_ID, frames=frames, **widgets)
+            rec["out"] = vfx_batch(args[0])
+            rec["ui"] = vfx_ui(ui)
+            rec["preview"] = vfx_preview(temp, ui)
+            if frames.shape[0] > 1:
+                rec["shifts"] = vfx_stab_shifts(frames)
+        except Exception as e:  # noqa: BLE001 - the error itself is the record
+            rec["error"] = err(e)
+        out.append(rec)
+    return out
+
+
+def vfx_fft_input(n: int, k: int) -> np.ndarray:
+    """A fixed exact formula (the spec makes the same doubles): part k of n values."""
+    j = np.arange(n, dtype=np.int64)
+    if k == 0:
+        return ((j * 7919 + 13) % 1000).astype(np.float64) / 1000.0 - 0.5
+    return ((j * 104729 + 7) % 997).astype(np.float64) / 997.0 - 0.5
+
+
+def c128(z: np.ndarray) -> str:
+    """A complex array as interleaved float64 (re, im), base64."""
+    return b64(np.ascontiguousarray(np.stack([z.real, z.imag], axis=-1).astype(np.float64)).tobytes())
+
+
+def c64(z) -> str:
+    z = np.asarray(z)
+    return b64(np.ascontiguousarray(np.stack([z.real, z.imag], axis=-1).astype(np.float32)).tobytes())
+
+
+def vfx_fft_cases() -> dict:
+    lengths = list(range(1, 65)) + [256, 1000, 1024, 4096]
+    one = []
+    for n in lengths:
+        x = vfx_fft_input(n, 0) + 1j * vfx_fft_input(n, 1)
+        one.append({"n": n, "fft": c128(np.fft.fft(x)), "ifft": c128(np.fft.ifft(x)), "rfft": c128(np.fft.rfft(x.real))})
+    two = []
+    for h, w in ((9, 16), (144, 256)):
+        x = (vfx_fft_input(h * w, 0) + 1j * vfx_fft_input(h * w, 1)).reshape(h, w)
+        two.append({"h": h, "w": w, "fft2": c128(np.fft.fft2(x)), "ifft2": c128(np.fft.ifft2(x)),
+                    "torch_fft2_c64": c64(torch.fft.fft2(torch.from_numpy(x.astype(np.complex64))).numpy())})
+    f32 = []
+    for n in (8, 64, 256, 1000, 1024, 4096):
+        x = vfx_fft_input(n, 0).astype(np.float32)
+        got = np.fft.rfft(x)
+        assert got.dtype == np.complex64, got.dtype
+        f32.append({"n": n, "rfft_c64": c64(got)})
+    return {"numpy": np.__version__, "one": one, "two": two, "rfft32": f32}
+
+
+def group_vfx_stabilize(names: list[str]) -> dict:
+    """Stabilize (R6.5) and the shared FFT."""
+    import tempfile
+    from comfy_extras import nodes_video_pro as nvp
+    st = {"smoothing": 0.85, "edge_mode": "crop", "crop_pad": 0.05}
+    grid = vfx_grid(
+        st, {"smoothing": (0.0, 0.99, 0.5), "crop_pad": (0.0, 0.3, 0.15)}, {"edge_mode": ["crop", "border"]},
+        [(f"{c}, {e}, smoothing {s}, crop_pad {p}", {"smoothing": s, "edge_mode": e, "crop_pad": p}, c)
+         for c in VFX_SHAKES for e in ("crop", "border") for s in (0.0, 0.85, 0.99) for p in (0.0, 0.3)
+         if not (e == "border" and p == 0.3)]
+        + [("border, clip8-odd", {**st, "edge_mode": "border"}, "clip8-odd"),
+           ("crop 0.3, clip8-big", {**st, "crop_pad": 0.3}, "clip8-big")],
+    )
+    cases: dict = {"threads": vfx_threads(), "clips": {k: {"frames": v[0], "w": v[1], "h": v[2], "seed": v[3]} for k, v in VFX_CLIPS.items()},
+                   "inlineValues": VFX_INLINE_VALUES, "band": VFX_BAND, "shiftTie": VFX_SHIFT_TIE,
+                   "shakes": {k: {"frames": v[0], "w": v[1], "h": v[2], "margin": v[3], "seed": v[4], "path": vfx_shake(k)[1]} for k, v in VFX_SHAKES.items()}}
+    with tempfile.TemporaryDirectory() as tmp:
+        cases["runs"] = vfx_stab_cases(tmp, grid)
+        cases["saved"] = [vfx_saved(tmp, nvp.StabilizeNode, "Stabilize", st)]
+    cases["fft"] = vfx_fft_cases()
+    return {"cases": cases}
+
+
 GROUPS = {"probe": group_probe, "decode": group_decode, "encode": group_encode, "sound": group_sound, "video": group_video,
           "frames": group_frames, "timeline-media": group_timeline_media, "vfx-time": group_vfx_time, "vfx-join": group_vfx_join,
-          "vfx-look": group_vfx_look}
+          "vfx-look": group_vfx_look, "vfx-stabilize": group_vfx_stabilize}
 
 
 def main() -> None:
