@@ -31,8 +31,8 @@ import type { KeptBytes } from '../runner/keptBytes'
 import type { OutputFile, RunnerValue, SoundNote } from '../runner/types'
 import { decodeAudio, decodeFrames, framesFilter, framesScale, pickFilter, type DecodedSound, type FramePick, type SoundDecoder } from './decode'
 import { FFV1_KEPT_RATE, PYAV_H264_DEFAULT, encodeVideo, floatWav, pyStreamRate, writeFfv1, type SoundLayout } from './encode'
-import { ffprobeJson, mediaCapsWord, probeMedia, type MediaProbe, type Rational } from './probe'
-import { MediaError, inputArgs, runMedia } from './run'
+import { ffprobeJson, mediaCapsWord, probeMedia, resolveMediaInput, type MediaProbe, type Rational } from './probe'
+import { MediaError, inputArgs, runMedia, type MediaLease } from './run'
 
 /** Classes whose sound Python decodes with _download_url_to_audio_dict (nodes_replicate.py:1735, :1834, :5463, and the two cards that run them). */
 export const SOUND_DOWNLOAD_CLASSES: ReadonlySet<string> = new Set([
@@ -176,21 +176,191 @@ async function* cappedFrames(frames: AsyncIterable<Uint8Array>, w: number, h: nu
 /** How often (in frames) a batch being kept checks the run's kept room. */
 export const KEEP_ROOM_EVERY = 16
 
-/** Keeps a frame batch (rgb24 frames of w × h) as one FFV1 file for the run. */
-export async function keepFrames(runId: string, frames: AsyncIterable<Uint8Array>, w: number, h: number, io: MediaValueIO): Promise<FramesValue> {
+/** Keeps a frame batch (rgb24 frames of w × h) as one FFV1 file for the run. `o.lease`: its job runs in that node's lease (R6.1). */
+export async function keepFrames(runId: string, frames: AsyncIterable<Uint8Array>, w: number, h: number, io: MediaValueIO, o: { lease?: MediaLease } = {}): Promise<FramesValue> {
   checkBatch(0, w, h, io.hosted)
   await io.kept.checkRoom(runId)
   const work = await io.kept.workDir(runId)
   try {
     const out = join(work, 'frames.mkv')
     const counted = { n: 0 }
-    const { count } = await writeFfv1({ frames: cappedFrames(frames, w, h, io.hosted, counted, () => io.kept.checkRoom(runId)), w, h, out, outRoots: [work], userId: io.userId, signal: io.signal })
+    const { count } = await writeFfv1({ frames: cappedFrames(frames, w, h, io.hosted, counted, () => io.kept.checkRoom(runId)), w, h, out, outRoots: [work], userId: io.userId, signal: io.signal, ...(o.lease ? { lease: o.lease } : {}) })
     const file = await io.kept.putPath(runId, out, 'mkv')
     return { kind: 'frames', file, count, w, h }
   }
   finally {
     await rm(work, { recursive: true, force: true })
   }
+}
+
+// ── Frames through a node, one at a time (R6.1) ──────────────────────────────
+
+/**
+ * One frame at a time between a producer and a consumer: `put` waits until
+ * the frame is taken (back-pressure: never more than one frame in hand), and
+ * a failure on either side reaches the other.
+ */
+class FrameChannel {
+  private frame: Uint8Array | null = null
+  private closed = false
+  private error: unknown = null
+  private wakeTaker: (() => void) | null = null
+  private wakePutter: (() => void) | null = null
+
+  async put(f: Uint8Array): Promise<void> {
+    while (this.frame !== null && this.error === null) await new Promise<void>((r) => { this.wakePutter = r })
+    if (this.error !== null) throw this.error
+    if (this.closed) throw new MediaError('failed')
+    this.frame = f
+    this.wake('taker')
+    // Taken (or failed) before the put resolves.
+    while (this.frame === f && this.error === null) await new Promise<void>((r) => { this.wakePutter = r })
+    if (this.error !== null && this.frame === f) throw this.error
+  }
+
+  /** The next frame, or null once closed with nothing left. */
+  async take(): Promise<Uint8Array | null> {
+    while (this.frame === null && !this.closed && this.error === null) await new Promise<void>((r) => { this.wakeTaker = r })
+    if (this.frame !== null) {
+      const f = this.frame
+      this.frame = null
+      this.wake('putter')
+      return f
+    }
+    if (this.error !== null) throw this.error
+    return null
+  }
+
+  close(): void {
+    this.closed = true
+    this.wake('taker')
+  }
+
+  fail(e: unknown): void {
+    if (this.error === null) this.error = e
+    this.frame = null
+    this.wake('taker')
+    this.wake('putter')
+  }
+
+  private wake(who: 'taker' | 'putter'): void {
+    const f = who === 'taker' ? this.wakeTaker : this.wakePutter
+    if (who === 'taker') this.wakeTaker = null
+    else this.wakePutter = null
+    f?.()
+  }
+
+  async* frames(): AsyncIterable<Uint8Array> {
+    for (;;) {
+      const f = await this.take()
+      if (f === null) return
+      yield f
+    }
+  }
+}
+
+/**
+ * A kept batch's header, known from its value (R6.1): the runner wrote it
+ * (writeFfv1: FFV1 in Matroska, bgr0, no colour tags), so the decode needs no
+ * probe job of its own under the node's lease. The file must still really be
+ * in the run's kept folder (`resolveMediaInput`).
+ */
+async function keptBatchProbe(v: FramesValue, path: string, root: string): Promise<MediaProbe> {
+  const real = await resolveMediaInput(path, [root])
+  return {
+    path: real, format: 'mkv', formatName: 'matroska,webm', containerDuration: null, bytes: 0, videoPackets: null, sound: [],
+    video: [{
+      index: 0, w: v.w, h: v.h, codec: 'ffv1', pixFmt: 'bgr0', averageRate: null, frames: v.count, duration: null,
+      timeBase: { num: 1, den: FFV1_KEPT_RATE }, colorRange: null, colorSpace: null, chromaLocation: null,
+    }],
+  }
+}
+
+/**
+ * A kept batch's frames in order, exact rgb24, one decode job under the
+ * node's lease (R5.2's readFrames as an iterator): checked against the batch
+ * caps it was kept under before any decode, and to decode to exactly its own
+ * count and size. Memory holds one frame; the decode waits while the node
+ * works on it. Leaving the loop early (a failure, Stop) ends the decode.
+ */
+export function framesOf(v: FramesValue, io: MediaValueIO, lease: MediaLease): AsyncIterable<Uint8Array> {
+  return {
+    async* [Symbol.asyncIterator]() {
+      checkBatch(v.count, v.w, v.h, io.hosted)
+      // Known gap (R5.2 review Minor 3, parked in the ledger): the bytes are verified, then the tool reopens the path.
+      const path = await io.access.verifiedPath(v.file)
+      const root = io.access.rootOf(v.file)
+      const probe = await keptBatchProbe(v, path, root)
+      const chan = new FrameChannel()
+      const stop = new AbortController()
+      const signal = io.signal ? AbortSignal.any([io.signal, stop.signal]) : stop.signal
+      const decoding = decodeFrames(path, {
+        userId: io.userId, signal, maxFrames: v.count, roots: [root], probe, kept: true, lease,
+        onFrame: rgb => chan.put(rgb),
+      }).then((got) => {
+        if (got.count !== v.count || got.w !== v.w || got.h !== v.h) throw new MediaError('failed')
+        chan.close()
+      })
+      decoding.catch(e => chan.fail(e))
+      let finished = false
+      try {
+        for (;;) {
+          const f = await chan.take()
+          if (f === null) break
+          yield f
+        }
+        await decoding
+        finished = true
+      }
+      finally {
+        if (!finished) {
+          stop.abort()
+          chan.fail(new MediaError('stopped'))
+          await decoding.catch(() => {})
+        }
+      }
+    },
+  }
+}
+
+/**
+ * A new batch written frame by frame: one FFV1 job under the node's lease
+ * (keepFrames: the batch caps and the run's kept room as it grows), kept on
+ * `done`, removed on `abort` (and on any failure). `put` waits until the
+ * writer has the frame.
+ */
+export function framesSink(w: number, h: number, io: MediaValueIO, lease: MediaLease): {
+  put(rgb: Uint8Array): Promise<void>; done(): Promise<FramesValue>; abort(): Promise<void>
+} {
+  const chan = new FrameChannel()
+  const kept = keepFrames(io.runId, chan.frames(), w, h, io, { lease })
+  kept.catch(e => chan.fail(e))
+  return {
+    async put(rgb) {
+      if (rgb.byteLength !== w * h * 3) throw new MediaError('sizeChanged')
+      await chan.put(rgb)
+    },
+    async done() {
+      chan.close()
+      return kept
+    },
+    async abort() {
+      chan.fail(new MediaError('stopped'))
+      await kept.catch(() => {})
+    },
+  }
+}
+
+/**
+ * Every frame of a batch in memory, 8-bit (an effect that needs them all at
+ * once, rule 6): refused past `maxBytes` (MEDIA_CAPS.heldFrameBytes) before
+ * any decode.
+ */
+export async function heldFrames(v: FramesValue, io: MediaValueIO, lease: MediaLease, maxBytes: number): Promise<Uint8Array[]> {
+  if (v.count * v.w * v.h * 3 > maxBytes) throw new MediaError('tooManyFrames')
+  const out: Uint8Array[] = []
+  for await (const f of framesOf(v, io, lease)) out.push(f)
+  return out
 }
 
 /**

@@ -126,7 +126,8 @@ function loaderFile(inputs: Record<string, unknown>): OutputFile | null {
   return isLink(inputs.file) ? null : parseInputFileRef(inputs.file)
 }
 
-function settingsOf(inputs: Record<string, unknown>): LoadFramesSettings {
+/** Load video frames' settings as its execute() receives them (R6.1: read by the start pass too, server/runner/video/shapes.ts). */
+export function settingsOf(inputs: Record<string, unknown>): LoadFramesSettings {
   return {
     max_seconds: floatOf(inputs.max_seconds, 10),
     max_frames: intOf(inputs.max_frames, 600),

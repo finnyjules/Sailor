@@ -140,6 +140,8 @@ import type { PythonWav } from './soundWav'
 import { planAudioCard, planLoadAudio, planPreviewAudio, planSaveAudio } from './media/soundNodes'
 import { planCreateVideo, planGetVideoComponents, planLoadVideo, planSaveVideo, planVideoCard } from './media/videoNodes'
 import { planLoadVideoFrames, planSaveVideoFrames } from './media/frameNodes'
+import { planVideoEffect } from './video/plan'
+import { videoEffectSpec } from './video/table'
 import { planGen3d } from './generators/gen3d'
 import { planImageExtras } from './generators/imageExtras'
 import { planLora } from './generators/lora'
@@ -1351,6 +1353,8 @@ async function planNodeRequest(ctx: PlanContext): Promise<NodePlan> {
     }
 
     default: {
+      // ── video-* (step 3, R6): the video effects, computed here (./video/) ──
+      if (videoEffectSpec(node.class_type)) return planVideoEffect(ctx)
       // ── effects-* (step 3, R2): the still-picture effects, computed here ──
       const fx = effectSpec(node.class_type)
       // Painter (R2.8) has a plan of its own: a canvas or the first picture, and a painter file.

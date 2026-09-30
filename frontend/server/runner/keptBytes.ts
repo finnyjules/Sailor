@@ -69,6 +69,13 @@ export interface KeptBytes {
    * (`withRunCap`; a store without a cap never refuses).
    */
   checkRoom(runId: string): Promise<void>
+  /**
+   * Lets go of one of the run's kept files now (R6 ruling (j): a frame batch
+   * or sound every reader of which has finished): removed, and no longer
+   * counted toward the run's cap. Reading it afterwards is KEPT_GONE. A file
+   * that isn't one of the run's kept files is left alone.
+   */
+  release(runId: string, file: OutputFile): Promise<void>
 }
 
 /** The sha256 of a file, read as it streams. */
@@ -216,6 +223,10 @@ export function createFileKeptBytes(dir: string): KeptBytes {
       return total
     },
     async checkRoom() {},
+    async release(runId, file) {
+      if (!shaOf(file) || file.subfolder !== runId) return
+      await rm(pathOf(file), { force: true })
+    },
   }
 }
 
@@ -289,6 +300,11 @@ export function createMemoryKeptBytes(): KeptBytes {
     },
     async workBytes(runId) { return disk ? disk.workBytes(runId) : 0 },
     async checkRoom() {},
+    async release(runId, file) {
+      if (!shaOf(file) || file.subfolder !== runId) return
+      m.delete(key(file))
+      await disk?.release(runId, file)
+    },
   }
 }
 
@@ -367,6 +383,14 @@ export function withRunCap(kept: KeptBytes, capOf: () => number): KeptBytes {
     async keepOnly(runIds) {
       for (const id of [...totals.keys()]) if (!runIds.has(id)) totals.delete(id)
       await kept.keepOnly(runIds)
+    },
+    async release(runId, file) {
+      // Under the run's lock, so a put racing it counts what is really there.
+      return locked(runId, async () => {
+        const size = await kept.size(file)
+        await kept.release(runId, file)
+        if (size !== null && totals.has(runId) && !(await kept.exists(file))) totals.set(runId, Math.max(0, totals.get(runId)! - size))
+      })
     },
   }
 }

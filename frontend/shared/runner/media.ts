@@ -19,10 +19,34 @@ export interface MediaCaps {
   /** channels·samples decoded at once. */
   soundSamples: number
   keptBytesPerRun: number
+  /**
+   * R6 ruling (i), the video and sound effects: the 8-bit frames one node may
+   * hold at once (bytes), the sound samples one node may hold (channels ·
+   * samples, its inputs and output together), and the work one node may ask
+   * for (pixel·steps, server/runner/video/table.ts VideoEffectSpec.work).
+   * Past any of them the workflow is left to the engine before the run.
+   * Locally R5's own caps only (these are unbounded).
+   */
+  heldFrameBytes: number
+  effectSoundSamples: number
+  effectWork: number
 }
 
 const GiB = 1024 ** 3
 const MiB = 1024 ** 2
+
+/**
+ * R6 ruling (i): the most work one video effect may ask for in hosted, in
+ * pixel·steps (server/runner/video/table.ts VideoEffectSpec.work: every pixel
+ * decoded and every pixel made counts VIDEO_IO_WORK_PER_PIXEL, and an
+ * effect's own arithmetic its steps). Measured on the development Mac (R6.1
+ * report, 24 frames of 1080p noise through the real plan): the slowest pilot
+ * (ping-pong, every frame held and handed over) moved 2.8 × 10⁷ units a
+ * second, Frame trail 5.4 × 10⁷, Trim 3.6 × 10⁷. At the slowest, ten minutes
+ * (the media job limit every one of the node's processes lives under) is
+ * 1.7 × 10¹⁰ units; the budget is half that.
+ */
+export const EFFECT_WORK_HOSTED = 8_000_000_000
 
 export const MEDIA_CAPS: { readonly local: Readonly<MediaCaps>; readonly hosted: Readonly<MediaCaps> } = {
   hosted: {
@@ -36,6 +60,11 @@ export const MEDIA_CAPS: { readonly local: Readonly<MediaCaps>; readonly hosted:
     // A 30-minute stereo sound at 48 kHz.
     soundSamples: 2 * 48000 * 30 * 60,
     keptBytesPerRun: 4 * GiB,
+    // About 86 frames of 1080p.
+    heldFrameBytes: 512 * MiB,
+    // Ten minutes of stereo sound at 48 kHz.
+    effectSoundSamples: 2 * 48000 * 10 * 60,
+    effectWork: EFFECT_WORK_HOSTED,
   },
   local: {
     // Python has no file size limit: the machine is the person's own.
@@ -49,8 +78,14 @@ export const MEDIA_CAPS: { readonly local: Readonly<MediaCaps>; readonly hosted:
     // An hour of stereo sound at 48 kHz.
     soundSamples: 2 * 48000 * 60 * 60,
     keptBytesPerRun: Number.POSITIVE_INFINITY,
+    heldFrameBytes: Number.POSITIVE_INFINITY,
+    effectSoundSamples: Number.POSITIVE_INFINITY,
+    effectWork: Number.POSITIVE_INFINITY,
   },
 }
+
+/** R6.1: the tool processes one node runs under its lease (server/media/run.ts mediaLease): two decodes and an encode. */
+export const MEDIA_LEASE_PROCESSES = 3
 
 export type MediaWord =
   | 'tooBig' | 'tooLong' | 'tooManyFrames' | 'unreadable' | 'noVideo' | 'noSound'

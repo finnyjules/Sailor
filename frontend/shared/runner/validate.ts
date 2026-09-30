@@ -31,6 +31,7 @@ import {
 } from './eligibility'
 import { NO_FAMILIES, familyOn, type RunnerFamily } from './families'
 import { EFFECT_OUTPUT_NODES } from './effects'
+import { MEDIA_EFFECT_OUTPUT_NODES } from './mediaEffects'
 import { linksOf, type ApiPrompt } from './graph'
 
 /**
@@ -84,6 +85,9 @@ export const RUNNER_OUTPUT_CLASSES: ReadonlySet<string> = new Set([
   'SaveVideo',
   // R5.5: Save video frames is an output node (is_output_node=True); Load video frames is not.
   'SaveVideoFrames',
+  // R6: every ported video effect that is one (all but Slow motion, Silence cut and Text clip, as
+  // define_schema's is_output_node says; ./mediaEffects.ts MEDIA_EFFECT_OUTPUT_NODES).
+  ...MEDIA_EFFECT_OUTPUT_NODES,
 ])
 
 /** ComfyUI's node_errors entry for a node that failed validation. */

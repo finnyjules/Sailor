@@ -46,7 +46,7 @@
  *                from the decoded frames' own pts and sizes.
  */
 import { isHosted } from '../utils/deployMode'
-import { MediaError, inputArgs, runMedia } from './run'
+import { MediaError, inputArgs, runMedia, type MediaLease } from './run'
 import { ffprobeJson, mediaCapsWord, probeMedia, resolveMediaInput, type MediaProbe, type SoundStreamProbe, type VideoStreamProbe } from './probe'
 
 /** sws's position for a chroma location, in 1/256 of a pixel (av_chroma_location_enum_to_pos). */
@@ -153,6 +153,8 @@ export async function decodeFrames(path: string, o: {
    * `maxFrames` still holds.
    */
   pick?: FramePick
+  /** R6.1: run in this node's lease (server/media/run.ts mediaLease), not a slot of its own. */
+  lease?: MediaLease
 }): Promise<{ count: number; w: number; h: number }> {
   const p = await probeFor(path, o, 'video')
   const refused = o.kept ? null : mediaCapsWord(p, 'video', isHosted())
@@ -203,6 +205,7 @@ export async function decodeFrames(path: string, o: {
   try {
     await runMedia({
       tool: 'ffmpeg', args, userId: o.userId, signal: o.signal,
+      ...(o.lease ? { lease: o.lease } : {}),
       onSide: (chunk) => {
         try {
           if (chunk === null) { statsClosed = true; return }

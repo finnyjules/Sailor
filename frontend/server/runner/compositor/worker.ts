@@ -28,6 +28,7 @@ import { compositorCore, type Picture, type RawPicture } from './plane'
 import { composeFrame, type FrameBackend, type FrameLoaders } from './render'
 import { pixelsCore, type PixelsPicture } from '../pixels/core'
 import { EFFECT_CORES, type EffectCoreEntry } from '../effects/cores'
+import { VIDEO_CORES } from '../video/cores'
 import type { PilRaw } from '../pixels/pilPixels'
 import { resampleCore } from '../../media/resample'
 
@@ -41,9 +42,9 @@ import { resampleCore } from '../../media/resample'
 export function workerScript(
   coreFn: () => unknown = compositorCore,
   pixelsFn: () => unknown = pixelsCore,
-  effectCores: readonly EffectCoreEntry[] = EFFECT_CORES,
+  effectCores: readonly EffectCoreEntry[] = [...EFFECT_CORES, ...VIDEO_CORES],
 ): string {
-  // The effect cores (R2), each from its source text, in dependency order.
+  // The effect cores (R2), then the video cores (R6), each from its source text, in dependency order.
   const built = effectCores.map(c => `built[${JSON.stringify(c.name)}] = (${c.fn.toString()})(${c.args.map(a => `built[${JSON.stringify(a)}]`).join(', ')})`).join('\n')
   return `
 const { parentPort, workerData } = require('node:worker_threads')
@@ -218,6 +219,29 @@ parentPort.on('message', (m) => {
       }
     }
     else if (m.op === 'fx.end') fx = null
+    // A video effect (R6.1, ../video/): one output frame per call, from the frames it reads (rgb24,
+    // made k / 255), with the state the op carried from the frame before. The frame back is 8-bit as
+    // rule 4 asks ('round' or 'trunc'); the live preview's (trunc) too when asked, from the same float.
+    else if (m.op === 'vfx.frame') {
+      stopped()
+      const vx = built.vx
+      if (!vx) throw new Error('The video effects are not in the runner')
+      const op = effectOp(m.fn)
+      const inputs = m.inputs.map(x => vx.fromRgb(x.rgb, x.w, x.h))
+      const r = op(inputs, m.params, m.state, m.index, m.count, isStopped)
+      stopped()
+      const rgb = vx.toRgb(r.out, m.quant, isStopped)
+      value = { rgb, w: r.out.w, h: r.out.h }
+      transfer = [rgb.buffer]
+      if (r.state) {
+        value.state = r.state
+        transfer.push(r.state)
+      }
+      if (m.preview) {
+        value.preview = m.quant === 'trunc' ? rgb.slice() : vx.toRgb(r.out, 'trunc', isStopped)
+        transfer.push(value.preview.buffer)
+      }
+    }
     // One sound channel through torchaudio's resampler (R5.1c): Stop is read between blocks of output.
     else if (m.op === 'audio.resample') {
       stopped()
@@ -455,9 +479,29 @@ export interface PixelsWorker {
    */
   effectRun(job: EffectRunJob): Promise<EffectRunResult>
   effectEnd(): Promise<void>
+  /**
+   * One output frame of a video effect (R6.1, ../video/plan.ts): `op` its
+   * worker op ('<core>.<fn>'), `index` its place in the batch of `count`,
+   * `inputs` the rgb24 frames it reads and `state` what the op carried from
+   * the frame before (both handed over). Back: the frame (8-bit by `quant`),
+   * the state to carry on, and the live preview's trunc-8 pixels when asked.
+   */
+  videoFrame(job: VideoFrameJob): Promise<VideoFrameResult>
   /** Aborted once this job's turn is over (Stop, the watchdog, or done): check before writing anything (R1.6 fix round 1). */
   live: AbortSignal
 }
+
+export interface VideoFrameJob {
+  op: string; params: Record<string, unknown>
+  index: number; count: number
+  inputs: { rgb: Uint8Array; w: number; h: number }[]
+  state?: ArrayBuffer
+  quant: 'round' | 'trunc'; preview: boolean
+}
+export interface VideoFrameResult { rgb: Uint8Array; w: number; h: number; state?: ArrayBuffer; preview?: Uint8Array }
+
+/** The longest one video effect may take on one frame (the Frame's limit, per worker call). */
+export const VIDEO_FRAME_TIMEOUT_MESSAGE = 'This video effect took longer than 2 minutes on one frame, so it was stopped'
 
 /** A mask handed to an effect: a kept 16-bit mask's inflated scanlines. */
 export interface EffectMaskIn { mask16: Uint8Array; w: number; h: number }
@@ -576,6 +620,20 @@ export function pixelsInWorker<T>(signal: AbortSignal | undefined, job: (w: Pixe
       },
       async effectEnd() {
         await call(t, { op: 'fx.end' }, [])
+      },
+      async videoFrame(job) {
+        const buffers: ArrayBuffer[] = []
+        const inputs = job.inputs.map((x) => {
+          const own = x.rgb.byteOffset === 0 && x.rgb.byteLength === x.rgb.buffer.byteLength && !(x.rgb.buffer instanceof SharedArrayBuffer) ? x.rgb : x.rgb.slice()
+          // The same buffer twice (a frame read twice in one call) is handed over once.
+          if (!buffers.includes(own.buffer as ArrayBuffer)) buffers.push(own.buffer as ArrayBuffer)
+          return { rgb: own, w: x.w, h: x.h }
+        })
+        if (job.state && !buffers.includes(job.state)) buffers.push(job.state)
+        return await call(t, {
+          op: 'vfx.frame', fn: job.op, params: job.params, index: job.index, count: job.count,
+          inputs, state: job.state, quant: job.quant, preview: job.preview,
+        }, buffers) as VideoFrameResult
       },
     }
     try { return await job(w) }

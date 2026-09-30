@@ -58,6 +58,10 @@ import { poseStartProblem } from './generators/nanoExtras'
 import { loadAudioStartProblems, soundStreamProblem } from './media/soundNodes'
 import { loadVideoStartProblems, videoFileVerdict } from './media/videoNodes'
 import { frameStartProblems, framesSoundVerdict } from './media/frameNodes'
+import { hasVideoEffect, mediaEffectStartProblems } from './video/start'
+import { frameShapes, videoSourceShapeOf } from './video/shapes'
+import { markReleased, reviveReleased, spentKeptMedia } from './keptRelease'
+import { MEDIA_EFFECT_FAMILIES } from '#shared/runner/mediaEffects'
 import { ev, type RunEvents, type SwitchReason } from './events'
 import { mediaNodeKind, nodeMediaChangedWords, nodeMediaCheck, nodeMediaFiles } from './nodeMedia'
 import { pythonWavOf, silenceWav, silentCardAt, soundMakerOf, type PythonWav } from './soundWav'
@@ -880,6 +884,23 @@ export function createEngine(deps: EngineDeps) {
     if (used + need > cap) throw refuse(KEPT_ROOM_REFUSED, 413)
   }
 
+  /**
+   * R6 ruling (j): lets go of every kept frame batch and sound no node will
+   * read any more (keptRelease.ts spentKeptMedia), writing its name on its
+   * holders' records. Only in a leg with an R6 family on: with them all off,
+   * the run keeps what it made until it ends, exactly as before.
+   */
+  async function releaseSpent(run: RunRecord, leg: LegRecord): Promise<void> {
+    if (!(leg.families ?? []).some(f => (MEDIA_EFFECT_FAMILIES as readonly string[]).includes(f))) return
+    const spent = spentKeptMedia(run)
+    if (!spent.length) return
+    for (const s of spent) {
+      await kept.release(run.id, s.file)
+      markReleased(s.file, s.holders)
+    }
+    await persist(run)
+  }
+
   // ── Opening a leg: price, hold, write down ─────────────────────────────
   async function openLeg(run: RunRecord, action: LegAction, gateId: string | null, takeIdx: number[]): Promise<LegRecord> {
     const index = run.legs.length
@@ -994,6 +1015,9 @@ export function createEngine(deps: EngineDeps) {
     if (charge.finished) return takeOutcome(take, leg.index)
 
     publish(run, ev.start(stageKey))
+    // A value let go after its readers finished (R6 ruling (j)) that a node still to run reads has its
+    // maker run again first (a restart, a later leg): free, and the same bytes.
+    reviveReleased(take)
     const nodes = legNodes(take.prompt, gateStateOf(take))
     for (const id of nodes) {
       const rec = take.nodes[id]!
@@ -1024,6 +1048,8 @@ export function createEngine(deps: EngineDeps) {
       }
       const doneId = await Promise.race([...inflight].map(([id, p]) => p.then(() => id)))
       inflight.delete(doneId)
+      // R6 ruling (j): the batches and sounds every reader of which has finished are let go now.
+      await releaseSpent(run, leg).catch(e => deps.reportError(e, { site: 'runner.kept.release', runId: run.id }))
     }
 
     // Charge exactly what was made (reused results are free); the flat
@@ -2207,6 +2233,16 @@ export function createEngine(deps: EngineDeps) {
     for (const p of prompts) {
       const bad = await frameStartProblems(p, f => files.exists(f), f => videoFileVerdict(files, f, { userId: i.userId, hosted: deps.hosted() }), f => framesSoundVerdict(files, f, { userId: i.userId }))
       if (bad) throw refuse(bad.message, 400, { nodeId: bad.nodeId, classType: bad.classType, ...(bad.file ? { file: bad.file } : {}), ...(bad.engine ? { reason: RUNNER_NOT_ELIGIBLE } : {}) })
+    }
+    // The video effects' start pass (R6 rule 3, ./video/start.ts): every frame batch's count and size
+    // through the chain, from the sources' headers and the widgets; a node past a limit (frames held,
+    // work, the batch caps, the run's kept total) or reading a source the build can't read leaves the
+    // whole workflow to the engine (RUNNER_NOT_ELIGIBLE), never a refusal.
+    for (const p of prompts) {
+      if (!hasVideoEffect(p, families)) continue
+      const shapes = await frameShapes(p, families, videoSourceShapeOf({ prompt: p, access: files, userId: i.userId, hosted: deps.hosted() }))
+      const bad = await mediaEffectStartProblems(p, families, { hosted: deps.hosted(), shapes })
+      if (bad) throw refuse(bad.message, 400, { nodeId: bad.nodeId, classType: bad.classType, reason: RUNNER_NOT_ELIGIBLE })
     }
     // The picture cards' files (R1.3 follow-up): one a card would refuse at its
     // turn (16-bit, 32-bit, CMYK, a see-through GIF, a kind sharp can't read)

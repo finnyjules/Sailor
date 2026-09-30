@@ -17,6 +17,7 @@ import {
   asciiGlyphsArePortable, effectFamilyOn, effectOutputSizeFits, effectPreviewName, effectRows, effectSwitchedClasses, effectTextIsPortable, painterInputsArePortable,
 } from './effects'
 import { SHADER_ASPECTS, shaderBakeTaken } from './shaderBakeKey'
+import { FRAMES_LINK_SOURCES, MEDIA_EFFECT_OUTPUT_KINDS, mediaEffectFamilyOn, mediaEffectRows, mediaEffectSwitchedClasses } from './mediaEffects'
 import {
   ENHANCE_ENGINES, REMOVE_BACKGROUND_MODELS, REPAIR_CLASSES, REPAIR_OUTPUT_FORMATS, RESTORE_PHOTO_MODELS,
   TOPAZ_ENHANCE_MODELS, TOPAZ_SUBJECT_DETECTION, TOPAZ_UPSCALE_FACTORS, UPSCALE_ENGINES,
@@ -948,7 +949,8 @@ export const RUNNER_NODE_RULES: Readonly<Record<string, RunnerNodeRule>> = {
   CreateVideo: {
     family: 'media-video', local: 'source', mustLink: ['images'], required: ['images', 'fps'],
     valueInputs: { images: ['frames'], fps: ['number'] },
-    linkSources: { audio: SOUND_OUTPUTS },
+    // R6.1: a batch from FRAMES_OUTPUTS (or a Gate handing one on), each source taken only while its family is on.
+    linkSources: { audio: SOUND_OUTPUTS, images: FRAMES_LINK_SOURCES },
     inputCheck: 'create-video-fps',
   },
   SaveVideo: {
@@ -985,6 +987,8 @@ export const RUNNER_NODE_RULES: Readonly<Record<string, RunnerNodeRule>> = {
   SaveVideoFrames: {
     family: 'media-video', local: 'render', mustLink: ['frames'], required: ['frames', 'fps'],
     valueInputs: { frames: ['frames'], fps: ['number'] },
+    // R6.1: as Create video's images.
+    linkSources: { frames: FRAMES_LINK_SOURCES },
     // A typed rate as ComfyUI validates it (1…120), the same as Create video's.
     inputCheck: 'create-video-fps',
     widgets: {
@@ -1542,6 +1546,10 @@ export const RUNNER_NODE_RULES: Readonly<Record<string, RunnerNodeRule>> = {
   // Rows built from the real node schemas (./effectSchemas.generated.ts), one
   // per ported class; each needs its family and `cards`.
   ...effectRows(),
+  // ── video-* and sound-* (step 3, R6): the video and sound effects (./mediaEffects.ts, server/runner/video/) ──
+  // Rows built from the real node schemas (./mediaEffectSchemas.generated.ts), one per ported class;
+  // each needs its family, its media family and `cards`.
+  ...mediaEffectRows(SOUND_OUTPUTS),
 }
 
 /** The Primitive cards (comfy_extras/nodes_primitive.py): each hands on its value (family `cards`). */
@@ -1626,6 +1634,8 @@ export const SWITCHED_CLASSES: Readonly<Record<string, RunnerFamily>> = {
   // R5.5: frame batches from and to files.
   LoadVideoFrames: 'media-video',
   SaveVideoFrames: 'media-video',
+  // R6: each ported video or sound effect, by its family.
+  ...mediaEffectSwitchedClasses(),
 }
 
 /**
@@ -2181,14 +2191,17 @@ export function outputKindsFor(families: ReadonlySet<RunnerFamily>): OutputKinds
   const base = families.has('cards') ? OUTPUT_KINDS_BASE : OUTPUT_KINDS_CARDS_OFF_BASE
   const on = Object.keys(EFFECT_OUTPUT_KINDS).filter(cls => effectFamilyOn(cls, families))
   const paid = Object.keys(PAID_OUTPUT_KIND_FAMILY).filter(cls => familyOn(PAID_OUTPUT_KIND_FAMILY[cls]!, families))
-  if (!on.length && !paid.length) return base
-  const key = `${on.join(',')}|${paid.join(',')}`
+  // R6: a video effect's batch, only while its family (and its chain) is on.
+  const media = Object.keys(MEDIA_EFFECT_OUTPUT_KINDS).filter(cls => mediaEffectFamilyOn(cls, families))
+  if (!on.length && !paid.length && !media.length) return base
+  const key = `${on.join(',')}|${paid.join(',')}|${media.join(',')}`
   let kinds = effectKindsCache.get(key)
   if (!kinds) {
     kinds = {
       ...base,
       ...Object.fromEntries(paid.map(cls => [cls, OUTPUT_KINDS[cls]!])),
       ...Object.fromEntries(on.map(cls => [cls, EFFECT_OUTPUT_KINDS[cls]!])),
+      ...Object.fromEntries(media.map(cls => [cls, MEDIA_EFFECT_OUTPUT_KINDS[cls]!])),
     }
     effectKindsCache.set(key, kinds)
   }

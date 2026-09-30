@@ -1,0 +1,734 @@
+/**
+ * Task R6.1: the frame-effect machinery every R6 video effect shares, proved
+ * with stand-in classes where a real class would hide it:
+ *   - the nine R6 families, their requirement chains and the media tools;
+ *   - the rows (mediaEffectRows), what their slots carry, and the wires they
+ *     take (frame batches only: ruling (k));
+ *   - rule 4's hand-off: framesQuantOf;
+ *   - the lease (server/media/run.ts mediaLease): one of the person's media
+ *     slots for all of a node's processes, and Stop ending every one of them;
+ *   - the start pass (server/runner/video/start.ts): what the runner can't
+ *     do leaves the whole workflow to the engine before the run;
+ *   - letting go of kept batches (ruling (j)) and making them again after a
+ *     restart;
+ *   - rule 12's invariant: with every R6 family off (and on with the tools
+ *     missing), every answer is as before R6.1.
+ *
+ * The lease is checked against fake tools (small shell scripts, as
+ * runner-media-run.unit.spec.ts does). What needs frames on disk uses the
+ * real tools (R5 rule 10: requireMediaTools fails, never skips).
+ */
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { chmodSync, copyFileSync, existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
+import type { MediaTools } from '~~/server/media/tools'
+
+// Fake tools for the lease (null: the real build).
+const fake = vi.hoisted(() => ({ tools: null as MediaTools | null }))
+
+// The start pass's sources, standing in for a probe (null: the real one).
+const shapeHook = vi.hoisted(() => ({ source: null as null | ((nodeId: string, cls: string) => Promise<{ count: number; w: number; h: number; exact: boolean } | null>) }))
+vi.mock('~~/server/runner/video/shapes', async (importOriginal) => {
+  const real = await importOriginal<typeof import('~~/server/runner/video/shapes')>()
+  return {
+    ...real,
+    videoSourceShapeOf: (o: Parameters<typeof real.videoSourceShapeOf>[0]) => {
+      const own = real.videoSourceShapeOf(o)
+      return (id: string, cls: string) => shapeHook.source ? shapeHook.source(id, cls) : own(id, cls)
+    },
+  }
+})
+
+// Every media job, with the lease it ran under (a spy on run.ts, which is the only way a tool starts).
+const jobs = vi.hoisted(() => ({ list: [] as { tool: string; lease: unknown; args: string[] }[] }))
+vi.mock('~~/server/media/run', async (importOriginal) => {
+  const real = await importOriginal<typeof import('~~/server/media/run')>()
+  return {
+    ...real,
+    runMedia: (job: Parameters<typeof real.runMedia>[0]) => {
+      jobs.list.push({ tool: job.tool, lease: job.lease ?? null, args: job.args })
+      return real.runMedia(job)
+    },
+  }
+})
+
+// A stand-in two-input class (the lease's case: two decodes and an encode at once), beside the real table.
+vi.mock('~~/server/runner/video/table', async (importOriginal) => {
+  const real = await importOriginal<typeof import('~~/server/runner/video/table')>()
+  const same = (_w: Record<string, unknown>, ins: readonly { count: number; w: number; h: number; exact: boolean }[]) => ({ ...ins[0]! })
+  return {
+    ...real,
+    VIDEO_EFFECTS: {
+      ...real.VIDEO_EFFECTS,
+      StandInJoin: { family: 'video-time', op: 'time.select', inputs: ['clip_a', 'clip_b'], reads: 'stream', preview: false, shape: same, heldBytes: () => 0, work: () => 0 },
+    },
+  }
+})
+
+// A gate in the worker's video frames: the Nth frame waits until the test lets it go (or Stops the node).
+const HOOK = vi.hoisted(() => ({ frames: 0, holdAt: 0, gate: null as Promise<void> | null, ctl: null as AbortController | null, abortedAt: 0 }))
+vi.mock('~~/server/runner/compositor/worker', async (importOriginal) => {
+  const real = await importOriginal<typeof import('~~/server/runner/compositor/worker')>()
+  return {
+    ...real,
+    pixelsInWorker: ((signal, job, timeout) => real.pixelsInWorker(signal, w => job(new Proxy(w, {
+      get(t, k) {
+        const v = Reflect.get(t, k)
+        if (k !== 'videoFrame') return typeof v === 'function' ? v.bind(t) : v
+        return async (...a: Parameters<typeof t.videoFrame>) => {
+          if (++HOOK.frames === HOOK.holdAt) {
+            if (HOOK.ctl) { HOOK.abortedAt = Date.now(); HOOK.ctl.abort() }
+            if (HOOK.gate) await HOOK.gate
+          }
+          return t.videoFrame(...a)
+        }
+      },
+    })), timeout)) as typeof real.pixelsInWorker,
+  }
+})
+
+/** Every tool process started, by pid (a spy on the process table's side of spawn). */
+const PROCS = vi.hoisted(() => ({ pids: [] as number[] }))
+vi.mock('node:child_process', async (importOriginal) => {
+  const real = await importOriginal<typeof import('node:child_process')>()
+  return {
+    ...real,
+    spawn: ((...a: Parameters<typeof real.spawn>) => {
+      const c = real.spawn(...a)
+      if (c.pid) PROCS.pids.push(c.pid)
+      return c
+    }) as typeof real.spawn,
+  }
+})
+
+// Rule 12 with the tools missing: the server's own family answer (config.ts runnerFamilies).
+const TOOLS = vi.hoisted(() => ({ ready: null as boolean | null }))
+vi.mock('~~/server/media/tools', async (importOriginal) => {
+  const real = await importOriginal<typeof import('~~/server/media/tools')>()
+  return {
+    ...real,
+    mediaTools: async () => fake.tools ?? await real.mediaTools(),
+    mediaToolsReady: () => TOOLS.ready ?? real.mediaToolsReady(),
+  }
+})
+
+const { ALL_RUNNER_FAMILIES, FAMILY_REQUIRES, MEDIA_EFFECT_TOOL_FAMILIES, MEDIA_TOOL_FAMILIES, RUNNER_FAMILIES, familyOn, parseFamilies, requirementOf } = await import('#shared/runner/families')
+const {
+  FRAMES_OUTPUTS, FRAME_ENCODERS, MEDIA_EFFECT_FAMILIES, MEDIA_EFFECT_FAMILY_OF, MEDIA_EFFECT_OUTPUT_KINDS, MEDIA_EFFECTS_PORTED, mediaEffectRows,
+} = await import('#shared/runner/mediaEffects')
+const { MEDIA_EFFECT_SCHEMAS } = await import('#shared/runner/mediaEffectSchemas.generated')
+const { EFFECT_FAMILY_OF } = await import('#shared/runner/effects')
+const {
+  LOCAL_RENDER_TYPES, PICTURE_OUTPUTS, RUNNER_NODE_RULES, SWITCHED_CLASSES, isRunnerEligible, outputKindsFor, runnerTakesNode, valueWiresAllowed,
+} = await import('#shared/runner/eligibility')
+const { RUNNER_OUTPUT_CLASSES, pruneInvalidOutputs, runnerTakesWorkflow } = await import('#shared/runner/validate')
+const { nodesNeedingEngine } = await import('#shared/runner/needsEngine')
+const { MEDIA_CAPS, MEDIA_LEASE_PROCESSES, MEDIA_WORDS } = await import('#shared/runner/media')
+const { RUNNER_NOT_ELIGIBLE } = await import('#shared/runner/messages')
+const { MediaError, leaseProcesses, mediaLease, mediaLimiter, runMedia } = await import('~~/server/media/run')
+const { framesQuantOf } = await import('~~/server/runner/video/plan')
+const { mediaEffectStartProblems, keptBatchBound } = await import('~~/server/runner/video/start')
+const { VIDEO_EFFECTS } = await import('~~/server/runner/video/table')
+const { requireMediaTools, clipPath } = await import('./__runner__/mediaParity')
+const { makeKit, until } = await import('./__runner__/kit')
+const { createFileKeptBytes, KEPT_GONE } = await import('~~/server/runner/keptBytes')
+const { runnerFamilies } = await import('~~/server/runner/config')
+const { MEDIA_EFFECT_WORDS } = await import('#shared/runner/mediaEffects')
+const { batchBytes, beforeR61, invariantAnswers, keptBatch, runVfxNode, sha256, vfxHarness, vfxRunId } = await import('./__runner__/mediaEffectsParity')
+
+import type { ApiPrompt } from '#shared/runner/graph'
+import type { RunnerFamily } from '#shared/runner/families'
+import type { OutputFile, RunnerValue } from '~~/server/runner/types'
+
+const LONG = { timeout: 120_000 }
+const START = { workflow: null, canvasId: null, projectUuid: null, projectName: null }
+const CARDS_VIDEO: RunnerFamily[] = ['cards', 'media-video']
+const ON: ReadonlySet<RunnerFamily> = new Set([...CARDS_VIDEO, 'video-time'])
+const R6: readonly RunnerFamily[] = ['video-time', 'video-join', 'video-look', 'video-stabilize', 'video-flow', 'video-draw', 'video-text', 'sound-effects', 'sound-denoise']
+
+type Link = [string, number]
+const loadVideo = (file: string) => ({ class_type: 'LoadVideo', inputs: { file } })
+const getComp = (from: string) => ({ class_type: 'GetVideoComponents', inputs: { video: [from, 0] as Link } })
+const createVideo = (images: Link, fps: number | Link = 24) => ({ class_type: 'CreateVideo', inputs: { images, fps } })
+const saveVideo = (from: string) => ({ class_type: 'SaveVideo', inputs: { video: [from, 0] as Link, filename_prefix: 'video/ComfyUI', format: 'auto', codec: 'auto' } })
+const saveFrames = (frames: Link) => ({ class_type: 'SaveVideoFrames', inputs: { frames, fps: 24, filename_prefix: 'video', audio_file: '(none)', preset: 'veryfast', crf: 20 } })
+const reverse = (frames: Link, mode = 'reverse') => ({ class_type: 'VideoReverse', inputs: { frames, mode } })
+const trim = (frames: Link, start = 0, end = -1) => ({ class_type: 'VideoTrim', inputs: { frames, start, end } })
+const trail = (frames: Link) => ({ class_type: 'FrameTrail', inputs: { frames, decay: 0.85, blend_mode: 'screen', intensity: 1, threshold: 0 } })
+const gate = (from: Link) => ({ class_type: 'ComfyGateNode', inputs: { data_in: from, bypass: false } })
+const saveImage = (images: Link) => ({
+  class_type: 'SaveImage',
+  inputs: { images, filename_prefix: 'ComfyUI', format: 'png', quality: 90, lossless_webp: true, png_compression: 6, scale: 1, max_dimension: 0, embed_metadata: true },
+})
+const imageCard = () => ({ class_type: 'Image', inputs: { image: 'a.png', export: false, batch_index: -1 } })
+
+/** Load video → Get video components → Reverse → Create video → Save video. */
+const reversed = (): ApiPrompt => ({ l: loadVideo('a.mp4'), g: getComp('l'), r: reverse(['g', 0]), c: createVideo(['r', 0]), s: saveVideo('c') })
+
+// ── The families ─────────────────────────────────────────────────────────────
+
+describe('the nine R6 families', () => {
+  it('are known, off by default, need the video tools, and are kept out of every set written before R6', () => {
+    for (const f of R6) {
+      expect(ALL_RUNNER_FAMILIES, f).toContain(f)
+      expect(MEDIA_EFFECT_TOOL_FAMILIES, f).toContain(f)
+      // Every "every family on" set written before R6 (RUNNER_FAMILIES, R5 rule 8) stays as it was, and R5's own list.
+      expect(RUNNER_FAMILIES, f).not.toContain(f)
+      expect(MEDIA_TOOL_FAMILIES, f).not.toContain(f)
+    }
+    expect([...MEDIA_EFFECT_FAMILIES].sort()).toEqual([...R6].sort())
+  })
+
+  it('the video families need media-video and the sound families media-sound', () => {
+    for (const f of R6) expect(requirementOf(f), f).toBe(f.startsWith('video-') ? 'media-video' : 'media-sound')
+    // R2's table (pinned by its specs) is as it was; R5's media families still need cards.
+    for (const f of R6) expect(Object.hasOwn(FAMILY_REQUIRES, f), f).toBe(false)
+    expect(requirementOf('media-video')).toBe('cards')
+  })
+
+  it('parseFamilies drops a family whose chain is broken, until nothing changes', () => {
+    expect([...parseFamilies('video-time,media-video')]).toEqual([])
+    expect(new Set(parseFamilies('video-time,media-video,cards'))).toEqual(new Set(['video-time', 'media-video', 'cards']))
+    // Written in any order: the family is kept only with the whole chain.
+    expect(new Set(parseFamilies('cards,video-time'))).toEqual(new Set(['cards']))
+    expect(new Set(parseFamilies('sound-denoise,sound-effects,media-sound'))).toEqual(new Set())
+    expect(new Set(parseFamilies(['sound-denoise', 'cards', 'media-sound']))).toEqual(new Set(['sound-denoise', 'cards', 'media-sound']))
+  })
+
+  it('familyOn follows the chain', () => {
+    expect(familyOn('video-time', new Set<RunnerFamily>(['video-time', 'media-video']))).toBe(false)
+    expect(familyOn('video-time', new Set<RunnerFamily>(['video-time', 'media-video', 'cards']))).toBe(true)
+    expect(familyOn('video-time', new Set<RunnerFamily>(['video-time', 'cards']))).toBe(false)
+  })
+})
+
+// ── The rows ─────────────────────────────────────────────────────────────────
+
+describe('the rows (rule 1)', () => {
+  it('every R6 class has its family; Save audio (Opus) is R5’s and none of them is an R2 effect', () => {
+    const classes = Object.keys(MEDIA_EFFECT_SCHEMAS).filter(c => c !== 'SaveAudioOpus')
+    expect(classes).toHaveLength(33)
+    for (const c of classes) {
+      expect(MEDIA_EFFECT_FAMILY_OF[c], c).toBe(MEDIA_EFFECT_SCHEMAS[c]!.family)
+      expect(Object.hasOwn(EFFECT_FAMILY_OF, c), c).toBe(false)
+    }
+    expect(MEDIA_EFFECT_SCHEMAS.SaveAudioOpus!.family).toBe('media-sound')
+    expect(Object.hasOwn(MEDIA_EFFECT_FAMILY_OF, 'SaveAudioOpus')).toBe(false)
+  })
+
+  it('the pilots’ rows: a local render reading frame batches only, their widgets as ComfyUI validates them', () => {
+    expect([...MEDIA_EFFECTS_PORTED].sort()).toEqual(['FrameTrail', 'VideoReverse', 'VideoTrim'])
+    const rows = mediaEffectRows()
+    expect(Object.keys(rows).sort()).toEqual(['FrameTrail', 'VideoReverse', 'VideoTrim'])
+    for (const [cls, row] of Object.entries(rows)) {
+      expect(row, cls).toMatchObject({ family: 'video-time', local: 'render', mustLink: ['frames'], required: ['frames'], valueInputs: { frames: ['frames'] } })
+      expect(row.linkSources!.frames, cls).toEqual(expect.arrayContaining(FRAMES_OUTPUTS.map(x => [...x])))
+      expect(RUNNER_NODE_RULES[cls], cls).toEqual(row)
+      expect(SWITCHED_CLASSES[cls], cls).toBe('video-time')
+      expect(LOCAL_RENDER_TYPES.has(cls), cls).toBe(true)
+      // Every video effect but Slow motion, Silence cut and Text clip is an output node (define_schema).
+      expect(RUNNER_OUTPUT_CLASSES.has(cls), cls).toBe(true)
+    }
+    expect(rows.VideoTrim!.widgets).toEqual({ start: { type: 'INT', required: true, min: 0, max: 10000 }, end: { type: 'INT', required: true, min: -1, max: 10000 } })
+    expect(rows.VideoReverse!.widgets).toEqual({ mode: { type: 'COMBO', required: true, options: ['reverse', 'ping_pong'] } })
+  })
+
+  it('FRAMES_OUTPUTS: Get video components, Load video frames and each ported effect; FRAME_ENCODERS: Create video, Save video frames', () => {
+    expect(FRAMES_OUTPUTS.map(x => [...x])).toEqual([['GetVideoComponents', 0], ['LoadVideoFrames', 0], ['FrameTrail', 0], ['VideoReverse', 0], ['VideoTrim', 0]])
+    expect([...FRAME_ENCODERS]).toEqual(['CreateVideo', 'SaveVideoFrames'])
+    expect(MEDIA_EFFECT_OUTPUT_KINDS).toEqual({ FrameTrail: { 0: 'frames' }, VideoReverse: { 0: 'frames' }, VideoTrim: { 0: 'frames' } })
+    for (const [cls, input] of [['CreateVideo', 'images'], ['SaveVideoFrames', 'frames']] as const) {
+      expect(RUNNER_NODE_RULES[cls]!.linkSources![input], cls).toEqual(expect.arrayContaining(FRAMES_OUTPUTS.map(x => [...x])))
+    }
+    expect(VIDEO_EFFECTS.VideoTrim!.reads).toBe('stream')
+    expect(VIDEO_EFFECTS.VideoReverse!.reads).toBe('held')
+    expect(VIDEO_EFFECTS.FrameTrail!.reads).toBe('stream')
+  })
+
+  it('an effect’s slot carries frames only while its family is on', () => {
+    expect(outputKindsFor(ON).VideoReverse).toEqual({ 0: 'frames' })
+    expect(outputKindsFor(new Set(CARDS_VIDEO)).VideoReverse).toBeUndefined()
+    expect(outputKindsFor(new Set([...CARDS_VIDEO, 'video-look'] as RunnerFamily[])).VideoReverse).toBeUndefined()
+    // Video effects are never pictures.
+    expect(Object.hasOwn(PICTURE_OUTPUTS, 'VideoReverse')).toBe(false)
+  })
+
+  it('takes Load video → Get video components → Reverse → Create video → Save video with video-time on; names Reverse with it off', () => {
+    const p = reversed()
+    expect(runnerTakesWorkflow(p, ON)).toBe(true)
+    expect(runnerTakesWorkflow(p, new Set(CARDS_VIDEO))).toBe(false)
+    // Reverse, and Create video, whose frames then come from a node the runner doesn't know.
+    expect(nodesNeedingEngine(p, { runnerOn: true, families: new Set(CARDS_VIDEO), titleOf: id => id })).toEqual(['r', 'c'])
+    // Chains, a Gate between, and Save video frames too.
+    const chain: ApiPrompt = { l: loadVideo('a.mp4'), g: getComp('l'), t: trim(['g', 0], 1, 5), x: gate(['t', 0]), r: reverse(['x', 0], 'ping_pong'), f: trail(['r', 0]), s: saveFrames(['f', 0]) }
+    expect(runnerTakesWorkflow(chain, ON)).toBe(true)
+  })
+
+  it('ruling (k): a picture wired into a video effect, and a video effect wired into Save image, leave the workflow to the engine', () => {
+    const picture: ApiPrompt = { i: imageCard(), r: reverse(['i', 0]), c: createVideo(['r', 0]), s: saveVideo('c') }
+    expect(runnerTakesNode(picture, 'r', ON)).toBe(false)
+    expect(runnerTakesWorkflow(picture, ON)).toBe(false)
+    const intoPicture: ApiPrompt = { l: loadVideo('a.mp4'), g: getComp('l'), r: reverse(['g', 0]), s: saveImage(['r', 0]) }
+    expect(runnerTakesNode(intoPicture, 's', ON)).toBe(false)
+    expect(runnerTakesWorkflow(intoPicture, ON)).toBe(false)
+  })
+})
+
+describe('rule 4: framesQuantOf', () => {
+  const base = { l: loadVideo('a.mp4'), g: getComp('l'), r: reverse(['g', 0]) }
+  it('is trunc only when every reader of the slot only encodes it', () => {
+    expect(framesQuantOf({ ...base, c: createVideo(['r', 0]), s: saveVideo('c') }, 'r', 0, ON)).toBe('trunc')
+    expect(framesQuantOf({ ...base, s: saveFrames(['r', 0]) }, 'r', 0, ON)).toBe('trunc')
+    expect(framesQuantOf({ ...base, s: saveFrames(['r', 0]), c: createVideo(['r', 0]), v: saveVideo('c') }, 'r', 0, ON)).toBe('trunc')
+    // Through a Gate.
+    expect(framesQuantOf({ ...base, x: gate(['r', 0]), s: saveFrames(['x', 0]) }, 'r', 0, ON)).toBe('trunc')
+  })
+  it('is round when any reader reads the frames on (another effect, or a made video taken apart again), or none reads them', () => {
+    expect(framesQuantOf({ ...base, t: trim(['r', 0]), s: saveFrames(['r', 0]) }, 'r', 0, ON)).toBe('round')
+    expect(framesQuantOf({ ...base, c: createVideo(['r', 0]), g2: getComp('c'), t: trail(['g2', 0]) }, 'r', 0, ON)).toBe('round')
+    expect(framesQuantOf(base, 'r', 0, ON)).toBe('round')
+    expect(framesQuantOf({ ...base, x: gate(['r', 0]), t: trim(['x', 0]) }, 'r', 0, ON)).toBe('round')
+  })
+})
+
+describe('the caps (ruling (i))', () => {
+  it('hosted: 512 MiB of frames held, ten minutes of stereo 48 kHz sound, and a work budget; locally R5’s own caps only', () => {
+    expect(MEDIA_CAPS.hosted.heldFrameBytes).toBe(512 * 1024 * 1024)
+    expect(MEDIA_CAPS.hosted.effectSoundSamples).toBe(2 * 48000 * 600)
+    expect(MEDIA_CAPS.hosted.effectWork).toBeGreaterThan(0)
+    expect(Number.isFinite(MEDIA_CAPS.hosted.effectWork)).toBe(true)
+    expect(MEDIA_CAPS.local.heldFrameBytes).toBe(Number.POSITIVE_INFINITY)
+    expect(MEDIA_CAPS.local.effectSoundSamples).toBe(Number.POSITIVE_INFINITY)
+    expect(MEDIA_CAPS.local.effectWork).toBe(Number.POSITIVE_INFINITY)
+    expect(MEDIA_LEASE_PROCESSES).toBe(3)
+  })
+})
+
+// ── The lease (ruling (n)) ───────────────────────────────────────────────────
+
+const HOSTED_KEY = 'NUXT_CLERK_SECRET_KEY'
+const scratch = mkdtempSync(join(tmpdir(), 'media-vfx-machinery-'))
+afterAll(() => rmSync(scratch, { recursive: true, force: true }))
+const sleep = (ms: number) => new Promise(r => setTimeout(r, ms))
+let runs = 0
+
+/** Runs `fn` as hosted (the media module reads the deployment from the environment). */
+async function asHosted<T>(fn: () => Promise<T>): Promise<T> {
+  const saved = process.env[HOSTED_KEY]
+  process.env[HOSTED_KEY] = 'sk_test_machinery'
+  try { return await fn() }
+  finally {
+    if (saved === undefined) delete process.env[HOSTED_KEY]
+    else process.env[HOSTED_KEY] = saved
+  }
+}
+
+describe('mediaLease: one of the person’s slots for all of a node’s processes', () => {
+  let dir: string
+  beforeEach(() => { dir = mkdtempSync(join(scratch, 'fake-')) })
+  afterEach(() => { fake.tools = null })
+
+  /** A fake ffmpeg that runs until it is killed. */
+  function sleepingTools(): MediaTools {
+    const f = join(dir, 'ffmpeg')
+    writeFileSync(f, '#!/bin/sh\nexec /bin/sleep 30\n')
+    chmodSync(f, 0o755)
+    const t: MediaTools = {
+      ffmpeg: f, ffprobe: f,
+      version: 'ffmpeg version 8.0.3-sailor1', buildconf: [], encoders: new Set(), protocols: { input: ['file', 'pipe'], output: ['file', 'pipe'] },
+    }
+    fake.tools = t
+    return t
+  }
+  const job = (lease: InstanceType<typeof Object> | undefined, userId: string | null) =>
+    runMedia({ tool: 'ffmpeg', args: ['-i', 'pipe:0', 'pipe:1'], userId, ...(lease ? { lease: lease as never } : {}) })
+
+  it('runs up to three processes in one slot, refuses a fourth, and makes a second node of the same person wait', LONG, async () => {
+    sleepingTools()
+    await asHosted(async () => {
+      let end!: () => void
+      const held = new Promise<void>((r) => { end = r })
+      let first: Parameters<Parameters<typeof mediaLease>[1]>[0] | null = null
+      const children: Promise<unknown>[] = []
+      const a = mediaLease({ userId: 'user_9' }, async (lease) => {
+        first = lease
+        for (let i = 0; i < 3; i++) children.push(job(lease, 'user_9').catch(e => e))
+        await until(() => leaseProcesses(lease) === 3)
+        await expect(job(lease, 'user_9')).rejects.toThrow(MEDIA_WORDS.failed)
+        // Another person's job can't run under this lease.
+        await expect(job(lease, 'user_8')).rejects.toThrow(MEDIA_WORDS.failed)
+        await held
+      })
+      await until(() => first !== null && leaseProcesses(first) === 3)
+      let secondRan = false
+      const b = mediaLease({ userId: 'user_9' }, async () => { secondRan = true })
+      await sleep(150)
+      // One running, one waiting: the lease is one slot, and hosted gives a person one.
+      expect(secondRan).toBe(false)
+      expect(mediaLimiter().pending('user_9')).toBe(2)
+      const t0 = Date.now()
+      end()
+      await a
+      // Ending the lease killed all three, each within the second.
+      expect(Date.now() - t0).toBeLessThan(1000)
+      for (const c of await Promise.all(children)) expect((c as Error).message).toBe(MEDIA_WORDS.stopped)
+      expect(leaseProcesses(first!)).toBe(0)
+      expect(first!.live).toBe(false)
+      await b
+      expect(secondRan).toBe(true)
+      // A job can't start under a lease that has ended.
+      await expect(job(first!, 'user_9')).rejects.toThrow(MEDIA_WORDS.stopped)
+    })
+  })
+
+  it('Stop ends the lease: every process killed within a second, and the slot given back', LONG, async () => {
+    sleepingTools()
+    await asHosted(async () => {
+      const ctl = new AbortController()
+      const before = PROCS.pids.length
+      const children: Promise<unknown>[] = []
+      const stopped = new Promise<void>((_, reject) => ctl.signal.addEventListener('abort', () => reject(new MediaError('stopped')), { once: true }))
+      stopped.catch(() => {})
+      const a = mediaLease({ userId: 'user_7', signal: ctl.signal }, async (lease) => {
+        for (let i = 0; i < 3; i++) children.push(job(lease, 'user_7').catch(e => e))
+        // The node's own work ends when Stop reaches it.
+        await stopped
+      })
+      await until(() => PROCS.pids.length - before >= 3)
+      const t0 = Date.now()
+      ctl.abort()
+      await expect(a).rejects.toThrow(MEDIA_WORDS.stopped)
+      expect(Date.now() - t0).toBeLessThan(1000)
+      for (const pid of PROCS.pids.slice(before)) expect(() => process.kill(pid, 0), `pid ${pid}`).toThrow()
+      expect(mediaLimiter().pending('user_7')).toBe(0)
+    })
+  })
+})
+
+// ── A node's plan under its lease (a stand-in class with two inputs) ─────────
+
+/** A stand-in node straight through planVideoEffect (the dispatch knows only ported classes). */
+async function runStandIn(h: ReturnType<typeof vfxHarness>, prompt: ApiPrompt, id: string, values: Record<string, Record<number, RunnerValue>>, o: { runId: string; signal?: AbortSignal }) {
+  const { planVideoEffect } = await import('~~/server/runner/video/plan')
+  const { vfxIo } = await import('./__runner__/mediaEffectsParity')
+  const plan = planVideoEffect({ prompt, nodeId: id, families: ON, gateOpen: false, filesFrom: () => [], valueFrom: l => values[l[0]]?.[l[1]], toUrl: async () => '' })
+  if (plan.kind !== 'derive') throw new Error('not a derive plan')
+  return plan.derive(vfxIo(h, id, o.runId, o.signal ?? new AbortController().signal))
+}
+
+describe('a video effect’s plan', () => {
+  const W = 320
+  const H = 240
+  const big = (n: number, seed: number) => ({ frames: Array.from({ length: n }, (_, i) => new Uint8Array(W * H * 3).fill((seed + i * 7) & 255)), w: W, h: H })
+  const joinPrompt = (): ApiPrompt => ({ l: loadVideo('a.mp4'), g: getComp('l'), g2: getComp('l'), j: { class_type: 'StandInJoin', inputs: { clip_a: ['g', 0], clip_b: ['g2', 0] } }, t: trim(['j', 0]) })
+
+  it('a two-input stand-in runs its decodes and its encode under one lease, while a second node of the same hosted person waits', LONG, async () => {
+    await requireMediaTools()
+    await asHosted(async () => {
+      const h = vfxHarness(scratch, { hosted: true })
+      const runId = vfxRunId(++runs)
+      const a = await keptBatch(h, runId, big(12, 1))
+      const b = await keptBatch(h, runId, big(12, 100))
+      const c = await keptBatch(h, runId, big(4, 50))
+      let letGo!: () => void
+      HOOK.frames = 0
+      HOOK.holdAt = 1
+      HOOK.gate = new Promise<void>((r) => { letGo = r })
+      const from = jobs.list.length
+      try {
+        const first = runStandIn(h, joinPrompt(), 'j', { g: { 0: a }, g2: { 0: b } }, { runId })
+        first.catch(() => {})
+        await until(() => HOOK.frames >= 1, 20_000)
+        const mine = jobs.list.slice(from)
+        // Two decodes and the encode, all ffmpeg, all under the same lease.
+        expect(mine.map(j => j.tool)).toEqual(['ffmpeg', 'ffmpeg', 'ffmpeg'])
+        expect(new Set(mine.map(j => j.lease)).size).toBe(1)
+        expect(mine[0]!.lease).not.toBeNull()
+        expect(leaseProcesses(mine[0]!.lease as never)).toBe(3)
+        // A second node of the same person waits for the slot: none of its processes starts.
+        const second = runVfxNode(h, { l: loadVideo('a.mp4'), g: getComp('l'), r: trim(['g', 0], 1) }, 'r', { g: { 0: c } }, { runId, families: ON })
+        second.catch(() => {})
+        await sleep(300)
+        expect(jobs.list.length - from).toBe(3)
+        expect(mediaLimiter().pending('user_1')).toBe(2)
+        letGo()
+        const made = await first
+        const out = await second
+        const theirs = jobs.list.slice(from + 3)
+        expect(theirs.length).toBeGreaterThanOrEqual(2)
+        expect(new Set(theirs.map(j => j.lease)).size).toBe(1)
+        expect(theirs[0]!.lease).not.toBe(mine[0]!.lease)
+        // The stand-in's frames are clip A's, one for one (its op hands the first input's frame on).
+        const got = await batchBytes(h, runId, made.values[0] as never)
+        expect(sha256(got)).toBe(sha256(await batchBytes(h, runId, a)))
+        expect((out.values[0] as { count: number }).count).toBe(3)
+      }
+      finally { HOOK.holdAt = 0; HOOK.gate = null }
+    })
+  })
+
+  it('Stop mid-batch kills all three processes within a second and leaves no kept file', LONG, async () => {
+    await requireMediaTools()
+    await asHosted(async () => {
+      const h = vfxHarness(scratch, { hosted: true })
+      const runId = vfxRunId(++runs)
+      const a = await keptBatch(h, runId, big(24, 3))
+      const b = await keptBatch(h, runId, big(24, 90))
+      const ctl = new AbortController()
+      const before = PROCS.pids.length
+      HOOK.frames = 0
+      HOOK.holdAt = 3
+      HOOK.ctl = ctl
+      try {
+        await expect(runStandIn(h, joinPrompt(), 'j', { g: { 0: a }, g2: { 0: b } }, { runId, signal: ctl.signal })).rejects.toThrow(MEDIA_WORDS.stopped)
+        expect(Date.now() - HOOK.abortedAt).toBeLessThan(1000)
+      }
+      finally { HOOK.holdAt = 0; HOOK.ctl = null }
+      const pids = PROCS.pids.slice(before)
+      expect(pids).toHaveLength(3)
+      for (const pid of pids) expect(() => process.kill(pid, 0), `pid ${pid}`).toThrow()
+      // Only the two inputs are kept: no partial batch, no work folder.
+      expect(readdirSync(join(h.root, 'kept', runId)).sort()).toEqual([a.file.filename, b.file.filename].sort())
+    })
+  })
+
+  it('a held batch past the node’s limit is refused before any decode', LONG, async () => {
+    await requireMediaTools()
+    const h = vfxHarness(scratch)
+    const runId = vfxRunId(++runs)
+    const a = await keptBatch(h, runId, big(3, 5))
+    const { heldFrames } = await import('~~/server/media/values')
+    const from = jobs.list.length
+    await expect(mediaLease({ userId: null }, lease => heldFrames(a, { access: h.access, kept: h.kept, runId, userId: null, hosted: false }, lease, 3 * W * H * 3 - 1)))
+      .rejects.toThrow(MEDIA_WORDS.tooManyFrames)
+    expect(jobs.list.length).toBe(from)
+  })
+})
+
+// ── The start pass (rule 3) ──────────────────────────────────────────────────
+
+describe('the start pass: what the runner can’t do leaves the whole workflow to the engine before the run', () => {
+  const HD = { w: 1920, h: 1080 }
+  const shapes = (entries: [string, { count: number; w: number; h: number }][]) => new Map(entries.map(([k, s]) => [k, { ...s, exact: false }]))
+
+  it('a held effect over heldFrameBytes (hosted), a batch over R5’s caps, an unknown source, too much work', async () => {
+    const p = reversed()
+    // 100 frames of 1080p held: 622 MB, over 512 MiB in hosted; nothing locally.
+    const s100 = shapes([['g:0', { count: 100, ...HD }]])
+    expect(await mediaEffectStartProblems(p, ON, { hosted: true, shapes: s100 })).toEqual({ message: MEDIA_EFFECT_WORDS.heldTooMuch, nodeId: 'r', classType: 'VideoReverse', engine: true })
+    expect(await mediaEffectStartProblems(p, ON, { hosted: false, shapes: s100 })).toBeNull()
+    // Ping-pong of 400 small frames makes 798: over the hosted batch's 600.
+    const pp: ApiPrompt = { ...p, r: reverse(['g', 0], 'ping_pong') }
+    expect(await mediaEffectStartProblems(pp, ON, { hosted: true, shapes: shapes([['g:0', { count: 400, w: 64, h: 48 }]]) }))
+      .toEqual({ message: MEDIA_WORDS.tooManyFrames, nodeId: 'r', classType: 'VideoReverse', engine: true })
+    // A source the build can't read (no shape known).
+    expect(await mediaEffectStartProblems(p, ON, { hosted: false, shapes: new Map() }))
+      .toEqual({ message: MEDIA_EFFECT_WORDS.unknownLength, nodeId: 'r', classType: 'VideoReverse', engine: true })
+    // Work past the budget: Frame trail over 600 frames of 1080p is 5 × 10⁹ pixel·steps, within the hosted
+    // budget; with the budget below it, the same workflow is left to the engine.
+    const trailed: ApiPrompt = { l: loadVideo('a.mp4'), g: getComp('l'), f: trail(['g', 0]), s: saveFrames(['f', 0]) }
+    const s600 = shapes([['g:0', { count: 600, ...HD }]])
+    expect(VIDEO_EFFECTS.FrameTrail!.work({}, [{ count: 600, ...HD, exact: true }], { count: 600, ...HD, exact: true })).toBeLessThan(MEDIA_CAPS.hosted.effectWork)
+    expect(await mediaEffectStartProblems(trailed, ON, { hosted: true, shapes: s600 })).toBeNull()
+    const caps = MEDIA_CAPS.hosted as { effectWork: number }
+    const budget = caps.effectWork
+    caps.effectWork = 1e9
+    try {
+      expect(await mediaEffectStartProblems(trailed, ON, { hosted: true, shapes: s600 })).toEqual({ message: MEDIA_EFFECT_WORDS.tooMuchWork, nodeId: 'f', classType: 'FrameTrail', engine: true })
+    }
+    finally { caps.effectWork = budget }
+    // With the family off there's nothing to check.
+    expect(await mediaEffectStartProblems(p, new Set(CARDS_VIDEO), { hosted: true, shapes: s100 })).toBeNull()
+  })
+
+  it('the run’s kept total, each batch let go after its last reader (ruling (j)), against the hosted run’s room', async () => {
+    const chain = (n: number): ApiPrompt => {
+      const p: ApiPrompt = { l: loadVideo('a.mp4'), g: getComp('l') }
+      let from = 'g'
+      for (let i = 1; i <= n; i++) { p[`t${i}`] = trim([from, 0], 1); from = `t${i}` }
+      p.s = saveFrames([from, 0])
+      return p
+    }
+    const shapesOf = (p: ApiPrompt, count: number) => {
+      const m = shapes([['g:0', { count, ...HD }]])
+      let c = count
+      for (const id of Object.keys(p).filter(k => k.startsWith('t'))) { c -= 1; m.set(`${id}:0`, { count: c, ...HD, exact: false }) }
+      return m
+    }
+    // 320 frames of 1080p: a batch's bound is 2.24 GB, two at once pass 4 GiB.
+    expect(keptBatchBound({ count: 320, ...HD, exact: true }) * 2).toBeGreaterThan(4 * 1024 ** 3)
+    const two = chain(1)
+    expect(await mediaEffectStartProblems(two, ON, { hosted: true, shapes: shapesOf(two, 320) }))
+      .toEqual({ message: MEDIA_EFFECT_WORDS.keptTooMuch, nodeId: 't1', classType: 'VideoTrim', engine: true })
+    // 250 frames through three trims: never more than two batches at once (3.5 GB); all four together would be 7 GB.
+    const four = chain(3)
+    expect(keptBatchBound({ count: 250, ...HD, exact: true }) * 4).toBeGreaterThan(4 * 1024 ** 3)
+    expect(await mediaEffectStartProblems(four, ON, { hosted: true, shapes: shapesOf(four, 250) })).toBeNull()
+    // Locally the room is the machine's own.
+    expect(await mediaEffectStartProblems(two, ON, { hosted: false, shapes: shapesOf(two, 320) })).toBeNull()
+  })
+
+  it('in the engine: each leaves the workflow to the engine before the run, with no tool process started', LONG, async () => {
+    await requireMediaTools()
+    const dir = mkdtempSync(join(scratch, 'runs-'))
+    const k = makeKit({ hosted: true, dir, deps: { families: () => ON, kept: createFileKeptBytes(join(dir, 'kept')) } })
+    copyFileSync(clipPath('v_stereo_aac.mp4'), join(k.root, 'input', 'v_stereo_aac.mp4'))
+    const held: ApiPrompt = { ...reversed(), l: loadVideo('v_stereo_aac.mp4') }
+    const kept: ApiPrompt = { l: loadVideo('v_stereo_aac.mp4'), g: getComp('l'), t: trim(['g', 0], 1), s: saveFrames(['t', 0]) }
+    try {
+      for (const [p, count, words] of [[held, 100, MEDIA_EFFECT_WORDS.heldTooMuch], [kept, 320, MEDIA_EFFECT_WORDS.keptTooMuch]] as const) {
+        shapeHook.source = async (_id, cls) => (cls === 'GetVideoComponents' ? { count, ...HD, exact: false } : null)
+        const from = jobs.list.length
+        await expect(k.engine.startRun({ userId: k.userId, takes: [p], ...START })).rejects.toMatchObject({ statusCode: 400, message: words, data: { reason: RUNNER_NOT_ELIGIBLE } })
+        // The start checks read the file's header (ffprobe); no decode or encode started.
+        expect(jobs.list.slice(from).filter(j => j.tool === 'ffmpeg')).toEqual([])
+      }
+    }
+    finally { shapeHook.source = null }
+    expect(k.ledger.hold).not.toHaveBeenCalled()
+  })
+})
+
+// ── Letting go (ruling (j)) ──────────────────────────────────────────────────
+
+describe('kept batches let go once their readers have finished, and made again after a restart', () => {
+  const clip = 'v_stereo_aac.mp4'
+  function kit(dir: string, families: ReadonlySet<RunnerFamily>) {
+    const k = makeKit({ dir, root: join(dir, 'root'), deps: { families: () => families, kept: createFileKeptBytes(join(dir, 'kept')) } })
+    copyFileSync(clipPath(clip), join(k.root, 'input', clip))
+    return k
+  }
+  const flow = (): ApiPrompt => ({ l: loadVideo(clip), g: getComp('l'), t: trim(['g', 0], 1), r: reverse(['t', 0]), s: saveFrames(['r', 0]) })
+  const keptNames = (dir: string, runId: string) => (existsSync(join(dir, 'kept', runId)) ? readdirSync(join(dir, 'kept', runId)).filter(n => /\.(?:mkv|wav)$/.test(n)).sort() : [])
+
+  it('lets go of every batch and sound as soon as nothing reads it any more, and marks each on its holders', LONG, async () => {
+    await requireMediaTools()
+    const dir = mkdtempSync(join(scratch, 'release-'))
+    const k = kit(dir, ON)
+    const { runId } = await k.engine.startRun({ userId: null, takes: [flow()], ...START })
+    await k.engine.settled(runId)
+    const t = (await k.store.get(runId))!.takes[0]!
+    for (const id of ['l', 'g', 't', 'r', 's']) expect(t.nodes[id]!.status, `${id}: ${t.nodes[id]!.error ?? ''}`).toBe('done')
+    const batch = (id: string) => (t.nodes[id]!.values![0] as { file: OutputFile }).file.filename
+    expect(t.nodes.g!.released).toEqual(expect.arrayContaining([batch('g')]))
+    expect(t.nodes.t!.released).toEqual([batch('t')])
+    expect(t.nodes.r!.released).toEqual([batch('r')])
+    // Nothing is kept once the run is over: every batch (and Get video components' sound) was let go.
+    expect(keptNames(dir, runId)).toEqual([])
+  })
+
+  it('with the R6 families off, a run keeps what it made until it ends, as before', LONG, async () => {
+    await requireMediaTools()
+    const dir = mkdtempSync(join(scratch, 'release-off-'))
+    const k = kit(dir, new Set(CARDS_VIDEO))
+    const { runId } = await k.engine.startRun({ userId: null, takes: [{ l: loadVideo(clip), g: getComp('l'), s: saveFrames(['g', 0]) }], ...START })
+    await k.engine.settled(runId)
+    const t = (await k.store.get(runId))!.takes[0]!
+    expect(t.nodes.s!.status).toBe('done')
+    expect(t.nodes.g!.released).toBeUndefined()
+    expect(keptNames(dir, runId)).toContain((t.nodes.g!.values![0] as { file: OutputFile }).file.filename)
+  })
+
+  it('a released value is made again after a restart, bit for bit', LONG, async () => {
+    await requireMediaTools()
+    const dir = mkdtempSync(join(scratch, 'revive-'))
+    const k1 = kit(dir, ON)
+    const { runId } = await k1.engine.startRun({ userId: null, takes: [flow()], ...START })
+    await k1.engine.settled(runId)
+    const run = (await k1.store.get(runId))!
+    const t = run.takes[0]!
+    const trimmed = t.nodes.t!.values![0] as Extract<RunnerValue, { kind: 'frames' }>
+    const got = (id: string) => (t.nodes[id]!.values![0] as { file: OutputFile }).file
+    expect(keptNames(dir, runId)).toEqual([])
+    await expect(k1.deps.kept!.verifiedPath(trimmed.file)).rejects.toThrow(KEPT_GONE)
+    // As if the server stopped while Reverse was running: its turn (and Save video frames') to come again.
+    t.nodes.r!.status = 'running'
+    t.nodes.s!.status = 'waiting'
+    run.status = 'running'
+    run.legs.at(-1)!.status = 'running'
+    for (const c of run.charges) c.finished = false
+    await k1.store.save(run)
+    const k2 = kit(dir, ON)
+    expect(await k2.engine.reattach()).toBe(1)
+    await k2.engine.settled(runId)
+    const again = (await k2.store.get(runId))!.takes[0]!
+    for (const id of ['g', 't', 'r', 's']) expect(again.nodes[id]!.status, `${id}: ${again.nodes[id]!.error ?? ''}`).toBe('done')
+    // Trim and Get video components ran again (their values were let go): the same bytes, so the same names.
+    expect((again.nodes.t!.values![0] as { file: OutputFile }).file).toEqual(got('t'))
+    expect((again.nodes.g!.values![0] as { file: OutputFile }).file).toEqual(got('g'))
+    expect((again.nodes.r!.values![0] as { file: OutputFile }).file).toEqual(got('r'))
+    expect(again.nodes.s!.outputs).toHaveLength(1)
+  })
+})
+
+// ── Rule 12 ──────────────────────────────────────────────────────────────────
+
+describe('rule 12: with every R6 family off (or on with the tools missing), every answer is as before R6.1', () => {
+  const allButR6 = ALL_RUNNER_FAMILIES.filter(f => !R6.includes(f))
+  const OFF_SETS: [string, RunnerFamily[]][] = [
+    ['none', []], ['cards', ['cards']], ['cards, media-video, media-sound', ['cards', 'media-video', 'media-sound']], ['every family but R6', allButR6],
+  ]
+
+  it('the server answers the R6 families as off while the tools are missing', () => {
+    const env = { ...process.env }
+    process.env.NUXT_RUNNER_ENABLED = 'true'
+    process.env.NUXT_RUNNER_FAMILIES = 'cards,media-video,media-sound,video-time,sound-effects'
+    try {
+      TOOLS.ready = false
+      expect([...runnerFamilies()]).toEqual(['cards'])
+      TOOLS.ready = true
+      expect([...runnerFamilies()].sort()).toEqual(['cards', 'media-sound', 'media-video', 'sound-effects', 'video-time'])
+    }
+    finally {
+      TOOLS.ready = null
+      process.env = env
+    }
+  })
+
+  it('over hand-made video graphs', () => {
+    const graphs: Record<string, ApiPrompt> = {
+      'parts remade': { l: loadVideo('a.mp4'), g: getComp('l'), v: createVideo(['g', 0], ['g', 2]), s: saveVideo('v') },
+      'frames through a Gate': { l: loadVideo('a.mp4'), g: getComp('l'), x: gate(['g', 0]), v: createVideo(['x', 0]), s: saveVideo('v') },
+      'frames saved': { l: loadVideo('a.mp4'), g: getComp('l'), s: saveFrames(['g', 0]) },
+      reversed: reversed(),
+      'a chain': { l: loadVideo('a.mp4'), g: getComp('l'), t: trim(['g', 0], 1, 5), r: reverse(['t', 0]), f: trail(['r', 0]), s: saveFrames(['f', 0]) },
+    }
+    for (const [name, p] of Object.entries(graphs)) {
+      for (const [set, fam] of OFF_SETS) {
+        const families = new Set(fam)
+        expect(invariantAnswers(p, families), `${name}, ${set}`).toEqual(beforeR61(() => invariantAnswers(p, families)))
+      }
+    }
+    for (const c of MEDIA_EFFECTS_PORTED) expect(Object.hasOwn(PICTURE_OUTPUTS, c), c).toBe(false)
+    // Teeth: with video-time on, the answers differ.
+    expect(invariantAnswers(reversed(), ON)).not.toEqual(beforeR61(() => invariantAnswers(reversed(), ON)))
+  })
+
+  const PROJECTS = fileURLToPath(new URL('../../../user/sailor/projects/', import.meta.url))
+  const projectsIt = existsSync(PROJECTS) ? it : it.skip
+  projectsIt('over every saved project graph (made into prompts as the app makes them)', async () => {
+    const { gunzipSync } = await import('node:zlib')
+    const { graphToPrompt } = await import('~/lib/graph/graphToPrompt')
+    const catalog = JSON.parse(gunzipSync(readFileSync(fileURLToPath(new URL('../../server/native/objectInfo.baseline.json.gz', import.meta.url)))).toString('utf8'))
+    let graphs = 0
+    for (const uuid of readdirSync(PROJECTS).sort()) {
+      let wf: { canvases?: { workflow: unknown }[] } | undefined
+      try { wf = JSON.parse(readFileSync(join(PROJECTS, uuid, 'versions', 'current.json'), 'utf8')).workflow }
+      catch { continue }
+      for (const c of wf?.canvases ?? []) {
+        let p: ApiPrompt
+        try { p = graphToPrompt(c.workflow as never, catalog) }
+        catch { continue }
+        for (const [name, fam] of OFF_SETS) {
+          const families = new Set(fam)
+          expect(invariantAnswers(p, families), `${uuid}, ${name}`).toEqual(beforeR61(() => invariantAnswers(p, families)))
+        }
+        graphs++
+      }
+    }
+    expect(graphs).toBeGreaterThanOrEqual(800)
+    console.info(`[media-vfx] rule 12 held over ${graphs} saved graphs`)
+  }, 300_000)
+})

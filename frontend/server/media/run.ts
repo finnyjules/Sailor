@@ -42,6 +42,14 @@
  *     limit, its partial outputs removed;
  *   - keeps at most 64 KiB of stderr, logged on failure and never shown: a
  *     failure reaches a person only as MEDIA_WORDS.
+ *
+ * A node that runs several tools at once (R6.1, ruling (n): a video effect's
+ * decodes and its encode, at most MEDIA_LEASE_PROCESSES) takes ONE of the
+ * person's slots for all of them with `mediaLease`, all at once, so it never
+ * waits on itself; its jobs carry the lease (MediaJob.lease) and take no slot
+ * of their own. Ending the lease (its job settled, Stop, a failure) kills
+ * every process it started (SIGKILL) and waits for them to be gone, their
+ * partial outputs removed, before the slot is given back.
  */
 import { AsyncLocalStorage } from 'node:async_hooks'
 import { spawn } from 'node:child_process'
@@ -50,7 +58,7 @@ import { lstat, mkdtemp, open, realpath, rm } from 'node:fs/promises'
 import { availableParallelism, tmpdir } from 'node:os'
 import { dirname, isAbsolute, join, normalize, sep } from 'node:path'
 import {
-  MEDIA_JOB_TIMEOUT_MS, MEDIA_JOBS_PER_USER, MEDIA_MAX_ALLOC, MEDIA_ROUTE_JOBS_PER_USER, MEDIA_ROUTE_SLOTS, MEDIA_ROUTE_WAIT_MS,
+  MEDIA_JOB_TIMEOUT_MS, MEDIA_JOBS_PER_USER, MEDIA_LEASE_PROCESSES, MEDIA_MAX_ALLOC, MEDIA_ROUTE_JOBS_PER_USER, MEDIA_ROUTE_SLOTS, MEDIA_ROUTE_WAIT_MS,
   MEDIA_STDERR_BYTES, MEDIA_WORDS,
   type MediaWord,
 } from '#shared/runner/media'
@@ -89,6 +97,21 @@ export interface MediaJob {
    * write no file.
    */
   workDir?: string
+  /**
+   * R6.1: the node's lease (`mediaLease`): the job runs in the lease's slot
+   * instead of taking its own, as one of its processes, and ends with it.
+   * `userId` must be the lease's.
+   */
+  lease?: MediaLease
+}
+
+/** One of a person's media slots, held by one node for all its tool processes (R6.1, `mediaLease`). */
+export interface MediaLease {
+  readonly userId: string | null
+  /** Aborted by the node's Stop and when the lease ends. */
+  readonly signal?: AbortSignal
+  /** False once the lease has ended (or was stopped): a job can't start under it any more. */
+  readonly live: boolean
 }
 
 /** ffmpeg's demuxer for each container `mediaFormat` tells apart. */
@@ -527,6 +550,60 @@ export function mediaLimiter(): { pending(userId: string | null): number; starte
   }
 }
 
+// ── leases (R6.1) ────────────────────────────────────────────────────────────
+
+interface LeaseState {
+  userId: string | null
+  signal: AbortSignal
+  ended: boolean
+  /** Processes running under it now. */
+  processes: number
+  /** Every job started under it, settled or not. */
+  jobs: Set<Promise<unknown>>
+}
+
+const leases = new WeakMap<MediaLease, LeaseState>()
+
+/**
+ * One of the person's media slots for a node, taken once (it waits its turn
+ * as a job would); up to MEDIA_LEASE_PROCESSES tool processes run under it at
+ * once, none taking a slot of its own. When `job` settles, or Stop reaches the
+ * lease, every process still running under it is killed (SIGKILL) and its
+ * partial outputs removed; the slot is given back once they are all gone.
+ */
+export async function mediaLease<T>(o: { userId: string | null; signal?: AbortSignal }, job: (lease: MediaLease) => Promise<T>): Promise<T> {
+  if (insideCallback.getStore()) {
+    console.warn('[media] media.lease.refused: a lease was asked for from inside a job\'s callback')
+    throw new MediaError('failed')
+  }
+  if (o.signal?.aborted) throw new MediaError('stopped')
+  const release = await acquire(o.userId, false, o.signal)
+  const end = new AbortController()
+  const signal = o.signal ? AbortSignal.any([o.signal, end.signal]) : end.signal
+  const state: LeaseState = { userId: o.userId, signal, ended: false, processes: 0, jobs: new Set() }
+  const lease: MediaLease = {
+    userId: o.userId,
+    signal,
+    get live() { return !state.ended && !signal.aborted },
+  }
+  leases.set(lease, state)
+  try {
+    return await job(lease)
+  }
+  finally {
+    state.ended = true
+    // Every process still running is killed now, and each job's partial outputs removed, before the slot goes back.
+    end.abort()
+    await Promise.allSettled([...state.jobs])
+    release()
+  }
+}
+
+/** For tests: processes running now under a lease (0 once it has ended). */
+export function leaseProcesses(lease: MediaLease): number {
+  return leases.get(lease)?.processes ?? 0
+}
+
 // ── one job ──────────────────────────────────────────────────────────────────
 
 /** Output collected when there is no `onStdout` (a probe's JSON); anything larger is not a probe. */
@@ -570,6 +647,7 @@ export async function runMedia(job: MediaJob): Promise<{ stdout: Uint8Array | nu
   }
   const tools = await mediaTools()
   if (!tools) throw new MediaError('toolsMissing')
+  if (job.lease) return underLease(job, job.lease, tools)
   let release: () => void
   const asked = Date.now()
   try { release = await acquire(job.userId, !!job.route, job.signal) }
@@ -577,6 +655,34 @@ export async function runMedia(job: MediaJob): Promise<{ stdout: Uint8Array | nu
     await removeAll(job.cleanup)
     throw e
   }
+  return inSlot(job, tools, release, asked)
+}
+
+/** A job in its lease's slot (R6.1): no slot of its own, Stop and the lease's end both reach it. */
+function underLease(job: MediaJob, lease: MediaLease, tools: NonNullable<Awaited<ReturnType<typeof mediaTools>>>): Promise<{ stdout: Uint8Array | null; stderrTail: string }> {
+  const st = leases.get(lease)
+  const refuse = async (word: MediaWord | 'failed') => {
+    await removeAll(job.cleanup)
+    throw new MediaError(word)
+  }
+  if (!st || st.ended || st.signal.aborted) return refuse('stopped')
+  // A lease is one person's: its jobs are theirs, and no more at once than it was taken for.
+  if (job.userId !== st.userId || job.route || st.processes >= MEDIA_LEASE_PROCESSES) return refuse('failed')
+  st.processes++
+  const signal = job.signal ? AbortSignal.any([job.signal, st.signal]) : st.signal
+  let done = false
+  const release = () => {
+    if (done) return
+    done = true
+    st.processes--
+  }
+  const p = inSlot({ ...job, signal }, tools, release, Date.now())
+  st.jobs.add(p.catch(() => {}))
+  return p
+}
+
+/** The job once it has its slot: its outputs confined, the tool run, the slot given back. */
+async function inSlot(job: MediaJob, tools: NonNullable<Awaited<ReturnType<typeof mediaTools>>>, release: () => void, asked: number): Promise<{ stdout: Uint8Array | null; stderrTail: string }> {
   let ownDir: string | null = null
   try {
     if (!job.workDir) ownDir = await mediaTempDir()

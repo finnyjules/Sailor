@@ -258,6 +258,26 @@ export type RunnerFamily =
    * were off (server/runner/config.ts). Off: they go to ComfyUI, as before.
    */
   | 'sound-in'
+  /**
+   * The video and sound effects, computed by Sailor's own server (step 3, R6),
+   * one family per kind of work (R6 ruling (h), shared/runner/mediaEffects.ts):
+   * time (Trim, Reverse, Frame trail…), joining two clips, frame looks,
+   * Stabilize, Slow motion by optical flow, made clips, text on video, the
+   * sound effects and noise removal. Free; each counts as work. Each needs its
+   * media family (the video ones `media-video`, the sound ones `media-sound`),
+   * which needs `cards` (FAMILY_REQUIRES), and the video tools: while they are
+   * missing or refused, the server answers as if it were off. Off: they go to
+   * ComfyUI, as before.
+   */
+  | 'video-time'
+  | 'video-join'
+  | 'video-look'
+  | 'video-stabilize'
+  | 'video-flow'
+  | 'video-draw'
+  | 'video-text'
+  | 'sound-effects'
+  | 'sound-denoise'
 
 export const RUNNER_FAMILIES: readonly RunnerFamily[] = [
   'fal-edit', 'replicate-image', 'replicate-video', 'nano-actions', 'ref-edits', 'restyle', 'frame', 'wan-3', 'gpt-image-2.5', 'h3-max-turbo', 'gemini-omni-flash', 'veo-3.1-lite', 'qwen-image-3', 'grok-imagine-2', 'ideogram-4', 'seedream-5-pro-edit', 'qwen-2511-angles', 'nano-banana-2-blend', 'bria-product-shot', 'muse-image', 'nano-banana-2-lite', 'reve-2.1', 'recraft-v4.1', 'krea-2', 'happyhorse-1.1', 'grok-imagine-video-1.5', 'ltx-2.5-fast', 'luma-ray-3.2', 'sync-3', 'topaz-video', 'fix-faces', 'face-swap', 'person-swap-video', 'cards',
@@ -275,12 +295,26 @@ export const RUNNER_FAMILIES: readonly RunnerFamily[] = [
  */
 export const MEDIA_TOOL_FAMILIES: readonly RunnerFamily[] = ['media-sound', 'media-video', 'sound-in']
 
-/** Every family parseFamilies knows: RUNNER_FAMILIES and the media families. */
-export const ALL_RUNNER_FAMILIES: readonly RunnerFamily[] = [...RUNNER_FAMILIES, ...MEDIA_TOOL_FAMILIES]
+/**
+ * R6's nine families (the video and sound effects), which need the video
+ * tools too: dropped with MEDIA_TOOL_FAMILIES while the tools are missing or
+ * refused (server/runner/config.ts; they also need `media-video` or
+ * `media-sound`, FAMILY_REQUIRES). A list of their own, so R5's list (pinned
+ * by its specs) stays as it was, and kept apart from RUNNER_FAMILIES, so every
+ * "every family on" set written before R6 stays as it was too.
+ */
+export const MEDIA_EFFECT_TOOL_FAMILIES: readonly RunnerFamily[] = [
+  'video-time', 'video-join', 'video-look', 'video-stabilize', 'video-flow', 'video-draw', 'video-text', 'sound-effects', 'sound-denoise',
+]
+
+/** Every family parseFamilies knows: RUNNER_FAMILIES, the media families and R6's. */
+export const ALL_RUNNER_FAMILIES: readonly RunnerFamily[] = [...RUNNER_FAMILIES, ...MEDIA_TOOL_FAMILIES, ...MEDIA_EFFECT_TOOL_FAMILIES]
 
 /**
  * A family that works only while another is on too (R2): with its
- * requirement off, parseFamilies drops it.
+ * requirement off, parseFamilies drops it. A requirement may have its own
+ * (R6: `video-time` needs `media-video`, which needs `cards`,
+ * MEDIA_EFFECT_REQUIRES): the whole chain must be on.
  */
 export const FAMILY_REQUIRES: Partial<Record<RunnerFamily, RunnerFamily>> = {
   'effects-tone': 'cards',
@@ -307,21 +341,51 @@ export const FAMILY_REQUIRES: Partial<Record<RunnerFamily, RunnerFamily>> = {
   'sound-in': 'cards',
 }
 
+/**
+ * R6's requirements: each video effect family needs `media-video`, each sound
+ * one `media-sound` (both of which need `cards`). A table of its own beside
+ * FAMILY_REQUIRES (whose keys R2's specs pin), read with it everywhere
+ * (`requirementOf`).
+ */
+export const MEDIA_EFFECT_REQUIRES: Partial<Record<RunnerFamily, RunnerFamily>> = {
+  'video-time': 'media-video',
+  'video-join': 'media-video',
+  'video-look': 'media-video',
+  'video-stabilize': 'media-video',
+  'video-flow': 'media-video',
+  'video-draw': 'media-video',
+  'video-text': 'media-video',
+  'sound-effects': 'media-sound',
+  'sound-denoise': 'media-sound',
+}
+
+/** The family a family needs on too (FAMILY_REQUIRES, then MEDIA_EFFECT_REQUIRES), or undefined. */
+export function requirementOf(family: RunnerFamily): RunnerFamily | undefined {
+  return FAMILY_REQUIRES[family] ?? MEDIA_EFFECT_REQUIRES[family]
+}
+
 const KNOWN: ReadonlySet<string> = new Set(ALL_RUNNER_FAMILIES)
 
 /** No family switched on. */
 export const NO_FAMILIES: ReadonlySet<RunnerFamily> = new Set()
 
-/** Whether a family is on: switched on, and its requirement (FAMILY_REQUIRES) with it. */
+/** Whether a family is on: switched on, and its requirement (FAMILY_REQUIRES) with it, down the whole chain (R6). */
 export function familyOn(family: RunnerFamily, families: ReadonlySet<RunnerFamily>): boolean {
-  const need = FAMILY_REQUIRES[family]
-  return families.has(family) && (!need || families.has(need))
+  let f: RunnerFamily | undefined = family
+  // A chain is short (at most three today); the bound only guards against a loop in the table.
+  for (let depth = 0; f && depth < 16; depth++) {
+    if (!families.has(f)) return false
+    f = requirementOf(f)
+  }
+  return !f
 }
 
 /**
  * A comma list of family names → the set. Unknown names are dropped; anything
  * unreadable (not a string or a list of strings) is no families at all. A
- * family whose requirement (FAMILY_REQUIRES) is off is dropped too.
+ * family whose requirement (FAMILY_REQUIRES) is off is dropped too, again
+ * until nothing changes (R6.1: one pass could keep a family whose
+ * requirement is dropped later in the same pass).
  */
 export function parseFamilies(raw: unknown): ReadonlySet<RunnerFamily> {
   let parts: unknown[]
@@ -334,9 +398,13 @@ export function parseFamilies(raw: unknown): ReadonlySet<RunnerFamily> {
     const name = p.trim().toLowerCase()
     if (KNOWN.has(name)) out.add(name as RunnerFamily)
   }
-  for (const f of [...out]) {
-    const need = FAMILY_REQUIRES[f]
-    if (need && !out.has(need)) out.delete(f)
+  let changed = true
+  while (changed) {
+    changed = false
+    for (const f of [...out]) {
+      const need = requirementOf(f)
+      if (need && !out.has(need)) { out.delete(f); changed = true }
+    }
   }
   return out
 }

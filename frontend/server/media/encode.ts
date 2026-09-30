@@ -63,7 +63,7 @@ import { h264Args, type H264Quality } from './h264Quality'
 import { exactFraction, ffprobeJson, mediaCapsWord, probeMedia, type MediaProbe, type Rational, type VideoStreamProbe } from './probe'
 import { resampleInWorker } from '../runner/compositor/worker'
 import { RESAMPLE_MAX_TAPS, opusRate, resampleTaps } from './resample'
-import { FROM_ZERO_BSF, MediaError, fromZeroBsfCut, inputArgs, mediaTempDir, removeMediaTempDir, runMedia } from './run'
+import { FROM_ZERO_BSF, MediaError, fromZeroBsfCut, inputArgs, mediaTempDir, removeMediaTempDir, runMedia, type MediaLease } from './run'
 
 export { OPENH264_FOR, PYAV_H264_DEFAULT, h264Args, type H264Quality } from './h264Quality'
 
@@ -698,7 +698,7 @@ export const FFV1_KEPT_RATE = 1000
  * a reversible transform, and rgb24 ↔ bgr0 only moves bytes). Bit-exact
  * muxing, so the same frames make the same file (kept by sha256).
  */
-export async function writeFfv1(o: { frames: AsyncIterable<Uint8Array>; w: number; h: number; out: string; outRoots: readonly string[]; userId: string | null; signal?: AbortSignal; timeoutMs?: number }): Promise<{ count: number }> {
+export async function writeFfv1(o: { frames: AsyncIterable<Uint8Array>; w: number; h: number; out: string; outRoots: readonly string[]; userId: string | null; signal?: AbortSignal; timeoutMs?: number; lease?: MediaLease }): Promise<{ count: number }> {
   if (!(Number.isInteger(o.w) && Number.isInteger(o.h) && o.w > 0 && o.h > 0)) throw new MediaError('failed')
   const work = await mediaTempDir()
   try {
@@ -710,7 +710,7 @@ export async function writeFfv1(o: { frames: AsyncIterable<Uint8Array>; w: numbe
       '-c:v', 'ffv1', '-threads:v', '1', '-pix_fmt', 'bgr0',
       '-fflags', '+bitexact', '-f', 'matroska', '-y', `file:${out}`,
     ]
-    await runMedia({ tool: 'ffmpeg', args, userId: o.userId, signal: o.signal, stdin: checkedFrames(o.frames, o.w * o.h * 3, counted, o.signal), workDir: work, cleanup: [out], timeoutMs: o.timeoutMs })
+    await runMedia({ tool: 'ffmpeg', args, userId: o.userId, signal: o.signal, stdin: checkedFrames(o.frames, o.w * o.h * 3, counted, o.signal), workDir: work, cleanup: [out], timeoutMs: o.timeoutMs, ...(o.lease ? { lease: o.lease } : {}) })
     if (counted.n === 0) throw new MediaError('noVideo')
     await moveOut(out, o.out, o.outRoots)
     return { count: counted.n }

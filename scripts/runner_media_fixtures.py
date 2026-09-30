@@ -83,6 +83,15 @@ Groups:
            its target pts, the frame's pts, whether the file ran out first);
            _gen_waveform_peaks at 16, 256 and 2048 buckets (the route's cache
            JSON text, zlib + base64).
+  vfx-time — (R6.1) the video effects' shared cases (R6 rule 13): the standard
+           frame inputs (`synth` frames handed over as Get video components
+           hands them, u8 / 255: clip8, clip8-odd, clip2, clip1, clip8-big,
+           clip6-small), the real node's execute with its hidden unique_id,
+           the live preview it wrote, and its output as float32 (base64 for
+           the small ones), round-8 and trunc-8 (sha256); each class through
+           Create video → Save video, libx264 and switched to libopenh264; and
+           rule 12's synthetic graphs, one per R6 class. R6.1's pilots: Trim,
+           Reverse / ping-pong and Frame trail.
 """
 from __future__ import annotations
 
@@ -2029,8 +2038,284 @@ def group_timeline_media(names: list[str]) -> dict:
     return {"cases": cases}
 
 
+# ── the video effects (R6) ────────────────────────────────────────────────────
+
+# R6 rule 13's standard frame inputs: name → (frames, w, h, seed); frame i is synth(w, h, 3, seed + i).
+VFX_CLIPS = {
+    "clip8": (8, 24, 16, 1000),
+    "clip8-odd": (8, 23, 15, 2000),
+    "clip2": (2, 24, 16, 3000),
+    "clip1": (1, 24, 16, 4000),
+    "clip8-big": (8, 160, 90, 5000),
+    "clip6-small": (6, 16, 12, 6000),
+}
+# The inputs every class runs its defaults on (clip6-small is the two-clip effects' second clip).
+VFX_STANDARD = ("clip8", "clip8-odd", "clip2", "clip1", "clip8-big")
+# A batch recorded whole (float32, base64) up to this many values (frames × h × w × 3); above it, sha256 only.
+VFX_INLINE_VALUES = 8 * 24 * 16 * 3
+# The node id every case runs as (its preview is live_preview_7.png).
+VFX_NODE_ID = "7"
+
+
+def vfx_clip(name: str) -> torch.Tensor:
+    """A standard input as Get video components hands it: [T, H, W, 3] float32, u8 / 255."""
+    n, w, h, seed = VFX_CLIPS[name]
+    frames = [np.frombuffer(synth(w, h, 3, seed + i), np.uint8).reshape(h, w, 3) for i in range(n)]
+    return torch.from_numpy(np.stack(frames).copy()) / 255.0
+
+
+def vfx_run(cls, node_id: str, **inputs):
+    """The real node's execute with its hidden unique_id set: its outputs and ui."""
+    from unittest import mock
+    from comfy_api.latest._io import HiddenHolder
+    with mock.patch.object(cls, "hidden", HiddenHolder.from_dict({"UNIQUE_ID": node_id})):
+        res = cls.execute(**inputs)
+    return res.args, res.ui
+
+
+def vfx_round8(t: torch.Tensor) -> bytes:
+    """Rule 4's hand-off: round(f32(clamp(x) · 255)), halves to even, as uint8."""
+    return (t.clamp(0, 1) * 255.0).round().to(torch.uint8).numpy().tobytes()
+
+
+def vfx_trunc8(t: torch.Tensor) -> bytes:
+    """Rule 4's savers and rule 9's preview: np.clip(255 · x, 0, 255).astype(uint8)."""
+    return np.clip(255.0 * t.numpy(), 0, 255).astype(np.uint8).tobytes()
+
+
+def vfx_batch(t: torch.Tensor) -> dict:
+    """A frame batch as recorded: its shape, its float32 (T, H, W, 3 order; whole when small) and its 8-bit forms."""
+    assert t.dtype == torch.float32 and t.ndim == 4 and t.shape[-1] == 3, (t.dtype, t.shape)
+    f = np.ascontiguousarray(t.numpy()).tobytes()
+    rec = {"count": int(t.shape[0]), "h": int(t.shape[1]), "w": int(t.shape[2]),
+           "f32_sha256": sha(f), "round8_sha256": sha(vfx_round8(t)), "trunc8_sha256": sha(vfx_trunc8(t))}
+    if t.numel() <= VFX_INLINE_VALUES:
+        rec["f32"] = b64(f)
+    return rec
+
+
+def vfx_preview(temp: str, ui) -> dict | None:
+    """The live preview the node wrote (rule 9), decoded: its name, size, pixels, and PNG settings."""
+    from PIL import Image
+    if ui is None:
+        return None
+    d = ui.as_dict() if hasattr(ui, "as_dict") else ui
+    entry = dict(d["images"][0])
+    with Image.open(os.path.join(temp, entry["subfolder"], entry["filename"])) as im:
+        im.load()
+        px = im.convert("RGB").tobytes()
+        rec = {"filename": entry["filename"], "mode": im.mode, "w": im.size[0], "h": im.size[1], "sha256": sha(px)}
+    if im.size[0] * im.size[1] <= 64 * 48:
+        rec["px"] = b64(px)
+    return rec
+
+
+def vfx_ui(ui) -> dict | None:
+    if ui is None:
+        return None
+    d = ui.as_dict() if hasattr(ui, "as_dict") else ui
+    return {k: ([dict(x) for x in v] if k == "images" else list(v)) for k, v in d.items()}
+
+
+def vfx_cases(tmp: str, cls, class_type: str, grid: list[tuple[str, dict, str]]) -> list[dict]:
+    """Each (name, widgets, input) through the real node, in a fresh temp folder."""
+    out = []
+    for name, widgets, clip in grid:
+        rec: dict = {"name": name, "class_type": class_type, "node_id": VFX_NODE_ID, "widgets": widgets, "input": clip}
+        _o, temp = fresh_dirs(tmp, f"{class_type}_{len(out)}")
+        try:
+            args, ui = vfx_run(cls, VFX_NODE_ID, frames=vfx_clip(clip), **widgets)
+            rec["out"] = vfx_batch(args[0])
+            rec["ui"] = vfx_ui(ui)
+            rec["preview"] = vfx_preview(temp, ui)
+        except Exception as e:  # noqa: BLE001 - the error itself is the record
+            rec["error"] = err(e)
+        out.append(rec)
+    return out
+
+
+def vfx_grid(defaults: dict, numeric: dict[str, tuple], options: dict[str, list], extra: list[tuple[str, dict, str]] = ()) -> list[tuple[str, dict, str]]:
+    """R6 rule 13's case set: every widget at its default over each standard input; each numeric widget at its
+    min, its max and one value between (one at a time); every option; and the class's own extra cases."""
+    grid = [(f"defaults, {c}", dict(defaults), c) for c in VFX_STANDARD]
+    for k, (lo, hi, mid) in numeric.items():
+        for label, v in (("min", lo), ("max", hi), ("between", mid)):
+            grid.append((f"{k} {label} ({v})", {**defaults, k: v}, "clip8"))
+    for k, opts in options.items():
+        for o in opts:
+            grid.append((f"{k} {o}", {**defaults, k: o}, "clip8"))
+    grid += list(extra)
+    return grid
+
+
+def vfx_saved(tmp: str, cls, class_type: str, widgets: dict) -> dict:
+    """The effect on clip8 → Create video (24 fps) → Save video, libx264 as ComfyUI runs it and switched to libopenh264."""
+    from comfy_api.latest._input_impl import video_types
+    from comfy_extras import nodes_video as nv
+    Create, Save = (c.PREPARE_CLASS_CLONE({"hidden_inputs": VIDEO_HIDDEN}) for c in (nv.CreateVideo, nv.SaveVideo))
+    args, _ui = vfx_run(cls, VFX_NODE_ID, frames=vfx_clip("clip8"), **widgets)
+    rec: dict = {"class_type": class_type, "widgets": widgets, "input": "clip8", "fps": 24.0}
+    for run, swap in (("x264", None), ("openh264", openh264_options(23))):
+        out, temp = fresh_dirs(tmp, f"saved_{class_type}_{run}")
+        vid = Create.execute(images=args[0], fps=24.0, audio=None).result[0]
+        with _patched(video_types, _AvShim(swap)):
+            ui = video_ui_of(Save.execute(video=vid, filename_prefix="video/ComfyUI", format="auto", codec="auto"))
+        saved = video_out(ui_file(out, temp, ui["images"][0]), None, False, False)
+        rec[run] = {"ui": ui, "header": saved["header"], "frameCount": saved["frameCount"], "frameRate": saved["frameRate"],
+                    "duration": saved["duration"], "frames": saved["frames"]}
+    return rec
+
+
+# Rule 12: every R6 class and where its inputs come from.
+VFX_GRAPH_CLASSES = {
+    "nodes_video_effects": ["FrameTrail", "TemporalMotionBlur", "SlitScan", "TimeDisplacement", "VideoReverse", "VideoTrim", "VideoCrossfade", "AnimatedNoise"],
+    "nodes_video_pro": ["SpeedRamp", "KenBurns", "AspectConvert", "ChromaKey", "CaptionTrack", "LUT", "ThreeWayCC", "AudioWaveform", "Transition", "Stabilize"],
+    "nodes_frame_interp": ["FrameInterpolate"],
+    "nodes_audio_effects": ["AudioFade", "AudioNormalize", "AudioDuck", "VideoSilenceCut"],
+    "nodes_text": ["TextClip"],
+    "nodes_audio": ["TrimAudioDuration", "SplitAudioChannels", "JoinAudioChannels", "AudioConcat", "AudioMerge", "AudioAdjustVolume",
+                    "EmptyAudio", "AudioEqualizer3Band", "SaveAudioOpus"],
+    "nodes_audio_denoise": ["AudioDenoise"],
+}
+
+
+def vfx_graphs() -> dict:
+    """Rule 12's synthetic graphs, one per R6 class (and Save audio (Opus)): Load video → Get video components feeding
+    every frame-batch input and Load audio every sound input, each widget at its default, and every picture output
+    read by Create video → Save video, every sound output by Save audio."""
+    import importlib
+    graphs = {}
+    for module, ids in VFX_GRAPH_CLASSES.items():
+        mod = importlib.import_module(f"comfy_extras.{module}")
+        found = {}
+        for name in dir(mod):
+            obj = getattr(mod, name)
+            if isinstance(obj, type) and obj.__module__ == mod.__name__ and hasattr(obj, "define_schema"):
+                try:
+                    sch = obj.define_schema()
+                except Exception:  # noqa: BLE001
+                    continue
+                if sch.node_id in ids:
+                    found[sch.node_id] = obj
+        assert sorted(found) == sorted(ids), (module, sorted(found))
+        for cid in ids:
+            cls = found[cid]
+            types = cls.INPUT_TYPES()
+            inputs: dict = {}
+            for section in ("required", "optional"):
+                for k, spec in (types.get(section) or {}).items():
+                    kind = spec[0]
+                    info = spec[1] if len(spec) > 1 else {}
+                    if kind == "IMAGE":
+                        inputs[k] = ["2", 0]
+                    elif kind == "AUDIO":
+                        inputs[k] = ["3", 0]
+                    elif isinstance(kind, list) or kind == "COMBO":
+                        opts = kind if isinstance(kind, list) else info.get("options", [])
+                        # A folder's file list differs by machine: its first entry is not recorded, "(none)" stands in.
+                        inputs[k] = info.get("default", "(none)" if cid in ("LUT", "AudioWaveform") else (opts[0] if opts else ""))
+                    else:
+                        inputs[k] = info.get("default", "" if kind == "STRING" else False if kind == "BOOLEAN" else 0)
+            g = {"1": {"class_type": "LoadVideo", "inputs": {"file": "a.mp4"}},
+                 "2": {"class_type": "GetVideoComponents", "inputs": {"video": ["1", 0]}},
+                 "3": {"class_type": "LoadAudio", "inputs": {"audio": "a.wav"}},
+                 "4": {"class_type": cid, "inputs": inputs}}
+            for slot, o in enumerate(cls.define_schema().outputs):
+                t = o.io_type if hasattr(o, "io_type") else o.get_io_type()
+                if t == "IMAGE":
+                    g[f"c{slot}"] = {"class_type": "CreateVideo", "inputs": {"images": ["4", slot], "fps": 24.0}}
+                    g[f"s{slot}"] = {"class_type": "SaveVideo", "inputs": {"video": [f"c{slot}", 0], "filename_prefix": "video/ComfyUI", "format": "auto", "codec": "auto"}}
+                elif t == "AUDIO":
+                    g[f"s{slot}"] = {"class_type": "SaveAudio", "inputs": {"audio": ["4", slot], "filename_prefix": "audio/ComfyUI"}}
+            graphs[cid] = g
+    return graphs
+
+
+# R6.1's acceptance: a standard clip (32 × 24, stereo AAC) through Load video → Get video components → Reverse →
+# Create video (its own rate) → Save video.
+VFX_ACCEPTANCE_CLIP = "v_stereo_aac.mp4"
+
+
+def vfx_acceptance(tmp: str) -> dict:
+    """The acceptance chain as Python runs it, libx264 and switched to libopenh264."""
+    from comfy_api.latest._input_impl import video_types
+    from comfy_extras import nodes_video as nv
+    from comfy_extras import nodes_video_effects as nve
+    folder_paths.set_input_directory(CLIPS)
+    LoadVideo, GetComp, Create, Save = (c.PREPARE_CLASS_CLONE({"hidden_inputs": VIDEO_HIDDEN}) for c in (nv.LoadVideo, nv.GetVideoComponents, nv.CreateVideo, nv.SaveVideo))
+    imgs, _audio, fps = GetComp.execute(video=LoadVideo.execute(file=VFX_ACCEPTANCE_CLIP).result[0]).result
+    args, _ui = vfx_run(nve.VideoReverseNode, VFX_NODE_ID, frames=imgs, mode="reverse")
+    rec: dict = {"clip": VFX_ACCEPTANCE_CLIP, "fps": fps, "reversed": vfx_batch(args[0])}
+    for run, swap in (("x264", None), ("openh264", openh264_options(23))):
+        out, temp = fresh_dirs(tmp, f"acceptance_{run}")
+        vid = Create.execute(images=args[0], fps=fps, audio=None).result[0]
+        with _patched(video_types, _AvShim(swap)):
+            ui = video_ui_of(Save.execute(video=vid, filename_prefix="video/ComfyUI", format="auto", codec="auto"))
+        saved = video_out(ui_file(out, temp, ui["images"][0]), None, False, False)
+        rec[run] = {"ui": ui, "header": saved["header"], "frameCount": saved["frameCount"], "frameRate": saved["frameRate"],
+                    "duration": saved["duration"], "frames": saved["frames"]}
+    return rec
+
+
+def vfx_threads() -> dict:
+    """R6 rule 13: torch at its default thread count (as R2 rule 11), recorded; OpenCV's too."""
+    import subprocess
+    assert torch.get_num_threads() > 1, "Run on a machine with more than one CPU thread: ComfyUI's nodes do"
+    # OpenCV in a process of its own: its bundled libavdevice would clash with PyAV's in this one.
+    got = subprocess.run([sys.executable, "-c", "import cv2; print(cv2.getNumThreads())"], capture_output=True, text=True, check=True)
+    return {"torch": torch.get_num_threads(), "opencv": int(got.stdout.strip())}
+
+
+def group_vfx_time(names: list[str]) -> dict:
+    """(R6.1) The time effects: the pilots Trim, Reverse / ping-pong and Frame trail (R6.2 adds the rest)."""
+    import tempfile
+    from comfy_extras import nodes_video_effects as nve
+    trail_defaults = {"decay": 0.85, "blend_mode": "screen", "intensity": 1.0, "threshold": 0.0}
+    trim_defaults = {"start": 0, "end": -1}
+    grids = {
+        "FrameTrail": (nve.FrameTrailNode, vfx_grid(
+            trail_defaults,
+            {"decay": (0.0, 0.99, 0.5), "intensity": (0.0, 2.0, 0.7), "threshold": (0.0, 1.0, 0.37)},
+            {"blend_mode": ["screen", "add", "max"]},
+            [("threshold 0.37, add, intensity 1.6", {**trail_defaults, "threshold": 0.37, "blend_mode": "add", "intensity": 1.6}, "clip8-odd")],
+        )),
+        "VideoTrim": (nve.VideoTrimNode, vfx_grid(
+            trim_defaults,
+            {"start": (0, 10000, 3), "end": (-1, 10000, 5)},
+            {},
+            [
+                ("end before start (5, 2): the first frame", {"start": 5, "end": 2}, "clip8"),
+                ("end at start (4, 4): the first frame", {"start": 4, "end": 4}, "clip8"),
+                ("end past the end (2, 50)", {"start": 2, "end": 50}, "clip8"),
+                ("start past the end (20, -1): the first frame", {"start": 20, "end": -1}, "clip8"),
+                ("one frame kept (7, 8)", {"start": 7, "end": 8}, "clip8-odd"),
+                ("start 1 of two", {"start": 1, "end": -1}, "clip2"),
+                ("start 1 of one: the first frame", {"start": 1, "end": -1}, "clip1"),
+            ],
+        )),
+        "VideoReverse": (nve.VideoReverseNode, [
+            (f"{mode}, {c}", {"mode": mode}, c) for mode in ("reverse", "ping_pong") for c in VFX_STANDARD
+        ]),
+    }
+    cases: dict = {"threads": vfx_threads(), "clips": {k: {"frames": v[0], "w": v[1], "h": v[2], "seed": v[3]} for k, v in VFX_CLIPS.items()},
+                   "inlineValues": VFX_INLINE_VALUES}
+    with tempfile.TemporaryDirectory() as tmp:
+        runs = []
+        for class_type, (cls, grid) in grids.items():
+            runs += vfx_cases(tmp, cls, class_type, grid)
+        cases["runs"] = runs
+        cases["saved"] = [
+            vfx_saved(tmp, nve.FrameTrailNode, "FrameTrail", trail_defaults),
+            vfx_saved(tmp, nve.VideoTrimNode, "VideoTrim", {"start": 2, "end": 6}),
+            vfx_saved(tmp, nve.VideoReverseNode, "VideoReverse", {"mode": "ping_pong"}),
+        ]
+        cases["acceptance"] = vfx_acceptance(tmp)
+    cases["graphs"] = vfx_graphs()
+    return {"cases": cases}
+
+
 GROUPS = {"probe": group_probe, "decode": group_decode, "encode": group_encode, "sound": group_sound, "video": group_video,
-          "frames": group_frames, "timeline-media": group_timeline_media}
+          "frames": group_frames, "timeline-media": group_timeline_media, "vfx-time": group_vfx_time}
 
 
 def main() -> None:

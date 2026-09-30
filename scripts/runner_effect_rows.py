@@ -13,7 +13,18 @@ define_schema() itself.
 
     cd /Users/julien/Documents/GitHub/Sailor && .venv/bin/python scripts/runner_effect_rows.py
 
-Running it again gives identical bytes. The network is blocked (as in
+With `--media` (step 3, R6.1) it writes frontend/shared/runner/
+mediaEffectSchemas.generated.ts instead: the video and sound effects of R6
+(and Save audio (Opus), which joins R5's `media-sound`), each with its family,
+its IMAGE (frame batch) and AUDIO inputs, its widgets as validate_inputs reads
+them, its outputs ('image' | 'mask' | 'audio') and whether it is an output
+node. A COMBO that lists the files of a folder (LUT's `lut_file`, Audio
+waveform's `audio_file`) is written as a `fileList` widget with no options:
+its list is whatever that machine's folder holds, so it can't be generated.
+
+    cd /Users/julien/Documents/GitHub/Sailor && .venv/bin/python scripts/runner_effect_rows.py --media
+
+Running either again gives identical bytes. The network is blocked (as in
 runner_cards_fixtures.py) before any node module is imported.
 """
 import importlib
@@ -105,11 +116,49 @@ assert len(EFFECTS) == 79, len(EFFECTS)
 WIDGET_TYPES = ("FLOAT", "INT", "BOOLEAN", "STRING", "COMBO", "COLOR")
 
 
-def node_classes() -> dict[str, type]:
-    """Every effect class by its node id, from its module."""
+# The video and sound effects of R6 (plan R6, the family table), and Save audio (Opus), which joins R5's
+# `media-sound` (R6 ruling (o)): class → (module, family).
+MEDIA: dict[str, tuple[str, str]] = {}
+
+
+def _media(family: str, module: str, *classes: str) -> None:
+    for c in classes:
+        assert c not in MEDIA, c
+        MEDIA[c] = (module, family)
+
+
+_media("video-time", "nodes_video_effects", "FrameTrail", "VideoReverse", "VideoTrim", "TemporalMotionBlur", "SlitScan", "TimeDisplacement")
+_media("video-time", "nodes_video_pro", "SpeedRamp")
+_media("video-join", "nodes_video_effects", "VideoCrossfade")
+_media("video-join", "nodes_video_pro", "Transition")
+_media("video-look", "nodes_video_pro", "KenBurns", "AspectConvert", "ChromaKey", "LUT", "ThreeWayCC")
+_media("video-stabilize", "nodes_video_pro", "Stabilize")
+_media("video-flow", "nodes_frame_interp", "FrameInterpolate")
+_media("video-draw", "nodes_video_effects", "AnimatedNoise")
+_media("video-draw", "nodes_video_pro", "AudioWaveform")
+_media("video-text", "nodes_text", "TextClip")
+_media("video-text", "nodes_video_pro", "CaptionTrack")
+_media("sound-effects", "nodes_audio", "TrimAudioDuration", "SplitAudioChannels", "JoinAudioChannels", "AudioConcat", "AudioMerge",
+       "AudioAdjustVolume", "EmptyAudio", "AudioEqualizer3Band")
+_media("sound-effects", "nodes_audio_effects", "AudioFade", "AudioNormalize", "AudioDuck", "VideoSilenceCut")
+_media("sound-denoise", "nodes_audio_denoise", "AudioDenoise")
+_media("media-sound", "nodes_audio", "SaveAudioOpus")
+
+# 21 video, 12 sound, and Save audio (Opus).
+assert len(MEDIA) == 34, len(MEDIA)
+
+# The COMBOs that list a folder's files: written without their options (they differ by machine).
+FILE_LIST_WIDGETS = {("LUT", "lut_file"), ("AudioWaveform", "audio_file")}
+
+MEDIA_FAMILIES = ("video-time", "video-join", "video-look", "video-stabilize", "video-flow", "video-draw", "video-text",
+                  "sound-effects", "sound-denoise", "media-sound")
+
+
+def node_classes(table: dict[str, tuple[str, str]] = EFFECTS) -> dict[str, type]:
+    """Every class of `table` by its node id, from its module."""
     import utils.install_util  # noqa: F401
     found: dict[str, type] = {}
-    for module in sorted({m for m, _ in EFFECTS.values()}):
+    for module in sorted({m for m, _ in table.values()}):
         mod = importlib.import_module(f"comfy_extras.{module}")
         for name in dir(mod):
             obj = getattr(mod, name)
@@ -119,10 +168,10 @@ def node_classes() -> dict[str, type]:
                 schema = obj.define_schema()
             except Exception:
                 continue
-            if schema.node_id in EFFECTS and EFFECTS[schema.node_id][0] == module:
+            if schema.node_id in table and table[schema.node_id][0] == module:
                 assert schema.node_id not in found, schema.node_id
                 found[schema.node_id] = obj
-    missing = sorted(set(EFFECTS) - set(found))
+    missing = sorted(set(table) - set(found))
     assert not missing, missing
     return found
 
@@ -180,7 +229,112 @@ def ts_value(v, indent: int = 0) -> str:
     return json.dumps(v, ensure_ascii=False, separators=(", ", ": "))
 
 
+def media_schema_row(cls: type, family: str) -> dict:
+    """A media effect's row: its frame-batch (IMAGE) and sound (AUDIO) inputs, widgets, outputs, output node."""
+    schema = cls.define_schema()
+    types = cls.INPUT_TYPES()
+    frames: list[dict] = []
+    sounds: list[dict] = []
+    widgets: dict[str, dict] = {}
+    for section in ("required", "optional"):
+        for name, spec in (types.get(section) or {}).items():
+            kind = spec[0]
+            info = spec[1] if len(spec) > 1 else {}
+            required = section == "required"
+            if kind == "IMAGE":
+                frames.append({"name": name, "required": required})
+            elif kind == "AUDIO":
+                sounds.append({"name": name, "required": required})
+            elif (schema.node_id, name) in FILE_LIST_WIDGETS:
+                assert kind == "COMBO" or isinstance(kind, list), (schema.node_id, name, kind)
+                widgets[name] = {"type": "COMBO", "required": required, "fileList": True}
+            else:
+                assert kind != "MASK", (schema.node_id, name)
+                widgets[name] = widget_row(kind, info, required)
+    outputs = []
+    for o in schema.outputs:
+        io_type = o.io_type if hasattr(o, "io_type") else o.get_io_type()
+        assert io_type in ("IMAGE", "MASK", "AUDIO"), (schema.node_id, io_type)
+        outputs.append({"IMAGE": "image", "MASK": "mask", "AUDIO": "audio"}[io_type])
+    return {
+        "family": family,
+        "frames": frames,
+        "sounds": sounds,
+        "widgets": widgets,
+        "outputs": outputs,
+        "outputNode": bool(schema.is_output_node),
+    }
+
+
+MEDIA_OUT = os.path.join(ROOT, "frontend", "shared", "runner", "mediaEffectSchemas.generated.ts")
+
+
+def main_media() -> None:
+    classes = node_classes(MEDIA)
+    rows = {name: media_schema_row(classes[name], MEDIA[name][1]) for name in sorted(MEDIA)}
+    fams = " | ".join(f"'{f}'" for f in MEDIA_FAMILIES)
+    lines = [
+        "/**",
+        " * GENERATED by scripts/runner_effect_rows.py --media from the real node",
+        " * classes (define_schema / INPUT_TYPES). Do not edit: run the script again.",
+        " *",
+        " * The video and sound effects the runner ports (step 3, R6): 21 video and",
+        " * 12 sound effects, and Save audio (Opus) (R5's `media-sound`), each with its",
+        " * family, frame-batch (IMAGE) and sound (AUDIO) inputs, widgets as ComfyUI's",
+        " * validate_inputs reads them, outputs, and whether it is an output node. A",
+        " * `fileList` widget is a COMBO of a folder's files (written with no options).",
+        " */",
+        "",
+        f"export type MediaEffectSchemaFamily = {fams}",
+        "",
+        "export interface MediaEffectSchemaInput { name: string; required: boolean }",
+        "",
+        "export interface MediaEffectSchemaWidget {",
+        "  type: 'FLOAT' | 'INT' | 'BOOLEAN' | 'STRING' | 'COMBO'",
+        "  required: boolean",
+        "  min?: number",
+        "  max?: number",
+        "  options?: readonly string[]",
+        "  fileList?: true",
+        "}",
+        "",
+        "export interface MediaEffectSchema {",
+        "  family: MediaEffectSchemaFamily",
+        "  frames: readonly MediaEffectSchemaInput[]",
+        "  sounds: readonly MediaEffectSchemaInput[]",
+        "  widgets: Readonly<Record<string, MediaEffectSchemaWidget>>",
+        "  outputs: readonly ('image' | 'mask' | 'audio')[]",
+        "  outputNode: boolean",
+        "}",
+        "",
+        "export const MEDIA_EFFECT_SCHEMAS: Readonly<Record<string, MediaEffectSchema>> = {",
+    ]
+    for name, row in rows.items():
+        lines.append(f"  {name}: {{")
+        lines.append(f"    family: {json.dumps(row['family'])},")
+        lines.append(f"    frames: {ts_value(row['frames'])},")
+        lines.append(f"    sounds: {ts_value(row['sounds'])},")
+        if row["widgets"]:
+            lines.append("    widgets: {")
+            for w, spec in row["widgets"].items():
+                lines.append(f"      {json.dumps(w)}: {ts_value(spec)},")
+            lines.append("    },")
+        else:
+            lines.append("    widgets: {},")
+        lines.append(f"    outputs: {ts_value(row['outputs'])},")
+        lines.append(f"    outputNode: {'true' if row['outputNode'] else 'false'},")
+        lines.append("  },")
+    lines.append("}")
+    text = "\n".join(lines) + "\n"
+    with open(MEDIA_OUT, "w", encoding="utf-8") as f:
+        f.write(text)
+    print(f"wrote {len(rows)} media effect schemas → {os.path.relpath(MEDIA_OUT, ROOT)}")
+
+
 def main() -> None:
+    if "--media" in sys.argv[1:]:
+        main_media()
+        return
     classes = node_classes()
     rows = {name: schema_row(classes[name], EFFECTS[name][1]) for name in sorted(EFFECTS)}
     lines = [

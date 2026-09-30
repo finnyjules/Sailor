@@ -223,6 +223,13 @@ export interface NodeRecord {
   servedBy?: RunnerProvider
   /** A `pipeline` node's calls, in the order they were first sent (R3.1). Absent on every other node. */
   calls?: CallRecord[]
+  /**
+   * R6 ruling (j): the kept frame batches and sounds its values name that were
+   * let go once every node reading them had finished (their file names). A
+   * node still to run that reads one has this node run again first
+   * (keptRelease.ts reviveReleased). Absent: nothing let go.
+   */
+  released?: string[]
 }
 
 export interface TakeRecord {
