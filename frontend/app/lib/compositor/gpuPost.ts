@@ -26,6 +26,12 @@ export function isFloatDepth(d: unknown): d is FloatDepth {
     && (d as { data?: unknown }).data instanceof Float32Array
 }
 
+/** Whether `next` needs uploading given what was last uploaded: the same object means the
+ *  same pixels (a source is immutable once built), so re-upload only on a genuine change. */
+export function needsUpload(last: CanvasImageSource | null, next: CanvasImageSource | null): boolean {
+  return last !== next
+}
+
 /** A uniform value. Plain numbers are floats (ints only for `uTapCount`, DOF's loop bound),
  *  a Float32Array is an array of vec2s (DOF's tap offsets), and `{ vec3 }` / `{ vec4 }` is one
  *  vec3 / vec4 — a wrapper rather than "guess by length", so a vec2 array is never misread. */
@@ -46,11 +52,14 @@ export class GpuPost {
   private program: WebGLProgram | null = null
   private texColor: WebGLTexture | null = null
   private texDepth: WebGLTexture | null = null
+  private texNormals: WebGLTexture | null = null
   /** The float field currently in texDepth. A field is immutable once built, so the same object
    *  means the same pixels: skip the (several-MB) re-upload. Forgotten whenever texDepth is. */
   private depthUploaded: FloatDepth | null = null
   /** Float-field uploads actually made (test marker for the reuse above). */
   depthUploads = 0
+  /** The image currently uploaded to texNormals, or null when it still holds the 1×1 dummy. */
+  private lastNormals: CanvasImageSource | null = null
   private failed = false
   private reason = ''
   /** Assertion marker: how many real GL draws have happened. Lets a test tell
@@ -79,7 +88,9 @@ export class GpuPost {
     this.program = null
     this.texColor = null
     this.texDepth = null
+    this.texNormals = null
     this.depthUploaded = null
+    this.lastNormals = null
   }
 
   private die(reason: string) {
@@ -149,7 +160,13 @@ export class GpuPost {
     this.program = program
     this.texColor = mkTex()
     this.texDepth = mkTex()
+    // Third texture, for MoGe-2 normals when a caller has them. Left storage-less (a 1×1
+    // dummy bind, no upload) until a real image arrives: a texture bound but never
+    // texImage2D'd samples as (0,0,0,1) in WebGL2, never an error, and uHasNormals gates its
+    // use — so unit 2 is always bound to *something*, for DOF and finish passes too.
+    this.texNormals = mkTex()
     this.depthUploaded = null
+    this.lastNormals = null
   }
 
   render(
@@ -158,6 +175,7 @@ export class GpuPost {
     w: number,
     h: number,
     uniforms: Record<string, GpuUniform>,
+    extra?: { normals?: CanvasImageSource },
   ): HTMLCanvasElement | null {
     if (this.gl?.isContextLost()) this.drop()
     this.init()
@@ -203,6 +221,18 @@ export class GpuPost {
       this.depthUploaded = null
     }
     gl.uniform1i(gl.getUniformLocation(program, 'uDepth'), 1)
+
+    // Normals (MoGe-2 surfaces), when given: same upload-reuse trick as the float depth field,
+    // uploaded with FLIP_Y on like the colour image. Unit 2 is always bound — to the real
+    // normals, or to the 1×1 dummy from init() — so the sampler is never left unbound.
+    gl.activeTexture(gl.TEXTURE2)
+    gl.bindTexture(gl.TEXTURE_2D, this.texNormals)
+    const normals = extra?.normals
+    if (normals && needsUpload(this.lastNormals, normals)) {
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, normals as TexImageSource)
+      this.lastNormals = normals
+    }
+    gl.uniform1i(gl.getUniformLocation(program, 'uNormals'), 2)
 
     for (const [name, value] of Object.entries(uniforms)) {
       const loc = gl.getUniformLocation(program, name)

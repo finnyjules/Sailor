@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { uniformSetter, isFloatDepth } from '~/lib/compositor/gpuPost'
+import { uniformSetter, isFloatDepth, needsUpload } from '~/lib/compositor/gpuPost'
 
 describe('uniformSetter', () => {
   it('keeps every existing DOF convention', () => {
@@ -18,5 +18,15 @@ describe('isFloatDepth', () => {
     expect(isFloatDepth({ kind: 'float', width: 1, height: 1, data: new Float32Array(1) })).toBe(true)
     expect(isFloatDepth({ width: 1, height: 1 })).toBe(false)
     expect(isFloatDepth(null)).toBe(false)
+  })
+})
+
+describe('needsUpload', () => {
+  it('same object → false, different → true, null last → true', () => {
+    const a = {} as CanvasImageSource
+    const b = {} as CanvasImageSource
+    expect(needsUpload(a, a)).toBe(false)
+    expect(needsUpload(a, b)).toBe(true)
+    expect(needsUpload(null, a)).toBe(true)
   })
 })

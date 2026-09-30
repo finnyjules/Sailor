@@ -30,4 +30,17 @@ describe('relight pass', () => {
   it('keeps the source alpha (straight alpha, like DOF)', () => {
     expect(RELIGHT_FRAG).toMatch(/fragColor = vec4\(toSrgb\(col\), src\.a\)/)
   })
+  it('declares uNormals and uHasNormals', () => {
+    expect(RELIGHT_FRAG).toContain('uNormals')
+    expect(RELIGHT_FRAG).toContain('uHasNormals')
+  })
+  it('flips the model normal map\'s green channel (green = up; lighting space is y-down)', () => {
+    expect(RELIGHT_FRAG).toMatch(/m\.y = -m\.y/)
+  })
+  it('samples normals through the same depth-rect mapping the depth lookup uses', () => {
+    const hDef = RELIGHT_FRAG.match(/float H\(vec2 p\) \{ return texture\(uDepth, (\w+)\(p\)\)\.r; \}/)
+    expect(hDef).toBeTruthy()
+    const helper = hDef![1]!
+    expect(RELIGHT_FRAG).toContain(`texture(uNormals, ${helper}(p))`)
+  })
 })

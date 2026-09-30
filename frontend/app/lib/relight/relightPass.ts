@@ -11,10 +11,10 @@ export const RELIGHT_FRAG = `#version 300 es
 precision highp float;
 in vec2 vUv;
 out vec4 fragColor;
-uniform sampler2D uColor, uDepth;
+uniform sampler2D uColor, uDepth, uNormals;
 uniform vec2 uDepthTexel, uImgTexel;
 uniform vec4 uDepthRect;     // the part of the source the layer box shows: u0, v0, du, dv (top-down)
-uniform float uAspect, uRelief, uKeep, uGloss, uDetail, uShadows, uLightCount;
+uniform float uAspect, uRelief, uKeep, uGloss, uDetail, uShadows, uLightCount, uHasNormals;
 uniform vec2 uLightPos[3];   // x, y (layer fractions, top-down)
 uniform vec2 uLightHR[3];    // height, reach
 uniform vec2 uLightRG[3];    // colour r, g (sRGB 0..1)
@@ -22,9 +22,11 @@ uniform vec2 uLightBP[3];    // colour b, brightness
 
 // Lighting runs in top-down layer fractions p; textures are FLIP_Y-uploaded, so vUv.y = 1 is the top.
 vec2 G(vec2 p) { return vec2(p.x, 1.0 - p.y); }
-// The depth field covers the whole source image; only its lookup is remapped through the crop.
-// uDepthTexel is one field texel expressed in p (box) units, so slopes still step one texel.
-float H(vec2 p) { return texture(uDepth, G(uDepthRect.xy + p * uDepthRect.zw)).r; }
+// The depth field (and the normals field, same coverage) cover the whole source image; only
+// the lookup is remapped through the crop. uDepthTexel is one field texel expressed in p (box)
+// units, so slopes still step one texel.
+vec2 fieldUv(vec2 p) { return G(uDepthRect.xy + p * uDepthRect.zw); }
+float H(vec2 p) { return texture(uDepth, fieldUv(p)).r; }
 
 vec2 slopeAt(vec2 p) {
   vec2 e = uDepthTexel * 2.0;
@@ -52,7 +54,15 @@ vec3 normalAt(vec2 p) {
   vec3 W = vec3(0.299, 0.587, 0.114);
   float lx = dot(texture(uColor, G(p + vec2(t.x, 0.))).rgb - texture(uColor, G(p - vec2(t.x, 0.))).rgb, W);
   float ly = dot(texture(uColor, G(p + vec2(0., t.y))).rgb - texture(uColor, G(p - vec2(0., t.y))).rgb, W);
-  g += vec2(lx, ly) * uDetail;
+  vec2 detailSlope = vec2(lx, ly) * uDetail;
+  if (uHasNormals > 0.5) {
+    // A normals model's map (MoGe-2): red = right, green = UP, blue = toward the camera.
+    vec3 m = texture(uNormals, fieldUv(p)).rgb * 2.0 - 1.0;
+    m.y = -m.y;                                   // model map: green = up; lighting space: y down
+    vec3 N = normalize(vec3(m.xy * (uRelief / 4.0), m.z) + vec3(-detailSlope * 0.5, 0.0));
+    return N;
+  }
+  g += detailSlope;
   return normalize(vec3(-g, 1.0));
 }
 
@@ -159,6 +169,7 @@ export function applyRelight(
   w: number,
   h: number,
   rect: DepthRect = FULL_DEPTH_RECT,
+  normals?: CanvasImageSource | null,
 ): HTMLCanvasElement | null {
   if (!relightShouldRun(fx)) return null
   const dw = 'kind' in (depth as object) ? (depth as FloatDepth).width : ((depth as HTMLImageElement).naturalWidth || (depth as HTMLCanvasElement).width)
@@ -173,5 +184,6 @@ export function applyRelight(
     uGloss: fx.shine,
     uDetail: fx.texture,
     uShadows: fx.shadows ? 1 : 0,
-  })
+    uHasNormals: normals ? 1 : 0,
+  }, normals ? { normals } : undefined)
 }
