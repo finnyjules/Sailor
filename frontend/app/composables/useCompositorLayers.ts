@@ -104,7 +104,10 @@ import {
   type GradientMapEffect, type GrainEffect, type PostEffect, type VignetteEffect,
 } from '~/lib/compositor/postEffects'
 import { applyDof, dofAvailable, dofShouldRun } from '~/lib/compositor/dofPass'
-import { depthImageFor, requestDepth, depthSourceFromViewUrl, type DepthRef } from '~/lib/compositor/depthRegistry'
+import { depthImageFor, requestDepth, depthSourceFromViewUrl, depthKey, type DepthRef } from '~/lib/compositor/depthRegistry'
+import { sanitizeRelight } from '~/lib/relight/settings'
+import { applyRelight, relightAvailable } from '~/lib/relight/relightPass'
+import { relightDepthFieldFor } from '~/lib/relight/depthField'
 import { ensureFillBitmaps, getFillBitmap } from '~/lib/paint/imageFillCache'
 import { applyTornEdge, type TornEdgeSpec } from '~/lib/compositor/tornEdge'
 import { applyFeather, type FeatherSpec } from '~/lib/compositor/feather'
@@ -1576,6 +1579,11 @@ export function setLiveEffectClock(seconds: number | null): number | null {
 let _frameLight: FrameLight = DEFAULT_FRAME_LIGHT
 export function currentFrameLight(): FrameLight { return _frameLight }
 
+// Compare: while the Relight panel's Compare is held, that one layer paints without Relight.
+let _relightBypass: string | null = null
+export function setRelightBypass(layerId: string | null): void { _relightBypass = layerId }
+export function relightBypassed(layerId: string): boolean { return _relightBypass === layerId }
+
 /** The clone being painted right now (set by paintLayer's cloner loop, read by the
  *  image branch of drawLayerContent). Outside a cloner loop it is the original alone. */
 const _cloneSlot = { k: 0, n: 1 }
@@ -2943,6 +2951,8 @@ function paintLayer(
     ? (layer as ImageLayer).filename
     : layer.kind === 'wired' ? depthSourceFromViewUrl((layer as WiredLayer).depthKey) : undefined
   const dof = dofRef ? (pinnedEffect(stack, 'dof') as DofEffect | undefined) : undefined
+  const relightRaw = dofRef ? pinnedEffect(stack, 'relight') : undefined
+  const relight = relightRaw && !relightBypassed(layer.id) ? sanitizeRelight(relightRaw) : undefined
   // (background_blur is a stack-level effect — paintLayerStack applies it
   // against the backdrop before this layer paints.)
 
@@ -2965,7 +2975,7 @@ function paintLayer(
     : undefined
   // A living image (Task 3): each clone shows a different frame of the same clip (see
   // `_cloneSlot` / `clipFrameFor`), so anything below that would otherwise memoise "the"
-  // content across clones — the silhouette bake and `dofMemo` — must not, for this layer.
+  // content across clones — the silhouette bake and `gpuMemo` — must not, for this layer.
   const isClipLayer = layer.kind === 'image' && !!layer.clip
 
   // Silhouette raster cache (see `_silhouetteCache`): only cases whose LOCAL BOX is a
@@ -2973,7 +2983,7 @@ function paintLayer(
   // old full-canvas path, byte-identical.
   const silhouetteCacheable = rasterable
     && layer.kind !== 'wired'                                       // graph pixels change under us — no content signature
-    && !cp && !dof                                                  // corner-pin / DOF have their own offscreen flows
+    && !cp && !dof && !relight                                      // corner-pin / DOF / Relight have their own offscreen flows
     && !(layer.kind === 'text' && layer.expressive)                 // expressive layout places words outside localLayerBox
     && !(layer as unknown as { textMotion?: unknown }).textMotion   // letters move every frame — the raster is never twice the same
     && !layerPaints(layer).some(p => isFill(p) && fillIsShader(p))  // shader fills are live / frame-anchored
@@ -2982,7 +2992,7 @@ function paintLayer(
     && !(layer.kind === 'brush' && _liveTip.has(layer.id))          // a live tip stroke isn't in the key: never bake a half-painted raster
     && !(layer.kind === 'brush' && brushMaterialOf(layer as BrushLayer)?.moving) // a moving material animates every frame — the cache key has no clock
     && silhouetteContentReady(layer, W)
-  // Memoized like `dofContent` below: identical for every clone of the SAME tint.
+  // Memoized like `gpuContent` below: identical for every clone of the SAME tint.
   //
   // COST NOTE, read before raising the swatch ceiling: `silhouetteCacheKey` deep-canonicalizes
   // and stringifies the layer, and `strokes` is NOT stripped from it. Before Vary this ran
@@ -3105,18 +3115,19 @@ function paintLayer(
   // Memoized because expandClones calls drawContent once per clone and the DOF result
   // is identical for all of them. The result is copied out of the pass's canvas, which
   // is reused between calls — holding a reference to it would alias.
-  let dofMemo: HTMLCanvasElement | null | undefined
-  const dofContent = (): HTMLCanvasElement | null => {
-    // A clip layer never reuses this across clones: each clone's DOF-blurred content
+  let gpuMemo: HTMLCanvasElement | null | undefined
+  const gpuContent = (): HTMLCanvasElement | null => {
+    // A clip layer never reuses this across clones: each clone's Relight/DOF content
     // is built from a different frame (`drawLayerContent` below reads `_cloneSlot`), so
     // returning the first clone's bake for every later clone would freeze the loop.
-    if (dofMemo !== undefined && !isClipLayer) return dofMemo
-    dofMemo = null
-    if (!dof || !dofAvailable()) return dofMemo
+    if (gpuMemo !== undefined && !isClipLayer) return gpuMemo
+    gpuMemo = null
+    const wantRelight = !!relight && relightAvailable()
+    const wantDof = !!dof && dofAvailable() && dofShouldRun(dof, true)
+    if (!wantRelight && !wantDof) return gpuMemo
 
     const depth = depthImageFor(dofRef!)
-    if (!depth) { requestDepth(dofRef!); return dofMemo }
-    if (!dofShouldRun(dof, true)) return dofMemo
+    if (!depth) { requestDepth(dofRef!); return gpuMemo }
 
     const box = localLayerBox(measureCtx(), layer, W, H, wiredLive)
     // A neon brush material's halo reaches past the box on every side (0 for everything else,
@@ -3125,25 +3136,35 @@ function paintLayer(
     const bw = Math.max(1, Math.round(box.w + matPad * 2)), bh = Math.max(1, Math.round(box.h + matPad * 2))
     const src = document.createElement('canvas'); src.width = bw; src.height = bh
     const sctx = src.getContext('2d')
-    if (!sctx) return dofMemo
+    if (!sctx) return gpuMemo
     sctx.translate(bw / 2, bh / 2)
     drawLayerContent(sctx, layer, W, wiredLive)
 
-    const out = applyDof(src, depth, dof, W, bw, bh)
-    if (!out) return dofMemo
-
-    const owned = document.createElement('canvas'); owned.width = bw; owned.height = bh
-    owned.getContext('2d')?.drawImage(out, 0, 0)
-    dofMemo = owned
-    return dofMemo
+    const own = (c: HTMLCanvasElement) => {   // the passes reuse their canvas: always copy out
+      const o = document.createElement('canvas'); o.width = bw; o.height = bh
+      o.getContext('2d')?.drawImage(c, 0, 0); return o
+    }
+    let cur: HTMLCanvasElement | null = null
+    // Relight first, so a depth-of-field blur on the same layer blurs the relit picture.
+    if (wantRelight) {
+      const field = relightDepthFieldFor(depthKey(dofRef!), depth, src)
+      const lit = field ? applyRelight(src, field, relight!, bw, bh) : null
+      if (lit) cur = own(lit)
+    }
+    if (wantDof) {
+      const out = applyDof(cur ?? src, depth, dof!, W, bw, bh)
+      if (out) cur = own(out)
+    }
+    gpuMemo = cur
+    return gpuMemo
   }
 
   const drawContent = (c: CanvasRenderingContext2D) => {
-    const dofCanvas = dofContent()
+    const gpuCanvas = gpuContent()
     // No corner-pin AND no raster warp ⇒ the original inline draw, byte-identical.
     if (!cp && !rasterWarp) {
-      if (dofCanvas) {
-        c.drawImage(dofCanvas, -dofCanvas.width / 2, -dofCanvas.height / 2)
+      if (gpuCanvas) {
+        c.drawImage(gpuCanvas, -gpuCanvas.width / 2, -gpuCanvas.height / 2)
         return
       }
       drawLayerContent(c, layer, W, wiredLive); return
@@ -3156,16 +3177,16 @@ function paintLayer(
     // centered — so the stroke survives the pin. NOTE that `pad` therefore also
     // SCALES the quad's corner pull below, which is why cornerPinPadPx
     // returns 0 for the plain centred stroke every saved frame has: same bw/bh,
-    // same quad, same warp as before the stack existed. Skipped when DOF already produced the
-    // source canvas (dofCanvas is used as-is, unpadded — a rarer combination
+    // same quad, same warp as before the stack existed. Skipped when DOF/Relight already
+    // produced the source canvas (gpuCanvas is used as-is, unpadded — a rarer combination
     // left as a pre-existing gap, not what this fix targets).
-    const pad = dofCanvas ? 0 : cornerPinPadPx(layer, W)
+    const pad = gpuCanvas ? 0 : cornerPinPadPx(layer, W)
     const bw = Math.max(1, Math.round(box.w + pad * 2)), bh = Math.max(1, Math.round(box.h + pad * 2))
     // Corner-pin warps whatever the content is — including the defocused version, so
     // the two effects compose instead of one silently winning.
     let cc: HTMLCanvasElement
-    if (dofCanvas) {
-      cc = dofCanvas
+    if (gpuCanvas) {
+      cc = gpuCanvas
     } else {
       cc = document.createElement('canvas'); cc.width = bw; cc.height = bh
       const cctx = cc.getContext('2d')
@@ -7181,6 +7202,8 @@ export function drawWiredImageLayer(
   // uploaded one must expose the same features — a gap between them reads as a bug.
   dof?: DofEffect | null,
   depthImg?: CanvasImageSource | null,
+  relight?: RelightEffect | null,
+  relightKey?: string,
 ) {
   if (!img) return
   const iw = 'naturalWidth' in img ? img.naturalWidth : img.width
@@ -7205,6 +7228,23 @@ export function drawWiredImageLayer(
   const cAspect = W / H, iAspect = iw / ih
   let fitW: number, fitH: number
   if (iAspect > cAspect) { fitW = W; fitH = W / iAspect } else { fitH = H; fitW = H * iAspect }
+
+  // Relight runs before DOF, so a depth-of-field blur on the same layer blurs the relit
+  // picture. Relight works in the image's own fractions, so native size needs no
+  // on-canvas normalisation, unlike DOF's `fitW * layer.scale`.
+  if (relight && depthImg && relightKey && relightAvailable() && relight.visible !== false) {
+    const guide = src instanceof HTMLCanvasElement ? src : (() => {
+      const c = document.createElement('canvas'); c.width = iw; c.height = ih
+      c.getContext('2d')?.drawImage(src, 0, 0); return c
+    })()
+    const field = relightDepthFieldFor(relightKey, depthImg as CanvasImageSource & { width?: number; height?: number }, guide)
+    const lit = field ? applyRelight(src, field, sanitizeRelight(relight), iw, ih) : null
+    if (lit) {
+      const owned = document.createElement('canvas'); owned.width = iw; owned.height = ih
+      owned.getContext('2d')?.drawImage(lit, 0, 0)
+      src = owned
+    }
+  }
 
   // Defocus runs on the masked source, before the cloner stamps it — so every clone
   // shows the same blur and the GPU pass runs once. Needs fitW, hence its position

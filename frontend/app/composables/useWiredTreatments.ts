@@ -13,6 +13,8 @@ export interface WiredTreatment {
    *  and this is the per-slot store that already exists for exactly that reason
    *  (`maskUrl` was added here to give Smart Select and brush Mask wired parity). */
   dof?: import('~/lib/compositor/postEffects').DofEffect
+  /** Relight, the same shape a local layer carries — wired parity, same as `dof` above. */
+  relight?: import('~/lib/relight/settings').RelightEffect
 }
 export type WiredTreatments = Record<string, WiredTreatment>
 
@@ -93,6 +95,24 @@ export function setWiredDof(node: any, slot: number, dof: WiredTreatment['dof'] 
   } else {
     const t = { ...cur[key] }
     delete t.dof
+    if (Object.keys(t).length) cur[key] = t
+    else delete cur[key]   // no stale w:<slot> entries
+  }
+  writeWiredTreatments(node, cur)
+}
+
+/**
+ * Set/clear Relight for a wired slot (1-based). Preserves other fields. Mirrors
+ * `setWiredDof` exactly (same key, same delete-when-null rule).
+ */
+export function setWiredRelight(node: any, slot: number, relight: WiredTreatment['relight'] | null) {
+  const key = `w:${slot}`
+  const cur = { ...readWiredTreatments(node) }
+  if (relight) {
+    cur[key] = { ...cur[key], relight }
+  } else {
+    const t = { ...cur[key] }
+    delete t.relight
     if (Object.keys(t).length) cur[key] = t
     else delete cur[key]   // no stale w:<slot> entries
   }

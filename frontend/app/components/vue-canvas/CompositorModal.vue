@@ -133,7 +133,7 @@ import { resolveWiredSourceKind } from '~/lib/studio/frameResolve'
 import { frameSourceEpoch, type StudioFrameSource } from '~/lib/studio/frameSource'
 import { deriveMasterClock, slotPhase01, masterFrameIndex } from '~/lib/compositor/masterClock'
 import {
-  onDepthChange, depthImageFor, requestDepth, depthSourceFromViewUrl,
+  onDepthChange, depthImageFor, requestDepth, depthSourceFromViewUrl, depthKey,
 } from '~/lib/compositor/depthRegistry'
 import { DEFAULT_DISPLACE_MAP } from '~/lib/compositor/displace'
 import { imageUrlForNode } from '~/lib/canvas/nodeImage'
@@ -4585,17 +4585,20 @@ function drawWiredLayer(ctx: CanvasRenderingContext2D, layer: Layer, W: number, 
   // Depth of field, matching a local image layer. Depth is read SYNCHRONOUSLY and the
   // layer renders through unblurred until it arrives, exactly as on the local path.
   const dof = wiredTreatments.value[wiredKey(layer.slot)]?.dof ?? null
+  const relight = wiredTreatments.value[wiredKey(layer.slot)]?.relight ?? null
   let depth: HTMLImageElement | null = null
-  if (dof?.visible !== false && dof) {
-    const src = wiredDepthSource(layer)
-    if (src) {
-      depth = depthImageFor(src)
-      if (!depth) requestDepth(src)
+  let depthSrc: ReturnType<typeof wiredDepthSource> = null
+  if ((dof?.visible !== false && dof) || (relight?.visible !== false && relight)) {
+    depthSrc = wiredDepthSource(layer)
+    if (depthSrc) {
+      depth = depthImageFor(depthSrc)
+      if (!depth) requestDepth(depthSrc)
     }
   }
   drawWiredImageLayer(
     ctx, wiredImageEls.value[layer.slot], layer, W, H,
     wiredMaskEls.value[layer.slot] ?? null, dof, depth,
+    relight, depthSrc ? depthKey(depthSrc) : undefined,
   )
 }
 
