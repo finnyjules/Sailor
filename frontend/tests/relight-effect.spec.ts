@@ -1,5 +1,19 @@
+import { existsSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
 import { test, expect, type Page } from '@playwright/test'
 import { openCompositor, stackPixels } from './_helpers'
+
+/** The puppy's MoGe-2 normal map, already in the engine's input cache. */
+const PUPPY_NORMALS = 'moge_a579ac8e5ca4ba75.png'
+const PUPPY_NORMALS_FILE = fileURLToPath(new URL(`../../input/sailor_depth/${PUPPY_NORMALS}`, import.meta.url))
+
+/** /api/depth/surfaces is a PAID route: every test answers it with the puppy's cached file
+ *  (free, and no fal call even if the cache were gone). A test needing another answer routes
+ *  it again — Playwright tries the most recently added route first. */
+async function mockSurfacesCached(page: Page) {
+  await page.route('**/api/depth/surfaces', (route) =>
+    route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ normalsFilename: PUPPY_NORMALS, subfolder: 'sailor_depth', cached: true }) }))
+}
 
 /**
  * Relight (stage 1) — browser verification. Proves what a screenshot can't: the effect really
@@ -28,6 +42,7 @@ async function addRelight(page: Page) {
 }
 
 test.describe('Relight effect', () => {
+  test.beforeEach(async ({ page }) => { await mockSurfacesCached(page) })
   test('right-click Relight… adds the effect, selects it and relights the photo', async ({ page }) => {
     await openCompositor(page)
     await seedPhoto(page)
@@ -91,7 +106,7 @@ test.describe('Relight effect', () => {
   // the bottom half) correctly faces UP, so a light near the top lights the floor as well. Raw
   // top > bottom then fails although the lighting is right (debug report 2026-09-30).
   test('a light near the top lights the top half; moved near the bottom, the bottom half', async ({ page }) => {
-    const { plain, high, low } = await measureOrientation(page)   // real route: the puppy's surfaces are cached (free)
+    const { plain, high, low } = await measureOrientation(page)   // surfaces: the mocked cached answer (beforeEach)
     console.log('[relight orientation] plain:', plain, 'light near top:', high, 'light near bottom:', low)
     expectLitTowardTheLight(plain, high, low)
   })
@@ -124,6 +139,7 @@ test.describe('Relight effect', () => {
   })
 
   test('the shader reads the MoGe-2 normal map the right way up', async ({ page }) => {
+    test.skip(!existsSync(PUPPY_NORMALS_FILE), `needs the cached normal map ${PUPPY_NORMALS} in input/sailor_depth`)
     await page.goto('/')
     // Relight's own fragment shader, with main() swapped to output the normal it lit with.
     const r = await page.evaluate(async () => {
@@ -211,6 +227,7 @@ test.describe('Relight effect', () => {
 })
 
 test.describe('Relight surfaces (stage 2)', () => {
+  test.beforeEach(async ({ page }) => { await mockSurfacesCached(page) })
   test('surfaces land: the price shows while reading, then the picture changes and the status clears', async ({ page }) => {
     // addRelight alone (right-click, menu click, wait for the depth-only GPU pass) runs a few
     // seconds in this harness, so the mock's delay has to clear that plus the assertion below
@@ -224,7 +241,7 @@ test.describe('Relight surfaces (stage 2)', () => {
     await openCompositor(page)
     await seedPhoto(page)
     await addRelight(page)                                    // depth-only pass has already run
-    await expect(page.getByTestId('relight-status-loading')).toHaveText(/Reading shape · \$/)
+    await expect(page.getByTestId('relight-status-loading')).toHaveText(/Reading shape · ~\$0\.01/)
     const depthOnly = await stackPixels(page)
     const runsBeforeSurfaces = await runs(page)
     await expect(page.getByTestId('relight-status-loading')).toHaveCount(0, { timeout: 10_000 })

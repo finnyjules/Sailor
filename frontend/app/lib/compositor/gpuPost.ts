@@ -231,7 +231,15 @@ export class GpuPost {
     gl.bindTexture(gl.TEXTURE_2D, this.texNormals)
     const normals = extra?.normals
     if (normals && needsUpload(this.lastNormals, normals)) {
+      // A normal map is data, not a picture: no colour-space conversion (an embedded profile
+      // would bend the vectors) and no premultiply. Whatever was set comes back after.
+      const prevCs = gl.getParameter(gl.UNPACK_COLORSPACE_CONVERSION_WEBGL)
+      const prevPm = gl.getParameter(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL)
+      gl.pixelStorei(gl.UNPACK_COLORSPACE_CONVERSION_WEBGL, gl.NONE)
+      gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false)
       gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, normals as TexImageSource)
+      gl.pixelStorei(gl.UNPACK_COLORSPACE_CONVERSION_WEBGL, prevCs)
+      gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, prevPm)
       this.lastNormals = normals
     }
     gl.uniform1i(gl.getUniformLocation(program, 'uNormals'), 2)

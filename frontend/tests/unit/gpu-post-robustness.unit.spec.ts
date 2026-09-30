@@ -8,6 +8,10 @@ interface Stub {
   failFrag?: (src: string) => boolean
   uploads: unknown[]
   canvases: FakeCanvas[]
+  /** pixelStorei state, read back through getParameter. */
+  store?: Record<string, unknown>
+  /** Snapshot of `store` at each texImage2D, alongside the uploaded source. */
+  uploadStates?: { src: unknown; store: Record<string, unknown> }[]
 }
 interface FakeCanvas {
   width: number; height: number
@@ -21,7 +25,8 @@ function makeGl(stub: Stub) {
   const own: Record<string, unknown> = {
     MAX_TEXTURE_SIZE: 'MAX_TEXTURE_SIZE',
     isContextLost: () => stub.lost,
-    getParameter: (p: unknown) => (p === 'MAX_TEXTURE_SIZE' ? stub.maxTex : 0),
+    getParameter: (p: unknown) => (p === 'MAX_TEXTURE_SIZE' ? stub.maxTex : (stub.store && String(p) in stub.store ? stub.store[String(p)] : 0)),
+    pixelStorei: (k: unknown, v: unknown) => { if (stub.store) stub.store[String(k)] = v },
     createShader: () => ({}),
     shaderSource: (s: object, src: string) => { shaders.set(s, src) },
     getShaderParameter: (s: object) => !(stub.failFrag?.(shaders.get(s) ?? '')),
@@ -29,7 +34,10 @@ function makeGl(stub: Stub) {
     getProgramParameter: () => true,
     createProgram: () => ({}), createBuffer: () => ({}), createTexture: () => ({}),
     getUniformLocation: () => ({}), getAttribLocation: () => 0,
-    texImage2D: (...a: unknown[]) => { stub.uploads.push(a[5]) },
+    texImage2D: (...a: unknown[]) => {
+      stub.uploads.push(a[5])
+      stub.uploadStates?.push({ src: a[5], store: { ...(stub.store ?? {}) } })
+    },
   }
   return new Proxy(own, {
     get: (t, k: string) => (k in t ? t[k] : (/^[A-Z_0-9]+$/.test(k) ? k : () => {})),
@@ -169,5 +177,24 @@ describe('applyFinish', () => {
     expect(stub.uploads.length).toBe(3)   // normals placeholder (0), off, depth stand-in
     const depth = stub.uploads.find(u => u !== off && typeof u === 'object') as FakeCanvas
     expect([depth.width, depth.height]).toEqual([1, 1])
+  })
+})
+
+describe('GpuPost — normals upload', () => {
+  // Final-review fix 10: a normal map is DATA, not a picture — the browser must not convert its
+  // colour space or premultiply it on upload, and whatever was set before comes back after.
+  it('uploads normals with no colour-space conversion and no premultiply, then restores both', async () => {
+    stub.store = { UNPACK_COLORSPACE_CONVERSION_WEBGL: 'BROWSER_DEFAULT_WEBGL', UNPACK_PREMULTIPLY_ALPHA_WEBGL: true }
+    stub.uploadStates = []
+    const { GpuPost } = await import('~/lib/compositor/gpuPost')
+    const normals = { tag: 'normals' } as unknown as CanvasImageSource
+    const out = new GpuPost('frag').render(src, src, 8, 8, {}, { normals })
+    expect(out).not.toBeNull()
+    const at = stub.uploadStates.find(u => u.src === normals)
+    expect(at).toBeDefined()
+    expect(at!.store.UNPACK_COLORSPACE_CONVERSION_WEBGL).toBe('NONE')
+    expect(at!.store.UNPACK_PREMULTIPLY_ALPHA_WEBGL).toBe(false)
+    expect(stub.store.UNPACK_COLORSPACE_CONVERSION_WEBGL).toBe('BROWSER_DEFAULT_WEBGL')
+    expect(stub.store.UNPACK_PREMULTIPLY_ALPHA_WEBGL).toBe(true)
   })
 })

@@ -53,6 +53,7 @@ describe('depth rect uniforms', () => {
   })
   it('the shader reads depth through the rect', () => {
     expect(RELIGHT_FRAG).toMatch(/uniform vec4 uDepthRect/)
-    expect(RELIGHT_FRAG).toMatch(/texture\(uDepth, G\(uDepthRect\.xy \+ p \* uDepthRect\.zw\)\)/)
+    expect(RELIGHT_FRAG).toMatch(/vec2 fieldUv\(vec2 p\) \{ return G\(uDepthRect\.xy \+ p \* uDepthRect\.zw\); \}/)
+    expect(RELIGHT_FRAG).toMatch(/texture\(uDepth, fieldUv\(p\)\)/)
   })
 })
