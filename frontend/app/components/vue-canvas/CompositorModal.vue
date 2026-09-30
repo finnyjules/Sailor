@@ -136,8 +136,8 @@ import {
   onDepthChange, depthImageFor, requestDepth, depthSourceFromViewUrl, depthKey, depthStatusFor,
 } from '~/lib/compositor/depthRegistry'
 import {
-  onSurfacesChange, requestSurfaces, retrySurfaces, surfacesImageFor, surfacesStatusFor, surfacesWasPaidFor,
-  surfacesMessageFor, SURFACES_STILL_READING,
+  onSurfacesChange, peekSurfacesFor, requestSurfaces, retrySurfaces, surfacesImageFor, surfacesStatusFor,
+  surfacesWasPaidFor, surfacesMessageFor, SURFACES_STILL_READING,
 } from '~/lib/compositor/surfacesRegistry'
 import RelightControls from '~/components/vue-canvas/compositor/RelightControls.vue'
 import { sanitizeRelight, RELIGHT_MAX_LIGHTS, newLightId } from '~/lib/relight/settings'
@@ -2919,7 +2919,7 @@ const activeEffectDepthStatus = computed<'idle' | 'loading' | 'ready' | 'error'>
 })
 // Surfaces status/price for the selected Relight layer's photo. Price shows EVERY time a
 // photo is read (user decision 2026-09-30) — never on a cache hit, never asked for.
-const activeEffectSurfacesStatus = computed<'idle' | 'loading' | 'ready' | 'error' | 'off'>(() => {
+const activeEffectSurfacesStatus = computed<'idle' | 'loading' | 'ready' | 'error' | 'off' | 'absent'>(() => {
   void surfacesTick.value
   return activeEffectDepth.value ? surfacesStatusFor(activeEffectDepth.value) : 'off'
 })
@@ -2927,6 +2927,14 @@ const activeEffectSurfacesPrice = computed<string | null>(() => {
   void surfacesTick.value
   const ref = activeEffectDepth.value
   if (!ref || !surfacesWasPaidFor(ref)) return null
+  const hosted = hostedModeEnabled(useRuntimeConfig().public)
+  return hosted ? `${surfacesCredits()} credits` : formatCostBadge(SURFACES_USD, true, false)
+})
+// The "Read shape" button's own price — shown whenever the button itself shows (status
+// 'absent'), unlike activeEffectSurfacesPrice above which is gated to a read actually in
+// flight. Same numbers, just not gated on surfacesWasPaidFor.
+const activeEffectSurfacesReadPrice = computed<string | null>(() => {
+  if (!activeEffectDepth.value) return null
   const hosted = hostedModeEnabled(useRuntimeConfig().public)
   return hosted ? `${surfacesCredits()} credits` : formatCostBadge(SURFACES_USD, true, false)
 })
@@ -2940,6 +2948,11 @@ const activeEffectSurfacesNote = computed<string | null>(() => {
 })
 function retryActiveEffectSurfaces() {
   if (activeEffectDepth.value) retrySurfaces(activeEffectDepth.value)
+}
+// The Relight panel's "Read shape" button — the one place left that starts a PAID surfaces
+// read (2026-09-30: the Frame editor itself only ever peeks for free, see the watch below).
+function readActiveEffectSurfaces() {
+  if (activeEffectDepth.value) requestSurfaces(activeEffectDepth.value)
 }
 /** The kinds `PostEffectsControls` draws — read from that component's own section list,
  *  so adding a section there cannot leave an effect row selecting into an empty panel. */
@@ -6176,14 +6189,16 @@ let stopSurfacesWatch: (() => void) | null = null
 const surfacesTick = ref(0)
 onMounted(() => { stopSurfacesWatch = onSurfacesChange(() => { renderStack(); surfacesTick.value++ }) })
 onBeforeUnmount(() => { stopSurfacesWatch?.(); stopSurfacesWatch = null })
-// Kick off a read for every visible Relight layer's photo when the SET of those photos
+// PEEK (free) for every visible Relight layer's photo when the SET of those photos
 // changes — a new Relight, a newly visible one, a photo swap. Watched as a cheap string
-// signature, not a deep watch of the layer tree (which re-ran on every drag frame). The
-// registry never restarts an existing key (an 'error' waits for Retry), so this is also
-// never a paid-call loop.
+// signature, not a deep watch of the layer tree (which re-ran on every drag frame).
+// 2026-09-30: the Frame editor never starts a PAID read by itself any more — a peek only
+// ever lands 'ready' (already cached, used automatically) or 'absent' (the Relight panel's
+// "Read shape" button starts the real read). peekSurfacesFor no-ops once a key has any
+// entry, so this is never a re-fetch loop either.
 const relightSurfaceRefsNow = () => relightSurfaceRefs(localLayers.value as unknown as RelightLayerLike[])
 watch(() => relightSurfaceRefsNow().map(depthKey).join('|'), () => {
-  for (const ref of relightSurfaceRefsNow()) requestSurfaces(ref)
+  for (const ref of relightSurfaceRefsNow()) peekSurfacesFor(ref)
 }, { immediate: true })
 // Relight depth fields build in a worker; paint draws the layer plain until one lands.
 let stopRelightFieldWatch: (() => void) | null = null
@@ -11453,11 +11468,13 @@ defineExpose({ editor, layoutGridResolved, layoutGrid, overlayGrid, viewLayoutGr
               :depth-status="activeEffectDepthStatus"
               :surfaces-status="activeEffectSurfacesStatus"
               :surfaces-price="activeEffectSurfacesPrice"
+              :surfaces-read-price="activeEffectSurfacesReadPrice"
               :surfaces-note="activeEffectSurfacesNote"
               @update="(p) => updateActiveEffect(p)"
               @select-light="(id) => (relightLightId = id)"
               @compare="(on) => { setRelightBypass(on ? activeEffectLayer?.id ?? null : null); renderStack() }"
-              @retry-surfaces="retryActiveEffectSurfaces" />
+              @retry-surfaces="retryActiveEffectSurfaces"
+              @read-surfaces="readActiveEffectSurfaces" />
           </div>
 
           <!-- Outer glow / Inner glow: a tinted halo outside (behind) or inside (clipped to) the
