@@ -13,6 +13,18 @@ export interface AddMenuItem {
   title?: string
 }
 export interface AddMenuGroup { label: string; items: AddMenuItem[] }
+
+/** Where to open the menu beside the button that opened it: on whichever side has more room,
+ *  its height capped to that room (the list scrolls), kept off the right edge. */
+export function anchoredMenuPos(r: DOMRect, width: number): { top: number; left: number; maxHeight: number } {
+  const MARGIN = 8
+  const below = window.innerHeight - (r.bottom + 4) - MARGIN
+  const above = (r.top - 4) - MARGIN
+  const left = Math.max(MARGIN, Math.min(r.left, window.innerWidth - MARGIN - width))
+  return below >= above
+    ? { top: r.bottom + 4, left, maxHeight: Math.max(0, below) }
+    : { top: Math.max(MARGIN, r.top - 4 - Math.max(0, above)), left, maxHeight: Math.max(0, above) }
+}
 </script>
 
 <script setup lang="ts">

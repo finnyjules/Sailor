@@ -72,6 +72,8 @@ import { rebaseMany, groupObjects, ungroupMany, rootObjects, descendantIds, clon
 import { remesh, boundsOf } from '~/lib/scene3d/voxel'
 import { mergeMeshes, type MergeOp } from '~/lib/scene3d/voxel/merge'
 import Scene3DObjectRow from './studio/Scene3DObjectRow.vue'
+import GroupedAddMenu, { anchoredMenuPos } from './studio/GroupedAddMenu.vue'
+import { scene3dAddMenuGroups, parseScene3dAddPick } from './studio/scene3dAddMenu'
 import { totalClones, clampedClones } from '~/lib/scene3d/modifiers'
 import { MODIFIER_SPECS, PRIMITIVE_PARAMS, modifierValue, varySettingsFor } from '~/lib/scene3d/primParams'
 import {
@@ -490,6 +492,40 @@ function toggleSelected(id: string, additive: boolean): void {
   else if (selectedIds.value.length > 1) selectedIds.value = selectedIds.value.filter((x) => x !== id)
 }
 const selected = computed<SceneObject | null>(() => doc.objects.find((o) => o.id === selectedId.value) ?? null)
+
+// ── "Add an effect" at the top of the object inspector: the same menu as the tree row's plus,
+// for the one selected object that can take treatments. Hidden on a multi-selection, which it
+// could only add to one of.
+const inspectorAddOffered = computed(() => !!selected.value && selectedIds.value.length <= 1 && isTreatmentHost(selected.value))
+const inspectorAddBtn = ref<HTMLElement | null>(null)
+const inspectorAddPos = ref<{ top: number; left: number; maxHeight: number } | null>(null)
+const inspectorAddGroups = computed(() => (selected.value ? scene3dAddMenuGroups(selected.value) : []))
+function onInspectorAddOutside(e: PointerEvent): void {
+  const t = e.target as HTMLElement | null
+  if (t?.closest('[data-inspector-add-menu]') || inspectorAddBtn.value?.contains(t)) return
+  closeInspectorAdd()
+}
+function toggleInspectorAdd(): void {
+  if (inspectorAddPos.value) { closeInspectorAdd(); return }
+  const r = inspectorAddBtn.value?.getBoundingClientRect()
+  if (!r) return
+  inspectorAddPos.value = anchoredMenuPos(r, 208)
+  document.addEventListener('pointerdown', onInspectorAddOutside, true)
+}
+function closeInspectorAdd(): void {
+  inspectorAddPos.value = null
+  document.removeEventListener('pointerdown', onInspectorAddOutside, true)
+}
+function onInspectorAddPick(id: string): void {
+  const o = selected.value
+  closeInspectorAdd()
+  if (!o) return
+  const p = parseScene3dAddPick(id)
+  if (p.type === 'modifier') addModifier(o.id, p.kind)
+  else addTreatment(o.id, p.kind)
+}
+watch(selectedId, closeInspectorAdd)
+onBeforeUnmount(closeInspectorAdd)
 const selectedIsPrimitive = computed(() => selected.value?.kind === 'primitive')
 // GLBs render their imported materials until the override switch is on; the
 // material editor's controls only appear (and bind) when they'd have an effect.
@@ -5564,6 +5600,18 @@ async function onClose() {
         <span class="tabular-nums">{{ selectedIds.length }} objects selected</span>
         <span class="ml-auto shrink-0 text-[10px] text-[#4f8cff]/60">edits apply to all</span>
       </div>
+      <div v-if="inspectorAddOffered" ref="inspectorAddBtn" class="mb-2">
+        <StudioButton class="w-full" data-testid="inspector-add-effect" @click="toggleInspectorAdd">
+          <span class="flex items-center justify-center gap-1.5"><Plus class="h-3.5 w-3.5" />Add an effect</span>
+        </StudioButton>
+      </div>
+      <Teleport to="body">
+        <GroupedAddMenu v-if="inspectorAddPos && inspectorAddOffered" data-inspector-add-menu
+          class="fixed z-[200] w-52"
+          :style="{ top: `${inspectorAddPos.top}px`, left: `${inspectorAddPos.left}px`, maxHeight: `${inspectorAddPos.maxHeight}px` }"
+          :groups="inspectorAddGroups" placeholder="Search"
+          @pointerdown.stop @pick="onInspectorAddPick" @close="closeInspectorAdd" />
+      </Teleport>
       <!-- Transform, drawn from SCENE_CONTROLS' Transform group. Its own panel because the
            hand-written Geometry section (and the sculpt panel that replaces it) sits between
            it and the Material card below, and one panel cannot interleave a hand-written

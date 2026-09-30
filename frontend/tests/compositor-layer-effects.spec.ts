@@ -107,6 +107,25 @@ test.describe('Frame per-layer effect stack', () => {
     expect(await stackPixels(page)).not.toBe(one)
   })
 
+  test('inspector "Add an effect" opens the same menu and adds to the selected layer', async ({ page }) => {
+    await openCompositor(page)
+    await addRect(page)
+    const btn = page.getByTestId('inspector-add-effect')
+    await expect(btn).toBeVisible()
+    await btn.click()
+    await expect(page.locator('[data-fx-menu]')).toBeVisible()
+    await expect(page.getByTestId('add-stroke')).toBeVisible()
+    // A second click on the same button closes it rather than reopening.
+    await btn.click()
+    await expect(page.locator('[data-fx-menu]')).toHaveCount(0)
+    await btn.click()
+    await page.keyboard.type('grain')
+    await page.keyboard.press('Enter')
+    await expect(page.locator('[data-testid="effect-row"][data-effect-kind="grain"]')).toBeVisible()
+    await expect(page.getByTestId('effect-breadcrumb')).toBeVisible()
+    expect(await kindsOf(page)).toEqual(['grain'])
+  })
+
   test('tree flow: add from the plus menu, tune, reorder by drag, remove', async ({ page }) => {
     await openCompositor(page)
     await addRect(page)

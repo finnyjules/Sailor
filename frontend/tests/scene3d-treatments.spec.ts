@@ -576,6 +576,25 @@ test.describe('3D Studio treatments', () => {
     expect(a.bottom).toBeGreaterThan(0.8)
   })
 
+  test('inspector "Add an effect": search, Enter adds to the selected object', async ({ page }) => {
+    await openLab(page, twoSpheres())
+    await page.locator('[data-testid="object-row"][data-object-name="Left"]').click()
+    const btn = page.getByTestId('inspector-add-effect')
+    await expect(btn).toBeVisible()
+    await btn.click()
+    await page.keyboard.type('rim')
+    await page.keyboard.press('Enter')
+    await expect(page.getByTestId('treatment-breadcrumb')).toHaveText(/Left.*Rim light/)
+    expect(await page.evaluate(() => (window as any).__scene3dDoc().objects[0].treatments))
+      .toMatchObject([{ kind: 'rimLight' }])
+    // Back on the object it shows again; on a multi-selection it hides (it could add to only one).
+    await page.locator('[data-testid="object-row"][data-object-name="Left"]').click()
+    await expect(page.getByTestId('inspector-add-effect')).toBeVisible()
+    await page.locator('[data-testid="object-row"][data-object-name="Right"]').click({ modifiers: ['Shift'] })
+    await expect(page.getByTestId('multi-select-badge')).toBeVisible()
+    await expect(page.getByTestId('inspector-add-effect')).toHaveCount(0)
+  })
+
   test('tree flow: add a rim light from the row menu, see the breadcrumb, toggle, remove', async ({ page }) => {
     await openLab(page, twoSpheres())
     const row = page.locator('[data-testid="object-row"][data-object-name="Left"]')

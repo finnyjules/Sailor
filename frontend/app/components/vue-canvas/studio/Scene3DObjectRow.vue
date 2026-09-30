@@ -10,13 +10,12 @@ import { computed, ref, nextTick, onBeforeUnmount } from 'vue'
 import { Box, Lightbulb, Folder, Sticker, ChevronRight, ChevronDown, Eye, EyeOff, Copy, Trash2, RotateCcw, Plus, Pencil } from 'lucide-vue-next'
 import type { SceneObject } from '~/lib/scene3d/config'
 import { childrenOf } from '~/lib/scene3d/hierarchy'
-import { TREATMENT_MENU_GROUPS, TREATMENT_LABELS, treatmentsOf, isTreatmentHost, isFinishKind, canTakeFinish, type TreatmentKind } from '~/lib/scene3d/treatments'
-import {
-  MODIFIER_KINDS, MODIFIER_LABELS, modifierStackOf, isPinnedModifier, type ModifierKind,
-} from '~/lib/scene3d/modifierStack'
-import Scene3DTreatmentRow, { TREATMENT_ICONS } from './Scene3DTreatmentRow.vue'
-import Scene3DModifierRow, { MODIFIER_ICONS } from './Scene3DModifierRow.vue'
-import GroupedAddMenu, { type AddMenuGroup } from './GroupedAddMenu.vue'
+import { treatmentsOf, isTreatmentHost, isFinishKind, canTakeFinish, type TreatmentKind } from '~/lib/scene3d/treatments'
+import { modifierStackOf, isPinnedModifier, type ModifierKind } from '~/lib/scene3d/modifierStack'
+import Scene3DTreatmentRow from './Scene3DTreatmentRow.vue'
+import Scene3DModifierRow from './Scene3DModifierRow.vue'
+import GroupedAddMenu, { anchoredMenuPos } from './GroupedAddMenu.vue'
+import { scene3dAddMenuGroups, parseScene3dAddPick } from './scene3dAddMenu'
 
 const props = defineProps<{
   object: SceneObject
@@ -106,25 +105,9 @@ function onOutside(e: PointerEvent): void {
   closeMenu()
 }
 function openMenu(): void {
+  // The full list is taller than the viewport, so the menu scrolls and stays on screen.
   const r = addBtn.value?.getBoundingClientRect()
-  if (r) {
-    // The full treatments + modifiers list is taller than the viewport, so the menu must SCROLL
-    // and stay on screen: open on whichever side of the button has more room and cap the height
-    // to that room (`maxHeight` drives the container's overflow). Also keep it off the right edge.
-    const MARGIN = 8
-    const below = window.innerHeight - (r.bottom + 4) - MARGIN
-    const above = (r.top - 4) - MARGIN
-    let top: number, maxHeight: number
-    if (below >= above) {
-      top = r.bottom + 4
-      maxHeight = Math.max(0, below)
-    } else {
-      maxHeight = Math.max(0, above)
-      top = Math.max(MARGIN, r.top - 4 - maxHeight)
-    }
-    const left = Math.max(8, Math.min(r.left, window.innerWidth - 8 - MENU_W))
-    menuPos.value = { top, left, maxHeight }
-  }
+  if (r) menuPos.value = anchoredMenuPos(r, MENU_W)
   menuOpen.value = true
   document.addEventListener('pointerdown', onOutside, true)
 }
@@ -143,30 +126,11 @@ function pickModifier(kind: ModifierKind): void {
   closeMenu()
 }
 onBeforeUnmount(closeMenu)
-/** Treatment families under plain names, then Modifiers (primitives only). A finish can never
- *  sit on a GLB, so it is left out there rather than greyed; a second one-per-object modifier
- *  is greyed with its reason. Modifier ids are prefixed so they never collide with a treatment. */
-const menuGroups = computed<AddMenuGroup[]>(() => {
-  const groups: AddMenuGroup[] = TREATMENT_MENU_GROUPS.map(g => ({
-    label: g.label,
-    items: g.kinds.filter(k => !finishDisabled(k)).map(k => ({
-      id: k, kind: k, label: TREATMENT_LABELS[k], icon: TREATMENT_ICONS[k], testid: 'add-treatment-item',
-    })),
-  })).filter(g => g.items.length)
-  if (isModifierHost.value) {
-    groups.push({
-      label: 'Modifiers',
-      items: MODIFIER_KINDS.map(k => ({
-        id: `mod:${k}`, kind: k, label: MODIFIER_LABELS[k], icon: MODIFIER_ICONS[k], testid: 'add-modifier-item',
-        disabled: pinnedPresent(k) || undefined, title: pinnedPresent(k) ? 'Already added — only one is allowed' : undefined,
-      })),
-    })
-  }
-  return groups
-})
+const menuGroups = computed(() => scene3dAddMenuGroups(props.object))
 function onMenuPick(id: string): void {
-  if (id.startsWith('mod:')) pickModifier(id.slice(4) as ModifierKind)
-  else pick(id as TreatmentKind)
+  const p = parseScene3dAddPick(id)
+  if (p.type === 'modifier') pickModifier(p.kind)
+  else pick(p.kind)
 }
 
 // ── Drag-reorder within THIS object's treatment list only.

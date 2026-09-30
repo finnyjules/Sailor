@@ -3101,7 +3101,7 @@ function onFxMenuOutside(ev: PointerEvent) {
   if (t?.closest('[data-fx-menu]')) return
   // A plus button closes/reopens through its own click handler. Closing here first would
   // make a second click on the SAME plus reopen the menu instead of dismissing it.
-  if (t?.closest('[data-testid="add-effect"]')) return
+  if (t?.closest('[data-testid="add-effect"], [data-testid="inspector-add-effect"]')) return
   closeFxMenu()
 }
 /** One menu item's height, and the menu's own width (`w-48`), for the viewport clamp. */
@@ -11673,6 +11673,12 @@ defineExpose({ editor, layoutGridResolved, layoutGrid, overlayGrid, viewLayoutGr
         </div>
         <div class="px-4 pt-3"><StudioActionRows :actions="frameActions" /></div>
         <div class="inspector-body p-4 flex flex-col gap-4 flex-1 min-h-0 overflow-y-auto">
+          <!-- The same menu as the layer row's plus, first in the inspector so it is found without
+               knowing the plus is there. Hidden on a multi-selection, which it could add to only one of. -->
+          <StudioButton v-if="selectedIds.size <= 1" class="w-full" data-testid="inspector-add-effect"
+            @click="fxMenuLayerId === selectedLocal.id ? closeFxMenu() : openFxMenu(selectedLocal.id, $event)">
+            <span class="flex items-center justify-center gap-1.5"><Plus class="size-3.5" />Add an effect</span>
+          </StudioButton>
           <!-- Text controls -->
           <template v-if="selectedLocal.kind === 'text'">
             <StudioSection title="Text">
