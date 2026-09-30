@@ -49,6 +49,12 @@ vi.mock('../../server/native/engineHealth', async orig => ({
   engineHealth: async () => engineHealthState.value,
 }))
 beforeEach(() => { engineHealthState.value = 'up' })
+// R5.6: these tests describe the video/sound routes WITHOUT Sailor's media tools (the engine or 503), so the
+// tools are pinned missing whatever this machine has built; with them, see native-media-video.unit.spec.ts.
+vi.mock('../../server/media/tools', async orig => ({
+  ...(await orig() as object),
+  mediaTools: async () => null,
+}))
 
 const rawBody = vi.fn(async () => undefined as Buffer | undefined)
 const requestHeader = vi.fn((_e: any, _n: string) => undefined as string | undefined)

@@ -125,8 +125,8 @@ function parseStat(line: string): FrameStat | null {
 }
 
 /** The probe of a checked input: the caller's own (for this very file), or a fresh one. */
-async function probeFor(path: string, o: { userId: string | null; signal?: AbortSignal; roots: readonly string[]; probe?: MediaProbe; kept?: true }, kind: 'video' | 'sound'): Promise<MediaProbe> {
-  if (!o.probe) return probeMedia(path, { userId: o.userId, signal: o.signal, roots: o.roots, kind, ...(o.kept ? { kept: true as const } : {}) })
+async function probeFor(path: string, o: { userId: string | null; signal?: AbortSignal; roots: readonly string[]; probe?: MediaProbe; kept?: true; route?: true }, kind: 'video' | 'sound'): Promise<MediaProbe> {
+  if (!o.probe) return probeMedia(path, { userId: o.userId, signal: o.signal, roots: o.roots, kind, ...(o.kept ? { kept: true as const } : {}), ...(o.route ? { route: true } : {}) })
   if ((await resolveMediaInput(path, o.roots)) !== o.probe.path) throw new MediaError('unreadable')
   return o.probe
 }
@@ -386,7 +386,7 @@ function pythonSeekArgs(p: MediaProbe, decoder: SoundDecoder): string[] {
  * reads the file (the same seek): `-stats_mux_pre` of the first `frames`
  * frames, their sizes as pcm_f32le, for get_components' skip rule.
  */
-async function leadingFrames(p: MediaProbe, k: number, s: SoundStreamProbe, frames: number, o: { userId: string | null; signal?: AbortSignal }): Promise<{ pts: number | null; samples: number }[]> {
+async function leadingFrames(p: MediaProbe, k: number, s: SoundStreamProbe, frames: number, o: { userId: string | null; signal?: AbortSignal; route?: true }): Promise<{ pts: number | null; samples: number }[]> {
   let text = ''
   await runMedia({
     tool: 'ffmpeg',
@@ -395,7 +395,7 @@ async function leadingFrames(p: MediaProbe, k: number, s: SoundStreamProbe, fram
       '-map', `0:a:${k}`, '-frames:a', String(frames), '-c:a', 'pcm_f32le',
       '-stats_mux_pre', 'pipe:3', '-stats_mux_pre_fmt', '{size} {ptsi} {tbi}', '-f', 'null', 'pipe:1',
     ],
-    userId: o.userId, signal: o.signal,
+    userId: o.userId, signal: o.signal, route: o.route,
     onSide: (chunk) => { if (chunk) text += Buffer.from(chunk).toString('latin1') },
   })
   const out: { pts: number | null; samples: number }[] = []
@@ -412,7 +412,7 @@ async function leadingFrames(p: MediaProbe, k: number, s: SoundStreamProbe, fram
 }
 
 /** How many samples get_components drops before t = 0, frame by frame; null when no frame reaches 0 (Python's sound is then None). */
-async function samplesBeforeZero(p: MediaProbe, k: number, s: SoundStreamProbe, o: { userId: string | null; signal?: AbortSignal }): Promise<number | null> {
+async function samplesBeforeZero(p: MediaProbe, k: number, s: SoundStreamProbe, o: { userId: string | null; signal?: AbortSignal; route?: true }): Promise<number | null> {
   const num = BigInt(s.timeBase.num); const den = BigInt(s.timeBase.den); const rate = BigInt(s.rate)
   for (let packets = 64; ; packets *= 4) {
     const frames = await leadingFrames(p, k, s, packets, o)
@@ -447,6 +447,8 @@ export async function decodeAudio(path: string, o: {
    * still holds as it streams.
    */
   within?: 'video'
+  /** R5.6: the Timeline's waveform route: the routes' own slots and their 30 s limit (rule 5). */
+  route?: true
 }): Promise<DecodedSound> {
   const p = await probeFor(path, o, o.within ?? 'sound')
   const refused = o.kept ? null : mediaCapsWord(p, o.within ?? 'sound', isHosted())
@@ -484,7 +486,7 @@ export async function decodeAudio(path: string, o: {
   await runMedia({
     tool: 'ffmpeg',
     args: [...pythonSeekArgs(p, o.decoder), ...inputArgs(p.path, p.format), '-map', `0:a:${k}`, '-c:a', 'pcm_f32le', '-f', 'f32le', 'pipe:1'],
-    userId: o.userId, signal: o.signal,
+    userId: o.userId, signal: o.signal, route: o.route,
     onStdout: (chunk) => {
       let bytes = chunk
       if (carry.length) {

@@ -152,7 +152,7 @@ const ALLOWED_OPTIONS: Readonly<Record<'ffmpeg' | 'ffprobe', Readonly<Record<str
     '-movflags': 1, '-map_metadata': 1, '-fflags': 1, '-enc_time_base': 1, '-bsf': 1,
     // R5.2: a kept frame batch read at the video's rate (encode.ts, the 'ffv1' input).
     '-r': 1,
-    // get_components' seek (decode.ts pythonSeekArgs) and its leading frames.
+    // get_components' seek (decode.ts pythonSeekArgs) and its leading frames; R5.6's thumbnail seek (thumbnails.ts).
     '-ss': 1, '-seek_timestamp': 1, '-noaccurate_seek': 0, '-frames': 1,
     // R5.4: Save video's stream copy (encode.ts copyVideo): each stream's time base as PyAV's muxer
     // sets it, and no chapters (Python copies none).
@@ -293,7 +293,8 @@ export function checkArgs(tool: 'ffmpeg' | 'ffprobe', args: readonly string[], o
       if (name === '-enc_time_base' && !/^\d+\/\d+$/.test(v!)) bad()
       if ((name === '-vf' || name === '-af' || name === '-filter_complex') && !checkFilterGraph(v!)) bad()
       if (name === '-bsf' && !/^setts=dts=DTS-\d+$/.test(v!) && v !== FROM_ZERO_BSF && !FROM_ZERO_BSF_CUT.test(v!)) bad()
-      if (name === '-ss' && v !== '0') bad()
+      // R5.6: a thumbnail's seek, whole microseconds (thumbnails.ts `seekMicros`); otherwise get_components' 0.
+      if (name === '-ss' && v !== '0' && !/^\d{1,15}us$/.test(v!)) bad()
       if (name === '-seek_timestamp' && v !== '1') bad()
       if (name === '-frames' && !/^\d+$/.test(v!)) bad()
       if (name === '-time_base' && !/^1\/\d{1,9}$/.test(v!)) bad()

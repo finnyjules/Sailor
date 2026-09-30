@@ -73,6 +73,16 @@ Groups:
            32, and with each sound clip, a broken one (g_frames_broken.wav)
            and a missing one, its name made at a fixed second (time.strftime
            patched), with libx264 and switched to libopenh264.
+  timeline-media — (R5.6) the Timeline's own readers in
+           comfy_extras/nodes_timeline.py, the real functions lifted out with
+           `ast` (as Phase A's parity oracle does): _probe_media over every
+           standard clip, this group's clips g_thumbs_gop.mp4 / .mkv (160 × 90
+           H.264, a keyframe every 6 frames, two B-frames) and two files no
+           reader opens (g_timeline_junk.mp4 / .wav); _gen_thumbnails at 1, 5
+           and 20 (each PNG's decoded pixels, and which frame the loop took:
+           its target pts, the frame's pts, whether the file ran out first);
+           _gen_waveform_peaks at 16, 256 and 2048 buckets (the route's cache
+           JSON text, zlib + base64).
 """
 from __future__ import annotations
 
@@ -1892,8 +1902,135 @@ def group_frames(names: list[str]) -> dict:
     return {"cases": cases}
 
 
+# ── timeline-media (R5.6) ─────────────────────────────────────────────────────
+
+TIMELINE_THUMB_COUNTS = (1, 5, 20)
+TIMELINE_WAVE_BUCKETS = (16, 256, 2048)
+# The handlers of comfy_extras/nodes_timeline.py this group runs, lifted out with `ast` (they are nested
+# inside the PromptServer try-block, so they can't be imported), as Phase A's parity oracle does
+# (frontend/tests/unit/fixtures/native-media-python-oracle.py).
+TIMELINE_FUNCS = {"_probe_media", "_thumb_height_px", "_gen_thumbnails", "_gen_waveform_peaks"}
+
+
+def timeline_handlers() -> dict:
+    import ast
+    from PIL import Image as PILImage
+    src_path = os.path.join(ROOT, "comfy_extras", "nodes_timeline.py")
+    tree = ast.parse(open(src_path, encoding="utf-8").read())
+    body = [n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef) and n.name in TIMELINE_FUNCS]
+    missing = TIMELINE_FUNCS - {n.name for n in body}
+    if missing:
+        raise SystemExit(f"handlers not found in nodes_timeline.py: {sorted(missing)}")
+    for n in body:
+        n.decorator_list = []
+    module = ast.Module(body=body, type_ignores=[])
+    ast.fix_missing_locations(module)
+    ns = {"os": os, "np": np, "json": json, "PILImage": PILImage}
+    exec(compile(module, src_path, "exec"), ns)
+    return ns
+
+
+def clip_thumbs_gop(name: str, fmt: str | None) -> str:
+    """This group's own clips: 36 `smooth` frames at 160 × 90 (a thumbnail is a downscale), H.264 at
+    24 fps with a keyframe every 6 frames and two B-frames, in MP4 and in Matroska: a thumbnail's seek
+    lands on a keyframe that isn't the first, and decodes forward from it."""
+    path, c = open_out(name, fmt)
+    s = video_stream(c, "libx264", 160, 90, 24, "yuv420p", {**X264, "g": "6", "keyint_min": "6", "bf": "2", "sc_threshold": "0"})
+    frames = []
+    for i in range(36):
+        f = av.VideoFrame.from_ndarray(np.frombuffer(smooth_frame(160, 90, i), np.uint8).reshape(90, 160, 3), format="rgb24").reformat(format="yuv420p")
+        f.pts = i
+        frames.append(f)
+    encode_frames(c, s, frames)
+    c.close()
+    return name
+
+
+def clip_timeline_junk() -> list[str]:
+    """Files no reader opens: bytes with no container, under a video and a sound name."""
+    out = []
+    for name in ("g_timeline_junk.mp4", "g_timeline_junk.wav"):
+        with open(os.path.join(CLIPS, name), "wb") as f:
+            f.write(bytes((i * 73 + 11) & 255 for i in range(4096)))
+        out.append(name)
+    return out
+
+
+def thumb_picks(path: str, count: int):
+    """_gen_thumbnails' video loop (nodes_timeline.py:2208-2240) as it runs, recording which frame it
+    takes for each thumbnail: the target pts, the frame's pts, and whether the decode ran out before
+    reaching the target (then the last frame decoded is taken). For the seek-parity finding."""
+    try:
+        with av.open(path) as c:
+            vs = c.streams.video[0]
+            tb = vs.time_base
+            dur_sec = float((vs.duration or 0) * tb) if tb else 0.0
+            if dur_sec <= 0:
+                dur_sec = float((c.duration or 0) / 1_000_000.0)
+            if dur_sec <= 0:
+                return []
+            picks = []
+            step = dur_sec / max(1, count)
+            for i in range(count):
+                t = step * (i + 0.5)
+                target = int(t / float(tb))
+                try:
+                    c.seek(max(0, target), stream=vs, any_frame=False, backward=True)
+                except Exception:  # noqa: BLE001 - as the handler
+                    pass
+                frame, reached = None, False
+                for f in c.decode(vs):
+                    frame = f
+                    if f.pts is not None and f.pts >= target:
+                        reached = True
+                        break
+                if frame is None:
+                    continue
+                picks.append({"target": target, "pts": frame.pts, "ranOut": not reached,
+                              "sha256": sha(frame.to_ndarray(format="rgb24").tobytes())})
+            return picks
+    except Exception as e:  # noqa: BLE001
+        return {"error": err(e)}
+
+
+def png_pixels(data_url: str) -> dict:
+    from io import BytesIO
+    from PIL import Image
+    im = Image.open(BytesIO(base64.b64decode(data_url.split(",", 1)[1])))
+    im.load()
+    rgb = im.convert("RGB").tobytes()
+    return {"mode": im.mode, "w": im.size[0], "h": im.size[1], "sha256": sha(rgb)}
+
+
+def group_timeline_media(names: list[str]) -> dict:
+    """(R5.6) The Timeline's _probe_media, _gen_thumbnails and _gen_waveform_peaks, the real handlers."""
+    ns = timeline_handlers()
+    gop = [clip_thumbs_gop("g_thumbs_gop.mp4", None), clip_thumbs_gop("g_thumbs_gop.mkv", "matroska")]
+    junk = clip_timeline_junk()
+    clips = names + gop + junk
+    cases: dict = {"groupClips": {n: sha(open(os.path.join(CLIPS, n), "rb").read()) for n in gop + junk}}
+    cases["probe"] = [{"clip": n, "info": ns["_probe_media"](os.path.join(CLIPS, n))} for n in clips]
+    thumbs = []
+    for n in clips:
+        for count in TIMELINE_THUMB_COUNTS:
+            got = ns["_gen_thumbnails"](os.path.join(CLIPS, n), count)
+            thumbs.append({"clip": n, "count": count, "thumbnails": [png_pixels(u) for u in got],
+                           "picks": thumb_picks(os.path.join(CLIPS, n), count)})
+    cases["thumbnails"] = thumbs
+    waves = []
+    for n in clips:
+        for buckets in TIMELINE_WAVE_BUCKETS:
+            peaks = ns["_gen_waveform_peaks"](os.path.join(CLIPS, n), buckets)
+            # The route's own cache file: json.dump of this payload (the asset id is the test's).
+            text = json.dumps({"peaks": peaks, "asset_id": "A", "buckets": buckets})
+            waves.append({"clip": n, "buckets": buckets, "count": len(peaks), "sha256": sha(text.encode("ascii")),
+                          "textz": b64(zlib.compress(text.encode("ascii"), 9))})
+    cases["waveforms"] = waves
+    return {"cases": cases}
+
+
 GROUPS = {"probe": group_probe, "decode": group_decode, "encode": group_encode, "sound": group_sound, "video": group_video,
-          "frames": group_frames}
+          "frames": group_frames, "timeline-media": group_timeline_media}
 
 
 def main() -> None:

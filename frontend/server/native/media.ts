@@ -11,20 +11,30 @@
  *   DELETE /sailor/assets/{asset_id} (:2160)
  *   GET    /sailor/input_thumbnail   (:2247)  cached in user/timeline_thumbs/
  *   GET    /sailor/asset_thumbnails  (:2281)  under the Python's own names
- *   GET    /sailor/asset_waveform    (:2332)
+ *   GET    /sailor/asset_waveform    (:2354)
+ *
+ * with `_probe_media` (:2077), `_gen_thumbnails` (:2184) and
+ * `_gen_waveform_peaks` (:2319) behind them.
  *
  * Same folders, same file formats, same response shapes. Images are handled
- * here with sharp. Video and audio need PyAV, which only the local engine has:
- * those requests go to ComfyUI when it is reachable, and otherwise answer 503
+ * here with sharp. Video and sound (step 3, R5.6, no family): when Sailor's
+ * media tools are ready (`mediaTools()`), server/media/thumbnails.ts reads them
+ * as PyAV does, and the engine is never asked; a file the tools can't read
+ * gives Python's own failure answer ([] or nulls). Without the tools, those
+ * requests go to ComfyUI when it is reachable, and otherwise answer 503
  * `This needs the local engine` (an import still records the asset, without
- * duration or size). A thumbnail or waveform the engine already cached is
- * served from the cache either way.
+ * duration or size). A thumbnail or waveform already cached is served from
+ * the cache either way.
  */
 import { createHash, randomUUID } from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
 import sharp from 'sharp'
 import type { H3Event } from 'h3'
+import { pyJsonDumps } from '../../shared/runner/pyJson'
+import { mediaTools } from '../media/tools'
+import type { NativeMedia } from '../media/thumbnails'
+import { isHosted } from '../utils/deployMode'
 import { resolveWorkerTarget } from '../utils/workerRoute'
 import { engineFolder, listdirEntries, pySafeResolve, resolveInside, writeFileAtomic } from './paths'
 import { pyDumps } from './pyJson'
@@ -49,8 +59,9 @@ const AUDIO_EXTS = new Set(['.mp3', '.wav', '.flac', '.ogg', '.m4a', '.aac'])
 /** `_MEDIA_EXTS` */
 export const MEDIA_EXTS = new Set([...IMAGE_EXTS, ...VIDEO_EXTS, ...AUDIO_EXTS])
 
-/** `_thumb_height_px()` — source-strip thumbnail height; width follows the aspect. */
+/** `_thumb_height_px()` — source-strip thumbnail height; width follows the aspect (server/media/thumbnails.ts has the same). */
 export const THUMB_HEIGHT_PX = 48
+export type { NativeMedia }
 
 export const NEEDS_ENGINE: MediaResult = { status: 503, body: { error: 'This needs the local engine' } }
 
@@ -266,13 +277,17 @@ function findAsset(assets: Json, id: string): Json | undefined {
 export interface ProbeInfo { kind: 'image' | 'video' | 'audio', duration_sec: number | null, width: number | null, height: number | null }
 
 /**
- * `_probe_media` for what Sailor can read without the engine: an image's size.
- * Video and audio come back with their kind and null duration/size.
+ * `_probe_media`: an image's size with sharp; a video's size and length and a
+ * sound's length from the media tools (`native`). Without them, video and
+ * audio come back with their kind and null duration/size.
  */
-export async function probeMediaNative(file: string): Promise<ProbeInfo> {
+export async function probeMediaNative(file: string, native: NativeMedia | null = null): Promise<ProbeInfo> {
   const ext = pyExt(file)
   const info: ProbeInfo = { kind: 'video', duration_sec: null, width: null, height: null }
-  if (VIDEO_EXTS.has(ext)) info.kind = 'video'
+  if (VIDEO_EXTS.has(ext)) {
+    info.kind = 'video'
+    if (native) Object.assign(info, await native.probe(file, 'video'))
+  }
   else if (IMAGE_EXTS.has(ext)) {
     info.kind = 'image'
     try {
@@ -284,7 +299,10 @@ export async function probeMediaNative(file: string): Promise<ProbeInfo> {
     }
     catch {}
   }
-  else if (AUDIO_EXTS.has(ext)) info.kind = 'audio'
+  else if (AUDIO_EXTS.has(ext)) {
+    info.kind = 'audio'
+    if (native) Object.assign(info, await native.probe(file, 'audio'))
+  }
   return info
 }
 
@@ -297,15 +315,17 @@ export function assetsListRoute(userDirectory: string): MediaResult {
 }
 
 /**
- * `_asset_import_route`. `engine` is called for a video/audio file (PyAV
- * probing); it returns the engine's own answer, or null when the engine is
- * not reachable — then the asset is recorded without duration or size.
+ * `_asset_import_route`. With the media tools (`native`) a video/audio file is
+ * probed here. Without them `engine` is called for it (PyAV probing); it
+ * returns the engine's own answer, or null when the engine is not reachable —
+ * then the asset is recorded without duration or size.
  */
 export async function assetImportRoute(
   userDirectory: string,
   inputDir: string,
   body: Json,
   engine: () => Promise<MediaResult | null>,
+  native: NativeMedia | null = null,
 ): Promise<MediaResult> {
   if (body === null || typeof body !== 'object' || Array.isArray(body)) throw new TypeError('body is not an object')
   let p: Json = body.path
@@ -316,11 +336,11 @@ export async function assetImportRoute(
   if (!p.startsWith('/')) p = pyJoin(inputDir, p)
   if (!statOrNull(p)) return { status: 404, body: { error: `not found: ${p}` } }
 
-  if (!isImageFile(p)) {
+  if (!isImageFile(p) && !native) {
     const forwarded = await engine()
     if (forwarded) return forwarded
   }
-  const info = await probeMediaNative(p)
+  const info = await probeMediaNative(p, native)
 
   const assets = loadAssets(userDirectory)
   const existing = records(assets).find((a: Json) => field(a, 'path') === p)
@@ -426,12 +446,17 @@ function readJsonFile(file: string | null): { ok: true, value: Json } | { ok: fa
 
 const EMPTY_404: MediaResult = { status: 404, body: '', text: true }
 
-/** `_input_thumbnail_route`. `engine` renders a non-image file (PyAV); null = not reachable. */
+/**
+ * `_input_thumbnail_route`. A non-image file is rendered by the media tools
+ * (`native`) when they are ready (a sound, or a file they can't read, 404s as
+ * in Python), else by `engine` (PyAV); null = not reachable.
+ */
 export async function inputThumbnailRoute(
   userDirectory: string,
   inputDirRaw: string,
   filename: string,
   engine: () => Promise<MediaResult | null>,
+  native: NativeMedia | null = null,
 ): Promise<MediaResult> {
   const inputDir = path.resolve(inputDirRaw)
   const p = path.resolve(inputDir, filename)
@@ -440,8 +465,8 @@ export async function inputThumbnailRoute(
   const st = fs.statSync(p, { bigint: true })
   const cachePng = path.join(thumbCacheDir(userDirectory), inputThumbName(filename, pyMtime(st)))
   if (!fs.existsSync(cachePng)) {
-    if (!isImageFile(p)) return (await engine()) ?? NEEDS_ENGINE
-    const png = await imageThumbnailPng(p)
+    if (!isImageFile(p) && !native) return (await engine()) ?? NEEDS_ENGINE
+    const png = isImageFile(p) ? await imageThumbnailPng(p) : (await native!.thumbnails(p, 1)).pngs[0] ?? null
     if (!png) return EMPTY_404
     try { writeFileAtomic(cachePng, png) }
     catch { return EMPTY_404 }
@@ -453,11 +478,12 @@ export async function inputThumbnailRoute(
   }
 }
 
-/** `_asset_thumbs_route`. */
+/** `_asset_thumbs_route`. A video goes to the media tools (`native`) when ready, else to `engine`. */
 export async function assetThumbnailsRoute(
   userDirectory: string,
   query: URLSearchParams,
   engine: () => Promise<MediaResult | null>,
+  native: NativeMedia | null = null,
 ): Promise<MediaResult> {
   const assetId = query.get('asset_id')
   const parsed = pyInt(query.get('count') ?? '5')
@@ -472,33 +498,65 @@ export async function assetThumbnailsRoute(
   if (!asset) return { status: 404, body: { error: 'asset not found' } }
 
   const assetPath = String(field(asset, 'path'))
-  if (!isImageFile(assetPath)) return (await engine()) ?? NEEDS_ENGINE
-  const png = await imageThumbnailPng(assetPath)
-  const thumbs = png ? [`data:image/png;base64,${png.toString('base64')}`] : []
+  let pngs: Buffer[]
+  let keep = true
+  if (isImageFile(assetPath)) {
+    const png = await imageThumbnailPng(assetPath)
+    pngs = png ? [png] : []
+  }
+  else if (native) {
+    const r = await native.thumbnails(assetPath, count)
+    pngs = r.pngs
+    keep = r.cache
+  }
+  else return (await engine()) ?? NEEDS_ENGINE
+  const thumbs = pngs.map(png => `data:image/png;base64,${png.toString('base64')}`)
   const payload = { thumbnails: thumbs, asset_id: assetId, count }
-  if (file) {
+  if (file && keep) {
     try { writeFileAtomic(file, pyDumps(payload)) }
     catch {}
   }
   return { status: 200, body: payload }
 }
 
-/** `_asset_waveform_route` — peaks need PyAV, so only a cached answer is served natively. */
+/**
+ * The waveform cache file: `json.dump({"peaks": [...], "asset_id": ..., "buckets": n})`,
+ * each peak a Python float (`0.0`, `1.0` keep their point).
+ */
+export function waveformJson(p: { peaks: number[], asset_id: string, buckets: number }): string {
+  return pyJsonDumps({ obj: [
+    ['peaks', p.peaks.map(x => ({ float: x }))],
+    ['asset_id', p.asset_id],
+    ['buckets', { int: String(p.buckets) }],
+  ] })
+}
+
+/** `_asset_waveform_route` — peaks from the media tools (`native`) when ready, else from `engine`. */
 export async function assetWaveformRoute(
   userDirectory: string,
   query: URLSearchParams,
   engine: () => Promise<MediaResult | null>,
+  native: NativeMedia | null = null,
 ): Promise<MediaResult> {
   const assetId = query.get('asset_id')
   const parsed = pyInt(query.get('buckets') ?? '256')
   const buckets = parsed === null ? 256 : Math.max(16, Math.min(2048, parsed))
   if (!assetId) return { status: 400, body: { error: 'missing asset_id' } }
 
-  const cached = readJsonFile(cacheFile(thumbCacheDir(userDirectory), waveformName(assetId, buckets)))
+  const file = cacheFile(thumbCacheDir(userDirectory), waveformName(assetId, buckets))
+  const cached = readJsonFile(file)
   if (cached.ok) return { status: 200, body: cached.value }
 
-  if (!findAsset(loadAssets(userDirectory), assetId)) return { status: 404, body: { error: 'asset not found' } }
-  return (await engine()) ?? NEEDS_ENGINE
+  const asset = findAsset(loadAssets(userDirectory), assetId)
+  if (!asset) return { status: 404, body: { error: 'asset not found' } }
+  if (!native) return (await engine()) ?? NEEDS_ENGINE
+  const r = await native.waveform(String(field(asset, 'path')), buckets)
+  const payload = { peaks: r.peaks, asset_id: assetId, buckets }
+  if (file && r.cache) {
+    try { writeFileAtomic(file, waveformJson(payload)) }
+    catch {}
+  }
+  return { status: 200, body: payload }
 }
 
 // ---------------------------------------------------------------- the engine
@@ -623,16 +681,33 @@ export async function runMediaRoute(ctx: MediaContext, h: MediaHandler, event: H
   // can be probing/transcoding a whole media file, so it gets a longer leash.
   const engine = () => forwardToEngine(event, canonicalPath, body?.raw, ENGINE_FORWARD_TIMEOUT_MS)
   const engineForImport = () => forwardToEngine(event, canonicalPath, body?.raw, ENGINE_ASSET_IMPORT_TIMEOUT_MS)
+  // R5.6 (no family, ruling l): the four video/sound routes read with Sailor's own tools once they're ready.
+  const reads = h.name === 'assetImport' || h.name === 'inputThumbnail' || h.name === 'assetThumbnails' || h.name === 'assetWaveform'
+  const native = reads ? await nativeMediaFor(ctx, event) : null
   switch (h.name) {
     case 'outputListing': return outputListing(ctx.outputDir)
     case 'inputListing': return inputListing(ctx.inputDir)
     case 'inputFileDelete': return deleteFile(ctx.inputDir, '', query.get('filename') ?? '')
     case 'outputFileDelete': return deleteFile(ctx.outputDir, query.get('subfolder') ?? '', query.get('filename') ?? '')
     case 'assetsList': return assetsListRoute(ctx.userDir)
-    case 'assetImport': return assetImportRoute(ctx.userDir, ctx.inputDir, body?.value, engineForImport)
+    case 'assetImport': return assetImportRoute(ctx.userDir, ctx.inputDir, body?.value, engineForImport, native)
     case 'assetDelete': return assetDeleteRoute(ctx.userDir, h.assetId)
-    case 'inputThumbnail': return inputThumbnailRoute(ctx.userDir, ctx.inputDir, query.get('filename') ?? '', engine)
-    case 'assetThumbnails': return assetThumbnailsRoute(ctx.userDir, query, engine)
-    case 'assetWaveform': return assetWaveformRoute(ctx.userDir, query, engine)
+    case 'inputThumbnail': return inputThumbnailRoute(ctx.userDir, ctx.inputDir, query.get('filename') ?? '', engine, native)
+    case 'assetThumbnails': return assetThumbnailsRoute(ctx.userDir, query, engine, native)
+    case 'assetWaveform': return assetWaveformRoute(ctx.userDir, query, engine, native)
   }
+}
+
+/**
+ * The media tools' reader for these routes, or null when the tools are
+ * missing (or switched off: NUXT_MEDIA_TOOLS=off). Locally a file may be
+ * anywhere (Python opens any asset path); hosted, only inside the input folder
+ * (the gate has already checked it is the person's own).
+ */
+async function nativeMediaFor(ctx: MediaContext, event: H3Event): Promise<NativeMedia | null> {
+  if (!(await mediaTools())) return null
+  // Loaded here, not at the top: the media module reaches the gate's modules, which import this one.
+  const { nativeMedia } = await import('../media/thumbnails')
+  const userId = (event.context as { userId?: unknown } | undefined)?.userId
+  return nativeMedia({ roots: isHosted() ? [ctx.inputDir] : ['/'], userId: typeof userId === 'string' ? userId : null })
 }
