@@ -76,6 +76,10 @@ export default defineEventHandler(async (event) => {
       setResponseStatus(event, answer.status)
       return answer.body
     }
-    throw err
+    // Anything else from the provider (FAILED status, poll deadline, a failed result fetch)
+    // answers 502 { message } like the surfaces route, never a bare 500.
+    if ((err as { statusCode?: number })?.statusCode === 502) throw err
+    const message = err instanceof Error ? err.message : String(err)
+    throw createError({ statusCode: 502, message: `nano-banana-2: ${message}` })
   }
 })

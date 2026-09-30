@@ -276,7 +276,7 @@ describe('POST /api/inpaint/relight-finish', () => {
       .rejects.toMatchObject({ statusCode: 502 })
   })
 
-  it('fal result endpoint fails entirely → the provider error propagates, and (hosted) the meter hold is released', async () => {
+  it('fal result endpoint fails entirely → 502, and (hosted) the meter hold is released', async () => {
     setHosted()
     bindMeterContext({ userId: 'u1' })
     fakeLedger.setAvailable(100)
@@ -284,7 +284,7 @@ describe('POST /api/inpaint/relight-finish', () => {
     vi.stubGlobal('fetch', fetchMock)
 
     await expect(handler(makeEvent({ original: ORIGINAL, guide: GUIDE }, 'u1')))
-      .rejects.toThrow()
+      .rejects.toMatchObject({ statusCode: 502 })
 
     expect(fakeLedger.hold).toHaveBeenCalledTimes(1)
     expect(fakeLedger.releaseHold).toHaveBeenCalledTimes(1)
