@@ -13,16 +13,22 @@
  *   held      — every frame held (8-bit, under MEDIA_CAPS.heldFrameBytes),
  *               each output frame reading the one `heldSource` names;
  *   two-pass  — the batch decoded twice (R6.5's Stabilize);
+ *   join      — two clips read side by side (R6.3's Crossfade and
+ *               Transition): each output frame reads A's frame, B's, or one
+ *               of each (`joinOf`, joinReads), both only moving forward, so
+ *               nothing is held;
  *   generator — no input (R6.7, R6.8).
  *
  * Each op is '<core>.<fn>' of ./cores.ts, called once per output frame.
  */
+import { createHash } from 'node:crypto'
 import { MEDIA_EFFECTS_PORTED, type MediaEffectFamily } from '#shared/runner/mediaEffects'
 import type { MediaEffectSchema } from '#shared/runner/mediaEffectSchemas.generated'
 import { isLink } from '#shared/runner/graph'
 import { pyFloatOf, pyIntOf, pyTruthy } from '#shared/runner/pyText'
 import { MEDIA_EFFECT_WORDS } from '#shared/runner/mediaEffects'
 import { videoCores } from './cores'
+import type { JoinLayout } from './core/join'
 
 /**
  * A frame batch's count and size; `exact: false` when the count is an upper
@@ -40,7 +46,7 @@ export interface VideoEffectSpec {
   op: string
   /** The frame-batch inputs, in order ([] for a generator). */
   inputs: readonly string[]
-  reads: 'stream' | 'window' | 'held' | 'two-pass' | 'generator'
+  reads: 'stream' | 'window' | 'held' | 'two-pass' | 'generator' | 'join'
   shape(widgets: Record<string, unknown>, ins: readonly FrameShape[]): FrameShape
   /** 8-bit frames held at once (rule 6), for the start pass; an op's own float state counts in bytes too. */
   heldBytes(widgets: Record<string, unknown>, ins: readonly FrameShape[]): number
@@ -64,6 +70,10 @@ export interface VideoEffectSpec {
    * no inputs of its own.
    */
   heldShared?: true
+  /** 'join': the two clips' layout (./core/join.ts layout): the ranges read, the overlap, the head, transition and tail. */
+  joinOf?(widgets: Record<string, unknown>, ins: readonly FrameShape[]): JoinLayout
+  /** Draws random numbers (Transition's glitch): the plan hands the op glitchSeed's seed as `_seed` (ruling (e)). */
+  seeded?(widgets: Record<string, unknown>): boolean
   /** Where Python itself raises for these widgets and inputs: its plain words (rule 14), said before any work. */
   pythonRaises?(widgets: Record<string, unknown>, ins: readonly FrameShape[]): string | null
 }
@@ -181,6 +191,99 @@ const rampOf = (w: Record<string, unknown>, T: number) => videoCores.time.rampSo
 
 /** Time displacement hands its input on (nodes_video_effects.py:257): T ≤ 1, or strength ≤ 0. */
 const displacePassThrough = (w: Record<string, unknown>, T: number) => T <= 1 || !((w.strength as number) > 0)
+
+/** Two clips' shapes (a join's inputs). */
+const twoInputs = (ins: readonly FrameShape[]): [FrameShape, FrameShape] => {
+  const a = ins[0]
+  const b = ins[1]
+  if (!a || !b) throw new Error('There are no video frames wired in')
+  return [a, b]
+}
+
+const joinLayoutOf = (w: Record<string, unknown>, ins: readonly FrameShape[]): JoinLayout => {
+  const [a, b] = twoInputs(ins)
+  return videoCores.join.layout(w, a.count, b.count)
+}
+
+/**
+ * A join's output: A's size, A's head, the transition and B's tail. With
+ * bounded inputs the count is a bound too (it only grows with either clip:
+ * one more frame lengthens a clip's part or the overlap, never shortens the
+ * other).
+ */
+function joinShape(w: Record<string, unknown>, ins: readonly FrameShape[]): FrameShape {
+  const [a, b] = twoInputs(ins)
+  const L = joinLayoutOf(w, ins)
+  return { count: L.head + L.trans + L.tail, w: a.w, h: a.h, exact: a.exact && b.exact }
+}
+
+/**
+ * What a join holds (rule 6): no frames (the two clips are read side by
+ * side, one frame in hand from each), on the worker two inputs, B resized
+ * and the style's own planes (a whip pan's two warps and its padded blur;
+ * a zoom's two warps): three float frames of state, each at the larger of
+ * the two clips' sizes.
+ */
+function joinHeldBytes(ins: readonly FrameShape[]): number {
+  const [a, b] = twoInputs(ins)
+  const big: FrameShape = { count: 1, w: 1, h: Math.max(a.w * a.h, b.w * b.h), exact: true }
+  return effectHeldBytes(big, { reads: 2, state32: 3 })
+}
+
+/** A transition frame's own steps a pixel, by style (a whip pan: two warps, the add and the blur's taps; a zoom: two warps and the blend). */
+const JOIN_STEPS: Readonly<Record<string, number>> = {
+  dissolve: 1, glitch: 1, light_leak: 3, zoom_in: 12, zoom_out: 12, whip_pan_left: 30, whip_pan_right: 30,
+}
+/** B resized to A's size, a pixel (the bilinear's four taps). */
+const RESIZE_STEPS = 2
+
+/**
+ * A join's work: every frame of both clips decoded (an upper bound: frames
+ * past a trim's end aren't), every output frame moved, the transition's own
+ * steps, and B's frames resized where the sizes differ.
+ */
+function joinWork(w: Record<string, unknown>, ins: readonly FrameShape[], out: FrameShape): number {
+  const [a, b] = twoInputs(ins)
+  const L = joinLayoutOf(w, ins)
+  const px = out.w * out.h
+  const steps = JOIN_STEPS[typeof w.style === 'string' ? w.style : 'dissolve'] ?? JOIN_STEPS.whip_pan_left!
+  const resized = a.w !== b.w || a.h !== b.h ? (L.trans + L.tail) * px * RESIZE_STEPS : 0
+  return (a.count * a.w * a.h + b.count * b.w * b.h + out.count * px) * VIDEO_IO_WORK_PER_PIXEL + L.trans * px * steps + resized
+}
+
+/**
+ * Each output frame of a join, in order: the frame of A (`a`) and of B
+ * (`b`) it reads, as indices into each input batch, and its own params for
+ * the op (./core/join.ts frame: `_part`, `_i`, `_d`, `_w`, `_h`). Both
+ * indices only grow, so the plan reads the two clips side by side.
+ */
+export function joinReads(L: JoinLayout, aw: number, ah: number): { a: number | null; b: number | null; own: Record<string, unknown> }[] {
+  const out: { a: number | null; b: number | null; own: Record<string, unknown> }[] = []
+  for (let j = 0; j < L.head; j++) out.push({ a: L.a[0] + j, b: null, own: { _part: 'a' } })
+  for (let i = 0; i < L.trans; i++) out.push({ a: L.a[0] + L.head + i, b: L.b[0] + i, own: { _part: 'mix', _i: i, _d: L.d } })
+  for (let k = 0; k < L.tail; k++) out.push({ a: null, b: L.b[0] + L.trans + k, own: { _part: 'b', _w: aw, _h: ah } })
+  return out
+}
+
+/**
+ * The glitch's seed (ruling (e), as Add noise's, R2 ruling (e)): Python
+ * draws from the process's generator, so no two runs match; the runner seeds
+ * its own from the node's widget values (as execute() receives them, in the
+ * schema's order) and its two input batches' kept sha256 (a kept batch is
+ * named by it), in order: the first 8 bytes of their sha256, an unsigned
+ * 64-bit value (torch keeps its low 32 bits). The glitch holds still while
+ * nothing changes and changes with a clip or a setting.
+ */
+export function glitchSeed(schema: MediaEffectSchema | undefined, params: Record<string, unknown>, clips: readonly { filename: string }[]): bigint {
+  const widgets = Object.keys(schema?.widgets ?? params).map(name => [name, params[name] ?? null])
+  const shas = clips.map((c) => {
+    const m = /^([0-9a-f]{64})\.[a-z0-9]+$/.exec(c.filename)
+    if (!m) throw new Error('A clip to join isn’t one the runner kept')
+    return m[1]
+  })
+  const h = createHash('sha256').update(JSON.stringify({ widgets, clips: shas })).digest()
+  return h.readBigUInt64BE(0)
+}
 
 export const VIDEO_EFFECTS: Readonly<Record<string, VideoEffectSpec>> = {
   VideoTrim: {
@@ -310,6 +413,33 @@ export const VIDEO_EFFECTS: Readonly<Record<string, VideoEffectSpec>> = {
       + (w.interpolation === 'nearest' ? 0 : out.count * out.w * out.h * BLEND_STEPS),
     passThrough: (_w, ins) => oneInput(ins).count <= 1,
     windowOf: (w, ins) => rampWindow(w, rampOf(w, oneInput(ins).count)),
+  },
+  /**
+   * Crossfade (nodes_video_effects.py:356-421): each clip trimmed, B resized
+   * to A's size, A's head, the blend a·(1 − α) + b·α over the overlap, B's
+   * tail (./core/join.ts). The two clips are read side by side. EXACT
+   * (linear, ease_in, ease_out); LIBRARY (ease_in_out: cos).
+   */
+  VideoCrossfade: {
+    family: 'video-join', op: 'join.frame', inputs: ['clip_a', 'clip_b'], reads: 'join', preview: true,
+    shape: joinShape,
+    heldBytes: (_w, ins) => joinHeldBytes(ins),
+    work: joinWork,
+    joinOf: joinLayoutOf,
+  },
+  /**
+   * Transition (nodes_video_pro.py:810-948): B resized to A's size, A's head,
+   * the styled transition over the overlap, B's tail. EXACT: dissolve with
+   * an exact curve, glitch under its seed (ruling (e)); LIBRARY: whip pan,
+   * zoom, light leak and ease_in_out.
+   */
+  Transition: {
+    family: 'video-join', op: 'join.frame', inputs: ['clip_a', 'clip_b'], reads: 'join', preview: true,
+    shape: joinShape,
+    heldBytes: (_w, ins) => joinHeldBytes(ins),
+    work: joinWork,
+    joinOf: joinLayoutOf,
+    seeded: w => w.style === 'glitch',
   },
 }
 

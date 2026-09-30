@@ -37,7 +37,7 @@ import { VIDEO_FRAME_TIMEOUT_MESSAGE, pixelsInWorker, type VideoFrameJob, type V
 import { png8 } from '../effects/plan'
 import { MediaError, mediaLease, type MediaLease } from '../../media/run'
 import { batchWord, framesOf, framesSink, heldFrames, heldFramesShared, type MediaValueIO } from '../../media/values'
-import { VIDEO_EFFECTS, mediaEffectParams, windowSchedule, type FrameShape, type VideoEffectSpec } from './table'
+import { VIDEO_EFFECTS, glitchSeed, joinReads, mediaEffectParams, windowSchedule, type FrameShape, type VideoEffectSpec } from './table'
 
 type FramesValue = Extract<RunnerValue, { kind: 'frames' }>
 type Frame = { rgb: Uint8Array; w: number; h: number }
@@ -148,8 +148,10 @@ export function planVideoEffect(ctx: PlanContext): NodePlan {
       if (spec.heldBytes(params, ins) > caps.heldFrameBytes) throw new Error(MEDIA_EFFECT_WORDS.heldTooMuch)
       if (spec.work(params, ins, out) > caps.effectWork) throw new Error(MEDIA_EFFECT_WORDS.tooMuchWork)
       const through = !!spec.passThrough?.(params, ins)
+      // A seeded effect (Transition's glitch, ruling (e)): its seed from its settings and its clips' kept bytes.
+      const own = spec.seeded?.(params) ? { ...params, _seed: String(glitchSeed(schema, params, values.map(v => v.file))) } : params
       const made = await mediaLease({ userId: media.userId, signal: media.signal }, lease =>
-        through ? passedOn(spec, values[0]!, media, lease) : worked(spec, params, values, ins, out, quant, media, lease))
+        through ? passedOn(spec, values[0]!, media, lease) : worked(spec, own, values, ins, out, quant, media, lease))
       if (media.signal?.aborted) throw new MediaError('stopped')
       let ui: Record<string, unknown> | null = null
       if (previewName && made.preview) {
@@ -198,6 +200,7 @@ async function worked(
   let preview: Uint8Array | null = null
   let state: ArrayBuffer | undefined
   let made = 0
+  let kept = false
   const emit = async (j: number, frames: Frame[], own?: Record<string, unknown>, held?: VideoFrameJob['held']) => {
     if (j !== made) throw new MediaError('failed')
     if (media.signal?.aborted) throw new MediaError('stopped')
@@ -290,14 +293,56 @@ async function worked(
         await it.return?.().catch(() => undefined)
       }
     }
+    else if (spec.reads === 'join' && spec.joinOf) {
+      // Two clips read side by side (R6.3): A's head, then A's last frames with B's first, then B's tail. Both
+      // decodes only move forward, one frame in hand from each; B's starts when it is first read, A's ends
+      // after its last. Nothing is held.
+      const [va, vb] = values as [FramesValue, FramesValue]
+      const reads = joinReads(spec.joinOf(params, ins), va.w, va.h)
+      const reader = (v: FramesValue) => {
+        let it: AsyncIterator<Uint8Array> | null = null
+        let next = 0
+        return {
+          async at(i: number): Promise<Uint8Array> {
+            it ??= framesOf(v, media, lease)[Symbol.asyncIterator]()
+            for (;;) {
+              const g = await it.next()
+              if (g.done) throw new MediaError('failed')
+              if (next++ === i) return g.value
+            }
+          },
+          async end() { await it?.return?.().catch(() => undefined) },
+        }
+      }
+      const ra = reader(va)
+      const rb = reader(vb)
+      const lastA = reads.reduce((m, r) => (r.a === null ? m : Math.max(m, r.a)), -1)
+      try {
+        for (let j = 0; j < reads.length; j++) {
+          const r = reads[j]!
+          const frames: Frame[] = []
+          if (r.a !== null) frames.push({ rgb: await ra.at(r.a), w: va.w, h: va.h })
+          if (r.b !== null) frames.push({ rgb: await rb.at(r.b), w: vb.w, h: vb.h })
+          // A's decode ends once its last frame is read (frames past a trim are never decoded).
+          if (r.a === lastA) await ra.end()
+          await emit(j, frames, r.own)
+        }
+      }
+      finally {
+        await ra.end()
+        await rb.end()
+      }
+    }
     else throw new Error('The runner cannot run this video effect yet')
     if (made !== out.count) throw new MediaError('failed')
     const value = await sink.done()
+    kept = true
     if (value.count !== out.count || value.w !== out.w || value.h !== out.h) throw new MediaError('failed')
     return { value, preview, previewW: out.w, previewH: out.h }
   }
-  catch (e) {
-    await sink.abort()
-    throw e
+  finally {
+    // The writer is ended on every path: kept by done(), else aborted (its process killed, its partial file
+    // removed) whether the node failed, was stopped or left early.
+    if (!kept) await sink.abort()
   }
 }

@@ -802,7 +802,10 @@ function spawnJob(file: string, job: MediaJob, cwd: string, atMost = Number.POSI
         oursBegins()
         inflight = inflight
           .then(() => (failure === null ? insideCallback.run(true, () => job.onStdout!(new Uint8Array(b.buffer, b.byteOffset, b.byteLength))) : undefined))
-          .then(() => { oursEnds(); if (failure === null) out.resume() }, (e) => { oursEnds(); fail(e); out.resume() })
+          // Resumed on every path: after a failure the rest of the output is read and dropped (the handler
+          // returns early), so the pipe drains and 'close' comes. A callback that ends cleanly after the job
+          // was failed (a stopped reader's last frame) must not leave the pipe paused (R6.3: a hang).
+          .then(() => { oursEnds(); out.resume() }, (e) => { oursEnds(); fail(e); out.resume() })
         return
       }
       collectedBytes += b.length

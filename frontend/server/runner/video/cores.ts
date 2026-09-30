@@ -11,18 +11,21 @@
 import type { EffectCoreEntry } from '../effects/cores'
 import { effectCores } from '../effects/cores'
 import { framesCore, timeCore } from './core/time'
+import { joinCore } from './core/join'
 
 export const VIDEO_CORES: readonly EffectCoreEntry[] = [
   { name: 'vx', fn: framesCore as EffectCoreEntry['fn'], args: ['tk'] },
   // R6.1: Trim, Reverse and Frame trail; R6.2: Slit scan, Time displacement and Speed ramp.
   { name: 'time', fn: timeCore as EffectCoreEntry['fn'], args: ['tk', 'kn', 'rng'] },
+  // R6.3: Crossfade and Transition.
+  { name: 'join', fn: joinCore as EffectCoreEntry['fn'], args: ['tk', 'kn', 'rng'] },
 ]
 
 /** The cores whose functions are video ops (not helpers). */
-export const VIDEO_OP_CORES: readonly string[] = ['time']
+export const VIDEO_OP_CORES: readonly string[] = ['time', 'join']
 
 /** The cores in this thread (tests), built as the worker builds them. */
 export const videoCores = (() => {
   const { tk, kn, rng } = effectCores
-  return { tk, vx: framesCore(tk), time: timeCore(tk, kn, rng) }
+  return { tk, vx: framesCore(tk), time: timeCore(tk, kn, rng), join: joinCore(tk, kn, rng) }
 })()

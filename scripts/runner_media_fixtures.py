@@ -2418,8 +2418,214 @@ def group_vfx_time(names: list[str]) -> dict:
     return {"cases": cases}
 
 
+# ── R6.3: joining two clips ────────────────────────────────────────────────────
+
+# Rule 5's band, in 255-scale: where Python's 255·x (as each 8-bit form computes it) lies this close to the edge the
+# form cuts at, a LIBRARY kernel may land on the other side (one step). R6.3's kernels differ from torch's by at most
+# one float32 ulp (≈ 3 × 10⁻⁵ in 255-scale, measured): the band is eight times that.
+VFX_BAND = 2.0 ** -12
+
+
+def vfx_band(t: torch.Tensor, lo: int, hi: int, sums: tuple = ()) -> dict:
+    """Rule 5's band list for frames [lo, hi) of a batch (the frames a LIBRARY kernel made): the flat indices (into the
+    whole batch's T·H·W·3 values) where round-8's f32(clamp(x)·255) lies within VFX_BAND of a half, or trunc-8's
+    f32(255·x) within VFX_BAND of a whole number; Python's 8-bit value at each; and each 8-bit form's sha256 with those
+    places zeroed (the rest must be equal). An 8-bit level itself (x = f32(k / 255)) is left out (a kernel that lands
+    exactly on one does so on both sides), except in the frames `sums` names, made by a sum whose order differs (the whip
+    pan's box blur: a sum of equal parts lands on a level in one order and an ulp off it in another)."""
+    x = np.ascontiguousarray(t.numpy()).reshape(-1)
+    per = int(np.prod(t.shape[1:]))
+    idx = np.arange(lo * per, hi * per)
+    v = x[idx]
+    levels = (np.arange(256, dtype=np.float32) / np.float32(255.0)).astype(np.float32)
+    level = np.isin(v, levels) & ~np.isin(idx // per, np.array(sums, dtype=np.int64))
+    r = (np.clip(v, 0, 1) * np.float32(255.0)).astype(np.float32)
+    tr = (np.float32(255.0) * v).astype(np.float32)
+    near_half = np.abs(r - np.floor(r) - 0.5) < VFX_BAND
+    near_whole = (np.abs(tr - np.round(tr)) < VFX_BAND) & (tr > 0) & (tr < 255)
+    rec: dict = {"round": idx[near_half & ~level].tolist(), "trunc": idx[near_whole & ~level].tolist()}
+    for form, whole in (("round", vfx_round8(t)), ("trunc", vfx_trunc8(t))):
+        b = np.frombuffer(whole, np.uint8).copy()
+        at = np.array(rec[form], dtype=np.int64)
+        rec[f"{form}_py"] = b[at].tolist()
+        b[at] = 0
+        rec[f"{form}8_masked_sha256"] = sha(b.tobytes())
+    return rec
+
+
+def vfx_join_layout(class_type: str, widgets: dict, ta: int, tb: int) -> dict:
+    """The join's frame layout as the node works it out (nodes_video_effects.py:377-386, nodes_video_pro.py:858-860):
+    each clip's kept range, the overlap d, and the output's head (A alone), transition and tail (B alone)."""
+    if class_type == "VideoCrossfade":
+        ia = max(0, min(int(widgets["trim_in_a"]), ta - 1))
+        oa = ta if int(widgets["trim_out_a"]) < 0 else max(ia + 1, min(int(widgets["trim_out_a"]), ta))
+        ib = max(0, min(int(widgets["trim_in_b"]), tb - 1))
+        ob = tb if int(widgets["trim_out_b"]) < 0 else max(ib + 1, min(int(widgets["trim_out_b"]), tb))
+    else:
+        ia, oa, ib, ob = 0, ta, 0, tb
+    d = max(1, min(int(widgets["duration"]), oa - ia, ob - ib))
+    return {"a": [ia, oa], "b": [ib, ob], "d": d, "head": oa - ia - d, "tail": ob - ib - d}
+
+
+def vfx_join_library(class_type: str, widgets: dict) -> bool:
+    """Whether a case's transition frames are LIBRARY (the brief's classes): torch's cos (ease_in_out), affine_grid and
+    conv2d (whip pan), the zoom's affine_grid, light leak's exp. Glitch is selection: its decisions are recorded exactly."""
+    if widgets.get("style", "dissolve") in ("whip_pan_left", "whip_pan_right", "zoom_in", "zoom_out", "light_leak"):
+        return True
+    return widgets.get("style") != "glitch" and widgets["curve"] == "ease_in_out"
+
+
+def vfx_blurred_frames(widgets: dict, lay: dict) -> tuple:
+    """The output frames a whip pan blurs (kw > 1, nodes_video_pro.py:891-894, repeated): a sum in torch's order."""
+    from comfy_extras.nodes_video_pro import TransitionNode
+    if widgets.get("style") not in ("whip_pan_left", "whip_pan_right"):
+        return ()
+    alpha = TransitionNode._alpha_ramp(lay["d"], widgets["curve"], "cpu", torch.float32)
+    return tuple(lay["head"] + i for i in range(lay["d"]) if max(1, int(15 * float(alpha[i] * (1 - alpha[i])) * 4 + 1)) > 1)
+
+
+def vfx_join_cases(tmp: str, cls, class_type: str, grid: list[tuple]) -> list[dict]:
+    """Each (name, widgets, clip A, clip B, seed) through the real node, in a fresh temp folder. A seed (the glitch)
+    seeds torch's global generator first (ruling (e)), as R2.9 does."""
+    out = []
+    for name, widgets, ca, cb, seed in grid:
+        rec: dict = {"name": name, "class_type": class_type, "node_id": VFX_NODE_ID, "widgets": widgets, "input": ca, "input_b": cb}
+        if seed is not None:
+            rec["seed"] = str(seed)
+        _o, temp = fresh_dirs(tmp, f"{class_type}_{len(out)}")
+        a, b = vfx_clip(ca), vfx_clip(cb)
+        rec["layout"] = vfx_join_layout(class_type, widgets, int(a.shape[0]), int(b.shape[0]))
+        try:
+            if seed is not None:
+                torch.manual_seed(seed)
+            args, ui = vfx_run(cls, VFX_NODE_ID, clip_a=a, clip_b=b, **widgets)
+            rec["out"] = vfx_batch(args[0])
+            rec["ui"] = vfx_ui(ui)
+            rec["preview"] = vfx_preview(temp, ui)
+            lay = rec["layout"]
+            assert rec["out"]["count"] == lay["head"] + lay["d"] + lay["tail"], (name, rec["out"]["count"], lay)
+            if "f32" not in rec["out"] and vfx_join_library(class_type, widgets):
+                rec["band"] = vfx_band(args[0], lay["head"], lay["head"] + lay["d"], vfx_blurred_frames(widgets, lay))
+        except Exception as e:  # noqa: BLE001 - the error itself is the record
+            rec["error"] = err(e)
+        out.append(rec)
+    return out
+
+
+def vfx_glitch_draws(widgets: dict, ta: int, tb: int, seed: int) -> dict:
+    """The glitch's decisions, repeated line for line (nodes_video_pro.py:913-930) from the same seed: per transition
+    frame its alpha, the clip it reads, the colour offset, the band count and height, and each band's shift."""
+    from comfy_extras.nodes_video_pro import TransitionNode
+    d = max(1, min(int(widgets["duration"]), ta, tb))
+    alpha = TransitionNode._alpha_ramp(d, widgets["curve"], "cpu", torch.float32)
+    torch.manual_seed(seed)
+    frames = []
+    for i in range(d):
+        t = float(alpha[i])
+        intensity = 1.0 - abs(2.0 * t - 1.0)
+        n = max(1, int(intensity * 12))
+        dx = [int((torch.rand(1).item() - 0.5) * intensity * 80) for _ in range(n)]
+        frames.append({"t": t, "fromB": not (t < 0.5), "offset": int(intensity * 30), "slices": n, "dx": dx})
+    return {"d": d, "frames": frames}
+
+
+def vfx_saved_join(tmp: str, cls, class_type: str, widgets: dict, ca: str, cb: str, seed: int | None = None) -> dict:
+    """A join of two standard clips → Create video (24 fps) → Save video, libx264 as ComfyUI runs it and switched to
+    libopenh264 (the glitch seeded first)."""
+    from comfy_api.latest._input_impl import video_types
+    from comfy_extras import nodes_video as nv
+    Create, Save = (c.PREPARE_CLASS_CLONE({"hidden_inputs": VIDEO_HIDDEN}) for c in (nv.CreateVideo, nv.SaveVideo))
+    if seed is not None:
+        torch.manual_seed(seed)
+    args, _ui = vfx_run(cls, VFX_NODE_ID, clip_a=vfx_clip(ca), clip_b=vfx_clip(cb), **widgets)
+    rec: dict = {"class_type": class_type, "widgets": widgets, "input": ca, "input_b": cb, "fps": 24.0}
+    if seed is not None:
+        rec["seed"] = str(seed)
+    for run, swap in (("x264", None), ("openh264", openh264_options(23))):
+        out, temp = fresh_dirs(tmp, f"saved_{class_type}_{len(os.listdir(tmp))}_{run}")
+        vid = Create.execute(images=args[0], fps=24.0, audio=None).result[0]
+        with _patched(video_types, _AvShim(swap)):
+            ui = video_ui_of(Save.execute(video=vid, filename_prefix="video/ComfyUI", format="auto", codec="auto"))
+        saved = video_out(ui_file(out, temp, ui["images"][0]), None, False, False)
+        rec[run] = {"ui": ui, "header": saved["header"], "frameCount": saved["frameCount"], "frameRate": saved["frameRate"],
+                    "duration": saved["duration"], "frames": saved["frames"]}
+    return rec
+
+
+# The glitch's seeds (ruling (e)): torch keeps a seed's low 32 bits, so one past 2³² checks the runner does too.
+VFX_GLITCH_SEEDS = (0, 12345, 2**64 - 1)
+
+
+def group_vfx_join(names: list[str]) -> dict:
+    """Crossfade and Transition (R6.3): two clips joined, the second resized to the first."""
+    import tempfile
+    from comfy_extras import nodes_video_effects as nve
+    from comfy_extras import nodes_video_pro as nvp
+    curves = ["linear", "ease_in_out", "ease_in", "ease_out"]
+    styles = ["dissolve", "whip_pan_left", "whip_pan_right", "zoom_in", "zoom_out", "glitch", "light_leak"]
+    pairs = [(c, "clip6-small") for c in VFX_STANDARD] + [("clip6-small", "clip8"), ("clip8", "clip8-odd"), ("clip8-big", "clip8"), ("clip8", "clip8-big")]
+    xf = {"duration": 12, "curve": "ease_in_out", "trim_in_a": 0, "trim_out_a": -1, "trim_in_b": 0, "trim_out_b": -1}
+    xf_grid = [(f"defaults, {a} + {b}", dict(xf), a, b, None) for a, b in pairs]
+    for k, (lo, hi, mid) in {"duration": (1, 2400, 3), "trim_in_a": (0, 100000, 3), "trim_out_a": (-1, 100000, 5),
+                             "trim_in_b": (0, 100000, 2), "trim_out_b": (-1, 100000, 4)}.items():
+        for label, v in (("min", lo), ("max", hi), ("between", mid)):
+            xf_grid.append((f"{k} {label} ({v})", {**xf, k: v}, "clip8", "clip6-small", None))
+    for c in curves:
+        for a, b in (("clip8", "clip6-small"), ("clip6-small", "clip8")):
+            xf_grid.append((f"curve {c}, {a} + {b}", {**xf, "curve": c}, a, b, None))
+    xf_grid += [
+        ("duration 7 (past B only), linear", {**xf, "duration": 7, "curve": "linear"}, "clip8", "clip6-small", None),
+        ("duration 1, ease_out", {**xf, "duration": 1, "curve": "ease_out"}, "clip8", "clip6-small", None),
+        ("duration 3, ease_in, clip8-odd + clip2", {**xf, "duration": 3, "curve": "ease_in"}, "clip8-odd", "clip2", None),
+        ("clip1 + clip1", {**xf, "curve": "linear"}, "clip1", "clip1", None),
+        ("trim_in_a at the last frame (7)", {**xf, "trim_in_a": 7, "curve": "linear"}, "clip8", "clip6-small", None),
+        ("trim_in_a past the end (8)", {**xf, "trim_in_a": 8, "curve": "linear"}, "clip8", "clip6-small", None),
+        ("trim_out_a 0: one frame", {**xf, "trim_out_a": 0, "curve": "linear"}, "clip8", "clip6-small", None),
+        ("trim_out_a before trim_in_a (5, 2): one frame", {**xf, "trim_in_a": 5, "trim_out_a": 2, "curve": "linear"}, "clip8", "clip6-small", None),
+        ("trim_out_a at trim_in_a (4, 4): one frame", {**xf, "trim_in_a": 4, "trim_out_a": 4, "curve": "ease_in"}, "clip8", "clip6-small", None),
+        ("trim_out_a at the end (8)", {**xf, "trim_out_a": 8, "curve": "linear"}, "clip8", "clip6-small", None),
+        ("trim_in_b at the last frame (5)", {**xf, "trim_in_b": 5, "curve": "linear"}, "clip8", "clip6-small", None),
+        ("trim_in_b past the end (6)", {**xf, "trim_in_b": 6, "curve": "ease_out"}, "clip8", "clip6-small", None),
+        ("trim_out_b 0: one frame", {**xf, "trim_out_b": 0, "curve": "linear"}, "clip8", "clip6-small", None),
+        ("trim_out_b before trim_in_b (4, 1): one frame", {**xf, "trim_in_b": 4, "trim_out_b": 1, "curve": "linear"}, "clip8", "clip6-small", None),
+        ("trims on both (2, 7, 1, 5), duration 3", {**xf, "trim_in_a": 2, "trim_out_a": 7, "trim_in_b": 1, "trim_out_b": 5, "duration": 3, "curve": "linear"}, "clip8", "clip6-small", None),
+        ("trims on both, sizes swapped", {**xf, "trim_in_a": 1, "trim_out_a": 4, "trim_in_b": 3, "trim_out_b": 8, "duration": 2, "curve": "ease_in"}, "clip6-small", "clip8", None),
+    ]
+    tr = {"style": "dissolve", "duration": 12, "curve": "ease_in_out"}
+    tr_grid = [(f"defaults, {a} + {b}", dict(tr), a, b, None) for a, b in pairs]
+    tr_grid += [(f"duration {label} ({v})", {**tr, "duration": v}, "clip8", "clip6-small", None) for label, v in (("min", 1), ("max", 240), ("between", 3))]
+    for s in styles:
+        for c in curves:
+            for a, b in (("clip8", "clip6-small"), ("clip6-small", "clip8")):
+                tr_grid.append((f"{s}, {c}, {a} + {b}", {**tr, "style": s, "curve": c}, a, b, 0 if s == "glitch" else None))
+        for dur in (1, 3, 240):
+            tr_grid.append((f"{s}, duration {dur}", {**tr, "style": s, "duration": dur, "curve": "linear"}, "clip8", "clip6-small", 0 if s == "glitch" else None))
+    for s in styles:
+        tr_grid.append((f"{s}, clip8-odd + clip8", {**tr, "style": s, "duration": 5, "curve": "ease_in"}, "clip8-odd", "clip8", 0 if s == "glitch" else None))
+        tr_grid.append((f"{s}, clip8-big + clip8", {**tr, "style": s, "duration": 6, "curve": "linear"}, "clip8-big", "clip8", 0 if s == "glitch" else None))
+    for seed in VFX_GLITCH_SEEDS:
+        for c, a, b, dur in (("linear", "clip8", "clip8-odd", 8), ("ease_in_out", "clip8-odd", "clip6-small", 6), ("ease_out", "clip8-big", "clip8", 7)):
+            tr_grid.append((f"glitch, seed {seed}, {c}, {a} + {b}, duration {dur}", {**tr, "style": "glitch", "duration": dur, "curve": c}, a, b, seed))
+    cases: dict = {"threads": vfx_threads(), "clips": {k: {"frames": v[0], "w": v[1], "h": v[2], "seed": v[3]} for k, v in VFX_CLIPS.items()},
+                   "inlineValues": VFX_INLINE_VALUES, "band": VFX_BAND}
+    with tempfile.TemporaryDirectory() as tmp:
+        runs = vfx_join_cases(tmp, nve.VideoCrossfadeNode, "VideoCrossfade", xf_grid)
+        runs += vfx_join_cases(tmp, nvp.TransitionNode, "Transition", tr_grid)
+        # The glitch's decisions, repeated line for line from the same seed (the brief: equal to Python exactly).
+        for rec in runs:
+            if rec["class_type"] == "Transition" and rec["widgets"]["style"] == "glitch" and "out" in rec:
+                rec["glitch"] = vfx_glitch_draws(rec["widgets"], VFX_CLIPS[rec["input"]][0], VFX_CLIPS[rec["input_b"]][0], int(rec["seed"]))
+        cases["runs"] = runs
+        cases["saved"] = [
+            vfx_saved_join(tmp, nve.VideoCrossfadeNode, "VideoCrossfade", {**xf, "duration": 4, "curve": "linear"}, "clip8", "clip6-small"),
+            vfx_saved_join(tmp, nvp.TransitionNode, "Transition", {**tr, "duration": 5, "curve": "ease_in"}, "clip8", "clip6-small"),
+            vfx_saved_join(tmp, nvp.TransitionNode, "Transition", {**tr, "style": "glitch", "duration": 6, "curve": "linear"}, "clip8", "clip8-odd", seed=12345),
+        ]
+    return {"cases": cases}
+
+
 GROUPS = {"probe": group_probe, "decode": group_decode, "encode": group_encode, "sound": group_sound, "video": group_video,
-          "frames": group_frames, "timeline-media": group_timeline_media, "vfx-time": group_vfx_time}
+          "frames": group_frames, "timeline-media": group_timeline_media, "vfx-time": group_vfx_time, "vfx-join": group_vfx_join}
 
 
 def main() -> None:

@@ -220,15 +220,19 @@ describe('the rows (rule 1)', () => {
     expect(Object.hasOwn(MEDIA_EFFECT_FAMILY_OF, 'SaveAudioOpus')).toBe(false)
   })
 
-  it('the time effects’ rows (R6.1’s pilots, R6.2’s four): a local render reading frame batches only, their widgets as ComfyUI validates them', () => {
-    expect([...MEDIA_EFFECTS_PORTED].sort()).toEqual(['FrameTrail', 'SlitScan', 'SpeedRamp', 'TemporalMotionBlur', 'TimeDisplacement', 'VideoReverse', 'VideoTrim'])
+  it('the ported effects’ rows (R6.1’s pilots, R6.2’s four, R6.3’s two joins): a local render reading frame batches only, their widgets as ComfyUI validates them', () => {
+    const ported = ['FrameTrail', 'SlitScan', 'SpeedRamp', 'TemporalMotionBlur', 'TimeDisplacement', 'Transition', 'VideoCrossfade', 'VideoReverse', 'VideoTrim']
+    expect([...MEDIA_EFFECTS_PORTED].sort()).toEqual(ported)
     const rows = mediaEffectRows()
-    expect(Object.keys(rows).sort()).toEqual(['FrameTrail', 'SlitScan', 'SpeedRamp', 'TemporalMotionBlur', 'TimeDisplacement', 'VideoReverse', 'VideoTrim'])
+    expect(Object.keys(rows).sort()).toEqual(ported)
     for (const [cls, row] of Object.entries(rows)) {
-      expect(row, cls).toMatchObject({ family: 'video-time', local: 'render', mustLink: ['frames'], required: ['frames'], valueInputs: { frames: ['frames'] } })
-      expect(row.linkSources!.frames, cls).toEqual(expect.arrayContaining(FRAMES_OUTPUTS.map(x => [...x])))
+      const joins = cls === 'VideoCrossfade' || cls === 'Transition'
+      const family = joins ? 'video-join' : 'video-time'
+      const ins = joins ? ['clip_a', 'clip_b'] : ['frames']
+      expect(row, cls).toMatchObject({ family, local: 'render', mustLink: ins, required: ins, valueInputs: Object.fromEntries(ins.map(i => [i, ['frames']])) })
+      for (const i of ins) expect(row.linkSources![i], `${cls} ${i}`).toEqual(expect.arrayContaining(FRAMES_OUTPUTS.map(x => [...x])))
       expect(RUNNER_NODE_RULES[cls], cls).toEqual(row)
-      expect(SWITCHED_CLASSES[cls], cls).toBe('video-time')
+      expect(SWITCHED_CLASSES[cls], cls).toBe(family)
       expect(LOCAL_RENDER_TYPES.has(cls), cls).toBe(true)
       // Every video effect but Slow motion, Silence cut and Text clip is an output node (define_schema).
       expect(RUNNER_OUTPUT_CLASSES.has(cls), cls).toBe(true)
@@ -240,12 +244,13 @@ describe('the rows (rule 1)', () => {
   it('FRAMES_OUTPUTS: Get video components, Load video frames and each ported effect; FRAME_ENCODERS: Create video, Save video frames', () => {
     expect(FRAMES_OUTPUTS.map(x => [...x])).toEqual([
       ['GetVideoComponents', 0], ['LoadVideoFrames', 0], ['FrameTrail', 0], ['VideoReverse', 0], ['VideoTrim', 0],
-      ['TemporalMotionBlur', 0], ['SlitScan', 0], ['TimeDisplacement', 0], ['SpeedRamp', 0],
+      ['TemporalMotionBlur', 0], ['SlitScan', 0], ['TimeDisplacement', 0], ['SpeedRamp', 0], ['VideoCrossfade', 0], ['Transition', 0],
     ])
     expect([...FRAME_ENCODERS]).toEqual(['CreateVideo', 'SaveVideoFrames'])
     expect(MEDIA_EFFECT_OUTPUT_KINDS).toEqual({
       FrameTrail: { 0: 'frames' }, VideoReverse: { 0: 'frames' }, VideoTrim: { 0: 'frames' },
       TemporalMotionBlur: { 0: 'frames' }, SlitScan: { 0: 'frames' }, TimeDisplacement: { 0: 'frames' }, SpeedRamp: { 0: 'frames' },
+      VideoCrossfade: { 0: 'frames' }, Transition: { 0: 'frames' },
     })
     for (const [cls, input] of [['CreateVideo', 'images'], ['SaveVideoFrames', 'frames']] as const) {
       expect(RUNNER_NODE_RULES[cls]!.linkSources![input], cls).toEqual(expect.arrayContaining(FRAMES_OUTPUTS.map(x => [...x])))
@@ -256,6 +261,8 @@ describe('the rows (rule 1)', () => {
     expect(VIDEO_EFFECTS.SlitScan!.reads).toBe('held')
     expect(VIDEO_EFFECTS.TimeDisplacement!.reads).toBe('held')
     expect(VIDEO_EFFECTS.SpeedRamp!.reads).toBe('window')
+    expect(VIDEO_EFFECTS.VideoCrossfade!.reads).toBe('join')
+    expect(VIDEO_EFFECTS.Transition!.reads).toBe('join')
   })
 
   it('an effect’s slot carries frames only while its family is on', () => {

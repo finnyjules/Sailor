@@ -38,8 +38,8 @@ export const MEDIA_EFFECT_FAMILIES: readonly MediaEffectFamily[] = [
   'video-time', 'video-join', 'video-look', 'video-stabilize', 'video-flow', 'video-draw', 'video-text', 'sound-effects', 'sound-denoise',
 ]
 
-/** The effects ported so far (R6.1: the three pilots; R6.2: the other time effects). Each task adds its classes. */
-export const MEDIA_EFFECTS_PORTED: readonly string[] = ['FrameTrail', 'VideoReverse', 'VideoTrim', 'TemporalMotionBlur', 'SlitScan', 'TimeDisplacement', 'SpeedRamp']
+/** The effects ported so far (R6.1: the three pilots; R6.2: the other time effects; R6.3: the two joins). Each task adds its classes. */
+export const MEDIA_EFFECTS_PORTED: readonly string[] = ['FrameTrail', 'VideoReverse', 'VideoTrim', 'TemporalMotionBlur', 'SlitScan', 'TimeDisplacement', 'SpeedRamp', 'VideoCrossfade', 'Transition']
 
 /** Each R6 class's family (every generated class, ported or not; Save audio (Opus) is not an R6 family's). */
 export const MEDIA_EFFECT_FAMILY_OF: Readonly<Record<string, MediaEffectFamily>> = Object.fromEntries(

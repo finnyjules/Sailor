@@ -86,7 +86,7 @@ vi.mock('~~/server/media/values', async (importOriginal) => {
 
 import type { ApiPrompt } from '#shared/runner/graph'
 import { ALL_RUNNER_FAMILIES, MEDIA_EFFECT_TOOL_FAMILIES, MEDIA_TOOL_FAMILIES, type RunnerFamily } from '#shared/runner/families'
-import { MEDIA_EFFECTS_PORTED, MEDIA_EFFECT_WORDS } from '#shared/runner/mediaEffects'
+import { MEDIA_EFFECTS_PORTED, MEDIA_EFFECT_FAMILY_OF, MEDIA_EFFECT_WORDS } from '#shared/runner/mediaEffects'
 import { PICTURE_OUTPUTS } from '#shared/runner/eligibility'
 import { runnerTakesWorkflow } from '#shared/runner/validate'
 import { nodesNeedingEngine } from '#shared/runner/needsEngine'
@@ -109,6 +109,8 @@ import {
 } from './__runner__/mediaEffectsParity'
 
 const FX = vfxFixture('vfx-time')
+/** The ported classes this group covers (R6.3 on: other families' classes are ported too). */
+const TIME_PORTED = MEDIA_EFFECTS_PORTED.filter(c => MEDIA_EFFECT_FAMILY_OF[c] === 'video-time')
 const LONG = { timeout: 120_000 }
 const ON: ReadonlySet<RunnerFamily> = new Set(['cards', 'media-video', 'video-time'])
 const OFF_VIDEO_TIME: ReadonlySet<RunnerFamily> = new Set(['cards', 'media-video'])
@@ -131,7 +133,7 @@ describe('the fixture', () => {
     expect(FX.threads.torch).toBeGreaterThan(1)
     expect(FX.threads.opencv).toBeGreaterThan(0)
     const classes = new Set(FX.runs.map(r => r.class_type))
-    expect([...classes].sort()).toEqual([...MEDIA_EFFECTS_PORTED].sort())
+    expect([...classes].sort()).toEqual([...TIME_PORTED].sort())
     // Python raises only in Motion blur (time), on every clip longer than one frame (its replicate pad of a 4-D tensor).
     expect(FX.runs.filter(r => r.error).map(r => r.class_type)).toEqual(expect.arrayContaining(['TemporalMotionBlur']))
     for (const r of FX.runs) {
@@ -415,7 +417,7 @@ describe('Motion blur (time) on a clip known to be longer than one frame is refu
 
 describe('the family', () => {
   it('with video-time off, a workflow with a pilot is left to the engine and the pilot named', () => {
-    for (const cls of MEDIA_EFFECTS_PORTED) {
+    for (const cls of TIME_PORTED) {
       const c = FX.runs.find(r => r.class_type === cls)!
       const p: ApiPrompt = { l: loadVideo(), g: getComp(), e: effect(c), c: createVideo('e'), s: saveVideo('c') }
       expect(runnerTakesWorkflow(p, ON), cls).toBe(true)

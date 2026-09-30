@@ -23,7 +23,7 @@ import { createFileAccess, type FileAccess } from '~~/server/runner/fileAccess'
 import { filesOf } from '~~/server/runner/values'
 import type { OutputFile, RunnerValue } from '~~/server/runner/types'
 import { keepFrames, readFrames, type MediaValueIO } from '~~/server/media/values'
-import { VIDEO_EFFECTS, mediaEffectParams, windowSchedule } from '~~/server/runner/video/table'
+import { VIDEO_EFFECTS, joinReads, mediaEffectParams, windowSchedule } from '~~/server/runner/video/table'
 import { videoCores } from '~~/server/runner/video/cores'
 import type { Tensor } from '~~/server/runner/effects/core/tensor'
 import { synth } from './effectsParity'
@@ -36,17 +36,27 @@ export interface VfxPreview { filename: string; mode: string; w: number; h: numb
 export interface VfxUi { images: { filename: string; subfolder: string; type: string }[]; animated: boolean[] }
 /** Speed ramp's count and source frames as Python works them out (R6.2; float32 arrays base64). */
 export interface VfxRamp { N: number; src: string; lo: number[]; hi: number[]; frac: string; nearest: number[]; meanRate?: number; cum_sha256?: string; cum?: string }
+/** The glitch's decisions as Python makes them (R6.3): per transition frame its alpha, the clip read, the offsets and each band's shift. */
+export interface VfxGlitch { d: number; frames: { t: number; fromB: boolean; offset: number; slices: number; dx: number[] }[] }
+/** A join's layout as the node works it out (R6.3): each clip's range, the overlap, the head and the tail. */
+export interface VfxJoinLayout { a: [number, number]; b: [number, number]; d: number; head: number; tail: number }
+/** Rule 5's band (R6.3): flat indices where Python's value sat within the fixture's band of the edge each 8-bit form cuts at, and the masked forms' sha256. */
+export interface VfxBand { round: number[]; trunc: number[]; round_py?: number[]; trunc_py?: number[]; round8_masked_sha256?: string; trunc8_masked_sha256?: string }
 export interface VfxRun {
   name: string; class_type: string; node_id: string; widgets: Record<string, unknown>; input: string
   out?: VfxBatch; ui?: VfxUi | null; preview?: VfxPreview | null; error?: string
   ramp?: VfxRamp
+  /** R6.3: the second clip, the seed torch was given, the layout, the band and the glitch's decisions. */
+  input_b?: string; seed?: string; layout?: VfxJoinLayout; band?: VfxBand; glitch?: VfxGlitch
 }
 export interface VfxSavedRun { ui: VfxUi; header: { video: { w: number; h: number; codec: string; pixFmt: string; frames: number }[] }; frameCount: number; frameRate: { num: number; den: number }; duration: number; frames: string[] }
-export interface VfxSaved { class_type: string; widgets: Record<string, unknown>; input: string; fps: number; x264: VfxSavedRun; openh264: VfxSavedRun }
+export interface VfxSaved { class_type: string; widgets: Record<string, unknown>; input: string; input_b?: string; seed?: string; fps: number; x264: VfxSavedRun; openh264: VfxSavedRun }
 export interface VfxFixture {
   threads: { torch: number; opencv: number }
   clips: Record<string, { frames: number; w: number; h: number; seed: number }>
   inlineValues: number
+  /** R6.3: rule 5's band, in 255-scale. */
+  band?: number
   runs: VfxRun[]
   saved: VfxSaved[]
   /** R6.1's acceptance: a clip through Load video → Get video components → Reverse → Create video → Save video. */
@@ -134,6 +144,35 @@ export function coreBatch(cls: string, widgets: Record<string, unknown>, input: 
     f32.push(bytesOf(hwc(r.out)).slice())
     round8.push(videoCores.vx.toRgb(r.out, 'round'))
     trunc8.push(videoCores.vx.toRgb(r.out, 'trunc'))
+  }
+  return { count: reads.length, w: out.w, h: out.h, f32: concat(f32), round8: concat(round8), trunc8: concat(trunc8) }
+}
+
+/**
+ * A join's whole output batch (R6.3: Crossfade, Transition) made by its core
+ * on this thread, frame by frame as the plan makes it (table.ts joinReads:
+ * each output frame's A and B frames and its own params), with the seed a
+ * glitch draws from (the fixture's, or glitchSeed's).
+ */
+export function coreJoinBatch(cls: string, widgets: Record<string, unknown>, a: { frames: Uint8Array[]; w: number; h: number }, b: { frames: Uint8Array[]; w: number; h: number }, seed?: string | bigint): ReturnType<typeof coreBatch> {
+  const spec = VIDEO_EFFECTS[cls]!
+  const params = mediaEffectParams(MEDIA_EFFECT_SCHEMAS[cls], widgets)
+  const ins = [{ count: a.frames.length, w: a.w, h: a.h, exact: true }, { count: b.frames.length, w: b.w, h: b.h, exact: true }]
+  const out = spec.shape(params, ins)
+  const reads = joinReads(spec.joinOf!(params, ins), a.w, a.h)
+  const own = seed !== undefined ? { ...params, _seed: String(seed) } : params
+  const f32: Uint8Array[] = []
+  const round8: Uint8Array[] = []
+  const trunc8: Uint8Array[] = []
+  for (let j = 0; j < reads.length; j++) {
+    const r = reads[j]!
+    const x: Tensor[] = []
+    if (r.a !== null) x.push(videoCores.vx.fromRgb(a.frames[r.a]!, a.w, a.h))
+    if (r.b !== null) x.push(videoCores.vx.fromRgb(b.frames[r.b]!, b.w, b.h))
+    const res = videoCores.join.frame(x, { ...own, ...r.own }, undefined, j, reads.length)
+    f32.push(bytesOf(hwc(res.out)).slice())
+    round8.push(videoCores.vx.toRgb(res.out, 'round'))
+    trunc8.push(videoCores.vx.toRgb(res.out, 'trunc'))
   }
   return { count: reads.length, w: out.w, h: out.h, f32: concat(f32), round8: concat(round8), trunc8: concat(trunc8) }
 }
