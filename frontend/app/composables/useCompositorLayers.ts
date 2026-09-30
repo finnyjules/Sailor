@@ -107,7 +107,7 @@ import { applyDof, dofAvailable, dofShouldRun } from '~/lib/compositor/dofPass'
 import { depthImageFor, requestDepth, depthSourceFromViewUrl, depthKey, type DepthRef } from '~/lib/compositor/depthRegistry'
 import { sanitizeRelight } from '~/lib/relight/settings'
 import { applyRelight, relightAvailable } from '~/lib/relight/relightPass'
-import { relightDepthFieldFor } from '~/lib/relight/depthField'
+import { relightDepthFieldFor, FULL_DEPTH_RECT, type DepthRect } from '~/lib/relight/depthField'
 import { ensureFillBitmaps, getFillBitmap } from '~/lib/paint/imageFillCache'
 import { applyTornEdge, type TornEdgeSpec } from '~/lib/compositor/tornEdge'
 import { applyFeather, type FeatherSpec } from '~/lib/compositor/feather'
@@ -274,6 +274,16 @@ export function coverSourceRect(srcW: number, srcH: number, boxW: number, boxH: 
   if (Math.abs(srcA - boxA) < 1e-9) return { sx: 0, sy: 0, sw: srcW, sh: srcH }
   if (srcA > boxA) { const sw = srcH * boxA; return { sx: (srcW - sw) * fx, sy: 0, sw, sh: srcH } }
   const sh = srcW / boxA; return { sx: 0, sy: (srcH - sh) * fy, sw: srcW, sh }
+}
+
+/** The part of a source image a layer box shows, as top-down source fractions — the same crop
+ *  `drawLayerContent` draws (cover around the focus point, else the whole image stretched).
+ *  Relight reads its whole-image depth field through this, so the light lands on the shape the
+ *  box actually shows. */
+export function relightDepthRect(srcW: number, srcH: number, boxW: number, boxH: number, crop?: { fit?: string; fx?: number; fy?: number } | null): DepthRect {
+  if (crop?.fit !== 'cover' || !(srcW > 0) || !(srcH > 0) || !(boxW > 0) || !(boxH > 0)) return FULL_DEPTH_RECT
+  const r = coverSourceRect(srcW, srcH, boxW, boxH, crop.fx ?? 0.5, crop.fy ?? 0.5)
+  return { u0: r.sx / srcW, v0: r.sy / srcH, du: r.sw / srcW, dv: r.sh / srcH }
 }
 
 // ── Paint (solid color or gradient) ──────────────────────────────────────────
@@ -3153,9 +3163,12 @@ function paintLayer(
     }
     let cur: HTMLCanvasElement | null = null
     // Relight first, so a depth-of-field blur on the same layer blurs the relit picture.
+    // The field is built from the SOURCE image (never this box-sized render), off the main
+    // thread; until it lands (or while the source is still decoding) the layer draws plain.
     if (wantRelight) {
-      const field = relightDepthFieldFor(depthKey(dofRef!), depth, src)
-      const lit = field ? applyRelight(src, field, relight!, bw, bh) : null
+      const rs = relightSourceOf(layer, W, wiredLive)
+      const field = rs ? relightDepthFieldFor(depthKey(dofRef!), depth, rs.src) : null
+      const lit = field ? applyRelight(src, field, relight!, bw, bh, rs!.rect) : null
       if (lit) cur = own(lit)
     }
     if (wantDof) {
@@ -7188,6 +7201,25 @@ export interface WiredTransform {
   layoutScale?: number
 }
 
+/** Relight's source for a layer: the image it draws from (the decoded bitmap, or the wired live
+ *  element) and the crop rect its box shows. null when there is no source element yet. */
+function relightSourceOf(
+  layer: LocalLayer, W: number, wiredLive: WiredLive | null | undefined,
+): { src: CanvasImageSource & { width?: number; height?: number }; rect: DepthRect } | null {
+  if (layer.kind === 'image') {
+    const img = _imageCache.get(imageLayerCacheKey(layer.filename))
+    if (!img) return null
+    return { src: img, rect: relightDepthRect(img.naturalWidth, img.naturalHeight, layer.w * W, layer.h * W, layer.crop) }
+  }
+  if (layer.kind === 'wired') {
+    const live = wiredLive !== undefined ? wiredLive : wiredContent(layer)
+    if (!live) return null
+    const box = wiredBoxPx(layer, W, live)
+    return { src: live.src as CanvasImageSource & { width?: number; height?: number }, rect: relightDepthRect(live.w, live.h, box.w, box.h, layer.crop) }
+  }
+  return null
+}
+
 /**
  * Draw one wired image layer — the SINGLE source of truth shared by the Frame
  * node and the Compositor modal so their previews can't drift apart. The image
@@ -7238,13 +7270,10 @@ export function drawWiredImageLayer(
 
   // Relight runs before DOF, so a depth-of-field blur on the same layer blurs the relit
   // picture. Relight works in the image's own fractions, so native size needs no
-  // on-canvas normalisation, unlike DOF's `fitW * layer.scale`.
+  // on-canvas normalisation, unlike DOF's `fitW * layer.scale`. The field reads the unmasked
+  // source itself (only on a cache miss); the whole image is drawn, so no crop rect.
   if (relight && depthImg && relightKey && relightAvailable() && relight.visible !== false) {
-    const guide = src instanceof HTMLCanvasElement ? src : (() => {
-      const c = document.createElement('canvas'); c.width = iw; c.height = ih
-      c.getContext('2d')?.drawImage(src, 0, 0); return c
-    })()
-    const field = relightDepthFieldFor(relightKey, depthImg as CanvasImageSource & { width?: number; height?: number }, guide)
+    const field = relightDepthFieldFor(relightKey, depthImg as CanvasImageSource & { width?: number; height?: number }, img)
     const lit = field ? applyRelight(src, field, sanitizeRelight(relight), iw, ih) : null
     if (lit) {
       const owned = document.createElement('canvas'); owned.width = iw; owned.height = ih

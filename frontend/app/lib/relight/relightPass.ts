@@ -4,7 +4,7 @@
  * Spec: docs/superpowers/specs/2026-09-30-relight-layer-effect-design.md ("Shader").
  */
 import { GpuPost } from '~/lib/compositor/gpuPost'
-import type { FloatDepth } from './depthField'
+import { FULL_DEPTH_RECT, type DepthRect, type FloatDepth } from './depthFieldCore'
 import type { RelightEffect } from './settings'
 
 export const RELIGHT_FRAG = `#version 300 es
@@ -13,6 +13,7 @@ in vec2 vUv;
 out vec4 fragColor;
 uniform sampler2D uColor, uDepth;
 uniform vec2 uDepthTexel, uImgTexel;
+uniform vec4 uDepthRect;     // the part of the source the layer box shows: u0, v0, du, dv (top-down)
 uniform float uAspect, uRelief, uKeep, uGloss, uDetail, uShadows, uLightCount;
 uniform vec2 uLightPos[3];   // x, y (layer fractions, top-down)
 uniform vec2 uLightHR[3];    // height, reach
@@ -21,7 +22,9 @@ uniform vec2 uLightBP[3];    // colour b, brightness
 
 // Lighting runs in top-down layer fractions p; textures are FLIP_Y-uploaded, so vUv.y = 1 is the top.
 vec2 G(vec2 p) { return vec2(p.x, 1.0 - p.y); }
-float H(vec2 p) { return texture(uDepth, G(p)).r; }
+// The depth field covers the whole source image; only its lookup is remapped through the crop.
+// uDepthTexel is one field texel expressed in p (box) units, so slopes still step one texel.
+float H(vec2 p) { return texture(uDepth, G(uDepthRect.xy + p * uDepthRect.zw)).r; }
 
 vec2 slopeAt(vec2 p) {
   vec2 e = uDepthTexel * 2.0;
@@ -140,19 +143,29 @@ export function __relightRuns(): number {
   return getPass().runs
 }
 
+/** The crop rect and the field texel in box units (one field texel ÷ the rect's size). */
+export function depthRectUniforms(rect: DepthRect, dw: number, dh: number): { uDepthRect: { vec4: [number, number, number, number] }; uDepthTexel: Float32Array } {
+  const du = rect.du > 0 ? rect.du : 1, dv = rect.dv > 0 ? rect.dv : 1
+  return {
+    uDepthRect: { vec4: [rect.u0, rect.v0, du, dv] },
+    uDepthTexel: new Float32Array([1 / (Math.max(1, dw) * du), 1 / (Math.max(1, dh) * dv)]),
+  }
+}
+
 export function applyRelight(
   color: CanvasImageSource,
   depth: FloatDepth | CanvasImageSource,
   fx: RelightEffect,
   w: number,
   h: number,
+  rect: DepthRect = FULL_DEPTH_RECT,
 ): HTMLCanvasElement | null {
   if (!relightShouldRun(fx)) return null
   const dw = 'kind' in (depth as object) ? (depth as FloatDepth).width : ((depth as HTMLImageElement).naturalWidth || (depth as HTMLCanvasElement).width)
   const dh = 'kind' in (depth as object) ? (depth as FloatDepth).height : ((depth as HTMLImageElement).naturalHeight || (depth as HTMLCanvasElement).height)
   return getPass().render(color, depth, w, h, {
     ...packLights(fx),
-    uDepthTexel: new Float32Array([1 / Math.max(1, dw), 1 / Math.max(1, dh)]),
+    ...depthRectUniforms(rect, dw, dh),
     uImgTexel: new Float32Array([1 / Math.max(1, w), 1 / Math.max(1, h)]),
     uAspect: w / Math.max(1, h),
     uRelief: fx.depth,
