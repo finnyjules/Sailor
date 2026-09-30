@@ -60,6 +60,19 @@ export function formatCostLong(usd: number, hosted: boolean): string {
 }
 
 /**
+ * Local-mode USD text that keeps a small price legible rather than rounding it to
+ * "$0.01": full cents at $0.10+, three decimals down to a cent, four below that —
+ * trailing zeros trimmed either way. Mirrors GeneratorsPanel.vue's local `formatUsd`
+ * (a per-node estimate reader), hoisted here so a plain per-call price like surfaces'
+ * $0.0125 reads as "$0.013" instead of "$0.01".
+ */
+export function formatUsd(n: number): string {
+  if (n >= 0.1) return `$${n.toFixed(2)}`
+  if (n >= 0.01) return `$${n.toFixed(3).replace(/0$/, '')}`
+  return `$${n.toFixed(4).replace(/0+$/, '').replace(/\.$/, '')}`
+}
+
+/**
  * Run-money text for an estimate that may already carry a hosted credits
  * figure (see costEstimate's `hostedCredits`). That figure is model-aware and
  * has ALREADY been through creditsForUsd; passing its USD back through the

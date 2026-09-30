@@ -69,4 +69,33 @@ describe('RelightControls', () => {
     await two.get('[data-testid="relight-remove-light"]').trigger('click')
     expect((two.emitted('update')![0]![0] as any).lights).toHaveLength(1)
   })
+
+  describe('surfaces price line', () => {
+    const mkSurfaces = (surfacesStatus: 'idle' | 'loading' | 'ready' | 'error' | 'off', surfacesPrice: string | null = null) =>
+      mount(RelightControls, {
+        props: { fx: sanitizeRelight(null), selectedLight: sanitizeRelight(null).lights[0]!.id, depthStatus: 'ready', surfacesStatus, surfacesPrice },
+      })
+
+    it('shows the price while loading', () => {
+      expect(mkSurfaces('loading', '3 credits').text()).toContain('Reading shape · 3 credits')
+    })
+    it('loading with no price shows the plain copy', () => {
+      const t = mkSurfaces('loading', null).get('[data-testid="relight-status-loading"]').text()
+      expect(t).toBe('Reading shape')
+    })
+    it('offers a Retry button on error, which emits retry-surfaces', async () => {
+      const w = mkSurfaces('error')
+      const btn = w.get('[data-testid="relight-surfaces-retry"]')
+      await btn.trigger('click')
+      expect(w.emitted('retry-surfaces')).toEqual([[]])
+    })
+    it('shows no status line when off', () => {
+      expect(mkSurfaces('off').find('[data-testid="relight-status-loading"]').exists()).toBe(false)
+      expect(mkSurfaces('off').find('[data-testid="relight-status-error"]').exists()).toBe(false)
+    })
+    it('shows no status line when ready', () => {
+      expect(mkSurfaces('ready').find('[data-testid="relight-status-loading"]').exists()).toBe(false)
+      expect(mkSurfaces('ready').find('[data-testid="relight-status-error"]').exists()).toBe(false)
+    })
+  })
 })

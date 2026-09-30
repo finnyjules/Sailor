@@ -105,6 +105,7 @@ import {
 } from '~/lib/compositor/postEffects'
 import { applyDof, dofAvailable, dofShouldRun } from '~/lib/compositor/dofPass'
 import { depthImageFor, requestDepth, depthSourceFromViewUrl, depthKey, type DepthRef } from '~/lib/compositor/depthRegistry'
+import { surfacesImageFor } from '~/lib/compositor/surfacesRegistry'
 import { sanitizeRelight } from '~/lib/relight/settings'
 import { applyRelight, relightAvailable } from '~/lib/relight/relightPass'
 import { relightDepthFieldFor, FULL_DEPTH_RECT, type DepthRect } from '~/lib/relight/depthField'
@@ -3168,7 +3169,11 @@ function paintLayer(
     if (wantRelight) {
       const rs = relightSourceOf(layer, W, wiredLive)
       const field = rs ? relightDepthFieldFor(depthKey(dofRef!), depth, rs.src) : null
-      const lit = field ? applyRelight(src, field, relight!, bw, bh, rs!.rect) : null
+      // Surfaces (a normal map read once per photo, see surfacesRegistry.ts) are read
+      // SYNCHRONOUSLY, same as depth — a paint never awaits and never requests them
+      // itself; only the open Frame editor does that (CompositorModal.vue).
+      const normals = dofRef ? surfacesImageFor(dofRef) : null
+      const lit = field ? applyRelight(src, field, relight!, bw, bh, rs!.rect, normals) : null
       if (lit) cur = own(lit)
     }
     if (wantDof) {
@@ -7243,6 +7248,10 @@ export function drawWiredImageLayer(
   depthImg?: CanvasImageSource | null,
   relight?: RelightEffect | null,
   relightKey?: string,
+  // Surfaces normal map for this layer's photo, read synchronously (surfacesRegistry.ts).
+  // The caller passes what it already has from computing `relightKey`'s source — this
+  // function never requests surfaces itself.
+  normals?: CanvasImageSource | null,
 ) {
   if (!img) return
   const iw = 'naturalWidth' in img ? img.naturalWidth : img.width
@@ -7274,7 +7283,7 @@ export function drawWiredImageLayer(
   // source itself (only on a cache miss); the whole image is drawn, so no crop rect.
   if (relight && depthImg && relightKey && relightAvailable() && relight.visible !== false) {
     const field = relightDepthFieldFor(relightKey, depthImg as CanvasImageSource & { width?: number; height?: number }, img)
-    const lit = field ? applyRelight(src, field, sanitizeRelight(relight), iw, ih) : null
+    const lit = field ? applyRelight(src, field, sanitizeRelight(relight), iw, ih, undefined, normals) : null
     if (lit) {
       const owned = document.createElement('canvas'); owned.width = iw; owned.height = ih
       owned.getContext('2d')?.drawImage(lit, 0, 0)

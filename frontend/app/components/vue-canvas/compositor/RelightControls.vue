@@ -6,8 +6,19 @@ import StudioSwitch from '~/components/vue-canvas/studio/StudioSwitch.vue'
 import { RELIGHT_MAX_LIGHTS, RELIGHT_SWATCHES, newLightId, type RelightEffect, type RelightLight } from '~/lib/relight/settings'
 import { RELIGHT_SETUP_NAMES, applySetup, setupOf, type RelightSetupName } from '~/lib/relight/presets'
 
-const props = defineProps<{ fx: RelightEffect; selectedLight: string | null; depthStatus: 'idle' | 'loading' | 'ready' | 'error' }>()
-const emit = defineEmits<{ update: [patch: Partial<RelightEffect>]; 'select-light': [id: string]; compare: [on: boolean] }>()
+const props = withDefaults(defineProps<{
+  fx: RelightEffect
+  selectedLight: string | null
+  depthStatus: 'idle' | 'loading' | 'ready' | 'error'
+  /** MoGe-2 surfaces (the photo's normal map) for this layer's photo — a separate, PAID
+   *  read from the free local depth `depthStatus` above. 'off' (the kill switch, or no
+   *  photo to read yet) shows nothing, same as 'ready'. */
+  surfacesStatus?: 'idle' | 'loading' | 'ready' | 'error' | 'off'
+  /** The price to show while surfaces are being read — null once cached (free) or when
+   *  surfacesStatus isn't 'loading'. Surfaces show their price every time, never asked. */
+  surfacesPrice?: string | null
+}>(), { surfacesStatus: 'off', surfacesPrice: null })
+const emit = defineEmits<{ update: [patch: Partial<RelightEffect>]; 'select-light': [id: string]; compare: [on: boolean]; 'retry-surfaces': [] }>()
 
 const active = computed(() => setupOf(props.fx))
 const light = computed(() => props.fx.lights.find(l => l.id === props.selectedLight) ?? props.fx.lights[0] ?? null)
@@ -52,7 +63,14 @@ const heightWord = (h: number) => (h < 0 ? 'Behind' : h < 0.2 ? 'Low' : h < 0.55
 
 <template>
   <div class="space-y-4 text-[12px]">
-    <p v-if="depthStatus === 'loading'" class="text-white/50" data-testid="relight-status-loading">Reading shape…</p>
+    <p v-if="surfacesStatus === 'loading'" class="text-white/50" data-testid="relight-status-loading" title="Worked out once per photo">
+      {{ surfacesPrice ? `Reading shape · ${surfacesPrice}` : 'Reading shape' }}
+    </p>
+    <p v-else-if="surfacesStatus === 'error'" class="text-red-300/80 flex items-center gap-2" data-testid="relight-status-error" title="Worked out once per photo">
+      <span>Couldn't read this photo's shape</span>
+      <button data-testid="relight-surfaces-retry" class="text-white/70 hover:text-white underline underline-offset-2 cursor-pointer" @click="emit('retry-surfaces')">Retry</button>
+    </p>
+    <p v-else-if="depthStatus === 'loading'" class="text-white/50" data-testid="relight-status-loading">Reading shape…</p>
     <p v-else-if="depthStatus === 'error'" class="text-red-300/80" data-testid="relight-status-error">Couldn't read this photo's shape</p>
 
     <section class="space-y-2">
