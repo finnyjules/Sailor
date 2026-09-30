@@ -96,6 +96,16 @@ function bigGcd(a: bigint, b: bigint): bigint {
 export function pyStreamRate(fps: number): Rational {
   if (!(fps > 0) || !Number.isFinite(fps)) throw new MediaError('failed')
   const [n, d] = exactFraction(fps)
+  return pyStreamRateOf(n, d)
+}
+
+/**
+ * The same for a rate Python holds as a Fraction (R5.4: a file's
+ * average_rate, which Save video's re-encode keeps exact): n / d, both
+ * positive.
+ */
+export function pyStreamRateOf(n: bigint, d: bigint): Rational {
+  if (!(n > 0n && d > 0n)) throw new MediaError('failed')
   const x = n * 1000n
   let q = x / d
   const r2 = 2n * (x % d)
@@ -386,9 +396,10 @@ export async function encodeVideo(o: EncodeVideoOptions): Promise<{ frames: numb
     // reads the sound, then keeps the AAC priming packet as it does in Python's own files (R5.1c
     // review, Important 3: with the video starting at 0 the seek drops it, and the sound starts
     // with 448 zeros).
-    args.push('-map', videoMap, '-fps_mode', 'passthrough', '-enc_time_base:v', tb, ...h264Args(o.quality), '-bsf:v', `setts=dts=DTS-${H264_DTS_DELAY}`)
+    // No `encoder` tag on the streams (R5.4): PyAV's streams carry none, and the CLI's would name the build.
+    args.push('-map', videoMap, '-fps_mode', 'passthrough', '-enc_time_base:v', tb, ...h264Args(o.quality), '-bsf:v', `setts=dts=DTS-${H264_DTS_DELAY}`, '-metadata:s:v:0', 'encoder=')
     if (sound && soundIndex !== null) {
-      args.push('-map', `${soundIndex}:a:0`, '-c:a', 'aac', '-ar', String(sound.rate), '-ch_layout', sound.layout)
+      args.push('-map', `${soundIndex}:a:0`, '-c:a', 'aac', '-ar', String(sound.rate), '-ch_layout', sound.layout, '-metadata:s:a:0', 'encoder=')
       if (soundFilter) args.push('-af', soundFilter)
     }
     args.push('-map_metadata', tagsIndex === null ? '-1' : String(tagsIndex))
@@ -402,6 +413,60 @@ export async function encodeVideo(o: EncodeVideoOptions): Promise<{ frames: numb
     const frames = made.video[0]?.frames ?? counted.n
     await moveOut(out, o.out, o.outRoots)
     return { frames }
+  }
+  finally {
+    await removeMediaTempDir(work)
+  }
+}
+
+// ── copyVideo ────────────────────────────────────────────────────────────────
+
+/**
+ * A file's streams into an MP4 as they are, as VideoFromFile.save_to copies
+ * them when it reuses them (video_types.py:344-374, R5.4): every video, sound
+ * and subtitle stream (`add_stream_from_template`; data streams and chapters
+ * are left out), packets untouched (`-c copy`), each stream at the time base
+ * PyAV's muxer gives a stream it set none for (1/90000 for pictures and
+ * subtitles, 1/rate for sound), `movflags use_metadata_tags`. The tags: the
+ * source's own, then `metadata` over them (Python writes its tags after
+ * copying every source tag they don't name), as an ffmetadata file. A codec
+ * the MP4 muxer doesn't take fails, as PyAV raises.
+ *
+ * `probe`: the source's (probeMedia of the person's file, checked against the
+ * video caps by the caller).
+ */
+export async function copyVideo(o: {
+  probe: MediaProbe
+  /** Where the finished MP4 goes (absolute; must not exist yet). */
+  out: string
+  /** Python's tags (text as it writes them); null for none (the Video card). */
+  metadata: Record<string, string> | null
+  userId: string | null; signal?: AbortSignal
+  /** The folders `out` may be written to. */
+  outRoots: readonly string[]
+  timeoutMs?: number
+}): Promise<void> {
+  const p = o.probe
+  if (!p.video.length) throw new MediaError('noVideo')
+  const j = await ffprobeJson(p.path, p.format, ['-show_format', '-show_streams'], { userId: o.userId, signal: o.signal })
+  const fmt = (j.format ?? {}) as { tags?: Record<string, unknown> }
+  const source: Record<string, string> = {}
+  for (const [k, v] of Object.entries(fmt.tags ?? {})) if (typeof v === 'string' && (!o.metadata || !Object.hasOwn(o.metadata, k))) source[k] = v
+  const tags = { ...source, ...(o.metadata ?? {}) }
+  const streams = Array.isArray(j.streams) ? (j.streams as { codec_type?: unknown; sample_rate?: unknown }[]) : []
+  const rates = streams.filter(s => s.codec_type === 'audio').map(s => Number(s.sample_rate))
+  const work = await mediaTempDir()
+  try {
+    const args: string[] = [...inputArgs(p.path, p.format)]
+    const tagsArgs = await tagsInput(work, tags)
+    if (tagsArgs) args.push(...tagsArgs)
+    const out = join(work, 'out.mp4')
+    args.push('-map', '0:v', '-map', '0:a?', '-map', '0:s?', '-c', 'copy', '-map_chapters', '-1')
+    args.push('-time_base:v', '1/90000', '-time_base:s', '1/90000')
+    rates.forEach((r, k) => { if (Number.isInteger(r) && r > 0) args.push(`-time_base:a:${k}`, `1/${r}`) })
+    args.push('-map_metadata', tagsArgs ? '1' : '-1', '-movflags', 'use_metadata_tags', '-f', 'mp4', '-y', `file:${out}`)
+    await runMedia({ tool: 'ffmpeg', args, userId: o.userId, signal: o.signal, workDir: work, cleanup: [out], timeoutMs: o.timeoutMs })
+    await moveOut(out, o.out, o.outRoots)
   }
   finally {
     await removeMediaTempDir(work)

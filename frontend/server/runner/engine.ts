@@ -54,6 +54,7 @@ import { PICTURE_ANIMATED, pictureHasFrames, pictureMeta, pictureRefusal } from 
 import { extraPromptText, hasOutputNode, measuredInput, nodeCredits, stageEstimate, unpricedProviderNode, type Metering } from './metering'
 import { poseStartProblem } from './generators/nanoExtras'
 import { loadAudioStartProblems, soundStreamProblem } from './media/soundNodes'
+import { loadVideoStartProblems, videoStreamProblem } from './media/videoNodes'
 import { ev, type RunEvents, type SwitchReason } from './events'
 import { mediaNodeKind, nodeMediaChangedWords, nodeMediaCheck, nodeMediaFiles } from './nodeMedia'
 import { switchedSinceHold } from './switches'
@@ -1045,9 +1046,10 @@ export function createEngine(deps: EngineDeps) {
       const made = (rec.endpoint !== null && PROVIDER_TYPES.has(rec.classType)) || renderedHere(id)
         || !!rec.calls?.some(c => c.status === 'done')
       if (rec.status === 'done' && !rec.reused && made) {
-        // The Audio card hands its sound on as its own output (R5.3 fix round 1, Important 1): only
-        // the files it saved itself are new; the sound it hands on was made (and listed) by its maker.
-        const handedOn = rec.classType === 'Audio' && rec.values ? new Set(filesOfValues(rec.values).map(outputKeyOf)) : null
+        // The Audio card hands its sound on as its own output (R5.3 fix round 1, Important 1), and the
+        // Video card its video (R5.4): only the files the card saved itself are new; what it hands on
+        // was made (and listed) by its maker.
+        const handedOn = (rec.classType === 'Audio' || rec.classType === 'Video') && rec.values ? new Set(filesOfValues(rec.values).map(outputKeyOf)) : null
         for (const f of rec.outputs) {
           if (f.type !== 'output' || handedOn?.has(outputKeyOf(f))) continue
           // Each file once in the stage's history.
@@ -2105,6 +2107,13 @@ export function createEngine(deps: EngineDeps) {
     for (const p of prompts) {
       const missing = await loadAudioStartProblems(p, f => files.exists(f), f => soundStreamProblem(files, f, i.userId))
       if (missing) throw refuse(missing.message, 400, { nodeId: missing.nodeId, classType: missing.classType, ...(missing.file ? { file: missing.file } : {}) })
+    }
+    // Load video's validate_inputs (R5.4): a video file that isn't there is refused now ("Invalid
+    // video file"), and so is one with no picture in it or over the caps (from its header, rule 6),
+    // before anything runs or is held.
+    for (const p of prompts) {
+      const bad = await loadVideoStartProblems(p, f => files.exists(f), f => videoStreamProblem(files, f, i.userId, deps.hosted()))
+      if (bad) throw refuse(bad.message, 400, { nodeId: bad.nodeId, classType: bad.classType, ...(bad.file ? { file: bad.file } : {}) })
     }
     // The picture cards' files (R1.3 follow-up): one a card would refuse at its
     // turn (16-bit, 32-bit, CMYK, a see-through GIF, a kind sharp can't read)

@@ -29,9 +29,10 @@ import { MEDIA_CAPS, type MediaCaps } from '#shared/runner/media'
 import type { FileAccess } from '../runner/fileAccess'
 import type { KeptBytes } from '../runner/keptBytes'
 import type { OutputFile, RunnerValue, SoundNote } from '../runner/types'
-import { decodeAudio, decodeFrames, type DecodedSound, type SoundDecoder } from './decode'
-import { PYAV_H264_DEFAULT, encodeVideo, floatWav, pyStreamRate, writeFfv1, type SoundLayout } from './encode'
-import { MediaError } from './run'
+import { decodeAudio, decodeFrames, framesFilter, type DecodedSound, type SoundDecoder } from './decode'
+import { FFV1_KEPT_RATE, PYAV_H264_DEFAULT, encodeVideo, floatWav, pyStreamRate, writeFfv1, type SoundLayout } from './encode'
+import { mediaCapsWord, probeMedia, type MediaProbe, type Rational } from './probe'
+import { MediaError, inputArgs, runMedia } from './run'
 
 /** Classes whose sound Python decodes with _download_url_to_audio_dict (nodes_replicate.py:1735, :1834, :5463, and the two cards that run them). */
 export const SOUND_DOWNLOAD_CLASSES: ReadonlySet<string> = new Set([
@@ -189,7 +190,11 @@ export async function keepFrames(runId: string, frames: AsyncIterable<Uint8Array
  * Fraction(round(fps · 1000), 1000) (`pyStreamRate`).
  */
 export function madeVideoSoundCut(rate: number, fps: number, frames: number): number {
-  const r = pyStreamRate(fps)
+  return soundCutAt(rate, pyStreamRate(fps), frames)
+}
+
+/** The same cut at a stream rate already set (R5.4: a file's average_rate, rounded by `pyStreamRateOf`). */
+export function soundCutAt(rate: number, r: Rational, frames: number): number {
   const top = BigInt(rate) * BigInt(frames) * BigInt(r.den)
   const n = BigInt(r.num)
   const q = top / n
@@ -220,10 +225,23 @@ export async function videoFileFor(v: RunnerValue, io: MediaValueIO, o: { metada
 }
 
 async function encodeMadeVideo(v: VideoValue, io: MediaValueIO, metadata: Record<string, string> | undefined): Promise<string> {
-  const { file, count, w, h } = v.frames
-  checkBatch(count, w, h, io.hosted)
-  const fps = pyStreamRate(v.fps)
+  checkBatch(v.frames.count, v.frames.w, v.frames.h, io.hosted)
   const sound = v.sound ? await readSound({ kind: 'files', files: [v.sound.file], sound: v.sound.note }, '', io) : null
+  return encodeVideoParts({ frames: v.frames, sound, rate: pyStreamRate(v.fps) }, io, metadata)
+}
+
+/**
+ * VideoFromComponents.save_to over parts already in hand (R5.4: also Save
+ * video's re-encode of a file, whose rate Python keeps as the exact
+ * average_rate): the kept frames, the sound's samples (or none), and the
+ * stream rate as save_to sets it. Into a temporary file in the run's kept
+ * folder (`dropVideoFile` lets it go).
+ */
+export async function encodeVideoParts(parts: { frames: { file: OutputFile; count: number; w: number; h: number }; sound: DecodedSound | null; rate: Rational }, io: MediaValueIO, metadata: Record<string, string> | undefined): Promise<string> {
+  const { file, count, w, h } = parts.frames
+  checkBatch(count, w, h, io.hosted)
+  const fps = parts.rate
+  const sound = parts.sound
   // Known gap (R5.2 review Minor 3, parked in the ledger): the bytes are verified, then the tool reopens the path.
   const framesPath = await io.access.verifiedPath(file)
   await io.kept.checkRoom(io.runId)
@@ -234,7 +252,7 @@ async function encodeMadeVideo(v: VideoValue, io: MediaValueIO, metadata: Record
       input: { kind: 'ffv1', path: framesPath, w, h },
       out, fps, quality: PYAV_H264_DEFAULT,
       sound: sound
-        ? { source: { sound }, layout: layoutOf(sound.channels.length), rate: sound.rate, cutSamples: madeVideoSoundCut(sound.rate, v.fps, count) }
+        ? { source: { sound }, layout: layoutOf(sound.channels.length), rate: sound.rate, cutSamples: soundCutAt(sound.rate, fps, count) }
         : null,
       ...(metadata ? { metadata } : {}),
       userId: io.userId, signal: io.signal,
@@ -251,4 +269,98 @@ async function encodeMadeVideo(v: VideoValue, io: MediaValueIO, metadata: Record
 /** Lets go of a temporary video file from `videoFileFor` (and its folder); a file video is left alone. */
 export async function dropVideoFile(r: { path: string; temporary: boolean }): Promise<void> {
   if (r.temporary) await rm(dirname(r.path), { recursive: true, force: true })
+}
+
+// ── a video file's parts (R5.4, Get video components) ────────────────────────
+
+/**
+ * A file video's header, as Get video components and Save video read it: the
+ * person's file, inside its store folder, judged by the video caps before any
+ * decode (MEDIA_WORDS: noVideo for a file with no picture, as Python's
+ * "No video stream found").
+ */
+export async function probeVideoFile(file: OutputFile, io: SoundReadIO): Promise<MediaProbe> {
+  // Known gap (R5.2 review Minor 3, parked in the ledger): the bytes are verified, then the tool reopens the path.
+  const path = await io.access.verifiedPath(file)
+  const p = await probeMedia(path, { userId: io.userId, signal: io.signal, roots: [io.access.rootOf(file)], kind: 'video', ...(file.type === 'kept' ? { kept: true as const } : {}) })
+  const word = file.type === 'kept' ? (p.video.length ? null : 'noVideo') : mediaCapsWord(p, 'video', io.hosted)
+  if (word) throw new MediaError(word)
+  return p
+}
+
+/**
+ * get_components' frames of a file (video_types.py:252-265), kept as one
+ * FFV1 batch in ONE job: the first video stream decoded exactly as
+ * `decodeFrames` reads it (every frame with pts ≥ 0, rgb24 by PyAV's own
+ * conversion), re-stamped one frame per millisecond as `writeFfv1` keeps a
+ * batch, and written by the tool straight into the run's work folder, never
+ * through memory. The same frames also go, as rawvideo, into the null muxer,
+ * whose `-stats_mux_pre` reports each frame's size as it passes: a frame of
+ * another size fails at once (sizeChanged, Python's torch.stack), and the
+ * batch caps are held as the frames stream (never more than one frame's
+ * report in hand).
+ */
+export async function keepVideoFrames(p: MediaProbe, io: MediaValueIO): Promise<FramesValue> {
+  const v = p.video[0]
+  if (!v) throw new MediaError('noVideo')
+  const { w, h } = v
+  checkBatch(0, w, h, io.hosted)
+  const caps = capsOf(io.hosted)
+  const frameBytes = w * h * 3
+  await io.kept.checkRoom(io.runId)
+  const work = await io.kept.workDir(io.runId)
+  try {
+    const out = join(work, 'frames.mkv')
+    let count = 0
+    let text = ''
+    const args = [
+      '-copyts', '-reinit_filter', '0', '-noautorotate', ...inputArgs(p.path, p.format),
+      '-filter_complex', `[0:v:0]${framesFilter(v)},settb=expr=1/${FFV1_KEPT_RATE},setpts=N,split=2[k][c]`,
+      '-map', '[k]', '-fps_mode', 'passthrough', '-c:v', 'ffv1', '-threads:v', '1', '-pix_fmt', 'bgr0',
+      '-map_metadata', '-1', '-fflags', '+bitexact', '-f', 'matroska', '-y', `file:${out}`,
+      '-map', '[c]', '-fps_mode', 'passthrough', '-c:v', 'rawvideo',
+      '-stats_mux_pre', 'pipe:3', '-stats_mux_pre_fmt', '{size}', '-f', 'null', 'pipe:1',
+    ]
+    await runMedia({
+      tool: 'ffmpeg', args, userId: io.userId, signal: io.signal, workDir: work, cleanup: [out],
+      onSide: (chunk) => {
+        if (chunk === null) return
+        text += Buffer.from(chunk).toString('latin1')
+        let nl: number
+        while ((nl = text.indexOf('\n')) >= 0) {
+          const line = text.slice(0, nl).trim()
+          text = text.slice(nl + 1)
+          if (!line) continue
+          if (!/^\d+$/.test(line)) throw new MediaError('failed')
+          if (Number(line) !== frameBytes) throw new MediaError('sizeChanged')
+          const word = batchWord(count + 1, w, h, caps)
+          if (word) throw new MediaError(word)
+          count++
+        }
+      },
+    })
+    if (text.trim()) throw new MediaError('failed')
+    // Python's get_components makes an empty batch here (zeros(0, 3, 0, 0)); a kept batch has at least one frame.
+    if (count === 0) throw new MediaError('noVideo')
+    const file = await io.kept.putPath(io.runId, out, 'mkv')
+    return { kind: 'frames', file, count, w, h }
+  }
+  finally {
+    await rm(work, { recursive: true, force: true })
+  }
+}
+
+/**
+ * get_components' sound of a file (video_types.py:269-307): the last sound
+ * stream, `fltp`, with Python's seek and skip rule (decodeAudio 'fltp'),
+ * judged by the video caps the file came in under; null where Python's is
+ * None (no sound stream, or no samples from t = 0).
+ */
+export async function videoSoundOf(p: MediaProbe, file: OutputFile, io: SoundReadIO): Promise<DecodedSound | null> {
+  if (!p.sound.length) return null
+  const s = await decodeAudio(p.path, {
+    decoder: 'fltp', userId: io.userId, signal: io.signal, maxSamples: capsOf(io.hosted).soundSamples,
+    roots: [io.access.rootOf(file)], probe: p, within: 'video',
+  })
+  return (s.channels[0]?.length ?? 0) > 0 ? s : null
 }

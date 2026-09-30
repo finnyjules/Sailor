@@ -51,6 +51,19 @@ Groups:
            the ui, the saved names and subfolders, the file's decoded samples
            (nodes_audio.load) and its tags. The temp names' five letters are
            drawn from a seeded `random`.
+  video  — (R5.4) the video nodes' own execute (comfy_extras/nodes_video.py):
+           LoadVideo → GetVideoComponents over every standard clip (frames,
+           sound, fps, or the error); CreateVideo → SaveVideo at 24, 29.97
+           and 30 fps (from this group's smooth clip, g_video_smooth.mp4, and the
+           named case from `synth` noise) with no sound, a mono and a stereo one, and with 3, 4
+           and 6 channels; SaveVideo of an MP4, a WebM, a MOV, a file with an
+           edit list and one with a subtitle stream (g_video_subs.mp4, this
+           group's own clip), with `format` and `codec` each auto and set; the
+           Video card with a source, a file, nothing, a source and a file, and
+           with export on for a file and for a made video. Each case records
+           the ui, the files written, and each saved file's header, Python's
+           own numbers, decoded frames and sound, and tags; every H.264 case
+           also with PyAV switched to libopenh264 (rule 3).
 """
 from __future__ import annotations
 
@@ -496,8 +509,8 @@ def make_clips() -> list[str]:
     clip_sound("a_aac.m4a", "aac", 44100, "stereo", "fltp", 1.0, bit_rate=96000)
     clip_sound("a_long_8k.wav", "pcm_s16le", 8000, "mono", "s16", 75.0, bits=16)
     clip_sound("a_min.wav", "pcm_s16le", 44100, "mono", "s16", 0.25, bits=16, extreme=True)
-    # e_*: the encode group's own inputs (Turntable's stitch), not standard clips.
-    return sorted(n for n in os.listdir(CLIPS) if not n.startswith("e_"))
+    # e_*: the encode group's own inputs (Turntable's stitch), and g_*: the video group's (R5.4), not standard clips.
+    return sorted(n for n in os.listdir(CLIPS) if not n.startswith(("e_", "g_")))
 
 
 # ── reading ───────────────────────────────────────────────────────────────────
@@ -1216,7 +1229,293 @@ def group_sound(names: list[str]) -> dict:
     return {"cases": cases}
 
 
-GROUPS = {"probe": group_probe, "decode": group_decode, "encode": group_encode, "sound": group_sound}
+# ── video (R5.4) ──────────────────────────────────────────────────────────────
+
+# The video nodes' hidden inputs as ComfyUI hands them over (SaveVideo reads both; the card neither).
+VIDEO_PROMPT = {"7": {"class_type": "SaveVideo", "inputs": {"filename_prefix": "video/ComfyUI", "format": "auto", "codec": "auto"}}}
+VIDEO_EXTRA = {"workflow": {"nodes": [{"id": 7, "type": "SaveVideo"}], "note": "a=b;c#d\\e\nf é"}}
+VIDEO_HIDDEN = {"PROMPT": VIDEO_PROMPT, "EXTRA_PNGINFO": VIDEO_EXTRA}
+
+# mov_text's encoder opens only with an ASS header (it reads its style from it).
+SUBTITLE_HEADER = (
+    b"[Script Info]\nScriptType: v4.00+\nPlayResX: 384\nPlayResY: 288\n\n[V4+ Styles]\n"
+    b"Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, "
+    b"StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\n"
+    b"Style: Default,Arial,16,&Hffffff,&Hffffff,&H0,&H0,0,0,0,0,100,100,0,0,1,1,0,2,10,10,10,0\n\n"
+    b"[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n"
+)
+
+
+def clip_video_subs() -> str:
+    """This group's own clip (not a standard clip): 12 H.264 frames, stereo AAC and a mov_text
+    subtitle stream of two cues, muxed by PyAV."""
+    import struct
+    name = "g_video_subs.mp4"
+    path, c = open_out(name)
+    s = video_stream(c, "libx264", 32, 24, 24, "yuv420p", X264)
+    a = sound_stream(c, "aac", 44100, "stereo", "fltp", 64000)
+    t = c.add_stream("mov_text")
+    t.codec_context.subtitle_header = SUBTITLE_HEADER
+    t.time_base = Fraction(1, 1000)
+    packets = []
+    for i in range(12):
+        f = synth_frame(32, 24, 1200 + i).reformat(format="yuv420p")
+        f.pts = i
+        packets += s.encode(f)
+    packets += s.encode(None)
+    for f in sound_frames(tone(44100, 0.5, 2).astype(np.float32), 44100, "stereo", "fltp", 1024):
+        packets += a.encode(f)
+    packets += a.encode(None)
+    for start, dur, text in [(0, 150, "Hello"), (160, 150, "World")]:
+        body = text.encode("ascii")
+        p = av.Packet(struct.pack(">H", len(body)) + body)
+        p.stream = t
+        p.pts = start
+        p.dts = start
+        p.duration = dur
+        p.time_base = Fraction(1, 1000)
+        packets.append(p)
+    for p in packets:
+        c.mux(p)
+    c.close()
+    return name
+
+
+def clip_video_smooth() -> str:
+    """This group's own clip (not a standard clip): 12 `smooth` frames at 64 × 48, H.264 at a high
+    quality. The made videos are built from its frames: the kind of picture ruling (d)'s OpenH264
+    table was measured on (the standard clips' `synth` noise is the named case, `madeNoise`)."""
+    name = "g_video_smooth.mp4"
+    path, c = open_out(name)
+    s = video_stream(c, "libx264", 64, 48, 24, "yuv420p", {**X264, "crf": "10"})
+    frames = []
+    for i in range(12):
+        f = av.VideoFrame.from_ndarray(np.frombuffer(smooth_frame(64, 48, i), np.uint8).reshape(48, 64, 3), format="rgb24").reformat(format="yuv420p")
+        f.pts = i
+        frames.append(f)
+    encode_frames(c, s, frames)
+    c.close()
+    return name
+
+
+def video_ui_of(out) -> dict | None:
+    """A video node's ui as ComfyUI sends it: PreviewVideo's {"images": [...], "animated": [true]}."""
+    ui = out.ui
+    if ui is None:
+        return None
+    d = ui.as_dict() if hasattr(ui, "as_dict") else ui
+    return {k: ([dict(x) for x in v] if k == "images" else list(v)) for k, v in d.items()}
+
+
+def images_record(imgs) -> dict:
+    """An IMAGE batch as uint8 rgb24 frames (exact: every value came from 8 bits), sha256 each."""
+    if not imgs.shape[0] or imgs.shape[-1] != 3:
+        return {"w": 0, "h": 0, "list": []}
+    h, w = int(imgs.shape[1]), int(imgs.shape[2])
+    return {"w": w, "h": h, "list": [sha((imgs[i] * 255.0).round().to(torch.uint8).numpy().tobytes()) for i in range(imgs.shape[0])]}
+
+
+def video_out(path: str, source: list[bytes] | None, keep_frames: bool, whole_sound: bool) -> dict:
+    """A saved video as Python's own reader reads it back: video_record's numbers, frames and
+    sound (the sound whole only where asked), every stream, and the tags."""
+    from comfy_api.latest._input_impl.video_types import VideoFromFile
+    v = VideoFromFile(path)
+    frames = rgb_frames_of(path)
+    rec = {
+        "header": header(path),
+        "frameCount": v.get_frame_count(),
+        "frameRate": rational(v.get_frame_rate()),
+        "duration": v._get_raw_duration(),
+        "frames": [sha(b) for b in frames],
+    }
+    if keep_frames:
+        rec["rgbz"] = b64(zlib.compress(b"".join(frames), 9))
+    if source is not None:
+        a = np.frombuffer(b"".join(source), np.uint8).astype(np.float64)
+        b = np.frombuffer(b"".join(frames), np.uint8).astype(np.float64)
+        mse = float(((a - b) ** 2).mean()) if a.size == b.size else None
+        rec["psnr"] = (10 * math.log10(255 * 255 / mse) if mse else None) if mse is not None else None
+    comp = v.get_components()
+    rec["sound"] = sound_record(comp.audio["waveform"][0].numpy(), int(comp.audio["sample_rate"]), whole_sound) if comp.audio is not None else None
+    with av.open(path) as c:
+        rec["streams"] = [{"type": st.type, "codec": st.codec_context.name, "timeBase": rational(st.time_base),
+                           "duration": st.duration, "frames": st.frames} for st in c.streams]
+        tags = dict(c.metadata)
+        for st in c.streams:
+            tags.update({f"stream{st.index}:{k}": val for k, val in st.metadata.items()})
+    rec["tags"] = tags
+    return rec
+
+
+def ui_file(out: str, temp: str, entry: dict) -> str:
+    return os.path.join(out if entry["type"] == "output" else temp, entry["subfolder"], entry["filename"])
+
+
+# SaveVideo's inputs: an MP4 with stereo AAC, VP9 in WebM at an odd size, ProRes in MOV, an edit list, and subtitles.
+SAVE_VIDEO_CLIPS = ["v_stereo_aac.mp4", "v_vp9_odd.webm", "v_prores.mov", "v_editlist.mp4", "g_video_subs.mp4"]
+# CreateVideo's frames: this clip's, through LoadVideo → GetVideoComponents; its sounds: LoadAudio's.
+MADE_FRAMES_CLIP = "g_video_smooth.mp4"
+# The named case: made from the standard clip's `synth` noise (32 × 24).
+NOISE_FRAMES_CLIP = "v_h264_601.mp4"
+MADE_SOUNDS = {"none": None, "mono": "a_min.wav", "stereo": "a_s16.wav"}
+
+
+def channels_input(n: int) -> np.ndarray:
+    """[n][N] float32 at 48 kHz, 0.1 s: tone's four rows, then two more at half volume."""
+    x = np.concatenate([tone(48000, 0.1, 4), tone(48000, 0.1, 2) * 0.5])[:n]
+    return np.ascontiguousarray(x.astype(np.float32))
+
+
+def group_video(names: list[str]) -> dict:
+    import tempfile
+    from comfy_api.latest._input_impl import video_types
+    from comfy_extras import nodes_video as nv
+    from comfy_extras import nodes_audio as na
+    subs = clip_video_subs()
+    smooth = clip_video_smooth()
+    folder_paths.set_input_directory(CLIPS)
+
+    def clone(cls):
+        return cls.PREPARE_CLASS_CLONE({"hidden_inputs": VIDEO_HIDDEN})
+    LoadVideo, GetComp, Create, Save, Card = (clone(nv.LoadVideo), clone(nv.GetVideoComponents), clone(nv.CreateVideo),
+                                              clone(nv.SaveVideo), clone(nv.Video))
+    LoadAudio = clone(na.LoadAudio)
+    oh = openh264_options(23)
+    cases: dict = {"prompt": VIDEO_PROMPT, "extraPnginfo": VIDEO_EXTRA, "openh264": oh,
+                   "groupClips": {n: sha(open(os.path.join(CLIPS, n), "rb").read()) for n in (subs, smooth)}}
+    with tempfile.TemporaryDirectory() as tmp:
+        # LoadVideo → GetVideoComponents over every standard clip.
+        comps = []
+        for name in names:
+            rec: dict = {"clip": name}
+            try:
+                v = LoadVideo.execute(file=name).result[0]
+                imgs, audio, fps = GetComp.execute(video=v).result
+                rec["frames"] = images_record(imgs)
+                rec["fps"] = fps
+                rec["sound"] = sound_record(audio["waveform"][0].numpy(), int(audio["sample_rate"])) if audio is not None else None
+            except Exception as e:  # noqa: BLE001
+                rec["error"] = err(e)
+            comps.append(rec)
+        cases["components"] = comps
+
+        # CreateVideo → SaveVideo: MADE_FRAMES_CLIP's frames at three rates, with each sound; x264 and libopenh264.
+        imgs = GetComp.execute(video=LoadVideo.execute(file=MADE_FRAMES_CLIP).result[0]).result[0]
+        source = rgb_frames_of(os.path.join(CLIPS, MADE_FRAMES_CLIP))
+        sounds = {k: (None if f is None else LoadAudio.execute(audio=f).result[0]) for k, f in MADE_SOUNDS.items()}
+        made = []
+        for fps in (24.0, 29.97, 30.0):
+            for label, snd in sounds.items():
+                rec = {"fps": fps, "sound": label}
+                for run, swap in (("x264", None), ("openh264", oh)):
+                    out, temp = fresh_dirs(tmp, f"made_{fps}_{label}_{run}")
+                    vid = Create.execute(images=imgs, fps=fps, audio=snd).result[0]
+                    with _patched(video_types, _AvShim(swap)):
+                        ui = video_ui_of(Save.execute(video=vid, filename_prefix="video/ComfyUI", format="auto", codec="auto"))
+                    rec[run] = {"ui": ui, "saved": video_out(ui_file(out, temp, ui["images"][0]), source, swap is None, False),
+                                "written": files_written(out)}
+                made.append(rec)
+        # libx264's frames depend on the rate only (not the sound): each set kept whole once, by its frames' sha256s.
+        rgbz: dict = {}
+        for rec in made:
+            saved = rec["x264"]["saved"]
+            key = sha("".join(saved["frames"]).encode("ascii"))
+            rgbz.setdefault(key, saved.pop("rgbz"))
+            saved["rgbzKey"] = key
+        cases["made"] = {"clip": MADE_FRAMES_CLIP, "sounds": MADE_SOUNDS, "cases": made, "rgbz": rgbz}
+
+        # The named case: CreateVideo → SaveVideo of noise frames (24 fps and 30 fps, no sound).
+        noise_imgs = GetComp.execute(video=LoadVideo.execute(file=NOISE_FRAMES_CLIP).result[0]).result[0]
+        noise_source = rgb_frames_of(os.path.join(CLIPS, NOISE_FRAMES_CLIP))
+        noisy = []
+        for fps in (24.0, 30.0):
+            rec = {"fps": fps, "sound": "none"}
+            for run, swap in (("x264", None), ("openh264", oh)):
+                out, temp = fresh_dirs(tmp, f"noise_{fps}_{run}")
+                vid = Create.execute(images=noise_imgs, fps=fps, audio=None).result[0]
+                with _patched(video_types, _AvShim(swap)):
+                    ui = video_ui_of(Save.execute(video=vid, filename_prefix="video/ComfyUI", format="auto", codec="auto"))
+                rec[run] = {"ui": ui, "saved": video_out(ui_file(out, temp, ui["images"][0]), noise_source, swap is None, False),
+                            "written": files_written(out)}
+            noisy.append(rec)
+        cases["madeNoise"] = {"clip": NOISE_FRAMES_CLIP, "cases": noisy}
+
+        # CreateVideo with 3, 4 and 6 channels (save_to's layouts: mono, stereo, 5.1, else stereo).
+        chans = []
+        for n in (3, 4, 6):
+            x = channels_input(n)
+            rec = {"channels": n, "rate": 48000, "input": b64(zlib.compress(x.tobytes(), 9))}
+            out, temp = fresh_dirs(tmp, f"channels_{n}")
+            vid = Create.execute(images=imgs, fps=24.0, audio={"waveform": torch.from_numpy(x)[None], "sample_rate": 48000}).result[0]
+            try:
+                ui = video_ui_of(Save.execute(video=vid, filename_prefix="video/ComfyUI", format="auto", codec="auto"))
+                rec["ui"] = ui
+                rec["saved"] = video_out(ui_file(out, temp, ui["images"][0]), source, False, False)
+            except Exception as e:  # noqa: BLE001
+                rec["error"] = err(e)
+            rec["written"] = files_written(out)
+            chans.append(rec)
+        cases["channels"] = chans
+
+        # SaveVideo of a file, with `format` and `codec` each auto and set.
+        saves = []
+        for name in SAVE_VIDEO_CLIPS:
+            src = rgb_frames_of(os.path.join(CLIPS, name))
+            for fmt in ("auto", "mp4"):
+                for codec in ("auto", "h264"):
+                    rec = {"clip": name, "format": fmt, "codec": codec}
+                    for run, swap in (("x264", None), ("openh264", oh)):
+                        out, temp = fresh_dirs(tmp, f"save_{name}_{fmt}_{codec}_{run}")
+                        v = LoadVideo.execute(file=name).result[0]
+                        try:
+                            with _patched(video_types, _AvShim(swap)):
+                                ui = video_ui_of(Save.execute(video=v, filename_prefix="video/ComfyUI", format=fmt, codec=codec))
+                            rec[run] = {"ui": ui, "saved": video_out(ui_file(out, temp, ui["images"][0]), src, swap is None, False),
+                                        "written": files_written(out)}
+                        except Exception as e:  # noqa: BLE001
+                            rec[run] = {"error": err(e), "written": files_written(out)}
+                    # A stream copy (the same frames either way): its decoded frames needn't be kept whole.
+                    if "saved" in rec["x264"] and "saved" in rec["openh264"] and rec["x264"]["saved"]["frames"] == rec["openh264"]["saved"]["frames"]:
+                        rec["x264"]["saved"].pop("rgbz", None)
+                    saves.append(rec)
+        cases["saves"] = {"clips": SAVE_VIDEO_CLIPS, "cases": saves}
+
+        # The Video card.
+        stereo = sounds["stereo"]
+        cards = []
+        card_cases = [
+            ("made", {"source": "made"}, False), ("made", {"source": "made"}, True),
+            ("source file", {"source": "v_stereo_aac.mp4"}, False),
+            ("file", {"file": "v_stereo_aac.mp4"}, False), ("file", {"file": "v_stereo_aac.mp4"}, True),
+            ("nothing", {}, False), ("nothing", {}, True),
+            ("source and file", {"source": "v_h264_601.mp4", "file": "v_stereo_aac.mp4"}, False),
+        ]
+        for label, how, export in card_cases:
+            rec = {"label": label, "file": how.get("file", ""), "source": how.get("source"), "export": export}
+            for run, swap in (("x264", None), ("openh264", oh)):
+                if run == "openh264" and how.get("source") != "made":
+                    continue
+                out, temp = fresh_dirs(tmp, f"card_{label}_{export}_{run}")
+                src = None
+                if how.get("source") == "made":
+                    src = Create.execute(images=imgs, fps=24.0, audio=stereo).result[0]
+                elif how.get("source"):
+                    src = LoadVideo.execute(file=how["source"]).result[0]
+                with _patched(video_types, _AvShim(swap)):
+                    res = Card.execute(file=how.get("file", ""), export=export, filename_prefix="video/ComfyUI", source=src)
+                ui = video_ui_of(res)
+                shown = [video_out(ui_file(out, temp, e), source if how.get("source") == "made" else None, swap is None and how.get("source") == "made", False)
+                         for e in (ui or {}).get("images", [])]
+                rec[run] = {"ui": ui, "shown": shown, "handsOn": res.result[0] is not None,
+                            "written": {"output": files_written(out), "temp": files_written(temp)}}
+            cards.append(rec)
+        cases["cards"] = cards
+
+        cases["validate"] = {"missing": nv.LoadVideo.validate_inputs(file="no_such_video.mp4"), "present": nv.LoadVideo.validate_inputs(file="v_h264_601.mp4")}
+    return {"cases": cases}
+
+
+GROUPS = {"probe": group_probe, "decode": group_decode, "encode": group_encode, "sound": group_sound, "video": group_video}
 
 
 def main() -> None:

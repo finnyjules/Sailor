@@ -150,6 +150,11 @@ const ALLOWED_OPTIONS: Readonly<Record<'ffmpeg' | 'ffprobe', Readonly<Record<str
     '-r': 1,
     // get_components' seek (decode.ts pythonSeekArgs) and its leading frames.
     '-ss': 1, '-seek_timestamp': 1, '-noaccurate_seek': 0, '-frames': 1,
+    // R5.4: Save video's stream copy (encode.ts copyVideo): each stream's time base as PyAV's muxer
+    // sets it, and no chapters (Python copies none).
+    '-time_base': 1, '-map_chapters': 1,
+    // R5.4: an encoded stream carries no `encoder` tag (PyAV writes none; only `encoder=`, which clears it).
+    '-metadata': 1,
   },
   ffprobe: {
     '-probesize': 1, '-analyzeduration': 1,
@@ -174,6 +179,8 @@ const ALLOWED_FILTERS: Readonly<Record<string, readonly string[]>> = {
   concat: ['n', 'v', 'a'],
   atrim: ['end_sample'],
   asetpts: [''],
+  // R5.4: Get video components' one job hands the same frames to the kept batch and to the size check (values.ts keepVideoFrames).
+  split: [''],
 }
 
 /**
@@ -257,6 +264,9 @@ export function checkArgs(tool: 'ffmpeg' | 'ffprobe', args: readonly string[], o
       if (name === '-ss' && v !== '0') bad()
       if (name === '-seek_timestamp' && v !== '1') bad()
       if (name === '-frames' && !/^\d+$/.test(v!)) bad()
+      if (name === '-time_base' && !/^1\/\d{1,9}$/.test(v!)) bad()
+      if (name === '-map_chapters' && v !== '-1') bad()
+      if (name === '-metadata' && v !== 'encoder=') bad()
       if (name === '-i' && v !== 'pipe:0' && !(v!.startsWith('file:') && isAbsolute(v!.slice(5)) && normalize(v!.slice(5)) === v!.slice(5))) bad()
       i += arity!
       continue

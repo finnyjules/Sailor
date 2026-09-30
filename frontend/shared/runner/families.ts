@@ -236,6 +236,16 @@ export type RunnerFamily =
    * (server/runner/config.ts). Off: they go to ComfyUI, as before.
    */
   | 'media-sound'
+  /**
+   * The video nodes, computed by Sailor's own server (step 3, R5.4): Load
+   * video, Get video components, Create video, Save video, and the Video
+   * card's export and made videos. Free; Get video components, Save video
+   * and the card count as work. Needs `cards`, and the video tools (R5.1a):
+   * while they are missing or refused, the server answers as if it were off
+   * (server/runner/config.ts). Off: they go to ComfyUI, and the Video card
+   * is exactly as before.
+   */
+  | 'media-video'
 
 export const RUNNER_FAMILIES: readonly RunnerFamily[] = [
   'fal-edit', 'replicate-image', 'replicate-video', 'nano-actions', 'ref-edits', 'restyle', 'frame', 'wan-3', 'gpt-image-2.5', 'h3-max-turbo', 'gemini-omni-flash', 'veo-3.1-lite', 'qwen-image-3', 'grok-imagine-2', 'ideogram-4', 'seedream-5-pro-edit', 'qwen-2511-angles', 'nano-banana-2-blend', 'bria-product-shot', 'muse-image', 'nano-banana-2-lite', 'reve-2.1', 'recraft-v4.1', 'krea-2', 'happyhorse-1.1', 'grok-imagine-video-1.5', 'ltx-2.5-fast', 'luma-ray-3.2', 'sync-3', 'topaz-video', 'fix-faces', 'face-swap', 'person-swap-video', 'cards',
@@ -244,14 +254,14 @@ export const RUNNER_FAMILIES: readonly RunnerFamily[] = [
 ]
 
 /**
- * The families whose work needs the server's video tools (R5.1a, R5.3): while
+ * The families whose work needs the server's video tools (R5.1a, R5.3, R5.4): while
  * `mediaTools()` is missing or refused, the server drops them from what it
  * takes (server/runner/config.ts), so their classes go to the engine.
  * Known to parseFamilies, but kept apart from RUNNER_FAMILIES: every
  * "every family on" set written before R5 (the specs' ALL sets, pinned
  * needs-the-engine hashes) stays exactly as it was (R5 rule 8).
  */
-export const MEDIA_TOOL_FAMILIES: readonly RunnerFamily[] = ['media-sound']
+export const MEDIA_TOOL_FAMILIES: readonly RunnerFamily[] = ['media-sound', 'media-video']
 
 /** Every family parseFamilies knows: RUNNER_FAMILIES and the media families. */
 export const ALL_RUNNER_FAMILIES: readonly RunnerFamily[] = [...RUNNER_FAMILIES, ...MEDIA_TOOL_FAMILIES]
@@ -281,6 +291,7 @@ export const FAMILY_REQUIRES: Partial<Record<RunnerFamily, RunnerFamily>> = {
   'nano-extras': 'cards',
   'turntable': 'cards',
   'media-sound': 'cards',
+  'media-video': 'cards',
 }
 
 const KNOWN: ReadonlySet<string> = new Set(ALL_RUNNER_FAMILIES)

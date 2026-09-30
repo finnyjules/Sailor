@@ -213,6 +213,19 @@ export const INPUT_CHECKS: Readonly<Record<string, (inputs: Record<string, unkno
   // or speech node's sound only, generators/sync3.ts sync3Sources; any other
   // sound waits for R3.10). Switching media-sound on never makes such a
   // working graph fail.
+  // Create video (R5.4): a typed fps as ComfyUI validates it (1…120); a wired
+  // one (Get video components' rate) is Python's float as it comes, which
+  // ComfyUI doesn't bound.
+  'create-video-fps': inputs => isLink(inputs.fps) || widgetValid(inputs, 'fps', CREATE_VIDEO_FPS),
+  // The Video card on its media row (R5.4): a card showing a made video (Create
+  // video's, directly or through Gates and other cards) feeds only the
+  // classes that read one (MADE_VIDEO_READERS); read by anything else, the
+  // workflow is left to the engine.
+  'video-card-made-video': (inputs, ctx) => {
+    if (!ctx.prompt || ctx.nodeId === undefined || !isLink(inputs.source)) return true
+    if (!showsMadeVideo(ctx.prompt, inputs.source)) return true
+    return Object.values(ctx.prompt).every(n => MADE_VIDEO_READERS.includes(n.class_type) || !linksOf(n).some(l => l.from === ctx.nodeId))
+  },
   'audio-card-lip-sync': (inputs, ctx) => {
     if (!ctx.prompt || ctx.nodeId === undefined || !isLink(inputs.source)) return true
     const from = ctx.prompt[inputs.source[0]]?.class_type
@@ -223,6 +236,16 @@ export const INPUT_CHECKS: Readonly<Record<string, (inputs: Record<string, unkno
 
 /** The name of an input check (INPUT_CHECKS). */
 export type InputCheckName = 'moodboard-reading' | 'bake-params' | 'empty-image-caps' | 'smart-layout' | 'effect-preview-name' | 'effect-output-size' | 'effect-text' | 'ascii-glyphs' | 'painter' | 'shader-bake' | 'audio-card-lip-sync'
+  | 'create-video-fps' | 'video-card-made-video'
+
+/** Whether a wire brings a made video: Create video's, directly or through Gates and Video cards (their `source`). */
+function showsMadeVideo(prompt: ApiPrompt, link: [string, number], depth = 0): boolean {
+  const from = prompt[link[0]]
+  if (!from || depth > 64) return false
+  if (from.class_type === 'CreateVideo') return link[1] === 0
+  const next = from.class_type === 'ComfyGateNode' ? from.inputs?.data_in : from.class_type === 'Video' ? from.inputs?.source : undefined
+  return link[1] === 0 && isLink(next) && showsMadeVideo(prompt, next, depth + 1)
+}
 
 /** nodes.py MAX_RESOLUTION: the most ComfyUI allows for a width or height widget. */
 export const COMFY_MAX_RESOLUTION = 16384
@@ -444,6 +467,25 @@ export const SOUND_OUTPUTS: readonly (readonly [string, number])[] = [
 
 /** The sound nodes that read a sound (R5.3): what a music or speech node may feed while `media-sound` is on. */
 const SOUND_READERS = ['SaveAudio', 'SaveAudioMP3', 'PreviewAudio'] as const
+
+/**
+ * Every (class, output slot) that hands on a VIDEO the runner's video nodes
+ * read (R5.4): Load video's file, Create video's made video, and the Video
+ * card (its file, a paid video it shows, or a made video). Each is taken
+ * only while its own family is on (the card: always, as a runner type).
+ */
+export const VIDEO_OUTPUTS: readonly (readonly [string, number])[] = [['LoadVideo', 0], ['CreateVideo', 0], ['Video', 0]]
+
+/**
+ * The classes that read a made video (R5.4: Create video's `video` value,
+ * encoded only when saved or shown). A Video card showing one may feed
+ * these only: anything else would be handed a video it can't read, so the
+ * workflow is left to the engine ('video-card-made-video').
+ */
+export const MADE_VIDEO_READERS: readonly string[] = ['SaveVideo', 'GetVideoComponents', 'Video']
+
+/** Create video's `fps` as ComfyUI validates a typed one (io.Float.Input: 1…120); a wired rate is Python's float as it comes. */
+const CREATE_VIDEO_FPS: RunnerWidgetSpec = { type: 'FLOAT', required: true, min: 1, max: 120 }
 
 export const RUNNER_NODE_RULES: Readonly<Record<string, RunnerNodeRule>> = {
   // ── fal-edit (Task B2): fal only, at most two linked pictures ──
@@ -868,6 +910,41 @@ export const RUNNER_NODE_RULES: Readonly<Record<string, RunnerNodeRule>> = {
   PreviewAudio: {
     family: 'media-sound', local: 'render', mustLink: ['audio'], required: ['audio'],
     linkSources: { audio: SOUND_OUTPUTS },
+  },
+  // ── media-video (step 3, R5.4): the video nodes, computed here with the
+  // video tools (server/runner/media/videoNodes.ts). Load video hands its
+  // file on (Python's VideoFromFile is the file itself); Get video components
+  // decodes a file into a kept frame batch and sound (a made video's own
+  // parts, no work); Create video names its frames and sound (no work); Save
+  // video copies a file's streams or encodes a made video. A VIDEO input takes
+  // a file or a made video from VIDEO_OUTPUTS only, a frame batch comes only
+  // from Get video components, and a sound from SOUND_OUTPUTS. Load video's
+  // own validate_inputs replaces the file list: a file that isn't there is
+  // refused before the run (videoNodes.ts loadVideoStartProblems).
+  LoadVideo: {
+    family: 'media-video', local: 'source',
+    widgets: { file: { type: 'STRING', required: true } },
+  },
+  GetVideoComponents: {
+    family: 'media-video', local: 'render', mustLink: ['video'], required: ['video'],
+    valueInputs: { video: ['files', 'video'] },
+    linkSources: { video: VIDEO_OUTPUTS },
+  },
+  CreateVideo: {
+    family: 'media-video', local: 'source', mustLink: ['images'], required: ['images', 'fps'],
+    valueInputs: { images: ['frames'], fps: ['number'] },
+    linkSources: { audio: SOUND_OUTPUTS },
+    inputCheck: 'create-video-fps',
+  },
+  SaveVideo: {
+    family: 'media-video', local: 'render', mustLink: ['video'], required: ['video'],
+    valueInputs: { video: ['files', 'video'] },
+    linkSources: { video: VIDEO_OUTPUTS },
+    widgets: {
+      filename_prefix: { type: 'STRING', required: true },
+      format: { type: 'COMBO', required: true, options: ['auto', 'mp4'] },
+      codec: { type: 'COMBO', required: true, options: ['auto', 'h264'] },
+    },
   },
   // ── topaz-video (model line-up F23): Enhance a video on fal's Topaz video upscale ──
   // The node already runs Topaz on ComfyUI (Replicate's topazlabs/video-upscale,
@@ -1430,6 +1507,11 @@ export const SWITCHED_CLASSES: Readonly<Record<string, RunnerFamily>> = {
   SaveAudio: 'media-sound',
   SaveAudioMP3: 'media-sound',
   PreviewAudio: 'media-sound',
+  // R5.4: the video nodes (the Video card is a runner type: its media row is VIDEO_CARD_MEDIA_RULE).
+  LoadVideo: 'media-video',
+  GetVideoComponents: 'media-video',
+  CreateVideo: 'media-video',
+  SaveVideo: 'media-video',
 }
 
 /**
@@ -1475,12 +1557,37 @@ export const AUDIO_CARD_MEDIA_RULE: RunnerNodeRule = {
 }
 
 /**
+ * The Video card's export and made videos (R5.4, `media-video`):
+ * nodes_video.py Video.execute, computed here
+ * (server/runner/media/videoNodes.ts planVideoCard). Its `source` (a file
+ * video, or a made video) wins, then its own file; a file video is shown as
+ * the file itself, a made video is encoded into a temp preview; with `export`
+ * on, a copy is saved into output and shown. It counts as work. Its file
+ * widget must not be wired; a card showing a made video may feed only
+ * MADE_VIDEO_READERS. With `media-video` off the card is the runner type it
+ * always was (no row: its file or source handed on and shown).
+ */
+export const VIDEO_CARD_MEDIA_RULE: RunnerNodeRule = {
+  family: 'media-video',
+  local: 'render',
+  mustNotLink: ['file'],
+  valueInputs: { source: ['files', 'video'] },
+  inputCheck: 'video-card-made-video',
+  widgets: {
+    export: { type: 'BOOLEAN', required: true },
+    filename_prefix: { type: 'STRING', required: true },
+  },
+}
+
+/**
  * The row a node is judged by: RUNNER_NODE_RULES', but for the Audio card,
  * in this order: the audio-gen row (R3.8) while `audio-gen` is on, `source`
  * is wired and `media-sound` is off, as before R5.3; the media row while
- * `media-sound` is on; else its sync-3 row.
+ * `media-sound` is on; else its sync-3 row. The Video card: its media row
+ * while `media-video` is on (R5.4), else none, as before.
  */
 export function runnerRuleFor(classType: string, inputs: Record<string, unknown>, families: ReadonlySet<RunnerFamily>): RunnerNodeRule | undefined {
+  if (classType === 'Video' && familyOn('media-video', families)) return VIDEO_CARD_MEDIA_RULE
   if (classType === 'Audio') {
     const media = familyOn('media-sound', families)
     if (!media && isLink(inputs.source) && familyOn('audio-gen', families)) return AUDIO_CARD_AUDIO_GEN_RULE
@@ -1491,12 +1598,13 @@ export function runnerRuleFor(classType: string, inputs: Record<string, unknown>
 
 /**
  * Whether a node renders here with these families on (its row's `local` is
- * 'render'): LOCAL_RENDER_TYPES, plus the Audio card on its media row (R5.3),
- * which counts as work only while `media-sound` is on. With it off, exactly
- * LOCAL_RENDER_TYPES.
+ * 'render'): LOCAL_RENDER_TYPES, plus the Audio card on its media row (R5.3)
+ * and the Video card on its (R5.4), which count as work only while
+ * `media-sound` / `media-video` is on. With them off, exactly LOCAL_RENDER_TYPES.
  */
 export function rendersLocally(classType: string, inputs: Record<string, unknown>, families: ReadonlySet<RunnerFamily>): boolean {
   if (LOCAL_RENDER_TYPES.has(classType)) return true
+  if (classType === 'Video') return runnerRuleFor(classType, inputs, families) === VIDEO_CARD_MEDIA_RULE
   return classType === 'Audio' && runnerRuleFor(classType, inputs, families) === AUDIO_CARD_MEDIA_RULE
 }
 
@@ -1893,6 +2001,9 @@ const PAID_OUTPUT_KIND_FAMILY: Readonly<Record<string, RunnerFamily>> = {
   FindObjectsNode: 'describe',
   ...Object.fromEntries(LAYERS_JSON_CLASSES.map(c => [c, 'layers' as const])),
   ...Object.fromEntries(GEN_3D_CLASSES.map(c => [c, 'gen-3d' as const])),
+  // R5.4: Get video components' frame batch and rate, and Create video's made video.
+  GetVideoComponents: 'media-video',
+  CreateVideo: 'media-video',
 }
 const withoutPaidRows = (kinds: OutputKinds): OutputKinds =>
   Object.fromEntries(Object.entries(kinds).filter(([cls]) => !Object.prototype.hasOwnProperty.call(PAID_OUTPUT_KIND_FAMILY, cls)))
@@ -1933,6 +2044,8 @@ export function valueInputsOf(classType: string, families?: ReadonlySet<RunnerFa
   // With `families` given, a class that exists for one family only takes no value while it is off (rule 15, R3.8 fix round 1).
   const only = families && Object.prototype.hasOwnProperty.call(SWITCHED_CLASSES, classType) ? SWITCHED_CLASSES[classType] : undefined
   if (only && !familyOn(only, families!)) return {}
+  // The Video card on its media row (R5.4): a file or a made video on `source`. Off, none, as before.
+  if (classType === 'Video' && families && familyOn('media-video', families)) return VIDEO_CARD_MEDIA_RULE.valueInputs!
   const rule = Object.prototype.hasOwnProperty.call(RUNNER_NODE_RULES, classType) ? RUNNER_NODE_RULES[classType] : undefined
   return rule?.valueInputs ?? (Object.prototype.hasOwnProperty.call(BASE_VALUE_INPUTS, classType) ? BASE_VALUE_INPUTS[classType]! : {})
 }
@@ -2076,6 +2189,8 @@ export function runnerTakesNode(prompt: ApiPrompt, id: string, families: Readonl
   const inputs = n.inputs ?? {}
   const rule = families.size ? runnerRuleFor(n.class_type, inputs, families) : undefined
   const byRule = !!rule && nodeRuleAllows(n.class_type, rule, inputs, families, opts, id, prompt) && graphRuleAllows(prompt, id, rule, families)
+  // The Video card on its media row (R5.4): a runner type, taken only as its row allows (off, exactly as before).
+  if (rule === VIDEO_CARD_MEDIA_RULE && !byRule) return false
   if (n.class_type === 'FilmShotNode') {
     if (!filmShotTaken(inputs, families)) return false
   }

@@ -61,6 +61,11 @@ export const OUTPUT_KINDS: Readonly<Record<string, Readonly<Record<number, Value
   Generate3DNode: { 0: 'glb' },
   Hunyuan3DRemoteNode: { 0: 'glb' },
   Hunyuan3DMultiViewNode: { 0: 'glb' },
+  // R5.4: Get video components' frame batch and rate (its sound, slot 1, is a
+  // file), and Create video's made video (values only while `media-video` is
+  // on: eligibility.ts outputKindsFor drops these rows with it off).
+  GetVideoComponents: { 0: 'frames', 2: 'number' },
+  CreateVideo: { 0: 'video' },
 }
 
 /** What a wire carries: the source's declared kind for that slot (through Gates), files by default. */

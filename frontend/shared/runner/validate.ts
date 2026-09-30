@@ -76,6 +76,9 @@ export const RUNNER_OUTPUT_CLASSES: ReadonlySet<string> = new Set([
   // R5.3: Save audio (FLAC and MP3) and Preview audio are output nodes (is_output_node=True;
   // Load audio and Record audio are not). The Audio card is listed above.
   'SaveAudio', 'SaveAudioMP3', 'PreviewAudio',
+  // R5.4: Save video is an output node (is_output_node=True; Load video, Get video
+  // components and Create video are not). The Video card is listed above.
+  'SaveVideo',
 ])
 
 /** ComfyUI's node_errors entry for a node that failed validation. */

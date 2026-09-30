@@ -300,9 +300,15 @@ export async function decodeAudio(path: string, o: {
   probe?: MediaProbe
   /** The runner's own kept sound (R5.2 fix round 1): no upload caps; `maxSamples` (soundSamples) holds as it streams. */
   kept?: true
+  /**
+   * R5.4: the sound of a video file (get_components), judged by the video
+   * caps the file was brought in under, not a sound file's; `maxSamples`
+   * still holds as it streams.
+   */
+  within?: 'video'
 }): Promise<DecodedSound> {
-  const p = await probeFor(path, o, 'sound')
-  const refused = o.kept ? null : mediaCapsWord(p, 'sound', isHosted())
+  const p = await probeFor(path, o, o.within ?? 'sound')
+  const refused = o.kept ? null : mediaCapsWord(p, o.within ?? 'sound', isHosted())
   if (refused) throw new MediaError(refused)
   const k = (o.stream ?? (o.decoder === 'fltp' ? 'last' : 'first')) === 'last' ? p.sound.length - 1 : 0
   const s = p.sound[k]!

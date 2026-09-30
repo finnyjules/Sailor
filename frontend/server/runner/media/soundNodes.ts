@@ -240,9 +240,9 @@ export function planAudioCard(ctx: PlanContext): NodePlan {
   const quality = String(inputs.quality ?? 'V0')
   const source = isLink(inputs.source) ? inputs.source : null
   // Python: `elif audio:` — any non-empty name is opened.
-  const named = !source && typeof inputs.audio === 'string' && inputs.audio !== ''
+  const named = typeof inputs.audio === 'string' && inputs.audio !== ''
   const file = named ? parseInputFileRef(inputs.audio) : null
-  if (named && !file) throw new Error(SOUND_FILE_MISSING)
+  if (!source && named && !file) throw new Error(SOUND_FILE_MISSING)
   const letters = audioPreviewLetters()
   return {
     kind: 'derive',
@@ -250,8 +250,12 @@ export function planAudioCard(ctx: PlanContext): NodePlan {
       const media = mediaOf(io)
       let value: RunnerValue
       let sound: DecodedSound
-      if (source) ({ value, sound } = await wiredSound(ctx, source, media))
-      else if (file) {
+      // A wire that brought no sound (R5.4: Get video components of a silent video) is Python's None:
+      // the card falls to its own file, then to silence.
+      const came = source ? (ctx.valueFrom?.(source) ?? { kind: 'files' as const, files: ctx.filesFrom(source) }) : null
+      if (source && !(came?.kind === 'files' && !came.files.length)) ({ value, sound } = await wiredSound(ctx, source, media))
+      else if (named) {
+        if (!file) throw new Error(SOUND_FILE_MISSING)
         value = { kind: 'files', files: [file], sound: { decode: 'load' } }
         sound = await readSound(value, 'Audio', media)
       }

@@ -47,13 +47,15 @@
  * FaceSwap on Easel's advanced face swap, family face-swap, which moves the
  * whole node while it is on;
  * PersonSwapVideo on fal's Pixverse Swap, family person-swap-video, which
- * moves the whole node while it is on; and the sound nodes, family
+ * moves the whole node while it is on; the sound nodes, family
  * media-sound, computed here with the video tools: LoadAudio, RecordAudio,
- * SaveAudio, SaveAudioMP3, PreviewAudio and the Audio card in full, R5.3)
+ * SaveAudio, SaveAudioMP3, PreviewAudio and the Audio card in full, R5.3;
+ * and the video nodes, family media-video: LoadVideo, GetVideoComponents,
+ * CreateVideo, SaveVideo and the Video card's export and made videos, R5.4)
  * closely enough that the same workflow gives the same result.
  */
 import { GATE_CLASS, isLink, type ApiLink, type ApiPrompt } from '#shared/runner/graph'
-import { AUDIO_CARD_MEDIA_RULE, classUpgradeOn, isShotDirected, resolveVideoModelId, runnerRuleFor } from '#shared/runner/eligibility'
+import { AUDIO_CARD_MEDIA_RULE, VIDEO_CARD_MEDIA_RULE, classUpgradeOn, isShotDirected, resolveVideoModelId, runnerRuleFor } from '#shared/runner/eligibility'
 import { filmShotPrompt } from '#shared/runner/shotPresets'
 import { NO_FAMILIES, type RunnerFamily } from '#shared/runner/families'
 import { RUNNER_IMAGE_MODELS, RUNNER_REPLICATE_IMAGE_MODELS, imageAppFor, nodeImagePrompt } from './generators/image'
@@ -131,6 +133,7 @@ import { planLayers } from './generators/layers'
 import { planSplitLayers } from './generators/splitLayers'
 import { planAudioGen } from './generators/audioGen'
 import { planAudioCard, planLoadAudio, planPreviewAudio, planSaveAudio } from './media/soundNodes'
+import { planCreateVideo, planGetVideoComponents, planLoadVideo, planSaveVideo, planVideoCard } from './media/videoNodes'
 import { planGen3d } from './generators/gen3d'
 import { planImageExtras } from './generators/imageExtras'
 import { planLora } from './generators/lora'
@@ -1133,6 +1136,16 @@ async function planNodeRequest(ctx: PlanContext): Promise<NodePlan> {
     case 'PreviewAudio':
       return planPreviewAudio(ctx)
 
+    // ── media-video (step 3, R5.4): the video nodes (media/videoNodes.ts) ──
+    case 'LoadVideo':
+      return planLoadVideo(ctx)
+    case 'GetVideoComponents':
+      return planGetVideoComponents(ctx)
+    case 'CreateVideo':
+      return planCreateVideo(ctx)
+    case 'SaveVideo':
+      return planSaveVideo(ctx)
+
     // ── frame family (comfy_extras/nodes_compositor.py) ──
     case 'Compositor':
       return planCompositor(ctx)
@@ -1277,6 +1290,8 @@ async function planNodeRequest(ctx: PlanContext): Promise<NodePlan> {
     case 'ShaderEffect': return planShaderEffect(ctx)
 
     case 'Video': {
+      // With media-video on (R5.4): the card's export and made videos, as Python's execute. Off, exactly as before.
+      if (runnerRuleFor('Video', inputs, ctx.families ?? NO_FAMILIES) === VIDEO_CARD_MEDIA_RULE) return planVideoCard(ctx)
       let files: OutputFile[]
       if (isLink(inputs.source)) files = linked('source')
       else {

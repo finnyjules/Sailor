@@ -4,8 +4,8 @@
  * unwired Image, Video or Audio card, a LoadImage's picture, the files the
  * bake-replay cards hand on (3D Studio's passes, Text on path's and Text
  * mask's render), Painter's painter file, the Shader effect's bake, Pose Mannequin's
- * saved pictures (R3.15), and the sound Load audio or Record audio loads
- * (R5.3). In hosted, every one must be the user's own.
+ * saved pictures (R3.15), the sound Load audio or Record audio loads
+ * (R5.3), and the video Load video loads (R5.4). In hosted, every one must be the user's own.
  */
 import { isLink, type ApiPrompt } from '#shared/runner/graph'
 import { parseShaderBaked } from '#shared/runner/shaderBakeKey'
@@ -151,6 +151,11 @@ export function collectInputFiles(prompt: ApiPrompt): OutputFile[] {
       if (f) out.push(f)
     }
     if (node.class_type === 'Video' && !isLink(inputs.source)) {
+      const f = parseInputFileRef(inputs.file)
+      if (f) out.push(f)
+    }
+    // Load video (R5.4, media-video): the file it loads.
+    if (node.class_type === 'LoadVideo' && !isLink(inputs.file)) {
       const f = parseInputFileRef(inputs.file)
       if (f) out.push(f)
     }
