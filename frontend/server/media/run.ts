@@ -241,6 +241,71 @@ function selectAllowed(expr: string): boolean {
 }
 
 /**
+ * R6.6: Slow motion's in-between frames made by ffmpeg's own motion
+ * interpolation (the user's matching rule: `minterpolate` in place of a port
+ * of OpenCV's Farneback). This is the ONE graph that may use extractplanes,
+ * mergeplanes, tpad and minterpolate, and it is pinned whole
+ * (`slowMotionGraphAllowed`): only the multiplier and the frame size vary,
+ * each validated, and the graph must be exactly the one `slowMotionGraph`
+ * builds from them.
+ *   - The frame's planes go to minterpolate as they are: G, B, R become the
+ *     Y, U, V of a yuv444p frame, and extractplanes and mergeplanes only move
+ *     bytes. No colour conversion touches them, so the original frames come
+ *     out bit for bit, and green (most of a frame's brightness) steers the
+ *     motion search.
+ *   - Timestamps are 0, 1, 2… seconds, and `fps` is the multiplier m, so
+ *     output frame j sits at j / m, as in Python (the original at every m-th).
+ *   - The last frame is cloned once (`tpad`), because minterpolate needs a
+ *     frame after a pair to make that pair's in-betweens. The decode cuts the
+ *     output at (T − 1)·m + 1 frames.
+ *   - minterpolate refuses a side under 32 pixels. A smaller side is enlarged
+ *     by a whole factor (nearest neighbour, so each pixel becomes a block and
+ *     comes back exactly) and shrunk back afterwards.
+ *   - Its per-pixel tables are 128 bytes a pixel in one allocation, so a
+ *     frame over SLOW_MOTION_MAX_PIXELS can't be done under -max_alloc (the
+ *     start pass leaves it to the engine).
+ */
+export const SLOW_MOTION_MIN_SIDE = 32
+/** minterpolate's settings, every one named (its defaults, with scene-change detection off: Python always interpolates). */
+export const SLOW_MOTION_MI = 'mi_mode=mci:mc_mode=obmc:me_mode=bilat:me=epzs:mb_size=16:search_param=32:vsbmc=0:scd=none'
+/** The most pixels minterpolate works on (its 128-byte-a-pixel tables within MEDIA_MAX_ALLOC). */
+export const SLOW_MOTION_MAX_PIXELS = Math.floor(MEDIA_MAX_ALLOC / 128)
+
+/** The size minterpolate works at: each side under SLOW_MOTION_MIN_SIDE enlarged by a whole factor. */
+export function slowMotionSize(w: number, h: number): { w: number; h: number; kx: number; ky: number } {
+  const kx = w < SLOW_MOTION_MIN_SIDE ? Math.ceil(SLOW_MOTION_MIN_SIDE / w) : 1
+  const ky = h < SLOW_MOTION_MIN_SIDE ? Math.ceil(SLOW_MOTION_MIN_SIDE / h) : 1
+  return { w: w * kx, h: h * ky, kx, ky }
+}
+
+/** The slow-motion graph for frames of w × h and a multiplier of 2–8, from those numbers only (throws on any other). */
+export function slowMotionGraph(w: number, h: number, multiplier: number): string {
+  const whole = (n: number, hi: number) => Number.isSafeInteger(n) && n >= 1 && n <= hi
+  if (!whole(w, 65_535) || !whole(h, 65_535) || !whole(multiplier, 8) || multiplier < 2) throw new MediaError('failed')
+  const big = slowMotionSize(w, h)
+  if (big.w * big.h > SLOW_MOTION_MAX_PIXELS) throw new MediaError('failed')
+  const scaled = big.kx > 1 || big.ky > 1
+  const grow = scaled ? `,scale=w=${big.w}:h=${big.h}:flags=neighbor,format=yuv444p` : ''
+  const back = scaled ? `,scale=w=${w}:h=${h}:flags=neighbor,format=yuv444p` : ''
+  return '[0:v:0]select=gte(pts\\,0),settb=expr=1,setpts=N,format=gbrp,extractplanes=r+g+b[r][g][b];'
+    + `[r][g][b]mergeplanes=map0s=1:map1s=2:map2s=0:format=yuv444p${grow},tpad=stop=1:stop_mode=clone,`
+    + `minterpolate=fps=${multiplier}:${SLOW_MOTION_MI}${back},extractplanes=y+u+v[y][u][v];`
+    + '[y][u][v]mergeplanes=map0s=0:map1s=1:map2s=2:format=gbrp,format=rgb24[f]'
+}
+
+/** Whether `graph` is exactly a slow-motion graph `slowMotionGraph` builds (for some valid size and multiplier). Exported for tests. */
+export function slowMotionGraphAllowed(graph: string): boolean {
+  const m = /,minterpolate=fps=([2-8]):/.exec(graph)
+  if (!m) return false
+  // The size is named only where it was enlarged (the scale back); any other size builds the same graph as 32 × 32.
+  const back = /,scale=w=(\d{1,5}):h=(\d{1,5}):flags=neighbor,format=yuv444p,extractplanes=y\+u\+v\[/.exec(graph)
+  try {
+    return graph === slowMotionGraph(back ? Number(back[1]) : SLOW_MOTION_MIN_SIDE, back ? Number(back[2]) : SLOW_MOTION_MIN_SIDE, Number(m[1]))
+  }
+  catch { return false }
+}
+
+/**
  * A filtergraph as the module builds it: no quotes, spaces or other syntax
  * that could hide a filter from this reading, a backslash only before a comma,
  * `[label]`s of plain words (an input's may name a stream, `[0:v:0]`), and
@@ -248,6 +313,8 @@ function selectAllowed(expr: string): boolean {
  * Exported for tests.
  */
 export function checkFilterGraph(graph: string): boolean {
+  // R6.6: Slow motion's one graph, pinned whole (its filters are on no list, so no other graph can use them).
+  if (slowMotionGraphAllowed(graph)) return true
   if (!/^[A-Za-z0-9_=:.,;[\]\\()*/+-]+$/.test(graph)) return false
   if (/\\(?!,)/.test(graph)) return false
   for (const chain of graph.split(';')) {

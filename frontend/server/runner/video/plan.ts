@@ -147,6 +147,7 @@ export function planVideoEffect(ctx: PlanContext): NodePlan {
       if (word) throw new MediaError(word)
       if (spec.heldBytes(params, ins) > caps.heldFrameBytes) throw new Error(MEDIA_EFFECT_WORDS.heldTooMuch)
       if (spec.work(params, ins, out) > caps.effectWork) throw new Error(MEDIA_EFFECT_WORDS.tooMuchWork)
+      for (const f of spec.limits?.(params, ins) ?? []) if (f.value > f.limit) throw new Error(f.message)
       const through = !!spec.passThrough?.(params, ins)
       // A seeded effect (Transition's glitch, ruling (e)): its seed from its settings and its clips' kept bytes.
       const own = spec.seeded?.(params) ? { ...params, _seed: String(glitchSeed(schema, params, values.map(v => v.file))) } : params
@@ -358,6 +359,15 @@ async function worked(
       finally {
         await ra.end()
         await rb.end()
+      }
+    }
+    else if (spec.reads === 'tool' && spec.tool && !spec.preview) {
+      // R6.6: ffmpeg makes the frames in the input's decode itself (Slow motion: minterpolate); each goes straight
+      // to the writer. The loop ends the decode on every path.
+      for await (const rgb of framesOf(values[0]!, media, lease, spec.tool(params))) {
+        if (media.signal?.aborted) throw new MediaError('stopped')
+        made++
+        await sink.put(rgb)
       }
     }
     else throw new Error('The runner cannot run this video effect yet')

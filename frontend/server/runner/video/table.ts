@@ -22,7 +22,10 @@
  *               Transition): each output frame reads A's frame, B's, or one
  *               of each (`joinOf`, joinReads), both only moving forward, so
  *               nothing is held;
- *   generator — no input (R6.7, R6.8).
+ *   generator — no input (R6.7, R6.8);
+ *   tool      — the frames made by ffmpeg in the decode of the input itself
+ *               (R6.6's Slow motion: minterpolate, `tool`), each handed
+ *               straight to the writer: no worker op, nothing held.
  *
  * Each op is '<core>.<fn>' of ./cores.ts, called once per output frame.
  */
@@ -36,6 +39,7 @@ import { videoCores } from './cores'
 import type { JoinLayout } from './core/join'
 import { parseCubeLut } from './core/look'
 import { shiftOf } from './core/stabilize'
+import { SLOW_MOTION_MAX_PIXELS, slowMotionSize } from '../../media/run'
 import { pythonInputRef } from '../inputs'
 import type { OutputFile } from '../types'
 
@@ -55,7 +59,7 @@ export interface VideoEffectSpec {
   op: string
   /** The frame-batch inputs, in order ([] for a generator). */
   inputs: readonly string[]
-  reads: 'stream' | 'window' | 'held' | 'two-pass' | 'generator' | 'join'
+  reads: 'stream' | 'window' | 'held' | 'two-pass' | 'generator' | 'join' | 'tool'
   shape(widgets: Record<string, unknown>, ins: readonly FrameShape[]): FrameShape
   /** 8-bit frames held at once (rule 6), for the start pass; an op's own float state counts in bytes too. */
   heldBytes(widgets: Record<string, unknown>, ins: readonly FrameShape[]): number
@@ -98,6 +102,14 @@ export interface VideoEffectSpec {
    * call found, read from the state it hands back; and, from everything
    * pass 1 found, each output frame's own params for pass 2's op (`op`).
    */
+  /** 'tool' (R6.6): what the input's decode makes instead of its own frames (values.ts framesOf). */
+  tool?(widgets: Record<string, unknown>): { slowMotion: number }
+  /**
+   * Limits of the effect's own beyond the caps (Slow motion: the largest
+   * frame minterpolate works on): over one, the start pass leaves the
+   * workflow to the engine, and the node checks again at its turn.
+   */
+  limits?(widgets: Record<string, unknown>, ins: readonly FrameShape[]): { message: string; value: number; limit: number }[]
   twoPass?: {
     op: string
     found(state: ArrayBuffer | undefined): readonly number[]
@@ -383,6 +395,36 @@ const STAB_CROP_STEPS = 2
 /** Pass 1's pooled size for a frame of `s` (./core/stabilize.ts trackSize). */
 const stabTrack = (s: FrameShape) => videoCores.stab.trackSize(s.h, s.w)
 
+// ── R6.6: Slow motion ─────────────────────────────────────────────────────────
+
+/**
+ * Slow motion's own steps an in-between pixel (minterpolate's motion search
+ * and blend, at the size it works at). Measured on this Mac: 9 to 13 million
+ * in-between pixels a second at 1080p (m 2 and 8, one filter thread), so
+ * these steps run at 9 × 10⁷ to 1.3 × 10⁸ a second, four times the slowest
+ * pilot's 2.2 × 10⁷ that sets the budget.
+ */
+const FLOW_STEPS = 10
+/**
+ * What minterpolate's process holds, a pixel of the size it works at: its
+ * per-pixel tables (motion vectors, weights, references: about 290 bytes) and
+ * its four frames. Measured peak: 775 MB at 1920 × 1080 (374 a pixel), 96 MB
+ * at 640 × 360; this is an upper bound over both.
+ */
+const FLOW_TOOL_BYTES_PER_PIXEL = 384
+const FLOW_TOOL_BASE_BYTES = 16 * 1024 * 1024
+
+/** Slow motion's count: (T − 1)·m + 1 frames; the input as it is under two frames (nodes_frame_interp.py:84-111). */
+function flowShape(w: Record<string, unknown>, ins: readonly FrameShape[]): FrameShape {
+  const x = oneInput(ins)
+  if (x.count < 2) return { count: x.count, w: x.w, h: x.h, exact: x.exact }
+  return { count: (x.count - 1) * (w.multiplier as number) + 1, w: x.w, h: x.h, exact: x.exact }
+}
+const flowPixels = (x: FrameShape) => {
+  const s = slowMotionSize(x.w, x.h)
+  return s.w * s.h
+}
+
 /**
  * What Stabilize holds (rule 6): one frame in hand from the decode, the
  * warp's planes (the grid and the sample, the crop and its resize: three
@@ -665,6 +707,35 @@ export const VIDEO_EFFECTS: Readonly<Record<string, VideoEffectSpec>> = {
       between: (w, found) => videoCores.stab.corrections(found.map(s => [s[0]!, s[1]!] as const), w.smoothing as number)
         .map(([ty, tx]) => ({ _ty: ty, _tx: tx })),
     },
+  },
+  /**
+   * Slow motion (nodes_frame_interp.py:63-111), by ffmpeg's own motion
+   * interpolation (the user's matching rule, in place of OpenCV's Farneback:
+   * media/run.ts slowMotionGraph). Python's count and places: the T frames
+   * as they are, with m − 1 in-between frames after each but the last,
+   * frame k of them at k / m of the way. The originals are Python's bit for
+   * bit; the in-betweens are judged by eye and a loose PSNR (VISUAL). Python
+   * warps both frames the wrong way along its flow (a double image at twice
+   * the motion); that is not copied. Not an output node: no preview. Under
+   * two frames, the input is handed on.
+   */
+  FrameInterpolate: {
+    family: 'video-flow', op: '', inputs: ['frames'], reads: 'tool', preview: false,
+    shape: flowShape,
+    // One frame in hand from the decode and one on its way to the encoder; minterpolate's own memory.
+    heldBytes: (_w, ins) => {
+      const x = oneInput(ins)
+      return 2 * frameBytes(x) + FLOW_TOOL_BASE_BYTES + FLOW_TOOL_BYTES_PER_PIXEL * flowPixels(x)
+    },
+    // Every input frame decoded, every output frame encoded, and minterpolate's work on each in-between.
+    work: (_w, ins, out) => {
+      const x = oneInput(ins)
+      return (x.count * x.w * x.h + out.count * out.w * out.h) * VIDEO_IO_WORK_PER_PIXEL
+        + Math.max(0, out.count - x.count) * flowPixels(x) * FLOW_STEPS
+    },
+    passThrough: (_w, ins) => oneInput(ins).count < 2,
+    tool: w => ({ slowMotion: w.multiplier as number }),
+    limits: (_w, ins) => [{ message: MEDIA_EFFECT_WORDS.flowTooBig, value: flowPixels(oneInput(ins)), limit: SLOW_MOTION_MAX_PIXELS }],
   },
 }
 

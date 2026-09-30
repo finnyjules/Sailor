@@ -220,15 +220,15 @@ describe('the rows (rule 1)', () => {
     expect(Object.hasOwn(MEDIA_EFFECT_FAMILY_OF, 'SaveAudioOpus')).toBe(false)
   })
 
-  it('the ported effects’ rows (R6.1’s pilots, R6.2’s four, R6.3’s two joins, R6.4’s five looks, R6.5’s Stabilize): a local render reading frame batches only, their widgets as ComfyUI validates them', () => {
+  it('the ported effects’ rows (R6.1’s pilots, R6.2’s four, R6.3’s two joins, R6.4’s five looks, R6.5’s Stabilize, R6.6’s Slow motion): a local render reading frame batches only, their widgets as ComfyUI validates them', () => {
     const looks = ['AspectConvert', 'ChromaKey', 'KenBurns', 'LUT', 'ThreeWayCC']
-    const ported = [...looks, 'Stabilize', 'FrameTrail', 'SlitScan', 'SpeedRamp', 'TemporalMotionBlur', 'TimeDisplacement', 'Transition', 'VideoCrossfade', 'VideoReverse', 'VideoTrim'].sort()
+    const ported = [...looks, 'Stabilize', 'FrameInterpolate', 'FrameTrail', 'SlitScan', 'SpeedRamp', 'TemporalMotionBlur', 'TimeDisplacement', 'Transition', 'VideoCrossfade', 'VideoReverse', 'VideoTrim'].sort()
     expect([...MEDIA_EFFECTS_PORTED].sort()).toEqual(ported)
     const rows = mediaEffectRows()
     expect(Object.keys(rows).sort()).toEqual(ported)
     for (const [cls, row] of Object.entries(rows)) {
       const joins = cls === 'VideoCrossfade' || cls === 'Transition'
-      const family = joins ? 'video-join' : looks.includes(cls) ? 'video-look' : cls === 'Stabilize' ? 'video-stabilize' : 'video-time'
+      const family = joins ? 'video-join' : looks.includes(cls) ? 'video-look' : cls === 'Stabilize' ? 'video-stabilize' : cls === 'FrameInterpolate' ? 'video-flow' : 'video-time'
       // 3-way color reads its frames on `image` (its Python name).
       const ins = joins ? ['clip_a', 'clip_b'] : cls === 'ThreeWayCC' ? ['image'] : ['frames']
       expect(row, cls).toMatchObject({ family, local: 'render', mustLink: ins, required: ins, valueInputs: Object.fromEntries(ins.map(i => [i, ['frames']])) })
@@ -237,7 +237,7 @@ describe('the rows (rule 1)', () => {
       expect(SWITCHED_CLASSES[cls], cls).toBe(family)
       expect(LOCAL_RENDER_TYPES.has(cls), cls).toBe(true)
       // Every video effect but Slow motion, Silence cut and Text clip is an output node (define_schema).
-      expect(RUNNER_OUTPUT_CLASSES.has(cls), cls).toBe(true)
+      expect(RUNNER_OUTPUT_CLASSES.has(cls), cls).toBe(cls !== 'FrameInterpolate')
     }
     expect(rows.VideoTrim!.widgets).toEqual({ start: { type: 'INT', required: true, min: 0, max: 10000 }, end: { type: 'INT', required: true, min: -1, max: 10000 } })
     expect(rows.VideoReverse!.widgets).toEqual({ mode: { type: 'COMBO', required: true, options: ['reverse', 'ping_pong'] } })
@@ -247,7 +247,7 @@ describe('the rows (rule 1)', () => {
     expect(FRAMES_OUTPUTS.map(x => [...x])).toEqual([
       ['GetVideoComponents', 0], ['LoadVideoFrames', 0], ['FrameTrail', 0], ['VideoReverse', 0], ['VideoTrim', 0],
       ['TemporalMotionBlur', 0], ['SlitScan', 0], ['TimeDisplacement', 0], ['SpeedRamp', 0], ['VideoCrossfade', 0], ['Transition', 0],
-      ['KenBurns', 0], ['AspectConvert', 0], ['ChromaKey', 0], ['LUT', 0], ['ThreeWayCC', 0], ['Stabilize', 0],
+      ['KenBurns', 0], ['AspectConvert', 0], ['ChromaKey', 0], ['LUT', 0], ['ThreeWayCC', 0], ['Stabilize', 0], ['FrameInterpolate', 0],
     ])
     expect([...FRAME_ENCODERS]).toEqual(['CreateVideo', 'SaveVideoFrames'])
     expect(MEDIA_EFFECT_OUTPUT_KINDS).toEqual({
@@ -255,7 +255,7 @@ describe('the rows (rule 1)', () => {
       TemporalMotionBlur: { 0: 'frames' }, SlitScan: { 0: 'frames' }, TimeDisplacement: { 0: 'frames' }, SpeedRamp: { 0: 'frames' },
       VideoCrossfade: { 0: 'frames' }, Transition: { 0: 'frames' },
       KenBurns: { 0: 'frames' }, AspectConvert: { 0: 'frames' }, ChromaKey: { 0: 'frames' }, LUT: { 0: 'frames' }, ThreeWayCC: { 0: 'frames' },
-      Stabilize: { 0: 'frames' },
+      Stabilize: { 0: 'frames' }, FrameInterpolate: { 0: 'frames' },
     })
     for (const [cls, input] of [['CreateVideo', 'images'], ['SaveVideoFrames', 'frames']] as const) {
       expect(RUNNER_NODE_RULES[cls]!.linkSources![input], cls).toEqual(expect.arrayContaining(FRAMES_OUTPUTS.map(x => [...x])))
@@ -270,6 +270,7 @@ describe('the rows (rule 1)', () => {
     expect(VIDEO_EFFECTS.Transition!.reads).toBe('join')
     for (const cls of ['KenBurns', 'AspectConvert', 'ChromaKey', 'LUT', 'ThreeWayCC']) expect(VIDEO_EFFECTS[cls]!.reads, cls).toBe('stream')
     expect(VIDEO_EFFECTS.Stabilize!.reads).toBe('two-pass')
+    expect(VIDEO_EFFECTS.FrameInterpolate!.reads).toBe('tool')
   })
 
   it('an effect’s slot carries frames only while its family is on', () => {

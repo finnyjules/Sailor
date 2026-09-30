@@ -41,7 +41,7 @@ export const MEDIA_EFFECT_FAMILIES: readonly MediaEffectFamily[] = [
 /** The effects ported so far (R6.1: the three pilots; R6.2: the other time effects; R6.3: the two joins; R6.4: the five looks; R6.5: Stabilize). Each task adds its classes. */
 export const MEDIA_EFFECTS_PORTED: readonly string[] = [
   'FrameTrail', 'VideoReverse', 'VideoTrim', 'TemporalMotionBlur', 'SlitScan', 'TimeDisplacement', 'SpeedRamp', 'VideoCrossfade', 'Transition',
-  'KenBurns', 'AspectConvert', 'ChromaKey', 'LUT', 'ThreeWayCC', 'Stabilize',
+  'KenBurns', 'AspectConvert', 'ChromaKey', 'LUT', 'ThreeWayCC', 'Stabilize', 'FrameInterpolate',
 ]
 
 /** Each R6 class's family (every generated class, ported or not; Save audio (Opus) is not an R6 family's). */
@@ -180,4 +180,5 @@ export const MEDIA_EFFECT_WORDS = {
   motionBlurFails: 'Motion blur (time) only works on a single frame.',
   lutMissing: 'The LUT file this workflow names isn’t there',
   lutTooBig: 'This LUT is too large to use here',
+  flowTooBig: 'This clip’s frames are too large for slow motion here',
 } as const

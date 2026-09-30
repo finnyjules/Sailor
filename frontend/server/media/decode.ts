@@ -46,7 +46,7 @@
  *                from the decoded frames' own pts and sizes.
  */
 import { isHosted } from '../utils/deployMode'
-import { MediaError, inputArgs, runMedia, type MediaLease } from './run'
+import { MediaError, inputArgs, runMedia, slowMotionGraph, type MediaLease } from './run'
 import { ffprobeJson, mediaCapsWord, probeMedia, resolveMediaInput, type MediaProbe, type SoundStreamProbe, type VideoStreamProbe } from './probe'
 
 /** sws's position for a chroma location, in 1/256 of a pixel (av_chroma_location_enum_to_pos). */
@@ -155,7 +155,15 @@ export async function decodeFrames(path: string, o: {
   pick?: FramePick
   /** R6.1: run in this node's lease (server/media/run.ts mediaLease), not a slot of its own. */
   lease?: MediaLease
+  /**
+   * R6.6 (a kept batch only): Slow motion's frames instead of the batch's own,
+   * made by ffmpeg in the same job (run.ts slowMotionGraph): the batch's T
+   * frames with m − 1 in-between frames after each but the last, cut at
+   * `maxFrames` ((T − 1)·m + 1).
+   */
+  slowMotion?: number
 }): Promise<{ count: number; w: number; h: number }> {
+  if (o.slowMotion !== undefined && (!o.kept || o.pick)) throw new MediaError('failed')
   const p = await probeFor(path, o, 'video')
   const refused = o.kept ? null : mediaCapsWord(p, 'video', isHosted())
   if (refused) throw new MediaError(refused)
@@ -196,8 +204,9 @@ export async function decodeFrames(path: string, o: {
   const args = [
     '-copyts', '-reinit_filter', '0', '-noautorotate',
     ...inputArgs(p.path, p.format),
-    '-map', '0:v:0', '-fps_mode', 'passthrough',
-    '-vf', framesFilter(v, o.pick),
+    ...(o.slowMotion !== undefined
+      ? ['-filter_complex', slowMotionGraph(w, h, o.slowMotion), '-map', '[f]', '-fps_mode', 'passthrough', '-frames:v', String(o.maxFrames)]
+      : ['-map', '0:v:0', '-fps_mode', 'passthrough', '-vf', framesFilter(v, o.pick)]),
     ...(o.pick ? ['-frames:v', String(o.pick.count)] : []),
     '-stats_mux_pre', 'pipe:3', '-stats_mux_pre_fmt', '{size} {ptsi} {tbi}',
     '-f', 'rawvideo', 'pipe:1',

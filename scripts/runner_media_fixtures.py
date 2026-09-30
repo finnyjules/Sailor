@@ -105,6 +105,13 @@ Groups:
            lengths 1–64, 256, 1000, 1024 and 4096 and fft2 of 9 × 16 and
            144 × 256 (float64), numpy's float32 rfft and torch's complex64
            fft2 of a few, all over a fixed exact formula.
+  vfx-flow — (R6.6) Slow motion over the standard inputs and moving
+           patterns (a hashed texture shifted by whole and half pixels,
+           turned and zoomed; 4 frames of 64 × 48 and 3 of 160 × 120, made
+           by an exact formula the spec shares), multiplier 2, 3 and 8: its
+           output (float32, round-8, trunc-8), each frame's sha256, and the
+           patterns' in-between frames whole. The node runs in a child
+           process (OpenCV's libavdevice clashes with PyAV's).
 """
 from __future__ import annotations
 
@@ -2974,9 +2981,133 @@ def group_vfx_stabilize(names: list[str]) -> dict:
     return {"cases": cases}
 
 
+# ── R6.6: Slow motion (optical flow) ──────────────────────────────────────────
+
+# The moving patterns: a colour texture (an integer hash on a 6-pixel grid, sampled bilinearly) moved by a
+# whole-pixel shift, a half-pixel shift, a small turn and a zoom. Every value is made with plain float64 + − × ÷
+# and floor, in the same order as the spec's TypeScript, so both make the same bytes (the turn's cos and sin
+# are written out: the two languages' sin of 6° differ in the last bit). name → (motion, frames, w, h).
+VFX_FLOW_CLIPS = {f"{k}-{w}x{h}": (k, n, w, h) for k in ("shift", "half", "turn", "zoom") for (n, w, h) in ((4, 64, 48), (3, 160, 120))}
+VFX_FLOW_CELL = 6
+VFX_FLOW_TURN = {1: (0.9993908270190958, 0.03489949670250097), 2: (0.9975640502598242, 0.0697564737441253),
+                 3: (0.9945218953682733, 0.10452846326765347)}
+
+
+def vfx_flow_hash(ix: int, iy: int, k: int) -> int:
+    h = ((ix + 4096) * 73856093 ^ (iy + 4096) * 19349663 ^ (k + 1) * 83492791) & 0xFFFFFFFF
+    h ^= (h << 13) & 0xFFFFFFFF
+    h ^= h >> 17
+    h ^= (h << 5) & 0xFFFFFFFF
+    return h & 255
+
+
+def vfx_flow_source(motion: str, t: int, x: float, y: float, cx: float, cy: float) -> tuple[float, float]:
+    """Where pixel (x, y) of frame t reads the texture."""
+    if motion == "shift":
+        return x - 3.0 * t, y - 2.0 * t
+    if motion == "half":
+        return x - 1.5 * t, y - 0.5 * t
+    if motion == "turn":
+        if t == 0:
+            return x, y
+        c, s = VFX_FLOW_TURN[t]
+        return cx + c * (x - cx) + s * (y - cy), cy - s * (x - cx) + c * (y - cy)
+    z = 1.0 + 0.03 * t
+    return cx + (x - cx) / z, cy + (y - cy) / z
+
+
+def vfx_flow_frame(motion: str, t: int, w: int, h: int) -> bytes:
+    out = bytearray()
+    cx, cy = w / 2.0, h / 2.0
+    for y in range(h):
+        for x in range(w):
+            u, v = vfx_flow_source(motion, t, float(x), float(y), cx, cy)
+            gx, gy = u / VFX_FLOW_CELL, v / VFX_FLOW_CELL
+            x0, y0 = math.floor(gx), math.floor(gy)
+            fx, fy = gx - x0, gy - y0
+            for k in range(3):
+                a, b = vfx_flow_hash(x0, y0, k), vfx_flow_hash(x0 + 1, y0, k)
+                c, d = vfx_flow_hash(x0, y0 + 1, k), vfx_flow_hash(x0 + 1, y0 + 1, k)
+                val = (1.0 - fx) * (1.0 - fy) * a + fx * (1.0 - fy) * b + (1.0 - fx) * fy * c + fx * fy * d
+                out.append(min(255, max(0, math.floor(val + 0.5))))
+    return bytes(out)
+
+
+def vfx_flow_clip(name: str) -> np.ndarray:
+    """A moving pattern (u8, T × H × W × 3), or a standard clip's frames."""
+    if name not in VFX_FLOW_CLIPS:
+        return np.round(vfx_clip(name).numpy() * 255.0).astype(np.uint8)
+    motion, n, w, h = VFX_FLOW_CLIPS[name]
+    return np.stack([np.frombuffer(vfx_flow_frame(motion, t, w, h), np.uint8).reshape(h, w, 3) for t in range(n)])
+
+
+# Slow motion runs OpenCV in a process of its own (its bundled libavdevice would clash with PyAV's in this one):
+# the node's execute on the frames handed over as Get video components hands them (u8 / 255), its float32 back.
+VFX_FLOW_CHILD = """
+import sys, numpy as np, torch
+sys.path.insert(0, sys.argv[2])
+from comfy_extras.nodes_frame_interp import FrameInterpolateNode
+from unittest import mock
+from comfy_api.latest._io import HiddenHolder
+d = sys.argv[1]
+frames = torch.from_numpy(np.load(d + "/in.npy")) / 255.0
+with mock.patch.object(FrameInterpolateNode, "hidden", HiddenHolder.from_dict({"UNIQUE_ID": sys.argv[4]})):
+    res = FrameInterpolateNode.execute(frames=frames, multiplier=int(sys.argv[3]))
+out = res.args[0]
+assert out.dtype == torch.float32, out.dtype
+np.save(d + "/out.npy", np.ascontiguousarray(out.numpy()))
+print("ui", res.ui is None)
+"""
+
+
+def vfx_flow_run(tmp: str, frames: np.ndarray, multiplier: int) -> tuple[torch.Tensor, bool]:
+    import subprocess
+    import tempfile
+    d = tempfile.mkdtemp(dir=tmp)
+    np.save(os.path.join(d, "in.npy"), frames)
+    got = subprocess.run([sys.executable, "-c", VFX_FLOW_CHILD, d, ROOT, str(multiplier), VFX_NODE_ID],
+                         capture_output=True, text=True, check=True)
+    assert got.stdout.strip().splitlines()[-1] == "ui True", got.stdout
+    return torch.from_numpy(np.load(os.path.join(d, "out.npy"))), True
+
+
+def group_vfx_flow(names: list[str]) -> dict:
+    """Slow motion (R6.6): Python's count, its originals, and (on the moving patterns) its in-between frames."""
+    import tempfile
+    grid = vfx_grid({"multiplier": 2}, {"multiplier": (2, 8, 5)}, {})
+    for name, (_motion, _n, w, _h) in VFX_FLOW_CLIPS.items():
+        for m in ((2, 3, 8) if w == 64 or name.startswith("shift") else (2, 3)):
+            grid.append((f"{name}, multiplier {m}", {"multiplier": m}, name))
+    cases: dict = {"threads": vfx_threads(), "clips": {k: {"frames": v[0], "w": v[1], "h": v[2], "seed": v[3]} for k, v in VFX_CLIPS.items()},
+                   "inlineValues": VFX_INLINE_VALUES, "flowCell": VFX_FLOW_CELL,
+                   "flowClips": {k: {"motion": v[0], "frames": v[1], "w": v[2], "h": v[3], "sha256": sha(vfx_flow_clip(k).tobytes())}
+                                 for k, v in VFX_FLOW_CLIPS.items()}}
+    runs = []
+    with tempfile.TemporaryDirectory() as tmp:
+        for name, widgets, clip in grid:
+            rec: dict = {"name": name, "class_type": "FrameInterpolate", "node_id": VFX_NODE_ID, "widgets": widgets, "input": clip}
+            try:
+                out, _ = vfx_flow_run(tmp, vfx_flow_clip(clip), widgets["multiplier"])
+                rec["out"] = vfx_batch(out)
+                rec["ui"] = None
+                rec["preview"] = None
+                u8 = vfx_trunc8(out)
+                per = int(out.shape[1]) * int(out.shape[2]) * 3
+                rec["frames"] = [sha(u8[j * per:(j + 1) * per]) for j in range(int(out.shape[0]))]
+                m = widgets["multiplier"]
+                if clip in VFX_FLOW_CLIPS:
+                    rec["inbetweens"] = b64(b"".join(u8[j * per:(j + 1) * per] for j in range(int(out.shape[0])) if j % m))
+            except Exception as e:  # noqa: BLE001 - the error itself is the record
+                rec["error"] = err(e)
+            runs.append(rec)
+    cases["runs"] = runs
+    cases["saved"] = []
+    return {"cases": cases}
+
+
 GROUPS = {"probe": group_probe, "decode": group_decode, "encode": group_encode, "sound": group_sound, "video": group_video,
           "frames": group_frames, "timeline-media": group_timeline_media, "vfx-time": group_vfx_time, "vfx-join": group_vfx_join,
-          "vfx-look": group_vfx_look, "vfx-stabilize": group_vfx_stabilize}
+          "vfx-look": group_vfx_look, "vfx-stabilize": group_vfx_stabilize, "vfx-flow": group_vfx_flow}
 
 
 def main() -> None:

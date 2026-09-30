@@ -283,10 +283,14 @@ async function keptBatchProbe(v: FramesValue, path: string, root: string): Promi
  * count and size. Memory holds one frame; the decode waits while the node
  * works on it. Leaving the loop early (a failure, Stop) ends the decode.
  */
-export function framesOf(v: FramesValue, io: MediaValueIO, lease: MediaLease): AsyncIterable<Uint8Array> {
+export function framesOf(v: FramesValue, io: MediaValueIO, lease: MediaLease, o: { slowMotion?: number } = {}): AsyncIterable<Uint8Array> {
   return {
     async* [Symbol.asyncIterator]() {
       checkBatch(v.count, v.w, v.h, io.hosted)
+      // R6.6: Slow motion's frames, made by the decode itself (decode.ts `slowMotion`): (T − 1)·m + 1 of them.
+      const m = o.slowMotion
+      if (m !== undefined && v.count < 2) throw new MediaError('failed')
+      const count = m === undefined ? v.count : (v.count - 1) * m + 1
       // Known gap (R5.2 review Minor 3, parked in the ledger): the bytes are verified, then the tool reopens the path.
       const path = await io.access.verifiedPath(v.file)
       const root = io.access.rootOf(v.file)
@@ -295,10 +299,11 @@ export function framesOf(v: FramesValue, io: MediaValueIO, lease: MediaLease): A
       const stop = new AbortController()
       const signal = io.signal ? AbortSignal.any([io.signal, stop.signal]) : stop.signal
       const decoding = decodeFrames(path, {
-        userId: io.userId, signal, maxFrames: v.count, roots: [root], probe, kept: true, lease,
+        userId: io.userId, signal, maxFrames: count, roots: [root], probe, kept: true, lease,
+        ...(m === undefined ? {} : { slowMotion: m }),
         onFrame: rgb => chan.put(rgb),
       }).then((got) => {
-        if (got.count !== v.count || got.w !== v.w || got.h !== v.h) throw new MediaError('failed')
+        if (got.count !== count || got.w !== v.w || got.h !== v.h) throw new MediaError('failed')
         chan.close()
       })
       decoding.catch(e => chan.fail(e))

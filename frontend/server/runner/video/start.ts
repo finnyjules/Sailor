@@ -148,6 +148,8 @@ function figuresOf(prompt: ApiPrompt, families: ReadonlySet<RunnerFamily>, caps:
       { nodeId: id, message: MEDIA_WORDS.tooManyFrames, value: out.count * out.w * out.h, limit: caps.batchPixels },
       { nodeId: id, message: MEDIA_EFFECT_WORDS.heldTooMuch, value: spec.heldBytes(params, shaped), limit: caps.heldFrameBytes },
       { nodeId: id, message: MEDIA_EFFECT_WORDS.tooMuchWork, value: spec.work(params, shaped, out), limit: caps.effectWork },
+      // The effect's own limits (R6.6: the largest frame Slow motion works on), hosted and local alike.
+      ...(spec.limits?.(params, shaped) ?? []).map(f => ({ nodeId: id, ...f })),
     )
   }
   if (Number.isFinite(caps.keptBytesPerRun)) {
