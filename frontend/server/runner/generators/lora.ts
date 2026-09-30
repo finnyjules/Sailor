@@ -42,6 +42,7 @@ import { answerRgbPng } from '../pictures/pythonView'
 import { imageUrlOf } from '../imageUrl'
 import { LORA_SIDECAR_UNREADABLE, pyJsonTruthy, readLoraSidecar, resolveTrainedModel, type LoraSidecar } from '../loraFiles'
 import type { NodePlan, PipelineIO, PlanContext } from '../executors'
+import { failNoFile, keptOrUndelivered } from '../pipelineDelivery'
 import type { OutputFile, RunnerValue } from '../types'
 import { firstOutputUrl } from './repair'
 
@@ -379,12 +380,13 @@ export async function planLora(ctx: PlanContext, reader?: SidecarReader): Promis
         lastKey = 'retry'
       }
       const url = firstOutputUrl(last.result)[0]
-      if (!url) throw new Error(LORA_NO_PICTURE)
-      // The picture as Python's tensor saves it: alpha dropped (rule 3).
-      const picture: OutputFile = await io.savedOnce(lastKey, 'picture', async () => {
+      // No picture (R3.17 fix round 1): the call delivered nothing, so it is charged 0.
+      if (!url) return await failNoFile(io, lastKey, LORA_NO_PICTURE)
+      // The picture as Python's tensor saves it: alpha dropped (rule 3). Not kept: its call is charged 0.
+      const picture: OutputFile = await io.savedOnce(lastKey, 'picture', () => keptOrUndelivered(io, lastKey, async () => {
         const got = await io.download(url)
         return io.saveAsset(await answerRgbPng(got.bytes), { prefix: 'flux_multilora', ext: 'png' })
-      })
+      }))
       const values: Record<number, RunnerValue> = { 0: { kind: 'files', files: [picture] } }
       return { values, ui: { images: [picture], animated: [false] } }
     },

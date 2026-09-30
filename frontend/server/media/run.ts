@@ -194,6 +194,8 @@ const ALLOWED_FILTERS: Readonly<Record<string, readonly string[]>> = {
   split: [''],
   // R5.5: Save video frames pads an odd size to even with black (encode.ts `padToEven`).
   pad: ['w', 'h', 'x', 'y', 'color'],
+  // R3.17 fix round 1: the stitch gives each renumbered frame one frame's duration (encode.ts `clips`).
+  fps: [''],
 }
 
 /**

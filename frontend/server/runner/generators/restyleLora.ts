@@ -52,6 +52,7 @@ import { imageUrlOf } from '../imageUrl'
 import { LORA_SIDECAR_UNREADABLE, readLoraSidecar, type LoraSidecar } from '../loraFiles'
 import { answerRgbPng } from '../pictures/pythonView'
 import type { NodePlan, PipelineIO, PlanContext } from '../executors'
+import { failNoFile, keptOrUndelivered } from '../pipelineDelivery'
 import type { OutputFile, RunnerValue } from '../types'
 import { answerOutput } from './llm'
 import { LORA_NO_PICTURE, float, int, resolveFluxLoraPlan, text, type HuggingFaceLookups, type SidecarReader } from './lora'
@@ -275,16 +276,17 @@ export async function planRestyleLora(ctx: PlanContext, reader?: SidecarReader):
       /** A picture answer kept for the run (a resumed node reads it back), with its own hand-off link. */
       const kept = async (callKey: string, url: string, name: string) => {
         const fresh: { bytes?: Uint8Array } = {}
-        const file = await io.savedOnce(callKey, 'kept', async () => {
+        // Not downloaded or not kept (R3.17 fix round 1): the call delivered nothing usable, charged 0.
+        const file = await io.savedOnce(callKey, 'kept', () => keptOrUndelivered(io, callKey, async () => {
           fresh.bytes = (await io.download(url)).bytes
           return io.keep(fresh.bytes, 'bin')
-        })
+        }))
         const bytes = fresh.bytes ?? await io.read(file)
         return { bytes, link: await io.handOff(bytes, `${name}.${answerExt('image', bytes, null, url)}`) }
       }
       /** The result, saved as Python's tensor saves it (alpha dropped), once. */
       const result = async (callKey: string, bytes: () => Promise<Uint8Array>): Promise<OutputFile> =>
-        io.savedOnce(callKey, 'picture', async () => io.saveAsset(await answerRgbPng(await bytes()), { prefix: 'restyle_lora', ext: 'png' }))
+        io.savedOnce(callKey, 'picture', () => keptOrUndelivered(io, callKey, async () => io.saveAsset(await answerRgbPng(await bytes()), { prefix: 'restyle_lora', ext: 'png' })))
 
       // 1. The caption.
       const described = await moondream('describe', content, describePrompt)
@@ -317,7 +319,8 @@ export async function planRestyleLora(ctx: PlanContext, reader?: SidecarReader):
       if (!io.recorded?.('stylize')) await io.moderateText?.(fluxPrompt)
       const stylized = await io.call({ key: 'stylize', provider: 'replicate', endpoint: fluxEndpoint, payload, media: 'image', usd: fluxUsd })
       const styleUrl = firstOutputUrl(stylized.result)[0]
-      if (!styleUrl) throw new Error(LORA_NO_PICTURE)
+      // No picture (R3.17 fix round 1): the call delivered nothing, so it is charged 0.
+      if (!styleUrl) return await failNoFile(io, 'stylize', LORA_NO_PICTURE)
       const style = await kept('stylize', styleUrl, 'restyle_style')
 
       // 3. Photo or illustration.
@@ -332,7 +335,7 @@ export async function planRestyleLora(ctx: PlanContext, reader?: SidecarReader):
           payload: nanoBananaPassInput(pass > 0 ? instruction + RESTYLE_ANTIPHOTO_RETRY : instruction, [content, style.link], { resolution, format, seed: passSeed(seed, pass) }),
         })
         const url = firstFalImageUrl(nb.result)
-        if (!url) throw new Error(RESTYLE_NB_NO_PICTURE)
+        if (!url) return await failNoFile(io, key, RESTYLE_NB_NO_PICTURE)
         if (target !== 'illustration') {
           picture = await result(key, async () => (await io.download(url)).bytes)
           break

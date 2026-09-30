@@ -51,7 +51,7 @@ import { buildRestyleInstruction } from '~~/server/runner/generators/restyle'
 import { NANO_BANANA_2_FAL_EDIT, RUNNER_ROUTES } from '~~/server/runner/generators/twins'
 import { LORA_SIDECAR_MAX_BYTES, LORA_SIDECAR_TOO_LARGE, LORA_SIDECAR_UNREADABLE, loraStartProblem } from '~~/server/runner/loraFiles'
 import { hostedRequestProblems, requestProblems } from '~~/server/runner/requestRules'
-import { createFileKeptBytes } from '~~/server/runner/keptBytes'
+import { KEPT_TOO_MUCH, createFileKeptBytes, createMemoryKeptBytes, type KeptExt } from '~~/server/runner/keptBytes'
 
 interface Catalogue {
   knobs: { style: number; override: number; out: [number, number] }[]
@@ -532,6 +532,37 @@ describe('charges: the calls that finished, never above the hold (ruling (f))', 
       const x = restyleLoraCalls({ resolution: r }).nanoBanana.call
       expect(paidCallUsd({ ...x, fallbacks: [] }), r).toBe(paidCallUsd(x))
     }
+  })
+
+  it('the LoRA\'s picture answered with none delivered nothing: the caption only is charged (R3.17 fix round 1)', async () => {
+    const c = caseNamed('target · photo')
+    const { k, rec, sent } = await kitDone(c, { hosted: true, answers: [c.answers[0], { output: null }] })
+    expect(rec.status).toBe('error')
+    expect(rec.error).toBe(LORA_NO_PICTURE)
+    expect(sent.map(s => s.endpoint)).toEqual([MOONDREAM_SLUG, FLUX_DEV_LORA_SLUG])
+    expect(rec.calls!.map(x => [x.key, x.status, !!x.lost])).toEqual([['describe', 'done', false], ['stylize', 'done', true]])
+    expect(charged(k)).toEqual([[61, 1]])
+  })
+
+  it('a pass answered with no picture delivered nothing: that pass isn\'t charged (R3.17 fix round 1)', async () => {
+    const c = caseNamed('target · photo')
+    const { k, rec } = await kitDone(c, { hosted: true, answers: [...c.answers.slice(0, 3), { images: [] }] })
+    expect(rec.status).toBe('error')
+    expect(rec.error).toBe(RESTYLE_NB_NO_PICTURE)
+    expect(rec.calls!.find(x => x.key === 'nb-1')!.lost).toBe(true)
+    expect(charged(k)).toEqual([[61, 1 + 8 + 1]])
+  })
+
+  it('a LoRA picture that couldn\'t be kept (the run\'s kept cap) delivered nothing usable: not charged (R3.17 fix round 1)', async () => {
+    const c = caseNamed('target · photo')
+    const base = createMemoryKeptBytes()
+    // Only the answer's kept copy (`bin`) is refused: the hand-offs (png) go on.
+    const kept = { ...base, put: async (runId: string, bytes: Uint8Array, ext: KeptExt) => { if (ext === 'bin') throw new Error(KEPT_TOO_MUCH); return base.put(runId, bytes, ext) } }
+    const { k, rec } = await kitDone(c, { hosted: true, kept: kept as never })
+    expect(rec.status).toBe('error')
+    expect(rec.error).toContain(KEPT_TOO_MUCH)
+    expect(rec.calls!.find(x => x.key === 'stylize')!.lost).toBe(true)
+    expect(charged(k)).toEqual([[61, 1]])
   })
 
   it('a lost download of the LoRA\'s picture isn\'t charged for that call (Sailor absorbs it)', async () => {

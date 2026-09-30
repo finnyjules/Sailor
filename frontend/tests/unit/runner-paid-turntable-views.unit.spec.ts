@@ -36,20 +36,22 @@ import { creditsForUsd } from '#shared/pricing/markup'
 import { priceGraph } from '~~/server/utils/priceBook'
 import { stageEstimate } from '~~/server/runner/metering'
 import { planNode, type PlanContext } from '~~/server/runner/executors'
-import { TURNTABLE_STITCH_QUALITY, segmentRequest, stitchRate, turntableSegments } from '~~/server/runner/generators/turntable'
+import { TURNTABLE_CLIP_MAX_BYTES, TURNTABLE_NO_CLIP, TURNTABLE_NO_TOOLS, TURNTABLE_STITCH_QUALITY, segmentRequest, stitchRate, turntableKeptBytes, turntableSegments } from '~~/server/runner/generators/turntable'
+import { MEDIA_CAPS } from '#shared/runner/media'
 import { RUNNER_ROUTES } from '~~/server/runner/generators/twins'
-import { createFileKeptBytes } from '~~/server/runner/keptBytes'
+import { KEPT_TOO_MUCH, createFileKeptBytes, createMemoryKeptBytes, type KeptBytes } from '~~/server/runner/keptBytes'
+import { KEPT_ROOM_REFUSED } from '~~/server/runner/engine'
 import { decodeFrames } from '~~/server/media/decode'
 import { probeMedia, pyRawDuration } from '~~/server/media/probe'
 import type { OutputFile } from '~~/server/runner/types'
 
 interface ViewsCase extends PaidCase {
-  clip_set: 'smooth' | 'noise' | 'sizes'
+  clip_set: 'smooth' | 'noise' | 'sizes' | 'fps25' | 'ntsc' | 'mixed' | 'sound'
   /** sha256 of each clip in the order stitch_clips was handed them. */
   stitch_order?: string[]
   stitch?: { x264: PyVideoOut; openh264: PyVideoOut }
 }
-interface Clip { b64: string; sha256: string; frames: string[] }
+interface Clip { b64: string; sha256: string; frames: string[]; averageRate: { num: number; den: number }; sounds: number }
 const FIXTURE = JSON.parse(readFileSync(join(__dirname, 'fixtures', 'runner-paid-turntable-views.json'), 'utf8')) as { cases: ViewsCase[]; clips: Record<string, Clip> }
 const CASES = FIXTURE.cases
 const STITCHED = CASES.filter(c => !c.error)
@@ -130,7 +132,11 @@ describe('the fixture', () => {
     for (const sub of ['right', 'back', 'left', 'right+back', 'right+left', 'back+left', 'right+back+left']) {
       for (const d of ['left', 'right']) expect(names.has(`${sub} · ${d}`), `${sub} ${d}`).toBe(true)
     }
-    for (const n of ['right+back+left · left · noisy clips', 'back · left · noisy clips', 'right+back+left · left · a clip of another size', FAILS_AT_3]) expect(names.has(n), n).toBe(true)
+    for (const n of [
+      'right+back+left · left · noisy clips', 'back · left · noisy clips', 'right+back+left · left · a clip of another size', FAILS_AT_3,
+      'right+back+left · left · 25 fps clips', 'back · left · 30000/1001 fps clips', 'right+back+left · right · 30000/1001 fps clips',
+      'right+back+left · left · the first clip 25 fps, the rest 24', 'right+back+left · left · clips with sound',
+    ]) expect(names.has(n), n).toBe(true)
     // Every call is Seedance 2.0 first → last frame on fal; one per arc; Python's stitched file Σ − (segments − 1) frames.
     for (const c of CASES) {
       expect(c.calls.every(x => x.provider === 'fal' && x.endpoint === SEEDANCE_I2V), c.name).toBe(true)
@@ -235,7 +241,13 @@ describe('every stitched case through the engine (cards, turntable and media-vid
       expect(pyRawDuration(p)).toBe(py.x264.duration)
       expect([p.video[0]!.w, p.video[0]!.h]).toEqual([py.x264.header.video[0]!.w, py.x264.header.video[0]!.h])
       const got = await decodeAll(out, [outRoot])
-      expect(got.pts).toEqual(got.pts.map((_, i) => i / 24))
+      // Frame i at i / rate, the rate the first clip's (stitchRate: PyAV's average_rate).
+      const first = FIXTURE.clips[`${c.clip_set}0`]!.averageRate
+      expect(py.x264.frameRate).toEqual(first)
+      got.pts.forEach((t, i) => expect(t, `frame ${i}`).toBeCloseTo((i * first.den) / first.num, 9))
+      // Python's stitch keeps no sound (it decodes the picture stream only), and neither does Sailor's.
+      expect(py.x264.header.sound).toEqual([])
+      expect(p.sound.length).toBe(0)
       // Byte for byte, Python's own stitch switched to libopenh264 (same frames, same settings).
       expect(got.frames.map(sha256Hex), 'equal to Python’s stitch on libopenh264').toEqual(py.openh264.frames)
       // No further from the source frames than Python's libx264 file, within 0.5 dB.
@@ -265,6 +277,20 @@ describe('every stitched case through the engine (cards, turntable and media-vid
     expect(kept.map(f => f.filename)).toEqual(c.stitch_order!.map(s => `${s}.mp4`))
   })
 
+  it('the fixture\'s rates: 25, 30000/1001, and a first clip of 25 before three of 24 all stitch at the first clip\'s rate, as Python', () => {
+    for (const name of ['right+back+left · left · 25 fps clips', 'back · left · 30000/1001 fps clips', 'right+back+left · left · the first clip 25 fps, the rest 24']) {
+      const c = caseNamed(name)
+      const first = FIXTURE.clips[`${c.clip_set}0`]!.averageRate
+      expect(first, name).not.toEqual({ num: 24, den: 1 })
+      expect(stitchRate({ video: [{ averageRate: first }] } as never), name).toEqual(first)
+      expect(c.stitch!.x264.frameRate, name).toEqual(first)
+    }
+    expect(FIXTURE.clips.mixed1!.averageRate).toEqual({ num: 24, den: 1 })
+    // Seedance's answers carry sound: every clip of the sound set has a track, and Python's stitch drops it.
+    for (let i = 0; i < 4; i++) expect(FIXTURE.clips[`sound${i}`]!.sounds).toBe(1)
+    expect(caseNamed('right+back+left · left · clips with sound').stitch!.x264.sound).toBeNull()
+  })
+
   it('the stitch: the first clip\'s rate (PyAV\'s average_rate, else 24), CRF 20 veryfast', () => {
     expect(TURNTABLE_STITCH_QUALITY).toEqual({ crf: 20, preset: 'veryfast' })
     const probe = (averageRate: { num: number; den: number } | null) => ({ video: [{ averageRate }] }) as never
@@ -274,7 +300,12 @@ describe('every stitched case through the engine (cards, turntable and media-vid
 })
 
 /** A kit whose fal answers each segment with its clip (served by URL), the case's pictures in its input folder. */
-async function runKit(c: ViewsCase, o: { hosted?: boolean; failAt?: number; lostAt?: number; kept?: ReturnType<typeof createFileKeptBytes>; dir?: string; root?: string; hangAt?: number } = {}) {
+async function runKit(c: ViewsCase, o: {
+  hosted?: boolean; failAt?: number; lostAt?: number; kept?: KeptBytes; dir?: string; root?: string; hangAt?: number
+  /** That segment answers `{video: null}`. */ noVideoAt?: number
+  /** That segment's clip is junk bytes (a file Sailor can't stitch). */ junkAt?: number
+  families?: () => ReadonlySet<RunnerFamily>
+} = {}) {
   const urlOf = (k: number) => `https://f.test/turntable/seg${k}.mp4`
   let n = 0
   const fal = createFakeFal({ answer: ({ input }) => ({ video: { url: urlOf(Number((input as { __seg?: number }).__seg ?? 0)) } }) })
@@ -291,13 +322,14 @@ async function runKit(c: ViewsCase, o: { hosted?: boolean; failAt?: number; lost
     const id = /^fal:\/\/(req\d+)/.exec(url)![1]!
     const seg = byPayload.get(fal.reqs.get(id)!.payload)!
     await (result as (u: string) => Promise<unknown>)(url)
-    return { video: { url: urlOf(seg) } }
+    return { video: o.noVideoAt === seg ? null : { url: urlOf(seg) } }
   }) as typeof result
   const gets: string[] = []
   const download = async (url: string) => {
     gets.push(url)
     const seg = Number(/seg(\d)\.mp4$/.exec(url)![1])
     if (o.lostAt === seg) throw new Error('connection reset')
+    if (o.junkAt === seg) return { bytes: new TextEncoder().encode('not a video at all'), contentType: 'video/mp4' }
     return { bytes: b64(FIXTURE.clips[`${c.clip_set}${seg - 1}`]!.b64), contentType: 'video/mp4' }
   }
   const reportError = vi.fn()
@@ -310,7 +342,7 @@ async function runKit(c: ViewsCase, o: { hosted?: boolean; failAt?: number; lost
   }) as typeof status
   const k = makeKit({
     hosted: o.hosted, available: 50_000, fal: o.hangAt ? { ...fal, client: { ...fal.client, status: hung } } : fal, dir: o.dir, root: o.root,
-    deps: { families: () => ON, download, reportError, ...(o.kept ? { kept: o.kept } : {}) },
+    deps: { families: o.families ?? (() => ON), download, reportError, ...(o.kept ? { kept: o.kept } : {}) },
   })
   for (const name of c.pictures ?? []) writeFileSync(join(k.root, 'input', `${name}.png`), b64(c.picture_files![name]!))
   const { runId } = await k.engine.startRun({ userId: k.userId, takes: [promptOf(c)], ...START })
@@ -366,6 +398,83 @@ describe('money: the hold is every arc, the charge the arcs that finished and we
     expect(fal.submitted().length).toBe(2)
     expect(charged(k)).toEqual([[912, ARC_CREDITS]])
     expect(reportError.mock.calls.map(x => (x[1] as { site: string }).site)).toContain('runner.download.lost')
+  })
+})
+
+describe('fix round 1: an arc that delivered nothing usable is charged 0; a stitch Sailor can\'t make charges nothing', () => {
+  const four = () => caseNamed('right+back+left · left')
+  const site = (r: ReturnType<typeof vi.fn>) => r.mock.calls.map(x => (x[1] as { site: string; why?: string }))
+
+  it('segment 3 answering {video: null}: segments 1–2 charged (456 of 912), not 684; segment 4 never sent', LONG, async () => {
+    await requireMediaTools()
+    const { k, runId, fal, reportError } = await runKit(four(), { hosted: true, noVideoAt: 3 })
+    await k.engine.settled(runId)
+    const rec = (await k.store.get(runId))!.takes[0]!.nodes.n!
+    expect(rec.status).toBe('error')
+    expect(rec.error).toBe(TURNTABLE_NO_CLIP)
+    expect(fal.submitted().length).toBe(3)
+    expect(rec.calls!.map(x => [x.key, x.status, !!x.lost])).toEqual([['seg-1', 'done', false], ['seg-2', 'done', false], ['seg-3', 'done', true]])
+    expect(charged(k)).toEqual([[912, 456]])
+    expect(site(reportError)).toContainEqual(expect.objectContaining({ site: 'runner.call.undelivered', why: 'no-file' }))
+  })
+
+  it('a clip that downloaded but couldn\'t be kept (the run\'s kept cap): that arc isn\'t charged (228 of 912: segment 1 only)', LONG, async () => {
+    await requireMediaTools()
+    const base = createMemoryKeptBytes()
+    let clips = 0
+    const kept: KeptBytes = { ...base, putPath: async (runId, tmp, ext) => { if (ext === 'mp4' && ++clips === 2) throw new Error(KEPT_TOO_MUCH); return base.putPath(runId, tmp, ext) } }
+    const { k, runId, fal, reportError } = await runKit(four(), { hosted: true, kept })
+    await k.engine.settled(runId)
+    const rec = (await k.store.get(runId))!.takes[0]!.nodes.n!
+    expect(rec.status).toBe('error')
+    expect(rec.error).toContain(KEPT_TOO_MUCH)
+    expect(fal.submitted().length).toBe(2)
+    expect(charged(k)).toEqual([[912, ARC_CREDITS]])
+    expect(site(reportError)).toContainEqual(expect.objectContaining({ site: 'runner.call.undelivered', why: 'not-kept' }))
+  })
+
+  it('a stitch Sailor can\'t make (a clip its tools can\'t read) charges nothing; the kept clips stay with the run', LONG, async () => {
+    await requireMediaTools()
+    const { k, runId, fal, reportError } = await runKit(four(), { hosted: true, junkAt: 2 })
+    await k.engine.settled(runId)
+    const rec = (await k.store.get(runId))!.takes[0]!.nodes.n!
+    expect(rec.status).toBe('error')
+    expect(fal.submitted().length).toBe(4)
+    expect(rec.calls!.every(x => x.status === 'done' && x.lost)).toBe(true)
+    expect(rec.calls!.every(x => !!(x.saved as Record<string, OutputFile> | undefined)?.clip)).toBe(true)
+    expect(rec.outputs).toEqual([])
+    // Nothing charged: the hold is let go whole.
+    expect([...k.ledger.holds.values()].map(h => [h.credits, h.state])).toEqual([[912, 'released']])
+    expect(site(reportError)).toContainEqual(expect.objectContaining({ site: 'runner.charge.absorbed', why: 'sailor-fault' }))
+  })
+
+  it('media-video off at the node\'s turn (the tools gone since the hold): nothing sent, nothing charged', LONG, async () => {
+    let turn = false
+    const families = () => (turn ? new Set<RunnerFamily>(['cards', 'turntable']) : ON)
+    const { k, runId, fal } = await runKit(four(), { hosted: true, families })
+    turn = true
+    await k.engine.settled(runId)
+    const rec = (await k.store.get(runId))!.takes[0]!.nodes.n!
+    expect(rec.status).toBe('error')
+    expect(rec.error).toBe(TURNTABLE_NO_TOOLS)
+    expect(fal.submitted().length).toBe(0)
+    expect([...k.ledger.holds.values()].map(h => [h.credits, h.state])).toEqual([[912, 'released']])
+  })
+
+  it('the run\'s kept room is checked before the hold: every arc\'s clip and the stitched file, over every take', async () => {
+    expect(TURNTABLE_CLIP_MAX_BYTES).toBe(128 * 1024 * 1024)
+    const inputs = promptOf(four()).n!.inputs
+    expect(turntableKeptBytes(inputs)).toBe(2 * 4 * TURNTABLE_CLIP_MAX_BYTES)
+    expect(turntableKeptBytes(promptOf(caseNamed('back · left')).n!.inputs)).toBe(2 * 2 * TURNTABLE_CLIP_MAX_BYTES)
+    expect(turntableKeptBytes({ image: ['p', 0], direction: 'left' })).toBe(0)
+    // Hosted 4 GiB: four four-arc Turntables fit (1 GiB each); a fifth take doesn't, refused before any hold.
+    expect(4 * turntableKeptBytes(inputs)).toBeLessThanOrEqual(MEDIA_CAPS.hosted.keptBytesPerRun)
+    const c = four()
+    const k = makeKit({ hosted: true, available: 50_000, deps: { families: () => ON } })
+    for (const name of c.pictures ?? []) writeFileSync(join(k.root, 'input', `${name}.png`), b64(c.picture_files![name]!))
+    await expect(k.engine.startRun({ userId: k.userId, takes: Array.from({ length: 5 }, () => promptOf(c)), ...START })).rejects.toThrow(KEPT_ROOM_REFUSED)
+    expect(k.ledger.hold).not.toHaveBeenCalled()
+    expect(k.fal.client.submit).not.toHaveBeenCalled()
   })
 })
 

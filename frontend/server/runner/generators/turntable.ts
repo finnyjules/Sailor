@@ -30,7 +30,7 @@
  * a restart replays the finished ones and a failure charges the arcs that
  * finished and were delivered (rule 12). Each answer's video (fal's
  * `video.url`, `first_fal_video_url`) is downloaded once (capped at
- * MAX_MEDIA_BYTES, rule 3) and kept for the run by path (R5.2's
+ * TURNTABLE_CLIP_MAX_BYTES, fix round 1) and kept for the run by path (R5.2's
  * KeptBytes.putPath). Then `stitch_clips` (_turntable_stitch.py:15-61) is
  * R5.1c's clip stitch (server/media/encode.ts encodeVideo `clips`: every clip
  * after the first loses its first frame, a clip of another size is scaled to
@@ -43,7 +43,16 @@
  * returns no ui. No backup (Seedance 2.0 has none: RUNNER_ROUTES).
  *
  * Path B needs Sailor's video tools: its rule row applies only while
- * `media-video` is on (#shared/runner/eligibility TURNTABLE_VIEWS_RULE).
+ * `media-video` is on (#shared/runner/eligibility TURNTABLE_VIEWS_RULE), and
+ * the node checks it again at its turn, before the first arc.
+ *
+ * Fix round 1 (money): an arc whose answer names no video, whose clip can't be
+ * downloaded or kept, is marked undelivered and charged 0
+ * (PipelineIO.undelivered); a stitch Sailor can't make charges nothing (every
+ * arc marked, the cancel policy's rule for Sailor's own faults), its kept
+ * clips left with the run; the run's kept room for every arc's clip and the
+ * stitched file (`turntableKeptBytes`) is checked before the hold (engine.ts
+ * keptRoomBeforeHold).
  */
 import { rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
@@ -55,10 +64,11 @@ import {
 } from '#shared/runner/turntable'
 import { paidCallUsd } from '#shared/pricing/paidRates'
 import { turntableArcCall } from '#shared/pricing/paidSettings'
-import { MAX_MEDIA_BYTES } from '../../utils/graphInputSeconds'
 import { encodeVideo, type H264Quality } from '../../media/encode'
 import { probeMedia, type MediaProbe, type Rational } from '../../media/probe'
+import { familyOn } from '#shared/runner/families'
 import type { NodePlan, PipelineIO, PlanContext } from '../executors'
+import { failNoFile, keptOrUndelivered } from '../pipelineDelivery'
 import { imageUrlOf } from '../imageUrl'
 import type { OutputFile } from '../types'
 import { RUNNER_VIDEO_MODELS, falVideoFn } from './video'
@@ -144,6 +154,27 @@ export const TURNTABLE_STITCH_QUALITY: H264Quality = Object.freeze({ crf: 20, pr
 export const TURNTABLE_NO_CLIP = 'The service sent back no video for one of the turntable’s turns'
 /** The node needs the run's files and kept store (a live preview has none). */
 export const TURNTABLE_NEEDS_RUN = 'A turntable with extra views can only be made in a run'
+/** The video tools went away between the hold and the node's turn (fix round 1): nothing is sent or charged. */
+export const TURNTABLE_NO_TOOLS = 'Sailor’s video tools aren’t available right now, so this turntable wasn’t started. Nothing was charged.'
+
+/**
+ * The most one arc's clip may be (fix round 1; rule 3's lower cap, named by
+ * this task): a 5 s Seedance 2.0 720p answer is a few MB, so 128 MiB is
+ * about 200 Mbit/s, far past any. A bigger answer isn't downloaded, and its
+ * arc is not charged. It sizes the run's kept room checked before the hold
+ * (`turntableKeptBytes`).
+ */
+export const TURNTABLE_CLIP_MAX_BYTES = 128 * 1024 * 1024
+
+/**
+ * The bytes a Turntable with views keeps in its run at most (fix round 1):
+ * each arc's clip, and the stitched file's work copy (sized as all the clips
+ * again: a CRF 20 re-encode of the same frames). 0 for the front-only spin.
+ */
+export function turntableKeptBytes(inputs: Record<string, unknown>): number {
+  const arcs = turntableViews(inputs).length ? turntableSegments(inputs).length : 0
+  return 2 * arcs * TURNTABLE_CLIP_MAX_BYTES
+}
 
 /** The input each view is read from (execute's `views` dict). */
 const VIEW_INPUT: Readonly<Record<TurntableView, string>> = {
@@ -183,10 +214,10 @@ export function stitchRate(first: Pick<MediaProbe, 'video'>): Rational {
   return r && r.num > 0 && r.den > 0 ? { num: r.num, den: r.den } : { num: 24, den: 1 }
 }
 
-/** An arc's clip, downloaded (MAX_MEDIA_BYTES, rule 3) and kept for the run by path. */
+/** An arc's clip, downloaded (TURNTABLE_CLIP_MAX_BYTES, rule 3) and kept for the run by path. */
 async function keepClip(io: PipelineIO, url: string): Promise<OutputFile> {
   const media = io.media!
-  const got = await io.download(url, { kind: 'video', maxBytes: MAX_MEDIA_BYTES })
+  const got = await io.download(url, { kind: 'video', maxBytes: TURNTABLE_CLIP_MAX_BYTES })
   await media.kept.checkRoom(media.runId)
   const work = await media.kept.workDir(media.runId)
   try {
@@ -253,6 +284,9 @@ export function planTurntableViews(ctx: PlanContext): NodePlan {
     kind: 'pipeline', prefix: 'turntable',
     run: async (io: PipelineIO) => {
       if (!io.media || !io.saveAssetFromPath) throw new Error(TURNTABLE_NEEDS_RUN)
+      // Fix round 1: the tools, checked again at the node's turn (the leg may have been held on a server that
+      // had them): without them, nothing is sent and nothing charged.
+      if (!ctx.families || !familyOn('media-video', ctx.families)) throw new Error(TURNTABLE_NO_TOOLS)
       const urls = new Map<TurntableView, string>()
       for (const [view, p] of pictures) urls.set(view, await imageUrlOf(ctx, p.file, p.link))
       const clips: OutputFile[] = []
@@ -260,11 +294,20 @@ export function planTurntableViews(ctx: PlanContext): NodePlan {
         const req = segmentRequest(s.prompt, urls.get(s.start)!, urls.get(s.end)!)
         const answer = await io.call({ key: s.key, ...req, media: 'video', usd })
         const url = answer.urls[0]
-        if (!url) throw new Error(TURNTABLE_NO_CLIP)
-        clips.push(await io.savedOnce(s.key, 'clip', () => keepClip(io, url)))
+        // Fix round 1: an arc with no video, or one not downloaded or kept, delivered nothing: charged 0.
+        if (!url) return await failNoFile(io, s.key, TURNTABLE_NO_CLIP)
+        clips.push(await io.savedOnce(s.key, 'clip', () => keptOrUndelivered(io, s.key, () => keepClip(io, url))))
       }
       // Saved once: a node resumed after its stitch was saved hands on that file.
-      const video = await io.savedOnce(segments[segments.length - 1]!.key, 'video', () => stitchClips(io, clips))
+      let video: OutputFile
+      try { video = await io.savedOnce(segments[segments.length - 1]!.key, 'video', () => stitchClips(io, clips)) }
+      catch (e) {
+        // Fix round 1 (the cancel policy's rule for Sailor's own faults): a stitch Sailor couldn't make charges
+        // nothing; every arc is marked so (Sailor absorbs them). The kept clips stay with the run. After Stop,
+        // the arcs that finished stay charged (ruling (f)).
+        if (!io.signal.aborted) for (const s of segments) await io.undelivered?.(s.key, 'sailor-fault')
+        throw e
+      }
       return { values: { 0: { kind: 'files', files: [video] } }, ui: null }
     },
   }

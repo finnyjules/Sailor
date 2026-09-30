@@ -473,13 +473,6 @@ function turntableCall(model: string, adv: Record<string, unknown>): PaidCall {
 }
 
 /**
- * Turntable (ruling (b), on both paths): front only, one Luma Ray 2 720p
- * spin (5 s × $0.18); with right, back or left views wired, one Seedance 2.0
- * 720p arc per segment planSegments plans (2 to 4), each priced on its own.
- * A wired view counts (the dearest plan); a wired or unknown direction plans
- * as many arcs as either direction does.
- */
-/**
  * One arc of a Turntable with views (R3.17): Seedance 2.0 first → last frame
  * at 720p, 5 s. The runner's pipeline prices each segment call with it
  * (server/runner/generators/turntable.ts), so its hold (every arc) and its
@@ -489,6 +482,13 @@ export function turntableArcCall(): PaidCall {
   return turntableCall(TURNTABLE_VIEWS_MODEL, { end_image_url: 'end' })
 }
 
+/**
+ * Turntable (ruling (b), on both paths): front only, one Luma Ray 2 720p
+ * spin (5 s × $0.18); with right, back or left views wired, one Seedance 2.0
+ * 720p arc per segment planSegments plans (2 to 4), each priced on its own.
+ * A wired view counts (the dearest plan); a wired or unknown direction plans
+ * as many arcs as either direction does.
+ */
 function turntablePlanner(inputs: NodeInputs): PaidCalls {
   const views = turntableViews(inputs)
   if (!views.length) return { steps: [{ call: turntableCall(TURNTABLE_FRONT_MODEL, { loop: true }), times: 1 }] }

@@ -35,6 +35,8 @@ import type { KeepStep } from './compositor/keep'
 import { createMemoryHeldBytes, type HeldBytes } from './heldBytes'
 import { createMemoryKeptBytes, withRunCap, type KeptBytes, type KeptExt } from './keptBytes'
 import { MEDIA_CAPS } from '#shared/runner/media'
+import { TURNTABLE_CLASS } from '#shared/runner/turntable'
+import { turntableKeptBytes } from './generators/turntable'
 import { createFileAccess } from './fileAccess'
 import type { BackupSettings } from './config'
 import { checkedInputFile, handedOffPictureProblem, inputFileCaps, linkedFileCheck, measuredInputProblem, pictureChangedWords, pictureOverMarginWords, hostedRequestProblems, requestProblems, unreadableInputWords } from './requestRules'
@@ -291,6 +293,8 @@ const NO_FILE: Record<Exclude<OutputMedia, 'value'>, string> = {
   image: 'The provider returned no image', video: 'The provider returned no video',
   audio: 'The provider returned no sound', glb: 'The provider returned no 3D model',
 }
+/** A leg whose nodes would keep more files than the run may hold (R3.17 fix round 1), refused before the hold. */
+export const KEPT_ROOM_REFUSED = 'This run would keep more video than Sailor can hold for one run. Run fewer turntables with extra views at once.'
 /** A resumed pipeline call that is no longer the call written down (the F12 rule). */
 export const PIPELINE_CALL_CHANGED = 'This step changed while it was running, so it was stopped. Run it again.'
 
@@ -852,6 +856,30 @@ export function createEngine(deps: EngineDeps) {
     }
   }
 
+  /**
+   * The run's kept room, checked before a leg's hold (R3.17 fix round 1): the
+   * files the leg's nodes will keep for the run at most (a Turntable with
+   * views: its arcs' clips and the stitched file's work copy,
+   * turntableKeptBytes), on top of what the run keeps already, must fit the
+   * run's cap (MEDIA_CAPS.keptBytesPerRun); else the leg is refused plainly
+   * before anything is held or sent.
+   */
+  async function keptRoomBeforeHold(run: RunRecord, takeIdx: number[]): Promise<void> {
+    const cap = (deps.hosted() ? MEDIA_CAPS.hosted : MEDIA_CAPS.local).keptBytesPerRun
+    if (!Number.isFinite(cap)) return
+    let need = 0
+    for (const t of takeIdx) {
+      const take = run.takes[t]!
+      for (const id of legNodes(take.prompt, gateStateOf(take))) {
+        const n = take.prompt[id]
+        if (n?.class_type === TURNTABLE_CLASS) need += turntableKeptBytes(n.inputs ?? {})
+      }
+    }
+    if (!need) return
+    const used = (await kept.runBytes(run.id)) + (await kept.workBytes(run.id))
+    if (used + need > cap) throw refuse(KEPT_ROOM_REFUSED, 413)
+  }
+
   // ── Opening a leg: price, hold, write down ─────────────────────────────
   async function openLeg(run: RunRecord, action: LegAction, gateId: string | null, takeIdx: number[]): Promise<LegRecord> {
     const index = run.legs.length
@@ -860,6 +888,7 @@ export function createEngine(deps: EngineDeps) {
     // The switches this leg's hold is priced with, written down on the leg:
     // a node whose model depends on one that changes before its turn is refused then (switches.ts).
     const families = deps.families?.() ?? NO_FAMILIES
+    await keptRoomBeforeHold(run, takeIdx)
     try {
       for (const t of takeIdx) {
         const take = run.takes[t]!
@@ -1471,6 +1500,16 @@ export function createEngine(deps: EngineDeps) {
             },
             // A text the node made in the run and sends on (R3.14), moderated as a wired text is at its turn (hosted only).
             moderateText: text => deps.metering.moderateText(text),
+            // R3.17 fix round 1: a finished call that delivered nothing usable is charged 0 (Sailor absorbs it).
+            undelivered: async (key, why) => {
+              const cr = rec.calls?.find(c => c.key === key && c.status === 'done')
+              if (!cr || cr.lost) return
+              cr.lost = true
+              deps.reportError(new Error(`A step of this node delivered nothing usable (${why}); not charged`), {
+                site: why === 'sailor-fault' ? 'runner.charge.absorbed' : 'runner.call.undelivered', stageKey, node: id, call: key, why,
+              })
+              await persist(run).catch(err => deps.reportError(err, { site: 'runner.call.save', stageKey, node: id, call: key }))
+            },
             handOff: async (bytes, name) => {
               const f = await kept.put(run.id, bytes, keptExtOf(name))
               // Uploaded under the node's own name (its type goes by it); remembered by the bytes.

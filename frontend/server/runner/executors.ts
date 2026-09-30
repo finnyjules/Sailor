@@ -278,7 +278,21 @@ export interface PipelineIO extends DeriveIO {
   /** Hands off bytes the node made itself (a mask, an RGB copy): kept by sha256, then uploaded. */
   handOff(bytes: Uint8Array, name: string): Promise<string>
   toUrl(file: OutputFile): Promise<string>
+  /**
+   * Marks the finished call `key` undelivered (R3.17 fix round 1, engine-wide):
+   * nothing usable came of it, so it is charged 0 (CallRecord.lost; Sailor
+   * absorbs what the provider billed) and it is reported. `why`: its answer
+   * named no file ('no-file'); what it delivered couldn't be kept
+   * ('not-kept', e.g. the run's kept cap); or Sailor failed afterwards with
+   * what it delivered ('sailor-fault', a stitch Sailor couldn't make). A call
+   * not finished, or already marked, is left as it is. Absent (a live
+   * preview, a test fake): nothing is marked.
+   */
+  undelivered?(key: string, why: UndeliveredWhy): Promise<void>
 }
+
+/** Why a finished pipeline call delivered nothing usable (PipelineIO.undelivered). */
+export type UndeliveredWhy = 'no-file' | 'not-kept' | 'sailor-fault'
 
 export type NodePlan =
   | {

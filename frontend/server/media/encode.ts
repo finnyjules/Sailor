@@ -418,7 +418,10 @@ export async function encodeVideo(o: EncodeVideoOptions): Promise<{ frames: numb
         parts.push(`[${i}:v:0]${steps.join(',')}[c${i}]`)
       })
       const joined = clipProbes.map((_, i) => `[c${i}]`).join('')
-      parts.push(`${joined}concat=n=${clipProbes.length}:v=1:a=0,${restamp}[v]`)
+      // R3.17 fix round 1: `fps` after the renumbering keeps every frame (their times are already exactly
+      // i / fps) and gives each one a duration of one frame, which `setpts` leaves as the clip's own: a clip
+      // at another rate (a first clip at 25 fps, the rest at 24) otherwise changed the file's average rate.
+      parts.push(`${joined}concat=n=${clipProbes.length}:v=1:a=0,${restamp},fps=${o.fps.num}/${o.fps.den}[v]`)
       args.push('-filter_complex', parts.join(';'))
       videoMap = '[v]'
     }

@@ -154,7 +154,9 @@ export interface CallRecord {
   /**
    * The call finished but a file of its answer could not be downloaded or
    * kept (R3.1 fix round 1): not delivered, so not charged (Sailor absorbs
-   * it; reported as runner.download.lost).
+   * it; reported as runner.download.lost). Also set (R3.17 fix round 1,
+   * PipelineIO.undelivered) when its answer named no file, what it delivered
+   * couldn't be kept, or Sailor failed with it afterwards.
    */
   lost?: true
   /**

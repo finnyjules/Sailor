@@ -443,13 +443,19 @@ describe('the reload retry and the order toggle (ruling (g))', () => {
     expect(multiLoraRotation()).toBe(1)
   })
 
-  async function multiRun(answers: unknown[], o: { failSecond?: boolean } = {}) {
+  async function multiRun(answers: unknown[], o: { failSecond?: boolean; lostDownload?: boolean } = {}) {
     const queue = [...answers]
     const bodyOf = new Map<unknown, string>()
     const k = makeKit({
       hosted: true, root: loraRoot(),
       replicate: createFakeReplicate({ bodyText: ({ input }) => bodyOf.get(input)! }),
-      deps: { families: () => ON, download: async () => ({ bytes: new Uint8Array(await png(8, 6, 4)), contentType: 'image/png' }) },
+      deps: {
+        families: () => ON,
+        download: async () => {
+          if (o.lostDownload) throw new Error('connection reset')
+          return { bytes: new Uint8Array(await png(8, 6, 4)), contentType: 'image/png' }
+        },
+      },
     })
     __setInputUploadsEngineRootForTests(k.root)
     const submit = k.replicate.client.submit
@@ -497,13 +503,29 @@ describe('the reload retry and the order toggle (ruling (g))', () => {
     expect(r.charged).toEqual([[20 + BASE_RENDER_CREDITS, 10]])
   })
 
-  it('a second answer with no picture fails plainly: both calls were made, both charged', async () => {
+  it('a second answer with no picture fails plainly: both calls were made, the second delivered nothing, so only the first is charged (R3.17 fix round 1)', async () => {
     const r = await multiRun([{ output: [OUT], logs: 'no marker' }, { output: null, logs: MARKER_LOGS }])
     expect(r.sent.length).toBe(2)
     expect(r.rec.status).toBe('error')
     expect(r.rec.error).toContain(LORA_NO_PICTURE)
-    // R3.18 ruling: the node failed and delivered nothing to an output: its two calls only, no render credit (was + 1).
-    expect(r.charged).toEqual([[20 + BASE_RENDER_CREDITS, 20]])
+    expect(r.rec.calls!.map(c => [c.key, c.status, !!c.lost])).toEqual([['first', 'done', false], ['retry', 'done', true]])
+    // The first call only (the retry delivered nothing); no render credit (R3.18 ruling).
+    expect(r.charged).toEqual([[20 + BASE_RENDER_CREDITS, 10]])
+  })
+
+  it('one call answering no picture delivered nothing: charged 0 (R3.17 fix round 1)', async () => {
+    const r = await multiRun([{ output: null, logs: MARKER_LOGS }])
+    expect(r.sent.length).toBe(1)
+    expect(r.rec.status).toBe('error')
+    expect(r.rec.error).toContain(LORA_NO_PICTURE)
+    // Nothing charged: the hold is let go whole.
+    expect([...r.k.ledger.holds.values()].map(h => [h.credits, h.state])).toEqual([[20 + BASE_RENDER_CREDITS, 'released']])
+  })
+
+  it('a picture that can\'t be downloaded delivered nothing: charged 0', async () => {
+    const r = await multiRun([{ output: [OUT], logs: MARKER_LOGS }], { lostDownload: true })
+    expect(r.rec.status).toBe('error')
+    expect([...r.k.ledger.holds.values()].map(h => [h.credits, h.state])).toEqual([[20 + BASE_RENDER_CREDITS, 'released']])
   })
 })
 

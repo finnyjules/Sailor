@@ -3011,24 +3011,34 @@ TURNTABLE_SEG_URL = "https://f.test/turntable/seg{k}.mp4"
 TURNTABLE_VIEW_NAMES = {"right": "right_reference", "back": "back_reference", "left": "left_reference"}
 
 
-def _segment_clip(k: int, w: int, h: int, frames: int, content: str) -> bytes:
-    """One Seedance answer clip: H.264 yuv420p in MP4 at 24 fps, libx264 with one
-    thread, every muxer and encoder bitexact (a second run writes the same bytes).
-    `content` "smooth" (runner_media_fixtures.smooth_frame) or "noise" (R2.1's synth)."""
+def _segment_clip(k: int, w: int, h: int, frames: int, content: str, rate=24, sound: bool = False) -> bytes:
+    """One Seedance answer clip: H.264 yuv420p in MP4 at `rate` (an int or a
+    Fraction), libx264 with one thread, every muxer and encoder bitexact (a second
+    run writes the same bytes). `content` "smooth" (runner_media_fixtures.smooth_frame)
+    or "noise" (R2.1's synth). `sound` (fix round 1): an AAC stereo 48 kHz track
+    too, as Seedance 2.0's answers carry one, interleaved by the muxer."""
     import io
     import av
     import numpy as np
     import runner_media_fixtures as rmf
     buf = io.BytesIO()
     c = av.open(buf, "w", format="mp4", options=dict(rmf.BITEXACT))
-    s = rmf.video_stream(c, "libx264", w, h, 24, "yuv420p", rmf.X264)
-    out = []
+    s = rmf.video_stream(c, "libx264", w, h, rate, "yuv420p", rmf.X264)
+    t = rmf.sound_stream(c, "aac", 48000, "stereo", "fltp", 64000) if sound else None
+    packets = []
     for i in range(frames):
         rgb = rmf.smooth_frame(w, h, 10 * k + i) if content == "smooth" else rmf.synth(w, h, 3, 100 * k + i + 1)
         f = av.VideoFrame.from_ndarray(np.frombuffer(rgb, np.uint8).reshape(h, w, 3), format="rgb24").reformat(format="yuv420p")
         f.pts = i
-        out.append(f)
-    rmf.encode_frames(c, s, out)
+        packets += s.encode(f)
+    packets += s.encode(None)
+    if t is not None:
+        x = rmf.tone(48000, frames / float(rate), 2) * (1.0 - 0.1 * k)
+        for f in rmf.sound_frames(x.astype(np.float32), 48000, "stereo", "fltp", 1024):
+            packets += t.encode(f)
+        packets += t.encode(None)
+    for p in packets:
+        c.mux(p)
     c.close()
     return buf.getvalue()
 
@@ -3061,13 +3071,21 @@ def turntable_views_group() -> dict:
     from comfy_extras import nodes_turntable
     from comfy_extras.nodes_turntable import TurntableNode
 
-    def clip_set(content: str, sizes: list) -> list:
-        return [_segment_clip(k, w, h, 6, content) for k, (w, h) in enumerate(sizes)]
+    from fractions import Fraction
 
+    def clip_set(content: str, sizes: list, rates=(24, 24, 24, 24), sound: bool = False) -> list:
+        return [_segment_clip(k, w, h, 6, content, rates[k], sound) for k, (w, h) in enumerate(sizes)]
+
+    ntsc = Fraction(30000, 1001)
     sets = {
         "smooth": clip_set("smooth", [(32, 32)] * 4),
         "noise": clip_set("noise", [(32, 32)] * 4),
         "sizes": clip_set("smooth", [(32, 32), (48, 48), (32, 32), (32, 32)]),
+        # Fix round 1: other rates (the output takes the first clip's), and clips with a sound track.
+        "fps25": clip_set("smooth", [(32, 32)] * 4, (25, 25, 25, 25)),
+        "ntsc": clip_set("smooth", [(32, 32)] * 4, (ntsc, ntsc, ntsc, ntsc)),
+        "mixed": clip_set("smooth", [(32, 32)] * 4, (25, 24, 24, 24)),
+        "sound": clip_set("smooth", [(32, 32)] * 4, sound=True),
     }
     clips: dict = {}
     for set_name, blobs in sets.items():
@@ -3076,8 +3094,10 @@ def turntable_views_group() -> dict:
                 f.write(b)
                 f.flush()
                 frames = rmf.rgb_frames_of(f.name)
+                head = rmf.header(f.name)
             clips[f"{set_name}{k}"] = {"b64": _b64(b), "sha256": hashlib.sha256(b).hexdigest(),
-                                      "frames": [rmf.sha(x) for x in frames]}
+                                      "frames": [rmf.sha(x) for x in frames],
+                                      "averageRate": head["video"][0]["averageRate"], "sounds": len(head["sound"])}
 
     cases: list = []
     real_stitch = ts.stitch_clips
@@ -3150,6 +3170,11 @@ def turntable_views_group() -> dict:
     add("back · left · noisy clips", ["back"], "left", clip_set_name="noise")
     add("right+back+left · left · a clip of another size", ["right", "back", "left"], "left", clip_set_name="sizes")
     add("right+back+left · left · segment 3 fails", ["right", "back", "left"], "left", fail_at=3)
+    add("right+back+left · left · 25 fps clips", ["right", "back", "left"], "left", clip_set_name="fps25")
+    add("back · left · 30000/1001 fps clips", ["back"], "left", clip_set_name="ntsc")
+    add("right+back+left · right · 30000/1001 fps clips", ["right", "back", "left"], "right", clip_set_name="ntsc")
+    add("right+back+left · left · the first clip 25 fps, the rest 24", ["right", "back", "left"], "left", clip_set_name="mixed")
+    add("right+back+left · left · clips with sound", ["right", "back", "left"], "left", clip_set_name="sound")
     return {"cases": cases, "clips": clips}
 
 
