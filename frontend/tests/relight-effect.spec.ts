@@ -228,29 +228,59 @@ test.describe('Relight effect', () => {
 
 test.describe('Relight surfaces (stage 2)', () => {
   test.beforeEach(async ({ page }) => { await mockSurfacesCached(page) })
-  test('surfaces land: the price shows while reading, then the picture changes and the status clears', async ({ page }) => {
-    // addRelight alone (right-click, menu click, wait for the depth-only GPU pass) runs a few
-    // seconds in this harness, so the mock's delay has to clear that plus the assertion below
-    // with room to spare, or the answer lands before we ever observe "loading".
-    let requests = 0
+
+  // 2026-09-30 (Read shape button): the Frame editor only ever PEEKS for free; a paid read
+  // starts only from the panel's own "Read shape" click.
+  test('a new photo: Read shape button shows the price, no read happens until clicked, then reads once and swaps', async ({ page }) => {
+    let peeks = 0, reads = 0
     await page.route('**/api/depth/surfaces', async (route) => {
-      requests++
-      await new Promise((r) => setTimeout(r, 5_000))
+      const body = route.request().postDataJSON() as { peek?: boolean }
+      if (body.peek) {
+        peeks++
+        await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ absent: true }) })
+        return
+      }
+      reads++
+      // addRelight alone (right-click, menu click, wait for the depth-only GPU pass) runs a
+      // few seconds in this harness, so the delay has to clear that plus the assertions below.
+      await new Promise((r) => setTimeout(r, 3_000))
       await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ normalsFilename: 'moge_a579ac8e5ca4ba75.png', subfolder: 'sailor_depth', cached: false }) })
     })
     await openCompositor(page)
     await seedPhoto(page)
     await addRelight(page)                                    // depth-only pass has already run
-    await expect(page.getByTestId('relight-status-loading')).toHaveText(/Reading shape · ~\$0\.01/)
+    await expect(page.getByTestId('relight-surfaces-read')).toHaveText(/Read shape · ~\$0\.01/)
+    expect(reads).toBe(0)
     const depthOnly = await stackPixels(page)
     const runsBeforeSurfaces = await runs(page)
+
+    await page.getByTestId('relight-surfaces-read').click()
+    await expect(page.getByTestId('relight-status-loading')).toHaveText(/Reading shape · ~\$0\.01/)
+    await expect(page.getByTestId('relight-surfaces-read')).toHaveCount(0)
     await expect(page.getByTestId('relight-status-loading')).toHaveCount(0, { timeout: 10_000 })
     await expect.poll(() => runs(page), { timeout: 5_000 }).toBeGreaterThan(runsBeforeSurfaces)
     expect(await stackPixels(page)).not.toBe(depthOnly)
-    expect(requests).toBe(1)
+    expect(reads).toBe(1)
+    expect(peeks).toBeGreaterThanOrEqual(1)
   })
 
-  test("switched off: the route answers 503 { off: true }, no status line, picture stays on depth only", async ({ page }) => {
+  test('a cached photo: no button, surfaces used automatically from a free peek, never a paid read', async ({ page }) => {
+    let peeks = 0, reads = 0
+    await page.route('**/api/depth/surfaces', async (route) => {
+      const body = route.request().postDataJSON() as { peek?: boolean }
+      if (body.peek) peeks++; else reads++
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ normalsFilename: 'moge_a579ac8e5ca4ba75.png', subfolder: 'sailor_depth', cached: true }) })
+    })
+    await openCompositor(page)
+    await seedPhoto(page)
+    await addRelight(page)
+    await expect(page.getByTestId('relight-surfaces-read')).toHaveCount(0)
+    await expect(page.getByTestId('relight-status-loading')).toHaveCount(0)
+    expect(reads).toBe(0)
+    expect(peeks).toBeGreaterThanOrEqual(1)
+  })
+
+  test("switched off: the route answers 503 { off: true }, no button, no status line, picture stays on depth only", async ({ page }) => {
     await page.route('**/api/depth/surfaces', async (route) => {
       await route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ off: true }) })
     })
@@ -258,6 +288,7 @@ test.describe('Relight surfaces (stage 2)', () => {
     await seedPhoto(page)
     await addRelight(page)
     const depthOnly = await stackPixels(page)
+    await expect(page.getByTestId('relight-surfaces-read')).toHaveCount(0)
     await expect(page.getByTestId('relight-status-loading')).toHaveCount(0)
     await expect(page.getByTestId('relight-status-error')).toHaveCount(0)
     expect(await stackPixels(page)).toBe(depthOnly)
@@ -266,12 +297,18 @@ test.describe('Relight surfaces (stage 2)', () => {
   test('a failed read shows the error line with Retry, and Retry calls the route again', async ({ page }) => {
     let requests = 0
     await page.route('**/api/depth/surfaces', async (route) => {
+      const body = route.request().postDataJSON() as { peek?: boolean }
+      if (body.peek) {
+        await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ absent: true }) })
+        return
+      }
       requests++
       await route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ message: 'moge-2: boom' }) })
     })
     await openCompositor(page)
     await seedPhoto(page)
     await addRelight(page)
+    await page.getByTestId('relight-surfaces-read').click()
     await expect(page.getByTestId('relight-status-error')).toBeVisible()
     expect(requests).toBe(1)
     await page.getByTestId('relight-surfaces-retry').click()
