@@ -31,7 +31,9 @@ const props = withDefaults(defineProps<{
   finishBusy?: boolean
   /** False hides the button: the layer can't be finished, or the route is switched off. */
   finishAvailable?: boolean
-}>(), { surfacesStatus: 'off', surfacesPrice: null, surfacesReadPrice: null, surfacesNote: null, finishPrice: null, finishBusy: false, finishAvailable: false })
+  /** Shown but not clickable (another edit is running, or Compare is held) — text unchanged. */
+  finishBlocked?: boolean
+}>(), { surfacesStatus: 'off', surfacesPrice: null, surfacesReadPrice: null, surfacesNote: null, finishPrice: null, finishBusy: false, finishAvailable: false, finishBlocked: false })
 const emit = defineEmits<{ update: [patch: Partial<RelightEffect>]; 'select-light': [id: string]; compare: [on: boolean]; 'retry-surfaces': []; 'read-surfaces': []; finish: [] }>()
 
 const active = computed(() => setupOf(props.fx))
@@ -151,7 +153,7 @@ const heightWord = (h: number) => (h < 0 ? 'Behind' : h < 0.2 ? 'Low' : h < 0.55
       <StudioSwitch data-testid="relight-shadows" label="Shadows" hint="Short contact shadows: hair on skin, chin on neck, folds" :model-value="fx.shadows" @update:model-value="(v: boolean) => emit('update', { shadows: v })" />
     </section>
 
-    <button v-if="finishAvailable" data-testid="relight-finish" :disabled="finishBusy"
+    <button v-if="finishAvailable" data-testid="relight-finish" :disabled="finishBusy || finishBlocked"
       class="w-full h-8 px-3 rounded-[8px] bg-white text-black font-medium hover:bg-white/90 cursor-pointer disabled:opacity-60 disabled:cursor-default"
       title="Adds real shadows and bounce light · about 14 s"
       @click="emit('finish')">{{ finishBusy ? 'Finishing…' : (finishPrice ? `Finish · ${finishPrice}` : 'Finish') }}</button>

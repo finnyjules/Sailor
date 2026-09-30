@@ -4385,7 +4385,7 @@ async function compositeInpaintAlpha(resultUrl: string, srcImg: HTMLImageElement
 }
 
 async function runImageEdit() {
-  const e = editImage.value; if (!e || !editImagePrompt.value.trim() || inpaint.busy.value) return
+  const e = editImage.value; if (!e || !editImagePrompt.value.trim() || inpaint.busy.value || relightFinishing.value) return
   const layer = localLayers.value.find((l: any) => l.id === e.layerId && l.kind === 'image') as any
   if (!layer) return
   const layerId = layer.id
@@ -4439,7 +4439,7 @@ function setRegionSelectTool(t: 'box' | 'brush') {
   if (t === 'box') genCursor.on = false   // drop the brush-size ring immediately
 }
 async function runRegionEdit() {
-  if (!editRegion.value || !genHasMask.value || !regionPrompt.value.trim() || inpaint.busy.value) return
+  if (!editRegion.value || !genHasMask.value || !regionPrompt.value.trim() || inpaint.busy.value || relightFinishing.value) return
   // FLUX Fill only for now — regionEditModel is captured but 'nano' isn't wired
   // to a region-crop-and-composite path yet (see task-4-report.md, deferred).
   genPrompt.value = styledPrompt(regionPrompt.value.trim())
@@ -7120,8 +7120,17 @@ const relightFinishing = ref<string | null>(null)   // the layer id while a Fini
 const relightFinishOff = ref(false)                  // the route answered off this session → hide the button
 const relightFinishPrice = computed(() => (hostedModeEnabled(useRuntimeConfig().public)
   ? `${finishCredits()} credits` : formatCostBadge(FINISH_USD, true, false)))
-const relightFinishAvailable = computed(() =>
-  !relightFinishOff.value && !!activeEffectLayer.value && canFinishRelight(activeEffectLayer.value))
+// Mirrors the Compare hold (setRelightBypass isn't reactive) so the button can wait it out.
+const relightComparing = ref(false)
+watch(selectedEffect, () => { relightComparing.value = false })
+/** Shown only when Finish can really run: an eligible image layer, WebGL2, and a visible Relight row. */
+const relightFinishAvailable = computed(() => {
+  const l = activeEffectLayer.value
+  if (relightFinishOff.value || !l || !canFinishRelight(l) || !relightAvailable()) return false
+  return effectStackOf(l).some(e => e.type === 'relight' && e.visible)
+})
+/** Shown but not clickable: another edit is running, or Compare is held. */
+const relightFinishBlocked = computed(() => inpaint.busy.value || relightComparing.value)
 /** Hosted only, and only at/above the person's threshold (the gate decides) — as Animate does. */
 function confirmFinishCost(): Promise<boolean> {
   if (!hostedModeEnabled(useRuntimeConfig().public)) return Promise.resolve(true)
@@ -7143,48 +7152,67 @@ async function sendRelightFinish(origFilename: string, pair: FinishPair): Promis
     return null
   }
   const src = await loadImage(imageLayerUrl(origFilename))
-  return inpaint.uploadDataUrl(await reapplyAlpha(res.image, src, pair.w, pair.h), 'relightfinish')
+  // reapplyAlpha reports a failed re-cut through inpaint.error (and keeps the opaque result):
+  // listen for it on a clean slate, say so here, and leave the Edit panel's error as it was.
+  const prevError = inpaint.error.value
+  inpaint.error.value = ''
+  const cut = await reapplyAlpha(res.image, src, pair.w, pair.h)
+  if (inpaint.error.value) toast('Couldn\'t keep the cut-out\'s transparency')
+  inpaint.error.value = prevError
+  return inpaint.uploadDataUrl(cut, 'relightfinish')
 }
 async function runRelightFinish() {
-  if (relightFinishing.value) return
-  if (viewOnlyGuard()) await nextTick()   // the result bar is placed from design positions
-  const layer = activeEffectLayer.value
-  if (!layer || !canFinishRelight(layer)) return
-  const relightId = effectStackOf(layer).find(e => e.type === 'relight')?.id
-  if (!relightId) return
-  if (!(await confirmFinishCost())) return
-  const cv = await renderRelightPair(layer, canvasDisplay.w, canvasDisplay.h)
-  if (!cv) { toast('Relight isn\'t ready yet'); return }
-  const pair: FinishPair = { original: cv.original.toDataURL('image/png'), guide: cv.guide.toDataURL('image/png'), w: cv.w, h: cv.h }
-  const layerId: string = layer.id
-  const origFilename: string = layer.filename
-  const revertPatch = finishRevertPatch(layer)   // captured BEFORE the write, so Revert lands here
-  const run = async (first: boolean) => {
-    relightFinishing.value = layerId
-    try {
-      const name = await sendRelightFinish(origFilename, pair)
-      if (!name) return false
-      const cur = layerById(layerId); if (!cur) return false
-      // One setLocal each (one undo step): the first applies photo + crop + no Relight row;
-      // Try again swaps the photo only.
-      setLocal(layerId, first ? finishApplyPatch(cur, name, relightId) : { filename: name })
-      return true
-    } catch (err: any) {
-      toast(`Finish didn't work — ${err?.message || 'upload failed'}`)
-      return false
-    } finally { relightFinishing.value = null }
-  }
-  if (!(await run(true))) return
-  selectedEffect.value = null
-  const l = layerById(layerId); if (!l) return
-  const b = boxPx(l)
-  const cx = l.x * canvasDisplay.w, cy = l.y * canvasDisplay.h
-  editResult.value = {
-    layerId, origFilename,
-    bnd: { minX: cx - b.w / 2, minY: cy - b.h / 2, maxX: cx + b.w / 2, maxY: cy + b.h / 2 },
-    reroll: async () => { await run(false) },
-    revert: () => setLocal(layerId, revertPatch),
-  }
+  if (relightFinishing.value || relightFinishBlocked.value) return
+  const start = activeEffectLayer.value
+  if (!start || !canFinishRelight(start)) return
+  const layerId: string = start.id
+  // Single-click guard: set on entry (before the cost confirm and the render), so a second click
+  // is ignored and the button already reads "Finishing…". Cleared on every exit (finally).
+  relightFinishing.value = layerId
+  try {
+    if (viewOnlyGuard()) await nextTick()   // the result bar is placed from design positions
+    const layer = layerById(layerId)
+    if (!layer || !canFinishRelight(layer)) return
+    const relightId = effectStackOf(layer).find(e => e.type === 'relight')?.id
+    if (!relightId) return
+    if (!(await confirmFinishCost())) return
+    const cv = await renderRelightPair(layer, canvasDisplay.w, canvasDisplay.h)
+    if (!cv) { toast('Relight isn\'t ready yet'); return }
+    const pair: FinishPair = { original: cv.original.toDataURL('image/png'), guide: cv.guide.toDataURL('image/png'), w: cv.w, h: cv.h }
+    const origFilename: string = layer.filename
+    const revertPatch = finishRevertPatch(layer)   // captured BEFORE the write, so Revert lands here
+    const send = async (first: boolean) => {
+      try {
+        const name = await sendRelightFinish(origFilename, pair)
+        if (!name) return false
+        const cur = layerById(layerId)
+        if (!cur) { toast('The layer was removed before Finish came back'); return false }
+        // One setLocal each (one undo step): the first applies photo + crop + no Relight row;
+        // Try again swaps the photo only.
+        setLocal(layerId, first ? finishApplyPatch(cur, name, relightId) : { filename: name })
+        return true
+      } catch (err: any) {
+        toast(`Finish didn't work — ${err?.message || 'upload failed'}`)
+        return false
+      }
+    }
+    if (!(await send(true))) return
+    selectedEffect.value = null
+    const l = layerById(layerId); if (!l) return
+    const b = boxPx(l)
+    const cx = l.x * canvasDisplay.w, cy = l.y * canvasDisplay.h
+    editResult.value = {
+      layerId, origFilename,
+      bnd: { minX: cx - b.w / 2, minY: cy - b.h / 2, maxX: cx + b.w / 2, maxY: cy + b.h / 2 },
+      // Try again: same stored pair, same guard, and (hosted) the same cost confirm as the first click.
+      reroll: async () => {
+        if (relightFinishing.value || inpaint.busy.value) return
+        relightFinishing.value = layerId
+        try { if (await confirmFinishCost()) await send(false) } finally { relightFinishing.value = null }
+      },
+      revert: () => setLocal(layerId, revertPatch),
+    }
+  } finally { relightFinishing.value = null }
 }
 
 // ── Streamlined drag-to-generate gesture ─────────────────────────────────────
@@ -7915,7 +7943,7 @@ const { sweepMaskUrl: genSweepMaskUrl } = regionFx
 watch([genActive, editImage, relightFinishing], ([g, e, f]) => { (g || e || f) ? regionFx.start() : regionFx.stop() })
 watch([genVersion, () => canvasDisplay.w, () => canvasDisplay.h], () => regionFx.rebuild())
 async function buildEditSilhouette() {
-  const id = editImage.value?.layerId ?? relightFinishing.value   // Edit image, or a Relight Finish
+  const id = relightFinishing.value ?? editImage.value?.layerId   // a running Relight Finish wins over Edit image
   const layer = id ? (localLayers.value.find((l: any) => l.id === id && l.kind === 'image') as any) : null
   if (!layer) { editSilhouetteCanvas = null; return }
   const W = Math.max(1, Math.round(canvasDisplay.w)), H = Math.max(1, Math.round(canvasDisplay.h))
@@ -8036,7 +8064,7 @@ async function generateObjectInto(maskCanvas: HTMLCanvasElement, bnd: GenBounds)
 // Mini-toolbar actions on the last generated object.
 async function rerollObject() {
   const r = genResult.value
-  if (!r || inpaint.busy.value) return
+  if (!r || inpaint.busy.value || relightFinishing.value) return
   try {
     const newId = await generateObjectInto(r.mask, r.bnd)
     if (newId) { deleteLocal(r.layerId); genResult.value = { ...r, layerId: newId } }
@@ -8116,7 +8144,7 @@ function onRegionSelectPointerUp(e: PointerEvent) {
 }
 
 async function runRegionFill() {
-  if (!genHasMask.value || inpaint.busy.value || !genMaskCanvas) return
+  if (!genHasMask.value || inpaint.busy.value || relightFinishing.value || !genMaskCanvas) return
   const layer = genTarget.value
   try {
     if (layer) {
@@ -9641,7 +9669,7 @@ defineExpose({ editor, layoutGridResolved, layoutGrid, overlayGrid, viewLayoutGr
             type="button"
             data-testid="gen-onbox-generate"
             class="flex items-center justify-center h-8 px-3 rounded-[8px] bg-white text-neutral-900 hover:bg-white/90 text-[12px] font-medium cursor-pointer disabled:opacity-40 disabled:cursor-default"
-            :disabled="!genPrompt.trim() || inpaint.busy.value"
+            :disabled="!genPrompt.trim() || inpaint.busy.value || !!relightFinishing"
             @click="runRegionFill"
           >Generate</button>
         </div>
@@ -10127,7 +10155,7 @@ defineExpose({ editor, layoutGridResolved, layoutGrid, overlayGrid, viewLayoutGr
           <button type="button"
             :data-testid="editImage ? 'edit-image-run' : 'edit-region-run'"
             class="flex items-center justify-center h-8 px-3 rounded-[8px] bg-white text-neutral-900 hover:bg-white/90 text-[12px] font-medium cursor-pointer disabled:opacity-40 disabled:cursor-default whitespace-nowrap"
-            :disabled="inpaint.busy.value || (editImage ? !editImagePrompt.trim() : (!genHasMask || !regionPrompt.trim()))"
+            :disabled="inpaint.busy.value || !!relightFinishing || (editImage ? !editImagePrompt.trim() : (!genHasMask || !regionPrompt.trim()))"
             @click="editImage ? runImageEdit() : runRegionEdit()">
             {{ inpaint.busy.value ? (editImage ? 'Editing…' : 'Generating…') : (editImage ? 'Edit' : 'Generate') }}</button>
         </div>
@@ -11623,9 +11651,10 @@ defineExpose({ editor, layoutGridResolved, layoutGrid, overlayGrid, viewLayoutGr
               :finish-price="relightFinishPrice"
               :finish-busy="!!relightFinishing"
               :finish-available="relightFinishAvailable"
+              :finish-blocked="relightFinishBlocked"
               @update="(p) => updateActiveEffect(p)"
               @select-light="(id) => (relightLightId = id)"
-              @compare="(on) => { setRelightBypass(on ? activeEffectLayer?.id ?? null : null); renderStack() }"
+              @compare="(on) => { relightComparing = on; setRelightBypass(on ? activeEffectLayer?.id ?? null : null); renderStack() }"
               @retry-surfaces="retryActiveEffectSurfaces"
               @read-surfaces="readActiveEffectSurfaces"
               @finish="runRelightFinish" />

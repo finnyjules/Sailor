@@ -175,6 +175,14 @@ describe('RelightControls', () => {
       await b.trigger('click')
       expect(w.emitted('finish')).toBeUndefined()
     })
+    it('blocked disables the button but keeps its price text', async () => {
+      const w = mkFinish({ finishBlocked: true })
+      const b = w.get('[data-testid="relight-finish"]')
+      expect(b.attributes('disabled')).toBeDefined()
+      expect(b.text()).toBe('Finish · ~$0.10')
+      await b.trigger('click')
+      expect(w.emitted('finish')).toBeUndefined()
+    })
     it('unavailable hides the button (also the default)', () => {
       expect(mkFinish({ finishAvailable: false }).find('[data-testid="relight-finish"]').exists()).toBe(false)
       expect(mk().find('[data-testid="relight-finish"]').exists()).toBe(false)
