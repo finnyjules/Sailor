@@ -160,11 +160,13 @@ export class GpuPost {
     this.program = program
     this.texColor = mkTex()
     this.texDepth = mkTex()
-    // Third texture, for MoGe-2 normals when a caller has them. Left storage-less (a 1×1
-    // dummy bind, no upload) until a real image arrives: a texture bound but never
-    // texImage2D'd samples as (0,0,0,1) in WebGL2, never an error, and uHasNormals gates its
-    // use — so unit 2 is always bound to *something*, for DOF and finish passes too.
+    // Third texture, for MoGe-2 normals when a caller has them. A texture bound but never
+    // texImage2D'd is "incomplete" — Chrome/ANGLE logs a RENDER WARNING for it on every
+    // draw once the program actually samples the unit (uNormals is always declared, even
+    // when uHasNormals gates its use). So it gets one real 1×1 RGBA pixel right away, not
+    // just a bind; lastNormals stays null so the first real normals image still uploads.
     this.texNormals = mkTex()
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array([128, 128, 255, 255]))
     this.depthUploaded = null
     this.lastNormals = null
   }

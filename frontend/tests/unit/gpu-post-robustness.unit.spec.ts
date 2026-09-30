@@ -161,7 +161,13 @@ describe('applyFinish', () => {
     const ok = f.applyFinish(off as unknown as HTMLCanvasElement, 'gold_foil', { metal: 'gold', brushed: 0.5, pressed: 0.5, grain: 0.4 }, { x: 0.2, y: 0.1, height: 0.6 }, 1)
     expect(ok).toBe(true)
     expect(stub.uploads.filter(u => u === off).length).toBe(1)
-    const depth = stub.uploads.find(u => u !== off) as FakeCanvas
+    // init() also uploads texNormals' own 1×1 placeholder pixel (GpuPost's, not a caller
+    // image — see gpuPost.ts) before this frame's uploads. The fake's texImage2D records
+    // whatever is at argument index 5, which for that 9-arg (width/height/border/…) call is
+    // the `border` int (always 0), not the pixel data — so the real depth stand-in is the
+    // first *object* upload that isn't `off`.
+    expect(stub.uploads.length).toBe(3)   // normals placeholder (0), off, depth stand-in
+    const depth = stub.uploads.find(u => u !== off && typeof u === 'object') as FakeCanvas
     expect([depth.width, depth.height]).toEqual([1, 1])
   })
 })
