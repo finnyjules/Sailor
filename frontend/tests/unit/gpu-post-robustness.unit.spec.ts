@@ -102,6 +102,26 @@ describe('GpuPost — context loss', () => {
   })
 })
 
+describe('GpuPost — float depth reuse', () => {
+  it('uploads a float field once, again only for a new field or after the context is dropped', async () => {
+    const { GpuPost } = await import('~/lib/compositor/gpuPost')
+    const p = new GpuPost('frag')
+    const f1 = { kind: 'float' as const, width: 2, height: 2, data: new Float32Array(4) }
+    const f2 = { kind: 'float' as const, width: 2, height: 2, data: new Float32Array(4) }
+    p.render(src, f1, 10, 10, {}); p.render(src, f1, 10, 10, {})
+    expect(p.depthUploads).toBe(1)
+    expect(p.runs).toBe(2)
+    p.render(src, f2, 10, 10, {})
+    expect(p.depthUploads).toBe(2)
+    p.render(src, src, 10, 10, {})              // an image depth replaces the texture's contents
+    p.render(src, f2, 10, 10, {})
+    expect(p.depthUploads).toBe(3)
+    stub.lost = true; p.render(src, f2, 10, 10, {}); stub.lost = false
+    p.render(src, f2, 10, 10, {})               // fresh context: must upload again
+    expect(p.depthUploads).toBe(4)
+  })
+})
+
 describe('GpuPost — texture size limit', () => {
   it('returns null (layer draws plain) when either side exceeds MAX_TEXTURE_SIZE', async () => {
     const { GpuPost } = await import('~/lib/compositor/gpuPost')

@@ -27,13 +27,15 @@ export function isFloatDepth(d: unknown): d is FloatDepth {
 }
 
 /** A uniform value. Plain numbers are floats (ints only for `uTapCount`, DOF's loop bound),
- *  a Float32Array is an array of vec2s (DOF's tap offsets), and `{ vec3 }` is one vec3 —
- *  a wrapper rather than "guess by length", so a vec2 array is never misread. */
-export type GpuUniform = number | Float32Array | { vec3: readonly [number, number, number] }
+ *  a Float32Array is an array of vec2s (DOF's tap offsets), and `{ vec3 }` / `{ vec4 }` is one
+ *  vec3 / vec4 — a wrapper rather than "guess by length", so a vec2 array is never misread. */
+export type GpuUniform = number | Float32Array
+  | { vec3: readonly [number, number, number] }
+  | { vec4: readonly [number, number, number, number] }
 
-export function uniformSetter(name: string, value: GpuUniform): '1i' | '1f' | '2fv' | '3f' {
+export function uniformSetter(name: string, value: GpuUniform): '1i' | '1f' | '2fv' | '3f' | '4f' {
   if (value instanceof Float32Array) return '2fv'
-  if (typeof value === 'object') return '3f'
+  if (typeof value === 'object') return 'vec4' in value ? '4f' : '3f'
   if (Number.isInteger(value) && name === 'uTapCount') return '1i'
   return '1f'
 }
@@ -44,6 +46,11 @@ export class GpuPost {
   private program: WebGLProgram | null = null
   private texColor: WebGLTexture | null = null
   private texDepth: WebGLTexture | null = null
+  /** The float field currently in texDepth. A field is immutable once built, so the same object
+   *  means the same pixels: skip the (several-MB) re-upload. Forgotten whenever texDepth is. */
+  private depthUploaded: FloatDepth | null = null
+  /** Float-field uploads actually made (test marker for the reuse above). */
+  depthUploads = 0
   private failed = false
   private reason = ''
   /** Assertion marker: how many real GL draws have happened. Lets a test tell
@@ -72,6 +79,7 @@ export class GpuPost {
     this.program = null
     this.texColor = null
     this.texDepth = null
+    this.depthUploaded = null
   }
 
   private die(reason: string) {
@@ -141,6 +149,7 @@ export class GpuPost {
     this.program = program
     this.texColor = mkTex()
     this.texDepth = mkTex()
+    this.depthUploaded = null
   }
 
   render(
@@ -180,13 +189,18 @@ export class GpuPost {
     gl.activeTexture(gl.TEXTURE1)
     gl.bindTexture(gl.TEXTURE_2D, this.texDepth)
     if (isFloatDepth(depth)) {
-      // A float field arrives already in GL row order (bottom row first); FLIP_Y must be off
-      // for the typed-array upload, then back on for the next image upload.
-      gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false)
-      gl.texImage2D(gl.TEXTURE_2D, 0, gl.R16F, depth.width, depth.height, 0, gl.RED, gl.FLOAT, depth.data)
-      gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true)
+      if (depth !== this.depthUploaded) {
+        // A float field arrives already in GL row order (bottom row first); FLIP_Y must be off
+        // for the typed-array upload, then back on for the next image upload.
+        gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false)
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.R16F, depth.width, depth.height, 0, gl.RED, gl.FLOAT, depth.data)
+        gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true)
+        this.depthUploaded = depth
+        this.depthUploads++
+      }
     } else {
       gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, depth as TexImageSource)
+      this.depthUploaded = null
     }
     gl.uniform1i(gl.getUniformLocation(program, 'uDepth'), 1)
 
@@ -196,6 +210,7 @@ export class GpuPost {
       switch (uniformSetter(name, value)) {
         case '2fv': gl.uniform2fv(loc, value as Float32Array); break
         case '3f': { const v = (value as { vec3: readonly [number, number, number] }).vec3; gl.uniform3f(loc, v[0], v[1], v[2]); break }
+        case '4f': { const v = (value as { vec4: readonly [number, number, number, number] }).vec4; gl.uniform4f(loc, v[0], v[1], v[2], v[3]); break }
         case '1i': gl.uniform1i(loc, value as number); break
         default: gl.uniform1f(loc, value as number)
       }
