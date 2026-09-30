@@ -184,6 +184,10 @@ const config: UserConfig = {
       // ~/lib/compositor/depthRequest is the one network call behind depth maps; depthRegistry.ts
       // imports it by exactly this id. An exported file gets the "not available" stand-in instead.
       { find: '~/lib/compositor/depthRequest', replacement: fileURLToPath(new URL('./app/lib/embed/frame/depthRequest.embed.ts', import.meta.url)) },
+      // ~/lib/compositor/surfacesRequest is the one network call behind Relight's photo
+      // surfaces; surfacesRegistry.ts imports it by exactly this id. An exported file gets
+      // the "not available" stand-in instead.
+      { find: '~/lib/compositor/surfacesRequest', replacement: fileURLToPath(new URL('./app/lib/embed/frame/surfacesRequest.embed.ts', import.meta.url)) },
       // Task 10: frame-lean drops fontkit (via textOutline.ts's font.ts import) and paper.js
       // entirely — most Frames need neither (see gather.ts's computeNeedsOutlines). These two
       // entries only apply to that one build; every other surface (including the regular 'frame'
