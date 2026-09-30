@@ -10,7 +10,7 @@
  * route's own `__setSurfacesRootForTests` seam so the test never touches the
  * real ComfyUI checkout.
  */
-import { mkdtemp, writeFile, rm, mkdir } from 'node:fs/promises'
+import { mkdtemp, writeFile, rm, mkdir, access } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -65,8 +65,14 @@ function jsonResponse(body: unknown, ok = true, status = 200): any {
 const FAL_APP = 'fal-ai/moge-2'
 const NORMAL_MAP_URL = 'https://fal.media/files/normal.png'
 const PNG_BYTES = new Uint8Array([1, 2, 3, 4])
+const OVERSIZED_CONTENT_LENGTH = 70 * 1024 * 1024 // over the route's 64 MB cap
 
-type FalScenario = 'ok' | 'no-normal-map' | 'result-fetch-fails'
+function fakeHeaders(entries: Record<string, string | null>): { get(name: string): string | null } {
+  const lower = new Map(Object.entries(entries).map(([k, v]) => [k.toLowerCase(), v]))
+  return { get: (name: string) => lower.get(name.toLowerCase()) ?? null }
+}
+
+type FalScenario = 'ok' | 'no-normal-map' | 'result-fetch-fails' | 'oversized'
 
 function makeFalFetchMock(scenario: FalScenario): ReturnType<typeof vi.fn> {
   const base = `https://queue.fal.run/${FAL_APP}`
@@ -87,7 +93,20 @@ function makeFalFetchMock(scenario: FalScenario): ReturnType<typeof vi.fn> {
       return jsonResponse({ normal_map: { url: NORMAL_MAP_URL } })
     }
     if (url === NORMAL_MAP_URL) {
-      return { ok: true, status: 200, arrayBuffer: async () => PNG_BYTES.buffer }
+      if (scenario === 'oversized') {
+        return {
+          ok: true,
+          status: 200,
+          headers: fakeHeaders({ 'content-type': 'image/png', 'content-length': String(OVERSIZED_CONTENT_LENGTH) }),
+          arrayBuffer: async () => { throw new Error('should never be read — the content-length check must refuse first') },
+        }
+      }
+      return {
+        ok: true,
+        status: 200,
+        headers: fakeHeaders({ 'content-type': 'image/png' }),
+        arrayBuffer: async () => PNG_BYTES.buffer,
+      }
     }
     throw new Error('unexpected fetch url: ' + url)
   })
@@ -283,6 +302,19 @@ describe('POST /api/depth/surfaces', () => {
 
     expect(fakeLedger.settleHold).toHaveBeenCalledTimes(1)
     expect(fakeLedger.releaseHold).not.toHaveBeenCalled()
+  })
+
+  it('fix round 1: an oversized normal-map body → 502, and nothing is written to the cache', async () => {
+    setLocal()
+    await writeFile(join(root, 'input', 'photo.png'), PNG_BYTES)
+    const fetchMock = makeFalFetchMock('oversized')
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(handler(makeEvent({ filename: 'photo.png', type: 'input' })))
+      .rejects.toMatchObject({ statusCode: 502 })
+
+    const name = `moge_${depthCacheKey(PNG_BYTES)}.png`
+    await expect(access(join(root, 'input', 'sailor_depth', name))).rejects.toThrow()
   })
 
   it('price: costForModel(fal-ai/moge-2) is $0.0125 at 3 credits', () => {

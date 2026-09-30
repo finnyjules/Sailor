@@ -23,9 +23,57 @@ import { depthCacheKey, assetType, safeAssetRelPath } from '../../utils/depthCac
 import { assertRateLimit } from '../../lib/rateLimit'
 import { assertInputOwned } from '../../utils/inputOwnership'
 import { runFal } from '../../utils/falRun'
+import { downloadResult } from '../../runner/falQueue'
 import { SURFACES_APP } from '../../../shared/pricing/relightSurfaces'
 
 const CACHE_SUBDIR = 'sailor_depth'
+// Fix round 1 (review): the old `fetch(url).arrayBuffer()` had no size cap and no
+// content-type check — a compromised or misbehaving fal endpoint could hand back an
+// arbitrarily large or non-image body and this route would write it straight into the
+// cache. downloadResult (falQueue.ts's capped, retried download helper — the same one
+// the runner uses for a finished provider answer) drives a fetchOnce that caps the read
+// WHILE STREAMING (never buffers an oversized body first) and reports the content-type
+// for the check below. `sleep` is a no-op: a too-large or wrong-shape body will not fix
+// itself on retry, so there is no reason to wait between the (still retried, for a
+// genuine transient network blip) attempts.
+const NORMAL_MAP_MAX_BYTES = 64 * 1024 * 1024
+
+/** One try at the normal-map download: same shape as answerDownload.ts's
+ *  AnswerFetchOnce, but over the plain global `fetch` (this route's downloads are
+ *  always fal's own CDN URL from a trusted provider response, not a URL a caller
+ *  picks — no SSRF surface to defend, unlike a layout's user-supplied image URLs). */
+async function cappedFetchOnce(url: string, o: { maxBytes?: number; signal?: AbortSignal }): Promise<{ status: number; contentType: string | null; bytes: Uint8Array }> {
+  const res = await fetch(url, o.signal ? { signal: o.signal } : {})
+  const contentType = res.headers.get('content-type')
+  if (!res.ok) return { status: res.status, contentType, bytes: new Uint8Array(0) }
+  const cap = o.maxBytes
+  const len = res.headers.get('content-length')
+  if (cap !== undefined && len && Number(len) > cap) {
+    throw new Error(`normal map is too large (${len} bytes, over the ${cap}-byte cap)`)
+  }
+  const reader = (res.body as ReadableStream<Uint8Array> | null)?.getReader?.()
+  if (!reader) {
+    const buf = new Uint8Array(await res.arrayBuffer())
+    if (cap !== undefined && buf.byteLength > cap) throw new Error(`normal map is too large (over the ${cap}-byte cap)`)
+    return { status: res.status, contentType, bytes: buf }
+  }
+  const chunks: Uint8Array[] = []
+  let total = 0
+  for (;;) {
+    const { done, value } = await reader.read()
+    if (done) break
+    total += value.byteLength
+    if (cap !== undefined && total > cap) {
+      await reader.cancel().catch(() => {})
+      throw new Error(`normal map is too large (over the ${cap}-byte cap)`)
+    }
+    chunks.push(value)
+  }
+  const bytes = new Uint8Array(total)
+  let offset = 0
+  for (const c of chunks) { bytes.set(c, offset); offset += c.byteLength }
+  return { status: res.status, contentType, bytes }
+}
 
 /** Pure path derivation from an engine root — factored out so tests can point
  *  it at a scratch directory instead of the real ComfyUI checkout. */
@@ -93,10 +141,25 @@ export default defineEventHandler(async (event) => {
   const url = out.normal_map?.url
   if (!url) throw createError({ statusCode: 502, message: 'moge-2 returned no normal map' })
 
-  const png = await fetch(url, { signal: AbortSignal.timeout(60_000) })
-  if (!png.ok) throw createError({ statusCode: 502, message: `normal map download ${png.status}` })
+  let pngBytes: Uint8Array
+  let contentType: string | null
+  try {
+    const dl = await downloadResult(url, {
+      maxBytes: NORMAL_MAP_MAX_BYTES,
+      signal: AbortSignal.timeout(60_000),
+      fetchOnce: cappedFetchOnce,
+      sleep: async () => {},
+    })
+    pngBytes = dl.bytes
+    contentType = dl.contentType
+  } catch (err) {
+    throw createError({ statusCode: 502, message: `normal map download: ${(err as Error).message}` })
+  }
+  if (contentType && !contentType.toLowerCase().startsWith('image/')) {
+    throw createError({ statusCode: 502, message: `normal map download returned a non-image content-type: ${contentType}` })
+  }
 
   await mkdir(cacheDir, { recursive: true })
-  await writeFile(outPath, new Uint8Array(await png.arrayBuffer()))
+  await writeFile(outPath, pngBytes)
   return { normalsFilename: name, subfolder: CACHE_SUBDIR, cached: false }
 })
