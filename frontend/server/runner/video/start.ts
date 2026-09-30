@@ -32,11 +32,13 @@ import { MEDIA_CAPS, MEDIA_WORDS, type MediaCaps } from '#shared/runner/media'
 import { MEDIA_EFFECT_WORDS } from '#shared/runner/mediaEffects'
 import { MEDIA_EFFECT_SCHEMAS } from '#shared/runner/mediaEffectSchemas.generated'
 import { KEPT_MEDIA_MAKERS } from '../keptRelease'
-import { pythonInputRef, takenLuts } from '../inputs'
+import { pythonInputRef, takenLuts, takenWaveforms } from '../inputs'
 import type { OutputFile } from '../types'
 import { parseCubeLut } from './core/look'
 import { LUT_HOSTED_MAX_BYTES, LUT_HOSTED_MAX_SIZE, VIDEO_EFFECTS, mediaEffectParams, type FrameShape, type SoundShape } from './table'
 import { batchesOf, takenVideoEffect, topoOrder } from './shapes'
+import { waveSoundOf } from './waveSound'
+import type { SoundReadIO } from '../../media/values'
 
 /** A kept FFV1 batch's size bound, per byte of raw rgb24 (R5.4 measured pure noise at 1.108). */
 export const KEPT_BATCH_RATIO = 1.125
@@ -263,6 +265,23 @@ export async function lutStartProblems(prompt: ApiPrompt, families: ReadonlySet<
     const r = parseCubeLut(await o.read(ref.file))
     if ('error' in r) return { message: r.error, ...at }
     if (o.hosted && r.size > LUT_HOSTED_MAX_SIZE) return { message: MEDIA_EFFECT_WORDS.lutTooBig, ...at, engine: true }
+  }
+  return null
+}
+
+/**
+ * Audio waveform's sound (R6.7), before the hold. Python draws silence where
+ * the file isn't there or won't read, and so does the runner at its turn
+ * (./waveSound.ts). Left to the engine instead (`engine: true`, never a
+ * refusal): locally, a name outside the input folders (Python opens it; in
+ * hosted it was refused by its name, inputs.ts unsafeWaveformNames); a file
+ * over the size cap; a rate over WAVE_MAX_RATE. Only the Audio waveforms the
+ * runner takes (`video-draw` on).
+ */
+export async function waveformStartProblems(prompt: ApiPrompt, families: ReadonlySet<RunnerFamily>, io: SoundReadIO): Promise<Problem | null> {
+  for (const { nodeId, name } of takenWaveforms(prompt, families)) {
+    const s = await waveSoundOf(name, io)
+    if (s.kind === 'engine') return { message: MEDIA_EFFECT_WORDS.waveSoundTooBig, nodeId, classType: 'AudioWaveform', engine: true }
   }
   return null
 }

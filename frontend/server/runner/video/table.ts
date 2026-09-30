@@ -22,7 +22,9 @@
  *               Transition): each output frame reads A's frame, B's, or one
  *               of each (`joinOf`, joinReads), both only moving forward, so
  *               nothing is held;
- *   generator — no input (R6.7, R6.8);
+ *   generator — no input (R6.7, R6.8): each output frame one worker call
+ *               from its params, and what the spec's `feed` hands it (Audio
+ *               waveform's window of its sound);
  *   tool      — the frames made by ffmpeg in the decode of the input itself
  *               (R6.6's Slow motion: minterpolate, `tool`), each handed
  *               straight to the writer: no worker op, nothing held.
@@ -42,6 +44,9 @@ import { shiftOf } from './core/stabilize'
 import { SLOW_MOTION_MAX_PIXELS, slowMotionSize } from '../../media/run'
 import { pythonInputRef } from '../inputs'
 import type { OutputFile } from '../types'
+import type { MediaLease } from '../../media/run'
+import type { SoundReadIO } from '../../media/values'
+import { waveMaxWindow, waveSamplesPerFrame, waveSoundOf, waveWindows } from './waveSound'
 
 /**
  * A frame batch's count and size; `exact: false` when the count is an upper
@@ -115,6 +120,14 @@ export interface VideoEffectSpec {
     found(state: ArrayBuffer | undefined): readonly number[]
     between(widgets: Record<string, unknown>, found: readonly (readonly number[])[]): Record<string, unknown>[]
   }
+  /**
+   * 'generator' (R6.7's Audio waveform): what each output frame reads besides
+   * its widgets, in order, as its own params. Opened at the node's turn before
+   * the lease (a probe of the file it names), then read under the lease (its
+   * decode, ended once the frames have what they need); null when the frames
+   * read nothing (Python's silence). A frame past the feed's end gets none.
+   */
+  feed?(widgets: Record<string, unknown>, io: SoundReadIO): Promise<((lease: MediaLease) => AsyncIterable<Record<string, unknown>>) | null>
 }
 
 /** A window effect's reads (VideoEffectSpec.windowOf). */
@@ -450,6 +463,36 @@ function stabWork(w: Record<string, unknown>, ins: readonly FrameShape[], out: F
     + out.count * out.w * out.h * warp
 }
 
+// ── R6.7: made clips ──────────────────────────────────────────────────────────
+
+/** A made clip's count and size, from its widgets alone (no frames in). */
+const madeShape = (w: Record<string, unknown>): FrameShape => ({ count: int(w.frame_count, 1), w: int(w.width, 64), h: int(w.height, 64), exact: true })
+
+/** Animated noise's own steps a pixel: the window's four taps and three sums, and the colour blend. */
+const NOISE_STEPS = 3
+/** One number of the grid torch draws (the Mersenne twister). */
+const RAND_STEPS = 1
+/** The drawing a pixel (the background, and the shapes over it) and its k / 255. */
+const DRAW_STEPS = 1
+/** Audio waveform's FFT, a point · log2 of its length (R6.5's transform in float64). */
+const FFT_STEPS = 1
+
+/** Animated noise's grid (./core/noiseClip.ts layout): torch's rand, before it is enlarged. */
+const noiseLayout = (w: Record<string, unknown>) => videoCores.nclip.layout(w)
+
+/** The FFT length a window of `spf` samples takes (:726): a power of two of at least 256. */
+const fftLength = (spf: number) => 1 << Math.max(8, 32 - Math.clz32(Math.max(1, spf) - 1))
+
+/**
+ * Audio waveform's FFT a frame, at most: its window's transform at the
+ * highest rate drawn (waveSound.ts WAVE_MAX_RATE), the magnitudes and the
+ * bands.
+ */
+function waveFftWork(w: Record<string, unknown>): number {
+  const n = fftLength(waveMaxWindow(int(w.fps, 1)))
+  return n * Math.log2(n) * FFT_STEPS + n
+}
+
 export const VIDEO_EFFECTS: Readonly<Record<string, VideoEffectSpec>> = {
   VideoTrim: {
     family: 'video-time', op: 'time.select', inputs: ['frames'], reads: 'stream', preview: true,
@@ -736,6 +779,57 @@ export const VIDEO_EFFECTS: Readonly<Record<string, VideoEffectSpec>> = {
     passThrough: (_w, ins) => oneInput(ins).count < 2,
     tool: w => ({ slowMotion: w.multiplier as number }),
     limits: (_w, ins) => [{ message: MEDIA_EFFECT_WORDS.flowTooBig, value: flowPixels(oneInput(ins)), limit: SLOW_MOTION_MAX_PIXELS }],
+  },
+  /**
+   * Animated noise (nodes_video_effects.py:429-509): a window moved through a
+   * seeded value-noise texture, coloured between two colours
+   * (./core/noiseClip.ts). EXACT: the runner works out only the window's
+   * pixels of the texture, from torch's grid, carried between frames (Python
+   * holds the whole texture; the runner never does). BAND on the breathe and
+   * swirl windows (an int() of a sin or cos).
+   */
+  AnimatedNoise: {
+    family: 'video-draw', op: 'nclip.frame', inputs: [], reads: 'generator', preview: true,
+    shape: w => madeShape(w),
+    // The grid (float32, carried, and its copy on its way), and a float plane of the window.
+    heldBytes: (w) => {
+      const L = noiseLayout(w)
+      return effectHeldBytes(madeShape(w), { reads: 0, state32: 1, extra: 2 * 4 * L.lowW * L.lowH })
+    },
+    work: (w, _ins, out) => {
+      const L = noiseLayout(w)
+      return out.count * out.w * out.h * (VIDEO_IO_WORK_PER_PIXEL + NOISE_STEPS) + L.lowW * L.lowH * RAND_STEPS
+    },
+  },
+  /**
+   * Audio waveform (nodes_video_pro.py:632-802): the sound the node names,
+   * drawn as bars, a wave, dots, rays or mirrored bars (./core/waveform.ts).
+   * VISUAL (the user's matching rule): the bands within float32's step of
+   * Python's, the drawing Pillow's closely enough to look the same, and a
+   * stereo sound drawn from its channels mixed, not Python's squeezed
+   * interleaving. Its windows are streamed from the file (./waveSound.ts).
+   */
+  AudioWaveform: {
+    family: 'video-draw', op: 'wave.frame', inputs: [], reads: 'generator', preview: true,
+    shape: w => madeShape(w),
+    // No frames held; the window (float32) in hand and on its way, and the FFT's float64 planes.
+    heldBytes: (w) => {
+      const spf = waveMaxWindow(int(w.fps, 1))
+      return effectHeldBytes(madeShape(w), { reads: 0, extra: 3 * 4 * spf + 3 * 8 * fftLength(spf) })
+    },
+    work: (w, _ins, out) => out.count * (out.w * out.h * (VIDEO_IO_WORK_PER_PIXEL + DRAW_STEPS) + waveFftWork(w)),
+    feed: async (w, io) => {
+      const s = await waveSoundOf(w.audio_file, io)
+      if (s.kind === 'silent') return null
+      // The start pass left these to the engine (start.ts waveformStartProblems); never reached.
+      if (s.kind === 'engine') throw new Error(MEDIA_EFFECT_WORDS.waveSoundTooBig)
+      const spf = waveSamplesPerFrame(s.rate, int(w.fps, 1))
+      return lease => ({
+        async* [Symbol.asyncIterator]() {
+          for await (const win of waveWindows(s, spf, io, lease)) yield { _window: win }
+        },
+      })
+    },
   },
 }
 

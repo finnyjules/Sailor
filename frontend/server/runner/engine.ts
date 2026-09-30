@@ -43,7 +43,7 @@ import { checkedInputFile, handedOffPictureProblem, inputFileCaps, linkedFileChe
 import { predictedHoldPixels, startPictureSizes } from './repairSizes'
 import { isReusable, requestFingerprint } from './fingerprint'
 import { gen3dTextSent } from '#shared/runner/gen3d'
-import { NOT_YOURS, assertFilesOwned, collectInputFiles, parseInputFileRef, unsafeLutNames, unsafeSoundNames, type OwnershipCheck } from './inputs'
+import { NOT_YOURS, assertFilesOwned, collectInputFiles, parseInputFileRef, unsafeLutNames, unsafeSoundNames, unsafeWaveformNames, type OwnershipCheck } from './inputs'
 import { shotRefFilenames, shotRefSizeProblem } from './shotRefs'
 import { parseJsonObject } from './generators/opts'
 import { cardPictureFiles, cardPictureRefusal } from './cards/bakeReplay'
@@ -58,7 +58,7 @@ import { poseStartProblem } from './generators/nanoExtras'
 import { loadAudioStartProblems, soundStreamProblem } from './media/soundNodes'
 import { loadVideoStartProblems, videoFileVerdict } from './media/videoNodes'
 import { frameStartProblems, framesSoundVerdict } from './media/frameNodes'
-import { hasVideoEffect, keptPeak, lutStartProblems, mediaEffectRefusals, mediaEffectStartProblems, nearLimit, needsExactCount } from './video/start'
+import { hasVideoEffect, keptPeak, lutStartProblems, mediaEffectRefusals, mediaEffectStartProblems, nearLimit, needsExactCount, waveformStartProblems } from './video/start'
 import { frameShapes, videoSourceShapeOf } from './video/shapes'
 import { markReleased, reviveReleased, spentKeptMedia } from './keptRelease'
 import { MEDIA_EFFECT_FAMILIES } from '#shared/runner/mediaEffects'
@@ -2156,7 +2156,8 @@ export function createEngine(deps: EngineDeps) {
     if (deps.hosted()) {
       for (const p of prompts) {
         // R6.4: a LUT's .cube file the same way (rule 8): absolute, or climbing out of its folder, is never theirs.
-        const [bad] = [...unsafeSoundNames(p), ...unsafeLutNames(p, families)]
+        // R6.7: Audio waveform's sound too.
+        const [bad] = [...unsafeSoundNames(p), ...unsafeLutNames(p, families), ...unsafeWaveformNames(p, families)]
         if (bad !== undefined) throw new MeterRefusalError(NOT_YOURS, 403, { file: bad })
       }
     }
@@ -2253,6 +2254,10 @@ export function createEngine(deps: EngineDeps) {
       for (const p of prompts) {
         const lut = await lutStartProblems(p, families, { hosted: deps.hosted(), exists: f => files.exists(f), size: f => files.size(f), read: f => files.read(f) })
         if (lut) throw refuse(lut.message, 400, { nodeId: lut.nodeId, classType: lut.classType, ...(lut.engine ? { reason: RUNNER_NOT_ELIGIBLE } : {}) })
+        // Audio waveform's sound (R6.7): a name outside the folders (local), a file over the size cap or a rate
+        // past the runner's bound leaves the workflow to the engine; a missing or unreadable one is Python's silence.
+        const wave = await waveformStartProblems(p, families, { access: files, userId: i.userId, hosted: deps.hosted() })
+        if (wave) throw refuse(wave.message, 400, { nodeId: wave.nodeId, classType: wave.classType, reason: RUNNER_NOT_ELIGIBLE })
       }
       const shapeAll = async (count: boolean) => Promise.all(prompts.map(p => frameShapes(p, families,
         videoSourceShapeOf({ prompt: p, access: files, userId: i.userId, hosted: deps.hosted(), count }))))

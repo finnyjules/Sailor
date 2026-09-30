@@ -15,6 +15,9 @@ import { joinCore } from './core/join'
 import { lookCore } from './core/look'
 import { fftCore } from './core/fft'
 import { stabilizeCore } from './core/stabilize'
+import { noiseClipCore } from './core/noiseClip'
+import { drawCore } from './core/draw'
+import { waveformCore } from './core/waveform'
 
 export const VIDEO_CORES: readonly EffectCoreEntry[] = [
   { name: 'vx', fn: framesCore as EffectCoreEntry['fn'], args: ['tk'] },
@@ -27,14 +30,23 @@ export const VIDEO_CORES: readonly EffectCoreEntry[] = [
   // R6.5: the shared FFT (a helper, not an op: R6.7 and R6.10 reuse it), and Stabilize.
   { name: 'ft', fn: fftCore as EffectCoreEntry['fn'], args: [] },
   { name: 'stab', fn: stabilizeCore as EffectCoreEntry['fn'], args: ['tk', 'kn', 'ft'] },
+  // R6.7: Animated noise (`nclip`: R2's Add noise is `noise`); the drawing (a helper) and Audio waveform.
+  { name: 'nclip', fn: noiseClipCore as EffectCoreEntry['fn'], args: ['tk', 'rng', 'look'] },
+  { name: 'dr', fn: drawCore as EffectCoreEntry['fn'], args: [] },
+  { name: 'wave', fn: waveformCore as EffectCoreEntry['fn'], args: ['tk', 'ft', 'dr', 'look'] },
 ]
 
 /** The cores whose functions are video ops (not helpers). */
-export const VIDEO_OP_CORES: readonly string[] = ['time', 'join', 'look', 'stab']
+export const VIDEO_OP_CORES: readonly string[] = ['time', 'join', 'look', 'stab', 'nclip', 'wave']
 
 /** The cores in this thread (tests), built as the worker builds them. */
 export const videoCores = (() => {
   const { tk, kn, rng } = effectCores
   const ft = fftCore()
-  return { tk, vx: framesCore(tk), time: timeCore(tk, kn, rng), join: joinCore(tk, kn, rng), look: lookCore(tk, kn), ft, stab: stabilizeCore(tk, kn, ft) }
+  const look = lookCore(tk, kn)
+  const dr = drawCore()
+  return {
+    tk, vx: framesCore(tk), time: timeCore(tk, kn, rng), join: joinCore(tk, kn, rng), look, ft, stab: stabilizeCore(tk, kn, ft),
+    nclip: noiseClipCore(tk, rng, look), dr, wave: waveformCore(tk, ft, dr, look),
+  }
 })()

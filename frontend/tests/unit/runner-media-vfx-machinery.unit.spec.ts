@@ -220,13 +220,23 @@ describe('the rows (rule 1)', () => {
     expect(Object.hasOwn(MEDIA_EFFECT_FAMILY_OF, 'SaveAudioOpus')).toBe(false)
   })
 
-  it('the ported effects’ rows (R6.1’s pilots, R6.2’s four, R6.3’s two joins, R6.4’s five looks, R6.5’s Stabilize, R6.6’s Slow motion): a local render reading frame batches only, their widgets as ComfyUI validates them', () => {
+  it('the ported effects’ rows (R6.1’s pilots, R6.2’s four, R6.3’s two joins, R6.4’s five looks, R6.5’s Stabilize, R6.6’s Slow motion, R6.7’s two made clips): a local render reading frame batches only, their widgets as ComfyUI validates them', () => {
     const looks = ['AspectConvert', 'ChromaKey', 'KenBurns', 'LUT', 'ThreeWayCC']
-    const ported = [...looks, 'Stabilize', 'FrameInterpolate', 'FrameTrail', 'SlitScan', 'SpeedRamp', 'TemporalMotionBlur', 'TimeDisplacement', 'Transition', 'VideoCrossfade', 'VideoReverse', 'VideoTrim'].sort()
+    const madeClips = ['AnimatedNoise', 'AudioWaveform']
+    const ported = [...looks, ...madeClips, 'Stabilize', 'FrameInterpolate', 'FrameTrail', 'SlitScan', 'SpeedRamp', 'TemporalMotionBlur', 'TimeDisplacement', 'Transition', 'VideoCrossfade', 'VideoReverse', 'VideoTrim'].sort()
     expect([...MEDIA_EFFECTS_PORTED].sort()).toEqual(ported)
     const rows = mediaEffectRows()
     expect(Object.keys(rows).sort()).toEqual(ported)
     for (const [cls, row] of Object.entries(rows)) {
+      // R6.7's made clips read no frames: a local render of the video-draw family, an output node (runner-media-vfx-draw).
+      if (madeClips.includes(cls)) {
+        expect(row, cls).toMatchObject({ family: 'video-draw', local: 'render' })
+        expect(row.mustLink, cls).toBeUndefined()
+        expect(RUNNER_NODE_RULES[cls], cls).toEqual(row)
+        expect(SWITCHED_CLASSES[cls], cls).toBe('video-draw')
+        expect(RUNNER_OUTPUT_CLASSES.has(cls), cls).toBe(true)
+        continue
+      }
       const joins = cls === 'VideoCrossfade' || cls === 'Transition'
       const family = joins ? 'video-join' : looks.includes(cls) ? 'video-look' : cls === 'Stabilize' ? 'video-stabilize' : cls === 'FrameInterpolate' ? 'video-flow' : 'video-time'
       // 3-way color reads its frames on `image` (its Python name).
@@ -248,6 +258,7 @@ describe('the rows (rule 1)', () => {
       ['GetVideoComponents', 0], ['LoadVideoFrames', 0], ['FrameTrail', 0], ['VideoReverse', 0], ['VideoTrim', 0],
       ['TemporalMotionBlur', 0], ['SlitScan', 0], ['TimeDisplacement', 0], ['SpeedRamp', 0], ['VideoCrossfade', 0], ['Transition', 0],
       ['KenBurns', 0], ['AspectConvert', 0], ['ChromaKey', 0], ['LUT', 0], ['ThreeWayCC', 0], ['Stabilize', 0], ['FrameInterpolate', 0],
+      ['AnimatedNoise', 0], ['AudioWaveform', 0],
     ])
     expect([...FRAME_ENCODERS]).toEqual(['CreateVideo', 'SaveVideoFrames'])
     expect(MEDIA_EFFECT_OUTPUT_KINDS).toEqual({
@@ -255,7 +266,7 @@ describe('the rows (rule 1)', () => {
       TemporalMotionBlur: { 0: 'frames' }, SlitScan: { 0: 'frames' }, TimeDisplacement: { 0: 'frames' }, SpeedRamp: { 0: 'frames' },
       VideoCrossfade: { 0: 'frames' }, Transition: { 0: 'frames' },
       KenBurns: { 0: 'frames' }, AspectConvert: { 0: 'frames' }, ChromaKey: { 0: 'frames' }, LUT: { 0: 'frames' }, ThreeWayCC: { 0: 'frames' },
-      Stabilize: { 0: 'frames' }, FrameInterpolate: { 0: 'frames' },
+      Stabilize: { 0: 'frames' }, FrameInterpolate: { 0: 'frames' }, AnimatedNoise: { 0: 'frames' }, AudioWaveform: { 0: 'frames' },
     })
     for (const [cls, input] of [['CreateVideo', 'images'], ['SaveVideoFrames', 'frames']] as const) {
       expect(RUNNER_NODE_RULES[cls]!.linkSources![input], cls).toEqual(expect.arrayContaining(FRAMES_OUTPUTS.map(x => [...x])))
@@ -271,6 +282,8 @@ describe('the rows (rule 1)', () => {
     for (const cls of ['KenBurns', 'AspectConvert', 'ChromaKey', 'LUT', 'ThreeWayCC']) expect(VIDEO_EFFECTS[cls]!.reads, cls).toBe('stream')
     expect(VIDEO_EFFECTS.Stabilize!.reads).toBe('two-pass')
     expect(VIDEO_EFFECTS.FrameInterpolate!.reads).toBe('tool')
+    expect(VIDEO_EFFECTS.AnimatedNoise!.reads).toBe('generator')
+    expect(VIDEO_EFFECTS.AudioWaveform!.reads).toBe('generator')
   })
 
   it('an effect’s slot carries frames only while its family is on', () => {

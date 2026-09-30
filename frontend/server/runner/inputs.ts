@@ -6,7 +6,8 @@
  * mask's render), Painter's painter file, the Shader effect's bake, Pose Mannequin's
  * saved pictures (R3.15), the sound Load audio or Record audio loads
  * (R5.3), the video Load video loads (R5.4), Load video frames' video and
- * Save video frames' sound (R5.5), and the LUT's .cube file (R6.4). In hosted,
+ * Save video frames' sound (R5.5), the LUT's .cube file (R6.4) and Audio
+ * waveform's sound (R6.7). In hosted,
  * every one must be the user's own.
  */
 import { isLink, type ApiPrompt } from '#shared/runner/graph'
@@ -163,6 +164,31 @@ export function unsafeLutNames(prompt: ApiPrompt, families: ReadonlySet<RunnerFa
   }).map(l => l.name)
 }
 
+/**
+ * R6.7: the sound each Audio waveform the runner takes (`video-draw` down its
+ * chain) names, as its execute() receives it (str() of the widget), or none
+ * ('(no audio found)', blank, or wired).
+ */
+export function takenWaveforms(prompt: ApiPrompt, families: ReadonlySet<RunnerFamily>): { nodeId: string; name: string }[] {
+  const out: { nodeId: string; name: string }[] = []
+  for (const [nodeId, node] of Object.entries(prompt)) {
+    if (node.class_type !== 'AudioWaveform' || !mediaEffectFamilyOn('AudioWaveform', families)) continue
+    const v = node.inputs?.audio_file
+    if (v === undefined || isLink(v)) continue
+    const name = typeof v === 'string' ? v : typeof v === 'boolean' ? (v ? 'True' : 'False') : v === null ? 'None' : String(v)
+    if (name !== '' && name !== '(no audio found)') out.push({ nodeId, name })
+  }
+  return out
+}
+
+/** R6.7 (rule 8): Audio waveform's sound names that aren't a file in the folders: refused by the name alone in hosted, as unsafeLutNames. */
+export function unsafeWaveformNames(prompt: ApiPrompt, families: ReadonlySet<RunnerFamily>): string[] {
+  return takenWaveforms(prompt, families).filter(l => {
+    const ref = pythonInputRef(l.name)
+    return !!ref && 'outside' in ref
+  }).map(l => l.name)
+}
+
 /** A file the workflow names that isn't the user's own (hosted): the same words whatever the reason. */
 export const NOT_YOURS = 'This workflow uses a file that isn’t one of yours'
 
@@ -245,6 +271,14 @@ export function collectInputFiles(prompt: ApiPrompt, families: ReadonlySet<Runne
       const name = lutFileOf(inputs)
       const ref = name === null ? null : pythonInputRef(name)
       if (ref && 'file' in ref) out.push(ref.file)
+    }
+    // Audio waveform's sound (R6.7, video-draw), read as Python opens it; a name outside the folders is refused
+    // by its name in hosted (unsafeWaveformNames) and left to the engine locally (video/start.ts waveformStartProblems).
+    if (node.class_type === 'AudioWaveform' && mediaEffectFamilyOn('AudioWaveform', families)) {
+      for (const w of takenWaveforms({ n: node }, families)) {
+        const ref = pythonInputRef(w.name)
+        if (ref && 'file' in ref) out.push(ref.file)
+      }
     }
     // The Audio card a sync-3 lip-sync reads (model line-up F22). The lip-sync's
     // own files (its studio's links) are checked by the engine (sync3Media.ts).

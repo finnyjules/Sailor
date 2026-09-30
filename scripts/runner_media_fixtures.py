@@ -112,6 +112,14 @@ Groups:
            output (float32, round-8, trunc-8), each frame's sha256, and the
            patterns' in-between frames whole. The node runs in a child
            process (OpenCV's libavdevice clashes with PyAV's).
+  vfx-draw — (R6.7) Animated noise (each motion at speed 0, 2 and 20, the
+           other widgets' edges, one 256 × 144 case) with each frame's window;
+           Audio waveform over R5's standard sounds and a missing file (each
+           style, bar_count 4 and 512, fps 1 and 120), with its bands per
+           frame and every frame (zlib'd), and a stereo file also through its
+           channels mixed to one (the look the runner's fix of Python's
+           squeezed stereo is judged by); and Pillow's rectangles, width-3
+           lines and ellipses on their own.
 """
 from __future__ import annotations
 
@@ -3105,9 +3113,217 @@ def group_vfx_flow(names: list[str]) -> dict:
     return {"cases": cases}
 
 
+# ── R6.7: made clips (Animated noise, Audio waveform) ─────────────────────────
+
+# Audio waveform's sounds: R5's standard sound clips, and a name that isn't there (Python draws silence).
+VFX_WAVE_SOUNDS = ("a_mono.mp3", "a_s16.wav", "a_s32.wav", "a_24.flac", "a_long_8k.wav", "a_min.wav", "nothing_here.wav")
+# The waveform cases' size and length (small enough to keep every frame, zlib'd).
+VFX_WAVE_SIZE = {"width": 320, "height": 180, "frame_count": 12}
+
+
+def vfx_noise_offsets(widgets: dict) -> list[list[int]]:
+    """Animated noise's window per frame (nodes_video_effects.py:470-503, repeated line for line): (ox, oy) after the clamp."""
+    from math import cos, sin
+    T, H, W = int(widgets["frame_count"]), int(widgets["height"]), int(widgets["width"])
+    speed = float(widgets["speed"])
+    max_pan = max(1, int(T * speed) + 1)
+    out = []
+    for t in range(T):
+        motion = widgets["motion"]
+        if motion == "pan_x":
+            ox, oy = int(t * speed) % max_pan, 0
+        elif motion == "pan_y":
+            ox, oy = 0, int(t * speed) % max_pan
+        elif motion == "diagonal":
+            ox = int(t * speed * 0.7) % max_pan
+            oy = int(t * speed * 0.7) % max_pan
+        elif motion == "breathe":
+            ox = int((sin(t * 0.1 * speed) * 0.5 + 0.5) * (max_pan - 1))
+            oy = int((cos(t * 0.1 * speed) * 0.5 + 0.5) * (max_pan - 1))
+        else:
+            angle = t * speed * 0.05
+            radius = min(t * speed * 0.5, max_pan / 2.0)
+            ox = int(cos(angle) * radius + max_pan / 2.0)
+            oy = int(sin(angle) * radius + max_pan / 2.0)
+        out.append([max(0, min(max_pan, ox)), max(0, min(max_pan, oy))])
+    return out
+
+
+def vfx_made_run(tmp: str, cls, class_type: str, name: str, widgets: dict, keep: bool) -> dict:
+    """A made clip's case (no frames in): the real node's output, ui and preview; `keep`: every frame's u8, zlib'd."""
+    rec: dict = {"name": name, "class_type": class_type, "node_id": VFX_NODE_ID, "widgets": widgets, "input": ""}
+    _o, temp = fresh_dirs(tmp, f"{class_type}_{name}".replace(" ", "_").replace(",", "").replace("#", "").replace("/", ""))
+    try:
+        args, ui = vfx_run(cls, VFX_NODE_ID, **widgets)
+        rec["out"] = vfx_batch(args[0])
+        rec["ui"] = vfx_ui(ui)
+        rec["preview"] = vfx_preview(temp, ui)
+        if keep:
+            rec["u8z"] = b64(zlib.compress(vfx_trunc8(args[0]), 9))
+    except Exception as e:  # noqa: BLE001 - the error itself is the record
+        rec["error"] = err(e)
+    return rec
+
+
+def vfx_wave_mix(src: str, dst: str) -> None:
+    """A stereo sound's channels mixed to one (their mean, as Python mixes a planar sound), as a mono float WAV
+    written by hand: what the runner's fix of Python's squeezed stereo is judged against."""
+    import struct
+    with av.open(src) as c:
+        s = c.streams.audio[0]
+        rate = s.sample_rate
+        parts = []
+        for f in c.decode(s):
+            a = f.to_ndarray()
+            C = len(f.layout.channels)
+            rows = a if a.shape[0] == C else a.reshape(-1, C).T
+            parts.append(rows.astype(np.float64))
+    x = np.concatenate(parts, axis=1)
+    scale = {np.dtype(np.int16): 32768.0, np.dtype(np.int32): 2.0 ** 31}.get(np.dtype(a.dtype), 1.0)
+    mono = (x.mean(axis=0) / scale).astype("<f4").tobytes()
+    fmt = struct.pack("<HHIIHH", 3, 1, rate, rate * 4, 4, 32)
+    with open(dst, "wb") as f:
+        f.write(b"RIFF" + struct.pack("<I", 4 + 8 + len(fmt) + 8 + len(mono)) + b"WAVE")
+        f.write(b"fmt " + struct.pack("<I", len(fmt)) + fmt + b"data" + struct.pack("<I", len(mono)) + mono)
+
+
+def vfx_wave_run(tmp: str, name: str, widgets: dict) -> dict:
+    """Audio waveform's case: the node over its sound, its bands per frame (float32, captured where the node clips
+    them for drawing), and every frame; a stereo file also through its channels mixed (`mixed`: the look the
+    runner's fix of the squeezed stereo is judged against)."""
+    from unittest import mock
+    from comfy_extras import nodes_video_pro as nvp
+    real_clip = np.clip
+    bands: list[bytes] = []
+
+    def spy(a, lo=None, hi=None, *rest, **kw):
+        if isinstance(a, np.ndarray) and a.dtype == np.float32 and a.ndim == 1 and lo == 0.0 and hi == 1.5:
+            bands.append(np.ascontiguousarray(a).tobytes())
+        return real_clip(a, lo, hi, *rest, **kw)
+
+    with mock.patch.object(nvp.np, "clip", spy):
+        rec = vfx_made_run(tmp, nvp.AudioWaveformNode, "AudioWaveform", name, widgets, True)
+    rec["bands"] = b64(b"".join(bands))
+    src = os.path.join(folder_paths.get_input_directory(), widgets["audio_file"])
+    if os.path.exists(src):
+        with av.open(src) as c:
+            stereo = len(c.streams.audio[0].layout.channels) > 1
+        if stereo:
+            mixed = f"mix_{widgets['audio_file']}.wav"
+            vfx_wave_mix(src, os.path.join(folder_paths.get_input_directory(), mixed))
+            bands.clear()
+            with mock.patch.object(nvp.np, "clip", spy):
+                m = vfx_made_run(tmp, nvp.AudioWaveformNode, "AudioWaveform", f"{name}, mixed", {**widgets, "audio_file": mixed}, True)
+            rec["mixed"] = {"out": m["out"], "u8z": m["u8z"], "bands": b64(b"".join(bands))}
+    return rec
+
+
+def vfx_draw_primitives() -> list[dict]:
+    """Pillow 12's drawing on its own: rectangles, width-3 lines at every octant, ellipses 2 × 2 to 64 × 40."""
+    from PIL import Image, ImageDraw
+    shapes: list[tuple[str, list]] = []
+    for box in ([3, 4, 3, 4], [2, 5, 20, 5], [5, 2, 5, 30], [10, 10, 40, 30], [-5, -5, 8, 70], [60, 40, 90, 90]):
+        shapes.append(("rectangle", box))
+    for dx, dy in ((20, 0), (20, 7), (20, 20), (7, 20), (0, 20), (-7, 20), (-20, 20), (-20, 7), (-20, 0), (-20, -7), (-20, -20), (-7, -20), (0, -20), (7, -20), (20, -20), (20, -7)):
+        shapes.append(("line", [(32, 32), (32 + dx, 32 + dy)]))
+    shapes.append(("line", [(0, 30), (2, 10), (4, 50), (6, 31), (8, 31), (10, 5)]))
+    for w, h in ((2, 2), (3, 3), (4, 4), (5, 5), (6, 3), (9, 9), (12, 7), (16, 16), (33, 20), (64, 40)):
+        shapes.append(("ellipse", [2, 3, 2 + w - 1, 3 + h - 1]))
+    out = []
+    for kind, xy in shapes:
+        img = Image.new("RGB", (72, 64), color=(0, 0, 0))
+        d = ImageDraw.Draw(img)
+        if kind == "rectangle":
+            d.rectangle(xy, fill=(255, 255, 255))
+        elif kind == "line":
+            d.line(xy, fill=(255, 255, 255), width=3)
+        else:
+            d.ellipse(xy, fill=(255, 255, 255))
+        out.append({"kind": kind, "xy": [list(p) if isinstance(p, tuple) else p for p in xy], "w": 72, "h": 64,
+                    "u8z": b64(zlib.compress(img.tobytes(), 9))})
+    return out
+
+
+def group_vfx_draw(names: list[str]) -> dict:
+    """Animated noise and Audio waveform (R6.7): generators, no frames in."""
+    import shutil
+    import tempfile
+    from comfy_extras import nodes_video_effects as nve
+    from comfy_extras import nodes_video_pro as nvp
+    nd = {"width": 64, "height": 64, "frame_count": 8, "noise_scale": 80.0, "speed": 2.0, "motion": "diagonal",
+          "dark_color": "#000000", "light_color": "#ffffff", "seed": 0}
+    noise = []
+    for motion in ("pan_x", "pan_y", "diagonal", "breathe", "swirl"):
+        for speed in (0.0, 2.0, 20.0):
+            noise.append((f"{motion}, speed {speed}", {**nd, "motion": motion, "speed": speed}))
+    noise += [
+        ("noise_scale min (4.0)", {**nd, "noise_scale": 4.0}), ("noise_scale max (400.0)", {**nd, "noise_scale": 400.0}),
+        ("seed max", {**nd, "seed": 2**31 - 1}), ("frame_count min (2)", {**nd, "frame_count": 2}),
+        ("colours #f0a, 123456", {**nd, "dark_color": "#f0a", "light_color": "123456"}),
+        ("colours junk, ##00ff7f  ", {**nd, "dark_color": "zz", "light_color": " ##00ff7f "}),
+        ("colours #12345, -f0000", {**nd, "dark_color": "#12345", "light_color": "-f0000"}),
+        ("256 x 144, swirl 7.5", {**nd, "width": 256, "height": 144, "frame_count": 16, "motion": "swirl", "speed": 7.5, "seed": 99}),
+        ("64 x 72, breathe 13.7", {**nd, "height": 72, "frame_count": 24, "motion": "breathe", "speed": 13.7, "seed": 5}),
+    ]
+    wd = {"audio_file": "a_mono.mp3", **VFX_WAVE_SIZE, "fps": 30, "style": "bars", "bar_count": 64, "color": "#ffffff",
+          "bg_color": "#000000", "sensitivity": 1.5, "smoothing": 0.6}
+    wave = []
+    for sound in VFX_WAVE_SOUNDS:
+        for style in ("bars", "wave", "dots", "radial", "mirrored_bars"):
+            wave.append((f"{style}, {sound}", {**wd, "audio_file": sound, "style": style}))
+    for style in ("bars", "wave", "dots", "radial", "mirrored_bars"):
+        for k in (4, 512):
+            wave.append((f"{style}, bar_count {k}", {**wd, "style": style, "bar_count": k}))
+    for fps in (1, 120):
+        wave.append((f"fps {fps}, a_long_8k.wav", {**wd, "audio_file": "a_long_8k.wav", "fps": fps}))
+        wave.append((f"fps {fps}, a_mono.mp3", {**wd, "fps": fps}))
+    wave += [
+        ("sensitivity min (0.1)", {**wd, "sensitivity": 0.1}), ("sensitivity max (10.0)", {**wd, "sensitivity": 10.0}),
+        ("smoothing min (0.0)", {**wd, "smoothing": 0.0}), ("smoothing max (0.95)", {**wd, "smoothing": 0.95}),
+        ("colours #f0a on 123456", {**wd, "color": "#f0a", "bg_color": "123456"}),
+        ("colours junk", {**wd, "color": "zz", "bg_color": "#12345"}),
+        ("64 x 64, one frame", {**wd, "width": 64, "height": 64, "frame_count": 1}),
+        ("odd size 330 x 97, dots", {**wd, "width": 330, "height": 97, "style": "dots", "bar_count": 20}),
+        ("(no audio found)", {**wd, "audio_file": "(no audio found)"}),
+    ]
+    cases: dict = {"threads": vfx_threads(), "clips": {}, "inlineValues": VFX_INLINE_VALUES, "waveSounds": list(VFX_WAVE_SOUNDS)}
+    runs = []
+    with tempfile.TemporaryDirectory() as tmp:
+        inputs = os.path.join(tmp, "input")
+        os.makedirs(inputs)
+        for s in VFX_WAVE_SOUNDS:
+            if os.path.exists(os.path.join(CLIPS, s)):
+                shutil.copyfile(os.path.join(CLIPS, s), os.path.join(inputs, s))
+        folder_paths.set_input_directory(inputs)
+        for name, widgets in noise:
+            rec = vfx_made_run(tmp, nve.AnimatedNoiseNode, "AnimatedNoise", name, widgets, False)
+            rec["offsets"] = vfx_noise_offsets(widgets)
+            runs.append(rec)
+        for name, widgets in wave:
+            runs.append(vfx_wave_run(tmp, name, widgets))
+        saved: dict = {"class_type": "AnimatedNoise", "widgets": nd, "input": "", "fps": 24.0}
+        from comfy_api.latest._input_impl import video_types
+        from comfy_extras import nodes_video as nv
+        Create, Save = (c.PREPARE_CLASS_CLONE({"hidden_inputs": VIDEO_HIDDEN}) for c in (nv.CreateVideo, nv.SaveVideo))
+        args, _ui = vfx_run(nve.AnimatedNoiseNode, VFX_NODE_ID, **nd)
+        for run, swap in (("x264", None), ("openh264", openh264_options(23))):
+            out, temp = fresh_dirs(tmp, f"saved_noise_{run}")
+            vid = Create.execute(images=args[0], fps=24.0, audio=None).result[0]
+            with _patched(video_types, _AvShim(swap)):
+                ui = video_ui_of(Save.execute(video=vid, filename_prefix="video/ComfyUI", format="auto", codec="auto"))
+            got = video_out(ui_file(out, temp, ui["images"][0]), None, False, False)
+            saved[run] = {"ui": ui, "header": got["header"], "frameCount": got["frameCount"], "frameRate": got["frameRate"],
+                          "duration": got["duration"], "frames": got["frames"]}
+    cases["runs"] = runs
+    cases["saved"] = [saved]
+    cases["primitives"] = vfx_draw_primitives()
+    return {"cases": cases}
+
+
 GROUPS = {"probe": group_probe, "decode": group_decode, "encode": group_encode, "sound": group_sound, "video": group_video,
           "frames": group_frames, "timeline-media": group_timeline_media, "vfx-time": group_vfx_time, "vfx-join": group_vfx_join,
-          "vfx-look": group_vfx_look, "vfx-stabilize": group_vfx_stabilize, "vfx-flow": group_vfx_flow}
+          "vfx-look": group_vfx_look, "vfx-stabilize": group_vfx_stabilize, "vfx-flow": group_vfx_flow,
+          "vfx-draw": group_vfx_draw}
 
 
 def main() -> None:

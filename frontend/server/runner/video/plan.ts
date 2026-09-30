@@ -154,8 +154,10 @@ export function planVideoEffect(ctx: PlanContext): NodePlan {
       // What the op carries from its first frame (the LUT's table), read now, before the lease: the file's
       // plain failure words, with nothing started (the start pass said so before the hold).
       const first = !through && spec.loadState ? await spec.loadState(params, { read: f => io.read(f), hosted: media.hosted }) : undefined
+      // What a made clip's frames read (R6.7: Audio waveform's sound), opened now, before the lease (its probe).
+      const feed = !through && spec.feed ? await spec.feed(params, media) : null
       const made = await mediaLease({ userId: media.userId, signal: media.signal }, lease =>
-        through ? passedOn(spec, values[0]!, media, lease) : worked(spec, own, values, ins, out, quant, media, lease, first))
+        through ? passedOn(spec, values[0]!, media, lease) : worked(spec, own, values, ins, out, quant, media, lease, first, feed))
       if (media.signal?.aborted) throw new MediaError('stopped')
       let ui: Record<string, unknown> | null = null
       if (previewName && made.preview) {
@@ -198,6 +200,7 @@ async function passedOn(spec: VideoEffectSpec, v: FramesValue, media: MediaValue
 async function worked(
   spec: VideoEffectSpec, params: Record<string, unknown>, values: FramesValue[], ins: FrameShape[], out: FrameShape,
   quant: 'trunc' | 'round', media: MediaValueIO, lease: MediaLease, first?: ArrayBuffer,
+  feed?: ((lease: MediaLease) => AsyncIterable<Record<string, unknown>>) | null,
 ): Promise<Made> {
   const sink = framesSink(out.w, out.h, media, lease)
   const mid = Math.floor(out.count / 2)
@@ -368,6 +371,27 @@ async function worked(
         if (media.signal?.aborted) throw new MediaError('stopped')
         made++
         await sink.put(rgb)
+      }
+    }
+    else if (spec.reads === 'generator') {
+      // R6.7: no frames in. Each output frame is one worker call from its widgets and what the feed hands it
+      // (Audio waveform: its window of the sound, decoded under the lease as the frames are made and ended once
+      // they have what they need, or by the finally on any other path). Frames past the feed's end get nothing.
+      const it = feed ? feed(lease)[Symbol.asyncIterator]() : null
+      let fed = !!it
+      try {
+        for (let j = 0; j < out.count; j++) {
+          let own: Record<string, unknown> | undefined
+          if (it && fed) {
+            const g = await it.next()
+            if (g.done) fed = false
+            else own = g.value
+          }
+          await emit(j, [], own)
+        }
+      }
+      finally {
+        await it?.return?.().catch(() => undefined)
       }
     }
     else throw new Error('The runner cannot run this video effect yet')
