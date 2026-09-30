@@ -228,7 +228,15 @@ parentPort.on('message', (m) => {
       if (!vx) throw new Error('The video effects are not in the runner')
       const op = effectOp(m.fn)
       const inputs = m.inputs.map(x => vx.fromRgb(x.rgb, x.w, x.h))
-      const r = op(inputs, m.params, m.state, m.index, m.count, isStopped)
+      // Every held frame, as views of the plan's one shared buffer (R6.2 fix round 1): read in place.
+      let held
+      if (m.held) {
+        const fb = m.held.w * m.held.h * 3
+        const frames = []
+        for (let i = 0; i < m.held.count; i++) frames.push(new Uint8Array(m.held.buf, i * fb, fb))
+        held = { frames, w: m.held.w, h: m.held.h }
+      }
+      const r = op(inputs, m.params, m.state, m.index, m.count, isStopped, held)
       stopped()
       const rgb = vx.toRgb(r.out, m.quant, isStopped)
       value = { rgb, w: r.out.w, h: r.out.h }
@@ -496,6 +504,8 @@ export interface VideoFrameJob {
   index: number; count: number
   inputs: { rgb: Uint8Array; w: number; h: number }[]
   state?: ArrayBuffer
+  /** Every frame of the input batch in one shared buffer (frame i at i · w · h · 3), read in place: an op that reads many frames per call. */
+  held?: { buf: SharedArrayBuffer; count: number; w: number; h: number }
   quant: 'round' | 'trunc'; preview: boolean
 }
 export interface VideoFrameResult { rgb: Uint8Array; w: number; h: number; state?: ArrayBuffer; preview?: Uint8Array }
@@ -632,7 +642,7 @@ export function pixelsInWorker<T>(signal: AbortSignal | undefined, job: (w: Pixe
         if (job.state && !buffers.includes(job.state)) buffers.push(job.state)
         return await call(t, {
           op: 'vfx.frame', fn: job.op, params: job.params, index: job.index, count: job.count,
-          inputs, state: job.state, quant: job.quant, preview: job.preview,
+          inputs, state: job.state, ...(job.held ? { held: job.held } : {}), quant: job.quant, preview: job.preview,
         }, buffers) as VideoFrameResult
       },
     }

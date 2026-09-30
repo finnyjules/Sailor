@@ -23,7 +23,7 @@ import { createFileAccess, type FileAccess } from '~~/server/runner/fileAccess'
 import { filesOf } from '~~/server/runner/values'
 import type { OutputFile, RunnerValue } from '~~/server/runner/types'
 import { keepFrames, readFrames, type MediaValueIO } from '~~/server/media/values'
-import { VIDEO_EFFECTS, gatherFrame, mediaEffectParams, windowSchedule } from '~~/server/runner/video/table'
+import { VIDEO_EFFECTS, mediaEffectParams, windowSchedule } from '~~/server/runner/video/table'
 import { videoCores } from '~~/server/runner/video/cores'
 import type { Tensor } from '~~/server/runner/effects/core/tensor'
 import { synth } from './effectsParity'
@@ -107,11 +107,10 @@ export function coreBatch(cls: string, widgets: Record<string, unknown>, input: 
   const through = !!spec.passThrough?.(params, ins)
   // Each output frame's inputs (rgb24) and its own params, as the plan hands them to the worker.
   const reads: { frames: Uint8Array[]; own?: Record<string, unknown> }[] = []
+  // An op that reads every held frame itself (Slit scan, Time displacement): no inputs of its own, the batch handed whole.
+  const held = spec.heldShared && !through ? { frames: input.frames, w: input.w, h: input.h } : undefined
   if (through) for (const f of input.frames) reads.push({ frames: [f] })
-  else if (spec.reads === 'held' && spec.gatherOf) {
-    const at = spec.gatherOf(params, ins)
-    for (let j = 0; j < out.count; j++) reads.push({ frames: [gatherFrame(input.frames, at(j), input.w, input.h)] })
-  }
+  else if (held) for (let j = 0; j < out.count; j++) reads.push({ frames: [] })
   else if (spec.reads === 'held') for (let j = 0; j < out.count; j++) reads.push({ frames: [input.frames[spec.heldSource ? spec.heldSource(params, ins, j) : j]!] })
   else if (spec.reads === 'window') {
     const plan = spec.windowOf!(params, ins)
@@ -130,7 +129,7 @@ export function coreBatch(cls: string, widgets: Record<string, unknown>, input: 
   let state: ArrayBuffer | undefined
   for (let j = 0; j < reads.length; j++) {
     const x = reads[j]!.frames.map(tensorOf)
-    const r = through ? { out: x[0]! } : op(x, reads[j]!.own ? { ...params, ...reads[j]!.own } : params, state, j, reads.length)
+    const r = through ? { out: x[0]! } : op(x, reads[j]!.own ? { ...params, ...reads[j]!.own } : params, state, j, reads.length, undefined, held)
     state = (r as { state?: ArrayBuffer }).state
     f32.push(bytesOf(hwc(r.out)).slice())
     round8.push(videoCores.vx.toRgb(r.out, 'round'))

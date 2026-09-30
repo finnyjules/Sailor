@@ -58,12 +58,12 @@ export interface VideoEffectSpec {
   windowOf?(widgets: Record<string, unknown>, ins: readonly FrameShape[]): WindowPlan
   /**
    * 'held', reading many frames per output frame (Slit scan, Time
-   * displacement): per output frame, the input frame each pixel comes from
-   * (h × w, row by row). The plan gathers that frame from the held frames
-   * (selection only, so exact whatever the thread) and the op sees it as its
-   * one input. The array returned may be reused by the next call.
+   * displacement): the op reads every held frame itself, handed to the
+   * worker as one shared buffer (R6.2 fix round 1: the gather, and Time
+   * displacement's noise, run on the worker, not this thread). Its call has
+   * no inputs of its own.
    */
-  gatherOf?(widgets: Record<string, unknown>, ins: readonly FrameShape[]): (j: number) => Int32Array
+  heldShared?: true
   /** Where Python itself raises for these widgets and inputs: its plain words (rule 14), said before any work. */
   pythonRaises?(widgets: Record<string, unknown>, ins: readonly FrameShape[]): string | null
 }
@@ -103,22 +103,6 @@ export function windowSchedule(plan: WindowPlan, count: number, inputCount: numb
   return { wins, keepFrom, maxHeld }
 }
 
-/** A frame gathered from held frames (VideoEffectSpec.gatherOf): pixel p of held frame src[p], rgb24. */
-export function gatherFrame(held: readonly (Uint8Array | null)[], src: Int32Array, w: number, h: number): Uint8Array {
-  const n = w * h
-  if (src.length !== n) throw new Error('A video frame is not the size its batch says')
-  const out = new Uint8Array(n * 3)
-  for (let p = 0; p < n; p++) {
-    const f = held[src[p]!]
-    if (!f) throw new Error('A video frame is missing')
-    const q = 3 * p
-    out[q] = f[q]!
-    out[q + 1] = f[q + 1]!
-    out[q + 2] = f[q + 2]!
-  }
-  return out
-}
-
 /**
  * The work of moving one output pixel through the node (rule 6: the decode of
  * the kept batch, the worker's k / 255 and quantise, the FFV1 encode), in
@@ -144,12 +128,12 @@ const frameBytes = (s: FrameShape) => s.w * s.h * 3
  *   - the float32 state an op carries between frames (`state32`, in frames:
  *     Frame trail's trail is one).
  */
-export function effectHeldBytes(s: FrameShape, o: { reads: number; held8?: number; state32?: number }): number {
+export function effectHeldBytes(s: FrameShape, o: { reads: number; held8?: number; state32?: number; extra?: number }): number {
   const f8 = frameBytes(s)
   const main8 = (o.held8 ?? 0) + o.reads + 1
   const worker8 = o.reads + 2
   const floats = o.reads + 1 + (o.state32 ?? 0)
-  return f8 * (main8 + worker8) + 4 * f8 * floats
+  return f8 * (main8 + worker8) + 4 * f8 * floats + (o.extra ?? 0)
 }
 
 /** Python's int() of a validated INT widget (already converted by the plan). */
@@ -179,7 +163,7 @@ const oneInput = (ins: readonly FrameShape[]): FrameShape => {
 const SELECT_STEPS = 0
 /** Frame trail's own steps a pixel: the decay, the max, the trail, the blend and the clamp (the luma where asked). */
 const TRAIL_STEPS = 2
-/** A pixel gathered on the main thread from the held frames, and its source worked out (Slit scan, Time displacement). */
+/** A pixel gathered on the worker from the held frames, and its source worked out (Slit scan, Time displacement). */
 const GATHER_STEPS = 2
 /** Speed ramp's blend a pixel: two products, a sum and the clamp. */
 const BLEND_STEPS = 1
@@ -272,29 +256,18 @@ export const VIDEO_EFFECTS: Readonly<Record<string, VideoEffectSpec>> = {
    * up to W (or H) frames anywhere in time. T ≤ 1 handed on. EXACT.
    */
   SlitScan: {
-    family: 'video-time', op: 'time.select', inputs: ['frames'], reads: 'held', preview: true,
+    family: 'video-time', op: 'time.slit', inputs: ['frames'], reads: 'held', heldShared: true, preview: true,
     shape: (_w, ins) => {
       const x = oneInput(ins)
       return { count: x.count, w: x.w, h: x.h, exact: x.exact }
     },
-    // Every frame, the gathered frame, and the sources (an int a pixel: under one float frame).
-    heldBytes: (_w, ins) => effectHeldBytes(oneInput(ins), { reads: 1, held8: oneInput(ins).count + 1, state32: 1 }),
+    // Every frame (one shared buffer), and the source table (an int per frame and step; the worker makes one row a frame).
+    heldBytes: (w, ins) => {
+      const x = oneInput(ins)
+      return effectHeldBytes(x, { reads: 1, held8: x.count + 1, state32: 1, extra: 4 * x.count * (w.axis === 'horizontal' ? x.w : x.h) })
+    },
     work: (_w, ins, out) => (oneInput(ins).count + out.count) * out.w * out.h * VIDEO_IO_WORK_PER_PIXEL + out.count * out.w * out.h * GATHER_STEPS,
     passThrough: (_w, ins) => oneInput(ins).count <= 1,
-    gatherOf: (w, ins) => {
-      const x = oneInput(ins)
-      const src = videoCores.time.slitSources(w, x.count, x.w, x.h)
-      const horizontal = w.axis === 'horizontal'
-      const S = horizontal ? x.w : x.h
-      const map = new Int32Array(x.w * x.h)
-      return (j) => {
-        const row = j * S
-        for (let y = 0; y < x.h; y++) {
-          for (let c = 0; c < x.w; c++) map[y * x.w + c] = src[row + (horizontal ? c : y)]!
-        }
-        return map
-      }
-    },
   },
   /**
    * Time displacement (:237-279): each pixel read from its own frame, offset
@@ -302,21 +275,15 @@ export const VIDEO_EFFECTS: Readonly<Record<string, VideoEffectSpec>> = {
    * frame held. T ≤ 1 or strength ≤ 0 handed on. EXACT.
    */
   TimeDisplacement: {
-    family: 'video-time', op: 'time.select', inputs: ['frames'], reads: 'held', preview: true,
+    family: 'video-time', op: 'time.displace', inputs: ['frames'], reads: 'held', heldShared: true, preview: true,
     shape: (_w, ins) => {
       const x = oneInput(ins)
       return { count: x.count, w: x.w, h: x.h, exact: x.exact }
     },
-    // Every frame, the gathered frame, the offsets (a float a pixel) and the sources (an int a pixel): under one float frame.
+    // Every frame (one shared buffer), the offsets (a float a pixel, carried) and the sources (an int a pixel): under one float frame.
     heldBytes: (_w, ins) => effectHeldBytes(oneInput(ins), { reads: 1, held8: oneInput(ins).count + 1, state32: 1 }),
     work: (_w, ins, out) => (oneInput(ins).count + out.count) * out.w * out.h * VIDEO_IO_WORK_PER_PIXEL + out.count * out.w * out.h * GATHER_STEPS,
     passThrough: (w, ins) => displacePassThrough(w, oneInput(ins).count),
-    gatherOf: (w, ins) => {
-      const x = oneInput(ins)
-      const offsets = videoCores.time.displaceOffsets(w, x.w, x.h)
-      const map = new Int32Array(x.w * x.h)
-      return j => videoCores.time.displaceSources(offsets, j, x.count, !!w.wrap, map)
-    },
   },
   /**
    * Speed ramp (nodes_video_pro.py:59-130): N output frames, each from its

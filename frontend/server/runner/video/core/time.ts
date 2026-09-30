@@ -26,7 +26,14 @@ import type { RngCore } from '../../effects/core/rng'
 
 /** One output frame: its tensor, and the state carried to the next frame (if any). */
 export interface VideoOpResult { out: Tensor; state?: ArrayBuffer }
-export type VideoOp = (inputs: Tensor[], p: Record<string, unknown>, state: ArrayBuffer | undefined, index: number, count: number, stop?: () => boolean) => VideoOpResult
+/**
+ * Every frame of the input batch, 8-bit rgb24, for an op that reads many
+ * frames per output frame (Slit scan, Time displacement): views of one
+ * shared buffer the plan filled once (R6.2 fix round 1), so nothing is
+ * copied per call.
+ */
+export interface HeldFrames { frames: Uint8Array[]; w: number; h: number }
+export type VideoOp = (inputs: Tensor[], p: Record<string, unknown>, state: ArrayBuffer | undefined, index: number, count: number, stop?: () => boolean, held?: HeldFrames) => VideoOpResult
 
 /**
  * Frames in and out of the ops (`vx`): an rgb24 frame as its float32 tensor,
@@ -163,6 +170,78 @@ export function timeCore(tk: TensorCore, kn: KernelsCore, rng: RngCore) {
     return { out, state: acc.buffer }
   }
 
+  /** k / 255 in float32 per byte, as Get video components hands a frame over (framesCore's table). */
+  const unit8 = new Float32Array(256)
+  for (let k = 0; k < 256; k++) unit8[k] = f(k / 255)
+
+  /**
+   * One output frame gathered from the held frames: pixel q of frame
+   * src(q), made k / 255 (the same floats as gathering the float frames:
+   * selection only). `src` gives a pixel's source frame.
+   */
+  function gathered(held: HeldFrames, src: (q: number) => number, stop?: () => boolean): Tensor {
+    const { w, h, frames } = held
+    const n = w * h
+    const out = tk.tensor(3, h, w)
+    const d = out.data
+    for (let y = 0; y < h; y++) {
+      if ((y & 63) === 0 && stop?.()) throw new Error('Stopped')
+      for (let x = 0; x < w; x++) {
+        const q = y * w + x
+        const fr = frames[src(q)]
+        if (!fr) throw new Error('A video frame is missing')
+        d[q] = unit8[fr[3 * q]!]!
+        d[n + q] = unit8[fr[3 * q + 1]!]!
+        d[2 * n + q] = unit8[fr[3 * q + 2]!]!
+      }
+    }
+    return out
+  }
+
+  function heldOf(held: HeldFrames | undefined): HeldFrames {
+    if (!held || !held.frames.length) throw new Error('The video frames are missing')
+    return held
+  }
+
+  /**
+   * SlitScan's output frame `index` (nodes_video_effects.py:207-220), on the
+   * worker: its row of slitSources, each pixel read from the frame its step
+   * (column, or row) names. EXACT.
+   */
+  function slit(_inputs: Tensor[], p: Record<string, unknown>, _state: ArrayBuffer | undefined, index: number, _count: number, stop?: () => boolean, held?: HeldFrames): VideoOpResult {
+    const hf = heldOf(held)
+    const T = hf.frames.length
+    const horizontal = p.axis === 'horizontal'
+    const row = slitRow(p, index, T, hf.w, hf.h)
+    return { out: gathered(hf, horizontal ? q => row[q % hf.w]! : q => row[Math.floor(q / hf.w)]!, stop) }
+  }
+
+  /**
+   * TimeDisplacement's output frame `index` (:257-278), on the worker: the
+   * offsets (the seeded noise) made on the first call and carried as the
+   * state; each pixel read from its own frame. EXACT.
+   */
+  function displace(_inputs: Tensor[], p: Record<string, unknown>, state: ArrayBuffer | undefined, index: number, _count: number, stop?: () => boolean, held?: HeldFrames): VideoOpResult {
+    const hf = heldOf(held)
+    const n = hf.w * hf.h
+    const offsets = state && state.byteLength === n * 4 ? new Float32Array(state) : displaceOffsets(p, hf.w, hf.h)
+    if (stop?.()) throw new Error('Stopped')
+    const src = displaceSources(offsets, index, hf.frames.length, !!p.wrap)
+    return { out: gathered(hf, q => src[q]!, stop), state: offsets.buffer as ArrayBuffer }
+  }
+
+  /** slitSources for output frame t only: its S sources. */
+  function slitRow(p: Record<string, unknown>, t: number, T: number, W: number, H: number): Int32Array {
+    const S = p.axis === 'horizontal' ? W : H
+    const dps = f((p.delay as number) * T / S)
+    const out = new Int32Array(S)
+    for (let s = 0; s < S; s++) {
+      const v = Math.trunc(f(t + f(s * dps)))
+      out[s] = p.wrap ? pyMod(v, T) : clampIndex(v, T)
+    }
+    return out
+  }
+
   /**
    * SlitScan's source frames (nodes_video_effects.py:207-218), per output
    * frame t and step s (a column for `horizontal`, a row for `vertical`),
@@ -173,14 +252,8 @@ export function timeCore(tk: TensorCore, kn: KernelsCore, rng: RngCore) {
    */
   function slitSources(p: Record<string, unknown>, T: number, W: number, H: number): Int32Array {
     const S = p.axis === 'horizontal' ? W : H
-    const dps = f((p.delay as number) * T / S)
     const out = new Int32Array(T * S)
-    for (let t = 0; t < T; t++) {
-      for (let s = 0; s < S; s++) {
-        const v = Math.trunc(f(t + f(s * dps)))
-        out[t * S + s] = p.wrap ? pyMod(v, T) : clampIndex(v, T)
-      }
-    }
+    for (let t = 0; t < T; t++) out.set(slitRow(p, t, T, W, H), t * S)
     return out
   }
 
@@ -330,7 +403,7 @@ export function timeCore(tk: TensorCore, kn: KernelsCore, rng: RngCore) {
     return { out }
   }
 
-  return { select, trail, ramp, slitSources, displaceOffsets, displaceSources, rampSources }
+  return { select, trail, ramp, slit, displace, slitSources, displaceOffsets, displaceSources, rampSources }
 }
 
 export type TimeCore = ReturnType<typeof timeCore>

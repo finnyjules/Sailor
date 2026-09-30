@@ -66,16 +66,21 @@ vi.mock('~~/server/runner/compositor/worker', async (importOriginal) => {
   }
 })
 
-/** Every heldFrames call (a spy): the batch it held and the most it was allowed to. */
-const HELD = vi.hoisted(() => ({ calls: [] as { count: number; w: number; h: number; maxBytes: number }[] }))
+/** Every heldFrames / heldFramesShared call (a spy): which, the batch it held and the most it was allowed to. */
+const HELD = vi.hoisted(() => ({ calls: [] as { fn: string; count: number; w: number; h: number; maxBytes: number; shared?: boolean }[] }))
 vi.mock('~~/server/media/values', async (importOriginal) => {
   const real = await importOriginal<typeof import('~~/server/media/values')>()
   return {
     ...real,
     heldFrames: ((v, io, lease, maxBytes) => {
-      HELD.calls.push({ count: v.count, w: v.w, h: v.h, maxBytes })
+      HELD.calls.push({ fn: 'heldFrames', count: v.count, w: v.w, h: v.h, maxBytes })
       return real.heldFrames(v, io, lease, maxBytes)
     }) as typeof real.heldFrames,
+    heldFramesShared: (async (v, io, lease, maxBytes) => {
+      const buf = await real.heldFramesShared(v, io, lease, maxBytes)
+      HELD.calls.push({ fn: 'heldFramesShared', count: v.count, w: v.w, h: v.h, maxBytes, shared: buf instanceof SharedArrayBuffer })
+      return buf
+    }) as typeof real.heldFramesShared,
   }
 })
 
@@ -93,7 +98,8 @@ import { LOCAL_LIVE_PREVIEW_SUBFOLDER } from '~~/server/runner/results'
 import { compositorCore } from '~~/server/runner/compositor/plane'
 import { workerScript } from '~~/server/runner/compositor/worker'
 import { videoCores } from '~~/server/runner/video/cores'
-import { VIDEO_EFFECTS, windowSchedule } from '~~/server/runner/video/table'
+import { VIDEO_EFFECTS, effectHeldBytes, windowSchedule } from '~~/server/runner/video/table'
+import { mediaEffectRefusals, needsExactCount } from '~~/server/runner/video/start'
 import { clipPath, requireMediaTools } from './__runner__/mediaParity'
 import { makeKit } from './__runner__/kit'
 import { createFileKeptBytes } from '~~/server/runner/keptBytes'
@@ -350,6 +356,63 @@ describe('the acceptance: Load video → Get video components → Reverse → Cr
   })
 })
 
+describe('Motion blur (time) on a clip known to be longer than one frame is refused before the hold', () => {
+  const blurFrom = (count: number, o: { counted?: boolean; exact?: boolean }) => {
+    const p: ApiPrompt = { l: loadVideo(), g: getComp(), m: { class_type: 'TemporalMotionBlur', inputs: { frames: ['g', 0], radius: 2, falloff: 'gaussian' } }, c: createVideo('m'), s: saveVideo('c') }
+    const shapes = new Map([['g:0', { count, w: 24, h: 16, exact: !!o.exact, ...(o.counted ? { counted: true as const } : {}) }]])
+    return { p, shapes }
+  }
+
+  it('only on a count known exactly (counted, or exact) above one; on a header bound the node’s own check stays, and the engine counts first', () => {
+    for (const o of [{ counted: true }, { exact: true }]) {
+      const { p, shapes } = blurFrom(2, o)
+      expect(mediaEffectRefusals(p, ON, shapes), JSON.stringify(o)).toEqual({ message: MEDIA_EFFECT_WORDS.motionBlurFails, nodeId: 'm', classType: 'TemporalMotionBlur' })
+      expect(needsExactCount(p, ON, shapes)).toBe(false)
+      expect(mediaEffectRefusals(blurFrom(1, o).p, ON, blurFrom(1, o).shapes)).toBeNull()
+    }
+    const bound = blurFrom(48, {})
+    expect(mediaEffectRefusals(bound.p, ON, bound.shapes)).toBeNull()
+    expect(needsExactCount(bound.p, ON, bound.shapes)).toBe(true)
+    const one = blurFrom(1, {})
+    expect(needsExactCount(one.p, ON, one.shapes)).toBe(false)
+    // Its family off: not the runner's, nothing refused.
+    expect(mediaEffectRefusals(bound.p, OFF_VIDEO_TIME, new Map([['g:0', { count: 48, w: 24, h: 16, exact: true }]]))).toBeNull()
+  })
+
+  it('in the engine, hosted: refused in plain words; the paid node in the other branch is neither run nor held', LONG, async () => {
+    await requireMediaTools()
+    const dir = mkdtempSync(join(scratch, 'refuse-'))
+    const k = makeKit({ hosted: true, dir, deps: { families: () => ON, kept: createFileKeptBytes(join(dir, 'kept')) } })
+    const clip = 'v_stereo_aac.mp4'
+    copyFileSync(clipPath(clip), join(k.root, 'input', clip))
+    const paid = {
+      i: { class_type: 'GenerateImageNode', inputs: { model: 'flux-schnell', prompt: 'a red fox', aspect_ratio: '1:1', seed: 0, model_options: '{}' } },
+      ic: { class_type: 'Image', inputs: { image: '', export: false, images: ['i', 0], batch_index: -1 } },
+    }
+    const video = (effect: Record<string, unknown>): ApiPrompt => ({
+      ...paid, l: { class_type: 'LoadVideo', inputs: { file: clip } }, g: getComp(), m: { class_type: String(effect.class_type), inputs: { frames: ['g', 0], ...(effect.inputs as object) } },
+      c: { class_type: 'CreateVideo', inputs: { images: ['m', 0], fps: ['g', 2] } }, s: saveVideo('c'),
+    })
+    const blurred = video({ class_type: 'TemporalMotionBlur', inputs: { radius: 2, falloff: 'gaussian' } })
+    expect(runnerTakesWorkflow(blurred, ON)).toBe(true)
+    const before = PROCS.pids.length
+    const err = await k.engine.startRun({ userId: k.userId, takes: [blurred], workflow: null, canvasId: null, projectUuid: null, projectName: null }).catch(e => e)
+    expect(err).toMatchObject({ statusCode: 400, message: MEDIA_EFFECT_WORDS.motionBlurFails, data: { nodeId: 'm', classType: 'TemporalMotionBlur' } })
+    expect(err.data.reason).toBeUndefined()
+    expect(k.fal.client.submit).not.toHaveBeenCalled()
+    expect(k.replicate.client.submit).not.toHaveBeenCalled()
+    expect(k.ledger.hold).not.toHaveBeenCalled()
+    expect(k.ledger.settle).not.toHaveBeenCalled()
+    // Only the header and the packet count were read (ffprobe): no decode or encode.
+    expect(PROCS.pids.length - before).toBeGreaterThan(0)
+    // Teeth: the same workflow with Trim in its place starts, and holds the paid node.
+    const trimmed = video({ class_type: 'VideoTrim', inputs: { start: 0, end: -1 } })
+    const { runId } = await k.engine.startRun({ userId: k.userId, takes: [trimmed], workflow: null, canvasId: null, projectUuid: null, projectName: null })
+    await k.engine.settled(runId)
+    expect(k.ledger.hold).toHaveBeenCalled()
+  })
+})
+
 describe('the family', () => {
   it('with video-time off, a workflow with a pilot is left to the engine and the pilot named', () => {
     for (const cls of MEDIA_EFFECTS_PORTED) {
@@ -417,7 +480,7 @@ describe('Stop mid-effect', () => {
 describe('Slit scan and Time displacement hold every frame, under the held-bytes limit', () => {
   for (const [cls, widgets] of [['SlitScan', { delay: 2.5, axis: 'vertical', wrap: true }], ['TimeDisplacement', { strength: 4, noise_scale: 8, wrap: true, seed: 0 }]] as const) {
     for (const hosted of [false, true]) {
-      it(`${cls}, ${hosted ? 'hosted' : 'local'}: one heldFrames call for the whole batch, within MEDIA_CAPS.heldFrameBytes`, LONG, async () => {
+      it(`${cls}, ${hosted ? 'hosted' : 'local'}: the whole batch held once, in one shared buffer the worker reads, within MEDIA_CAPS.heldFrameBytes`, LONG, async () => {
         await requireMediaTools()
         const h = vfxHarness(scratch, { hosted })
         const runId = vfxRunId(++runs)
@@ -426,14 +489,22 @@ describe('Slit scan and Time displacement hold every frame, under the held-bytes
         HELD.calls.length = 0
         await runVfxNode(h, { l: loadVideo(), g: getComp(), e: effect({ class_type: cls, widgets }), r: trimOf('e') }, 'e', { g: { 0: input } }, { runId, families: ON })
         const limit = (hosted ? MEDIA_CAPS.hosted : MEDIA_CAPS.local).heldFrameBytes
-        expect(HELD.calls).toEqual([{ count: 8, w: clip.w, h: clip.h, maxBytes: limit }])
+        expect(HELD.calls).toEqual([{ fn: 'heldFramesShared', count: 8, w: clip.w, h: clip.h, maxBytes: limit, shared: true }])
         for (const c of HELD.calls) expect(c.count * c.w * c.h * 3).toBeLessThanOrEqual(c.maxBytes)
-        // The start pass's figure covers every frame, the gathered one and the sources.
+        // The start pass's figure covers every frame, the sources, and (Slit scan) the whole source table.
         const ins = [{ count: 8, w: clip.w, h: clip.h, exact: true }]
-        expect(VIDEO_EFFECTS[cls]!.heldBytes(widgets, ins)).toBeGreaterThanOrEqual(9 * clip.w * clip.h * 3 + 4 * clip.w * clip.h * 3)
+        const table = cls === 'SlitScan' ? 4 * 8 * clip.h : 0
+        expect(VIDEO_EFFECTS[cls]!.heldBytes(widgets, ins)).toBeGreaterThanOrEqual(9 * clip.w * clip.h * 3 + 4 * clip.w * clip.h * 3 + table)
       })
     }
   }
+
+  it('Slit scan’s figure counts its whole source table (4 bytes a frame and step), through the shared helper', () => {
+    const flat = [{ count: 600, w: 4096, h: 2, exact: true }]
+    const base = effectHeldBytes(flat[0]!, { reads: 1, held8: 601, state32: 1 })
+    expect(VIDEO_EFFECTS.SlitScan!.heldBytes({ delay: 1, axis: 'horizontal', wrap: false }, flat)).toBe(base + 4 * 600 * 4096)
+    expect(VIDEO_EFFECTS.SlitScan!.heldBytes({ delay: 1, axis: 'vertical', wrap: false }, flat)).toBe(base + 4 * 600 * 2)
+  })
 
   it('a batch over the hosted limit is left to the engine by the start pass (the same figure)', () => {
     const big = [{ count: 90, w: 1920, h: 1080, exact: true }]
@@ -537,7 +608,17 @@ describe('esbuild guard: the video cores survive Nitro’s build', () => {
           const r2 = await reply({ id: 3, op: 'vfx.frame', fn: 'time.ramp', params: rp, index: 0, count: 1, inputs: [{ rgb: clip.frames[2]!.slice(), w: clip.w, h: clip.h }, { rgb: clip.frames[3]!.slice(), w: clip.w, h: clip.h }], quant: 'trunc', preview: false })
           expect(r2.error).toBeUndefined()
           expect([...r2.value.rgb]).toEqual([...want])
-          // And the built core's own sources (the plan works them out on its thread).
+          // Time displacement in the built worker, reading every frame from one shared buffer: this thread's frame.
+          const fb = clip.w * clip.h * 3
+          const sab = new SharedArrayBuffer(clip.frames.length * fb)
+          clip.frames.forEach((fr, i) => new Uint8Array(sab, i * fb, fb).set(fr))
+          const dw = { strength: 4, noise_scale: 8, wrap: true, seed: 2 ** 31 - 1 }
+          const dwant = videoCores.vx.toRgb(videoCores.time.displace([], dw, undefined, 3, 8, undefined, { frames: clip.frames, w: clip.w, h: clip.h }).out, 'round')
+          const r3 = await reply({ id: 4, op: 'vfx.frame', fn: 'time.displace', params: dw, index: 3, count: 8, inputs: [], held: { buf: sab, count: 8, w: clip.w, h: clip.h }, quant: 'round', preview: false })
+          expect(r3.error).toBeUndefined()
+          expect([...r3.value.rgb]).toEqual([...dwant])
+          expect(r3.value.state.byteLength).toBe(clip.w * clip.h * 4)
+          // And the built core's own sources and ramp.
           const pxc = px.pixelsCore!()
           const tkc = tk.tensorCore!(pxc)
           const built = time.timeCore!(tkc, kn.kernelsCore!(tkc, pxc), rng.rngCore!()) as typeof videoCores.time

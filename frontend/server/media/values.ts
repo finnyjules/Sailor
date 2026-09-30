@@ -364,6 +364,27 @@ export async function heldFrames(v: FramesValue, io: MediaValueIO, lease: MediaL
 }
 
 /**
+ * Every frame of a kept batch in ONE shared buffer (frame i at i · w · h · 3),
+ * for an op on the worker that reads many frames per output frame (R6.2 fix
+ * round 1): the worker reads it in place, nothing copied per call. Refused
+ * (`tooManyFrames`) past `maxBytes` before any decode, as heldFrames.
+ */
+export async function heldFramesShared(v: FramesValue, io: MediaValueIO, lease: MediaLease, maxBytes: number): Promise<SharedArrayBuffer> {
+  const fb = v.w * v.h * 3
+  if (v.count * fb > maxBytes) throw new MediaError('tooManyFrames')
+  const buf = new SharedArrayBuffer(v.count * fb)
+  const all = new Uint8Array(buf)
+  let i = 0
+  for await (const f of framesOf(v, io, lease)) {
+    if (i >= v.count || f.length !== fb) throw new MediaError('failed')
+    all.set(f, i * fb)
+    i++
+  }
+  if (i !== v.count) throw new MediaError('failed')
+  return buf
+}
+
+/**
  * save_to's sound cut (video_types.py:437): math.ceil((rate / frame_rate) ·
  * frames), `frame_rate` the stream rate it has just set,
  * Fraction(round(fps · 1000), 1000) (`pyStreamRate`).

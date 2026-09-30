@@ -36,8 +36,8 @@ import type { RunnerValue } from '../types'
 import { VIDEO_FRAME_TIMEOUT_MESSAGE, pixelsInWorker, type VideoFrameJob, type VideoFrameResult } from '../compositor/worker'
 import { png8 } from '../effects/plan'
 import { MediaError, mediaLease, type MediaLease } from '../../media/run'
-import { batchWord, framesOf, framesSink, heldFrames, type MediaValueIO } from '../../media/values'
-import { VIDEO_EFFECTS, gatherFrame, mediaEffectParams, windowSchedule, type FrameShape, type VideoEffectSpec } from './table'
+import { batchWord, framesOf, framesSink, heldFrames, heldFramesShared, type MediaValueIO } from '../../media/values'
+import { VIDEO_EFFECTS, mediaEffectParams, windowSchedule, type FrameShape, type VideoEffectSpec } from './table'
 
 type FramesValue = Extract<RunnerValue, { kind: 'frames' }>
 type Frame = { rgb: Uint8Array; w: number; h: number }
@@ -198,10 +198,10 @@ async function worked(
   let preview: Uint8Array | null = null
   let state: ArrayBuffer | undefined
   let made = 0
-  const emit = async (j: number, frames: Frame[], own?: Record<string, unknown>) => {
+  const emit = async (j: number, frames: Frame[], own?: Record<string, unknown>, held?: VideoFrameJob['held']) => {
     if (j !== made) throw new MediaError('failed')
     if (media.signal?.aborted) throw new MediaError('stopped')
-    const r = await frameOnWorker(media, { op: spec.op, params: own ? { ...params, ...own } : params, index: j, count: out.count, inputs: frames, ...(state ? { state } : {}), quant, preview: spec.preview && j === mid })
+    const r = await frameOnWorker(media, { op: spec.op, params: own ? { ...params, ...own } : params, index: j, count: out.count, inputs: frames, ...(state ? { state } : {}), ...(held ? { held } : {}), quant, preview: spec.preview && j === mid })
     state = r.state
     if (r.w !== out.w || r.h !== out.h) throw new MediaError('sizeChanged')
     if (r.preview) preview = r.preview
@@ -225,31 +225,29 @@ async function worked(
         await Promise.all(its.map(it => it.return?.().catch(() => undefined)))
       }
     }
+    else if (spec.reads === 'held' && spec.heldShared) {
+      // Every frame in one shared buffer, read in place by the op on the worker (R6.2 fix round 1): this thread
+      // only fills it as the frames decode and hands it on, each output frame one worker call.
+      const v = values[0]!
+      const buf = await heldFramesShared(v, media, lease, capsOf(media.hosted).heldFrameBytes)
+      const held = { buf, count: v.count, w: v.w, h: v.h }
+      for (let j = 0; j < out.count; j++) await emit(j, [], undefined, held)
+    }
     else if (spec.reads === 'held') {
       const v = values[0]!
       const held: (Uint8Array | null)[] = await heldFrames(v, media, lease, capsOf(media.hosted).heldFrameBytes)
-      if (spec.gatherOf) {
-        // Each output frame gathered from many held frames (selection only), on this thread; the op sees it as its one input.
-        const at = spec.gatherOf(params, ins)
-        for (let j = 0; j < out.count; j++) {
-          if (media.signal?.aborted) throw new MediaError('stopped')
-          await emit(j, [{ rgb: gatherFrame(held, at(j), v.w, v.h), w: v.w, h: v.h }])
-        }
-      }
-      else {
-        const source = (j: number) => spec.heldSource ? spec.heldSource(params, ins, j) : j
-        const uses = new Map<number, number>()
-        for (let j = 0; j < out.count; j++) uses.set(source(j), (uses.get(source(j)) ?? 0) + 1)
-        for (let j = 0; j < out.count; j++) {
-          const src = source(j)
-          const f = held[src]
-          if (!f) throw new MediaError('failed')
-          const left = (uses.get(src) ?? 1) - 1
-          uses.set(src, left)
-          // Each frame is let go after its last use.
-          if (left <= 0) held[src] = null
-          await emit(j, [{ rgb: handOver(f, left > 0), w: v.w, h: v.h }])
-        }
+      const source = (j: number) => spec.heldSource ? spec.heldSource(params, ins, j) : j
+      const uses = new Map<number, number>()
+      for (let j = 0; j < out.count; j++) uses.set(source(j), (uses.get(source(j)) ?? 0) + 1)
+      for (let j = 0; j < out.count; j++) {
+        const src = source(j)
+        const f = held[src]
+        if (!f) throw new MediaError('failed')
+        const left = (uses.get(src) ?? 1) - 1
+        uses.set(src, left)
+        // Each frame is let go after its last use.
+        if (left <= 0) held[src] = null
+        await emit(j, [{ rgb: handOver(f, left > 0), w: v.w, h: v.h }])
       }
     }
     else if (spec.reads === 'window' && spec.windowOf) {

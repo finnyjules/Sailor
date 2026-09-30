@@ -58,7 +58,7 @@ import { poseStartProblem } from './generators/nanoExtras'
 import { loadAudioStartProblems, soundStreamProblem } from './media/soundNodes'
 import { loadVideoStartProblems, videoFileVerdict } from './media/videoNodes'
 import { frameStartProblems, framesSoundVerdict } from './media/frameNodes'
-import { hasVideoEffect, keptPeak, mediaEffectStartProblems, nearLimit } from './video/start'
+import { hasVideoEffect, keptPeak, mediaEffectRefusals, mediaEffectStartProblems, nearLimit, needsExactCount } from './video/start'
 import { frameShapes, videoSourceShapeOf } from './video/shapes'
 import { markReleased, reviveReleased, spentKeptMedia } from './keptRelease'
 import { MEDIA_EFFECT_FAMILIES } from '#shared/runner/mediaEffects'
@@ -2257,7 +2257,13 @@ export function createEngine(deps: EngineDeps) {
       }
       const others = (k: number) => (several ? prompts.reduce((sum, _p, j) => (j === k ? sum : sum + keptOf(j)), 0) : 0)
       const opts = (k: number) => ({ hosted: deps.hosted(), shapes: shapes[k]!, release: !several, keptOthers: others(k) })
-      if (prompts.some((p, k) => nearLimit(p, families, opts(k)))) shapes = await shapeAll(true)
+      if (prompts.some((p, k) => nearLimit(p, families, opts(k)) || needsExactCount(p, families, shapes[k]!))) shapes = await shapeAll(true)
+      // Where Python itself raises on a count known exactly (Motion blur (time) on more than one frame): refused
+      // now, before the hold, in the node's own words (R6.2 fix round 1); never a run that fails after paid nodes.
+      for (const [k, p] of prompts.entries()) {
+        const raises = mediaEffectRefusals(p, families, shapes[k]!)
+        if (raises) throw refuse(raises.message, 400, { nodeId: raises.nodeId, classType: raises.classType })
+      }
       for (const [k, p] of prompts.entries()) {
         if (!hasVideoEffect(p, families) && !several) continue
         const bad = await mediaEffectStartProblems(p, families, opts(k))
