@@ -137,7 +137,7 @@ import {
 } from '~/lib/compositor/depthRegistry'
 import RelightControls from '~/components/vue-canvas/compositor/RelightControls.vue'
 import { sanitizeRelight, RELIGHT_MAX_LIGHTS, newLightId } from '~/lib/relight/settings'
-import { relightAvailable, relightUnavailableReason } from '~/lib/relight/relightPass'
+import { relightAvailable, relightUnavailableReason, __relightRuns } from '~/lib/relight/relightPass'
 import { setRelightBypass } from '~/composables/useCompositorLayers'
 import { DEFAULT_DISPLACE_MAP } from '~/lib/compositor/displace'
 import { imageUrlForNode } from '~/lib/canvas/nodeImage'
@@ -2720,6 +2720,10 @@ onMounted(() => {
 
       return { actual: actual.toDataURL(), expected: expected.toDataURL() }
     }
+    // Relight stage 1 Task 9 proof hook: distinguishes "Relight ran on the GPU" from the
+    // plain fallback, the way __dofRuns would if it were exposed (mirrors this file's own
+    // __compositor* hooks above).
+    ;(window as any).__relightRuns = __relightRuns
   }
 })
 onBeforeUnmount(() => {
