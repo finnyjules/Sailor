@@ -11,11 +11,20 @@
  * that might be billed is in flight, so the Relight panel can show a price line: true from
  * request start until the answer, false the instant any answer lands (ready, a cache hit,
  * error or off). The price rule is in docs/superpowers/specs/2026-09-30-relight-layer-effect-design.md.
+ *
+ * 2026-09-30 (Read shape button): the Frame editor no longer starts a paid read on its own.
+ * Instead it PEEKS — a free `peekSurfacesFor` call, same signature watch as before — which
+ * only ever lands an entry as 'ready' (already cached) or 'absent' (nothing cached: the
+ * Relight panel shows the "Read shape" button). `requestSurfaces`, the paid read, now runs
+ * only from that button's click (or directly, for a key with no entry yet — kept so callers
+ * that skip the peek still get a first read, and so the existing money-loop-guard tests keep
+ * their shape): it starts a read for no-entry or 'absent', and still never restarts
+ * 'loading'/'ready'/'error'/'off' — 'error' stays retrySurfaces-only.
  */
-import { requestSurfacesRead } from '~/lib/compositor/surfacesRequest'
+import { requestSurfacesRead, peekSurfaces } from '~/lib/compositor/surfacesRequest'
 import { type DepthRef, type DepthSource, depthKey } from '~/lib/compositor/depthRegistry'
 
-type Status = 'idle' | 'loading' | 'ready' | 'error' | 'off'
+type Status = 'idle' | 'loading' | 'ready' | 'error' | 'off' | 'absent'
 
 const asSource = (ref: DepthRef): DepthSource =>
   typeof ref === 'string' ? { filename: ref } : ref
@@ -95,10 +104,57 @@ export function requestSurfaces(ref: DepthRef): void {
   const src = asSource(ref)
   if (!src?.filename) return
   const key = depthKey(src)
-  // Any existing entry answers for itself: 'loading' and 'ready' need nothing, 'error' waits
-  // for retrySurfaces, 'off' stays off (see the header — this is the paid-route loop guard).
-  if (entries.has(key)) return
+  const cur = entries.get(key)
+  // Any existing entry other than 'absent' answers for itself: 'loading' and 'ready' need
+  // nothing, 'error' waits for retrySurfaces, 'off' stays off (see the header — this is the
+  // paid-route loop guard). 'absent' is a free peek's answer, not a read: the Read shape
+  // button's click reaches here and must start the real, paid read.
+  if (cur && cur.status !== 'absent') return
   start(src, key)
+}
+
+/** Free: asks the server whether this photo's surfaces are already cached, without ever
+ *  starting a paid read. No-op when an entry already exists in ANY state — 'absent' included,
+ *  so the watch that calls this on every layer-set change never re-peeks a photo it has
+ *  already asked about; the button (`requestSurfaces`) is what moves 'absent' onward. At most
+ *  one peek runs per key at a time. */
+const peeking = new Set<string>()
+
+export function peekSurfacesFor(ref: DepthRef): void {
+  const src = asSource(ref)
+  if (!src?.filename) return
+  const key = depthKey(src)
+  if (entries.has(key) || peeking.has(key)) return
+  peeking.add(key)
+  void (async () => {
+    let res: Awaited<ReturnType<typeof peekSurfaces>>
+    try {
+      res = await peekSurfaces(src)
+    } finally {
+      peeking.delete(key)
+    }
+    // A real read (the button, or a direct requestSurfaces call) may have started while the
+    // peek was in flight — that entry always wins over a late peek answer.
+    if (entries.has(key)) return
+    if (!res.ok) {
+      if (res.off) off(key, res.message)
+      // An ordinary peek failure is quiet and leaves no entry: the next matching watch tick
+      // (or the user reopening the layer) gets another free try, never an error line for a
+      // read nobody asked for yet.
+      return
+    }
+    if (res.absent) {
+      entries.set(key, { status: 'absent', img: null, paid: false })
+      notify()
+      return
+    }
+    const url = surfacesUrl(res.normalsFilename, res.subfolder)
+    const img = new Image()
+    img.crossOrigin = 'anonymous'
+    img.onload = () => { entries.set(key, { status: 'ready', img, paid: false }); notify() }
+    img.onerror = () => fail(key, 'surfaces map could not be decoded')
+    img.src = url
+  })()
 }
 
 /** Retries an 'error' entry — the only way an error is ever requested again. Does nothing
@@ -117,4 +173,5 @@ export function retrySurfaces(ref: DepthRef): void {
 export function __resetSurfacesRegistry(): void {
   entries = new Map()
   listeners = new Set()
+  peeking.clear()
 }
