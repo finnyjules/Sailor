@@ -86,34 +86,75 @@ test.describe('Relight effect', () => {
     await expect.poll(() => stackPixels(page)).toBe(lit)
   })
 
+  // Orientation is judged by the GAIN per half (lit ÷ plain), never by raw brightness: the puppy
+  // photo's bottom half is 17% brighter to begin with, and with MoGe-2 surfaces its floor (59% of
+  // the bottom half) correctly faces UP, so a light near the top lights the floor as well. Raw
+  // top > bottom then fails although the lighting is right (debug report 2026-09-30).
   test('a light near the top lights the top half; moved near the bottom, the bottom half', async ({ page }) => {
-    await openCompositor(page)
-    await seedPhoto(page)
-    await addRelight(page)                                         // Golden key: a single light
-    await expect(page.getByTestId('relight-light-handle')).toHaveCount(1)
-    const h = page.getByTestId('relight-light-handle').first()
-    /** Drag the one light to a layer fraction (0.5, fy), and wait for the GPU pass to re-run. */
-    const dragTo = async (fy: number) => {
-      const runs0 = await runs(page)
-      const hb = (await h.boundingBox())!
-      const L = await layerRect(page)
-      await page.mouse.move(hb.x + hb.width / 2, hb.y + hb.height / 2); await page.mouse.down()
-      await page.mouse.move(L.cx, L.top + L.h * fy, { steps: 10 }); await page.mouse.up()
-      await expect.poll(() => runs(page)).toBeGreaterThan(runs0)
-      return halves(page)
-    }
-    const high = await dragTo(0.06)
-    const low = await dragTo(0.92)
-    // The photo without Relight (Compare held), so the gain per half is independent of the photo.
-    const cb = (await page.getByTestId('relight-compare').boundingBox())!
-    await page.mouse.move(cb.x + cb.width / 2, cb.y + cb.height / 2); await page.mouse.down()
-    const plain = await halves(page)
-    await page.mouse.up()
+    const { plain, high, low } = await measureOrientation(page)   // real route: the puppy's surfaces are cached (free)
     console.log('[relight orientation] plain:', plain, 'light near top:', high, 'light near bottom:', low)
+    expectLitTowardTheLight(plain, high, low)
+  })
+
+  test('orientation on depth only (surfaces switched off)', async ({ page }) => {
+    let normalsFetched = false
+    page.on('request', (r) => { if (r.url().includes('moge_')) normalsFetched = true })
+    await page.route('**/api/depth/surfaces', (route) =>
+      route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ off: true }) }))
+    const { plain, high, low } = await measureOrientation(page)
+    console.log('[relight orientation, depth only] plain:', plain, 'light near top:', high, 'light near bottom:', low)
+    expect(normalsFetched).toBe(false)
+    expectLitTowardTheLight(plain, high, low)
+    // On depth alone the effect is also strong enough to beat the photo's own brighter bottom.
     expect(high.top).toBeGreaterThan(high.bottom)
     expect(low.bottom).toBeGreaterThan(low.top)
-    expect(high.top / plain.top).toBeGreaterThan(high.bottom / plain.bottom)
-    expect(low.bottom / plain.bottom).toBeGreaterThan(low.top / plain.top)
+  })
+
+  test('orientation with MoGe-2 surfaces', async ({ page }) => {
+    await page.route('**/api/depth/surfaces', (route) =>
+      route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ normalsFilename: 'moge_a579ac8e5ca4ba75.png', subfolder: 'sailor_depth', cached: true }) }))
+    const normalsLoaded = page.waitForResponse((r) => r.url().includes('moge_a579ac8e5ca4ba75.png') && r.ok(), { timeout: 20_000 })
+    const { plain, high, low } = await measureOrientation(page, normalsLoaded)
+    console.log('[relight orientation, surfaces] plain:', plain, 'light near top:', high, 'light near bottom:', low)
+    expectLitTowardTheLight(plain, high, low)
+    // What only surfaces know: the floor (most of the bottom half) faces UP, so the bottom half is
+    // brighter with the light above than with it low in front. The gain checks alone also pass
+    // with the normal map's green channel read upside down; this one does not.
+    expect(high.bottom).toBeGreaterThan(low.bottom)
+  })
+
+  test('the shader reads the MoGe-2 normal map the right way up', async ({ page }) => {
+    await page.goto('/')
+    // Relight's own fragment shader, with main() swapped to output the normal it lit with.
+    const r = await page.evaluate(async () => {
+      const rp = await import('/_nuxt/lib/relight/relightPass.ts' as string)
+      const gp = await import('/_nuxt/lib/compositor/gpuPost.ts' as string)
+      const load = (u: string) => new Promise<HTMLImageElement>((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = u })
+      const col = await load('/view?filename=flux_lora_00165_.png&type=input')
+      const nor = await load('/view?filename=moge_a579ac8e5ca4ba75.png&subfolder=sailor_depth&type=input')
+      const frag = (rp.RELIGHT_FRAG as string).replace(/void main\(\) \{[\s\S]*\}$/,
+        'void main() { vec2 p = vec2(vUv.x, 1.0 - vUv.y); fragColor = vec4(normalAt(p) * 0.5 + 0.5, 1.0); }')
+      const W = 256, H = 256
+      const out = new gp.GpuPost(frag).render(col, col, W, H, {
+        ...rp.depthRectUniforms({ u0: 0, v0: 0, du: 1, dv: 1 }, 1024, 1024),
+        uImgTexel: new Float32Array([1 / W, 1 / H]), uAspect: 1, uRelief: 4, uDetail: 0, uHasNormals: 1,
+      }, { normals: nor }) as HTMLCanvasElement | null
+      if (!out) return null
+      const read = (s: CanvasImageSource) => { const c = document.createElement('canvas'); c.width = W; c.height = H; const x = c.getContext('2d')!; x.drawImage(s, 0, 0, W, H); return x.getImageData(0, 0, W, H).data }
+      const o = read(out), n = read(nor)
+      // Expected at the same pixel: red unchanged, green inverted (map: green = up; lighting: y down).
+      let same = 0, flipped = 0
+      for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+        const i = (y * W + x) * 4, j = ((H - 1 - y) * W + x) * 4
+        same += Math.abs(o[i + 1]! - (255 - n[i + 1]!)) + Math.abs(o[i]! - n[i]!)
+        flipped += Math.abs(o[i + 1]! - (255 - n[j + 1]!)) + Math.abs(o[i]! - n[j]!)
+      }
+      return { same: same / (W * H * 2), flipped: flipped / (W * H * 2) }
+    })
+    console.log('[relight normals decode] mean abs diff, same row:', r?.same, 'mirrored row:', r?.flipped)
+    expect(r).not.toBeNull()
+    expect(r!.same).toBeLessThan(2)                                // measured 0.25
+    expect(r!.flipped).toBeGreaterThan(20)                         // control: the map is not symmetric (63.5)
   })
 
   test('a wheel run over a light raises it as one undo step and does not pan; a click records nothing', async ({ page }) => {
@@ -221,6 +262,43 @@ test.describe('Relight surfaces (stage 2)', () => {
     await expect(page.getByTestId('relight-status-error')).toBeVisible()
   })
 })
+
+type Halves = { top: number; bottom: number }
+
+/** Golden key (one light) dragged near the top, then near the bottom, then Compare held for the
+ *  plain photo. `ready` (e.g. the normal map's response) is awaited before the first drag. */
+async function measureOrientation(page: Page, ready?: Promise<unknown>): Promise<{ plain: Halves; high: Halves; low: Halves }> {
+  await openCompositor(page)
+  await seedPhoto(page)
+  await addRelight(page)                                         // Golden key: a single light
+  await expect(page.getByTestId('relight-light-handle')).toHaveCount(1)
+  if (ready) { await ready; await stackPixels(page) }            // the surfaces swap has painted
+  const h = page.getByTestId('relight-light-handle').first()
+  /** Drag the one light to a layer fraction (0.5, fy), and wait for the GPU pass to re-run. */
+  const dragTo = async (fy: number) => {
+    const runs0 = await runs(page)
+    const hb = (await h.boundingBox())!
+    const L = await layerRect(page)
+    await page.mouse.move(hb.x + hb.width / 2, hb.y + hb.height / 2); await page.mouse.down()
+    await page.mouse.move(L.cx, L.top + L.h * fy, { steps: 10 }); await page.mouse.up()
+    await expect.poll(() => runs(page)).toBeGreaterThan(runs0)
+    return halves(page)
+  }
+  const high = await dragTo(0.06)
+  const low = await dragTo(0.92)
+  // The photo without Relight (Compare held), so the gain per half is independent of the photo.
+  const cb = (await page.getByTestId('relight-compare').boundingBox())!
+  await page.mouse.move(cb.x + cb.width / 2, cb.y + cb.height / 2); await page.mouse.down()
+  const plain = await halves(page)
+  await page.mouse.up()
+  return { plain, high, low }
+}
+
+/** The half nearer the light gains more than the other half, for both light positions. */
+function expectLitTowardTheLight(plain: Halves, high: Halves, low: Halves) {
+  expect(high.top / plain.top).toBeGreaterThan(high.bottom / plain.bottom)
+  expect(low.bottom / plain.bottom).toBeGreaterThan(low.top / plain.top)
+}
 
 /** The Relight layer's box in client px, from the dim overlay's hole (rotation 0 in these tests). */
 async function layerRect(page: Page) {
