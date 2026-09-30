@@ -73,6 +73,9 @@ export const RUNNER_OUTPUT_CLASSES: ReadonlySet<string> = new Set([
   'LensReframe', 'PoseMannequin',
   // R3.16: Turntable is one too (is_output_node=True).
   'TurntableNode',
+  // R5.3: Save audio (FLAC and MP3) and Preview audio are output nodes (is_output_node=True;
+  // Load audio and Record audio are not). The Audio card is listed above.
+  'SaveAudio', 'SaveAudioMP3', 'PreviewAudio',
 ])
 
 /** ComfyUI's node_errors entry for a node that failed validation. */
@@ -103,10 +106,11 @@ export function prunedAny(r: PrunedPrompt): boolean {
 }
 
 /**
- * A class known under a second family as well as its SWITCHED_CLASSES one:
- * the Audio card showing a music or speech node's sound (R3.8, audio-gen).
+ * Classes known under more families as well as their SWITCHED_CLASSES one:
+ * the Audio card showing a music or speech node's sound (R3.8, audio-gen),
+ * and the Audio card in full (R5.3, media-sound).
  */
-const ALSO_SWITCHED: Readonly<Record<string, RunnerFamily>> = { Audio: 'audio-gen' }
+const ALSO_SWITCHED: Readonly<Record<string, readonly RunnerFamily[]>> = { Audio: ['audio-gen', 'media-sound'] }
 
 /**
  * A class the port knows: a runner type, or a family row's class. A class
@@ -119,7 +123,7 @@ const knows = (classType: string, families: ReadonlySet<RunnerFamily>) => {
   if (!Object.prototype.hasOwnProperty.call(RUNNER_NODE_RULES, classType)) return false
   const only = Object.prototype.hasOwnProperty.call(SWITCHED_CLASSES, classType) ? SWITCHED_CLASSES[classType] : undefined
   const also = Object.prototype.hasOwnProperty.call(ALSO_SWITCHED, classType) ? ALSO_SWITCHED[classType] : undefined
-  return !only || familyOn(only, families) || (!!also && familyOn(also, families))
+  return !only || familyOn(only, families) || (!!also && also.some(f => familyOn(f, families)))
 }
 
 /** The prompt as ComfyUI's validate_prompt leaves it to run. `families`: the runner families on. */

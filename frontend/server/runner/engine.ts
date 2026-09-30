@@ -6,7 +6,7 @@
  * failed or paused at a Gate. Money is held per take before a leg starts and
  * charged exactly when it ends. See docs/superpowers/specs/2026-09-22-sailor-runner-and-gate-design.md.
  */
-import { FRAME_RENDER_TYPES, LOCAL_RENDER_TYPES, PROVIDER_TYPES, isRunnerEligible } from '#shared/runner/eligibility'
+import { FRAME_RENDER_TYPES, LOCAL_RENDER_TYPES, PROVIDER_TYPES, isRunnerEligible, rendersLocally } from '#shared/runner/eligibility'
 import { NO_FAMILIES, type RunnerFamily } from '#shared/runner/families'
 import { staticWiredTexts } from '#shared/runner/staticValues'
 import { withStaticSpeechText } from '#shared/runner/audioGen'
@@ -53,6 +53,7 @@ import { effectOutRefusal } from './effects/plan'
 import { PICTURE_ANIMATED, pictureHasFrames, pictureMeta, pictureRefusal } from './pictures/pythonView'
 import { extraPromptText, hasOutputNode, measuredInput, nodeCredits, stageEstimate, unpricedProviderNode, type Metering } from './metering'
 import { poseStartProblem } from './generators/nanoExtras'
+import { loadAudioStartProblems } from './media/soundNodes'
 import { ev, type RunEvents, type SwitchReason } from './events'
 import { mediaNodeKind, nodeMediaChangedWords, nodeMediaCheck, nodeMediaFiles } from './nodeMedia'
 import { switchedSinceHold } from './switches'
@@ -1001,13 +1002,16 @@ export function createEngine(deps: EngineDeps) {
     // are charged, the render credit is not. A take that finished earns it on
     // any charge or any finished local render, as before.
     const ended = takeOutcome(take, leg.index)
+    // A local render: LOCAL_RENDER_TYPES, and the Audio card on its media row (R5.3), by the leg's own families.
+    const legFamilies: ReadonlySet<RunnerFamily> = new Set(leg.families ?? [])
+    const renderedHere = (id: string) => rendersLocally(take.nodes[id]!.classType, take.prompt[id]?.inputs ?? {}, legFamilies)
     let earnsBase: boolean
     if (ended === 'error' || ended === 'stopped') {
       const ran = new Set(legIds.filter(id => take.nodes[id]!.status === 'done' && !take.nodes[id]!.reused))
       const made = new Set([...ran].filter(id => charged.get(id)! > 0 || FRAME_RENDER_TYPES.has(take.nodes[id]!.classType)))
       earnsBase = deliveredToOutput(outputReadsOf(take.prompt), ran, made)
     }
-    else earnsBase = actual > 0 || legIds.some(id => take.nodes[id]!.status === 'done' && LOCAL_RENDER_TYPES.has(take.nodes[id]!.classType))
+    else earnsBase = actual > 0 || legIds.some(id => take.nodes[id]!.status === 'done' && renderedHere(id))
     if (charge.includesBase && earnsBase && !run.baseCharged) {
       actual += BASE_RENDER_CREDITS
       run.baseCharged = true
@@ -1032,7 +1036,7 @@ export function createEngine(deps: EngineDeps) {
       // A node that handed its picture on (no call, so no endpoint) made nothing new.
       // A local render made its own files; those in the output folder are Save image's assets (R1.5).
       // A pipeline (R3.1) made something when one of its calls finished.
-      const made = (rec.endpoint !== null && PROVIDER_TYPES.has(rec.classType)) || LOCAL_RENDER_TYPES.has(rec.classType)
+      const made = (rec.endpoint !== null && PROVIDER_TYPES.has(rec.classType)) || renderedHere(id)
         || !!rec.calls?.some(c => c.status === 'done')
       if (rec.status === 'done' && !rec.reused && made) {
         outputs.push(...rec.outputs.filter(f => f.type === 'output'))
@@ -1298,6 +1302,17 @@ export function createEngine(deps: EngineDeps) {
       // Files saved into the output folder (Save image, R1.5; a pipeline's
       // saves, R3.1): the run's assets, owned by the user and listed in the take's record.
       const assets: OutputFile[] = []
+      /** A saved file's bookkeeping: an output is the run's asset; an input file is the user's own. */
+      const recordSaved = async (f: OutputFile, folder: 'output' | 'temp' | 'input') => {
+        if (folder === 'output') {
+          await deps.metering.addOutput(run.userId, stageKey, f)
+          assets.push(f)
+        }
+        // Saved into the input folder (R3.6, Layerize an image's layers): recorded
+        // under the runner's own kind, so the user owns it (inputs.ts), but not an asset.
+        if (folder === 'input') await deps.metering.addSavedInput(run.userId, stageKey, f)
+        return f
+      }
       const deriveIO = (): DeriveIO => ({
         read: readOnce,
         keep: (bytes, ext) => kept.put(run.id, bytes, ext),
@@ -1308,15 +1323,22 @@ export function createEngine(deps: EngineDeps) {
             ...(o.subfolder !== undefined ? { subfolder: o.subfolder } : {}),
             ...(o.counter ? { counter: o.counter } : {}),
           })
-          if (folder === 'output') {
-            await deps.metering.addOutput(run.userId, stageKey, f)
-            assets.push(f)
-          }
-          // Saved into the input folder (R3.6, Layerize an image's layers): recorded
-          // under the runner's own kind, so the user owns it (inputs.ts), but not an asset.
-          if (folder === 'input') await deps.metering.addSavedInput(run.userId, stageKey, f)
-          return f
+          return recordSaved(f, folder)
         },
+        // A file the video tools wrote (R5.3, the sound nodes): moved into place, never read into memory.
+        ...(deps.results.saveFromPath
+          ? {
+              saveAssetFromPath: async (path: string, o: Parameters<NonNullable<DeriveIO['saveAssetFromPath']>>[1]) => {
+                const folder = o.folder ?? 'output'
+                const f = await deps.results.saveFromPath!(path, {
+                  userId: run.userId, prefix: o.prefix, ext: o.ext, folder,
+                  ...(o.subfolder !== undefined ? { subfolder: o.subfolder } : {}),
+                  ...(o.counter ? { counter: o.counter } : {}),
+                })
+                return recordSaved(f, folder)
+              },
+            }
+          : {}),
         savePreview: (bytes, o) => deps.results.saveLivePreview(bytes, { nodeId: o.nodeId ?? id, userId: run.userId }),
         savePreviewAs: (bytes, o) => deps.results.savePreviewAs(bytes, { filename: o.filename, userId: run.userId }),
         hosted: deps.hosted(),
@@ -2062,6 +2084,12 @@ export function createEngine(deps: EngineDeps) {
     // now, before anything runs or is charged.
     for (const f of loadImageFiles(prompts)) {
       if (!(await files.exists(f))) throw refuse(LOADED_PICTURE_MISSING, 400, { file: f.filename })
+    }
+    // Load audio's validate_inputs (R5.3): a sound file that isn't there is refused now, as
+    // ComfyUI refuses the prompt ("Invalid audio file"), before anything runs or is held.
+    for (const p of prompts) {
+      const missing = await loadAudioStartProblems(p, f => files.exists(f))
+      if (missing) throw refuse(missing.message, 400, { nodeId: missing.nodeId, classType: missing.classType, ...(missing.file ? { file: missing.file } : {}) })
     }
     // The picture cards' files (R1.3 follow-up): one a card would refuse at its
     // turn (16-bit, 32-bit, CMYK, a see-through GIF, a kind sharp can't read)

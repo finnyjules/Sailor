@@ -108,6 +108,12 @@ export interface RunnerNodeRule {
   /** Every node reading this one must be one of these classes. */
   feedsOnly?: readonly string[]
   /**
+   * More classes that may read this one while `family` is on (R5.3: a music
+   * or speech node's sound saved or previewed directly by the sound nodes of
+   * `media-sound`). With it off, `feedsOnly` is exactly as before.
+   */
+  feedsAlso?: { family: RunnerFamily; classes: readonly string[] }
+  /**
    * The class hands on a list (ComfyUI's is_output_list: the next node runs
    * once per item): only these classes may read it. Anything else is left to
    * the engine (R1.6: ComfyUI would run a paid node once per item).
@@ -412,6 +418,21 @@ const LOAD_IMAGE_MASK = [['LoadImage', 1]] as const
  * ADDS models; the models the runner takes without any family stay as they
  * are.
  */
+/**
+ * Every (class, output slot) that makes a sound (Python's AUDIO) the runner
+ * can take (R5.3): each is taken only while its own family is on, so an AUDIO
+ * input may list them all. LoadAudio, RecordAudio and the Audio card
+ * (`media-sound`); Get video components' sound (`media-video`, R5.4); the
+ * music and speech nodes (`audio-gen`); Clone a singing voice (`sound-in`, R3.10).
+ */
+export const SOUND_OUTPUTS: readonly (readonly [string, number])[] = [
+  ['LoadAudio', 0], ['RecordAudio', 0], ['Audio', 0], ['GetVideoComponents', 1],
+  ...AUDIO_GEN_CLASSES.map(c => [c, 0] as const), ['CloneSingingVoiceNode', 0],
+]
+
+/** The sound nodes that read a sound (R5.3): what a music or speech node may feed while `media-sound` is on. */
+const SOUND_READERS = ['SaveAudio', 'SaveAudioMP3', 'PreviewAudio'] as const
+
 export const RUNNER_NODE_RULES: Readonly<Record<string, RunnerNodeRule>> = {
   // ── fal-edit (Task B2): fal only, at most two linked pictures ──
   // Text widgets the runner reads as plain text must not be wired: a linked
@@ -804,6 +825,38 @@ export const RUNNER_NODE_RULES: Readonly<Record<string, RunnerNodeRule>> = {
     needsReader: true,
     offWidgets: ['export'],
   },
+  // ── media-sound (step 3, R5.3): the sound nodes, computed here with the
+  // video tools (server/runner/media/soundNodes.ts). The loaders hand their
+  // file on (Python's `load` decodes it where it is read); the savers and
+  // Preview audio write files, so they count as work. Every AUDIO input takes
+  // a sound from SOUND_OUTPUTS only. The widgets as ComfyUI validates them
+  // (LoadAudio's own validate_inputs replaces the file list: a file that isn't
+  // there is refused before the run, soundNodes.ts loadAudioStartProblems).
+  LoadAudio: {
+    family: 'media-sound', local: 'source',
+    widgets: { audio: { type: 'STRING', required: true } },
+  },
+  RecordAudio: {
+    family: 'media-sound', local: 'source',
+    widgets: { audio: { type: 'STRING', required: true } },
+  },
+  SaveAudio: {
+    family: 'media-sound', local: 'render', mustLink: ['audio'], required: ['audio'],
+    linkSources: { audio: SOUND_OUTPUTS },
+    widgets: { filename_prefix: { type: 'STRING', required: true } },
+  },
+  SaveAudioMP3: {
+    family: 'media-sound', local: 'render', mustLink: ['audio'], required: ['audio'],
+    linkSources: { audio: SOUND_OUTPUTS },
+    widgets: {
+      filename_prefix: { type: 'STRING', required: true },
+      quality: { type: 'COMBO', required: true, options: ['V0', '128k', '320k'] },
+    },
+  },
+  PreviewAudio: {
+    family: 'media-sound', local: 'render', mustLink: ['audio'], required: ['audio'],
+    linkSources: { audio: SOUND_OUTPUTS },
+  },
   // ── topaz-video (model line-up F23): Enhance a video on fal's Topaz video upscale ──
   // The node already runs Topaz on ComfyUI (Replicate's topazlabs/video-upscale,
   // flat priced), so this family moves the whole class (Ruling 10), as F10 and
@@ -1064,6 +1117,7 @@ export const RUNNER_NODE_RULES: Readonly<Record<string, RunnerNodeRule>> = {
     valueInputs: { prompt: ['text'] },
     required: ['prompt'],
     feedsOnly: ['Audio'],
+    feedsAlso: { family: 'media-sound', classes: SOUND_READERS },
     needsReader: true,
     widgets: {
       ...(c === 'GenerateMusicNode' ? { model: { type: 'COMBO', required: true, options: MUSIC_MODELS } } : {}),
@@ -1079,6 +1133,7 @@ export const RUNNER_NODE_RULES: Readonly<Record<string, RunnerNodeRule>> = {
     valueInputs: { text: ['text'] },
     required: ['text'],
     feedsOnly: ['Audio'],
+    feedsAlso: { family: 'media-sound', classes: SOUND_READERS },
     needsReader: true,
     widgets: {
       ...(c === 'GenerateSpeechNode' ? { model: { type: 'COMBO', required: true, options: SPEECH_MODELS } } : {}),
@@ -1357,6 +1412,12 @@ export const SWITCHED_CLASSES: Readonly<Record<string, RunnerFamily>> = {
   ...Object.fromEntries(NANO_EXTRAS_CLASSES.map(c => [c, 'nano-extras' as const])),
   // R3.16: Turntable.
   [TURNTABLE_CLASS]: 'turntable',
+  // R5.3: the sound nodes (the Audio card keeps its sync-3 entry; validate.ts ALSO_SWITCHED).
+  LoadAudio: 'media-sound',
+  RecordAudio: 'media-sound',
+  SaveAudio: 'media-sound',
+  SaveAudioMP3: 'media-sound',
+  PreviewAudio: 'media-sound',
 }
 
 /**
@@ -1377,10 +1438,53 @@ export const AUDIO_CARD_AUDIO_GEN_RULE: RunnerNodeRule = {
   offWidgets: ['export'],
 }
 
-/** The row a node is judged by: RUNNER_NODE_RULES', but for an Audio card showing a music or speech node's sound (R3.8). */
+/**
+ * The Audio card in full (R5.3, `media-sound`): nodes_audio.py Audio.execute,
+ * computed here (server/runner/media/soundNodes.ts planAudioCard). Its
+ * `source` (a sound from SOUND_OUTPUTS) wins, then its own file, else
+ * Python's 1 s of silence; it shows Python's FLAC preview of the samples, or
+ * with `export` on saves a copy in the format and quality asked and shows
+ * that. It writes files, so it counts as work; it may feed any reader of a
+ * sound (each reader's own row decides). Every setting is a widget as
+ * ComfyUI validates it; its file widget must not be wired.
+ */
+export const AUDIO_CARD_MEDIA_RULE: RunnerNodeRule = {
+  family: 'media-sound',
+  local: 'render',
+  mustNotLink: ['audio'],
+  linkSources: { source: SOUND_OUTPUTS },
+  widgets: {
+    export: { type: 'BOOLEAN', required: true },
+    filename_prefix: { type: 'STRING', required: true },
+    format: { type: 'COMBO', required: true, options: ['flac', 'mp3', 'opus'] },
+    quality: { type: 'COMBO', required: true, options: ['V0', '128k', '192k', '320k'] },
+  },
+}
+
+/**
+ * The row a node is judged by: RUNNER_NODE_RULES', but for the Audio card,
+ * in this order: the audio-gen row (R3.8) while `audio-gen` is on, `source`
+ * is wired and `media-sound` is off, as before R5.3; the media row while
+ * `media-sound` is on; else its sync-3 row.
+ */
 export function runnerRuleFor(classType: string, inputs: Record<string, unknown>, families: ReadonlySet<RunnerFamily>): RunnerNodeRule | undefined {
-  if (classType === 'Audio' && isLink(inputs.source) && familyOn('audio-gen', families)) return AUDIO_CARD_AUDIO_GEN_RULE
+  if (classType === 'Audio') {
+    const media = familyOn('media-sound', families)
+    if (!media && isLink(inputs.source) && familyOn('audio-gen', families)) return AUDIO_CARD_AUDIO_GEN_RULE
+    if (media) return AUDIO_CARD_MEDIA_RULE
+  }
   return Object.prototype.hasOwnProperty.call(RUNNER_NODE_RULES, classType) ? RUNNER_NODE_RULES[classType] : undefined
+}
+
+/**
+ * Whether a node renders here with these families on (its row's `local` is
+ * 'render'): LOCAL_RENDER_TYPES, plus the Audio card on its media row (R5.3),
+ * which counts as work only while `media-sound` is on. With it off, exactly
+ * LOCAL_RENDER_TYPES.
+ */
+export function rendersLocally(classType: string, inputs: Record<string, unknown>, families: ReadonlySet<RunnerFamily>): boolean {
+  if (LOCAL_RENDER_TYPES.has(classType)) return true
+  return classType === 'Audio' && runnerRuleFor(classType, inputs, families) === AUDIO_CARD_MEDIA_RULE
 }
 
 /**
@@ -1724,7 +1828,7 @@ function graphRuleAllows(prompt: ApiPrompt, id: string, rule: RunnerNodeRule, fa
         if (notLinked.includes(l.slot)) return false
         const only = slotReaders && Object.prototype.hasOwnProperty.call(slotReaders, l.slot) ? slotReaders[l.slot] : undefined
         if (only && !only.some(([cls, input]) => cls === node.class_type && input === l.input)) return false
-        if (feedsOnly && !feedsOnly.includes(node.class_type)) return false
+        if (feedsOnly && !feedsOnly.includes(node.class_type) && !(rule.feedsAlso && familyOn(rule.feedsAlso.family, families) && rule.feedsAlso.classes.includes(node.class_type))) return false
         if (listReaders && !listReaders.includes(node.class_type)) return false
       }
     }
@@ -1986,7 +2090,7 @@ export function isRunnerEligible(prompt: ApiPrompt | null | undefined, families:
   for (const id of ids) {
     if (!runnerTakesNode(prompt, id, families, opts)) return false
     const ct = prompt[id]!.class_type
-    if (PROVIDER_TYPES.has(ct) || LOCAL_RENDER_TYPES.has(ct)) work++
+    if (PROVIDER_TYPES.has(ct) || rendersLocally(ct, prompt[id]!.inputs ?? {}, families)) work++
   }
   return work > 0 || !!opts.afterPruning
 }

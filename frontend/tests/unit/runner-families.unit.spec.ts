@@ -8,7 +8,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import {
   PROVIDER_TYPES, RUNNER_NODE_RULES, isRunnerEligible, nodeRuleAllows, runnerTakesNode,
 } from '#shared/runner/eligibility'
-import { NO_FAMILIES, RUNNER_FAMILIES, parseFamilies, type RunnerFamily } from '#shared/runner/families'
+import { ALL_RUNNER_FAMILIES, NO_FAMILIES, RUNNER_FAMILIES, parseFamilies, type RunnerFamily } from '#shared/runner/families'
 import type { ApiPrompt } from '#shared/runner/graph'
 import { runnerFamilies } from '~~/server/runner/config'
 import { shouldUseRunner } from '~/lib/runner/client'
@@ -120,7 +120,8 @@ describe('eligibility with families', () => {
   it('every rule row names known families', () => {
     for (const rule of Object.values(RUNNER_NODE_RULES)) {
       const named = [rule.family, ...Object.values(rule.models ?? {}).map(m => typeof m === 'string' ? m : m.family)]
-      for (const f of named.filter(Boolean)) expect(RUNNER_FAMILIES).toContain(f)
+      // Every family parseFamilies knows (R5.3: the media families are known but kept apart from RUNNER_FAMILIES).
+      for (const f of named.filter(Boolean)) expect(ALL_RUNNER_FAMILIES).toContain(f)
     }
   })
   it('the provider set is the two generators, Film a shot (Task 4), plus every rule row the runner does not compute itself', () => {

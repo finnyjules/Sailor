@@ -11,7 +11,8 @@
  *   NUXT_RUNNER_BACKUP=on                    let a stalled or refused job move to its backup service (off by default)
  *   NUXT_RUNNER_BACKUP_STALL_MS=120000       how long a job may wait to start before it is switched; 0 = never for a slow start
  */
-import { NO_FAMILIES, parseFamilies, type RunnerFamily } from '#shared/runner/families'
+import { MEDIA_TOOL_FAMILIES, NO_FAMILIES, parseFamilies, type RunnerFamily } from '#shared/runner/families'
+import { mediaToolsReady } from '../media/tools'
 
 function truthy(v: string | undefined): boolean {
   if (typeof v !== 'string') return false
@@ -23,10 +24,16 @@ export function runnerEnabled(): boolean {
   return truthy(process.env.NUXT_RUNNER_ENABLED)
 }
 
-/** The families switched on, server side. None while the runner itself is off. */
+/**
+ * The families switched on, server side. None while the runner itself is off.
+ * The media families (MEDIA_TOOL_FAMILIES, R5.3) answer as off while the video
+ * tools are missing or refused (R5 rule 1): their classes go to the engine.
+ */
 export function runnerFamilies(): ReadonlySet<RunnerFamily> {
   if (!runnerEnabled()) return NO_FAMILIES
-  return parseFamilies(process.env.NUXT_RUNNER_FAMILIES)
+  const on = parseFamilies(process.env.NUXT_RUNNER_FAMILIES)
+  if (mediaToolsReady() || !MEDIA_TOOL_FAMILIES.some(f => on.has(f))) return on
+  return new Set([...on].filter(f => !MEDIA_TOOL_FAMILIES.includes(f)))
 }
 
 export function webhookBaseUrl(): string | null {

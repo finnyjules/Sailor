@@ -10,7 +10,7 @@
  * provider node that prices at 0 is refused in hosted (unpricedProviderNode).
  */
 import type { ApiNode, ApiPrompt } from '#shared/runner/graph'
-import { LOCAL_RENDER_TYPES, PROVIDER_TYPES } from '#shared/runner/eligibility'
+import { PROVIDER_TYPES, rendersLocally } from '#shared/runner/eligibility'
 import { BASE_RENDER_CREDITS, OUTPUT_CLASS_TYPES, priceGraph } from '../utils/priceBook'
 import { extractGraphPromptTexts } from '../utils/graphPromptText'
 import { MeterRefusalError } from '../utils/requestMeter'
@@ -232,7 +232,8 @@ export function stageEstimate(
   for (const id of nodeIds) {
     const n = priced[id]
     if (!n) continue
-    if (LOCAL_RENDER_TYPES.has(n.class_type)) renders = true
+    // A local render (the Audio card on its media row too, R5.3: rendersLocally).
+    if (rendersLocally(n.class_type, n.inputs ?? {}, families)) renders = true
     else {
       const m = measured && Object.prototype.hasOwnProperty.call(measured, id) ? measured[id] : undefined
       // A Pose Mannequin whose saved pose the start of the run read and found loading makes no call (R3.15 fix round 1).

@@ -38,6 +38,19 @@ Groups:
            stitch clips are written beside the standard clips as e_*.mp4 and
            are not standard clips (the probe and decode groups skip them).
            Every encoder runs with one thread.
+  sound  — (R5.3) the sound nodes' own execute: LoadAudio, RecordAudio,
+           the Audio card (a file, a wired source that wins over the file,
+           nothing: 1 s of silence), PreviewAudio, SaveAudio and SaveAudioMP3
+           over every sound clip (and the video with stereo AAC), each in a
+           fresh output and temp folder; the card's export in every format and
+           quality; SaveAudio of a two-item batch with and without
+           `%batch_num%`, and twice for the counter; Opus export's resample
+           (torchaudio's samples as save_audio makes them) from 44.1, 22.05,
+           96 and 8 kHz; and a Generate music answer (WAV mono and stereo,
+           _download_url_to_audio_dict) shown by the card. Each case records
+           the ui, the saved names and subfolders, the file's decoded samples
+           (nodes_audio.load) and its tags. The temp names' five letters are
+           drawn from a seeded `random`.
 """
 from __future__ import annotations
 
@@ -1000,7 +1013,210 @@ def group_encode(names: list[str]) -> dict:
     return {"cases": cases, "encodeClips": {n: sha(open(os.path.join(CLIPS, n), "rb").read()) for n in stitch_names}}
 
 
-GROUPS = {"probe": group_probe, "decode": group_decode, "encode": group_encode}
+# ── sound (R5.3) ──────────────────────────────────────────────────────────────
+
+# The sound nodes' hidden inputs as ComfyUI hands them over (the same as the encode group's save_audio).
+SOUND_HIDDEN = {"PROMPT": _Hidden.prompt, "EXTRA_PNGINFO": _Hidden.extra_pnginfo}
+# Clips whose saved sounds are kept whole (their decode is a named not-exact case, R5.1b).
+SOUND_SAVED_WHOLE = {"a_opus.webm"}
+
+
+def node_clone(cls):
+    """The node class as the executor runs it: a clone with its hidden inputs set."""
+    return cls.PREPARE_CLASS_CLONE({"hidden_inputs": SOUND_HIDDEN})
+
+
+def ui_of(out) -> dict | None:
+    ui = out.ui
+    if ui is None:
+        return None
+    d = ui.as_dict() if hasattr(ui, "as_dict") else ui
+    return {k: [dict(x) for x in v] for k, v in d.items()}
+
+
+def saved_sound(folder: str, entry: dict, whole: bool = False) -> dict:
+    """A saved sound as Python's own reader (nodes_audio.load) reads it back, with its tags and stream."""
+    from comfy_extras.nodes_audio import load
+    path = os.path.join(folder, entry["subfolder"], entry["filename"])
+    wav, sr = load(path)
+    with av.open(path) as c:
+        tags = dict(c.metadata)
+        for st in c.streams:
+            tags.update({f"stream:{k}": v for k, v in st.metadata.items()})
+        a = c.streams.audio[0]
+        stream = {"codec": a.codec_context.name, "rate": int(a.codec_context.sample_rate), "channels": int(a.channels),
+                  "bitRate": int(a.codec_context.bit_rate or 0)}
+    return {"decoded": sound_digest(wav.numpy(), int(sr), whole), "tags": tags, "stream": stream}
+
+
+def sound_digest(x: np.ndarray, rate: int, whole: bool = False) -> dict:
+    """sound_record without the small sounds inline: a sha256 and the head, or (whole) every sample zlib'd."""
+    rec = sound_record(x, rate, whole)
+    if "f32" in rec:
+        del rec["f32"]
+        rec["head"] = b64(np.ascontiguousarray(np.ascontiguousarray(x, dtype=np.float32)[:, :SOUND_HEAD]).tobytes())
+    return rec
+
+
+def fresh_dirs(tmp: str, label: str) -> tuple[str, str]:
+    out, temp = os.path.join(tmp, label, "output"), os.path.join(tmp, label, "temp")
+    os.makedirs(out)
+    os.makedirs(temp)
+    folder_paths.set_output_directory(out)
+    folder_paths.set_temp_directory(temp)
+    return out, temp
+
+
+def audio_value_record(v: dict, whole: bool = False) -> dict:
+    w = v["waveform"]
+    assert w.dtype == torch.float32 and w.shape[0] == 1, (w.dtype, w.shape)
+    return sound_digest(w[0].numpy(), int(v["sample_rate"]), whole)
+
+
+def files_written(folder: str) -> list[str]:
+    return sorted(os.path.relpath(os.path.join(d, f), folder) for d, _, fs in os.walk(folder) for f in fs)
+
+
+def group_sound(names: list[str]) -> dict:
+    import random
+    import tempfile
+    import torchaudio
+    from comfy_api.latest import _ui
+    from comfy_extras import nodes_audio as na
+    from comfy_extras.nodes_audio import load
+    random.seed(20260929)
+    folder_paths.set_input_directory(CLIPS)
+    clips = [n for n in names if n.startswith("a_")] + ["v_stereo_aac.mp4"]
+    LoadAudio, RecordAudio, Card = node_clone(na.LoadAudio), node_clone(na.RecordAudio), node_clone(na.Audio)
+    Preview, Save, SaveMP3 = node_clone(na.PreviewAudio), node_clone(na.SaveAudio), node_clone(na.SaveAudioMP3)
+    shim = _AvShim()
+    cases: dict = {"prompt": _Hidden.prompt, "extraPnginfo": _Hidden.extra_pnginfo}
+    with tempfile.TemporaryDirectory() as tmp, _patched(_ui, shim):
+        # Each clip through every class, in a fresh output and temp folder, in this order:
+        # the card (no export), PreviewAudio, SaveAudio, SaveAudioMP3 V0.
+        per_clip = []
+        for name in clips:
+            out, temp = fresh_dirs(tmp, "clip_" + name)
+            whole = name in SOUND_SAVED_WHOLE
+            value = LoadAudio.execute(audio=name).result[0]
+            rec_value = RecordAudio.execute(audio=name).result[0]
+            assert torch.equal(value["waveform"], rec_value["waveform"]) and value["sample_rate"] == rec_value["sample_rate"]
+            card = Card.execute(audio=name, export=False, filename_prefix="audio/ComfyUI", format="flac", quality="V0")
+            assert torch.equal(card.result[0]["waveform"], value["waveform"])
+            preview = Preview.execute(audio=value)
+            save = Save.execute(audio=value, filename_prefix="audio/ComfyUI")
+            mp3 = SaveMP3.execute(audio=value, filename_prefix="audio/ComfyUI", quality="V0")
+            card_ui, preview_ui, save_ui, mp3_ui = ui_of(card), ui_of(preview), ui_of(save), ui_of(mp3)
+            flac = saved_sound(temp, card_ui["audio"][0], whole)
+            # One FLAC encoder, the same samples: the card's preview, PreviewAudio's and SaveAudio's decode alike.
+            assert saved_sound(temp, preview_ui["audio"][0])["decoded"]["sha256"] == flac["decoded"]["sha256"]
+            assert saved_sound(out, save_ui["audio"][0])["decoded"]["sha256"] == flac["decoded"]["sha256"]
+            per_clip.append({
+                "clip": name,
+                "load": audio_value_record(value),
+                "ui": {"card": card_ui, "preview": preview_ui, "save": save_ui, "mp3": mp3_ui},
+                "flac": flac,
+                "saveTags": saved_sound(out, save_ui["audio"][0])["tags"],
+                "mp3": saved_sound(out, mp3_ui["audio"][0], whole),
+                "written": {"output": files_written(out), "temp": files_written(temp)},
+            })
+        cases["clips"] = per_clip
+
+        # The card: a wired source wins over the file; nothing at all is 1 s of silence (export or not).
+        out, temp = fresh_dirs(tmp, "card_source")
+        src = LoadAudio.execute(audio="a_s16.wav").result[0]
+        wins = Card.execute(audio="a_mono.mp3", export=False, filename_prefix="audio/ComfyUI", format="flac", quality="V0", source=src)
+        assert torch.equal(wins.result[0]["waveform"], src["waveform"])
+        cases["cardSource"] = {"file": "a_mono.mp3", "source": "a_s16.wav", "value": audio_value_record(wins.result[0]),
+                               "ui": ui_of(wins), "flac": saved_sound(temp, ui_of(wins)["audio"][0])}
+        silence = []
+        for export in (False, True):
+            out, temp = fresh_dirs(tmp, f"card_silence_{export}")
+            s = Card.execute(audio="", export=export, filename_prefix="audio/ComfyUI", format="mp3", quality="V0")
+            silence.append({"export": export, "value": audio_value_record(s.result[0]), "ui": ui_of(s),
+                            "written": {"output": files_written(out), "temp": files_written(temp)}})
+        cases["cardSilence"] = silence
+
+        # The card's export in every format and quality, in order into one output folder (the counter moves on).
+        out, temp = fresh_dirs(tmp, "card_export")
+        exports = []
+        for fmt in ("flac", "mp3", "opus"):
+            for q in ("V0", "128k", "192k", "320k"):
+                try:
+                    e = Card.execute(audio="a_min.wav", export=True, filename_prefix="audio/ComfyUI", format=fmt, quality=q)
+                except Exception as x:  # noqa: BLE001
+                    # PyAV refuses some settings (libopus with no bit rate): the node fails.
+                    exports.append({"format": fmt, "quality": q, "error": err(x), "written": files_written(out)})
+                    continue
+                ui = ui_of(e)
+                exports.append({"format": fmt, "quality": q, "ui": ui, "saved": saved_sound(out, ui["audio"][0], fmt == "opus")})
+        cases["cardExport"] = {"clip": "a_min.wav", "cases": exports, "written": {"output": files_written(out), "temp": files_written(temp)}}
+
+        # SaveAudio over a two-item batch: the clip, then the clip at half volume (exact in float32).
+        one = load(os.path.join(CLIPS, "a_min.wav"))
+        batch = {"waveform": torch.stack([one[0], one[0] * 0.5]), "sample_rate": one[1]}
+        batches = []
+        out, temp = fresh_dirs(tmp, "batch")
+        for prefix in ("audio/b_%batch_num%", "audio/c", "audio/c"):
+            b = Save.execute(audio=batch, filename_prefix=prefix)
+            ui = ui_of(b)
+            batches.append({"prefix": prefix, "ui": ui, "decoded": [saved_sound(out, e)["decoded"] for e in ui["audio"]]})
+        cases["batch"] = {"clip": "a_min.wav", "scales": [1.0, 0.5], "runs": batches, "written": files_written(out)}
+
+        # Opus export's resample, as save_audio makes it: torchaudio's own samples, captured.
+        real = torchaudio.functional.resample
+        seen: list = []
+
+        def spy(w, orig, new, *a, **k):
+            y = real(w, orig, new, *a, **k)
+            seen.append((w.clone(), int(orig), int(new), y.clone()))
+            return y
+        resampled = []
+        out, temp = fresh_dirs(tmp, "resample")
+        _ui.torchaudio.functional.resample = spy
+        try:
+            for rate in (44100, 22050, 96000, 8000):
+                seen.clear()
+                x = tone_f32(rate, 0.05, 2)
+                res = _ui.AudioSaveHelper.save_audio({"waveform": torch.from_numpy(x)[None], "sample_rate": rate}, f"r{rate}", _ui.FolderType.output, Save, "opus", "128k")
+                s = shim.last.streams_made[0]
+                rec = {"rate": rate, "input": b64(zlib.compress(np.ascontiguousarray(x).tobytes(), 9)),
+                       "encoderRate": int(s.codec_context.sample_rate), "filename": res[0]["filename"],
+                       "saved": saved_sound(out, dict(res[0]), True)}
+                if seen:
+                    (_w, o, n, y) = seen[0]
+                    rec["resample"] = {"orig": o, "new": n, "samples": int(y.shape[-1]),
+                                       "output": b64(zlib.compress(np.ascontiguousarray(y.numpy()).tobytes(), 9))}
+                else:
+                    rec["resample"] = None
+                resampled.append(rec)
+        finally:
+            _ui.torchaudio.functional.resample = real
+        cases["resample"] = resampled
+
+        # A Generate music answer (WAV, mono and stereo) shown by the card: the value as it came in, and its FLAC.
+        answers = []
+        for name in ("a_min.wav", "a_s16.wav"):
+            out, temp = fresh_dirs(tmp, "answer_" + name)
+            import comfy_api_nodes.nodes_replicate as nr
+            with open(os.path.join(CLIPS, name), "rb") as f:
+                FakeSession.raw = f.read()
+            orig = nr.aiohttp.ClientSession
+            nr.aiohttp.ClientSession = FakeSession
+            try:
+                got = asyncio.run(nr._download_url_to_audio_dict("https://example.invalid/sound"))
+            finally:
+                nr.aiohttp.ClientSession = orig
+            c = Card.execute(audio="", export=False, filename_prefix="audio/ComfyUI", format="flac", quality="V0", source=got)
+            ui = ui_of(c)
+            answers.append({"clip": name, "value": audio_value_record(c.result[0]), "ui": ui, "flac": saved_sound(temp, ui["audio"][0])})
+        cases["answers"] = answers
+
+        cases["validate"] = {"missing": na.LoadAudio.validate_inputs(audio="no_such_sound.wav"), "present": na.LoadAudio.validate_inputs(audio="a_min.wav")}
+    return {"cases": cases}
+
+
+GROUPS = {"probe": group_probe, "decode": group_decode, "encode": group_encode, "sound": group_sound}
 
 
 def main() -> None:

@@ -47,11 +47,13 @@
  * FaceSwap on Easel's advanced face swap, family face-swap, which moves the
  * whole node while it is on;
  * PersonSwapVideo on fal's Pixverse Swap, family person-swap-video, which
- * moves the whole node while it is on)
+ * moves the whole node while it is on; and the sound nodes, family
+ * media-sound, computed here with the video tools: LoadAudio, RecordAudio,
+ * SaveAudio, SaveAudioMP3, PreviewAudio and the Audio card in full, R5.3)
  * closely enough that the same workflow gives the same result.
  */
 import { GATE_CLASS, isLink, type ApiLink, type ApiPrompt } from '#shared/runner/graph'
-import { classUpgradeOn, isShotDirected, resolveVideoModelId } from '#shared/runner/eligibility'
+import { AUDIO_CARD_MEDIA_RULE, classUpgradeOn, isShotDirected, resolveVideoModelId, runnerRuleFor } from '#shared/runner/eligibility'
 import { filmShotPrompt } from '#shared/runner/shotPresets'
 import { NO_FAMILIES, type RunnerFamily } from '#shared/runner/families'
 import { RUNNER_IMAGE_MODELS, RUNNER_REPLICATE_IMAGE_MODELS, imageAppFor, nodeImagePrompt } from './generators/image'
@@ -128,6 +130,7 @@ import { planRepair } from './generators/repair'
 import { planLayers } from './generators/layers'
 import { planSplitLayers } from './generators/splitLayers'
 import { planAudioGen } from './generators/audioGen'
+import { planAudioCard, planLoadAudio, planPreviewAudio, planSaveAudio } from './media/soundNodes'
 import { planGen3d } from './generators/gen3d'
 import { planImageExtras } from './generators/imageExtras'
 import { planLora } from './generators/lora'
@@ -168,6 +171,13 @@ export interface DeriveIO {
    * an asset. `counter`: ResultStore.save's.
    */
   saveAsset(bytes: Uint8Array, o: { prefix: string; ext: string; subfolder?: string; folder?: 'output' | 'temp' | 'input'; counter?: { prefix: string; offset: number } }): Promise<OutputFile>
+  /**
+   * `saveAsset` from a file the video tools wrote (R5.3, the sound nodes):
+   * the same names, counters and bookkeeping, the file moved into place and
+   * never read into memory (ResultStore.saveFromPath); `path` is gone
+   * afterwards. Absent (a live preview, older test fakes): a media node fails plainly.
+   */
+  saveAssetFromPath?(path: string, o: { prefix: string; ext: string; subfolder?: string; folder?: 'output' | 'temp'; counter?: { prefix: string; offset: number } }): Promise<OutputFile>
   /** Saves a live preview into temp (as Python's save_live_preview(unique=True)). */
   savePreview(bytes: Uint8Array, o: { nodeId?: string }): Promise<OutputFile>
   /** Saves a picture to show in temp under its own name, overwriting (ResultStore.savePreviewAs). */
@@ -1102,6 +1112,8 @@ async function planNodeRequest(ctx: PlanContext): Promise<NodePlan> {
     // that node's sound, handed on and shown (the provider's own file; Python
     // shows a FLAC copy it encodes, which waits for R5).
     case 'Audio': {
+      // With media-sound on (R5.3): the card in full, as Python's execute (its FLAC preview, its export).
+      if (runnerRuleFor('Audio', inputs, ctx.families ?? NO_FAMILIES) === AUDIO_CARD_MEDIA_RULE) return planAudioCard(ctx)
       if (isLink(inputs.source)) {
         const made = ctx.filesFrom(inputs.source)
         if (!made.length) throw new Error('There is no sound to show')
@@ -1110,6 +1122,16 @@ async function planNodeRequest(ctx: PlanContext): Promise<NodePlan> {
       const f = parseInputFileRef(inputs.audio)
       return { kind: 'pass', files: f ? [f] : [], ui: null }
     }
+
+    // ── media-sound (step 3, R5.3): the sound nodes (media/soundNodes.ts) ──
+    case 'LoadAudio':
+    case 'RecordAudio':
+      return planLoadAudio(ctx)
+    case 'SaveAudio':
+    case 'SaveAudioMP3':
+      return planSaveAudio(ctx)
+    case 'PreviewAudio':
+      return planPreviewAudio(ctx)
 
     // ── frame family (comfy_extras/nodes_compositor.py) ──
     case 'Compositor':

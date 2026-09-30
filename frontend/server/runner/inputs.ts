@@ -3,8 +3,9 @@
  * pictures (GenerateImageNode.style_refs, RestyleFromImageNode.style_refs), pictures/clips/sounds loaded into an
  * unwired Image, Video or Audio card, a LoadImage's picture, the files the
  * bake-replay cards hand on (3D Studio's passes, Text on path's and Text
- * mask's render), Painter's painter file, the Shader effect's bake, and Pose Mannequin's
- * saved pictures (R3.15). In hosted, every one must be the user's own.
+ * mask's render), Painter's painter file, the Shader effect's bake, Pose Mannequin's
+ * saved pictures (R3.15), and the sound Load audio or Record audio loads
+ * (R5.3). In hosted, every one must be the user's own.
  */
 import { isLink, type ApiPrompt } from '#shared/runner/graph'
 import { parseShaderBaked } from '#shared/runner/shaderBakeKey'
@@ -151,6 +152,11 @@ export function collectInputFiles(prompt: ApiPrompt): OutputFile[] {
     }
     if (node.class_type === 'Video' && !isLink(inputs.source)) {
       const f = parseInputFileRef(inputs.file)
+      if (f) out.push(f)
+    }
+    // Load audio and Record audio (R5.3, media-sound): the file each loads.
+    if ((node.class_type === 'LoadAudio' || node.class_type === 'RecordAudio') && !isLink(inputs.audio)) {
+      const f = parseInputFileRef(inputs.audio)
       if (f) out.push(f)
     }
     // The Audio card a sync-3 lip-sync reads (model line-up F22). The lip-sync's
