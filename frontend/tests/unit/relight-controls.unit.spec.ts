@@ -89,6 +89,15 @@ describe('RelightControls', () => {
       await btn.trigger('click')
       expect(w.emitted('retry-surfaces')).toEqual([[]])
     })
+    it('the error line shows the still-reading note in place of the plain words', () => {
+      const w = mount(RelightControls, {
+        props: { fx: sanitizeRelight(null), selectedLight: sanitizeRelight(null).lights[0]!.id, depthStatus: 'ready', surfacesStatus: 'error', surfacesNote: 'Still reading — try again in a minute' },
+      })
+      const t = w.get('[data-testid="relight-status-error"]').text()
+      expect(t).toContain('Still reading — try again in a minute')
+      expect(t).not.toContain("Couldn't read")
+      expect(mkSurfaces('error').get('[data-testid="relight-status-error"]').text()).toContain("Couldn't read this photo's shape")
+    })
     it('shows no status line when off', () => {
       expect(mkSurfaces('off').find('[data-testid="relight-status-loading"]').exists()).toBe(false)
       expect(mkSurfaces('off').find('[data-testid="relight-status-error"]').exists()).toBe(false)

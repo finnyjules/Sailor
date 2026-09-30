@@ -17,7 +17,10 @@ const props = withDefaults(defineProps<{
   /** The price to show while surfaces are being read — null once cached (free) or when
    *  surfacesStatus isn't 'loading'. Surfaces show their price every time, never asked. */
   surfacesPrice?: string | null
-}>(), { surfacesStatus: 'off', surfacesPrice: null })
+  /** Words for the error line in place of the plain one — set only for a read that is still
+   *  running on the provider ("Still reading — try again in a minute"). */
+  surfacesNote?: string | null
+}>(), { surfacesStatus: 'off', surfacesPrice: null, surfacesNote: null })
 const emit = defineEmits<{ update: [patch: Partial<RelightEffect>]; 'select-light': [id: string]; compare: [on: boolean]; 'retry-surfaces': [] }>()
 
 const active = computed(() => setupOf(props.fx))
@@ -67,7 +70,7 @@ const heightWord = (h: number) => (h < 0 ? 'Behind' : h < 0.2 ? 'Low' : h < 0.55
       {{ surfacesPrice ? `Reading shape · ${surfacesPrice}` : 'Reading shape' }}
     </p>
     <p v-else-if="surfacesStatus === 'error'" class="text-red-300/80 flex items-center gap-2" data-testid="relight-status-error" title="Worked out once per photo">
-      <span>Couldn't read this photo's shape</span>
+      <span>{{ surfacesNote ?? "Couldn't read this photo's shape" }}</span>
       <button data-testid="relight-surfaces-retry" class="text-white/70 hover:text-white underline underline-offset-2 cursor-pointer" @click="emit('retry-surfaces')">Retry</button>
     </p>
     <p v-else-if="depthStatus === 'loading'" class="text-white/50" data-testid="relight-status-loading">Reading shape…</p>

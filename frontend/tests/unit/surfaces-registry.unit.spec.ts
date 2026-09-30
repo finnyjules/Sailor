@@ -2,7 +2,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import {
   surfacesStatusFor, surfacesImageFor, surfacesMessageFor, surfacesWasPaidFor,
-  requestSurfaces, retrySurfaces, onSurfacesChange, __resetSurfacesRegistry,
+  requestSurfaces, retrySurfaces, onSurfacesChange, __resetSurfacesRegistry, SURFACES_STILL_READING,
 } from '~/lib/compositor/surfacesRegistry'
 
 class FakeImage {
@@ -97,5 +97,43 @@ describe('surfacesRegistry', () => {
     await vi.waitFor(() => expect(surfacesStatusFor('a.png')).toBe('ready'))
     requestSurfaces('a.png')
     expect(f).toHaveBeenCalledTimes(1)
+  })
+
+  // Final-review fix 1 (money loop): the Frame editor re-requests on every layer change, so an
+  // 'error' entry that requestSurfaces restarted would call the PAID route again on each edit.
+  it('requestSurfaces never restarts an error entry — only retrySurfaces does', async () => {
+    const f = vi.fn(async () => ({ ok: false, status: 502, json: async () => ({ message: 'boom' }) }))
+    vi.stubGlobal('fetch', f)
+    requestSurfaces('a.png')
+    await vi.waitFor(() => expect(surfacesStatusFor('a.png')).toBe('error'))
+    requestSurfaces('a.png'); requestSurfaces('a.png')
+    expect(f).toHaveBeenCalledTimes(1)
+    expect(surfacesStatusFor('a.png')).toBe('error')
+  })
+
+  it('requestSurfaces never restarts an off entry', async () => {
+    const f = vi.fn(async () => ({ ok: false, status: 503, json: async () => ({ off: true }) }))
+    vi.stubGlobal('fetch', f)
+    requestSurfaces('a.png')
+    await vi.waitFor(() => expect(surfacesStatusFor('a.png')).toBe('off'))
+    requestSurfaces('a.png')
+    expect(f).toHaveBeenCalledTimes(1)
+  })
+
+  // Fix 8: a hosted refusal (no balance, unpriced) is quiet — local depth only, no line.
+  it('a 402 (no balance) lands as off, quietly', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, status: 402, json: async () => ({ message: 'insufficient credits' }) })))
+    requestSurfaces('a.png')
+    await vi.waitFor(() => expect(surfacesStatusFor('a.png')).toBe('off'))
+    expect(surfacesWasPaidFor('a.png')).toBe(false)
+  })
+
+  // Fix 7: a read that outlasts the server's poll is an error the user can retry later.
+  it('a 503 { retryLater } lands as error with the still-reading message', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, status: 503, json: async () => ({ retryLater: true, message: 'fal request timed out' }) })))
+    requestSurfaces('a.png')
+    await vi.waitFor(() => expect(surfacesStatusFor('a.png')).toBe('error'))
+    expect(surfacesMessageFor('a.png')).toBe(SURFACES_STILL_READING)
+    expect(SURFACES_STILL_READING).toBe('Still reading — try again in a minute')
   })
 })

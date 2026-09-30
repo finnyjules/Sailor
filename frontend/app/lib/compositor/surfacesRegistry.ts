@@ -1,12 +1,16 @@
 /**
  * Photo surfaces (MoGe-2 normal maps) for Relight layers, held so paintLayer can read them
- * SYNCHRONOUSLY. Mirrors depthRegistry.ts's shape and rules: one in-flight request per key,
- * an error is retryable, a paint never awaits.
+ * SYNCHRONOUSLY. Mirrors depthRegistry.ts's shape (one in-flight request per key, a paint
+ * never awaits) with one difference that matters for money: requestSurfaces NEVER restarts
+ * an existing entry, 'error' and 'off' included. The Frame editor calls it on every layer
+ * change, so a restartable error would call the paid route again on each edit. An 'error'
+ * restarts only through retrySurfaces (the Relight panel's Retry); 'off' stays off for the
+ * session.
  *
- * Unlike depth, surfaces cost money on a miss. surfacesWasPaidFor tracks whether the
- * in-flight (or just-finished) request might be billed, so the Relight panel can show a
- * price line — true from request start until the answer, false the instant a cache hit or
- * an error/off answer lands. See global-constraints.md for the pricing rule.
+ * Unlike depth, surfaces cost money on a miss. surfacesWasPaidFor says whether a request
+ * that might be billed is in flight, so the Relight panel can show a price line: true from
+ * request start until the answer, false the instant any answer lands (ready, a cache hit,
+ * error or off). The price rule is in docs/superpowers/specs/2026-09-30-relight-layer-effect-design.md.
  */
 import { requestSurfacesRead } from '~/lib/compositor/surfacesRequest'
 import { type DepthRef, type DepthSource, depthKey } from '~/lib/compositor/depthRegistry'
@@ -65,6 +69,9 @@ function off(key: string, message: string) {
   notify()
 }
 
+/** The error message for a read that outlasted the server's poll (503 { retryLater }). */
+export const SURFACES_STILL_READING = 'Still reading — try again in a minute'
+
 function start(src: DepthSource, key: string): void {
   entries.set(key, { status: 'loading', img: null, paid: true })
   notify()
@@ -73,7 +80,7 @@ function start(src: DepthSource, key: string): void {
     const res = await requestSurfacesRead(src)
     if (!res.ok) {
       if (res.off) return off(key, res.message)
-      return fail(key, res.message)
+      return fail(key, res.retryLater ? SURFACES_STILL_READING : res.message)
     }
     const url = surfacesUrl(res.normalsFilename, res.subfolder)
     const img = new Image()
@@ -88,17 +95,15 @@ export function requestSurfaces(ref: DepthRef): void {
   const src = asSource(ref)
   if (!src?.filename) return
   const key = depthKey(src)
-  const cur = entries.get(key)
-  // 'error' is deliberately retryable; 'off' stays off until retrySurfaces; 'loading' and
-  // 'ready' are not re-requested.
-  if (cur && cur.status !== 'error') return
+  // Any existing entry answers for itself: 'loading' and 'ready' need nothing, 'error' waits
+  // for retrySurfaces, 'off' stays off (see the header — this is the paid-route loop guard).
+  if (entries.has(key)) return
   start(src, key)
 }
 
-/** Retries an 'error' entry. Deliberately does nothing for 'off' — the kill switch is a
- *  server decision, not a transient failure, so a switched-off server is never hammered by
- *  retries; it clears only when requestSurfaces/retrySurfaces is called after the switch
- *  flips back on and the caller re-requests from a fresh idle state. */
+/** Retries an 'error' entry — the only way an error is ever requested again. Does nothing
+ *  for 'off': the kill switch or a hosted refusal is a server decision, not a transient
+ *  failure, so it is never retried; the entry clears only with the registry (a page load). */
 export function retrySurfaces(ref: DepthRef): void {
   const src = asSource(ref)
   if (!src?.filename) return

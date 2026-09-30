@@ -137,6 +137,7 @@ import {
 } from '~/lib/compositor/depthRegistry'
 import {
   onSurfacesChange, requestSurfaces, retrySurfaces, surfacesImageFor, surfacesStatusFor, surfacesWasPaidFor,
+  surfacesMessageFor, SURFACES_STILL_READING,
 } from '~/lib/compositor/surfacesRegistry'
 import RelightControls from '~/components/vue-canvas/compositor/RelightControls.vue'
 import { sanitizeRelight, RELIGHT_MAX_LIGHTS, newLightId } from '~/lib/relight/settings'
@@ -144,7 +145,7 @@ import { relightAvailable, relightUnavailableReason, __relightRuns } from '~/lib
 import { relightSurfaceRefs, type RelightLayerLike } from '~/lib/relight/relightSurfaceRefs'
 import { setRelightBypass } from '~/composables/useCompositorLayers'
 import { onRelightFieldReady } from '~/lib/relight/depthField'
-import { formatUsd } from '~/lib/pricing'
+import { formatCostBadge } from '~/lib/pricing'
 import { SURFACES_USD, surfacesCredits } from '#shared/pricing/relightSurfaces'
 import { recordOnce, wheelGestureRecorder } from '~/lib/relight/gestureHistory'
 import { DEFAULT_DISPLACE_MAP } from '~/lib/compositor/displace'
@@ -2927,7 +2928,15 @@ const activeEffectSurfacesPrice = computed<string | null>(() => {
   const ref = activeEffectDepth.value
   if (!ref || !surfacesWasPaidFor(ref)) return null
   const hosted = hostedModeEnabled(useRuntimeConfig().public)
-  return hosted ? `${surfacesCredits()} credits` : formatUsd(SURFACES_USD)
+  return hosted ? `${surfacesCredits()} credits` : formatCostBadge(SURFACES_USD, true, false)
+})
+// Only the still-reading error (a read that outlasted the server's poll) has its own words;
+// every other error keeps the panel's plain line.
+const activeEffectSurfacesNote = computed<string | null>(() => {
+  void surfacesTick.value
+  const ref = activeEffectDepth.value
+  if (!ref || surfacesStatusFor(ref) !== 'error') return null
+  return surfacesMessageFor(ref) === SURFACES_STILL_READING ? SURFACES_STILL_READING : null
 })
 function retryActiveEffectSurfaces() {
   if (activeEffectDepth.value) retrySurfaces(activeEffectDepth.value)
@@ -6167,12 +6176,15 @@ let stopSurfacesWatch: (() => void) | null = null
 const surfacesTick = ref(0)
 onMounted(() => { stopSurfacesWatch = onSurfacesChange(() => { renderStack(); surfacesTick.value++ }) })
 onBeforeUnmount(() => { stopSurfacesWatch?.(); stopSurfacesWatch = null })
-// Kick off (or dedupe into) a read for every visible Relight layer's photo whenever the
-// layer tree changes — a new Relight, a newly visible one, a photo swap. The registry itself
-// dedupes by depth key, so this can run on every change with no extra cost on a re-render.
-watch(localLayers, (ls) => {
-  for (const ref of relightSurfaceRefs(ls as unknown as RelightLayerLike[])) requestSurfaces(ref)
-}, { immediate: true, deep: true })
+// Kick off a read for every visible Relight layer's photo when the SET of those photos
+// changes — a new Relight, a newly visible one, a photo swap. Watched as a cheap string
+// signature, not a deep watch of the layer tree (which re-ran on every drag frame). The
+// registry never restarts an existing key (an 'error' waits for Retry), so this is also
+// never a paid-call loop.
+const relightSurfaceRefsNow = () => relightSurfaceRefs(localLayers.value as unknown as RelightLayerLike[])
+watch(() => relightSurfaceRefsNow().map(depthKey).join('|'), () => {
+  for (const ref of relightSurfaceRefsNow()) requestSurfaces(ref)
+}, { immediate: true })
 // Relight depth fields build in a worker; paint draws the layer plain until one lands.
 let stopRelightFieldWatch: (() => void) | null = null
 onMounted(() => { stopRelightFieldWatch = onRelightFieldReady(() => renderStack()) })
@@ -11441,6 +11453,7 @@ defineExpose({ editor, layoutGridResolved, layoutGrid, overlayGrid, viewLayoutGr
               :depth-status="activeEffectDepthStatus"
               :surfaces-status="activeEffectSurfacesStatus"
               :surfaces-price="activeEffectSurfacesPrice"
+              :surfaces-note="activeEffectSurfacesNote"
               @update="(p) => updateActiveEffect(p)"
               @select-light="(id) => (relightLightId = id)"
               @compare="(on) => { setRelightBypass(on ? activeEffectLayer?.id ?? null : null); renderStack() }"
