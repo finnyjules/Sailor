@@ -150,4 +150,34 @@ describe('RelightControls', () => {
       expect(w.get('[data-testid="relight-status-loading"]').text()).toBe('Reading shape · ~$0.01')
     })
   })
+  describe('Finish button (stage 3)', () => {
+    const mkFinish = (extra: Record<string, unknown> = {}) =>
+      mount(RelightControls, {
+        props: { fx: sanitizeRelight(null), selectedLight: sanitizeRelight(null).lights[0]!.id, depthStatus: 'ready', finishAvailable: true, finishPrice: '~$0.10', ...extra },
+      })
+
+    it('shows the price on the button, with the explanation as a tooltip', () => {
+      const b = mkFinish().get('[data-testid="relight-finish"]')
+      expect(b.text()).toBe('Finish · ~$0.10')
+      expect(b.attributes('title')).toBe('Adds real shadows and bounce light · about 14 s')
+      expect(mkFinish({ finishPrice: '20 credits' }).get('[data-testid="relight-finish"]').text()).toBe('Finish · 20 credits')
+    })
+    it('clicking Finish emits finish', async () => {
+      const w = mkFinish()
+      await w.get('[data-testid="relight-finish"]').trigger('click')
+      expect(w.emitted('finish')).toEqual([[]])
+    })
+    it('busy disables the button and says Finishing…', async () => {
+      const w = mkFinish({ finishBusy: true })
+      const b = w.get('[data-testid="relight-finish"]')
+      expect(b.attributes('disabled')).toBeDefined()
+      expect(b.text()).toBe('Finishing…')
+      await b.trigger('click')
+      expect(w.emitted('finish')).toBeUndefined()
+    })
+    it('unavailable hides the button (also the default)', () => {
+      expect(mkFinish({ finishAvailable: false }).find('[data-testid="relight-finish"]').exists()).toBe(false)
+      expect(mk().find('[data-testid="relight-finish"]').exists()).toBe(false)
+    })
+  })
 })

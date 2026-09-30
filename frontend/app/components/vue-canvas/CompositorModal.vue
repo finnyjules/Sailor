@@ -148,6 +148,11 @@ import { setRelightBypass } from '~/composables/useCompositorLayers'
 import { onRelightFieldReady } from '~/lib/relight/depthField'
 import { formatCostBadge } from '~/lib/pricing'
 import { SURFACES_USD, surfacesCredits } from '#shared/pricing/relightSurfaces'
+import { FINISH_USD, finishCredits } from '#shared/pricing/relightFinish'
+import { canFinishRelight, finishApplyPatch, finishRevertPatch } from '~/lib/relight/finish'
+import { requestRelightFinish } from '~/composables/useRelightFinish'
+import { renderRelightPair } from '~/composables/useCompositorLayers'
+import { requestCostConfirm } from '~/lib/costConfirmRequest'
 import { recordOnce, wheelGestureRecorder } from '~/lib/relight/gestureHistory'
 import { DEFAULT_DISPLACE_MAP } from '~/lib/compositor/displace'
 import { imageUrlForNode } from '~/lib/canvas/nodeImage'
@@ -7092,17 +7097,95 @@ const genResult = ref<{ layerId: string; mask: HTMLCanvasElement; bnd: GenBounds
 // validate (accept). `origFilename` is the revert target; `reroll` re-runs the
 // same generation (always from the original, so rolls never compound); `bnd`
 // (artboard px) anchors the toolbar. Cleared on revert/validate and on exit.
-const editResult = ref<{ layerId: string; origFilename: string; bnd: GenBounds; reroll: () => Promise<void> } | null>(null)
+// `revert` (optional): a result that changed more than the filename (Relight Finish also resets
+// the crop and removes the Relight row) restores all of it in ONE setLocal.
+const editResult = ref<{ layerId: string; origFilename: string; bnd: GenBounds; reroll: () => Promise<void>; revert?: () => void } | null>(null)
 function revertEdit() {
-  const r = editResult.value; if (!r || inpaint.busy.value) return
-  setLocal(r.layerId, { filename: r.origFilename })
+  const r = editResult.value; if (!r || inpaint.busy.value || relightFinishing.value) return
+  if (r.revert) r.revert()
+  else setLocal(r.layerId, { filename: r.origFilename })
   editResult.value = null
 }
 async function rerollEdit() {
-  const r = editResult.value; if (!r || inpaint.busy.value) return
+  const r = editResult.value; if (!r || inpaint.busy.value || relightFinishing.value) return
   try { await r.reroll() } catch (err) { console.error('[compositor edit reroll]', err) }
 }
-function validateEdit() { editResult.value = null }
+function validateEdit() { if (!relightFinishing.value) editResult.value = null }
+
+// ── Relight Finish (stage 3) ─────────────────────────────────────────────────
+// Nano Banana 2 turns the live relight preview into a realistic photo. The (original, guide)
+// pair is rendered once from the layer's box; the result lands in the Edit-image pending bar
+// above: Revert restores photo + crop + Relight row, Try again re-sends the SAME pair.
+const relightFinishing = ref<string | null>(null)   // the layer id while a Finish call runs
+const relightFinishOff = ref(false)                  // the route answered off this session → hide the button
+const relightFinishPrice = computed(() => (hostedModeEnabled(useRuntimeConfig().public)
+  ? `${finishCredits()} credits` : formatCostBadge(FINISH_USD, true, false)))
+const relightFinishAvailable = computed(() =>
+  !relightFinishOff.value && !!activeEffectLayer.value && canFinishRelight(activeEffectLayer.value))
+/** Hosted only, and only at/above the person's threshold (the gate decides) — as Animate does. */
+function confirmFinishCost(): Promise<boolean> {
+  if (!hostedModeEnabled(useRuntimeConfig().public)) return Promise.resolve(true)
+  return requestCostConfirm({
+    usd: FINISH_USD, approximate: true,
+    breakdown: [{ id: 'frame-relight-finish', label: 'Relight: Finish', usd: FINISH_USD }],
+    hostedCredits: finishCredits(),
+  })
+}
+type FinishPair = { original: string; guide: string; w: number; h: number }
+/** One call for a stored pair → the uploaded filename, or null (already reported). A cutout
+ *  keeps its alpha the way Edit image does: the source drawn at the pair's size decides. */
+async function sendRelightFinish(origFilename: string, pair: FinishPair): Promise<string | null> {
+  const res = await requestRelightFinish(pair.original, pair.guide)
+  if (!res.ok) {
+    if (res.off) relightFinishOff.value = true
+    else if (res.status === 402) toast(res.message)
+    else toast(`Finish didn't work — ${res.message}`)
+    return null
+  }
+  const src = await loadImage(imageLayerUrl(origFilename))
+  return inpaint.uploadDataUrl(await reapplyAlpha(res.image, src, pair.w, pair.h), 'relightfinish')
+}
+async function runRelightFinish() {
+  if (relightFinishing.value) return
+  if (viewOnlyGuard()) await nextTick()   // the result bar is placed from design positions
+  const layer = activeEffectLayer.value
+  if (!layer || !canFinishRelight(layer)) return
+  const relightId = effectStackOf(layer).find(e => e.type === 'relight')?.id
+  if (!relightId) return
+  if (!(await confirmFinishCost())) return
+  const cv = await renderRelightPair(layer, canvasDisplay.w, canvasDisplay.h)
+  if (!cv) { toast('Relight isn\'t ready yet'); return }
+  const pair: FinishPair = { original: cv.original.toDataURL('image/png'), guide: cv.guide.toDataURL('image/png'), w: cv.w, h: cv.h }
+  const layerId: string = layer.id
+  const origFilename: string = layer.filename
+  const revertPatch = finishRevertPatch(layer)   // captured BEFORE the write, so Revert lands here
+  const run = async (first: boolean) => {
+    relightFinishing.value = layerId
+    try {
+      const name = await sendRelightFinish(origFilename, pair)
+      if (!name) return false
+      const cur = layerById(layerId); if (!cur) return false
+      // One setLocal each (one undo step): the first applies photo + crop + no Relight row;
+      // Try again swaps the photo only.
+      setLocal(layerId, first ? finishApplyPatch(cur, name, relightId) : { filename: name })
+      return true
+    } catch (err: any) {
+      toast(`Finish didn't work — ${err?.message || 'upload failed'}`)
+      return false
+    } finally { relightFinishing.value = null }
+  }
+  if (!(await run(true))) return
+  selectedEffect.value = null
+  const l = layerById(layerId); if (!l) return
+  const b = boxPx(l)
+  const cx = l.x * canvasDisplay.w, cy = l.y * canvasDisplay.h
+  editResult.value = {
+    layerId, origFilename,
+    bnd: { minX: cx - b.w / 2, minY: cy - b.h / 2, maxX: cx + b.w / 2, maxY: cy + b.h / 2 },
+    reroll: async () => { await run(false) },
+    revert: () => setLocal(layerId, revertPatch),
+  }
+}
 
 // ── Streamlined drag-to-generate gesture ─────────────────────────────────────
 // The Generate-in-region engine (genActive + box tool) re-surfaced as a direct
@@ -7823,17 +7906,17 @@ let editSilhouetteCanvas: HTMLCanvasElement | null = null
 const regionFx = useRegionFx({
   overlay: genOverlayCanvas,
   sweep: genSweepCanvas,
-  getMask: () => editImage.value ? editSilhouetteCanvas
+  getMask: () => (editImage.value || relightFinishing.value) ? editSilhouetteCanvas
     : (genHasMask.value && genMaskCanvas) ? genMaskCanvas : null,
   getDims: () => canvasDisplay,
-  busy: () => inpaint.busy.value,
+  busy: () => inpaint.busy.value || !!relightFinishing.value,
 })
 const { sweepMaskUrl: genSweepMaskUrl } = regionFx
-watch([genActive, editImage], ([g, e]) => { (g || e) ? regionFx.start() : regionFx.stop() })
+watch([genActive, editImage, relightFinishing], ([g, e, f]) => { (g || e || f) ? regionFx.start() : regionFx.stop() })
 watch([genVersion, () => canvasDisplay.w, () => canvasDisplay.h], () => regionFx.rebuild())
 async function buildEditSilhouette() {
-  const e = editImage.value
-  const layer = e ? (localLayers.value.find((l: any) => l.id === e.layerId && l.kind === 'image') as any) : null
+  const id = editImage.value?.layerId ?? relightFinishing.value   // Edit image, or a Relight Finish
+  const layer = id ? (localLayers.value.find((l: any) => l.id === id && l.kind === 'image') as any) : null
   if (!layer) { editSilhouetteCanvas = null; return }
   const W = Math.max(1, Math.round(canvasDisplay.w)), H = Math.max(1, Math.round(canvasDisplay.h))
   try {
@@ -7848,7 +7931,7 @@ async function buildEditSilhouette() {
   } catch { editSilhouetteCanvas = null }
   regionFx.rebuild()
 }
-watch(editImage, (v) => { if (v) void buildEditSilhouette(); else { editSilhouetteCanvas = null; regionFx.rebuild() } })
+watch([editImage, relightFinishing], ([v, f]) => { if (v || f) void buildEditSilhouette(); else { editSilhouetteCanvas = null; regionFx.rebuild() } })
 
 // flux-dev's supported aspect ratios → nearest match for a region's bbox.
 const FLUX_ASPECTS: [string, number][] = [
@@ -9445,13 +9528,13 @@ defineExpose({ editor, layoutGridResolved, layoutGrid, overlayGrid, viewLayoutGr
         <!-- glimm prism sweep while a generation is running, clipped to the region (or, in
              whole-image Edit, the image) silhouette via a CSS mask. -->
         <canvas
-          v-show="genActive || !!editImage"
+          v-show="genActive || !!editImage || !!relightFinishing"
           ref="genSweepCanvas"
           class="absolute inset-0 pointer-events-none"
           :style="{
             width: canvasDisplay.w + 'px',
             height: canvasDisplay.h + 'px',
-            opacity: inpaint.busy.value ? 1 : 0,
+            opacity: (inpaint.busy.value || relightFinishing) ? 1 : 0,
             transition: 'opacity 240ms ease',
             maskImage: genSweepMaskUrl ? `url(${genSweepMaskUrl})` : 'none',
             WebkitMaskImage: genSweepMaskUrl ? `url(${genSweepMaskUrl})` : 'none',
@@ -9584,9 +9667,9 @@ defineExpose({ editor, layoutGridResolved, layoutGrid, overlayGrid, viewLayoutGr
           :style="{ left: Math.min(Math.max((editResult.bnd.minX + editResult.bnd.maxX) / 2, 64), canvasDisplay.w - 64) + 'px', top: Math.min(editResult.bnd.maxY + 12, canvasDisplay.h - 44) + 'px' }"
           @pointerdown.stop @click.stop
         >
-          <button data-testid="edit-result-revert" class="flex items-center justify-center size-8 rounded-[8px] hover:bg-white/10 text-white/80 cursor-pointer disabled:opacity-40 disabled:cursor-default" title="Revert to the original" :disabled="inpaint.busy.value" @click="revertEdit"><Undo2 class="size-4" /></button>
-          <button data-testid="edit-result-reroll" class="flex items-center justify-center size-8 rounded-[8px] hover:bg-white/10 text-white/80 cursor-pointer disabled:opacity-40 disabled:cursor-default" title="Re-roll" :disabled="inpaint.busy.value" @click="rerollEdit"><RefreshCw class="size-4" :class="inpaint.busy.value ? 'animate-spin' : ''" /></button>
-          <button data-testid="edit-result-validate" class="flex items-center justify-center size-8 rounded-[8px] bg-white text-neutral-900 hover:bg-white/90 cursor-pointer disabled:opacity-40 disabled:cursor-default" title="Validate" :disabled="inpaint.busy.value" @click="validateEdit"><Check class="size-4" /></button>
+          <button data-testid="edit-result-revert" class="flex items-center justify-center size-8 rounded-[8px] hover:bg-white/10 text-white/80 cursor-pointer disabled:opacity-40 disabled:cursor-default" title="Revert to the original" :disabled="inpaint.busy.value || !!relightFinishing" @click="revertEdit"><Undo2 class="size-4" /></button>
+          <button data-testid="edit-result-reroll" class="flex items-center justify-center size-8 rounded-[8px] hover:bg-white/10 text-white/80 cursor-pointer disabled:opacity-40 disabled:cursor-default" title="Re-roll" :disabled="inpaint.busy.value || !!relightFinishing" @click="rerollEdit"><RefreshCw class="size-4" :class="(inpaint.busy.value || relightFinishing) ? 'animate-spin' : ''" /></button>
+          <button data-testid="edit-result-validate" class="flex items-center justify-center size-8 rounded-[8px] bg-white text-neutral-900 hover:bg-white/90 cursor-pointer disabled:opacity-40 disabled:cursor-default" title="Validate" :disabled="inpaint.busy.value || !!relightFinishing" @click="validateEdit"><Check class="size-4" /></button>
         </div>
 
         <!-- Smart-select action bar -->
@@ -9930,7 +10013,7 @@ defineExpose({ editor, layoutGridResolved, layoutGrid, overlayGrid, viewLayoutGr
         />
 
         <!-- Relight: light handles on the layer, and the rest of the Frame dimmed. -->
-        <template v-if="relightSelected && !editingId && !genActive">
+        <template v-if="relightSelected && !editingId && !genActive && !relightFinishing">
           <svg data-testid="relight-dim" class="absolute inset-0 pointer-events-none z-10" :width="canvasDisplay.w" :height="canvasDisplay.h">
             <defs><mask id="relight-hole">
               <rect :width="canvasDisplay.w" :height="canvasDisplay.h" fill="white" />
@@ -11537,11 +11620,15 @@ defineExpose({ editor, layoutGridResolved, layoutGrid, overlayGrid, viewLayoutGr
               :surfaces-price="activeEffectSurfacesPrice"
               :surfaces-read-price="activeEffectSurfacesReadPrice"
               :surfaces-note="activeEffectSurfacesNote"
+              :finish-price="relightFinishPrice"
+              :finish-busy="!!relightFinishing"
+              :finish-available="relightFinishAvailable"
               @update="(p) => updateActiveEffect(p)"
               @select-light="(id) => (relightLightId = id)"
               @compare="(on) => { setRelightBypass(on ? activeEffectLayer?.id ?? null : null); renderStack() }"
               @retry-surfaces="retryActiveEffectSurfaces"
-              @read-surfaces="readActiveEffectSurfaces" />
+              @read-surfaces="readActiveEffectSurfaces"
+              @finish="runRelightFinish" />
           </div>
 
           <!-- Outer glow / Inner glow: a tinted halo outside (behind) or inside (clipped to) the

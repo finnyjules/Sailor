@@ -24,8 +24,15 @@ const props = withDefaults(defineProps<{
   /** Words for the error line in place of the plain one — set only for a read that is still
    *  running on the provider ("Still reading — try again in a minute"). */
   surfacesNote?: string | null
-}>(), { surfacesStatus: 'off', surfacesPrice: null, surfacesReadPrice: null, surfacesNote: null })
-const emit = defineEmits<{ update: [patch: Partial<RelightEffect>]; 'select-light': [id: string]; compare: [on: boolean]; 'retry-surfaces': []; 'read-surfaces': [] }>()
+  /** Finish (stage 3): Nano Banana 2 turns the live preview into a realistic photo. The
+   *  button's price text ("~$0.10" locally, "20 credits" hosted). */
+  finishPrice?: string | null
+  /** A Finish call is running — the button disables and reads "Finishing…". */
+  finishBusy?: boolean
+  /** False hides the button: the layer can't be finished, or the route is switched off. */
+  finishAvailable?: boolean
+}>(), { surfacesStatus: 'off', surfacesPrice: null, surfacesReadPrice: null, surfacesNote: null, finishPrice: null, finishBusy: false, finishAvailable: false })
+const emit = defineEmits<{ update: [patch: Partial<RelightEffect>]; 'select-light': [id: string]; compare: [on: boolean]; 'retry-surfaces': []; 'read-surfaces': []; finish: [] }>()
 
 const active = computed(() => setupOf(props.fx))
 const light = computed(() => props.fx.lights.find(l => l.id === props.selectedLight) ?? props.fx.lights[0] ?? null)
@@ -143,5 +150,10 @@ const heightWord = (h: number) => (h < 0 ? 'Behind' : h < 0.2 ? 'Low' : h < 0.55
       <StudioSlider data-testid="relight-shine" label="Shine" hint="Glossy highlights" :min="0" :max="1" :step="0.01" :default="0" :model-value="fx.shine" @update:model-value="(v: number) => emit('update', { shine: v })" />
       <StudioSwitch data-testid="relight-shadows" label="Shadows" hint="Short contact shadows: hair on skin, chin on neck, folds" :model-value="fx.shadows" @update:model-value="(v: boolean) => emit('update', { shadows: v })" />
     </section>
+
+    <button v-if="finishAvailable" data-testid="relight-finish" :disabled="finishBusy"
+      class="w-full h-8 px-3 rounded-[8px] bg-white text-black font-medium hover:bg-white/90 cursor-pointer disabled:opacity-60 disabled:cursor-default"
+      title="Adds real shadows and bounce light · about 14 s"
+      @click="emit('finish')">{{ finishBusy ? 'Finishing…' : (finishPrice ? `Finish · ${finishPrice}` : 'Finish') }}</button>
   </div>
 </template>
