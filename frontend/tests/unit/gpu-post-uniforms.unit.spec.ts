@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { uniformSetter } from '~/lib/compositor/gpuPost'
+import { uniformSetter, isFloatDepth } from '~/lib/compositor/gpuPost'
 
 describe('uniformSetter', () => {
   it('keeps every existing DOF convention', () => {
@@ -10,5 +10,13 @@ describe('uniformSetter', () => {
   })
   it('sends a { vec3 } wrapper as a vec3', () => {
     expect(uniformSetter('uM0', { vec3: [1, 0.5, 0] })).toBe('3f')
+  })
+})
+
+describe('isFloatDepth', () => {
+  it('tells a float field from an image', () => {
+    expect(isFloatDepth({ kind: 'float', width: 1, height: 1, data: new Float32Array(1) })).toBe(true)
+    expect(isFloatDepth({ width: 1, height: 1 })).toBe(false)
+    expect(isFloatDepth(null)).toBe(false)
   })
 })

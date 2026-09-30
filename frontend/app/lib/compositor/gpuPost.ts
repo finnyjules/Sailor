@@ -11,6 +11,8 @@
  * load-bearing, not defensive. This has bitten this codebase before.
  */
 
+import type { FloatDepth } from '~/lib/relight/depthField'
+
 const VERT = `#version 300 es
 in vec2 aPos;
 out vec2 vUv;
@@ -18,6 +20,11 @@ void main() {
   vUv = aPos * 0.5 + 0.5;
   gl_Position = vec4(aPos, 0.0, 1.0);
 }`
+
+export function isFloatDepth(d: unknown): d is FloatDepth {
+  return !!d && typeof d === 'object' && (d as { kind?: unknown }).kind === 'float'
+    && (d as { data?: unknown }).data instanceof Float32Array
+}
 
 /** A uniform value. Plain numbers are floats (ints only for `uTapCount`, DOF's loop bound),
  *  a Float32Array is an array of vec2s (DOF's tap offsets), and `{ vec3 }` is one vec3 —
@@ -138,7 +145,7 @@ export class GpuPost {
 
   render(
     color: CanvasImageSource,
-    depth: CanvasImageSource,
+    depth: CanvasImageSource | FloatDepth,
     w: number,
     h: number,
     uniforms: Record<string, GpuUniform>,
@@ -172,7 +179,15 @@ export class GpuPost {
 
     gl.activeTexture(gl.TEXTURE1)
     gl.bindTexture(gl.TEXTURE_2D, this.texDepth)
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, depth as TexImageSource)
+    if (isFloatDepth(depth)) {
+      // A float field arrives already in GL row order (bottom row first); FLIP_Y must be off
+      // for the typed-array upload, then back on for the next image upload.
+      gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false)
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.R16F, depth.width, depth.height, 0, gl.RED, gl.FLOAT, depth.data)
+      gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true)
+    } else {
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, depth as TexImageSource)
+    }
     gl.uniform1i(gl.getUniformLocation(program, 'uDepth'), 1)
 
     for (const [name, value] of Object.entries(uniforms)) {
