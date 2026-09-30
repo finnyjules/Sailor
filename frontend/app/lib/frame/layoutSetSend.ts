@@ -74,6 +74,12 @@ export function sentFrameData(source: Record<string, any>, entry: SetEntry): Rec
   }
   // The source's baked picture is of the source's layout: the new Frame starts unbaked.
   delete p.sailor_renderKey
+  // …and the source card's viewing shape was made against the source's size: the new card starts
+  // at its own design shape.
+  if (p.sailor_frame && typeof p.sailor_frame === 'object') {
+    const { cardView: _cardView, ...frame } = p.sailor_frame as Record<string, unknown>
+    p.sailor_frame = frame
+  }
   delete data.images
   delete data.running
   data.title = sentFrameName(source, entry)

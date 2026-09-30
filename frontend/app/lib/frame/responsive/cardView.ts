@@ -4,7 +4,7 @@
  * in Frame px, saved on the node as `sailor_frame.cardView`, and the card reflows to it through
  * `resolveLayout` exactly as the editor does for its viewing sizes. A fixed Frame never has one.
  */
-import { clampViewSize, type Size } from './viewport'
+import { atDesignSize, clampViewSize, type Size } from './viewport'
 
 /** Screen px per Frame px on the card: the design's long side is the display edge. Constant while
  *  the view is dragged, so the card grows under the cursor. */
@@ -31,6 +31,14 @@ export function cardViewOf(sailorFrame: unknown, design: Size): Size {
   const w = Number(v?.w), h = Number(v?.h)
   if (!(typeof v?.w === 'number' && typeof v?.h === 'number' && w > 0 && h > 0)) return { w: design.w, h: design.h }
   return clampViewSize({ w, h }, design)
+}
+
+/** What to store as `sailor_frame.cardView` for a viewing size: nothing at the design size (the
+ *  card then shows the design shape), else the size rounded to whole Frame px. Shared by the card's
+ *  grip and the Frame editor, whose viewing size IS the card's shape. */
+export function cardViewToStore(view: Size, design: Size): Size | null {
+  if (atDesignSize(view, design)) return null
+  return { w: Math.round(view.w), h: Math.round(view.h) }
 }
 
 /** The design size and Responsive switch the saved card view was made against. */

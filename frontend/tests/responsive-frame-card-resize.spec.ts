@@ -85,3 +85,60 @@ test('a responsive Frame card resizes freely and resets on double-click', async 
     return Math.abs(b.width - b.height) < 2
   }).toBe(true)
 })
+
+test('the Frame editor opens at the card\'s shape, and its size is the card\'s size', async ({ page }) => {
+  test.setTimeout(120_000)
+  await waitForBackend(page)
+  await page.setViewportSize({ width: 1600, height: 1400 })
+  await openBlankWorkflow(page)
+  await page.evaluate((layers) => {
+    window.dispatchEvent(new CustomEvent('sailor:addNode', { detail: {
+      nodeType: 'Compositor',
+      widgetOverrides: { width: 1080, height: 1080 },
+      propertyOverrides: { sailor_frame: { responsive: true }, sailor_localLayers: layers },
+    } }))
+  }, LAYERS)
+  const card = page.locator('.vue-flow__node-artifact-frame').last()
+  await expect(card).toBeVisible({ timeout: 10_000 })
+  await page.evaluate(() => {
+    let c: any = (document.querySelector('.vue-flow') as any)?.__vueParentComponent
+    while (c && !(c.exposed && typeof c.exposed.fitView === 'function')) c = c.parent
+    c?.exposed.fitView({ maxZoom: 0.8, padding: 0.4 })
+  })
+  await page.waitForTimeout(500)
+
+  // Reshape the card wide.
+  const grip = card.locator('[title^="Resize"]')
+  const g = (await grip.boundingBox())!
+  await page.mouse.move(g.x + g.width / 2, g.y + g.height / 2)
+  await page.mouse.down()
+  await page.mouse.move(g.x + g.width / 2 + 160, g.y + g.height / 2, { steps: 8 })
+  await page.mouse.up()
+  const cardCanvas = card.getByTestId('frame-card-stack-canvas')
+  const cb = (await cardCanvas.boundingBox())!
+  expect(cb.width / cb.height).toBeGreaterThan(1.3)
+
+  // Open the editor: its artboard takes the card's shape and says so.
+  await card.hover()
+  await card.getByRole('button', { name: 'Open', exact: true }).click()
+  const art = page.getByTestId('compositor-stack-canvas')
+  await expect(art).toBeVisible({ timeout: 15_000 })
+  await expect.poll(async () => {
+    const b = (await art.boundingBox())!
+    return Math.abs(b.width / b.height - cb.width / cb.height) < 0.05
+  }, { timeout: 10_000 }).toBe(true)
+  await expect(page.getByText('Viewing size', { exact: true })).toBeVisible()
+
+  // Back to design size in the editor puts the card back to its design shape too.
+  await page.getByRole('button', { name: 'Back to design size' }).click()
+  await expect.poll(async () => {
+    const b = (await art.boundingBox())!
+    return Math.abs(b.width - b.height) < 3
+  }).toBe(true)
+  await page.keyboard.press('Escape')
+  await expect(art).toBeHidden({ timeout: 10_000 })
+  await expect.poll(async () => {
+    const b = (await cardCanvas.boundingBox())!
+    return Math.abs(b.width - b.height) < 2
+  }).toBe(true)
+})

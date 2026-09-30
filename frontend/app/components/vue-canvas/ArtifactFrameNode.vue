@@ -35,7 +35,7 @@ import LayoutGridOverlay from './LayoutGridOverlay.vue'
 import { FRAME_SIZE_PRESET_GROUPS, FRAME_SIZE_PRESETS, applyFramePreset, framePresetId, readFrameSize, setFrameDim, setFrameResponsive } from '~/lib/frame/frameSize'
 import { isResponsiveFrame } from '~/lib/frame/responsive/fromNode'
 import { resolveLayout, frameDocFromProps, resizeViewFromEdge, atDesignSize, type LayoutResult } from '~/lib/frame/responsive'
-import { cardBox, cardScale, cardViewOf, cardViewStale } from '~/lib/frame/responsive/cardView'
+import { cardBox, cardScale, cardViewOf, cardViewStale, cardViewToStore } from '~/lib/frame/responsive/cardView'
 import { toast } from 'vue-sonner'
 import PrintSurface from '~/components/vue-canvas/surfaces/PrintSurface.vue'
 import NodeOpenBar from '~/components/vue-canvas/surfaces/NodeOpenBar.vue'
@@ -244,7 +244,8 @@ function onResizeDown(e: PointerEvent) {
 function setCardView(v: { w: number; h: number } | null) {
   if (!props.data.properties) (props.data as any).properties = {}
   const { cardView: _old, ...rest } = ((props.data.properties as any).sailor_frame ?? {}) as Record<string, unknown>
-  ;(props.data.properties as any).sailor_frame = v ? { ...rest, cardView: { w: v.w, h: v.h } } : rest
+  const store = v ? cardViewToStore(v, designSize.value) : null   // the design size stores nothing
+  ;(props.data.properties as any).sailor_frame = store ? { ...rest, cardView: store } : rest
 }
 function onResizeMove(e: PointerEvent) {
   if (!resize) return

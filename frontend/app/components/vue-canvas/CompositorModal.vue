@@ -65,6 +65,7 @@ import { mapKeyToEdit, snapAngle } from '~/lib/compositor/layerEdits'
 import { resizeBox, type Handle } from '~/lib/compositor/resizeBox'
 import ResponsivePinsCard from './ResponsivePinsCard.vue'
 import { atDesignSize as isAtDesignSize, clampViewSize, designShapedArtboard, resizeViewFromEdge, shapePresets, readoutLabel as viewReadoutLabel } from '~/lib/frame/responsive/viewport'
+import { cardViewOf, cardViewToStore } from '~/lib/frame/responsive/cardView'
 import { FRAME_SIZE_PRESET_GROUPS, FRAME_SIZE_PRESETS, applyFramePreset, frameDimFor, framePresetId, readFrameSize, setFrameDim, setFrameResponsive } from '~/lib/frame/frameSize'
 import { useTemplateLibrary } from '~/composables/useTemplateLibrary'
 import { serializeLayersForOS, parseLayersFromOS, setClipboard, type ClipboardPayload } from '~/lib/compositor/layerClipboard'
@@ -444,8 +445,9 @@ const baseAspect = computed(() => {
 })
 const canvasDisplay = reactive({ w: 680, h: 680 })
 // ── Responsive Frames: view-at-a-size ────────────────────────────────────────
-// Is THIS frame responsive, its design (output) size, and the transient viewing
-// size (editor-only, never saved). A fixed frame keeps viewSize == designSize
+// Is THIS frame responsive, its design size, and the viewing size — which IS the canvas card's
+// shape (`sailor_frame.cardView`): the editor opens at it, saves it back on explicit viewing-size
+// actions, and renders its outputs at the saved shape (see persistCardView / outputFrame). A fixed frame keeps viewSize == designSize
 // forever, so every responsive branch below is a no-op and the render is
 // byte-identical to a non-responsive Frame.
 const frameIsResponsive = computed(() => isResponsiveFrame(compositor.value?.data?.properties as any))
@@ -569,17 +571,37 @@ function fitCanvasToStage() {
 }
 watch(stageBottomReserve, () => fitCanvasToStage())
 watch([baseAspect, previewAspect], fitCanvasToStage)
-// Responsive Frames: start every editor session at the design size; snap back when
-// the frame stops being responsive or the design size changes under us. This modal
+// Responsive Frames: open at the card's shape (`sailor_frame.cardView`, the design size when it
+// has none); snap back to the design size when the frame stops (or starts) being responsive or
+// the design size changes under us — the card drops its cardView on the same change. This modal
 // is mounted fresh per open (v-if in VueNodeCanvas), so `{ immediate: true }` is the
-// "on open" reset — there is no `open` prop to watch.
+// "on open" run — there is no `open` prop to watch. A Frame with no size yet is still opening.
 // Watch the design-size PRIMITIVES (not the object): a same-valued recompute of
 // designSize — e.g. when canvasDisplay churns on a stage resize / panel toggle —
 // is then a no-op and no longer snaps the viewing size back.
+let viewOpened = false
 watch([frameIsResponsive, () => designSize.value.w, () => designSize.value.h], () => {
   const d = designSize.value
-  viewSize.w = d.w; viewSize.h = d.h
+  const v = !viewOpened && frameIsResponsive.value
+    ? cardViewOf((compositor.value?.data?.properties as any)?.sailor_frame, d) : d
+  if (d.w > 0 && d.h > 0) viewOpened = true
+  viewSize.w = v.w; viewSize.h = v.h
 }, { immediate: true })
+// The viewing size is saved as the card's shape (`sailor_frame.cardView`, removed at the design
+// size, spread exactly as the card's own grip writes it) ONLY by the explicit viewing-size
+// actions: an edge drag (on release), the W/H readout, a shape preset and "Back to design size"
+// (backToDesignSizeAndSave). Never from a watcher: a design-only tool's snap to the design size
+// (viewOnlyGuard → backToDesignSize) must not erase the card's shape. Only a real change writes,
+// and no undo step: viewing sizes never had one.
+function persistCardView() {
+  const n = compositor.value
+  if (!n || !frameIsResponsive.value || !(viewSize.w > 0 && viewSize.h > 0)) return
+  const next = cardViewToStore(viewSize, designSize.value)
+  const p = (n.data.properties ||= {}) as Record<string, any>
+  const { cardView: cur, ...rest } = (p.sailor_frame ?? {}) as Record<string, any>
+  if (next ? (cur?.w === next.w && cur?.h === next.h) : cur == null) return
+  p.sailor_frame = next ? { ...rest, cardView: next } : rest
+}
 let stageRO: ResizeObserver | null = null
 onMounted(() => {
   try { panelsVisible.value = sessionStorage.getItem(PANELS_KEY) !== '0' } catch { /* private mode */ }
@@ -742,8 +764,8 @@ const zoomMenuItems = computed(() => [
   { id: 'selection', label: 'Zoom to selection', hint: '⌘2', disabled: !hasSelectionToZoom.value, run: () => { zoomToSelection() } },
 ])
 
-// Responsive Frames: the viewing-size readout in the toolbar (editor-only, never
-// saved). Typing a dimension, picking a shape, or "Back to design size" all just
+// Responsive Frames: the viewing-size readout in the toolbar (saved as the card's
+// shape by persistCardView). Typing a dimension, picking a shape, or "Back to design size" all just
 // move viewSize; the layout re-flows off that.
 const viewShapes = computed(() => shapePresets(designSize.value))
 const viewReadout = computed(() => viewReadoutLabel(viewSize, designSize.value))
@@ -751,12 +773,17 @@ function setViewDim(which: 'w' | 'h', raw: string) {
   const n = Math.round(parseFloat(raw) || 0); if (n <= 0) return
   const next = clampViewSize({ w: which === 'w' ? n : viewSize.w, h: which === 'h' ? n : viewSize.h }, designSize.value)
   viewSize.w = next.w; viewSize.h = next.h
+  persistCardView()
 }
 function pickViewShape(id: string) {
   const p = viewShapes.value.find(x => x.id === id); if (!p) return
   viewSize.w = p.w; viewSize.h = p.h
+  persistCardView()
 }
+// A snap to the design size for a design-only tool: the card keeps its shape (not saved).
 function backToDesignSize() { const d = designSize.value; viewSize.w = d.w; viewSize.h = d.h }
+// The "Back to design size" button and the readout's Done: the card goes back to its design shape.
+function backToDesignSizeAndSave() { backToDesignSize(); persistCardView() }
 
 // Slice 2 does not edit at a viewing size. Any editing gesture snaps back to the design size
 // first; the existing selection (and its pins card + guides) is what stays visible while looking.
@@ -796,7 +823,7 @@ function onStagePointerMovePan(e: PointerEvent) {
 }
 function onStagePointerUpPan() { panFrom = null; panning.value = false }
 
-// Responsive Frames: dragging an artboard edge changes the viewing size (editor-only).
+// Responsive Frames: dragging an artboard edge changes the viewing size (= the card's shape).
 const edgeDrag = ref<{ edge: 'e' | 's' | 'se'; sx: number; sy: number; w0: number; h0: number } | null>(null)
 function onEdgeDown(edge: 'e' | 's' | 'se', ev: PointerEvent) {
   ev.preventDefault(); ev.stopPropagation()
@@ -812,7 +839,7 @@ function onEdgeMove(ev: PointerEvent) {
   viewSize.w = next.w; viewSize.h = next.h
 }
 function onEdgeUp(ev: PointerEvent) {
-  if (edgeDrag.value) { ev.stopPropagation(); (ev.target as HTMLElement).releasePointerCapture?.(ev.pointerId); edgeDrag.value = null }
+  if (edgeDrag.value) { ev.stopPropagation(); (ev.target as HTMLElement).releasePointerCapture?.(ev.pointerId); edgeDrag.value = null; persistCardView() }
 }
 
 const canvasRef = ref<HTMLDivElement | null>(null)
@@ -5394,6 +5421,36 @@ function bakeSize(): { W: number; H: number } {
   return { W: canvasDisplay.w, H: canvasDisplay.h }
 }
 
+// What Render (image and video), the motion bake and Download PNG produce: the card's SAVED
+// shape (`sailor_frame.cardView`), whatever the editor is looking at right now — a design-only
+// tool snaps the view to the design size without changing it. A responsive Frame whose card is off
+// its design size outputs that shape (Frame px) with the RESOLVED layout painted into it — what
+// the card renders (the live `resolved` reused when the view is at the same shape); otherwise
+// bakeSize() and the raw layers (`resolved` null), so a fixed Frame, or one at its design size,
+// is byte-identical.
+interface FrameOutput { W: number; H: number; resolved: LayoutResult | null }
+const cardOutput = computed<FrameOutput | null>(() => {
+  if (!frameIsResponsive.value) return null
+  const d = designSize.value
+  const card = cardViewOf((compositor.value?.data?.properties as any)?.sailor_frame, d)
+  if (isAtDesignSize(card, d)) return null
+  const live = resolved.value
+  const r = (live && viewSize.w === card.w && viewSize.h === card.h) ? live
+    : resolveLayout(frameDocFromProps(compositor.value?.data?.properties as any, d.w, d.h), card.w, card.h, { measureCtx: measureCtx(), withBoxes: true })
+  return { W: card.w, H: card.h, resolved: r }
+})
+function outputFrame(): FrameOutput {
+  const out = cardOutput.value
+  if (out) return out
+  const { W, H } = bakeSize()
+  return { W, H, resolved: null }
+}
+// The motion painted at an output: only the POSITION tracks (`.motionx`) are remapped by the
+// resolver, merged in exactly as renderStack does. Null resolved ⇒ the motion itself.
+function outputMotion(motion: FrameMotion, r: LayoutResult | null): FrameMotion {
+  return r ? { ...motion, motionx: r.motion?.motionx ?? motion.motionx } : motion
+}
+
 // The doc-level parts of the Frame every paint draws around the layers — the same four
 // renderStack() (the live view) passes. One painter, one look: the motion bake and the
 // browser video export hand these to the painter too, so a recording keeps the Frame's
@@ -5450,11 +5507,11 @@ const effectiveMotion = computed<FrameMotion>(() => {
 const motionStale = computed(() => {
   const stored = storedMotionParams.value
   if (!stored) return false
-  const { W, H } = bakeSize()
-  return stored.source_key !== motionSourceKey(localLayers.value as LocalLayer[], effectiveMotion.value, W, H)
+  const out = outputFrame()
+  return stored.source_key !== motionSourceKey(paintLayersFor(out.resolved), outputMotion(effectiveMotion.value, out.resolved), out.W, out.H)
 })
 
-async function bakeMotion(motionOverride?: FrameMotion, opts?: { signal?: AbortSignal; keepPaused?: boolean }) {
+async function bakeMotion(motionOverride?: FrameMotion, opts?: { signal?: AbortSignal; keepPaused?: boolean; out?: FrameOutput }) {
   if (baking.value) return
   // A Bake mid-export would pull the same wired canvases at other times, and its
   // `finally` clears the wired-content registration the export relies on. The
@@ -5468,8 +5525,10 @@ async function bakeMotion(motionOverride?: FrameMotion, opts?: { signal?: AbortS
   pause() // don't fight the rAF preview loop for the layer state
   stopLive() // don't let the live studio RAF race the bake's per-frame pulls
   try {
-    const { W, H } = bakeSize()
-    const motion = motionOverride ?? effectiveMotion.value
+    // The output shape (the card's); a video export hands its own, taken when it started.
+    const out = opts?.out ?? outputFrame()
+    const { W, H } = out
+    const motion = outputMotion(motionOverride ?? effectiveMotion.value, out.resolved)
     const previousFrames = storedMotionParams.value?.rendered ?? []
     // The bake is ASYNC (one awaited upload per frame), so the scoped
     // `withWiredContent` span can't hold across it — a global registration is the
@@ -5478,7 +5537,7 @@ async function bakeMotion(motionOverride?: FrameMotion, opts?: { signal?: AbortS
     // `finally` so no stale resolver outlives the bake.
     _registerWiredContent(wiredContentForSlot)
     const params = await bakeAndUpload(
-      () => buildStackItems(), localLayers.value as LocalLayer[], W, H, motion,
+      () => paintItemsFor(out.resolved), paintLayersFor(out.resolved), W, H, motion,
       (done, total) => { bakeProgress.value = done / total },
       async (t) => {
         throwIfAborted(opts?.signal)
@@ -5514,7 +5573,7 @@ async function bakeMotion(motionOverride?: FrameMotion, opts?: { signal?: AbortS
 
 // Static Render freshness: hash the inputs that affect the client-side composite.
 function staticSourceKey(): string {
-  const { W, H } = bakeSize()
+  const { W, H } = outputFrame()   // the output shape: a render at another card shape is stale
   const s = JSON.stringify({
     local: localLayers.value, order: stackKeys.value,
     treatments: wiredTreatments.value, wired: layers.value, W, H,
@@ -5544,15 +5603,18 @@ function cancelVideoExport() { videoAbort?.abort() }
 // `frame` (Make a set, Stage 5): paint THESE layers / groups / draw order instead of the Frame's
 // own — a planned format — with everything else unchanged (background, wired content per slot,
 // wired treatments, post effects, fonts and images ensured). Absent: exactly the Frame's own.
-async function renderStaticComposite(W: number, H: number, frame?: { layers: LocalLayer[]; groups: LayerGroup[]; order: readonly string[] }): Promise<Blob | null> {
+// `r` (no `frame`): paint this resolved layout — a responsive Frame's output at its card shape
+// (outputFrame). Null: the raw layers, as before.
+async function renderStaticComposite(W: number, H: number, frame?: { layers: LocalLayer[]; groups: LayerGroup[]; order: readonly string[] }, r: LayoutResult | null = null): Promise<Blob | null> {
   const off = document.createElement('canvas')
   off.width = Math.max(1, Math.round(W)); off.height = Math.max(1, Math.round(H))
   const ctx = off.getContext('2d'); if (!ctx) return null
-  await ensureLayerImages(frame ? frame.layers : localLayers.value as LocalLayer[])
-  await ensureLayerFonts(frame ? frame.layers : localLayers.value as LocalLayer[], W)
+  const lays = frame ? frame.layers : paintLayersFor(r)
+  await ensureLayerImages(lays)
+  await ensureLayerFonts(lays, W)
   // bake=true (Task 10): the static Render/Export path — final output, not preview.
   withWiredContent(wiredContentForSlot, () =>
-    paintLayerStack(ctx, W, H, frame ? stackItemsFor(frame.layers, frame.order) : buildStackItems(), frame ? frame.layers : localLayers.value as LocalLayer[],
+    paintLayerStack(ctx, W, H, frame ? stackItemsFor(frame.layers, frame.order) : paintItemsFor(r), lays,
       undefined, undefined, undefined, wiredTreatments.value, background.value, frame ? frame.groups : localGroups.value, postEffects.value, true, frameLight.value))
   return await new Promise<Blob | null>(resolve => off.toBlob(b => resolve(b), 'image/png'))
 }
@@ -5590,8 +5652,8 @@ async function generateImage() {
   renderError.value = ''
   webExportNotice.value = ''; videoStatus.value = ''   // the footer's one status line: the latest event wins
   try {
-    const { W, H } = bakeSize()
-    const blob = await renderStaticComposite(W, H)
+    const out = outputFrame()
+    const blob = await renderStaticComposite(out.W, out.H, undefined, out.resolved)
     if (!blob) return
     const { uploadFrameBatch } = await import('~/lib/studio/frameUpload')
     const [filename] = await uploadFrameBatch([blob], 'frame_img')
@@ -5814,7 +5876,10 @@ async function generateVideo() {
   renderError.value = ''
   videoStatus.value = ''
   webExportNotice.value = ''   // a stale "Downloaded" must not hide this export's progress or notice
-  const { W, H } = bakeSize()
+  // The output shape (the card's), taken once: a viewing-size change mid-export must not
+  // change later frames, nor the server fallback's bake.
+  const out = outputFrame()
+  const { W, H } = out
   const motion = effectiveMotion.value
   const alpha = !hasPaint(background.value)
   videoAbort = new AbortController()
@@ -5830,7 +5895,7 @@ async function generateVideo() {
       const animated = layers.value.filter(l => l.live && l.live.duration > 0)
       await Promise.all(animated.map(l => pullLiveFrameModal(l, slotPhase01(t, l.live!.duration))))
     }
-    const painter = await prepareMotionFramePainter(() => buildStackItems(), localLayers.value as LocalLayer[], W, H, motion, pull, {}, frameDocPaint())
+    const painter = await prepareMotionFramePainter(() => paintItemsFor(out.resolved), paintLayersFor(out.resolved), W, H, outputMotion(motion, out.resolved), pull, {}, frameDocPaint())
     const made = await exportStudioVideo({
       prefix: 'frame', publish: true,
       width: W, height: H, fps: motion.fps, frameCount: painter.total, alpha,
@@ -5841,7 +5906,7 @@ async function generateVideo() {
       },
       onStatus: t => { videoStatus.value = t },
       serverFallback: async (signal) => {
-        await bakeMotion(undefined, { signal, keepPaused: true })
+        await bakeMotion(undefined, { signal, keepPaused: true, out })
         throwIfAborted(signal)
         if (bakeError.value) throw new Error(bakeError.value)
         videoStatus.value = 'Encoding…'
@@ -5882,7 +5947,7 @@ const frameFooterProgress = computed(() =>
     : exportingVideo.value ? (videoStatus.value || 'Rendering…')
       : encoding.value ? 'Encoding…'
         : (rendering.value || downloadingPng.value) ? 'Rendering…' : '')
-// Download PNG: the same still As image renders (renderStaticComposite at the bake size), saved
+// Download PNG: the same still As image renders (renderStaticComposite at the output shape), saved
 // locally and named like the other studios' PNG downloads (`<studio>_<timestamp>.png`).
 const downloadingPng = ref(false)
 async function downloadFramePng() {
@@ -5890,8 +5955,8 @@ async function downloadFramePng() {
   downloadingPng.value = true
   renderError.value = ''; webExportNotice.value = ''; videoStatus.value = ''
   try {
-    const { W, H } = bakeSize()
-    const blob = await renderStaticComposite(W, H)
+    const out = outputFrame()
+    const blob = await renderStaticComposite(out.W, out.H, undefined, out.resolved)
     if (blob) downloadBlobAsFile(blob, `frame_${Date.now()}.png`)
   } catch (err: any) {
     console.error('[frame] png download failed', err)
@@ -6050,13 +6115,15 @@ function buildStackItems(): StackItem[] {
 // Responsive Frames: the layers to paint — resolved for a viewing size, else the raw
 // editor layers. `resolved` is null (so this is a pure pass-through) for a fixed frame
 // or at the design size, keeping the render byte-identical.
-function paintLayers(): LocalLayer[] {
-  return (resolved.value?.layers ?? localLayers.value) as LocalLayer[]
+function paintLayers(): LocalLayer[] { return paintLayersFor(resolved.value) }
+function paintItems(): StackItem[] { return paintItemsFor(resolved.value) }
+// …for a given resolved layout (the live view's, or an output's snapshot — outputFrame).
+function paintLayersFor(r: LayoutResult | null): LocalLayer[] {
+  return (r?.layers ?? localLayers.value) as LocalLayer[]
 }
 // Items for the painter, swapping in the resolved layer (by id) wherever one exists.
-function paintItems(): StackItem[] {
+function paintItemsFor(r: LayoutResult | null): StackItem[] {
   const items = buildStackItems()
-  const r = resolved.value
   if (!r) return items
   const byId = new Map(r.layers.map(l => [l.id, l]))
   return items.map(it => (it.type === 'local' && byId.has(it.layer.id))
@@ -10014,7 +10081,7 @@ defineExpose({ editor, layoutGridResolved, layoutGrid, overlayGrid, viewLayoutGr
         @more-paint="openBrushGallery('paint')" @more-effect="openBrushGallery('effect')" />
       <ViewSizeToolbar v-if="viewingOffDesign" class="pointer-events-auto"
         :w="viewSize.w" :h="viewSize.h" :shapes="viewShapes" :dragging="!!viewDrag"
-        @set-dim="setViewDim" @pick-shape="pickViewShape" @done="backToDesignSize" />
+        @set-dim="setViewDim" @pick-shape="pickViewShape" @done="backToDesignSizeAndSave" />
       <!-- The brush galleries (teleported): More… in Paint / Effect mode and a painted-effect
            layer's Change effect…. -->
       <ShaderEffectGallery
@@ -10099,7 +10166,7 @@ defineExpose({ editor, layoutGridResolved, layoutGrid, overlayGrid, viewLayoutGr
           </select>
           <button v-if="!atDesign"
             class="underline decoration-dotted hover:text-white cursor-pointer"
-            @click="backToDesignSize">Back to design size</button>
+            @click="backToDesignSizeAndSave">Back to design size</button>
         </div>
         <!-- Select tool — hidden once an image is selected. Collapses out with the
              same tb-expand transition as the canvas tools, concurrently with the

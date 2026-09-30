@@ -126,6 +126,17 @@ describe('sentFrameData — the new Frame node', () => {
     expect(d.properties.sailor_renderKey).toBeUndefined()
   })
 
+  it('drops the source card’s viewing shape (made for the source’s size), keeping the rest of sailor_frame', () => {
+    const src = source() as ReturnType<typeof source> & { properties: { sailor_frame: Record<string, unknown> } }
+    src.properties.sailor_frame = { ...src.properties.sailor_frame, responsive: true, cardView: { w: 1440, h: 900 } }
+    const d = sentFrameData(src, entry('meta-story'))!
+    expect(d.properties.sailor_frame.cardView).toBeUndefined()
+    expect(d.properties.sailor_frame.preset).toBe('meta-story')
+    expect(d.properties.sailor_frame.displayEdge).toBe(320)
+    expect(d.properties.sailor_frame.responsive).toBe(true)
+    expect(src.properties.sailor_frame.cardView).toEqual({ w: 1440, h: 900 })   // source untouched
+  })
+
   it('leaves the source untouched', () => {
     const src = source()
     const before = JSON.parse(JSON.stringify(src))
