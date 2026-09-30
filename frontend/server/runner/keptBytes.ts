@@ -73,9 +73,12 @@ export interface KeptBytes {
    * Lets go of one of the run's kept files now (R6 ruling (j): a frame batch
    * or sound every reader of which has finished): removed, and no longer
    * counted toward the run's cap. Reading it afterwards is KEPT_GONE. A file
-   * that isn't one of the run's kept files is left alone.
+   * that isn't one of the run's kept files is left alone. `still` (R6.1 fix
+   * round 1) is asked just before the file goes, inside the run's lock that
+   * every put and putPath of the run also takes: false leaves the file (a node
+   * has made the same bytes again since the caller decided).
    */
-  release(runId: string, file: OutputFile): Promise<void>
+  release(runId: string, file: OutputFile, o?: { still?: () => boolean }): Promise<boolean>
 }
 
 /** The sha256 of a file, read as it streams. */
@@ -223,9 +226,11 @@ export function createFileKeptBytes(dir: string): KeptBytes {
       return total
     },
     async checkRoom() {},
-    async release(runId, file) {
-      if (!shaOf(file) || file.subfolder !== runId) return
+    async release(runId, file, o = {}) {
+      if (!shaOf(file) || file.subfolder !== runId) return false
+      if (o.still && !o.still()) return false
       await rm(pathOf(file), { force: true })
+      return true
     },
   }
 }
@@ -300,10 +305,12 @@ export function createMemoryKeptBytes(): KeptBytes {
     },
     async workBytes(runId) { return disk ? disk.workBytes(runId) : 0 },
     async checkRoom() {},
-    async release(runId, file) {
-      if (!shaOf(file) || file.subfolder !== runId) return
+    async release(runId, file, o = {}) {
+      if (!shaOf(file) || file.subfolder !== runId) return false
+      if (o.still && !o.still()) return false
       m.delete(key(file))
       await disk?.release(runId, file)
+      return true
     },
   }
 }
@@ -345,7 +352,8 @@ export function withRunCap(kept: KeptBytes, capOf: () => number): KeptBytes {
   return {
     ...kept,
     async put(runId, bytes, ext) {
-      if (!Number.isFinite(capOf())) return kept.put(runId, bytes, ext)
+      // Every put of a run takes its lock, capped or not: a release (below) never races it (R6.1 fix round 1).
+      if (!Number.isFinite(capOf())) return locked(runId, () => kept.put(runId, bytes, ext))
       const file = keptFile(runId, bytes, ext)
       return locked(runId, async () => {
         if (await kept.exists(file)) return kept.put(runId, bytes, ext)
@@ -357,7 +365,7 @@ export function withRunCap(kept: KeptBytes, capOf: () => number): KeptBytes {
       })
     },
     async putPath(runId, tmpPath, ext) {
-      if (!Number.isFinite(capOf())) return kept.putPath(runId, tmpPath, ext)
+      if (!Number.isFinite(capOf())) return locked(runId, () => kept.putPath(runId, tmpPath, ext))
       return locked(runId, async () => {
         let size: number
         try {
@@ -384,12 +392,15 @@ export function withRunCap(kept: KeptBytes, capOf: () => number): KeptBytes {
       for (const id of [...totals.keys()]) if (!runIds.has(id)) totals.delete(id)
       await kept.keepOnly(runIds)
     },
-    async release(runId, file) {
-      // Under the run's lock, so a put racing it counts what is really there.
+    async release(runId, file, o = {}) {
+      // Under the run's lock, which every put and putPath of the run takes too: `still` is asked with no put
+      // under way, and a put that made the same bytes again before it has made its holder (R6.1 fix round 1).
       return locked(runId, async () => {
+        if (o.still && !o.still()) return false
         const size = await kept.size(file)
-        await kept.release(runId, file)
+        const gone = await kept.release(runId, file)
         if (size !== null && totals.has(runId) && !(await kept.exists(file))) totals.set(runId, Math.max(0, totals.get(runId)! - size))
+        return gone
       })
     },
   }

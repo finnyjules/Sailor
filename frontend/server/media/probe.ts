@@ -395,6 +395,37 @@ export async function pyFrameCount(p: MediaProbe, path: string, o: { userId: str
   return counted
 }
 
+/** R6.1 fix round 1: frames added to a rate × length bound, for a length the header rounds. */
+export const FRAME_BOUND_MARGIN = 2
+
+/**
+ * A TRUE upper bound on the frames a decode of the first video stream can
+ * give (R6.1 fix round 1: the video effects' start pass; `pyFrameCount` is
+ * Python's estimate, which a file can pass). ceil(length × the faster of
+ * avg_frame_rate and r_frame_rate) + FRAME_BOUND_MARGIN, never under the
+ * header's frame count; and the stream's packets counted instead (a demux,
+ * no decode, within the scan's time limit) where the file's rate is
+ * variable (the two rates differ), where it has no usable length or rate, or
+ * where the caller asks (`count`: the bound lands near a limit). Every
+ * decoded frame comes from a packet, so the count bounds the frames.
+ * `counted`: the packets were counted.
+ */
+export async function pyFrameBound(p: MediaProbe, o: { userId: string | null; signal?: AbortSignal; count?: boolean }): Promise<{ frames: number; counted: boolean }> {
+  const v = p.video[0]
+  if (!v) throw new MediaError('noVideo')
+  const counted = async () => ({ frames: await countVideoPackets(p.path, p.format, { userId: o.userId, signal: o.signal, timeoutMs: scanTimeoutMs(p.bytes) }), counted: true })
+  if (o.count) return counted()
+  const j = await ffprobeJson(p.path, p.format, ['-select_streams', 'v:0', '-show_entries', 'stream=r_frame_rate'], { userId: o.userId, signal: o.signal })
+  const real = rational(((j.streams as Json[] | undefined)?.[0] ?? {}).r_frame_rate)
+  const avg = v.averageRate
+  const secs = v.duration !== null ? (v.duration * v.timeBase.num) / v.timeBase.den
+    : p.containerDuration !== null ? p.containerDuration / 1e6 : null
+  if (!avg || !real || avg.num * real.den !== real.num * avg.den || secs === null || !(secs > 0) || !Number.isFinite(secs)) return counted()
+  const rate = Math.max(avg.num / avg.den, real.num / real.den)
+  const bound = Math.ceil(secs * rate) + FRAME_BOUND_MARGIN
+  return { frames: Math.max(bound, v.frames ?? 0), counted: false }
+}
+
 // ── Fraction(float).limit_denominator(), exactly ─────────────────────────────
 
 function bigAbs(n: bigint): bigint { return n < 0n ? -n : n }

@@ -110,6 +110,11 @@ export const MEDIA_WORDS: Readonly<Record<MediaWord, string>> = {
 
 /** Rule 5: how long one job may run. */
 export const MEDIA_JOB_TIMEOUT_MS = { hosted: 10 * 60_000, local: 30 * 60_000, route: 30_000 } as const
+/**
+ * R6.1 fix round 1: a tool in a node's lease that makes no progress for this
+ * long, while the node isn't the one holding it up, is killed (it has stalled).
+ */
+export const MEDIA_STALL_MS = 5 * 60_000
 /** Rule 6: a header probe's own time limit. */
 export const MEDIA_PROBE_TIMEOUT_MS = 10_000
 /** A whole-file packet scan's own time limit grows by a millisecond per this many bytes (20 MB a second) on top of the probe's. */

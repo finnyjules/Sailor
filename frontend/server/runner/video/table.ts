@@ -22,8 +22,13 @@ import type { MediaEffectSchema } from '#shared/runner/mediaEffectSchemas.genera
 import { isLink } from '#shared/runner/graph'
 import { pyFloatOf, pyIntOf, pyTruthy } from '#shared/runner/pyText'
 
-/** A frame batch's count and size; `exact: false` when the count is an upper bound. */
-export interface FrameShape { count: number; w: number; h: number; exact: boolean }
+/**
+ * A frame batch's count and size; `exact: false` when the count is an upper
+ * bound. `counted`: the bound comes from the file's packets, counted (R6.1 fix
+ * round 1). `soundBytes`: the sound a source keeps beside the batch (Get video
+ * components' float WAV), bounded.
+ */
+export interface FrameShape { count: number; w: number; h: number; exact: boolean; counted?: true; soundBytes?: number }
 /** A sound's rate, channels and length (R6.9's sound start pass); `exact: false` when the length is an upper bound. */
 export interface SoundShape { rate: number; channels: number; samples: number; exact: boolean }
 
@@ -58,6 +63,29 @@ export const VIDEO_IO_WORK_PER_PIXEL = 1
 
 /** The bytes of one 8-bit frame. */
 const frameBytes = (s: FrameShape) => s.w * s.h * 3
+
+/**
+ * The memory one video effect node holds at once (rule 6, R6.1 fix round 1:
+ * one cost model every effect's `heldBytes` uses), in bytes, for frames of
+ * `s`'s size:
+ *   - on the main thread: the 8-bit frames the plan holds (`held8`: all of
+ *     them for a held effect, a window's for a window effect), one frame in
+ *     hand from each input's decode (`reads`), and one on its way to the
+ *     encoder;
+ *   - on the worker, per output frame: the 8-bit frames it was handed
+ *     (`reads`), their float32 tensors (k / 255, 4 bytes a value), the
+ *     output's float32 tensor, and its 8-bit forms (the frame and the
+ *     preview's);
+ *   - the float32 state an op carries between frames (`state32`, in frames:
+ *     Frame trail's trail is one).
+ */
+export function effectHeldBytes(s: FrameShape, o: { reads: number; held8?: number; state32?: number }): number {
+  const f8 = frameBytes(s)
+  const main8 = (o.held8 ?? 0) + o.reads + 1
+  const worker8 = o.reads + 2
+  const floats = o.reads + 1 + (o.state32 ?? 0)
+  return f8 * (main8 + worker8) + 4 * f8 * floats
+}
 
 /** Python's int() of a validated INT widget (already converted by the plan). */
 const int = (v: unknown, fallback: number) => (typeof v === 'number' && Number.isFinite(v) ? Math.trunc(v) : fallback)
@@ -95,8 +123,7 @@ export const VIDEO_EFFECTS: Readonly<Record<string, VideoEffectSpec>> = {
       const r = trimRange(w, x.count)
       return { count: r.e - r.s, w: x.w, h: x.h, exact: x.exact }
     },
-    // One frame in hand, one out.
-    heldBytes: (_w, ins) => 2 * frameBytes(oneInput(ins)),
+    heldBytes: (_w, ins) => effectHeldBytes(oneInput(ins), { reads: 1 }),
     // Every input frame is decoded (the ones outside the range dropped), every output one moved.
     work: (_w, ins, out) => (oneInput(ins).count + out.count) * out.w * out.h * (VIDEO_IO_WORK_PER_PIXEL + SELECT_STEPS),
     streamOut: (w, ins, i) => {
@@ -115,7 +142,7 @@ export const VIDEO_EFFECTS: Readonly<Record<string, VideoEffectSpec>> = {
       const x = oneInput(ins)
       return { count: reverseCount(w.mode, x.count), w: x.w, h: x.h, exact: x.exact }
     },
-    heldBytes: (_w, ins) => (oneInput(ins).count + 1) * frameBytes(oneInput(ins)),
+    heldBytes: (_w, ins) => effectHeldBytes(oneInput(ins), { reads: 1, held8: oneInput(ins).count }),
     work: (_w, ins, out) => (oneInput(ins).count + out.count) * out.w * out.h * (VIDEO_IO_WORK_PER_PIXEL + SELECT_STEPS),
     heldSource: (w, ins, j) => {
       const T = oneInput(ins).count
@@ -128,9 +155,12 @@ export const VIDEO_EFFECTS: Readonly<Record<string, VideoEffectSpec>> = {
   },
   FrameTrail: {
     family: 'video-time', op: 'time.trail', inputs: ['frames'], reads: 'stream', preview: true,
-    shape: (_w, ins) => ({ ...oneInput(ins) }),
-    // A frame in, one out, and the trail (three float32 planes).
-    heldBytes: (_w, ins) => 2 * frameBytes(oneInput(ins)) + 4 * frameBytes(oneInput(ins)),
+    shape: (_w, ins) => {
+      const x = oneInput(ins)
+      return { count: x.count, w: x.w, h: x.h, exact: x.exact }
+    },
+    // The trail is carried as one float32 frame.
+    heldBytes: (_w, ins) => effectHeldBytes(oneInput(ins), { reads: 1, state32: 1 }),
     work: (_w, ins, out) => (oneInput(ins).count + out.count) * out.w * out.h * VIDEO_IO_WORK_PER_PIXEL + out.count * out.w * out.h * TRAIL_STEPS,
     passThrough: (_w, ins) => oneInput(ins).count <= 1,
   },

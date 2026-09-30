@@ -58,7 +58,7 @@ import { poseStartProblem } from './generators/nanoExtras'
 import { loadAudioStartProblems, soundStreamProblem } from './media/soundNodes'
 import { loadVideoStartProblems, videoFileVerdict } from './media/videoNodes'
 import { frameStartProblems, framesSoundVerdict } from './media/frameNodes'
-import { hasVideoEffect, mediaEffectStartProblems } from './video/start'
+import { hasVideoEffect, keptPeak, mediaEffectStartProblems, nearLimit } from './video/start'
 import { frameShapes, videoSourceShapeOf } from './video/shapes'
 import { markReleased, reviveReleased, spentKeptMedia } from './keptRelease'
 import { MEDIA_EFFECT_FAMILIES } from '#shared/runner/mediaEffects'
@@ -894,11 +894,16 @@ export function createEngine(deps: EngineDeps) {
     if (!(leg.families ?? []).some(f => (MEDIA_EFFECT_FAMILIES as readonly string[]).includes(f))) return
     const spent = spentKeptMedia(run)
     if (!spent.length) return
+    let any = false
     for (const s of spent) {
-      await kept.release(run.id, s.file)
+      // Asked again inside the run's kept lock, just before the file goes (R6.1 fix round 1): a node that has
+      // made the same bytes again since (another take's) keeps it.
+      const still = () => spentKeptMedia(run).some(x => x.file.subfolder === s.file.subfolder && x.file.filename === s.file.filename)
+      if (!(await kept.release(run.id, s.file, { still }))) continue
       markReleased(s.file, s.holders)
+      any = true
     }
-    await persist(run)
+    if (any) await persist(run)
   }
 
   // ── Opening a leg: price, hold, write down ─────────────────────────────
@@ -2238,11 +2243,26 @@ export function createEngine(deps: EngineDeps) {
     // through the chain, from the sources' headers and the widgets; a node past a limit (frames held,
     // work, the batch caps, the run's kept total) or reading a source the build can't read leaves the
     // whole workflow to the engine (RUNNER_NOT_ELIGIBLE), never a refusal.
-    for (const p of prompts) {
-      if (!hasVideoEffect(p, families)) continue
-      const shapes = await frameShapes(p, families, videoSourceShapeOf({ prompt: p, access: files, userId: i.userId, hosted: deps.hosted() }))
-      const bad = await mediaEffectStartProblems(p, families, { hosted: deps.hosted(), shapes })
-      if (bad) throw refuse(bad.message, 400, { nodeId: bad.nodeId, classType: bad.classType, reason: RUNNER_NOT_ELIGIBLE })
+    // Every figure is a true upper bound (R6.1 fix round 1): a source's frames from its header, its packets
+    // counted where the file's rate varies or a hosted figure lands within 10% of its limit. Several takes run
+    // side by side: none lets go of anything for the others, and each counts the others' kept bytes.
+    if (prompts.some(p => hasVideoEffect(p, families))) {
+      const shapeAll = async (count: boolean) => Promise.all(prompts.map(p => frameShapes(p, families,
+        videoSourceShapeOf({ prompt: p, access: files, userId: i.userId, hosted: deps.hosted(), count }))))
+      let shapes = await shapeAll(false)
+      const several = prompts.length > 1
+      const keptOf = (k: number) => {
+        const peak = keptPeak(prompts[k]!, families, shapes[k]!, { release: false })
+        return peak ? peak.bytes : Number.POSITIVE_INFINITY
+      }
+      const others = (k: number) => (several ? prompts.reduce((sum, _p, j) => (j === k ? sum : sum + keptOf(j)), 0) : 0)
+      const opts = (k: number) => ({ hosted: deps.hosted(), shapes: shapes[k]!, release: !several, keptOthers: others(k) })
+      if (prompts.some((p, k) => nearLimit(p, families, opts(k)))) shapes = await shapeAll(true)
+      for (const [k, p] of prompts.entries()) {
+        if (!hasVideoEffect(p, families) && !several) continue
+        const bad = await mediaEffectStartProblems(p, families, opts(k))
+        if (bad) throw refuse(bad.message, 400, { nodeId: bad.nodeId, classType: bad.classType, reason: RUNNER_NOT_ELIGIBLE })
+      }
     }
     // The picture cards' files (R1.3 follow-up): one a card would refuse at its
     // turn (16-bit, 32-bit, CMYK, a see-through GIF, a kind sharp can't read)

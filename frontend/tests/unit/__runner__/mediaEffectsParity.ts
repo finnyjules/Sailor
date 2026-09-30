@@ -12,10 +12,9 @@ import { join, resolve } from 'node:path'
 import sharp from 'sharp'
 import type { ApiPrompt } from '#shared/runner/graph'
 import type { RunnerFamily } from '#shared/runner/families'
-import { MEDIA_EFFECTS_PORTED } from '#shared/runner/mediaEffects'
 import { MEDIA_EFFECT_SCHEMAS } from '#shared/runner/mediaEffectSchemas.generated'
-import { LOCAL_RENDER_TYPES, RUNNER_NODE_RULES, SWITCHED_CLASSES, isRunnerEligible, outputKindsFor, runnerTakesNode, valueWiresAllowed } from '#shared/runner/eligibility'
-import { RUNNER_OUTPUT_CLASSES, pruneInvalidOutputs, runnerTakesWorkflow } from '#shared/runner/validate'
+import { isRunnerEligible, outputKindsFor, runnerTakesNode, valueWiresAllowed } from '#shared/runner/eligibility'
+import { pruneInvalidOutputs, runnerTakesWorkflow } from '#shared/runner/validate'
 import { nodesNeedingEngine } from '#shared/runner/needsEngine'
 import { planNode, type DeriveIO, type Derived, type NodePlan } from '~~/server/runner/executors'
 import { createEngineResultStore, type ResultStore } from '~~/server/runner/results'
@@ -208,33 +207,24 @@ export async function previewPixels(h: VfxHarness, file: { filename: string; sub
 // ── Rule 12: every answer as before R6.1 ─────────────────────────────────────
 
 /**
- * `fn` answered as it would be before R6.1: the ported R6 classes' rows,
- * switches, renders and output-node entries taken out, and Create video's and
- * Save video frames' rows without the frame-batch sources R6.1 gave them.
+ * Rule 12's baseline (R6.1 fix round 1, M2): the answers of the code at
+ * f0d1f7da1, before R6.1, pinned by a generator run over a `git archive` of
+ * that commit (fixtures/runner-media-vfx-rule12.json): per graph and family
+ * set, the hash of `invariantAnswers`; saved project graphs by their
+ * prompt's hash; PICTURE_OUTPUTS whole.
  */
-export function beforeR61<T>(fn: () => T): T {
-  const rules = RUNNER_NODE_RULES as Record<string, unknown>
-  const switched = SWITCHED_CLASSES as Record<string, unknown>
-  const renders = LOCAL_RENDER_TYPES as Set<string>
-  const outputs = RUNNER_OUTPUT_CLASSES as Set<string>
-  const saved = MEDIA_EFFECTS_PORTED.map(c => [c, rules[c], switched[c], renders.has(c), outputs.has(c)] as const)
-  const create = rules.CreateVideo as { linkSources: Record<string, unknown> }
-  const saveFrames = rules.SaveVideoFrames as { linkSources?: Record<string, unknown> }
-  for (const c of MEDIA_EFFECTS_PORTED) { delete rules[c]; delete switched[c]; renders.delete(c); outputs.delete(c) }
-  rules.CreateVideo = { ...create, linkSources: { audio: create.linkSources.audio } }
-  const { linkSources: _frames, ...savePlain } = saveFrames
-  rules.SaveVideoFrames = savePlain
-  try { return fn() }
-  finally {
-    for (const [c, r, s, isRender, isOutput] of saved) {
-      rules[c] = r; switched[c] = s
-      if (isRender) renders.add(c)
-      if (isOutput) outputs.add(c)
-    }
-    rules.CreateVideo = create
-    rules.SaveVideoFrames = saveFrames
-  }
+export interface Rule12Pin {
+  commit: string
+  sets: Record<string, string[]>
+  pictureOutputs: Record<string, number[]>
+  graphs: Record<string, { prompt: ApiPrompt; answers: Record<string, string> }>
+  saved: Record<string, Record<string, string>>
 }
+export function rule12Pin(): Rule12Pin {
+  return JSON.parse(readFileSync(join(FIXTURES, 'runner-media-vfx-rule12.json'), 'utf8')) as Rule12Pin
+}
+/** The pin's hash of a JSON value (sha256, 16 hex digits). */
+export const hash16 = (x: unknown) => createHash('sha256').update(JSON.stringify(x)).digest('hex').slice(0, 16)
 
 /** Rule 12's answers: runnerTakesNode, nodesNeedingEngine, outputKindsFor, valueWiresAllowed (and the workflow's). */
 export function invariantAnswers(p: ApiPrompt, families: ReadonlySet<RunnerFamily>) {

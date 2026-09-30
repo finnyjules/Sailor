@@ -59,7 +59,7 @@ import { availableParallelism, tmpdir } from 'node:os'
 import { dirname, isAbsolute, join, normalize, sep } from 'node:path'
 import {
   MEDIA_JOB_TIMEOUT_MS, MEDIA_JOBS_PER_USER, MEDIA_LEASE_PROCESSES, MEDIA_MAX_ALLOC, MEDIA_ROUTE_JOBS_PER_USER, MEDIA_ROUTE_SLOTS, MEDIA_ROUTE_WAIT_MS,
-  MEDIA_STDERR_BYTES, MEDIA_WORDS,
+  MEDIA_STALL_MS, MEDIA_STDERR_BYTES, MEDIA_WORDS,
   type MediaWord,
 } from '#shared/runner/media'
 import { isHosted } from '../utils/deployMode'
@@ -599,6 +599,18 @@ export async function mediaLease<T>(o: { userId: string | null; signal?: AbortSi
   }
 }
 
+/**
+ * The clock a lease job's time is measured by (R6.1 fix round 1), and how
+ * often its watchdog looks. Tests stub it (`__setMediaClockForTests`).
+ */
+const clock = { now: () => Date.now(), tickMs: 1000 }
+
+/** Tests only: a stubbed clock for lease jobs' watchdog (null restores the real one). */
+export function __setMediaClockForTests(c: { now: () => number; tickMs: number } | null): void {
+  clock.now = c ? c.now : () => Date.now()
+  clock.tickMs = c ? c.tickMs : 1000
+}
+
 /** For tests: processes running now under a lease (0 once it has ended). */
 export function leaseProcesses(lease: MediaLease): number {
   return leases.get(lease)?.processes ?? 0
@@ -749,11 +761,33 @@ function spawnJob(file: string, job: MediaJob, cwd: string, atMost = Number.POSI
       wakeFailed()
     }
 
-    const timer = setTimeout(() => fail(new MediaError('timedOut')), timeoutMs)
+    // A job in a node's lease (R6.1 fix round 1) lives as long as its node streams frames through it, so it
+    // isn't held to one span of wall-clock time. Its clock runs only while the tool owes the node something:
+    // not while its output waits for the node (a frame queued on the worker, the next node's slot), nor while
+    // it waits for the node's next frame to encode. Held to the job's limit of that time in hosted (none
+    // locally, as Python has none), and killed when it makes no progress at all for MEDIA_STALL_MS.
+    const leased = !!job.lease
+    const activeLimit = leased ? (job.timeoutMs ?? (isHosted() ? MEDIA_JOB_TIMEOUT_MS.hosted : Number.POSITIVE_INFINITY)) : timeoutMs
+    let ours = 0
+    let active = 0
+    let idle = 0
+    let last = clock.now()
+    const tick = () => {
+      const now = clock.now()
+      if (ours === 0) { active += now - last; idle += now - last }
+      last = now
+      if (active > activeLimit || idle > MEDIA_STALL_MS) fail(new MediaError('timedOut'))
+    }
+    const progress = () => { if (leased) { tick(); idle = 0 } }
+    const oursBegins = () => { if (leased) { tick(); ours++ } }
+    const oursEnds = () => { if (leased) { tick(); ours--; idle = 0 } }
+    const watch = leased ? setInterval(tick, clock.tickMs) : null
+    const timer = leased ? null : setTimeout(() => fail(new MediaError('timedOut')), timeoutMs)
     const onAbort = () => fail(new MediaError('stopped'))
     job.signal?.addEventListener('abort', onAbort, { once: true })
 
     child.stderr!.on('data', (b: Buffer) => {
+      progress()
       stderrTail = Buffer.concat([stderrTail, b])
       if (stderrTail.length > MEDIA_STDERR_BYTES) stderrTail = stderrTail.subarray(stderrTail.length - MEDIA_STDERR_BYTES)
     })
@@ -761,11 +795,14 @@ function spawnJob(file: string, job: MediaJob, cwd: string, atMost = Number.POSI
     const out = child.stdout!
     out.on('data', (b: Buffer) => {
       if (failure !== null) return
+      progress()
       if (job.onStdout) {
         out.pause()
+        // The node's own time (it works on what it was handed): not the tool's.
+        oursBegins()
         inflight = inflight
           .then(() => (failure === null ? insideCallback.run(true, () => job.onStdout!(new Uint8Array(b.buffer, b.byteOffset, b.byteLength))) : undefined))
-          .then(() => { if (failure === null) out.resume() }, (e) => { fail(e); out.resume() })
+          .then(() => { oursEnds(); if (failure === null) out.resume() }, (e) => { oursEnds(); fail(e); out.resume() })
         return
       }
       collectedBytes += b.length
@@ -777,6 +814,7 @@ function spawnJob(file: string, job: MediaJob, cwd: string, atMost = Number.POSI
       const side = child.stdio[3] as NodeJS.ReadableStream
       side.on('data', (b: Buffer) => {
         if (failure !== null) return
+        progress()
         try { insideCallback.run(true, () => job.onSide!(new Uint8Array(b.buffer, b.byteOffset, b.byteLength))) }
         catch (e) { fail(e) }
       })
@@ -791,10 +829,16 @@ function spawnJob(file: string, job: MediaJob, cwd: string, atMost = Number.POSI
       const sink = child.stdin!
       sink.on('error', () => { /* the tool stopped reading; its exit code says why */ })
       void (async () => {
+        const it = job.stdin![Symbol.asyncIterator]()
         try {
-          for await (const chunk of job.stdin!) {
-            if (failure !== null || exited) break
-            if (!sink.write(chunk)) {
+          for (;;) {
+            // Waiting for the node's next frame is the node's time, not the tool's.
+            oursBegins()
+            let got: IteratorResult<Uint8Array>
+            try { got = await it.next() }
+            finally { oursEnds() }
+            if (got.done || failure !== null || exited) break
+            if (!sink.write(got.value)) {
               await new Promise<void>((r) => {
                 // Whichever comes first; the other listener goes too, so none pile up over a long encode.
                 const done = () => { sink.off('drain', done); sink.off('close', done); r() }
@@ -802,10 +846,15 @@ function spawnJob(file: string, job: MediaJob, cwd: string, atMost = Number.POSI
                 sink.once('close', done)
               })
             }
+            progress()
           }
         }
         catch (e) { fail(e) }
-        finally { sink.end() }
+        finally {
+          sink.end()
+          // Leaving early (a failure, Stop): the source is told, so it can let go of what it holds.
+          if (failure !== null || exited) void Promise.resolve(it.return?.()).catch(() => {})
+        }
       })()
     }
 
@@ -818,7 +867,8 @@ function spawnJob(file: string, job: MediaJob, cwd: string, atMost = Number.POSI
         if (finished) return
         finished = true
         // The time limit and Stop cover the job until here, a stuck callback included.
-        clearTimeout(timer)
+        if (timer) clearTimeout(timer)
+        if (watch) clearInterval(watch)
         job.signal?.removeEventListener('abort', onAbort)
         if (failure === null && code !== 0) failure = new MediaError('failed')
         const tail = stderrTail.toString('utf8')

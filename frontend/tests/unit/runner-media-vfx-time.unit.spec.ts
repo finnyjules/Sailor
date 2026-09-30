@@ -81,7 +81,7 @@ import { clipPath, requireMediaTools } from './__runner__/mediaParity'
 import { makeKit } from './__runner__/kit'
 import { createFileKeptBytes } from '~~/server/runner/keptBytes'
 import {
-  b64, batchBytes, beforeR61, clipFrames, coreBatch, invariantAnswers, keptBatch, previewPixels, runVfxNode, sha256, vfxFixture, vfxHarness, vfxRunId,
+  b64, batchBytes, clipFrames, coreBatch, hash16, invariantAnswers, rule12Pin, keptBatch, previewPixels, runVfxNode, sha256, vfxFixture, vfxHarness, vfxRunId,
   type VfxRun,
 } from './__runner__/mediaEffectsParity'
 
@@ -250,23 +250,24 @@ describe('the family', () => {
     }
   })
 
-  it('rule 12 over the synthetic graphs: with every R6 family off, or on with the tools missing, every answer is as before R6.1', () => {
-    const R6: RunnerFamily[] = ['video-time', 'video-join', 'video-look', 'video-stabilize', 'video-flow', 'video-draw', 'video-text', 'sound-effects', 'sound-denoise']
-    const allButR6 = ALL_RUNNER_FAMILIES.filter(f => !R6.includes(f))
-    // The server's own answer with the tools missing: every media family dropped (config.ts runnerFamilies).
-    const toolsMissing = ALL_RUNNER_FAMILIES.filter(f => !MEDIA_TOOL_FAMILIES.includes(f) && !MEDIA_EFFECT_TOOL_FAMILIES.includes(f))
-    const sets: [string, RunnerFamily[]][] = [['none', []], ['cards', ['cards']], ['cards, media-video, media-sound', ['cards', 'media-video', 'media-sound']], ['every family but R6', allButR6], ['every family, tools missing', toolsMissing]]
-    expect(Object.keys(FX.graphs)).toHaveLength(34)
-    for (const [cls, p] of Object.entries(FX.graphs)) {
-      for (const [name, fam] of sets) {
-        const families = new Set(fam)
-        expect(invariantAnswers(p, families), `${cls}, ${name}`).toEqual(beforeR61(() => invariantAnswers(p, families)))
+  it('rule 12 over the synthetic and hand-made graphs: with every R6 family off, or on with the tools missing or their media families off, every answer is the pinned one from before R6.1', () => {
+    const pin = rule12Pin()
+    expect(pin.commit).toBe('f0d1f7da1')
+    expect(Object.keys(pin.graphs).filter(k => k.startsWith('synthetic '))).toHaveLength(34)
+    for (const [name, g] of Object.entries(pin.graphs)) {
+      for (const [set, fam] of Object.entries(pin.sets)) {
+        expect(hash16(invariantAnswers(g.prompt, new Set(fam as RunnerFamily[]))), `${name}, ${set}`).toBe(g.answers[set])
       }
     }
+    // The server's own set with the tools missing drops every media and R6 family: one of the pinned sets.
+    const toolsMissing = ALL_RUNNER_FAMILIES.filter(f => !MEDIA_TOOL_FAMILIES.includes(f) && !MEDIA_EFFECT_TOOL_FAMILIES.includes(f))
+    expect(toolsMissing.sort()).toEqual([...pin.sets['every family before R6, tools missing']!].sort())
+    expect(PICTURE_OUTPUTS).toEqual(pin.pictureOutputs)
     for (const cls of MEDIA_EFFECTS_PORTED) expect(Object.hasOwn(PICTURE_OUTPUTS, cls), cls).toBe(false)
     // Teeth: with video-time on, a pilot's graph answers otherwise.
-    const on = new Set<RunnerFamily>([...allButR6, 'video-time'])
-    expect(invariantAnswers(FX.graphs.VideoReverse!, on)).not.toEqual(beforeR61(() => invariantAnswers(FX.graphs.VideoReverse!, on)))
+    const on = new Set<RunnerFamily>([...pin.sets['every family before R6']! as RunnerFamily[], 'video-time'])
+    const g = pin.graphs['synthetic VideoReverse']!
+    expect(hash16(invariantAnswers(g.prompt, on))).not.toBe(g.answers['every family before R6'])
   })
 })
 

@@ -133,10 +133,12 @@ const { mediaEffectStartProblems, keptBatchBound } = await import('~~/server/run
 const { VIDEO_EFFECTS } = await import('~~/server/runner/video/table')
 const { requireMediaTools, clipPath } = await import('./__runner__/mediaParity')
 const { makeKit, until } = await import('./__runner__/kit')
-const { createFileKeptBytes, KEPT_GONE } = await import('~~/server/runner/keptBytes')
+const { createFileKeptBytes, KEPT_GONE, withRunCap } = await import('~~/server/runner/keptBytes')
+const { pyFrameBound, pyFrameCount, probeMedia } = await import('~~/server/media/probe')
+const { spentKeptMedia } = await import('~~/server/runner/keptRelease')
 const { runnerFamilies } = await import('~~/server/runner/config')
 const { MEDIA_EFFECT_WORDS } = await import('#shared/runner/mediaEffects')
-const { batchBytes, beforeR61, invariantAnswers, keptBatch, runVfxNode, sha256, vfxHarness, vfxRunId } = await import('./__runner__/mediaEffectsParity')
+const { batchBytes, hash16, invariantAnswers, rule12Pin, keptBatch, runVfxNode, sha256, vfxHarness, vfxRunId } = await import('./__runner__/mediaEffectsParity')
 
 import type { ApiPrompt } from '#shared/runner/graph'
 import type { RunnerFamily } from '#shared/runner/families'
@@ -666,11 +668,6 @@ describe('kept batches let go once their readers have finished, and made again a
 // ── Rule 12 ──────────────────────────────────────────────────────────────────
 
 describe('rule 12: with every R6 family off (or on with the tools missing), every answer is as before R6.1', () => {
-  const allButR6 = ALL_RUNNER_FAMILIES.filter(f => !R6.includes(f))
-  const OFF_SETS: [string, RunnerFamily[]][] = [
-    ['none', []], ['cards', ['cards']], ['cards, media-video, media-sound', ['cards', 'media-video', 'media-sound']], ['every family but R6', allButR6],
-  ]
-
   it('the server answers the R6 families as off while the tools are missing', () => {
     const env = { ...process.env }
     process.env.NUXT_RUNNER_ENABLED = 'true'
@@ -687,32 +684,22 @@ describe('rule 12: with every R6 family off (or on with the tools missing), ever
     }
   })
 
-  it('over hand-made video graphs', () => {
-    const graphs: Record<string, ApiPrompt> = {
-      'parts remade': { l: loadVideo('a.mp4'), g: getComp('l'), v: createVideo(['g', 0], ['g', 2]), s: saveVideo('v') },
-      'frames through a Gate': { l: loadVideo('a.mp4'), g: getComp('l'), x: gate(['g', 0]), v: createVideo(['x', 0]), s: saveVideo('v') },
-      'frames saved': { l: loadVideo('a.mp4'), g: getComp('l'), s: saveFrames(['g', 0]) },
-      reversed: reversed(),
-      'a chain': { l: loadVideo('a.mp4'), g: getComp('l'), t: trim(['g', 0], 1, 5), r: reverse(['t', 0]), f: trail(['r', 0]), s: saveFrames(['f', 0]) },
-    }
-    for (const [name, p] of Object.entries(graphs)) {
-      for (const [set, fam] of OFF_SETS) {
-        const families = new Set(fam)
-        expect(invariantAnswers(p, families), `${name}, ${set}`).toEqual(beforeR61(() => invariantAnswers(p, families)))
-      }
-    }
-    for (const c of MEDIA_EFFECTS_PORTED) expect(Object.hasOwn(PICTURE_OUTPUTS, c), c).toBe(false)
-    // Teeth: with video-time on, the answers differ.
-    expect(invariantAnswers(reversed(), ON)).not.toEqual(beforeR61(() => invariantAnswers(reversed(), ON)))
+  it('PICTURE_OUTPUTS is the pinned one, and the teeth: with video-time on, the answers differ', () => {
+    const pin = rule12Pin()
+    expect(PICTURE_OUTPUTS).toEqual(pin.pictureOutputs)
+    const g = pin.graphs['hand-made reversed']!
+    expect(hash16(invariantAnswers(g.prompt, ON))).not.toBe(g.answers.cards)
   })
 
   const PROJECTS = fileURLToPath(new URL('../../../user/sailor/projects/', import.meta.url))
   const projectsIt = existsSync(PROJECTS) ? it : it.skip
-  projectsIt('over every saved project graph (made into prompts as the app makes them)', async () => {
+  projectsIt('over every saved project graph (made into prompts as the app makes them): the answers pinned from before R6.1', async () => {
     const { gunzipSync } = await import('node:zlib')
     const { graphToPrompt } = await import('~/lib/graph/graphToPrompt')
     const catalog = JSON.parse(gunzipSync(readFileSync(fileURLToPath(new URL('../../server/native/objectInfo.baseline.json.gz', import.meta.url)))).toString('utf8'))
+    const pin = rule12Pin()
     let graphs = 0
+    let matched = 0
     for (const uuid of readdirSync(PROJECTS).sort()) {
       let wf: { canvases?: { workflow: unknown }[] } | undefined
       try { wf = JSON.parse(readFileSync(join(PROJECTS, uuid, 'versions', 'current.json'), 'utf8')).workflow }
@@ -721,14 +708,234 @@ describe('rule 12: with every R6 family off (or on with the tools missing), ever
         let p: ApiPrompt
         try { p = graphToPrompt(c.workflow as never, catalog) }
         catch { continue }
-        for (const [name, fam] of OFF_SETS) {
-          const families = new Set(fam)
-          expect(invariantAnswers(p, families), `${uuid}, ${name}`).toEqual(beforeR61(() => invariantAnswers(p, families)))
-        }
         graphs++
+        // A project edited since the pin was made has another prompt: it can't be compared.
+        const want = pin.saved[hash16(p)]
+        if (!want) continue
+        matched++
+        for (const [set, fam] of Object.entries(pin.sets)) {
+          expect(hash16(invariantAnswers(p, new Set(fam as RunnerFamily[]))), `${uuid}, ${set}`).toBe(want[set])
+        }
       }
     }
-    expect(graphs).toBeGreaterThanOrEqual(800)
-    console.info(`[media-vfx] rule 12 held over ${graphs} saved graphs`)
+    expect(matched).toBeGreaterThanOrEqual(800)
+    console.info(`[media-vfx] rule 12 held over ${matched} of ${graphs} saved graphs, against the answers pinned at ${pin.commit}`)
   }, 300_000)
+})
+
+// ── Fix round 1 ──────────────────────────────────────────────────────────────
+
+describe('fix round 1 (I1): the start pass bounds a source’s frames, never estimates them', () => {
+  const clip = 'g_video_ps.mpg'
+
+  it('an MPEG-PS clip: Python’s estimate is under its decoded frames; the bound counts its packets (its rate varies)', LONG, async () => {
+    await requireMediaTools()
+    const path = clipPath(clip)
+    const p = await probeMedia(path, { userId: null, roots: [join(path, '..')] })
+    expect(await pyFrameCount(p, p.path, { userId: null })).toBe(6)
+    expect(await pyFrameBound(p, { userId: null })).toEqual({ frames: 8, counted: true })
+    // A constant-rate file: ceil(length × rate) + 2, from its header, without counting.
+    const cfr = clipPath('v_stereo_aac.mp4')
+    const q = await probeMedia(cfr, { userId: null, roots: [join(cfr, '..')] })
+    expect(await pyFrameBound(q, { userId: null })).toEqual({ frames: 26, counted: false })
+    expect(await pyFrameBound(q, { userId: null, count: true })).toEqual({ frames: 24, counted: true })
+  })
+
+  function hostedKit() {
+    const dir = mkdtempSync(join(scratch, 'runs-'))
+    const k = makeKit({ hosted: true, dir, deps: { families: () => ON, kept: createFileKeptBytes(join(dir, 'kept')) } })
+    for (const c of [clip, 'v_stereo_aac.mp4']) copyFileSync(clipPath(c), join(k.root, 'input', c))
+    return k
+  }
+  const reversedFrom = (file: string): ApiPrompt => ({ l: loadVideo(file), g: getComp('l'), r: reverse(['g', 0]), s: saveFrames(['r', 0]) })
+  /** Reverse's held figure for `count` frames of `w` × `h` (table.ts effectHeldBytes: the frames held, in hand and on the worker). */
+  const reverseHeld = (count: number, w: number, h: number) => VIDEO_EFFECTS.VideoReverse!.heldBytes({ mode: 'reverse' }, [{ count, w, h, exact: false }])
+
+  it('a variable-rate clip whose estimate is under the held limit and whose real count is over it leaves the workflow to the engine; the node’s own check is the backstop', LONG, async () => {
+    await requireMediaTools()
+    const k = hostedKit()
+    const caps = MEDIA_CAPS.hosted as { heldFrameBytes: number }
+    const saved = caps.heldFrameBytes
+    // 32 × 24: 6 frames (the estimate) fit, 8 (its frames) don't.
+    caps.heldFrameBytes = reverseHeld(7, 32, 24)
+    expect(reverseHeld(6, 32, 24)).toBeLessThanOrEqual(caps.heldFrameBytes)
+    expect(reverseHeld(8, 32, 24)).toBeGreaterThan(caps.heldFrameBytes)
+    try {
+      await expect(k.engine.startRun({ userId: k.userId, takes: [reversedFrom(clip)], ...START }))
+        .rejects.toMatchObject({ statusCode: 400, message: MEDIA_EFFECT_WORDS.heldTooMuch, data: { reason: RUNNER_NOT_ELIGIBLE } })
+      expect(k.ledger.hold).not.toHaveBeenCalled()
+      // Had it run, Reverse would have failed at its turn, plainly (the backstop).
+      await asHosted(async () => {
+        const h = vfxHarness(scratch, { hosted: true })
+        const runId = vfxRunId(++runs)
+        const eight = await keptBatch(h, runId, { frames: Array.from({ length: 8 }, (_, i) => new Uint8Array(32 * 24 * 3).fill(i)), w: 32, h: 24 })
+        await expect(runVfxNode(h, reversedFrom(clip), 'r', { g: { 0: eight } }, { runId, families: ON })).rejects.toThrow(MEDIA_EFFECT_WORDS.heldTooMuch)
+      })
+    }
+    finally { caps.heldFrameBytes = saved }
+  })
+
+  it('a bound within 10% of a hosted limit is measured again with the packets counted, before the hold', LONG, async () => {
+    await requireMediaTools()
+    const k = hostedKit()
+    const caps = MEDIA_CAPS.hosted as { heldFrameBytes: number }
+    const saved = caps.heldFrameBytes
+    // The header bound (26 frames) lands within 10% of the limit; its 24 frames, counted, fit.
+    caps.heldFrameBytes = reverseHeld(26, 32, 24) + 1
+    try {
+      const from = jobs.list.length
+      const { runId } = await k.engine.startRun({ userId: k.userId, takes: [reversedFrom('v_stereo_aac.mp4')], ...START })
+      const counted = jobs.list.slice(from).filter(j => j.tool === 'ffprobe' && j.args.includes('-count_packets'))
+      expect(counted.length).toBeGreaterThanOrEqual(1)
+      await k.engine.settled(runId)
+      expect((await k.store.get(runId))!.takes[0]!.nodes.s!.status).toBe('done')
+    }
+    finally { caps.heldFrameBytes = saved }
+  })
+})
+
+describe('fix round 1 (I2): the kept total is pessimistic about branches running side by side', () => {
+  const HD = { w: 1920, h: 1080 }
+  it('300 frames of 1080p into four Frame trails, each saved, leaves the workflow to the engine in hosted', async () => {
+    const p: ApiPrompt = { l: loadVideo('a.mp4'), g: getComp('l') }
+    const shapes = new Map([['g:0', { count: 300, ...HD, exact: false }]])
+    for (let i = 1; i <= 4; i++) {
+      p[`f${i}`] = trail(['g', 0])
+      p[`s${i}`] = saveFrames([`f${i}`, 0])
+      shapes.set(`f${i}:0`, { count: 300, ...HD, exact: false })
+    }
+    expect(await mediaEffectStartProblems(p, ON, { hosted: true, shapes }))
+      .toMatchObject({ message: MEDIA_EFFECT_WORDS.keptTooMuch, engine: true })
+    // One trail alone fits: Get video components' batch and its own.
+    const one: ApiPrompt = { l: p.l!, g: p.g!, f1: p.f1!, s1: p.s1! }
+    expect(await mediaEffectStartProblems(one, ON, { hosted: true, shapes })).toBeNull()
+  })
+
+  it('counts Get video components’ kept sound (never let go), and nothing is let go between takes', async () => {
+    const { keptPeak } = await import('~~/server/runner/video/start')
+    const p: ApiPrompt = { l: loadVideo('a.mp4'), g: getComp('l'), t: trim(['g', 0], 1), s: saveFrames(['t', 0]) }
+    const plain = new Map([['g:0', { count: 10, w: 64, h: 48, exact: false }], ['t:0', { count: 9, w: 64, h: 48, exact: false }]])
+    const withSound = new Map([['g:0', { count: 10, w: 64, h: 48, exact: false, soundBytes: 5_000_000 }], ['t:0', { count: 9, w: 64, h: 48, exact: false }]])
+    const a = keptPeak(p, ON, plain, { release: true })!
+    const b = keptPeak(p, ON, withSound, { release: true })!
+    expect(b.bytes - a.bytes).toBe(5_000_000)
+    // A chain lets its source go once the next node has read it; with several takes nothing is let go.
+    const chain: ApiPrompt = { ...p, t2: trim(['t', 0], 1), s: saveFrames(['t2', 0]) }
+    const shapes3 = new Map([...plain, ['t2:0', { count: 8, w: 64, h: 48, exact: false }]])
+    expect(keptPeak(chain, ON, shapes3, { release: false })!.bytes).toBeGreaterThan(keptPeak(chain, ON, shapes3, { release: true })!.bytes)
+  })
+})
+
+describe('fix round 1 (I3): a lease job’s time is the tool’s own, with no whole-node limit locally', () => {
+  let dir: string
+  beforeEach(() => { dir = mkdtempSync(join(scratch, 'clock-')) })
+  afterEach(async () => {
+    fake.tools = null
+    const { __setMediaClockForTests } = await import('~~/server/media/run')
+    __setMediaClockForTests(null)
+  })
+  function tool(body: string): void {
+    const f = join(dir, 'ffmpeg')
+    writeFileSync(f, `#!/bin/sh\n${body}\n`)
+    chmodSync(f, 0o755)
+    fake.tools = { ffmpeg: f, ffprobe: f, version: 'ffmpeg version 8.0.3-sailor1', buildconf: [], encoders: new Set(), protocols: { input: ['file', 'pipe'], output: ['file', 'pipe'] } }
+  }
+  /** A thousand stubbed milliseconds for every real one: a real second is almost 17 minutes. */
+  async function stubClock(): Promise<void> {
+    const { __setMediaClockForTests } = await import('~~/server/media/run')
+    const t0 = Date.now()
+    __setMediaClockForTests({ now: () => t0 + (Date.now() - t0) * 1000, tickMs: 20 })
+  }
+  const leased = (o: { onStdout?: (c: Uint8Array) => Promise<void> } = {}) => mediaLease({ userId: null }, lease =>
+    runMedia({ tool: 'ffmpeg', args: ['-i', 'pipe:0', 'pipe:1'], userId: null, lease, ...(o.onStdout ? { onStdout: o.onStdout } : {}) }))
+  // A tool that works for 1.5 s (25 stubbed minutes), printing as it goes.
+  const busy = 'i=0; while [ $i -lt 30 ]; do printf x; /bin/sleep 0.05; i=$((i+1)); done'
+
+  it('locally a tool that keeps working runs past the old 30-minute limit', LONG, async () => {
+    tool(busy)
+    await stubClock()
+    const r = await leased()
+    expect(Buffer.from(r.stdout!).toString()).toBe('x'.repeat(30))
+  })
+
+  it('in hosted the tool’s own time is held to the job limit (10 minutes)', LONG, async () => {
+    tool(busy)
+    await stubClock()
+    await asHosted(async () => {
+      await expect(leased()).rejects.toThrow(MEDIA_WORDS.timedOut)
+    })
+  })
+
+  it('a tool that makes no progress for five minutes is killed (the stall watchdog)', LONG, async () => {
+    tool('exec /bin/sleep 30')
+    await stubClock()
+    const t0 = Date.now()
+    await expect(leased()).rejects.toThrow(MEDIA_WORDS.timedOut)
+    expect(Date.now() - t0).toBeLessThan(5_000)
+  })
+
+  it('time the node holds the tool up (its frame on the worker, a slot) isn’t counted', LONG, async () => {
+    tool('printf a; /bin/sleep 0.05; printf b; /bin/sleep 0.05; printf c')
+    await stubClock()
+    let chunks = 0
+    // Each chunk held for 0.5 s (over eight stubbed minutes), past the stall limit: none of it is the tool's.
+    await leased({ onStdout: async () => { chunks++; await sleep(500) } })
+    expect(chunks).toBeGreaterThanOrEqual(1)
+  })
+})
+
+describe('fix round 1 (M1): a release never removes a batch made again since it was decided', () => {
+  const rec = (status: string, values?: Record<number, RunnerValue>) => ({ status, classType: 'VideoTrim', leg: 0, endpoint: null, payload: null, fingerprint: null, request: null, outputs: [], reused: false, credits: 0, startedAt: null, endedAt: null, error: null, ...(values ? { values } : {}) })
+
+  it('another take making the same bytes after the snapshot keeps the file', async () => {
+    const dir = mkdtempSync(join(scratch, 'race-'))
+    const kept = withRunCap(createFileKeptBytes(dir), () => Number.POSITIVE_INFINITY)
+    const runId = vfxRunId(++runs)
+    const bytes = Buffer.from('the same batch')
+    const write = async () => {
+      const work = await kept.workDir(runId)
+      writeFileSync(join(work, 'frames.mkv'), bytes)
+      return kept.putPath(runId, join(work, 'frames.mkv'), 'mkv')
+    }
+    const file = await write()
+    const value: RunnerValue = { kind: 'frames', file, count: 1, w: 1, h: 1 }
+    const prompt: ApiPrompt = { a: trim(['x', 0]), r: saveFrames(['a', 0]) }
+    // Take 0 made it and read it; take 1's maker hasn't started.
+    const run = {
+      id: runId,
+      takes: [
+        { index: 0, prompt, nodes: { a: rec('done', { 0: value }), r: rec('done') }, openGates: [], droppedGates: [] },
+        { index: 1, prompt, nodes: { a: rec('waiting'), r: rec('waiting') }, openGates: [], droppedGates: [] },
+      ],
+    } as never as Parameters<typeof spentKeptMedia>[0]
+    const spent = spentKeptMedia(run)
+    expect(spent.map(s => s.file)).toEqual([file])
+    // Take 1's maker starts after the snapshot and puts the same bytes; the release, queued behind it, asks again.
+    run.takes[1]!.nodes.a!.status = 'running'
+    const again = write()
+    const still = () => spentKeptMedia(run).some(x => x.file.filename === file.filename)
+    const released = kept.release(runId, file, { still })
+    expect(await again).toEqual(file)
+    expect(await released).toBe(false)
+    expect(await kept.exists(file)).toBe(true)
+    // With nothing made again, the same release lets it go.
+    run.takes[1]!.nodes.a!.status = 'waiting'
+    expect(await kept.release(runId, file, { still })).toBe(true)
+    expect(await kept.exists(file)).toBe(false)
+  })
+})
+
+describe('fix round 1 (M3): the held figure counts the worker’s float tensors', () => {
+  it('one cost model: frames held and in hand, the worker’s 8-bit frames and its float32 tensors and state', async () => {
+    const { effectHeldBytes } = await import('~~/server/runner/video/table')
+    const s = { count: 10, w: 4096, h: 4096, exact: true }
+    const f8 = 4096 * 4096 * 3
+    // Frame trail: in hand 2 + worker 3 frames at 8 bits; input, output and trail as float32.
+    expect(VIDEO_EFFECTS.FrameTrail!.heldBytes({}, [s])).toBe(5 * f8 + 3 * 4 * f8)
+    expect(VIDEO_EFFECTS.FrameTrail!.heldBytes({}, [s])).toBe(effectHeldBytes(s, { reads: 1, state32: 1 }))
+    expect(VIDEO_EFFECTS.VideoTrim!.heldBytes({}, [s])).toBe(5 * f8 + 2 * 4 * f8)
+    expect(VIDEO_EFFECTS.VideoReverse!.heldBytes({ mode: 'reverse' }, [s])).toBe((10 + 5) * f8 + 2 * 4 * f8)
+    // At a hosted 4096² frame Frame trail holds about 850 MB: over 512 MiB, so it goes to the engine.
+    expect(VIDEO_EFFECTS.FrameTrail!.heldBytes({}, [s])).toBeGreaterThan(MEDIA_CAPS.hosted.heldFrameBytes)
+  })
 })

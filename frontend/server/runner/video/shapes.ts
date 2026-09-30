@@ -23,7 +23,7 @@ import type { FileAccess } from '../fileAccess'
 import { parseInputFileRef } from '../inputs'
 import { loadFramesPick, settingsOf } from '../media/frameNodes'
 import { probeVideoFile } from '../../media/values'
-import { pyFrameCount } from '../../media/probe'
+import { pyFrameBound, type MediaProbe } from '../../media/probe'
 import { VIDEO_EFFECTS, mediaEffectParams, type FrameShape } from './table'
 
 const key = (l: ApiLink) => `${l[0]}:${l[1]}`
@@ -126,6 +126,15 @@ export async function frameShapes(
         s = at(inputs.video) ?? (isLink(inputs.video) && madeVideoLink(prompt, inputs.video) ? null : await sourceShape(id, n.class_type))
         break
       case 'LoadVideoFrames': s = await sourceShape(id, n.class_type); break
+      case 'SaveVideo': {
+        // A file saved with a format or codec other than its own is decoded into a kept batch first (R5.4):
+        // counted as a kept file of its own (`${id}:kept`), never let go before the run ends. A made video's
+        // frames are its batch already.
+        if (!isLink(inputs.video) || madeVideoLink(prompt, inputs.video) || (inputs.format === 'auto' && inputs.codec === 'auto')) break
+        const k = await sourceShape(id, n.class_type)
+        shapes.set(`${id}:kept`, k ?? { count: -1, w: 0, h: 0, exact: false })
+        break
+      }
       default: {
         if (!takenVideoEffect(n.class_type, families)) break
         const spec = VIDEO_EFFECTS[n.class_type]!
@@ -166,25 +175,43 @@ function videoFileOf(prompt: ApiPrompt, link: ApiLink, depth = 0): OutputFile | 
   return null
 }
 
+/** The sound Get video components keeps of a file (its last stream, float32), bounded: null when its length can't be known. */
+function keptSoundBound(p: MediaProbe): number | null {
+  const t = p.sound.at(-1)
+  if (!t) return 0
+  const secs = t.duration !== null ? (t.duration * t.timeBase.num) / t.timeBase.den
+    : p.containerDuration !== null ? p.containerDuration / 1e6
+      : t.measuredSeconds
+  if (secs === null || !Number.isFinite(secs) || secs < 0 || !(t.rate > 0) || !(t.channels > 0)) return null
+  // A second more than the header says, and the WAV's header.
+  return t.channels * (Math.ceil(secs * t.rate) + t.rate) * 4 + 4096
+}
+
 /**
  * The start pass's sources in a run (engine.ts): the file each Get video
- * components or Load video frames reads, probed as the node will read it. Null
- * where it can't be known (the file isn't there, or the build can't read it:
- * the start checks before this one say which).
+ * components or Load video frames reads (and a Save video that re-encodes a
+ * file, which keeps its frames on the way), probed as the node will read it,
+ * its frames bounded by `pyFrameBound` (R6.1 fix round 1: a TRUE upper bound,
+ * never Python's estimate; `count`: the packets counted). Get video
+ * components' shape carries the bound of the sound it keeps. Null where it
+ * can't be known (the file isn't there, the build can't read it, a length
+ * can't be bounded): the workflow is then left to the engine.
  */
-export function videoSourceShapeOf(o: { prompt: ApiPrompt; access: FileAccess; userId: string | null; hosted: boolean; signal?: AbortSignal }): (nodeId: string, classType: string) => Promise<FrameShape | null> {
+export function videoSourceShapeOf(o: { prompt: ApiPrompt; access: FileAccess; userId: string | null; hosted: boolean; signal?: AbortSignal; count?: boolean }): (nodeId: string, classType: string) => Promise<FrameShape | null> {
   return async (nodeId, classType) => {
     const n = o.prompt[nodeId]
     if (!n) return null
     const inputs = n.inputs ?? {}
     try {
-      if (classType === 'GetVideoComponents') {
+      if (classType === 'GetVideoComponents' || classType === 'SaveVideo') {
         const file = isLink(inputs.video) ? videoFileOf(o.prompt, inputs.video) : null
         if (!file || !(await o.access.exists(file))) return null
         const p = await probeVideoFile(file, o)
         const v = p.video[0]!
-        const count = await pyFrameCount(p, p.path, { userId: o.userId, signal: o.signal })
-        return { count, w: v.w, h: v.h, exact: false }
+        const bound = await pyFrameBound(p, { userId: o.userId, signal: o.signal, count: o.count })
+        const sound = classType === 'GetVideoComponents' ? keptSoundBound(p) : 0
+        if (sound === null) return null
+        return { count: bound.frames, w: v.w, h: v.h, exact: false, ...(bound.counted ? { counted: true } : {}), ...(sound ? { soundBytes: sound } : {}) }
       }
       if (classType === 'LoadVideoFrames') {
         const file = isLink(inputs.file) ? null : parseInputFileRef(inputs.file)
@@ -192,9 +219,11 @@ export function videoSourceShapeOf(o: { prompt: ApiPrompt; access: FileAccess; u
         const p = await probeVideoFile(file, o)
         const v = p.video[0]!
         const pick = loadFramesPick({ w: v.w, h: v.h, rate: v.averageRate }, settingsOf(inputs))
-        // The header's frames bound the pick (as planLoadVideoFrames' own check); none picked is Python's 64 × 64 black frame.
-        const known = v.frames && v.frames > 0 ? Math.min(pick.count, Math.max(0, Math.ceil((v.frames - pick.start) / pick.stride))) : pick.count
-        return known > 0 ? { count: known, w: pick.tw, h: pick.th, exact: false } : { count: 1, w: 64, h: 64, exact: false }
+        // The pick stops at `count` frames; the file's frame bound bounds it too. None picked is Python's 64 × 64 black frame.
+        const bound = await pyFrameBound(p, { userId: o.userId, signal: o.signal, count: o.count })
+        const known = Math.min(pick.count, Math.max(0, Math.ceil((bound.frames - pick.start) / pick.stride)))
+        const counted = bound.counted ? { counted: true as const } : {}
+        return known > 0 ? { count: known, w: pick.tw, h: pick.th, exact: false, ...counted } : { count: 1, w: 64, h: 64, exact: false, ...counted }
       }
     }
     catch { return null }
