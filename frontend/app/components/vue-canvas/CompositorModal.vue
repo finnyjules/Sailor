@@ -133,8 +133,12 @@ import { resolveWiredSourceKind } from '~/lib/studio/frameResolve'
 import { frameSourceEpoch, type StudioFrameSource } from '~/lib/studio/frameSource'
 import { deriveMasterClock, slotPhase01, masterFrameIndex } from '~/lib/compositor/masterClock'
 import {
-  onDepthChange, depthImageFor, requestDepth, depthSourceFromViewUrl, depthKey,
+  onDepthChange, depthImageFor, requestDepth, depthSourceFromViewUrl, depthKey, depthStatusFor,
 } from '~/lib/compositor/depthRegistry'
+import RelightControls from '~/components/vue-canvas/compositor/RelightControls.vue'
+import { sanitizeRelight } from '~/lib/relight/settings'
+import { relightAvailable, relightUnavailableReason } from '~/lib/relight/relightPass'
+import { setRelightBypass } from '~/composables/useCompositorLayers'
 import { DEFAULT_DISPLACE_MAP } from '~/lib/compositor/displace'
 import { imageUrlForNode } from '~/lib/canvas/nodeImage'
 import { imageUrlToFile } from '~/lib/canvas/imageUrlToFile'
@@ -2810,6 +2814,21 @@ function updateActiveEffect(patch: Record<string, unknown>) {
   if (!sel || !l) return
   setLayerStack(sel.layerId, layerStack(l).map(e => (e.id === sel.effectId ? { ...e, ...patch } : e)))
 }
+// Relight: which of the effect's lights the panel and the on-canvas handles show as selected.
+// Owned here (not by RelightControls) so it survives the panel re-rendering, and reset to the
+// first light whenever the selection lands on a different Relight instance (or one loses its
+// current light, e.g. after Remove).
+const relightLightId = ref<string | null>(null)
+watch(activeEffect, (v) => {
+  if (v?.type === 'relight') {
+    const f = sanitizeRelight(v)
+    if (!f.lights.some(l => l.id === relightLightId.value)) relightLightId.value = f.lights[0]?.id ?? null
+  }
+})
+const activeEffectDepthStatus = computed<'idle' | 'loading' | 'ready' | 'error'>(() => {
+  void depthTick.value
+  return activeEffectDepth.value ? depthStatusFor(activeEffectDepth.value) : 'error'
+})
 /** The kinds `PostEffectsControls` draws — read from that component's own section list,
  *  so adding a section there cannot leave an effect row selecting into an empty panel. */
 const isPanelKind = (k: EffectKind) => (PANEL_EFFECT_KINDS as string[]).includes(k)
@@ -6018,7 +6037,11 @@ function renderStack(wallT?: number, live = false) {
 // subscription a DOF layer would stay unblurred until some unrelated interaction
 // happened to trigger a repaint.
 let stopDepthWatch: (() => void) | null = null
-onMounted(() => { stopDepthWatch = onDepthChange(() => renderStack()) })
+// The registry is a plain module, not reactive — bump a counter on change so the Relight
+// panel's depth status (idle/loading/ready/error) re-renders, same nudge PostEffectsControls
+// gives its own depthStatus computed.
+const depthTick = ref(0)
+onMounted(() => { stopDepthWatch = onDepthChange(() => { renderStack(); depthTick.value++ }) })
 // A still shader fill (a Mosaic in the Oddgrid / Static style, speed 0) has no clock
 // to re-render it once the shader catalog lands — the first paint after a cold load
 // falls back to the spec's input paint and would stay that way until the next edit.
@@ -11247,6 +11270,20 @@ defineExpose({ editor, layoutGridResolved, layoutGrid, overlayGrid, viewLayoutGr
               @update:model-value="(v: boolean) => updateActiveEffect({ varnishOnly: v })" />
             <p class="text-[11px] text-white/40">Varnish only hides the layer's colours and leaves just the clear coat.</p>
             <FinishLightControl :light="frameLight" @update="(l: FrameLight) => setFrameLight(l)" />
+          </div>
+
+          <!-- Relight: a pinned GPU layer effect that relights the layer's own pixels from its
+               depth field. Setups, per-light controls and photo-wide controls all live in
+               RelightControls; this block only wires it to the selected effect and layer. -->
+          <div v-else-if="activeEffect!.type === 'relight'" class="space-y-1.5">
+            <p v-if="!relightAvailable()" class="text-[11px] text-white/50">{{ relightUnavailableReason() }}</p>
+            <RelightControls
+              :fx="sanitizeRelight(activeEffect)"
+              :selected-light="relightLightId"
+              :depth-status="activeEffectDepthStatus"
+              @update="(p) => updateActiveEffect(p)"
+              @select-light="(id) => (relightLightId = id)"
+              @compare="(on) => { setRelightBypass(on ? activeEffectLayer?.id ?? null : null); renderStack() }" />
           </div>
 
           <!-- Outer glow / Inner glow: a tinted halo outside (behind) or inside (clipped to) the
