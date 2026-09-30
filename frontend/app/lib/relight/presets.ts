@@ -28,7 +28,8 @@ export function applySetup(fx: RelightEffect, name: RelightSetupName): RelightEf
 
 const close = (a: number, b: number) => Math.abs(a - b) < 1e-3
 
-/** The setup these settings still match exactly (ids ignored), or null once anything moved. */
+/** The setup these settings still match exactly (ids ignored), or null once anything moved.
+ *  Photo controls (Depth, Texture, Shine, Shadows) are ignored on purpose: a setup defines only the lights and Original light. */
 export function setupOf(fx: RelightEffect): RelightSetupName | null {
   for (const name of RELIGHT_SETUP_NAMES) {
     const s = SETUPS[name]

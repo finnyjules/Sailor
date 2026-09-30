@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /** The Relight effect's settings. Layout and presets follow the mockup (artifact 7rAD2Mu5a2S5d34kHU42iy). */
-import { computed } from 'vue'
+import { computed, onBeforeUnmount, ref } from 'vue'
 import StudioSlider from '~/components/vue-canvas/studio/StudioSlider.vue'
 import StudioSwitch from '~/components/vue-canvas/studio/StudioSwitch.vue'
 import { RELIGHT_MAX_LIGHTS, RELIGHT_SWATCHES, newLightId, type RelightEffect, type RelightLight } from '~/lib/relight/settings'
@@ -29,11 +29,24 @@ function patchLight(p: Partial<RelightLight>) {
   emit('update', { lights: props.fx.lights.map(x => (x.id === l.id ? { ...x, ...p } : x)) })
 }
 function removeLight() {
-  const l = light.value; if (!l) return
+  const l = light.value; if (!l || props.fx.lights.length <= 1) return
   const rest = props.fx.lights.filter(x => x.id !== l.id)
   emit('update', { lights: rest })
   if (rest[0]) emit('select-light', rest[0].id)
 }
+// Compare is a hold. Every way the hold can end releases it — including the pointer being taken
+// away (pointercancel / lostpointercapture) and the panel going away mid-hold.
+const comparing = ref(false)
+function compare(on: boolean) {
+  if (comparing.value === on) return
+  comparing.value = on
+  emit('compare', on)
+}
+function compareDown(e: PointerEvent) {
+  try { (e.currentTarget as HTMLElement | null)?.setPointerCapture?.(e.pointerId) } catch { /* no capture: the other ends still release */ }
+  compare(true)
+}
+onBeforeUnmount(() => compare(false))
 const heightWord = (h: number) => (h < 0 ? 'Behind' : h < 0.2 ? 'Low' : h < 0.55 ? 'Mid' : 'High')
 </script>
 
@@ -55,7 +68,8 @@ const heightWord = (h: number) => (h < 0 ? 'Behind' : h < 0.2 ? 'Low' : h < 0.55
       <div class="flex items-center justify-between">
         <span class="text-white/40 uppercase tracking-[.04em] text-[11px]">Lights</span>
         <button data-testid="relight-compare" title="Hold to see the photo without Relight" class="h-7 px-2.5 rounded-[8px] bg-white/5 text-white/70 hover:text-white cursor-pointer"
-          @pointerdown="emit('compare', true)" @pointerup="emit('compare', false)" @pointerleave="emit('compare', false)">Compare</button>
+          @pointerdown="compareDown" @pointerup="compare(false)" @pointerleave="compare(false)"
+          @pointercancel="compare(false)" @lostpointercapture="compare(false)">Compare</button>
       </div>
       <div class="flex flex-wrap gap-1.5">
         <button v-for="(l, i) in fx.lights" :key="l.id" :data-testid="`relight-light-${i + 1}`"
@@ -73,7 +87,8 @@ const heightWord = (h: number) => (h < 0 ? 'Behind' : h < 0.2 ? 'Low' : h < 0.55
         <span class="text-white/40 uppercase tracking-[.04em] text-[11px]">Light {{ lightIndex }}</span>
         <div class="flex items-center gap-1">
           <StudioSwitch data-testid="relight-light-on" label="On" :model-value="light.on" @update:model-value="(v: boolean) => patchLight({ on: v })" />
-          <button data-testid="relight-remove-light" title="Remove light" class="size-7 rounded-[8px] hover:bg-white/10 text-white/60 cursor-pointer" @click="removeLight">✕</button>
+          <button data-testid="relight-remove-light" title="Remove light" :disabled="fx.lights.length <= 1"
+            class="size-7 rounded-[8px] hover:bg-white/10 text-white/60 cursor-pointer disabled:opacity-40 disabled:cursor-default disabled:hover:bg-transparent" @click="removeLight">✕</button>
         </div>
       </div>
       <div class="flex flex-wrap gap-1.5 items-center">

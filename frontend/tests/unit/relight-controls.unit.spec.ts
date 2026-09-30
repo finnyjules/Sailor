@@ -46,4 +46,27 @@ describe('RelightControls', () => {
     await b.trigger('pointerdown'); await b.trigger('pointerup')
     expect(w.emitted('compare')).toEqual([[true], [false]])
   })
+  it('releases Compare however the hold ends, once', async () => {
+    for (const end of ['pointercancel', 'lostpointercapture', 'pointerleave']) {
+      const w = mk()
+      const b = w.get('[data-testid="relight-compare"]')
+      await b.trigger('pointerdown'); await b.trigger(end); await b.trigger('pointerup')
+      expect(w.emitted('compare')).toEqual([[true], [false]])
+    }
+    const got: boolean[] = []
+    const fx = sanitizeRelight(null)
+    const w = mount(RelightControls, { props: { fx, selectedLight: fx.lights[0]!.id, depthStatus: 'ready', onCompare: (on: boolean) => got.push(on) } })
+    await w.get('[data-testid="relight-compare"]').trigger('pointerdown')
+    w.unmount()                                   // the panel goes away mid-hold
+    expect(got).toEqual([true, false])
+  })
+  it('cannot remove the last light', async () => {
+    const one = mk()
+    expect(one.get('[data-testid="relight-remove-light"]').attributes('disabled')).toBeDefined()
+    const fx = applySetup(sanitizeRelight(null), 'Neon')
+    const two = mk(fx)
+    expect(two.get('[data-testid="relight-remove-light"]').attributes('disabled')).toBeUndefined()
+    await two.get('[data-testid="relight-remove-light"]').trigger('click')
+    expect((two.emitted('update')![0]![0] as any).lights).toHaveLength(1)
+  })
 })

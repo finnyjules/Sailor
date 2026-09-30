@@ -139,6 +139,8 @@ import RelightControls from '~/components/vue-canvas/compositor/RelightControls.
 import { sanitizeRelight, RELIGHT_MAX_LIGHTS, newLightId } from '~/lib/relight/settings'
 import { relightAvailable, relightUnavailableReason, __relightRuns } from '~/lib/relight/relightPass'
 import { setRelightBypass } from '~/composables/useCompositorLayers'
+import { onRelightFieldReady } from '~/lib/relight/depthField'
+import { recordOnce, wheelGestureRecorder } from '~/lib/relight/gestureHistory'
 import { DEFAULT_DISPLACE_MAP } from '~/lib/compositor/displace'
 import { imageUrlForNode } from '~/lib/canvas/nodeImage'
 import { imageUrlToFile } from '~/lib/canvas/imageUrlToFile'
@@ -2361,7 +2363,7 @@ function pointerToRelight(ev: { clientX: number; clientY: number }, r: DOMRect):
 const relightHandles = computed(() => (relightFx.value?.lights ?? []).map(l => ({ l, ...relightToCanvas(l.x, l.y) })))
 function writeRelight(patch: Record<string, unknown>, record: boolean) {
   if (record) { updateActiveEffect(patch); return }
-  // During a drag: write without a history entry (recordHistory() ran once at pointer-down).
+  // Inside a gesture: write without a history entry (the gesture recorded its one step).
   const sel = selectedEffect.value; const l = sel ? layerById(sel.layerId) : null
   if (!sel || !l) return
   const stack = layerStack(l).map(e => (e.id === sel.effectId ? { ...e, ...patch } : e))
@@ -2372,29 +2374,37 @@ function onRelightHandleDown(e: PointerEvent, id: string) {
   e.preventDefault(); e.stopPropagation()
   relightLightId.value = id
   const r = canvasRect(); if (!r) return
-  recordHistory()                                            // one undo step for the whole drag
+  const recordDrag = recordOnce(recordHistory)               // one undo step, on the first move only
   const move = (ev: PointerEvent) => {
     const f = relightFx.value; if (!f) return
     const p = pointerToRelight(ev, r)
     const x = Math.min(1.4, Math.max(-0.4, p.x)), y = Math.min(1.4, Math.max(-0.4, p.y))
+    recordDrag()
     writeRelight({ lights: f.lights.map(l => (l.id === id ? { ...l, x, y } : l)) }, false)
   }
   const up = () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up) }
   window.addEventListener('pointermove', move); window.addEventListener('pointerup', up)
 }
+// One undo step per wheel run (first event after 300 ms of quiet), not per event.
+const recordRelightWheel = wheelGestureRecorder(recordHistory)
 function onRelightHandleWheel(e: WheelEvent, id: string) {
-  e.preventDefault()
+  if (viewOnlyGuard()) return
   const f = relightFx.value; if (!f) return
-  writeRelight({ lights: f.lights.map(l => (l.id === id ? { ...l, height: Math.min(1, Math.max(-0.3, l.height - e.deltaY * 0.001)) } : l)) }, true)
+  recordRelightWheel()
+  writeRelight({ lights: f.lights.map(l => (l.id === id ? { ...l, height: Math.min(1, Math.max(-0.3, l.height - e.deltaY * 0.001)) } : l)) }, false)
 }
-function onRelightDoubleClick(e: MouseEvent) {
-  const f = relightFx.value; if (!f || f.lights.length >= RELIGHT_MAX_LIGHTS) return
-  const r = canvasRect(); if (!r) return
+/** Double-click on the Relight layer adds a light. true only when it consumed the event (a
+ *  light was added, or the click snapped a viewing size back); anything else falls through. */
+function onRelightDoubleClick(e: MouseEvent): boolean {
+  const f = relightFx.value; if (!f || f.lights.length >= RELIGHT_MAX_LIGHTS) return false
+  const r = canvasRect(); if (!r) return false
   const p = pointerToRelight(e, r)
-  if (p.x < 0 || p.x > 1 || p.y < 0 || p.y > 1) return      // only on the layer itself
+  if (p.x < 0 || p.x > 1 || p.y < 0 || p.y > 1) return false  // only on the layer itself
+  if (viewOnlyGuard()) return true
   const l = { id: newLightId(), x: p.x, y: p.y, height: 0.35, color: '#f4f7ff', brightness: 1.4, reach: 1, on: true }
   updateActiveEffect({ lights: [...f.lights, l] })
   relightLightId.value = l.id
+  return true
 }
 
 /** The Frame light's on-canvas handle — shown while a Spot UV effect is selected, or while the
@@ -2888,6 +2898,8 @@ function updateActiveEffect(patch: Record<string, unknown>) {
 // first light whenever the selection lands on a different Relight instance (or one loses its
 // current light, e.g. after Remove).
 const relightLightId = ref<string | null>(null)
+// Compare is a hold: a selection change mid-hold must not leave that layer painting without Relight.
+watch(selectedEffect, () => { setRelightBypass(null) })
 watch(activeEffect, (v) => {
   if (v?.type === 'relight') {
     const f = sanitizeRelight(v)
@@ -3265,6 +3277,11 @@ function fxKindState(kind: EffectKind): { hidden?: true; disabled?: true; title?
   if (kind === 'dof' && !localDepthSource(l)) {
     return l.kind === 'image' || l.kind === 'wired'
       ? { disabled: true, title: 'Depth of field needs an image with a depth map' }
+      : { hidden: true }
+  }
+  if (kind === 'relight' && !localDepthSource(l)) {
+    return l.kind === 'image' || l.kind === 'wired'
+      ? { disabled: true, title: 'Relight needs an image with a depth map' }
       : { hidden: true }
   }
   // Geometry effects transform a vector outline before it rasterises: a layer with no outline
@@ -4379,7 +4396,7 @@ function onCanvasPointerUpCapture(e: PointerEvent) {
 }
 function onCanvasDblClickCapture(e: MouseEvent) {
   if (penSession.value) return // the pen's own double-clicks
-  if (relightSelected.value) { onRelightDoubleClick(e); return } // Relight owns double-click on its layer
+  if (relightSelected.value && onRelightDoubleClick(e)) { e.preventDefault(); e.stopPropagation(); return } // a double-click on the Relight layer adds a light
   if (viewEditing.value) { void onViewDblClick(e); return }
   // Double-click a path → enter node edit; otherwise fall back to text edit.
   if (!nodeEdit.active.value) {
@@ -6120,6 +6137,13 @@ let stopDepthWatch: (() => void) | null = null
 // gives its own depthStatus computed.
 const depthTick = ref(0)
 onMounted(() => { stopDepthWatch = onDepthChange(() => { renderStack(); depthTick.value++ }) })
+// Relight depth fields build in a worker; paint draws the layer plain until one lands.
+let stopRelightFieldWatch: (() => void) | null = null
+onMounted(() => { stopRelightFieldWatch = onRelightFieldReady(() => renderStack()) })
+onBeforeUnmount(() => {
+  stopRelightFieldWatch?.(); stopRelightFieldWatch = null
+  setRelightBypass(null)                                     // a held Compare never outlives the editor
+})
 // A still shader fill (a Mosaic in the Oddgrid / Static style, speed 0) has no clock
 // to re-render it once the shader catalog lands — the first paint after a cold load
 // falls back to the spec's input paint and would stay that way until the next edit.
@@ -9792,7 +9816,7 @@ defineExpose({ editor, layoutGridResolved, layoutGrid, overlayGrid, viewLayoutGr
               background: h.l.color, opacity: h.l.on ? 1 : 0.35,
               outline: h.l.height < 0 ? '1.5px dashed rgba(255,255,255,.8)' : 'none', outlineOffset: '4px',
               boxShadow: (h.l.id === relightLightId ? '0 0 0 2px #fff, 0 0 0 6px rgba(255,255,255,.22), ' : '0 0 0 2px rgba(255,255,255,.95), ') + `0 0 22px 6px ${h.l.color}99` }"
-            @pointerdown="onRelightHandleDown($event, h.l.id)" @wheel="onRelightHandleWheel($event, h.l.id)" />
+            @pointerdown="onRelightHandleDown($event, h.l.id)" @wheel.stop.prevent="onRelightHandleWheel($event, h.l.id)" />
         </template>
       </div>
 
