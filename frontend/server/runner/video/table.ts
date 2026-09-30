@@ -24,7 +24,9 @@
  *               nothing is held;
  *   generator — no input (R6.7, R6.8): each output frame one worker call
  *               from its params, and what the spec's `feed` hands it (Audio
- *               waveform's window of its sound);
+ *               waveform's window of its sound); a `still` one (Text clip)
+ *               makes its first frame on the worker and hands the writer
+ *               that same frame for the rest;
  *   tool      — the frames made by ffmpeg in the decode of the input itself
  *               (R6.6's Slow motion: minterpolate, `tool`), each handed
  *               straight to the writer: no worker op, nothing held.
@@ -47,6 +49,7 @@ import type { OutputFile } from '../types'
 import type { MediaLease } from '../../media/run'
 import type { SoundReadIO } from '../../media/values'
 import { waveMaxWindow, waveSamplesPerFrame, waveSoundOf, waveWindows } from './waveSound'
+import { CAPTION_RENDERS_KEPT, bundledFontFile, captionFeed, captionSegments, textClipMask } from './text'
 
 /**
  * A frame batch's count and size; `exact: false` when the count is an upper
@@ -121,13 +124,16 @@ export interface VideoEffectSpec {
     between(widgets: Record<string, unknown>, found: readonly (readonly number[])[]): Record<string, unknown>[]
   }
   /**
-   * 'generator' (R6.7's Audio waveform): what each output frame reads besides
-   * its widgets, in order, as its own params. Opened at the node's turn before
-   * the lease (a probe of the file it names), then read under the lease (its
-   * decode, ended once the frames have what they need); null when the frames
-   * read nothing (Python's silence). A frame past the feed's end gets none.
+   * 'generator' (R6.7's Audio waveform) and 'stream' (R6.8's Caption track):
+   * what each output frame reads besides its widgets, in order, as its own
+   * params. Opened at the node's turn before the lease (a probe of the file it
+   * names), then read under the lease (its decode, ended once the frames have
+   * what they need); null when the frames read nothing (Python's silence). A
+   * frame past the feed's end gets none.
    */
-  feed?(widgets: Record<string, unknown>, io: SoundReadIO): Promise<((lease: MediaLease) => AsyncIterable<Record<string, unknown>>) | null>
+  feed?(widgets: Record<string, unknown>, io: SoundReadIO, ins: readonly FrameShape[]): Promise<((lease: MediaLease) => AsyncIterable<Record<string, unknown>>) | null>
+  /** 'generator': every output frame is the first (Text clip): made once on the worker, the writer handed it again. */
+  still?: true
 }
 
 /** A window effect's reads (VideoEffectSpec.windowOf). */
@@ -493,6 +499,32 @@ function waveFftWork(w: Record<string, unknown>): number {
   return n * Math.log2(n) * FFT_STEPS + n
 }
 
+// ── R6.8: text on video ───────────────────────────────────────────────────────
+
+/**
+ * The letters drawn a pixel of their frame (sharp's librsvg: the fill, and the
+ * outline's stroke), measured on this Mac through the real plan (the spec's
+ * work figure).
+ */
+const RASTER_STEPS = 8
+/** Pillow's blend a pixel: the outline's and the letters' (Caption track). */
+const TEXT_BLEND_STEPS = 2
+/** The most text one Text clip draws, and all of one Caption track's captions: past it, the workflow goes to the engine. */
+export const TEXT_MAX_CHARS = 20_000
+export const CAPTIONS_MAX_CHARS = 200_000
+const textLength = (v: unknown) => (typeof v === 'string' ? v.length : 0)
+/** The font check (never over while the bundled font is in place) and the text's length. */
+const textLimits = (text: unknown, max: number) => [
+  { message: MEDIA_EFFECT_WORDS.textFontMissing, value: bundledFontFile() ? 0 : 1, limit: 0 },
+  { message: MEDIA_EFFECT_WORDS.textTooLong, value: textLength(text), limit: max },
+]
+/**
+ * Caption track's captions drawn at most: one a frame at most, and at most one
+ * a run of frames showing the same caption; the shown caption changes only at
+ * a caption's start or end, so there are at most 2 · captions + 1 runs.
+ */
+const captionRenders = (w: Record<string, unknown>, T: number) => Math.min(T, 2 * captionSegments(w.captions).length + 1)
+
 export const VIDEO_EFFECTS: Readonly<Record<string, VideoEffectSpec>> = {
   VideoTrim: {
     family: 'video-time', op: 'time.select', inputs: ['frames'], reads: 'stream', preview: true,
@@ -829,6 +861,55 @@ export const VIDEO_EFFECTS: Readonly<Record<string, VideoEffectSpec>> = {
           for await (const win of waveWindows(s, spf, io, lease)) yield { _window: win }
         },
       })
+    },
+  },
+  /**
+   * Text clip (nodes_text.py:67-165): the text wrapped, placed and drawn once
+   * over the background (./text.ts, ./core/textDraw.ts), every frame that one
+   * frame. VISUAL (the user's matching rule): Python's layout arithmetic on
+   * fontkit's reading of the same font, the letters drawn by sharp. Not an
+   * output node: no preview.
+   */
+  TextClip: {
+    family: 'video-text', op: 'txt.clip', inputs: [], reads: 'generator', preview: false, still: true,
+    shape: w => madeShape(w),
+    // The mask (the state and its copy on its way), sharp's RGBA of it, and the frame handed to the writer again.
+    heldBytes: (w) => {
+      const s = madeShape(w)
+      return effectHeldBytes(s, { reads: 0, extra: s.w * s.h * (2 + 4 + 3) })
+    },
+    // Every frame encoded; the one frame drawn and blended.
+    work: (_w, _ins, out) => out.w * out.h * (out.count * VIDEO_IO_WORK_PER_PIXEL + RASTER_STEPS + TEXT_BLEND_STEPS),
+    limits: w => textLimits(w.text, TEXT_MAX_CHARS),
+    loadState: (w, o) => textClipMask(w, o.hosted),
+  },
+  /**
+   * Caption track (nodes_video_pro.py:375-466): each frame's caption (the
+   * LAST whose [start, end) holds it) drawn centred at Python's place, the
+   * outline first (EXACT timing; VISUAL letters, as Text clip). Each distinct
+   * caption is drawn once on the main thread (./text.ts captionFeed) and
+   * blended on the worker; a frame with no caption is handed on unchanged.
+   * No captions at all hands the whole batch on.
+   */
+  CaptionTrack: {
+    family: 'video-text', op: 'txt.caption', inputs: ['frames'], reads: 'stream', preview: true,
+    shape: sameShape,
+    // One frame in hand; the kept renders (two masks each), sharp's RGBA of one, and this frame's copy of its masks.
+    heldBytes: (w, ins) => {
+      const x = oneInput(ins)
+      return effectHeldBytes(x, { reads: 1, extra: x.w * x.h * (2 * CAPTION_RENDERS_KEPT + 4 + 2) })
+    },
+    work: (w, ins, out) => {
+      const x = oneInput(ins)
+      return (x.count * x.w * x.h + out.count * out.w * out.h) * VIDEO_IO_WORK_PER_PIXEL
+        + out.count * out.w * out.h * TEXT_BLEND_STEPS + captionRenders(w, x.count) * 2 * x.w * x.h * RASTER_STEPS
+    },
+    limits: w => textLimits(w.captions, CAPTIONS_MAX_CHARS),
+    passThrough: w => captionSegments(w.captions).length === 0,
+    feed: async (w, io, ins) => {
+      const x = oneInput(ins)
+      const feed = captionFeed(w, io.hosted, x.w, x.h)
+      return () => feed
     },
   },
 }

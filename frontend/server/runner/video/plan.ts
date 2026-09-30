@@ -154,8 +154,9 @@ export function planVideoEffect(ctx: PlanContext): NodePlan {
       // What the op carries from its first frame (the LUT's table), read now, before the lease: the file's
       // plain failure words, with nothing started (the start pass said so before the hold).
       const first = !through && spec.loadState ? await spec.loadState(params, { read: f => io.read(f), hosted: media.hosted }) : undefined
-      // What a made clip's frames read (R6.7: Audio waveform's sound), opened now, before the lease (its probe).
-      const feed = !through && spec.feed ? await spec.feed(params, media) : null
+      // What each frame reads besides its widgets (R6.7: Audio waveform's sound; R6.8: Caption track's drawn
+      // captions), opened now, before the lease (a probe).
+      const feed = !through && spec.feed ? await spec.feed(params, media, ins) : null
       const made = await mediaLease({ userId: media.userId, signal: media.signal }, lease =>
         through ? passedOn(spec, values[0]!, media, lease) : worked(spec, own, values, ins, out, quant, media, lease, first, feed))
       if (media.signal?.aborted) throw new MediaError('stopped')
@@ -208,6 +209,8 @@ async function worked(
   let state: ArrayBuffer | undefined = first
   let made = 0
   let kept = false
+  // A still clip's first frame (R6.8), set by emit (a box: TypeScript doesn't follow the closure's write).
+  const still: { frame: Uint8Array | null } = { frame: null }
   const emit = async (j: number, frames: Frame[], own?: Record<string, unknown>, held?: VideoFrameJob['held']) => {
     if (j !== made) throw new MediaError('failed')
     if (media.signal?.aborted) throw new MediaError('stopped')
@@ -216,23 +219,28 @@ async function worked(
     if (r.w !== out.w || r.h !== out.h) throw new MediaError('sizeChanged')
     if (r.preview) preview = r.preview
     made++
+    if (spec.still && j === 0) still.frame = r.rgb.slice()
     await sink.put(r.rgb)
   }
   try {
     if (spec.reads === 'stream') {
       const its = values.map(v => framesOf(v, media, lease)[Symbol.asyncIterator]())
+      // R6.8: a feed hands each output frame its own params, in order (Caption track: its caption drawn).
+      const fed = feed ? feed(lease)[Symbol.asyncIterator]() : null
       try {
         for (let i = 0; ; i++) {
           const got = await Promise.all(its.map(it => it.next()))
           if (got.some(g => g.done)) break
           const j = spec.streamOut ? spec.streamOut(params, ins, i) : i
           if (j === null) continue
-          await emit(j, got.map((g, k) => ({ rgb: g.value as Uint8Array, w: values[k]!.w, h: values[k]!.h })))
+          const own = fed ? await fed.next() : null
+          await emit(j, got.map((g, k) => ({ rgb: g.value as Uint8Array, w: values[k]!.w, h: values[k]!.h })), own && !own.done ? own.value : undefined)
         }
       }
       finally {
-        // An input longer than the others (or a failure) ends its decode here.
+        // An input longer than the others (or a failure) ends its decode here; the feed too.
         await Promise.all(its.map(it => it.return?.().catch(() => undefined)))
+        await fed?.return?.().catch(() => undefined)
       }
     }
     else if (spec.reads === 'held' && spec.heldShared) {
@@ -381,6 +389,13 @@ async function worked(
       let fed = !!it
       try {
         for (let j = 0; j < out.count; j++) {
+          // R6.8: a still clip (Text clip) is its first frame throughout: the writer is handed a copy of it.
+          if (spec.still && j > 0 && still.frame) {
+            if (media.signal?.aborted) throw new MediaError('stopped')
+            made++
+            await sink.put(still.frame.slice())
+            continue
+          }
           let own: Record<string, unknown> | undefined
           if (it && fed) {
             const g = await it.next()

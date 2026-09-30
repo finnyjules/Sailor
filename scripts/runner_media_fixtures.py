@@ -120,6 +120,17 @@ Groups:
            channels mixed to one (the look the runner's fix of Python's
            squeezed stereo is judged by); and Pillow's rectangles, width-3
            lines and ellipses on their own.
+  vfx-text — (R6.8) Text clip (each align and v_align, wrapped text,
+           font_size 8 and 512, padding and line_spacing edges, accented
+           letters, an emoji, empty text, colours) and Caption track (the
+           default captions, overlapping and malformed lines, each position,
+           outline 0 / 2 / 12, font_size 8 / 44 / 256, y_inset edges,
+           colours, no captions) over a gradient clip of an exact formula the
+           spec shares, each with this machine's font and with `_FONT_PATHS`
+           pointed at the bundled DejaVu Sans Bold (a fixture-only patch):
+           Python's lines and their (x, y) and boxes, each frame's sha256 and
+           ink box (the pixels the text changed), a Text clip's frame and a
+           caption's pixels around its text, zlib'd.
 """
 from __future__ import annotations
 
@@ -3320,10 +3331,193 @@ def group_vfx_draw(names: list[str]) -> dict:
     return {"cases": cases}
 
 
+# ── R6.8: text on video (Text clip, Caption track) ────────────────────────────
+
+# The bundled font (R6.8, ruling (b)): the runner's copy of matplotlib's DejaVu Sans Bold.
+VFX_TEXT_BUNDLED = os.path.join(ROOT, "frontend", "server", "runner", "video", "fonts", "DejaVuSans-Bold.ttf")
+VFX_TEXT_LONG = ("The quick brown fox jumps over the lazy dog while a small band plays on the pier, and "
+                 "everyone on the boat waves back at the lighthouse keeper before the fog rolls in again")
+
+
+def vfx_text_clip(T: int, W: int, H: int) -> torch.Tensor:
+    """Caption track's input: frame i's pixel (x, y) is ((2x + 5i) & 255, (3y + 7i) & 255, (x + y + 11i) & 255), as u8 / 255
+    (the spec makes the same frames)."""
+    i = np.arange(T).reshape(T, 1, 1)
+    y = np.arange(H).reshape(1, H, 1)
+    x = np.arange(W).reshape(1, 1, W)
+    r = (2 * x + 5 * i + 0 * y) & 255
+    g = (3 * y + 7 * i + 0 * x) & 255
+    b = (x + y + 11 * i) & 255
+    u8 = np.stack([r, g, b], axis=-1).astype(np.uint8)
+    return torch.from_numpy(np.ascontiguousarray(u8)) / 255.0
+
+
+def vfx_ink_box(a: np.ndarray, b: np.ndarray):
+    """The box [x0, y0, x1, y1) of the pixels where two H × W × 3 u8 frames differ, or None."""
+    d = np.any(a != b, axis=-1)
+    if not d.any():
+        return None
+    ys, xs = np.nonzero(d)
+    return [int(xs.min()), int(ys.min()), int(xs.max()) + 1, int(ys.max()) + 1]
+
+
+def vfx_font_name(font) -> str | None:
+    """A font's file as recorded: the bundled one by its path in the repository, a system one by its own path."""
+    p = getattr(font, "path", None)
+    return os.path.relpath(p, ROOT) if isinstance(p, str) and p.startswith(ROOT + os.sep) else p
+
+
+def vfx_text_font(bundled: bool):
+    """`_FONT_PATHS` as this machine has it, or pointed at the bundled file only (the fixture's patch)."""
+    from unittest import mock
+    from comfy_extras import nodes_text as nt
+    return mock.patch.object(nt, "_FONT_PATHS", [VFX_TEXT_BUNDLED]) if bundled else mock.patch.object(nt, "_FONT_PATHS", list(nt._FONT_PATHS))
+
+
+def vfx_text_layout(widgets: dict) -> dict:
+    """render_text_to_pil's layout (nodes_text.py:86-120), repeated line for line: the font, the lines and each (x, y) and box."""
+    from PIL import Image, ImageDraw
+    from comfy_extras import nodes_text as nt
+    W, H = int(widgets["width"]), int(widgets["height"])
+    draw = ImageDraw.Draw(Image.new("RGB", (W, H)))
+    font = nt._load_font(int(widgets["font_size"]))
+    inset_x, inset_y = int(W * float(widgets["padding"])), int(H * float(widgets["padding"]))
+    max_w = W - 2 * inset_x
+    lines = nt._wrap(widgets["text"] or "", draw, font, max_w)
+    sb = draw.textbbox((0, 0), "Ag", font=font)
+    line_h = (sb[3] - sb[1]) * float(widgets["line_spacing"])
+    block_h = max(1.0, line_h * len(lines))
+    v = widgets["v_align"]
+    y = inset_y if v == "top" else (H - inset_y - block_h if v == "bottom" else (H - block_h) / 2.0)
+    out = []
+    for line in lines:
+        bb = draw.textbbox((0, 0), line, font=font)
+        tw = bb[2] - bb[0]
+        a = widgets["align"]
+        x = (W - tw) / 2.0 if a == "center" else (W - inset_x - tw if a == "right" else inset_x)
+        out.append({"text": line, "x": x, "y": y, "bbox": list(bb)})
+        y += line_h
+    return {"font": vfx_font_name(font), "maxW": max_w, "sample": list(sb), "lines": out}
+
+
+def vfx_text_clip_run(tmp: str, name: str, widgets: dict, bundled: bool) -> dict:
+    from comfy_extras import nodes_text as nt
+    rec: dict = {"name": f"{name} [{'bundled' if bundled else 'system'}]", "class_type": "TextClip", "node_id": VFX_NODE_ID,
+                 "widgets": widgets, "input": "", "font": "bundled" if bundled else "system"}
+    with vfx_text_font(bundled):
+        rec["layout"] = vfx_text_layout(widgets)
+        args, ui = vfx_run(nt.TextClipNode, VFX_NODE_ID, **widgets)
+    t = args[0]
+    rec["out"] = vfx_batch(t)
+    rec["ui"] = vfx_ui(ui)
+    first = np.clip(255.0 * t[0].numpy(), 0, 255).astype(np.uint8)
+    bg = np.empty_like(first)
+    fr, fg, fb = nt._hex_rgb(widgets["bg_color"], (0, 0, 0))
+    bg[...] = (int(fr * 255), int(fg * 255), int(fb * 255))
+    rec["ink"] = vfx_ink_box(first, bg)
+    rec["u8z"] = b64(zlib.compress(first.tobytes(), 9))
+    return rec
+
+
+def vfx_caption_run(tmp: str, name: str, widgets: dict, clip: tuple, bundled: bool) -> dict:
+    from comfy_extras import nodes_video_pro as nvp
+    from comfy_extras import nodes_text as nt
+    T, W, H = clip
+    rec: dict = {"name": f"{name} [{'bundled' if bundled else 'system'}]", "class_type": "CaptionTrack", "node_id": VFX_NODE_ID,
+                 "widgets": widgets, "input": f"text-grad {T}x{W}x{H}", "clip": list(clip), "font": "bundled" if bundled else "system"}
+    frames = vfx_text_clip(T, W, H)
+    _o, temp = fresh_dirs(tmp, f"caption_{sha(f'{name} {bundled}'.encode())[:16]}")
+    with vfx_text_font(bundled):
+        font = nt._load_font(int(widgets["font_size"]))
+        rec["fontPath"] = vfx_font_name(font)
+        args, ui = vfx_run(nvp.CaptionTrackNode, VFX_NODE_ID, frames=frames, **widgets)
+    out = args[0]
+    rec["out"] = vfx_batch(out)
+    rec["ui"] = vfx_ui(ui)
+    rec["preview"] = vfx_preview(temp, ui)
+    src = vfx_trunc8(frames)
+    got = vfx_trunc8(out)
+    per = W * H * 3
+    rec["frames"] = []
+    kept = 0
+    last = None
+    for j in range(T):
+        a = np.frombuffer(src[j * per:(j + 1) * per], np.uint8).reshape(H, W, 3)
+        b = np.frombuffer(got[j * per:(j + 1) * per], np.uint8).reshape(H, W, 3)
+        fr = {"sha256": sha(b.tobytes()), "ink": vfx_ink_box(a, b)}
+        if fr["ink"] is not None and fr["sha256"] != last and kept < 2:
+            # Python's pixels around the text only (the ink box, 8 pixels more each side, cut to the frame).
+            x0, y0, x1, y1 = fr["ink"]
+            crop = [max(0, x0 - 8), max(0, y0 - 8), min(W, x1 + 8), min(H, y1 + 8)]
+            fr["crop"] = crop
+            fr["u8z"] = b64(zlib.compress(np.ascontiguousarray(b[crop[1]:crop[3], crop[0]:crop[2]]).tobytes(), 9))
+            kept += 1
+        last = fr["sha256"]
+        rec["frames"].append(fr)
+    return rec
+
+
+def group_vfx_text(names: list[str]) -> dict:
+    """Text clip and Caption track (R6.8), each with this machine's font and with the bundled one."""
+    import tempfile
+    assert os.path.exists(VFX_TEXT_BUNDLED), VFX_TEXT_BUNDLED
+    td = {"text": "Sample text", "width": 1280, "height": 720, "frame_count": 30, "font_size": 72, "color": "#ffffff",
+          "bg_color": "#000000", "align": "center", "v_align": "middle", "padding": 0.06, "line_spacing": 1.2}
+    small = {**td, "width": 640, "height": 360, "frame_count": 2, "font_size": 32, "text": VFX_TEXT_LONG}
+    text = [("defaults", td)]
+    for a in ("left", "center", "right"):
+        for v in ("top", "middle", "bottom"):
+            text.append((f"long wrapped, {a} {v}", {**small, "align": a, "v_align": v}))
+    text += [
+        ("font_size min (8)", {**small, "font_size": 8, "width": 320, "height": 180}),
+        ("font_size max (512)", {**td, "font_size": 512, "text": "Big", "frame_count": 1}),
+        ("padding min (0.0)", {**small, "padding": 0.0}), ("padding max (0.4)", {**small, "padding": 0.4}),
+        ("line_spacing min (0.8)", {**small, "line_spacing": 0.8}), ("line_spacing max (2.5)", {**small, "line_spacing": 2.5}),
+        ("accented letters", {**small, "text": "Café crème, déjà vu — Ñandú, Øre, Ångström, naïve façade"}),
+        ("an emoji (a missing letter)", {**small, "text": "Hello \U0001F642 world"}),
+        ("empty text", {**small, "text": ""}),
+        ("line breaks", {**small, "text": "First line\nSecond line\n\nFourth after a blank"}),
+        ("colours #f0a on 123456", {**small, "text": "Colour", "color": "#f0a", "bg_color": "123456"}),
+        ("colours junk", {**small, "text": "Colour", "color": "zz", "bg_color": "#12345"}),
+    ]
+    cd = {"captions": "0 30 Hello\n30 60 Welcome to the show\n60 90 Subscribe please", "font_size": 44, "color": "#ffffff",
+          "outline_color": "#000000", "outline_width": 2, "position": "bottom", "y_inset": 0.08}
+    grad = (24, 480, 270)
+    short = {**cd, "captions": "0 8 Hello there\n8 16 Welcome to the show\n16 24 Subscribe please"}
+    caps = [
+        ("defaults", cd, (96, 480, 270)),
+        ("defaults, tiny clip", cd, (8, 24, 16)),
+        ("overlapping", {**short, "captions": "0 10 First caption\n5 20 Second overlaps\n15 24 Third one"}, grad),
+        ("malformed lines", {**short, "captions": "x y nope\n2\n3 8\n4 9 Good line\n  10 12   spaced   text  \n-3 2 negative start\n"
+                                              "14 13 backwards\n1_6 2_0 underscores\n+20 22 plus sign\n22 99 past the end"}, grad),
+        ("position top", {**short, "position": "top"}, grad), ("position middle", {**short, "position": "middle"}, grad),
+        ("outline_width min (0)", {**short, "outline_width": 0}, grad), ("outline_width max (12)", {**short, "outline_width": 12}, grad),
+        ("font_size min (8)", {**short, "font_size": 8}, grad), ("font_size max (256)", {**short, "font_size": 256}, grad),
+        ("y_inset min (0.0)", {**short, "y_inset": 0.0}, grad), ("y_inset max (0.4)", {**short, "y_inset": 0.4, "position": "top"}, grad),
+        ("colours #f0a / 123456", {**short, "color": "#f0a", "outline_color": "123456"}, grad),
+        ("colours junk", {**short, "color": "zz", "outline_color": "#12345"}, grad),
+        ("accented and an emoji", {**short, "captions": "0 12 Café déjà vu — Ñandú\n12 24 Hi \U0001F642 there"}, grad),
+        ("no captions", {**short, "captions": ""}, grad),
+        ("no timed lines", {**short, "captions": "just words\nand more"}, grad),
+    ]
+    cases: dict = {"threads": vfx_threads(), "clips": {}, "inlineValues": VFX_INLINE_VALUES,
+                   "bundled": {"path": "frontend/server/runner/video/fonts/DejaVuSans-Bold.ttf", "sha256": sha(open(VFX_TEXT_BUNDLED, "rb").read())}}
+    runs = []
+    with tempfile.TemporaryDirectory() as tmp:
+        for bundled in (False, True):
+            for name, widgets in text:
+                runs.append(vfx_text_clip_run(tmp, name, widgets, bundled))
+            for name, widgets, clip in caps:
+                runs.append(vfx_caption_run(tmp, name, widgets, clip, bundled))
+    cases["runs"] = runs
+    cases["saved"] = []
+    return {"cases": cases}
+
+
 GROUPS = {"probe": group_probe, "decode": group_decode, "encode": group_encode, "sound": group_sound, "video": group_video,
           "frames": group_frames, "timeline-media": group_timeline_media, "vfx-time": group_vfx_time, "vfx-join": group_vfx_join,
           "vfx-look": group_vfx_look, "vfx-stabilize": group_vfx_stabilize, "vfx-flow": group_vfx_flow,
-          "vfx-draw": group_vfx_draw}
+          "vfx-draw": group_vfx_draw, "vfx-text": group_vfx_text}
 
 
 def main() -> None:

@@ -18,6 +18,7 @@ import { stabilizeCore } from './core/stabilize'
 import { noiseClipCore } from './core/noiseClip'
 import { drawCore } from './core/draw'
 import { waveformCore } from './core/waveform'
+import { textDrawCore } from './core/textDraw'
 
 export const VIDEO_CORES: readonly EffectCoreEntry[] = [
   { name: 'vx', fn: framesCore as EffectCoreEntry['fn'], args: ['tk'] },
@@ -34,10 +35,12 @@ export const VIDEO_CORES: readonly EffectCoreEntry[] = [
   { name: 'nclip', fn: noiseClipCore as EffectCoreEntry['fn'], args: ['tk', 'rng', 'look'] },
   { name: 'dr', fn: drawCore as EffectCoreEntry['fn'], args: [] },
   { name: 'wave', fn: waveformCore as EffectCoreEntry['fn'], args: ['tk', 'ft', 'dr', 'look'] },
+  // R6.8: Text clip and Caption track (the letters' coverage laid on the frames; drawn on the main thread, ../text.ts).
+  { name: 'txt', fn: textDrawCore as EffectCoreEntry['fn'], args: ['tk', 'vx', 'look'] },
 ]
 
 /** The cores whose functions are video ops (not helpers). */
-export const VIDEO_OP_CORES: readonly string[] = ['time', 'join', 'look', 'stab', 'nclip', 'wave']
+export const VIDEO_OP_CORES: readonly string[] = ['time', 'join', 'look', 'stab', 'nclip', 'wave', 'txt']
 
 /** The cores in this thread (tests), built as the worker builds them. */
 export const videoCores = (() => {
@@ -45,8 +48,9 @@ export const videoCores = (() => {
   const ft = fftCore()
   const look = lookCore(tk, kn)
   const dr = drawCore()
+  const vx = framesCore(tk)
   return {
-    tk, vx: framesCore(tk), time: timeCore(tk, kn, rng), join: joinCore(tk, kn, rng), look, ft, stab: stabilizeCore(tk, kn, ft),
-    nclip: noiseClipCore(tk, rng, look), dr, wave: waveformCore(tk, ft, dr, look),
+    tk, vx, time: timeCore(tk, kn, rng), join: joinCore(tk, kn, rng), look, ft, stab: stabilizeCore(tk, kn, ft),
+    nclip: noiseClipCore(tk, rng, look), dr, wave: waveformCore(tk, ft, dr, look), txt: textDrawCore(tk, vx, look),
   }
 })()
