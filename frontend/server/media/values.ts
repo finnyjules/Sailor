@@ -157,15 +157,21 @@ export async function readFrames(v: FramesValue, io: MediaValueIO, onFrame: (rgb
 }
 
 /** Frames as they stream, the batch caps checked at each (a batch over them fails before its next frame is written). */
-async function* cappedFrames(frames: AsyncIterable<Uint8Array>, w: number, h: number, hosted: boolean, counted: { n: number }): AsyncIterable<Uint8Array> {
+async function* cappedFrames(frames: AsyncIterable<Uint8Array>, w: number, h: number, hosted: boolean, counted: { n: number }, room?: () => Promise<void>): AsyncIterable<Uint8Array> {
   const caps = capsOf(hosted)
   for await (const f of frames) {
     const word = batchWord(counted.n + 1, w, h, caps)
     if (word) throw new MediaError(word)
     counted.n++
+    // R5.5 fix round 1 (Minor 4): the file being written is held to the run's kept room as it grows,
+    // every KEEP_ROOM_EVERY frames (it is in the run's work folder, so the room counts it).
+    if (room && counted.n % KEEP_ROOM_EVERY === 0) await room()
     yield f
   }
 }
+
+/** How often (in frames) a batch being kept checks the run's kept room. */
+export const KEEP_ROOM_EVERY = 16
 
 /** Keeps a frame batch (rgb24 frames of w × h) as one FFV1 file for the run. */
 export async function keepFrames(runId: string, frames: AsyncIterable<Uint8Array>, w: number, h: number, io: MediaValueIO): Promise<FramesValue> {
@@ -175,7 +181,7 @@ export async function keepFrames(runId: string, frames: AsyncIterable<Uint8Array
   try {
     const out = join(work, 'frames.mkv')
     const counted = { n: 0 }
-    const { count } = await writeFfv1({ frames: cappedFrames(frames, w, h, io.hosted, counted), w, h, out, outRoots: [work], userId: io.userId, signal: io.signal })
+    const { count } = await writeFfv1({ frames: cappedFrames(frames, w, h, io.hosted, counted, () => io.kept.checkRoom(runId)), w, h, out, outRoots: [work], userId: io.userId, signal: io.signal })
     const file = await io.kept.putPath(runId, out, 'mkv')
     return { kind: 'frames', file, count, w, h }
   }
@@ -338,7 +344,15 @@ class FirstFrameSize extends MediaError {
   constructor() { super('sizeChanged') }
 }
 
-/** The size of the decoder's frame number `n` (0, 1, 2… in the order it hands them over), or null. */
+/**
+ * PARKED (R5.5 review Minor 5, controller ruling): the frames up to `n + 65`
+ * are listed as JSON, which runMedia collects up to its 32 MiB stdout limit
+ * (about 500,000 frames), and `-read_intervals %+#N` counts packets, so the
+ * margin assumes a decoder delay under 65 frames. A size-changing clip with a
+ * very large `start_frame` can read as unreadable where Python loads it.
+ * Local only (hosted videos are 10 minutes at most), rare.
+ *
+ * The size of the decoder's frame number `n` (0, 1, 2… in the order it hands them over), or null. */
 async function pickedFrameSize(p: MediaProbe, io: MediaValueIO, n: number): Promise<{ w: number; h: number } | null> {
   const j = await ffprobeJson(p.path, p.format, ['-select_streams', 'v:0', '-show_entries', 'frame=width,height', '-read_intervals', `%+#${n + 65}`], {
     userId: io.userId, signal: io.signal,

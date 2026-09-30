@@ -55,8 +55,9 @@ import { pixelsInWorker } from '../compositor/worker'
 import type { FileAccess } from '../fileAccess'
 import { VIDEO_FILE_MISSING, videoSaveWords } from './videoNodes'
 import type { FramePick } from '../../media/decode'
-import { decodeFrames } from '../../media/decode'
-import { encodeVideo, pyStreamRate, type SoundLayout, type SoundSource } from '../../media/encode'
+import { decodeFramesAnySize } from '../../media/decode'
+import { encodeVideo, pyStreamRateOf, type SoundLayout, type SoundSource } from '../../media/encode'
+import { SAVE_OUTSIDE } from '../results'
 import { probeMedia, sniffMediaFormat, type MediaProbe, type Rational } from '../../media/probe'
 import { MediaError } from '../../media/run'
 import { batchWord, keepFrames, keepPickedFrames, probeVideoFile, type MediaValueIO } from '../../media/values'
@@ -182,7 +183,6 @@ async function* blackFrame(): AsyncIterable<Uint8Array> {
  * leaves nothing: the raw file goes with its folder.
  */
 async function keepResized(p: MediaProbe, file: OutputFile, media: MediaValueIO, pick: FramePick, tw: number, th: number): Promise<FramesValue | null> {
-  const v = p.video[0]!
   const caps = capsOf(media.hosted)
   const bytes = tw * th * 3
   await media.kept.checkRoom(media.runId)
@@ -190,21 +190,33 @@ async function keepResized(p: MediaProbe, file: OutputFile, media: MediaValueIO,
   try {
     const raw = join(work, 'frames.raw')
     let n = 0
+    let sinceCheck = 0
     const out = await open(raw, 'wx')
     try {
-      await decodeFrames(p.path, {
-        userId: media.userId, signal: media.signal, maxFrames: pick.count,
-        roots: [media.access.rootOf(file)], probe: p, pick,
-        onFrame: async (rgb) => {
+      // Each frame at its own size (fix round 1): Python resizes whatever size a frame comes out at.
+      await decodeFramesAnySize(p.path, {
+        userId: media.userId, signal: media.signal, pick, framePixels: caps.framePixels,
+        roots: [media.access.rootOf(file)], probe: p,
+        onFrame: async (rgb, fw, fh) => {
           const word = batchWord(n + 1, tw, th, caps)
           if (word) throw new MediaError(word)
-          const small = await pixelsInWorker(media.signal, w => w.resizeRgb(rgb, v.w, v.h, tw, th))
+          let small: Uint8Array
+          try { small = await pixelsInWorker(media.signal, w => w.resizeRgb(rgb, fw, fh, tw, th)) }
+          // Stop reaches the worker as its own 'Stopped': the node says the plain words.
+          catch (e) { throw media.signal?.aborted ? new MediaError('stopped') : e }
           if (small.byteLength !== bytes) throw new MediaError('failed')
           for (let at = 0; at < small.byteLength;) {
             const { bytesWritten } = await out.write(small, at, small.byteLength - at)
             at += bytesWritten
           }
           n++
+          // The raw file is held to the run's kept room as it grows (fix round 1, Minor 4): KEPT_TOO_MUCH
+          // as soon as it passes, not only once the decode is done.
+          sinceCheck += bytes
+          if (sinceCheck >= ROOM_CHECK_BYTES || n % ROOM_CHECK_FRAMES === 0) {
+            sinceCheck = 0
+            await media.kept.checkRoom(media.runId)
+          }
         },
       })
     }
@@ -217,6 +229,11 @@ async function keepResized(p: MediaProbe, file: OutputFile, media: MediaValueIO,
     await rm(work, { recursive: true, force: true })
   }
 }
+
+/** How many bytes of frames may be written between two checks of the run's kept room. */
+export const ROOM_CHECK_BYTES = 64 * 1024 * 1024
+/** …and at least every this many frames. */
+export const ROOM_CHECK_FRAMES = 16
 
 /** A raw rgb24 file's `n` frames of `bytes` each, read one at a time. */
 async function* rawFrames(path: string, bytes: number, n: number): AsyncIterable<Uint8Array> {
@@ -281,7 +298,8 @@ async function soundFor(v: unknown, media: MediaValueIO, seconds: number): Promi
   const path = await media.access.verifiedPath(file)
   const root = media.access.rootOf(file)
   let p: MediaProbe
-  try { p = await probeMedia(path, { userId: media.userId, signal: media.signal, roots: [root], kind: 'sound' }) }
+  // Only T / fps of it is read (fix round 1, Minor 2): its length isn't held to the caps, what is decoded is.
+  try { p = await probeMedia(path, { userId: media.userId, signal: media.signal, roots: [root], kind: 'sound', anyLength: true }) }
   catch (e) {
     // PyAV can't open it either: "[SaveVideoFrames] audio open failed", and the video is saved without it.
     if (e instanceof MediaError && (e.word === 'unreadable' || e.word === 'failed')) {
@@ -293,6 +311,30 @@ async function soundFor(v: unknown, media: MediaValueIO, seconds: number): Promi
   const s = p.sound[0]
   if (!s) return null
   return { sound: { source: { path, stream: 'first', cutSeconds: seconds }, layout: 'stereo', rate: s.rate || 48000 }, root }
+}
+
+/**
+ * The stream rate SaveVideoFrames sets (:678): Fraction(int(round(fps * 1000)),
+ * 1000), `fps` a Python FLOAT, so the product is rounded as the double it is,
+ * halves to even (R5.5 fix round 1, Important 1: 23.9765 · 1000 is the double
+ * 23976.5, which rounds to 23976; the exact value, 23976.4999…, is what R5.4's
+ * `pyStreamRate` rounds, right for save_to's Fraction(fps) but not here).
+ */
+export function framesStreamRate(fps: number): Rational {
+  const q = pyRound(fps * 1000)
+  if (!(q > 0) || !Number.isSafeInteger(q)) throw new MediaError('failed')
+  return pyStreamRateOf(BigInt(q), 1000n)
+}
+
+/**
+ * Whether a prefix would save outside the output folder (R5.5 fix round 1,
+ * Minor 3): an absolute path, or a `..` part. Python's os.path.join really
+ * writes there; Sailor never does, and refuses it before any work.
+ */
+export function framesPrefixOutside(prefix: string): boolean {
+  const full = (prefix || 'video').replace(/_+$/, '')
+  // The last part is the name itself (the stamp follows it), never a folder.
+  return full.startsWith('/') || full.split('/').slice(0, -1).some(part => part === '..')
 }
 
 /** Python's float() of the fps (a typed widget, or the rate a wire brought, already in place). */
@@ -311,6 +353,7 @@ export function planSaveVideoFrames(ctx: PlanContext): NodePlan {
   if (!isLink(link)) throw new Error(NO_FRAMES_WIRED)
   const fps = fpsOf(inputs.fps ?? 30)
   const prefix = pyStr(inputs.filename_prefix ?? 'video')
+  if (framesPrefixOutside(prefix)) throw new Error(SAVE_OUTSIDE)
   const crf = intOf(inputs.crf, 20)
   const preset = String(inputs.preset ?? 'veryfast') as 'veryfast' | 'fast' | 'medium' | 'slow'
   return {
@@ -331,7 +374,7 @@ export function planSaveVideoFrames(ctx: PlanContext): NodePlan {
         const out = join(work, 'video.mp4')
         await encodeVideo({
           input: { kind: 'ffv1', path: framesPath, w: frames.w, h: frames.h }, padToEven: true,
-          out, fps: pyStreamRate(fps), quality: { crf, preset },
+          out, fps: framesStreamRate(fps), quality: { crf, preset },
           sound: sound?.sound ?? null,
           userId: media.userId, signal: media.signal,
           roots: [media.access.rootOf(frames.file), ...(sound ? [sound.root] : [])], outRoots: [work],
@@ -364,7 +407,7 @@ export async function framesSoundVerdict(access: FileAccess, file: OutputFile, o
   catch { return null }
   const format = await sniffMediaFormat(path).catch(() => null)
   if (!format) return { message: MEDIA_WORDS.unreadable, engine: true }
-  try { await probeMedia(path, { userId: o.userId, signal: o.signal, roots: [access.rootOf(file)], kind: 'sound' }) }
+  try { await probeMedia(path, { userId: o.userId, signal: o.signal, roots: [access.rootOf(file)], kind: 'sound', anyLength: true }) }
   catch (e) {
     const w = e instanceof MediaError ? e.word : 'failed'
     if (w === 'unreadable' || w === 'failed') return null
@@ -396,6 +439,10 @@ export async function frameStartProblems(
       if (!(await exists(file))) return { message: VIDEO_FILE_MISSING, nodeId, classType: n.class_type, file: file.filename }
       const v = await verdictOf(file)
       if (v) return { message: v.message, nodeId, classType: n.class_type, file: file.filename, ...(v.engine ? { engine: true as const } : {}) }
+    }
+    // A prefix that would save outside output (fix round 1, Minor 3): refused before anything runs.
+    if (n.class_type === 'SaveVideoFrames' && typeof inputs.filename_prefix === 'string' && framesPrefixOutside(inputs.filename_prefix)) {
+      return { message: SAVE_OUTSIDE, nodeId, classType: n.class_type }
     }
     if (n.class_type === 'SaveVideoFrames' && !isLink(inputs.audio_file)) {
       const file = soundFileOf(inputs.audio_file)

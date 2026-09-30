@@ -241,6 +241,117 @@ export async function decodeFrames(path: string, o: {
   return { count, w, h }
 }
 
+/**
+ * Load video frames' resize path (R5.5 fix round 1): the picked frames, each
+ * at its OWN size, in ONE job. Python resizes every frame from whatever size
+ * it comes out at (PIL takes any size), so a video whose frames change size
+ * partway is resized frame by frame, not refused. ffmpeg's rawvideo output
+ * carries no sizes, so the same frames also go through two one-row and
+ * one-column branches (gray: one byte a pixel) into one null output, whose
+ * two streams' `-stats_mux_pre` sizes are each frame's width and height
+ * (told apart by `{sidx}`; one writer on the pipe, so no line is split). A frame over
+ * `framePixels` fails (tooBig), past `pick.count` frames it fails
+ * (tooManyFrames), as they stream.
+ */
+export async function decodeFramesAnySize(path: string, o: {
+  userId: string | null; signal?: AbortSignal
+  roots: readonly string[]
+  probe?: MediaProbe
+  pick: FramePick
+  framePixels: number
+  onFrame(rgb: Uint8Array, w: number, h: number, index: number): Promise<void>
+}): Promise<{ count: number }> {
+  const p = await probeFor(path, o, 'video')
+  const refused = mediaCapsWord(p, 'video', isHosted())
+  if (refused) throw new MediaError(refused)
+  const v = p.video[0]!
+  const n = String(o.pick.count)
+  /** Each frame's width, then height, from the one null output's two streams. */
+  const lists: number[][] = [[], []]
+  let closed = false
+  let wake: (() => void) | null = null
+  const nudge = () => { const f = wake; wake = null; f?.() }
+  const at = async (k: number, i: number): Promise<number> => {
+    while (lists[k]!.length <= i && !closed) await new Promise<void>((r) => { wake = r })
+    const x = lists[k]![i]
+    if (x === undefined) throw new MediaError('failed')
+    return x
+  }
+  let text = ''
+  let buf: Uint8Array | null = null
+  let want = 0
+  let filled = 0
+  let count = 0
+  const graph = `[0:v:0]${pickFilter(o.pick)},split=3[a][b][c];[a]${framesScale(v)}[f];`
+    + '[b]scale=w=iw:h=1:eval=frame:flags=bilinear,format=gray[wd];[c]scale=w=1:h=ih:eval=frame:flags=bilinear,format=gray[ht]'
+  // One writer on the stats pipe (two outputs' lines can interleave mid-line): the null output, whose two
+  // streams report each frame's width and height; the frame's bytes are then w · h · 3.
+  const args = [
+    '-copyts', '-reinit_filter', '0', '-noautorotate', ...inputArgs(p.path, p.format),
+    '-filter_complex', graph,
+    '-map', '[f]', '-fps_mode', 'passthrough', '-frames:v', n, '-f', 'rawvideo', 'pipe:1',
+    '-map', '[wd]', '-map', '[ht]', '-fps_mode', 'passthrough', '-frames:v', n, '-c:v', 'rawvideo',
+    '-stats_mux_pre', 'pipe:3', '-stats_mux_pre_fmt', '{sidx} {size}', '-f', 'null', 'pipe:1',
+  ]
+  const next = async () => {
+    if (o.signal?.aborted) throw new MediaError('stopped')
+    if (count >= o.pick.count) throw new MediaError('tooManyFrames')
+    const w = await at(0, count)
+    const h = await at(1, count)
+    if (w < 1 || h < 1) throw new MediaError('failed')
+    want = w * h * 3
+    if (w * h > o.framePixels) throw new MediaError('tooBig')
+    buf = new Uint8Array(want)
+    filled = 0
+  }
+  try {
+    await runMedia({
+      tool: 'ffmpeg', args, userId: o.userId, signal: o.signal,
+      onSide: (chunk) => {
+        try {
+          if (chunk === null) { closed = true; return }
+          text += Buffer.from(chunk).toString('latin1')
+          let nl: number
+          while ((nl = text.indexOf('\n')) >= 0) {
+            const line = text.slice(0, nl).trim()
+            text = text.slice(nl + 1)
+            if (!line) continue
+            const m = /^([01]) (\d+)$/.exec(line)
+            if (!m) throw new MediaError('failed')
+            lists[Number(m[1])]!.push(Number(m[2]))
+          }
+        }
+        finally { nudge() }
+      },
+      onStdout: async (chunk) => {
+        let i = 0
+        while (i < chunk.length) {
+          if (!buf) await next()
+          const take = Math.min(want - filled, chunk.length - i)
+          buf!.set(chunk.subarray(i, i + take), filled)
+          filled += take
+          i += take
+          if (filled === want) {
+            const frame = buf!
+            const index = count
+            buf = null
+            const w = lists[0]![index]!
+            const h = lists[1]![index]!
+            await o.onFrame(frame, w, h, index)
+            count++
+          }
+        }
+      },
+    })
+  }
+  finally {
+    closed = true
+    nudge()
+  }
+  if (buf) throw new MediaError('failed')
+  return { count }
+}
+
 export type SoundDecoder = 'load' | 'download' | 'fltp'
 /** [C][N] float32 samples. */
 export interface DecodedSound { rate: number; channels: Float32Array[] }

@@ -41,7 +41,7 @@ import { checkedInputFile, handedOffPictureProblem, inputFileCaps, linkedFileChe
 import { predictedHoldPixels, startPictureSizes } from './repairSizes'
 import { isReusable, requestFingerprint } from './fingerprint'
 import { gen3dTextSent } from '#shared/runner/gen3d'
-import { assertFilesOwned, collectInputFiles, parseInputFileRef, type OwnershipCheck } from './inputs'
+import { assertFilesOwned, collectInputFiles, optionalInputFiles, parseInputFileRef, type OwnershipCheck } from './inputs'
 import { shotRefFilenames, shotRefSizeProblem } from './shotRefs'
 import { parseJsonObject } from './generators/opts'
 import { cardPictureFiles, cardPictureRefusal } from './cards/bakeReplay'
@@ -2052,7 +2052,12 @@ export function createEngine(deps: EngineDeps) {
     if (queuedCalls(i.userId) + wanted > MAX_QUEUED_CALLS) throw refuse('You have too many runs waiting. Try again when one finishes.', 429)
     await deps.metering.spendGuard(i.userId)
     const inputFiles = new Map<string, OutputFile>()
-    for (const p of prompts) for (const f of collectInputFiles(p, families)) inputFiles.set(`${f.type}:${f.subfolder}:${f.filename}`, f)
+    for (const p of prompts) for (const f of collectInputFiles(p, families, { optional: false })) inputFiles.set(`${f.type}:${f.subfolder}:${f.filename}`, f)
+    // Files Python skips when they aren't there (R5.5 fix round 1: Save video frames' sound): only one that
+    // is there has an owner to check.
+    for (const p of prompts) {
+      for (const f of optionalInputFiles(p)) if (await files.exists(f)) inputFiles.set(`${f.type}:${f.subfolder}:${f.filename}`, f)
+    }
     // A Film a shot's reference links (`/view?…&type=input` in its options,
     // Task 4; a preset shot's too, R3.11): the runner resolves them into
     // provider links, so they must be the caller's own files too. Generate a

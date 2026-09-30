@@ -22,6 +22,26 @@ import { tmpdir } from 'node:os'
 import { join, relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterAll, afterEach, describe, expect, it, vi } from 'vitest'
+
+/** Fix round 1 (Minor 6): a hook in the worker's resize, to stop a run while frames flow and a resize runs. */
+const HOOK = vi.hoisted(() => ({ calls: 0, abortAt: 0, ctl: null as AbortController | null }))
+vi.mock('~~/server/runner/compositor/worker', async (importOriginal) => {
+  const real = await importOriginal<typeof import('~~/server/runner/compositor/worker')>()
+  return {
+    ...real,
+    pixelsInWorker: ((signal, job, timeout) => real.pixelsInWorker(signal, w => job(new Proxy(w, {
+      get(t, k) {
+        const v = Reflect.get(t, k)
+        if (k !== 'resizeRgb') return typeof v === 'function' ? v.bind(t) : v
+        return (...a: Parameters<typeof t.resizeRgb>) => {
+          const running = t.resizeRgb(...a)
+          if (++HOOK.calls === HOOK.abortAt) HOOK.ctl?.abort()
+          return running
+        }
+      },
+    })), timeout)) as typeof real.pixelsInWorker,
+  }
+})
 import { makeKit } from './__runner__/kit'
 import { synth } from './__runner__/effectsParity'
 import { clipPath, requireMediaTools, sha256Hex, unz, type PySound, type PyRational } from './__runner__/mediaParity'
@@ -47,7 +67,10 @@ import type { OutputFile, RunnerValue } from '~~/server/runner/types'
 import { decodeAudio, decodeFrames } from '~~/server/media/decode'
 import { probeMedia, pyFrameCount, pyFrameRate, pyRawDuration } from '~~/server/media/probe'
 import { readFrames } from '~~/server/media/values'
-import { NO_FRAMES_WIRED, frameStartProblems, loadFramesPick, saveFramesName } from '~~/server/runner/media/frameNodes'
+import { NO_FRAMES_WIRED, frameStartProblems, framesPrefixOutside, framesStreamRate, loadFramesPick, saveFramesName } from '~~/server/runner/media/frameNodes'
+import { pyStreamRate } from '~~/server/media/encode'
+import { KEPT_TOO_MUCH } from '~~/server/runner/keptBytes'
+import { SAVE_OUTSIDE } from '~~/server/runner/results'
 import { VIDEO_FILE_MISSING } from '~~/server/runner/media/videoNodes'
 
 // ── The fixture ──────────────────────────────────────────────────────────────
@@ -69,7 +92,7 @@ interface LoadSettings { max_size: number; stride: number; start_frame: number; 
 type LoadCase = LoadSettings & { clip: string } & ({ error: string } | { w: number; h: number; frames: number[]; fps: number })
 interface SaveCase {
   source: 'even' | 'odd'; fps: number; crf: number; audio: string
-  kept?: { kept: number; rate: number; frameSizes: number[]; lastFrame: number } | { error: string } | null
+  kept?: { kept: number; rate: number; frameSizes: number[]; lastFrame: number; broken?: string } | { error: string } | null
   x264: PyRun; openh264: PyRun
 }
 interface FramesCases {
@@ -413,7 +436,7 @@ describe('SaveVideoFrames equals Python’s execute (ruling c for the pictures; 
   }
 
   it('the sound runs past the video by at most one of its own frames, as Python’s loop keeps it', () => {
-    const withSound = C.saves.filter(c => c.kept && !('error' in c.kept))
+    const withSound = C.saves.filter(c => c.kept && !('error' in c.kept) && !c.kept.broken)
     expect(withSound.length).toBeGreaterThanOrEqual(10)
     let over = 0
     for (const c of withSound) {
@@ -813,3 +836,162 @@ describe('the engine', () => {
     expect(recorded.some(r => r.includes(out.filename))).toBe(true)
   })
 })
+
+// ── Fix round 1 ──────────────────────────────────────────────────────────────
+
+describe('fix round 1', () => {
+  afterEach(() => {
+    vi.useRealTimers()
+    HOOK.abortAt = 0
+    HOOK.ctl = null
+    HOOK.calls = 0
+  })
+
+  it('Important 1: the stream rate rounds the float fps · 1000, halves to even, as SaveVideoFrames does', () => {
+    expect(framesStreamRate(23.9765)).toEqual({ num: 2997, den: 125 })
+    expect(framesStreamRate(12.3455)).toEqual({ num: 6173, den: 500 })
+    // R5.4's exact rounding (right for save_to's Fraction(fps)) lands elsewhere on these.
+    expect(pyStreamRate(23.9765)).not.toEqual(framesStreamRate(23.9765))
+    expect(pyStreamRate(12.3455)).not.toEqual(framesStreamRate(12.3455))
+    for (const r of [24, 29.97, 30, 59.94, 1, 120]) expect(framesStreamRate(r), String(r)).toEqual(pyStreamRate(r))
+    const cases = C.saves.filter(c => c.fps === 23.9765 || c.fps === 12.3455)
+    expect(cases).toHaveLength(2)
+    // Python's own files have these rates (the parity cases above save them and match every number).
+    for (const c of cases) expect(c.openh264.saved.header.video[0]!.averageRate, String(c.fps)).toEqual(framesStreamRate(c.fps))
+  })
+
+  it('(1) a sound that fails partway: Python keeps the video, and the sound its unflushed encoder had made', () => {
+    const broken = C.saves.filter(c => c.kept && !('error' in c.kept) && c.kept.broken)
+    expect(broken.map(c => c.audio).sort()).toEqual(['g_frames_badmid.m4a', 'g_frames_badmid.mp3'])
+    for (const c of broken) {
+      const k = c.kept as { kept: number }
+      // One AAC packet for each whole 1024-sample frame after the first; the parity cases decode ours exactly.
+      expect(c.openh264.saved.sound!.samples, c.audio).toBe((Math.floor(k.kept / 1024) - 1) * 1024)
+      expect(c.openh264.saved.header.video[0]!.frames, c.audio).toBe(C.sources.even.count)
+    }
+  })
+
+  it('(3) frames that change size partway are each resized, as Python resizes them', () => {
+    const cases = C.loads.filter(c => c.clip === 'g_frames_resize.webm')
+    const resized = cases.filter(c => c.max_size === 64)
+    expect(resized.every(c => !('error' in c) && c.w === 64 && c.h === 48)).toBe(true)
+    expect(resized.map(c => ('frames' in c ? c.frames.length : 0))).toEqual([8, 3, 3, 1])
+    // Not resized, Python's stack fails where the pick spans both sizes (the parity loop runs every case).
+    expect(cases.filter(c => 'error' in c)).toHaveLength(2)
+  })
+
+  it('(2) hosted: a named sound that isn’t there is skipped; one that is there but not the user’s is refused before the hold', LONG, async () => {
+    await requireMediaTools()
+    const dir = mkdtempSync(join(scratch, 'runs-'))
+    const k = makeKit({
+      hosted: true, dir,
+      deps: {
+        families: () => ON, kept: createFileKeptBytes(join(dir, 'kept')),
+        ownership: { ownsInput: async (_u, f) => f.filename !== 'someone.wav', ownsOutput: async () => true },
+      },
+    })
+    for (const c of ['g_frames_big.mp4']) copyFileSync(clipPath(c), join(k.root, 'input', c))
+    copyFileSync(clipPath('a_s16.wav'), join(k.root, 'input', 'someone.wav'))
+    const gone = await k.engine.startRun({ userId: k.userId, takes: [{ l: loadFrames('g_frames_big.mp4', { max_size: 64, max_frames: 2 }), s: saveFrames(['l', 0], { audio: 'gone.wav' }) }], ...START })
+    await k.engine.settled(gone.runId)
+    const t = (await k.store.get(gone.runId))!.takes[0]!
+    expect(t.nodes.s!.status, t.nodes.s!.error ?? '').toBe('done')
+    const out = t.nodes.s!.outputs[0]!
+    const path = join(k.root, 'output', out.subfolder, out.filename)
+    expect((await probeMedia(path, { userId: null, roots: rootsOf(path) })).sound).toEqual([])
+    const held = k.ledger.hold.mock.calls.length
+    await expect(k.engine.startRun({ userId: k.userId, takes: [{ l: loadFrames('g_frames_big.mp4'), s: saveFrames(['l', 0], { audio: 'someone.wav' }) }], ...START })).rejects.toThrow('isn’t one of yours')
+    expect(k.ledger.hold.mock.calls.length).toBe(held)
+  })
+
+  it('Minor 2: a soundtrack longer than the length cap is read as far as the video; what is decoded is held to the sample cap', LONG, async () => {
+    await requireMediaTools()
+    const caps = MEDIA_CAPS.local as { soundSeconds: number; soundSamples: number }
+    const saved = { soundSeconds: caps.soundSeconds, soundSamples: caps.soundSamples }
+    const want = C.saves.find(c => c.audio === 'a_s16.wav')!.openh264.saved.sound!
+    const h = harness({ clips: ['g_frames_big.mp4', 'a_s16.wav'] })
+    const load = await runNode(h, { l: loadFrames('g_frames_big.mp4', { max_size: 96, max_seconds: 0.25 }) }, 'l')
+    const prompt = { l: loadFrames('g_frames_big.mp4'), s: saveFrames(['l', 0], { fps: 24, audio: 'a_s16.wav' }) }
+    let path = ''
+    try {
+      // The file is 1 s long, the cap 0.1 s: the 0.25 s video still gets Python's sound.
+      caps.soundSeconds = 0.1
+      expect(await frameStartProblems(prompt, async () => true, async () => null, f => framesSoundVerdictOf(h, f))).toBeNull()
+      const ok = await runNode(h, prompt, 's', { l: load.values })
+      path = h.results.pathOf!(ok.assets[0]!)
+      // The samples it would decode (0.25 s, stereo) over the sample cap: refused plainly.
+      caps.soundSamples = 1000
+      await expect(runNode(h, prompt, 's', { l: load.values })).rejects.toThrow(MEDIA_WORDS.tooLong)
+    }
+    finally {
+      caps.soundSeconds = saved.soundSeconds
+      caps.soundSamples = saved.soundSamples
+    }
+    // Read back under the usual caps: exactly Python's sound for this file.
+    const got = await decodeAudio(path, { decoder: 'fltp', userId: null, maxSamples: BIG, roots: rootsOf(path) })
+    expect(sha256Hex(soundBytes(got.channels))).toBe(want.sha256)
+  })
+
+  it('Minor 3: a prefix that would save outside output is refused before any work, in plain words', LONG, async () => {
+    for (const bad of ['../x', '/abs/x', 'a/../../x', '..//x']) expect(framesPrefixOutside(bad), bad).toBe(true)
+    for (const ok of ['video', 'clips/take_', '..', 'a..b/c', '', 'x/..y']) expect(framesPrefixOutside(ok), ok).toBe(false)
+    await expect(planNode({ prompt: { l: loadFrames('a.mp4'), s: saveFrames(['l', 0], { prefix: '../x' }) }, nodeId: 's', families: ON, gateOpen: false, filesFrom: () => [], toUrl: async () => '' }))
+      .rejects.toThrow(SAVE_OUTSIDE)
+    expect(SAVE_OUTSIDE).toMatch(/^[A-Z][^_]*$/)
+    const dir = mkdtempSync(join(scratch, 'runs-'))
+    const k = makeKit({ dir, deps: { families: () => ON, kept: createFileKeptBytes(join(dir, 'kept')) } })
+    copyFileSync(clipPath('g_frames_big.mp4'), join(k.root, 'input', 'g_frames_big.mp4'))
+    await expect(k.engine.startRun({ userId: null, takes: [{ l: loadFrames('g_frames_big.mp4'), s: saveFrames(['l', 0], { prefix: '/tmp/x' }) }], ...START })).rejects.toThrow(SAVE_OUTSIDE)
+    expect(written(join(k.root, 'output'))).toEqual([])
+    expect(k.ledger.hold).not.toHaveBeenCalled()
+  })
+
+  it('Minor 4: the raw file is held to the run’s kept room as it grows: KEPT_TOO_MUCH plainly, nothing left', LONG, async () => {
+    await requireMediaTools()
+    const h = harness({ clips: ['g_frames_big.mp4'] })
+    let checks = 0
+    const tight = new Proxy(h.kept, {
+      get(t, k) {
+        const v = Reflect.get(t, k)
+        if (k !== 'checkRoom') return typeof v === 'function' ? v.bind(t) : v
+        return async (runId: string) => {
+          // Room at the start; none once frames are being written.
+          if (++checks > 1) throw new Error(KEPT_TOO_MUCH)
+          return t.checkRoom(runId)
+        }
+      },
+    })
+    const runId = rid(++runs)
+    await expect(runNode(h, { l: loadFrames('g_frames_big.mp4', { max_size: 64, max_seconds: 0 }) }, 'l', {}, { runId, kept: tight })).rejects.toThrow(KEPT_TOO_MUCH)
+    // Checked while the raw file grew (30 frames: at frame 16), not only once the decode was done.
+    expect(checks).toBe(2)
+    expect(await h.kept.runBytes(runId)).toBe(0)
+    expect(await h.kept.workBytes(runId)).toBe(0)
+    expect(written(join(h.root, 'kept'))).toEqual([])
+  })
+
+  for (const [clip, at] of [['g_frames_big.mp4', 3], ['g_frames_resize.webm', 6]] as const) {
+    it(`Minor 6: Stop while frames flow and a worker resize runs (${clip}, frame ${at}): the plain words, nothing kept or left`, LONG, async () => {
+      await requireMediaTools()
+      const h = harness({ clips: [clip] })
+      const ctl = new AbortController()
+      HOOK.ctl = ctl
+      HOOK.abortAt = at
+      HOOK.calls = 0
+      const runId = rid(++runs)
+      const err = await runNode(h, { l: loadFrames(clip, { max_size: 64, max_seconds: 0 }) }, 'l', {}, { runId, signal: ctl.signal }).then(() => null, e => e as Error)
+      expect(ctl.signal.aborted).toBe(true)
+      expect(HOOK.calls).toBe(at)
+      expect(err?.message).toBe(MEDIA_WORDS.stopped)
+      expect(await h.kept.runBytes(runId)).toBe(0)
+      expect(await h.kept.workBytes(runId)).toBe(0)
+      expect(written(join(h.root, 'kept'))).toEqual([])
+    })
+  }
+})
+
+/** framesSoundVerdict over a harness's files. */
+async function framesSoundVerdictOf(h: Harness, f: OutputFile) {
+  const { framesSoundVerdict } = await import('~~/server/runner/media/frameNodes')
+  return framesSoundVerdict(h.access, f, { userId: null })
+}

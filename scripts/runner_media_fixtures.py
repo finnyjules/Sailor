@@ -1631,7 +1631,20 @@ PIL_BILINEAR_CASES = [
 # The fixed stamp SaveVideoFrames' names take here (time.strftime patched): the runner's names are checked at the same second.
 FRAMES_STAMP = "20260930_120000"
 FRAMES_SOUNDS = ["a_mono.mp3", "a_s16.wav", "a_s24.wav", "a_s32.wav", "a_16.flac", "a_24.flac", "a_vorbis.ogg",
-                 "a_opus.webm", "a_aac.m4a", "a_long_8k.wav", "a_min.wav", "g_frames_broken.wav", "no_such_sound.wav"]
+                 "a_opus.webm", "a_aac.m4a", "a_long_8k.wav", "a_min.wav", "g_frames_broken.wav", "no_such_sound.wav",
+                 # Fix round 1: sounds that open, then fail partway (PyAV raises InvalidDataError on the 6th frame).
+                 "g_frames_badmid.m4a", "g_frames_badmid.mp3"]
+# Fix round 1: sounds made from standard clips with three bytes flipped (offset: xor 0xA5 each), so their
+# decode fails partway: SaveVideoFrames keeps the video and the sound up to there.
+FRAMES_BAD_MID = {"g_frames_badmid.m4a": ("a_aac.m4a", 1539), "g_frames_badmid.mp3": ("a_mono.mp3", 2526)}
+# Fix round 1: SaveVideoFrames' rates where Python's round of the float fps·1000 lands on a .5 the exact
+# value doesn't (Fraction(round(fps * 1000), 1000)): 23.9765 → 23976, 12.3455 → 12346.
+FRAMES_ODD_RATES = [23.9765, 12.3455]
+# Fix round 1: a clip whose frames change size partway (96 × 72, then 128 × 72), resized frame by frame.
+FRAMES_RESIZE_GRID = [
+    {"max_size": m, "stride": s, "start_frame": st, "max_seconds": 0.0, "max_frames": 600}
+    for m in (64, 720) for s in (1, 3) for st in (0, 5)
+]
 
 
 def clip_frames_big() -> str:
@@ -1661,6 +1674,48 @@ def clip_frames_odd() -> str:
         f.pts = i
         frames.append(f)
     encode_frames(c, s, frames)
+    c.close()
+    return name
+
+
+def clip_frames_bad_mid() -> list[str]:
+    for name, (src, off) in FRAMES_BAD_MID.items():
+        b = bytearray(open(os.path.join(CLIPS, src), "rb").read())
+        for i in range(off, off + 3):
+            b[i] ^= 0xA5
+        with open(os.path.join(CLIPS, name), "wb") as f:
+            f.write(bytes(b))
+    return list(FRAMES_BAD_MID)
+
+
+def clip_frames_resize() -> str:
+    """This group's own clip: 4 `smooth` frames at 96 × 72, then 4 at 128 × 72, VP9 in one WebM track (two
+    encoders, as x_vp9_resize.webm). LoadVideoFrames resizes each to the header's scale at max_size 64."""
+    name = "g_frames_resize.webm"
+    path, c = open_out(name, "webm")
+    opts = {"cpu-used": "8", "deadline": "realtime", "row-mt": "0", "lag-in-frames": "0"}
+    s = video_stream(c, "libvpx-vp9", 96, 72, 24, "yuv420p", opts)
+    second = av.CodecContext.create("libvpx-vp9", "w")
+    second.width, second.height, second.pix_fmt = 128, 72, "yuv420p"
+    second.time_base = Fraction(1, 24)
+    second.thread_count = 1
+    second.flags |= av.codec.context.Flags.bitexact
+    second.options = dict(opts)
+    packets = []
+    for i in range(4):
+        f = av.VideoFrame.from_ndarray(np.frombuffer(smooth_frame(96, 72, i), np.uint8).reshape(72, 96, 3), format="rgb24").reformat(format="yuv420p")
+        f.pts = i
+        packets += s.encode(f)
+    packets += s.encode(None)
+    for i in range(4, 8):
+        f = av.VideoFrame.from_ndarray(np.frombuffer(smooth_frame(128, 72, i), np.uint8).reshape(72, 128, 3), format="rgb24").reformat(format="yuv420p")
+        f.pts = i
+        f.time_base = Fraction(1, 24)
+        packets += second.encode(f)
+    packets += second.encode(None)
+    for p in packets:
+        p.stream = s
+        c.mux(p)
     c.close()
     return name
 
@@ -1724,17 +1779,21 @@ def kept_sound_samples(path: str, target: float):
     decoded frames up to the first whose time is past `target`), and the frames' sizes; None when it
     won't open (Python skips the sound)."""
     try:
-        with av.open(path) as c:
-            s = c.streams.audio[0]
-            kept, sizes = 0, []
+        c = av.open(path)
+    except Exception as e:  # noqa: BLE001
+        return {"error": err(e)}
+    with c:
+        s = c.streams.audio[0]
+        kept, sizes = 0, []
+        try:
             for f in c.decode(s):
                 if f.time is not None and f.time > target:
                     break
                 kept += f.samples
                 sizes.append(f.samples)
-            return {"kept": kept, "rate": s.rate or 48000, "frameSizes": sizes[:4], "lastFrame": sizes[-1] if sizes else 0}
-    except Exception as e:  # noqa: BLE001
-        return {"error": err(e)}
+        except Exception as e:  # noqa: BLE001 - fix round 1: the decode fails partway; Python keeps what came
+            return {"kept": kept, "rate": s.rate or 48000, "frameSizes": sizes[:4], "lastFrame": sizes[-1] if sizes else 0, "broken": err(e)}
+        return {"kept": kept, "rate": s.rate or 48000, "frameSizes": sizes[:4], "lastFrame": sizes[-1] if sizes else 0}
 
 
 def group_frames(names: list[str]) -> dict:
@@ -1743,16 +1802,18 @@ def group_frames(names: list[str]) -> dict:
     from PIL import Image
     from comfy_extras import nodes_video_effects as nve
     big, odd, broken = clip_frames_big(), clip_frames_odd(), clip_frames_broken()
+    bad_mid = clip_frames_bad_mid()
+    resize = clip_frames_resize()
     folder_paths.set_input_directory(CLIPS)
     Load = nve.LoadVideoFramesNode.PREPARE_CLASS_CLONE({"hidden_inputs": {}})
     Save = nve.SaveVideoFramesNode.PREPARE_CLASS_CLONE({"hidden_inputs": {}})
-    cases: dict = {"groupClips": {n: sha(open(os.path.join(CLIPS, n), "rb").read()) for n in (big, odd, broken)},
+    cases: dict = {"groupClips": {n: sha(open(os.path.join(CLIPS, n), "rb").read()) for n in (big, odd, broken, *bad_mid, resize)},
                    "stamp": FRAMES_STAMP, "pastEnd": FRAMES_PAST_END}
 
     # LoadVideoFrames: each case's frames as indices into its clip's table of distinct frames (sha256).
     tables: dict = {}
     loads = []
-    for clip, grid in [(n, FRAMES_STANDARD_GRID) for n in names] + [(big, FRAMES_GROUP_GRID), (odd, FRAMES_GROUP_GRID)]:
+    for clip, grid in [(n, FRAMES_STANDARD_GRID) for n in names] + [(big, FRAMES_GROUP_GRID), (odd, FRAMES_GROUP_GRID), (resize, FRAMES_RESIZE_GRID)]:
         table = tables.setdefault(clip, [])
         for g in grid:
             rec: dict = {"clip": clip, **g}
@@ -1795,6 +1856,7 @@ def group_frames(names: list[str]) -> dict:
     saves = []
     runs = [(k, fps, crf, "(none)") for k in ("even", "odd") for fps in (24.0, 29.97) for crf in (10, 20, 32)]
     runs += [("even", 24.0, 20, a) for a in FRAMES_SOUNDS]
+    runs += [("even", r, 20, "(none)") for r in FRAMES_ODD_RATES]
     rgbz: dict = {}
     with tempfile.TemporaryDirectory() as tmp:
         for k, fps, crf, audio in runs:

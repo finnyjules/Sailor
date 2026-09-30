@@ -138,6 +138,8 @@ export async function removeMediaTempDir(dir: string): Promise<void> {
 const ALLOWED_OPTIONS: Readonly<Record<'ffmpeg' | 'ffprobe', Readonly<Record<string, number>>>> = {
   ffmpeg: {
     '-copyts': 0, '-reinit_filter': 1, '-noautorotate': 0,
+    // R5.5 fix round 1: Save video frames' sound scan stops at the first decode error, as PyAV raises there.
+    '-xerror': 0,
     '-protocol_whitelist': 1, '-f': 1, '-enable_drefs': 1, '-i': 1,
     '-map': 1, '-fps_mode': 1, '-vf': 1, '-c': 1,
     '-stats_mux_pre': 1, '-stats_mux_pre_fmt': 1,
@@ -225,6 +227,23 @@ export function checkFilterGraph(graph: string): boolean {
  */
 export const FROM_ZERO_BSF = 'setts=pts=PTS-STARTPTS:dts=DTS-STARTDTS'
 
+/**
+ * R5.5 fix round 1: packets numbered 0, 1024, 2048… (whole AAC frames), then only the first N kept (`noise`'s
+ * drop expression: every packet from number N on is dropped). A sound that
+ * failed partway in Python ended with its encoder unflushed, so its file holds
+ * only the packets made before the error. `-frames:a` can't do this: in ffmpeg
+ * 8 a stream reaching its frame limit ends the whole output file.
+ */
+export const FROM_ZERO_BSF_CUT = /^setts=pts=N\*1024:dts=N\*1024:duration=1024,noise=drop=gte\(n\\,\d{1,9}\)$/
+
+/** FROM_ZERO_BSF, keeping only the first `packets` packets. */
+export function fromZeroBsfCut(packets: number): string {
+  if (!Number.isSafeInteger(packets) || packets < 1) throw new MediaError('failed')
+  // Every packet kept is a whole AAC frame (1024 samples), numbered from 0, as Python's muxer numbers the
+  // unflushed encoder's: a sound converted from mono would otherwise carry the resampler's stamps (a 1023).
+  return `setts=pts=N*1024:dts=N*1024:duration=1024,noise=drop=gte(n\\,${packets})`
+}
+
 /** `-r`'s value: `num/den` or a decimal, both positive. Exported for tests. */
 export function validRate(v: string): boolean {
   const m = /^(\d{1,9})\/(\d{1,9})$/.exec(v)
@@ -273,7 +292,7 @@ export function checkArgs(tool: 'ffmpeg' | 'ffprobe', args: readonly string[], o
       if (name === '-fflags' && v !== '+bitexact') bad()
       if (name === '-enc_time_base' && !/^\d+\/\d+$/.test(v!)) bad()
       if ((name === '-vf' || name === '-af' || name === '-filter_complex') && !checkFilterGraph(v!)) bad()
-      if (name === '-bsf' && !/^setts=dts=DTS-\d+$/.test(v!) && v !== FROM_ZERO_BSF) bad()
+      if (name === '-bsf' && !/^setts=dts=DTS-\d+$/.test(v!) && v !== FROM_ZERO_BSF && !FROM_ZERO_BSF_CUT.test(v!)) bad()
       if (name === '-ss' && v !== '0') bad()
       if (name === '-seek_timestamp' && v !== '1') bad()
       if (name === '-frames' && !/^\d+$/.test(v!)) bad()

@@ -219,13 +219,20 @@ export interface ProbeOptions {
    * for files a person brings in. The header caps are then not judged here.
    */
   kept?: true
+  /**
+   * R5.5 fix round 1: a sound of which only a stretch is read (Save video
+   * frames' soundtrack, cut at the video's length): its size cap is judged,
+   * not its stated length. The caller holds what it decodes to the sample cap.
+   */
+  anyLength?: true
 }
 
 /** The size, frame and stated-length caps, judged from the header alone (before any whole-file scan). */
-function headerCapsWord(p: MediaProbe, kind: 'video' | 'sound' | undefined, hosted: boolean): MediaWord | null {
+function headerCapsWord(p: MediaProbe, kind: 'video' | 'sound' | undefined, hosted: boolean, anyLength = false): MediaWord | null {
   const caps: MediaCaps = hosted ? MEDIA_CAPS.hosted : MEDIA_CAPS.local
   const maxBytes = kind === 'video' ? caps.videoBytes : kind === 'sound' ? caps.soundBytes : Math.max(caps.videoBytes, caps.soundBytes)
   if (p.bytes > maxBytes) return 'tooBig'
+  if (anyLength) return null
   if (kind === 'video' && p.video[0] && p.video[0].w * p.video[0].h > caps.framePixels) return 'tooBig'
   const maxSeconds = kind === 'video' ? caps.videoSeconds : kind === 'sound' ? caps.soundSeconds : Math.max(caps.videoSeconds, caps.soundSeconds)
   if (p.containerDuration !== null && p.containerDuration / 1e6 > maxSeconds) return 'tooLong'
@@ -293,7 +300,7 @@ export async function probeMedia(path: string, o: ProbeOptions): Promise<MediaPr
     containerDuration: Number.isFinite(secs) ? Math.round(secs * 1e6) : null,
     video, sound, bytes, videoPackets: null,
   }
-  const early = o.kept ? null : headerCapsWord(p, o.kind, isHosted())
+  const early = o.kept ? null : headerCapsWord(p, o.kind, isHosted(), !!o.anyLength)
   if (early) throw new MediaError(early)
   const scan: ProbeJobOptions = { userId: o.userId, signal: o.signal, route: o.route, timeoutMs: scanTimeoutMs(bytes) }
   const v = video[0]

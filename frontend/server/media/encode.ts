@@ -57,12 +57,13 @@ import { constants as fsConstants } from 'node:fs'
 import { copyFile, link, realpath, rm, writeFile } from 'node:fs/promises'
 import { basename, dirname, isAbsolute, join, sep } from 'node:path'
 import { isHosted } from '../utils/deployMode'
+import { MEDIA_CAPS } from '#shared/runner/media'
 import { CHROMA_POS, chromaSubsampling, type DecodedSound } from './decode'
 import { h264Args, type H264Quality } from './h264Quality'
 import { exactFraction, ffprobeJson, mediaCapsWord, probeMedia, type MediaProbe, type Rational, type VideoStreamProbe } from './probe'
 import { resampleInWorker } from '../runner/compositor/worker'
 import { RESAMPLE_MAX_TAPS, opusRate, resampleTaps } from './resample'
-import { FROM_ZERO_BSF, MediaError, inputArgs, mediaTempDir, removeMediaTempDir, runMedia } from './run'
+import { FROM_ZERO_BSF, MediaError, fromZeroBsfCut, inputArgs, mediaTempDir, removeMediaTempDir, runMedia } from './run'
 
 export { OPENH264_FOR, PYAV_H264_DEFAULT, h264Args, type H264Quality } from './h264Quality'
 
@@ -252,22 +253,66 @@ async function probeVideoInput(path: string, o: { userId: string | null; signal?
   return p
 }
 
+/** The loop's end was reached: the scan stops there (the rest of the file is never decoded). */
+class CutReached extends Error {}
+
 /**
  * SaveVideoFrames' sound cut: the samples of the first stream's decoded
  * frames up to the first whose time is past `cutSeconds` (`frame.time >
- * target` breaks the loop; a frame without a time is kept).
+ * target` breaks the loop; a frame without a time is kept). The frames come
+ * from a decode that stops at the first decode error, as PyAV raises there
+ * (`-xerror`); then `broken` (R5.5 fix round 1): Python's loop ends in its
+ * `except`, its AAC encoder never flushed. The decode stops once the cut is
+ * reached (fix round 1, Minor 2: a soundtrack longer than the caps is read
+ * only as far as the video), and the samples it keeps are held to
+ * `maxSamples` (channels · samples) as they come.
  */
-async function samplesUpTo(p: MediaProbe, cutSeconds: number, o: { userId: string | null; signal?: AbortSignal }): Promise<number> {
+async function samplesUpTo(p: MediaProbe, cutSeconds: number, o: { userId: string | null; signal?: AbortSignal; maxSamples: number }): Promise<{ kept: number; broken: boolean }> {
   const s = p.sound[0]!
-  const j = await ffprobeJson(p.path, p.format, ['-select_streams', 'a:0', '-show_entries', 'frame=pts,nb_samples'], o)
-  const frames = Array.isArray(j.frames) ? (j.frames as { pts?: unknown; nb_samples?: unknown }[]) : []
+  const C = Math.max(1, s.channels)
   let kept = 0
-  for (const f of frames) {
-    if (typeof f.pts === 'number' && (f.pts * s.timeBase.num) / s.timeBase.den > cutSeconds) break
-    kept += typeof f.nb_samples === 'number' ? f.nb_samples : 0
+  let text = ''
+  let done = false
+  try {
+    await runMedia({
+      tool: 'ffmpeg',
+      args: [
+        '-xerror', '-copyts', ...inputArgs(p.path, p.format), '-map', '0:a:0', '-c:a', 'pcm_f32le',
+        '-stats_mux_pre', 'pipe:3', '-stats_mux_pre_fmt', '{size} {ptsi} {tbi}', '-f', 'null', 'pipe:1',
+      ],
+      userId: o.userId, signal: o.signal,
+      onSide: (chunk) => {
+        if (chunk === null || done) return
+        text += Buffer.from(chunk).toString('latin1')
+        let nl: number
+        while ((nl = text.indexOf('\n')) >= 0) {
+          const line = text.slice(0, nl).trim()
+          text = text.slice(nl + 1)
+          if (!line) continue
+          const m = /^(\d+) (-?\d+|N\/A) (\d+)\/(\d+)$/.exec(line)
+          if (!m) throw new MediaError('failed')
+          // Python's frame.time: pts · time_base of the stream (the packets carry the decoded frames' own).
+          if (m[2] !== 'N/A' && (Number(m[2]) * Number(m[3])) / Number(m[4]) > cutSeconds) {
+            done = true
+            throw new CutReached()
+          }
+          kept += Number(m[1]) / (4 * C)
+          if (kept * C > o.maxSamples) throw new MediaError('tooLong')
+        }
+      },
+    })
   }
-  return kept
+  catch (e) {
+    if (e instanceof CutReached) return { kept, broken: false }
+    // A decode error (the file opened: a probe read it). Stop, time limits and the caps stay failures.
+    if (e instanceof MediaError && e.word === 'failed') return { kept, broken: true }
+    throw e
+  }
+  return { kept, broken: false }
 }
+
+/** The AAC encoder's frame, in samples: a packet comes out for each one after the first. */
+const AAC_FRAME = 1024
 
 // ── encodeVideo ──────────────────────────────────────────────────────────────
 
@@ -383,6 +428,8 @@ export async function encodeVideo(o: EncodeVideoOptions): Promise<{ frames: numb
     // Sound: an input of its own.
     let soundIndex: number | null = null
     let soundFilter: string | null = null
+    /** R5.5 fix round 1: how many AAC packets Python's file holds when its sound failed partway (null: all). */
+    let soundPackets: number | null = null
     if (sound) {
       soundIndex = nextInput()
       const C = LAYOUT_CHANNELS[sound.layout]
@@ -397,13 +444,33 @@ export async function encodeVideo(o: EncodeVideoOptions): Promise<{ frames: numb
         args.push('-f', 'f32le', '-ar', String(sound.rate), '-ch_layout', sound.layout, '-protocol_whitelist', 'file,pipe', '-i', `file:${raw}`)
       }
       else {
-        const p = await probeMedia(sound.source.path, { userId: o.userId, signal: o.signal, roots, kind: 'sound' })
-        const refused = mediaCapsWord(p, 'sound', isHosted())
+        const cut = sound.source.cutSeconds
+        // With a cut (SaveVideoFrames), only as much is read as the video lasts: the size cap is judged, not
+        // the length (R5.5 fix round 1, Minor 2); what is decoded is held to the sample cap as it comes.
+        const p = await probeMedia(sound.source.path, { userId: o.userId, signal: o.signal, roots, kind: 'sound', ...(cut !== undefined ? { anyLength: true as const } : {}) })
+        const refused = cut !== undefined ? (p.sound.length ? null : 'noSound') : mediaCapsWord(p, 'sound', isHosted())
         if (refused) throw new MediaError(refused)
-        const keep = sound.source.cutSeconds === undefined ? null : await samplesUpTo(p, sound.source.cutSeconds, { userId: o.userId, signal: o.signal })
-        args.push(...inputArgs(p.path, p.format))
-        // Python re-stamps every frame (`frame.pts = None`): the sound starts at 0 however the file's did.
-        soundFilter = `${keep !== null ? `atrim=end_sample=${keep},` : ''}asetpts=N/SR/TB`
+        const caps = isHosted() ? MEDIA_CAPS.hosted : MEDIA_CAPS.local
+        const keep = cut === undefined ? null : await samplesUpTo(p, cut, { userId: o.userId, signal: o.signal, maxSamples: caps.soundSamples })
+        let end = keep?.kept ?? null
+        if (keep?.broken) {
+          // Python's loop ended in its `except` (R5.5 fix round 1): the encoder was never flushed, so the file
+          // holds the packets it had made: one for each whole 1024-sample frame after the first. Only whole
+          // frames go in, and every packet after that many is dropped (run.ts fromZeroBsfCut).
+          const whole = Math.floor(keep.kept / AAC_FRAME)
+          end = whole * AAC_FRAME
+          soundPackets = whole - 1
+        }
+        if (soundPackets !== null && soundPackets < 1) {
+          // No packet made before the error: Python's file has a sound stream with none in it. Named case:
+          // the runner saves no sound stream.
+          soundIndex = null
+        }
+        else {
+          args.push(...inputArgs(p.path, p.format))
+          // Python re-stamps every frame (`frame.pts = None`): the sound starts at 0 however the file's did.
+          soundFilter = `${end !== null ? `atrim=end_sample=${end},` : ''}asetpts=N/SR/TB`
+        }
       }
     }
 
@@ -425,7 +492,7 @@ export async function encodeVideo(o: EncodeVideoOptions): Promise<{ frames: numb
       // A file's sound (SaveVideoFrames, R5.5): Python sets every frame's pts to None, so the muxer numbers
       // the AAC packets from 0 and the encoder's priming (1024 samples) is not trimmed by an edit list: the
       // packets are numbered from 0 here too, which is what Python's reader then decodes.
-      if (!('sound' in sound.source)) args.push('-bsf:a', FROM_ZERO_BSF)
+      if (!('sound' in sound.source)) args.push('-bsf:a', soundPackets !== null ? fromZeroBsfCut(soundPackets) : FROM_ZERO_BSF)
     }
     args.push('-map_metadata', tagsIndex === null ? '-1' : String(tagsIndex))
     args.push('-movflags', '+faststart+use_metadata_tags', '-f', 'mp4', '-y', `file:${out}`)
