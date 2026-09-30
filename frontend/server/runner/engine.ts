@@ -2059,7 +2059,7 @@ export function createEngine(deps: EngineDeps) {
     if (deps.hosted()) {
       for (const p of prompts) {
         const [bad] = unsafeSoundNames(p)
-        if (bad !== undefined) throw new MeterRefusalError(NOT_YOURS, 403)
+        if (bad !== undefined) throw new MeterRefusalError(NOT_YOURS, 403, { file: bad })
       }
     }
     // A Film a shot's reference links (`/view?…&type=input` in its options,

@@ -906,11 +906,14 @@ describe('fix round 1', () => {
     // Another user's name: refused before the hold, there (someone.wav) or not (nobody.wav), and so is a name
     // outside the folders; every refusal has the same words and status, so none tells whether a file exists.
     const held = k.ledger.hold.mock.calls.length
-    const refusals: { message: string; statusCode?: number }[] = []
+    const refusals: { message: string; statusCode?: number; data?: unknown }[] = []
     for (const audio of ['someone.wav', 'nobody.wav', 'u_0123456789ab/x.wav', '../someone.wav', '/etc/someone.wav']) {
-      const err = await k.engine.startRun({ userId: k.userId, takes: [take(audio)], ...START }).then(() => null, e => e as Error & { statusCode?: number })
+      const err = await k.engine.startRun({ userId: k.userId, takes: [take(audio)], ...START }).then(() => null, e => e as Error & { statusCode?: number; data?: { file?: string } })
       expect(err, audio).not.toBeNull()
-      refusals.push({ message: err!.message, statusCode: err!.statusCode })
+      // The whole answer, with the name itself swapped out, must be the same for every name.
+      expect(Object.keys(err!.data ?? {}), audio).toEqual(['file'])
+      expect(audio.endsWith(err!.data!.file!), audio).toBe(true)
+      refusals.push({ message: err!.message, statusCode: err!.statusCode, data: { ...err!.data, file: '<name>' } })
     }
     expect(new Set(refusals.map(r => JSON.stringify(r))).size, JSON.stringify(refusals)).toBe(1)
     expect(refusals[0]!.message).toBe('This workflow uses a file that isn’t one of yours')
