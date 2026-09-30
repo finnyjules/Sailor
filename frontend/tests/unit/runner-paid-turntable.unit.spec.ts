@@ -241,7 +241,7 @@ describe('prices: by what it sends, on both paths (ruling (b))', () => {
     expect(estimateFloored(TURNTABLE_CLASS, front, p)).toEqual(p)
     expect(paidNoCall(TURNTABLE_CLASS, front)).toBe(false)
     expect(paidNoCall(TURNTABLE_CLASS, {})).toBe(false)
-    expect(PRICE_BOOK_VERSION).toBe('r3-turntable')
+    expect(PRICE_BOOK_VERSION).toBe('r3-sound-in')
   })
 
   it('hosted: held at 135 and charged 135', async () => {

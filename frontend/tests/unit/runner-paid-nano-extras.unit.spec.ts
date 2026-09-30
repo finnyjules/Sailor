@@ -406,7 +406,7 @@ describe('prices', () => {
       expect(editCalls(ct, {})).toEqual(editCalls('RemoveObjectNode', {}))
     }
     expect(creditsForUsd(0.067)).toBe(14)
-    expect(PRICE_BOOK_VERSION).toBe('r3-turntable')
+    expect(PRICE_BOOK_VERSION).toBe('r3-sound-in')
   })
 
   it('14 credits for a call on both paths and the badge; nothing for a branch that makes none (was a flat 10)', async () => {

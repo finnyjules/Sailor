@@ -58,6 +58,8 @@ import { loadVideoStartProblems, videoFileVerdict } from './media/videoNodes'
 import { frameStartProblems, framesSoundVerdict } from './media/frameNodes'
 import { ev, type RunEvents, type SwitchReason } from './events'
 import { mediaNodeKind, nodeMediaChangedWords, nodeMediaCheck, nodeMediaFiles } from './nodeMedia'
+import { pythonWavOf, soundMakerOf, type PythonWav } from './soundWav'
+import { SOUND_FILE_MISSING } from './media/soundNodes'
 import { switchedSinceHold } from './switches'
 import { measuredMediaChanged } from './mediaInputs'
 import type { InputSeconds } from '#shared/pricing/clipSettings'
@@ -1124,6 +1126,19 @@ export function createEngine(deps: EngineDeps) {
         if (!p) { p = files.read(f); reads.set(key, p) }
         return p
       }
+      // A sound-in node's WAV (R3.10, ./soundWav.ts): made once for this turn from what the wire
+      // brought, so the WAV measured and charged (nodeMediaCheck) is the very one the plan sends.
+      const wavs = new Map<string, Promise<PythonWav>>()
+      const soundWavOnce = (link: ApiLink): Promise<PythonWav> => {
+        const key = `${link[0]}:${link[1]}`
+        let p = wavs.get(key)
+        if (!p) {
+          const value = valueAt(take)(link) ?? { kind: 'files' as const, files: filesAt(take)(link) }
+          p = pythonWavOf(value, soundMakerOf(take.prompt, link), { access: files, userId: run.userId, hosted: deps.hosted(), signal })
+          wavs.set(key, p)
+        }
+        return p
+      }
       // Resuming a request already sent before a restart (F22 fix round 2):
       // nothing is measured, checked or handed off again, and the credits
       // written down at submit stand. The job is running (and billing) at the
@@ -1216,7 +1231,7 @@ export function createEngine(deps: EngineDeps) {
       // released); what is measured is what it is planned and charged on.
       let inputSeconds: InputSeconds | undefined
       const media = resuming ? null : await nodeMediaCheck(take.prompt, id, {
-        read: readOnce, size: f => files.size(f), strict: deps.hosted(), filesFrom: filesAt(take),
+        read: readOnce, size: f => files.size(f), strict: deps.hosted(), filesFrom: filesAt(take), soundWav: soundWavOnce,
       })
       if (media) {
         if (media.problem !== null) throw new Error(media.problem)
@@ -1275,6 +1290,7 @@ export function createEngine(deps: EngineDeps) {
         hold,
         ...(resuming && rec.keepHeld ? { keepHeld: rec.keepHeld } : {}),
         priceInputs: take.prompt[id]!.inputs,
+        soundWav: soundWavOnce,
       })
       const handOff = async (f: OutputFile) => deps.handoff.toUrlBytes(f, await readOnce(f))
       // A picture wired into an IMAGE input: from a loader, the PNG of its tensor (R3.H).
@@ -1316,6 +1332,7 @@ export function createEngine(deps: EngineDeps) {
       }
       // The files' bytes are not kept for the provider wait (up to 30 minutes).
       reads.clear()
+      wavs.clear()
       views.clear()
       // Files saved into the output folder (Save image, R1.5; a pipeline's
       // saves, R3.1): the run's assets, owned by the user and listed in the take's record.
@@ -2102,6 +2119,11 @@ export function createEngine(deps: EngineDeps) {
         await assertFilesOwned(nodeMediaFiles(p, nodeId), i.userId, deps.hosted(), deps.ownership)
         const media = await nodeMediaCheck(p, nodeId, {
           read: f => files.read(f), size: f => files.size(f), strict: deps.hosted(),
+          // A sound-in node's sound named by the prompt (R3.10): Python's WAV of it, as `load` reads the file.
+          soundFileWav: async (f) => {
+            if (!(await files.exists(f))) throw new Error(SOUND_FILE_MISSING)
+            return pythonWavOf({ kind: 'files', files: [f], sound: { decode: 'load' } }, 'LoadAudio', { access: files, userId: i.userId, hosted: deps.hosted() })
+          },
         })
         if (!media) continue
         if (media.problem !== null) throw refuse(media.problem, 400, { nodeId, classType: n.class_type })

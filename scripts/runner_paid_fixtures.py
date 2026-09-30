@@ -54,6 +54,16 @@ Groups:
              speed, pitch and volume bounds, a non-ASCII text, a cloned
              voice, for frontend/server/runner/generators/audioGen.ts
              (tests/unit/runner-paid-audio-gen.unit.spec.ts)
+  sound-in   (R3.10) Transcribe audio and its hidden twin (Whisper on fal's
+             Wizper), Identify speakers, Clone a singing voice and Sync lips to
+             audio and its hidden twin: every language, translate, speaker
+             counts, RVC presets, pitch settings and formats, every sync mode
+             and address kind, Wizper answers with the text missing, null,
+             spaced and non-ASCII; and the WAV Python sends for the standard
+             clips (3 s mono and stereo at 16, 44.1 and 48 kHz, 75 s clips cut
+             at 60 s, float clips beyond ±1), by samples, for
+             frontend/server/runner/generators/soundIn.ts and soundWav.ts
+             (tests/unit/runner-paid-sound-in.unit.spec.ts)
   gen-3d     (R3.9) Generate a 3D model and its hidden twin (Hunyuan3D 2), and
              Multi-View → 3D on each engine (TRELLIS, Rodin, Hunyuan3D-2mv)
              with one, two and four views; seeds 0, 1, 65,536 and 2**32 - 1;
@@ -1690,6 +1700,190 @@ def audio_gen_group() -> dict:
     return {"cases": cases, "text_lengths": [{"text": t, "len": len(t)} for t in texts]}
 
 
+# ── sound-in (R3.10) ─────────────────────────────────────────────────────────
+
+WIZPER_OUT = {"text": "Hello from Sailor.", "chunks": [{"timestamp": [0.0, 1.5], "text": "Hello from Sailor."}], "languages": ["en"]}
+RVC_OUT = "https://r.test/rvc/out.wav"
+RVC_OUT_2 = "https://r.test/rvc/second.wav"
+LIPSYNC_OUT = "https://r.test/lipsync/out.mp4"
+LIPSYNC_OUT_2 = "https://r.test/lipsync/second.mp4"
+FACE_VIDEO = "https://r.test/face.mp4"
+TRANSCRIBE_DEFAULTS = {"language": "auto", "translate": False}
+DIARIZE_DEFAULTS = {"model": "Whisper Diarization", "num_speakers": 0, "language": "auto"}
+RVC_DEFAULTS = {"model": "Realistic Voice Cloning (RVC)", "rvc_model": "Squidward", "custom_rvc_model_url": "",
+                "pitch_change": "no-change", "pitch_shift_semitones": 0, "pitch_detection_algorithm": "rmvpe",
+                "output_format": "wav"}
+LIPSYNC_DEFAULTS = {"video_url": FACE_VIDEO, "sync_mode": "cut_off"}
+SOUND_LANGUAGES = ["auto", "en", "es", "fr", "de", "it", "pt", "ja", "ko", "zh", "ru", "ar", "hi"]
+RVC_PRESETS = ["Squidward", "MrKrabs", "Plankton", "Drake", "Vader", "Trump", "Biden", "Obama", "Guitar", "Voilin", "CUSTOM"]
+
+
+def clip_samples(frames: int, channels: int, seed: int) -> list:
+    """The standard sound clips' samples, interleaved (frame by frame, channel by channel): an LCG
+    (state = (state · 1103515245 + 12345) mod 2**31, from `seed`), each sample
+    ((state >> 8) mod 65536) − 32768, an int16. The TypeScript side makes the same numbers."""
+    state = seed & 0x7FFFFFFF
+    out = []
+    for _ in range(frames * channels):
+        state = (state * 1103515245 + 12345) & 0x7FFFFFFF
+        out.append(((state >> 8) & 0xFFFF) - 32768)
+    return out
+
+
+def clip_bytes(kind: str, rate: int, channels: int, frames: int, seed: int) -> bytes:
+    """A clip file: `pcm16` a 16-bit PCM WAV of clip_samples; `float32` an IEEE-float WAV of each
+    sample / 8192 (up to ±4: samples beyond ±1). The plain 44-byte header, fmt tag 1 or 3."""
+    samples = clip_samples(frames, channels, seed)
+    if kind == "pcm16":
+        data = struct.pack(f"<{len(samples)}h", *samples)
+        tag, width = 1, 2
+    else:
+        data = struct.pack(f"<{len(samples)}f", *[v / 8192 for v in samples])
+        tag, width = 3, 4
+    header = b"RIFF" + struct.pack("<I", 36 + len(data)) + b"WAVE" + b"fmt " + struct.pack(
+        "<IHHIIHH", 16, tag, channels, rate, rate * channels * width, channels * width, width * 8) + b"data" + struct.pack("<I", len(data))
+    return header + data
+
+
+SOUND_CLIPS = [
+    {"name": "mono 16 kHz 3 s", "kind": "pcm16", "rate": 16000, "channels": 1, "seconds": 3, "seed": 101},
+    {"name": "stereo 16 kHz 3 s", "kind": "pcm16", "rate": 16000, "channels": 2, "seconds": 3, "seed": 102},
+    {"name": "mono 44.1 kHz 3 s", "kind": "pcm16", "rate": 44100, "channels": 1, "seconds": 3, "seed": 103},
+    {"name": "stereo 44.1 kHz 3 s", "kind": "pcm16", "rate": 44100, "channels": 2, "seconds": 3, "seed": 104},
+    {"name": "mono 48 kHz 3 s", "kind": "pcm16", "rate": 48000, "channels": 1, "seconds": 3, "seed": 105},
+    {"name": "stereo 48 kHz 3 s", "kind": "pcm16", "rate": 48000, "channels": 2, "seconds": 3, "seed": 106},
+    {"name": "mono 16 kHz 75 s (cut at 60 s)", "kind": "pcm16", "rate": 16000, "channels": 1, "seconds": 75, "seed": 107},
+    {"name": "stereo 8 kHz 75 s (cut at 60 s)", "kind": "pcm16", "rate": 8000, "channels": 2, "seconds": 75, "seed": 108},
+    {"name": "stereo 44.1 kHz float, beyond ±1", "kind": "float32", "rate": 44100, "channels": 2, "seconds": 1, "seed": 109},
+    {"name": "mono 22.05 kHz float, beyond ±1", "kind": "float32", "rate": 22050, "channels": 1, "seconds": 2, "seed": 110},
+]
+
+
+def _python_wav(path: str) -> dict:
+    """What `_audio_dict_to_wav_data_url(audio, max_seconds=60)` sends for the AUDIO LoadAudio makes of
+    `path` (nodes_audio.load): the WAV's own header facts and the sha256 of its PCM samples."""
+    import base64
+    import hashlib
+    import io
+    import wave
+    import comfy_extras.nodes_audio as na
+    import runner_builder_fixtures as rbf
+    nr, _fal, _extras = rbf._node_modules()
+    waveform, rate = na.load(path)
+    url = nr._audio_dict_to_wav_data_url({"waveform": waveform.unsqueeze(0), "sample_rate": rate}, max_seconds=60)
+    wav = base64.b64decode(url.split(",", 1)[1])
+    with wave.open(io.BytesIO(wav), "rb") as w:
+        ch, width, r, n = w.getnchannels(), w.getsampwidth(), w.getframerate(), w.getnframes()
+        pcm = w.readframes(n)
+    return {"channels": ch, "sample_width": width, "rate": r, "frames": n, "pcm_sha256": hashlib.sha256(pcm).hexdigest(),
+            "head": list(struct.unpack(f"<{min(16, len(pcm) // 2)}h", pcm[:32])),
+            "seconds": n / r}
+
+
+def sound_in_group() -> dict:
+    """R3.10: Transcribe audio and its twin (Whisper on fal's Wizper), Identify speakers, Clone a singing
+    voice and Sync lips to audio and its twin, each sending Python's WAV of its sound (`WAV:<input>`, and
+    Whisper's uploaded as `UPLOAD:whisper.wav`); and `wavs`: the WAV Python sends for the standard clips
+    (3 s mono and stereo at 16, 44.1 and 48 kHz, 75 s clips cut at 60 s, float clips beyond ±1), each read
+    by LoadAudio's own `load`, compared by samples (PyAV's header carries an encoder tag)."""
+    import hashlib
+    import tempfile
+    import runner_builder_fixtures as rbf
+    nr, _fal, _extras = rbf._node_modules()
+    rvc_wav = _b64(wav_bytes(0.1, 8000, 31))
+    rvc_wav2 = _b64(wav_bytes(0.1, 8000, 32, channels=2))
+    video = _b64(b"\x00\x00\x00\x18ftypmp42\x00\x00\x00\x00mp42isom" + b"\x00\x00\x00\x08mdat")
+    cases: list = []
+
+    def add(name, cls, widgets, answers, files=None):
+        cases.append(paid_case(name, cls, widgets, answers, sounds=["audio"], files=files))
+
+    def transcribe(name, twin=False, answer=None, **w):
+        cls = nr.WhisperRemoteNode if twin else nr.TranscribeAudioNode
+        widgets = {**TRANSCRIBE_DEFAULTS, **w} if twin else {"model": "Whisper", **TRANSCRIBE_DEFAULTS, **w}
+        add(f"{'whisper twin' if twin else 'transcribe'} · {name}", cls, widgets, [WIZPER_OUT if answer is None else answer])
+
+    for lang in SOUND_LANGUAGES:
+        transcribe(f"language {lang}", language=lang)
+    transcribe("translate", translate=True)
+    transcribe("translate fr", translate=True, language="fr")
+    # The answer's text: missing, null, empty, spaces kept, non-ASCII, a number (str()), a falsy 0, a null body.
+    transcribe("text missing", answer={"chunks": [], "languages": ["en"]})
+    transcribe("text null", answer={"__body__": '{"text": null, "chunks": []}'})
+    transcribe("text empty", answer={"text": ""})
+    transcribe("text with spaces", answer={"text": "  Hello,  world.  \n"})
+    transcribe("non-ASCII text", answer={"__body__": '{"text": " caf\\u00e9 \\u732b \\ud83d\\ude00 \\u65e5\\u672c\\u8a9e "}'})
+    transcribe("text a float", answer={"__body__": '{"text": 1.0}'})
+    transcribe("text a big float", answer={"__body__": '{"text": 1e5}'})
+    transcribe("text zero", answer={"__body__": '{"text": 0}'})
+    transcribe("body null", answer={"__body__": "null"})
+    transcribe("defaults", twin=True)
+    transcribe("translate ja", twin=True, translate=True, language="ja")
+    transcribe("text with spaces", twin=True, answer={"text": "  twin  "})
+
+    def diarize(name, answer=None, **w):
+        add(f"speakers · {name}", nr.IdentifySpeakersNode, {**DIARIZE_DEFAULTS, **w},
+            [answer if answer is not None else {"__body__": DIARIZE_BODY}])
+
+    for n in (0, 1, 2, 20):
+        diarize(f"{n} speakers", num_speakers=n)
+    for lang in SOUND_LANGUAGES:
+        diarize(f"language {lang}", language=lang)
+    diarize("3 speakers, de", num_speakers=3, language="de")
+    diarize("output a string", answer={"output": '{"segments": [], "note": "already text"}'})
+    diarize("output null", answer={"__body__": '{"output": null}'})
+    diarize("output missing", answer={"__body__": '{"status": "succeeded"}'})
+    diarize("output a list", answer={"__body__": '{"output": [1.0, 1e5, "caf\\u00e9", {"b": 2, "a": -0.0}]}'})
+
+    def clone(name, answer=None, files=None, **w):
+        add(f"clone · {name}", nr.CloneSingingVoiceNode, {**RVC_DEFAULTS, **w},
+            [answer or {"output": RVC_OUT}], files=files or {RVC_OUT: rvc_wav, RVC_OUT_2: rvc_wav2})
+
+    for preset in RVC_PRESETS:
+        clone(f"preset {preset}", rvc_model=preset)
+    clone("CUSTOM with a URL", rvc_model="CUSTOM", custom_rvc_model_url="https://huggingface.co/alice/voice.zip")
+    clone("a URL without CUSTOM", rvc_model="Guitar", custom_rvc_model_url="https://huggingface.co/alice/voice.zip")
+    for change in ("no-change", "male-to-female", "female-to-male"):
+        clone(f"pitch {change}", pitch_change=change)
+    for semis in (-12, -1, 0, 5, 12):
+        clone(f"semitones {semis}", pitch_shift_semitones=semis)
+    clone("mangio-crepe", pitch_detection_algorithm="mangio-crepe")
+    clone("mp3", output_format="mp3")
+    clone("answer list", answer={"output": [RVC_OUT_2, RVC_OUT]})
+
+    def lipsync(name, twin=False, answer=None, **w):
+        cls = nr.LipsyncRemoteNode if twin else nr.LipsyncNode
+        widgets = {**LIPSYNC_DEFAULTS, **w} if twin else {"model": "sync.so 2-pro", **LIPSYNC_DEFAULTS, **w}
+        add(f"{'lipsync twin' if twin else 'lipsync'} · {name}", cls, widgets, [answer or {"output": LIPSYNC_OUT}],
+            files={LIPSYNC_OUT: video, LIPSYNC_OUT_2: video})
+
+    for mode in ("loop", "bounce", "cut_off", "silence", "remap"):
+        lipsync(f"mode {mode}", sync_mode=mode)
+        lipsync(f"mode {mode}", twin=True, sync_mode=mode)
+    lipsync("upload link", video_url="/view?filename=face.mp4&type=input")
+    lipsync("http address", video_url="http://r.test/face.mp4")
+    lipsync("spaces address", video_url="   ")
+    lipsync("blank address", video_url="")
+    lipsync("blank address", twin=True, video_url="")
+    lipsync("answer list", answer={"output": [LIPSYNC_OUT_2, LIPSYNC_OUT]})
+
+    wavs = []
+    with tempfile.TemporaryDirectory() as tmp:
+        for clip in SOUND_CLIPS:
+            data = clip_bytes(clip["kind"], clip["rate"], clip["channels"], clip["rate"] * clip["seconds"], clip["seed"])
+            path = os.path.join(tmp, "clip.wav")
+            with open(path, "wb") as f:
+                f.write(data)
+            wavs.append({**clip, "file_sha256": hashlib.sha256(data).hexdigest(), "sent": _python_wav(path)})
+    return {"cases": cases, "wavs": wavs}
+
+
+DIARIZE_BODY = ('{"output": {"segments": [{"start": 0.0, "end": 1.5, "speaker": "SPEAKER_00", "text": " Hello caf\\u00e9.", '
+                '"avg_logprob": -0.25, "words": [{"word": " Hello", "start": 0, "end": 1e5, "probability": 1.0}]}, '
+                '{"start": 1.5, "end": 3.0, "speaker": "SPEAKER_01", "text": " \\u732b \\ud83d\\ude00"}], '
+                '"num_speakers": 2, "language": "en"}, "metrics": {"predict_time": 1.25}}')
+
+
 GLB_OUT = "https://r.test/3d/model.glb"
 GLB_OUT_2 = "https://r.test/3d/preview.glb"
 GLB_VIDEO = "https://r.test/3d/color.mp4"
@@ -2945,6 +3139,7 @@ GROUPS = {
     "layers": layers_group,
     "split": split_group,
     "audio-gen": audio_gen_group,
+    "sound-in": sound_in_group,
     "gen-3d": gen_3d_group,
     "film-shot": film_shot_group,
     "image-extras": image_extras_group,

@@ -44,7 +44,7 @@ export interface PaidCase {
   widgets: Record<string, unknown>
   /** Picture inputs, by input name: each fed by a LoadImage of `<name>.png`. */
   pictures?: string[]
-  /** Sound inputs, by input name (the runner's sound source is set up by the task that needs it). */
+  /** Sound inputs, by input name: each fed by a Load audio of `<name>.wav` (R3.10; needs `media-sound` on). */
   sounds?: string[]
   /** The provider's answers in call order: Replicate's prediction, fal's result body, or a raw body text. */
   answers: unknown[]
@@ -150,6 +150,15 @@ export async function runPaidCase(c: PaidCase, o: { families: ReadonlySet<Runner
     prompt[`p_${name}`] = { class_type: 'LoadImage', inputs: { image: file, upload: 'image' } }
     prompt[NODE]!.inputs[name] = [`p_${name}`, 0]
   }
+  // Sounds (R3.10): each a Load audio of `<name>.wav` (the case's file), which hands its file on as it is.
+  for (const name of c.sounds ?? []) {
+    const file = `${name}.wav`
+    const given = c.sound_files?.[name]
+    if (!given) throw new Error(`${c.name}: no file for the sound ${name}`)
+    writeFileSync(join(k.root, 'input', file), new Uint8Array(Buffer.from(given, 'base64')))
+    prompt[`s_${name}`] = { class_type: 'LoadAudio', inputs: { audio: file } }
+    prompt[NODE]!.inputs[name] = [`s_${name}`, 0]
+  }
   const { runId } = await k.engine.startRun({ userId: k.userId, takes: [prompt], ...START })
   await k.engine.settled(runId)
   const rec = (await k.store.get(runId))!.takes[0]!.nodes[NODE]!
@@ -163,7 +172,7 @@ export async function runPaidCase(c: PaidCase, o: { families: ReadonlySet<Runner
  */
 export function readerFor(classType: string, id = NODE): ApiPrompt {
   if (RUNNER_OUTPUT_CLASSES.has(classType)) return {}
-  if (isAudioGenClass(classType)) {
+  if (isAudioGenClass(classType) || classType === 'CloneSingingVoiceNode') {
     return { [`${id}_card`]: { class_type: 'Audio', inputs: { audio: '', export: false, filename_prefix: 'audio/ComfyUI', format: 'flac', quality: 'V0', source: [id, 0] } } }
   }
   if (VIDEO_CLASSES.has(classType)) {
@@ -185,13 +194,15 @@ export function showing(prompt: ApiPrompt): ApiPrompt {
 }
 
 /** The classes whose slot 0 is a video (a Video card shows it). */
-const VIDEO_CLASSES: ReadonlySet<string> = new Set(['GenerateVideoNode', 'FilmShotNode', 'LipSyncNode', 'EnhanceVideoNode'])
+const VIDEO_CLASSES: ReadonlySet<string> = new Set(['GenerateVideoNode', 'FilmShotNode', 'LipSyncNode', 'EnhanceVideoNode', 'LipsyncNode', 'LipsyncRemoteNode'])
 
 /** The calls as Python writes them: a handed-off picture as `IMG:<input>`, a sound as `WAV:<input>`. */
 export function normalizeSent(sent: readonly SentCall[], pictures: readonly string[] = [], sounds: readonly string[] = []): SentCall[] {
   const names = new Map<string, string>([
     ...pictures.map(n => [`https://fal.storage/${n}.png`, `IMG:${n}`] as [string, string]),
     ...sounds.map(n => [`https://fal.storage/${n}.wav`, `WAV:${n}`] as [string, string]),
+    // Whisper's WAV goes to fal storage under Python's own name (R3.10), which capture_calls writes as an upload.
+    ...(sounds.length ? [['https://fal.storage/whisper.wav', 'UPLOAD:whisper.wav'] as [string, string]] : []),
   ])
   const walk = (v: unknown): unknown => {
     if (typeof v === 'string') return names.get(v) ?? v

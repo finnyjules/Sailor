@@ -487,8 +487,8 @@ describe('the family', () => {
   it('is known, needs `cards`, and is dropped without it', () => {
     // Known, but kept out of RUNNER_FAMILIES so every pre-R5 "every family" set is unchanged (rule 8).
     expect(ALL_RUNNER_FAMILIES).toContain('media-sound')
-    // R5.4's media-video joined it.
-    expect(MEDIA_TOOL_FAMILIES).toEqual(['media-sound', 'media-video'])
+    // R5.4's media-video joined it, and R3.10's sound-in (its WAV is made with the tools).
+    expect(MEDIA_TOOL_FAMILIES).toEqual(['media-sound', 'media-video', 'sound-in'])
     expect(RUNNER_FAMILIES).not.toContain('media-sound')
     expect(FAMILY_REQUIRES['media-sound']).toBe('cards')
     expect([...parseFamilies('media-sound')]).toEqual([])

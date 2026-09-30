@@ -52,7 +52,9 @@
  * SaveAudio, SaveAudioMP3, PreviewAudio and the Audio card in full, R5.3;
  * and the video nodes, family media-video: LoadVideo, GetVideoComponents,
  * CreateVideo, SaveVideo and the Video card's export and made videos, R5.4;
- * LoadVideoFrames and SaveVideoFrames, R5.5)
+ * LoadVideoFrames and SaveVideoFrames, R5.5; and the sound-in nodes, family
+ * sound-in: Transcribe audio, Identify speakers, Clone a singing voice and
+ * Sync lips to audio, each sending Python's WAV of its sound, R3.10)
  * closely enough that the same workflow gives the same result.
  */
 import { GATE_CLASS, isLink, type ApiLink, type ApiPrompt } from '#shared/runner/graph'
@@ -133,6 +135,8 @@ import { planRepair } from './generators/repair'
 import { planLayers } from './generators/layers'
 import { planSplitLayers } from './generators/splitLayers'
 import { planAudioGen } from './generators/audioGen'
+import { planSoundIn } from './generators/soundIn'
+import type { PythonWav } from './soundWav'
 import { planAudioCard, planLoadAudio, planPreviewAudio, planSaveAudio } from './media/soundNodes'
 import { planCreateVideo, planGetVideoComponents, planLoadVideo, planSaveVideo, planVideoCard } from './media/videoNodes'
 import { planLoadVideoFrames, planSaveVideoFrames } from './media/frameNodes'
@@ -398,6 +402,12 @@ export interface PlanContext {
    * value a wire brought (prices never read a wired value). Absent: `prompt`'s.
    */
   priceInputs?: Record<string, unknown>
+  /**
+   * A sound-in node's WAV (R3.10, ./soundWav.ts): Python's 16-bit WAV of the
+   * sound a link brings, its first 60 s, made once for the node's turn (the
+   * one its media check measured). Absent: such a node fails plainly.
+   */
+  soundWav?(link: ApiLink): Promise<PythonWav>
 }
 
 /**
@@ -1211,6 +1221,14 @@ async function planNodeRequest(ctx: PlanContext): Promise<NodePlan> {
     case 'GenerateSpeechNode':
     case 'MiniMaxSpeechRemoteNode':
       return planAudioGen(ctx)
+    // ── sound-in (step 3, R3.10): Transcribe, Identify speakers, Clone a singing voice, Sync lips (+ the twins), one call each ──
+    case 'TranscribeAudioNode':
+    case 'WhisperRemoteNode':
+    case 'IdentifySpeakersNode':
+    case 'CloneSingingVoiceNode':
+    case 'LipsyncNode':
+    case 'LipsyncRemoteNode':
+      return planSoundIn(ctx)
     // ── gen-3d (step 3, R3.9): Generate a 3D model (+ its twin) and Multi-View → 3D, one Replicate call each ──
     case 'Generate3DNode':
     case 'Hunyuan3DRemoteNode':

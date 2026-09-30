@@ -10,6 +10,13 @@
    "nodes": 1
   },
   {
+   "class": "CloneSingingVoiceNode",
+   "old": 4,
+   "new": 9,
+   "source": "defaults",
+   "nodes": 1
+  },
+  {
    "class": "ConsistentFaceNode",
    "old": 16,
    "new": 23,
@@ -192,6 +199,13 @@
    "nodes": 1
   },
   {
+   "class": "TranscribeAudioNode",
+   "old": 1,
+   "new": 2,
+   "source": "defaults",
+   "nodes": 1
+  },
+  {
    "class": "TranslateTextNode",
    "old": 1,
    "new": 0,
@@ -202,6 +216,13 @@
    "class": "TurntableNode",
    "old": 75,
    "new": 135,
+   "source": "defaults",
+   "nodes": 1
+  },
+  {
+   "class": "WhisperRemoteNode",
+   "old": 1,
+   "new": 2,
    "source": "defaults",
    "nodes": 1
   }

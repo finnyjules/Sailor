@@ -9,7 +9,9 @@
  *  - `per_token`: dollars per million input tokens and per million output
  *    tokens (the text models);
  *  - `per_input_second`: dollars per second of the sound or video sent, with
- *    a billed minimum where the service has one;
+ *    a billed minimum where the service has one (R3.10: also a GPU-time
+ *    model whose run grows with the sound sent, an `estimate` with a `note`
+ *    saying how the figure was reached);
  *  - `per_output_second`: dollars per second of what comes back;
  *  - `per_thousand_chars`: dollars per thousand characters of text sent
  *    (speech), in proportion;
@@ -60,7 +62,7 @@ interface RateMeta {
 export type PaidRate =
   | (RateMeta & { unit: 'per_call', usd: number })
   | (RateMeta & { unit: 'per_token', inputPerMillion: number, outputPerMillion: number })
-  | (RateMeta & { unit: 'per_input_second', perSecond: number, minSeconds?: number })
+  | (RateMeta & { unit: 'per_input_second', perSecond: number, minSeconds?: number, note?: string })
   | (RateMeta & { unit: 'per_output_second', perSecond: number })
   | (RateMeta & { unit: 'per_thousand_chars', perThousand: number })
   | (RateMeta & { unit: 'gpu_ceiling', usd: number, note: string, perSteps?: number })
@@ -266,6 +268,36 @@ export const PAID_RATES: Record<string, PaidRate> = {
     unit: 'gpu_ceiling', usd: 0.043, perSteps: 28,
     note: 'H100 at $0.001525/s; the page\'s typical run, 28 s at the default 28 steps = $0.0427 (p50 $0.041), rounded up; scaled with the steps above 28',
     service: 'replicate', source: 'https://replicate.com/lucataco/flux-dev-multi-lora', read: '2026-09-27', confidence: 'estimate',
+  },
+  // R3.10, sound in (read 2026-09-30, plain GETs of the public pages; each node sends at most 60 s of sound,
+  // priced by the seconds it sends). Sync lips to audio's sync/lipsync-2-pro is priced by its clip card
+  // (clipRates.ts, $0.08325 a second of video made, verified).
+  // Transcribe audio (and its twin) on fal's Wizper: the page and its llms.txt give "$0 per compute second"
+  // and no other figure, so the card is Sailor's own ceiling, $0.0001 a second of sound sent ($0.006 for
+  // the 60 s cap): an estimate that blocks switch-on until the live check reads the real charge.
+  'fal-ai/wizper': {
+    unit: 'per_input_second', perSecond: 0.0001,
+    note: 'page and llms.txt: "$0 per compute second", no figure; Sailor\'s ceiling $0.0001/s of sound sent until a live call is billed',
+    service: 'fal', source: 'https://fal.ai/models/fal-ai/wizper', read: '2026-09-30', confidence: 'estimate',
+  },
+  // Identify speakers on whisper-diarization, billed by GPU time (Nvidia L40S, "$0.000975 per second", no
+  // billing table; "approximately $0.0018 to run"). The page's example run: 1,184.79 s of speech (its last
+  // segment's end) in 52.01 s of predict time, 0.0439 GPU-seconds a second of sound = $0.0000428 a second,
+  // written here rounded up to $0.00005 a second, and never below the page's $0.0018 (36 s of sound). An
+  // estimate until the live check measures a short clip (the start-up share of a 10 s run is unknown).
+  'thomasmol/whisper-diarization': {
+    unit: 'per_input_second', perSecond: 0.00005, minSeconds: 36,
+    note: 'L40S at $0.000975/s; page example: 1,184.79 s of speech in 52.01 s predict ($0.0000428/s of sound), rounded up to $0.00005/s; at least the page\'s approximately $0.0018 to run (36 s)',
+    service: 'replicate', source: 'https://replicate.com/thomasmol/whisper-diarization', read: '2026-09-30', confidence: 'estimate',
+  },
+  // Clone a singing voice on realistic-voice-cloning, billed by GPU time (Nvidia T4, "$0.000225 per second",
+  // no billing table): "approximately $0.042 to run", "typically complete within 4 minutes" (its p50; the
+  // page's one example is a cached 2.8 s run and says nothing of length). Carded as that p50 for the node's
+  // longest sound, 60 s: $0.0007 a second of sound sent. An estimate until the live check measures it.
+  'zsxkib/realistic-voice-cloning': {
+    unit: 'per_input_second', perSecond: 0.0007,
+    note: 'T4 at $0.000225/s; page: approximately $0.042 to run (p50), typically within 4 minutes; taken as the price of the 60 s the node sends at most: $0.0007/s',
+    service: 'replicate', source: 'https://replicate.com/zsxkib/realistic-voice-cloning', read: '2026-09-30', confidence: 'estimate',
   },
 }
 

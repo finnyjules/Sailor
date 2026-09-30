@@ -36,6 +36,10 @@ import {
 } from './imageExtras'
 import { LENS_FOCAL, LENS_NAMES, LENS_STRENGTH, NANO_EXTRAS_CLASSES, POSE_SOURCES } from './nanoExtras'
 import { TURNTABLE_CLASS, TURNTABLE_DIRECTIONS, TURNTABLE_VIEW_INPUTS } from './turntable'
+import {
+  DIARIZATION_MODELS, DIARIZATION_SPEAKERS, LIPSYNC_MODELS, LIPSYNC_SYNC_MODES_TAKEN, RVC_MODELS, RVC_OUTPUT_FORMATS, RVC_PITCH_ALGORITHMS,
+  RVC_PITCH_CHANGES, RVC_PRESET_VOICES, RVC_SEMITONES, SOUND_IN_CLASSES, SOUND_IN_LANGUAGES, TRANSCRIBE_MODELS,
+} from './soundIn'
 import { FLUX_LORA_ASPECT_RATIOS, FLUX_LORA_MEGAPIXELS, FLUX_LORA_STEPS, LORA_CLASSES, MULTI_LORA_SLOTS, RESTYLE_LORA_CLASS, RESTYLE_LORA_FORMATS, RESTYLE_LORA_RESOLUTIONS } from './lora'
 import {
   BRAINSTORM_ANGLES, CHAT_LLM_MODELS, IMPROVE_PROMPT_MODELS, IMPROVE_PROMPT_TARGETS, REASON_MODELS, REWRITE_MODELS, REWRITE_TONES,
@@ -112,7 +116,7 @@ export interface RunnerNodeRule {
    * or speech node's sound saved or previewed directly by the sound nodes of
    * `media-sound`). With it off, `feedsOnly` is exactly as before.
    */
-  feedsAlso?: { family: RunnerFamily; classes: readonly string[] }
+  feedsAlso?: FeedsAlso | readonly FeedsAlso[]
   /**
    * The class hands on a list (ComfyUI's is_output_list: the next node runs
    * once per item): only these classes may read it. Anything else is left to
@@ -157,6 +161,17 @@ export interface RunnerNodeRule {
    * anything, not only Frames). With it off, the row is exactly as before.
    */
   open?: { family: RunnerFamily; lifts: readonly ('feedsOnly')[] }
+}
+
+/** More readers a family allows (RunnerNodeRule.feedsAlso). */
+export interface FeedsAlso { family: RunnerFamily; classes: readonly string[] }
+
+/** Whether a rule's `feedsAlso` lets `classType` read the node with these families on. */
+function feedsAlsoAllows(rule: RunnerNodeRule, classType: string, families: ReadonlySet<RunnerFamily>): boolean {
+  const also = rule.feedsAlso
+  if (!also) return false
+  const list: readonly FeedsAlso[] = Array.isArray(also) ? also : [also as FeedsAlso]
+  return list.some(a => familyOn(a.family, families) && a.classes.includes(classType))
 }
 
 /** What an input check may read beside the node's inputs: its class, its id in the prompt, the host, and (R2.10) the prompt. */
@@ -1239,7 +1254,8 @@ export const RUNNER_NODE_RULES: Readonly<Record<string, RunnerNodeRule>> = {
     valueInputs: { prompt: ['text'] },
     required: ['prompt'],
     feedsOnly: ['Audio'],
-    feedsAlso: { family: 'media-sound', classes: SOUND_READERS },
+    // R3.10: a sound-in node may read it directly too, while `sound-in` is on.
+    feedsAlso: [{ family: 'media-sound', classes: SOUND_READERS }, { family: 'sound-in', classes: SOUND_IN_CLASSES }],
     needsReader: true,
     widgets: {
       ...(c === 'GenerateMusicNode' ? { model: { type: 'COMBO', required: true, options: MUSIC_MODELS } } : {}),
@@ -1255,7 +1271,8 @@ export const RUNNER_NODE_RULES: Readonly<Record<string, RunnerNodeRule>> = {
     valueInputs: { text: ['text'] },
     required: ['text'],
     feedsOnly: ['Audio'],
-    feedsAlso: { family: 'media-sound', classes: SOUND_READERS },
+    // R3.10: a sound-in node may read it directly too, while `sound-in` is on.
+    feedsAlso: [{ family: 'media-sound', classes: SOUND_READERS }, { family: 'sound-in', classes: SOUND_IN_CLASSES }],
     needsReader: true,
     widgets: {
       ...(c === 'GenerateSpeechNode' ? { model: { type: 'COMBO', required: true, options: SPEECH_MODELS } } : {}),
@@ -1265,6 +1282,63 @@ export const RUNNER_NODE_RULES: Readonly<Record<string, RunnerNodeRule>> = {
       volume: { type: 'FLOAT', required: true, min: 0.1, max: 10 },
       pitch: { type: 'INT', required: true, min: -12, max: 12 },
       language_boost: { type: 'COMBO', required: true, options: MINIMAX_LANGUAGES },
+    },
+  } satisfies RunnerNodeRule])),
+  // ── sound-in (step 3, R3.10): Transcribe audio (+ its twin Whisper) on fal,
+  // Identify speakers, Clone a singing voice and Sync lips to audio (+ its
+  // twin) on Replicate, each sending Python's WAV of its sound
+  // (server/runner/soundWav.ts). The sound comes from any runner sound
+  // (SOUND_OUTPUTS: each source taken only while its own family is on);
+  // every setting is a widget as ComfyUI validates it (a wired one leaves the
+  // node to the engine). Transcribe and Identify speakers are output nodes;
+  // Clone a singing voice's sound goes to an Audio card or another sound
+  // reader; Sync lips' video to any reader of a video. Sync lips' mode
+  // "silence" can't be priced (the whole video's length): left to the engine.
+  ...Object.fromEntries((['TranscribeAudioNode', 'WhisperRemoteNode'] as const).map(c => [c, {
+    family: 'sound-in',
+    mustLink: ['audio'], required: ['audio'],
+    linkSources: { audio: SOUND_OUTPUTS },
+    widgets: {
+      ...(c === 'TranscribeAudioNode' ? { model: { type: 'COMBO', required: true, options: TRANSCRIBE_MODELS } } : {}),
+      language: { type: 'COMBO', required: true, options: SOUND_IN_LANGUAGES },
+      translate: { type: 'BOOLEAN', required: true },
+    },
+  } satisfies RunnerNodeRule])),
+  IdentifySpeakersNode: {
+    family: 'sound-in',
+    mustLink: ['audio'], required: ['audio'],
+    linkSources: { audio: SOUND_OUTPUTS },
+    widgets: {
+      model: { type: 'COMBO', required: true, options: DIARIZATION_MODELS },
+      num_speakers: { type: 'INT', required: true, min: DIARIZATION_SPEAKERS.min, max: DIARIZATION_SPEAKERS.max },
+      language: { type: 'COMBO', required: true, options: SOUND_IN_LANGUAGES },
+    },
+  },
+  CloneSingingVoiceNode: {
+    family: 'sound-in',
+    mustLink: ['audio'], required: ['audio'],
+    linkSources: { audio: SOUND_OUTPUTS },
+    feedsOnly: ['Audio'],
+    feedsAlso: [{ family: 'media-sound', classes: SOUND_READERS }, { family: 'sound-in', classes: SOUND_IN_CLASSES }],
+    needsReader: true,
+    widgets: {
+      model: { type: 'COMBO', required: true, options: RVC_MODELS },
+      rvc_model: { type: 'COMBO', required: true, options: RVC_PRESET_VOICES },
+      custom_rvc_model_url: { type: 'STRING', required: true },
+      pitch_change: { type: 'COMBO', required: true, options: RVC_PITCH_CHANGES },
+      pitch_shift_semitones: { type: 'INT', required: true, min: RVC_SEMITONES.min, max: RVC_SEMITONES.max },
+      pitch_detection_algorithm: { type: 'COMBO', required: true, options: RVC_PITCH_ALGORITHMS },
+      output_format: { type: 'COMBO', required: true, options: RVC_OUTPUT_FORMATS },
+    },
+  },
+  ...Object.fromEntries((['LipsyncNode', 'LipsyncRemoteNode'] as const).map(c => [c, {
+    family: 'sound-in',
+    mustLink: ['audio'], required: ['audio'],
+    linkSources: { audio: SOUND_OUTPUTS },
+    widgets: {
+      ...(c === 'LipsyncNode' ? { model: { type: 'COMBO', required: true, options: LIPSYNC_MODELS } } : {}),
+      video_url: { type: 'STRING', required: true },
+      sync_mode: { type: 'COMBO', required: true, options: LIPSYNC_SYNC_MODES_TAKEN },
     },
   } satisfies RunnerNodeRule])),
   // ── gen-3d (step 3, R3.9): Generate a 3D model (and its hidden twin) and
@@ -1524,6 +1598,8 @@ export const SWITCHED_CLASSES: Readonly<Record<string, RunnerFamily>> = {
   ...Object.fromEntries(AUDIO_GEN_CLASSES.map(c => [c, 'audio-gen' as const])),
   // R3.9: 3D models.
   ...Object.fromEntries(GEN_3D_CLASSES.map(c => [c, 'gen-3d' as const])),
+  // R3.10: sound in.
+  ...Object.fromEntries(SOUND_IN_CLASSES.map(c => [c, 'sound-in' as const])),
   // R3.12: text effect, sketch to image and face references.
   ...Object.fromEntries(IMAGE_EXTRAS_CLASSES.map(c => [c, 'image-extras' as const])),
   // R3.13: Flux Dev + LoRA and Flux Dev + LoRAs.
@@ -1565,6 +1641,24 @@ export const AUDIO_CARD_AUDIO_GEN_RULE: RunnerNodeRule = {
   mustNotLink: ['audio'],
   linkSources: { source: AUDIO_GEN_CLASSES.map(c => [c, 0] as const) },
   feedsOnly: ['LipSyncNode'],
+  // R3.10: a sound-in node may read it too, while `sound-in` is on.
+  feedsAlso: { family: 'sound-in', classes: SOUND_IN_CLASSES },
+  offWidgets: ['export'],
+}
+
+/**
+ * The Audio card playing its own file for a sound-in node (R3.10), while
+ * `sound-in` is on and `media-sound` is off: its file handed on (no call, no
+ * charge), as its sync-3 row hands it to Lip-sync; the sound-in nodes read it
+ * as Python's `load` would (server/runner/soundWav.ts). It may feed them and
+ * Lip-sync a character (each reader's own row decides), and must be read.
+ */
+export const AUDIO_CARD_SOUND_IN_RULE: RunnerNodeRule = {
+  family: 'sound-in',
+  local: 'source',
+  mustNotLink: ['audio', 'source'],
+  feedsOnly: ['LipSyncNode', ...SOUND_IN_CLASSES],
+  needsReader: true,
   offWidgets: ['export'],
 }
 
@@ -1619,7 +1713,8 @@ export const VIDEO_CARD_MEDIA_RULE: RunnerNodeRule = {
  * The row a node is judged by: RUNNER_NODE_RULES', but for the Audio card,
  * in this order: the audio-gen row (R3.8) while `audio-gen` is on, `source`
  * is wired and `media-sound` is off, as before R5.3; the media row while
- * `media-sound` is on; else its sync-3 row. The Video card: its media row
+ * `media-sound` is on; the sound-in row (R3.10) for a card playing its own
+ * file while `sound-in` is on; else its sync-3 row. The Video card: its media row
  * while `media-video` is on (R5.4), else none, as before.
  */
 export function runnerRuleFor(classType: string, inputs: Record<string, unknown>, families: ReadonlySet<RunnerFamily>): RunnerNodeRule | undefined {
@@ -1628,6 +1723,7 @@ export function runnerRuleFor(classType: string, inputs: Record<string, unknown>
     const media = familyOn('media-sound', families)
     if (!media && isLink(inputs.source) && familyOn('audio-gen', families)) return AUDIO_CARD_AUDIO_GEN_RULE
     if (media) return AUDIO_CARD_MEDIA_RULE
+    if (!isLink(inputs.source) && familyOn('sound-in', families)) return AUDIO_CARD_SOUND_IN_RULE
   }
   return Object.prototype.hasOwnProperty.call(RUNNER_NODE_RULES, classType) ? RUNNER_NODE_RULES[classType] : undefined
 }
@@ -1985,7 +2081,7 @@ function graphRuleAllows(prompt: ApiPrompt, id: string, rule: RunnerNodeRule, fa
         if (notLinked.includes(l.slot)) return false
         const only = slotReaders && Object.prototype.hasOwnProperty.call(slotReaders, l.slot) ? slotReaders[l.slot] : undefined
         if (only && !only.some(([cls, input]) => cls === node.class_type && input === l.input)) return false
-        if (feedsOnly && !feedsOnly.includes(node.class_type) && !(rule.feedsAlso && familyOn(rule.feedsAlso.family, families) && rule.feedsAlso.classes.includes(node.class_type))) return false
+        if (feedsOnly && !feedsOnly.includes(node.class_type) && !feedsAlsoAllows(rule, node.class_type, families)) return false
         if (listReaders && !listReaders.includes(node.class_type)) return false
       }
     }
@@ -2037,6 +2133,10 @@ const PAID_OUTPUT_KIND_FAMILY: Readonly<Record<string, RunnerFamily>> = {
   FindObjectsNode: 'describe',
   ...Object.fromEntries(LAYERS_JSON_CLASSES.map(c => [c, 'layers' as const])),
   ...Object.fromEntries(GEN_3D_CLASSES.map(c => [c, 'gen-3d' as const])),
+  // R3.10: Transcribe audio's text (and its twin's), Identify speakers' JSON.
+  TranscribeAudioNode: 'sound-in',
+  WhisperRemoteNode: 'sound-in',
+  IdentifySpeakersNode: 'sound-in',
   // R5.4: Get video components' frame batch and rate, and Create video's made video.
   GetVideoComponents: 'media-video',
   CreateVideo: 'media-video',

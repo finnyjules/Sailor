@@ -94,6 +94,13 @@ const EDIT_BASE: Record<string, Record<string, unknown>> = {
   MusicGenRemoteNode: { prompt: 'lo-fi piano' },
   GenerateSpeechNode: { model: 'MiniMax Speech-02 HD', text: 'Hello.' },
   MiniMaxSpeechRemoteNode: { text: 'Hello.' },
+  // Sound in (R3.10): the sound; the rest at the node's defaults (Sync lips with a web address).
+  TranscribeAudioNode: { model: 'Whisper', audio: LINK, language: 'auto', translate: false },
+  WhisperRemoteNode: { audio: LINK, language: 'auto', translate: false },
+  IdentifySpeakersNode: { model: 'Whisper Diarization', audio: LINK, num_speakers: 0, language: 'auto' },
+  CloneSingingVoiceNode: { model: 'Realistic Voice Cloning (RVC)', audio: LINK, rvc_model: 'Guitar', custom_rvc_model_url: '', pitch_change: 'no-change', pitch_shift_semitones: 0, pitch_detection_algorithm: 'rmvpe', output_format: 'wav' },
+  LipsyncNode: { model: 'sync.so 2-pro', video_url: 'https://example.test/face.mp4', audio: LINK, sync_mode: 'cut_off' },
+  LipsyncRemoteNode: { video_url: 'https://example.test/face.mp4', audio: LINK, sync_mode: 'cut_off' },
   // 3D models (R3.9): the picture; the rest at the node's defaults (Multi-View on TRELLIS, its default engine).
   Generate3DNode: { model: 'Hunyuan3D 2', image: LINK },
   Hunyuan3DRemoteNode: { image: LINK },
@@ -128,6 +135,9 @@ const EDIT_BASE: Record<string, Record<string, unknown>> = {
   EnhanceVideoNode: { model: 'Topaz Video Upscale', video_url: '/view?filename=clip.mp4&type=input', target_resolution: '1080p', fps: 'original' },
 }
 
+/** A sound-in node's WAV (R3.10): one sample of silence. */
+const SOUND_WAV = { wav: new Uint8Array(46), seconds: 1 / 8000, frames: 1, rate: 8000, channels: 1 }
+
 /** What the engine measured of a media node's files before planning (Topaz sets its factor from the video's size, F23). */
 const MEASURED = { video: 3, videoWidth: 1280, videoHeight: 720, videoFps: 24 }
 
@@ -140,6 +150,9 @@ async function plan(classType: string, inputs: Record<string, unknown>, families
     toUrl: async (f: OutputFile) => `https://pics.test/${f.filename}`,
     ...(families ? { families } : {}),
     measured: MEASURED,
+    // A sound-in node's WAV (R3.10): any, handed off by its name.
+    soundWav: async () => SOUND_WAV,
+    bytesToUrl: async (f: OutputFile) => `https://pics.test/${f.filename}`,
   })
   if (p.kind !== 'provider') throw new Error(`${classType} made no call`)
   return p
@@ -156,6 +169,9 @@ async function firstCall(classType: string, inputs: Record<string, unknown>, fam
     toUrl: async (f: OutputFile) => `https://pics.test/${f.filename}`,
     ...(families ? { families } : {}),
     measured: MEASURED,
+    // A sound-in node's WAV (R3.10): any, handed off by its name.
+    soundWav: async () => SOUND_WAV,
+    bytesToUrl: async (f: OutputFile) => `https://pics.test/${f.filename}`,
   })
   if (p.kind === 'provider') return p
   if (p.kind !== 'pipeline') throw new Error(`${classType} made no call`)

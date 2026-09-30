@@ -73,6 +73,9 @@ export const RUNNER_OUTPUT_CLASSES: ReadonlySet<string> = new Set([
   'LensReframe', 'PoseMannequin',
   // R3.16: Turntable is one too (is_output_node=True).
   'TurntableNode',
+  // R3.10: Transcribe audio (and its twin Whisper) and Identify speakers are output nodes
+  // (is_output_node=True; Clone a singing voice and Sync lips to audio, and its twin, are not).
+  'TranscribeAudioNode', 'WhisperRemoteNode', 'IdentifySpeakersNode',
   // R5.3: Save audio (FLAC and MP3) and Preview audio are output nodes (is_output_node=True;
   // Load audio and Record audio are not). The Audio card is listed above.
   'SaveAudio', 'SaveAudioMP3', 'PreviewAudio',
@@ -115,7 +118,7 @@ export function prunedAny(r: PrunedPrompt): boolean {
  * the Audio card showing a music or speech node's sound (R3.8, audio-gen),
  * and the Audio card in full (R5.3, media-sound).
  */
-const ALSO_SWITCHED: Readonly<Record<string, readonly RunnerFamily[]>> = { Audio: ['audio-gen', 'media-sound'] }
+const ALSO_SWITCHED: Readonly<Record<string, readonly RunnerFamily[]>> = { Audio: ['audio-gen', 'media-sound', 'sound-in'] }
 
 /**
  * A class the port knows: a runner type, or a family row's class. A class

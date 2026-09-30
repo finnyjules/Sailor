@@ -180,6 +180,7 @@ import { llmRequestProblem } from '#shared/runner/llm'
 import { describeComfyPathProblem, describeRequestProblem } from '#shared/runner/describe'
 import { repairRequestProblem } from '#shared/runner/repair'
 import { hostedVoiceProblem, speechTextProblem } from '#shared/runner/audioGen'
+import { hostedSoundInProblem, soundInRequestProblem } from '#shared/runner/soundIn'
 import { gen3dComfyPathProblem, gen3dRequestProblem } from '#shared/runner/gen3d'
 import { imageExtrasRequestProblem } from '#shared/runner/imageExtras'
 import { hostedLoraProblem, loraRequestProblem } from '#shared/runner/lora'
@@ -1097,6 +1098,9 @@ export function requestProblems(prompt: ApiPrompt, opts: { runner?: boolean } = 
     // refuses the same for a wired text at the node's turn).
     const sp = opts.runner ? speechTextProblem(ct, inputs) : null
     if (sp) out.push({ nodeId, classType: ct, input: sp.input, message: sp.message })
+    // Sync lips to audio (R3.10), on a runner run: no video address (Python raises before its call).
+    const si = opts.runner ? soundInRequestProblem(ct, inputs) : null
+    if (si) out.push({ nodeId, classType: ct, input: si.input, message: si.message })
     // Generate a 3D model (R3.9), on a runner run: a setting Hunyuan3D 2's
     // published schema refuses (#shared/runner/gen3d gen3dRequestProblem); on
     // the ComfyUI path (the /prompt gate, hosted and local, R3.9 fix round 1):
@@ -1149,6 +1153,9 @@ export function hostedRequestProblems(prompt: ApiPrompt): RequestProblem[] {
     // A LoRA picked by name or a trained model's address (R3.13, ruling (i)): public links only.
     const l = hostedLoraProblem(node?.class_type, node?.inputs ?? {})
     if (l) out.push({ nodeId, classType: node!.class_type, input: l.input, message: l.message })
+    // Clone a singing voice (R3.10, ruling (m)): no preset named after a real person, on both paths.
+    const v = hostedSoundInProblem(node?.class_type, node?.inputs ?? {})
+    if (v) out.push({ nodeId, classType: node!.class_type, input: v.input, message: v.message })
   }
   return out
 }

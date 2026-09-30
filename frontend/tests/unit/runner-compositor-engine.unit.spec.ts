@@ -456,7 +456,8 @@ describe('server health: caps, sources, Stop', () => {
   it('every runner image class is a picture source (drift guard); the video ones are not', () => {
     // Lip-sync a character on sync-3 (Task F22), Enhance a video on Topaz (Task F23), Film a shot (Task 4) and
     // Person swap (video) on Pixverse Swap (non-commercial face models replacement) make a video; so does Turntable (R3.16).
-    const videos = new Set(['GenerateVideoNode', 'LipSyncNode', 'EnhanceVideoNode', 'FilmShotNode', 'PersonSwapVideo', 'TurntableNode'])
+    // Sync lips to audio and its twin (R3.10) make a video too.
+    const videos = new Set(['GenerateVideoNode', 'LipSyncNode', 'EnhanceVideoNode', 'FilmShotNode', 'PersonSwapVideo', 'TurntableNode', 'LipsyncNode', 'LipsyncRemoteNode'])
     // The LLM text nodes (R3.3) hand on text.
     const texts = new Set(['ChatLLMNode', 'ImprovePromptNode', 'SummarizeTextNode', 'TranslateTextNode', 'RewriteToneNode', 'BrainstormIdeasNode', 'ReasonStepByStepNode',
       // Describe, read and find (R3.4) hand on text and JSON.
@@ -464,7 +465,9 @@ describe('server health: caps, sources, Stop', () => {
       // Music and speech (R3.8) hand on a sound.
       'GenerateMusicNode', 'MusicGenRemoteNode', 'GenerateSpeechNode', 'MiniMaxSpeechRemoteNode',
       // 3D models (R3.9) hand on a 3D file.
-      'Generate3DNode', 'Hunyuan3DRemoteNode', 'Hunyuan3DMultiViewNode'])
+      'Generate3DNode', 'Hunyuan3DRemoteNode', 'Hunyuan3DMultiViewNode',
+      // Sound in (R3.10): text and JSON, and a sound.
+      'TranscribeAudioNode', 'WhisperRemoteNode', 'IdentifySpeakersNode', 'CloneSingingVoiceNode'])
     // A paid family's picture classes (R3.5's image-repair) are pictures only while their family is on (PAID_PICTURE_FAMILY).
     for (const c of PROVIDER_TYPES) expect(IMAGE_OUTPUT_CLASSES.has(c) || Object.prototype.hasOwnProperty.call(PAID_PICTURE_FAMILY, c), c).toBe(!videos.has(c) && !texts.has(c))
     for (const c of Object.keys(PAID_PICTURE_FAMILY)) expect(IMAGE_OUTPUT_CLASSES.has(c), c).toBe(false)

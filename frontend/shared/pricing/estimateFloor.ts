@@ -67,6 +67,11 @@ export const PRE_R3_FLAT: Readonly<Record<string, { credits: number, badgeUsd: n
   // R3.13, Flux Dev + LoRA and Flux Dev + LoRAs (LORA_RENDER_CREDITS, the LoRA category's ~$0.04).
   FluxLoRARemoteNode: { credits: 8, badgeUsd: 0.04, family: 'lora' },
   FluxMultiLoRARemoteNode: { credits: 8, badgeUsd: 0.04, family: 'lora' },
+  // R3.10, sound in (Sync lips to audio keeps its clip price since lineup-p5: no row).
+  TranscribeAudioNode: { credits: 1, badgeUsd: 0.005, family: 'sound-in' },
+  WhisperRemoteNode: { credits: 1, badgeUsd: 0.001, family: 'sound-in' },
+  IdentifySpeakersNode: { credits: 10, badgeUsd: 0.05, family: 'sound-in' },
+  CloneSingingVoiceNode: { credits: 4, badgeUsd: 0.02, family: 'sound-in' },
   // R3.16, Turntable (badge $0.50). Its cards (Luma Ray 2, Seedance 2.0) are verified: no floor applies; kept as the record.
   TurntableNode: { credits: 75, badgeUsd: 0.50, family: 'turntable' },
 }

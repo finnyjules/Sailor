@@ -267,7 +267,18 @@ export { VIDEO_RATES, MODEL_PRICED_NODE_CLASSES, SETTING_PRICED_NODE_CLASSES, RE
 // right, back or left views wired, one Seedance 2.0 720p arc per segment
 // (5 s × $0.3034 = $1.517, 228 credits each, verified), 2 to 4 arcs: 456,
 // 684 or 912 credits.
-export const PRICE_BOOK_VERSION = 'r3-turntable'
+// r3-sound-in (step 3, R3.10, ruling (a)): Transcribe audio (+ its twin
+// Whisper), Identify speakers and Clone a singing voice leave their flat rows
+// (1, 1, 10 and 4 credits, from their badges) for their calls, priced by the
+// seconds of sound sent (Python's WAV, at most 60 s; paidRates.ts, each an
+// estimate until its live check): Wizper $0.0001/s, whisper-diarization
+// $0.00005/s (at least $0.0018), realistic-voice-cloning $0.0007/s. The
+// ComfyUI path can't measure the sound, so it is charged the 60 s ceiling,
+// never below its flat row while the card is an estimate (R3.9 fix round 2,
+// estimateFloor.ts): Transcribe and Whisper 2 credits, Identify speakers 10
+// (its card's 1, floored), Clone a singing voice 9. The runner pays the card.
+// Sync lips to audio (+ its twin) keeps its clip price.
+export const PRICE_BOOK_VERSION = 'r3-sound-in'
 
 export const BASE_RENDER_CREDITS = 1
 
@@ -433,10 +444,9 @@ export const GRAPH_NODE_CREDITS: Record<string, number> = {
   EnhanceVideoNode: 150,           // badge $1.00
 
   // — audio / speech —
-  WhisperRemoteNode: 1,            // badge $0.001 / min
-  TranscribeAudioNode: 1,          // badge $0.005 / min
-  CloneSingingVoiceNode: 4,        // badge $0.02 / min
-  IdentifySpeakersNode: 10,        // badge $0.05 / min
+  // Transcribe audio (+ its twin Whisper), Identify speakers and Clone a
+  // singing voice are priced by their calls since R3.10 (shared/pricing/paidSettings.ts,
+  // the seconds of sound sent), on both paths.
 
   // — 3D —
   // Generate a 3D model (+ its twin) and Multi-View → 3D are priced by their

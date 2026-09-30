@@ -790,6 +790,31 @@ describe('an estimate never lowers the ComfyUI path (R3.9 fix round 2)', () => {
 })
 
 // ───────────────────────────────────────────────────────────────────────────
+// R3.10 (ruling (a)): Transcribe audio (+ its twin Whisper), Identify speakers
+// and Clone a singing voice leave their flat rows (1, 1, 10 and 4) for their
+// calls, priced by the seconds of sound sent. The ComfyUI path can't measure
+// the sound: it is charged the 60 s ceiling, never below the flat row while
+// the card is an estimate (Identify speakers stays 10). Sync lips keeps its
+// clip price (60 s ceiling, 750).
+// ───────────────────────────────────────────────────────────────────────────
+describe('sound in on the ComfyUI path (R3.10)', () => {
+  const at = (ct: string, inputs: Record<string, unknown>) => priceGraph({ 1: { class_type: ct, inputs } }).nodes!['1']
+  const A = ['2', 0]
+  it('each class at the 60 s ceiling, floored at its flat row while its card is an estimate', () => {
+    expect(at('TranscribeAudioNode', { model: 'Whisper', audio: A, language: 'auto', translate: false })).toBe(2)
+    expect(at('WhisperRemoteNode', { audio: A, language: 'en', translate: true })).toBe(2)
+    expect(at('IdentifySpeakersNode', { model: 'Whisper Diarization', audio: A, num_speakers: 0, language: 'auto' })).toBe(10)
+    expect(at('CloneSingingVoiceNode', { model: 'Realistic Voice Cloning (RVC)', audio: A, rvc_model: 'Guitar', custom_rvc_model_url: '', pitch_change: 'no-change', pitch_shift_semitones: 0, pitch_detection_algorithm: 'rmvpe', output_format: 'wav' })).toBe(9)
+    expect(at('LipsyncNode', { model: 'sync.so 2-pro', video_url: 'https://x.test/a.mp4', audio: A, sync_mode: 'cut_off' })).toBe(750)
+  })
+  it('measured seconds price below the ceiling (the runner\'s measured sound; its family on pays the card)', () => {
+    const on = new Set(['cards', 'sound-in'] as const)
+    const p = (ct: string, audio: number) => priceGraph({ 1: { class_type: ct, inputs: { audio: A } } }, { inputSeconds: { 1: { audio } }, families: on as never }).nodes!['1']
+    expect([p('TranscribeAudioNode', 10), p('IdentifySpeakersNode', 10), p('CloneSingingVoiceNode', 10)]).toEqual([1, 1, 2])
+  })
+})
+
+// ───────────────────────────────────────────────────────────────────────────
 // R3.12 (ruling (a)): Text effect, Sketch to image and Generate face references
 // leave their flat rows (8, 8 and 16, from their badges) for their calls
 // (Replicate's billing tables): Text effect by its path, Ideogram V3 Turbo

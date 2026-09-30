@@ -644,7 +644,8 @@ describe('the Video card with media-video on', () => {
 describe('the family', () => {
   it('is known, needs `cards`, and is dropped without it', () => {
     expect(ALL_RUNNER_FAMILIES).toContain('media-video')
-    expect(MEDIA_TOOL_FAMILIES).toEqual(['media-sound', 'media-video'])
+    // R3.10's sound-in joined them (its WAV is made with the tools).
+    expect(MEDIA_TOOL_FAMILIES).toEqual(['media-sound', 'media-video', 'sound-in'])
     expect(RUNNER_FAMILIES).not.toContain('media-video')
     expect(FAMILY_REQUIRES['media-video']).toBe('cards')
     expect([...parseFamilies('media-video')]).toEqual([])

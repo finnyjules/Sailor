@@ -148,8 +148,8 @@ describe('the rows', () => {
       expect(RUNNER_FAMILIES).toContain(f)
       expect(FAMILY_REQUIRES[f as RunnerFamily]).toBe('cards')
     }
-    // + R3.3's llm-text, R3.4's describe, R3.5's image-repair, R3.6's layers, R3.8's audio-gen, R3.9's gen-3d, R3.11's film-shot, R3.12's image-extras and R3.13's lora, which need cards too (and R3.15's nano-extras, R3.16's turntable, R5.3's media-sound, R5.4's media-video).
-    expect(Object.keys(FAMILY_REQUIRES).sort()).toEqual([...added, 'llm-text', 'describe', 'image-repair', 'layers', 'audio-gen', 'gen-3d', 'film-shot', 'image-extras', 'lora', 'nano-extras', 'turntable', 'media-sound', 'media-video'].sort())
+    // + R3.3's llm-text, R3.4's describe, R3.5's image-repair, R3.6's layers, R3.8's audio-gen, R3.9's gen-3d, R3.11's film-shot, R3.12's image-extras and R3.13's lora, which need cards too (and R3.15's nano-extras, R3.16's turntable, R5.3's media-sound, R5.4's media-video, R3.10's sound-in).
+    expect(Object.keys(FAMILY_REQUIRES).sort()).toEqual([...added, 'llm-text', 'describe', 'image-repair', 'layers', 'audio-gen', 'gen-3d', 'film-shot', 'image-extras', 'lora', 'nano-extras', 'turntable', 'media-sound', 'media-video', 'sound-in'].sort())
     expect(EFFECT_MAX_PICTURE_PIXELS).toBe(8192 * 8192)
     expect(EFFECT_HOSTED_MAX_PICTURE_PIXELS).toBe(HOSTED_MAX_FRAME_ARTBOARD_PIXELS)
   })

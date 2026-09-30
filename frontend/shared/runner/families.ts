@@ -247,6 +247,16 @@ export type RunnerFamily =
    * is exactly as before.
    */
   | 'media-video'
+  /**
+   * The paid nodes that send a sound (step 3, R3.10): Transcribe audio and
+   * its hidden twin (fal's Wizper), Identify speakers, Clone a singing voice
+   * and Sync lips to audio and its hidden twin (Replicate). Each sends
+   * Python's WAV of its sound (the first 60 s, 16-bit), made with Sailor's
+   * own video tools from any runner sound. Needs `cards`, and the video tools
+   * (R5.1a): while they are missing or refused, the server answers as if it
+   * were off (server/runner/config.ts). Off: they go to ComfyUI, as before.
+   */
+  | 'sound-in'
 
 export const RUNNER_FAMILIES: readonly RunnerFamily[] = [
   'fal-edit', 'replicate-image', 'replicate-video', 'nano-actions', 'ref-edits', 'restyle', 'frame', 'wan-3', 'gpt-image-2.5', 'h3-max-turbo', 'gemini-omni-flash', 'veo-3.1-lite', 'qwen-image-3', 'grok-imagine-2', 'ideogram-4', 'seedream-5-pro-edit', 'qwen-2511-angles', 'nano-banana-2-blend', 'bria-product-shot', 'muse-image', 'nano-banana-2-lite', 'reve-2.1', 'recraft-v4.1', 'krea-2', 'happyhorse-1.1', 'grok-imagine-video-1.5', 'ltx-2.5-fast', 'luma-ray-3.2', 'sync-3', 'topaz-video', 'fix-faces', 'face-swap', 'person-swap-video', 'cards',
@@ -255,14 +265,14 @@ export const RUNNER_FAMILIES: readonly RunnerFamily[] = [
 ]
 
 /**
- * The families whose work needs the server's video tools (R5.1a, R5.3, R5.4): while
+ * The families whose work needs the server's video tools (R5.1a, R5.3, R5.4, R3.10): while
  * `mediaTools()` is missing or refused, the server drops them from what it
  * takes (server/runner/config.ts), so their classes go to the engine.
  * Known to parseFamilies, but kept apart from RUNNER_FAMILIES: every
  * "every family on" set written before R5 (the specs' ALL sets, pinned
  * needs-the-engine hashes) stays exactly as it was (R5 rule 8).
  */
-export const MEDIA_TOOL_FAMILIES: readonly RunnerFamily[] = ['media-sound', 'media-video']
+export const MEDIA_TOOL_FAMILIES: readonly RunnerFamily[] = ['media-sound', 'media-video', 'sound-in']
 
 /** Every family parseFamilies knows: RUNNER_FAMILIES and the media families. */
 export const ALL_RUNNER_FAMILIES: readonly RunnerFamily[] = [...RUNNER_FAMILIES, ...MEDIA_TOOL_FAMILIES]
@@ -293,6 +303,7 @@ export const FAMILY_REQUIRES: Partial<Record<RunnerFamily, RunnerFamily>> = {
   'turntable': 'cards',
   'media-sound': 'cards',
   'media-video': 'cards',
+  'sound-in': 'cards',
 }
 
 const KNOWN: ReadonlySet<string> = new Set(ALL_RUNNER_FAMILIES)

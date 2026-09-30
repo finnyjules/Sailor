@@ -351,6 +351,13 @@ export const RUNNER_ROUTES: Readonly<Record<string, Route>> = {
   ...Object.fromEntries([
     'GenerateMusicNode', 'MusicGenRemoteNode', 'GenerateSpeechNode', 'MiniMaxSpeechRemoteNode',
   ].map(ct => [ct, r('replicate', null, 'MiniMax Speech and MusicGen aren\'t carded on fal')])),
+  // R3.10, sound in (family sound-in): each on its own service, as Python.
+  'TranscribeAudioNode': r('fal', null, 'Replicate\'s Whisper models aren\'t carded, and none is fal\'s Wizper'),
+  'WhisperRemoteNode': r('fal', null, 'Replicate\'s Whisper models aren\'t carded, and none is fal\'s Wizper'),
+  'IdentifySpeakersNode': r('replicate', null, 'no same-model twin on fal is carded'),
+  'CloneSingingVoiceNode': r('replicate', null, 'no same-model twin on fal is carded'),
+  'LipsyncNode': r('replicate', null, 'fal\'s lipsync-2-pro isn\'t carded; its schema isn\'t saved, so its settings aren\'t known to match'),
+  'LipsyncRemoteNode': r('replicate', null, 'fal\'s lipsync-2-pro isn\'t carded; its schema isn\'t saved, so its settings aren\'t known to match'),
   // R3.9, 3D models (family gen-3d): Replicate, as Python. fal's Hunyuan3D, Rodin and Trellis have no saved schema.
   ...Object.fromEntries([
     'Generate3DNode', 'Hunyuan3DRemoteNode', 'Hunyuan3DMultiViewNode',

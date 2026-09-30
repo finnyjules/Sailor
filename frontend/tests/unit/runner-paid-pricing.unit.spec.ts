@@ -24,6 +24,7 @@ import { LLM_ENDPOINTS, LLM_TEXT_CLASSES } from '#shared/runner/llm'
 import { DESCRIBE_CLASSES } from '#shared/runner/describe'
 import { REPAIR_PER_CALL_CLASSES } from '#shared/runner/repair'
 import { LAYERS_CLASSES, SPLIT_CLASS } from '#shared/runner/layers'
+import { SOUND_IN_CLASSES } from '#shared/runner/soundIn'
 import { AUDIO_GEN_CLASSES } from '#shared/runner/audioGen'
 import { GEN_3D_CLASSES } from '#shared/runner/gen3d'
 import { IMAGE_EXTRAS_CLASSES } from '#shared/runner/imageExtras'
@@ -146,7 +147,7 @@ describe('paidCallUsd', () => {
     expect(paidCallUsd({ endpoint: 'gpu', fallbacks: [{ endpoint: 'call' }] }, T)).toBe(0.35)
     expect(paidCallUsd({ endpoint: 'call', fallbacks: [{ endpoint: 'nobody/knows' }] }, T)).toBeNull()
   })
-  it('the real table holds only the cards the tasks added (R3.3: the LLM text nodes; R3.4: describe; R3.5: image-repair; R3.6 and R3.7: layers; R3.8: audio-gen; R3.9: gen-3d; R3.12: image-extras; R3.13 and R3.14: lora)', () => {
+  it('the real table holds only the cards the tasks added (R3.3: the LLM text nodes; R3.4: describe; R3.5: image-repair; R3.6 and R3.7: layers; R3.8: audio-gen; R3.9: gen-3d; R3.10: sound-in; R3.12: image-extras; R3.13 and R3.14: lora)', () => {
     // (R3.4: Gemini 2.5 Flash, Dolphin, YOLO-World; moondream2 keeps its edit card.
     // R3.5: Restore and Remove background; the upscalers keep their edit cards.
     // R3.6: Ideogram Layerize, Seedream Layerize, Flux Fill Pro and Bria Expand.
@@ -164,6 +165,8 @@ describe('paidCallUsd', () => {
       'tencent/hunyuan3d-2', 'tencent/hunyuan3d-2mv', 'hyper3d/rodin', 'firtoz/trellis',
       'ideogram-ai/ideogram-v3-turbo', 'black-forest-labs/flux-kontext-pro', 'ideogram-ai/ideogram-character',
       'lucataco/flux-dev-multi-lora',
+      // R3.10: Wizper, whisper-diarization and realistic-voice-cloning; lipsync-2-pro keeps its clip card.
+      'fal-ai/wizper', 'thomasmol/whisper-diarization', 'zsxkib/realistic-voice-cloning',
     ].sort())
   })
   it('no paid card duplicates an edit, clip or video card (each rate lives in one place)', () => {
@@ -215,9 +218,9 @@ describe('tokenCeiling', () => {
 // ── priceNode ────────────────────────────────────────────────────────────────
 
 describe('priceNode for a paid class', () => {
-  it('stand-ins are shared-priced classes; the real list is the tasks\' classes (R3.3: the LLM text nodes; R3.4: describe; R3.5: image-repair; R3.6 and R3.7: layers; R3.8: audio-gen; R3.9: gen-3d; R3.12: image-extras; R3.13: lora; R3.16: turntable)', () => {
+  it('stand-ins are shared-priced classes; the real list is the tasks\' classes (R3.3: the LLM text nodes; R3.4: describe; R3.5: image-repair; R3.6 and R3.7: layers; R3.8: audio-gen; R3.10: sound-in; R3.9: gen-3d; R3.12: image-extras; R3.13: lora; R3.16: turntable)', () => {
     for (const ct of Object.keys(STAND_IN)) expect(SHARED_PRICED_CLASS_SET.has(ct)).toBe(true)
-    expect(PAID_NODE_CLASSES).toEqual([...LLM_TEXT_CLASSES, ...DESCRIBE_CLASSES, ...REPAIR_PER_CALL_CLASSES, ...LAYERS_CLASSES, SPLIT_CLASS, ...AUDIO_GEN_CLASSES, ...GEN_3D_CLASSES, ...IMAGE_EXTRAS_CLASSES, ...LORA_CLASSES, RESTYLE_LORA_CLASS, TURNTABLE_CLASS, ...Object.keys(STAND_IN)])
+    expect(PAID_NODE_CLASSES).toEqual([...LLM_TEXT_CLASSES, ...DESCRIBE_CLASSES, ...REPAIR_PER_CALL_CLASSES, ...LAYERS_CLASSES, SPLIT_CLASS, ...AUDIO_GEN_CLASSES, ...SOUND_IN_CLASSES.filter(c => !c.startsWith('Lipsync')), ...GEN_3D_CLASSES, ...IMAGE_EXTRAS_CLASSES, ...LORA_CLASSES, RESTYLE_LORA_CLASS, TURNTABLE_CLASS, ...Object.keys(STAND_IN)])
   })
 
   it('a token node: the hold is creditsForUsd of the ceiling (rule (c), tokenCeiling)', () => {
@@ -286,8 +289,8 @@ describe('GRAPH_NODE_CREDITS', () => {
     // (R3.3 moved the seven LLM text nodes out, R3.4 five describe nodes, R3.5 Restore and Remove background with their twins,
     // R3.6 Layerize, Seedream Layerize and Outpaint, R3.7 Separate background and foreground, R3.8 music and speech with their twins,
     // R3.9 the three 3D nodes, R3.12 Text effect, Sketch to image and Generate face references,
-    // R3.13 Flux Dev + LoRA and Flux Dev + LoRAs, R3.16 Turntable.)
-    expect(rows.length).toBeGreaterThanOrEqual(10)
+    // R3.13 Flux Dev + LoRA and Flux Dev + LoRAs, R3.16 Turntable, R3.10 Transcribe, Whisper, Identify speakers and Clone a singing voice.)
+    expect(rows.length).toBeGreaterThanOrEqual(6)
     for (const [ct, flat] of rows) {
       expect(PAID_NODE_CLASSES.includes(ct), ct).toBe(false)
       expect(priceGraph({ n: { class_type: ct, inputs: {} } }).nodes!.n, ct).toBe(flat)

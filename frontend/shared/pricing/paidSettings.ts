@@ -50,6 +50,7 @@ import {
   AUDIO_GEN_CLASSES, AUDIO_GEN_ENDPOINTS, MUSIC_DEFAULT_SECONDS, MUSIC_MAX_SECONDS, MUSIC_MIN_SECONDS, SPEECH_MAX_CHARS,
   isSpeechClass, speechChars, type AudioGenClass,
 } from '../runner/audioGen'
+import { SOUND_IN_CLASSES, SOUND_IN_ENDPOINTS, SOUND_IN_MAX_SECONDS, isLipsync2ProClass, type SoundInClass } from '../runner/soundIn'
 import { GEN_3D_CLASSES, GEN_3D_STEPS, HUNYUAN3D_MV_SLUG, HUNYUAN3D_SLUG, MULTI_VIEW_CLASS, multiViewSlugsOf } from '../runner/gen3d'
 import { FACE_SLUG, SKETCH_SLUG, textEffectSlug } from '../runner/imageExtras'
 import { FLUX_DEV_LORA_SLUG, FLUX_LORA_STEPS, FLUX_MULTI_LORA_SLUG, RESTYLE_LORA_CLASS, multiLoraCount } from '../runner/lora'
@@ -346,6 +347,25 @@ function audioGenPlanner(classType: AudioGenClass): PaidPlanner {
   }
 }
 
+// ── R3.10: sound in (#shared/runner/soundIn) ──
+
+/**
+ * Transcribe audio (and its twin), Identify speakers and Clone a singing
+ * voice: one call each, priced by the seconds of sound sent (Python's WAV:
+ * at most 60 s). Measured before the hold (`opts.inputSeconds.audio`, the
+ * runner's own WAV, server/runner/soundInMedia.ts), else at the 60 s cap
+ * (a sound made in the run, and the ComfyUI path, which can't measure it).
+ * Sync lips to audio is priced by clipSettings.ts (the clip it makes).
+ */
+function soundInPlanner(classType: SoundInClass): PaidPlanner {
+  const endpoint = SOUND_IN_ENDPOINTS[classType]
+  return (_inputs, opts) => {
+    const s = opts.inputSeconds?.audio
+    const seconds = typeof s === 'number' && Number.isFinite(s) && s > 0 ? Math.min(s, SOUND_IN_MAX_SECONDS) : SOUND_IN_MAX_SECONDS
+    return { steps: [{ call: { endpoint, inputSeconds: seconds }, times: 1 }] }
+  }
+}
+
 // ── R3.9: 3D models (#shared/runner/gen3d) ──
 
 /**
@@ -483,6 +503,7 @@ const PAID_PLANNERS: Readonly<Record<string, PaidPlanner>> = {
   ...LAYERS_PLANNERS,
   [SPLIT_CLASS]: splitPlanner,
   ...Object.fromEntries(AUDIO_GEN_CLASSES.map(c => [c, audioGenPlanner(c)])),
+  ...Object.fromEntries(SOUND_IN_CLASSES.filter(c => !isLipsync2ProClass(c)).map(c => [c, soundInPlanner(c)])),
   ...Object.fromEntries(GEN_3D_CLASSES.map(c => [c, gen3dPlanner(c)])),
   ...IMAGE_EXTRAS_PLANNERS,
   ...LORA_PLANNERS,

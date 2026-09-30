@@ -61,6 +61,11 @@ export const OUTPUT_KINDS: Readonly<Record<string, Readonly<Record<number, Value
   Generate3DNode: { 0: 'glb' },
   Hunyuan3DRemoteNode: { 0: 'glb' },
   Hunyuan3DMultiViewNode: { 0: 'glb' },
+  // R3.10: Transcribe audio (and its twin) hands on its transcript, Identify
+  // speakers Python's JSON text (values only while `sound-in` is on).
+  TranscribeAudioNode: { 0: 'text' },
+  WhisperRemoteNode: { 0: 'text' },
+  IdentifySpeakersNode: { 0: 'json' },
   // R5.4: Get video components' frame batch and rate (its sound, slot 1, is a
   // file), and Create video's made video (values only while `media-video` is
   // on: eligibility.ts outputKindsFor drops these rows with it off).
