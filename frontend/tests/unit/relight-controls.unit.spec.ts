@@ -107,4 +107,47 @@ describe('RelightControls', () => {
       expect(mkSurfaces('ready').find('[data-testid="relight-status-error"]').exists()).toBe(false)
     })
   })
+
+  describe('Read shape button (2026-09-30)', () => {
+    const mkAbsent = (surfacesReadPrice: string | null = '~$0.01') =>
+      mount(RelightControls, {
+        props: {
+          fx: sanitizeRelight(null), selectedLight: sanitizeRelight(null).lights[0]!.id, depthStatus: 'ready',
+          surfacesStatus: 'absent', surfacesReadPrice,
+        },
+      })
+
+    it('shows a Read shape button with the price when surfaces are absent', () => {
+      const w = mkAbsent('~$0.01')
+      expect(w.get('[data-testid="relight-surfaces-read"]').text()).toBe('Read shape · ~$0.01')
+    })
+
+    it('clicking Read shape emits read-surfaces', async () => {
+      const w = mkAbsent()
+      await w.get('[data-testid="relight-surfaces-read"]').trigger('click')
+      expect(w.emitted('read-surfaces')).toEqual([[]])
+    })
+
+    it('shows no button and no status line for idle, ready or off', () => {
+      for (const surfacesStatus of ['idle', 'ready', 'off'] as const) {
+        const w = mount(RelightControls, {
+          props: { fx: sanitizeRelight(null), selectedLight: sanitizeRelight(null).lights[0]!.id, depthStatus: 'ready', surfacesStatus },
+        })
+        expect(w.find('[data-testid="relight-surfaces-read"]').exists()).toBe(false)
+        expect(w.find('[data-testid="relight-status-loading"]').exists()).toBe(false)
+        expect(w.find('[data-testid="relight-status-error"]').exists()).toBe(false)
+      }
+    })
+
+    it('loading still shows the status line, not the button', () => {
+      const w = mount(RelightControls, {
+        props: {
+          fx: sanitizeRelight(null), selectedLight: sanitizeRelight(null).lights[0]!.id, depthStatus: 'ready',
+          surfacesStatus: 'loading', surfacesPrice: '~$0.01',
+        },
+      })
+      expect(w.find('[data-testid="relight-surfaces-read"]').exists()).toBe(false)
+      expect(w.get('[data-testid="relight-status-loading"]').text()).toBe('Reading shape · ~$0.01')
+    })
+  })
 })

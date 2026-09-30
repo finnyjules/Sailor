@@ -12,16 +12,20 @@ const props = withDefaults(defineProps<{
   depthStatus: 'idle' | 'loading' | 'ready' | 'error'
   /** MoGe-2 surfaces (the photo's normal map) for this layer's photo — a separate, PAID
    *  read from the free local depth `depthStatus` above. 'off' (the kill switch, or no
-   *  photo to read yet) shows nothing, same as 'ready'. */
-  surfacesStatus?: 'idle' | 'loading' | 'ready' | 'error' | 'off'
+   *  photo to read yet) shows nothing, same as 'ready'. 'absent' (2026-09-30): the Frame
+   *  editor's free peek found nothing cached — the panel offers the "Read shape" button;
+   *  no paid read starts until it's clicked. */
+  surfacesStatus?: 'idle' | 'loading' | 'ready' | 'error' | 'off' | 'absent'
   /** The price to show while surfaces are being read — null once cached (free) or when
    *  surfacesStatus isn't 'loading'. Surfaces show their price every time, never asked. */
   surfacesPrice?: string | null
+  /** The "Read shape" button's own price — shown whenever surfacesStatus is 'absent'. */
+  surfacesReadPrice?: string | null
   /** Words for the error line in place of the plain one — set only for a read that is still
    *  running on the provider ("Still reading — try again in a minute"). */
   surfacesNote?: string | null
-}>(), { surfacesStatus: 'off', surfacesPrice: null, surfacesNote: null })
-const emit = defineEmits<{ update: [patch: Partial<RelightEffect>]; 'select-light': [id: string]; compare: [on: boolean]; 'retry-surfaces': [] }>()
+}>(), { surfacesStatus: 'off', surfacesPrice: null, surfacesReadPrice: null, surfacesNote: null })
+const emit = defineEmits<{ update: [patch: Partial<RelightEffect>]; 'select-light': [id: string]; compare: [on: boolean]; 'retry-surfaces': []; 'read-surfaces': [] }>()
 
 const active = computed(() => setupOf(props.fx))
 const light = computed(() => props.fx.lights.find(l => l.id === props.selectedLight) ?? props.fx.lights[0] ?? null)
@@ -66,7 +70,11 @@ const heightWord = (h: number) => (h < 0 ? 'Behind' : h < 0.2 ? 'Low' : h < 0.55
 
 <template>
   <div class="space-y-4 text-[12px]">
-    <p v-if="surfacesStatus === 'loading'" class="text-white/50" data-testid="relight-status-loading" title="Worked out once per photo">
+    <button v-if="surfacesStatus === 'absent'" data-testid="relight-surfaces-read"
+      class="h-7 px-2.5 rounded-[8px] bg-white/10 text-white/80 hover:bg-white/15 hover:text-white cursor-pointer"
+      title="Reads this photo's surfaces for more realistic light — once per photo"
+      @click="emit('read-surfaces')">Read shape · {{ surfacesReadPrice }}</button>
+    <p v-else-if="surfacesStatus === 'loading'" class="text-white/50" data-testid="relight-status-loading" title="Worked out once per photo">
       {{ surfacesPrice ? `Reading shape · ${surfacesPrice}` : 'Reading shape' }}
     </p>
     <p v-else-if="surfacesStatus === 'error'" class="text-red-300/80 flex items-center gap-2" data-testid="relight-status-error" title="Worked out once per photo">
