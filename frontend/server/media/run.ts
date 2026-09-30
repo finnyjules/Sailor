@@ -34,7 +34,10 @@
  *     child would wait for ever, so it is refused at once instead;
  *   - waits its turn behind the limiter (one job per person hosted, two
  *     local, at most max(1, ⌊cpus / 2⌋) at once; the thumbnail and waveform
- *     routes have two slots of their own);
+ *     routes have two slots of their own, of which a person holds one at most
+ *     in hosted with four more waiting, and a route job waits at most
+ *     MEDIA_ROUTE_WAIT_MS, the wait counted in its 30 s: past either it is
+ *     refused at once with MEDIA_WORDS.busy);
  *   - has a time limit, and is killed (SIGKILL) at once by Stop or by the
  *     limit, its partial outputs removed;
  *   - keeps at most 64 KiB of stderr, logged on failure and never shown: a
@@ -47,7 +50,8 @@ import { lstat, mkdtemp, open, realpath, rm } from 'node:fs/promises'
 import { availableParallelism, tmpdir } from 'node:os'
 import { dirname, isAbsolute, join, normalize, sep } from 'node:path'
 import {
-  MEDIA_JOB_TIMEOUT_MS, MEDIA_JOBS_PER_USER, MEDIA_MAX_ALLOC, MEDIA_ROUTE_SLOTS, MEDIA_STDERR_BYTES, MEDIA_WORDS,
+  MEDIA_JOB_TIMEOUT_MS, MEDIA_JOBS_PER_USER, MEDIA_MAX_ALLOC, MEDIA_ROUTE_JOBS_PER_USER, MEDIA_ROUTE_SLOTS, MEDIA_ROUTE_WAIT_MS,
+  MEDIA_STDERR_BYTES, MEDIA_WORDS,
   type MediaWord,
 } from '#shared/runner/media'
 import { isHosted } from '../utils/deployMode'
@@ -176,6 +180,7 @@ const ALLOWED_OPTIONS: Readonly<Record<'ffmpeg' | 'ffprobe', Readonly<Record<str
  * file.
  */
 const ALLOWED_FILTERS: Readonly<Record<string, readonly string[]>> = {
+  // Its expression is pinned to SELECT_FORMS below (R5.6 fix round 1).
   select: [''],
   scale: ['w', 'h', 'eval', 'flags', 'in_h_chr_pos', 'in_v_chr_pos', 'out_h_chr_pos', 'out_v_chr_pos'],
   format: [''],
@@ -189,6 +194,25 @@ const ALLOWED_FILTERS: Readonly<Record<string, readonly string[]>> = {
   split: [''],
   // R5.5: Save video frames pads an odd size to even with black (encode.ts `padToEven`).
   pad: ['w', 'h', 'x', 'y', 'color'],
+}
+
+/**
+ * The only `select` expressions the module builds (R5.6 fix round 1: the
+ * expression language has loops and variables, so the shape is pinned, not
+ * only its characters): decode.ts's `gte(pts\,0)`, a thumbnail's
+ * `gte(pts\,<target>)` (thumbnails.ts) and Load video frames' pick
+ * `gte(n\,<start>)*not(mod(n-<start>\,<stride>))` (decode.ts pickFilter).
+ */
+const SELECT_FORMS: readonly RegExp[] = [
+  /^gte\(pts\\,\d{1,18}\)$/,
+  /^gte\(n\\,(\d{1,15})\)\*not\(mod\(n-(\d{1,15})\\,\d{1,15}\)\)$/,
+]
+
+function selectAllowed(expr: string): boolean {
+  const m = SELECT_FORMS.map(r => r.exec(expr)).find(Boolean)
+  if (!m) return false
+  // The pick names its start twice, the same number both times.
+  return m.length < 3 || m[1] === m[2]
 }
 
 /**
@@ -208,6 +232,7 @@ export function checkFilterGraph(graph: string): boolean {
       if (!m) return false
       const keys = Object.hasOwn(ALLOWED_FILTERS, m[1]!) ? ALLOWED_FILTERS[m[1]!]! : null
       if (!keys) return false
+      if (m[1] === 'select' && (m[2] === undefined || !selectAllowed(m[2]))) return false
       if (m[2] === undefined) continue
       for (const opt of m[2].split(':')) {
         const eq = opt.indexOf('=')
@@ -395,6 +420,8 @@ const running = new Map<string, number>()
 const queue: Waiter[] = []
 let total = 0
 let routeRunning = 0
+/** Route jobs running per person (hosted holds each to MEDIA_ROUTE_JOBS_PER_USER.running). */
+const routeRunningBy = new Map<string, number>()
 let started = 0
 
 function jobsMax(): number {
@@ -406,12 +433,12 @@ function perUser(): number {
 const keyOf = (userId: string | null) => userId ?? '\0local'
 
 function canStart(w: Waiter): boolean {
-  if (w.route) return routeRunning < MEDIA_ROUTE_SLOTS
+  if (w.route) return routeRunning < MEDIA_ROUTE_SLOTS && (!isHosted() || (routeRunningBy.get(w.key) ?? 0) < MEDIA_ROUTE_JOBS_PER_USER.running)
   return total < jobsMax() && (running.get(w.key) ?? 0) < perUser()
 }
 
 function take(w: Waiter): void {
-  if (w.route) routeRunning++
+  if (w.route) { routeRunning++; routeRunningBy.set(w.key, (routeRunningBy.get(w.key) ?? 0) + 1) }
   else { total++; running.set(w.key, (running.get(w.key) ?? 0) + 1) }
 }
 
@@ -427,15 +454,31 @@ function pump(): void {
   }
 }
 
-/** Waits in order for a slot; the returned function gives it back. Stop while waiting leaves the queue. */
+/**
+ * Waits in order for a slot; the returned function gives it back. Stop while
+ * waiting leaves the queue. A route job (R5.6 fix round 1) is refused at once
+ * (busy) when its person already has MEDIA_ROUTE_JOBS_PER_USER.waiting route
+ * jobs waiting (hosted), and leaves the queue refused (busy) after
+ * MEDIA_ROUTE_WAIT_MS.
+ */
 function acquire(userId: string | null, route: boolean, signal?: AbortSignal): Promise<() => void> {
   const key = keyOf(userId)
   return new Promise((resolve, reject) => {
+    if (route && isHosted() && queue.filter(q => q.route && q.key === key).length >= MEDIA_ROUTE_JOBS_PER_USER.waiting) {
+      reject(new MediaError('busy'))
+      return
+    }
     let done = false
+    let waitTimer: ReturnType<typeof setTimeout> | null = null
     const release = () => {
       if (done) return
       done = true
-      if (route) routeRunning--
+      if (route) {
+        routeRunning--
+        const n = (routeRunningBy.get(key) ?? 1) - 1
+        if (n > 0) routeRunningBy.set(key, n)
+        else routeRunningBy.delete(key)
+      }
       else {
         total--
         const n = (running.get(key) ?? 1) - 1
@@ -444,27 +487,36 @@ function acquire(userId: string | null, route: boolean, signal?: AbortSignal): P
       }
       pump()
     }
-    const onAbort = () => {
+    const leave = (word: 'stopped' | 'busy') => {
       const at = queue.indexOf(w)
       if (at >= 0) queue.splice(at, 1)
-      reject(new MediaError('stopped'))
+      if (waitTimer) clearTimeout(waitTimer)
+      signal?.removeEventListener('abort', onAbort)
+      reject(new MediaError(word))
     }
+    const onAbort = () => leave('stopped')
     const w: Waiter = {
       key, route,
       go: () => {
         signal?.removeEventListener('abort', onAbort)
+        if (waitTimer) clearTimeout(waitTimer)
         resolve(release)
       },
     }
     signal?.addEventListener('abort', onAbort, { once: true })
     queue.push(w)
+    if (route) waitTimer = setTimeout(() => leave('busy'), MEDIA_ROUTE_WAIT_MS)
     pump()
   })
 }
 
 /** For tests: jobs running or waiting for a person, and how many processes have been started. */
-export function mediaLimiter(): { pending(userId: string | null): number; started(): number } {
+export function mediaLimiter(): { pending(userId: string | null): number; started(): number; routes(userId: string | null): { running: number; waiting: number } } {
   return {
+    routes: (userId) => {
+      const key = keyOf(userId)
+      return { running: routeRunningBy.get(key) ?? 0, waiting: queue.filter(w => w.key === key && w.route).length }
+    },
     pending: (userId) => {
       const key = keyOf(userId)
       return (running.get(key) ?? 0) + queue.filter(w => w.key === key && !w.route).length
@@ -517,6 +569,7 @@ export async function runMedia(job: MediaJob): Promise<{ stdout: Uint8Array | nu
   const tools = await mediaTools()
   if (!tools) throw new MediaError('toolsMissing')
   let release: () => void
+  const asked = Date.now()
   try { release = await acquire(job.userId, !!job.route, job.signal) }
   catch (e) {
     await removeAll(job.cleanup)
@@ -531,7 +584,9 @@ export async function runMedia(job: MediaJob): Promise<{ stdout: Uint8Array | nu
       await removeAll(job.cleanup)
       throw e
     }
-    const r = await spawnJob(tools[job.tool], job, job.workDir ?? ownDir!)
+    // A route job's wait for its slot counts against its time limit (R5.6 fix round 1).
+    const left = job.route ? Math.max(1, MEDIA_JOB_TIMEOUT_MS.route - (Date.now() - asked)) : Number.POSITIVE_INFINITY
+    const r = await spawnJob(tools[job.tool], job, job.workDir ?? ownDir!, left)
     try { await checkConfinedOutputs(made) }
     catch (e) {
       await removeAll(job.cleanup)
@@ -549,9 +604,9 @@ async function removeAll(paths?: string[]): Promise<void> {
   for (const p of paths ?? []) await rm(p, { recursive: true, force: true }).catch(() => {})
 }
 
-function spawnJob(file: string, job: MediaJob, cwd: string): Promise<{ stdout: Uint8Array | null; stderrTail: string }> {
+function spawnJob(file: string, job: MediaJob, cwd: string, atMost = Number.POSITIVE_INFINITY): Promise<{ stdout: Uint8Array | null; stderrTail: string }> {
   const args = fullArgs(job.tool, job.args)
-  const timeoutMs = job.timeoutMs ?? defaultTimeout(!!job.route)
+  const timeoutMs = Math.min(job.timeoutMs ?? defaultTimeout(!!job.route), atMost)
   return new Promise((resolve, reject) => {
     const stdio: ('ignore' | 'pipe')[] = [job.stdin ? 'pipe' : 'ignore', 'pipe', 'pipe']
     if (job.onSide) stdio.push('pipe')

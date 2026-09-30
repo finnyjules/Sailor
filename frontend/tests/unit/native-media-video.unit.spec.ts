@@ -31,6 +31,12 @@ vi.mock('~~/server/media/tools', async (importOriginal) => {
 // The hosted gate's own checks (engineGate.ts): which mode, and a cached engine-health state that never reaches :8188.
 const deploy = vi.hoisted(() => ({ mode: 'local' as 'local' | 'hosted' }))
 vi.mock('~~/server/utils/deployMode', () => ({ deployMode: () => deploy.mode, isHosted: () => deploy.mode === 'hosted' }))
+// The Frame's worker, watched (a large thumbnail frame is resized there): the real one, counted.
+const workerCalls = vi.hoisted(() => ({ n: 0 }))
+vi.mock('~~/server/runner/compositor/worker', async (importOriginal) => {
+  const real = await importOriginal<typeof import('~~/server/runner/compositor/worker')>()
+  return { ...real, pixelsInWorker: ((...a: Parameters<typeof real.pixelsInWorker>) => { workerCalls.n++; return real.pixelsInWorker(...a) }) as typeof real.pixelsInWorker }
+})
 vi.mock('~~/server/native/engineHealth', async orig => ({ ...(await orig() as object), engineHealth: async () => 'down' as const }))
 
 const g = globalThis as any
@@ -40,7 +46,10 @@ g.createError ??= (o: { statusCode: number, message?: string }) => Object.assign
 const M = await import('~~/server/native/media')
 const { pyDumps } = await import('~~/server/native/pyJson')
 const T = await import('~~/server/media/thumbnails')
-const { checkArgs, mediaLimiter } = await import('~~/server/media/run')
+const { checkArgs, checkFilterGraph, mediaLimiter, runMedia, MediaError } = await import('~~/server/media/run')
+const { framesFilter, pickFilter } = await import('~~/server/media/decode')
+const { pixels } = await import('~~/server/runner/pixels/core')
+const { MEDIA_ROUTE_JOBS_PER_USER, MEDIA_ROUTE_WAIT_MS, MEDIA_WORDS } = await import('#shared/runner/media')
 const { CLIP_ROOTS, clipPath, requireMediaTools, sha256Hex, unz } = await import('./__runner__/mediaParity')
 const { handleHostedSailorData, SAILOR_ASSET_KIND } = await import('~~/server/utils/engineGate')
 const { __setResourceOwnersDbForTests } = await import('~~/server/utils/resourceOwners')
@@ -410,3 +419,238 @@ describe('the hosted gate still runs first', () => {
   })
 })
 
+
+// ── fix round 1 ──────────────────────────────────────────────────────────────
+
+describe('run.ts pins select to the forms Sailor builds (fix round 1, Important 1)', () => {
+  it('admits decode.ts\'s and thumbnails.ts\'s own select filters', () => {
+    const v = { chromaLocation: 'left', pixFmt: 'yuv420p' }
+    for (const g of [
+      framesFilter(v),
+      framesFilter(v, { start: 5, stride: 3, count: 10 }),
+      pickFilter({ start: 0, stride: 1, count: 1 }),
+      '[0:v:0]select=gte(pts\\,9216),split=3[a][b][c]',
+      'select=gte(pts\\,0)',
+    ]) expect(checkFilterGraph(g), g).toBe(true)
+  })
+
+  it('refuses every other select expression, loops and variables first', () => {
+    for (const g of [
+      'select=while(1\\,1)',
+      'select=st(0\\,1)*ld(0)',
+      'select=gte(pts\\,1)+1',
+      'select=gte(t\\,1)',
+      'select=gte(pts\\,-1)',
+      'select=gte(n\\,3)*not(mod(n-4\\,2))',
+      'select=gte(n\\,3)*not(mod(n-3\\,2))*while(1\\,1)',
+      'select=1',
+      'select',
+      'select=eq(pts\\,5)',
+    ]) expect(checkFilterGraph(g), g).toBe(false)
+    expect(() => checkArgs('ffmpeg', ['-i', 'file:/a/b.mp4', '-vf', 'select=while(1\\,1)', 'pipe:1'])).toThrow()
+  })
+})
+
+describe('the resize: inline below THUMB_WORKER_PIXELS, on the Frame\'s worker above (fix round 1)', () => {
+  const frame = (w: number, h: number) => {
+    const rgb = new Uint8Array(w * h * 3)
+    for (let i = 0; i < rgb.length; i++) rgb[i] = (i * 31 + (i >> 7)) & 255
+    return { rgb, w, h }
+  }
+  it('a 1920 × 1080 frame goes to the worker, a 1280 × 720 one doesn\'t; both are Pillow\'s pixels', async () => {
+    expect(T.THUMB_WORKER_PIXELS).toBe(2_000_000)
+    for (const [w, h, onWorker] of [[1280, 720, false], [1920, 1080, true]] as const) {
+      const f = frame(w, h)
+      const want = pixels.pilResize(f.rgb.slice(), w, h, 3, 85, 48, undefined, 'bilinear')
+      const before = workerCalls.n
+      const png = await T.thumbnailPng(f)
+      expect(workerCalls.n - before, `${w}×${h}`).toBe(onWorker ? 1 : 0)
+      const got = await pngPixels(png)
+      expect(got, `${w}×${h}`).toEqual({ mode: 'RGB', w: 85, h: 48, sha256: sha256Hex(want) })
+    }
+  }, 60_000)
+})
+
+describe('the waveform, streamed (fix round 1, Important 3)', () => {
+  const f32 = (xs: number[]) => Float32Array.from(xs)
+
+  it('PeakBuckets: chunks may split a sample; the buckets are Python\'s (0.0 past the end)', () => {
+    const l = T.flatLayout('flt', 2)
+    const a = new T.PeakBuckets(6, 4, l)
+    a.push(f32([0.25, -0.5]))
+    a.push(f32([0.125]))
+    a.push(f32([-1, 0.75, 0.5]))
+    // flat = |interleaved|; chunk = 6 // 4 = 1; the last bucket runs to the end.
+    expect(a.peaks()).toEqual([0.25, 0.5, 0.125, 1])
+    const b = new T.PeakBuckets(2, 4, T.flatLayout('s16', 1))
+    b.push(f32([0.5, -0.25]))
+    expect(b.peaks()).toEqual([1, 0.5, 0, 0])
+  })
+
+  it('PeakBuckets: planar u8 is back to 0…255 and averaged in float64; planar floats in float32', () => {
+    // u8p, two channels: x0 = [0, 255], x1 = [10, 20] (pcm_f32le gives (x − 128) / 128).
+    const u = new T.PeakBuckets(2, 2, T.flatLayout('u8p', 2))
+    u.push(f32([(0 - 128) / 128, (10 - 128) / 128, (255 - 128) / 128, (20 - 128) / 128]))
+    expect(u.peaks()).toEqual([Math.fround(5 / 137.5), 1])
+    // fltp, three channels: numpy's float32 sum row by row, then / 3.
+    const x = [0.1, 0.2, 0.3].map(Math.fround)
+    const sum = Math.fround(Math.fround(x[0]! + x[1]!) + x[2]!)
+    const m = Math.abs(Math.fround(sum / 3))
+    const p = new T.PeakBuckets(1, 16, T.flatLayout('fltp', 3))
+    p.push(f32(x))
+    expect(p.peaks()[0]).toBe(Math.fround(m / m))
+  })
+
+  it('PeakBuckets fails when the second pass brings a different count', () => {
+    const a = new T.PeakBuckets(3, 2, T.flatLayout('flt', 1))
+    a.push(f32([1, 2]))
+    expect(() => a.peaks()).toThrow(MediaError)
+    expect(() => a.push(f32([1, 2]))).toThrow(MediaError)
+  })
+})
+
+/** A fake ffprobe answering this JSON. */
+const probeSays = (j: unknown) => `cat <<'JSON'\n${JSON.stringify(j)}\nJSON`
+const soundAnswer = (o: { fmt: string, channels: number, seconds: number, rate?: number }) => ({
+  format: { format_name: 'wav', duration: o.seconds.toFixed(6) },
+  streams: [{ index: 0, codec_type: 'audio', codec_name: 'pcm_s16le', sample_fmt: o.fmt, sample_rate: String(o.rate ?? 8000), channels: o.channels, time_base: `1/${o.rate ?? 8000}`, duration_ts: o.seconds * (o.rate ?? 8000) }],
+})
+function fakeWav(name: string): string {
+  const f = join(input, name)
+  writeFileSync(f, Buffer.concat([Buffer.from('RIFF\0\0\0\0WAVEfmt '), Buffer.alloc(64)]))
+  return f
+}
+
+describe('what is cached: only Python\'s own empties (fix round 1)', () => {
+  const q = (s: string) => new URLSearchParams(s)
+
+  it('a frame over the size cap, and a tool that fails, give [] and cache nothing', async () => {
+    fakeTools({ ffprobe: probeSays(JSON.parse(videoAnswer.replace('"width":64,"height":48', '"width":10000,"height":10000'))), ffmpeg: 'exit 1' })
+    const big = fakeMp4('big.mp4')
+    writeAssets([{ id: 'big', path: big, kind: 'video' }])
+    expect(await M.assetThumbnailsRoute(user, q('asset_id=big&count=2'), vi.fn(async () => null), localNative())).toEqual({ status: 200, body: { thumbnails: [], asset_id: 'big', count: 2 } })
+    fakeTools({ ffprobe: probeSays(JSON.parse(videoAnswer)), ffmpeg: 'exit 1' })
+    const broken = fakeMp4('broken.mp4')
+    writeAssets([{ id: 'broken', path: broken, kind: 'video' }])
+    expect((await M.assetThumbnailsRoute(user, q('asset_id=broken&count=2'), vi.fn(async () => null), localNative())).body).toMatchObject({ thumbnails: [] })
+    expect(cached()).toEqual([])
+  })
+
+  it('hosted, a sound over the caps gives [] and caches nothing; a planar sound of 10 channels is a named case, not cached', async () => {
+    deploy.mode = 'hosted'
+    fakeTools({ ffprobe: probeSays(soundAnswer({ fmt: 's16', channels: 1, seconds: 3 * 3600 })), ffmpeg: 'exit 1' })
+    writeAssets([{ id: 'long', path: fakeWav('long.wav'), kind: 'audio' }, { id: 'ten', path: fakeWav('ten.wav'), kind: 'audio' }])
+    const hosted = T.nativeMedia({ roots: [input], userId: 'u1' })
+    expect((await M.assetWaveformRoute(user, q('asset_id=long&buckets=16'), vi.fn(async () => null), hosted)).body).toEqual({ peaks: [], asset_id: 'long', buckets: 16 })
+    fakeTools({ ffprobe: probeSays(soundAnswer({ fmt: 'fltp', channels: 10, seconds: 1 })), ffmpeg: 'exit 1' })
+    expect((await M.assetWaveformRoute(user, q('asset_id=ten&buckets=16'), vi.fn(async () => null), hosted)).body).toEqual({ peaks: [], asset_id: 'ten', buckets: 16 })
+    expect(cached()).toEqual([])
+  })
+
+  it('locally a sound over an hour is drawn, as Python draws it, and cached', async () => {
+    // Both passes hand over the same two floats: 0.5 and -1.0.
+    fakeTools({ ffprobe: probeSays(soundAnswer({ fmt: 's16', channels: 1, seconds: 2 * 3600 })), ffmpeg: `printf '\\000\\000\\000\\077\\000\\000\\200\\277'` })
+    writeAssets([{ id: 'long', path: fakeWav('long.wav'), kind: 'audio' }])
+    const r = await M.assetWaveformRoute(user, q('asset_id=long&buckets=16'), vi.fn(async () => null), localNative())
+    expect(r.body).toEqual({ peaks: [0.5, 1, ...Array(14).fill(0)], asset_id: 'long', buckets: 16 })
+    expect(readFileSync(join(thumbsDir(), 'wave_long.16.json'), 'utf8')).toBe(`{"peaks": [0.5, 1.0, ${Array(14).fill('0.0').join(', ')}], "asset_id": "long", "buckets": 16}`)
+  })
+
+  it('an import whose probe stops for Sailor\'s own reason is answered but not recorded, so a re-import probes again (Minor 4)', async () => {
+    fakeTools({ ffprobe: 'exec /bin/sleep 120', ffmpeg: 'exit 1' })
+    fakeMp4('slow.mp4')
+    const ac = new AbortController()
+    setTimeout(() => ac.abort(), 300)
+    const native = T.nativeMedia({ roots: ['/'], userId: null, signal: ac.signal })
+    const r = await M.assetImportRoute(user, input, { path: 'slow.mp4' }, vi.fn(async () => null), native)
+    expect(r.body).toMatchObject({ created: true, asset: { kind: 'video', duration_sec: null, width: null, height: null } })
+    expect(existsSync(join(user, 'timeline_assets.json')) ? JSON.parse(readFileSync(join(user, 'timeline_assets.json'), 'utf8')) : []).toEqual([])
+    // A file that isn't media is Python's own answer: recorded with nulls.
+    fakeTools({ ffprobe: 'exit 1', ffmpeg: 'exit 1' })
+    fakeMp4('junk.mp4')
+    await M.assetImportRoute(user, input, { path: 'junk.mp4' }, vi.fn(async () => null), T.nativeMedia({ roots: ['/'], userId: null }))
+    expect(JSON.parse(readFileSync(join(user, 'timeline_assets.json'), 'utf8')).map((a: any) => a.name)).toEqual(['junk.mp4'])
+  })
+})
+
+describe('route jobs are fair and bounded (fix round 1, Important 2)', () => {
+  const job = (userId: string | null, signal?: AbortSignal) =>
+    runMedia({ tool: 'ffprobe', args: ['-of', 'json', '-show_format', '-i', 'file:/a/b.mp4'], userId, route: true, signal })
+  const word = (p: Promise<unknown>) => p.then(() => 'done', (e: InstanceType<typeof MediaError>) => e.word)
+
+  it('hosted: one running and four waiting per person, the next refused at once (busy); another person still runs; Stop empties both', async () => {
+    deploy.mode = 'hosted'
+    fakeTools({ ffprobe: 'exec /bin/sleep 120', ffmpeg: 'exit 1' })
+    expect(MEDIA_ROUTE_JOBS_PER_USER).toEqual({ running: 1, waiting: 4 })
+    const ac = new AbortController()
+    const a = Array.from({ length: 5 }, () => word(job('A', ac.signal)))
+    await new Promise(r => setTimeout(r, 200))
+    expect(mediaLimiter().routes('A')).toEqual({ running: 1, waiting: 4 })
+    const t0 = Date.now()
+    expect(await word(job('A', ac.signal))).toBe('busy')
+    expect(Date.now() - t0).toBeLessThan(100)
+    const b = word(job('B', ac.signal))
+    await new Promise(r => setTimeout(r, 200))
+    expect(mediaLimiter().routes('B')).toEqual({ running: 1, waiting: 0 })
+    const t1 = Date.now()
+    ac.abort()
+    expect(await Promise.all([...a, b])).toEqual(Array(6).fill('stopped'))
+    expect(Date.now() - t1).toBeLessThan(1500)
+    expect(mediaLimiter().routes('A')).toEqual({ running: 0, waiting: 0 })
+    expect(MEDIA_WORDS.busy).toMatch(/busy/)
+  })
+
+  it('a route job waits at most MEDIA_ROUTE_WAIT_MS for a slot, then is refused (busy)', async () => {
+    fakeTools({ ffprobe: 'exec /bin/sleep 120', ffmpeg: 'exit 1' })
+    const ac = new AbortController()
+    const held = [word(job(null, ac.signal)), word(job(null, ac.signal))]
+    const t0 = Date.now()
+    expect(await word(job(null, ac.signal))).toBe('busy')
+    const waited = Date.now() - t0
+    expect(waited).toBeGreaterThanOrEqual(MEDIA_ROUTE_WAIT_MS - 50)
+    expect(waited).toBeLessThan(MEDIA_ROUTE_WAIT_MS + 1000)
+    ac.abort()
+    expect(await Promise.all(held)).toEqual(['stopped', 'stopped'])
+  }, 30_000)
+
+  it('the request closing stops its jobs: through runMediaRoute, a closed response ends a hanging thumbnail at once, nothing cached', async () => {
+    const { EventEmitter } = await import('node:events')
+    fakeTools({ ffprobe: probeSays(JSON.parse(videoAnswer)), ffmpeg: 'exec /bin/sleep 120' })
+    const clip = fakeMp4('hang.mp4')
+    writeAssets([{ id: 'hang', path: clip, kind: 'video' }])
+    const res = Object.assign(new EventEmitter(), { writableEnded: false })
+    const ev = { path: '/sailor/asset_thumbnails?asset_id=hang&count=5', method: 'GET', context: {}, node: { req: {}, res } } as any
+    const ctx = { userDir: user, inputDir: input, outputDir: join(root, 'output') }
+    setTimeout(() => res.emit('close'), 500)
+    const t0 = Date.now()
+    const r = await M.runMediaRoute(ctx, { name: 'assetThumbnails' }, ev, '/sailor/asset_thumbnails')
+    expect(Date.now() - t0).toBeLessThan(2500)
+    expect(r.body).toEqual({ thumbnails: [], asset_id: 'hang', count: 5 })
+    expect(cached()).toEqual([])
+    expect(mediaLimiter().routes(null)).toEqual({ running: 0, waiting: 0 })
+  })
+})
+
+describe('if the media module fails to load, the routes behave as without the tools (Minor 6)', () => {
+  it('forwards (503 with the engine down) and logs', async () => {
+    await requireMediaTools()
+    vi.resetModules()
+    vi.doMock('~~/server/media/thumbnails', () => { throw new Error('sharp failed to load') })
+    try {
+      const fresh = await import('~~/server/native/media')
+      vi.stubGlobal('fetch', vi.fn(async () => { throw new TypeError('fetch failed') }))
+      const err = vi.spyOn(console, 'error').mockImplementation(() => {})
+      const clip = addClip('v_h264_601.mp4', 'clip.mp4')
+      writeAssets([{ id: 'vid', path: clip, kind: 'video' }])
+      const ctx = { userDir: user, inputDir: input, outputDir: join(root, 'output') }
+      const r = await fresh.runMediaRoute(ctx, { name: 'assetThumbnails' }, { path: '/sailor/asset_thumbnails?asset_id=vid', method: 'GET', context: {} } as any, '/sailor/asset_thumbnails')
+      expect(r).toEqual(fresh.NEEDS_ENGINE)
+      expect(err.mock.calls.some(c => String(c[0]).includes('media.route.unavailable'))).toBe(true)
+      err.mockRestore()
+    }
+    finally {
+      vi.doUnmock('~~/server/media/thumbnails')
+      vi.resetModules()
+    }
+  })
+})

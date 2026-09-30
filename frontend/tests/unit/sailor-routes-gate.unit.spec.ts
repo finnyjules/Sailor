@@ -49,12 +49,14 @@ vi.mock('../../server/native/engineHealth', async orig => ({
   engineHealth: async () => engineHealthState.value,
 }))
 beforeEach(() => { engineHealthState.value = 'up' })
-// R5.6: these tests describe the video/sound routes WITHOUT Sailor's media tools (the engine or 503), so the
-// tools are pinned missing whatever this machine has built; with them, see native-media-video.unit.spec.ts.
-vi.mock('../../server/media/tools', async orig => ({
-  ...(await orig() as object),
-  mediaTools: async () => null,
-}))
+// R5.6: most tests here describe the video/sound routes WITHOUT Sailor's media tools (the engine or 503), so the
+// tools are pinned missing whatever this machine has built. The "with the media tools" block switches the real
+// build on (R5.6 fix round 1, Minor 5); native-media-video.unit.spec.ts covers the rest.
+const gateTools = vi.hoisted(() => ({ real: false }))
+vi.mock('../../server/media/tools', async (orig) => {
+  const real = await orig() as typeof import('../../server/media/tools')
+  return { ...real, mediaTools: async () => (gateTools.real ? real.mediaTools() : null) }
+})
 
 const rawBody = vi.fn(async () => undefined as Buffer | undefined)
 const requestHeader = vi.fn((_e: any, _n: string) => undefined as string | undefined)
@@ -771,5 +773,72 @@ describe('coverage guard: every registered /sailor route is classified', () => {
       if (!seen.has(key)) mismatches.push(`${key}: in the table but NOT found in comfy_extras (route removed/renamed?)`)
     }
     expect(mismatches).toEqual([])
+  })
+})
+
+// ======================================= R5.6: the media tools present (hosted)
+
+describe('hosted, with the media tools: the gate first, then Sailor reads only the input folder (R5.6 fix round 1)', () => {
+  let mediaParity: typeof import('./__runner__/mediaParity')
+  let limiter: typeof import('../../server/media/run').mediaLimiter
+  beforeEach(async () => {
+    gateTools.real = true
+    mediaParity = await import('./__runner__/mediaParity')
+    limiter = (await import('../../server/media/run')).mediaLimiter
+    await mediaParity.requireMediaTools()
+  })
+  afterEach(() => { gateTools.real = false })
+  const clip = (name: string, to: string) => {
+    fs.mkdirSync(path.dirname(to), { recursive: true })
+    fs.copyFileSync(mediaParity.clipPath(name), to)
+  }
+
+  it('the caller\'s own video asset is served natively — thumbnails and waveform — and the engine is never asked', async () => {
+    owners.set(okey(SAILOR_ASSET_KIND, 'a-mine'), 'u1')
+    clip('v_stereo_aac.mp4', inDir('mine.mp4'))
+    writeAssets([{ id: 'a-mine', path: inDir('mine.mp4'), kind: 'video' }])
+    const t = await call('/sailor/asset_thumbnails?asset_id=a-mine&count=2', 'GET', 'u1')
+    expect(t.status).toBe(200)
+    expect(t.body.thumbnails).toHaveLength(2)
+    const w = await call('/sailor/asset_waveform?asset_id=a-mine&buckets=16', 'GET', 'u1')
+    expect(w.body.peaks).toHaveLength(16)
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('asset_import of the caller\'s own video probes it natively and records the owner; the engine is never asked', async () => {
+    uploads.set('input::clip.mp4', 'u1')
+    clip('v_h264_601.mp4', inDir('clip.mp4'))
+    const r = await call('/sailor/asset_import', 'POST', 'u1', { path: 'clip.mp4' })
+    expect(r.body.asset).toMatchObject({ kind: 'video', duration_sec: 0.3333333333333333, width: 32, height: 24 })
+    expect(owners.get(okey(SAILOR_ASSET_KIND, r.body.asset.id))).toBe('u1')
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('an owned asset whose file is outside input/ (a record pointing out, or a symlink out) gives [] and no tool starts', async () => {
+    owners.set(okey(SAILOR_ASSET_KIND, 'a-out'), 'u1')
+    owners.set(okey(SAILOR_ASSET_KIND, 'a-link'), 'u1')
+    clip('v_h264_601.mp4', outDir('elsewhere.mp4'))
+    fs.symlinkSync(outDir('elsewhere.mp4'), inDir('link.mp4'))
+    writeAssets([{ id: 'a-out', path: outDir('elsewhere.mp4'), kind: 'video' }, { id: 'a-link', path: inDir('link.mp4'), kind: 'video' }])
+    const before = limiter().started()
+    for (const id of ['a-out', 'a-link']) {
+      const r = await call(`/sailor/asset_thumbnails?asset_id=${id}&count=1`, 'GET', 'u1')
+      expect(r.body, id).toEqual({ thumbnails: [], asset_id: id, count: 1 })
+      const w = await call(`/sailor/asset_waveform?asset_id=${id}&buckets=16`, 'GET', 'u1')
+      expect(w.body.peaks, id).toEqual([])
+    }
+    expect(limiter().started(), 'no ffprobe or ffmpeg ran').toBe(before)
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('another user\'s input_thumbnail and asset_import are refused (404) before any job starts', async () => {
+    uploads.set('input::theirs.mp4', 'u2')
+    clip('v_h264_601.mp4', inDir('theirs.mp4'))
+    const before = limiter().started()
+    expect((await call('/sailor/input_thumbnail?filename=theirs.mp4', 'GET', 'u1')).status).toBe(404)
+    expect((await call('/sailor/asset_import', 'POST', 'u1', { path: 'theirs.mp4' })).status).toBe(404)
+    expect(limiter().started()).toBe(before)
+    expect(fs.existsSync(userFile('timeline_thumbs')) ? fs.readdirSync(userFile('timeline_thumbs')) : []).toEqual([])
+    expect([...owners.keys()]).toEqual([])
   })
 })

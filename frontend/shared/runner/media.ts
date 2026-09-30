@@ -54,7 +54,7 @@ export const MEDIA_CAPS: { readonly local: Readonly<MediaCaps>; readonly hosted:
 
 export type MediaWord =
   | 'tooBig' | 'tooLong' | 'tooManyFrames' | 'unreadable' | 'noVideo' | 'noSound'
-  | 'oddSize' | 'stopped' | 'timedOut' | 'failed' | 'sizeChanged' | 'oddRate'
+  | 'oddSize' | 'stopped' | 'timedOut' | 'failed' | 'sizeChanged' | 'oddRate' | 'busy'
 
 /** What a person reads when media work can't go on: sentence case, plain words, short enough for a node. */
 export const MEDIA_WORDS: Readonly<Record<MediaWord, string>> = {
@@ -70,6 +70,7 @@ export const MEDIA_WORDS: Readonly<Record<MediaWord, string>> = {
   failed: 'The video tools couldn’t finish this',
   sizeChanged: 'This video’s frames change size partway through',
   oddRate: 'This sound’s sample rate is too unusual to convert for Opus',
+  busy: 'Sailor is busy with other videos right now, so try again in a moment',
 }
 
 /** Rule 5: how long one job may run. */
@@ -87,5 +88,12 @@ export const MEDIA_MAX_ALLOC = 536_870_912
 export const MEDIA_JOBS_PER_USER = { hosted: 1, local: 2 } as const
 /** Rule 5: the thumbnail and waveform routes' own slots, so a long render never blocks one. */
 export const MEDIA_ROUTE_SLOTS = 2
+/**
+ * R5.6 fix round 1: the routes' share per person in hosted — one running and
+ * four waiting; past that a route job is refused at once (MEDIA_WORDS.busy).
+ */
+export const MEDIA_ROUTE_JOBS_PER_USER = { running: 1, waiting: 4 } as const
+/** R5.6 fix round 1: the longest a route job waits for a slot (then MEDIA_WORDS.busy); waiting counts against its 30 s. */
+export const MEDIA_ROUTE_WAIT_MS = 10_000
 /** Rule 5: the most stderr kept from one job (logged, never shown). */
 export const MEDIA_STDERR_BYTES = 64 * 1024

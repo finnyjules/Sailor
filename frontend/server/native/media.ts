@@ -282,11 +282,29 @@ export interface ProbeInfo { kind: 'image' | 'video' | 'audio', duration_sec: nu
  * audio come back with their kind and null duration/size.
  */
 export async function probeMediaNative(file: string, native: NativeMedia | null = null): Promise<ProbeInfo> {
+  return (await probeKept(file, native)).info
+}
+
+/**
+ * `probeMediaNative`, and whether its numbers may be recorded: `keep` is false
+ * when the media tools gave nulls for Sailor's own reason (a cap, the time
+ * limit, busy slots, a tool failure), so the import answers but records
+ * nothing, and a re-import probes again (R5.6 fix round 1).
+ */
+async function probeKept(file: string, native: NativeMedia | null): Promise<{ info: ProbeInfo, keep: boolean }> {
   const ext = pyExt(file)
   const info: ProbeInfo = { kind: 'video', duration_sec: null, width: null, height: null }
+  let keep = true
+  const fromTools = async (kind: 'video' | 'audio') => {
+    const r = await native!.probe(file, kind)
+    info.duration_sec = r.duration_sec
+    info.width = r.width
+    info.height = r.height
+    keep = r.keep
+  }
   if (VIDEO_EXTS.has(ext)) {
     info.kind = 'video'
-    if (native) Object.assign(info, await native.probe(file, 'video'))
+    if (native) await fromTools('video')
   }
   else if (IMAGE_EXTS.has(ext)) {
     info.kind = 'image'
@@ -301,9 +319,9 @@ export async function probeMediaNative(file: string, native: NativeMedia | null 
   }
   else if (AUDIO_EXTS.has(ext)) {
     info.kind = 'audio'
-    if (native) Object.assign(info, await native.probe(file, 'audio'))
+    if (native) await fromTools('audio')
   }
-  return info
+  return { info, keep }
 }
 
 export function isImageFile(file: string): boolean {
@@ -340,7 +358,7 @@ export async function assetImportRoute(
     const forwarded = await engine()
     if (forwarded) return forwarded
   }
-  const info = await probeMediaNative(p, native)
+  const { info, keep } = await probeKept(p, native)
 
   const assets = loadAssets(userDirectory)
   const existing = records(assets).find((a: Json) => field(a, 'path') === p)
@@ -365,6 +383,8 @@ export async function assetImportRoute(
   const latest = loadAssets(userDirectory)
   const latestExisting = records(latest).find((a: Json) => field(a, 'path') === p)
   if (latestExisting) return { status: 200, body: { asset: latestExisting, created: false } }
+  // The probe failed for Sailor's own reason: answered, not recorded, so the next import probes again.
+  if (!keep) return { status: 200, body: { asset, created: true } }
   latest.push(asset)
   saveAssets(userDirectory, latest)
   return { status: 200, body: { asset, created: true } }
@@ -706,8 +726,31 @@ export async function runMediaRoute(ctx: MediaContext, h: MediaHandler, event: H
  */
 async function nativeMediaFor(ctx: MediaContext, event: H3Event): Promise<NativeMedia | null> {
   if (!(await mediaTools())) return null
-  // Loaded here, not at the top: the media module reaches the gate's modules, which import this one.
-  const { nativeMedia } = await import('../media/thumbnails')
+  let nativeMedia: typeof import('../media/thumbnails').nativeMedia
+  try {
+    // Loaded here, not at the top: the media module reaches the gate's modules, which import this one.
+    ({ nativeMedia } = await import('../media/thumbnails'))
+  }
+  catch (e) {
+    // As without the tools: the engine, or 503 (R5.6 fix round 1).
+    console.error('[media] media.route.unavailable: the media module failed to load', e)
+    return null
+  }
   const userId = (event.context as { userId?: unknown } | undefined)?.userId
-  return nativeMedia({ roots: isHosted() ? [ctx.inputDir] : ['/'], userId: typeof userId === 'string' ? userId : null })
+  return nativeMedia({ roots: isHosted() ? [ctx.inputDir] : ['/'], userId: typeof userId === 'string' ? userId : null, signal: requestClosed(event) })
+}
+
+/**
+ * Aborted when the person leaves before the answer is sent (the response
+ * closes unfinished): their route jobs, waiting or running, stop (R5.6 fix
+ * round 1). Undefined without a Node response (tests' plain events).
+ */
+export function requestClosed(event: H3Event): AbortSignal | undefined {
+  const res = (event as { node?: { res?: { once?: unknown, writableEnded?: boolean } } }).node?.res
+  if (!res || typeof res.once !== 'function') return undefined
+  const ac = new AbortController()
+  ;(res as { once(ev: string, fn: () => void): void }).once('close', () => {
+    if (!res.writableEnded) ac.abort()
+  })
+  return ac.signal
 }
