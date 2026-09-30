@@ -3123,11 +3123,18 @@ function paintLayer(
     if (gpuMemo !== undefined && !isClipLayer) return gpuMemo
     gpuMemo = null
     const wantRelight = !!relight && relightAvailable()
-    const wantDof = !!dof && dofAvailable() && dofShouldRun(dof, true)
-    if (!wantRelight && !wantDof) return gpuMemo
+    // Gated on presence + availability only here — NOT `dofShouldRun` yet, which needs
+    // `depth` (below) to decide. Old `dofContent` always fetched depth before checking
+    // `dofShouldRun`, so an aperture-0 DOF-only layer still requested/held its depth map;
+    // folding `dofShouldRun` in here would skip that fetch and regress it.
+    const wantDofMaybe = !!dof && dofAvailable()
+    if (!wantRelight && !wantDofMaybe) return gpuMemo
 
     const depth = depthImageFor(dofRef!)
     if (!depth) { requestDepth(dofRef!); return gpuMemo }
+
+    const wantDof = wantDofMaybe && dofShouldRun(dof!, true)
+    if (!wantRelight && !wantDof) return gpuMemo
 
     const box = localLayerBox(measureCtx(), layer, W, H, wiredLive)
     // A neon brush material's halo reaches past the box on every side (0 for everything else,
