@@ -287,6 +287,19 @@ export const EFFECT_LABELS: Record<EffectKind, string> = {
   drop_shadow: 'Drop shadow',
 }
 
+/** How the add menu groups the kinds. Menu-only: the pipeline still runs in EFFECT_ORDER.
+ *  Every kind sits in exactly one group (unit-tested), so a new kind must be placed here. */
+export const EFFECT_MENU_GROUPS: readonly { label: string; kinds: readonly EffectKind[] }[] = [
+  { label: 'Light & shadow', kinds: ['drop_shadow', 'outer_glow', 'inner_shadow', 'inner_glow', 'bloom', 'halation', 'vignette'] },
+  { label: 'Colour', kinds: ['adjust', 'levels', 'posterise', 'threshold', 'invert', 'duotone', 'gradientMap', 'color_overlay', 'gradient_overlay'] },
+  { label: 'Blur', kinds: ['layer_blur', 'directional_blur', 'radial_blur', 'zoom_blur'] },
+  { label: 'Edges', kinds: ['feather', 'diffused_edge', 'torn_edge', 'rough_edge', 'stroke_from_alpha'] },
+  { label: 'Print & texture', kinds: ['grain', 'ink_bleed', 'risograph', 'photocopy', 'letterpress', 'spot_uv'] },
+  { label: 'Shape', kinds: GEOMETRY_KINDS },
+  { label: 'Shader', kinds: ['shader'] },
+  { label: 'Behind', kinds: ['background_blur', 'backdrop_shader', 'backdrop_luminance_mask', 'dof'] },
+]
+
 const ORDER_INDEX = new Map<string, number>(EFFECT_ORDER.map((k, i) => [k, i]))
 
 export const isEffectKind = (v: unknown): v is EffectKind =>

@@ -48,6 +48,15 @@ export const MOTION_TREATMENT_KINDS = ['velocityBlur', 'ghostTrails'] as const
  *  the restyle sub-loop run, so a scene with none is byte-identical (mirrors the S3/S6 gates). */
 export const RESTYLE_TREATMENT_KINDS = ['aiRestyle'] as const
 export const TREATMENT_KINDS = [...MASKED_TREATMENT_KINDS, ...EDGE_TREATMENT_KINDS, ...BUFFER_TREATMENT_KINDS, ...FINISH_TREATMENT_KINDS, ...MOTION_TREATMENT_KINDS, ...RESTYLE_TREATMENT_KINDS] as const
+/** How the add menu groups the families — plain names for the user, menu-only. */
+export const TREATMENT_MENU_GROUPS: readonly { label: string; kinds: readonly TreatmentKind[] }[] = [
+  { label: 'Look', kinds: MASKED_TREATMENT_KINDS },
+  { label: 'Edges', kinds: EDGE_TREATMENT_KINDS },
+  { label: 'Drawn', kinds: BUFFER_TREATMENT_KINDS },
+  { label: 'Surface', kinds: FINISH_TREATMENT_KINDS },
+  { label: 'Trails', kinds: MOTION_TREATMENT_KINDS },
+  { label: 'AI', kinds: RESTYLE_TREATMENT_KINDS },
+]
 export type MaskedTreatmentKind = typeof MASKED_TREATMENT_KINDS[number]
 export type EdgeTreatmentKind = typeof EDGE_TREATMENT_KINDS[number]
 export type BufferTreatmentKind = typeof BUFFER_TREATMENT_KINDS[number]

@@ -10,12 +10,13 @@ import { computed, ref, nextTick, onBeforeUnmount } from 'vue'
 import { Box, Lightbulb, Folder, Sticker, ChevronRight, ChevronDown, Eye, EyeOff, Copy, Trash2, RotateCcw, Plus, Pencil } from 'lucide-vue-next'
 import type { SceneObject } from '~/lib/scene3d/config'
 import { childrenOf } from '~/lib/scene3d/hierarchy'
-import { TREATMENT_KINDS, TREATMENT_LABELS, treatmentsOf, isTreatmentHost, isFinishKind, canTakeFinish, type TreatmentKind } from '~/lib/scene3d/treatments'
+import { TREATMENT_MENU_GROUPS, TREATMENT_LABELS, treatmentsOf, isTreatmentHost, isFinishKind, canTakeFinish, type TreatmentKind } from '~/lib/scene3d/treatments'
 import {
   MODIFIER_KINDS, MODIFIER_LABELS, modifierStackOf, isPinnedModifier, type ModifierKind,
 } from '~/lib/scene3d/modifierStack'
 import Scene3DTreatmentRow, { TREATMENT_ICONS } from './Scene3DTreatmentRow.vue'
 import Scene3DModifierRow, { MODIFIER_ICONS } from './Scene3DModifierRow.vue'
+import GroupedAddMenu, { type AddMenuGroup } from './GroupedAddMenu.vue'
 
 const props = defineProps<{
   object: SceneObject
@@ -96,7 +97,7 @@ const icon = computed(() =>
 // ── Add-treatment menu. Teleported to body: the Objects list scrolls (overflow-y-auto),
 // which would clip an absolutely positioned popover. Closes on any outside pointerdown.
 const menuOpen = ref(false)
-const MENU_W = 176 // w-44
+const MENU_W = 208 // w-52
 const menuPos = ref({ top: 0, left: 0, maxHeight: 0 })
 const addBtn = ref<HTMLButtonElement | null>(null)
 function onOutside(e: PointerEvent): void {
@@ -142,6 +143,31 @@ function pickModifier(kind: ModifierKind): void {
   closeMenu()
 }
 onBeforeUnmount(closeMenu)
+/** Treatment families under plain names, then Modifiers (primitives only). A finish can never
+ *  sit on a GLB, so it is left out there rather than greyed; a second one-per-object modifier
+ *  is greyed with its reason. Modifier ids are prefixed so they never collide with a treatment. */
+const menuGroups = computed<AddMenuGroup[]>(() => {
+  const groups: AddMenuGroup[] = TREATMENT_MENU_GROUPS.map(g => ({
+    label: g.label,
+    items: g.kinds.filter(k => !finishDisabled(k)).map(k => ({
+      id: k, kind: k, label: TREATMENT_LABELS[k], icon: TREATMENT_ICONS[k], testid: 'add-treatment-item',
+    })),
+  })).filter(g => g.items.length)
+  if (isModifierHost.value) {
+    groups.push({
+      label: 'Modifiers',
+      items: MODIFIER_KINDS.map(k => ({
+        id: `mod:${k}`, kind: k, label: MODIFIER_LABELS[k], icon: MODIFIER_ICONS[k], testid: 'add-modifier-item',
+        disabled: pinnedPresent(k) || undefined, title: pinnedPresent(k) ? 'Already added — only one is allowed' : undefined,
+      })),
+    })
+  }
+  return groups
+})
+function onMenuPick(id: string): void {
+  if (id.startsWith('mod:')) pickModifier(id.slice(4) as ModifierKind)
+  else pick(id as TreatmentKind)
+}
 
 // ── Drag-reorder within THIS object's treatment list only.
 const dragFrom = ref<string | null>(null)
@@ -197,32 +223,11 @@ function onModDropOn(objectId: string, modifierId: string): void {
       <button type="button" class="opacity-0 group-hover:opacity-70" @click.stop="emit('remove', object.id)"><Trash2 class="h-3.5 w-3.5" /></button>
     </div>
     <Teleport to="body">
-      <div v-if="menuOpen" data-treatment-menu
-        class="fixed z-[200] w-44 overflow-y-auto overscroll-contain rounded-lg border border-white/10 bg-[#161616] p-1 shadow-2xl"
-        :style="{ top: `${menuPos.top}px`, left: `${menuPos.left}px`, maxHeight: `${menuPos.maxHeight}px` }" @pointerdown.stop>
-        <div class="px-2 pt-0.5 pb-1 text-[10px] font-medium uppercase tracking-wide text-white/35">Treatments</div>
-        <button v-for="kind in TREATMENT_KINDS" :key="kind" type="button" data-testid="add-treatment-item" :data-kind="kind"
-          :disabled="finishDisabled(kind)"
-          class="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-[12px] transition-colors cursor-pointer"
-          :class="finishDisabled(kind) ? 'text-white/25 cursor-not-allowed' : 'text-white/80 hover:bg-white/10 hover:text-white'"
-          :title="finishDisabled(kind) ? 'Finishes only work on primitive shapes' : ''"
-          @click.stop="pick(kind)">
-          <component :is="TREATMENT_ICONS[kind]" class="h-3.5 w-3.5 opacity-70" />
-          <span>{{ TREATMENT_LABELS[kind] }}</span>
-        </button>
-        <template v-if="isModifierHost">
-          <div class="mt-1 border-t border-white/10 px-2 pt-1.5 pb-1 text-[10px] font-medium uppercase tracking-wide text-white/35">Modifiers</div>
-          <button v-for="kind in MODIFIER_KINDS" :key="`mod-${kind}`" type="button" data-testid="add-modifier-item" :data-kind="kind"
-            :disabled="pinnedPresent(kind)"
-            class="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-[12px] transition-colors cursor-pointer"
-            :class="pinnedPresent(kind) ? 'text-white/25 cursor-not-allowed' : 'text-white/80 hover:bg-white/10 hover:text-white'"
-            :title="pinnedPresent(kind) ? 'Already added — only one is allowed' : ''"
-            @click.stop="pickModifier(kind)">
-            <component :is="MODIFIER_ICONS[kind]" class="h-3.5 w-3.5 opacity-70" />
-            <span>{{ MODIFIER_LABELS[kind] }}</span>
-          </button>
-        </template>
-      </div>
+      <GroupedAddMenu v-if="menuOpen" data-treatment-menu
+        class="fixed z-[200] w-52"
+        :style="{ top: `${menuPos.top}px`, left: `${menuPos.left}px`, maxHeight: `${menuPos.maxHeight}px` }"
+        :groups="menuGroups" placeholder="Search"
+        @pointerdown.stop @pick="onMenuPick" @close="closeMenu" />
     </Teleport>
     <template v-if="expanded">
       <Scene3DTreatmentRow v-for="t in treatments" :key="t.id"

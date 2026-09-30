@@ -773,7 +773,8 @@ async function openFxMenuFirst(page: Page): Promise<void> {
   const btn = page.locator('[data-testid="add-effect"]').first()
   await btn.hover()
   await btn.click()
-  await expect(page.locator('[data-testid="add-effect-item"][data-kind="trim"]')).toBeVisible()
+  // Grain is offered on every layer kind; trim is left out of an image's menu.
+  await expect(page.locator('[data-testid="add-effect-item"][data-kind="grain"]')).toBeVisible()
 }
 
 async function seedOne(page: Page, layer: Record<string, unknown>): Promise<void> {
@@ -781,19 +782,17 @@ async function seedOne(page: Page, layer: Record<string, unknown>): Promise<void
 }
 
 test.describe('Frame geometry effects — menu gating + inspector dials (F2 Task 6)', () => {
-  test('greyed on an image layer, with a "needs a vector shape" reason — except warp', async ({ page }) => {
+  test('left out of an image layer\'s menu — except warp', async ({ page }) => {
     await openCompositor(page)
     await seedOne(page, { id: 'i1', kind: 'image', x: 0.5, y: 0.5, w: 0.4, h: 0.4, rotation: 0, opacity: 1, src: TINY_PNG })
     await openFxMenuFirst(page)
-    // Every outline-only geometry kind is greyed on an image; WARP is the one kind that also
-    // runs on raster layers (F3 4b — pixel-domain mesh warp), so it stays enabled.
+    // An image can never take an outline-only geometry kind, so the menu leaves them out; WARP is
+    // the one kind that also runs on raster layers (F3 4b — pixel-domain mesh warp).
     for (const k of GEOMETRY_KINDS) {
       const item = page.locator(`[data-testid="add-effect-item"][data-kind="${k}"]`)
       if (k === 'warp') await expect(item, k).toBeEnabled()
-      else await expect(item, k).toBeDisabled()
+      else await expect(item, k).toHaveCount(0)
     }
-    await expect(page.locator('[data-testid="add-effect-item"][data-kind="trim"]'))
-      .toHaveAttribute('title', /vector shape/)
     // A pixel effect stays offered — only geometry is gated on the outline.
     await expect(page.locator('[data-testid="add-effect-item"][data-kind="grain"]')).toBeEnabled()
   })
@@ -1337,11 +1336,11 @@ test.describe('Frame geometry effects — boolean / combine shapes (F3 Task 2)',
     await expect(page.locator('[data-testid="add-effect-item"][data-kind="boolean"]')).toBeEnabled()
   })
 
-  test('the add menu greys boolean on an image (no outline)', async ({ page }) => {
+  test('the add menu leaves boolean out on an image (no outline)', async ({ page }) => {
     await openCompositor(page)
     await seedOne(page, { id: 'i1', kind: 'image', x: 0.5, y: 0.5, w: 0.4, h: 0.4, rotation: 0, opacity: 1, src: TINY_PNG })
     await openFxMenuFirst(page)
-    await expect(page.locator('[data-testid="add-effect-item"][data-kind="boolean"]')).toBeDisabled()
+    await expect(page.locator('[data-testid="add-effect-item"][data-kind="boolean"]')).toHaveCount(0)
   })
 })
 
@@ -1413,11 +1412,11 @@ test.describe('Frame geometry effects — morph / morph to shape (F3 Task 3)', (
     await expect(page.locator('[data-testid="add-effect-item"][data-kind="morph"]')).toBeEnabled()
   })
 
-  test('the add menu greys morph on an image (no outline)', async ({ page }) => {
+  test('the add menu leaves morph out on an image (no outline)', async ({ page }) => {
     await openCompositor(page)
     await seedOne(page, { id: 'i1', kind: 'image', x: 0.5, y: 0.5, w: 0.4, h: 0.4, rotation: 0, opacity: 1, src: TINY_PNG })
     await openFxMenuFirst(page)
-    await expect(page.locator('[data-testid="add-effect-item"][data-kind="morph"]')).toBeDisabled()
+    await expect(page.locator('[data-testid="add-effect-item"][data-kind="morph"]')).toHaveCount(0)
   })
 })
 
@@ -1504,14 +1503,14 @@ test.describe('Frame geometry effects — long shadow (F3 Task 5)', () => {
     expect(centreAfter.b).toBeGreaterThan(220)
   })
 
-  test('the add menu offers long shadow on a rect and greys it on an image', async ({ page }) => {
+  test('the add menu offers long shadow on a rect and leaves it out on an image', async ({ page }) => {
     await openCompositor(page)
     await addRect(page)
     await openFxMenuFirst(page)
     await expect(page.locator('[data-testid="add-effect-item"][data-kind="long_shadow"]')).toBeEnabled()
     await seedOne(page, { id: 'i1', kind: 'image', x: 0.5, y: 0.5, w: 0.4, h: 0.4, rotation: 0, opacity: 1, src: TINY_PNG })
     await openFxMenuFirst(page)
-    await expect(page.locator('[data-testid="add-effect-item"][data-kind="long_shadow"]')).toBeDisabled()
+    await expect(page.locator('[data-testid="add-effect-item"][data-kind="long_shadow"]')).toHaveCount(0)
   })
 })
 
@@ -1570,14 +1569,14 @@ test.describe('Frame geometry effects — shatter (F3 Task 6)', () => {
     expect(after).toBe(before)
   })
 
-  test('the add menu offers shatter on a rect and greys it on an image', async ({ page }) => {
+  test('the add menu offers shatter on a rect and leaves it out on an image', async ({ page }) => {
     await openCompositor(page)
     await addRect(page)
     await openFxMenuFirst(page)
     await expect(page.locator('[data-testid="add-effect-item"][data-kind="shatter"]')).toBeEnabled()
     await seedOne(page, { id: 'i1', kind: 'image', x: 0.5, y: 0.5, w: 0.4, h: 0.4, rotation: 0, opacity: 1, src: TINY_PNG })
     await openFxMenuFirst(page)
-    await expect(page.locator('[data-testid="add-effect-item"][data-kind="shatter"]')).toBeDisabled()
+    await expect(page.locator('[data-testid="add-effect-item"][data-kind="shatter"]')).toHaveCount(0)
   })
 })
 

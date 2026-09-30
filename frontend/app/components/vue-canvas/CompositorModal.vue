@@ -221,9 +221,10 @@ import type { OwnedMaps } from '~/lib/compositor/recolour/imageMap'
 import PostEffectsControls, { PANEL_EFFECT_KINDS } from '~/components/vue-canvas/PostEffectsControls.vue'
 import CompositorEffectRow from '~/components/vue-canvas/compositor/CompositorEffectRow.vue'
 import CompositorStrokeRow from '~/components/vue-canvas/compositor/CompositorStrokeRow.vue'
+import GroupedAddMenu, { type AddMenuGroup, type AddMenuItem } from '~/components/vue-canvas/studio/GroupedAddMenu.vue'
 import ShapeStrokeRow from '~/components/vue-canvas/compositor/ShapeStrokeRow.vue'
 import {
-  EFFECT_ORDER, EFFECT_LABELS, isPinnedKind, isGeometryKind, effectStackOf, writeStackToLayer,
+  EFFECT_ORDER, EFFECT_LABELS, EFFECT_MENU_GROUPS, isPinnedKind, isGeometryKind, effectStackOf, writeStackToLayer,
   addEffect, removeEffect, duplicateEffect, reorderEffect, canReorder,
   type EffectInstance, type EffectKind,
 } from '~/lib/compositor/effectStack'
@@ -3105,15 +3106,16 @@ function onFxMenuOutside(ev: PointerEvent) {
 }
 /** One menu item's height, and the menu's own width (`w-48`), for the viewport clamp. */
 const FX_MENU_ITEM_H = 30
-const FX_MENU_W = 192
+const FX_MENU_W = 208
 function openFxMenu(layerId: string, ev: MouseEvent) {
   const r = (ev.currentTarget as HTMLElement).getBoundingClientRect()
   // Keep the whole menu on screen: flip it above the button when the full list would run off
   // the bottom (a layer near the end of a long panel), and pull it left off the right edge.
   // The stroked kinds get an extra "Add outline" entry plus its separating rule.
   const l = layerById(layerId)
+  // Rough full height: every row plus a heading per group plus the search box.
   const extra = l && strokeSupportsStack(l.kind) ? FX_MENU_ITEM_H + 9 : 0
-  const h = EFFECT_ORDER.length * FX_MENU_ITEM_H + extra + 8
+  const h = (EFFECT_ORDER.length + EFFECT_MENU_GROUPS.length) * FX_MENU_ITEM_H + extra + 48
   // The full list is now taller than a short viewport (F3 added five geometry kinds), so the menu
   // must be able to SCROLL rather than run off-screen. Open on whichever side of the button has
   // more room, and cap the height to that room — `maxHeight` drives the container's overflow.
@@ -3158,37 +3160,47 @@ const fxMenuOffersStroke = computed(() => {
   const l = fxMenuLayerId.value ? layerById(fxMenuLayerId.value) : null
   return !!l && strokeSupportsStack(l.kind)
 })
-/** A pinned kind already on the layer cannot be added twice; orderable kinds always can.
- *  Depth of field is the one kind the LAYER can refuse: without a depth map it has nothing
- *  to defocus against, so offering it would add a dead effect. */
-function fxKindDisabled(kind: EffectKind): boolean {
+/** How the open plus menu offers a kind. HIDDEN when this kind of layer can never take it (a
+ *  geometry effect on an image, depth of field on text); GREYED with a reason when the layer
+ *  could take it after a change (decorated text, an image without a depth map, a pinned kind
+ *  already on the layer). */
+function fxKindState(kind: EffectKind): { hidden?: true; disabled?: true; title?: string } {
   const l = fxMenuLayerId.value ? layerById(fxMenuLayerId.value) : null
-  if (!l) return false
-  if (kind === 'dof' && !localDepthSource(l)) return true
+  if (!l) return {}
+  if (kind === 'dof' && !localDepthSource(l)) {
+    return l.kind === 'image' || l.kind === 'wired'
+      ? { disabled: true, title: 'Depth of field needs an image with a depth map' }
+      : { hidden: true }
+  }
   // Geometry effects transform a vector outline before it rasterises: a layer with no outline
-  // (image / wired / brush / line / deal / scatter / mosaic) or decorated text can't take one.
-  // WARP is the exception (F3 4b): on a raster layer (image / wired / brush) it runs as a
-  // pixel-domain mesh warp of the content, so it stays enabled there even though canTakeGeometry
-  // is false.
-  if (isGeometryKind(kind) && !canTakeGeometry(l as LocalLayer)) {
-    if (!(kind === 'warp' && canWarpRaster(l as LocalLayer))) return true
-  }
-  return isPinnedKind(kind) && layerStack(l).some(e => e.type === kind)
-}
-/** Why a greyed menu entry is greyed — depth of field and the geometry kinds each have a
- *  human reason worth spelling out. */
-function fxKindDisabledTitle(kind: EffectKind): string | undefined {
-  const l = fxMenuLayerId.value ? layerById(fxMenuLayerId.value) : null
-  if (!l) return undefined
-  if (kind === 'dof' && !localDepthSource(l)) return 'Depth of field needs an image with a depth map'
-  if (isGeometryKind(kind) && !canTakeGeometry(l as LocalLayer)) {
-    // Warp on a raster layer is enabled (pixel-domain mesh warp) — no greyed reason.
-    if (kind === 'warp' && canWarpRaster(l as LocalLayer)) return undefined
+  // (image / wired / brush / line / deal / scatter / mosaic) can't take one; decorated text
+  // could once its decoration is off. WARP is the exception (F3 4b): on a raster layer (image /
+  // wired / brush) it runs as a pixel-domain mesh warp of the content.
+  if (isGeometryKind(kind) && !canTakeGeometry(l as LocalLayer) && !(kind === 'warp' && canWarpRaster(l as LocalLayer))) {
     return l.kind === 'text'
-      ? 'Underlined or struck-through text can\'t take geometry effects'
-      : 'Geometry effects need a vector shape'
+      ? { disabled: true, title: 'Underlined or struck-through text can\'t take geometry effects' }
+      : { hidden: true }
   }
-  return undefined
+  if (isPinnedKind(kind) && layerStack(l).some(e => e.type === kind))
+    return { disabled: true, title: 'Already added — only one is allowed' }
+  return {}
+}
+const fxMenuGroups = computed<AddMenuGroup[]>(() => {
+  if (!fxMenuLayerId.value) return []
+  return EFFECT_MENU_GROUPS.map(g => ({
+    label: g.label,
+    items: g.kinds.flatMap((kind) => {
+      const st = fxKindState(kind)
+      return st.hidden ? [] : [{ id: kind, kind, label: EFFECT_LABELS[kind], testid: 'add-effect-item', disabled: st.disabled, title: st.title }]
+    }),
+  })).filter(g => g.items.length)
+})
+/** Outlines come first: on a stroked layer it is the entry most often wanted. */
+const fxMenuLead = computed<AddMenuItem[]>(() =>
+  fxMenuOffersStroke.value ? [{ id: '__outline', label: 'Add outline', testid: 'add-stroke' }] : [])
+function onFxMenuPick(id: string) {
+  if (id === '__outline') { if (fxMenuLayerId.value) pickStrokeAdd(fxMenuLayerId.value) }
+  else pickFxKind(id as EffectKind)
 }
 onBeforeUnmount(closeFxMenu)
 
@@ -13064,23 +13076,11 @@ defineExpose({ editor, layoutGridResolved, layoutGrid, overlayGrid, viewLayoutGr
     <!-- Add-effect menu. Teleported because the layer panel scrolls and would clip an
          absolutely positioned popover. -->
     <Teleport to="body">
-      <div v-if="fxMenuLayerId" data-fx-menu
-        class="fixed z-[200] w-48 overflow-y-auto overscroll-contain rounded-lg border border-white/10 bg-[#161616] p-1 shadow-2xl"
-        :style="{ top: `${fxMenuPos.top}px`, left: `${fxMenuPos.left}px`, maxHeight: `${fxMenuPos.maxHeight}px` }" @pointerdown.stop>
-        <!-- Outlines come first: on a stroked layer it is the entry most often wanted, and
-             the rule keeps it from reading as one more effect kind. -->
-        <template v-if="fxMenuOffersStroke">
-          <button type="button" data-testid="add-stroke"
-            class="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-[12px] text-white/80 transition-colors hover:bg-white/10 hover:text-white cursor-pointer"
-            @click.stop="pickStrokeAdd(fxMenuLayerId!)">Add outline</button>
-          <div class="my-1 h-px bg-white/10" />
-        </template>
-        <button v-for="kind in EFFECT_ORDER" :key="kind" type="button"
-          data-testid="add-effect-item" :data-kind="kind" :disabled="fxKindDisabled(kind)"
-          :title="fxKindDisabledTitle(kind)"
-          class="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-[12px] text-white/80 transition-colors hover:bg-white/10 hover:text-white disabled:opacity-30 disabled:cursor-default disabled:hover:bg-transparent disabled:hover:text-white/80 cursor-pointer"
-          @click.stop="pickFxKind(kind)">{{ EFFECT_LABELS[kind] }}</button>
-      </div>
+      <GroupedAddMenu v-if="fxMenuLayerId" data-fx-menu
+        class="fixed z-[200] w-52"
+        :style="{ top: `${fxMenuPos.top}px`, left: `${fxMenuPos.left}px`, maxHeight: `${fxMenuPos.maxHeight}px` }"
+        :groups="fxMenuGroups" :lead="fxMenuLead" placeholder="Search"
+        @pointerdown.stop @pick="onFxMenuPick" @close="closeFxMenu" />
     </Teleport>
 
     <!-- Right-click menu for an image layer. CanvasContextMenu self-teleports to
