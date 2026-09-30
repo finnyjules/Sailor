@@ -3,13 +3,23 @@
  * Relight layer effect (stage 2, Task 1). Replaces the dev-only prototype
  * route `depth/moge-normals.post.ts` (untracked, deleted by this task).
  *
- * Body:    { filename, subfolder?, type? } — same addressing as /api/depth/estimate.
+ * Body:    { filename, subfolder?, type?, peek? } — same addressing as /api/depth/estimate.
  * Returns: { normalsFilename, subfolder: 'sailor_depth', cached }
  *          503 { off: true }  — kill switch (NUXT_RELIGHT_SURFACES=off), or a hosted
  *                               unpriced/unmetered refusal: the client stays on local depth
  *          402 { message }    — hosted, not enough credits (also quiet on the client)
  *          503 { retryLater } — fal had not finished within the 600 s poll
  *          4xx/5xx { message } — path/ownership/provider failures
+ *
+ * `peek: true` (2026-09-30, "Read shape" button): a FREE probe — same gates (kill switch,
+ * rate limit, path safety, ownership) and the same cache check, but it NEVER calls fal. A
+ * cached photo answers exactly like a normal read (`{ normalsFilename, subfolder, cached:
+ * true }`); an uncached one answers 200 `{ absent: true }` instead of starting a read. The
+ * Frame editor peeks every visible Relight layer's photo for free so an already-cached photo
+ * keeps lighting automatically; an explicit "Read shape" click is what starts the paid read.
+ * Peeks share the kill switch and ownership gates with a real read (so they can't be used to
+ * probe files that aren't the caller's own) but use a separate, more generous rate-limit
+ * bucket — they cost nothing and the Frame editor calls one per visible Relight photo.
  *
  * One read per photo at a time: a second request for a photo already being read
  * waits for that read and answers `cached: true` (free — it made no call). The
@@ -145,9 +155,11 @@ export default defineEventHandler(async (event) => {
     return { off: true }
   }
 
-  assertRateLimit(event, 'depth-surfaces', 20)
+  const body = await readBody<{ filename?: string; subfolder?: string; type?: string; peek?: boolean }>(event)
+  const peek = body?.peek === true
 
-  const body = await readBody<{ filename?: string; subfolder?: string; type?: string }>(event)
+  assertRateLimit(event, peek ? 'depth-surfaces-peek' : 'depth-surfaces', peek ? 120 : 20)
+
   const root = assetType(body?.type)
   if (!root) throw createError({ statusCode: 400, message: `unknown asset type: ${body?.type}` })
   const rel = safeAssetRelPath(body?.filename ?? '', body?.subfolder)
@@ -167,6 +179,9 @@ export default defineEventHandler(async (event) => {
   const name = `moge_${depthCacheKey(bytes)}.png`
   const outPath = join(cacheDir, name)
   if (await exists(outPath)) return { normalsFilename: name, subfolder: CACHE_SUBDIR, cached: true }
+
+  // A peek never calls fal: nothing cached means "absent", not a read.
+  if (peek) return { absent: true }
 
   const ext = rel.split('.').pop()?.toLowerCase() ?? 'png'
 

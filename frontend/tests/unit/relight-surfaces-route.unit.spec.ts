@@ -324,6 +324,72 @@ describe('POST /api/depth/surfaces', () => {
   })
 })
 
+// 2026-09-30 (Read shape button): `peek: true` asks for free whether a photo already has
+// surfaces cached, and must never call fal.
+describe('POST /api/depth/surfaces — peek', () => {
+  it('peek on a cached file: returns the cached answer, no fetch', async () => {
+    setLocal()
+    const bytes = PNG_BYTES
+    await writeFile(join(root, 'input', 'photo.png'), bytes)
+    const name = `moge_${depthCacheKey(bytes)}.png`
+    await mkdir(join(root, 'input', 'sailor_depth'), { recursive: true })
+    await writeFile(join(root, 'input', 'sailor_depth', name), new Uint8Array([9]))
+
+    const fetchMock = vi.fn(async (url: string) => { throw new Error('unexpected fetch: ' + url) })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const res = await handler(makeEvent({ filename: 'photo.png', type: 'input', peek: true }))
+
+    expect(res).toEqual({ normalsFilename: name, subfolder: 'sailor_depth', cached: true })
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('peek on an uncached file: { absent: true }, no fetch, no fal call', async () => {
+    setLocal()
+    await writeFile(join(root, 'input', 'photo.png'), PNG_BYTES)
+    const fetchMock = vi.fn(async (url: string) => { throw new Error('unexpected fetch: ' + url) })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const res = await handler(makeEvent({ filename: 'photo.png', type: 'input', peek: true }))
+
+    expect(res).toEqual({ absent: true })
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('peek respects ownership: hosted, foreign file → 404, no fetch', async () => {
+    setHosted()
+    bindMeterContext({ userId: 'u1' })
+    await writeFile(join(root, 'input', 'photo.png'), PNG_BYTES)
+    __setInputUploadsDbForTests({
+      query: async (sql: string) => {
+        if (sql.includes('SELECT user_id FROM input_uploads')) return { rows: [{ user_id: 'u2' }] }
+        return { rows: [] }
+      },
+    })
+    const fetchMock = vi.fn(async (url: string) => { throw new Error('unexpected fetch: ' + url) })
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(handler(makeEvent({ filename: 'photo.png', type: 'input', peek: true }, 'u1')))
+      .rejects.toMatchObject({ statusCode: 404 })
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('peek respects the kill switch: 503 { off: true }, no fetch', async () => {
+    setLocal()
+    process.env.NUXT_RELIGHT_SURFACES = 'off'
+    await writeFile(join(root, 'input', 'photo.png'), PNG_BYTES)
+    const fetchMock = vi.fn(async (url: string) => { throw new Error('unexpected fetch: ' + url) })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const event = makeEvent({ filename: 'photo.png', type: 'input', peek: true })
+    const res = await handler(event)
+
+    expect(res).toEqual({ off: true })
+    expect(event.node.res.statusCode).toBe(503)
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+})
+
 describe('POST /api/depth/surfaces — final-review fixes', () => {
   const submits = (f: ReturnType<typeof vi.fn>) =>
     f.mock.calls.filter(([url]: [string]) => url === `https://queue.fal.run/${FAL_APP}`).length
