@@ -6,7 +6,8 @@
  * nothing else in the runner reads or writes files directly.
  */
 import { constants as fsConstants } from 'node:fs'
-import { copyFile, link, mkdir, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
+import { pipeline } from 'node:stream/promises'
+import { link, lstat, mkdir, open, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
 import { join, resolve, sep } from 'node:path'
 import { pyIntOf } from '#shared/runner/pyText'
 import { shortUserHash } from '../utils/meterGraphRun'
@@ -153,22 +154,44 @@ export function extFor(contentType: string | null, url: string, fallback: string
   return fallback
 }
 
+export const SAVE_NOT_A_FILE = 'This result isn’t a plain file, so it wasn’t saved'
+
 /**
- * Moves `src` to `dest` without ever replacing a file there: linked, then the
- * old name removed; across disks (or where links aren't allowed), copied
- * with COPYFILE_EXCL. EEXIST when
- * `dest` is taken.
+ * Moves `src` to `dest` without ever replacing a file there, `src` checked
+ * first (R5.2 fix round 1): a regular file, never a link or a folder
+ * (`lstat`), else SAVE_NOT_A_FILE. It is linked, then the old name removed,
+ * and the link must be that very file; across disks (or where links aren't
+ * allowed) it is copied through a no-follow open into a new file ('wx').
+ * EEXIST when `dest` is taken.
  */
 async function moveNoClobber(src: string, dest: string): Promise<void> {
-  try { await link(src, dest) }
+  const st = await lstat(src)
+  if (!st.isFile()) throw new Error(SAVE_NOT_A_FILE)
+  try {
+    await link(src, dest)
+    const made = await lstat(dest)
+    if (!made.isFile() || made.ino !== st.ino || made.dev !== st.dev) {
+      await rm(dest, { force: true })
+      throw new Error(SAVE_NOT_A_FILE)
+    }
+  }
   catch (e: any) {
     if (e?.code !== 'EXDEV' && e?.code !== 'EPERM' && e?.code !== 'ENOTSUP') throw e
-    try { await copyFile(src, dest, fsConstants.COPYFILE_EXCL) }
-    catch (c: any) {
-      // A copy that failed partway leaves nothing behind (a name that was taken is someone else's).
-      if (c?.code !== 'EEXIST') await rm(dest, { force: true })
-      throw c
+    const from = await open(src, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW)
+    try {
+      const fst = await from.stat()
+      if (!fst.isFile() || fst.ino !== st.ino) throw new Error(SAVE_NOT_A_FILE)
+      const to = await open(dest, 'wx')
+      try { await pipeline(from.createReadStream({ autoClose: false }), to.createWriteStream({ autoClose: false })) }
+      catch (c) {
+        // A copy that failed partway leaves nothing behind.
+        await to.close().catch(() => {})
+        await rm(dest, { force: true })
+        throw c
+      }
+      await to.close()
     }
+    finally { await from.close().catch(() => {}) }
   }
   await rm(src, { force: true })
 }
@@ -225,7 +248,8 @@ export function createEngineResultStore(o: { dirForType(type: string): string | 
     save: (bytes, so) => saveWith(p => writeFile(p, bytes, { flag: 'wx' }), so),
     saveFromPath: async (tmpPath, so) => {
       try { return await saveWith(p => moveNoClobber(tmpPath, p), so) }
-      finally { await rm(tmpPath, { force: true }) }
+      // A link or a folder refused is not followed or emptied: only a plain file left behind is removed.
+      finally { if (await lstat(tmpPath).then(st => st.isFile(), () => false)) await rm(tmpPath, { force: true }) }
     },
     async saveLivePreview(bytes, { nodeId, userId }) {
       const root = o.dirForType('temp')

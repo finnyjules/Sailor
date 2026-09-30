@@ -26,7 +26,6 @@
 import { rm, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { MEDIA_CAPS, type MediaCaps } from '#shared/runner/media'
-import { isHosted } from '../utils/deployMode'
 import type { FileAccess } from '../runner/fileAccess'
 import type { KeptBytes } from '../runner/keptBytes'
 import type { OutputFile, RunnerValue, SoundNote } from '../runner/types'
@@ -103,19 +102,27 @@ function soundFileOf(v: RunnerValue): OutputFile {
  */
 export async function readSound(v: RunnerValue, makerClass: string, io: SoundReadIO): Promise<DecodedSound> {
   const file = soundFileOf(v)
+  // Known gap (R5.2 review Minor 3, parked in the ledger): the bytes are verified, then the tool reopens the path.
   const path = await io.access.verifiedPath(file)
   return decodeAudio(path, {
     decoder: decoderOf(soundNoteOf(v, makerClass)),
     userId: io.userId, signal: io.signal,
     maxSamples: capsOf(io.hosted).soundSamples,
     roots: [io.access.rootOf(file)],
+    // The runner's own kept sound is read back under the cap it was kept under (soundSamples, above),
+    // not the upload caps (soundBytes, the length): its float WAV is 4 bytes a sample (fix round 1).
+    ...(file.type === 'kept' ? { kept: true as const } : {}),
   })
 }
 
-/** Keeps a sound the runner made, as a float WAV of its samples (read back 'exact', bit for bit). */
-export async function keepSound(runId: string, s: DecodedSound, kept: KeptBytes): Promise<RunnerValue> {
+/**
+ * Keeps a sound the runner made, as a float WAV of its samples (read back
+ * 'exact', bit for bit). `o.hosted`: the run's own (MediaValueIO.hosted).
+ */
+export async function keepSound(runId: string, s: DecodedSound, kept: KeptBytes, o: { hosted: boolean }): Promise<RunnerValue> {
   const n = s.channels[0]?.length ?? 0
-  if (s.channels.length * n > capsOf(isHosted()).soundSamples) throw new MediaError('tooLong')
+  if (s.channels.length * n > capsOf(o.hosted).soundSamples) throw new MediaError('tooLong')
+  await kept.checkRoom(runId)
   const bytes = floatWav(s)
   const work = await kept.workDir(runId)
   try {
@@ -136,10 +143,13 @@ export async function keepSound(runId: string, s: DecodedSound, kept: KeptBytes)
  */
 export async function readFrames(v: FramesValue, io: MediaValueIO, onFrame: (rgb: Uint8Array, i: number) => Promise<void>): Promise<void> {
   checkBatch(v.count, v.w, v.h, io.hosted)
+  // Known gap (R5.2 review Minor 3, parked in the ledger): the bytes are verified, then the tool reopens the path.
   const path = await io.access.verifiedPath(v.file)
   const got = await decodeFrames(path, {
     userId: io.userId, signal: io.signal, maxFrames: v.count,
     roots: [io.access.rootOf(v.file)],
+    // Judged above by the batch caps it was kept under, not the upload caps (videoBytes, the length).
+    kept: true,
     onFrame: (rgb, i) => onFrame(rgb, i),
   })
   if (got.count !== v.count || got.w !== v.w || got.h !== v.h) throw new MediaError('failed')
@@ -159,6 +169,7 @@ async function* cappedFrames(frames: AsyncIterable<Uint8Array>, w: number, h: nu
 /** Keeps a frame batch (rgb24 frames of w × h) as one FFV1 file for the run. */
 export async function keepFrames(runId: string, frames: AsyncIterable<Uint8Array>, w: number, h: number, io: MediaValueIO): Promise<FramesValue> {
   checkBatch(0, w, h, io.hosted)
+  await io.kept.checkRoom(runId)
   const work = await io.kept.workDir(runId)
   try {
     const out = join(work, 'frames.mkv')
@@ -201,6 +212,7 @@ export async function videoFileFor(v: RunnerValue, io: MediaValueIO, o: { metada
   if (v.kind === 'files') {
     const file = v.files[0]
     if (!file) throw new MediaError('noVideo')
+    // Known gap (R5.2 review Minor 3, parked in the ledger): the bytes are verified, then the tool reopens the path.
     return { path: await io.access.verifiedPath(file), temporary: false }
   }
   if (v.kind !== 'video') throw new MediaError('noVideo')
@@ -212,7 +224,9 @@ async function encodeMadeVideo(v: VideoValue, io: MediaValueIO, metadata: Record
   checkBatch(count, w, h, io.hosted)
   const fps = pyStreamRate(v.fps)
   const sound = v.sound ? await readSound({ kind: 'files', files: [v.sound.file], sound: v.sound.note }, '', io) : null
+  // Known gap (R5.2 review Minor 3, parked in the ledger): the bytes are verified, then the tool reopens the path.
   const framesPath = await io.access.verifiedPath(file)
+  await io.kept.checkRoom(io.runId)
   const work = await io.kept.workDir(io.runId)
   const out = join(work, 'video.mp4')
   try {

@@ -205,6 +205,13 @@ export function checkFilterGraph(graph: string): boolean {
   return true
 }
 
+/** `-r`'s value: `num/den` or a decimal, both positive. Exported for tests. */
+export function validRate(v: string): boolean {
+  const m = /^(\d{1,9})\/(\d{1,9})$/.exec(v)
+  if (m) return Number(m[1]) > 0 && Number(m[2]) > 0
+  return /^\d{1,9}(?:\.\d{1,9})?$/.test(v) && Number(v) > 0
+}
+
 /** `file:<absolute, normalised path>` strictly inside `dir`. */
 function fileInside(arg: string, dir: string | undefined): boolean {
   if (!dir || !arg.startsWith('file:')) return false
@@ -240,6 +247,8 @@ export function checkArgs(tool: 'ffmpeg' | 'ffprobe', args: readonly string[], o
       if (name === '-enable_drefs' && v !== '0') bad()
       if (name === '-stats_mux_pre' && !(v === 'pipe:3' && o.side)) bad()
       if (name === '-movflags' && !/^[+a-z_]+$/.test(v!)) bad()
+      // A rate only: a positive fraction or a positive decimal (R5.2 fix round 1).
+      if (name === '-r' && !validRate(v!)) bad()
       if (name === '-map_metadata' && !/^(?:-1|\d+)$/.test(v!)) bad()
       if (name === '-fflags' && v !== '+bitexact') bad()
       if (name === '-enc_time_base' && !/^\d+\/\d+$/.test(v!)) bad()

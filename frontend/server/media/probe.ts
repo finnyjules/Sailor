@@ -211,6 +211,14 @@ export interface ProbeOptions {
    * kinds' caps.
    */
   kind?: 'video' | 'sound'
+  /**
+   * R5.2 fix round 1: the file is the runner's own kept file (a frame batch or
+   * an exact sound, its sha256 verified), read back under the caps it was
+   * kept under (batchFrames/batchPixels, soundSamples: server/media/values.ts),
+   * not the upload caps (videoBytes, soundBytes and the lengths), which are
+   * for files a person brings in. The header caps are then not judged here.
+   */
+  kept?: true
 }
 
 /** The size, frame and stated-length caps, judged from the header alone (before any whole-file scan). */
@@ -285,7 +293,7 @@ export async function probeMedia(path: string, o: ProbeOptions): Promise<MediaPr
     containerDuration: Number.isFinite(secs) ? Math.round(secs * 1e6) : null,
     video, sound, bytes, videoPackets: null,
   }
-  const early = headerCapsWord(p, o.kind, isHosted())
+  const early = o.kept ? null : headerCapsWord(p, o.kind, isHosted())
   if (early) throw new MediaError(early)
   const scan: ProbeJobOptions = { userId: o.userId, signal: o.signal, route: o.route, timeoutMs: scanTimeoutMs(bytes) }
   const v = video[0]

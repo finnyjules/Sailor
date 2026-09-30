@@ -10,7 +10,7 @@
  * Let go at server start for runs no longer in progress (as ./heldBytes.ts).
  */
 import { createHash } from 'node:crypto'
-import { constants as fsConstants, createReadStream, statSync } from 'node:fs'
+import { constants as fsConstants, createReadStream, rmSync, statSync } from 'node:fs'
 import { copyFile, mkdir, mkdtemp, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -59,6 +59,14 @@ export interface KeptBytes {
   workDir(runId: string): Promise<string>
   /** The bytes a run keeps now (its kept files, not its work folders). */
   runBytes(runId: string): Promise<number>
+  /** The bytes in the run's work folders now (a tool's outputs before they are kept). */
+  workBytes(runId: string): Promise<number>
+  /**
+   * Throws KEPT_TOO_MUCH when the run already keeps its cap or more (kept
+   * files and work folders together): called before media work starts
+   * (`withRunCap`; a store without a cap never refuses).
+   */
+  checkRoom(runId: string): Promise<void>
 }
 
 /** The sha256 of a file, read as it streams. */
@@ -184,7 +192,44 @@ export function createFileKeptBytes(dir: string): KeptBytes {
       }
       return total
     },
+    async workBytes(runId) {
+      const d = runDir(runId)
+      let names: string[] = []
+      try { names = await readdir(d) }
+      catch { return 0 }
+      let total = 0
+      for (const n of names) {
+        if (!n.startsWith(WORK_PREFIX)) continue
+        let inner: string[] = []
+        try { inner = await readdir(join(d, n)) }
+        catch { continue }
+        for (const f of inner) {
+          try {
+            const st = await stat(join(d, n, f))
+            if (st.isFile()) total += st.size
+          }
+          catch {}
+        }
+      }
+      return total
+    },
+    async checkRoom() {},
   }
+}
+
+/** The memory stores' temporary folders, removed when the process exits (R5.2 fix round 1). */
+const memoryDiskDirs = new Set<string>()
+let memoryExitHook = false
+function removeMemoryDirsAtExit(dir: string): void {
+  memoryDiskDirs.add(dir)
+  if (memoryExitHook) return
+  memoryExitHook = true
+  process.once('exit', () => {
+    for (const d of memoryDiskDirs) {
+      try { rmSync(d, { recursive: true, force: true }) }
+      catch {}
+    }
+  })
 }
 
 /**
@@ -198,7 +243,10 @@ export function createMemoryKeptBytes(): KeptBytes {
   let disk: KeptBytes | null = null
   let diskDir: string | null = null
   const onDisk = async (): Promise<KeptBytes> => {
-    diskDir ??= await mkdtemp(join(tmpdir(), 'runner-kept-'))
+    if (!diskDir) {
+      diskDir = await mkdtemp(join(tmpdir(), 'runner-kept-'))
+      removeMemoryDirsAtExit(diskDir)
+    }
     disk ??= createFileKeptBytes(diskDir)
     return disk
   }
@@ -237,42 +285,86 @@ export function createMemoryKeptBytes(): KeptBytes {
       for (const [k, b] of m) if (k.split('/')[0] === runId) total += b.length
       return total
     },
+    async workBytes(runId) { return disk ? disk.workBytes(runId) : 0 },
+    async checkRoom() {},
   }
 }
 
 /**
  * The store with each run's kept total capped at `capOf()` bytes (R5.2:
- * MEDIA_CAPS.keptBytesPerRun, read at each put): a put that would pass it
- * fails with KEPT_TOO_MUCH (and a `putPath` lets its file go). The same bytes
- * `put` again cost nothing; a `putPath` is judged by its size alone. Two puts racing may both pass: the cap is a
- * server-health bound, not an exact one.
+ * MEDIA_CAPS.keptBytesPerRun, read at each put). Each run's total is kept in
+ * memory, seeded once by one scan of its folder, and moved on at each put
+ * under a per-run lock, so racing puts can't both pass (fix round 1). The
+ * run's work folders (tool outputs not yet kept) count toward the cap while
+ * they exist. A put that would pass the cap fails with KEPT_TOO_MUCH (and a
+ * `putPath` lets its file go); `checkRoom` refuses before the work when the
+ * run is already at or over it. The same bytes `put` again cost nothing; a
+ * `putPath` is counted by its size (a repeat of bytes already kept is counted
+ * again, which only makes the cap stricter: hashing a large file twice to
+ * spot one isn't worth it).
  */
 export function withRunCap(kept: KeptBytes, capOf: () => number): KeptBytes {
-  const check = async (runId: string, file: OutputFile, bytes: number): Promise<void> => {
-    const cap = capOf()
-    if (!Number.isFinite(cap)) return
-    if (await kept.exists(file)) return
-    if ((await kept.runBytes(runId)) + bytes > cap) throw new Error(KEPT_TOO_MUCH)
+  const totals = new Map<string, number>()
+  const locks = new Map<string, Promise<unknown>>()
+  /** `fn` run alone for this run: after every earlier put of it. */
+  const locked = <T>(runId: string, fn: () => Promise<T>): Promise<T> => {
+    const prev = locks.get(runId) ?? Promise.resolve()
+    const next = prev.then(fn, fn)
+    const tail = next.catch(() => {})
+    locks.set(runId, tail)
+    void tail.then(() => { if (locks.get(runId) === tail) locks.delete(runId) })
+    return next
   }
+  const totalOf = async (runId: string): Promise<number> => {
+    let t = totals.get(runId)
+    if (t === undefined) {
+      t = await kept.runBytes(runId)
+      totals.set(runId, t)
+    }
+    return t
+  }
+  const add = (runId: string, n: number) => totals.set(runId, (totals.get(runId) ?? 0) + n)
   return {
     ...kept,
     async put(runId, bytes, ext) {
-      await check(runId, keptFile(runId, bytes, ext), bytes.length)
-      return kept.put(runId, bytes, ext)
+      if (!Number.isFinite(capOf())) return kept.put(runId, bytes, ext)
+      const file = keptFile(runId, bytes, ext)
+      return locked(runId, async () => {
+        if (await kept.exists(file)) return kept.put(runId, bytes, ext)
+        const used = (await totalOf(runId)) + await kept.workBytes(runId)
+        if (used + bytes.length > capOf()) throw new Error(KEPT_TOO_MUCH)
+        const f = await kept.put(runId, bytes, ext)
+        add(runId, bytes.length)
+        return f
+      })
     },
     async putPath(runId, tmpPath, ext) {
-      if (Number.isFinite(capOf())) {
-        // Judged by size alone (hashing a large file twice to spot a repeat isn't worth it).
+      if (!Number.isFinite(capOf())) return kept.putPath(runId, tmpPath, ext)
+      return locked(runId, async () => {
+        let size: number
         try {
-          const size = (await stat(tmpPath)).size
-          if ((await kept.runBytes(runId)) + size > capOf()) throw new Error(KEPT_TOO_MUCH)
+          size = (await stat(tmpPath)).size
+          // The file itself is in a work folder: counted once, as the kept file it becomes.
+          const work = Math.max(0, (await kept.workBytes(runId)) - size)
+          if ((await totalOf(runId)) + work + size > capOf()) throw new Error(KEPT_TOO_MUCH)
         }
         catch (e) {
           await rm(tmpPath, { force: true })
           throw e
         }
-      }
-      return kept.putPath(runId, tmpPath, ext)
+        const f = await kept.putPath(runId, tmpPath, ext)
+        add(runId, size)
+        return f
+      })
+    },
+    async checkRoom(runId) {
+      const cap = capOf()
+      if (!Number.isFinite(cap)) return
+      if ((await totalOf(runId)) + await kept.workBytes(runId) >= cap) throw new Error(KEPT_TOO_MUCH)
+    },
+    async keepOnly(runIds) {
+      for (const id of [...totals.keys()]) if (!runIds.has(id)) totals.delete(id)
+      await kept.keepOnly(runIds)
     },
   }
 }

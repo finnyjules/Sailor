@@ -102,8 +102,8 @@ function parseStat(line: string): FrameStat | null {
 }
 
 /** The probe of a checked input: the caller's own (for this very file), or a fresh one. */
-async function probeFor(path: string, o: { userId: string | null; signal?: AbortSignal; roots: readonly string[]; probe?: MediaProbe }, kind: 'video' | 'sound'): Promise<MediaProbe> {
-  if (!o.probe) return probeMedia(path, { userId: o.userId, signal: o.signal, roots: o.roots, kind })
+async function probeFor(path: string, o: { userId: string | null; signal?: AbortSignal; roots: readonly string[]; probe?: MediaProbe; kept?: true }, kind: 'video' | 'sound'): Promise<MediaProbe> {
+  if (!o.probe) return probeMedia(path, { userId: o.userId, signal: o.signal, roots: o.roots, kind, ...(o.kept ? { kept: true as const } : {}) })
   if ((await resolveMediaInput(path, o.roots)) !== o.probe.path) throw new MediaError('unreadable')
   return o.probe
 }
@@ -122,9 +122,11 @@ export async function decodeFrames(path: string, o: {
   roots: readonly string[]
   /** A probe already made of this file (saves a second one). */
   probe?: MediaProbe
+  /** The runner's own kept batch (R5.2 fix round 1): no upload caps; the caller has judged the batch caps, and `maxFrames` holds. */
+  kept?: true
 }): Promise<{ count: number; w: number; h: number }> {
   const p = await probeFor(path, o, 'video')
-  const refused = mediaCapsWord(p, 'video', isHosted())
+  const refused = o.kept ? null : mediaCapsWord(p, 'video', isHosted())
   if (refused) throw new MediaError(refused)
   const v = p.video[0]!
   const { w, h } = v
@@ -296,9 +298,11 @@ export async function decodeAudio(path: string, o: {
   /** The folders the file must really be in (the person's own; `resolveMediaInput`). */
   roots: readonly string[]
   probe?: MediaProbe
+  /** The runner's own kept sound (R5.2 fix round 1): no upload caps; `maxSamples` (soundSamples) holds as it streams. */
+  kept?: true
 }): Promise<DecodedSound> {
   const p = await probeFor(path, o, 'sound')
-  const refused = mediaCapsWord(p, 'sound', isHosted())
+  const refused = o.kept ? null : mediaCapsWord(p, 'sound', isHosted())
   if (refused) throw new MediaError(refused)
   const k = (o.stream ?? (o.decoder === 'fltp' ? 'last' : 'first')) === 'last' ? p.sound.length - 1 : 0
   const s = p.sound[k]!

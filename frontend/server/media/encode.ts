@@ -65,7 +65,7 @@ export { OPENH264_FOR, PYAV_H264_DEFAULT, h264Args, type H264Quality } from './h
 export type VideoSource =
   /** rgb24 frames, each exactly w · h · 3 bytes. */
   | { kind: 'rgb'; w: number; h: number; frames: AsyncIterable<Uint8Array> }
-  /** A kept frame batch (`writeFfv1`). */
+  /** A kept frame batch (`writeFfv1`): the runner's own file, read without the upload caps (the caller judges the batch caps). */
   | { kind: 'ffv1'; path: string; w: number; h: number }
   /** Turntable's clips, joined. */
   | { kind: 'clips'; paths: string[]; dropFirstAfterFirst: true }
@@ -230,9 +230,10 @@ function rationalOk(r: Rational): boolean {
 }
 
 /** A checked video input's probe (the person's folders; the video caps). */
-async function probeVideoInput(path: string, o: { userId: string | null; signal?: AbortSignal; roots: readonly string[] }): Promise<MediaProbe> {
-  const p = await probeMedia(path, { userId: o.userId, signal: o.signal, roots: o.roots, kind: 'video' })
-  const refused = mediaCapsWord(p, 'video', isHosted())
+async function probeVideoInput(path: string, o: { userId: string | null; signal?: AbortSignal; roots: readonly string[]; kept?: true }): Promise<MediaProbe> {
+  const p = await probeMedia(path, { userId: o.userId, signal: o.signal, roots: o.roots, kind: 'video', ...(o.kept ? { kept: true as const } : {}) })
+  // A kept batch (the 'ffv1' input) is judged by the batch caps it was kept under, before this (R5.2 fix round 1).
+  const refused = o.kept ? null : mediaCapsWord(p, 'video', isHosted())
   if (refused) throw new MediaError(refused)
   return p
 }
@@ -320,7 +321,7 @@ export async function encodeVideo(o: EncodeVideoOptions): Promise<{ frames: numb
       videoMap = '[v]'
     }
     else if (input.kind === 'ffv1') {
-      const p = await probeVideoInput(input.path, { userId: o.userId, signal: o.signal, roots })
+      const p = await probeVideoInput(input.path, { userId: o.userId, signal: o.signal, roots, kept: true })
       const v = p.video[0]!
       if (v.w !== W || v.h !== H) throw new MediaError('sizeChanged')
       // `-r` as an input option: the kept batch's own stamps (FFV1_KEPT_RATE) are replaced by frames at
@@ -395,7 +396,9 @@ export async function encodeVideo(o: EncodeVideoOptions): Promise<{ frames: numb
 
     await runMedia({ tool: 'ffmpeg', args, userId: o.userId, signal: o.signal, stdin, workDir: work, cleanup: [out], timeoutMs: o.timeoutMs })
     if (input.kind === 'rgb' && counted.n === 0) throw new MediaError('noVideo')
-    const made = await probeMedia(out, { userId: o.userId, signal: o.signal, roots: [work], kind: 'video' })
+    // The job's own output, only counted here: not held to the upload caps (R5.2 fix round 1: a made
+    // video within the batch caps could pass videoBytes or videoSeconds and be refused after its encode).
+    const made = await probeMedia(out, { userId: o.userId, signal: o.signal, roots: [work], kind: 'video', kept: true })
     const frames = made.video[0]?.frames ?? counted.n
     await moveOut(out, o.out, o.outRoots)
     return { frames }

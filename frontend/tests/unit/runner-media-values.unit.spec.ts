@@ -13,7 +13,7 @@
  * the tools are missing.
  */
 import { createHash } from 'node:crypto'
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -33,7 +33,11 @@ import { createEngineResultStore } from '~~/server/runner/results'
 import { createFileAccess } from '~~/server/runner/fileAccess'
 import type { OutputFile, RunnerValue } from '~~/server/runner/types'
 import { decodeAudio, decodeFrames, type DecodedSound } from '~~/server/media/decode'
-import { PYAV_H264_DEFAULT, encodeVideo, pyStreamRate } from '~~/server/media/encode'
+import { FFV1_KEPT_RATE, PYAV_H264_DEFAULT, encodeVideo, pyStreamRate, writeFfv1 } from '~~/server/media/encode'
+import { mediaCapsWord, probeMedia, pyRawDuration } from '~~/server/media/probe'
+import { checkArgs, validRate } from '~~/server/media/run'
+import { SAVE_NOT_A_FILE } from '~~/server/runner/results'
+import type { KeptBytes } from '~~/server/runner/keptBytes'
 import {
   SOUND_DOWNLOAD_CLASSES, dropVideoFile, keepFrames, keepSound, madeVideoSoundCut, readFrames, readSound, soundNoteOf, videoFileFor,
   type MediaValueIO,
@@ -118,7 +122,7 @@ vi.mock('~~/server/runner/executors', async (importOriginal) => {
             const m = io.media!
             const frames = await media.keepFrames(m.runId, stream(makerFrames(i.w!, i.h!, i.count!, i.seed!)), i.w!, i.h!, m)
             if (n.class_type === 'TestFramesMaker') return { values: { 0: frames }, ui: null }
-            const sound = await media.keepSound(m.runId, tone(i.rate!, i.samples!), m.kept) as Extract<RunnerValue, { kind: 'files' }>
+            const sound = await media.keepSound(m.runId, tone(i.rate!, i.samples!), m.kept, { hosted: m.hosted }) as Extract<RunnerValue, { kind: 'files' }>
             const video: RunnerValue = {
               kind: 'video', frames: { file: frames.file, count: frames.count, w: frames.w, h: frames.h }, fps: i.fps!,
               sound: { file: sound.files[0]!, note: sound.sound! },
@@ -372,7 +376,7 @@ describe('sound notes', () => {
     const io = ioOf(k, rid(6))
     const odd = new Float32Array([0, -0, 1, -1, 3.5, -2, 1e-30, -1e-38, 1.401298464324817e-45, 3.4028234663852886e38, Math.fround(Math.PI)])
     const s: DecodedSound = { rate: 22050, channels: [Float32Array.from({ length: 5000 }, (_, i) => odd[i % odd.length]! * (i % 7 ? 1 : 0.25)), tone(22050, 5000).channels[1]!] }
-    const v = await keepSound(rid(6), s, k.kept)
+    const v = await keepSound(rid(6), s, k.kept, { hosted: false })
     expect(v).toMatchObject({ kind: 'files', sound: { decode: 'exact' } })
     const f = (v as Extract<RunnerValue, { kind: 'files' }>).files[0]!
     expect(f.type).toBe('kept')
@@ -380,7 +384,7 @@ describe('sound notes', () => {
     const back = await readSound(v, 'Anything', io)
     expect(back.rate).toBe(22050)
     expect(back.channels.map(ch => sha(new Uint8Array(ch.buffer, ch.byteOffset, ch.byteLength)))).toEqual(s.channels.map(ch => sha(new Uint8Array(ch.buffer, ch.byteOffset, ch.byteLength))))
-    expect(await keepSound(rid(6), s, k.kept)).toEqual(v)
+    expect(await keepSound(rid(6), s, k.kept, { hosted: false })).toEqual(v)
     // No work folders are left behind.
     expect(readdirSync(join(k.keptDir, rid(6)))).toEqual([f.filename])
   })
@@ -388,7 +392,7 @@ describe('sound notes', () => {
   it('keepSound refuses a sound over soundSamples before writing it', async () => {
     CAPS.over.local = { soundSamples: 100 }
     const kept = createMemoryKeptBytes()
-    await expect(keepSound(rid(7), tone(8000, 51), kept)).rejects.toThrow(MEDIA_WORDS.tooLong)
+    await expect(keepSound(rid(7), tone(8000, 51), kept, { hosted: false })).rejects.toThrow(MEDIA_WORDS.tooLong)
     expect(await kept.runBytes(rid(7))).toBe(0)
   })
 })
@@ -448,7 +452,7 @@ describe('frame batches and made videos', () => {
     const frames = makerFrames(32, 24, 5, 11)
     const fv = await keepFrames(rid(8), stream(frames), 32, 24, io)
     const s = tone(44100, 30000)
-    const sv = await keepSound(rid(8), s, k.kept) as Extract<RunnerValue, { kind: 'files' }>
+    const sv = await keepSound(rid(8), s, k.kept, { hosted: false }) as Extract<RunnerValue, { kind: 'files' }>
     const tags = { prompt: '{"1": {}}', workflow: '{"nodes": []}' }
     for (const [fps, sound] of [[12.5, true], [29.97, true], [24, false]] as const) {
       const v: RunnerValue = { kind: 'video', frames: { file: fv.file, count: 5, w: 32, h: 24 }, fps, sound: sound ? { file: sv.files[0]!, note: sv.sound! } : null }
@@ -567,6 +571,150 @@ describe('the engine hands the new kinds on', () => {
   })
 })
 
+// ── Fix round 1 ──────────────────────────────────────────────────────────────
+
+/** Runs `fn` as the hosted server (deployMode reads the Clerk key at each call). */
+async function asHosted<T>(fn: () => Promise<T>): Promise<T> {
+  const before = process.env.NUXT_CLERK_SECRET_KEY
+  process.env.NUXT_CLERK_SECRET_KEY = 'sk_test_r52'
+  try { return await fn() }
+  finally {
+    if (before === undefined) delete process.env.NUXT_CLERK_SECRET_KEY
+    else process.env.NUXT_CLERK_SECRET_KEY = before
+  }
+}
+
+describe('fix round 1: kept values are read back under the caps they were kept under (Important 1 and 2)', () => {
+  it('hosted, a sound just under soundSamples round-trips keepSound → readSound, although its float WAV is over soundBytes; a user’s own file is still held to soundBytes', LONG, async () => {
+    await requireMediaTools()
+    await asHosted(async () => {
+      // The upload caps set far below the kept WAV (80 KB, 1.25 s): the real cap path would refuse it.
+      CAPS.over.hosted = { soundSamples: 20_000, soundBytes: 1000, soundSeconds: 0.5 }
+      const k = kit({ hosted: true })
+      const io = ioOf(k, rid(20), true)
+      const s = tone(8000, 9_999)
+      expect(s.channels.length * 9_999).toBeLessThan(20_000)
+      const v = await keepSound(rid(20), s, k.kept, { hosted: true })
+      const back = await readSound(v, 'Anything', io)
+      expect(back.channels.map(ch => sha(new Uint8Array(ch.buffer, ch.byteOffset, ch.byteLength)))).toEqual(s.channels.map(ch => sha(new Uint8Array(ch.buffer, ch.byteOffset, ch.byteLength))))
+      // Just over soundSamples is refused before it is kept.
+      await expect(keepSound(rid(20), tone(8000, 10_001), k.kept, { hosted: true })).rejects.toThrow(MEDIA_WORDS.tooLong)
+      // The same bytes as a person's own file are held to the upload caps.
+      const f = (v as Extract<RunnerValue, { kind: 'files' }>).files[0]!
+      mkdirSync(join(k.root, 'input'), { recursive: true })
+      copyFileSync(join(k.keptDir, rid(20), f.filename), join(k.root, 'input', 'mine.wav'))
+      await expect(readSound({ kind: 'files', files: [{ filename: 'mine.wav', subfolder: '', type: 'input' }] }, 'LoadAudio', io)).rejects.toThrow(MEDIA_WORDS.tooBig)
+    })
+  })
+
+  it('hosted, a 600-frame batch round-trips keepFrames → readFrames and into a made video, although its FFV1 file is over videoBytes; a user’s own copy is still held to videoBytes', LONG, async () => {
+    await requireMediaTools()
+    await asHosted(async () => {
+      CAPS.over.hosted = { videoBytes: 1000, videoSeconds: 0.01 }
+      const k = kit({ hosted: true })
+      const io = ioOf(k, rid(21), true)
+      const frames = Array.from({ length: 600 }, (_, i) => smoothFrame(16, 16, i))
+      const v = await keepFrames(rid(21), stream(frames), 16, 16, io)
+      expect(v.count).toBe(600)
+      const got: string[] = []
+      await readFrames(v, io, async (rgb) => { got.push(sha(rgb)) })
+      expect(got).toEqual(frames.map(sha))
+      const made = await videoFileFor({ kind: 'video', frames: { file: v.file, count: 600, w: 16, h: 16 }, fps: 24, sound: null }, io)
+      expect((await probeMedia(made.path, { userId: null, roots: [k.kept.rootOf(rid(21))], kept: true })).video[0]!.frames).toBe(600)
+      await dropVideoFile(made)
+      // One frame over batchFrames is refused as it streams.
+      await expect(keepFrames(rid(21), stream([...frames, frames[0]!]), 16, 16, io)).rejects.toThrow(MEDIA_WORDS.tooManyFrames)
+      // The same file as a person's own video is held to the upload caps.
+      mkdirSync(join(k.root, 'input'), { recursive: true })
+      copyFileSync(join(k.keptDir, rid(21), v.file.filename), join(k.root, 'input', 'mine.mkv'))
+      await expect(decodeFrames(join(k.root, 'input', 'mine.mkv'), { userId: null, maxFrames: BIG, roots: [join(k.root, 'input')], onFrame: async () => {} })).rejects.toThrow(MEDIA_WORDS.tooBig)
+    })
+  }, 240_000)
+
+  it('a kept batch is stamped at FFV1_KEPT_RATE, so its length stays inside the video caps (fails at 1 fps: Minor 2)', LONG, async () => {
+    await requireMediaTools()
+    expect(FFV1_KEPT_RATE).toBe(1000)
+    CAPS.over.local = { videoSeconds: 1 }
+    const d = realpathSync(mkdtempSync(join(scratch, 'rate-')))
+    await writeFfv1({ frames: stream(makerFrames(8, 6, 4, 0)), w: 8, h: 6, out: join(d, 'b.mkv'), outRoots: [d], userId: null })
+    const p = await probeMedia(join(d, 'b.mkv'), { userId: null, roots: [d], kind: 'video' })
+    // At 1 fps this batch would read as 4 s, over the 1 s cap.
+    expect(pyRawDuration(p)!).toBeLessThan(0.01)
+    expect(mediaCapsWord(p, 'video', false)).toBeNull()
+  })
+})
+
+describe('fix round 1: -r takes a rate only (Minor 1)', () => {
+  it('a positive fraction or decimal; anything else refused before any process', () => {
+    for (const ok of ['24', '30000/1001', '12.5', '2997/100']) expect(validRate(ok), ok).toBe(true)
+    for (const bad of ['0', '0/1', '1/0', '0.0', '-24', 'abc', 'file:/etc/passwd', '24/', '1e3', ' 24', '24,1']) expect(validRate(bad), bad).toBe(false)
+    const base = ['-f', 'matroska', '-i', 'file:/tmp/x.mkv', '-f', 'null', 'pipe:1']
+    expect(() => checkArgs('ffmpeg', ['-r', '24', ...base])).not.toThrow()
+    expect(() => checkArgs('ffmpeg', ['-r', 'file:/x', ...base])).toThrow()
+    expect(() => checkArgs('ffmpeg', ['-r', '0', ...base])).toThrow()
+  })
+})
+
+describe('fix round 1: the run cap (Minors 4 and 5)', () => {
+  /** A file store counting its folder scans. */
+  function counted(dir: string): { kept: KeptBytes; scans: () => number } {
+    const inner = createFileKeptBytes(dir)
+    let n = 0
+    return { kept: { ...inner, runBytes: async (r) => { n++; return inner.runBytes(r) } }, scans: () => n }
+  }
+
+  it('keeps a running total seeded by one scan; racing puts can’t both pass', async () => {
+    const c = counted(mkdtempSync(join(scratch, 'cap-race-')))
+    const kept = withRunCap(c.kept, () => 10)
+    await kept.put(rid(30), new Uint8Array([1]), 'bin')
+    await kept.put(rid(30), new Uint8Array([2]), 'bin')
+    await kept.put(rid(30), new Uint8Array([3]), 'bin')
+    expect(c.scans()).toBe(1)
+    const race = await Promise.allSettled([kept.put(rid(30), new Uint8Array(4).fill(7), 'bin'), kept.put(rid(30), new Uint8Array(4).fill(8), 'bin')])
+    expect(race.map(r => r.status).sort()).toEqual(['fulfilled', 'rejected'])
+    expect((race.find(r => r.status === 'rejected') as PromiseRejectedResult).reason.message).toBe(KEPT_TOO_MUCH)
+    expect(await c.kept.runBytes(rid(30))).toBe(7)
+    expect(c.scans()).toBe(2)
+  })
+
+  it('work folders count toward the cap, and media work is refused before it starts when the run is at the cap', LONG, async () => {
+    await requireMediaTools()
+    const dir = mkdtempSync(join(scratch, 'cap-room-'))
+    const kept = withRunCap(createFileKeptBytes(dir), () => 100)
+    await kept.put(rid(31), new Uint8Array(60), 'bin')
+    await expect(kept.checkRoom(rid(31))).resolves.toBeUndefined()
+    const work = await kept.workDir(rid(31))
+    writeFileSync(join(work, 'part.mkv'), new Uint8Array(40))
+    await expect(kept.checkRoom(rid(31))).rejects.toThrow(KEPT_TOO_MUCH)
+    await expect(kept.put(rid(31), new Uint8Array(1), 'bin')).rejects.toThrow(KEPT_TOO_MUCH)
+    rmSync(work, { recursive: true })
+    await kept.put(rid(31), new Uint8Array(40).fill(1), 'bin')
+    // At the cap: keepFrames and keepSound refuse before any work folder is made.
+    const results = createEngineResultStore({ dirForType: t => join(scratch, t), hosted: () => false })
+    const io: MediaValueIO = { access: createFileAccess(results, kept), kept, runId: rid(31), userId: null, hosted: false }
+    await expect(keepFrames(rid(31), stream(makerFrames(8, 6, 2, 0)), 8, 6, io)).rejects.toThrow(KEPT_TOO_MUCH)
+    await expect(keepSound(rid(31), tone(8000, 10), kept, { hosted: false })).rejects.toThrow(KEPT_TOO_MUCH)
+    expect(readdirSync(join(dir, rid(31))).filter(n => n.startsWith('.work-'))).toEqual([])
+  })
+})
+
+describe('fix round 1: saveFromPath takes plain files only (Minor 9)', () => {
+  it('refuses a symlink or a folder, publishing nothing and leaving the target alone', async () => {
+    const root = mkdtempSync(join(scratch, 'store-link-'))
+    const results = createEngineResultStore({ dirForType: t => join(root, t), hosted: () => false })
+    const secret = join(scratch, 'secret.txt')
+    writeFileSync(secret, 'secret')
+    const link = join(scratch, 'link.mp4')
+    symlinkSync(secret, link)
+    await expect(results.saveFromPath!(link, { userId: null, prefix: 'ComfyUI', ext: 'mp4' })).rejects.toThrow(SAVE_NOT_A_FILE)
+    const folder = mkdtempSync(join(scratch, 'folder-'))
+    await expect(results.saveFromPath!(folder, { userId: null, prefix: 'ComfyUI', ext: 'mp4' })).rejects.toThrow(SAVE_NOT_A_FILE)
+    expect(readdirSync(join(root, 'output'))).toEqual([])
+    expect(readFileSync(secret, 'utf8')).toBe('secret')
+    expect(existsSync(folder)).toBe(true)
+  })
+})
+
 // ── Rule 8: with the media families off, nothing changes ─────────────────────
 
 /** The Gate's value inputs before R5.2. */
@@ -579,6 +727,66 @@ function beforeR52<T>(fn: () => T): T {
   table[GATE_CLASS] = { data_in: GATE_KINDS_BEFORE }
   try { return fn() }
   finally { table[GATE_CLASS] = now }
+}
+
+/** The classes whose outputs carry video, frame batches or sound (as files today; R5.3–R5.5 give some of them values). */
+const MEDIA_SOURCES = new Set(['LoadVideo', 'GetVideoComponents', 'CreateVideo', 'LoadAudio', 'RecordAudio', 'Video', 'Audio', 'LoadVideoFrames', GATE_CLASS])
+
+/** Checked-in graphs for rule 8 (fix round 1, Minor 8): video, frame batches and sound wired through the real classes, directly and through Gates. */
+const MEDIA_GRAPHS: Record<string, ApiPrompt> = {
+  'video components remade': {
+    lv: { class_type: 'LoadVideo', inputs: { file: 'clip.mp4' } },
+    gc: { class_type: 'GetVideoComponents', inputs: { video: ['lv', 0] } },
+    cv: { class_type: 'CreateVideo', inputs: { images: ['gc', 0], audio: ['gc', 1], fps: ['gc', 2] } },
+    sv: { class_type: 'SaveVideo', inputs: { video: ['cv', 0], filename_prefix: 'video/ComfyUI', format: 'auto', codec: 'auto' } },
+  },
+  'video through a Gate': {
+    lv: { class_type: 'LoadVideo', inputs: { file: 'clip.mp4' } },
+    g: { class_type: GATE_CLASS, inputs: { data_in: ['lv', 0], bypass: true } },
+    sv: { class_type: 'SaveVideo', inputs: { video: ['g', 0], filename_prefix: 'video/ComfyUI', format: 'auto', codec: 'auto' } },
+  },
+  'video frames into Save image': {
+    lv: { class_type: 'LoadVideo', inputs: { file: 'clip.mp4' } },
+    gc: { class_type: 'GetVideoComponents', inputs: { video: ['lv', 0] } },
+    s: saveImage('gc'),
+  },
+  'frame batch saved as a video': {
+    lf: { class_type: 'LoadVideoFrames', inputs: { file: 'clip.mp4', max_seconds: 0, max_frames: 0, max_size: 0, start_frame: 0, stride: 1 } },
+    g: { class_type: GATE_CLASS, inputs: { data_in: ['lf', 0], bypass: false } },
+    sf: { class_type: 'SaveVideoFrames', inputs: { frames: ['g', 0], fps: ['lf', 1], filename_prefix: 'frames', audio_file: 'none', preset: 'medium', crf: 23 } },
+  },
+  'frame batch into Save image': {
+    lf: { class_type: 'LoadVideoFrames', inputs: { file: 'clip.mp4', max_seconds: 0, max_frames: 0, max_size: 0, start_frame: 0, stride: 1 } },
+    s: saveImage('lf'),
+  },
+  'sound saved three ways': {
+    la: { class_type: 'LoadAudio', inputs: { audio: 'a.wav' } },
+    sa: { class_type: 'SaveAudio', inputs: { audio: ['la', 0], filename_prefix: 'audio/ComfyUI' } },
+    g: { class_type: GATE_CLASS, inputs: { data_in: ['la', 0], bypass: true } },
+    sm: { class_type: 'SaveAudioMP3', inputs: { audio: ['g', 0], filename_prefix: 'audio/ComfyUI', quality: 'V0' } },
+    pa: { class_type: 'PreviewAudio', inputs: { audio: ['la', 0] } },
+  },
+  'recorded sound into a made video': {
+    ra: { class_type: 'RecordAudio', inputs: { audio: 'rec.webm' } },
+    lf: { class_type: 'LoadVideoFrames', inputs: { file: 'clip.mp4', max_seconds: 0, max_frames: 0, max_size: 0, start_frame: 0, stride: 1 } },
+    cv: { class_type: 'CreateVideo', inputs: { images: ['lf', 0], audio: ['ra', 0], fps: 24 } },
+    sv: { class_type: 'SaveVideo', inputs: { video: ['cv', 0], filename_prefix: 'video/ComfyUI', format: 'auto', codec: 'auto' } },
+  },
+  'the cards': {
+    vc: { class_type: 'Video', inputs: { file: 'clip.mp4', export: false, filename_prefix: 'video' } },
+    ac: { class_type: 'Audio', inputs: { audio: 'a.wav', export: false, filename_prefix: 'audio', format: 'flac', quality: 'V0' } },
+    v2: { class_type: 'Video', inputs: { file: '', export: false, filename_prefix: 'video', source: ['vc', 0] } },
+    a2: { class_type: 'Audio', inputs: { audio: '', export: false, filename_prefix: 'audio', format: 'flac', quality: 'V0', source: ['ac', 0] } },
+    sv: { class_type: 'SaveVideo', inputs: { video: ['v2', 0], filename_prefix: 'video/ComfyUI', format: 'auto', codec: 'auto' } },
+    pa: { class_type: 'PreviewAudio', inputs: { audio: ['a2', 0] } },
+  },
+  'a paid video into a Frame, a sound into a video generator': {
+    lv: { class_type: 'LoadVideo', inputs: { file: 'clip.mp4' } },
+    la: { class_type: 'LoadAudio', inputs: { audio: 'a.wav' } },
+    gv: { class_type: 'GenerateVideoNode', inputs: { model: 'kling-v3', prompt: 'x', seed: 1, model_options: '{}', audio: ['la', 0] } },
+    gc: { class_type: 'GetVideoComponents', inputs: { video: ['lv', 0] } },
+    f: { class_type: 'Compositor', inputs: { layer1: ['gc', 0] } },
+  },
 }
 
 const OFF_SETS: [string, RunnerFamily[]][] = [
@@ -610,6 +818,23 @@ describe('rule 8: the families-off invariant', () => {
     expect(runnerTakesNode(gated, 'g', CARDS)).toBe(true)
     expect(beforeR52(() => runnerTakesNode(gated, 'g', CARDS))).toBe(false)
     expect(answers(gated, CARDS)).not.toEqual(beforeR52(() => answers(gated, CARDS)))
+  })
+
+  it('over checked-in graphs wiring video, frame batches and sound through the real classes (runs everywhere, never empty)', () => {
+    let wires = 0
+    for (const [name, p] of Object.entries(MEDIA_GRAPHS)) {
+      for (const n of Object.values(p)) {
+        for (const v of Object.values(n.inputs ?? {})) {
+          if (Array.isArray(v) && v.length === 2 && MEDIA_SOURCES.has(p[v[0] as string]?.class_type ?? '')) wires++
+        }
+      }
+      for (const [set, fam] of OFF_SETS) {
+        const families = new Set(fam)
+        expect(answers(p, families), `${name}, ${set}`).toEqual(beforeR52(() => answers(p, families)))
+      }
+    }
+    expect(Object.keys(MEDIA_GRAPHS).length).toBeGreaterThanOrEqual(8)
+    expect(wires).toBeGreaterThanOrEqual(15)
   })
 
   const PROJECTS = resolve(__dirname, '../../../user/sailor/projects')
