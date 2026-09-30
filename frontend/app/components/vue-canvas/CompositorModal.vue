@@ -136,7 +136,7 @@ import {
   onDepthChange, depthImageFor, requestDepth, depthSourceFromViewUrl, depthKey, depthStatusFor,
 } from '~/lib/compositor/depthRegistry'
 import RelightControls from '~/components/vue-canvas/compositor/RelightControls.vue'
-import { sanitizeRelight } from '~/lib/relight/settings'
+import { sanitizeRelight, RELIGHT_MAX_LIGHTS, newLightId } from '~/lib/relight/settings'
 import { relightAvailable, relightUnavailableReason } from '~/lib/relight/relightPass'
 import { setRelightBypass } from '~/composables/useCompositorLayers'
 import { DEFAULT_DISPLACE_MAP } from '~/lib/compositor/displace'
@@ -257,7 +257,7 @@ import { VARIABLE_FONTS } from '~/data/variable-fonts'
 import type { GoogleFont } from '~/data/google-fonts'
 import { libraryFamily } from '~/data/library-fonts'
 import { defaultExpressiveParams, type ExpressiveParams } from '~~/shared/text-layout/expressive'
-import { PenTool, Brush, Sparkles, Wand2, Lasso, Undo2, Redo2, ChevronRight, ChevronDown, ChevronUp, GripVertical, Play, Palette, Check, RefreshCw, ImagePlus, FileUp, LayoutGrid, LayoutTemplate, Snowflake, Wheat, SquareDashedMousePointer } from 'lucide-vue-next'
+import { PenTool, Brush, Sparkles, Wand2, Lasso, Undo2, Redo2, ChevronRight, ChevronDown, ChevronUp, GripVertical, Play, Palette, Check, RefreshCw, ImagePlus, FileUp, LayoutGrid, LayoutTemplate, Snowflake, Wheat, SquareDashedMousePointer, Sun } from 'lucide-vue-next'
 import {
   TOOLBAR_SHAPES, TOOLBAR_INSERT,
   DEFAULT_SHAPE_FACE, DEFAULT_INSERT_FACE,
@@ -2332,6 +2332,71 @@ function onDistortPointerDown(cornerKey: 'tl' | 'tr' | 'br' | 'bl', e: PointerEv
   window.addEventListener('pointermove', move); window.addEventListener('pointerup', up)
 }
 
+// ── Relight: on-canvas light handles ───────────────────────────────────────
+const relightSelected = computed(() => activeEffect.value?.type === 'relight' && !!activeEffectLayer.value)
+const relightFx = computed(() => (relightSelected.value ? sanitizeRelight(activeEffect.value) : null))
+// Same geometry as distortHandlePositions / onDistortPointerDown (proven under rotation):
+// boxPx is in canvas-display px, the layer centre is (l.x·W, l.y·H), rotation about it.
+/** Layer fraction (0,0 = the layer box's top left, before rotation) → canvas display px. */
+function relightToCanvas(fx: number, fy: number): { x: number; y: number } {
+  const l = activeEffectLayer.value
+  const W = canvasDisplay.w, H = canvasDisplay.h
+  const box = boxPx(l)
+  const cx = l.x * W, cy = l.y * H
+  const rad = ((l.rotation || 0) * Math.PI) / 180, cosA = Math.cos(rad), sinA = Math.sin(rad)
+  const dx = (fx - 0.5) * box.w, dy = (fy - 0.5) * box.h
+  return { x: cx + dx * cosA - dy * sinA, y: cy + dx * sinA + dy * cosA }
+}
+/** A pointer event → layer fraction (the inverse), mapped through the canvas rect as distort does. */
+function pointerToRelight(ev: { clientX: number; clientY: number }, r: DOMRect): { x: number; y: number } {
+  const l = activeEffectLayer.value
+  const W = canvasDisplay.w, H = canvasDisplay.h
+  const box = boxPx(l)
+  const mx = ((ev.clientX - r.left) / r.width) * W - l.x * W
+  const my = ((ev.clientY - r.top) / r.height) * H - l.y * H
+  const rad = ((l.rotation || 0) * Math.PI) / 180, cosA = Math.cos(rad), sinA = Math.sin(rad)
+  const lx = mx * cosA + my * sinA, ly = -mx * sinA + my * cosA   // un-rotate into the layer box
+  return { x: box.w ? lx / box.w + 0.5 : 0.5, y: box.h ? ly / box.h + 0.5 : 0.5 }
+}
+const relightHandles = computed(() => (relightFx.value?.lights ?? []).map(l => ({ l, ...relightToCanvas(l.x, l.y) })))
+function writeRelight(patch: Record<string, unknown>, record: boolean) {
+  if (record) { updateActiveEffect(patch); return }
+  // During a drag: write without a history entry (recordHistory() ran once at pointer-down).
+  const sel = selectedEffect.value; const l = sel ? layerById(sel.layerId) : null
+  if (!sel || !l) return
+  const stack = layerStack(l).map(e => (e.id === sel.effectId ? { ...e, ...patch } : e))
+  commit(localLayers.value.map((x: any) => (x.id === l.id ? { ...x, ...writeStackToLayer(stack) } : x)))
+}
+function onRelightHandleDown(e: PointerEvent, id: string) {
+  if (viewOnlyGuard()) return
+  e.preventDefault(); e.stopPropagation()
+  relightLightId.value = id
+  const r = canvasRect(); if (!r) return
+  recordHistory()                                            // one undo step for the whole drag
+  const move = (ev: PointerEvent) => {
+    const f = relightFx.value; if (!f) return
+    const p = pointerToRelight(ev, r)
+    const x = Math.min(1.4, Math.max(-0.4, p.x)), y = Math.min(1.4, Math.max(-0.4, p.y))
+    writeRelight({ lights: f.lights.map(l => (l.id === id ? { ...l, x, y } : l)) }, false)
+  }
+  const up = () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up) }
+  window.addEventListener('pointermove', move); window.addEventListener('pointerup', up)
+}
+function onRelightHandleWheel(e: WheelEvent, id: string) {
+  e.preventDefault()
+  const f = relightFx.value; if (!f) return
+  writeRelight({ lights: f.lights.map(l => (l.id === id ? { ...l, height: Math.min(1, Math.max(-0.3, l.height - e.deltaY * 0.001)) } : l)) }, true)
+}
+function onRelightDoubleClick(e: MouseEvent) {
+  const f = relightFx.value; if (!f || f.lights.length >= RELIGHT_MAX_LIGHTS) return
+  const r = canvasRect(); if (!r) return
+  const p = pointerToRelight(e, r)
+  if (p.x < 0 || p.x > 1 || p.y < 0 || p.y > 1) return      // only on the layer itself
+  const l = { id: newLightId(), x: p.x, y: p.y, height: 0.35, color: '#f4f7ff', brightness: 1.4, reach: 1, on: true }
+  updateActiveEffect({ lights: [...f.lights, l] })
+  relightLightId.value = l.id
+}
+
 /** The Frame light's on-canvas handle — shown while a Spot UV effect is selected, or while the
  *  selected layer carries foil anywhere (a foil fill, text colour or outline paint). */
 const finishEffectSelected = computed(() => (activeEffect.value?.type === 'spot_uv' && finishAvailable('spot_uv'))
@@ -3091,6 +3156,13 @@ function addLayerEffect(layerId: string, kind: EffectKind) {
   // Select what was just added so its dials are on screen straight away.
   const fresh = next.find(e => !beforeIds.has(e.id)) ?? next[next.length - 1]
   if (fresh) selectEffect(layerId, fresh.id)
+}
+/** Right-click "Relight…": select the layer's existing Relight effect, or add one. */
+function relightStart(layerId: string) {
+  const l = layerById(layerId); if (!l) return
+  const existing = layerStack(l).find(e => e.type === 'relight')
+  if (existing) { selectEffect(layerId, existing.id); return }
+  addLayerEffect(layerId, 'relight')                         // adds, expands the layer, selects it
 }
 function removeLayerEffect(layerId: string, effectId: string) {
   const l = layerById(layerId); if (!l) return
@@ -4124,6 +4196,7 @@ function onCanvasContextMenu(e: MouseEvent) {
     items: [
       { id: 'edit-image', label: 'Edit image…', icon: Wand2, action: () => { imageCtxMenu.value = null; editImageStart(id) } },
       { id: 'edit-region', label: 'Edit an area…', icon: SquareDashedMousePointer, action: () => { imageCtxMenu.value = null; editRegionStart(id) } },
+      { id: 'relight', label: 'Relight…', icon: Sun, action: () => { imageCtxMenu.value = null; relightStart(id) } },
       // "Select an object" (SAM smart-select) hidden for now — see SMART_SELECT_ENABLED.
       ...(SMART_SELECT_ENABLED ? [
         { divider: true },
@@ -4302,6 +4375,7 @@ function onCanvasPointerUpCapture(e: PointerEvent) {
 }
 function onCanvasDblClickCapture(e: MouseEvent) {
   if (penSession.value) return // the pen's own double-clicks
+  if (relightSelected.value) { onRelightDoubleClick(e); return } // Relight owns double-click on its layer
   if (viewEditing.value) { void onViewDblClick(e); return }
   // Double-click a path → enter node edit; otherwise fall back to text edit.
   if (!nodeEdit.active.value) {
@@ -9696,6 +9770,26 @@ defineExpose({ editor, layoutGridResolved, layoutGrid, overlayGrid, viewLayoutGr
           :style="{ left: lightHandlePos.x + 'px', top: lightHandlePos.y + 'px', transform: 'translate(-50%, -50%)' }"
           @pointerdown="onLightPointerDown"
         />
+
+        <!-- Relight: light handles on the layer, and the rest of the Frame dimmed. -->
+        <template v-if="relightSelected && !editingId && !genActive">
+          <svg data-testid="relight-dim" class="absolute inset-0 pointer-events-none z-10" :width="canvasDisplay.w" :height="canvasDisplay.h">
+            <defs><mask id="relight-hole">
+              <rect :width="canvasDisplay.w" :height="canvasDisplay.h" fill="white" />
+              <polygon :points="[relightToCanvas(0,0), relightToCanvas(1,0), relightToCanvas(1,1), relightToCanvas(0,1)].map(p => `${p.x},${p.y}`).join(' ')" fill="black" />
+            </mask></defs>
+            <rect :width="canvasDisplay.w" :height="canvasDisplay.h" fill="rgba(0,0,0,0.35)" mask="url(#relight-hole)" />
+          </svg>
+          <div v-for="h in relightHandles" :key="h.l.id" data-handle data-testid="relight-light-handle" :data-light-id="h.l.id"
+            :aria-label="`Light ${relightFx!.lights.indexOf(h.l) + 1}`" title="Drag to move · scroll to raise or lower"
+            class="absolute z-20 rounded-full cursor-grab"
+            :style="{ left: h.x + 'px', top: h.y + 'px', transform: 'translate(-50%, -50%)',
+              width: 14 + Math.max(0, h.l.height) * 26 + 'px', height: 14 + Math.max(0, h.l.height) * 26 + 'px',
+              background: h.l.color, opacity: h.l.on ? 1 : 0.35,
+              outline: h.l.height < 0 ? '1.5px dashed rgba(255,255,255,.8)' : 'none', outlineOffset: '4px',
+              boxShadow: (h.l.id === relightLightId ? '0 0 0 2px #fff, 0 0 0 6px rgba(255,255,255,.22), ' : '0 0 0 2px rgba(255,255,255,.95), ') + `0 0 22px 6px ${h.l.color}99` }"
+            @pointerdown="onRelightHandleDown($event, h.l.id)" @wheel="onRelightHandleWheel($event, h.l.id)" />
+        </template>
       </div>
 
       <!-- Chrome below is positioned against the stage box, which is now full-bleed
