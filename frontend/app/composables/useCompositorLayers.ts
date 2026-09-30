@@ -109,6 +109,7 @@ import { surfacesImageFor } from '~/lib/compositor/surfacesRegistry'
 import { sanitizeRelight } from '~/lib/relight/settings'
 import { applyRelight, relightAvailable } from '~/lib/relight/relightPass'
 import { relightDepthFieldFor, FULL_DEPTH_RECT, type DepthRect } from '~/lib/relight/depthField'
+import { canFinishRelight } from '~/lib/relight/finish'
 import { ensureFillBitmaps, getFillBitmap } from '~/lib/paint/imageFillCache'
 import { applyTornEdge, type TornEdgeSpec } from '~/lib/compositor/tornEdge'
 import { applyFeather, type FeatherSpec } from '~/lib/compositor/feather'
@@ -1337,6 +1338,13 @@ export function __setImageForTest(filename: string, img: CanvasImageSource & { c
 }
 export function __clearImageCacheForTest(): void {
   _imageCache.clear()
+}
+/** Test seam: exercises `drawLayerContent`'s `skipTint` option (used by `renderRelightPair`,
+ *  fix round 1 ruling 1) directly, without a full paint pass or a WebGL context. */
+export function __drawLayerContentForTest(
+  ctx: CanvasRenderingContext2D, layer: LocalLayer, W: number, opts?: { skipTint?: boolean },
+): void {
+  drawLayerContent(ctx, layer, W, undefined, opts)
 }
 
 // ── Living-image clip frames ─────────────────────────────────────────────────
@@ -4703,15 +4711,20 @@ function maybePaintLongShadow(ctx: CanvasRenderingContext2D, layer: LocalLayer, 
   ctx.fill(new Path2D(body))
 }
 
-function drawLayerContent(ctx: CanvasRenderingContext2D, layer: LocalLayer, W: number, wiredLive?: WiredLive | null) {
+/** `opts.skipTint`: used ONLY by `renderRelightPair` (the Finish pair) — its "original"/"guide"
+ *  renders must show the layer's PHOTO, not the live preview's tint wash, since Finish keeps
+ *  tint as a live, non-destructive property on the layer (applied on every paint, same as
+ *  today) rather than baking it into the sent pair or the returned result. Every other caller
+ *  omits `opts`, so this is byte-identical to before for the live paint. */
+function drawLayerContent(ctx: CanvasRenderingContext2D, layer: LocalLayer, W: number, wiredLive?: WiredLive | null, opts?: { skipTint?: boolean }) {
   // Foil regions are clipped to this layer's device box (see `paintFoilRegion`). Scoped per
   // call and restored, so a nested draw can never leave its box behind for the next layer.
   const prevFoilBox = _foilBox
   _foilBox = layerHasFoil(layer) ? foilBoxFor(ctx, layer, W) : null
-  try { drawLayerContentBody(ctx, layer, W, wiredLive) } finally { _foilBox = prevFoilBox }
+  try { drawLayerContentBody(ctx, layer, W, wiredLive, opts) } finally { _foilBox = prevFoilBox }
 }
 
-function drawLayerContentBody(ctx: CanvasRenderingContext2D, layer: LocalLayer, W: number, wiredLive?: WiredLive | null) {
+function drawLayerContentBody(ctx: CanvasRenderingContext2D, layer: LocalLayer, W: number, wiredLive?: WiredLive | null, opts?: { skipTint?: boolean }) {
   // F3 seam: the sibling-outline resolver for THIS layer, bound to the live stack (or undefined
   // outside a paint). Threaded into every geometry `applyGeometry`/`computedOutlineD` call below.
   // Inert until a geometry kind carries a `refLayerId` (F3 Task 2) — no current kind does, so the
@@ -4911,7 +4924,7 @@ function drawLayerContentBody(ctx: CanvasRenderingContext2D, layer: LocalLayer, 
     const img = clipFrameFor(layer, _paintClockT, _cloneSlot.k, _cloneSlot.n)
       ?? _imageCache.get(imageLayerCacheKey(layer.filename))
     if (img && img.complete && img.naturalWidth) {
-      if (hasPaint(layer.tint)) drawTintedImage(ctx, img, layer, w, h)
+      if (hasPaint(layer.tint) && !opts?.skipTint) drawTintedImage(ctx, img, layer, w, h)
       else if (layer.crop?.fit === 'cover') {
         const r = coverSourceRect(img.naturalWidth, img.naturalHeight, w, h, layer.crop.fx ?? 0.5, layer.crop.fy ?? 0.5)
         ctx.drawImage(img, r.sx, r.sy, r.sw, r.sh, -w / 2, -h / 2, w, h)
@@ -7247,19 +7260,43 @@ function relightLitFrom(
 }
 
 /**
- * The Finish pair (Relight stage 3, Task 2): renders the SAME box-sized content
- * `gpuContent` paints with, twice — once without Relight (`original`) and once with it applied
- * (`guide`) — for the "Finish with Nano Banana 2" button (Task 3). Built from the identical
- * internals as the live paint (`relightLitFrom`, `relightSourceOf`, `localLayerBox`,
- * `drawLayerContent`), so the pair is pixel-aligned with what the effect is already showing —
- * the model must see the SAME lighting the user approved, not a re-derived approximation.
+ * The Finish pair (Relight stage 3, Task 2): renders the layer's own photo twice — once without
+ * Relight (`original`) and once with it applied (`guide`) — for the "Finish with Nano Banana 2"
+ * button (Task 3). Built from the identical internals as the live paint (`relightLitFrom`,
+ * `relightSourceOf`, `drawLayerContent`), so the LIGHTING is pixel-for-pixel what the effect is
+ * already showing — the model must see the SAME field, crop rect and surfaces the user approved,
+ * not a re-derived approximation. Only ever called for a layer `canFinishRelight` accepts (a
+ * still, unclipped image layer); returns `null` otherwise.
  *
- * Both canvases are scaled down so their long edge is at most `maxEdge` (default 1536, the
- * plan's fixed ceiling) — never up, so a smaller box stays at its own size. Returns `null`
- * (never throws, never awaits) when Relight can't run yet: no depth source on the layer, no
- * visible Relight effect, WebGL2 unavailable, the depth map still loading (a fetch is kicked
- * off, same as `gpuContent`), or the source image not yet decoded — Task 3 is expected to poll
- * this on every paint until it stops returning `null`, exactly like the live effect does.
+ * RESOLUTION (fix round 1, ruling 4): the output is sized from the SOURCE photo, never from the
+ * caller's `W` (the editor's current preview width, which can be arbitrarily small on a phone or
+ * a zoomed-out canvas — Nano Banana 2 must not be handed a downsampled preview when the original
+ * file is much bigger). `W`/`H` still define the box's GEOMETRY (its aspect ratio, via
+ * `relightSourceOf`'s `rect`, exactly like the live paint) but never its pixel count: the box's
+ * native pixel size is `rect.du × source.naturalWidth` by `rect.dv × source.naturalHeight` — the
+ * same crop-rect maths `relightDepthRect`/`coverSourceRect` already use to answer "what part of
+ * the source does the box show", just read at the source's own resolution instead of the box's
+ * on-screen one. That native size is then downscaled (never upscaled) so its long edge is at most
+ * `maxEdge` (default 1536, the plan's fixed ceiling) — a box smaller than that stays at its own
+ * native size, never stretched up to fill the ceiling.
+ *
+ * TINT (ruling 1): drawn with `drawLayerContent`'s `skipTint` option, so a tinted layer's photo
+ * goes to the model — and comes back from Keep — untinted; `tint`/`tintBlend`/`tintOpacity` stay
+ * on the layer and keep painting live over the result exactly as they did over the original,
+ * rather than being baked into the sent pair (which `finishApplyPatch` never touches either).
+ *
+ * NOTE on `relightDepthFieldFor` (ruling 6, no code change here — see its own doc comment):
+ * without a Worker it builds the field SYNCHRONOUSLY on this call, and pins whatever key it reads
+ * against eviction until "the next paint" unpins it — a notion this function doesn't otherwise
+ * participate in, same as it already doesn't for `gpuContent`'s own callers outside a real paint
+ * frame. Calling this off-frame (Task 3's expected polling) is exactly the live effect's own
+ * behaviour, not a new gap.
+ *
+ * Returns `null` (never throws, never awaits) whenever Relight can't run yet: the layer isn't
+ * Finish-eligible, no visible Relight effect, WebGL2 unavailable, the depth map still loading (a
+ * fetch is kicked off, same as `gpuContent`), the source image's natural size not yet known, or
+ * the depth field itself not yet built — Task 3 is expected to poll this on every paint until it
+ * stops returning `null`, exactly like the live effect does.
  */
 export async function renderRelightPair(
   layer: LocalLayer,
@@ -7267,10 +7304,8 @@ export async function renderRelightPair(
   H: number,
   maxEdge = 1536,
 ): Promise<{ original: HTMLCanvasElement; guide: HTMLCanvasElement; w: number; h: number } | null> {
-  const dofRef: DepthRef | null | undefined = layer.kind === 'image'
-    ? (layer as ImageLayer).filename
-    : layer.kind === 'wired' ? depthSourceFromViewUrl((layer as WiredLayer).depthKey) : undefined
-  if (!dofRef) return null
+  if (!canFinishRelight(layer)) return null
+  const dofRef: DepthRef = (layer as ImageLayer).filename
 
   const stack = effectStackOf(layer).filter(e => e.visible)
   const relightRaw = pinnedEffect(stack, 'relight')
@@ -7280,27 +7315,45 @@ export async function renderRelightPair(
   const depth = depthImageFor(dofRef)
   if (!depth) { requestDepth(dofRef); return null }
 
-  const wiredLive: WiredLive | null | undefined = layer.kind === 'wired' ? wiredContent(layer as WiredLayer) : undefined
-  const box = localLayerBox(measureCtx(), layer, W, H, wiredLive)
-  const matPad = brushMaterialPadPx(layer, W)
-  const bw = Math.max(1, Math.round(box.w + matPad * 2)), bh = Math.max(1, Math.round(box.h + matPad * 2))
+  // canFinishRelight guarantees `kind === 'image'`, so there is no wired live content to thread
+  // through — every call below gets `wiredLive: undefined` (its own-resolve fallback, unused for
+  // an image layer anyway).
+  const rs = relightSourceOf(layer, W, undefined)
+  if (!rs) return null
+  const srcEl = rs.src as { naturalWidth?: number; naturalHeight?: number; width?: number; height?: number }
+  const srcW = srcEl.naturalWidth || srcEl.width || 0
+  const srcH = srcEl.naturalHeight || srcEl.height || 0
+  if (!(srcW > 0) || !(srcH > 0)) return null
+
+  // The box's native pixel size: `rs.rect` is the fraction of the source the box shows (the
+  // whole image, `du=dv=1`, when the layer has no cover crop) — read at the source's OWN
+  // resolution, not the editor's. `coverSourceRect` builds `rect` so this ratio already equals
+  // the box's aspect, so no separate aspect computation is needed here.
+  const nativeW = rs.rect.du * srcW, nativeH = rs.rect.dv * srcH
+  const downscale = Math.min(1, maxEdge / Math.max(nativeW, nativeH))
+  const bw = Math.max(1, Math.round(nativeW * downscale))
+  const bh = Math.max(1, Math.round(nativeH * downscale))
+  // The effective width unit that makes `drawLayerContent`'s own `layer.w * W'` land on exactly
+  // this box: box aspect is independent of W (both `layer.w*W` and `layer.h*W` scale together),
+  // so any `W'` reproduces the identical box — just at THIS resolution instead of the preview's.
+  const layerW = (layer as ImageLayer).w
+  const Weff = layerW > 0 ? bw / layerW : W
+
   const src = document.createElement('canvas'); src.width = bw; src.height = bh
   const sctx = src.getContext('2d')
   if (!sctx) return null
   sctx.translate(bw / 2, bh / 2)
-  drawLayerContent(sctx, layer, W, wiredLive)
+  drawLayerContent(sctx, layer, Weff, undefined, { skipTint: true })
 
-  const lit = relightLitFrom(layer, W, wiredLive, dofRef, depth, relight, src, bw, bh)
+  const lit = relightLitFrom(layer, Weff, undefined, dofRef, depth, relight, src, bw, bh)
   if (!lit) return null
+  // `lit` is the GPU pass's own reused canvas (see `gpuContent`'s `own()` above) — copy it out so
+  // a later call (the next poll, or another layer's Finish pair) can't silently mutate the
+  // canvas this one already returned.
+  const guide = document.createElement('canvas'); guide.width = bw; guide.height = bh
+  guide.getContext('2d')?.drawImage(lit, 0, 0)
 
-  const scale = Math.min(1, maxEdge / Math.max(bw, bh))
-  const w = Math.max(1, Math.round(bw * scale))
-  const h = Math.max(1, Math.round(bh * scale))
-  const original = document.createElement('canvas'); original.width = w; original.height = h
-  original.getContext('2d')?.drawImage(src, 0, 0, w, h)
-  const guide = document.createElement('canvas'); guide.width = w; guide.height = h
-  guide.getContext('2d')?.drawImage(lit, 0, 0, w, h)
-  return { original, guide, w, h }
+  return { original: src, guide, w: bw, h: bh }
 }
 
 /**

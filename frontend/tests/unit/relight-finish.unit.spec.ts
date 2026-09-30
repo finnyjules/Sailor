@@ -1,22 +1,59 @@
 /**
- * Relight stage 3 ("Finish", Task 2): the pure apply/revert patch builders
- * (`app/lib/relight/finish.ts`) and the client request (`app/composables/useRelightFinish.ts`),
- * `fetch` stubbed — no real fal call. `renderRelightPair` itself needs live decoded images, a
- * built depth field and a WebGL2 context; the existing harness has no cheap way to fake all
- * three, so it is left to Task 4's browser test (per the brief).
+ * Relight stage 3 ("Finish", Task 2 + fix round 1): the pure apply/revert patch builders and
+ * `canFinishRelight` (`app/lib/relight/finish.ts`), the `skipTint` draw option
+ * (`useCompositorLayers.ts`'s `drawLayerContent`, exercised through the `__drawLayerContentForTest`
+ * seam), and the client request (`app/composables/useRelightFinish.ts`), `fetch` stubbed — no real
+ * fal call. `renderRelightPair` itself needs a live decoded image, a built depth field and a
+ * WebGL2 context; the existing harness has no cheap way to fake all three, so it is left to
+ * Task 4's browser test (per the brief).
  */
-import { describe, it, expect, vi, afterEach } from 'vitest'
-import { finishApplyPatch, finishRevertPatch, type FinishableLayer } from '~/lib/relight/finish'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { finishApplyPatch, finishRevertPatch, canFinishRelight, type FinishableLayer } from '~/lib/relight/finish'
 import { requestRelightFinish } from '~/composables/useRelightFinish'
+import { effectStackOf } from '~/lib/compositor/effectStack'
+import {
+  __drawLayerContentForTest, __setImageForTest, __clearImageCacheForTest, createImageLayer,
+  type LocalLayer,
+} from '~/composables/useCompositorLayers'
 
 const relightFx = (id = 'fx:relight:0') => ({ id, type: 'relight' as const, visible: true, lights: [], keep: 0.12, depth: 4, texture: 2, shine: 0, shadows: true })
 const blurFx = (id = 'fx:layer_blur:0') => ({ id, type: 'layer_blur' as const, visible: true, radius: 4 })
 
+describe('canFinishRelight', () => {
+  it('accepts a plain image layer with a filename and no clip', () => {
+    expect(canFinishRelight({ kind: 'image', filename: 'a.png' })).toBe(true)
+  })
+
+  it('rejects a wired layer (no stable file for fal — depth keys it by a /view URL, not a filename)', () => {
+    expect(canFinishRelight({ kind: 'wired' })).toBe(false)
+  })
+
+  it('rejects an image layer with no filename', () => {
+    expect(canFinishRelight({ kind: 'image', filename: '' })).toBe(false)
+    expect(canFinishRelight({ kind: 'image' })).toBe(false)
+  })
+
+  it('rejects an image layer carrying a living-image clip', () => {
+    expect(canFinishRelight({ kind: 'image', filename: 'a.png', clip: { dir: 'x', frames: 3 } })).toBe(false)
+  })
+
+  it('rejects every other layer kind', () => {
+    expect(canFinishRelight({ kind: 'text', filename: 'a.png' })).toBe(false)
+    expect(canFinishRelight({ kind: 'brush' })).toBe(false)
+  })
+})
+
 describe('finishApplyPatch', () => {
-  it('resets crop to undefined so the result fills the box unscaled/uncropped', () => {
+  it('sets a centred cover crop (not undefined) — the model may return a slightly different aspect', () => {
     const layer: FinishableLayer = { id: 'l1', filename: 'orig.png', crop: { fit: 'cover', fx: 0.3, fy: 0.7 }, effects: [relightFx()] }
     const patch = finishApplyPatch(layer, 'result.png', 'fx:relight:0')
-    expect(patch.crop).toBeUndefined()
+    expect(patch.crop).toEqual({ fit: 'cover' })
+  })
+
+  it('sets a centred cover crop even when the layer previously had no crop (a stretch)', () => {
+    const layer: FinishableLayer = { id: 'l1', filename: 'orig.png', effects: [relightFx()] }
+    const patch = finishApplyPatch(layer, 'result.png', 'fx:relight:0')
+    expect(patch.crop).toEqual({ fit: 'cover' })
   })
 
   it('sets the new filename', () => {
@@ -31,17 +68,53 @@ describe('finishApplyPatch', () => {
     expect(patch.effects.map(e => e.type)).toEqual(['layer_blur'])
   })
 
-  it('retires the legacy tornEdge/feather fields (writeStackToLayer convention)', () => {
-    const layer: FinishableLayer = { id: 'l1', filename: 'orig.png', effects: [relightFx()] }
-    const patch = finishApplyPatch(layer, 'result.png', 'fx:relight:0')
-    expect(patch.tornEdge).toBeUndefined()
-    expect(patch.feather).toBeUndefined()
+  it('removes the Relight entry from a LEGACY (id-less) stack by the id the live stack mints for it', () => {
+    // No `id` field on either entry: effectStackOf's old-shape branch mints deterministic
+    // `fx:<type>:<ordinal>` ids — Task 3 must read the id from the SAME `effectStackOf` call
+    // the live Relight panel uses, not assume a caller-chosen id.
+    const layer: FinishableLayer = {
+      id: 'l1', filename: 'orig.png',
+      effects: [
+        { type: 'relight', visible: true, lights: [], keep: 0.12, depth: 4, texture: 2, shine: 0, shadows: true },
+        { type: 'layer_blur', visible: true, radius: 4 },
+      ] as unknown as FinishableLayer['effects'],
+    }
+    const mintedId = effectStackOf(layer).find(e => e.type === 'relight')!.id
+    expect(mintedId).toBe('fx:relight:0')
+    const patch = finishApplyPatch(layer, 'result.png', mintedId)
+    expect(patch.effects.map(e => e.type)).toEqual(['layer_blur'])
   })
 
   it('is a no-op on the stack when the given relightId is not present', () => {
     const layer: FinishableLayer = { id: 'l1', filename: 'orig.png', effects: [blurFx()] }
     const patch = finishApplyPatch(layer, 'result.png', 'fx:relight:0')
     expect(patch.effects.map(e => e.type)).toEqual(['layer_blur'])
+  })
+
+  it('clears a layer\'s REAL legacy tornEdge/feather fields once applied (writeStackToLayer retires them)', () => {
+    const layer = {
+      id: 'l1', filename: 'orig.png', effects: [relightFx()],
+      tornEdge: { amount: 0.5, seed: 1 }, feather: { amount: 0.3 },
+    } as unknown as FinishableLayer
+    const patch = finishApplyPatch(layer, 'result.png', 'fx:relight:0')
+    const merged = { ...layer, ...patch }
+    expect(merged.tornEdge).toBeUndefined()
+    expect(merged.feather).toBeUndefined()
+  })
+
+  it('does not touch tint/tintBlend/tintOpacity — Finish keeps them live on the layer (ruling 1)', () => {
+    const layer = {
+      id: 'l1', filename: 'orig.png', effects: [relightFx()],
+      tint: '#ff0000', tintBlend: 'multiply', tintOpacity: 0.6,
+    } as unknown as FinishableLayer
+    const patch = finishApplyPatch(layer, 'result.png', 'fx:relight:0')
+    expect(patch).not.toHaveProperty('tint')
+    expect(patch).not.toHaveProperty('tintBlend')
+    expect(patch).not.toHaveProperty('tintOpacity')
+    const merged = { ...layer, ...patch } as typeof layer
+    expect(merged.tint).toBe('#ff0000')
+    expect(merged.tintBlend).toBe('multiply')
+    expect(merged.tintOpacity).toBe(0.6)
   })
 })
 
@@ -73,6 +146,71 @@ describe('finishRevertPatch', () => {
   })
 })
 
+// ── `drawLayerContent`'s `skipTint` option (ruling 1) ────────────────────────────────────────
+// The cheapest seam available: a fake `document.createElement('canvas')` (same pattern as
+// foil-fill-render.unit.spec.ts), asserting on CANVAS CREATION COUNT rather than pixels —
+// `drawTintedImage` always allocates its own offscreen canvas to composite the tint before
+// stamping it onto the passed context; the untinted branches (`skipTint: true`, or no tint at
+// all) never allocate one. happy-dom's real `getContext('2d')` returns `null` (confirmed), which
+// would make both paths converge on the same fallback — so `document` is stubbed here instead of
+// relying on a DOM environment.
+function stubCtx(): CanvasRenderingContext2D {
+  return {
+    save: vi.fn(), restore: vi.fn(), translate: vi.fn(), rotate: vi.fn(), scale: vi.fn(),
+    transform: vi.fn(), setTransform: vi.fn(), getTransform: () => ({ a: 1, b: 0, c: 0, d: 1, e: 0, f: 0 }),
+    drawImage: vi.fn(), fillRect: vi.fn(), clearRect: vi.fn(), beginPath: vi.fn(), rect: vi.fn(),
+    ellipse: vi.fn(), clip: vi.fn(), fill: vi.fn(), stroke: vi.fn(), moveTo: vi.fn(), lineTo: vi.fn(),
+    closePath: vi.fn(), roundRect: vi.fn(), setLineDash: vi.fn(),
+    createRadialGradient: vi.fn(() => ({ addColorStop: vi.fn() })),
+    createLinearGradient: vi.fn(() => ({ addColorStop: vi.fn() })),
+    createPattern: vi.fn(() => ({})),
+    getImageData: vi.fn(() => ({ data: new Uint8ClampedArray(4), width: 1, height: 1 })),
+    putImageData: vi.fn(), measureText: vi.fn(() => ({ width: 1 })), fillText: vi.fn(), strokeText: vi.fn(),
+    globalCompositeOperation: 'source-over', globalAlpha: 1, fillStyle: '#000', strokeStyle: '#000',
+    imageSmoothingEnabled: true, lineWidth: 1,
+  } as unknown as CanvasRenderingContext2D
+}
+
+describe('drawLayerContent skipTint (the Finish pair\'s untinted render)', () => {
+  let canvasesCreated = 0
+  beforeEach(() => {
+    canvasesCreated = 0
+    __clearImageCacheForTest()
+    __setImageForTest('photo.png', { complete: true, naturalWidth: 100, naturalHeight: 50 } as any)
+    vi.stubGlobal('document', {
+      createElement: (tag: string) => {
+        if (tag !== 'canvas') return {}
+        canvasesCreated++
+        const c: any = { width: 0, height: 0 }
+        c.getContext = () => stubCtx()
+        return c
+      },
+    })
+  })
+  afterEach(() => { vi.unstubAllGlobals(); __clearImageCacheForTest() })
+
+  const tintedLayer = (): LocalLayer =>
+    createImageLayer('photo.png', 2, { tint: '#ff0000', tintOpacity: 1 }) as unknown as LocalLayer
+
+  it('a tinted layer draws through drawTintedImage (allocates an offscreen canvas) by default', () => {
+    __drawLayerContentForTest(stubCtx(), tintedLayer(), 100)
+    expect(canvasesCreated).toBeGreaterThan(0)
+  })
+
+  it('skipTint:true skips drawTintedImage entirely (no offscreen canvas allocated)', () => {
+    __drawLayerContentForTest(stubCtx(), tintedLayer(), 100, { skipTint: true })
+    expect(canvasesCreated).toBe(0)
+  })
+
+  it('an untinted layer never allocates one either way (skipTint is a pure no-op for it)', () => {
+    const plain = createImageLayer('photo.png', 2) as unknown as LocalLayer
+    __drawLayerContentForTest(stubCtx(), plain, 100)
+    expect(canvasesCreated).toBe(0)
+    __drawLayerContentForTest(stubCtx(), plain, 100, { skipTint: true })
+    expect(canvasesCreated).toBe(0)
+  })
+})
+
 describe('requestRelightFinish', () => {
   afterEach(() => { vi.unstubAllGlobals() })
 
@@ -95,6 +233,12 @@ describe('requestRelightFinish', () => {
     vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, status: 503, json: async () => ({ off: true }) })))
     const res = await requestRelightFinish(ORIGINAL, GUIDE)
     expect(res).toMatchObject({ ok: false, off: true, status: 503 })
+  })
+
+  it('400 (bad input) maps to ok:false with the server message', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, status: 400, json: async () => ({ message: 'original image is required' }) })))
+    const res = await requestRelightFinish(ORIGINAL, GUIDE)
+    expect(res).toEqual({ ok: false, status: 400, message: 'original image is required' })
   })
 
   it('402 maps to ok:false with the balance message, no off flag', async () => {
