@@ -1,0 +1,106 @@
+/**
+ * Relight stage 2 final-review fix 3: the depth routes (free /api/depth/estimate and paid
+ * /api/depth/surfaces) share assertInputOwned. In hosted mode it used to refuse every
+ * `output`/`temp` source, which broke depth for WIRED layers (their image is an execution
+ * output). It now gates `output` exactly as /view does — the caller's owned output keys, with
+ * one harvest-and-recheck for the race window — and leaves `temp` ungated like /view.
+ */
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+
+const g = globalThis as any
+g.createError = (opts: { statusCode: number, message?: string, statusMessage?: string }) => {
+  const err = new Error(opts.message ?? opts.statusMessage) as Error & { statusCode: number }
+  err.statusCode = opts.statusCode
+  return err
+}
+
+let mode: 'local' | 'hosted' = 'hosted'
+vi.mock('../../server/utils/deployMode', () => ({
+  deployMode: () => mode,
+  isHosted: () => mode === 'hosted',
+}))
+
+let owned = new Set<string>()
+let ownedAfterHarvest: Set<string> | null = null
+vi.mock('../../server/utils/graphRuns', async (orig) => {
+  const actual = await orig() as any
+  return { ...actual, ownedOutputKeys: async () => owned }
+})
+
+const harvestPendingOutputs = vi.fn(async () => { if (ownedAfterHarvest) owned = ownedAfterHarvest })
+vi.mock('../../server/utils/engineGate', async (orig) => {
+  const actual = await orig() as any
+  return { ...actual, harvestPendingOutputs: (...a: any[]) => harvestPendingOutputs(...(a as [])) }
+})
+
+import { assertInputOwned } from '../../server/utils/inputOwnership'
+import { __setInputUploadsDbForTests } from '../../server/utils/inputUploads'
+
+const ev = (userId: string | null) => ({ context: { userId } }) as any
+
+beforeEach(() => {
+  mode = 'hosted'
+  owned = new Set()
+  ownedAfterHarvest = null
+  harvestPendingOutputs.mockClear()
+  __setInputUploadsDbForTests({ query: async () => ({ rows: [] }) })
+})
+afterEach(() => { __setInputUploadsDbForTests(null) })
+
+describe('assertInputOwned — hosted output sources', () => {
+  it('an output the caller owns passes', async () => {
+    owned = new Set(['output::render_0001.png'])
+    await expect(assertInputOwned(ev('u1'), 'output', '', 'render_0001.png')).resolves.toBeUndefined()
+    expect(harvestPendingOutputs).not.toHaveBeenCalled()
+  })
+
+  it('an output in a subfolder is keyed with that subfolder', async () => {
+    owned = new Set(['output:runs/a:render_0001.png'])
+    await expect(assertInputOwned(ev('u1'), 'output', 'runs/a', 'render_0001.png')).resolves.toBeUndefined()
+  })
+
+  it('a foreign output 404s after one harvest-and-recheck', async () => {
+    owned = new Set(['output::mine.png'])
+    await expect(assertInputOwned(ev('u1'), 'output', '', 'theirs.png')).rejects.toMatchObject({ statusCode: 404 })
+    expect(harvestPendingOutputs).toHaveBeenCalledTimes(1)
+  })
+
+  it('an output recorded only by the harvest (race window) passes', async () => {
+    ownedAfterHarvest = new Set(['output::fresh.png'])
+    await expect(assertInputOwned(ev('u1'), 'output', '', 'fresh.png')).resolves.toBeUndefined()
+    expect(harvestPendingOutputs).toHaveBeenCalledTimes(1)
+  })
+
+  it('the key names the file actually read: a slash in filename cannot borrow an owned basename', async () => {
+    owned = new Set(['output::mine.png'])
+    await expect(assertInputOwned(ev('u1'), 'output', '', 'other/mine.png')).rejects.toMatchObject({ statusCode: 404 })
+    owned = new Set(['output:other:mine.png'])
+    await expect(assertInputOwned(ev('u1'), 'output', '', 'other/mine.png')).resolves.toBeUndefined()
+  })
+
+  it('an output with no signed-in caller 404s', async () => {
+    owned = new Set(['output::render_0001.png'])
+    await expect(assertInputOwned(ev(null), 'output', '', 'render_0001.png')).rejects.toMatchObject({ statusCode: 404 })
+  })
+
+  it('temp is ungated, exactly as /view leaves it', async () => {
+    await expect(assertInputOwned(ev('u1'), 'temp', '', 'preview_0001.png')).resolves.toBeUndefined()
+  })
+
+  it('local mode never checks', async () => {
+    mode = 'local'
+    await expect(assertInputOwned(ev(null), 'output', '', 'anything.png')).resolves.toBeUndefined()
+    expect(harvestPendingOutputs).not.toHaveBeenCalled()
+  })
+})
+
+describe('assertInputOwned — hosted input sources (unchanged)', () => {
+  it('an input owned by someone else 404s', async () => {
+    __setInputUploadsDbForTests({ query: async () => ({ rows: [{ user_id: 'u2' }] }) })
+    await expect(assertInputOwned(ev('u1'), 'input', '', 'photo.png')).rejects.toMatchObject({ statusCode: 404 })
+  })
+  it('an input the caller owns passes', async () => {
+    __setInputUploadsDbForTests({ query: async () => ({ rows: [{ user_id: 'u1' }] }) })
+    await expect(assertInputOwned(ev('u1'), 'input', '', 'photo.png')).resolves.toBeUndefined()
+  })
+})
