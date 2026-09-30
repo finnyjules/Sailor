@@ -171,13 +171,19 @@ describe('surfacesRegistry — peekSurfacesFor', () => {
     expect(surfacesWasPaidFor('a.png')).toBe(false)
   })
 
-  it('an ordinary peek failure leaves no entry (quiet — no error line for a read nobody asked for)', async () => {
+  it('an ordinary peek failure lands as absent, so the Read shape button still shows', async () => {
     const f = vi.fn(async () => ({ ok: false, status: 500, json: async () => ({ message: 'boom' }) }))
     vi.stubGlobal('fetch', f)
     peekSurfacesFor('a.png')
     await vi.waitFor(() => expect(f).toHaveBeenCalledTimes(1))
-    await Promise.resolve(); await Promise.resolve()
-    expect(surfacesStatusFor('a.png')).toBe('idle')
+    await vi.waitFor(() => expect(surfacesStatusFor('a.png')).toBe('absent'))
+    expect(surfacesWasPaidFor('a.png')).toBe(false)
+  })
+
+  it('a peek that throws (network down) also lands as absent', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => { throw new TypeError('Failed to fetch') }))
+    peekSurfacesFor('a.png')
+    await vi.waitFor(() => expect(surfacesStatusFor('a.png')).toBe('absent'))
   })
 
   it('watch-style repeated peeks before the answer lands make only one request', async () => {

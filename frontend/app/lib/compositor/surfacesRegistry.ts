@@ -130,6 +130,8 @@ export function peekSurfacesFor(ref: DepthRef): void {
     let res: Awaited<ReturnType<typeof peekSurfaces>>
     try {
       res = await peekSurfaces(src)
+    } catch (e) {
+      res = { ok: false, status: 0, message: e instanceof Error ? e.message : String(e) } as typeof res
     } finally {
       peeking.delete(key)
     }
@@ -137,10 +139,11 @@ export function peekSurfacesFor(ref: DepthRef): void {
     // peek was in flight — that entry always wins over a late peek answer.
     if (entries.has(key)) return
     if (!res.ok) {
-      if (res.off) off(key, res.message)
-      // An ordinary peek failure is quiet and leaves no entry: the next matching watch tick
-      // (or the user reopening the layer) gets another free try, never an error line for a
-      // read nobody asked for yet.
+      if (res.off) { off(key, res.message); return }
+      // An ordinary peek failure is quiet: show the Read shape button as if nothing were
+      // cached. A click does the real read, which answers from the cache when there is one.
+      entries.set(key, { status: 'absent', img: null, paid: false })
+      notify()
       return
     }
     if (res.absent) {
