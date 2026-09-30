@@ -1298,6 +1298,62 @@ def clip_video_smooth() -> str:
     return name
 
 
+def clip_video_containers() -> list[str]:
+    """This group's own clips (R5.4 fix round 1): the single-file containers a person can upload
+    that Python's LoadVideo reads, beyond MP4, WebM/Matroska and AVI. 64 × 48, 8 frames at 24 fps,
+    with sound: MPEG-TS (H.264 + AAC, a screen recording's), MPEG-PS (MPEG-1 video + MP2), FLV
+    (Sorenson H.263 + MP3), ASF (WMV 8 + WMA 2), and QuickTime with no `ftyp` box (its first
+    atom renamed `free`, as older cameras' files begin)."""
+    made = []
+    for name, fmt, vcodec, vfmt, acodec, afmt, vopts in [
+        ("g_video_ts.ts", "mpegts", "libx264", "yuv420p", "aac", "fltp", X264),
+        ("g_video_ps.mpg", "mpeg", "mpeg1video", "yuv420p", "mp2", "s16", {}),
+        ("g_video_flv.flv", "flv", "flv", "yuv420p", "libmp3lame", "s16p", {}),
+        ("g_video_asf.wmv", "asf", "wmv2", "yuv420p", "wmav2", "fltp", {}),
+        ("g_video_noftyp.mov", "mov", "libx264", "yuv420p", "aac", "fltp", X264),
+    ]:
+        path, c = open_out(name, fmt)
+        s = video_stream(c, vcodec, 64, 48, 24, vfmt, vopts)
+        a = sound_stream(c, acodec, 44100, "stereo", afmt, 96000)
+        packets = []
+        for i in range(8):
+            f = av.VideoFrame.from_ndarray(np.frombuffer(smooth_frame(64, 48, 40 + i), np.uint8).reshape(48, 64, 3), format="rgb24").reformat(format=vfmt)
+            f.pts = i
+            packets += s.encode(f)
+        packets += s.encode(None)
+        x = tone(44100, 8 / 24, 2)
+        if afmt.startswith("s16"):
+            x = to_int(x, 16)
+        block = 1152 if acodec in ("mp2", "libmp3lame") else 2048 if acodec == "wmav2" else 1024
+        for f in sound_frames(x, 44100, "stereo", afmt, block):
+            packets += a.encode(f)
+        packets += a.encode(None)
+        for p in packets:
+            c.mux(p)
+        c.close()
+        if name.endswith("noftyp.mov"):
+            with open(path, "r+b") as fh:
+                head = fh.read(8)
+                assert head[4:8] == b"ftyp", head
+                fh.seek(4)
+                fh.write(b"free")
+        made.append(name)
+    return made
+
+
+def clip_video_hvc1() -> str:
+    """This group's own clip, NOT muxed by PyAV (R5.4 fix round 1): the standard HEVC clip copied by
+    Sailor's ffmpeg as a phone writes it, `hvc1`-tagged, with its own stream tags (language
+    `eng`, handler "Core Media Video"). Python's copy resets the codec tag and drops the stream tags."""
+    import subprocess
+    name = "g_video_hvc1.mp4"
+    out = os.path.join(CLIPS, name)
+    subprocess.run([media_tool("ffmpeg"), *FFMPEG_FIXED, "-y", "-i", os.path.join(CLIPS, "v_hevc10.mp4"), "-map", "0", "-c", "copy",
+                    *FFMPEG_EXACT, "-tag:v", "hvc1", "-metadata:s:v:0", "language=eng", "-metadata:s:v:0", "handler_name=Core Media Video",
+                    "-f", "mp4", out], check=True)
+    return name
+
+
 def video_ui_of(out) -> dict | None:
     """A video node's ui as ComfyUI sends it: PreviewVideo's {"images": [...], "animated": [true]}."""
     ui = out.ui
@@ -1351,8 +1407,9 @@ def ui_file(out: str, temp: str, entry: dict) -> str:
     return os.path.join(out if entry["type"] == "output" else temp, entry["subfolder"], entry["filename"])
 
 
-# SaveVideo's inputs: an MP4 with stereo AAC, VP9 in WebM at an odd size, ProRes in MOV, an edit list, and subtitles.
-SAVE_VIDEO_CLIPS = ["v_stereo_aac.mp4", "v_vp9_odd.webm", "v_prores.mov", "v_editlist.mp4", "g_video_subs.mp4"]
+# SaveVideo's inputs: an MP4 with stereo AAC, VP9 in WebM at an odd size, ProRes in MOV, an edit list, subtitles,
+# and (fix round 1) an hvc1-tagged HEVC with its own stream tags, not muxed by PyAV.
+SAVE_VIDEO_CLIPS = ["v_stereo_aac.mp4", "v_vp9_odd.webm", "v_prores.mov", "v_editlist.mp4", "g_video_subs.mp4", "g_video_hvc1.mp4"]
 # CreateVideo's frames: this clip's, through LoadVideo → GetVideoComponents; its sounds: LoadAudio's.
 MADE_FRAMES_CLIP = "g_video_smooth.mp4"
 # The named case: made from the standard clip's `synth` noise (32 × 24).
@@ -1373,6 +1430,8 @@ def group_video(names: list[str]) -> dict:
     from comfy_extras import nodes_audio as na
     subs = clip_video_subs()
     smooth = clip_video_smooth()
+    hvc1 = clip_video_hvc1()
+    containers = clip_video_containers()
     folder_paths.set_input_directory(CLIPS)
 
     def clone(cls):
@@ -1382,7 +1441,7 @@ def group_video(names: list[str]) -> dict:
     LoadAudio = clone(na.LoadAudio)
     oh = openh264_options(23)
     cases: dict = {"prompt": VIDEO_PROMPT, "extraPnginfo": VIDEO_EXTRA, "openh264": oh,
-                   "groupClips": {n: sha(open(os.path.join(CLIPS, n), "rb").read()) for n in (subs, smooth)}}
+                   "groupClips": {n: sha(open(os.path.join(CLIPS, n), "rb").read()) for n in (subs, smooth, hvc1, *containers)}}
     with tempfile.TemporaryDirectory() as tmp:
         # LoadVideo → GetVideoComponents over every standard clip.
         comps = []
@@ -1398,6 +1457,31 @@ def group_video(names: list[str]) -> dict:
                 rec["error"] = err(e)
             comps.append(rec)
         cases["components"] = comps
+
+        # Fix round 1: the other containers a person can upload, through LoadVideo → GetVideoComponents,
+        # and SaveVideo (auto, auto) of each: its stream copy into MP4, or the error Python raises.
+        conts = []
+        for name in containers:
+            rec = {"clip": name}
+            try:
+                v = LoadVideo.execute(file=name).result[0]
+                imgs, audio, fps = GetComp.execute(video=v).result
+                rec["frames"] = images_record(imgs)
+                rec["fps"] = fps
+                rec["sound"] = sound_record(audio["waveform"][0].numpy(), int(audio["sample_rate"])) if audio is not None else None
+            except Exception as e:  # noqa: BLE001 - PyAV can't seek an FLV: get_components raises
+                rec["error"] = err(e)
+            with av.open(os.path.join(CLIPS, name)) as c:
+                rec["formatName"] = c.format.name
+                rec["codecs"] = [st.codec_context.name for st in c.streams]
+            out, temp = fresh_dirs(tmp, f"container_{name}")
+            try:
+                ui = video_ui_of(Save.execute(video=LoadVideo.execute(file=name).result[0], filename_prefix="video/ComfyUI", format="auto", codec="auto"))
+                rec["save"] = {"ui": ui, "saved": video_out(ui_file(out, temp, ui["images"][0]), None, False, False), "written": files_written(out)}
+            except Exception as e:  # noqa: BLE001
+                rec["save"] = {"error": err(e), "written": files_written(out)}
+            conts.append(rec)
+        cases["containers"] = conts
 
         # CreateVideo → SaveVideo: MADE_FRAMES_CLIP's frames at three rates, with each sound; x264 and libopenh264.
         imgs = GetComp.execute(video=LoadVideo.execute(file=MADE_FRAMES_CLIP).result[0]).result[0]

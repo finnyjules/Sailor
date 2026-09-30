@@ -92,6 +92,8 @@ const DEMUXER: Readonly<Record<MediaFormat, string>> = {
   mp4: 'mov', mov: 'mov', m4a: 'mov',
   webm: 'matroska', mkv: 'matroska',
   wav: 'wav', avi: 'avi', mp3: 'mp3', ogg: 'ogg', flac: 'flac', aac: 'aac',
+  // R5.4 fix round 1: single-file containers Python's LoadVideo reads (the build has had their demuxers since R5.1a).
+  mpegts: 'mpegts', mpegps: 'mpeg', flv: 'flv', asf: 'asf',
 }
 
 /**
@@ -155,6 +157,8 @@ const ALLOWED_OPTIONS: Readonly<Record<'ffmpeg' | 'ffprobe', Readonly<Record<str
     '-time_base': 1, '-map_chapters': 1,
     // R5.4: an encoded stream carries no `encoder` tag (PyAV writes none; only `encoder=`, which clears it).
     '-metadata': 1,
+    // R5.4 fix round 1: a copied stream's codec tag as PyAV's reset gives it (encode.ts MP4_DEFAULT_TAG).
+    '-tag': 1,
   },
   ffprobe: {
     '-probesize': 1, '-analyzeduration': 1,
@@ -267,6 +271,7 @@ export function checkArgs(tool: 'ffmpeg' | 'ffprobe', args: readonly string[], o
       if (name === '-time_base' && !/^1\/\d{1,9}$/.test(v!)) bad()
       if (name === '-map_chapters' && v !== '-1') bad()
       if (name === '-metadata' && v !== 'encoder=') bad()
+      if (name === '-tag' && v !== 'avc1' && v !== 'hev1') bad()
       if (name === '-i' && v !== 'pipe:0' && !(v!.startsWith('file:') && isAbsolute(v!.slice(5)) && normalize(v!.slice(5)) === v!.slice(5))) bad()
       i += arity!
       continue

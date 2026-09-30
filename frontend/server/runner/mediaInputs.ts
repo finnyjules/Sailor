@@ -19,6 +19,16 @@ export type { MediaKind }
 
 /** The containers the runner can tell apart from a file's first bytes. */
 export type MediaFormat = 'mp4' | 'mov' | 'm4a' | 'webm' | 'mkv' | 'wav' | 'avi' | 'mp3' | 'ogg' | 'flac' | 'aac'
+  | 'mpegts' | 'mpegps' | 'flv' | 'asf'
+
+/** The first bytes a sniff needs: MPEG-TS is told by its sync byte at three packet starts (188 or 192 bytes apart). */
+export const MEDIA_SNIFF_BYTES = 1024
+
+/** ASF's header object GUID (WMV, WMA). */
+const ASF_GUID = [0x30, 0x26, 0xB2, 0x75, 0x8E, 0x66, 0xCF, 0x11, 0xA6, 0xD9, 0x00, 0xAA, 0x00, 0x62, 0xCE, 0x6C]
+
+/** QuickTime atoms a MOV may begin with instead of `ftyp` (older cameras and editors). */
+const QT_FIRST_ATOMS = ['moov', 'mdat', 'wide', 'free', 'skip', 'pnot']
 
 const ascii = (bytes: Uint8Array, at: number, text: string) =>
   [...text].every((c, i) => bytes[at + i] === c.charCodeAt(0))
@@ -28,7 +38,11 @@ const ascii = (bytes: Uint8Array, at: number, text: string) =>
  * `ftyp` box, told apart by its brand), WebM or other Matroska (an EBML header
  * naming "webm" or "matroska"), WAV (RIFF…WAVE), AVI (RIFF…AVI), MP3 (an ID3
  * tag or an MPEG audio frame), Ogg, FLAC, or AAC (an ADTS frame). Null for
- * anything else (GIF, a picture, a playlist, text). The media module names
+ * anything else (GIF, a picture, a playlist, text). R5.4 fix round 1: also
+ * QuickTime with no `ftyp` (its first atom moov, mdat, wide, free, skip or
+ * pnot), MPEG-TS (sync bytes at three packet starts, 188 or 192 apart),
+ * MPEG-PS (a pack header), FLV and ASF (WMV, WMA), which Python's LoadVideo
+ * reads and a person can upload. The media module names
  * ffmpeg's demuxer from this answer, never from a file's name (R5 rule 6).
  */
 export function mediaFormat(bytes: Uint8Array): MediaFormat | null {
@@ -37,6 +51,18 @@ export function mediaFormat(bytes: Uint8Array): MediaFormat | null {
     if (ascii(bytes, 8, 'M4A ') || ascii(bytes, 8, 'M4B ')) return 'm4a'
     return 'mp4'
   }
+  if (bytes.byteLength >= 8 && QT_FIRST_ATOMS.some(a => ascii(bytes, 4, a))) {
+    // An atom's size is 1 (a 64-bit size follows) or at least its 8-byte header.
+    const size = ((bytes[0]! << 24) >>> 0) + (bytes[1]! << 16) + (bytes[2]! << 8) + bytes[3]!
+    if (size === 1 || size >= 8) return 'mov'
+  }
+  for (const step of [188, 192]) {
+    const at = step === 192 ? 4 : 0
+    if (bytes.byteLength >= at + 2 * step + 1 && [0, 1, 2].every(k => bytes[at + k * step] === 0x47)) return 'mpegts'
+  }
+  if (bytes[0] === 0x00 && bytes[1] === 0x00 && bytes[2] === 0x01 && bytes[3] === 0xBA) return 'mpegps'
+  if (ascii(bytes, 0, 'FLV') && bytes[3] === 0x01) return 'flv'
+  if (bytes.byteLength >= 16 && ASF_GUID.every((b, i) => bytes[i] === b)) return 'asf'
   if (bytes[0] === 0x1A && bytes[1] === 0x45 && bytes[2] === 0xDF && bytes[3] === 0xA3) {
     const head = String.fromCharCode(...bytes.subarray(0, 64))
     return head.includes('webm') ? 'webm' : head.includes('matroska') ? 'mkv' : null

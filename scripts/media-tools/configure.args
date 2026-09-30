@@ -27,6 +27,11 @@
 #    3gp), matroska (webm), wav, mp3, ogg, flac, aac, avi, aiff, caf, gif, mpegts,
 #    mpegps (listed as "mpeg"), flv, raw h264/hevc, asf (wma, wmv), raw ac3,
 #    eac3, dts, amr, au, w64, dv, mxf, ivf, yuv4mpegpipe (y4m), nut, rm;
+#  - (R5.4 fix round 1) mpegvideo, m4v and loas: raw-stream readers that
+#    libavformat's stream probe needs to name the codec of an MPEG-PS or
+#    MPEG-TS stream that doesn't declare it (a .mpg's MPEG-1/2 video, MPEG-4
+#    part 2 video, LATM AAC). Without them an MPEG-PS's video reads as no
+#    video. Single-file, like every line here;
 #  - the media module's own inputs: rawvideo and pcm_f32le (frames and samples
 #    piped in), ffmetadata (tags too large for an argument).
 # Names here are configure's component names (`./configure --list-demuxers`),
@@ -34,7 +39,7 @@
 # "mpeg", pcm_f32le as "f32le". build.sh checks config_components.h right after
 # configure, so a name that enables nothing stops the build before compiling.
 --disable-demuxers
---enable-demuxer=mov,matroska,wav,mp3,ogg,flac,aac,avi,aiff,caf,gif,mpegts,mpegps,flv,h264,hevc,asf,ac3,eac3,dts,amr,au,w64,dv,mxf,ivf,yuv4mpegpipe,nut,rm,rawvideo,pcm_f32le,ffmetadata
+--enable-demuxer=mov,matroska,wav,mp3,ogg,flac,aac,avi,aiff,caf,gif,mpegts,mpegps,flv,h264,hevc,asf,ac3,eac3,dts,amr,au,w64,dv,mxf,ivf,yuv4mpegpipe,nut,rm,mpegvideo,m4v,loas,rawvideo,pcm_f32le,ffmetadata
 --disable-muxers
 --enable-muxer=mp4,mov,matroska,wav,flac,mp3,ogg,opus,rawvideo,pcm_f32le,null
 --disable-encoders

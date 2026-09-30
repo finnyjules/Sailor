@@ -24,7 +24,7 @@ import {
   MEDIA_ANALYZEDURATION, MEDIA_CAPS, MEDIA_PROBE_TIMEOUT_MS, MEDIA_PROBESIZE, MEDIA_SCAN_BYTES_PER_MS, MEDIA_WORDS,
   type MediaCaps, type MediaWord,
 } from '#shared/runner/media'
-import { mediaFormat, type MediaFormat } from '../runner/mediaInputs'
+import { MEDIA_SNIFF_BYTES, mediaFormat, type MediaFormat } from '../runner/mediaInputs'
 import { isHosted } from '../utils/deployMode'
 import { MediaError, inputArgs, runMedia } from './run'
 
@@ -82,7 +82,7 @@ async function head(path: string, n = 64): Promise<Uint8Array> {
 
 /** The container of a file on disk, from its first bytes (`mediaFormat`), or null. */
 export async function sniffMediaFormat(path: string): Promise<MediaFormat | null> {
-  return mediaFormat(await head(path))
+  return mediaFormat(await head(path, MEDIA_SNIFF_BYTES))
 }
 
 function rational(s: unknown): Rational | null {

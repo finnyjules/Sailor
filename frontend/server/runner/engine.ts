@@ -54,7 +54,7 @@ import { PICTURE_ANIMATED, pictureHasFrames, pictureMeta, pictureRefusal } from 
 import { extraPromptText, hasOutputNode, measuredInput, nodeCredits, stageEstimate, unpricedProviderNode, type Metering } from './metering'
 import { poseStartProblem } from './generators/nanoExtras'
 import { loadAudioStartProblems, soundStreamProblem } from './media/soundNodes'
-import { loadVideoStartProblems, videoStreamProblem } from './media/videoNodes'
+import { loadVideoStartProblems, videoFileVerdict } from './media/videoNodes'
 import { ev, type RunEvents, type SwitchReason } from './events'
 import { mediaNodeKind, nodeMediaChangedWords, nodeMediaCheck, nodeMediaFiles } from './nodeMedia'
 import { switchedSinceHold } from './switches'
@@ -2049,7 +2049,7 @@ export function createEngine(deps: EngineDeps) {
     if (queuedCalls(i.userId) + wanted > MAX_QUEUED_CALLS) throw refuse('You have too many runs waiting. Try again when one finishes.', 429)
     await deps.metering.spendGuard(i.userId)
     const inputFiles = new Map<string, OutputFile>()
-    for (const p of prompts) for (const f of collectInputFiles(p)) inputFiles.set(`${f.type}:${f.subfolder}:${f.filename}`, f)
+    for (const p of prompts) for (const f of collectInputFiles(p, families)) inputFiles.set(`${f.type}:${f.subfolder}:${f.filename}`, f)
     // A Film a shot's reference links (`/view?…&type=input` in its options,
     // Task 4; a preset shot's too, R3.11): the runner resolves them into
     // provider links, so they must be the caller's own files too. Generate a
@@ -2110,10 +2110,12 @@ export function createEngine(deps: EngineDeps) {
     }
     // Load video's validate_inputs (R5.4): a video file that isn't there is refused now ("Invalid
     // video file"), and so is one with no picture in it or over the caps (from its header, rule 6),
-    // before anything runs or is held.
+    // before anything runs or is held. A file the build can't read, and a Video card export the
+    // runner can't do (fix round 1), leave the whole workflow to the engine (RUNNER_NOT_ELIGIBLE):
+    // switching media-video on never makes a working graph fail.
     for (const p of prompts) {
-      const bad = await loadVideoStartProblems(p, f => files.exists(f), f => videoStreamProblem(files, f, i.userId, deps.hosted()))
-      if (bad) throw refuse(bad.message, 400, { nodeId: bad.nodeId, classType: bad.classType, ...(bad.file ? { file: bad.file } : {}) })
+      const bad = await loadVideoStartProblems(p, f => files.exists(f), (f, o) => videoFileVerdict(files, f, { userId: i.userId, hosted: deps.hosted(), card: o.card }), families)
+      if (bad) throw refuse(bad.message, 400, { nodeId: bad.nodeId, classType: bad.classType, ...(bad.file ? { file: bad.file } : {}), ...(bad.engine ? { reason: RUNNER_NOT_ELIGIBLE } : {}) })
     }
     // The picture cards' files (R1.3 follow-up): one a card would refuse at its
     // turn (16-bit, 32-bit, CMYK, a see-through GIF, a kind sharp can't read)

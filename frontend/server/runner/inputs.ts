@@ -8,6 +8,8 @@
  * (R5.3), and the video Load video loads (R5.4). In hosted, every one must be the user's own.
  */
 import { isLink, type ApiPrompt } from '#shared/runner/graph'
+import { AUDIO_CARD_MEDIA_RULE, VIDEO_CARD_MEDIA_RULE, runnerRuleFor } from '#shared/runner/eligibility'
+import { NO_FAMILIES, type RunnerFamily } from '#shared/runner/families'
 import { parseShaderBaked } from '#shared/runner/shaderBakeKey'
 import { POSE_BAKED_INPUTS, POSE_MANNEQUIN_CLASS, bakedNamePresent } from '#shared/runner/nanoExtras'
 import { posix } from 'node:path'
@@ -105,7 +107,14 @@ export function bakeParams(raw: unknown): Record<string, unknown> {
 /** 3D Studio's baked passes (comfy_extras/nodes_scene3d.py), in output order. */
 export const SCENE3D_BAKES = ['beauty_image', 'depth_image', 'normal_image'] as const
 
-export function collectInputFiles(prompt: ApiPrompt): OutputFile[] {
+/**
+ * `families`: the families the run is taken under (R5.4 fix round 1). On
+ * their media rows the Video and Audio cards fall back to their own file
+ * when their wired source brings nothing (Python's None), so there the
+ * card's file is listed whenever it is set, wired source or not: in hosted it
+ * must be the user's own, checked before the hold. Off, as before.
+ */
+export function collectInputFiles(prompt: ApiPrompt, families: ReadonlySet<RunnerFamily> = NO_FAMILIES): OutputFile[] {
   const out: OutputFile[] = []
   for (const node of Object.values(prompt)) {
     const inputs = node.inputs ?? {}
@@ -150,7 +159,7 @@ export function collectInputFiles(prompt: ApiPrompt): OutputFile[] {
       const f = parseInputFileRef(inputs.image)
       if (f) out.push(f)
     }
-    if (node.class_type === 'Video' && !isLink(inputs.source)) {
+    if (node.class_type === 'Video' && (!isLink(inputs.source) || runnerRuleFor('Video', inputs, families) === VIDEO_CARD_MEDIA_RULE)) {
       const f = parseInputFileRef(inputs.file)
       if (f) out.push(f)
     }
@@ -166,7 +175,7 @@ export function collectInputFiles(prompt: ApiPrompt): OutputFile[] {
     }
     // The Audio card a sync-3 lip-sync reads (model line-up F22). The lip-sync's
     // own files (its studio's links) are checked by the engine (sync3Media.ts).
-    if (node.class_type === 'Audio' && !isLink(inputs.source)) {
+    if (node.class_type === 'Audio' && (!isLink(inputs.source) || runnerRuleFor('Audio', inputs, families) === AUDIO_CARD_MEDIA_RULE)) {
       const f = parseInputFileRef(inputs.audio)
       if (f) out.push(f)
     }

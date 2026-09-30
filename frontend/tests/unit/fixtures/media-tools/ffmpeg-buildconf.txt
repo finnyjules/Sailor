@@ -16,7 +16,7 @@
     --disable-protocols
     --enable-protocol='file,pipe'
     --disable-demuxers
-    --enable-demuxer='mov,matroska,wav,mp3,ogg,flac,aac,avi,aiff,caf,gif,mpegts,mpegps,flv,h264,hevc,asf,ac3,eac3,dts,amr,au,w64,dv,mxf,ivf,yuv4mpegpipe,nut,rm,rawvideo,pcm_f32le,ffmetadata'
+    --enable-demuxer='mov,matroska,wav,mp3,ogg,flac,aac,avi,aiff,caf,gif,mpegts,mpegps,flv,h264,hevc,asf,ac3,eac3,dts,amr,au,w64,dv,mxf,ivf,yuv4mpegpipe,nut,rm,mpegvideo,m4v,loas,rawvideo,pcm_f32le,ffmetadata'
     --disable-muxers
     --enable-muxer='mp4,mov,matroska,wav,flac,mp3,ogg,opus,rawvideo,pcm_f32le,null'
     --disable-encoders

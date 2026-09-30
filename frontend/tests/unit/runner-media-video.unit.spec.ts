@@ -46,6 +46,9 @@ import { mediaLimiter, runMedia } from '~~/server/media/run'
 import { keepFrames, keepSound, readFrames, readSound } from '~~/server/media/values'
 import { VIDEO_FILE_MISSING, VIDEO_NOT_MP4, loadVideoStartProblems, videoSaveWords } from '~~/server/runner/media/videoNodes'
 import { runnerFamilies } from '~~/server/runner/config'
+import { RUNNER_NOT_ELIGIBLE } from '#shared/runner/messages'
+import { mediaFormat } from '~~/server/runner/mediaInputs'
+import { keepVideoFrames, probeVideoFile } from '~~/server/media/values'
 
 /** The tools' remembered answer, as the server's eligibility reads it; null: the real one. */
 const TOOLS = vi.hoisted(() => ({ ready: null as boolean | null }))
@@ -86,6 +89,7 @@ interface VideoCases {
     openh264?: { ui: PyUi; shown: PySaved[]; handsOn: boolean; written: { output: string[]; temp: string[] } }
   }[]
   validate: { missing: string; present: boolean }
+  containers: ({ clip: string; formatName: string; codecs: string[]; save: PyRun | PyFailed } & ({ error: string } | { frames: { w: number; h: number; list: string[] }; fps: number; sound: PySound | null }))[]
 }
 
 const FIXTURES = fileURLToPath(new URL('./fixtures/', import.meta.url))
@@ -1075,4 +1079,179 @@ describe('a noisy 1080p batch kept as FFV1 (measured)', () => {
     expect(batch600).toBeGreaterThan(2 * GiB)
     expect(batch600).toBeLessThan(4 * GiB)
   })
+})
+
+// ── Fix round 1 ──────────────────────────────────────────────────────────────
+
+describe('fix round 1 (Critical): on their media rows the cards’ own files are the user’s, checked before the hold', () => {
+  const OTHER = 'u_someone_else/clip.mp4'
+  it('collectInputFiles lists a card’s file whenever it is set on its media row, wired source or not (off: as before)', () => {
+    const p: ApiPrompt = { a: videoCard(), c: videoCard({ source: ['a', 0], file: OTHER, export: true }) }
+    const own = { filename: 'clip.mp4', subfolder: 'u_someone_else', type: 'input' }
+    expect(collectInputFiles(p, ON)).toContainEqual(own)
+    expect(collectInputFiles(p, CARDS)).not.toContainEqual(own)
+    const a: ApiPrompt = { g: getComp('l'), c: { class_type: 'Audio', inputs: { audio: 'u_someone_else/voice.wav', export: true, filename_prefix: 'audio/ComfyUI', format: 'flac', quality: 'V0', source: ['g', 1] } } }
+    const voice = { filename: 'voice.wav', subfolder: 'u_someone_else', type: 'input' }
+    expect(collectInputFiles(a, ON_BOTH)).toContainEqual(voice)
+    expect(collectInputFiles(a, ON)).not.toContainEqual(voice)
+  })
+
+  function hostedKit(families: ReadonlySet<RunnerFamily>) {
+    const dir = mkdtempSync(join(scratch, 'runs-'))
+    return makeKit({
+      hosted: true, dir,
+      deps: {
+        families: () => families, kept: createFileKeptBytes(join(dir, 'kept')),
+        // The user owns their own folder's files only.
+        ownership: { ownsInput: async (_u: string, f: OutputFile) => !f.subfolder.startsWith('u_someone_else'), ownsOutput: async () => true },
+      },
+    })
+  }
+
+  it('Video card: an empty video source, another user’s file, export on: refused before the hold', async () => {
+    const k = hostedKit(ON)
+    const take: ApiPrompt = { a: videoCard(), c: videoCard({ source: ['a', 0], file: OTHER, export: true }) }
+    expect(runnerTakesWorkflow(take, ON)).toBe(true)
+    await expect(k.engine.startRun({ userId: k.userId, takes: [take], ...START })).rejects.toThrow('isn’t one of yours')
+    expect(k.ledger.hold).not.toHaveBeenCalled()
+  })
+
+  it('Audio card: an empty sound source (a silent video’s), another user’s sound, export on: refused before the hold', async () => {
+    const k = hostedKit(ON_BOTH)
+    const take: ApiPrompt = {
+      l: loadVideo('mine.mp4'), g: getComp('l'),
+      c: { class_type: 'Audio', inputs: { audio: 'u_someone_else/voice.wav', export: true, filename_prefix: 'audio/ComfyUI', format: 'flac', quality: 'V0', source: ['g', 1] } },
+    }
+    expect(runnerTakesWorkflow(take, ON_BOTH)).toBe(true)
+    await expect(k.engine.startRun({ userId: k.userId, takes: [take], ...START })).rejects.toThrow('isn’t one of yours')
+    expect(k.ledger.hold).not.toHaveBeenCalled()
+  })
+})
+
+describe('fix round 1 (Important 1): a stream copy keeps no codec tag or stream tag of the source’s, as PyAV’s', () => {
+  it('an hvc1-tagged HEVC with its own language and handler, not muxed by PyAV, saves as Python saves it', LONG, async () => {
+    await requireMediaTools()
+    const src = await streamsAndTags(clipPath('g_video_hvc1.mp4'))
+    // The source really carries what a phone writes.
+    expect(src.tags['stream0:language']).toBe('eng')
+    expect(src.tags['stream0:handler_name']).toBe('Core Media Video')
+    const c = C.saves.cases.find(x => x.clip === 'g_video_hvc1.mp4' && x.format === 'auto' && x.codec === 'auto')!.x264 as PyRun
+    const h = harness({ clips: ['g_video_hvc1.mp4'] })
+    const saved = await runNode(h, { l: loadVideo('g_video_hvc1.mp4'), s: saveVideo('l') }, 's', { l: { 0: { kind: 'files', files: [inputFile('g_video_hvc1.mp4')] } } })
+    const path = h.results.pathOf!(saved.assets[0]!)
+    const { stdout } = await runMedia({ tool: 'ffprobe', args: ['-protocol_whitelist', 'file,pipe', '-i', `file:${path}`, '-of', 'json', '-show_streams'], userId: null })
+    const tagOf = (JSON.parse(Buffer.from(stdout!).toString('utf8')) as { streams: { codec_tag_string: string }[] }).streams[0]!.codec_tag_string
+    // PyAV resets the codec tag: the MP4 muxer's own for HEVC.
+    expect(tagOf).toBe('hev1')
+    expectTags((await streamsAndTags(path)).tags, c.saved.tags, 'hvc1')
+  })
+})
+
+describe('fix round 1 (Important 2): every container a person can upload that Python reads', () => {
+  const FORMATS: Record<string, string> = {
+    'g_video_ts.ts': 'mpegts', 'g_video_ps.mpg': 'mpegps', 'g_video_flv.flv': 'flv', 'g_video_asf.wmv': 'asf', 'g_video_noftyp.mov': 'mov',
+  }
+  it('is told apart from its first bytes', () => {
+    for (const c of C.containers) expect(mediaFormat(readFileSync(clipPath(c.clip)).subarray(0, 1024)), c.clip).toBe(FORMATS[c.clip])
+    // An M2TS (192-byte packets, a 4-byte time code before each) is MPEG-TS too.
+    const m2ts = new Uint8Array(1024)
+    for (let k = 0; k < 5; k++) m2ts[4 + 192 * k] = 0x47
+    expect(mediaFormat(m2ts)).toBe('mpegts')
+    // A lone 0x47 is not.
+    expect(mediaFormat(Uint8Array.from([0x47, 1, 2, 3, 4, 5, 6, 7]))).toBeNull()
+  })
+
+  for (const c of C.containers) {
+    it(`${c.clip} (${c.formatName}): LoadVideo → GetVideoComponents, and SaveVideo`, LONG, async () => {
+      await requireMediaTools()
+      const h = harness({ clips: [c.clip] })
+      const values = { l: { 0: { kind: 'files', files: [inputFile(c.clip)] } as RunnerValue } }
+      // The start check passes it.
+      expect(await loadVideoStartProblems({ l: loadVideo(c.clip) }, f => h.access.exists(f), f => probeVideoFile(f, { access: h.access, userId: null, hosted: false }).then(() => null))).toBeNull()
+      const made = await runNode(h, { l: loadVideo(c.clip), g: getComp('l') }, 'g', values)
+      const shas: string[] = []
+      await readFrames(made.values[0] as Extract<RunnerValue, { kind: 'frames' }>, { access: h.access, kept: h.kept, runId: rid(runs), userId: null, hosted: false }, async (rgb) => { shas.push(sha256Hex(rgb)) })
+      if ('error' in c) {
+        // Named: PyAV can't seek an FLV (get_components' seek to 0 raises); the runner, which doesn't seek, reads its 8 frames.
+        expect(c.error).toContain('Operation not permitted')
+        expect(made.values[0]).toMatchObject({ kind: 'frames', count: 8, w: 64, h: 48 })
+      }
+      else {
+        expect(shas, `${c.clip}: frames`).toEqual(c.frames.list)
+        expect(made.values[2]).toEqual({ kind: 'number', value: c.fps, int: false })
+        const s = await readSound(made.values[1]!, 'GetVideoComponents', { access: h.access, userId: null, hosted: false })
+        expect(sha256Hex(soundBytes(s.channels)), `${c.clip}: sound`).toBe(c.sound!.sha256)
+      }
+      const prompt: ApiPrompt = { l: loadVideo(c.clip), s: saveVideo('l') }
+      if ('error' in c.save) {
+        expect(c.save.error).toContain('does not support')
+        await expect(runNode(h, prompt, 's', values)).rejects.toThrow(VIDEO_NOT_MP4)
+        return
+      }
+      const saved = await runNode(h, prompt, 's', values)
+      expect(saved.ui).toEqual(c.save.ui)
+      const path = h.results.pathOf!(saved.assets[0]!)
+      expect((await decodeAll(path)).map(sha256Hex)).toEqual(c.save.saved.frames)
+      await expectFileSound(path, c.save.saved.sound, c.clip)
+      expectTags((await streamsAndTags(path)).tags, c.save.saved.tags, c.clip)
+    })
+  }
+
+  it('a file the build can’t read leaves the whole workflow to the engine (never refused)', async () => {
+    await requireMediaTools()
+    const dir = mkdtempSync(join(scratch, 'runs-'))
+    const k = makeKit({ dir, deps: { families: () => ON, kept: createFileKeptBytes(join(dir, 'kept')) } })
+    const { writeFileSync } = await import('node:fs')
+    writeFileSync(join(k.root, 'input', 'odd.mp4'), Buffer.from('not a container any tool here reads'.repeat(40)))
+    for (const take of [
+      { l: loadVideo('odd.mp4'), s: saveVideo('l') },
+      { c: videoCard({ file: 'odd.mp4' }), g: getComp('c'), v: createVideo(['g', 0], 24), s: saveVideo('v') },
+      { c: videoCard({ file: 'odd.mp4' }), s: saveVideo('c') },
+    ] as ApiPrompt[]) {
+      await expect(k.engine.startRun({ userId: null, takes: [take], ...START }), Object.keys(take).join(' ')).rejects.toMatchObject({ statusCode: 400, data: { reason: RUNNER_NOT_ELIGIBLE } })
+    }
+    expect(k.ledger.hold).not.toHaveBeenCalled()
+  })
+
+  it('a Video card export the runner can’t do (ProRes into MP4) leaves the workflow to the engine; one it can do runs', LONG, async () => {
+    await requireMediaTools()
+    const dir = mkdtempSync(join(scratch, 'runs-'))
+    const k = makeKit({ dir, deps: { families: () => ON, kept: createFileKeptBytes(join(dir, 'kept')) } })
+    for (const c of ['v_prores.mov', 'v_stereo_aac.mp4']) copyFileSync(clipPath(c), join(k.root, 'input', c))
+    for (const take of [
+      { c: videoCard({ file: 'v_prores.mov', export: true }) },
+      { l: loadVideo('v_prores.mov'), c: videoCard({ source: ['l', 0], export: true }) },
+    ] as ApiPrompt[]) {
+      await expect(k.engine.startRun({ userId: null, takes: [take], ...START })).rejects.toMatchObject({ statusCode: 400, data: { reason: RUNNER_NOT_ELIGIBLE } })
+    }
+    // Shown only (export off), the ProRes file is handed on as before.
+    const shown = await k.engine.startRun({ userId: null, takes: [{ c: videoCard({ file: 'v_prores.mov' }) }], ...START })
+    await k.engine.settled(shown.runId)
+    expect((await k.store.get(shown.runId))!.takes[0]!.nodes.c!.status).toBe('done')
+    const ok = await k.engine.startRun({ userId: null, takes: [{ c: videoCard({ file: 'v_stereo_aac.mp4', export: true }) }], ...START })
+    await k.engine.settled(ok.runId)
+    expect((await k.store.get(ok.runId))!.takes[0]!.nodes.c!.status).toBe('done')
+    expect(k.ledger.hold).not.toHaveBeenCalled()
+  })
+})
+
+describe('fix round 1 (Minor): a failed or stopped sound step keeps no frames', () => {
+  for (const how of ['fails', 'is stopped'] as const) {
+    it(`when the sound step ${how}, the frames just written are gone and the run keeps nothing`, LONG, async () => {
+      await requireMediaTools()
+      const h = harness({ clips: ['v_stereo_aac.mp4'] })
+      const runId = rid(++runs)
+      const ctl = new AbortController()
+      const io = { access: h.access, kept: h.kept, runId, userId: null, hosted: false, signal: ctl.signal }
+      const p = await probeVideoFile(inputFile('v_stereo_aac.mp4'), io)
+      const before = async () => {
+        if (how === 'fails') throw new Error('the sound failed')
+        ctl.abort()
+      }
+      await expect(keepVideoFrames(p, io, { before })).rejects.toThrow(how === 'fails' ? 'the sound failed' : MEDIA_WORDS.stopped)
+      expect(await h.kept.runBytes(runId)).toBe(0)
+      expect(await h.kept.workBytes(runId)).toBe(0)
+      expect(written(join(h.root, 'kept')).filter(f => f.endsWith('.mkv'))).toEqual([])
+    })
+  }
 })

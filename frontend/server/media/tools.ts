@@ -48,7 +48,7 @@ export const REQUIRED_ENCODERS: readonly string[] = ['libopenh264', 'aac', 'libm
  */
 export const ALLOWED_DEMUXERS: readonly string[] = [
   'aac', 'ac3', 'aiff', 'amr', 'asf', 'au', 'avi', 'caf', 'dts', 'dv', 'eac3', 'f32le', 'ffmetadata', 'flac', 'flv', 'gif',
-  'h264', 'hevc', 'ivf', 'matroska', 'mov', 'mp3', 'mpeg', 'mpegts', 'mxf', 'nut', 'ogg', 'rawvideo', 'rm', 'w64', 'wav', 'yuv4mpegpipe',
+  'h264', 'hevc', 'ivf', 'loas', 'm4v', 'matroska', 'mov', 'mp3', 'mpeg', 'mpegts', 'mpegvideo', 'mxf', 'nut', 'ogg', 'rawvideo', 'rm', 'w64', 'wav', 'yuv4mpegpipe',
 ]
 export const ALLOWED_MUXERS: readonly string[] = ['f32le', 'flac', 'matroska', 'mov', 'mp3', 'mp4', 'null', 'ogg', 'opus', 'rawvideo', 'wav']
 export const ALLOWED_PROTOCOLS: readonly string[] = ['file', 'pipe']

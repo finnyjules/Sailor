@@ -422,15 +422,30 @@ export async function encodeVideo(o: EncodeVideoOptions): Promise<{ frames: numb
 // ── copyVideo ────────────────────────────────────────────────────────────────
 
 /**
+ * The MP4 muxer's own tag for a codec it can write under more than one
+ * (libavformat's codec_mp4_tags, the first for each): what PyAV's copy gets,
+ * since `add_stream_from_template` resets the codec tag to 0 and the muxer
+ * then picks this one. A codec with a single MP4 tag needs no entry.
+ */
+export const MP4_DEFAULT_TAG: Readonly<Record<string, string>> = { h264: 'avc1', hevc: 'hev1' }
+
+/**
  * A file's streams into an MP4 as they are, as VideoFromFile.save_to copies
  * them when it reuses them (video_types.py:344-374, R5.4): every video, sound
  * and subtitle stream (`add_stream_from_template`; data streams and chapters
  * are left out), packets untouched (`-c copy`), each stream at the time base
  * PyAV's muxer gives a stream it set none for (1/90000 for pictures and
- * subtitles, 1/rate for sound), `movflags use_metadata_tags`. The tags: the
- * source's own, then `metadata` over them (Python writes its tags after
- * copying every source tag they don't name), as an ffmetadata file. A codec
- * the MP4 muxer doesn't take fails, as PyAV raises.
+ * subtitles, 1/rate for sound), `movflags use_metadata_tags`.
+ *
+ * The rule, as PyAV's copy (R5.4 fix round 1): the streams keep nothing of
+ * the source's but their packets and codec parameters. Their codec tag is
+ * reset (PyAV sets `codec_tag = 0`, so an `hvc1` HEVC comes out `hev1`, an
+ * `avc3` H.264 `avc1`: MP4_DEFAULT_TAG), and no stream tag is copied
+ * (`-map_metadata:s -1`: the muxer writes its own language and handler, as
+ * PyAV's). The container's tags are Python's: the source's own, then
+ * `metadata` over them (Python writes its tags after copying every source
+ * tag they don't name), as an ffmetadata file. A codec the MP4 muxer doesn't
+ * take fails, as PyAV raises.
  *
  * `probe`: the source's (probeMedia of the person's file, checked against the
  * video caps by the caller).
@@ -453,8 +468,9 @@ export async function copyVideo(o: {
   const source: Record<string, string> = {}
   for (const [k, v] of Object.entries(fmt.tags ?? {})) if (typeof v === 'string' && (!o.metadata || !Object.hasOwn(o.metadata, k))) source[k] = v
   const tags = { ...source, ...(o.metadata ?? {}) }
-  const streams = Array.isArray(j.streams) ? (j.streams as { codec_type?: unknown; sample_rate?: unknown }[]) : []
+  const streams = Array.isArray(j.streams) ? (j.streams as { codec_type?: unknown; codec_name?: unknown; sample_rate?: unknown }[]) : []
   const rates = streams.filter(s => s.codec_type === 'audio').map(s => Number(s.sample_rate))
+  const videoCodecs = streams.filter(s => s.codec_type === 'video').map(s => String(s.codec_name ?? ''))
   const work = await mediaTempDir()
   try {
     const args: string[] = [...inputArgs(p.path, p.format)]
@@ -464,7 +480,8 @@ export async function copyVideo(o: {
     args.push('-map', '0:v', '-map', '0:a?', '-map', '0:s?', '-c', 'copy', '-map_chapters', '-1')
     args.push('-time_base:v', '1/90000', '-time_base:s', '1/90000')
     rates.forEach((r, k) => { if (Number.isInteger(r) && r > 0) args.push(`-time_base:a:${k}`, `1/${r}`) })
-    args.push('-map_metadata', tagsArgs ? '1' : '-1', '-movflags', 'use_metadata_tags', '-f', 'mp4', '-y', `file:${out}`)
+    videoCodecs.forEach((c, k) => { if (Object.hasOwn(MP4_DEFAULT_TAG, c)) args.push(`-tag:v:${k}`, MP4_DEFAULT_TAG[c]!) })
+    args.push('-map_metadata', tagsArgs ? '1' : '-1', '-map_metadata:s', '-1', '-movflags', 'use_metadata_tags', '-f', 'mp4', '-y', `file:${out}`)
     await runMedia({ tool: 'ffmpeg', args, userId: o.userId, signal: o.signal, workDir: work, cleanup: [out], timeoutMs: o.timeoutMs })
     await moveOut(out, o.out, o.outRoots)
   }

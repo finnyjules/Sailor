@@ -55,6 +55,8 @@ import { join } from 'node:path'
 import { isLink, type ApiLink, type ApiPrompt } from '#shared/runner/graph'
 import { pyFloatOf, pyTruthy } from '#shared/runner/pyText'
 import { MEDIA_WORDS } from '#shared/runner/media'
+import { VIDEO_CARD_MEDIA_RULE, runnerRuleFor } from '#shared/runner/eligibility'
+import { NO_FAMILIES, type RunnerFamily } from '#shared/runner/families'
 import type { DeriveIO, NodePlan, PlanContext } from '../executors'
 import type { OutputFile, RunnerValue } from '../types'
 import { parseInputFileRef } from '../inputs'
@@ -63,6 +65,7 @@ import { asciiJson, saveImagePrefix } from '../cards/saveImage'
 import { copyVideo, pyStreamRateOf } from '../../media/encode'
 import { MediaError, mediaTempDir, removeMediaTempDir } from '../../media/run'
 import { ffprobeJson, type MediaProbe } from '../../media/probe'
+import type { DecodedSound } from '../../media/decode'
 import {
   dropVideoFile, encodeVideoParts, keepSound, keepVideoFrames, probeVideoFile, soundNoteOf, videoFileFor, videoSoundOf,
   type MediaValueIO,
@@ -199,8 +202,9 @@ export async function saveVideoFile(
   }
   // Not reused: get_components_internal, then VideoFromComponents.save_to (libx264 refuses an odd size).
   if (v.w % 2 || v.h % 2) throw new MediaError('oddSize')
-  const frames = await keepVideoFrames(p, media)
-  const sound = await videoSoundOf(p, file, media)
+  // The sound first decoded, then the frames kept: a failed or stopped sound step keeps nothing (fix round 1).
+  let sound: DecodedSound | null = null
+  const frames = await keepVideoFrames(p, media, { before: async () => { sound = await videoSoundOf(p, file, media) } })
   const avg = v.averageRate
   const rate = avg ? pyStreamRateOf(BigInt(avg.num), BigInt(avg.den)) : { num: 1, den: 1 }
   const path = await encodeVideoParts({ frames, sound, rate }, media, componentsTags)
@@ -210,11 +214,11 @@ export async function saveVideoFile(
 }
 
 /** Whether a file holds a picture, sound or subtitle stream whose codec the MP4 muxer doesn't take (MP4_CODECS). */
-async function holdsOtherCodecs(p: MediaProbe, media: MediaValueIO): Promise<boolean> {
+async function holdsOtherCodecs(p: MediaProbe, o: { userId: string | null; signal?: AbortSignal }): Promise<boolean> {
   if ([...p.video, ...p.sound].some(s => !MP4_CODECS.has(s.codec))) return true
   // Subtitles aren't in the probe: read them from the header.
   try {
-    const j = await ffprobeJson(p.path, p.format, ['-show_streams'], { userId: media.userId, signal: media.signal })
+    const j = await ffprobeJson(p.path, p.format, ['-show_streams'], { userId: o.userId, signal: o.signal })
     const streams = Array.isArray(j.streams) ? (j.streams as { codec_type?: unknown; codec_name?: unknown }[]) : []
     return streams.some(s => s.codec_type === 'subtitle' && !MP4_CODECS.has(String(s.codec_name)))
   }
@@ -229,19 +233,33 @@ function loaderFile(inputs: Record<string, unknown>): OutputFile | null {
 }
 
 /**
- * Why a file can't give Python a video, from its header, or null: no picture
- * in it (Python's "No video stream found", at its first reader), or a file
- * over the caps (rule 6: refused before any decode). A file the tools can't
- * read is refused in the probe's own plain words.
+ * What a person's video file is to the runner, from its header, before the
+ * run (R5.4 fix round 1): null when the runner can do what it's asked, else
+ * the plain words and whether the workflow is left to the engine instead of
+ * refused. A switched-on family must never make a working graph fail
+ * (progress.md, R5.4 rulings), so:
+ *   - a container or stream the build can't read (Python's PyAV may) is left
+ *     to the engine, never refused;
+ *   - for the Video card's export (`card`), anything it can't do is left to
+ *     the engine: before R5.4 the runner ignored the export, and ComfyUI does
+ *     it (or fails) as it always has. That includes a stream MP4 can't hold as
+ *     it is (ProRes…), which the export's stream copy would need;
+ *   - Load video's file with no picture in it, or over the caps (rule 6), is
+ *     refused: Python fails on it too, at its first reader.
  */
-export async function videoStreamProblem(access: MediaValueIO['access'], file: OutputFile, userId: string | null, hosted: boolean, signal?: AbortSignal): Promise<string | null> {
-  try {
-    await probeVideoFile(file, { access, userId, signal, hosted })
-    return null
-  }
+export async function videoFileVerdict(
+  access: MediaValueIO['access'], file: OutputFile,
+  o: { userId: string | null; hosted: boolean; signal?: AbortSignal; card?: boolean },
+): Promise<{ message: string; engine: boolean } | null> {
+  let p: MediaProbe
+  try { p = await probeVideoFile(file, { access, userId: o.userId, signal: o.signal, hosted: o.hosted }) }
   catch (e) {
-    return e instanceof MediaError ? e.message : MEDIA_WORDS.unreadable
+    const word = e instanceof MediaError ? e.word : 'unreadable'
+    const message = e instanceof MediaError ? e.message : MEDIA_WORDS.unreadable
+    return { message, engine: !!o.card || word === 'unreadable' || word === 'failed' || word === 'toolsMissing' }
   }
+  if (o.card && await holdsOtherCodecs(p, o)) return { message: VIDEO_NOT_MP4, engine: true }
+  return null
 }
 
 /** LoadVideo: the file handed on as it is (Python's VideoFromFile does no work). */
@@ -258,23 +276,76 @@ export function planLoadVideo(ctx: PlanContext): NodePlan {
 }
 
 /**
- * The loaders' checks before the run, the first failing node or null:
- * LoadVideo's validate_inputs (a file that isn't there, or a name
- * get_annotated_filepath can't open, is refused as ComfyUI refuses the prompt),
- * and (`videoOf`: videoStreamProblem) a file with no picture in it or over
- * the caps, refused at that node before anything runs.
+ * The file a Video card on its media row shows, where it is known before the
+ * run: its source's (a Load video's file, or another card's, followed back),
+ * else its own. 'none' when it shows nothing (then a card reading it falls to
+ * its own file, as Python's None does); 'unknown' when it comes from a node
+ * that makes it in the run.
+ */
+function cardFile(prompt: ApiPrompt, id: string, depth = 0): OutputFile | 'none' | 'unknown' {
+  const inputs = prompt[id]?.inputs ?? {}
+  if (depth > 64) return 'unknown'
+  const own = (): OutputFile | 'none' => {
+    if (typeof inputs.file !== 'string' || inputs.file === '') return 'none'
+    return parseInputFileRef(inputs.file) ?? 'none'
+  }
+  if (!isLink(inputs.source)) return own()
+  const from = prompt[inputs.source[0]]
+  if (!from || inputs.source[1] !== 0) return 'unknown'
+  if (from.class_type === 'LoadVideo') return loaderFile(from.inputs ?? {}) ?? 'unknown'
+  if (from.class_type === 'Video') {
+    const up = cardFile(prompt, inputs.source[0], depth + 1)
+    return up === 'none' ? own() : up
+  }
+  return 'unknown'
+}
+
+/**
+ * The video checks before the run, the first node found or null:
+ *   - LoadVideo's validate_inputs: a file that isn't there, or a name
+ *     get_annotated_filepath can't open, is refused as ComfyUI refuses the
+ *     prompt; then its file's verdict (`verdictOf`, videoFileVerdict);
+ *   - (fix round 1) a Video card exporting on its media row (`families`):
+ *     the file it will copy, where known before the run, and there when
+ *     checked; whatever it can't do leaves the workflow to the engine;
+ *   - (fix round 1) a Video card's file read by Get video components or
+ *     Save video: one the build can't read leaves it to the engine too.
+ * `engine: true`: leave the whole workflow to the engine (RUNNER_NOT_ELIGIBLE), don't refuse it.
  */
 export async function loadVideoStartProblems(
   prompt: ApiPrompt, exists: (f: OutputFile) => Promise<boolean>,
-  videoOf?: (f: OutputFile) => Promise<string | null>,
-): Promise<{ message: string; nodeId: string; classType: string; file?: string } | null> {
+  verdictOf?: (f: OutputFile, o: { card: boolean }) => Promise<{ message: string; engine: boolean } | null>,
+  families: ReadonlySet<RunnerFamily> = NO_FAMILIES,
+): Promise<{ message: string; nodeId: string; classType: string; file?: string; engine?: true } | null> {
   for (const [nodeId, n] of Object.entries(prompt)) {
     if (n.class_type !== 'LoadVideo') continue
     const file = loaderFile(n.inputs ?? {})
     if (!file) return { message: VIDEO_FILE_MISSING, nodeId, classType: n.class_type }
     if (!(await exists(file))) return { message: VIDEO_FILE_MISSING, nodeId, classType: n.class_type, file: file.filename }
-    const why = videoOf ? await videoOf(file) : null
-    if (why) return { message: why, nodeId, classType: n.class_type, file: file.filename }
+    const v = verdictOf ? await verdictOf(file, { card: false }) : null
+    if (v) return { message: v.message, nodeId, classType: n.class_type, file: file.filename, ...(v.engine ? { engine: true as const } : {}) }
+  }
+  for (const [nodeId, n] of Object.entries(prompt)) {
+    const inputs = n.inputs ?? {}
+    if (n.class_type !== 'Video' || runnerRuleFor('Video', inputs, families) !== VIDEO_CARD_MEDIA_RULE || !pyTruthy(inputs.export)) continue
+    const file = cardFile(prompt, nodeId)
+    // A card showing nothing exports nothing; one whose file comes from the run is judged at its turn;
+    // a file that isn't there fails at its turn, as Python's does.
+    if (file === 'none' || file === 'unknown' || !(await exists(file))) continue
+    const v = verdictOf ? await verdictOf(file, { card: true }) : null
+    if (v) return { message: v.message, nodeId, classType: n.class_type, file: file.filename, engine: true }
+  }
+  // A Video card's file read by Get video components or Save video (a Load video's is judged above):
+  // one the build can't read leaves the workflow to the engine, as Load video's does.
+  for (const [nodeId, n] of Object.entries(prompt)) {
+    const link = n.inputs?.video
+    if ((n.class_type !== 'GetVideoComponents' && n.class_type !== 'SaveVideo') || !isLink(link) || prompt[link[0]]?.class_type !== 'Video') continue
+    const card = prompt[link[0]]!
+    if (runnerRuleFor('Video', card.inputs ?? {}, families) !== VIDEO_CARD_MEDIA_RULE) continue
+    const file = cardFile(prompt, link[0])
+    if (file === 'none' || file === 'unknown' || !(await exists(file))) continue
+    const v = verdictOf ? await verdictOf(file, { card: false }) : null
+    if (v?.engine) return { message: v.message, nodeId, classType: n.class_type, file: file.filename, engine: true }
   }
   return null
 }
@@ -305,13 +376,20 @@ export function planGetVideoComponents(ctx: PlanContext): NodePlan {
       }
       const file = video.files[0]!
       const p = await probeVideoFile(file, media)
-      const frames = await keepVideoFrames(p, media)
-      const sound = await videoSoundOf(p, file, media)
+      // The sound step runs before the frames are kept (fix round 1): when it fails or is stopped, the
+      // frames just written are removed and never count toward the run's kept total.
+      let soundValue: RunnerValue = { kind: 'files', files: [] }
+      const frames = await keepVideoFrames(p, media, {
+        before: async () => {
+          const sound = await videoSoundOf(p, file, media)
+          if (sound) soundValue = await keepSound(media.runId, sound, media.kept, { hosted: media.hosted })
+        },
+      })
       const avg = p.video[0]!.averageRate
       return {
         values: {
           0: frames,
-          1: sound ? await keepSound(media.runId, sound, media.kept, { hosted: media.hosted }) : { kind: 'files', files: [] },
+          1: soundValue,
           // float(Fraction(average_rate) if average_rate else Fraction(1)).
           2: { kind: 'number', value: avg ? avg.num / avg.den : 1, int: false },
         },

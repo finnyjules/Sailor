@@ -299,8 +299,13 @@ export async function probeVideoFile(file: OutputFile, io: SoundReadIO): Promise
  * another size fails at once (sizeChanged, Python's torch.stack), and the
  * batch caps are held as the frames stream (never more than one frame's
  * report in hand).
+ *
+ * `before` (R5.4 fix round 1): the step that must succeed for the batch to be
+ * kept (the file's sound). It runs once the frames are written and before
+ * they are kept: when it fails or is stopped, the frames are removed with
+ * the work folder, and never count toward the run's kept total.
  */
-export async function keepVideoFrames(p: MediaProbe, io: MediaValueIO): Promise<FramesValue> {
+export async function keepVideoFrames(p: MediaProbe, io: MediaValueIO, o: { before?: () => Promise<void> } = {}): Promise<FramesValue> {
   const v = p.video[0]
   if (!v) throw new MediaError('noVideo')
   const { w, h } = v
@@ -342,6 +347,8 @@ export async function keepVideoFrames(p: MediaProbe, io: MediaValueIO): Promise<
     if (text.trim()) throw new MediaError('failed')
     // Python's get_components makes an empty batch here (zeros(0, 3, 0, 0)); a kept batch has at least one frame.
     if (count === 0) throw new MediaError('noVideo')
+    if (o.before) await o.before()
+    if (io.signal?.aborted) throw new MediaError('stopped')
     const file = await io.kept.putPath(io.runId, out, 'mkv')
     return { kind: 'frames', file, count, w, h }
   }
