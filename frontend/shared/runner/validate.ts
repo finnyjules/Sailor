@@ -79,6 +79,8 @@ export const RUNNER_OUTPUT_CLASSES: ReadonlySet<string> = new Set([
   // R5.4: Save video is an output node (is_output_node=True; Load video, Get video
   // components and Create video are not). The Video card is listed above.
   'SaveVideo',
+  // R5.5: Save video frames is an output node (is_output_node=True); Load video frames is not.
+  'SaveVideoFrames',
 ])
 
 /** ComfyUI's node_errors entry for a node that failed validation. */

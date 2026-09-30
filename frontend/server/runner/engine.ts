@@ -55,6 +55,7 @@ import { extraPromptText, hasOutputNode, measuredInput, nodeCredits, stageEstima
 import { poseStartProblem } from './generators/nanoExtras'
 import { loadAudioStartProblems, soundStreamProblem } from './media/soundNodes'
 import { loadVideoStartProblems, videoFileVerdict } from './media/videoNodes'
+import { frameStartProblems, framesSoundVerdict } from './media/frameNodes'
 import { ev, type RunEvents, type SwitchReason } from './events'
 import { mediaNodeKind, nodeMediaChangedWords, nodeMediaCheck, nodeMediaFiles } from './nodeMedia'
 import { switchedSinceHold } from './switches'
@@ -1351,6 +1352,8 @@ export function createEngine(deps: EngineDeps) {
                   userId: run.userId, prefix: o.prefix, ext: o.ext, folder,
                   ...(o.subfolder !== undefined ? { subfolder: o.subfolder } : {}),
                   ...(o.counter ? { counter: o.counter } : {}),
+                  // R5.5: Save video frames' own name, a counter only on a clash (ruling h).
+                  ...(o.exact ? { exact: true as const } : {}),
                 })
                 return recordSaved(f, folder)
               },
@@ -2115,6 +2118,13 @@ export function createEngine(deps: EngineDeps) {
     // switching media-video on never makes a working graph fail.
     for (const p of prompts) {
       const bad = await loadVideoStartProblems(p, f => files.exists(f), (f, o) => videoFileVerdict(files, f, { userId: i.userId, hosted: deps.hosted(), card: o.card }), families)
+      if (bad) throw refuse(bad.message, 400, { nodeId: bad.nodeId, classType: bad.classType, ...(bad.file ? { file: bad.file } : {}), ...(bad.engine ? { reason: RUNNER_NOT_ELIGIBLE } : {}) })
+    }
+    // Load video frames' validate_inputs and Save video frames' sound (R5.5), the same way: a file
+    // that isn't there is refused (a missing sound is skipped at its turn, as Python skips it); one
+    // the build can't read leaves the whole workflow to the engine.
+    for (const p of prompts) {
+      const bad = await frameStartProblems(p, f => files.exists(f), f => videoFileVerdict(files, f, { userId: i.userId, hosted: deps.hosted() }), f => framesSoundVerdict(files, f, { userId: i.userId }))
       if (bad) throw refuse(bad.message, 400, { nodeId: bad.nodeId, classType: bad.classType, ...(bad.file ? { file: bad.file } : {}), ...(bad.engine ? { reason: RUNNER_NOT_ELIGIBLE } : {}) })
     }
     // The picture cards' files (R1.3 follow-up): one a card would refuse at its

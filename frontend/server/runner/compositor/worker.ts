@@ -153,6 +153,12 @@ parentPort.on('message', (m) => {
       value = px.savePixels(m.picture, m.w, m.h, m.flatten, () => Atomics.load(stop, 0) === 1)
       transfer = [value.px.buffer]
     }
+    // Load video frames (R5.5): Pillow's resize(BILINEAR) of one RGB frame.
+    else if (m.op === 'px.resizeRgb') {
+      stopped()
+      value = px.pilResize(m.px, m.w, m.h, 3, m.ow, m.oh, () => Atomics.load(stop, 0) === 1, 'bilinear')
+      transfer = [value.buffer]
+    }
     // The effects (R2.1, ../effects/): one picture (or batch index) per fx.run.
     else if (m.op === 'fx.begin') {
       fx = { cls: m.cls, op: effectOp(m.fn), params: m.params, count: m.count, state: {} }
@@ -437,6 +443,8 @@ export interface PixelsWorker {
   rgbOf(raw: PilRaw): Promise<Uint8Array>
   /** Save image (R1.5): the pixels save_images encodes, w × h (Lanczos when that differs), flattened onto white for JPEG. */
   savePixels(picture: RawPicture, w: number, h: number, flatten: boolean): Promise<HandOff8>
+  /** Load video frames (R5.5): Pillow's resize(BILINEAR) of one rgb24 frame, w × h → ow × oh (the frame is handed over). */
+  resizeRgb(rgb: Uint8Array, w: number, h: number, ow: number, oh: number): Promise<Uint8Array>
   /** An effect (R2.1) starts its batch: `fn` its op ('<core>.<fn>'), `params` its widgets, `count` the batch's length. */
   effectBegin(job: { cls: string; fn: string; params: Record<string, unknown>; count: number }): Promise<void>
   /**
@@ -529,6 +537,10 @@ export function pixelsInWorker<T>(signal: AbortSignal | undefined, job: (w: Pixe
       async savePixels(picture, width, height, flatten) {
         const p = handOver(picture)
         return await call(t, { op: 'px.save', picture: p.picture, w: width, h: height, flatten }, p.buffers) as HandOff8
+      },
+      async resizeRgb(rgb, width, height, ow, oh) {
+        const own = rgb.byteOffset === 0 && rgb.byteLength === rgb.buffer.byteLength && !(rgb.buffer instanceof SharedArrayBuffer) ? rgb : rgb.slice()
+        return await call(t, { op: 'px.resizeRgb', px: own, w: width, h: height, ow, oh }, [own.buffer as ArrayBuffer]) as Uint8Array
       },
       async effectBegin(job) {
         await call(t, { op: 'fx.begin', cls: job.cls, fn: job.fn, params: job.params, count: job.count }, [])

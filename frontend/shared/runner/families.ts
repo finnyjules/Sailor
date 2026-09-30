@@ -239,8 +239,9 @@ export type RunnerFamily =
   /**
    * The video nodes, computed by Sailor's own server (step 3, R5.4): Load
    * video, Get video components, Create video, Save video, and the Video
-   * card's export and made videos. Free; Get video components, Save video
-   * and the card count as work. Needs `cards`, and the video tools (R5.1a):
+   * card's export and made videos; and (R5.5) Load video frames and Save
+   * video frames. Free; Get video components, Save video, the card and both
+   * frames nodes count as work. Needs `cards`, and the video tools (R5.1a):
    * while they are missing or refused, the server answers as if it were off
    * (server/runner/config.ts). Off: they go to ComfyUI, and the Video card
    * is exactly as before.

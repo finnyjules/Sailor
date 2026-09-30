@@ -346,9 +346,9 @@ describe('sound from a file (SaveVideoFrames’ audio_file; its Python parity is
       const p = await probeMedia(out, { userId: null, roots: ROOTS() })
       expect(p.sound.map(s => ({ codec: s.codec, rate: s.rate, channels: s.channels })), clip).toEqual([{ codec: 'aac', rate, channels: 2 }])
       const back = await decodeAudio(out, { decoder: 'fltp', userId: null, maxSamples: BIG, roots: ROOTS() })
-      // AAC ends on whole 1024-sample frames; the decoded end padding is R5.5's to fix against a Python fixture.
-      expect(back.channels[0]!.length, clip).toBeGreaterThanOrEqual(kept)
-      expect(back.channels[0]!.length, clip).toBeLessThan(kept + 1024)
+      // R5.5 fixed this against Python's own SaveVideoFrames (runner-media-frames): its AAC packets are
+      // numbered from 0, so the encoder's 1024 samples of priming stay in front, in whole frames of 1024.
+      expect(back.channels[0]!.length, clip).toBe(Math.ceil((kept + 1024) / 1024) * 1024)
     }
   })
 

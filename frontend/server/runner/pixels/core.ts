@@ -284,12 +284,15 @@ export function pixelsCore() {
     return { w: p.w, h: p.h, channels: c, px }
   }
 
-  // ── Pillow's Image.resize(size, LANCZOS) on 8-bit pictures (Resample.c) ──
+  // ── Pillow's Image.resize(size, LANCZOS | BILINEAR) on 8-bit pictures (Resample.c) ──
   // Coefficients in double, fixed point with 22 fraction bits, rounded sums
   // shifted and clamped; horizontal pass, then vertical. RGBA is resized
   // premultiplied (RGBa, MULDIV255) and divided back (255·c / a, truncated;
   // alpha 0 and 255 kept as they are). Measured equal to Pillow 12 on random
-  // pictures (scripts/runner_cards_fixtures.py `save_image.lanczos`).
+  // pictures (scripts/runner_cards_fixtures.py `save_image.lanczos`). BILINEAR
+  // (R5.5, Load video frames) is Pillow's triangle filter, support 1, through
+  // the same fixed-point path: measured equal to Pillow 12 on `synth` pictures
+  // (scripts/runner_media_fixtures.py --group frames).
   const PRECISION_BITS = 22
 
   function lanczos(x: number): number {
@@ -301,10 +304,20 @@ export function pixelsCore() {
     return x >= -3 && x < 3 ? sinc(x) * sinc(x / 3) : 0
   }
 
-  function pilCoeffs(inSize: number, outSize: number): { ksize: number; bounds: Int32Array; kk: Int32Array } {
+  /** Pillow's triangle filter (BILINEAR), support 1. */
+  function triangle(x: number): number {
+    if (x < 0) x = -x
+    return x < 1 ? 1 - x : 0
+  }
+
+  /** Pillow's filters: the kernel and its support (Resample.c `filters`). */
+  const FILTERS = { lanczos: { fn: lanczos, support: 3 }, bilinear: { fn: triangle, support: 1 } } as const
+
+  function pilCoeffs(inSize: number, outSize: number, filter: 'lanczos' | 'bilinear' = 'lanczos'): { ksize: number; bounds: Int32Array; kk: Int32Array } {
+    const { fn, support: base } = FILTERS[filter]
     const scale = inSize / outSize
     const filterscale = scale < 1 ? 1 : scale
-    const support = 3 * filterscale
+    const support = base * filterscale
     const ksize = Math.ceil(support) * 2 + 1
     const bounds = new Int32Array(outSize * 2)
     const kk = new Int32Array(outSize * ksize)
@@ -319,7 +332,7 @@ export function pixelsCore() {
       xmax -= xmin
       let ww = 0
       for (let x = 0; x < xmax; x++) {
-        const w = lanczos((x + xmin - center + 0.5) * ss)
+        const w = fn((x + xmin - center + 0.5) * ss)
         k[x] = w
         ww += w
       }
@@ -338,12 +351,12 @@ export function pixelsCore() {
     return v < 0 ? 0 : v > 255 ? 255 : v
   }
 
-  /** Pillow's LANCZOS resize of interleaved 8-bit pixels (c bands, each on its own). */
-  function pilResize(px: Uint8Array, w: number, h: number, c: number, ow: number, oh: number, stop?: () => boolean): Uint8Array {
+  /** Pillow's LANCZOS (or, named, BILINEAR) resize of interleaved 8-bit pixels (c bands, each on its own). */
+  function pilResize(px: Uint8Array, w: number, h: number, c: number, ow: number, oh: number, stop?: () => boolean, filter: 'lanczos' | 'bilinear' = 'lanczos'): Uint8Array {
     let src = px
     let sw = w
     if (ow !== w) {
-      const { ksize, bounds, kk } = pilCoeffs(w, ow)
+      const { ksize, bounds, kk } = pilCoeffs(w, ow, filter)
       const out = new Uint8Array(ow * h * c)
       for (let y = 0; y < h; y++) {
         if (stop && (y & 63) === 0 && stop()) throw new Error('Stopped')
@@ -363,7 +376,7 @@ export function pixelsCore() {
       sw = ow
     }
     if (oh !== h) {
-      const { ksize, bounds, kk } = pilCoeffs(h, oh)
+      const { ksize, bounds, kk } = pilCoeffs(h, oh, filter)
       const out = new Uint8Array(sw * oh * c)
       for (let yy = 0; yy < oh; yy++) {
         if (stop && (yy & 63) === 0 && stop()) throw new Error('Stopped')

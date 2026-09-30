@@ -918,7 +918,7 @@ export const RUNNER_NODE_RULES: Readonly<Record<string, RunnerNodeRule>> = {
   // parts, no work); Create video names its frames and sound (no work); Save
   // video copies a file's streams or encodes a made video. A VIDEO input takes
   // a file or a made video from VIDEO_OUTPUTS only, a frame batch comes only
-  // from Get video components, and a sound from SOUND_OUTPUTS. Load video's
+  // from Get video components (or, R5.5, Load video frames), and a sound from SOUND_OUTPUTS. Load video's
   // own validate_inputs replaces the file list: a file that isn't there is
   // refused before the run (videoNodes.ts loadVideoStartProblems).
   LoadVideo: {
@@ -944,6 +944,39 @@ export const RUNNER_NODE_RULES: Readonly<Record<string, RunnerNodeRule>> = {
       filename_prefix: { type: 'STRING', required: true },
       format: { type: 'COMBO', required: true, options: ['auto', 'mp4'] },
       codec: { type: 'COMBO', required: true, options: ['auto', 'h264'] },
+    },
+  },
+  // ── media-video (step 3, R5.5): frame batches from and to files
+  // (server/runner/media/frameNodes.ts). Load video frames decodes a file
+  // into a kept frame batch (resized with Pillow's bilinear where it's asked
+  // to be smaller) and hands on its rate; Save video frames encodes a frame
+  // batch (Load video frames' or Get video components') to H.264, with a
+  // sound file's first stream. Both count as work. Every widget is read
+  // before the run, so none may be wired; the rate on Save video frames may
+  // (a `number`, as Create video's). Load video frames' own validate_inputs
+  // replaces the file list: a file that isn't there is refused before the
+  // run (frameNodes.ts frameStartProblems).
+  LoadVideoFrames: {
+    family: 'media-video', local: 'render',
+    widgets: {
+      file: { type: 'STRING', required: true },
+      max_seconds: { type: 'FLOAT', required: true, min: 0, max: 600 },
+      max_frames: { type: 'INT', required: true, min: 1, max: 10000 },
+      max_size: { type: 'INT', required: true, min: 64, max: 4096 },
+      start_frame: { type: 'INT', required: true, min: 0, max: 1000000 },
+      stride: { type: 'INT', required: true, min: 1, max: 60 },
+    },
+  },
+  SaveVideoFrames: {
+    family: 'media-video', local: 'render', mustLink: ['frames'], required: ['frames', 'fps'],
+    valueInputs: { frames: ['frames'], fps: ['number'] },
+    // A typed rate as ComfyUI validates it (1…120), the same as Create video's.
+    inputCheck: 'create-video-fps',
+    widgets: {
+      filename_prefix: { type: 'STRING', required: true },
+      audio_file: { type: 'STRING', required: true },
+      preset: { type: 'COMBO', required: true, options: ['veryfast', 'fast', 'medium', 'slow'] },
+      crf: { type: 'INT', required: true, min: 10, max: 32 },
     },
   },
   // ── topaz-video (model line-up F23): Enhance a video on fal's Topaz video upscale ──
@@ -1512,6 +1545,9 @@ export const SWITCHED_CLASSES: Readonly<Record<string, RunnerFamily>> = {
   GetVideoComponents: 'media-video',
   CreateVideo: 'media-video',
   SaveVideo: 'media-video',
+  // R5.5: frame batches from and to files.
+  LoadVideoFrames: 'media-video',
+  SaveVideoFrames: 'media-video',
 }
 
 /**
@@ -2004,6 +2040,8 @@ const PAID_OUTPUT_KIND_FAMILY: Readonly<Record<string, RunnerFamily>> = {
   // R5.4: Get video components' frame batch and rate, and Create video's made video.
   GetVideoComponents: 'media-video',
   CreateVideo: 'media-video',
+  // R5.5: Load video frames' batch and rate.
+  LoadVideoFrames: 'media-video',
 }
 const withoutPaidRows = (kinds: OutputKinds): OutputKinds =>
   Object.fromEntries(Object.entries(kinds).filter(([cls]) => !Object.prototype.hasOwnProperty.call(PAID_OUTPUT_KIND_FAMILY, cls)))

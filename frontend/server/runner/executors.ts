@@ -51,7 +51,8 @@
  * media-sound, computed here with the video tools: LoadAudio, RecordAudio,
  * SaveAudio, SaveAudioMP3, PreviewAudio and the Audio card in full, R5.3;
  * and the video nodes, family media-video: LoadVideo, GetVideoComponents,
- * CreateVideo, SaveVideo and the Video card's export and made videos, R5.4)
+ * CreateVideo, SaveVideo and the Video card's export and made videos, R5.4;
+ * LoadVideoFrames and SaveVideoFrames, R5.5)
  * closely enough that the same workflow gives the same result.
  */
 import { GATE_CLASS, isLink, type ApiLink, type ApiPrompt } from '#shared/runner/graph'
@@ -134,6 +135,7 @@ import { planSplitLayers } from './generators/splitLayers'
 import { planAudioGen } from './generators/audioGen'
 import { planAudioCard, planLoadAudio, planPreviewAudio, planSaveAudio } from './media/soundNodes'
 import { planCreateVideo, planGetVideoComponents, planLoadVideo, planSaveVideo, planVideoCard } from './media/videoNodes'
+import { planLoadVideoFrames, planSaveVideoFrames } from './media/frameNodes'
 import { planGen3d } from './generators/gen3d'
 import { planImageExtras } from './generators/imageExtras'
 import { planLora } from './generators/lora'
@@ -180,7 +182,7 @@ export interface DeriveIO {
    * never read into memory (ResultStore.saveFromPath); `path` is gone
    * afterwards. Absent (a live preview, older test fakes): a media node fails plainly.
    */
-  saveAssetFromPath?(path: string, o: { prefix: string; ext: string; subfolder?: string; folder?: 'output' | 'temp'; counter?: { prefix: string; offset: number } }): Promise<OutputFile>
+  saveAssetFromPath?(path: string, o: { prefix: string; ext: string; subfolder?: string; folder?: 'output' | 'temp'; counter?: { prefix: string; offset: number }; exact?: true }): Promise<OutputFile>
   /** Saves a live preview into temp (as Python's save_live_preview(unique=True)). */
   savePreview(bytes: Uint8Array, o: { nodeId?: string }): Promise<OutputFile>
   /** Saves a picture to show in temp under its own name, overwriting (ResultStore.savePreviewAs). */
@@ -1145,6 +1147,11 @@ async function planNodeRequest(ctx: PlanContext): Promise<NodePlan> {
       return planCreateVideo(ctx)
     case 'SaveVideo':
       return planSaveVideo(ctx)
+    // R5.5: frame batches from and to files (media/frameNodes.ts).
+    case 'LoadVideoFrames':
+      return planLoadVideoFrames(ctx)
+    case 'SaveVideoFrames':
+      return planSaveVideoFrames(ctx)
 
     // ── frame family (comfy_extras/nodes_compositor.py) ──
     case 'Compositor':

@@ -185,6 +185,8 @@ const ALLOWED_FILTERS: Readonly<Record<string, readonly string[]>> = {
   asetpts: [''],
   // R5.4: Get video components' one job hands the same frames to the kept batch and to the size check (values.ts keepVideoFrames).
   split: [''],
+  // R5.5: Save video frames pads an odd size to even with black (encode.ts `padToEven`).
+  pad: ['w', 'h', 'x', 'y', 'color'],
 }
 
 /**
@@ -215,6 +217,13 @@ export function checkFilterGraph(graph: string): boolean {
   }
   return true
 }
+
+/**
+ * R5.5: SaveVideoFrames' sound packets numbered from 0 (encode.ts): Python
+ * hands the AAC encoder frames with no pts, so the muxer numbers its packets
+ * from 0 and the encoder's priming delay stays at the front of the sound.
+ */
+export const FROM_ZERO_BSF = 'setts=pts=PTS-STARTPTS:dts=DTS-STARTDTS'
 
 /** `-r`'s value: `num/den` or a decimal, both positive. Exported for tests. */
 export function validRate(v: string): boolean {
@@ -264,7 +273,7 @@ export function checkArgs(tool: 'ffmpeg' | 'ffprobe', args: readonly string[], o
       if (name === '-fflags' && v !== '+bitexact') bad()
       if (name === '-enc_time_base' && !/^\d+\/\d+$/.test(v!)) bad()
       if ((name === '-vf' || name === '-af' || name === '-filter_complex') && !checkFilterGraph(v!)) bad()
-      if (name === '-bsf' && !/^setts=dts=DTS-\d+$/.test(v!)) bad()
+      if (name === '-bsf' && !/^setts=dts=DTS-\d+$/.test(v!) && v !== FROM_ZERO_BSF) bad()
       if (name === '-ss' && v !== '0') bad()
       if (name === '-seek_timestamp' && v !== '1') bad()
       if (name === '-frames' && !/^\d+$/.test(v!)) bad()

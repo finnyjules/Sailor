@@ -82,13 +82,36 @@ export function chromaSubsampling(pixFmt: string): { w: boolean; h: boolean } | 
  * 4:2:2 a position on a full-resolution axis moves the picture). Exported
  * for tests.
  */
-export function framesFilter(v: Pick<VideoStreamProbe, 'chromaLocation' | 'pixFmt'>): string {
+export function framesFilter(v: Pick<VideoStreamProbe, 'chromaLocation' | 'pixFmt'>, pick?: FramePick): string {
+  return `${pick ? pickFilter(pick) : 'select=gte(pts\\,0)'},${framesScale(v)}`
+}
+
+/**
+ * The conversion to rgb24 alone: each frame at its own size, or (R5.5, a
+ * batch kept at its first picked frame's size where that isn't the header's)
+ * at `size`, which is the same conversion for a frame already that size.
+ */
+export function framesScale(v: Pick<VideoStreamProbe, 'chromaLocation' | 'pixFmt'>, size?: { w: number; h: number }): string {
   const pos = v.chromaLocation && Object.hasOwn(CHROMA_POS, v.chromaLocation) ? CHROMA_POS[v.chromaLocation]! : null
   const sub = chromaSubsampling(v.pixFmt)
   let chroma = ''
   if (pos && sub?.w) chroma += `:in_h_chr_pos=${pos[0]}`
   if (pos && sub?.h) chroma += `:in_v_chr_pos=${pos[1]}`
-  return `select=gte(pts\\,0),scale=w=iw:h=ih:eval=frame:flags=bilinear${chroma},format=rgb24`
+  if (size && !(Number.isSafeInteger(size.w) && Number.isSafeInteger(size.h) && size.w > 0 && size.h > 0)) throw new MediaError('failed')
+  return `scale=${size ? `w=${size.w}:h=${size.h}` : 'w=iw:h=ih:eval=frame'}:flags=bilinear${chroma},format=rgb24`
+}
+
+/**
+ * Load video frames' choice (R5.5, nodes_video_effects.py:580-595): of every
+ * frame the decoder hands over (`container.decode(stream)`: no pts rule, unlike
+ * get_components), skip `start`, then keep every `stride`-th, `count` at most.
+ */
+export interface FramePick { start: number; stride: number; count: number }
+
+/** The pick as a select filter over the decoded frames' own numbers (0, 1, 2…), from integers only. */
+export function pickFilter(p: FramePick): string {
+  if (![p.start, p.stride, p.count].every(n => Number.isSafeInteger(n) && n >= 0) || p.stride < 1 || p.count < 1) throw new MediaError('failed')
+  return `select=gte(n\\,${p.start})*not(mod(n-${p.start}\\,${p.stride}))`
 }
 
 /** One `-stats_mux_pre` line: the frame's bytes, its input pts and time base. */
@@ -124,6 +147,12 @@ export async function decodeFrames(path: string, o: {
   probe?: MediaProbe
   /** The runner's own kept batch (R5.2 fix round 1): no upload caps; the caller has judged the batch caps, and `maxFrames` holds. */
   kept?: true
+  /**
+   * R5.5 (Load video frames): only these of the decoder's frames, every one
+   * counted (no pts rule), and the decode stops once `count` are out.
+   * `maxFrames` still holds.
+   */
+  pick?: FramePick
 }): Promise<{ count: number; w: number; h: number }> {
   const p = await probeFor(path, o, 'video')
   const refused = o.kept ? null : mediaCapsWord(p, 'video', isHosted())
@@ -166,7 +195,8 @@ export async function decodeFrames(path: string, o: {
     '-copyts', '-reinit_filter', '0', '-noautorotate',
     ...inputArgs(p.path, p.format),
     '-map', '0:v:0', '-fps_mode', 'passthrough',
-    '-vf', framesFilter(v),
+    '-vf', framesFilter(v, o.pick),
+    ...(o.pick ? ['-frames:v', String(o.pick.count)] : []),
     '-stats_mux_pre', 'pipe:3', '-stats_mux_pre_fmt', '{size} {ptsi} {tbi}',
     '-f', 'rawvideo', 'pipe:1',
   ]

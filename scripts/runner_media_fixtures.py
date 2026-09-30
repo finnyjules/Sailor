@@ -64,6 +64,15 @@ Groups:
            the ui, the files written, and each saved file's header, Python's
            own numbers, decoded frames and sound, and tags; every H.264 case
            also with PyAV switched to libopenh264 (rule 3).
+  frames — (R5.5) LoadVideoFrames over every standard clip (the frame
+           choice: stride, start, max_seconds) and over this group's own
+           clips g_frames_big.mp4 (160 × 90) and g_frames_odd.mkv (128 × 73,
+           FFV1) at every max_size, where Pillow's resize(BILINEAR) runs;
+           Pillow's resize(BILINEAR) of `synth` pictures; SaveVideoFrames of
+           an even and an odd batch at 24 and 29.97 fps and CRF 10, 20 and
+           32, and with each sound clip, a broken one (g_frames_broken.wav)
+           and a missing one, its name made at a fixed second (time.strftime
+           patched), with libx264 and switched to libopenh264.
 """
 from __future__ import annotations
 
@@ -1599,7 +1608,230 @@ def group_video(names: list[str]) -> dict:
     return {"cases": cases}
 
 
-GROUPS = {"probe": group_probe, "decode": group_decode, "encode": group_encode, "sound": group_sound, "video": group_video}
+# ── frame batches (R5.5) ──────────────────────────────────────────────────────
+
+# LoadVideoFrames' settings over the standard clips (none is over 64 px, so no resize: the frame choice)
+# and over this group's own clips (every combination, with the resize).
+FRAMES_PAST_END = 100000
+FRAMES_STANDARD_GRID = [
+    {"max_size": 720, "stride": s, "start_frame": st, "max_seconds": ms, "max_frames": 600}
+    for s in (1, 3) for st in (0, 5, FRAMES_PAST_END) for ms in (0.0, 0.5)
+]
+FRAMES_GROUP_GRID = [
+    {"max_size": m, "stride": s, "start_frame": st, "max_seconds": ms, "max_frames": 600}
+    for m in (64, 96, 720, 4096) for s in (1, 3) for st in (0, 5, FRAMES_PAST_END) for ms in (0.0, 0.5)
+] + [{"max_size": 64, "stride": 2, "start_frame": 1, "max_seconds": 0.0, "max_frames": 2},
+     {"max_size": 720, "stride": 1, "start_frame": 0, "max_seconds": 10.0, "max_frames": 600}]
+# Pillow's resize(BILINEAR) of R2.1's `synth` pictures: (w, h, seed, ow, oh), down, up, one side, and odd sizes.
+PIL_BILINEAR_CASES = [
+    (64, 48, 11, 32, 24), (64, 48, 12, 17, 13), (33, 25, 13, 64, 48), (97, 61, 14, 40, 25), (200, 10, 15, 7, 3),
+    (5, 5, 16, 1, 1), (64, 48, 17, 64, 20), (64, 48, 18, 21, 48), (160, 90, 19, 64, 36), (128, 73, 20, 64, 36),
+    (3, 2, 21, 7, 5), (1, 1, 22, 4, 3),
+]
+# The fixed stamp SaveVideoFrames' names take here (time.strftime patched): the runner's names are checked at the same second.
+FRAMES_STAMP = "20260930_120000"
+FRAMES_SOUNDS = ["a_mono.mp3", "a_s16.wav", "a_s24.wav", "a_s32.wav", "a_16.flac", "a_24.flac", "a_vorbis.ogg",
+                 "a_opus.webm", "a_aac.m4a", "a_long_8k.wav", "a_min.wav", "g_frames_broken.wav", "no_such_sound.wav"]
+
+
+def clip_frames_big() -> str:
+    """This group's own clip: 30 `smooth` frames at 160 × 90, H.264 at 24 fps (resized by every max_size under 160)."""
+    name = "g_frames_big.mp4"
+    path, c = open_out(name)
+    s = video_stream(c, "libx264", 160, 90, 24, "yuv420p", {**X264, "crf": "18"})
+    frames = []
+    for i in range(30):
+        f = av.VideoFrame.from_ndarray(np.frombuffer(smooth_frame(160, 90, i), np.uint8).reshape(90, 160, 3), format="rgb24").reformat(format="yuv420p")
+        f.pts = i
+        frames.append(f)
+    encode_frames(c, s, frames)
+    c.close()
+    return name
+
+
+def clip_frames_odd() -> str:
+    """This group's own clip: 8 `smooth` frames at 128 × 73 (an odd height), FFV1 RGB in Matroska at 25 fps.
+    At max_size 64 the height is 36.5, which Python's round() takes to 36 (half to even)."""
+    name = "g_frames_odd.mkv"
+    path, c = open_out(name, "matroska")
+    s = video_stream(c, "ffv1", 128, 73, 25, "bgr0")
+    frames = []
+    for i in range(8):
+        f = av.VideoFrame.from_ndarray(np.frombuffer(smooth_frame(128, 73, i), np.uint8).reshape(73, 128, 3), format="rgb24").reformat(format="bgr0")
+        f.pts = i
+        frames.append(f)
+    encode_frames(c, s, frames)
+    c.close()
+    return name
+
+
+def clip_frames_broken() -> str:
+    """A WAV that won't open: its RIFF and WAVE marks, then no format chunk (SaveVideoFrames skips its sound)."""
+    name = "g_frames_broken.wav"
+    body = b"WAVE" + b"junk" + (8).to_bytes(4, "little") + b"notsound" + b"data" + (16).to_bytes(4, "little") + bytes(range(16))
+    with open(os.path.join(CLIPS, name), "wb") as f:
+        f.write(b"RIFF" + len(body).to_bytes(4, "little") + body)
+    return name
+
+
+class _Stamp:
+    """time.strftime giving FRAMES_STAMP for SaveVideoFrames' name (and the real one otherwise)."""
+
+    def __enter__(self):
+        import time
+        self.real = time.strftime
+        time.strftime = lambda fmt, *a: FRAMES_STAMP if fmt == "%Y%m%d_%H%M%S" else self.real(fmt, *a)
+
+    def __exit__(self, *a):
+        import time
+        time.strftime = self.real
+        return False
+
+
+class _AvModule:
+    """sys.modules['av'] as an _AvShim while SaveVideoFrames runs (it imports av inside execute)."""
+
+    def __init__(self, shim):
+        self.shim = shim
+
+    def __enter__(self):
+        self.real = sys.modules["av"]
+        sys.modules["av"] = self.shim
+
+    def __exit__(self, *a):
+        sys.modules["av"] = self.real
+        return False
+
+
+def frames_u8(imgs) -> list[bytes]:
+    """An IMAGE batch as the uint8 rgb24 frames it holds (exact: each value came from 8 bits)."""
+    return [(imgs[i] * 255.0).round().to(torch.uint8).numpy().tobytes() for i in range(imgs.shape[0])]
+
+
+def padded(frames: list[bytes], w: int, h: int) -> list[bytes]:
+    """SaveVideoFrames' padding: black at the right and bottom up to even sizes."""
+    ew, eh = w + (w % 2), h + (h % 2)
+    out = []
+    for b in frames:
+        a = np.zeros((eh, ew, 3), np.uint8)
+        a[:h, :w] = np.frombuffer(b, np.uint8).reshape(h, w, 3)
+        out.append(a.tobytes())
+    return out
+
+
+def kept_sound_samples(path: str, target: float):
+    """The samples SaveVideoFrames' loop hands the AAC encoder from a sound file (its first stream's
+    decoded frames up to the first whose time is past `target`), and the frames' sizes; None when it
+    won't open (Python skips the sound)."""
+    try:
+        with av.open(path) as c:
+            s = c.streams.audio[0]
+            kept, sizes = 0, []
+            for f in c.decode(s):
+                if f.time is not None and f.time > target:
+                    break
+                kept += f.samples
+                sizes.append(f.samples)
+            return {"kept": kept, "rate": s.rate or 48000, "frameSizes": sizes[:4], "lastFrame": sizes[-1] if sizes else 0}
+    except Exception as e:  # noqa: BLE001
+        return {"error": err(e)}
+
+
+def group_frames(names: list[str]) -> dict:
+    """(R5.5) LoadVideoFrames and SaveVideoFrames (comfy_extras/nodes_video_effects.py) as Python runs them."""
+    import tempfile
+    from PIL import Image
+    from comfy_extras import nodes_video_effects as nve
+    big, odd, broken = clip_frames_big(), clip_frames_odd(), clip_frames_broken()
+    folder_paths.set_input_directory(CLIPS)
+    Load = nve.LoadVideoFramesNode.PREPARE_CLASS_CLONE({"hidden_inputs": {}})
+    Save = nve.SaveVideoFramesNode.PREPARE_CLASS_CLONE({"hidden_inputs": {}})
+    cases: dict = {"groupClips": {n: sha(open(os.path.join(CLIPS, n), "rb").read()) for n in (big, odd, broken)},
+                   "stamp": FRAMES_STAMP, "pastEnd": FRAMES_PAST_END}
+
+    # LoadVideoFrames: each case's frames as indices into its clip's table of distinct frames (sha256).
+    tables: dict = {}
+    loads = []
+    for clip, grid in [(n, FRAMES_STANDARD_GRID) for n in names] + [(big, FRAMES_GROUP_GRID), (odd, FRAMES_GROUP_GRID)]:
+        table = tables.setdefault(clip, [])
+        for g in grid:
+            rec: dict = {"clip": clip, **g}
+            try:
+                imgs, fps = Load.execute(file=clip, **g).result
+                shas = [sha(b) for b in frames_u8(imgs)]
+                for s in shas:
+                    if s not in table:
+                        table.append(s)
+                rec.update({"w": int(imgs.shape[2]), "h": int(imgs.shape[1]), "frames": [table.index(s) for s in shas], "fps": fps})
+            except Exception as e:  # noqa: BLE001
+                rec["error"] = err(e)
+            loads.append(rec)
+    cases["loads"] = loads
+    cases["tables"] = tables
+    cases["black64"] = sha(bytes(64 * 64 * 3))
+    cases["validate"] = {"missing": nve.LoadVideoFramesNode.validate_inputs(file="no_such_video.mp4"),
+                         "present": nve.LoadVideoFramesNode.validate_inputs(file=big)}
+
+    # Pillow's resize(BILINEAR) of `synth` pictures (the resize LoadVideoFrames makes).
+    pil = []
+    for w, h, seed, ow, oh in PIL_BILINEAR_CASES:
+        src = synth(w, h, 3, seed)
+        got = np.asarray(Image.frombytes("RGB", (w, h), src).resize((ow, oh), Image.BILINEAR)).tobytes()
+        pil.append({"w": w, "h": h, "seed": seed, "ow": ow, "oh": oh, "sha256": sha(got), **({"rgb": b64(got)} if ow * oh <= 64 * 48 else {})})
+    cases["pilBilinear"] = pil
+
+    # SaveVideoFrames: frames from LoadVideoFrames (an even and an odd size), 24 and 29.97 fps, CRF 10/20/32,
+    # without sound; then each sound clip (and a broken and a missing one) at 24 fps, CRF 20. libx264 as
+    # ComfyUI runs it, and the same call switched to libopenh264 at the CRF's OPENH264_FOR row.
+    sources = {
+        "even": {"clip": big, "max_size": 96, "max_seconds": 0.25},
+        "odd": {"clip": "v_vp9_odd.webm", "max_size": 720, "max_seconds": 0.25},
+    }
+    batches = {}
+    for key, s in sources.items():
+        imgs, _fps = Load.execute(file=s["clip"], max_seconds=s["max_seconds"], max_frames=600, max_size=s["max_size"], start_frame=0, stride=1).result
+        batches[key] = imgs
+    cases["sources"] = {k: {**sources[k], "w": int(v.shape[2]), "h": int(v.shape[1]), "count": int(v.shape[0])} for k, v in batches.items()}
+    saves = []
+    runs = [(k, fps, crf, "(none)") for k in ("even", "odd") for fps in (24.0, 29.97) for crf in (10, 20, 32)]
+    runs += [("even", 24.0, 20, a) for a in FRAMES_SOUNDS]
+    rgbz: dict = {}
+    with tempfile.TemporaryDirectory() as tmp:
+        for k, fps, crf, audio in runs:
+            imgs = batches[k]
+            T, H, W = int(imgs.shape[0]), int(imgs.shape[1]), int(imgs.shape[2])
+            source = padded(frames_u8(imgs), W, H)
+            rec: dict = {"source": k, "fps": fps, "crf": crf, "audio": audio}
+            if audio != "(none)":
+                rec["kept"] = kept_sound_samples(os.path.join(CLIPS, audio), T / float(fps)) if os.path.exists(os.path.join(CLIPS, audio)) else None
+            for run, swap in (("x264", None), ("openh264", openh264_options(crf))):
+                out, _temp = fresh_dirs(tmp, f"save_{k}_{fps}_{crf}_{audio}_{run}")
+                shim = _AvShim(swap)
+                with _Stamp(), _AvModule(shim):
+                    res = Save.execute(frames=imgs, fps=fps, filename_prefix="video", audio_file=audio, preset="veryfast", crf=crf)
+                ui = video_ui_of(res)
+                saved = video_out(os.path.join(out, ui["images"][0]["subfolder"], ui["images"][0]["filename"]), source, swap is None, False)
+                rec[run] = {"ui": ui, "saved": saved, "written": files_written(out), "result": list(res.result or [])}
+            saved = rec["x264"]["saved"]
+            key = sha("".join(saved["frames"]).encode("ascii"))
+            rgbz.setdefault(key, saved.pop("rgbz"))
+            saved["rgbzKey"] = key
+            saves.append(rec)
+        # The name: (filename_prefix or 'video').rstrip('_'), then the stamp.
+        names_rec = []
+        for prefix in ("video", "clip__", "", "a_b_"):
+            out, _temp = fresh_dirs(tmp, f"name_{prefix or 'empty'}")
+            with _Stamp(), _AvModule(_AvShim(openh264_options(20))):
+                ui = video_ui_of(Save.execute(frames=batches["even"][:1], fps=24.0, filename_prefix=prefix, audio_file="(none)", preset="veryfast", crf=20))
+            names_rec.append({"prefix": prefix, "ui": ui, "written": files_written(out)})
+        cases["names"] = names_rec
+    cases["saves"] = saves
+    cases["rgbz"] = rgbz
+    return {"cases": cases}
+
+
+GROUPS = {"probe": group_probe, "decode": group_decode, "encode": group_encode, "sound": group_sound, "video": group_video,
+          "frames": group_frames}
 
 
 def main() -> None:

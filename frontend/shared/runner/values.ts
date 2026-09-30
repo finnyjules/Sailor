@@ -66,6 +66,8 @@ export const OUTPUT_KINDS: Readonly<Record<string, Readonly<Record<number, Value
   // on: eligibility.ts outputKindsFor drops these rows with it off).
   GetVideoComponents: { 0: 'frames', 2: 'number' },
   CreateVideo: { 0: 'video' },
+  // R5.5: Load video frames' batch and its rate (fps / stride), also only while `media-video` is on.
+  LoadVideoFrames: { 0: 'frames', 1: 'number' },
 }
 
 /** What a wire carries: the source's declared kind for that slot (through Gates), files by default. */

@@ -25,13 +25,13 @@
  */
 import { rm, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
-import { MEDIA_CAPS, type MediaCaps } from '#shared/runner/media'
+import { MEDIA_CAPS, MEDIA_JOB_TIMEOUT_MS, type MediaCaps } from '#shared/runner/media'
 import type { FileAccess } from '../runner/fileAccess'
 import type { KeptBytes } from '../runner/keptBytes'
 import type { OutputFile, RunnerValue, SoundNote } from '../runner/types'
-import { decodeAudio, decodeFrames, framesFilter, type DecodedSound, type SoundDecoder } from './decode'
+import { decodeAudio, decodeFrames, framesFilter, framesScale, pickFilter, type DecodedSound, type FramePick, type SoundDecoder } from './decode'
 import { FFV1_KEPT_RATE, PYAV_H264_DEFAULT, encodeVideo, floatWav, pyStreamRate, writeFfv1, type SoundLayout } from './encode'
-import { mediaCapsWord, probeMedia, type MediaProbe, type Rational } from './probe'
+import { ffprobeJson, mediaCapsWord, probeMedia, type MediaProbe, type Rational } from './probe'
 import { MediaError, inputArgs, runMedia } from './run'
 
 /** Classes whose sound Python decodes with _download_url_to_audio_dict (nodes_replicate.py:1735, :1834, :5463, and the two cards that run them). */
@@ -58,7 +58,7 @@ type VideoValue = Extract<RunnerValue, { kind: 'video' }>
 const capsOf = (hosted: boolean): Readonly<MediaCaps> => hosted ? MEDIA_CAPS.hosted : MEDIA_CAPS.local
 
 /** A frame batch's size against the caps, before any work: the MEDIA_WORDS key, or null. */
-function batchWord(count: number, w: number, h: number, caps: Readonly<MediaCaps>): 'tooBig' | 'tooManyFrames' | null {
+export function batchWord(count: number, w: number, h: number, caps: Readonly<MediaCaps>): 'tooBig' | 'tooManyFrames' | null {
   if (w * h > caps.framePixels) return 'tooBig'
   if (count > caps.batchFrames || count * w * h > caps.batchPixels) return 'tooManyFrames'
   return null
@@ -306,9 +306,56 @@ export async function probeVideoFile(file: OutputFile, io: SoundReadIO): Promise
  * the work folder, and never count toward the run's kept total.
  */
 export async function keepVideoFrames(p: MediaProbe, io: MediaValueIO, o: { before?: () => Promise<void> } = {}): Promise<FramesValue> {
+  const kept = await keepDecodedFrames(p, io, o)
+  // Python's get_components makes an empty batch here (zeros(0, 3, 0, 0)); a kept batch has at least one frame.
+  if (!kept) throw new MediaError('noVideo')
+  return kept
+}
+
+/**
+ * Load video frames' batch (R5.5) at the file's own size, in the same ONE
+ * job: of the decoder's frames (no pts rule: `container.decode`), the ones
+ * `pick` chooses, the decode stopped once `pick.count` are out. Null when it
+ * chooses none (a start past the end): nothing is kept, and the caller keeps
+ * Python's 64 × 64 black frame instead.
+ */
+export async function keepPickedFrames(p: MediaProbe, io: MediaValueIO, pick: FramePick): Promise<FramesValue | null> {
+  try { return await keepDecodedFrames(p, io, { pick }) }
+  catch (e) {
+    if (!(e instanceof FirstFrameSize)) throw e
+    // The first frame picked isn't the header's size (a video whose size changes, R5.5): Python keeps
+    // the frames at their own size (no resize is asked for), so the batch is kept at that frame's size,
+    // and a frame of yet another size fails as torch.stack does.
+    const size = await pickedFrameSize(p, io, pick.start)
+    const v = p.video[0]!
+    if (!size || (size.w === v.w && size.h === v.h)) throw new MediaError('sizeChanged')
+    return keepDecodedFrames(p, io, { pick, size })
+  }
+}
+
+/** keepDecodedFrames' first picked frame came out another size than the header's. */
+class FirstFrameSize extends MediaError {
+  constructor() { super('sizeChanged') }
+}
+
+/** The size of the decoder's frame number `n` (0, 1, 2… in the order it hands them over), or null. */
+async function pickedFrameSize(p: MediaProbe, io: MediaValueIO, n: number): Promise<{ w: number; h: number } | null> {
+  const j = await ffprobeJson(p.path, p.format, ['-select_streams', 'v:0', '-show_entries', 'frame=width,height', '-read_intervals', `%+#${n + 65}`], {
+    userId: io.userId, signal: io.signal,
+    // A decode up to the frame, not a header read: the job's own limit.
+    timeoutMs: io.hosted ? MEDIA_JOB_TIMEOUT_MS.hosted : MEDIA_JOB_TIMEOUT_MS.local,
+  })
+  const frames = Array.isArray(j.frames) ? (j.frames as { width?: unknown; height?: unknown }[]) : []
+  const f = frames[n]
+  const w = Number(f?.width)
+  const h = Number(f?.height)
+  return Number.isInteger(w) && Number.isInteger(h) && w > 0 && h > 0 ? { w, h } : null
+}
+
+async function keepDecodedFrames(p: MediaProbe, io: MediaValueIO, o: { before?: () => Promise<void>; pick?: FramePick; size?: { w: number; h: number } }): Promise<FramesValue | null> {
   const v = p.video[0]
   if (!v) throw new MediaError('noVideo')
-  const { w, h } = v
+  const { w, h } = o.size ?? v
   checkBatch(0, w, h, io.hosted)
   const caps = capsOf(io.hosted)
   const frameBytes = w * h * 3
@@ -318,12 +365,21 @@ export async function keepVideoFrames(p: MediaProbe, io: MediaValueIO, o: { befo
     const out = join(work, 'frames.mkv')
     let count = 0
     let text = ''
+    // R5.5: the decode stops once the pick's frames are out (each output stops at its count).
+    const frameLimit = o.pick ? ['-frames:v', String(o.pick.count)] : []
+    // At the first picked frame's own size (R5.5, `size`): the kept branch converts to that size, so the
+    // FFV1 is made at it (the graph was set up at the header's); the checked branch keeps each frame at its
+    // own size, so a frame of yet another size still fails.
+    const graph = o.size && o.pick
+      ? `[0:v:0]${pickFilter(o.pick)},split=2[a][b];[a]${framesScale(v, o.size)},settb=expr=1/${FFV1_KEPT_RATE},setpts=N[k];[b]${framesScale(v)}[c]`
+      : `[0:v:0]${framesFilter(v, o.pick)},settb=expr=1/${FFV1_KEPT_RATE},setpts=N,split=2[k][c]`
     const args = [
       '-copyts', '-reinit_filter', '0', '-noautorotate', ...inputArgs(p.path, p.format),
-      '-filter_complex', `[0:v:0]${framesFilter(v)},settb=expr=1/${FFV1_KEPT_RATE},setpts=N,split=2[k][c]`,
+      '-filter_complex', graph,
       '-map', '[k]', '-fps_mode', 'passthrough', '-c:v', 'ffv1', '-threads:v', '1', '-pix_fmt', 'bgr0',
+      ...frameLimit,
       '-map_metadata', '-1', '-fflags', '+bitexact', '-f', 'matroska', '-y', `file:${out}`,
-      '-map', '[c]', '-fps_mode', 'passthrough', '-c:v', 'rawvideo',
+      '-map', '[c]', '-fps_mode', 'passthrough', '-c:v', 'rawvideo', ...frameLimit,
       '-stats_mux_pre', 'pipe:3', '-stats_mux_pre_fmt', '{size}', '-f', 'null', 'pipe:1',
     ]
     await runMedia({
@@ -337,7 +393,7 @@ export async function keepVideoFrames(p: MediaProbe, io: MediaValueIO, o: { befo
           text = text.slice(nl + 1)
           if (!line) continue
           if (!/^\d+$/.test(line)) throw new MediaError('failed')
-          if (Number(line) !== frameBytes) throw new MediaError('sizeChanged')
+          if (Number(line) !== frameBytes) throw o.pick && !o.size && count === 0 ? new FirstFrameSize() : new MediaError('sizeChanged')
           const word = batchWord(count + 1, w, h, caps)
           if (word) throw new MediaError(word)
           count++
@@ -345,8 +401,7 @@ export async function keepVideoFrames(p: MediaProbe, io: MediaValueIO, o: { befo
       },
     })
     if (text.trim()) throw new MediaError('failed')
-    // Python's get_components makes an empty batch here (zeros(0, 3, 0, 0)); a kept batch has at least one frame.
-    if (count === 0) throw new MediaError('noVideo')
+    if (count === 0) return null
     if (o.before) await o.before()
     if (io.signal?.aborted) throw new MediaError('stopped')
     const file = await io.kept.putPath(io.runId, out, 'mkv')

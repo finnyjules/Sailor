@@ -5,7 +5,8 @@
  * bake-replay cards hand on (3D Studio's passes, Text on path's and Text
  * mask's render), Painter's painter file, the Shader effect's bake, Pose Mannequin's
  * saved pictures (R3.15), the sound Load audio or Record audio loads
- * (R5.3), and the video Load video loads (R5.4). In hosted, every one must be the user's own.
+ * (R5.3), the video Load video loads (R5.4), and Load video frames' video and
+ * Save video frames' sound (R5.5). In hosted, every one must be the user's own.
  */
 import { isLink, type ApiPrompt } from '#shared/runner/graph'
 import { AUDIO_CARD_MEDIA_RULE, VIDEO_CARD_MEDIA_RULE, runnerRuleFor } from '#shared/runner/eligibility'
@@ -163,9 +164,14 @@ export function collectInputFiles(prompt: ApiPrompt, families: ReadonlySet<Runne
       const f = parseInputFileRef(inputs.file)
       if (f) out.push(f)
     }
-    // Load video (R5.4, media-video): the file it loads.
-    if (node.class_type === 'LoadVideo' && !isLink(inputs.file)) {
+    // Load video (R5.4, media-video) and Load video frames (R5.5): the file it loads.
+    if ((node.class_type === 'LoadVideo' || node.class_type === 'LoadVideoFrames') && !isLink(inputs.file)) {
       const f = parseInputFileRef(inputs.file)
+      if (f) out.push(f)
+    }
+    // Save video frames (R5.5): the sound file it adds, when one is named ('(none)' names none).
+    if (node.class_type === 'SaveVideoFrames' && typeof inputs.audio_file === 'string' && inputs.audio_file !== '(none)') {
+      const f = parseInputFileRef(inputs.audio_file)
       if (f) out.push(f)
     }
     // Load audio and Record audio (R5.3, media-sound): the file each loads.

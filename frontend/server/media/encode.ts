@@ -24,7 +24,11 @@
  *     does (`clipToYuv420p`);
  *   - sound is AAC in one stream: from samples (save_to: `fltp`, the layout by
  *     channel count, cut to `cutSamples`), or from a file (SaveVideoFrames:
- *     its first sound stream, whole frames up to `cutSeconds`, stereo);
+ *     its first sound stream, whole frames up to `cutSeconds`, stereo, its
+ *     packets numbered from 0 as Python's muxer numbers frames with no pts,
+ *     so the encoder's priming stays in front: R5.5, measured exact);
+ *   - SaveVideoFrames' odd sizes are padded to even with black (`padToEven`,
+ *     R5.5) where save_to's are refused;
  *   - decode times two frames ahead of presentation (`H264_DTS_DELAY`, the
  *     `setts` bitstream filter), as libx264's B-frames make them in Python's
  *     files: pictures are untouched, and Python's own get_components reads
@@ -58,7 +62,7 @@ import { h264Args, type H264Quality } from './h264Quality'
 import { exactFraction, ffprobeJson, mediaCapsWord, probeMedia, type MediaProbe, type Rational, type VideoStreamProbe } from './probe'
 import { resampleInWorker } from '../runner/compositor/worker'
 import { RESAMPLE_MAX_TAPS, opusRate, resampleTaps } from './resample'
-import { MediaError, inputArgs, mediaTempDir, removeMediaTempDir, runMedia } from './run'
+import { FROM_ZERO_BSF, MediaError, inputArgs, mediaTempDir, removeMediaTempDir, runMedia } from './run'
 
 export { OPENH264_FOR, PYAV_H264_DEFAULT, h264Args, type H264Quality } from './h264Quality'
 
@@ -275,6 +279,13 @@ export interface EncodeVideoOptions {
   fps: Rational
   /** clips: the first clip's; else the input's. */
   size?: { w: number; h: number }
+  /**
+   * SaveVideoFrames (R5.5, nodes_video_effects.py:679-706): an odd width or
+   * height is padded to even with black at the right and bottom (rgb24 zeros,
+   * before the conversion to yuv420p, as Python pads its array) instead of
+   * refused. 'ffv1' input only.
+   */
+  padToEven?: true
   quality: H264Quality
   sound?: { source: SoundSource; layout: SoundLayout; rate: number; cutSamples?: number } | null
   /** Written with -movflags use_metadata_tags (values as Python writes them: JSON text). */
@@ -312,6 +323,15 @@ export async function encodeVideo(o: EncodeVideoOptions): Promise<{ frames: numb
     H = input.h
     if (o.size && (o.size.w !== W || o.size.h !== H)) throw new MediaError('sizeChanged')
   }
+  if (o.padToEven && input.kind !== 'ffv1') throw new MediaError('failed')
+  /** The frames' own size (the kept batch's), before any padding. */
+  const inW = W
+  const inH = H
+  if (o.padToEven) {
+    if (!(Number.isInteger(W) && Number.isInteger(H) && W > 0 && H > 0)) throw new MediaError('failed')
+    W += W % 2
+    H += H % 2
+  }
   evenSize(W, H)
   const sound = o.sound ?? null
   if (sound && !(Object.hasOwn(LAYOUT_CHANNELS, sound.layout) && Number.isInteger(sound.rate) && sound.rate > 0)) throw new MediaError('failed')
@@ -333,13 +353,14 @@ export async function encodeVideo(o: EncodeVideoOptions): Promise<{ frames: numb
     else if (input.kind === 'ffv1') {
       const p = await probeVideoInput(input.path, { userId: o.userId, signal: o.signal, roots, kept: true })
       const v = p.video[0]!
-      if (v.w !== W || v.h !== H) throw new MediaError('sizeChanged')
+      if (v.w !== inW || v.h !== inH) throw new MediaError('sizeChanged')
       // `-r` as an input option: the kept batch's own stamps (FFV1_KEPT_RATE) are replaced by frames at
       // the video's rate, so each frame lasts 1/fps as a piped frame does (R5.2: without it the last
       // frame kept the batch file's duration, and the MP4 came out a frame short of Python's length).
       args.push('-noautorotate', '-r', `${o.fps.num}/${o.fps.den}`, ...inputArgs(p.path, p.format))
-      // bgr0 → rgb24 is a lossless shuffle; then exactly the rgb24 path.
-      args.push('-filter_complex', `[0:v]format=rgb24,${RGB_TO_YUV420P},${restamp}[v]`)
+      // bgr0 → rgb24 is a lossless shuffle; then (R5.5) black padding to even, as Python's zeros; then exactly the rgb24 path.
+      const pad = W !== inW || H !== inH ? `pad=w=${W}:h=${H}:x=0:y=0:color=black,` : ''
+      args.push('-filter_complex', `[0:v]format=rgb24,${pad}${RGB_TO_YUV420P},${restamp}[v]`)
       videoMap = '[v]'
     }
     else {
@@ -401,6 +422,10 @@ export async function encodeVideo(o: EncodeVideoOptions): Promise<{ frames: numb
     if (sound && soundIndex !== null) {
       args.push('-map', `${soundIndex}:a:0`, '-c:a', 'aac', '-ar', String(sound.rate), '-ch_layout', sound.layout, '-metadata:s:a:0', 'encoder=')
       if (soundFilter) args.push('-af', soundFilter)
+      // A file's sound (SaveVideoFrames, R5.5): Python sets every frame's pts to None, so the muxer numbers
+      // the AAC packets from 0 and the encoder's priming (1024 samples) is not trimmed by an edit list: the
+      // packets are numbered from 0 here too, which is what Python's reader then decodes.
+      if (!('sound' in sound.source)) args.push('-bsf:a', FROM_ZERO_BSF)
     }
     args.push('-map_metadata', tagsIndex === null ? '-1' : String(tagsIndex))
     args.push('-movflags', '+faststart+use_metadata_tags', '-f', 'mp4', '-y', `file:${out}`)

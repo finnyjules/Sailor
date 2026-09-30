@@ -37,6 +37,13 @@ export interface SaveOptions {
    * counter Python reads once over the prefix as typed.
    */
   counter?: { prefix: string; offset: number }
+  /**
+   * R5.5 (Save video frames, ruling h): the file is `<prefix>.<ext>` exactly,
+   * as Python names it (by the second, with no counter); only when that name
+   * is taken does a counter follow, `<prefix>_2.<ext>`, `_3`…, so a save never
+   * overwrites where Python would.
+   */
+  exact?: true
 }
 
 export const SAVE_OUTSIDE = 'This file name would save outside the output folder'
@@ -212,7 +219,7 @@ export function createEngineResultStore(o: { dirForType(type: string): string | 
    * Writes one saved file under `save`'s names: `write(path)` makes it at
    * that name or throws EEXIST, and the next counter is tried.
    */
-  async function saveWith(write: (path: string) => Promise<void>, { userId, prefix, ext, subfolder: sub, folder = 'output', counter: counting }: SaveOptions): Promise<OutputFile> {
+  async function saveWith(write: (path: string) => Promise<void>, { userId, prefix, ext, subfolder: sub, folder = 'output', counter: counting, exact }: SaveOptions): Promise<OutputFile> {
     const base = o.dirForType(folder)
     if (!base) throw new Error('The file store is not available')
     if (!prefix || /[/\0]/.test(prefix) || /[/\0]/.test(ext)) throw new Error(SAVE_OUTSIDE)
@@ -221,6 +228,19 @@ export function createEngineResultStore(o: { dirForType(type: string): string | 
     const dir = resolve(root, subfolder)
     if (dir !== root && !dir.startsWith(root + sep)) throw new Error(SAVE_OUTSIDE)
     await mkdir(dir, { recursive: true })
+    if (exact) {
+      for (let n = 1; n <= 1000; n++) {
+        const filename = n === 1 ? `${prefix}.${ext}` : `${prefix}_${n}.${ext}`
+        try {
+          await write(join(dir, filename))
+          return { filename, subfolder, type: folder }
+        }
+        catch (e: any) {
+          if (e?.code !== 'EEXIST') throw e
+        }
+      }
+      throw new Error('Could not find a free file name')
+    }
     const names = await readdir(dir).catch(() => [])
     let counter = counting ? nextCounter(names, counting.prefix) + counting.offset : nextCounter(names, prefix)
     for (let tries = 0; tries < 1000; tries++, counter++) {
