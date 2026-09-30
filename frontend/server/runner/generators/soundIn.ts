@@ -135,6 +135,12 @@ export function diarizationJson(result: unknown, raw: string | null): string {
 
 // ── The plan ──
 
+/** The payload key each class sends its sound under (a resumed node reads its link back from it). */
+const SOUND_KEY: Readonly<Record<SoundInClass, string>> = {
+  TranscribeAudioNode: 'audio_url', WhisperRemoteNode: 'audio_url', IdentifySpeakersNode: 'file',
+  CloneSingingVoiceNode: 'song_input', LipsyncNode: 'audio', LipsyncRemoteNode: 'audio',
+}
+
 /** The node's plan: one call with Python's WAV, whose answer is its text, its JSON, its sound or its video. */
 export async function planSoundIn(ctx: PlanContext): Promise<NodePlan> {
   const node = ctx.prompt[ctx.nodeId]!
@@ -142,9 +148,14 @@ export async function planSoundIn(ctx: PlanContext): Promise<NodePlan> {
   const inputs = node.inputs ?? {}
   const endpoint = SOUND_IN_ENDPOINTS[classType]
   const lipsync = isLipsync2ProClass(classType)
+  // A resumed node (fix round 1, Minor 2): its job is running; the links come from the request
+  // written down when it was sent. Nothing is decoded, read or uploaded again.
+  const recorded = ctx.recordedPayload
+  const recordedLink = (key: string): string | null => (recorded && typeof recorded[key] === 'string' ? recorded[key] as string : null)
   // Sync lips: Python checks the address before its call (LipsyncNode before, the twin after, the WAV).
   let video: string | null = null
-  if (lipsync) {
+  if (lipsync && recordedLink('video') !== null) video = recordedLink('video')
+  else if (lipsync) {
     const s = lipsyncVideoOf(inputs.video_url)
     if ('blank' in s) throw new Error(LIPSYNC_NEEDS_VIDEO)
     if ('refused' in s) throw new Error(s.refused)
@@ -155,14 +166,19 @@ export async function planSoundIn(ctx: PlanContext): Promise<NodePlan> {
     }
     else video = String(inputs.video_url)
   }
-  const link = inputs.audio
-  if (!isLink(link) || !ctx.soundWav) throw new Error(SOUND_IN_NEEDS_SOUND)
-  const w = await ctx.soundWav(link as ApiLink)
   const transcribe = isTranscribeClass(classType)
-  // Whisper's WAV goes up under Python's own name (`_lipsync_hosted_media_url(..., "whisper.wav")`).
-  const name = transcribe ? 'whisper.wav' : 'audio.wav'
-  if (!ctx.bytesToUrl) throw new Error(SOUND_IN_NEEDS_SOUND)
-  const audioUrl = await ctx.bytesToUrl({ filename: name, subfolder: '', type: 'kept' }, w.wav)
+  const sentAudio = recordedLink(SOUND_KEY[classType])
+  let audioUrl: string
+  if (sentAudio !== null) audioUrl = sentAudio
+  else {
+    const link = inputs.audio
+    if (!isLink(link) || !ctx.soundWav) throw new Error(SOUND_IN_NEEDS_SOUND)
+    const w = await ctx.soundWav(link as ApiLink)
+    // Whisper's WAV goes up under Python's own name (`_lipsync_hosted_media_url(..., "whisper.wav")`).
+    const name = transcribe ? 'whisper.wav' : 'audio.wav'
+    if (!ctx.bytesToUrl) throw new Error(SOUND_IN_NEEDS_SOUND)
+    audioUrl = await ctx.bytesToUrl({ filename: name, subfolder: '', type: 'kept' }, w.wav)
+  }
   const none = () => null
   switch (classType) {
     case 'TranscribeAudioNode':

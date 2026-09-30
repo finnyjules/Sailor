@@ -1762,22 +1762,35 @@ SOUND_CLIPS = [
 def _python_wav(path: str) -> dict:
     """What `_audio_dict_to_wav_data_url(audio, max_seconds=60)` sends for the AUDIO LoadAudio makes of
     `path` (nodes_audio.load): the WAV's own header facts and the sha256 of its PCM samples."""
+    import comfy_extras.nodes_audio as na
+    waveform, rate = na.load(path)
+    return _python_wav_of({"waveform": waveform.unsqueeze(0), "sample_rate": rate})
+
+
+def _card_silence() -> dict:
+    """The AUDIO the real Audio card hands on with no file and nothing wired (nodes_audio.py :327-331)."""
+    import comfy_extras.nodes_audio as na
+    out = na.Audio.execute(audio="", export=False, filename_prefix="audio/ComfyUI", format="flac", quality="V0")
+    return out.args[0]
+
+
+def _python_wav_of(audio: dict) -> dict:
+    """`_audio_dict_to_wav_data_url(audio, max_seconds=60)` of an AUDIO dict: the WAV's facts, its PCM's
+    sha256, and the sha256 of the whole WAV (what capture_calls names a sound it made itself)."""
     import base64
     import hashlib
     import io
     import wave
-    import comfy_extras.nodes_audio as na
     import runner_builder_fixtures as rbf
     nr, _fal, _extras = rbf._node_modules()
-    waveform, rate = na.load(path)
-    url = nr._audio_dict_to_wav_data_url({"waveform": waveform.unsqueeze(0), "sample_rate": rate}, max_seconds=60)
+    url = nr._audio_dict_to_wav_data_url(audio, max_seconds=60)
     wav = base64.b64decode(url.split(",", 1)[1])
     with wave.open(io.BytesIO(wav), "rb") as w:
         ch, width, r, n = w.getnchannels(), w.getsampwidth(), w.getframerate(), w.getnframes()
         pcm = w.readframes(n)
     return {"channels": ch, "sample_width": width, "rate": r, "frames": n, "pcm_sha256": hashlib.sha256(pcm).hexdigest(),
             "head": list(struct.unpack(f"<{min(16, len(pcm) // 2)}h", pcm[:32])),
-            "seconds": n / r}
+            "seconds": n / r, "wav_sha256": hashlib.sha256(wav).hexdigest()}
 
 
 def sound_in_group() -> dict:
@@ -1867,6 +1880,29 @@ def sound_in_group() -> dict:
     lipsync("blank address", twin=True, video_url="")
     lipsync("answer list", answer={"output": [LIPSYNC_OUT_2, LIPSYNC_OUT]})
 
+    # An empty Audio card wired in (fix round 1): Python's card hands on 1 s of 44.1 kHz silence, which
+    # each node sends as its WAV (`WAV:<sha256>` of the WAV Python made; Whisper's uploaded as ever).
+    def silent(name, cls, widgets, answers, files=None):
+        got = capture_calls(cls, answers, files=files, tensors={"audio": _card_silence()}, **widgets)
+        case = {"name": name, "class_type": cls.define_schema().node_id, "widgets": widgets, "pictures": [], "sounds": [],
+                "picture_files": {}, "sound_files": {}, "silent_card": ["audio"], "answers": answers,
+                "calls": got["calls"], "gets": got["gets"], "output": got.get("output"), "ui": got.get("ui")}
+        if files:
+            case["files"] = files
+        if "error" in got:
+            case["error"] = got["error"]
+        cases.append(case)
+
+    silent("transcribe · empty Audio card", nr.TranscribeAudioNode, {"model": "Whisper", **TRANSCRIBE_DEFAULTS}, [WIZPER_OUT])
+    silent("whisper twin · empty Audio card", nr.WhisperRemoteNode, dict(TRANSCRIBE_DEFAULTS), [WIZPER_OUT])
+    silent("speakers · empty Audio card", nr.IdentifySpeakersNode, dict(DIARIZE_DEFAULTS), [{"__body__": DIARIZE_BODY}])
+    silent("clone · empty Audio card", nr.CloneSingingVoiceNode, {**RVC_DEFAULTS, "rvc_model": "Guitar"}, [{"output": RVC_OUT}],
+           files={RVC_OUT: rvc_wav})
+    silent("lipsync · empty Audio card", nr.LipsyncNode, {"model": "sync.so 2-pro", **LIPSYNC_DEFAULTS}, [{"output": LIPSYNC_OUT}],
+           files={LIPSYNC_OUT: video})
+    silent("lipsync twin · empty Audio card", nr.LipsyncRemoteNode, dict(LIPSYNC_DEFAULTS), [{"output": LIPSYNC_OUT}],
+           files={LIPSYNC_OUT: video})
+
     wavs = []
     with tempfile.TemporaryDirectory() as tmp:
         for clip in SOUND_CLIPS:
@@ -1875,7 +1911,7 @@ def sound_in_group() -> dict:
             with open(path, "wb") as f:
                 f.write(data)
             wavs.append({**clip, "file_sha256": hashlib.sha256(data).hexdigest(), "sent": _python_wav(path)})
-    return {"cases": cases, "wavs": wavs}
+    return {"cases": cases, "wavs": wavs, "silence": _python_wav_of(_card_silence())}
 
 
 DIARIZE_BODY = ('{"output": {"segments": [{"start": 0.0, "end": 1.5, "speaker": "SPEAKER_00", "text": " Hello caf\\u00e9.", '

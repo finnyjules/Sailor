@@ -95,6 +95,10 @@ export const RVC_VOICE_NOT_OFFERED = 'Voices named after real people aren’t av
 export const LIPSYNC_NEEDS_VIDEO = 'Sync lips to audio needs a link to the source video.'
 /** Ruling (r), hosted: an https address or the user's own upload. */
 export const LIPSYNC_VIDEO_ADDRESS = 'Sync lips to audio takes a web address (https) or a video you uploaded to Sailor.'
+export const LIPSYNC_VIDEO_MISSING = 'The source video to lip-sync is missing. Upload it again.'
+/** Fix round 1, Minor 1: the longest custom voice model address hosted Sailor sends. */
+export const RVC_CUSTOM_URL_MAX = 2048
+export const RVC_CUSTOM_URL_REFUSED = `A custom voice model must be a web address (https) of at most ${RVC_CUSTOM_URL_MAX.toLocaleString('en-US')} characters.`
 
 /**
  * Where Sync lips' video comes from, as the runner reads `video_url`:
@@ -134,23 +138,23 @@ export function soundInRequestProblem(classType: unknown, inputs: Record<string,
 }
 
 /**
- * Hosted, before the hold, on both paths:
- *   - Clone a singing voice: a preset named after a real person (ruling (m));
- *     a wired preset can't be judged, so it is refused too;
- *   - Sync lips to audio (the runner's own rule, `runner`): an address that
- *     is neither https nor a `/view` link to an upload (ruling (r); the
- *     upload's owner is judged by its name with the run's other files).
+ * Hosted, before the hold, on both paths: Clone a singing voice
+ *   - with a preset named after a real person (ruling (m)); a wired preset
+ *     can't be judged, so it is refused too;
+ *   - with CUSTOM and a model address that isn't https, or is longer than
+ *     RVC_CUSTOM_URL_MAX characters (fix round 1, Minor 1: Replicate
+ *     downloads it; a data: link would also swell the request and the record).
+ * Sync lips' address is the media check's (server/runner/soundInMedia.ts).
  */
-export function hostedSoundInProblem(classType: unknown, inputs: Record<string, unknown>, o: { runner?: boolean } = {}): { input: string, message: string } | null {
-  if (classType === 'CloneSingingVoiceNode') {
-    const v = inputs.rvc_model
-    if (isLink(v) || (typeof v === 'string' && RVC_REAL_PEOPLE.includes(v))) return { input: 'rvc_model', message: RVC_VOICE_NOT_OFFERED }
-    return null
-  }
-  if (o.runner && isLipsync2ProClass(classType) && !isLink(inputs.video_url)) {
-    const s = lipsyncVideoOf(inputs.video_url)
-    if ('refused' in s) return { input: 'video_url', message: s.refused }
-    if ('other' in s) return { input: 'video_url', message: LIPSYNC_VIDEO_ADDRESS }
+export function hostedSoundInProblem(classType: unknown, inputs: Record<string, unknown>): { input: string, message: string } | null {
+  if (classType !== 'CloneSingingVoiceNode') return null
+  const v = inputs.rvc_model
+  if (isLink(v) || (typeof v === 'string' && RVC_REAL_PEOPLE.includes(v))) return { input: 'rvc_model', message: RVC_VOICE_NOT_OFFERED }
+  const url = inputs.custom_rvc_model_url
+  if (v === 'CUSTOM' && url !== undefined && url !== null && url !== '') {
+    if (isLink(url) || typeof url !== 'string' || !/^https:\/\//i.test(url) || url.length > RVC_CUSTOM_URL_MAX) {
+      return { input: 'custom_rvc_model_url', message: RVC_CUSTOM_URL_REFUSED }
+    }
   }
   return null
 }

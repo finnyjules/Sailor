@@ -99,9 +99,10 @@ function soundFileOf(v: RunnerValue): OutputFile {
 /**
  * A sound value's samples, exactly as Python's AUDIO holds them: decoded the
  * way its note (or its maker, `soundNoteOf`) says. Past MEDIA_CAPS.soundSamples
- * it fails as it streams (and before, where the header says so).
+ * it fails as it streams (and before, where the header says so). `firstSeconds`
+ * (R3.10): only that much of it, with no length cap (decode.ts).
  */
-export async function readSound(v: RunnerValue, makerClass: string, io: SoundReadIO): Promise<DecodedSound> {
+export async function readSound(v: RunnerValue, makerClass: string, io: SoundReadIO, o: { firstSeconds?: number } = {}): Promise<DecodedSound> {
   const file = soundFileOf(v)
   // Known gap (R5.2 review Minor 3, parked in the ledger): the bytes are verified, then the tool reopens the path.
   const path = await io.access.verifiedPath(file)
@@ -113,6 +114,8 @@ export async function readSound(v: RunnerValue, makerClass: string, io: SoundRea
     // The runner's own kept sound is read back under the cap it was kept under (soundSamples, above),
     // not the upload caps (soundBytes, the length): its float WAV is 4 bytes a sample (fix round 1).
     ...(file.type === 'kept' ? { kept: true as const } : {}),
+    // R3.10: only the first seconds a sound-in node sends (decode.ts `firstSeconds`).
+    ...(o.firstSeconds !== undefined ? { firstSeconds: o.firstSeconds } : {}),
   })
 }
 

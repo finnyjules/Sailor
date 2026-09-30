@@ -142,6 +142,34 @@ export function soundFileBeforeRun(prompt: ApiPrompt, link: ApiLink, parse: (v: 
 export async function pythonWavOf(value: RunnerValue | undefined, makerClass: string, io: SoundReadIO): Promise<PythonWav> {
   if (!value || value.kind !== 'files' || !value.files.length) throw new Error(SOUND_IN_NEEDS_SOUND)
   const note = soundNoteOf(value, makerClass)
-  const sound = await readSound({ ...value, sound: note }, makerClass, io)
+  // Only the first 60 s are sent: only they are decoded (fix round 1, Minor 3), with no length cap.
+  const sound = await readSound({ ...value, sound: note }, makerClass, io, { firstSeconds: SOUND_IN_MAX_SECONDS })
   return pythonWav(sound)
+}
+
+/** The Audio card's 1 s of silence (nodes_audio.py :327-331): `torch.zeros((1, 1, 44100))` at 44.1 kHz. */
+export const CARD_SILENCE_RATE = 44100
+
+/** Python's WAV of the card's silence: 44,100 zero samples, mono, 44.1 kHz. */
+export function silenceWav(): PythonWav {
+  return pythonWav({ rate: CARD_SILENCE_RATE, channels: [new Float32Array(CARD_SILENCE_RATE)] })
+}
+
+/**
+ * Whether a link's sound is an Audio card's 1 s of silence (fix round 1,
+ * Important): through Audio cards' `source`, a card with nothing wired into
+ * `source` and no file (`elif audio:` — an empty name is Python's False),
+ * which hands on `{"waveform": zeros(1, 1, 44100), "sample_rate": 44100}`.
+ */
+export function silentCardAt(prompt: ApiPrompt, link: ApiLink): boolean {
+  let at: ApiLink = link
+  for (let depth = 0; depth < 64; depth++) {
+    const n = prompt[at[0]]
+    if (!n || n.class_type !== 'Audio' || at[1] !== 0) return false
+    const inputs = n.inputs ?? {}
+    if (isLink(inputs.source)) { at = inputs.source; continue }
+    const a = inputs.audio
+    return a === undefined || a === null || a === ''
+  }
+  return false
 }

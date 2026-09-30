@@ -58,7 +58,8 @@ import { loadVideoStartProblems, videoFileVerdict } from './media/videoNodes'
 import { frameStartProblems, framesSoundVerdict } from './media/frameNodes'
 import { ev, type RunEvents, type SwitchReason } from './events'
 import { mediaNodeKind, nodeMediaChangedWords, nodeMediaCheck, nodeMediaFiles } from './nodeMedia'
-import { pythonWavOf, soundMakerOf, type PythonWav } from './soundWav'
+import { pythonWavOf, silenceWav, silentCardAt, soundMakerOf, type PythonWav } from './soundWav'
+import { lipsyncUploadProblem } from './soundInMedia'
 import { SOUND_FILE_MISSING } from './media/soundNodes'
 import { switchedSinceHold } from './switches'
 import { measuredMediaChanged } from './mediaInputs'
@@ -1133,12 +1134,18 @@ export function createEngine(deps: EngineDeps) {
         const key = `${link[0]}:${link[1]}`
         let p = wavs.get(key)
         if (!p) {
-          const value = valueAt(take)(link) ?? { kind: 'files' as const, files: filesAt(take)(link) }
-          p = pythonWavOf(value, soundMakerOf(take.prompt, link), { access: files, userId: run.userId, hosted: deps.hosted(), signal })
+          // An Audio card's 1 s of silence (fix round 1, Important), as Python's card hands it on.
+          if (silentCardAt(take.prompt, link)) p = Promise.resolve(silenceWav())
+          else {
+            const value = valueAt(take)(link) ?? { kind: 'files' as const, files: filesAt(take)(link) }
+            p = pythonWavOf(value, soundMakerOf(take.prompt, link), { access: files, userId: run.userId, hosted: deps.hosted(), signal })
+          }
           wavs.set(key, p)
         }
         return p
       }
+      // Sync lips' upload in hosted (fix round 1, Minor 5): there, and within the video caps, from its header.
+      const videoUploadProblem = (f: OutputFile) => lipsyncUploadProblem(f, { access: files, userId: run.userId, hosted: deps.hosted(), signal })
       // Resuming a request already sent before a restart (F22 fix round 2):
       // nothing is measured, checked or handed off again, and the credits
       // written down at submit stand. The job is running (and billing) at the
@@ -1231,7 +1238,7 @@ export function createEngine(deps: EngineDeps) {
       // released); what is measured is what it is planned and charged on.
       let inputSeconds: InputSeconds | undefined
       const media = resuming ? null : await nodeMediaCheck(take.prompt, id, {
-        read: readOnce, size: f => files.size(f), strict: deps.hosted(), filesFrom: filesAt(take), soundWav: soundWavOnce,
+        read: readOnce, size: f => files.size(f), strict: deps.hosted(), filesFrom: filesAt(take), soundWav: soundWavOnce, videoUploadProblem,
       })
       if (media) {
         if (media.problem !== null) throw new Error(media.problem)
@@ -1291,6 +1298,9 @@ export function createEngine(deps: EngineDeps) {
         ...(resuming && rec.keepHeld ? { keepHeld: rec.keepHeld } : {}),
         priceInputs: take.prompt[id]!.inputs,
         soundWav: soundWavOnce,
+        // A resumed node's job is already running: a sound-in node takes its links from the request
+        // written down, never decoding or uploading its sound again (fix round 1, Minor 2).
+        ...(resuming && rec.payload ? { recordedPayload: rec.payload } : {}),
       })
       const handOff = async (f: OutputFile) => deps.handoff.toUrlBytes(f, await readOnce(f))
       // A picture wired into an IMAGE input: from a loader, the PNG of its tensor (R3.H).
@@ -2124,6 +2134,7 @@ export function createEngine(deps: EngineDeps) {
             if (!(await files.exists(f))) throw new Error(SOUND_FILE_MISSING)
             return pythonWavOf({ kind: 'files', files: [f], sound: { decode: 'load' } }, 'LoadAudio', { access: files, userId: i.userId, hosted: deps.hosted() })
           },
+          videoUploadProblem: f => lipsyncUploadProblem(f, { access: files, userId: i.userId, hosted: deps.hosted() }),
         })
         if (!media) continue
         if (media.problem !== null) throw refuse(media.problem, 400, { nodeId, classType: n.class_type })

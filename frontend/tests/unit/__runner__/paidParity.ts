@@ -51,6 +51,8 @@ export interface PaidCase {
   /** The input files Python was given, base64, by input name (else a small picture of its own per input). */
   picture_files?: Record<string, string>
   sound_files?: Record<string, string>
+  /** Sound inputs fed by an empty Audio card (R3.10 fix round 1): 1 s of 44.1 kHz silence, as Python's card. */
+  silent_card?: string[]
   /** Linked JSON files the node fetches, by URL (a status besides 200 as `{ status, text }`). */
   links?: Record<string, LinkBody>
   /** Answer files the node downloads, base64, by URL. */
@@ -157,6 +159,11 @@ export async function runPaidCase(c: PaidCase, o: { families: ReadonlySet<Runner
     if (!given) throw new Error(`${c.name}: no file for the sound ${name}`)
     writeFileSync(join(k.root, 'input', file), new Uint8Array(Buffer.from(given, 'base64')))
     prompt[`s_${name}`] = { class_type: 'LoadAudio', inputs: { audio: file } }
+    prompt[NODE]!.inputs[name] = [`s_${name}`, 0]
+  }
+  // An empty Audio card wired in (R3.10 fix round 1): Python's card hands on 1 s of silence.
+  for (const name of c.silent_card ?? []) {
+    prompt[`s_${name}`] = { class_type: 'Audio', inputs: { audio: '', export: false, filename_prefix: 'audio/ComfyUI', format: 'flac', quality: 'V0' } }
     prompt[NODE]!.inputs[name] = [`s_${name}`, 0]
   }
   const { runId } = await k.engine.startRun({ userId: k.userId, takes: [prompt], ...START })

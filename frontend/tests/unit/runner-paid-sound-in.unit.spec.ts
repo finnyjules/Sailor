@@ -17,8 +17,11 @@ import { mkdirSync, mkdtempSync, readFileSync, readdirSync, existsSync, writeFil
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { createHash } from 'node:crypto'
+import { rmSync } from 'node:fs'
+import { BufferTarget, EncodedPacket, EncodedVideoPacketSource, Mp4OutputFormat, Output } from 'mediabunny'
+import { MEDIA_WORDS } from '#shared/runner/media'
 import { describe, expect, it, vi } from 'vitest'
-import { createFakeFal, createFakeReplicate, makeKit } from './__runner__/kit'
+import { createFakeFal, createFakeLedger, createFakeReplicate, makeKit, until } from './__runner__/kit'
 import { normalizeSent, runPaidCase, wireText, type PaidCase } from './__runner__/paidParity'
 import { requireMediaTools } from './__runner__/mediaParity'
 import { checkPayload, type ProviderSchemaFixture } from './helpers/providerSchema'
@@ -30,7 +33,7 @@ import {
 import { nodesNeedingEngine } from '#shared/runner/needsEngine'
 import { RUNNER_OUTPUT_CLASSES } from '#shared/runner/validate'
 import {
-  DIARIZATION_SLUG, LIPSYNC_2_PRO_SLUG, LIPSYNC_NEEDS_VIDEO, LIPSYNC_VIDEO_ADDRESS, RVC_PRESET_VOICES, RVC_REAL_PEOPLE, RVC_SLUG,
+  DIARIZATION_SLUG, LIPSYNC_2_PRO_SLUG, LIPSYNC_NEEDS_VIDEO, LIPSYNC_VIDEO_ADDRESS, LIPSYNC_VIDEO_MISSING, RVC_CUSTOM_URL_MAX, RVC_CUSTOM_URL_REFUSED, RVC_PRESET_VOICES, RVC_REAL_PEOPLE, RVC_SLUG,
   RVC_VOICE_NOT_OFFERED, SOUND_IN_CHANNELS, SOUND_IN_CLASSES, SOUND_IN_EMPTY, SOUND_IN_LANGUAGES, WIZPER_APP, type SoundInClass,
 } from '#shared/runner/soundIn'
 import { PAID_RATES, otherCardFor, paidCallUsd } from '#shared/pricing/paidRates'
@@ -42,8 +45,9 @@ import { planNode, type NodePlan } from '~~/server/runner/executors'
 import { diarizationInput, lipsync2ProInput, rvcInput, wizperInput, wizperText } from '~~/server/runner/generators/soundIn'
 import { RUNNER_ROUTES } from '~~/server/runner/generators/twins'
 import { hostedRequestProblems, requestProblems } from '~~/server/runner/requestRules'
-import { pyInt16, pythonWav, type PythonWav } from '~~/server/runner/soundWav'
+import { pyInt16, pythonWav, pythonWavOf, silenceWav, type PythonWav } from '~~/server/runner/soundWav'
 import { decodeAudio } from '~~/server/media/decode'
+import { probeMedia } from '~~/server/media/probe'
 import { meterGraphSubmit } from '~~/server/utils/meterGraphRun'
 
 // ── The fixture ──────────────────────────────────────────────────────────────
@@ -53,7 +57,7 @@ interface WavCase {
   file_sha256: string
   sent: { channels: number; sample_width: number; rate: number; frames: number; pcm_sha256: string; head: number[]; seconds: number }
 }
-const FIXTURE = JSON.parse(readFileSync(join(__dirname, 'fixtures', 'runner-paid-sound-in.json'), 'utf8')) as { cases: PaidCase[]; wavs: WavCase[] }
+const FIXTURE = JSON.parse(readFileSync(join(__dirname, 'fixtures', 'runner-paid-sound-in.json'), 'utf8')) as { cases: PaidCase[]; wavs: WavCase[]; silence: WavCase['sent'] & { wav_sha256: string } }
 const CASES = FIXTURE.cases
 const START = { workflow: null, canvasId: null, projectUuid: null, projectName: null }
 const ON: ReadonlySet<RunnerFamily> = new Set<RunnerFamily>(['cards', 'media-sound', 'sound-in'])
@@ -68,6 +72,18 @@ function pythonWire(payloadJson: string): string {
 const node = (c: PaidCase, inputs: Record<string, unknown> = {}) => ({ class_type: c.class_type, inputs: { ...c.widgets, ...inputs } })
 const byName = (name: string) => CASES.find(c => c.name === name)!
 const sample = (ct: SoundInClass) => CASES.find(c => c.class_type === ct && !c.error)!
+/** An empty Audio card's case (fix round 1): Python names the silence WAV it made by its sha256. */
+const isSilent = (c: PaidCase) => !!c.silent_card?.length
+/** The calls as Python writes them: a handed-off `audio.wav` is `WAV:audio`, or, for the card's silence, `WAV:<sha256>`. */
+function pyNorm(c: PaidCase, sent: Parameters<typeof normalizeSent>[0]) {
+  const got = normalizeSent(sent, [], ['audio'])
+  if (!isSilent(c)) return got
+  const swap = (v: unknown): unknown => (v === 'WAV:audio' ? `WAV:${FIXTURE.silence.wav_sha256}` : v)
+  return got.map(g => ({ ...g, payload: Object.fromEntries(Object.entries(g.payload).map(([k, v]) => [k, swap(v)])) }))
+}
+/** The seconds a case sends: its 0.25 s sound, or the card's 1 s of silence. */
+const secondsOf = (c: PaidCase) => (isSilent(c) ? 1 : CASE_SECONDS)
+
 /** Each case whose Python made its call (not the blank addresses). */
 const CALLED = CASES.filter(c => !c.error)
 
@@ -199,7 +215,9 @@ describe('Python\'s WAV: the samples sent equal Python\'s exactly', () => {
     expect(sha(bytes), 'the clip is the fixture\'s').toBe(w.file_sha256)
     const path = join(dir, `${w.seed}.wav`)
     writeFileSync(path, bytes)
-    const sound = await decodeAudio(path, { decoder: 'load', userId: null, roots: [dir], maxSamples: 100_000_000 })
+    // As the node decodes it (fix round 1, Minor 3): the first 60 s only, no length cap.
+    const sound = await decodeAudio(path, { decoder: 'load', userId: null, roots: [dir], maxSamples: 100_000_000, firstSeconds: 60 })
+    expect(sound.channels[0]!.length).toBe(Math.min(w.rate * w.seconds, 60 * w.rate))
     const made = pythonWav(sound)
     expect({ channels: made.channels, rate: made.rate, frames: made.frames }).toEqual({ channels: w.sent.channels, rate: w.sent.rate, frames: w.sent.frames })
     expect(made.seconds).toBe(w.sent.seconds)
@@ -244,11 +262,11 @@ describe('every fixture case: what Python sends and returns', () => {
     expect(plan.kind).toBe('provider')
     expect(plan.backup).toBeUndefined()
     const py = c.calls[0]!
-    expect(normalizeSent([{ provider: plan.provider, endpoint: plan.endpoint, payload: plan.payload }], [], ['audio']))
+    expect(pyNorm(c, [{ provider: plan.provider, endpoint: plan.endpoint, payload: plan.payload }]))
       .toEqual([{ provider: py.provider, endpoint: py.endpoint, payload: py.payload }])
     const pw = pythonWire(py.payload_json!)
     if (pw !== py.payload_json) wholeFloat.push(c.name)
-    expect(wireText(normalizeSent([{ provider: plan.provider, endpoint: plan.endpoint, payload: plan.payload }], [], ['audio'])[0]!.payload)).toBe(pw)
+    expect(wireText(pyNorm(c, [{ provider: plan.provider, endpoint: plan.endpoint, payload: plan.payload }])[0]!.payload)).toBe(pw)
     // Every payload fits the published schema (a Python address that isn't one aside: Python sends it as typed).
     const problems = checkPayload(SCHEMAS[plan.endpoint]!, plan.payload)
     expect(problems).toEqual([])
@@ -271,7 +289,7 @@ describe('every fixture case: what Python sends and returns', () => {
   it('the builders alone give the same', () => {
     for (const c of CALLED) {
       const py = c.calls[0]!.payload
-      const wav = c.class_type.startsWith('Transcribe') || c.class_type.startsWith('Whisper') ? 'UPLOAD:whisper.wav' : 'WAV:audio'
+      const wav = c.class_type.startsWith('Transcribe') || c.class_type.startsWith('Whisper') ? 'UPLOAD:whisper.wav' : isSilent(c) ? `WAV:${FIXTURE.silence.wav_sha256}` : 'WAV:audio'
       const built = c.class_type === 'IdentifySpeakersNode' ? diarizationInput(c.widgets, wav)
         : c.class_type === 'CloneSingingVoiceNode' ? rvcInput(c.widgets, wav)
           : c.class_type.startsWith('Lipsync') ? lipsync2ProInput(c.widgets, String(c.widgets.video_url), wav)
@@ -302,7 +320,7 @@ describe('every fixture case: what Python sends and returns', () => {
   })
 })
 
-describe('every fixture case through the engine (cards, media-sound and sound-in on; the sound from Load audio)', () => {
+describe('every fixture case through the engine (cards, media-sound and sound-in on; the sound from Load audio, or an empty Audio card)', () => {
   // Sync lips' "silence" is left to the engine (it can't be priced), so it isn't run here.
   const RUN = CALLED.filter(c => c.widgets.sync_mode !== 'silence')
 
@@ -310,7 +328,7 @@ describe('every fixture case through the engine (cards, media-sound and sound-in
     await requireMediaTools()
     const run = await runPaidCase(c, { families: ON })
     expect(run.status, run.error ?? '').toBe('done')
-    const sent = normalizeSent(run.sent, [], ['audio'])
+    const sent = pyNorm(c, run.sent)
     expect(sent).toEqual([{ provider: c.calls[0]!.provider, endpoint: c.calls[0]!.endpoint, payload: c.calls[0]!.payload }])
     expect(wireText(sent[0]!.payload)).toBe(pythonWire(c.calls[0]!.payload_json!))
     const out = pythonOut(c)
@@ -321,8 +339,8 @@ describe('every fixture case through the engine (cards, media-sound and sound-in
       expect(run.files.length).toBe(1)
       expect(run.files[0]!.filename).toMatch(c.class_type === 'CloneSingingVoiceNode' ? /^voice_clone.*\.wav$/ : /^lipsync.*\.mp4$/)
     }
-    // Charged on the seconds sent (0.25 s of the case's sound).
-    const price = priceNode(c.class_type, c.widgets, { inputSeconds: { audio: CASE_SECONDS } })
+    // Charged on the seconds sent (0.25 s of the case's sound, or the empty card's 1 s of silence).
+    const price = priceNode(c.class_type, c.widgets, { inputSeconds: { audio: secondsOf(c) } })
     if ('refused' in price) throw new Error(price.refused)
     expect(run.credits).toBe(price.credits)
   }, 60_000)
@@ -682,3 +700,214 @@ function meterDeps() {
     releaseHold: vi.fn(async () => {}),
   }
 }
+
+// ── Fix round 1 ──────────────────────────────────────────────────────────────
+
+/** A picture-only MP4 whose video track lasts `seconds` (10 fps), muxed without an encoder (as runner-sync-3's). */
+async function mp4(seconds: number, width = 320, height = 240): Promise<Buffer> {
+  const out = new Output({ format: new Mp4OutputFormat(), target: new BufferTarget() })
+  const src = new EncodedVideoPacketSource('avc')
+  out.addVideoTrack(src, { frameRate: 10 })
+  await out.start()
+  const description = new Uint8Array([1, 0x42, 0xC0, 0x1E, 0xFF, 0xE1, 0, 0x0A, 0x67, 0x42, 0xC0, 0x1E, 0xDA, 0x02, 0x80, 0xBF, 0xE5, 0x84, 1, 0, 4, 0x68, 0xCE, 0x3C, 0x80])
+  const frames = Math.round(seconds * 10)
+  for (let i = 0; i < frames; i++) {
+    await src.add(new EncodedPacket(new Uint8Array([0, 0, 0, 1, 0x65]), i === 0 ? 'key' : 'delta', i / 10, 0.1),
+      i === 0 ? { decoderConfig: { codec: 'avc1.42c01e', codedWidth: width, codedHeight: height, description } } : undefined)
+  }
+  await out.finalize()
+  return Buffer.from((out.target as BufferTarget).buffer!)
+}
+
+const emptyCard = () => ({ class_type: 'Audio', inputs: { audio: '', export: false, filename_prefix: 'audio/ComfyUI', format: 'flac', quality: 'V0' } })
+
+describe('fix round 1 · Important: an empty Audio card sends Python\'s 1 s of silence, priced at 1 s', () => {
+  it('the silence WAV equals Python\'s (the real card\'s AUDIO, through the real encoder), by samples', () => {
+    const w = silenceWav()
+    expect({ channels: w.channels, rate: w.rate, frames: w.frames, seconds: w.seconds })
+      .toEqual({ channels: FIXTURE.silence.channels, rate: FIXTURE.silence.rate, frames: FIXTURE.silence.frames, seconds: FIXTURE.silence.seconds })
+    expect(sha(w.wav.subarray(44))).toBe(FIXTURE.silence.pcm_sha256)
+    expect(CASES.filter(isSilent).map(c => c.class_type).sort()).toEqual([...SOUND_IN_CLASSES].sort())
+  })
+
+  it.each([['media-sound on', ON], ['media-sound off', new Set<RunnerFamily>(['cards', 'sound-in'])]] as const)('%s: the run succeeds, held and charged for 1 s', async (_n, families) => {
+    const t = sample('TranscribeAudioNode')
+    const fal = createFakeFal({ bodyText: () => JSON.stringify({ text: 'silence' }) })
+    const k = makeKit({ hosted: true, fal, deps: { families: () => families } })
+    const { runId } = await k.engine.startRun({ userId: k.userId, takes: [{ a: emptyCard(), n: { ...node(t), inputs: { ...t.widgets, audio: ['a', 0] } } }], ...START })
+    await k.engine.settled(runId)
+    const rec = (await k.store.get(runId))!.takes[0]!.nodes.n!
+    expect(rec.status, rec.error ?? '').toBe('done')
+    const one = priceNode(t.class_type, t.widgets, { inputSeconds: { audio: 1 } })
+    if ('refused' in one) throw new Error(one.refused)
+    expect(rec.credits).toBe(one.credits)
+    // The hold: the start knew the 1 s already (1 credit, not the 60 s ceiling's 2), plus the render
+    // credit; settled at exactly what was held.
+    const sixty = priceNode(t.class_type, t.widgets, {})
+    if ('refused' in sixty) throw new Error(sixty.refused)
+    expect(sixty.credits).toBeGreaterThan(one.credits)
+    const holds = [...k.ledger.holds.values()]
+    expect(holds.map(h => [h.credits, h.actual])).toEqual([[one.credits + 1, one.credits + 1]])
+    // What went up is Python's silence WAV.
+    expect(fal.submitted()[0]!.payload.audio_url).toBe('https://fal.storage/whisper.wav')
+    expect(k.upload.mock.calls.map(c => sha((c[0] as Uint8Array).subarray(44)))).toContain(FIXTURE.silence.pcm_sha256)
+  }, 60_000)
+})
+
+describe('fix round 1 · Minor 1: a CUSTOM voice model address in hosted', () => {
+  it('https only, at most 2,048 characters; refused before the hold in plain words; not sent (not CUSTOM) is not judged', () => {
+    const clone = sample('CloneSingingVoiceNode')
+    const judge = (w: Record<string, unknown>) => hostedRequestProblems({ n: node(clone, w) }).map(x => x.message)
+    expect(judge({ rvc_model: 'CUSTOM', custom_rvc_model_url: 'https://huggingface.co/a/v.zip' })).toEqual([])
+    expect(judge({ rvc_model: 'CUSTOM', custom_rvc_model_url: `https://h.test/${'a'.repeat(RVC_CUSTOM_URL_MAX - 15)}` })).toEqual([])
+    expect(judge({ rvc_model: 'CUSTOM', custom_rvc_model_url: `https://h.test/${'a'.repeat(RVC_CUSTOM_URL_MAX)}` })).toEqual([RVC_CUSTOM_URL_REFUSED])
+    for (const url of ['http://h.test/v.zip', 'data:application/zip;base64,UEsDBA==', '/view?filename=v.zip&type=input', 'ftp://h.test/v.zip']) {
+      expect(judge({ rvc_model: 'CUSTOM', custom_rvc_model_url: url }), url).toEqual([RVC_CUSTOM_URL_REFUSED])
+      // Not CUSTOM: Python doesn't send it, so it isn't judged.
+      expect(judge({ rvc_model: 'Guitar', custom_rvc_model_url: url }), url).toEqual([])
+      // Locally it is sent as typed, as Python does.
+      expect(requestProblems({ n: node(clone, { rvc_model: 'CUSTOM', custom_rvc_model_url: url }) }, { runner: true })).toEqual([])
+    }
+    expect(judge({ rvc_model: 'CUSTOM', custom_rvc_model_url: '' })).toEqual([])
+    expect(RVC_CUSTOM_URL_REFUSED).not.toMatch(/Node|_|url\b/)
+  })
+
+  it('the engine refuses it before any hold or call', async () => {
+    const clone = sample('CloneSingingVoiceNode')
+    const k = makeKit({ hosted: true, deps: { families: () => ON } })
+    const p: ApiPrompt = {
+      s: { class_type: 'LoadAudio', inputs: { audio: 'audio.wav' } },
+      n: { ...node(clone), inputs: { ...clone.widgets, rvc_model: 'CUSTOM', custom_rvc_model_url: 'http://h.test/v.zip', audio: ['s', 0] } },
+      out: { class_type: 'Audio', inputs: { audio: '', export: false, filename_prefix: 'audio/ComfyUI', format: 'flac', quality: 'V0', source: ['n', 0] } },
+    }
+    await expect(k.engine.startRun({ userId: k.userId, takes: [p], ...START })).rejects.toThrow(RVC_CUSTOM_URL_REFUSED)
+    expect(k.ledger.hold).not.toHaveBeenCalled()
+    expect(k.replicate.client.submit).not.toHaveBeenCalled()
+  })
+})
+
+describe('fix round 1 · Minor 2: a resumed node never decodes or uploads its sound again', () => {
+  it('its job running, the sound gone after a restart: the job carries on with the link it was sent; nothing cancelled', async () => {
+    await requireMediaTools()
+    const c = sample('IdentifySpeakersNode')
+    const root = mkdtempSync(join(tmpdir(), 'sound-in-resume-'))
+    for (const t of ['input', 'output', 'temp']) mkdirSync(join(root, t), { recursive: true })
+    writeFileSync(join(root, 'input', 'voice.wav'), clipBytes('pcm16', 8000, 1, 8000, 21))
+    const replicate = createFakeReplicate({ bodyText: () => JSON.stringify({ id: 'p', status: 'succeeded', output: { segments: [] } }) })
+    const ledger = createFakeLedger(5000)
+    const state = { crashed: false }
+    const k1 = makeKit({ root, replicate, ledger, deps: { families: () => ON, sleep: () => (state.crashed ? new Promise<void>(() => {}) : new Promise<void>(r => setTimeout(r, 1))) } })
+    replicate.holdNext(1)
+    const take: ApiPrompt = { s: { class_type: 'LoadAudio', inputs: { audio: 'voice.wav' } }, n: { ...node(c), inputs: { ...c.widgets, audio: ['s', 0] } } }
+    const { runId } = await k1.engine.startRun({ userId: k1.userId, takes: [take], ...START })
+    await until(() => (replicate.submitted()[0]?.polls ?? 0) >= 2)
+    state.crashed = true
+    await new Promise(r => setTimeout(r, 20))
+    const uploadsBefore = k1.upload.mock.calls.length
+    // While the server is down the sound becomes unreadable.
+    writeFileSync(join(root, 'input', 'voice.wav'), 'not a sound')
+    const k2 = makeKit({ dir: k1.dir, root, replicate, ledger, deps: { families: () => ON } })
+    expect(await k2.engine.reattach()).toBe(1)
+    replicate.release()
+    await k2.engine.settled(runId)
+    const rec = (await k2.store.get(runId))!.takes[0]!.nodes.n!
+    expect(rec.status, rec.error ?? '').toBe('done')
+    expect(replicate.submitted()).toHaveLength(1)
+    expect(replicate.client.cancel).not.toHaveBeenCalled()
+    expect(rec.payload).toEqual(replicate.submitted()[0]!.payload)
+    // Nothing uploaded after the restart (k2 has its own hand-off; k1's count is unchanged).
+    expect(k2.upload).not.toHaveBeenCalled()
+    expect(k1.upload.mock.calls.length).toBe(uploadsBefore)
+  }, 60_000)
+
+  it('planning with the request written down reads nothing: no WAV, no upload, the links as sent', async () => {
+    for (const ct of SOUND_IN_CLASSES) {
+      const c = sample(ct)
+      const recorded = { ...c.calls[0]!.payload }
+      const plan = await planNode({
+        prompt: { n: { ...node(c), inputs: { ...c.widgets, audio: ['s', 0] } } }, nodeId: 'n', gateOpen: false, filesFrom: () => [], hosted: true,
+        toUrl: async () => { throw new Error('read') }, bytesToUrl: async () => { throw new Error('uploaded') },
+        soundWav: async () => { throw new Error('decoded') }, recordedPayload: recorded,
+      }) as Extract<NodePlan, { kind: 'provider' }>
+      expect(plan.payload, ct).toEqual(recorded)
+    }
+  })
+})
+
+describe('fix round 1 · Minor 3: only the first 60 s are decoded, with no length cap', () => {
+  it('a sound past the sample cap decodes its first 60 s (the whole decode refuses it)', async () => {
+    await requireMediaTools()
+    const dir = mkdtempSync(join(tmpdir(), 'sound-in-cap-'))
+    const path = join(dir, 'long.wav')
+    writeFileSync(path, clipBytes('pcm16', 8000, 1, 8000 * 70, 33))
+    await expect(decodeAudio(path, { decoder: 'load', userId: null, roots: [dir], maxSamples: 8000 * 10 })).rejects.toThrow(MEDIA_WORDS.tooLong)
+    const cut = await decodeAudio(path, { decoder: 'load', userId: null, roots: [dir], maxSamples: 8000 * 10, firstSeconds: 60 })
+    const whole = await decodeAudio(path, { decoder: 'load', userId: null, roots: [dir], maxSamples: 1e9 })
+    expect(cut.channels[0]!.length).toBe(8000 * 60)
+    expect(Buffer.from(cut.channels[0]!.buffer, cut.channels[0]!.byteOffset, cut.channels[0]!.byteLength)
+      .equals(Buffer.from(whole.channels[0]!.subarray(0, 8000 * 60).buffer, whole.channels[0]!.byteOffset, 8000 * 60 * 4))).toBe(true)
+  })
+
+  it('a sound whose header says it is past the length cap is still decoded, its first 60 s (the whole decode refuses it)', async () => {
+    await requireMediaTools()
+    const dir = mkdtempSync(join(tmpdir(), 'sound-in-liar-'))
+    const path = join(dir, 'liar.wav')
+    writeFileSync(path, clipBytes('pcm16', 8000, 1, 8000 * 70, 34))
+    // The header's length as the caps read it, stretched past the local hour.
+    const real = await probeMedia(path, { userId: null, roots: [dir], kind: 'sound' })
+    const probe = { ...real, containerDuration: 75 * 3600 * 1e6, sound: real.sound.map(t => ({ ...t, duration: null, measuredSeconds: 75 * 3600 })) }
+    await expect(decodeAudio(path, { decoder: 'load', userId: null, roots: [dir], maxSamples: 1e12, probe })).rejects.toThrow(MEDIA_WORDS.tooLong)
+    const cut = await decodeAudio(path, { decoder: 'load', userId: null, roots: [dir], maxSamples: 1e12, probe, firstSeconds: 60 })
+    expect(cut.channels[0]!.length).toBe(8000 * 60)
+  })
+})
+
+describe('fix round 1 · Minor 5: Sync lips\' upload in hosted, judged by the video caps before the hold', () => {
+  const lipTake = (c: PaidCase): ApiPrompt => ({
+    s: { class_type: 'LoadAudio', inputs: { audio: 'audio.wav' } },
+    n: { ...node(c), inputs: { ...c.widgets, audio: ['s', 0] } },
+    v: { class_type: 'Video', inputs: { file: '', export: false, filename_prefix: 'video/ComfyUI', source: ['n', 0] } },
+  })
+
+  it('missing, or not a video: refused before any hold, in plain words', async () => {
+    await requireMediaTools()
+    const upload = byName('lipsync · upload link')
+    for (const [bytes, want] of [[null, LIPSYNC_VIDEO_MISSING], [Buffer.from('not a video at all'), MEDIA_WORDS.unreadable]] as const) {
+      const k = makeKit({ hosted: true, deps: { families: () => ON } })
+      const dir = join(k.root, 'input')
+      writeFileSync(join(dir, 'audio.wav'), Buffer.from(upload.sound_files!.audio!, 'base64'))
+      if (bytes) writeFileSync(join(dir, 'face.mp4'), bytes)
+      const err = await k.engine.startRun({ userId: k.userId, takes: [lipTake(upload)], ...START }).then(() => null, (e: Error) => e.message)
+      expect(err === want || (want === MEDIA_WORDS.unreadable && err !== null && err !== LIPSYNC_VIDEO_MISSING), String(err)).toBe(true)
+      expect(k.ledger.hold).not.toHaveBeenCalled()
+      expect(k.replicate.client.submit).not.toHaveBeenCalled()
+    }
+  })
+
+  it('a video within the caps is handed off; one gone after the start fails at its turn, before its call, and is not charged', async () => {
+    await requireMediaTools()
+    const upload = byName('lipsync · upload link')
+    const speech = { class_type: 'GenerateSpeechNode', inputs: { model: 'MiniMax Speech-02 HD', text: 'Hello.', voice_id: 'Wise_Woman', emotion: 'auto', speed: 1, volume: 1, pitch: 0, language_boost: 'auto' } }
+    const replicate = createFakeReplicate({ bodyText: ({ model }) => JSON.stringify({ id: 'p', status: 'succeeded', output: model === LIPSYNC_2_PRO_SLUG ? 'https://r.test/l.mp4' : 'https://r.test/s.wav' }) })
+    const k = makeKit({
+      hosted: true, replicate, available: 5000,
+      deps: { families: () => new Set<RunnerFamily>([...ON, 'audio-gen']), download: async (url: string) => ({ bytes: url.endsWith('.wav') ? clipBytes('pcm16', 8000, 1, 1600, 12) : new Uint8Array(16), contentType: null }) },
+    })
+    const dir = join(k.root, 'input')
+    writeFileSync(join(dir, 'face.mp4'), await mp4(2))
+    replicate.holdNext(1)
+    const p: ApiPrompt = { sp: speech, n: { ...node(upload), inputs: { ...upload.widgets, audio: ['sp', 0] } }, v: { class_type: 'Video', inputs: { file: '', export: false, filename_prefix: 'video/ComfyUI', source: ['n', 0] } } }
+    const { runId } = await k.engine.startRun({ userId: k.userId, takes: [p], ...START })
+    await until(() => (replicate.submitted()[0]?.polls ?? 0) >= 2)
+    // Gone while the speech is made.
+    rmSync(join(dir, 'face.mp4'))
+    replicate.release()
+    await k.engine.settled(runId)
+    const nodes = (await k.store.get(runId))!.takes[0]!.nodes
+    expect(nodes.n!.status).toBe('error')
+    expect(nodes.n!.error).toBe(LIPSYNC_VIDEO_MISSING)
+    expect(replicate.submitted().map(r => r.endpoint)).toEqual(['minimax/speech-02-hd'])
+    // Charged the speech only.
+    expect([...k.ledger.holds.values()].map(h => h.actual)).toEqual([nodes.sp!.credits])
+  }, 60_000)
+})

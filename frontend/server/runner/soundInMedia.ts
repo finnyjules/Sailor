@@ -19,14 +19,15 @@
  */
 import { isLink, type ApiLink, type ApiPrompt } from '#shared/runner/graph'
 import {
-  LIPSYNC_NEEDS_VIDEO, LIPSYNC_VIDEO_ADDRESS, SOUND_IN_CHANNELS, SOUND_IN_EMPTY, SOUND_IN_NEEDS_SOUND, isLipsync2ProClass, lipsyncVideoOf,
+  LIPSYNC_NEEDS_VIDEO, LIPSYNC_VIDEO_ADDRESS, LIPSYNC_VIDEO_MISSING, SOUND_IN_CHANNELS, SOUND_IN_EMPTY, SOUND_IN_NEEDS_SOUND, isLipsync2ProClass, lipsyncVideoOf,
 } from '#shared/runner/soundIn'
 import { MEDIA_WORDS } from '#shared/runner/media'
 import { MediaError } from '../media/run'
+import { probeVideoFile, type SoundReadIO } from '../media/values'
 import { SOUND_FILE_MISSING } from './media/soundNodes'
 import { sha256Hex } from './handoff'
 import { parseInputFileRef } from './inputs'
-import { soundFileBeforeRun, type PythonWav } from './soundWav'
+import { silenceWav, silentCardAt, soundFileBeforeRun, type PythonWav } from './soundWav'
 import type { MeasuredMedia, OutputFile } from './types'
 
 export interface SoundInReads {
@@ -36,6 +37,13 @@ export interface SoundInReads {
   soundWav?(link: ApiLink): Promise<PythonWav>
   /** At the start of a run: the WAV of a file the prompt names. Absent: nothing measured (held at the ceiling). */
   soundFileWav?(file: OutputFile): Promise<PythonWav>
+  /**
+   * Hosted (fix round 1, Minor 5): Sync lips' uploaded video judged against
+   * the media module's video caps from its header, at the start and again at
+   * the node's turn; the plain words of its refusal, or null. A file that is
+   * gone refuses as LIPSYNC_VIDEO_MISSING. Absent: not judged.
+   */
+  videoUploadProblem?(file: OutputFile): Promise<string | null>
 }
 
 /** Words a person can read for a failed read: the media module's and this node's own, never the file system's. */
@@ -69,10 +77,19 @@ export async function soundInMediaCheck(prompt: ApiPrompt, nodeId: string, reads
   const inputs = node.inputs ?? {}
   const bad = videoProblem(node.class_type, inputs, reads.strict)
   if (bad) return { problem: bad }
+  if (reads.strict && isLipsync2ProClass(node.class_type) && reads.videoUploadProblem) {
+    const s = lipsyncVideoOf(inputs.video_url)
+    if ('upload' in s) {
+      const why = await reads.videoUploadProblem({ filename: s.upload, subfolder: '', type: 'input' }).catch(() => LIPSYNC_VIDEO_MISSING)
+      if (why) return { problem: why }
+    }
+  }
   const link = inputs.audio
   if (!isLink(link)) return { problem: SOUND_IN_NEEDS_SOUND }
   try {
     if (reads.soundWav) return { problem: null, measured: measuredWav(await reads.soundWav(link)) }
+    // An Audio card's 1 s of silence (fix round 1, Important): known before the run, priced at 1 s.
+    if (silentCardAt(prompt, link)) return { problem: null, measured: measuredWav(silenceWav()) }
     const file = soundFileBeforeRun(prompt, link, parseInputFileRef)
     if (!file || !reads.soundFileWav) return null
     return { problem: null, measured: measuredWav(await reads.soundFileWav(file)) }
@@ -97,4 +114,20 @@ export function soundInInputFiles(prompt: ApiPrompt, nodeId: string): OutputFile
     if ('upload' in s) out.push({ filename: s.upload, subfolder: '', type: 'input' })
   }
   return out
+}
+
+/**
+ * Sync lips' uploaded video in hosted (fix round 1, Minor 5): gone → plain
+ * words; else its header judged by the media module's video caps (size,
+ * pixels, length; a file with no picture), as the video nodes judge theirs.
+ */
+export async function lipsyncUploadProblem(file: OutputFile, io: SoundReadIO): Promise<string | null> {
+  if (!(await io.access.exists(file))) return LIPSYNC_VIDEO_MISSING
+  try {
+    await probeVideoFile(file, io)
+    return null
+  }
+  catch (e) {
+    return e instanceof MediaError ? e.message : MEDIA_WORDS.unreadable
+  }
 }

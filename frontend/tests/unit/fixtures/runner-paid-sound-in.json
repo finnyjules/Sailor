@@ -4238,8 +4238,320 @@
     "sync_mode": "cut_off",
     "video_url": "https://r.test/face.mp4"
    }
+  },
+  {
+   "answers": [
+    {
+     "chunks": [
+      {
+       "text": "Hello from Sailor.",
+       "timestamp": [
+        0.0,
+        1.5
+       ]
+      }
+     ],
+     "languages": [
+      "en"
+     ],
+     "text": "Hello from Sailor."
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "fal-ai/wizper",
+     "payload": {
+      "audio_url": "UPLOAD:whisper.wav",
+      "task": "transcribe",
+      "version": "3"
+     },
+     "payload_json": "{\"audio_url\": \"UPLOAD:whisper.wav\", \"task\": \"transcribe\", \"version\": \"3\"}",
+     "provider": "fal"
+    }
+   ],
+   "class_type": "TranscribeAudioNode",
+   "gets": [],
+   "name": "transcribe \u00b7 empty Audio card",
+   "output": [
+    "Hello from Sailor."
+   ],
+   "picture_files": {},
+   "pictures": [],
+   "silent_card": [
+    "audio"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "language": "auto",
+    "model": "Whisper",
+    "translate": false
+   }
+  },
+  {
+   "answers": [
+    {
+     "chunks": [
+      {
+       "text": "Hello from Sailor.",
+       "timestamp": [
+        0.0,
+        1.5
+       ]
+      }
+     ],
+     "languages": [
+      "en"
+     ],
+     "text": "Hello from Sailor."
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "fal-ai/wizper",
+     "payload": {
+      "audio_url": "UPLOAD:whisper.wav",
+      "task": "transcribe",
+      "version": "3"
+     },
+     "payload_json": "{\"audio_url\": \"UPLOAD:whisper.wav\", \"task\": \"transcribe\", \"version\": \"3\"}",
+     "provider": "fal"
+    }
+   ],
+   "class_type": "WhisperRemoteNode",
+   "gets": [],
+   "name": "whisper twin \u00b7 empty Audio card",
+   "output": [
+    "Hello from Sailor."
+   ],
+   "picture_files": {},
+   "pictures": [],
+   "silent_card": [
+    "audio"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "language": "auto",
+    "translate": false
+   }
+  },
+  {
+   "answers": [
+    {
+     "__body__": "{\"output\": {\"segments\": [{\"start\": 0.0, \"end\": 1.5, \"speaker\": \"SPEAKER_00\", \"text\": \" Hello caf\\u00e9.\", \"avg_logprob\": -0.25, \"words\": [{\"word\": \" Hello\", \"start\": 0, \"end\": 1e5, \"probability\": 1.0}]}, {\"start\": 1.5, \"end\": 3.0, \"speaker\": \"SPEAKER_01\", \"text\": \" \\u732b \\ud83d\\ude00\"}], \"num_speakers\": 2, \"language\": \"en\"}, \"metrics\": {\"predict_time\": 1.25}}"
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "thomasmol/whisper-diarization",
+     "payload": {
+      "file": "WAV:e380a28624751121dcf0713e6813814dc054d7ee80a408bc9a9afbf7cfd5e62e"
+     },
+     "payload_json": "{\"file\": \"WAV:e380a28624751121dcf0713e6813814dc054d7ee80a408bc9a9afbf7cfd5e62e\"}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "IdentifySpeakersNode",
+   "gets": [],
+   "name": "speakers \u00b7 empty Audio card",
+   "output": [
+    "{\"segments\": [{\"start\": 0.0, \"end\": 1.5, \"speaker\": \"SPEAKER_00\", \"text\": \" Hello caf\\u00e9.\", \"avg_logprob\": -0.25, \"words\": [{\"word\": \" Hello\", \"start\": 0, \"end\": 100000.0, \"probability\": 1.0}]}, {\"start\": 1.5, \"end\": 3.0, \"speaker\": \"SPEAKER_01\", \"text\": \" \\u732b \\ud83d\\ude00\"}], \"num_speakers\": 2, \"language\": \"en\"}"
+   ],
+   "picture_files": {},
+   "pictures": [],
+   "silent_card": [
+    "audio"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "language": "auto",
+    "model": "Whisper Diarization",
+    "num_speakers": 0
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": "https://r.test/rvc/out.wav"
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "zsxkib/realistic-voice-cloning",
+     "payload": {
+      "output_format": "wav",
+      "pitch_change": "no-change",
+      "pitch_change_all": 0.0,
+      "pitch_detection_algorithm": "rmvpe",
+      "rvc_model": "Guitar",
+      "song_input": "WAV:e380a28624751121dcf0713e6813814dc054d7ee80a408bc9a9afbf7cfd5e62e"
+     },
+     "payload_json": "{\"output_format\": \"wav\", \"pitch_change\": \"no-change\", \"pitch_change_all\": 0.0, \"pitch_detection_algorithm\": \"rmvpe\", \"rvc_model\": \"Guitar\", \"song_input\": \"WAV:e380a28624751121dcf0713e6813814dc054d7ee80a408bc9a9afbf7cfd5e62e\"}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "CloneSingingVoiceNode",
+   "files": {
+    "https://r.test/rvc/out.wav": "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"
+   },
+   "gets": [
+    {
+     "status": 200,
+     "url": "https://r.test/rvc/out.wav"
+    }
+   ],
+   "name": "clone \u00b7 empty Audio card",
+   "output": [
+    {
+     "audio": "https://r.test/rvc/out.wav"
+    }
+   ],
+   "picture_files": {},
+   "pictures": [],
+   "silent_card": [
+    "audio"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "custom_rvc_model_url": "",
+    "model": "Realistic Voice Cloning (RVC)",
+    "output_format": "wav",
+    "pitch_change": "no-change",
+    "pitch_detection_algorithm": "rmvpe",
+    "pitch_shift_semitones": 0,
+    "rvc_model": "Guitar"
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": "https://r.test/lipsync/out.mp4"
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "sync/lipsync-2-pro",
+     "payload": {
+      "audio": "WAV:e380a28624751121dcf0713e6813814dc054d7ee80a408bc9a9afbf7cfd5e62e",
+      "sync_mode": "cut_off",
+      "video": "https://r.test/face.mp4"
+     },
+     "payload_json": "{\"audio\": \"WAV:e380a28624751121dcf0713e6813814dc054d7ee80a408bc9a9afbf7cfd5e62e\", \"sync_mode\": \"cut_off\", \"video\": \"https://r.test/face.mp4\"}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "LipsyncNode",
+   "files": {
+    "https://r.test/lipsync/out.mp4": "AAAAGGZ0eXBtcDQyAAAAAG1wNDJpc29tAAAACG1kYXQ="
+   },
+   "gets": [
+    {
+     "status": 200,
+     "url": "https://r.test/lipsync/out.mp4"
+    }
+   ],
+   "name": "lipsync \u00b7 empty Audio card",
+   "output": [
+    {
+     "video": "https://r.test/lipsync/out.mp4"
+    }
+   ],
+   "picture_files": {},
+   "pictures": [],
+   "silent_card": [
+    "audio"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "model": "sync.so 2-pro",
+    "sync_mode": "cut_off",
+    "video_url": "https://r.test/face.mp4"
+   }
+  },
+  {
+   "answers": [
+    {
+     "output": "https://r.test/lipsync/out.mp4"
+    }
+   ],
+   "calls": [
+    {
+     "endpoint": "sync/lipsync-2-pro",
+     "payload": {
+      "audio": "WAV:e380a28624751121dcf0713e6813814dc054d7ee80a408bc9a9afbf7cfd5e62e",
+      "sync_mode": "cut_off",
+      "video": "https://r.test/face.mp4"
+     },
+     "payload_json": "{\"audio\": \"WAV:e380a28624751121dcf0713e6813814dc054d7ee80a408bc9a9afbf7cfd5e62e\", \"sync_mode\": \"cut_off\", \"video\": \"https://r.test/face.mp4\"}",
+     "provider": "replicate"
+    }
+   ],
+   "class_type": "LipsyncRemoteNode",
+   "files": {
+    "https://r.test/lipsync/out.mp4": "AAAAGGZ0eXBtcDQyAAAAAG1wNDJpc29tAAAACG1kYXQ="
+   },
+   "gets": [
+    {
+     "status": 200,
+     "url": "https://r.test/lipsync/out.mp4"
+    }
+   ],
+   "name": "lipsync twin \u00b7 empty Audio card",
+   "output": [
+    {
+     "video": "https://r.test/lipsync/out.mp4"
+    }
+   ],
+   "picture_files": {},
+   "pictures": [],
+   "silent_card": [
+    "audio"
+   ],
+   "sound_files": {},
+   "sounds": [],
+   "ui": null,
+   "widgets": {
+    "sync_mode": "cut_off",
+    "video_url": "https://r.test/face.mp4"
+   }
   }
  ],
+ "silence": {
+  "channels": 1,
+  "frames": 44100,
+  "head": [
+   0,
+   0,
+   0,
+   0,
+   0,
+   0,
+   0,
+   0,
+   0,
+   0,
+   0,
+   0,
+   0,
+   0,
+   0,
+   0
+  ],
+  "pcm_sha256": "5b1870cf6b89ae9a9e699ccc42b21a6ebe1ace5234132811234dadaa066a03a6",
+  "rate": 44100,
+  "sample_width": 2,
+  "seconds": 1.0,
+  "wav_sha256": "e380a28624751121dcf0713e6813814dc054d7ee80a408bc9a9afbf7cfd5e62e"
+ },
  "wavs": [
   {
    "channels": 1,
@@ -4273,7 +4585,8 @@
     "pcm_sha256": "5689cee1bcc3328667601c4e3026de9fdb907215c51d5d91163d34aca6da323a",
     "rate": 16000,
     "sample_width": 2,
-    "seconds": 3.0
+    "seconds": 3.0,
+    "wav_sha256": "25169c7891b768cd36d292ee6bc602b2c9eb3fc3d18a804182e4e6b22c7cc55f"
    }
   },
   {
@@ -4308,7 +4621,8 @@
     "pcm_sha256": "2f2804b97e0b4ad2fcf89acd88deea3f5248023896a3d61cf8f9c02d16211b76",
     "rate": 16000,
     "sample_width": 2,
-    "seconds": 3.0
+    "seconds": 3.0,
+    "wav_sha256": "72a98170204cd596784eb2673585b064d93403847bb056b59d99cd6128b6403b"
    }
   },
   {
@@ -4343,7 +4657,8 @@
     "pcm_sha256": "db8d45900fde23cefe78c9081a5a701b7d879a1498f99b39b5c03608b1679e58",
     "rate": 44100,
     "sample_width": 2,
-    "seconds": 3.0
+    "seconds": 3.0,
+    "wav_sha256": "e686d751c54e2c1c39afde307383fbf2f2dea7631fad030bc1f73e3181f80765"
    }
   },
   {
@@ -4378,7 +4693,8 @@
     "pcm_sha256": "d9dcc24fc3be5fa02bc803340ba01801e1a29b808f4d9501c3d2250b655d23bc",
     "rate": 44100,
     "sample_width": 2,
-    "seconds": 3.0
+    "seconds": 3.0,
+    "wav_sha256": "a3c30fe8370536d1d840ab0bd1e991f697ba43067604272e1a4ba076dff08b68"
    }
   },
   {
@@ -4413,7 +4729,8 @@
     "pcm_sha256": "20708e1ad8c0e9fefc581364efed0554834da36b0a49eaadb4a56f47cc519336",
     "rate": 48000,
     "sample_width": 2,
-    "seconds": 3.0
+    "seconds": 3.0,
+    "wav_sha256": "dd620faf4187ba873aa3e3914d1d481745ebd0cdac00197c2a6f5e64689e7f93"
    }
   },
   {
@@ -4448,7 +4765,8 @@
     "pcm_sha256": "f09bdb3d28b79d50dd7864fefff54941287ff5f5aed94fd3ba7bd6848420329a",
     "rate": 48000,
     "sample_width": 2,
-    "seconds": 3.0
+    "seconds": 3.0,
+    "wav_sha256": "c6e646535b2d59910b639f5d470720b2643b3c9c4270ee0280cbfb4be2af8698"
    }
   },
   {
@@ -4483,7 +4801,8 @@
     "pcm_sha256": "081692e799e5cbcf7f9cccc6fcfe2a16f42d78650a931db3efc8ab5f9a9cfaff",
     "rate": 16000,
     "sample_width": 2,
-    "seconds": 60.0
+    "seconds": 60.0,
+    "wav_sha256": "1380d03461529f42049c4d67bc52db5f068e45feb217455e7716b88aae454983"
    }
   },
   {
@@ -4518,7 +4837,8 @@
     "pcm_sha256": "bffb80ee010e2e17c71f100bfed8122a5ab9c6f1c0dff708287c2de8a3b3a854",
     "rate": 8000,
     "sample_width": 2,
-    "seconds": 60.0
+    "seconds": 60.0,
+    "wav_sha256": "d4aaf5b0c6dc005db72e3d0119c9ba400406c3d9ed5464de06dd179d82cb12cd"
    }
   },
   {
@@ -4553,7 +4873,8 @@
     "pcm_sha256": "9580a34de853d8982ca8cf8cf54f1f959f40ce2be569387e9c8d014794fc2d64",
     "rate": 44100,
     "sample_width": 2,
-    "seconds": 1.0
+    "seconds": 1.0,
+    "wav_sha256": "ace33c3839c52f68b3c51c7cd6962bab9480b9b2c2f038e5cca2a6642795b957"
    }
   },
   {
@@ -4588,7 +4909,8 @@
     "pcm_sha256": "7b867ef699a3c21b167363d49bf67d992ce3e5c90f151f90e7b467619dbdcd00",
     "rate": 22050,
     "sample_width": 2,
-    "seconds": 2.0
+    "seconds": 2.0,
+    "wav_sha256": "e270cdb5c9c5cfbac651fcad52b9e191e59a45a00cba2fc8272b56fa6b452003"
    }
   }
  ]

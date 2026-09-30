@@ -408,6 +408,13 @@ export interface PlanContext {
    * one its media check measured). Absent: such a node fails plainly.
    */
   soundWav?(link: ApiLink): Promise<PythonWav>
+  /**
+   * A resumed node (its job already running at the provider): the request
+   * written down when it was sent. A sound-in node takes its sound's and
+   * video's links from it instead of decoding and uploading again (R3.10 fix
+   * round 1, Minor 2), so a sound unreadable after a restart can't stop the job.
+   */
+  recordedPayload?: Record<string, unknown>
 }
 
 /**

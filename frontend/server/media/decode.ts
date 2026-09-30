@@ -449,9 +449,21 @@ export async function decodeAudio(path: string, o: {
   within?: 'video'
   /** R5.6: the Timeline's waveform route: the routes' own slots and their 30 s limit (rule 5). */
   route?: true
+  /**
+   * R3.10 (the sound-in nodes, which send the first 60 s only): decode just
+   * the first `firstSeconds · rate` samples of each channel (an `atrim` on
+   * the decode: the same samples as the whole decode's first ones), and no
+   * length cap (a longer sound is cut, as Python cuts it). The 'load' and
+   * 'fltp' readers only: 'download' divides by the whole sound's peak, so
+   * it still reads it all.
+   */
+  firstSeconds?: number
 }): Promise<DecodedSound> {
   const p = await probeFor(path, o, o.within ?? 'sound')
-  const refused = o.kept ? null : mediaCapsWord(p, o.within ?? 'sound', isHosted())
+  const first = o.firstSeconds !== undefined && o.decoder !== 'download' ? o.firstSeconds : undefined
+  const word = o.kept ? null : mediaCapsWord(p, o.within ?? 'sound', isHosted())
+  // Cut to its first seconds, a sound's length can't be too long (its size in bytes still counts).
+  const refused = first !== undefined && word === 'tooLong' ? null : word
   if (refused) throw new MediaError(refused)
   const k = (o.stream ?? (o.decoder === 'fltp' ? 'last' : 'first')) === 'last' ? p.sound.length - 1 : 0
   const s = p.sound[k]!
@@ -469,7 +481,8 @@ export async function decodeAudio(path: string, o: {
   // Straight into the channels, de-interleaved as the samples stream: one buffer per channel, sized
   // from the header and grown only if the file holds more (peak memory ≈ the sound itself, R5.1b review
   // Minor 2). The cap is checked as it streams.
-  const perChannelCap = Math.floor(o.maxSamples / C)
+  const firstFrames = first !== undefined ? Math.max(0, Math.floor(first * s.rate)) : null
+  const perChannelCap = firstFrames !== null ? firstFrames + 1 : Math.floor(o.maxSamples / C)
   const stated = s.duration !== null ? (s.duration * s.timeBase.num) / s.timeBase.den
     : p.containerDuration !== null ? p.containerDuration / 1e6 : (s.measuredSeconds ?? 0)
   let capacity = Math.min(perChannelCap, Math.ceil(stated * s.rate) + 8192)
@@ -485,7 +498,12 @@ export async function decodeAudio(path: string, o: {
   let carry = new Uint8Array(0)
   await runMedia({
     tool: 'ffmpeg',
-    args: [...pythonSeekArgs(p, o.decoder), ...inputArgs(p.path, p.format), '-map', `0:a:${k}`, '-c:a', 'pcm_f32le', '-f', 'f32le', 'pipe:1'],
+    args: [
+      ...pythonSeekArgs(p, o.decoder), ...inputArgs(p.path, p.format), '-map', `0:a:${k}`,
+      // The first samples only (R3.10): the skipped ones before t = 0 are counted in, and dropped below.
+      ...(firstFrames !== null ? ['-af', `atrim=end_sample=${firstFrames + skip}`] : []),
+      '-c:a', 'pcm_f32le', '-f', 'f32le', 'pipe:1',
+    ],
     userId: o.userId, signal: o.signal, route: o.route,
     onStdout: (chunk) => {
       let bytes = chunk
