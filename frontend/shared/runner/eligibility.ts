@@ -207,10 +207,22 @@ export const INPUT_CHECKS: Readonly<Record<string, (inputs: Record<string, unkno
   // The Shader effect (R2.10): a bake of the browser's the runner can replay
   // (./shaderBakeKey.ts shaderBakeTaken). Without the prompt, nothing to check it against.
   'shader-bake': (_inputs, ctx) => !!ctx.prompt && ctx.nodeId !== undefined && shaderBakeTaken(ctx.prompt, ctx.nodeId),
+  // The Audio card on its media row (R5.3 fix round 1, A): a card fed from
+  // anything but a music or speech node, read by a Lip-sync, is left to the
+  // engine, as it was before R5.3 (sync-3 takes a card's own file or a music
+  // or speech node's sound only, generators/sync3.ts sync3Sources; any other
+  // sound waits for R3.10). Switching media-sound on never makes such a
+  // working graph fail.
+  'audio-card-lip-sync': (inputs, ctx) => {
+    if (!ctx.prompt || ctx.nodeId === undefined || !isLink(inputs.source)) return true
+    const from = ctx.prompt[inputs.source[0]]?.class_type
+    if (from && (AUDIO_GEN_CLASSES as readonly string[]).includes(from)) return true
+    return !Object.values(ctx.prompt).some(n => n.class_type === 'LipSyncNode' && linksOf(n).some(l => l.from === ctx.nodeId))
+  },
 }
 
 /** The name of an input check (INPUT_CHECKS). */
-export type InputCheckName = 'moodboard-reading' | 'bake-params' | 'empty-image-caps' | 'smart-layout' | 'effect-preview-name' | 'effect-output-size' | 'effect-text' | 'ascii-glyphs' | 'painter' | 'shader-bake'
+export type InputCheckName = 'moodboard-reading' | 'bake-params' | 'empty-image-caps' | 'smart-layout' | 'effect-preview-name' | 'effect-output-size' | 'effect-text' | 'ascii-glyphs' | 'painter' | 'shader-bake' | 'audio-card-lip-sync'
 
 /** nodes.py MAX_RESOLUTION: the most ComfyUI allows for a width or height widget. */
 export const COMFY_MAX_RESOLUTION = 16384
@@ -1453,6 +1465,7 @@ export const AUDIO_CARD_MEDIA_RULE: RunnerNodeRule = {
   local: 'render',
   mustNotLink: ['audio'],
   linkSources: { source: SOUND_OUTPUTS },
+  inputCheck: 'audio-card-lip-sync',
   widgets: {
     export: { type: 'BOOLEAN', required: true },
     filename_prefix: { type: 'STRING', required: true },

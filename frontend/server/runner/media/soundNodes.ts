@@ -47,11 +47,13 @@ import { pyTruthy } from '#shared/runner/pyText'
 import type { DeriveIO, NodePlan, PlanContext } from '../executors'
 import type { OutputFile, RunnerValue } from '../types'
 import { parseInputFileRef } from '../inputs'
-import { SAVE_OUTSIDE } from '../results'
+import { SAVE_NOT_A_FILE, SAVE_OUTSIDE } from '../results'
 import { asciiJson, saveImagePrefix } from '../cards/saveImage'
 import type { DecodedSound } from '../../media/decode'
 import { SAVE_AUDIO_SAMPLE_FMT, encodeAudio, type AudioFormat, type AudioQuality } from '../../media/encode'
 import { MediaError, mediaTempDir, removeMediaTempDir } from '../../media/run'
+import { probeMedia } from '../../media/probe'
+import { MEDIA_WORDS } from '#shared/runner/media'
 import { keepSound, readSound, soundNoteOf, type MediaValueIO } from '../../media/values'
 
 /** LoadAudio's validate_inputs ("Invalid audio file: …"), in plain words. */
@@ -62,7 +64,19 @@ export const NO_SOUND_WIRED = 'There is no sound wired in'
 export const SOUND_NEEDS_RUN = 'Sound can only be worked on when the workflow runs'
 /** libopus refuses more than 256 kb/s a channel (PyAV raises "Invalid argument"). */
 export const OPUS_BIT_RATE_REFUSED = 'Opus can’t save this sound at this quality. Pick a lower quality.'
-export const SOUND_SAVE_FAILED = 'The sound couldn’t be saved under this file name. Try a shorter, plainer name.'
+/** Save failures in plain words, by cause (fix round 1, Minor 4): only a name problem asks for another name. */
+export const SOUND_SAVE_BAD_NAME = 'The sound couldn’t be saved under this file name. Try a shorter, plainer name.'
+export const SOUND_SAVE_NO_ROOM = 'The sound couldn’t be saved: the server has no room left.'
+export const SOUND_SAVE_FAILED = 'The sound couldn’t be saved.'
+
+/** A save failure's plain words by its cause; the file system's own words (the server's folders) are never shown. */
+export function soundSaveWords(e: unknown): string {
+  if (e instanceof Error && (e.message === SAVE_OUTSIDE || e.message === SAVE_NOT_A_FILE)) return e.message
+  const code = (e as NodeJS.ErrnoException | null)?.code
+  if (code === 'ENAMETOOLONG' || code === 'EINVAL' || code === 'EILSEQ') return SOUND_SAVE_BAD_NAME
+  if (code === 'ENOSPC' || code === 'EDQUOT') return SOUND_SAVE_NO_ROOM
+  return SOUND_SAVE_FAILED
+}
 
 /** UI.PreviewAudio's letters (comfy_api/latest/_ui.py): all 26, unlike PreviewImage's. */
 export const AUDIO_PREVIEW_LETTERS = 'abcdefghijklmnopqrstuvwxyz'
@@ -127,8 +141,7 @@ export async function saveAudioFiles(
       }
       catch (e) {
         // The file system's own words name the server's folders: never shown on a node.
-        if (e instanceof Error && (e.message === SAVE_OUTSIDE || e.message === 'The file store is not available')) throw e
-        throw new Error(SOUND_SAVE_FAILED)
+        throw new Error(soundSaveWords(e))
       }
     }
     finally {
@@ -152,6 +165,23 @@ function loaderFile(inputs: Record<string, unknown>): OutputFile | null {
   return isLink(inputs.audio) ? null : parseInputFileRef(inputs.audio)
 }
 
+/**
+ * Why a loader's file can't give Python's `load` a sound, from its header
+ * (R5.3 fix round 1, B), or null. `load` raises "No audio stream found in the
+ * file." for a file with no sound stream: in plain words, MEDIA_WORDS.noSound.
+ * A file the tools can't read (or over the caps) is refused in the probe's own
+ * plain words.
+ */
+export async function soundStreamProblem(access: Pick<MediaValueIO['access'], 'pathOf' | 'rootOf'>, file: OutputFile, userId: string | null, signal?: AbortSignal): Promise<string | null> {
+  try {
+    const p = await probeMedia(access.pathOf(file), { userId, signal, roots: [access.rootOf(file)], kind: 'sound' })
+    return p.sound.length ? null : MEDIA_WORDS.noSound
+  }
+  catch (e) {
+    return e instanceof MediaError ? e.message : MEDIA_WORDS.unreadable
+  }
+}
+
 /** LoadAudio and RecordAudio: the file handed on as it is, read by `load` where it is read. */
 export function planLoadAudio(ctx: PlanContext): NodePlan {
   const file = loaderFile(ctx.prompt[ctx.nodeId]!.inputs ?? {})
@@ -159,25 +189,44 @@ export function planLoadAudio(ctx: PlanContext): NodePlan {
   return {
     kind: 'derive',
     async derive(io) {
-      if (io.media && !(await io.media.access.exists(file))) throw new Error(SOUND_FILE_MISSING)
+      if (io.media) {
+        if (!(await io.media.access.exists(file))) throw new Error(SOUND_FILE_MISSING)
+        // Python's `load` fails here, at the loader, on a file with no sound (backstop for the start check).
+        const why = await soundStreamProblem(io.media.access, file, io.media.userId, io.signal)
+        if (why) throw new Error(why)
+      }
       return { values: { 0: { kind: 'files', files: [file], sound: { decode: 'load' } } }, ui: null }
     },
   }
 }
 
 /**
- * LoadAudio's validate_inputs before the run: a file that isn't there (or a
- * name get_annotated_filepath can't open) is refused, as ComfyUI refuses the
- * prompt before running anything. The first such node, or null.
+ * The loaders' checks before the run, the first failing node or null:
+ *   - LoadAudio's validate_inputs: a file that isn't there (or a name
+ *     get_annotated_filepath can't open) is refused, as ComfyUI refuses the
+ *     prompt before running anything;
+ *   - LoadAudio and RecordAudio (fix round 1, B): a file with no sound stream
+ *     (`soundOf`: soundStreamProblem) is refused at that node, as Python's
+ *     `load` fails there. A RecordAudio file that isn't there is left to its turn.
  */
 export async function loadAudioStartProblems(
   prompt: ApiPrompt, exists: (f: OutputFile) => Promise<boolean>,
+  soundOf?: (f: OutputFile) => Promise<string | null>,
 ): Promise<{ message: string; nodeId: string; classType: string; file?: string } | null> {
   for (const [nodeId, n] of Object.entries(prompt)) {
-    if (n.class_type !== 'LoadAudio') continue
+    if (n.class_type !== 'LoadAudio' && n.class_type !== 'RecordAudio') continue
     const file = loaderFile(n.inputs ?? {})
-    if (!file) return { message: SOUND_FILE_MISSING, nodeId, classType: n.class_type }
-    if (!(await exists(file))) return { message: SOUND_FILE_MISSING, nodeId, classType: n.class_type, file: file.filename }
+    const load = n.class_type === 'LoadAudio'
+    if (!file) {
+      if (load) return { message: SOUND_FILE_MISSING, nodeId, classType: n.class_type }
+      continue
+    }
+    if (!(await exists(file))) {
+      if (load) return { message: SOUND_FILE_MISSING, nodeId, classType: n.class_type, file: file.filename }
+      continue
+    }
+    const why = soundOf ? await soundOf(file) : null
+    if (why) return { message: why, nodeId, classType: n.class_type, file: file.filename }
   }
   return null
 }

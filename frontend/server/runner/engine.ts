@@ -6,7 +6,7 @@
  * failed or paused at a Gate. Money is held per take before a leg starts and
  * charged exactly when it ends. See docs/superpowers/specs/2026-09-22-sailor-runner-and-gate-design.md.
  */
-import { FRAME_RENDER_TYPES, LOCAL_RENDER_TYPES, PROVIDER_TYPES, isRunnerEligible, rendersLocally } from '#shared/runner/eligibility'
+import { FRAME_RENDER_TYPES, PROVIDER_TYPES, isRunnerEligible, rendersLocally } from '#shared/runner/eligibility'
 import { NO_FAMILIES, type RunnerFamily } from '#shared/runner/families'
 import { staticWiredTexts } from '#shared/runner/staticValues'
 import { withStaticSpeechText } from '#shared/runner/audioGen'
@@ -53,7 +53,7 @@ import { effectOutRefusal } from './effects/plan'
 import { PICTURE_ANIMATED, pictureHasFrames, pictureMeta, pictureRefusal } from './pictures/pythonView'
 import { extraPromptText, hasOutputNode, measuredInput, nodeCredits, stageEstimate, unpricedProviderNode, type Metering } from './metering'
 import { poseStartProblem } from './generators/nanoExtras'
-import { loadAudioStartProblems } from './media/soundNodes'
+import { loadAudioStartProblems, soundStreamProblem } from './media/soundNodes'
 import { ev, type RunEvents, type SwitchReason } from './events'
 import { mediaNodeKind, nodeMediaChangedWords, nodeMediaCheck, nodeMediaFiles } from './nodeMedia'
 import { switchedSinceHold } from './switches'
@@ -107,7 +107,12 @@ export function createLimiter(limit: number) {
 }
 
 /** What counts against MAX_QUEUED_CALLS: provider calls, and Frame renders (one worker renders them in turn). */
-const isQueuedWork = (classType: string) => PROVIDER_TYPES.has(classType) || LOCAL_RENDER_TYPES.has(classType)
+/** Work that waits its turn: a provider call, or a local render (the Audio card on its media row too, R5.3 fix round 1). */
+const isQueuedWork = (classType: string, inputs: Record<string, unknown> = {}, families: ReadonlySet<RunnerFamily> = NO_FAMILIES) =>
+  PROVIDER_TYPES.has(classType) || rendersLocally(classType, inputs, families)
+
+/** A file's identity: its folder type, subfolder and name. */
+const outputKeyOf = (f: OutputFile) => `${f.type}:${f.subfolder}:${f.filename}`
 
 /** The files the prompts' LoadImage nodes read. */
 function loadImageFiles(prompts: ApiPrompt[]): OutputFile[] {
@@ -1029,6 +1034,7 @@ export function createEngine(deps: EngineDeps) {
     // Only what this stage newly made: a reused result is an earlier run's
     // file, already recorded then. Nothing new → no record at all.
     const outputs: OutputFile[] = []
+    const listed = new Set<string>()
     // Which service made each result, so a switched job's cost can be checked later.
     const servedBy: Record<string, RunnerProvider> = {}
     for (const id of legIds) {
@@ -1039,7 +1045,16 @@ export function createEngine(deps: EngineDeps) {
       const made = (rec.endpoint !== null && PROVIDER_TYPES.has(rec.classType)) || renderedHere(id)
         || !!rec.calls?.some(c => c.status === 'done')
       if (rec.status === 'done' && !rec.reused && made) {
-        outputs.push(...rec.outputs.filter(f => f.type === 'output'))
+        // The Audio card hands its sound on as its own output (R5.3 fix round 1, Important 1): only
+        // the files it saved itself are new; the sound it hands on was made (and listed) by its maker.
+        const handedOn = rec.classType === 'Audio' && rec.values ? new Set(filesOfValues(rec.values).map(outputKeyOf)) : null
+        for (const f of rec.outputs) {
+          if (f.type !== 'output' || handedOn?.has(outputKeyOf(f))) continue
+          // Each file once in the stage's history.
+          if (listed.has(outputKeyOf(f))) continue
+          listed.add(outputKeyOf(f))
+          outputs.push(f)
+        }
         if (rec.servedBy) servedBy[id] = rec.servedBy
       }
     }
@@ -1950,7 +1965,7 @@ export function createEngine(deps: EngineDeps) {
           for (const id of charge.nodeIds ?? stageNodeIds(take, charge, leg.index)) {
             const rec = take.nodes[id]
             if (!rec) continue
-            if (isQueuedWork(rec.classType) && (rec.status === 'waiting' || rec.status === 'running')) n++
+            if (isQueuedWork(rec.classType, take.prompt[id]?.inputs, new Set(leg.families ?? [])) && (rec.status === 'waiting' || rec.status === 'running')) n++
           }
         }
       }
@@ -2028,7 +2043,7 @@ export function createEngine(deps: EngineDeps) {
       }
     }
     const noGates: TakeGateState = { done: new Set(), open: new Set(), dropped: new Set() }
-    const wanted = prompts.reduce((n, p) => n + [...legNodes(p, noGates)].filter(id => isQueuedWork(p[id]!.class_type)).length, 0)
+    const wanted = prompts.reduce((n, p) => n + [...legNodes(p, noGates)].filter(id => isQueuedWork(p[id]!.class_type, p[id]!.inputs, families)).length, 0)
     if (queuedCalls(i.userId) + wanted > MAX_QUEUED_CALLS) throw refuse('You have too many runs waiting. Try again when one finishes.', 429)
     await deps.metering.spendGuard(i.userId)
     const inputFiles = new Map<string, OutputFile>()
@@ -2088,7 +2103,7 @@ export function createEngine(deps: EngineDeps) {
     // Load audio's validate_inputs (R5.3): a sound file that isn't there is refused now, as
     // ComfyUI refuses the prompt ("Invalid audio file"), before anything runs or is held.
     for (const p of prompts) {
-      const missing = await loadAudioStartProblems(p, f => files.exists(f))
+      const missing = await loadAudioStartProblems(p, f => files.exists(f), f => soundStreamProblem(files, f, i.userId))
       if (missing) throw refuse(missing.message, 400, { nodeId: missing.nodeId, classType: missing.classType, ...(missing.file ? { file: missing.file } : {}) })
     }
     // The picture cards' files (R1.3 follow-up): one a card would refuse at its

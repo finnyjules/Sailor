@@ -48,8 +48,13 @@ import { opusRate, resampleLikeTorchaudio } from '~~/server/media/resample'
 import { runMedia } from '~~/server/media/run'
 import { readSound } from '~~/server/media/values'
 import {
-  AUDIO_PREVIEW_LETTERS, OPUS_BIT_RATE_REFUSED, SOUND_FILE_MISSING, loadAudioStartProblems, saveAudioFiles,
+  AUDIO_PREVIEW_LETTERS, OPUS_BIT_RATE_REFUSED, SOUND_FILE_MISSING, SOUND_SAVE_BAD_NAME, SOUND_SAVE_FAILED, SOUND_SAVE_NO_ROOM,
+  loadAudioStartProblems, saveAudioFiles, soundSaveWords,
 } from '~~/server/runner/media/soundNodes'
+import { SAVE_NOT_A_FILE, SAVE_OUTSIDE } from '~~/server/runner/results'
+import { createFakeReplicate } from './__runner__/kit'
+import { cardCaseKey, cardCases, cardPrompt } from './__runner__/soundCardCases'
+import { createHash } from 'node:crypto'
 import { runnerFamilies } from '~~/server/runner/config'
 
 /** The tools' remembered answer, as the server's eligibility reads it; null: the real one. */
@@ -789,5 +794,135 @@ describe('guards', () => {
     const three: DecodedSound = { rate: 44100, channels: [new Float32Array(10), new Float32Array(10), new Float32Array(10)] }
     await expect(saveAudioFiles(ioFor(h, 's', rid(++runs), []), [three], { prefix: 'x', format: 'flac', quality: '128k', folder: 'output' })).rejects.toThrow(MEDIA_WORDS.failed)
     expect(written(join(h.root, 'output'))).toEqual([])
+  })
+})
+
+// ── Fix round 1 ──────────────────────────────────────────────────────────────
+
+const videoCard = (from: string) => ({ class_type: 'Video', inputs: { file: '', export: false, filename_prefix: 'video/ComfyUI', source: [from, 0] as [string, number] } })
+const lipSync = (from: string) => ({ class_type: 'LipSyncNode', inputs: { engine: 'sync-3', model_options: '{"engine":"sync-3","face_video":"face.mp4"}', sync_mode: 'cut_off', audio: [from, 0] as [string, number] } })
+
+describe('fix round 1 (A): a loaded or recorded sound through the card into a Lip-sync stays with the engine', () => {
+  it('with media-sound on the workflow goes to the engine, as before R5.3, and is never refused', () => {
+    const fam = new Set<RunnerFamily>(['cards', 'sync-3', 'audio-gen', 'media-sound'])
+    const before = new Set<RunnerFamily>(['cards', 'sync-3', 'audio-gen'])
+    for (const src of [loadAudio('b.wav'), recordAudio('rec.webm'), card({ audio: 'b.wav' })]) {
+      // The Video card after the lip-sync shows its result (a lip-sync nothing reads is not run, by ComfyUI either).
+      const p: ApiPrompt = { s: src, c: card({ source: ['s', 0] }), ls: lipSync('c'), v: videoCard('ls') }
+      expect(runnerTakesWorkflow(p, fam), src.class_type).toBe(false)
+      expect(runnerTakesNode(p, 'c', fam), src.class_type).toBe(false)
+      expect(nodesNeedingEngine(p, { runnerOn: true, families: fam, titleOf: id => id }), src.class_type).toContain('c')
+      expect(runnerTakesWorkflow(p, before), `${src.class_type}, before`).toBe(false)
+    }
+    // The card's own file, and a music node's sound, still reach sync-3 in the runner.
+    expect(runnerTakesNode({ c: card({ audio: 'a.wav' }), ls: lipSync('c'), v: videoCard('ls') }, 'c', fam)).toBe(true)
+    expect(runnerTakesNode({ g: music(), c: card({ source: ['g', 0] }), ls: lipSync('c'), v: videoCard('ls') }, 'c', fam)).toBe(true)
+    // Read by anything else, a loaded sound through the card is the runner's.
+    expect(runnerTakesWorkflow({ s: loadAudio('b.wav'), c: card({ source: ['s', 0] }), p: previewAudio('c') }, fam)).toBe(true)
+  })
+})
+
+describe('fix round 1 (B): a loader’s file with no sound fails at that node before the run', () => {
+  const NO_SOUND = 'v_h264_601.mp4'
+  it('LoadAudio and RecordAudio are refused before anything is held, in Python’s plain words', LONG, async () => {
+    await requireMediaTools()
+    const dir = mkdtempSync(join(scratch, 'runs-'))
+    const k = makeKit({ dir, deps: { families: () => ON, kept: createFileKeptBytes(join(dir, 'kept')) } })
+    copyFileSync(clipPath(NO_SOUND), join(k.root, 'input', NO_SOUND))
+    for (const node of [loadAudio(NO_SOUND), recordAudio(NO_SOUND)]) {
+      const err = await k.engine.startRun({ userId: null, takes: [{ l: node, s: saveAudio('l') }], ...START }).then(() => null, e => e as Error & { data?: Record<string, unknown> })
+      expect(err?.message, node.class_type).toContain(MEDIA_WORDS.noSound)
+    }
+    expect(k.ledger.hold).not.toHaveBeenCalled()
+  })
+
+  it('the node itself fails at its turn too (the backstop), and a sound file passes', LONG, async () => {
+    await requireMediaTools()
+    const h = harness({ clips: [NO_SOUND, 'a_min.wav'] })
+    await expect(runNode(h, { l: recordAudio(NO_SOUND) }, 'l')).rejects.toThrow(MEDIA_WORDS.noSound)
+    await expect(runNode(h, { l: loadAudio('a_min.wav') }, 'l')).resolves.toBeTruthy()
+    const exists = (f: OutputFile) => h.access.exists(f)
+    const probe = async (f: OutputFile) => (await import('~~/server/runner/media/soundNodes')).soundStreamProblem(h.access, f, null)
+    expect(await loadAudioStartProblems({ l: loadAudio(NO_SOUND) }, exists, probe)).toMatchObject({ nodeId: 'l', classType: 'LoadAudio', message: MEDIA_WORDS.noSound })
+    expect(await loadAudioStartProblems({ l: recordAudio('missing.webm') }, exists, probe)).toBeNull()
+    expect(await loadAudioStartProblems({ l: loadAudio('a_min.wav') }, exists, probe)).toBeNull()
+  })
+})
+
+describe('fix round 1 (Important 1): the stage’s history lists each file once', () => {
+  for (const exporting of [false, true]) {
+    it(`Generate music → Audio card (export ${exporting ? 'on' : 'off'}): the music once${exporting ? ', and the export once' : ''}`, LONG, async () => {
+      await requireMediaTools()
+      const bytes = readFileSync(clipPath('a_min.wav'))
+      const replicate = createFakeReplicate({ bodyText: () => JSON.stringify({ id: 'p', status: 'succeeded', output: 'https://r.test/music/out.wav' }) })
+      const dir = mkdtempSync(join(scratch, 'runs-'))
+      const k = makeKit({
+        dir, replicate,
+        deps: { families: () => new Set<RunnerFamily>(['cards', 'audio-gen', 'media-sound']), kept: createFileKeptBytes(join(dir, 'kept')), download: async () => ({ bytes: new Uint8Array(bytes), contentType: 'audio/wav' }) },
+      })
+      const { runId } = await k.engine.startRun({ userId: null, takes: [{ g: music(), c: card({ source: ['g', 0], export: exporting }) }], ...START })
+      await k.engine.settled(runId)
+      const nodes = (await k.store.get(runId))!.takes[0]!.nodes
+      expect(nodes.c!.status, nodes.c!.error ?? '').toBe('done')
+      const made = nodes.g!.outputs[0]!
+      const written = k.records.write.mock.calls.flatMap(c => (c[0] as { outputs: OutputFile[] }).outputs)
+      const keys = written.map(f => `${f.type}:${f.subfolder}:${f.filename}`)
+      expect(new Set(keys).size, keys.join(', ')).toBe(keys.length)
+      expect(keys.filter(x => x === `output:${made.subfolder}:${made.filename}`)).toHaveLength(1)
+      expect(written.length).toBe(exporting ? 2 : 1)
+    })
+  }
+})
+
+describe('fix round 1 (Minor 3): the card’s rows with media-sound off equal the code before R5.3', () => {
+  const PIN = JSON.parse(readFileSync(join(FIXTURES, 'runner-media-sound-card-rows.json'), 'utf8')) as {
+    commit: string; rows: Record<string, { prompt: string; rule: string; card: boolean; workflow: boolean; needs: string[] }>
+  }
+  it('every configuration and family set answers as b56ff8551 pinned it', () => {
+    const cases = cardCases()
+    expect(Object.keys(PIN.rows)).toHaveLength(cases.length)
+    const tally: Record<string, number> = {}
+    for (const k of cases) {
+      const key = cardCaseKey(k)
+      const want = PIN.rows[key]!
+      const p = cardPrompt(k)
+      const fam = new Set(k.families) as ReadonlySet<RunnerFamily>
+      expect(createHash('sha256').update(JSON.stringify(p)).digest('hex').slice(0, 16), `${key}: the same prompt`).toBe(want.prompt)
+      const rule = runnerRuleFor('Audio', p.c!.inputs ?? {}, fam)
+      const got = {
+        prompt: want.prompt,
+        rule: rule === AUDIO_CARD_AUDIO_GEN_RULE ? 'audio-gen' : rule === RUNNER_NODE_RULES.Audio ? 'sync-3' : rule ? 'other' : 'none',
+        card: runnerTakesNode(p, 'c', fam),
+        workflow: runnerTakesWorkflow(p, fam),
+        needs: nodesNeedingEngine(p, { runnerOn: true, families: fam, titleOf: id => id }),
+      }
+      expect(got, key).toEqual(want)
+      tally[`${got.rule} ${got.card}`] = (tally[`${got.rule} ${got.card}`] ?? 0) + 1
+      // With media-sound on (and cards), the media row, whatever else is on.
+      if (k.families.includes('cards')) expect(runnerRuleFor('Audio', p.c!.inputs ?? {}, new Set([...fam, 'media-sound'])), key).toBe(AUDIO_CARD_MEDIA_RULE)
+    }
+    // Teeth: the pinned answers take the card under both of its old rows.
+    expect(tally['sync-3 true']).toBeGreaterThan(0)
+    expect(tally['audio-gen true']).toBeGreaterThan(0)
+  })
+})
+
+describe('fix round 1 (Minor 4): save failures in plain words by cause', () => {
+  const coded = (code: string) => Object.assign(new Error(`${code}: /srv/secret/output/x`), { code })
+  it('only a name problem asks for another name; the server’s folders are never named', () => {
+    expect(soundSaveWords(coded('ENAMETOOLONG'))).toBe(SOUND_SAVE_BAD_NAME)
+    expect(soundSaveWords(coded('EINVAL'))).toBe(SOUND_SAVE_BAD_NAME)
+    expect(soundSaveWords(coded('ENOSPC'))).toBe(SOUND_SAVE_NO_ROOM)
+    expect(soundSaveWords(new Error(SAVE_NOT_A_FILE))).toBe(SAVE_NOT_A_FILE)
+    expect(soundSaveWords(new Error(SAVE_OUTSIDE))).toBe(SAVE_OUTSIDE)
+    expect(soundSaveWords(coded('EACCES'))).toBe(SOUND_SAVE_FAILED)
+    expect(soundSaveWords(new Error('The file store is not available'))).toBe(SOUND_SAVE_FAILED)
+  })
+
+  it('a full disk while saving is reported as such, not as a bad name', LONG, async () => {
+    await requireMediaTools()
+    const h = harness()
+    const io = { ...ioFor(h, 's', rid(++runs), []), saveAssetFromPath: async () => { throw coded('ENOSPC') } }
+    await expect(saveAudioFiles(io, [{ rate: 8000, channels: [new Float32Array(80)] }], { prefix: 'x', format: 'flac', quality: '128k', folder: 'output' })).rejects.toThrow(SOUND_SAVE_NO_ROOM)
   })
 })
