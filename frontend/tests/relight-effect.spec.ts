@@ -128,7 +128,8 @@ test.describe('Relight effect', () => {
   test('orientation with MoGe-2 surfaces', async ({ page }) => {
     await page.route('**/api/depth/surfaces', (route) =>
       route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ normalsFilename: 'moge_a579ac8e5ca4ba75.png', subfolder: 'sailor_depth', cached: true }) }))
-    const normalsLoaded = page.waitForResponse((r) => r.url().includes('moge_a579ac8e5ca4ba75.png') && r.ok(), { timeout: 20_000 })
+    // The wait starts before measureOrientation opens the editor, so it must outlast a cold page open too.
+    const normalsLoaded = page.waitForResponse((r) => r.url().includes('moge_a579ac8e5ca4ba75.png') && r.ok(), { timeout: 60_000 })
     const { plain, high, low } = await measureOrientation(page, normalsLoaded)
     console.log('[relight orientation, surfaces] plain:', plain, 'light near top:', high, 'light near bottom:', low)
     expectLitTowardTheLight(plain, high, low)
@@ -386,6 +387,9 @@ async function measurePair(page: Page, body: { original: string; guide: string }
   }, body)
 }
 
+/** 64×64: an opaque square inside an 8 px transparent border — a cut-out the right-click can still hit. */
+const CUTOUT_PNG_B64 = 'iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAYAAACqaXHeAAAAg0lEQVR4nO3PQRECAQDDwBBVyDgxyEAMMnDFOYDnDZPuO48WZmZmpur2K3g/jw9/7P54ff0ocRIncRIncRIncRIncRIncRIncRIncRIncRIncRIncRIncRIncRIncRIncRIncRIncRIncRIncRIncRIncRIncRIncRLn1QNmZmZmuMgJoj0EYOtl9tsAAAAASUVORK5CYII='
+
 test.describe('Relight Finish (stage 3, Task 4)', () => {
   test.beforeEach(async ({ page }) => { await mockSurfacesCached(page) })
 
@@ -479,12 +483,13 @@ test.describe('Relight Finish (stage 3, Task 4)', () => {
   })
 
   test('a cut-out photo gets no Finish button and sends nothing', async ({ page }) => {
-    // The puppy's own file, served as a transparent PNG: the editor sees a cut-out, while its
-    // depth (keyed by filename) is still the cached one, so Relight itself runs.
+    // The puppy's own file, served as a cut-out (opaque middle, transparent border): the editor
+    // sees transparency, the middle still takes the right-click, and its depth (keyed by
+    // filename) is still the cached one, so Relight itself runs.
     await page.route('**/*', (route) => {
       const u = route.request().url()
       if (route.request().resourceType() === 'image' && u.includes('/view') && u.includes('flux_lora_00165_')) {
-        return route.fulfill({ status: 200, contentType: 'image/png', body: Buffer.from(TINY_PNG_DATA_URL.split(',')[1]!, 'base64') })
+        return route.fulfill({ status: 200, contentType: 'image/png', body: Buffer.from(CUTOUT_PNG_B64, 'base64') })
       }
       return route.fallback()
     })
