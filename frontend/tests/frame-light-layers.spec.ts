@@ -1,4 +1,4 @@
-import { readFile } from 'node:fs/promises'
+import { readFile, writeFile, mkdir } from 'node:fs/promises'
 import { test, expect, type Page } from '@playwright/test'
 import { openBlankWorkflow, waitForBackend, stackPixels } from './_helpers'
 import { renderExported } from './_frameEmbedHelpers'
@@ -39,14 +39,14 @@ async function openFrame(page: Page, W = 1000, H = 1000, bg = BG) {
   })), [W, H, bg] as const)
   await openEditor(page)
 }
-async function openEditor(page: Page) {
+async function openEditor(page: Page, opts: { grid?: boolean } = {}) {
   const node = page.locator('.vue-flow__node').first()
   await node.waitFor({ state: 'attached', timeout: 60_000 })
   const nodeId = await node.getAttribute('data-id')
   await page.evaluate((id) => window.dispatchEvent(new CustomEvent('sailor:openCompositor', { detail: { nodeId: id } })), nodeId)
   await page.locator('[data-testid="compositor-stack-canvas"]').waitFor({ state: 'visible', timeout: 15_000 })
   await expect.poll(() => page.evaluate(() => typeof (window as any).__compositorSetLayers === 'function'), { timeout: 10_000 }).toBe(true)
-  await gridOff(page)
+  if (!opts.grid) await gridOff(page)
 }
 /** Hide the Frame's layout grid (⇧G) so its guide lines stay out of the screenshots. */
 async function gridOff(page: Page) {
@@ -562,6 +562,474 @@ test.describe('Frame light layers (stage 1) — real editor', () => {
     const teeth = maxCellDiff(gw.filter((_, i) => !inWord(i)), gu.filter((_, i) => !inWord(i)))
     console.log('[web export file] teeth — max cell diff vs the unlit editor:', teeth)
     expect(teeth).toBeGreaterThan(10)
+  })
+})
+
+// ══════════════════════════════════════════════════════════════════════════════════════════════
+// Stage 2: photos with Relight take the Frame's lights.
+//
+// The puppy (`flux_lora_00165_.png`: its depth map and MoGe-2 normals are cached in
+// input/sailor_depth) as a 0.6-wide photo in the middle of a 1000×1000 Frame, a small shape in the
+// bottom-left corner, far from the photo and its lamps. /api/depth/surfaces is a PAID route: every
+// stage-2 test answers it with the cached normals file (no fal call even if the cache were gone),
+// and Finish and the upload are mocked too.
+// ══════════════════════════════════════════════════════════════════════════════════════════════
+const PUP_FILE = 'flux_lora_00165_.png'
+const PUP_NORMALS = 'moge_a579ac8e5ca4ba75.png'
+const PUP = { id: 'pup', kind: 'image', filename: PUP_FILE, x: 0.5, y: 0.5, w: 0.6, h: 0.6, rotation: 0, opacity: 1, effects: [] as unknown[] }
+const CORNER = { ...SHAPE, id: 'corner', x: 0.12, y: 0.9, w: 0.16, h: 0.1 }
+const PHOTO = [CORNER, PUP]   // bottom → top
+/** The photo's box on the canvas (it spans 0.2..0.8), inset 5% of the box. */
+const P = { x0: 0.23, y0: 0.23, x1: 0.77, y1: 0.77, mx: 0.5, my: 0.5 }
+const photoHalves = async (page: Page, name: string) => ({
+  left: await mean(page, name, [P.x0, P.y0, P.mx, P.y1]), right: await mean(page, name, [P.mx, P.y0, P.x1, P.y1]),
+  top: await mean(page, name, [P.x0, P.y0, P.x1, P.my]), bottom: await mean(page, name, [P.x0, P.my, P.x1, P.y1]),
+})
+type PH = Awaited<ReturnType<typeof photoHalves>>
+/** Lit ÷ plain per half, so the photo's own brighter parts don't count as light. */
+const gains = (lit: PH, plain: PH) => {
+  const r = (k: keyof PH) => Math.round((lit[k] / plain[k]) * 1000) / 1000
+  return { left: r('left'), right: r('right'), top: r('top'), bottom: r('bottom') }
+}
+const relightRuns = (page: Page) => page.evaluate(() => (window as any).__relightRuns?.() ?? -1)
+const lightsOf = (ls: any[]) => ls.filter(l => l.kind === 'light')
+/** A Relight effect as it was stored before stage 2: its own lights, in fractions of the photo's box. */
+const oldRelight = (lights: { id: string; x: number; y: number }[]) => ({
+  id: 'fx-relight', type: 'relight', visible: true, keep: 0.12, depth: 4, texture: 2, shine: 0, shadows: true,
+  lights: lights.map(l => ({ ...l, height: 0.4, color: '#ffcf94', brightness: 3, reach: 1.4, on: true })),
+})
+
+/** Pages whose MoGe-2 normals image has loaded (the facing tile is then re-made with surfaces). */
+const normalsSeen = new WeakSet<Page>()
+async function mockPaidRoutes(page: Page) {
+  trackFacingModule(page)
+  page.on('response', (r) => { if (r.url().includes(PUP_NORMALS) && r.ok()) normalsSeen.add(page) })
+  await page.route('**/api/depth/surfaces', route =>
+    route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ normalsFilename: PUP_NORMALS, subfolder: 'sailor_depth', cached: true }) }))
+}
+/** The URL the app loaded the facing pass from (the dev server adds an HMR `?t=` stamp, and a
+ *  module imported under another URL is another instance with its own counters). */
+const facingModuleUrl = new WeakMap<Page, string>()
+function trackFacingModule(page: Page) {
+  page.on('request', (r) => { if (r.url().includes('/lib/frame/lighting/facingPass.ts')) facingModuleUrl.set(page, r.url()) })
+}
+/** Facing tiles drawn so far (the per-photo shape pass that needs the depth field), read from the
+ *  app's own module instance. Unknown (-1) until the app has loaded it — a wait then times out,
+ *  never passes falsely. */
+const tileRuns = (page: Page) => {
+  const url = facingModuleUrl.get(page)
+  return url ? page.evaluate(async (u) => (await import(u)).__facingTileRuns() as number, url) : Promise.resolve(-1)
+}
+/** Settled: no Relight pass ran for 1.5 s (the depth field and the normals have landed and their
+ *  tile is drawn), then the stack canvas is stable. */
+async function settleRelight(page: Page, tilesAtLeast = 0) {
+  await expect.poll(() => tileRuns(page), { timeout: 30_000 }).toBeGreaterThanOrEqual(tilesAtLeast)
+  let prev = await relightRuns(page), still = 0
+  for (let i = 0; i < 60 && still < 6; i++) {
+    await page.waitForTimeout(250)
+    const n = await relightRuns(page)
+    still = n === prev ? still + 1 : 0
+    prev = n
+  }
+  await stackPixels(page)
+}
+/** Right-click the photo → "Relight…" (the editor adds the effect and, with no light, a lamp). */
+async function addRelightByMenu(page: Page) {
+  const tiles0 = await tileRuns(page)
+  const r = await canvasRect(page)
+  await page.mouse.click(r.x + r.width / 2, r.y + r.height / 2, { button: 'right' })
+  await page.getByText('Relight…', { exact: true }).click()
+  await expect(page.locator('[data-testid="effect-row"][data-effect-kind="relight"]')).toHaveCount(1)
+  // The facing tile, drawn once the depth field has landed (Finish and the lighting both need
+  // it), and the normals image, whose arrival re-makes the tile with surfaces.
+  await expect.poll(() => normalsSeen.has(page), { timeout: 60_000 }).toBe(true)
+  await settleRelight(page, tiles0 + 1)
+}
+/** Drag the (only) lamp to a Frame fraction with the real mouse and wait for the new picture. */
+async function moveLamp(page: Page, fx: number, fy: number, name: string) {
+  const before = await stackPixels(page)
+  await dragDotTo(page, page.getByTestId('light-dot').first(), fx, fy)
+  await expect.poll(async () => { const l = lightsOf(await layers(page))[0]; return Math.hypot(l.x - fx, l.y - fy) }, { timeout: 5_000 }).toBeLessThan(0.02)
+  await expect.poll(async () => (await stackPixels(page)) !== before, { timeout: 10_000 }).toBe(true)
+  await snap(page, name)
+}
+const selectRelightRow = (page: Page) => page.locator('[data-testid="effect-row"][data-effect-kind="relight"]').click()
+
+test.describe('Frame light layers (stage 2) — photos lit by Frame lights', () => {
+  test.beforeEach(async ({ page }) => { await mockPaidRoutes(page) })
+
+  test('no light, no Relight: nothing runs; adding Relight brings a lamp that the photo follows; one ⌘Z is byte-identical', async ({ page }) => {
+    const normals = page.waitForResponse(r => r.url().includes(PUP_NORMALS) && r.ok(), { timeout: 120_000 })
+    await openFrame(page)
+    await setLayers(page, PHOTO)
+    const plainUrl = await snap(page, 'plain')
+    const runs0 = { light: await lightRuns(page), stamps: await mapStamps(page), relight: await relightRuns(page) }
+    console.log('[s2 no light, no Relight] runs:', runs0)
+    expect(runs0).toEqual({ light: 0, stamps: 0, relight: 0 })
+
+    // 1. Relight from the right-click: a lamp lands at Golden key's place (right of the face).
+    await addRelightByMenu(page)
+    await normals
+    await settleRelight(page)
+    await expect(page.getByTestId('light-dot')).toHaveCount(1)
+    const ls = await layers(page)
+    expect(ls.map(l => l.kind)).toEqual(['rect', 'image', 'light'])
+    const lamp = ls[2]
+    console.log('[s2 add] lamp at', lamp.x.toFixed(3), lamp.y.toFixed(3), JSON.stringify(lamp.light))
+    expect(lamp.x).toBeCloseTo(0.5 + 0.35 * 0.6, 3)   // Golden key: box (0.85, 0.3)
+    expect(lamp.y).toBeCloseTo(0.5 - 0.2 * 0.6, 3)
+    await snap(page, 'golden')
+    await page.screenshot({ path: `${SHOTS}/s2-1-relight-added-lamp-right.png` })
+    const plain = await photoHalves(page, 'plain')
+    const gR = gains(await photoHalves(page, 'golden'), plain)
+    console.log('[s2 add] photo gain per half, lamp at the right:', gR)
+    expect(gR.right - gR.left).toBeGreaterThan(0.05)
+
+    // 2. The lamp dragged to the left (real mouse): the left half gains more.
+    await moveLamp(page, 0.14, 0.4, 'lampLeft')
+    await page.screenshot({ path: `${SHOTS}/s2-2-lamp-left.png` })
+    const gL = gains(await photoHalves(page, 'lampLeft'), plain)
+    console.log('[s2 drag] photo gain per half, lamp at the left:', gL)
+    // Original light (keep 0.12) evens the photo's own light out first — it lifts the darker right
+    // half by ~20% whatever the lamp does — so the move is judged lamp place against lamp place:
+    // the left half gains, the right half loses.
+    expect(gL.left - gR.left).toBeGreaterThan(0.05)
+    expect(gR.right - gL.right).toBeGreaterThan(0.05)
+
+    // 8. Byte identity: undo the drag, then the add (ONE step: effect and lamp go together).
+    await page.keyboard.press('Meta+z')
+    await expect.poll(async () => lightsOf(await layers(page))[0]?.x, { timeout: 5_000 }).toBeCloseTo(lamp.x, 5)
+    await page.keyboard.press('Meta+z')
+    await expect(page.getByTestId('light-dot')).toHaveCount(0)
+    const back = await layers(page)
+    expect(back.map(l => l.kind)).toEqual(['rect', 'image'])
+    expect(back[1].effects ?? []).toEqual([])
+    const runsAfter = { light: await lightRuns(page), relight: await relightRuns(page) }
+    const after = await stackPixels(page)
+    console.log('[s2 byte identity] after undoing Relight + lamp: identical to the plain Frame:', after === plainUrl)
+    expect(after).toBe(plainUrl)
+    await page.waitForTimeout(500)
+    expect({ light: await lightRuns(page), relight: await relightRuns(page) }).toEqual(runsAfter)
+  })
+
+  test('surfaces: the floor faces up — a lamp above lights the bottom half more than one low in front', async ({ page }) => {
+    const normals = page.waitForResponse(r => r.url().includes(PUP_NORMALS) && r.ok(), { timeout: 120_000 })
+    await openFrame(page)
+    await setLayers(page, PHOTO)
+    await snap(page, 'plain')
+    await addRelightByMenu(page)
+    await normals
+    await settleRelight(page)
+    // Above the photo's top edge and near its bottom edge, both centred.
+    await moveLamp(page, 0.5, 0.2 + 0.06 * 0.6, 'high')
+    await page.screenshot({ path: `${SHOTS}/s2-2-lamp-high.png` })
+    await moveLamp(page, 0.5, 0.2 + 0.92 * 0.6, 'low')
+    await page.screenshot({ path: `${SHOTS}/s2-2-lamp-low.png` })
+    const plain = await photoHalves(page, 'plain')
+    const hi = gains(await photoHalves(page, 'high'), plain), lo = gains(await photoHalves(page, 'low'), plain)
+    console.log('[s2 surfaces] gain per half — lamp high:', hi, 'lamp low:', lo)
+    // Lamp place against lamp place (Original light evens the photo out first, see above): moving
+    // the lamp up raises the top half more than the bottom half…
+    expect(hi.top / lo.top).toBeGreaterThan(hi.bottom / lo.bottom + 0.05)
+    // …and what only surfaces know: the floor (most of the bottom half) faces UP, so it takes the
+    // lamp above better than the lamp low in front of it.
+    expect(hi.bottom).toBeGreaterThan(lo.bottom)
+  })
+
+  test('Setups replace the Frame’s lights around the photo (count and places); one ⌘Z puts the lamp back', async ({ page }) => {
+    await openFrame(page)
+    await setLayers(page, PHOTO)
+    await addRelightByMenu(page)
+    const golden = lightsOf(await layers(page))
+    expect(golden.length).toBe(1)
+    await expect(page.getByTestId('relight-setup-Golden key')).toHaveAttribute('aria-pressed', 'true')
+    const before = await snap(page, 'golden')
+
+    await page.getByTestId('relight-setup-Neon').click()
+    await expect(page.getByTestId('light-dot')).toHaveCount(2)
+    await expect(page.getByTestId('relight-setup-Neon')).toHaveAttribute('aria-pressed', 'true')
+    const neon = lightsOf(await layers(page))
+    console.log('[s2 setups] Neon lights:', neon.map(l => [l.id, l.x.toFixed(3), l.y.toFixed(3), l.light.color]))
+    expect(neon.length).toBe(2)
+    expect(neon.some(l => l.id === golden[0].id)).toBe(false)   // replaced, not added to
+    // Neon's box places (0.05, 0.5) and (0.95, 0.45), mapped through the 0.6 photo in the middle.
+    expect(neon[0].x).toBeCloseTo(0.5 - 0.45 * 0.6, 3); expect(neon[0].y).toBeCloseTo(0.5, 3)
+    expect(neon[1].x).toBeCloseTo(0.5 + 0.45 * 0.6, 3); expect(neon[1].y).toBeCloseTo(0.5 - 0.05 * 0.6, 3)
+    expect(neon.map(l => l.light.color)).toEqual(['#ff3fb4', '#29d8ff'])
+    await expect(page.getByTestId('relight-light-2')).toHaveAttribute('data-light-id', neon[1].id)
+    await expect.poll(async () => (await stackPixels(page)) !== before).toBe(true)
+    await snap(page, 'neon')
+    await page.screenshot({ path: `${SHOTS}/s2-3-setup-neon.png` })
+
+    await page.getByTestId('relight-setup-Window').click()
+    await expect(page.getByTestId('light-dot')).toHaveCount(1)
+    const win = lightsOf(await layers(page))
+    expect(win[0].x).toBeCloseTo(0.5 - 0.55 * 0.6, 3); expect(win[0].y).toBeCloseTo(0.5 - 0.25 * 0.6, 3)
+    expect((await layers(page)).find(l => l.id === 'pup').effects.find((e: any) => e.type === 'relight').keep).toBeCloseTo(0.3, 5)
+
+    // One ⌘Z per Setup: Window → Neon → Golden key's lamp, the same layer in the same place.
+    await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur?.())
+    await page.keyboard.press('Meta+z')
+    await expect(page.getByTestId('light-dot')).toHaveCount(2)
+    expect(lightsOf(await layers(page)).map(l => l.id)).toEqual(neon.map(l => l.id))
+    await page.keyboard.press('Meta+z')
+    await expect(page.getByTestId('light-dot')).toHaveCount(1)
+    const back = lightsOf(await layers(page))
+    expect(back).toEqual(golden)
+    await snap(page, 'undone')
+    const d = maxCellDiff(await gridMeans(page, 'undone'), await gridMeans(page, 'golden'))
+    console.log('[s2 setups] after two undos, max 6×6 cell diff vs Golden key:', d, '| vs Neon:', maxCellDiff(await gridMeans(page, 'undone'), await gridMeans(page, 'neon')))
+    expect(d).toBeLessThan(0.5)
+  })
+
+  test('an old Relight Frame opens converted: lights on top, the toast, the other layers untouched; one ⌘Z restores the old data', async ({ page }) => {
+    const OLD_FX = oldRelight([{ id: 'k1', x: 0.15, y: 0.3 }, { id: 'k2', x: 0.9, y: 0.8 }])
+    const OLD = [CORNER, { ...PUP, effects: [OLD_FX] }]
+    await openBlankWorkflow(page)
+    await waitForBackend(page)
+    await page.evaluate(([b, ls]) => window.dispatchEvent(new CustomEvent('sailor:addNode', {
+      detail: { nodeType: 'Compositor', widgetOverrides: { width: 1000, height: 1000 }, propertyOverrides: { sailor_localBg: b, sailor_localLayers: ls } },
+    })), [BG, JSON.parse(JSON.stringify(OLD))] as const)
+    await openEditor(page, { grid: true })   // the grid stays until after the undo: ⇧G is an undo step too
+    await expect(page.getByText('Relight\'s lights are now Frame lights', { exact: true })).toBeVisible({ timeout: 15_000 })
+    await expect(page.getByTestId('light-dot')).toHaveCount(2)
+    const conv = await layers(page)
+    console.log('[s2 old Frame] after open:', JSON.stringify(conv.map(l => ({ id: l.id, kind: l.kind, x: l.x?.toFixed(3), y: l.y?.toFixed(3), lit: l.lit, castsShadow: l.castsShadow, lights: l.effects?.[0]?.lights?.length }))))
+    expect(conv.map(l => l.kind)).toEqual(['rect', 'image', 'light', 'light'])   // the lights at the TOP
+    expect(conv.slice(2).map(l => l.id)).toEqual(['ll-rl-pup-k1', 'll-rl-pup-k2'])
+    expect(conv[2].x).toBeCloseTo(0.5 - 0.35 * 0.6, 3); expect(conv[2].y).toBeCloseTo(0.5 - 0.2 * 0.6, 3)
+    expect(conv[3].x).toBeCloseTo(0.5 + 0.4 * 0.6, 3); expect(conv[3].y).toBeCloseTo(0.5 + 0.3 * 0.6, 3)
+    expect(conv[0]).toMatchObject({ lit: false, castsShadow: false })
+    expect('lights' in conv[1].effects[0]).toBe(false)
+    // …and the light rows are the top rows of the layer list.
+    const rowsTop = await page.evaluate(() => ({
+      lights: [...document.querySelectorAll('[data-testid="light-row-swatch"]')].map(e => e.getBoundingClientRect().top),
+      others: [...document.querySelectorAll('[data-testid="row-lit"]')].map(e => e.getBoundingClientRect().top),
+    }))
+    expect(rowsTop.lights.length).toBe(2)
+    expect(Math.max(...rowsTop.lights)).toBeLessThan(Math.min(...rowsTop.others))
+    await expect.poll(() => normalsSeen.has(page), { timeout: 60_000 }).toBe(true)
+    await settleRelight(page, 1)
+    await snap(page, 'converted')
+
+    // One ⌘Z: the old data exactly (no light layer, the effect's own lights, the shape untouched).
+    await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur?.())
+    await page.keyboard.press('Meta+z')
+    await expect(page.getByTestId('light-dot')).toHaveCount(0)
+    const undone = await layers(page)
+    expect(undone.map(l => l.kind)).toEqual(['rect', 'image'])
+    expect(undone[0].lit).toBeUndefined(); expect(undone[0].castsShadow).toBeUndefined()
+    expect(undone[1].effects).toEqual(OLD[1]!.effects)
+    // Undone, the painter's own read-only conversion paints the same picture.
+    await settleRelight(page)
+    await snap(page, 'undone')
+    // Redo, then hide the grid for the screenshot of the converted Frame.
+    await page.keyboard.press('Meta+Shift+z')
+    await expect(page.getByTestId('light-dot')).toHaveCount(2)
+    await gridOff(page)
+    await settleRelight(page)
+    await page.screenshot({ path: `${SHOTS}/s2-4-old-frame-converted.png` })
+    const same = maxCellDiff(await gridMeans(page, 'undone'), await gridMeans(page, 'converted'))
+    console.log('[s2 old Frame] undone (painter-converted) vs editor-converted, max 6×6 cell diff:', same)
+    expect(same).toBeLessThan(0.5)
+
+    // The other layers look as they did before: the corner shape's inside equals the same Frame
+    // painted with no Relight and no light at all (the old Relight lit the photo only).
+    await setLayers(page, PHOTO)
+    await snap(page, 'before')
+    const inside: Box = [0.06, 0.87, 0.18, 0.93]
+    const shape = await page.evaluate(([b]) => {
+      const S = (window as any).__snaps, a = S.converted, z = S.before
+      const [x0, y0, x1, y1] = (b as number[]).map((v, i) => Math.round(v * (i % 2 ? a.h : a.w)))
+      let max = 0
+      for (let y = y0!; y < y1!; y++) for (let x = x0!; x < x1!; x++) for (let c = 0; c < 3; c++) { const i = (y * a.w + x) * 4 + c; max = Math.max(max, Math.abs(a.d[i] - z.d[i])) }
+      return max
+    }, [inside] as const)
+    // …and so does the background: the conversion leaves it unlit (the old Relight lit the photo only).
+    const bgCorner: Box = [0.02, 0.02, 0.12, 0.12]
+    const bg = { converted: await mean(page, 'converted', bgCorner), before: await mean(page, 'before', bgCorner) }
+    console.log('[s2 old Frame] corner shape inside: max |converted − before| =', shape, '| background top-left, converted vs before:', bg)
+    expect(shape).toBe(0)
+    expect(Math.abs(bg.converted - bg.before)).toBeLessThan(0.5)
+  })
+
+  test('an unopened old Relight Frame: its card is lit by the converted lights, and nothing is written', async ({ page }) => {
+    await openBlankWorkflow(page)
+    await waitForBackend(page)
+    // Two old Frames: the only light at the photo's left in one, at its right in the other.
+    const add = (x: number) => page.evaluate(([b, ls]) => window.dispatchEvent(new CustomEvent('sailor:addNode', {
+      detail: { nodeType: 'Compositor', widgetOverrides: { width: 1000, height: 1000 }, propertyOverrides: { sailor_localBg: b, sailor_localLayers: ls } },
+    })), [BG, [CORNER, { ...PUP, effects: [oldRelight([{ id: 'k', x, y: 0.5 }])] }]] as const)
+    await add(0.05)
+    await expect(page.locator('.vue-flow__node')).toHaveCount(1)
+    const idL = await page.locator('.vue-flow__node').first().getAttribute('data-id')
+    await add(0.95)
+    await expect(page.locator('.vue-flow__node')).toHaveCount(2)
+    const idR = (await page.locator('.vue-flow__node').evaluateAll(ns => ns.map(n => n.getAttribute('data-id')))).find(id => id !== idL)!
+    // Read both cards (settled: two equal reads), then the halves of the photo on each.
+    const card = async (id: string, name: string) => {
+      const cv = page.locator(`.vue-flow__node[data-id="${id}"] [data-testid="frame-card-stack-canvas"]`)
+      await expect.poll(() => cv.evaluate((c: HTMLCanvasElement) => c.width), { timeout: 20_000 }).toBeGreaterThan(10)
+      let prev = ''
+      for (let i = 0; i < 40; i++) {
+        await page.waitForTimeout(250)
+        const cur = await cv.evaluate((c: HTMLCanvasElement) => { const k = document.createElement('canvas'); k.width = c.width; k.height = c.height; k.getContext('2d')!.drawImage(c, 0, 0); return k.toDataURL() })
+        if (cur === prev && i > 4) break
+        prev = cur
+      }
+      await page.evaluate(([n, u]) => new Promise<void>((res) => {
+        const img = new Image()
+        img.onload = () => {
+          const c = document.createElement('canvas'); c.width = img.width; c.height = img.height
+          const g = c.getContext('2d', { willReadFrequently: true })!; g.drawImage(img, 0, 0)
+          const w = window as any; w.__snaps ??= {}
+          w.__snaps[n!] = { w: c.width, h: c.height, d: g.getImageData(0, 0, c.width, c.height).data }
+          res()
+        }
+        img.src = u!
+      }), [name, prev])
+      return photoHalves(page, name)
+    }
+    const L = await card(idL, 'cardL'), R = await card(idR, 'cardR')
+    console.log('[s2 card] photo halves — old light left:', L, '| old light right:', R)
+    expect(L.left - L.right).toBeGreaterThan(5)
+    expect(R.right - R.left).toBeGreaterThan(5)
+    expect(L.left - R.left).toBeGreaterThan(5)
+    await page.locator(`.vue-flow__node[data-id="${idL}"]`).screenshot({ path: `${SHOTS}/s2-5-card-old-frame-light-left.png` })
+    // Nothing was persisted: the stored layers are still the old format.
+    const stored = await page.evaluate((id) => {
+      let c: any = (document.querySelector('.vue-flow') as any)?.__vueParentComponent
+      while (c && !(c.exposed && typeof c.exposed.getNodes === 'function')) c = c.parent
+      const n = c.exposed.getNodes().find((n: any) => String(n.id) === String(id))
+      return JSON.parse(JSON.stringify({ layers: n.data.properties.sailor_localLayers, lighting: n.data.properties.sailor_localLighting ?? null }))
+    }, idL)
+    expect(stored.layers.map((l: any) => l.kind)).toEqual(['rect', 'image'])
+    expect(stored.layers[1].effects[0].lights.length).toBe(1)
+    expect(stored.lighting).toBeNull()
+  })
+
+  test('Finish (mocked): the guide is the photo lit by the Frame’s lamp — it differs from the original and its brighter half follows the lamp', async ({ page }) => {
+    await openFrame(page)
+    await setLayers(page, PHOTO)
+    await addRelightByMenu(page)                                // Golden key's lamp, right of the face
+    await page.route('**/upload/image', async (route) => {
+      const m = (route.request().postData() ?? '').match(/filename="([^"]+)"/)
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ name: m?.[1] ?? 'relightfinish_x.png', subfolder: '', type: 'input' }) })
+    })
+    const bodies: { original: string; guide: string }[] = []
+    await page.route('**/api/inpaint/relight-finish', async (route) => {
+      bodies.push(route.request().postDataJSON())
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ images: ['data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII='], model: 'fal-ai/nano-banana-2/edit' }) })
+    })
+    /** The pair, decoded: sizes, the mean |guide − original|, and on each half of the box (inset
+     *  5%) the guide's mean luminance and its gain over the original. */
+    const measure = (b: { original: string; guide: string }) => page.evaluate(async ({ original, guide }) => {
+      const load = (s: string) => new Promise<HTMLImageElement>((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = s })
+      const [a, g] = await Promise.all([load(original), load(guide)])
+      const px = (im: HTMLImageElement) => { const c = document.createElement('canvas'); c.width = im.naturalWidth; c.height = im.naturalHeight; const x = c.getContext('2d')!; x.drawImage(im, 0, 0); return x.getImageData(0, 0, c.width, c.height).data }
+      const W = a.naturalWidth, H = a.naturalHeight, da = px(a), dg = px(g)
+      let diff = 0, k = [0, 0]
+      const sum = { a: [0, 0], g: [0, 0] }
+      for (let y = Math.round(H * 0.05); y < H * 0.95; y++) for (let x = Math.round(W * 0.05); x < W * 0.95; x++) {
+        const i = (y * W + x) * 4, side = x < W / 2 ? 0 : 1
+        sum.a[side] += 0.299 * da[i]! + 0.587 * da[i + 1]! + 0.114 * da[i + 2]!
+        sum.g[side] += 0.299 * dg[i]! + 0.587 * dg[i + 1]! + 0.114 * dg[i + 2]!
+        k[side]++
+      }
+      for (let i = 0; i < da.length; i += 4) for (let k = 0; k < 3; k++) diff += Math.abs(da[i + k]! - dg[i + k]!)
+      const r = (v: number) => Math.round(v * 1000) / 1000
+      return {
+        a: [W, H], g: [g.naturalWidth, g.naturalHeight], diff: r(diff / ((da.length / 4) * 3)),
+        guideLeft: r(sum.g[0]! / k[0]!), guideRight: r(sum.g[1]! / k[1]!), gainLeft: r(sum.g[0]! / sum.a[0]!), gainRight: r(sum.g[1]! / sum.a[1]!),
+      }
+    }, b)
+    /** Select the Relight row, Finish, read the pair. Then the result bar: Revert when it shows.
+     *  Returns the measures and whether the bar showed. */
+    const finishOnce = async () => {
+      await selectRelightRow(page)
+      await expect(page.getByTestId('relight-finish')).toBeEnabled()
+      const n = bodies.length
+      await page.getByTestId('relight-finish').click()
+      await expect.poll(() => bodies.length, { timeout: 15_000 }).toBe(n + 1)
+      const m = await measure(bodies[n]!)
+      const bar = await page.locator('[data-edit-result-bar]').waitFor({ state: 'visible', timeout: 10_000 }).then(() => true, () => false)
+      if (bar) {
+        await page.getByTestId('edit-result-revert').click()
+        await expect(page.locator('[data-edit-result-bar]')).toHaveCount(0)
+        await expect(page.locator('[data-testid="effect-row"][data-effect-kind="relight"]')).toHaveCount(1)
+      }
+      return { ...m, bar }
+    }
+    // 1) Golden key's lamp at the right; the photo is the selected layer (as after the add).
+    const right = await finishOnce()
+    expect(right.bar).toBe(true)
+    // 2) The lamp dragged to the left — the drag selects the lamp — then the photo's Relight row.
+    await moveLamp(page, 0.14, 0.4, 'finishLeft')
+    const left = await finishOnce()
+    console.log('[s2 Finish] guide vs original — lamp right:', JSON.stringify(right), '| lamp left:', JSON.stringify(left))
+    await mkdir(SHOTS, { recursive: true })
+    await writeFile(`${SHOTS}/s2-6-finish-guide-lamp-left.png`, Buffer.from(bodies[1]!.guide.replace(/^data:image\/png;base64,/, ''), 'base64'))
+    for (const m of [right, left]) {
+      expect(m.a).toEqual(m.g)                                // the pair stays pixel-aligned
+      expect(m.diff).toBeGreaterThan(2)                       // the guide is lit, not a copy
+    }
+    // The guide's brighter half is the lamp's half…
+    expect(right.guideRight - right.guideLeft).toBeGreaterThan(3)
+    expect(left.guideLeft - left.guideRight).toBeGreaterThan(3)
+    // …and, lamp place against lamp place (the guide carries Original light, which lifts the
+    // photo's darker right half whatever the lamp does), the left half gains and the right loses.
+    expect(left.gainLeft - right.gainLeft).toBeGreaterThan(0.05)
+    expect(right.gainRight - left.gainRight).toBeGreaterThan(0.05)
+    // Finish's result bar (Revert · Try again · Keep) shows after a Finish started with a light
+    // selected too (a lamp drag selects the lamp; the Relight row keeps it as the selected layer).
+    expect(left.bar, 'the result bar after Finish with the lamp as the selected layer').toBe(true)
+  })
+
+  test('web export file of a Relight Frame looks like the editor', async ({ page, context }) => {
+    const errors: string[] = []
+    page.on('console', m => { if (m.type() === 'error') errors.push(m.text()) })
+    await openFrame(page)
+    await setLayers(page, PHOTO)
+    await snap(page, 'plainEditor')
+    await addRelightByMenu(page)
+    await snap(page, 'editor')
+    await page.getByTestId('compositor-right-panel').getByRole('button', { name: /^Download/ }).click()
+    await page.getByTestId('frame-web-export').click()
+    const sheet = page.getByTestId('frame-web-export-sheet')
+    const ready = sheet.getByText('One file · plays anywhere'), failed = sheet.getByText("The export couldn't be built", { exact: false })
+    await expect(ready.or(failed)).toBeVisible({ timeout: 90_000 })
+    if (await failed.isVisible()) throw new Error(`web export failed: ${errors.find(e => e.includes('[Frame] web export failed')) ?? errors.join(' | ')}`)
+    const sizeText = await page.getByTestId('frame-web-export-size').textContent()
+    const notes = await sheet.innerText()
+    const [wdl] = await Promise.all([page.waitForEvent('download'), sheet.getByRole('button', { name: 'Download' }).click()])
+    const html = await readFile((await wdl.path())!, 'utf8')
+    expect(html).toContain('"kind":"light"')
+    const r = await canvasRect(page)
+    const exp = await renderExported(context, html, 0, { width: Math.round(r.width), height: Math.round(r.height) })
+    await snapUrl(page, 'web', exp.png, 'editor')
+    const gw = await gridMeans(page, 'web'), ge = await gridMeans(page, 'editor'), gp = await gridMeans(page, 'plainEditor')
+    const row = (g: number[]) => g.map(v => Math.round(v * 10) / 10).join(' ')
+    console.log('[s2 web export] size', sizeText, '| bytes', html.length, '| requests', exp.requests.length)
+    console.log('[s2 web export] sheet text:', notes.replace(/\s+/g, ' ').slice(0, 600))
+    console.log('[s2 web export] cells editor:', row(ge))
+    console.log('[s2 web export] cells export:', row(gw))
+    console.log('[s2 web export] cells (export − editor):', gw.map((v, i) => Math.round((v - ge[i]!) * 10) / 10).join(' '))
+    const ph = { editor: await photoHalves(page, 'editor'), web: await photoHalves(page, 'web'), plain: await photoHalves(page, 'plainEditor') }
+    console.log('[s2 web export] photo halves:', JSON.stringify(ph))
+    await mkdir(SHOTS, { recursive: true })
+    await writeFile(`${SHOTS}/s2-7-web-export.png`, Buffer.from(exp.png.replace(/^data:image\/png;base64,/, ''), 'base64'))
+    // Regions away from fine detail: the lit background above the photo and beside it, and the
+    // photo's plain floor (bottom left of the box, clear of the puppy's fur and paws).
+    const regions: Record<string, Box> = { bgTop: [0.05, 0.03, 0.95, 0.15], bgRight: [0.84, 0.3, 0.97, 0.7], floor: [0.23, 0.66, 0.36, 0.77] }
+    const reg: Record<string, number[]> = {}
+    for (const [k, b] of Object.entries(regions)) reg[k] = [await mean(page, 'editor', b), await mean(page, 'web', b), await mean(page, 'plainEditor', b)]
+    console.log('[s2 web export] regions [editor, export, plain]:', JSON.stringify(reg))
+    expect(exp.requests).toEqual([])
+    expect(notes).not.toContain('Relight on Image')               // depth and surfaces travelled with the file
+    expect(html).toContain('"surfaces":[')
+    for (const [editor, file] of Object.values(reg)) expect(Math.abs(editor! - file!)).toBeLessThan(3)
+    expect(Math.abs(reg.floor![0]! - reg.floor![2]!)).toBeGreaterThan(5)   // teeth: the floor really is relit in the editor
+    expect(maxCellDiff(gw, gp)).toBeGreaterThan(10)                       // and the export really is lit
   })
 })
 

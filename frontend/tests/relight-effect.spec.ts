@@ -11,14 +11,19 @@ const PUPPY_NORMALS_FILE = fileURLToPath(new URL(`../../input/sailor_depth/${PUP
  *  (free, and no fal call even if the cache were gone). A test needing another answer routes
  *  it again — Playwright tries the most recently added route first. */
 async function mockSurfacesCached(page: Page) {
+  trackFacingModule(page)
   await page.route('**/api/depth/surfaces', (route) =>
     route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ normalsFilename: PUPPY_NORMALS, subfolder: 'sailor_depth', cached: true }) }))
 }
 
 /**
- * Relight (stage 1) — browser verification. Proves what a screenshot can't: the effect really
- * ran on the GPU (run counter, not the plain fallback), lights change the pixels, a drag is ONE
- * undo step, and the right-click entry adds and selects the effect.
+ * Relight — browser verification. Since Frame light layers stage 2 a Relight photo has no lights
+ * of its own: it takes the Frame's light layers (adding Relight to a Frame with no light brings
+ * a Lamp at Golden key's place), and the light dots are the Frame's. Proves what a screenshot
+ * can't: the per-photo pass really ran on the GPU (run counter, not the plain fallback), the
+ * Frame lamp's place decides which side of the photo gains light, a drag is ONE undo step, and
+ * the right-click entry adds and selects the effect. The per-photo pass is cached (a lamp drag
+ * does not re-run it), so moves wait on the picture, never on `__relightRuns`.
  */
 
 /** One image layer (the puppy, whose depth map is cached in input/sailor_depth), inset so a canvas corner stays empty. */
@@ -32,28 +37,35 @@ async function seedPhoto(page: Page) {
 }
 const runs = (page: Page) => page.evaluate(() => (window as any).__relightRuns?.() ?? -1)
 
-/** Right-click the photo → Relight…, then wait until the GPU pass has actually run. */
+/** Right-click the photo → Relight…, then wait until the GPU passes have actually run: the
+ *  Original light paint (it needs no depth) and the facing tile once the depth field has landed —
+ *  Finish needs that tile — then until no pass has run for 1.5 s. */
 async function addRelight(page: Page) {
-  const runs0 = await runs(page)
+  const tiles0 = await tileRuns(page)
   const box = (await page.locator('[data-testid="compositor-stack-canvas"]').boundingBox())!
   await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2, { button: 'right' })
   await page.getByText('Relight…', { exact: true }).click()
-  await expect.poll(() => runs(page), { timeout: 15_000 }).toBeGreaterThan(runs0)
+  await settleRelight(page, tiles0 + 1)
 }
 
 test.describe('Relight effect', () => {
   test.beforeEach(async ({ page }) => { await mockSurfacesCached(page) })
-  test('right-click Relight… adds the effect, selects it and relights the photo', async ({ page }) => {
+  test('right-click Relight… adds the effect and a Frame lamp, selects it and relights the photo', async ({ page }) => {
     await openCompositor(page)
     await seedPhoto(page)
     const before = await stackPixels(page)
     await addRelight(page)                                    // includes: the GPU pass really ran
     await expect(page.getByTestId('light-dot')).toHaveCount(1)
     await expect(page.getByTestId('relight-setup-Golden key')).toHaveAttribute('aria-pressed', 'true')
+    // The lamp is the Frame's own light layer, at the top of the stack, and the panel's chip is it.
+    const ls = await page.evaluate(() => (window as any).__compositorLayers().map((l: any) => ({ id: l.id, kind: l.kind })))
+    expect(ls.map((l: any) => l.kind)).toEqual(['image', 'light'])
+    await expect(page.getByTestId('relight-light-1')).toHaveAttribute('data-light-id', ls[1].id)
+    await expect(page.getByTestId('light-dot')).toHaveAttribute('data-light-id', ls[1].id)
     expect(await stackPixels(page)).not.toBe(before)
   })
 
-  test('dragging a light moves it and changes the picture; one undo restores it', async ({ page }) => {
+  test('dragging the Frame lamp moves it and changes the picture; one undo restores it', async ({ page }) => {
     await openCompositor(page)
     await seedPhoto(page)
     await addRelight(page)
@@ -73,7 +85,7 @@ test.describe('Relight effect', () => {
     expect(await stackPixels(page)).toBe(px0)
   })
 
-  test('setups switch the lights; Neon gives two light dots and un-highlights after a change', async ({ page }) => {
+  test('setups replace the Frame lights; Neon gives two light dots and un-highlights after a change', async ({ page }) => {
     await openCompositor(page)
     await seedPhoto(page)
     await addRelight(page)
@@ -90,22 +102,26 @@ test.describe('Relight effect', () => {
   test('Compare shows the photo without Relight while held', async ({ page }) => {
     await openCompositor(page)
     await seedPhoto(page)
-    const plain = await stackPixels(page)
+    await stackPixels(page)
+    const plain = await photoPixels(page)
     await addRelight(page)
     const lit = await stackPixels(page)
+    expect(await photoPixels(page)).not.toBe(plain)
     const cmp = page.getByTestId('relight-compare')
     const cb = (await cmp.boundingBox())!
     await page.mouse.move(cb.x + cb.width / 2, cb.y + cb.height / 2); await page.mouse.down()
-    await expect.poll(() => stackPixels(page)).toBe(plain)
+    // Held: the photo itself is exactly the plain photo (the Frame around it stays lit by its lamp).
+    await expect.poll(() => photoPixels(page), { timeout: 10_000 }).toBe(plain)
     await page.mouse.up()
     await expect.poll(() => stackPixels(page)).toBe(lit)
   })
 
-  // Orientation is judged by the GAIN per half (lit ÷ plain), never by raw brightness: the puppy
-  // photo's bottom half is 17% brighter to begin with, and with MoGe-2 surfaces its floor (59% of
-  // the bottom half) correctly faces UP, so a light near the top lights the floor as well. Raw
-  // top > bottom then fails although the lighting is right (debug report 2026-09-30).
-  test('a light near the top lights the top half; moved near the bottom, the bottom half', async ({ page }) => {
+  // Orientation is judged lamp place against lamp place (see expectLitTowardTheLight), never by
+  // raw brightness: the puppy photo's bottom half is 17% brighter to begin with, Original light
+  // evens that out whatever the lamp does, and with MoGe-2 surfaces its floor (59% of the bottom
+  // half) correctly faces UP, so a light near the top lights the floor as well (debug report
+  // 2026-09-30).
+  test('the Frame lamp near the top lights the top half; moved near the bottom, the bottom half', async ({ page }) => {
     const { plain, high, low } = await measureOrientation(page)   // surfaces: the mocked cached answer (beforeEach)
     console.log('[relight orientation] plain:', plain, 'light near top:', high, 'light near bottom:', low)
     expectLitTowardTheLight(plain, high, low)
@@ -120,9 +136,12 @@ test.describe('Relight effect', () => {
     console.log('[relight orientation, depth only] plain:', plain, 'light near top:', high, 'light near bottom:', low)
     expect(normalsFetched).toBe(false)
     expectLitTowardTheLight(plain, high, low)
-    // On depth alone the effect is also strong enough to beat the photo's own brighter bottom.
-    expect(high.top).toBeGreaterThan(high.bottom)
-    expect(low.bottom).toBeGreaterThan(low.top)
+    // The control for the surfaces test below: on depth alone the floor does not know it faces
+    // up, so the lamp low in front lights the bottom half MORE than the lamp above (measured
+    // 121 vs 108; with surfaces it is the other way round, 102 vs 107). Since stage 2 the photo's own brighter
+    // bottom is no longer beaten in raw brightness by a lamp above (the Frame lamp is softer than
+    // the old box light), so raw top-vs-bottom is not asserted.
+    expect(low.bottom).toBeGreaterThan(high.bottom)
   })
 
   test('orientation with MoGe-2 surfaces', async ({ page }) => {
@@ -142,7 +161,7 @@ test.describe('Relight effect', () => {
   test('the shader reads the MoGe-2 normal map the right way up', async ({ page }) => {
     test.skip(!existsSync(PUPPY_NORMALS_FILE), `needs the cached normal map ${PUPPY_NORMALS} in input/sailor_depth`)
     await page.goto('/')
-    // Relight's own fragment shader, with main() swapped to output the normal it lit with.
+    // The facing pass's fragment shader (RELIGHT_FRAG), with main() swapped to output the normal it reads.
     const r = await page.evaluate(async () => {
       const rp = await import('/_nuxt/lib/relight/relightPass.ts' as string)
       const gp = await import('/_nuxt/lib/compositor/gpuPost.ts' as string)
@@ -531,60 +550,98 @@ test.describe('Relight Finish (stage 3, Task 4)', () => {
   })
 
   // Not covered here: "Relight isn't ready yet" (renderRelightPair returning null because the
-  // depth field hasn't loaded) — by the time addRelight() resolves, the GPU pass has already run
-  // at least once, which requires the depth field to be present. There is no deterministic way
+  // depth field hasn't loaded) — addRelight() settles until the facing tile, which needs the
+  // depth field, has been drawn. There is no deterministic way
   // from this harness to click Finish in the narrow window before that first pass without racing
   // a timer, so per the brief this case is skipped rather than faked.
 })
 
 type Halves = { top: number; bottom: number }
 
-/** Golden key (one light) dragged near the top, then near the bottom, then Compare held for the
- *  plain photo. `ready` (e.g. the normal map's response) is awaited before the first drag. */
+/** Golden key's Frame lamp dragged (real mouse) near the top of the photo, then near its bottom.
+ *  `plain` is the photo before Relight. `ready` (e.g. the normal map's response) is awaited
+ *  before the first drag. */
 async function measureOrientation(page: Page, ready?: Promise<unknown>): Promise<{ plain: Halves; high: Halves; low: Halves }> {
   await openCompositor(page)
   await seedPhoto(page)
-  await addRelight(page)                                         // Golden key: a single light
+  await expect.poll(async () => (await halves(page)).top, { timeout: 20_000 }).toBeGreaterThan(10)   // the photo has painted
+  const plain = await halves(page)
+  await addRelight(page)                                         // the Frame's one lamp
   await expect(page.getByTestId('light-dot')).toHaveCount(1)
-  if (ready) { await ready; await stackPixels(page) }            // the surfaces swap has painted
+  if (ready) await ready
+  await settleRelight(page)                                      // the field and surfaces have painted
   const h = page.getByTestId('light-dot').first()
-  /** Drag the one light to a layer fraction (0.5, fy), and wait for the GPU pass to re-run. */
+  /** Drag the lamp to the photo fraction (0.5, fy) and wait for the new picture. */
   const dragTo = async (fy: number) => {
-    const runs0 = await runs(page)
+    const px0 = await stackPixels(page)
     const hb = (await h.boundingBox())!
     const L = await layerRect(page)
     await page.mouse.move(hb.x + hb.width / 2, hb.y + hb.height / 2); await page.mouse.down()
     await page.mouse.move(L.cx, L.top + L.h * fy, { steps: 10 }); await page.mouse.up()
-    await expect.poll(() => runs(page)).toBeGreaterThan(runs0)
+    await expect.poll(async () => (await stackPixels(page)) !== px0, { timeout: 10_000 }).toBe(true)
     return halves(page)
   }
   const high = await dragTo(0.06)
   const low = await dragTo(0.92)
-  // The photo without Relight (Compare held), so the gain per half is independent of the photo.
-  const cb = (await page.getByTestId('relight-compare').boundingBox())!
-  await page.mouse.move(cb.x + cb.width / 2, cb.y + cb.height / 2); await page.mouse.down()
-  const plain = await halves(page)
-  await page.mouse.up()
   return { plain, high, low }
 }
 
-/** The half nearer the light gains more than the other half, for both light positions. */
+/** Moving the lamp from low to high raises the top half more than the bottom half. Judged lamp
+ *  place against lamp place: Original light evens the photo's own light out first (it lifts its
+ *  darker top whatever the lamp does), so a gain over the plain photo mixes the two. The plain
+ *  photo is still read, to prove the halves are of a painted photo. */
 function expectLitTowardTheLight(plain: Halves, high: Halves, low: Halves) {
-  expect(high.top / plain.top).toBeGreaterThan(high.bottom / plain.bottom)
-  expect(low.bottom / plain.bottom).toBeGreaterThan(low.top / plain.top)
+  expect(plain.top).toBeGreaterThan(10)
+  expect(high.top / low.top).toBeGreaterThan(high.bottom / low.bottom + 0.05)
 }
 
-/** The Relight layer's box in client px, from the dim overlay's hole (rotation 0 in these tests). */
+/** The URL the app loaded the facing pass from (the dev server adds an HMR `?t=` stamp, and a
+ *  module imported under another URL is another instance with its own counters). */
+const facingModuleUrl = new WeakMap<Page, string>()
+function trackFacingModule(page: Page) {
+  page.on('request', (r) => { if (r.url().includes('/lib/frame/lighting/facingPass.ts')) facingModuleUrl.set(page, r.url()) })
+}
+/** Facing tiles drawn so far (the per-photo shape pass that needs the depth field), read from the
+ *  app's own module instance. Unknown (-1) until the app has loaded it — a wait then times out,
+ *  never passes falsely. */
+const tileRuns = (page: Page) => {
+  const url = facingModuleUrl.get(page)
+  return url ? page.evaluate(async (u) => (await import(u)).__facingTileRuns() as number, url) : Promise.resolve(-1)
+}
+/** Settled: no per-photo Relight pass for 1.5 s (depth field / normals landed), then a stable canvas. */
+async function settleRelight(page: Page, tilesAtLeast = 0) {
+  await expect.poll(() => tileRuns(page), { timeout: 30_000 }).toBeGreaterThanOrEqual(tilesAtLeast)
+  let prev = await runs(page), still = 0
+  for (let i = 0; i < 60 && still < 6; i++) {
+    await page.waitForTimeout(250)
+    const n = await runs(page)
+    still = n === prev ? still + 1 : 0
+    prev = n
+  }
+  await stackPixels(page)
+}
+
+/** The photo layer's box in client px, from its own x, y, w (a square photo; rotation 0 here). */
 async function layerRect(page: Page) {
-  return page.evaluate(() => {
-    const svg = document.querySelector('[data-testid="relight-dim"]') as SVGSVGElement
-    const pts = svg.querySelector('polygon')!.getAttribute('points')!.split(' ').map(p => p.split(',').map(Number) as [number, number])
-    const r = svg.getBoundingClientRect()
-    const sx = r.width / Number(svg.getAttribute('width')), sy = r.height / Number(svg.getAttribute('height'))
-    const xs = pts.map(p => r.left + p[0] * sx), ys = pts.map(p => r.top + p[1] * sy)
-    const left = Math.min(...xs), top = Math.min(...ys), w = Math.max(...xs) - left, h = Math.max(...ys) - top
-    return { left, top, w, h, cx: left + w / 2 }
-  })
+  const cr = (await page.getByTestId('compositor-stack-canvas').boundingBox())!
+  const l = await page.evaluate(() => (window as any).__compositorLayers().find((x: any) => x.id === 'pup'))
+  const w = l.w * cr.width, h = w
+  const left = cr.x + l.x * cr.width - w / 2, top = cr.y + l.y * cr.height - h / 2
+  return { left, top, w, h, cx: left + w / 2 }
+}
+
+/** The photo's pixels alone (inset 5%), as a data URL — a byte-exact comparison of the photo. */
+async function photoPixels(page: Page): Promise<string> {
+  const L = await layerRect(page)
+  return page.evaluate((L) => {
+    const cv = document.querySelector('[data-testid="compositor-stack-canvas"]') as HTMLCanvasElement
+    const cr = cv.getBoundingClientRect(), k = cv.width / cr.width
+    const x0 = Math.round((L.left - cr.left + L.w * 0.05) * k), y0 = Math.round((L.top - cr.top + L.h * 0.05) * k)
+    const w = Math.round(L.w * 0.9 * k), h = Math.round(L.h * 0.9 * k)
+    const c = document.createElement('canvas'); c.width = w; c.height = h
+    c.getContext('2d')!.drawImage(cv, x0, y0, w, h, 0, 0, w, h)
+    return c.toDataURL()
+  }, L)
 }
 
 /** Mean luminance of the layer's top and bottom halves on the stack canvas (inset 5%). */
