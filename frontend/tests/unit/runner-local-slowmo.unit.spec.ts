@@ -69,7 +69,7 @@ import { FRAMES_LINK_SOURCES } from '#shared/runner/mediaEffects'
 import { MEDIA_CAPS } from '#shared/runner/media'
 import {
   FRAME_INTERP_AI_CLASS, LOCAL_MODEL_FAMILY_OF, RIFE_MAX_MULTIPLIER, RIFE_VIDEO_SLUG, SERVICE_OF, SLOW_MOTION_AI_MAX_FRAMES, SLOW_MOTION_AI_WORDS,
-  rifeMakes, rifePricedPixels, serviceTooltip, slowMotionAiCount,
+  RIFE_LOCAL_MAX, fitsRifeLocal, rifeMakes, rifePricedPixels, rifeTakes, serviceTooltip, slowMotionAiCount,
 } from '#shared/runner/localModels'
 import { PAID_RATES, paidCallUsd } from '#shared/pricing/paidRates'
 import { paidNoCall } from '#shared/pricing/paidSettings'
@@ -152,7 +152,7 @@ interface ByHand {
 
 /** The node's plan, run by hand with the real stores and tools, a fake RIFE answering `answer`. */
 async function byHand(h: VfxHarness, runId: string, input: Frames, m: number, o: {
-  answer?: () => Promise<Uint8Array>; urls?: string[]; measured?: Record<string, number>; signal?: AbortSignal
+  answer?: () => Promise<Uint8Array>; urls?: string[]; measured?: Record<string, number>; signal?: AbortSignal; place?: 'hosted' | 'local'
 } = {}): Promise<ByHand> {
   const prompt: ApiPrompt = {
     l: { class_type: 'LoadVideo', inputs: { file: 'a.mp4' } }, g: { class_type: 'GetVideoComponents', inputs: { video: ['l', 0] } },
@@ -161,7 +161,7 @@ async function byHand(h: VfxHarness, runId: string, input: Frames, m: number, o:
   const plan = await planNode({
     prompt, nodeId: 'n', families: ON, gateOpen: false,
     filesFrom: () => [], valueFrom: l => (l[0] === 'g' ? input : undefined), toUrl: async () => '',
-    measured: o.measured ?? { frames: input.count, videoWidth: input.w, videoHeight: input.h },
+    measured: { ...(o.measured ?? { frames: input.count, videoWidth: input.w, videoHeight: input.h }), ...(o.place ? { place: o.place } : {}) },
   })
   if (plan.kind !== 'pipeline') throw new Error(`planned ${plan.kind}`)
   const calls: PipelineCall[] = []
@@ -559,7 +559,7 @@ describe('the canvas’s "up to" for a clip it can’t see covers the most the r
     const cap = hosted ? SLOW_MOTION_AI_MAX_FRAMES.hosted : SLOW_MOTION_AI_MAX_FRAMES.local
     return hosted
       ? [[cap, 2, 2560, 1015], [cap, 2, 1920, 1080], [121, 5, 2560, 1040], [2, 5, 4096, 4096], [cap, 2, 640, 360]]
-      : [[cap, 5, 8192, 8192], [cap, 2, 8192, 8192], [2, 5, 8192, 8192], [cap, 5, 3840, 2160]]
+      : [[cap, 5, 3840, 2160], [cap, 2, 2160, 3840], [2, 5, 3840, 2160], [cap, 5, 1920, 1080], [cap, 3, 8192, 8192]]
   }
 
   it('locally: the badge (this computer’s caps) is at least the hold of the largest clip the start pass lets through, 900 frames included', () => {
@@ -601,6 +601,55 @@ describe('the canvas’s "up to" for a clip it can’t see covers the most the r
       checked++
     }
     expect(checked).toBeGreaterThanOrEqual(3)
+  })
+})
+
+describe('locally, RIFE takes 4K at most (fix round 2, controller ruling)', () => {
+  it('the local badge for an unseen clip is the 4K ceiling: 900 frames, each 3840 × 2160 at most, within the batch caps', () => {
+    const f = localModelFrames(null, false)
+    for (const m of [2, 5]) {
+      const badge = modelPricedUsd(FRAME_INTERP_AI_CLASS, { multiplier: m }, { families: ON, inputSeconds: localModelSeconds(f, false) })!
+      const out = Math.min(slowMotionAiCount(SLOW_MOTION_AI_MAX_FRAMES.local, m), MEDIA_CAPS.local.batchFrames)
+      expect(badge, `×${m}`).toBe(paidCallUsd({ endpoint: RIFE_VIDEO_SLUG, outputFrames: out, outputPixels: 3840 * 2160 }))
+      // It covers the largest 4K clip held, and is no longer this computer's 8192² ceiling.
+      expect(badge).toBeGreaterThanOrEqual((priceNode(FRAME_INTERP_AI_CLASS, { multiplier: m }, { families: ON, inputSeconds: { frames: 900, videoWidth: 3840, videoHeight: 2160, place: 'local' } }) as { usd: number }).usd)
+      expect(badge).toBeLessThan(paidCallUsd({ endpoint: RIFE_VIDEO_SLUG, outputFrames: out, outputPixels: 8192 * 8192 })!)
+    }
+    // ×5 at the 4K ceiling: under $20.
+    expect(modelPricedUsd(FRAME_INTERP_AI_CLASS, { multiplier: 5 }, { families: ON, inputSeconds: localModelSeconds(f, false) })!).toBeLessThan(20)
+    // Hosted is unchanged: its own frame cap.
+    expect(rifeTakes(2, 4096, 4096, 'hosted')).toBe(true)
+  })
+
+  it('4K in either orientation fits; past it, locally: Sailor’s own interpolation where R6.6’s limits allow (no call, nothing held), else the engine', () => {
+    expect([fitsRifeLocal(3840, 2160), fitsRifeLocal(2160, 3840), fitsRifeLocal(3841, 2160), fitsRifeLocal(3840, 2161), fitsRifeLocal(4000, 1000)]).toEqual([true, true, false, false, false])
+    expect(RIFE_LOCAL_MAX).toEqual({ long: 3840, short: 2160 })
+    // 4000 × 1000 (4 Mpx, within minterpolate's 2048²): Sailor's interpolation, held for nothing.
+    expect(slowMotionAiStart({ multiplier: 2 }, { count: 24, w: 4000, h: 1000, exact: false }, false)).toEqual({ frames: 24, w: 4000, h: 1000 })
+    expect(priceNode(FRAME_INTERP_AI_CLASS, { multiplier: 2 }, { families: ON, inputSeconds: { frames: 24, videoWidth: 4000, videoHeight: 1000, place: 'local' } })).toEqual({ usd: 0, credits: 0 })
+    // The same clip hosted (within its frame cap) still goes to RIFE.
+    expect((priceNode(FRAME_INTERP_AI_CLASS, { multiplier: 2 }, { families: ON, inputSeconds: { frames: 24, videoWidth: 4000, videoHeight: 1000, place: 'hosted' } }) as { credits: number }).credits).toBeGreaterThan(0)
+    // 5120 × 2880 locally: past 4K and past minterpolate's largest frame: left to the engine (a named stop-gap).
+    expect(slowMotionAiStart({ multiplier: 2 }, { count: 24, w: 5120, h: 2880, exact: false }, false)).toEqual({ problem: SLOW_MOTION_AI_WORDS.tooBig })
+  })
+
+  it('a local clip past 4K through the plan: no call, Sailor’s interpolation, Python’s count, the originals bit for bit', LONG, async () => {
+    await requireMediaTools()
+    // 4000 × 16 frames: past 4K's long side, tiny in pixels.
+    const w = 4000
+    const hgt = 16
+    const ins = Array.from({ length: 3 }, (_, t) => new Uint8Array(w * hgt * 3).map((_, i) => (i * 7 + t * 31) & 255))
+    const h = vfxHarness(scratch)
+    const runId = vfxRunId(++runs)
+    const input = await keptBatch(h, runId, { frames: ins, w, h: hgt })
+    const before = PROCS.pids.length
+    const r = await byHand(h, runId, input, 2, { measured: { frames: 3, videoWidth: w, videoHeight: hgt }, place: 'local' })
+    const out = (await r.run).values[0] as Frames
+    expect(r.calls).toEqual([])
+    expect([out.count, out.w, out.h]).toEqual([5, w, hgt])
+    const frames = split(await batchBytes(h, runId, out), w * hgt * 3)
+    for (let i = 0; i < 3; i++) expect(Buffer.from(frames[i * 2]!).equals(Buffer.from(ins[i]!)), `original ${i}`).toBe(true)
+    await allGone(pids(before))
   })
 })
 

@@ -2318,7 +2318,7 @@ export function createEngine(deps: EngineDeps) {
         const was = measured[index]![nodeId]
         // R7.6: Slow motion (AI) is priced by its clip's frame size too.
         const size = counted.sizes?.[nodeId]
-        const sized = size ? { videoWidth: size.w, videoHeight: size.h } : {}
+        const sized = size ? { videoWidth: size.w, videoHeight: size.h, place: size.place } : {}
         measured[index]![nodeId] = { ...(was ?? {}), seconds: { ...(was?.seconds ?? {}), frames, ...sized }, sha: was?.sha ?? {} }
       }
     }

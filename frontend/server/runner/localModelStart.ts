@@ -140,8 +140,8 @@ export function pictureBound(prompt: ApiPrompt, link: ApiLink, families: Readonl
 export interface LocalModelStart {
   /** Node id → the pictures it works through (at most), for the hold. */
   counts: Record<string, number>
-  /** R7.6: node id → the clip's frame size, for the hold (Slow motion (AI) is priced by its frames' size). */
-  sizes?: Record<string, { w: number; h: number }>
+  /** R7.6: node id → the clip's frame size and where it runs, for the hold (Slow motion (AI) is priced by its frames' size; locally RIFE takes 4K at most). */
+  sizes?: Record<string, { w: number; h: number; place: 'hosted' | 'local' }>
   /**
    * The most bytes this take keeps for its frame batches while it runs (R6's peak, every batch kept
    * to the end, a clip's cut-out batch among them), plus each clip's masks (16-bit PNGs, at most
@@ -234,7 +234,7 @@ export function slowMotionAiStart(inputs: Record<string, unknown>, shape: FrameS
   const out = slowMotionAiCount(shape.count, m)
   // The batch it hands on, held to R5's batch caps (values.ts keepFrames).
   if (out > caps.batchFrames || out * shape.w * shape.h > caps.batchPixels) return { problem: SLOW_MOTION_AI_WORDS.outTooLong }
-  if (shape.count >= 2 && !rifeTakes(m, shape.w, shape.h)) {
+  if (shape.count >= 2 && !rifeTakes(m, shape.w, shape.h, hosted ? 'hosted' : 'local')) {
     // Sailor's own interpolation (R6.6's Slow motion): its memory, its largest frame and its work, as R6.6's start pass judges them.
     const spec = VIDEO_EFFECTS.FrameInterpolate!
     const w = { multiplier: m }
@@ -258,7 +258,7 @@ export async function localModelStartProblems(
   },
 ): Promise<LocalModelStart> {
   const counts: Record<string, number> = {}
-  const sizes: Record<string, { w: number; h: number }> = {}
+  const sizes: Record<string, { w: number; h: number; place: 'hosted' | 'local' }> = {}
   const cap = o.hosted ? LOCAL_MODEL_MAX_FRAMES.hosted : LOCAL_MODEL_MAX_FRAMES.local
   const kinds = outputKindsFor(families)
   let shapes: ReadonlyMap<string, FrameShape> | null = null
@@ -272,7 +272,7 @@ export async function localModelStartProblems(
       const got = slowMotionAiStart(n.inputs ?? {}, shapes.get(`${link[0]}:${link[1]}`), o.hosted)
       if ('problem' in got) return { counts, keptBytes: 0, problem: { message: got.problem, nodeId, classType: n.class_type } }
       counts[nodeId] = got.frames
-      sizes[nodeId] = { w: got.w, h: got.h }
+      sizes[nodeId] = { w: got.w, h: got.h, place: o.hosted ? 'hosted' : 'local' }
       continue
     }
     if (!localModelOn(n.class_type, families) || !Object.prototype.hasOwnProperty.call(LOCAL_MODEL_PICTURE_INPUT, n.class_type)) continue

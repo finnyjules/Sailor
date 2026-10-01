@@ -1179,8 +1179,10 @@ export function planSlowMotionAi(ctx: PlanContext): NodePlan {
   if (T < 2) return { kind: 'pipeline', prefix: 'slow_motion_ai', run: async () => ({ values: { 0: v }, ui: null }) }
   const out = slowMotionAiCount(T, m)
 
-  if (!rifeTakes(m, v.w, v.h)) {
-    // A multiplier RIFE doesn't make, or a clip under 16 pixels a side (the encoder refuses it): Sailor's own
+  // Fix round 2: on this computer RIFE takes 4K at most (the start of the run recorded where it runs).
+  const place = ctx.measured?.place ?? (ctx.hosted ? 'hosted' : 'local')
+  if (!rifeTakes(m, v.w, v.h, place)) {
+    // A multiplier RIFE doesn't make, a clip under 16 pixels a side (the encoder refuses it), or locally one past 4K: Sailor's own
     // interpolation (R6.6), free, (T − 1)·m + 1 frames, the originals exact.
     return {
       kind: 'pipeline', prefix: 'slow_motion_ai',

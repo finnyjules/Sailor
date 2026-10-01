@@ -193,6 +193,8 @@ export interface InputSeconds {
    * the clip's size (Slow motion (AI)) then takes that place's largest clip.
    */
   framesUpTo?: 'hosted' | 'local' | null
+  /** R7.6 fix round 2: where a measured clip runs (the start of the run records it): locally, RIFE takes 4K at most. */
+  place?: 'hosted' | 'local' | null
 }
 
 /**

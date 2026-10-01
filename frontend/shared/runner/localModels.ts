@@ -140,9 +140,28 @@ export function rifeMakes(m: number): boolean {
  */
 export const RIFE_MIN_SIDE = 16
 
-/** Whether a clip of w × h at multiplier `m` goes to RIFE (else Sailor's own interpolation, or nothing under two frames). */
-export function rifeTakes(m: number, w: number, h: number): boolean {
-  return rifeMakes(m) && w >= RIFE_MIN_SIDE && h >= RIFE_MIN_SIDE
+/**
+ * The largest frame RIFE is sent on this computer (fix round 2, controller
+ * ruling): 4K, 3840 × 2160 in either orientation. A larger clip runs on
+ * Sailor's own interpolation (R6.6) where its limits allow, else it is left
+ * to the engine (a stop-gap named in R7.6's report). Hosted keeps its own
+ * caps (MEDIA_CAPS.hosted.framePixels).
+ */
+export const RIFE_LOCAL_MAX = { long: 3840, short: 2160 } as const
+
+/** Whether a w × h frame fits RIFE's local cap (4K, either orientation). */
+export function fitsRifeLocal(w: number, h: number): boolean {
+  return Math.max(w, h) <= RIFE_LOCAL_MAX.long && Math.min(w, h) <= RIFE_LOCAL_MAX.short
+}
+
+/**
+ * Whether a clip of w × h at multiplier `m` goes to RIFE (else Sailor's own
+ * interpolation, or nothing under two frames). `place`: where it runs; on
+ * this computer a frame past 4K doesn't (RIFE_LOCAL_MAX). Not known (a price
+ * read without it): as hosted, so RIFE is held for (never under the charge).
+ */
+export function rifeTakes(m: number, w: number, h: number, place?: 'hosted' | 'local' | null): boolean {
+  return rifeMakes(m) && w >= RIFE_MIN_SIDE && h >= RIFE_MIN_SIDE && (place !== 'local' || fitsRifeLocal(w, h))
 }
 
 /** Python's output count: (T − 1)·m + 1, or the input as it is under two frames (nodes_frame_interp.py:219-236). */
@@ -516,6 +535,8 @@ export interface SlowMotionAiMeasured {
   videoHeight?: number | null
   /** `frames` is the canvas's frame cap where it runs, not a measured clip (fix round 1): price that place's ceiling. */
   framesUpTo?: 'hosted' | 'local' | null
+  /** Where a measured clip runs (fix round 2: locally, a frame past 4K isn't sent to RIFE). */
+  place?: 'hosted' | 'local' | null
 }
 
 /**
@@ -527,10 +548,10 @@ export interface SlowMotionAiMeasured {
  * interpolation, R6.6). A wired multiplier is held at the dearest RIFE makes.
  *
  * Not measured (the canvas's "up to", fix round 1): the most the start of the
- * run can hold WHERE THE CANVAS RUNS (`framesUpTo`; absent, this computer's,
- * the larger): T at that place's frame cap, the output at most its batch's
- * frames, and the frames' megapixels at most its batch's pixels (each frame
- * at most its largest frame). The start pass refuses anything past those caps
+ * run can hold WHERE THE CANVAS RUNS (`framesUpTo`; absent, this computer's):
+ * T at that place's frame cap, the output at most its batch's frames, and
+ * the frames' megapixels at most its batch's pixels (each frame at most the
+ * largest RIFE is sent there: locally 4K, fix round 2; hosted its frame cap). The start pass refuses anything past those caps
  * (localModelStart.ts slowMotionAiStart), so what is shown is never below
  * what is held.
  */
@@ -545,7 +566,7 @@ export function slowMotionAiCalls(multiplier: unknown, frames: number | null | u
   if (sized && known && !seen?.framesUpTo) {
     const t = Math.trunc(frames)
     // Under two frames, or a clip too small for the encoder (Sailor's own interpolation): no call.
-    if (t < 2 || !rifeTakes(m, w, h)) return { steps: [] }
+    if (t < 2 || !rifeTakes(m, w, h, seen?.place)) return { steps: [] }
     return { steps: [{ call: { endpoint: RIFE_VIDEO_SLUG, outputFrames: slowMotionAiCount(t, m), outputPixels: rifePricedPixels(w, h) }, times: 1 }] }
   }
   // The ceiling where the canvas runs.
@@ -555,6 +576,8 @@ export function slowMotionAiCalls(multiplier: unknown, frames: number | null | u
   const t = known && !seen?.framesUpTo ? Math.min(Math.trunc(frames), cap) : cap
   if (t < 2) return { steps: [] }
   const out = Math.min(slowMotionAiCount(t, m), caps.batchFrames)
-  const outputPixels = sized ? rifePricedPixels(w, h) : Math.ceil(Math.min(caps.framePixels, caps.batchPixels / out))
+  // Each frame at most that place's largest RIFE is sent (locally 4K, fix round 2; hosted its frame cap).
+  const largest = place === 'local' ? RIFE_LOCAL_MAX.long * RIFE_LOCAL_MAX.short : caps.framePixels
+  const outputPixels = sized ? rifePricedPixels(w, h) : Math.ceil(Math.min(largest, caps.batchPixels / out))
   return { steps: [{ call: { endpoint: RIFE_VIDEO_SLUG, outputFrames: out, outputPixels }, times: 1 }] }
 }
