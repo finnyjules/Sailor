@@ -11,7 +11,7 @@ import { describe, expect, it, vi } from 'vitest'
 import type { ApiPrompt } from '#shared/runner/graph'
 import type { RunnerFamily } from '#shared/runner/families'
 import { isRunnerEligible } from '#shared/runner/eligibility'
-import { BG_REMOVE_CLASS, VOCALS_CLASS, WHISPER_CLASS } from '#shared/runner/localModels'
+import { BG_REMOVE_CLASS, WHISPER_CLASS } from '#shared/runner/localModels'
 import { RUNNER_NOT_ELIGIBLE } from '#shared/runner/messages'
 import { createMemoryKeptBytes } from '~~/server/runner/keptBytes'
 import { NOT_YOURS } from '~~/server/runner/inputs'
@@ -20,6 +20,7 @@ import { QUOTES_PER_MINUTE, assertQuoteRate, quoteAnswerOf } from '~~/server/api
 import { _resetRateLimits } from '~~/server/lib/rateLimit'
 import { stageEstimateParts } from '~~/server/runner/metering'
 import { makeKit, rgbPng1x1 } from './__runner__/kit'
+import { buildKaraokePrompt } from '~/lib/runner/karaokeApp'
 import { requireMediaTools } from './__runner__/mediaParity'
 
 const START = { workflow: null, canvasId: null, projectUuid: null, projectName: null }
@@ -74,15 +75,10 @@ const APPS: AppCase[] = [
     files: { 'product.png': new Uint8Array(Buffer.from(cut.pictures[0]!, 'base64')) },
   },
   {
-    // KaraokeMakerApp.vue: Load audio → Vocal separator → two MP3s.
+    // KaraokeMakerApp.vue's exact prompt (R8.2): Load audio → Vocal separator → two MP3s.
     name: 'Karaoke',
     families: new Set<RunnerFamily>(['cards', 'media-sound', 'vocal-split']),
-    prompt: {
-      s: { class_type: 'LoadAudio', inputs: { audio: 'song.wav' } },
-      n: { class_type: VOCALS_CLASS, inputs: { audio: ['s', 0], model: 'htdemucs', shifts: 1 } },
-      v: { class_type: 'SaveAudioMP3', inputs: { audio: ['n', 0], filename_prefix: 'karaoke_vocals', quality: 'V0' } },
-      i: { class_type: 'SaveAudioMP3', inputs: { audio: ['n', 1], filename_prefix: 'karaoke_instrumental', quality: 'V0' } },
-    },
+    prompt: buildKaraokePrompt('song.wav'),
     files: { 'song.wav': wav(3, 44100, 2) },
     media: true,
   },
@@ -245,7 +241,7 @@ describe('a quote refuses as the start would, before anything', () => {
     // A loaded sound's own name, the same way: never read, refused as not the person's.
     const owns = vi.fn(async () => false)
     k.deps.ownership.ownsInput = owns
-    const err2 = await k.engine.quoteRun({ userId: k.userId, takes: [{ ...karaoke.prompt, s: { class_type: 'LoadAudio', inputs: { audio: 'other_user/song.wav' } } }], ...START }).then(() => null, (e: unknown) => e)
+    const err2 = await k.engine.quoteRun({ userId: k.userId, takes: [{ ...karaoke.prompt, 1: { class_type: 'LoadAudio', inputs: { audio: 'other_user/song.wav' } } }], ...START }).then(() => null, (e: unknown) => e)
     expect(err2).toMatchObject({ statusCode: 403, message: NOT_YOURS })
     expect(reads).not.toHaveBeenCalled()
     expect(exists).not.toHaveBeenCalled()

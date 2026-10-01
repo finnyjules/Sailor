@@ -1,143 +1,36 @@
 <script setup lang="ts">
 /**
  * Karaoke Maker app — drop a song, get vocals + instrumental stems back.
- * Pipeline: LoadAudio → VocalSeparator → 2× SaveAudioMP3.
+ * Pipeline: LoadAudio → VocalSeparator → 2× SaveAudioMP3, on the Sailor
+ * runner with its price shown before the run and a Stop button (step 3,
+ * R8.2; lib/runner/karaokeApp.ts).
  */
-import { ArrowRight, Download, Loader2, Music, RefreshCcw } from 'lucide-vue-next'
+import { ArrowRight, Download, Loader2, Music, RefreshCcw, Square } from 'lucide-vue-next'
 import TakesStrip from '~/components/vue-canvas/TakesStrip.vue'
+import { useKaraokeRun } from '~/lib/runner/karaokeApp'
 
 interface UploadedFile { file: File; filename: string; previewUrl: string }
 
 const song = ref<UploadedFile | null>(null)
-const status = ref<'idle' | 'running' | 'done' | 'error'>('idle')
-const errorMessage = ref<string | null>(null)
-const progressLabel = ref('')
 // Each separation stacks as a take holding both stems [vocals, instrumental];
 // the displayed pair is the active take.
 const { takes, activeTakeId, activeTake, addTake, selectTake, pinTake, discardTake, reset: resetTakes } = useAppTakes()
 const vocalsUrl = computed<string | null>(() => activeTake.value?.audios?.[0] ?? null)
 const instrumentalUrl = computed<string | null>(() => activeTake.value?.audios?.[1] ?? null)
 
-const canRun = computed(() => !!song.value && status.value !== 'running')
+const hosted = useRuntimeConfig().public?.hostedMode === true
+const karaoke = useKaraokeRun({ song, addTake, hosted })
+const { status, errorMessage, priceText, blocked, canRun, canStop, quoting, stopError } = karaoke
+const run = karaoke.run
+const stop = karaoke.stop
 
-function buildPrompt(filename: string) {
-  return {
-    '1': { class_type: 'LoadAudio', inputs: { audio: filename } },
-    '2': {
-      class_type: 'VocalSeparator',
-      inputs: { audio: ['1', 0], model: 'htdemucs', shifts: 1 },
-    },
-    '3': {
-      class_type: 'SaveAudioMP3',
-      inputs: { audio: ['2', 0], filename_prefix: 'karaoke_vocals', quality: 'V0' },
-    },
-    '4': {
-      class_type: 'SaveAudioMP3',
-      inputs: { audio: ['2', 1], filename_prefix: 'karaoke_instrumental', quality: 'V0' },
-    },
-  }
-}
-
-function viewUrl(f: { filename: string; subfolder: string; type: string }): string {
-  return `/view?${new URLSearchParams({
-    filename: f.filename,
-    type: f.type,
-    ...(f.subfolder ? { subfolder: f.subfolder } : {}),
-    t: String(Date.now()),
-  })}`
-}
-
-async function run() {
-  if (!canRun.value || !song.value) return
-  errorMessage.value = null
-  status.value = 'running'
-  progressLabel.value = 'Submitting…'
-
-  try {
-    const res = await fetch('/prompt', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ prompt: buildPrompt(song.value.filename) }),
-    })
-    if (!res.ok) {
-      const text = await res.text()
-      throw new Error(text || `Comfy returned ${res.status}`)
-    }
-    const data = await res.json()
-    const promptId: string | undefined = data?.prompt_id
-    if (!promptId) throw new Error('No prompt_id returned — is ComfyUI running?')
-
-    progressLabel.value = 'Separating vocals from instrumental (this can take a minute)…'
-    const result = await pollForResult(promptId)
-    if (!result.vocals || !result.instrumental) {
-      throw new Error('Run finished but produced incomplete output.')
-    }
-    addTake({
-      audios: [viewUrl(result.vocals), viewUrl(result.instrumental)],
-      promptId,
-      sig: `${result.vocals.subfolder || ''}/${result.vocals.filename}`,
-    })
-    status.value = 'done'
-  } catch (e: any) {
-    errorMessage.value = humanizeError(e?.message ?? String(e))
-    status.value = 'error'
-  }
-}
-
-interface AudioFile { filename: string; subfolder: string; type: string }
-
-async function pollForResult(promptId: string): Promise<{ vocals?: AudioFile; instrumental?: AudioFile }> {
-  // Each SaveAudioMP3 emits one entry in `output.audio`. Pair by filename prefix.
-  const deadline = Date.now() + 10 * 60 * 1000
-  while (Date.now() < deadline) {
-    await new Promise((r) => setTimeout(r, 800))
-    try {
-      const r = await fetch(`/history/${promptId}`)
-      if (!r.ok) continue
-      const data = await r.json()
-      const entry = data?.[promptId]
-      if (!entry) continue
-      if (entry?.status?.status_str === 'error') {
-        throw new Error(extractComfyError(entry))
-      }
-      const outputs = entry?.outputs
-      if (!outputs) continue
-      let vocals: AudioFile | undefined
-      let instrumental: AudioFile | undefined
-      for (const node of Object.values(outputs) as any[]) {
-        const list = node?.audio
-        if (!Array.isArray(list)) continue
-        for (const f of list as AudioFile[]) {
-          if (/vocals/i.test(f.filename)) vocals = f
-          else if (/instrumental/i.test(f.filename)) instrumental = f
-        }
-      }
-      if (vocals && instrumental) return { vocals, instrumental }
-    } catch (e) {
-      if (e instanceof Error && e.message.startsWith('Comfy:')) throw e
-    }
-  }
-  throw new Error('Timed out waiting for the separation to finish.')
-}
-
-function extractComfyError(entry: any): string {
-  const messages: any[] = entry?.status?.messages ?? []
-  const errMsg = messages.find((m) => m[0] === 'execution_error')?.[1]
-  if (errMsg?.exception_message) return `Comfy: ${errMsg.exception_message}`
-  return 'Comfy: execution failed.'
-}
-
-function humanizeError(msg: string): string {
-  if (msg.includes('No prompt_id')) return "Couldn't reach the engine. Is ComfyUI running on port 8188?"
-  if (msg.includes('demucs')) return 'Vocal separation model failed to load. Try restarting ComfyUI.'
-  return msg
-}
+// The price is worked out once the song is uploaded.
+watch(() => song.value?.filename ?? null, () => { void karaoke.quote() }, { immediate: true })
 
 function reset() {
   song.value = null
   resetTakes()
-  errorMessage.value = null
-  status.value = 'idle'
+  karaoke.reset()
 }
 
 function download(url: string, name: string) {
@@ -162,7 +55,7 @@ function download(url: string, name: string) {
         </h1>
         <p class="text-[15px] text-white/60 max-w-[560px] leading-relaxed">
           Drop a song and get two separated tracks back — the instrumental for sing-alongs
-          and the isolated vocals for remixing. Takes a minute or two on first use.
+          and the isolated vocals for remixing.
         </p>
       </div>
 
@@ -180,23 +73,40 @@ function download(url: string, name: string) {
       <div class="flex items-center justify-between mb-12">
         <p v-if="status === 'running'" class="text-[12px] text-white/55 flex items-center gap-2">
           <Loader2 class="size-3.5 animate-spin" />
-          <span>{{ progressLabel }}</span>
+          <span>Separating the vocals…</span>
         </p>
-        <p v-else-if="errorMessage" class="text-[12px] text-rose-400 max-w-md">
-          {{ errorMessage }}
+        <p v-else-if="errorMessage || stopError" class="text-[12px] text-rose-400 max-w-md">
+          {{ stopError || errorMessage }}
+        </p>
+        <p v-else-if="song && blocked" class="text-[12px] text-rose-400 max-w-md">
+          {{ blocked }}
         </p>
         <span v-else class="text-[12px] text-white/35">
           {{ song ? 'Ready to separate.' : 'Add a song above to start.' }}
         </span>
-        <button
-          class="inline-flex items-center gap-2 h-10 px-5 rounded-full bg-white text-[#0a0a0a] font-medium text-[13px] hover:bg-white/90 transition-colors cursor-pointer disabled:bg-white/15 disabled:text-white/40 disabled:cursor-not-allowed"
-          :disabled="!canRun"
-          @click="run"
-        >
-          <span>{{ status === 'running' ? 'Separating…' : 'Separate' }}</span>
-          <ArrowRight v-if="status !== 'running'" class="size-4" />
-          <Loader2 v-else class="size-4 animate-spin" />
-        </button>
+        <div class="flex items-center gap-3">
+          <span v-if="status !== 'running' && song && (quoting || priceText)" class="text-[12px] text-white/55 tabular-nums" title="The most this run can cost">
+            {{ quoting ? '…' : priceText }}
+          </span>
+          <button
+            v-if="canStop"
+            class="inline-flex items-center gap-2 h-10 px-5 rounded-full bg-white/[0.08] text-white font-medium text-[13px] hover:bg-white/[0.14] transition-colors cursor-pointer"
+            @click="stop"
+          >
+            <Square class="size-3.5" />
+            <span>Stop</span>
+          </button>
+          <button
+            v-else
+            class="inline-flex items-center gap-2 h-10 px-5 rounded-full bg-white text-[#0a0a0a] font-medium text-[13px] hover:bg-white/90 transition-colors cursor-pointer disabled:bg-white/15 disabled:text-white/40 disabled:cursor-not-allowed"
+            :disabled="!canRun"
+            @click="run"
+          >
+            <span>{{ status === 'running' ? 'Separating…' : 'Separate' }}</span>
+            <ArrowRight v-if="status !== 'running'" class="size-4" />
+            <Loader2 v-else class="size-4 animate-spin" />
+          </button>
+        </div>
       </div>
 
       <div v-if="vocalsUrl || instrumentalUrl || status === 'running'" class="border-t border-white/[0.06] pt-10">
@@ -259,7 +169,7 @@ function download(url: string, name: string) {
         <div v-else class="rounded-xl bg-black border border-white/[0.06] min-h-[200px] flex items-center justify-center">
           <div class="flex flex-col items-center gap-3 py-12">
             <Loader2 class="size-6 text-white/30 animate-spin" />
-            <div class="text-[12px] text-white/40">{{ progressLabel || 'Working…' }}</div>
+            <div class="text-[12px] text-white/40">Separating the vocals…</div>
           </div>
         </div>
 
