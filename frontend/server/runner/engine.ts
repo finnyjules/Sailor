@@ -62,6 +62,7 @@ import { hasVideoEffect, keptPeak, lutStartProblems, mediaEffectRefusals, mediaE
 import { frameShapes, videoSourceShapeOf } from './video/shapes'
 import { hasLocalModelPicture, localModelStartProblems } from './localModelStart'
 import { LOCAL_MODEL_WORDS, isLocalModelClass } from '#shared/runner/localModels'
+import { perFrameCredits } from '#shared/pricing/nodePrice'
 import { hasSoundEffect, soundEffectRefusals, soundEffectStartProblems, soundKeptBytes, soundShapes, soundSourceShapeOf } from './video/soundShapes'
 import { markReleased, reviveReleased, spentKeptMedia } from './keptRelease'
 import { MEDIA_EFFECT_FAMILIES } from '#shared/runner/mediaEffects'
@@ -806,7 +807,9 @@ export function createEngine(deps: EngineDeps) {
   function chargeableCredits(rec: NodeRecord, stageKey: string, nodeId: string): number {
     if (rec.calls) {
       // Each call's credits from the one per-call calculation (the hold's), summed: never a marked-up sum of dollars.
-      const credits = callsCredits(rec.calls.filter(c => c.status === 'done' && !c.lost))
+      // A per-frame node (R7, USER ruling, fix round 1): its delivered frames' dollars added up, marked up once.
+      const delivered = rec.calls.filter(c => c.status === 'done' && !c.lost)
+      const credits = isLocalModelClass(rec.classType) ? perFrameCredits(delivered) : callsCredits(delivered)
       if (credits > rec.credits) {
         deps.reportError(new Error(`A charge of ${credits} credits is above this step’s hold of ${rec.credits}; charged the hold`), {
           site: 'runner.charge.above-hold', stageKey, node: nodeId, charge: credits, hold: rec.credits,

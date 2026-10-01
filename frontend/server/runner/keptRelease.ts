@@ -26,7 +26,7 @@ import { linksOf, type ApiPrompt } from '#shared/runner/graph'
 import { MEDIA_EFFECT_FAMILY_OF } from '#shared/runner/mediaEffects'
 import type { NodeRecord, OutputFile, RunRecord, RunnerValue, TakeRecord } from './types'
 import { filesOf, slotValue } from './values'
-import { LOCAL_MODEL_FAMILY_OF } from '#shared/runner/localModels'
+import { LOCAL_MODEL_FAMILY_OF, isLocalModelClass } from '#shared/runner/localModels'
 
 /** The classes that keep frame batches or sounds of their own as they run (R5, R6). */
 export const KEPT_MEDIA_MAKERS: ReadonlySet<string> = new Set([
@@ -76,6 +76,9 @@ export function spentKeptMedia(run: RunRecord): { file: OutputFile; holders: Nod
           u.holders.push(rec)
           // Every reader must be done; one not in the take's records (or not done) keeps it.
           if (rec.status !== 'done' || readersOf(t.prompt, id, slot).some(r => t.nodes[r]?.status !== 'done')) u.spent = false
+          // R7.1 fix round 1: a paid node's batch (Background remove's clip) is kept to the run's end: let go, a
+          // later leg would revive its maker, which would fetch its answers again (provider links expire in an hour).
+          if (isLocalModelClass(rec.classType)) u.spent = false
         }
       }
     }

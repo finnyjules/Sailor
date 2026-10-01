@@ -281,6 +281,32 @@ export function shownUsd(summedBasis: number, credits: number): number {
 }
 
 /**
+ * A per-frame node's price (R7, USER ruling 2026-09-30, fix round 1): every
+ * frame's provider price added up, and the markup taken ONCE on the sum,
+ * rounded up to credits once per node — not a credit (or more) per call. The
+ * hold is this over the counted frames; the charge is the same calculation
+ * over the frames delivered (engine.ts chargeableCredits, perFrameCredits).
+ */
+export function localModelPrice(p: PaidCalls): NodePrice {
+  if ('refused' in p) return p
+  let usd = 0
+  for (const { call, times } of p.steps) {
+    if (!Number.isInteger(times) || times < 1) return { refused: `${call.endpoint} is planned to run ${times} times; a call runs a whole number of times, at least once` }
+    const basis = paidCallUsd(call)
+    if (basis == null) return { refused: `${call.endpoint} has no listed price` }
+    usd += basis * times
+  }
+  const sum = Math.round(usd * 1e8) / 1e8
+  return { usd: sum, credits: creditsForUsd(sum) }
+}
+
+/** The credits for per-frame calls delivered, each at its own price basis: summed, then marked up once (localModelPrice's rule). */
+export function perFrameCredits(calls: readonly { usd: number }[]): number {
+  const sum = Math.round(calls.reduce((s, c) => s + c.usd, 0) * 1e8) / 1e8
+  return creditsForUsd(sum)
+}
+
+/**
  * A paid node: the hold is the ceiling its settings can reach; with
  * `answerUsage` (or a speech node's `inputChars`) the calls as used, never
  * above that ceiling (and the ceiling when the used calls can't be priced).
@@ -335,7 +361,7 @@ export function priceNode(classType: string, inputs: NodeInputs | null | undefin
   // Pixverse Swap, while person-swap-video is on: the measured video, else its ceiling.
   if (familyPricedClass(classType, opts.families)) {
     // R7 (ruling (f)): one call per frame, the frames counted before the hold (else one picture).
-    if (isLocalModelClass(classType)) return paidStepsPrice(localModelCalls(classType, opts.inputSeconds?.frames))
+    if (isLocalModelClass(classType)) return localModelPrice(localModelCalls(classType, opts.inputSeconds?.frames))
     const usd = classType === 'PersonSwapVideo'
       ? personSwapVideoUsd(inputs ?? {}, opts.inputSeconds ?? {})
       : topazVideoUsd(inputs ?? {}, opts.inputSeconds ?? {})

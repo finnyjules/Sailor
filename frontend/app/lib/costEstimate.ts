@@ -30,6 +30,8 @@ import { FAMILY_PRICED_CLASSES, priceNode } from '#shared/pricing/nodePrice'
 import { estimateFloored } from '#shared/pricing/estimateFloor'
 import { sizePricedInput, sourceOutputPixels } from '#shared/pricing/editSettings'
 import { NO_FAMILIES, type RunnerFamily } from '#shared/runner/families'
+import { IMAGE_OUTPUT_CLASSES, PAID_PICTURE_FAMILY } from '#shared/runner/eligibility'
+import { LOCAL_MODEL_MAX_FRAMES, LOCAL_MODEL_PICTURE_INPUT, isLocalModelClass } from '#shared/runner/localModels'
 import { allotMediaFiles, gateNodeOrder, mediaFileKey, secondsPricedMedia, sourceAudioSeconds, type InputSeconds, type MediaFileRef, type MediaSource } from '#shared/pricing/clipSettings'
 
 export interface BadgeCost { usd: number; approximate: boolean }
@@ -65,8 +67,15 @@ export interface EstimateInputNode {
   inputPixels?: number | null
   /** Lip-sync nodes: the media lengths the canvas knows (upstreamInputSeconds), else absent (the 60 s cap). */
   inputSeconds?: InputSeconds | null
+  /**
+   * R7 per-frame nodes (Background remove): how many pictures the canvas can
+   * see coming in (upstreamPictureCount), or null when it can't (a clip, a
+   * source it can't bound): priced then at the frame cap, "up to".
+   */
+  pictures?: number | null
 }
-export interface CostBreakdownItem { id: string; label: string; usd: number; credits?: boolean }
+/** `upTo`: priced at its ceiling (a clip's frame cap), the run may cost less. */
+export interface CostBreakdownItem { id: string; label: string; usd: number; credits?: boolean; upTo?: true }
 export interface CostEstimate {
   usd: number
   approximate: boolean
@@ -176,12 +185,17 @@ export function estimateUsdForNodes(
   const breakdown: CostBreakdownItem[] = []
   for (const n of nodes) {
     const creditBilled = isApiCreditBilled(n)
+    // R7 (USER ruling, fix round 1): a per-frame node is priced as it is held: the pictures the canvas sees
+    // coming in, else the frame cap ("up to"); local runs too (ruling (a): they cost the same few cents).
+    const perFrame = isLocalModelClass(n.type)
+    const frames = perFrame ? localModelFrames(n.pictures ?? null, hosted) : null
     // Hosted: a model-priced picker is charged by the server whatever its
     // billing class, so price it even if the badge/category filter misses it.
     // Priced from the WHOLE widget map, the same way the server charges it.
     // An estimate-priced R3 class off the runner at its flat price before R3, as priceGraph charges it (R3.9 fix round 2).
-    const values = hosted ? widgetValueMap(n.widgetDefs, n.widgetsValues, n.linkedInputs) : null
-    const shared = values ? estimateFloored(n.type, values, priceNode(n.type, values, { inputPixels: n.inputPixels, inputSeconds: n.inputSeconds, families: opts.families }), opts.families) : null
+    const values = hosted || perFrame ? widgetValueMap(n.widgetDefs, n.widgetsValues, n.linkedInputs) : null
+    const inputSeconds = frames ? { ...(n.inputSeconds ?? {}), frames: frames.frames } : n.inputSeconds
+    const shared = values ? estimateFloored(n.type, values, priceNode(n.type, values, { inputPixels: n.inputPixels, inputSeconds, families: opts.families }), opts.families) : null
     const modelPrice = shared && !('refused' in shared) ? shared : null
     if (modelPrice == null && !isReplicateBilled(n) && !creditBilled) continue
     // The selected model's real price beats the static badge when we have it.
@@ -192,11 +206,13 @@ export function estimateUsdForNodes(
     // static badge's USD goes through the same markup function.
     if (hosted) credits += modelPrice != null ? modelPrice.credits : creditsForUsd(cost.usd)
     approximate = approximate || cost.approximate || creditBilled
+    const upTo = !!(frames?.upTo && modelPrice != null)
     breakdown.push({
       id: n.id,
-      label: (n.title || n.type) + (creditBilled ? ' (credits)' : ''),
+      label: (n.title || n.type) + (creditBilled ? ' (credits)' : '') + (upTo ? ' (up to)' : ''),
       usd: cost.usd,
       ...(creditBilled ? { credits: true } : {}),
+      ...(upTo ? { upTo: true as const } : {}),
     })
   }
   if (!breakdown.length) return null
@@ -224,7 +240,49 @@ export function vueNodesToEstimateInput(nodes: any[], edges?: any[] | null, fami
       linkedInputs: linkedInputNames(String(n.id), n?.data?.inputs, edges),
       inputPixels: upstreamInputPixels(n, nodes, edges, families),
       inputSeconds: upstreamInputSeconds(n, nodes, edges)?.seconds ?? null,
+      ...(isLocalModelClass(String(n?.data?.nodeType || '')) ? { pictures: upstreamPictureCount(n, nodes, edges) } : {}),
     }))
+}
+
+/**
+ * A per-frame node's frames for its price (R7, fix round 1): the pictures the
+ * canvas sees, else the frame cap where it runs (hosted or this computer),
+ * "up to". The runner holds the count it measures before the run, never above.
+ */
+export function localModelFrames(pictures: number | null, hosted: boolean): { frames: number; upTo: boolean } {
+  if (pictures != null && pictures >= 1) return { frames: pictures, upTo: false }
+  return { frames: hosted ? LOCAL_MODEL_MAX_FRAMES.hosted : LOCAL_MODEL_MAX_FRAMES.local, upTo: true }
+}
+
+/** Sources that hand on one picture (the runner's server/runner/localModelStart.ts pictureBound, as far as the canvas sees). */
+const ONE_PICTURE_SOURCES: ReadonlySet<string> = new Set(['LoadImage', 'Compositor', 'Scene3DStudio', 'TextOnPath', 'TextMask', 'ShaderEffect'])
+
+/**
+ * How many pictures a per-frame canvas node gets (R7, fix round 1), as far
+ * as the canvas can tell from its wires and widgets: one from a loader, an
+ * Image card, a Frame or a provider's picture; Empty image's batch; through
+ * Gates, Image cards fed by a wire and another per-frame node. Null for a
+ * clip or any source it can't bound (priced then at the frame cap).
+ */
+export function upstreamPictureCount(node: any, nodes?: readonly any[] | null, edges?: readonly any[] | null, depth = 0): number | null {
+  if (!node?.data || !nodes || !edges || depth > 64) return null
+  const ct = String(node.data.nodeType || '')
+  const name = Object.prototype.hasOwnProperty.call(LOCAL_MODEL_PICTURE_INPUT, ct) ? LOCAL_MODEL_PICTURE_INPUT[ct]! : ct === 'ComfyGateNode' ? 'data_in' : ct === 'Image' ? 'images' : null
+  if (!name) return null
+  const port = (node.data.inputs || []).findIndex((i: any) => i?.name === name)
+  const edge = port >= 0 ? edges.find((e: any) => String(e?.target) === String(node.id) && e?.targetHandle === `input-${port}`) : null
+  if (!edge) return ct === 'Image' ? 1 : null
+  const src = nodes.find((m: any) => String(m?.id) === String(edge.source))
+  const st = String(src?.data?.nodeType || '')
+  if (!src?.data) return null
+  if (st === 'EmptyImage') {
+    const own = widgetValueMap(src.data.widgetDefs, src.data.widgetsValues, linkedInputNames(String(src.id), src.data.inputs, edges))
+    const b = own.batch_size === undefined ? 1 : Number(own.batch_size)
+    return Number.isInteger(b) && b >= 1 ? b : null
+  }
+  if (st === 'Image' || st === 'ComfyGateNode' || isLocalModelClass(st)) return upstreamPictureCount(src, nodes, edges, depth + 1)
+  if (ONE_PICTURE_SOURCES.has(st) || IMAGE_OUTPUT_CLASSES.has(st) || Object.prototype.hasOwnProperty.call(PAID_PICTURE_FAMILY, st)) return 1
+  return null
 }
 
 /**
@@ -276,6 +334,12 @@ export function upstreamInputSeconds(node: any, nodes?: readonly any[] | null, e
   // its price is always the ceiling (60 s, above 1080p, 60 fps): "up to".
   // (With its switch off the class isn't priced here and the badge is Python's.)
   if (Object.prototype.hasOwnProperty.call(FAMILY_PRICED_CLASSES, ct)) return { seconds: {}, upTo: true }
+  // An R7 per-frame node (Background remove, fix round 1): the pictures the canvas sees, else the hosted
+  // frame cap, "up to" (the badge's hosted credits; localModelFrames picks the cap where it runs).
+  if (isLocalModelClass(ct)) {
+    const f = localModelFrames(upstreamPictureCount(node, nodes, edges), true)
+    return { seconds: { frames: f.frames }, upTo: f.upTo }
+  }
   // Describe a video (R3.4): the canvas can't see the video's length, so it is
   // priced at its ceiling (45 minutes, the longest answer): "up to". The
   // runner charges an uploaded video by its length and the tokens used.

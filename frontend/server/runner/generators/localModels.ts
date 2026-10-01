@@ -111,33 +111,46 @@ export function heldPictures(ctx: PlanContext): number {
 /**
  * Runs `each` over every picture in order, at most PER_NODE_IN_FLIGHT at a
  * time; `done` gets each result in order (a frame batch's writer must be fed
- * in order). A failure stops the walk: the caller's lease (if any) ends the
- * decode; the engine cancels every call still in flight (settleCalls).
+ * in order). A failure stops the walk and leaves AT ONCE (fix round 1): the
+ * other pictures' work is not waited for, so their calls are still in the
+ * engine's in-flight set when the node fails, and the engine cancels them
+ * under the runner's cancel policy (settleCalls: the node's signal aborts,
+ * each sent request is cancelled, a cancel counts only once the provider
+ * confirms it). Frames not delivered are not charged. The caller's lease (if
+ * any) ends the decode.
  */
 async function inOrder<T>(pictures: AsyncIterable<InPicture>, each: (p: InPicture) => Promise<T>, done: (r: T, p: InPicture) => Promise<void>, signal: AbortSignal): Promise<number> {
   const pending: { p: InPicture; work: Promise<T> }[] = []
   let count = 0
-  const flushOne = async () => {
+  // A box: TypeScript doesn't follow the write in the rejection handler.
+  const failed: { e?: unknown; at?: true } = {}
+  const flushOne = (): Promise<void> => {
     const next = pending.shift()!
-    await done(await next.work, next.p)
+    const f = (async () => { await done(await next.work, next.p) })()
+    // Left behind when a sibling fails first: its own end is nobody's to read.
+    f.catch(() => undefined)
+    return f
   }
-  try {
-    for await (const p of pictures) {
-      if (signal.aborted) throw new MediaError('stopped')
-      const work = each(p)
-      // Never an unhandled rejection while it waits its turn: its failure is read when flushed.
-      work.catch(() => undefined)
-      pending.push({ p, work })
-      count++
-      if (pending.length >= PER_NODE_IN_FLIGHT) await flushOne()
-    }
-    while (pending.length) await flushOne()
+  for await (const p of pictures) {
+    if (signal.aborted) throw new MediaError('stopped')
+    if (failed.at) throw failed.e
+    const work = each(p)
+    // Never an unhandled rejection while it waits its turn; the first failure of any picture ends the walk
+    // without waiting for the order to reach it (its siblings' calls are cancelled by the engine).
+    work.catch((e) => { if (!failed.at) { failed.e = e; failed.at = true } })
+    pending.push({ p, work })
+    count++
+    if (pending.length >= PER_NODE_IN_FLIGHT) await Promise.race([flushOne(), firstFailure(pending.map(x => x.work))])
   }
-  finally {
-    // Whatever is left settles before the caller moves on (its calls are the engine's to cancel).
-    await Promise.allSettled(pending.map(x => x.work))
-  }
+  while (pending.length) await Promise.race([flushOne(), firstFailure(pending.map(x => x.work))])
   return count
+}
+
+/** Rejects with the first of `works` to fail; never settles otherwise. */
+function firstFailure(works: readonly Promise<unknown>[]): Promise<never> {
+  return new Promise<never>((_resolve, reject) => {
+    for (const w of works) w.catch(reject)
+  })
 }
 
 /** A frame (rgb24) as the PNG handed to the service. */

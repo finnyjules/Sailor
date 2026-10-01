@@ -32,7 +32,7 @@ import { getGeneratorIcon } from '~/data/generator-icons'
 import { hostedModeEnabled } from '~/lib/hostedMode'
 import { creditsForUsd } from '~/lib/pricing'
 import { MODEL_PRICED_BADGE_CLASSES, modelPricedUsd, nodeCreditEstimate, nodePriceTooltip } from '~/lib/nodeCreditEstimate'
-import { linkedInputNames, upstreamInputPixels, upstreamInputSeconds, widgetValueMap } from '~/lib/costEstimate'
+import { linkedInputNames, localModelFrames, upstreamInputPixels, upstreamInputSeconds, upstreamPictureCount, widgetValueMap } from '~/lib/costEstimate'
 import { NO_FAMILIES, parseFamilies } from '#shared/runner/families'
 import { upgradeHidesWidget } from '#shared/runner/eligibility'
 import { RETIRED_NODE_MESSAGE, isRetiredClass } from '#shared/runner/retired'
@@ -170,9 +170,11 @@ const priceLabel = computed(() => {
   }
   // A node moved off this computer onto a paid service (R7, ruling (a): it costs the same few cents
   // locally): its service's price for one picture, in dollars, named by the tooltip.
+  // A per-frame node is priced on the pictures the canvas sees, else this computer's frame cap, "up to" (fix round 1).
   else if (priceTitle.value) {
-    const usd = modelPricedUsd(props.data.nodeType as string, pricedInputs.value, { families: badgeFamilies })
-    if (usd != null && usd > 0) return usd < 0.01 ? '<$0.01' : `~$${usd.toFixed(2)}`
+    const f = localModelFrames(upstreamPictureCount(props, injectedNodes?.value, injectedEdges?.value), false)
+    const usd = modelPricedUsd(props.data.nodeType as string, pricedInputs.value, { families: badgeFamilies, inputSeconds: { frames: f.frames } })
+    if (usd != null && usd > 0) return `${f.upTo ? 'up to ' : '~'}${usd < 0.01 ? '<$0.01' : `$${usd.toFixed(2)}`}`
   }
   const badge = props.data.priceBadge
   if (!badge?.expr) return null

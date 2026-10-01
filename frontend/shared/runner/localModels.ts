@@ -104,8 +104,9 @@ export const LOCAL_MODEL_OUTPUT_KINDS: Readonly<Record<string, Readonly<Record<n
 
 /**
  * The most frames one picture node works through, one call each (ruling
- * (f)): hosted 300 (10 s at 30 fps; $0.12 at the remover's card), locally
- * 900 (30 s). A clip over the cap is left to the engine before the run
+ * (f)): hosted 300 (10 s at 30 fps; 300 × $0.0004 = $0.12 at the remover's
+ * card, held and charged as 18 credits: the frames' dollars added up and
+ * marked up once, nodePrice.ts localModelPrice), locally 900 (30 s). A clip over the cap is left to the engine before the run
  * (server/runner/localModelStart.ts) — a stop-gap named in R7.1's report.
  */
 export const LOCAL_MODEL_MAX_FRAMES = { hosted: 300, local: 900 } as const
