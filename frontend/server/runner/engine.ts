@@ -2306,6 +2306,8 @@ export function createEngine(deps: EngineDeps) {
         // R7.2: a loaded picture's header, for a service's largest picture (Upscale (2×)).
         read: f => files.read(f),
       })
+      // R7.3 fix round 1: what Python itself fails on (Object removal's mask of another size) is refused plainly, before the hold.
+      if (counted.refused) throw refuse(counted.refused.message, 400, { nodeId: counted.refused.nodeId, classType: counted.refused.classType })
       if (counted.problem) throw refuse(counted.problem.message, 400, { nodeId: counted.problem.nodeId, classType: counted.problem.classType, reason: RUNNER_NOT_ELIGIBLE })
       localKept += counted.keptBytes
       if (localKept > (deps.hosted() ? MEDIA_CAPS.hosted : MEDIA_CAPS.local).keptBytesPerRun) {

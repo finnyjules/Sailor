@@ -891,6 +891,34 @@ export async function linkPictureBound(
   return 'px' in s ? s.px : null
 }
 
+/**
+ * Every width × height a picture wire may have when it runs (the same walk,
+ * pictureSizer), or null unless that set is known exactly (a loaded file's
+ * sides come in both orders: which one is the width isn't certain). R7.3:
+ * Object removal compares its picture's and its mask's before the hold
+ * (server/runner/localModelStart.ts).
+ */
+export async function linkPictureShapes(
+  prompt: Prompt,
+  link: unknown,
+  readFile: GateFileReader = engineFileSize,
+  reads: GateReads = createGateReads(),
+): Promise<readonly Shape[] | null> {
+  const measure = async (value: string): Promise<FileRead> => {
+    const r = await reads.measure<FileRead>(`pixels:${value}`, async () => {
+      try {
+        const got = await readFile(value)
+        if (typeof got === 'number') return got > 0 ? { pixels: got } : 'unreadable'
+        return got && got.pixels > 0 ? got : 'unreadable'
+      }
+      catch { return 'unreadable' }
+    }, 'pictures')
+    return r ?? 'unread'
+  }
+  const s = await pictureSizer(prompt, measure).ofLink(link)
+  return 'px' in s && s.exact && s.shapes?.length ? s.shapes : null
+}
+
 /** Node id → the size of the picture each size-priced node is sent, where the gate knows it (graphInputSizes). */
 export async function graphInputPixels(
   prompt: Prompt,

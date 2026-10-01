@@ -459,6 +459,75 @@ describe('the acceptance chains, with ComfyUI off', () => {
   })
 })
 
+describe('a mask of another size is refused before the hold (fix round 1)', () => {
+  const loadOf = (image: string) => ({ class_type: 'LoadImage', inputs: { image, upload: 'image' } })
+  const bgOf = (from: [string, number]) => ({ class_type: 'BackgroundRemove', inputs: { frames: from, output: 'transparent', edge_softness: 0 } })
+
+  it('Background remove\'s mask of picture A → Object removal on picture B of another size: refused in plain words before the hold, nothing sent, nothing charged', async () => {
+    const a = await alphaPicture(24, 16, 12)
+    const b = await alphaPicture(30, 20, 13)
+    const prompt: ApiPrompt = { a: loadOf('a.png'), b: bgOf(['a', 0]), c: loadOf('b.png'), n: eraseNode(2, ['c', 0], ['b', 1]), s: save(['n', 0]) }
+    expect(isRunnerEligible(prompt, ON_BG)).toBe(true)
+    const replicate = createFakeReplicate()
+    const k = makeKit({ hosted: true, replicate, deps: { families: () => ON_BG } })
+    writeFileSync(join(k.root, 'input', 'a.png'), a.png)
+    writeFileSync(join(k.root, 'input', 'b.png'), b.png)
+    const err = await k.engine.startRun({ userId: k.userId, takes: [prompt], ...START }).catch(e => e)
+    expect(err).toBeInstanceOf(Error)
+    expect(err.message).toBe(OBJECT_REMOVE_WORDS.maskSize)
+    // A plain refusal, not a hand-off to the engine.
+    expect(err.data).toEqual({ nodeId: 'n', classType: OBJECT_REMOVE_CLASS })
+    expect(k.ledger.hold).not.toHaveBeenCalled()
+    expect(replicate.submitted()).toEqual([])
+  })
+
+  it('the same chain with two pictures of one size runs: both calls made and charged', async () => {
+    const a = await alphaPicture(24, 16, 14)
+    const b = await alphaPicture(24, 16, 15)
+    const cut = await alphaPicture(24, 16, 16)
+    const fillPng = new Uint8Array(await sharp(Buffer.alloc(24 * 16 * 3, 50), { raw: { width: 24, height: 16, channels: 3 } }).png().toBuffer())
+    const prompt: ApiPrompt = { a: loadOf('a.png'), b: bgOf(['a', 0]), c: loadOf('b.png'), n: eraseNode(2, ['c', 0], ['b', 1]), s: save(['n', 0]) }
+    const { k, take, replicate } = await kitRun(prompt, { [BG_REMOVE_SLUG]: () => cut.png, [OBJECT_REMOVE_SLUG]: () => fillPng }, { hosted: true, families: ON_BG, files: { 'a.png': a.png, 'b.png': b.png } })
+    for (const id of ['a', 'b', 'c', 'n', 's']) expect(take.nodes[id]!.status, `${id}: ${take.nodes[id]!.error ?? ''}`).toBe('done')
+    expect(replicate.submitted().map(x => x.endpoint)).toEqual([BG_REMOVE_SLUG, OBJECT_REMOVE_SLUG])
+    const credits = creditsForUsd(0.0004) + creditsForUsd(USD)
+    expect(charged(k)).toEqual([[credits + 1, credits + 1]])
+  })
+
+  it('LoadImage\'s mask: another size with an alpha is refused before the hold; with no alpha (a black 64 × 64 mask) it runs and makes no call, as Python', async () => {
+    const big = await alphaPicture(30, 20, 17)
+    const opaque = new Uint8Array(await sharp(Buffer.alloc(30 * 20 * 3, 9), { raw: { width: 30, height: 20, channels: 3 } }).png().toBuffer())
+    const small = await alphaPicture(24, 16, 18)
+    const prompt: ApiPrompt = { a: loadOf('a.png'), c: loadOf('b.png'), n: eraseNode(2, ['c', 0], ['a', 1]), s: save(['n', 0]) }
+    const replicate = createFakeReplicate()
+    const k = makeKit({ hosted: true, replicate, deps: { families: () => ON } })
+    writeFileSync(join(k.root, 'input', 'a.png'), big.png)
+    writeFileSync(join(k.root, 'input', 'b.png'), small.png)
+    await expect(k.engine.startRun({ userId: k.userId, takes: [prompt], ...START })).rejects.toThrow(OBJECT_REMOVE_WORDS.maskSize)
+    expect(k.ledger.hold).not.toHaveBeenCalled()
+    const { take, replicate: r2 } = await kitRun(prompt, {}, { hosted: true, files: { 'a.png': opaque, 'b.png': small.png } })
+    for (const id of ['a', 'c', 'n', 's']) expect(take.nodes[id]!.status, `${id}: ${take.nodes[id]!.error ?? ''}`).toBe('done')
+    expect(r2.submitted()).toEqual([])
+  })
+
+  it('the start pass by hand: sized makers compared; a maker it can\'t size is left to the turn\'s check (the backstop)', async () => {
+    const a = await alphaPicture(24, 16, 19)
+    const b = await alphaPicture(30, 20, 20)
+    const files: Record<string, Uint8Array> = { 'a.png': a.png, 'b.png': b.png }
+    const read = async (f: OutputFile) => files[f.filename]!
+    const shapes = async () => new Map()
+    const viaBg: ApiPrompt = { a: loadOf('a.png'), b: bgOf(['a', 0]), c: loadOf('b.png'), n: eraseNode(2, ['c', 0], ['b', 1]) }
+    expect((await localModelStartProblems(viaBg, ON_BG, { hosted: true, shapes, read })).refused?.message).toBe(OBJECT_REMOVE_WORDS.maskSize)
+    const same: ApiPrompt = { a: loadOf('a.png'), b: bgOf(['a', 0]), n: eraseNode(2, ['a', 0], ['b', 1]) }
+    expect((await localModelStartProblems(same, ON_BG, { hosted: true, shapes, read })).refused).toBeUndefined()
+    // Image to mask: its picture's size.
+    const viaI2m: ApiPrompt = { a: loadOf('a.png'), m: { class_type: 'ImageToMask', inputs: { image: ['a', 0], channel: 'red' } }, c: loadOf('b.png'), n: eraseNode(2, ['c', 0], ['m', 0]) }
+    expect((await localModelStartProblems(viaI2m, ON, { hosted: true, shapes, read })).refused?.message).toBe(OBJECT_REMOVE_WORDS.maskSize)
+    // No reader (sizes unknown): nothing refused here.
+    expect((await localModelStartProblems(viaBg, ON_BG, { hosted: true, shapes })).refused).toBeUndefined()
+  })
+})
+
 describe('R7.1\'s Background remove saved as Python saves it (R7.3\'s fix)', () => {
   it('premultiplied and matte only are saved RGB (Python\'s 3-channel tensor); transparent keeps its alpha', async () => {
     const pic = await alphaPicture(24, 16, 9)

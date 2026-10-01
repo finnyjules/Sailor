@@ -32,9 +32,12 @@ import { EFFECT_PICTURE_OUTPUTS, effectFamilyOn, effectSchemaOf } from '#shared/
 import { outputKind } from '#shared/runner/values'
 import { pyIntOf } from '#shared/runner/pyText'
 import {
-  LOCAL_MODEL_MAX_FRAMES, LOCAL_MODEL_MAX_PIXELS, LOCAL_MODEL_OUTPUT_KINDS, LOCAL_MODEL_PICTURE_INPUT, LOCAL_MODEL_WORDS, UPSCALE_2X_WORDS, localModelOn, overCapWords,
+  BG_REMOVE_CLASS, LOCAL_MODEL_MAX_FRAMES, LOCAL_MODEL_MAX_PIXELS, LOCAL_MODEL_OUTPUT_KINDS, LOCAL_MODEL_PICTURE_INPUT, LOCAL_MODEL_WORDS, OBJECT_REMOVE_CLASS,
+  OBJECT_REMOVE_WORDS, UPSCALE_2X_WORDS, localModelOn, overCapWords,
 } from '#shared/runner/localModels'
-import { linkPictureBound, pictureSize } from '../utils/graphInputPixels'
+import { linkPictureBound, linkPictureShapes, pictureSize, type Shape } from '../utils/graphInputPixels'
+import { pictureMeta } from './pictures/pythonView'
+import { hasAlphaAsPil } from './pictures/mask'
 import type { FrameShape } from './video/table'
 import { keptPeak } from './video/start'
 import { parseInputFileRef } from './inputs'
@@ -131,6 +134,43 @@ export interface LocalModelStart {
   keptBytes: number
   /** The first node whose count can't be known or is over the cap: the workflow goes to the engine. */
   problem: { message: string; nodeId: string; classType: string } | null
+  /**
+   * R7.3 (fix round 1): a node Python itself would fail on, known before the hold (Object removal's
+   * mask of another size than its picture): refused plainly, nothing held or charged.
+   */
+  refused?: { message: string; nodeId: string; classType: string }
+}
+
+type ShapeOf = (link: ApiLink) => Promise<readonly Shape[] | null>
+
+/**
+ * Every size the mask on `link` may have, 'empty' when it is certainly all
+ * black (LoadImage's file with no alpha: its 64 × 64 zero mask, which Python's
+ * Object removal hands on unchanged whatever its size), or null when that
+ * can't be known before the run. Sized: LoadImage's mask (its file's, when it
+ * has an alpha), Image to mask (its picture's), Background remove's mask (its
+ * own picture's: the cut-out is fitted to it), through Gates. Any other maker
+ * is checked at the node's turn (generators/localModels.ts, the backstop).
+ */
+async function maskShapes(prompt: ApiPrompt, link: ApiLink, families: ReadonlySet<RunnerFamily>, shapeOf: ShapeOf, read: ((f: OutputFile) => Promise<Uint8Array>) | undefined, depth = 0): Promise<readonly Shape[] | 'empty' | null> {
+  const from = prompt[link[0]]
+  if (!from || depth > 64) return null
+  const inputs = from.inputs ?? {}
+  if (from.class_type === GATE_CLASS) return isLink(inputs.data_in) ? maskShapes(prompt, inputs.data_in, families, shapeOf, read, depth + 1) : null
+  if (from.class_type === 'LoadImage' && link[1] === 1) {
+    const f = read ? parseInputFileRef(inputs.image) : null
+    if (!f || !read) return null
+    let bytes: Uint8Array
+    try { bytes = await read(f) }
+    catch { return null }
+    const meta = await pictureMeta(bytes).catch(() => null)
+    if (!meta) return null
+    if (!hasAlphaAsPil(bytes, meta.hasAlpha, meta.format)) return 'empty'
+    return shapeOf([link[0], 0])
+  }
+  if (from.class_type === 'ImageToMask' && link[1] === 0) return isLink(inputs.image) ? shapeOf(inputs.image) : null
+  if (from.class_type === BG_REMOVE_CLASS && link[1] === 1 && localModelOn(BG_REMOVE_CLASS, families)) return isLink(inputs.frames) ? shapeOf(inputs.frames) : null
+  return null
 }
 
 /** A clip's masks kept as 16-bit greyscale PNGs: at most their raw size, a filter byte a row, and a margin each. */
@@ -202,6 +242,23 @@ export async function localModelStartProblems(
       if (pixels > maxPixels) return { counts, keptBytes: 0, problem: { message: UPSCALE_2X_WORDS.tooLarge, nodeId, classType: n.class_type } }
     }
     counts[nodeId] = Math.max(1, count)
+    // R7.3 (fix round 1): Object removal's mask must be its picture's size (Python fails in numpy's
+    // composite otherwise, after any earlier paid node ran): refused before the hold when certain.
+    if (n.class_type === OBJECT_REMOVE_CLASS && isLink(n.inputs?.mask)) {
+      const shapeOf: ShapeOf = async (l) => {
+        if (outputKind(prompt, l, kinds) === 'frames') {
+          shapes ??= await o.shapes()
+          const s = shapes.get(`${l[0]}:${l[1]}`)
+          return s ? [[s.w, s.h]] : null
+        }
+        return linkPictureShapes(prompt, l, readerOf(o.read))
+      }
+      const picture = await shapeOf(link)
+      const mask = picture ? await maskShapes(prompt, n.inputs.mask, families, shapeOf, o.read) : null
+      if (picture && mask && mask !== 'empty' && !picture.some(([w, h]) => mask.some(([mw, mh]) => mw === w && mh === h))) {
+        return { counts, keptBytes: 0, problem: null, refused: { message: OBJECT_REMOVE_WORDS.maskSize, nodeId, classType: n.class_type } }
+      }
+    }
   }
   if (!shapes) return { counts, keptBytes: 0, problem: null }
   const peak = keptPeak(prompt, families, shapes, { release: false })
