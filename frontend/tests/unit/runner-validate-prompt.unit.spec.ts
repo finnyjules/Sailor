@@ -12,7 +12,7 @@ import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import { isRunnerEligible } from '#shared/runner/eligibility'
-import { RUNNER_FAMILIES, type RunnerFamily } from '#shared/runner/families'
+import { ALL_RUNNER_FAMILIES, LOCAL_MODEL_FAMILIES, RUNNER_FAMILIES, type RunnerFamily } from '#shared/runner/families'
 import type { ApiPrompt } from '#shared/runner/graph'
 import { NO_VALID_OUTPUTS_MESSAGE, RUNNER_OUTPUT_CLASSES, pruneInvalidOutputs, runnerTakesWorkflow } from '#shared/runner/validate'
 import { shouldUseRunner } from '~~/app/lib/runner/client'
@@ -120,6 +120,63 @@ describe('the engine runs only what ComfyUI would', () => {
     expect((err as { data: { node_errors: Record<string, unknown> } }).data.node_errors).toHaveProperty('3')
     expect(k.ledger.hold).not.toHaveBeenCalled()
     expect(k.fal.client.submit).not.toHaveBeenCalled()
+  })
+
+  // R7.11 fix: the executed part comes from VALID outputs only (ComfyUI's good_outputs).
+  const GEN = (prompt: string) => ({ class_type: 'GenerateImageNode', inputs: { model: 'flux-schnell', prompt, aspect_ratio: '1:1', seed: 0, model_options: '{}' } })
+  /** Save image with its required widgets missing (format, quality, … embed_metadata): it fails validation. */
+  const BAD_SAVE = (from: string) => ({ class_type: 'SaveImage', inputs: { images: [from, 0], filename_prefix: 'ComfyUI' } })
+
+  it('R7.11: a paid node read only by an invalid Save image: refused plainly before the hold, no provider call', async () => {
+    const k = makeKit({ hosted: true, deps: { families: () => ALL } })
+    const p: ApiPrompt = { 1: GEN('a fox'), 2: BAD_SAVE('1') }
+    const err = await k.engine.startRun({ userId: k.userId, takes: [p], ...START }).catch(e => e)
+    expect(err).toMatchObject({ statusCode: 400, message: NO_VALID_OUTPUTS_MESSAGE })
+    expect((err as { data: { node_errors: Record<string, unknown> } }).data.node_errors).toMatchObject({ 2: { class_type: 'SaveImage', dependent_outputs: ['2'] } })
+    expect(k.ledger.hold).not.toHaveBeenCalled()
+    expect(k.fal.client.submit).not.toHaveBeenCalled()
+  })
+
+  it('R7.11: one valid and one invalid output: only the valid branch runs, is held and charged; the invalid one is reported as ComfyUI does', async () => {
+    const k = makeKit({ hosted: true, deps: { families: () => ALL } })
+    const p: ApiPrompt = {
+      1: GEN('a fox'),
+      2: { class_type: 'Image', inputs: { image: '', export: false, images: ['1', 0], batch_index: -1 } },
+      3: GEN('a cat'),
+      4: BAD_SAVE('3'),
+    }
+    const pruned = pruneInvalidOutputs(p, ALL)
+    expect(pruned).toMatchObject({ dropped: ['4'], unread: [], failed: false })
+    const started = await k.engine.startRun({ userId: k.userId, takes: [p], ...START })
+    expect(started.nodeErrors).toMatchObject({ 4: { class_type: 'SaveImage', dependent_outputs: ['4'], errors: expect.arrayContaining([expect.objectContaining({ type: 'required_input_missing' })]) } })
+    await k.engine.settled(started.runId)
+    const run = (await k.store.get(started.runId))!
+    expect(run.status).toBe('done')
+    expect(Object.keys(run.takes[0]!.prompt).sort()).toEqual(['1', '2'])
+    expect(Object.keys(run.takes[0]!.nodes).sort()).toEqual(['1', '2'])
+    expect(k.fal.submitted().map(r => r.payload.prompt)).toEqual(['a fox'])
+    // Held and charged for the one picture made (and the render credit): exactly the valid branch alone.
+    const k2 = makeKit({ hosted: true, deps: { families: () => ALL } })
+    const alone = await k2.engine.startRun({ userId: k2.userId, takes: [{ 1: p[1]!, 2: p[2]! }], ...START })
+    await k2.engine.settled(alone.runId)
+    const holds = (kit: typeof k) => [...kit.ledger.holds.values()].map(h => [h.credits, h.actual])
+    expect(holds(k)).toEqual(holds(k2))
+    expect(holds(k)[0]![1]).toBeGreaterThan(0)
+  })
+
+  it('R7.11: the R7 nodes are output nodes themselves (is_output_node=True): with an invalid Save image after one, it runs and shows its result, as in ComfyUI', () => {
+    const load = { class_type: 'LoadImage', inputs: { image: 'image.png', upload: 'image' } }
+    const nodes: Record<string, Record<string, unknown>> = {
+      BackgroundRemove: { frames: ['l', 0], output: 'transparent', edge_softness: 0 },
+      UpscaleImage: { frames: ['l', 0], tile_size: 512 },
+    }
+    for (const cls of ['BackgroundRemove', 'UpscaleImage', 'ObjectRemove', 'LensBlur']) expect(RUNNER_OUTPUT_CLASSES.has(cls), cls).toBe(true)
+    for (const [cls, inputs] of Object.entries(nodes)) {
+      const r = pruneInvalidOutputs({ l: load, n: { class_type: cls, inputs }, s: BAD_SAVE('n') }, new Set([...ALL_RUNNER_FAMILIES, ...LOCAL_MODEL_FAMILIES]))
+      expect(r.failed, cls).toBe(false)
+      expect(r.dropped, cls).toEqual(['s'])
+      expect(Object.keys(r.prompt).sort(), cls).toEqual(['l', 'n'])
+    }
   })
 
   it('a prompt whose outputs all validate starts exactly as before (no node_errors)', async () => {

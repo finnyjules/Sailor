@@ -326,7 +326,8 @@ describe('prices (ruling (a))', () => {
       service: 'replicate', source: 'https://replicate.com/flux-kontext-apps/restore-image', read: '2026-09-27', confidence: 'verified',
     })
     expect(PAID_RATES['851-labs/background-remover']).toMatchObject({
-      unit: 'gpu_ceiling', usd: 0.0004, confidence: 'estimate', read: '2026-09-27', source: 'https://replicate.com/851-labs/background-remover',
+      // R7.11: raised from $0.0004 after the live check measured 1.80 s on T4 ($0.000405).
+      unit: 'gpu_ceiling', usd: 0.0008, confidence: 'estimate', read: '2026-10-01', source: 'https://replicate.com/851-labs/background-remover',
     })
     for (const slug of ['flux-kontext-apps/restore-image', '851-labs/background-remover']) expect(otherCardFor(slug), slug).toBeNull()
     for (const slug of [...Object.values(UPSCALE_ENGINE_SLUGS), ...Object.values(ENHANCE_ENGINE_SLUGS)]) {
@@ -350,7 +351,7 @@ describe('prices (ruling (a))', () => {
   it('per call: Restore 8 credits, Remove background 1, on both paths (as before)', () => {
     const want: Record<string, { usd: number; credits: number }> = {
       RestorePhotoNode: { usd: 0.04, credits: 8 }, RestorePhotoRemoteNode: { usd: 0.04, credits: 8 },
-      RemoveBackgroundNode: { usd: 0.0004, credits: 1 }, RemoveBackgroundRemoteNode: { usd: 0.0004, credits: 1 },
+      RemoveBackgroundNode: { usd: 0.0008, credits: 1 }, RemoveBackgroundRemoteNode: { usd: 0.0008, credits: 1 },
     }
     for (const [c, p] of Object.entries(want)) {
       expect(priceNode(c, inputsOf[c]), c).toEqual(p)

@@ -151,11 +151,12 @@ export const PAID_RATES: Record<string, PaidRate> = {
     service: 'replicate', source: 'https://replicate.com/flux-kontext-apps/restore-image', read: '2026-09-27', confidence: 'verified',
   },
   // Remove background (and its twin), billed by GPU time (Nvidia T4, $0.000225/s): the page says
-  // "approximately $0.00037 to run", written here rounded up to the next hundredth of a cent (the
-  // figure the price book has charged it at). An estimate until the live check measures it.
+  // "approximately $0.00037 to run" (read 2026-09-27; the card was $0.0004). R7.11 live check
+  // (2026-10-01): predict_time 1.80 s on T4 for one picture, about $0.000405 — at the old card. Raised to
+  // $0.0008 (3.6 s of T4, twice the measurement) so it is a true ceiling with margin.
   '851-labs/background-remover': {
-    unit: 'gpu_ceiling', usd: 0.0004, note: 'T4 at $0.000225/s; page: approximately $0.00037 to run (read 2026-09-27), rounded up to the next $0.0001',
-    service: 'replicate', source: 'https://replicate.com/851-labs/background-remover', read: '2026-09-27', confidence: 'estimate',
+    unit: 'gpu_ceiling', usd: 0.0008, note: 'T4 at $0.000225/s; page: approximately $0.00037 to run (read 2026-09-27); live check 2026-10-01: 1.80 s = $0.000405; ceiling 3.6 s (2× measured)',
+    service: 'replicate', source: 'https://replicate.com/851-labs/background-remover', read: '2026-10-01', confidence: 'estimate',
   },
   // R3.6, layers from one call, and outpaint (read 2026-09-27, plain GETs of the public pages).
   // Separate text from image: the page's billing table, "$0.09 per output image"
@@ -186,11 +187,12 @@ export const PAID_RATES: Record<string, PaidRate> = {
   // R3.7, Separate background and foreground (read 2026-09-27, plain GETs of the public pages).
   // Its cut-out is Remove background's call (851-labs/background-remover, above). The fills:
   // LaMa, billed by GPU time (Nvidia T4, $0.000225/s, no billing table): the page says "approximately
-  // $0.00068 to run" (its p50 price), written here rounded up to the next hundredth of a cent. An
-  // estimate until the live check measures it (a larger picture runs longer).
+  // $0.00068 to run" (its p50 price; read 2026-09-27, the card was $0.0007). R7.11 live check (2026-10-01):
+  // predict_time 3.14–3.20 s on T4 for a 1152 × 1152 picture, about $0.00072 — over the old card. Raised to
+  // $0.0015 (6.7 s of T4, about 2.1× the measurement). Still a flat ceiling: a much larger picture runs longer.
   'zylim0702/remove-object': {
-    unit: 'gpu_ceiling', usd: 0.0007, note: 'T4 at $0.000225/s; page: approximately $0.00068 to run (read 2026-09-27), rounded up to the next $0.0001',
-    service: 'replicate', source: 'https://replicate.com/zylim0702/remove-object', read: '2026-09-27', confidence: 'estimate',
+    unit: 'gpu_ceiling', usd: 0.0015, note: 'T4 at $0.000225/s; page: approximately $0.00068 to run (read 2026-09-27); live check 2026-10-01: 3.14–3.20 s at 1152² = $0.00072; ceiling 6.7 s (about 2.1× measured)',
+    service: 'replicate', source: 'https://replicate.com/zylim0702/remove-object', read: '2026-10-01', confidence: 'estimate',
   },
   // Bria Eraser: the page's billing table, "$0.04 per output image" (`image_output_count`; "or 25 images for $1").
   'bria/eraser': {
@@ -287,6 +289,8 @@ export const PAID_RATES: Record<string, PaidRate> = {
   // the 60 s cap): an estimate that blocks switch-on until the live check reads the real charge.
   // R7.7: Whisper transcribe (family whisper-captions) calls it too, with the whole sound (at most 30 minutes
   // hosted, an hour on this computer): one live measurement serves both.
+  // R7.11 live check (2026-10-01): 0.15 s of compute for 7.8 s of sound — well under the card ($0.00078
+  // for that sound); card left as it is.
   'fal-ai/wizper': {
     unit: 'per_input_second', perSecond: 0.0001,
     note: 'page and llms.txt: "$0 per compute second", no figure; Sailor\'s ceiling $0.0001/s of sound sent until a live call is billed',
@@ -324,6 +328,8 @@ export const PAID_RATES: Record<string, PaidRate> = {
   // clip, encoding the answer) plus 0.385 s for every megapixel of every frame made ($0.0005: 2.6 megapixel-
   // frames a second, about six frames of 480p a second, far below RIFE's own speed on a GPU). A 2-second
   // 480p clip at ×2 (119 frames) is then about $0.044. An estimate until the live check measures it.
+  // R7.11 live check (2026-10-01): 18.6 s of compute for 60 frames in, 119 out at 854 × 480, about $0.024 —
+  // under this card's $0.044 ceiling for that clip; card left as it is.
   'fal-ai/rife/video': {
     unit: 'gpu_per_output_megapixel_frame', baseUsd: 0.02, perMegapixelFrame: 0.0005,
     note: '$0.0013 a compute second; ceiling: 15.4 s a call ($0.02) + 0.385 s a megapixel of every frame made ($0.0005)',
@@ -335,6 +341,8 @@ export const PAID_RATES: Record<string, PaidRate> = {
   // $0.0288: $0.000176 a second of sound, written here rounded up to $0.0002 a second, and never below the page's
   // $0.034 (170 s). The seconds priced are the sound's times the work its settings ask for (localModels.ts
   // vocalsWork: htdemucs_ft ×4, each shift a pass). An estimate until the live check measures it.
+  // R7.11 live check (2026-10-01): predict_time 2.59 s for 30 s of sound at htdemucs, shifts 1, about $0.003 —
+  // far under the card's $0.034 floor; card left as it is.
   'ryan5453/demucs': {
     unit: 'per_input_second', perSecond: 0.0002, minSeconds: 170,
     note: 'A100 (40GB) at $0.00115/s; page example: 163.8 s of song in 25.03 s predict ($0.000176/s of sound), rounded up to $0.0002/s; at least the page\'s approximately $0.034 to run (170 s); × the settings\' work (htdemucs_ft ×4, shifts passes)',

@@ -202,6 +202,12 @@ export interface InputSeconds {
   framesUpTo?: 'hosted' | 'local' | null
   /** R7.6 fix round 2: where a measured clip runs (the start of the run records it): locally, RIFE takes 4K at most. */
   place?: 'hosted' | 'local' | null
+  /**
+   * R7.11: the largest picture (pixels) a local-model node sends, measured at
+   * the start of the run (Upscale (2×): Real-ESRGAN is priced by the picture
+   * sent in). Absent or null = not measured: the service's largest.
+   */
+  picturePixels?: number | null
 }
 
 /**

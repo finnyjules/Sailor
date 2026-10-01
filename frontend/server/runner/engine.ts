@@ -2404,7 +2404,10 @@ export function createEngine(deps: EngineDeps) {
         // R7.6: Slow motion (AI) is priced by its clip's frame size too.
         const size = counted.sizes?.[nodeId]
         const sized = size ? { videoWidth: size.w, videoHeight: size.h, place: size.place } : {}
-        measured[index]![nodeId] = { ...(was ?? {}), seconds: { ...(was?.seconds ?? {}), frames, ...sized }, sha: was?.sha ?? {} }
+        // R7.11: Upscale (2×) is priced by the largest picture it sends.
+        const picture = counted.pictures?.[nodeId]
+        const pictured = typeof picture === 'number' ? { picturePixels: picture } : {}
+        measured[index]![nodeId] = { ...(was ?? {}), seconds: { ...(was?.seconds ?? {}), frames, ...sized, ...pictured }, sha: was?.sha ?? {} }
       }
     }
     // The sound effects' start pass (R6.9, ./video/soundShapes.ts): every sound's rate, channels and length

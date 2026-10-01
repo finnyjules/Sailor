@@ -283,6 +283,8 @@ export interface MeasuredMedia {
     audioUpTo?: number | null
     /** Where the node runs (R7.6: a clip's RIFE cap; R7.7: Whisper's longest sound, its hold when the sound isn't known yet). */
     place?: 'hosted' | 'local' | null
+    /** R7.11: the largest picture (pixels) Upscale (2×) sends, measured at the start of the run (its price reads it). */
+    picturePixels?: number | null
   }
   /** The sha256 of each file's bytes, by its part (a sync-3 node has both; a Topaz node only its video). */
   sha: { video?: string; audio?: string }

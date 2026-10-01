@@ -131,7 +131,7 @@ import { pyFloatOf, pyIntOf, pyStrip, pyTruthy } from '#shared/runner/pyText'
 import { paidCallUsd } from '#shared/pricing/paidRates'
 import {
   BG_REMOVE_CLASS, BG_REMOVE_EDGE_SOFTNESS, BG_REMOVE_OUTPUTS, BG_REMOVE_SLUG, LOCAL_MODEL_WORDS, OBJECT_REMOVE_CLASS, OBJECT_REMOVE_GROW,
-  OBJECT_REMOVE_SLUG, OBJECT_REMOVE_WORDS, UPSCALE_2X_CLASS, UPSCALE_2X_MAX_PIXELS, UPSCALE_2X_SLUG, UPSCALE_2X_WORDS, isLocalModelClass,
+  OBJECT_REMOVE_SLUG, OBJECT_REMOVE_WORDS, UPSCALE_2X_CLASS, UPSCALE_2X_MAX_PIXELS, UPSCALE_2X_SLUG, UPSCALE_2X_WORDS, isLocalModelClass, upscale2xPricedPixels,
   MASK_BY_TEXT_CLASS, MASK_BY_TEXT_PROMPT, MASK_BY_TEXT_THRESHOLD, SAM_3_SLUG, SAM_MASK_CLASSES, SAM_MASK_FEATHER, SAM_MASK_WORDS,
   SUBJECT_MASK_CLASS, SUBJECT_MASK_GROW, SUBJECT_MASK_MODES, SUBJECT_MASK_POINT, SUBJECT_MASK_WORDS,
   FRAME_INTERP_AI_CLASS, FRAME_INTERP_AI_MULTIPLIER, RIFE_VIDEO_SLUG, SLOW_MOTION_AI_WORDS, rifePricedPixels, rifeTakes, slowMotionAiCount,
@@ -506,8 +506,10 @@ export function planUpscale2x(ctx: PlanContext): NodePlan {
   const inputs = ctx.prompt[ctx.nodeId]!.inputs ?? {}
   const link = inputs.frames
   if (!isLink(link)) throw new Error(UPSCALE_2X_WORDS.noPicture)
-  const usd = paidCallUsd({ endpoint: UPSCALE_2X_SLUG })
-  if (usd == null) throw new Error('Upscale has no price yet')
+  // R7.11: Real-ESRGAN is priced by the picture sent in (editRates.ts): each call at its own picture's size,
+  // never above the hold (the start of the run held the largest picture, or the service's largest).
+  const usdOf = (w: number, h: number) => paidCallUsd({ endpoint: UPSCALE_2X_SLUG, inputPixels: upscale2xPricedPixels(w * h) })
+  if (paidCallUsd({ endpoint: UPSCALE_2X_SLUG }) == null) throw new Error('Upscale has no price yet')
   const incoming = incomingOf(ctx, link)
   const held = heldPictures(ctx)
   const count = incoming.kind === 'frames' ? incoming.value.count : incoming.files.length
@@ -530,7 +532,7 @@ export function planUpscale2x(ctx: PlanContext): NodePlan {
     const dw = 2 * p.w
     const dh = 2 * p.h
     const image = await p.url()
-    const got = await io.call({ key, provider: 'replicate', endpoint: UPSCALE_2X_SLUG, payload: upscale2xInput(image), media: 'image', usd })
+    const got = await io.call({ key, provider: 'replicate', endpoint: UPSCALE_2X_SLUG, payload: upscale2xInput(image), media: 'image', usd: usdOf(p.w, p.h)! })
     const url = firstOutputUrl(got.result)[0]
     if (!url) {
       // Its answer named no file: nothing delivered, so not charged (R3.17 fix round 1).

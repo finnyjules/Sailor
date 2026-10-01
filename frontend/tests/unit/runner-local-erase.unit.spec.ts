@@ -67,7 +67,8 @@ const START = { workflow: null, canvasId: null, projectUuid: null, projectName: 
 const LONG = { timeout: 120_000 }
 const SAVE_DEFAULTS = { filename_prefix: 'ComfyUI', format: 'png', quality: 90, lossless_webp: false, png_compression: 4, scale: 1, max_dimension: 0, embed_metadata: true }
 const SCHEMA = loadProviderSchema('replicate', OBJECT_REMOVE_SLUG)
-const USD = 0.0007
+// R7.11: LaMa's card raised from $0.0007 after the live check measured 3.14–3.20 s on T4 ($0.00072).
+const USD = 0.0015
 
 interface TensorRecord { shape: number[]; f32_sha256: string; round8_sha256: string; trunc8_sha256: string }
 interface DilateCase { name: string; w: number; h: number; grow: number; mask_f32: string; m8: string; grown: string }
@@ -441,7 +442,7 @@ describe('the acceptance chains, with ComfyUI off', () => {
     for (let i = 0; i < alpha.length; i++) alpha[i] = Math.fround(cutPx.data[i * 4 + 3]! / 255)
     const want = erase.erase({ rgb: pic.rgb, fill: new Uint8Array(24 * 16 * 3).fill(7), mask: maxFilterL(erase.mask8(alpha), 24, 16, 3), w: 24, h: 16, quant: 'trunc', preview: false }).picture
     expect(sha((await savedPixels(k, take.nodes.s!.outputs[0]!)).data)).toBe(sha(want))
-    const credits = creditsForUsd(0.0004) + creditsForUsd(USD)
+    const credits = creditsForUsd(0.0008) + creditsForUsd(USD)
     expect(charged(k)).toEqual([[credits + 1, credits + 1]])
   })
 
@@ -490,7 +491,7 @@ describe('a mask of another size is refused before the hold (fix round 1)', () =
     const { k, take, replicate } = await kitRun(prompt, { [BG_REMOVE_SLUG]: () => cut.png, [OBJECT_REMOVE_SLUG]: () => fillPng }, { hosted: true, families: ON_BG, files: { 'a.png': a.png, 'b.png': b.png } })
     for (const id of ['a', 'b', 'c', 'n', 's']) expect(take.nodes[id]!.status, `${id}: ${take.nodes[id]!.error ?? ''}`).toBe('done')
     expect(replicate.submitted().map(x => x.endpoint)).toEqual([BG_REMOVE_SLUG, OBJECT_REMOVE_SLUG])
-    const credits = creditsForUsd(0.0004) + creditsForUsd(USD)
+    const credits = creditsForUsd(0.0008) + creditsForUsd(USD)
     expect(charged(k)).toEqual([[credits + 1, credits + 1]])
   })
 
@@ -584,7 +585,7 @@ describe('a clip, one call per frame (ruling (f))', () => {
     expect([out.count, out.w, out.h]).toEqual([3, input.w, input.h])
     // Three frames' dollars added up and marked up once (USER ruling).
     expect(take.nodes.n!.credits).toBe(creditsForUsd(3 * USD))
-    const credits = creditsForUsd(3 * 0.0004) + creditsForUsd(3 * USD)
+    const credits = creditsForUsd(3 * 0.0008) + creditsForUsd(3 * USD)
     expect(charged(k)).toEqual([[credits + 1, credits + 1]])
   })
 
@@ -610,12 +611,12 @@ describe('prices (R7 rule 4)', () => {
     expect(Object.prototype.hasOwnProperty.call(FAMILY_PRICED_CLASSES, OBJECT_REMOVE_CLASS)).toBe(false)
   })
 
-  it('priced only while its family is on: frames × $0.0007, marked up once; one picture when nothing was counted', () => {
+  it('priced only while its family is on: frames × $0.0015, marked up once; one picture when nothing was counted', () => {
     const inputs = { frames: ['l', 0], mask: ['l', 1], mask_grow: 4 }
     expect('refused' in priceNode(OBJECT_REMOVE_CLASS, inputs)).toBe(true)
     expect('refused' in priceNode(OBJECT_REMOVE_CLASS, inputs, { families: new Set(['object-remove']) })).toBe(true)
     expect(priceNode(OBJECT_REMOVE_CLASS, inputs, { families: ON })).toEqual({ usd: USD, credits: creditsForUsd(USD) })
-    expect(priceNode(OBJECT_REMOVE_CLASS, inputs, { families: ON, inputSeconds: { frames: 300 } })).toEqual({ usd: 0.21, credits: creditsForUsd(0.21) })
+    expect(priceNode(OBJECT_REMOVE_CLASS, inputs, { families: ON, inputSeconds: { frames: 300 } })).toEqual({ usd: 0.45, credits: creditsForUsd(0.45) })
     expect(perFrameCredits(Array.from({ length: 3 }, () => ({ usd: USD })))).toBe(creditsForUsd(3 * USD))
     expect(localModelCalls(OBJECT_REMOVE_CLASS, 3)).toEqual({ steps: [{ call: { endpoint: OBJECT_REMOVE_SLUG }, times: 3 }] })
     expect(priceGraph({ 1: { class_type: OBJECT_REMOVE_CLASS, inputs } }).nodes['1']).toBeUndefined()

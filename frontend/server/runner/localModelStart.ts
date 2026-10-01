@@ -145,6 +145,8 @@ export interface LocalModelStart {
   counts: Record<string, number>
   /** R7.6: node id → the clip's frame size and where it runs, for the hold (Slow motion (AI) is priced by its frames' size; locally RIFE takes 4K at most). */
   sizes?: Record<string, { w: number; h: number; place: 'hosted' | 'local' }>
+  /** R7.11: node id → the largest picture (pixels) it sends, for a class with a largest picture (Upscale (2×), priced by it). */
+  pictures?: Record<string, number>
   /**
    * The most bytes this take keeps for its frame batches while it runs (R6's peak, every batch kept
    * to the end, a clip's cut-out batch among them), plus each clip's masks (16-bit PNGs, at most
@@ -268,6 +270,7 @@ export async function localModelStartProblems(
 ): Promise<LocalModelStart> {
   const counts: Record<string, number> = {}
   const sizes: Record<string, { w: number; h: number; place: 'hosted' | 'local' }> = {}
+  const pictures: Record<string, number> = {}
   const cap = o.hosted ? LOCAL_MODEL_MAX_FRAMES.hosted : LOCAL_MODEL_MAX_FRAMES.local
   const kinds = outputKindsFor(families)
   let shapes: ReadonlyMap<string, FrameShape> | null = null
@@ -320,6 +323,7 @@ export async function localModelStartProblems(
     if (maxPixels) {
       if (pixels === null || !Number.isFinite(pixels) || pixels <= 0) return { counts, keptBytes: 0, problem: { message: UPSCALE_2X_WORDS.unknownSize, nodeId, classType: n.class_type } }
       if (pixels > maxPixels) return { counts, keptBytes: 0, problem: { message: UPSCALE_2X_WORDS.tooLarge, nodeId, classType: n.class_type } }
+      pictures[nodeId] = pixels
     }
     counts[nodeId] = Math.max(1, count)
     // R7.3 (fix round 1): Object removal's mask must be its picture's size (Python fails in numpy's
@@ -340,13 +344,13 @@ export async function localModelStartProblems(
       }
     }
   }
-  if (!shapes) return { counts, sizes, keptBytes: 0, keptByNode, problem: null }
+  if (!shapes) return { counts, sizes, pictures, keptBytes: 0, keptByNode, problem: null }
   const peak = keptPeak(prompt, families, shapes, { release: false })
   if (!peak) {
     const first = Object.keys(counts)[0]!
     return { counts, keptBytes: 0, problem: { message: LOCAL_MODEL_WORDS.unknownCount, nodeId: first, classType: prompt[first]!.class_type } }
   }
-  return { counts, sizes, keptBytes: peak.bytes + masks, keptByNode, problem: null }
+  return { counts, sizes, pictures, keptBytes: peak.bytes + masks, keptByNode, problem: null }
 }
 
 /** Generate music and its twin: the sound is its `duration` setting long (IO.Int 1–30; MusicGen makes that many seconds). */

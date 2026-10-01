@@ -322,7 +322,7 @@ describe('every picture case (the plan, run by hand)', () => {
       expect([x.provider, x.endpoint, x.media]).toEqual(['replicate', BG_REMOVE_SLUG, 'image'])
       expect(x.payload).toEqual(bgRemoveInput(String(x.payload.image)))
       expect(checkPayload(SCHEMA, x.payload), `${c.name} call ${i}`).toEqual([])
-      expect(x.usd).toBe(0.0004)
+      expect(x.usd).toBe(0.0008) // R7.11: the remover's card, raised from $0.0004 after its live check
       expect(x.backup).toBeUndefined()
     }
     expect(r.most()).toBeLessThanOrEqual(PER_NODE_IN_FLIGHT)
@@ -460,7 +460,7 @@ describe('the acceptance chains, with ComfyUI off', () => {
     const { k, take, replicate } = await kitRun(c, prompt, { hosted: true })
     expect(take.nodes.n!.status, take.nodes.n!.error ?? '').toBe('done')
     expect(replicate.submitted().length).toBe(3)
-    // Three frames' dollars added up and marked up once (USER ruling): 3 × $0.0004 = $0.0012 → 1 credit (+ render).
+    // Three frames' dollars added up and marked up once (USER ruling): 3 × $0.0008 = $0.0024 → 1 credit (+ render).
     expect(take.nodes.n!.credits).toBe(1)
     expect(charged(k)).toEqual([[2, 2]])
     expect((take.nodes.n!.values![1] as { files: unknown[] }).files.length).toBe(3)
@@ -513,7 +513,7 @@ describe('a clip, one call per frame (ruling (f))', () => {
     expect(out.kind).toBe('frames')
     expect(out.count).toBe(3)
     expect((take.nodes.n!.values![1] as { files: unknown[] }).files.length).toBe(3)
-    // Three frames' dollars added up and marked up once (USER ruling): 3 × $0.0004 = $0.0012 → 1 credit (+ render).
+    // Three frames' dollars added up and marked up once (USER ruling): 3 × $0.0008 = $0.0024 → 1 credit (+ render).
     expect(take.nodes.n!.credits).toBe(1)
     expect(charged(k)).toEqual([[2, 2]])
   })
@@ -621,19 +621,19 @@ describe('what the canvas shows covers what is held (fix round 1, Critical)', ()
     expect(upstreamPictureCount(bg, clipCanvas.nodes, clipCanvas.edges)).toBeNull()
     const secs = upstreamInputSeconds(bg, clipCanvas.nodes, clipCanvas.edges)
     expect(secs).toEqual({ seconds: { frames: LOCAL_MODEL_MAX_FRAMES.hosted, framesUpTo: 'hosted' }, upTo: true })
-    // The badge: "up to 19 cr" (300 × $0.0004 = $0.12 → 18 credits, + the render credit).
-    expect(nodeCreditEstimate(BG_REMOVE_CLASS, values, { inputSeconds: secs!.seconds, families: ON_CLIP })).toBe(19)
+    // The badge: "up to 37 cr" (300 × $0.0008 = $0.24 → 36 credits, + the render credit; R7.11's card).
+    expect(nodeCreditEstimate(BG_REMOVE_CLASS, values, { inputSeconds: secs!.seconds, families: ON_CLIP })).toBe(37)
     // The run-confirm and the cost gate (hosted): the same ceiling, marked "up to".
     const est = estimateUsdForNodes(vueNodesToEstimateInput(clipCanvas.nodes, clipCanvas.edges, ON_CLIP), { hosted: true, families: ON_CLIP })!
-    expect(est.usd).toBe(0.12)
-    expect(est.hostedCredits).toBe(19)
-    expect(est.breakdown).toEqual([{ id: 'n', label: `${BG_REMOVE_CLASS} (up to)`, usd: 0.12, upTo: true }])
-    // What the engine holds for that clip once it has counted 300 frames: the same 18 + 1, never more.
+    expect(est.usd).toBe(0.24)
+    expect(est.hostedCredits).toBe(37)
+    expect(est.breakdown).toEqual([{ id: 'n', label: `${BG_REMOVE_CLASS} (up to)`, usd: 0.24, upTo: true }])
+    // What the engine holds for that clip once it has counted 300 frames: the same 36 + 1, never more.
     const prompt: ApiPrompt = { v: { class_type: 'LoadVideoFrames', inputs: {} }, n: bgNode(caseNamed('cutout · a clip of three frames · transparent'), ['v', 0]), s: { class_type: 'SaveVideoFrames', inputs: { frames: ['n', 0] } } }
-    expect(stageEstimate(prompt, ['n'], true, ON_CLIP, { n: { seconds: { frames: 300 } } })).toBe(19)
+    expect(stageEstimate(prompt, ['n'], true, ON_CLIP, { n: { seconds: { frames: 300 } } })).toBe(37)
     // Locally (ruling (a)): this computer's cap, "up to".
     const local = estimateUsdForNodes(vueNodesToEstimateInput(clipCanvas.nodes, clipCanvas.edges, ON_CLIP), { families: ON_CLIP })!
-    expect(local.usd).toBe(0.36)
+    expect(local.usd).toBe(0.72)
     expect(local.breakdown[0]!.upTo).toBe(true)
   })
 
@@ -643,7 +643,7 @@ describe('what the canvas shows covers what is held (fix round 1, Critical)', ()
     expect(secs).toEqual({ seconds: { frames: 3 }, upTo: false })
     expect(nodeCreditEstimate(BG_REMOVE_CLASS, values, { inputSeconds: secs!.seconds, families: ON })).toBe(2)
     const est = estimateUsdForNodes(vueNodesToEstimateInput(batchCanvas.nodes, batchCanvas.edges, ON), { hosted: true, families: ON })!
-    expect(est.usd).toBe(0.0012)
+    expect(est.usd).toBe(0.0024)
     expect(est.hostedCredits).toBe(2)
     expect(est.breakdown[0]!.upTo).toBeUndefined()
     expect(estimateUsdForNodes(vueNodesToEstimateInput(batchCanvas.nodes, batchCanvas.edges, new Set(['cards'])), { hosted: true, families: new Set(['cards']) })).toBeNull()
@@ -701,7 +701,7 @@ describe('a frame that fails partway (fix round 1, Important)', () => {
     expect(byKey['cut-2']).toBe('error')
     for (const key of ['cut-3', 'cut-4', 'cut-5']) expect(byKey[key]).not.toBe('done')
     // Held 6 frames (1 credit + render); charged the 2 delivered frames, added up and marked up once: 1 credit.
-    expect(charged(k)).toEqual([[2, perFrameCredits([{ usd: 0.0004 }, { usd: 0.0004 }])]])
+    expect(charged(k)).toEqual([[2, perFrameCredits([{ usd: 0.0008 }, { usd: 0.0008 }])]])
     expect(rec.values).toBeUndefined()
   })
 })
@@ -722,7 +722,9 @@ describe('a clip\'s cut-out batch is kept to the run\'s end (fix round 1, Minor 
 
 describe('prices (R7 rule 4)', () => {
   it('the remover\'s card is R3.5\'s estimate (one live check serves both); no flat row; the price book version stands', () => {
-    expect(PAID_RATES[BG_REMOVE_SLUG]).toMatchObject({ unit: 'gpu_ceiling', usd: 0.0004, confidence: 'estimate', service: 'replicate' })
+    // R7.11: raised from $0.0004 after the live check measured 1.80 s on T4 ($0.000405).
+    expect(PAID_RATES[BG_REMOVE_SLUG]).toMatchObject({ unit: 'gpu_ceiling', usd: 0.0008, confidence: 'estimate', service: 'replicate' })
+    expect(1.80 * 0.000225).toBeLessThan(0.0008)
     expect(Object.prototype.hasOwnProperty.call(GRAPH_NODE_CREDITS, BG_REMOVE_CLASS)).toBe(false)
     expect(PAID_NODE_CLASSES).not.toContain(BG_REMOVE_CLASS)
     expect(Object.prototype.hasOwnProperty.call(FAMILY_PRICED_CLASSES, BG_REMOVE_CLASS)).toBe(false)
@@ -733,20 +735,20 @@ describe('prices (R7 rule 4)', () => {
     const inputs = { frames: ['l', 0], output: 'transparent', edge_softness: 0 }
     expect('refused' in priceNode(BG_REMOVE_CLASS, inputs)).toBe(true)
     expect('refused' in priceNode(BG_REMOVE_CLASS, inputs, { families: new Set(['bg-remove']) })).toBe(true)
-    expect(priceNode(BG_REMOVE_CLASS, inputs, { families: ON })).toEqual({ usd: 0.0004, credits: 1 })
+    expect(priceNode(BG_REMOVE_CLASS, inputs, { families: ON })).toEqual({ usd: 0.0008, credits: 1 })
     // USER ruling (fix round 1): the frames' dollars added up, marked up and rounded up to credits ONCE per node.
-    expect(priceNode(BG_REMOVE_CLASS, inputs, { families: ON, inputSeconds: { frames: 300 } })).toEqual({ usd: 0.12, credits: creditsForUsd(0.12) })
-    expect(creditsForUsd(0.12)).toBe(18)
-    expect(priceNode(BG_REMOVE_CLASS, inputs, { families: ON, inputSeconds: { frames: 3 } })).toEqual({ usd: 0.0012, credits: 1 })
-    expect((priceNode(BG_REMOVE_CLASS, inputs, { families: ON, inputSeconds: { frames: 900 } }) as { credits: number }).credits).toBe(creditsForUsd(0.36))
+    expect(priceNode(BG_REMOVE_CLASS, inputs, { families: ON, inputSeconds: { frames: 300 } })).toEqual({ usd: 0.24, credits: creditsForUsd(0.24) })
+    expect(creditsForUsd(0.24)).toBe(36)
+    expect(priceNode(BG_REMOVE_CLASS, inputs, { families: ON, inputSeconds: { frames: 3 } })).toEqual({ usd: 0.0024, credits: 1 })
+    expect((priceNode(BG_REMOVE_CLASS, inputs, { families: ON, inputSeconds: { frames: 900 } }) as { credits: number }).credits).toBe(creditsForUsd(0.72))
     // The charge: the same rule over the frames delivered (a failed or undelivered frame costs nothing).
-    expect(perFrameCredits(Array.from({ length: 100 }, () => ({ usd: 0.0004 })))).toBe(creditsForUsd(0.04))
+    expect(perFrameCredits(Array.from({ length: 100 }, () => ({ usd: 0.0008 })))).toBe(creditsForUsd(0.08))
     expect(perFrameCredits([])).toBe(0)
     expect(localModelCalls(BG_REMOVE_CLASS, 3)).toEqual({ steps: [{ call: { endpoint: BG_REMOVE_SLUG }, times: 3 }] })
     // The ComfyUI path: nothing with the family off (as before: it was free); the same calculation with it on.
     expect(priceGraph({ 1: { class_type: BG_REMOVE_CLASS, inputs } }).nodes['1']).toBeUndefined()
     expect(priceGraph({ 1: { class_type: BG_REMOVE_CLASS, inputs } }, { families: ON }).nodes['1']).toBe(1)
-    expect(priceGraph({ 1: { class_type: BG_REMOVE_CLASS, inputs } }, { families: ON, inputSeconds: { 1: { frames: 300 } } }).nodes['1']).toBe(18)
+    expect(priceGraph({ 1: { class_type: BG_REMOVE_CLASS, inputs } }, { families: ON, inputSeconds: { 1: { frames: 300 } } }).nodes['1']).toBe(36)
   })
 
   it('sends no text: nothing to moderate', () => {

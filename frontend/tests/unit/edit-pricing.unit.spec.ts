@@ -125,7 +125,8 @@ const only = (ct: string, inputs: Record<string, unknown>): EditCall => {
 // ── Rate cards ───────────────────────────────────────────────────────────
 
 /** Billed by GPU time: no published per-unit figure. */
-const ESTIMATES = ['black-forest-labs/flux-dev-lora', 'catacolabs/sdxl-ad-inpaint', 'fermatresearch/magic-image-refiner', 'fofr/style-transfer', 'lucataco/moondream2', 'philz1337x/clarity-upscaler']
+// R7.11: Real-ESRGAN too (its live check measured GPU-time billing over the old $0.002 a picture).
+const ESTIMATES = ['black-forest-labs/flux-dev-lora', 'catacolabs/sdxl-ad-inpaint', 'fermatresearch/magic-image-refiner', 'fofr/style-transfer', 'lucataco/moondream2', 'nightmareai/real-esrgan', 'philz1337x/clarity-upscaler']
 
 describe('edit rate cards', () => {
   it('every card carries a source, the date read and a confidence; only GPU-time models are estimates', () => {
@@ -136,7 +137,8 @@ describe('edit rate cards', () => {
         : /^https:\/\/(fal\.ai\/models\/.+\/llms\.txt|replicate\.com\/.+)$/)
       expect(r.source, endpoint).toContain(endpoint)
       // Moondream re-read with R3.14 fix round 1 (its page's price had halved).
-      expect(r.read, endpoint).toBe(endpoint === 'lucataco/moondream2' ? '2026-09-28' : '2026-09-24')
+      // Real-ESRGAN re-carded from R7.11's live check (2026-10-01).
+      expect(r.read, endpoint).toBe(endpoint === 'lucataco/moondream2' ? '2026-09-28' : endpoint === 'nightmareai/real-esrgan' ? '2026-10-01' : '2026-09-24')
       expect(r.service, endpoint).toBe(r.source.includes('fal.ai') ? 'fal' : 'replicate')
     }
     const est = Object.entries(EDIT_RATES).filter(([, r]) => r.confidence === 'estimate').map(([k]) => k).sort()
@@ -427,7 +429,11 @@ const EXAMPLES: [string, Record<string, unknown>, number, number, number?][] = [
   ['UpscaleImageNode', { model: 'Crystal' }, 1.60, 240], // 75.5 M px ≤ 110 M
   ['UpscaleImageNode', { model: 'Crystal' }, 0.05, 10, MP1], // 4 M px ≤ 4.4 M
   ['UpscaleImageNode', { model: 'Crystal', scale_factor: 10 }, 3.20, 480],
-  ['UpscaleImageNode', { model: 'Real-ESRGAN', scale_factor: 10 }, 0.002, 1],
+  // R7.11: Real-ESRGAN by the picture sent in, $0.003 a megapixel (at least $0.003), at most 1440p (2560 × 1440):
+  // unmeasured, the cap's 3.6864 MP; the live check's 1152² (1.33 MP), $0.00398; 1 MP, the floor.
+  ['UpscaleImageNode', { model: 'Real-ESRGAN', scale_factor: 10 }, 0.0110592, 3],
+  ['UpscaleImageNode', { model: 'Real-ESRGAN', scale_factor: 2 }, 0.003981312, 1, 1152 * 1152],
+  ['UpscaleImageNode', { model: 'Real-ESRGAN' }, 0.003, 1, MP1],
   ['UpscaleImageNode', { model: 'Recraft Crisp' }, 0.006, 2],
   ['UpscaleImageNode', { model: 'Topaz' }, 0.32, 48], // 75.5 MP ≤ 96: 4 units
   ['UpscaleImageNode', { model: 'Topaz' }, 0.08, 16, MP1],

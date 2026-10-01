@@ -358,10 +358,11 @@ function upscaleCall(engine: string, inputs: NodeInputs, px: number): EditCall |
   const slug = hasOwn(UPSCALE_ENGINE_SLUGS, engine) ? UPSCALE_ENGINE_SLUGS[engine]! : null
   if (!slug) return null
   // Clarity and Crystal enlarge by scale_factor; Topaz by its own factor;
-  // Real-ESRGAN and Recraft Crisp cost the same at any size.
+  // Recraft Crisp costs the same at any size; Real-ESRGAN by the picture sent
+  // in (R7.11: GPU time, editRates.ts).
   const factor = upscaleSideFactor(engine, inputs) ?? scaleFactor(inputs.scale_factor)
   // The input enlarged `factor` times on each side.
-  return call(slug, null, { output: px * factor * factor })
+  return call(slug, null, { input: px, output: px * factor * factor })
 }
 
 function enhanceCall(engine: string, px: number): EditCall | null {

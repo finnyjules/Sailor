@@ -25,7 +25,12 @@
  *    that comes back (each rounded up, see below);
  *  - `per_megapixel`: a published price per megapixel of the picture that
  *    comes back, at least one megapixel (Rotate camera on Qwen Image Edit
- *    2511, Task F10).
+ *    2511, Task F10);
+ *  - `per_input_megapixel`: a model billed by GPU time whose run grows with
+ *    the picture sent in (R7.11, Real-ESRGAN): a ceiling per megapixel of
+ *    that picture (its pixels / 1,000,000, not rounded: the rate carries the
+ *    margin), with a floor, the picture taken at most `maxInputPixels` (the
+ *    model's largest input). A picture of unknown size is priced at that cap.
  *
  * Megapixels: where the service does not say how it counts them, a picture is
  * its pixels / 1,000,000 ROUNDED UP (controller ruling, fail-safe).
@@ -56,6 +61,7 @@ export type EditRate =
   | (RateMeta & { unit: 'per_output_megapixel', perMegapixel: number, minUsd: number })
   | (RateMeta & { unit: 'per_run_megapixels', perRun: number, perInputMegapixel: number, perOutputMegapixel: number })
   | (RateMeta & { unit: 'per_megapixel', perMegapixel: number })
+  | (RateMeta & { unit: 'per_input_megapixel', perMegapixel: number, minUsd: number, maxInputPixels: number, note: string })
 
 /** One priced provider call: the endpoint and the settings it is billed by. */
 export interface EditCall {
@@ -194,8 +200,19 @@ export const EDIT_RATES: Record<string, EditRate> = {
     steps: [[4_400_000, 0.05], [8_800_000, 0.10], [17_600_000, 0.20], [27_500_000, 0.40], [55_000_000, 0.80], [110_000_000, 1.60], [Infinity, 3.20]],
     ...verified('replicate', rep('philz1337x/crystal-upscaler')),
   },
-  // "$0.002 per image output".
-  'nightmareai/real-esrgan': { unit: 'per_image', usd: 0.002, ...verified('replicate', rep('nightmareai/real-esrgan')) },
+  // Real-ESRGAN is billed by GPU time (R7.11 live check, 2026-10-01): its predict_time on Nvidia T4
+  // ($0.000225/s, Replicate's T4 rate, as the other T4 cards in paidRates.ts) was 12.13 s for a 1152 × 1152
+  // picture (1.33 MP in) at 2×, about $0.00273 — over the $0.002 a picture this card said (read as "$0.002
+  // per image output", marked verified, 2026-09-24). Now a ceiling per megapixel sent in: measured 9.14 s a
+  // megapixel ($0.00206); carded at $0.003 a megapixel (13.3 s, about 1.46× the measurement), at least $0.003
+  // a call (13.3 s, a small picture's start-up), the picture taken at most the page's "max recommended
+  // input image resolution is 1440p" (2560 × 1440, shared/runner/localModels.ts UPSCALE_2X_MAX_PIXELS):
+  // at most $0.0111 a call. An estimate: one measured run, at 2×, face_enhance off.
+  'nightmareai/real-esrgan': {
+    unit: 'per_input_megapixel', perMegapixel: 0.003, minUsd: 0.003, maxInputPixels: 2560 * 1440,
+    note: 'T4 at $0.000225/s; live check 2026-10-01: 12.13 s for 1152² in (1.33 MP) at 2× = $0.00273 ($0.00206/MP); ceiling $0.003/MP, at least $0.003, input capped at 1440p (2560 × 1440)',
+    ...estimate(rep('nightmareai/real-esrgan')), read: '2026-10-01',
+  },
   // "$6 per thousand output images".
   'recraft-ai/recraft-crisp-upscale': { unit: 'per_image', usd: 0.006, ...verified('replicate', rep('recraft-ai/recraft-crisp-upscale')) },
   // "$0.08 per unit"; the units by output megapixels, from the page's table:
@@ -287,6 +304,11 @@ export function editUsd(call: EditCall): number | null {
       return tidy(rate.perRun + rate.perInputMegapixel * megapixelsOf(call.inputPixels ?? 0) + rate.perOutputMegapixel * megapixelsOf(call.outputPixels ?? 0))
     case 'per_megapixel':
       return tidy(rate.perMegapixel * Math.max(1, megapixelsOf(call.outputPixels ?? 0)))
+    case 'per_input_megapixel': {
+      const sent = call.inputPixels
+      const px = typeof sent === 'number' && Number.isFinite(sent) && sent > 0 ? Math.min(sent, rate.maxInputPixels) : rate.maxInputPixels
+      return tidy(Math.max(rate.minUsd, rate.perMegapixel * px / 1e6))
+    }
   }
 }
 

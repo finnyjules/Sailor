@@ -645,21 +645,57 @@ async function submitMetered(userId: string | null, body: any, deps: GraphRunDep
     return fwd // verbatim — clients parse node_errors from this exact shape
   }
 
+  // R7.11 fix: ComfyUI dropped the outputs that failed validation (its
+  // node_errors' dependent_outputs) and executes only its good outputs and
+  // what they read. The hold stays (a ceiling, taken before ComfyUI could
+  // say); the charge on success and the plan cover only what it executes.
+  // Repriced over a part of what was priced, never above the hold.
+  let charge = price
+  let chargedPrompt = priced
+  const droppedOutputs = comfyDroppedOutputs(fwd.body?.node_errors)
+  if (droppedOutputs.length && deps.isOutputClass && body.prompt && typeof body.prompt === 'object' && !Array.isArray(body.prompt)) {
+    const part = executedPart(body.prompt as ApiPrompt, deps.isOutputClass, droppedOutputs)
+    if (Object.keys(part).length < Object.keys(priced).length) {
+      try {
+        const re = deps.priceGraph(part, inputPixels || inputSeconds || savedPoses ? { inputPixels, inputSeconds, ...(savedPoses ? { savedPoses } : {}) } : undefined)
+        if (re.credits <= price.credits) { charge = re; chargedPrompt = part }
+      }
+      catch (e) { console.error('[graphMeter] repricing without the dropped outputs failed — charging the whole price', { promptId, error: e }) }
+    }
+  }
+
   // Finding 3: the money path must not depend on the ownership-row insert.
   // ComfyUI already queued this run — if createGraphRun throws (Neon
   // transient), settlement still has to run or the hold sits open until the
   // 2h sweep while the client also gets a spurious 500 for a run that WILL
   // execute (inviting a double-spend resubmit). Log and keep going.
   try {
-    await deps.registerRun({ promptId, userId, credits: price.credits, holdId })
+    await deps.registerRun({ promptId, userId, credits: charge.credits, holdId })
   } catch (e) {
     console.error('[graphMeter] registerRun failed — run will settle but ownership row is missing', { promptId, userId, holdId, error: e })
   }
   run.handedOff = true
-  // Task G2: the per-node figures the hold is the sum of, kept for an error settle.
-  const plan = price.nodes ? chargePlanOf(priced, price.nodes, price.base ?? 0) : undefined
-  deps.startSettle({ promptId, holdId, credits: price.credits, ...(plan ? { plan } : {}) })
+  // Task G2: the per-node figures the charge is the sum of, kept for an error settle.
+  const plan = charge.nodes ? chargePlanOf(chargedPrompt, charge.nodes, charge.base ?? 0) : undefined
+  deps.startSettle({ promptId, holdId, credits: charge.credits, ...(plan ? { plan } : {}) })
   return fwd
+}
+
+/**
+ * The outputs ComfyUI's validate_prompt dropped, from a queued prompt's
+ * node_errors (R7.11 fix): every dropped output is some erroring node's
+ * dependent output (execution.py appends each failed output to every
+ * validated node with errors of its own). Anything malformed reads as none.
+ */
+export function comfyDroppedOutputs(nodeErrors: unknown): string[] {
+  if (!nodeErrors || typeof nodeErrors !== 'object' || Array.isArray(nodeErrors)) return []
+  const out = new Set<string>()
+  for (const e of Object.values(nodeErrors as Record<string, unknown>)) {
+    const deps = e && typeof e === 'object' ? (e as { dependent_outputs?: unknown }).dependent_outputs : undefined
+    if (!Array.isArray(deps)) continue
+    for (const o of deps) if (typeof o === 'string' || typeof o === 'number') out.add(String(o))
+  }
+  return [...out]
 }
 
 /**

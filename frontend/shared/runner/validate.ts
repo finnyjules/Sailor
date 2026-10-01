@@ -222,10 +222,16 @@ export function readByOutputs(prompt: ApiPrompt, outputs: Iterable<string>): Set
  * node reads. A prompt with no output node is returned as it is (ComfyUI
  * refuses it before running anything), and so is one whose every node is
  * read. The hosted ComfyUI path prices and holds this (R3.8 fix round 2).
+ *
+ * `dropped` (R7.11 fix): outputs ComfyUI's validate_prompt dropped (its
+ * node_errors' dependent_outputs). They are not run, so neither is what only
+ * they read: left out, as Python executes only its good outputs. Dropping
+ * every output leaves the prompt as it is (ComfyUI refuses that prompt).
  */
-export function executedPart(prompt: ApiPrompt, isOutput: (classType: string) => boolean): ApiPrompt {
+export function executedPart(prompt: ApiPrompt, isOutput: (classType: string) => boolean, dropped: Iterable<string> = []): ApiPrompt {
   const ids = Object.keys(prompt)
-  const outputs = ids.filter(id => isOutput(prompt[id]!.class_type))
+  const gone = new Set([...dropped].map(String))
+  const outputs = ids.filter(id => isOutput(prompt[id]!.class_type) && !gone.has(id))
   if (!outputs.length) return prompt
   const keep = readByOutputs(prompt, outputs)
   if (keep.size === ids.length) return prompt

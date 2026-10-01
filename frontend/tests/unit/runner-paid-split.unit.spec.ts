@@ -671,13 +671,14 @@ describe('resumed after a restart', () => {
 describe('prices (ruling (a))', () => {
   it('the fill engines\' cards, read from their pages; the cut-out is Remove background\'s card; none duplicates another card', () => {
     expect(PAID_RATES[LAMA]).toEqual({
-      unit: 'gpu_ceiling', usd: 0.0007, note: 'T4 at $0.000225/s; page: approximately $0.00068 to run (read 2026-09-27), rounded up to the next $0.0001',
-      service: 'replicate', source: 'https://replicate.com/zylim0702/remove-object', read: '2026-09-27', confidence: 'estimate',
+      // R7.11: raised from $0.0007 after the live check measured 3.14–3.20 s on T4 at 1152² ($0.00072).
+      unit: 'gpu_ceiling', usd: 0.0015, note: 'T4 at $0.000225/s; page: approximately $0.00068 to run (read 2026-09-27); live check 2026-10-01: 3.14–3.20 s at 1152² = $0.00072; ceiling 6.7 s (about 2.1× measured)',
+      service: 'replicate', source: 'https://replicate.com/zylim0702/remove-object', read: '2026-10-01', confidence: 'estimate',
     })
     expect(PAID_RATES[BRIA]).toEqual({
       unit: 'per_call', usd: 0.04, service: 'replicate', source: 'https://replicate.com/bria/eraser', read: '2026-09-27', confidence: 'verified',
     })
-    expect(PAID_RATES[SPLIT_CUTOUT_SLUG]).toMatchObject({ unit: 'gpu_ceiling', usd: 0.0004, confidence: 'estimate' })
+    expect(PAID_RATES[SPLIT_CUTOUT_SLUG]).toMatchObject({ unit: 'gpu_ceiling', usd: 0.0008, confidence: 'estimate' })
     for (const e of [LAMA, BRIA]) expect(otherCardFor(e), e).toBeNull()
   })
 
@@ -688,7 +689,7 @@ describe('prices (ruling (a))', () => {
   })
 
   it('the hold is the cut-out and the fill, each call\'s own credits: LaMa 1 + 1, Bria Eraser 1 + 8; a wired, missing or unknown engine at the dearer', () => {
-    expect([callCredits({ usd: 0.0004 }), callCredits({ usd: 0.0007 }), callCredits({ usd: 0.04 })]).toEqual([1, 1, 8])
+    expect([callCredits({ usd: 0.0008 }), callCredits({ usd: 0.0015 }), callCredits({ usd: 0.04 })]).toEqual([1, 1, 8])
     const img = { image: ['p', 0], mask_grow: 12 }
     const want: [Record<string, unknown>, number][] = [
       [{ background_fill: 'LaMa (fast)' }, 2],

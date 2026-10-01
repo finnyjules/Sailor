@@ -71,7 +71,7 @@ export const OBJECT_REMOVE_CLASS = 'ObjectRemove'
 /**
  * Replicate's LaMa (USER ruling (c)): the model this node runs today, the
  * fill R3.7's Separate background and foreground already calls ('LaMa
- * (fast)'), its card in paidRates.ts ($0.0007, an estimate until measured).
+ * (fast)'), its card in paidRates.ts ($0.0015 since R7.11's live check, an estimate).
  */
 export const OBJECT_REMOVE_SLUG = PHOTO_FILL_SLUGS['LaMa (fast)']
 /** `mask_grow`: IO.Int.Input(default=4, min=0, max=64, step=1). */
@@ -406,8 +406,8 @@ export const LOCAL_MODEL_MAX_PIXELS: Readonly<Record<string, number>> = {
 
 /**
  * The most frames one picture node works through, one call each (ruling
- * (f)): hosted 300 (10 s at 30 fps; 300 × $0.0004 = $0.12 at the remover's
- * card, held and charged as 18 credits: the frames' dollars added up and
+ * (f)): hosted 300 (10 s at 30 fps; 300 × $0.0008 = $0.24 at the remover's
+ * card since R7.11, held and charged as 36 credits: the frames' dollars added up and
  * marked up once, nodePrice.ts localModelPrice), locally 900 (30 s). A clip over the cap is left to the engine before the run
  * (server/runner/localModelStart.ts) — a stop-gap named in R7.1's report.
  */
@@ -646,13 +646,14 @@ export function localModelSwitchedClasses(): Record<string, RunnerFamily> {
 
 /**
  * The endpoint each per-picture class calls once per picture or frame. Upscale
- * (2×)'s is R3.5's Real-ESRGAN card (editRates.ts, `per_image` $0.002, verified):
- * a flat price per output picture, whatever its size.
+ * (2×)'s is R3.5's Real-ESRGAN card (editRates.ts): since R7.11's live check a
+ * ceiling per megapixel of the picture sent (GPU time), the picture measured
+ * at the start of the run (`picturePixels`), else the service's largest.
  */
 const LOCAL_MODEL_SLUG: Readonly<Record<string, string>> = {
   [BG_REMOVE_CLASS]: BG_REMOVE_SLUG,
   [UPSCALE_2X_CLASS]: UPSCALE_2X_SLUG,
-  // R7.3: LaMa's card (paidRates.ts, `gpu_ceiling` $0.0007, an estimate), shared with R3.7's fill.
+  // R7.3: LaMa's card (paidRates.ts, `gpu_ceiling` $0.0015 since R7.11, an estimate), shared with R3.7's fill.
   [OBJECT_REMOVE_CLASS]: OBJECT_REMOVE_SLUG,
   // R7.4: SAM 3's card (paidRates.ts, `per_call` $0.005, verified): one call per node.
   [MASK_BY_TEXT_CLASS]: SAM_3_SLUG,
@@ -676,7 +677,18 @@ export function localModelCalls(classType: string, frames: number | null | undef
   if (!endpoint) return { refused: `${classType} has no price yet` }
   // A SAM 3 mask class reads the first picture only: one call, however many came in.
   const times = perPictureClass(classType) && typeof frames === 'number' && Number.isFinite(frames) ? Math.max(1, Math.trunc(frames)) : 1
+  // R7.11: Upscale (2×) is priced by the picture it sends (the largest the start of the run measured; else the service's largest).
+  if (classType === UPSCALE_2X_CLASS) return { steps: [{ call: { endpoint, inputPixels: upscale2xPricedPixels(seconds?.picturePixels) }, times }] }
   return { steps: [{ call: { endpoint }, times }] }
+}
+
+/**
+ * R7.11: the pixels Upscale (2×)'s price takes for each picture it sends: the
+ * measured picture (at most the service's largest, which the start of the run
+ * refuses past), else that largest.
+ */
+export function upscale2xPricedPixels(measured: number | null | undefined): number {
+  return typeof measured === 'number' && Number.isFinite(measured) && measured > 0 ? Math.min(measured, UPSCALE_2X_MAX_PIXELS) : UPSCALE_2X_MAX_PIXELS
 }
 
 /** What Slow motion (AI)'s and Whisper transcribe's prices read of the media (clipSettings.ts InputSeconds' fields). */
@@ -691,6 +703,8 @@ export interface SlowMotionAiMeasured {
   framesUpTo?: 'hosted' | 'local' | null
   /** Where a measured clip runs (fix round 2: locally, a frame past 4K isn't sent to RIFE). */
   place?: 'hosted' | 'local' | null
+  /** R7.11: the largest picture (pixels) Upscale (2×) sends, measured at the start of the run. */
+  picturePixels?: number | null
 }
 
 /**

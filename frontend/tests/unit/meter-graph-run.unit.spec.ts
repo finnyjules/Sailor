@@ -527,6 +527,45 @@ describe('meterGraphSubmit — only what an output reads is priced and held', ()
     expect(Object.keys(d.forward.mock.calls[0]![0].prompt).sort()).toEqual(['e', 'g', 'i'])
   })
 
+  // R7.11 fix: an output ComfyUI drops for failing validation never runs, nor what only it reads.
+  const gen2 = { ...gen, inputs: { ...gen.inputs, prompt: 'a cat' } }
+  const badSave = { class_type: 'SaveImage', inputs: { images: ['g2', 0] } } // its required widgets missing
+  const dropsSave = (s: string) => vi.fn(async () => ({ status: 200, body: { prompt_id: 'p1', number: 1, node_errors: { [s]: { errors: [{ type: 'required_input_missing' }], dependent_outputs: [s], class_type: 'SaveImage' } } } }))
+
+  it('R7.11: a generator read only by an output ComfyUI dropped is held (the ceiling, before ComfyUI says) but never charged', async () => {
+    const d = deps({ priceGraph: realPriceGraph, isOutputClass: outputClassesOf(CATALOG), forward: dropsSave('s') })
+    const prompt = { g: gen, i: card, g2: gen2, s: badSave }
+    const r = await meterGraphSubmit('u1', { prompt, client_id: 'c1' }, d)
+    expect(r.status).toBe(200)
+    expect(r.body.node_errors).toHaveProperty('s') // ComfyUI's body, verbatim
+    const whole = realPriceGraph(prompt).credits
+    const alone = realPriceGraph({ g: gen, i: card }).credits
+    expect(whole).toBeGreaterThan(alone)
+    expect(d.hold).toHaveBeenCalledWith('u1', whole)
+    const settle = d.startSettle.mock.calls[0]![0]
+    expect(settle).toMatchObject({ holdId: 7, credits: alone })
+    expect(Object.keys(settle.plan.nodes)).not.toContain('g2')
+    expect(settle.plan.outputReads).toEqual({ i: ['g', 'i'] })
+    expect((d.registerRun.mock.calls[0] as unknown[])[0]).toMatchObject({ credits: alone })
+  })
+
+  it('R7.11: no node_errors (every output valid): charged exactly as held, as before', async () => {
+    const d = deps({ priceGraph: realPriceGraph, isOutputClass: outputClassesOf(CATALOG) })
+    const prompt = { g: gen, i: card, g2: gen2, s: { ...badSave, inputs: { ...badSave.inputs, filename_prefix: 'x' } } }
+    await meterGraphSubmit('u1', { prompt, client_id: 'c1' }, d)
+    const whole = realPriceGraph(prompt).credits
+    expect(d.hold).toHaveBeenCalledWith('u1', whole)
+    expect(d.startSettle.mock.calls[0]![0]).toMatchObject({ credits: whole })
+  })
+
+  it('R7.11: the dropped outputs read from node_errors; malformed reads as none', async () => {
+    const { comfyDroppedOutputs } = await import('../../server/utils/meterGraphRun')
+    expect(comfyDroppedOutputs({ 3: { dependent_outputs: ['3', '5'] }, 4: { dependent_outputs: [5] } }).sort()).toEqual(['3', '5'])
+    expect(comfyDroppedOutputs(undefined)).toEqual([])
+    expect(comfyDroppedOutputs([])).toEqual([])
+    expect(comfyDroppedOutputs({ 1: null, 2: { dependent_outputs: 'x' } })).toEqual([])
+  })
+
   it('without the catalog the whole prompt is priced, as before', async () => {
     const d = deps({ priceGraph: realPriceGraph })
     await meterGraphSubmit('u1', { prompt: { g: gen, i: card, e: dangling }, client_id: 'c1' }, d)

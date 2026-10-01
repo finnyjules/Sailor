@@ -34,6 +34,7 @@ import {
   UPSCALE_2X_WORDS, localModelCalls, serviceTooltip,
 } from '#shared/runner/localModels'
 import { EDIT_RATES } from '#shared/pricing/editRates'
+import { paidCallUsd } from '#shared/pricing/paidRates'
 import { FAMILY_PRICED_CLASSES, perFrameCredits, priceNode } from '#shared/pricing/nodePrice'
 import { creditsForUsd } from '#shared/pricing/markup'
 import { PAID_NODE_CLASSES } from '#shared/pricing/paidSettings'
@@ -143,7 +144,8 @@ describe('a picture (the plan, run by hand)', () => {
     const made = await r.run()
     expect(r.calls.length).toBe(1)
     const x = r.calls[0]!
-    expect([x.key, x.provider, x.endpoint, x.media, x.usd, x.backup]).toEqual(['up-0', 'replicate', UPSCALE_2X_SLUG, 'image', 0.002, undefined])
+    // R7.11: each call at its own picture's size: 0.19 MP sent, the card's $0.003 floor.
+    expect([x.key, x.provider, x.endpoint, x.media, x.usd, x.backup]).toEqual(['up-0', 'replicate', UPSCALE_2X_SLUG, 'image', 0.003, undefined])
     expect(x.payload).toEqual(upscale2xInput('https://fal.storage/p0.png'))
     expect(checkPayload(SCHEMA, x.payload)).toEqual([])
     const out = made.values[0] as Extract<RunnerValue, { kind: 'files' }>
@@ -354,23 +356,31 @@ describe('a clip, one call per frame (ruling (f))', () => {
 // ── Prices, families, tooltip ───────────────────────────────────────────────
 
 describe('prices (R7 rule 4)', () => {
-  it('R3.5\'s Real-ESRGAN card (per output picture, $0.002, verified); no flat row', () => {
-    expect(EDIT_RATES[UPSCALE_2X_SLUG]).toMatchObject({ unit: 'per_image', usd: 0.002, confidence: 'verified', service: 'replicate' })
+  it('R3.5\'s Real-ESRGAN card, re-carded by R7.11\'s live check (GPU time: $0.003 a megapixel sent, at least $0.003, at most 1440p in; an estimate); no flat row', () => {
+    expect(EDIT_RATES[UPSCALE_2X_SLUG]).toMatchObject({ unit: 'per_input_megapixel', perMegapixel: 0.003, minUsd: 0.003, maxInputPixels: UPSCALE_2X_MAX_PIXELS, confidence: 'estimate', service: 'replicate' })
+    // The live check's run: 12.13 s on T4 ($0.000225/s) for 1152² in, $0.00273 — under the card's $0.00398 for it.
+    expect(12.13 * 0.000225).toBeLessThan(paidCallUsd({ endpoint: UPSCALE_2X_SLUG, inputPixels: 1152 * 1152 })!)
     expect(Object.prototype.hasOwnProperty.call(GRAPH_NODE_CREDITS, UPSCALE_2X_CLASS)).toBe(false)
     expect(PAID_NODE_CLASSES).not.toContain(UPSCALE_2X_CLASS)
     expect(Object.prototype.hasOwnProperty.call(FAMILY_PRICED_CLASSES, UPSCALE_2X_CLASS)).toBe(false)
   })
 
-  it('priced only while its family is on: frames × $0.002, marked up once; one picture when nothing was counted', () => {
+  it('priced only while its family is on: frames × the picture\'s price (measured at the start, else 1440p), marked up once; one picture when nothing was counted', () => {
     const inputs = { frames: ['l', 0], tile_size: 512 }
+    const CAP_USD = 0.0110592 // 2560 × 1440 = 3.6864 MP × $0.003
     expect('refused' in priceNode(UPSCALE_2X_CLASS, inputs)).toBe(true)
     expect('refused' in priceNode(UPSCALE_2X_CLASS, inputs, { families: new Set(['upscale-2x']) })).toBe(true)
-    expect(priceNode(UPSCALE_2X_CLASS, inputs, { families: ON })).toEqual({ usd: 0.002, credits: creditsForUsd(0.002) })
-    expect(priceNode(UPSCALE_2X_CLASS, inputs, { families: ON, inputSeconds: { frames: 300 } })).toEqual({ usd: 0.6, credits: creditsForUsd(0.6) })
-    expect(perFrameCredits(Array.from({ length: 3 }, () => ({ usd: 0.002 })))).toBe(creditsForUsd(0.006))
-    expect(localModelCalls(UPSCALE_2X_CLASS, 3)).toEqual({ steps: [{ call: { endpoint: UPSCALE_2X_SLUG }, times: 3 }] })
+    expect(priceNode(UPSCALE_2X_CLASS, inputs, { families: ON })).toEqual({ usd: CAP_USD, credits: creditsForUsd(CAP_USD) })
+    expect(priceNode(UPSCALE_2X_CLASS, inputs, { families: ON, inputSeconds: { frames: 300 } })).toEqual({ usd: 3.31776, credits: creditsForUsd(3.31776) })
+    // Measured at the start of the run (R7.11): the live check's 1152² picture, three of them.
+    expect(priceNode(UPSCALE_2X_CLASS, inputs, { families: ON, inputSeconds: { frames: 3, picturePixels: 1152 * 1152 } })).toEqual({ usd: 0.01194393, credits: 3 })
+    expect(priceNode(UPSCALE_2X_CLASS, inputs, { families: ON, inputSeconds: { picturePixels: 500 * 375 } })).toEqual({ usd: 0.003, credits: 1 })
+    // Never above the service's largest picture.
+    expect(priceNode(UPSCALE_2X_CLASS, inputs, { families: ON, inputSeconds: { picturePixels: 4096 * 4096 } })).toEqual({ usd: CAP_USD, credits: creditsForUsd(CAP_USD) })
+    expect(perFrameCredits(Array.from({ length: 3 }, () => ({ usd: 0.003 })))).toBe(creditsForUsd(0.009))
+    expect(localModelCalls(UPSCALE_2X_CLASS, 3)).toEqual({ steps: [{ call: { endpoint: UPSCALE_2X_SLUG, inputPixels: UPSCALE_2X_MAX_PIXELS }, times: 3 }] })
     expect(priceGraph({ 1: { class_type: UPSCALE_2X_CLASS, inputs } }).nodes['1']).toBeUndefined()
-    expect(priceGraph({ 1: { class_type: UPSCALE_2X_CLASS, inputs } }, { families: ON }).nodes['1']).toBe(creditsForUsd(0.002))
+    expect(priceGraph({ 1: { class_type: UPSCALE_2X_CLASS, inputs } }, { families: ON }).nodes['1']).toBe(creditsForUsd(CAP_USD))
   })
 
   it('sends no text; the tooltip names the service while the family is on; its route has no backup', () => {
