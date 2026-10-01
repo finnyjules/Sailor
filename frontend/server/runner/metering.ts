@@ -24,7 +24,9 @@ import { withStaticSpeechText } from '#shared/runner/audioGen'
 import { isLink } from '#shared/runner/graph'
 import { picturePixels } from '../utils/graphInputPixels'
 import { NO_FAMILIES, type RunnerFamily } from '#shared/runner/families'
-import type { InputSeconds } from '#shared/pricing/clipSettings'
+import { secondsPricedMedia, type InputSeconds } from '#shared/pricing/clipSettings'
+import { priceNode } from '#shared/pricing/nodePrice'
+import { usdChargedAtCost } from '#shared/pricing/markup'
 import { gen3dTextSent } from '#shared/runner/gen3d'
 
 /**
@@ -226,9 +228,31 @@ export function hasOutputNode(prompt: ApiPrompt): boolean {
  */
 export function stageEstimate(
   prompt: ApiPrompt, nodeIds: Iterable<string>, includeBase: boolean, families: ReadonlySet<RunnerFamily> = NO_FAMILIES,
-  measured?: Readonly<Record<string, { seconds: InputSeconds; pixels?: number; savedPose?: true }>>,
+  measured?: Readonly<Record<string, StageMeasured>>,
 ): number {
+  return stageEstimateParts(prompt, nodeIds, includeBase, families, measured).credits
+}
+
+/** What the start of the run measured about one node (TakeRecord.measured), as the hold reads it. */
+type StageMeasured = { seconds: InputSeconds; pixels?: number; savedPose?: true; predicted?: true }
+
+/**
+ * The hold for one stage (stageEstimate's figure, `credits`) with what the
+ * price shown before a run needs besides (R8.0, the quote): `usd`, the
+ * provider dollars those credits stand for (each paid node's own price basis,
+ * as its badge shows it; the render credit is not provider spend), and
+ * `upTo`, true when a node is held on a bound rather than a measurement (a
+ * sound's header bound, a predicted picture size, a size-priced node whose
+ * picture isn't read, the longest sound where it runs), so the run may cost
+ * less. One loop: the quote can't price a node the hold doesn't.
+ */
+export function stageEstimateParts(
+  prompt: ApiPrompt, nodeIds: Iterable<string>, includeBase: boolean, families: ReadonlySet<RunnerFamily> = NO_FAMILIES,
+  measured?: Readonly<Record<string, StageMeasured>>,
+): { credits: number; usd: number; upTo: boolean } {
   let total = 0
+  let usd = 0
+  let upTo = false
   let renders = false
   // A speech text a card decides before the run is priced at its length (R3.8 fix round 1).
   const priced = withStaticSpeechText(prompt)
@@ -242,10 +266,40 @@ export function stageEstimate(
       // A Pose Mannequin whose saved pose the start of the run read and found loading makes no call (R3.15 fix round 1).
       if (actionPassThrough(n.class_type, n.inputs ?? {}) || paidNoCall(n.class_type, n.inputs ?? {}, { savedPoseLoads: m?.savedPose === true })) continue
       // An Upscale or Enhance detail sized at the start (R3.5): priced on that picture, else the cap.
-      total += nodeCredits(n, m?.pixels, families, m?.seconds)
+      const credits = nodeCredits(n, m?.pixels, families, m?.seconds)
+      total += credits
+      if (credits > 0) {
+        usd += nodeShownUsd(n, credits, m?.pixels, families, m?.seconds)
+        if (heldOnBound(n, m, families)) upTo = true
+      }
     }
   }
-  return includeBase && (total > 0 || renders) ? total + BASE_RENDER_CREDITS : total
+  const credits = includeBase && (total > 0 || renders) ? total + BASE_RENDER_CREDITS : total
+  return { credits, usd: Math.round(usd * 1e8) / 1e8, upTo }
+}
+
+/**
+ * The provider dollars a paid node's held credits stand for: its own price
+ * basis (priceNode's `usd`, what its badge shows) where that price is the
+ * credits held, else the basis whose markup is exactly those credits
+ * (usdChargedAtCost, as shownUsd does), so the dollars shown never stand for
+ * less than the hold.
+ */
+function nodeShownUsd(node: ApiNode, credits: number, inputPixels: number | undefined, families: ReadonlySet<RunnerFamily>, inputSeconds: InputSeconds | undefined): number {
+  const p = priceNode(node.class_type, node.inputs ?? {}, { inputPixels, inputSeconds, families })
+  if (!('refused' in p) && p.credits === credits && p.usd > 0) return p.usd
+  return usdChargedAtCost(credits / 100)
+}
+
+/** A paid node held on a bound or a cap rather than on what was measured (stageEstimateParts' `upTo`). */
+function heldOnBound(node: ApiNode, m: StageMeasured | undefined, families: ReadonlySet<RunnerFamily>): boolean {
+  const inputs = node.inputs ?? {}
+  const s = m?.seconds
+  if (m?.predicted || s?.audioUpTo != null || s?.framesUpTo) return true
+  if (sizePricedInput(node.class_type, inputs, families) !== null && !m?.pixels) return true
+  if (secondsPricedMedia(node.class_type, inputs) !== null && s?.audio == null) return true
+  // A sound node held on the longest sound where it runs (no measurement, no bound: R7.7).
+  return !!s?.place && s.audio == null && s.audioUpTo == null && s.frames == null && s.videoWidth == null && s.picturePixels == null
 }
 
 export interface LedgerPort {

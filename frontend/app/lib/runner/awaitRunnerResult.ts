@@ -31,15 +31,27 @@ export function buildFaceSwapPrompt(a: { face: string, target: string, gender: s
 }
 
 type Target = Pick<Window, 'addEventListener' | 'removeEventListener'>
+type Envelope = Record<string, any>
 
-export function awaitRunnerImage(promptId: string | Promise<string>, opts: { timeoutMs?: number, target?: Target } = {}): Promise<RunnerImage> {
+/** What a run's listener does with each of its own envelopes: settle the wait, or keep waiting. */
+interface Watch<T> {
+  onEvent(d: Envelope, resolve: (v: T) => void, reject: (e: Error) => void): void
+  slowWords: string
+}
+
+/**
+ * The shared wait (R8.0): a window listener attached at once (before
+ * `promptId`, even a settled promise, can resolve), every sailor-bridge
+ * envelope buffered until the id is known, then replayed against it, and live
+ * envelopes matched the same way. The timeout starts at call time; an id that
+ * fails rejects with its own error. The listener always goes when it settles.
+ */
+function watchRun<T>(promptId: string | Promise<string>, watch: Watch<T>, opts: { timeoutMs?: number, target?: Target }): Promise<T> {
   const target = opts.target ?? window
-  return new Promise((resolve, reject) => {
-    let picture: RunnerImage | null = null
+  return new Promise<T>((resolve, reject) => {
     let resolvedId: string | null = null
     let finished = false
-    // Envelopes seen before the id is known — replayed once it resolves.
-    const buffer: Record<string, any>[] = []
+    const buffer: Envelope[] = []
 
     const finish = (fn: () => void) => {
       if (finished) return
@@ -48,32 +60,22 @@ export function awaitRunnerImage(promptId: string | Promise<string>, opts: { tim
       target.removeEventListener('message', onMessage as EventListener)
       fn()
     }
+    const done = (v: T) => finish(() => resolve(v))
+    const fail = (e: Error) => finish(() => reject(e))
 
-    const process = (d: Record<string, any>) => {
+    const process = (d: Envelope) => {
       if (finished || resolvedId === null || d.prompt_id !== resolvedId) return
-      if (d.event === 'executed') {
-        const img = d.output?.images?.[0]
-        if (img?.filename) { picture = { filename: img.filename, subfolder: img.subfolder ?? '', type: img.type ?? 'output' }; finish(() => resolve(picture!)) }
-      } else if (d.event === 'execution_error') {
-        finish(() => reject(new Error(d.exception_message || 'The swap failed.')))
-      } else if (d.event === 'execution_complete') {
-        finish(() => picture ? resolve(picture) : reject(new Error('The swap finished but made no picture.')))
-      }
+      watch.onEvent(d, done, fail)
     }
 
     const onMessage = (e: MessageEvent) => {
-      const d = e.data as Record<string, any> | null
+      const d = e.data as Envelope | null
       if (!d || d.type !== 'sailor-bridge') return
       if (resolvedId === null) { buffer.push(d); return }
       process(d)
     }
 
-    // The timeout starts at call time, same as before — an id that never
-    // resolves (or resolves too late) still gives up after opts.timeoutMs.
-    const timer = setTimeout(() => finish(() => reject(new Error('The swap took too long. Try again.'))), opts.timeoutMs ?? 5 * 60_000)
-    // Attached synchronously, before `promptId` (even an already-settled
-    // promise) can resolve — nothing posted between call time and id
-    // resolution is missed.
+    const timer = setTimeout(() => fail(new Error(watch.slowWords)), opts.timeoutMs ?? 5 * 60_000)
     target.addEventListener('message', onMessage as EventListener)
 
     Promise.resolve(promptId).then(
@@ -85,9 +87,103 @@ export function awaitRunnerImage(promptId: string | Promise<string>, opts: { tim
           process(d)
         }
       },
-      (err) => {
-        finish(() => reject(err instanceof Error ? err : new Error(String(err))))
-      },
+      (err) => fail(err instanceof Error ? err : new Error(String(err))),
     )
   })
+}
+
+/** Face swap's wait: the first picture its run shows. */
+export function awaitRunnerImage(promptId: string | Promise<string>, opts: { timeoutMs?: number, target?: Target } = {}): Promise<RunnerImage> {
+  let picture: RunnerImage | null = null
+  return watchRun<RunnerImage>(promptId, {
+    slowWords: 'The swap took too long. Try again.',
+    onEvent(d, resolve, reject) {
+      if (d.event === 'executed') {
+        const img = d.output?.images?.[0]
+        if (img?.filename) { picture = { filename: img.filename, subfolder: img.subfolder ?? '', type: img.type ?? 'output' }; resolve(picture) }
+      } else if (d.event === 'execution_error') {
+        reject(new Error(d.exception_message || 'The swap failed.'))
+      } else if (d.event === 'execution_complete') {
+        if (picture) resolve(picture)
+        else reject(new Error('The swap finished but made no picture.'))
+      }
+    },
+  }, opts)
+}
+
+/** One node's files from its `executed` output (its ui), sorted by kind, with the ui itself. */
+export interface RunnerNodeOutput {
+  images: RunnerImage[]
+  audio: RunnerImage[]
+  videos: RunnerImage[]
+  ui: Record<string, unknown>
+}
+
+/** A run Stop ended (execution_complete with `stopped`). */
+export class AppRunStopped extends Error {
+  constructor() { super('Stopped.'); this.name = 'AppRunStopped' }
+}
+
+const VIDEO_NAME = /\.(mp4|webm|mov|mkv|m4v|gif)$/i
+
+function fileOf(f: any): RunnerImage | null {
+  return f && typeof f.filename === 'string' && f.filename ? { filename: f.filename, subfolder: f.subfolder ?? '', type: f.type ?? 'output' } : null
+}
+
+/**
+ * A node's ui as files: `images` (a picture; Save video's video is an
+ * animated entry there, R5.4, sorted to `videos` by its `animated` flag or
+ * name), `audio`, and the video keys (`gifs`, `video`, `videos`).
+ */
+export function nodeOutputOf(ui: unknown): RunnerNodeOutput {
+  const u = (ui && typeof ui === 'object' ? ui : {}) as Record<string, any>
+  const out: RunnerNodeOutput = { images: [], audio: [], videos: [], ui: u }
+  const list = (v: unknown): any[] => (Array.isArray(v) ? v : v ? [v] : [])
+  const animated = list(u.animated)
+  list(u.images).forEach((f, i) => {
+    const file = fileOf(f)
+    if (!file) return
+    if (animated[i] === true || (animated.length === 1 && animated[0] === true) || VIDEO_NAME.test(file.filename)) out.videos.push(file)
+    else out.images.push(file)
+  })
+  for (const f of list(u.audio)) { const file = fileOf(f); if (file) out.audio.push(file) }
+  for (const key of ['gifs', 'video', 'videos']) for (const f of list(u[key])) { const file = fileOf(f); if (file) out.videos.push(file) }
+  return out
+}
+
+export interface AwaitOutputsOptions {
+  timeoutMs?: number
+  target?: Target
+  /** The app's own words for a failure with none of its own, a run that made nothing, and one that took too long. */
+  words?: { failed?: string, empty?: string, slow?: string }
+}
+
+/**
+ * A mini app's wait for its run (R8.0): each listed node's `executed` output,
+ * by node id. Resolves once every listed node has shown its output; rejects
+ * on the run's error (its own words), on a run that finished without one of
+ * them, on Stop (AppRunStopped) and on the timeout. Early events are kept, as
+ * awaitRunnerImage keeps them.
+ */
+export function awaitRunnerOutputs(promptId: string | Promise<string>, nodeIds: readonly string[], opts: AwaitOutputsOptions = {}): Promise<Record<string, RunnerNodeOutput>> {
+  const want = new Set(nodeIds.map(String))
+  const got: Record<string, RunnerNodeOutput> = {}
+  const complete = () => [...want].every(id => Object.prototype.hasOwnProperty.call(got, id))
+  return watchRun(promptId, {
+    slowWords: opts.words?.slow ?? 'This took too long. Try again.',
+    onEvent(d, resolve, reject) {
+      if (d.event === 'executed') {
+        const id = String(d.node_id ?? d.node ?? '')
+        if (!want.has(id)) return
+        got[id] = nodeOutputOf(d.output)
+        if (complete()) resolve(got)
+      } else if (d.event === 'execution_error') {
+        reject(new Error(d.exception_message || opts.words?.failed || 'This didn’t work. Try again.'))
+      } else if (d.event === 'execution_complete') {
+        if (d.stopped === true) reject(new AppRunStopped())
+        else if (complete()) resolve(got)
+        else reject(new Error(opts.words?.empty ?? 'This finished but made nothing.'))
+      }
+    },
+  }, opts)
 }

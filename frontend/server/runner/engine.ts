@@ -53,7 +53,7 @@ import { sha256Hex } from './handoff'
 import { handoffRefusal } from './pictures/handoffView'
 import { effectOutRefusal } from './effects/plan'
 import { PICTURE_ANIMATED, pictureHasFrames, pictureMeta, pictureRefusal } from './pictures/pythonView'
-import { extraPromptText, hasOutputNode, measuredInput, nodeCredits, stageEstimate, unpricedProviderNode, type Metering } from './metering'
+import { extraPromptText, hasOutputNode, measuredInput, nodeCredits, stageEstimateParts, unpricedProviderNode, type Metering } from './metering'
 import { poseStartProblem } from './generators/nanoExtras'
 import { loadAudioStartProblems, soundStreamProblem } from './media/soundNodes'
 import { loadVideoStartProblems, videoFileVerdict } from './media/videoNodes'
@@ -244,6 +244,8 @@ export interface LegStarted {
   /** ComfyUI's node_errors for outputs dropped because they fail validation (present only then). */
   nodeErrors?: Record<string, ComfyNodeError>
 }
+/** A run's price before it starts (quoteRun): the credits it holds, the provider dollars they stand for, and whether a node is held on a bound. */
+export interface RunQuote { usd: number; credits: number; upTo: boolean }
 export type GateActionName = 'continue' | 'redo' | 'restart'
 export interface GateActionInput { userId: string | null; runId: string; gateId: string; action: GateActionName; takes?: number[] }
 export interface PausedGate { runId: string; promptId: string; nodeId: string; choices: GateChoice[]; picked: number[] }
@@ -892,12 +894,19 @@ export function createEngine(deps: EngineDeps) {
    * only after its service was paid.
    */
   async function keptRoomBeforeHold(run: RunRecord, takeIdx: number[]): Promise<void> {
+    const room = keptRoomNeeded(run.takes, takeIdx)
+    if (!room) return
+    keptRoomCheck(room, (await kept.runBytes(run.id)) + (await kept.workBytes(run.id)))
+  }
+
+  /** What a leg's takes will keep for the run at most (keptRoomBeforeHold), or null when nothing is counted. */
+  function keptRoomNeeded(takes: readonly TakeRecord[], takeIdx: number[]): { need: number; media: number } | null {
     const cap = (deps.hosted() ? MEDIA_CAPS.hosted : MEDIA_CAPS.local).keptBytesPerRun
-    if (!Number.isFinite(cap)) return
+    if (!Number.isFinite(cap)) return null
     let need = 0
     let media = 0
     for (const t of takeIdx) {
-      const take = run.takes[t]!
+      const take = takes[t]!
       for (const id of legNodes(take.prompt, gateStateOf(take))) {
         const n = take.prompt[id]
         if (n?.class_type === TURNTABLE_CLASS) need += turntableKeptBytes(n.inputs ?? {})
@@ -905,9 +914,13 @@ export function createEngine(deps: EngineDeps) {
         if (typeof own === 'number' && own > 0 && take.nodes[id]?.status !== 'done') media += own
       }
     }
-    if (!need && !media) return
-    const used = (await kept.runBytes(run.id)) + (await kept.workBytes(run.id))
-    if (used + need + media > cap) throw refuse(media ? KEPT_ROOM_MEDIA_REFUSED : KEPT_ROOM_REFUSED, 413)
+    return need || media ? { need, media } : null
+  }
+
+  /** Refuses a leg whose kept files, on top of `used`, wouldn't fit the run's kept room. */
+  function keptRoomCheck(room: { need: number; media: number }, used: number): void {
+    const cap = (deps.hosted() ? MEDIA_CAPS.hosted : MEDIA_CAPS.local).keptBytesPerRun
+    if (used + room.need + room.media > cap) throw refuse(room.media ? KEPT_ROOM_MEDIA_REFUSED : KEPT_ROOM_REFUSED, 413)
   }
 
   /**
@@ -933,6 +946,28 @@ export function createEngine(deps: EngineDeps) {
   }
 
   // ── Opening a leg: price, hold, write down ─────────────────────────────
+  /**
+   * Each take's hold for a leg: the one price calculation the hold and the
+   * quote (R8.0, quoteRun) both read, so the price shown covers the hold.
+   */
+  function legPrices(takes: readonly TakeRecord[], takeIdx: number[], baseCharged: boolean, families: ReadonlySet<RunnerFamily>) {
+    return takeIdx.map((t) => {
+      const take = takes[t]!
+      const nodes = legNodes(take.prompt, gateStateOf(take))
+      // Every take's hold covers the render credit (a hold is an upper bound);
+      // which take actually pays it is only known once one makes something.
+      const includesBase = !baseCharged && hasOutputNode(take.prompt)
+      let parts: ReturnType<typeof stageEstimateParts>
+      // Media nodes (sync-3, Topaz) hold the price of what the start of the run measured (TakeRecord.measured); none, the ceiling.
+      try { parts = stageEstimateParts(take.prompt, nodes, includesBase, families, take.measured) }
+      catch (e) {
+        if (e instanceof UnpricedGraphError) throw refuse('A model in this workflow has no price yet', 500)
+        throw e
+      }
+      return { t, nodes, includesBase, estimate: parts.credits, usd: parts.usd, upTo: parts.upTo }
+    })
+  }
+
   async function openLeg(run: RunRecord, action: LegAction, gateId: string | null, takeIdx: number[]): Promise<LegRecord> {
     const index = run.legs.length
     const legId = `${run.id}.${index}`
@@ -942,19 +977,7 @@ export function createEngine(deps: EngineDeps) {
     const families = deps.families?.() ?? NO_FAMILIES
     await keptRoomBeforeHold(run, takeIdx)
     try {
-      for (const t of takeIdx) {
-        const take = run.takes[t]!
-        const nodes = legNodes(take.prompt, gateStateOf(take))
-        // Every take's hold covers the render credit (a hold is an upper bound);
-        // which take actually pays it is only known once one makes something.
-        const includesBase = !run.baseCharged && hasOutputNode(take.prompt)
-        let estimate: number
-        // Media nodes (sync-3, Topaz) hold the price of what the start of the run measured (TakeRecord.measured); none, the ceiling.
-        try { estimate = stageEstimate(take.prompt, nodes, includesBase, families, take.measured) }
-        catch (e) {
-          if (e instanceof UnpricedGraphError) throw refuse('A model in this workflow has no price yet', 500)
-          throw e
-        }
+      for (const { t, nodes, includesBase, estimate } of legPrices(run.takes, takeIdx, run.baseCharged, families)) {
         const stageKey = stageKeyOf(legId, t)
         const holdId = await deps.metering.hold(run.userId, stageKey, estimate)
         charges.push({ stageKey, leg: index, take: t, estimate, includesBase, holdId, state: holdId == null ? 'free' : 'held', actual: null, finished: false, nodeIds: [...nodes] })
@@ -2117,7 +2140,13 @@ export function createEngine(deps: EngineDeps) {
     return n
   }
 
-  async function startRun(i: StartRunInput): Promise<LegStarted> {
+  /**
+   * The start of a run up to its hold (R8.0): every check, refusal and
+   * measurement the start makes, in its order, with nothing held, stored or
+   * kept. startRun and quoteRun both begin here, so a quote refuses what a
+   * run would and is priced on the same measurements.
+   */
+  async function prepareStart(i: StartRunInput) {
     const takes = i.takes
     if (!Array.isArray(takes) || !takes.length) throw refuse('There is nothing to run', 400)
     if (takes.length > deps.maxTakes) throw refuse(`At most ${deps.maxTakes} versions can run at once`, 400)
@@ -2518,6 +2547,26 @@ export function createEngine(deps: EngineDeps) {
         }
       }
     }
+    return { prompts, nodeErrors, measured, keptUpTo, chosenAtStart }
+  }
+
+  /** A fresh run's take records from its start (prepareStart). */
+  function newTakes(prep: Awaited<ReturnType<typeof prepareStart>>): TakeRecord[] {
+    const { prompts, measured, keptUpTo } = prep
+    return prompts.map((prompt, index) => ({
+      index,
+      prompt: JSON.parse(JSON.stringify(prompt)) as ApiPrompt,
+      nodes: Object.fromEntries(Object.entries(prompt).map(([id, n]) => [id, emptyNodeRecord(n.class_type)])),
+      openGates: [],
+      droppedGates: [],
+      ...(Object.keys(measured[index]!).length ? { measured: measured[index] } : {}),
+      ...(Object.keys(keptUpTo[index]!).length ? { keptUpTo: keptUpTo[index] } : {}),
+    }))
+  }
+
+  async function startRun(i: StartRunInput): Promise<LegStarted> {
+    const prep = await prepareStart(i)
+    const { prompts, chosenAtStart, nodeErrors } = prep
     await deps.metering.moderate(prompts, prompts.flatMap(p => staticWiredTexts(p)))
 
     const now = deps.now()
@@ -2531,15 +2580,7 @@ export function createEngine(deps: EngineDeps) {
       createdAt: now,
       updatedAt: now,
       status: 'running',
-      takes: prompts.map((prompt, index) => ({
-        index,
-        prompt: JSON.parse(JSON.stringify(prompt)) as ApiPrompt,
-        nodes: Object.fromEntries(Object.entries(prompt).map(([id, n]) => [id, emptyNodeRecord(n.class_type)])),
-        openGates: [],
-        droppedGates: [],
-        ...(Object.keys(measured[index]!).length ? { measured: measured[index] } : {}),
-        ...(Object.keys(keptUpTo[index]!).length ? { keptUpTo: keptUpTo[index] } : {}),
-      })),
+      takes: newTakes(prep),
       legs: [],
       charges: [],
       baseCharged: false,
@@ -2554,6 +2595,29 @@ export function createEngine(deps: EngineDeps) {
     await persist(run)
     launch(run, leg)
     return { runId: run.id, legId: leg.id, promptIds: leg.takes.map(t => stageKeyOf(leg.id, t)), ...(nodeErrors ? { nodeErrors } : {}) }
+  }
+
+  /**
+   * The price of a run before it starts (R8.0, POST /api/runs/quote): the
+   * start's own checks and measurements (prepareStart) and the first leg's
+   * hold calculation (legPrices, kept room included), with nothing held,
+   * stored, kept or sent. Moderation is left to the run (it calls a
+   * service). Refuses exactly as the start would; the figure is what the run
+   * then holds, take by take, summed.
+   */
+  async function quoteRun(i: StartRunInput): Promise<RunQuote> {
+    const prep = await prepareStart(i)
+    const takes = newTakes(prep)
+    const all = takes.map(t => t.index)
+    const room = keptRoomNeeded(takes, all)
+    // A new run keeps nothing yet.
+    if (room) keptRoomCheck(room, 0)
+    const prices = legPrices(takes, all, false, deps.families?.() ?? NO_FAMILIES)
+    return {
+      credits: prices.reduce((n, p) => n + p.estimate, 0),
+      usd: Math.round(prices.reduce((n, p) => n + p.usd, 0) * 1e8) / 1e8,
+      upTo: prices.some(p => p.upTo),
+    }
   }
 
   function nudge(requestId: string): boolean {
@@ -2731,7 +2795,7 @@ export function createEngine(deps: EngineDeps) {
     }
   }
 
-  return { startRun, gateAction, stop, reattach, nudge, pausedGates, snapshot, record, settled, cancelChecksSettled, events: deps.events }
+  return { startRun, quoteRun, gateAction, stop, reattach, nudge, pausedGates, snapshot, record, settled, cancelChecksSettled, events: deps.events }
 }
 
 export type Engine = ReturnType<typeof createEngine>
