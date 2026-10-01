@@ -37,23 +37,44 @@
  * compress level 1). A picture larger than the service's stated largest
  * (UPSCALE_2X_MAX_PIXELS) never reaches the call: the start of the run leaves
  * such a workflow to the engine, and the turn refuses one before any call.
+ *
+ * Object removal (R7.3, family `object-remove`; comfy_extras/nodes_object_remove.py
+ * :54-65 → _inpaint.py lama_inpaint): one call per picture to Replicate's LaMa
+ * (USER ruling (c)), R3.7's fill call `{image: the RGB picture, mask: the grown
+ * mask as an 8-bit grey PNG}` at full size, its first answer URL. Around it,
+ * exact against Python given the same fill (../pixels/erase.ts): the mask's 8
+ * bits truncated from its float (the tensor kept for it, effects/tensorFiles.ts),
+ * grown by MaxFilter(2·grow + 1) (cv2.dilate's 3 × 3 square `grow` times, on
+ * the Frame's worker), and `fill·m + picture·(1 − m)`. A picture whose grown
+ * mask is all black is handed on unchanged with no call (nothing charged). One
+ * mask serves every picture, or one each (Python's mask batch). A mask of
+ * another size than its picture is refused before any call (Python fails
+ * inside OpenCV), unless it is all black (Python hands the picture on). The
+ * picture sent is Python's RGB view of it (R3.7's splitPictures: a loader's
+ * EXIF turn, a made picture's tensor); an answer of another size is fitted to
+ * the picture (sharp's cubic, as Python's own resize back). Preview: the first
+ * picture (save_live_preview(unique=True), RGB).
  */
 import sharp from 'sharp'
 import { isLink, type ApiLink } from '#shared/runner/graph'
 import { NO_FAMILIES } from '#shared/runner/families'
-import { pyFloatOf } from '#shared/runner/pyText'
+import { pyFloatOf, pyIntOf } from '#shared/runner/pyText'
 import { paidCallUsd } from '#shared/pricing/paidRates'
 import {
-  BG_REMOVE_CLASS, BG_REMOVE_EDGE_SOFTNESS, BG_REMOVE_OUTPUTS, BG_REMOVE_SLUG, LOCAL_MODEL_WORDS, UPSCALE_2X_CLASS, UPSCALE_2X_MAX_PIXELS,
-  UPSCALE_2X_SLUG, UPSCALE_2X_WORDS, isLocalModelClass, type BgRemoveOutput,
+  BG_REMOVE_CLASS, BG_REMOVE_EDGE_SOFTNESS, BG_REMOVE_OUTPUTS, BG_REMOVE_SLUG, LOCAL_MODEL_WORDS, OBJECT_REMOVE_CLASS, OBJECT_REMOVE_GROW,
+  OBJECT_REMOVE_SLUG, OBJECT_REMOVE_WORDS, UPSCALE_2X_CLASS, UPSCALE_2X_MAX_PIXELS, UPSCALE_2X_SLUG, UPSCALE_2X_WORDS, isLocalModelClass,
+  type BgRemoveOutput,
 } from '#shared/runner/localModels'
 import type { NodePlan, PipelineIO, PlanContext } from '../executors'
 import type { OutputFile, RunnerValue } from '../types'
 import { pixelsInWorker } from '../compositor/worker'
 import { pictureMeta, pilRgba, pngColourType } from '../pictures/pythonView'
 import { pixels as pixelOps } from '../pixels/core'
-import { loaderSourceOf } from '../pictureHandoff'
-import { encodeMask } from '../pictures/mask'
+import { loaderSourceOf, madeSourceOf } from '../pictureHandoff'
+import { decodeMask, encodeMask, type Mask } from '../pictures/mask'
+import { loaderFileBehind } from '../cards/bakeReplay'
+import { effectCores } from '../effects/cores'
+import type { LoaderKind } from '../pictures/handoffView'
 import { png8 } from '../effects/plan'
 import { onlySavesRead } from '../cards/utilities'
 import { framesQuantOf } from '../video/plan'
@@ -61,6 +82,7 @@ import { MediaError, mediaLease } from '../../media/run'
 import { framesOf, framesSink } from '../../media/values'
 import type { CutoutMode, CutoutResult } from '../pixels/cutout'
 import { firstOutputUrl, upscaleInput } from './repair'
+import { fillInput, maskPng, splitPictures } from './splitLayers'
 
 type FramesValue = Extract<RunnerValue, { kind: 'frames' }>
 
@@ -80,6 +102,7 @@ export function planLocalModel(ctx: PlanContext): NodePlan {
   const cls = ctx.prompt[ctx.nodeId]!.class_type
   if (cls === BG_REMOVE_CLASS) return planBackgroundRemove(ctx)
   if (cls === UPSCALE_2X_CLASS) return planUpscale2x(ctx)
+  if (cls === OBJECT_REMOVE_CLASS) return planObjectRemove(ctx)
   throw new Error(`The runner cannot run a ${cls} node`)
 }
 
@@ -518,6 +541,260 @@ export function planUpscale2x(ctx: PlanContext): NodePlan {
       })
       if (io.signal.aborted) throw new MediaError('stopped')
       return { values: { 0: made }, ui }
+    },
+  }
+}
+
+
+// ── Object removal (R7.3) ──
+
+/** The composite took longer than the worker's limit. */
+export const ERASE_TIMEOUT = 'Removing an object from one picture took longer than 2 minutes, so it was stopped'
+
+/** `mask_grow` as ComfyUI hands it to execute (validated by the rule row; missing: the default). */
+function growOf(v: unknown): number {
+  if (v === undefined || v === null) return OBJECT_REMOVE_GROW.default
+  if (typeof v === 'number' && Number.isFinite(v)) return Math.trunc(v)
+  if (typeof v === 'boolean') return Number(v)
+  if (typeof v === 'string') {
+    const n = pyIntOf(v)
+    if (n !== null) return n
+  }
+  throw new Error('This number setting must be a whole number')
+}
+
+/** A kept mask's size from its PNG header (IHDR), or null when it isn't a PNG. */
+function maskPngSize(bytes: Uint8Array): { w: number; h: number } | null {
+  if (bytes.length < 24 || bytes[0] !== 0x89 || bytes[1] !== 0x50) return null
+  const v = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
+  return { w: v.getUint32(16), h: v.getUint32(20) }
+}
+
+/** The service's fill as RGB at the picture's size (an answer of another size fitted with sharp's cubic). */
+async function fillRgb(bytes: Uint8Array, w: number, h: number): Promise<Uint8Array> {
+  const { rgb, w: aw, h: ah } = await answerRgb(bytes)
+  if (aw === w && ah === h) return rgb
+  const out = await sharp(rgb, { raw: { width: aw, height: ah, channels: 3 } }).resize(w, h, { fit: 'fill', kernel: 'cubic' }).raw().toBuffer()
+  // A copy of sharp's native memory: a plain buffer the worker can take over.
+  return new Uint8Array(out)
+}
+
+/** A picture's RGB pixels from a PNG (Python's RGB view of it, made by splitPictures, or the file itself). */
+async function rgbOfPng(png: Uint8Array): Promise<{ rgb: Uint8Array; w: number; h: number }> {
+  const { data, info } = await sharp(png, { limitInputPixels: false }).removeAlpha().raw({ depth: 'uchar' }).toBuffer({ resolveWithObject: true })
+  if (info.channels !== 3) throw new Error(OBJECT_REMOVE_WORDS.noPicture)
+  // A copy of sharp's native memory: a plain buffer the worker can take over.
+  return { rgb: new Uint8Array(data), w: info.width, h: info.height }
+}
+
+/** One mask, ready for the call: its grown 8 bits, whether there is nothing to fill, and its PNG's link (made once). */
+interface ReadyMask { grown: Uint8Array; empty: boolean; w: number; h: number; url: () => Promise<string> }
+
+export function planObjectRemove(ctx: PlanContext): NodePlan {
+  const inputs = ctx.prompt[ctx.nodeId]!.inputs ?? {}
+  const link = inputs.frames
+  const maskLink = inputs.mask
+  if (!isLink(link)) throw new Error(OBJECT_REMOVE_WORDS.noPicture)
+  if (!isLink(maskLink)) throw new Error(OBJECT_REMOVE_WORDS.noMask)
+  const grow = growOf(inputs.mask_grow)
+  const usd = paidCallUsd({ endpoint: OBJECT_REMOVE_SLUG })
+  if (usd == null) throw new Error('Object removal has no price yet')
+  const incoming = incomingOf(ctx, link)
+  const held = heldPictures(ctx)
+  const count = incoming.kind === 'frames' ? incoming.value.count : incoming.files.length
+  if (count < 1) throw new Error(OBJECT_REMOVE_WORDS.noPicture)
+  // Never more calls than the hold covers (rule 6: the start's count is an upper bound).
+  if (count > held) throw new Error(LOCAL_MODEL_WORDS.tooManyFrames)
+  const mv = ctx.valueFrom?.(maskLink)
+  if (mv?.kind !== 'mask' || !mv.files.length) throw new Error(OBJECT_REMOVE_WORDS.noMask)
+  const maskFiles = mv.files
+  // The float32 tensors kept beside the 16-bit PNGs (effects/tensorFiles.ts, while this reads them): Python's exact float.
+  const maskTensors = mv.tensors && mv.tensors.length === maskFiles.length ? mv.tensors : null
+  // Python's mask batch: one for every picture, else mask[t] (fewer than the pictures fails in Python: refused).
+  if (maskFiles.length > 1 && maskFiles.length < count) throw new Error(OBJECT_REMOVE_WORDS.maskCount)
+  const maskIndex = (t: number) => (maskFiles.length === 1 ? 0 : t)
+  const clip = incoming.kind === 'frames'
+  const quant = clip ? framesQuantOf(ctx.prompt, ctx.nodeId, 0, ctx.families) : onlySavesRead(ctx.prompt, ctx.nodeId, 0) ? 'trunc' : 'round'
+  // Python's picture (R3.7's splitPictures): behind a loader the loader's tensor, made in the run its node's.
+  const behind = !clip ? loaderFileBehind(ctx.prompt, link) : null
+  const loader: LoaderKind | null = behind ? { keepsAlpha: behind.classType === 'Image' } : null
+  const made = !clip && !behind && ctx.families ? madeSourceOf(ctx.prompt, link, ctx.families)?.view ?? null : null
+  const erase = effectCores.erase
+
+  /** A mask as Python's float: the kept tensor, else the 16-bit PNG (exact for every k / 255). */
+  const readMask = async (io: PipelineIO, i: number): Promise<Mask> => {
+    if (maskTensors) {
+      const t = effectCores.tk.fromTensorFile(await io.read(maskTensors[i]!))
+      return { w: t.w, h: t.h, data: t.data }
+    }
+    return decodeMask(await io.read(maskFiles[i]!))
+  }
+
+  /**
+   * Before any call: each mask the pictures use is their size, or all black
+   * (Python hands such a picture on before OpenCV sees the sizes). Only the
+   * headers are read, and a mask is decoded only when its size differs.
+   */
+  const checkSizes = async (io: PipelineIO, sizes: (t: number) => { w: number; h: number }) => {
+    const seen = new Set<string>()
+    for (let t = 0; t < count; t++) {
+      const i = maskIndex(t)
+      const want = sizes(t)
+      const key = `${i}:${want.w}x${want.h}`
+      if (seen.has(key)) continue
+      seen.add(key)
+      const size = maskPngSize(await io.read(maskFiles[i]!))
+      if (size && size.w === want.w && size.h === want.h) continue
+      const m = await readMask(io, i)
+      if (m.w === want.w && m.h === want.h) continue
+      if (!erase.empty(erase.mask8(m.data))) throw new Error(OBJECT_REMOVE_WORDS.maskSize)
+    }
+  }
+
+  /** A mask made ready: Python's 8 bits, grown on the Frame's worker; its PNG handed off only when a call needs it. */
+  const readyMask = async (io: PipelineIO, i: number, name: string): Promise<ReadyMask> => {
+    const m = await readMask(io, i)
+    const m8 = erase.mask8(m.data)
+    if (erase.empty(m8)) return { grown: m8, empty: true, w: m.w, h: m.h, url: async () => { throw new Error(OBJECT_REMOVE_WORDS.noMask) } }
+    const grown = grow > 0 ? await pixelsInWorker(io.signal, worker => worker.maxFilter(m8, m.w, m.h, 2 * grow + 1), ERASE_TIMEOUT) : m8
+    let url: Promise<string> | null = null
+    return {
+      grown, empty: false, w: m.w, h: m.h,
+      url: () => (url ??= (async () => {
+        const png = await maskPng(grown, m.w, m.h)
+        return ctx.bytesToUrl && clip ? ctx.bytesToUrl({ filename: name, subfolder: '', type: 'temp' }, png) : io.handOff(png, name)
+      })()),
+    }
+  }
+
+  /** The masks by index: one shared mask is made ready once; a mask per picture as its picture comes. */
+  const masksFor = (io: PipelineIO) => {
+    let shared: Promise<ReadyMask> | null = null
+    return (t: number): Promise<ReadyMask> => {
+      if (maskFiles.length === 1) return (shared ??= readyMask(io, 0, 'erase_mask.png'))
+      return readyMask(io, t, `erase_mask_${t}.png`)
+    }
+  }
+
+  /** One picture: no call when its mask is all black; else the call, the fill, and the composite on the worker. */
+  interface ErasePicture extends InPicture { w: number; h: number; rgb: () => Promise<Uint8Array> }
+  interface Erased { picture: Uint8Array; preview?: Uint8Array; w: number; h: number }
+  const eraseOne = async (io: PipelineIO, p: ErasePicture, mask: ReadyMask): Promise<Erased> => {
+    const rgb = await p.rgb()
+    // Nothing to fill: the picture as Python hands it on (k / 255 gives k back, rounded or truncated).
+    if (mask.empty) return { picture: rgb, ...(p.index === 0 ? { preview: rgb } : {}), w: p.w, h: p.h }
+    if (mask.w !== p.w || mask.h !== p.h) throw new Error(OBJECT_REMOVE_WORDS.maskSize)
+    const key = `erase-${p.index}`
+    const [image, maskUrl] = await Promise.all([p.url(), mask.url()])
+    const got = await io.call({ key, provider: 'replicate', endpoint: OBJECT_REMOVE_SLUG, payload: fillInput(image, maskUrl), media: 'image', usd })
+    const url = firstOutputUrl(got.result)[0]
+    if (!url) {
+      // Its answer named no file: nothing delivered, so not charged (R3.17 fix round 1).
+      await io.undelivered?.(key, 'no-file')
+      throw new Error(OBJECT_REMOVE_WORDS.noAnswer)
+    }
+    // A picture's answer is kept for the run (a resumed node doesn't fetch it again); a clip's frames are not.
+    let bytes: Uint8Array
+    if (clip) bytes = (await io.download(url)).bytes
+    else {
+      const fresh: { bytes?: Uint8Array } = {}
+      const kept = await io.savedOnce(key, 'answer', async () => {
+        fresh.bytes = (await io.download(url)).bytes
+        return io.keep(fresh.bytes, 'bin')
+      })
+      bytes = fresh.bytes ?? await io.read(kept)
+    }
+    const fill = await fillRgb(bytes, p.w, p.h)
+    const r = await pixelsInWorker(io.signal, worker => worker.erase({
+      // Copies handed over: a frame's own buffer stays with its decoder, a shared mask with the next picture.
+      rgb: rgb.slice(), fill, mask: mask.grown.slice(), w: p.w, h: p.h, quant, preview: p.index === 0,
+    }), ERASE_TIMEOUT)
+    return { ...r, w: p.w, h: p.h }
+  }
+
+  /** The first picture's live preview (save_live_preview(unique=True): RGB, compress level 1). */
+  const previewOf = async (io: PipelineIO, a: Erased): Promise<Record<string, unknown> | null> => {
+    if (!a.preview) return null
+    const png = await png8(a.preview, a.w, a.h, 3, 1)
+    // Checked immediately before the write (R1.6's rule): a stopped node never writes a preview.
+    if (io.signal.aborted) throw new MediaError('stopped')
+    const f = await io.savePreview(png, { nodeId: ctx.nodeId })
+    return { images: [{ filename: f.filename, subfolder: f.subfolder, type: f.type }], animated: [false] }
+  }
+
+  return {
+    kind: 'pipeline', prefix: 'object_remove',
+    run: async (io: PipelineIO) => {
+      let ui: Record<string, unknown> | null = null
+      const maskOf = masksFor(io)
+      if (incoming.kind === 'files') {
+        const files = incoming.files
+        // Python's picture of each, read before any call: its RGB PNG (null: the file itself is) and its size.
+        const pics: Awaited<ReturnType<typeof splitPictures>>[] = []
+        for (const f of files) pics.push(await splitPictures(await io.read(f), loader, io.signal, made))
+        await checkSizes(io, t => pics[t]!)
+        const out: OutputFile[] = []
+        async function* each(): AsyncIterable<ErasePicture> {
+          for (const [index, f] of files.entries()) {
+            const pic = pics[index]!
+            yield {
+              index, w: pic.w, h: pic.h,
+              url: async () => (pic.fill ? io.handOff(pic.fill, 'erase_image.png') : ctx.toUrl(f)),
+              rgb: async () => (await rgbOfPng(pic.fill ?? await io.read(f))).rgb,
+            }
+          }
+        }
+        await inOrder(each(), async p => eraseOne(io, p as ErasePicture, await maskOf(maskIndex(p.index))), async (a, p) => {
+          out.push(await io.keep(await png8(a.picture, a.w, a.h, 3, 6), 'png'))
+          if (p.index === 0) ui = await previewOf(io, a)
+        }, io.signal)
+        return { values: { 0: { kind: 'files', files: out } }, ui }
+      }
+      // A clip (ruling (f)): its frames decoded one at a time, each sent and filled, the batch written in order.
+      const v = incoming.value
+      const media = io.media
+      if (!media) throw new Error(LOCAL_MODEL_WORDS.needsRun)
+      await checkSizes(io, () => ({ w: v.w, h: v.h }))
+      const made2 = await mediaLease({ userId: media.userId, signal: io.signal }, async (lease) => {
+        const sink = framesSink(v.w, v.h, media, lease)
+        let finished = false
+        try {
+          const frames = framesOf(v, media, lease)[Symbol.asyncIterator]()
+          async function* each(): AsyncIterable<ErasePicture> {
+            try {
+              for (let index = 0; ; index++) {
+                const g = await frames.next()
+                if (g.done) return
+                const rgb = g.value as Uint8Array
+                yield {
+                  index, w: v.w, h: v.h, rgb: async () => rgb,
+                  url: async () => {
+                    const png = await framePng(rgb, v.w, v.h)
+                    const name = `erase_frame_${index}.png`
+                    return ctx.bytesToUrl ? ctx.bytesToUrl({ filename: name, subfolder: '', type: 'temp' }, png) : io.handOff(png, name)
+                  },
+                }
+              }
+            }
+            finally {
+              await frames.return?.().catch(() => undefined)
+            }
+          }
+          const n = await inOrder(each(), async p => eraseOne(io, p as ErasePicture, await maskOf(maskIndex(p.index))), async (a, p) => {
+            await sink.put(a.picture)
+            if (p.index === 0) ui = await previewOf(io, a)
+          }, io.signal)
+          if (n !== v.count) throw new MediaError('failed')
+          const out = await sink.done()
+          finished = true
+          return out
+        }
+        finally {
+          if (!finished) await sink.abort()
+        }
+      })
+      if (io.signal.aborted) throw new MediaError('stopped')
+      return { values: { 0: made2 }, ui }
     },
   }
 }

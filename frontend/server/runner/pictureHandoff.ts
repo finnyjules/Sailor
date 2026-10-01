@@ -151,6 +151,11 @@ const PROVIDER_KEPT_SLOTS: Readonly<Record<string, readonly number[]>> = {
   SplitPhotoLayersNode: [1],
   // R7.2: Upscale (2×)'s picture is an 8-bit RGB PNG of Python's tensor (generators/localModels.ts).
   UpscaleImage: [0],
+  // R7.3's fix to R7.1: Background remove's picture is the PNG of Python's tensor (RGBA for
+  // `transparent`, RGB for `premultiplied` and `matte_only`), not the provider's RGBA view.
+  BackgroundRemove: [0],
+  // R7.3: Object removal's picture is an 8-bit RGB PNG of Python's tensor (generators/localModels.ts).
+  ObjectRemove: [0],
 }
 
 /** Provider classes whose later slot is a provider's file too (Separate background and foreground's subject is slot 0). */

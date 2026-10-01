@@ -346,6 +346,8 @@ function runnerEndpoints(): string[] {
   out.add('replicate 851-labs/background-remover')
   // R7.2: Upscale (2×) on Replicate's Real-ESRGAN (generators/localModels.ts; its grid is runner-local-upscale.unit.spec.ts).
   out.add('replicate nightmareai/real-esrgan')
+  // R7.3: Object removal on Replicate's LaMa, R3.7's fill (generators/localModels.ts; its grid is runner-local-erase.unit.spec.ts).
+  out.add('replicate zylim0702/remove-object')
   for (const d of Object.values(RUNNER_REPLICATE_IMAGE_MODELS)) out.add(`replicate ${d.slug}`)
   for (const d of Object.values(RUNNER_REPLICATE_VIDEO_MODELS)) out.add(`replicate ${d.slug}`)
   for (const app of [FLUX_2_EDIT_APP, FLUX_KONTEXT_APP, NANO_BANANA_2_EDIT_APP, NANO_BANANA_PRO_EDIT_APP]) out.add(`fal ${app}`)

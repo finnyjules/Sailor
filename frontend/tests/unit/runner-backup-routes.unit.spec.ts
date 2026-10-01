@@ -22,6 +22,7 @@ import {
 import { RESTYLE_MODELS } from '~~/server/runner/generators/restyle'
 import { REFERENCE_MODEL_IDS } from '~~/server/runner/generators/refEdits'
 import type { OutputFile } from '~~/server/runner/types'
+import { encodeMask } from '~~/server/runner/pictures/mask'
 import type { RunnerFamily } from '#shared/runner/families'
 import { RUNNER_NODE_RULES } from '#shared/runner/eligibility'
 import { IMAGE_MODELS_BY_ID } from '~~/app/data/image-models'
@@ -93,6 +94,8 @@ const EDIT_BASE: Record<string, Record<string, unknown>> = {
   BackgroundRemove: { frames: LINK, output: 'transparent', edge_softness: 0 },
   // Upscale (2×) (R7.2): one picture; its call is Real-ESRGAN at scale 2.
   UpscaleImage: { frames: LINK, tile_size: 512 },
+  // Object removal (R7.3): one picture and its mask; its call is LaMa's fill.
+  ObjectRemove: { frames: LINK, mask: LINK, mask_grow: 4 },
   // Music and speech (R3.8): the text; the rest at the node's defaults.
   GenerateMusicNode: { model: 'MusicGen', prompt: 'lo-fi piano' },
   MusicGenRemoteNode: { prompt: 'lo-fi piano' },
@@ -142,6 +145,9 @@ const EDIT_BASE: Record<string, Record<string, unknown>> = {
 /** A sound-in node's WAV (R3.10): one sample of silence. */
 const SOUND_WAV = { wav: new Uint8Array(46), seconds: 1 / 8000, frames: 1, rate: 8000, channels: 1 }
 
+/** Object removal's mask (R7.3), kept as the runner keeps masks. */
+const MASK_FILE: OutputFile = { filename: 'mask.png', subfolder: '', type: 'temp' }
+
 /** What the engine measured of a media node's files before planning (Topaz sets its factor from the video's size, F23). */
 const MEASURED = { video: 3, videoWidth: 1280, videoHeight: 720, videoFps: 24 }
 
@@ -170,6 +176,8 @@ async function firstCall(classType: string, inputs: Record<string, unknown>, fam
   const p = await planNode({
     prompt: { n: { class_type: classType, inputs } }, nodeId: 'n', gateOpen: false,
     filesFrom: () => [{ filename: 'a.png', subfolder: '', type: 'output' }],
+    // Object removal (R7.3) reads its mask as a mask value: one 2 × 2 white mask.
+    valueFrom: link => (classType === 'ObjectRemove' && link === inputs.mask ? { kind: 'mask', files: [MASK_FILE] } : undefined),
     toUrl: async (f: OutputFile) => `https://pics.test/${f.filename}`,
     ...(families ? { families } : {}),
     measured: MEASURED,
@@ -185,7 +193,7 @@ async function firstCall(classType: string, inputs: Record<string, unknown>, fam
   const picture = new Uint8Array(await sharp({ create: { width: 2, height: 2, channels: 3, background: { r: 1, g: 2, b: 3 } } }).png().toBuffer())
   await p.run({
     signal: new AbortController().signal, call: async (c: PipelineCall) => { first = c; throw sent },
-    read: async () => picture, handOff: async (_b: Uint8Array, name: string) => `https://pics.test/${name}`,
+    read: async (f: OutputFile) => (f.filename === MASK_FILE.filename ? await encodeMask({ w: 2, h: 2, data: new Float32Array(4).fill(1) }) : picture), handOff: async (_b: Uint8Array, name: string) => `https://pics.test/${name}`,
   } as unknown as PipelineIO).catch((e) => { if (e !== sent) throw e })
   if (!first) throw new Error(`${classType} made no call`)
   const c = first as PipelineCall

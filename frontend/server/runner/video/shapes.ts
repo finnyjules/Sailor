@@ -25,7 +25,7 @@ import { loadFramesPick, settingsOf } from '../media/frameNodes'
 import { probeVideoFile } from '../../media/values'
 import { pyFrameBound, type MediaProbe } from '../../media/probe'
 import { VIDEO_EFFECTS, mediaEffectParams, type FrameShape } from './table'
-import { BG_REMOVE_CLASS, UPSCALE_2X_CLASS, localModelOn } from '#shared/runner/localModels'
+import { BG_REMOVE_CLASS, OBJECT_REMOVE_CLASS, UPSCALE_2X_CLASS, localModelOn } from '#shared/runner/localModels'
 
 const key = (l: ApiLink) => `${l[0]}:${l[1]}`
 
@@ -82,9 +82,10 @@ export function batchesOf(prompt: ApiPrompt, families: ReadonlySet<RunnerFamily>
         if (shapes.has(`${id}:0`)) { on = id; batches.set(id, { maker: id, readers: new Set() }) }
         break
       // R7.1 (ruling (f)): Background remove on a clip makes a batch of its own, frame for frame.
-      // R7.2: Upscale (2×) on a clip too.
+      // R7.2: Upscale (2×) on a clip too. R7.3: Object removal too.
       case BG_REMOVE_CLASS:
       case UPSCALE_2X_CLASS:
+      case OBJECT_REMOVE_CLASS:
         if (localModelOn(n.class_type, families) && shapes.has(`${id}:0`)) { on = id; batches.set(id, { maker: id, readers: new Set() }) }
         break
       default:
@@ -134,7 +135,9 @@ export async function frameShapes(
         break
       case 'LoadVideoFrames': s = await sourceShape(id, n.class_type); break
       // R7.1 (ruling (f)): Background remove on a clip hands on a batch of the clip's count and size.
-      case BG_REMOVE_CLASS: {
+      // R7.3: Object removal the same.
+      case BG_REMOVE_CLASS:
+      case OBJECT_REMOVE_CLASS: {
         const i = localModelOn(n.class_type, families) ? at(inputs.frames) : undefined
         if (i) s = { count: i.count, w: i.w, h: i.h, exact: i.exact, ...(i.counted ? { counted: true as const } : {}) }
         break

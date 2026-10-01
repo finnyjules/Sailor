@@ -1,0 +1,47 @@
+{
+  "endpoint": "zylim0702/remove-object",
+  "fetchedAt": "2026-09-30",
+  "sources": {
+    "schema": "https://replicate.com/zylim0702/remove-object/api/schema"
+  },
+  "versionId": "0e3a841c913f597c1e4c321560aa69e2bc1f15c65f8c366caafc379240efd8ba",
+  "input": {
+    "$ref": "#/components/schemas/Input"
+  },
+  "output": {
+    "$ref": "#/components/schemas/Output"
+  },
+  "components": {
+    "schemas": {
+      "Input": {
+        "type": "object",
+        "title": "Input",
+        "required": [
+          "image",
+          "mask"
+        ],
+        "properties": {
+          "mask": {
+            "type": "string",
+            "title": "Mask",
+            "format": "uri",
+            "x-order": 1,
+            "description": "Mask for inpainting"
+          },
+          "image": {
+            "type": "string",
+            "title": "Image",
+            "format": "uri",
+            "x-order": 0,
+            "description": "Image to inpaint"
+          }
+        }
+      },
+      "Output": {
+        "type": "string",
+        "title": "Output",
+        "format": "uri"
+      }
+    }
+  }
+}

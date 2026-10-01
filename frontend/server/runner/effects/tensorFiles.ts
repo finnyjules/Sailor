@@ -17,6 +17,7 @@
  */
 import { GATE_CLASS, isLink, linksOf, type ApiLink, type ApiPrompt } from '#shared/runner/graph'
 import { EFFECT_PICTURE_OUTPUTS, effectFamilyOn } from '#shared/runner/effects'
+import { OBJECT_REMOVE_CLASS, localModelOn } from '#shared/runner/localModels'
 import type { RunnerFamily } from '#shared/runner/families'
 import type { PlanContext } from '../executors'
 import type { OutputFile } from '../types'
@@ -36,10 +37,14 @@ export function maskTensorBytes(m: { w: number; h: number; data: Float32Array })
  *   - a picture: the Frame (`frame` on); Image to mask's `image` and Text
  *     mask's `source` (`cards` on), which work on the float as Python does;
  *   - a mask: not the Frame, which reads only LoadImage's MASK and rebuilds
- *     its exact float from the 16 bits (compositor/plan.ts), as before R2.8.
+ *     its exact float from the 16 bits (compositor/plan.ts), as before R2.8;
+ *     Object removal's `mask` (R7.3, `object-remove` on), which truncates it.
  */
 function readsFloat(classType: string, input: string, families: ReadonlySet<RunnerFamily>, kind: 'picture' | 'mask'): boolean {
   if (Object.prototype.hasOwnProperty.call(EFFECT_PICTURE_OUTPUTS, classType)) return effectFamilyOn(classType, families)
+  // R7.3: Object removal truncates the mask's float to 8 bits (`uint8(255·m)`): LoadImage's 1 − a/255
+  // sits just below k/255, which its 16-bit PNG can't carry, so it reads the tensor while it is on.
+  if (classType === OBJECT_REMOVE_CLASS && input === 'mask') return localModelOn(classType, families)
   if (kind === 'mask') return false
   if (classType === 'Compositor') return families.has('frame')
   if ((classType === 'ImageToMask' && input === 'image') || (classType === 'TextMask' && input === 'source')) return families.has('cards')

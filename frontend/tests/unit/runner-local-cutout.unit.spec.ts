@@ -749,7 +749,7 @@ describe('the R7 families (shared pieces)', () => {
     expect([...parseFamilies('bg-remove')]).toEqual([])
     expect([...parseFamilies('bg-remove,cards')].sort()).toEqual(['bg-remove', 'cards'])
     expect([...parseFamilies('cards,whisper-captions')]).toEqual(['cards'])
-    expect(LOCAL_MODEL_FAMILY_OF).toEqual({ [BG_REMOVE_CLASS]: 'bg-remove', UpscaleImage: 'upscale-2x' })
+    expect(LOCAL_MODEL_FAMILY_OF).toEqual({ [BG_REMOVE_CLASS]: 'bg-remove', UpscaleImage: 'upscale-2x', ObjectRemove: 'object-remove' })
   })
 
   it('the row: a provider class, its widgets as ComfyUI validates them; out of range or wired settings go to the engine', () => {

@@ -351,6 +351,8 @@ export const RUNNER_ROUTES: Readonly<Record<string, Route>> = {
   'BackgroundRemove': r('replicate', null, 'no same-model twin on fal with the same settings is carded'),
   // R7.2, Upscale (2×) (family upscale-2x): one call per picture to Replicate's Real-ESRGAN at scale 2.
   'UpscaleImage': r('replicate', null, 'no same-model twin on fal with the same settings is carded'),
+  // R7.3, Object removal (family object-remove): one call per picture to Replicate's LaMa (R3.7's fill).
+  'ObjectRemove': r('replicate', null, 'no same-model twin on fal with the same settings is carded'),
   // R3.8, music and speech (family audio-gen): Replicate, as Python.
   ...Object.fromEntries([
     'GenerateMusicNode', 'MusicGenRemoteNode', 'GenerateSpeechNode', 'MiniMaxSpeechRemoteNode',

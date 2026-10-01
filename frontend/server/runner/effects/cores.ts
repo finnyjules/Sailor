@@ -23,6 +23,7 @@ import { rngCore } from './core/rng'
 import { maxFilterCore } from '../pixels/maxFilter'
 import { pilPixelsCore } from '../pixels/pilPixels'
 import { cutoutCore } from '../pixels/cutout'
+import { eraseCore } from '../pixels/erase'
 
 export interface EffectCoreEntry {
   /** The name the worker (and an op) knows the built core by. */
@@ -56,6 +57,8 @@ export const EFFECT_CORES: readonly EffectCoreEntry[] = [
   // R7.1: Background remove's work after the service's answer (the alpha's blur, the outputs, the
   // preview): a helper the worker's `px.cutout` op calls, not an effect op.
   { name: 'cut', fn: cutoutCore as EffectCoreEntry['fn'], args: ['kn'] },
+  // R7.3: Object removal's composite after the service's fill: a helper the worker's `px.erase` op calls, not an effect op.
+  { name: 'erase', fn: eraseCore as EffectCoreEntry['fn'], args: [] },
 ]
 
 /** The cores whose functions are effect ops (not helpers). */
@@ -66,5 +69,5 @@ export const effectCores = (() => {
   const tk = tensorCore(pixels)
   const kn = kernelsCore(tk, pixels)
   const rng = rngCore()
-  return { px: pixels, tk, kn, tone: toneCore(tk, kn), rng, blur: blurCore(tk, kn), cells: cellsCore(tk, kn), warp: warpCore(tk, kn), mask: maskCore(tk, kn, pixels), noise: noiseCore(tk, kn, rng), cut: cutoutCore(kn) }
+  return { px: pixels, tk, kn, tone: toneCore(tk, kn), rng, blur: blurCore(tk, kn), cells: cellsCore(tk, kn), warp: warpCore(tk, kn), mask: maskCore(tk, kn, pixels), noise: noiseCore(tk, kn, rng), cut: cutoutCore(kn), erase: eraseCore() }
 })()

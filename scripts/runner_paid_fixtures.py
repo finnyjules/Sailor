@@ -162,7 +162,20 @@ Groups:
              frontend/server/runner/generators/localModels.ts and
              frontend/server/runner/pixels/cutout.ts
              (tests/unit/runner-local-cutout.unit.spec.ts)
-  e2e       (R3.18) the controller check's chained workflows no single-node
+  local-erase (R7.3) Object removal (comfy_extras/nodes_object_remove.py →
+             _inpaint.py): cv2.dilate recorded directly (Python's 8 bits of
+             the mask — LoadImage's 1 − a/255, soft, hard, every edge and
+             corner, all black — grown 0, 1, 4 and 64 times on 29 × 19, 3 × 2
+             and 1 × 1), and the real execute with LaMa's session and its
+             512 × 512 resizes swapped for stand-ins, so the composite is of a
+             recorded full-size fill (the provider's answer): grow 0 / 4 / 64,
+             an all-black mask (no call), a clip of three frames with one mask
+             and a mask per frame. Each records the output tensor, its 8-bit
+             forms and the live preview, for
+             frontend/server/runner/generators/localModels.ts and
+             frontend/server/runner/pixels/erase.ts
+             (tests/unit/runner-local-erase.unit.spec.ts)
+  e2e      (R3.18) the controller check's chained workflows no single-node
              case covers, node by node (Summarize → Generate an image;
              Separate background and foreground → Frame; Upscale → Remove
              background → Save image; Restyle held on the second pass; Flux
@@ -3510,6 +3523,146 @@ def local_cutout_group() -> dict:
     return {"cases": cases, "size": [CUTOUT_W, CUTOUT_H], "blur": blur}
 
 
+# ── R7.3: Object removal with a stand-in model (group local-erase) ──────────────
+
+ERASE_W, ERASE_H = 29, 19
+
+
+def _erase_masks(w: int, h: int, seed: int) -> dict:
+    """The masks the erase cases grow, float32 [H, W]: LoadImage's own (1 − a/255, every
+    alpha level: its truncation quirk), soft noise, a hard disc, one touching every edge
+    and corner, and all black."""
+    import numpy as np
+    rng = np.random.default_rng(seed)
+    a = rng.integers(0, 256, size=(h, w)).astype(np.float32)
+    loader = (np.float32(1.0) - a / np.float32(255.0)).astype(np.float32)
+    loader[rng.random((h, w)) < 0.5] = 0.0
+    soft = rng.random((h, w)).astype(np.float32)
+    soft[soft < 0.6] = 0.0
+    yy, xx = np.mgrid[0:h, 0:w]
+    r = np.sqrt((xx - w / 2.0) ** 2 + (yy - h / 2.0) ** 2) / (min(w, h) / 2.0)
+    hard = np.where(r < 0.5, 1.0, 0.0).astype(np.float32)
+    edges = np.zeros((h, w), dtype=np.float32)
+    for (y, x) in [(0, 0), (0, w - 1), (h - 1, 0), (h - 1, w - 1), (0, w // 2), (h - 1, w // 3), (h // 2, 0), (h // 3, w - 1)]:
+        edges[y, x] = 1.0
+    edges[h // 2, w // 2] = 0.5
+    return {"loader": loader, "soft": soft, "hard": hard, "edges": edges, "black": np.zeros((h, w), dtype=np.float32)}
+
+
+def _fill_png(w: int, h: int, seed: int) -> bytes:
+    """A recorded full-size fill (the provider's answer): random RGB."""
+    return png_bytes(w, h, seed)
+
+
+def local_erase_group() -> dict:
+    """Object removal's mask grow and composite (R7.3): cv2.dilate recorded directly, and the
+    real execute with LaMa's 512 × 512 session and its resizes swapped for stand-ins, so the
+    full-size fill the provider answers is what Python composites."""
+    import hashlib
+    import shutil
+    import tempfile
+    import cv2
+    import numpy as np
+    import torch
+    from PIL import Image
+    import folder_paths
+    from comfy_api.latest._io import HiddenHolder
+    from comfy_extras import _inpaint, nodes_object_remove as ob
+
+    # cv2.dilate alone: Python's own 8 bits of the mask, grown by a 3 × 3 square `grow` times.
+    dilate: list = []
+    kernel = np.ones((3, 3), np.uint8)
+    for (w, h, seed) in ((ERASE_W, ERASE_H, 7700), (3, 2, 7701), (1, 1, 7702)):
+        for kind, m in _erase_masks(w, h, seed).items():
+            for grow in (0, 1, 4, 64):
+                m8 = (m * 255.0).clip(0, 255).astype(np.uint8)
+                grown = cv2.dilate(m8, kernel, iterations=int(grow)) if grow > 0 else m8
+                dilate.append({"name": f"dilate · {w} × {h} · {kind} · grow {grow}", "w": w, "h": h, "grow": grow,
+                               "mask_f32": _b64(np.ascontiguousarray(m, dtype="<f4").tobytes()),
+                               "m8": _b64(m8.tobytes()), "grown": _b64(grown.tobytes())})
+
+    # The real execute: the session answers zeros at 512 × 512 (never read: the stand-in
+    # resize back hands over the recorded full-size fill instead, as the provider would).
+    fills: list = []
+    session_calls: list = []
+
+    class _In:
+        def __init__(self, name):
+            self.name = name
+
+    class StandInSession:
+        def get_inputs(self):
+            return [_In("image"), _In("mask")]
+
+        def run(self, _outputs, feed):
+            assert feed["image"].shape == (1, 3, 512, 512) and feed["mask"].shape == (1, 1, 512, 512)
+            session_calls.append(1)
+            return [np.zeros((1, 3, 512, 512), dtype=np.float32)]
+
+    real_resize = cv2.resize
+
+    def stand_in_resize(src, dsize, interpolation=None):
+        if tuple(dsize) == (512, 512):
+            return real_resize(src, dsize, interpolation=interpolation)
+        assert interpolation == cv2.INTER_CUBIC, interpolation
+        fill = fills.pop(0)
+        assert fill.shape[1] == dsize[0] and fill.shape[0] == dsize[1], (fill.shape, dsize)
+        return fill
+
+    temp = tempfile.mkdtemp(prefix="local-erase-")
+    folder_paths.set_temp_directory(temp)
+    cases: list = []
+
+    def run(name: str, pictures: list, mask, grow: int, served: list, node_id: str = "9"):
+        fills[:] = [np.array(Image.open(__import__("io").BytesIO(f)).convert("RGB")) for f in served]
+        session_calls.clear()
+        frames = torch.cat([_picture_tensor(p) for p in pictures], dim=0)
+        with mock.patch.object(ob, "lama_ready", lambda: True), \
+                mock.patch.object(_inpaint, "_get_session", lambda: StandInSession()), \
+                mock.patch.object(cv2, "resize", stand_in_resize), \
+                mock.patch.object(ob.ObjectRemoveNode, "hidden", HiddenHolder.from_dict({"UNIQUE_ID": node_id})):
+            res = ob.ObjectRemoveNode.execute(frames=frames, mask=torch.from_numpy(mask), mask_grow=grow)
+        assert not fills, f"{name}: {len(fills)} fills unused"
+        (image,) = res.args
+        ui = res.ui.as_dict() if hasattr(res.ui, "as_dict") else res.ui
+        entry = dict(ui["images"][0])
+        with Image.open(os.path.join(temp, entry["subfolder"], entry["filename"])) as im:
+            im.load()
+            preview = {"filename": entry["filename"], "subfolder": entry["subfolder"], "type": entry["type"], "mode": im.mode,
+                       "w": im.size[0], "h": im.size[1], "sha256": hashlib.sha256(im.tobytes()).hexdigest()}
+        cases.append({
+            "name": name, "class_type": "ObjectRemove", "node_id": node_id, "mask_grow": grow,
+            "pictures": [_b64(p) for p in pictures],
+            "mask_shape": list(mask.shape),
+            "mask_f32": _b64(np.ascontiguousarray(mask, dtype="<f4").tobytes()),
+            "fills": [_b64(f) for f in served],
+            "calls": len(session_calls),
+            "image": _cutout_tensor_record(image),
+            "preview": preview,
+            "animated": list(ui.get("animated", [])),
+        })
+
+    try:
+        w, h = ERASE_W, ERASE_H
+        masks = _erase_masks(w, h, 7710)
+        seed = 7720
+        for kind in ("loader", "soft", "hard", "edges"):
+            for grow in (0, 4, 64):
+                seed += 1
+                run(f"erase · {kind} mask · grow {grow}", [png_bytes(w, h, seed)], masks[kind], grow, [_fill_png(w, h, seed + 500)])
+        # Nothing to remove: the frame unchanged, no call.
+        run("erase · an all-black mask · grow 4", [png_bytes(w, h, 7790)], masks["black"], 4, [])
+        # A clip: one mask for every frame ([H, W] and [1, H, W]), and a mask per frame (the middle one black: no call).
+        frames = [png_bytes(w, h, 7800 + i) for i in range(3)]
+        run("erase · a clip of three frames · one mask", frames, masks["soft"], 2, [_fill_png(w, h, 7810 + i) for i in range(3)])
+        run("erase · a clip of three frames · a batch of one mask", frames, masks["hard"][None], 1, [_fill_png(w, h, 7820 + i) for i in range(3)])
+        per = np.stack([masks["loader"], masks["black"], masks["edges"]])
+        run("erase · a clip of three frames · a mask per frame, one black", frames, per, 3, [_fill_png(w, h, 7830 + i) for i in (0, 2)])
+    finally:
+        shutil.rmtree(temp, ignore_errors=True)
+    return {"dilate": dilate, "cases": cases, "size": [ERASE_W, ERASE_H]}
+
+
 GROUPS = {
     "handoff": handoff_group,
     "handoff2": handoff2_group,
@@ -3531,6 +3684,7 @@ GROUPS = {
     "turntable-views": turntable_views_group,
     "e2e": e2e_group,
     "local-cutout": local_cutout_group,
+    "local-erase": local_erase_group,
 }
 
 

@@ -19,11 +19,12 @@
  * (frames); their picture output carries what came in (KIND_FOLLOWS_INPUT in
  * ./values.ts): a picture for a picture, a frame batch for a clip.
  *
- * Imports nothing at run time but the family chain and the remover's slug;
+ * Imports nothing at run time but the family chain and the remover's and LaMa's slugs;
  * ./eligibility.ts builds its rule table from localModelRows() when it loads.
  */
 import { familyOn, type RunnerFamily } from './families'
 import { BACKGROUND_REMOVER_SLUG } from './repair'
+import { PHOTO_FILL_SLUGS } from './layers'
 import type { RunnerNodeRule, RunnerWidgetSpec } from './eligibility'
 import type { ValueKind } from './values'
 import type { PaidCalls } from '../pricing/paidSettings'
@@ -60,16 +61,31 @@ export const UPSCALE_2X_TILE_SIZE = { default: 512, min: 0, max: 2048 } as const
  */
 export const UPSCALE_2X_MAX_PIXELS = 2560 * 1440
 
+// ── Object removal (R7.3, family `object-remove`) ──
+
+/** comfy_extras/nodes_object_remove.py ObjectRemoveNode's node_id. */
+export const OBJECT_REMOVE_CLASS = 'ObjectRemove'
+/**
+ * Replicate's LaMa (USER ruling (c)): the model this node runs today, the
+ * fill R3.7's Separate background and foreground already calls ('LaMa
+ * (fast)'), its card in paidRates.ts ($0.0007, an estimate until measured).
+ */
+export const OBJECT_REMOVE_SLUG = PHOTO_FILL_SLUGS['LaMa (fast)']
+/** `mask_grow`: IO.Int.Input(default=4, min=0, max=64, step=1). */
+export const OBJECT_REMOVE_GROW = { default: 4, min: 0, max: 64 } as const
+
 /** Every moved class's family (each task adds its row once its port exists). */
 export const LOCAL_MODEL_FAMILY_OF: Readonly<Record<string, RunnerFamily>> = {
   [BG_REMOVE_CLASS]: 'bg-remove',
   [UPSCALE_2X_CLASS]: 'upscale-2x',
+  [OBJECT_REMOVE_CLASS]: 'object-remove',
 }
 
 /** The service each moved class calls (ruling (b): the price's tooltip names it). Null: none (Lens, in the server). */
 export const SERVICE_OF: Readonly<Record<string, LocalModelService | null>> = {
   [BG_REMOVE_CLASS]: 'replicate',
   [UPSCALE_2X_CLASS]: 'replicate',
+  [OBJECT_REMOVE_CLASS]: 'replicate',
 }
 
 /** The tooltip on the price (ruling (b)): sentence case, plain, no node copy. */
@@ -110,12 +126,14 @@ export function serviceTooltip(classType: string, families: ReadonlySet<RunnerFa
 export const LOCAL_MODEL_PICTURE_INPUT: Readonly<Record<string, string>> = {
   [BG_REMOVE_CLASS]: 'frames',
   [UPSCALE_2X_CLASS]: 'frames',
+  [OBJECT_REMOVE_CLASS]: 'frames',
 }
 
 /** Each picture class's picture slots (a picture to the runner only while its family is on, eligibility.ts carriesImage). */
 export const LOCAL_MODEL_PICTURE_SLOTS: Readonly<Record<string, readonly number[]>> = {
   [BG_REMOVE_CLASS]: [0],
   [UPSCALE_2X_CLASS]: [0],
+  [OBJECT_REMOVE_CLASS]: [0],
 }
 
 /** What each moved class's other slots carry (applied only while its family is on, eligibility.ts outputKindsFor). */
@@ -123,6 +141,8 @@ export const LOCAL_MODEL_OUTPUT_KINDS: Readonly<Record<string, Readonly<Record<n
   [BG_REMOVE_CLASS]: { 1: 'mask' },
   // Its one slot follows its input (values.ts KIND_FOLLOWS_INPUT); the row is there so that applies while it is on.
   [UPSCALE_2X_CLASS]: {},
+  // R7.3: the same (a picture for a picture, a frame batch for a clip).
+  [OBJECT_REMOVE_CLASS]: {},
 }
 
 /** The largest picture each class's service takes (pixels), where its page states one (rule 6). */
@@ -158,13 +178,29 @@ export const UPSCALE_2X_WORDS = {
   noAnswer: 'The service sent back no upscaled picture.',
 } as const
 
+/** Object removal's own words (R7.3). */
+export const OBJECT_REMOVE_WORDS = {
+  noPicture: 'There is no picture to remove anything from.',
+  noMask: 'There is no mask of what to remove.',
+  maskSize: 'The mask must be the same size as the picture.',
+  maskCount: 'There must be one mask, or one for every picture.',
+  overCap: 'This clip is too long to remove objects from here.',
+  noAnswer: 'The service sent back no filled picture.',
+} as const
+
 /** What the start of the run says of a clip over the frame cap, in the class's own words. */
 export function overCapWords(classType: string): string {
-  return classType === UPSCALE_2X_CLASS ? UPSCALE_2X_WORDS.overCap : LOCAL_MODEL_WORDS.overCap
+  if (classType === UPSCALE_2X_CLASS) return UPSCALE_2X_WORDS.overCap
+  if (classType === OBJECT_REMOVE_CLASS) return OBJECT_REMOVE_WORDS.overCap
+  return LOCAL_MODEL_WORDS.overCap
 }
 
 const UPSCALE_2X_WIDGETS: Readonly<Record<string, RunnerWidgetSpec>> = {
   tile_size: { type: 'INT', required: true, min: UPSCALE_2X_TILE_SIZE.min, max: UPSCALE_2X_TILE_SIZE.max },
+}
+
+const OBJECT_REMOVE_WIDGETS: Readonly<Record<string, RunnerWidgetSpec>> = {
+  mask_grow: { type: 'INT', required: true, min: OBJECT_REMOVE_GROW.min, max: OBJECT_REMOVE_GROW.max },
 }
 
 const BG_REMOVE_WIDGETS: Readonly<Record<string, RunnerWidgetSpec>> = {
@@ -196,6 +232,16 @@ export function localModelRows(): Record<string, RunnerNodeRule> {
       inputCheck: 'local-model-source',
       widgets: UPSCALE_2X_WIDGETS,
     },
+    // R7.3: the picture or clip, and the mask (a mask value: one for every picture, or one each),
+    // `mask_grow` as ComfyUI validates it.
+    [OBJECT_REMOVE_CLASS]: {
+      family: 'object-remove',
+      mustLink: ['frames', 'mask'],
+      required: ['frames', 'mask'],
+      valueInputs: { frames: ['files', 'frames'], mask: ['mask'] },
+      inputCheck: 'local-model-source',
+      widgets: OBJECT_REMOVE_WIDGETS,
+    },
   }
 }
 
@@ -212,6 +258,8 @@ export function localModelSwitchedClasses(): Record<string, RunnerFamily> {
 const LOCAL_MODEL_SLUG: Readonly<Record<string, string>> = {
   [BG_REMOVE_CLASS]: BG_REMOVE_SLUG,
   [UPSCALE_2X_CLASS]: UPSCALE_2X_SLUG,
+  // R7.3: LaMa's card (paidRates.ts, `gpu_ceiling` $0.0007, an estimate), shared with R3.7's fill.
+  [OBJECT_REMOVE_CLASS]: OBJECT_REMOVE_SLUG,
 }
 
 /**

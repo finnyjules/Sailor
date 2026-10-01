@@ -94,6 +94,8 @@ export const RUNNER_OUTPUT_CLASSES: ReadonlySet<string> = new Set([
   'BackgroundRemove',
   // R7.2: Upscale (2×) is an output node (is_output_node=True).
   'UpscaleImage',
+  // R7.3: Object removal is an output node (is_output_node=True).
+  'ObjectRemove',
 ])
 
 /** ComfyUI's node_errors entry for a node that failed validation. */

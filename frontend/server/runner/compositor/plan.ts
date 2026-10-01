@@ -81,6 +81,16 @@ export function pictureSourceOf(prompt: ApiPrompt, link: ApiLink, depth = 0): Pi
     case 'UpscaleImage':
       if (slot === 0) return 'tensor'
       break
+    // Background remove (R7.1; R7.3's fix, taken only while `bg-remove` is on): the PNG of Python's
+    // tensor, read with its own channels: RGBA for `transparent`, RGB for `premultiplied` and
+    // `matte_only` (not the provider's RGBA view, which would hand Save image four channels).
+    case 'BackgroundRemove':
+      if (slot === 0) return 'tensor'
+      break
+    // Object removal (R7.3, taken only while `object-remove` is on): an RGB PNG of Python's tensor.
+    case 'ObjectRemove':
+      if (slot === 0) return 'tensor'
+      break
     default:
       // An effect's picture (R2.1): the tensor it made, kept with its own channels.
       if (Object.prototype.hasOwnProperty.call(EFFECT_PICTURE_OUTPUTS, node.class_type)) {

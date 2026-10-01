@@ -32,6 +32,7 @@ import { VIDEO_CORES } from '../video/cores'
 import type { SoundOpResult } from '../video/core/sound'
 import type { PilRaw } from '../pixels/pilPixels'
 import type { CutoutJob, CutoutResult } from '../pixels/cutout'
+import type { EraseJob, EraseResult } from '../pixels/erase'
 import { resampleCore } from '../../media/resample'
 
 /**
@@ -161,6 +162,12 @@ parentPort.on('message', (m) => {
       stopped()
       value = built.cut.cutout(m.job, isStopped)
       transfer = value.preview ? [value.picture.buffer, value.alpha.buffer, value.preview.buffer] : [value.picture.buffer, value.alpha.buffer]
+    }
+    // Object removal (R7.3, ../pixels/erase.ts): one picture's composite of the service's fill.
+    else if (m.op === 'px.erase') {
+      stopped()
+      value = built.erase.erase(m.job, isStopped)
+      transfer = value.preview ? [value.picture.buffer, value.preview.buffer] : [value.picture.buffer]
     }
     // Load video frames (R5.5): Pillow's resize(BILINEAR) of one RGB frame.
     else if (m.op === 'px.resizeRgb') {
@@ -496,6 +503,8 @@ export interface PixelsWorker {
   resizeRgb(rgb: Uint8Array, w: number, h: number, ow: number, oh: number): Promise<Uint8Array>
   /** Background remove (R7.1, ../pixels/cutout.ts): one picture's outputs from the service's answer (its RGBA handed over). */
   cutout(job: CutoutJob): Promise<CutoutResult>
+  /** Object removal (R7.3, ../pixels/erase.ts): one picture's composite of the service's fill (its buffers handed over). */
+  erase(job: EraseJob): Promise<EraseResult>
   /** An effect (R2.1) starts its batch: `fn` its op ('<core>.<fn>'), `params` its widgets, `count` the batch's length. */
   effectBegin(job: { cls: string; fn: string; params: Record<string, unknown>; count: number }): Promise<void>
   /**
@@ -614,6 +623,13 @@ export function pixelsInWorker<T>(signal: AbortSignal | undefined, job: (w: Pixe
       async cutout(job) {
         const own = job.rgba.byteOffset === 0 && job.rgba.byteLength === job.rgba.buffer.byteLength && !(job.rgba.buffer instanceof SharedArrayBuffer) ? job.rgba : job.rgba.slice()
         return await call(t, { op: 'px.cutout', job: { ...job, rgba: own } }, [own.buffer as ArrayBuffer]) as CutoutResult
+      },
+      async erase(job) {
+        const own = (b: Uint8Array) => b.byteOffset === 0 && b.byteLength === b.buffer.byteLength && !(b.buffer instanceof SharedArrayBuffer) ? b : b.slice()
+        const j = { ...job, rgb: own(job.rgb), fill: own(job.fill), mask: own(job.mask) }
+        // One buffer may back two of them (a caller's own copy): each is transferred once.
+        const buffers = [...new Set([j.rgb.buffer, j.fill.buffer, j.mask.buffer])] as ArrayBuffer[]
+        return await call(t, { op: 'px.erase', job: j }, buffers) as EraseResult
       },
       async resizeRgb(rgb, width, height, ow, oh) {
         const own = rgb.byteOffset === 0 && rgb.byteLength === rgb.buffer.byteLength && !(rgb.buffer instanceof SharedArrayBuffer) ? rgb : rgb.slice()
