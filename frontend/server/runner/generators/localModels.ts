@@ -136,7 +136,7 @@ import {
   SUBJECT_MASK_CLASS, SUBJECT_MASK_GROW, SUBJECT_MASK_MODES, SUBJECT_MASK_POINT, SUBJECT_MASK_WORDS,
   FRAME_INTERP_AI_CLASS, FRAME_INTERP_AI_MULTIPLIER, RIFE_VIDEO_SLUG, SLOW_MOTION_AI_WORDS, rifePricedPixels, rifeTakes, slowMotionAiCount,
   WHISPER_CLASS, WHISPER_FPS, WHISPER_SLUG, WHISPER_WORDS, WIZPER_LANGUAGES, whisperMaxSeconds,
-  VOCALS_CLASS, VOCALS_RATE, VOCALS_SHIFTS, VOCALS_SLUG, VOCALS_WORDS, vocalsMaxSeconds, vocalsWork,
+  VOCALS_CLASS, VOCALS_MODEL_SENT, VOCALS_RATE, VOCALS_SHIFTS, VOCALS_SLUG, VOCALS_WORDS, vocalsMaxSeconds, vocalsWork,
   type BgRemoveOutput, type SubjectMaskMode,
 } from '#shared/runner/localModels'
 import { parseMaskPoints, samPointsInput, samSubjectInput, samTextInput } from '#shared/runner/samInput'
@@ -1535,13 +1535,15 @@ export function vocalsShifts(v: unknown): number {
 
 /**
  * The request (names from the saved schema, ruling (i)): the sound, Python's
- * model and shifts, `split` as Python passes it, two-stem mode (`stem:
+ * model as the service names it (VOCALS_MODEL_SENT: `mdx_extra` is sent as
+ * its quantised `mdx_extra_q`, the controller's ruling) and shifts, `split` as Python passes it, two-stem mode (`stem:
  * 'vocals'`: the vocals and `no_vocals`, the sum of the other stems), and
  * the stems back as lossless float32 WAVs, never rescaled (`clip_mode: 'none'`:
  * Python's stems are the model's floats as they are).
  */
 export function vocalsInput(audioUrl: string, model: string, shifts: number): Record<string, unknown> {
-  return { audio: audioUrl, model, shifts, split: true, stem: 'vocals', output_format: 'wav', wav_format: 'float32', clip_mode: 'none' }
+  const sent = Object.prototype.hasOwnProperty.call(VOCALS_MODEL_SENT, model) ? VOCALS_MODEL_SENT[model]! : model
+  return { audio: audioUrl, model: sent, shifts, split: true, stem: 'vocals', output_format: 'wav', wav_format: 'float32', clip_mode: 'none' }
 }
 
 /** The answer's two stems (`output: { vocals, no_vocals }`), or null when either is missing. */

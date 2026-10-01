@@ -224,12 +224,15 @@ export const VOCALS_SLUG = 'ryan5453/demucs'
 /** `model`'s options (its define_schema). */
 export const VOCALS_MODELS = ['htdemucs', 'htdemucs_ft', 'mdx_extra'] as const
 /**
- * The models the service takes (the saved schema's `model` enum holds
- * `htdemucs` and `htdemucs_ft`, not `mdx_extra`: only its quantised
- * `mdx_extra_q`). `mdx_extra` leaves the workflow to the engine (rule 3;
- * named in R7.8's report, with its plan).
+ * The model the service is sent for each of Python's (controller ruling,
+ * R7.8 fix round 1): the saved schema's `model` enum holds `htdemucs` and
+ * `htdemucs_ft` as Python names them, but not `mdx_extra` — only its
+ * quantised `mdx_extra_q`, the same model (the same bag of networks, its
+ * weights stored in fewer bits; demucs' author: no quality lost). Under the
+ * user's matching rule it only has to sound the same, so `mdx_extra` is sent
+ * as `mdx_extra_q` and never leaves the workflow to the engine.
  */
-export const VOCALS_MODELS_SENT = ['htdemucs', 'htdemucs_ft'] as const
+export const VOCALS_MODEL_SENT: Readonly<Record<string, string>> = { htdemucs: 'htdemucs', htdemucs_ft: 'htdemucs_ft', mdx_extra: 'mdx_extra_q' }
 /** `shifts`: IO.Int.Input(default=1, min=0, max=10). The saved schema takes any integer. */
 export const VOCALS_SHIFTS = { default: 1, min: 0, max: 10 } as const
 /**
@@ -244,9 +247,10 @@ export const VOCALS_RATE = 44100
 /**
  * How much more GPU time a setting takes than htdemucs at one pass (its
  * price): `htdemucs_ft` is a bag of four models (Python's tooltip: "~4×
- * slower"); `shifts` passes average that many runs (0 and 1: one run).
+ * slower"); `mdx_extra` (sent as `mdx_extra_q`) is a bag of four models too,
+ * held at the same ×4; `shifts` passes average that many runs (0 and 1: one run).
  */
-export const VOCALS_MODEL_WORK: Readonly<Record<string, number>> = { htdemucs: 1, htdemucs_ft: 4 }
+export const VOCALS_MODEL_WORK: Readonly<Record<string, number>> = { htdemucs: 1, htdemucs_ft: 4, mdx_extra: 4 }
 
 /** Where a Vocal separator node runs, for its sound cap: `place`, else the canvas's "up to" place, else this computer's (the larger). */
 export function vocalsMaxSeconds(place: 'hosted' | 'local' | null | undefined): number {
@@ -520,7 +524,7 @@ const WHISPER_WIDGETS: Readonly<Record<string, RunnerWidgetSpec>> = {
 }
 
 const VOCALS_WIDGETS: Readonly<Record<string, RunnerWidgetSpec>> = {
-  model: { type: 'COMBO', required: true, options: VOCALS_MODELS_SENT },
+  model: { type: 'COMBO', required: true, options: VOCALS_MODELS },
   shifts: { type: 'INT', required: true, min: VOCALS_SHIFTS.min, max: VOCALS_SHIFTS.max },
 }
 
@@ -624,7 +628,7 @@ export function localModelRows(
       widgets: WHISPER_WIDGETS,
     },
     // R7.8: the sound (any runner sound, each source taken only while its own family is on), the model
-    // the service takes (mdx_extra: the engine's) and the shifts as ComfyUI validates them.
+    // and the shifts as ComfyUI validates them (mdx_extra is sent as mdx_extra_q, fix round 1).
     [VOCALS_CLASS]: {
       family: 'vocal-split',
       mustLink: ['audio'],

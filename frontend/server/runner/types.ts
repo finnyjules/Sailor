@@ -252,6 +252,14 @@ export interface TakeRecord {
    */
   measured?: Record<string, MeasuredMedia>
   /**
+   * R7.8 fix round 1: node id → the most bytes that node keeps for the run
+   * (an R7 node's clip batch and masks, Slow motion (AI)'s batch, Vocal
+   * separator's two stems), bounded at the start of the run. Each leg's hold
+   * first checks they fit the run's kept room (engine.ts keptRoomBeforeHold).
+   * Absent: nothing such.
+   */
+  keptUpTo?: Record<string, number>
+  /**
    * The capped pictures chosen at the start of the run (R3.H fix round 2),
    * by pictureHandoff.ts handoffKey: the bytes kept for the run (a JPEG is
    * kept as `.bin`), their format, and whether they keep see-through parts.

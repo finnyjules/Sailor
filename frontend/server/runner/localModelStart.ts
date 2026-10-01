@@ -42,13 +42,14 @@ import { outputKind } from '#shared/runner/values'
 import { pyIntOf } from '#shared/runner/pyText'
 import {
   BG_REMOVE_CLASS, FRAME_INTERP_AI_CLASS, SLOW_MOTION_AI_MAX_FRAMES, SLOW_MOTION_AI_WORDS, rifeTakes, slowMotionAiCount, LOCAL_MODEL_MAX_FRAMES, LOCAL_MODEL_MAX_PIXELS, LOCAL_MODEL_OUTPUT_KINDS, LOCAL_MODEL_PICTURE_INPUT, LOCAL_MODEL_WORDS, OBJECT_REMOVE_CLASS,
-  OBJECT_REMOVE_WORDS, SAM_MASK_CLASSES, SUBJECT_MASK_CLASS, UPSCALE_2X_WORDS, localModelMaskSlot, localModelOn, localModelPictureSlot, overCapWords,
+  OBJECT_REMOVE_WORDS, SAM_MASK_CLASSES, SUBJECT_MASK_CLASS, UPSCALE_2X_CLASS, UPSCALE_2X_WORDS, localModelMaskSlot, localModelOn, localModelPictureSlot, overCapWords,
 } from '#shared/runner/localModels'
 import { linkPictureBound, linkPictureShapes, pictureSize, type Shape } from '../utils/graphInputPixels'
 import { pictureMeta } from './pictures/pythonView'
 import { hasAlphaAsPil } from './pictures/mask'
 import type { FrameShape } from './video/table'
-import { keptPeak } from './video/start'
+import { keptBatchBound, keptPeak } from './video/start'
+import { batchSlotOf } from './video/shapes'
 import { VIDEO_EFFECTS } from './video/table'
 import { parseInputFileRef } from './inputs'
 import type { OutputFile } from './types'
@@ -150,6 +151,12 @@ export interface LocalModelStart {
    * raw size and a margin): 0 with no clip. The engine sums the takes against the run's kept room.
    */
   keptBytes: number
+  /**
+   * R7.8 fix round 1: node id → the most bytes that node itself keeps for the run (a clip's output
+   * batch, its masks; Slow motion (AI)'s output batch), for the run's kept room before each leg's
+   * hold (engine.ts keptRoomBeforeHold). A single picture keeps nothing sized here.
+   */
+  keptByNode?: Record<string, number>
   /** The first node whose count can't be known or is over the cap: the workflow goes to the engine. */
   problem: { message: string; nodeId: string; classType: string } | null
   /**
@@ -265,6 +272,7 @@ export async function localModelStartProblems(
   const kinds = outputKindsFor(families)
   let shapes: ReadonlyMap<string, FrameShape> | null = null
   let masks = 0
+  const keptByNode: Record<string, number> = {}
   for (const [nodeId, n] of Object.entries(prompt)) {
     // R7.6: Slow motion (AI), its clip's count and size (one call for the whole clip).
     if (n.class_type === FRAME_INTERP_AI_CLASS && localModelOn(n.class_type, families)) {
@@ -275,6 +283,9 @@ export async function localModelStartProblems(
       if ('problem' in got) return { counts, keptBytes: 0, problem: { message: got.problem, nodeId, classType: n.class_type } }
       counts[nodeId] = got.frames
       sizes[nodeId] = { w: got.w, h: got.h, place: o.hosted ? 'hosted' : 'local' }
+      // Its output batch: (T − 1)·m + 1 frames of the clip's size.
+      const out = shapes.get(`${nodeId}:0`) ?? { count: slowMotionAiCount(got.frames, n.inputs?.multiplier as number), w: got.w, h: got.h, exact: false }
+      keptByNode[nodeId] = keptBatchBound(out)
       continue
     }
     if (!localModelOn(n.class_type, families) || !Object.prototype.hasOwnProperty.call(LOCAL_MODEL_PICTURE_INPUT, n.class_type)) continue
@@ -290,6 +301,13 @@ export async function localModelStartProblems(
       // A class with a mask slot (Background remove) keeps a mask per frame too.
       if (s && keepsMasks(n.class_type)) masks += maskBytesBound(s)
       if (s) pixels = s.w * s.h
+      // What it keeps itself: its output batch (R6's shape of it; else its input's, twice each side for
+      // Upscale (2×)), and its masks.
+      if (s) {
+        const scale = n.class_type === UPSCALE_2X_CLASS ? 2 : 1
+        const out = shapes.get(`${nodeId}:${batchSlotOf(n.class_type)}`) ?? { ...s, w: s.w * scale, h: s.h * scale }
+        keptByNode[nodeId] = keptBatchBound(out) + (keepsMasks(n.class_type) ? maskBytesBound(s) : 0)
+      }
     }
     else {
       count = pictureBound(prompt, link, families)
@@ -322,13 +340,13 @@ export async function localModelStartProblems(
       }
     }
   }
-  if (!shapes) return { counts, sizes, keptBytes: 0, problem: null }
+  if (!shapes) return { counts, sizes, keptBytes: 0, keptByNode, problem: null }
   const peak = keptPeak(prompt, families, shapes, { release: false })
   if (!peak) {
     const first = Object.keys(counts)[0]!
     return { counts, keptBytes: 0, problem: { message: LOCAL_MODEL_WORDS.unknownCount, nodeId: first, classType: prompt[first]!.class_type } }
   }
-  return { counts, sizes, keptBytes: peak.bytes + masks, problem: null }
+  return { counts, sizes, keptBytes: peak.bytes + masks, keptByNode, problem: null }
 }
 
 /** Generate music and its twin: the sound is its `duration` setting long (IO.Int 1–30; MusicGen makes that many seconds). */

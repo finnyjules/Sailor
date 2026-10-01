@@ -61,6 +61,7 @@ import { frameStartProblems, framesSoundVerdict } from './media/frameNodes'
 import { hasVideoEffect, keptPeak, lutStartProblems, mediaEffectRefusals, mediaEffectStartProblems, nearLimit, needsExactCount, waveformStartProblems } from './video/start'
 import { frameShapes, videoSourceShapeOf } from './video/shapes'
 import { hasLocalModelPicture, localModelStartProblems, soundBoundOf } from './localModelStart'
+import { vocalsStemMaxBytes } from './generators/localModels'
 import {
   LOCAL_MODEL_WORDS, VOCALS_CLASS, VOCALS_WORDS, WHISPER_CLASS, WHISPER_WORDS, isLocalModelClass, vocalsMaxSeconds, whisperMaxSeconds,
 } from '#shared/runner/localModels'
@@ -313,6 +314,8 @@ const NO_FILE: Record<Exclude<OutputMedia, 'value'>, string> = {
 }
 /** A leg whose nodes would keep more files than the run may hold (R3.17 fix round 1), refused before the hold. */
 export const KEPT_ROOM_REFUSED = 'This run would keep more video than Sailor can hold for one run. Run fewer turntables with extra views at once.'
+/** R7.8 fix round 1: the same, where the clips, slowed clips or separated stems a run keeps don't fit. */
+export const KEPT_ROOM_MEDIA_REFUSED = 'This run would keep more video or sound than Sailor can hold for one run. Run fewer or shorter clips and songs at once.'
 /** A resumed pipeline call that is no longer the call written down (the F12 rule). */
 export const PIPELINE_CALL_CHANGED = 'This step changed while it was running, so it was stopped. Run it again.'
 
@@ -882,22 +885,28 @@ export function createEngine(deps: EngineDeps) {
    * views: its arcs' clips and the stitched file's work copy,
    * turntableKeptBytes), on top of what the run keeps already, must fit the
    * run's cap (MEDIA_CAPS.keptBytesPerRun); else the leg is refused plainly
-   * before anything is held or sent.
+   * before anything is held or sent. R7.8 fix round 1: with the R7 nodes'
+   * own kept files too (TakeRecord.keptUpTo: Vocal separator's two stems, a
+   * clip's batch and masks, Slow motion (AI)'s batch), so none is refused
+   * only after its service was paid.
    */
   async function keptRoomBeforeHold(run: RunRecord, takeIdx: number[]): Promise<void> {
     const cap = (deps.hosted() ? MEDIA_CAPS.hosted : MEDIA_CAPS.local).keptBytesPerRun
     if (!Number.isFinite(cap)) return
     let need = 0
+    let media = 0
     for (const t of takeIdx) {
       const take = run.takes[t]!
       for (const id of legNodes(take.prompt, gateStateOf(take))) {
         const n = take.prompt[id]
         if (n?.class_type === TURNTABLE_CLASS) need += turntableKeptBytes(n.inputs ?? {})
+        const own = take.keptUpTo?.[id]
+        if (typeof own === 'number' && own > 0 && take.nodes[id]?.status !== 'done') media += own
       }
     }
-    if (!need) return
+    if (!need && !media) return
     const used = (await kept.runBytes(run.id)) + (await kept.workBytes(run.id))
-    if (used + need > cap) throw refuse(KEPT_ROOM_REFUSED, 413)
+    if (used + need + media > cap) throw refuse(media ? KEPT_ROOM_MEDIA_REFUSED : KEPT_ROOM_REFUSED, 413)
   }
 
   /**
@@ -2227,6 +2236,8 @@ export function createEngine(deps: EngineDeps) {
     // The node's turn reads them again. What was measured is recorded on the
     // take (the tight hold, F22 fix round 1).
     const measured: Record<string, MeasuredMedia>[] = prompts.map(() => ({}))
+    // R7.8 fix round 1: what each R7 node keeps for the run at most (TakeRecord.keptUpTo).
+    const keptUpTo: Record<string, number>[] = prompts.map(() => ({}))
     // The request going away stops this media work (R7.7 fix round 1): every probe and decode below
     // runs under its signal (each tool job in its own media slot, given back when it is killed).
     const startSignal = i.signal
@@ -2259,7 +2270,11 @@ export function createEngine(deps: EngineDeps) {
           const cap = longest.seconds
           if (media && media.problem !== null) throw refuse(media.problem, 400, { nodeId, classType: n.class_type })
           // The empty Audio card's second of silence is measured exactly (its WAV, as at the turn).
-          if (media) { measured[index]![nodeId] = { ...media.measured, seconds: { ...media.measured.seconds, place } }; continue }
+          if (media) {
+            measured[index]![nodeId] = { ...media.measured, seconds: { ...media.measured.seconds, place } }
+            if (n.class_type === VOCALS_CLASS) keptUpTo[index]![nodeId] = 2 * vocalsStemMaxBytes(Math.min(media.measured.seconds.audio ?? cap, cap))
+            continue
+          }
           const link = n.inputs?.audio
           let found: { seconds: number; exact: boolean } | null = null
           if (isLink(link)) {
@@ -2281,6 +2296,8 @@ export function createEngine(deps: EngineDeps) {
           // Held on the bound (or, where the maker can't be bounded, on the place's longest sound); the
           // node's turn measures the WAV it sends and is charged on that, never above the hold.
           measured[index]![nodeId] = { seconds: { place, ...(bound !== null ? { audioUpTo: Math.min(bound, cap) } : {}) }, sha: {} }
+          // Its two stems are kept for the run: counted against the kept room before the hold.
+          if (n.class_type === VOCALS_CLASS) keptUpTo[index]![nodeId] = 2 * vocalsStemMaxBytes(bound !== null ? Math.min(bound, cap) : cap)
           continue
         }
         if (!media) continue
@@ -2380,6 +2397,7 @@ export function createEngine(deps: EngineDeps) {
         const [nodeId] = Object.keys(counted.counts)
         throw refuse(LOCAL_MODEL_WORDS.overCap, 400, { nodeId, classType: nodeId ? p[nodeId]?.class_type : undefined, reason: RUNNER_NOT_ELIGIBLE })
       }
+      for (const [nodeId, bytes] of Object.entries(counted.keptByNode ?? {})) keptUpTo[index]![nodeId] = bytes
       for (const [nodeId, frames] of Object.entries(counted.counts)) {
         const was = measured[index]![nodeId]
         // R7.6: Slow motion (AI) is priced by its clip's frame size too.
@@ -2509,6 +2527,7 @@ export function createEngine(deps: EngineDeps) {
         openGates: [],
         droppedGates: [],
         ...(Object.keys(measured[index]!).length ? { measured: measured[index] } : {}),
+        ...(Object.keys(keptUpTo[index]!).length ? { keptUpTo: keptUpTo[index] } : {}),
       })),
       legs: [],
       charges: [],

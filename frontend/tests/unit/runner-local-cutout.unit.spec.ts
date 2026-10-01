@@ -72,6 +72,7 @@ import { pixelsInWorker } from '~~/server/runner/compositor/worker'
 import { pilRgba } from '~~/server/runner/pictures/pythonView'
 import { decodeMask } from '~~/server/runner/pictures/mask'
 import { createFileKeptBytes } from '~~/server/runner/keptBytes'
+import { KEPT_ROOM_MEDIA_REFUSED } from '~~/server/runner/engine'
 import { KEPT_MEDIA_MAKERS } from '~~/server/runner/keptRelease'
 import { nodePriceTooltip } from '~/lib/nodeCreditEstimate'
 import type { OutputFile, RunnerValue } from '~~/server/runner/types'
@@ -515,6 +516,31 @@ describe('a clip, one call per frame (ruling (f))', () => {
     // Three frames' dollars added up and marked up once (USER ruling): 3 × $0.0004 = $0.0012 → 1 credit (+ render).
     expect(take.nodes.n!.credits).toBe(1)
     expect(charged(k)).toEqual([[2, 2]])
+  })
+
+  it('R7.8 fix round 1: a clip whose own batch and masks wouldn\'t fit the run\'s kept room is refused before the hold, nothing sent', LONG, async () => {
+    await requireMediaTools()
+    const prompt: ApiPrompt = { v: lvf, n: bgNode(c, ['v', 0]), s: saveFrames(['n', 0]) }
+    // What the start records it keeps: its three-frame batch and masks (the clip's frames at most 64 a side).
+    const run = async (used: number) => {
+      const replicate = replicateServing()
+      const inner = createFileKeptBytes(mkdtempSync(join(scratch, 'kept-room-')))
+      const kept = { ...inner, runBytes: async (r: string) => used + await inner.runBytes(r) }
+      const k = makeKit({ hosted: true, replicate, deps: { families: () => ON_CLIP, download: async () => ({ bytes: b64(c.answers[0]!), contentType: 'image/png' }), kept } })
+      writeFileSync(join(k.root, 'input', clip), readFileSync(clipPath(clip)))
+      const out = await k.engine.startRun({ userId: k.userId, takes: [prompt], ...START }).then(r => r, (e: Error) => e)
+      return { k, replicate, out }
+    }
+    const probe = await run(0)
+    expect(probe.out).not.toBeInstanceOf(Error)
+    const { runId } = probe.out as { runId: string }
+    await probe.k.engine.settled(runId)
+    const own = (await probe.k.store.get(runId))!.takes[0]!.keptUpTo?.n as number
+    expect(own).toBeGreaterThan(0)
+    const full = await run(MEDIA_CAPS.hosted.keptBytesPerRun - own + 1)
+    expect((full.out as Error).message).toBe(KEPT_ROOM_MEDIA_REFUSED)
+    expect(full.k.ledger.hold).not.toHaveBeenCalled()
+    expect(full.replicate.submitted()).toEqual([])
   })
 
   it('Stop mid-clip: the calls in flight cancelled, nothing charged, no tool process left within a second, no partial batch kept', LONG, async () => {

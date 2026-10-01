@@ -28,25 +28,28 @@ import { ALL_RUNNER_FAMILIES, LOCAL_MODEL_FAMILIES, LOCAL_MODEL_REQUIRES, LOCAL_
 import { PROVIDER_TYPES, SOUND_OUTPUTS, isRunnerEligible, outputKindsFor, runnerTakesNode, valueWiresAllowed } from '#shared/runner/eligibility'
 import { nodesNeedingEngine } from '#shared/runner/needsEngine'
 import {
-  LOCAL_MODEL_FAMILY_OF, SERVICE_OF, VOCALS_CLASS, VOCALS_MAX_SECONDS, VOCALS_MODELS, VOCALS_MODELS_SENT, VOCALS_RATE, VOCALS_SHIFTS, VOCALS_SLUG,
+  LOCAL_MODEL_FAMILY_OF, SERVICE_OF, VOCALS_CLASS, VOCALS_MAX_SECONDS, VOCALS_MODELS, VOCALS_MODEL_SENT, VOCALS_RATE, VOCALS_SHIFTS, VOCALS_SLUG,
   VOCALS_WORDS, localModelCalls, serviceTooltip, vocalsCalls, vocalsWork,
 } from '#shared/runner/localModels'
 import { RUNNER_NOT_ELIGIBLE } from '#shared/runner/messages'
-import { MEDIA_WORDS } from '#shared/runner/media'
+import { MEDIA_CAPS, MEDIA_WORDS } from '#shared/runner/media'
 import { PAID_RATES, paidCallUsd } from '#shared/pricing/paidRates'
 import { priceNode } from '#shared/pricing/nodePrice'
 import { creditsForUsd } from '#shared/pricing/markup'
 import { estimateUsdForNodes } from '~/lib/costEstimate'
 import { planNode, type NodePlan, type PipelineIO } from '~~/server/runner/executors'
 import { RUNNER_ROUTES } from '~~/server/runner/generators/twins'
-import { planVocals, vocalsInput, vocalsStemMaxBytes, vocalsStemUrls } from '~~/server/runner/generators/localModels'
+import { vocalsInput, vocalsStemMaxBytes, vocalsStemUrls } from '~~/server/runner/generators/localModels'
 import { vocalsSilence, vocalsSilentStems, vocalsSound, vocalsStereo, type VocalsSound } from '~~/server/runner/soundWav'
 import { cardSilenceFor } from '~~/server/runner/soundInMedia'
-import { soundBoundOf } from '~~/server/runner/localModelStart'
+import { localModelStartProblems, maskBytesBound, soundBoundOf } from '~~/server/runner/localModelStart'
+import { keptBatchBound } from '~~/server/runner/video/start'
 import { soundShapes } from '~~/server/runner/video/soundShapes'
 import { decodeAudio, type DecodedSound } from '~~/server/media/decode'
 import { floatWav } from '~~/server/media/encode'
 import { mediaLimiter } from '~~/server/media/run'
+import { createMemoryKeptBytes, type KeptBytes } from '~~/server/runner/keptBytes'
+import { KEPT_ROOM_MEDIA_REFUSED } from '~~/server/runner/engine'
 
 /** Every tool process the tests start (none may outlive a closed request), and a hook on each spawn. */
 const PROCS = vi.hoisted(() => ({ pids: [] as number[], onSpawn: null as null | ((tool: string, pid: number) => void) }))
@@ -208,16 +211,16 @@ describe('the sound sent: Python\'s channels, at the sound\'s own rate', () => {
 
 describe('the request, against the saved schema', () => {
   it('two-stem mode, float32 WAVs, never rescaled, for every model the service takes and every shifts Python allows', () => {
-    for (const model of VOCALS_MODELS_SENT) {
+    for (const model of VOCALS_MODELS) {
       for (let shifts = VOCALS_SHIFTS.min; shifts <= VOCALS_SHIFTS.max; shifts++) {
         const p = vocalsInput('https://fal.storage/vocal_separator.flac', model, shifts)
         expect(checkPayload(SCHEMA, p), `${model} ${shifts}`).toEqual([])
-        expect(p).toEqual({ audio: 'https://fal.storage/vocal_separator.flac', model, shifts, split: true, stem: 'vocals', output_format: 'wav', wav_format: 'float32', clip_mode: 'none' })
+        expect(p).toEqual({ audio: 'https://fal.storage/vocal_separator.flac', model: VOCALS_MODEL_SENT[model], shifts, split: true, stem: 'vocals', output_format: 'wav', wav_format: 'float32', clip_mode: 'none' })
       }
     }
-    // The schema refuses Python's mdx_extra (it has only the quantised mdx_extra_q): the row leaves it to the engine.
-    expect(checkPayload(SCHEMA, vocalsInput('https://x.test/a.flac', 'mdx_extra', 1))).not.toEqual([])
-    expect(VOCALS_MODELS_SENT).toEqual(VOCALS_MODELS.filter(m => m !== 'mdx_extra'))
+    // Fix round 1 (controller ruling): the schema has no mdx_extra, only its quantised mdx_extra_q, which is sent for it.
+    expect(VOCALS_MODEL_SENT).toEqual({ htdemucs: 'htdemucs', htdemucs_ft: 'htdemucs_ft', mdx_extra: 'mdx_extra_q' })
+    expect(checkPayload(SCHEMA, { ...vocalsInput('https://x.test/a.flac', 'htdemucs', 1), model: 'mdx_extra' })).not.toEqual([])
   })
 
   it('the answer\'s two stems: `vocals` and `no_vocals`; anything else is no answer', () => {
@@ -326,7 +329,7 @@ describe('the price: a new card, by the seconds sent times the settings\' work',
     expect(PAID_RATES[VOCALS_SLUG]).toMatchObject({ unit: 'per_input_second', perSecond: 0.0002, minSeconds: 170, service: 'replicate', confidence: 'estimate' })
     expect(paidCallUsd({ endpoint: VOCALS_SLUG, inputSeconds: 30 })).toBe(0.034)
     expect(paidCallUsd({ endpoint: VOCALS_SLUG, inputSeconds: 600 })).toBe(0.12)
-    expect([vocalsWork('htdemucs', 0), vocalsWork('htdemucs', 1), vocalsWork('htdemucs', 10), vocalsWork('htdemucs_ft', 2), vocalsWork('htdemucs', ['x', 0]), vocalsWork('mdx_extra', 1)]).toEqual([1, 1, 10, 8, 10, null])
+    expect([vocalsWork('htdemucs', 0), vocalsWork('htdemucs', 1), vocalsWork('htdemucs', 10), vocalsWork('htdemucs_ft', 2), vocalsWork('htdemucs', ['x', 0]), vocalsWork('mdx_extra', 1), vocalsWork('nope', 1)]).toEqual([1, 1, 10, 8, 10, 4, null])
   })
 
   it('measured: those seconds; bounded: the bound; neither: the longest where it runs (hosted 10 minutes, this computer 20)', () => {
@@ -339,7 +342,8 @@ describe('the price: a new card, by the seconds sent times the settings\' work',
     expect(call({ framesUpTo: 'hosted' })).toBe(600)
     expect(call({ framesUpTo: 'local' })).toBe(1200)
     expect(call({})).toBe(1200)
-    expect('refused' in vocalsCalls({ model: 'mdx_extra', shifts: 1 }, {})).toBe(true)
+    expect(call({ audio: 10 }, { model: 'mdx_extra', shifts: 1 })).toBe(40)
+    expect('refused' in vocalsCalls({ model: 'nope', shifts: 1 }, {})).toBe(true)
     expect(localModelCalls(VOCALS_CLASS, 300, { model: 'htdemucs', shifts: 1 }, { audio: 3 })).toEqual(vocalsCalls({ model: 'htdemucs', shifts: 1 }, { audio: 3 }))
     expect(credits({ audio: 30 })).toBe(creditsForUsd(0.034))
     expect(credits({ place: 'hosted' })).toBe(creditsForUsd(0.12))
@@ -448,6 +452,77 @@ describe('through the engine (ComfyUI off): Karaoke\'s chain held, sent, charged
   }, 60_000)
 })
 
+describe('fix round 1: the kept room before the hold, and mdx_extra', () => {
+  /** A kept store that says the run already keeps `used` bytes. */
+  const nearlyFull = (used: number): KeptBytes => {
+    const inner = createMemoryKeptBytes()
+    return { ...inner, runBytes: async (runId: string) => used + await inner.runBytes(runId) }
+  }
+  const HOSTED_CAP = MEDIA_CAPS.hosted.keptBytesPerRun
+
+  it('Vocal separator whose two stems wouldn\'t fit the run\'s kept room: refused before the hold, nothing sent; with room, it runs', async () => {
+    await requireMediaTools()
+    // A 2 s song: held for its header bound (3 s), so its stems count 2 × vocalsStemMaxBytes(3 s + slack).
+    const need = 2 * vocalsStemMaxBytes(3 + 1e-3)
+    const replicate = createFakeReplicate({ answer: () => STEM_URLS })
+    const k = makeKit({ hosted: true, replicate, deps: { families: () => ON, download: stemDownload(2), kept: nearlyFull(HOSTED_CAP - need + 1) } })
+    putInput(k.root, 'song.wav', clipBytes('pcm16', 44100, 1, 44100 * 2, 8601))
+    const err = await k.engine.startRun({ userId: k.userId, takes: [{ s: loadAudio(), n: vocalsNode(), ...saves() }], ...START }).then(() => null, (e: Error) => e)
+    expect(err?.message).toBe(KEPT_ROOM_MEDIA_REFUSED)
+    expect(k.ledger.hold).not.toHaveBeenCalled()
+    expect(replicate.submitted()).toEqual([])
+    expect(k.upload).not.toHaveBeenCalled()
+    // The partial control: with just enough room (the same run, a little more free), it runs and keeps both stems.
+    const r2 = createFakeReplicate({ answer: () => STEM_URLS })
+    const k2 = makeKit({ hosted: true, replicate: r2, deps: { families: () => ON, download: stemDownload(2), kept: nearlyFull(HOSTED_CAP - need - 64 * 1024 * 1024) } })
+    putInput(k2.root, 'song.wav', clipBytes('pcm16', 44100, 1, 44100 * 2, 8601))
+    const { runId } = await k2.engine.startRun({ userId: k2.userId, takes: [{ s: loadAudio(), n: vocalsNode(), ...saves() }], ...START })
+    await k2.engine.settled(runId)
+    const take = (await k2.store.get(runId))!.takes[0]!
+    expect(take.keptUpTo).toEqual({ n: need })
+    for (const id of ['s', 'n', 'v', 'i']) expect(take.nodes[id]!.status, `${id}: ${take.nodes[id]!.error ?? ''}`).toBe('done')
+    expect(r2.submitted().length).toBe(1)
+  }, 120_000)
+
+  it('the start records what each clip node keeps itself: Slow motion (AI)\'s output batch, Upscale (2×)\'s doubled batch, Background remove\'s batch and masks', async () => {
+    const fam = new Set<RunnerFamily>(['cards', 'media-video', 'slow-motion-ai', 'upscale-2x', 'bg-remove'])
+    const lvf = { class_type: 'LoadVideoFrames', inputs: { file: 'a.mp4', max_seconds: 10, max_frames: 10, max_size: 64, start_frame: 0, stride: 1 } }
+    const p: ApiPrompt = {
+      v: lvf,
+      m: { class_type: 'FrameInterpolateAI', inputs: { frames: ['v', 0], multiplier: 2 } },
+      u: { class_type: 'UpscaleImage', inputs: { frames: ['v', 0], tile_size: 512 } },
+      b: { class_type: 'BackgroundRemove', inputs: { frames: ['v', 0], output: 'transparent', edge_softness: 0 } },
+    }
+    const clip = { count: 10, w: 64, h: 36, exact: true }
+    const shapes = new Map([['v:0', clip], ['m:0', { ...clip, count: 19 }], ['u:0', { ...clip, w: 128, h: 72 }], ['b:0', clip]])
+    const got = await localModelStartProblems(p, fam, { hosted: true, shapes: async () => shapes })
+    expect(got.problem).toBeNull()
+    expect(got.keptByNode).toEqual({
+      m: keptBatchBound({ ...clip, count: 19 }),
+      u: keptBatchBound({ ...clip, w: 128, h: 72 }),
+      b: keptBatchBound(clip) + maskBytesBound(clip),
+    })
+  })
+
+  it('mdx_extra (Python\'s) is sent as the service\'s mdx_extra_q, through the engine; its payload passes the saved schema', async () => {
+    await requireMediaTools()
+    const replicate = createFakeReplicate({ answer: () => STEM_URLS })
+    const k = makeKit({ hosted: true, replicate, deps: { families: () => ON, download: stemDownload(2) } })
+    putInput(k.root, 'song.wav', clipBytes('pcm16', 44100, 2, 44100 * 2, 8602))
+    const p: ApiPrompt = { s: loadAudio(), n: vocalsNode({ model: 'mdx_extra', shifts: 2 }), ...saves() }
+    expect(isRunnerEligible(p, ON)).toBe(true)
+    const { runId } = await k.engine.startRun({ userId: k.userId, takes: [p], ...START })
+    await k.engine.settled(runId)
+    const take = (await k.store.get(runId))!.takes[0]!
+    expect(take.nodes.n!.status, take.nodes.n!.error ?? '').toBe('done')
+    const sent = replicate.submitted()[0]!.payload
+    expect(sent).toMatchObject({ model: 'mdx_extra_q', shifts: 2, stem: 'vocals' })
+    expect(checkPayload(SCHEMA, sent)).toEqual([])
+    // Held and charged as a bag of four models × 2 shifts: 2 s × 8 = 16 s of work (under the floor).
+    expect(take.nodes.n!.credits).toBe(credits({ audio: 2 }, { model: 'mdx_extra', shifts: 2 }))
+  }, 120_000)
+})
+
 describe('a request closed while the run is being started leaves nothing running', () => {
   it('Vocal separator: its sound\'s header probed at the start (ffprobe), closed mid-way: refused, no tool left within a second, the slot given back, nothing held', async () => {
     await requireMediaTools()
@@ -496,7 +571,9 @@ describe('the row, the family and the families-off invariant (rule 15)', () => {
     const p: ApiPrompt = { s: loadAudio(), n: vocalsNode(), ...saves() }
     expect(isRunnerEligible(p, ON)).toBe(true)
     // A model the service doesn't take, shifts ComfyUI refuses, a wired shifts or model: the engine's.
-    for (const bad of [{ model: 'mdx_extra' }, { shifts: -1 }, { shifts: 11 }, { shifts: ['x', 0] }, { model: ['x', 0] }]) {
+    // Fix round 1: mdx_extra is taken (sent as mdx_extra_q).
+    expect(runnerTakesNode({ ...p, n: vocalsNode({ model: 'mdx_extra' }) }, 'n', ON)).toBe(true)
+    for (const bad of [{ model: 'nope' }, { shifts: -1 }, { shifts: 11 }, { shifts: ['x', 0] }, { model: ['x', 0] }]) {
       expect(runnerTakesNode({ ...p, n: vocalsNode(bad) }, 'n', ON), JSON.stringify(bad)).toBe(false)
     }
     // A picture isn't a sound.
