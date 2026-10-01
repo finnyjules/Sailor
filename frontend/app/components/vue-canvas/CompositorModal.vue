@@ -149,6 +149,13 @@ import { lightingDragging } from '~/lib/frame/lighting/drag'
 import { MAX_LIGHTS, type LightLayer, type LightType } from '~/lib/frame/lighting/settings'
 import { LIGHT_PLACEMENT } from '~/lib/frame/lighting/handles'
 import LightHandles from '~/components/vue-canvas/compositor/LightHandles.vue'
+import LightInspector from '~/components/vue-canvas/compositor/LightInspector.vue'
+import LightShadowControls from '~/components/vue-canvas/compositor/LightShadowControls.vue'
+import LightDarknessSlider from '~/components/vue-canvas/compositor/LightDarknessSlider.vue'
+import LayerLightToggles from '~/components/vue-canvas/compositor/LayerLightToggles.vue'
+import { lightingAvailable } from '~/lib/frame/lighting/lightingPass'
+import { effectiveCasts, effectiveLit, defaultCastsShadow, type LightParams } from '~/lib/frame/lighting/settings'
+import { lightLabel } from '~/lib/frame/lighting/labels'
 import { relightSurfaceRefs, type RelightLayerLike } from '~/lib/relight/relightSurfaceRefs'
 import { setRelightBypass } from '~/composables/useCompositorLayers'
 import { onRelightFieldReady } from '~/lib/relight/depthField'
@@ -1933,7 +1940,7 @@ const frameSuggestions = computed(() => {
 })
 // The layer inspector's header names the layer exactly as the chip does.
 const selectedLayerHead = computed(() => (selectedLocal.value
-  ? frameSelectionLabel([frameChipLayer(selectedLocal.value as any, { wiredName: wiredChipName })]) ?? ''
+  ? (selectedLocal.value as LocalLayer).kind === 'light' ? lightLabel(selectedLocal.value as LightLayer) : frameSelectionLabel([frameChipLayer(selectedLocal.value as any, { wiredName: wiredChipName })]) ?? ''
   : ''))
 // ── new effects on Frame's background (stage 5, Ruling 10) ──────────────────
 // The background is where new effects show in Frame. A previewed take is a local overlay
@@ -2477,6 +2484,37 @@ const showLightDots = computed(() => frameLightLayers.value.length > 0 && inspec
 const selectedIdList = computed(() => [...selectedIds.value])
 /** A selected light has no transform box: it is a point, moved by its dot. */
 const selectedIsLight = computed(() => (selectedLocal.value as LocalLayer | null)?.kind === 'light')
+// ── Light layers (stage 1): the panels — light rows, the light inspector, the switches, Darkness ──
+/** The light panels show only while the Frame has a light: with none, the panels are as before. */
+const hasLights = computed(() => frameLightLayers.value.length > 0)
+/** Read only while a light exists: the pass (and its GL context) is never made for a Frame without one. */
+const lightingAvail = computed(() => (hasLights.value ? lightingAvailable() : true))
+const isLightRow = (row: any) => (row.kind === 'local' || row.kind === 'child') && row.layer?.kind === 'light'
+/** A light inspector write: `record` is true once per gesture (LightInspector decides). */
+function onLightEdit(id: string, patch: Partial<LightParams>, record: boolean) {
+  if (record) recordHistory()
+  commit(localLayers.value.map((l: any) => (l.id === id && l.kind === 'light' ? { ...l, light: { ...l.light, ...patch } } : l)))
+}
+/** A Light and shadow card write (Lit / Casts / Lift); `undefined` removes the field (= default). */
+function onLayerLightChange(id: string, patch: Record<string, unknown>, record: boolean) {
+  if (record) recordHistory()
+  commit(localLayers.value.map((l: any) => {
+    if (l.id !== id) return l
+    const next = { ...l, ...patch }
+    for (const k of Object.keys(patch)) if (patch[k] === undefined) delete next[k]
+    return next
+  }))
+}
+function toggleRowLit(row: any) {
+  const l = row.layer; if (!l?.id) return
+  onLayerLightChange(l.id, { lit: effectiveLit(l) ? false : undefined }, true)
+}
+function toggleRowCasts(row: any) {
+  const l = row.layer; if (!l?.id) return
+  const next = !effectiveCasts(l)
+  onLayerLightChange(l.id, { castsShadow: next === defaultCastsShadow(l.kind) ? undefined : next }, true)
+}
+function onDarkness(v: number, record: boolean) { editor.setLighting({ darkness: v }, record) }
 function onLightDotSelect(id: string) { if (selectedLocalId.value !== id || selectedIds.value.size !== 1) selectLocal(id) }
 /** A dot gesture's write: no history entry — LightHandles emitted `record` once at its start. */
 function onLightDotChange(id: string, patch: Partial<LightLayer>) {
@@ -3636,6 +3674,8 @@ const flatRows = computed<FlatRow[]>(() => {
   const groups = localGroups.value
   const si = stackIndexByKey.value
   type Sortable = { kind: 'group'; id: string; sort: number } | { kind: 'item'; item: any; sort: number }
+  // Light layers (stage 1) list first, above every other row, in their own stack order.
+  const itemSort = (it: any): number => { const k = si.get(it.key) ?? Infinity; return it.type === 'local' && it.layer?.kind === 'light' ? k - 1e9 : k }
 
   const emitGroup = (gid: string, depth: number) => {
     rows.push({ rk: 'gh:' + gid, kind: 'group', groupId: gid, depth, count: groupCount(gid) })
@@ -3643,7 +3683,7 @@ const flatRows = computed<FlatRow[]>(() => {
     const kids: Sortable[] = []
     for (const cg of childGroupIds(gid, groups)) if (groupCount(cg) > 0) kids.push({ kind: 'group', id: cg, sort: groupSortIndex(cg) })
     for (const it of resolvedStack.value) {
-      if (it.type === 'local' && it.layer.groupId === gid) kids.push({ kind: 'item', item: it, sort: si.get(it.key) ?? Infinity })
+      if (it.type === 'local' && it.layer.groupId === gid) kids.push({ kind: 'item', item: it, sort: itemSort(it) })
     }
     kids.sort((a, b) => a.sort - b.sort)
     for (const k of kids) {
@@ -3664,7 +3704,7 @@ const flatRows = computed<FlatRow[]>(() => {
   }
   for (const it of resolvedStack.value) {
     if (it.type === 'local' && it.layer.groupId) continue // rendered under its group
-    tops.push({ kind: 'item', item: it, sort: si.get(it.key) ?? Infinity })
+    tops.push({ kind: 'item', item: it, sort: itemSort(it) })
   }
   tops.sort((a, b) => a.sort - b.sort)
   for (const t of tops) {
@@ -3723,6 +3763,8 @@ function rowLabel(row: any) {
   if (l.kind === 'deal') return 'Mosaic'
   // A scatter layer is the Scatter element; its kind reads lowercase otherwise.
   if (l.kind === 'scatter') return 'Scatter'
+  // A light layer reads Lamp / Spot / Sun (or the user's name, returned above).
+  if (l.kind === 'light') return lightLabel(l)
   return l.kind === 'text' ? (l.text?.split('\n')[0] || 'Text') : l.kind
 }
 /** The 1-BASED modal slot a row's wired content lives on, or null when the row is
@@ -8781,7 +8823,7 @@ function kindIcon(kind: string) {
     : kind === 'ellipse' ? Circle : kind === 'image' ? ImageIcon
     : kind === 'polygon' ? Hexagon : kind === 'star' ? Star
     : kind === 'brush' ? Brush : kind === 'deal' ? LayoutGrid
-    : kind === 'scatter' ? Wheat : Minus
+    : kind === 'scatter' ? Wheat : kind === 'light' ? Lightbulb : Minus
 }
 // A layer's fill Paint for the layer-list swatch, or null for kinds without a
 // meaningful fill (image = its own pixels, line = a stroke). Falls back to the
@@ -9427,7 +9469,7 @@ defineExpose({ editor, layoutGridResolved, layoutGrid, overlayGrid, viewLayoutGr
               <!-- Layer effect disclosure — only on a layer that actually has effects. -->
               <button
                 v-if="(row.kind === 'local' || row.kind === 'child' || row.kind === 'wired')
-                  && row.layer?.id && ((layerFxCount.get(row.layer.id) ?? 0) + (layerStrokeCount.get(row.layer.id) ?? 0)) > 0"
+                  && row.layer?.id && !isLightRow(row) && ((layerFxCount.get(row.layer.id) ?? 0) + (layerStrokeCount.get(row.layer.id) ?? 0)) > 0"
                 type="button" data-testid="layer-fx-toggle"
                 title="Show/hide effects and outlines"
                 class="-ml-1 shrink-0 text-white/40 hover:text-white/80 cursor-pointer"
@@ -9443,6 +9485,10 @@ defineExpose({ editor, layoutGridResolved, layoutGrid, overlayGrid, viewLayoutGr
                   alt="" draggable="false" title="Group" data-testid="layer-thumb" />
                 <Group v-else class="size-3.5 text-white/60 shrink-0" />
               </template>
+              <!-- A light: a glowing swatch of its colour. -->
+              <span v-else-if="isLightRow(row)" data-testid="light-row-swatch" aria-hidden="true"
+                class="rounded-full shrink-0 ring-1 ring-white/20" :class="row.kind === 'child' ? 'size-3' : 'size-3.5'"
+                :style="{ background: row.layer.light?.color, boxShadow: `0 0 8px ${row.layer.light?.color}` }" />
               <!-- Live image preview for image layers (local + wired), so the row reads at a glance -->
               <img v-else-if="rowThumbUrl(row)" :src="rowThumbUrl(row)!"
                 class="rounded object-cover shrink-0 ring-1 ring-white/10 bg-white/[0.03]"
@@ -9505,6 +9551,9 @@ defineExpose({ editor, layoutGridResolved, layoutGrid, overlayGrid, viewLayoutGr
               <span v-if="(row as any).layer?.kind === 'wired' && (row as any).layer?.unlinked"
                 class="shrink-0 rounded px-1 py-px text-[9.5px] uppercase tracking-wide bg-amber-400/15 text-amber-300/90 border border-amber-400/25"
                 title="This layer's input was disconnected — reconnect the input to bring its pixels back">unlinked</span>
+              <!-- Light layers: the shadow and bulb switches — only while the Frame has a light, never on a light. -->
+              <LayerLightToggles v-if="hasLights && (row.kind === 'local' || row.kind === 'child') && row.layer?.id && !isLightRow(row)"
+                :layer="row.layer" @toggle-lit="toggleRowLit(row)" @toggle-casts="toggleRowCasts(row)" />
               <!-- Lock (locked layers render but ignore canvas clicks/drags) -->
               <button v-if="row.kind !== 'group'"
                 class="transition cursor-pointer"
@@ -9568,7 +9617,7 @@ defineExpose({ editor, layoutGridResolved, layoutGrid, overlayGrid, viewLayoutGr
                    Sits BEFORE the Delete block so the group/local delete v-if chain stays
                    contiguous — a v-if wedged between them would orphan the local delete. -->
               <button
-                v-if="(row.kind === 'local' || row.kind === 'child' || row.kind === 'wired') && row.layer?.id"
+                v-if="(row.kind === 'local' || row.kind === 'child' || row.kind === 'wired') && row.layer?.id && !isLightRow(row)"
                 type="button" data-testid="add-effect" aria-label="Add effect or outline"
                 class="shrink-0 opacity-0 group-hover/row:opacity-100 text-white/40 hover:text-white/80 cursor-pointer"
                 :class="fxMenuLayerId === row.layer.id ? '!opacity-100' : ''"
@@ -12250,6 +12299,14 @@ defineExpose({ editor, layoutGridResolved, layoutGrid, overlayGrid, viewLayoutGr
             <button class="text-white/40 hover:text-red-400 p-1" title="Delete" @click="deleteLocal(selectedLocal.id)"><Trash2 class="size-3.5" /></button>
           </div>
         </div>
+        <!-- A light: only the light inspector. Lights take no effects, masks, clones or blend, so
+             none of the generic cards (or the add-effect button) appear for one. -->
+        <div v-if="selectedIsLight" class="inspector-body p-4 flex flex-col gap-4 flex-1 min-h-0 overflow-y-auto">
+          <LightInspector :light="(selectedLocal as LightLayer)" :darkness="frameLighting.darkness" :available="lightingAvail"
+            @change="(patch, record) => onLightEdit(selectedLocal!.id, patch, record)"
+            @darkness="onDarkness" @delete="deleteLocal(selectedLocal!.id)" />
+        </div>
+        <template v-else>
         <div class="px-4 pt-3"><StudioActionRows :actions="frameActions" /></div>
         <div class="inspector-body p-4 flex flex-col gap-4 flex-1 min-h-0 overflow-y-auto">
           <!-- The same menu as the layer row's plus, first in the inspector so it is found without
@@ -13489,6 +13546,10 @@ defineExpose({ editor, layoutGridResolved, layoutGrid, overlayGrid, viewLayoutGr
             </div>
           </StudioSection>
 
+          <!-- Light layers: how the lights treat this layer — only while the Frame has a light. -->
+          <LightShadowControls v-if="hasLights" :layer="(selectedLocal as any)"
+            @change="(patch, record) => onLayerLightChange(selectedLocal!.id, patch, record)" />
+
           <!-- Cloner: repeat this layer (linear/grid/radial) with falloff -->
           <CompositorClonerPanel
             class="mt-1"
@@ -13518,6 +13579,7 @@ defineExpose({ editor, layoutGridResolved, layoutGrid, overlayGrid, viewLayoutGr
             <div v-if="layerEdit.error.value" class="text-[10px] text-rose-400">{{ layerEdit.error.value }}</div>
           </div>
         </div>
+        </template>
       </template>
 
       <!-- Frame properties — shown when nothing is selected. A wired slot is a
@@ -13569,6 +13631,8 @@ defineExpose({ editor, layoutGridResolved, layoutGrid, overlayGrid, viewLayoutGr
                   :model-value="frameIsResponsive" @update:model-value="onFrameResponsive" />
               </div>
             </div>
+            <!-- Light layers: Darkness applies to the whole Frame — only while it has a light. -->
+            <LightDarknessSlider v-if="hasLights" class="mt-1.5" :darkness="frameLighting.darkness" @update="onDarkness" />
           </StudioSection>
           <LayoutGridSection :grid="layoutGrid" :resolved="layoutGridResolved" :format-label="frameFormatLabel" show-shortcut="⇧G" @update="(g) => setLayoutGrid(g)" />
           <!-- Canvas background fill (bottom-most; baked into the frame) -->
@@ -13576,6 +13640,10 @@ defineExpose({ editor, layoutGridResolved, layoutGrid, overlayGrid, viewLayoutGr
             <FillControl allow-none :model-value="background"
               @update:model-value="(v: any) => setBackground(v)" />
             <p class="mt-1.5 text-[10px] text-white/30 leading-snug">Fills behind every layer and bakes into the frame. An opaque generated image will sit on top of it.</p>
+            <div v-if="hasLights" class="mt-1.5" data-testid="background-lit">
+              <StudioSwitch label="Lit by lights" hint="Off keeps the background flat, whatever the lights do"
+                :model-value="frameLighting.backgroundLit" @update:model-value="(v: boolean) => editor.setLighting({ backgroundLit: v })" />
+            </div>
           </StudioSection>
           <!-- Colours: the frame's palette as slots, and a palette family to swap it for -->
           <StudioSection title="Colours">
