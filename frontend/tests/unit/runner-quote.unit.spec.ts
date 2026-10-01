@@ -16,7 +16,9 @@ import { RUNNER_NOT_ELIGIBLE } from '#shared/runner/messages'
 import { createMemoryKeptBytes } from '~~/server/runner/keptBytes'
 import { NOT_YOURS } from '~~/server/runner/inputs'
 import { MeterRefusalError } from '~~/server/utils/requestMeter'
-import { quoteAnswerOf } from '~~/server/api/runs/quote.post'
+import { QUOTES_PER_MINUTE, assertQuoteRate, quoteAnswerOf } from '~~/server/api/runs/quote.post'
+import { _resetRateLimits } from '~~/server/lib/rateLimit'
+import { stageEstimateParts } from '~~/server/runner/metering'
 import { makeKit, rgbPng1x1 } from './__runner__/kit'
 import { requireMediaTools } from './__runner__/mediaParity'
 
@@ -254,4 +256,48 @@ describe('a quote refuses as the start would, before anything', () => {
     expect(() => quoteAnswerOf(new Error('boom'))).toThrow('boom')
     expect(quoteAnswerOf(new MeterRefusalError('x', 400, { reason: RUNNER_NOT_ELIGIBLE }))).toEqual({ declined: true })
   })
+})
+
+describe('fix round 1', () => {
+  it('M4: a wired setting priced at its dearest says "up to"; the same node set by hand does not', () => {
+    const typed: ApiPrompt = { n: { class_type: 'GenerateVideoNode', inputs: { model: 'hailuo-h3', prompt: 'the fox runs', aspect_ratio: '16:9', duration: '5', seed: 0, model_options: '{}' } } }
+    const wired: ApiPrompt = { m: { class_type: 'PrimitiveString', inputs: { value: '5' } }, n: { class_type: 'GenerateVideoNode', inputs: { ...typed.n!.inputs, duration: ['m', 0] } } }
+    const a = stageEstimateParts(typed, ['n'], false)
+    const b = stageEstimateParts(wired, ['n'], false)
+    expect(a.credits).toBeGreaterThan(0)
+    expect(a.upTo).toBe(false)
+    expect(b.credits).toBeGreaterThan(a.credits)
+    expect(b.upTo).toBe(true)
+    // A picture wire a flat price never reads changes nothing (Face swap).
+    const face = APPS[0]!
+    expect(stageEstimateParts(face.prompt, ['3'], false, face.families).upTo).toBe(false)
+  })
+
+  it('M5: another refusal raised in the start answers with its own words; a fault is thrown on', () => {
+    expect(quoteAnswerOf(Object.assign(new Error('This request is too large'), { statusCode: 413 }))).toEqual({ refused: 'This request is too large' })
+    expect(quoteAnswerOf(Object.assign(new Error('x'), { statusCode: 400, data: { reason: RUNNER_NOT_ELIGIBLE } }))).toEqual({ declined: true })
+    expect(() => quoteAnswerOf(Object.assign(new Error('db down'), { statusCode: 500 }))).toThrow('db down')
+  })
+
+  it('M3: a signed-in caller is limited on their own (hosted runs behind a proxy: one shared address)', () => {
+    _resetRateLimits()
+    const proxied = { node: { req: { socket: { remoteAddress: '172.16.0.1' } } } } as never
+    for (let i = 0; i < QUOTES_PER_MINUTE; i++) assertQuoteRate(proxied, 'user_a')
+    expect(() => assertQuoteRate(proxied, 'user_a')).toThrow(expect.objectContaining({ statusCode: 429 }))
+    // Another person behind the same address still gets their quotes.
+    expect(() => assertQuoteRate(proxied, 'user_b')).not.toThrow()
+    _resetRateLimits()
+  })
+
+  it('M3: a quote the browser let go of stops at once, with nothing held', async () => {
+    await requireMediaTools()
+    const karaoke = APPS.find(a => a.name === 'Karaoke')!
+    const { k, kept } = kitFor(karaoke, true)
+    const s = spies(k, kept)
+    const ctl = new AbortController()
+    ctl.abort()
+    const err = await k.engine.quoteRun({ userId: k.userId, takes: [karaoke.prompt], ...START, signal: ctl.signal }).then(() => null, (e: unknown) => e)
+    expect(err).toBeInstanceOf(MeterRefusalError)
+    expectUntouched(k, s)
+  }, 120_000)
 })

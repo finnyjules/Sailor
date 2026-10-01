@@ -3,10 +3,11 @@
  * wait (lib/runner/awaitRunnerResult.ts awaitRunnerOutputs), fed fake runner
  * events. Face swap's own wait (awaitRunnerImage) is face-swap-app-runner's.
  */
+import { effectScope } from 'vue'
 import { describe, expect, it, vi, type Mock } from 'vitest'
 import type { ApiPrompt } from '#shared/runner/graph'
-import { AppRunStopped, awaitRunnerOutputs, nodeOutputOf } from '~/lib/runner/awaitRunnerResult'
-import { AppRunCancelled, AppRunDeclined, QUOTE_BUSY, QUOTE_FAILED, appPriceText, useAppRun, type AppQuote, type AppRunDeps } from '~/composables/useAppRun'
+import { AppRunStopped, AppRunTimedOut, awaitRunnerOutputs, nodeOutputOf } from '~/lib/runner/awaitRunnerResult'
+import { AppRunCancelled, AppRunDeclined, AppRunRefused, QUOTE_BUSY, QUOTE_FAILED, QUOTE_FRESH_MS, STILL_GOING, STOP_FAILED, TIMED_OUT_STOP_FAILED, appPriceText, useAppRun, type AppQuote, type AppRunDeps } from '~/composables/useAppRun'
 
 function fakeWindow() {
   const handlers = new Set<(e: MessageEvent) => void>()
@@ -113,7 +114,7 @@ describe('useAppRun', () => {
     void a.quote({ 9: { class_type: 'X', inputs: {} } })
     await a.quote(PROMPT)
     expect(deps.postQuote).toHaveBeenCalledTimes(1)
-    expect(deps.postQuote).toHaveBeenCalledWith({ takes: [PROMPT] })
+    expect(deps.postQuote).toHaveBeenCalledWith({ takes: [PROMPT] }, expect.any(AbortSignal))
     expect(a.price.value).toEqual({ usd: 0.034, credits: 7, upTo: true })
     expect(a.priceText.value).toBe('up to $0.03')
     const h = useAppRun({ hosted: true, debounceMs: 0, deps: fakeDeps() })
@@ -212,5 +213,164 @@ describe('useAppRun', () => {
     expect(appPriceText({ usd: 0, credits: 0, upTo: false }, false)).toBeNull()
     expect(appPriceText({ usd: 0.0008, credits: 1, upTo: false }, false)).toBe('<$0.01')
     expect(appPriceText({ usd: 0.0008, credits: 1, upTo: true }, true)).toBe('up to 1 cr')
+  })
+})
+
+describe('useAppRun, fix round 1', () => {
+  const OTHER: ApiPrompt = { 1: { class_type: 'LoadAudio', inputs: { audio: 'long_song.wav' } } }
+
+  it('I1: Run prices exactly the prompt it runs: a stale quote for another prompt is never confirmed on', async () => {
+    const postQuote = vi.fn(async (b: { takes: ApiPrompt[] }): Promise<AppQuote> =>
+      (b.takes[0]![1]!.inputs!.audio === 'long_song.wav' ? { usd: 2.4, credits: 360, upTo: false } : { usd: 0.03, credits: 6, upTo: false }))
+    const deps = fakeDeps({ postQuote })
+    const a = useAppRun({ hosted: true, debounceMs: 0, deps })
+    await a.quote(PROMPT)
+    expect(a.priceText.value).toBe('6 cr')
+    // Run pressed with another prompt before its own quote landed.
+    const w = fakeWindow()
+    const done = a.run(OTHER, ['v'], { target: w })
+    await vi.waitFor(() => expect(deps.start).toHaveBeenCalled())
+    expect(postQuote).toHaveBeenLastCalledWith({ takes: [OTHER] }, undefined)
+    expect(deps.confirm).toHaveBeenCalledWith(expect.objectContaining({ usd: 2.4, hostedCredits: 360 }))
+    w.post({ event: 'executed', prompt_id: 'run_1.0', node_id: 'v', output: { audio: [file('v.mp3')] } })
+    await done
+  })
+
+  it('I1: a fresh quote for the same prompt (keys in any order) is used; an old one is asked again', async () => {
+    let t = 0
+    const deps = fakeDeps()
+    const a = useAppRun({ debounceMs: 0, deps, now: () => t })
+    await a.quote({ 1: { inputs: { audio: 'song.wav' }, class_type: 'LoadAudio' } })
+    const w = fakeWindow()
+    const one = a.run(PROMPT, ['v'], { target: w })
+    await vi.waitFor(() => expect(deps.start).toHaveBeenCalledTimes(1))
+    expect(deps.postQuote).toHaveBeenCalledTimes(1)
+    w.post({ event: 'executed', prompt_id: 'run_1.0', node_id: 'v', output: {} })
+    await one
+    t += QUOTE_FRESH_MS + 1
+    const two = a.run(PROMPT, ['v'], { target: w })
+    await vi.waitFor(() => expect(deps.start).toHaveBeenCalledTimes(2))
+    expect(deps.postQuote).toHaveBeenCalledTimes(2)
+    w.post({ event: 'executed', prompt_id: 'run_1.0', node_id: 'v', output: {} })
+    await two
+  })
+
+  it('I1: a quote that fails or refuses starts nothing, in its words; a free run still asks the gate', async () => {
+    const failing = fakeDeps({ postQuote: vi.fn(async () => { throw Object.assign(new Error('500'), { statusCode: 500 }) }) })
+    const a = useAppRun({ debounceMs: 0, deps: failing })
+    await expect(a.run(PROMPT, ['v'], { target: fakeWindow() })).rejects.toEqual(new AppRunRefused(QUOTE_FAILED))
+    expect(failing.confirm).not.toHaveBeenCalled()
+    expect(failing.start).not.toHaveBeenCalled()
+    expect(a.refused.value).toBe(QUOTE_FAILED)
+    expect(a.running.value).toBe(false)
+    const refusing = fakeDeps({ postQuote: vi.fn(async (): Promise<AppQuote> => ({ refused: 'This song is longer than 10 minutes.' })) })
+    const r = useAppRun({ debounceMs: 0, deps: refusing })
+    await expect(r.run(PROMPT, ['v'], { target: fakeWindow() })).rejects.toThrow('This song is longer than 10 minutes.')
+    expect(refusing.start).not.toHaveBeenCalled()
+    const free = fakeDeps({ postQuote: vi.fn(async (): Promise<AppQuote> => ({ usd: 0, credits: 0, upTo: false })), confirm: vi.fn(async () => false) })
+    const f = useAppRun({ debounceMs: 0, deps: free })
+    await expect(f.run(PROMPT, ['v'], { target: fakeWindow() })).rejects.toBeInstanceOf(AppRunCancelled)
+    expect(free.confirm).toHaveBeenCalled()
+  })
+
+  it('I2: a wait that gives up stops the run, as Stop does, and says so', async () => {
+    const deps = fakeDeps()
+    const a = useAppRun({ debounceMs: 0, deps })
+    const err = await a.run(PROMPT, ['v'], { target: fakeWindow(), timeoutMs: 20 }).catch(e => e)
+    expect(err).toBeInstanceOf(AppRunTimedOut)
+    expect(err.message).toBe('This took too long, so it was stopped.')
+    expect(deps.stop).toHaveBeenCalledWith(['run_1'])
+    expect(a.running.value).toBe(false)
+  })
+
+  it('I2: if that Stop fails, no second run starts until a Stop goes through', async () => {
+    const deps = fakeDeps({ stop: vi.fn(async () => { throw new Error('offline') }) })
+    const a = useAppRun({ debounceMs: 0, deps })
+    const err = await a.run(PROMPT, ['v'], { target: fakeWindow(), timeoutMs: 20 }).catch(e => e)
+    expect(err).toEqual(new AppRunTimedOut(TIMED_OUT_STOP_FAILED))
+    expect(a.running.value).toBe(true)
+    expect(a.stopError.value).toBe(STOP_FAILED)
+    await expect(a.run(PROMPT, ['v'], { target: fakeWindow() })).rejects.toThrow(STILL_GOING)
+    expect(deps.start).toHaveBeenCalledTimes(1)
+    deps.stop.mockImplementation(async () => {})
+    await a.stop()
+    expect(a.stopError.value).toBeNull()
+    expect(a.running.value).toBe(false)
+  })
+
+  it('M1: closing the app mid-run stops the run and drops the listener', async () => {
+    const w = fakeWindow()
+    const deps = fakeDeps()
+    const scope = effectScope()
+    const a = scope.run(() => useAppRun({ debounceMs: 0, deps }))!
+    const done = a.run(PROMPT, ['v'], { target: w }).catch(e => e)
+    await vi.waitFor(() => expect(a.runId.value).toBe('run_1'))
+    expect(w.size()).toBe(1)
+    scope.stop()
+    expect(await done).toBeInstanceOf(AppRunStopped)
+    expect(w.size()).toBe(0)
+    expect(deps.stop).toHaveBeenCalledWith(['run_1'])
+  })
+
+  it('M1: closed before the start answered: stopped once its id is known', async () => {
+    let answer!: (l: { runId: string, legId: string, promptIds: string[] }) => void
+    const deps = fakeDeps({ start: vi.fn(() => new Promise<{ runId: string, legId: string, promptIds: string[] }>(r => { answer = r })) })
+    const scope = effectScope()
+    const a = scope.run(() => useAppRun({ debounceMs: 0, deps }))!
+    const done = a.run(PROMPT, ['v'], { target: fakeWindow() }).catch(e => e)
+    await vi.waitFor(() => expect(deps.start).toHaveBeenCalled())
+    scope.stop()
+    answer({ runId: 'run_3', legId: 'run_3.0', promptIds: ['run_3.0'] })
+    await vi.waitFor(() => expect(deps.stop).toHaveBeenCalledWith(['run_3']))
+    expect(await done).toBeInstanceOf(AppRunStopped)
+  })
+
+  it('M2: a Stop that fails says so, and nothing is left unhandled', async () => {
+    const deps = fakeDeps({ stop: vi.fn(async () => { throw new Error('offline') }) })
+    const a = useAppRun({ debounceMs: 0, deps })
+    const done = a.run(PROMPT, ['v'], { target: fakeWindow() }).catch(e => e)
+    await vi.waitFor(() => expect(a.runId.value).toBe('run_1'))
+    await a.stop()
+    expect(a.stopError.value).toBe(STOP_FAILED)
+    expect(a.running.value).toBe(true)
+    // The early-Stop path, too.
+    let answer!: (l: { runId: string, legId: string, promptIds: string[] }) => void
+    const early = fakeDeps({ stop: vi.fn(async () => { throw new Error('offline') }), start: vi.fn(() => new Promise<{ runId: string, legId: string, promptIds: string[] }>(r => { answer = r })) })
+    const b = useAppRun({ debounceMs: 0, deps: early })
+    void b.run(PROMPT, ['v'], { target: fakeWindow() }).catch(() => {})
+    await vi.waitFor(() => expect(early.start).toHaveBeenCalled())
+    await b.stop()
+    answer({ runId: 'run_4', legId: 'run_4.0', promptIds: ['run_4.0'] })
+    await vi.waitFor(() => expect(b.stopError.value).toBe(STOP_FAILED))
+    void done
+  })
+
+  it('M3: a quote a newer one replaces is aborted', async () => {
+    const signals: (AbortSignal | undefined)[] = []
+    const postQuote = vi.fn((_b: { takes: ApiPrompt[] }, signal?: AbortSignal) => {
+      signals.push(signal)
+      return new Promise<AppQuote>((resolve, reject) => {
+        signal?.addEventListener('abort', () => reject(new Error('aborted')))
+        setTimeout(() => resolve({ usd: 0.05, credits: 10, upTo: false }), signals.length === 1 ? 5_000 : 10)
+      })
+    })
+    const a = useAppRun({ debounceMs: 0, deps: fakeDeps({ postQuote }) })
+    const first = a.quote(PROMPT)
+    await vi.waitFor(() => expect(postQuote).toHaveBeenCalledTimes(1))
+    const second = a.quote(OTHER)
+    await Promise.all([first, second])
+    expect(signals[0]!.aborted).toBe(true)
+    expect(signals[1]!.aborted).toBe(false)
+    expect(a.price.value).toEqual({ usd: 0.05, credits: 10, upTo: false })
+    expect(a.refused.value).toBeNull()
+  })
+
+  it('M5: the start\'s refusal shows its own words, from the route\'s body', async () => {
+    const fetchError = Object.assign(new Error('[POST] "/api/runs": 400 Bad Request'), { statusCode: 400, data: { message: 'This song is longer than 10 minutes.' } })
+    const a = useAppRun({ debounceMs: 0, deps: fakeDeps({ start: vi.fn(async () => { throw fetchError }) }) })
+    await expect(a.run(PROMPT, ['v'], { target: fakeWindow() })).rejects.toThrow('This song is longer than 10 minutes.')
+    const q = useAppRun({ debounceMs: 0, deps: fakeDeps({ postQuote: vi.fn(async () => { throw Object.assign(new Error('[POST] "/api/runs/quote": 413'), { statusCode: 413, data: { message: 'This request is too large' } }) }) }) })
+    await q.quote(PROMPT)
+    expect(q.refused.value).toBe('This request is too large')
   })
 })

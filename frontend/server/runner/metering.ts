@@ -291,6 +291,31 @@ function nodeShownUsd(node: ApiNode, credits: number, inputPixels: number | unde
   return usdChargedAtCost(credits / 100)
 }
 
+/**
+ * A wired setting priced at its dearest (fix round 1, M4): a linked input
+ * the price reads (a model, a duration, a wired text priced at its ceiling)
+ * is held at its most expensive, so the run may cost less. Found by pricing
+ * the node without each link: where that price differs (or can't be had),
+ * the link sets it.
+ * A picture or sound wire a flat price never reads changes nothing.
+ */
+function wiredSettingRaisesPrice(node: ApiNode, m: StageMeasured | undefined, families: ReadonlySet<RunnerFamily>): boolean {
+  const inputs = node.inputs ?? {}
+  const linked = Object.keys(inputs).filter(k => isLink(inputs[k]))
+  if (!linked.length) return false
+  const opts = { inputPixels: m?.pixels, inputSeconds: m?.seconds, families }
+  const asSent = priceNode(node.class_type, inputs, opts)
+  if ('refused' in asSent) return false
+  for (const k of linked) {
+    const without = { ...inputs }
+    delete without[k]
+    // Without it the node can't be priced at all (a model only the wire names): the wire sets the price too.
+    const p = priceNode(node.class_type, without, opts)
+    if ('refused' in p || p.credits !== asSent.credits) return true
+  }
+  return false
+}
+
 /** A paid node held on a bound or a cap rather than on what was measured (stageEstimateParts' `upTo`). */
 function heldOnBound(node: ApiNode, m: StageMeasured | undefined, families: ReadonlySet<RunnerFamily>): boolean {
   const inputs = node.inputs ?? {}
@@ -298,6 +323,7 @@ function heldOnBound(node: ApiNode, m: StageMeasured | undefined, families: Read
   if (m?.predicted || s?.audioUpTo != null || s?.framesUpTo) return true
   if (sizePricedInput(node.class_type, inputs, families) !== null && !m?.pixels) return true
   if (secondsPricedMedia(node.class_type, inputs) !== null && s?.audio == null) return true
+  if (wiredSettingRaisesPrice(node, m, families)) return true
   // A sound node held on the longest sound where it runs (no measurement, no bound: R7.7).
   return !!s?.place && s.audio == null && s.audioUpTo == null && s.frames == null && s.videoWidth == null && s.picturePixels == null
 }

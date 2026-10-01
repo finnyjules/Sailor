@@ -2607,6 +2607,8 @@ export function createEngine(deps: EngineDeps) {
    */
   async function quoteRun(i: StartRunInput): Promise<RunQuote> {
     const prep = await prepareStart(i)
+    // A quote a newer one replaced (the browser aborted it): nothing more is worked out (fix round 1, M3).
+    if (i.signal?.aborted) throw refuse(MEDIA_WORDS.stopped, 400)
     const takes = newTakes(prep)
     const all = takes.map(t => t.index)
     const room = keptRoomNeeded(takes, all)

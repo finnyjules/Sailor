@@ -65,9 +65,14 @@ export function runnerGateAction(body: { runId: string; nodeId: string; action: 
 
 /** Stops the listed runner runs (only those: other tabs' runs keep going). */
 export async function stopRunnerRuns(runIds: string[]): Promise<void> {
-  if (!runIds.length) return
-  try { await $fetch('/api/runs/stop', { method: 'POST', body: { runIds } }) }
+  try { await stopRunnerRunsOrThrow(runIds) }
   catch (e) { console.warn('[runner] stop failed', e) }
+}
+
+/** The same Stop, for a caller that tells the person when it didn't go through (the mini apps, R8.0). */
+export async function stopRunnerRunsOrThrow(runIds: string[]): Promise<void> {
+  if (!runIds.length) return
+  await $fetch('/api/runs/stop', { method: 'POST', body: { runIds } })
 }
 
 export async function fetchPausedGates(canvasId: string): Promise<PausedGateView[]> {
