@@ -12,10 +12,11 @@
  * caller's own, signed in.
  */
 import { createError, defineEventHandler, readBody } from 'h3'
+import type { H3Event } from 'h3'
 import { runnerEnabled } from '../../runner/config'
 import { getEngine } from '../../runner/index'
 import type { RunQuote } from '../../runner/engine'
-import { assertRateLimit, takeToken } from '../../lib/rateLimit'
+import { rateLimitKey, takeToken } from '../../lib/rateLimit'
 import { MeterRefusalError } from '../../utils/requestMeter'
 import { RUNNER_NOT_ELIGIBLE } from '#shared/runner/messages'
 
@@ -44,13 +45,13 @@ export function quoteAnswerOf(e: unknown): QuoteAnswer {
 export const QUOTES_PER_MINUTE = 30
 
 /**
- * The quote's rate limit. assertRateLimit keys by the socket's address
- * alone; hosted runs behind Fly's proxy, where that address is the proxy's
- * and so shared by everyone. A signed-in caller is keyed by their user id.
+ * The quote's rate limit: assertRateLimit's per-caller key (the user id where
+ * signed in, else the client address), with the quote's own words. The
+ * user id is passed so the handler's resolved caller is the one keyed.
  */
-export function assertQuoteRate(event: Parameters<typeof assertRateLimit>[0], userId: string | null): void {
-  if (!userId) return assertRateLimit(event, 'runs-quote', QUOTES_PER_MINUTE)
-  if (!takeToken(`runs-quote:user:${userId}`, QUOTES_PER_MINUTE, 60_000)) {
+export function assertQuoteRate(event: H3Event, userId: string | null): void {
+  const key = userId ? `user:${userId}` : rateLimitKey(event)
+  if (!takeToken(`runs-quote:${key}`, QUOTES_PER_MINUTE, 60_000)) {
     throw Object.assign(new Error('Too many price checks at once. Wait a moment.'), { statusCode: 429 })
   }
 }
