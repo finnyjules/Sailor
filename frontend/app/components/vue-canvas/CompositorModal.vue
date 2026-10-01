@@ -7177,7 +7177,10 @@ watch(() => {
   const r = editResult.value; if (!r || !v) return
   const l = layerById(r.layerId)
   const sel = selectedLocalId.value
-  if (!l || l.filename !== r.appliedFilename || (sel != null && sel !== r.layerId)) editResult.value = null
+  // Picking a light (its dot, chip or row) is not moving on from the photo: lights are the
+  // Frame's, and the Relight panel keeps them at hand. Any other layer is.
+  const selIsLight = sel != null && layerById(sel)?.kind === 'light'
+  if (!l || l.filename !== r.appliedFilename || (sel != null && sel !== r.layerId && !selIsLight)) editResult.value = null
 })
 function revertEdit() {
   const r = editResult.value; if (!r || inpaint.busy.value || relightFinishing.value) return
@@ -7264,6 +7267,9 @@ async function runRelightFinish() {
   const start = activeEffectLayer.value
   if (!start || !canFinishRelight(start)) return
   const layerId: string = start.id
+  // The photo becomes the selected layer: Finish may start with a light selected (a lamp drag,
+  // a light chip or dot keep the Relight panel open), and the result bar belongs to the photo.
+  selectLocal(layerId)
   // Single-click guard: set on entry (before the cost confirm and the render), so a second click
   // is ignored and the button already reads "Finishing…". Cleared on every exit (finally).
   relightFinishing.value = layerId

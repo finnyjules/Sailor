@@ -102,8 +102,9 @@ describe('relightLightsToLayers', () => {
     expect(fx).toMatchObject({ type: 'relight', keep: 0.12, depth: 4, texture: 2, shadows: true })
     expect(hasLegacyRelightLights(r.layers)).toBe(false)
   })
-  it('sets Darkness 0.45 unless the Frame already has a lighting record', () => {
-    expect(relightLightsToLayers([photo()], undefined, W, H).lighting).toEqual({ ...DEFAULT_LIGHTING, darkness: 0.45 })
+  it('sets Darkness 0.45 and an unlit background (the layout looks as before) unless the Frame already has a lighting record', () => {
+    expect(relightLightsToLayers([photo()], undefined, W, H).lighting).toEqual({ ...DEFAULT_LIGHTING, darkness: 0.45, backgroundLit: false })
+    expect(relightLightsToLayers([photo()], { darkness: 0.3, backgroundLit: true }, W, H).lighting).toEqual({ darkness: 0.3, backgroundLit: true })
     const own = { darkness: 0.8, backgroundLit: false }
     expect(relightLightsToLayers([photo()], own, W, H).lighting).toEqual(own)
   })

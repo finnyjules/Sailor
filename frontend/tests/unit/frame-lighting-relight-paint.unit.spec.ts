@@ -122,13 +122,22 @@ describe('legacy lights light it through the virtual conversion', () => {
     const r = rect('r')
     paint([r, p])
     expect(lightFrame).toHaveBeenCalledTimes(1)
-    const [, , , stamps, lights, lighting] = lightFrame.mock.calls[0]! as [unknown, number, number, LightingStamp[], LocalLayer[], { darkness: number }]
+    const [, , , stamps, lights, lighting] = lightFrame.mock.calls[0]! as [unknown, number, number, LightingStamp[], LocalLayer[], { darkness: number; backgroundLit: boolean }]
     expect(lights.map(l => l.id)).toEqual([`ll-rl-${p.id}-k`])
-    expect(lighting.darkness).toBe(0.45)
+    expect(lighting).toEqual({ darkness: 0.45, backgroundLit: false })
     // The layout looks as before: the rect is not lit (and casts nothing); the photo is.
     const rs = stamps.find(s => s.layer?.id === 'r')!
     expect(rs.layer!.lit).toBe(false)
     expect(stamps.find(s => s.layer?.id === p.id)!.facing).toBeTruthy()
+  })
+
+  it('the defaults handed in (no stored record, as painters read it) still give the conversion\'s unlit background; a real record wins', () => {
+    const p = photo({ lights: [{ id: 'k', x: 0.2, y: 0.3, height: 0.4, color: '#ffcf94', brightness: 2, reach: 1, on: true }] })
+    paint([rect('r'), p], { darkness: 0.45, backgroundLit: true })
+    expect(lightFrame.mock.calls[0]![5]).toEqual({ darkness: 0.45, backgroundLit: false })
+    lightFrame.mockClear()
+    paint([rect('r'), p], { darkness: 0.7, backgroundLit: true })
+    expect(lightFrame.mock.calls[0]![5]).toEqual({ darkness: 0.7, backgroundLit: true })
   })
 
   it('never persisted: the layers handed in are untouched', () => {

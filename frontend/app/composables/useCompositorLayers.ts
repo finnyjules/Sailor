@@ -6785,6 +6785,13 @@ function addShaderFieldRequest(out: FieldRequest[], paint: Paint | undefined, W:
  * to convert (a light layer exists, or no Relight effect carries lights).
  */
 const _legacyUnlit = new WeakMap<LocalLayer, LocalLayer>()
+/** Painters receive the Frame's lighting already read (`readFrameLighting`: the defaults when no
+ *  record is stored), so "no record" arrives as exactly the defaults. The conversion's own
+ *  record (Darkness 0.45, background unlit) applies then, as the editor's does on open. */
+function storedLighting(lighting: FrameLighting | undefined): FrameLighting | undefined {
+  return !lighting || (lighting.darkness === DEFAULT_LIGHTING.darkness && lighting.backgroundLit === DEFAULT_LIGHTING.backgroundLit)
+    ? undefined : lighting
+}
 const _legacyConv = new WeakMap<LocalLayer[], { W: number; H: number; lk: string; conv: RelightConversion }>()
 function legacyRelightView(
   items: StackItem[], localLayers: LocalLayer[], lighting: FrameLighting | undefined, W: number, H: number,
@@ -6799,7 +6806,7 @@ function legacyRelightView(
   else {
     conv = localLayers.some(l => l.kind === 'light') || !hasLegacyRelightLights(localLayers)
       ? { layers: localLayers, lighting: lighting ?? DEFAULT_LIGHTING, dropped: 0, changed: false }
-      : relightLightsToLayers(localLayers, lighting, W, H)
+      : relightLightsToLayers(localLayers, storedLighting(lighting), W, H)
     _legacyConv.set(localLayers, { W, H, lk, conv })
   }
   if (!conv.changed) return null

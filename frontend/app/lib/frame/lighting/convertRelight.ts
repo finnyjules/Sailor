@@ -105,7 +105,8 @@ export interface RelightConversion {
  * `dropped`; an off light becomes a hidden light; an effect or photo that is hidden gives hidden
  * lights), appended at the top of the stack; the Relight effects lose their `lights`; every
  * non-photo layer gets `lit: false` and `castsShadow: false` so the layout looks as before;
- * Darkness is 0.45 unless the Frame already has a lighting record (`lighting`).
+ * Darkness is 0.45 and the background unlit unless the Frame already has a lighting record
+ * (`lighting`).
  *
  * Light ids are derived from the photo and the old light, so a read-only conversion (the
  * painter's) produces the same lights on every paint.
@@ -145,7 +146,8 @@ export function relightLightsToLayers(
   })
   return {
     layers: [...out, ...lights],
-    lighting: record ?? { ...DEFAULT_LIGHTING, darkness: 0.45 },
+    // The background stays unlit too, so the layout looks as before (the old Relight lit the photo only).
+    lighting: record ?? { ...DEFAULT_LIGHTING, darkness: 0.45, backgroundLit: false },
     dropped,
     changed: true,
   }
