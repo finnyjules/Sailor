@@ -354,6 +354,8 @@ function runnerEndpoints(): string[] {
   out.add('fal fal-ai/rife/video')
   // R7.7: Whisper transcribe on fal's Wizper, R3.10's call (generators/localModels.ts; its grid is runner-local-whisper.unit.spec.ts).
   out.add('fal fal-ai/wizper')
+  // R7.8: Vocal separator on Replicate's demucs (generators/localModels.ts; its grid is runner-local-vocals.unit.spec.ts).
+  out.add('replicate ryan5453/demucs')
   for (const d of Object.values(RUNNER_REPLICATE_IMAGE_MODELS)) out.add(`replicate ${d.slug}`)
   for (const d of Object.values(RUNNER_REPLICATE_VIDEO_MODELS)) out.add(`replicate ${d.slug}`)
   for (const app of [FLUX_2_EDIT_APP, FLUX_KONTEXT_APP, NANO_BANANA_2_EDIT_APP, NANO_BANANA_PRO_EDIT_APP]) out.add(`fal ${app}`)

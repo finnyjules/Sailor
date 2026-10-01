@@ -222,6 +222,21 @@ Groups:
              length, sha256 and spot samples, for
              frontend/server/runner/generators/localModels.ts and soundWav.ts
              (tests/unit/runner-local-whisper.unit.spec.ts)
+  local-vocals (R7.8) Vocal separator (comfy_extras/nodes_audio_ml.py) with
+             Demucs a stand-in (demucs.apply and demucs.pretrained put in
+             sys.modules) whose model has the clip's own rate (so Python
+             resamples nothing) and four sources, and whose apply_model
+             records what it is handed and answers four seeded stems. For
+             mono, stereo and 6-channel clips and a float clip beyond ±1: the
+             channels Python sends (mono repeated, past two cut to two), their
+             float32 sha256 and spot samples, the model name and shifts asked
+             for, `split`; the two outputs' sha256 and rate; and how far
+             Python's instrumental (all stems − vocals) is from the sum of the
+             other stems Replicate's demucs sends as `no_vocals`. Plus one
+             48 kHz clip with a 44.1 kHz model (Python resamples; its output
+             rate), and the node's options, for
+             frontend/server/runner/soundWav.ts
+             (tests/unit/runner-local-vocals.unit.spec.ts)
   e2e    (R3.18) the controller check's chained workflows no single-node
              case covers, node by node (Summarize → Generate an image;
              Separate background and foreground → Frame; Upscale → Remove
@@ -4196,6 +4211,124 @@ def local_whisper_group() -> dict:
     return {"cases": cases, "sounds": sounds}
 
 
+def local_vocals_group() -> dict:
+    """Vocal separator's real execute with Demucs a stand-in (R7.8): the channels Python hands Demucs for
+    the standard clips, the model and shifts it asks for, and its two outputs given four recorded stems."""
+    import hashlib
+    import shutil
+    import tempfile
+    import types
+    import numpy as np
+    import torch
+    import comfy_extras.nodes_audio as na
+    from comfy_extras import nodes_audio_ml as ml
+
+    seen: list = []
+    state: dict = {"rate": 44100, "seed": 0}
+
+    class StandInModel:
+        sources = ["drums", "bass", "other", "vocals"]
+
+        def __init__(self, name):
+            self.name = name
+            self.samplerate = state["rate"]
+
+        def eval(self):
+            return self
+
+    def get_model(name):
+        seen.append({"get_model": name})
+        return StandInModel(name)
+
+    def apply_model(model, mix, device=None, shifts=1, split=True, progress=False):
+        seen.append({"mix": mix.clone(), "shifts": shifts, "split": split, "model": model.name})
+        g = torch.Generator().manual_seed(state["seed"])
+        return (torch.rand((1, 4) + tuple(mix.shape[1:]), generator=g, dtype=torch.float32) * 2 - 1) * 0.75
+
+    demucs = types.ModuleType("demucs")
+    apply_mod = types.ModuleType("demucs.apply")
+    apply_mod.apply_model = apply_model
+    pretrained = types.ModuleType("demucs.pretrained")
+    pretrained.get_model = get_model
+    demucs.apply, demucs.pretrained = apply_mod, pretrained
+    fakes = {"demucs": demucs, "demucs.apply": apply_mod, "demucs.pretrained": pretrained}
+
+    def clip_audio(clip: dict) -> dict:
+        tmp = tempfile.mkdtemp(prefix="local-vocals-")
+        try:
+            path = os.path.join(tmp, "clip.wav")
+            with open(path, "wb") as f:
+                f.write(clip_bytes(clip["kind"], clip["rate"], clip["channels"], clip["rate"] * clip["seconds"], clip["seed"]))
+            waveform, rate = na.load(path)
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+        return {"waveform": waveform.unsqueeze(0), "sample_rate": rate}
+
+    def f32(t) -> np.ndarray:
+        return np.ascontiguousarray(t.detach().cpu().numpy(), dtype="<f4")
+
+    def facts(t) -> dict:
+        x = f32(t)
+        flat = x.reshape(-1)
+        step = max(1, len(flat) // 64)
+        return {"shape": list(x.shape), "sha256": hashlib.sha256(x.tobytes()).hexdigest(),
+                "head": [_float_hex(float(v)) for v in flat[:8]],
+                "spots": [[int(i), _float_hex(float(flat[i]))] for i in range(0, len(flat), step)]}
+
+    def run(audio: dict, model_rate: int, model: str = "htdemucs", shifts: int = 1, seed: int = 0):
+        seen.clear()
+        state["rate"], state["seed"] = model_rate, seed
+        ml._WHISPER_CACHE.clear()
+        with mock.patch.dict(sys.modules, fakes):
+            res = ml.VocalSeparatorNode.execute(audio=audio, model=model, shifts=shifts)
+        calls = [s for s in seen if "mix" in s]
+        assert len(calls) == 1
+        return res.args, calls[0], [s["get_model"] for s in seen if "get_model" in s]
+
+    clips = [
+        {"name": "mono 44.1 kHz 1 s", "kind": "pcm16", "rate": 44100, "channels": 1, "seconds": 1, "seed": 8101},
+        {"name": "stereo 48 kHz 1 s", "kind": "pcm16", "rate": 48000, "channels": 2, "seconds": 1, "seed": 8102},
+        {"name": "6-channel 44.1 kHz 1 s", "kind": "pcm16", "rate": 44100, "channels": 6, "seconds": 1, "seed": 8103},
+        {"name": "stereo 22.05 kHz float, beyond ±1", "kind": "float32", "rate": 22050, "channels": 2, "seconds": 1, "seed": 8104},
+    ]
+    sounds: list = []
+    for i, clip in enumerate(clips):
+        audio = clip_audio(clip)
+        (vocals, instrumental), got, models = run(audio, clip["rate"], seed=8200 + i)
+        mix = got["mix"][0]
+        # The stand-in's stems again (same seed): what Replicate's demucs sends as no_vocals is the sum of
+        # the other stems, in the model's order, from zeros.
+        g = torch.Generator().manual_seed(8200 + i)
+        stems = (torch.rand((1, 4) + tuple(mix.shape), generator=g, dtype=torch.float32) * 2 - 1)[0] * 0.75
+        others = torch.zeros_like(stems[3])
+        for k in range(3):
+            others += stems[k]
+        sounds.append({
+            **clip, "sent": facts(mix), "rate_sent": int(clip["rate"]), "split": bool(got["split"]),
+            "shifts": got["shifts"], "model": got["model"], "get_model": models,
+            "vocals": {**facts(vocals["waveform"]), "rate": int(vocals["sample_rate"])},
+            "vocals_is_stem": bool(torch.equal(vocals["waveform"][0], stems[3])),
+            "instrumental": {**facts(instrumental["waveform"]), "rate": int(instrumental["sample_rate"])},
+            "instrumental_vs_no_vocals_max_abs": _float_hex(float((instrumental["waveform"][0] - others).abs().max())),
+        })
+    # Python resamples to the model's rate (44.1 kHz for htdemucs); Replicate's demucs does the same itself.
+    (vocals, instrumental), got, _models = run(clip_audio(clips[1]), 44100, seed=8300)
+    resampled = {"rate_in": clips[1]["rate"], "frames_in": clips[1]["rate"] * clips[1]["seconds"],
+                 "sent_shape": list(got["mix"].shape), "out_rate": int(vocals["sample_rate"]), "out_shape": list(vocals["waveform"].shape)}
+    settings: list = []
+    for model in ["htdemucs", "htdemucs_ft", "mdx_extra"]:
+        for shifts in [0, 1, 10]:
+            _out, got, models = run(clip_audio(clips[0]), 44100, model=model, shifts=shifts, seed=1)
+            settings.append({"model": model, "shifts": shifts, "get_model": models, "model_used": got["model"],
+                             "shifts_sent": got["shifts"], "split": bool(got["split"])})
+    schema = ml.VocalSeparatorNode.define_schema()
+    by_id = {i.id: i for i in schema.inputs}
+    options = {"model": list(by_id["model"].options), "model_default": by_id["model"].default,
+               "shifts": {"default": by_id["shifts"].default, "min": by_id["shifts"].min, "max": by_id["shifts"].max},
+               "inputs": [i.id for i in schema.inputs], "outputs": [o.display_name for o in schema.outputs]}
+    return {"sounds": sounds, "resampled": resampled, "settings": settings, "options": options}
+
+
 GROUPS = {
     "handoff": handoff_group,
     "handoff2": handoff2_group,
@@ -4221,6 +4354,7 @@ GROUPS = {
     "local-masks": local_masks_group,
     "local-slowmo": local_slowmo_group,
     "local-whisper": local_whisper_group,
+    "local-vocals": local_vocals_group,
 }
 
 

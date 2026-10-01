@@ -106,6 +106,8 @@ const EDIT_BASE: Record<string, Record<string, unknown>> = {
   FrameInterpolateAI: { frames: LINK, multiplier: 2 },
   // Whisper transcribe (R7.7): the sound; its call is Wizper's.
   WhisperTranscribe: { audio: LINK, model_size: 'base', language: 'auto', fps: 30 },
+  // Vocal separator (R7.8): the sound; its call is demucs' (a pipeline of one call).
+  VocalSeparator: { audio: LINK, model: 'htdemucs', shifts: 1 },
   // Music and speech (R3.8): the text; the rest at the node's defaults.
   GenerateMusicNode: { model: 'MusicGen', prompt: 'lo-fi piano' },
   MusicGenRemoteNode: { prompt: 'lo-fi piano' },

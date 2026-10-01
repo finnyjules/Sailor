@@ -227,6 +227,12 @@ export interface PipelineCall {
   key: string
   provider: RunnerProvider; endpoint: string; payload: Record<string, unknown>
   media: 'image' | 'video' | 'value'
+  /**
+   * How long the job may take, where it isn't its media's (R7.8: Vocal
+   * separator's answer is a value, but its run grows with the song, so it
+   * waits as a video does). Absent: a video's wait for 'video', else a picture's.
+   */
+  wait?: 'image' | 'video'
   backup?: ProviderBackup
   /**
    * This call's price basis in dollars (the price module's figure for it),

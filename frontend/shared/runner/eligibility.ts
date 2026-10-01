@@ -20,7 +20,7 @@ import { SHADER_ASPECTS, shaderBakeTaken } from './shaderBakeKey'
 import { parseMaskPoints } from './samInput'
 import { FRAMES_LINK_SOURCES, MEDIA_EFFECT_OUTPUT_KINDS, SOUND_EFFECT_OUTPUTS, linkSourceOn, mediaEffectFamilyOn, mediaEffectRows, mediaEffectSwitchedClasses } from './mediaEffects'
 import {
-  LOCAL_MODEL_FAMILY_OF, LOCAL_MODEL_OUTPUT_KINDS, LOCAL_MODEL_PICTURE_SLOTS, LOCAL_MODEL_SOURCE_INPUT, localModelOn, localModelRows, localModelSwitchedClasses,
+  LOCAL_MODEL_FAMILY_OF, LOCAL_MODEL_OUTPUT_KINDS, LOCAL_MODEL_PICTURE_SLOTS, LOCAL_MODEL_SOURCE_INPUT, VOCALS_CLASS, localModelOn, localModelRows, localModelSwitchedClasses,
 } from './localModels'
 import {
   ENHANCE_ENGINES, REMOVE_BACKGROUND_MODELS, REPAIR_CLASSES, REPAIR_OUTPUT_FORMATS, RESTORE_PHOTO_MODELS,
@@ -511,12 +511,14 @@ const LOAD_IMAGE_MASK = [['LoadImage', 1]] as const
  * (`media-sound`); Get video components' sound (`media-video`, R5.4); the
  * music and speech nodes (`audio-gen`); Clone a singing voice (`sound-in`, R3.10);
  * every sound effect's sound slots (`sound-effects`, R6.9: only while that
- * family is on, graphRuleAllows' linkSourceOn).
+ * family is on, graphRuleAllows' linkSourceOn); Vocal separator's vocals and
+ * instrumental (`vocal-split`, R7.8: only while that family is on, linkSourceOn).
  */
 export const SOUND_OUTPUTS: readonly (readonly [string, number])[] = [
   ['LoadAudio', 0], ['RecordAudio', 0], ['Audio', 0], ['GetVideoComponents', 1],
   ...AUDIO_GEN_CLASSES.map(c => [c, 0] as const), ['CloneSingingVoiceNode', 0],
   ...SOUND_EFFECT_OUTPUTS,
+  [VOCALS_CLASS, 0], [VOCALS_CLASS, 1],
 ]
 
 /** The sound nodes that read a sound (R5.3): what a music or speech node may feed while `media-sound` is on. */
@@ -1601,7 +1603,7 @@ export const RUNNER_NODE_RULES: Readonly<Record<string, RunnerNodeRule>> = {
   ...mediaEffectRows(SOUND_OUTPUTS),
   // ── R7: the local-model nodes moved onto paid services (./localModels.ts) ──
   // Each needs its family and `cards`; a picture class takes a picture or a frame batch (ruling (f));
-  // R7.7's Whisper transcribe a sound from SOUND_OUTPUTS.
+  // R7.7's Whisper transcribe and R7.8's Vocal separator a sound from SOUND_OUTPUTS.
   ...localModelRows(FRAMES_LINK_SOURCES, SOUND_OUTPUTS),
 }
 

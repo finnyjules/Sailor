@@ -518,6 +518,8 @@ describe('the family', () => {
       ...AUDIO_GEN_CLASSES.map(c => [c, 0]), ['CloneSingingVoiceNode', 0],
       // R6.9: every sound effect's sound slots (taken only while `sound-effects` is on: runner-media-sfx).
       ...SOUND_EFFECT_OUTPUTS,
+      // R7.8: Vocal separator's two stems (taken only while `vocal-split` is on: runner-local-vocals).
+      ['VocalSeparator', 0], ['VocalSeparator', 1],
     ])
     for (const cls of ['SaveAudio', 'SaveAudioMP3', 'PreviewAudio']) expect(RUNNER_NODE_RULES[cls]!.linkSources, cls).toEqual({ audio: SOUND_OUTPUTS })
     expect(AUDIO_CARD_MEDIA_RULE.linkSources).toEqual({ source: SOUND_OUTPUTS })

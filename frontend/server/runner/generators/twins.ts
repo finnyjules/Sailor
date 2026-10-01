@@ -362,6 +362,8 @@ export const RUNNER_ROUTES: Readonly<Record<string, Route>> = {
   'FrameInterpolateAI': r('fal', null, 'no RIFE video on Replicate is carded'),
   // R7.7, Whisper transcribe (family whisper-captions): one call to fal's Wizper (R3.10's) with the whole sound.
   'WhisperTranscribe': r('fal', null, 'Replicate\'s Whisper models aren\'t carded, and none is fal\'s Wizper'),
+  // R7.8, Vocal separator (family vocal-split): one call to Replicate's demucs in two-stem mode.
+  'VocalSeparator': r('replicate', null, 'no Demucs on fal is carded'),
   // R3.8, music and speech (family audio-gen): Replicate, as Python.
   ...Object.fromEntries([
     'GenerateMusicNode', 'MusicGenRemoteNode', 'GenerateSpeechNode', 'MiniMaxSpeechRemoteNode',

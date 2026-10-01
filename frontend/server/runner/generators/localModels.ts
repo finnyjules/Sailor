@@ -112,8 +112,17 @@
  * (Python's skipped segments left gaps: a fix). A sound Whisper would hear
  * nothing in (no samples, or every one 0) makes no call: three empty texts,
  * free. No ui (Python returns none).
+ *
+ * Vocal separator (R7.8, family `vocal-split`; comfy_extras/nodes_audio_ml.py
+ * :211-295): ONE call to Replicate's demucs in two-stem mode with the whole
+ * sound as Python hands Demucs (batch 0, mono repeated, past two channels cut
+ * to two) at its own rate (the service resamples, as Python does), sent as a
+ * 16-bit FLAC (../soundWav.ts vocalsSoundOf, measured at the node's turn:
+ * the seconds it is charged on). Its `vocals` and `no_vocals` (the sum of the
+ * other stems: Python's instrumental) come back as float32 WAVs and are kept
+ * as they came. A silent sound makes no call: two silent stems, free. No ui.
  */
-import { readFile, writeFile } from 'node:fs/promises'
+import { readFile, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import sharp from 'sharp'
 import { isLink, type ApiLink } from '#shared/runner/graph'
@@ -127,11 +136,13 @@ import {
   SUBJECT_MASK_CLASS, SUBJECT_MASK_GROW, SUBJECT_MASK_MODES, SUBJECT_MASK_POINT, SUBJECT_MASK_WORDS,
   FRAME_INTERP_AI_CLASS, FRAME_INTERP_AI_MULTIPLIER, RIFE_VIDEO_SLUG, SLOW_MOTION_AI_WORDS, rifePricedPixels, rifeTakes, slowMotionAiCount,
   WHISPER_CLASS, WHISPER_FPS, WHISPER_SLUG, WHISPER_WORDS, WIZPER_LANGUAGES, whisperMaxSeconds,
+  VOCALS_CLASS, VOCALS_RATE, VOCALS_SHIFTS, VOCALS_SLUG, VOCALS_WORDS, vocalsMaxSeconds, vocalsWork,
   type BgRemoveOutput, type SubjectMaskMode,
 } from '#shared/runner/localModels'
 import { parseMaskPoints, samPointsInput, samSubjectInput, samTextInput } from '#shared/runner/samInput'
 import { SOUND_IN_NEEDS_SOUND } from '#shared/runner/soundIn'
-import { wavIsSilent } from '../soundWav'
+import { vocalsSilentStems, wavIsSilent, type PythonWav, type VocalsSound } from '../soundWav'
+import { keepSound } from '../../media/values'
 import { wizperInput } from './soundIn'
 import { effectPreviewName } from '#shared/runner/effects'
 import type { NodePlan, PipelineIO, PlanContext } from '../executors'
@@ -183,6 +194,7 @@ export function planLocalModel(ctx: PlanContext): NodePlan | Promise<NodePlan> {
   if (cls === SUBJECT_MASK_CLASS) return planSubjectMask(ctx)
   if (cls === FRAME_INTERP_AI_CLASS) return planSlowMotionAi(ctx)
   if (cls === WHISPER_CLASS) return planWhisper(ctx)
+  if (cls === VOCALS_CLASS) return planVocals(ctx)
   throw new Error(`The runner cannot run a ${cls} node`)
 }
 
@@ -1503,5 +1515,160 @@ export async function planWhisper(ctx: PlanContext): Promise<NodePlan> {
     media: 'value', prefix: 'whisper',
     valuesOf: (result): Record<number, RunnerValue> => whisperValues(whisperOutputs(wizperChunks(result), fps, seconds)),
     uiFor: () => null,
+  }
+}
+
+// ── Vocal separator (R7.8, family `vocal-split`) ──
+
+/** The pipeline call's key (a resumed node matches it). */
+const VOCALS_KEY = 'demucs'
+
+/** `model` as execute gets it (validated by the rule row; missing: the default). */
+export function vocalsModel(v: unknown): string {
+  return typeof v === 'string' ? v : 'htdemucs'
+}
+
+/** `shifts` as execute gets it: ComfyUI's validation `int(val)` (1.5 → 1), validated by the rule row; missing: the default. */
+export function vocalsShifts(v: unknown): number {
+  return typeof v === 'number' && Number.isFinite(v) ? Math.trunc(v) : typeof v === 'boolean' ? Number(v) : VOCALS_SHIFTS.default
+}
+
+/**
+ * The request (names from the saved schema, ruling (i)): the sound, Python's
+ * model and shifts, `split` as Python passes it, two-stem mode (`stem:
+ * 'vocals'`: the vocals and `no_vocals`, the sum of the other stems), and
+ * the stems back as lossless float32 WAVs, never rescaled (`clip_mode: 'none'`:
+ * Python's stems are the model's floats as they are).
+ */
+export function vocalsInput(audioUrl: string, model: string, shifts: number): Record<string, unknown> {
+  return { audio: audioUrl, model, shifts, split: true, stem: 'vocals', output_format: 'wav', wav_format: 'float32', clip_mode: 'none' }
+}
+
+/** The answer's two stems (`output: { vocals, no_vocals }`), or null when either is missing. */
+export function vocalsStemUrls(result: unknown): { vocals: string; instrumental: string } | null {
+  const out = result && typeof result === 'object' ? (result as Record<string, unknown>).output : undefined
+  if (!out || typeof out !== 'object' || Array.isArray(out)) return null
+  const o = out as Record<string, unknown>
+  const ok = (v: unknown): v is string => typeof v === 'string' && v !== ''
+  return ok(o.vocals) && ok(o.no_vocals) ? { vocals: o.vocals, instrumental: o.no_vocals } : null
+}
+
+/** The most bytes a stem of this many seconds' sound may be: stereo float32 at 44.1 kHz, two seconds over, plus its header. */
+export function vocalsStemMaxBytes(seconds: number): number {
+  return Math.ceil(seconds + 2) * VOCALS_STEM_BYTES_PER_SECOND + 64 * 1024
+}
+
+/** A stem's bytes a second: stereo float32 at Demucs' 44.1 kHz. */
+const VOCALS_STEM_BYTES_PER_SECOND = VOCALS_RATE * 2 * 4
+
+const isWav = (b: Uint8Array) => b.length > 12 && String.fromCharCode(...b.subarray(0, 4)) === 'RIFF' && String.fromCharCode(...b.subarray(8, 12)) === 'WAVE'
+
+/**
+ * Vocal separator's plan (R7.8): ONE call to Replicate's demucs with the
+ * sound the engine made and measured for this turn (`ctx.soundWav`,
+ * ../soundWav.ts vocalsSoundOf: Python's stereo at the sound's own rate, a
+ * 16-bit FLAC), handed off; its two stems downloaded and kept for the run as
+ * they came (float32 WAVs, read back by Python's `load`), slot 0 the vocals,
+ * slot 1 the instrumental. A silent sound makes no call: two silent stems,
+ * free (a derive plan, known from the sound this turn measured). A resumed
+ * node sends nothing again: its request is the one written down. An answer
+ * missing a stem, or one that isn't a WAV, is not delivered (charged
+ * nothing). No ui (Python returns none).
+ */
+export async function planVocals(ctx: PlanContext): Promise<NodePlan> {
+  const inputs = ctx.prompt[ctx.nodeId]!.inputs ?? {}
+  const link = inputs.audio
+  if (!isLink(link)) throw new Error(SOUND_IN_NEEDS_SOUND)
+  const model = vocalsModel(inputs.model)
+  const shifts = vocalsShifts(inputs.shifts)
+  const work = vocalsWork(model, shifts)
+  if (work === null) throw new Error('Vocal separator can’t run this model on its service')
+  const place = ctx.measured?.place ?? (ctx.hosted ? 'hosted' : 'local')
+  const cap = vocalsMaxSeconds(place)
+  // This turn measured the sound (a resumed node's record holds no `audio`, and its sound isn't made again):
+  // nothing to separate (Demucs makes silence of silence) is two silent stems, no call, free.
+  if (typeof ctx.measured?.audio === 'number' && ctx.soundWav) {
+    const w = await ctx.soundWav(link as ApiLink) as PythonWav & Partial<VocalsSound>
+    if (w.silent === true) {
+      return {
+        kind: 'derive',
+        derive: async (io) => {
+          const media = io.media
+          if (!media) throw new Error(LOCAL_MODEL_WORDS.needsRun)
+          const stems = vocalsSilentStems(w.frames, w.rate)
+          const a = await keepSound(media.runId, stems, media.kept, { hosted: media.hosted })
+          const b = await keepSound(media.runId, stems, media.kept, { hosted: media.hosted })
+          return { values: { 0: a, 1: b }, ui: null }
+        },
+      }
+    }
+  }
+  return {
+    kind: 'pipeline', prefix: 'vocal_separator',
+    run: async (io: PipelineIO) => {
+      const mediaOf = () => {
+        if (!io.media) throw new Error(LOCAL_MODEL_WORDS.needsRun)
+        return io.media
+      }
+      let payload = io.recorded?.(VOCALS_KEY) ?? null
+      let seconds: number
+      if (payload) {
+        // Resumed: priced as recorded when it was sent; its download is still bounded by what was held.
+        const m = ctx.measured
+        seconds = typeof m?.audio === 'number' ? m.audio : typeof m?.audioUpTo === 'number' ? Math.min(m.audioUpTo, cap) : cap
+      }
+      else {
+        if (!ctx.soundWav || !ctx.bytesToUrl) throw new Error(SOUND_IN_NEEDS_SOUND)
+        const w = await ctx.soundWav(link as ApiLink) as PythonWav & Partial<VocalsSound>
+        // Silent, but not known before planning (a resumed node whose call was never sent): still no call.
+        if (w.silent === true) {
+          const media = mediaOf()
+          const stems = vocalsSilentStems(w.frames, w.rate)
+          const a = await keepSound(media.runId, stems, media.kept, { hosted: media.hosted })
+          const b = await keepSound(media.runId, stems, media.kept, { hosted: media.hosted })
+          return { values: { 0: a, 1: b }, ui: null }
+        }
+        // Held for at most this place's longest sound: a longer one is never sent.
+        if (w.seconds > cap) throw new Error(VOCALS_WORDS.tooLong)
+        payload = vocalsInput(await ctx.bytesToUrl({ filename: 'vocal_separator.flac', subfolder: '', type: 'kept' }, w.wav), model, shifts)
+        seconds = w.seconds
+      }
+      const usd = paidCallUsd({ endpoint: VOCALS_SLUG, inputSeconds: seconds * work })
+      if (usd == null) throw new Error('Vocal separator has no price yet')
+      const got = await io.call({ key: VOCALS_KEY, provider: 'replicate', endpoint: VOCALS_SLUG, payload, media: 'value', wait: 'video', usd })
+      const urls = vocalsStemUrls(got.result)
+      if (!urls) {
+        await io.undelivered?.(VOCALS_KEY, 'no-file')
+        throw new Error(VOCALS_WORDS.noAnswer)
+      }
+      const media = mediaOf()
+      const maxBytes = vocalsStemMaxBytes(seconds)
+      const keep = async (url: string): Promise<RunnerValue> => {
+        const { bytes } = await io.download(url, { kind: 'audio', maxBytes })
+        if (!isWav(bytes)) {
+          await io.undelivered?.(VOCALS_KEY, 'no-file')
+          throw new Error(VOCALS_WORDS.noAnswer)
+        }
+        // Kept by path (the tools read a sound by its path, never whole), its work folder removed on every path.
+        let work: string | null = null
+        try {
+          await media.kept.checkRoom(media.runId)
+          work = await media.kept.workDir(media.runId)
+          const tmp = join(work, 'stem.wav')
+          await writeFile(tmp, bytes, { flag: 'wx' })
+          return { kind: 'files', files: [await media.kept.putPath(media.runId, tmp, 'wav')], sound: { decode: 'load' } }
+        }
+        catch (e) {
+          if (!io.signal.aborted) await io.undelivered?.(VOCALS_KEY, 'not-kept')
+          throw e
+        }
+        finally {
+          if (work) await rm(work, { recursive: true, force: true })
+        }
+      }
+      const vocals = await keep(urls.vocals)
+      const instrumental = await keep(urls.instrumental)
+      return { values: { 0: vocals, 1: instrumental }, ui: null }
+    },
   }
 }

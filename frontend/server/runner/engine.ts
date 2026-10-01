@@ -60,15 +60,18 @@ import { loadVideoStartProblems, videoFileVerdict } from './media/videoNodes'
 import { frameStartProblems, framesSoundVerdict } from './media/frameNodes'
 import { hasVideoEffect, keptPeak, lutStartProblems, mediaEffectRefusals, mediaEffectStartProblems, nearLimit, needsExactCount, waveformStartProblems } from './video/start'
 import { frameShapes, videoSourceShapeOf } from './video/shapes'
-import { hasLocalModelPicture, localModelStartProblems, whisperSoundBound } from './localModelStart'
-import { LOCAL_MODEL_WORDS, WHISPER_CLASS, WHISPER_WORDS, isLocalModelClass, whisperMaxSeconds } from '#shared/runner/localModels'
+import { hasLocalModelPicture, localModelStartProblems, soundBoundOf } from './localModelStart'
+import {
+  LOCAL_MODEL_WORDS, VOCALS_CLASS, VOCALS_WORDS, WHISPER_CLASS, WHISPER_WORDS, isLocalModelClass, vocalsMaxSeconds, whisperMaxSeconds,
+} from '#shared/runner/localModels'
 import { perFrameCredits } from '#shared/pricing/nodePrice'
 import { hasSoundEffect, soundEffectRefusals, soundEffectStartProblems, soundKeptBytes, soundShapes, soundSourceShapeOf } from './video/soundShapes'
 import { markReleased, reviveReleased, spentKeptMedia } from './keptRelease'
 import { MEDIA_EFFECT_FAMILIES } from '#shared/runner/mediaEffects'
 import { ev, type RunEvents, type SwitchReason } from './events'
 import { mediaNodeKind, nodeMediaChangedWords, nodeMediaCheck, nodeMediaFiles } from './nodeMedia'
-import { pythonWavOf, silenceWav, silentCardAt, soundMakerOf, whisperSilenceWav, whisperWavOf, type PythonWav } from './soundWav'
+import { pythonWavOf, silentCardAt, soundMakerOf, vocalsSoundOf, whisperWavOf, type PythonWav } from './soundWav'
+import { cardSilenceFor } from './soundInMedia'
 import { lipsyncUploadProblem } from './soundInMedia'
 import { SOUND_FILE_MISSING } from './media/soundNodes'
 import { switchedSinceHold } from './switches'
@@ -744,7 +747,7 @@ export function createEngine(deps: EngineDeps) {
           }
         }
       }
-      result = await waitForResult(run, call, stageKey, nodeId, c.media === 'video' ? 'video' : 'image', signal, backup, o.backupSettings.stallMs, MEDIA_NOUN[c.media])
+      result = await waitForResult(run, call, stageKey, nodeId, c.wait ?? (c.media === 'video' ? 'video' : 'image'), signal, backup, o.backupSettings.stallMs, MEDIA_NOUN[c.media])
     }
     catch (e) {
       if (!(e instanceof RunStopped) && !signal.aborted) {
@@ -1203,18 +1206,20 @@ export function createEngine(deps: EngineDeps) {
       // A sound-in node's WAV (R3.10, ./soundWav.ts): made once for this turn from what the wire
       // brought, so the WAV measured and charged (nodeMediaCheck) is the very one the plan sends.
       const wavs = new Map<string, Promise<PythonWav>>()
-      // R7.7: Whisper transcribe sends the whole sound as 16 kHz mono (soundWav.ts whisperWavOf), not R3.10's first 60 s.
-      const whisper = take.prompt[id]!.class_type === WHISPER_CLASS
+      // R7.7: Whisper transcribe sends the whole sound as 16 kHz mono (soundWav.ts whisperWavOf), not R3.10's first 60 s;
+      // R7.8: Vocal separator the whole sound as Python's stereo, a 16-bit FLAC (soundWav.ts vocalsSoundOf).
+      const nodeClass = take.prompt[id]!.class_type
+      const soundOf = nodeClass === WHISPER_CLASS ? whisperWavOf : nodeClass === VOCALS_CLASS ? vocalsSoundOf : pythonWavOf
       const soundWavOnce = (link: ApiLink): Promise<PythonWav> => {
         const key = `${link[0]}:${link[1]}`
         let p = wavs.get(key)
         if (!p) {
           // An Audio card's 1 s of silence (fix round 1, Important), as Python's card hands it on.
-          if (silentCardAt(take.prompt, link)) p = Promise.resolve(whisper ? whisperSilenceWav() : silenceWav())
+          if (silentCardAt(take.prompt, link)) p = Promise.resolve(cardSilenceFor(nodeClass))
           else {
             const value = valueAt(take)(link) ?? { kind: 'files' as const, files: filesAt(take)(link) }
             const io = { access: files, userId: run.userId, hosted: deps.hosted(), signal }
-            p = (whisper ? whisperWavOf : pythonWavOf)(value, soundMakerOf(take.prompt, link), io)
+            p = soundOf(value, soundMakerOf(take.prompt, link), io)
           }
           wavs.set(key, p)
         }
@@ -1319,11 +1324,11 @@ export function createEngine(deps: EngineDeps) {
       if (media) {
         if (media.problem !== null) throw new Error(media.problem)
         // R7.7: a Whisper sound longer than this place sends (one whose maker couldn't be bounded before the
-        // hold, or within a source's second of slack) stops here, before the hand-off and the call.
+        // hold, or within a source's second of slack) stops here, before the hand-off and the call; R7.8: a
+        // Vocal separator's the same.
         const heard = media.measured.seconds.audio
-        if (take.prompt[id]!.class_type === WHISPER_CLASS && typeof heard === 'number' && heard > whisperMaxSeconds(deps.hosted() ? 'hosted' : 'local')) {
-          throw new Error(WHISPER_WORDS.tooLong)
-        }
+        const longest = wholeSoundCap(take.prompt[id]!.class_type, deps.hosted() ? 'hosted' : 'local')
+        if (longest && typeof heard === 'number' && heard > longest.seconds) throw new Error(longest.words)
         // The tight hold (F22 fix round 1): the files must be the ones the start
         // of the run measured and held for, and cost no more.
         const recorded = take.measured && Object.prototype.hasOwnProperty.call(take.measured, id) ? take.measured[id] : undefined
@@ -2228,17 +2233,20 @@ export function createEngine(deps: EngineDeps) {
     const stoppedWords = (e: unknown) => (startSignal?.aborted ? MEDIA_WORDS.stopped : null) ?? (e instanceof Error ? e.message : String(e))
     for (const [index, p] of prompts.entries()) {
       // R7.7 fix round 1: Whisper transcribe's sound bounded before the hold from its maker (R6.9's
-      // sound start pass: headers and the sound effects' widgets, probes only — nothing is decoded).
+      // sound start pass: headers and the sound effects' widgets, probes only — nothing is decoded);
+      // R7.8: Vocal separator's the same.
       let whisperShapes: Awaited<ReturnType<typeof soundShapes>> | null = null
       for (const [nodeId, n] of Object.entries(p)) {
         if (!mediaNodeKind(n)) continue
         await assertFilesOwned(nodeMediaFiles(p, nodeId), i.userId, deps.hosted(), deps.ownership)
-        const whisper = n.class_type === WHISPER_CLASS
+        const place = deps.hosted() ? 'hosted' as const : 'local' as const
+        const longest = wholeSoundCap(n.class_type, place)
         const media = await nodeMediaCheck(p, nodeId, {
           read: f => files.read(f), size: f => files.size(f), strict: deps.hosted(),
           // A sound-in node's sound named by the prompt (R3.10): Python's WAV of it, as `load` reads the file
-          // (its first 60 s), under the request's signal. Whisper transcribe's isn't decoded here (bounded below).
-          ...(whisper ? {} : {
+          // (its first 60 s), under the request's signal. Whisper transcribe's and Vocal separator's whole sound
+          // isn't decoded here (bounded below).
+          ...(longest ? {} : {
             soundFileWav: async (f: OutputFile) => {
               if (!(await files.exists(f))) throw new Error(SOUND_FILE_MISSING)
               return pythonWavOf({ kind: 'files', files: [f], sound: { decode: 'load' } }, 'LoadAudio', { access: files, userId: i.userId, hosted: deps.hosted(), signal: startSignal })
@@ -2247,26 +2255,29 @@ export function createEngine(deps: EngineDeps) {
           videoUploadProblem: f => lipsyncUploadProblem(f, { access: files, userId: i.userId, hosted: deps.hosted(), signal: startSignal }),
         })
         if (startSignal?.aborted) throw refuse(MEDIA_WORDS.stopped, 400, { nodeId, classType: n.class_type })
-        if (whisper) {
-          const place = deps.hosted() ? 'hosted' as const : 'local' as const
-          const cap = whisperMaxSeconds(place)
+        if (longest) {
+          const cap = longest.seconds
           if (media && media.problem !== null) throw refuse(media.problem, 400, { nodeId, classType: n.class_type })
           // The empty Audio card's second of silence is measured exactly (its WAV, as at the turn).
           if (media) { measured[index]![nodeId] = { ...media.measured, seconds: { ...media.measured.seconds, place } }; continue }
           const link = n.inputs?.audio
-          let bound: number | null = null
+          let found: { seconds: number; exact: boolean } | null = null
           if (isLink(link)) {
             try {
               whisperShapes ??= await soundShapes(p, families, soundSourceShapeOf({ prompt: p, access: files, userId: i.userId, hosted: deps.hosted(), signal: startSignal }))
             }
             catch (e) { throw refuse(stoppedWords(e), 400, { nodeId, classType: n.class_type }) }
             if (startSignal?.aborted) throw refuse(MEDIA_WORDS.stopped, 400, { nodeId, classType: n.class_type })
-            bound = whisperSoundBound(p, link, whisperShapes)
+            found = soundBoundOf(p, link, whisperShapes)
           }
-          // Longer than Whisper sends here: refused plainly, before anything is held or run. A source's
+          const bound = found ? found.seconds : null
+          // Longer than the node sends here: refused plainly, before anything is held or run. A source's
           // bound is its header's length plus a second, so a loaded file is refused just when its own
-          // length passes the cap; within that second the node's turn is the backstop.
-          if (bound !== null && bound > cap + 1 + 1e-3) throw refuse(WHISPER_WORDS.tooLong, 400, { nodeId, classType: n.class_type })
+          // length passes the cap; within that second the node's turn is the backstop. R7.8 (R7.7's
+          // re-review): Vocal separator adds that second only where a header source (or a music node's
+          // duration) is in the chain, so an exact chain past the cap is refused here too.
+          const slack = n.class_type === VOCALS_CLASS && found?.exact ? 0 : 1
+          if (bound !== null && bound > cap + slack + 1e-3) throw refuse(longest.words, 400, { nodeId, classType: n.class_type })
           // Held on the bound (or, where the maker can't be bounded, on the place's longest sound); the
           // node's turn measures the WAV it sends and is charged on that, never above the hold.
           measured[index]![nodeId] = { seconds: { place, ...(bound !== null ? { audioUpTo: Math.min(bound, cap) } : {}) }, sha: {} }
@@ -2694,3 +2705,14 @@ export function createEngine(deps: EngineDeps) {
 }
 
 export type Engine = ReturnType<typeof createEngine>
+
+/**
+ * The longest sound a node that sends its WHOLE sound may send where it runs,
+ * and its words past it (R7.7 Whisper transcribe, R7.8 Vocal separator), or
+ * null for any other class.
+ */
+function wholeSoundCap(classType: string, place: 'hosted' | 'local'): { seconds: number; words: string } | null {
+  if (classType === WHISPER_CLASS) return { seconds: whisperMaxSeconds(place), words: WHISPER_WORDS.tooLong }
+  if (classType === VOCALS_CLASS) return { seconds: vocalsMaxSeconds(place), words: VOCALS_WORDS.tooLong }
+  return null
+}

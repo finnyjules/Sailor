@@ -357,10 +357,21 @@ export const WHISPER_RESAMPLE_SLACK = 1e-3
  *     in R7.7's report).
  */
 export function whisperSoundBound(prompt: ApiPrompt, link: ApiLink, shapes: ReadonlyMap<string, SoundShape>): number | null {
+  return soundBoundOf(prompt, link, shapes)?.seconds ?? null
+}
+
+/**
+ * whisperSoundBound's bound, and whether it is exact (R7.8): `exact` only
+ * where every source in the chain is known to the sample (the empty card,
+ * Empty audio and the effects over them); a header source (a loaded file, a
+ * video's sound) or a music node's duration carries a second of slack, so a
+ * caller refusing past a cap adds that second only then (R7.7's re-review).
+ */
+export function soundBoundOf(prompt: ApiPrompt, link: ApiLink, shapes: ReadonlyMap<string, SoundShape>): { seconds: number; exact: boolean } | null {
   let at: ApiLink = link
   for (let depth = 0; depth < 64; depth++) {
     const s = shapes.get(`${at[0]}:${at[1]}`)
-    if (s && s.rate > 0) return s.samples / s.rate + WHISPER_RESAMPLE_SLACK
+    if (s && s.rate > 0) return { seconds: s.samples / s.rate + WHISPER_RESAMPLE_SLACK, exact: s.exact }
     const n = prompt[at[0]]
     if (!n) return null
     const inputs = n.inputs ?? {}
@@ -369,7 +380,7 @@ export function whisperSoundBound(prompt: ApiPrompt, link: ApiLink, shapes: Read
     if (MUSIC_CLASSES.has(n.class_type) && at[1] === 0) {
       const d = inputs.duration
       const typed = typeof d === 'number' && Number.isFinite(d) ? Math.min(Math.max(Math.trunc(d), MUSIC_MIN_SECONDS), MUSIC_MAX_SECONDS) : MUSIC_MAX_SECONDS
-      return typed + 1
+      return { seconds: typed + 1, exact: false }
     }
     return null
   }

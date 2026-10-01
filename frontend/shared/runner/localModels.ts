@@ -215,6 +215,58 @@ export function whisperMaxSeconds(place: 'hosted' | 'local' | null | undefined):
   return place === 'hosted' ? WHISPER_MAX_SECONDS.hosted : WHISPER_MAX_SECONDS.local
 }
 
+// ── Vocal separator (R7.8, family `vocal-split`) ──
+
+/** comfy_extras/nodes_audio_ml.py VocalSeparatorNode's node_id (Demucs, now Replicate's demucs). */
+export const VOCALS_CLASS = 'VocalSeparator'
+/** Replicate's demucs (ruling (i)), in two-stem mode: `stem: 'vocals'` answers `vocals` and `no_vocals`. */
+export const VOCALS_SLUG = 'ryan5453/demucs'
+/** `model`'s options (its define_schema). */
+export const VOCALS_MODELS = ['htdemucs', 'htdemucs_ft', 'mdx_extra'] as const
+/**
+ * The models the service takes (the saved schema's `model` enum holds
+ * `htdemucs` and `htdemucs_ft`, not `mdx_extra`: only its quantised
+ * `mdx_extra_q`). `mdx_extra` leaves the workflow to the engine (rule 3;
+ * named in R7.8's report, with its plan).
+ */
+export const VOCALS_MODELS_SENT = ['htdemucs', 'htdemucs_ft'] as const
+/** `shifts`: IO.Int.Input(default=1, min=0, max=10). The saved schema takes any integer. */
+export const VOCALS_SHIFTS = { default: 1, min: 0, max: 10 } as const
+/**
+ * The longest sound one Vocal separator node sends (ruling (i)): hosted 10
+ * minutes; on this computer 20 minutes, the most whose stems (two float32
+ * stereo WAVs at Demucs' 44.1 kHz, 352,800 bytes a second each) stay under
+ * the 512 MiB a downloaded sound may be (answerDownload.ts).
+ */
+export const VOCALS_MAX_SECONDS = { hosted: 10 * 60, local: 20 * 60 } as const
+/** The rate Demucs makes its stems at (Python's `sep_model.samplerate` for every model it offers). */
+export const VOCALS_RATE = 44100
+/**
+ * How much more GPU time a setting takes than htdemucs at one pass (its
+ * price): `htdemucs_ft` is a bag of four models (Python's tooltip: "~4×
+ * slower"); `shifts` passes average that many runs (0 and 1: one run).
+ */
+export const VOCALS_MODEL_WORK: Readonly<Record<string, number>> = { htdemucs: 1, htdemucs_ft: 4 }
+
+/** Where a Vocal separator node runs, for its sound cap: `place`, else the canvas's "up to" place, else this computer's (the larger). */
+export function vocalsMaxSeconds(place: 'hosted' | 'local' | null | undefined): number {
+  return place === 'hosted' ? VOCALS_MAX_SECONDS.hosted : VOCALS_MAX_SECONDS.local
+}
+
+/**
+ * The work a setting asks for, in htdemucs passes: the model's factor times
+ * the shifts' passes (at least one). A wired shifts: the most it takes; a
+ * model the service doesn't take: null (left to the engine, never priced).
+ */
+export function vocalsWork(model: unknown, shifts: unknown): number | null {
+  const m = typeof model === 'string' && Object.prototype.hasOwnProperty.call(VOCALS_MODEL_WORK, model) ? VOCALS_MODEL_WORK[model]! : model === undefined ? 1 : null
+  if (m === null) return null
+  // A typed shifts as ComfyUI hands it on (`int(val)`: 1.5 is 1).
+  const s = typeof shifts === 'number' && Number.isFinite(shifts) ? Math.min(Math.max(Math.trunc(shifts), VOCALS_SHIFTS.min), VOCALS_SHIFTS.max)
+    : shifts === undefined ? VOCALS_SHIFTS.default : VOCALS_SHIFTS.max
+  return m * Math.max(1, s)
+}
+
 /** Every moved class's family (each task adds its row once its port exists). */
 export const LOCAL_MODEL_FAMILY_OF: Readonly<Record<string, RunnerFamily>> = {
   [BG_REMOVE_CLASS]: 'bg-remove',
@@ -225,6 +277,7 @@ export const LOCAL_MODEL_FAMILY_OF: Readonly<Record<string, RunnerFamily>> = {
   [SUBJECT_MASK_CLASS]: 'subject-mask',
   [FRAME_INTERP_AI_CLASS]: 'slow-motion-ai',
   [WHISPER_CLASS]: 'whisper-captions',
+  [VOCALS_CLASS]: 'vocal-split',
 }
 
 /** The service each moved class calls (ruling (b): the price's tooltip names it). Null: none (Lens, in the server). */
@@ -237,6 +290,7 @@ export const SERVICE_OF: Readonly<Record<string, LocalModelService | null>> = {
   [SUBJECT_MASK_CLASS]: 'fal',
   [FRAME_INTERP_AI_CLASS]: 'fal',
   [WHISPER_CLASS]: 'fal',
+  [VOCALS_CLASS]: 'replicate',
 }
 
 /** The tooltip on the price (ruling (b)): sentence case, plain, no node copy. */
@@ -325,6 +379,8 @@ export const LOCAL_MODEL_OUTPUT_KINDS: Readonly<Record<string, Readonly<Record<n
   [FRAME_INTERP_AI_CLASS]: { 0: 'frames' },
   // R7.7: three texts (caption track, SRT, plain text).
   [WHISPER_CLASS]: { 0: 'text', 1: 'text', 2: 'text' },
+  // R7.8: two sounds (vocals, instrumental), files values as every runner sound is (no row of their own).
+  [VOCALS_CLASS]: {},
 }
 
 /** The slot a picture class's picture (or a clip's frame batch) comes out of: 0, but Subject mask's cutout 1. */
@@ -414,6 +470,12 @@ export const WHISPER_WORDS = {
   noAnswer: 'The service sent back no transcript.',
 } as const
 
+/** Vocal separator's own words (R7.8). */
+export const VOCALS_WORDS = {
+  tooLong: 'This sound is too long to separate here.',
+  noAnswer: 'The service sent back no vocals or instrumental.',
+} as const
+
 /** What the start of the run says of a clip over the frame cap, in the class's own words. */
 export function overCapWords(classType: string): string {
   if (classType === UPSCALE_2X_CLASS) return UPSCALE_2X_WORDS.overCap
@@ -455,6 +517,11 @@ const FRAME_INTERP_AI_WIDGETS: Readonly<Record<string, RunnerWidgetSpec>> = {
 
 const WHISPER_WIDGETS: Readonly<Record<string, RunnerWidgetSpec>> = {
   model_size: { type: 'COMBO', required: true, options: WHISPER_MODEL_SIZES },
+}
+
+const VOCALS_WIDGETS: Readonly<Record<string, RunnerWidgetSpec>> = {
+  model: { type: 'COMBO', required: true, options: VOCALS_MODELS_SENT },
+  shifts: { type: 'INT', required: true, min: VOCALS_SHIFTS.min, max: VOCALS_SHIFTS.max },
 }
 
 const BG_REMOVE_WIDGETS: Readonly<Record<string, RunnerWidgetSpec>> = {
@@ -556,6 +623,15 @@ export function localModelRows(
       inputCheck: 'create-video-fps',
       widgets: WHISPER_WIDGETS,
     },
+    // R7.8: the sound (any runner sound, each source taken only while its own family is on), the model
+    // the service takes (mdx_extra: the engine's) and the shifts as ComfyUI validates them.
+    [VOCALS_CLASS]: {
+      family: 'vocal-split',
+      mustLink: ['audio'],
+      required: ['audio', 'model', 'shifts'],
+      linkSources: { audio: soundSources },
+      widgets: VOCALS_WIDGETS,
+    },
   }
 }
 
@@ -591,6 +667,7 @@ const LOCAL_MODEL_SLUG: Readonly<Record<string, string>> = {
 export function localModelCalls(classType: string, frames: number | null | undefined, inputs?: Readonly<Record<string, unknown>> | null, seconds?: SlowMotionAiMeasured | null): PaidCalls {
   if (classType === FRAME_INTERP_AI_CLASS) return slowMotionAiCalls(inputs?.multiplier, frames, seconds)
   if (classType === WHISPER_CLASS) return whisperCalls(seconds)
+  if (classType === VOCALS_CLASS) return vocalsCalls(inputs, seconds)
   const endpoint = has(LOCAL_MODEL_SLUG, classType) ? LOCAL_MODEL_SLUG[classType]! : null
   if (!endpoint) return { refused: `${classType} has no price yet` }
   // A SAM 3 mask class reads the first picture only: one call, however many came in.
@@ -673,4 +750,26 @@ export function whisperCalls(seen?: SlowMotionAiMeasured | null): PaidCalls {
   const ok = (x: unknown): x is number => typeof x === 'number' && Number.isFinite(x) && x >= 0
   const inputSeconds = ok(a) ? Math.min(a, cap) : ok(b) ? Math.min(b, cap) : cap
   return { steps: [{ call: { endpoint: WHISPER_SLUG, inputSeconds }, times: 1 }] }
+}
+
+/**
+ * Vocal separator's call (R7.8), for its price: one call to Replicate's
+ * demucs, by the seconds of sound sent times the work its settings ask for
+ * (vocalsWork: htdemucs_ft four times htdemucs, each shift a pass), on the
+ * card's per-second ceiling with the page's figure as its floor
+ * (paidRates.ts). The seconds: measured (`audio`: the sound the node's turn
+ * sends, or the empty card's known second), else bounded before the run
+ * (`audioUpTo`, from the sound's maker), else the longest sound it may send
+ * where it runs (`place`; the canvas's `framesUpTo`; neither: this
+ * computer's, the larger), so what is shown and held is never below the charge.
+ */
+export function vocalsCalls(inputs: Readonly<Record<string, unknown>> | null | undefined, seen?: SlowMotionAiMeasured | null): PaidCalls {
+  const work = vocalsWork(inputs?.model, inputs?.shifts)
+  if (work === null) return { refused: 'Vocal separator can’t run this model on its service' }
+  const cap = vocalsMaxSeconds(seen?.place ?? seen?.framesUpTo)
+  const a = seen?.audio
+  const b = seen?.audioUpTo
+  const ok = (x: unknown): x is number => typeof x === 'number' && Number.isFinite(x) && x >= 0
+  const seconds = ok(a) ? Math.min(a, cap) : ok(b) ? Math.min(b, cap) : cap
+  return { steps: [{ call: { endpoint: VOCALS_SLUG, inputSeconds: seconds * work }, times: 1 }] }
 }

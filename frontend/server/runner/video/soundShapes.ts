@@ -14,7 +14,9 @@
  *   - Get video components: the made video's sound (Create video's), or the
  *     file's last sound stream, as R6.1 bounds it;
  *   - a Gate hands on what reached it;
- *   - a sound effect: its own shape, from its widgets and its inputs'.
+ *   - a sound effect: its own shape, from its widgets and its inputs';
+ *   - Vocal separator (R7.8, its family on): two stereo 44.1 kHz stems, its
+ *     sound's length resampled plus a second.
  * Any other source (a music or speech node) can't be known before the run: a
  * sound effect reading it leaves the workflow to the engine.
  *
@@ -31,6 +33,7 @@ import { GATE_CLASS, isLink } from '#shared/runner/graph'
 import type { RunnerFamily } from '#shared/runner/families'
 import { MEDIA_CAPS, MEDIA_WORDS } from '#shared/runner/media'
 import { MEDIA_EFFECT_WORDS, mediaEffectFamilyOn } from '#shared/runner/mediaEffects'
+import { VOCALS_CLASS, VOCALS_RATE, localModelOn } from '#shared/runner/localModels'
 import { MEDIA_EFFECT_SCHEMAS } from '#shared/runner/mediaEffectSchemas.generated'
 import { parseInputFileRef } from '../inputs'
 import type { OutputFile } from '../types'
@@ -174,6 +177,17 @@ export async function soundShapes(
       case 'GetVideoComponents': {
         const made = isLink(inputs.video) ? madeVideoSound(prompt, inputs.video, at) : undefined
         set(1, made !== undefined ? made : await sourceShape(id, n.class_type))
+        break
+      }
+      case VOCALS_CLASS: {
+        // R7.8: Vocal separator's two stems, while its family is on: stereo at Demucs' 44.1 kHz, as long as
+        // its sound once resampled, plus a second (the service resamples and encodes it itself).
+        const src = localModelOn(n.class_type, families) ? at(inputs.audio) : undefined
+        if (src) {
+          const stem = { rate: VOCALS_RATE, channels: 2, samples: resampledBound(src.samples, src.rate, VOCALS_RATE) + VOCALS_RATE, exact: false }
+          set(0, stem)
+          set(1, stem)
+        }
         break
       }
       default: {

@@ -27,8 +27,8 @@ import { probeVideoFile, type SoundReadIO } from '../media/values'
 import { SOUND_FILE_MISSING } from './media/soundNodes'
 import { sha256Hex } from './handoff'
 import { parseInputFileRef } from './inputs'
-import { silenceWav, silentCardAt, soundFileBeforeRun, whisperSilenceWav, type PythonWav } from './soundWav'
-import { WHISPER_CLASS } from '#shared/runner/localModels'
+import { silenceWav, silentCardAt, soundFileBeforeRun, vocalsSilence, whisperSilenceWav, type PythonWav } from './soundWav'
+import { VOCALS_CLASS, WHISPER_CLASS } from '#shared/runner/localModels'
 import type { MeasuredMedia, OutputFile } from './types'
 
 export interface SoundInReads {
@@ -61,6 +61,13 @@ export function measuredWav(w: PythonWav): MeasuredMedia {
   return { seconds: { audio: w.seconds }, sha: { audio: sha256Hex(w.wav) } }
 }
 
+/** The Audio card's second of silence as this class sends (and measures) it. */
+export function cardSilenceFor(classType: string): PythonWav {
+  if (classType === WHISPER_CLASS) return whisperSilenceWav()
+  if (classType === VOCALS_CLASS) return vocalsSilence()
+  return silenceWav()
+}
+
 /** The node's video address judged (Sync lips only), or null. */
 function videoProblem(classType: string, inputs: Record<string, unknown>, strict: boolean): string | null {
   if (!isLipsync2ProClass(classType)) return null
@@ -90,8 +97,8 @@ export async function soundInMediaCheck(prompt: ApiPrompt, nodeId: string, reads
   try {
     if (reads.soundWav) return { problem: null, measured: measuredWav(await reads.soundWav(link)) }
     // An Audio card's 1 s of silence (fix round 1, Important): known before the run, priced at 1 s
-    // (R7.7: Whisper transcribe's own 16 kHz WAV of it).
-    if (silentCardAt(prompt, link)) return { problem: null, measured: measuredWav(node.class_type === WHISPER_CLASS ? whisperSilenceWav() : silenceWav()) }
+    // (R7.7: Whisper transcribe's own 16 kHz WAV of it; R7.8: Vocal separator's stereo silence).
+    if (silentCardAt(prompt, link)) return { problem: null, measured: measuredWav(cardSilenceFor(node.class_type)) }
     const file = soundFileBeforeRun(prompt, link, parseInputFileRef)
     if (!file || !reads.soundFileWav) return null
     return { problem: null, measured: measuredWav(await reads.soundFileWav(file)) }

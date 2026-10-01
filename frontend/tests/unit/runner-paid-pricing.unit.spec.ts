@@ -171,6 +171,8 @@ describe('paidCallUsd', () => {
       'fal-ai/sam-3/image',
       // R7.6: RIFE video (Slow motion (AI)).
       'fal-ai/rife/video',
+      // R7.8: demucs (Vocal separator).
+      'ryan5453/demucs',
     ].sort())
   })
   it('no paid card duplicates an edit, clip or video card (each rate lives in one place)', () => {

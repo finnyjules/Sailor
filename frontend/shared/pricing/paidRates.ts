@@ -329,6 +329,17 @@ export const PAID_RATES: Record<string, PaidRate> = {
     note: '$0.0013 a compute second; ceiling: 15.4 s a call ($0.02) + 0.385 s a megapixel of every frame made ($0.0005)',
     service: 'fal', source: 'https://fal.ai/models/fal-ai/rife/video', read: '2026-10-01', confidence: 'estimate',
   },
+  // R7.8, Vocal separator on Replicate's demucs (read 2026-10-01, plain GETs of the public pages), billed by GPU
+  // time (Nvidia A100 40GB, "$0.00115 per second", no billing table): "approximately $0.034 to run" (its p50). The
+  // page's example run (htdemucs, shifts 1, 163.8 s of song, four MP3 stems) took 25.03 s of predict time,
+  // $0.0288: $0.000176 a second of sound, written here rounded up to $0.0002 a second, and never below the page's
+  // $0.034 (170 s). The seconds priced are the sound's times the work its settings ask for (localModels.ts
+  // vocalsWork: htdemucs_ft ×4, each shift a pass). An estimate until the live check measures it.
+  'ryan5453/demucs': {
+    unit: 'per_input_second', perSecond: 0.0002, minSeconds: 170,
+    note: 'A100 (40GB) at $0.00115/s; page example: 163.8 s of song in 25.03 s predict ($0.000176/s of sound), rounded up to $0.0002/s; at least the page\'s approximately $0.034 to run (170 s); × the settings\' work (htdemucs_ft ×4, shifts passes)',
+    service: 'replicate', source: 'https://replicate.com/ryan5453/demucs', read: '2026-10-01', confidence: 'estimate',
+  },
 }
 
 const own = <T>(o: Record<string, T>, k: string): T | undefined =>

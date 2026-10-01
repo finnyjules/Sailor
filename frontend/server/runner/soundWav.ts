@@ -29,7 +29,11 @@ import { MediaError } from '../media/run'
 import { RESAMPLE_MAX_TAPS, resampleTaps } from '../media/resample'
 import { readSound, soundNoteOf, type SoundReadIO } from '../media/values'
 import { resampleInWorker } from './compositor/worker'
-import { WHISPER_RATE } from '#shared/runner/localModels'
+import { VOCALS_RATE, WHISPER_RATE } from '#shared/runner/localModels'
+import { readFile } from 'node:fs/promises'
+import { join } from 'node:path'
+import { SAVE_AUDIO_SAMPLE_FMT, encodeAudio } from '../media/encode'
+import { mediaTempDir, removeMediaTempDir } from '../media/run'
 import type { OutputFile, RunnerValue } from './types'
 
 /** What a sound-in node sends: the WAV, and the seconds of sound in it (what the price reads). */
@@ -256,4 +260,87 @@ export function whisperSilenceWav(): PythonWav {
 export function wavIsSilent(w: PythonWav): boolean {
   for (let i = 44; i < w.wav.length; i++) if (w.wav[i] !== 0) return false
   return true
+}
+
+// ── Vocal separator (R7.8, family `vocal-split`) ──
+
+/** The sound Vocal separator sends: its bytes (`wav`: a 16-bit FLAC), their seconds, and whether it is silent (no call). */
+export interface VocalsSound extends PythonWav {
+  /** Every sample 0 (or none): Demucs would make two silent stems, so no call is made. */
+  silent: boolean
+  /** The file kind of `wav`: 'flac' sent, or 'wav' for a silence that is never sent. */
+  ext: 'flac' | 'wav'
+}
+
+/**
+ * Python's channel steps before Demucs (comfy_extras/nodes_audio_ml.py
+ * :266-275) on a decoded sound (batch 0): mono repeated to stereo, more than
+ * two channels cut to the first two, the samples as they are. The resample to
+ * the model's rate is left to the service (Replicate's demucs resamples what
+ * it is sent to its own rate, as Python does).
+ */
+export function vocalsStereo(s: DecodedSound): DecodedSound {
+  const C = s.channels.length
+  if (C < 1) return { rate: s.rate, channels: [] }
+  if (C === 1) return { rate: s.rate, channels: [s.channels[0]!, s.channels[0]!] }
+  return { rate: s.rate, channels: [s.channels[0]!, s.channels[1]!] }
+}
+
+const allZero = (s: DecodedSound): boolean => s.channels.every(ch => ch.every(v => v === 0))
+
+/** A silence's bytes (never sent: only measured and compared): a 16-bit stereo WAV of `frames` zeros at `rate`. */
+function silentStereo(rate: number, frames: number): VocalsSound {
+  const dataBytes = frames * 4
+  const wav = new Uint8Array(44 + dataBytes)
+  wav.set(wavHeader(rate, 2, dataBytes), 0)
+  return { wav, seconds: frames / rate, frames, rate, channels: 2, silent: true, ext: 'wav' }
+}
+
+/**
+ * The sound Vocal separator sends for a decoded sound: Python's stereo
+ * (vocalsStereo) at its own rate, as a 16-bit FLAC (R5.3's encoder, the media
+ * module's tool job: in its own slot, killed on Stop through `signal`; the
+ * temporary folder removed on every path). A silent sound is not encoded.
+ */
+export async function vocalsSound(s: DecodedSound, o: { userId: string | null; signal?: AbortSignal }): Promise<VocalsSound> {
+  const stereo = vocalsStereo(s)
+  const frames = stereo.channels[0]?.length ?? 0
+  if (!(Number.isInteger(stereo.rate) && stereo.rate > 0)) throw new MediaError('failed')
+  if (frames === 0 || allZero(stereo)) return silentStereo(stereo.rate, frames)
+  const work = await mediaTempDir()
+  try {
+    const out = join(work, 'vocals.flac')
+    await encodeAudio({ sound: stereo, format: 'flac', quality: 'V0', sampleFmt: SAVE_AUDIO_SAMPLE_FMT.flac, out, userId: o.userId, ...(o.signal ? { signal: o.signal } : {}), outRoots: [work] })
+    const wav = new Uint8Array(await readFile(out))
+    return { wav, seconds: frames / stereo.rate, frames, rate: stereo.rate, channels: 2, silent: false, ext: 'flac' }
+  }
+  finally {
+    await removeMediaTempDir(work)
+  }
+}
+
+/**
+ * Vocal separator's sound of the sound a value holds, read as Python's AUDIO
+ * holds it (its note, or its maker's), the WHOLE sound (R5's sound caps apply
+ * as it streams).
+ */
+export async function vocalsSoundOf(value: RunnerValue | undefined, makerClass: string, io: SoundReadIO): Promise<VocalsSound> {
+  if (!value || value.kind !== 'files' || !value.files.length) throw new Error(SOUND_IN_NEEDS_SOUND)
+  const sound = await readSound({ ...value, sound: soundNoteOf(value, makerClass) }, makerClass, io)
+  return vocalsSound(sound, { userId: io.userId, ...(io.signal ? { signal: io.signal } : {}) })
+}
+
+/** Vocal separator's sound of the Audio card's 1 s of silence (44,100 zeros at 44.1 kHz, made stereo): silent. */
+export function vocalsSilence(): VocalsSound {
+  return silentStereo(CARD_SILENCE_RATE, CARD_SILENCE_RATE)
+}
+
+/**
+ * The two silent stems Python makes of a silent sound (Demucs on zeros gives
+ * zeros): stereo at Demucs' 44.1 kHz, the length torchaudio's resample gives
+ * (`ceil(frames · 44100 / rate)`).
+ */
+export function vocalsSilentStems(frames: number, rate: number): DecodedSound {
+  const n = rate === VOCALS_RATE ? frames : Math.ceil((frames * VOCALS_RATE) / rate)
+  return { rate: VOCALS_RATE, channels: [new Float32Array(n), new Float32Array(n)] }
 }
