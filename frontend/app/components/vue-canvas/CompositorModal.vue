@@ -4394,7 +4394,7 @@ async function runImageEdit() {
   const m = wholeEditModel.value
   // Generate from the ORIGINAL image every call (a re-roll must not stack on the
   // previous result). Returns true on success.
-  const apply = async (): Promise<boolean> => {
+  const apply = async (stillCurrent?: () => boolean): Promise<boolean> => {
     const img = await loadImage(imageLayerUrl(origFilename))
     const { w, h } = capDims(img.naturalWidth || 1024, img.naturalHeight || 1024)
     const src = imageToDataUrl(img, w, h)
@@ -4405,18 +4405,20 @@ async function runImageEdit() {
       : await inpaint.kontext(src, prompt)
     const first = out[0]; if (!first) { inpaint.error.value = 'The edit returned no image — try again.'; return false }
     const name = await inpaint.uploadDataUrl(await reapplyAlpha(first, img, w, h), 'compedit')
-    setLocal(layerId, { filename: name })
+    if (stillCurrent && !stillCurrent()) return false
+    writeEditResultFile(layerId, { filename: name })
     return true
   }
   try {
     if (await apply()) {
       const b = boxPx(layer)
       const cx = layer.x * canvasDisplay.w, cy = layer.y * canvasDisplay.h
-      editResult.value = {
-        layerId, origFilename,
+      const r = {
+        layerId, origFilename, appliedFilename: layerById(layerId)?.filename ?? '',
         bnd: { minX: cx - b.w / 2, minY: cy - b.h / 2, maxX: cx + b.w / 2, maxY: cy + b.h / 2 },
-        reroll: async () => { await apply() },
+        reroll: async () => { const me = editResult.value; await apply(() => isCurrentEditResult(me)) },
       }
+      editResult.value = r
     }
   } catch (err) { console.error('[compositor edit image]', err) /* inpaint.error is shown in the panel */ }
 }
@@ -7099,7 +7101,30 @@ const genResult = ref<{ layerId: string; mask: HTMLCanvasElement; bnd: GenBounds
 // (artboard px) anchors the toolbar. Cleared on revert/validate and on exit.
 // `revert` (optional): a result that changed more than the filename (Relight Finish also resets
 // the crop and removes the Relight row) restores all of it in ONE setLocal.
-const editResult = ref<{ layerId: string; origFilename: string; bnd: GenBounds; reroll: () => Promise<void>; revert?: () => void } | null>(null)
+// `appliedFilename`: the photo the bar's own last write put on the layer (see writeEditResultFile).
+const editResult = ref<{ layerId: string; origFilename: string; appliedFilename: string; bnd: GenBounds; reroll: () => Promise<void>; revert?: () => void } | null>(null)
+/** Writes a pending result's photo and keeps the bar's record of it in step — in the same tick,
+ *  so the moved-on watch below never mistakes the bar's own write (Try again) for an undo. */
+function writeEditResultFile(layerId: string, patch: Record<string, any> & { filename: string }) {
+  setLocal(layerId, patch as any)
+  const r = editResult.value
+  if (r && r.layerId === layerId) r.appliedFilename = patch.filename
+}
+/** True while `r` is still the bar on screen — a Try again whose answer arrives after the person
+ *  moved on (undo, another layer) is dropped instead of written over the state they moved to. */
+const isCurrentEditResult = (r: unknown) => !!r && editResult.value === r
+// The bar belongs to one result on one layer. When the person moves on — undo/redo or any other
+// change of that layer's photo, the layer going away, or picking a different layer — the bar
+// clears as a Keep (no layer write), and the prompt dock comes back.
+watch(() => {
+  const r = editResult.value; if (!r) return null
+  return [r.layerId, r.appliedFilename, layerById(r.layerId)?.filename ?? null, selectedLocalId.value] as const
+}, (v) => {
+  const r = editResult.value; if (!r || !v) return
+  const l = layerById(r.layerId)
+  const sel = selectedLocalId.value
+  if (!l || l.filename !== r.appliedFilename || (sel != null && sel !== r.layerId)) editResult.value = null
+})
 function revertEdit() {
   const r = editResult.value; if (!r || inpaint.busy.value || relightFinishing.value) return
   if (r.revert) r.revert()
@@ -7123,10 +7148,30 @@ const relightFinishPrice = computed(() => (hostedModeEnabled(useRuntimeConfig().
 // Mirrors the Compare hold (setRelightBypass isn't reactive) so the button can wait it out.
 const relightComparing = ref(false)
 watch(selectedEffect, () => { relightComparing.value = false })
-/** Shown only when Finish can really run: an eligible image layer, WebGL2, and a visible Relight row. */
+// Cut-outs get no Finish: the model returns an opaque photo, and re-cutting it is a second paid
+// call that would also cut away the cast shadows Finish exists to add. There is no layer flag
+// for "cut-out" — like Edit image (srcHasTransparency), it is the photo's own alpha, checked
+// once per file when the Relight row opens and cached here. runRelightFinish checks again.
+const relightFinishCutOut = ref<Record<string, boolean>>({})
+async function photoIsCutOut(filename: string): Promise<boolean> {
+  const known = relightFinishCutOut.value[filename]
+  if (known !== undefined) return known
+  const img = await loadImage(imageLayerUrl(filename))
+  const { w, h } = capDims(img.naturalWidth || 1024, img.naturalHeight || 1024)
+  const cut = srcHasTransparency(img, w, h)
+  relightFinishCutOut.value = { ...relightFinishCutOut.value, [filename]: cut }
+  return cut
+}
+watch(() => {
+  const l = activeEffectLayer.value
+  return l && canFinishRelight(l) && effectStackOf(l).some(e => e.type === 'relight') ? (l.filename as string) : null
+}, (f) => { if (f) photoIsCutOut(f).catch(() => { /* unreadable: the click checks again */ }) }, { immediate: true })
+/** Shown only when Finish can really run: an eligible image layer that isn't a cut-out, WebGL2,
+ *  and a visible Relight row. */
 const relightFinishAvailable = computed(() => {
   const l = activeEffectLayer.value
   if (relightFinishOff.value || !l || !canFinishRelight(l) || !relightAvailable()) return false
+  if (relightFinishCutOut.value[l.filename] === true) return false
   return effectStackOf(l).some(e => e.type === 'relight' && e.visible)
 })
 /** Shown but not clickable: another edit is running, or Compare is held. */
@@ -7141,25 +7186,24 @@ function confirmFinishCost(): Promise<boolean> {
   })
 }
 type FinishPair = { original: string; guide: string; w: number; h: number }
-/** One call for a stored pair → the uploaded filename, or null (already reported). A cutout
- *  keeps its alpha the way Edit image does: the source drawn at the pair's size decides. */
-async function sendRelightFinish(origFilename: string, pair: FinishPair): Promise<string | null> {
+const FINISH_FAILED = 'Finish didn\'t work — try again'
+/** One call for a stored pair → the uploaded filename, or null (already reported). Cut-outs
+ *  never get here (see relightFinishCutOut), so there is no re-cut — and no removeBackground
+ *  call — on the Finish path. The server's own words go to the console, not the toast. */
+async function sendRelightFinish(pair: FinishPair): Promise<string | null> {
   const res = await requestRelightFinish(pair.original, pair.guide)
   if (!res.ok) {
     if (res.off) relightFinishOff.value = true
-    else if (res.status === 402) toast(res.message)
-    else toast(`Finish didn't work — ${res.message}`)
+    else if (res.status === 402) {
+      // The route's credits line is fine as is, unless it names a model (an app id like fal-ai/…).
+      toast(/fal-ai|nano-banana|[a-z0-9-]+\/[a-z0-9-]+/i.test(res.message) ? 'Not enough credits for Finish' : res.message)
+    } else {
+      console.warn('[relight finish]', res.status, res.message)
+      toast(FINISH_FAILED)
+    }
     return null
   }
-  const src = await loadImage(imageLayerUrl(origFilename))
-  // reapplyAlpha reports a failed re-cut through inpaint.error (and keeps the opaque result):
-  // listen for it on a clean slate, say so here, and leave the Edit panel's error as it was.
-  const prevError = inpaint.error.value
-  inpaint.error.value = ''
-  const cut = await reapplyAlpha(res.image, src, pair.w, pair.h)
-  if (inpaint.error.value) toast('Couldn\'t keep the cut-out\'s transparency')
-  inpaint.error.value = prevError
-  return inpaint.uploadDataUrl(cut, 'relightfinish')
+  return inpaint.uploadDataUrl(res.image, 'relightfinish')
 }
 async function runRelightFinish() {
   if (relightFinishing.value || relightFinishBlocked.value) return
@@ -7175,24 +7219,34 @@ async function runRelightFinish() {
     if (!layer || !canFinishRelight(layer)) return
     const relightId = effectStackOf(layer).find(e => e.type === 'relight')?.id
     if (!relightId) return
+    // Before the cost confirm: a cut-out is refused without paying anything.
+    if (await photoIsCutOut(layer.filename).catch(() => false)) { toast('Finish works on photos without a cut-out'); return }
     if (!(await confirmFinishCost())) return
     const cv = await renderRelightPair(layer, canvasDisplay.w, canvasDisplay.h)
     if (!cv) { toast('Relight isn\'t ready yet'); return }
     const pair: FinishPair = { original: cv.original.toDataURL('image/png'), guide: cv.guide.toDataURL('image/png'), w: cv.w, h: cv.h }
     const origFilename: string = layer.filename
     const revertPatch = finishRevertPatch(layer)   // captured BEFORE the write, so Revert lands here
-    const send = async (first: boolean) => {
+    // `stillCurrent` (Try again only): the bar it was pressed on is still up — otherwise the
+    // person undid or moved on while it ran, and the answer is dropped, not written.
+    const send = async (first: boolean, stillCurrent?: () => boolean) => {
       try {
-        const name = await sendRelightFinish(origFilename, pair)
+        const name = await sendRelightFinish(pair)
         if (!name) return false
         const cur = layerById(layerId)
         if (!cur) { toast('The layer was removed before Finish came back'); return false }
+        if (first ? (cur.filename !== origFilename || !effectStackOf(cur).some(e => e.id === relightId))
+          : (stillCurrent && !stillCurrent())) {
+          toast('The photo changed before Finish came back'); return false
+        }
         // One setLocal each (one undo step): the first applies photo + crop + no Relight row;
         // Try again swaps the photo only.
-        setLocal(layerId, first ? finishApplyPatch(cur, name, relightId) : { filename: name })
+        if (first) setLocal(layerId, finishApplyPatch(cur, name, relightId))
+        else writeEditResultFile(layerId, { filename: name })
         return true
       } catch (err: any) {
-        toast(`Finish didn't work — ${err?.message || 'upload failed'}`)
+        console.warn('[relight finish]', err)
+        toast(FINISH_FAILED)
         return false
       }
     }
@@ -7202,13 +7256,16 @@ async function runRelightFinish() {
     const b = boxPx(l)
     const cx = l.x * canvasDisplay.w, cy = l.y * canvasDisplay.h
     editResult.value = {
-      layerId, origFilename,
+      layerId, origFilename, appliedFilename: l.filename,
       bnd: { minX: cx - b.w / 2, minY: cy - b.h / 2, maxX: cx + b.w / 2, maxY: cy + b.h / 2 },
       // Try again: same stored pair, same guard, and (hosted) the same cost confirm as the first click.
       reroll: async () => {
         if (relightFinishing.value || inpaint.busy.value) return
+        const me = editResult.value
         relightFinishing.value = layerId
-        try { if (await confirmFinishCost()) await send(false) } finally { relightFinishing.value = null }
+        try {
+          if (await confirmFinishCost() && isCurrentEditResult(me)) await send(false, () => isCurrentEditResult(me))
+        } finally { relightFinishing.value = null }
       },
       revert: () => setLocal(layerId, revertPatch),
     }
@@ -8169,17 +8226,21 @@ async function runRegionFill() {
       const framed = `${genPrompt.value.trim() || 'subject'}. Keep everything requested fully inside this region and complete: the whole subject visible, drawn small and centred with generous empty margin on all sides, nothing cropped or touching the edges of the filled area.`
       // Same original image + mask every call, so a re-roll re-fills the identical
       // region from the untouched source rather than stacking on the last fill.
-      const apply = async (): Promise<boolean> => {
+      const apply = async (stillCurrent?: () => boolean): Promise<boolean> => {
         const results = await inpaint.fluxFill(imageData, maskPng, framed,
           { model: regionEditModel.value, tier: regionEditModel.value === 'flux' ? 'pro' : undefined })
         const r0 = results[0]; if (!r0) { inpaint.error.value = 'The edit returned no image — try again.'; return false }
         const newName = await inpaint.uploadDataUrl(await compositeInpaintAlpha(r0, img, mc, capW, capH), 'compinpaint')
-        setLocal(layerId, { filename: newName })
+        if (stillCurrent && !stillCurrent()) return false
+        writeEditResultFile(layerId, { filename: newName })
         return true
       }
       const bnd = genMaskBounds()   // capture before clearGenMask() wipes the region
       if (await apply() && bnd) {
-        editResult.value = { layerId, origFilename, bnd, reroll: async () => { await apply() } }
+        editResult.value = {
+          layerId, origFilename, appliedFilename: layerById(layerId)?.filename ?? '', bnd,
+          reroll: async () => { const me = editResult.value; await apply(() => isCurrentEditResult(me)) },
+        }
       }
     } else {
       // No target image → generate a brand-new object, then keep the region
@@ -11654,7 +11715,8 @@ defineExpose({ editor, layoutGridResolved, layoutGrid, overlayGrid, viewLayoutGr
               :finish-busy="!!relightFinishing"
               :finish-available="relightFinishAvailable"
               :finish-blocked="relightFinishBlocked"
-              @update="(p) => updateActiveEffect(p)"
+              :locked="!!relightFinishing"
+              @update="(p) => { if (!relightFinishing) updateActiveEffect(p) }"
               @select-light="(id) => (relightLightId = id)"
               @compare="(on) => { relightComparing = on; setRelightBypass(on ? activeEffectLayer?.id ?? null : null); renderStack() }"
               @retry-surfaces="retryActiveEffectSurfaces"

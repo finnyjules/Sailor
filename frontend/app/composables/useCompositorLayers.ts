@@ -7345,6 +7345,10 @@ export async function renderRelightPair(
   sctx.translate(bw / 2, bh / 2)
   drawLayerContent(sctx, layer, Weff, undefined, { skipTint: true })
 
+  // The guide is rendered at SOURCE resolution (up to maxEdge), not the on-screen box size. The
+  // light direction and colour are identical to the preview, but Texture relief is measured in
+  // texels, so the guide picks up finer detail than the preview shows. Accepted: the model takes
+  // only the lighting from the guide.
   const lit = relightLitFrom(layer, Weff, undefined, dofRef, depth, relight, src, bw, bh)
   if (!lit) return null
   // `lit` is the GPU pass's own reused canvas (see `gpuContent`'s `own()` above) — copy it out so

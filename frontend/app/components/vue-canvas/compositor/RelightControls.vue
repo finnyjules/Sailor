@@ -33,7 +33,10 @@ const props = withDefaults(defineProps<{
   finishAvailable?: boolean
   /** Shown but not clickable (another edit is running, or Compare is held) — text unchanged. */
   finishBlocked?: boolean
-}>(), { surfacesStatus: 'off', surfacesPrice: null, surfacesReadPrice: null, surfacesNote: null, finishPrice: null, finishBusy: false, finishAvailable: false, finishBlocked: false })
+  /** A Finish call is running on this layer: every control above the button is inert, so the
+   *  settings can't drift from the guide that was sent. */
+  locked?: boolean
+}>(), { surfacesStatus: 'off', surfacesPrice: null, surfacesReadPrice: null, surfacesNote: null, finishPrice: null, finishBusy: false, finishAvailable: false, finishBlocked: false, locked: false })
 const emit = defineEmits<{ update: [patch: Partial<RelightEffect>]; 'select-light': [id: string]; compare: [on: boolean]; 'retry-surfaces': []; 'read-surfaces': []; finish: [] }>()
 
 const active = computed(() => setupOf(props.fx))
@@ -79,6 +82,8 @@ const heightWord = (h: number) => (h < 0 ? 'Behind' : h < 0.2 ? 'Low' : h < 0.55
 
 <template>
   <div class="space-y-4 text-[12px]">
+    <div data-testid="relight-controls-body" class="space-y-4" :class="locked ? 'opacity-50 pointer-events-none select-none' : ''"
+      :inert="locked || undefined" :aria-disabled="locked || undefined">
     <button v-if="surfacesStatus === 'absent'" data-testid="relight-surfaces-read"
       class="h-7 px-2.5 rounded-[8px] bg-white/10 text-white/80 hover:bg-white/15 hover:text-white cursor-pointer"
       title="Reads this photo's surfaces for more realistic light — once per photo"
@@ -152,10 +157,11 @@ const heightWord = (h: number) => (h < 0 ? 'Behind' : h < 0.2 ? 'Low' : h < 0.55
       <StudioSlider data-testid="relight-shine" label="Shine" hint="Glossy highlights" :min="0" :max="1" :step="0.01" :default="0" :model-value="fx.shine" @update:model-value="(v: number) => emit('update', { shine: v })" />
       <StudioSwitch data-testid="relight-shadows" label="Shadows" hint="Short contact shadows: hair on skin, chin on neck, folds" :model-value="fx.shadows" @update:model-value="(v: boolean) => emit('update', { shadows: v })" />
     </section>
+    </div>
 
     <button v-if="finishAvailable" data-testid="relight-finish" :disabled="finishBusy || finishBlocked"
       class="w-full h-8 px-3 rounded-[8px] bg-white text-black font-medium hover:bg-white/90 cursor-pointer disabled:opacity-60 disabled:cursor-default"
-      title="Adds real shadows and bounce light · about 14 s"
+      title="Adds real shadows and bounce light · about 20 s"
       @click="emit('finish')">{{ finishBusy ? 'Finishing…' : (finishPrice ? `Finish · ${finishPrice}` : 'Finish') }}</button>
   </div>
 </template>

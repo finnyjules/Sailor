@@ -159,7 +159,7 @@ describe('RelightControls', () => {
     it('shows the price on the button, with the explanation as a tooltip', () => {
       const b = mkFinish().get('[data-testid="relight-finish"]')
       expect(b.text()).toBe('Finish · ~$0.10')
-      expect(b.attributes('title')).toBe('Adds real shadows and bounce light · about 14 s')
+      expect(b.attributes('title')).toBe('Adds real shadows and bounce light · about 20 s')
       expect(mkFinish({ finishPrice: '20 credits' }).get('[data-testid="relight-finish"]').text()).toBe('Finish · 20 credits')
     })
     it('clicking Finish emits finish', async () => {
@@ -186,6 +186,14 @@ describe('RelightControls', () => {
     it('unavailable hides the button (also the default)', () => {
       expect(mkFinish({ finishAvailable: false }).find('[data-testid="relight-finish"]').exists()).toBe(false)
       expect(mk().find('[data-testid="relight-finish"]').exists()).toBe(false)
+    })
+    it('locked makes every control above the button inert, and only while locked', () => {
+      const body = mkFinish({ finishBusy: true, locked: true }).get('[data-testid="relight-controls-body"]')
+      expect(body.attributes('inert')).toBeDefined()
+      expect(body.find('[data-testid="relight-setup-Neon"]').exists()).toBe(true)
+      expect(body.find('[data-testid="relight-compare"]').exists()).toBe(true)
+      expect(body.find('[data-testid="relight-finish"]').exists()).toBe(false)
+      expect(mkFinish().get('[data-testid="relight-controls-body"]').attributes('inert')).toBeUndefined()
     })
   })
 })

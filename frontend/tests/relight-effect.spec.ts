@@ -358,6 +358,33 @@ function mockRelightFinish(page: Page, opts: { off?: boolean } = {}) {
 const relightRow = (page: Page) => page.locator('[data-testid="effect-row"][data-effect-kind="relight"]')
 const layerFilename = (page: Page) => page.evaluate(() => (window as any).__compositorLayers()[0]?.filename)
 const finishBtn = (page: Page) => page.getByTestId('relight-finish')
+const resultBar = (page: Page) => page.locator('[data-edit-result-bar]')
+/** Everything Finish writes or Revert restores: photo, crop and the whole effect stack. */
+const layerState = (page: Page) => page.evaluate(() => {
+  const l = (window as any).__compositorLayers()[0]
+  return JSON.stringify({ filename: l?.filename, crop: l?.crop ?? null, effects: l?.effects ?? null })
+})
+
+/** The sent pair, decoded in the page: both PNG data URLs of the same size, and how far apart
+ *  their pixels are (mean absolute difference per channel, 0–255). */
+async function measurePair(page: Page, body: { original: string; guide: string }) {
+  return page.evaluate(async ({ original, guide }) => {
+    const load = (src: string) => new Promise<HTMLImageElement>((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = src })
+    const [a, b] = await Promise.all([load(original), load(guide)])
+    const px = (im: HTMLImageElement) => {
+      const c = document.createElement('canvas'); c.width = im.naturalWidth; c.height = im.naturalHeight
+      const x = c.getContext('2d')!; x.drawImage(im, 0, 0)
+      return x.getImageData(0, 0, c.width, c.height).data
+    }
+    let diff = 0
+    if (a.naturalWidth === b.naturalWidth && a.naturalHeight === b.naturalHeight) {
+      const da = px(a), db = px(b)
+      for (let i = 0; i < da.length; i += 4) for (let k = 0; k < 3; k++) diff += Math.abs(da[i + k]! - db[i + k]!)
+      diff /= (da.length / 4) * 3
+    }
+    return { a: [a.naturalWidth, a.naturalHeight], b: [b.naturalWidth, b.naturalHeight], diff }
+  }, body)
+}
 
 test.describe('Relight Finish (stage 3, Task 4)', () => {
   test.beforeEach(async ({ page }) => { await mockSurfacesCached(page) })
@@ -366,18 +393,32 @@ test.describe('Relight Finish (stage 3, Task 4)', () => {
     await openCompositor(page)
     await seedPhoto(page)
     await addRelight(page)
-    await mockUpload(page)
+    const upload = await mockUpload(page)
     const finish = mockRelightFinish(page)
     const origFilename = await layerFilename(page)
     await expect(relightRow(page)).toHaveCount(1)
+    const before = await layerState(page)
 
     await expect(finishBtn(page)).toHaveText(/Finish · ~\$0\.10/)
     await finishBtn(page).click()
     await expect(finishBtn(page)).toHaveText('Finishing…')
     await expect(finishBtn(page)).toBeDisabled()
+    // The panel is locked while it runs: the settings can't drift from the guide that was sent.
+    await expect(page.getByTestId('relight-controls-body')).toHaveAttribute('inert', /.*/)
 
     await expect(page.locator('[data-edit-result-bar]')).toBeVisible({ timeout: 10_000 })
     expect(finish.count).toBe(1)
+    expect(upload.count).toBe(finish.count)
+    // The pair: two PNG data URLs (no prompt — it is fixed on the server), the same size, and the
+    // guide really is relit (not a copy of the original).
+    const body = finish.bodies[0]
+    expect(Object.keys(body).sort()).toEqual(['guide', 'original'])
+    expect(body.original).toMatch(/^data:image\/png;base64,/)
+    expect(body.guide).toMatch(/^data:image\/png;base64,/)
+    const pair = await measurePair(page, body)
+    expect(pair.a[0]).toBeGreaterThan(1)
+    expect(pair.a).toEqual(pair.b)
+    expect(pair.diff).toBeGreaterThan(2)
     // The Relight row is gone, and the layer got a fresh, relightfinish_-prefixed photo — both
     // written by the SAME setLocal (finishApplyPatch).
     await expect(relightRow(page)).toHaveCount(0)
@@ -391,6 +432,8 @@ test.describe('Relight Finish (stage 3, Task 4)', () => {
     await expect(page.locator('[data-edit-result-bar]')).toHaveCount(0)
     expect(await layerFilename(page)).toBe(origFilename)
     await expect(relightRow(page)).toHaveCount(1)
+    // Photo, crop and the whole effect stack are back exactly as they were.
+    expect(await layerState(page)).toBe(before)
   })
 
   test('Finish → Keep clears the bar; one global undo returns to the relit layer', async ({ page }) => {
@@ -400,6 +443,7 @@ test.describe('Relight Finish (stage 3, Task 4)', () => {
     await mockUpload(page)
     mockRelightFinish(page)
     const origFilename = await layerFilename(page)
+    const before = await layerState(page)
 
     await finishBtn(page).click()
     await expect(page.locator('[data-edit-result-bar]')).toBeVisible({ timeout: 10_000 })
@@ -410,6 +454,48 @@ test.describe('Relight Finish (stage 3, Task 4)', () => {
     await page.keyboard.press('Meta+z')
     await expect.poll(() => layerFilename(page)).toBe(origFilename)
     await expect(relightRow(page)).toHaveCount(1)
+    expect(await layerState(page)).toBe(before)
+  })
+
+  test('Undo with Meta+Z while the bar is up clears the bar, brings the dock back, and sends nothing more', async ({ page }) => {
+    await openCompositor(page)
+    await seedPhoto(page)
+    await addRelight(page)
+    const upload = await mockUpload(page)
+    const finish = mockRelightFinish(page)
+    const before = await layerState(page)
+
+    await finishBtn(page).click()
+    await expect(resultBar(page)).toBeVisible({ timeout: 10_000 })
+    await expect(page.getByTestId('compositor-prompt-dock')).toBeHidden()
+
+    await page.keyboard.press('Meta+z')
+    await expect(resultBar(page)).toHaveCount(0)
+    await expect.poll(() => layerState(page)).toBe(before)
+    await expect(page.getByTestId('compositor-prompt-dock')).toBeVisible()
+    await page.waitForTimeout(1_500)   // longer than the mock's delay: nothing else goes out
+    expect(finish.count).toBe(1)
+    expect(upload.count).toBe(finish.count)
+  })
+
+  test('a cut-out photo gets no Finish button and sends nothing', async ({ page }) => {
+    // The puppy's own file, served as a transparent PNG: the editor sees a cut-out, while its
+    // depth (keyed by filename) is still the cached one, so Relight itself runs.
+    await page.route('**/*', (route) => {
+      const u = route.request().url()
+      if (route.request().resourceType() === 'image' && u.includes('/view') && u.includes('flux_lora_00165_')) {
+        return route.fulfill({ status: 200, contentType: 'image/png', body: Buffer.from(TINY_PNG_DATA_URL.split(',')[1]!, 'base64') })
+      }
+      return route.fallback()
+    })
+    await openCompositor(page)
+    await seedPhoto(page)
+    await addRelight(page)
+    const finish = mockRelightFinish(page)
+    await expect(relightRow(page)).toHaveCount(1)
+    await expect(page.getByTestId('relight-setup-Neon')).toBeVisible()
+    await expect(finishBtn(page)).toHaveCount(0)
+    expect(finish.count).toBe(0)
   })
 
   test('the route answering 503 { off: true } hides the Finish button for the session', async ({ page }) => {
@@ -446,7 +532,7 @@ test.describe('Relight Finish (stage 3, Task 4)', () => {
     await openCompositor(page)
     await seedPhoto(page)
     await addRelight(page)
-    await mockUpload(page)
+    const upload = await mockUpload(page)
     const finish = mockRelightFinish(page)
 
     await finishBtn(page).click()
@@ -459,6 +545,10 @@ test.describe('Relight Finish (stage 3, Task 4)', () => {
     await expect(page.locator('[data-edit-result-bar]')).toBeVisible()
     await expect.poll(() => layerFilename(page)).not.toBe(afterFirst)
     await expect(relightRow(page)).toHaveCount(0)
+    // The bar's own write is not "moving on": it stays up, and one upload per answer.
+    await page.waitForTimeout(300)
+    await expect(page.locator('[data-edit-result-bar]')).toBeVisible()
+    expect(upload.count).toBe(finish.count)
   })
 
   // Not covered here: "Relight isn't ready yet" (renderRelightPair returning null because the
