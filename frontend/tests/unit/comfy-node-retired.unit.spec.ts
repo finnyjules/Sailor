@@ -86,6 +86,23 @@ describe('a saved retired node', () => {
     w.unmount()
   })
 
+  it('FaceRestore and LipSync open, show Retired, and name their replacement', () => {
+    for (const [type, message] of [
+      ['FaceRestore', 'This node was retired. Use Fix faces instead.'],
+      ['LipSync', 'This node was retired. Use Lip-sync a character instead.'],
+    ] as const) {
+      const [node] = open({ nodes: [{ ...klingNode(), type, widgets_values: [] }] })
+      expect(node.data.nodeType).toBe(type)
+      const w = card(node)
+      expect(w.find('[data-part="TooltipContent"]').text()).toBe(message)
+      expect(w.find('[data-retired]').text()).toBe('Retired')
+      // These classes are no longer in the catalogue, so the card may draw no Run row at all; if it does, it can't run.
+      const row = w.findComponent(NodeRunRow)
+      if (row.exists()) { expect(row.props('canRun')).toBe(false); expect(row.props('blockedReason')).toBe(message) }
+      w.unmount()
+    }
+  })
+
   it('any other node is untouched: no badge, its price and scope menu stay', () => {
     const [node] = open({ nodes: [{ ...klingNode(), type: 'GenerateVideoNode', widgets_values: [] }] })
     const w = card(node)

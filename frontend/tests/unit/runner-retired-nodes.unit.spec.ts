@@ -17,7 +17,7 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { gunzipSync } from 'node:zlib'
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
-import { RETIRED_CLASSES, RETIRED_NODE_MESSAGE, RETIRED_OUTPUT_CLASSES, isRetiredClass, retiredNodeIds, retiredNodesResponse } from '#shared/runner/retired'
+import { RETIRED_ADVICE_OF, RETIRED_CLASSES, RETIRED_NODE_MESSAGE, RETIRED_OUTPUT_CLASSES, isRetiredClass, retiredNodeIds, retiredNodesResponse } from '#shared/runner/retired'
 import { PROVIDER_TYPES, RUNNER_NODE_RULES, RUNNER_NODE_TYPES } from '#shared/runner/eligibility'
 import { modelMenus } from '#shared/runner/modelMenus'
 import { blockedRunRefusal, workflowNodeTitles } from '#shared/runner/needsEngine'
@@ -67,11 +67,33 @@ const retiredGraph = (): ApiPrompt => ({
 })
 
 describe('the retired list (guard)', () => {
-  it('is exactly every api.comfy.org-billed class in the committed catalogue: 182', () => {
+  it('is exactly every api.comfy.org-billed class in the committed catalogue (182) plus the two deleted local nodes', () => {
     const billed = Object.keys(CATALOG).filter(comfyBilled).sort()
     expect(billed.length).toBe(182)
-    expect([...RETIRED_CLASSES].sort()).toEqual(billed)
+    expect([...RETIRED_CLASSES].sort()).toEqual([...billed, 'FaceRestore', 'LipSync'].sort())
     for (const name of billed) expect(isRetiredClass(name), name).toBe(true)
+    expect(Object.keys(RETIRED_ADVICE_OF).sort()).toEqual(['FaceRestore', 'LipSync'])
+    for (const name of ['FaceRestore', 'LipSync']) expect(name in CATALOG, name).toBe(false)
+  })
+
+  it('FaceRestore and LipSync are refused before the hold, each with its own advice, on both paths', () => {
+    const cases: [string, string][] = [
+      ['FaceRestore', 'This node was retired. Use Fix faces instead.'],
+      ['LipSync', 'This node was retired. Use Lip-sync a character instead.'],
+    ]
+    for (const [cls, message] of cases) {
+      const g: ApiPrompt = {
+        1: { class_type: 'LoadImage', inputs: { image: 'a.png' } },
+        2: { class_type: cls, inputs: { image: ['1', 0] } },
+        3: { class_type: 'SaveImage', inputs: { images: ['2', 0], filename_prefix: 'x' } },
+      }
+      const body = retiredNodesResponse(g, c => c === 'SaveImage')!
+      expect(body.error.message).toBe(message)
+      expect(body.node_errors['2']).toMatchObject({ class_type: cls, errors: [{ message }] })
+      expect(blockedPromptRefusal(g, { isOutputClass: c => c === 'SaveImage' })!.error.message).toBe(message)
+      expect(blockedRunRefusal([{ prompt: g, titleOf: () => 'Old node' }], { runnerOn: true, isOutputClass: c => c === 'SaveImage' }))
+        .toEqual({ title: '“Old node” was retired', description: message.replace('This node was retired. ', '') })
+    }
   })
 
   it('the retired output nodes are exactly the catalogue\'s: 17', () => {

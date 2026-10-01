@@ -35,7 +35,7 @@ import { MODEL_PRICED_BADGE_CLASSES, modelPricedUsd, nodeCreditEstimate, nodePri
 import { linkedInputNames, localModelFrames, localModelSeconds, upstreamInputPixels, upstreamInputSeconds, upstreamPictureCount, widgetValueMap } from '~/lib/costEstimate'
 import { NO_FAMILIES, parseFamilies } from '#shared/runner/families'
 import { upgradeHidesWidget } from '#shared/runner/eligibility'
-import { RETIRED_NODE_MESSAGE, isRetiredClass } from '#shared/runner/retired'
+import { retiredMessageOf, isRetiredClass } from '#shared/runner/retired'
 import { TooltipContent, TooltipPortal, TooltipProvider, TooltipRoot, TooltipTrigger } from 'reka-ui'
 import TakesStrip from '~/components/vue-canvas/TakesStrip.vue'
 import LightTableModal from '~/components/vue-canvas/LightTableModal.vue'
@@ -213,6 +213,7 @@ const HEAVY_LOCAL_COMPUTE = new Set<string>([
 // still opens, marked, and can't be run.
 const isRetired = computed(() => isRetiredClass(props.data.nodeType) || !!props.data.containsRetired)
 // Its Run row: no price, no scope menu, "Retired" as the status.
+const retiredMessage = computed(() => retiredMessageOf(props.data.nodeType))
 const RETIRED_STATUS = { tone: 'idle' as const, text: 'Retired' }
 // The badge's tooltip: hover and keyboard focus open it (reka-ui); a tap opens it too.
 const retiredTipOpen = ref(false)
@@ -1853,11 +1854,11 @@ watch(previewImages, (urls) => {
             <TooltipContent
               side="top" :side-offset="6" :collision-padding="8"
               class="z-[200] max-w-[220px] rounded-md border border-white/10 bg-[#1b1b1f] px-2 py-1 text-[11px] leading-snug text-white/85 shadow-lg shadow-black/40"
-            >{{ RETIRED_NODE_MESSAGE }}</TooltipContent>
+            >{{ retiredMessage }}</TooltipContent>
           </TooltipPortal>
         </TooltipRoot>
       </TooltipProvider>
-      <span v-if="isRetired" :id="retiredDescId" class="sr-only">{{ RETIRED_NODE_MESSAGE }}</span>
+      <span v-if="isRetired" :id="retiredDescId" class="sr-only">{{ retiredMessage }}</span>
       <!-- Subgraph node count badge -->
       <span
         v-if="data.isSubgraph && data.innerNodeCount"
@@ -2347,7 +2348,7 @@ watch(previewImages, (urls) => {
       :button-text="hasRun ? 'Run again' : 'Run'"
       :status="isRetired ? RETIRED_STATUS : runStatus"
       :can-run="showRunButton && !isMuted && !isBypassed && !isRetired"
-      :blocked-reason="isRetired ? RETIRED_NODE_MESSAGE : null"
+      :blocked-reason="isRetired ? retiredMessage : null"
       :running="!!data.running"
       :run-label="hasRun ? 'Re-render this node' : 'Run this node'"
       @run="playThisNode"

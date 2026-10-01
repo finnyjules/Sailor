@@ -13,7 +13,7 @@ import { prunedAny, pruneInvalidOutputs } from './validate'
 import { NO_FAMILIES, type RunnerFamily } from './families'
 import { blockedModelRefusal, blockedModelUses, blockedModelsResponse, promptNodeTitle } from './blockedModels'
 import { shaderEngineReason } from './shaderBakeKey'
-import { RETIRED_NODE_ADVICE, retiredNodeIds, type IsOutputClass } from './retired'
+import { retiredAdviceOf, retiredNodeIds, type IsOutputClass } from './retired'
 
 /** The fallback title for a node with neither a title nor a known display name. */
 export const UNNAMED_NODE = 'Unnamed node'
@@ -144,7 +144,7 @@ export function blockedRunRefusal(
   // outputClassesOf; without it every retired node counts).
   for (const take of takes) {
     const id = retiredNodeIds(take.prompt, opts.isOutputClass)[0]
-    if (id !== undefined) return { title: `“${take.titleOf(id)}” was retired`, description: RETIRED_NODE_ADVICE }
+    if (id !== undefined) return { title: `“${take.titleOf(id)}” was retired`, description: retiredAdviceOf((take.prompt as ApiPrompt)[id]?.class_type) }
   }
   for (const take of takes) {
     const prompt = take.prompt

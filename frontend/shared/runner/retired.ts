@@ -130,7 +130,29 @@ export const RETIRED_CLASSES: ReadonlySet<string> = new Set([
   'WanTextToVideoApi',
   // nodes_wavespeed.py (2)
   'WavespeedFlashVSRNode', 'WavespeedImageUpscaleNode',
+  // Local nodes deleted 2026-09-27 (6b682b578; non-commercial licences), Task R7.10 (2)
+  'FaceRestore', 'LipSync',
 ])
+
+/**
+ * Retired classes whose replacement has a name of its own (Task R7.10): the
+ * words after "Use", naming the replacement by its visible name. Any retired
+ * class not here keeps RETIRED_NODE_ADVICE.
+ */
+export const RETIRED_ADVICE_OF: Readonly<Record<string, string>> = {
+  FaceRestore: 'Use Fix faces instead.',
+  LipSync: 'Use Lip-sync a character instead.',
+}
+
+/** What a retired class says to do instead. */
+export function retiredAdviceOf(classType: unknown): string {
+  return (typeof classType === 'string' && RETIRED_ADVICE_OF[classType]) || RETIRED_NODE_ADVICE
+}
+
+/** What a retired class says, on its node and in the refusal. */
+export function retiredMessageOf(classType: unknown): string {
+  return `This node was retired. ${retiredAdviceOf(classType)}`
+}
 
 /**
  * The retired classes that are ComfyUI output nodes (OUTPUT_NODE /
@@ -197,13 +219,16 @@ export function retiredNodesResponse(prompt: unknown, isOutputClass?: IsOutputCl
   for (const id of ids) {
     const classType = (prompt as ApiPrompt)[id]!.class_type
     node_errors[id] = {
-      errors: [{ type: 'value_not_valid', message: RETIRED_NODE_MESSAGE, details: '', extra_info: {} }],
+      errors: [{ type: 'value_not_valid', message: retiredMessageOf(classType), details: '', extra_info: {} }],
       dependent_outputs: [],
       class_type: classType,
     }
   }
+  // The top-level message is the node's own when one node runs, the default otherwise.
+  const classes = [...new Set(ids.map(id => (prompt as ApiPrompt)[id]!.class_type))]
+  const message = classes.length === 1 ? retiredMessageOf(classes[0]) : RETIRED_NODE_MESSAGE
   return {
-    error: { type: 'value_not_valid', message: RETIRED_NODE_MESSAGE, details: '', extra_info: {} },
+    error: { type: 'value_not_valid', message, details: '', extra_info: {} },
     node_errors,
   }
 }
