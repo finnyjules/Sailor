@@ -109,10 +109,12 @@ import {
 import { applyDof, dofAvailable, dofShouldRun } from '~/lib/compositor/dofPass'
 import { depthImageFor, requestDepth, depthSourceFromViewUrl, depthKey, type DepthRef } from '~/lib/compositor/depthRegistry'
 import { surfacesImageFor } from '~/lib/compositor/surfacesRegistry'
-// Stage 2 bridge (Task 1 → Task 2): the painter lights a Relight photo from the effect's own
-// (legacy) lights, exactly as before stage 2, until Task 2 moves it onto the Frame's lights.
-import { sanitizeRelightWithLegacyLights, type LegacyRelightEffect } from '~/lib/relight/settings'
-import { applyRelight, relightAvailable } from '~/lib/relight/relightPass'
+// Relight (light layers stage 2): the photo's own paint takes Original light only; the Frame's
+// light layers light it, by the facing tile it hands the lighting maps. Old Frames whose Relight
+// still carries its own lights are lit through the read-only conversion (convertRelight.ts).
+import { sanitizeRelight } from '~/lib/relight/settings'
+import { relightAvailable, relightFacingTile, relightOriginalLight, originalLightActive } from '~/lib/relight/relightPass'
+import { hasLegacyRelightLights, isRelightPhoto, relightLightsToLayers } from '~/lib/frame/lighting/convertRelight'
 import { relightDepthFieldFor, FULL_DEPTH_RECT, type DepthRect } from '~/lib/relight/depthField'
 import { canFinishRelight, finishBoxSize } from '~/lib/relight/finish'
 import { ensureFillBitmaps, getFillBitmap } from '~/lib/paint/imageFillCache'
@@ -1639,6 +1641,15 @@ let _relightBypass: string | null = null
 export function setRelightBypass(layerId: string | null): void { _relightBypass = layerId }
 export function relightBypassed(layerId: string): boolean { return _relightBypass === layerId }
 
+// Frame light layers stage 2. While `paintLayerStack` lights a Frame, each Relight photo's paint
+// records its facing tile here (by layer id) for the lighting maps; null ⇒ no Frame lighting in
+// this paint ⇒ no tile is made (no depth field, no normal pass).
+interface FacingRecord { tile: HTMLCanvasElement; sig: string | null; shine: number }
+let _facingRecorder: Map<string, FacingRecord> | null = null
+// While a facing stamp draws (maps.ts), that layer's content IS its tile: `paintLayer` draws the
+// tile where its pixels would go — same transform, crop, mask, clones and corner pin.
+let _facingOverride: { id: string; canvas: HTMLCanvasElement } | null = null
+
 /** The clone being painted right now (set by paintLayer's cloner loop, read by the
  *  image branch of drawLayerContent). Outside a cloner loop it is the original alone. */
 const _cloneSlot = { k: 0, n: 1 }
@@ -3027,7 +3038,9 @@ function paintLayer(
     : layer.kind === 'wired' ? depthSourceFromViewUrl((layer as WiredLayer).depthKey) : undefined
   const dof = dofRef ? (pinnedEffect(stack, 'dof') as DofEffect | undefined) : undefined
   const relightRaw = dofRef ? pinnedEffect(stack, 'relight') : undefined
-  const relight = relightRaw && !relightBypassed(layer.id) ? sanitizeRelightWithLegacyLights(relightRaw) : undefined
+  const relight = relightRaw && !relightBypassed(layer.id) ? sanitizeRelight(relightRaw) : undefined
+  // A facing stamp (Frame lighting maps) is drawing this layer: its content is the tile.
+  const facingOverride = _facingOverride && _facingOverride.id === layer.id ? _facingOverride.canvas : null
   // (background_blur is a stack-level effect — paintLayerStack applies it
   // against the backdrop before this layer paints.)
 
@@ -3058,7 +3071,7 @@ function paintLayer(
   // old full-canvas path, byte-identical.
   const silhouetteCacheable = rasterable
     && layer.kind !== 'wired'                                       // graph pixels change under us — no content signature
-    && !cp && !dof && !relight                                      // corner-pin / DOF / Relight have their own offscreen flows
+    && !cp && !dof && !relight && !facingOverride                   // corner-pin / DOF / Relight / a facing tile have their own offscreen flows
     && !(layer.kind === 'text' && layer.expressive)                 // expressive layout places words outside localLayerBox
     && !(layer as unknown as { textMotion?: unknown }).textMotion   // letters move every frame — the raster is never twice the same
     && !layerPaints(layer).some(p => isFill(p) && fillIsShader(p))  // shader fills are live / frame-anchored
@@ -3195,6 +3208,7 @@ function paintLayer(
     // A clip layer never reuses this across clones: each clone's Relight/DOF content
     // is built from a different frame (`drawLayerContent` below reads `_cloneSlot`), so
     // returning the first clone's bake for every later clone would freeze the loop.
+    if (facingOverride) return facingOverride
     if (gpuMemo !== undefined && !isClipLayer) return gpuMemo
     gpuMemo = null
     const wantRelight = !!relight && relightAvailable()
@@ -3204,12 +3218,17 @@ function paintLayer(
     // folding `dofShouldRun` in here would skip that fetch and regress it.
     const wantDofMaybe = !!dof && dofAvailable()
     if (!wantRelight && !wantDofMaybe) return gpuMemo
+    // Relight (stage 2): Original light needs only the pixels; the facing tile — made only while
+    // the Frame is being lit — needs the depth field.
+    const wantTile = wantRelight && _facingRecorder !== null
+    const wantOriginal = wantRelight && originalLightActive(relight!.keep)
 
     const depth = depthImageFor(dofRef!)
-    if (!depth) { requestDepth(dofRef!); return gpuMemo }
+    if (!depth && (wantDofMaybe || wantTile)) requestDepth(dofRef!)
+    if (!depth && !wantOriginal) return gpuMemo
 
-    const wantDof = wantDofMaybe && dofShouldRun(dof!, true)
-    if (!wantRelight && !wantDof) return gpuMemo
+    const wantDof = wantDofMaybe && !!depth && dofShouldRun(dof!, true)
+    if (!wantOriginal && !(wantTile && depth) && !wantDof) return gpuMemo
 
     const box = localLayerBox(measureCtx(), layer, W, H, wiredLive)
     // A neon brush material's halo reaches past the box on every side (0 for everything else,
@@ -3227,16 +3246,18 @@ function paintLayer(
       o.getContext('2d')?.drawImage(c, 0, 0); return o
     }
     let cur: HTMLCanvasElement | null = null
-    // Relight first, so a depth-of-field blur on the same layer blurs the relit picture.
-    // The field is built from the SOURCE image (never this box-sized render), off the main
-    // thread; until it lands (or while the source is still decoding) the layer draws plain.
-    // Shared with `renderRelightPair` (the Finish pair) below — see `relightLitFrom`.
+    // Relight first, so a depth-of-field blur on the same layer blurs the Original-light picture.
+    // Its facing tile goes to the lighting maps (recorded here, stamped by `pushStamp`); the
+    // field it needs is built from the SOURCE image (never this box-sized render), off the main
+    // thread, and until it lands the photo faces the viewer. Shared with `renderRelightPair`
+    // (the Finish pair) below — see `relightPhotoFor`.
     if (wantRelight) {
-      const lit = relightLitFrom(layer, W, wiredLive, dofRef!, depth, relight!, src, bw, bh)
-      if (lit) cur = own(lit)
+      const out = relightPhotoFor(layer, W, wiredLive, dofRef!, depth, relight!, src, bw, bh, isClipLayer, wantTile && !!depth, layer.rotation || 0)
+      if (out.paint) cur = out.paint            // cached, shared, never drawn into
+      if (out.tile) _facingRecorder!.set(layer.id, { tile: out.tile, sig: out.sig, shine: relight!.shine })
     }
     if (wantDof) {
-      const out = applyDof(cur ?? src, depth, dof!, W, bw, bh)
+      const out = applyDof(cur ?? src, depth!, dof!, W, bw, bh)
       if (out) cur = own(out)
     }
     gpuMemo = cur
@@ -6758,6 +6779,33 @@ function addShaderFieldRequest(out: FieldRequest[], paint: Paint | undefined, W:
 }
 
 /**
+ * Light layers stage 2: the read-only conversion of an old Relight Frame (see
+ * `relightLightsToLayers`) applied to one paint's stack — the converted lights appended as items
+ * at the top, every other non-photo local item unlit and non-casting. Null when there is nothing
+ * to convert (a light layer exists, or no Relight effect carries lights).
+ */
+const _legacyUnlit = new WeakMap<LocalLayer, LocalLayer>()
+function legacyRelightView(
+  items: StackItem[], localLayers: LocalLayer[], lighting: FrameLighting | undefined, W: number, H: number,
+): { items: StackItem[]; localLayers: LocalLayer[]; lighting: FrameLighting } | null {
+  if (!localLayers.some(l => l.kind === 'image' || l.kind === 'wired')) return null
+  if (localLayers.some(l => l.kind === 'light') || !hasLegacyRelightLights(localLayers)) return null
+  const conv = relightLightsToLayers(localLayers, lighting, W, H)
+  if (!conv.changed) return null
+  const before = new Set(localLayers.map(l => l.id))
+  const out: StackItem[] = items.map((it) => {
+    if (it.type !== 'local' || it.layer.kind === 'light' || isRelightPhoto(it.layer)) return it
+    // Memoised per layer object, so an unchanged layer keeps one identity from paint to paint
+    // (its stamp signature is then a lookup, not a re-hash).
+    let unlit = _legacyUnlit.get(it.layer)
+    if (!unlit) { unlit = { ...it.layer, lit: false, castsShadow: false } as LocalLayer; _legacyUnlit.set(it.layer, unlit) }
+    return { ...it, layer: unlit }
+  })
+  for (const l of conv.layers) if (l.kind === 'light' && !before.has(l.id)) out.push({ type: 'local', key: `l:${l.id}`, layer: l })
+  return { items: out, localLayers: conv.layers, lighting: conv.lighting }
+}
+
+/**
  * A lighting-map stamp's cache signature, or null when the silhouette can change with nothing in
  * the layer changing: content still loading (font, image, image fill — see
  * silhouetteContentReady), a living-image clip on a running clock, a wired mask. A live tip
@@ -6810,6 +6858,12 @@ export function paintLayerStack(
 ): { frozenCount: number } {
   _frameLight = light ?? DEFAULT_FRAME_LIGHT
   _paintClockT = t ?? 0
+  // Light layers stage 2: an old Frame whose Relight effects still carry their own lights (and
+  // which has no light layer yet) paints through the read-only conversion, so every painter —
+  // cards, Render, video, web export — shows it converted. Never persisted here (the editor
+  // converts once on open). No legacy Relight ⇒ the same arrays, untouched.
+  const legacy = legacyRelightView(items, localLayers, lighting, W, H)
+  if (legacy) ({ items, localLayers, lighting } = legacy)
   // Shader fields, glass, backdrop and pixel effects run on the live effect clock when a live
   // host set one (never for a bake); otherwise on `t`, exactly as before.
   const fieldT = !bake && _liveEffectClock != null ? _liveEffectClock : (t ?? 0), fieldFps = motion?.fps ?? 30
@@ -6984,6 +7038,7 @@ export function paintLayerStack(
   // The Frame's loop length reaches generated effects as u_loop, so their motion repeats
   // seamlessly where the Frame's clock wraps. Put back in the finally.
   const prevFieldLoop = setFieldLoop(motion?.duration ?? 0)
+  const prevFacingRecorder = _facingRecorder
   try {
     // Frame Morph: swap morphing layers for their transient path clone — inside the try, so a
     // throw still clears `_siblingResolveFor`. The resolver keeps the PRE-swap list.
@@ -7032,6 +7087,8 @@ export function paintLayerStack(
     let anyLight = false
     for (const l of localLayers) if (l.kind === 'light' && l.visible !== false) { anyLight = true; break }
     const lightingOn = anyLight && lightingAvailable()
+    // Relight photos record their facing tiles only while this Frame is being lit.
+    _facingRecorder = lightingOn ? new Map() : null
     const stamps: LightingStamp[] | null = lightingOn ? [] : null
     const loopLights: LightLayer[] | null = lightingOn ? [] : null
     const pushStamp = !lightingOn ? null : (
@@ -7048,19 +7105,33 @@ export function paintLayerStack(
       const ghost = paintShown({ ...layer, opacity: 1, effects: undefined, blend: undefined } as LocalLayer)
       const scaled = typeof ms === 'number' && Math.abs(ms - 1) > 1e-4 ? Math.max(0.001, ms) : 0
       const maskLocal = maskItem?.type === 'local' ? maskItem.layer : null
+      const draw = (target: CanvasRenderingContext2D) => {
+        if (scaled) {
+          target.translate(layer.x * W, layer.y * H)
+          target.scale(scaled, scaled)
+          target.translate(-layer.x * W, -layer.y * H)
+        }
+        if (motionDraw) motionDraw(target, ghost)
+        else if (maskItem && maskItem.type !== 'local') drawItemMasked(target, { type: 'local', key: `l:${layer.id}`, layer: ghost }, maskItem, W, H, 'source-over', 1)
+        else drawLocalLayer(target, ghost, W, H, maskLocal, 1)
+      }
+      // A Relight photo whose paint just recorded a facing tile stamps it too: the SAME draw with
+      // the layer's content swapped for the tile (`_facingOverride`), so the tile lands exactly
+      // where the pixels did. Its signature joins the stamp's (dials, depth field, surfaces).
+      const rec = _facingRecorder?.get(layer.id)
+      const base = lightingStampSig(layer, maskItem, maskLocal, W, t, `${scaled}|${extraSig}`)
       stamps!.push({
         layer,
-        sig: lightingStampSig(layer, maskItem, maskLocal, W, t, `${scaled}|${extraSig}`),
-        draw: (target) => {
-          if (scaled) {
-            target.translate(layer.x * W, layer.y * H)
-            target.scale(scaled, scaled)
-            target.translate(-layer.x * W, -layer.y * H)
-          }
-          if (motionDraw) motionDraw(target, ghost)
-          else if (maskItem && maskItem.type !== 'local') drawItemMasked(target, { type: 'local', key: `l:${layer.id}`, layer: ghost }, maskItem, W, H, 'source-over', 1)
-          else drawLocalLayer(target, ghost, W, H, maskLocal, 1)
-        },
+        sig: rec ? (base != null && rec.sig != null ? `${base}|f${rec.sig}|${rec.shine}` : null) : base,
+        draw,
+        facing: rec ? {
+          shine: rec.shine,
+          draw: (target) => {
+            const prev = _facingOverride
+            _facingOverride = { id: layer.id, canvas: rec.tile }
+            try { draw(target) } finally { _facingOverride = prev }
+          },
+        } : null,
       })
     }
 
@@ -7263,6 +7334,7 @@ export function paintLayerStack(
     return { frozenCount }
     })
   } finally {
+    _facingRecorder = prevFacingRecorder // a nested paint (a glass source) hands it back
     _fieldCtx.token = 0
     _siblingResolveFor = null // F3: unbind so a later out-of-paint render sees no stale resolver
     setFieldLoop(prevFieldLoop)
@@ -7378,36 +7450,99 @@ function relightSourceOf(
   return null
 }
 
-/** The Relight pixel pass, factored out of `gpuContent` (`paintLayer`, above) so it has exactly
+/** Small stable ids for objects (a decoded source, a depth field, a surfaces map) in cache keys. */
+const _objIds = new WeakMap<object, number>()
+let _objSeq = 0
+function objId(o: unknown): number {
+  if (!o || typeof o !== 'object') return 0
+  let n = _objIds.get(o)
+  if (n === undefined) { n = ++_objSeq; _objIds.set(o, n) }
+  return n
+}
+
+/** A layer's signature without its position: moving a photo changes neither of its passes. */
+const _placeFreeSig = new WeakMap<object, string>()
+function placeFreeSig(layer: LocalLayer): string {
+  let sig = _placeFreeSig.get(layer)
+  if (sig === undefined) {
+    const { x: _x, y: _y, ...rest } = layer as LocalLayer & { x: number; y: number }
+    sig = layerSig(rest as LocalLayer)
+    _placeFreeSig.set(layer, sig)
+  }
+  return sig
+}
+
+/** What Relight makes from one photo's box (light layers stage 2). */
+interface RelightPhotoOut {
+  /** The photo's paint with Original light applied; null ⇒ draw `src` as it is (keep 1, or the
+   *  pass is unavailable). Shared from the cache: never draw into it. */
+  paint: HTMLCanvasElement | null
+  /** The facing tile (facingPass.ts encoding), rotated by `rotation`; null when not asked for or
+   *  the depth field has not landed. Shared from the cache. */
+  tile: HTMLCanvasElement | null
+  /** The result's content signature (photo, box, dials, field, surfaces); null ⇒ uncacheable. */
+  sig: string | null
+}
+
+// A few photos' results, so a paint that changes nothing about a photo (a light drag, a text
+// edit elsewhere) runs neither pass. Each entry holds at most two box-sized canvases.
+const RELIGHT_PHOTO_CACHE_MAX = 4
+const _relightPhotoCache = new Map<string, { paint: HTMLCanvasElement | null; tile: HTMLCanvasElement | null }>()
+const copyCanvas = (c: HTMLCanvasElement | null): HTMLCanvasElement | null => {
+  if (!c) return null
+  const o = document.createElement('canvas'); o.width = c.width; o.height = c.height
+  o.getContext('2d')?.drawImage(c, 0, 0)
+  return o
+}
+
+/** Relight's per-photo work, factored out of `gpuContent` (`paintLayer`, above) so it has exactly
  *  ONE implementation: the live paint and the Finish pair (`renderRelightPair` below) must see
- *  the identical field, crop rect and surfaces normals, or the "guide" the Finish button sends
- *  would silently drift from what the user is actually looking at. `depth` is the caller's own
- *  `depthImageFor(dofRef)` result (never re-fetched here — this stays synchronous). Returns
- *  `null` when the source image isn't decoded yet or the depth field hasn't built. */
-function relightLitFrom(
+ *  the identical field, crop rect and surfaces normals. `depth` is the caller's own
+ *  `depthImageFor(dofRef)` result (never re-fetched here — this stays synchronous); the depth
+ *  field and surfaces are read only when a tile is asked for. A living image (`noCache`) and a
+ *  photo whose source is not decoded yet are never cached. */
+function relightPhotoFor(
   layer: LocalLayer,
   W: number,
   wiredLive: WiredLive | null | undefined,
   dofRef: DepthRef,
-  depth: HTMLImageElement,
-  relight: LegacyRelightEffect,
+  depth: HTMLImageElement | null,
+  relight: RelightEffect,
   src: HTMLCanvasElement,
   bw: number,
   bh: number,
-): HTMLCanvasElement | null {
+  noCache: boolean,
+  wantTile: boolean,
+  rotation: number,
+): RelightPhotoOut {
   const rs = relightSourceOf(layer, W, wiredLive)
-  const field = rs ? relightDepthFieldFor(depthKey(dofRef), depth, rs.src) : null
-  // Surfaces (a normal map read once per photo, see surfacesRegistry.ts) are read
-  // SYNCHRONOUSLY, same as depth — a paint never awaits and never requests them
-  // itself; only the open Frame editor does that (CompositorModal.vue).
-  const normals = surfacesImageFor(dofRef)
-  return field && rs ? applyRelight(src, field, relight, bw, bh, rs.rect, normals) : null
+  const field = wantTile && rs && depth ? relightDepthFieldFor(depthKey(dofRef), depth, rs.src) : null
+  // Surfaces (a normal map read once per photo, see surfacesRegistry.ts) are read SYNCHRONOUSLY,
+  // same as depth — a paint never awaits and never requests them itself; only the open Frame
+  // editor does that (CompositorModal.vue).
+  const normals = field ? surfacesImageFor(dofRef) : null
+  // A canvas source (a live studio slot) is redrawn in place: its identity says nothing.
+  const live = !!rs && typeof HTMLCanvasElement !== 'undefined' && rs.src instanceof HTMLCanvasElement
+  const key = noCache || !rs || live ? null
+    : `${objId(rs.src)}|${placeFreeSig(layer)}|${bw}x${bh}|${W}|${wantTile ? `t${objId(field)}:${objId(normals)}:${rotation}` : '-'}`
+  const hit = key == null ? undefined : _relightPhotoCache.get(key)
+  if (hit) {
+    _relightPhotoCache.delete(key!); _relightPhotoCache.set(key!, hit)
+    return { ...hit, sig: key }
+  }
+  const paint = copyCanvas(relightOriginalLight(src, relight.keep, bw, bh))
+  const tile = field && rs ? copyCanvas(relightFacingTile(src, field, relight, bw, bh, rs.rect, normals, rotation)) : null
+  if (key != null) {
+    if (_relightPhotoCache.size >= RELIGHT_PHOTO_CACHE_MAX) _relightPhotoCache.delete(_relightPhotoCache.keys().next().value as string)
+    _relightPhotoCache.set(key, { paint, tile })
+  }
+  return { paint, tile, sig: key }
 }
 
 /**
  * The Finish pair (Relight stage 3, Task 2): renders the layer's own photo twice — once without
  * Relight (`original`) and once with it applied (`guide`) — for the "Finish with Nano Banana 2"
- * button (Task 3). Built from the identical internals as the live paint (`relightLitFrom`,
+ * button (Task 3). Built from the identical internals as the live paint (`relightPhotoFor`,
  * `relightSourceOf`, `drawLayerContent`), so the LIGHTING is pixel-for-pixel what the effect is
  * already showing — the model must see the SAME field, crop rect and surfaces the user approved,
  * not a re-derived approximation. Only ever called for a layer `canFinishRelight` accepts (a
@@ -7454,7 +7589,7 @@ export async function renderRelightPair(
 
   const stack = effectStackOf(layer).filter(e => e.visible)
   const relightRaw = pinnedEffect(stack, 'relight')
-  const relight = relightRaw && !relightBypassed(layer.id) ? sanitizeRelightWithLegacyLights(relightRaw) : undefined
+  const relight = relightRaw && !relightBypassed(layer.id) ? sanitizeRelight(relightRaw) : undefined
   if (!relight || !relightAvailable()) return null
 
   const depth = depthImageFor(dofRef)
@@ -7490,17 +7625,17 @@ export async function renderRelightPair(
   sctx.translate(bw / 2, bh / 2)
   drawLayerContent(sctx, layer, Weff, undefined, { skipTint: true })
 
-  // The guide is rendered at SOURCE resolution (up to maxEdge), not the on-screen box size. The
-  // light direction and colour are identical to the preview, but Texture relief is measured in
-  // texels, so the guide picks up finer detail than the preview shows. Accepted: the model takes
-  // only the lighting from the guide.
-  const lit = relightLitFrom(layer, Weff, undefined, dofRef, depth, relight, src, bw, bh)
-  if (!lit) return null
-  // `lit` is the GPU pass's own reused canvas (see `gpuContent`'s `own()` above) — copy it out so
-  // a later call (the next poll, or another layer's Finish pair) can't silently mutate the
-  // canvas this one already returned.
-  const guide = document.createElement('canvas'); guide.width = bw; guide.height = bh
-  guide.getContext('2d')?.drawImage(lit, 0, 0)
+  // The guide is rendered at SOURCE resolution (up to maxEdge), not the on-screen box size.
+  // Texture relief is measured in texels, so the box-space facing tile (rotation 0) picks up
+  // finer detail than the preview shows. Accepted: the model takes only the lighting.
+  // Light layers stage 2: Relight no longer lights the photo by itself. Until Finish takes the
+  // Frame's lights (stage 2 Task 4, through `lightBoxWithFrameLights` with `out.tile`), the guide
+  // is the photo with Original light applied. Null until the depth field has landed, as before.
+  const out = relightPhotoFor(layer, Weff, undefined, dofRef, depth, relight, src, bw, bh, true, true, 0)
+  if (!out.tile) return null
+  // Copied: the result never aliases a cached or reused canvas.
+  const guide = copyCanvas(out.paint ?? src)
+  if (!guide) return null
 
   return { original: src, guide, w: bw, h: bh }
 }
@@ -7526,12 +7661,12 @@ export function drawWiredImageLayer(
   // uploaded one must expose the same features — a gap between them reads as a bug.
   dof?: DofEffect | null,
   depthImg?: CanvasImageSource | null,
-  relight?: RelightEffect | null,   // re-read below with its legacy lights (stage 2 bridge)
-  relightKey?: string,
-  // Surfaces normal map for this layer's photo, read synchronously (surfacesRegistry.ts).
-  // The caller passes what it already has from computing `relightKey`'s source — this
-  // function never requests surfaces itself.
-  normals?: CanvasImageSource | null,
+  // Relight on a wired SLOT (the legacy wired path): since light layers stage 2 it applies
+  // Original light only — the slot is not a Frame layer, so it takes no facing map and the old
+  // per-layer lights are not read. `relightKey` / `normals` are kept for the callers' signature.
+  relight?: RelightEffect | null,
+  _relightKey?: string,
+  _normals?: CanvasImageSource | null,
 ) {
   if (!img) return
   const iw = 'naturalWidth' in img ? img.naturalWidth : img.width
@@ -7557,13 +7692,10 @@ export function drawWiredImageLayer(
   let fitW: number, fitH: number
   if (iAspect > cAspect) { fitW = W; fitH = W / iAspect } else { fitH = H; fitW = H * iAspect }
 
-  // Relight runs before DOF, so a depth-of-field blur on the same layer blurs the relit
-  // picture. Relight works in the image's own fractions, so native size needs no
-  // on-canvas normalisation, unlike DOF's `fitW * layer.scale`. The field reads the unmasked
-  // source itself (only on a cache miss); the whole image is drawn, so no crop rect.
-  if (relight && depthImg && relightKey && relightAvailable() && relight.visible !== false) {
-    const field = relightDepthFieldFor(relightKey, depthImg as CanvasImageSource & { width?: number; height?: number }, img)
-    const lit = field ? applyRelight(src, field, sanitizeRelightWithLegacyLights(relight), iw, ih, undefined, normals) : null
+  // Relight's Original light runs before DOF, so a depth-of-field blur on the same layer blurs
+  // the flattened picture. It works at the image's own size.
+  if (relight && relight.visible !== false && relightAvailable()) {
+    const lit = relightOriginalLight(src, sanitizeRelight(relight).keep, iw, ih)
     if (lit) {
       const owned = document.createElement('canvas'); owned.width = iw; owned.height = ih
       owned.getContext('2d')?.drawImage(lit, 0, 0)

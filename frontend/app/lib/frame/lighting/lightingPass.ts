@@ -5,7 +5,10 @@
  * albedo × (ambient `1 − darkness·0.92` + Σ light colour × falloff × cone × wrapped n·L × soft
  * shadow), tone `col/(1+col·0.18)`, back to sRGB. The maths is the approved prototype's `FS`
  * (scratchpad lightproto/light-layer.html) verbatim, with stage-1 changes only:
- *   - flat normals (n = +z), no shine term;
+ *   - flat normals (n = +z), no shine term — stage 2: a Relight photo's facing map (facingPass.ts)
+ *     gives the normal and a contact term, and the lit map's G channel its shine (Blinn, the
+ *     prototype's `pow(n·H, 48)·shine·2`). Without a facing map (`uHasFacing` 0) both are flat
+ *     and the result is stage 1's;
  *   - alpha kept (a transparent Frame stays transparent where it was);
  *   - the lit map is a mix factor rather than a 0.5 threshold (soft silhouette edges stay soft);
  *     where it is 0 the source pixel passes through untouched;
@@ -20,9 +23,11 @@
  * (load-bearing — without it drawImage reads stale pixels), FLIP_Y uploads, a lost context is
  * dropped and rebuilt on the next call rather than disabling the pass.
  */
+import type { LocalLayer } from '~/composables/useCompositorLayers'
 import type { FrameLighting, LightLayer } from './settings'
 import { packLightUniforms } from './shade'
-import { cachedLightingMaps, releaseLightingMaps, LIFT_SCALE, type LightingMaps, type LightingStamp } from './maps'
+import { cachedLightingMaps, releaseLightingMaps, lightingMapSize, nextLightingMapVersion, LIFT_SCALE, type LightingMaps, type LightingStamp } from './maps'
+import { frameToRelightBox, relightPhotoBox } from './convertRelight'
 
 export { LIFT_SCALE }
 
@@ -38,12 +43,13 @@ export const LIGHTING_FRAG = `#version 300 es
 precision highp float;
 in vec2 vUv;
 out vec4 fragColor;
-uniform sampler2D uColor, uLit, uLift;
+uniform sampler2D uColor, uLit, uLift, uFacing;
 uniform vec4 uA[6];   // x, y*aspect, z, type (1 lamp, 2 spot, 3 sun; sun: direction toward it)
 uniform vec4 uB[6];   // linear r, g, b * brightness, reach
 uniform vec4 uC[6];   // aimX, aimY*aspect, cosOuter, cosInner
 uniform float uCount, uDark, uAspect, uLiftScale;
 uniform float uMaxLift;  // the tallest stacked lift on the Frame; 0 = nothing casts
+uniform float uHasFacing; // 1 = a Relight photo stamped the facing map (and the lit map's G is shine)
 
 // Textures are FLIP_Y-uploaded, so vUv.y = 1 is the top; lighting runs top-down like the prototype.
 vec2 G(vec2 uv) { return vec2(uv.x, 1.0 - uv.y); }
@@ -57,8 +63,19 @@ void main() {
   vec3 alb = pow(src.rgb, vec3(2.2));
   vec3 P = vec3(uv.x, uv.y * uAspect, hgt(uv));
   vec3 n = vec3(0.0, 0.0, 1.0);
+  float contact = 1.0;
+  float shineK = 0.0;
+  if (uHasFacing > 0.5) {
+    // Facing map: R, G = normal x, y as 128 + n*127 (128 is exactly 0), B = contact; z rebuilt.
+    vec3 f = texture(uFacing, vUv).rgb * 255.0;
+    vec2 nxy = clamp((f.rg - 128.0) / 127.0, -1.0, 1.0);
+    n = vec3(nxy, sqrt(max(1.0 - dot(nxy, nxy), 0.0)));
+    contact = f.b / 255.0;
+    shineK = texture(uLit, vUv).g;
+  }
   float amb = 1.0 - uDark * 0.92;
   vec3 acc = vec3(amb);
+  vec3 spec = vec3(0.0);
   int count = int(uCount + 0.5);
   for (int i = 0; i < 6; i++) {
     if (i >= count) break;
@@ -96,9 +113,11 @@ void main() {
         sh = min(sh, 1.0 - smoothstep(0.0, 0.02 + t * 0.25, above) * 0.85);
       }
     }
-    acc += uB[i].rgb * att * sh * ndl;
+    vec3 c = uB[i].rgb * att * sh * contact;
+    acc += c * ndl;
+    if (shineK > 0.0) spec += c * pow(max(dot(n, normalize(L + vec3(0.0, 0.0, 1.0))), 0.0), 48.0) * shineK * 2.0;
   }
-  vec3 col = alb * acc;
+  vec3 col = alb * acc + spec;
   col = max(col / (1.0 + col * 0.18), alb * amb);
   vec3 lit = pow(col, vec3(1.0 / 2.2));
   fragColor = vec4(mix(src.rgb, lit, clamp(litK, 0.0, 1.0)), src.a);
@@ -113,6 +132,7 @@ class LightingGl {
   private texColor: WebGLTexture | null = null
   private texLit: WebGLTexture | null = null
   private texLift: WebGLTexture | null = null
+  private texFacing: WebGLTexture | null = null
   private loc: Record<string, WebGLUniformLocation | null> = {}
   /** The map (canvas + version) currently in each texture: maps are cached between paints, so a
    *  light drag uploads only the colour. Forgotten with the context. */
@@ -120,6 +140,7 @@ class LightingGl {
   /** Size of the colour texture's storage: same size ⇒ texSubImage2D (no reallocation). */
   private colorSize: { w: number; h: number } | null = null
   private liftIn: { c: HTMLCanvasElement; v: number } | null = null
+  private facingIn: { c: HTMLCanvasElement; v: number } | null = null
   private failed = false
   private reason = ''
   /** Real GL draws made — "the pass ran" vs "silently skipped" in tests. */
@@ -138,15 +159,15 @@ class LightingGl {
 
   private drop() {
     this.canvas = null; this.gl = null; this.program = null
-    this.texColor = null; this.texLit = null; this.texLift = null
-    this.loc = {}; this.litIn = null; this.liftIn = null; this.colorSize = null
+    this.texColor = null; this.texLit = null; this.texLift = null; this.texFacing = null
+    this.loc = {}; this.litIn = null; this.liftIn = null; this.facingIn = null; this.colorSize = null
   }
 
   /** Free the GL objects and the context itself (the next `init` builds a fresh one). */
   release() {
     const gl = this.gl
     if (gl && !gl.isContextLost()) {
-      gl.deleteTexture(this.texColor); gl.deleteTexture(this.texLit); gl.deleteTexture(this.texLift)
+      gl.deleteTexture(this.texColor); gl.deleteTexture(this.texLit); gl.deleteTexture(this.texLift); gl.deleteTexture(this.texFacing)
       gl.deleteProgram(this.program)
       gl.getExtension('WEBGL_lose_context')?.loseContext()
     }
@@ -196,11 +217,15 @@ class LightingGl {
     }
     this.canvas = canvas; this.gl = gl; this.program = program
     this.texColor = mkTex(); this.texLit = mkTex(); this.texLift = mkTex()
+    // The facing map gets one real flat texel now: its sampler is declared even with no Relight
+    // photo, and a never-filled texture is "incomplete" (a warning on every draw).
+    this.texFacing = mkTex()
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array([128, 128, 255, 255]))
     gl.useProgram(program)
-    for (const n of ['uColor', 'uLit', 'uLift', 'uA', 'uB', 'uC', 'uCount', 'uDark', 'uAspect', 'uLiftScale', 'uMaxLift']) {
+    for (const n of ['uColor', 'uLit', 'uLift', 'uFacing', 'uA', 'uB', 'uC', 'uCount', 'uDark', 'uAspect', 'uLiftScale', 'uMaxLift', 'uHasFacing']) {
       this.loc[n] = gl.getUniformLocation(program, n)
     }
-    this.litIn = null; this.liftIn = null; this.colorSize = null
+    this.litIn = null; this.liftIn = null; this.facingIn = null; this.colorSize = null
   }
 
   render(color: CanvasImageSource, maps: LightingMaps, w: number, h: number, u: Uniforms & { uMaxLift: number }): HTMLCanvasElement | null {
@@ -244,10 +269,17 @@ class LightingGl {
       gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, maps.lift)
       this.liftIn = { c: maps.lift, v: maps.version }
     }
+    gl.activeTexture(gl.TEXTURE3)
+    gl.bindTexture(gl.TEXTURE_2D, this.texFacing)
+    if (maps.facing && (this.facingIn?.c !== maps.facing || this.facingIn.v !== maps.version)) {
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, maps.facing)
+      this.facingIn = { c: maps.facing, v: maps.version }
+    }
     gl.pixelStorei(gl.UNPACK_COLORSPACE_CONVERSION_WEBGL, prevCs)
 
     const L = this.loc
-    gl.uniform1i(L.uColor!, 0); gl.uniform1i(L.uLit!, 1); gl.uniform1i(L.uLift!, 2)
+    gl.uniform1i(L.uColor!, 0); gl.uniform1i(L.uLit!, 1); gl.uniform1i(L.uLift!, 2); gl.uniform1i(L.uFacing!, 3)
+    gl.uniform1f(L.uHasFacing!, maps.facing ? 1 : 0)
     gl.uniform4fv(L.uA!, u.uA); gl.uniform4fv(L.uB!, u.uB); gl.uniform4fv(L.uC!, u.uC)
     gl.uniform1f(L.uCount!, u.uCount); gl.uniform1f(L.uDark!, u.uDark)
     gl.uniform1f(L.uAspect!, u.uAspect); gl.uniform1f(L.uLiftScale!, u.uLiftScale)
@@ -361,4 +393,83 @@ export function lightFrame(
   ctx.restore()
   _lastMs = now() - t0
   return true
+}
+
+
+// ── One photo's box, lit by the Frame's lights (Relight Finish, stage 2 Task 4) ──────────────
+
+/**
+ * The Frame's lights re-expressed in a photo's box: positions and spot aims mapped Frame → box
+ * fractions through the photo's centre, size and rotation (`frameToRelightBox`); lamp/spot
+ * heights and reach rescaled from Frame widths to box widths, so the light sits at the same
+ * place and falls off over the same part of the photo. A sun keeps its height (an angle); its
+ * dot is mapped too, so its direction turns with the photo. Not clamped — these never persist.
+ */
+export function lightsInBox(photo: LocalLayer, lights: readonly LightLayer[], W: number, H: number): LightLayer[] {
+  const bw = relightPhotoBox(photo).w
+  const s = bw > 0 ? 1 / bw : 1
+  return lights.map((l) => {
+    const at = frameToRelightBox(photo, l.x, l.y, W, H)
+    const aim = frameToRelightBox(photo, l.light.aimX, l.light.aimY, W, H)
+    const sun = l.light.type === 'sun'
+    return {
+      ...l, x: at.x, y: at.y,
+      light: {
+        ...l.light,
+        aimX: aim.x, aimY: aim.y,
+        height: sun ? l.light.height : ((0.04 + l.light.height * 0.9) * s - 0.04) / 0.9,
+        reach: sun ? l.light.reach : l.light.reach * s,
+      },
+    }
+  })
+}
+
+/**
+ * A photo's box lit by the Frame's lights only — the guide Relight's Finish sends (stage 2,
+ * Task 4): the SAME lighting pass and maths as the Frame, over the box alone. No other layer, so
+ * no cast shadows; the photo's own facing tile (box space, rotation 0, `relightFacingTile`) gives
+ * the shape, contact and shine. `color` is the box with Original light already applied, `bw`×`bh`
+ * its size (the tile the same size, or null ⇒ flat). `lights` are the Frame's visible lights in
+ * Frame terms; `shine` the Relight dial. Returns a fresh canvas, or null (no WebGL2, too big).
+ * With no light the box passes through as it is (lit by ambient only).
+ */
+export function lightBoxWithFrameLights(
+  color: CanvasImageSource,
+  tile: CanvasImageSource | null,
+  bw: number,
+  bh: number,
+  photo: LocalLayer,
+  lights: readonly LightLayer[],
+  lighting: FrameLighting,
+  W: number,
+  H: number,
+  shine: number,
+): HTMLCanvasElement | null {
+  const w = Math.max(1, Math.round(bw)), h = Math.max(1, Math.round(bh))
+  const p = getPass()
+  if (!p.available() || typeof document === 'undefined') return null
+  const ms = lightingMapSize(w, h)
+  const mk = () => { const c = document.createElement('canvas'); c.width = ms.w; c.height = ms.h; return c }
+  const lit = mk(), lift = mk(), facing = tile ? mk() : null
+  const lc = lit.getContext('2d'), fc = lift.getContext('2d')
+  if (!lc || !fc) return null
+  const g = Math.max(0, Math.min(255, Math.round(shine * 255)))
+  lc.fillStyle = facing ? `rgb(255,${g},255)` : 'rgb(255,255,255)'
+  lc.fillRect(0, 0, ms.w, ms.h)
+  fc.fillStyle = 'rgb(0,0,0)'
+  fc.fillRect(0, 0, ms.w, ms.h)
+  if (facing && tile) {
+    const xc = facing.getContext('2d')
+    if (!xc) return null
+    xc.fillStyle = 'rgb(128,128,255)'
+    xc.fillRect(0, 0, ms.w, ms.h)
+    xc.drawImage(tile, 0, 0, ms.w, ms.h)
+  }
+  const maps: LightingMaps = { lit, lift, facing, width: ms.w, height: ms.h, version: nextLightingMapVersion(), maxLift: 0 }
+  const boxLights = lightsInBox(photo, lights, W, H)
+  const out = p.render(color, maps, w, h, { ...packLightUniforms(boxLights, lighting, h / w, LIFT_SCALE), uMaxLift: 0 })
+  if (!out) return null
+  const copy = document.createElement('canvas'); copy.width = w; copy.height = h
+  copy.getContext('2d')?.drawImage(out, 0, 0)
+  return copy
 }

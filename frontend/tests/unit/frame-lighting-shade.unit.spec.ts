@@ -1,6 +1,11 @@
 import { describe, it, expect } from 'vitest'
-import { lightAt, packLight, packLightUniforms, shadePixel, shadowWalk, WALK_STEP, WALK_STEPS, type PackedLight } from '~/lib/frame/lighting/shade'
-import { LIGHTING_FRAG, frameDeviceRect } from '~/lib/frame/lighting/lightingPass'
+import {
+  lightAt, packLight, packLightUniforms, shadePixel, shadowWalk, WALK_STEP, WALK_STEPS, type PackedLight,
+  decodeFacing, encodeFacing, FLAT_FACING, FLAT_FACING_RGB, SHINE_GAIN, SHINE_POWER, shineAt, type Facing, type Vec3,
+} from '~/lib/frame/lighting/shade'
+import { LIGHTING_FRAG, frameDeviceRect, lightsInBox } from '~/lib/frame/lighting/lightingPass'
+import { relightBoxToFrame } from '~/lib/frame/lighting/convertRelight'
+import type { LocalLayer } from '~/composables/useCompositorLayers'
 import { newLightLayer, LIGHT_DEFAULTS, DEFAULT_LIGHTING } from '~/lib/frame/lighting/settings'
 import type { LightLayer } from '~/lib/frame/lighting/settings'
 
@@ -128,5 +133,96 @@ describe('web-export bleed darkening', () => {
         expect(c * (1 - bleedAmbientAlpha(d))).toBeCloseTo(passed, 6)
       }
     }
+  })
+})
+
+// ── Stage 2: facing, contact, shine ─────────────────────────────────────────────────────────
+const unit = (v: Vec3): Vec3 => { const l = Math.hypot(...v); return v.map(x => x / l) as Vec3 }
+const facing = (n: Vec3, contact = 1, shine = 0): Facing => ({ n: unit(n), contact, shine })
+
+describe('facing — the map encoding', () => {
+  it('flat (128,128,255) decodes to exactly n = +z and contact 1', () => {
+    const d = decodeFacing(...FLAT_FACING_RGB)
+    expect(d.n).toEqual([0, 0, 1])
+    expect(d.contact).toBe(1)
+    expect(encodeFacing([0, 0, 1], 1)).toEqual([...FLAT_FACING_RGB])
+  })
+
+  it('round-trips a tilted normal within one 8-bit step', () => {
+    const n = unit([-0.5, 0.3, 0.8])
+    const d = decodeFacing(...encodeFacing(n, 0.6))
+    for (let i = 0; i < 3; i++) expect(Math.abs(d.n[i]! - n[i]!)).toBeLessThan(0.02)
+    expect(d.contact).toBeCloseTo(0.6, 2)
+  })
+})
+
+describe('flat facing equals stage 1', () => {
+  it('lightAt and shadePixel with the flat facing are stage 1\'s numbers exactly', () => {
+    const lights = [light('lamp', 0.2, 0.3), light('spot', 0.7, 0.2, { aimX: 0.6, aimY: 0.6 }), light('sun', -0.2, 0.4)]
+    const flat = { ...decodeFacing(...FLAT_FACING_RGB), shine: 0 }
+    for (const [x, y] of [[0.1, 0.1], [0.5, 0.5], [0.9, 0.8]]) {
+      for (const p of lights) expect(lightAt(p, at(x!, y!), flat)).toEqual(lightAt(p, at(x!, y!)))
+      expect(shadePixel([0.6, 0.4, 0.2], lights, at(x!, y!), 0.45, flat)).toEqual(shadePixel([0.6, 0.4, 0.2], lights, at(x!, y!), 0.45))
+      expect(shadePixel([0.6, 0.4, 0.2], lights, at(x!, y!), 0.45, FLAT_FACING)).toEqual(shadePixel([0.6, 0.4, 0.2], lights, at(x!, y!), 0.45))
+    }
+  })
+})
+
+describe('facing changes the light', () => {
+  const lamp = light('lamp', 0.1, 0.5, { height: 0.2 })
+  const P = at(0.5, 0.5)
+
+  it('a normal facing the light is brighter than one facing away', () => {
+    const toward = sum(lightAt(lamp, P, facing([-0.6, 0, 0.8])))
+    const flat = sum(lightAt(lamp, P))
+    const away = sum(lightAt(lamp, P, facing([0.6, 0, 0.8])))
+    expect(toward).toBeGreaterThan(flat)
+    expect(flat).toBeGreaterThan(away)
+  })
+
+  it('the contact term darkens, in proportion', () => {
+    const open = lightAt(lamp, P, facing([0, 0, 1], 1))
+    const shut = lightAt(lamp, P, facing([0, 0, 1], 0.5))
+    expect(sum(shut)).toBeCloseTo(sum(open) * 0.5, 10)
+    expect(shadePixel([0.5, 0.5, 0.5], [lamp], P, 0.45, facing([0, 0, 1], 0.5))[0])
+      .toBeLessThan(shadePixel([0.5, 0.5, 0.5], [lamp], P, 0.45)[0])
+  })
+
+  it('shine adds a highlight where the normal meets the half vector; 0 shine adds nothing', () => {
+    // Half of (toward the lamp) and the view: tilt the normal toward the lamp.
+    const n: Vec3 = [-0.45, 0, 0.9]
+    expect(sum(shineAt(lamp, P, facing(n, 1, 0)))).toBe(0)
+    expect(sum(shineAt(lamp, P, facing(n, 1, 1)))).toBeGreaterThan(0)
+    expect(shadePixel([0.3, 0.3, 0.3], [lamp], P, 0.45, facing(n, 1, 1))[0])
+      .toBeGreaterThan(shadePixel([0.3, 0.3, 0.3], [lamp], P, 0.45, facing(n, 1, 0))[0])
+  })
+
+  it('the shader carries the facing decode, contact and the prototype\'s shine', () => {
+    for (const c of ['(f.rg - 128.0) / 127.0', 'sqrt(max(1.0 - dot(nxy, nxy), 0.0))', 'contact = f.b / 255.0', 'att * sh * contact',
+      `0.0), ${SHINE_POWER}.0) * shineK * ${SHINE_GAIN}.0`, 'normalize(L + vec3(0.0, 0.0, 1.0))', 'shineK = texture(uLit, vUv).g', 'alb * acc + spec']) {
+      expect(LIGHTING_FRAG, c).toContain(c)
+    }
+    expect(SHINE_POWER).toBe(48)
+    expect(SHINE_GAIN).toBe(2)
+  })
+})
+
+describe('lightsInBox — the Frame\'s lights in a photo\'s box (Finish guide)', () => {
+  const W = 1080, H = 1350
+  const photo = { id: 'p', kind: 'image', x: 0.4, y: 0.55, w: 0.5, h: 0.4, rotation: 30, opacity: 1 } as unknown as LocalLayer
+  it('a lamp maps to the box fraction the conversion maps back from, height and reach in box widths', () => {
+    const lamp = newLightLayer('lamp', relightBoxToFrame(photo, 0.2, 0.3, W, H))
+    const [b] = lightsInBox(photo, [lamp], W, H)
+    expect(b!.x).toBeCloseTo(0.2, 9)
+    expect(b!.y).toBeCloseTo(0.3, 9)
+    // Same height above the page: z_box · boxWidth = z_frame.
+    expect((0.04 + b!.light.height * 0.9) * 0.5).toBeCloseTo(0.04 + lamp.light.height * 0.9, 9)
+    expect(b!.light.reach).toBeCloseTo(lamp.light.reach / 0.5, 9)
+  })
+  it('a sun keeps its height; its dot turns with the photo', () => {
+    const sun = newLightLayer('sun', { x: 0.1, y: 0.5 })
+    const [b] = lightsInBox(photo, [sun], W, H)
+    expect(b!.light.height).toBe(sun.light.height)
+    expect(b!.x).not.toBeCloseTo(0.1, 3)
   })
 })

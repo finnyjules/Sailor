@@ -13,9 +13,18 @@ export function relightAvailable(): boolean {
   return false
 }
 
-export function applyRelight(): HTMLCanvasElement | null {
+export function relightFacingTile(): HTMLCanvasElement | null {
   leanFeatureUsed('Relight')
   return null
+}
+
+export function relightOriginalLight(): HTMLCanvasElement | null {
+  leanFeatureUsed('Relight')
+  return null
+}
+
+export function originalLightActive(): boolean {
+  return false
 }
 
 export function relightDepthFieldFor(): FloatDepth | null {

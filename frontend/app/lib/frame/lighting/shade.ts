@@ -2,6 +2,8 @@
  * Frame light layers, stage 1: how a light layer becomes shader numbers, and a pure TypeScript
  * mirror of the per-pixel lighting in `lightingPass.ts` (no shadows — the shadow walk needs
  * the lift map) so the maths can be tested without WebGL.
+ * Stage 2 adds the facing map (a Relight photo's normals + contact term, see facingPass.ts) and
+ * shine: `Facing` below; absent ⇒ flat (n = +z, contact 1, shine 0) ⇒ stage 1's numbers exactly.
  *
  * Space: Frame widths. A point is (x, y·aspect, z) with x, y Frame fractions and
  * aspect = H / W, exactly as the approved prototype (scratchpad lightproto/light-layer.html).
@@ -88,12 +90,44 @@ const smoothstep = (e0: number, e1: number, x: number) => {
 /** Ambient: what is left of the picture's own light at this Darkness. */
 export const ambient = (darkness: number) => 1 - darkness * 0.92
 
+/** What the facing map and the lit map's shine channel say about one pixel. */
+export interface Facing {
+  /** Unit normal in lighting space (x right, y down, z toward the viewer). */
+  n: Vec3
+  /** Contact term, multiplies the light (1 = open). */
+  contact: number
+  /** Shine 0..1 (the Relight `shine` dial; 0 for every other layer in stage 2). */
+  shine: number
+}
+
+export const FLAT_FACING: Readonly<Facing> = Object.freeze({ n: [0, 0, 1] as Vec3, contact: 1, shine: 0 })
+
+/** The facing map's flat colour: x = y = 0 (128 is exactly 0), contact 1. */
+export const FLAT_FACING_RGB = [128, 128, 255] as const
+
+/** A normal's x/y → the facing map's 8-bit R/G (`128 + n·127`), contact → B. */
+export function encodeFacing(n: Vec3, contact: number): [number, number, number] {
+  const q = (v: number) => Math.round(128 + Math.max(-1, Math.min(1, v)) * 127)
+  return [q(n[0]), q(n[1]), Math.round(Math.max(0, Math.min(1, contact)) * 255)]
+}
+
+/** The facing map's 8-bit R/G/B → normal (z rebuilt from x, y) and contact — `LIGHTING_FRAG`'s decode. */
+export function decodeFacing(r: number, g: number, b: number): { n: Vec3; contact: number } {
+  const x = Math.max(-1, Math.min(1, (r - 128) / 127)), y = Math.max(-1, Math.min(1, (g - 128) / 127))
+  return { n: [x, y, Math.sqrt(Math.max(1 - x * x - y * y, 0))], contact: b / 255 }
+}
+
+/** Blinn shine (the prototype's): `pow(max(n·H, 0), 48) · shine · 2`, H = half of L and the view (+z). */
+export const SHINE_POWER = 48
+export const SHINE_GAIN = 2
+
 /**
- * One light's contribution (linear rgb) at P = (x, y·aspect, z), flat normal, no shadow —
- * the loop body of the shader: falloff r²/(r²+d²·3), spot cone smoothstep, wrapped n·L.
+ * One light's contribution (linear rgb) at P = (x, y·aspect, z), no shadow — the loop body of
+ * the shader: falloff r²/(r²+d²·3), spot cone smoothstep, wrapped n·L, × contact, plus shine.
+ * `facing` absent ⇒ flat: stage 1's term exactly.
  */
-export function lightAt(p: PackedLight, P: Vec3): Vec3 {
-  const n: Vec3 = [0, 0, 1]
+export function lightAt(p: PackedLight, P: Vec3, facing: Facing = FLAT_FACING): Vec3 {
+  const n = facing.n
   let L: Vec3
   let att = 1
   if (p.type === 3) {
@@ -112,24 +146,54 @@ export function lightAt(p: PackedLight, P: Vec3): Vec3 {
   }
   const ndl = Math.max(dot(n, L) * 0.85 + 0.15, 0)
   if (att * ndl < 0.002) return [0, 0, 0]
-  return [p.color[0] * att * ndl, p.color[1] * att * ndl, p.color[2] * att * ndl]
+  const k = att * facing.contact
+  return [p.color[0] * k * ndl, p.color[1] * k * ndl, p.color[2] * k * ndl]
+}
+
+/** One light's shine (linear rgb, added after the albedo multiply) — 0 when `shine` is 0. */
+export function shineAt(p: PackedLight, P: Vec3, facing: Facing = FLAT_FACING): Vec3 {
+  if (!(facing.shine > 0)) return [0, 0, 0]
+  const n = facing.n
+  let L: Vec3
+  let att = 1
+  if (p.type === 3) {
+    L = norm(p.pos)
+  } else {
+    const d = sub(p.pos, P)
+    const dist = len(d)
+    L = norm(d)
+    const r = p.reach
+    att = r * r / (r * r + dist * dist * 3)
+    if (p.type === 2) {
+      const axis = norm(sub([p.aim[0], p.aim[1], 0], p.pos))
+      att *= smoothstep(p.cosOuter, p.cosInner, dot([-L[0], -L[1], -L[2]], axis))
+    }
+  }
+  const ndl = Math.max(dot(n, L) * 0.85 + 0.15, 0)
+  if (att * ndl < 0.002) return [0, 0, 0]
+  const Hh = norm([L[0], L[1], L[2] + 1])
+  const s = Math.pow(Math.max(dot(n, Hh), 0), SHINE_POWER) * facing.shine * SHINE_GAIN * att * facing.contact
+  return [p.color[0] * s, p.color[1] * s, p.color[2] * s]
 }
 
 /**
  * One pixel, unshadowed: sRGB albedo in, sRGB out. Mirrors the shader's tail: linear albedo ×
- * (ambient + lights), tone `col/(1+col·0.18)`, then floored at the ambient-only value so the
- * tone curve never takes away light Darkness left in place (Darkness 0 never darkens).
+ * (ambient + lights) + shine, tone `col/(1+col·0.18)`, then floored at the ambient-only value so
+ * the tone curve never takes away light Darkness left in place (Darkness 0 never darkens).
  */
-export function shadePixel(albedo: Vec3, lights: readonly PackedLight[], P: Vec3, darkness: number): Vec3 {
+export function shadePixel(albedo: Vec3, lights: readonly PackedLight[], P: Vec3, darkness: number, facing: Facing = FLAT_FACING): Vec3 {
   const amb = ambient(darkness)
   const acc: Vec3 = [amb, amb, amb]
+  const spec: Vec3 = [0, 0, 0]
   for (const p of lights.slice(0, MAX_SHADER_LIGHTS)) {
-    const c = lightAt(p, P)
+    const c = lightAt(p, P, facing)
     acc[0] += c[0]; acc[1] += c[1]; acc[2] += c[2]
+    const s = shineAt(p, P, facing)
+    spec[0] += s[0]; spec[1] += s[1]; spec[2] += s[2]
   }
   return albedo.map((s, i) => {
     const a = Math.pow(s, 2.2)
-    const col = a * acc[i]!
+    const col = a * acc[i]! + spec[i]!
     const toned = Math.max(col / (1 + col * 0.18), a * amb)
     return Math.pow(toned, 1 / 2.2)
   }) as Vec3

@@ -8,26 +8,27 @@ import type { LocalLayer } from '~/composables/useCompositorLayers'
 import { newLightLayer } from '~/lib/frame/lighting/settings'
 
 /**
- * A tiny grey raster standing in for a 2D canvas: each pixel is [value 0..255, alpha 0..1],
- * premultiplication ignored where it doesn't matter. Supports exactly the ops the map stamper
+ * A tiny raster standing in for a 2D canvas: each pixel is [red `v`, green `g`, blue `b` 0..255,
+ * alpha 0..1], premultiplication ignored where it doesn't matter. Supports exactly the ops the map stamper
  * uses: fillRect (through a scale+translate transform), clearRect, drawImage(canvas, 0, 0) and
  * the composite ops source-over / source-in / lighter.
  */
 class FakeCanvas {
-  px: { v: number; a: number }[]
+  px: { v: number; g: number; b: number; a: number }[]
   ctx: FakeCtx
   constructor(public width: number, public height: number) {
-    this.px = Array.from({ length: width * height }, () => ({ v: 0, a: 0 }))
+    this.px = Array.from({ length: width * height }, () => ({ v: 0, g: 0, b: 0, a: 0 }))
     this.ctx = new FakeCtx(this)
   }
   getContext() { return this.ctx }
   at(x: number, y = 0) { return this.px[y * this.width + x]! }
 }
-const grey = (s: string): number => {
-  const m = /^rgb\((\d+(?:\.\d+)?),/.exec(s)
-  if (m) return Number(m[1])
-  if (s === '#fff' || s === '#ffffff' || s === 'white') return 255
-  if (s === '#000' || s === '#000000' || s === 'black') return 0
+type RGB = [number, number, number]
+const rgbOf = (s: string): RGB => {
+  const m = /^rgb\((\d+(?:\.\d+)?),\s*(\d+(?:\.\d+)?),\s*(\d+(?:\.\d+)?)\)$/.exec(s)
+  if (m) return [Number(m[1]), Number(m[2]), Number(m[3])]
+  if (s === '#fff' || s === '#ffffff' || s === 'white') return [255, 255, 255]
+  if (s === '#000' || s === '#000000' || s === 'black') return [0, 0, 0]
   throw new Error('fake canvas: unknown fillStyle ' + s)
 }
 class FakeCtx {
@@ -41,17 +42,18 @@ class FakeCtx {
   restore() { this.t = this.stack.pop() ?? this.t }
   setTransform(a: number, _b: number, _c: number, d: number, e: number, f: number) { this.t = { a, d, e, f } }
   getTransform() { return { ...this.t, b: 0, c: 0 } }
-  private blend(i: number, v: number, a: number) {
+  private blend(i: number, c: RGB, a: number) {
     const p = this.canvas.px[i]!
     const op = this.globalCompositeOperation
-    if (op === 'source-in') { p.v = v; p.a = p.a * a; return }
-    if (op === 'lighter') { p.v = Math.min(255, p.v * p.a + v * a); p.a = Math.min(1, p.a + a); return }
+    const keys = ['v', 'g', 'b'] as const
+    if (op === 'source-in') { keys.forEach((k, j) => { p[k] = c[j]! }); p.a = p.a * a; return }
+    if (op === 'lighter') { keys.forEach((k, j) => { p[k] = Math.min(255, p[k] * p.a + c[j]! * a) }); p.a = Math.min(1, p.a + a); return }
     const outA = a + p.a * (1 - a)
-    p.v = outA > 0 ? (v * a + p.v * p.a * (1 - a)) / outA : 0
+    keys.forEach((k, j) => { p[k] = outA > 0 ? (c[j]! * a + p[k] * p.a * (1 - a)) / outA : 0 })
     p.a = outA
   }
   fillRect(x: number, y: number, w: number, h: number) {
-    const v = grey(String(this.fillStyle))
+    const v = rgbOf(String(this.fillStyle))
     const x0 = Math.round(x * this.t.a + this.t.e), x1 = Math.round((x + w) * this.t.a + this.t.e)
     const y0 = Math.round(y * this.t.d + this.t.f), y1 = Math.round((y + h) * this.t.d + this.t.f)
     const all = this.globalCompositeOperation === 'source-in'
@@ -61,9 +63,9 @@ class FakeCtx {
       else if (all) this.canvas.px[yy * this.canvas.width + xx]!.a = 0
     }
   }
-  clearRect() { for (const p of this.canvas.px) { p.v = 0; p.a = 0 } }
+  clearRect() { for (const p of this.canvas.px) { p.v = 0; p.g = 0; p.b = 0; p.a = 0 } }
   drawImage(src: FakeCanvas) {
-    src.px.forEach((p, i) => { if (p.a > 0 || this.globalCompositeOperation === 'source-in') this.blend(i, p.v, p.a) })
+    src.px.forEach((p, i) => { if (p.a > 0 || this.globalCompositeOperation === 'source-in') this.blend(i, [p.v, p.g, p.b], p.a) })
   }
 }
 const makeCanvas = (w: number, h: number) => new FakeCanvas(w, h) as unknown as HTMLCanvasElement
@@ -231,5 +233,65 @@ describe('map size and cache', () => {
     const m2 = cachedLightingMaps([stamp(a, 0, 2)], W, H, W, H, opts)
     expect(m2).not.toBe(m1)
     expect(__lightingMapStamps() - n0).toBe(1)
+  })
+})
+
+// ── Stage 2: the facing map and shine ───────────────────────────────────────────────────────
+
+/** A Relight photo's stamp: silhouette over [x0, x1), and a facing tile there in `rgb`. */
+function photoStamp(layer: LocalLayer, x0: number, x1: number, rgb: RGB, shine: number, sig = 'tile1'): LightingStamp {
+  const tile = new FakeCanvas(W, H)
+  for (let x = x0; x < x1; x++) Object.assign(tile.at(x), { v: rgb[0], g: rgb[1], b: rgb[2], a: 1 })
+  const base = stamp(layer, x0, x1)
+  return { ...base, sig: `${base.sig}|f${sig}|${shine}`, facing: { shine, draw: t => (t as unknown as FakeCtx).drawImage(tile) } }
+}
+const img = (id: string, patch: Record<string, unknown> = {}) => ({ ...rectLayer(id), kind: 'image', ...patch } as unknown as LocalLayer)
+
+describe('stampLightingMaps — facing (stage 2)', () => {
+  it('no Relight photo ⇒ no facing map, and the lit map is stage 1\'s grey, byte for byte', () => {
+    const m = stampLightingMaps([stamp(rectLayer('a', { lit: false }), 1, 3)], W, H, W, H, opts)!
+    expect(m.facing).toBeNull()
+    expect(raster(m.lit).px.map(p => [p.v, p.g, p.b])).toEqual([[255, 255, 255], [0, 0, 0], [0, 0, 0], [255, 255, 255]])
+  })
+
+  it('a Relight photo makes the facing map: flat outside it, its tile inside; shine in the lit map\'s G', () => {
+    const m = stampLightingMaps([photoStamp(img('p'), 1, 3, [60, 200, 140], 0.5)], W, H, W, H, opts)!
+    const f = raster(m.facing!)
+    expect([f.at(0).v, f.at(0).g, f.at(0).b]).toEqual([128, 128, 255])
+    expect([f.at(1).v, f.at(1).g, f.at(1).b]).toEqual([60, 200, 140])
+    expect([f.at(2).v, f.at(2).g, f.at(2).b]).toEqual([60, 200, 140])
+    expect([f.at(3).v, f.at(3).g, f.at(3).b]).toEqual([128, 128, 255])
+    const l = raster(m.lit)
+    expect([l.at(0).v, l.at(0).g]).toEqual([255, 0])        // background: lit, no shine
+    expect([l.at(1).v, l.at(1).g]).toEqual([255, 128])      // the photo: lit, shine 0.5
+  })
+
+  it('a layer above the photo faces the viewer again and has no shine', () => {
+    const m = stampLightingMaps([photoStamp(img('p'), 0, 4, [60, 200, 140], 1), stamp(rectLayer('t'), 2, 3)], W, H, W, H, opts)!
+    const f = raster(m.facing!)
+    expect([f.at(1).v, f.at(1).g, f.at(1).b]).toEqual([60, 200, 140])
+    expect([f.at(2).v, f.at(2).g, f.at(2).b]).toEqual([128, 128, 255])
+    expect(raster(m.lit).at(1).g).toBe(255)
+    expect(raster(m.lit).at(2).g).toBe(0)
+  })
+
+  it('a hidden photo makes no facing map', () => {
+    const m = stampLightingMaps([photoStamp(img('p', { visible: false }), 0, 4, [60, 200, 140], 1)], W, H, W, H, opts)!
+    expect(m.facing).toBeNull()
+  })
+
+  it('cached: the same tile serves the cache; a new tile signature (dials, field landing) re-stamps', () => {
+    const p = img('p')
+    const n0 = __lightingMapStamps()
+    const m1 = cachedLightingMaps([photoStamp(p, 1, 3, [60, 200, 140], 0.5, 'a')], W, H, W, H, opts)
+    const m2 = cachedLightingMaps([photoStamp(p, 1, 3, [60, 200, 140], 0.5, 'a')], W, H, W, H, opts)
+    expect(m2).toBe(m1)
+    expect(m1!.facing).not.toBeNull()
+    const m3 = cachedLightingMaps([photoStamp(p, 1, 3, [70, 200, 140], 0.5, 'b')], W, H, W, H, opts)
+    expect(m3).not.toBe(m1)
+    expect(raster(m3!.facing!).at(1).v).toBe(70)
+    expect(__lightingMapStamps() - n0).toBe(2)
+    // Back to a Frame without a photo: no facing map.
+    expect(cachedLightingMaps([stamp(rectLayer('a', { lit: false }), 0, 1)], W, H, W, H, opts)!.facing).toBeNull()
   })
 })

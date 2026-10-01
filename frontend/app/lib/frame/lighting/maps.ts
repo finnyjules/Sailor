@@ -11,9 +11,18 @@
  * SAME folded layer (motion, reveal, draw-time scale) — see `LightingStamp`. This module never
  * imports the painter, so it is testable with a fake canvas.
  *
- * Maps are device-sized with the long edge capped at 2048 px, and cached between paints by a
+ * Stage 2 — only when a Relight photo with a facing tile is among the stamps (otherwise none of
+ * this exists and the maps are stage 1's, byte for byte):
+ * - **facing** — starts flat `(128,128,255)`; a Relight photo stamps its facing tile (normal x, y
+ *   and contact, see facingPass.ts) through its own transform and silhouette; any other layer
+ *   above one stamps flat through its silhouette, so a headline over the photo faces the viewer.
+ * - **shine** lives in the lit map's G channel: the lit stamps are `rgb(lit, shine, lit)` (shine =
+ *   the Relight `shine` dial for a photo, 0 for every other layer and the background).
+ *
+ * Maps are device-sized with the long edge capped at MAP_MAX_EDGE, and cached between paints by a
  * cheap signature of the stamped layers + size + the background switch: moving a light or
- * changing Darkness never re-stamps.
+ * changing Darkness never re-stamps. A photo's stamp signature carries its tile's signature
+ * (its dials, depth field and surfaces), so a dial change or a field landing re-stamps.
  */
 import type { LocalLayer } from '~/composables/useCompositorLayers'
 import { effectiveCasts, effectiveLift, effectiveLit } from './settings'
@@ -30,13 +39,26 @@ export interface LightingStamp {
   /** Draw the item's silhouette (any colour, real alpha) through `target`'s current transform,
    *  in Frame units (W×H). The stamper sets that transform. */
   draw: (target: CanvasRenderingContext2D) => void
-  /** Cheap content signature for the cache; null ⇒ never served from the cache. */
+  /** Cheap content signature for the cache; null ⇒ never served from the cache. Includes the
+   *  facing tile's own signature when `facing` is set. */
   sig: string | null
+  /** A Relight photo's facing tile: `draw` paints the tile (opaque where the photo is) through
+   *  the same placement and silhouette as `draw`, in Frame units. */
+  facing?: StampFacing | null
+}
+
+export interface StampFacing {
+  draw: (target: CanvasRenderingContext2D) => void
+  /** The Relight `shine` dial, 0..1 — written to the lit map's G channel. */
+  shine: number
 }
 
 export interface LightingMaps {
   lit: HTMLCanvasElement
   lift: HTMLCanvasElement
+  /** Stage 2: the facing map — null (not created) unless a Relight photo stamped a tile. When
+   *  set, the lit map's G channel is shine. */
+  facing: HTMLCanvasElement | null
   width: number
   height: number
   /** Bumped on every (re)stamp — the GPU pass re-uploads a map only when this changes. */
@@ -65,24 +87,43 @@ const defaultMake = (w: number, h: number): HTMLCanvasElement => {
   return c
 }
 
-const grey = (v: number) => { const n = Math.max(0, Math.min(255, Math.round(v))); return `rgb(${n},${n},${n})` }
+const byte = (v: number) => Math.max(0, Math.min(255, Math.round(v)))
+const grey = (v: number) => { const n = byte(v); return `rgb(${n},${n},${n})` }
+/** The lit map's stamp colour: grey (stage 1) without a facing map; with one, G is the shine. */
+const litColour = (lit: boolean, shine: number, facingOn: boolean) =>
+  facingOn ? `rgb(${lit ? 255 : 0},${byte(shine * 255)},${lit ? 255 : 0})` : grey(lit ? 255 : 0)
+const FLAT = `rgb(128,128,255)`
 
-interface PlannedStamp { stamp: LightingStamp; lit: boolean; lift: number /* 0 = casts nothing */ }
+interface PlannedStamp {
+  stamp: LightingStamp
+  lit: boolean
+  lift: number /* 0 = casts nothing */
+  facing: StampFacing | null
+}
+
+/** True when a visible stamp brings a facing tile: only then is a facing map made. */
+export function wantsFacing(stamps: readonly LightingStamp[]): boolean {
+  return stamps.some(s => !!s.facing && !(s.layer && (s.layer.kind === 'light' || s.layer.visible === false)))
+}
 
 /** Which stamps can change a map, with their switches resolved. A lit, non-casting stamp while
  *  the lit map is still all white changes nothing (typical for a wired photo over a lit
- *  background) — skipped, so its per-paint closure never defeats the cache. */
-function plan(stamps: readonly LightingStamp[], backgroundLit: boolean): PlannedStamp[] {
+ *  background) — skipped, so its per-paint closure never defeats the cache. With a facing map,
+ *  a plain stamp above a photo's tile is kept (it puts the normal back to flat, the shine to 0). */
+function plan(stamps: readonly LightingStamp[], backgroundLit: boolean, facingOn = false): PlannedStamp[] {
   const out: PlannedStamp[] = []
   let anyBlack = !backgroundLit
+  let anyFacing = false
   for (const s of stamps) {
     const l = s.layer
     if (l && (l.kind === 'light' || l.visible === false)) continue
     const lit = l ? effectiveLit(l) : true
     const lift = l && effectiveCasts(l) ? effectiveLift(l) : 0
-    if (lit && lift <= 0 && !anyBlack) continue
+    const facing = facingOn && s.facing ? s.facing : null
+    if (lit && lift <= 0 && !anyBlack && !facing && !anyFacing) continue
     if (!lit) anyBlack = true
-    out.push({ stamp: s, lit, lift })
+    if (facing) anyFacing = true
+    out.push({ stamp: s, lit, lift, facing })
   }
   return out
 }
@@ -97,21 +138,31 @@ export function plannedMaxLift(planned: readonly { lift: number }[]): number {
 let _stamps = 0
 let _version = 0
 
-function stampInto(maps: { lit: HTMLCanvasElement; lift: HTMLCanvasElement }, planned: readonly PlannedStamp[], W: number, H: number, mw: number, mh: number, backgroundLit: boolean, make: (w: number, h: number) => HTMLCanvasElement): boolean {
+type MapCanvases = { lit: HTMLCanvasElement; lift: HTMLCanvasElement; facing: HTMLCanvasElement | null }
+
+function stampInto(maps: MapCanvases, planned: readonly PlannedStamp[], W: number, H: number, mw: number, mh: number, backgroundLit: boolean, make: (w: number, h: number) => HTMLCanvasElement): boolean {
   const litCtx = maps.lit.getContext('2d') as CanvasRenderingContext2D | null
   const liftCtx = maps.lift.getContext('2d') as CanvasRenderingContext2D | null
-  if (!litCtx || !liftCtx) return false
+  const facingCtx = maps.facing ? maps.facing.getContext('2d') as CanvasRenderingContext2D | null : null
+  if (!litCtx || !liftCtx || (maps.facing && !facingCtx)) return false
+  const facingOn = !!facingCtx
   const reset = (c: CanvasRenderingContext2D) => {
     c.setTransform(1, 0, 0, 1, 0, 0)
     c.globalCompositeOperation = 'source-over'
     c.globalAlpha = 1
   }
   reset(litCtx); reset(liftCtx)
-  litCtx.fillStyle = grey(backgroundLit ? 255 : 0)
+  litCtx.fillStyle = litColour(backgroundLit, 0, facingOn)
   litCtx.fillRect(0, 0, mw, mh)
   liftCtx.fillStyle = grey(0)
   liftCtx.fillRect(0, 0, mw, mh)
+  if (facingCtx) {
+    reset(facingCtx)
+    facingCtx.fillStyle = FLAT
+    facingCtx.fillRect(0, 0, mw, mh)
+  }
   if (!planned.length) return true
+  let facingStamped = false
 
   const scratch = scratchFor(make, mw, mh)
   const sctx = scratch.getContext('2d') as CanvasRenderingContext2D | null
@@ -129,7 +180,7 @@ function stampInto(maps: { lit: HTMLCanvasElement; lift: HTMLCanvasElement }, pl
     reset(sctx)
     // 2. Recolour it, keeping its alpha, and stamp it on each map.
     sctx.globalCompositeOperation = 'source-in'
-    sctx.fillStyle = grey(p.lit ? 255 : 0)
+    sctx.fillStyle = litColour(p.lit, p.facing ? p.facing.shine : 0, facingOn)
     sctx.fillRect(0, 0, mw, mh)
     litCtx.globalCompositeOperation = 'source-over'
     litCtx.drawImage(scratch, 0, 0)
@@ -139,6 +190,26 @@ function stampInto(maps: { lit: HTMLCanvasElement; lift: HTMLCanvasElement }, pl
       liftCtx.globalCompositeOperation = 'lighter'
       liftCtx.drawImage(scratch, 0, 0)
       liftCtx.globalCompositeOperation = 'source-over'
+    }
+    if (!facingCtx) continue
+    if (p.facing) {
+      // 3. The photo's facing tile, through its own placement and silhouette.
+      sctx.save()
+      reset(sctx)
+      sctx.clearRect(0, 0, mw, mh)
+      sctx.setTransform(mw / W, 0, 0, mh / H, 0, 0)
+      try { p.facing.draw(sctx) } catch (err) {
+        if (import.meta.dev) console.warn('[lighting maps] a facing tile failed to draw; skipped', err)
+      }
+      sctx.restore()
+      reset(sctx)
+      facingCtx.drawImage(scratch, 0, 0)
+      facingStamped = true
+    } else if (facingStamped) {
+      // 3. Anything above a photo faces the viewer again.
+      sctx.fillStyle = FLAT
+      sctx.fillRect(0, 0, mw, mh)
+      facingCtx.drawImage(scratch, 0, 0)
     }
   }
   return true
@@ -162,8 +233,9 @@ export function stampLightingMaps(
 ): LightingMaps | null {
   const { w, h } = lightingMapSize(devW, devH)
   const make = opts.makeCanvas ?? defaultMake
-  const maps = { lit: make(w, h), lift: make(w, h) }
-  const planned = plan(stamps, opts.backgroundLit)
+  const facingOn = wantsFacing(stamps)
+  const maps: MapCanvases = { lit: make(w, h), lift: make(w, h), facing: facingOn ? make(w, h) : null }
+  const planned = plan(stamps, opts.backgroundLit, facingOn)
   if (!stampInto(maps, planned, W, H, w, h, opts.backgroundLit, make)) return null
   _stamps++
   return { ...maps, width: w, height: h, version: ++_version, maxLift: plannedMaxLift(planned) }
@@ -176,7 +248,7 @@ const CACHE_MAX = 3
 const _cache = new Map<string, LightingMaps>()
 let _epoch = 0
 let _uncacheable = 0
-let _uncached: { make: (w: number, h: number) => HTMLCanvasElement; lit: HTMLCanvasElement; lift: HTMLCanvasElement } | null = null
+let _uncached: { make: (w: number, h: number) => HTMLCanvasElement; lit: HTMLCanvasElement; lift: HTMLCanvasElement; facing: HTMLCanvasElement | null } | null = null
 
 /** Fonts and images load after a first paint without changing any layer: anything that can
  *  change a silhouette that way bumps this, so the next paint re-stamps. */
@@ -223,8 +295,9 @@ export function cachedLightingMaps(
   stamps: readonly LightingStamp[], W: number, H: number, devW: number, devH: number, opts: StampOptions,
 ): LightingMaps | null {
   const { w, h } = lightingMapSize(devW, devH)
-  const planned = plan(stamps, opts.backgroundLit)
-  let key: string | null = fontsLoading() ? null : `${w}x${h}|${W}x${H}|${opts.backgroundLit ? 1 : 0}|${_epoch}`
+  const facingOn = wantsFacing(stamps)
+  const planned = plan(stamps, opts.backgroundLit, facingOn)
+  let key: string | null = fontsLoading() ? null : `${w}x${h}|${W}x${H}|${opts.backgroundLit ? 1 : 0}|${_epoch}${facingOn ? '|f' : ''}`
   for (const p of planned) {
     if (key == null) break
     if (p.stamp.sig == null) { key = null; break }
@@ -237,14 +310,15 @@ export function cachedLightingMaps(
     return hit
   }
   const make = opts.makeCanvas ?? defaultMake
-  let maps: { lit: HTMLCanvasElement; lift: HTMLCanvasElement }
+  let maps: MapCanvases
   if (key == null) {
     // Uncacheable (a wired item over an unlit layer, a live stroke, a playing clip…): ONE pair,
     // re-stamped in place every such paint — never a fresh allocation per paint.
     if (!_uncached || _uncached.make !== make || _uncached.lit.width !== w || _uncached.lit.height !== h) {
-      _uncached = { make, lit: make(w, h), lift: make(w, h) }
+      _uncached = { make, lit: make(w, h), lift: make(w, h), facing: null }
     }
-    maps = _uncached
+    if (facingOn && !_uncached.facing) _uncached.facing = make(w, h)
+    maps = { lit: _uncached.lit, lift: _uncached.lift, facing: facingOn ? _uncached.facing : null }
   } else {
     // Re-use the oldest entry's canvases when they are the right size (no churn per edit).
     let reuse: LightingMaps | undefined
@@ -253,13 +327,16 @@ export function cachedLightingMaps(
       reuse = _cache.get(oldest)
       _cache.delete(oldest)
     }
-    maps = reuse && reuse.width === w && reuse.height === h
-      ? { lit: reuse.lit, lift: reuse.lift }
-      : { lit: make(w, h), lift: make(w, h) }
+    const same = reuse && reuse.width === w && reuse.height === h ? reuse : null
+    maps = {
+      lit: same ? same.lit : make(w, h),
+      lift: same ? same.lift : make(w, h),
+      facing: facingOn ? (same?.facing ?? make(w, h)) : null,
+    }
   }
   if (!stampInto(maps, planned, W, H, w, h, opts.backgroundLit, make)) return null
   _stamps++
-  const out: LightingMaps = { lit: maps.lit, lift: maps.lift, width: w, height: h, version: ++_version, maxLift: plannedMaxLift(planned) }
+  const out: LightingMaps = { lit: maps.lit, lift: maps.lift, facing: maps.facing, width: w, height: h, version: ++_version, maxLift: plannedMaxLift(planned) }
   if (key != null) _cache.set(k, out)
   return out
 }
@@ -274,3 +351,7 @@ export function releaseLightingMaps(): void {
 
 /** Test hook: how many times maps were (re)stamped. */
 export function __lightingMapStamps(): number { return _stamps }
+
+/** A fresh map version, for maps made outside the stamper (`lightBoxWithFrameLights`), so the
+ *  pass never mistakes them for an upload it already holds. */
+export function nextLightingMapVersion(): number { return ++_version }
