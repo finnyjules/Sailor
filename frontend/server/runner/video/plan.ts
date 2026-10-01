@@ -147,7 +147,7 @@ export function planVideoEffect(ctx: PlanContext): NodePlan {
       if (word) throw new MediaError(word)
       if (spec.heldBytes(params, ins) > caps.heldFrameBytes) throw new Error(MEDIA_EFFECT_WORDS.heldTooMuch)
       if (spec.work(params, ins, out) > caps.effectWork) throw new Error(MEDIA_EFFECT_WORDS.tooMuchWork)
-      for (const f of spec.limits?.(params, ins) ?? []) if (f.value > f.limit) throw new Error(f.message)
+      for (const f of spec.limits?.(params, ins, { turn: true }) ?? []) if (f.value > f.limit) throw new Error(f.message)
       const through = !!spec.passThrough?.(params, ins)
       // A seeded effect (Transition's glitch, ruling (e)): its seed from its settings and its clips' kept bytes.
       const own = spec.seeded?.(params) ? { ...params, _seed: String(glitchSeed(schema, params, values.map(v => v.file))) } : params

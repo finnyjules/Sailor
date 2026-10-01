@@ -101,6 +101,8 @@ import {
   TEXT_FONT_PATHS, __setTextFontsForTests, bundledFontFile, captionAt, captionPlace, captionSegments, faceAt, textBbox, textClipLayout, textClipMask,
   textFont, textSvgs, wrapText,
 } from '~~/server/runner/video/text'
+import { captionFeed, captionFontBoxEm, captionLaid, captionSweep, laidSvgs, textMasks } from '~~/server/runner/video/text'
+import { withWiredValues } from '~~/server/runner/values'
 import { requireMediaTools } from './__runner__/mediaParity'
 import {
   batchBytes, hash16, invariantAnswers, keptBatch, previewPixels, rule12Pin, runVfxNode, sha256, vfxFixture, vfxHarness, vfxRunId,
@@ -726,5 +728,151 @@ describe('the work figure', () => {
       expect(work / s, cls).toBeGreaterThan(2.2e7)
     }
     figuresOut(`[work] 48 frames of 1280 × 720: ${lines.join('; ')}`)
+  })
+})
+
+// ── R8.3: captions wired in (Auto subtitle's Whisper → Caption track) ────────
+
+describe('R8.3: Caption track takes its captions by wire', () => {
+  const WHISPER_ON: ReadonlySet<RunnerFamily> = new Set<RunnerFamily>([...ON, 'media-sound', 'whisper-captions'])
+  const whisper = () => ({ class_type: 'WhisperTranscribe', inputs: { audio: ['g', 1] as Link, model_size: 'base', language: 'auto', fps: ['g', 2] as Link } })
+  const wiredGraph = (widgets: Record<string, unknown>): ApiPrompt => ({ ...sources(), n: whisper(), e: captioned({ ...widgets, captions: ['n', 0] }), c: createVideo('e'), s: saveVideo('c') })
+
+  it('the row takes a text wire on captions (Whisper, a Text card), and nothing else there', () => {
+    expect(mediaEffectRows().CaptionTrack!.valueInputs).toEqual({ frames: ['frames'], captions: ['text'] })
+    expect(runnerTakesWorkflow(wiredGraph(CAPS[0]!.widgets), WHISPER_ON)).toBe(true)
+    const card: ApiPrompt = { ...sources(), t: { class_type: 'Text', inputs: { text: '0 5 Hello' } }, e: captioned({ ...CAPS[0]!.widgets, captions: ['t', 0] }), c: createVideo('e'), s: saveVideo('c') }
+    expect(runnerTakesWorkflow(card, ON)).toBe(true)
+    // A frame batch on captions is not text.
+    expect(runnerTakesWorkflow({ ...sources(), e: captioned({ ...CAPS[0]!.widgets, captions: ['g', 0] }), c: createVideo('e'), s: saveVideo('c') }, ON)).toBe(false)
+  })
+
+  it('with video-text off, the workflow is left to the engine as before, Caption track named', () => {
+    const p = wiredGraph(CAPS[0]!.widgets)
+    for (const fam of [new Set<RunnerFamily>([...WHISPER_ON].filter(f => f !== 'video-text')), new Set<RunnerFamily>(['cards', 'media-video', 'media-sound'])]) {
+      expect(runnerTakesWorkflow(p, fam)).toBe(false)
+      expect(nodesNeedingEngine(p, { runnerOn: true, families: fam, titleOf: id => id })).toContain('e')
+    }
+  })
+
+  it('Whisper\'s captions by wire give the same batch, byte for byte, as the same text typed in', LONG, async () => {
+    await requireMediaTools()
+    const c = CAPS.find(r => r.font === 'system' && r.name.startsWith('overlapping'))!
+    useFonts(c)
+    const [T, W, H] = c.clip!
+    const h = vfxHarness(scratch)
+    const runId = vfxRunId(++runs)
+    const values: Record<string, Record<number, RunnerValue>> = { g: { 0: await keptBatch(h, runId, gradClip(T, W, H)) }, n: { 0: { kind: 'text', text: c.widgets.captions as string } } }
+    const typed = await runVfxNode(h, { ...sources(), e: captioned(c.widgets), r: trimOf('e') }, 'e', values, { runId, families: WHISPER_ON })
+    // The node's turn as the engine reads it: the wire replaced by Whisper's text.
+    const wired = withWiredValues({ ...sources(), n: whisper(), e: captioned({ ...c.widgets, captions: ['n', 0] }), r: trimOf('e') }, 'e', l => values[l[0]]?.[l[1]]).prompt
+    expect(wired.e!.inputs!.captions).toBe(c.widgets.captions)
+    const got = await runVfxNode(h, wired, 'e', values, { runId, families: WHISPER_ON })
+    expect(sha256(await batchBytes(h, runId, got.values[0] as Extract<RunnerValue, { kind: 'frames' }>)))
+      .toBe(sha256(await batchBytes(h, runId, typed.values[0] as Extract<RunnerValue, { kind: 'frames' }>)))
+  })
+
+  it('a caption wider than the frame: only the letters that can land are laid out, and the pixels are the same as with every letter', LONG, async () => {
+    __setTextFontsForTests(null)
+    const W = 320
+    const H = 180
+    const long = 'Every letter of this caption is laid out once, but only those that can reach the frame are drawn. '.repeat(40).trim()
+    for (const [position, outline] of [['bottom', 3], ['top', 0], ['middle', 8]] as const) {
+      const p = paramsOf('CaptionTrack', { ...CAPS[0]!.widgets, captions: `0 2 ${long}`, position, outline_width: outline, font_size: 24 })
+      const face = faceAt(textFont(false)!.font, 24)
+      const laid = captionLaid(face, long, p, W, H, outline)
+      expect(laid.line.glyphs.length, 'about a frame\'s width of letters').toBeLessThan(80)
+      expect(long.length).toBeGreaterThan(3000)
+      // Every letter, as before R8.3.
+      const all = await textMasks(face, [captionPlace(face, long, p, W, H)], W, H, outline)
+      const it = captionFeed(p, false, W, H)[Symbol.asyncIterator]()
+      const cut = (await it.next()).value._cap as typeof all
+      expect(all, position).not.toBeNull()
+      expect({ x: cut!.x, y: cut!.y, w: cut!.w, h: cut!.h }).toEqual({ x: all!.x, y: all!.y, w: all!.w, h: all!.h })
+      expect(sha256(cut!.fill), `${position}: the letters`).toBe(sha256(all!.fill))
+      expect(cut!.line ? sha256(cut!.line) : null, `${position}: the outline`).toBe(all!.line ? sha256(all!.line) : null)
+      await it.return?.()
+    }
+  })
+
+  it('a short caption is laid out whole, its SVG the same as before', () => {
+    __setTextFontsForTests(null)
+    const p = paramsOf('CaptionTrack', { ...CAPS[0]!.widgets, captions: '0 2 Hello there', outline_width: 3 })
+    const face = faceAt(textFont(false)!.font, 44)
+    const laid = captionLaid(face, 'Hello there', p, 640, 360, 3)
+    expect(laidSvgs(face, [laid.line], 640, 360, 3, laid.box)).toEqual(textSvgs(face, [captionPlace(face, 'Hello there', p, 640, 360)], 640, 360, 3))
+  })
+
+  it('the start pass\'s bound for wired captions holds for 0, 1 and T captions, and needs no character cap', async () => {
+    __setTextFontsForTests(null)
+    const spec = VIDEO_EFFECTS.CaptionTrack!
+    const T = 600
+    const ins = [{ count: T, w: 1920, h: 1080, exact: true }]
+    const widgets = { ...CAPS[0]!.widgets, font_size: 96, outline_width: 20 }
+    const wired = mediaEffectParams(MEDIA_EFFECT_SCHEMAS.CaptionTrack, { frames: ['g', 0], ...widgets, captions: ['n', 0] })
+    expect(wired.captions).toBeUndefined()
+    const out = spec.shape(wired, ins)
+    const bound = spec.work(wired, ins, out)
+    const typedWork = (captions: string) => spec.work(paramsOf('CaptionTrack', { ...widgets, captions }), ins, out)
+    const many = Array.from({ length: T }, (_, i) => `${i} ${i + 1} Caption ${i} ${'w'.repeat(i % 50)}`).join('\n')
+    for (const captions of ['', '0 600 One caption over every frame', many]) expect(typedWork(captions)).toBeLessThanOrEqual(bound)
+    expect(typedWork(many)).toBe(bound)
+    // Only the font check in the limits for wired captions; at the node's turn, no character cap either.
+    expect(spec.limits!(wired, ins).every(f => f.value <= f.limit)).toBe(true)
+    const huge = paramsOf('CaptionTrack', { ...widgets, captions: `0 600 ${'x'.repeat(CAPTIONS_MAX_CHARS + 10)}` })
+    expect(spec.limits!(huge, ins).some(f => f.value > f.limit), 'typed, at the start: as before').toBe(true)
+    expect(spec.limits!(huge, ins, { turn: true }).every(f => f.value <= f.limit), 'at the turn: no character cap').toBe(true)
+    // A whole hosted batch of 1080p (20 s at 30 fps) with wired captions fits the hosted work cap at the app's
+    // sizes up to 88 px (the bound is one caption drawn every frame; it was one a frame-run of typed captions).
+    const shapes = new Map([['g:0', { count: T, w: 1920, h: 1080, exact: true }]])
+    for (const font_size of [20, 44, 88]) {
+      expect(await mediaEffectStartProblems(wiredGraph({ ...CAPS[0]!.widgets, font_size, outline_width: 3 }), WHISPER_ON, { hosted: true, shapes }), `${font_size}`).toBeNull()
+    }
+  })
+
+  it('the feed\'s sweep shows the same caption as Python\'s loop on every frame (fix round 1), in one pass over the captions', () => {
+    let seed = 7
+    const rnd = (n: number) => { seed = (Math.imul(seed, 1103515245) + 12345) & 0x7FFFFFFF; return seed % n }
+    const sets: string[] = CAPS.map(c => c.widgets.captions as string)
+    for (let k = 0; k < 200; k++) {
+      // Overlaps, repeats, empty and reversed ranges, negative starts, the same text in several captions.
+      const n = rnd(40)
+      sets.push(Array.from({ length: n }, () => {
+        const s0 = rnd(120) - 10
+        return `${s0} ${s0 + rnd(30) - 5} T${rnd(6)}`
+      }).join('\n'))
+    }
+    for (const captions of sets) {
+      const segs = captionSegments(captions)
+      const at = captionSweep(segs)
+      for (let i = 0; i < 140; i++) expect(at(i), `${captions.slice(0, 40)} frame ${i}`).toBe(captionAt(segs, i))
+    }
+    // Asked out of order, it says so rather than answer wrongly.
+    const at = captionSweep(captionSegments('0 5 a'))
+    at(3)
+    expect(() => at(2)).toThrow()
+    // A wired text at the value cap's scale: 40,000 captions over 600 frames in well under a second.
+    const many = captionSegments(Array.from({ length: 40_000 }, (_, i) => `${i % 600} ${(i % 600) + 3} c${i}`).join('\n'))
+    const t0 = Date.now()
+    const sweep = captionSweep(many)
+    for (let i = 0; i < 600; i++) sweep(i)
+    expect(Date.now() - t0).toBeLessThan(1000)
+    expect(captionSweep(many)(0)).toBe(captionAt(many, 0))
+  })
+
+  it('every caption drawn fits the band the bound counts: at most the frame wide, the font\'s box plus the outline\'s pad high', LONG, async () => {
+    for (const fonts of [null, { system: [] as string[] }]) {
+      __setTextFontsForTests(fonts)
+      const W = 640
+      const H = 360
+      for (const [fs, ow] of [[20, 0], [44, 3], [96, 12]] as const) {
+        const text = 'ÀÉÎÕÜ gjpqy |[]{} Ÿ Å ÇŞ ½ — ‰ ∫ √ ¶ §'
+        const p = paramsOf('CaptionTrack', { ...CAPS[0]!.widgets, captions: `0 1 ${text}`, font_size: fs, outline_width: ow, position: 'middle' })
+        const m = (await captionFeed(p, false, W, H)[Symbol.asyncIterator]().next()).value._cap as { w: number; h: number }
+        expect(m.w).toBeLessThanOrEqual(W)
+        expect(m.h, `${fs}/${ow}`).toBeLessThanOrEqual(Math.ceil(captionFontBoxEm() * fs) + 2 * (ow + 2) + 2)
+      }
+    }
+    __setTextFontsForTests(null)
   })
 })

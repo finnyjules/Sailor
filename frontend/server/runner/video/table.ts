@@ -49,7 +49,7 @@ import type { OutputFile } from '../types'
 import type { MediaLease } from '../../media/run'
 import type { SoundReadIO } from '../../media/values'
 import { waveMaxWindow, waveSamplesPerFrame, waveSoundOf, waveWindows } from './waveSound'
-import { CAPTION_RENDERS_KEPT, bundledFontFile, captionFeed, captionSegments, textClipMask } from './text'
+import { CAPTION_RENDERS_KEPT, bundledFontFile, captionFeed, captionFontBoxEm, captionSegments, textClipMask } from './text'
 
 /**
  * A frame batch's count and size; `exact: false` when the count is an upper
@@ -117,7 +117,7 @@ export interface VideoEffectSpec {
    * frame minterpolate works on): over one, the start pass leaves the
    * workflow to the engine, and the node checks again at its turn.
    */
-  limits?(widgets: Record<string, unknown>, ins: readonly FrameShape[]): { message: string; value: number; limit: number }[]
+  limits?(widgets: Record<string, unknown>, ins: readonly FrameShape[], o?: { turn?: boolean }): { message: string; value: number; limit: number }[]
   twoPass?: {
     op: string
     found(state: ArrayBuffer | undefined): readonly number[]
@@ -522,8 +522,24 @@ const textLimits = (text: unknown, max: number) => [
  * Caption track's captions drawn at most: one a frame at most, and at most one
  * a run of frames showing the same caption; the shown caption changes only at
  * a caption's start or end, so there are at most 2 · captions + 1 runs.
+ * Wired captions (R8.3, ruling (c)) are unknown before the node's turn: one a
+ * frame, the bound that doesn't depend on the text.
  */
-const captionRenders = (w: Record<string, unknown>, T: number) => Math.min(T, 2 * captionSegments(w.captions).length + 1)
+const captionRenders = (w: Record<string, unknown>, T: number) =>
+  typeof w.captions === 'string' ? Math.min(T, 2 * captionSegments(w.captions).length + 1) : T
+/**
+ * The height one caption's letters are drawn in (R8.3): one line, no wrap, so
+ * the font's box at its size and the outline's pad on each side (./text.ts
+ * textSvgs), never more than the frame. The width is at most the frame's: the
+ * letters past its sides are not laid out.
+ */
+const captionBand = (w: Record<string, unknown>, H: number) => {
+  const outline = Math.max(0, int(w.outline_width, 0))
+  return Math.min(H, Math.ceil(captionFontBoxEm() * Math.max(0, int(w.font_size, 0))) + 2 * (outline + 2) + 2)
+}
+/** The text's length, as a limit only at the start and only for typed captions: wired ones have no character cap (ruling (c)). */
+const captionLimits = (w: Record<string, unknown>, turn: boolean) =>
+  textLimits(turn || typeof w.captions !== 'string' ? '' : w.captions, CAPTIONS_MAX_CHARS)
 
 export const VIDEO_EFFECTS: Readonly<Record<string, VideoEffectSpec>> = {
   VideoTrim: {
@@ -902,9 +918,9 @@ export const VIDEO_EFFECTS: Readonly<Record<string, VideoEffectSpec>> = {
     work: (w, ins, out) => {
       const x = oneInput(ins)
       return (x.count * x.w * x.h + out.count * out.w * out.h) * VIDEO_IO_WORK_PER_PIXEL
-        + out.count * out.w * out.h * TEXT_BLEND_STEPS + captionRenders(w, x.count) * 2 * x.w * x.h * RASTER_STEPS
+        + out.count * out.w * out.h * TEXT_BLEND_STEPS + captionRenders(w, x.count) * 2 * x.w * captionBand(w, x.h) * RASTER_STEPS
     },
-    limits: w => textLimits(w.captions, CAPTIONS_MAX_CHARS),
+    limits: (w, _ins, o) => captionLimits(w, !!o?.turn),
     passThrough: w => captionSegments(w.captions).length === 0,
     feed: async (w, io, ins) => {
       const x = oneInput(ins)
@@ -962,6 +978,8 @@ export function mediaEffectParams(schema: MediaEffectSchema | undefined, inputs:
     return out
   }
   for (const [name, w] of Object.entries(schema.widgets)) {
+    // A wired widget (R8.3: Caption track's captions) is unknown until the node's turn, when the value replaces the wire.
+    if (isLink(inputs[name])) continue
     const v = widgetValue(w.fileList ? 'STRING' : w.type, inputs[name])
     if (v !== undefined) out[name] = v
   }

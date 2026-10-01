@@ -267,7 +267,10 @@ describe('the rows (rule 1)', () => {
       const family = joins ? 'video-join' : looks.includes(cls) ? 'video-look' : cls === 'Stabilize' ? 'video-stabilize' : cls === 'FrameInterpolate' ? 'video-flow' : cls === 'CaptionTrack' ? 'video-text' : 'video-time'
       // 3-way color reads its frames on `image` (its Python name).
       const ins = joins ? ['clip_a', 'clip_b'] : cls === 'ThreeWayCC' ? ['image'] : ['frames']
-      expect(row, cls).toMatchObject({ family, local: 'render', mustLink: ins, required: ins, valueInputs: Object.fromEntries(ins.map(i => [i, ['frames']])) })
+      // R8.3: Caption track's captions also take a text wire (required, no longer checked as a typed widget).
+      const texts = cls === 'CaptionTrack' ? ['captions'] : []
+      expect(row, cls).toMatchObject({ family, local: 'render', mustLink: ins, required: [...ins, ...texts], valueInputs: Object.fromEntries([...ins.map(i => [i, ['frames']]), ...texts.map(t => [t, ['text']])]) })
+      for (const t of texts) expect(row.widgets![t], `${cls} ${t}`).toBeUndefined()
       for (const i of ins) expect(row.linkSources![i], `${cls} ${i}`).toEqual(expect.arrayContaining(FRAMES_OUTPUTS.map(x => [...x])))
       expect(RUNNER_NODE_RULES[cls], cls).toEqual(row)
       expect(SWITCHED_CLASSES[cls], cls).toBe(family)

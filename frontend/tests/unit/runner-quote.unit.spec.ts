@@ -22,7 +22,8 @@ import { stageEstimateParts } from '~~/server/runner/metering'
 import { makeKit, rgbPng1x1 } from './__runner__/kit'
 import { buildKaraokePrompt } from '~/lib/runner/karaokeApp'
 import { buildBackgroundPrompt, buildBlendPrompt, buildCutoutPrompt } from '~/lib/runner/productShotApp'
-import { requireMediaTools } from './__runner__/mediaParity'
+import { clipPath, requireMediaTools } from './__runner__/mediaParity'
+import { buildAutoSubtitlePrompt } from '~/lib/runner/autoSubtitleApp'
 
 const START = { workflow: null, canvasId: null, projectUuid: null, projectName: null }
 
@@ -100,7 +101,7 @@ const APPS: AppCase[] = [
     media: true,
   },
   {
-    // Auto subtitle's transcription (its Caption track is R8.3's): Load audio → Whisper → its texts.
+    // Auto subtitle's transcription: Load audio → Whisper → its texts.
     name: 'Auto subtitle transcription',
     families: new Set<RunnerFamily>(['cards', 'media-sound', 'whisper-captions']),
     prompt: {
@@ -109,6 +110,15 @@ const APPS: AppCase[] = [
       t0: { class_type: 'Text', inputs: { source: ['n', 0], text: '' } },
     },
     files: { 'speech.wav': wav(2) },
+    media: true,
+  },
+  {
+    // AutoSubtitleApp.vue's exact prompt (R8.3): Load video → Get video components → Whisper → Caption track
+    // (the captions wired) → Create video → Save video.
+    name: 'Auto subtitle',
+    families: new Set<RunnerFamily>(['cards', 'media-sound', 'media-video', 'whisper-captions', 'video-text']),
+    prompt: buildAutoSubtitlePrompt('clip.mp4', { language: 'auto', position: 'bottom', fontSize: 44 }),
+    files: { 'clip.mp4': new Uint8Array(readFileSync(clipPath('v_stereo_aac.mp4'))) },
     media: true,
   },
 ]

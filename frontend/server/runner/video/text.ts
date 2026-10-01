@@ -230,6 +230,52 @@ export function captionAt(segs: readonly Caption[], i: number): string | null {
   return active || null
 }
 
+/**
+ * captionAt for frames asked in order (0, 1, 2, …), as Caption track's feed
+ * asks them (R8.3): one sweep over the captions sorted by start, the ones
+ * started kept in a heap by their place in the list (the LAST one wins, as
+ * Python's loop), the ended ones dropped from its top as they surface. Each
+ * caption goes in and out once: O((captions + frames) · log captions), not
+ * captions × frames. EXACT: the same caption as captionAt for every frame.
+ */
+export function captionSweep(segs: readonly Caption[]): (i: number) => string | null {
+  const order = segs.map((_, k) => k).sort((a, b) => segs[a]!.s - segs[b]!.s || a - b)
+  const heap: number[] = []
+  const up = (j: number) => {
+    while (j > 0) {
+      const p = (j - 1) >> 1
+      if (heap[p]! >= heap[j]!) break
+      ;[heap[p], heap[j]] = [heap[j]!, heap[p]!]
+      j = p
+    }
+  }
+  const pop = () => {
+    const last = heap.pop()!
+    if (!heap.length) return
+    heap[0] = last
+    for (let j = 0; ;) {
+      const l = 2 * j + 1
+      const r = l + 1
+      let m = j
+      if (l < heap.length && heap[l]! > heap[m]!) m = l
+      if (r < heap.length && heap[r]! > heap[m]!) m = r
+      if (m === j) break
+      ;[heap[m], heap[j]] = [heap[j]!, heap[m]!]
+      j = m
+    }
+  }
+  let next = 0
+  let last = -Infinity
+  return (i: number) => {
+    if (i < last) throw new Error('Caption track asked for an earlier frame')
+    last = i
+    while (next < order.length && segs[order[next]!]!.s <= i) { heap.push(order[next]!); up(heap.length - 1); next++ }
+    // A caption that has ended (or never began: e ≤ s) never shows again: dropped when it reaches the top.
+    while (heap.length && segs[heap[0]!]!.e <= i) pop()
+    return heap.length ? (segs[heap[0]!]!.text || null) : null
+  }
+}
+
 /** Where Caption track draws `text` on a W × H frame (nodes_video_pro.py:440-450): Python's (x, y). */
 export function captionPlace(face: Face, text: string, p: Record<string, unknown>, W: number, H: number): Placed {
   const bb = textBbox(face, text)
@@ -249,6 +295,36 @@ const num = (v: number) => (Number.isFinite(v) ? String(Math.round(v * 1000) / 1
 /** The SVGs a text's coverage is drawn from, and where they sit on the frame. */
 export interface TextSvgs { x: number; y: number; w: number; h: number; fill: string; line: string | null }
 
+/** A line ready to draw: its origin (Placed's x, y) and its glyphs at their pens. */
+export interface LaidLine { x: number; y: number; glyphs: readonly { g: any; x: number }[] }
+
+/** The letters' ink extent (pixels on the frame, unrounded) of laid lines, or null where nothing has ink. */
+export interface InkBox { l: number; r: number; t: number; b: number }
+
+/** A glyph's ink box in font units, or null where it has no ink (a space). */
+function inkOf(g: any): { minX: number; minY: number; maxX: number; maxY: number } | null {
+  const bb = g.bbox as { minX: number; minY: number; maxX: number; maxY: number } | undefined
+  return bb && Number.isFinite(bb.minX) && bb.maxX > bb.minX && bb.maxY > bb.minY ? bb : null
+}
+
+function inkBoxOf(face: Face, lines: readonly LaidLine[]): InkBox | null {
+  let l = Infinity
+  let r = -Infinity
+  let t = Infinity
+  let b = -Infinity
+  for (const p of lines) {
+    for (const { g, x } of p.glyphs) {
+      const bb = inkOf(g)
+      if (!bb) continue
+      l = Math.min(l, p.x + x + bb.minX * face.s)
+      r = Math.max(r, p.x + x + bb.maxX * face.s)
+      t = Math.min(t, p.y + face.asc - bb.maxY * face.s)
+      b = Math.max(b, p.y + face.asc - bb.minY * face.s)
+    }
+  }
+  return Number.isFinite(l) ? { l, r, t, b } : null
+}
+
 /**
  * The SVGs of `lines` drawn on a W × H frame, cut to the frame (null: nothing
  * of it lands there): the letters, and with `outline` > 0 the letters stroked
@@ -257,33 +333,28 @@ export interface TextSvgs { x: number; y: number; w: number; h: number; fill: st
  * only) go into them, never the text.
  */
 export function textSvgs(face: Face, lines: readonly Placed[], W: number, H: number, outline: number): TextSvgs | null {
-  let l = Infinity
-  let r = -Infinity
-  let t = Infinity
-  let b = -Infinity
-  const laid = lines.map(p => ({ p, laid: layLine(face, p.text) }))
-  for (const { p, laid: L } of laid) {
-    for (const { g, x } of L.glyphs) {
-      const bb = g.bbox as { minX: number; minY: number; maxX: number; maxY: number } | undefined
-      if (!bb || !Number.isFinite(bb.minX) || !(bb.maxX > bb.minX) || !(bb.maxY > bb.minY)) continue
-      l = Math.min(l, p.x + x + bb.minX * face.s)
-      r = Math.max(r, p.x + x + bb.maxX * face.s)
-      t = Math.min(t, p.y + face.asc - bb.maxY * face.s)
-      b = Math.max(b, p.y + face.asc - bb.minY * face.s)
-    }
-  }
-  if (!Number.isFinite(l)) return null
+  return laidSvgs(face, lines.map(p => ({ x: p.x, y: p.y, glyphs: layLine(face, p.text).glyphs })), W, H, outline)
+}
+
+/**
+ * textSvgs on lines already laid out. `box`: the ink extent the cut is taken
+ * from, where the lines hold only some of the glyphs (R8.3: a caption's
+ * letters that can't land in the frame left out); without it, the lines' own.
+ */
+export function laidSvgs(face: Face, lines: readonly LaidLine[], W: number, H: number, outline: number, box?: InkBox | null): TextSvgs | null {
+  const ink = box === undefined ? inkBoxOf(face, lines) : box
+  if (!ink) return null
   const pad = outline + 2
-  const x0 = Math.max(0, Math.floor(l - pad))
-  const y0 = Math.max(0, Math.floor(t - pad))
-  const x1 = Math.min(W, Math.ceil(r + pad))
-  const y1 = Math.min(H, Math.ceil(b + pad))
+  const x0 = Math.max(0, Math.floor(ink.l - pad))
+  const y0 = Math.max(0, Math.floor(ink.t - pad))
+  const x1 = Math.min(W, Math.ceil(ink.r + pad))
+  const y1 = Math.min(H, Math.ceil(ink.b + pad))
   if (x1 <= x0 || y1 <= y0) return null
   const w = x1 - x0
   const h = y1 - y0
   const paths: string[] = []
-  for (const { p, laid: L } of laid) {
-    for (const { g, x } of L.glyphs) {
+  for (const p of lines) {
+    for (const { g, x } of p.glyphs) {
       const d = g.path?.toSVG?.() as unknown
       if (typeof d !== 'string' || !d || !PATH_DATA.test(d)) continue
       paths.push(`<path transform="translate(${num(p.x + x - x0)} ${num(p.y + face.asc - y0)}) scale(${num(face.s)} ${num(-face.s)})" d="${d}"/>`)
@@ -303,7 +374,10 @@ const PATH_DATA = /^[MLQCZ0-9eE.+\- ]*$/
 
 /** The coverage of `lines` on a W × H frame, cut to the frame (./core/textDraw.ts TextMask), drawn by sharp (librsvg, off this thread). */
 export async function textMasks(face: Face, lines: readonly Placed[], W: number, H: number, outline: number): Promise<TextMask | null> {
-  const s = textSvgs(face, lines, W, H, outline)
+  return svgMasks(textSvgs(face, lines, W, H, outline))
+}
+
+async function svgMasks(s: TextSvgs | null): Promise<TextMask | null> {
   if (!s) return null
   const fill = await coverage(s.fill, s.w, s.h)
   const line = s.line ? await coverage(s.line, s.w, s.h) : null
@@ -330,6 +404,47 @@ export async function textClipMask(p: Record<string, unknown>, hosted: boolean):
   return full.buffer
 }
 
+/** A caption laid out (R8.3): the line with only the glyphs that can land in the frame, and the whole line's ink extent. */
+export interface CaptionLaid { line: LaidLine; box: InkBox | null }
+
+/**
+ * A caption laid out to draw (R8.3, ruling (c)): Python's place from the
+ * whole line's measure (one line, centred, no wrap: nodes_video_pro.py
+ * :440-450), and of its glyphs only those whose ink (with the outline's pad)
+ * can reach the frame across. The rest would land off the frame, so leaving
+ * them out changes no pixel: the cut is still taken from the whole line's ink
+ * extent (`box`). A caption wider than the frame then lays out about a
+ * frame's width of letters, however long its text.
+ */
+export function captionLaid(face: Face, text: string, p: Record<string, unknown>, W: number, H: number, outline: number): CaptionLaid {
+  const at = captionPlace(face, text, p, W, H)
+  const all = layLine(face, text).glyphs
+  const line: LaidLine = { x: at.x, y: at.y, glyphs: all }
+  const box = inkBoxOf(face, [line])
+  const pad = outline + 2
+  const glyphs = all.filter(({ g, x }) => {
+    const bb = inkOf(g)
+    return !!bb && at.x + x + bb.minX * face.s - pad < W && at.x + x + bb.maxX * face.s + pad > 0
+  })
+  return { line: { x: at.x, y: at.y, glyphs }, box }
+}
+
+/**
+ * The tallest a line's letters can be, in ems, over the fonts text may be
+ * drawn in here (the bundled one, and this machine's first of Python's list):
+ * each font's own box (its head table's), so a caption's drawn band has a
+ * bound before its text is known (R8.3: the work figure for wired captions).
+ */
+export function captionFontBoxEm(): number {
+  let em = 0
+  for (const got of [textFont(true), textFont(false)]) {
+    const bb = got?.font.bbox as { minY: number; maxY: number } | undefined
+    if (got && bb && Number.isFinite(bb.minY) && Number.isFinite(bb.maxY)) em = Math.max(em, (bb.maxY - bb.minY) / got.font.unitsPerEm)
+  }
+  // No font: the classes go to the engine (the font check); a full em-square of slack keeps the figure an upper bound.
+  return em > 0 ? em : 2
+}
+
 /** The renders Caption track keeps at once (a caption shown again soon after is not drawn again). */
 export const CAPTION_RENDERS_KEPT = 4
 
@@ -340,19 +455,25 @@ export const CAPTION_RENDERS_KEPT = 4
  */
 export function captionFeed(p: Record<string, unknown>, hosted: boolean, W: number, H: number): AsyncIterable<Record<string, unknown>> {
   const segs = captionSegments(p.captions)
+  const shownAt = captionSweep(segs)
   const got = textFont(hosted)
   if (!got) throw new Error(MEDIA_EFFECT_WORDS.textFontMissing)
   const face = faceAt(got.font, Math.trunc(p.font_size as number))
   const ow = Math.trunc(p.outline_width as number)
   const kept = new Map<string, TextMask | null>()
+  // Each distinct caption measured once: Python's place and the glyphs that can land, kept for the run
+  // (at most the captions' own length in glyphs, all told).
+  const laid = new Map<string, CaptionLaid>()
   return {
     async* [Symbol.asyncIterator]() {
       for (let i = 0; ; i++) {
-        const text = captionAt(segs, i)
+        const text = shownAt(i)
         if (text === null) { yield { _cap: null }; continue }
         let m = kept.get(text)
         if (m === undefined) {
-          m = await textMasks(face, [captionPlace(face, text, p, W, H)], W, H, ow > 0 ? ow : 0)
+          let c = laid.get(text)
+          if (!c) { c = captionLaid(face, text, p, W, H, ow > 0 ? ow : 0); laid.set(text, c) }
+          m = await svgMasks(laidSvgs(face, [c.line], W, H, ow > 0 ? ow : 0, c.box))
           kept.set(text, m)
           if (kept.size > CAPTION_RENDERS_KEPT) kept.delete(kept.keys().next().value!)
         }

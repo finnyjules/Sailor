@@ -160,6 +160,14 @@ function widgetSpec(w: MediaEffectSchema['widgets'][string]): RunnerWidgetSpec {
 }
 
 /**
+ * R8.3: widgets that also take a text wire (the shared text sources: Whisper
+ * transcribe's captions, the Text card, the string Primitives), read at the
+ * node's turn. Caption track's captions: the start pass bounds its work by the
+ * frame count, never by the text (server/runner/video/table.ts).
+ */
+const TEXT_VALUE_INPUTS: Readonly<Record<string, readonly string[]>> = { CaptionTrack: ['captions'] }
+
+/**
  * Rule 1's rows, one per ported class: its family; a local render; its
  * required frame batches and sounds linked; each frame-batch input a `frames`
  * value from FRAMES_LINK_SOURCES; each sound input from `soundSources`
@@ -171,14 +179,25 @@ export function mediaEffectRows(soundSources: readonly (readonly [string, number
   const rows: Record<string, RunnerNodeRule> = {}
   for (const cls of MEDIA_EFFECTS_PORTED) {
     const s = MEDIA_EFFECT_SCHEMAS[cls]!
-    const required = [...s.frames, ...s.sounds].filter(i => i.required).map(i => i.name)
+    const texts = TEXT_VALUE_INPUTS[cls] ?? []
+    // A text widget that takes a wire is required as before, and checked as a widget only where typed (any text is valid).
+    const linked = [...s.frames, ...s.sounds].filter(i => i.required).map(i => i.name)
+    const required = [...linked, ...texts.filter(n => s.widgets[n]?.required)]
     const checks: InputCheckName[] = s.outputNode ? ['effect-preview-name'] : []
     const masks = maskSlotsOf(cls)
     rows[cls] = {
       family: s.family as MediaEffectFamily,
       local: 'render',
-      ...(required.length ? { mustLink: required, required } : {}),
-      ...(s.frames.length ? { valueInputs: Object.fromEntries(s.frames.map(f => [f.name, ['frames'] as const])) } : {}),
+      ...(linked.length ? { mustLink: linked } : {}),
+      ...(required.length ? { required } : {}),
+      ...(s.frames.length || texts.length
+        ? {
+            valueInputs: {
+              ...Object.fromEntries(s.frames.map(f => [f.name, ['frames'] as const])),
+              ...Object.fromEntries(texts.map(name => [name, ['text'] as const])),
+            },
+          }
+        : {}),
       ...(s.frames.length || s.sounds.length
         ? {
             linkSources: {
@@ -187,7 +206,7 @@ export function mediaEffectRows(soundSources: readonly (readonly [string, number
             },
           }
         : {}),
-      widgets: Object.fromEntries(Object.entries(s.widgets).map(([k, w]) => [k, widgetSpec(w)])),
+      widgets: Object.fromEntries(Object.entries(s.widgets).filter(([k]) => !texts.includes(k)).map(([k, w]) => [k, widgetSpec(w)])),
       ...(checks.length ? { inputCheck: checks } : {}),
       ...(masks.length ? { outputsNotLinked: masks } : {}),
     }

@@ -2,163 +2,46 @@
 /**
  * Auto Subtitle app — drop a video, get it back with burned-in captions.
  * Pipeline: LoadVideo → GetVideoComponents → WhisperTranscribe → CaptionTrack
- *           → CreateVideo (audio re-attached) → SaveVideo.
+ *           → CreateVideo (audio re-attached) → SaveVideo, on the Sailor
+ * runner with its price shown before the run and a Stop button (step 3,
+ * R8.3; lib/runner/autoSubtitleApp.ts).
  */
-import { ArrowRight, Download, Loader2, RefreshCcw } from 'lucide-vue-next'
+import { ArrowRight, Download, Loader2, RefreshCcw, Square } from 'lucide-vue-next'
 import TakesStrip from '~/components/vue-canvas/TakesStrip.vue'
 import StudioSlider from '~/components/vue-canvas/studio/StudioSlider.vue'
+import { useAutoSubtitleRun, type AutoSubtitleLanguage, type AutoSubtitlePosition } from '~/lib/runner/autoSubtitleApp'
 
 interface UploadedFile { file: File; filename: string; previewUrl: string }
 
 const video = ref<UploadedFile | null>(null)
-const status = ref<'idle' | 'running' | 'done' | 'error'>('idle')
-const errorMessage = ref<string | null>(null)
-const progressLabel = ref('')
 // Each run stacks as a take; the displayed result is the active take.
 const { takes, activeTakeId, activeTake, addTake, selectTake, pinTake, discardTake, reset: resetTakes } = useAppTakes()
 const outputUrl = computed<string | null>(() => activeTake.value?.videos?.[0] ?? null)
 
 // User-facing knobs
-const language = ref<'auto' | 'en' | 'fr' | 'es' | 'de' | 'ja' | 'zh' | 'pt' | 'it' | 'ko'>('auto')
-const position = ref<'bottom' | 'middle' | 'top'>('bottom')
+const language = ref<AutoSubtitleLanguage>('auto')
+const position = ref<AutoSubtitlePosition>('bottom')
 const fontSize = ref(44)
 
-const canRun = computed(() => !!video.value && status.value !== 'running')
+const hosted = useRuntimeConfig().public?.hostedMode === true
+const subtitles = useAutoSubtitleRun({
+  video,
+  settings: () => ({ language: language.value, position: position.value, fontSize: fontSize.value }),
+  addTake,
+  hosted,
+})
+const { status, errorMessage, priceText, blocked, canRun, canStop, quoting, stopError } = subtitles
+const run = subtitles.run
+const stop = subtitles.stop
+const progressLabel = 'Transcribing the speech and adding captions…'
 
-function buildPrompt(filename: string) {
-  return {
-    '1': { class_type: 'LoadVideo', inputs: { file: filename } },
-    '2': { class_type: 'GetVideoComponents', inputs: { video: ['1', 0] } },
-    '3': {
-      class_type: 'WhisperTranscribe',
-      inputs: {
-        audio: ['2', 1],
-        model_size: 'base',
-        language: language.value,
-        fps: ['2', 2],
-      },
-    },
-    '4': {
-      class_type: 'CaptionTrack',
-      inputs: {
-        frames: ['2', 0],
-        captions: ['3', 0],
-        font_size: fontSize.value,
-        color: '#ffffff',
-        outline_color: '#000000',
-        outline_width: 3,
-        position: position.value,
-        y_inset: 0.08,
-      },
-    },
-    '5': {
-      class_type: 'CreateVideo',
-      inputs: { images: ['4', 0], fps: ['2', 2], audio: ['2', 1] },
-    },
-    '6': {
-      class_type: 'SaveVideo',
-      inputs: {
-        video: ['5', 0],
-        filename_prefix: 'auto_subtitle',
-        format: 'auto',
-        codec: 'auto',
-      },
-    },
-  }
-}
-
-function viewUrl(f: { filename: string; subfolder: string; type: string }): string {
-  return `/view?${new URLSearchParams({
-    filename: f.filename,
-    type: f.type,
-    ...(f.subfolder ? { subfolder: f.subfolder } : {}),
-    t: String(Date.now()),
-  })}`
-}
-
-async function run() {
-  if (!canRun.value || !video.value) return
-  errorMessage.value = null
-  status.value = 'running'
-  progressLabel.value = 'Submitting…'
-
-  try {
-    const res = await fetch('/prompt', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ prompt: buildPrompt(video.value.filename) }),
-    })
-    if (!res.ok) {
-      const text = await res.text()
-      throw new Error(text || `Comfy returned ${res.status}`)
-    }
-    const data = await res.json()
-    const promptId: string | undefined = data?.prompt_id
-    if (!promptId) throw new Error('No prompt_id returned — is ComfyUI running?')
-
-    progressLabel.value = 'Transcribing speech and burning captions (this can take a couple of minutes)…'
-    const output = await pollForOutput(promptId)
-    if (!output) throw new Error('Run finished but produced no output.')
-    addTake({ videos: [viewUrl(output)], promptId, sig: `${output.subfolder || ''}/${output.filename}` })
-    status.value = 'done'
-  } catch (e: any) {
-    errorMessage.value = humanizeError(e?.message ?? String(e))
-    status.value = 'error'
-  }
-}
-
-async function pollForOutput(promptId: string): Promise<{ filename: string; subfolder: string; type: string } | null> {
-  const deadline = Date.now() + 30 * 60 * 1000  // 30 min — Whisper can be slow
-  while (Date.now() < deadline) {
-    await new Promise((r) => setTimeout(r, 1000))
-    try {
-      const r = await fetch(`/history/${promptId}`)
-      if (!r.ok) continue
-      const data = await r.json()
-      const entry = data?.[promptId]
-      if (!entry) continue
-      if (entry?.status?.status_str === 'error') {
-        throw new Error(extractComfyError(entry))
-      }
-      const outputs = entry?.outputs
-      if (!outputs) continue
-      // SaveVideo could emit under images / video / videos depending on Comfy version.
-      for (const node of Object.values(outputs) as any[]) {
-        for (const k of ['images', 'video', 'videos']) {
-          const list = node?.[k]
-          if (Array.isArray(list) && list.length > 0) return list[0]
-        }
-      }
-    } catch (e) {
-      if (e instanceof Error && e.message.startsWith('Comfy:')) throw e
-    }
-  }
-  throw new Error('Timed out waiting for the video to finish.')
-}
-
-function extractComfyError(entry: any): string {
-  const messages: any[] = entry?.status?.messages ?? []
-  const errMsg = messages.find((m) => m[0] === 'execution_error')?.[1]
-  if (errMsg?.exception_message) return `Comfy: ${errMsg.exception_message}`
-  return 'Comfy: execution failed.'
-}
-
-function humanizeError(msg: string): string {
-  if (msg.includes('No prompt_id')) return "Couldn't reach the engine. Is ComfyUI running on port 8188?"
-  if (msg.toLowerCase().includes('no audio') || msg.toLowerCase().includes('audio stream')) {
-    return "Couldn't find an audio track in your video. Auto Subtitle needs spoken audio to transcribe."
-  }
-  if (msg.includes('whisper') || msg.includes('Whisper')) {
-    return 'Speech recognition failed. The clip may be too quiet or contain no speech.'
-  }
-  return msg
-}
+// The price is worked out once the video is uploaded, and again for the exact settings.
+watch(() => [video.value?.filename ?? null, language.value, position.value, fontSize.value], () => { void subtitles.quote() }, { immediate: true })
 
 function reset() {
   video.value = null
   resetTakes()
-  errorMessage.value = null
-  status.value = 'idle'
+  subtitles.reset()
 }
 
 function download() {
@@ -184,8 +67,8 @@ function download() {
           Auto Subtitle
         </h1>
         <p class="text-[15px] text-white/60 max-w-[560px] leading-relaxed">
-          Drop a video with speech, get it back with captions burned in. Whisper transcribes,
-          captions burn in over the original frames, audio stays untouched.
+          Drop a video with speech, get it back with captions burned in. The speech is transcribed,
+          captions burn in over the original frames, and the sound stays untouched.
         </p>
       </div>
 
@@ -250,21 +133,38 @@ function download() {
           <Loader2 class="size-3.5 animate-spin" />
           <span>{{ progressLabel }}</span>
         </p>
-        <p v-else-if="errorMessage" class="text-[12px] text-rose-400 max-w-md">
-          {{ errorMessage }}
+        <p v-else-if="errorMessage || stopError" class="text-[12px] text-rose-400 max-w-md">
+          {{ stopError || errorMessage }}
+        </p>
+        <p v-else-if="video && blocked" class="text-[12px] text-rose-400 max-w-md">
+          {{ blocked }}
         </p>
         <span v-else class="text-[12px] text-white/35">
           {{ video ? 'Ready to transcribe.' : 'Add a video above to start.' }}
         </span>
-        <button
-          class="inline-flex items-center gap-2 h-10 px-5 rounded-full bg-white text-[#0a0a0a] font-medium text-[13px] hover:bg-white/90 transition-colors cursor-pointer disabled:bg-white/15 disabled:text-white/40 disabled:cursor-not-allowed"
-          :disabled="!canRun"
-          @click="run"
-        >
-          <span>{{ status === 'running' ? 'Working…' : 'Add captions' }}</span>
-          <ArrowRight v-if="status !== 'running'" class="size-4" />
-          <Loader2 v-else class="size-4 animate-spin" />
-        </button>
+        <div class="flex items-center gap-3">
+          <span v-if="status !== 'running' && video && (quoting || priceText)" class="text-[12px] text-white/55 tabular-nums" title="The most this run can cost">
+            {{ quoting ? '…' : priceText }}
+          </span>
+          <button
+            v-if="canStop"
+            class="inline-flex items-center gap-2 h-10 px-5 rounded-full bg-white/[0.08] text-white font-medium text-[13px] hover:bg-white/[0.14] transition-colors cursor-pointer"
+            @click="stop"
+          >
+            <Square class="size-3.5" />
+            <span>Stop</span>
+          </button>
+          <button
+            v-else
+            class="inline-flex items-center gap-2 h-10 px-5 rounded-full bg-white text-[#0a0a0a] font-medium text-[13px] hover:bg-white/90 transition-colors cursor-pointer disabled:bg-white/15 disabled:text-white/40 disabled:cursor-not-allowed"
+            :disabled="!canRun"
+            @click="run"
+          >
+            <span>{{ status === 'running' ? 'Working…' : 'Add captions' }}</span>
+            <ArrowRight v-if="status !== 'running'" class="size-4" />
+            <Loader2 v-else class="size-4 animate-spin" />
+          </button>
+        </div>
       </div>
 
       <div v-if="outputUrl || status === 'running'" class="border-t border-white/[0.06] pt-10">
@@ -298,7 +198,7 @@ function download() {
           />
           <div v-else class="flex flex-col items-center gap-3 py-16">
             <Loader2 class="size-6 text-white/30 animate-spin" />
-            <div class="text-[12px] text-white/40 text-center px-6 max-w-md">{{ progressLabel || 'Working…' }}</div>
+            <div class="text-[12px] text-white/40 text-center px-6 max-w-md">{{ progressLabel }}</div>
           </div>
         </div>
         <TakesStrip
