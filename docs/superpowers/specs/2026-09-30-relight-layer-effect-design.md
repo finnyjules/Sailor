@@ -178,9 +178,16 @@ Shadows on. Measured about 5 ms a frame at 1024² with two lights and shadows.
 
   > Relight image 1 so its lighting matches image 2: the same light direction, colour, intensity and falloff.
   > Image 2 is only a rough lighting preview — take nothing but the lighting from it. Remove image 1's original
-  > lighting where it conflicts, and add physically correct shadows (including cast shadows on the floor or
-  > background) and bounce light. Keep the subject, composition, framing, textures and every detail of image 1
-  > exactly the same.
+  > lighting where it conflicts, and add physically correct shading, bounce light and shadows. Cast shadows may
+  > only fall on surfaces already visible in image 1, such as a floor or a wall; never add new walls, floors,
+  > objects or scenery, and if the background is a flat colour, keep it flat. Keep image 1's medium and style
+  > (an illustration stays an illustration), and keep the subject, composition, framing, textures and every
+  > detail of image 1 exactly the same.
+
+  (Revised 2026-09-30 after the paid check: the bake-off wording asked for "cast shadows on the floor or
+  background", and on a flat illustration the model invented a wall to cast them on. Checked on the same two
+  pairs: the illustration's background stays flat; the puppy keeps its floor shadow — one of two puppy draws
+  lit from the wrong side, the other matched the guide.)
 
 - The **guide** is the effect's current render of the layer at the source image's resolution (capped at 1536 px),
   uploaded first.

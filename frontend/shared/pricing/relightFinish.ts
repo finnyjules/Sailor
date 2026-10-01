@@ -13,6 +13,8 @@ export const finishCredits = (): number => creditsForUsd(FINISH_USD)
 export const RELIGHT_FINISH_PROMPT =
   "Relight image 1 so its lighting matches image 2: the same light direction, colour, intensity and " +
   "falloff. Image 2 is only a rough lighting preview — take nothing but the lighting from it. Remove " +
-  "image 1's original lighting where it conflicts, and add physically correct shadows (including cast " +
-  "shadows on the floor or background) and bounce light. Keep the subject, composition, framing, " +
-  "textures and every detail of image 1 exactly the same."
+  "image 1's original lighting where it conflicts, and add physically correct shading, bounce light and " +
+  "shadows. Cast shadows may only fall on surfaces already visible in image 1, such as a floor or a wall; " +
+  "never add new walls, floors, objects or scenery, and if the background is a flat colour, keep it flat. " +
+  "Keep image 1's medium and style (an illustration stays an illustration), and keep the subject, " +
+  "composition, framing, textures and every detail of image 1 exactly the same."
