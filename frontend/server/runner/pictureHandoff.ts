@@ -156,6 +156,8 @@ const PROVIDER_KEPT_SLOTS: Readonly<Record<string, readonly number[]>> = {
   BackgroundRemove: [0],
   // R7.3: Object removal's picture is an 8-bit RGB PNG of Python's tensor (generators/localModels.ts).
   ObjectRemove: [0],
+  // R7.5: Subject mask's cutout (slot 1) is an 8-bit RGB PNG of Python's tensor (generators/localModels.ts).
+  SubjectMask: [1],
 }
 
 /** Provider classes whose later slot is a provider's file too (Separate background and foreground's subject is slot 0). */

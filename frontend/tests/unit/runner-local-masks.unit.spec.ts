@@ -10,6 +10,13 @@
  * the real execute with both models swapped for stand-ins, so what follows the
  * model is Python's own on a recorded mask, and the clicks are what Python's
  * processor received. The shared R7 pieces are R7.1's (runner-local-cutout).
+ *
+ * R7.5: Subject mask (family `subject-mask`) on the same SAM 3 call, one click
+ * per picture or frame (a clip runs here, one call a frame: the user's
+ * direction). nodes_subject_track.py runs MobileSAM on every frame and picks
+ * one of three candidates (best / largest / smallest), then grows or shrinks
+ * it and makes the cutout. The fixture's `subject` part runs the real execute
+ * with MobileSAM swapped for stand-ins that answer recorded candidates.
  */
 import { createHash } from 'node:crypto'
 import { existsSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
@@ -19,6 +26,7 @@ import { describe, expect, it, vi } from 'vitest'
 import sharp from 'sharp'
 import { createFakeFal, createFakeReplicate, makeKit } from './__runner__/kit'
 import { checkPayload, loadProviderSchema } from './helpers/providerSchema'
+import { clipPath, requireMediaTools } from './__runner__/mediaParity'
 import type { ApiPrompt } from '#shared/runner/graph'
 import { ALL_RUNNER_FAMILIES, LOCAL_MODEL_FAMILIES, type RunnerFamily } from '#shared/runner/families'
 import {
@@ -28,9 +36,11 @@ import { nodesNeedingEngine } from '#shared/runner/needsEngine'
 import { RUNNER_OUTPUT_CLASSES } from '#shared/runner/validate'
 import {
   LOCAL_MODEL_FAMILY_OF, MASK_BY_TEXT_CLASS, MASK_EXTRACTOR_CLASS, OBJECT_REMOVE_CLASS, OBJECT_REMOVE_SLUG, OBJECT_REMOVE_WORDS, SAM_3_SLUG,
-  SAM_MASK_WORDS, SERVICE_OF, localModelCalls, serviceTooltip,
+  SAM_MASK_WORDS, SERVICE_OF, SUBJECT_MASK_CLASS, SUBJECT_MASK_WORDS, localModelCalls, overCapWords, serviceTooltip,
 } from '#shared/runner/localModels'
-import { SAM_3_MAX_MASKS, buildSamInput, parseMaskPoints, samPointsInput, samTextInput } from '#shared/runner/samInput'
+import { SAM_3_MAX_MASKS, SAM_3_SUBJECT_MASKS, buildSamInput, parseMaskPoints, samPointsInput, samSubjectInput, samTextInput } from '#shared/runner/samInput'
+import { outputKind } from '#shared/runner/values'
+import { FRAMES_LINK_SOURCES } from '#shared/runner/mediaEffects'
 import { PAID_RATES } from '#shared/pricing/paidRates'
 import { FAMILY_PRICED_CLASSES, priceNode } from '#shared/pricing/nodePrice'
 import { creditsForUsd } from '#shared/pricing/markup'
@@ -43,13 +53,17 @@ import { planNode, type NodePlan, type PipelineCall, type PipelineIO } from '~~/
 import { localModelStartProblems } from '~~/server/runner/localModelStart'
 import { RUNNER_ROUTES } from '~~/server/runner/generators/twins'
 import { maskByTextPrompt, samAnswerMask, samMaskUrls } from '~~/server/runner/generators/localModels'
+import { subjectCutout8, subjectGrow, subjectGrowSteps, subjectMask8, subjectMaskFloat, subjectPickIndex, type SubjectPick } from '~~/server/runner/pixels/subjectMask'
+import { KEPT_MEDIA_MAKERS } from '~~/server/runner/keptRelease'
+import { keptPeak } from '~~/server/runner/video/start'
+import { batchSlotOf } from '~~/server/runner/video/shapes'
 import { pixelsInWorker } from '~~/server/runner/compositor/worker'
 import { samMaskCore } from '~~/server/runner/pixels/samMask'
 import { effectCores } from '~~/server/runner/effects/cores'
 import { decodeMask } from '~~/server/runner/pictures/mask'
 import { maxFilterL } from '~~/server/runner/pixels/maxFilter'
 import { createFileKeptBytes } from '~~/server/runner/keptBytes'
-import type { OutputFile } from '~~/server/runner/types'
+import type { OutputFile, RunnerValue } from '~~/server/runner/types'
 
 const ON: ReadonlySet<RunnerFamily> = new Set<RunnerFamily>(['cards', 'sam-3-masks'])
 const ON_ERASE: ReadonlySet<RunnerFamily> = new Set<RunnerFamily>(['cards', 'sam-3-masks', 'object-remove'])
@@ -225,9 +239,9 @@ const clickNode = (w: Record<string, unknown> = {}, from: [string, number] = ['l
 const PIC: OutputFile = { filename: 'p.png', subfolder: '', type: 'input' }
 const ANSWER_URL = (i: number) => `https://v3.fal.media/files/mask_${i}.png`
 
-async function runByHand(node: { class_type: string; inputs: Record<string, unknown> }, picture: Uint8Array, answers: Uint8Array[]) {
+async function runByHand(node: { class_type: string; inputs: Record<string, unknown> }, picture: Uint8Array, answers: Uint8Array[], families: ReadonlySet<RunnerFamily> = ON) {
   const plan: NodePlan = await planNode({
-    prompt: { l: LOAD, n: node }, nodeId: 'n', gateOpen: false, families: ON,
+    prompt: { l: LOAD, n: node }, nodeId: 'n', gateOpen: false, families,
     filesFrom: () => [PIC],
     valueFrom: () => ({ kind: 'files', files: [PIC] }),
     toUrl: async f => `https://fal.storage/${f.filename}`,
@@ -236,13 +250,13 @@ async function runByHand(node: { class_type: string; inputs: Record<string, unkn
   const calls: PipelineCall[] = []
   const files = new Map<string, Uint8Array>()
   const previews: { bytes: Uint8Array; name: string }[] = []
+  const downloads: string[] = []
   const io = {
     signal: new AbortController().signal,
     call: async (x: PipelineCall) => {
       calls.push(x)
       return { result: { image: { url: ANSWER_URL(99) }, masks: answers.map((_a, i) => ({ url: ANSWER_URL(i) })) }, raw: null, urls: [] }
     },
-    download: async (url: string) => ({ bytes: answers[Number(/mask_(\d+)\.png$/.exec(url)![1])]!, contentType: 'image/png' }),
     keep: async (bytes: Uint8Array, ext: string) => {
       const file: OutputFile = { filename: `${sha(bytes)}.${ext}`, subfolder: 'run', type: 'kept' }
       files.set(file.filename, bytes)
@@ -250,13 +264,17 @@ async function runByHand(node: { class_type: string; inputs: Record<string, unkn
     },
     read: async (file: OutputFile) => (file.type === 'input' ? picture : files.get(file.filename)!),
     savedOnce: async (_call: string, _key: string, make: () => Promise<OutputFile>) => make(),
+    download: async (url: string) => {
+      downloads.push(url)
+      return { bytes: answers[Number(/mask_(\d+)\.png$/.exec(url)![1])]!, contentType: 'image/png' }
+    },
     savePreviewAs: async (bytes: Uint8Array, s: { filename: string }) => {
       previews.push({ bytes, name: s.filename })
       return { filename: s.filename, subfolder: '', type: 'temp' } as OutputFile
     },
     handOff: async (_b: Uint8Array, name: string) => `https://fal.storage/${name}`,
   } as unknown as PipelineIO
-  return { run: () => plan.run(io), calls, files, previews }
+  return { run: () => plan.run(io), calls, files, previews, downloads }
 }
 
 describe('one picture (the plan, run by hand)', () => {
@@ -490,7 +508,7 @@ describe('with every R7 family off, nothing changes (rule 15)', () => {
     ['every family but R7\'s', ALL_RUNNER_FAMILIES.filter(x => !LOCAL_MODEL_FAMILIES.includes(x))],
     ['the other R7 families on, the masks off', ['cards', 'bg-remove', 'upscale-2x', 'object-remove']],
   ]
-  const OURS = new Set([MASK_BY_TEXT_CLASS, MASK_EXTRACTOR_CLASS])
+  const OURS = new Set([MASK_BY_TEXT_CLASS, MASK_EXTRACTOR_CLASS, SUBJECT_MASK_CLASS])
   const before = (p: ApiPrompt): ApiPrompt => Object.fromEntries(Object.entries(p).map(([id, n]) => [id, OURS.has(n.class_type) ? { ...n, class_type: `${n.class_type}Before` } : n]))
   function sameAsBefore(p: ApiPrompt, label: string) {
     const old = before(p)
@@ -519,6 +537,9 @@ describe('with every R7 family off, nothing changes (rule 15)', () => {
     sameAsBefore({ l: LOAD, x: clickNode() }, 'Mask extractor')
     sameAsBefore({ l: LOAD, x: clickNode(), n: eraseNode(['x', 0]), s: save(['n', 0]) }, 'Mask extractor → Object removal')
     sameAsBefore({ l: LOAD, t: textNode(), m: { class_type: 'MatteGrowShrink', inputs: { mask: ['t', 0], amount: 2, feather: 0 } } }, 'Mask by text → a mask effect')
+    // R7.5: Subject mask, its mask into Object removal, its cutout saved; on a clip into Save video frames.
+    sameAsBefore({ l: LOAD, m: subjectNode(), n: eraseNode(['m', 0]), s: save(['m', 1]) }, 'Subject mask → Object removal, cutout saved')
+    sameAsBefore({ v: LVF, m: subjectNode({}, ['v', 0]), s: saveFrames(['m', 1]) }, 'Load video frames → Subject mask → Save video frames')
   })
 
   const PROJECTS = resolve(__dirname, '../../../user/sailor/projects')
@@ -544,6 +565,297 @@ describe('with every R7 family off, nothing changes (rule 15)', () => {
       }
     }
     expect(graphs).toBeGreaterThanOrEqual(800)
-    console.info(`sam-3-masks families-off invariant: ${graphs} saved graphs, ${withIt} with a SAM 3 mask class`)
+    console.info(`sam-3-masks / subject-mask families-off invariant: ${graphs} saved graphs, ${withIt} with a SAM 3 mask class or Subject mask`)
   }, 600_000)
+})
+
+// ── R7.5: Subject mask ──────────────────────────────────────────────────────
+
+const ON_SUBJECT: ReadonlySet<RunnerFamily> = new Set<RunnerFamily>(['cards', 'subject-mask'])
+const ON_SUBJECT_ERASE: ReadonlySet<RunnerFamily> = new Set<RunnerFamily>(['cards', 'subject-mask', 'object-remove'])
+const ON_SUBJECT_CLIP: ReadonlySet<RunnerFamily> = new Set<RunnerFamily>(['cards', 'media-video', 'subject-mask'])
+const subjectNode = (w: Record<string, unknown> = {}, from: [string, number] = ['l', 0]) =>
+  ({ class_type: SUBJECT_MASK_CLASS, inputs: { frames: from, point_x: 0.5, point_y: 0.5, output_mode: 'best', mask_grow: 0, ...w } })
+const CLIP = 'v_stereo_aac.mp4'
+const LVF = { class_type: 'LoadVideoFrames', inputs: { file: CLIP, max_seconds: 10, max_frames: 3, max_size: 64, start_frame: 0, stride: 1 } }
+const saveFrames = (from: [string, number]) => ({ class_type: 'SaveVideoFrames', inputs: { frames: from, fps: 24, filename_prefix: 'video', audio_file: '(none)', preset: 'veryfast', crf: 20 } })
+const LONG = { timeout: 120_000 }
+
+interface SubjectCase {
+  name: string; pictures: string[]; sets: string[]
+  widgets: { point_x: number; point_y: number; output_mode: SubjectPick; mask_grow: number }
+  sent_coords: number[][]; sent_labels: number[][]; sent_orig: number[][]; scale: number
+  mask: { shape: number[]; f32_sha256: string; u8: string }
+  cutout: { shape: number[]; f32_sha256: string; trunc8: string }
+  ui: null
+}
+const SUB = (FX as unknown as { subject: { cases: SubjectCase[]; size: [number, number]; sets: Record<string, { candidates: string[]; scores: number[] }> } }).subject
+const subjectNamed = (name: string) => SUB.cases.find(c => c.name === name)!
+/** A set's candidates as SAM 3 answers them: grey masks (white = selected), best first (SAM 3 orders its answer by score). */
+function answerOf(set: string): { l: Uint8Array; w: number; h: number }[] {
+  const s = SUB.sets[set]!
+  const order = s.scores.map((v, i) => [v, i] as const).sort((a, b) => b[0] - a[0]).map(x => x[1])
+  return order.map(i => ({ l: Uint8Array.from(f32Of(s.candidates[i]!), v => (v > 0 ? 255 : 0)), w: W, h: H }))
+}
+const greyPng = async (l: Uint8Array, w = W, h = H) => new Uint8Array(await sharp(Buffer.from(l), { raw: { width: w, height: h, channels: 1 } }).png().toBuffer())
+const unit = (k: number) => Math.fround(k / 255)
+
+/** Python's outputs from the runner's steps on the same candidates, frame by frame: the float32 mask and cutout, and the cutout's 8 bits. */
+async function subjectBy(c: SubjectCase) {
+  const masks: Float32Array[] = []
+  const cut8: Uint8Array[] = []
+  for (const [t, set] of c.sets.entries()) {
+    const m8 = subjectMask8(answerOf(set), c.widgets.output_mode, W, H)
+    const grown = await subjectGrow(m8, W, H, c.widgets.mask_grow, maxFilterL)
+    masks.push(subjectMaskFloat(grown))
+    cut8.push(subjectCutout8(await rgbOf(b64(c.pictures[t]!)), grown))
+  }
+  const join = <T extends Float32Array | Uint8Array>(xs: T[], make: (n: number) => T) => {
+    const out = make(xs.reduce((n, x) => n + x.length, 0))
+    let at = 0
+    for (const x of xs) { out.set(x as never, at); at += x.length }
+    return out
+  }
+  const mask = join(masks, n => new Float32Array(n))
+  const cut = join(cut8, n => new Uint8Array(n))
+  return { mask, cut, cutF32: Float32Array.from(cut, k => unit(k)) }
+}
+
+describe('Subject mask: the fixture', () => {
+  it('three modes × grow −32 / −1 / 0 / 3 / 32 × three candidate sets, Python\'s half-to-even grows, clicks at the edges, two clips; no ui', () => {
+    expect(SUB.cases.length).toBe(55)
+    expect(new Set(SUB.cases.map(c => c.widgets.mask_grow))).toEqual(new Set([-32, -1, 0, 3, 32, 2.5, -2.5, 0.5, -1.5, 1, -2]))
+    for (const c of SUB.cases) {
+      expect(c.ui, c.name).toBeNull()
+      expect(c.mask.shape).toEqual([c.sets.length, H, W])
+      expect(c.cutout.shape).toEqual([c.sets.length, H, W, 3])
+      // One positive point a frame (the −1 is the decoder's padding), the same click on every frame.
+      expect(c.sent_labels.every(l => l[0] === 1 && l[1] === -1)).toBe(true)
+      expect(c.sent_orig.every(o => o[0] === H && o[1] === W)).toBe(true)
+    }
+  })
+})
+
+describe('Subject mask: the call (#shared/runner/samInput samSubjectInput)', () => {
+  it('one positive click at Python\'s point, rounded to whole pixels and kept on the picture; every candidate back; it passes the saved schema', () => {
+    for (const c of SUB.cases) {
+      const px = c.widgets.point_x * W
+      const py = c.widgets.point_y * H
+      // What the decoder received is Python's point in its 1024 space.
+      expect(Math.abs(c.sent_coords[0]![0]! / c.scale - px), c.name).toBeLessThan(1e-3)
+      expect(Math.abs(c.sent_coords[0]![1]! / c.scale - py), c.name).toBeLessThan(1e-3)
+      const payload = samSubjectInput('https://fal.storage/p.png', c.widgets.point_x, c.widgets.point_y, W, H)
+      const x = Math.min(W - 1, Math.round(px))
+      const y = Math.min(H - 1, Math.round(py))
+      expect(payload, c.name).toEqual({
+        image_url: 'https://fal.storage/p.png', prompt: '', apply_mask: false, output_format: 'png',
+        return_multiple_masks: true, max_masks: SAM_3_SUBJECT_MASKS, point_prompts: [{ x, y, label: 1 }],
+      })
+      expect(checkPayload(SCHEMA, payload)).toEqual([])
+    }
+    // A click at 1.0 is the last pixel, not one past it.
+    expect(samSubjectInput('u', 1, 1, W, H).point_prompts).toEqual([{ x: W - 1, y: H - 1, label: 1 }])
+    expect(SAM_3_SUBJECT_MASKS).toBe(3)
+  })
+})
+
+describe('Subject mask after the model (../pixels/subjectMask.ts): exact against Python given the candidates', () => {
+  it('every case: the float32 mask, the cutout\'s float32 and its 8 bits', async () => {
+    for (const c of SUB.cases) {
+      const r = await subjectBy(c)
+      expect(sha(bytesOf(r.mask)), c.name).toBe(c.mask.f32_sha256)
+      expect(sha(bytesOf(r.cutF32)), c.name).toBe(c.cutout.f32_sha256)
+      expect(sha(r.cut), c.name).toBe(sha(b64(c.cutout.trunc8)))
+    }
+  })
+
+  it('the pick: best is the first answer; largest / smallest by pixels > 0, the first on a tie; none: an all-black mask', () => {
+    const m = (n: number) => ({ l: Uint8Array.from({ length: 4 }, (_v, i) => (i < n ? 9 : 0)), w: 2, h: 2 })
+    expect(subjectPickIndex([m(1), m(3), m(2)], 'best')).toBe(0)
+    expect(subjectPickIndex([m(1), m(3), m(3)], 'largest')).toBe(1)
+    expect(subjectPickIndex([m(2), m(0), m(0)], 'smallest')).toBe(1)
+    expect(subjectPickIndex([m(2)], 'smallest')).toBe(0)
+    expect(subjectPickIndex([], 'largest')).toBeNull()
+    expect(subjectMask8([], 'best', 3, 2)).toEqual(new Uint8Array(6))
+    // A candidate of another size: fitted to the picture (R0's bilinear), then > 0.
+    expect(subjectMask8([{ l: new Uint8Array(4).fill(255), w: 2, h: 2 }], 'best', 4, 4)).toEqual(new Uint8Array(16).fill(255))
+  })
+
+  it('the grow rounds as Python\'s round() does (half to even)', () => {
+    expect([2.5, -2.5, 0.5, -1.5, 3, -32].map(subjectGrowSteps)).toEqual([
+      { dilate: 2, erode: 0 }, { dilate: 0, erode: 2 }, { dilate: 0, erode: 0 }, { dilate: 0, erode: 2 }, { dilate: 3, erode: 0 }, { dilate: 0, erode: 32 },
+    ])
+  })
+})
+
+describe('Subject mask: one picture (the plan, run by hand)', () => {
+  it('largest: one call to the saved schema, every candidate read; Python\'s mask (slot 0) and cutout (slot 1); no preview', async () => {
+    const c = subjectNamed('subject · set a · largest · grow 3.0')
+    const answers = await Promise.all(answerOf('a').map(m => greyPng(m.l)))
+    const r = await runByHand(subjectNode({ output_mode: 'largest', mask_grow: 3 }), b64(c.pictures[0]!), answers, ON_SUBJECT)
+    const out = await r.run()
+    expect(r.calls.map(x => [x.provider, x.endpoint, x.usd])).toEqual([['fal', SAM_3_SLUG, USD]])
+    expect(r.calls[0]!.payload).toEqual(samSubjectInput('https://fal.storage/p.png', 0.5, 0.5, W, H))
+    expect(r.downloads.length).toBe(3)
+    const m = out.values![0] as { kind: string; files: OutputFile[] }
+    expect(m.kind).toBe('mask')
+    expect(sha(bytesOf((await decodeMask(r.files.get(m.files[0]!.filename)!)).data))).toBe(c.mask.f32_sha256)
+    const p = out.values![1] as { kind: string; files: OutputFile[] }
+    expect(p.kind).toBe('files')
+    const png = r.files.get(p.files[0]!.filename)!
+    expect((await sharp(png).metadata()).channels).toBe(3)
+    expect(sha(await rgbOf(png))).toBe(sha(b64(c.cutout.trunc8)))
+    expect(out.ui).toBeNull()
+    expect(r.previews).toEqual([])
+  })
+
+  it('best fetches the first candidate only; an answer with no mask is an all-black mask and an all-black cutout, the call made', async () => {
+    const c = subjectNamed('subject · set c · best · grow 0.0')
+    const answers = await Promise.all(answerOf('c').map(m => greyPng(m.l)))
+    const r = await runByHand(subjectNode(), b64(c.pictures[0]!), answers, ON_SUBJECT)
+    const out = await r.run()
+    expect(r.downloads).toEqual([ANSWER_URL(0)])
+    expect(sha(bytesOf((await decodeMask(r.files.get((out.values![0] as { files: OutputFile[] }).files[0]!.filename)!)).data))).toBe(c.mask.f32_sha256)
+    const none = await runByHand(subjectNode({ output_mode: 'smallest' }), b64(c.pictures[0]!), [], ON_SUBJECT)
+    const o2 = await none.run()
+    expect(none.calls.length).toBe(1)
+    expect((await decodeMask(none.files.get((o2.values![0] as { files: OutputFile[] }).files[0]!.filename)!)).data.every(x => x === 0)).toBe(true)
+    expect((await rgbOf(none.files.get((o2.values![1] as { files: OutputFile[] }).files[0]!.filename)!)).every(x => x === 0)).toBe(true)
+  })
+})
+
+describe('Subject mask through the engine, with ComfyUI off', () => {
+  it('Load image → Subject mask → Object removal → Save image, hosted: two calls, both held and charged; the fill under the subject', async () => {
+    const w = 20
+    const h = 12
+    const subject = new Float32Array(w * h).map((_v, i) => (i % w >= 6 && i % w < 13 && Math.floor(i / w) >= 2 && Math.floor(i / w) < 8 ? 1 : 0))
+    const prompt: ApiPrompt = { l: LOAD, m: subjectNode({ point_x: 0.45, point_y: 0.4, output_mode: 'smallest' }), n: eraseNode(['m', 0]), s: save(['n', 0]) }
+    expect(isRunnerEligible(prompt, ON_SUBJECT_ERASE)).toBe(true)
+    const { k, take, fal, replicate } = await kitRun(prompt, { masks: [await maskPngOf(new Float32Array(w * h).fill(1), w, h), await maskPngOf(subject, w, h)], fill: await picturePng(w, h, 200), files: { 'image.png': await picturePng(w, h, 40) }, families: ON_SUBJECT_ERASE })
+    for (const id of ['l', 'm', 'n', 's']) expect(take.nodes[id]!.status, `${id}: ${take.nodes[id]!.error ?? ''}`).toBe('done')
+    expect(fal.submitted().map(x => x.endpoint)).toEqual([SAM_3_SLUG])
+    expect(fal.submitted()[0]!.payload).toMatchObject({ point_prompts: [{ x: 9, y: 5, label: 1 }], return_multiple_masks: true, max_masks: 3 })
+    expect(checkPayload(SCHEMA, fal.submitted()[0]!.payload)).toEqual([])
+    expect(replicate.submitted().map(x => x.endpoint)).toEqual([OBJECT_REMOVE_SLUG])
+    const credits = creditsForUsd(USD) + creditsForUsd(LAMA_USD)
+    expect(charged(k)).toEqual([[credits + 1, credits + 1]])
+    const px = new Uint8Array(await sharp(readFileSync(join(k.root, 'output', take.nodes.s!.outputs[0]!.subfolder, take.nodes.s!.outputs[0]!.filename))).raw().toBuffer())
+    const grown = maxFilterL(Uint8Array.from(subject, v => v * 255), w, h, 3)
+    for (let i = 0; i < w * h; i++) expect(px[i * 3], `pixel ${i}`).toBe(grown[i] ? 200 : 40)
+  })
+
+  it('Subject mask\'s cutout → Save image: the picture where the subject is, black elsewhere, as an RGB file', async () => {
+    const w = 10
+    const h = 6
+    const subject = new Float32Array(w * h).map((_v, i) => (i % w < 5 ? 1 : 0))
+    const prompt: ApiPrompt = { l: LOAD, m: subjectNode(), s: save(['m', 1]) }
+    const { k, take } = await kitRun(prompt, { masks: [await maskPngOf(subject, w, h)], files: { 'image.png': await picturePng(w, h, 77) }, families: ON_SUBJECT })
+    for (const id of ['l', 'm', 's']) expect(take.nodes[id]!.status, `${id}: ${take.nodes[id]!.error ?? ''}`).toBe('done')
+    const file = readFileSync(join(k.root, 'output', take.nodes.s!.outputs[0]!.subfolder, take.nodes.s!.outputs[0]!.filename))
+    expect((await sharp(file).metadata()).channels).toBe(3)
+    const px = new Uint8Array(await sharp(file).raw().toBuffer())
+    for (let i = 0; i < w * h; i++) expect(px[i * 3], `pixel ${i}`).toBe(i % w < 5 ? 77 : 0)
+    expect(charged(k)).toEqual([[creditsForUsd(USD) + 1, creditsForUsd(USD) + 1]])
+  })
+
+  it('a Subject mask of another size than Object removal\'s picture: refused before the hold, nothing sent (its maskShapes row)', async () => {
+    const prompt: ApiPrompt = {
+      l: LOAD, b: { class_type: 'LoadImage', inputs: { image: 'other.png', upload: 'image' } },
+      m: subjectNode(), n: eraseNode(['m', 0], ['b', 0]), s: save(['n', 0]),
+    }
+    const fal = createFakeFal()
+    const k = makeKit({ hosted: true, fal, deps: { families: () => ON_SUBJECT_ERASE } })
+    writeFileSync(join(k.root, 'input', 'image.png'), await picturePng(24, 16, 1))
+    writeFileSync(join(k.root, 'input', 'other.png'), await picturePng(30, 20, 1))
+    await expect(k.engine.startRun({ userId: k.userId, takes: [prompt], ...START })).rejects.toThrow(OBJECT_REMOVE_WORDS.maskSize)
+    expect(k.ledger.holds.size).toBe(0)
+    expect(fal.submitted()).toEqual([])
+  })
+})
+
+describe('Subject mask on a clip: one call per frame, in Sailor', () => {
+  it('the cutout is a frame batch on slot 1 and the masks a mask list on slot 0 while the family is on; the frame readers take it', () => {
+    const p: ApiPrompt = { v: LVF, m: subjectNode({}, ['v', 0]), s: saveFrames(['m', 1]) }
+    expect(outputKind(p, ['m', 1], outputKindsFor(ON_SUBJECT_CLIP))).toBe('frames')
+    expect(outputKind(p, ['m', 0], outputKindsFor(ON_SUBJECT_CLIP))).toBe('mask')
+    expect(outputKind({ l: LOAD, m: subjectNode() }, ['m', 1], outputKindsFor(ON_SUBJECT_CLIP))).toBe('files')
+    expect(isRunnerEligible(p, ON_SUBJECT_CLIP)).toBe(true)
+    // A clip's cutout into a picture reader is left to the engine (the value kinds), as R7.1's.
+    expect(runnerTakesNode({ ...p, s: save(['m', 1]) }, 's', ON_SUBJECT_CLIP)).toBe(false)
+    expect(FRAMES_LINK_SOURCES.map(x => x.join(':'))).toContain(`${SUBJECT_MASK_CLASS}:1`)
+    expect(KEPT_MEDIA_MAKERS.has(SUBJECT_MASK_CLASS)).toBe(true)
+    expect(batchSlotOf(SUBJECT_MASK_CLASS)).toBe(1)
+    // The kept room counts its batch from its own slot.
+    const shapes = new Map([['v:0', { count: 3, w: 64, h: 36, exact: true }], ['m:1', { count: 3, w: 64, h: 36, exact: true }]])
+    const peak = keptPeak(p, ON_SUBJECT_CLIP, shapes, { release: false })
+    expect(peak).not.toBeNull()
+    expect(peak!.bytes).toBeGreaterThan(keptPeak({ v: LVF, s: saveFrames(['v', 0]) }, ON_SUBJECT_CLIP, new Map([['v:0', shapes.get('v:0')!]]), { release: false })!.bytes)
+  })
+
+  it('Load video frames → Subject mask → Save video frames, hosted: three calls, held and charged as three frames summed once, a batch of three and three masks', LONG, async () => {
+    await requireMediaTools()
+    const prompt: ApiPrompt = { v: LVF, m: subjectNode({ output_mode: 'largest', mask_grow: 1 }, ['v', 0]), s: saveFrames(['m', 1]) }
+    // The answer's masks are any size: each is fitted to the frame.
+    const disc = new Float32Array(16 * 9).map((_v, i) => (Math.hypot(i % 16 - 8, Math.floor(i / 16) - 4) < 4 ? 1 : 0))
+    const { k, take, fal } = await kitRun(prompt, { masks: [await maskPngOf(disc, 16, 9)], files: { [CLIP]: new Uint8Array(readFileSync(clipPath(CLIP))) }, families: ON_SUBJECT_CLIP })
+    for (const id of ['v', 'm', 's']) expect(take.nodes[id]!.status, `${id}: ${take.nodes[id]!.error ?? ''}`).toBe('done')
+    expect(take.measured?.m?.seconds.frames).toBe(3)
+    expect(fal.submitted().length).toBe(3)
+    for (const x of fal.submitted()) expect(checkPayload(SCHEMA, x.payload)).toEqual([])
+    const out = take.nodes.m!.values![1] as Extract<RunnerValue, { kind: 'frames' }>
+    expect(out.kind).toBe('frames')
+    expect(out.count).toBe(3)
+    expect((take.nodes.m!.values![0] as { kind: string; files: unknown[] })).toMatchObject({ kind: 'mask' })
+    expect((take.nodes.m!.values![0] as { files: unknown[] }).files.length).toBe(3)
+    const credits = creditsForUsd(3 * USD)
+    expect(take.nodes.m!.credits).toBe(credits)
+    expect(charged(k)).toEqual([[credits + 1, credits + 1]])
+  })
+
+  it('over the frame cap: the workflow is left to the engine before anything is held (a stop-gap), in its own words', async () => {
+    const p: ApiPrompt = { v: LVF, m: subjectNode({}, ['v', 0]), s: saveFrames(['m', 1]) }
+    const shapes = (count: number) => async () => new Map([['v:0', { count, w: 64, h: 36, exact: false }]])
+    expect(await localModelStartProblems(p, ON_SUBJECT_CLIP, { hosted: true, shapes: shapes(300) })).toMatchObject({ counts: { m: 300 }, problem: null })
+    expect((await localModelStartProblems(p, ON_SUBJECT_CLIP, { hosted: true, shapes: shapes(301) })).problem?.message).toBe(SUBJECT_MASK_WORDS.overCap)
+    expect(overCapWords(SUBJECT_MASK_CLASS)).toBe(SUBJECT_MASK_WORDS.overCap)
+  })
+})
+
+describe('Subject mask: price, family, rows', () => {
+  it('SAM 3\'s card, one call per picture or frame, summed and marked up once; priced only while its family is on; no flat row', () => {
+    const inputs = subjectNode().inputs
+    expect(Object.prototype.hasOwnProperty.call(GRAPH_NODE_CREDITS, SUBJECT_MASK_CLASS)).toBe(false)
+    expect('refused' in priceNode(SUBJECT_MASK_CLASS, inputs, { families: ON })).toBe(true)
+    expect(priceNode(SUBJECT_MASK_CLASS, inputs, { families: ON_SUBJECT })).toEqual({ usd: USD, credits: creditsForUsd(USD) })
+    expect(priceNode(SUBJECT_MASK_CLASS, inputs, { families: ON_SUBJECT, inputSeconds: { frames: 300 } })).toEqual({ usd: 1.5, credits: creditsForUsd(1.5) })
+    expect(localModelCalls(SUBJECT_MASK_CLASS, 3)).toEqual({ steps: [{ call: { endpoint: SAM_3_SLUG }, times: 3 }] })
+    expect(priceGraph({ 1: { class_type: SUBJECT_MASK_CLASS, inputs } }).nodes['1']).toBeUndefined()
+  })
+
+  it('a fal provider class in family subject-mask, not an output node (Python returns no ui); the tooltip names fal; no backup; settings as ComfyUI validates them', () => {
+    expect(LOCAL_MODEL_FAMILY_OF[SUBJECT_MASK_CLASS]).toBe('subject-mask')
+    expect(RUNNER_NODE_RULES[SUBJECT_MASK_CLASS]!.family).toBe('subject-mask')
+    expect(PROVIDER_TYPES.has(SUBJECT_MASK_CLASS)).toBe(true)
+    expect(SWITCHED_CLASSES[SUBJECT_MASK_CLASS]).toBe('subject-mask')
+    expect(RUNNER_OUTPUT_CLASSES.has(SUBJECT_MASK_CLASS)).toBe(false)
+    expect(outputKindsFor(ON_SUBJECT)[SUBJECT_MASK_CLASS]).toEqual({ 0: 'mask' })
+    expect(SERVICE_OF[SUBJECT_MASK_CLASS]).toBe('fal')
+    expect(nodePriceTooltip(SUBJECT_MASK_CLASS, ON_SUBJECT)).toBe('Runs on fal')
+    expect(nodePriceTooltip(SUBJECT_MASK_CLASS, new Set(['cards']))).toBeNull()
+    expect(RUNNER_ROUTES[SUBJECT_MASK_CLASS]).toMatchObject({ first: 'fal', backup: null })
+    const pt = (w: Record<string, unknown>): ApiPrompt => ({ l: LOAD, n: subjectNode(w) })
+    expect(runnerTakesNode(pt({}), 'n', ON_SUBJECT)).toBe(true)
+    expect(runnerTakesNode(pt({ point_x: 1, point_y: 0, output_mode: 'smallest', mask_grow: -32 }), 'n', ON_SUBJECT)).toBe(true)
+    for (const w of [{ point_x: 1.5 }, { point_y: -0.1 }, { mask_grow: 33 }, { output_mode: 'all' }, { frames: ['l', 1] }]) expect(runnerTakesNode(pt(w), 'n', ON_SUBJECT), JSON.stringify(w)).toBe(false)
+    // The canvas counts the pictures that come in (one from a loader); "up to" the cap for a clip.
+    expect(upstreamPictureCount({ id: 'x', data: { nodeType: SUBJECT_MASK_CLASS, inputs: [{ name: 'frames' }] } }, [{ id: 'l', data: { nodeType: 'LoadImage' } }], [{ source: 'l', target: 'x', targetHandle: 'input-0' }])).toBe(1)
+    expect(SUBJECT_MASK_WORDS.noPicture).toMatch(/^[A-Z][^_]*\.$/)
+  })
+
+  it('with the family off, the class goes to the engine and is named', () => {
+    const p: ApiPrompt = { l: LOAD, m: subjectNode() }
+    expect(runnerTakesNode(p, 'm', new Set(['cards', 'sam-3-masks']))).toBe(false)
+    expect(nodesNeedingEngine(p, { runnerOn: true, families: new Set(['cards']), titleOf: id => id })).toEqual(['m'])
+    expect(nodesNeedingEngine(p, { runnerOn: true, families: ON_SUBJECT, titleOf: id => id })).toEqual([])
+  })
 })

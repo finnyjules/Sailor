@@ -356,6 +356,8 @@ export const RUNNER_ROUTES: Readonly<Record<string, Route>> = {
   // R7.4, Mask by text and Mask extractor (family sam-3-masks): one call to fal's SAM 3 on the first picture.
   'MaskByText': r('fal', null, 'no SAM 3 on Replicate is carded'),
   'MaskExtractor': r('fal', null, 'no SAM 3 on Replicate is carded'),
+  // R7.5, Subject mask (family subject-mask): one call to fal's SAM 3 per picture or frame.
+  'SubjectMask': r('fal', null, 'no SAM 3 on Replicate is carded'),
   // R3.8, music and speech (family audio-gen): Replicate, as Python.
   ...Object.fromEntries([
     'GenerateMusicNode', 'MusicGenRemoteNode', 'GenerateSpeechNode', 'MiniMaxSpeechRemoteNode',

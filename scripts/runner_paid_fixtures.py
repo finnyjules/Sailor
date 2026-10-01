@@ -188,7 +188,14 @@ Groups:
              frontend/server/runner/generators/localModels.ts,
              frontend/shared/runner/samInput.ts and
              frontend/server/runner/pixels/samMask.ts
-             (tests/unit/runner-local-masks.unit.spec.ts)
+             (tests/unit/runner-local-masks.unit.spec.ts). Its `subject`
+             part (R7.5): Subject mask (comfy_extras/nodes_subject_track.py)
+             with MobileSAM's encoder and decoder swapped for stand-ins that
+             answer three recorded candidate masks with scores; the real
+             execute picks one (best / largest / smallest), grows or shrinks
+             it (mask_grow −32 / −1 / 0 / 3 / 32 and Python's half-to-even
+             rounding) and makes the cutout, on pictures and a clip, for
+             frontend/server/runner/pixels/subjectMask.ts
   e2e    (R3.18) the controller check's chained workflows no single-node
              case covers, node by node (Summarize → Generate an image;
              Separate background and foreground → Frame; Upscale → Remove
@@ -3887,7 +3894,113 @@ def local_masks_group() -> dict:
     finally:
         shutil.rmtree(temp, ignore_errors=True)
     return {"cases": cases, "size": [w, h], "answers": answers,
-            "candidates": [_b64(np.ascontiguousarray(c, dtype="<f4").tobytes()) for c in cands]}
+            "candidates": [_b64(np.ascontiguousarray(c, dtype="<f4").tobytes()) for c in cands],
+            "subject": local_subject_cases()}
+
+
+def local_subject_cases() -> dict:
+    """Subject mask (R7.5): the real execute with MobileSAM's encoder and decoder swapped for
+    stand-ins (no model, no network). The decoder answers three recorded candidate masks
+    (logits ±10 at the picture's own size, so Python's resize never runs) and their scores;
+    the real execute then picks one (best / largest / smallest), grows or shrinks it
+    (cv2.dilate / cv2.erode, 3 × 3, round(mask_grow) times) and makes the cutout. Each case
+    records the click the decoder received, the mask and the cutout."""
+    import hashlib
+    import numpy as np
+    from comfy_extras import nodes_subject_track as st
+
+    w, h = MASKS_W, MASKS_H
+    seen: dict = {}
+
+    class _In:
+        def __init__(self, name):
+            self.name = name
+
+    class Encoder:
+        def get_inputs(self):
+            return [_In("image")]
+
+        def run(self, _outputs, feed):
+            assert feed["image"].shape == (1, 3, 1024, 1024), feed["image"].shape
+            return [np.zeros((1, 256, 64, 64), dtype=np.float32)]
+
+    class Decoder:
+        def __init__(self, frames):
+            self.frames = list(frames)
+
+        def get_inputs(self):
+            return [_In(n) for n in ("image_embeddings", "point_coords", "point_labels", "mask_input", "has_mask_input", "orig_im_size")]
+
+        def run(self, _outputs, feed):
+            cands, scores = self.frames.pop(0)
+            seen.setdefault("coords", []).append([float(v) for v in feed["point_coords"][0, 0]])
+            seen.setdefault("labels", []).append([float(v) for v in feed["point_labels"][0]])
+            seen.setdefault("orig", []).append([float(v) for v in feed["orig_im_size"]])
+            logits = np.stack([np.where(c > 0, 10.0, -10.0) for c in cands]).astype(np.float32)[None]
+            return [logits, np.asarray([scores], dtype=np.float32)]
+
+    def disc(cx, cy, r):
+        return _masks_disc(w, h, cx, cy, r)
+
+    sets = {
+        # Three nested-ish discs, one touching the top and left edges.
+        "a": ([disc(7, 5, 4), disc(15, 9, 6), disc(2, 1, 5)], [0.2, 0.9, 0.5]),
+        # A wide one past every edge, a small one, and an empty one (smallest picks it).
+        "b": ([disc(12, 8, 30), disc(18, 12, 2.5), np.zeros((h, w), dtype=np.float32)], [0.7, 0.3, 0.1]),
+        # The bottom-right corner, a middle one, a thin bar.
+        "c": ([disc(23, 15, 7), disc(11, 7, 5), (np.abs(np.mgrid[0:h, 0:w][0] - 8) < 1).astype(np.float32)], [0.4, 0.6, 0.8]),
+    }
+
+    cases: list = []
+
+    def run(name, pictures, frame_sets, point_x, point_y, mode, grow):
+        seen.clear()
+        frames = torch_cat([_picture_tensor(p) for p in pictures])
+        with mock.patch.object(st.os.path, "isfile", lambda _p: True), \
+                mock.patch.object(st, "_get_encoder", lambda: Encoder()), \
+                mock.patch.object(st, "_get_decoder", lambda: Decoder([sets[k] for k in frame_sets])):
+            res = st.SubjectMaskNode.execute(frames=frames, point_x=point_x, point_y=point_y, output_mode=mode, mask_grow=grow)
+        mask, cutout = res.args
+        m = np.ascontiguousarray(mask.detach().cpu().float().numpy())
+        c = np.ascontiguousarray(cutout.detach().cpu().float().numpy())
+        assert set(np.unique(m).tolist()) <= {0.0, 1.0}, name
+        cases.append({
+            "name": name, "class_type": "SubjectMask", "pictures": [_b64(p) for p in pictures], "sets": list(frame_sets),
+            "widgets": {"point_x": point_x, "point_y": point_y, "output_mode": mode, "mask_grow": grow},
+            "sent_coords": seen["coords"], "sent_labels": seen["labels"], "sent_orig": seen["orig"],
+            "scale": 1024 / max(w, h),
+            "mask": {"shape": list(m.shape), "f32_sha256": hashlib.sha256(m.tobytes()).hexdigest(),
+                     "u8": _b64((m * 255).astype(np.uint8).tobytes())},
+            "cutout": {"shape": list(c.shape), "f32_sha256": hashlib.sha256(c.tobytes()).hexdigest(),
+                       "trunc8": _b64(np.clip(np.float32(255) * c, 0, 255).astype(np.uint8).tobytes())},
+            "ui": None if res.ui is None else "ui",
+        })
+
+    def torch_cat(ts):
+        import torch
+        return torch.cat(ts, dim=0)
+
+    seed = 8100
+    for mode in ("best", "largest", "smallest"):
+        for grow in (-32.0, -1.0, 0.0, 3.0, 32.0):
+            for k in ("a", "b", "c"):
+                seed += 1
+                run(f"subject · set {k} · {mode} · grow {grow}", [png_bytes(w, h, seed)], [k], 0.5, 0.5, mode, grow)
+    # Python's round() is half to even: 2.5 → 2, −2.5 → −2, 0.5 → 0, −1.5 → −2.
+    for grow in (2.5, -2.5, 0.5, -1.5):
+        seed += 1
+        run(f"subject · set a · best · grow {grow}", [png_bytes(w, h, seed)], ["a"], 0.5, 0.5, "best", grow)
+    # The click at the edges and off the middle.
+    for (px, py) in ((0.0, 0.0), (1.0, 1.0), (0.37, 0.81), (0.5, 0.03125)):
+        seed += 1
+        run(f"subject · click {px}, {py}", [png_bytes(w, h, seed)], ["c"], px, py, "best", 0.0)
+    # A clip of three frames: one decoder answer each, the same click on every frame.
+    run("subject · a clip of three frames · largest · grow 1", [png_bytes(w, h, 8190 + i) for i in range(3)], ["a", "b", "c"], 0.4, 0.6, "largest", 1.0)
+    run("subject · a clip of three frames · smallest · grow -2", [png_bytes(w, h, 8195 + i) for i in range(3)], ["c", "a", "b"], 0.4, 0.6, "smallest", -2.0)
+    return {
+        "cases": cases, "size": [w, h],
+        "sets": {k: {"candidates": [_b64(np.ascontiguousarray(c, dtype="<f4").tobytes()) for c in v[0]], "scores": v[1]} for k, v in sets.items()},
+    }
 
 
 GROUPS = {

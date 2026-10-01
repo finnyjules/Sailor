@@ -94,6 +94,18 @@ export const MASK_BY_TEXT_PROMPT = 'object'
 /** Mask extractor's `points` default. */
 export const MASK_EXTRACTOR_POINTS = '[{"x":0.5,"y":0.5,"label":1}]'
 
+// ── Subject mask (R7.5, family `subject-mask`) ──
+
+/** comfy_extras/nodes_subject_track.py SubjectMaskNode's node_id (MobileSAM, now SAM 3 on one click per picture). */
+export const SUBJECT_MASK_CLASS = 'SubjectMask'
+/** The node's `output_mode` options (its define_schema), in order. */
+export const SUBJECT_MASK_MODES = ['best', 'largest', 'smallest'] as const
+export type SubjectMaskMode = typeof SUBJECT_MASK_MODES[number]
+/** `point_x` / `point_y`: IO.Float.Input(default=0.5, min=0.0, max=1.0, step=0.01). */
+export const SUBJECT_MASK_POINT = { default: 0.5, min: 0, max: 1 } as const
+/** `mask_grow`: IO.Float.Input(default=0.0, min=-32.0, max=32.0, step=1.0). */
+export const SUBJECT_MASK_GROW = { default: 0, min: -32, max: 32 } as const
+
 /** Every moved class's family (each task adds its row once its port exists). */
 export const LOCAL_MODEL_FAMILY_OF: Readonly<Record<string, RunnerFamily>> = {
   [BG_REMOVE_CLASS]: 'bg-remove',
@@ -101,6 +113,7 @@ export const LOCAL_MODEL_FAMILY_OF: Readonly<Record<string, RunnerFamily>> = {
   [OBJECT_REMOVE_CLASS]: 'object-remove',
   [MASK_BY_TEXT_CLASS]: 'sam-3-masks',
   [MASK_EXTRACTOR_CLASS]: 'sam-3-masks',
+  [SUBJECT_MASK_CLASS]: 'subject-mask',
 }
 
 /** The service each moved class calls (ruling (b): the price's tooltip names it). Null: none (Lens, in the server). */
@@ -110,6 +123,7 @@ export const SERVICE_OF: Readonly<Record<string, LocalModelService | null>> = {
   [OBJECT_REMOVE_CLASS]: 'replicate',
   [MASK_BY_TEXT_CLASS]: 'fal',
   [MASK_EXTRACTOR_CLASS]: 'fal',
+  [SUBJECT_MASK_CLASS]: 'fal',
 }
 
 /** The tooltip on the price (ruling (b)): sentence case, plain, no node copy. */
@@ -151,6 +165,8 @@ export const LOCAL_MODEL_PICTURE_INPUT: Readonly<Record<string, string>> = {
   [BG_REMOVE_CLASS]: 'frames',
   [UPSCALE_2X_CLASS]: 'frames',
   [OBJECT_REMOVE_CLASS]: 'frames',
+  // R7.5: Subject mask, one SAM 3 call per picture or frame (ruling (f), the user's direction for clips).
+  [SUBJECT_MASK_CLASS]: 'frames',
 }
 
 /**
@@ -176,6 +192,8 @@ export const LOCAL_MODEL_PICTURE_SLOTS: Readonly<Record<string, readonly number[
   [BG_REMOVE_CLASS]: [0],
   [UPSCALE_2X_CLASS]: [0],
   [OBJECT_REMOVE_CLASS]: [0],
+  // R7.5: Subject mask's cutout is slot 1 (slot 0 is its mask).
+  [SUBJECT_MASK_CLASS]: [1],
 }
 
 /** What each moved class's other slots carry (applied only while its family is on, eligibility.ts outputKindsFor). */
@@ -188,6 +206,20 @@ export const LOCAL_MODEL_OUTPUT_KINDS: Readonly<Record<string, Readonly<Record<n
   // R7.4: one mask, the first picture's size ([1, H, W]).
   [MASK_BY_TEXT_CLASS]: { 0: 'mask' },
   [MASK_EXTRACTOR_CLASS]: { 0: 'mask' },
+  // R7.5: a mask per picture or frame; its cutout (slot 1) follows its input (values.ts KIND_FOLLOWS_INPUT).
+  [SUBJECT_MASK_CLASS]: { 0: 'mask' },
+}
+
+/** The slot a picture class's picture (or a clip's frame batch) comes out of: 0, but Subject mask's cutout 1. */
+export function localModelPictureSlot(classType: string): number {
+  return has(LOCAL_MODEL_PICTURE_SLOTS, classType) ? LOCAL_MODEL_PICTURE_SLOTS[classType]![0]! : 0
+}
+
+/** The slot a picture class's mask comes out of (Background remove 1, Subject mask 0), or null when it has none. */
+export function localModelMaskSlot(classType: string): number | null {
+  const row = has(LOCAL_MODEL_OUTPUT_KINDS, classType) ? LOCAL_MODEL_OUTPUT_KINDS[classType]! : {}
+  const slot = Object.keys(row).find(k => row[Number(k)] === 'mask')
+  return slot === undefined ? null : Number(slot)
 }
 
 /** The largest picture each class's service takes (pixels), where its page states one (rule 6). */
@@ -241,10 +273,18 @@ export const SAM_MASK_WORDS = {
   pointsUnreadable: 'These click points can’t be read.',
 } as const
 
+/** Subject mask's own words (R7.5). */
+export const SUBJECT_MASK_WORDS = {
+  noPicture: 'There is no picture to find the subject in.',
+  overCap: 'This clip is too long to find the subject in here.',
+  noMode: 'Pick which mask to keep: best, largest or smallest.',
+} as const
+
 /** What the start of the run says of a clip over the frame cap, in the class's own words. */
 export function overCapWords(classType: string): string {
   if (classType === UPSCALE_2X_CLASS) return UPSCALE_2X_WORDS.overCap
   if (classType === OBJECT_REMOVE_CLASS) return OBJECT_REMOVE_WORDS.overCap
+  if (classType === SUBJECT_MASK_CLASS) return SUBJECT_MASK_WORDS.overCap
   return LOCAL_MODEL_WORDS.overCap
 }
 
@@ -265,6 +305,13 @@ const MASK_BY_TEXT_WIDGETS: Readonly<Record<string, RunnerWidgetSpec>> = {
 const MASK_EXTRACTOR_WIDGETS: Readonly<Record<string, RunnerWidgetSpec>> = {
   feather: { type: 'FLOAT', required: true, min: SAM_MASK_FEATHER.min, max: SAM_MASK_FEATHER.max },
   invert: { type: 'BOOLEAN', required: true },
+}
+
+const SUBJECT_MASK_WIDGETS: Readonly<Record<string, RunnerWidgetSpec>> = {
+  point_x: { type: 'FLOAT', required: true, min: SUBJECT_MASK_POINT.min, max: SUBJECT_MASK_POINT.max },
+  point_y: { type: 'FLOAT', required: true, min: SUBJECT_MASK_POINT.min, max: SUBJECT_MASK_POINT.max },
+  output_mode: { type: 'COMBO', required: true, options: SUBJECT_MASK_MODES },
+  mask_grow: { type: 'FLOAT', required: true, min: SUBJECT_MASK_GROW.min, max: SUBJECT_MASK_GROW.max },
 }
 
 const BG_REMOVE_WIDGETS: Readonly<Record<string, RunnerWidgetSpec>> = {
@@ -327,6 +374,15 @@ export function localModelRows(): Record<string, RunnerNodeRule> {
       inputCheck: ['local-model-source', 'effect-preview-name', 'sam-points'],
       widgets: MASK_EXTRACTOR_WIDGETS,
     },
+    // R7.5: the picture or clip (a SAM 3 call per picture or frame), and the settings as ComfyUI validates them.
+    [SUBJECT_MASK_CLASS]: {
+      family: 'subject-mask',
+      mustLink: ['frames'],
+      required: ['frames'],
+      valueInputs: { frames: ['files', 'frames'] },
+      inputCheck: 'local-model-source',
+      widgets: SUBJECT_MASK_WIDGETS,
+    },
   }
 }
 
@@ -348,6 +404,8 @@ const LOCAL_MODEL_SLUG: Readonly<Record<string, string>> = {
   // R7.4: SAM 3's card (paidRates.ts, `per_call` $0.005, verified): one call per node.
   [MASK_BY_TEXT_CLASS]: SAM_3_SLUG,
   [MASK_EXTRACTOR_CLASS]: SAM_3_SLUG,
+  // R7.5: the same card, one call per picture or frame.
+  [SUBJECT_MASK_CLASS]: SAM_3_SLUG,
 }
 
 /**

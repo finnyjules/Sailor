@@ -464,6 +464,8 @@ export const PAID_PICTURE_FAMILY: Readonly<Record<string, RunnerFamily>> = {
  */
 export const PAID_PICTURE_SLOTS: Readonly<Record<string, readonly number[]>> = {
   [SPLIT_CLASS]: [0, 1],
+  // R7.5: Subject mask's cutout (slot 1; slot 0 is its mask), a picture only while `subject-mask` is on.
+  ...Object.fromEntries(Object.entries(LOCAL_MODEL_PICTURE_SLOTS).filter(([, s]) => s.length !== 1 || s[0] !== 0)),
 }
 
 /**

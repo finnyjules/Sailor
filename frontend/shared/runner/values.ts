@@ -87,6 +87,8 @@ export const KIND_FOLLOWS_INPUT: Readonly<Record<string, { slot: number; input: 
   UpscaleImage: { slot: 0, input: 'frames' },
   // R7.3: Object removal, the same (the picture with the masked part filled, or a clip's frames).
   ObjectRemove: { slot: 0, input: 'frames' },
+  // R7.5: Subject mask's cutout (slot 1; slot 0 is its mask), the same.
+  SubjectMask: { slot: 1, input: 'frames' },
 }
 
 /** What a wire carries: the source's declared kind for that slot (through Gates), files by default. */

@@ -91,6 +91,10 @@ export function pictureSourceOf(prompt: ApiPrompt, link: ApiLink, depth = 0): Pi
     case 'ObjectRemove':
       if (slot === 0) return 'tensor'
       break
+    // Subject mask (R7.5, taken only while `subject-mask` is on): its cutout (slot 1), an RGB PNG of Python's tensor.
+    case 'SubjectMask':
+      if (slot === 1) return 'tensor'
+      break
     default:
       // An effect's picture (R2.1): the tensor it made, kept with its own channels.
       if (Object.prototype.hasOwnProperty.call(EFFECT_PICTURE_OUTPUTS, node.class_type)) {

@@ -1,7 +1,8 @@
 /**
  * SAM 3's requests (fal-ai/sam-3/image), shared by the inpaint click-to-select
- * route (server/api/inpaint/segment.post.ts) and the runner's Mask by text and
- * Mask extractor (step 3, R7.4: server/runner/generators/localModels.ts).
+ * route (server/api/inpaint/segment.post.ts) and the runner's Mask by text,
+ * Mask extractor (step 3, R7.4) and Subject mask (R7.5):
+ * server/runner/generators/localModels.ts.
  * Moved here from server/utils/samInput.ts (which re-exports it).
  *
  * Unlike the old segment-everything SAM, SAM 3 actually consumes the points:
@@ -84,6 +85,21 @@ export function samPointsInput(imageUrl: string, points: readonly SamRequestPoin
 /** Mask by text's call (R7.4): the words, every mask back (their union is the mask, ruling (k)). */
 export function samTextInput(imageUrl: string, prompt: string): Record<string, unknown> {
   return { image_url: imageUrl, prompt, apply_mask: false, output_format: 'png', return_multiple_masks: true, max_masks: SAM_3_MAX_MASKS }
+}
+
+/** The candidates Subject mask chooses from: MobileSAM's three (its multimask output), SAM 3's default `max_masks`. */
+export const SAM_3_SUBJECT_MASKS = 3
+
+/**
+ * Subject mask's call (R7.5): one positive click at `(point_x·W, point_y·H)`,
+ * rounded to whole pixels as the route rounds them and kept on the picture
+ * (a click at 1.0 is the last pixel, not one past it), and every candidate
+ * back (`return_multiple_masks`) for the node's best / largest / smallest.
+ */
+export function samSubjectInput(imageUrl: string, pointX: number, pointY: number, w: number, h: number): Record<string, unknown> {
+  const x = Math.max(0, Math.min(w - 1, Math.round(pointX * w)))
+  const y = Math.max(0, Math.min(h - 1, Math.round(pointY * h)))
+  return { ...buildSamInput({ image: imageUrl, points: [{ x, y, label: 1 }] }, { syncMode: false }), return_multiple_masks: true, max_masks: SAM_3_SUBJECT_MASKS }
 }
 
 /**

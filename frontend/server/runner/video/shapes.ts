@@ -25,7 +25,7 @@ import { loadFramesPick, settingsOf } from '../media/frameNodes'
 import { probeVideoFile } from '../../media/values'
 import { pyFrameBound, type MediaProbe } from '../../media/probe'
 import { VIDEO_EFFECTS, mediaEffectParams, type FrameShape } from './table'
-import { BG_REMOVE_CLASS, OBJECT_REMOVE_CLASS, UPSCALE_2X_CLASS, localModelOn } from '#shared/runner/localModels'
+import { BG_REMOVE_CLASS, OBJECT_REMOVE_CLASS, SUBJECT_MASK_CLASS, UPSCALE_2X_CLASS, localModelOn, localModelPictureSlot } from '#shared/runner/localModels'
 
 const key = (l: ApiLink) => `${l[0]}:${l[1]}`
 
@@ -56,6 +56,15 @@ export function takenVideoEffect(classType: string, families: ReadonlySet<Runner
 export interface KeptBatch { maker: string; readers: Set<string> }
 
 /**
+ * The slot a batch maker hands its frame batch out of: 0, but Subject mask's
+ * cutout 1 (R7.5, its mask is slot 0). Every shape and carried batch of a
+ * maker is keyed `${id}:${batchSlotOf(class)}`.
+ */
+export function batchSlotOf(classType: string): number {
+  return classType === SUBJECT_MASK_CLASS ? localModelPictureSlot(classType) : 0
+}
+
+/**
  * Which slot carries which kept batch (by its maker's id), in prompt order:
  * a maker makes a new file; a Gate, Create video, a Video card, Get video
  * components of a made video and an effect that hands its input on carry the
@@ -83,10 +92,12 @@ export function batchesOf(prompt: ApiPrompt, families: ReadonlySet<RunnerFamily>
         break
       // R7.1 (ruling (f)): Background remove on a clip makes a batch of its own, frame for frame.
       // R7.2: Upscale (2×) on a clip too. R7.3: Object removal too.
+      // R7.5: Subject mask too, its cutout in slot 1 (batchSlotOf).
       case BG_REMOVE_CLASS:
       case UPSCALE_2X_CLASS:
       case OBJECT_REMOVE_CLASS:
-        if (localModelOn(n.class_type, families) && shapes.has(`${id}:0`)) { on = id; batches.set(id, { maker: id, readers: new Set() }) }
+      case SUBJECT_MASK_CLASS:
+        if (localModelOn(n.class_type, families) && shapes.has(`${id}:${batchSlotOf(n.class_type)}`)) { on = id; batches.set(id, { maker: id, readers: new Set() }) }
         break
       default:
         if (takenVideoEffect(n.class_type, families) && shapes.has(`${id}:0`)) {
@@ -97,7 +108,7 @@ export function batchesOf(prompt: ApiPrompt, families: ReadonlySet<RunnerFamily>
           else { on = id; batches.set(id, { maker: id, readers: new Set() }) }
         }
     }
-    if (on) carried.set(`${id}:0`, on)
+    if (on) carried.set(`${id}:${batchSlotOf(n.class_type)}`, on)
   }
   // Every node reading a slot that carries a batch reads that batch.
   for (const [id, n] of Object.entries(prompt)) {
@@ -136,8 +147,10 @@ export async function frameShapes(
       case 'LoadVideoFrames': s = await sourceShape(id, n.class_type); break
       // R7.1 (ruling (f)): Background remove on a clip hands on a batch of the clip's count and size.
       // R7.3: Object removal the same.
+      // R7.5: Subject mask's cutout the same, in its slot 1 (batchSlotOf).
       case BG_REMOVE_CLASS:
-      case OBJECT_REMOVE_CLASS: {
+      case OBJECT_REMOVE_CLASS:
+      case SUBJECT_MASK_CLASS: {
         const i = localModelOn(n.class_type, families) ? at(inputs.frames) : undefined
         if (i) s = { count: i.count, w: i.w, h: i.h, exact: i.exact, ...(i.counted ? { counted: true as const } : {}) }
         break
@@ -165,7 +178,7 @@ export async function frameShapes(
         s = spec.shape(mediaEffectParams(MEDIA_EFFECT_SCHEMAS[n.class_type], inputs), ins as FrameShape[])
       }
     }
-    if (s) shapes.set(`${id}:0`, s)
+    if (s) shapes.set(`${id}:${batchSlotOf(n.class_type)}`, s)
   }
   return shapes
 }

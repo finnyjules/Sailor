@@ -36,7 +36,7 @@ import { pythonInputRef, takenLuts, takenWaveforms } from '../inputs'
 import type { OutputFile } from '../types'
 import { parseCubeLut } from './core/look'
 import { LUT_HOSTED_MAX_BYTES, LUT_HOSTED_MAX_SIZE, VIDEO_EFFECTS, mediaEffectParams, type FrameShape, type SoundShape } from './table'
-import { batchesOf, takenVideoEffect, topoOrder } from './shapes'
+import { batchSlotOf, batchesOf, takenVideoEffect, topoOrder } from './shapes'
 import { waveSoundOf } from './waveSound'
 import type { SoundReadIO } from '../../media/values'
 
@@ -94,7 +94,8 @@ export function keptPeak(prompt: ApiPrompt, families: ReadonlySet<RunnerFamily>,
   const isAnc = (a: string, b: string) => anc.get(b)?.has(a) ?? false
   const comparable = (a: string, b: string) => a === b || isAnc(a, b) || isAnc(b, a)
   const size = new Map<string, number>()
-  for (const b of batches.keys()) size.set(b, keptBatchBound(shapes.get(`${b}:0`)!))
+  // A maker's batch is in its own slot (R7.5: Subject mask's cutout is slot 1).
+  for (const b of batches.keys()) size.set(b, keptBatchBound(shapes.get(`${b}:${batchSlotOf(prompt[b]!.class_type)}`)!))
   // Kept outputs never let go: Get video components' sound, a Save video's re-encoded frames.
   const extra = new Map<string, number>()
   for (const id of order) {

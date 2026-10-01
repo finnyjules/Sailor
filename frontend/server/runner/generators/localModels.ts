@@ -70,6 +70,16 @@
  * picture, save_live_preview's fixed `live_preview_<node id>.png`). The mask
  * is the picture's size, kept as the runner keeps masks (16 bits, and its
  * float32 tensor when a reader takes the float: Object removal).
+ *
+ * Subject mask (R7.5, family `subject-mask`; comfy_extras/nodes_subject_track.py
+ * :160-248): one call to fal's SAM 3 per picture or frame (the user's direction:
+ * a clip runs here, one call a frame, as ruling (f)'s picture classes do), the
+ * click `(point_x·W, point_y·H)` as one positive point and every candidate back
+ * (#shared/runner/samInput samSubjectInput). Then, exact against Python given
+ * the candidates (../pixels/subjectMask.ts): the pick (best / largest /
+ * smallest), (m > 0), the grow or shrink (the worker's MaxFilter), and the
+ * cutout. Outputs: a mask per picture (slot 0) and the cutout (slot 1: a
+ * picture, or a clip's frame batch); no preview (Python returns no ui).
  */
 import sharp from 'sharp'
 import { isLink, type ApiLink } from '#shared/runner/graph'
@@ -80,9 +90,10 @@ import {
   BG_REMOVE_CLASS, BG_REMOVE_EDGE_SOFTNESS, BG_REMOVE_OUTPUTS, BG_REMOVE_SLUG, LOCAL_MODEL_WORDS, OBJECT_REMOVE_CLASS, OBJECT_REMOVE_GROW,
   OBJECT_REMOVE_SLUG, OBJECT_REMOVE_WORDS, UPSCALE_2X_CLASS, UPSCALE_2X_MAX_PIXELS, UPSCALE_2X_SLUG, UPSCALE_2X_WORDS, isLocalModelClass,
   MASK_BY_TEXT_CLASS, MASK_BY_TEXT_PROMPT, MASK_BY_TEXT_THRESHOLD, SAM_3_SLUG, SAM_MASK_CLASSES, SAM_MASK_FEATHER, SAM_MASK_WORDS,
-  type BgRemoveOutput,
+  SUBJECT_MASK_CLASS, SUBJECT_MASK_GROW, SUBJECT_MASK_MODES, SUBJECT_MASK_POINT, SUBJECT_MASK_WORDS,
+  type BgRemoveOutput, type SubjectMaskMode,
 } from '#shared/runner/localModels'
-import { parseMaskPoints, samPointsInput, samTextInput } from '#shared/runner/samInput'
+import { parseMaskPoints, samPointsInput, samSubjectInput, samTextInput } from '#shared/runner/samInput'
 import { effectPreviewName } from '#shared/runner/effects'
 import type { NodePlan, PipelineIO, PlanContext } from '../executors'
 import type { OutputFile, RunnerValue } from '../types'
@@ -102,6 +113,7 @@ import { framesOf, framesSink } from '../../media/values'
 import { floatReadBy, maskTensorBytes } from '../effects/tensorFiles'
 import type { SamAnswerMask } from '../pixels/samMask'
 import type { CutoutMode, CutoutResult } from '../pixels/cutout'
+import { subjectCutout8, subjectGrow, subjectMask8, subjectMaskFloat } from '../pixels/subjectMask'
 import { firstOutputUrl, upscaleInput } from './repair'
 import { fillInput, maskPng, splitPictures } from './splitLayers'
 
@@ -125,6 +137,7 @@ export function planLocalModel(ctx: PlanContext): NodePlan {
   if (cls === UPSCALE_2X_CLASS) return planUpscale2x(ctx)
   if (cls === OBJECT_REMOVE_CLASS) return planObjectRemove(ctx)
   if (SAM_MASK_CLASSES.has(cls)) return planSamMask(ctx)
+  if (cls === SUBJECT_MASK_CLASS) return planSubjectMask(ctx)
   throw new Error(`The runner cannot run a ${cls} node`)
 }
 
@@ -943,6 +956,148 @@ export function planSamMask(ctx: PlanContext): NodePlan {
         values: { 0: { kind: 'mask', files: [file], ...tensors } },
         ui: { images: [{ filename: f.filename, subfolder: f.subfolder, type: f.type }], animated: [false] },
       }
+    },
+  }
+}
+
+// ── Subject mask (R7.5) ──
+
+/** The grow took longer than the worker's limit. */
+export const SUBJECT_MASK_TIMEOUT = 'Growing the subject’s mask took longer than 2 minutes, so it was stopped'
+
+/** `output_mode` as ComfyUI hands it to execute (validated by the rule row; missing: the default). */
+function subjectModeOf(v: unknown): SubjectMaskMode {
+  if (v === undefined) return 'best'
+  if (typeof v === 'string' && (SUBJECT_MASK_MODES as readonly string[]).includes(v)) return v as SubjectMaskMode
+  throw new Error(SUBJECT_MASK_WORDS.noMode)
+}
+
+export function planSubjectMask(ctx: PlanContext): NodePlan {
+  const inputs = ctx.prompt[ctx.nodeId]!.inputs ?? {}
+  const link = inputs.frames
+  if (!isLink(link)) throw new Error(SUBJECT_MASK_WORDS.noPicture)
+  const pointX = floatOf(inputs.point_x, SUBJECT_MASK_POINT.default)
+  const pointY = floatOf(inputs.point_y, SUBJECT_MASK_POINT.default)
+  const mode = subjectModeOf(inputs.output_mode)
+  const grow = floatOf(inputs.mask_grow, SUBJECT_MASK_GROW.default)
+  const usd = paidCallUsd({ endpoint: SAM_3_SLUG })
+  if (usd == null) throw new Error('Finding the subject has no price yet')
+  const incoming = incomingOf(ctx, link)
+  const held = heldPictures(ctx)
+  const count = incoming.kind === 'frames' ? incoming.value.count : incoming.files.length
+  if (count < 1) throw new Error(SUBJECT_MASK_WORDS.noPicture)
+  // Never more calls than the hold covers (rule 6: the start's count is an upper bound).
+  if (count > held) throw new Error(LOCAL_MODEL_WORDS.tooManyFrames)
+  const clip = incoming.kind === 'frames'
+  // Python's picture (R3.7's splitPictures): behind a loader the loader's tensor, made in the run its node's.
+  const behind = !clip ? loaderFileBehind(ctx.prompt, link) : null
+  const loader: LoaderKind | null = behind ? { keepsAlpha: behind.classType === 'Image' } : null
+  const made = !clip && !behind && ctx.families ? madeSourceOf(ctx.prompt, link, ctx.families)?.view ?? null : null
+
+  interface SubjectPicture extends InPicture { w: number; h: number; rgb: () => Promise<Uint8Array> }
+  interface Found { mask: Uint8Array; cutout: Uint8Array; w: number; h: number }
+
+  /** One picture: the call, the candidates it needs (best: the first only), and Python's work on them. */
+  const findOne = async (io: PipelineIO, p: SubjectPicture): Promise<Found> => {
+    const key = `subject-${p.index}`
+    const image = await p.url()
+    const got = await io.call({ key, provider: 'fal', endpoint: SAM_3_SLUG, payload: samSubjectInput(image, pointX, pointY, p.w, p.h), media: 'image', usd })
+    // No mask at all: an all-black mask, charged (ruling (k): the call ran and answered).
+    const all = samMaskUrls(got.result)
+    const urls = mode === 'best' ? all.slice(0, 1) : all
+    const masks: SamAnswerMask[] = []
+    for (const [i, url] of urls.entries()) {
+      // A picture's candidates are kept for the run (a resumed node doesn't fetch them again); a clip's are not.
+      let bytes: Uint8Array
+      if (clip) bytes = (await io.download(url)).bytes
+      else {
+        const fresh: { bytes?: Uint8Array } = {}
+        const kept = await io.savedOnce(key, `mask-${i}`, async () => {
+          fresh.bytes = (await io.download(url)).bytes
+          return io.keep(fresh.bytes, 'bin')
+        })
+        bytes = fresh.bytes ?? await io.read(kept)
+      }
+      masks.push(await samAnswerMask(bytes))
+    }
+    const m8 = subjectMask8(masks, mode, p.w, p.h)
+    const mask = await subjectGrow(m8, p.w, p.h, grow, (l, w, h, size) => pixelsInWorker(io.signal, worker => worker.maxFilter(l, w, h, size), SUBJECT_MASK_TIMEOUT))
+    return { mask, cutout: subjectCutout8(await p.rgb(), mask), w: p.w, h: p.h }
+  }
+
+  /** The mask as the runner keeps masks (a 16-bit PNG: exact for Python's 0s and 1s). */
+  const maskFile = async (io: PipelineIO, a: Found): Promise<OutputFile> => io.keep(await encodeMask({ w: a.w, h: a.h, data: subjectMaskFloat(a.mask) }), 'png')
+
+  return {
+    kind: 'pipeline', prefix: 'subject_mask',
+    run: async (io: PipelineIO) => {
+      const masks: OutputFile[] = []
+      if (incoming.kind === 'files') {
+        const files = incoming.files
+        // Python's picture of each, read before any call: its RGB PNG (null: the file itself is) and its size.
+        const pics: Awaited<ReturnType<typeof splitPictures>>[] = []
+        for (const f of files) pics.push(await splitPictures(await io.read(f), loader, io.signal, made))
+        const cutouts: OutputFile[] = []
+        async function* each(): AsyncIterable<SubjectPicture> {
+          for (const [index, f] of files.entries()) {
+            const pic = pics[index]!
+            yield {
+              index, w: pic.w, h: pic.h,
+              url: async () => (pic.fill ? io.handOff(pic.fill, 'subject_image.png') : ctx.toUrl(f)),
+              rgb: async () => (await rgbOfPng(pic.fill ?? await io.read(f))).rgb,
+            }
+          }
+        }
+        await inOrder(each(), p => findOne(io, p as SubjectPicture), async (a) => {
+          masks.push(await maskFile(io, a))
+          cutouts.push(await io.keep(await png8(a.cutout, a.w, a.h, 3, 6), 'png'))
+        }, io.signal)
+        return { values: { 0: { kind: 'mask', files: masks }, 1: { kind: 'files', files: cutouts } }, ui: null }
+      }
+      // A clip: its frames decoded one at a time, each sent, the cutout batch written in order.
+      const v = incoming.value
+      const media = io.media
+      if (!media) throw new Error(LOCAL_MODEL_WORDS.needsRun)
+      const batch = await mediaLease({ userId: media.userId, signal: io.signal }, async (lease) => {
+        const sink = framesSink(v.w, v.h, media, lease)
+        let finished = false
+        try {
+          const frames = framesOf(v, media, lease)[Symbol.asyncIterator]()
+          async function* each(): AsyncIterable<SubjectPicture> {
+            try {
+              for (let index = 0; ; index++) {
+                const g = await frames.next()
+                if (g.done) return
+                const rgb = g.value as Uint8Array
+                yield {
+                  index, w: v.w, h: v.h, rgb: async () => rgb,
+                  url: async () => {
+                    const png = await framePng(rgb, v.w, v.h)
+                    const name = `subject_frame_${index}.png`
+                    return ctx.bytesToUrl ? ctx.bytesToUrl({ filename: name, subfolder: '', type: 'temp' }, png) : io.handOff(png, name)
+                  },
+                }
+              }
+            }
+            finally {
+              await frames.return?.().catch(() => undefined)
+            }
+          }
+          const n = await inOrder(each(), p => findOne(io, p as SubjectPicture), async (a) => {
+            await sink.put(a.cutout)
+            masks.push(await maskFile(io, a))
+          }, io.signal)
+          if (n !== v.count) throw new MediaError('failed')
+          const out = await sink.done()
+          finished = true
+          return out
+        }
+        finally {
+          if (!finished) await sink.abort()
+        }
+      })
+      if (io.signal.aborted) throw new MediaError('stopped')
+      return { values: { 0: { kind: 'mask', files: masks }, 1: batch }, ui: null }
     },
   }
 }
