@@ -34,7 +34,7 @@ import { answerRgbPng } from './pictures/pythonView'
 import type { KeepStep } from './compositor/keep'
 import { createMemoryHeldBytes, type HeldBytes } from './heldBytes'
 import { createMemoryKeptBytes, withRunCap, type KeptBytes, type KeptExt } from './keptBytes'
-import { MEDIA_CAPS } from '#shared/runner/media'
+import { MEDIA_CAPS, MEDIA_WORDS } from '#shared/runner/media'
 import { TURNTABLE_CLASS } from '#shared/runner/turntable'
 import { turntableKeptBytes } from './generators/turntable'
 import { createFileAccess } from './fileAccess'
@@ -60,7 +60,7 @@ import { loadVideoStartProblems, videoFileVerdict } from './media/videoNodes'
 import { frameStartProblems, framesSoundVerdict } from './media/frameNodes'
 import { hasVideoEffect, keptPeak, lutStartProblems, mediaEffectRefusals, mediaEffectStartProblems, nearLimit, needsExactCount, waveformStartProblems } from './video/start'
 import { frameShapes, videoSourceShapeOf } from './video/shapes'
-import { hasLocalModelPicture, localModelStartProblems } from './localModelStart'
+import { hasLocalModelPicture, localModelStartProblems, whisperSoundBound } from './localModelStart'
 import { LOCAL_MODEL_WORDS, WHISPER_CLASS, WHISPER_WORDS, isLocalModelClass, whisperMaxSeconds } from '#shared/runner/localModels'
 import { perFrameCredits } from '#shared/pricing/nodePrice'
 import { hasSoundEffect, soundEffectRefusals, soundEffectStartProblems, soundKeptBytes, soundShapes, soundSourceShapeOf } from './video/soundShapes'
@@ -223,6 +223,13 @@ export interface StartRunInput {
   canvasId: string | null
   projectUuid: string | null
   projectName: string | null
+  /**
+   * The request's own signal (R7.7 fix round 1): aborted when the caller goes
+   * away while the run is being started. The start of the run's media work
+   * (probes, the sound-in WAVs it measures) runs under it, so a closed request
+   * leaves no tool process or worker job behind and holds no media slot.
+   */
+  signal?: AbortSignal
 }
 
 export interface LegStarted {
@@ -1311,6 +1318,12 @@ export function createEngine(deps: EngineDeps) {
       })
       if (media) {
         if (media.problem !== null) throw new Error(media.problem)
+        // R7.7: a Whisper sound longer than this place sends (one whose maker couldn't be bounded before the
+        // hold, or within a source's second of slack) stops here, before the hand-off and the call.
+        const heard = media.measured.seconds.audio
+        if (take.prompt[id]!.class_type === WHISPER_CLASS && typeof heard === 'number' && heard > whisperMaxSeconds(deps.hosted() ? 'hosted' : 'local')) {
+          throw new Error(WHISPER_WORDS.tooLong)
+        }
         // The tight hold (F22 fix round 1): the files must be the ones the start
         // of the run measured and held for, and cost no more.
         const recorded = take.measured && Object.prototype.hasOwnProperty.call(take.measured, id) ? take.measured[id] : undefined
@@ -2209,30 +2222,54 @@ export function createEngine(deps: EngineDeps) {
     // The node's turn reads them again. What was measured is recorded on the
     // take (the tight hold, F22 fix round 1).
     const measured: Record<string, MeasuredMedia>[] = prompts.map(() => ({}))
+    // The request going away stops this media work (R7.7 fix round 1): every probe and decode below
+    // runs under its signal (each tool job in its own media slot, given back when it is killed).
+    const startSignal = i.signal
+    const stoppedWords = (e: unknown) => (startSignal?.aborted ? MEDIA_WORDS.stopped : null) ?? (e instanceof Error ? e.message : String(e))
     for (const [index, p] of prompts.entries()) {
+      // R7.7 fix round 1: Whisper transcribe's sound bounded before the hold from its maker (R6.9's
+      // sound start pass: headers and the sound effects' widgets, probes only — nothing is decoded).
+      let whisperShapes: Awaited<ReturnType<typeof soundShapes>> | null = null
       for (const [nodeId, n] of Object.entries(p)) {
         if (!mediaNodeKind(n)) continue
         await assertFilesOwned(nodeMediaFiles(p, nodeId), i.userId, deps.hosted(), deps.ownership)
+        const whisper = n.class_type === WHISPER_CLASS
         const media = await nodeMediaCheck(p, nodeId, {
           read: f => files.read(f), size: f => files.size(f), strict: deps.hosted(),
-          // A sound-in node's sound named by the prompt (R3.10): Python's WAV of it, as `load` reads the file.
-          soundFileWav: async (f) => {
-            if (!(await files.exists(f))) throw new Error(SOUND_FILE_MISSING)
-            // R7.7: Whisper transcribe's whole sound, 16 kHz mono.
-            const read = n.class_type === WHISPER_CLASS ? whisperWavOf : pythonWavOf
-            return read({ kind: 'files', files: [f], sound: { decode: 'load' } }, 'LoadAudio', { access: files, userId: i.userId, hosted: deps.hosted() })
-          },
-          videoUploadProblem: f => lipsyncUploadProblem(f, { access: files, userId: i.userId, hosted: deps.hosted() }),
+          // A sound-in node's sound named by the prompt (R3.10): Python's WAV of it, as `load` reads the file
+          // (its first 60 s), under the request's signal. Whisper transcribe's isn't decoded here (bounded below).
+          ...(whisper ? {} : {
+            soundFileWav: async (f: OutputFile) => {
+              if (!(await files.exists(f))) throw new Error(SOUND_FILE_MISSING)
+              return pythonWavOf({ kind: 'files', files: [f], sound: { decode: 'load' } }, 'LoadAudio', { access: files, userId: i.userId, hosted: deps.hosted(), signal: startSignal })
+            },
+          }),
+          videoUploadProblem: f => lipsyncUploadProblem(f, { access: files, userId: i.userId, hosted: deps.hosted(), signal: startSignal }),
         })
-        if (n.class_type === WHISPER_CLASS) {
+        if (startSignal?.aborted) throw refuse(MEDIA_WORDS.stopped, 400, { nodeId, classType: n.class_type })
+        if (whisper) {
           const place = deps.hosted() ? 'hosted' as const : 'local' as const
+          const cap = whisperMaxSeconds(place)
           if (media && media.problem !== null) throw refuse(media.problem, 400, { nodeId, classType: n.class_type })
-          // R7.7: a sound longer than Whisper sends here leaves the workflow to the engine (a stop-gap, R7.7's report).
-          const a = media?.measured.seconds.audio
-          if (typeof a === 'number' && a > whisperMaxSeconds(place)) throw refuse(WHISPER_WORDS.tooLong, 400, { nodeId, classType: n.class_type, reason: RUNNER_NOT_ELIGIBLE })
-          // Not known yet (a sound made in the run): only where it runs is recorded, so the hold is that
-          // place's longest sound (shared/runner/localModels.ts whisperCalls), never below the charge.
-          measured[index]![nodeId] = media ? media.measured : { seconds: { place }, sha: {} }
+          // The empty Audio card's second of silence is measured exactly (its WAV, as at the turn).
+          if (media) { measured[index]![nodeId] = { ...media.measured, seconds: { ...media.measured.seconds, place } }; continue }
+          const link = n.inputs?.audio
+          let bound: number | null = null
+          if (isLink(link)) {
+            try {
+              whisperShapes ??= await soundShapes(p, families, soundSourceShapeOf({ prompt: p, access: files, userId: i.userId, hosted: deps.hosted(), signal: startSignal }))
+            }
+            catch (e) { throw refuse(stoppedWords(e), 400, { nodeId, classType: n.class_type }) }
+            if (startSignal?.aborted) throw refuse(MEDIA_WORDS.stopped, 400, { nodeId, classType: n.class_type })
+            bound = whisperSoundBound(p, link, whisperShapes)
+          }
+          // Longer than Whisper sends here: refused plainly, before anything is held or run. A source's
+          // bound is its header's length plus a second, so a loaded file is refused just when its own
+          // length passes the cap; within that second the node's turn is the backstop.
+          if (bound !== null && bound > cap + 1 + 1e-3) throw refuse(WHISPER_WORDS.tooLong, 400, { nodeId, classType: n.class_type })
+          // Held on the bound (or, where the maker can't be bounded, on the place's longest sound); the
+          // node's turn measures the WAV it sends and is charged on that, never above the hold.
+          measured[index]![nodeId] = { seconds: { place, ...(bound !== null ? { audioUpTo: Math.min(bound, cap) } : {}) }, sha: {} }
           continue
         }
         if (!media) continue
@@ -2287,7 +2324,7 @@ export function createEngine(deps: EngineDeps) {
         if (wave) throw refuse(wave.message, 400, { nodeId: wave.nodeId, classType: wave.classType, reason: RUNNER_NOT_ELIGIBLE })
       }
       const shapeAll = async (count: boolean) => Promise.all(prompts.map(p => frameShapes(p, families,
-        videoSourceShapeOf({ prompt: p, access: files, userId: i.userId, hosted: deps.hosted(), count }))))
+        videoSourceShapeOf({ prompt: p, access: files, userId: i.userId, hosted: deps.hosted(), signal: i.signal, count }))))
       let shapes = await shapeAll(false)
       const several = prompts.length > 1
       const keptOf = (k: number) => {
@@ -2320,7 +2357,7 @@ export function createEngine(deps: EngineDeps) {
       if (!hasLocalModelPicture(p, families)) continue
       const counted = await localModelStartProblems(p, families, {
         hosted: deps.hosted(),
-        shapes: () => frameShapes(p, families, videoSourceShapeOf({ prompt: p, access: files, userId: i.userId, hosted: deps.hosted(), count: true })),
+        shapes: () => frameShapes(p, families, videoSourceShapeOf({ prompt: p, access: files, userId: i.userId, hosted: deps.hosted(), signal: i.signal, count: true })),
         // R7.2: a loaded picture's header, for a service's largest picture (Upscale (2×)).
         read: f => files.read(f),
       })
@@ -2346,7 +2383,7 @@ export function createEngine(deps: EngineDeps) {
     // sound held at once, the sound caps, the run's kept total with the video effects' peak) or reading a sound
     // that can't be known before the run leaves the whole workflow to the engine (RUNNER_NOT_ELIGIBLE).
     if (prompts.some(p => hasSoundEffect(p, families))) {
-      const all = await Promise.all(prompts.map(p => soundShapes(p, families, soundSourceShapeOf({ prompt: p, access: files, userId: i.userId, hosted: deps.hosted() }))))
+      const all = await Promise.all(prompts.map(p => soundShapes(p, families, soundSourceShapeOf({ prompt: p, access: files, userId: i.userId, hosted: deps.hosted(), signal: i.signal }))))
       for (const [k, p] of prompts.entries()) {
         const raised = soundEffectRefusals(p, families, all[k]!)
         if (raised) throw refuse(raised.message, 400, { nodeId: raised.nodeId, classType: raised.classType })
@@ -2356,7 +2393,7 @@ export function createEngine(deps: EngineDeps) {
       for (const [k, p] of prompts.entries()) {
         keptAll += soundKeptBytes(p, families, all[k]!)
         if (hasVideoEffect(p, families)) {
-          const shapes = await frameShapes(p, families, videoSourceShapeOf({ prompt: p, access: files, userId: i.userId, hosted: deps.hosted(), count: true }))
+          const shapes = await frameShapes(p, families, videoSourceShapeOf({ prompt: p, access: files, userId: i.userId, hosted: deps.hosted(), signal: i.signal, count: true }))
           const peak = keptPeak(p, families, shapes, { release: prompts.length === 1 })
           keptAll += peak ? peak.bytes : Number.POSITIVE_INFINITY
         }

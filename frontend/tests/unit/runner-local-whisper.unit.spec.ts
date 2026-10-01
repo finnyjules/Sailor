@@ -19,7 +19,7 @@ import { createHash } from 'node:crypto'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { createFakeFal, makeKit } from './__runner__/kit'
 import { clipPath, requireMediaTools } from './__runner__/mediaParity'
 import { checkPayload, loadProviderSchema } from './helpers/providerSchema'
@@ -45,6 +45,25 @@ import {
 } from '~~/server/runner/generators/localModels'
 import { whisperMono16k, whisperSilenceWav, whisperWavOfSamples, wavIsSilent, type PythonWav } from '~~/server/runner/soundWav'
 import { decodeAudio } from '~~/server/media/decode'
+import { mediaLimiter } from '~~/server/media/run'
+import { WHISPER_RESAMPLE_SLACK, whisperSoundBound } from '~~/server/runner/localModelStart'
+import { MEDIA_WORDS } from '#shared/runner/media'
+
+/** Every tool process the tests start (fix round 1: none may outlive a closed request), and a hook on each spawn. */
+const PROCS = vi.hoisted(() => ({ pids: [] as number[], onSpawn: null as null | ((tool: string, pid: number) => void) }))
+vi.mock('node:child_process', async (importOriginal) => {
+  const real = await importOriginal<typeof import('node:child_process')>()
+  return {
+    ...real,
+    spawn: ((...a: Parameters<typeof real.spawn>) => {
+      const c = real.spawn(...a)
+      if (c.pid) PROCS.pids.push(c.pid)
+      const hook = PROCS.onSpawn
+      if (hook && c.pid) { const pid = c.pid; setImmediate(() => hook(String(a[0]), pid)) }
+      return c
+    }) as typeof real.spawn,
+  }
+})
 
 // ── The fixture ──────────────────────────────────────────────────────────────
 
@@ -305,12 +324,17 @@ describe('through the engine (ComfyUI off): held, sent, charged', () => {
     // The WAV handed off: 2 s of 16 kHz mono.
     const wav = k.upload.mock.calls.map(x => x[0] as Uint8Array).find(b => b.length === 44 + 2 * 32000)
     expect(wav).toBeDefined()
-    expect(take.measured?.n?.seconds.audio).toBe(2)
+    // Fix round 1: bounded before the hold from the file's header (2 s, plus a second), nothing decoded;
+    // the turn measures the 2 s it sends and is charged on them.
+    const upTo = take.measured?.n?.seconds.audioUpTo
+    expect(take.measured?.n).toEqual({ seconds: { place: 'hosted', audioUpTo: upTo }, sha: {} })
+    expect(upTo).toBeCloseTo(3 + WHISPER_RESAMPLE_SLACK, 6)
     expect(take.nodes.n!.credits).toBe(credits({ audio: 2 }))
-    expect([...k.ledger.holds.values()].map(h => [h.credits, h.actual])).toEqual([[credits({ audio: 2 }), credits({ audio: 2 })]])
+    expect([...k.ledger.holds.values()].map(h => [h.credits, h.actual])).toEqual([[credits({ audioUpTo: upTo }), credits({ audio: 2 })]])
+    expect(credits({ audio: 2 })).toBeLessThanOrEqual(credits({ audioUpTo: upTo }))
   }, 120_000)
 
-  it('Auto subtitle up to Caption track, hosted: Load video → Get video components → Whisper (its rate wired) → a Text card; held at 30 minutes, charged the seconds sent', async () => {
+  it('Auto subtitle up to Caption track, hosted: Load video → Get video components → Whisper (its rate wired) → a Text card; held on the video\'s sound bound, charged the seconds sent', async () => {
     await requireMediaTools()
     const clip = 'v_stereo_aac.mp4'
     const fal = createFakeFal({ answer: () => ({ text: 'hi', chunks: [{ timestamp: [0, 0.5], text: ' hi ' }], languages: ['en'] }) })
@@ -327,14 +351,19 @@ describe('through the engine (ComfyUI off): held, sent, charged', () => {
     await k.engine.settled(runId)
     const take = (await k.store.get(runId))!.takes[0]!
     for (const id of ['l', 'g', 'n', 't0']) expect(take.nodes[id]!.status, `${id}: ${take.nodes[id]!.error ?? ''}`).toBe('done')
-    // The sound is made in the run: only its place is recorded, and the hold is the hosted ceiling.
-    expect(take.measured?.n).toEqual({ seconds: { place: 'hosted' }, sha: {} })
+    // Fix round 1: the sound is made in the run, bounded before the hold by the video file's sound stream
+    // (its header, plus a second); the hold is that, not the hosted ceiling.
+    const upTo = take.measured?.n?.seconds.audioUpTo as number
+    expect(take.measured?.n).toEqual({ seconds: { place: 'hosted', audioUpTo: upTo }, sha: {} })
+    expect(upTo).toBeGreaterThan(1)
+    expect(upTo).toBeLessThan(WHISPER_MAX_SECONDS.hosted)
     const fps = (take.nodes.g!.values![2] as { kind: 'number'; value: number }).value
     expect(take.nodes.n!.values?.[0]).toEqual({ kind: 'text', text: `0 ${Math.max(pyRoundHalfEven(0.5 * fps), 1)} hi` })
     const seconds = (k.upload.mock.calls.map(x => x[0] as Uint8Array).find(b => b.length > 44 && b[22] === 1 && new DataView(b.buffer, b.byteOffset).getUint32(24, true) === 16000)!.length - 44) / 2 / 16000
     expect(seconds).toBeGreaterThan(0)
     const holds = [...k.ledger.holds.values()]
-    expect(holds.map(h => h.credits)).toEqual([credits({ place: 'hosted' })])
+    expect(holds.map(h => h.credits)).toEqual([credits({ place: 'hosted', audioUpTo: upTo })])
+    expect(seconds).toBeLessThanOrEqual(upTo)
     expect(take.nodes.n!.credits).toBe(credits({ audio: seconds }))
     expect(holds.map(h => h.actual)).toEqual([credits({ audio: seconds })])
   }, 120_000)
@@ -351,7 +380,7 @@ describe('through the engine (ComfyUI off): held, sent, charged', () => {
     expect(fal.submitted()).toEqual([])
     // The start knew the silence (1 s): held at its price plus the card's render credit; settled at the
     // render credit alone (Whisper made no call).
-    expect(take.measured?.n?.seconds.audio).toBe(1)
+    expect(take.measured?.n?.seconds).toMatchObject({ audio: 1, place: 'hosted' })
     expect(take.nodes.n!.credits).toBe(0)
     expect([...k.ledger.holds.values()].map(h => [h.credits, h.actual])).toEqual([[credits({ audio: 1 }) + 1, 1]])
   }, 60_000)
@@ -371,15 +400,138 @@ describe('through the engine (ComfyUI off): held, sent, charged', () => {
     expect([...k.ledger.holds.values()].map(h => (h.state === 'released' ? 0 : h.actual))).toEqual([0])
   }, 60_000)
 
-  it('hosted, a loaded sound longer than 30 minutes: the workflow is left to the engine before any hold', async () => {
+  it('hosted, a loaded sound longer than 30 minutes: refused plainly before any hold (fix round 1: never the engine), from its header', async () => {
     await requireMediaTools()
     const k = makeKit({ hosted: true, deps: { families: () => ON } })
     putInput(k.root, 'long.wav', clipBytes('pcm16', 8000, 1, 8000 * (WHISPER_MAX_SECONDS.hosted + 1), 7203))
     const err = await k.engine.startRun({ userId: k.userId, takes: [{ s: loadAudio('long.wav'), n: whisperNode(), ...readers() }], ...START }).then(() => null, (e: Error & { data?: { reason?: string } }) => e)
     expect(err?.message).toBe(WHISPER_WORDS.tooLong)
-    expect((err as { data?: { reason?: string } })?.data?.reason ?? (err as { reason?: string })?.reason).toBe(RUNNER_NOT_ELIGIBLE)
+    expect((err as { data?: { reason?: string } })?.data?.reason ?? (err as { reason?: string })?.reason).not.toBe(RUNNER_NOT_ELIGIBLE)
     expect(k.ledger.hold).not.toHaveBeenCalled()
   }, 180_000)
+})
+
+describe('fix round 1 · Finding 2: a sound made in the run is bounded before the hold, from its maker', () => {
+  const FX_ON: ReadonlySet<RunnerFamily> = new Set<RunnerFamily>([...ON, 'sound-effects'])
+
+  it('an R6 sound-effect chain from a long source into Whisper (hosted): refused plainly before the hold; nothing upstream charged or run', async () => {
+    await requireMediaTools()
+    const fal = createFakeFal({ answer: () => ({ text: '', chunks: [] }) })
+    const k = makeKit({ hosted: true, fal, deps: { families: () => FX_ON } })
+    // 20 minutes, joined to itself: 40 minutes, past the hosted 30.
+    putInput(k.root, 'long.wav', clipBytes('pcm16', 8000, 1, 8000 * 20 * 60, 7301))
+    const p: ApiPrompt = {
+      s: loadAudio('long.wav'),
+      c: { class_type: 'AudioConcat', inputs: { audio1: ['s', 0], audio2: ['s', 0], direction: 'after' } },
+      v: { class_type: 'AudioAdjustVolume', inputs: { audio: ['c', 0], volume: 1 } },
+      n: { ...whisperNode(), inputs: { ...whisperNode().inputs, audio: ['v', 0] } },
+      ...readers(),
+    }
+    expect(isRunnerEligible(p, FX_ON)).toBe(true)
+    const err = await k.engine.startRun({ userId: k.userId, takes: [p], ...START }).then(() => null, (e: Error) => e)
+    expect(err?.message).toBe(WHISPER_WORDS.tooLong)
+    expect((err as { data?: { reason?: string } })?.data?.reason ?? (err as { reason?: string })?.reason).not.toBe(RUNNER_NOT_ELIGIBLE)
+    expect(k.ledger.hold).not.toHaveBeenCalled()
+    expect(fal.submitted()).toEqual([])
+  }, 120_000)
+
+  it('the same chain from a short source: held on the chain\'s bound, charged the seconds sent', async () => {
+    await requireMediaTools()
+    const fal = createFakeFal({ answer: () => ({ text: 'a', chunks: [{ timestamp: [0, 1], text: 'a' }] }) })
+    const k = makeKit({ hosted: true, fal, deps: { families: () => FX_ON } })
+    putInput(k.root, 'short.wav', clipBytes('pcm16', 8000, 1, 8000, 7302))
+    const p: ApiPrompt = {
+      s: loadAudio('short.wav'),
+      c: { class_type: 'AudioConcat', inputs: { audio1: ['s', 0], audio2: ['s', 0], direction: 'after' } },
+      n: { ...whisperNode(), inputs: { ...whisperNode().inputs, audio: ['c', 0] } },
+      ...readers(),
+    }
+    const { runId } = await k.engine.startRun({ userId: k.userId, takes: [p], ...START })
+    await k.engine.settled(runId)
+    const take = (await k.store.get(runId))!.takes[0]!
+    expect(take.nodes.n!.status, take.nodes.n!.error ?? '').toBe('done')
+    // Two 1 s sources, each bounded at 2 s by its header: 4 s, held on that.
+    expect(take.measured?.n?.seconds.audioUpTo).toBeCloseTo(4 + WHISPER_RESAMPLE_SLACK, 6)
+    const sent = take.measured?.n?.seconds.audioUpTo as number
+    expect(take.nodes.n!.credits).toBe(credits({ audio: 2 }))
+    expect(take.nodes.n!.credits).toBeLessThanOrEqual(credits({ audioUpTo: sent }))
+  }, 120_000)
+
+  it('whisperSoundBound: the sound start pass\'s shapes; Generate music by its duration; speech and a cloned voice can\'t be bounded', () => {
+    const shapes = new Map([['s:0', { rate: 8000, channels: 1, samples: 16000, exact: false }]])
+    const p: ApiPrompt = {
+      s: loadAudio(),
+      g: { class_type: 'ComfyGateNode', inputs: { data_in: ['s', 0], bypass: true } },
+      m: { class_type: 'GenerateMusicNode', inputs: { model: 'MusicGen', prompt: 'x', duration: 8 } },
+      w: { class_type: 'GenerateMusicNode', inputs: { model: 'MusicGen', prompt: 'x', duration: ['x', 0] } },
+      a: { class_type: 'Audio', inputs: { source: ['m', 0], audio: '' } },
+      sp: { class_type: 'GenerateSpeechNode', inputs: { text: 'Hello.' } },
+      cl: { class_type: 'CloneSingingVoiceNode', inputs: { audio: ['s', 0] } },
+    }
+    expect(whisperSoundBound(p, ['s', 0], shapes)).toBe(2 + WHISPER_RESAMPLE_SLACK)
+    expect(whisperSoundBound(p, ['g', 0], shapes)).toBe(2 + WHISPER_RESAMPLE_SLACK)
+    expect(whisperSoundBound(p, ['m', 0], shapes)).toBe(9)
+    expect(whisperSoundBound(p, ['a', 0], shapes)).toBe(9)
+    expect(whisperSoundBound(p, ['w', 0], shapes)).toBe(31)
+    expect(whisperSoundBound(p, ['sp', 0], shapes)).toBeNull()
+    expect(whisperSoundBound(p, ['cl', 0], shapes)).toBeNull()
+    // The hold reads the bound, never past the place's cap.
+    expect(whisperCalls({ audioUpTo: 9, place: 'hosted' }).steps?.[0]?.call.inputSeconds).toBe(9)
+    expect(whisperCalls({ audioUpTo: 5000, place: 'hosted' }).steps?.[0]?.call.inputSeconds).toBe(1800)
+    expect(whisperCalls({ audio: 2, audioUpTo: 9 }).steps?.[0]?.call.inputSeconds).toBe(2)
+  })
+})
+
+describe('fix round 1 · Finding 1: a request closed while the run is being started leaves nothing running', () => {
+  const pids = (from: number) => PROCS.pids.slice(from)
+  async function allGone(list: number[], ms = 1000) {
+    const t0 = Date.now()
+    for (const pid of list) {
+      while (Date.now() - t0 < ms) {
+        try { process.kill(pid, 0) }
+        catch { break }
+        await new Promise(r => setTimeout(r, 10))
+      }
+      expect(() => process.kill(pid, 0), `pid ${pid}`).toThrow()
+    }
+  }
+
+  it.each([
+    ['Transcribe audio (R3.10): its WAV decoded at the start (ffmpeg)', 'TranscribeAudioNode', 'ffmpeg'],
+    ['Whisper transcribe: its sound\'s header probed at the start (ffprobe)', WHISPER_CLASS, 'ffprobe'],
+  ] as const)('%s — closed mid-way: refused, no tool process left within a second, the slot given back, nothing held', async (_n, cls, tool) => {
+    await requireMediaTools()
+    const families = new Set<RunnerFamily>([...ON, 'sound-in'])
+    const k = makeKit({ hosted: true, deps: { families: () => families } })
+    putInput(k.root, 'speech.wav', clipBytes('pcm16', 48000, 2, 48000 * 50, 7401))
+    const n = cls === WHISPER_CLASS ? whisperNode() : { class_type: cls, inputs: { model: 'Whisper', audio: ['s', 0], language: 'auto', translate: false } }
+    const ctl = new AbortController()
+    const before = PROCS.pids.length
+    // Checked BEFORE the clean-up below kills anything: the request's signal itself ended every tool process.
+    const check = async () => allGone(pids(before))
+    let seen = 0
+    // The tool is frozen mid-work (SIGSTOP) as the request closes: only the request's signal can end it
+    // (Stop kills with SIGKILL, which reaches a stopped process); without it the start would wait for ever.
+    PROCS.onSpawn = (path, pid) => {
+      if (!path.includes(tool) || seen++) return
+      try { process.kill(pid, 'SIGSTOP') } catch { /* already done */ }
+      ctl.abort()
+    }
+    try {
+      const started = k.engine.startRun({ userId: k.userId, takes: [{ s: loadAudio(), n, ...(cls === WHISPER_CLASS ? readers() : {}) }], ...START, signal: ctl.signal }).then(() => null, (e: Error) => e)
+      const err = await Promise.race([started, new Promise<'hung'>(r => setTimeout(() => r('hung'), 5000))])
+      expect(seen).toBeGreaterThan(0)
+      expect(err === 'hung' ? 'hung' : err?.message).toBe(MEDIA_WORDS.stopped)
+      await check()
+    }
+    finally {
+      PROCS.onSpawn = null
+      for (const pid of pids(before)) { try { process.kill(pid, 'SIGKILL') } catch { /* gone */ } }
+    }
+    expect(pids(before).length).toBeGreaterThan(0)
+    expect(mediaLimiter().pending(k.userId)).toBe(0)
+    expect(k.ledger.hold).not.toHaveBeenCalled()
+  }, 60_000)
 })
 
 describe('the row, the family and the families-off invariant (rule 15)', () => {

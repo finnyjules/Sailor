@@ -52,6 +52,8 @@ import { keptPeak } from './video/start'
 import { VIDEO_EFFECTS } from './video/table'
 import { parseInputFileRef } from './inputs'
 import type { OutputFile } from './types'
+import type { SoundShape } from './video/table'
+import { MUSIC_MAX_SECONDS, MUSIC_MIN_SECONDS } from '#shared/runner/audioGen'
 
 /** Sources that hand on one picture (a provider's first answer, a loader's first frame, a render). */
 const ONE_PICTURE: ReadonlySet<string> = new Set(['LoadImage', 'Compositor', 'Scene3DStudio', 'TextOnPath', 'TextMask', 'ShaderEffect'])
@@ -327,4 +329,49 @@ export async function localModelStartProblems(
     return { counts, keptBytes: 0, problem: { message: LOCAL_MODEL_WORDS.unknownCount, nodeId: first, classType: prompt[first]!.class_type } }
   }
   return { counts, sizes, keptBytes: peak.bytes + masks, problem: null }
+}
+
+/** Generate music and its twin: the sound is its `duration` setting long (IO.Int 1–30; MusicGen makes that many seconds). */
+const MUSIC_CLASSES: ReadonlySet<string> = new Set(['GenerateMusicNode', 'MusicGenRemoteNode'])
+
+/**
+ * The resample to 16 kHz adds at most a sample (torchaudio's ceil): a bound
+ * taken from an exact length (the empty card, Empty audio) is widened by
+ * this so it stays a bound on what Whisper is sent and charged.
+ */
+export const WHISPER_RESAMPLE_SLACK = 1e-3
+
+/**
+ * R7.7 fix round 1: the most seconds of sound a Whisper node may get, before
+ * the run, from the sound's maker — a TRUE upper bound, or null where it
+ * can't be known:
+ *   - R6.9's sound start pass (`shapes`, ./video/soundShapes.ts): Load audio,
+ *     Record audio and an Audio card's own file by their header (plus a
+ *     second), Get video components' sound, the empty card's second of
+ *     silence, and every R6 sound effect's output from its inputs (a trim, a
+ *     concat, Empty audio…), followed back to the measured sources;
+ *   - Generate music (and its twin), through Gates and Audio cards: its
+ *     typed `duration` (a wired one: the most it takes, 30 s), plus a second;
+ *   - anything else (Generate speech, Clone a singing voice): null — held at
+ *     the place's longest sound, with the node's turn as the backstop (named
+ *     in R7.7's report).
+ */
+export function whisperSoundBound(prompt: ApiPrompt, link: ApiLink, shapes: ReadonlyMap<string, SoundShape>): number | null {
+  let at: ApiLink = link
+  for (let depth = 0; depth < 64; depth++) {
+    const s = shapes.get(`${at[0]}:${at[1]}`)
+    if (s && s.rate > 0) return s.samples / s.rate + WHISPER_RESAMPLE_SLACK
+    const n = prompt[at[0]]
+    if (!n) return null
+    const inputs = n.inputs ?? {}
+    if (n.class_type === GATE_CLASS && at[1] === 0 && isLink(inputs.data_in)) { at = inputs.data_in; continue }
+    if (n.class_type === 'Audio' && at[1] === 0 && isLink(inputs.source)) { at = inputs.source; continue }
+    if (MUSIC_CLASSES.has(n.class_type) && at[1] === 0) {
+      const d = inputs.duration
+      const typed = typeof d === 'number' && Number.isFinite(d) ? Math.min(Math.max(Math.trunc(d), MUSIC_MIN_SECONDS), MUSIC_MAX_SECONDS) : MUSIC_MAX_SECONDS
+      return typed + 1
+    }
+    return null
+  }
+  return null
 }

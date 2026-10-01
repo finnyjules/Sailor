@@ -271,6 +271,8 @@ export interface MeasuredMedia {
     videoFps?: number | null
     /** R7 (ruling (f)): the pictures a local-model node works through, counted at the start (./localModelStart.ts). */
     frames?: number | null
+    /** R7.7 fix round 1: the most seconds of sound a Whisper node may get, bounded before the run (not measured). */
+    audioUpTo?: number | null
     /** Where the node runs (R7.6: a clip's RIFE cap; R7.7: Whisper's longest sound, its hold when the sound isn't known yet). */
     place?: 'hosted' | 'local' | null
   }

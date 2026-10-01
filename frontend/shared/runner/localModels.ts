@@ -600,8 +600,10 @@ export function localModelCalls(classType: string, frames: number | null | undef
 
 /** What Slow motion (AI)'s and Whisper transcribe's prices read of the media (clipSettings.ts InputSeconds' fields). */
 export interface SlowMotionAiMeasured {
-  /** R7.7: the seconds of 16 kHz sound Whisper sends, measured (the start of the run, or the node's turn). */
+  /** R7.7: the seconds of 16 kHz sound Whisper sends, measured (the empty card's silence at the start of the run, or the node's turn). */
   audio?: number | null
+  /** R7.7 fix round 1: the most seconds it may send, bounded before the run from the sound's maker. */
+  audioUpTo?: number | null
   videoWidth?: number | null
   videoHeight?: number | null
   /** `frames` is the canvas's frame cap where it runs, not a measured clip (fix round 1): price that place's ceiling. */
@@ -656,16 +658,19 @@ export function slowMotionAiCalls(multiplier: unknown, frames: number | null | u
 /**
  * Whisper transcribe's call (R7.7), for its price: one Wizper call on R3.10's
  * card, by the seconds of sound sent. Measured (`audio`: the 16 kHz WAV the
- * runner makes, at the start of the run for a sound the prompt names, else
- * at the node's turn): those seconds. Not measured (a sound made in the run,
- * or the canvas): the longest sound the node may send where it runs
- * (`place`, recorded by the start of the run; the canvas's `framesUpTo`;
- * neither: this computer's, the larger), so what is shown and held is never
- * below the charge.
+ * runner makes at the node's turn, or the empty card's known silence): those
+ * seconds. Bounded before the run (`audioUpTo`, fix round 1: from the sound's
+ * maker, server/runner/localModelStart.ts whisperSoundBound): at most that.
+ * Neither (a maker that can't be bounded, or the canvas): the longest sound
+ * the node may send where it runs (`place`, recorded by the start of the run;
+ * the canvas's `framesUpTo`; neither: this computer's, the larger), so what is
+ * shown and held is never below the charge.
  */
 export function whisperCalls(seen?: SlowMotionAiMeasured | null): PaidCalls {
   const cap = whisperMaxSeconds(seen?.place ?? seen?.framesUpTo)
   const a = seen?.audio
-  const inputSeconds = typeof a === 'number' && Number.isFinite(a) && a > 0 ? Math.min(a, cap) : cap
+  const b = seen?.audioUpTo
+  const ok = (x: unknown): x is number => typeof x === 'number' && Number.isFinite(x) && x >= 0
+  const inputSeconds = ok(a) ? Math.min(a, cap) : ok(b) ? Math.min(b, cap) : cap
   return { steps: [{ call: { endpoint: WHISPER_SLUG, inputSeconds }, times: 1 }] }
 }

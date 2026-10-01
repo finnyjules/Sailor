@@ -172,6 +172,13 @@ export const LIPSYNC_MAX_SECONDS = 60
  */
 export interface InputSeconds {
   audio?: number | null
+  /**
+   * R7.7 fix round 1: the most seconds of sound a node may get, bounded before
+   * the run from its maker (a loaded file's header, a sound effect chain, a
+   * music node's duration), where the sound itself isn't measured yet. The
+   * hold is priced on it; the node's turn measures `audio` and charges that.
+   */
+  audioUpTo?: number | null
   video?: number | null
   /**
    * The video's display size and frame rate, where the runner measured them

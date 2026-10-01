@@ -42,7 +42,9 @@ describe('runner routes', () => {
     const res = await post(handler(start), { takes: [{}], workflow: { a: 1 }, canvasId: 'c1', projectUuid: 'p1', projectName: 'Fox' })
     expect(res.status).toBe(200)
     expect(await res.json()).toEqual({ runId: 'run_a', legId: 'run_a.0', promptIds: ['run_a.0.t0'] })
-    expect(engine.startRun).toHaveBeenCalledWith({ userId: 'user_1', takes: [{}], workflow: { a: 1 }, canvasId: 'c1', projectUuid: 'p1', projectName: 'Fox' })
+    // R7.7 fix round 1: with the request's own signal (aborted if the caller goes away while it starts).
+    expect(engine.startRun).toHaveBeenCalledWith({ userId: 'user_1', takes: [{}], workflow: { a: 1 }, canvasId: 'c1', projectUuid: 'p1', projectName: 'Fox', signal: expect.any(AbortSignal) })
+    expect((engine.startRun.mock.calls.at(-1)![0] as { signal: AbortSignal }).signal.aborted).toBe(false)
   })
   it('pass Gate buttons through with the ticked pictures', async () => {
     await post(handler(gate), { runId: 'run_a', nodeId: '2', action: 'continue', takes: [1, 3] })
