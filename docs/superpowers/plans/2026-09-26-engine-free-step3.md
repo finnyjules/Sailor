@@ -5236,6 +5236,13 @@ R7 moves the nodes that run an AI model on this computer (spec decision 1) into 
 
 Record the results in `.superpowers/sdd/2026-09-26-engine-free-step3/progress.md` and `docs/STATE.md`.
 
+### USER rulings on R7 (2026-09-30; override the recommendations below where they differ)
+
+- **(a) Everywhere.** The paid versions switch on everywhere, this Mac included, once each passes its live check: one behaviour, no ComfyUI needed; local runs cost the same few cents.
+- **(c) LaMa on Replicate** (`zylim0702/remove-object`) for Object removal.
+- **(f) Clips run in Sailor, one call per frame**, with a frame cap and the hold at frames × price — the user: "why would I use Comfy if the goal is to remove Comfy". A clip never leaves to the engine for these nodes.
+- **Direction for the rest of the programme:** "leave the workflow to the engine" is a stop-gap while ComfyUI exists, not a design answer. Every R7–R11 task should make its nodes run in Sailor; a case that still leaves to the engine is named in the task and must have a plan to close before ComfyUI is removed.
+
 ### Controller rulings needed before R7 is built
 
 - **(a) Free here, paid once moved.** Today these nodes run free on this Mac. Once a family is on, each run is charged, locally too. *Recommend:* families are switched per place: keep them off on this Mac, so the local models stay free here, and switch them on in hosted after each live check. *Cost:* the same node is free locally and paid in hosted. Someone running locally without ComfyUI pays.
