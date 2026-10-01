@@ -72,10 +72,13 @@
  * float32 tensor when a reader takes the float: Object removal).
  *
  * Subject mask (R7.5, family `subject-mask`; comfy_extras/nodes_subject_track.py
- * :160-248): one call to fal's SAM 3 per picture or frame (the user's direction:
- * a clip runs here, one call a frame, as ruling (f)'s picture classes do), the
- * click `(point_x·W, point_y·H)` as one positive point and every candidate back
- * (#shared/runner/samInput samSubjectInput). Then, exact against Python given
+ * :160-248): fal's SAM 3 on every picture or frame (the user's direction: a
+ * clip runs here, as ruling (f)'s picture classes do). SAM 3 answers one mask
+ * for a click (the live check, 2026-10-01: a portrait's face alone), so by the
+ * USER's ruling `best` and `largest` mean the whole subject: smallest sends the
+ * click alone, best the click with a whole-picture box on one object (the whole
+ * object), largest both and keeps the larger (#shared/runner/samInput
+ * samSubjectInput, subjectCallKinds; priced per call). Then, exact against Python given
  * the candidates (../pixels/subjectMask.ts): the pick (best / largest /
  * smallest), (m > 0), the grow or shrink (the worker's MaxFilter), and the
  * cutout. Outputs: a mask per picture (slot 0) and the cutout (slot 1: a
@@ -139,7 +142,7 @@ import {
   VOCALS_CLASS, VOCALS_MODEL_SENT, VOCALS_RATE, VOCALS_SHIFTS, VOCALS_SLUG, VOCALS_WORDS, vocalsMaxSeconds, vocalsWork,
   type BgRemoveOutput, type SubjectMaskMode,
 } from '#shared/runner/localModels'
-import { parseMaskPoints, samPointsInput, samSubjectInput, samTextInput } from '#shared/runner/samInput'
+import { parseMaskPoints, samPointsInput, samSubjectInput, samTextInput, subjectCallKinds } from '#shared/runner/samInput'
 import { SOUND_IN_NEEDS_SOUND } from '#shared/runner/soundIn'
 import { vocalsSilentStems, wavIsSilent, type PythonWav, type VocalsSound } from '../soundWav'
 import { keepSound } from '../../media/values'
@@ -1024,6 +1027,31 @@ export function planSamMask(ctx: PlanContext): NodePlan {
 /** The grow took longer than the worker's limit. */
 export const SUBJECT_MASK_TIMEOUT = 'Growing the subject’s mask took longer than 2 minutes, so it was stopped'
 
+/**
+ * Each answer mask's score (`include_scores`: the answer's `scores`, else its
+ * `metadata[].score`), null where none is given.
+ */
+export function samMaskScores(result: unknown, n: number): (number | null)[] {
+  const r = result && typeof result === 'object' ? result as { scores?: unknown; metadata?: unknown } : {}
+  const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : null)
+  const out: (number | null)[] = []
+  for (let i = 0; i < n; i++) {
+    const s = Array.isArray(r.scores) ? num(r.scores[i]) : null
+    const meta = Array.isArray(r.metadata) ? r.metadata[i] as { score?: unknown } | undefined : undefined
+    out.push(s ?? num(meta?.score))
+  }
+  return out
+}
+
+/** Candidates by score, highest first (a candidate with no score after every scored one); ties keep their order. */
+function byScore<T extends { score: number | null }>(cands: readonly T[]): T[] {
+  return cands.map((c, i) => [c, i] as const).sort((a, b) => {
+    const sa = a[0].score ?? -Infinity
+    const sb = b[0].score ?? -Infinity
+    return sb !== sa ? sb - sa : a[1] - b[1]
+  }).map(x => x[0])
+}
+
 /** `output_mode` as ComfyUI hands it to execute (validated by the rule row; missing: the default). */
 function subjectModeOf(v: unknown): SubjectMaskMode {
   if (v === undefined) return 'best'
@@ -1057,29 +1085,38 @@ export function planSubjectMask(ctx: PlanContext): NodePlan {
   interface Found { mask: Uint8Array; cutout: Uint8Array; w: number; h: number }
 
   /** One picture: the call, the candidates it needs (best: the first only), and Python's work on them. */
+  const kinds = subjectCallKinds(mode)
   const findOne = async (io: PipelineIO, p: SubjectPicture): Promise<Found> => {
-    const key = `subject-${p.index}`
     const image = await p.url()
-    const got = await io.call({ key, provider: 'fal', endpoint: SAM_3_SLUG, payload: samSubjectInput(image, pointX, pointY, p.w, p.h), media: 'image', usd })
-    // No mask at all: an all-black mask, charged (ruling (k): the call ran and answered).
-    const all = samMaskUrls(got.result)
-    const urls = mode === 'best' ? all.slice(0, 1) : all
-    const masks: SamAnswerMask[] = []
-    for (const [i, url] of urls.entries()) {
-      // A picture's candidates are kept for the run (a resumed node doesn't fetch them again); a clip's are not.
-      let bytes: Uint8Array
-      if (clip) bytes = (await io.download(url)).bytes
-      else {
-        const fresh: { bytes?: Uint8Array } = {}
-        const kept = await io.savedOnce(key, `mask-${i}`, async () => {
-          fresh.bytes = (await io.download(url)).bytes
-          return io.keep(fresh.bytes, 'bin')
-        })
-        bytes = fresh.bytes ?? await io.read(kept)
+    // One call a kind (smallest: the click alone; best: the whole object; largest: both), in flight together.
+    const answers = await Promise.all(kinds.map(async (kind) => {
+      const key = kind === 'part' ? `subject-${p.index}` : `subject-whole-${p.index}`
+      const got = await io.call({ key, provider: 'fal', endpoint: SAM_3_SLUG, payload: samSubjectInput(image, pointX, pointY, p.w, p.h, kind), media: 'image', usd })
+      // No mask at all: no candidate from this call; none from any call is an all-black mask, charged (ruling (k)).
+      const urls = samMaskUrls(got.result)
+      const scores = samMaskScores(got.result, urls.length)
+      const masks: { m: SamAnswerMask; score: number | null }[] = []
+      for (const [i, url] of urls.entries()) {
+        // A picture's candidates are kept for the run (a resumed node doesn't fetch them again); a clip's are not.
+        let bytes: Uint8Array
+        if (clip) bytes = (await io.download(url)).bytes
+        else {
+          const fresh: { bytes?: Uint8Array } = {}
+          const kept = await io.savedOnce(key, `mask-${i}`, async () => {
+            fresh.bytes = (await io.download(url)).bytes
+            return io.keep(fresh.bytes, 'bin')
+          })
+          bytes = fresh.bytes ?? await io.read(kept)
+        }
+        masks.push({ m: await samAnswerMask(bytes), score: scores[i]! })
       }
-      masks.push(await samAnswerMask(bytes))
-    }
-    const m8 = subjectMask8(masks, mode, p.w, p.h)
+      return masks
+    }))
+    // The candidates, the whole object's first (it wins a tie on size); `best` the highest score
+    // (Python's np.argmax; no scores: SAM 3's own order), the sizes compared by the core.
+    const cands = [...(answers[kinds.indexOf('whole')] ?? []), ...(answers[kinds.indexOf('part')] ?? [])]
+    const ordered = mode === 'best' ? byScore(cands) : cands
+    const m8 = subjectMask8(ordered.map(c => c.m), mode, p.w, p.h)
     const mask = await subjectGrow(m8, p.w, p.h, grow, (l, w, h, size) => pixelsInWorker(io.signal, worker => worker.maxFilter(l, w, h, size), SUBJECT_MASK_TIMEOUT))
     return { mask, cutout: subjectCutout8(await p.rgb(), mask), w: p.w, h: p.h }
   }

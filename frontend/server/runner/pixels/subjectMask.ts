@@ -3,7 +3,7 @@
  * comfy_extras/nodes_subject_track.py:160-248), exact against Python given
  * the same candidate masks:
  *
- *   pick   best: the first mask SAM 3 answers (its own order, by score);
+ *   pick   best: the first mask handed in (the plan orders them by SAM 3's score);
  *          largest / smallest: the most / fewest pixels > 0, the first on a
  *          tie (np.argmax / np.argmin); one mask is taken for every mode; no
  *          mask at all is an all-black mask (the call ran: charged, ruling (k))
