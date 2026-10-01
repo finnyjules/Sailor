@@ -13,7 +13,7 @@ import { clipFrameUrl, clipFrameKey } from '~/lib/compositor/clip'
 import { shaderTextureUrl, shaderTextureKey } from '~/lib/shaderfill/field'
 import { compositorFontToken } from '~/lib/compositor/textOutline'
 import { effectStackOf, isGeometryKind } from '~/lib/compositor/effectStack'
-import { layersNeedPaper } from './needs'
+import { layersNeedPaper, frameNeedsFullBundle } from './needs'
 import { formatBytes } from '../formatBytes'
 import type { DepthRef } from '~/lib/compositor/depthRegistry'
 import type { EffectDef } from '~/lib/shaderfx/types'
@@ -291,6 +291,7 @@ export async function buildFrameSnapshot(plan: FramePlan, variant: FrameVariant,
     version: 1, fit: plan.fit, duration: plan.duration, still: plan.still,
     variants: [variant], assets: { urls, fonts, shaders, depth }, wired,
     notices: [...notices.filter(n => n.group === 'fonts'), ...liveNotices, ...notices.filter(n => n.group !== 'fonts')],
-    needsOutlines: computeNeedsOutlines(plan, variant),
+    // Brush tips, Pixel reveal and Relight are not in frame-lean.js either: same full bundle.
+    needsOutlines: computeNeedsOutlines(plan, variant) || frameNeedsFullBundle(variant.layers, variant.motion?.behaviours) !== null,
   }
 }

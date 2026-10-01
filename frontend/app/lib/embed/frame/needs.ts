@@ -20,6 +20,7 @@
  * depends on it.
  */
 import { effectStackOf, isGeometryKind, type EffectKind } from '~/lib/compositor/effectStack'
+import { isTipStroke } from '~/lib/brushTips/record'
 
 /** The three F3 geometry kinds that read paper.js — `boolean`/`shatter` directly
  *  (booleanGeometry.ts), `morph` (blendPath, ~/lib/vector/morph.ts) grouped in per Task 10's
@@ -42,4 +43,30 @@ export function layersNeedPaper(layers: readonly unknown[]): boolean {
     }
   }
   return false
+}
+
+/**
+ * Light layers final review: the features `frame-lean.js` does not carry (vite.embed.config.ts
+ * stubs them in that one build, to keep it under its size ceiling) — brush tips (a paint layer
+ * with a tip stroke), Pixel reveal (a `pixelreveal` motion bar, muted or not) and Relight (a
+ * `relight` effect, any visibility, same R14f posture as `layersNeedPaper`). Returns the first
+ * one found, or null. `gather.ts` folds a non-null answer into `needsOutlines` so the export
+ * fetches the full `frame.js`; `surfaces/frame.ts`'s `mount()` re-asks on the live layers and
+ * rejects a lean mount that would need one (the poster stays) rather than draw it wrong.
+ */
+export function frameNeedsFullBundle(
+  layers: readonly unknown[],
+  behaviours?: ReadonlyArray<{ kind?: unknown }> | null,
+): 'brush tips' | 'Pixel reveal' | 'Relight' | null {
+  for (const l of layers) {
+    const strokes = (l as { strokes?: unknown } | null)?.strokes
+    if (Array.isArray(strokes) && strokes.some(s => isTipStroke(s as Parameters<typeof isTipStroke>[0]))) return 'brush tips'
+  }
+  if ((behaviours ?? []).some(b => b?.kind === 'pixelreveal')) return 'Pixel reveal'
+  for (const l of layers) {
+    for (const e of effectStackOf(l as Parameters<typeof effectStackOf>[0])) {
+      if (e.type === 'relight') return 'Relight'
+    }
+  }
+  return null
 }

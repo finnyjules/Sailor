@@ -176,6 +176,36 @@ function stripVariableFontCssUrlsPlugin(): Plugin {
   }
 }
 
+// Light layers final review: `frame-lean` also leaves out brush tips, Pixel reveal and Relight
+// (with lighting kept in), to stay under its size ceiling. A Frame using any of them is routed to
+// the full `frame.js` (`frameNeedsFullBundle`, app/lib/embed/frame/needs.ts, folded into
+// FrameSnapshot.needsOutlines), and `mount()` refuses one that reaches the lean bundle anyway.
+// A resolveId hook rather than aliases: paintPixels.ts imports './paintPixelReveal' relatively,
+// which an alias never sees. Matching on the RESOLVED path catches every importer.
+const FRAME_LEAN_STUBS: [RegExp, string][] = [
+  [/\/app\/lib\/brushTips\/coverage\.ts$/, './app/lib/embed/frame/brushTipsLean.embed.ts'],
+  [/\/app\/lib\/motionx\/reveal\/paintPixelReveal\.ts$/, './app/lib/embed/frame/pixelRevealLean.embed.ts'],
+  [/\/app\/lib\/relight\/relightPass\.ts$/, './app/lib/embed/frame/relightLean.embed.ts'],
+  [/\/app\/lib\/embed\/frame\/depthField\.embed\.ts$/, './app/lib/embed/frame/relightLean.embed.ts'],
+  [/\/app\/lib\/embed\/frame\/bundleKind\.ts$/, './app/lib/embed/frame/bundleKind.lean.embed.ts'],
+]
+
+function frameLeanStubsPlugin(): Plugin {
+  const stubs = FRAME_LEAN_STUBS.map(([re, rel]) => [re, fileURLToPath(new URL(rel, import.meta.url))] as const)
+  return {
+    name: 'sailor-embed-frame-lean-stubs',
+    enforce: 'pre',
+    async resolveId(source, importer, options) {
+      if (!importer || source.startsWith('\0')) return null
+      const r = await this.resolve(source, importer, { ...options, skipSelf: true })
+      if (!r) return null
+      const id = r.id.replace(/\\/g, '/')
+      for (const [re, file] of stubs) if (re.test(id)) return file
+      return null
+    },
+  }
+}
+
 const config: UserConfig = {
   resolve: {
     // Array form so the order is explicit: Vite matches aliases in order, and the `~` entry would
@@ -191,6 +221,10 @@ const config: UserConfig = {
       // ~/composables/useRelightFinish is the one network call behind Relight's "Finish" button
       // (Nano Banana 2); an exported file gets the "not available" stand-in instead.
       { find: '~/composables/useRelightFinish', replacement: fileURLToPath(new URL('./app/lib/embed/frame/relightFinish.embed.ts', import.meta.url)) },
+      // ~/lib/relight/depthField builds Relight's depth field in a Web Worker — a separate worker
+      // file URL an exported .html cannot carry (the export's network scan refuses it). The
+      // stand-in builds the same field synchronously and never imports the worker.
+      { find: /^~\/lib\/relight\/depthField$/, replacement: fileURLToPath(new URL('./app/lib/embed/frame/depthField.embed.ts', import.meta.url)) },
       // Task 10: frame-lean drops fontkit (via textOutline.ts's font.ts import) and paper.js
       // entirely — most Frames need neither (see gather.ts's computeNeedsOutlines). These two
       // entries only apply to that one build; every other surface (including the regular 'frame'
@@ -216,7 +250,7 @@ const config: UserConfig = {
       { find: '~', replacement: fileURLToPath(new URL('./app', import.meta.url)) },
     ],
   },
-  plugins: [...(effectId ? [spacetypeEffectEntryPlugin(effectId)] : []), pruneShaderCatalogPlugin(), stripVariableFontCssUrlsPlugin()],
+  plugins: [...(effectId ? [spacetypeEffectEntryPlugin(effectId)] : []), ...(isFrameLean ? [frameLeanStubsPlugin()] : []), pruneShaderCatalogPlugin(), stripVariableFontCssUrlsPlugin()],
   build: {
     outDir: 'public/embed',
     // false, not true: each invocation of this config builds ONE surface's

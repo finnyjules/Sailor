@@ -33,7 +33,8 @@ import { seedDepthImage } from '~/lib/compositor/depthRegistry'
 import { ensureRevealShadersReady } from '~/lib/motionx/reveal/paintPixels'
 import { warmPaperBoolean, isPaperWarm } from '~/lib/compositor/booleanGeometry'
 import { warmCompositorFont } from '~/lib/compositor/textOutline'
-import { layersNeedPaper } from '../frame/needs'
+import { layersNeedPaper, frameNeedsFullBundle } from '../frame/needs'
+import { LEAN_FRAME_BUNDLE } from '../frame/bundleKind'
 import {
   paintLayerStack, ensureLayerImages, withWiredContent, type LocalLayer, type StackItem,
 } from '~/composables/useCompositorLayers'
@@ -214,6 +215,13 @@ const frameSurface: EmbedSurface = {
       // instead of silently shipping the unclipped shape. bundle.ts's runtime keeps the poster —
       // a correct still — on a rejected mount, and `export.ts`'s `bakePoster` runs this SAME
       // `mount()`, so the poster inherits this fix for free.
+      // Same posture for what frame-lean.js stubs out besides paper/fontkit (brush tips, Pixel
+      // reveal, Relight): re-asked on the live layers, a lean mount that would need one rejects
+      // (the poster stays) instead of drawing the Frame without it.
+      if (LEAN_FRAME_BUNDLE) {
+        const missing = frameNeedsFullBundle(v.layers, v.motion?.behaviours)
+        if (missing) throw new Error(`embed: this Frame uses ${missing}, which the lean bundle does not carry`)
+      }
       if (snap.needsOutlines || layersNeedPaper(v.layers)) {
         await warmPaperBoolean()
         if (!isPaperWarm()) throw new Error('embed: paper.js failed to load for a Frame that needs it')
@@ -290,7 +298,7 @@ const frameSurface: EmbedSurface = {
       // background alone, so it gets the same ambient darkening or the artboard edge shows. Light
       // glow does not reach into the bleed (stage 1). 0 ⇒ nothing to do.
       const bleedDark = (() => {
-        if (!visibleLights(layers).length) return 0
+        if (!visibleLights(layers, v.groups).length) return 0
         const lighting = readFrameLighting({ sailor_localLighting: v.lighting })
         return lighting.backgroundLit && lightingAvailable() ? bleedAmbientAlpha(lighting.darkness) : 0
       })()

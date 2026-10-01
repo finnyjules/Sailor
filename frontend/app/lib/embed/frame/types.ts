@@ -90,7 +90,9 @@ export interface FrameSnapshot {
    *  it to pick between the full `frame.js` (ships paper.js + fontkit) and the smaller
    *  `frame-lean.js` (ships neither; every text layer draws with `fillText`, and a boolean/
    *  shatter/morph effect — none present when this is false — would throw). Most Frames have no
-   *  outlined text and no F3 geometry effect, so most exports take the lean bundle. */
+   *  outlined text and no F3 geometry effect, so most exports take the lean bundle.
+   *  Also true when the Frame uses brush tips, Pixel reveal or Relight (`frameNeedsFullBundle`,
+   *  ./needs.ts), which the lean bundle stubs out too. */
   needsOutlines: boolean
 }
 
