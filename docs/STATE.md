@@ -488,6 +488,14 @@ Spec `docs/superpowers/specs/2026-09-23-scene3d-web-embed-design.md` (its own "P
 
 **Known limits for slice 2:** layer blur, torn edge, grain and `localLayerBox` still ride the unscaled device scale; members of a rigid unit share the unit's motion map (exact for edge and centre pins, drifts for a manually relative-pinned or Keep-size group); a re-wrapped text's reported box uses the design height when its vertical pin is centre or relative. The three review findings above all landed, so slice 2 inherits nothing new from them.
 
+### Sailor without ComfyUI, step 3 — stage R8 BUILT (the mini apps run on Sailor) — 2026-10-01 (plan R8 section; ledger `.superpowers/sdd/2026-09-26-engine-free-step3/progress.md`)
+
+- **Shared:** a free price quote (`/api/runs/quote`) that shares the run start's checks and hold (`prepareStart`), so the price shown always covers the hold; one app helper (`useAppRun`) to quote, confirm on that exact prompt, run, wait and Stop (a timeout or closing the app stops the run).
+- **Apps:** Karaoke, Product shot (cut-out on Background remove; "keep the product exact" from its own mask), Auto subtitle (Caption track takes Whisper's captions wired in), Face swap (price, Stop, "switched off"), trainers (LoRA opens on Cloud when the engine is down or in hosted; Voice pinned engine-free).
+- **Live checks (~$0.14):** Karaoke, Auto subtitle and Product shot passed after two look fixes: captions now wrap inside the frame (drawn once per caption, so a full hosted 1080p batch fits), and keep-exact no longer shows the product twice (the model's own copy is found and filled first). Face swap's check is blocked: fal's Easel face-swap app answered "Application is not available"; nothing charged.
+
+**Owed:** Face swap's live check (retry, or another provider); a real-mouse pass of the apps; hosted rate limits keyed by user (flagged as its own task). **Next:** R9–R11 (expand first).
+
 ### Sailor without ComfyUI, step 3 — stage R7 BUILT (local-model nodes on paid services), every family OFF pending live checks — 2026-09-30/10-01 (plan R7 section; ledger `.superpowers/sdd/2026-09-26-engine-free-step3/progress.md`)
 
 - **Moved:** Background remove (Replicate 851-labs), Upscale (2×) (Real-ESRGAN), Object removal (LaMa), Mask by text and Mask extractor (fal SAM 3), Subject mask (SAM 3), Slow motion (AI) (fal RIFE, falling back to Sailor's own interpolation), Whisper transcribe with its caption track (fal Wizper), Vocal separator (Replicate Demucs), and Lens · depth of field (free: an in-process depth model plus Python's blur). FaceRestore and LipSync say they were retired and name their replacements.
