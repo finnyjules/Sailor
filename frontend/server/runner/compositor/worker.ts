@@ -34,6 +34,7 @@ import type { PilRaw } from '../pixels/pilPixels'
 import type { CutoutJob, CutoutResult } from '../pixels/cutout'
 import type { EraseJob, EraseResult } from '../pixels/erase'
 import type { SamMaskJob, SamMaskResult } from '../pixels/samMask'
+import type { KeepCleanResult, KeepCleanWork } from '../pixels/keepClean'
 import { resampleCore } from '../../media/resample'
 
 /**
@@ -163,6 +164,18 @@ parentPort.on('message', (m) => {
       stopped()
       value = built.cut.cutout(m.job, isStopped)
       transfer = value.preview ? [value.picture.buffer, value.alpha.buffer, value.preview.buffer] : [value.picture.buffer, value.alpha.buffer]
+    }
+    // Blend scene's cleaned kept subject (R8.1 live-check fix, ../pixels/keepClean.ts): the fill's mask.
+    else if (m.op === 'px.keepClean') {
+      stopped()
+      const j = m.job
+      const plane = core.maskFromScanlines(j.mask16, j.mw, j.mh)
+      const sized = j.mw === j.w && j.mh === j.h ? plane : core.resizeBilinear(plane, j.h, j.w)
+      const keep = new Uint8Array(j.w * j.h)
+      for (let i = 0; i < keep.length; i++) { const v = sized.data[i]; keep[i] = v <= 0 ? 0 : v >= 1 ? 255 : Math.round(v * 255) }
+      const alpha = built.kclean.nearest(j.alpha, j.aw, j.ah, j.w, j.h)
+      value = built.kclean.keepCleanMask({ alpha, keep, w: j.w, h: j.h }, isStopped)
+      transfer = value.mask ? [value.mask.buffer] : []
     }
     // Object removal (R7.3, ../pixels/erase.ts): one picture's composite of the service's fill.
     else if (m.op === 'px.erase') {
@@ -518,6 +531,8 @@ export interface PixelsWorker {
   cutout(job: CutoutJob): Promise<CutoutResult>
   /** Object removal (R7.3, ../pixels/erase.ts): one picture's composite of the service's fill (its buffers handed over). */
   erase(job: EraseJob): Promise<EraseResult>
+  /** Blend scene's cleaned kept subject (R8.1 live-check fix, ../pixels/keepClean.ts): the fill's mask (its buffers handed over). */
+  keepClean(job: KeepCleanWork): Promise<KeepCleanResult>
   /** Mask by text and Mask extractor (R7.4, ../pixels/samMask.ts): the mask and the preview from SAM 3's answer (its buffers handed over). */
   samMask(job: SamMaskJob): Promise<SamMaskResult>
   /** An effect (R2.1) starts its batch: `fn` its op ('<core>.<fn>'), `params` its widgets, `count` the batch's length. */
@@ -646,6 +661,12 @@ export function pixelsInWorker<T>(signal: AbortSignal | undefined, job: (w: Pixe
         // One buffer may back two of them (a caller's own copy): each is transferred once.
         const buffers = [...new Set([j.rgb.buffer, j.fill.buffer, j.mask.buffer])] as ArrayBuffer[]
         return await call(t, { op: 'px.erase', job: j }, buffers) as EraseResult
+      },
+      async keepClean(job) {
+        const own = (b: Uint8Array) => b.byteOffset === 0 && b.byteLength === b.buffer.byteLength && !(b.buffer instanceof SharedArrayBuffer) ? b : b.slice()
+        const j = { ...job, alpha: own(job.alpha), mask16: own(job.mask16) }
+        const buffers = [...new Set([j.alpha.buffer, j.mask16.buffer])] as ArrayBuffer[]
+        return await call(t, { op: 'px.keepClean', job: j }, buffers) as KeepCleanResult
       },
       async samMask(job) {
         const own = (b: Uint8Array) => b.byteOffset === 0 && b.byteLength === b.buffer.byteLength && !(b.buffer instanceof SharedArrayBuffer) ? b : b.slice()

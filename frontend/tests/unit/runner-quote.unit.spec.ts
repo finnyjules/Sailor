@@ -93,6 +93,13 @@ const APPS: AppCase[] = [
     files: { 'composite.png': rgbPng1x1(120, 110, 100), 'mask.png': rgbPng1x1(178, 178, 178) },
   },
   {
+    // The same, with the model's copy of the product found and filled (R8.1 live-check fix): three calls held.
+    name: 'Product shot relight, product kept exact, cleaned',
+    families: new Set<RunnerFamily>(['cards', 'fal-edit', 'bg-remove', 'object-remove']),
+    prompt: buildBlendPrompt({ composite: 'composite.png', mask: 'mask.png', model: 'Flux 2 Pro', prompt: 'relight', feather: 0, seed: 5 }),
+    files: { 'composite.png': rgbPng1x1(120, 110, 100), 'mask.png': rgbPng1x1(178, 178, 178) },
+  },
+  {
     // KaraokeMakerApp.vue's exact prompt (R8.2): Load audio → Vocal separator → two MP3s.
     name: 'Karaoke',
     families: new Set<RunnerFamily>(['cards', 'media-sound', 'vocal-split']),

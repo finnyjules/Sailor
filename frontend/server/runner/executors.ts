@@ -84,6 +84,8 @@ import { moodboardFiles, parseInputFileRef } from './inputs'
 import { resolveShotRefs } from './shotRefs'
 import { pictureSourceOf, planCompositor } from './compositor/plan'
 import { planKeepSubject, type KeepHeld, type KeepHold, type KeepStep } from './compositor/keep'
+import { planBlendKeepClean } from './compositor/keepClean'
+import { blendKeepCleanCalls } from '#shared/pricing/nodePrice'
 import {
   FAL_FIRST_VIDEO, IMAGE_BACKUPS, NANO_BANANA_2_REPLICATE, VIDEO_BACKUPS,
   flux2ProEditOnReplicate, nanoBananaOnFal, nanoBananaOnReplicate, type ServiceCall,
@@ -355,7 +357,11 @@ export type NodePlan =
    * which writes each one down, so a restarted server replays the finished
    * ones; charged for the calls that finished (ruling (f)).
    */
-  | { kind: 'pipeline'; prefix: string; run(io: PipelineIO): Promise<Derived> }
+  | {
+    kind: 'pipeline'; prefix: string; run(io: PipelineIO): Promise<Derived>
+    /** Blend scene's kept subject, cleaned (R8.1 live-check fix): its kept bytes are recorded on the node, as a provider plan's are. */
+    keep?: KeepStep
+  }
   | { kind: 'pass'; files: OutputFile[]; ui: Record<string, unknown> | null }
   /** A closed Gate: `values` is the value that reached it (R0.4), kept on its record so Continue hands it on. */
   | { kind: 'pause'; files: OutputFile[]; values?: Record<number, RunnerValue> }
@@ -423,6 +429,12 @@ export interface PlanContext {
   hold?: KeepHold
   /** A resumed Blend scene: the kept bytes recorded at its send (NodeRecord.keepHeld). */
   keepHeld?: KeepHeld
+  /**
+   * The size of the picture a size-priced node is sent, as its hold was
+   * priced (the engine's measurement at the node's turn): a pipeline that
+   * prices its own calls (Blend's cleaned kept subject, R8.1) prices them on it.
+   */
+  inputPixels?: number
   /**
    * The node's inputs as sent (wires left as wires), which its hold was
    * priced from: a token node's charge is capped from these, never from the
@@ -932,7 +944,17 @@ async function planNodeRequest(ctx: PlanContext): Promise<NodePlan> {
         keep = await planKeepSubject(ctx, inputs, { link, source }, ctx.keepHeld)
       }
       const plan = await planBlendScene()
-      if (keep && plan.kind === 'provider') plan.keep = keep
+      if (keep && plan.kind === 'provider') {
+        // R8.1 live-check fix: with Background remove and Object removal on, the model's own copy of the
+        // kept subject is found and filled before the original is laid back (./compositor/keepClean.ts).
+        const clean = blendKeepCleanCalls(ctx.priceInputs ?? inputs, { inputPixels: ctx.inputPixels, families: ctx.families })
+        if (clean && 'refused' in clean) throw new Error(clean.refused)
+        if (clean) {
+          checkRequest(plan.provider, plan.endpoint, plan.payload)
+          return planBlendKeepClean({ provider: plan.provider, endpoint: plan.endpoint, payload: plan.payload, keep, usd: clean })
+        }
+        plan.keep = keep
+      }
       return plan
     }
 

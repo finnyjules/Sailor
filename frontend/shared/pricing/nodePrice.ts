@@ -73,7 +73,7 @@ import { videoPriceMaxUsd, videoPriceUsd, videoRate } from './videoRates'
 import { REMOTE_VIDEO_NODE_CLASSES, personSwapVideoUsd, remoteVideoNodeUsd, topazVideoUsd, type InputSeconds } from './clipSettings'
 import { effectiveVideoSettings, maxVideoSeconds } from './videoSettings'
 import type { RunnerFamily } from '../runner/families'
-import { isLocalModelClass, localModelCalls, localModelOn } from '../runner/localModels'
+import { BG_REMOVE_CLASS, BG_REMOVE_SLUG, OBJECT_REMOVE_CLASS, OBJECT_REMOVE_SLUG, isLocalModelClass, localModelCalls, localModelOn } from '../runner/localModels'
 
 export type NodeInputs = Record<string, unknown>
 
@@ -198,6 +198,31 @@ function editNodeUsd(classType: string, inputs: NodeInputs, opts: PriceOptions):
     usd = Math.max(usd, price)
   }
   return usd
+}
+
+/**
+ * Blend scene's kept subject, cleaned (R8.1 live-check fix): with keep_subject
+ * wired and both Background remove (bg-remove) and Object removal
+ * (object-remove) on, the runner finds the model's own redrawn copy of the
+ * kept subject in the answer (a background-remover call), fills it and the
+ * kept region from the relit scene (a LaMa call), and lays the original on
+ * top, so one subject is left. Those two calls are priced here, each marked
+ * up on its own (callCredits), on top of the blend's own call. The ComfyUI
+ * path never passes `families`, so it never prices them (it makes one call).
+ */
+export function blendKeepCleanOn(inputs: NodeInputs, families: ReadonlySet<RunnerFamily> | undefined): boolean {
+  return isLinkedInput(inputs.keep_subject) && localModelOn(BG_REMOVE_CLASS, families) && localModelOn(OBJECT_REMOVE_CLASS, families)
+}
+
+/** The three calls of a cleaned kept subject (the blend, the cut-out, the fill), in dollars; null when not cleaned. */
+export function blendKeepCleanCalls(inputs: NodeInputs, opts: PriceOptions): { blend: number; cutout: number; fill: number } | { refused: string } | null {
+  if (!blendKeepCleanOn(inputs, opts.families)) return null
+  const blend = editNodeUsd('BlendSceneNode', inputs, opts)
+  if (typeof blend !== 'number') return blend
+  const cutout = paidCallUsd({ endpoint: BG_REMOVE_SLUG })
+  const fill = paidCallUsd({ endpoint: OBJECT_REMOVE_SLUG })
+  if (cutout == null || fill == null) return { refused: 'Keeping the subject clean has no listed price' }
+  return { blend, cutout, fill }
 }
 
 /** What the caller measured about a node's run-time inputs. */
@@ -345,6 +370,15 @@ export function priceNode(classType: string, inputs: NodeInputs | null | undefin
   if (planned) {
     const credits = callsCredits(planned)
     return { usd: shownUsd(planned.reduce((s, c) => s + c.usd, 0), credits), credits }
+  }
+  // Blend scene with its kept subject cleaned (R8.1 live-check fix): the blend, the cut-out and the fill.
+  if (classType === 'BlendSceneNode') {
+    const clean = blendKeepCleanCalls(inputs ?? {}, opts)
+    if (clean && 'refused' in clean) return clean
+    if (clean) {
+      const credits = callsCredits([{ usd: clean.blend }, { usd: clean.cutout }, { usd: clean.fill }])
+      return { usd: clean.blend + clean.cutout + clean.fill, credits }
+    }
   }
   // A paid-model class (step 3, R3): the calls its settings can make.
   if (PAID_CLASS_SET.has(classType)) return paidNodePrice(classType, inputs ?? {}, opts)

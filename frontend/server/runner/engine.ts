@@ -1422,6 +1422,7 @@ export function createEngine(deps: EngineDeps) {
         ...(planMeasured ? { measured: planMeasured } : {}),
         hold,
         ...(resuming && rec.keepHeld ? { keepHeld: rec.keepHeld } : {}),
+        ...(inputPixels !== undefined ? { inputPixels } : {}),
         priceInputs: take.prompt[id]!.inputs,
         soundWav: soundWavOnce,
         // A resumed node's job is already running: a sound-in node takes its links from the request
@@ -1540,6 +1541,8 @@ export function createEngine(deps: EngineDeps) {
       // charged for the calls that finished (the stage charge, chargeableCredits).
       if (plan.kind === 'pipeline') {
         if (!resuming) rec.credits = nodeCredits(take.prompt[id]!, inputPixels, families, inputSeconds)
+        // Blend's cleaned kept subject (R8.1 live-check fix): its kept bytes recorded, so a resumed node lays the same original.
+        if (plan.keep && !resuming) rec.keepHeld = plan.keep.held
         rec.calls ??= []
         await persist(run)
         // The node's own signal (fix round 1): a failed or finished pipeline

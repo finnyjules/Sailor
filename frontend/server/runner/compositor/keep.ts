@@ -129,6 +129,8 @@ export interface KeepStep {
   held: KeepHeld
   /** The provider's answer (the downloaded file) → the PNG the node saves. */
   apply(answer: Uint8Array, signal?: AbortSignal): Promise<Uint8Array>
+  /** The kept region's file (its 16-bit PNG), as kept for the node (R8.1 live-check fix: the fill's mask is made from it). */
+  maskBytes(): Promise<Uint8Array>
 }
 
 export interface KeepHeld { base: string | null; mask: string }
@@ -224,6 +226,11 @@ export async function planKeepSubject(
   return {
     fingerprint: { mask: k.mask, feather },
     held: k,
+    async maskBytes() {
+      const m = await hold.get(k.mask)
+      if (!m) throw new Error(KEEP_HELD_MISSING)
+      return m
+    },
     async apply(answer, signal) {
       // The kept bytes (never ComfyUI's temp folder, which a restart empties).
       const maskNow = await hold.get(k.mask)

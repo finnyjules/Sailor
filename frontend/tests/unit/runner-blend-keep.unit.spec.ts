@@ -44,10 +44,13 @@ import {
 import { __frameWorkerForTests, keepSubjectInWorker } from '~~/server/runner/compositor/worker'
 import { nodeCredits } from '~~/server/runner/metering'
 import type { OutputFile } from '~~/server/runner/types'
-import { createFakeLedger, makeKit, until } from './__runner__/kit'
+import { createFakeLedger, createFakeReplicate, makeKit, until } from './__runner__/kit'
 import { createFileHeldBytes, sha256Hex, type HeldBytes } from '~~/server/runner/heldBytes'
 import { mkdirSync, mkdtempSync, readdirSync, rmSync } from 'node:fs'
 import { buildBlendPrompt } from '~/lib/runner/productShotApp'
+import { BG_REMOVE_SLUG, OBJECT_REMOVE_SLUG } from '#shared/runner/localModels'
+import { blendKeepCleanCalls } from '#shared/pricing/nodePrice'
+import { callsCredits } from '#shared/pricing/pipelinePrice'
 import { tmpdir } from 'node:os'
 
 interface FrameFix { links: Record<string, string>; inputs: Record<string, unknown>; width: number; height: number; image8: string; protect: string }
@@ -815,5 +818,171 @@ describe('R8.1: Image to mask\'s mask into Blend\'s keep_subject', () => {
     await k.engine.settled(runId)
     expect([...k.ledger.holds.values()].reduce((n, h) => n + h.credits, 0)).toBe(q.credits)
     expect(q.credits).toBeGreaterThan(0)
+  })
+})
+
+// ── R8.1 live-check fix: one subject left (the model's own copy found and filled) ──
+
+/**
+ * The live check (2026-10-01): Kontext redrew the kept car slightly LOWER, and
+ * laying the original back showed it twice. With Background remove and Object
+ * removal on, Blend finds the answer's subject (the remover), fills it and the
+ * kept region from the relit scene (LaMa), then lays the original on top.
+ *
+ * Fakes: Kontext answers the relit scene with the car 10 rows lower; the
+ * remover answers that car's alpha; LaMa really fills what its mask asks
+ * (the mask is read back from the hand-off), so a mask that missed the copy
+ * would leave red pixels below the car.
+ */
+describe('R8.1 live-check fix: the model\'s copy of the kept subject is filled, one subject left', () => {
+  const W = 64
+  const H = 48
+  const CAR = { x0: 20, x1: 40, y0: 10, y1: 24 }
+  const SHIFT = 10
+  const CLEAN_ON: ReadonlySet<RunnerFamily> = new Set<RunnerFamily>(['cards', 'fal-edit', 'bg-remove', 'object-remove'])
+  const inCar = (x: number, y: number, dy = 0) => x >= CAR.x0 && x < CAR.x1 && y >= CAR.y0 + dy && y < CAR.y1 + dy
+  const relit = (x: number, y: number) => [70 + x, 100, 150 + y] as const
+  const raw = (f: (x: number, y: number) => readonly number[], ch: 3 | 4) => {
+    const b = Buffer.alloc(W * H * ch)
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) f(x, y).forEach((v, c) => { b[(y * W + x) * ch + c] = v })
+    return b
+  }
+  const png = async (f: (x: number, y: number) => readonly number[], ch: 3 | 4 = 3) =>
+    new Uint8Array(await sharp(raw(f, ch), { raw: { width: W, height: H, channels: ch } }).png().toBuffer())
+
+  async function cleanKit(o: { families?: ReadonlySet<RunnerFamily>; hosted?: boolean; fillAnswer?: 'none' } = {}) {
+    const composite = await png((x, y) => (inCar(x, y) ? [230, 20, 20] : [60 + x, 90, 140 + y]))
+    const mask = await png((x, y) => (inCar(x, y) ? [255, 255, 255] : [0, 0, 0]))
+    // Kontext: the relit scene, the car redrawn 10 rows lower (a little darker).
+    const answer = await png((x, y) => (inCar(x, y, SHIFT) ? [200, 30, 30] : relit(x, y)))
+    const cutout = await png((x, y) => (inCar(x, y, SHIFT) ? [200, 30, 30, 255] : [0, 0, 0, 0]), 4)
+    let k!: ReturnType<typeof makeKit>
+    const uploaded = (url: string) => {
+      const call = k.upload.mock.calls.find(([, name]) => `https://fal.storage/${name}` === url)
+      if (!call) throw new Error(`no hand-off for ${url}`)
+      return new Uint8Array(call[0])
+    }
+    const replicate = createFakeReplicate({
+      answer: (req) => {
+        if (req.model.includes('background-remover')) return 'https://replicate.delivery/cut.png'
+        if (o.fillAnswer === 'none') return []
+        return [`https://replicate.delivery/fill.png?image=${encodeURIComponent(String(req.input.image))}&mask=${encodeURIComponent(String(req.input.mask))}`]
+      },
+    })
+    k = makeKit({
+      hosted: !!o.hosted,
+      replicate,
+      deps: {
+        families: () => o.families ?? CLEAN_ON,
+        download: async (url: string) => {
+          if (url === 'https://replicate.delivery/cut.png') return { bytes: cutout, contentType: 'image/png' }
+          if (url.startsWith('https://replicate.delivery/fill.png')) {
+            // A fake LaMa that fills exactly what the mask asks, from the relit scene.
+            const q = new URL(url).searchParams
+            const img = await sharp(uploaded(q.get('image')!)).removeAlpha().raw().toBuffer({ resolveWithObject: true })
+            const m = await sharp(uploaded(q.get('mask')!)).extractChannel(0).raw().toBuffer()
+            for (let i = 0; i < W * H; i++) {
+              if (m[i]! < 128) continue
+              const [r, g, b] = relit(i % W, Math.floor(i / W))
+              img.data[i * 3] = r; img.data[i * 3 + 1] = g; img.data[i * 3 + 2] = b
+            }
+            return { bytes: new Uint8Array(await sharp(img.data, { raw: { width: W, height: H, channels: 3 } }).png().toBuffer()), contentType: 'image/png' }
+          }
+          return { bytes: answer, contentType: 'image/png' }
+        },
+      },
+    })
+    mkdirSync(join(k.root, 'input', 'user_1'), { recursive: true })
+    for (const [n, b] of Object.entries({ 'composite.png': composite, 'mask.png': mask })) {
+      writeFileSync(join(k.root, 'input', n), b)
+      writeFileSync(join(k.root, 'input', 'user_1', n), b)
+    }
+    return { k, replicate }
+  }
+  const prompt = () => buildBlendPrompt({ composite: 'composite.png', mask: 'mask.png', model: 'Flux 2 Pro', prompt: 'relight', feather: 0, seed: 7 })
+
+  async function runIt(k: ReturnType<typeof makeKit>) {
+    const { runId } = await k.engine.startRun({ userId: k.userId, takes: [prompt()], ...START })
+    await k.engine.settled(runId)
+    const run = (await k.store.get(runId))!
+    const rec = run.takes[0]!.nodes['4']!
+    const saved = run.takes[0]!.nodes['5']!.outputs[0]!
+    const px = await sharp(join(k.root, saved.type, saved.subfolder, saved.filename)).removeAlpha().raw().toBuffer()
+    return { run, rec, px }
+  }
+  /** Red pixels outside the kept region: what is left of the model's copy. */
+  const ghost = (px: Buffer) => {
+    let n = 0
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+      const i = (y * W + x) * 3
+      if (!inCar(x, y) && px[i]! > 150 && px[i + 1]! < 60) n++
+    }
+    return n
+  }
+
+  it('control, cleaning off: the copy shows below the kept car (the live check\'s ghost)', async () => {
+    const { k } = await cleanKit({ families: new Set<RunnerFamily>(['cards', 'fal-edit']) })
+    const { rec, px } = await runIt(k)
+    expect(rec.status).toBe('done')
+    expect(ghost(px)).toBe((CAR.x1 - CAR.x0) * SHIFT)
+    expect(k.replicate.submitted()).toHaveLength(0)
+  })
+
+  it('cleaning on: one car, the exact original at its placed spot; no copy left; three calls, each charged', async () => {
+    const { k, replicate } = await cleanKit({ hosted: true })
+    const quote = await k.engine.quoteRun({ userId: k.userId, takes: [prompt()], ...START })
+    const { run, rec, px } = await runIt(k)
+    expect(rec.error ?? null).toBeNull()
+    expect(rec.status).toBe('done')
+    expect(ghost(px)).toBe(0)
+    // The kept region is the original's pixels exactly.
+    for (let y = CAR.y0; y < CAR.y1; y++) for (let x = CAR.x0; x < CAR.x1; x++) {
+      const i = (y * W + x) * 3
+      expect([px[i], px[i + 1], px[i + 2]]).toEqual([230, 20, 20])
+    }
+    // Where the copy was, the relit scene.
+    const i = ((CAR.y1 + 5) * W + 30) * 3
+    expect([px[i], px[i + 1], px[i + 2]]).toEqual([...relit(30, CAR.y1 + 5)])
+    expect(k.fal.submitted()).toHaveLength(1)
+    expect(replicate.submitted().map(r => r.endpoint)).toEqual([BG_REMOVE_SLUG, OBJECT_REMOVE_SLUG])
+    expect(rec.calls!.map(c => [c.key, c.status, !!c.lost])).toEqual([['blend', 'done', false], ['cutout', 'done', false], ['fill', 'done', false]])
+    // The price covers the three calls: the quote is the hold, and all three were delivered, so the charge is the hold.
+    const calls = blendKeepCleanCalls(prompt()['4']!.inputs, { families: CLEAN_ON })
+    if (!calls || 'refused' in calls) throw new Error('no price')
+    const three = callsCredits([{ usd: calls.blend }, { usd: calls.cutout }, { usd: calls.fill }])
+    expect(rec.credits).toBe(three)
+    expect(three).toBeGreaterThan(callsCredits([{ usd: calls.blend }]))
+    // The take's hold: Blend's three calls plus the run's render credit (Save image); the quote shown is that hold.
+    const holds = [...k.ledger.holds.values()]
+    expect(holds.map(h => h.credits)).toEqual([quote.credits])
+    const base = quote.credits - three
+    expect(base).toBeGreaterThanOrEqual(0)
+    expect(holds[0]!.actual).toBe(three + base)
+    expect(run.status).toBe('done')
+  })
+
+  it('a fill that delivers nothing costs nothing, and the node still lays the original (never fails)', async () => {
+    const { k } = await cleanKit({ hosted: true, fillAnswer: 'none' })
+    const { rec } = await runIt(k)
+    expect(rec.status).toBe('done')
+    expect(rec.calls!.find(c => c.key === 'fill')!.lost).toBe(true)
+    const calls = blendKeepCleanCalls(prompt()['4']!.inputs, { families: CLEAN_ON })
+    if (!calls || 'refused' in calls) throw new Error('no price')
+    const holds = [...k.ledger.holds.values()]
+    const base = holds[0]!.credits - rec.credits
+    expect(holds[0]!.actual).toBe(callsCredits([{ usd: calls.blend }, { usd: calls.cutout }]) + base)
+    expect(holds[0]!.actual).toBeLessThan(holds[0]!.credits)
+  })
+
+  it('the price: the extra calls only with keep_subject wired and both families on; the ComfyUI path (no families) never', () => {
+    const node = prompt()['4']!
+    const plain = nodeCredits(node, 1024 * 1024, new Set<RunnerFamily>(['cards', 'fal-edit']))
+    const cleaned = nodeCredits(node, 1024 * 1024, CLEAN_ON)
+    expect(cleaned).toBeGreaterThan(plain)
+    expect(nodeCredits(node, 1024 * 1024, new Set<RunnerFamily>(['cards', 'fal-edit', 'bg-remove']))).toBe(plain)
+    const noKeep = { ...node, inputs: { ...node.inputs } }
+    delete (noKeep.inputs as Record<string, unknown>).keep_subject
+    expect(nodeCredits(noKeep, 1024 * 1024, CLEAN_ON)).toBe(plain)
+    report.push(`R8.1 fix: 1024² keep-exact Kontext hold ${cleaned} credits (was ${plain})`)
   })
 })
