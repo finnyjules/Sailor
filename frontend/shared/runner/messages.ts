@@ -13,6 +13,14 @@ export const RUNNER_WORKER = -1
  */
 export const RUNNER_NOT_ELIGIBLE = 'not-eligible'
 
+/**
+ * `data.reason` on the start's refusal of a sound longer than a node that
+ * sends its whole sound may send where it runs (Whisper, Vocal separator).
+ * The quote route passes it on, so an app can act on it without reading the
+ * words (Karaoke, this computer: the engine as a stop-gap, R8 ruling (i)).
+ */
+export const RUNNER_SOUND_TOO_LONG = 'sound-too-long'
+
 export function isRunnerPromptId(id: unknown): boolean {
   return typeof id === 'string' && id.startsWith('run_')
 }

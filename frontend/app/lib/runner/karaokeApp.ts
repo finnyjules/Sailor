@@ -10,13 +10,16 @@
  *   engine's /prompt as before R8 (a named stop-gap, removed by R10.1); in
  *   hosted the app says it is switched off.
  * - Ruling (i): locally, a song over the runner's longest (20 minutes) goes to
- *   the engine too (stop-gap until songs are cut into pieces, R11); in hosted
- *   a song over 10 minutes is refused plainly, before any hold.
+ *   the engine too (stop-gap until songs are cut into pieces, R11), keyed on
+ *   the refusal's reason code (RUNNER_SOUND_TOO_LONG), never its words; in
+ *   hosted a song over 10 minutes is refused plainly, before any hold.
+ * - A price check that failed (not a refusal) shows its words and leaves Run
+ *   on: pressing it prices the exact prompt again before anything starts.
  */
 import { computed, ref, type Ref } from 'vue'
 import type { ApiPrompt } from '#shared/runner/graph'
-import { VOCALS_WORDS } from '#shared/runner/localModels'
-import { AppRunCancelled, AppRunDeclined, useAppRun } from '~/composables/useAppRun'
+import { RUNNER_SOUND_TOO_LONG } from '#shared/runner/messages'
+import { AppRunCancelled, AppRunDeclined, AppRunRefused, useAppRun } from '~/composables/useAppRun'
 import type { AppTakeInput } from '~/composables/useAppTakes'
 import type { AwaitOutputsOptions, RunnerImage } from '~/lib/runner/awaitRunnerResult'
 
@@ -105,8 +108,8 @@ export function useKaraokeRun(o: {
   const onEngine = ref(false)
 
   /** Locally, the workflow the runner won't take (families off, or a song over its longest) goes to the engine. */
-  const engineStopGap = computed(() => !hosted && (app.declined.value || app.refused.value === VOCALS_WORDS.tooLong))
-  /** What shows in place of a price: the refusal's words, or "switched off" in hosted. */
+  const engineStopGap = computed(() => !hosted && (app.declined.value || app.refusedReason.value === RUNNER_SOUND_TOO_LONG))
+  /** What shows in place of a price: the refusal's or failed check's words, or "switched off" in hosted. */
   const blocked = computed<string | null>(() => {
     if (engineStopGap.value) return null
     if (app.declined.value) return new AppRunDeclined().message
@@ -114,8 +117,9 @@ export function useKaraokeRun(o: {
   })
   const priceText = computed(() => (engineStopGap.value ? null : app.priceText.value))
   const running = computed(() => status.value === 'running')
-  const canRun = computed(() => !!o.song.value && !running.value && !app.quoting.value && !blocked.value
-    && (engineStopGap.value || app.price.value !== null))
+  // A failed price check never leaves the button dead: Run asks for the price again (useAppRun.run).
+  const canRun = computed(() => !!o.song.value && !running.value && !app.quoting.value
+    && (engineStopGap.value || app.quoteFailed.value || (!blocked.value && app.price.value !== null)))
   /** Stop is offered while a runner run is going. */
   const canStop = computed(() => running.value && !onEngine.value)
 
@@ -154,8 +158,10 @@ export function useKaraokeRun(o: {
       land({ promptId, vocals, instrumental })
     }
     catch (e) {
-      // The runner said no at the start: locally, the engine as before; hosted, "switched off".
-      if (e instanceof AppRunDeclined && !hosted) {
+      // The runner said no at the start, or the song is longer than it sends here: locally, the
+      // engine as before; hosted, "switched off" or the refusal's words.
+      const tooLong = e instanceof AppRunRefused && e.reason === RUNNER_SOUND_TOO_LONG
+      if ((e instanceof AppRunDeclined || tooLong) && !hosted) {
         try { return await viaEngine(prompt) }
         catch (err) { e = err }
       }

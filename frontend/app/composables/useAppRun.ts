@@ -28,7 +28,7 @@ import { requestCostConfirm } from '~/lib/costConfirmRequest'
 import type { CostEstimate } from '~/lib/costEstimate'
 
 /** The quote route's answer (server/api/runs/quote.post.ts). */
-export type AppQuote = { usd: number, credits: number, upTo: boolean } | { declined: true } | { refused: string }
+export type AppQuote = { usd: number, credits: number, upTo: boolean } | { declined: true } | { refused: string, reason?: string }
 export interface AppPrice { usd: number, credits: number, upTo: boolean }
 
 /** The runner won't take this workflow (off, or a family off): the app falls back or says it is switched off. */
@@ -38,7 +38,15 @@ export class AppRunDeclined extends Error {
 
 /** The price couldn't be had for the prompt about to run (refused, or the check failed): nothing was started. Its words are the person's. */
 export class AppRunRefused extends Error {
-  constructor(words: string) { super(words); this.name = 'AppRunRefused' }
+  /** The refusal's stable reason code (e.g. RUNNER_SOUND_TOO_LONG), when the start gave one. */
+  readonly reason: string | null
+  constructor(words: string, reason?: string | null) { super(words); this.name = 'AppRunRefused'; this.reason = reason ?? null }
+}
+
+/** The stable reason code a Sailor route's refusal carries (its body's `data.reason`), else null. */
+export function reasonOf(e: unknown): string | null {
+  const r = (e as { data?: { data?: { reason?: unknown } } } | null)?.data?.data?.reason
+  return typeof r === 'string' && r ? r : null
 }
 
 /** The person said no at the cost-confirm gate: nothing was started. */
@@ -127,6 +135,10 @@ export function useAppRun(opts: { hosted?: boolean, debounceMs?: number, now?: (
 
   const price = ref<AppPrice | null>(null)
   const refused = ref<string | null>(null)
+  /** The refusal's stable reason code, when it has one: apps key on this, never on the words. */
+  const refusedReason = ref<string | null>(null)
+  /** The price check itself failed (not a refusal): `refused` holds its words, and Run may be pressed to ask again. */
+  const quoteFailed = ref(false)
   const declined = ref(false)
   const quoting = ref(false)
   /** True from Run until the run has surely ended: finished, failed, or stopped (a Stop that went through). */
@@ -156,13 +168,18 @@ export function useAppRun(opts: { hosted?: boolean, debounceMs?: number, now?: (
       const status = statusOf(e)
       if (status === 429) return { failed: QUOTE_BUSY }
       // A request the route refused with its own words (a 4xx): those words.
-      if (status !== undefined && status >= 400 && status < 500) return { refused: wordsOf(e, QUOTE_FAILED) }
+      if (status !== undefined && status >= 400 && status < 500) {
+        const reason = reasonOf(e)
+        return reason ? { refused: wordsOf(e, QUOTE_FAILED), reason } : { refused: wordsOf(e, QUOTE_FAILED) }
+      }
       return { failed: QUOTE_FAILED }
     }
   }
 
   function show(answer: QuoteResult): void {
     quoting.value = false
+    quoteFailed.value = 'failed' in answer
+    refusedReason.value = 'refused' in answer ? answer.reason ?? null : null
     if ('declined' in answer) { declined.value = true; price.value = null; refused.value = null }
     else if ('refused' in answer) { declined.value = false; price.value = null; refused.value = answer.refused }
     else if ('failed' in answer) { price.value = null; refused.value = answer.failed }
@@ -187,6 +204,8 @@ export function useAppRun(opts: { hosted?: boolean, debounceMs?: number, now?: (
       quoting.value = false
       price.value = null
       refused.value = null
+      refusedReason.value = null
+      quoteFailed.value = false
       return Promise.resolve()
     }
     quoting.value = true
@@ -249,7 +268,7 @@ export function useAppRun(opts: { hosted?: boolean, debounceMs?: number, now?: (
     try {
       const answer = await quoteFor(prompt)
       if ('declined' in answer) { declined.value = true; throw new AppRunDeclined() }
-      if ('refused' in answer) throw new AppRunRefused(answer.refused)
+      if ('refused' in answer) throw new AppRunRefused(answer.refused, answer.reason)
       if ('failed' in answer) throw new AppRunRefused(answer.failed)
       const ok = await deps.confirm({
         usd: answer.usd, approximate: answer.upTo, hostedCredits: hosted ? answer.credits : null,
@@ -283,7 +302,7 @@ export function useAppRun(opts: { hosted?: boolean, debounceMs?: number, now?: (
           throw e
         }
         // The start's refusal (or a failed start): its own plain words.
-        if (!runId.value && !(e instanceof Error && e.name === 'AppRunStopped')) throw new Error(wordsOf(e, 'This didn’t start. Try again.'))
+        if (!runId.value && !(e instanceof Error && e.name === 'AppRunStopped')) throw new AppRunRefused(wordsOf(e, 'This didn’t start. Try again.'), reasonOf(e))
         throw e
       }
     }
@@ -316,5 +335,5 @@ export function useAppRun(opts: { hosted?: boolean, debounceMs?: number, now?: (
     })
   }
 
-  return { price, priceText, refused, declined, quoting, running, runId, stopError, quote, run, stop }
+  return { price, priceText, refused, refusedReason, quoteFailed, declined, quoting, running, runId, stopError, quote, run, stop }
 }

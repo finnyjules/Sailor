@@ -19,7 +19,7 @@ import { assertRateLimit, takeToken } from '../../lib/rateLimit'
 import { MeterRefusalError } from '../../utils/requestMeter'
 import { RUNNER_NOT_ELIGIBLE } from '#shared/runner/messages'
 
-export type QuoteAnswer = RunQuote | { declined: true } | { refused: string }
+export type QuoteAnswer = RunQuote | { declined: true } | { refused: string, reason?: string }
 
 /** A start refusal as the quote answers it; anything else (a fault, the runner off) is thrown on. */
 export function quoteAnswerOf(e: unknown): QuoteAnswer {
@@ -27,8 +27,9 @@ export function quoteAnswerOf(e: unknown): QuoteAnswer {
   const reason = (x?.data as { reason?: unknown } | undefined)?.reason
   if (e instanceof MeterRefusalError) {
     if (reason === RUNNER_NOT_ELIGIBLE) return { declined: true }
-    // The start's refusals (4xx, and 5xx for an unpriced model or a pause) carry plain words.
-    return { refused: e.message }
+    // The start's refusals (4xx, and 5xx for an unpriced model or a pause) carry plain words, and
+    // their stable reason code where the start gives one (an app keys on it, never on the words).
+    return typeof reason === 'string' && reason ? { refused: e.message, reason } : { refused: e.message }
   }
   // Any other refusal raised in the start with a status (an h3 error: a request too large, a body it can't
   // read) answers with its own words, so the app shows them; a fault without one is thrown on.

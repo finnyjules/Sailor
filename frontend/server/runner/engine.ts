@@ -17,7 +17,7 @@ import {
   GATE_CLASS, dependenciesOf, downstreamNodes, isLink, legNodes, upstreamStage,
   type ApiLink, type ApiPrompt, type TakeGateState,
 } from '#shared/runner/graph'
-import { RUNNER_NOT_ELIGIBLE, type GateChoice, type RunnerMessage } from '#shared/runner/messages'
+import { RUNNER_NOT_ELIGIBLE, RUNNER_SOUND_TOO_LONG, type GateChoice, type RunnerMessage } from '#shared/runner/messages'
 import { RUNNER_TIMEOUTS, type RunnerTimeouts } from '#shared/runner/timeouts'
 import { MeterRefusalError } from '../utils/requestMeter'
 import { BASE_RENDER_CREDITS, UnpricedGraphError } from '../utils/priceBook'
@@ -2322,7 +2322,7 @@ export function createEngine(deps: EngineDeps) {
           // re-review): Vocal separator adds that second only where a header source (or a music node's
           // duration) is in the chain, so an exact chain past the cap is refused here too.
           const slack = n.class_type === VOCALS_CLASS && found?.exact ? 0 : 1
-          if (bound !== null && bound > cap + slack + 1e-3) throw refuse(longest.words, 400, { nodeId, classType: n.class_type })
+          if (bound !== null && bound > cap + slack + 1e-3) throw refuse(longest.words, 400, { nodeId, classType: n.class_type, reason: RUNNER_SOUND_TOO_LONG })
           // Held on the bound (or, where the maker can't be bounded, on the place's longest sound); the
           // node's turn measures the WAV it sends and is charged on that, never above the hold.
           measured[index]![nodeId] = { seconds: { place, ...(bound !== null ? { audioUpTo: Math.min(bound, cap) } : {}) }, sha: {} }

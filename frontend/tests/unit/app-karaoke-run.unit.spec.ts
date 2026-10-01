@@ -18,9 +18,11 @@ import type { ApiPrompt } from '#shared/runner/graph'
 import type { RunnerFamily } from '#shared/runner/families'
 import { isRunnerEligible } from '#shared/runner/eligibility'
 import { VOCALS_RATE, VOCALS_WORDS } from '#shared/runner/localModels'
-import { RUNNER_NOT_ELIGIBLE } from '#shared/runner/messages'
+import { RUNNER_NOT_ELIGIBLE, RUNNER_SOUND_TOO_LONG } from '#shared/runner/messages'
+import { MeterRefusalError } from '~~/server/utils/requestMeter'
+import { quoteAnswerOf } from '~~/server/api/runs/quote.post'
 import { floatWav } from '~~/server/media/encode'
-import { useAppRun, type AppQuote, type AppRunDeps } from '~/composables/useAppRun'
+import { QUOTE_FAILED, useAppRun, type AppQuote, type AppRunDeps } from '~/composables/useAppRun'
 import { KARAOKE_STEMS, KARAOKE_WORDS, buildKaraokePrompt, runOnEngine, useKaraokeRun, type KaraokeStems } from '~/lib/runner/karaokeApp'
 import type { AppTakeInput } from '~/composables/useAppTakes'
 import { mapWsEvent } from '~/lib/graph/wsEventMap'
@@ -211,7 +213,7 @@ describe('the app, fed fake runner events', () => {
   })
 
   it('a song over the runner\'s longest on this computer goes to the engine (ruling (i)); in hosted it is refused', async () => {
-    const refuse = { postQuote: vi.fn(async (): Promise<AppQuote> => ({ refused: VOCALS_WORDS.tooLong })) }
+    const refuse = { postQuote: vi.fn(async (): Promise<AppQuote> => ({ refused: VOCALS_WORDS.tooLong, reason: RUNNER_SOUND_TOO_LONG })) }
     const local = setup({ deps: refuse })
     local.song.value = { filename: 'long.wav' }
     await local.k.quote()
@@ -224,6 +226,98 @@ describe('the app, fed fake runner events', () => {
     other.song.value = { filename: 'song.wav' }
     await other.k.quote()
     expect(other.k.canRun.value).toBe(false)
+  })
+})
+
+describe('fix round 1', () => {
+  it('the local fallback keys on the reason code, never the words: the same words without the code stay a refusal', async () => {
+    const words = setup({ deps: { postQuote: vi.fn(async (): Promise<AppQuote> => ({ refused: VOCALS_WORDS.tooLong })) } })
+    words.song.value = { filename: 'long.wav' }
+    await words.k.quote()
+    expect(words.k.blocked.value).toBe(VOCALS_WORDS.tooLong)
+    expect(words.k.canRun.value).toBe(false)
+    // Other words, the code: the engine.
+    const code = setup({ deps: { postQuote: vi.fn(async (): Promise<AppQuote> => ({ refused: 'Too long.', reason: RUNNER_SOUND_TOO_LONG })) } })
+    code.song.value = { filename: 'long.wav' }
+    await code.k.quote()
+    expect(code.k.canRun.value).toBe(true)
+    await code.k.run()
+    expect(code.engine).toHaveBeenCalledTimes(1)
+    // In hosted the code is a plain refusal.
+    const hosted = setup({ hosted: true, deps: { postQuote: vi.fn(async (): Promise<AppQuote> => ({ refused: 'Too long.', reason: RUNNER_SOUND_TOO_LONG })) } })
+    hosted.song.value = { filename: 'long.wav' }
+    await hosted.k.quote()
+    expect(hosted.k.blocked.value).toBe('Too long.')
+    expect(hosted.k.canRun.value).toBe(false)
+  })
+
+  it('the run\'s own refusal carrying the code, on this computer, goes to the engine too', async () => {
+    const tooLong = Object.assign(new Error('x'), { statusCode: 400, data: { message: 'Too long.', data: { reason: RUNNER_SOUND_TOO_LONG } } })
+    const { song, k, engine, takes } = setup({ deps: { start: vi.fn(async () => { throw tooLong }) } })
+    song.value = { filename: 'song.wav' }
+    await k.quote()
+    await k.run()
+    expect(engine).toHaveBeenCalledTimes(1)
+    expect(takes).toHaveLength(1)
+  })
+
+  it('the start\'s refusal carries the code next to its words, and the quote route passes it on', async () => {
+    await requireMediaTools()
+    const k = makeKit({ hosted: true, deps: { families: () => ON } })
+    // 10 minutes and 2 s of 8 kHz mono: past hosted's longest.
+    const n = 8000 * (10 * 60 + 2)
+    const data = Buffer.alloc(n * 2)
+    const h = Buffer.alloc(44)
+    h.write('RIFF', 0); h.writeUInt32LE(36 + data.length, 4); h.write('WAVE', 8); h.write('fmt ', 12)
+    h.writeUInt32LE(16, 16); h.writeUInt16LE(1, 20); h.writeUInt16LE(1, 22); h.writeUInt32LE(8000, 24)
+    h.writeUInt32LE(16000, 28); h.writeUInt16LE(2, 32); h.writeUInt16LE(16, 34); h.write('data', 36); h.writeUInt32LE(data.length, 40)
+    mkdirSync(join(k.root, 'input', 'user_1'), { recursive: true })
+    writeFileSync(join(k.root, 'input', 'user_1', 'long.wav'), Buffer.concat([h, data]))
+    writeFileSync(join(k.root, 'input', 'long.wav'), Buffer.concat([h, data]))
+    const err = await k.engine.quoteRun({ userId: k.userId, takes: [buildKaraokePrompt('long.wav')], ...START }).then(() => null, (e: unknown) => e)
+    expect(err).toBeInstanceOf(MeterRefusalError)
+    expect((err as MeterRefusalError).data).toMatchObject({ reason: RUNNER_SOUND_TOO_LONG })
+    expect(quoteAnswerOf(err)).toEqual({ refused: VOCALS_WORDS.tooLong, reason: RUNNER_SOUND_TOO_LONG })
+    // The run's start refuses the same way, before any hold.
+    const err2 = await k.engine.startRun({ userId: k.userId, takes: [buildKaraokePrompt('long.wav')], ...START }).then(() => null, (e: unknown) => e)
+    expect((err2 as MeterRefusalError).data).toMatchObject({ reason: RUNNER_SOUND_TOO_LONG })
+    expect(k.ledger.hold).not.toHaveBeenCalled()
+    // A refusal with no code answers as before.
+    expect(quoteAnswerOf(new MeterRefusalError('Sign in to run workflows.', 401))).toEqual({ refused: 'Sign in to run workflows.' })
+  }, 120_000)
+
+  it('a failed price check shows its words and leaves Separate on; pressing it prices again, then runs', async () => {
+    let calls = 0
+    const postQuote = vi.fn(async (): Promise<AppQuote> => {
+      if (calls++ === 0) throw Object.assign(new Error('fetch failed'), { statusCode: 500 })
+      return { usd: 0.034, credits: 7, upTo: true }
+    })
+    const { song, k, deps, w, takes } = setup({ deps: { postQuote } })
+    song.value = { filename: 'song.wav' }
+    await k.quote()
+    expect(k.blocked.value).toBe(QUOTE_FAILED)
+    expect(k.priceText.value).toBeNull()
+    expect(k.canRun.value).toBe(true)
+    const done = k.run()
+    await vi.waitFor(() => expect(deps.start).toHaveBeenCalled())
+    expect(postQuote).toHaveBeenCalledTimes(2)
+    expect(deps.confirm).toHaveBeenCalledWith(expect.objectContaining({ usd: 0.034 }))
+    w.post({ event: 'executed', prompt_id: 'run_1.0', node_id: KARAOKE_STEMS.vocals, output: { audio: [file('v.mp3')] } })
+    w.post({ event: 'executed', prompt_id: 'run_1.0', node_id: KARAOKE_STEMS.instrumental, output: { audio: [file('i.mp3')] } })
+    await done
+    expect(takes).toHaveLength(1)
+    expect(k.blocked.value).toBeNull()
+  })
+
+  it('a price check that fails again at Run starts nothing, says so, and leaves Separate on', async () => {
+    const postQuote = vi.fn(async (): Promise<AppQuote> => { throw Object.assign(new Error('fetch failed'), { statusCode: 500 }) })
+    const { song, k, deps } = setup({ deps: { postQuote } })
+    song.value = { filename: 'song.wav' }
+    await k.quote()
+    await k.run()
+    expect(deps.start).not.toHaveBeenCalled()
+    expect(k.errorMessage.value).toBe(QUOTE_FAILED)
+    expect(k.canRun.value).toBe(true)
   })
 })
 
