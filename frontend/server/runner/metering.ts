@@ -179,6 +179,9 @@ export const PAID_TEXT_INPUTS: Readonly<Record<string, readonly string[]>> = {
   PoseMannequin: ['prompt', 'pose_prompt'],
   // R3.16, Turntable: the extra direction, inside Sailor's spin instruction.
   TurntableNode: ['instructions'],
+  // R7.4, Mask by text on SAM 3 (family sam-3-masks): its words, sent as typed (an empty one sends Sailor's
+  // own "object"). Mask extractor sends only click points.
+  MaskByText: ['prompt'],
 }
 
 /** The non-blank values of RUNNER_EXTRA_TEXT_INPUTS (a typed-in taste, a paid class's PAID_TEXT_INPUTS) across the prompt, each on its own. */

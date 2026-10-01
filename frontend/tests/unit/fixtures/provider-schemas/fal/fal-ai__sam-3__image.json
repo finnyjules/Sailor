@@ -1,0 +1,540 @@
+{
+  "endpoint": "fal-ai/sam-3/image",
+  "fetchedAt": "2026-10-01",
+  "sources": {
+    "schema": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=fal-ai/sam-3/image",
+    "pricing": "https://fal.ai/models/fal-ai/sam-3/image/llms.txt"
+  },
+  "input": {
+    "$ref": "#/components/schemas/Sam3ImageInput"
+  },
+  "output": {
+    "$ref": "#/components/schemas/Sam3ImageOutput"
+  },
+  "components": {
+    "schemas": {
+      "Sam3ImageInput": {
+        "x-fal-order-properties": [
+          "image_url",
+          "prompt",
+          "text_prompt",
+          "point_prompts",
+          "box_prompts",
+          "apply_mask",
+          "sync_mode",
+          "output_format",
+          "return_multiple_masks",
+          "max_masks",
+          "include_scores",
+          "include_boxes"
+        ],
+        "title": "SAM3ImageInput",
+        "properties": {
+          "include_boxes": {
+            "default": false,
+            "title": "Include Boxes",
+            "description": "Whether to include bounding boxes for each mask (when available).",
+            "type": "boolean"
+          },
+          "apply_mask": {
+            "default": true,
+            "title": "Apply Mask",
+            "description": "Apply the mask on the image.",
+            "type": "boolean"
+          },
+          "output_format": {
+            "default": "png",
+            "title": "Output Format",
+            "type": "string",
+            "description": "The format of the generated image.",
+            "enum": [
+              "jpeg",
+              "png",
+              "webp"
+            ]
+          },
+          "max_masks": {
+            "default": 3,
+            "title": "Max Masks",
+            "type": "integer",
+            "minimum": 1,
+            "description": "Maximum number of masks to return when `return_multiple_masks` is enabled.",
+            "maximum": 32
+          },
+          "return_multiple_masks": {
+            "default": false,
+            "title": "Return Multiple Masks",
+            "description": "If True, upload and return multiple generated masks as defined by `max_masks`.",
+            "type": "boolean"
+          },
+          "text_prompt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Text Prompt",
+            "deprecated": true,
+            "description": "[DEPRECATED] Use 'prompt' instead. Kept for backward compatibility."
+          },
+          "prompt": {
+            "title": "Prompt",
+            "default": "wheel",
+            "description": "Text prompt for segmentation",
+            "type": "string"
+          },
+          "include_scores": {
+            "default": false,
+            "title": "Include Scores",
+            "description": "Whether to include mask confidence scores.",
+            "type": "boolean"
+          },
+          "point_prompts": {
+            "default": [],
+            "title": "Point Prompts",
+            "description": "List of point prompts",
+            "items": {
+              "$ref": "#/components/schemas/PointPrompt"
+            },
+            "type": "array"
+          },
+          "box_prompts": {
+            "default": [],
+            "title": "Box Prompts",
+            "description": "Box prompt coordinates (x_min, y_min, x_max, y_max). Multiple boxes supported - use object_id to group boxes for the same object or leave empty for separate objects.",
+            "items": {
+              "$ref": "#/components/schemas/BoxPrompt"
+            },
+            "type": "array"
+          },
+          "sync_mode": {
+            "default": false,
+            "title": "Sync Mode",
+            "description": "If True, the media will be returned as a data URI.",
+            "type": "boolean"
+          },
+          "image_url": {
+            "title": "Image Url",
+            "examples": [
+              "https://raw.githubusercontent.com/facebookresearch/segment-anything-2/main/notebooks/images/truck.jpg"
+            ],
+            "description": "URL of the image to be segmented",
+            "type": "string"
+          }
+        },
+        "required": [
+          "image_url"
+        ],
+        "type": "object"
+      },
+      "PointPrompt": {
+        "title": "PointPrompt",
+        "properties": {
+          "label": {
+            "anyOf": [
+              {
+                "enum": [
+                  0,
+                  1
+                ],
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Label",
+            "description": "1 for foreground, 0 for background"
+          },
+          "y": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Y",
+            "description": "Y Coordinate of the prompt"
+          },
+          "frame_index": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Frame Index",
+            "description": "The frame index to interact with."
+          },
+          "x": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "X",
+            "description": "X Coordinate of the prompt"
+          },
+          "object_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Object Id",
+            "description": "Optional object identifier. Prompts sharing an object id refine the same object. When a text prompt is also given, the id selects which detected object the points refine."
+          }
+        },
+        "x-fal-order-properties": [
+          "x",
+          "y",
+          "label",
+          "object_id",
+          "frame_index"
+        ],
+        "type": "object"
+      },
+      "BoxPrompt": {
+        "title": "BoxPrompt",
+        "properties": {
+          "y_max": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Y Max",
+            "description": "Y Max Coordinate of the box"
+          },
+          "object_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Object Id",
+            "description": "Optional object identifier. Boxes sharing an object id refine the same object."
+          },
+          "frame_index": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Frame Index",
+            "description": "The frame index to interact with."
+          },
+          "x_max": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "X Max",
+            "description": "X Max Coordinate of the box"
+          },
+          "x_min": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "X Min",
+            "description": "X Min Coordinate of the box"
+          },
+          "y_min": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Y Min",
+            "description": "Y Min Coordinate of the box"
+          }
+        },
+        "x-fal-order-properties": [
+          "x_min",
+          "y_min",
+          "x_max",
+          "y_max",
+          "object_id",
+          "frame_index"
+        ],
+        "type": "object"
+      },
+      "Sam3ImageOutput": {
+        "x-fal-order-properties": [
+          "image",
+          "masks",
+          "metadata",
+          "scores",
+          "boxes"
+        ],
+        "title": "SAM3ImageOutput",
+        "properties": {
+          "scores": {
+            "anyOf": [
+              {
+                "items": {
+                  "anyOf": [
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scores",
+            "description": "Per-mask confidence scores when requested."
+          },
+          "metadata": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/MaskMetadata"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Metadata",
+            "description": "Per-mask metadata including scores and boxes."
+          },
+          "masks": {
+            "title": "Masks",
+            "description": "Segmented mask images.",
+            "items": {
+              "$ref": "#/components/schemas/Image"
+            },
+            "type": "array"
+          },
+          "boxes": {
+            "anyOf": [
+              {
+                "items": {
+                  "anyOf": [
+                    {
+                      "items": {
+                        "type": "number"
+                      },
+                      "type": "array"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Boxes",
+            "description": "Per-mask normalized bounding boxes [cx, cy, w, h] when requested."
+          },
+          "image": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Image"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Primary segmented mask preview."
+          }
+        },
+        "required": [
+          "masks"
+        ],
+        "type": "object"
+      },
+      "MaskMetadata": {
+        "x-fal-order-properties": [
+          "index",
+          "score",
+          "box"
+        ],
+        "title": "MaskMetadata",
+        "properties": {
+          "score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Score",
+            "description": "Score for this mask."
+          },
+          "index": {
+            "title": "Index",
+            "description": "Index of the mask inside the model output.",
+            "type": "integer"
+          },
+          "box": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "number"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Box",
+            "description": "Bounding box for the mask in normalized cxcywh coordinates."
+          }
+        },
+        "required": [
+          "index"
+        ],
+        "type": "object"
+      },
+      "Image": {
+        "title": "Image",
+        "properties": {
+          "file_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "examples": [
+              "z9RV14K95DvU.png"
+            ],
+            "description": "The name of the file. It will be auto-generated if not provided.",
+            "title": "File Name"
+          },
+          "url": {
+            "title": "Url",
+            "description": "The URL where the file can be downloaded from.",
+            "type": "string"
+          },
+          "content_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "examples": [
+              "image/png"
+            ],
+            "description": "The mime type of the file.",
+            "title": "Content Type"
+          },
+          "file_size": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "examples": [
+              4404019
+            ],
+            "description": "The size of the file in bytes.",
+            "title": "File Size"
+          },
+          "width": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "examples": [
+              1024
+            ],
+            "description": "The width of the image in pixels.",
+            "title": "Width"
+          },
+          "height": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "examples": [
+              1024
+            ],
+            "description": "The height of the image in pixels.",
+            "title": "Height"
+          }
+        },
+        "description": "Represents an image file.",
+        "x-fal-order-properties": [
+          "url",
+          "content_type",
+          "file_name",
+          "file_size",
+          "width",
+          "height"
+        ],
+        "required": [
+          "url"
+        ],
+        "type": "object"
+      }
+    }
+  },
+  "pricingText": "Your request will cost $0.005 per request.\n\nFor more details, see [fal.ai pricing](https://fal.ai/pricing)."
+}

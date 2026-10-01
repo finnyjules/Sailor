@@ -96,6 +96,9 @@ const EDIT_BASE: Record<string, Record<string, unknown>> = {
   UpscaleImage: { frames: LINK, tile_size: 512 },
   // Object removal (R7.3): one picture and its mask; its call is LaMa's fill.
   ObjectRemove: { frames: LINK, mask: LINK, mask_grow: 4 },
+  // Mask by text and Mask extractor (R7.4): one picture; their call is SAM 3's.
+  MaskByText: { image: LINK, prompt: 'the dog', threshold: 0, feather: 0, invert: false },
+  MaskExtractor: { image: LINK, points: '[{"x":0.5,"y":0.5,"label":1}]', feather: 0, invert: false },
   // Music and speech (R3.8): the text; the rest at the node's defaults.
   GenerateMusicNode: { model: 'MusicGen', prompt: 'lo-fi piano' },
   MusicGenRemoteNode: { prompt: 'lo-fi piano' },

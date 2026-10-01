@@ -33,7 +33,7 @@ import { outputKind } from '#shared/runner/values'
 import { pyIntOf } from '#shared/runner/pyText'
 import {
   BG_REMOVE_CLASS, LOCAL_MODEL_MAX_FRAMES, LOCAL_MODEL_MAX_PIXELS, LOCAL_MODEL_OUTPUT_KINDS, LOCAL_MODEL_PICTURE_INPUT, LOCAL_MODEL_WORDS, OBJECT_REMOVE_CLASS,
-  OBJECT_REMOVE_WORDS, UPSCALE_2X_WORDS, localModelOn, overCapWords,
+  OBJECT_REMOVE_WORDS, SAM_MASK_CLASSES, UPSCALE_2X_WORDS, localModelOn, overCapWords,
 } from '#shared/runner/localModels'
 import { linkPictureBound, linkPictureShapes, pictureSize, type Shape } from '../utils/graphInputPixels'
 import { pictureMeta } from './pictures/pythonView'
@@ -62,6 +62,8 @@ function maskBound(prompt: ApiPrompt, link: ApiLink, families: ReadonlySet<Runne
   const inputs = from.inputs ?? {}
   if (from.class_type === GATE_CLASS) return isLink(inputs.data_in) ? maskBound(prompt, inputs.data_in, families, depth + 1) : null
   if (ONE_MASK.has(from.class_type)) return 1
+  // R7.4: Mask by text and Mask extractor hand on one mask ([1, H, W]), while their family is on.
+  if (SAM_MASK_CLASSES.has(from.class_type) && link[1] === 0 && localModelOn(from.class_type, families)) return 1
   if (from.class_type === 'ImageToMask') return isLink(inputs.image) ? pictureBound(prompt, inputs.image, families, depth + 1) : null
   if (localModelOn(from.class_type, families) && link[1] === 1) {
     const name = LOCAL_MODEL_PICTURE_INPUT[from.class_type]!
@@ -149,7 +151,9 @@ type ShapeOf = (link: ApiLink) => Promise<readonly Shape[] | null>
  * Object removal hands on unchanged whatever its size), or null when that
  * can't be known before the run. Sized: LoadImage's mask (its file's, when it
  * has an alpha), Image to mask (its picture's), Background remove's mask (its
- * own picture's: the cut-out is fitted to it), through Gates. Any other maker
+ * own picture's: the cut-out is fitted to it), Mask by text's and Mask
+ * extractor's (R7.4: their first picture's; SAM 3's answer is fitted to it),
+ * through Gates. Any other maker
  * is checked at the node's turn (generators/localModels.ts, the backstop).
  */
 async function maskShapes(prompt: ApiPrompt, link: ApiLink, families: ReadonlySet<RunnerFamily>, shapeOf: ShapeOf, read: ((f: OutputFile) => Promise<Uint8Array>) | undefined, depth = 0): Promise<readonly Shape[] | 'empty' | null> {
@@ -170,6 +174,8 @@ async function maskShapes(prompt: ApiPrompt, link: ApiLink, families: ReadonlySe
   }
   if (from.class_type === 'ImageToMask' && link[1] === 0) return isLink(inputs.image) ? shapeOf(inputs.image) : null
   if (from.class_type === BG_REMOVE_CLASS && link[1] === 1 && localModelOn(BG_REMOVE_CLASS, families)) return isLink(inputs.frames) ? shapeOf(inputs.frames) : null
+  // R7.4: the mask is the first picture's size (a picture list's sizes are all among its shapes).
+  if (SAM_MASK_CLASSES.has(from.class_type) && link[1] === 0 && localModelOn(from.class_type, families)) return isLink(inputs.image) ? shapeOf(inputs.image) : null
   return null
 }
 

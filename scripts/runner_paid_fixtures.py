@@ -175,7 +175,21 @@ Groups:
              frontend/server/runner/generators/localModels.ts and
              frontend/server/runner/pixels/erase.ts
              (tests/unit/runner-local-erase.unit.spec.ts)
-  e2e      (R3.18) the controller check's chained workflows no single-node
+  local-masks (R7.4) Mask by text and Mask extractor (comfy_extras/nodes_matte_ml.py)
+             with CLIPSeg and SAM swapped for stand-ins: CLIPSeg's logits at the
+             picture's own size (hard ±1000, soft with exact 0.5s), so its
+             resize is the identity; SAM's three candidate masks and scores. The
+             real execute then thresholds, feathers, inverts and previews:
+             every threshold, feather and invert edge, a batch of two pictures,
+             a feather wider than the picture (Python fails), and the click
+             texts Python reads (bad, empty, non-list, clamped, string numbers,
+             bools, several points, and the ones Python fails on). Each records
+             what the stand-in was sent, the mask and the preview, for
+             frontend/server/runner/generators/localModels.ts,
+             frontend/shared/runner/samInput.ts and
+             frontend/server/runner/pixels/samMask.ts
+             (tests/unit/runner-local-masks.unit.spec.ts)
+  e2e    (R3.18) the controller check's chained workflows no single-node
              case covers, node by node (Summarize → Generate an image;
              Separate background and foreground → Frame; Upscale → Remove
              background → Save image; Restyle held on the second pass; Flux
@@ -3663,6 +3677,219 @@ def local_erase_group() -> dict:
     return {"dilate": dilate, "cases": cases, "size": [ERASE_W, ERASE_H]}
 
 
+MASKS_W, MASKS_H = 24, 16
+
+
+def _masks_disc(w: int, h: int, cx: float, cy: float, r: float):
+    """A hard disc, float32 [H, W] of 0 and 1."""
+    import numpy as np
+    yy, xx = np.mgrid[0:h, 0:w]
+    return (np.sqrt((xx - cx) ** 2 + (yy - cy) ** 2) < r).astype(np.float32)
+
+
+def _masks_logits(w: int, h: int, seed: int, kind: str):
+    """CLIPSeg's stand-in logits at the picture's own size (Python's resize is then the
+    identity): `hard` ±1000 (sigmoid gives exactly 0 and 1, a hard mask as SAM 3's), `soft`
+    random with every tenth one 0 (sigmoid 0.5: the threshold's edge)."""
+    import numpy as np
+    if kind == "hard":
+        return np.where(_masks_disc(w, h, w * 0.4, h * 0.55, min(w, h) * 0.35) > 0, 1000.0, -1000.0).astype(np.float32)
+    rng = np.random.default_rng(seed)
+    lg = (rng.standard_normal((h, w)) * 3.0).astype(np.float32)
+    lg.flat[::10] = 0.0
+    return lg
+
+
+def local_masks_group() -> dict:
+    """Mask by text and Mask extractor (R7.4): the real execute with CLIPSeg and SAM swapped
+    for stand-ins (no model, no network), so what follows the model (the threshold, the
+    feather, the invert, the preview) is Python's own on a recorded mask, and the click
+    points are what Python's processor receives."""
+    import hashlib
+    import io
+    import shutil
+    import tempfile
+    import numpy as np
+    import torch
+    from PIL import Image
+    import folder_paths
+    from comfy_api.latest._io import HiddenHolder
+    from comfy_extras import nodes_matte_ml as mm
+
+    temp = tempfile.mkdtemp(prefix="local-masks-")
+    folder_paths.set_temp_directory(temp)
+    w, h = MASKS_W, MASKS_H
+    seen: dict = {}
+
+    class _Out:
+        pass
+
+    class ClipProc:
+        def __call__(self, text, images, return_tensors, padding):
+            assert return_tensors == "pt" and padding is True
+            seen["text"] = list(text)
+            seen["size"] = list(images[0].size)
+            return {"input_ids": torch.zeros(1, 1)}
+
+    def clip_model(logits):
+        def run(**_inputs):
+            o = _Out()
+            o.logits = torch.from_numpy(logits.copy())
+            return o
+        return run
+
+    class SamImageProcessor:
+        def __init__(self, cands):
+            self.cands = cands
+
+        def post_process_masks(self, pred, orig, reshaped):
+            return [torch.from_numpy(np.stack(self.cands)[None] > 0.5)]
+
+    class SamProc:
+        def __init__(self, cands):
+            self.image_processor = SamImageProcessor(cands)
+
+        def __call__(self, pil, input_points, input_labels, return_tensors):
+            assert return_tensors == "pt"
+            seen["size"] = list(pil.size)
+            seen["coords"] = [list(map(int, c)) for c in input_points[0]]
+            seen["labels"] = [int(x) for x in input_labels[0]]
+            return {"original_sizes": torch.tensor([[h, w]]), "reshaped_input_sizes": torch.tensor([[h, w]])}
+
+    def sam_model(scores):
+        def run(**_inputs):
+            assert _inputs.get("multimask_output") is True
+            o = _Out()
+            o.pred_masks = torch.zeros(1, 1, 3, 4, 4)
+            o.iou_scores = torch.tensor([[scores]], dtype=torch.float32)
+            return o
+        return run
+
+    def record_ui(res, inline: bool) -> dict:
+        ui = res.ui.as_dict() if hasattr(res.ui, "as_dict") else res.ui
+        entry = dict(ui["images"][0])
+        with Image.open(os.path.join(temp, entry["subfolder"], entry["filename"])) as im:
+            im.load()
+            rec = {"filename": entry["filename"], "subfolder": entry["subfolder"], "type": entry["type"], "mode": im.mode,
+                   "w": im.size[0], "h": im.size[1], "sha256": hashlib.sha256(im.tobytes()).hexdigest(), "animated": list(ui.get("animated", []))}
+            if inline:
+                rec["pixels"] = _b64(im.tobytes())
+            return rec
+
+    def mask_record(t, inline: bool) -> dict:
+        """The float32 mask: its sha256, and the values themselves where a feather makes them LIBRARY (compared in a band)."""
+        f = np.ascontiguousarray(t.detach().cpu().float().numpy())
+        rec = {"shape": list(f.shape), "f32_sha256": hashlib.sha256(f.tobytes()).hexdigest()}
+        if inline:
+            rec["f32"] = _b64(f.tobytes())
+        return rec
+
+    cases: list = []
+    answers: dict = {}
+
+    def run_text(name, pictures, logits, prompt, threshold, feather, invert, node_id="7"):
+        seen.clear()
+        image = torch.cat([_picture_tensor(p) for p in pictures], dim=0)
+        answer = torch.sigmoid(torch.from_numpy(logits.copy()).float())
+        if answer.dim() == 3:
+            answer = answer[0]
+        key = hashlib.sha256(np.ascontiguousarray(answer.numpy()).tobytes()).hexdigest()[:16]
+        answers.setdefault(key, _b64(np.ascontiguousarray(answer.numpy(), dtype="<f4").tobytes()))
+        case = {"name": name, "class_type": "MaskByText", "node_id": node_id, "pictures": [_b64(p) for p in pictures],
+                "widgets": {"prompt": prompt, "threshold": threshold, "feather": feather, "invert": invert},
+                "logits_dims": int(logits.ndim), "answer": key}
+        try:
+            with mock.patch.object(mm, "_load_clipseg", lambda _d: (ClipProc(), clip_model(logits))), \
+                    mock.patch.object(mm.MaskByTextNode, "hidden", HiddenHolder.from_dict({"UNIQUE_ID": node_id})):
+                res = mm.MaskByTextNode.execute(image=image, prompt=prompt, threshold=threshold, feather=feather, invert=invert)
+        except Exception as e:  # noqa: BLE001 (Python's own failure is the record)
+            case["error"] = type(e).__name__
+            cases.append(case)
+            return
+        (mask,) = res.args
+        if threshold == 0 and feather == 0 and not invert:
+            assert torch.equal(mask[0], answer), f"{name}: CLIPSeg's resize is not the identity"
+        case.update({"sent_text": seen["text"], "sent_size": seen["size"], "mask": mask_record(mask, feather > 0), "preview": record_ui(res, feather > 0)})
+        cases.append(case)
+
+    def run_clicks(name, picture, points, feather, invert, cands, scores, node_id="8"):
+        seen.clear()
+        image = _picture_tensor(picture)
+        case = {"name": name, "class_type": "MaskExtractor", "node_id": node_id, "pictures": [_b64(picture)],
+                "widgets": {"points": points, "feather": feather, "invert": invert},
+                "scores": scores}
+        try:
+            with mock.patch.object(mm, "_load_sam", lambda _d: (SamProc(cands), sam_model(scores))), \
+                    mock.patch.object(mm.MaskExtractorNode, "hidden", HiddenHolder.from_dict({"UNIQUE_ID": node_id})):
+                res = mm.MaskExtractorNode.execute(image=image, points=points, feather=feather, invert=invert)
+        except Exception as e:  # noqa: BLE001 (Python's own failure is the record)
+            case["error"] = type(e).__name__
+            if "coords" in seen:
+                case.update({"sent_coords": seen["coords"], "sent_labels": seen["labels"]})
+            cases.append(case)
+            return
+        (mask,) = res.args
+        best = int(np.argmax(np.asarray(scores, dtype=np.float32)))
+        case.update({"best": best, "sent_coords": seen["coords"], "sent_labels": seen["labels"], "sent_size": seen["size"],
+                     "mask": mask_record(mask, feather > 0), "preview": record_ui(res, feather > 0)})
+        cases.append(case)
+
+    try:
+        hard = _masks_logits(w, h, 0, "hard")
+        soft = _masks_logits(w, h, 7900, "soft")
+        seed = 7910
+        for (prompt, logits, lname) in (("", hard, "hard"), ("the dog", soft, "soft"), ("  ", soft[None], "soft, [1, H, W]")):
+            for (thr, fe, inv) in ((0.0, 0.0, False), (0.0, 0.0, True), (0.5, 0.0, False), (0.3, 0.0, False), (1.0, 0.0, False),
+                                   (0.0, 2.5, False), (0.5, 2.5, True), (0.0, 0.5, False), (0.0, 4.0, False)):
+                seed += 1
+                run_text(f"text · {lname} · prompt {prompt!r} · threshold {thr} · feather {fe} · invert {inv}",
+                         [png_bytes(w, h, seed)], logits, prompt, thr, fe, inv)
+        # A batch of two pictures: the mask from the first, the preview of the first.
+        run_text("text · a batch of two pictures", [png_bytes(w, h, 7990), png_bytes(w, h, 7991)], soft, "sky", 0.0, 0.0, False)
+        # A feather wider than the picture: torchvision's reflect padding raises (the runner narrows it: fix-bugs rule).
+        run_text("text · feather 30 on 24 × 16 (Python fails)", [png_bytes(w, h, 7992)], hard, "x", 0.0, 30.0, False)
+
+        cands = [_masks_disc(w, h, 7, 5, 4), _masks_disc(w, h, 15, 9, 6), _masks_disc(w, h, 12, 8, 30)]
+        clicks = [
+            ('[{"x":0.5,"y":0.5,"label":1}]', [0.2, 0.9, 0.5]),
+            ("", [0.9, 0.2, 0.5]),
+            ("not json", [0.1, 0.2, 0.95]),
+            ("{}", [0.3, 0.3, 0.2]),
+            ("[]", [0.5, 0.6, 0.4]),
+            ("5", [0.5, 0.6, 0.4]),
+            ("null", [0.5, 0.6, 0.4]),
+            ('[{"x":0.25,"y":"0.75","label":0}]', [0.2, 0.9, 0.5]),
+            ('[{"x":1.5,"y":-0.2}]', [0.2, 0.9, 0.5]),
+            ('[{"x":0.999,"y":1}]', [0.2, 0.9, 0.5]),
+            ('[{"x":"1e-1","y":" 0.5 ","label":"1"}]', [0.2, 0.9, 0.5]),
+            ('[{"x":true,"y":false,"label":1.9}]', [0.2, 0.9, 0.5]),
+            ('[{"x":"1_0e-1","y":0.5,"label":true}]', [0.2, 0.9, 0.5]),
+            ('[{"x":0.1,"y":0.2,"label":1},{"x":0.9,"y":0.8,"label":0},{"x":0.5,"y":0.5}]', [0.7, 0.7, 0.1]),
+            # Python fails on these (the runner leaves them to the engine, or fails plainly at the turn).
+            ("[1, 2]", [0.2, 0.9, 0.5]),
+            ('[{"y":0.5}]', [0.2, 0.9, 0.5]),
+            ('[{"x":"abc","y":0.5}]', [0.2, 0.9, 0.5]),
+            ('[{"x":0.5,"y":0.5,"label":null}]', [0.2, 0.9, 0.5]),
+            ('[{"x":0.5,"y":0.5,"label":"1.0"}]', [0.2, 0.9, 0.5]),
+            ('[{"x":1e400,"y":0.5}]', [0.2, 0.9, 0.5]),
+            ('[{"x":NaN,"y":0.5}]', [0.2, 0.9, 0.5]),
+            # Python runs these; SAM 3's schema takes labels 0 and 1 only (left to the engine).
+            ('[{"x":0.5,"y":0.5,"label":2}]', [0.2, 0.9, 0.5]),
+            ('[{"x":0.5,"y":0.5,"label":-1}]', [0.2, 0.9, 0.5]),
+        ]
+        seed = 8000
+        for (points, scores) in clicks:
+            seed += 1
+            run_clicks(f"clicks · {points!r}", png_bytes(w, h, seed), points, 0.0, False, cands, scores)
+        for (fe, inv) in ((0.0, True), (2.5, False), (2.5, True), (4.0, True)):
+            seed += 1
+            run_clicks(f"clicks · feather {fe} · invert {inv}", png_bytes(w, h, seed), '[{"x":0.3,"y":0.6,"label":1}]', fe, inv, cands, [0.4, 0.8, 0.3])
+    finally:
+        shutil.rmtree(temp, ignore_errors=True)
+    return {"cases": cases, "size": [w, h], "answers": answers,
+            "candidates": [_b64(np.ascontiguousarray(c, dtype="<f4").tobytes()) for c in cands]}
+
+
 GROUPS = {
     "handoff": handoff_group,
     "handoff2": handoff2_group,
@@ -3685,6 +3912,7 @@ GROUPS = {
     "e2e": e2e_group,
     "local-cutout": local_cutout_group,
     "local-erase": local_erase_group,
+    "local-masks": local_masks_group,
 }
 
 

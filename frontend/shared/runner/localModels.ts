@@ -19,12 +19,13 @@
  * (frames); their picture output carries what came in (KIND_FOLLOWS_INPUT in
  * ./values.ts): a picture for a picture, a frame batch for a clip.
  *
- * Imports nothing at run time but the family chain and the remover's and LaMa's slugs;
+ * Imports nothing at run time but the family chain and the remover's, LaMa's and SAM 3's ids;
  * ./eligibility.ts builds its rule table from localModelRows() when it loads.
  */
 import { familyOn, type RunnerFamily } from './families'
 import { BACKGROUND_REMOVER_SLUG } from './repair'
 import { PHOTO_FILL_SLUGS } from './layers'
+import { SAM_3_IMAGE_APP } from './samInput'
 import type { RunnerNodeRule, RunnerWidgetSpec } from './eligibility'
 import type { ValueKind } from './values'
 import type { PaidCalls } from '../pricing/paidSettings'
@@ -74,11 +75,32 @@ export const OBJECT_REMOVE_SLUG = PHOTO_FILL_SLUGS['LaMa (fast)']
 /** `mask_grow`: IO.Int.Input(default=4, min=0, max=64, step=1). */
 export const OBJECT_REMOVE_GROW = { default: 4, min: 0, max: 64 } as const
 
+// ── Mask by text and Mask extractor (R7.4, family `sam-3-masks`) ──
+
+/** comfy_extras/nodes_matte_ml.py MaskByTextNode's node_id (CLIPSeg, now SAM 3 on a text prompt). */
+export const MASK_BY_TEXT_CLASS = 'MaskByText'
+/** comfy_extras/nodes_matte_ml.py MaskExtractorNode's node_id (SAM ViT-base, now SAM 3 on clicks). */
+export const MASK_EXTRACTOR_CLASS = 'MaskExtractor'
+/** fal's SAM 3 on pictures: /api/inpaint/segment's call (#shared/runner/samInput). */
+export const SAM_3_SLUG = SAM_3_IMAGE_APP
+/** The two classes: one call each on the first picture, whatever comes in (Python's `_image_to_pil`). */
+export const SAM_MASK_CLASSES: ReadonlySet<string> = new Set([MASK_BY_TEXT_CLASS, MASK_EXTRACTOR_CLASS])
+/** `feather` (both): IO.Float.Input(default=0.0, min=0.0, max=30.0, step=0.5). */
+export const SAM_MASK_FEATHER = { default: 0, min: 0, max: 30 } as const
+/** Mask by text's `threshold`: IO.Float.Input(default=0.0, min=0.0, max=1.0, step=0.01). */
+export const MASK_BY_TEXT_THRESHOLD = { default: 0, min: 0, max: 1 } as const
+/** Mask by text's `prompt` default, and what Python sends for an empty one (`prompt or "object"`). */
+export const MASK_BY_TEXT_PROMPT = 'object'
+/** Mask extractor's `points` default. */
+export const MASK_EXTRACTOR_POINTS = '[{"x":0.5,"y":0.5,"label":1}]'
+
 /** Every moved class's family (each task adds its row once its port exists). */
 export const LOCAL_MODEL_FAMILY_OF: Readonly<Record<string, RunnerFamily>> = {
   [BG_REMOVE_CLASS]: 'bg-remove',
   [UPSCALE_2X_CLASS]: 'upscale-2x',
   [OBJECT_REMOVE_CLASS]: 'object-remove',
+  [MASK_BY_TEXT_CLASS]: 'sam-3-masks',
+  [MASK_EXTRACTOR_CLASS]: 'sam-3-masks',
 }
 
 /** The service each moved class calls (ruling (b): the price's tooltip names it). Null: none (Lens, in the server). */
@@ -86,6 +108,8 @@ export const SERVICE_OF: Readonly<Record<string, LocalModelService | null>> = {
   [BG_REMOVE_CLASS]: 'replicate',
   [UPSCALE_2X_CLASS]: 'replicate',
   [OBJECT_REMOVE_CLASS]: 'replicate',
+  [MASK_BY_TEXT_CLASS]: 'fal',
+  [MASK_EXTRACTOR_CLASS]: 'fal',
 }
 
 /** The tooltip on the price (ruling (b)): sentence case, plain, no node copy. */
@@ -129,6 +153,24 @@ export const LOCAL_MODEL_PICTURE_INPUT: Readonly<Record<string, string>> = {
   [OBJECT_REMOVE_CLASS]: 'frames',
 }
 
+/**
+ * The picture input of every moved class that reads one, for the rule rows'
+ * 'local-model-source' check: the per-picture classes' (above), and the SAM 3
+ * mask classes' `image` (R7.4: a picture or a frame batch, of which Python
+ * reads the first). Only LOCAL_MODEL_PICTURE_INPUT's classes are counted
+ * before the run (a call per picture): a mask class makes one call.
+ */
+export const LOCAL_MODEL_SOURCE_INPUT: Readonly<Record<string, string>> = {
+  ...LOCAL_MODEL_PICTURE_INPUT,
+  [MASK_BY_TEXT_CLASS]: 'image',
+  [MASK_EXTRACTOR_CLASS]: 'image',
+}
+
+/** Whether a moved class makes one call per picture or frame (ruling (f)); the SAM 3 mask classes make one in all. */
+export function perPictureClass(classType: string): boolean {
+  return has(LOCAL_MODEL_PICTURE_INPUT, classType)
+}
+
 /** Each picture class's picture slots (a picture to the runner only while its family is on, eligibility.ts carriesImage). */
 export const LOCAL_MODEL_PICTURE_SLOTS: Readonly<Record<string, readonly number[]>> = {
   [BG_REMOVE_CLASS]: [0],
@@ -143,6 +185,9 @@ export const LOCAL_MODEL_OUTPUT_KINDS: Readonly<Record<string, Readonly<Record<n
   [UPSCALE_2X_CLASS]: {},
   // R7.3: the same (a picture for a picture, a frame batch for a clip).
   [OBJECT_REMOVE_CLASS]: {},
+  // R7.4: one mask, the first picture's size ([1, H, W]).
+  [MASK_BY_TEXT_CLASS]: { 0: 'mask' },
+  [MASK_EXTRACTOR_CLASS]: { 0: 'mask' },
 }
 
 /** The largest picture each class's service takes (pixels), where its page states one (rule 6). */
@@ -188,6 +233,14 @@ export const OBJECT_REMOVE_WORDS = {
   noAnswer: 'The service sent back no filled picture.',
 } as const
 
+/** Mask by text's and Mask extractor's own words (R7.4). */
+export const SAM_MASK_WORDS = {
+  noPicture: 'There is no picture to make a mask from.',
+  pointsFail: 'These click points can’t be read. Each needs an x and a y between 0 and 1.',
+  pointsLabel: 'Each click point must add to the mask (1) or take away from it (0).',
+  pointsUnreadable: 'These click points can’t be read.',
+} as const
+
 /** What the start of the run says of a clip over the frame cap, in the class's own words. */
 export function overCapWords(classType: string): string {
   if (classType === UPSCALE_2X_CLASS) return UPSCALE_2X_WORDS.overCap
@@ -201,6 +254,17 @@ const UPSCALE_2X_WIDGETS: Readonly<Record<string, RunnerWidgetSpec>> = {
 
 const OBJECT_REMOVE_WIDGETS: Readonly<Record<string, RunnerWidgetSpec>> = {
   mask_grow: { type: 'INT', required: true, min: OBJECT_REMOVE_GROW.min, max: OBJECT_REMOVE_GROW.max },
+}
+
+const MASK_BY_TEXT_WIDGETS: Readonly<Record<string, RunnerWidgetSpec>> = {
+  threshold: { type: 'FLOAT', required: true, min: MASK_BY_TEXT_THRESHOLD.min, max: MASK_BY_TEXT_THRESHOLD.max },
+  feather: { type: 'FLOAT', required: true, min: SAM_MASK_FEATHER.min, max: SAM_MASK_FEATHER.max },
+  invert: { type: 'BOOLEAN', required: true },
+}
+
+const MASK_EXTRACTOR_WIDGETS: Readonly<Record<string, RunnerWidgetSpec>> = {
+  feather: { type: 'FLOAT', required: true, min: SAM_MASK_FEATHER.min, max: SAM_MASK_FEATHER.max },
+  invert: { type: 'BOOLEAN', required: true },
 }
 
 const BG_REMOVE_WIDGETS: Readonly<Record<string, RunnerWidgetSpec>> = {
@@ -242,6 +306,27 @@ export function localModelRows(): Record<string, RunnerNodeRule> {
       inputCheck: 'local-model-source',
       widgets: OBJECT_REMOVE_WIDGETS,
     },
+    // R7.4: the picture (or a clip, of which the first frame is read), the words (moderated; a text wire
+    // read at the node's turn), and the settings as ComfyUI validates them.
+    [MASK_BY_TEXT_CLASS]: {
+      family: 'sam-3-masks',
+      mustLink: ['image'],
+      required: ['image', 'prompt'],
+      valueInputs: { image: ['files', 'frames'], prompt: ['text'] },
+      // Its preview is save_live_preview's fixed `live_preview_<node id>.png`.
+      inputCheck: ['local-model-source', 'effect-preview-name'],
+      widgets: MASK_BY_TEXT_WIDGETS,
+    },
+    // R7.4: the picture, the clicks (a text wire read at the node's turn; typed clicks SAM 3 can't take,
+    // or Python can't read, go to the engine: 'sam-points'), and the settings as ComfyUI validates them.
+    [MASK_EXTRACTOR_CLASS]: {
+      family: 'sam-3-masks',
+      mustLink: ['image'],
+      required: ['image', 'points'],
+      valueInputs: { image: ['files', 'frames'], points: ['text'] },
+      inputCheck: ['local-model-source', 'effect-preview-name', 'sam-points'],
+      widgets: MASK_EXTRACTOR_WIDGETS,
+    },
   }
 }
 
@@ -260,6 +345,9 @@ const LOCAL_MODEL_SLUG: Readonly<Record<string, string>> = {
   [UPSCALE_2X_CLASS]: UPSCALE_2X_SLUG,
   // R7.3: LaMa's card (paidRates.ts, `gpu_ceiling` $0.0007, an estimate), shared with R3.7's fill.
   [OBJECT_REMOVE_CLASS]: OBJECT_REMOVE_SLUG,
+  // R7.4: SAM 3's card (paidRates.ts, `per_call` $0.005, verified): one call per node.
+  [MASK_BY_TEXT_CLASS]: SAM_3_SLUG,
+  [MASK_EXTRACTOR_CLASS]: SAM_3_SLUG,
 }
 
 /**
@@ -272,6 +360,7 @@ const LOCAL_MODEL_SLUG: Readonly<Record<string, string>> = {
 export function localModelCalls(classType: string, frames: number | null | undefined): PaidCalls {
   const endpoint = has(LOCAL_MODEL_SLUG, classType) ? LOCAL_MODEL_SLUG[classType]! : null
   if (!endpoint) return { refused: `${classType} has no price yet` }
-  const times = typeof frames === 'number' && Number.isFinite(frames) ? Math.max(1, Math.trunc(frames)) : 1
+  // A SAM 3 mask class reads the first picture only: one call, however many came in.
+  const times = perPictureClass(classType) && typeof frames === 'number' && Number.isFinite(frames) ? Math.max(1, Math.trunc(frames)) : 1
   return { steps: [{ call: { endpoint }, times }] }
 }

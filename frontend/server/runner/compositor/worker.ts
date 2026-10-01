@@ -33,6 +33,7 @@ import type { SoundOpResult } from '../video/core/sound'
 import type { PilRaw } from '../pixels/pilPixels'
 import type { CutoutJob, CutoutResult } from '../pixels/cutout'
 import type { EraseJob, EraseResult } from '../pixels/erase'
+import type { SamMaskJob, SamMaskResult } from '../pixels/samMask'
 import { resampleCore } from '../../media/resample'
 
 /**
@@ -168,6 +169,12 @@ parentPort.on('message', (m) => {
       stopped()
       value = built.erase.erase(m.job, isStopped)
       transfer = value.preview ? [value.picture.buffer, value.preview.buffer] : [value.picture.buffer]
+    }
+    // Mask by text and Mask extractor (R7.4, ../pixels/samMask.ts): the mask and the preview from SAM 3's answer.
+    else if (m.op === 'px.samMask') {
+      stopped()
+      value = built.sam.samMask(m.job, isStopped)
+      transfer = [value.mask.buffer, value.preview.buffer]
     }
     // Load video frames (R5.5): Pillow's resize(BILINEAR) of one RGB frame.
     else if (m.op === 'px.resizeRgb') {
@@ -505,6 +512,8 @@ export interface PixelsWorker {
   cutout(job: CutoutJob): Promise<CutoutResult>
   /** Object removal (R7.3, ../pixels/erase.ts): one picture's composite of the service's fill (its buffers handed over). */
   erase(job: EraseJob): Promise<EraseResult>
+  /** Mask by text and Mask extractor (R7.4, ../pixels/samMask.ts): the mask and the preview from SAM 3's answer (its buffers handed over). */
+  samMask(job: SamMaskJob): Promise<SamMaskResult>
   /** An effect (R2.1) starts its batch: `fn` its op ('<core>.<fn>'), `params` its widgets, `count` the batch's length. */
   effectBegin(job: { cls: string; fn: string; params: Record<string, unknown>; count: number }): Promise<void>
   /**
@@ -630,6 +639,13 @@ export function pixelsInWorker<T>(signal: AbortSignal | undefined, job: (w: Pixe
         // One buffer may back two of them (a caller's own copy): each is transferred once.
         const buffers = [...new Set([j.rgb.buffer, j.fill.buffer, j.mask.buffer])] as ArrayBuffer[]
         return await call(t, { op: 'px.erase', job: j }, buffers) as EraseResult
+      },
+      async samMask(job) {
+        const own = (b: Uint8Array) => b.byteOffset === 0 && b.byteLength === b.buffer.byteLength && !(b.buffer instanceof SharedArrayBuffer) ? b : b.slice()
+        const j = { ...job, rgb: own(job.rgb), masks: job.masks.map(m => ({ ...m, l: own(m.l) })) }
+        // One buffer may back two of them (a caller's own copy): each is transferred once.
+        const buffers = [...new Set([j.rgb.buffer, ...j.masks.map(m => m.l.buffer)])] as ArrayBuffer[]
+        return await call(t, { op: 'px.samMask', job: j }, buffers) as SamMaskResult
       },
       async resizeRgb(rgb, width, height, ow, oh) {
         const own = rgb.byteOffset === 0 && rgb.byteLength === rgb.buffer.byteLength && !(rgb.buffer instanceof SharedArrayBuffer) ? rgb : rgb.slice()

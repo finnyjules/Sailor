@@ -31,7 +31,7 @@ import { estimateFloored } from '#shared/pricing/estimateFloor'
 import { sizePricedInput, sourceOutputPixels } from '#shared/pricing/editSettings'
 import { NO_FAMILIES, type RunnerFamily } from '#shared/runner/families'
 import { IMAGE_OUTPUT_CLASSES, PAID_PICTURE_FAMILY } from '#shared/runner/eligibility'
-import { LOCAL_MODEL_MAX_FRAMES, LOCAL_MODEL_PICTURE_INPUT, isLocalModelClass } from '#shared/runner/localModels'
+import { LOCAL_MODEL_MAX_FRAMES, LOCAL_MODEL_PICTURE_INPUT, SAM_MASK_CLASSES, isLocalModelClass } from '#shared/runner/localModels'
 import { allotMediaFiles, gateNodeOrder, mediaFileKey, secondsPricedMedia, sourceAudioSeconds, type InputSeconds, type MediaFileRef, type MediaSource } from '#shared/pricing/clipSettings'
 
 export interface BadgeCost { usd: number; approximate: boolean }
@@ -267,6 +267,8 @@ const ONE_PICTURE_SOURCES: ReadonlySet<string> = new Set(['LoadImage', 'Composit
 export function upstreamPictureCount(node: any, nodes?: readonly any[] | null, edges?: readonly any[] | null, depth = 0): number | null {
   if (!node?.data || !nodes || !edges || depth > 64) return null
   const ct = String(node.data.nodeType || '')
+  // R7.4: Mask by text and Mask extractor read the first picture only: one call, whatever comes in.
+  if (SAM_MASK_CLASSES.has(ct)) return 1
   const name = Object.prototype.hasOwnProperty.call(LOCAL_MODEL_PICTURE_INPUT, ct) ? LOCAL_MODEL_PICTURE_INPUT[ct]! : ct === 'ComfyGateNode' ? 'data_in' : ct === 'Image' ? 'images' : null
   if (!name) return null
   const port = (node.data.inputs || []).findIndex((i: any) => i?.name === name)

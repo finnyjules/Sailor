@@ -1,4 +1,4 @@
-import { buildSamInput, type SamRequestBody } from '../../utils/samInput'
+import { SAM_3_IMAGE_APP, buildSamInput, type SamRequestBody } from '#shared/runner/samInput'
 import { assertRateLimit } from '../../lib/rateLimit'
 
 /**
@@ -32,7 +32,7 @@ import { assertRateLimit } from '../../lib/rateLimit'
  * point_prompts genuinely steer the model. See samInput.ts for the input
  * fields that made it work (empty prompt, apply_mask:false, sync_mode:true).
  */
-const SAM_MODEL = 'fal-ai/sam-3/image'
+const SAM_MODEL = SAM_3_IMAGE_APP
 
 interface SamImage { url?: string }
 interface SamOutput { image?: SamImage; masks?: SamImage[] }

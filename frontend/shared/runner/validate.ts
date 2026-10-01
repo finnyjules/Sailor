@@ -96,6 +96,8 @@ export const RUNNER_OUTPUT_CLASSES: ReadonlySet<string> = new Set([
   'UpscaleImage',
   // R7.3: Object removal is an output node (is_output_node=True).
   'ObjectRemove',
+  // R7.4: Mask by text and Mask extractor are output nodes (is_output_node=True).
+  'MaskByText', 'MaskExtractor',
 ])
 
 /** ComfyUI's node_errors entry for a node that failed validation. */

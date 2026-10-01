@@ -299,6 +299,13 @@ export const PAID_RATES: Record<string, PaidRate> = {
     note: 'T4 at $0.000225/s; page: approximately $0.042 to run (p50), typically within 4 minutes; taken as the price of the 60 s the node sends at most: $0.0007/s',
     service: 'replicate', source: 'https://replicate.com/zsxkib/realistic-voice-cloning', read: '2026-09-30', confidence: 'estimate',
   },
+  // R7.4, Mask by text and Mask extractor on fal's SAM 3 (read 2026-09-30, plain GETs of the public
+  // pages): llms.txt, "Your request will cost $0.005 per request" (the saved schema's pricingText), as
+  // the price book's route row for /api/inpaint/segment has it.
+  'fal-ai/sam-3/image': {
+    unit: 'per_call', usd: 0.005,
+    service: 'fal', source: 'https://fal.ai/models/fal-ai/sam-3/image', read: '2026-09-30', confidence: 'verified',
+  },
 }
 
 const own = <T>(o: Record<string, T>, k: string): T | undefined =>

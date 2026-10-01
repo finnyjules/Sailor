@@ -17,9 +17,10 @@ import {
   asciiGlyphsArePortable, effectFamilyOn, effectOutputSizeFits, effectPreviewName, effectRows, effectSwitchedClasses, effectTextIsPortable, painterInputsArePortable,
 } from './effects'
 import { SHADER_ASPECTS, shaderBakeTaken } from './shaderBakeKey'
+import { parseMaskPoints } from './samInput'
 import { FRAMES_LINK_SOURCES, MEDIA_EFFECT_OUTPUT_KINDS, SOUND_EFFECT_OUTPUTS, linkSourceOn, mediaEffectFamilyOn, mediaEffectRows, mediaEffectSwitchedClasses } from './mediaEffects'
 import {
-  LOCAL_MODEL_FAMILY_OF, LOCAL_MODEL_OUTPUT_KINDS, LOCAL_MODEL_PICTURE_INPUT, LOCAL_MODEL_PICTURE_SLOTS, localModelOn, localModelRows, localModelSwitchedClasses,
+  LOCAL_MODEL_FAMILY_OF, LOCAL_MODEL_OUTPUT_KINDS, LOCAL_MODEL_PICTURE_SLOTS, LOCAL_MODEL_SOURCE_INPUT, localModelOn, localModelRows, localModelSwitchedClasses,
 } from './localModels'
 import {
   ENHANCE_ENGINES, REMOVE_BACKGROUND_MODELS, REPAIR_CLASSES, REPAIR_OUTPUT_FORMATS, RESTORE_PHOTO_MODELS,
@@ -249,7 +250,7 @@ export const INPUT_CHECKS: Readonly<Record<string, (inputs: Record<string, unkno
   // frame batch (FRAMES_LINK_SOURCES, its maker's family on; through a Gate, a batch indeed). Anything
   // else (a video file, a sound) is left to the engine. Without the prompt, nothing to check it against.
   'local-model-source': (inputs, ctx) => {
-    const name = Object.prototype.hasOwnProperty.call(LOCAL_MODEL_PICTURE_INPUT, ctx.classType) ? LOCAL_MODEL_PICTURE_INPUT[ctx.classType]! : null
+    const name = Object.prototype.hasOwnProperty.call(LOCAL_MODEL_SOURCE_INPUT, ctx.classType) ? LOCAL_MODEL_SOURCE_INPUT[ctx.classType]! : null
     if (!name || !ctx.prompt) return true
     const v = inputs[name]
     if (!isLink(v)) return false
@@ -258,6 +259,17 @@ export const INPUT_CHECKS: Readonly<Record<string, (inputs: Record<string, unkno
     const from = ctx.prompt[v[0]]
     if (!from || !FRAMES_LINK_SOURCES.some(([cls, slot]) => cls === from.class_type && slot === v[1]) || !linkSourceOn(from.class_type, families)) return false
     return from.class_type !== 'ComfyGateNode' || outputKind(ctx.prompt, v, outputKindsFor(families)) === 'frames'
+  },
+  // R7.4: Mask extractor's typed clicks read as Python reads them, and SAM 3's schema takes them (labels 0
+  // and 1). Clicks Python fails on, a label SAM 3 doesn't take, or text only Python's json.loads reads
+  // (NaN, Infinity) leave the workflow to the engine (a stop-gap, R7.4's report). Read here on a 2 × 2
+  // picture (the size is known only at the turn; it changes the outcome only for a coordinate near
+  // 1e307, whose product overflows): the turn reads them again at the real size, before any call.
+  // A wired text is read at the node's turn.
+  'sam-points': (inputs) => {
+    const v = inputs.points
+    if (isLink(v)) return true
+    return parseMaskPoints(v, 2, 2).ok
   },
   'audio-card-lip-sync': (inputs, ctx) => {
     if (!ctx.prompt || ctx.nodeId === undefined || !isLink(inputs.source)) return true
@@ -269,7 +281,7 @@ export const INPUT_CHECKS: Readonly<Record<string, (inputs: Record<string, unkno
 
 /** The name of an input check (INPUT_CHECKS). */
 export type InputCheckName = 'moodboard-reading' | 'bake-params' | 'empty-image-caps' | 'smart-layout' | 'effect-preview-name' | 'effect-output-size' | 'effect-text' | 'ascii-glyphs' | 'painter' | 'shader-bake' | 'audio-card-lip-sync'
-  | 'create-video-fps' | 'video-card-made-video' | 'local-model-source'
+  | 'create-video-fps' | 'video-card-made-video' | 'local-model-source' | 'sam-points'
 
 /** Whether a wire brings a made video: Create video's, directly or through Gates and Video cards (their `source`). */
 function showsMadeVideo(prompt: ApiPrompt, link: [string, number], depth = 0): boolean {

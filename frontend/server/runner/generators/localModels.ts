@@ -54,17 +54,36 @@
  * EXIF turn, a made picture's tensor); an answer of another size is fitted to
  * the picture (sharp's cubic, as Python's own resize back). Preview: the first
  * picture (save_live_preview(unique=True), RGB).
+ *
+ * Mask by text and Mask extractor (R7.4, family `sam-3-masks`;
+ * comfy_extras/nodes_matte_ml.py:105-217): one call to fal's SAM 3 on the
+ * first picture (Python's `_image_to_pil` reads `image[0]`; a clip's first
+ * frame), sent as Python's RGB view of it (R3.7's splitPictures). Text:
+ * `{image_url, prompt: prompt or "object", apply_mask: false, output_format:
+ * 'png', return_multiple_masks: true, max_masks: 32}`, the union of every mask
+ * (ruling (k)); clicks: the `points` text read exactly as Python reads it
+ * (#shared/runner/samInput parseMaskPoints) and sent as /api/inpaint/segment
+ * sends clicks (samPointsInput), `masks[0]`. An answer with no mask is an
+ * all-black mask, charged (ruling (k)). Then, exact against Python given the
+ * mask (../pixels/samMask.ts, on the Frame's worker): the threshold (text),
+ * the feather, the invert, and the preview (_mask_preview of the first
+ * picture, save_live_preview's fixed `live_preview_<node id>.png`). The mask
+ * is the picture's size, kept as the runner keeps masks (16 bits, and its
+ * float32 tensor when a reader takes the float: Object removal).
  */
 import sharp from 'sharp'
 import { isLink, type ApiLink } from '#shared/runner/graph'
 import { NO_FAMILIES } from '#shared/runner/families'
-import { pyFloatOf, pyIntOf } from '#shared/runner/pyText'
+import { pyFloatOf, pyIntOf, pyTruthy } from '#shared/runner/pyText'
 import { paidCallUsd } from '#shared/pricing/paidRates'
 import {
   BG_REMOVE_CLASS, BG_REMOVE_EDGE_SOFTNESS, BG_REMOVE_OUTPUTS, BG_REMOVE_SLUG, LOCAL_MODEL_WORDS, OBJECT_REMOVE_CLASS, OBJECT_REMOVE_GROW,
   OBJECT_REMOVE_SLUG, OBJECT_REMOVE_WORDS, UPSCALE_2X_CLASS, UPSCALE_2X_MAX_PIXELS, UPSCALE_2X_SLUG, UPSCALE_2X_WORDS, isLocalModelClass,
+  MASK_BY_TEXT_CLASS, MASK_BY_TEXT_PROMPT, MASK_BY_TEXT_THRESHOLD, SAM_3_SLUG, SAM_MASK_CLASSES, SAM_MASK_FEATHER, SAM_MASK_WORDS,
   type BgRemoveOutput,
 } from '#shared/runner/localModels'
+import { parseMaskPoints, samPointsInput, samTextInput } from '#shared/runner/samInput'
+import { effectPreviewName } from '#shared/runner/effects'
 import type { NodePlan, PipelineIO, PlanContext } from '../executors'
 import type { OutputFile, RunnerValue } from '../types'
 import { pixelsInWorker } from '../compositor/worker'
@@ -80,6 +99,8 @@ import { onlySavesRead } from '../cards/utilities'
 import { framesQuantOf } from '../video/plan'
 import { MediaError, mediaLease } from '../../media/run'
 import { framesOf, framesSink } from '../../media/values'
+import { floatReadBy, maskTensorBytes } from '../effects/tensorFiles'
+import type { SamAnswerMask } from '../pixels/samMask'
 import type { CutoutMode, CutoutResult } from '../pixels/cutout'
 import { firstOutputUrl, upscaleInput } from './repair'
 import { fillInput, maskPng, splitPictures } from './splitLayers'
@@ -103,6 +124,7 @@ export function planLocalModel(ctx: PlanContext): NodePlan {
   if (cls === BG_REMOVE_CLASS) return planBackgroundRemove(ctx)
   if (cls === UPSCALE_2X_CLASS) return planUpscale2x(ctx)
   if (cls === OBJECT_REMOVE_CLASS) return planObjectRemove(ctx)
+  if (SAM_MASK_CLASSES.has(cls)) return planSamMask(ctx)
   throw new Error(`The runner cannot run a ${cls} node`)
 }
 
@@ -795,6 +817,132 @@ export function planObjectRemove(ctx: PlanContext): NodePlan {
       })
       if (io.signal.aborted) throw new MediaError('stopped')
       return { values: { 0: made2 }, ui }
+    },
+  }
+}
+
+// ── Mask by text and Mask extractor (R7.4) ──
+
+/** The mask's work took longer than the worker's limit. */
+export const SAM_MASK_TIMEOUT = 'Making the mask took longer than 2 minutes, so it was stopped'
+
+/** SAM 3's answer's mask links, in order (`masks[].url`). */
+export function samMaskUrls(result: unknown): string[] {
+  const masks = result && typeof result === 'object' ? (result as { masks?: unknown }).masks : undefined
+  if (!Array.isArray(masks)) return []
+  const out: string[] = []
+  for (const m of masks) {
+    const url = m && typeof m === 'object' ? (m as { url?: unknown }).url : undefined
+    if (typeof url === 'string' && url) out.push(url)
+  }
+  return out
+}
+
+/** A mask answer as PIL's convert("L") reads it (white = selected): L = (R·19595 + G·38470 + B·7471 + 2¹⁵) >> 16. */
+export async function samAnswerMask(bytes: Uint8Array): Promise<SamAnswerMask> {
+  const { data, info: { width: w, height: h } } = await pilRgba(bytes)
+  const l = new Uint8Array(w * h)
+  for (let i = 0, j = 0; i < l.length; i++, j += 4) l[i] = (data[j]! * 19595 + data[j + 1]! * 38470 + data[j + 2]! * 7471 + 0x8000) >>> 16
+  return { l, w, h }
+}
+
+/** Mask by text's words as Python sends them: `prompt or "object"` (a non-text value as its str). */
+export function maskByTextPrompt(v: unknown): string {
+  if (v === undefined || v === null || v === '') return MASK_BY_TEXT_PROMPT
+  if (typeof v === 'boolean') return v ? 'True' : 'False'
+  return String(v)
+}
+
+export function planSamMask(ctx: PlanContext): NodePlan {
+  const cls = ctx.prompt[ctx.nodeId]!.class_type
+  const text = cls === MASK_BY_TEXT_CLASS
+  const inputs = ctx.prompt[ctx.nodeId]!.inputs ?? {}
+  const link = inputs.image
+  if (!isLink(link)) throw new Error(SAM_MASK_WORDS.noPicture)
+  const threshold = text ? floatOf(inputs.threshold, MASK_BY_TEXT_THRESHOLD.default) : null
+  const feather = floatOf(inputs.feather, SAM_MASK_FEATHER.default)
+  const invert = pyTruthy(inputs.invert ?? false)
+  const prompt = text ? maskByTextPrompt(inputs.prompt) : ''
+  const usd = paidCallUsd({ endpoint: SAM_3_SLUG })
+  if (usd == null) throw new Error('Making a mask has no price yet')
+  const previewName = effectPreviewName(ctx.nodeId)
+  if (!previewName) throw new Error('This node’s preview can’t be named after it')
+  const incoming = incomingOf(ctx, link)
+  const count = incoming.kind === 'frames' ? incoming.value.count : incoming.files.length
+  if (count < 1) throw new Error(SAM_MASK_WORDS.noPicture)
+  // Python's picture (R3.7's splitPictures): behind a loader the loader's tensor, made in the run its node's.
+  const behind = incoming.kind === 'files' ? loaderFileBehind(ctx.prompt, link) : null
+  const loader: LoaderKind | null = behind ? { keepsAlpha: behind.classType === 'Image' } : null
+  const made = incoming.kind === 'files' && !behind && ctx.families ? madeSourceOf(ctx.prompt, link, ctx.families)?.view ?? null : null
+  // Object removal (and any reader of the float) takes the mask's float32 tensor too (effects/tensorFiles.ts).
+  const float = floatReadBy(ctx.prompt, ctx.nodeId, 0, ctx.families, 'mask')
+
+  /** The first picture: its RGB as Python's tensor holds it, its size, and the link SAM 3 is sent. */
+  const firstPicture = async (io: PipelineIO): Promise<{ rgb: Uint8Array; w: number; h: number; url: () => Promise<string> }> => {
+    if (incoming.kind === 'files') {
+      const f = incoming.files[0]!
+      const pic = await splitPictures(await io.read(f), loader, io.signal, made)
+      const { rgb } = await rgbOfPng(pic.fill ?? await io.read(f))
+      return { rgb, w: pic.w, h: pic.h, url: async () => (pic.fill ? io.handOff(pic.fill, 'sam_image.png') : ctx.toUrl(f)) }
+    }
+    // A clip: its first frame, decoded under a media lease that ends with it.
+    const v = incoming.value
+    const media = io.media
+    if (!media) throw new Error(LOCAL_MODEL_WORDS.needsRun)
+    const rgb = await mediaLease({ userId: media.userId, signal: io.signal }, async (lease) => {
+      const frames = framesOf(v, media, lease)[Symbol.asyncIterator]()
+      try {
+        const g = await frames.next()
+        if (g.done) throw new Error(SAM_MASK_WORDS.noPicture)
+        return new Uint8Array(g.value as Uint8Array)
+      }
+      finally {
+        await frames.return?.().catch(() => undefined)
+      }
+    })
+    if (io.signal.aborted) throw new MediaError('stopped')
+    const png = await framePng(rgb, v.w, v.h)
+    const name = 'sam_frame_0.png'
+    return { rgb, w: v.w, h: v.h, url: async () => (ctx.bytesToUrl ? ctx.bytesToUrl({ filename: name, subfolder: '', type: 'temp' }, png) : io.handOff(png, name)) }
+  }
+
+  return {
+    kind: 'pipeline', prefix: text ? 'mask_by_text' : 'mask_extractor',
+    run: async (io: PipelineIO) => {
+      const pic = await firstPicture(io)
+      // The clicks, read as Python reads them at the picture's size, before any call.
+      let payload: Record<string, unknown>
+      if (text) payload = samTextInput(await pic.url(), prompt)
+      else {
+        const read = parseMaskPoints(inputs.points, pic.w, pic.h)
+        if (!read.ok) throw new Error(read.why === 'label' ? SAM_MASK_WORDS.pointsLabel : read.why === 'unreadable' ? SAM_MASK_WORDS.pointsUnreadable : SAM_MASK_WORDS.pointsFail)
+        payload = samPointsInput(await pic.url(), read.points)
+      }
+      const got = await io.call({ key: 'sam', provider: 'fal', endpoint: SAM_3_SLUG, payload, media: 'image', usd })
+      // Text: every mask (their union); clicks: the one asked for. None: an all-black mask, charged (ruling (k)).
+      const urls = text ? samMaskUrls(got.result) : samMaskUrls(got.result).slice(0, 1)
+      const masks: SamAnswerMask[] = []
+      for (const [i, url] of urls.entries()) {
+        // Kept for the run, so a resumed node doesn't fetch it again.
+        const fresh: { bytes?: Uint8Array } = {}
+        const kept = await io.savedOnce('sam', `mask-${i}`, async () => {
+          fresh.bytes = (await io.download(url)).bytes
+          return io.keep(fresh.bytes, 'bin')
+        })
+        masks.push(await samAnswerMask(fresh.bytes ?? await io.read(kept)))
+      }
+      const r = await pixelsInWorker(io.signal, worker => worker.samMask({ masks, w: pic.w, h: pic.h, threshold, feather, invert, rgb: pic.rgb }), SAM_MASK_TIMEOUT)
+      const mask = { w: pic.w, h: pic.h, data: r.mask }
+      const file = await io.keep(await encodeMask(mask), 'png')
+      const tensors = float ? { tensors: [await io.keep(maskTensorBytes(mask), 'bin')] } : {}
+      const png = await png8(r.preview, pic.w, pic.h, 3, 1)
+      // Checked immediately before the write (R1.6's rule): a stopped node never writes a preview.
+      if (io.signal.aborted) throw new MediaError('stopped')
+      const f = await io.savePreviewAs(png, { filename: previewName })
+      return {
+        values: { 0: { kind: 'mask', files: [file], ...tensors } },
+        ui: { images: [{ filename: f.filename, subfolder: f.subfolder, type: f.type }], animated: [false] },
+      }
     },
   }
 }

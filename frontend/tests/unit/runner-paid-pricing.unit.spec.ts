@@ -167,6 +167,8 @@ describe('paidCallUsd', () => {
       'lucataco/flux-dev-multi-lora',
       // R3.10: Wizper, whisper-diarization and realistic-voice-cloning; lipsync-2-pro keeps its clip card.
       'fal-ai/wizper', 'thomasmol/whisper-diarization', 'zsxkib/realistic-voice-cloning',
+      // R7.4: SAM 3 (Mask by text and Mask extractor).
+      'fal-ai/sam-3/image',
     ].sort())
   })
   it('no paid card duplicates an edit, clip or video card (each rate lives in one place)', () => {
@@ -323,8 +325,9 @@ describe('PAID_TEXT_INPUTS', () => {
   it('lists only the tasks\' classes (R3.3: the LLM text nodes; R3.4: describe; R3.5: Upscale and Enhance detail; R3.6: layers; R3.8: audio-gen; R3.9: Multi-View; R3.12: image-extras; R3.13 and R3.14: lora; R3.15: Pose Mannequin; R3.16: Turntable)', () => {
     // (R3.4: every describe class but Extract text, which sends no text. R3.5: the two with prompts. R3.6: all three. R3.8: all four.
     // R3.9: Multi-View's prompt; Generate a 3D model and its twin send no text. R3.12: all three. R3.13: both. R3.14: Restyle.
-    // R3.15: Pose Mannequin; Lens · 3D Reframe sends only Sailor's own text. R3.16: Turntable's extra direction.)
-    expect(Object.keys(PAID_TEXT_INPUTS)).toEqual([...LLM_TEXT_CLASSES, ...DESCRIBE_CLASSES.filter(c => c !== 'ExtractTextNode'), 'UpscaleImageNode', 'EnhanceDetailNode', ...LAYERS_CLASSES, ...AUDIO_GEN_CLASSES, 'Hunyuan3DMultiViewNode', ...IMAGE_EXTRAS_CLASSES, ...LORA_CLASSES, RESTYLE_LORA_CLASS, 'PoseMannequin', 'TurntableNode'])
+    // R3.15: Pose Mannequin; Lens · 3D Reframe sends only Sailor's own text. R3.16: Turntable's extra direction.
+    // R7.4: Mask by text's words; Mask extractor sends only clicks.)
+    expect(Object.keys(PAID_TEXT_INPUTS)).toEqual([...LLM_TEXT_CLASSES, ...DESCRIBE_CLASSES.filter(c => c !== 'ExtractTextNode'), 'UpscaleImageNode', 'EnhanceDetailNode', ...LAYERS_CLASSES, ...AUDIO_GEN_CLASSES, 'Hunyuan3DMultiViewNode', ...IMAGE_EXTRAS_CLASSES, ...LORA_CLASSES, RESTYLE_LORA_CLASS, 'PoseMannequin', 'TurntableNode', 'MaskByText'])
   })
 
   it('extraPromptTexts reads a paid class’s listed inputs (typed text only)', () => {
