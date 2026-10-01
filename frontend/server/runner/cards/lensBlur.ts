@@ -32,6 +32,8 @@ import { CARD_MAX_PIXELS } from '#shared/runner/eligibility'
 import {
   EFFECT_IO_WORK_PER_VALUE, EFFECT_MAX_WORK, EFFECT_PICTURES_TOO_LARGE, EFFECT_TOO_MUCH_WORK, effectPictureCap, effectPreviewName,
 } from '#shared/runner/effects'
+import { NO_FAMILIES, familyOn, type RunnerFamily } from '#shared/runner/families'
+import type { ApiPrompt } from '#shared/runner/graph'
 import type { EffectSchema } from '#shared/runner/effectSchemas.generated'
 import { parsePyJson, type PyJson } from '#shared/runner/pyJson'
 import { pyFloatOf } from '#shared/runner/pyText'
@@ -45,6 +47,8 @@ import { effectParams, pictureHeader, plain, png8 } from '../effects/plan'
 import { floatReadBy, keptTensorsBehind } from '../effects/tensorFiles'
 import { effectCores } from '../effects/cores'
 import { DEPTH_MODEL_MAX_SIDE, depthOfRgb, type RawDepth } from '../../utils/depthModel'
+import { linkPictureBound, pictureSize } from '../../utils/graphInputPixels'
+import { parseInputFileRef } from '../inputs'
 
 export const LENS_DEPTH_FAILED = 'The depth of this picture could not be worked out here'
 
@@ -76,17 +80,43 @@ const WORK_CHANNELS = 4
 /** Python's round() of a float: halves to the even neighbour. */
 const pyRound = (x: number) => { const r = Math.round(x); return r - x === 0.5 && r % 2 !== 0 ? r - 1 : r }
 
+/** The most a blurred level is reduced by on the fast path (blurReduced). */
+export const LENS_MAX_SCALE = 8
+/** Reading the picture down by area (each value about once) and bilinear back up, a value per blurred level. */
+const LENS_WORK_REDUCE = 12
+
 /**
- * The work of one Lens · Depth of field on a w × h picture at this aperture
- * (an upper bound: every level at the largest radius the aperture allows;
- * the circle of confusion is at most 24 · aperture), its depth's resize, and,
- * when it runs, the model.
+ * The work of one Lens · Depth of field on a picture of `px` pixels at this
+ * aperture (an upper bound: every level at the largest radius the aperture
+ * allows; the circle of confusion is at most 24 · aperture), its depth's
+ * resize, and, when it runs, the model. `scale` > 1: the fast path, the
+ * blurred levels at 1 / scale of each side (at most px / scale² pixels, the
+ * radius ⌈r / scale⌉ at most), read down and back up at full size.
  */
-export function lensWork(aperture: number, size: { w: number; h: number }, model: boolean): number {
-  const px = size.w * size.h
+export function lensWork(aperture: number, px: number, model: boolean, scale = 1): number {
   const r = Math.max(1, pyRound(MAX_RADIUS * Math.max(0, aperture)))
-  return px * WORK_CHANNELS * BLURRED_LEVELS * ((2 * r + 1) * LENS_WORK_PER_TAP + LENS_WORK_PER_VALUE)
-    + px * LENS_WORK_PER_PIXEL + (model ? LENS_MODEL_WORK : 0)
+  const own = px * LENS_WORK_PER_PIXEL + px * WORK_CHANNELS * BLURRED_LEVELS * LENS_WORK_PER_VALUE + (model ? LENS_MODEL_WORK : 0)
+  if (scale <= 1) return own + px * WORK_CHANNELS * BLURRED_LEVELS * (2 * r + 1) * LENS_WORK_PER_TAP
+  const small = px / (scale * scale)
+  const rs = Math.ceil(r / scale) + 1
+  return own + small * WORK_CHANNELS * BLURRED_LEVELS * ((2 * rs + 1) * LENS_WORK_PER_TAP + LENS_WORK_PER_VALUE)
+    + px * WORK_CHANNELS * BLURRED_LEVELS * LENS_WORK_REDUCE
+}
+
+/** Reading and writing the pictures (the effects' I/O count): the picture, the depth wired in, the output. */
+const lensIoWork = (px: number, dpx: number) => EFFECT_IO_WORK_PER_VALUE * WORK_CHANNELS * (px + dpx + px)
+
+/**
+ * The blur's scale for a picture of `px` pixels (and a depth of `dpx`): 1
+ * (Python's) when that fits EFFECT_MAX_WORK, else the smallest reduction of
+ * the blurred levels that does (the fast path, R7.9 fix round 1), or null
+ * when none up to LENS_MAX_SCALE does.
+ */
+export function lensScale(aperture: number, px: number, dpx: number, model: boolean): number | null {
+  for (let scale = 1; scale <= LENS_MAX_SCALE; scale++) {
+    if (lensWork(aperture, px, model, scale) + lensIoWork(px, dpx) <= EFFECT_MAX_WORK) return scale
+  }
+  return null
 }
 
 /**
@@ -236,9 +266,11 @@ export function planLensBlur(ctx: PlanContext): NodePlan {
       if (px + dpx + px > CARD_MAX_PIXELS) throw new Error(EFFECT_PICTURES_TOO_LARGE)
       // The model runs for a picture of more than one pixel with no depth wired in (one pixel's normalised depth is 0).
       const runsModel = !!image && !depthIn && px > 1
-      const work = (image ? lensWork(params.aperture as number, size, runsModel) : 0)
-        + EFFECT_IO_WORK_PER_VALUE * WORK_CHANNELS * ((image ? px : 0) + dpx + px)
-      if (work > EFFECT_MAX_WORK) throw new Error(EFFECT_TOO_MUCH_WORK)
+      // Python's blur when it fits the work budget, else the fast path's smallest reduction that does
+      // (checked before the hold too, lensStartRefusal; this is the backstop).
+      const scale = image ? lensScale(params.aperture as number, px, dpx, runsModel) : 1
+      if (scale === null) throw new Error(EFFECT_TOO_MUCH_WORK)
+      const work = (image ? lensWork(params.aperture as number, px, runsModel, scale) : 0) + lensIoWork(image ? px : 0, dpx)
       io.spendWork?.(work)
 
       // The pictures, decoded here (sharp) or read as an effect's tensor; the depth model here; the blur on the worker.
@@ -271,7 +303,7 @@ export function planLensBlur(ctx: PlanContext): NodePlan {
         // Checked immediately before every write, after its encode: a stopped node never writes.
         const stopped = () => { if (worker.live.aborted || io.signal.aborted) throw new Error('Stopped') }
         try {
-          await worker.effectBegin({ cls: LENS_BLUR_CLASS, fn: 'lens.LensBlur', params, count: 1 })
+          await worker.effectBegin({ cls: LENS_BLUR_CLASS, fn: 'lens.LensBlur', params: { ...params, scale }, count: 1 })
           const r = await worker.effectRun({
             index: 0, inputs: handed, first: true, masks: [false],
             want: { round: [!trunc], trunc: [trunc], f32: [float] },
@@ -301,4 +333,49 @@ export function planLensBlur(ctx: PlanContext): NodePlan {
       return { values, ui: { images: [{ filename: made.preview.filename, subfolder: made.preview.subfolder, type: made.preview.type }], animated: [false] } }
     },
   }
+}
+
+// ── Before the hold (R7.9 fix round 1: never start a run that fails at this node's turn) ──
+
+/**
+ * Every Lens · Depth of field the runner takes in a prompt, checked before
+ * the hold from the largest its picture (and depth) can be
+ * (graphInputPixels.ts linkPictureBound: a loaded file's header, a sized
+ * maker's settings): a picture over the effects' cap, more pixels than a
+ * card reads in all, or a blur that no reduction up to LENS_MAX_SCALE brings
+ * within the work budget is refused now, in plain words, never sent to the
+ * engine. A picture whose size can't be bounded before the run (an
+ * unsized maker: the report names them) is left to the turn's same check, the backstop.
+ */
+export async function lensStartRefusal(
+  prompt: ApiPrompt, families: ReadonlySet<RunnerFamily> = NO_FAMILIES,
+  o: { hosted: boolean; read?: (f: OutputFile) => Promise<Uint8Array> },
+): Promise<{ message: string; nodeId: string; classType: string } | null> {
+  if (!familyOn('lens-blur', families)) return null
+  const readFile = async (value: string) => {
+    const f = o.read ? parseInputFileRef(value) : null
+    return f && o.read ? pictureSize(await o.read(f)) : null
+  }
+  const { max, message: tooLarge } = effectPictureCap(LENS_BLUR_CLASS, o.hosted)
+  for (const [nodeId, n] of Object.entries(prompt)) {
+    if (n.class_type !== LENS_BLUR_CLASS) continue
+    const inputs = n.inputs ?? {}
+    if (!isLink(inputs.image)) continue
+    const refused = (message: string) => ({ message, nodeId, classType: LENS_BLUR_CLASS })
+    const px = await linkPictureBound(prompt, inputs.image, readFile)
+    if (px === null || !Number.isFinite(px)) continue
+    if (px > max) return refused(tooLarge)
+    let dpx = 0
+    if (isLink(inputs.depth)) {
+      const d = await linkPictureBound(prompt, inputs.depth, readFile)
+      if (d === null || !Number.isFinite(d)) continue
+      if (d > max) return refused(tooLarge)
+      dpx = d
+    }
+    if (px + dpx + px > CARD_MAX_PIXELS) return refused(EFFECT_PICTURES_TOO_LARGE)
+    const aperture = lensParamsOf(inputs).aperture
+    if (typeof aperture !== 'number') continue
+    if (lensScale(aperture, px, dpx, !isLink(inputs.depth)) === null) return refused(EFFECT_TOO_MUCH_WORK)
+  }
+  return null
 }

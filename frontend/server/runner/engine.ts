@@ -61,6 +61,7 @@ import { frameStartProblems, framesSoundVerdict } from './media/frameNodes'
 import { hasVideoEffect, keptPeak, lutStartProblems, mediaEffectRefusals, mediaEffectStartProblems, nearLimit, needsExactCount, waveformStartProblems } from './video/start'
 import { frameShapes, videoSourceShapeOf } from './video/shapes'
 import { hasLocalModelPicture, localModelStartProblems, soundBoundOf } from './localModelStart'
+import { lensStartRefusal } from './cards/lensBlur'
 import { vocalsStemMaxBytes } from './generators/localModels'
 import {
   LOCAL_MODEL_WORDS, VOCALS_CLASS, VOCALS_WORDS, WHISPER_CLASS, WHISPER_WORDS, isLocalModelClass, vocalsMaxSeconds, whisperMaxSeconds,
@@ -2454,6 +2455,13 @@ export function createEngine(deps: EngineDeps) {
           if (tooLarge) throw refuse(tooLarge, 400, { nodeId: c.resized.nodeId, classType: c.resized.classType, file: c.file.filename })
         }
       }
+    }
+    // Lens · Depth of field (R7.9 fix round 1): its picture bounded now, and its blur's work from that bound
+    // and its settings (Python's, or the fast path's reduced levels): one no reduction fits is refused
+    // plainly, before anything is held or any paid node runs. An unbounded picture keeps the turn's check.
+    for (const p of prompts) {
+      const lens = await lensStartRefusal(p, families, { hosted: deps.hosted(), read: f => files.read(f) })
+      if (lens) throw refuse(lens.message, 400, { nodeId: lens.nodeId, classType: lens.classType })
     }
     // Pose Mannequin (R3.15): its saved pictures read as Python would open them,
     // before anything is held: one Python reads its own way refused, and

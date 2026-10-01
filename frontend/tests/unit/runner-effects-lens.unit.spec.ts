@@ -22,12 +22,12 @@ import {
 import { effectCores } from '~~/server/runner/effects/cores'
 import type { Tensor } from '~~/server/runner/effects/core/tensor'
 import { decodeRaw, type PictureSource } from '~~/server/runner/compositor/decode'
-import { __setLensDepthModelForTests, lensFocusOf, lensParamsOf, lensWork } from '~~/server/runner/cards/lensBlur'
+import { __setLensDepthModelForTests, LENS_MAX_SCALE, lensFocusOf, lensParamsOf, lensScale, lensStartRefusal, lensWork } from '~~/server/runner/cards/lensBlur'
 import { planNode, type NodePlan } from '~~/server/runner/executors'
 import { runnerFamilies } from '~~/server/runner/config'
 import { DEPTH_MODEL, DEPTH_MODEL_FILES, DEPTH_MODEL_MAX_SIDE, depthModelReady } from '~~/server/utils/depthModel'
 import { GRAPH_NODE_CREDITS, priceGraph } from '~~/server/utils/priceBook'
-import { EFFECT_ERROR_MESSAGES, EFFECT_MAX_WORK, EFFECT_TOO_MUCH_WORK } from '#shared/runner/effects'
+import { EFFECT_ERROR_MESSAGES, EFFECT_MAX_WORK, EFFECT_PICTURE_TOO_LARGE_HOSTED, EFFECT_TOO_MUCH_WORK } from '#shared/runner/effects'
 import type { ApiPrompt } from '#shared/runner/graph'
 import { ALL_RUNNER_FAMILIES, LOCAL_MODEL_FAMILIES, type RunnerFamily } from '#shared/runner/families'
 import {
@@ -310,15 +310,17 @@ describe('Lens · Depth of field through the runner', () => {
     expect(spy).not.toHaveBeenCalled()
   })
 
-  it('too much work is refused before any pixel is decoded or the model runs (hosted: 4096², aperture 1)', async () => {
-    expect(lensWork(1, { w: 4096, h: 4096 }, true)).toBeGreaterThan(EFFECT_MAX_WORK)
-    expect(lensWork(0.4, { w: 4096, h: 4096 }, true)).toBeLessThan(EFFECT_MAX_WORK)
+  it('a picture no reduction brings within the budget is refused at its turn before any decode or model run (the backstop)', async () => {
+    expect(lensWork(1, 4096 * 4096, true)).toBeGreaterThan(EFFECT_MAX_WORK)
+    expect(lensWork(0.4, 4096 * 4096, true)).toBeLessThan(EFFECT_MAX_WORK)
+    // Locally an 8192² picture's own full-size steps are over the budget, whatever the reduction.
+    expect(lensScale(0, 8192 * 8192, 0, true)).toBeNull()
     const spy = vi.fn(async () => { throw new Error('the model ran') })
     __setLensDepthModelForTests(spy)
     const c = caseNamed('the model\'s depth, resized and normalised')
-    const big = await sharp({ create: { width: 4096, height: 4096, channels: 3, background: { r: 9, g: 9, b: 9 } } }).png().toBuffer()
+    const big = await sharp({ create: { width: 8192, height: 8192, channels: 3, background: { r: 9, g: 9, b: 9 } } }).png({ compressionLevel: 1 }).toBuffer()
     const file = c.inputs.image!.files[0]!
-    await expect(runPlan(withWidgets(c, { aperture: 1 }), { hosted: true, files: { [file]: new Uint8Array(big) } })).rejects.toThrow(EFFECT_TOO_MUCH_WORK)
+    await expect(runPlan(withWidgets(c, { aperture: 1 }), { files: { [file]: new Uint8Array(big) } })).rejects.toThrow(EFFECT_TOO_MUCH_WORK)
     expect(spy).not.toHaveBeenCalled()
   })
 
@@ -556,4 +558,141 @@ describe('with `lens-blur` off, nothing changes', () => {
     expect(graphs).toBeGreaterThanOrEqual(800)
     console.info(`lens-blur families-off invariant: ${graphs} saved graphs, ${withIt} with Lens · Depth of field`)
   }, 600_000)
+})
+
+// ── Fix round 1: the work decided before the hold; the fast path ─────────────
+
+describe('fix round 1: the blur\'s work before the hold, and the fast path', () => {
+  it('Python\'s blur where it fits; the smallest reduction that fits where it doesn\'t (hosted 4096², aperture 1)', () => {
+    expect(lensScale(1, 48 * 40, 0, true)).toBe(1)
+    expect(lensScale(0.4, 4096 * 4096, 0, true)).toBe(1)
+    const s = lensScale(1, 4096 * 4096, 0, true)!
+    expect(s).toBeGreaterThan(1)
+    expect(s).toBeLessThanOrEqual(LENS_MAX_SCALE)
+    expect(lensWork(1, 4096 * 4096, true, s)).toBeLessThan(EFFECT_MAX_WORK)
+  })
+
+  it('the fast path looks the same side by side: in-focus pixels are Python\'s, the rest close', () => {
+    const W = 192
+    const H = 160
+    const img = tk.tensor(3, H, W)
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) for (let c = 0; c < 3; c++) {
+      img.data[c * W * H + y * W + x] = Math.fround(((x * 7 + y * 3 + c * 50) % 97) / 96 * ((x >> 4) % 2 ? 1 : 0.4))
+    }
+    const depth = tk.tensor(1, H, W)
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) depth.data[y * W + x] = Math.fround(x / (W - 1))
+    const p = { ...lensParamsOf(caseNamed('defaults').widgets), aperture: 1, fx: 0.25, fy: 0.5 }
+    const full = lens.LensBlur({ image: img, depth }, p).outputs[0]!
+    const fast = lens.LensBlur({ image: img, depth }, { ...p, scale: 2 }).outputs[0]!
+    let sum = 0
+    let worst = 0
+    const n = W * H
+    for (let i = 0; i < full.data.length; i++) {
+      const d = Math.abs(full.data[i]! - fast.data[i]!)
+      sum += d
+      worst = Math.max(worst, d)
+    }
+    const mean = (sum / full.data.length) * 255
+    console.log(`fast path (scale 2) vs Python's blur: mean |Δ| ${mean.toFixed(2)} of 255, worst ${(worst * 255).toFixed(1)}`)
+    expect(mean).toBeLessThan(6)
+    // Where the circle of confusion is zero the picture is Python's sharp level, untouched.
+    const cocZero: number[] = []
+    for (let i = 0; i < n; i++) {
+      const x = i % W
+      if (Math.fround(Math.abs(Math.fround(depth.data[i]! - Math.fround(depth.data[48]!)))) === 0 && x === 48) cocZero.push(i)
+    }
+    // The tapped column (x = trunc(0.25 · 192) = 48) is the focus plane.
+    expect(cocZero).toHaveLength(H)
+    for (const i of cocZero) for (let c = 0; c < 3; c++) expect(fast.data[c * n + i]).toBe(full.data[c * n + i])
+  })
+
+  it('the start check: sized pictures bounded; an unbounded maker is left to the turn', async () => {
+    const files: Record<string, Uint8Array> = {
+      'big.png': new Uint8Array(await sharp({ create: { width: 4097, height: 4096, channels: 3, background: { r: 1, g: 2, b: 3 } } }).png({ compressionLevel: 1 }).toBuffer()),
+      'ok.png': new Uint8Array(await sharp({ create: { width: 4096, height: 4096, channels: 3, background: { r: 1, g: 2, b: 3 } } }).png({ compressionLevel: 1 }).toBuffer()),
+    }
+    const read = async (f: { filename: string }) => files[f.filename]!
+    const p = (image: string, over: Record<string, unknown> = {}): ApiPrompt => ({ l: { ...LOAD, inputs: { image, upload: 'image' } }, n: lensNode({ aperture: 1, ...over }) })
+    expect(await lensStartRefusal(p('ok.png'), ON, { hosted: true, read })).toBeNull()
+    expect(await lensStartRefusal(p('big.png'), ON, { hosted: true, read })).toEqual({ message: EFFECT_PICTURE_TOO_LARGE_HOSTED, nodeId: 'n', classType: LENS_BLUR_CLASS })
+    // Family off: nothing to check.
+    expect(await lensStartRefusal(p('big.png'), new Set(['cards']), { hosted: true, read })).toBeNull()
+    // An EmptyImage's size is its settings: 8192² locally, aperture 1, refused (no reduction fits).
+    const empty: ApiPrompt = { e: { class_type: 'EmptyImage', inputs: { width: 8192, height: 8192, batch_size: 1, color: 0 } }, n: lensNode({ aperture: 1 }, ['e', 0]) }
+    expect((await lensStartRefusal(empty, ON, { hosted: false, read }))?.message).toBe(EFFECT_TOO_MUCH_WORK)
+    // A maker whose size can't be known before the run (a Frame baked for motion): left to the turn.
+    const unsized: ApiPrompt = { f: { class_type: 'Compositor', inputs: { width: ['w', 0], height: 512 } }, w: { class_type: 'PrimitiveInt', inputs: { value: 9000 } }, n: lensNode({ aperture: 1 }, ['f', 0]) }
+    expect(await lensStartRefusal(unsized, ON, { hosted: true, read })).toBeNull()
+  })
+
+  const START = { workflow: null, canvasId: null, projectUuid: null, projectName: null }
+
+  it('hosted, a picture over the cap beside a paid node: refused plainly before the hold, no paid node runs', async () => {
+    const families: ReadonlySet<RunnerFamily> = new Set(['cards', 'lens-blur'])
+    const k = makeKit({ hosted: true, deps: { families: () => families } })
+    writeFileSync(join(k.root, 'input', 'big.png'), await sharp({ create: { width: 4097, height: 4096, channels: 3, background: { r: 1, g: 2, b: 3 } } }).png({ compressionLevel: 1 }).toBuffer())
+    const prompt: ApiPrompt = {
+      g: { class_type: 'GenerateImageNode', inputs: { model: 'flux-schnell', prompt: 'a fox', aspect_ratio: '1:1', seed: 0, model_options: '{}' } },
+      gs: { class_type: 'SaveImage', inputs: { images: ['g', 0], ...SAVE_DEFAULTS } },
+      l: { ...LOAD, inputs: { image: 'big.png', upload: 'image' } },
+      n: lensNode({ aperture: 1 }),
+      s: { class_type: 'SaveImage', inputs: { images: ['n', 0], ...SAVE_DEFAULTS } },
+    }
+    expect(isRunnerEligible(prompt, families)).toBe(true)
+    const err = await k.engine.startRun({ userId: k.userId, takes: [prompt], ...START }).catch(e => e)
+    expect(err).toBeInstanceOf(Error)
+    expect(err.message).toBe(EFFECT_PICTURE_TOO_LARGE_HOSTED)
+    // A plain refusal, not a hand-off to the engine.
+    expect(err.data).toEqual({ nodeId: 'n', classType: LENS_BLUR_CLASS })
+    expect(k.ledger.hold).not.toHaveBeenCalled()
+    expect(k.fal.submitted()).toEqual([])
+    expect(k.replicate.submitted()).toEqual([])
+  })
+
+  it('hosted, a 4096² picture at aperture 1: accepted before the hold and run by the fast path', async () => {
+    const families: ReadonlySet<RunnerFamily> = new Set(['cards', 'lens-blur'])
+    const k = makeKit({ hosted: true, deps: { families: () => families } })
+    const c = caseNamed('the model\'s depth, resized and normalised')
+    const { model } = standInModel(c.depth_raw!)
+    __setLensDepthModelForTests(model)
+    const px = new Uint8Array(4096 * 4096 * 3)
+    for (let i = 0; i < px.length; i++) px[i] = (i * 2654435761) >>> 27
+    writeFileSync(join(k.root, 'input', 'big.png'), await sharp(px, { raw: { width: 4096, height: 4096, channels: 3 } }).png({ compressionLevel: 1 }).toBuffer())
+    const prompt: ApiPrompt = { l: { ...LOAD, inputs: { image: 'big.png', upload: 'image' } }, n: lensNode({ aperture: 1 }), s: { class_type: 'SaveImage', inputs: { images: ['n', 0], ...SAVE_DEFAULTS } } }
+    const { runId } = await k.engine.startRun({ userId: k.userId, takes: [prompt], ...START })
+    await k.engine.settled(runId)
+    const take = (await k.store.get(runId))!.takes[0]!
+    for (const id of ['l', 'n', 's']) expect(take.nodes[id]!.status, `${id}: ${take.nodes[id]!.error ?? ''}`).toBe('done')
+    expect(model).toHaveBeenCalledTimes(1)
+  }, 180_000)
+
+  it('a normal picture runs as before, through the engine: Python\'s blur (scale 1), free but the render credit', async () => {
+    const families: ReadonlySet<RunnerFamily> = new Set(['cards', 'lens-blur'])
+    const k = makeKit({ hosted: true, deps: { families: () => families } })
+    const c = caseNamed('defaults')
+    const pic = pictureOf(c as FxCase)
+    writeFileSync(join(k.root, 'input', 'pic.png'), pic.files[c.inputs.image!.files[0]!]!)
+    writeFileSync(join(k.root, 'input', 'depth.png'), pic.files[c.inputs.depth!.files[0]!]!)
+    const prompt: ApiPrompt = {
+      l: { ...LOAD, inputs: { image: 'pic.png', upload: 'image' } },
+      m: { ...LOAD, inputs: { image: 'depth.png', upload: 'image' } },
+      n: { class_type: LENS_BLUR_CLASS, inputs: { image: ['l', 0], depth: ['m', 0], ...c.widgets } },
+      s: { class_type: 'SaveImage', inputs: { images: ['n', 0], ...SAVE_DEFAULTS } },
+    }
+    const { runId } = await k.engine.startRun({ userId: k.userId, takes: [prompt], ...START })
+    await k.engine.settled(runId)
+    const take = (await k.store.get(runId))!.takes[0]!
+    for (const id of ['l', 'm', 'n', 's']) expect(take.nodes[id]!.status, `${id}: ${take.nodes[id]!.error ?? ''}`).toBe('done')
+    // Save image writes Python's trunc8 (the rgb picture through LoadImage is the same bytes): within the band.
+    const saved = take.nodes.s!.outputs[0]!
+    const got = await pngPixels(new Uint8Array(readFileSync(join(k.root, saved.type, saved.subfolder, saved.filename))))
+    const item = c.outputs![0]!.items[0]!
+    const py = pythonF32(item)
+    const want = py8(py, 'trunc')
+    for (let i = 0; i < want.length; i++) {
+      const d = Math.abs(got.px[i]! - want[i]!)
+      if (d) expect(d === 1 && Math.abs(py[i]! * 255 - Math.round(py[i]! * 255)) < LENS_EPS, `byte ${i}`).toBe(true)
+    }
+    expect(k.fal.submitted()).toEqual([])
+  })
 })

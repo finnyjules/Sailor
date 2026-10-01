@@ -218,8 +218,29 @@ export function lensCore(k: TensorCore, kn: KernelsCore) {
     return out
   }
 
-  /** _lens.render_dof: the five-level CoC pyramid, the highlight boost on the blurred levels, tent weights, clamped. */
-  function renderDof(img: Tensor, coc: Float32Array, shape: string, highlight: number, stop: Stop): Tensor {
+  /**
+   * A blurred level at a reduced size (R7.9 fix round 1, the fast path for a
+   * picture whose full-size blur is over the work budget): the picture
+   * area-averaged down by `scale` (floor of each side), blurred at radius /
+   * scale, and bilinear back up to its size. Only the blurred levels take it:
+   * the sharp level and the tent blend stay at full size, so in-focus pixels
+   * are Python's. It looks the same side by side (the user's matching rule:
+   * a hard port need only look the same); the 8-bit bytes differ.
+   */
+  function blurReduced(src: Tensor, shape: string, radius: number, scale: number, stop: Stop): Tensor {
+    const oh = Math.max(1, Math.floor(src.h / scale))
+    const ow = Math.max(1, Math.floor(src.w / scale))
+    const small = kn.resizeArea(src, oh, ow, { stop })
+    const blurred = blur(small, shape, radius / scale, stop)
+    return kn.resizeBilinear(blurred, src.h, src.w)
+  }
+
+  /**
+   * _lens.render_dof: the five-level CoC pyramid, the highlight boost on the
+   * blurred levels, tent weights, clamped. `scale` > 1: the blurred levels at a
+   * reduced size (blurReduced); 1 is Python's.
+   */
+  function renderDof(img: Tensor, coc: Float32Array, shape: string, highlight: number, stop: Stop, scale = 1): Tensor {
     const n = img.w * img.h
     let src = img
     if (highlight > 0) {
@@ -237,7 +258,9 @@ export function lensCore(k: TensorCore, kn: KernelsCore) {
     for (let i = 0; i < n; i++) cf[i] = f(f(coc[i]! / maxR) * (LEVELS - 1))
     for (let level = 0; level < LEVELS; level++) {
       const radius = (maxR * level) / (LEVELS - 1)
-      const p = blur(level === 0 ? img : src, shape, radius, stop)
+      const p = level === 0 ? blur(img, shape, radius, stop)
+        : scale > 1 && radius >= 0.5 ? blurReduced(src, shape, radius, scale, stop)
+          : blur(src, shape, radius, stop)
       for (let i = 0; i < n; i++) {
         const wgt = kn.clamp01(f(1 - Math.abs(f(cf[i]! - level))))
         for (let c = 0; c < img.c; c++) {
@@ -286,8 +309,9 @@ export function lensCore(k: TensorCore, kn: KernelsCore) {
   /**
    * LensBlur (nodes_lens.py:59-117) on the first picture. Params (the main
    * thread's reading, cards/lensBlur.ts): `fx`, `fy` the focus point as
-   * Python reads its text (the centre where Python fails on it), and the
-   * widgets. Inputs: `image` (absent: no picture), `depth` (a picture wired
+   * Python reads its text (the centre where Python fails on it), the
+   * widgets, and `scale` (absent or 1: Python's blur; more: the fast path the
+   * plan chose to fit the work budget, blurReduced). Inputs: `image` (absent: no picture), `depth` (a picture wired
    * in) or `depthRaw` (the model's raw answer; absent on a 1 × 1 picture,
    * whose normalised depth is 0 whatever the model says).
    */
@@ -309,7 +333,8 @@ export function lensCore(k: TensorCore, kn: KernelsCore) {
     const f32focus = f(focus)
     const ap = f(p.aperture as number)
     for (let i = 0; i < n; i++) coc[i] = f(f(Math.abs(f(depth.data[i]! - f32focus)) * ap) * MAX_RADIUS)
-    result = renderDof(result, coc, p.bokeh_shape as string, p.highlight_bokeh as number, stop)
+    const scale = typeof p.scale === 'number' && p.scale > 1 ? Math.trunc(p.scale) : 1
+    result = renderDof(result, coc, p.bokeh_shape as string, p.highlight_bokeh as number, stop, scale)
     result = chromatic(result, p.chromatic_aberration as number, stop)
     result = vignette(result, p.vignette as number, stop)
     return { outputs: [result], preview: null }
