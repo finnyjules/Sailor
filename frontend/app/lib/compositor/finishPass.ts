@@ -26,7 +26,7 @@ export const METAL_LABELS: Record<FoilMetal, string> = { gold: 'Gold', silver: '
 export interface FoilDials { metal: FoilMetal; brushed: number; pressed: number; grain: number }
 export interface SpotUvDials { gloss: number; raised: number; varnishOnly: boolean }
 
-const COMMON = `#version 300 es
+export const FINISH_COMMON = `#version 300 es
 precision highp float;
 in vec2 vUv;
 out vec4 fragColor;
@@ -60,7 +60,7 @@ vec2 frameUv(vec2 uv) { return (uv * uSize + uOrigin) / uFull; }
 vec3 worldPos(vec2 uv) { return vec3(uv.x - 0.5, (uv.y - 0.5) * uAspect, 0.0); }
 `
 
-export const FOIL_FRAG = `${COMMON}
+export const FOIL_FRAG = `${FINISH_COMMON}
 uniform vec3 uM0;
 uniform vec3 uM1;
 uniform vec3 uM2;
@@ -97,7 +97,7 @@ void main() {
   fragColor = vec4(min(c, vec3(1.0)), smoothstep(0.3, 0.7, src.a + ero * 0.3));
 }`
 
-export const SPOT_UV_FRAG = `${COMMON}
+export const SPOT_UV_FRAG = `${FINISH_COMMON}
 uniform float uGloss;
 uniform float uRaised;
 uniform float uVarnishOnly;
@@ -187,7 +187,7 @@ export function finishRegionRect(box: DeviceRect, m: Affine2D, marginPx: number,
   return r > l && b > t ? { x: l, y: t, w: r - l, h: b - t } : null
 }
 
-function shared(light: FrameLight, w: number, h: number, scale: number, frame?: FinishFrame | null): Record<string, GpuUniform> {
+export function finishSharedUniforms(light: FrameLight, w: number, h: number, scale: number, frame?: FinishFrame | null): Record<string, GpuUniform> {
   const { origin, full } = finishFrameUniforms(w, h, frame)
   const aspect = full[1] / Math.max(1, full[0])
   return {
@@ -199,14 +199,14 @@ function shared(light: FrameLight, w: number, h: number, scale: number, frame?: 
 export function foilUniforms(d: FoilDials, light: FrameLight, w: number, h: number, scale: number, frame?: FinishFrame | null): Record<string, GpuUniform> {
   const m = METALS[d.metal] ?? METALS.gold
   return {
-    ...shared(light, w, h, scale, frame),
+    ...finishSharedUniforms(light, w, h, scale, frame),
     uM0: hexVec3(m[0]), uM1: hexVec3(m[1]), uM2: hexVec3(m[2]), uM3: hexVec3(m[3]),
     uBrushed: clamp01(d.brushed), uPressed: clamp01(d.pressed), uGrain: clamp01(d.grain ?? 0),
   }
 }
 
 export function spotUvUniforms(d: SpotUvDials, light: FrameLight, w: number, h: number, scale: number, frame?: FinishFrame | null): Record<string, GpuUniform> {
-  return { ...shared(light, w, h, scale, frame), uGloss: clamp01(d.gloss), uRaised: clamp01(d.raised), uVarnishOnly: d.varnishOnly ? 1 : 0 }
+  return { ...finishSharedUniforms(light, w, h, scale, frame), uGloss: clamp01(d.gloss), uRaised: clamp01(d.raised), uVarnishOnly: d.varnishOnly ? 1 : 0 }
 }
 
 let foilPass: GpuPost | null = null
