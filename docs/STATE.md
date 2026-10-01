@@ -481,7 +481,7 @@ Spec `docs/superpowers/specs/2026-09-23-scene3d-web-embed-design.md` (its own "P
 - **Money hardening found by review:** the shown price always covers the hold (clips show "up to", per place); a failed frame cancels the calls in flight; every R7 node's kept output is counted against the run's room before the hold; mask, sound and picture sizes are bounded before the hold from their makers; the start of a run stops when its request closes.
 - **Named stop-gaps still leaving to the engine** (each with a plan in its report): clips over the frame cap or kept room, pictures over Upscale's 1440p and the 4K slow-motion cap, a few unsizeable makers.
 
-**Owed:** the live checks (~$0.10, $0.16 max), which also measure five estimate cards (Background remove, Object removal, Slow motion (AI), Whisper, Vocal separator); the Fly image with the depth model built. **Next:** R8 (the mini apps) — expand first.
+**Live checks DONE 10-01 (~$0.07):** all ten nodes worked on the real services; prices measured and the cards marked verified (Real-ESRGAN, LaMa and the remover raised to the measurements); Subject mask's best/largest now take the background remover's whole subject (SAM 3 alone gave only the part clicked). The live checks also found a hosted-gate bug — invalid-output branches were charged — now fixed. The R7 families are ON locally, as the user ruled. **Owed:** the Fly image with the depth model built. **Next:** R8 (the mini apps) — expand first.
 
 ### Sailor without ComfyUI, step 3 — stage R6 BUILT (video and sound effects in Sailor), nine families ON locally, OFF in hosted — 2026-09-30 (plan R6 section; ledger `.superpowers/sdd/2026-09-26-engine-free-step3/progress.md`)
 
