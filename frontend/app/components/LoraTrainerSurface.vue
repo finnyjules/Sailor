@@ -18,6 +18,8 @@ import { toast } from 'vue-sonner'
 import { assembleAesthetic } from '~/lib/lora/aesthetic'
 import { DEFAULT_LORA_RANK } from '~~/shared/lora-defaults'
 import JSZip from 'jszip'
+import { defaultComputeMode, localTrainingAvailable, probeEngineUp, LOCAL_NEEDS_ENGINE, type ComputeMode } from '~/lib/lora/trainerCompute'
+import { hostedModeEnabled } from '~/lib/hostedMode'
 import {
   CHARACTER_SHOT_SCENES,
   pickScenes,
@@ -28,8 +30,14 @@ import {
 
 // ----- Compute mode (Local vs Cloud) ------------------------------------
 
-type ComputeMode = 'local' | 'cloud'
-const computeMode = ref<ComputeMode>('local')
+const trainerHosted = hostedModeEnabled(useRuntimeConfig().public)
+const trainerEngineUp = ref(true)
+const computeMode = ref<ComputeMode>(defaultComputeMode({ hosted: trainerHosted, engineUp: true }))
+const localAvailable = computed(() => localTrainingAvailable({ hosted: trainerHosted, engineUp: trainerEngineUp.value }))
+onMounted(async () => {
+  trainerEngineUp.value = await probeEngineUp()
+  if (!localAvailable.value) computeMode.value = 'cloud'
+})
 
 // Cloud family — what Replicate trainer to use. Independent of the local
 // checkpoint picker (which is moot in cloud mode).
@@ -1504,11 +1512,13 @@ onBeforeUnmount(() => {
           <label class="text-[12px] font-medium text-white/85 tracking-[0.01em]">Compute</label>        </div>
         <div class="inline-flex rounded-lg bg-white/[0.03] border border-white/[0.06] p-0.5">
           <button
-            class="inline-flex items-center gap-2 h-9 px-4 rounded-md text-[12.5px] font-medium transition-colors cursor-pointer"
+            class="inline-flex items-center gap-2 h-9 px-4 rounded-md text-[12.5px] font-medium transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
             :class="computeMode === 'local'
               ? 'bg-white/[0.08] text-white'
               : 'text-white/55 hover:text-white/80'"
-            @click="computeMode = 'local'"
+            :disabled="!localAvailable"
+            :title="localAvailable ? undefined : LOCAL_NEEDS_ENGINE"
+            @click="localAvailable && (computeMode = 'local')"
           >
             <Cpu class="size-3.5" />
             Local
