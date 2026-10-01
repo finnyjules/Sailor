@@ -686,7 +686,7 @@ export const MODEL_COSTS: Record<string, ModelCost> = {
   'fal-ai/flux/dev/image-to-image': { usd: 0.025, credits: 5, confidence: 'estimate', note: 'FLUX.1 [dev] img2img fallback — assumed fal flux/dev $0.025/MP rate; re-verify against a live invoice (S7 Task 5)' },
   'fal-ai/flux-general': { usd: 0.05, credits: 10, confidence: 'estimate', note: 'FLUX general (depth ControlNet + IP-adapter, one call) — assumed ~$0.05/MP for the heavier graph; re-verify against a live invoice (restyle-style Task 5)' },
   'fal-ai/flux-lora/inpainting': { usd: 0.04, credits: 8, confidence: 'estimate', note: 'FLUX Fill dev tier' },
-  'fal-ai/nano-banana-2/edit': { usd: 0.10, credits: 20, confidence: 'estimate', note: 'pose transfer; verify against fal pricing' },
+  'fal-ai/nano-banana-2/edit': { usd: 0.08, credits: 16, confidence: 'verified', note: 'pose transfer and Relight Finish, both at 1K; fal\'s page "$0.08 per image" at 1K (shared/pricing/editRates.ts, same reading)' },
   // — inpaint / whole-image edit routes, priced 2026-09-20 from fal's own model pages. Unpriced, every
   //   one of these was REFUSED in hosted mode (the meter fails closed), FLUX.2 edit — the default edit
   //   model — included. Per-megapixel rows are priced for a ~1 MP job, like their neighbours above.

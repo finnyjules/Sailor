@@ -153,12 +153,12 @@ describe('RelightControls', () => {
   describe('Finish button (stage 3)', () => {
     const mkFinish = (extra: Record<string, unknown> = {}) =>
       mount(RelightControls, {
-        props: { fx: sanitizeRelight(null), selectedLight: sanitizeRelight(null).lights[0]!.id, depthStatus: 'ready', finishAvailable: true, finishPrice: '~$0.10', ...extra },
+        props: { fx: sanitizeRelight(null), selectedLight: sanitizeRelight(null).lights[0]!.id, depthStatus: 'ready', finishAvailable: true, finishPrice: '~$0.08', ...extra },
       })
 
     it('shows the price on the button, with the explanation as a tooltip', () => {
       const b = mkFinish().get('[data-testid="relight-finish"]')
-      expect(b.text()).toBe('Finish · ~$0.10')
+      expect(b.text()).toBe('Finish · ~$0.08')
       expect(b.attributes('title')).toBe('Adds real shadows and bounce light · about 20 s')
       expect(mkFinish({ finishPrice: '20 credits' }).get('[data-testid="relight-finish"]').text()).toBe('Finish · 20 credits')
     })
@@ -179,7 +179,7 @@ describe('RelightControls', () => {
       const w = mkFinish({ finishBlocked: true })
       const b = w.get('[data-testid="relight-finish"]')
       expect(b.attributes('disabled')).toBeDefined()
-      expect(b.text()).toBe('Finish · ~$0.10')
+      expect(b.text()).toBe('Finish · ~$0.08')
       await b.trigger('click')
       expect(w.emitted('finish')).toBeUndefined()
     })

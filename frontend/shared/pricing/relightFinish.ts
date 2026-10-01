@@ -6,7 +6,7 @@ import { creditsForUsd } from './markup'
 
 export const FINISH_APP = 'fal-ai/nano-banana-2/edit'
 /** Matches the price-book row for FINISH_APP exactly (pinned by a unit test) — do not edit independently. */
-export const FINISH_USD = 0.10
+export const FINISH_USD = 0.08
 export const finishCredits = (): number => creditsForUsd(FINISH_USD)
 
 /** Fixed server-side prompt (never sent by the client) — verbatim from the plan's Global Constraints. */

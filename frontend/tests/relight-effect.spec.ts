@@ -399,7 +399,7 @@ test.describe('Relight Finish (stage 3, Task 4)', () => {
     await expect(relightRow(page)).toHaveCount(1)
     const before = await layerState(page)
 
-    await expect(finishBtn(page)).toHaveText(/Finish · ~\$0\.10/)
+    await expect(finishBtn(page)).toHaveText(/Finish · ~\$0\.08/)
     await finishBtn(page).click()
     await expect(finishBtn(page)).toHaveText('Finishing…')
     await expect(finishBtn(page)).toBeDisabled()

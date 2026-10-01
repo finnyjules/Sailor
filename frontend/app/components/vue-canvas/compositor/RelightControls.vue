@@ -25,7 +25,7 @@ const props = withDefaults(defineProps<{
    *  running on the provider ("Still reading — try again in a minute"). */
   surfacesNote?: string | null
   /** Finish (stage 3): Nano Banana 2 turns the live preview into a realistic photo. The
-   *  button's price text ("~$0.10" locally, "20 credits" hosted). */
+   *  button's price text ("~$0.08" locally, "16 credits" hosted). */
   finishPrice?: string | null
   /** A Finish call is running — the button disables and reads "Finishing…". */
   finishBusy?: boolean
