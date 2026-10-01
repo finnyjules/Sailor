@@ -4,15 +4,14 @@
  *
  * This is intentionally a *page* design (hero, copy, generous spacing), not a
  * canvas. The same FaceSwap node powers it under the hood, but the run itself
- * goes through the Sailor runner (family face-swap + cards), not /prompt —
- * the first mini app to run there.
+ * goes through the Sailor runner (family face-swap + cards) via useAppRun
+ * (lib/runner/faceSwapApp.ts, R8.4): its price before the run, and Stop.
  */
-import { ArrowRight, Download, Image as ImageIcon, Loader2, RefreshCcw, Upload, X } from 'lucide-vue-next'
+import { ArrowRight, Download, Image as ImageIcon, Loader2, RefreshCcw, Square, Upload, X } from 'lucide-vue-next'
 import TakesStrip from '~/components/vue-canvas/TakesStrip.vue'
 import StudioSelect from '~/components/vue-canvas/studio/StudioSelect.vue'
 import StudioSegmented from '~/components/vue-canvas/studio/StudioSegmented.vue'
-import { awaitRunnerImage, buildFaceSwapPrompt } from '~/lib/runner/awaitRunnerResult'
-import { isRunnerDeclined, startRunnerRun } from '~/lib/runner/client'
+import { useFaceSwapRun } from '~/lib/runner/faceSwapApp'
 import {
   FACE_SWAP_GENDER_DEFAULT,
   FACE_SWAP_GENDER_OPTIONS,
@@ -28,12 +27,12 @@ interface UploadedFile {
 
 const sourceFace = ref<UploadedFile | null>(null)
 const targetImage = ref<UploadedFile | null>(null)
-const status = ref<'idle' | 'uploading' | 'running' | 'done' | 'error'>('idle')
-const errorMessage = ref<string | null>(null)
+const uploading = ref(false)
+const uploadError = ref<string | null>(null)
 // Each run stacks as a take; the displayed result is the active take.
 const { takes, activeTakeId, activeTake, addTake, selectTake, pinTake, discardTake, reset: resetTakes } = useAppTakes()
 const outputUrl = computed<string | null>(() => activeTake.value?.images?.[0] ?? null)
-const progressLabel = ref('')
+const progressLabel = 'Swapping the face…'
 
 // ----- Upload helpers ----------------------------------------------------
 
@@ -53,16 +52,17 @@ async function uploadFile(file: File): Promise<UploadedFile> {
 
 async function pickFile(role: 'source' | 'target', file: File | undefined | null) {
   if (!file) return
-  errorMessage.value = null
-  status.value = 'uploading'
+  uploadError.value = null
+  if (!swap.running.value) swap.reset()
+  uploading.value = true
   try {
     const uploaded = await uploadFile(file)
     if (role === 'source') sourceFace.value = uploaded
     else targetImage.value = uploaded
-    status.value = 'idle'
   } catch (e: any) {
-    errorMessage.value = e?.message ?? 'Upload failed.'
-    status.value = 'error'
+    uploadError.value = e?.message ?? 'Upload failed.'
+  } finally {
+    uploading.value = false
   }
 }
 
@@ -71,7 +71,7 @@ function clearSlot(role: 'source' | 'target') {
   if (ref.value) URL.revokeObjectURL(ref.value.previewUrl)
   ref.value = null
   resetTakes()
-  status.value = 'idle'
+  if (!swap.running.value) swap.reset()
 }
 
 // ----- Face's gender + hair choice ----------------------------------------
@@ -106,50 +106,21 @@ watch(keepHairFrom, (v) => {
   try { localStorage.setItem(HAIR_STORAGE_KEY, v) } catch { /* best effort only */ }
 })
 
-// ----- Prompt construction + submission (Sailor runner) -------------------
+// ----- Price, run and Stop (Sailor runner, useAppRun) ---------------------
 
-const canRun = computed(() =>
-  !!sourceFace.value && !!targetImage.value && gender.value !== FACE_SWAP_GENDER_DEFAULT
-  && status.value !== 'running' && status.value !== 'uploading',
-)
+const swap = useFaceSwapRun({
+  choice: computed(() => ({ face: sourceFace.value, target: targetImage.value, gender: gender.value, keepHairFrom: keepHairFrom.value })),
+  addTake,
+})
+const { status, priceText, blocked, quoting, stopError } = swap
+// The price follows the exact prompt: both pictures, the gender and the hair choice.
+watch(() => [sourceFace.value?.filename, targetImage.value?.filename, gender.value, keepHairFrom.value], () => { void swap.quote() }, { immediate: true })
 
-async function run() {
-  if (!canRun.value || !sourceFace.value || !targetImage.value || !gender.value) return
-  errorMessage.value = null
-  status.value = 'running'
-  progressLabel.value = 'Swapping the face…'
-  try {
-    await ensureRunnerEvents()
-    const prompt = buildFaceSwapPrompt({
-      face: sourceFace.value.filename,
-      target: targetImage.value.filename,
-      gender: gender.value,
-      keepHairFrom: keepHairFrom.value,
-    })
-    // awaitRunnerImage is called BEFORE the POST settles (not after, on its
-    // promptId) so its window listener is attached before the runner can
-    // possibly post this leg's events — server/runner/engine.ts starts the
-    // leg without awaiting the response, so those events can otherwise land
-    // before startRunnerRun resolves and be missed.
-    const idPromise = startRunnerRun({ takes: [prompt], workflow: null, canvasId: null, projectUuid: null, projectName: null })
-      .then(leg => leg.promptIds[0] ?? Promise.reject(new Error('The swap didn’t start. Try again.')))
-    const done = awaitRunnerImage(idPromise)
-    const output = await done
-    // Already settled by the time `done` resolves — just reads the id back.
-    const promptId = await idPromise
-    const url = `/view?${new URLSearchParams({
-      filename: output.filename,
-      type: output.type,
-      ...(output.subfolder ? { subfolder: output.subfolder } : {}),
-      t: String(Date.now()),
-    })}`
-    addTake({ images: [url], promptId, sig: `${output.subfolder || ''}/${output.filename}` })
-    status.value = 'done'
-  } catch (e: any) {
-    errorMessage.value = isRunnerDeclined(e) ? 'Face swap is switched off in Sailor right now.' : (e?.data?.message ?? e?.message ?? String(e))
-    status.value = 'error'
-  }
-}
+const canRun = computed(() => swap.canRun.value && !uploading.value)
+const errorMessage = computed(() => uploadError.value ?? swap.errorMessage.value ?? stopError.value ?? blocked.value)
+
+function run() { void swap.run() }
+function stop() { void swap.stop() }
 
 // ----- File-slot interactions -------------------------------------------
 
@@ -170,8 +141,8 @@ function reset() {
   sourceFace.value = null
   targetImage.value = null
   resetTakes()
-  errorMessage.value = null
-  status.value = 'idle'
+  uploadError.value = null
+  if (!swap.running.value) swap.reset()
 }
 
 function download() {
@@ -313,11 +284,11 @@ function download() {
 
       <!-- Run -->
       <div class="flex items-center justify-between mb-12">
-        <p v-if="status === 'running'" class="text-[12px] text-white/55 flex items-center gap-2">
+        <p v-if="status === 'running' && !stopError" class="text-[12px] text-white/55 flex items-center gap-2">
           <Loader2 class="size-3.5 animate-spin" />
           <span>{{ progressLabel }}</span>
         </p>
-        <p v-else-if="status === 'uploading'" class="text-[12px] text-white/55 flex items-center gap-2">
+        <p v-else-if="uploading" class="text-[12px] text-white/55 flex items-center gap-2">
           <Loader2 class="size-3.5 animate-spin" />
           <span>Uploading…</span>
         </p>
@@ -325,17 +296,32 @@ function download() {
           {{ errorMessage }}
         </p>
         <span v-else class="text-[12px] text-white/35">
-          {{ sourceFace && targetImage ? 'Ready to swap.' : 'Add both photos above to start.' }}
+          {{ !sourceFace || !targetImage ? 'Add both photos above to start.' : gender === FACE_SWAP_GENDER_DEFAULT ? 'Choose the face’s gender.' : 'Ready to swap.' }}
         </span>
-        <button
-          class="inline-flex items-center gap-2 h-10 px-5 rounded-full bg-white text-[#0a0a0a] font-medium text-[13px] hover:bg-white/90 transition-colors cursor-pointer disabled:bg-white/15 disabled:text-white/40 disabled:cursor-not-allowed"
-          :disabled="!canRun"
-          @click="run"
-        >
-          <span>{{ status === 'running' ? 'Swapping…' : 'Swap faces' }}</span>
-          <ArrowRight v-if="status !== 'running'" class="size-4" />
-          <Loader2 v-else class="size-4 animate-spin" />
-        </button>
+        <div class="flex items-center gap-3">
+          <span
+            v-if="status !== 'running' && (quoting || priceText)"
+            class="text-[12px] text-white/55 tabular-nums"
+            title="The most this run can cost"
+          >{{ quoting ? '…' : priceText }}</span>
+          <button
+            v-if="status === 'running'"
+            class="inline-flex items-center gap-2 h-10 px-5 rounded-full bg-white/[0.08] text-white font-medium text-[13px] hover:bg-white/[0.14] transition-colors cursor-pointer"
+            @click="stop"
+          >
+            <Square class="size-3.5" :stroke-width="2" />
+            <span>Stop</span>
+          </button>
+          <button
+            v-else
+            class="inline-flex items-center gap-2 h-10 px-5 rounded-full bg-white text-[#0a0a0a] font-medium text-[13px] hover:bg-white/90 transition-colors cursor-pointer disabled:bg-white/15 disabled:text-white/40 disabled:cursor-not-allowed"
+            :disabled="!canRun"
+            @click="run"
+          >
+            <span>Swap faces</span>
+            <ArrowRight class="size-4" />
+          </button>
+        </div>
       </div>
 
       <!-- Output -->
