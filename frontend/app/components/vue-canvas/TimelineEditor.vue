@@ -11,14 +11,9 @@ import { usePlaybackEngine } from '~/composables/usePlaybackEngine'
 import { usePlaybackEngineGL, webglPreviewSupported } from '~/composables/usePlaybackEngineGL'
 import { useLocalSettings } from '~/composables/useLocalSettings'
 import { useClipPreview } from '~/composables/useClipPreview'
-import { ensureMotionBake } from '~/lib/engine/motionClipBake'
-import { ensureSpaceTypeClipBake } from '~/lib/engine/spaceTypeClipBake'
-import { spaceTypeEngineAvailable } from '~/lib/engine/spaceTypeEnginePool'
-import { ensureMotionFonts } from '~/composables/useTemplateFonts'
-import { ensureTimelineMix } from '~/lib/engine/audio/mixdown'
 import { recordTimeline, TimelineExportRefused } from '~/lib/timeline/recordTimeline'
 import { publishVideo, HOSTED_UPLOAD_LIMIT } from '~/lib/engine/publishVideo'
-import { canRecordInBrowser, prefersServerVideoExport } from '~/lib/engine/videoExportSupport'
+import { canRecordInBrowser } from '~/lib/engine/videoExportSupport'
 import { isAbortError } from '~/lib/engine/videoRecorder'
 import { hostedModeEnabled } from '~/lib/hostedMode'
 import type { Clip, Track, BlendMode, MotionClip, SpaceTypeClip, Transition, TransitionKind, EditState } from '~~/shared/timeline/types'
@@ -222,19 +217,6 @@ function resolveAudioUrl(clip: Clip): string | null {
   if (clip.kind !== 'audio') return null
   const asset = getAsset((clip as any).asset_id)
   return asset ? getAssetUrl(asset) : null
-}
-
-// Pull the raw input/ filename out of a source URL (resolveClipSource returns
-// /view?filename=…&type=input). The export payload needs filenames, not URLs —
-// the backend resolves a relative filename against its input directory.
-function inputFilenameFromUrl(url: string): string | null {
-  if (!url) return null
-  try {
-    const f = new URL(url, window.location.origin).searchParams.get('filename')
-    if (f) return f
-  } catch { /* not a parseable URL — fall through */ }
-  // Bare filename (no query, no scheme): usable as-is.
-  return (!/[?#]/.test(url) && !/^https?:/i.test(url)) ? url : null
 }
 
 // WebGL preview engine — DEFAULT when WebGL2 is available (Slice 0 promotion).
@@ -1144,11 +1126,9 @@ const renderError = ref<string | null>(null)
 /** Something the export could not do, shown beside the result (not a failure). */
 const renderNotice = ref<string | null>(null)
 const renderProgress = ref<{ current: number; total: number } | null>(null)
-/** Which half of an export is running. Space Type clips bake in the browser
- *  before the server renders, and that bake is slow enough to look like a hang
- *  — so the button must say which phase the bar is measuring, or it fills to
- *  100% twice with no explanation. */
-const renderPhase = ref<'baking' | 'mixing' | 'rendering' | 'uploading' | null>(null)
+/** Which part of an export is running, so the button says what the bar is
+ *  measuring rather than filling to 100% more than once with no explanation. */
+const renderPhase = ref<'mixing' | 'rendering' | 'uploading' | null>(null)
 // The browser export in flight, so Cancel can stop it.
 let exportAbort: AbortController | null = null
 // Mirrors exportAbort for the template — a plain `let` doesn't trigger a
@@ -1157,7 +1137,8 @@ const browserExporting = ref(false)
 function cancelExport() { exportAbort?.abort() }
 
 /** Export: recorded in the browser — the preview's own renderer, with the
- *  sound — or, in local mode only and said out loud, today's server render. */
+ *  sound. The only route (Task R9.2): a browser that can't record says why
+ *  and makes nothing, locally as in hosted. */
 async function exportTimeline() {
   if (isRendering.value) return
   renderError.value = null
@@ -1172,14 +1153,12 @@ async function exportTimeline() {
   store.pause()
   const live = store.state.value
   const hosted = hostedModeEnabled(useRuntimeConfig().public)
-  let reason = ''   // why the browser route was not used ('' = the server route was chosen on purpose)
+  let reason = ''   // why the browser could not make the video
   const finish = () => { isRendering.value = false; renderPhase.value = null; renderProgress.value = null }
   const cancelled = () => { renderNotice.value = 'Export cancelled.'; finish() }
 
   try {
-    if (!hosted && prefersServerVideoExport()) {
-      // fall through to the server route below
-    } else if (!webglPreviewSupported()) {
+    if (!webglPreviewSupported()) {
       reason = 'this browser has no WebGL2'
     } else if (!(await canRecordInBrowser({
       width: live.canvas.width, height: live.canvas.height, fps: live.canvas.fps,
@@ -1192,8 +1171,8 @@ async function exportTimeline() {
       if (abort.signal.aborted) return cancelled()
       // Record from a snapshot: an edit made while the export runs must not
       // change the file partway through. In it, a wired workflow clip whose
-      // node resolves to a real file becomes that plain video/image clip — as
-      // the server route does — so wired footage is drawn, not left black.
+      // node resolves to a real file becomes that plain video/image clip, so
+      // wired footage is drawn, not left black.
       const es: EditState = JSON.parse(JSON.stringify(live))
       const previews = new Map<string, NonNullable<ReturnType<typeof resolveClipPreview>>>()
       for (const track of es.tracks) {
@@ -1226,9 +1205,7 @@ async function exportTimeline() {
         }
 
         if (recorded) {
-          // The upload has its own error: a failed upload is NOT a reason to
-          // re-make the video on the server — that route uploads far more, and
-          // would fail the same way.
+          // The upload has its own error, in its own words.
           const { result, skippedAudio, skippedClips, audioLeftOut } = recorded
           renderPhase.value = 'uploading'
           renderProgress.value = null
@@ -1259,24 +1236,15 @@ async function exportTimeline() {
       }
     }
 
-    if (hosted) {
-      renderError.value = reason.startsWith('These clips')
-        ? `${reason}. Replace them with a smaller or more common video file.`
-        : `Video export failed: ${reason}.`
-      finish()
-      return
-    }
+    // The browser could not make it: say why, and make nothing (no server route).
     if (abort.signal.aborted) return cancelled()
-    const notes = [reason ? `Made on the server, because ${reason.charAt(0).toLowerCase()}${reason.slice(1)}.` : 'Made on the server (browser recording is switched off).']
-    // The server renderer draws no titles or lower thirds: say so, never drop them quietly.
-    if (live.tracks.some(t => !t.muted && t.kind !== 'audio' && t.clips.some(c => c.kind === 'title' || c.kind === 'lower_third'))) {
-      notes.push('The server render leaves out titles and lower thirds.')
-    }
-    renderNotice.value = notes.join(' ')
+    renderError.value = reason.startsWith('These clips')
+      ? `${reason}. Replace them with a smaller or more common video file.`
+      : `Video export failed: ${reason}.`
+    finish()
   } finally {
     if (exportAbort === abort) exportAbort = null
   }
-  await renderOnServer()
 }
 
 /** A failed upload in plain words (publishVideo's own messages, or the network's). */
@@ -1285,158 +1253,6 @@ function uploadErrorText(err: unknown): string {
   if (/^This video/.test(msg)) return `${msg}.`
   if (/^video upload failed/i.test(msg)) return `V${msg.slice(1)}.`
   return `Video upload failed: ${msg}.`
-}
-
-/** Today's route: bake Motion/Space Type clips, mix and upload the sound, and let the Python renderer draw every frame. The local fallback (and the only route a Timeline node inside a workflow uses). */
-async function renderOnServer() {
-  const es = store.state.value
-  const assetLib = assetsList.value
-  const fps = es.canvas.fps
-  const W = es.canvas.width
-  const H = es.canvas.height
-
-  // Bake any Motion clips against the REAL store clips first so motion_bake
-  // caches across exports (a re-export with no kinetic edits skips re-baking).
-  ensureMotionFonts(es)
-  for (const track of es.tracks) {
-    for (const clip of track.clips) {
-      if (clip.kind === 'motion') {
-        // Externally baked (e.g. Space Type) — frames are authoritative; re-baking
-        // from the placeholder text layer would blank them.
-        if ((clip as MotionClip).motion_bake?.external) continue
-        try {
-          await ensureMotionBake(clip as MotionClip, W, H, fps)
-        } catch (err: any) {
-          isRendering.value = false
-          renderError.value = `kinetic bake failed: ${err?.message ?? err}`
-          return
-        }
-      }
-    }
-  }
-
-  // Space Type clips render live in the browser but Python can't run three.js,
-  // so bake one seamless cycle per clip. Unlike Motion (Canvas2D text, ~instant)
-  // a supersampled three.js bake is slow enough that a silent stall reads as a
-  // hang — hence the per-frame progress into the same status the render uses.
-  const spaceTypeClips = es.tracks.flatMap(t => t.clips).filter(c => c.kind === 'spacetype') as SpaceTypeClip[]
-  if (spaceTypeClips.length && !spaceTypeEngineAvailable()) {
-    isRendering.value = false
-    renderError.value = 'This timeline has Space Type clips, which need WebGL2 to render. Export is unavailable in this browser.'
-    return
-  }
-  if (spaceTypeClips.length) renderPhase.value = 'baking'
-  for (let i = 0; i < spaceTypeClips.length; i++) {
-    const clip = spaceTypeClips[i]!
-    try {
-      clip.spacetype_bake = await ensureSpaceTypeClipBake(clip, (done, total) => {
-        // Progress across ALL Space Type clips, so the bar advances once rather
-        // than resetting per clip.
-        renderProgress.value = { current: i * total + done, total: spaceTypeClips.length * total }
-      })
-    } catch (err: any) {
-      isRendering.value = false
-      renderPhase.value = null
-      renderProgress.value = null
-      renderError.value = `Space Type bake failed: ${err?.message ?? err}`
-      return
-    }
-  }
-  // Mix every audio clip (all tracks, position, volume, fades, speed, reverse)
-  // into one file in the browser — the same voices the preview plays — and hand
-  // the server that. If it fails the export still runs, with the old
-  // first-clip-only sound, and says so.
-  let mixFile: string | null = null
-  renderPhase.value = 'mixing'
-  renderProgress.value = null
-  try {
-    const mix = await ensureTimelineMix(es, clip => resolveAudioUrl(clip), store.boundNodeId())
-    mixFile = mix.file
-    let mixNotice: string | null = null
-    if (mix.skipped && !mix.file) mixNotice = 'None of the audio clips could be loaded, so this export only has the first audio clip.'
-    else if (mix.skipped === 1) mixNotice = 'One audio clip could not be loaded, so it was left out of this export.'
-    else if (mix.skipped > 1) mixNotice = `${mix.skipped} audio clips could not be loaded, so they were left out of this export.`
-    if (mixNotice) renderNotice.value = [renderNotice.value, mixNotice].filter(Boolean).join(' ')
-  } catch (err: any) {
-    console.warn('[timeline] audio mix failed', err)
-    renderNotice.value = [renderNotice.value, `Audio could not be mixed (${err?.message ?? err}), so this export only has the first audio clip.`].filter(Boolean).join(' ')
-  }
-
-  renderPhase.value = 'rendering'
-  renderProgress.value = null
-
-  const payload: any = JSON.parse(JSON.stringify(es))
-  for (const track of payload.tracks) {
-    for (const clip of track.clips) {
-      if (clip.kind === 'video' || clip.kind === 'image' || clip.kind === 'audio') {
-        const asset = assetLib.find((a: any) => a.id === clip.asset_id)
-        if (asset) clip.path = asset.path
-      } else if (clip.kind === 'motion') {
-        clip.motion_frames = clip.motion_bake?.frames ?? []
-      } else if (clip.kind === 'spacetype') {
-        // One seamless cycle; the exporter tiles it across the clip length.
-        clip.spacetype_frames = clip.spacetype_bake?.frames ?? []
-        clip.spacetype_loop = clip.loop !== false
-      } else if (clip.kind === 'workflow') {
-        // A clip fed by a wired node. If that node resolves to a real input/
-        // file (LoadVideo / Video / LoadImage / Image), render it as a normal
-        // clip. Only genuinely-computed ports (no resolvable file) fall through
-        // to the backend's workflow-skip — those need an in-graph run for pixels.
-        const resolved = resolveClipPreview(clip)
-        const filename = resolved && (resolved.kind === 'video' || resolved.kind === 'image')
-          ? inputFilenameFromUrl(resolved.url)
-          : null
-        if (resolved && filename) {
-          clip.kind = resolved.kind
-          clip.path = filename
-        }
-      }
-    }
-  }
-  if (mixFile) payload.audio_path = mixFile
-
-  try {
-    const res = await fetch('/sailor/render_timeline_stream', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(payload),
-    })
-    if (!res.ok || !res.body) throw new Error(`HTTP ${res.status}`)
-
-    // NDJSON stream: read line-by-line.
-    const reader = res.body.getReader()
-    const decoder = new TextDecoder()
-    let buffer = ''
-    while (true) {
-      const { value, done } = await reader.read()
-      if (done) break
-      buffer += decoder.decode(value, { stream: true })
-      let nl = buffer.indexOf('\n')
-      while (nl !== -1) {
-        const line = buffer.slice(0, nl).trim()
-        buffer = buffer.slice(nl + 1)
-        nl = buffer.indexOf('\n')
-        if (!line) continue
-        try {
-          const msg = JSON.parse(line)
-          if (msg.type === 'progress') {
-            renderProgress.value = { current: msg.current, total: msg.total }
-          } else if (msg.type === 'result') {
-            const filename = String(msg.result?.filename ?? '')
-            if (filename) renderResult.value = { url: `/view?${new URLSearchParams({ filename, type: 'output' })}`, filename }
-          } else if (msg.type === 'error') {
-            renderError.value = msg.error || 'render failed'
-          }
-        } catch {}
-      }
-    }
-  } catch (err: any) {
-    renderError.value = err?.message ?? 'render failed'
-  } finally {
-    isRendering.value = false
-    renderProgress.value = null
-    renderPhase.value = null
-  }
 }
 
 // -- Keyboard --
@@ -2071,9 +1887,7 @@ const assetTab = ref<'ports' | 'files' | 'library'>(portBindings.value.length > 
             <span class="relative">
               {{
                 isRendering
-                  ? (renderPhase === 'baking'
-                      ? (renderProgress ? `Baking ${Math.round(renderProgress.current / Math.max(1, renderProgress.total) * 100)}%` : 'Baking…')
-                      : renderPhase === 'mixing' ? 'Mixing sound…'
+                  ? (renderPhase === 'mixing' ? 'Mixing sound…'
                       : renderPhase === 'uploading' ? 'Uploading…'
                       : (renderProgress ? `${Math.round(renderProgress.current / Math.max(1, renderProgress.total) * 100)}%` : 'Rendering…'))
                   : (renderResult ? 'Re-render' : 'Export')

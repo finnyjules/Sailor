@@ -5,13 +5,12 @@ if (!import.meta.dev) {
 }
 
 // Dev/test-only surface: Playwright drives window.__timelineHarness to render
-// fixture frames through a PreviewRenderer and read pixels back. Not linked
-// from anywhere in the app UI. Phase 1 registers 'webgl' as a second renderer
-// kind here — the golden spec then runs against both.
+// fixture frames through the WebGL PreviewRenderer and read pixels back. Not
+// linked from anywhere in the app UI. (The server renderer it was once
+// compared with went with the server Timeline render, Task R9.3.)
 import { onMounted, onBeforeUnmount, ref } from 'vue'
 import { migrateEditState } from '~~/shared/timeline/types'
 import type { PreviewRenderer } from '~~/shared/timeline/previewRenderer'
-import { ServerFrameRenderer } from '~/lib/serverFrameRenderer'
 import { WebGLPreviewRenderer } from '~/lib/engine/webglPreviewRenderer'
 
 const canvas = ref<HTMLCanvasElement | null>(null)
@@ -20,13 +19,13 @@ let renderer: PreviewRenderer | null = null
 
 onMounted(() => {
   ;(window as any).__timelineHarness = {
-    async load(stateJson: string, kind: 'server' | 'webgl' = 'server'): Promise<void> {
+    async load(stateJson: string): Promise<void> {
       const state = migrateEditState(JSON.parse(stateJson))
       if (!state) throw new Error('invalid edit state')
       renderer?.dispose()
-      renderer = kind === 'webgl' ? new WebGLPreviewRenderer() : new ServerFrameRenderer()
+      renderer = new WebGLPreviewRenderer()
       await renderer.load(state)
-      status.value = `loaded (${kind})`
+      status.value = 'loaded (webgl)'
     },
     async renderFrame(frame: number): Promise<string> {
       if (!renderer || !canvas.value) throw new Error('load() first')

@@ -144,13 +144,37 @@ export const RETIRED_ADVICE_OF: Readonly<Record<string, string>> = {
   LipSync: 'Use Lip-sync a character instead.',
 }
 
-/** What a retired class says to do instead. */
+/**
+ * Classes that are not retired but never run in a workflow: their own editor
+ * makes their result (Task R9.1). The Timeline node still opens the Timeline
+ * editor, which exports in the browser; inside a run it is refused before any
+ * hold, on both paths, read exactly as the retired classes are (an output
+ * node, so always refused). Each says what to do instead, and nothing more:
+ * the node isn't "retired", so it stays offered and its card stays normal.
+ */
+export const EDITOR_ONLY_ADVICE_OF: Readonly<Record<string, string>> = {
+  Timeline: 'Export this timeline from the Timeline editor.',
+}
+
+/** Whether `classType` is made only in its own editor (EDITOR_ONLY_ADVICE_OF), never in a run. */
+export function isEditorOnlyClass(classType: unknown): boolean {
+  return typeof classType === 'string' && Object.prototype.hasOwnProperty.call(EDITOR_ONLY_ADVICE_OF, classType)
+}
+
+/** Whether a run holding `classType` is refused: a retired class, or an editor-only one. */
+export function isRefusedInRunClass(classType: unknown): boolean {
+  return isRetiredClass(classType) || isEditorOnlyClass(classType)
+}
+
+/** What a retired (or editor-only) class says to do instead. */
 export function retiredAdviceOf(classType: unknown): string {
+  if (isEditorOnlyClass(classType)) return EDITOR_ONLY_ADVICE_OF[classType as string]!
   return (typeof classType === 'string' && RETIRED_ADVICE_OF[classType]) || RETIRED_NODE_ADVICE
 }
 
-/** What a retired class says, on its node and in the refusal. */
+/** What a retired class says, on its node and in the refusal; an editor-only class says only what to do instead. */
 export function retiredMessageOf(classType: unknown): string {
+  if (isEditorOnlyClass(classType)) return retiredAdviceOf(classType)
   return `This node was retired. ${retiredAdviceOf(classType)}`
 }
 
@@ -191,11 +215,12 @@ export function retiredNodeIds(prompt: unknown, isOutputClass?: IsOutputClass): 
     return node && typeof node === 'object' ? (node as { class_type?: unknown }).class_type : undefined
   }
   const ids = Object.keys(nodes)
-  const retired = ids.filter(id => isRetiredClass(classOf(id)))
+  const retired = ids.filter(id => isRefusedInRunClass(classOf(id)))
   if (!retired.length || !isOutputClass) return retired
+  // An editor-only class (Timeline) is an output node: it always runs, so it is always refused.
   const outputs = ids.filter((id) => {
     const ct = classOf(id)
-    return typeof ct === 'string' && (isOutputClass(ct) || RETIRED_OUTPUT_CLASSES.has(ct))
+    return typeof ct === 'string' && (isOutputClass(ct) || RETIRED_OUTPUT_CLASSES.has(ct) || isEditorOnlyClass(ct))
   })
   const read = readByOutputs(nodes as ApiPrompt, outputs)
   return retired.filter(id => read.has(id))
@@ -243,11 +268,22 @@ const CLASS_TYPE_IN_JSON = /"class_type"\s*:\s*"([^"\\]*)"/g
  * such node counts (the safe side; no pruning here).
  */
 export function jsonNamesRetiredClass(text: string): boolean {
-  for (const m of text.matchAll(CLASS_TYPE_IN_JSON)) if (RETIRED_CLASSES.has(m[1]!)) return true
-  return false
+  return retiredClassInJson(text) !== null
 }
 
-/** The refusal for a retired node found in a prompt too large to parse: no node named. */
-export function retiredUnparsedResponse(): RetiredNodesBody {
-  return { error: { type: 'value_not_valid', message: RETIRED_NODE_MESSAGE, details: '', extra_info: {} }, node_errors: {} }
+/** The first retired (or editor-only) class a prompt's JSON text names as a node's class, or null. */
+function retiredClassInJson(text: string): string | null {
+  for (const m of text.matchAll(CLASS_TYPE_IN_JSON)) if (isRefusedInRunClass(m[1])) return m[1]!
+  return null
+}
+
+/**
+ * The refusal for a retired (or editor-only) node found in a prompt too large
+ * to parse: no node named. With the prompt's text, the words are that class's
+ * own (an editor-only class's advice); without it, the default.
+ */
+export function retiredUnparsedResponse(text?: string): RetiredNodesBody {
+  const classType = text === undefined ? null : retiredClassInJson(text)
+  const message = classType ? retiredMessageOf(classType) : RETIRED_NODE_MESSAGE
+  return { error: { type: 'value_not_valid', message, details: '', extra_info: {} }, node_errors: {} }
 }

@@ -4,9 +4,9 @@ import { fileURLToPath } from 'node:url'
 import * as path from 'node:path'
 import { PNG } from 'pngjs'
 
-// Golden-frame parity, both renderers:
-//  - server: Python ground truth via /sailor/timeline/render_frame.
-//    Bit-near-exact (same math, PNG quantization only) → tight tolerance.
+// Golden-frame parity for the WebGL renderer (the goldens were made by the
+// Python exporter; its per-frame route went with the server Timeline render,
+// Task R9.3):
 //  - webgl: the Phase-1 engine. GPU linear sampling ≠ PIL BILINEAR and GL quads
 //    are center-anchored vs PIL's integer top-left paste, so edges of
 //    scaled/rotated layers differ by design. Gate = mean error + fraction of
@@ -21,8 +21,6 @@ const thisDir = fileURLToPath(new URL('.', import.meta.url))
 const repoRoot = path.resolve(thisDir, '../..')
 const fixturesDir = path.join(repoRoot, 'tests-unit', 'timeline_fixtures')
 const goldenDir = path.join(repoRoot, 'tests-unit', 'timeline_golden')
-
-const SERVER_TOL = { max: 2 / 255, mean: 0.5 / 255 }
 
 // Perceptibility threshold for "this channel sample differs": 8/255.
 // CALIBRATION (Julien's dev Mac, 2026-06-09, 14 frames across 3 fixtures):
@@ -58,7 +56,7 @@ function diffStats(a: PNG, b: PNG): { max: number; mean: number; pctOver: number
 }
 
 const fixtures = readdirSync(fixturesDir).filter(f => f.endsWith('.json'))
-const RENDERERS = ['server', 'webgl'] as const
+const RENDERERS = ['webgl'] as const
 
 for (const renderer of RENDERERS) {
   for (const fixtureFile of fixtures) {
@@ -66,30 +64,23 @@ for (const renderer of RENDERERS) {
       const raw = JSON.parse(readFileSync(path.join(fixturesDir, fixtureFile), 'utf-8'))
       const frames: number[] = raw._golden.frames
 
-      if (renderer === 'server') {
-        // Python endpoint reads the filesystem directly — absolutize.
-        for (const track of raw.tracks) for (const clip of track.clips) {
-          if (clip.path && !path.isAbsolute(clip.path)) clip.path = path.join(fixturesDir, clip.path)
-        }
-      } else {
-        // Browser fetches sources — rewrite to routed URLs served from disk.
-        await page.route('**/__fixture_assets/*', (route) => {
-          const name = route.request().url().split('/__fixture_assets/')[1]!
-          const file = path.join(fixturesDir, 'assets', decodeURIComponent(name))
-          if (!existsSync(file)) return route.fulfill({ status: 404 })
-          return route.fulfill({ body: readFileSync(file), contentType: 'image/png' })
-        })
-        for (const track of raw.tracks) for (const clip of track.clips) {
-          if (clip.path) clip.path = `/__fixture_assets/${path.basename(clip.path)}`
-        }
+      // Browser fetches sources — rewrite to routed URLs served from disk.
+      await page.route('**/__fixture_assets/*', (route) => {
+        const name = route.request().url().split('/__fixture_assets/')[1]!
+        const file = path.join(fixturesDir, 'assets', decodeURIComponent(name))
+        if (!existsSync(file)) return route.fulfill({ status: 404 })
+        return route.fulfill({ body: readFileSync(file), contentType: 'image/png' })
+      })
+      for (const track of raw.tracks) for (const clip of track.clips) {
+        if (clip.path) clip.path = `/__fixture_assets/${path.basename(clip.path)}`
       }
 
       await page.goto('/timeline-harness')
       await page.getByTestId('harness-status').waitFor()
       await page.waitForFunction(() => !!(window as any).__timelineHarness, { timeout: 10_000 })
       await page.evaluate(
-        ([stateJson, kind]) => (window as any).__timelineHarness.load(stateJson, kind),
-        [JSON.stringify(raw), renderer] as const,
+        (stateJson) => (window as any).__timelineHarness.load(stateJson),
+        JSON.stringify(raw),
       )
 
       const stem = fixtureFile.replace(/\.json$/, '')
@@ -105,10 +96,7 @@ for (const renderer of RENDERERS) {
         const golden = PNG.sync.read(readFileSync(goldenPath))
         const { max, mean, pctOver } = diffStats(rendered, golden)
 
-        if (renderer === 'server') {
-          expect(max, `${stem} f${frame} max diff`).toBeLessThanOrEqual(SERVER_TOL.max)
-          expect(mean, `${stem} f${frame} mean diff`).toBeLessThanOrEqual(SERVER_TOL.mean)
-        } else if (CALIBRATE) {
+        if (CALIBRATE) {
           console.log(`[calibrate] ${stem} f${frame}: max=${max.toFixed(4)} mean=${(mean * 255).toFixed(3)}/255 pctOver=${(pctOver * 100).toFixed(3)}%`)
         } else {
           expect(mean, `${stem} f${frame} mean diff`).toBeLessThanOrEqual(WEBGL_TOL.mean)

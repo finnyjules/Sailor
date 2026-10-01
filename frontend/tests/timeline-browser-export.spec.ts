@@ -52,9 +52,9 @@ test.describe('timeline recorded in the browser', () => {
     expect(r.audioCodec).toBeNull()
   })
 
-  test('a plain text clip is drawn where the server draws it', async ({ page }) => {
-    // Rendered by the timeline harness through both renderers; compare the
-    // bounding box of the text pixels (fonts differ slightly, layout must not).
+  test('a plain text clip is drawn centred', async ({ page }) => {
+    // Rendered by the timeline harness (WebGL); the bounding box of the text
+    // pixels is centred, as the old server layout placed it.
     await page.goto('/timeline-harness')
     await page.waitForFunction(() => !!(window as any).__timelineHarness, null, { timeout: 60_000 })
     const state = base([
@@ -63,9 +63,9 @@ test.describe('timeline recorded in the browser', () => {
         text: { text: 'Hello world', font_size: 40, color: '#ffffff', bg_color: '#000000', align: 'center', v_align: 'middle', padding: 0.06, line_spacing: 1.2 },
       }] },
     ])
-    const box = async (kind: 'webgl' | 'server') => page.evaluate(async ([json, k]) => {
+    const box = async () => page.evaluate(async (json) => {
       const h = (window as any).__timelineHarness
-      await h.load(json, k)
+      await h.load(json)
       const url: string = await h.renderFrame(0)
       const img = new Image(); img.src = url; await img.decode()
       const c = document.createElement('canvas'); c.width = img.width; c.height = img.height
@@ -76,17 +76,11 @@ test.describe('timeline recorded in the browser', () => {
         if (d[(y * c.width + x) * 4]! > 128) { x0 = Math.min(x0, x); y0 = Math.min(y0, y); x1 = Math.max(x1, x); y1 = Math.max(y1, y) }
       }
       return { x0, y0, x1, y1 }
-    }, [JSON.stringify(state), kind] as const)
-    const serverUp = await page.evaluate(() => fetch('/system_stats').then(r => r.ok).catch(() => false))
-    const b = await box('webgl')
+    }, JSON.stringify(state))
+    const b = await box()
     expect(b.x1).toBeGreaterThan(b.x0)                // something was drawn
     const cx = (b.x0 + b.x1) / 2, cy = (b.y0 + b.y1) / 2
-    expect(Math.abs(cx - 160)).toBeLessThanOrEqual(8) // centred, like the server's layout
+    expect(Math.abs(cx - 160)).toBeLessThanOrEqual(8) // centred
     expect(Math.abs(cy - 90)).toBeLessThanOrEqual(8)
-    if (serverUp) {
-      const s = await box('server')
-      test.info().annotations.push({ type: 'boxes', description: JSON.stringify({ webgl: b, server: s }) })
-      for (const k of ['x0', 'y0', 'x1', 'y1'] as const) expect(Math.abs(b[k] - s[k])).toBeLessThanOrEqual(0.06 * 320)
-    }
   })
 })

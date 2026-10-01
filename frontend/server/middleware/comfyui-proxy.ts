@@ -149,12 +149,13 @@ export default defineEventHandler(async (event) => {
       if (raw && raw.length <= PROMPT_CHECK_MAX_BYTES) prompt = JSON.parse(raw.toString('utf8'))?.prompt
       // Over the cap, Generate a 3D model is still refused (R3.9 fix round 2): ComfyUI would pay for its
       // call and then fail on the answer. Its class is looked for in the text, without parsing it.
-      // A retired partner node too (Task R4.1): ComfyUI would bill it through Comfy's account.
+      // A retired partner node too (Task R4.1): ComfyUI would bill it through Comfy's account;
+      // and a Timeline node (Task R9.1), which only its editor exports, in its own words.
       // Unparsed, whether an output reads it isn't knowable, so it is refused anyway (the safe side).
       else if (raw) {
         const text = raw.toString('utf8')
         if (jsonNamesGenerate3d(text)) oversized = generate3dRefusal()
-        else if (jsonNamesRetiredClass(text)) oversized = retiredUnparsedResponse()
+        else if (jsonNamesRetiredClass(text)) oversized = retiredUnparsedResponse(text)
       }
     }
     catch { prompt = undefined }

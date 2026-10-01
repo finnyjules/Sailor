@@ -13,7 +13,7 @@ import { prunedAny, pruneInvalidOutputs } from './validate'
 import { NO_FAMILIES, type RunnerFamily } from './families'
 import { blockedModelRefusal, blockedModelUses, blockedModelsResponse, promptNodeTitle } from './blockedModels'
 import { shaderEngineReason } from './shaderBakeKey'
-import { retiredAdviceOf, retiredNodeIds, type IsOutputClass } from './retired'
+import { isEditorOnlyClass, retiredAdviceOf, retiredNodeIds, type IsOutputClass } from './retired'
 
 /** The fallback title for a node with neither a title nor a known display name. */
 export const UNNAMED_NODE = 'Unnamed node'
@@ -142,9 +142,14 @@ export function blockedRunRefusal(
   // title, when an output reads it. One nothing reads is pruned, as ComfyUI
   // prunes it (`isOutputClass`: /object_info's output test, ./validate.ts
   // outputClassesOf; without it every retired node counts).
+  // An editor-only node (the Timeline, Task R9.1) is refused the same way,
+  // saying where its result is made instead.
   for (const take of takes) {
     const id = retiredNodeIds(take.prompt, opts.isOutputClass)[0]
-    if (id !== undefined) return { title: `“${take.titleOf(id)}” was retired`, description: retiredAdviceOf((take.prompt as ApiPrompt)[id]?.class_type) }
+    if (id === undefined) continue
+    const classType = (take.prompt as ApiPrompt)[id]?.class_type
+    const title = isEditorOnlyClass(classType) ? `“${take.titleOf(id)}” can’t run in a workflow` : `“${take.titleOf(id)}” was retired`
+    return { title, description: retiredAdviceOf(classType) }
   }
   for (const take of takes) {
     const prompt = take.prompt

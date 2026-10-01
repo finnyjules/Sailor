@@ -260,9 +260,10 @@ describe('classifySailor — the audited bucket table', () => {
       ['/sailor/space_thumbnail/burst', 'GET', 'proxy'],
       ['/sailor/font_subset', 'POST', 'proxy'],
       ['/sailor/models/status', 'GET', 'proxy'],
-      ['/sailor/render_timeline', 'POST', 'refuse'],
-      ['/sailor/render_timeline_stream', 'POST', 'refuse'],
-      ['/sailor/timeline/render_frame', 'POST', 'refuse'],
+      // The engine's Timeline renders (Task R9.3): unlisted, so refused by default.
+      ['/sailor/render_timeline', 'POST', 'unknown'],
+      ['/sailor/render_timeline_stream', 'POST', 'unknown'],
+      ['/sailor/timeline/render_frame', 'POST', 'unknown'],
       ['/sailor/spacetype_encode', 'POST', 'refuse'],
       ['/sailor/motion/cleanup_frames', 'POST', 'refuse'],
       ['/sailor/lora/save_captions', 'POST', 'refuse'],
@@ -668,17 +669,26 @@ const EXPECTED: Record<string, string> = {
   'DELETE /sailor/input_file': 'data',
   'DELETE /sailor/output_file': 'data',
   // compute / shared-state write (refuse)
-  'POST /sailor/render_timeline_stream': 'refuse',
-  'POST /sailor/render_timeline': 'refuse',
   'POST /sailor/spacetype_encode': 'refuse',
-  'POST /sailor/timeline/render_frame': 'refuse',
   'POST /sailor/space_default/{effect_id}': 'refuse',
   'POST /sailor/space_thumbnail/{effect_id}': 'refuse',
   'POST /sailor/lora/save_captions': 'refuse',
   'POST /sailor/lora/clear_dataset': 'refuse',
   'GET /sailor/models/download': 'refuse',
   'POST /sailor/motion/cleanup_frames': 'refuse',
+  // Task R9.3: the engine's Timeline renders, which Sailor no longer calls,
+  // are deliberately unlisted: hosted refuses them by default (RETIRED_ROUTES).
+  'POST /sailor/render_timeline_stream': 'unknown',
+  'POST /sailor/render_timeline': 'unknown',
+  'POST /sailor/timeline/render_frame': 'unknown',
 }
+
+/** Engine routes nothing in Sailor calls any more, left unclassified on purpose (deny by default). */
+const RETIRED_ROUTES = new Set([
+  'POST /sailor/render_timeline_stream',
+  'POST /sailor/render_timeline',
+  'POST /sailor/timeline/render_frame',
+])
 
 /** Turn a `{param}` template into a concrete path classifySailor can match. */
 function concrete(template: string): string {
@@ -753,7 +763,7 @@ describe('coverage guard: every registered /sailor route is classified', () => {
     for (const { verb, template } of routes) {
       const key = `${verb} ${template}`
       const bucket = classifySailor(concrete(template), verb).bucket
-      if (bucket === 'unknown') misclassified.push(`${key} → unknown (would fail closed, but MUST be classified)`)
+      if (bucket === 'unknown' && !RETIRED_ROUTES.has(key)) misclassified.push(`${key} → unknown (would fail closed, but MUST be classified)`)
     }
     expect(misclassified, 'every /sailor route must be audited into a bucket').toEqual([])
   })

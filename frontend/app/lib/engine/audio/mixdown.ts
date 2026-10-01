@@ -2,15 +2,13 @@ import type { EditState, Clip } from '~~/shared/timeline/types'
 import { computeTotalFrames } from '~~/shared/timeline/types'
 import { audioScheduleFor, type AudioClipLike } from './audioEngine'
 
-// One mixed sound file for the whole timeline, built in the browser before
-// export — the same pattern as the Motion / Space Type bakes: the server can't
-// reproduce the preview, so the browser renders it and hands over a file.
+// One mixed sound for the whole timeline, built in the browser for the export
+// (recordTimeline, mixTimelineAudio).
 // Preview (AudioEngine.play) and export (renderMixdown) both go through
 // voiceFor + voiceBufferWindow, so what you hear is what you export.
 
 export const MIX_SAMPLE_RATE = 48000
-/** Past this the mix is skipped (memory + upload size); export falls back to
- *  the server's single-clip audio with a visible notice. */
+/** Past this the mix is refused (memory): mixTimelineAudio throws. */
 export const MAX_MIX_SEC = 1800
 
 export interface VoiceClip extends AudioClipLike {
@@ -167,40 +165,6 @@ export async function renderMixdown(plan: MixPlan, buffers: Map<string, AudioBuf
   return channels
 }
 
-let fallbackTab: string | null = null
-/** A short id that is stable for this browser tab (survives reloads) and
- *  differs between tabs, so two windows exporting timelines whose nodes share
- *  an id never write the same file at the same moment. */
-export function mixTabToken(): string {
-  try {
-    let t = sessionStorage.getItem('sailor.mixTab')
-    if (!t) { t = Math.random().toString(36).slice(2, 8); sessionStorage.setItem('sailor.mixTab', t) }
-    return t
-  } catch {
-    return (fallbackTab ??= Math.random().toString(36).slice(2, 8))
-  }
-}
-
-/** One fixed name per slot, overwritten on every export, so repeated exports
- *  don't pile sound files up in input/. The caller's slot is the browser tab's
- *  token plus the timeline node's id — so at most one file per tab per timeline
- *  is ever left behind (a new tab starts a new one). */
-export function mixFileName(slot: string | null): string {
-  return `timeline_mix_${(slot ?? '').replace(/[^a-zA-Z0-9_-]/g, '_') || 'default'}.wav`
-}
-
-/** Same upload route the frame bakes use; ComfyUI writes any file type to input/. */
-export async function uploadMix(wav: ArrayBuffer, slot: string | null): Promise<string> {
-  const fname = mixFileName(slot)
-  const fd = new FormData()
-  fd.append('image', new File([wav], fname, { type: 'audio/wav' }))
-  fd.append('overwrite', 'true')
-  const res = await fetch('/upload/image', { method: 'POST', body: fd })
-  if (!res.ok) throw new Error(`mix upload failed (${res.status})`)
-  const data = await res.json() as { name?: string; subfolder?: string }
-  return data.subfolder ? `${data.subfolder}/${data.name}` : (data.name || fname)
-}
-
 /** Mix every audio clip into one stereo AudioBuffer (48 kHz) — the same voices
  *  the preview plays. `buffer` is null when there is nothing to mix or nothing
  *  loaded; a clip whose file is missing / fails to load is left out and counted. */
@@ -254,21 +218,4 @@ export async function mixTimelineAudio(
   buffer.copyToChannel(channels[0] as unknown as Float32Array<ArrayBuffer>, 0)
   buffer.copyToChannel(channels[1] as unknown as Float32Array<ArrayBuffer>, 1)
   return { buffer, skipped }
-}
-
-/** Mix every audio clip into one uploaded WAV. `file` is null when there was
- *  nothing to mix, or nothing loaded. A clip with no file, or whose file fails
- *  to fetch or decode, is left out of the mix (not fatal) and counted in
- *  `skipped` — the caller shows that count instead of failing the export. */
-// No cache of finished mixes on purpose: a 6 s mix + upload measured 33 ms, and
-// a remembered filename can't be re-checked — Sailor's /view route keeps its
-// own permanent copy of every file, so a deleted mix still looks present, and
-// the server skips a missing audio file without complaint (a silent export).
-export async function ensureTimelineMix(
-  state: EditState, resolveClipUrl: (clip: Clip) => string | null, slot: string | null = null,
-): Promise<{ file: string | null; skipped: number }> {
-  const { buffer, skipped } = await mixTimelineAudio(state, resolveClipUrl)
-  if (!buffer) return { file: null, skipped }
-  const file = await uploadMix(encodeWav16([buffer.getChannelData(0), buffer.getChannelData(1)], MIX_SAMPLE_RATE), `${mixTabToken()}_${slot ?? ''}`)
-  return { file, skipped }
 }

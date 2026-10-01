@@ -242,11 +242,11 @@ const SPACE_THUMB_WRITE_MSG = 'Space preset thumbnails are operator content in h
  * compute that will be metered later. `verb` narrows the two routes whose
  * refusal is method-specific (space_default/{id} POST; space_thumbnail/{id}
  * POST is refused in classifySailor's verb branch above the proxy list).
+ * The engine's Timeline render routes are no longer listed (Task R9.3):
+ * nothing in Sailor calls them, so in hosted they fall to `unknown` and are
+ * refused by default.
  */
 const SAILOR_REFUSE: { prefix: string, verb?: string, message: string }[] = [
-  { prefix: '/sailor/render_timeline_stream', message: 'Timeline render is not available in hosted mode — it writes to the shared output directory' },
-  { prefix: '/sailor/render_timeline', message: 'Timeline render is not available in hosted mode — it writes to the shared output directory' },
-  { prefix: '/sailor/timeline', message: 'Frame render is not available in hosted mode — it runs unmetered compute' },
   { prefix: '/sailor/spacetype_encode', message: 'Video encode is not available in hosted mode — it writes to the shared input directory' },
   { prefix: '/sailor/motion', message: 'Frame cleanup is not available in hosted mode — it deletes from the shared input directory' },
   { prefix: '/sailor/lora', message: 'Dataset writes are not available in hosted mode — they mutate the shared training directory' },
