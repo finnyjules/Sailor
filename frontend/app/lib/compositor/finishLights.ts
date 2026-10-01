@@ -37,22 +37,22 @@ uniform float uCount, uDark;
 `
 
 /**
- * One gain on every light's radiance, in the finish shaders only (the lighting pass is untouched).
- * The lighting pass's falloff gives a lamp about 0.35–0.5 of its brightness across a Frame, where
- * the hidden light lit the finishes at a weight of 1; this brings the toolbar's default lamp
- * (white, brightness 1.6) at the hidden light's default spot, Darkness 0.45, back to today's
- * gold foil: opaque mean luminance 138 against today's 149 (−8%). Spot UV comes out brighter than
- * today at this gain (its own match is nearer 1.25). Measured in a Chromium harness, stage-3 Task 1
- * report, fix round 1.
+ * A gain on every light's radiance, per finish, in the finish shaders only (the lighting pass is
+ * untouched). The lighting pass's falloff gives a lamp about 0.35–0.5 of its brightness across a
+ * Frame, where the hidden light lit the finishes at a weight of 1; these bring the toolbar's
+ * default lamp (white, brightness 1.6) at the hidden light's default spot, Darkness 0.45, back to
+ * today's look. Measured in a Chromium harness (stage-3 Task 1 report, fix round 2): foil's
+ * ambient base terms now scale with Darkness, so foil needs more gain than Spot UV.
  */
-export const FINISH_LIGHT_GAIN = 2
+export const FOIL_LIGHT_GAIN = 2
+export const SPOT_UV_LIGHT_GAIN = 1.25
 
 /** FINISH_COMMON with the hidden light swapped for the light layers; '' if FINISH_COMMON no
  *  longer declares the hidden light as expected (then the lit shaders are empty, `applyFinishLit`
  *  answers false so the caller falls back, and the unit tests fail loudly). Never throws at import. */
-function litCommon(): string {
+function litCommon(gain: number): string {
   if (!FINISH_COMMON.includes(HIDDEN_LIGHT_DECL)) return ''
-  return FINISH_COMMON.replace(HIDDEN_LIGHT_DECL, LIGHTS_DECL) + `const float LIGHT_GAIN = ${FINISH_LIGHT_GAIN.toFixed(4)};
+  return FINISH_COMMON.replace(HIDDEN_LIGHT_DECL, LIGHTS_DECL) + `const float LIGHT_GAIN = ${gain.toFixed(4)};
 float lum(vec3 c) { return dot(c, vec3(0.2126, 0.7152, 0.0722)); }
 // Light i at frame uv fu (y up) and world point P: its radiance (linear rgb), and L, the world
 // direction toward it. Falloff and cone are LIGHTING_FRAG's, in the lighting pass's own space.
@@ -78,9 +78,10 @@ vec3 lightE(int i, vec2 fu, vec3 P, out vec3 L) {
 `
 }
 
-const COMMON_LIT = litCommon()
+const FOIL_COMMON_LIT = litCommon(FOIL_LIGHT_GAIN)
+const SPOT_UV_COMMON_LIT = litCommon(SPOT_UV_LIGHT_GAIN)
 
-export const FOIL_LIT_FRAG = !COMMON_LIT ? '' : `${COMMON_LIT}
+export const FOIL_LIT_FRAG = !FOIL_COMMON_LIT ? '' : `${FOIL_COMMON_LIT}
 uniform vec3 uM0;
 uniform vec3 uM1;
 uniform vec3 uM2;
@@ -129,7 +130,7 @@ void main() {
   fragColor = vec4(min(c, vec3(1.0)), smoothstep(0.3, 0.7, src.a + ero * 0.3));
 }`
 
-export const SPOT_UV_LIT_FRAG = !COMMON_LIT ? '' : `${COMMON_LIT}
+export const SPOT_UV_LIT_FRAG = !SPOT_UV_COMMON_LIT ? '' : `${SPOT_UV_COMMON_LIT}
 uniform float uGloss;
 uniform float uRaised;
 uniform float uVarnishOnly;

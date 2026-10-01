@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest'
 import { createHash } from 'node:crypto'
 import { FOIL_FRAG, SPOT_UV_FRAG } from '~/lib/compositor/finishPass'
-import { FOIL_LIT_FRAG, SPOT_UV_LIT_FRAG, FINISH_LIGHT_GAIN, finishLightUniforms, finishLightWorld, varnishDarkTerm } from '~/lib/compositor/finishLights'
+import { FOIL_LIT_FRAG, SPOT_UV_LIT_FRAG, FOIL_LIGHT_GAIN, SPOT_UV_LIGHT_GAIN, finishLightUniforms, finishLightWorld, varnishDarkTerm } from '~/lib/compositor/finishLights'
 import { DEFAULT_FRAME_LIGHT, lightWorld } from '~/lib/compositor/frameLight'
 import { packLightUniforms } from '~/lib/frame/lighting/shade'
 import { newLightLayer, DEFAULT_LIGHTING, type LightLayer } from '~/lib/frame/lighting/settings'
@@ -130,10 +130,12 @@ describe('finishLightUniforms', () => {
 })
 
 describe('fix round 1', () => {
-  it('scale every light\'s radiance by FINISH_LIGHT_GAIN, in the finish shaders only', () => {
-    expect(FINISH_LIGHT_GAIN).toBeGreaterThan(1)
-    for (const f of [FOIL_LIT_FRAG, SPOT_UV_LIT_FRAG]) {
-      expect(f).toContain(`const float LIGHT_GAIN = ${FINISH_LIGHT_GAIN.toFixed(4)};`)
+  it('scale every light\'s radiance by its finish\'s own gain (foil 2, Spot UV 1.25), in the finish shaders only', () => {
+    expect(FOIL_LIGHT_GAIN).toBe(2)
+    expect(SPOT_UV_LIGHT_GAIN).toBe(1.25)
+    for (const [f, g] of [[FOIL_LIT_FRAG, FOIL_LIGHT_GAIN], [SPOT_UV_LIT_FRAG, SPOT_UV_LIGHT_GAIN]] as const) {
+      expect(f).toContain(`const float LIGHT_GAIN = ${g.toFixed(4)};`)
+      expect(f.match(/const float LIGHT_GAIN/g)).toHaveLength(1)
       expect(f).toContain('return uB[i].rgb * att * LIGHT_GAIN;')
     }
   })
