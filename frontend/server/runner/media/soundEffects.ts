@@ -20,6 +20,12 @@
  *   AudioFade           — one envelope (both 0, or no samples: handed on);
  *   AudioNormalize      — to a peak or an RMS (silence: handed on);
  *   AudioDuck           — the sidechain's envelope turns the sound down;
+ *   AudioDenoise        — (R6.10, family `sound-denoise`) noisereduce's spectral
+ *                         gating (../video/core/denoise.ts): the stationary
+ *                         noise profile in one worker call, then each
+ *                         600,000-sample chunk in one call of its own (Stop
+ *                         is read between and within them); strength 0 or no
+ *                         samples: handed on;
  *   VideoSilenceCut     — the loud ranges from the sound first (the walk fixed:
  *                         ../video/core/sound.ts), then the batch read once, the
  *                         frames outside them dropped as they decode, under one
@@ -44,10 +50,14 @@ import { MediaError, mediaLease } from '../../media/run'
 import { framesOf, framesSink, keepSound, type MediaValueIO } from '../../media/values'
 import { mediaEffectParams } from '../video/table'
 import { soundCore } from '../video/core/sound'
+import { denoiseCore } from '../video/core/denoise'
+import { fftCore } from '../video/core/fft'
 import { soundEffectRaises, trimSamples } from '../video/soundShapes'
 import { NO_SOUND_WIRED, wiredSound } from './soundNodes'
 
 const { pyRound } = soundCore()
+/** Only the chunk layout is used here (no transform runs on this thread). */
+const dn = denoiseCore(fftCore())
 const capsOf = (hosted: boolean) => hosted ? MEDIA_CAPS.hosted : MEDIA_CAPS.local
 type SoundValue = RunnerValue & { kind: 'files' }
 type FramesValue = Extract<RunnerValue, { kind: 'frames' }>
@@ -211,9 +221,40 @@ async function work(cls: string, w: Record<string, unknown>, got: Record<string,
       }, signal)
       return { 0: { rate: x.rate, channels: r.channels! } }
     }
+    case 'AudioDenoise': {
+      const x = got.audio!.sound
+      const strength = num('strength', 1)
+      if (strength <= 0 || samplesOf(x) === 0) return { 0: got.audio!.value }
+      return { 0: { rate: x.rate, channels: await denoised(x, strength, (w.noise_type ?? 'stationary') === 'stationary', signal) } }
+    }
     case 'VideoSilenceCut': return silenceCut(w, got.audio!, ctx, media)
   }
   throw new Error(`The runner cannot run a ${cls} node`)
+}
+
+/**
+ * Audio denoise, chunk by chunk on the worker (R6 rule 6: a denoise chunk per
+ * call): the noise profile from the first chunk's samples, then every chunk
+ * read padded (zeros past the ends) and its middle kept. Stop between chunks
+ * ends the work before the next one starts.
+ */
+async function denoised(x: DecodedSound, prop: number, stationary: boolean, signal?: AbortSignal): Promise<Float32Array[]> {
+  const n = lengthOf(x)
+  let thresh: Float64Array | undefined
+  if (stationary) {
+    const r = await soundInWorker('dn.profile', x.channels.map(c => c.slice(0, dn.CHUNK)), {}, signal) as { thresh?: Float64Array }
+    thresh = r.thresh
+  }
+  const out = x.channels.map(() => new Float32Array(n))
+  const cut = n > dn.CHUNK
+  for (const c of dn.chunksOf(n)) {
+    if (signal?.aborted) throw new MediaError('stopped')
+    const r = await soundInWorker('dn.chunk', dn.padded(x.channels, c.start, cut ? dn.CHUNK : n), {
+      rate: x.rate, stationary, prop, thresh, from: dn.PAD, to: dn.PAD + c.end - c.start,
+    }, signal)
+    r.channels!.forEach((y, k) => out[k]!.set(y, c.start))
+  }
+  return out
 }
 
 /** Silence cut's frame ranges: each kept sample range [s, e) as frames [round(s / rate · fps), round(e / rate · fps)) within T. */

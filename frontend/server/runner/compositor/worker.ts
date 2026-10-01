@@ -252,10 +252,10 @@ parentPort.on('message', (m) => {
       }
     }
     // A sound effect's arithmetic (R6.9, ../video/core/sound.ts): one sound per call, its channels handed
-    // over and handed back; Stop is read as it goes.
+    // over and handed back; Stop is read as it goes. A dotted fn names another core's op (R6.10: 'dn.chunk').
     else if (m.op === 'sfx.run') {
       stopped()
-      const op = effectOp('sfx.' + m.fn)
+      const op = effectOp(m.fn.indexOf('.') > 0 ? m.fn : 'sfx.' + m.fn)
       value = op(m.channels, m.params, isStopped)
       transfer = []
       for (const c of (value && value.channels) || []) if (!transfer.includes(c.buffer)) transfer.push(c.buffer)

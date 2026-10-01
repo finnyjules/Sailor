@@ -145,6 +145,15 @@ Groups:
            the node walks them and as its walk was meant to (short silences
            absorbed, the run's start kept); Save audio (Opus) at every
            quality from 44.1 and 48 kHz, read back by nodes_audio.load.
+  sfx-denoise — (R6.10) Audio denoise's real execute (noisereduce 3.0.3),
+           both methods, over sounds of an exact formula the spec shares (a
+           gated tone and a speech-like sound plus hashed noise; silence) at
+           8 kHz (shorter and longer than a 600,000-sample chunk), 44.1 and
+           48 kHz, mono and stereo, strength 1, 0.5 and 0 (handed on), and at
+           4 kHz (raises). Each case records Python's output's sha256, its NaN
+           count, its level in the noise-only stretches and elsewhere (dB), and
+           windows of its float32 samples; judged by the user's matching rule
+           (by ear and a loose signal-to-noise figure).
 """
 from __future__ import annotations
 
@@ -3816,10 +3825,136 @@ def group_sfx(names: list[str]) -> dict:
 
 
 
+# ── sfx-denoise (R6.10) ──────────────────────────────────────────────────────
+# Sounds of an exact formula the spec shares (tests/unit/runner-media-sfx-denoise.unit.spec.ts dnSound): the noise is
+# an integer hash (lowbias32) of the sample's index, so TypeScript makes the same samples without the fixture
+# carrying them; the tone and the speech-like sound are sines in float64, then cast to float32.
+
+DN_WINDOW = 2048
+DN_MARGIN_S = 0.06
+
+
+def dn_hash(x: np.ndarray) -> np.ndarray:
+    x = x.astype(np.uint32)
+    x ^= x >> np.uint32(16)
+    x *= np.uint32(0x7FEB352D)
+    x ^= x >> np.uint32(15)
+    x *= np.uint32(0x846CA68B)
+    x ^= x >> np.uint32(16)
+    return x
+
+
+def dn_noise(channels: int, n: int, seed: int) -> np.ndarray:
+    """[C, N] float64: per sample the sum of four uniforms in [-0.5, 0.5) from the hash of (c·N + n)·4 + j + seed·16777259."""
+    idx = (np.arange(channels * n, dtype=np.uint64) * 4)
+    out = np.zeros(channels * n)
+    for j in range(4):
+        u = dn_hash(((idx + j + seed * 16777259) & 0xFFFFFFFF).astype(np.uint32)).astype(np.float64) / 4294967296.0 - 0.5
+        out += u
+    return out.reshape(channels, n)
+
+
+def dn_gate(kind: str, rate: int, n: np.ndarray) -> np.ndarray:
+    """1 where the sound is on: the tone half a second off, half on; the speech-like 0.84 s of words, 0.36 s pause."""
+    t = n / rate
+    if kind == "tone":
+        return (np.floor(n / (rate / 2)) % 2).astype(np.float64)
+    if kind == "speech":
+        return ((t / 1.2) % 1.0 < 0.7).astype(np.float64)
+    return np.zeros(len(n))
+
+
+def dn_sound(kind: str, rate: int, channels: int, n: int) -> np.ndarray:
+    k = np.arange(n, dtype=np.float64)
+    t = k / rate
+    g = dn_gate(kind, rate, k)
+    if kind == "silence":
+        return np.zeros((channels, n), dtype=np.float32)
+    noise = dn_noise(channels, n, 3 if kind == "tone" else 5)
+    rows = []
+    for c in range(channels):
+        if kind == "tone":
+            x = g * 0.4 * np.sin(2 * math.pi * (440 + 220 * c) * t) + 0.05 * noise[c]
+        else:
+            phase = 2 * math.pi * (140 + 20 * c) * t - (40 / 0.7) * np.cos(2 * math.pi * 0.7 * t)
+            voice = sum(np.sin(h * phase) / h for h in range(1, 11)) / 2.93
+            syl = np.sin(math.pi * ((t * 4) % 1.0)) ** 2
+            x = 0.3 * g * syl * voice + 0.03 * noise[c]
+        rows.append(x)
+    return np.stack(rows).astype(np.float32)
+
+
+def dn_floor_mask(kind: str, rate: int, n: int) -> np.ndarray:
+    """The noise-only samples: the gate off here and DN_MARGIN_S either side."""
+    k = np.arange(n, dtype=np.float64)
+    m = int(DN_MARGIN_S * rate)
+    off = dn_gate(kind, rate, k) == 0
+    for d in (-m, m):
+        off &= dn_gate(kind, rate, np.clip(k + d, 0, n - 1)) == 0
+    return off
+
+
+def dn_level_db(x: np.ndarray, mask: np.ndarray) -> float:
+    v = x.astype(np.float64)[:, mask]
+    return float(10 * np.log10(np.mean(v * v) + 1e-30))
+
+
+def dn_windows(n: int) -> list:
+    starts = {0, max(0, n // 2 - DN_WINDOW // 2), max(0, n - DN_WINDOW)}
+    if n > 600000:
+        starts |= {600000 - DN_WINDOW // 2, 600000 - 30000 - DN_WINDOW // 2}
+    return sorted(starts)
+
+
+def dn_case(kind: str, rate: int, channels: int, n: int, method: str, strength: float) -> dict:
+    from comfy_extras.nodes_audio_denoise import AudioDenoiseNode
+    import warnings
+    x = dn_sound(kind, rate, channels, n)
+    audio = {"waveform": torch.from_numpy(x.copy())[None], "sample_rate": rate}
+    rec = {"kind": kind, "rate": rate, "channels": channels, "samples": n, "noise_type": method, "strength": strength,
+           "input_sha256": sha(np.ascontiguousarray(x).tobytes())}
+    try:
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            res = AudioDenoiseNode.execute(audio=audio, strength=strength, noise_type=method)
+    except Exception as e:  # noqa: BLE001
+        rec["error"] = f"{type(e).__name__}: {e}"
+        return rec
+    out = res.args[0]
+    rec["handedOn"] = out is audio
+    y = out["waveform"][0].numpy()
+    assert y.dtype == np.float32 and y.shape == x.shape, (y.dtype, y.shape)
+    rec["nan"] = int(np.isnan(y).sum())
+    rec["output_sha256"] = sha(np.ascontiguousarray(y).tobytes())
+    if kind != "silence":
+        mask = dn_floor_mask(kind, rate, n)
+        rec["floorIn"] = round(dn_level_db(x, mask), 4)
+        rec["floorOut"] = round(dn_level_db(y, mask), 4)
+        rec["levelOut"] = round(dn_level_db(y, ~mask), 4)
+    rec["windows"] = [{"start": s, "f32": b64(np.ascontiguousarray(y[:, s:s + DN_WINDOW]).tobytes())} for s in dn_windows(n)]
+    return rec
+
+
+def group_sfx_denoise(names: list[str]) -> dict:
+    cases = []
+    for method in ("stationary", "non_stationary"):
+        for s in (1.0, 0.5):
+            cases.append(dn_case("tone", 8000, 1, 16000, method, s))
+        cases.append(dn_case("tone", 8000, 1, 660000, method, 1.0))
+        cases.append(dn_case("tone", 44100, 2, 66150, method, 1.0))
+        cases.append(dn_case("tone", 48000, 1, 72000, method, 1.0))
+        cases.append(dn_case("speech", 48000, 1, 144000, method, 1.0))
+        cases.append(dn_case("speech", 44100, 2, 132300, method, 1.0))
+        cases.append(dn_case("silence", 8000, 1, 8000, method, 1.0))
+        cases.append(dn_case("tone", 8000, 1, 16000, method, 0.0))
+        cases.append(dn_case("tone", 4000, 1, 8000, method, 1.0))
+    return {"cases": {"window": DN_WINDOW, "marginSeconds": DN_MARGIN_S, "runs": cases}}
+
+
 GROUPS = {"probe": group_probe, "decode": group_decode, "encode": group_encode, "sound": group_sound, "video": group_video,
           "frames": group_frames, "timeline-media": group_timeline_media, "vfx-time": group_vfx_time, "vfx-join": group_vfx_join,
           "vfx-look": group_vfx_look, "vfx-stabilize": group_vfx_stabilize, "vfx-flow": group_vfx_flow,
-          "vfx-draw": group_vfx_draw, "vfx-text": group_vfx_text, "sfx": group_sfx}
+          "vfx-draw": group_vfx_draw, "vfx-text": group_vfx_text, "sfx": group_sfx, "sfx-denoise": group_sfx_denoise}
 
 
 def main() -> None:

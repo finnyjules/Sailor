@@ -49,9 +49,15 @@ export const SOUND_EFFECT_CLASSES: readonly string[] = [
   'EmptyAudio', 'AudioEqualizer3Band', 'AudioFade', 'AudioNormalize', 'AudioDuck', 'VideoSilenceCut',
 ]
 
+/** Audio denoise (R6.10, family `sound-denoise`): a sound effect of its own family, planned and bounded as the others. */
+export const SOUND_DENOISE_CLASSES: readonly string[] = ['AudioDenoise']
+
+/** Every class planned as a sound effect (../media/soundEffects.ts), whatever its family. */
+export const SOUND_TAKEN_CLASSES: readonly string[] = [...SOUND_EFFECT_CLASSES, ...SOUND_DENOISE_CLASSES]
+
 /** A sound effect the runner takes here: ported, with its family (and chain) on. */
 export function takenSoundEffect(classType: string, families: ReadonlySet<RunnerFamily>): boolean {
-  return SOUND_EFFECT_CLASSES.includes(classType) && mediaEffectFamilyOn(classType, families)
+  return SOUND_TAKEN_CLASSES.includes(classType) && mediaEffectFamilyOn(classType, families)
 }
 
 export function hasSoundEffect(prompt: ApiPrompt, families: ReadonlySet<RunnerFamily>): boolean {
@@ -129,6 +135,7 @@ export function soundEffectShapes(classType: string, inputs: Record<string, unkn
     case 'AudioEqualizer3Band':
     case 'AudioFade':
     case 'AudioNormalize':
+    case 'AudioDenoise':
       return same(one('audio'))
     case 'AudioDuck':
       return one('sidechain') ? same(one('audio')) : undefined
@@ -332,6 +339,24 @@ export function soundEffectRaises(classType: string, w: Record<string, unknown>,
       const [a, b] = [ins[0]!.channels, ins[1]!.channels]
       return a !== b && a !== 1 && b !== 1 ? MEDIA_EFFECT_WORDS.soundChannelsDiffer : null
     }
+    case 'AudioDenoise': {
+      // Python hands the sound on (no raise) at strength 0 or with no samples: only a sound known to have some raises.
+      const x = ins[0]!
+      const strength = typeof w.strength === 'number' ? w.strength : 1
+      if (!(strength > 0) || !x.exact || x.samples * x.channels === 0) return null
+      return denoiseRateRaise(x.rate)
+    }
   }
+  return null
+}
+
+/**
+ * noisereduce's smoothing filter needs at least one step each way
+ * (spectralgate/base.py:99-128): a rate under 5,120 Hz (or over 256 kHz)
+ * raises. The same float sums as Python's.
+ */
+export function denoiseRateRaise(rate: number): string | null {
+  if (Math.trunc(500 / (rate / 512)) < 1) return MEDIA_EFFECT_WORDS.denoiseRateHigh
+  if (Math.trunc(50 / ((256 / rate) * 1000)) < 1) return MEDIA_EFFECT_WORDS.denoiseRateLow
   return null
 }

@@ -227,10 +227,18 @@ describe('the rows (rule 1)', () => {
     // R6.9's sound effects and Silence cut (family sound-effects): their rows are checked in runner-media-sfx.
     const sounds = ['TrimAudioDuration', 'SplitAudioChannels', 'JoinAudioChannels', 'AudioConcat', 'AudioMerge', 'AudioAdjustVolume', 'EmptyAudio',
       'AudioEqualizer3Band', 'AudioFade', 'AudioNormalize', 'AudioDuck', 'VideoSilenceCut']
-    expect([...MEDIA_EFFECTS_PORTED].sort()).toEqual([...ported, ...sounds].sort())
+    // R6.10's Audio denoise (family sound-denoise): its row is checked in runner-media-sfx-denoise.
+    const denoise = ['AudioDenoise']
+    expect([...MEDIA_EFFECTS_PORTED].sort()).toEqual([...ported, ...sounds, ...denoise].sort())
     const rows = mediaEffectRows()
-    expect(Object.keys(rows).sort()).toEqual([...ported, ...sounds].sort())
+    expect(Object.keys(rows).sort()).toEqual([...ported, ...sounds, ...denoise].sort())
     for (const [cls, row] of Object.entries(rows)) {
+      if (denoise.includes(cls)) {
+        expect(row, cls).toMatchObject({ family: 'sound-denoise', local: 'render' })
+        expect(SWITCHED_CLASSES[cls], cls).toBe('sound-denoise')
+        expect(RUNNER_OUTPUT_CLASSES.has(cls), cls).toBe(false)
+        continue
+      }
       if (sounds.includes(cls)) {
         expect(row, cls).toMatchObject({ family: 'sound-effects', local: 'render' })
         expect(SWITCHED_CLASSES[cls], cls).toBe('sound-effects')

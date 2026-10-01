@@ -38,13 +38,14 @@ export const MEDIA_EFFECT_FAMILIES: readonly MediaEffectFamily[] = [
   'video-time', 'video-join', 'video-look', 'video-stabilize', 'video-flow', 'video-draw', 'video-text', 'sound-effects', 'sound-denoise',
 ]
 
-/** The effects ported so far (R6.1: the three pilots; R6.2: the other time effects; R6.3: the two joins; R6.4: the five looks; R6.5: Stabilize; R6.6: Slow motion; R6.7: Animated noise and Audio waveform; R6.8: Text clip and Caption track; R6.9: the sound effects and Silence cut). Each task adds its classes. */
+/** The effects ported so far (R6.1: the three pilots; R6.2: the other time effects; R6.3: the two joins; R6.4: the five looks; R6.5: Stabilize; R6.6: Slow motion; R6.7: Animated noise and Audio waveform; R6.8: Text clip and Caption track; R6.9: the sound effects and Silence cut; R6.10: Audio denoise). Each task adds its classes. */
 export const MEDIA_EFFECTS_PORTED: readonly string[] = [
   'FrameTrail', 'VideoReverse', 'VideoTrim', 'TemporalMotionBlur', 'SlitScan', 'TimeDisplacement', 'SpeedRamp', 'VideoCrossfade', 'Transition',
   'KenBurns', 'AspectConvert', 'ChromaKey', 'LUT', 'ThreeWayCC', 'Stabilize', 'FrameInterpolate', 'AnimatedNoise', 'AudioWaveform',
   'TextClip', 'CaptionTrack',
   'TrimAudioDuration', 'SplitAudioChannels', 'JoinAudioChannels', 'AudioConcat', 'AudioMerge', 'AudioAdjustVolume', 'EmptyAudio',
   'AudioEqualizer3Band', 'AudioFade', 'AudioNormalize', 'AudioDuck', 'VideoSilenceCut',
+  'AudioDenoise',
 ]
 
 /** Each R6 class's family (every generated class, ported or not; Save audio (Opus) is not an R6 family's). */
@@ -212,4 +213,6 @@ export const MEDIA_EFFECT_WORDS = {
   splitNeedsStereo: 'This needs a stereo sound to split',
   joinNeedsMono: 'Both sounds must be mono to join them',
   soundChannelsDiffer: 'These two sounds have different numbers of channels, so they can’t be combined',
+  denoiseRateLow: 'This sound’s sample rate is too low to remove noise from',
+  denoiseRateHigh: 'This sound’s sample rate is too high to remove noise from',
 } as const

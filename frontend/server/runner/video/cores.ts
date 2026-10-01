@@ -20,6 +20,7 @@ import { drawCore } from './core/draw'
 import { waveformCore } from './core/waveform'
 import { textDrawCore } from './core/textDraw'
 import { soundCore } from './core/sound'
+import { denoiseCore } from './core/denoise'
 
 export const VIDEO_CORES: readonly EffectCoreEntry[] = [
   { name: 'vx', fn: framesCore as EffectCoreEntry['fn'], args: ['tk'] },
@@ -40,6 +41,8 @@ export const VIDEO_CORES: readonly EffectCoreEntry[] = [
   { name: 'txt', fn: textDrawCore as EffectCoreEntry['fn'], args: ['tk', 'vx', 'look'] },
   // R6.9: the sound effects' arithmetic (the worker's `sfx.run`, a sound per call; not a frame op).
   { name: 'sfx', fn: soundCore as EffectCoreEntry['fn'], args: [] },
+  // R6.10: Audio denoise's spectral gating on the shared FFT (`sfx.run` with fn 'dn.profile' / 'dn.chunk': a chunk per call).
+  { name: 'dn', fn: denoiseCore as EffectCoreEntry['fn'], args: ['ft'] },
 ]
 
 /** The cores whose functions are video ops (not helpers). */
@@ -55,6 +58,6 @@ export const videoCores = (() => {
   return {
     tk, vx, time: timeCore(tk, kn, rng), join: joinCore(tk, kn, rng), look, ft, stab: stabilizeCore(tk, kn, ft),
     nclip: noiseClipCore(tk, rng, look), dr, wave: waveformCore(tk, ft, dr, look), txt: textDrawCore(tk, vx, look),
-    sfx: soundCore(),
+    sfx: soundCore(), dn: denoiseCore(ft),
   }
 })()
