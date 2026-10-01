@@ -45,6 +45,11 @@ export interface LightingStamp {
   /** A Relight photo's facing tile: `draw` paints the tile (opaque where the photo is) through
    *  the same placement and silhouette as `draw`, in Frame units. */
   facing?: StampFacing | null
+  /** Stage 3: the parts of this layer lit by their own shader (Gold foil regions under the
+   *  Frame's lights), drawn through the same transform as `draw`, in Frame units. In the lit map
+   *  they read UNLIT (0, shine 0) within the layer's silhouette, so the lighting pass never
+   *  lights them a second time. Absent ⇒ nothing punched out. */
+  selfLit?: ((target: CanvasRenderingContext2D) => void) | null
 }
 
 export interface StampFacing {
@@ -120,8 +125,8 @@ function plan(stamps: readonly LightingStamp[], backgroundLit: boolean, facingOn
     const lit = l ? effectiveLit(l) : true
     const lift = l && effectiveCasts(l) ? effectiveLift(l) : 0
     const facing = facingOn && s.facing ? s.facing : null
-    if (lit && lift <= 0 && !anyBlack && !facing && !anyFacing) continue
-    if (!lit) anyBlack = true
+    if (lit && lift <= 0 && !anyBlack && !facing && !anyFacing && !s.selfLit) continue
+    if (!lit || s.selfLit) anyBlack = true
     if (facing) anyFacing = true
     out.push({ stamp: s, lit, lift, facing })
   }
@@ -191,8 +196,7 @@ function stampInto(maps: MapCanvases, planned: readonly PlannedStamp[], W: numbe
       liftCtx.drawImage(scratch, 0, 0)
       liftCtx.globalCompositeOperation = 'source-over'
     }
-    if (!facingCtx) continue
-    if (p.facing) {
+    if (facingCtx && p.facing) {
       // 3. The photo's facing tile, through its own placement and silhouette.
       sctx.save()
       reset(sctx)
@@ -205,11 +209,32 @@ function stampInto(maps: MapCanvases, planned: readonly PlannedStamp[], W: numbe
       reset(sctx)
       facingCtx.drawImage(scratch, 0, 0)
       facingStamped = true
-    } else if (facingStamped) {
+    } else if (facingCtx && facingStamped) {
       // 3. Anything above a photo faces the viewer again.
       sctx.fillStyle = FLAT
       sctx.fillRect(0, 0, mw, mh)
       facingCtx.drawImage(scratch, 0, 0)
+    }
+    if (p.stamp.selfLit) {
+      // 4. Stage 3: its self-lit parts (foil lit by its own shader), kept to what the scratch
+      // still holds of its silhouette (destination-in: a mask or clip on the layer clips them
+      // too), stamped black on the lit map. The lit map is opaque, so black source-over at the
+      // parts' alpha IS "destination-out, then black at the same alpha": those pixels read unlit,
+      // shine 0. Last, because the steps above reuse the silhouette whole; lift and facing are
+      // untouched.
+      sctx.save()
+      reset(sctx)
+      sctx.globalCompositeOperation = 'destination-in'
+      sctx.setTransform(mw / W, 0, 0, mh / H, 0, 0)
+      try { p.stamp.selfLit(sctx) } catch (err) {
+        if (import.meta.dev) console.warn('[lighting maps] self-lit parts failed to draw; skipped', err)
+      }
+      sctx.restore()
+      reset(sctx)
+      sctx.globalCompositeOperation = 'source-in'
+      sctx.fillStyle = litColour(false, 0, facingOn)
+      sctx.fillRect(0, 0, mw, mh)
+      litCtx.drawImage(scratch, 0, 0)
     }
   }
   return true

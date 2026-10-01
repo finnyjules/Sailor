@@ -11,7 +11,7 @@ import { newLightLayer } from '~/lib/frame/lighting/settings'
  * A tiny raster standing in for a 2D canvas: each pixel is [red `v`, green `g`, blue `b` 0..255,
  * alpha 0..1], premultiplication ignored where it doesn't matter. Supports exactly the ops the map stamper
  * uses: fillRect (through a scale+translate transform), clearRect, drawImage(canvas, 0, 0) and
- * the composite ops source-over / source-in / lighter.
+ * the composite ops source-over / source-in / destination-in / lighter.
  */
 class FakeCanvas {
   px: { v: number; g: number; b: number; a: number }[]
@@ -47,6 +47,7 @@ class FakeCtx {
     const op = this.globalCompositeOperation
     const keys = ['v', 'g', 'b'] as const
     if (op === 'source-in') { keys.forEach((k, j) => { p[k] = c[j]! }); p.a = p.a * a; return }
+    if (op === 'destination-in') { p.a = p.a * a; return }
     if (op === 'lighter') { keys.forEach((k, j) => { p[k] = Math.min(255, p[k] * p.a + c[j]! * a) }); p.a = Math.min(1, p.a + a); return }
     const outA = a + p.a * (1 - a)
     keys.forEach((k, j) => { p[k] = outA > 0 ? (c[j]! * a + p[k] * p.a * (1 - a)) / outA : 0 })
@@ -56,7 +57,7 @@ class FakeCtx {
     const v = rgbOf(String(this.fillStyle))
     const x0 = Math.round(x * this.t.a + this.t.e), x1 = Math.round((x + w) * this.t.a + this.t.e)
     const y0 = Math.round(y * this.t.d + this.t.f), y1 = Math.round((y + h) * this.t.d + this.t.f)
-    const all = this.globalCompositeOperation === 'source-in'
+    const all = this.globalCompositeOperation === 'source-in' || this.globalCompositeOperation === 'destination-in'
     for (let yy = 0; yy < this.canvas.height; yy++) for (let xx = 0; xx < this.canvas.width; xx++) {
       const inside = xx >= x0 && xx < x1 && yy >= y0 && yy < y1
       if (inside) this.blend(yy * this.canvas.width + xx, v, this.globalAlpha)
@@ -65,7 +66,8 @@ class FakeCtx {
   }
   clearRect() { for (const p of this.canvas.px) { p.v = 0; p.g = 0; p.b = 0; p.a = 0 } }
   drawImage(src: FakeCanvas) {
-    src.px.forEach((p, i) => { if (p.a > 0 || this.globalCompositeOperation === 'source-in') this.blend(i, [p.v, p.g, p.b], p.a) })
+    const all = this.globalCompositeOperation === 'source-in' || this.globalCompositeOperation === 'destination-in'
+    src.px.forEach((p, i) => { if (p.a > 0 || all) this.blend(i, [p.v, p.g, p.b], p.a) })
   }
 }
 const makeCanvas = (w: number, h: number) => new FakeCanvas(w, h) as unknown as HTMLCanvasElement
@@ -293,5 +295,44 @@ describe('stampLightingMaps — facing (stage 2)', () => {
     expect(__lightingMapStamps() - n0).toBe(2)
     // Back to a Frame without a photo: no facing map.
     expect(cachedLightingMaps([stamp(rectLayer('a', { lit: false }), 0, 1)], W, H, W, H, opts)!.facing).toBeNull()
+  })
+})
+
+// ── Stage 3: a finish lit by its own shader is punched out of the lit map ───────────────────
+describe('stampLightingMaps — self-lit parts (stage 3)', () => {
+  /** A layer over [x0, x1) whose foil region covers [f0, f1). */
+  const withFoil = (layer: LocalLayer, x0: number, x1: number, f0: number, f1: number): LightingStamp => {
+    const base = stamp(layer, x0, x1)
+    return { ...base, sig: `${base.sig}|sl`, selfLit: (t) => { t.fillStyle = '#fff'; t.fillRect(f0, 0, f1 - f0, 1) } }
+  }
+
+  it('the foil region reads 0 (shine 0) and the same layer\'s plain fill 255', () => {
+    // A text with a plain fill over columns 0..2 and a foil outline over column 2..3.
+    const m = stampLightingMaps([withFoil(rectLayer('t'), 0, 3, 2, 3)], W, H, W, H, opts)!
+    const r = raster(m.lit)
+    expect(r.at(0).v).toBe(255)
+    expect(r.at(1).v).toBe(255)
+    expect(r.at(2).v).toBe(0)
+    expect(r.at(2).g).toBe(0)
+    expect(r.at(3).v).toBe(255)   // background
+  })
+
+  it('is kept to the layer\'s own silhouette (a clip or mask clips the punch-out too)', () => {
+    const m = stampLightingMaps([withFoil(rectLayer('t'), 0, 2, 1, 4)], W, H, W, H, opts)!
+    const r = raster(m.lit)
+    expect([r.at(0).v, r.at(1).v, r.at(2).v, r.at(3).v]).toEqual([255, 0, 255, 255])
+  })
+
+  it('a lit layer stamped above the foil lights it again (stack order)', () => {
+    const m = stampLightingMaps([withFoil(rectLayer('t'), 0, 4, 0, 4), stamp(rectLayer('top'), 1, 2)], W, H, W, H, opts)!
+    const r = raster(m.lit)
+    expect([r.at(0).v, r.at(1).v, r.at(2).v]).toEqual([0, 255, 0])
+  })
+
+  it('leaves the lift map alone', () => {
+    const a = rectLayer('a', { lift: 0.04 })
+    const plain = stampLightingMaps([stamp(a, 0, 3)], W, H, W, H, opts)!
+    const foil = stampLightingMaps([withFoil(a, 0, 3, 0, 3)], W, H, W, H, opts)!
+    expect(raster(foil.lift).px.map(p => p.v)).toEqual(raster(plain.lift).px.map(p => p.v))
   })
 })
